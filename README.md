@@ -1,1 +1,1 @@
-(((a dynamic programming environment)))
+a dynamic programming environment

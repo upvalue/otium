@@ -3,11 +3,11 @@
 
 #[cfg(target_arch = "wasm32")]
 #[path = "./wasm/core.rs"]
-mod kernel;
+mod arch;
 
 #[cfg(target_arch = "riscv32")]
 #[path = "./riscv32/core.rs"]
-mod kernel;
+mod arch;
 
 #[cfg(feature = "prog_echo")]
 mod prog_echo;
@@ -19,6 +19,6 @@ fn run_prog() {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_enter() -> () {
-  kernel::start();
+  arch::start();
   run_prog();
 }

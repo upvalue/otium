@@ -53,15 +53,7 @@ pub extern "C" fn alloc(bytes: usize) -> *const u8 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn start() -> () {
-  /*
-  loop {
-    print_str("> ");
-    let str = prompt();
-    print_str(str);
-    print_str("\n");
-  }*/
-}
+pub extern "C" fn start() -> () {}
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {

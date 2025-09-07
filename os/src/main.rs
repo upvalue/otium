@@ -6,6 +6,7 @@ use core::panic::PanicInfo;
 #[cfg(target_arch = "riscv32")]
 core::arch::global_asm!(include_str!("arch/riscv32.s"));
 
+#[cfg(target_arch = "riscv32")]
 #[unsafe(no_mangle)]
 fn main() -> ! {
     println("Hello from RISC-V 32-bit kernel!");

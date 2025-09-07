@@ -3,45 +3,13 @@
 
 use core::panic::PanicInfo;
 
-core::arch::global_asm!(
-    r#"
-.section .text.init
-.global _start
-_start:
-    # Set up stack pointer
-    la sp, stack_top
-    
-    # Clear BSS section
-    la t0, sbss
-    la t1, ebss
-1:
-    beq t0, t1, 2f
-    sw zero, 0(t0)
-    addi t0, t0, 4
-    j 1b
-2:
-    # Jump to Rust main
-    call main
-    
-.section .bss
-.global sbss
-sbss:
-.global ebss
-ebss:
-"#
-);
+#[cfg(target_arch = "riscv32")]
+core::arch::global_asm!(include_str!("arch/riscv32.s"));
 
 #[unsafe(no_mangle)]
 fn main() -> ! {
     println("Hello from RISC-V 32-bit kernel!");
     println("CPU is running in machine mode");
-
-    // Simple demonstration of RISC-V registers
-    unsafe {
-        let mhartid: u32;
-        core::arch::asm!("csrr {}, mhartid", out(reg) mhartid);
-        print_hex("Hart ID: 0x", mhartid);
-    }
 
     loop {
         unsafe {

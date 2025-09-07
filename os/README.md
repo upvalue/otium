@@ -1,3 +1,6 @@
 # os
 
-operating system kernel
+a little operating system in rust demo
+
+currently runs under WASM
+

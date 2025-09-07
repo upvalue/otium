@@ -1,12 +1,16 @@
 // run-wasm.js -- runs webassembly (under node)
 const fs = require('fs');
 const path = require('path');
+const prompt = require('prompt-sync')({
+
+});
+
+const wasmPath = path.join(__dirname, 'target/wasm32-unknown-unknown/debug/os.wasm');
 
 async function runWasmOS() {
-    console.log('Loading WASM Rust OS...');
     
     // Load the WASM binary
-    const wasmPath = path.join(__dirname, 'target/wasm32-unknown-unknown/debug/os.wasm');
+    console.log(`Loading ${wasmPath}`);
     
     if (!fs.existsSync(wasmPath)) {
         console.error('WASM binary not found. Please run ./build.sh first');
@@ -23,6 +27,24 @@ async function runWasmOS() {
                 const bytes = new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len);
                 const str = new TextDecoder().decode(bytes);
                 process.stdout.write(str);
+            },
+            host_readln: (buffer, bufferLength) => {
+                const ln = prompt("");
+
+                if(ln === null || ln === '') {
+                    return 0;
+                }
+                
+                const memory = wasmInstance.exports.memory;
+                const memoryView = new Uint8Array(memory.buffer, buffer, bufferLength);
+
+                const encoder = new TextEncoder();
+                const encoded = encoder.encode(ln);
+                const maxBytes = Math.min(encoded.length, bufferLength - 1);
+                memoryView.set(encoded.subarray(0, maxBytes));
+                memoryView[maxBytes] = 0;
+
+                return 1;
             }
         }
     };

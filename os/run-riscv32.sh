@@ -1,7 +1,7 @@
 #!/bin/bash
 set -xue
 
-cargo build
+cargo build --target riscv32imac-unknown-none-elf
 
 # QEMU file path
 QEMU=qemu-system-riscv32

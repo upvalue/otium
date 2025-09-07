@@ -54,12 +54,13 @@ pub extern "C" fn alloc(bytes: usize) -> *const u8 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn start() -> () {
-  // Allocate memory for usage
-  print_str("hi! what's your name?\n");
-  let str = prompt();
-  print_str("hi ");
-  print_str(str);
-  print_str("\n");
+  /*
+  loop {
+    print_str("> ");
+    let str = prompt();
+    print_str(str);
+    print_str("\n");
+  }*/
 }
 
 #[panic_handler]

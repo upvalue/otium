@@ -2,7 +2,8 @@
 const fs = require('fs');
 const path = require('path');
 const prompt = require('prompt-sync')({
-
+    sigint: true,
+    eot: true,
 });
 
 const wasmPath = path.join(__dirname, 'target/wasm32-unknown-unknown/debug/os.wasm');
@@ -56,7 +57,7 @@ async function runWasmOS() {
     console.log(`Running ${wasmPath}`)
     
     try {
-        wasmInstance.exports.start();
+        wasmInstance.exports.kernel_enter();
     } catch(e) {
         console.error(`Exception ${e.toString()}`);
     }

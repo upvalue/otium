@@ -3,6 +3,10 @@ name = "os"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["prog_echo"]
+prog_echo = []
+
 [dependencies]
 
 [profile.dev]

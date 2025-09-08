@@ -1,0 +1,27 @@
+// Hello!
+
+// Otium is an experimental little programming language.
+
+// You can have single line comments if you want.
+
+/* Or multi line comments
+  /* even nested ones */
+*/
+
+print("Hello, world!")
+
+// You can define functions like this
+
+fib := fn(n) {
+  if(n > 2) {
+    fib(n - 1) + fib(n - 2) // Returns are implicit
+  } else {
+    n
+  }
+}
+
+// Use print to print results
+print(fib(5))
+
+
+

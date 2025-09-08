@@ -1,0 +1,48 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`basic lexer test 1`] = `
+[
+  {
+    "begin": 0,
+    "end": 2,
+    "type": "NUMBER",
+    "value": "42",
+  },
+  {
+    "begin": 3,
+    "end": 16,
+    "type": "STRING",
+    "value": "hello world",
+  },
+  {
+    "begin": 17,
+    "end": 24,
+    "type": "SYMBOL",
+    "value": "foo-bar",
+  },
+  {
+    "begin": 25,
+    "end": 26,
+    "type": "PUNCTUATION",
+    "value": "(",
+  },
+  {
+    "begin": 27,
+    "end": 28,
+    "type": "PUNCTUATION",
+    "value": ")",
+  },
+  {
+    "begin": 29,
+    "end": 30,
+    "type": "PUNCTUATION",
+    "value": ";",
+  },
+  {
+    "begin": 30,
+    "end": 30,
+    "type": "EOF",
+    "value": "",
+  },
+]
+`;

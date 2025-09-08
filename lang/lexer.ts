@@ -11,6 +11,7 @@ export type Token = {
     | "SUB"
     | "MUL"
     | "DIV"
+    | "COMMA"
     | "ASSIGN"
     | "PUNCTUATION"
     | "EOF"
@@ -25,7 +26,7 @@ export type Token = {
 };
 
 // characters which terminate symbols
-const TERM_CHARS = ["(", ")", "[", "]", ".", '"', "'", "#"];
+const TERM_CHARS = ["(", ")", "[", "]", ".", '"', "'", "#", ","];
 
 export class Lexer {
   private input: string;
@@ -224,6 +225,17 @@ export class Lexer {
           line,
           column,
         };
+      case ",": {
+        return {
+          type: "COMMA",
+          begin,
+          end: this.position,
+          value: char,
+          sourceName,
+          line,
+          column,
+        };
+      }
       case "{":
         return {
           type: "LBRACE",
@@ -341,7 +353,7 @@ if (import.meta.main) {
 
     let token = lexer.nextToken();
     while (token.type !== "EOF") {
-      console.log(`${token.type} ${token.value}`);
+      console.log(`${token.type} ${token.line}:${token.column} ${token.value}`);
       token = lexer.nextToken();
     }
     console.log(`${token.type} ${token.value}`);

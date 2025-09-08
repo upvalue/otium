@@ -1,5 +1,8 @@
 [build]
-target = "wasm32-unknown-unknown"
+#target = "wasm32-unknown-unknown"
+target = "riscv32imac-unknown-none-elf"
+
+
 
 [target.riscv32imac-unknown-none-elf]
 rustflags = [

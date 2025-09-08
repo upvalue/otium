@@ -14,7 +14,7 @@ _start:
     j 1b
 2:
     # Jump to Rust main
-    call main
+    call kernel_enter
     
 .section .bss
 .global sbss

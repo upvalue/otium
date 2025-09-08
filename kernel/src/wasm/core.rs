@@ -5,8 +5,6 @@ unsafe extern "C" {
   fn host_readln(buffer: *mut u8, bufferlen: usize) -> bool;
 }
 
-use core::arch::wasm32 as wasm;
-
 // Statically allocated 1MB heap for now
 static mut HEAP: [u8; 1024 * 1024] = [0; 1024 * 1024];
 

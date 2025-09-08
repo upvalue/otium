@@ -1,9 +1,51 @@
-use core::panic::PanicInfo;
+use core::{ffi::c_long, panic::PanicInfo};
 
 core::arch::global_asm!(include_str!("boot.s"));
 
 unsafe extern "C" {
   fn hello();
+}
+
+pub struct SBIError {
+  pub errc: isize,
+}
+
+#[unsafe(no_mangle)]
+/**
+ * Calls an OpenSBI function; for running on qemu
+ */
+fn sbi_call(
+  a0: c_long,
+  a1: c_long,
+  a2: c_long,
+  a3: c_long,
+  a4: c_long,
+  a5: c_long,
+  fid: c_long,
+  eid: c_long,
+) -> Result<isize, SBIError> {
+  let error: isize;
+  let value: isize;
+  unsafe {
+    core::arch::asm!(
+    "ecall",
+    inout("a0") a0 => error,
+    inout("a1") a1 => value,
+    in("a2") a2,
+    in("a3") a3,
+    in("a4") a4,
+    in("a5") a5,
+    in("a6") fid,
+    in("a7") eid,
+    options(nostack, preserves_flags),
+    )
+  }
+
+  if error == 0 {
+    Ok(value)
+  } else {
+    Err(SBIError { errc: error })
+  }
 }
 
 #[unsafe(no_mangle)]

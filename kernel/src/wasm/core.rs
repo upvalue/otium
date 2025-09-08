@@ -3,10 +3,9 @@ use core::panic::PanicInfo;
 unsafe extern "C" {
   fn host_print(ptr: *const u8, len: usize);
   fn host_readln(buffer: *mut u8, bufferlen: usize) -> bool;
+  fn c_init();
+  fn hello();
 }
-
-// Statically allocated 1MB heap for now
-static mut HEAP: [u8; 1024 * 1024] = [0; 1024 * 1024];
 
 static mut SCRATCH: [u8; 1024 * 1024] = [0; 1024 * 1024];
 const SCRATCH_LENGTH: usize = 1024 * 1024;
@@ -51,7 +50,15 @@ pub extern "C" fn alloc(bytes: usize) -> *const u8 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn start() -> () {}
+pub extern "C" fn start() -> () {
+  print_str("wasm/core:start() called\n");
+
+  unsafe {
+    c_init();
+  }
+
+  print_str("wasm/core:start() returning\n");
+}
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {

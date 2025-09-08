@@ -14,7 +14,7 @@ async function runWasmOS() {
     console.log(`Loading ${wasmPath}`);
     
     if (!fs.existsSync(wasmPath)) {
-        console.error('WASM binary not found. Please run ./build.sh first');
+        console.error('WASM binary not found. Try running ./run-wasm.sh');
         process.exit(1);
     }
     

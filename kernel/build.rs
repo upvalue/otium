@@ -24,29 +24,49 @@ fn find_llvm_tool(tool: &str) -> Option<String> {
   Some(tool.to_string())
 }
 
+fn compile_c_support(arch: &str, target: &str) {
+  let clang = find_llvm_tool("clang").unwrap_or_else(|| "clang".to_string());
+  let ar = find_llvm_tool("llvm-ar").unwrap_or_else(|| "ar".to_string());
+
+  println!(
+    "cargo:warning=Using LLVM tools for {}: clang={}, ar={}",
+    arch, clang, ar
+  );
+
+  let mut build = cc::Build::new();
+  build
+    .file(&format!("src/{}/support.c", arch))
+    .target(target)
+    .compiler(&clang)
+    .archiver(&ar)
+    .flag("-nostdlib")
+    .flag("-ffreestanding")
+    .flag("-fno-builtin")
+    .opt_level(2);
+
+  // Architecture-specific flags
+  if arch == "riscv32" {
+    build
+      .flag("--target=riscv32")
+      .flag("-march=rv32imac")
+      .flag("-mabi=ilp32");
+  } else if arch == "wasm" {
+    build.flag("--target=wasm32");
+  }
+
+  build.compile(&format!("support_{}", arch));
+
+  println!("cargo:rerun-if-changed=src/{}/support.c", arch);
+}
+
 fn main() {
   let target = std::env::var("TARGET").unwrap_or_default();
 
   if target.contains("riscv32") {
-    let clang = find_llvm_tool("clang").unwrap_or_else(|| "clang".to_string());
-    let ar = find_llvm_tool("llvm-ar").unwrap_or_else(|| "ar".to_string());
+    compile_c_support("riscv32", &target);
+  }
 
-    println!("cargo:warning=Using LLVM tools: clang={}, ar={}", clang, ar);
-
-    cc::Build::new()
-      .file("src/riscv32/hello.c")
-      .target(&target)
-      .compiler(&clang)
-      .archiver(&ar)
-      .flag("--target=riscv32")
-      .opt_level(2)
-      .flag("-march=rv32imac")
-      .flag("-mabi=ilp32")
-      .flag("-nostdlib")
-      .flag("-ffreestanding")
-      .flag("-fno-builtin")
-      .compile("hello");
-
-    println!("cargo:rerun-if-changed=src/riscv32/hello.c");
+  if target.contains("wasm32") {
+    compile_c_support("wasm", &target);
   }
 }

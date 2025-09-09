@@ -19,15 +19,12 @@ const BINDING_POWERS = {
 
 /**
  * This parser is a top down operator precedence parser; see the following
- * tutorials for some explanation as to how it works:
+ * resources for some explanation as to how it works:
  *
  * Crockford's JS subset parser article: https://crockford.com/javascript/tdop/tdop.html
  * Eli Barzilay's article: https://eli.thegreenplace.net/2010/01/02/top-down-operator-precedence-parsing
  * (has some more call traces and explanatory text)
- *
- * Two differences so far: This one isn't defined in an OO style and it
- * returns something more akin to S-expressions than an abstract syntax
- * tree
+ * Lua parser source: https://raw.githubusercontent.com/lua/lua/refs/heads/master/lparser.c
  */
 
 export class Parser {
@@ -52,111 +49,34 @@ export class Parser {
   }
 
   advance(): Token {
-    console.log("advance", {
-      tokenIdx: this.tokenIdx,
-      currentToken: this.currentToken,
-    });
     this.currentToken = this.tokens[++this.tokenIdx]!;
     return this.currentToken;
   }
 
-  nextExpr(rbp = 0): OtExpr {
-    this.traceLog(`expr(rbp = ${rbp})`);
-    let left = this.nud();
-    this.traceLog(`expr(rbp = ${rbp}) => ${left}`);
+  primaryExpr(): OtExpr {}
 
-    while (rbp < this.lbp()) {
-      this.traceLog(`expr ${rbp} < ${this.lbp()} call led ${left}`);
-      left = this.led(left);
+  suffixedExpr(): OtExpr {
+    this.primaryExpr();
+  }
+
+  simpleExpr(): OtExpr {
+    const token = this.currentToken;
+
+    if (token.type === "EOF") {
+      return EofValue;
+    } else if (token.type === "STRING") {
+      return token.value;
+    } else if (token.type === "NUMBER") {
+      return parseInt(token.value, 10);
+    } else {
+      return this.suffixedExpr();
     }
-
-    return left;
   }
 
-  lbp() {
-    if (BINDING_POWERS[this.currentToken.type] === undefined) {
-      throw new Error(
-        `Don't know binding power for token type ${this.currentToken.type}`
-      );
-    }
-    return BINDING_POWERS[this.currentToken.type];
-  }
-
-  led(left: OtExpr): OtExpr {
-    this.traceLog("led");
-    this.traceRet("led", () => {
-      switch (this.currentToken.type) {
-        // Left paren as a "binary operator" is how we implement
-        // function calls
-        case "LPAREN": {
-          const vec = [left];
-          console.log("left", { left });
-          while (true) {
-            const exp = this.nextExpr(80);
-            console.log("exp", { exp });
-            if (exp == RParenVal) {
-              break;
-            }
-            vec.push(exp);
-          }
-          return vec;
-        }
-      }
-    });
-  }
-
-  traceLog(msg: string) {
-    console.log(
-      `${this.currentToken.sourceName} ${this.currentToken.line}:${this.currentToken.column} ${this.currentToken.type} ${msg}`
-    );
-  }
-
-  traceRet(msg: string, a: any): any {
-    const r = a();
-
-    this.traceLog(`${msg} => ${r}`);
-
-    return r;
-  }
-
-  nud(): OtExpr {
-    this.traceLog("nud");
-
-    switch (this.currentToken.type) {
-      case "NUMBER":
-        this.advance();
-        return parseInt(this.currentToken.value, 10);
-      case "SYMBOL": {
-        const ret = this.currentToken.value;
-        this.advance();
-        return ret;
-      }
-      case "STRING": {
-        const ret = this.currentToken.value;
-        this.advance();
-        return ret;
-      }
-      case "RPAREN": {
-        this.advance();
-        return RParenVal;
-      }
-      case "LPAREN": {
-        this.advance();
-        console.log("currentToken", this.currentToken);
-        const exp = this.nextExpr(0);
-        // @ts-expect-error
-        if (this.currentToken.type !== "RPAREN") {
-          throw new Error("Expected closing paren");
-        }
-        this.advance();
-        return exp;
-      }
-
-      case "EOF":
-        return EofValue;
-    }
-
-    throw new Error(`unknown token type: ${this.currentToken.type}`);
+  nextExpr(limit = 0): OtExpr {
+    const exp = this.simpleExpr();
+    this.advance();
+    return exp;
   }
 }
 
@@ -183,6 +103,8 @@ if (import.meta.main) {
       if (exp == EofValue) {
         break;
       }
+
+      console.log("exp", { exp });
     }
   } catch (error) {
     console.error(`Error reading file: ${error}`);

@@ -21,7 +21,7 @@ function parseString(input: string): OtExpr[] {
 }
 
 test("parse simple string", () => {
-  const result = parseString("hi");
+  const result = parseString('"hi"');
   expect(result).toMatchInlineSnapshot(`
     [
       "hi",

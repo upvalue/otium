@@ -3,12 +3,19 @@
 A simple Lisp-derived language with C-like syntax.
 
 The current implementation is in TypeScript running under Bun (for prototyping -- this
-will eventually gain a standalone compiler)
+will eventually gain a standalone runtime and compiler)
 
 > bun lexer.ts scratch.ot
 > bun parser.ts scratch.ot
+> bun translate.ts scratch.ot
 
-to run the lexer and parser on an example file
+to run the lexer, parser or translator on an example file
+
+The translator produces some (pretty cursed) JavaScript code as its output, which can then
+be run with a JS interpreter
+
+> bun translate.ts scratch.ot > scratch.js
+> bun scratch.js
 
 and
 

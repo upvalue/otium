@@ -84,13 +84,15 @@ export class Parser {
   }
 
   traceCall(msg: string) {
-    if (!this.currentToken) {
-      console.log(`EOF: ${msg}`);
-      return;
+    if (this.trace) {
+      if (!this.currentToken) {
+        console.log(`EOF: ${msg}`);
+        return;
+      }
+      console.log(
+        `${this.currentToken.sourceName} ${this.currentToken.line}:${this.currentToken.column} ${this.currentToken.type} ${msg}`
+      );
     }
-    console.log(
-      `${this.currentToken.sourceName} ${this.currentToken.line}:${this.currentToken.column} ${this.currentToken.type} ${msg}`
-    );
   }
 
   assertMatchAndConsume(tokenType: TokenType) {
@@ -256,18 +258,10 @@ export class Parser {
   }
 }
 
+import { runWithFile } from "./support";
+
 if (import.meta.main) {
-  const args = process.argv.slice(2);
-  if (args.length !== 1) {
-    console.error("Usage: bun lexer.ts <file>");
-    process.exit(1);
-  }
-
-  const filename = args[0];
-
-  try {
-    const fs = require("fs");
-    const content = fs.readFileSync(filename, "utf8") as string;
+  runWithFile((content, filename) => {
     const lexer = new Lexer(content, filename);
     const parser = new Parser(lexer);
     parser.trace = true;
@@ -282,8 +276,5 @@ if (import.meta.main) {
 
       console.log(JSON.stringify(exp));
     }
-  } catch (error) {
-    console.error(`Error reading file: ${error}`);
-    process.exit(1);
-  }
+  });
 }

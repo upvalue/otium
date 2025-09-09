@@ -373,18 +373,10 @@ export class Lexer {
   }
 }
 
+import { runWithFile } from './support';
+
 if (import.meta.main) {
-  const args = process.argv.slice(2);
-  if (args.length !== 1) {
-    console.error("Usage: bun lexer.ts <file>");
-    process.exit(1);
-  }
-
-  const filename = args[0];
-
-  try {
-    const fs = require("fs");
-    const content = fs.readFileSync(filename, "utf8");
+  runWithFile((content, filename) => {
     const lexer = new Lexer(content);
 
     let token = lexer.nextToken();
@@ -393,8 +385,5 @@ if (import.meta.main) {
       token = lexer.nextToken();
     }
     console.log(`${token.type} ${token.value}`);
-  } catch (error) {
-    console.error(`Error reading file: ${error}`);
-    process.exit(1);
-  }
+  });
 }

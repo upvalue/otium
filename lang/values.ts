@@ -11,7 +11,7 @@ export class ConstantCls {
 export const EofValue = new ConstantCls("eof");
 export const RParenVal = new ConstantCls("rparen");
 
-class Symbol {
+export class OtSymbol {
   constructor(public name: string) {}
 
   toJSON() {
@@ -23,15 +23,15 @@ class Symbol {
   }
 }
 
-const symTable: { [key: string]: Symbol } = {};
+const symTable: { [key: string]: OtSymbol } = {};
 
-export function getSymbol(name: string): Symbol {
+export function getSymbol(name: string): OtSymbol {
   if (symTable[name]) {
     return symTable[name];
   }
-  const sym = new Symbol(name);
+  const sym = new OtSymbol(name);
   symTable[name] = sym;
   return sym;
 }
 
-export type OtExpr = number | string | Array<OtExpr> | Symbol | ConstantCls;
+export type OtExpr = number | string | Array<OtExpr> | OtSymbol | ConstantCls;

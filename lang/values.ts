@@ -1,4 +1,5 @@
 // values.ts - value types
+import { inspect } from "util";
 
 export class ConstantCls {
   constructor(readonly name: string) {}
@@ -12,6 +13,14 @@ export const RParenVal = new ConstantCls("rparen");
 
 class Symbol {
   constructor(public name: string) {}
+
+  toJSON() {
+    return `#${this.name}`;
+  }
+
+  [inspect.custom]() {
+    return `#${this.name}`;
+  }
 }
 
 const symTable: { [key: string]: Symbol } = {};

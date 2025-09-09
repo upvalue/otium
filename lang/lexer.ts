@@ -13,15 +13,19 @@ export const TOKEN_TYPES = {
   RPAREN: "RPAREN",
   LBRACE: "LBRACE",
   RBRACE: "RBRACE",
-  ADD: "ADD",
-  SUB: "SUB",
-  MUL: "MUL",
-  DIV: "DIV",
   COMMA: "COMMA",
-  ASSIGN: "ASSIGN",
   PUNCTUATION: "PUNCTUATION",
   EOF: "EOF",
   COMMENT: "COMMENT",
+
+  // Operators
+  OP_ADD: "OP_ADD",
+  OP_SUB: "OP_SUB",
+  OP_LT: "OP_LT",
+  OP_GT: "OP_GT",
+  OP_MUL: "OP_MUL",
+  OP_DIV: "OP_DIV",
+  OP_ASSIGN: "OP_ASSIGN",
 } as const;
 
 export type TokenType = (typeof TOKEN_TYPES)[keyof typeof TOKEN_TYPES];
@@ -279,9 +283,19 @@ export class Lexer {
           line,
           column,
         };
+      case "<":
+        return {
+          type: "OP_LT",
+          begin,
+          end: this.position,
+          value: char,
+          sourceName,
+          line,
+          column,
+        };
       case "+":
         return {
-          type: "ADD",
+          type: "OP_ADD",
           begin,
           end: this.position,
           value: char,
@@ -291,7 +305,7 @@ export class Lexer {
         };
       case "-":
         return {
-          type: "SUB",
+          type: "OP_SUB",
           begin,
           end: this.position,
           value: char,
@@ -301,7 +315,7 @@ export class Lexer {
         };
       case "*":
         return {
-          type: "MUL",
+          type: "OP_MUL",
           begin,
           end: this.position,
           value: char,
@@ -311,7 +325,7 @@ export class Lexer {
         };
       case "/":
         return {
-          type: "DIV",
+          type: "OP_DIV",
           begin,
           end: this.position,
           value: char,
@@ -323,7 +337,7 @@ export class Lexer {
         if (this.peek() == "=") {
           this.advance();
           return {
-            type: "ASSIGN",
+            type: "OP_ASSIGN",
             begin,
             end: this.position,
             value: ":=",

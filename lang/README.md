@@ -1,16 +1,14 @@
 # lang
 
-a simple lisp-derived language with c-like syntax
+A simple Lisp-derived language with C-like syntax.
 
-bun is required to run
-
-currently there is a lexer and a partially complete parser; each component can be invoked
-individually to see the output
+The current implementation is in TypeScript running under Bun (for prototyping -- this
+will eventually gain a standalone compiler)
 
 > bun lexer.ts scratch.ot
 > bun parser.ts scratch.ot
 
-to run on an example file 
+to run the lexer and parser on an example file
 
 and
 

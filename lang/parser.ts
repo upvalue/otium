@@ -1,6 +1,8 @@
 import { EOF_TOKEN, Lexer, type Token, type TokenType } from "./lexer";
 import { EofValue, getSymbol, type OtExpr } from "./values";
 
+const beginSym = getSymbol("begin");
+
 export class ParserError extends Error {
   constructor(message: string) {
     super(message);
@@ -9,21 +11,41 @@ export class ParserError extends Error {
 }
 
 const PRIORITY: Record<TokenType, { left: number; right: number }> = {
-  ADD: {
+  OP_ADD: {
     left: 10,
     right: 10,
   },
-  MUL: {
+  OP_SUB: {
+    left: 10,
+    right: 10,
+  },
+  OP_MUL: {
     left: 11,
     right: 11,
   },
+  OP_LT: {
+    left: 3,
+    right: 3,
+  },
+  OP_ASSIGN: {
+    left: 100,
+    right: 100,
+  },
 };
 
-const isOperator = (token: Token) => ["ADD", "MUL"].includes(token.type);
+const isOperator = (token: Token) =>
+  ["OP_ADD", "OP_MUL", "OP_LT", "OP_ASSIGN", "OP_SUB"].includes(token.type);
 
 class StrongerOperator {
   constructor(public operator: Token) {}
 }
+
+const splat = (exp: OtExpr): OtExpr[] => {
+  if (Array.isArray(exp)) {
+    return exp;
+  }
+  return [exp];
+};
 
 /**
  * This parser is a top down operator precedence parser; see the following
@@ -33,6 +55,7 @@ class StrongerOperator {
  * Eli Barzilay's article: https://eli.thegreenplace.net/2010/01/02/top-down-operator-precedence-parsing
  * (has some more call traces and explanatory text)
  * Lua parser source: https://raw.githubusercontent.com/lua/lua/refs/heads/master/lparser.c
+ * ^ this is the closest to this parser
  */
 export class Parser {
   tokens: Token[];
@@ -179,7 +202,9 @@ export class Parser {
    *
    * The binding power may also cause the parser to return early. For example
    * in the expression 2 * 2 + 5 because + has a lower (stronger) priority than
-   * *, in this case the function returns early by throwing an exception
+   * *, in this case the parser returns early with StrongerOperator of +
+   * which causes the parser to loop again, wrapping the left side of the
+   * expression (2*2) in the +
    */
   nextExpr(bindingPower = 0): [StrongerOperator | null, OtExpr] {
     this.traceCall(`nextExpr bindingPower: ${bindingPower}`);
@@ -188,15 +213,28 @@ export class Parser {
     // Check for binary operator presence
     let operator = this.currentToken;
 
+    while (operator.type === "LBRACE") {
+      this.advance();
+      let [, body] = this.nextExpr();
+      if (this.currentToken.type !== "RBRACE") {
+        throw new ParserError("expected }");
+      }
+      this.advance();
+      operator = this.currentToken;
+      exp = [...splat(exp), body];
+    }
+
     while (
       isOperator(operator) &&
       PRIORITY[operator.type].left > bindingPower
     ) {
+      /*
       console.log({
         operator,
         priority: PRIORITY[operator.type],
         bindingPower,
       });
+      */
       const rightPri = PRIORITY[this.currentToken.type].right;
       const op = getSymbol(this.currentToken.value);
       this.advance();
@@ -242,7 +280,7 @@ if (import.meta.main) {
         break;
       }
 
-      console.log(exp);
+      console.log(JSON.stringify(exp));
     }
   } catch (error) {
     console.error(`Error reading file: ${error}`);

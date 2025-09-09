@@ -10,7 +10,7 @@ function parseString(input: string): OtExpr[] {
 
   let expr: OtExpr;
   while (true) {
-    expr = parser.expr();
+    [, expr] = parser.nextExpr();
     if (expr === EofValue) {
       break;
     }
@@ -47,6 +47,46 @@ test("basic function call", () => {
           "name": "print",
         },
         "hello",
+      ],
+    ]
+  `);
+});
+
+test("basic arithmetic expression", () => {
+  const result = parseString("5 * 5 + 10");
+  expect(result).toMatchInlineSnapshot(`
+    [
+      [
+        Symbol {
+          "name": "+",
+        },
+        [
+          Symbol {
+            "name": "*",
+          },
+          5,
+          5,
+        ],
+        10,
+      ],
+    ]
+  `);
+});
+
+test("brace splicing", () => {
+  const result = parseString("if(true) { true }");
+  expect(result).toMatchInlineSnapshot(`
+    [
+      [
+        Symbol {
+          "name": "if",
+        },
+        Symbol {
+          "name": "true",
+        },
+        Symbol {
+          "name": "true",
+        },
       ],
     ]
   `);

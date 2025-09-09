@@ -1,28 +1,47 @@
+export class LexerError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LexerError";
+  }
+}
+
+export const TOKEN_TYPES = {
+  NUMBER: "NUMBER",
+  STRING: "STRING",
+  SYMBOL: "SYMBOL",
+  LPAREN: "LPAREN",
+  RPAREN: "RPAREN",
+  LBRACE: "LBRACE",
+  RBRACE: "RBRACE",
+  ADD: "ADD",
+  SUB: "SUB",
+  MUL: "MUL",
+  DIV: "DIV",
+  COMMA: "COMMA",
+  ASSIGN: "ASSIGN",
+  PUNCTUATION: "PUNCTUATION",
+  EOF: "EOF",
+  COMMENT: "COMMENT",
+} as const;
+
 export type Token = {
-  type:
-    | "NUMBER"
-    | "STRING"
-    | "SYMBOL"
-    | "LPAREN"
-    | "RPAREN"
-    | "LBRACE"
-    | "RBRACE"
-    | "ADD"
-    | "SUB"
-    | "MUL"
-    | "DIV"
-    | "COMMA"
-    | "ASSIGN"
-    | "PUNCTUATION"
-    | "EOF"
-    | "COMMENT"
-    | "QUOTE";
+  type: (typeof TOKEN_TYPES)[keyof typeof TOKEN_TYPES];
   begin: number;
   end: number;
   value: string;
   sourceName?: string;
   line: number;
   column: number;
+};
+
+export const EOF_TOKEN: Token = {
+  type: "EOF",
+  begin: 0,
+  end: 0,
+  value: "",
+  sourceName: "",
+  line: 1,
+  column: 1,
 };
 
 // characters which terminate symbols
@@ -72,9 +91,11 @@ export class Lexer {
     const begin = this.position;
     const line = this.lineNumber;
     const column = this.columnNumber;
+
     while (/\d/.test(this.peek())) {
       this.advance();
     }
+
     return {
       type: "NUMBER",
       begin,
@@ -296,7 +317,7 @@ export class Lexer {
           line,
           column,
         };
-      case ":": {
+      case ":":
         if (this.peek() == "=") {
           this.advance();
           return {
@@ -309,7 +330,6 @@ export class Lexer {
             column: column,
           };
         }
-      }
       default:
         return {
           type: "PUNCTUATION",

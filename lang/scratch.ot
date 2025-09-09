@@ -1,7 +1,1 @@
-fib := fn(n) {
-  if(n > 2) {
-    fib(n - 1) + fib(n - 2)
-  } else {
-    n
-  }
-}
+print("hello world")

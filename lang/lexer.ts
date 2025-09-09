@@ -24,8 +24,10 @@ export const TOKEN_TYPES = {
   COMMENT: "COMMENT",
 } as const;
 
+export type TokenType = (typeof TOKEN_TYPES)[keyof typeof TOKEN_TYPES];
+
 export type Token = {
-  type: (typeof TOKEN_TYPES)[keyof typeof TOKEN_TYPES];
+  type: TokenType;
   begin: number;
   end: number;
   value: string;

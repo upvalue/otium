@@ -1,4 +1,10 @@
-import { EOF_TOKEN, Lexer, TOKEN_TYPES, type Token } from "./lexer";
+import {
+  EOF_TOKEN,
+  Lexer,
+  TOKEN_TYPES,
+  type Token,
+  type TokenType,
+} from "./lexer";
 import { Eof, EofValue, getSymbol, RParenVal, type OtExpr } from "./values";
 
 export class ParserError extends Error {
@@ -53,16 +59,80 @@ export class Parser {
     return this.currentToken;
   }
 
-  primaryExpr(): OtExpr {}
-
-  suffixedExpr(): OtExpr {
-    this.primaryExpr();
+  traceCall(msg: string) {
+    if (!this.currentToken) {
+      console.log(`EOF: ${msg}`);
+      return;
+    }
+    console.log(
+      `${this.currentToken.sourceName} ${this.currentToken.line}:${this.currentToken.column} ${this.currentToken.type} ${msg}`
+    );
   }
 
+  assertMatch(tokenType: TokenType) {
+    if (this.currentToken.type !== tokenType) {
+      throw new ParserError(
+        `expected ${tokenType} but got ${this.currentToken.type}`
+      );
+    }
+  }
+
+  // primaryExpr -> SYMBOL | '(' EXPR ')'
+  primaryExpr(): OtExpr {
+    this.traceCall("primaryExpr");
+    if (this.currentToken.type === "LPAREN") {
+      // LPAREN => we have a subexpression, parse it
+      this.advance();
+      const exp = this.nextExpr();
+      this.assertMatch("RPAREN");
+      return exp;
+    } else if (this.currentToken.type === "SYMBOL") {
+      const sym = getSymbol(this.currentToken.value);
+      this.advance();
+      return sym;
+    } else {
+      throw new ParserError(`unexpected ${this.currentToken.type}`);
+    }
+  }
+
+  expList(): OtExpr[] {
+    const ls = [this.nextExpr()];
+    while (this.currentToken.type === "COMMA") {
+      this.advance();
+      ls.push(this.nextExpr());
+    }
+    return ls;
+  }
+
+  functionArgs(): OtExpr[] {
+    this.traceCall("functionArgs");
+    if (this.currentToken.type === "LPAREN") {
+      this.advance();
+      const ls = this.expList();
+
+      return ls;
+    } else {
+      throw new ParserError(
+        `unexpected functionArgs: ${this.currentToken.type}`
+      );
+    }
+  }
+
+  suffixedExpr(): OtExpr {
+    const left = this.primaryExpr();
+    switch (this.currentToken.type) {
+      case "LPAREN": {
+        return [left, ...this.functionArgs()];
+      }
+    }
+    return left;
+  }
+
+  // simpleExpr -> STRING | NUMBER | suffixedExpr
   simpleExpr(): OtExpr {
     const token = this.currentToken;
 
-    if (token.type === "EOF") {
+    if (token === undefined || token.type === "EOF") {
       return EofValue;
     } else if (token.type === "STRING") {
       return token.value;
@@ -74,6 +144,7 @@ export class Parser {
   }
 
   nextExpr(limit = 0): OtExpr {
+    this.traceCall("nextExpr");
     const exp = this.simpleExpr();
     this.advance();
     return exp;
@@ -104,7 +175,7 @@ if (import.meta.main) {
         break;
       }
 
-      console.log("exp", { exp });
+      console.log(exp);
     }
   } catch (error) {
     console.error(`Error reading file: ${error}`);

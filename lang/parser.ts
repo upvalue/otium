@@ -1,11 +1,5 @@
-import {
-  EOF_TOKEN,
-  Lexer,
-  TOKEN_TYPES,
-  type Token,
-  type TokenType,
-} from "./lexer";
-import { Eof, EofValue, getSymbol, RParenVal, type OtExpr } from "./values";
+import { EOF_TOKEN, Lexer, type Token, type TokenType } from "./lexer";
+import { EofValue, getSymbol, type OtExpr } from "./values";
 
 export class ParserError extends Error {
   constructor(message: string) {
@@ -14,14 +8,22 @@ export class ParserError extends Error {
   }
 }
 
-const BINDING_POWERS = {
-  [TOKEN_TYPES.LPAREN]: 80,
-  [TOKEN_TYPES.SYMBOL]: 0,
-  [TOKEN_TYPES.STRING]: 0,
-  [TOKEN_TYPES.NUMBER]: 0,
-  [TOKEN_TYPES.RPAREN]: 0,
-  [TOKEN_TYPES.EOF]: 0,
+const PRIORITY: Record<TokenType, { left: number; right: number }> = {
+  ADD: {
+    left: 10,
+    right: 10,
+  },
+  MUL: {
+    left: 11,
+    right: 11,
+  },
 };
+
+const isOperator = (token: Token) => ["ADD", "MUL"].includes(token.type);
+
+class StrongerOperator {
+  constructor(public operator: Token) {}
+}
 
 /**
  * This parser is a top down operator precedence parser; see the following
@@ -32,7 +34,6 @@ const BINDING_POWERS = {
  * (has some more call traces and explanatory text)
  * Lua parser source: https://raw.githubusercontent.com/lua/lua/refs/heads/master/lparser.c
  */
-
 export class Parser {
   tokens: Token[];
   tokenIdx: number;
@@ -69,12 +70,13 @@ export class Parser {
     );
   }
 
-  assertMatch(tokenType: TokenType) {
+  assertMatchAndConsume(tokenType: TokenType) {
     if (this.currentToken.type !== tokenType) {
       throw new ParserError(
         `expected ${tokenType} but got ${this.currentToken.type}`
       );
     }
+    this.advance();
   }
 
   // primaryExpr -> SYMBOL | '(' EXPR ')'
@@ -83,8 +85,8 @@ export class Parser {
     if (this.currentToken.type === "LPAREN") {
       // LPAREN => we have a subexpression, parse it
       this.advance();
-      const exp = this.nextExpr();
-      this.assertMatch("RPAREN");
+      const [, exp] = this.nextExpr();
+      this.assertMatchAndConsume("RPAREN");
       return exp;
     } else if (this.currentToken.type === "SYMBOL") {
       const sym = getSymbol(this.currentToken.value);
@@ -95,15 +97,25 @@ export class Parser {
     }
   }
 
+  /**
+   * expList is any comma separated list of expressions
+   */
   expList(): OtExpr[] {
-    const ls = [this.nextExpr()];
+    this.traceCall("expList");
+    let [, elt] = this.nextExpr();
+    const ls = [elt];
     while (this.currentToken.type === "COMMA") {
       this.advance();
-      ls.push(this.nextExpr());
+      [, elt] = this.nextExpr();
+      ls.push(elt);
     }
     return ls;
   }
 
+  /**
+   * functionArgs handles parsing a function's argument
+   * list, returns an array
+   */
   functionArgs(): OtExpr[] {
     this.traceCall("functionArgs");
     if (this.currentToken.type === "LPAREN") {
@@ -118,36 +130,91 @@ export class Parser {
     }
   }
 
+  /**
+   * suffixedExpr -> primaryExp funcargs
+   * handles function calls
+   */
   suffixedExpr(): OtExpr {
+    this.traceCall("suffixedExpr");
     const left = this.primaryExpr();
     switch (this.currentToken.type) {
       case "LPAREN": {
-        return [left, ...this.functionArgs()];
+        const r = [left, ...this.functionArgs()];
+        this.assertMatchAndConsume("RPAREN");
+        return r;
       }
     }
     return left;
   }
 
-  // simpleExpr -> STRING | NUMBER | suffixedExpr
+  /**
+   * simpleExpr -> STRING | NUMBER | suffixedExpr
+   * simpleExpr handles self-evaluating expressions (like numbers and
+   * strings) or calls out to suffixedExpr in the case of a more
+   * complex expression (currently, function calls)
+   */
   simpleExpr(): OtExpr {
     const token = this.currentToken;
 
     if (token === undefined || token.type === "EOF") {
       return EofValue;
     } else if (token.type === "STRING") {
+      this.advance();
       return token.value;
     } else if (token.type === "NUMBER") {
+      this.advance();
       return parseInt(token.value, 10);
     } else {
       return this.suffixedExpr();
     }
   }
 
-  nextExpr(limit = 0): OtExpr {
-    this.traceCall("nextExpr");
-    const exp = this.simpleExpr();
-    this.advance();
-    return exp;
+  /**
+   * nextExpr is the main entry point for the parser; it takes a binding
+   * power as an argument. The binding power is what controls whether
+   * the parser will recurse into itself in order to handle expressions
+   * with operators. It always begins with zero but, for example, if we encounter
+   * the expression 2 + 2, '+' will be detected before nextExpr exits and it
+   * then recurses with a binding power of 10, the priority of the + operator
+   *
+   * The binding power may also cause the parser to return early. For example
+   * in the expression 2 * 2 + 5 because + has a lower (stronger) priority than
+   * *, in this case the function returns early by throwing an exception
+   */
+  nextExpr(bindingPower = 0): [StrongerOperator | null, OtExpr] {
+    this.traceCall(`nextExpr bindingPower: ${bindingPower}`);
+    let exp = this.simpleExpr();
+
+    // Check for binary operator presence
+    let operator = this.currentToken;
+
+    while (
+      isOperator(operator) &&
+      PRIORITY[operator.type].left > bindingPower
+    ) {
+      console.log({
+        operator,
+        priority: PRIORITY[operator.type],
+        bindingPower,
+      });
+      const rightPri = PRIORITY[this.currentToken.type].right;
+      const op = getSymbol(this.currentToken.value);
+      this.advance();
+      const [nextOp, nextExp] = this.nextExpr(rightPri);
+
+      exp = [op, exp, nextExp];
+      if (!nextOp) {
+        break;
+      }
+
+      operator = nextOp.operator;
+    }
+
+    if (isOperator(operator)) {
+      return [new StrongerOperator(operator), exp];
+    }
+
+    return [null, exp];
   }
 }
 
@@ -169,7 +236,7 @@ if (import.meta.main) {
 
     let exp: OtExpr;
     while (true) {
-      exp = parser.nextExpr();
+      [, exp] = parser.nextExpr();
 
       if (exp == EofValue) {
         break;

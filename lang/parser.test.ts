@@ -10,7 +10,7 @@ function parseString(input: string): OtExpr[] {
 
   let expr: OtExpr;
   while (true) {
-    expr = parser.nextExpr();
+    expr = parser.expr();
     if (expr === EofValue) {
       break;
     }
@@ -34,6 +34,20 @@ test("parse number", () => {
   expect(result).toMatchInlineSnapshot(`
     [
       12345,
+    ]
+  `);
+});
+
+test("basic function call", () => {
+  const result = parseString('print("hello")');
+  expect(result).toMatchInlineSnapshot(`
+    [
+      [
+        Symbol {
+          "name": "print",
+        },
+        "hello",
+      ],
     ]
   `);
 });

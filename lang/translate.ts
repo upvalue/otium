@@ -180,7 +180,6 @@ export const translate = (env: Env, value: OtExpr): string => {
 };
 
 import { runWithFile } from "./support";
-import { IndexKind } from "typescript";
 
 if (import.meta.main) {
   runWithFile((content, filename) => {

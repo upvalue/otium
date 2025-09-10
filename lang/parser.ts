@@ -1,7 +1,5 @@
 import { EOF_TOKEN, Lexer, type Token, type TokenType } from "./lexer";
-import { EofValue, getSymbol, type OtExpr } from "./values";
-
-const beginSym = getSymbol("begin");
+import { beginSym, EofValue, getSymbol, type OtExpr } from "./values";
 
 export class ParserError extends Error {
   constructor(message: string) {
@@ -223,7 +221,7 @@ export class Parser {
       }
       this.advance();
       operator = this.currentToken;
-      exp = [...splat(exp), body];
+      exp = [...splat(exp), [beginSym, body]];
     }
 
     while (

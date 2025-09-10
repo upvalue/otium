@@ -1,6 +1,5 @@
 // values.ts - value types
 import { inspect } from "util";
-
 export class ConstantCls {
   constructor(readonly name: string) {}
   toString(): string {
@@ -33,5 +32,7 @@ export function getSymbol(name: string): OtSymbol {
   symTable[name] = sym;
   return sym;
 }
+
+export const beginSym = getSymbol("begin");
 
 export type OtExpr = number | string | Array<OtExpr> | OtSymbol | ConstantCls;

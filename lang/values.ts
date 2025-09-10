@@ -1,5 +1,4 @@
 // values.ts - value types
-import { inspect } from "util";
 export class ConstantCls {
   constructor(readonly name: string) {}
   toString(): string {
@@ -17,7 +16,7 @@ export class OtSymbol {
     return `#${this.name}`;
   }
 
-  [inspect.custom]() {
+  toString() {
     return `#${this.name}`;
   }
 }

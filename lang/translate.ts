@@ -5,7 +5,7 @@
 
 import { Lexer } from "./lexer";
 import { Parser } from "./parser";
-import { beginSym, EofValue, OtExpr, OtSymbol } from "./values";
+import { beginSym, EofValue, type OtExpr, OtSymbol } from "./values";
 
 const assertInvariant = (x: boolean, msg: string) => {
   if (!x) {
@@ -54,7 +54,7 @@ class Env {
   }
 }
 
-const rootEnv = new Env();
+export const rootEnv = new Env();
 
 rootEnv.vars["print"] = "print";
 rootEnv.vars["true"] = "true";
@@ -144,7 +144,7 @@ return ${translate(fnEnv, body[1]!)};
   },
 };
 
-const prelude = `
+export const prelude = `
 // prelude
 const print = console.log;
 const begin = (x) => x;
@@ -155,7 +155,7 @@ const add = (a, b) => a + b;
 // begin main program
 `;
 
-const translate = (env: Env, value: OtExpr): string => {
+export const translate = (env: Env, value: OtExpr): string => {
   if (typeof value === "number" || typeof value === "string") {
     return JSON.stringify(value);
   } else if (Array.isArray(value)) {

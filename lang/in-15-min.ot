@@ -1,4 +1,4 @@
-// note: aspirational, not yet supported
+// note: aspirational, most of the syntax here isn't yet supported
 
 // Hello!
 
@@ -25,5 +25,16 @@ fib := fn(n) {
 // Use print to print results
 print(fib(5))
 
+// Otium has a bit of syntactic sugar, but like a Lisp it ultimately becomes S-expressions
+
+print(#'(if(n < 2) {
+  n
+}))
+
+// Prints
+
+// [#if, [#<, #n, 2]
+//   [#begin, #n]]
 
 
+  

@@ -2,6 +2,8 @@
 
 A simple Lisp-derived language with C-like syntax.
 
+Status: It can parse and run the fibonacci number calculator.
+
 The current implementation is in TypeScript running under Bun (for prototyping -- this
 will eventually gain a standalone runtime and compiler). It's very much been thrown together
 and is still changing a lot.

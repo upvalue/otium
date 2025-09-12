@@ -31,9 +31,14 @@ const PRIORITY: Record<TokenType, { left: number; right: number }> = {
   },
 };
 
+// TODO: This can just be startsWith OP_
 const isOperator = (token: Token) =>
   ["OP_ADD", "OP_MUL", "OP_LT", "OP_ASSIGN", "OP_SUB"].includes(token.type);
 
+/**
+ * Special return value stating that the parser has encountered
+ * a stronger operator
+ */
 class StrongerOperator {
   constructor(public operator: Token) {}
 }
@@ -69,7 +74,7 @@ export class Parser {
     for (const token of lexer.tokenize()) {
       this.tokens.push(token);
     }
-    this.currentToken = this.tokens[0];
+    this.currentToken = this.tokens[0]!;
   }
 
   peek(): Token {

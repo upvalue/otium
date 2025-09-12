@@ -1,6 +1,8 @@
 export function runWithFile(
   callback: (content: string, filename: string) => void
 ): void {
+  require("./bunsupport");
+
   const args = process.argv.slice(2);
   if (args.length !== 1) {
     console.error("Usage: bun <script> <file>");

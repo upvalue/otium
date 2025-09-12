@@ -7,6 +7,8 @@ import { Lexer } from "./lexer";
 import { Parser } from "./parser";
 import { beginSym, EofValue, type OtExpr, OtSymbol } from "./values";
 
+class TranslateError extends Error {}
+
 const assertInvariant = (x: boolean, msg: string) => {
   if (!x) {
     throw new TranslateError(`Invariant violation: ${msg}`);
@@ -63,8 +65,6 @@ rootEnv.vars["begin"] = "begin";
 rootEnv.vars["<"] = "lt";
 rootEnv.vars["-"] = "sub";
 rootEnv.vars["+"] = "add";
-
-class TranslateError extends Error {}
 
 /**
  * Syntax table -- these magical forms invoke the translator

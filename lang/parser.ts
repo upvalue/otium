@@ -240,7 +240,6 @@ export class Parser {
     }
 
     while (isOperator(operator) && PRIORITY[operator.type] > bindingPower) {
-      console.log("haha isOperator yesss");
       /*
       console.log({
         operator,

@@ -27,6 +27,7 @@
 import { Lexer } from "./lexer";
 import { Parser } from "./parser";
 import { beginSym, EofValue, type OtExpr, OtSymbol } from "./values";
+import { format } from "prettier";
 
 /**
  * Destination describes where the
@@ -234,7 +235,7 @@ class Translator {
 
       code += this.compileVec(fnEnv, body.slice(1), retDest);
 
-      code += `\nreturn ${retDest};\n}`;
+      code += `\nreturn ${retDest};\n}\n`;
 
       return code;
     },
@@ -248,9 +249,9 @@ class Translator {
     if (typeof exp === "number" || typeof exp === "string") {
       // Self evaluating expressions
       if (destination) {
-        return `${destination} = ${exp}`;
+        return `${destination} = ${JSON.stringify(exp)}`;
       } else {
-        return `${exp}`;
+        return `${JSON.stringify(exp)}`;
       }
     } else if (Array.isArray(exp)) {
       // Function call
@@ -324,13 +325,13 @@ class Translator {
 import { runWithFile } from "./support";
 
 if (import.meta.main) {
-  runWithFile((content, filename) => {
+  runWithFile(async (content, filename) => {
     const lexer = new Lexer(content, filename);
     const parser = new Parser(lexer);
     const translator = new Translator();
 
     let exp: OtExpr;
-    console.log(PRELUDE);
+    let accum = PRELUDE;
     while (true) {
       [, exp] = parser.nextExpr();
 
@@ -338,10 +339,13 @@ if (import.meta.main) {
         break;
       }
 
-      const res = translator.compileToplevel(exp);
-      console.log(res);
-
-      // console.log(translate(rootEnv, exp));
+      accum += translator.compileToplevel(exp);
     }
+
+    console.log(
+      await format(accum, {
+        parser: "babel",
+      })
+    );
   });
 }

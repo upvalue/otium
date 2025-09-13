@@ -8,32 +8,42 @@ export class ParserError extends Error {
   }
 }
 
-const PRIORITY: Record<TokenType, { left: number; right: number }> = {
-  OP_ADD: {
-    left: 10,
-    right: 10,
-  },
-  OP_SUB: {
-    left: 10,
-    right: 10,
-  },
-  OP_MUL: {
-    left: 11,
-    right: 11,
-  },
-  OP_LT: {
-    left: 3,
-    right: 3,
-  },
-  OP_ASSIGN: {
-    left: 100,
-    right: 100,
-  },
+/**
+ * Priority for operators -- higher is stronger.
+ * There's no right-associative operators yet,
+ * if we add those there'll need to be two values
+ */
+const PRIORITY: Partial<Record<TokenType, number>> = {
+  // Arithmetic
+  // +
+  OP_ADD: 3,
+  // -
+  OP_SUB: 3,
+  // *
+  OP_MUL: 3,
+  // /
+  OP_DIV: 3,
+
+  // Comparison operators
+  // <
+  OP_LT: 2,
+  // >
+  OP_GT: 2,
+  // <=
+  OP_LTE: 2,
+  // >=
+  OP_GTE: 2,
+
+  // ==
+  OP_EQ: 2,
+  // !=
+  OP_NEQ: 2,
+
+  // Assignment :=
+  OP_ASSIGN: 10,
 };
 
-// TODO: This can just be startsWith OP_
-const isOperator = (token: Token) =>
-  ["OP_ADD", "OP_MUL", "OP_LT", "OP_ASSIGN", "OP_SUB"].includes(token.type);
+const isOperator = (token: Token) => token.type.startsWith("OP_");
 
 /**
  * Special return value stating that the parser has encountered
@@ -229,10 +239,8 @@ export class Parser {
       exp = [...splat(exp), [beginSym, body]];
     }
 
-    while (
-      isOperator(operator) &&
-      PRIORITY[operator.type].left > bindingPower
-    ) {
+    while (isOperator(operator) && PRIORITY[operator.type] > bindingPower) {
+      console.log("haha isOperator yesss");
       /*
       console.log({
         operator,
@@ -240,7 +248,7 @@ export class Parser {
         bindingPower,
       });
       */
-      const rightPri = PRIORITY[this.currentToken.type].right;
+      const rightPri = PRIORITY[this.currentToken.type];
       const op = getSymbol(this.currentToken.value);
       this.advance();
       const [nextOp, nextExp] = this.nextExpr(rightPri);

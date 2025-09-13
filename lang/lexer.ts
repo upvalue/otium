@@ -23,6 +23,10 @@ export const TOKEN_TYPES = {
   OP_SUB: "OP_SUB",
   OP_LT: "OP_LT",
   OP_GT: "OP_GT",
+  OP_LTE: "OP_LTE",
+  OP_GTE: "OP_GTE",
+  OP_EQ: "OP_EQ",
+  OP_NEQ: "OP_NEQ",
   OP_MUL: "OP_MUL",
   OP_DIV: "OP_DIV",
   OP_ASSIGN: "OP_ASSIGN",
@@ -284,6 +288,18 @@ export class Lexer {
           column,
         };
       case "<":
+        if (this.peek() === "=") {
+          this.advance();
+          return {
+            type: "OP_LTE",
+            begin,
+            end: this.position,
+            value: "<=",
+            sourceName,
+            line,
+            column,
+          };
+        }
         return {
           type: "OP_LT",
           begin,
@@ -293,6 +309,56 @@ export class Lexer {
           line,
           column,
         };
+      case ">":
+        if (this.peek() === "=") {
+          this.advance();
+          return {
+            type: "OP_GTE",
+            begin,
+            end: this.position,
+            value: ">=",
+            sourceName,
+            line,
+            column,
+          };
+        }
+        return {
+          type: "OP_GT",
+          begin,
+          end: this.position,
+          value: char,
+          sourceName,
+          line,
+          column,
+        };
+      case "!":
+        if (this.peek() === "=") {
+          this.advance();
+          return {
+            type: "OP_NEQ",
+            begin,
+            end: this.position,
+            value: "!=",
+            sourceName,
+            line,
+            column,
+          };
+        }
+        break;
+      case "=":
+        if (this.peek() === "=") {
+          this.advance();
+          return {
+            type: "OP_EQ",
+            begin,
+            end: this.position,
+            value: "==",
+            sourceName,
+            line,
+            column,
+          };
+        }
+        break;
       case "+":
         return {
           type: "OP_ADD",
@@ -347,15 +413,7 @@ export class Lexer {
           };
         }
       default:
-        return {
-          type: "PUNCTUATION",
-          begin,
-          end: this.position,
-          value: char,
-          sourceName,
-          line,
-          column,
-        };
+        throw new LexerError(`unrecognized character ${char}`);
     }
   }
 
@@ -373,7 +431,7 @@ export class Lexer {
   }
 }
 
-import { runWithFile } from './support';
+import { runWithFile } from "./support";
 
 if (import.meta.main) {
   runWithFile((content, filename) => {

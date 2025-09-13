@@ -2,11 +2,11 @@ import { expect, test } from "bun:test";
 import { Lexer } from "./lexer";
 
 test("basic lexer test", () => {
-    const input = `42 "hello world" foo-bar ( ) + - * / ;`;
-    const lexer = new Lexer(input);
-    const tokens = lexer.tokenize();
-    
-    expect(tokens).toMatchInlineSnapshot(`
+  const input = `42 "hello world" foo-bar ( ) + - * /`;
+  const lexer = new Lexer(input);
+  const tokens = lexer.tokenize();
+
+  expect(tokens).toMatchInlineSnapshot(`
       [
         {
           "begin": 0,
@@ -90,18 +90,83 @@ test("basic lexer test", () => {
           "value": "/",
         },
         {
-          "begin": 37,
-          "column": 38,
-          "end": 38,
+          "begin": 36,
+          "column": 37,
+          "end": 36,
           "line": 1,
           "sourceName": undefined,
-          "type": "PUNCTUATION",
-          "value": ";",
+          "type": "EOF",
+          "value": "",
+        },
+      ]
+    `);
+});
+
+test("comparison operators", () => {
+  const input = `< <= > >= == !=`;
+  const lexer = new Lexer(input);
+  const tokens = lexer.tokenize();
+
+  expect(tokens).toMatchInlineSnapshot(`
+      [
+        {
+          "begin": 0,
+          "column": 1,
+          "end": 1,
+          "line": 1,
+          "sourceName": undefined,
+          "type": "OP_LT",
+          "value": "<",
         },
         {
-          "begin": 38,
-          "column": 39,
-          "end": 38,
+          "begin": 2,
+          "column": 3,
+          "end": 4,
+          "line": 1,
+          "sourceName": undefined,
+          "type": "OP_LTE",
+          "value": "<=",
+        },
+        {
+          "begin": 5,
+          "column": 6,
+          "end": 6,
+          "line": 1,
+          "sourceName": undefined,
+          "type": "OP_GT",
+          "value": ">",
+        },
+        {
+          "begin": 7,
+          "column": 8,
+          "end": 9,
+          "line": 1,
+          "sourceName": undefined,
+          "type": "OP_GTE",
+          "value": ">=",
+        },
+        {
+          "begin": 10,
+          "column": 11,
+          "end": 12,
+          "line": 1,
+          "sourceName": undefined,
+          "type": "OP_EQ",
+          "value": "==",
+        },
+        {
+          "begin": 13,
+          "column": 14,
+          "end": 15,
+          "line": 1,
+          "sourceName": undefined,
+          "type": "OP_NEQ",
+          "value": "!=",
+        },
+        {
+          "begin": 15,
+          "column": 16,
+          "end": 15,
           "line": 1,
           "sourceName": undefined,
           "type": "EOF",

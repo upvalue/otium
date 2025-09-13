@@ -43,7 +43,7 @@ test("basic function call", () => {
   expect(result).toMatchInlineSnapshot(`
     [
       [
-        Symbol {
+        OtSymbol {
           "name": "print",
         },
         "hello",
@@ -57,11 +57,11 @@ test("basic arithmetic expression", () => {
   expect(result).toMatchInlineSnapshot(`
     [
       [
-        Symbol {
+        OtSymbol {
           "name": "+",
         },
         [
-          Symbol {
+          OtSymbol {
             "name": "*",
           },
           5,
@@ -78,15 +78,20 @@ test("brace splicing", () => {
   expect(result).toMatchInlineSnapshot(`
     [
       [
-        Symbol {
+        OtSymbol {
           "name": "if",
         },
-        Symbol {
+        OtSymbol {
           "name": "true",
         },
-        Symbol {
-          "name": "true",
-        },
+        [
+          OtSymbol {
+            "name": "begin",
+          },
+          OtSymbol {
+            "name": "true",
+          },
+        ],
       ],
     ]
   `);

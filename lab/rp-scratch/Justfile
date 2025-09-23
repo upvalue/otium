@@ -1,0 +1,7 @@
+# Flash the built binary to a ready device
+flash:
+  picotool load -u -v -x -t elf target/thumbv8m.main-none-eabihf/debug/rp2350-scratch
+
+# Open the console (on OSX)
+console:
+  screen /dev/tty.usbmodemrpscratch1

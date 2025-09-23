@@ -10,3 +10,5 @@ otium is a project to make a modern retro computer. Just getting started.
 `./lang` contains the beginnings of the programming language. It's written in TypeScript and can run
 basic programs (via compilation to JS)
 
+`./lab` is one off experiments
+

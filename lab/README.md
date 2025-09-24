@@ -1,4 +1,6 @@
 this folder contains one off experiments
 
-- rp2350-blink-rs: an [rp-hal](https://github.com/rp-rs/rp-hal) based demo: make an LED blink on
-  various rp2350 dev boards
+- rp-scratch-rs: experiments with [rp-hal](https://github.com/rp-rs/rp-hal)
+- rp-scratch-c: experiments with writing a plain C (no pico SDK dependency)
+  program for the rp2350
+

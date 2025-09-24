@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RP2350 C from Scratch</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <style>
+    /* Custom prose styling since Tailwind prose isn't available in CDN */
+    .prose {
+      color: #374151;
+      max-width: none;
+    }
+    .prose h1:first-of-type, .prose h2:first-of-type, .prose h3:first-of-type, .prose h4:first-of-type, .prose h5:first-of-type, .prose h6:first-of-type {
+      margin-top: 0;
+    }
+    .prose h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+      margin-top: 1.5rem;
+      color: #111827;
+      line-height: 1.25;
+    }
+    .prose h2 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      margin-top: 1.25rem;
+      color: #111827;
+      line-height: 1.3;
+    }
+    .prose h3 {
+      font-size: 1.125rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      margin-top: 1rem;
+      color: #111827;
+      line-height: 1.35;
+    }
+    .prose p {
+      margin-bottom: 1rem;
+      line-height: 1.6;
+    }
+    .prose ul, .prose ol {
+      margin-bottom: 1rem;
+      padding-left: 1.5rem;
+    }
+    .prose li {
+      margin-bottom: 0.25rem;
+      line-height: 1.6;
+    }
+    .prose ul li {
+      list-style-type: disc;
+    }
+    .prose ol li {
+      list-style-type: decimal;
+    }
+    .prose blockquote {
+      border-left: 4px solid #e5e7eb;
+      padding-left: 1rem;
+      margin: 1rem 0;
+      font-style: italic;
+      color: #6b7280;
+    }
+    .prose code {
+      background-color: #f3f4f6;
+      padding: 0.125rem 0.25rem;
+      border-radius: 0.25rem;
+      font-size: 0.875rem;
+      font-family: ui-monospace, SFMono-Regular, "Roboto Mono", "Cascadia Code", "Source Code Pro", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    }
+    .prose pre {
+      background-color: #1f2937;
+      color: #e5e7eb;
+      padding: 0.75rem;
+      border-radius: 0.375rem;
+      font-size: 0.875rem;
+      overflow-x: auto;
+      margin: 1rem 0;
+    }
+    .prose pre code {
+      background-color: transparent;
+      padding: 0;
+      color: inherit;
+    }
+    .prose strong {
+      font-weight: 600;
+      color: #111827;
+    }
+    .prose em {
+      font-style: italic;
+    }
+    .prose a {
+      color: #2563eb;
+      text-decoration: underline;
+    }
+    .prose a:hover {
+      color: #1d4ed8;
+    }
+  </style>
+</head>
+<body class="bg-gray-50 font-sans">
+  <div class="max-w-7xl mx-auto">
+    <header class="py-8 px-6 bg-white shadow-sm border-b">
+      <h1 class="text-3xl font-bold text-gray-900">RP2350 C from Scratch</h1>
+      <div class="text-gray-600 mt-2 prose"><p>How to use RP2350 without any SDK or library code</p>
+</div>
+    </header>
+    
+    <main class="block lg:flex min-h-screen">
+      
+    
+    <!-- File Header: linker.ld -->
+    <div class="bg-gray-100 border-b-2 border-gray-300 lg:hidden w-full">
+      <div class="w-full lg:w-2/5 bg-gray-50 border-r border-gray-300">
+        <div class="p-6">
+          <h2 class="text-xl font-semibold text-gray-800 mb-2">
+            <svg class="inline-block w-4 h-4 mr-2 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path>
+            </svg>
+            linker.ld
+          </h2>
+        </div>
+      </div>
+      <div class="hidden lg:block w-3/5 bg-gray-100">
+        <div class="p-6">
+          <div class="h-full min-h-[3rem] flex items-center">
+            <span class="text-gray-500 text-sm italic">Source file</span>
+          </div>
+        </div>
+      </div>
+    </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <h1>rp2350 from scratch</h1>
+<p>This documentation is generated with <a href="https://github.com/upvalue/litsdoc">litsdoc</a></p>
+<p>It&#39;s largely derived from the <a href="https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf">RP2350 datasheet</a></p>
+<h1>Linker script</h1>
+<p>The first file is the <a href="https://mcyoung.xyz/2021/06/01/linker-script/">linker script</a> which describes the layout
+of our program in memory.</p>
+
+              </div>
+            </div>
+          </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>The MEMORY statement controls how memory addresses are allocated within our program. In higher level programming, when
+we talk about memory, we talk about it as though it&#39;s one contiguous area that lives in RAM.</p>
+<p>On this system (and in other low-level contexts), addresses in memory can have special meanings which are handled at the layers
+beneath us. For example, we might load from a memory address and instead of reading from the system&#39;s (relatively low) RAM it
+might be read from the much larger flash memory. The system handles this transparently for us, but it&#39;s up to us to make sure we
+use the right addresses and use supported operations with those addresses.</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>MEMORY {</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>The flash memory is where our program lives; in the datasheet it&#39;s called XIP (executable in place) and exposed at the 
+memory address 0x1000000.</p>
+<p>Both of the values come from <a href="https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf#page=31">pg 30</a> of the datasheet</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>FLASH (rx) : ORIGIN = 0x10000000, LENGTH = 2048K</span></span>
+<span class="line"><span>  RAM (rwx)  : ORIGIN = 0x20000000, LENGTH = 512K</span></span>
+<span class="line"><span>}</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>ENTRY(_start)</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>SECTIONS {</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Boot2 stage - first 256 bytes of flash</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.boot2 : {</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Boot2 must be exactly 256 bytes</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>} > FLASH</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Vector table and code</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.text : {</span></span>
+<span class="line"><span>      KEEP(*(.vector_table))</span></span>
+<span class="line"><span>      *(.text*)</span></span>
+<span class="line"><span>      *(.rodata*)</span></span>
+<span class="line"><span>      . = ALIGN(4);</span></span>
+<span class="line"><span>  } > FLASH</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Initialized data</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.data : {</span></span>
+<span class="line"><span>      _data_start = .;</span></span>
+<span class="line"><span>      *(.data*)</span></span>
+<span class="line"><span>      . = ALIGN(4);</span></span>
+<span class="line"><span>      _data_end = .;</span></span>
+<span class="line"><span>  } > RAM AT > FLASH</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>  _data_load_start = LOADADDR(.data);</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Uninitialized data</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.bss : {</span></span>
+<span class="line"><span>      _bss_start = .;</span></span>
+<span class="line"><span>      *(.bss*)</span></span>
+<span class="line"><span>      *(COMMON)</span></span>
+<span class="line"><span>      . = ALIGN(4);</span></span>
+<span class="line"><span>      _bss_end = .;</span></span>
+<span class="line"><span>  } > RAM</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Stack pointer - end of RAM. Stack grows downwards</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>_stack_top = ORIGIN(RAM) + LENGTH(RAM);</span></span>
+<span class="line"><span>}</span></span></code></pre>
+              </div>
+            </div>
+    <!-- File Header: pico.c -->
+    <div class="bg-gray-100 border-b-2 border-gray-300 lg:hidden w-full">
+      <div class="w-full lg:w-2/5 bg-gray-50 border-r border-gray-300">
+        <div class="p-6">
+          <h2 class="text-xl font-semibold text-gray-800 mb-2">
+            <svg class="inline-block w-4 h-4 mr-2 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path>
+            </svg>
+            pico.c
+          </h2>
+        </div>
+      </div>
+      <div class="hidden lg:block w-3/5 bg-gray-100">
+        <div class="p-6">
+          <div class="h-full min-h-[3rem] flex items-center">
+            <span class="text-gray-500 text-sm italic">Source file</span>
+          </div>
+        </div>
+      </div>
+    </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>pico.h
+a standalone and two file setup for interacting with the RP2350 system
+derived from the <a href="https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf">datasheet</a>
+mainly a learning exercise</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#ifndef</span><span style="color:#B392F0"> _PICO_H</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> _PICO_H</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>APB registers. section 2.2.4, pg 31</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> IO_BANK0_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">40028000</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> IO_QSPI_BASE</span><span style="color:#F97583">  0x</span><span style="color:#79B8FF">40030000</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Bootrom codes. section 5.4.3, pg 378</p>
+
+              </div>
+            </div>
+          </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Success codes</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_OK</span><span style="color:#79B8FF">                              0</span><span style="color:#6A737D">    // The function executed successfully</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>General error codes</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_NOT_PERMITTED</span><span style="color:#F97583">            -</span><span style="color:#79B8FF">4</span><span style="color:#6A737D">    // The operation was disallowed by a security constraint</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_INVALID_ARG</span><span style="color:#F97583">              -</span><span style="color:#79B8FF">5</span><span style="color:#6A737D">    // One or more parameters passed to the function is outside the range of supported values</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Address and alignment errors</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_INVALID_ADDRESS</span><span style="color:#F97583">         -</span><span style="color:#79B8FF">10</span><span style="color:#6A737D">    // An address argument was out-of-bounds or was determined to be an address that the caller may not access</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_BAD_ALIGNMENT</span><span style="color:#F97583">           -</span><span style="color:#79B8FF">11</span><span style="color:#6A737D">    // An address passed to the function was not correctly aligned</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>State and buffer errors</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_INVALID_STATE</span><span style="color:#F97583">           -</span><span style="color:#79B8FF">12</span><span style="color:#6A737D">    // Something happened or failed to happen in the past, and consequently the request cannot currently be serviced</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_BUFFER_TOO_SMALL</span><span style="color:#F97583">        -</span><span style="color:#79B8FF">13</span><span style="color:#6A737D">    // A user-allocated buffer was too small to hold the result or working state of the function</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_PRECONDITION_NOT_MET</span><span style="color:#F97583">    -</span><span style="color:#79B8FF">14</span><span style="color:#6A737D">    // The call failed because another bootrom function must be called first</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Data errors</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_MODIFIED_DATA</span><span style="color:#F97583">           -</span><span style="color:#79B8FF">15</span><span style="color:#6A737D">    // Cached data was determined to be inconsistent with the full version of the data it was copied from</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_INVALID_DATA</span><span style="color:#F97583">            -</span><span style="color:#79B8FF">16</span><span style="color:#6A737D">    // The contents of a data structure are invalid</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_NOT_FOUND</span><span style="color:#F97583">               -</span><span style="color:#79B8FF">17</span><span style="color:#6A737D">    // An attempt was made to access something that does not exist; or, a search failed</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Modification and lock errors</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_UNSUPPORTED_MODIFICATION</span><span style="color:#F97583"> -</span><span style="color:#79B8FF">18</span><span style="color:#6A737D">   // Modification is impossible based on current state. This might occur, for example, when attempting to clear an OTP bit</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_LOCK_REQUIRED</span><span style="color:#F97583">           -</span><span style="color:#79B8FF">19</span><span style="color:#6A737D">    // A required lock is not owned</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#FDAEB7;font-style:italic">#endif</span></span></code></pre>
+              </div>
+            </div>
+    <!-- File Header: blink.c -->
+    <div class="bg-gray-100 border-b-2 border-gray-300 lg:hidden w-full">
+      <div class="w-full lg:w-2/5 bg-gray-50 border-r border-gray-300">
+        <div class="p-6">
+          <h2 class="text-xl font-semibold text-gray-800 mb-2">
+            <svg class="inline-block w-4 h-4 mr-2 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path>
+            </svg>
+            blink.c
+          </h2>
+        </div>
+      </div>
+      <div class="hidden lg:block w-3/5 bg-gray-100">
+        <div class="p-6">
+          <div class="h-full min-h-[3rem] flex items-center">
+            <span class="text-gray-500 text-sm italic">Source file</span>
+          </div>
+        </div>
+      </div>
+    </div>
+          <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#include</span><span style="color:#9ECBFF"> "pico.h"</span></span></code></pre>
+            </div>
+          </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Minimal RP2350 program without SDK</p>
+
+              </div>
+            </div>
+          </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Memory-mapped register addresses</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> IO_BANK0_BASE</span><span style="color:#E1E4E8"> </span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> PADS_BANK0_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">4001c000</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> SIO_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">d0000000</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>GPIO registers (simplified)</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> GPIO_CTRL_FUNCSEL_SIO</span><span style="color:#79B8FF"> 5</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> GPIO25_CTRL</span><span style="color:#E1E4E8"> (</span><span style="color:#F97583">*</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">volatile</span><span style="color:#F97583"> unsigned</span><span style="color:#F97583"> int*</span><span style="color:#E1E4E8">)(IO_BANK0_BASE </span><span style="color:#F97583">+</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">0cc</span><span style="color:#E1E4E8">))</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> GPIO25_PAD</span><span style="color:#E1E4E8"> (</span><span style="color:#F97583">*</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">volatile</span><span style="color:#F97583"> unsigned</span><span style="color:#F97583"> int*</span><span style="color:#E1E4E8">)(PADS_BANK0_BASE </span><span style="color:#F97583">+</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">68</span><span style="color:#E1E4E8">))</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>SIO registers for GPIO output</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> SIO_GPIO_OE</span><span style="color:#E1E4E8"> (</span><span style="color:#F97583">*</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">volatile</span><span style="color:#F97583"> unsigned</span><span style="color:#F97583"> int*</span><span style="color:#E1E4E8">)(SIO_BASE </span><span style="color:#F97583">+</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">020</span><span style="color:#E1E4E8">))</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> SIO_GPIO_OUT</span><span style="color:#E1E4E8"> (</span><span style="color:#F97583">*</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">volatile</span><span style="color:#F97583"> unsigned</span><span style="color:#F97583"> int*</span><span style="color:#E1E4E8">)(SIO_BASE </span><span style="color:#F97583">+</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">010</span><span style="color:#E1E4E8">))</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">void</span><span style="color:#B392F0"> delay</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">unsigned</span><span style="color:#F97583"> int</span><span style="color:#FFAB70"> count</span><span style="color:#E1E4E8">) {</span></span>
+<span class="line"><span style="color:#F97583">    for</span><span style="color:#E1E4E8"> (</span><span style="color:#F97583">volatile</span><span style="color:#F97583"> unsigned</span><span style="color:#F97583"> int</span><span style="color:#E1E4E8"> i </span><span style="color:#F97583">=</span><span style="color:#79B8FF"> 0</span><span style="color:#E1E4E8">; i </span><span style="color:#F97583">&#x3C;</span><span style="color:#E1E4E8"> count; i</span><span style="color:#F97583">++</span><span style="color:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">int</span><span style="color:#B392F0"> main</span><span style="color:#E1E4E8">() {</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Configure GPIO25 (onboard LED) as SIO-controlled output</p>
+
+              </div>
+            </div>
+          </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Enable output, disable pulls</p>
+
+              </div>
+            </div>
+          </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Set function to SIO</p>
+
+              </div>
+            </div>
+          </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Enable output on GPIO25</p>
+
+              </div>
+            </div>
+          </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>Blink LED forever</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">while</span><span style="color:#E1E4E8"> (</span><span style="color:#79B8FF">1</span><span style="color:#E1E4E8">) {</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>LED on</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#B392F0">delay</span><span style="color:#E1E4E8">(</span><span style="color:#79B8FF">1000000</span><span style="color:#E1E4E8">);</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>LED off</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#B392F0">delay</span><span style="color:#E1E4E8">(</span><span style="color:#79B8FF">1000000</span><span style="color:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#E1E4E8">    }</span></span>
+<span class="line"><span style="color:#E1E4E8">    </span></span>
+<span class="line"><span style="color:#F97583">    return</span><span style="color:#79B8FF"> 0</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">void</span><span style="color:#B392F0"> _start</span><span style="color:#E1E4E8">() {</span></span>
+<span class="line"><span style="color:#E1E4E8">  (</span><span style="color:#F97583">void</span><span style="color:#E1E4E8">) </span><span style="color:#B392F0">main</span><span style="color:#E1E4E8">();</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span></code></pre>
+              </div>
+            </div>
+    <div class="hidden lg:flex lg:flex-col w-full">
+      
+    <!-- File Header: linker.ld -->
+    <div class="bg-gray-100 border-b-2 border-gray-300 lg:flex w-full">
+      <div class="w-full lg:w-2/5 bg-gray-50 border-r border-gray-300">
+        <div class="p-6">
+          <h2 class="text-xl font-semibold text-gray-800 mb-2">
+            <svg class="inline-block w-4 h-4 mr-2 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path>
+            </svg>
+            linker.ld
+          </h2>
+        </div>
+      </div>
+      <div class="hidden lg:block w-3/5 bg-gray-100">
+        <div class="p-6">
+          <div class="h-full min-h-[3rem] flex items-center">
+            <span class="text-gray-500 text-sm italic">Source file</span>
+          </div>
+        </div>
+      </div>
+    </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <h1>rp2350 from scratch</h1>
+<p>This documentation is generated with <a href="https://github.com/upvalue/litsdoc">litsdoc</a></p>
+<p>It&#39;s largely derived from the <a href="https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf">RP2350 datasheet</a></p>
+<h1>Linker script</h1>
+<p>The first file is the <a href="https://mcyoung.xyz/2021/06/01/linker-script/">linker script</a> which describes the layout
+of our program in memory.</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <div class="h-full min-h-[4rem]"></div>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>The MEMORY statement controls how memory addresses are allocated within our program. In higher level programming, when
+we talk about memory, we talk about it as though it&#39;s one contiguous area that lives in RAM.</p>
+<p>On this system (and in other low-level contexts), addresses in memory can have special meanings which are handled at the layers
+beneath us. For example, we might load from a memory address and instead of reading from the system&#39;s (relatively low) RAM it
+might be read from the much larger flash memory. The system handles this transparently for us, but it&#39;s up to us to make sure we
+use the right addresses and use supported operations with those addresses.</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>MEMORY {</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>The flash memory is where our program lives; in the datasheet it&#39;s called XIP (executable in place) and exposed at the 
+memory address 0x1000000.</p>
+<p>Both of the values come from <a href="https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf#page=31">pg 30</a> of the datasheet</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>FLASH (rx) : ORIGIN = 0x10000000, LENGTH = 2048K</span></span>
+<span class="line"><span>  RAM (rwx)  : ORIGIN = 0x20000000, LENGTH = 512K</span></span>
+<span class="line"><span>}</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>ENTRY(_start)</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>SECTIONS {</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Boot2 stage - first 256 bytes of flash</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.boot2 : {</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Boot2 must be exactly 256 bytes</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>} > FLASH</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Vector table and code</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.text : {</span></span>
+<span class="line"><span>      KEEP(*(.vector_table))</span></span>
+<span class="line"><span>      *(.text*)</span></span>
+<span class="line"><span>      *(.rodata*)</span></span>
+<span class="line"><span>      . = ALIGN(4);</span></span>
+<span class="line"><span>  } > FLASH</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Initialized data</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.data : {</span></span>
+<span class="line"><span>      _data_start = .;</span></span>
+<span class="line"><span>      *(.data*)</span></span>
+<span class="line"><span>      . = ALIGN(4);</span></span>
+<span class="line"><span>      _data_end = .;</span></span>
+<span class="line"><span>  } > RAM AT > FLASH</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>  _data_load_start = LOADADDR(.data);</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Uninitialized data</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.bss : {</span></span>
+<span class="line"><span>      _bss_start = .;</span></span>
+<span class="line"><span>      *(.bss*)</span></span>
+<span class="line"><span>      *(COMMON)</span></span>
+<span class="line"><span>      . = ALIGN(4);</span></span>
+<span class="line"><span>      _bss_end = .;</span></span>
+<span class="line"><span>  } > RAM</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Stack pointer - end of RAM. Stack grows downwards</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>_stack_top = ORIGIN(RAM) + LENGTH(RAM);</span></span>
+<span class="line"><span>}</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+    <!-- File Header: pico.c -->
+    <div class="bg-gray-100 border-b-2 border-gray-300 lg:flex w-full">
+      <div class="w-full lg:w-2/5 bg-gray-50 border-r border-gray-300">
+        <div class="p-6">
+          <h2 class="text-xl font-semibold text-gray-800 mb-2">
+            <svg class="inline-block w-4 h-4 mr-2 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path>
+            </svg>
+            pico.c
+          </h2>
+        </div>
+      </div>
+      <div class="hidden lg:block w-3/5 bg-gray-100">
+        <div class="p-6">
+          <div class="h-full min-h-[3rem] flex items-center">
+            <span class="text-gray-500 text-sm italic">Source file</span>
+          </div>
+        </div>
+      </div>
+    </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>pico.h
+a standalone and two file setup for interacting with the RP2350 system
+derived from the <a href="https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf">datasheet</a>
+mainly a learning exercise</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#ifndef</span><span style="color:#B392F0"> _PICO_H</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> _PICO_H</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>APB registers. section 2.2.4, pg 31</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> IO_BANK0_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">40028000</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> IO_QSPI_BASE</span><span style="color:#F97583">  0x</span><span style="color:#79B8FF">40030000</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Bootrom codes. section 5.4.3, pg 378</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <div class="h-full min-h-[4rem]"></div>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Success codes</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_OK</span><span style="color:#79B8FF">                              0</span><span style="color:#6A737D">    // The function executed successfully</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>General error codes</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_NOT_PERMITTED</span><span style="color:#F97583">            -</span><span style="color:#79B8FF">4</span><span style="color:#6A737D">    // The operation was disallowed by a security constraint</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_INVALID_ARG</span><span style="color:#F97583">              -</span><span style="color:#79B8FF">5</span><span style="color:#6A737D">    // One or more parameters passed to the function is outside the range of supported values</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Address and alignment errors</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_INVALID_ADDRESS</span><span style="color:#F97583">         -</span><span style="color:#79B8FF">10</span><span style="color:#6A737D">    // An address argument was out-of-bounds or was determined to be an address that the caller may not access</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_BAD_ALIGNMENT</span><span style="color:#F97583">           -</span><span style="color:#79B8FF">11</span><span style="color:#6A737D">    // An address passed to the function was not correctly aligned</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>State and buffer errors</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_INVALID_STATE</span><span style="color:#F97583">           -</span><span style="color:#79B8FF">12</span><span style="color:#6A737D">    // Something happened or failed to happen in the past, and consequently the request cannot currently be serviced</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_BUFFER_TOO_SMALL</span><span style="color:#F97583">        -</span><span style="color:#79B8FF">13</span><span style="color:#6A737D">    // A user-allocated buffer was too small to hold the result or working state of the function</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_PRECONDITION_NOT_MET</span><span style="color:#F97583">    -</span><span style="color:#79B8FF">14</span><span style="color:#6A737D">    // The call failed because another bootrom function must be called first</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Data errors</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_MODIFIED_DATA</span><span style="color:#F97583">           -</span><span style="color:#79B8FF">15</span><span style="color:#6A737D">    // Cached data was determined to be inconsistent with the full version of the data it was copied from</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_INVALID_DATA</span><span style="color:#F97583">            -</span><span style="color:#79B8FF">16</span><span style="color:#6A737D">    // The contents of a data structure are invalid</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_NOT_FOUND</span><span style="color:#F97583">               -</span><span style="color:#79B8FF">17</span><span style="color:#6A737D">    // An attempt was made to access something that does not exist; or, a search failed</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Modification and lock errors</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_UNSUPPORTED_MODIFICATION</span><span style="color:#F97583"> -</span><span style="color:#79B8FF">18</span><span style="color:#6A737D">   // Modification is impossible based on current state. This might occur, for example, when attempting to clear an OTP bit</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_LOCK_REQUIRED</span><span style="color:#F97583">           -</span><span style="color:#79B8FF">19</span><span style="color:#6A737D">    // A required lock is not owned</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#FDAEB7;font-style:italic">#endif</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+    <!-- File Header: blink.c -->
+    <div class="bg-gray-100 border-b-2 border-gray-300 lg:flex w-full">
+      <div class="w-full lg:w-2/5 bg-gray-50 border-r border-gray-300">
+        <div class="p-6">
+          <h2 class="text-xl font-semibold text-gray-800 mb-2">
+            <svg class="inline-block w-4 h-4 mr-2 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path>
+            </svg>
+            blink.c
+          </h2>
+        </div>
+      </div>
+      <div class="hidden lg:block w-3/5 bg-gray-100">
+        <div class="p-6">
+          <div class="h-full min-h-[3rem] flex items-center">
+            <span class="text-gray-500 text-sm italic">Source file</span>
+          </div>
+        </div>
+      </div>
+    </div>
+          <div class="hidden lg:flex w-full">
+            <div class="w-2/5 bg-white border-r border-gray-200">
+              <div class="p-6">
+                <div class="h-full min-h-[4rem]"></div>
+              </div>
+            </div>
+            <div class="w-3/5 bg-gray-900">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#include</span><span style="color:#9ECBFF"> "pico.h"</span></span></code></pre>
+              </div>
+            </div>
+          </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Minimal RP2350 program without SDK</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <div class="h-full min-h-[4rem]"></div>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Memory-mapped register addresses</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> IO_BANK0_BASE</span><span style="color:#E1E4E8"> </span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> PADS_BANK0_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">4001c000</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> SIO_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">d0000000</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>GPIO registers (simplified)</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> GPIO_CTRL_FUNCSEL_SIO</span><span style="color:#79B8FF"> 5</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> GPIO25_CTRL</span><span style="color:#E1E4E8"> (</span><span style="color:#F97583">*</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">volatile</span><span style="color:#F97583"> unsigned</span><span style="color:#F97583"> int*</span><span style="color:#E1E4E8">)(IO_BANK0_BASE </span><span style="color:#F97583">+</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">0cc</span><span style="color:#E1E4E8">))</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> GPIO25_PAD</span><span style="color:#E1E4E8"> (</span><span style="color:#F97583">*</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">volatile</span><span style="color:#F97583"> unsigned</span><span style="color:#F97583"> int*</span><span style="color:#E1E4E8">)(PADS_BANK0_BASE </span><span style="color:#F97583">+</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">68</span><span style="color:#E1E4E8">))</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>SIO registers for GPIO output</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> SIO_GPIO_OE</span><span style="color:#E1E4E8"> (</span><span style="color:#F97583">*</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">volatile</span><span style="color:#F97583"> unsigned</span><span style="color:#F97583"> int*</span><span style="color:#E1E4E8">)(SIO_BASE </span><span style="color:#F97583">+</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">020</span><span style="color:#E1E4E8">))</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> SIO_GPIO_OUT</span><span style="color:#E1E4E8"> (</span><span style="color:#F97583">*</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">volatile</span><span style="color:#F97583"> unsigned</span><span style="color:#F97583"> int*</span><span style="color:#E1E4E8">)(SIO_BASE </span><span style="color:#F97583">+</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">010</span><span style="color:#E1E4E8">))</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">void</span><span style="color:#B392F0"> delay</span><span style="color:#E1E4E8">(</span><span style="color:#F97583">unsigned</span><span style="color:#F97583"> int</span><span style="color:#FFAB70"> count</span><span style="color:#E1E4E8">) {</span></span>
+<span class="line"><span style="color:#F97583">    for</span><span style="color:#E1E4E8"> (</span><span style="color:#F97583">volatile</span><span style="color:#F97583"> unsigned</span><span style="color:#F97583"> int</span><span style="color:#E1E4E8"> i </span><span style="color:#F97583">=</span><span style="color:#79B8FF"> 0</span><span style="color:#E1E4E8">; i </span><span style="color:#F97583">&#x3C;</span><span style="color:#E1E4E8"> count; i</span><span style="color:#F97583">++</span><span style="color:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">int</span><span style="color:#B392F0"> main</span><span style="color:#E1E4E8">() {</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Configure GPIO25 (onboard LED) as SIO-controlled output</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <div class="h-full min-h-[4rem]"></div>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Enable output, disable pulls</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <div class="h-full min-h-[4rem]"></div>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Set function to SIO</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <div class="h-full min-h-[4rem]"></div>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Enable output on GPIO25</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <div class="h-full min-h-[4rem]"></div>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>Blink LED forever</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">while</span><span style="color:#E1E4E8"> (</span><span style="color:#79B8FF">1</span><span style="color:#E1E4E8">) {</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>LED on</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#B392F0">delay</span><span style="color:#E1E4E8">(</span><span style="color:#79B8FF">1000000</span><span style="color:#E1E4E8">);</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>LED off</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#B392F0">delay</span><span style="color:#E1E4E8">(</span><span style="color:#79B8FF">1000000</span><span style="color:#E1E4E8">);</span></span>
+<span class="line"><span style="color:#E1E4E8">    }</span></span>
+<span class="line"><span style="color:#E1E4E8">    </span></span>
+<span class="line"><span style="color:#F97583">    return</span><span style="color:#79B8FF"> 0</span><span style="color:#E1E4E8">;</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">void</span><span style="color:#B392F0"> _start</span><span style="color:#E1E4E8">() {</span></span>
+<span class="line"><span style="color:#E1E4E8">  (</span><span style="color:#F97583">void</span><span style="color:#E1E4E8">) </span><span style="color:#B392F0">main</span><span style="color:#E1E4E8">();</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+    </div>
+    </main>
+  </div>
+</body>
+</html>

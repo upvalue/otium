@@ -1,7 +1,7 @@
 # rp2350-scratch
 
-RP2350 bare metal demo -- this is largely derived from the
-[rp-hal](https://github.com/rp-rs/rp-hal) repository.
+RP2350 bare metal demo -- this is largely derived from the [rp-hal](https://github.com/rp-rs/rp-hal)
+repository.
 
 For running, Rust setup:
 
@@ -21,3 +21,11 @@ works on OSX
 Then to build and flash
 
 > picotool load -u -v -x -t elf target/thumbv8m.main-none-eabihf/debug/rp2350-scratch
+
+Shortcuts are available in the Justfile with just
+
+> just flash
+
+> just console
+
+To open the usb console

@@ -1,0 +1,4 @@
+linker.ld pico.c blink.c
+--title "RP2350 C from Scratch"
+--description "How to use RP2350 without any SDK or library code"
+-o pico.html

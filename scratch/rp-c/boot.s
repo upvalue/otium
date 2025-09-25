@@ -19,7 +19,7 @@
  * to set the stack pointer.
  */ 
 .word stack_start
-.word main
+.word start
 
 /* 
  * Now we have an IMAGE_DEF or image definition. As far as I can tell, this is found by scanning

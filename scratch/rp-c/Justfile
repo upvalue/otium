@@ -1,7 +1,7 @@
 # Uses [litsdoc](https://github.com/upvalue/litsdoc) with an alias to generate the HTML
 # documentation
 doc:
-  ,litdocs
+  ,litsdoc --argfile cfg/litsdoc.argfile
 
 build:
   ./build.sh
@@ -10,5 +10,9 @@ build:
 debug-server:
   openocd -f interface/cmsis-dap.cfg -f target/rp2350.cfg
 
+debug: 
+  gdb -x cfg/gdb.init
+
 flash:
-  picotool load -u -v -x -t elf ./blink.elf
+  picotool load -u -v -x -t elf ./obj/main.elf
+

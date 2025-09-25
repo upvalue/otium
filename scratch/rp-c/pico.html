@@ -138,8 +138,10 @@
 <p>This documentation is generated with <a href="https://github.com/upvalue/litsdoc">litsdoc</a></p>
 <p>It&#39;s largely derived from the <a href="https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf">RP2350 datasheet</a></p>
 <h1>Linker script</h1>
-<p>The first file is the <a href="https://mcyoung.xyz/2021/06/01/linker-script/">linker script</a> which describes the layout
-of our program in memory.</p>
+<p>The first file is the linker script which describes the layout
+of our program in memory. <a href="https://mcyoung.xyz/2021/06/01/linker-script/">Everything you never wanted to know about linker script</a> was very helpful
+and good to consult directly. The linker script will actually be used at the very end of the compilation process, once our code has been
+compiled to ARM binary code.</p>
 
               </div>
             </div>
@@ -152,7 +154,10 @@ we talk about memory, we talk about it as though it&#39;s one contiguous area th
 <p>On this system (and in other low-level contexts), addresses in memory can have special meanings which are handled at the layers
 beneath us. For example, we might load from a memory address and instead of reading from the system&#39;s (relatively low) RAM it
 might be read from the much larger flash memory. The system handles this transparently for us, but it&#39;s up to us to make sure we
-use the right addresses and use supported operations with those addresses.</p>
+use the right addresses and use supported operations with those addresses (some memory for example can&#39;t contain executable code).</p>
+<p>Magic memory addresses and registers are also how we interact with system processes, setting up functionality like the GPIO pins
+or PSRAM. At the point we&#39;re starting at, there is no code defined to handle stuff like this, though it&#39;d normally be handled
+by the SDK or hardware abstraction layer in a higher level program.</p>
 
               </div>
             </div>
@@ -167,116 +172,99 @@ use the right addresses and use supported operations with those addresses.</p>
               <div class="prose">
                 <p>The flash memory is where our program lives; in the datasheet it&#39;s called XIP (executable in place) and exposed at the 
 memory address 0x1000000.</p>
-<p>Both of the values come from <a href="https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf#page=31">pg 30</a> of the datasheet</p>
+<p>Notice that we also define whether the memory can be (r)ead, e(x)ecuted or (w)ritten to</p>
 
               </div>
             </div>
           </div>
             <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
               <div class="p-6">
-                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>FLASH (rx) : ORIGIN = 0x10000000, LENGTH = 2048K</span></span>
-<span class="line"><span>  RAM (rwx)  : ORIGIN = 0x20000000, LENGTH = 512K</span></span>
-<span class="line"><span>}</span></span>
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>FLASH(rx): ORIGIN = 0x10000000, LENGTH = 2M</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>The RP2350 has 520kb of SRAM which we use for the program stack and a few other things.
+Both of the memory addresses here come from <a href="https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf#page=31">pg 30</a> of the datasheet</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>SRAM(rwx): ORIGIN = 0x20000000, LENGTH = 512K</span></span>
+<span class="line"><span>}</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>The second portion of our linker script is SECTIONS; a section is a named block of data.
+The actual data of these sections will be supplied either by us or the C compiler later, 
+but this tells the linker how to lay them out when linking.</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>SECTIONS {</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>The init section is the very beginning of our program. For us, it just contains
+a few magical constants that will be explained later.</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.init :{</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>. is the &quot;current location counter&quot;. What we&#39;re doing here is aligning it to a 4-byte boundary.</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>. = ALIGN(4);</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>This basically says &quot;take the .init section from the object files and place it here&quot;</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>*(.init);</span></span></code></pre>
+              </div>
+            </div>
+          <div class="bg-white border-b border-gray-200 lg:hidden">
+            <div class="p-6">
+              <div class="prose">
+                <p>And then whatever comes after this should also be 4-byte aligned</p>
+
+              </div>
+            </div>
+          </div>
+            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
+              <div class="p-6">
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>. = ALIGN(4);</span></span>
+<span class="line"><span>  } >FLASH</span></span>
 <span class="line"><span></span></span>
-<span class="line"><span>ENTRY(_start)</span></span>
-<span class="line"><span></span></span>
-<span class="line"><span>SECTIONS {</span></span></code></pre>
-              </div>
-            </div>
-          <div class="bg-white border-b border-gray-200 lg:hidden">
-            <div class="p-6">
-              <div class="prose">
-                <p>Boot2 stage - first 256 bytes of flash</p>
-
-              </div>
-            </div>
-          </div>
-            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
-              <div class="p-6">
-                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.boot2 : {</span></span></code></pre>
-              </div>
-            </div>
-          <div class="bg-white border-b border-gray-200 lg:hidden">
-            <div class="p-6">
-              <div class="prose">
-                <p>Boot2 must be exactly 256 bytes</p>
-
-              </div>
-            </div>
-          </div>
-            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
-              <div class="p-6">
-                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>} > FLASH</span></span></code></pre>
-              </div>
-            </div>
-          <div class="bg-white border-b border-gray-200 lg:hidden">
-            <div class="p-6">
-              <div class="prose">
-                <p>Vector table and code</p>
-
-              </div>
-            </div>
-          </div>
-            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
-              <div class="p-6">
-                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.text : {</span></span>
-<span class="line"><span>      KEEP(*(.vector_table))</span></span>
-<span class="line"><span>      *(.text*)</span></span>
-<span class="line"><span>      *(.rodata*)</span></span>
-<span class="line"><span>      . = ALIGN(4);</span></span>
-<span class="line"><span>  } > FLASH</span></span></code></pre>
-              </div>
-            </div>
-          <div class="bg-white border-b border-gray-200 lg:hidden">
-            <div class="p-6">
-              <div class="prose">
-                <p>Initialized data</p>
-
-              </div>
-            </div>
-          </div>
-            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
-              <div class="p-6">
-                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.data : {</span></span>
-<span class="line"><span>      _data_start = .;</span></span>
-<span class="line"><span>      *(.data*)</span></span>
-<span class="line"><span>      . = ALIGN(4);</span></span>
-<span class="line"><span>      _data_end = .;</span></span>
-<span class="line"><span>  } > RAM AT > FLASH</span></span>
-<span class="line"><span></span></span>
-<span class="line"><span>  _data_load_start = LOADADDR(.data);</span></span></code></pre>
-              </div>
-            </div>
-          <div class="bg-white border-b border-gray-200 lg:hidden">
-            <div class="p-6">
-              <div class="prose">
-                <p>Uninitialized data</p>
-
-              </div>
-            </div>
-          </div>
-            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
-              <div class="p-6">
-                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.bss : {</span></span>
-<span class="line"><span>      _bss_start = .;</span></span>
-<span class="line"><span>      *(.bss*)</span></span>
-<span class="line"><span>      *(COMMON)</span></span>
-<span class="line"><span>      . = ALIGN(4);</span></span>
-<span class="line"><span>      _bss_end = .;</span></span>
-<span class="line"><span>  } > RAM</span></span></code></pre>
-              </div>
-            </div>
-          <div class="bg-white border-b border-gray-200 lg:hidden">
-            <div class="p-6">
-              <div class="prose">
-                <p>Stack pointer - end of RAM. Stack grows downwards</p>
-
-              </div>
-            </div>
-          </div>
-            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
-              <div class="p-6">
-                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>_stack_top = ORIGIN(RAM) + LENGTH(RAM);</span></span>
 <span class="line"><span>}</span></span></code></pre>
               </div>
             </div>
@@ -303,20 +291,11 @@ memory address 0x1000000.</p>
           <div class="bg-white border-b border-gray-200 lg:hidden">
             <div class="p-6">
               <div class="prose">
-                <p>pico.h
-a standalone and two file setup for interacting with the RP2350 system
-derived from the <a href="https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf">datasheet</a>
-mainly a learning exercise</p>
+                <p>This is a one file implementation of some of the Pico SDK / datasheet functionality</p>
 
               </div>
             </div>
           </div>
-            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
-              <div class="p-6">
-                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#ifndef</span><span style="color:#B392F0"> _PICO_H</span></span>
-<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> _PICO_H</span></span></code></pre>
-              </div>
-            </div>
           <div class="bg-white border-b border-gray-200 lg:hidden">
             <div class="p-6">
               <div class="prose">
@@ -423,7 +402,9 @@ mainly a learning exercise</p>
                 <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_UNSUPPORTED_MODIFICATION</span><span style="color:#F97583"> -</span><span style="color:#79B8FF">18</span><span style="color:#6A737D">   // Modification is impossible based on current state. This might occur, for example, when attempting to clear an OTP bit</span></span>
 <span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_LOCK_REQUIRED</span><span style="color:#F97583">           -</span><span style="color:#79B8FF">19</span><span style="color:#6A737D">    // A required lock is not owned</span></span>
 <span class="line"></span>
-<span class="line"><span style="color:#FDAEB7;font-style:italic">#endif</span></span></code></pre>
+<span class="line"><span style="color:#F97583">#ifdef</span><span style="color:#B392F0"> PICO_IMPL</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">#endif</span></span></code></pre>
               </div>
             </div>
     <!-- File Header: blink.c -->
@@ -448,32 +429,13 @@ mainly a learning exercise</p>
     </div>
           <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
             <div class="p-6">
-              <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#include</span><span style="color:#9ECBFF"> "pico.h"</span></span></code></pre>
-            </div>
-          </div>
-          <div class="bg-white border-b border-gray-200 lg:hidden">
-            <div class="p-6">
-              <div class="prose">
-                <p>Minimal RP2350 program without SDK</p>
-
-              </div>
-            </div>
-          </div>
-          <div class="bg-white border-b border-gray-200 lg:hidden">
-            <div class="p-6">
-              <div class="prose">
-                <p>Memory-mapped register addresses</p>
-
-              </div>
-            </div>
-          </div>
-            <div class="bg-gray-900 border-b border-gray-200 lg:hidden">
-              <div class="p-6">
-                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> IO_BANK0_BASE</span><span style="color:#E1E4E8"> </span></span>
-<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> PADS_BANK0_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">4001c000</span></span>
+              <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#include</span><span style="color:#9ECBFF"> "pico.c"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> IO_BANK0_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">40028000</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> PADS_BANK0_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">40038000</span></span>
 <span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> SIO_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">d0000000</span></span></code></pre>
-              </div>
             </div>
+          </div>
           <div class="bg-white border-b border-gray-200 lg:hidden">
             <div class="p-6">
               <div class="prose">
@@ -618,8 +580,10 @@ mainly a learning exercise</p>
 <p>This documentation is generated with <a href="https://github.com/upvalue/litsdoc">litsdoc</a></p>
 <p>It&#39;s largely derived from the <a href="https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf">RP2350 datasheet</a></p>
 <h1>Linker script</h1>
-<p>The first file is the <a href="https://mcyoung.xyz/2021/06/01/linker-script/">linker script</a> which describes the layout
-of our program in memory.</p>
+<p>The first file is the linker script which describes the layout
+of our program in memory. <a href="https://mcyoung.xyz/2021/06/01/linker-script/">Everything you never wanted to know about linker script</a> was very helpful
+and good to consult directly. The linker script will actually be used at the very end of the compilation process, once our code has been
+compiled to ARM binary code.</p>
 
                   </div>
                 </div>
@@ -639,7 +603,10 @@ we talk about memory, we talk about it as though it&#39;s one contiguous area th
 <p>On this system (and in other low-level contexts), addresses in memory can have special meanings which are handled at the layers
 beneath us. For example, we might load from a memory address and instead of reading from the system&#39;s (relatively low) RAM it
 might be read from the much larger flash memory. The system handles this transparently for us, but it&#39;s up to us to make sure we
-use the right addresses and use supported operations with those addresses.</p>
+use the right addresses and use supported operations with those addresses (some memory for example can&#39;t contain executable code).</p>
+<p>Magic memory addresses and registers are also how we interact with system processes, setting up functionality like the GPIO pins
+or PSRAM. At the point we&#39;re starting at, there is no code defined to handle stuff like this, though it&#39;d normally be handled
+by the SDK or hardware abstraction layer in a higher level program.</p>
 
                   </div>
                 </div>
@@ -656,128 +623,111 @@ use the right addresses and use supported operations with those addresses.</p>
                   <div class="prose">
                     <p>The flash memory is where our program lives; in the datasheet it&#39;s called XIP (executable in place) and exposed at the 
 memory address 0x1000000.</p>
-<p>Both of the values come from <a href="https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf#page=31">pg 30</a> of the datasheet</p>
+<p>Notice that we also define whether the memory can be (r)ead, e(x)ecuted or (w)ritten to</p>
 
                   </div>
                 </div>
               </div>
               <div class="w-3/5 bg-gray-900">
                 <div class="p-6">
-                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>FLASH (rx) : ORIGIN = 0x10000000, LENGTH = 2048K</span></span>
-<span class="line"><span>  RAM (rwx)  : ORIGIN = 0x20000000, LENGTH = 512K</span></span>
-<span class="line"><span>}</span></span>
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>FLASH(rx): ORIGIN = 0x10000000, LENGTH = 2M</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>The RP2350 has 520kb of SRAM which we use for the program stack and a few other things.
+Both of the memory addresses here come from <a href="https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf#page=31">pg 30</a> of the datasheet</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>SRAM(rwx): ORIGIN = 0x20000000, LENGTH = 512K</span></span>
+<span class="line"><span>}</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>The second portion of our linker script is SECTIONS; a section is a named block of data.
+The actual data of these sections will be supplied either by us or the C compiler later, 
+but this tells the linker how to lay them out when linking.</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>SECTIONS {</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>The init section is the very beginning of our program. For us, it just contains
+a few magical constants that will be explained later.</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.init :{</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>. is the &quot;current location counter&quot;. What we&#39;re doing here is aligning it to a 4-byte boundary.</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>. = ALIGN(4);</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>This basically says &quot;take the .init section from the object files and place it here&quot;</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>*(.init);</span></span></code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="hidden lg:flex w-full">
+              <div class="w-2/5 bg-white border-r border-gray-200">
+                <div class="p-6">
+                  <div class="prose">
+                    <p>And then whatever comes after this should also be 4-byte aligned</p>
+
+                  </div>
+                </div>
+              </div>
+              <div class="w-3/5 bg-gray-900">
+                <div class="p-6">
+                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>. = ALIGN(4);</span></span>
+<span class="line"><span>  } >FLASH</span></span>
 <span class="line"><span></span></span>
-<span class="line"><span>ENTRY(_start)</span></span>
-<span class="line"><span></span></span>
-<span class="line"><span>SECTIONS {</span></span></code></pre>
-                </div>
-              </div>
-            </div>
-            <div class="hidden lg:flex w-full">
-              <div class="w-2/5 bg-white border-r border-gray-200">
-                <div class="p-6">
-                  <div class="prose">
-                    <p>Boot2 stage - first 256 bytes of flash</p>
-
-                  </div>
-                </div>
-              </div>
-              <div class="w-3/5 bg-gray-900">
-                <div class="p-6">
-                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.boot2 : {</span></span></code></pre>
-                </div>
-              </div>
-            </div>
-            <div class="hidden lg:flex w-full">
-              <div class="w-2/5 bg-white border-r border-gray-200">
-                <div class="p-6">
-                  <div class="prose">
-                    <p>Boot2 must be exactly 256 bytes</p>
-
-                  </div>
-                </div>
-              </div>
-              <div class="w-3/5 bg-gray-900">
-                <div class="p-6">
-                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>} > FLASH</span></span></code></pre>
-                </div>
-              </div>
-            </div>
-            <div class="hidden lg:flex w-full">
-              <div class="w-2/5 bg-white border-r border-gray-200">
-                <div class="p-6">
-                  <div class="prose">
-                    <p>Vector table and code</p>
-
-                  </div>
-                </div>
-              </div>
-              <div class="w-3/5 bg-gray-900">
-                <div class="p-6">
-                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.text : {</span></span>
-<span class="line"><span>      KEEP(*(.vector_table))</span></span>
-<span class="line"><span>      *(.text*)</span></span>
-<span class="line"><span>      *(.rodata*)</span></span>
-<span class="line"><span>      . = ALIGN(4);</span></span>
-<span class="line"><span>  } > FLASH</span></span></code></pre>
-                </div>
-              </div>
-            </div>
-            <div class="hidden lg:flex w-full">
-              <div class="w-2/5 bg-white border-r border-gray-200">
-                <div class="p-6">
-                  <div class="prose">
-                    <p>Initialized data</p>
-
-                  </div>
-                </div>
-              </div>
-              <div class="w-3/5 bg-gray-900">
-                <div class="p-6">
-                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.data : {</span></span>
-<span class="line"><span>      _data_start = .;</span></span>
-<span class="line"><span>      *(.data*)</span></span>
-<span class="line"><span>      . = ALIGN(4);</span></span>
-<span class="line"><span>      _data_end = .;</span></span>
-<span class="line"><span>  } > RAM AT > FLASH</span></span>
-<span class="line"><span></span></span>
-<span class="line"><span>  _data_load_start = LOADADDR(.data);</span></span></code></pre>
-                </div>
-              </div>
-            </div>
-            <div class="hidden lg:flex w-full">
-              <div class="w-2/5 bg-white border-r border-gray-200">
-                <div class="p-6">
-                  <div class="prose">
-                    <p>Uninitialized data</p>
-
-                  </div>
-                </div>
-              </div>
-              <div class="w-3/5 bg-gray-900">
-                <div class="p-6">
-                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>.bss : {</span></span>
-<span class="line"><span>      _bss_start = .;</span></span>
-<span class="line"><span>      *(.bss*)</span></span>
-<span class="line"><span>      *(COMMON)</span></span>
-<span class="line"><span>      . = ALIGN(4);</span></span>
-<span class="line"><span>      _bss_end = .;</span></span>
-<span class="line"><span>  } > RAM</span></span></code></pre>
-                </div>
-              </div>
-            </div>
-            <div class="hidden lg:flex w-full">
-              <div class="w-2/5 bg-white border-r border-gray-200">
-                <div class="p-6">
-                  <div class="prose">
-                    <p>Stack pointer - end of RAM. Stack grows downwards</p>
-
-                  </div>
-                </div>
-              </div>
-              <div class="w-3/5 bg-gray-900">
-                <div class="p-6">
-                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span>_stack_top = ORIGIN(RAM) + LENGTH(RAM);</span></span>
 <span class="line"><span>}</span></span></code></pre>
                 </div>
               </div>
@@ -806,18 +756,14 @@ memory address 0x1000000.</p>
               <div class="w-2/5 bg-white border-r border-gray-200">
                 <div class="p-6">
                   <div class="prose">
-                    <p>pico.h
-a standalone and two file setup for interacting with the RP2350 system
-derived from the <a href="https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf">datasheet</a>
-mainly a learning exercise</p>
+                    <p>This is a one file implementation of some of the Pico SDK / datasheet functionality</p>
 
                   </div>
                 </div>
               </div>
               <div class="w-3/5 bg-gray-900">
                 <div class="p-6">
-                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#ifndef</span><span style="color:#B392F0"> _PICO_H</span></span>
-<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> _PICO_H</span></span></code></pre>
+                  <div class="h-full min-h-[4rem]"></div>
                 </div>
               </div>
             </div>
@@ -947,7 +893,9 @@ mainly a learning exercise</p>
                   <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_UNSUPPORTED_MODIFICATION</span><span style="color:#F97583"> -</span><span style="color:#79B8FF">18</span><span style="color:#6A737D">   // Modification is impossible based on current state. This might occur, for example, when attempting to clear an OTP bit</span></span>
 <span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> BOOTROM_ERROR_LOCK_REQUIRED</span><span style="color:#F97583">           -</span><span style="color:#79B8FF">19</span><span style="color:#6A737D">    // A required lock is not owned</span></span>
 <span class="line"></span>
-<span class="line"><span style="color:#FDAEB7;font-style:italic">#endif</span></span></code></pre>
+<span class="line"><span style="color:#F97583">#ifdef</span><span style="color:#B392F0"> PICO_IMPL</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">#endif</span></span></code></pre>
                 </div>
               </div>
             </div>
@@ -979,42 +927,14 @@ mainly a learning exercise</p>
             </div>
             <div class="w-3/5 bg-gray-900">
               <div class="p-6">
-                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#include</span><span style="color:#9ECBFF"> "pico.h"</span></span></code></pre>
+                <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#include</span><span style="color:#9ECBFF"> "pico.c"</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> IO_BANK0_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">40028000</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> PADS_BANK0_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">40038000</span></span>
+<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> SIO_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">d0000000</span></span></code></pre>
               </div>
             </div>
           </div>
-            <div class="hidden lg:flex w-full">
-              <div class="w-2/5 bg-white border-r border-gray-200">
-                <div class="p-6">
-                  <div class="prose">
-                    <p>Minimal RP2350 program without SDK</p>
-
-                  </div>
-                </div>
-              </div>
-              <div class="w-3/5 bg-gray-900">
-                <div class="p-6">
-                  <div class="h-full min-h-[4rem]"></div>
-                </div>
-              </div>
-            </div>
-            <div class="hidden lg:flex w-full">
-              <div class="w-2/5 bg-white border-r border-gray-200">
-                <div class="p-6">
-                  <div class="prose">
-                    <p>Memory-mapped register addresses</p>
-
-                  </div>
-                </div>
-              </div>
-              <div class="w-3/5 bg-gray-900">
-                <div class="p-6">
-                  <pre class="text-sm leading-relaxed overflow-x-auto text-white" style="background-color: transparent; padding: 0; margin: 0;" tabindex="0"><code style="background-color: transparent;"><span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> IO_BANK0_BASE</span><span style="color:#E1E4E8"> </span></span>
-<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> PADS_BANK0_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">4001c000</span></span>
-<span class="line"><span style="color:#F97583">#define</span><span style="color:#B392F0"> SIO_BASE</span><span style="color:#F97583"> 0x</span><span style="color:#79B8FF">d0000000</span></span></code></pre>
-                </div>
-              </div>
-            </div>
             <div class="hidden lg:flex w-full">
               <div class="w-2/5 bg-white border-r border-gray-200">
                 <div class="p-6">

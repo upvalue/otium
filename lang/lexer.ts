@@ -29,7 +29,7 @@ export const TOKEN_TYPES = {
   OP_NEQ: "OP_NEQ",
   OP_MUL: "OP_MUL",
   OP_DIV: "OP_DIV",
-  OP_ASSIGN: "OP_ASSIGN",
+  OP_DEFINE: "OP_DEFINE",
 } as const;
 
 export type TokenType = (typeof TOKEN_TYPES)[keyof typeof TOKEN_TYPES];
@@ -403,7 +403,7 @@ export class Lexer {
         if (this.peek() == "=") {
           this.advance();
           return {
-            type: "OP_ASSIGN",
+            type: "OP_DEFINE",
             begin,
             end: this.position,
             value: ":=",

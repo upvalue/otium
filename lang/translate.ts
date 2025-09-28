@@ -322,28 +322,39 @@ class Translator {
   }
 }
 
+export function translateString(content: string, filename?: string): string {
+  const lexer = new Lexer(content, filename);
+  const parser = new Parser(lexer);
+  const translator = new Translator();
+
+  let exp: OtExpr;
+  let accum = PRELUDE;
+  while (true) {
+    [, exp] = parser.nextExpr();
+
+    if (exp == EofValue) {
+      break;
+    }
+
+    accum += translator.compileToplevel(exp);
+  }
+
+  return accum;
+}
+
+export async function translateFile(filename: string): Promise<string> {
+  const fs = await import("fs");
+  const content = fs.readFileSync(filename, "utf8");
+  return translateString(content, filename);
+}
+
 import { runWithFile } from "./support";
 
 if (import.meta.main) {
   runWithFile(async (content, filename) => {
-    const lexer = new Lexer(content, filename);
-    const parser = new Parser(lexer);
-    const translator = new Translator();
-
-    let exp: OtExpr;
-    let accum = PRELUDE;
-    while (true) {
-      [, exp] = parser.nextExpr();
-
-      if (exp == EofValue) {
-        break;
-      }
-
-      accum += translator.compileToplevel(exp);
-    }
-
+    const jsCode = translateString(content, filename);
     console.log(
-      await format(accum, {
+      await format(jsCode, {
         parser: "babel",
       })
     );

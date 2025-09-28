@@ -1,7 +1,0 @@
-{
-    "rust-analyzer.cargo.features": "all",
-    "rust-analyzer.checkOnSave.allTargets": false,
-    "rust-analyzer.diagnostics.disabled": [
-        "unresolved-extern-crate"
-    ]
-}

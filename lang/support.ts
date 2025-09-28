@@ -18,9 +18,11 @@ export function runWithFile(
       callback(content, filename!);
     } catch (error) {
       console.error(`Error while operating on file: ${error}`);
+      throw error;
     }
   } catch (error) {
     console.error(`Error reading file: ${error}`);
+    throw error;
     process.exit(1);
   }
 }

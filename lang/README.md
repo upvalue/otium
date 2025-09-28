@@ -10,9 +10,19 @@ and is still changing a lot.
 
 > bun lexer.ts scratch.ot
 
+Lexes a whole file and prints out tokens.
+
 > bun parser.ts scratch.ot
 
+Parses a whole file and prints out an internal representation of expressions.
+
 > bun translate.ts scratch.ot
+
+Translates the file to JavaScript.
+
+> bun eval.ts scratch.ot
+
+Evaluates the file 
 
 to run the lexer, parser or translator on an example file
 

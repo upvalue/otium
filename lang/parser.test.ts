@@ -96,3 +96,22 @@ test("brace splicing", () => {
     ]
   `);
 });
+
+test("define within define", () => {
+  expect(() => parseString("x := x := 5")).toThrowErrorMatchingInlineSnapshot(
+    `"cannot nest definitions/assignments"`
+  );
+});
+
+test("function with no args", () => {
+  const result = parseString("funcall()");
+  expect(result).toMatchInlineSnapshot(`
+    [
+      [
+        OtSymbol {
+          "name": "funcall",
+        },
+      ],
+    ]
+  `);
+});

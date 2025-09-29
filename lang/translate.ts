@@ -30,7 +30,7 @@ import { beginSym, EofValue, type OtExpr, OtSymbol } from "./values";
 import { format } from "prettier";
 
 /**
- * Destination describes where the
+ * Destination describes where the result of an expression should be stored, if anywhere
  */
 type Destination = string | null;
 
@@ -47,13 +47,23 @@ const assertInvariant = (x: boolean, msg: string) => {
  * a few things for convenience
  */
 export const PRELUDE = `
-// prelude
+///// otium:prelude
 const print = console.log;
-const lt = (a, b) => a < b;
-const sub = (a, b) => a - b;
-const add = (a, b) => a + b;
 
-// begin main program
+// Builtin operators
+const _ot_lt = (a, b) => a < b;
+const _ot_sub = (a, b) => a - b;
+const _ot_add = (a, b) => a + b;
+const _ot_lte = (a, b) => a <= b;
+const _ot_gte = (a, b) => a >= b;
+const _ot_eq = (a, b) => a === b;
+const _ot_neq = (a, b) => a !== b;
+const _ot_mul = (a, b) => a * b;
+const _ot_div = (a, b) => a / b;
+
+const not = (a) => !a;
+
+///// otium:main
 `;
 
 /**
@@ -111,9 +121,19 @@ class Translator {
     rootEnv.vars["true"] = "true";
     rootEnv.vars["false"] = "false";
     rootEnv.vars["begin"] = "begin";
-    rootEnv.vars["<"] = "lt";
-    rootEnv.vars["-"] = "sub";
-    rootEnv.vars["+"] = "add";
+
+    // operators
+    rootEnv.vars["<"] = "_ot_lt";
+    rootEnv.vars["-"] = "_ot_sub";
+    rootEnv.vars["+"] = "_ot_add";
+    rootEnv.vars["<="] = "_ot_lte";
+    rootEnv.vars[">"] = "_ot_gt";
+    rootEnv.vars[">="] = "_ot_gte";
+    rootEnv.vars["=="] = "_ot_eq";
+    rootEnv.vars["!="] = "_ot_neq";
+    rootEnv.vars["*"] = "_ot_mul";
+    rootEnv.vars["/"] = "_ot_div";
+    rootEnv.vars["not"] = "not";
 
     this.rootEnv = rootEnv;
   }
@@ -136,6 +156,25 @@ class Translator {
    * specific methods
    */
   syntaxTable = {
+    while: (env: Env, args: OtExpr[], destination: Destination): string => {
+      const cond = args[0]!;
+      const body = args[1]!;
+
+      const conddest = this.makeDest("while_cond");
+      const bodydest = this.makeDest("while_body");
+
+      let code = `let ${conddest};`;
+
+      code += this.compile(env, cond, conddest);
+
+      code += `\nwhile(${conddest} !== false) {\n`;
+
+      code += this.compileVec(env, body.slice(1), bodydest);
+
+      code += `\n}`;
+
+      return code;
+    },
     // If expression syntax
     if: (env: Env, args: OtExpr[], destination: Destination): string => {
       const cond = args[0];
@@ -180,8 +219,59 @@ class Translator {
       return code;
     },
 
+    /** Raw JS -- allows inserting some raw JS as output */
+    js: (env: Env, args: OtExpr, destination: Destination): string => {
+      assertInvariant(
+        args.length === 1,
+        "js syntax only takes one string as argument"
+      );
+      assertInvariant(
+        typeof args[0] === "string",
+        "js syntax only takes one string as argument"
+      );
+
+      return destination
+        ? `${destination} = ${args[0] as string};`
+        : (args[0] as string);
+    },
+
     /** Assignment syntax */
     ":=": (env: Env, args: OtExpr, _destination: Destination): string => {
+      assertInvariant(args.length === 2, "definition is binary operator");
+      const name = args[0]!,
+        val = args[1]!;
+
+      if (!(name instanceof OtSymbol)) {
+        throw new TranslateError(
+          `currently only symbols can be assigned to but got ${name}`
+        );
+      }
+
+      const defdest = this.makeDest("def");
+      env.define(name.name);
+      return `let ${name.name};\n${this.compile(env, val, defdest)};\n${name.name} = ${defdest};\n`;
+    },
+
+    access: (env: Env, args: OtExpr, destination: Destination): string => {
+      assertInvariant(
+        args.length === 2,
+        "access should have exactly two arguments"
+      );
+
+      assertInvariant(
+        args[1] instanceof OtSymbol,
+        ".access right-hand side should be a symbol"
+      );
+
+      const left = args[0]!,
+        right = args[1]!;
+
+      return destination
+        ? `${destination} = ${this.compile(env, left, null)}.${right.name}`
+        : `${this.compile(env, left, null)}.${right.name}`;
+    },
+
+    "=": (env: Env, args: OtExpr, _destination: Destination): string => {
       assertInvariant(args.length === 2, "assignment is binary operator");
       const name = args[0]!,
         val = args[1]!;
@@ -193,7 +283,7 @@ class Translator {
       }
 
       env.define(name.name);
-      return `const ${name.name} = ${this.compile(env, val, null)}`;
+      return `${name.name} = ${this.compile(env, val, null)}`;
     },
 
     /** Function definition syntax */
@@ -270,7 +360,7 @@ class Translator {
         .slice(1)
         .map((a, i) => this.makeDest((t) => `apply_operand${t}_${i}`));
 
-      let code = `let ${applyOperator}, ${applyOperands};\n`;
+      let code = `let ${applyOperator}${applyOperands.length > 0 ? ", " : ""}${applyOperands};\n`;
 
       code += this.compile(env, exp[0]!, applyOperator);
       code += `\n`;
@@ -292,7 +382,9 @@ class Translator {
       // Variable
       const { name } = exp;
       if (!env.isDefined(name)) {
-        console.error(`WARNING: Reference to undefined symbol ${name}`);
+        // Currently not aware of the more complex situations
+        // in which symbols can occur (eg object access)
+        // console.error(`WARNING: Reference to undefined symbol ${name}`);
       }
       const nameResult = env.lookup(name)!;
       return destination ? `${destination} = ${nameResult};` : nameResult;
@@ -318,7 +410,7 @@ class Translator {
 
   /** Compile a top level expression */
   compileToplevel(exp: OtExpr) {
-    return this.compile(this.rootEnv, exp, null);
+    return `${this.compile(this.rootEnv, exp, null)};`;
   }
 }
 
@@ -330,7 +422,13 @@ export function translateString(content: string, filename?: string): string {
   let exp: OtExpr;
   let accum = PRELUDE;
   while (true) {
+    const beginSrc = parser.beginSrc();
     [, exp] = parser.nextExpr();
+    const endSrc = parser.endSrc(beginSrc);
+
+    // Add comment with original source
+    accum += `\n// ${beginSrc.sourceName} ${beginSrc.line}:${beginSrc.column}\n`;
+    accum += `/* ${content.slice(beginSrc.begin, endSrc.end)} */\n`;
 
     if (exp == EofValue) {
       break;

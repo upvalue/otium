@@ -2,11 +2,18 @@
 
 A simple Lisp-derived language with C-like syntax.
 
-Status: It can parse and run the fibonacci number calculator.
+Status: It can run some basic examples such as the Fibonacci number calculator and Raylib
+graphical demos.
 
 The current implementation is in TypeScript running under Bun (for prototyping -- this
 will eventually gain a standalone runtime and compiler). It's very much been thrown together
-and is still changing a lot.
+and is still changing a lot. It works by outputting JS which can then be run anywhere you
+can run JS (at present, the output is relatively implementation agnostic though this might
+change).
+
+> bun install
+
+Before running anything.
 
 > bun lexer.ts scratch.ot
 
@@ -24,21 +31,24 @@ Translates the file to JavaScript.
 
 Evaluates the file 
 
-to run the lexer, parser or translator on an example file
+In principle, each of these are independent steps that build on eachother (e.g. lexer has no dependencies, parser depends on the lexer and so on)
 
-# How to run Otium code
+# Examples
 
-The translator produces some (pretty cursed) JavaScript code as its output, which can then
-be run with a JS interpreter
+There are some examples under `./examples`
 
-> bun translate.ts scratch.ot > scratch.js
+- fib.ot - the classic fibonacci calculator meme code
+- raylib-ball.ot - Renders a ball with Raylib and moves it around
 
-> bun scratch.js
+To run the raylib examples is a bit more involved:
+
+> bun translate.ts example/raylib-ball.ot > raylibdemo/raylib-ball.js
+> cd raylibdemo && npm install && node raylib-ball.js
+
+As `node-raylib` didn't seem to work under Bun.
 
 # Testing
 
-> bun test lexer.test.ts
+> bun test 
 
-> bun test parser.test.ts
-
-to run test suites
+to run test suites. Most tests are snapshot tests.

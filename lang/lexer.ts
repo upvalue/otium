@@ -14,11 +14,11 @@ export const TOKEN_TYPES = {
   LBRACE: "LBRACE",
   RBRACE: "RBRACE",
   COMMA: "COMMA",
-  PUNCTUATION: "PUNCTUATION",
   EOF: "EOF",
-  COMMENT: "COMMENT",
+  ACCESS: "ACCESS",
 
-  // Operators
+  // Operators -- binary operators which need to be handled
+  // with presedence
   OP_ADD: "OP_ADD",
   OP_SUB: "OP_SUB",
   OP_LT: "OP_LT",
@@ -30,19 +30,31 @@ export const TOKEN_TYPES = {
   OP_MUL: "OP_MUL",
   OP_DIV: "OP_DIV",
   OP_DEFINE: "OP_DEFINE",
+  OP_ASSIGN: "OP_ASSIGN",
 } as const;
 
 export type TokenType = (typeof TOKEN_TYPES)[keyof typeof TOKEN_TYPES];
 
-export type Token = {
-  type: TokenType;
-  begin: number;
-  end: number;
-  value: string;
+export type SourceLocation = {
   sourceName?: string;
   line: number;
   column: number;
+  begin: number;
+  end: number;
 };
+
+export type Token = {
+  type: TokenType;
+  value: string;
+} & SourceLocation;
+
+export const tokenSourceLocation = (token: Token) => ({
+  sourceName: token.sourceName,
+  line: token.line,
+  column: token.column,
+  begin: token.begin,
+  end: token.end,
+});
 
 export const EOF_TOKEN: Token = {
   type: "EOF",
@@ -55,7 +67,7 @@ export const EOF_TOKEN: Token = {
 };
 
 // characters which terminate symbols
-const TERM_CHARS = ["(", ")", "[", "]", ".", '"', "'", "#", ","];
+const TERM_CHARS = ["(", ")", "[", "]", ".", '"', "'", "#", ",", "."];
 
 export class Lexer {
   private input: string;
@@ -76,7 +88,7 @@ export class Lexer {
     if (this.position >= this.input.length) {
       return "\0";
     }
-    return this.input[this.position];
+    return this.input[this.position]!;
   }
 
   private advance(): string {
@@ -201,22 +213,81 @@ export class Lexer {
     };
   }
 
+  private skipSingleLineComment(): void {
+    // Skip the '//' characters
+    this.advance();
+    this.advance();
+
+    // Skip until end of line or end of input
+    while (this.peek() !== "\n" && this.peek() !== "\0") {
+      this.advance();
+    }
+  }
+
+  private skipMultiLineComment(): void {
+    // Skip the '/*' characters
+    this.advance();
+    this.advance();
+
+    let nestingLevel = 1;
+
+    while (nestingLevel > 0 && this.peek() !== "\0") {
+      const char = this.peek();
+
+      if (
+        char === "/" &&
+        this.position + 1 < this.input.length &&
+        this.input[this.position + 1] === "*"
+      ) {
+        // Found opening of nested comment
+        this.advance();
+        this.advance();
+        nestingLevel++;
+      } else if (
+        char === "*" &&
+        this.position + 1 < this.input.length &&
+        this.input[this.position + 1] === "/"
+      ) {
+        // Found closing of comment
+        this.advance();
+        this.advance();
+        nestingLevel--;
+      } else {
+        this.advance();
+      }
+    }
+  }
+
   nextToken(): Token {
     this.skipWhitespace();
 
-    const { sourceName, lineNumber: line, columnNumber: column } = this;
+    // Check for comments before processing other tokens
+    if (this.peek() === "/" && this.position + 1 < this.input.length) {
+      const nextChar = this.input[this.position + 1];
+      if (nextChar === "/") {
+        this.skipSingleLineComment();
+        return this.nextToken(); // Recursively get the next non-comment token
+      } else if (nextChar === "*") {
+        this.skipMultiLineComment();
+        return this.nextToken(); // Recursively get the next non-comment token
+      }
+    }
+
     const begin = this.position;
+    const token = {
+      sourceName: this.sourceName,
+      line: this.lineNumber,
+      column: this.columnNumber,
+    };
     const char = this.peek();
 
     if (char === "\0") {
       return {
+        ...token,
         type: "EOF",
         begin,
         end: this.position,
         value: "",
-        sourceName,
-        line,
-        column,
       };
     }
 
@@ -238,110 +309,90 @@ export class Lexer {
     switch (char) {
       case "(":
         return {
+          ...token,
           type: "LPAREN",
           begin,
           end: this.position,
           value: char,
-          sourceName,
-          line,
-          column,
         };
       case ")":
         return {
+          ...token,
           type: "RPAREN",
           begin,
           end: this.position,
           value: char,
-          sourceName,
-          line,
-          column,
         };
       case ",": {
         return {
+          ...token,
           type: "COMMA",
           begin,
           end: this.position,
           value: char,
-          sourceName,
-          line,
-          column,
         };
       }
       case "{":
         return {
+          ...token,
           type: "LBRACE",
           begin,
           end: this.position,
           value: char,
-          sourceName,
-          line,
-          column,
         };
       case "}":
         return {
+          ...token,
           type: "RBRACE",
           begin,
           end: this.position,
           value: char,
-          sourceName,
-          line,
-          column,
         };
       case "<":
         if (this.peek() === "=") {
           this.advance();
           return {
+            ...token,
             type: "OP_LTE",
             begin,
             end: this.position,
             value: "<=",
-            sourceName,
-            line,
-            column,
           };
         }
         return {
+          ...token,
           type: "OP_LT",
           begin,
           end: this.position,
           value: char,
-          sourceName,
-          line,
-          column,
         };
       case ">":
         if (this.peek() === "=") {
           this.advance();
           return {
+            ...token,
             type: "OP_GTE",
             begin,
             end: this.position,
             value: ">=",
-            sourceName,
-            line,
-            column,
           };
         }
         return {
+          ...token,
           type: "OP_GT",
           begin,
           end: this.position,
           value: char,
-          sourceName,
-          line,
-          column,
         };
       case "!":
         if (this.peek() === "=") {
           this.advance();
           return {
+            ...token,
             type: "OP_NEQ",
             begin,
             end: this.position,
             value: "!=",
-            sourceName,
-            line,
-            column,
           };
         }
         break;
@@ -349,72 +400,75 @@ export class Lexer {
         if (this.peek() === "=") {
           this.advance();
           return {
+            ...token,
             type: "OP_EQ",
             begin,
             end: this.position,
             value: "==",
-            sourceName,
-            line,
-            column,
           };
         }
-        break;
+        return {
+          ...token,
+          type: "OP_ASSIGN",
+          begin,
+          end: this.position,
+          value: char,
+        };
+      case ".":
+        return {
+          ...token,
+          type: "ACCESS",
+          begin,
+          end: this.position,
+          value: char,
+        };
       case "+":
         return {
+          ...token,
           type: "OP_ADD",
           begin,
           end: this.position,
           value: char,
-          sourceName,
-          line,
-          column,
         };
       case "-":
         return {
+          ...token,
           type: "OP_SUB",
           begin,
           end: this.position,
           value: char,
-          sourceName,
-          line,
-          column,
         };
       case "*":
         return {
+          ...token,
           type: "OP_MUL",
           begin,
           end: this.position,
           value: char,
-          sourceName,
-          line,
-          column,
         };
       case "/":
         return {
+          ...token,
           type: "OP_DIV",
           begin,
           end: this.position,
           value: char,
-          sourceName,
-          line,
-          column,
         };
       case ":":
         if (this.peek() == "=") {
           this.advance();
           return {
+            ...token,
             type: "OP_DEFINE",
             begin,
             end: this.position,
             value: ":=",
-            sourceName,
-            line: line,
-            column: column,
           };
         }
       default:
-        throw new LexerError(`unrecognized character ${char}`);
+        break;
     }
+    throw new LexerError(`unrecognized character ${char}`);
   }
 
   tokenize(): Token[] {

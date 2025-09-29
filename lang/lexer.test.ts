@@ -175,3 +175,262 @@ test("comparison operators", () => {
       ]
     `);
 });
+
+test("field access", () => {
+  const input = "hello.world";
+  const lexer = new Lexer(input);
+  const tokens = lexer.tokenize();
+
+  expect(tokens).toMatchInlineSnapshot(`
+    [
+      {
+        "begin": 0,
+        "column": 1,
+        "end": 5,
+        "line": 1,
+        "sourceName": undefined,
+        "type": "SYMBOL",
+        "value": "hello",
+      },
+      {
+        "begin": 5,
+        "column": 6,
+        "end": 6,
+        "line": 1,
+        "sourceName": undefined,
+        "type": "ACCESS",
+        "value": ".",
+      },
+      {
+        "begin": 6,
+        "column": 7,
+        "end": 11,
+        "line": 1,
+        "sourceName": undefined,
+        "type": "SYMBOL",
+        "value": "world",
+      },
+      {
+        "begin": 11,
+        "column": 12,
+        "end": 11,
+        "line": 1,
+        "sourceName": undefined,
+        "type": "EOF",
+        "value": "",
+      },
+    ]
+    `);
+});
+
+test("single line comments", () => {
+  const input = `42 // this is a comment
+  foo`;
+  const lexer = new Lexer(input);
+  const tokens = lexer.tokenize();
+
+  expect(tokens).toMatchInlineSnapshot(`
+    [
+      {
+        "begin": 0,
+        "column": 1,
+        "end": 2,
+        "line": 1,
+        "sourceName": undefined,
+        "type": "NUMBER",
+        "value": "42",
+      },
+      {
+        "begin": 26,
+        "column": 3,
+        "end": 29,
+        "line": 2,
+        "sourceName": undefined,
+        "type": "SYMBOL",
+        "value": "foo",
+      },
+      {
+        "begin": 29,
+        "column": 6,
+        "end": 29,
+        "line": 2,
+        "sourceName": undefined,
+        "type": "EOF",
+        "value": "",
+      },
+    ]
+    `);
+});
+
+test("multi-line comments", () => {
+  const input = `42 /* this is a
+  multi-line comment */ foo`;
+  const lexer = new Lexer(input);
+  const tokens = lexer.tokenize();
+
+  expect(tokens).toMatchInlineSnapshot(`
+    [
+      {
+        "begin": 0,
+        "column": 1,
+        "end": 2,
+        "line": 1,
+        "sourceName": undefined,
+        "type": "NUMBER",
+        "value": "42",
+      },
+      {
+        "begin": 40,
+        "column": 25,
+        "end": 43,
+        "line": 2,
+        "sourceName": undefined,
+        "type": "SYMBOL",
+        "value": "foo",
+      },
+      {
+        "begin": 43,
+        "column": 28,
+        "end": 43,
+        "line": 2,
+        "sourceName": undefined,
+        "type": "EOF",
+        "value": "",
+      },
+    ]
+    `);
+});
+
+test("nested multi-line comments", () => {
+  const input = `42 /* outer /* inner */ still in outer */ foo`;
+  const lexer = new Lexer(input);
+  const tokens = lexer.tokenize();
+
+  expect(tokens).toMatchInlineSnapshot(`
+    [
+      {
+        "begin": 0,
+        "column": 1,
+        "end": 2,
+        "line": 1,
+        "sourceName": undefined,
+        "type": "NUMBER",
+        "value": "42",
+      },
+      {
+        "begin": 42,
+        "column": 43,
+        "end": 45,
+        "line": 1,
+        "sourceName": undefined,
+        "type": "SYMBOL",
+        "value": "foo",
+      },
+      {
+        "begin": 45,
+        "column": 46,
+        "end": 45,
+        "line": 1,
+        "sourceName": undefined,
+        "type": "EOF",
+        "value": "",
+      },
+    ]
+    `);
+});
+
+test("comments mixed with division operator", () => {
+  const input = `10 / 2 // division
+  /* block comment */ 5 / 3`;
+  const lexer = new Lexer(input);
+  const tokens = lexer.tokenize();
+
+  expect(tokens).toMatchInlineSnapshot(`
+    [
+      {
+        "begin": 0,
+        "column": 1,
+        "end": 2,
+        "line": 1,
+        "sourceName": undefined,
+        "type": "NUMBER",
+        "value": "10",
+      },
+      {
+        "begin": 3,
+        "column": 4,
+        "end": 4,
+        "line": 1,
+        "sourceName": undefined,
+        "type": "OP_DIV",
+        "value": "/",
+      },
+      {
+        "begin": 5,
+        "column": 6,
+        "end": 6,
+        "line": 1,
+        "sourceName": undefined,
+        "type": "NUMBER",
+        "value": "2",
+      },
+      {
+        "begin": 41,
+        "column": 23,
+        "end": 42,
+        "line": 2,
+        "sourceName": undefined,
+        "type": "NUMBER",
+        "value": "5",
+      },
+      {
+        "begin": 43,
+        "column": 25,
+        "end": 44,
+        "line": 2,
+        "sourceName": undefined,
+        "type": "OP_DIV",
+        "value": "/",
+      },
+      {
+        "begin": 45,
+        "column": 27,
+        "end": 46,
+        "line": 2,
+        "sourceName": undefined,
+        "type": "NUMBER",
+        "value": "3",
+      },
+      {
+        "begin": 46,
+        "column": 28,
+        "end": 46,
+        "line": 2,
+        "sourceName": undefined,
+        "type": "EOF",
+        "value": "",
+      },
+    ]
+    `);
+});
+
+test("only comments", () => {
+  const input = `// just a comment
+  /* and a block comment */`;
+  const lexer = new Lexer(input);
+  const tokens = lexer.tokenize();
+
+  expect(tokens).toMatchInlineSnapshot(`
+    [
+      {
+        "begin": 45,
+        "column": 28,
+        "end": 45,
+        "line": 2,
+        "sourceName": undefined,
+        "type": "EOF",
+        "value": "",
+      },
+    ]
+    `);
+});

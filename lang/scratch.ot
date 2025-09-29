@@ -1,1 +1,36 @@
-asdf := 5
+// raylib-ball.ot - uses node-raylib to render a ball on the screen
+// and allow the user to move it around
+
+r := js("require('raylib')")
+
+screenWidth := 800
+screenHeight := 600
+
+ballPos := r.Vector2(400, 300)
+
+r.InitWindow(screenWidth, screenHeight, "raylib ball movement demo in otium")
+r.SetTargetFPS(60)
+
+while(not(r.WindowShouldClose())) {
+  r.BeginDrawing()
+}
+
+r.CloseWindow()
+
+//while(!r.WindowShouldClose()) {
+//  if(r.IsKeyDown(r.KEY_RIGHT), ballPos.x = ballPos.x + 2)
+//  if(r.IsKeyDown(r.KEY_LEFT), ballPos.x = ballPos.x - 2)
+//  if(r.IsKeyDown(r.KEY_UP), ballPos.y = ballPos.y - 2)
+//  if(r.IsKeyDown(r.KEY_DOWN), ballPos.y = ballPos.y + 2)
+
+//  r.BeginDrawing()
+
+//  r.ClearBackground(r.RAYWHITE)
+//  r.DrawText("move the ball with arrow keys", 10, 10, 20, r.DARKGRAY)
+//  r.DrawCircleV(ballPos, 50, r.MAROON)
+
+//  r.EndDrawing()
+//}
+
+//r.CloseWindow()
+

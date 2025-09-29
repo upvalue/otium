@@ -1,5 +1,13 @@
-import { EOF_TOKEN, Lexer, type Token, type TokenType } from "./lexer";
+import {
+  EOF_TOKEN,
+  Lexer,
+  tokenSourceLocation,
+  type SourceLocation,
+  type Token,
+  type TokenType,
+} from "./lexer";
 import { beginSym, EofValue, getSymbol, type OtExpr } from "./values";
+import { runWithFile } from "./support";
 
 export class ParserError extends Error {
   constructor(message: string) {
@@ -39,7 +47,10 @@ const PRIORITY: Partial<Record<TokenType, number>> = {
   // !=
   OP_NEQ: 2,
 
-  // Assignment :=
+  // Definition :=
+  OP_DEFINE: 10,
+
+  // Assignment =
   OP_ASSIGN: 10,
 };
 
@@ -59,6 +70,8 @@ const splat = (exp: OtExpr): OtExpr[] => {
   }
   return [exp];
 };
+
+type InSyntax = "DEFINE" | "ASSIGN" | null;
 
 /**
  * This parser is a top down operator precedence parser; see the following
@@ -109,12 +122,12 @@ export class Parser {
   }
 
   assertMatchAndConsume(tokenType: TokenType) {
-    if (this.currentToken.type !== tokenType) {
-      throw new ParserError(
-        `expected ${tokenType} but got ${this.currentToken.type}`
-      );
+    const tok = this.currentToken;
+    if (tok.type !== tokenType) {
+      throw new ParserError(`expected ${tokenType} but got ${tok.type}`);
     }
     this.advance();
+    return tok;
   }
 
   // primaryExpr -> SYMBOL | '(' EXPR ')'
@@ -156,8 +169,14 @@ export class Parser {
    */
   functionArgs(): OtExpr[] {
     this.traceCall("functionArgs");
-    if (this.currentToken.type === "LPAREN") {
+    const tok = this.currentToken;
+    if (tok.type === "LPAREN") {
       this.advance();
+
+      if (this.currentToken.type === "RPAREN") {
+        return [];
+      }
+
       const ls = this.expList();
 
       return ls;
@@ -169,17 +188,36 @@ export class Parser {
   }
 
   /**
-   * suffixedExpr -> primaryExp funcargs
+   * suffixedExpr -> primaryExp { '.' NAME | funcargs }
    * handles function calls
    */
   suffixedExpr(): OtExpr {
     this.traceCall("suffixedExpr");
-    const left = this.primaryExpr();
-    switch (this.currentToken.type) {
-      case "LPAREN": {
-        const r = [left, ...this.functionArgs()];
-        this.assertMatchAndConsume("RPAREN");
-        return r;
+    let left = this.primaryExpr();
+    while (true) {
+      const { currentToken } = this;
+      switch (currentToken.type) {
+        case "ACCESS": {
+          const rhs = this.advance();
+          if (rhs.type !== "SYMBOL") {
+            throw new ParserError(
+              `access right side should be a symbol but got ${this.currentToken.type}`
+            );
+          }
+          left = [getSymbol("access"), left, getSymbol(rhs.value)];
+          this.advance();
+          continue;
+        }
+        case "LPAREN": {
+          const r = [left, ...this.functionArgs()];
+          this.assertMatchAndConsume("RPAREN");
+          return r;
+        }
+        case "EOF": {
+          throw new ParserError("unexpected EOF");
+        }
+        default:
+          return left;
       }
     }
     return left;
@@ -207,6 +245,19 @@ export class Parser {
     }
   }
 
+  beginSrc(): SourceLocation {
+    return tokenSourceLocation(this.currentToken);
+  }
+
+  endSrc(beginSrc: SourceLocation): SourceLocation {
+    const endSrc = tokenSourceLocation(this.tokens[this.tokenIdx - 1]!);
+
+    return {
+      ...beginSrc,
+      end: endSrc.end,
+    };
+  }
+
   /**
    * nextExpr is the main entry point for the parser; it takes a binding
    * power as an argument. The binding power is what controls whether
@@ -225,50 +276,58 @@ export class Parser {
     this.traceCall(`nextExpr bindingPower: ${bindingPower}`);
     let exp = this.simpleExpr();
 
-    // Check for binary operator presence
-    let operator = this.currentToken;
+    let isStx: InSyntax = null;
 
-    while (operator.type === "LBRACE") {
+    // Check for binary operator presence
+    let op = this.currentToken;
+
+    while (op.type === "LBRACE") {
       this.advance();
       let [, body] = this.nextExpr();
       if (this.currentToken.type !== "RBRACE") {
         throw new ParserError("expected }");
       }
       this.advance();
-      operator = this.currentToken;
+      op = this.currentToken;
       exp = [...splat(exp), [beginSym, body]];
     }
 
-    while (isOperator(operator) && PRIORITY[operator.type] > bindingPower) {
-      /*
-      console.log({
-        operator,
-        priority: PRIORITY[operator.type],
-        bindingPower,
-      });
-      */
+    while (isOperator(op) && PRIORITY[op.type]! > bindingPower) {
       const rightPri = PRIORITY[this.currentToken.type];
-      const op = getSymbol(this.currentToken.value);
+      const opSymbol = getSymbol(this.currentToken.value);
+
+      if (op.type === "OP_DEFINE") {
+        isStx = "DEFINE";
+      } else if (op.type === "OP_ASSIGN") {
+        isStx = "ASSIGN";
+      }
+
       this.advance();
       const [nextOp, nextExp] = this.nextExpr(rightPri);
 
-      exp = [op, exp, nextExp];
+      exp = [opSymbol, exp, nextExp];
       if (!nextOp) {
         break;
       }
 
-      operator = nextOp.operator;
+      if (
+        isStx !== null &&
+        (nextOp.operator.type === "OP_DEFINE" ||
+          nextOp.operator.type === "OP_ASSIGN")
+      ) {
+        throw new ParserError("cannot nest definitions/assignments");
+      }
+
+      op = nextOp.operator;
     }
 
-    if (isOperator(operator)) {
-      return [new StrongerOperator(operator), exp];
+    if (isOperator(op)) {
+      return [new StrongerOperator(op), exp];
     }
 
     return [null, exp];
   }
 }
-
-import { runWithFile } from "./support";
 
 if (import.meta.main) {
   runWithFile((content, filename) => {

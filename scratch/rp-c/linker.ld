@@ -37,6 +37,11 @@ MEMORY {
    * Both of the memory addresses here come from [pg 30](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf#page=31) of the datasheet
    */
   SRAM(rwx): ORIGIN = 0x20000000, LENGTH = 520K
+
+  /**
+   * PSRAM (pseudo-static RAM) is an optional addon that gives us some additional memory to work with.
+   */
+  PSRAM(rwx): ORIGIN = 0x10000000, LENGTH = 8M
 }
 
 
@@ -90,6 +95,20 @@ SECTIONS {
      * be written to)
      */
   } >SRAM AT>FLASH
+
+  /**
+   * PSRAM. We have two different components here; separating psram_start and
+   * psram_heap_start gives us the option of storing constants and program data
+   * in the PSRAM before using the heap_start in a more dynamic way (e.g. malloc'ing
+   * from it).
+   */
+  .psram :{
+    psram_start = .;
+    *(.psram*)
+    . = ALIGN(4096);
+    psram_heap_start = .;
+  } >PSRAM
+
 
   stack_start = ORIGIN(SRAM) + LENGTH(SRAM);
 }

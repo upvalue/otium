@@ -33,7 +33,7 @@
 
 /**
  * Resets ([chapter
- * 7(https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf#page=495)))
+ * 7](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf#page=495)))
  * of the datasheet.
  *
  * We use the reset base to make subsystem resets. Basically letting the system

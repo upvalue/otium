@@ -24,6 +24,9 @@
  * var = t1;
  */
 
+// If true, format result with prettier, makes it easier to follow
+let FORMAT = true;
+
 import { Lexer } from "./lexer";
 import { Parser } from "./parser";
 import { beginSym, EofValue, type OtExpr, OtSymbol } from "./values";
@@ -169,16 +172,20 @@ class Translator {
 
       code += `\nwhile(${conddest} !== false) {\n`;
 
-      code += this.compileVec(env, body.slice(1), bodydest);
+      code += this.compile(env, body, bodydest);
+
+      // re evaluate condition
+      code += this.compile(env, cond, conddest);
 
       code += `\n}`;
 
       return code;
     },
+
     // If expression syntax
     if: (env: Env, args: OtExpr[], destination: Destination): string => {
       const cond = args[0];
-      const then = args[1];
+      const thenbody = args[1];
       const elseb = args[2];
 
       if (!cond) {
@@ -187,13 +194,13 @@ class Translator {
         );
       }
 
-      if (!then) {
+      if (!thenbody) {
         throw new TranslateError(
           `if syntax expected then branch but none was found`
         );
       }
 
-      const thenbody = then.slice(1);
+      // const thenbody = then.slice(1);
 
       const conddest = this.makeDest("if_cond");
 
@@ -203,14 +210,14 @@ class Translator {
 
       code += `\nif(${conddest} !== false) {\n`;
 
-      code += this.compileVec(env, thenbody, destination);
+      code += this.compile(env, thenbody, destination);
+      // code += this.compileVec(env, thenbody, destination);
 
       code += `\n}`;
 
       if (elseb) {
-        const elsebody = elseb.slice(1);
         code += ` else {\n`;
-        code += this.compileVec(env, elsebody, destination);
+        code += this.compile(env, elseb, destination);
         code += `}\n`;
       } else {
         code += `\n`;
@@ -235,6 +242,10 @@ class Translator {
         : (args[0] as string);
     },
 
+    begin: (env: Env, args: OtExpr[], destination: Destination): string => {
+      return this.compileVec(env, args, destination);
+    },
+
     /** Assignment syntax */
     ":=": (env: Env, args: OtExpr, _destination: Destination): string => {
       assertInvariant(args.length === 2, "definition is binary operator");
@@ -243,13 +254,13 @@ class Translator {
 
       if (!(name instanceof OtSymbol)) {
         throw new TranslateError(
-          `currently only symbols can be assigned to but got ${name}`
+          `currently only symbols can be defined but got ${name}`
         );
       }
 
       const defdest = this.makeDest("def");
       env.define(name.name);
-      return `let ${name.name};\n${this.compile(env, val, defdest)};\n${name.name} = ${defdest};\n`;
+      return `let ${name.name}, ${defdest};\n${this.compile(env, val, defdest)};\n${name.name} = ${defdest};\n`;
     },
 
     access: (env: Env, args: OtExpr, destination: Destination): string => {
@@ -273,17 +284,16 @@ class Translator {
 
     "=": (env: Env, args: OtExpr, _destination: Destination): string => {
       assertInvariant(args.length === 2, "assignment is binary operator");
-      const name = args[0]!,
+      const lhs = args[0]!,
         val = args[1]!;
 
-      if (!(name instanceof OtSymbol)) {
-        throw new TranslateError(
-          `currently only symbols can be assigned to but got ${name}`
-        );
-      }
+      const setdest = this.makeDest("set");
+      // env.define(name.name);
+      const leftcode = this.compile(env, lhs, null);
 
-      env.define(name.name);
-      return `${name.name} = ${this.compile(env, val, null)}`;
+      let code = `${this.compile(env, val, setdest)}`;
+      code += `\n${leftcode} = ${setdest}\n`;
+      return code;
     },
 
     /** Function definition syntax */
@@ -321,7 +331,7 @@ class Translator {
       }
 
       let retDest = this.makeDest("return");
-      let code = `(${arglist.map((a) => a.name)}) => {\nlet ${retDest};`;
+      let code = `${destination ? `${destination} = ` : ""}(${arglist.map((a) => a.name)}) => {\nlet ${retDest};`;
 
       code += this.compileVec(fnEnv, body.slice(1), retDest);
 
@@ -381,12 +391,7 @@ class Translator {
     } else if (exp instanceof OtSymbol) {
       // Variable
       const { name } = exp;
-      if (!env.isDefined(name)) {
-        // Currently not aware of the more complex situations
-        // in which symbols can occur (eg object access)
-        // console.error(`WARNING: Reference to undefined symbol ${name}`);
-      }
-      const nameResult = env.lookup(name)!;
+      const nameResult = env.isDefined(name) ? env.lookup(name)! : name;
       return destination ? `${destination} = ${nameResult};` : nameResult;
     }
   }
@@ -452,9 +457,11 @@ if (import.meta.main) {
   runWithFile(async (content, filename) => {
     const jsCode = translateString(content, filename);
     console.log(
-      await format(jsCode, {
-        parser: "babel",
-      })
+      await (FORMAT
+        ? format(jsCode, {
+            parser: "babel",
+          })
+        : jsCode)
     );
   });
 }

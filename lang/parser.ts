@@ -28,9 +28,9 @@ const PRIORITY: Partial<Record<TokenType, number>> = {
   // -
   OP_SUB: 3,
   // *
-  OP_MUL: 3,
+  OP_MUL: 4,
   // /
-  OP_DIV: 3,
+  OP_DIV: 4,
 
   // Comparison operators
   // <
@@ -48,10 +48,10 @@ const PRIORITY: Partial<Record<TokenType, number>> = {
   OP_NEQ: 2,
 
   // Definition :=
-  OP_DEFINE: 10,
+  OP_DEFINE: 1,
 
   // Assignment =
-  OP_ASSIGN: 10,
+  OP_ASSIGN: 1,
 };
 
 const isOperator = (token: Token) => token.type.startsWith("OP_");
@@ -160,6 +160,7 @@ export class Parser {
       [, elt] = this.nextExpr();
       ls.push(elt);
     }
+
     return ls;
   }
 
@@ -276,6 +277,8 @@ export class Parser {
     this.traceCall(`nextExpr bindingPower: ${bindingPower}`);
     let exp = this.simpleExpr();
 
+    if (exp === EofValue) return [null, exp];
+
     let isStx: InSyntax = null;
 
     // Check for binary operator presence
@@ -283,16 +286,26 @@ export class Parser {
 
     while (op.type === "LBRACE") {
       this.advance();
-      let [, body] = this.nextExpr();
-      if (this.currentToken.type !== "RBRACE") {
-        throw new ParserError("expected }");
+      let body = [];
+      while (true) {
+        let [, bodyExp] = this.nextExpr();
+        body.push(bodyExp);
+        if (this.currentToken.type === "RBRACE") {
+          break;
+        }
       }
       this.advance();
       op = this.currentToken;
-      exp = [...splat(exp), [beginSym, body]];
+      exp = [...splat(exp), [beginSym, ...body]];
     }
 
-    while (isOperator(op) && PRIORITY[op.type]! > bindingPower) {
+    if (this.currentToken.type === "EOF") return [null, exp];
+
+    while (
+      isOperator(op) &&
+      PRIORITY[op.type]! > bindingPower &&
+      this.currentToken
+    ) {
       const rightPri = PRIORITY[this.currentToken.type];
       const opSymbol = getSymbol(this.currentToken.value);
 
@@ -302,8 +315,25 @@ export class Parser {
         isStx = "ASSIGN";
       }
 
-      this.advance();
+      // We've encountered some other thing which is not an operator time to exit the
+      // operator parsing loop; this can happen if a StrongerOperator causes a loop
+      // at the end of an expression
+      if (isOperator(this.currentToken)) {
+        this.advance();
+      } else {
+        break;
+      }
+
       const [nextOp, nextExp] = this.nextExpr(rightPri);
+
+      if (nextExp === EofValue) {
+        // EOF at end of binary expression
+        if (!rightPri) {
+          break;
+        }
+        // EOF in binary expression, invalid
+        throw new ParserError("unexpected EOF in binary expression");
+      }
 
       exp = [opSymbol, exp, nextExp];
       if (!nextOp) {

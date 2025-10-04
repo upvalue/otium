@@ -115,3 +115,62 @@ test("function with no args", () => {
     ]
   `);
 });
+
+test("complex binary expression", () => {
+  const result = parseString("5 * 5 + 5 * 3");
+  expect(result).toMatchInlineSnapshot(`
+    [
+      [
+        OtSymbol {
+          "name": "+",
+        },
+        [
+          OtSymbol {
+            "name": "*",
+          },
+          5,
+          5,
+        ],
+        [
+          OtSymbol {
+            "name": "*",
+          },
+          5,
+          3,
+        ],
+      ],
+    ]
+  `);
+});
+
+test("assignment with binary expression in function call", () => {
+  const result = parseString("func(asdf := 5 * 3)");
+  expect(result).toMatchInlineSnapshot(`
+    [
+      [
+        OtSymbol {
+          "name": "func",
+        },
+        [
+          OtSymbol {
+            "name": ":=",
+          },
+          OtSymbol {
+            "name": "asdf",
+          },
+          [
+            OtSymbol {
+              "name": "*",
+            },
+            5,
+            3,
+          ],
+        ],
+      ],
+    ]
+  `);
+});
+
+test("invalid expression - incomplete binary operation", () => {
+  expect(() => parseString("5 *")).toThrow();
+});

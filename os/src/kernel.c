@@ -2,6 +2,8 @@ typedef unsigned char uint8_t;
 typedef unsigned int uint32_t;
 typedef uint32_t size_t;
 
+extern void putchar(char);
+
 extern char __bss[], __bss_end[], __stack_top[];
 
 struct sbiret {
@@ -26,10 +28,6 @@ struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4,
                          "r"(a6), "r"(a7)
                        : "memory");
   return (struct sbiret){.error = a0, .value = a1};
-}
-
-void putchar(char ch) {
-  sbi_call(ch, 0, 0, 0, 0, 0, 0, 1 /* Console Putchar */);
 }
 
 void kernel_main(void) {

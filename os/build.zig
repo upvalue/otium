@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
 
     // Create a root module with our Zig code
     const root_module = b.createModule(.{
-        .root_source_file = b.path("src/kernel.zig"),
+        .root_source_file = b.path("src/kern-zig.zig"),
         .target = target,
         .optimize = optimize,
     });

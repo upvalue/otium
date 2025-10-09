@@ -1,7 +1,7 @@
 // raylib-ball.ot - uses node-raylib to render a ball on the screen
 // and allow the user to move it around
 
-r := js("require('raylib')")
+r := require("raylib")
 
 screenWidth := 800
 screenHeight := 600

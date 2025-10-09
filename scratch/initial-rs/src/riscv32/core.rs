@@ -98,3 +98,11 @@ fn panic(info: &PanicInfo) -> ! {
     }
   }
 }
+
+pub fn exit() -> ! {
+  loop {
+    unsafe {
+      core::arch::asm!("wfi");
+    }
+  }
+}

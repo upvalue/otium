@@ -1,0 +1,116 @@
+     VMA      LMA     Size Align Out     In      Symbol
+       0        0 80200000     1 . = 0x80200000
+80200000 80200000       84     2 .text
+80200000 80200000        c     1         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-riscv-b2e606.o:(.text.boot)
+80200000 80200000        0     1                 .L0 
+80200000 80200000        0     1                 .Lpcrel_hi0
+80200000 80200000        0     1                 $x
+80200000 80200000        0     1                 .L0 
+80200000 80200000        0     1                 boot
+80200008 80200008        0     1                 .L0 
+8020000c 8020000c        0     1                 .L0 
+8020000c 8020000c       78     2         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-89d592.o:(.text)
+8020000c 8020000c        0     1                 .L0 
+8020000c 8020000c        0     1                 .L0 
+8020000c 8020000c        0     1                 $x
+8020000c 8020000c        0     1                 .L0 
+8020000c 8020000c        6     1                 sbi_call
+80200010 80200010        0     1                 .L0 
+80200012 80200012        0     1                 .L0 
+80200012 80200012        0     1                 .L0 
+80200012 80200012        0     1                 .L0 
+80200012 80200012       14     1                 putchar
+80200024 80200024        0     1                 .L0 
+80200026 80200026        0     1                 .L0 
+80200026 80200026        0     1                 .L0 
+80200026 80200026        0     1                 .L0 
+80200026 80200026       48     1                 kernel_main
+8020002e 8020002e        0     1                 .L0 
+80200036 80200036        0     1                 .L0 
+80200042 80200042        0     1                 .L0 
+80200042 80200042        0     1                 .L0 
+80200048 80200048        0     1                 .L0 
+8020004e 8020004e        0     1                 .L0 
+80200052 80200052        0     1                 .L0 
+8020005e 8020005e        0     1                 .L0 
+80200068 80200068        0     1                 .L0 
+8020006c 8020006c        0     1                 .L0 
+8020006e 8020006e        0     1                 .L0 
+8020006e 8020006e        0     1                 .L0 
+8020006e 8020006e        0     1                 .L0 
+8020006e 8020006e        0     1                 .L0 
+8020006e 8020006e        0     1                 .L0 
+8020006e 8020006e       16     1                 memset
+80200072 80200072        0     1                 .L0 
+80200072 80200072        0     1                 .L0 
+80200074 80200074        0     1                 .L0 
+80200078 80200078        0     1                 .L0 
+8020007e 8020007e        0     1                 .L0 
+8020007e 8020007e        0     1                 .L0 
+80200082 80200082        0     1                 .L0 
+80200082 80200082        0     1                 .L0 
+80200084 80200084        0     1                 .L0 
+80200084 80200084        0     2         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-riscv-b2e606.o:(.text)
+80200084 80200084       10     4 .rodata
+80200084 80200084       10     1         <internal>:(.rodata.str1.1)
+80200094 80200094        0     4 .bss
+80200094 80200094        0     1         __bss = .
+80200094 80200094        0     1         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-riscv-b2e606.o:(.bss)
+80200094 80200094        0     1                 sbss
+80200094 80200094        0     1                 ebss
+80200094 80200094        0     1         __bss_end = .
+80200094 80200094        0     1 . = ALIGN(4)
+80200094 80200094    20000     1 . += 128 * 1024
+80220094 80220094        0     1 __stack_top = .
+       0        0       8a     1 .debug_loclists
+       0        0       8a     1         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-89d592.o:(.debug_loclists)
+       0        0        0     1                 $d
+       c        c        0     1                 .L0 
+       0        0      1b0     1 .debug_abbrev
+       0        0      18f     1         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-89d592.o:(.debug_abbrev)
+       0        0        0     1                 $d
+     18f      18f       21     1         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-riscv-b2e606.o:(.debug_abbrev)
+     18f      18f        0     1                 .L0 
+     18f      18f        0     1                 $d
+       0        0      3f1     1 .debug_info
+       0        0      37e     1         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-89d592.o:(.debug_info)
+       0        0        0     1                 $d
+     37e      37e       73     1         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-riscv-b2e606.o:(.debug_info)
+     37e      37e        0     1                 .L0 
+     37e      37e        0     1                 $d
+       0        0       b0     1 .debug_str_offsets
+       0        0       b0     1         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-89d592.o:(.debug_str_offsets)
+       0        0        0     1                 $d
+       8        8        0     1                 .L0 
+       0        0      11a     1 .debug_str
+       0        0      11a     1         <internal>:(.debug_str)
+       0        0       24     1 .debug_addr
+       0        0       24     1         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-89d592.o:(.debug_addr)
+       0        0        0     1                 $d
+       8        8        0     1                 .L0 
+       0        0       3b     1 .comment
+       0        0       3b     1         <internal>:(.comment)
+       0        0       4e     1 .riscv.attributes
+       0        0       4e     1         <internal>:(.riscv.attributes)
+       0        0       54     4 .debug_frame
+       0        0       54     4         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-89d592.o:(.debug_frame)
+       0        0        0     1                 .L0 
+       0        0        0     1                 $d
+       0        0      113     1 .debug_line
+       0        0       ba     1         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-89d592.o:(.debug_line)
+       0        0        0     1                 .Lline_table_start0
+       0        0        0     1                 $d
+      ba       ba       59     1         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-riscv-b2e606.o:(.debug_line)
+      ba       ba        0     1                 .Lline_table_start0
+      ba       ba        0     1                 $d
+       0        0       30     1 .debug_line_str
+       0        0       30     1         <internal>:(.debug_line_str)
+       0        0       20     1 .debug_aranges
+       0        0       20     1         /var/folders/xs/l5fdrjm147v2r8c1413w72ch0000gn/T/kernel-riscv-b2e606.o:(.debug_aranges)
+       0        0        0     1                 $d
+       0        0      200     4 .symtab
+       0        0      200     4         <internal>:(.symtab)
+       0        0       d5     1 .shstrtab
+       0        0       d5     1         <internal>:(.shstrtab)
+       0        0       95     1 .strtab
+       0        0       95     1         <internal>:(.strtab)

@@ -27,4 +27,3 @@ while(not(r.WindowShouldClose())) {
 }
 
 r.CloseWindow()
-

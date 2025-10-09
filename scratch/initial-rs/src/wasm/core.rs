@@ -3,6 +3,7 @@ use core::panic::PanicInfo;
 unsafe extern "C" {
   fn host_print(ptr: *const u8, len: usize);
   fn host_readln(buffer: *mut u8, bufferlen: usize) -> bool;
+  fn host_exit();
   fn c_init();
   fn hello();
 }
@@ -63,4 +64,10 @@ pub extern "C" fn start() -> () {
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
   loop {}
+}
+
+pub fn exit() -> () {
+  unsafe {
+    host_exit();
+  }
 }

@@ -23,6 +23,9 @@ async function runWasmOS() {
     // Create imports for the WASM module
     const imports = {
         env: {
+            host_exit: () => {
+                process.exit(0);
+            },
             host_print: (ptr, len) => {
                 // Read string from WASM memory
                 const bytes = new Uint8Array(wasmInstance.exports.memory.buffer, ptr, len);

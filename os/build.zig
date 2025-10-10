@@ -28,21 +28,32 @@ pub fn build(b: *std.Build) void {
     kernel.setLinkerScript(b.path("src/kernel.ld"));
     kernel.entry = .{ .symbol_name = "boot" };
 
+    const cflags: []const []const u8 = &.{
+        "-std=c11",
+        "-ffreestanding",
+        "-nostdlib",
+        "-fno-stack-protector",
+        "-Isrc/vendor",
+    };
+
+    const cflags_strict = cflags ++ .{
+        "-Wall",
+        "-Wextra",
+    };
+
     // Add C source files
     kernel.addCSourceFile(.{
-        .file = b.path("src/kernel.c"),
-        .flags = &.{
-            "-std=c11",
-            "-ffreestanding",
-            "-nostdlib",
-            "-fno-stack-protector",
-            "-Wall",
-            "-Wextra",
-        },
+        .file = b.path("src/riscv32/kernel.c"),
+        .flags = cflags_strict,
+    });
+
+    kernel.addCSourceFile(.{
+        .file = b.path("src/vendor/tlsf.c"),
+        .flags = cflags,
     });
 
     // Add assembly source file
-    kernel.addAssemblyFile(b.path("src/boot.s"));
+    kernel.addAssemblyFile(b.path("src/riscv32/boot.s"));
 
     // Install the kernel
     b.installArtifact(kernel);

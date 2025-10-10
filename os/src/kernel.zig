@@ -1,6 +1,7 @@
 const c = @import("common");
 const config = @import("config");
 const helloWorld = @import("prog-hello-world");
+const echo = @import("prog-echo");
 
 const SbiRet = extern struct {
     err: c_long,
@@ -22,6 +23,9 @@ export fn kernel_main() void {
     switch (config.program) {
         .hello_world => {
             helloWorld.main();
+        },
+        .echo => {
+            echo.main();
         },
     }
 

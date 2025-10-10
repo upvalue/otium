@@ -179,7 +179,13 @@ __attribute__((naked)) __attribute__((aligned(4))) void otk_c_exception(void) {
 /***** STDLIB stuff
  * stdlib-esque things that are platform specific
  */
+
 void putchar(char c) { sbi_call(c, 0, 0, 0, 0, 0, 0, 1); }
+int getchar(void) {
+
+  struct sbiret ret = sbi_call(0, 0, 0, 0, 0, 0, 0, 2);
+  return (int)ret.error;
+}
 
 /***** MEMORY MANAGEMENT
  * Set up memory management with tlsf from RAM

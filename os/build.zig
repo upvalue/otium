@@ -2,6 +2,7 @@ const std = @import("std");
 
 const Program = enum {
     hello_world,
+    echo,
 };
 
 pub fn build(b: *std.Build) void {
@@ -28,6 +29,13 @@ pub fn build(b: *std.Build) void {
     });
     prog_hello_world.addImport("common", common_module);
 
+    const prog_echo = b.createModule(.{
+        .root_source_file = b.path("src/prog-echo.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    prog_echo.addImport("common", common_module);
+
     // Create a root module with our Zig code
     const root_module = b.createModule(.{
         .root_source_file = b.path("src/kernel.zig"),
@@ -37,6 +45,7 @@ pub fn build(b: *std.Build) void {
 
     root_module.addImport("common", common_module);
     root_module.addImport("prog-hello-world", prog_hello_world);
+    root_module.addImport("prog-echo", prog_echo);
 
     // Create the kernel executable
     const kernel = b.addExecutable(.{

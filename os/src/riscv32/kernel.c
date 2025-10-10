@@ -170,7 +170,15 @@ void *memcpy(void *dest, const void *src, size_t n) {
 void *malloc(size_t size) {
   void *ptr = tlsf_malloc(tlsf, size);
   memset(ptr, 0, size);
+  printf("malloc: %x\n", ptr);
   return ptr;
+}
+
+size_t strlen(const char *s) {
+  size_t len = 0;
+  while (*s++)
+    len++;
+  return len;
 }
 
 void free(void *ptr) { tlsf_free(tlsf, ptr); }
@@ -258,9 +266,6 @@ __attribute__((naked)) __attribute__((aligned(4))) void otk_c_exception(void) {
                        "sret\n");
 }
 
-/**
- * Sets up TLSF for dynamic memory allocation
- */
 void otk_c_setup(void) {
   // Set up exception handler
   WRITE_CSR(stvec, (uint32_t)otk_c_exception); // new

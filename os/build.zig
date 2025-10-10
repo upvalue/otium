@@ -1,5 +1,9 @@
 const std = @import("std");
 
+const Program = enum {
+    hello_world,
+};
+
 pub fn build(b: *std.Build) void {
     const target = b.resolveTargetQuery(.{
         .cpu_arch = .riscv32,
@@ -9,18 +13,42 @@ pub fn build(b: *std.Build) void {
 
     const optimize = b.standardOptimizeOption(.{});
 
-    // Create a root module with our Zig code
-    const root_module = b.createModule(.{
-        .root_source_file = b.path("src/kern-zig.zig"),
+    // Create shared common module (C bindings)
+    const common_module = b.createModule(.{
+        .root_source_file = b.path("src/common.zig"),
         .target = target,
         .optimize = optimize,
     });
+
+    // Create program modules
+    const prog_hello_world = b.createModule(.{
+        .root_source_file = b.path("src/prog-hello-world.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    prog_hello_world.addImport("common", common_module);
+
+    // Create a root module with our Zig code
+    const root_module = b.createModule(.{
+        .root_source_file = b.path("src/kernel.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    root_module.addImport("common", common_module);
+    root_module.addImport("prog-hello-world", prog_hello_world);
 
     // Create the kernel executable
     const kernel = b.addExecutable(.{
         .name = "kernel.elf",
         .root_module = root_module,
     });
+
+    // Program selection: allows determining what the main program to run is
+    const prog = b.option(Program, "program", "The program to build") orelse .hello_world;
+    const options = b.addOptions();
+    options.addOption(Program, "program", prog);
+    kernel.root_module.addOptions("config", options);
 
     kernel.linkage = .static;
 
@@ -44,6 +72,11 @@ pub fn build(b: *std.Build) void {
     // Add C source files
     kernel.addCSourceFile(.{
         .file = b.path("src/riscv32/kernel.c"),
+        .flags = cflags_strict,
+    });
+
+    kernel.addCSourceFile(.{
+        .file = b.path("src/common.c"),
         .flags = cflags_strict,
     });
 

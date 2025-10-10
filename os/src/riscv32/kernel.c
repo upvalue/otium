@@ -1,10 +1,8 @@
 #include "tlsf.h"
 
-#include <stdarg.h>
+#include "../common.h"
 
-typedef unsigned char uint8_t;
-typedef unsigned int uint32_t;
-typedef uint32_t size_t;
+#include <stdarg.h>
 
 struct trap_frame {
   uint32_t ra;
@@ -60,69 +58,6 @@ struct trap_frame {
     }                                                                          \
   } while (0)
 
-extern void putchar(char c);
-
-void printf(const char *fmt, ...) {
-  va_list vargs;
-  va_start(vargs, fmt);
-
-  while (*fmt) {
-    if (*fmt == '%') {
-      fmt++;          // Skip '%'
-      switch (*fmt) { // Read the next character
-      case '\0':      // '%' at the end of the format string
-        putchar('%');
-        goto end;
-      case '%': // Print '%'
-        putchar('%');
-        break;
-      case 's': { // Print a NULL-terminated string.
-        const char *s = va_arg(vargs, const char *);
-        while (*s) {
-          putchar(*s);
-          s++;
-        }
-        break;
-      }
-      case 'd': { // Print an integer in decimal.
-        int value = va_arg(vargs, int);
-        unsigned magnitude = value;
-        if (value < 0) {
-          putchar('-');
-          magnitude = -magnitude;
-        }
-
-        unsigned divisor = 1;
-        while (magnitude / divisor > 9)
-          divisor *= 10;
-
-        while (divisor > 0) {
-          putchar('0' + magnitude / divisor);
-          magnitude %= divisor;
-          divisor /= 10;
-        }
-
-        break;
-      }
-      case 'x': { // Print an integer in hexadecimal.
-        unsigned value = va_arg(vargs, unsigned);
-        for (int i = 7; i >= 0; i--) {
-          unsigned nibble = (value >> (i * 4)) & 0xf;
-          putchar("0123456789abcdef"[nibble]);
-        }
-      }
-      }
-    } else {
-      putchar(*fmt);
-    }
-
-    fmt++;
-  }
-
-end:
-  va_end(vargs);
-}
-
 extern char __bss[], __bss_end[], __stack_top[], __free_ram[], __free_ram_end[];
 
 static tlsf_t tlsf;
@@ -154,34 +89,9 @@ struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4,
   return (struct sbiret){.error = a0, .value = a1};
 }
 
-void memset(void *s, int c, size_t n) {
-  for (size_t i = 0; i < n; i++) {
-    ((char *)s)[i] = (char)c;
-  }
-}
-
-void *memcpy(void *dest, const void *src, size_t n) {
-  for (size_t i = 0; i < n; i++) {
-    ((char *)dest)[i] = ((char *)src)[i];
-  }
-  return dest;
-}
-
-void *malloc(size_t size) {
-  void *ptr = tlsf_malloc(tlsf, size);
-  memset(ptr, 0, size);
-  printf("malloc: %x\n", ptr);
-  return ptr;
-}
-
-size_t strlen(const char *s) {
-  size_t len = 0;
-  while (*s++)
-    len++;
-  return len;
-}
-
-void free(void *ptr) { tlsf_free(tlsf, ptr); }
+/***** EXCEPTION HANDLING
+ * Handles traps
+ */
 
 void handle_trap() {
   uint32_t scause = READ_CSR(scause);
@@ -266,6 +176,28 @@ __attribute__((naked)) __attribute__((aligned(4))) void otk_c_exception(void) {
                        "sret\n");
 }
 
+/***** STDLIB stuff
+ * stdlib-esque things that are platform specific
+ */
+void putchar(char c) { sbi_call(c, 0, 0, 0, 0, 0, 0, 1); }
+
+/***** MEMORY MANAGEMENT
+ * Set up memory management with tlsf from RAM
+ */
+
+void *malloc(size_t size) {
+  void *ptr = tlsf_malloc(tlsf, size);
+  memset(ptr, 0, size);
+  printf("malloc: %x\n", ptr);
+  return ptr;
+}
+
+void free(void *ptr) { tlsf_free(tlsf, ptr); }
+
+/**
+ * C setup;
+ * does a few basic things to get ready for use
+ */
 void otk_c_setup(void) {
   // Set up exception handler
   WRITE_CSR(stvec, (uint32_t)otk_c_exception); // new
@@ -284,6 +216,9 @@ void otk_c_setup(void) {
   printf("otk_c_setup end\n");
 }
 
+/**
+ * Exits the kernel
+ */
 void otk_exit(void) {
   for (;;) {
     __asm__ __volatile__("wfi");

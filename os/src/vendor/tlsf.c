@@ -8,11 +8,7 @@
 
 #include "tlsf.h"
 
-#if defined(__cplusplus)
-#define tlsf_decl inline
-#else
 #define tlsf_decl static
-#endif
 
 extern void *memcpy(void *dest, const void *src, size_t n);
 

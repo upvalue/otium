@@ -4,4 +4,4 @@ extern void host_putchar(char c);
 
 void putchar(char c) { host_putchar(c); }
 
-void kernel_enter() { printf("aw shucks\n"); }
+void kernel_enter() { printf("hello world from wasm\n"); }

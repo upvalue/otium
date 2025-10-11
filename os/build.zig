@@ -5,12 +5,30 @@ const Program = enum {
     echo,
 };
 
+const TargetArch = enum {
+    riscv32,
+    wasm32,
+};
+
 pub fn build(b: *std.Build) void {
+    // Options setup
+    // User can pick target architecture and main program to run
+    const targetArch = b.option(TargetArch, "target-arch", "The architecture to build for") orelse .riscv32;
+
     const target = b.resolveTargetQuery(.{
-        .cpu_arch = .riscv32,
+        .cpu_arch = switch (targetArch) {
+            .riscv32 => .riscv32,
+            .wasm32 => .wasm32,
+        },
         .os_tag = .freestanding,
         .abi = .none,
     });
+
+    const prog = b.option(Program, "program", "The program to build") orelse .hello_world;
+    const options = b.addOptions();
+
+    options.addOption(TargetArch, "target-arch", targetArch);
+    options.addOption(Program, "program", prog);
 
     const optimize = b.standardOptimizeOption(.{});
 
@@ -54,9 +72,6 @@ pub fn build(b: *std.Build) void {
     });
 
     // Program selection: allows determining what the main program to run is
-    const prog = b.option(Program, "program", "The program to build") orelse .hello_world;
-    const options = b.addOptions();
-    options.addOption(Program, "program", prog);
     kernel.root_module.addOptions("config", options);
 
     kernel.linkage = .static;
@@ -79,10 +94,6 @@ pub fn build(b: *std.Build) void {
     };
 
     // Add C source files
-    kernel.addCSourceFile(.{
-        .file = b.path("src/riscv32/kernel.c"),
-        .flags = cflags_strict,
-    });
 
     kernel.addCSourceFile(.{
         .file = b.path("src/common.c"),
@@ -94,8 +105,21 @@ pub fn build(b: *std.Build) void {
         .flags = cflags,
     });
 
-    // Add assembly source file
-    kernel.addAssemblyFile(b.path("src/riscv32/boot.s"));
+    // Architecture specific support code
+    if (targetArch == .riscv32) {
+        kernel.addCSourceFile(.{
+            .file = b.path("src/riscv32/kernel.c"),
+            .flags = cflags_strict,
+        });
+
+        // Add assembly source file
+        kernel.addAssemblyFile(b.path("src/riscv32/boot.s"));
+    } else if (targetArch == .wasm32) {
+        kernel.addCSourceFile(.{
+            .file = b.path("src/wasm32/kernel.c"),
+            .flags = cflags_strict,
+        });
+    }
 
     // Install the kernel
     b.installArtifact(kernel);

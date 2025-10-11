@@ -1,5 +1,6 @@
 const c = @import("common");
 const config = @import("config");
+
 const helloWorld = @import("prog-hello-world");
 const echo = @import("prog-echo");
 
@@ -9,6 +10,7 @@ const SbiRet = extern struct {
 };
 
 extern fn sbi_call(arg0: c_long, arg1: c_long, arg2: c_long, arg3: c_long, arg4: c_long, arg5: c_long, fid: c_long, eid: c_long) SbiRet;
+
 extern fn otk_c_setup() void;
 extern fn otk_exit() void;
 

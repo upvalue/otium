@@ -76,10 +76,6 @@ pub fn build(b: *std.Build) void {
 
     kernel.linkage = .static;
 
-    // Configure for bare-metal embedded target
-    kernel.setLinkerScript(b.path("src/kernel.ld"));
-    kernel.entry = .{ .symbol_name = "boot" };
-
     const cflags: []const []const u8 = &.{
         "-std=c11",
         "-ffreestanding",
@@ -105,8 +101,11 @@ pub fn build(b: *std.Build) void {
         .flags = cflags,
     });
 
+    kernel.entry = .{ .symbol_name = "kernel_enter" };
+
     // Architecture specific support code
     if (targetArch == .riscv32) {
+        kernel.setLinkerScript(b.path("src/riscv32/link.ld"));
         kernel.addCSourceFile(.{
             .file = b.path("src/riscv32/kernel.c"),
             .flags = cflags_strict,
@@ -119,6 +118,8 @@ pub fn build(b: *std.Build) void {
             .file = b.path("src/wasm32/kernel.c"),
             .flags = cflags_strict,
         });
+        kernel.root_module.addCMacro("__wasm__", "1");
+        kernel.import_symbols = true;
     }
 
     // Install the kernel

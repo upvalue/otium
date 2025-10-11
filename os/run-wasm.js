@@ -32,6 +32,9 @@ async function runWasmOS() {
                 const str = new TextDecoder().decode(bytes);
                 process.stdout.write(str);
             },
+            host_putchar: (c) => {
+                process.stdout.write(String.fromCharCode(c));
+            },
             host_readln: (buffer, bufferLength) => {
                 const ln = prompt("");
 
@@ -60,8 +63,7 @@ async function runWasmOS() {
     console.log(`Running ${wasmPath}`)
     
     try {
-        // wasmInstance.exports.kernel_enter();
-      wasmInstance.exports.boot();
+      wasmInstance.exports.kernel_enter();
     } catch(e) {
         console.error(`Exception ${e.toString()}`);
     }

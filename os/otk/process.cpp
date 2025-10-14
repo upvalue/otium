@@ -1,8 +1,31 @@
 #include "otk/kernel.hpp"
 
+extern char __kernel_base[];
+
 Process procs[PROCS_MAX];
 
 Process *current_proc = nullptr, *idle_proc = nullptr;
+
+void map_page(uintptr_t *table1, uintptr_t vaddr, uintptr_t paddr,
+              uint32_t flags) {
+  if (!is_aligned((void *)vaddr, PAGE_SIZE))
+    PANIC("unaligned vaddr %x", vaddr);
+
+  if (!is_aligned((void *)paddr, PAGE_SIZE))
+    PANIC("unaligned paddr %x", paddr);
+
+  uint32_t vpn1 = (vaddr >> 22) & 0x3ff;
+  if ((table1[vpn1] & PAGE_V) == 0) {
+    // Create the 1st level page table if it doesn't exist.
+    uintptr_t pt_paddr = (uintptr_t)page_allocate(1);
+    table1[vpn1] = ((pt_paddr / PAGE_SIZE) << 10) | PAGE_V;
+  }
+
+  // Set the 2nd level page table entry to map the physical page.
+  uint32_t vpn0 = (vaddr >> 12) & 0x3ff;
+  uint32_t *table0 = (uint32_t *)((table1[vpn1] >> 10) * PAGE_SIZE);
+  table0[vpn0] = ((paddr / PAGE_SIZE) << 10) | flags | PAGE_V;
+}
 
 Process *process_create_impl(Process *table, uint32_t max_procs,
                              const char *name, uint32_t pc) {
@@ -32,6 +55,7 @@ Process *process_create_impl(Process *table, uint32_t max_procs,
   free_proc->state = RUNNABLE;
   free_proc->pid = i;
 
+  // Set up initial stack with zeroed out registers
   uint32_t *sp = (uint32_t *)&free_proc->stack[sizeof(free_proc->stack)];
   *--sp = 0;            // s11
   *--sp = 0;            // s10
@@ -48,6 +72,14 @@ Process *process_create_impl(Process *table, uint32_t max_procs,
   *--sp = (uint32_t)pc; // ra
 
   free_proc->ctx.stack_ptr = (uintptr_t)sp;
+
+  // Map kernel pages.
+  void *page_table = page_allocate(1);
+  for (uintptr_t paddr = (uintptr_t)__kernel_base;
+       paddr < (uintptr_t)__free_ram_end; paddr += PAGE_SIZE)
+    map_page((uintptr_t *)page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
+
+  free_proc->page_table = (uintptr_t *)page_table;
 
   TRACE("proc %s stack ptr: %x", free_proc->name, free_proc->ctx.stack_ptr);
 
@@ -75,4 +107,9 @@ Process *process_next_runnable(void) {
   }
 
   return next;
+}
+
+void process_exit(Process *proc) {
+  omemset(proc, 0, sizeof(Process));
+  proc->state = UNUSED;
 }

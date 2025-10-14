@@ -37,24 +37,17 @@ extern "C" char __free_ram[], __free_ram_end[];
 // process management
 #define PROCS_MAX 8
 
+#define SATP_SV32 (1u << 31)
+#define PAGE_V (1 << 0) // "Valid" bit (entry is enabled)
+#define PAGE_R (1 << 1) // Readable
+#define PAGE_W (1 << 2) // Writable
+#define PAGE_X (1 << 3) // Executable
+#define PAGE_U (1 << 4) // User (accessible in user mode)
+
 enum ProcessState { UNUSED, RUNNABLE };
 
 struct ProcessContext {
-  uintptr_t return_addr;
   uintptr_t stack_ptr;
-
-  uint32_t s0;
-  uint32_t s1;
-  uint32_t s2;
-  uint32_t s3;
-  uint32_t s4;
-  uint32_t s5;
-  uint32_t s6;
-  uint32_t s7;
-  uint32_t s8;
-  uint32_t s9;
-  uint32_t s10;
-  uint32_t s11;
 };
 
 struct Process {
@@ -62,6 +55,7 @@ struct Process {
   uint32_t pid;
   ProcessState state;
   ProcessContext ctx;
+  uintptr_t *page_table;
   uint8_t stack[8192];
 };
 
@@ -69,6 +63,7 @@ Process *process_create_impl(Process *table, uint32_t max_procs,
                              const char *name, uint32_t pc);
 Process *process_create(const char *name, uintptr_t pc);
 Process *process_next_runnable(void);
+void process_exit(Process *proc);
 
 extern Process *idle_proc, *current_proc;
 extern Process procs[PROCS_MAX];

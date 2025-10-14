@@ -22,6 +22,8 @@ typedef uint32_t uintptr_t;
 
 #endif
 
+#define is_aligned(value, align) __builtin_is_aligned(value, align)
+
 // basic functions
 void *omemset(void *buf, char c, size_t n);
 void oprintf(const char *fmt, ...);

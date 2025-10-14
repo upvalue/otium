@@ -5,5 +5,6 @@ clang++ -DOT_TEST -DOT_TRACE_MEM \
     otk/memory-test.cpp \
     otk/memory.cpp \
     otk/std.cpp \
-    otk/platform-test.cpp 
+    otk/platform-test.cpp \
+    otk/process-test.cpp
 ./test

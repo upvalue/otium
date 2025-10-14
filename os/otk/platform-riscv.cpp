@@ -224,9 +224,14 @@ void yield(void) {
   }
 
   __asm__ __volatile__(
+      "sfence.vma\n"
+      "csrw satp, %[satp]\n"
+      "sfence.vma\n"
       "csrw sscratch, %[sscratch]\n"
       :
-      : [sscratch] "r"((uint32_t)&next->stack[sizeof(next->stack)]));
+      // Don't forget the trailing comma!
+      : [satp] "r"(SATP_SV32 | ((uint32_t)next->page_table / PAGE_SIZE)),
+        [sscratch] "r"((uint32_t)&next->stack[sizeof(next->stack)]));
 
   Process *prev = current_proc;
   current_proc = next;

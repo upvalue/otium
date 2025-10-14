@@ -70,7 +70,7 @@ struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4,
   return (struct sbiret){.error = a0, .value = a1};
 }
 
-void putchar(char ch) {
+void oputchar(char ch) {
   sbi_call(ch, 0, 0, 0, 0, 0, 0, 1 /* Console Putchar */);
 }
 

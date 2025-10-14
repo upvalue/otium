@@ -1,11 +1,17 @@
 #!/bin/bash
-set -xue
+set -euxo pipefail
 
-# QEMU file path
 QEMU=qemu-system-riscv32
 
-# Build the kernel using Zig
-zig build -Dprogram=echo
+# Path to clang and compiler flags
+CC=/opt/homebrew/opt/llvm/bin/clang  # Ubuntu users: use CC=clang
+CPPFLAGS="-I."
+CFLAGS="-O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib"
+
+# Build the kernel
+$CC $CPPFLAGS $CFLAGS -Wl,-Totk/kernel-link.ld -Wl,-Map=otk/kernel.map -o otk/kernel.elf \
+    otk/kernel.cpp otk/riscv.cpp otk/std.cpp
 
 # Start QEMU
-$QEMU -machine virt -bios default -nographic -serial mon:stdio --no-reboot -kernel zig-out/bin/kernel.elf
+$QEMU -machine virt -bios default -nographic -serial mon:stdio --no-reboot \
+    -kernel otk/kernel.elf

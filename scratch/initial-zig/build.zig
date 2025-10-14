@@ -112,7 +112,7 @@ pub fn build(b: *std.Build) void {
         });
 
         // Add assembly source file
-        kernel.addAssemblyFile(b.path("src/riscv32/boot.s"));
+        kernel.addAssemblyFile(b.path("src/riscv32/support.s"));
     } else if (targetArch == .wasm32) {
         kernel.addCSourceFile(.{
             .file = b.path("src/wasm32/kernel.c"),

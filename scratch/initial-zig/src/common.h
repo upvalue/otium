@@ -11,7 +11,8 @@ void *malloc(size_t size);
 size_t strlen(const char *s);
 
 void printf(const char *fmt, ...);
-
 void putchar(char c);
+
+void panic(const char *str);
 
 #endif

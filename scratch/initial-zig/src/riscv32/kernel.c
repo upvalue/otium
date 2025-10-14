@@ -176,6 +176,8 @@ __attribute__((naked)) __attribute__((aligned(4))) void otk_c_exception(void) {
                        "sret\n");
 }
 
+void panic(const char *str) { PANIC("%s", str); }
+
 /***** STDLIB stuff
  * stdlib-esque things that are platform specific
  */

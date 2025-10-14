@@ -26,8 +26,11 @@
 #define TRACE_MEM(fmt, ...)
 #endif
 
-void kernel_common(void);
+// platform specific utility functions
 void wfi(void);
+void kernel_exit(void);
+
+void kernel_common(void);
 
 // memory management
 void *page_allocate_impl(char *begin, char *end, char **next, size_t page_size);

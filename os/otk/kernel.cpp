@@ -38,12 +38,15 @@ void kernel_common(void) {
   TRACE("created idle proc with name %s and pid %d", idle_proc->name,
         idle_proc->pid);
 
+  /*
   proc_a = process_create("proc_a", (uintptr_t)proc_a_entry);
   TRACE("created proc with name %s and pid %d", proc_a->name, proc_a->pid);
   proc_b = process_create("proc_b", (uintptr_t)proc_b_entry);
   TRACE("created proc with name %s and pid %d", proc_b->name, proc_b->pid);
 
   proc_a_entry();
+  */
 
-  wfi();
+  // wfi();
+  kernel_exit();
 }

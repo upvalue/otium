@@ -79,6 +79,12 @@ void oputchar(char ch) {
   sbi_call(ch, 0, 0, 0, 0, 0, 0, 1 /* Console Putchar */);
 }
 
+#define SBI_EXT_SRST 0x53525354 // "SRST"
+#define SBI_SRST_SHUTDOWN 0
+void kernel_exit(void) {
+  sbi_call(0, 0, 0, 0, 0, 0, SBI_SRST_SHUTDOWN, SBI_EXT_SRST);
+}
+
 void wfi(void) {
   for (;;) {
     __asm__ __volatile__("wfi");

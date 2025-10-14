@@ -21,7 +21,6 @@ TEST_CASE("page_allocator") {
       (char *)test_page_memory, test_page_memory + sizeof(test_page_memory),
       &next, 1);
 
-  CHECK(next != prevnext);
   CHECK(next == test_page_memory + 2 * PAGE_SIZE);
   CHECK(page2 == test_page_memory + PAGE_SIZE);
 }

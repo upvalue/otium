@@ -23,6 +23,8 @@ void *page_allocate_impl(char *begin, char *end, char **next,
 }
 
 void *page_allocate(size_t page_count) {
-  return page_allocate_impl((char *)__free_ram, (char *)__free_ram_end,
+  TRACE_MEM("__free_ram: %x, next_page_addr: %x, __free_ram_end: %x",
+            __free_ram, next_page_addr, __free_ram_end);
+  return page_allocate_impl(__free_ram, __free_ram_end,
                             (char **)&next_page_addr, page_count);
 }

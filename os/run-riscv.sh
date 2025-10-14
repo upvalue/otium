@@ -10,6 +10,7 @@ CFLAGS="-O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fuse-ld=lld -fno-sta
 
 # Build the kernel
 $CC $CPPFLAGS $CFLAGS -Wl,-Totk/kernel-link.ld -Wl,-Map=otk/kernel.map -o otk/kernel.elf \
+    -fno-exceptions -fno-rtti \
     otk/kernel.cpp otk/riscv.cpp otk/std.cpp
 
 # Start QEMU

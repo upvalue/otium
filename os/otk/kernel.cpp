@@ -14,7 +14,7 @@ extern "C" void proc_a_entry(void) {
   oprintf("starting process A\n");
   while (1) {
     oputchar('A');
-    switch_context(&proc_a->ctx.stack_ptr, &proc_b->ctx.stack_ptr);
+    yield();
     delay();
   }
 }
@@ -23,14 +23,20 @@ extern "C" void proc_b_entry(void) {
   oprintf("starting process B\n");
   while (1) {
     oputchar('B');
-    switch_context(&proc_b->ctx.stack_ptr, &proc_a->ctx.stack_ptr);
+    yield();
     delay();
   }
 }
 
 void kernel_common(void) {
   omemset(__bss, 0, (size_t)__bss_end - (size_t)__bss);
-  TRACE("hello from kernel");
+  TRACE("hello from kernel_common");
+
+  idle_proc = process_create("idle", (uintptr_t)nullptr);
+  current_proc = idle_proc;
+
+  TRACE("created idle proc with name %s and pid %d", idle_proc->name,
+        idle_proc->pid);
 
   proc_a = process_create("proc_a", (uintptr_t)proc_a_entry);
   TRACE("created proc with name %s and pid %d", proc_a->name, proc_a->pid);

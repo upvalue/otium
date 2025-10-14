@@ -171,6 +171,7 @@ kernel_entry(void) {
 
 __attribute__((naked)) extern "C" void switch_context(uint32_t *prev_sp,
                                                       uint32_t *next_sp) {
+  // TODO: Handle stack overflows
   __asm__ __volatile__(
       // Save callee-saved registers onto the current process's stack.
       "addi sp, sp, -13 * 4\n" // Allocate stack space for 13 4-byte registers
@@ -208,6 +209,28 @@ __attribute__((naked)) extern "C" void switch_context(uint32_t *prev_sp,
       "lw s11, 12 * 4(sp)\n"
       "addi sp, sp, 13 * 4\n" // We've popped 13 4-byte registers from the stack
       "ret\n");
+}
+
+void yield(void) {
+  if (!current_proc || !idle_proc) {
+    PANIC("current_proc or idle_proc is null");
+  }
+
+  Process *next = process_next_runnable();
+
+  // No runnable process other than the current one
+  if (next == current_proc) {
+    return;
+  }
+
+  __asm__ __volatile__(
+      "csrw sscratch, %[sscratch]\n"
+      :
+      : [sscratch] "r"((uint32_t)&next->stack[sizeof(next->stack)]));
+
+  Process *prev = current_proc;
+  current_proc = next;
+  switch_context(&prev->ctx.stack_ptr, &current_proc->ctx.stack_ptr);
 }
 
 extern "C" void kernel_main(void) {

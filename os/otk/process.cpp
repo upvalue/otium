@@ -1,6 +1,8 @@
 #include "otk/kernel.hpp"
 
-static Process procs[PROCS_MAX];
+Process procs[PROCS_MAX];
+
+Process *current_proc = nullptr, *idle_proc = nullptr;
 
 Process *process_create_impl(Process *table, uint32_t max_procs,
                              const char *name, uint32_t pc) {
@@ -27,7 +29,7 @@ Process *process_create_impl(Process *table, uint32_t max_procs,
     free_proc->name[j] = name[j];
   }
 
-  free_proc->state = RUNNING;
+  free_proc->state = RUNNABLE;
   free_proc->pid = i;
 
   uint32_t *sp = (uint32_t *)&free_proc->stack[sizeof(free_proc->stack)];
@@ -60,4 +62,17 @@ Process *process_create(const char *name, uintptr_t pc) {
   }
 
   return p;
+}
+
+Process *process_next_runnable(void) {
+  Process *next = idle_proc;
+  for (size_t i = 0; i < PROCS_MAX; i++) {
+    Process *p = &procs[(current_proc->pid + i + 1) % PROCS_MAX];
+    if (p->state == RUNNABLE && p->pid > 0) {
+      next = p;
+      break;
+    }
+  }
+
+  return next;
 }

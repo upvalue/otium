@@ -37,7 +37,7 @@ extern "C" char __free_ram[], __free_ram_end[];
 // process management
 #define PROCS_MAX 8
 
-enum ProcessState { UNUSED, RUNNING };
+enum ProcessState { UNUSED, RUNNABLE };
 
 struct ProcessContext {
   uintptr_t return_addr;
@@ -68,7 +68,12 @@ struct Process {
 Process *process_create_impl(Process *table, uint32_t max_procs,
                              const char *name, uint32_t pc);
 Process *process_create(const char *name, uintptr_t pc);
+Process *process_next_runnable(void);
+
+extern Process *idle_proc, *current_proc;
+extern Process procs[PROCS_MAX];
 
 extern "C" void switch_context(uintptr_t *prev_sp, uintptr_t *next_sp);
+void yield(void);
 
 #endif

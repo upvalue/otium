@@ -49,22 +49,20 @@ extern "C" char __free_ram[], __free_ram_end[];
 
 enum ProcessState { UNUSED, RUNNABLE };
 
-struct ProcessContext {
-  uintptr_t stack_ptr;
-};
-
 struct Process {
   char name[32];
   uint32_t pid;
   ProcessState state;
-  ProcessContext ctx;
   uintptr_t *page_table;
+  uintptr_t stack_ptr;
   uint8_t stack[8192];
 };
 
 Process *process_create_impl(Process *table, uint32_t max_procs,
-                             const char *name, uint32_t pc);
-Process *process_create(const char *name, uintptr_t pc);
+                             const char *name, const void *image_or_pc,
+                             size_t size, bool is_image);
+Process *process_create(const char *name, const void *image_or_pc, size_t size,
+                        bool is_image);
 Process *process_next_runnable(void);
 void process_exit(Process *proc);
 
@@ -73,5 +71,10 @@ extern Process procs[PROCS_MAX];
 
 extern "C" void switch_context(uintptr_t *prev_sp, uintptr_t *next_sp);
 void yield(void);
+
+#define USER_BASE 0x1000000
+#define SSTATUS_SPIE (1 << 5)
+
+extern "C" void user_entry(void);
 
 #endif

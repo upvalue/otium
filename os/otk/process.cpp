@@ -28,7 +28,8 @@ void map_page(uintptr_t *table1, uintptr_t vaddr, uintptr_t paddr,
 }
 
 Process *process_create_impl(Process *table, uint32_t max_procs,
-                             const char *name, uint32_t pc) {
+                             const char *name, const void *image_or_pc,
+                             uint32_t size, bool is_image) {
   Process *free_proc = nullptr;
   uint32_t i;
   for (i = 0; i < max_procs; i++) {
@@ -56,22 +57,29 @@ Process *process_create_impl(Process *table, uint32_t max_procs,
   free_proc->pid = i;
 
   // Set up initial stack with zeroed out registers
-  uint32_t *sp = (uint32_t *)&free_proc->stack[sizeof(free_proc->stack)];
-  *--sp = 0;            // s11
-  *--sp = 0;            // s10
-  *--sp = 0;            // s9
-  *--sp = 0;            // s8
-  *--sp = 0;            // s7
-  *--sp = 0;            // s6
-  *--sp = 0;            // s5
-  *--sp = 0;            // s4
-  *--sp = 0;            // s3
-  *--sp = 0;            // s2
-  *--sp = 0;            // s1
-  *--sp = 0;            // s0
-  *--sp = (uint32_t)pc; // ra
+  uintptr_t *sp = (uintptr_t *)&free_proc->stack[sizeof(free_proc->stack)];
+  *--sp = 0; // s11
+  *--sp = 0; // s10
+  *--sp = 0; // s9
+  *--sp = 0; // s8
+  *--sp = 0; // s7
+  *--sp = 0; // s6
+  *--sp = 0; // s5
+  *--sp = 0; // s4
+  *--sp = 0; // s3
+  *--sp = 0; // s2
+  *--sp = 0; // s1
+  *--sp = 0; // s0
 
-  free_proc->ctx.stack_ptr = (uintptr_t)sp;
+  if (is_image) {
+    oprintf("set pc to %x\n", (uintptr_t)user_entry);
+    oprintf("insn at %x\n", *(char *)image_or_pc);
+    *--sp = (uintptr_t)user_entry; // ra
+  } else {
+    *--sp = (uintptr_t)image_or_pc; // ra
+  }
+
+  free_proc->stack_ptr = (uintptr_t)sp;
 
   // Map kernel pages.
   void *page_table = page_allocate(1);
@@ -79,15 +87,37 @@ Process *process_create_impl(Process *table, uint32_t max_procs,
        paddr < (uintptr_t)__free_ram_end; paddr += PAGE_SIZE)
     map_page((uintptr_t *)page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
 
+  // Map user pages.
+  if (is_image) {
+    oprintf("found image. allocating pages\n");
+    for (size_t off = 0; off < size; off += PAGE_SIZE) {
+      void *page = page_allocate(1);
+
+      // Handle the case where the data to be copied is smaller than the
+      // page size.
+      size_t remaining = size - off;
+      size_t copy_size = PAGE_SIZE <= remaining ? PAGE_SIZE : remaining;
+
+      // Fill and map the page.
+      oprintf("copying %d bytes to page %x from %x\n", copy_size, page,
+              (uintptr_t)image_or_pc + off);
+      memcpy((void *)page, ((char *)image_or_pc) + off, copy_size);
+      map_page((uintptr_t *)page_table, (uintptr_t)USER_BASE + off,
+               (uintptr_t)page, PAGE_U | PAGE_R | PAGE_W | PAGE_X);
+    }
+  }
+
   free_proc->page_table = (uintptr_t *)page_table;
 
-  TRACE("proc %s stack ptr: %x", free_proc->name, free_proc->ctx.stack_ptr);
+  TRACE("proc %s stack ptr: %x", free_proc->name, free_proc->stack_ptr);
 
   return free_proc;
 }
 
-Process *process_create(const char *name, uintptr_t pc) {
-  Process *p = process_create_impl(procs, PROCS_MAX, name, pc);
+Process *process_create(const char *name, const void *image_or_pc, size_t size,
+                        bool is_image) {
+  Process *p =
+      process_create_impl(procs, PROCS_MAX, name, image_or_pc, size, is_image);
 
   if (!p) {
     PANIC("reached proc limit");

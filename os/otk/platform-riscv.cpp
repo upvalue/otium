@@ -138,6 +138,10 @@ kernel_entry(void) {
                        "csrr a0, sscratch\n"
                        "sw a0, 4 * 30(sp)\n"
 
+                       // Reset the kernel stack.
+                       "addi a0, sp, 4 * 31\n"
+                       "csrw sscratch, a0\n"
+
                        "mv a0, sp\n"
                        "call handle_trap\n"
 
@@ -217,6 +221,13 @@ __attribute__((naked)) extern "C" void switch_context(uint32_t *prev_sp,
       "ret\n");
 }
 
+__attribute__((naked)) extern "C" void user_entry(void) {
+  __asm__ __volatile__("csrw sepc, %[sepc]        \n"
+                       "csrw sstatus, %[sstatus]  \n"
+                       "sret                      \n"
+                       :
+                       : [sepc] "r"(USER_BASE), [sstatus] "r"(SSTATUS_SPIE));
+}
 void yield(void) {
   if (!current_proc || !idle_proc) {
     PANIC("current_proc or idle_proc is null");
@@ -236,12 +247,12 @@ void yield(void) {
       "csrw sscratch, %[sscratch]\n"
       :
       // Don't forget the trailing comma!
-      : [satp] "r"(SATP_SV32 | ((uint32_t)next->page_table / PAGE_SIZE)),
-        [sscratch] "r"((uint32_t)&next->stack[sizeof(next->stack)]));
+      : [satp] "r"(SATP_SV32 | ((uintptr_t)next->page_table / PAGE_SIZE)),
+        [sscratch] "r"((uintptr_t)&next->stack[sizeof(next->stack)]));
 
   Process *prev = current_proc;
   current_proc = next;
-  switch_context(&prev->ctx.stack_ptr, &current_proc->ctx.stack_ptr);
+  switch_context(&prev->stack_ptr, &current_proc->stack_ptr);
 }
 
 extern "C" void kernel_main(void) {

@@ -46,9 +46,9 @@ void kernel_common(void) {
   proc_b = process_create("proc_b", (const void *)proc_b_entry, 0, false);
   TRACE("created proc with name %s and pid %d", proc_b->name, proc_b->pid);
 
-  /*Process *proc_c =
+  Process *proc_c =
       process_create("proc_c", (const void *)_binary_otu_prog_shell_bin_start,
-                     (size_t)_binary_otu_prog_shell_bin_size, true);*/
+                     (size_t)_binary_otu_prog_shell_bin_size, true);
   TRACE("created proc with name %s and pid %d", proc_b->name, proc_b->pid);
 
   // proc_a_entry();

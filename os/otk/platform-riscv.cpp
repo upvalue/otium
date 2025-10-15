@@ -2,6 +2,8 @@
 
 #include "otk/kernel.hpp"
 
+#define SCAUSE_ECALL 8
+
 extern "C" char __bss[], __bss_end[], __stack_top[];
 
 struct sbiret {
@@ -91,18 +93,39 @@ void wfi(void) {
   }
 }
 
+void handle_syscall(struct trap_frame *f) {
+  uint32_t sysno = f->a3;
+  uint32_t arg0 = f->a0;
+  uint32_t arg1 = f->a1;
+  uint32_t arg2 = f->a2;
+
+  switch (sysno) {
+  case SYS_PUTCHAR:
+    oputchar(arg0);
+    break;
+  default:
+    PANIC("unexpected syscall sysno=%x\n", sysno);
+  }
+}
+
 extern "C" void handle_trap(struct trap_frame *f) {
   uint32_t scause = READ_CSR(scause);
   uint32_t stval = READ_CSR(stval);
   uint32_t user_pc = READ_CSR(sepc);
 
-  PANIC("unexpected trap scause=%x, stval=%x, sepc=%x\n", scause, stval,
-        user_pc);
+  if (scause == SCAUSE_ECALL) {
+    handle_syscall(f);
+  } else {
+    PANIC("unexpected trap scause=%x, stval=%x, sepc=%x\n", scause, stval,
+          user_pc);
+  }
+
+  WRITE_CSR(sepc, user_pc);
 }
 
 __attribute__((naked)) __attribute__((aligned(4))) extern "C" void
 kernel_entry(void) {
-  __asm__ __volatile__("csrw sscratch, sp\n"
+  __asm__ __volatile__("csrrw sp, sscratch, sp\n"
                        "addi sp, sp, -4 * 31\n"
                        "sw ra,  4 * 0(sp)\n"
                        "sw gp,  4 * 1(sp)\n"

@@ -32,7 +32,11 @@ char *strcpy(char *dst, const char *src);
 int strcmp(const char *s1, const char *s2);
 
 // syscalls
-#define SYS_PUTCHAR 1
+#define OU_YIELD 1
+#define OU_PUTCHAR 2
+#define OU_GETCHAR 3
+#define OU_EXIT 4
+
 void oputchar(char);
 
 #ifdef __cplusplus

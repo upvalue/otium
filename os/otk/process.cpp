@@ -55,6 +55,7 @@ Process *process_create_impl(Process *table, uint32_t max_procs,
 
   free_proc->state = RUNNABLE;
   free_proc->pid = i;
+  free_proc->user_pc = is_image ? USER_BASE : (uintptr_t)image_or_pc;
 
   // Set up initial stack with zeroed out registers
   uintptr_t *sp = (uintptr_t *)&free_proc->stack[sizeof(free_proc->stack)];

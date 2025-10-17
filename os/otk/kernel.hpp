@@ -47,7 +47,7 @@ extern "C" char __free_ram[], __free_ram_end[];
 #define PAGE_X (1 << 3) // Executable
 #define PAGE_U (1 << 4) // User (accessible in user mode)
 
-enum ProcessState { UNUSED, RUNNABLE };
+enum ProcessState { UNUSED, RUNNABLE, TERMINATED };
 
 struct Process {
   char name[32];
@@ -55,6 +55,7 @@ struct Process {
   ProcessState state;
   uintptr_t *page_table;
   uintptr_t stack_ptr;
+  uintptr_t user_pc;  // Save user program counter
   uint8_t stack[8192];
 };
 

@@ -3,6 +3,7 @@
 #include "otk/kernel.hpp"
 
 #define SCAUSE_ECALL 8
+#define SSTATUS_SPP (1 << 8)
 
 extern "C" char __bss[], __bss_end[], __stack_top[];
 
@@ -100,27 +101,53 @@ void handle_syscall(struct trap_frame *f) {
   uint32_t arg2 = f->a2;
 
   switch (sysno) {
-  case SYS_PUTCHAR:
+  case OU_PUTCHAR:
     oputchar(arg0);
+    break;
+  case OU_YIELD:
+    break;
+  case OU_EXIT:
+    if (current_proc) {
+      oprintf("Process %s (pid=%d) exited\n", current_proc->name, current_proc->pid);
+      current_proc->state = TERMINATED;
+    }
+    break;
+  case OU_GETCHAR:
+    // getchar();
     break;
   default:
     PANIC("unexpected syscall sysno=%x\n", sysno);
   }
+  yield();
 }
 
 extern "C" void handle_trap(struct trap_frame *f) {
   uint32_t scause = READ_CSR(scause);
   uint32_t stval = READ_CSR(stval);
   uint32_t user_pc = READ_CSR(sepc);
+  uint32_t sstatus = READ_CSR(sstatus);
 
   if (scause == SCAUSE_ECALL) {
+    // Save the user PC before yielding (will be restored in yield)
+    if (current_proc) {
+      current_proc->user_pc = user_pc + 4; // Skip past the ecall instruction
+    }
     handle_syscall(f);
+    // user_pc will be restored by yield(), don't write it back here
   } else {
-    PANIC("unexpected trap scause=%x, stval=%x, sepc=%x\n", scause, stval,
-          user_pc);
-  }
+    // Check if trap came from user mode
+    bool from_user = !(sstatus & SSTATUS_SPP);
 
-  WRITE_CSR(sepc, user_pc);
+    if (from_user && current_proc) {
+      oprintf("Process %s (pid=%d) crashed: scause=%x, stval=%x, sepc=%x\n",
+              current_proc->name, current_proc->pid, scause, stval, user_pc);
+      current_proc->state = TERMINATED;
+      yield();
+    } else {
+      PANIC("unexpected trap in kernel stval=%x, sepc=%x\n", scause, stval,
+            user_pc);
+    }
+  }
 }
 
 __attribute__((naked)) __attribute__((aligned(4))) extern "C" void
@@ -251,6 +278,7 @@ __attribute__((naked)) extern "C" void user_entry(void) {
                        :
                        : [sepc] "r"(USER_BASE), [sstatus] "r"(SSTATUS_SPIE));
 }
+
 void yield(void) {
   if (!current_proc || !idle_proc) {
     PANIC("current_proc or idle_proc is null");
@@ -268,10 +296,12 @@ void yield(void) {
       "csrw satp, %[satp]\n"
       "sfence.vma\n"
       "csrw sscratch, %[sscratch]\n"
+      "csrw sepc, %[sepc]\n" // Restore the next process's PC
       :
       // Don't forget the trailing comma!
       : [satp] "r"(SATP_SV32 | ((uintptr_t)next->page_table / PAGE_SIZE)),
-        [sscratch] "r"((uintptr_t)&next->stack[sizeof(next->stack)]));
+        [sscratch] "r"((uintptr_t)&next->stack[sizeof(next->stack)]),
+        [sepc] "r"(next->user_pc));
 
   Process *prev = current_proc;
   current_proc = next;

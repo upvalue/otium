@@ -73,8 +73,6 @@ Process *process_create_impl(Process *table, uint32_t max_procs,
   *--sp = 0; // s0
 
   if (is_image) {
-    oprintf("set pc to %x\n", (uintptr_t)user_entry);
-    oprintf("insn at %x\n", *(char *)image_or_pc);
     *--sp = (uintptr_t)user_entry; // ra
   } else {
     *--sp = (uintptr_t)image_or_pc; // ra

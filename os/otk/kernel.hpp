@@ -5,12 +5,21 @@
 
 #define PAGE_SIZE 4096
 
+#ifdef OT_TEST
+#include <stdlib.h>
+#define PANIC(fmt, ...)                                                        \
+  do {                                                                         \
+    oprintf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);     \
+    exit(1);                                                                   \
+  } while (0)
+#else
 #define PANIC(fmt, ...)                                                        \
   do {                                                                         \
     oprintf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);     \
     while (1) {                                                                \
     }                                                                          \
   } while (0)
+#endif
 
 #define TRACE(fmt, ...)                                                        \
   do {                                                                         \
@@ -33,8 +42,25 @@ void kernel_exit(void);
 void kernel_common(void);
 
 // memory management
-void *page_allocate_impl(char *begin, char *end, char **next, size_t page_size);
-void *page_allocate(size_t n);
+struct PageInfo {
+  uint32_t pid;        // Process ID that owns this page (0 = free)
+  uintptr_t addr;      // Physical address of the page
+  PageInfo *next;      // For free list linking
+};
+
+struct MemoryStats {
+  uint32_t total_pages;
+  uint32_t allocated_pages;
+  uint32_t freed_pages;
+  uint32_t processes_created;
+  uint32_t peak_usage_pages;
+};
+
+void *page_allocate(uint32_t pid, size_t page_count);
+void page_free_process(uint32_t pid);
+void memory_init();
+void memory_report();
+void memory_increment_process_count();
 extern "C" char __free_ram[], __free_ram_end[];
 
 // process management

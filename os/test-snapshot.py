@@ -14,6 +14,7 @@ from typing import List, Tuple
 # Test programs to run (map of test name to compile flag)
 TEST_PROGRAMS = {
     "test-hello": "--test-hello",
+    "test-mem": "--test-mem",
 }
 
 QEMU_TIMEOUT = 10  # seconds

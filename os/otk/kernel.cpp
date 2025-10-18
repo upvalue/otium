@@ -12,6 +12,32 @@ extern "C" void proc_hello_world(void) {
   yield();
 }
 
+// Minimal binary image for memory test - just a few bytes to allocate a page
+static const char mem_test_image[] = {
+  0x01, 0x00, 0x00, 0x00,  // Minimal data
+  0x00, 0x00, 0x00, 0x00,
+};
+
+// Test process for memory recycling - just does minimal work and exits
+extern "C" void proc_mem_test(void) {
+  oprintf("TEST: Process %d running\n", current_proc->pid);
+  current_proc->state = TERMINATED;
+  yield();
+}
+
+// Helper to get all pages allocated to a process
+static void get_process_pages(uint32_t pid, uintptr_t *pages, uint32_t *count) {
+  extern PageInfo *page_infos;
+  extern uint32_t total_page_count;
+
+  *count = 0;
+  for (uint32_t i = 0; i < total_page_count && *count < 16; i++) {
+    if (page_infos[i].pid == pid) {
+      pages[(*count)++] = page_infos[i].addr;
+    }
+  }
+}
+
 void kernel_common(void) {
   omemset(__bss, 0, (size_t)__bss_end - (size_t)__bss);
   TRACE("hello from kernel_common");
@@ -21,7 +47,58 @@ void kernel_common(void) {
   TRACE("created idle proc with name %s and pid %d", idle_proc->name,
         idle_proc->pid);
 
-#ifdef KERNEL_PROG_TEST_HELLO
+#ifdef KERNEL_PROG_TEST_MEM
+  // Test mode: memory recycling test
+  oprintf("TEST: Starting memory recycling test\n");
+
+  // Create first process with minimal image to allocate user pages
+  Process *proc1 = process_create("mem_test_1", mem_test_image, sizeof(mem_test_image), true);
+  uintptr_t proc1_pages[16];
+  uint32_t proc1_page_count = 0;
+  get_process_pages(proc1->pid, proc1_pages, &proc1_page_count);
+  oprintf("TEST: Process 1 (pid %d) allocated %d pages\n", proc1->pid, proc1_page_count);
+
+  // Create second process
+  Process *proc2 = process_create("mem_test_2", mem_test_image, sizeof(mem_test_image), true);
+  uintptr_t proc2_pages[16];
+  uint32_t proc2_page_count = 0;
+  get_process_pages(proc2->pid, proc2_pages, &proc2_page_count);
+  oprintf("TEST: Process 2 (pid %d) allocated %d pages\n", proc2->pid, proc2_page_count);
+
+  // Exit process 1 to free its pages
+  process_exit(proc1);
+  oprintf("TEST: Exited process 1 (freed %d pages)\n", proc1_page_count);
+
+  // Create third process - should reuse process 1's pages
+  Process *proc3 = process_create("mem_test_3", mem_test_image, sizeof(mem_test_image), true);
+  uintptr_t proc3_pages[16];
+  uint32_t proc3_page_count = 0;
+  get_process_pages(proc3->pid, proc3_pages, &proc3_page_count);
+  oprintf("TEST: Process 3 (pid %d) allocated %d pages\n", proc3->pid, proc3_page_count);
+
+  // Verify page recycling - check if all of proc3's pages are from proc1
+  uint32_t reused_count = 0;
+  for (uint32_t i = 0; i < proc3_page_count; i++) {
+    for (uint32_t j = 0; j < proc1_page_count; j++) {
+      if (proc3_pages[i] == proc1_pages[j]) {
+        reused_count++;
+        break;
+      }
+    }
+  }
+
+  if (reused_count == proc3_page_count && proc3_page_count == proc1_page_count) {
+    oprintf("TEST: SUCCESS - Process 3 reused all %d pages from Process 1\n", reused_count);
+  } else {
+    oprintf("TEST: FAILURE - Process 3 reused %d/%d pages (expected %d)\n",
+            reused_count, proc3_page_count, proc1_page_count);
+  }
+
+  // Clean up
+  process_exit(proc2);
+  process_exit(proc3);
+
+#elif defined(KERNEL_PROG_TEST_HELLO)
   // Test mode: run hello world test
   Process *test_proc =
       process_create("test_hello", (const void *)proc_hello_world, 0, false);
@@ -38,5 +115,6 @@ void kernel_common(void) {
 
   yield();
   TRACE("no programs left to run, exiting kernel\n");
+  memory_report();
   kernel_exit();
 }

@@ -5,6 +5,8 @@ set -euxo pipefail
 TEST_PROG=""
 if [ "${1:-}" = "--test-hello" ]; then
   TEST_PROG="-DKERNEL_PROG_TEST_HELLO"
+elif [ "${1:-}" = "--test-mem" ]; then
+  TEST_PROG="-DKERNEL_PROG_TEST_MEM"
 fi
 
 # Path to clang and compiler flags

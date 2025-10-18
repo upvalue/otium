@@ -5,8 +5,11 @@
 
 #include "otu/tcl.h"
 
+// Buffer for storing user commands
 static char buffer[4096];
 static size_t buffer_i = 0;
+
+// Whether the shell is running
 static bool running = true;
 
 void *memory_begin = nullptr;
@@ -50,6 +53,8 @@ extern "C" void main(void) {
         }
         oprintf("%c", c);
       }
+
+      // new line
       if (c == 13) {
         buffer[buffer_i] = 0;
         oputchar('\n');
@@ -62,12 +67,20 @@ extern "C" void main(void) {
         buffer_i = 0;
         break;
       }
+
+      // bksp
+      if ((c == 8 || c == 127) && buffer_i != 0) {
+        oprintf("\b \b");
+        buffer_i--;
+      }
     }
   }
 
   // Print memory usage report from tlsf
   oprintf("exiting shell\n");
-  oprintf("memory usage: %zu bytes\n", tlsf_block_size(pool));
+
+  // TODO: This crashes, why?
+  // oprintf("memory usage: %zu bytes\n", tlsf_block_size(pool));
 
   ou_exit();
 }

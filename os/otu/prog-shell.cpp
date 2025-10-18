@@ -41,6 +41,15 @@ extern "C" void main(void) {
                        return tcl::S_OK;
                      });
 
+  // cause a crash by dereferencing a random addr
+  i.register_command("crash",
+                     [](tcl::Interp &i, tcl::vector<tcl::string> &argv,
+                        tcl::ProcPrivdata *privdata) -> tcl::Status {
+                       char *p = (char *)0x10;
+                       (*p) = 0;
+                       return tcl::S_OK;
+                     });
+
   while (running) {
     oprintf("> ");
     while (running) {

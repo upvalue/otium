@@ -2,8 +2,13 @@
 
 extern "C" char __bss[], __bss_end[], __stack_top[];
 
+#ifndef __EMSCRIPTEN__
 extern "C" char _binary_otu_prog_shell_bin_start[],
     _binary_otu_prog_shell_bin_size[];
+#else
+// For WASM, we compile the shell together with the kernel
+extern "C" void shell_main(void);  // Shell main function
+#endif
 
 // a basic process that just prints hello world and exits
 extern "C" void proc_hello_world(void) {
@@ -39,7 +44,9 @@ static void get_process_pages(uint32_t pid, uintptr_t *pages, uint32_t *count) {
 }
 
 void kernel_common(void) {
+#ifndef __EMSCRIPTEN__
   omemset(__bss, 0, (size_t)__bss_end - (size_t)__bss);
+#endif
   TRACE("hello from kernel_common");
 
   idle_proc = process_create("idle", nullptr, 0, false);
@@ -114,9 +121,15 @@ void kernel_common(void) {
         test_proc->pid);
 #else
   // Default/main mode
+#ifdef __EMSCRIPTEN__
+  // For WASM, call the shell main function directly
+  Process *proc_shell = process_create("shell", (const void *)shell_main, 0, false);
+#else
+  // For RISC-V, load the shell from the embedded binary
   Process *proc_shell =
       process_create("shell", (const void *)_binary_otu_prog_shell_bin_start,
                      (size_t)_binary_otu_prog_shell_bin_size, true);
+#endif
   TRACE("created proc with name %s and pid %d", proc_shell->name,
         proc_shell->pid);
 #endif

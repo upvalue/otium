@@ -8,7 +8,7 @@ extern "C" {
 
 #include <stdarg.h>
 
-#ifdef OT_TEST
+#if defined(OT_TEST) || defined(__EMSCRIPTEN__)
 #include <stddef.h>
 #include <stdint.h>
 #else

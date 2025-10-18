@@ -59,7 +59,11 @@ void page_free_process(uint32_t pid);
 void memory_init();
 void memory_report();
 void memory_increment_process_count();
+#ifndef __EMSCRIPTEN__
 extern "C" char __free_ram[], __free_ram_end[];
+#else
+extern "C" char *__free_ram, *__free_ram_end;
+#endif
 
 // process management
 #define PROCS_MAX 8

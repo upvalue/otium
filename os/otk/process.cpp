@@ -29,7 +29,7 @@ void map_page(uintptr_t *table1, uintptr_t vaddr, uintptr_t paddr,
 
 Process *process_create_impl(Process *table, uint32_t max_procs,
                              const char *name, const void *image_or_pc,
-                             uint32_t size, bool is_image) {
+                             size_t size, bool is_image) {
   // Initialize memory tracking on first process creation
   memory_init();
 
@@ -84,6 +84,7 @@ Process *process_create_impl(Process *table, uint32_t max_procs,
 
   free_proc->stack_ptr = (uintptr_t)sp;
 
+#ifndef __EMSCRIPTEN__
   // Map kernel pages.
   void *page_table = page_allocate(i, 1);
   for (uintptr_t paddr = (uintptr_t)__kernel_base;
@@ -111,6 +112,16 @@ Process *process_create_impl(Process *table, uint32_t max_procs,
   }
 
   free_proc->page_table = (uintptr_t *)page_table;
+#else
+  // WASM: No page tables needed, use direct memory access
+  free_proc->page_table = nullptr;
+
+  // For WASM, we don't support loading binary images
+  // Programs must be compiled together with the kernel
+  if (is_image) {
+    PANIC("Binary image loading not supported on WASM");
+  }
+#endif
 
   TRACE("proc %s stack ptr: %x", free_proc->name, free_proc->stack_ptr);
 

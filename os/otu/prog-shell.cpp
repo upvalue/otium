@@ -20,7 +20,11 @@ void *malloc(size_t size) { return tlsf_malloc(pool, size); }
 void free(void *ptr) { tlsf_free(pool, ptr); }
 void *realloc(void *ptr, size_t size) { return tlsf_realloc(pool, ptr, size); }
 
+#ifdef __EMSCRIPTEN__
+extern "C" void shell_main(void) {
+#else
 extern "C" void main(void) {
+#endif
   // allocate some contiguous pages to work with
   memory_begin = ou_alloc_page();
 

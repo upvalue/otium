@@ -15,7 +15,14 @@ OBJCOPY=/opt/homebrew/opt/llvm/bin/llvm-objcopy
 CPPFLAGS="-I. -DOT_TRACE_MEM $TEST_PROG"
 CFLAGS="-O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib -fno-exceptions -fno-rtti"
 
-$CC $CPPFLAGS $CFLAGS -Wl,-Totu/user.ld -Wl,-Map=otu/prog-shell.map -o otu/prog-shell.elf otu/user-riscv.cpp otu/prog-shell.cpp
+$CC $CPPFLAGS $CFLAGS \
+    -Wl,-Totu/user.ld -Wl,-Map=otu/prog-shell.map -o otu/prog-shell.elf \
+    otu/user-riscv.cpp \
+    otu/prog-shell.cpp \
+    otk/std.cpp \
+    otu/vendor/tlsf.c \
+    otu/tcl.cpp
+    
 $OBJCOPY --set-section-flags .bss=alloc,contents -O binary otu/prog-shell.elf otu/prog-shell.bin
 $OBJCOPY -Ibinary -Oelf32-littleriscv otu/prog-shell.bin otu/prog-shell.bin.o
 

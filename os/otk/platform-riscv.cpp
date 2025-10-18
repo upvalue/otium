@@ -82,6 +82,10 @@ void oputchar(char ch) {
   sbi_call(ch, 0, 0, 0, 0, 0, 0, 1 /* Console Putchar */);
 }
 
+int ogetchar() {
+  return (int)sbi_call(0, 0, 0, 0, 0, 0, 0, 2 /* Console Putchar */).error;
+}
+
 #define SBI_EXT_SRST 0x53525354 // "SRST"
 #define SBI_SRST_SHUTDOWN 0
 void kernel_exit(void) {
@@ -100,6 +104,7 @@ void handle_syscall(struct trap_frame *f) {
   uint32_t arg1 = f->a1;
   uint32_t arg2 = f->a2;
 
+  f->a0 = 0;
   switch (sysno) {
   case OU_PUTCHAR:
     oputchar(arg0);
@@ -108,13 +113,36 @@ void handle_syscall(struct trap_frame *f) {
     break;
   case OU_EXIT:
     if (current_proc) {
-      oprintf("Process %s (pid=%d) exited\n", current_proc->name, current_proc->pid);
+      oprintf("Process %s (pid=%d) exited\n", current_proc->name,
+              current_proc->pid);
       current_proc->state = TERMINATED;
     }
     break;
   case OU_GETCHAR:
-    // getchar();
+    f->a0 = ogetchar();
     break;
+  case OU_ALLOC_PAGE: {
+    if (!current_proc) {
+      f->a0 = 0; // Return NULL if no current process
+      break;
+    }
+    // Allocate physical page
+    void *paddr = page_allocate(current_proc->pid, 1);
+    if (!paddr) {
+      f->a0 = 0; // Return NULL on allocation failure
+      break;
+    }
+    // Get virtual address for this allocation
+    uintptr_t vaddr = current_proc->heap_next_vaddr;
+    // Map the page into user space
+    map_page(current_proc->page_table, vaddr, (uintptr_t)paddr,
+             PAGE_U | PAGE_R | PAGE_W, current_proc->pid);
+    // Update next heap address
+    current_proc->heap_next_vaddr += PAGE_SIZE;
+    // Return virtual address to user
+    f->a0 = vaddr;
+    break;
+  }
   default:
     PANIC("unexpected syscall sysno=%x\n", sysno);
   }
@@ -288,6 +316,8 @@ void yield(void) {
 
   // No runnable process other than the current one
   if (next == current_proc) {
+    // Still need to update sepc to advance past the syscall
+    WRITE_CSR(sepc, current_proc->user_pc);
     return;
   }
 

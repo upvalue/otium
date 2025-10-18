@@ -26,18 +26,26 @@ typedef uint32_t uintptr_t;
 
 // basic functions
 void *omemset(void *buf, char c, size_t n);
+size_t strlen(const char *s);
 void oprintf(const char *fmt, ...);
 void *memcpy(void *dst, const void *src, size_t n);
 char *strcpy(char *dst, const char *src);
 int strcmp(const char *s1, const char *s2);
+int atoi(const char *s);
+int memcmp(const void *s1, const void *s2, size_t n);
+void ovsnprintf(char *str, size_t size, const char *format, va_list args);
+void osnprintf(char *str, size_t size, const char *format, ...);
 
 // syscalls
 #define OU_YIELD 1
 #define OU_PUTCHAR 2
 #define OU_GETCHAR 3
 #define OU_EXIT 4
+#define OU_ALLOC_PAGE 5
 
 void oputchar(char);
+
+#define PAGE_SIZE 4096
 
 #ifdef __cplusplus
 } // extern "C"

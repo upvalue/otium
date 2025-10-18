@@ -3,8 +3,6 @@
 
 #include "otcommon.h"
 
-#define PAGE_SIZE 4096
-
 #ifdef OT_TEST
 #include <stdlib.h>
 #define PANIC(fmt, ...)                                                        \
@@ -43,9 +41,9 @@ void kernel_common(void);
 
 // memory management
 struct PageInfo {
-  uint32_t pid;        // Process ID that owns this page (0 = free)
-  uintptr_t addr;      // Physical address of the page
-  PageInfo *next;      // For free list linking
+  uint32_t pid;   // Process ID that owns this page (0 = free)
+  uintptr_t addr; // Physical address of the page
+  PageInfo *next; // For free list linking
 };
 
 struct MemoryStats {
@@ -81,7 +79,8 @@ struct Process {
   ProcessState state;
   uintptr_t *page_table;
   uintptr_t stack_ptr;
-  uintptr_t user_pc;  // Save user program counter
+  uintptr_t user_pc;         // Save user program counter
+  uintptr_t heap_next_vaddr; // Next available heap address
   uint8_t stack[8192];
 };
 
@@ -92,6 +91,8 @@ Process *process_create(const char *name, const void *image_or_pc, size_t size,
                         bool is_image);
 Process *process_next_runnable(void);
 void process_exit(Process *proc);
+void map_page(uintptr_t *table1, uintptr_t vaddr, uintptr_t paddr,
+              uint32_t flags, uint32_t pid);
 
 extern Process *idle_proc, *current_proc;
 extern Process procs[PROCS_MAX];
@@ -100,6 +101,7 @@ extern "C" void switch_context(uintptr_t *prev_sp, uintptr_t *next_sp);
 void yield(void);
 
 #define USER_BASE 0x1000000
+#define HEAP_BASE 0x2000000
 #define SSTATUS_SPIE (1 << 5)
 
 extern "C" void user_entry(void);

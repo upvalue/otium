@@ -14,8 +14,8 @@ extern "C" void proc_hello_world(void) {
 
 // Minimal binary image for memory test - just a few bytes to allocate a page
 static const char mem_test_image[] = {
-  0x01, 0x00, 0x00, 0x00,  // Minimal data
-  0x00, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, // Minimal data
+    0x00, 0x00, 0x00, 0x00,
 };
 
 // Test process for memory recycling - just does minimal work and exits
@@ -52,29 +52,35 @@ void kernel_common(void) {
   oprintf("TEST: Starting memory recycling test\n");
 
   // Create first process with minimal image to allocate user pages
-  Process *proc1 = process_create("mem_test_1", mem_test_image, sizeof(mem_test_image), true);
+  Process *proc1 = process_create("mem_test_1", mem_test_image,
+                                  sizeof(mem_test_image), true);
   uintptr_t proc1_pages[16];
   uint32_t proc1_page_count = 0;
   get_process_pages(proc1->pid, proc1_pages, &proc1_page_count);
-  oprintf("TEST: Process 1 (pid %d) allocated %d pages\n", proc1->pid, proc1_page_count);
+  oprintf("TEST: Process 1 (pid %d) allocated %d pages\n", proc1->pid,
+          proc1_page_count);
 
   // Create second process
-  Process *proc2 = process_create("mem_test_2", mem_test_image, sizeof(mem_test_image), true);
+  Process *proc2 = process_create("mem_test_2", mem_test_image,
+                                  sizeof(mem_test_image), true);
   uintptr_t proc2_pages[16];
   uint32_t proc2_page_count = 0;
   get_process_pages(proc2->pid, proc2_pages, &proc2_page_count);
-  oprintf("TEST: Process 2 (pid %d) allocated %d pages\n", proc2->pid, proc2_page_count);
+  oprintf("TEST: Process 2 (pid %d) allocated %d pages\n", proc2->pid,
+          proc2_page_count);
 
   // Exit process 1 to free its pages
   process_exit(proc1);
   oprintf("TEST: Exited process 1 (freed %d pages)\n", proc1_page_count);
 
   // Create third process - should reuse process 1's pages
-  Process *proc3 = process_create("mem_test_3", mem_test_image, sizeof(mem_test_image), true);
+  Process *proc3 = process_create("mem_test_3", mem_test_image,
+                                  sizeof(mem_test_image), true);
   uintptr_t proc3_pages[16];
   uint32_t proc3_page_count = 0;
   get_process_pages(proc3->pid, proc3_pages, &proc3_page_count);
-  oprintf("TEST: Process 3 (pid %d) allocated %d pages\n", proc3->pid, proc3_page_count);
+  oprintf("TEST: Process 3 (pid %d) allocated %d pages\n", proc3->pid,
+          proc3_page_count);
 
   // Verify page recycling - check if all of proc3's pages are from proc1
   uint32_t reused_count = 0;
@@ -87,8 +93,10 @@ void kernel_common(void) {
     }
   }
 
-  if (reused_count == proc3_page_count && proc3_page_count == proc1_page_count) {
-    oprintf("TEST: SUCCESS - Process 3 reused all %d pages from Process 1\n", reused_count);
+  if (reused_count == proc3_page_count &&
+      proc3_page_count == proc1_page_count) {
+    oprintf("TEST: SUCCESS - Process 3 reused all %d pages from Process 1\n",
+            reused_count);
   } else {
     oprintf("TEST: FAILURE - Process 3 reused %d/%d pages (expected %d)\n",
             reused_count, proc3_page_count, proc1_page_count);

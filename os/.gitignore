@@ -2,3 +2,5 @@
 *.map
 *.bin
 *.o
+*.js
+*.wasm

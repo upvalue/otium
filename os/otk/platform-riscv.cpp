@@ -138,7 +138,7 @@ void handle_syscall(struct trap_frame *f) {
     map_page(current_proc->page_table, vaddr, (uintptr_t)paddr,
              PAGE_U | PAGE_R | PAGE_W, current_proc->pid);
     // Update next heap address
-    current_proc->heap_next_vaddr += PAGE_SIZE;
+    current_proc->heap_next_vaddr += OT_PAGE_SIZE;
     // Return virtual address to user
     f->a0 = vaddr;
     break;
@@ -329,7 +329,7 @@ void yield(void) {
       "csrw sepc, %[sepc]\n" // Restore the next process's PC
       :
       // Don't forget the trailing comma!
-      : [satp] "r"(SATP_SV32 | ((uintptr_t)next->page_table / PAGE_SIZE)),
+      : [satp] "r"(SATP_SV32 | ((uintptr_t)next->page_table / OT_PAGE_SIZE)),
         [sscratch] "r"((uintptr_t)&next->stack[sizeof(next->stack)]),
         [sepc] "r"(next->user_pc));
 

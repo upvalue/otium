@@ -20,7 +20,7 @@ void *malloc(size_t size) { return tlsf_malloc(pool, size); }
 void free(void *ptr) { tlsf_free(pool, ptr); }
 void *realloc(void *ptr, size_t size) { return tlsf_realloc(pool, ptr, size); }
 
-#ifdef __EMSCRIPTEN__
+#ifdef OT_ARCH_WASM
 extern "C" void shell_main(void) {
 #else
 extern "C" void main(void) {
@@ -33,7 +33,7 @@ extern "C" void main(void) {
   }
 
   // create memory pool
-  pool = tlsf_create_with_pool(memory_begin, 10 * PAGE_SIZE);
+  pool = tlsf_create_with_pool(memory_begin, 10 * OT_PAGE_SIZE);
 
   tcl::Interp i;
   tcl::register_core_commands(i);

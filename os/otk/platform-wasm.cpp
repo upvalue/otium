@@ -2,6 +2,8 @@
 
 #include "otk/kernel.hpp"
 #include <emscripten.h>
+#include <emscripten/fiber.h>
+#include <stdlib.h>
 
 // Memory region for WASM (simulate __free_ram from linker script)
 // Allocate 16MB for OS use
@@ -86,54 +88,139 @@ void kernel_exit(void) {
 }
 
 void wfi(void) {
-  // In WASM, just yield execution and wait
+  // In WASM, just infinite loop (idle)
   while (1) {
-    emscripten_sleep(100);
+    // Busy wait
   }
-}
-
-// For WASM, switch_context just needs to yield to the event loop
-// Asyncify will handle saving/restoring the call stack
-extern "C" void switch_context(uintptr_t *prev_sp, uintptr_t *next_sp) {
-  // In WASM with Asyncify, we just need to yield to the event loop
-  // The stack will be automatically saved and restored by Asyncify
-  (void)prev_sp; // Unused in WASM
-  (void)next_sp; // Unused in WASM
-
-  // This is the magic: pause WASM execution and resume later
-  emscripten_sleep(0);
 }
 
 // User entry - for WASM, we don't need privilege mode switching
 // Just call the user program directly
 extern "C" void user_entry(void) {
   // Jump to user base address
+  TRACE("user_entry: calling user program for process %s", current_proc->name);
   typedef void (*user_func_t)(void);
   user_func_t user_main = (user_func_t)current_proc->user_pc;
   user_main();
 
   // If user program returns, exit the process
+  TRACE("user_entry: user program %s returned, marking TERMINATED",
+        current_proc->name);
   current_proc->state = TERMINATED;
   yield();
 }
+
+// Scheduler fiber
+static emscripten_fiber_t scheduler_fiber;
+static void *scheduler_asyncify_stack = nullptr;
 
 void yield(void) {
   if (!current_proc || !idle_proc) {
     PANIC("current_proc or idle_proc is null");
   }
 
-  Process *next = process_next_runnable();
+  TRACE("yield: process %s (pid=%d) yielding", current_proc->name,
+        current_proc->pid);
 
-  // No runnable process other than the current one
-  if (next == current_proc) {
-    return;
+  // Switch from process fiber back to scheduler fiber
+  // First arg is current context, second is target context
+  emscripten_fiber_swap((emscripten_fiber_t *)current_proc->fiber,
+                        &scheduler_fiber);
+
+  TRACE("yield: process %s (pid=%d) resumed", current_proc->name,
+        current_proc->pid);
+}
+
+// Fiber entry point wrapper - calls user_entry for the process
+static void fiber_entry_point(void *arg) {
+  Process *proc = (Process *)arg;
+  TRACE("fiber_entry_point: starting process %s (pid=%d)", proc->name,
+        proc->pid);
+
+  // Set as current process and run
+  current_proc = proc;
+  user_entry();
+
+  // If we get here, process terminated (returned from user_entry instead of
+  // yielding)
+  TRACE("fiber_entry_point: process %s returned from user_entry, marking "
+        "TERMINATED",
+        proc->name);
+  proc->state = TERMINATED;
+
+  // Yield back to scheduler
+  yield();
+}
+
+// WASM scheduler loop - runs processes cooperatively with fibers
+void scheduler_loop(void) {
+  TRACE("Entering WASM scheduler loop");
+
+  // Initialize the scheduler fiber from current context
+  const size_t SCHEDULER_ASYNCIFY_STACK_SIZE = 512 * 1024; // 512KB
+  scheduler_asyncify_stack = malloc(SCHEDULER_ASYNCIFY_STACK_SIZE);
+  if (!scheduler_asyncify_stack) {
+    PANIC("Failed to allocate scheduler asyncify stack");
   }
 
-  // No page table switching needed for WASM
-  // Just switch the current process and yield execution
-  Process *prev = current_proc;
-  current_proc = next;
-  switch_context(&prev->stack_ptr, &current_proc->stack_ptr);
+  TRACE("Initializing scheduler fiber with asyncify stack size %d",
+        SCHEDULER_ASYNCIFY_STACK_SIZE);
+  emscripten_fiber_init_from_current_context(&scheduler_fiber,
+                                             scheduler_asyncify_stack,
+                                             SCHEDULER_ASYNCIFY_STACK_SIZE);
+
+  while (true) {
+    Process *next = process_next_runnable();
+
+    // Check if we're done (only idle process left or no processes)
+    if (!next || next == idle_proc) {
+      TRACE("No more runnable processes, exiting scheduler");
+      break;
+    }
+
+    TRACE("Scheduler picked process %s (pid=%d)", next->name, next->pid);
+    current_proc = next;
+
+    // Create fiber for this process if not already created
+    if (!next->started) {
+      next->started = true;
+
+      const size_t C_STACK_SIZE = 512 * 1024;        // 512KB C stack
+      const size_t ASYNCIFY_STACK_SIZE = 512 * 1024; // 512KB asyncify stack
+
+      TRACE("Creating fiber for process %s with stack size %d, asyncify stack "
+            "size %d",
+            next->name, C_STACK_SIZE, ASYNCIFY_STACK_SIZE);
+
+      // Allocate stacks dynamically
+      void *c_stack = malloc(C_STACK_SIZE);
+      void *asyncify_stack = malloc(ASYNCIFY_STACK_SIZE);
+
+      if (!c_stack || !asyncify_stack) {
+        PANIC("Failed to allocate stacks for fiber");
+      }
+
+      // Allocate and initialize fiber
+      next->fiber = new emscripten_fiber_t;
+      emscripten_fiber_init((emscripten_fiber_t *)next->fiber,
+                            fiber_entry_point, next, c_stack, C_STACK_SIZE,
+                            asyncify_stack, ASYNCIFY_STACK_SIZE);
+    }
+
+    // Swap to the process fiber
+    // First arg is current context (scheduler), second is target (process)
+    TRACE("Swapping to process %s (state=%d)", next->name, next->state);
+    emscripten_fiber_swap(&scheduler_fiber, (emscripten_fiber_t *)next->fiber);
+    TRACE("Returned from process %s (state=%d)", next->name, next->state);
+  }
+
+  TRACE("Scheduler loop finished");
+
+  // Cleanup
+  if (scheduler_asyncify_stack) {
+    free(scheduler_asyncify_stack);
+    scheduler_asyncify_stack = nullptr;
+  }
 }
 
 // Syscall handlers for user programs
@@ -178,7 +265,7 @@ void *kernel_syscall_alloc_page(void) {
   // In WASM, physical address = virtual address (no MMU)
   // Still track the heap address for consistency
   uintptr_t vaddr = current_proc->heap_next_vaddr;
-  current_proc->heap_next_vaddr += PAGE_SIZE;
+  current_proc->heap_next_vaddr += OT_PAGE_SIZE;
 
   yield();
   return paddr; // Return physical address directly

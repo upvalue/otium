@@ -8,23 +8,23 @@ Process *current_proc = nullptr, *idle_proc = nullptr;
 
 void map_page(uintptr_t *table1, uintptr_t vaddr, uintptr_t paddr,
               uint32_t flags, uint32_t pid) {
-  if (!is_aligned((void *)vaddr, PAGE_SIZE))
+  if (!is_aligned((void *)vaddr, OT_PAGE_SIZE))
     PANIC("unaligned vaddr %x", vaddr);
 
-  if (!is_aligned((void *)paddr, PAGE_SIZE))
+  if (!is_aligned((void *)paddr, OT_PAGE_SIZE))
     PANIC("unaligned paddr %x", paddr);
 
   uint32_t vpn1 = (vaddr >> 22) & 0x3ff;
   if ((table1[vpn1] & PAGE_V) == 0) {
     // Create the 1st level page table if it doesn't exist.
     uintptr_t pt_paddr = (uintptr_t)page_allocate(pid, 1);
-    table1[vpn1] = ((pt_paddr / PAGE_SIZE) << 10) | PAGE_V;
+    table1[vpn1] = ((pt_paddr / OT_PAGE_SIZE) << 10) | PAGE_V;
   }
 
   // Set the 2nd level page table entry to map the physical page.
   uint32_t vpn0 = (vaddr >> 12) & 0x3ff;
-  uint32_t *table0 = (uint32_t *)((table1[vpn1] >> 10) * PAGE_SIZE);
-  table0[vpn0] = ((paddr / PAGE_SIZE) << 10) | flags | PAGE_V;
+  uint32_t *table0 = (uint32_t *)((table1[vpn1] >> 10) * OT_PAGE_SIZE);
+  table0[vpn0] = ((paddr / OT_PAGE_SIZE) << 10) | flags | PAGE_V;
 }
 
 Process *process_create_impl(Process *table, uint32_t max_procs,
@@ -84,23 +84,24 @@ Process *process_create_impl(Process *table, uint32_t max_procs,
 
   free_proc->stack_ptr = (uintptr_t)sp;
 
-#ifndef __EMSCRIPTEN__
+#ifndef OT_ARCH_WASM
   // Map kernel pages.
   void *page_table = page_allocate(i, 1);
   for (uintptr_t paddr = (uintptr_t)__kernel_base;
-       paddr < (uintptr_t)__free_ram_end; paddr += PAGE_SIZE)
-    map_page((uintptr_t *)page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X, i);
+       paddr < (uintptr_t)__free_ram_end; paddr += OT_PAGE_SIZE)
+    map_page((uintptr_t *)page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X,
+             i);
 
   // Map user pages.
   if (is_image) {
     oprintf("found image. allocating pages\n");
-    for (size_t off = 0; off < size; off += PAGE_SIZE) {
+    for (size_t off = 0; off < size; off += OT_PAGE_SIZE) {
       void *page = page_allocate(i, 1);
 
       // Handle the case where the data to be copied is smaller than the
       // page size.
       size_t remaining = size - off;
-      size_t copy_size = PAGE_SIZE <= remaining ? PAGE_SIZE : remaining;
+      size_t copy_size = OT_PAGE_SIZE <= remaining ? OT_PAGE_SIZE : remaining;
 
       // Fill and map the page.
       oprintf("copying %d bytes to page %x from %x\n", copy_size, page,

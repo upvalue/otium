@@ -28,6 +28,9 @@ for arg in "$@"; do
     --test-mem)
       TEST_PROG="-DKERNEL_PROG_TEST_MEM"
       ;;
+    --test-alternate)
+      TEST_PROG="-DKERNEL_PROG_TEST_ALTERNATE"
+      ;;
     -v|--verbose)
       VERBOSE="yes"
       set -x
@@ -45,7 +48,7 @@ emcc --version | head -1
 echo ""
 
 # Compiler flags for WASM
-CPPFLAGS="-I. -DOT_TRACE_MEM $TEST_PROG"
+CPPFLAGS="-I. -DOT_ARCH_WASM -DOT_TRACE_MEM $TEST_PROG"
 CFLAGS="-O2 -g3 -Wall -Wextra -fno-exceptions -fno-rtti"
 
 if [ -n "$TEST_PROG" ]; then
@@ -58,8 +61,7 @@ echo ""
 # Emscripten-specific flags
 EMFLAGS=(
   -s ASYNCIFY=1
-  -s "ASYNCIFY_IMPORTS=[emscripten_sleep]"
-  -s TOTAL_MEMORY=33554432  # 32MB
+  -s INITIAL_MEMORY=67108864  # 64MB initial
   -s ALLOW_MEMORY_GROWTH=1
   -s "EXPORTED_FUNCTIONS=[_main]"
   -s "EXPORTED_RUNTIME_METHODS=[ccall,cwrap,print]"
@@ -70,6 +72,7 @@ EMFLAGS=(
 # Build the complete system
 $CC $CPPFLAGS $CFLAGS "${EMFLAGS[@]}" -o otk/kernel.js \
     otk/kernel.cpp \
+    otk/kernel-prog.cpp \
     otk/platform-wasm.cpp \
     otk/std.cpp \
     otk/memory.cpp \

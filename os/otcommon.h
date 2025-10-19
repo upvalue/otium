@@ -8,7 +8,7 @@ extern "C" {
 
 #include <stdarg.h>
 
-#if defined(OT_TEST) || defined(__EMSCRIPTEN__)
+#if defined(OT_TEST) || defined(OT_ARCH_WASM)
 #include <stddef.h>
 #include <stdint.h>
 #else
@@ -45,7 +45,7 @@ void osnprintf(char *str, size_t size, const char *format, ...);
 
 void oputchar(char);
 
-#define PAGE_SIZE 4096
+#define OT_PAGE_SIZE 4096
 
 #ifdef __cplusplus
 } // extern "C"

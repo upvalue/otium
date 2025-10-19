@@ -59,7 +59,7 @@ void page_free_process(uint32_t pid);
 void memory_init();
 void memory_report();
 void memory_increment_process_count();
-#ifndef __EMSCRIPTEN__
+#ifndef OT_ARCH_WASM
 extern "C" char __free_ram[], __free_ram_end[];
 #else
 extern "C" char *__free_ram, *__free_ram_end;
@@ -85,7 +85,12 @@ struct Process {
   uintptr_t stack_ptr;
   uintptr_t user_pc;         // Save user program counter
   uintptr_t heap_next_vaddr; // Next available heap address
-  uint8_t stack[8192];
+  uint8_t stack[8192] __attribute__((aligned(16)));
+#ifdef OT_ARCH_WASM
+  bool started;              // For WASM: track if process has been started
+  void *fiber;               // emscripten_fiber_t for this process
+  uint8_t asyncify_stack[8192] __attribute__((aligned(16))); // Asyncify stack for fiber
+#endif
 };
 
 Process *process_create_impl(Process *table, uint32_t max_procs,
@@ -103,6 +108,10 @@ extern Process procs[PROCS_MAX];
 
 extern "C" void switch_context(uintptr_t *prev_sp, uintptr_t *next_sp);
 void yield(void);
+
+#ifdef OT_ARCH_WASM
+void scheduler_loop(void);
+#endif
 
 #define USER_BASE 0x1000000
 #define HEAP_BASE 0x2000000

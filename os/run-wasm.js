@@ -31,8 +31,6 @@ const Module = {
   print: function(text, addNewline = true) {
     if (text === undefined || text === null) return;
 
-    return;
-
     if (addNewline === false) {
       // Write immediately without newline
       process.stdout.write(text);

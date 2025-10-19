@@ -3,39 +3,118 @@
 Snapshot test runner for the Otium kernel.
 
 Runs test programs, captures TEST: output lines, and compares against saved snapshots.
+Supports both RISC-V (via QEMU) and WASM (via Node.js) platforms.
 """
 
 import subprocess
 import sys
 import os
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Callable
 
 # Test programs to run (map of test name to config.sh flag)
 TEST_PROGRAMS = {
     "test-hello": "--test-hello",
     "test-mem": "--test-mem",
+    "test-alternate": "--test-alternate",
 }
 
-QEMU_TIMEOUT = 10  # seconds
+# Platform-specific test exclusions
+PLATFORM_EXCLUSIONS = {
+    "wasm": ["test-mem"],  # Skip memory test on WASM for now
+}
+
 SNAPSHOT_DIR = Path(__file__).parent / "snapshots"
 CONFIG_SCRIPT = Path(__file__).parent / "config.sh"
-COMPILE_SCRIPT = Path(__file__).parent / "compile-riscv.sh"
-QEMU_CMD = "qemu-system-riscv32"
+
+# Platform-specific configuration
+PLATFORMS = {
+    "riscv": {
+        "compile_script": Path(__file__).parent / "compile-riscv.sh",
+        "timeout": 10,
+        "qemu_cmd": "qemu-system-riscv32",
+    },
+    "wasm": {
+        "compile_script": Path(__file__).parent / "compile-wasm.sh",
+        "timeout": 5,
+        "node_script": Path(__file__).parent / "run-wasm.js",
+    }
+}
 
 
-def run_test(test_name: str, config_flag: str) -> List[str]:
+def run_qemu(platform_config: dict) -> str:
+    """Run QEMU and capture output."""
+    timeout = platform_config["timeout"]
+    qemu_cmd = platform_config["qemu_cmd"]
+
+    try:
+        result = subprocess.run(
+            [
+                qemu_cmd,
+                "-machine", "virt",
+                "-bios", "default",
+                "-nographic",
+                "-serial", "mon:stdio",
+                "--no-reboot",
+                "-kernel", "bin/kernel.elf"
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        return result.stdout + result.stderr
+    except subprocess.TimeoutExpired as e:
+        # Timeout is expected for some tests
+        return (e.stdout or "") + (e.stderr or "")
+
+
+def run_node_wasm(platform_config: dict) -> str:
+    """Run Node.js with WASM kernel and capture output."""
+    timeout = platform_config["timeout"]
+    node_script = platform_config["node_script"]
+
+    # Set test mode environment variable
+    env = os.environ.copy()
+    env['OTIUM_TEST_MODE'] = '1'
+
+    try:
+        result = subprocess.run(
+            ["node", str(node_script)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env
+        )
+        return result.stdout + result.stderr
+    except subprocess.TimeoutExpired as e:
+        # Timeout is expected for some tests
+        return (e.stdout or "") + (e.stderr or "")
+
+
+def extract_test_lines(output: str) -> List[str]:
+    """Extract TEST: lines from output."""
+    return [
+        line.strip()
+        for line in output.split('\n')
+        if line.strip().startswith('TEST:')
+    ]
+
+
+def run_test(test_name: str, config_flag: str, platform: str) -> List[str]:
     """
-    Compile and run a test program, returning TEST: output lines.
+    Compile and run a test program on specified platform.
 
     Args:
         test_name: Name of the test
         config_flag: Flag to pass to config.sh
+        platform: "riscv" or "wasm"
 
     Returns:
         List of TEST: output lines
     """
-    print(f"Running test: {test_name}")
+    print(f"Running test: {test_name} on {platform}")
+
+    platform_config = PLATFORMS[platform]
 
     # Generate configuration
     print(f"  Configuring with flag: {config_flag}")
@@ -52,11 +131,11 @@ def run_test(test_name: str, config_flag: str) -> List[str]:
         print(f"  stderr: {e.stderr}")
         raise
 
-    # Compile the kernel
-    print(f"  Compiling...")
+    # Compile the kernel with platform-specific script
+    print(f"  Compiling for {platform}...")
     try:
         subprocess.run(
-            [str(COMPILE_SCRIPT)],
+            [str(platform_config["compile_script"])],
             check=True,
             capture_output=True,
             text=True
@@ -67,43 +146,31 @@ def run_test(test_name: str, config_flag: str) -> List[str]:
         print(f"  stderr: {e.stderr}")
         raise
 
-    # Run QEMU and capture output
-    print(f"  Running QEMU (timeout: {QEMU_TIMEOUT}s)")
-    try:
-        result = subprocess.run(
-            [
-                QEMU_CMD,
-                "-machine", "virt",
-                "-bios", "default",
-                "-nographic",
-                "-serial", "mon:stdio",
-                "--no-reboot",
-                "-kernel", "bin/kernel.elf"
-            ],
-            capture_output=True,
-            text=True,
-            timeout=QEMU_TIMEOUT
-        )
-        output = result.stdout + result.stderr
-    except subprocess.TimeoutExpired as e:
-        # Timeout is expected for some tests
-        output = (e.stdout or "") + (e.stderr or "")
+    # Run with platform-specific runner
+    print(f"  Running on {platform} (timeout: {platform_config['timeout']}s)")
+    if platform == "riscv":
+        output = run_qemu(platform_config)
+    elif platform == "wasm":
+        output = run_node_wasm(platform_config)
+    else:
+        raise ValueError(f"Unknown platform: {platform}")
 
     # Extract TEST: lines
-    test_lines = [
-        line.strip()
-        for line in output.split('\n')
-        if line.strip().startswith('TEST:')
-    ]
+    test_lines = extract_test_lines(output)
 
     print(f"  Captured {len(test_lines)} TEST: lines")
     return test_lines
 
 
-def save_snapshot(test_name: str, lines: List[str]) -> None:
-    """Save snapshot for a test."""
+def get_snapshot_path(test_name: str, platform: str) -> Path:
+    """Get snapshot file path for test and platform."""
+    return SNAPSHOT_DIR / f"{test_name}-{platform}.txt"
+
+
+def save_snapshot(test_name: str, platform: str, lines: List[str]) -> None:
+    """Save snapshot for a test on a specific platform."""
     SNAPSHOT_DIR.mkdir(exist_ok=True)
-    snapshot_file = SNAPSHOT_DIR / f"{test_name}.txt"
+    snapshot_file = get_snapshot_path(test_name, platform)
 
     with open(snapshot_file, 'w') as f:
         for line in lines:
@@ -112,9 +179,9 @@ def save_snapshot(test_name: str, lines: List[str]) -> None:
     print(f"  Saved snapshot to {snapshot_file}")
 
 
-def load_snapshot(test_name: str) -> List[str]:
-    """Load snapshot for a test."""
-    snapshot_file = SNAPSHOT_DIR / f"{test_name}.txt"
+def load_snapshot(test_name: str, platform: str) -> List[str]:
+    """Load snapshot for a test on a specific platform."""
+    snapshot_file = get_snapshot_path(test_name, platform)
 
     if not snapshot_file.exists():
         return []
@@ -158,42 +225,62 @@ def main():
         action="store_true",
         help="Update snapshots instead of comparing"
     )
+    parser.add_argument(
+        "--platform",
+        choices=["riscv", "wasm", "all"],
+        default="all",
+        help="Platform to test (riscv, wasm, or all)"
+    )
     args = parser.parse_args()
+
+    # Determine which platforms to test
+    platforms_to_test = (
+        ["riscv", "wasm"] if args.platform == "all"
+        else [args.platform]
+    )
 
     results = {}
 
-    for test_name, compile_flag in TEST_PROGRAMS.items():
-        try:
-            # Run the test
-            actual_output = run_test(test_name, compile_flag)
+    for platform in platforms_to_test:
+        for test_name, config_flag in TEST_PROGRAMS.items():
+            # Skip tests excluded for this platform
+            if test_name in PLATFORM_EXCLUSIONS.get(platform, []):
+                print(f"Skipping {test_name} on {platform} (excluded)")
+                continue
 
-            if args.update:
-                # Update mode: save the snapshot
-                save_snapshot(test_name, actual_output)
-                results[test_name] = "UPDATED"
-            else:
-                # Test mode: compare against snapshot
-                expected_output = load_snapshot(test_name)
+            test_key = f"{test_name}-{platform}"
 
-                if not expected_output:
-                    print(f"  ⚠ WARNING: No snapshot found for {test_name}")
-                    print(f"  Run with --update to create snapshot")
-                    results[test_name] = "NO_SNAPSHOT"
+            try:
+                # Run the test
+                actual_output = run_test(test_name, config_flag, platform)
+
+                if args.update:
+                    # Update mode: save the snapshot
+                    save_snapshot(test_name, platform, actual_output)
+                    results[test_key] = "UPDATED"
                 else:
-                    passed = compare_snapshots(test_name, actual_output, expected_output)
-                    results[test_name] = "PASS" if passed else "FAIL"
+                    # Test mode: compare against snapshot
+                    expected_output = load_snapshot(test_name, platform)
 
-        except Exception as e:
-            print(f"  ✗ ERROR: {e}")
-            results[test_name] = "ERROR"
+                    if not expected_output:
+                        print(f"  ⚠ WARNING: No snapshot found for {test_key}")
+                        print(f"  Run with --update to create snapshot")
+                        results[test_key] = "NO_SNAPSHOT"
+                    else:
+                        passed = compare_snapshots(test_name, actual_output, expected_output)
+                        results[test_key] = "PASS" if passed else "FAIL"
 
-        print()
+            except Exception as e:
+                print(f"  ✗ ERROR: {e}")
+                results[test_key] = "ERROR"
+
+            print()
 
     # Print summary
     print("=" * 60)
     print("SUMMARY")
     print("=" * 60)
-    for test_name, result in results.items():
+    for test_key, result in results.items():
         symbol = {
             "PASS": "✓",
             "FAIL": "✗",
@@ -201,7 +288,7 @@ def main():
             "NO_SNAPSHOT": "⚠",
             "UPDATED": "↻"
         }.get(result, "?")
-        print(f"{symbol} {test_name}: {result}")
+        print(f"{symbol} {test_key}: {result}")
 
     # Exit with error code if any tests failed
     if any(r in ["FAIL", "ERROR"] for r in results.values()):

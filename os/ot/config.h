@@ -17,7 +17,7 @@
 #define KERNEL_PROG_TEST_ALTERNATE 3
 
 // Selected kernel program (modified by config.sh)
-#define KERNEL_PROG KERNEL_PROG_SHELL
+#define KERNEL_PROG KERNEL_PROG_TEST_ALTERNATE
 
 // Log levels
 #define LSILENT 0

@@ -34,20 +34,20 @@ extern "C" void proc_mem_test(void) {
 
 // TEST_ALTERNATE: Process A - outputs 1, yields, outputs 3
 extern "C" void proc_alternate_a(void) {
-  while (1) {
-    oprintf("A\n");
-    yield();
-  }
+  oprintf("TEST: 1\n");
+  yield();
+  oprintf("TEST: 3\n");
   current_proc->state = TERMINATED;
+  yield();
 }
 
 // TEST_ALTERNATE: Process B - outputs 2, yields, outputs 4
 extern "C" void proc_alternate_b(void) {
-  while (1) {
-    oprintf("B\n");
-    yield();
-  }
+  oprintf("TEST: 2\n");
+  yield();
+  oprintf("TEST: 4\n");
   current_proc->state = TERMINATED;
+  yield();
 }
 
 // Helper to get all pages allocated to a process

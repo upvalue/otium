@@ -26,7 +26,11 @@ typedef uint32_t uintptr_t;
 
 #define is_aligned(value, align) __builtin_is_aligned(value, align)
 
-// basic functions
+// These are common C stdlib-like functions, callable from anyhwere
+
+// In a few cases, they're prefixed with "o" because these are sometimes
+// macros in normal stdlib headers and that causes compilation conflicts
+// when this is compiled on a normal system instea dof for a freestanding target
 void *omemset(void *buf, char c, size_t n);
 size_t strlen(const char *s);
 void oprintf(const char *fmt, ...);
@@ -38,7 +42,7 @@ int memcmp(const void *s1, const void *s2, size_t n);
 void ovsnprintf(char *str, size_t size, const char *format, va_list args);
 void osnprintf(char *str, size_t size, const char *format, ...);
 
-// syscalls
+// System calls
 #define OU_YIELD 1
 #define OU_PUTCHAR 2
 #define OU_GETCHAR 3

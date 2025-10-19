@@ -2,14 +2,6 @@
 
 extern "C" char __bss[], __bss_end[], __stack_top[];
 
-#ifndef OT_ARCH_WASM
-extern "C" char _binary_otu_prog_shell_bin_start[],
-    _binary_otu_prog_shell_bin_size[];
-#else
-// For WASM, we compile the shell together with the kernel
-extern "C" void shell_main(void);  // Shell main function
-#endif
-
 // Forward declarations for test programs (defined in kernel-prog.cpp)
 extern "C" void proc_hello_world(void);
 extern "C" void proc_mem_test(void);

@@ -17,7 +17,7 @@
 #define KERNEL_PROG_TEST_ALTERNATE 3
 
 // Selected kernel program (modified by config.sh)
-#define KERNEL_PROG KERNEL_PROG_TEST_ALTERNATE
+#define KERNEL_PROG KERNEL_PROG_SHELL
 
 // Log levels
 #define LSILENT 0
@@ -26,7 +26,7 @@
 
 // Subsystem log levels (configured by config.sh)
 #define LOG_GENERAL LSOFT
-#define LOG_MEM LSOFT
+#define LOG_MEM LSILENT
 #define LOG_PROC LSOFT
 
 #endif

@@ -8,6 +8,9 @@ void kernel_common(void);
 #ifdef OT_ARCH_WASM
 // Forward declaration for shell_main (defined in prog-shell.cpp)
 extern "C" void shell_main(void);
+#else
+extern "C" char _binary_bin_prog_shell_bin_start[],
+    _binary_bin_prog_shell_bin_size[];
 #endif
 
 // a basic process that just prints hello world and exits
@@ -34,20 +37,20 @@ extern "C" void proc_mem_test(void) {
 
 // TEST_ALTERNATE: Process A - outputs 1, yields, outputs 3
 extern "C" void proc_alternate_a(void) {
-  oprintf("TEST: 1\n");
-  yield();
-  oprintf("TEST: 3\n");
+  while (1) {
+    oprintf("A\n");
+    yield();
+  }
   current_proc->state = TERMINATED;
-  yield();
 }
 
 // TEST_ALTERNATE: Process B - outputs 2, yields, outputs 4
 extern "C" void proc_alternate_b(void) {
-  oprintf("TEST: 2\n");
-  yield();
-  oprintf("TEST: 4\n");
+  while (1) {
+    oprintf("B\n");
+    yield();
+  }
   current_proc->state = TERMINATED;
-  yield();
 }
 
 // Helper to get all pages allocated to a process
@@ -139,8 +142,10 @@ void kernel_start(void) {
       process_create("alternate_a", (const void *)proc_alternate_a, 0, false);
   Process *proc_b =
       process_create("alternate_b", (const void *)proc_alternate_b, 0, false);
-  TRACE(LSOFT, "created proc_a with name %s and pid %d", proc_a->name, proc_a->pid);
-  TRACE(LSOFT, "created proc_b with name %s and pid %d", proc_b->name, proc_b->pid);
+  TRACE(LSOFT, "created proc_a with name %s and pid %d", proc_a->name,
+        proc_a->pid);
+  TRACE(LSOFT, "created proc_b with name %s and pid %d", proc_b->name,
+        proc_b->pid);
 #else
   // Default/main mode
 #ifdef OT_ARCH_WASM
@@ -150,8 +155,8 @@ void kernel_start(void) {
 #else
   // For RISC-V, load the shell from the embedded binary
   Process *proc_shell =
-      process_create("shell", (const void *)_binary_otu_prog_shell_bin_start,
-                     (size_t)_binary_otu_prog_shell_bin_size, true);
+      process_create("shell", (const void *)_binary_bin_prog_shell_bin_start,
+                     (size_t)_binary_bin_prog_shell_bin_size, true);
 #endif
   TRACE(LSOFT, "created proc with name %s and pid %d", proc_shell->name,
         proc_shell->pid);

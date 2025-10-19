@@ -4,8 +4,8 @@
 #ifndef _TCL_H
 #define _TCL_H
 
-#include "otcommon.h"
-#include "otu/shell.h"
+#include "ot/common.h"
+#include "ot/user/shell.h"
 
 // Placement new operator (avoids needing <new>)
 inline void *operator new(size_t, void *p) noexcept { return p; }

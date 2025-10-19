@@ -1,9 +1,9 @@
 // prog-shell.cpp - shell program
-#include "otu/user.hpp"
+#include "ot/user/user.hpp"
 
-#include "otu/vendor/tlsf.h"
+#include "ot/user/vendor/tlsf.h"
 
-#include "otu/tcl.h"
+#include "ot/user/tcl.h"
 
 // Buffer for storing user commands
 static char buffer[4096];

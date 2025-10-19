@@ -1,4 +1,4 @@
-#include "otk/kernel.hpp"
+#include "ot/kernel/kernel.hpp"
 
 extern char __kernel_base[];
 
@@ -94,7 +94,7 @@ Process *process_create_impl(Process *table, uint32_t max_procs,
 
   // Map user pages.
   if (is_image) {
-    oprintf("found image. allocating pages\n");
+    TRACE_PROC(LLOUD, "found image. allocating pages");
     for (size_t off = 0; off < size; off += OT_PAGE_SIZE) {
       void *page = page_allocate(i, 1);
 
@@ -104,8 +104,8 @@ Process *process_create_impl(Process *table, uint32_t max_procs,
       size_t copy_size = OT_PAGE_SIZE <= remaining ? OT_PAGE_SIZE : remaining;
 
       // Fill and map the page.
-      oprintf("copying %d bytes to page %x from %x\n", copy_size, page,
-              (uintptr_t)image_or_pc + off);
+      TRACE_PROC(LLOUD, "copying %d bytes to page %x from %x", copy_size, page,
+                 (uintptr_t)image_or_pc + off);
       memcpy((void *)page, ((char *)image_or_pc) + off, copy_size);
       map_page((uintptr_t *)page_table, (uintptr_t)USER_BASE + off,
                (uintptr_t)page, PAGE_U | PAGE_R | PAGE_W | PAGE_X, i);
@@ -124,7 +124,7 @@ Process *process_create_impl(Process *table, uint32_t max_procs,
   }
 #endif
 
-  TRACE("proc %s stack ptr: %x", free_proc->name, free_proc->stack_ptr);
+  TRACE_PROC(LSOFT, "proc %s stack ptr: %x", free_proc->name, free_proc->stack_ptr);
 
   memory_increment_process_count();
 
@@ -157,7 +157,7 @@ Process *process_next_runnable(void) {
 }
 
 void process_exit(Process *proc) {
-  TRACE("Process %d (%s) exiting", proc->pid, proc->name);
+  TRACE_PROC(LSOFT, "Process %d (%s) exiting", proc->pid, proc->name);
 
   // Free all pages allocated to this process
   page_free_process(proc->pid);

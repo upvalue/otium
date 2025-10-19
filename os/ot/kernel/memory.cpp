@@ -1,6 +1,6 @@
 // memory.cpp - page manager
 
-#include "otk/kernel.hpp"
+#include "ot/kernel/kernel.hpp"
 
 static uintptr_t next_page_addr = (uintptr_t)__free_ram;
 
@@ -20,7 +20,7 @@ static void *page_allocate_bootstrap(size_t page_count) {
     PANIC("out of memory during bootstrap");
   }
 
-  TRACE_MEM("Bootstrap allocated %d pages at address %x", page_count,
+  TRACE_MEM(LLOUD, "Bootstrap allocated %d pages at address %x", page_count,
             page_addr);
 
   omemset((void *)page_addr, 0, page_count * OT_PAGE_SIZE);
@@ -32,20 +32,20 @@ void memory_init() {
     return;
   }
 
-  TRACE("Initializing memory management system");
+  TRACE(LSOFT, "Initializing memory management system");
 
   // Calculate total number of pages available
   uintptr_t free_ram_size = (uintptr_t)__free_ram_end - (uintptr_t)__free_ram;
   total_page_count = free_ram_size / OT_PAGE_SIZE;
 
-  TRACE("Total pages available: %d", total_page_count);
+  TRACE(LSOFT, "Total pages available: %d", total_page_count);
 
   // Allocate PageInfo array using bootstrap allocator (before tracking starts)
   size_t page_infos_size = total_page_count * sizeof(PageInfo);
   size_t page_infos_pages = (page_infos_size + OT_PAGE_SIZE - 1) / OT_PAGE_SIZE;
   page_infos = (PageInfo *)page_allocate_bootstrap(page_infos_pages);
 
-  TRACE("Allocated %d pages for PageInfo array at %x", page_infos_pages,
+  TRACE(LSOFT, "Allocated %d pages for PageInfo array at %x", page_infos_pages,
         page_infos);
 
   // Initialize page tracking structures
@@ -85,7 +85,7 @@ void memory_init() {
   mem_stats.peak_usage_pages = page_infos_pages;
 
   memory_initialized = true;
-  TRACE("Memory initialization complete. Free list head: %x", free_list_head);
+  TRACE(LSOFT, "Memory initialization complete. Free list head: %x", free_list_head);
 }
 
 void *page_allocate(uint32_t pid, size_t page_count) {
@@ -93,7 +93,7 @@ void *page_allocate(uint32_t pid, size_t page_count) {
     PANIC("page_allocate called before memory_init");
   }
 
-  TRACE_MEM("page_allocate: pid=%d, count=%d", pid, page_count);
+  TRACE_MEM(LSOFT, "page_allocate: pid=%d, count=%d", pid, page_count);
 
   // For now, only support single page allocation
   if (page_count != 1) {
@@ -121,18 +121,18 @@ void *page_allocate(uint32_t pid, size_t page_count) {
   void *page_addr = (void *)page_info->addr;
   omemset(page_addr, 0, OT_PAGE_SIZE);
 
-  TRACE_MEM("Allocated page at %x to pid %d", page_addr, pid);
+  TRACE_MEM(LLOUD, "Allocated page at %x to pid %d", page_addr, pid);
 
   return page_addr;
 }
 
 void page_free_process(uint32_t pid) {
   if (!memory_initialized) {
-    TRACE_MEM("Memory not initialized, cannot free pages");
+    TRACE_MEM(LSOFT, "Memory not initialized, cannot free pages");
     return;
   }
 
-  TRACE_MEM("page_free_process: pid=%d", pid);
+  TRACE_MEM(LSOFT, "page_free_process: pid=%d", pid);
 
   uint32_t freed_count = 0;
 
@@ -151,7 +151,7 @@ void page_free_process(uint32_t pid) {
 
       freed_count++;
 
-      TRACE_MEM("Freed page %x from pid %d", page_infos[i].addr, pid);
+      TRACE_MEM(LLOUD, "Freed page %x from pid %d", page_infos[i].addr, pid);
     }
   }
 
@@ -159,7 +159,7 @@ void page_free_process(uint32_t pid) {
   mem_stats.allocated_pages -= freed_count;
   mem_stats.freed_pages += freed_count;
 
-  TRACE_MEM("Freed %d pages from pid %d", freed_count, pid);
+  TRACE_MEM(LSOFT, "Freed %d pages from pid %d", freed_count, pid);
 }
 
 void memory_report() {

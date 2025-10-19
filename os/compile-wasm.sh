@@ -29,20 +29,21 @@ EMFLAGS=(
 )
 
 # Build the complete system
-$CC $CPPFLAGS $CFLAGS "${EMFLAGS[@]}" -o otk/kernel.js \
-    otk/kernel.cpp \
-    otk/kernel-prog.cpp \
-    otk/platform-wasm.cpp \
-    otk/std.cpp \
-    otk/memory.cpp \
-    otk/process.cpp \
-    otu/user-wasm.cpp \
-    otu/prog-shell.cpp \
-    otu/tcl.cpp \
-    otu/vendor/tlsf.c
+mkdir -p bin
+$CC $CPPFLAGS $CFLAGS "${EMFLAGS[@]}" -o bin/kernel.js \
+    ot/kernel/startup.cpp \
+    ot/kernel/main.cpp \
+    ot/kernel/platform-wasm.cpp \
+    ot/shared/std.cpp \
+    ot/kernel/memory.cpp \
+    ot/kernel/process.cpp \
+    ot/user/user-wasm.cpp \
+    ot/user/prog-shell.cpp \
+    ot/user/tcl.cpp \
+    ot/user/vendor/tlsf.c
 
-set +x 
+set +x
 
 echo "Build complete! Output files:"
-echo "  otk/kernel.js"
-echo "  otk/kernel.wasm"
+echo "  bin/kernel.js"
+echo "  bin/kernel.wasm"

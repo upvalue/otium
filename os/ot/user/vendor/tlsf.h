@@ -39,7 +39,7 @@
 ** SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include "otcommon.h"
+#include "ot/common.h"
 
 #if defined(__cplusplus)
 extern "C" {

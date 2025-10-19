@@ -20,10 +20,11 @@ pkgs.stdenv.mkDerivation {
   nativeBuildInputs = [ pkgs.emscripten ];
 
   buildPhase = ''
-    # Generate otconfig.h
-    cat > otconfig.h <<EOF
-#ifndef _OT_CONFIG_H
-#define _OT_CONFIG_H
+    # Generate ot/config.h
+    mkdir -p ot
+    cat > ot/config.h <<EOF
+#ifndef OT_CONFIG_H
+#define OT_CONFIG_H
 
 // Available kernel program modes
 #define KERNEL_PROG_SHELL 0
@@ -56,17 +57,18 @@ EOF
     )
 
     # Build the complete system
-    emcc $CPPFLAGS $CFLAGS "''${EMFLAGS[@]}" -o otk/kernel.js \
-      otk/kernel.cpp \
-      otk/kernel-prog.cpp \
-      otk/platform-wasm.cpp \
-      otk/std.cpp \
-      otk/memory.cpp \
-      otk/process.cpp \
-      otu/user-wasm.cpp \
-      otu/prog-shell.cpp \
-      otu/tcl.cpp \
-      otu/vendor/tlsf.c
+    mkdir -p ot/kernel ot/user ot/shared
+    emcc $CPPFLAGS $CFLAGS "''${EMFLAGS[@]}" -o ot/kernel/kernel.js \
+      ot/kernel/startup.cpp \
+      ot/kernel/main.cpp \
+      ot/kernel/platform-wasm.cpp \
+      ot/shared/std.cpp \
+      ot/kernel/memory.cpp \
+      ot/kernel/process.cpp \
+      ot/user/user-wasm.cpp \
+      ot/user/prog-shell.cpp \
+      ot/user/tcl.cpp \
+      ot/user/vendor/tlsf.c
 
     echo ""
     echo "Build complete!"
@@ -74,8 +76,8 @@ EOF
 
   installPhase = ''
     mkdir -p $out/lib
-    cp otk/kernel.js $out/lib/
-    cp otk/kernel.wasm $out/lib/
+    cp ot/kernel/kernel.js $out/lib/
+    cp ot/kernel/kernel.wasm $out/lib/
 
     echo ""
     echo "Output files:"

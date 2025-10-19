@@ -1,6 +1,6 @@
 // std.cpp - standard library like functions
 
-#include "otcommon.h"
+#include "ot/common.h"
 
 void *omemset(void *buf, char c, size_t n) {
   uint8_t *p = (uint8_t *)buf;

@@ -1,13 +1,43 @@
 # otium/os
 
-this is a simple operating system kernel; currently it targets QEMU RISC-V and supports purely
-cooperative scheduling
+This is a simple operating system with a kernel and a user-space program.
+
+Currently, it targets two systems:
+- RISC-V under QEMU with assembly to switch and store stack information by hand
+- WASM on Emscripten, using the fiber library to switch processes
+
+## Source
+
+The source of the operating system is written in C++. Source files live in the `./ot` directory.
+Because kernel and user space programs may be compiled and run separately, `ot/kernel` contains
+kernel code and `ot/user` contains user code. `ot/shared` contains shared process-agnostic code
+including some C stdlib like functionality that can be run in either system.
+
+## Subsystems
+
+### Processes and scheduler
+
+The operating system runs multiple processes. Processes have a PID (unsigned int), a name and a
+state of UNUSED, RUNNABLE or TERMINATED.
+
+The scheduler currently is a purely cooperative system where processes yield to the operating
+system, which then selects the next process by PID and runs it.
+
+When a process encounters a fault on RISC-V, the process will be terminated by the OS.
+
+### Memory
+
+The memory is a simple page system. Pages are kept in a free list. Processes never free pages, but
+when processes are killed or exit the pages are returned to the OS. Pages can be readable, writable
+and executable and processes can only access pages directly belonging to them, but this enforcement
+only happens on RISC-V (as WASM doesn't have a mechanism for doing so).
 
 ## Testing
 
 ### Unit tests
 
-There are some unit tests with doctest; these can be run with `./test-unit.sh`
+There are some unit tests with doctest that run on the host system; these can be run with
+`./test-unit.sh`.
  
 ### Snapshot tests
 

@@ -1,6 +1,6 @@
 // riscv.cpp - risc-v and opensbi specific functionality
 
-#include "otk/kernel.hpp"
+#include "ot/kernel/kernel.hpp"
 
 #define SCAUSE_ECALL 8
 #define SSTATUS_SPP (1 << 8)
@@ -341,7 +341,7 @@ void yield(void) {
 
 extern "C" void kernel_main(void) {
   WRITE_CSR(stvec, (uintptr_t)kernel_entry);
-  kernel_common();
+  kernel_start();
 }
 
 __attribute__((section(".text.boot"))) __attribute__((naked)) extern "C" void

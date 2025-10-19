@@ -1,8 +1,8 @@
-// otcommon.h - global type definitions and globally available functions
-#ifndef OTCOMMON_H
-#define OTCOMMON_H
+// ot/common.h - global type definitions and globally available functions
+#ifndef OT_COMMON_H
+#define OT_COMMON_H
 
-#include "otconfig.h"
+#include "ot/config.h"
 
 #ifdef __cplusplus
 extern "C" {

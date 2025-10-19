@@ -11,23 +11,25 @@ OBJCOPY=/opt/homebrew/opt/llvm/bin/llvm-objcopy
 CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_RISCV"
 CFLAGS="$COMMON_CFLAGS --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib"
 
+mkdir -p bin
+
 $CC $CPPFLAGS $CFLAGS \
-    -Wl,-Totu/user.ld -Wl,-Map=otu/prog-shell.map -o otu/prog-shell.elf \
-    otu/user-riscv.cpp \
-    otu/prog-shell.cpp \
-    otk/std.cpp \
-    otu/vendor/tlsf.c \
-    otu/tcl.cpp
-    
-$OBJCOPY --set-section-flags .bss=alloc,contents -O binary otu/prog-shell.elf otu/prog-shell.bin
-$OBJCOPY -Ibinary -Oelf32-littleriscv otu/prog-shell.bin otu/prog-shell.bin.o
+    -Wl,-Tot/user/user.ld -Wl,-Map=bin/prog-shell.map -o bin/prog-shell.elf \
+    ot/user/user-riscv.cpp \
+    ot/user/prog-shell.cpp \
+    ot/shared/std.cpp \
+    ot/user/vendor/tlsf.c \
+    ot/user/tcl.cpp
+
+$OBJCOPY --set-section-flags .bss=alloc,contents -O binary bin/prog-shell.elf bin/prog-shell.bin
+$OBJCOPY -Ibinary -Oelf32-littleriscv bin/prog-shell.bin bin/prog-shell.bin.o
 
 # Build the kernel
-$CC $CPPFLAGS $CFLAGS -Wl,-Totk/kernel-link.ld -Wl,-Map=otk/kernel.map -o otk/kernel.elf \
-    otk/kernel.cpp \
-    otk/kernel-prog.cpp \
-    otk/platform-riscv.cpp \
-    otk/std.cpp \
-    otk/memory.cpp \
-    otk/process.cpp \
-    otu/prog-shell.bin.o
+$CC $CPPFLAGS $CFLAGS -Wl,-Tot/kernel/kernel-link.ld -Wl,-Map=bin/kernel.map -o bin/kernel.elf \
+    ot/kernel/startup.cpp \
+    ot/kernel/main.cpp \
+    ot/kernel/platform-riscv.cpp \
+    ot/shared/std.cpp \
+    ot/kernel/memory.cpp \
+    ot/kernel/process.cpp \
+    bin/prog-shell.bin.o

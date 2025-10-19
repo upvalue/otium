@@ -1,7 +1,7 @@
-#ifndef _USER_HPP
-#define _USER_HPP
+#ifndef OT_USER_HPP
+#define OT_USER_HPP
 
-#include "otcommon.h"
+#include "ot/common.h"
 
 // system calls
 extern "C" {

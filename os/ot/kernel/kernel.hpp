@@ -1,7 +1,7 @@
-#ifndef OTK_KERNEL_HPP
-#define OTK_KERNEL_HPP
+#ifndef OT_KERNEL_HPP
+#define OT_KERNEL_HPP
 
-#include "otcommon.h"
+#include "ot/common.h"
 
 #ifdef OT_TEST
 #include <stdlib.h>
@@ -19,19 +19,26 @@
   } while (0)
 #endif
 
-#define TRACE(fmt, ...)                                                        \
+#define TRACE(level, fmt, ...)                                                 \
   do {                                                                         \
-    oprintf("TRACE: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);     \
+    if (LOG_GENERAL >= (level)) {                                              \
+      oprintf("[dbg] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);    \
+    }                                                                          \
   } while (0)
 
-#ifdef OT_TRACE_MEM
-#define TRACE_MEM(fmt, ...)                                                    \
+#define TRACE_MEM(level, fmt, ...)                                             \
   do {                                                                         \
-    oprintf("TRACE_MEM: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); \
+    if (LOG_MEM >= (level)) {                                                  \
+      oprintf("[mem] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);    \
+    }                                                                          \
   } while (0)
-#else
-#define TRACE_MEM(fmt, ...)
-#endif
+
+#define TRACE_PROC(level, fmt, ...)                                            \
+  do {                                                                         \
+    if (LOG_PROC >= (level)) {                                                 \
+      oprintf("[proc] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);   \
+    }                                                                          \
+  } while (0)
 
 // platform specific utility functions
 void wfi(void);
@@ -87,12 +94,14 @@ struct Process {
   uintptr_t heap_next_vaddr; // Next available heap address
   uint8_t stack[8192] __attribute__((aligned(16)));
 #ifdef OT_ARCH_WASM
-  bool started;              // For WASM: track if process has been started
-  void *fiber;               // emscripten_fiber_t for this process
-  uint8_t asyncify_stack[8192] __attribute__((aligned(16))); // Asyncify stack for fiber
+  bool started; // For WASM: track if process has been started
+  void *fiber;  // emscripten_fiber_t for this process
+  uint8_t asyncify_stack[8192]
+      __attribute__((aligned(16))); // Asyncify stack for fiber
 #endif
 };
 
+// Process management subsystem
 Process *process_create_impl(Process *table, uint32_t max_procs,
                              const char *name, const void *image_or_pc,
                              size_t size, bool is_image);
@@ -100,8 +109,6 @@ Process *process_create(const char *name, const void *image_or_pc, size_t size,
                         bool is_image);
 Process *process_next_runnable(void);
 void process_exit(Process *proc);
-void map_page(uintptr_t *table1, uintptr_t vaddr, uintptr_t paddr,
-              uint32_t flags, uint32_t pid);
 
 extern Process *idle_proc, *current_proc;
 extern Process procs[PROCS_MAX];
@@ -113,10 +120,17 @@ void yield(void);
 void scheduler_loop(void);
 #endif
 
+// Memory management subsystem
+void map_page(uintptr_t *table1, uintptr_t vaddr, uintptr_t paddr,
+              uint32_t flags, uint32_t pid);
+
 #define USER_BASE 0x1000000
 #define HEAP_BASE 0x2000000
 #define SSTATUS_SPIE (1 << 5)
 
+// Process for entering into a loaded userspace program (on RISCV)
 extern "C" void user_entry(void);
+
+extern "C" void kernel_start(void);
 
 #endif

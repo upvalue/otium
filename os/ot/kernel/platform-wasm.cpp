@@ -1,6 +1,6 @@
 // platform-wasm.cpp - WASM/Emscripten specific functionality
 
-#include "otk/kernel.hpp"
+#include "ot/kernel/kernel.hpp"
 #include <emscripten.h>
 #include <emscripten/fiber.h>
 #include <stdlib.h>
@@ -98,13 +98,13 @@ void wfi(void) {
 // Just call the user program directly
 extern "C" void user_entry(void) {
   // Jump to user base address
-  TRACE("user_entry: calling user program for process %s", current_proc->name);
+  TRACE(LLOUD, "user_entry: calling user program for process %s", current_proc->name);
   typedef void (*user_func_t)(void);
   user_func_t user_main = (user_func_t)current_proc->user_pc;
   user_main();
 
   // If user program returns, exit the process
-  TRACE("user_entry: user program %s returned, marking TERMINATED",
+  TRACE(LLOUD, "user_entry: user program %s returned, marking TERMINATED",
         current_proc->name);
   current_proc->state = TERMINATED;
   yield();
@@ -121,7 +121,7 @@ void yield(void) {
     PANIC("current_proc or idle_proc is null");
   }
 
-  TRACE("yield: process %s (pid=%d) yielding", current_proc->name,
+  TRACE(LLOUD, "yield: process %s (pid=%d) yielding", current_proc->name,
         current_proc->pid);
 
   // Switch from process fiber back to scheduler fiber
@@ -129,14 +129,14 @@ void yield(void) {
   emscripten_fiber_swap((emscripten_fiber_t *)current_proc->fiber,
                         &scheduler_fiber);
 
-  TRACE("yield: process %s (pid=%d) resumed", current_proc->name,
+  TRACE(LLOUD, "yield: process %s (pid=%d) resumed", current_proc->name,
         current_proc->pid);
 }
 
 // Fiber entry point wrapper - calls user_entry for the process
 static void fiber_entry_point(void *arg) {
   Process *proc = (Process *)arg;
-  TRACE("fiber_entry_point: starting process %s (pid=%d)", proc->name,
+  TRACE(LLOUD, "fiber_entry_point: starting process %s (pid=%d)", proc->name,
         proc->pid);
 
   // Set as current process and run
@@ -145,7 +145,7 @@ static void fiber_entry_point(void *arg) {
 
   // If we get here, process terminated (returned from user_entry instead of
   // yielding)
-  TRACE("fiber_entry_point: process %s returned from user_entry, marking "
+  TRACE(LLOUD, "fiber_entry_point: process %s returned from user_entry, marking "
         "TERMINATED",
         proc->name);
   proc->state = TERMINATED;
@@ -156,7 +156,7 @@ static void fiber_entry_point(void *arg) {
 
 // WASM scheduler loop - runs processes cooperatively with fibers
 void scheduler_loop(void) {
-  TRACE("Entering WASM scheduler loop");
+  TRACE(LSOFT, "Entering WASM scheduler loop");
 
   // Initialize the scheduler fiber from current context
   const size_t SCHEDULER_ASYNCIFY_STACK_SIZE = 512 * 1024; // 512KB
@@ -165,7 +165,7 @@ void scheduler_loop(void) {
     PANIC("Failed to allocate scheduler asyncify stack");
   }
 
-  TRACE("Initializing scheduler fiber with asyncify stack size %d",
+  TRACE(LSOFT, "Initializing scheduler fiber with asyncify stack size %d",
         SCHEDULER_ASYNCIFY_STACK_SIZE);
   emscripten_fiber_init_from_current_context(&scheduler_fiber,
                                              scheduler_asyncify_stack,
@@ -176,11 +176,11 @@ void scheduler_loop(void) {
 
     // Check if we're done (only idle process left or no processes)
     if (!next || next == idle_proc) {
-      TRACE("No more runnable processes, exiting scheduler");
+      TRACE(LSOFT, "No more runnable processes, exiting scheduler");
       break;
     }
 
-    TRACE("Scheduler picked process %s (pid=%d)", next->name, next->pid);
+    TRACE(LLOUD, "Scheduler picked process %s (pid=%d)", next->name, next->pid);
     current_proc = next;
 
     // Create fiber for this process if not already created
@@ -190,7 +190,7 @@ void scheduler_loop(void) {
       const size_t C_STACK_SIZE = 512 * 1024;        // 512KB C stack
       const size_t ASYNCIFY_STACK_SIZE = 512 * 1024; // 512KB asyncify stack
 
-      TRACE("Creating fiber for process %s with stack size %d, asyncify stack "
+      TRACE(LLOUD, "Creating fiber for process %s with stack size %d, asyncify stack "
             "size %d",
             next->name, C_STACK_SIZE, ASYNCIFY_STACK_SIZE);
 
@@ -211,12 +211,12 @@ void scheduler_loop(void) {
 
     // Swap to the process fiber
     // First arg is current context (scheduler), second is target (process)
-    TRACE("Swapping to process %s (state=%d)", next->name, next->state);
+    TRACE(LLOUD, "Swapping to process %s (state=%d)", next->name, next->state);
     emscripten_fiber_swap(&scheduler_fiber, (emscripten_fiber_t *)next->fiber);
-    TRACE("Returned from process %s (state=%d)", next->name, next->state);
+    TRACE(LLOUD, "Returned from process %s (state=%d)", next->name, next->state);
   }
 
-  TRACE("Scheduler loop finished");
+  TRACE(LSOFT, "Scheduler loop finished");
 
   // Cleanup
   if (scheduler_asyncify_stack) {
@@ -275,7 +275,7 @@ void *kernel_syscall_alloc_page(void) {
 // Main entry point for WASM
 extern "C" void kernel_main(void) {
   oprintf("Otium OS starting on WASM\n");
-  kernel_common();
+  kernel_start();
 }
 
 // Emscripten calls main, so we just call kernel_main

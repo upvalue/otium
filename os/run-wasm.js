@@ -8,7 +8,7 @@ const path = require('path');
 const readline = require('readline');
 
 // Load the compiled WASM module
-const OtiumOS = require('./otk/kernel.js');
+const OtiumOS = require('./bin/kernel.js');
 
 // Input buffer for getchar
 const inputBuffer = [];

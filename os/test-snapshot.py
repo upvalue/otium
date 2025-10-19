@@ -78,7 +78,7 @@ def run_test(test_name: str, config_flag: str) -> List[str]:
                 "-nographic",
                 "-serial", "mon:stdio",
                 "--no-reboot",
-                "-kernel", "otk/kernel.elf"
+                "-kernel", "bin/kernel.elf"
             ],
             capture_output=True,
             text=True,

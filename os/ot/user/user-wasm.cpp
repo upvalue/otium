@@ -1,7 +1,7 @@
 // user-wasm.cpp - WASM syscall implementation
 
-#include "otk/kernel.hpp"
-#include "otu/user.hpp"
+#include "ot/kernel/kernel.hpp"
+#include "ot/user/user.hpp"
 
 // In WASM, syscalls are just direct function calls
 // No need for ecall or trap handling

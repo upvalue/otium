@@ -1,6 +1,6 @@
 // process tests.cpp
 #include "vendor/doctest.h"
-#include "otk/kernel.hpp"
+#include "ot/kernel/kernel.hpp"
 
 TEST_CASE("page_recycling") {
   // Note: We rely on the __free_ram and __free_ram_end symbols defined in

@@ -2,9 +2,7 @@
 *.map
 *.bin
 *.o
-kernel/*.js
-otk/*.js
 *.wasm
 /result
-/test
 *.html
+bin/

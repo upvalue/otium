@@ -2,6 +2,7 @@
 
 // run-wasm.js - Node.js test runner for Otium OS WASM build
 
+
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
@@ -16,7 +17,7 @@ const inputBuffer = [];
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
-  terminal: false
+  terminal: true
 });
 
 // Buffer to accumulate output
@@ -66,7 +67,7 @@ const Module = {
         inputBuffer.push(line.charCodeAt(i));
       }
       // Add newline
-      inputBuffer.push(10);
+      inputBuffer.push(13);
     });
 
     rl.on('close', () => {

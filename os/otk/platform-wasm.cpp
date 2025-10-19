@@ -62,6 +62,7 @@ extern "C" {
 void oputchar(char ch) { js_putchar(ch); }
 
 int ogetchar() {
+  emscripten_sleep(0);
   // Check local buffer first
   if (input_read_pos != input_write_pos) {
     char ch = input_buffer[input_read_pos];
@@ -84,7 +85,6 @@ int ogetchar() {
 void kernel_exit(void) {
   oprintf("Kernel exiting\n");
   js_exit();
-  // emscripten_force_exit(0);
 }
 
 void wfi(void) {
@@ -115,6 +115,8 @@ static emscripten_fiber_t scheduler_fiber;
 static void *scheduler_asyncify_stack = nullptr;
 
 void yield(void) {
+  // .emscripten_sleep(0);
+
   if (!current_proc || !idle_proc) {
     PANIC("current_proc or idle_proc is null");
   }
@@ -225,7 +227,7 @@ void scheduler_loop(void) {
 
 // Syscall handlers for user programs
 extern "C" {
-
+;
 void kernel_syscall_putchar(char ch) {
   oputchar(ch);
   yield();

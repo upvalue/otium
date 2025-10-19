@@ -38,6 +38,8 @@ extern "C" void main(void) {
   tcl::Interp i;
   tcl::register_core_commands(i);
 
+  oprintf("tcl shell ready\n");
+
   i.register_command("bye",
                      [](tcl::Interp &i, tcl::vector<tcl::string> &argv,
                         tcl::ProcPrivdata *privdata) -> tcl::Status {

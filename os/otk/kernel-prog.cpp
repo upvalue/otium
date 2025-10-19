@@ -37,18 +37,18 @@ void get_process_pages(uint32_t pid, uintptr_t *pages, uint32_t *count) {
 
 // TEST_ALTERNATE: Process A - outputs 1, yields, outputs 3
 extern "C" void proc_alternate_a(void) {
-  oprintf("1\n");
-  yield();
-  oprintf("3\n");
+  while (1) {
+    oprintf("A\n");
+    yield();
+  }
   current_proc->state = TERMINATED;
-  yield();
 }
 
 // TEST_ALTERNATE: Process B - outputs 2, yields, outputs 4
 extern "C" void proc_alternate_b(void) {
-  oprintf("2\n");
-  yield();
-  oprintf("4\n");
+  while (1) {
+    oprintf("B\n");
+    yield();
+  }
   current_proc->state = TERMINATED;
-  yield();
 }

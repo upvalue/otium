@@ -115,7 +115,7 @@ static emscripten_fiber_t scheduler_fiber;
 static void *scheduler_asyncify_stack = nullptr;
 
 void yield(void) {
-  // .emscripten_sleep(0);
+  emscripten_sleep(0);
 
   if (!current_proc || !idle_proc) {
     PANIC("current_proc or idle_proc is null");

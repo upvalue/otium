@@ -101,8 +101,9 @@ void wfi(void) {
 void handle_syscall(struct trap_frame *f) {
   uint32_t sysno = f->a3;
   uint32_t arg0 = f->a0;
-  uint32_t arg1 = f->a1;
-  uint32_t arg2 = f->a2;
+  // Not currently used
+  // uint32_t arg1 = f->a1;
+  // uint32_t arg2 = f->a2;
 
   f->a0 = 0;
   switch (sysno) {

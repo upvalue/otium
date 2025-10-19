@@ -265,12 +265,10 @@ void *kernel_syscall_alloc_page(void) {
   }
 
   // In WASM, physical address = virtual address (no MMU)
-  // Still track the heap address for consistency
-  uintptr_t vaddr = current_proc->heap_next_vaddr;
   current_proc->heap_next_vaddr += OT_PAGE_SIZE;
 
   yield();
-  return paddr; // Return physical address directly
+  return paddr;
 }
 }
 

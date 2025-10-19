@@ -2,5 +2,9 @@
 *.map
 *.bin
 *.o
-*.js
+kernel/*.js
+otk/*.js
 *.wasm
+/result
+/test
+*.html

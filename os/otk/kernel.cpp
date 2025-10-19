@@ -29,7 +29,7 @@ void kernel_common(void) {
   TRACE("created idle proc with name %s and pid %d", idle_proc->name,
         idle_proc->pid);
 
-#ifdef KERNEL_PROG_TEST_MEM
+#if KERNEL_PROG == KERNEL_PROG_TEST_MEM
   // Test mode: memory recycling test
   oprintf("TEST: Starting memory recycling test\n");
 
@@ -88,13 +88,13 @@ void kernel_common(void) {
   process_exit(proc2);
   process_exit(proc3);
 
-#elif defined(KERNEL_PROG_TEST_HELLO)
+#elif KERNEL_PROG == KERNEL_PROG_TEST_HELLO
   // Test mode: run hello world test
   Process *test_proc =
       process_create("test_hello", (const void *)proc_hello_world, 0, false);
   TRACE("created test proc with name %s and pid %d", test_proc->name,
         test_proc->pid);
-#elif defined(KERNEL_PROG_TEST_ALTERNATE)
+#elif KERNEL_PROG == KERNEL_PROG_TEST_ALTERNATE
   // Test mode: alternate process execution
   oprintf("TEST: Starting alternate process test (should print 1234)\n");
   Process *proc_a =

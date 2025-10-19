@@ -1,21 +1,15 @@
 #!/bin/bash
 set -euxo pipefail
 
-# Parse test program argument
-TEST_PROG=""
-if [ "${1:-}" = "--test-hello" ]; then
-  TEST_PROG="-DKERNEL_PROG_TEST_HELLO"
-elif [ "${1:-}" = "--test-alternate" ]; then
-  TEST_PROG="-DKERNEL_PROG_TEST_ALTERNATE"
-elif [ "${1:-}" = "--test-mem" ]; then
-  TEST_PROG="-DKERNEL_PROG_TEST_MEM"
-fi
+# Source common compiler flags
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common-flags.sh"
 
 # Path to clang and compiler flags
 CC=/opt/homebrew/opt/llvm/bin/clang  # Ubuntu users: use CC=clang
 OBJCOPY=/opt/homebrew/opt/llvm/bin/llvm-objcopy
-CPPFLAGS="-I. -DOT_ARCH_RISCV -DOT_TRACE_MEM $TEST_PROG"
-CFLAGS="-O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib -fno-exceptions -fno-rtti"
+CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_RISCV"
+CFLAGS="$COMMON_CFLAGS --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib"
 
 $CC $CPPFLAGS $CFLAGS \
     -Wl,-Totu/user.ld -Wl,-Map=otu/prog-shell.map -o otu/prog-shell.elf \

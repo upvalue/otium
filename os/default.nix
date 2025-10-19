@@ -3,10 +3,10 @@
 }:
 
 let
-  testFlag = if testMode == "hello" then "-DKERNEL_PROG_TEST_HELLO"
-             else if testMode == "mem" then "-DKERNEL_PROG_TEST_MEM"
-             else if testMode == "alternate" then "-DKERNEL_PROG_TEST_ALTERNATE"
-             else "";
+  kernelProg = if testMode == "hello" then "KERNEL_PROG_TEST_HELLO"
+               else if testMode == "mem" then "KERNEL_PROG_TEST_MEM"
+               else if testMode == "alternate" then "KERNEL_PROG_TEST_ALTERNATE"
+               else "KERNEL_PROG_SHELL";
 
   testDescription = if testMode != null then " (test mode: ${testMode})" else "";
 in
@@ -20,11 +20,28 @@ pkgs.stdenv.mkDerivation {
   nativeBuildInputs = [ pkgs.emscripten ];
 
   buildPhase = ''
+    # Generate otconfig.h
+    cat > otconfig.h <<EOF
+#ifndef _OT_CONFIG_H
+#define _OT_CONFIG_H
+
+// Available kernel program modes
+#define KERNEL_PROG_SHELL 0
+#define KERNEL_PROG_TEST_HELLO 1
+#define KERNEL_PROG_TEST_MEM 2
+#define KERNEL_PROG_TEST_ALTERNATE 3
+
+// Selected kernel program
+#define KERNEL_PROG ${kernelProg}
+
+#endif
+EOF
+
     echo "Compiler: $(which emcc)"
     emcc --version | head -1
 
     # Compiler flags
-    CPPFLAGS="-I. -DOT_ARCH_WASM -DOT_TRACE_MEM ${testFlag}"
+    CPPFLAGS="-I. -DOT_ARCH_WASM -DOT_TRACE_MEM"
     CFLAGS="-O2 -g3 -Wall -Wextra -fno-exceptions -fno-rtti"
 
     # Emscripten-specific flags

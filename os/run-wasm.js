@@ -28,21 +28,7 @@ const Module = {
   exit: () => {
     process.exit(0);
   },
-  // Print function - called by the OS for console output
-  print: function(text, addNewline = true) {
-    if (text === undefined || text === null) return;
-
-    if (addNewline === false) {
-      // Write immediately without newline
-      process.stdout.write(text);
-    } else {
-      // Write with newline
-      outputBuffer += text;
-      process.stdout.write(outputBuffer + '\n');
-      outputBuffer = '';
-    }
-  },
-
+  
   print2: function(text) {
     process.stdout.write(text);
   },

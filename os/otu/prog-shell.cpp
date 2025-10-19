@@ -40,7 +40,7 @@ extern "C" void main(void) {
 
   oprintf("tcl shell ready\n");
 
-  i.register_command("bye",
+  i.register_command("quit",
                      [](tcl::Interp &i, tcl::vector<tcl::string> &argv,
                         tcl::ProcPrivdata *privdata) -> tcl::Status {
                        running = false;

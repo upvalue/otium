@@ -8,7 +8,7 @@ extern "C" {
 void oputchar(char ch);
 int ogetchar();
 void ou_yield(void);
-__attribute__((noreturn)) void ou_exit(void);
-void* ou_alloc_page(void);
+void ou_exit(void);
+void *ou_alloc_page(void);
 }
 #endif

@@ -1,45 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# Check if emcc is available
-if ! command -v emcc &> /dev/null; then
-    echo "Error: emcc (Emscripten) is not installed or not in PATH"
-    echo ""
-    echo "To install Emscripten:"
-    echo "  git clone https://github.com/emscripten-core/emsdk.git"
-    echo "  cd emsdk"
-    echo "  ./emsdk install latest"
-    echo "  ./emsdk activate latest"
-    echo "  source ./emsdk_env.sh"
-    echo ""
-    echo "Or visit: https://emscripten.org/docs/getting_started/downloads.html"
-    exit 1
-fi
-
-# Parse arguments
-TEST_PROG=""
-VERBOSE=""
-
-for arg in "$@"; do
-  case $arg in
-    --test-hello)
-      TEST_PROG="-DKERNEL_PROG_TEST_HELLO"
-      ;;
-    --test-mem)
-      TEST_PROG="-DKERNEL_PROG_TEST_MEM"
-      ;;
-    --test-alternate)
-      TEST_PROG="-DKERNEL_PROG_TEST_ALTERNATE"
-      ;;
-    -v|--verbose)
-      VERBOSE="yes"
-      set -x
-      ;;
-  esac
-done
-
-echo "=== Otium OS WASM Build ==="
-echo ""
+# Source common compiler flags
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common-flags.sh"
 
 # Emscripten compiler
 CC=emcc
@@ -47,16 +11,11 @@ echo "Compiler: $(which emcc)"
 emcc --version | head -1
 echo ""
 
-# Compiler flags for WASM
-CPPFLAGS="-I. -DOT_ARCH_WASM -DOT_TRACE_MEM $TEST_PROG"
-CFLAGS="-O2 -g3 -Wall -Wextra -fno-exceptions -fno-rtti"
+set -x
 
-if [ -n "$TEST_PROG" ]; then
-  echo "Building with test mode: $TEST_PROG"
-else
-  echo "Building default mode (shell)"
-fi
-echo ""
+# Compiler flags for WASM
+CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_WASM"
+CFLAGS="$COMMON_CFLAGS"
 
 # Emscripten-specific flags
 EMFLAGS=(
@@ -82,7 +41,8 @@ $CC $CPPFLAGS $CFLAGS "${EMFLAGS[@]}" -o otk/kernel.js \
     otu/tcl.cpp \
     otu/vendor/tlsf.c
 
-echo ""
+set +x 
+
 echo "Build complete! Output files:"
 echo "  otk/kernel.js"
 echo "  otk/kernel.wasm"

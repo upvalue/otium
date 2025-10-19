@@ -11,7 +11,8 @@ There are some unit tests with doctest; these can be run with `./test-unit.sh`
  
 ### Snapshot tests
 
-The kernel uses snapshot testing to verify behavior. Tests are defined in `test-snapshot.py` and run specific kernel configurations by compiling with test flags.
+The kernel uses snapshot testing to verify behavior. Tests are defined in `test-snapshot.py` and run
+specific kernel configurations by compiling with test flags.
 
 #### Running tests
 

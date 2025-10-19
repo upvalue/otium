@@ -10,10 +10,12 @@ extern "C" void proc_hello_world(void) {
 }
 
 // Minimal binary image for memory test - just a few bytes to allocate a page
+#if KERNEL_PROG == KERNEL_PROG_TEST_MEM
 const char mem_test_image[] = {
     0x01, 0x00, 0x00, 0x00, // Minimal data
     0x00, 0x00, 0x00, 0x00,
 };
+#endif
 
 // Test process for memory recycling - just does minimal work and exits
 extern "C" void proc_mem_test(void) {

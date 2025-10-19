@@ -2,6 +2,8 @@
 #ifndef OTCOMMON_H
 #define OTCOMMON_H
 
+#include "otconfig.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif

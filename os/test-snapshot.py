@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import List, Tuple
 
-# Test programs to run (map of test name to compile flag)
+# Test programs to run (map of test name to config.sh flag)
 TEST_PROGRAMS = {
     "test-hello": "--test-hello",
     "test-mem": "--test-mem",
@@ -19,28 +19,44 @@ TEST_PROGRAMS = {
 
 QEMU_TIMEOUT = 10  # seconds
 SNAPSHOT_DIR = Path(__file__).parent / "snapshots"
+CONFIG_SCRIPT = Path(__file__).parent / "config.sh"
 COMPILE_SCRIPT = Path(__file__).parent / "compile-riscv.sh"
 QEMU_CMD = "qemu-system-riscv32"
 
 
-def run_test(test_name: str, compile_flag: str) -> List[str]:
+def run_test(test_name: str, config_flag: str) -> List[str]:
     """
     Compile and run a test program, returning TEST: output lines.
 
     Args:
         test_name: Name of the test
-        compile_flag: Flag to pass to compile-riscv.sh
+        config_flag: Flag to pass to config.sh
 
     Returns:
         List of TEST: output lines
     """
     print(f"Running test: {test_name}")
 
-    # Compile the kernel with the test flag
-    print(f"  Compiling with flag: {compile_flag}")
+    # Generate configuration
+    print(f"  Configuring with flag: {config_flag}")
     try:
         subprocess.run(
-            [str(COMPILE_SCRIPT), compile_flag],
+            [str(CONFIG_SCRIPT), config_flag],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"  ERROR: Configuration failed")
+        print(f"  stdout: {e.stdout}")
+        print(f"  stderr: {e.stderr}")
+        raise
+
+    # Compile the kernel
+    print(f"  Compiling...")
+    try:
+        subprocess.run(
+            [str(COMPILE_SCRIPT)],
             check=True,
             capture_output=True,
             text=True

@@ -7,7 +7,7 @@ static uintptr_t next_page_addr = (uintptr_t)__free_ram;
 // Page tracking for recycling
 PageInfo *page_infos = nullptr;
 static PageInfo *free_list_head = nullptr;
-static MemoryStats mem_stats = {0};
+static MemoryStats mem_stats = {0, 0, 0, 0, 0};
 static bool memory_initialized = false;
 uint32_t total_page_count = 0;
 

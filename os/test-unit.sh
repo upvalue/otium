@@ -7,5 +7,6 @@ clang++ -DOT_TEST -DOT_TRACE_MEM \
     ot/kernel/memory.cpp \
     ot/shared/std.cpp \
     ot/kernel/platform-test.cpp \
-    ot/kernel/process-test.cpp
+    ot/kernel/process-test.cpp \
+    ot/shared/regstr-test.cpp
 ./bin/test

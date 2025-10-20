@@ -128,15 +128,15 @@ void handle_syscall(struct trap_frame *f) {
       break;
     }
     // Allocate physical page
-    void *paddr = page_allocate(current_proc->pid, 1);
-    if (!paddr) {
+    PageAddr paddr = page_allocate(current_proc->pid, 1);
+    if (paddr.is_null()) {
       f->a0 = 0; // Return NULL on allocation failure
       break;
     }
     // Get virtual address for this allocation
     uintptr_t vaddr = current_proc->heap_next_vaddr;
     // Map the page into user space
-    map_page(current_proc->page_table, vaddr, (uintptr_t)paddr,
+    map_page(current_proc->page_table, vaddr, paddr,
              PAGE_U | PAGE_R | PAGE_W, current_proc->pid);
     // Update next heap address
     current_proc->heap_next_vaddr += OT_PAGE_SIZE;

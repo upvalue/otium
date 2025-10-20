@@ -2,6 +2,7 @@
 #define OT_KERNEL_HPP
 
 #include "ot/common.h"
+#include "ot/shared/address.hpp"
 
 #ifdef OT_TEST
 #include <stdlib.h>
@@ -47,9 +48,11 @@ void kernel_exit(void);
 void kernel_common(void);
 
 // memory management
+typedef int32_t proc_id_t;
+
 struct PageInfo {
-  uint32_t pid;   // Process ID that owns this page (0 = free)
-  uintptr_t addr; // Physical address of the page
+  int32_t pid;   // Process ID that owns this page (0 = free)
+  PageAddr addr; // Physical address of the page
   PageInfo *next; // For free list linking
 };
 
@@ -61,8 +64,8 @@ struct MemoryStats {
   uint32_t peak_usage_pages;
 };
 
-void *page_allocate(uint32_t pid, size_t page_count);
-void page_free_process(uint32_t pid);
+PageAddr page_allocate(proc_id_t pid, size_t page_count);
+void page_free_process(proc_id_t pid);
 void memory_init();
 void memory_report();
 void memory_increment_process_count();
@@ -102,7 +105,7 @@ struct Process {
 };
 
 // Process management subsystem
-Process *process_create_impl(Process *table, uint32_t max_procs,
+Process *process_create_impl(Process *table, proc_id_t max_procs,
                              const char *name, const void *image_or_pc,
                              size_t size, bool is_image);
 Process *process_create(const char *name, const void *image_or_pc, size_t size,
@@ -121,8 +124,8 @@ void scheduler_loop(void);
 #endif
 
 // Memory management subsystem
-void map_page(uintptr_t *table1, uintptr_t vaddr, uintptr_t paddr,
-              uint32_t flags, uint32_t pid);
+void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr,
+              uint32_t flags, proc_id_t pid);
 
 #define USER_BASE 0x1000000
 #define HEAP_BASE 0x2000000

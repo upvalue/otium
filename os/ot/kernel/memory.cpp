@@ -2,7 +2,7 @@
 
 #include "ot/kernel/kernel.hpp"
 
-static uintptr_t next_page_addr = (uintptr_t)__free_ram;
+static PageAddr next_page_addr = PageAddr(__free_ram);
 
 // Page tracking for recycling
 PageInfo *page_infos = nullptr;
@@ -12,19 +12,19 @@ static bool memory_initialized = false;
 uint32_t total_page_count = 0;
 
 // Bootstrap allocator - only used during memory_init to allocate PageInfo array
-static void *page_allocate_bootstrap(size_t page_count) {
-  uintptr_t page_addr = next_page_addr;
+static PageAddr page_allocate_bootstrap(size_t page_count) {
+  PageAddr page_addr = next_page_addr;
   next_page_addr += page_count * OT_PAGE_SIZE;
 
-  if (next_page_addr > (uintptr_t)__free_ram_end) {
+  if (next_page_addr.raw() > (uintptr_t)__free_ram_end) {
     PANIC("out of memory during bootstrap");
   }
 
   TRACE_MEM(LLOUD, "Bootstrap allocated %d pages at address %x", page_count,
-            page_addr);
+            page_addr.raw());
 
-  omemset((void *)page_addr, 0, page_count * OT_PAGE_SIZE);
-  return (void *)page_addr;
+  omemset(page_addr.as_ptr(), 0, page_count * OT_PAGE_SIZE);
+  return page_addr;
 }
 
 void memory_init() {
@@ -43,20 +43,21 @@ void memory_init() {
   // Allocate PageInfo array using bootstrap allocator (before tracking starts)
   size_t page_infos_size = total_page_count * sizeof(PageInfo);
   size_t page_infos_pages = (page_infos_size + OT_PAGE_SIZE - 1) / OT_PAGE_SIZE;
-  page_infos = (PageInfo *)page_allocate_bootstrap(page_infos_pages);
+  PageAddr page_infos_addr = page_allocate_bootstrap(page_infos_pages);
+  page_infos = page_infos_addr.as<PageInfo>();
 
   TRACE(LSOFT, "Allocated %d pages for PageInfo array at %x", page_infos_pages,
-        page_infos);
+        page_infos_addr.raw());
 
   // Initialize page tracking structures
-  uintptr_t current_page_addr = next_page_addr;
+  PageAddr current_page_addr = next_page_addr;
   PageInfo *prev = nullptr;
 
   for (uint32_t i = 0; i < total_page_count; i++) {
-    uintptr_t page_addr = (uintptr_t)__free_ram + i * OT_PAGE_SIZE;
+    PageAddr page_addr = PageAddr((uintptr_t)__free_ram + i * OT_PAGE_SIZE);
 
     // Skip pages already allocated for PageInfo array
-    if (page_addr < current_page_addr) {
+    if (page_addr.raw() < current_page_addr.raw()) {
       page_infos[i].pid = 0xFFFFFFFF; // Mark as kernel/system page
       page_infos[i].addr = page_addr;
       page_infos[i].next = nullptr;
@@ -88,7 +89,7 @@ void memory_init() {
   TRACE(LSOFT, "Memory initialization complete. Free list head: %x", free_list_head);
 }
 
-void *page_allocate(uint32_t pid, size_t page_count) {
+PageAddr page_allocate(proc_id_t pid, size_t page_count) {
   if (!memory_initialized) {
     PANIC("page_allocate called before memory_init");
   }
@@ -118,15 +119,15 @@ void *page_allocate(uint32_t pid, size_t page_count) {
     mem_stats.peak_usage_pages = mem_stats.allocated_pages;
   }
 
-  void *page_addr = (void *)page_info->addr;
-  omemset(page_addr, 0, OT_PAGE_SIZE);
+  PageAddr page_addr = page_info->addr;
+  omemset(page_addr.as_ptr(), 0, OT_PAGE_SIZE);
 
-  TRACE_MEM(LLOUD, "Allocated page at %x to pid %d", page_addr, pid);
+  TRACE_MEM(LLOUD, "Allocated page at %x to pid %d", page_addr.raw(), pid);
 
   return page_addr;
 }
 
-void page_free_process(uint32_t pid) {
+void page_free_process(proc_id_t pid) {
   if (!memory_initialized) {
     TRACE_MEM(LSOFT, "Memory not initialized, cannot free pages");
     return;
@@ -140,7 +141,7 @@ void page_free_process(uint32_t pid) {
   for (uint32_t i = 0; i < total_page_count; i++) {
     if (page_infos[i].pid == pid) {
       // Clear page contents for security
-      omemset((void *)page_infos[i].addr, 0, OT_PAGE_SIZE);
+      omemset(page_infos[i].addr.as_ptr(), 0, OT_PAGE_SIZE);
 
       // Mark as free
       page_infos[i].pid = 0;
@@ -151,7 +152,7 @@ void page_free_process(uint32_t pid) {
 
       freed_count++;
 
-      TRACE_MEM(LLOUD, "Freed page %x from pid %d", page_infos[i].addr, pid);
+      TRACE_MEM(LLOUD, "Freed page %x from pid %d", page_infos[i].addr.raw(), pid);
     }
   }
 

@@ -54,14 +54,14 @@ extern "C" void proc_alternate_b(void) {
 }
 
 // Helper to get all pages allocated to a process
-void get_process_pages(uint32_t pid, uintptr_t *pages, uint32_t *count) {
+void get_process_pages(int32_t pid, uintptr_t *pages, uint32_t *count) {
   extern PageInfo *page_infos;
   extern uint32_t total_page_count;
 
   *count = 0;
   for (uint32_t i = 0; i < total_page_count && *count < 16; i++) {
     if (page_infos[i].pid == pid) {
-      pages[(*count)++] = page_infos[i].addr;
+      pages[(*count)++] = page_infos[i].addr.raw();
     }
   }
 }

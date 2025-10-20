@@ -51,8 +51,8 @@ void kernel_common(void);
 typedef int32_t proc_id_t;
 
 struct PageInfo {
-  int32_t pid;   // Process ID that owns this page (0 = free)
-  PageAddr addr; // Physical address of the page
+  int32_t pid;    // Process ID that owns this page (0 = free)
+  PageAddr addr;  // Physical address of the page
   PageInfo *next; // For free list linking
 };
 
@@ -126,6 +126,9 @@ void scheduler_loop(void);
 // Memory management subsystem
 void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr,
               uint32_t flags, proc_id_t pid);
+
+/** Look up PageInfo given an address. */
+PageInfo *page_info_lookup(PageAddr);
 
 #define USER_BASE 0x1000000
 #define HEAP_BASE 0x2000000

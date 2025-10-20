@@ -86,7 +86,8 @@ void memory_init() {
   mem_stats.peak_usage_pages = page_infos_pages;
 
   memory_initialized = true;
-  TRACE(LSOFT, "Memory initialization complete. Free list head: %x", free_list_head);
+  TRACE(LSOFT, "Memory initialization complete. Free list head: %x",
+        free_list_head);
 }
 
 PageAddr page_allocate(proc_id_t pid, size_t page_count) {
@@ -127,6 +128,16 @@ PageAddr page_allocate(proc_id_t pid, size_t page_count) {
   return page_addr;
 }
 
+PageInfo *page_info_lookup(PageAddr addr) {
+  PageInfo *pinfo = page_infos;
+  for (uint32_t i = 0; i < total_page_count; i++) {
+    if (pinfo[i].addr == addr) {
+      return &pinfo[i];
+    }
+  }
+  return nullptr;
+}
+
 void page_free_process(proc_id_t pid) {
   if (!memory_initialized) {
     TRACE_MEM(LSOFT, "Memory not initialized, cannot free pages");
@@ -152,7 +163,8 @@ void page_free_process(proc_id_t pid) {
 
       freed_count++;
 
-      TRACE_MEM(LLOUD, "Freed page %x from pid %d", page_infos[i].addr.raw(), pid);
+      TRACE_MEM(LLOUD, "Freed page %x from pid %d", page_infos[i].addr.raw(),
+                pid);
     }
   }
 

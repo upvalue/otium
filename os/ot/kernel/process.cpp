@@ -1,3 +1,4 @@
+#include "ot/gen/user-prog-sections.h"
 #include "ot/kernel/kernel.hpp"
 
 extern char __kernel_base[];
@@ -5,6 +6,8 @@ extern char __kernel_base[];
 Process procs[PROCS_MAX];
 
 Process *current_proc = nullptr, *idle_proc = nullptr;
+
+PageInfo *user_text_pages = nullptr, *user_rodata_pages = nullptr;
 
 void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr,
               uint32_t flags, proc_id_t pid) {
@@ -89,13 +92,33 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
   PageAddr page_table = page_allocate(i, 1);
   for (uintptr_t paddr = (uintptr_t)__kernel_base;
        paddr < (uintptr_t)__free_ram_end; paddr += OT_PAGE_SIZE)
-    map_page(page_table.as<uintptr_t>(), paddr, PageAddr(paddr), PAGE_R | PAGE_W | PAGE_X,
-             i);
+    map_page(page_table.as<uintptr_t>(), paddr, PageAddr(paddr),
+             PAGE_R | PAGE_W | PAGE_X, i);
 
   // Map user pages.
   if (is_image) {
     TRACE_PROC(LLOUD, "found image. allocating pages");
     for (size_t off = 0; off < size; off += OT_PAGE_SIZE) {
+      uintptr_t virtual_addr = USER_BASE + off;
+      uint32_t flags = 0;
+
+      // Use appropriate
+      if (virtual_addr >= PROG_TEXT_START && virtual_addr <= PROG_TEXT_END) {
+        flags = PAGE_U | PAGE_R | PAGE_X;
+        // TRACE_PROC(LSOFT, "allocating text page");
+      } else if (virtual_addr >= PROG_RODATA_START &&
+                 virtual_addr <= PROG_RODATA_END) {
+        flags = PAGE_U | PAGE_R | PAGE_X;
+        // TRACE_PROC(LSOFT, "allocating rodata page");
+      } else if (virtual_addr >= PROG_DATA_START &&
+                 virtual_addr <= PROG_DATA_END) {
+        flags = PAGE_U | PAGE_R | PAGE_W | PAGE_X;
+        // TRACE_PROC(LSOFT, "allocating data or bss page");
+      } else if (virtual_addr >= PROG_BSS_START) {
+        // TRACE_PROC(LSOFT, "allocating bss page");
+        flags = PAGE_U | PAGE_R | PAGE_W | PAGE_X;
+      }
+
       PageAddr page = page_allocate(i, 1);
 
       // Handle the case where the data to be copied is smaller than the
@@ -104,11 +127,10 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
       size_t copy_size = OT_PAGE_SIZE <= remaining ? OT_PAGE_SIZE : remaining;
 
       // Fill and map the page.
-      TRACE_PROC(LLOUD, "copying %d bytes to page %x from %x", copy_size, page.raw(),
-                 (uintptr_t)image_or_pc + off);
+      TRACE_PROC(LLOUD, "copying %d bytes to page %x from %x", copy_size,
+                 page.raw(), (uintptr_t)image_or_pc + off);
       memcpy(page.as_ptr(), ((char *)image_or_pc) + off, copy_size);
-      map_page(page_table.as<uintptr_t>(), (uintptr_t)USER_BASE + off,
-               page, PAGE_U | PAGE_R | PAGE_W | PAGE_X, i);
+      map_page(page_table.as<uintptr_t>(), virtual_addr, page, flags, i);
     }
   }
 
@@ -124,7 +146,8 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
   }
 #endif
 
-  TRACE_PROC(LSOFT, "proc %s stack ptr: %x", free_proc->name, free_proc->stack_ptr);
+  TRACE_PROC(LSOFT, "proc %s stack ptr: %x", free_proc->name,
+             free_proc->stack_ptr);
 
   memory_increment_process_count();
 

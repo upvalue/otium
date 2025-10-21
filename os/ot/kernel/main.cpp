@@ -6,8 +6,8 @@
 void kernel_common(void);
 
 #ifdef OT_ARCH_WASM
-// Forward declaration for shell_main (defined in prog-shell.cpp)
-extern "C" void shell_main(void);
+// Forward declaration for shell_main (defined in prog-user.cpp)
+extern "C" void user_program_main(void);
 #else
 extern "C" char _binary_bin_prog_shell_bin_start[],
     _binary_bin_prog_shell_bin_size[];
@@ -148,17 +148,23 @@ void kernel_start(void) {
         proc_b->pid);
 #else
   // Default/main mode
-  char *test_args[] = {"test", "arg1", "arg2"};
-  Arguments args = {3, test_args};
+  char *shell_argv = {"shell"};
+  Arguments shell_args = {1, &shell_argv};
+  char *user2_test_argv = {"user2_test"};
+  Arguments user2_test_args = {1, &user2_test_argv};
 #ifdef OT_ARCH_WASM
   // For WASM, call the shell main function directly
-  Process *proc_shell =
-      process_create("shell", (const void *)shell_main, 0, false, &args);
+  Process *proc_shell = process_create("shell", (const void *)user_program_main,
+                                       0, false, &shell_args);
 #else
   // For RISC-V, load the shell from the embedded binary
-  Process *proc_shell =
-      process_create("shell", (const void *)_binary_bin_prog_shell_bin_start,
-                     (size_t)_binary_bin_prog_shell_bin_size, true, &args);
+  Process *proc_shell = process_create(
+      "shell", (const void *)_binary_bin_prog_shell_bin_start,
+      (size_t)_binary_bin_prog_shell_bin_size, true, &shell_args);
+
+  Process *proc_user2_test = process_create(
+      "user2_test", (const void *)_binary_bin_prog_shell_bin_start,
+      (size_t)_binary_bin_prog_shell_bin_size, true, &user2_test_args);
 #endif
   TRACE(LSOFT, "created proc with name %s and pid %d", proc_shell->name,
         proc_shell->pid);

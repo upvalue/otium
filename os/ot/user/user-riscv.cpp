@@ -33,11 +33,24 @@ void *ou_alloc_page(void) { return (void *)syscall(OU_ALLOC_PAGE, 0, 0, 0); }
 __attribute__((section(".text.start"))) __attribute__((naked)) void
 start(void) {
   __asm__ __volatile__("mv sp, %[stack_top] \n"
-                       "call main           \n"
+                       "call user_program_main           \n"
                        "call exit           \n" ::[stack_top] "r"(__stack_top));
 }
+
+} // extern "C"
+
+PageAddr ou_get_sys_page(int type) {
+  return PageAddr(syscall(OU_GET_SYS_PAGE, type, 0, 0));
 }
 
-PageAddr ou_get_arg_page(void) {
-  return PageAddr(syscall(OU_GET_ARG_PAGE, 0, 0, 0));
+PageAddr ou_get_arg_page(void) { return ou_get_sys_page(OU_SYS_PAGE_ARG); }
+PageAddr ou_get_comm_page(void) { return ou_get_sys_page(OU_SYS_PAGE_COMM); }
+
+int ou_io_puts(char *str, int size) {
+  PageAddr comm_page = ou_get_comm_page();
+  if (comm_page.is_null()) {
+    return 0;
+  }
+  memcpy(comm_page.as<char>(), str, size);
+  return syscall(OU_IO_PUTS, (int)size, 0, 0);
 }

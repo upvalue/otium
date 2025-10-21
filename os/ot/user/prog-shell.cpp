@@ -22,28 +22,53 @@ void *malloc(size_t size) { return tlsf_malloc(pool, size); }
 void free(void *ptr) { tlsf_free(pool, ptr); }
 void *realloc(void *ptr, size_t size) { return tlsf_realloc(pool, ptr, size); }
 
-#ifdef OT_ARCH_WASM
-extern "C" void shell_main(void) {
-#else
-extern "C" void main(void) {
-#endif
+enum ProgramType { UNKNOWN, SHELL } program_type;
+
+void determine_program_type() {
+  program_type = UNKNOWN;
   PageAddr arg_page = ou_get_arg_page();
 
-  int x = mpack_print(arg_page.as<char>(), OT_PAGE_SIZE, oputchar);
-  oprintf("mpack_print returned %d\n", x);
-  // MPackReader reader(arg_page.as<char>(), OT_PAGE_SIZE);
-  /*Arguments args;
-  ou_get_arguments(args);
+  MPackReader reader(arg_page.as<char>(), OT_PAGE_SIZE);
 
-  if (args.argc > 0) {
-    // oprintf("arg page ptr %x\n", (uintptr_t)args.arg_page.as_ptr());
-    oprintf("I got me some arguments! :)  %d\n", args.argc);
-    for (size_t i = 0; i != args.argc; i++) {
-      oprintf("argument ptr %x\n", (uintptr_t)args.argv[i]);
-      oprintf("Argument %d: %s\n", i, args.argv[i]);
+  uint32_t pair_count;
+  StringView key;
+
+  if (!reader.enter_map(pair_count)) {
+    return;
+  }
+
+  bool found_args = false;
+
+  for (size_t i = 0; i != pair_count; i++) {
+    if (!reader.read_string(key)) {
+      return;
     }
-  }*/
 
+    if (key.equals("args")) {
+      found_args = true;
+      break;
+    }
+  }
+
+  uint32_t argc;
+
+  if (!found_args || !reader.enter_array(argc)) {
+    return;
+  }
+
+  StringView arg;
+  for (size_t i = 0; i != argc; i++) {
+    if (!reader.read_string(arg))
+      return;
+
+    if (arg.equals("shell")) {
+      program_type = SHELL;
+      return;
+    }
+  }
+}
+
+void shell_main() {
   // allocate some contiguous pages to work with
   memory_begin = ou_alloc_page();
 
@@ -115,6 +140,17 @@ extern "C" void main(void) {
 
   // TODO: This crashes, why?
   // oprintf("memory usage: %zu bytes\n", tlsf_block_size(pool));
+}
+
+extern "C" void user_program_main(void) {
+  determine_program_type();
+
+  if (program_type == SHELL) {
+    shell_main();
+  } else {
+    char *str = "unknown program type, exiting\n";
+    ou_io_puts(str, strlen(str));
+  }
 
   ou_exit();
 }

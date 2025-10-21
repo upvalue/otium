@@ -96,10 +96,16 @@ struct Process {
   uintptr_t *page_table;
 
   /**
-   * Optional: if arguments were given to the process when starting,
-   * argc+argv are stored in this page.
+   * Communicates startup arguments in the form of a msgpack message,
+   * if given. May be null.
    */
   PageAddr arg_page;
+
+  /**
+   * For syscalls to take extended arguments
+   */
+  Pair<PageAddr, PageAddr> comm_page;
+
   uintptr_t stack_ptr;
   uintptr_t user_pc;         // Save user program counter
   uintptr_t heap_next_vaddr; // Next available heap address
@@ -123,14 +129,16 @@ void process_exit(Process *proc);
 
 // Gets the argument page pointer of the current process if possible
 PageAddr process_get_arg_page();
+// Gets the comm page pointer of the current process if possible
+Pair<PageAddr, PageAddr> process_get_comm_page();
 
 // Allocates a page for the given process and maps it appropriately for the
 // current architecture (with MMU for RISC-V, direct for WASM)
-// Returns Pair<paddr, vaddr> where paddr is physical address and vaddr is virtual
-// Returns Pair of null PageAddrs on failure
+// Returns Pair<paddr, vaddr> where paddr is physical address and vaddr is
+// virtual Returns Pair of null PageAddrs on failure
 Pair<PageAddr, PageAddr> process_alloc_mapped_page(Process *proc, bool readable,
-                                                    bool writable,
-                                                    bool executable);
+                                                   bool writable,
+                                                   bool executable);
 
 extern Process *idle_proc, *current_proc;
 extern Process procs[PROCS_MAX];

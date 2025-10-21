@@ -59,7 +59,11 @@ void osnprintf(char *str, size_t size, const char *format, ...);
 #define OU_GETCHAR 3
 #define OU_EXIT 4
 #define OU_ALLOC_PAGE 5
-#define OU_GET_ARG_PAGE 6
+#define OU_GET_SYS_PAGE 6
+#define OU_IO_PUTS 7 // Writes a string in the comm page to the console
+
+#define OU_SYS_PAGE_ARG 0
+#define OU_SYS_PAGE_COMM 1
 
 // oputchar -- returns 0 in case of failure, 1 otherwise
 int oputchar(char);

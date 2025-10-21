@@ -150,6 +150,17 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
   }
 #endif
 
+  Pair<PageAddr, PageAddr> comm_page =
+      process_alloc_mapped_page(free_proc, true, true, false);
+  if (comm_page.first.is_null() || comm_page.second.is_null()) {
+    PANIC("failed to allocate comm page");
+  }
+
+  free_proc->comm_page = comm_page;
+  TRACE_PROC(LSOFT, "allocated comm page with paddr %x and vaddr %x",
+             free_proc->comm_page.first.raw(),
+             free_proc->comm_page.second.raw());
+
   // Handle argument array
   if (args) {
 
@@ -220,10 +231,14 @@ PageAddr process_get_arg_page() {
   if (current_proc == nullptr) {
     return paddr;
   }
-  if (current_proc->arg_page.is_null()) {
-    return paddr;
-  }
   return current_proc->arg_page;
+}
+
+Pair<PageAddr, PageAddr> process_get_comm_page(void) {
+  if (current_proc == nullptr) {
+    return make_pair(PageAddr(nullptr), PageAddr(nullptr));
+  }
+  return current_proc->comm_page;
 }
 
 Pair<PageAddr, PageAddr> process_alloc_mapped_page(Process *proc, bool readable,

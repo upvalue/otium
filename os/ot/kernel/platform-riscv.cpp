@@ -129,10 +129,27 @@ void handle_syscall(struct trap_frame *f) {
     f->a0 = result.second.raw();
     break;
   }
-  case OU_GET_ARG_PAGE: {
-    PageAddr paddr = process_get_arg_page();
+  case OU_GET_SYS_PAGE: {
+    PageAddr paddr;
+    if (arg0 == OU_SYS_PAGE_ARG) {
+      paddr = process_get_arg_page();
+    } else if (arg0 == OU_SYS_PAGE_COMM) {
+      paddr = process_get_comm_page().second;
+    }
     f->a0 = paddr.raw();
-    oprintf("GETARGPAGE CALL %x\n", f->a0);
+    break;
+  }
+  case OU_IO_PUTS: {
+    Pair<PageAddr, PageAddr> comm_page = process_get_comm_page();
+    if (comm_page.first.is_null()) {
+      return;
+    }
+
+    char *str = comm_page.first.as<char>();
+
+    for (size_t i = 0; i < arg0; i++) {
+      oputchar(str[i]);
+    }
     break;
   }
   default:

@@ -13,6 +13,7 @@ extern "C" {
 #if defined(OT_TEST) || defined(OT_ARCH_WASM)
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #else
 
 typedef unsigned char uint8_t;
@@ -34,8 +35,15 @@ typedef uint32_t uintptr_t;
 void *omemset(void *buf, char c, size_t n);
 size_t strlen(const char *s);
 void oprintf(const char *fmt, ...);
+
+#ifndef memcpy
 void *memcpy(void *dst, const void *src, size_t n);
+#endif
+
+#ifndef strcpy
 char *strcpy(char *dst, const char *src);
+#endif
+
 int strcmp(const char *s1, const char *s2);
 int atoi(const char *s);
 int memcmp(const void *s1, const void *s2, size_t n);

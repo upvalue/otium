@@ -34,6 +34,7 @@ $CC $CPPFLAGS $CFLAGS "${EMFLAGS[@]}" -o bin/kernel.js \
     "${KERNEL_SHARED_SOURCES[@]}" \
     ot/kernel/platform-wasm.cpp \
     ot/user/user-wasm.cpp \
+    "${COMMON_SHARED_SOURCES[@]}" \
     "${USER_SHARED_SOURCES[@]}"
 
 set +x

@@ -7,6 +7,7 @@ extern "C" {
 
 #include "vendor/libmpack/core.h"
 #include "vendor/libmpack/conv.h"
+#include "vendor/libmpack/object.h"
 
 #ifdef __cplusplus
 }

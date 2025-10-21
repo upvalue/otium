@@ -8,7 +8,7 @@
 
 // system calls
 extern "C" {
-void oputchar(char ch);
+int oputchar(char ch);
 int ogetchar();
 void ou_yield(void);
 void ou_exit(void);

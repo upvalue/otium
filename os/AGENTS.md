@@ -6,6 +6,11 @@ Currently, it targets two systems:
 - RISC-V under QEMU with assembly to switch and store stack information by hand
 - WASM on Emscripten, using the fiber library to switch processes
 
+## Coding style
+
+In general, try to avoid using #ifdef based on platform architecture outside of the
+platform-specific files (those containing riscv or wasm in the name).
+
 ## Source
 
 The source of the operating system is written in C++. Source files live in the `./ot` directory.

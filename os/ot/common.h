@@ -57,7 +57,8 @@ void osnprintf(char *str, size_t size, const char *format, ...);
 #define OU_ALLOC_PAGE 5
 #define OU_GET_ARG_PAGE 6
 
-void oputchar(char);
+// oputchar -- returns 0 in case of failure, 1 otherwise
+int oputchar(char);
 
 #define OT_PAGE_SIZE 4096
 

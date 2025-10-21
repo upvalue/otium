@@ -7,4 +7,7 @@
 alignas(OT_PAGE_SIZE) char __free_ram[256 * OT_PAGE_SIZE];
 char __free_ram_end[0]; // Zero-sized array at the end
 
-void oputchar(char ch) { putchar(ch); }
+int oputchar(char ch) {
+  putchar(ch);
+  return 1;
+}

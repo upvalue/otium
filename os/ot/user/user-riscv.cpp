@@ -24,7 +24,7 @@ int syscall(int sysno, int arg0, int arg1, int arg2) {
 
 extern "C" {
 
-void oputchar(char ch) { syscall(OU_PUTCHAR, ch, 0, 0); }
+int oputchar(char ch) { return syscall(OU_PUTCHAR, ch, 0, 0); }
 void ou_exit(void) { syscall(OU_EXIT, 0, 0, 0); }
 int ogetchar(void) { return syscall(OU_GETCHAR, 0, 0, 0); }
 void ou_yield(void) { syscall(OU_YIELD, 0, 0, 0); }

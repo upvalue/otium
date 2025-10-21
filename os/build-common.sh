@@ -15,7 +15,7 @@ KERNEL_SHARED_SOURCES=(
 
 COMMON_SHARED_SOURCES=(
   ot/shared/std.cpp
-  vendor/libmpack/mpack.c
+  # vendor/libmpack/mpack.c
 )
 
 # Shared user program source files (platform-independent)

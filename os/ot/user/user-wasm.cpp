@@ -12,7 +12,7 @@
 
 extern "C" {
 
-__attribute__((noreturn)) void exit(void) {
+__attribute__((noreturn)) void exit(int) {
   for (;;)
     ;
 }

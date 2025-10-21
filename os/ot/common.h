@@ -13,7 +13,6 @@ extern "C" {
 #if defined(OT_TEST) || defined(OT_ARCH_WASM)
 #include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
 #else
 
 typedef unsigned char uint8_t;

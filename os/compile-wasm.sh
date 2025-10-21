@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# Source common compiler flags
+# Source common compiler flags and source lists
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common-flags.sh"
+source "$SCRIPT_DIR/build-common.sh"
 
 # Emscripten compiler
 CC=emcc
@@ -31,16 +31,10 @@ EMFLAGS=(
 # Build the complete system
 mkdir -p bin
 $CC $CPPFLAGS $CFLAGS "${EMFLAGS[@]}" -o bin/kernel.js \
-    ot/kernel/startup.cpp \
-    ot/kernel/main.cpp \
+    "${KERNEL_SHARED_SOURCES[@]}" \
     ot/kernel/platform-wasm.cpp \
-    ot/shared/std.cpp \
-    ot/kernel/memory.cpp \
-    ot/kernel/process.cpp \
     ot/user/user-wasm.cpp \
-    ot/user/prog-shell.cpp \
-    ot/user/tcl.cpp \
-    ot/user/vendor/tlsf.c
+    "${USER_SHARED_SOURCES[@]}"
 
 set +x
 

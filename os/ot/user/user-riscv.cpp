@@ -1,3 +1,4 @@
+#include "ot/shared/address.hpp"
 #include "ot/user/user.hpp"
 
 extern char __stack_top[];
@@ -35,4 +36,8 @@ start(void) {
                        "call main           \n"
                        "call exit           \n" ::[stack_top] "r"(__stack_top));
 }
+}
+
+PageAddr ou_get_arg_page(void) {
+  return PageAddr(syscall(OU_GET_ARG_PAGE, 0, 0, 0));
 }

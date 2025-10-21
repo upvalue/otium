@@ -17,7 +17,7 @@ void kernel_common(void) {
 #endif
   TRACE(LSOFT, "hello from kernel_common");
 
-  idle_proc = process_create("idle", nullptr, 0, false);
+  idle_proc = process_create("idle", nullptr, 0, false, nullptr);
   current_proc = idle_proc;
   TRACE(LSOFT, "created idle proc with name %s and pid %d", idle_proc->name,
         idle_proc->pid);

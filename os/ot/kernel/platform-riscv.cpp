@@ -123,25 +123,15 @@ void handle_syscall(struct trap_frame *f) {
     f->a0 = ogetchar();
     break;
   case OU_ALLOC_PAGE: {
-    if (!current_proc) {
-      f->a0 = 0; // Return NULL if no current process
-      break;
-    }
-    // Allocate physical page
-    PageAddr paddr = page_allocate(current_proc->pid, 1);
-    if (paddr.is_null()) {
-      f->a0 = 0; // Return NULL on allocation failure
-      break;
-    }
-    // Get virtual address for this allocation
-    uintptr_t vaddr = current_proc->heap_next_vaddr;
-    // Map the page into user space
-    map_page(current_proc->page_table, vaddr, paddr,
-             PAGE_U | PAGE_R | PAGE_W, current_proc->pid);
-    // Update next heap address
-    current_proc->heap_next_vaddr += OT_PAGE_SIZE;
-    // Return virtual address to user
-    f->a0 = vaddr;
+    Pair<PageAddr, PageAddr> result =
+        process_alloc_mapped_page(current_proc, true, true, false);
+    f->a0 = result.second.raw();
+    break;
+  }
+  case OU_GET_ARG_PAGE: {
+    PageAddr paddr = process_get_arg_page();
+    f->a0 = paddr.raw();
+    oprintf("GETARGPAGE CALL %x\n", f->a0);
     break;
   }
   default:

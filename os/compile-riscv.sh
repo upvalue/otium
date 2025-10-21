@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euxo pipefail
 
-# Source common compiler flags
+# Source common compiler flags and source lists
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common-flags.sh"
+source "$SCRIPT_DIR/build-common.sh"
 
 # Path to clang and compiler flags
 CC=/opt/homebrew/opt/llvm/bin/clang  # Ubuntu users: use CC=clang
@@ -16,20 +16,14 @@ mkdir -p bin
 $CC $CPPFLAGS $CFLAGS \
     -Wl,-Tot/user/user.ld -Wl,-Map=bin/prog-shell.map -o bin/prog-shell.elf \
     ot/user/user-riscv.cpp \
-    ot/user/prog-shell.cpp \
     ot/shared/std.cpp \
-    ot/user/vendor/tlsf.c \
-    ot/user/tcl.cpp
+    "${USER_SHARED_SOURCES[@]}"
 
 $OBJCOPY --set-section-flags .bss=alloc,contents -O binary bin/prog-shell.elf bin/prog-shell.bin
 $OBJCOPY -Ibinary -Oelf32-littleriscv bin/prog-shell.bin bin/prog-shell.bin.o
 
 # Build the kernel
 $CC $CPPFLAGS $CFLAGS -Wl,-Tot/kernel/kernel-link.ld -Wl,-Map=bin/kernel.map -o bin/kernel.elf \
-    ot/kernel/startup.cpp \
-    ot/kernel/main.cpp \
+    "${KERNEL_SHARED_SOURCES[@]}" \
     ot/kernel/platform-riscv.cpp \
-    ot/shared/std.cpp \
-    ot/kernel/memory.cpp \
-    ot/kernel/process.cpp \
     bin/prog-shell.bin.o

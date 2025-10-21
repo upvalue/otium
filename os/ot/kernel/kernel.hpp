@@ -3,6 +3,8 @@
 
 #include "ot/common.h"
 #include "ot/shared/address.hpp"
+#include "ot/shared/arguments.hpp"
+#include "ot/shared/pair.hpp"
 
 #ifdef OT_TEST
 #include <stdlib.h>
@@ -92,6 +94,12 @@ struct Process {
   uint32_t pid;
   ProcessState state;
   uintptr_t *page_table;
+
+  /**
+   * Optional: if arguments were given to the process when starting,
+   * argc+argv are stored in this page.
+   */
+  PageAddr arg_page;
   uintptr_t stack_ptr;
   uintptr_t user_pc;         // Save user program counter
   uintptr_t heap_next_vaddr; // Next available heap address
@@ -107,11 +115,22 @@ struct Process {
 // Process management subsystem
 Process *process_create_impl(Process *table, proc_id_t max_procs,
                              const char *name, const void *image_or_pc,
-                             size_t size, bool is_image);
+                             size_t size, bool is_image, Arguments *args);
 Process *process_create(const char *name, const void *image_or_pc, size_t size,
-                        bool is_image);
+                        bool is_image, Arguments *args);
 Process *process_next_runnable(void);
 void process_exit(Process *proc);
+
+// Gets the argument page pointer of the current process if possible
+PageAddr process_get_arg_page();
+
+// Allocates a page for the given process and maps it appropriately for the
+// current architecture (with MMU for RISC-V, direct for WASM)
+// Returns Pair<paddr, vaddr> where paddr is physical address and vaddr is virtual
+// Returns Pair of null PageAddrs on failure
+Pair<PageAddr, PageAddr> process_alloc_mapped_page(Process *proc, bool readable,
+                                                    bool writable,
+                                                    bool executable);
 
 extern Process *idle_proc, *current_proc;
 extern Process procs[PROCS_MAX];

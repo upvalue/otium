@@ -76,7 +76,7 @@ void kernel_start(void) {
 
   // Create first process with minimal image to allocate user pages
   Process *proc1 = process_create("mem_test_1", mem_test_image,
-                                  sizeof(mem_test_image), true);
+                                  sizeof(mem_test_image), true, nullptr);
   uintptr_t proc1_pages[16];
   uint32_t proc1_page_count = 0;
   get_process_pages(proc1->pid, proc1_pages, &proc1_page_count);
@@ -85,7 +85,7 @@ void kernel_start(void) {
 
   // Create second process
   Process *proc2 = process_create("mem_test_2", mem_test_image,
-                                  sizeof(mem_test_image), true);
+                                  sizeof(mem_test_image), true, nullptr);
   uintptr_t proc2_pages[16];
   uint32_t proc2_page_count = 0;
   get_process_pages(proc2->pid, proc2_pages, &proc2_page_count);
@@ -98,7 +98,7 @@ void kernel_start(void) {
 
   // Create third process - should reuse process 1's pages
   Process *proc3 = process_create("mem_test_3", mem_test_image,
-                                  sizeof(mem_test_image), true);
+                                  sizeof(mem_test_image), true, nullptr);
   uintptr_t proc3_pages[16];
   uint32_t proc3_page_count = 0;
   get_process_pages(proc3->pid, proc3_pages, &proc3_page_count);
@@ -131,17 +131,17 @@ void kernel_start(void) {
 
 #elif KERNEL_PROG == KERNEL_PROG_TEST_HELLO
   // Test mode: run hello world test
-  Process *test_proc =
-      process_create("test_hello", (const void *)proc_hello_world, 0, false);
+  Process *test_proc = process_create(
+      "test_hello", (const void *)proc_hello_world, 0, false, nullptr);
   TRACE(LSOFT, "created test proc with name %s and pid %d", test_proc->name,
         test_proc->pid);
 #elif KERNEL_PROG == KERNEL_PROG_TEST_ALTERNATE
   // Test mode: alternate process execution
   oprintf("TEST: Starting alternate process test (should print 1234)\n");
-  Process *proc_a =
-      process_create("alternate_a", (const void *)proc_alternate_a, 0, false);
-  Process *proc_b =
-      process_create("alternate_b", (const void *)proc_alternate_b, 0, false);
+  Process *proc_a = process_create(
+      "alternate_a", (const void *)proc_alternate_a, 0, false, nullptr);
+  Process *proc_b = process_create(
+      "alternate_b", (const void *)proc_alternate_b, 0, false, nullptr);
   TRACE(LSOFT, "created proc_a with name %s and pid %d", proc_a->name,
         proc_a->pid);
   TRACE(LSOFT, "created proc_b with name %s and pid %d", proc_b->name,
@@ -151,12 +151,14 @@ void kernel_start(void) {
 #ifdef OT_ARCH_WASM
   // For WASM, call the shell main function directly
   Process *proc_shell =
-      process_create("shell", (const void *)shell_main, 0, false);
+      process_create("shell", (const void *)shell_main, 0, false, nullptr);
 #else
   // For RISC-V, load the shell from the embedded binary
+  char *test_args[] = {"test", "arg1", "arg2"};
+  Arguments args = {3, test_args};
   Process *proc_shell =
       process_create("shell", (const void *)_binary_bin_prog_shell_bin_start,
-                     (size_t)_binary_bin_prog_shell_bin_size, true);
+                     (size_t)_binary_bin_prog_shell_bin_size, true, &args);
 #endif
   TRACE(LSOFT, "created proc with name %s and pid %d", proc_shell->name,
         proc_shell->pid);

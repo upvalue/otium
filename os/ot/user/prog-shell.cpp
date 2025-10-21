@@ -1,6 +1,6 @@
 // prog-shell.cpp - shell program
+#include "ot/shared/arguments.hpp"
 #include "ot/user/user.hpp"
-
 #include "ot/user/vendor/tlsf.h"
 
 #include "ot/user/tcl.h"
@@ -25,6 +25,18 @@ extern "C" void shell_main(void) {
 #else
 extern "C" void main(void) {
 #endif
+  Arguments args;
+  ou_get_arguments(args);
+
+  if (args.argc > 0) {
+    // oprintf("arg page ptr %x\n", (uintptr_t)args.arg_page.as_ptr());
+    oprintf("I got me some arguments! :)  %d\n", args.argc);
+    for (size_t i = 0; i != args.argc; i++) {
+      oprintf("argument ptr %x\n", (uintptr_t)args.argv[i]);
+      oprintf("Argument %d: %s\n", i, args.argv[i]);
+    }
+  }
+
   // allocate some contiguous pages to work with
   memory_begin = ou_alloc_page();
 

@@ -1,5 +1,6 @@
 #include "ot/gen/user-prog-sections.h"
 #include "ot/kernel/kernel.hpp"
+#include "ot/shared/page-allocator.hpp"
 
 extern char __kernel_base[];
 
@@ -32,7 +33,7 @@ void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr,
 
 Process *process_create_impl(Process *table, proc_id_t max_procs,
                              const char *name, const void *image_or_pc,
-                             size_t size, bool is_image) {
+                             size_t size, bool is_image, Arguments *args) {
   // Initialize memory tracking on first process creation
   memory_init();
 
@@ -98,6 +99,8 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
   // Map user pages.
   if (is_image) {
     TRACE_PROC(LLOUD, "found image. allocating pages");
+    if (user_text_pages) {
+    }
     for (size_t off = 0; off < size; off += OT_PAGE_SIZE) {
       uintptr_t virtual_addr = USER_BASE + off;
       uint32_t flags = 0;
@@ -146,6 +149,44 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
   }
 #endif
 
+  // Handle argument array
+  if (args) {
+
+    Pair<PageAddr, PageAddr> alloc_result =
+        process_alloc_mapped_page(free_proc, true, false, false);
+
+    TRACE_PROC(
+        LSOFT,
+        "allocating argument page for %d arguments with paddr %x and vaddr %x",
+        args->argc, alloc_result.first.raw(), alloc_result.second.raw());
+    if (!alloc_result.first.is_null()) {
+      PageAllocator allocator(alloc_result.first, alloc_result.second);
+
+      // Allocate argc - write to physical, get virtual for storage
+      Pair<uintptr_t *, uintptr_t *> argc_ptrs = allocator.alloc<uintptr_t>();
+      *argc_ptrs.first = args->argc; // Write to physical
+
+      // Allocate argv array - write to physical, get virtual for storage
+      Pair<char **, char **> argv_ptrs =
+          allocator.alloc<char *>(args->argc * sizeof(char *));
+
+      for (size_t i = 0; i != args->argc; i++) {
+        size_t len = strlen(args->argv[i]);
+        // Allocate string - write to physical, store virtual in argv
+        Pair<char *, char *> arg_ptrs = allocator.alloc<char>(len + 1);
+        arg_ptrs.first[len] = '\0';
+
+        memcpy(arg_ptrs.first, args->argv[i], len); // Write to physical
+        argv_ptrs.first[i] = arg_ptrs.second;       // Store virtual in argv
+        oprintf("arg %d %s (paddr %x, vaddr %x)\n", i, arg_ptrs.first,
+                arg_ptrs.first, arg_ptrs.second);
+      }
+
+      // Store virtual address for user access
+      free_proc->arg_page = alloc_result.second;
+    }
+  }
+
   TRACE_PROC(LSOFT, "proc %s stack ptr: %x", free_proc->name,
              free_proc->stack_ptr);
 
@@ -155,9 +196,9 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
 }
 
 Process *process_create(const char *name, const void *image_or_pc, size_t size,
-                        bool is_image) {
-  Process *p =
-      process_create_impl(procs, PROCS_MAX, name, image_or_pc, size, is_image);
+                        bool is_image, Arguments *args) {
+  Process *p = process_create_impl(procs, PROCS_MAX, name, image_or_pc, size,
+                                   is_image, args);
 
   if (!p) {
     PANIC("reached proc limit");
@@ -187,4 +228,50 @@ void process_exit(Process *proc) {
 
   omemset(proc, 0, sizeof(Process));
   proc->state = UNUSED;
+}
+
+PageAddr process_get_arg_page() {
+  PageAddr paddr = PageAddr(nullptr);
+  if (current_proc == nullptr) {
+    return paddr;
+  }
+  if (current_proc->arg_page.is_null()) {
+    return paddr;
+  }
+  return current_proc->arg_page;
+}
+
+Pair<PageAddr, PageAddr> process_alloc_mapped_page(Process *proc, bool readable,
+                                                   bool writable,
+                                                   bool executable) {
+  if (!proc) {
+    return make_pair(PageAddr(nullptr), PageAddr(nullptr));
+  }
+
+  // Allocate physical page
+  PageAddr paddr = page_allocate(proc->pid, 1);
+  if (paddr.is_null()) {
+    return make_pair(PageAddr(nullptr), PageAddr(nullptr));
+  }
+
+#ifndef OT_ARCH_WASM
+  // RISC-V: Use MMU to map page to virtual address with specified permissions
+  uint32_t flags = PAGE_U;
+  if (readable)
+    flags |= PAGE_R;
+  if (writable)
+    flags |= PAGE_W;
+  if (executable)
+    flags |= PAGE_X;
+
+  uintptr_t vaddr_raw = proc->heap_next_vaddr;
+  map_page(proc->page_table, vaddr_raw, paddr, flags, proc->pid);
+  proc->heap_next_vaddr += OT_PAGE_SIZE;
+  return make_pair(paddr, PageAddr(vaddr_raw));
+#else
+  // WASM: No MMU, physical address = virtual address
+  // Permissions are not enforced in WASM
+  proc->heap_next_vaddr += OT_PAGE_SIZE;
+  return make_pair(paddr, paddr);
+#endif
 }

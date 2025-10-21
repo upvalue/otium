@@ -98,7 +98,8 @@ void wfi(void) {
 // Just call the user program directly
 extern "C" void user_entry(void) {
   // Jump to user base address
-  TRACE(LLOUD, "user_entry: calling user program for process %s", current_proc->name);
+  TRACE(LLOUD, "user_entry: calling user program for process %s",
+        current_proc->name);
   typedef void (*user_func_t)(void);
   user_func_t user_main = (user_func_t)current_proc->user_pc;
   user_main();
@@ -145,7 +146,8 @@ static void fiber_entry_point(void *arg) {
 
   // If we get here, process terminated (returned from user_entry instead of
   // yielding)
-  TRACE(LLOUD, "fiber_entry_point: process %s returned from user_entry, marking "
+  TRACE(LLOUD,
+        "fiber_entry_point: process %s returned from user_entry, marking "
         "TERMINATED",
         proc->name);
   proc->state = TERMINATED;
@@ -190,7 +192,8 @@ void scheduler_loop(void) {
       const size_t C_STACK_SIZE = 512 * 1024;        // 512KB C stack
       const size_t ASYNCIFY_STACK_SIZE = 512 * 1024; // 512KB asyncify stack
 
-      TRACE(LLOUD, "Creating fiber for process %s with stack size %d, asyncify stack "
+      TRACE(LLOUD,
+            "Creating fiber for process %s with stack size %d, asyncify stack "
             "size %d",
             next->name, C_STACK_SIZE, ASYNCIFY_STACK_SIZE);
 
@@ -213,7 +216,8 @@ void scheduler_loop(void) {
     // First arg is current context (scheduler), second is target (process)
     TRACE(LLOUD, "Swapping to process %s (state=%d)", next->name, next->state);
     emscripten_fiber_swap(&scheduler_fiber, (emscripten_fiber_t *)next->fiber);
-    TRACE(LLOUD, "Returned from process %s (state=%d)", next->name, next->state);
+    TRACE(LLOUD, "Returned from process %s (state=%d)", next->name,
+          next->state);
   }
 
   TRACE(LSOFT, "Scheduler loop finished");
@@ -252,25 +256,13 @@ void kernel_syscall_exit(void) {
 }
 
 void *kernel_syscall_alloc_page(void) {
-  if (!current_proc) {
-    return nullptr;
-  }
-
-  // For WASM, we don't use page tables, so just allocate physical memory
-  // and return it directly as a virtual address
-  void *paddr = page_allocate(current_proc->pid, 1);
-  if (!paddr) {
-    yield();
-    return nullptr;
-  }
-
-  // In WASM, physical address = virtual address (no MMU)
-  current_proc->heap_next_vaddr += OT_PAGE_SIZE;
-
+  Pair<PageAddr, PageAddr> result =
+      process_alloc_mapped_page(current_proc, true, true, false);
   yield();
-  return paddr;
+  return result.second.as_ptr();
 }
-}
+
+PageAddr kernel_syscall_get_arg_page(void) { return process_get_arg_page(); }
 
 // Main entry point for WASM
 extern "C" void kernel_main(void) {

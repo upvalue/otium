@@ -56,19 +56,30 @@ EOF
       -s "EXPORT_NAME=OtiumOS"
     )
 
+    # Shared kernel source files (platform-independent)
+    KERNEL_SHARED_SOURCES=(
+      ot/kernel/startup.cpp
+      ot/kernel/main.cpp
+      ot/kernel/memory.cpp
+      ot/kernel/process.cpp
+      ot/shared/std.cpp
+    )
+
+    # Shared user program source files (platform-independent)
+    USER_SHARED_SOURCES=(
+      ot/user/prog-shell.cpp
+      ot/user/user-shared.cpp
+      ot/user/tcl.cpp
+      ot/user/vendor/tlsf.c
+    )
+
     # Build the complete system
     mkdir -p ot/kernel ot/user ot/shared
     emcc $CPPFLAGS $CFLAGS "''${EMFLAGS[@]}" -o ot/kernel/kernel.js \
-      ot/kernel/startup.cpp \
-      ot/kernel/main.cpp \
+      "''${KERNEL_SHARED_SOURCES[@]}" \
       ot/kernel/platform-wasm.cpp \
-      ot/shared/std.cpp \
-      ot/kernel/memory.cpp \
-      ot/kernel/process.cpp \
       ot/user/user-wasm.cpp \
-      ot/user/prog-shell.cpp \
-      ot/user/tcl.cpp \
-      ot/user/vendor/tlsf.c
+      "''${USER_SHARED_SOURCES[@]}"
 
     echo ""
     echo "Build complete!"

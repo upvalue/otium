@@ -48,6 +48,7 @@ void osnprintf(char *str, size_t size, const char *format, ...);
 #define OU_GETCHAR 3
 #define OU_EXIT 4
 #define OU_ALLOC_PAGE 5
+#define OU_GET_ARG_PAGE 6
 
 void oputchar(char);
 

@@ -2,9 +2,10 @@
 
 This is a simple operating system with a kernel and a user-space program.
 
-Currently, it targets two systems:
+Currently, it targets three systems:
 - RISC-V under QEMU with assembly to switch and store stack information by hand
 - WASM on Emscripten, using the fiber library to switch processes
+- Unit tests, runs as a normal program on OSX 
 
 ## Coding style
 

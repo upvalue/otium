@@ -15,6 +15,8 @@ clang++ -DOT_TEST -DOT_TRACE_MEM \
     ot/kernel/process-test.cpp \
     ot/shared/regstr-test.cpp \
     ot/shared/mpack-writer-test.cpp \
+    ot/shared/mpack-reader.cpp \
+    ot/shared/mpack-reader-test.cpp \
     ot/shared/mpack-utils.cpp \
     ot/shared/mpack-utils-test.cpp \
     bin/mpack.o

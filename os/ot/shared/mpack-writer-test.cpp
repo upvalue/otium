@@ -145,3 +145,58 @@ TEST_CASE("mpack-writer - reset") {
   CHECK(size1 == size2);
   CHECK(msg.ok());
 }
+
+TEST_CASE("mpack-writer - args map structure") {
+  char buf[256];
+  MPackWriter msg(buf, sizeof(buf));
+
+  char* args[] = {(char*)"program", (char*)"arg1", (char*)"arg2"};
+
+  // Pack: {"args": ["program", "arg1", "arg2"]}
+  msg.map(1).str("args").stringarray(3, args);
+
+  CHECK(msg.ok());
+  CHECK(msg.size() > 0);
+
+  // Unpack and verify the structure
+  const char* rbuf = (const char*)msg.data();
+  size_t rlen = msg.size();
+  mpack_tokbuf_t state;
+  mpack_tokbuf_init(&state);
+  mpack_token_t tok;
+
+  // Read map header
+  int result = mpack_read(&state, &rbuf, &rlen, &tok);
+  CHECK(result == MPACK_OK);
+  CHECK(tok.type == MPACK_TOKEN_MAP);
+  CHECK(tok.length == 1);
+
+  // Read "args" key - string header
+  result = mpack_read(&state, &rbuf, &rlen, &tok);
+  CHECK(result == MPACK_OK);
+  CHECK(tok.type == MPACK_TOKEN_STR);
+  CHECK(tok.length == 4);
+
+  // Read "args" key - chunk
+  result = mpack_read(&state, &rbuf, &rlen, &tok);
+  CHECK(result == MPACK_OK);
+  CHECK(tok.type == MPACK_TOKEN_CHUNK);
+  CHECK(memcmp(tok.data.chunk_ptr, "args", 4) == 0);
+
+  // Read array header
+  result = mpack_read(&state, &rbuf, &rlen, &tok);
+  CHECK(result == MPACK_OK);
+  CHECK(tok.type == MPACK_TOKEN_ARRAY);
+  CHECK(tok.length == 3);
+
+  // Read first string "program"
+  result = mpack_read(&state, &rbuf, &rlen, &tok);
+  CHECK(result == MPACK_OK);
+  CHECK(tok.type == MPACK_TOKEN_STR);
+  CHECK(tok.length == 7);
+
+  result = mpack_read(&state, &rbuf, &rlen, &tok);
+  CHECK(result == MPACK_OK);
+  CHECK(tok.type == MPACK_TOKEN_CHUNK);
+  CHECK(memcmp(tok.data.chunk_ptr, "program", 7) == 0);
+}

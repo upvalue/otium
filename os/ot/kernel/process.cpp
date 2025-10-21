@@ -1,5 +1,6 @@
 #include "ot/gen/user-prog-sections.h"
 #include "ot/kernel/kernel.hpp"
+#include "ot/shared/mpack-writer.hpp"
 #include "ot/shared/page-allocator.hpp"
 
 extern char __kernel_base[];
@@ -159,33 +160,17 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
         LSOFT,
         "allocating argument page for %d arguments with paddr %x and vaddr %x",
         args->argc, alloc_result.first.raw(), alloc_result.second.raw());
-    if (!alloc_result.first.is_null()) {
-      PageAllocator allocator(alloc_result.first, alloc_result.second);
 
-      // Allocate argc - write to physical, get virtual for storage
-      Pair<uintptr_t *, uintptr_t *> argc_ptrs = allocator.alloc<uintptr_t>();
-      *argc_ptrs.first = args->argc; // Write to physical
+    char *buffer = alloc_result.first.as<char>();
 
-      // Allocate argv array - write to physical, get virtual for storage
-      Pair<char **, char **> argv_ptrs =
-          allocator.alloc<char *>(args->argc * sizeof(char *));
+    MPackWriter msg(buffer, OT_PAGE_SIZE);
 
-      for (size_t i = 0; i != args->argc; i++) {
-        size_t len = strlen(args->argv[i]);
-        // Allocate string - write to physical, store virtual in argv
-        Pair<char *, char *> arg_ptrs = allocator.alloc<char>(len + 1);
-        arg_ptrs.first[len] = '\0';
+    msg.map(1).str("args").stringarray(args->argc, args->argv);
 
-        memcpy(arg_ptrs.first, args->argv[i], len); // Write to physical
-        argv_ptrs.first[i] = arg_ptrs.second;       // Store virtual in argv
-        oprintf("arg %d %s (paddr %x, vaddr %x)\n", i, arg_ptrs.first,
-                arg_ptrs.first, arg_ptrs.second);
-      }
-
-      // Store virtual address for user access
-      free_proc->arg_page = alloc_result.second;
-    }
+    // Store virtual address for user access
+    free_proc->arg_page = alloc_result.second;
   }
+  // }
 
   TRACE_PROC(LSOFT, "proc %s stack ptr: %x", free_proc->name,
              free_proc->stack_ptr);

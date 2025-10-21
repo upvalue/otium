@@ -1,5 +1,7 @@
 // prog-shell.cpp - shell program
 #include "ot/shared/arguments.hpp"
+#include "ot/shared/mpack-reader.hpp"
+#include "ot/shared/mpack-utils.hpp"
 #include "ot/user/user.hpp"
 #include "ot/user/vendor/tlsf.h"
 
@@ -25,7 +27,12 @@ extern "C" void shell_main(void) {
 #else
 extern "C" void main(void) {
 #endif
-  Arguments args;
+  PageAddr arg_page = ou_get_arg_page();
+
+  int x = mpack_print(arg_page.as<char>(), OT_PAGE_SIZE, oputchar);
+  oprintf("mpack_print returned %d\n", x);
+  // MPackReader reader(arg_page.as<char>(), OT_PAGE_SIZE);
+  /*Arguments args;
   ou_get_arguments(args);
 
   if (args.argc > 0) {
@@ -35,7 +42,7 @@ extern "C" void main(void) {
       oprintf("argument ptr %x\n", (uintptr_t)args.argv[i]);
       oprintf("Argument %d: %s\n", i, args.argv[i]);
     }
-  }
+  }*/
 
   // allocate some contiguous pages to work with
   memory_begin = ou_alloc_page();

@@ -109,7 +109,7 @@ void handle_syscall(struct trap_frame *f) {
   f->a0 = 0;
   switch (sysno) {
   case OU_PUTCHAR:
-    oputchar(arg0);
+    f->a0 = oputchar(arg0);
     break;
   case OU_YIELD:
     break;

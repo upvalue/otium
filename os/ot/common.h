@@ -15,6 +15,10 @@ extern "C" {
 #include <stdint.h>
 #else
 
+#ifndef NULL
+#define NULL 0
+#endif
+
 typedef unsigned char uint8_t;
 typedef int int32_t;
 typedef unsigned int uint32_t;

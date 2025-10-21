@@ -231,7 +231,7 @@ void scheduler_loop(void) {
 
 // Syscall handlers for user programs
 extern "C" {
-;
+
 void kernel_syscall_putchar(char ch) {
   oputchar(ch);
   yield();
@@ -261,6 +261,8 @@ void *kernel_syscall_alloc_page(void) {
   yield();
   return result.second.as_ptr();
 }
+
+} // extern "C"
 
 PageAddr kernel_syscall_get_arg_page(void) { return process_get_arg_page(); }
 

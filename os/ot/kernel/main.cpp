@@ -148,14 +148,14 @@ void kernel_start(void) {
         proc_b->pid);
 #else
   // Default/main mode
+  char *test_args[] = {"test", "arg1", "arg2"};
+  Arguments args = {3, test_args};
 #ifdef OT_ARCH_WASM
   // For WASM, call the shell main function directly
   Process *proc_shell =
-      process_create("shell", (const void *)shell_main, 0, false, nullptr);
+      process_create("shell", (const void *)shell_main, 0, false, &args);
 #else
   // For RISC-V, load the shell from the embedded binary
-  char *test_args[] = {"test", "arg1", "arg2"};
-  Arguments args = {3, test_args};
   Process *proc_shell =
       process_create("shell", (const void *)_binary_bin_prog_shell_bin_start,
                      (size_t)_binary_bin_prog_shell_bin_size, true, &args);

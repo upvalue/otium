@@ -23,7 +23,6 @@ int kernel_syscall_getchar(void);
 void kernel_syscall_yield(void);
 void kernel_syscall_exit(void);
 void *kernel_syscall_alloc_page(void);
-PageAddr kernel_syscall_get_arg_page();
 
 // Note: oputchar and ogetchar are defined in platform-wasm.cpp
 // and used by both kernel and user code
@@ -42,3 +41,6 @@ void *ou_alloc_page(void) { return kernel_syscall_alloc_page(); }
 // No special start routine needed for WASM
 // The kernel will call shell_main() directly
 }
+
+PageAddr kernel_syscall_get_arg_page(void);
+PageAddr ou_get_arg_page(void) { return kernel_syscall_get_arg_page(); }

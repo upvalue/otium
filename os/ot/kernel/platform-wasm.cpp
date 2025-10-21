@@ -59,7 +59,10 @@ EM_JS(void, js_exit, (), {
 // Console I/O functions - must be extern "C" for user programs
 extern "C" {
 
-void oputchar(char ch) { js_putchar(ch); }
+int oputchar(char ch) {
+  js_putchar(ch);
+  return 1;
+}
 
 int ogetchar() {
   emscripten_sleep(0);

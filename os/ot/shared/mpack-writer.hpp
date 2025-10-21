@@ -1,5 +1,5 @@
-#ifndef OT_SHARED_MPACKER_HPP
-#define OT_SHARED_MPACKER_HPP
+#ifndef OT_SHARED_MPACK_WRITER_HPP
+#define OT_SHARED_MPACK_WRITER_HPP
 
 #include "ot/common.h"
 #include "ot/shared/mpack.h"
@@ -7,11 +7,11 @@
 // Simple C++ wrapper around libmpack for easier serialization
 // Usage:
 //   char buf[256];
-//   MPacker msg(buf, sizeof(buf));
+//   MPackWriter msg(buf, sizeof(buf));
 //   msg.stringarray(argc, argv);
 //   send(msg.data(), msg.size());
 //
-class MPacker {
+class MPackWriter {
 private:
   char* buf_start_;     // Original buffer start
   char* buf_;           // Current write position
@@ -31,7 +31,7 @@ private:
 
 public:
   // Initialize packer with a buffer
-  MPacker(void* buffer, size_t size)
+  MPackWriter(void* buffer, size_t size)
     : buf_start_((char*)buffer)
     , buf_((char*)buffer)
     , buflen_(size)
@@ -51,22 +51,22 @@ public:
 
   // ===== Basic Types =====
 
-  MPacker& nil() {
+  MPackWriter& nil() {
     write_token(mpack_pack_nil());
     return *this;
   }
 
-  MPacker& pack(bool v) {
+  MPackWriter& pack(bool v) {
     write_token(mpack_pack_boolean(v ? 1u : 0u));
     return *this;
   }
 
-  MPacker& pack(uint32_t v) {
+  MPackWriter& pack(uint32_t v) {
     write_token(mpack_pack_uint(v));
     return *this;
   }
 
-  MPacker& pack(int32_t v) {
+  MPackWriter& pack(int32_t v) {
     write_token(mpack_pack_sint(v));
     return *this;
   }
@@ -74,7 +74,7 @@ public:
   // ===== Strings =====
 
   // Pack null-terminated string
-  MPacker& str(const char* s) {
+  MPackWriter& str(const char* s) {
     if (!s || error_) return *this;
     uint32_t len = 0;
     const char* p = s;
@@ -83,7 +83,7 @@ public:
   }
 
   // Pack string with explicit length
-  MPacker& str(const char* s, uint32_t len) {
+  MPackWriter& str(const char* s, uint32_t len) {
     if (error_) return *this;
     write_token(mpack_pack_str(len));
     write_token(mpack_pack_chunk(s, len));
@@ -92,7 +92,7 @@ public:
 
   // ===== Binary Data =====
 
-  MPacker& bin(const void* data, uint32_t len) {
+  MPackWriter& bin(const void* data, uint32_t len) {
     if (error_) return *this;
     write_token(mpack_pack_bin(len));
     write_token(mpack_pack_chunk((const char*)data, len));
@@ -102,13 +102,13 @@ public:
   // ===== Collections =====
 
   // Start an array of N elements (caller must pack N items after this)
-  MPacker& array(uint32_t count) {
+  MPackWriter& array(uint32_t count) {
     write_token(mpack_pack_array(count));
     return *this;
   }
 
   // Start a map of N key-value pairs (caller must pack 2*N items)
-  MPacker& map(uint32_t count) {
+  MPackWriter& map(uint32_t count) {
     write_token(mpack_pack_map(count));
     return *this;
   }
@@ -116,7 +116,7 @@ public:
   // ===== Convenience Methods =====
 
   // Pack argc/argv as array of strings
-  MPacker& stringarray(int argc, char** argv) {
+  MPackWriter& stringarray(int argc, char** argv) {
     array(argc);
     for (int i = 0; i < argc; i++) {
       str(argv[i]);
@@ -147,4 +147,4 @@ public:
   }
 };
 
-#endif  // OT_SHARED_MPACKER_HPP
+#endif  // OT_SHARED_MPACK_WRITER_HPP

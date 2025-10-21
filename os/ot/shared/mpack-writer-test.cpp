@@ -1,11 +1,11 @@
 #include "vendor/doctest.h"
 #include "ot/common.h"
-#include "ot/shared/mpacker.hpp"
+#include "ot/shared/mpack-writer.hpp"
 #include "ot/shared/mpack.h"
 
-TEST_CASE("mpacker - basic types") {
+TEST_CASE("mpack-writer - basic types") {
   char buf[256];
-  MPacker msg(buf, sizeof(buf));
+  MPackWriter msg(buf, sizeof(buf));
 
   // Pack some basic values
   msg.nil();
@@ -18,9 +18,9 @@ TEST_CASE("mpacker - basic types") {
   CHECK(msg.size() > 0);
 }
 
-TEST_CASE("mpacker - strings") {
+TEST_CASE("mpack-writer - strings") {
   char buf[256];
-  MPacker msg(buf, sizeof(buf));
+  MPackWriter msg(buf, sizeof(buf));
 
   msg.str("hello");
   msg.str("world", 5);
@@ -41,9 +41,9 @@ TEST_CASE("mpacker - strings") {
   CHECK(tok.length == 5);
 }
 
-TEST_CASE("mpacker - stringarray") {
+TEST_CASE("mpack-writer - stringarray") {
   char buf[256];
-  MPacker msg(buf, sizeof(buf));
+  MPackWriter msg(buf, sizeof(buf));
 
   char* args[] = {
     (char*)"cmd",
@@ -82,9 +82,9 @@ TEST_CASE("mpacker - stringarray") {
   CHECK(memcmp(tok.data.chunk_ptr, "cmd", 3) == 0);
 }
 
-TEST_CASE("mpacker - collections") {
+TEST_CASE("mpack-writer - collections") {
   char buf[256];
-  MPacker msg(buf, sizeof(buf));
+  MPackWriter msg(buf, sizeof(buf));
 
   // Pack: [1, 2, 3]
   msg.array(3)
@@ -104,9 +104,9 @@ TEST_CASE("mpacker - collections") {
   CHECK(msg.size() > 0);
 }
 
-TEST_CASE("mpacker - binary") {
+TEST_CASE("mpack-writer - binary") {
   char buf[256];
-  MPacker msg(buf, sizeof(buf));
+  MPackWriter msg(buf, sizeof(buf));
 
   uint8_t data[] = {0xde, 0xad, 0xbe, 0xef};
   msg.bin(data, 4);
@@ -127,9 +127,9 @@ TEST_CASE("mpacker - binary") {
   CHECK(tok.length == 4);
 }
 
-TEST_CASE("mpacker - reset") {
+TEST_CASE("mpack-writer - reset") {
   char buf[256];
-  MPacker msg(buf, sizeof(buf));
+  MPackWriter msg(buf, sizeof(buf));
 
   msg.pack((uint32_t)42);
   uint32_t size1 = msg.size();

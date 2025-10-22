@@ -194,29 +194,17 @@ int mpack_print(const char *data, size_t len, mpack_putchar_fn putchar_fn) {
   ctx.putchar_fn = putchar_fn;
   ctx.error = 0;
 
+  mpack_parser_t parser;
+  mpack_parser_init(&parser, 0);
+  parser.data.p = &ctx;
+
   const char *buf = data;
   size_t buflen = len;
-  bool first = true;
 
-  // Loop over all top-level values
-  while (buflen > 0) {
-    mpack_parser_t parser;
-    mpack_parser_init(&parser, 0);
-    parser.data.p = &ctx;
+  int result = mpack_parse(&parser, &buf, &buflen, print_enter, print_exit);
 
-    // Add comma separator between values
-    if (!first) {
-      write_char(&ctx, ',');
-      if (ctx.error)
-        return 0;
-    }
-    first = false;
-
-    int result = mpack_parse(&parser, &buf, &buflen, print_enter, print_exit);
-
-    if (result != MPACK_OK || ctx.error) {
-      return 0;
-    }
+  if (result != MPACK_OK || ctx.error) {
+    return 0;
   }
 
   return 1;

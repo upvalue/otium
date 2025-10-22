@@ -34,6 +34,8 @@ enum MsgSerializationError {
   MSG_SERIALIZATION_EOF = 1,
   MSG_SERIALIZATION_UNEXPECTED_TYPE = 2,
   MSG_SERIALIZATION_OTHER = 3,
+  MSG_SERIALIZATION_EXPECTED_TOPLEVEL_ARRAY = 4,
+  MSG_SERIALIZATION_EXPECTED_TOPLEVEL_ARRAY_LEN = 5,
 };
 
 /** A message containing a single string */
@@ -43,12 +45,19 @@ struct MsgString : MPackBuffer {
 
   MsgSerializationError serialize(StringView &sv) {
     MPackWriter writer(buffer, length);
-    writer.str("string").str(sv);
+    writer.array(2).str("string").str(sv);
     return writer.ok() ? MSG_SERIALIZATION_OK : MSG_SERIALIZATION_OTHER;
   }
 
   MsgSerializationError deserialize(StringView &sv) {
     MPackReader reader(buffer, length);
+    uint32_t count;
+    if (!reader.enter_array(count)) {
+      return MSG_SERIALIZATION_EXPECTED_TOPLEVEL_ARRAY;
+    }
+    if (count != 2) {
+      return MSG_SERIALIZATION_EXPECTED_TOPLEVEL_ARRAY_LEN;
+    }
     StringView type;
     if (!reader.read_string(type)) {
       return MSG_SERIALIZATION_UNEXPECTED_TYPE;
@@ -69,17 +78,24 @@ struct MsgError : MPackBuffer {
 
   MsgSerializationError serialize(ErrorCode code, const char *message) {
     MPackWriter writer(buffer, length);
-    writer.str("error").pack((int32_t)code).str(message);
+    writer.array(3).str("error").pack((int32_t)code).str(message);
     return writer.ok() ? MSG_SERIALIZATION_OK : MSG_SERIALIZATION_OTHER;
   }
 
   MsgSerializationError deserialize(ErrorCode &code, StringView &message) {
     MPackReader reader(buffer, length);
-    StringView type;
-    if (!reader.read_string(type)) {
-      return MSG_SERIALIZATION_OTHER;
+    uint32_t count;
+    if (!reader.enter_array(count)) {
+      return MSG_SERIALIZATION_EXPECTED_TOPLEVEL_ARRAY;
+    }
+    if (count != 3) {
+      return MSG_SERIALIZATION_EXPECTED_TOPLEVEL_ARRAY_LEN;
     }
 
+    StringView type;
+    if (!reader.read_string(type)) {
+      return MSG_SERIALIZATION_UNEXPECTED_TYPE;
+    }
     if (!type.equals("error")) {
       return MSG_SERIALIZATION_UNEXPECTED_TYPE;
     }

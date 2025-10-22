@@ -224,7 +224,9 @@ TEST_CASE("error structure") {
   char buf[256];
   MPackWriter msg(buf, sizeof(buf));
 
-  msg.str("error")
+  // Error messages are now wrapped in arrays
+  msg.array(3)
+      .str("error")
       .pack((int32_t)KERNEL__IPC_SEND_MESSAGE__PID_NOT_FOUND)
       .str("pid not found");
 
@@ -235,8 +237,7 @@ TEST_CASE("error structure") {
   int result = mpack_print((const char *)msg.data(), msg.size(), test_putchar);
   CHECK(result == 1);
 
-  // Multiple top-level values are comma-separated
-  INFO("Expected: \"error\",1,\"pid not found\"");
+  INFO("Expected: [\"error\",1,\"pid not found\"]");
   INFO("Got: " << test_output);
-  CHECK(strcmp(test_output, "\"error\",1,\"pid not found\"") == 0);
+  CHECK(strcmp(test_output, "[\"error\",1,\"pid not found\"]") == 0);
 }

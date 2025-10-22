@@ -25,6 +25,7 @@ let outputBuffer = '';
 // Module configuration
 const Module = {
   exit: (status) => {
+    console.log('process exited with status', status);
     if (isTestMode) {
       // In test mode, exit immediately with the status
       process.exit(status || 0);
@@ -44,7 +45,6 @@ const Module = {
 
   print3: function(text, size) {
     console.log({text, size});
-    // process.stdout.write(text.slice(0, size));
   },
 
   printErr: function(text) {

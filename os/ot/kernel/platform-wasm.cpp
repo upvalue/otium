@@ -267,7 +267,21 @@ void *kernel_syscall_alloc_page(void) {
 
 } // extern "C"
 
+int kernel_syscall_io_puts(const char *str, int size) {
+  for (int i = 0; i < size; i++) {
+    oputchar(str[i]);
+  }
+  yield();
+  return 1;
+}
+
 PageAddr kernel_syscall_get_arg_page(void) { return process_get_arg_page(); }
+
+int kernel_syscall_proc_lookup(const char *name) {
+  Process *proc = process_lookup(name);
+  yield();
+  return proc ? proc->pid : 0;
+}
 
 // Main entry point for WASM
 extern "C" void kernel_main(void) {

@@ -30,10 +30,9 @@ void *kernel_syscall_alloc_page(void);
 void ou_yield(void) { kernel_syscall_yield(); }
 
 __attribute__((noreturn)) void ou_exit(void) {
-  kernel_syscall_exit();
-  // Should never return, but just in case
-  while (1)
-    ;
+  // kernel_syscall_exit();
+  process_exit(current_proc);
+  ou_yield();
 }
 
 void *ou_alloc_page(void) { return kernel_syscall_alloc_page(); }
@@ -44,3 +43,15 @@ void *ou_alloc_page(void) { return kernel_syscall_alloc_page(); }
 
 PageAddr kernel_syscall_get_arg_page(void);
 PageAddr ou_get_arg_page(void) { return kernel_syscall_get_arg_page(); }
+
+int kernel_syscall_proc_lookup(const char *name);
+
+int ou_proc_lookup(const char *name) {
+  return kernel_syscall_proc_lookup(name);
+}
+
+int kernel_syscall_io_puts(const char *str, int size);
+
+int ou_io_puts(const char *str, int size) {
+  return kernel_syscall_io_puts(str, size);
+}

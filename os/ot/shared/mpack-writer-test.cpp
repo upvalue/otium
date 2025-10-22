@@ -1,7 +1,8 @@
-#include "vendor/doctest.h"
 #include "ot/common.h"
+#include "ot/shared/messages.hpp"
 #include "ot/shared/mpack-writer.hpp"
 #include "ot/shared/mpack.h"
+#include "vendor/doctest.h"
 
 TEST_CASE("mpack-writer - basic types") {
   char buf[256];
@@ -29,7 +30,7 @@ TEST_CASE("mpack-writer - strings") {
   CHECK(msg.size() > 0);
 
   // Unpack and verify
-  const char* rbuf = (const char*)msg.data();
+  const char *rbuf = (const char *)msg.data();
   size_t rlen = msg.size();
   mpack_tokbuf_t state;
   mpack_tokbuf_init(&state);
@@ -45,12 +46,8 @@ TEST_CASE("mpack-writer - stringarray") {
   char buf[256];
   MPackWriter msg(buf, sizeof(buf));
 
-  char* args[] = {
-    (char*)"cmd",
-    (char*)"arg1",
-    (char*)"arg2",
-    (char*)"arg3"
-  };
+  char *args[] = {(char *)"cmd", (char *)"arg1", (char *)"arg2",
+                  (char *)"arg3"};
 
   msg.stringarray(4, args);
 
@@ -58,7 +55,7 @@ TEST_CASE("mpack-writer - stringarray") {
   CHECK(msg.size() > 0);
 
   // Unpack and verify the array
-  const char* rbuf = (const char*)msg.data();
+  const char *rbuf = (const char *)msg.data();
   size_t rlen = msg.size();
   mpack_tokbuf_t state;
   mpack_tokbuf_init(&state);
@@ -87,18 +84,13 @@ TEST_CASE("mpack-writer - collections") {
   MPackWriter msg(buf, sizeof(buf));
 
   // Pack: [1, 2, 3]
-  msg.array(3)
-     .pack((uint32_t)1)
-     .pack((uint32_t)2)
-     .pack((uint32_t)3);
+  msg.array(3).pack((uint32_t)1).pack((uint32_t)2).pack((uint32_t)3);
 
   CHECK(msg.ok());
 
   // Pack: {"key": "value"}
   msg.reset();
-  msg.map(1)
-     .str("key")
-     .str("value");
+  msg.map(1).str("key").str("value");
 
   CHECK(msg.ok());
   CHECK(msg.size() > 0);
@@ -115,7 +107,7 @@ TEST_CASE("mpack-writer - binary") {
   CHECK(msg.size() > 0);
 
   // Unpack and verify
-  const char* rbuf = (const char*)msg.data();
+  const char *rbuf = (const char *)msg.data();
   size_t rlen = msg.size();
   mpack_tokbuf_t state;
   mpack_tokbuf_init(&state);
@@ -150,7 +142,7 @@ TEST_CASE("mpack-writer - args map structure") {
   char buf[256];
   MPackWriter msg(buf, sizeof(buf));
 
-  char* args[] = {(char*)"program", (char*)"arg1", (char*)"arg2"};
+  char *args[] = {(char *)"program", (char *)"arg1", (char *)"arg2"};
 
   // Pack: {"args": ["program", "arg1", "arg2"]}
   msg.map(1).str("args").stringarray(3, args);
@@ -159,7 +151,7 @@ TEST_CASE("mpack-writer - args map structure") {
   CHECK(msg.size() > 0);
 
   // Unpack and verify the structure
-  const char* rbuf = (const char*)msg.data();
+  const char *rbuf = (const char *)msg.data();
   size_t rlen = msg.size();
   mpack_tokbuf_t state;
   mpack_tokbuf_init(&state);

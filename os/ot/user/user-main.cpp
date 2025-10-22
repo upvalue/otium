@@ -147,6 +147,12 @@ void scratch_main() {
   int shell_pid = ou_proc_lookup("shell");
   oprintf("shell pid: %d\n", shell_pid);
 
+  // try sending to invalid pid and see what happens
+  int x = ou_ipc_send_message(5);
+  PageAddr comm_page = ou_get_comm_page();
+  mpack_scratch_print(comm_page.as<char>(), OT_PAGE_SIZE);
+  ou_io_puts(ot_scratch_buffer, strlen(ot_scratch_buffer));
+
   while (true) {
     int msg_count = ou_ipc_check_message();
     if (msg_count > 0) {

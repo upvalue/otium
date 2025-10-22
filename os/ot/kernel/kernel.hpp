@@ -68,6 +68,8 @@ struct MemoryStats {
 };
 
 PageAddr page_allocate(proc_id_t pid, size_t page_count);
+/** Look up PageInfo given an address. */
+PageInfo *page_info_lookup(PageAddr);
 void page_free_process(proc_id_t pid);
 void memory_init();
 void memory_report();
@@ -121,7 +123,9 @@ struct Process {
   /** Pages for incoming messages */
   Pair<PageAddr, PageAddr> msg_pages[OT_MSG_LIMIT];
 
-  /** How many messages are waiting for the process to handle */
+  /** How many messages are waiting for the process to handle. Note that idx
+   *  of the message in array is msg_count - 1
+   */
   uint8_t msg_count;
 
   uintptr_t stack_ptr;
@@ -144,6 +148,8 @@ Process *process_next_runnable(void);
 /** Looks up a process by name. Returns highest PID process that matches
  * (conflicts are allowed). */
 Process *process_lookup(const StringView &name);
+/** Looks up a process by PID, returns nullptr if process not runnable */
+Process *process_lookup(int pid);
 void process_exit(Process *proc);
 
 // Gets the argument page pointer of the current process if possible
@@ -166,24 +172,22 @@ extern Process procs[PROCS_MAX];
 extern "C" void switch_context(uintptr_t *prev_sp, uintptr_t *next_sp);
 void yield(void);
 
+// Process for entering into a loaded userspace program (on RISCV)
+extern "C" void user_entry(void);
+extern "C" void kernel_start(void);
+
 #ifdef OT_ARCH_WASM
 void scheduler_loop(void);
 #endif
-
-// Memory management subsystem
-void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr,
-              uint32_t flags, proc_id_t pid);
-
-/** Look up PageInfo given an address. */
-PageInfo *page_info_lookup(PageAddr);
 
 #define USER_BASE 0x1000000
 #define HEAP_BASE 0x2000000
 #define SSTATUS_SPIE (1 << 5)
 
-// Process for entering into a loaded userspace program (on RISCV)
-extern "C" void user_entry(void);
+void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr,
+              uint32_t flags, proc_id_t pid);
 
-extern "C" void kernel_start(void);
+// inter-process communication
+bool ipc_send_message(Process *sender, int target_pid);
 
 #endif

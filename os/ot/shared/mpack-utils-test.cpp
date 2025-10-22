@@ -1,7 +1,8 @@
-#include "vendor/doctest.h"
 #include "ot/common.h"
+#include "ot/shared/error-codes.hpp"
 #include "ot/shared/mpack-utils.hpp"
 #include "ot/shared/mpack-writer.hpp"
+#include "vendor/doctest.h"
 #include <string.h>
 
 // Test buffer for capturing output
@@ -17,7 +18,7 @@ static void reset_output() {
 // Test putchar that writes to buffer
 static int test_putchar(char ch) {
   if (test_output_pos >= sizeof(test_output) - 1) {
-    return 0;  // Buffer full
+    return 0; // Buffer full
   }
   test_output[test_output_pos++] = ch;
   return 1;
@@ -35,16 +36,16 @@ TEST_CASE("mpack-utils - print basic types") {
 
   // Pack: [null, true, false, 42, -17]
   msg.array(5)
-     .nil()
-     .pack(true)
-     .pack(false)
-     .pack((uint32_t)42)
-     .pack((int32_t)-17);
+      .nil()
+      .pack(true)
+      .pack(false)
+      .pack((uint32_t)42)
+      .pack((int32_t)-17);
 
   CHECK(msg.ok());
 
   reset_output();
-  int result = mpack_print((const char*)msg.data(), msg.size(), test_putchar);
+  int result = mpack_print((const char *)msg.data(), msg.size(), test_putchar);
 
   CHECK(result == 1);
   INFO("Expected: [null,true,false,42,-17]");
@@ -57,14 +58,12 @@ TEST_CASE("mpack-utils - print strings") {
   MPackWriter msg(buf, sizeof(buf));
 
   // Pack: ["hello", "world"]
-  msg.array(2)
-     .str("hello")
-     .str("world");
+  msg.array(2).str("hello").str("world");
 
   CHECK(msg.ok());
 
   reset_output();
-  int result = mpack_print((const char*)msg.data(), msg.size(), test_putchar);
+  int result = mpack_print((const char *)msg.data(), msg.size(), test_putchar);
 
   CHECK(result == 1);
   CHECK(strcmp(test_output, "[\"hello\",\"world\"]") == 0);
@@ -76,13 +75,17 @@ TEST_CASE("mpack-utils - print nested arrays") {
 
   // Pack: [[1, 2], [3, 4]]
   msg.array(2)
-     .array(2).pack((uint32_t)1).pack((uint32_t)2)
-     .array(2).pack((uint32_t)3).pack((uint32_t)4);
+      .array(2)
+      .pack((uint32_t)1)
+      .pack((uint32_t)2)
+      .array(2)
+      .pack((uint32_t)3)
+      .pack((uint32_t)4);
 
   CHECK(msg.ok());
 
   reset_output();
-  int result = mpack_print((const char*)msg.data(), msg.size(), test_putchar);
+  int result = mpack_print((const char *)msg.data(), msg.size(), test_putchar);
 
   CHECK(result == 1);
   CHECK(strcmp(test_output, "[[1,2],[3,4]]") == 0);
@@ -93,14 +96,12 @@ TEST_CASE("mpack-utils - print map") {
   MPackWriter msg(buf, sizeof(buf));
 
   // Pack: {"name": "alice", "age": 30}
-  msg.map(2)
-     .str("name").str("alice")
-     .str("age").pack((uint32_t)30);
+  msg.map(2).str("name").str("alice").str("age").pack((uint32_t)30);
 
   CHECK(msg.ok());
 
   reset_output();
-  int result = mpack_print((const char*)msg.data(), msg.size(), test_putchar);
+  int result = mpack_print((const char *)msg.data(), msg.size(), test_putchar);
 
   CHECK(result == 1);
   CHECK(strcmp(test_output, "{\"name\":\"alice\",\"age\":30}") == 0);
@@ -116,7 +117,7 @@ TEST_CASE("mpack-utils - print binary") {
   CHECK(msg.ok());
 
   reset_output();
-  int result = mpack_print((const char*)msg.data(), msg.size(), test_putchar);
+  int result = mpack_print((const char *)msg.data(), msg.size(), test_putchar);
 
   CHECK(result == 1);
   INFO("Expected: <bin:4>");
@@ -129,13 +130,13 @@ TEST_CASE("mpack-utils - print stringarray") {
   char buf[256];
   MPackWriter msg(buf, sizeof(buf));
 
-  char* args[] = {(char*)"cmd", (char*)"arg1", (char*)"arg2"};
+  char *args[] = {(char *)"cmd", (char *)"arg1", (char *)"arg2"};
   msg.stringarray(3, args);
 
   CHECK(msg.ok());
 
   reset_output();
-  int result = mpack_print((const char*)msg.data(), msg.size(), test_putchar);
+  int result = mpack_print((const char *)msg.data(), msg.size(), test_putchar);
 
   CHECK(result == 1);
   CHECK(strcmp(test_output, "[\"cmd\",\"arg1\",\"arg2\"]") == 0);
@@ -145,21 +146,32 @@ TEST_CASE("mpack-utils - complex nested structure") {
   char buf[512];
   MPackWriter msg(buf, sizeof(buf));
 
-  // Pack: {"users": [{"name": "alice", "age": 30}, {"name": "bob", "age": 25}], "count": 2}
+  // Pack: {"users": [{"name": "alice", "age": 30}, {"name": "bob", "age": 25}],
+  // "count": 2}
   msg.map(2)
-     .str("users").array(2)
-       .map(2).str("name").str("alice").str("age").pack((uint32_t)30)
-       .map(2).str("name").str("bob").str("age").pack((uint32_t)25)
-     .str("count").pack((uint32_t)2);
+      .str("users")
+      .array(2)
+      .map(2)
+      .str("name")
+      .str("alice")
+      .str("age")
+      .pack((uint32_t)30)
+      .map(2)
+      .str("name")
+      .str("bob")
+      .str("age")
+      .pack((uint32_t)25)
+      .str("count")
+      .pack((uint32_t)2);
 
   CHECK(msg.ok());
 
   reset_output();
-  int result = mpack_print((const char*)msg.data(), msg.size(), test_putchar);
+  int result = mpack_print((const char *)msg.data(), msg.size(), test_putchar);
 
   CHECK(result == 1);
-  CHECK(strcmp(test_output,
-    "{\"users\":[{\"name\":\"alice\",\"age\":30},{\"name\":\"bob\",\"age\":25}],\"count\":2}") == 0);
+  CHECK(strcmp(test_output, "{\"users\":[{\"name\":\"alice\",\"age\":30},{"
+                            "\"name\":\"bob\",\"age\":25}],\"count\":2}") == 0);
 }
 
 TEST_CASE("mpack-utils - handles putchar failure") {
@@ -170,7 +182,7 @@ TEST_CASE("mpack-utils - handles putchar failure") {
   CHECK(msg.ok());
 
   // Use a putchar that always fails
-  int result = mpack_print((const char*)msg.data(), msg.size(), fail_putchar);
+  int result = mpack_print((const char *)msg.data(), msg.size(), fail_putchar);
 
   CHECK(result == 0);
 }
@@ -188,7 +200,7 @@ TEST_CASE("mpack-utils - empty array") {
   CHECK(msg.ok());
 
   reset_output();
-  int result = mpack_print((const char*)msg.data(), msg.size(), test_putchar);
+  int result = mpack_print((const char *)msg.data(), msg.size(), test_putchar);
 
   CHECK(result == 1);
   CHECK(strcmp(test_output, "[]") == 0);
@@ -202,8 +214,29 @@ TEST_CASE("mpack-utils - empty map") {
   CHECK(msg.ok());
 
   reset_output();
-  int result = mpack_print((const char*)msg.data(), msg.size(), test_putchar);
+  int result = mpack_print((const char *)msg.data(), msg.size(), test_putchar);
 
   CHECK(result == 1);
   CHECK(strcmp(test_output, "{}") == 0);
+}
+
+TEST_CASE("error structure") {
+  char buf[256];
+  MPackWriter msg(buf, sizeof(buf));
+
+  msg.str("error")
+      .pack((int32_t)KERNEL__IPC_SEND_MESSAGE__PID_NOT_FOUND)
+      .str("pid not found");
+
+  CHECK(msg.ok());
+  CHECK(msg.size() > 0);
+
+  reset_output();
+  int result = mpack_print((const char *)msg.data(), msg.size(), test_putchar);
+  CHECK(result == 1);
+
+  // Multiple top-level values are comma-separated
+  INFO("Expected: \"error\",1,\"pid not found\"");
+  INFO("Got: " << test_output);
+  CHECK(strcmp(test_output, "\"error\",1,\"pid not found\"") == 0);
 }

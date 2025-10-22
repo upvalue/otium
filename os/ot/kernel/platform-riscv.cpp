@@ -182,6 +182,10 @@ void handle_syscall(struct trap_frame *f) {
     f->a0 = current_proc->msg_count;
     break;
   }
+  case OU_IPC_SEND_MESSAGE: {
+    f->a0 = ipc_send_message(current_proc, arg0);
+    break;
+  }
   default:
     PANIC("unexpected syscall sysno=%x\n", sysno);
   }

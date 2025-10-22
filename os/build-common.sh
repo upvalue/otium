@@ -10,6 +10,7 @@ KERNEL_SHARED_SOURCES=(
   ot/kernel/startup.cpp
   ot/kernel/main.cpp
   ot/kernel/memory.cpp
+  ot/kernel/ipc.cpp
   ot/kernel/process.cpp
   ot/kernel/std.cpp
 )

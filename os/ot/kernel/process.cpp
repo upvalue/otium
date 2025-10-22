@@ -244,7 +244,6 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
     // Store virtual address for user access
     free_proc->arg_page = alloc_result.second;
   }
-  // }
 
   TRACE_PROC(LSOFT, "proc %s stack ptr: %x", free_proc->name,
              free_proc->stack_ptr);
@@ -361,4 +360,15 @@ Process *process_lookup(const StringView &name) {
     }
   }
   return nullptr;
+}
+
+Process *process_lookup(int pid) {
+  if (pid < 0 || pid >= PROCS_MAX) {
+    return nullptr;
+  }
+  Process *p = &procs[pid];
+  if (p->state != RUNNABLE) {
+    return nullptr;
+  }
+  return p;
 }

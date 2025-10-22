@@ -32,6 +32,13 @@ typedef uint32_t uintptr_t;
 
 #define is_aligned(value, align) __builtin_is_aligned(value, align)
 
+#define OT_SOFT_ASSERT(msg, condition) \
+  do { \
+    if (!(condition)) { \
+      oprintf("SOFT ASSERT FAILED: %s\n", msg); \
+    } \
+  } while (0)
+
 // These are common C stdlib-like functions, callable from anyhwere
 
 // In a few cases, they're prefixed with "o" because these are sometimes

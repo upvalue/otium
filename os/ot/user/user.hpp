@@ -17,6 +17,7 @@ void *ou_alloc_page(void);
 }
 
 PageAddr ou_get_arg_page(void);
+PageAddr ou_get_comm_page(void);
 int ou_io_puts(const char *str, int size);
 int ou_proc_lookup(const char *name);
 int ou_ipc_check_message(void);

@@ -146,6 +146,17 @@ void shell_main() {
 void scratch_main() {
   int shell_pid = ou_proc_lookup("shell");
   oprintf("shell pid: %d\n", shell_pid);
+
+  while (true) {
+    int msg_count = ou_ipc_check_message();
+    if (msg_count > 0) {
+      oprintf("scratch: msg count: %d\n", msg_count);
+      oprintf("scratch: got message, exiting\n");
+      break;
+    }
+    ou_yield();
+    break;
+  }
 }
 
 extern "C" void user_program_main(void) {

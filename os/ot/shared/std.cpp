@@ -2,7 +2,8 @@
 
 #include "ot/common.h"
 
-char scratch_buffer[1024];
+char _ot_scratch_buffer[OT_PAGE_SIZE];
+extern "C" char *ot_scratch_buffer = _ot_scratch_buffer;
 
 void *omemset(void *buf, char c, size_t n) {
   uint8_t *p = (uint8_t *)buf;
@@ -79,7 +80,7 @@ int memcmp(const void *s1, const void *s2, size_t n) {
   return 0;
 }
 
-void ovsnprintf(char *str, size_t size, const char *format, va_list args) {
+int ovsnprintf(char *str, size_t size, const char *format, va_list args) {
   size_t pos = 0;
 
   auto putchar_buf = [&](char c) {
@@ -148,19 +149,21 @@ void ovsnprintf(char *str, size_t size, const char *format, va_list args) {
 end:
   if (size > 0)
     str[pos] = '\0';
+  return pos;
 }
 
-void osnprintf(char *str, size_t size, const char *format, ...) {
+int osnprintf(char *str, size_t size, const char *format, ...) {
   va_list args;
   va_start(args, format);
-  ovsnprintf(str, size, format, args);
+  int r = ovsnprintf(str, size, format, args);
   va_end(args);
+  return r;
 }
 
 void oprintf(const char *fmt, ...) {
   va_list args;
   va_start(args, fmt);
-  ovsnprintf(scratch_buffer, sizeof(scratch_buffer), fmt, args);
+  int len = ovsnprintf(ot_scratch_buffer, OT_PAGE_SIZE, fmt, args);
   va_end(args);
-  oputsn(scratch_buffer, (int)strlen(scratch_buffer));
+  oputsn(ot_scratch_buffer, len);
 }

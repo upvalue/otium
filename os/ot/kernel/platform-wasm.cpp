@@ -283,6 +283,8 @@ int kernel_syscall_proc_lookup(const char *name) {
   return proc ? proc->pid : 0;
 }
 
+int kernel_syscall_ipc_check_message(void) { return current_proc->msg_count; }
+
 // Main entry point for WASM
 extern "C" void kernel_main(void) {
   oprintf("Otium OS starting on WASM\n");

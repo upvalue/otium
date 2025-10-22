@@ -104,7 +104,7 @@ void handle_syscall(struct trap_frame *f) {
   uint32_t sysno = f->a3;
   uint32_t arg0 = f->a0;
   // Not currently used
-  // uint32_t arg1 = f->a1;
+  uint32_t arg1 = f->a1;
   // uint32_t arg2 = f->a2;
 
   f->a0 = 0;
@@ -131,13 +131,15 @@ void handle_syscall(struct trap_frame *f) {
     break;
   }
   case OU_GET_SYS_PAGE: {
-    PageAddr paddr;
+    PageAddr vaddr;
     if (arg0 == OU_SYS_PAGE_ARG) {
-      paddr = process_get_arg_page();
+      vaddr = process_get_arg_page();
     } else if (arg0 == OU_SYS_PAGE_COMM) {
-      paddr = process_get_comm_page().second;
+      vaddr = process_get_comm_page().second;
+    } else if (arg0 == OU_SYS_PAGE_MSG) {
+      vaddr = process_get_msg_page(arg1).second;
     }
-    f->a0 = paddr.raw();
+    f->a0 = vaddr.raw();
     break;
   }
   case OU_IO_PUTS: {
@@ -172,6 +174,10 @@ void handle_syscall(struct trap_frame *f) {
     Process *proc = process_lookup(str);
 
     f->a0 = proc ? proc->pid : 0;
+    break;
+  }
+  case OU_IPC_CHECK_MESSAGE: {
+    f->a0 = current_proc->msg_count;
     break;
   }
   default:

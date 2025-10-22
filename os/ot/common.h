@@ -53,8 +53,8 @@ int strcmp(const char *s1, const char *s2);
 int strncmp(const char *s1, const char *s2, size_t n);
 int atoi(const char *s);
 int memcmp(const void *s1, const void *s2, size_t n);
-void ovsnprintf(char *str, size_t size, const char *format, va_list args);
-void osnprintf(char *str, size_t size, const char *format, ...);
+int ovsnprintf(char *str, size_t size, const char *format, va_list args);
+int osnprintf(char *str, size_t size, const char *format, ...);
 int oputsn(const char *str, int n);
 
 // System calls
@@ -64,9 +64,10 @@ int oputsn(const char *str, int n);
 #define OU_EXIT 4
 #define OU_ALLOC_PAGE 5
 #define OU_GET_SYS_PAGE 6
-#define OU_IO_PUTS 7      // Writes a string in the comm page to the console
-#define OU_PROC_LOOKUP 8  // Look up a process by name
-#define OU_PROC_MESSAGE 9 // Send a message to a process
+#define OU_IO_PUTS 7          // Writes a string in the comm page to the console
+#define OU_PROC_LOOKUP 8      // Look up a process by name
+#define OU_IPC_SEND_MESSAGE 9 // Send a message to a process
+#define OU_IPC_CHECK_MESSAGE 10 // Check if one or more messages are waiting
 
 // Arguments to the get sys page
 #define OU_SYS_PAGE_ARG 0
@@ -86,6 +87,10 @@ int oputchar(char);
 uint64_t o_time_get(void);
 
 #define OT_PAGE_SIZE 4096
+
+/** a page sized scratch buffer for general use -- generally not safe to call
+ * around any other function, esp i/o ones */
+extern char *ot_scratch_buffer;
 
 /**
  * Maximum number of messages a process can receive.

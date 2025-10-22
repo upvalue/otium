@@ -106,6 +106,8 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
       uintptr_t virtual_addr = USER_BASE + off;
       uint32_t flags = 0;
 
+      PageAddr page;
+
       // Use appropriate
       if (virtual_addr >= PROG_TEXT_START && virtual_addr <= PROG_TEXT_END) {
         flags = PAGE_U | PAGE_R | PAGE_X;
@@ -117,13 +119,13 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
       } else if (virtual_addr >= PROG_DATA_START &&
                  virtual_addr <= PROG_DATA_END) {
         flags = PAGE_U | PAGE_R | PAGE_W | PAGE_X;
-        // TRACE_PROC(LSOFT, "allocating data or bss page");
+        // TRACE_PROC(LSOFT, "allocating data page");
       } else if (virtual_addr >= PROG_BSS_START) {
         // TRACE_PROC(LSOFT, "allocating bss page");
         flags = PAGE_U | PAGE_R | PAGE_W | PAGE_X;
       }
 
-      PageAddr page = page_allocate(i, 1);
+      page = page_allocate(i, 1);
 
       // Handle the case where the data to be copied is smaller than the
       // page size.
@@ -237,24 +239,34 @@ PageAddr process_get_arg_page() {
   return current_proc->arg_page;
 }
 
+Pair<PageAddr, PageAddr> empty_page_pair =
+    make_pair(PageAddr(nullptr), PageAddr(nullptr));
+
 Pair<PageAddr, PageAddr> process_get_comm_page(void) {
   if (current_proc == nullptr) {
-    return make_pair(PageAddr(nullptr), PageAddr(nullptr));
+    return empty_page_pair;
   }
   return current_proc->comm_page;
+}
+
+Pair<PageAddr, PageAddr> process_get_msg_page(int msg_idx) {
+  if (current_proc == nullptr) {
+    return empty_page_pair;
+  }
+  return current_proc->msg_pages[msg_idx];
 }
 
 Pair<PageAddr, PageAddr> process_alloc_mapped_page(Process *proc, bool readable,
                                                    bool writable,
                                                    bool executable) {
   if (!proc) {
-    return make_pair(PageAddr(nullptr), PageAddr(nullptr));
+    return empty_page_pair;
   }
 
   // Allocate physical page
   PageAddr paddr = page_allocate(proc->pid, 1);
   if (paddr.is_null()) {
-    return make_pair(PageAddr(nullptr), PageAddr(nullptr));
+    return empty_page_pair;
   }
 
 #ifndef OT_ARCH_WASM

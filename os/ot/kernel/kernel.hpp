@@ -88,6 +88,9 @@ extern "C" char *__free_ram, *__free_ram_end;
 #define PAGE_X (1 << 3) // Executable
 #define PAGE_U (1 << 4) // User (accessible in user mode)
 
+/** A physical and virtual address of pages */
+typedef Pair<PageAddr, PageAddr> PageAddrs;
+
 enum ProcessState { UNUSED, RUNNABLE, TERMINATED };
 
 struct Process {
@@ -110,11 +113,12 @@ struct Process {
    *
    * Should always be a valid msgpack message.
    */
-  Pair<PageAddr, PageAddr> comm_page;
+  PageAddrs comm_page;
 
-  /**
-   * Pages for incoming messages
-   */
+  /** PID that sent a message, if any */
+  int msg_send_pid[OT_MSG_LIMIT];
+
+  /** Pages for incoming messages */
   Pair<PageAddr, PageAddr> msg_pages[OT_MSG_LIMIT];
 
   /** How many messages are waiting for the process to handle */
@@ -123,13 +127,11 @@ struct Process {
   uintptr_t stack_ptr;
   uintptr_t user_pc;         // Save user program counter
   uintptr_t heap_next_vaddr; // Next available heap address
-  uint8_t stack[8192] __attribute__((aligned(16)));
 #ifdef OT_ARCH_WASM
   bool started; // For WASM: track if process has been started
   void *fiber;  // emscripten_fiber_t for this process
-  uint8_t asyncify_stack[8192]
-      __attribute__((aligned(16))); // Asyncify stack for fiber
 #endif
+  uint8_t stack[8192] __attribute__((aligned(16)));
 };
 
 // Process management subsystem
@@ -148,6 +150,7 @@ void process_exit(Process *proc);
 PageAddr process_get_arg_page();
 // Gets the comm page pointer of the current process if possible
 Pair<PageAddr, PageAddr> process_get_comm_page();
+Pair<PageAddr, PageAddr> process_get_msg_page(int msg_idx);
 
 // Allocates a page for the given process and maps it appropriately for the
 // current architecture (with MMU for RISC-V, direct for WASM)

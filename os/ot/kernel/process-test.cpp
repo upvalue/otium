@@ -75,3 +75,22 @@ TEST_CASE("page_recycling") {
     page_free_process(i + 10);
   }
 }
+
+TEST_CASE("process_lookup") {
+  memset(procs, 0, sizeof(procs));
+  // Create a few processes
+  process_create("proc1", nullptr, 0, false, nullptr);
+  process_create("proc2", nullptr, 0, false, nullptr);
+  process_create("proc3", nullptr, 0, false, nullptr);
+  // Create with conflict
+  process_create("proc1", nullptr, 0, false, nullptr);
+
+  // Lookup each process by name
+  Process *proc1 = process_lookup("proc1");
+  CHECK(proc1 != nullptr);
+  CHECK(proc1->pid == 3);
+
+  Process *proc2 = process_lookup("proc2");
+  CHECK(proc2 != nullptr);
+  CHECK(proc2->pid == 1);
+}

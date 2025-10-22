@@ -98,14 +98,26 @@ struct Process {
   /**
    * Communicates startup arguments in the form of a msgpack message,
    * if given. May be null.
+   *
+   *
    */
   PageAddr arg_page;
 
   /**
-   * For syscalls to take extended arguments.
+   * For syscalls that need more than 3 registers of storage
+   * to communicate meaning to the kernel.
+   *
    * Should always be a valid msgpack message.
    */
   Pair<PageAddr, PageAddr> comm_page;
+
+  /**
+   * Pages for incoming messages
+   */
+  Pair<PageAddr, PageAddr> msg_pages[OT_MSG_LIMIT];
+
+  /** How many messages are waiting for the process to handle */
+  uint8_t msg_count;
 
   uintptr_t stack_ptr;
   uintptr_t user_pc;         // Save user program counter
@@ -126,6 +138,9 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
 Process *process_create(const char *name, const void *image_or_pc, size_t size,
                         bool is_image, Arguments *args);
 Process *process_next_runnable(void);
+/** Looks up a process by name. Returns highest PID process that matches
+ * (conflicts are allowed). */
+Process *process_lookup(const char *name);
 void process_exit(Process *proc);
 
 // Gets the argument page pointer of the current process if possible

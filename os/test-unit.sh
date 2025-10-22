@@ -8,10 +8,12 @@ clang -DOT_TEST -I. -c vendor/libmpack/mpack.c -o bin/mpack.o
 # Compile and link tests
 clang++ -DOT_TEST -DOT_TRACE_MEM \
     -I. -o bin/test \
+    ot/test-linking.cpp \
     ot/kernel/memory-test.cpp \
     ot/kernel/memory.cpp \
     ot/shared/std.cpp \
     ot/kernel/platform-test.cpp \
+    ot/kernel/process.cpp \
     ot/kernel/process-test.cpp \
     ot/shared/regstr-test.cpp \
     ot/shared/mpack-writer-test.cpp \

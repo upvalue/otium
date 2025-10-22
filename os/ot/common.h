@@ -62,10 +62,15 @@ void osnprintf(char *str, size_t size, const char *format, ...);
 #define OU_EXIT 4
 #define OU_ALLOC_PAGE 5
 #define OU_GET_SYS_PAGE 6
-#define OU_IO_PUTS 7 // Writes a string in the comm page to the console
+#define OU_IO_PUTS 7      // Writes a string in the comm page to the console
+#define OU_PROC_LOOKUP 8  // Look up a process by name
+#define OU_PROC_MESSAGE 9 // Send a message to a process
 
+// Arguments to the get sys page
 #define OU_SYS_PAGE_ARG 0
 #define OU_SYS_PAGE_COMM 1
+// Get a message page -- next argument must be a valid message number
+#define OU_SYS_PAGE_MSG 2
 
 // oputchar -- returns 0 in case of failure, 1 otherwise
 int oputchar(char);
@@ -79,6 +84,12 @@ int oputchar(char);
 uint64_t o_time_get(void);
 
 #define OT_PAGE_SIZE 4096
+
+/**
+ * Maximum number of messages a process can receive.
+ * Currently there is one page allocated per message.
+ */
+#define OT_MSG_LIMIT 16
 
 #ifdef __cplusplus
 } // extern "C"

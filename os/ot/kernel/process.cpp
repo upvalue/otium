@@ -278,3 +278,17 @@ Pair<PageAddr, PageAddr> process_alloc_mapped_page(Process *proc, bool readable,
   return make_pair(paddr, paddr);
 #endif
 }
+
+Process *process_lookup(const char *name) {
+  size_t i = PROCS_MAX - 1;
+  while (true) {
+    Process *p = &procs[i];
+    if (p->state == RUNNABLE && strcmp(p->name, name) == 0) {
+      return p;
+    }
+    if (i-- == 0) {
+      break;
+    }
+  }
+  return nullptr;
+}

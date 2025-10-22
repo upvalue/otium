@@ -144,8 +144,8 @@ void shell_main() {
 }
 
 void scratch_main() {
-  char *str = "scratch";
-  ou_io_puts(str, strlen(str));
+
+  // lookup shell process pid
 }
 
 extern "C" void user_program_main(void) {

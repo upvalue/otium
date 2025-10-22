@@ -1,6 +1,7 @@
 // riscv.cpp - risc-v and opensbi specific functionality
 
 #include "ot/kernel/kernel.hpp"
+#include "ot/shared/mpack-reader.hpp"
 
 #define SCAUSE_ECALL 8
 #define SSTATUS_SPP (1 << 8)
@@ -145,11 +146,16 @@ void handle_syscall(struct trap_frame *f) {
       return;
     }
 
-    char *str = comm_page.first.as<char>();
-
-    for (size_t i = 0; i < arg0; i++) {
+    MPackReader reader(comm_page.first.as<char>(), OT_PAGE_SIZE);
+    StringView str;
+    if (!reader.read_string(str)) {
+      f->a0 = 0;
+    }
+    for (size_t i = 0; i < str.len; i++) {
       oputchar(str[i]);
     }
+    f->a0 = 1;
+
     break;
   }
   default:
@@ -304,7 +310,8 @@ __attribute__((naked)) extern "C" void switch_context(uint32_t *prev_sp,
       "lw s9,  10 * 4(sp)\n"
       "lw s10, 11 * 4(sp)\n"
       "lw s11, 12 * 4(sp)\n"
-      "addi sp, sp, 13 * 4\n" // We've popped 13 4-byte registers from the stack
+      "addi sp, sp, 13 * 4\n" // We've popped 13 4-byte registers from the
+                              // stack
       "ret\n");
 }
 

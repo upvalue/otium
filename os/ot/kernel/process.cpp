@@ -156,6 +156,9 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
     PANIC("failed to allocate comm page");
   }
 
+  MPackWriter msg(comm_page.first.as<char>(), OT_PAGE_SIZE);
+  msg.nil();
+
   free_proc->comm_page = comm_page;
   TRACE_PROC(LSOFT, "allocated comm page with paddr %x and vaddr %x",
              free_proc->comm_page.first.raw(),

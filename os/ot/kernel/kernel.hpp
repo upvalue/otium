@@ -102,7 +102,8 @@ struct Process {
   PageAddr arg_page;
 
   /**
-   * For syscalls to take extended arguments
+   * For syscalls to take extended arguments.
+   * Should always be a valid msgpack message.
    */
   Pair<PageAddr, PageAddr> comm_page;
 

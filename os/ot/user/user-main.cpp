@@ -141,25 +141,11 @@ void shell_main() {
 
   // Print memory usage report from tlsf
   oprintf("exiting shell\n");
-
-  // TODO: This crashes, why?
-  // oprintf("memory usage: %zu bytes\n", tlsf_block_size(pool));
 }
 
 void scratch_main() {
-  char buffer[1024];
-  uintptr_t last_time = o_time_get();
-  int ticks = 0;
-  while (ticks < 3) {
-    uintptr_t time = o_time_get();
-    osnprintf(buffer, sizeof(buffer), "time: %d\n", time);
-    if (time - last_time >= O_TIME_UNITS_PER_SECOND) {
-      last_time = time;
-      ticks++;
-      ou_io_puts(buffer, strlen(buffer));
-    }
-    ou_yield();
-  }
+  char *str = "scratch";
+  ou_io_puts(str, strlen(str));
 }
 
 extern "C" void user_program_main(void) {

@@ -1,4 +1,5 @@
 #include "ot/shared/address.hpp"
+#include "ot/shared/mpack-writer.hpp"
 #include "ot/user/user.hpp"
 
 extern char __stack_top[];
@@ -51,6 +52,7 @@ int ou_io_puts(char *str, int size) {
   if (comm_page.is_null()) {
     return 0;
   }
-  memcpy(comm_page.as<char>(), str, size);
+  MPackWriter writer(comm_page.as<char>(), OT_PAGE_SIZE);
+  writer.str(str, size);
   return syscall(OU_IO_PUTS, (int)size, 0, 0);
 }

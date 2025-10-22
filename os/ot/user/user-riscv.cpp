@@ -38,6 +38,8 @@ start(void) {
                        "call exit           \n" ::[stack_top] "r"(__stack_top));
 }
 
+int oputsn(const char *str, int n) { return ou_io_puts(str, n); }
+
 } // extern "C"
 
 PageAddr ou_get_sys_page(int type) {
@@ -47,7 +49,7 @@ PageAddr ou_get_sys_page(int type) {
 PageAddr ou_get_arg_page(void) { return ou_get_sys_page(OU_SYS_PAGE_ARG); }
 PageAddr ou_get_comm_page(void) { return ou_get_sys_page(OU_SYS_PAGE_COMM); }
 
-int ou_io_puts(char *str, int size) {
+int ou_io_puts(const char *str, int size) {
   PageAddr comm_page = ou_get_comm_page();
   if (comm_page.is_null()) {
     return 0;
@@ -55,4 +57,14 @@ int ou_io_puts(char *str, int size) {
   MPackWriter writer(comm_page.as<char>(), OT_PAGE_SIZE);
   writer.str(str, size);
   return syscall(OU_IO_PUTS, (int)size, 0, 0);
+}
+
+int ou_proc_lookup(const char *name) {
+  PageAddr comm_page = ou_get_comm_page();
+  if (comm_page.is_null()) {
+    return 0;
+  }
+  MPackWriter writer(comm_page.as<char>(), OT_PAGE_SIZE);
+  writer.str(name);
+  return syscall(OU_PROC_LOOKUP, 0, 0, 0);
 }

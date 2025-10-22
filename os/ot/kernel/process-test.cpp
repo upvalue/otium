@@ -78,15 +78,16 @@ TEST_CASE("page_recycling") {
 
 TEST_CASE("process_lookup") {
   memset(procs, 0, sizeof(procs));
+  StringView str("proc1");
   // Create a few processes
-  process_create("proc1", nullptr, 0, false, nullptr);
+  process_create(str.ptr, nullptr, 0, false, nullptr);
   process_create("proc2", nullptr, 0, false, nullptr);
   process_create("proc3", nullptr, 0, false, nullptr);
   // Create with conflict
   process_create("proc1", nullptr, 0, false, nullptr);
 
   // Lookup each process by name
-  Process *proc1 = process_lookup("proc1");
+  Process *proc1 = process_lookup(str);
   CHECK(proc1 != nullptr);
   CHECK(proc1->pid == 3);
 

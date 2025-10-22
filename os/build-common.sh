@@ -11,6 +11,7 @@ KERNEL_SHARED_SOURCES=(
   ot/kernel/main.cpp
   ot/kernel/memory.cpp
   ot/kernel/process.cpp
+  ot/kernel/std.cpp
 )
 
 COMMON_SHARED_SOURCES=(

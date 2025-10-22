@@ -158,6 +158,22 @@ void handle_syscall(struct trap_frame *f) {
 
     break;
   }
+  case OU_PROC_LOOKUP: {
+    Pair<PageAddr, PageAddr> comm_page = process_get_comm_page();
+    if (comm_page.first.is_null()) {
+      return;
+    }
+
+    MPackReader reader(comm_page.first.as<char>(), OT_PAGE_SIZE);
+    StringView str;
+    if (!reader.read_string(str)) {
+      f->a0 = 0;
+    }
+    Process *proc = process_lookup(str);
+
+    f->a0 = proc ? proc->pid : 0;
+    break;
+  }
   default:
     PANIC("unexpected syscall sysno=%x\n", sysno);
   }

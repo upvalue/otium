@@ -16,7 +16,8 @@ void *ou_alloc_page(void);
 }
 
 PageAddr ou_get_arg_page(void);
-int ou_io_puts(char *str, int size);
+int ou_io_puts(const char *str, int size);
+int ou_proc_lookup(const char *name);
 
 /**
  * Sets up arguments passed to the process or a nullptr if no

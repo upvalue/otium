@@ -279,11 +279,11 @@ Pair<PageAddr, PageAddr> process_alloc_mapped_page(Process *proc, bool readable,
 #endif
 }
 
-Process *process_lookup(const char *name) {
+Process *process_lookup(const StringView &name) {
   size_t i = PROCS_MAX - 1;
   while (true) {
     Process *p = &procs[i];
-    if (p->state == RUNNABLE && strcmp(p->name, name) == 0) {
+    if (p->state == RUNNABLE && strncmp(p->name, name.ptr, name.len) == 0) {
       return p;
     }
     if (i-- == 0) {

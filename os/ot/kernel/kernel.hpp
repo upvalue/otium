@@ -5,6 +5,7 @@
 #include "ot/shared/address.hpp"
 #include "ot/shared/arguments.hpp"
 #include "ot/shared/pair.hpp"
+#include "ot/shared/string-view.hpp"
 
 #ifdef OT_TEST
 #include <stdlib.h>
@@ -91,7 +92,7 @@ enum ProcessState { UNUSED, RUNNABLE, TERMINATED };
 
 struct Process {
   char name[32];
-  uint32_t pid;
+  int pid;
   ProcessState state;
   uintptr_t *page_table;
 
@@ -140,7 +141,7 @@ Process *process_create(const char *name, const void *image_or_pc, size_t size,
 Process *process_next_runnable(void);
 /** Looks up a process by name. Returns highest PID process that matches
  * (conflicts are allowed). */
-Process *process_lookup(const char *name);
+Process *process_lookup(const StringView &name);
 void process_exit(Process *proc);
 
 // Gets the argument page pointer of the current process if possible

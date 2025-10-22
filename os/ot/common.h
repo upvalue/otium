@@ -50,10 +50,12 @@ char *strcpy(char *dst, const char *src);
 #endif
 
 int strcmp(const char *s1, const char *s2);
+int strncmp(const char *s1, const char *s2, size_t n);
 int atoi(const char *s);
 int memcmp(const void *s1, const void *s2, size_t n);
 void ovsnprintf(char *str, size_t size, const char *format, va_list args);
 void osnprintf(char *str, size_t size, const char *format, ...);
+int oputsn(const char *str, int n);
 
 // System calls
 #define OU_YIELD 1

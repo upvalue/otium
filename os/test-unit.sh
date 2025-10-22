@@ -11,6 +11,7 @@ clang++ -DOT_TEST -DOT_TRACE_MEM \
     ot/test-linking.cpp \
     ot/kernel/memory-test.cpp \
     ot/kernel/memory.cpp \
+    ot/kernel/std.cpp \
     ot/shared/std.cpp \
     ot/kernel/platform-test.cpp \
     ot/kernel/process.cpp \

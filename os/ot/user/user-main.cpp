@@ -144,8 +144,8 @@ void shell_main() {
 }
 
 void scratch_main() {
-
-  // lookup shell process pid
+  int shell_pid = ou_proc_lookup("shell");
+  oprintf("shell pid: %d\n", shell_pid);
 }
 
 extern "C" void user_program_main(void) {
@@ -156,7 +156,7 @@ extern "C" void user_program_main(void) {
   } else if (program_type == SCRATCH) {
     scratch_main();
   } else {
-    char *str = "unknown program type, exiting\n";
+    const char *str = "unknown program type, exiting\n";
     ou_io_puts(str, strlen(str));
   }
 

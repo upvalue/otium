@@ -5,25 +5,31 @@
 
 // Non-owning view of a string (not necessarily null-terminated)
 struct StringView {
-  const char* ptr;
+  const char *ptr;
   size_t len;
 
+  StringView(const char *ptr, size_t len) : ptr(ptr), len(len) {}
+  StringView(const char *ptr) : ptr(ptr), len(strlen(ptr)) {}
+  StringView() : ptr(nullptr), len(0) {}
+
   // Check if empty
-  bool empty() const {
-    return len == 0;
-  }
+  bool empty() const { return len == 0; }
 
   // Compare with null-terminated C string
-  bool equals(const char* s) const {
-    if (!s) return false;
+  bool equals(const char *s) const {
+    if (!s)
+      return false;
 
     size_t s_len = 0;
-    while (s[s_len]) s_len++;
+    while (s[s_len])
+      s_len++;
 
-    if (len != s_len) return false;
+    if (len != s_len)
+      return false;
 
     for (size_t i = 0; i < len; i++) {
-      if (ptr[i] != s[i]) return false;
+      if (ptr[i] != s[i])
+        return false;
     }
     return true;
   }
@@ -36,9 +42,9 @@ struct StringView {
   }
 
   // Copy to a buffer and null-terminate
-  bool copy_to(char* buffer, size_t bufsize) const {
+  bool copy_to(char *buffer, size_t bufsize) const {
     if (bufsize == 0 || len >= bufsize) {
-      return false;  // Not enough space for string + null
+      return false; // Not enough space for string + null
     }
     for (size_t i = 0; i < len; i++) {
       buffer[i] = ptr[i];
@@ -48,9 +54,7 @@ struct StringView {
   }
 
   // Get character at index (unchecked)
-  char operator[](size_t index) const {
-    return ptr[index];
-  }
+  char operator[](size_t index) const { return ptr[index]; }
 };
 
-#endif  // OT_SHARED_STRING_VIEW_HPP
+#endif // OT_SHARED_STRING_VIEW_HPP

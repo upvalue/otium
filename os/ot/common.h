@@ -22,6 +22,8 @@ extern "C" {
 typedef unsigned char uint8_t;
 typedef int int32_t;
 typedef unsigned int uint32_t;
+typedef long long int64_t;
+typedef unsigned long long uint64_t;
 typedef uint32_t size_t;
 typedef int32_t intptr_t;
 typedef uint32_t uintptr_t;
@@ -67,6 +69,14 @@ void osnprintf(char *str, size_t size, const char *format, ...);
 
 // oputchar -- returns 0 in case of failure, 1 otherwise
 int oputchar(char);
+
+#ifdef OT_ARCH_WASM
+#define O_TIME_UNITS_PER_SECOND 1000
+#else
+#define O_TIME_UNITS_PER_SECOND 10000000
+#endif
+
+uint64_t o_time_get(void);
 
 #define OT_PAGE_SIZE 4096
 

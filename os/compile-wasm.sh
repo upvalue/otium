@@ -17,6 +17,9 @@ set -x
 CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_WASM"
 CFLAGS="$COMMON_CFLAGS"
 
+COMMON_SHARED_SOURCES+=("ot/shared/shared-wasm.cpp")
+
+
 # Emscripten-specific flags
 EMFLAGS=(
   -s ASYNCIFY=1

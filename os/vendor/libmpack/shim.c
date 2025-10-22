@@ -8,7 +8,6 @@
 // In kernel mode, use custom implementations
 #include "ot/common.h"
 
-#define NULL 0
 typedef int bool;
 #define memset omemset
 

@@ -11,7 +11,8 @@ OBJCOPY=/opt/homebrew/opt/llvm/bin/llvm-objcopy
 CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_RISCV "
 CFLAGS="$COMMON_CFLAGS --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib"
 
-mkdir -p bin
+# Add shared file to shared source
+COMMON_SHARED_SOURCES+=("ot/shared/shared-riscv.cpp")
 
 $CC $CPPFLAGS $CFLAGS \
     -Wl,-Tot/user/user.ld -Wl,-Map=bin/prog-shell.map -o bin/prog-shell.elf \

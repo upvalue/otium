@@ -22,8 +22,7 @@ COMMON_SHARED_SOURCES=(
 
 # Shared user program source files (platform-independent)
 USER_SHARED_SOURCES=(
-  ot/user/prog-shell.cpp
-  ot/user/user-shared.cpp
+  ot/user/user-main.cpp
   ot/user/tcl.cpp
   ot/user/vendor/tlsf.c
 )

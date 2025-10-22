@@ -150,21 +150,24 @@ void kernel_start(void) {
   // Default/main mode
   char *shell_argv = {"shell"};
   Arguments shell_args = {1, &shell_argv};
-  char *user2_test_argv = {"user2_test"};
-  Arguments user2_test_args = {1, &user2_test_argv};
+  char *scratch_argv = {"scratch"};
+  Arguments scratch_args = {1, &scratch_argv};
 #ifdef OT_ARCH_WASM
   // For WASM, call the shell main function directly
   Process *proc_shell = process_create("shell", (const void *)user_program_main,
                                        0, false, &shell_args);
+
+  Process *proc_scratch = process_create(
+      "scratch", (const void *)user_program_main, 0, false, &scratch_args);
 #else
   // For RISC-V, load the shell from the embedded binary
   Process *proc_shell = process_create(
       "shell", (const void *)_binary_bin_prog_shell_bin_start,
       (size_t)_binary_bin_prog_shell_bin_size, true, &shell_args);
 
-  Process *proc_user2_test = process_create(
-      "user2_test", (const void *)_binary_bin_prog_shell_bin_start,
-      (size_t)_binary_bin_prog_shell_bin_size, true, &user2_test_args);
+  Process *proc_scratch = process_create(
+      "scratch", (const void *)_binary_bin_prog_shell_bin_start,
+      (size_t)_binary_bin_prog_shell_bin_size, true, &scratch_args);
 #endif
   TRACE(LSOFT, "created proc with name %s and pid %d", proc_shell->name,
         proc_shell->pid);

@@ -1,4 +1,4 @@
-// prog-shell.cpp - shell program
+// user-main.cpp - Main entry point for userspace programs
 #include "ot/shared/arguments.hpp"
 #include "ot/shared/mpack-reader.hpp"
 #include "ot/shared/mpack-utils.hpp"
@@ -22,7 +22,7 @@ void *malloc(size_t size) { return tlsf_malloc(pool, size); }
 void free(void *ptr) { tlsf_free(pool, ptr); }
 void *realloc(void *ptr, size_t size) { return tlsf_realloc(pool, ptr, size); }
 
-enum ProgramType { UNKNOWN, SHELL } program_type;
+enum ProgramType { UNKNOWN, SHELL, SCRATCH } program_type;
 
 void determine_program_type() {
   program_type = UNKNOWN;
@@ -63,6 +63,9 @@ void determine_program_type() {
 
     if (arg.equals("shell")) {
       program_type = SHELL;
+      return;
+    } else if (arg.equals("scratch")) {
+      program_type = SCRATCH;
       return;
     }
   }
@@ -132,6 +135,7 @@ void shell_main() {
         oprintf("\b \b");
         buffer_i--;
       }
+      ou_yield();
     }
   }
 
@@ -142,11 +146,29 @@ void shell_main() {
   // oprintf("memory usage: %zu bytes\n", tlsf_block_size(pool));
 }
 
+void scratch_main() {
+  char buffer[1024];
+  uintptr_t last_time = o_time_get();
+  int ticks = 0;
+  while (ticks < 3) {
+    uintptr_t time = o_time_get();
+    osnprintf(buffer, sizeof(buffer), "time: %d\n", time);
+    if (time - last_time >= O_TIME_UNITS_PER_SECOND) {
+      last_time = time;
+      ticks++;
+      ou_io_puts(buffer, strlen(buffer));
+    }
+    ou_yield();
+  }
+}
+
 extern "C" void user_program_main(void) {
   determine_program_type();
 
   if (program_type == SHELL) {
     shell_main();
+  } else if (program_type == SCRATCH) {
+    scratch_main();
   } else {
     char *str = "unknown program type, exiting\n";
     ou_io_puts(str, strlen(str));

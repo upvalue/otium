@@ -34,8 +34,17 @@ const Module = {
     }
   },
 
+  time_get: function() {
+    return Date.now();
+  },
+
   print2: function(text) {
     process.stdout.write(text);
+  },
+
+  print3: function(text, size) {
+    console.log({text, size});
+    // process.stdout.write(text.slice(0, size));
   },
 
   printErr: function(text) {

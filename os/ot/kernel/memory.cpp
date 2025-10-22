@@ -97,35 +97,49 @@ PageAddr page_allocate(proc_id_t pid, size_t page_count) {
 
   TRACE_MEM(LSOFT, "page_allocate: pid=%d, count=%d", pid, page_count);
 
-  // For now, only support single page allocation
-  if (page_count != 1) {
-    PANIC("Multi-page allocation not yet supported in tracked allocator");
+  if (page_count == 0) {
+    PANIC("Cannot allocate 0 pages");
   }
 
-  // Take page from free list
-  if (!free_list_head) {
-    PANIC("Out of memory - no free pages available");
+  // Check if we have enough free pages
+  PageInfo *check = free_list_head;
+  size_t available = 0;
+  while (check && available < page_count) {
+    available++;
+    check = check->next;
   }
 
-  PageInfo *page_info = free_list_head;
-  free_list_head = page_info->next;
+  if (available < page_count) {
+    PANIC("Out of memory - requested %d pages, only %d available", page_count, available);
+  }
 
-  // Mark page as allocated to this process
-  page_info->pid = pid;
-  page_info->next = nullptr;
+  // Allocate first page (this is what we'll return)
+  PageInfo *first_page = free_list_head;
+  free_list_head = first_page->next;
+  first_page->pid = pid;
+  first_page->next = nullptr;
+  omemset(first_page->addr.as_ptr(), 0, OT_PAGE_SIZE);
+
+  TRACE_MEM(LLOUD, "Allocated page at %x to pid %d", first_page->addr.raw(), pid);
+
+  // Allocate remaining pages
+  for (size_t i = 1; i < page_count; i++) {
+    PageInfo *page_info = free_list_head;
+    free_list_head = page_info->next;
+    page_info->pid = pid;
+    page_info->next = nullptr;
+    omemset(page_info->addr.as_ptr(), 0, OT_PAGE_SIZE);
+
+    TRACE_MEM(LLOUD, "Allocated page at %x to pid %d", page_info->addr.raw(), pid);
+  }
 
   // Update statistics
-  mem_stats.allocated_pages++;
+  mem_stats.allocated_pages += page_count;
   if (mem_stats.allocated_pages > mem_stats.peak_usage_pages) {
     mem_stats.peak_usage_pages = mem_stats.allocated_pages;
   }
 
-  PageAddr page_addr = page_info->addr;
-  omemset(page_addr.as_ptr(), 0, OT_PAGE_SIZE);
-
-  TRACE_MEM(LLOUD, "Allocated page at %x to pid %d", page_addr.raw(), pid);
-
-  return page_addr;
+  return first_page->addr;
 }
 
 PageInfo *page_info_lookup(PageAddr addr) {

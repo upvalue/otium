@@ -31,7 +31,7 @@ SECTIONS {
         *(.bss .bss.* .sbss .sbss.*);
 
         . = ALIGN(16);
-        . += 64 * 1024; /* 64KB */
+        . += 32 * 1024; /* 32KB */
         __stack_top = .;
         __bss_end = .;
 09

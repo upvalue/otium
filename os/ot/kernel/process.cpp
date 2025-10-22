@@ -9,7 +9,13 @@ Process procs[PROCS_MAX];
 
 Process *current_proc = nullptr, *idle_proc = nullptr;
 
-PageInfo *user_text_pages = nullptr, *user_rodata_pages = nullptr;
+static bool use_shared_sections = true;
+
+static struct {
+  bool initialized;
+  PageAddr text_start;
+  PageAddr rodata_start;
+} shared_sections = {false, PageAddr(nullptr), PageAddr(nullptr)};
 
 void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr,
               uint32_t flags, proc_id_t pid) {
@@ -100,43 +106,94 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
   // Map user pages.
   if (is_image) {
     TRACE_PROC(LLOUD, "found image. allocating pages");
-    if (user_text_pages) {
-    }
-    for (size_t off = 0; off < size; off += OT_PAGE_SIZE) {
-      uintptr_t virtual_addr = USER_BASE + off;
-      uint32_t flags = 0;
 
-      PageAddr page;
+    // One-time initialization of shared sections
+    if (use_shared_sections && !shared_sections.initialized) {
+      // Allocate pages for text section
+      size_t text_pages =
+          (PROG_TEXT_END - PROG_TEXT_START + OT_PAGE_SIZE - 1) / OT_PAGE_SIZE;
+      shared_sections.text_start = page_allocate(0, text_pages);
 
-      // Use appropriate
-      if (virtual_addr >= PROG_TEXT_START && virtual_addr <= PROG_TEXT_END) {
-        flags = PAGE_U | PAGE_R | PAGE_X;
-        // TRACE_PROC(LSOFT, "allocating text page");
-      } else if (virtual_addr >= PROG_RODATA_START &&
-                 virtual_addr <= PROG_RODATA_END) {
-        flags = PAGE_U | PAGE_R | PAGE_X;
-        // TRACE_PROC(LSOFT, "allocating rodata page");
-      } else if (virtual_addr >= PROG_DATA_START &&
-                 virtual_addr <= PROG_DATA_END) {
-        flags = PAGE_U | PAGE_R | PAGE_W | PAGE_X;
-        // TRACE_PROC(LSOFT, "allocating data page");
-      } else if (virtual_addr >= PROG_BSS_START) {
-        // TRACE_PROC(LSOFT, "allocating bss page");
-        flags = PAGE_U | PAGE_R | PAGE_W | PAGE_X;
+      // Copy text data page by page (like the main loop does)
+      for (size_t page_idx = 0; page_idx < text_pages; page_idx++) {
+        size_t vaddr_offset = page_idx * OT_PAGE_SIZE;
+        size_t image_offset = (PROG_TEXT_START - USER_BASE) + vaddr_offset;
+        size_t remaining = size - image_offset;
+        size_t copy_size = OT_PAGE_SIZE <= remaining ? OT_PAGE_SIZE : remaining;
+
+        PageAddr dest_page =
+            PageAddr(shared_sections.text_start.raw() + vaddr_offset);
+        memcpy(dest_page.as_ptr(), ((char *)image_or_pc) + image_offset,
+               copy_size);
       }
 
-      page = page_allocate(i, 1);
+      // Allocate pages for rodata section
+      size_t rodata_pages =
+          (PROG_RODATA_END - PROG_RODATA_START + OT_PAGE_SIZE - 1) /
+          OT_PAGE_SIZE;
+      shared_sections.rodata_start = page_allocate(0, rodata_pages);
 
-      // Handle the case where the data to be copied is smaller than the
-      // page size.
-      size_t remaining = size - off;
-      size_t copy_size = OT_PAGE_SIZE <= remaining ? OT_PAGE_SIZE : remaining;
+      // Copy rodata data page by page
+      for (size_t page_idx = 0; page_idx < rodata_pages; page_idx++) {
+        size_t vaddr_offset = page_idx * OT_PAGE_SIZE;
+        size_t image_offset = (PROG_RODATA_START - USER_BASE) + vaddr_offset;
+        size_t remaining = size - image_offset;
+        size_t copy_size = OT_PAGE_SIZE <= remaining ? OT_PAGE_SIZE : remaining;
 
-      // Fill and map the page.
-      TRACE_PROC(LLOUD, "copying %d bytes to page %x from %x", copy_size,
-                 page.raw(), (uintptr_t)image_or_pc + off);
-      memcpy(page.as_ptr(), ((char *)image_or_pc) + off, copy_size);
-      map_page(page_table.as<uintptr_t>(), virtual_addr, page, flags, i);
+        PageAddr dest_page =
+            PageAddr(shared_sections.rodata_start.raw() + vaddr_offset);
+        memcpy(dest_page.as_ptr(), ((char *)image_or_pc) + image_offset,
+               copy_size);
+      }
+
+      shared_sections.initialized = true;
+    }
+
+    // Map all pages - shared for text/rodata (if enabled), per-process
+    // otherwise
+    for (size_t off = 0; off < size; off += OT_PAGE_SIZE) {
+      uintptr_t vaddr = USER_BASE + off;
+      PageAddr page;
+      uint32_t flags;
+
+      if (vaddr >= PROG_TEXT_START && vaddr < PROG_TEXT_END) {
+        if (use_shared_sections) {
+          page = PageAddr(shared_sections.text_start.raw() +
+                          (vaddr - PROG_TEXT_START));
+        } else {
+          page = page_allocate(i, 1);
+          size_t remaining = size - off;
+          size_t copy_size =
+              OT_PAGE_SIZE <= remaining ? OT_PAGE_SIZE : remaining;
+          memcpy(page.as_ptr(), ((char *)image_or_pc) + off, copy_size);
+        }
+        flags = PAGE_U | PAGE_R | PAGE_X;
+      } else if (vaddr >= PROG_RODATA_START && vaddr < PROG_RODATA_END) {
+        if (use_shared_sections) {
+          page = PageAddr(shared_sections.rodata_start.raw() +
+                          (vaddr - PROG_RODATA_START));
+        } else {
+          page = page_allocate(i, 1);
+          size_t remaining = size - off;
+          size_t copy_size =
+              OT_PAGE_SIZE <= remaining ? OT_PAGE_SIZE : remaining;
+          memcpy(page.as_ptr(), ((char *)image_or_pc) + off, copy_size);
+        }
+        flags = PAGE_U | PAGE_R;
+      } else {
+        // Allocate per-process pages for writable sections
+        page = page_allocate(i, 1);
+        size_t remaining = size - off;
+        size_t copy_size = OT_PAGE_SIZE <= remaining ? OT_PAGE_SIZE : remaining;
+        memcpy(page.as_ptr(), ((char *)image_or_pc) + off, copy_size);
+        flags = PAGE_U | PAGE_R | PAGE_W;
+      }
+
+      TRACE_PROC(LSOFT,
+                 "mapping page %x to vaddr %x with paddr %x and flags %x",
+                 page.raw(), vaddr, page.raw(), flags);
+
+      map_page(page_table.as<uintptr_t>(), vaddr, page, flags, i);
     }
   }
 

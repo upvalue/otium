@@ -1,4 +1,5 @@
 #include "ot/shared/address.hpp"
+#include "ot/shared/messages.hpp"
 #include "ot/shared/mpack-writer.hpp"
 #include "ot/user/user.hpp"
 
@@ -60,9 +61,13 @@ int ou_io_puts(const char *str, int size) {
   if (comm_page.is_null()) {
     return 0;
   }
-  MPackWriter writer(comm_page.as<char>(), OT_PAGE_SIZE);
-  writer.str(str, size);
-  return syscall(OU_IO_PUTS, (int)size, 0, 0).a0;
+  MsgString msg(comm_page.as<char>(), OT_PAGE_SIZE);
+  StringView sv(str, size);
+  MsgSerializationError error = msg.serialize(sv);
+  if (error != MSG_SERIALIZATION_OK) {
+    return 0;
+  }
+  return syscall(OU_IO_PUTS, 0, 0, 0).a0;
 }
 
 int ou_proc_lookup(const char *name) {

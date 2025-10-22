@@ -9,6 +9,7 @@ Process procs[PROCS_MAX];
 
 Process *current_proc = nullptr, *idle_proc = nullptr;
 
+/** if true, use shared pid=0 pages to capture code and rodata */
 static bool use_shared_sections = true;
 
 static struct {
@@ -189,9 +190,9 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
         flags = PAGE_U | PAGE_R | PAGE_W;
       }
 
-      TRACE_PROC(LSOFT,
+      /*TRACE_PROC(LSOFT,
                  "mapping page %x to vaddr %x with paddr %x and flags %x",
-                 page.raw(), vaddr, page.raw(), flags);
+                 page.raw(), vaddr, page.raw(), flags);*/
 
       map_page(page_table.as<uintptr_t>(), vaddr, page, flags, i);
     }

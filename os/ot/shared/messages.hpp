@@ -1,0 +1,62 @@
+// messages.hpp - common message types
+#ifndef OT_SHARED_MESSAGES_HPP
+#define OT_SHARED_MESSAGES_HPP
+
+#include "ot/common.h"
+#include "ot/shared/mpack-reader.hpp"
+#include "ot/shared/mpack-writer.hpp"
+#include "ot/shared/string-view.hpp"
+
+// Messages
+
+// Messages always begin with a type
+
+// Types
+// error - type: 'error', code: string, message: string, <arbitrary contents
+// based on type>
+//   code => <source>.<name>
+//     ex => kernel.invalid-pid
+// string - type: 'string', <a single string>
+
+struct MPackBuffer {
+  char *buffer;
+  size_t length;
+
+  MPackBuffer(char *buffer, size_t length) : buffer(buffer), length(length) {}
+  ~MPackBuffer() {}
+};
+
+enum MsgSerializationError {
+  MSG_SERIALIZATION_OK = 0,
+  MSG_SERIALIZATION_EOF = 1,
+  MSG_SERIALIZATION_UNEXPECTED_TYPE = 2,
+  MSG_SERIALIZATION_OTHER = 3,
+};
+
+/** A message containing a single string */
+struct MsgString : MPackBuffer {
+  MsgString(char *buffer, size_t length) : MPackBuffer(buffer, length) {}
+
+  MsgSerializationError serialize(StringView &sv) {
+    MPackWriter writer(buffer, length);
+    writer.str("string").str(sv);
+    return writer.ok() ? MSG_SERIALIZATION_OK : MSG_SERIALIZATION_OTHER;
+  }
+
+  MsgSerializationError deserialize(StringView &sv) {
+    MPackReader reader(buffer, length);
+    StringView type;
+    if (!reader.read_string(type)) {
+      return MSG_SERIALIZATION_UNEXPECTED_TYPE;
+    }
+    if (!type.equals("string")) {
+      return MSG_SERIALIZATION_UNEXPECTED_TYPE;
+    }
+    if (!reader.read_string(sv)) {
+      return MSG_SERIALIZATION_OTHER;
+    }
+    return reader.ok() ? MSG_SERIALIZATION_OK : MSG_SERIALIZATION_OTHER;
+  }
+};
+
+#endif

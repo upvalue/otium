@@ -97,13 +97,13 @@ struct Process {
   char name[32];
   int pid;
   ProcessState state;
+
+  // TODO: Not necessary on WASM
   uintptr_t *page_table;
 
   /**
    * Communicates startup arguments in the form of a msgpack message,
    * if given. May be null.
-   *
-   *
    */
   PageAddr arg_page;
 

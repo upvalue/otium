@@ -1,6 +1,7 @@
 // riscv.cpp - risc-v and opensbi specific functionality
 
 #include "ot/kernel/kernel.hpp"
+#include "ot/shared/messages.hpp"
 #include "ot/shared/mpack-reader.hpp"
 
 #define SCAUSE_ECALL 8
@@ -143,21 +144,22 @@ void handle_syscall(struct trap_frame *f) {
     break;
   }
   case OU_IO_PUTS: {
-    Pair<PageAddr, PageAddr> comm_page = process_get_comm_page();
-    if (comm_page.first.is_null()) {
-      return;
+    PageAddr comm_page = process_get_comm_page().first;
+    if (comm_page.is_null()) {
+      oprintf("Failed to get comm page\n");
+      f->a0 = 0;
+      break;
     }
-
-    MPackReader reader(comm_page.first.as<char>(), OT_PAGE_SIZE);
-    StringView str;
-    if (!reader.read_string(str)) {
+    MsgString msg(comm_page.as<char>(), OT_PAGE_SIZE);
+    StringView sv;
+    MsgSerializationError error = msg.deserialize(sv);
+    if (error != MSG_SERIALIZATION_OK) {
+      oprintf("Failed to serialize string: %d\n", error);
       f->a0 = 0;
     }
-    for (size_t i = 0; i < str.len; i++) {
-      oputchar(str[i]);
+    for (size_t i = 0; i < sv.len; i++) {
+      oputchar(sv[i]);
     }
-    f->a0 = 1;
-
     break;
   }
   case OU_PROC_LOOKUP: {

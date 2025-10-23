@@ -5,7 +5,13 @@
 #define _TCL_H
 
 #include "ot/common.h"
-#include "ot/user/shell.h"
+
+// Forward declarations for memory allocation functions
+extern "C" {
+void *malloc(size_t size);
+void free(void *ptr);
+void *realloc(void *ptr, size_t size);
+}
 
 // Placement new operator (avoids needing <new>)
 inline void *operator new(size_t, void *p) noexcept { return p; }

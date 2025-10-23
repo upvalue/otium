@@ -15,6 +15,7 @@
 // Always an array
 
 // Types
+// ipc message - type: 'ipc', method: '<method>',
 // error - type: 'error', code: string, message: string, <arbitrary contents
 // based on type>
 //   code => <source>.<name>

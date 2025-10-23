@@ -4,18 +4,9 @@
 #include "ot/shared/mpack-reader.hpp"
 #include "ot/shared/mpack-utils.hpp"
 #include "ot/shared/mpack-writer.hpp"
+#include "ot/user/prog-shell.h"
 #include "ot/user/user.hpp"
 #include "ot/user/vendor/tlsf.h"
-#include "ot/user/prog-shell.h"
-
-void *memory_begin = nullptr;
-tlsf_t pool = nullptr;
-
-extern "C" {
-void *malloc(size_t size) { return tlsf_malloc(pool, size); }
-void free(void *ptr) { tlsf_free(pool, ptr); }
-void *realloc(void *ptr, size_t size) { return tlsf_realloc(pool, ptr, size); }
-}
 
 enum ProgramType { UNKNOWN, SHELL, SCRATCH, SCRATCH2 } program_type;
 

@@ -812,6 +812,7 @@ static void *block_prepare_used(control_t *control, block_header_t *block, size_
 /* Clear structure and point all empty lists at the null block. */
 static void control_construct(control_t *control)
 {
+
     int i, j;
 
     control->block_null.next_free = &control->block_null;

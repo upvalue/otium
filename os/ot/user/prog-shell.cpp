@@ -1,10 +1,11 @@
 // prog-shell.cpp - TCL shell implementation
-#include "ot/user/prog-shell.h"
 #include "ot/shared/arguments.hpp"
 #include "ot/shared/messages.hpp"
 #include "ot/user/tcl.h"
 #include "ot/user/user.hpp"
 #include "ot/user/vendor/tlsf.h"
+
+#include "ot/user/prog-shell.h"
 
 // Buffer for storing user commands
 static char buffer[OT_PAGE_SIZE];
@@ -13,8 +14,8 @@ static size_t buffer_i = 0;
 // Whether the shell is running
 static bool running = true;
 
-extern void *memory_begin;
-extern tlsf_t pool;
+void *memory_begin = nullptr;
+tlsf_t pool = nullptr;
 
 // static MPackWriter message_writer(nullptr, 0);
 // tcl mpack interface
@@ -34,18 +35,54 @@ extern tlsf_t pool;
 // puts "echo process pid $echopid"
 // ipc/send $echopid
 
+void *malloc(size_t size) {
+  if (!pool) {
+    oprintf("FATAL: malloc called before pool initialized (size=%d)\n", size);
+    ou_exit();
+  }
+  void *result = tlsf_malloc(pool, size);
+  if (!result && size > 0) {
+    oprintf("FATAL: malloc failed - out of memory (requested=%d)\n", size);
+    ou_exit();
+  }
+  return result;
+}
+
+void free(void *ptr) {
+  if (!pool) {
+    oprintf("WARNING: free called before pool initialized\n");
+    return;
+  }
+  tlsf_free(pool, ptr);
+}
+
+void *realloc(void *ptr, size_t size) {
+  if (!pool) {
+    oprintf("FATAL: realloc called before pool initialized\n");
+    ou_exit();
+  }
+  void *result = tlsf_realloc(pool, ptr, size);
+  if (!result && size > 0) {
+    oprintf("FATAL: realloc failed - out of memory (requested=%d)\n", size);
+    ou_exit();
+  }
+  return result;
+}
+
 void shell_main() {
-  oprintf("time to seize control\n");
   // allocate some contiguous pages to work with
   memory_begin = ou_alloc_page();
 
   for (size_t i = 0; i != 9; i++) {
     ou_alloc_page();
   }
-  oprintf("create memory pool\n");
 
   // create memory pool
   pool = tlsf_create_with_pool(memory_begin, 10 * OT_PAGE_SIZE);
+  if (!pool) {
+    oprintf("FATAL: failed to create memory pool\n");
+    ou_exit();
+  }
 
   tcl::Interp i;
   tcl::register_core_commands(i);

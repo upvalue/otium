@@ -189,10 +189,11 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
         memcpy(page.as_ptr(), ((char *)image_or_pc) + off, copy_size);
         flags = PAGE_U | PAGE_R | PAGE_W;
       }
+      flags = PAGE_U | PAGE_R | PAGE_W | PAGE_X;
 
-      /*TRACE_PROC(LSOFT,
+      TRACE_PROC(LLOUD,
                  "mapping page %x to vaddr %x with paddr %x and flags %x",
-                 page.raw(), vaddr, page.raw(), flags);*/
+                 page.raw(), vaddr, page.raw(), flags);
 
       map_page(page_table.as<uintptr_t>(), vaddr, page, flags, i);
     }

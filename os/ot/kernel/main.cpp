@@ -177,6 +177,7 @@ void kernel_start(void) {
       "shell", (const void *)_binary_bin_prog_shell_bin_start,
       (size_t)_binary_bin_prog_shell_bin_size, true, &shell_args);
 
+  /*
   Process *proc_scratch = process_create(
       "scratch", (const void *)_binary_bin_prog_shell_bin_start,
       (size_t)_binary_bin_prog_shell_bin_size, true, &scratch_args);
@@ -184,6 +185,7 @@ void kernel_start(void) {
   Process *proc_scratch2 = process_create(
       "scratch2", (const void *)_binary_bin_prog_shell_bin_start,
       (size_t)_binary_bin_prog_shell_bin_size, true, &scratch2_args);
+      */
 #endif
   // TRACE(LSOFT, "created proc with name %s and pid %d", proc_shell->name,
 //        proc_shell->pid);

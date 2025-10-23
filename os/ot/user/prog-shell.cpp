@@ -1,10 +1,10 @@
 // prog-shell.cpp - TCL shell implementation
+#include "ot/user/prog-shell.h"
 #include "ot/shared/arguments.hpp"
 #include "ot/shared/messages.hpp"
+#include "ot/user/tcl.h"
 #include "ot/user/user.hpp"
 #include "ot/user/vendor/tlsf.h"
-#include "ot/user/tcl.h"
-#include "ot/user/prog-shell.h"
 
 // Buffer for storing user commands
 static char buffer[OT_PAGE_SIZE];
@@ -15,6 +15,24 @@ static bool running = true;
 
 extern void *memory_begin;
 extern tlsf_t pool;
+
+// static MPackWriter message_writer(nullptr, 0);
+// tcl mpack interface
+
+// mp/reset -> erase scratch buffer
+// mp/array 3
+// mp/string "ipc"
+// mp/string "echo"
+// mp/string "Hello, world!"
+
+// mp/print -> print contents of scratch buffer
+
+// proc/lookup echo
+// lookup pid of echo proc
+
+// set echopid [proc/lookup echo]
+// puts "echo process pid $echopid"
+// ipc/send $echopid
 
 void shell_main() {
   // allocate some contiguous pages to work with

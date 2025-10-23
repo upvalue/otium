@@ -14,8 +14,13 @@ void *realloc(void *ptr, size_t size);
 }
 
 // Placement new operator (avoids needing <new>)
+// In test environment, use standard library version
+#ifdef OT_TEST
+#include <new>
+#else
 inline void *operator new(size_t, void *p) noexcept { return p; }
 inline void operator delete(void *, void *) noexcept {}
+#endif
 
 namespace tcl {
 

@@ -236,7 +236,7 @@ TEST_CASE("error structure") {
   CHECK(result == 1);
 
   // Error messages now include error code string prefix
-  INFO("Expected: [\"error\",1,\"kernel.ipc-send-message.pid-not-found: pid 42 not found\"]");
+  INFO("Expected: [\"error\",2,\"kernel.ipc-send-message.pid-not-found: pid 42 not found\"]");
   INFO("Got: " << test_output);
-  CHECK(strcmp(test_output, "[\"error\",1,\"kernel.ipc-send-message.pid-not-found: pid 42 not found\"]") == 0);
+  CHECK(strcmp(test_output, "[\"error\",2,\"kernel.ipc-send-message.pid-not-found: pid 42 not found\"]") == 0);
 }

@@ -726,51 +726,152 @@ static Status cmd_return(Interp &i, vector<string> &argv,
   return S_RETURN;
 }
 
-static Status cmd_math(Interp &i, vector<string> &argv,
-                       ProcPrivdata *privdata) {
-  if (!i.arity_check("math", argv, 3, 3)) {
+static Status cmd_add(Interp &i, vector<string> &argv,
+                      ProcPrivdata *privdata) {
+  if (!i.arity_check("+", argv, 3, 3)) {
     return S_ERR;
   }
-
-  if (!i.int_check("math", argv, 1)) {
+  if (!i.int_check("+", argv, 1) || !i.int_check("+", argv, 2)) {
     return S_ERR;
   }
-  if (!i.int_check("math", argv, 2)) {
-    return S_ERR;
-  }
-
-  int a = atoi(argv[1].c_str());
-  int b = atoi(argv[2].c_str());
-  int c = 0;
-
-  const string &op = argv[0];
-  if (op.compare("+") == 0) {
-    c = a + b;
-  } else if (op.compare("-") == 0) {
-    c = a - b;
-  } else if (op.compare("*") == 0) {
-    c = a * b;
-  } else if (op.compare("/") == 0) {
-    c = a / b;
-  } else if (op.compare(">") == 0) {
-    c = a > b;
-  } else if (op.compare("<") == 0) {
-    c = a < b;
-  } else if (op.compare("==") == 0) {
-    c = a == b;
-  } else if (op.compare("!=") == 0) {
-    c = a != b;
-  } else if (op.compare(">=") == 0) {
-    c = a >= b;
-  } else if (op.compare("<=") == 0) {
-    c = a <= b;
-  } else {
-    format_error(i.result, "[%s]: unknown operator", op.c_str());
-    return S_ERR;
-  }
-
+  int result = atoi(argv[1].c_str()) + atoi(argv[2].c_str());
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%d", c);
+  osnprintf(buf, sizeof(buf), "%d", result);
+  i.result = buf;
+  return S_OK;
+}
+
+static Status cmd_sub(Interp &i, vector<string> &argv,
+                      ProcPrivdata *privdata) {
+  if (!i.arity_check("-", argv, 3, 3)) {
+    return S_ERR;
+  }
+  if (!i.int_check("-", argv, 1) || !i.int_check("-", argv, 2)) {
+    return S_ERR;
+  }
+  int result = atoi(argv[1].c_str()) - atoi(argv[2].c_str());
+  char buf[32];
+  osnprintf(buf, sizeof(buf), "%d", result);
+  i.result = buf;
+  return S_OK;
+}
+
+static Status cmd_mul(Interp &i, vector<string> &argv,
+                      ProcPrivdata *privdata) {
+  if (!i.arity_check("*", argv, 3, 3)) {
+    return S_ERR;
+  }
+  if (!i.int_check("*", argv, 1) || !i.int_check("*", argv, 2)) {
+    return S_ERR;
+  }
+  int result = atoi(argv[1].c_str()) * atoi(argv[2].c_str());
+  char buf[32];
+  osnprintf(buf, sizeof(buf), "%d", result);
+  i.result = buf;
+  return S_OK;
+}
+
+static Status cmd_div(Interp &i, vector<string> &argv,
+                      ProcPrivdata *privdata) {
+  if (!i.arity_check("/", argv, 3, 3)) {
+    return S_ERR;
+  }
+  if (!i.int_check("/", argv, 1) || !i.int_check("/", argv, 2)) {
+    return S_ERR;
+  }
+  int result = atoi(argv[1].c_str()) / atoi(argv[2].c_str());
+  char buf[32];
+  osnprintf(buf, sizeof(buf), "%d", result);
+  i.result = buf;
+  return S_OK;
+}
+
+static Status cmd_eq(Interp &i, vector<string> &argv,
+                     ProcPrivdata *privdata) {
+  if (!i.arity_check("==", argv, 3, 3)) {
+    return S_ERR;
+  }
+  if (!i.int_check("==", argv, 1) || !i.int_check("==", argv, 2)) {
+    return S_ERR;
+  }
+  int result = atoi(argv[1].c_str()) == atoi(argv[2].c_str());
+  char buf[32];
+  osnprintf(buf, sizeof(buf), "%d", result);
+  i.result = buf;
+  return S_OK;
+}
+
+static Status cmd_ne(Interp &i, vector<string> &argv,
+                     ProcPrivdata *privdata) {
+  if (!i.arity_check("!=", argv, 3, 3)) {
+    return S_ERR;
+  }
+  if (!i.int_check("!=", argv, 1) || !i.int_check("!=", argv, 2)) {
+    return S_ERR;
+  }
+  int result = atoi(argv[1].c_str()) != atoi(argv[2].c_str());
+  char buf[32];
+  osnprintf(buf, sizeof(buf), "%d", result);
+  i.result = buf;
+  return S_OK;
+}
+
+static Status cmd_gt(Interp &i, vector<string> &argv,
+                     ProcPrivdata *privdata) {
+  if (!i.arity_check(">", argv, 3, 3)) {
+    return S_ERR;
+  }
+  if (!i.int_check(">", argv, 1) || !i.int_check(">", argv, 2)) {
+    return S_ERR;
+  }
+  int result = atoi(argv[1].c_str()) > atoi(argv[2].c_str());
+  char buf[32];
+  osnprintf(buf, sizeof(buf), "%d", result);
+  i.result = buf;
+  return S_OK;
+}
+
+static Status cmd_lt(Interp &i, vector<string> &argv,
+                     ProcPrivdata *privdata) {
+  if (!i.arity_check("<", argv, 3, 3)) {
+    return S_ERR;
+  }
+  if (!i.int_check("<", argv, 1) || !i.int_check("<", argv, 2)) {
+    return S_ERR;
+  }
+  int result = atoi(argv[1].c_str()) < atoi(argv[2].c_str());
+  char buf[32];
+  osnprintf(buf, sizeof(buf), "%d", result);
+  i.result = buf;
+  return S_OK;
+}
+
+static Status cmd_gte(Interp &i, vector<string> &argv,
+                      ProcPrivdata *privdata) {
+  if (!i.arity_check(">=", argv, 3, 3)) {
+    return S_ERR;
+  }
+  if (!i.int_check(">=", argv, 1) || !i.int_check(">=", argv, 2)) {
+    return S_ERR;
+  }
+  int result = atoi(argv[1].c_str()) >= atoi(argv[2].c_str());
+  char buf[32];
+  osnprintf(buf, sizeof(buf), "%d", result);
+  i.result = buf;
+  return S_OK;
+}
+
+static Status cmd_lte(Interp &i, vector<string> &argv,
+                      ProcPrivdata *privdata) {
+  if (!i.arity_check("<=", argv, 3, 3)) {
+    return S_ERR;
+  }
+  if (!i.int_check("<=", argv, 1) || !i.int_check("<=", argv, 2)) {
+    return S_ERR;
+  }
+  int result = atoi(argv[1].c_str()) <= atoi(argv[2].c_str());
+  char buf[32];
+  osnprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
   return S_OK;
 }
@@ -784,16 +885,16 @@ void register_core_commands(Interp &i) {
   i.register_command("continue", cmd_continue);
   i.register_command("proc", cmd_proc);
   i.register_command("return", cmd_return);
-  i.register_command("+", cmd_math);
-  i.register_command("-", cmd_math);
-  i.register_command("*", cmd_math);
-  i.register_command("/", cmd_math);
-  i.register_command("==", cmd_math);
-  i.register_command("!=", cmd_math);
-  i.register_command(">", cmd_math);
-  i.register_command("<", cmd_math);
-  i.register_command(">=", cmd_math);
-  i.register_command("<=", cmd_math);
+  i.register_command("+", cmd_add);
+  i.register_command("-", cmd_sub);
+  i.register_command("*", cmd_mul);
+  i.register_command("/", cmd_div);
+  i.register_command("==", cmd_eq);
+  i.register_command("!=", cmd_ne);
+  i.register_command(">", cmd_gt);
+  i.register_command("<", cmd_lt);
+  i.register_command(">=", cmd_gte);
+  i.register_command("<=", cmd_lte);
 }
 
 } // namespace tcl

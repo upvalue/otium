@@ -66,6 +66,16 @@ void get_process_pages(int32_t pid, uintptr_t *pages, uint32_t *count) {
   }
 }
 
+bool programs_running() {
+  // start at 1 to skip idle proc
+  for (int i = 1; i < PROCS_MAX; i++) {
+    if (procs[i].state == RUNNABLE) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Kernel startup - initializes kernel and creates initial processes
 void kernel_start(void) {
   kernel_common();
@@ -175,8 +185,8 @@ void kernel_start(void) {
       "scratch2", (const void *)_binary_bin_prog_shell_bin_start,
       (size_t)_binary_bin_prog_shell_bin_size, true, &scratch2_args);
 #endif
-  TRACE(LSOFT, "created proc with name %s and pid %d", proc_shell->name,
-        proc_shell->pid);
+  // TRACE(LSOFT, "created proc with name %s and pid %d", proc_shell->name,
+//        proc_shell->pid);
 #endif
 
 #ifdef OT_ARCH_WASM
@@ -186,6 +196,9 @@ void kernel_start(void) {
   // For RISC-V: yield and let processes run
   yield();
 #endif
+
+  OT_SOFT_ASSERT("reached end of kernel while programs were running",
+                 !programs_running());
 
   TRACE(LSOFT, "no programs left to run, exiting kernel");
   memory_report();

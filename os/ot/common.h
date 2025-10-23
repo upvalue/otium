@@ -10,7 +10,7 @@ extern "C" {
 
 #include <stdarg.h>
 
-#if defined(OT_TEST) || defined(OT_ARCH_WASM)
+#if defined(OT_POSIX) || defined(OT_ARCH_WASM)
 #include <stddef.h>
 #include <stdint.h>
 #else
@@ -35,7 +35,7 @@ typedef uint32_t uintptr_t;
 #define OT_SOFT_ASSERT(msg, condition)                                         \
   do {                                                                         \
     if (!(condition)) {                                                        \
-      oprintf("SOFT ASSERT FAILED: %s\n", msg);                                \
+      oprintf("SOFT-ASSERT: %s\n", msg);                                       \
     }                                                                          \
   } while (0)
 

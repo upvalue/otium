@@ -1,6 +1,6 @@
 // shim.c - otium os shim for libmpack compilation
-#ifdef OT_TEST
-// In test mode, use standard library
+#ifdef OT_POSIX
+// In POSIX mode, use standard library
 #include <assert.h>
 #include <stdbool.h>
 #include <string.h>

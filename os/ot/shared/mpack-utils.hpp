@@ -17,7 +17,7 @@ int mpack_print(const char* data, size_t len, mpack_putchar_fn putchar_fn);
 // The output will be null-terminated if it fits in the buffer
 int mpack_sprint(const char* data, size_t data_len, char* buf, size_t buf_size);
 
-#ifndef OT_TEST
+#ifndef OT_POSIX
 // Pretty print msgpack data using oputchar
 // Returns: 1 on success, 0 if oputchar failed
 int mpack_oprint(const char* data, size_t len);

@@ -35,12 +35,14 @@ extern tlsf_t pool;
 // ipc/send $echopid
 
 void shell_main() {
+  oprintf("time to seize control\n");
   // allocate some contiguous pages to work with
   memory_begin = ou_alloc_page();
 
   for (size_t i = 0; i != 9; i++) {
     ou_alloc_page();
   }
+  oprintf("create memory pool\n");
 
   // create memory pool
   pool = tlsf_create_with_pool(memory_begin, 10 * OT_PAGE_SIZE);

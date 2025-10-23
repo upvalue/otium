@@ -14,8 +14,8 @@ void *realloc(void *ptr, size_t size);
 }
 
 // Placement new operator (avoids needing <new>)
-// In test environment, use standard library version
-#ifdef OT_TEST
+// In POSIX environments, use standard library version
+#ifdef OT_POSIX
 #include <new>
 #else
 inline void *operator new(size_t, void *p) noexcept { return p; }

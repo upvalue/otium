@@ -264,7 +264,7 @@ int mpack_sprint(const char *data, size_t data_len, char *buf, size_t buf_size) 
   return result ? (int)g_sprint_ctx.pos : -1;
 }
 
-#ifndef OT_TEST
+#ifndef OT_POSIX
 int mpack_oprint(const char *data, size_t len) {
   return mpack_print(data, len, [](char ch) -> int { return oputchar(ch); });
 }

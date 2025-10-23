@@ -7,7 +7,7 @@
 #include "ot/shared/pair.hpp"
 #include "ot/shared/string-view.hpp"
 
-#ifdef OT_TEST
+#ifdef OT_POSIX
 #include <stdlib.h>
 #define PANIC(fmt, ...)                                                        \
   do {                                                                         \

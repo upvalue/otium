@@ -3,10 +3,10 @@ set -euxo pipefail
 mkdir -p bin
 
 # Compile mpack as C
-clang -DOT_TEST -I. -c vendor/libmpack/mpack.c -o bin/mpack.o
+clang -DOT_POSIX -DOT_TEST -I. -c vendor/libmpack/mpack.c -o bin/mpack.o
 
 # Compile and link tests
-clang++ -DOT_TEST -DOT_TRACE_MEM \
+clang++ -DOT_POSIX -DOT_TEST -DOT_TRACE_MEM \
     -I. -o bin/test \
     ot/test-linking.cpp \
     ot/kernel/memory-test.cpp \

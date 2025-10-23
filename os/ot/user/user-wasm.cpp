@@ -43,6 +43,11 @@ void *ou_alloc_page(void) { return kernel_syscall_alloc_page(); }
 
 PageAddr kernel_syscall_get_arg_page(void);
 PageAddr ou_get_arg_page(void) { return kernel_syscall_get_arg_page(); }
+
+PageAddr kernel_syscall_get_msg_page(int msg_idx);
+PageAddr ou_get_msg_page(int msg_idx) {
+  return kernel_syscall_get_msg_page(msg_idx);
+}
 int kernel_syscall_ipc_check_message(void);
 
 int kernel_syscall_proc_lookup(const char *name);

@@ -44,6 +44,13 @@
     }                                                                          \
   } while (0)
 
+#define TRACE_IPC(level, fmt, ...)                                             \
+  do {                                                                         \
+    if (LOG_IPC >= (level)) {                                                  \
+      oprintf("[ipc] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);    \
+    }                                                                          \
+  } while (0)
+
 // platform specific utility functions
 void wfi(void);
 void kernel_exit(void);
@@ -189,5 +196,6 @@ void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr,
 
 // inter-process communication
 bool ipc_send_message(Process *sender, int target_pid);
+int ipc_pop_message(Process *receiver);
 
 #endif

@@ -129,6 +129,15 @@ bool MPackReader::read_int(int32_t& value) {
   }
 }
 
+bool MPackReader::read_error_code(ErrorCode& value) {
+  int32_t code_int;
+  if (!read_int(code_int)) {
+    return false;
+  }
+  value = static_cast<ErrorCode>(code_int);
+  return true;
+}
+
 bool MPackReader::read_string(StringView& str) {
   mpack_token_t tok;
 

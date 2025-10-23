@@ -2,6 +2,7 @@
 #define OT_SHARED_MPACK_READER_HPP
 
 #include "ot/common.h"
+#include "ot/shared/error-codes.hpp"
 #include "ot/shared/mpack.h"
 #include "ot/shared/string-view.hpp"
 
@@ -38,6 +39,9 @@ public:
 
   // Read signed integer
   bool read_int(int32_t& value);
+
+  // Read error code
+  bool read_error_code(ErrorCode& value);
 
   // Read string (zero-copy - returns view into msgpack buffer)
   bool read_string(StringView& str);

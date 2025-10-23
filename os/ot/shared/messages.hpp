@@ -76,35 +76,50 @@ struct MsgError : MPackBuffer {
   MsgError(char *buffer, size_t length) : MPackBuffer(buffer, length) {}
   MsgError(PageAddr page) : MPackBuffer(page) {}
 
-  MsgSerializationError serialize(ErrorCode code, const char *message) {
+  MsgSerializationError serialize(ErrorCode code, const char *fmt, ...) {
+    // Format the user message
+    va_list args;
+    va_start(args, fmt);
+    ovsnprintf(ot_scratch_buffer, OT_PAGE_SIZE, fmt, args);
+    va_end(args);
+
+    // Prepend error code string
+    char final_msg[OT_PAGE_SIZE];
+    osnprintf(final_msg, OT_PAGE_SIZE, "%s: %s", error_code_to_string(code),
+              ot_scratch_buffer);
+
+    // Serialize as array
     MPackWriter writer(buffer, length);
-    writer.array(3).str("error").pack((int32_t)code).str(message);
+    writer.array(3).str("error").pack(code).str(final_msg);
     return writer.ok() ? MSG_SERIALIZATION_OK : MSG_SERIALIZATION_OTHER;
   }
 
   MsgSerializationError deserialize(ErrorCode &code, StringView &message) {
     MPackReader reader(buffer, length);
     uint32_t count;
+
     if (!reader.enter_array(count)) {
       return MSG_SERIALIZATION_EXPECTED_TOPLEVEL_ARRAY;
     }
+
     if (count != 3) {
       return MSG_SERIALIZATION_EXPECTED_TOPLEVEL_ARRAY_LEN;
     }
 
     StringView type;
+
     if (!reader.read_string(type)) {
       return MSG_SERIALIZATION_UNEXPECTED_TYPE;
     }
+
     if (!type.equals("error")) {
       return MSG_SERIALIZATION_UNEXPECTED_TYPE;
     }
 
-    int32_t code_int;
-    if (!reader.read_int(code_int)) {
+    if (!reader.read_error_code(code)) {
       return MSG_SERIALIZATION_OTHER;
     }
-    code = static_cast<ErrorCode>(code_int);
+
     if (!reader.read_string(message)) {
       return MSG_SERIALIZATION_OTHER;
     }

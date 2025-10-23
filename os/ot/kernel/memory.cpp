@@ -95,7 +95,7 @@ PageAddr page_allocate(proc_id_t pid, size_t page_count) {
     PANIC("page_allocate called before memory_init");
   }
 
-  TRACE_MEM(LSOFT, "page_allocate: pid=%d, count=%d", pid, page_count);
+  TRACE_MEM(LLOUD, "page_allocate: pid=%d, count=%d", pid, page_count);
 
   if (page_count == 0) {
     PANIC("Cannot allocate 0 pages");
@@ -110,7 +110,8 @@ PageAddr page_allocate(proc_id_t pid, size_t page_count) {
   }
 
   if (available < page_count) {
-    PANIC("Out of memory - requested %d pages, only %d available", page_count, available);
+    PANIC("Out of memory - requested %d pages, only %d available", page_count,
+          available);
   }
 
   // Allocate first page (this is what we'll return)
@@ -120,7 +121,8 @@ PageAddr page_allocate(proc_id_t pid, size_t page_count) {
   first_page->next = nullptr;
   omemset(first_page->addr.as_ptr(), 0, OT_PAGE_SIZE);
 
-  TRACE_MEM(LLOUD, "Allocated page at %x to pid %d", first_page->addr.raw(), pid);
+  TRACE_MEM(LLOUD, "Allocated page at %x to pid %d", first_page->addr.raw(),
+            pid);
 
   // Allocate remaining pages
   for (size_t i = 1; i < page_count; i++) {
@@ -130,7 +132,8 @@ PageAddr page_allocate(proc_id_t pid, size_t page_count) {
     page_info->next = nullptr;
     omemset(page_info->addr.as_ptr(), 0, OT_PAGE_SIZE);
 
-    TRACE_MEM(LLOUD, "Allocated page at %x to pid %d", page_info->addr.raw(), pid);
+    TRACE_MEM(LLOUD, "Allocated page at %x to pid %d", page_info->addr.raw(),
+              pid);
   }
 
   // Update statistics

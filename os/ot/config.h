@@ -26,7 +26,8 @@
 
 // Subsystem log levels (configured by config.sh)
 #define LOG_GENERAL LSOFT
-#define LOG_MEM LSILENT
+#define LOG_MEM LSOFT
 #define LOG_PROC LSOFT
+#define LOG_IPC LSOFT
 
 #endif

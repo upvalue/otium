@@ -23,6 +23,23 @@ static void write_str(mpack_print_ctx *ctx, const char *s) {
   }
 }
 
+// Helper to write an escaped character (for string content)
+static void write_escaped_char(mpack_print_ctx *ctx, char ch) {
+  switch (ch) {
+  case '\n':
+    write_char(ctx, '\\');
+    write_char(ctx, 'n');
+    break;
+  case '\r':
+    write_char(ctx, '\\');
+    write_char(ctx, 'r');
+    break;
+  default:
+    write_char(ctx, ch);
+    break;
+  }
+}
+
 // Helper to write a uint32_t
 static void write_uint32(mpack_print_ctx *ctx, uint32_t val) {
   if (val == 0) {
@@ -108,9 +125,9 @@ static void print_enter(mpack_parser_t *parser, mpack_node_t *node) {
       // Skip binary/ext data chunks
       break;
     }
-    // Write string data directly
+    // Write string data with escaping
     for (uint32_t i = 0; i < tok->length && !ctx->error; i++) {
-      write_char(ctx, tok->data.chunk_ptr[i]);
+      write_escaped_char(ctx, tok->data.chunk_ptr[i]);
     }
     break;
   }

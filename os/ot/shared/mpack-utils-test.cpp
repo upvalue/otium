@@ -1,5 +1,6 @@
 #include "ot/common.h"
 #include "ot/shared/error-codes.hpp"
+#include "ot/shared/messages.hpp"
 #include "ot/shared/mpack-utils.hpp"
 #include "ot/shared/mpack-writer.hpp"
 #include "vendor/doctest.h"
@@ -222,22 +223,20 @@ TEST_CASE("mpack-utils - empty map") {
 
 TEST_CASE("error structure") {
   char buf[256];
-  MPackWriter msg(buf, sizeof(buf));
+  MsgError msg(buf, sizeof(buf));
 
-  // Error messages are now wrapped in arrays
-  msg.array(3)
-      .str("error")
-      .pack((int32_t)KERNEL__IPC_SEND_MESSAGE__PID_NOT_FOUND)
-      .str("pid not found");
+  // Test the new serialize with printf-style formatting
+  MsgSerializationError err =
+      msg.serialize(KERNEL__IPC_SEND_MESSAGE__PID_NOT_FOUND, "pid %d not found", 42);
 
-  CHECK(msg.ok());
-  CHECK(msg.size() > 0);
+  CHECK(err == MSG_SERIALIZATION_OK);
 
   reset_output();
-  int result = mpack_print((const char *)msg.data(), msg.size(), test_putchar);
+  int result = mpack_print((const char *)msg.buffer, msg.length, test_putchar);
   CHECK(result == 1);
 
-  INFO("Expected: [\"error\",1,\"pid not found\"]");
+  // Error messages now include error code string prefix
+  INFO("Expected: [\"error\",1,\"kernel.ipc-send-message.pid-not-found: pid 42 not found\"]");
   INFO("Got: " << test_output);
-  CHECK(strcmp(test_output, "[\"error\",1,\"pid not found\"]") == 0);
+  CHECK(strcmp(test_output, "[\"error\",1,\"kernel.ipc-send-message.pid-not-found: pid 42 not found\"]") == 0);
 }

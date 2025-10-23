@@ -277,6 +277,10 @@ int kernel_syscall_io_puts(const char *str, int size) {
 
 PageAddr kernel_syscall_get_arg_page(void) { return process_get_arg_page(); }
 
+PageAddr kernel_syscall_get_msg_page(int msg_idx) {
+  return process_get_msg_page(msg_idx);
+}
+
 int kernel_syscall_proc_lookup(const char *name) {
   Process *proc = process_lookup(name);
   yield();
@@ -284,6 +288,10 @@ int kernel_syscall_proc_lookup(const char *name) {
 }
 
 int kernel_syscall_ipc_check_message(void) { return current_proc->msg_count; }
+
+int kernel_syscall_ipc_pop_message(void) {
+  return ipc_pop_message(current_proc);
+}
 
 // Main entry point for WASM
 extern "C" void kernel_main(void) {

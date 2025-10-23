@@ -32,11 +32,11 @@ typedef uint32_t uintptr_t;
 
 #define is_aligned(value, align) __builtin_is_aligned(value, align)
 
-#define OT_SOFT_ASSERT(msg, condition) \
-  do { \
-    if (!(condition)) { \
-      oprintf("SOFT ASSERT FAILED: %s\n", msg); \
-    } \
+#define OT_SOFT_ASSERT(msg, condition)                                         \
+  do {                                                                         \
+    if (!(condition)) {                                                        \
+      oprintf("SOFT ASSERT FAILED: %s\n", msg);                                \
+    }                                                                          \
   } while (0)
 
 // These are common C stdlib-like functions, callable from anyhwere
@@ -75,6 +75,7 @@ int oputsn(const char *str, int n);
 #define OU_PROC_LOOKUP 8      // Look up a process by name
 #define OU_IPC_SEND_MESSAGE 9 // Send a message to a process
 #define OU_IPC_CHECK_MESSAGE 10 // Check if one or more messages are waiting
+#define OU_IPC_POP_MESSAGE 11 // Pop a message from the end of the message queue
 
 // Arguments to the get sys page
 #define OU_SYS_PAGE_ARG 0

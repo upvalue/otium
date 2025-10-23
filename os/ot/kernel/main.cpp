@@ -152,6 +152,8 @@ void kernel_start(void) {
   Arguments shell_args = {1, &shell_argv};
   char *scratch_argv = {"scratch"};
   Arguments scratch_args = {1, &scratch_argv};
+  char *scratch2_argv = {"scratch2"};
+  Arguments scratch2_args = {1, &scratch2_argv};
 #ifdef OT_ARCH_WASM
   // For WASM, call the shell main function directly
   Process *proc_shell = process_create("shell", (const void *)user_program_main,
@@ -168,6 +170,10 @@ void kernel_start(void) {
   Process *proc_scratch = process_create(
       "scratch", (const void *)_binary_bin_prog_shell_bin_start,
       (size_t)_binary_bin_prog_shell_bin_size, true, &scratch_args);
+
+  Process *proc_scratch2 = process_create(
+      "scratch2", (const void *)_binary_bin_prog_shell_bin_start,
+      (size_t)_binary_bin_prog_shell_bin_size, true, &scratch2_args);
 #endif
   TRACE(LSOFT, "created proc with name %s and pid %d", proc_shell->name,
         proc_shell->pid);

@@ -3,6 +3,7 @@
 
 #include "ot/common.h"
 
+#include "ot/shared/error-codes.hpp"
 #include "ot/shared/mpack.h"
 #include "ot/shared/string-view.hpp"
 
@@ -67,6 +68,11 @@ public:
 
   MPackWriter &pack(int32_t v) {
     write_token(mpack_pack_sint(v));
+    return *this;
+  }
+
+  MPackWriter &pack(ErrorCode v) {
+    write_token(mpack_pack_sint((int32_t)v));
     return *this;
   }
 

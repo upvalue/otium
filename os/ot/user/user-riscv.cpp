@@ -53,6 +53,9 @@ PageAddr ou_get_sys_page(int type, int msg_idx) {
   return PageAddr(syscall(OU_GET_SYS_PAGE, type, msg_idx, 0).a0);
 }
 
+PageAddr ou_get_msg_page(int msg_idx) {
+  return ou_get_sys_page(OU_SYS_PAGE_MSG, msg_idx);
+}
 PageAddr ou_get_arg_page(void) { return ou_get_sys_page(OU_SYS_PAGE_ARG, 0); }
 PageAddr ou_get_comm_page(void) { return ou_get_sys_page(OU_SYS_PAGE_COMM, 0); }
 
@@ -87,3 +90,5 @@ int ou_ipc_check_message(void) {
 int ou_ipc_send_message(int pid) {
   return syscall(OU_IPC_SEND_MESSAGE, pid, 0, 0).a0;
 }
+
+int ou_ipc_pop_message(void) { return syscall(OU_IPC_POP_MESSAGE, 0, 0, 0).a0; }

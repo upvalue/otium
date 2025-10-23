@@ -12,6 +12,7 @@
 // Messages
 
 // Messages always begin with a type
+// Always an array
 
 // Types
 // error - type: 'error', code: string, message: string, <arbitrary contents

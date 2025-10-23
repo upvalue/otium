@@ -10,7 +10,7 @@
 #include "ot/user/tcl.h"
 
 // Buffer for storing user commands
-static char buffer[4096];
+static char buffer[OT_PAGE_SIZE];
 static size_t buffer_i = 0;
 
 // Whether the shell is running

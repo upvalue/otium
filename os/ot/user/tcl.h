@@ -303,11 +303,13 @@ typedef Status (*cmd_func_t)(Interp &i, vector<string> &argv,
  * Command struct
  */
 struct Cmd {
-  Cmd(const string &name_, cmd_func_t func_, ProcPrivdata *privdata_);
+  Cmd(const string &name_, cmd_func_t func_, ProcPrivdata *privdata_ = nullptr,
+      const string &docstring_ = "");
   ~Cmd();
   string name;
   cmd_func_t func;
   ProcPrivdata *privdata;
+  string docstring;
 };
 
 /**
@@ -336,7 +338,7 @@ struct Interp {
   bool trace_parser;
 
   // MessagePack support (optional)
-  void *mpack_buffer_;
+  char *mpack_buffer_;
   size_t mpack_buffer_size_;
   MPackWriter mpack_writer_;
 
@@ -346,7 +348,8 @@ struct Interp {
   void drop_call_frame();
   Cmd *get_command(const string &name) const;
   Status register_command(const string &name, cmd_func_t fn,
-                          ProcPrivdata *privdata = nullptr);
+                          ProcPrivdata *privdata = nullptr,
+                          const string &docstring = "");
   Var *get_var(const string_view &name);
   Status set_var(const string &name, const string &val);
   bool arity_check(const string &name, const vector<string> &argv, size_t min,
@@ -355,7 +358,7 @@ struct Interp {
   Status eval(const string_view &str);
 
   // MessagePack functions
-  void register_mpack_functions(void *buffer, size_t size);
+  void register_mpack_functions(char *buffer, size_t size);
 };
 
 // Global functions

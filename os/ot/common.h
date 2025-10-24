@@ -108,6 +108,12 @@ extern char *ot_scratch_buffer;
 
 #ifdef __cplusplus
 } // extern "C"
+
+// Include C++ headers outside of extern "C"
+#include "ot/shared/result.hpp"
+
+// C++ functions
+BoolResult<int> parse_int(const char *s);
 #endif
 
 #endif

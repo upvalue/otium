@@ -23,6 +23,7 @@ clang++ -DOT_POSIX -DOT_TEST -DOT_TRACE_MEM \
     ot/shared/mpack-reader-test.cpp \
     ot/shared/mpack-utils.cpp \
     ot/shared/mpack-utils-test.cpp \
+    ot/shared/result-test.cpp \
     ot/user/tcl.cpp \
     ot/user/tcl-test.cpp \
     bin/mpack.o \

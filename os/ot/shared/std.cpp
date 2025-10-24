@@ -123,3 +123,50 @@ void oprintf(const char *fmt, ...) {
   va_end(args);
   oputsn(ot_scratch_buffer, len);
 }
+
+// Parse integer with error handling
+BoolResult<int> parse_int(const char *s) {
+  if (!s || *s == '\0') {
+    return BoolResult<int>::err(false);
+  }
+
+  int result = 0;
+  int sign = 1;
+  const char *orig = s;
+
+  // Handle sign
+  if (*s == '-') {
+    sign = -1;
+    s++;
+  } else if (*s == '+') {
+    s++;
+  }
+
+  // Must have at least one digit after optional sign
+  if (*s < '0' || *s > '9') {
+    return BoolResult<int>::err(false);
+  }
+
+  // Parse digits
+  while (*s >= '0' && *s <= '9') {
+    int digit = *s - '0';
+
+    // Check for overflow before multiplying
+    if (sign == 1 && result > (2147483647 - digit) / 10) {
+      return BoolResult<int>::err(false);  // Would overflow INT_MAX
+    }
+    if (sign == -1 && result > (2147483648LL - digit) / 10) {
+      return BoolResult<int>::err(false);  // Would overflow INT_MIN
+    }
+
+    result = result * 10 + digit;
+    s++;
+  }
+
+  // Should have consumed entire string
+  if (*s != '\0') {
+    return BoolResult<int>::err(false);
+  }
+
+  return BoolResult<int>::ok(sign * result);
+}

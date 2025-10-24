@@ -404,8 +404,9 @@ ProcPrivdata::~ProcPrivdata() {
 // CMD IMPLEMENTATION
 //
 
-Cmd::Cmd(const string &name_, cmd_func_t func_, ProcPrivdata *privdata_)
-    : name(name_), func(func_), privdata(privdata_) {}
+Cmd::Cmd(const string &name_, cmd_func_t func_, ProcPrivdata *privdata_,
+         const string &docstring_)
+    : name(name_), func(func_), privdata(privdata_), docstring(docstring_) {}
 
 Cmd::~Cmd() {
   if (privdata)
@@ -465,12 +466,13 @@ Cmd *Interp::get_command(const string &name) const {
 }
 
 Status Interp::register_command(const string &name, cmd_func_t fn,
-                                ProcPrivdata *privdata) {
+                                ProcPrivdata *privdata,
+                                const string &docstring) {
   if (get_command(name) != nullptr) {
     format_error(result, "command already defined: '%s'", name.c_str());
     return S_ERR;
   }
-  commands.push_back(tcl_new<Cmd>(name, fn, privdata));
+  commands.push_back(tcl_new<Cmd>(name, fn, privdata, docstring));
   return S_OK;
 }
 
@@ -869,25 +871,116 @@ static Status cmd_lte(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   return S_OK;
 }
 
+static Status cmd_help(Interp &i, vector<string> &argv,
+                       ProcPrivdata *privdata) {
+  if (argv.size() == 1) {
+    // List all commands with their docstrings
+    oprintf("Available commands:\n");
+    for (Cmd *c : i.commands) {
+      if (!c->docstring.empty()) {
+        oprintf("  %s\n    %s\n", c->name.c_str(), c->docstring.c_str());
+      } else {
+        oprintf("  %s\n", c->name.c_str());
+      }
+    }
+  } else if (argv.size() == 2) {
+    // Show help for specific command
+    Cmd *cmd = i.get_command(argv[1]);
+    if (cmd) {
+      if (!cmd->docstring.empty()) {
+        oprintf("%s: %s\n", cmd->name.c_str(), cmd->docstring.c_str());
+      } else {
+        oprintf("%s: no documentation available\n", cmd->name.c_str());
+      }
+    } else {
+      format_error(i.result, "command not found: '%s'", argv[1].c_str());
+      return S_ERR;
+    }
+  } else {
+    format_error(i.result, "[help]: expected 0 or 1 arguments");
+    return S_ERR;
+  }
+  return S_OK;
+}
+
+static Status cmd_commands(Interp &i, vector<string> &argv,
+                           ProcPrivdata *privdata) {
+  if (!i.arity_check("commands", argv, 1, 1)) {
+    return S_ERR;
+  }
+  for (Cmd *c : i.commands) {
+    oprintf("%s ", c->name.c_str());
+  }
+  oprintf("\n");
+  return S_OK;
+}
+
 void register_core_commands(Interp &i) {
-  i.register_command("puts", cmd_puts);
-  i.register_command("set", cmd_set);
-  i.register_command("if", cmd_if);
-  i.register_command("while", cmd_while);
-  i.register_command("break", cmd_break);
-  i.register_command("continue", cmd_continue);
-  i.register_command("proc", cmd_proc);
-  i.register_command("return", cmd_return);
-  i.register_command("+", cmd_add);
-  i.register_command("-", cmd_sub);
-  i.register_command("*", cmd_mul);
-  i.register_command("/", cmd_div);
-  i.register_command("==", cmd_eq);
-  i.register_command("!=", cmd_ne);
-  i.register_command(">", cmd_gt);
-  i.register_command("<", cmd_lt);
-  i.register_command(">=", cmd_gte);
-  i.register_command("<=", cmd_lte);
+  // I/O commands
+  i.register_command("puts", cmd_puts, nullptr,
+                     "[puts string] => nil - Print string to output");
+
+  // Variable commands
+  i.register_command("set", cmd_set, nullptr,
+                     "[set var value] => value - Set variable to value");
+
+  // Control flow commands
+  i.register_command("if", cmd_if, nullptr,
+                     "[if cond then else?] => any - Evaluate then-body if "
+                     "condition is true, else-body otherwise");
+  i.register_command(
+      "while", cmd_while, nullptr,
+      "[while cond body] => nil - Execute body while condition is true");
+  i.register_command("break", cmd_break, nullptr,
+                     "[break] => nil - Break out of innermost loop");
+  i.register_command(
+      "continue", cmd_continue, nullptr,
+      "[continue] => nil - Skip to next iteration of innermost loop");
+
+  // Procedure commands
+  i.register_command("proc", cmd_proc, nullptr,
+                     "[proc name args body] => nil - Define a new procedure");
+  i.register_command("return", cmd_return, nullptr,
+                     "[return value?] => any - Return from current procedure "
+                     "with optional value");
+
+  // Arithmetic commands
+  i.register_command("+", cmd_add, nullptr,
+                     "[+ a:int b:int] => int - Add two integers");
+  i.register_command("-", cmd_sub, nullptr,
+                     "[- a:int b:int] => int - Subtract b from a");
+  i.register_command("*", cmd_mul, nullptr,
+                     "[* a:int b:int] => int - Multiply two integers");
+  i.register_command(
+      "/", cmd_div, nullptr,
+      "[/ a:int b:int] => int - Divide a by b (integer division)");
+
+  // Comparison commands
+  i.register_command(
+      "==", cmd_eq, nullptr,
+      "[== a:int b:int] => bool - Test if a equals b (returns 1 or 0)");
+  i.register_command("!=", cmd_ne, nullptr,
+                     "[!= a:int b:int] => bool - Test if a is not equal to b "
+                     "(returns 1 or 0)");
+  i.register_command(
+      ">", cmd_gt, nullptr,
+      "[> a:int b:int] => bool - Test if a is greater than b (returns 1 or 0)");
+  i.register_command(
+      "<", cmd_lt, nullptr,
+      "[< a:int b:int] => bool - Test if a is less than b (returns 1 or 0)");
+  i.register_command(">=", cmd_gte, nullptr,
+                     "[>= a:int b:int] => bool - Test if a is greater than or "
+                     "equal to b (returns 1 or 0)");
+  i.register_command("<=", cmd_lte, nullptr,
+                     "[<= a:int b:int] => bool - Test if a is less than or "
+                     "equal to b (returns 1 or 0)");
+
+  // Help commands
+  i.register_command(
+      "help", cmd_help, nullptr,
+      "[help cmd?] => nil - Show help for all commands or a specific command");
+  i.register_command("commands", cmd_commands, nullptr,
+                     "[commands] => nil - List all available commands");
 }
 
 //
@@ -1125,22 +1218,43 @@ static Status cmd_mp_hex(Interp &i, vector<string> &argv,
   return S_OK;
 }
 
-void Interp::register_mpack_functions(void *buffer, size_t size) {
+void Interp::register_mpack_functions(char *buffer, size_t size) {
   mpack_buffer_ = buffer;
   mpack_buffer_size_ = size;
   mpack_writer_.init(buffer, size);
 
-  register_command("mp/reset", cmd_mp_reset);
-  register_command("mp/array", cmd_mp_array);
-  register_command("mp/map", cmd_mp_map);
-  register_command("mp/string", cmd_mp_string);
-  register_command("mp/int", cmd_mp_int);
-  register_command("mp/uint", cmd_mp_uint);
-  register_command("mp/bool", cmd_mp_bool);
-  register_command("mp/nil", cmd_mp_nil);
-  register_command("mp/print", cmd_mp_print);
-  register_command("mp/size", cmd_mp_size);
-  register_command("mp/hex", cmd_mp_hex);
+  register_command(
+      "mp/reset", cmd_mp_reset, nullptr,
+      "[mp/reset] => nil - Reset MessagePack buffer to empty state");
+  register_command("mp/array", cmd_mp_array, nullptr,
+                   "[mp/array count:int] => nil - Begin MessagePack array with "
+                   "given element count");
+  register_command("mp/map", cmd_mp_map, nullptr,
+                   "[mp/map count:int] => nil - Begin MessagePack map with "
+                   "given key-value pair count");
+  register_command(
+      "mp/string", cmd_mp_string, nullptr,
+      "[mp/string str] => nil - Write string to MessagePack buffer");
+  register_command(
+      "mp/int", cmd_mp_int, nullptr,
+      "[mp/int value:int] => nil - Write signed integer to MessagePack buffer");
+  register_command("mp/uint", cmd_mp_uint, nullptr,
+                   "[mp/uint value:uint] => nil - Write unsigned integer to "
+                   "MessagePack buffer");
+  register_command("mp/bool", cmd_mp_bool, nullptr,
+                   "[mp/bool value:bool] => nil - Write boolean (0 or 1) to "
+                   "MessagePack buffer");
+  register_command("mp/nil", cmd_mp_nil, nullptr,
+                   "[mp/nil] => nil - Write nil value to MessagePack buffer");
+  register_command("mp/print", cmd_mp_print, nullptr,
+                   "[mp/print] => nil - Print human-readable representation of "
+                   "MessagePack buffer");
+  register_command(
+      "mp/size", cmd_mp_size, nullptr,
+      "[mp/size] => int - Return current size of MessagePack buffer in bytes");
+  register_command("mp/hex", cmd_mp_hex, nullptr,
+                   "[mp/hex] => string - Return hexadecimal representation of "
+                   "MessagePack buffer");
 }
 
 } // namespace tcl

@@ -3,6 +3,16 @@
 #include "ot/user/tcl.h"
 #include "vendor/doctest.h"
 
+#ifdef OT_POSIX
+#include <stdlib.h>
+// Provide TCL memory functions for test environment
+extern "C" {
+void *tcl_malloc(size_t size) { return malloc(size); }
+void tcl_free(void *ptr) { free(ptr); }
+void *tcl_realloc(void *ptr, size_t size) { return realloc(ptr, size); }
+}
+#endif
+
 TEST_CASE("tcl - basic evaluation") {
   tcl::Interp i;
   tcl::register_core_commands(i);

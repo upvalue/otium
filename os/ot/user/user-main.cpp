@@ -81,9 +81,10 @@ void print_server_main() {
                    OT_PAGE_SIZE);
       ou_io_puts(ot_scratch_buffer, strlen(ot_scratch_buffer));
       ou_ipc_pop_message();
+      oputchar('\n');
     }
+    ou_yield();
   }
-  ou_yield();
   oprintf("exiting print-server\n");
 }
 

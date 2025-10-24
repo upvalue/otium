@@ -14,6 +14,7 @@ clang++ -DOT_POSIX -DOT_TEST -DOT_TRACE_MEM \
     ot/kernel/memory.cpp \
     ot/kernel/std.cpp \
     ot/shared/std.cpp \
+    ot/posix-util/posix-std.cpp \
     ot/shared/printf-test.cpp \
     ot/kernel/platform-test.cpp \
     ot/kernel/process.cpp \

@@ -58,10 +58,14 @@ void *tcl_realloc(void *ptr, size_t size) {
 tcl::Status cmd_proc_lookup(tcl::Interp &i, tcl::vector<tcl::string> &argv,
                             tcl::ProcPrivdata *privdata) {
   if (!i.arity_check("proc/lookup", argv, 2, 2)) {
+    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "arity check failed");
+    i.result = ot_scratch_buffer;
     return tcl::S_ERR;
   }
   int proc_pid = ou_proc_lookup(argv[1].c_str());
   if (proc_pid == 0) {
+    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "proc not found");
+    i.result = ot_scratch_buffer;
     return tcl::S_ERR;
   }
   char buf[32];

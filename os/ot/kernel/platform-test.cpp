@@ -6,8 +6,3 @@
 // We define __free_ram directly as the test memory pool
 alignas(OT_PAGE_SIZE) char __free_ram[256 * OT_PAGE_SIZE];
 char __free_ram_end[0]; // Zero-sized array at the end
-
-int oputchar(char ch) {
-  putchar(ch);
-  return 1;
-}

@@ -20,12 +20,13 @@ pkgs.stdenv.mkDerivation {
   nativeBuildInputs = [ pkgs.emscripten ];
 
   buildPhase = ''
+    # Fix shebangs for Nix environment
+    patchShebangs config.sh compile-wasm.sh
+
     # Generate ot/config.h using config.sh
-    chmod +x config.sh
     ${if testMode != null then "./config.sh --test-${testMode}" else "./config.sh --default"}
 
     # Build using compile-wasm.sh
-    chmod +x compile-wasm.sh
     ./compile-wasm.sh
   '';
 

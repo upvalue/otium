@@ -48,9 +48,13 @@ PageAddr kernel_syscall_get_msg_page(int msg_idx);
 PageAddr ou_get_msg_page(int msg_idx) {
   return kernel_syscall_get_msg_page(msg_idx);
 }
-int kernel_syscall_ipc_check_message(void);
+PageAddr kernel_syscall_get_comm_page(void);
+PageAddr ou_get_comm_page(void) { return kernel_syscall_get_comm_page(); }
 
+int kernel_syscall_ipc_check_message(void);
+int kernel_syscall_ipc_send_message(int pid);
 int kernel_syscall_proc_lookup(const char *name);
+int kernel_syscall_ipc_pop_message(void);
 
 int ou_proc_lookup(const char *name) {
   return kernel_syscall_proc_lookup(name);
@@ -63,3 +67,9 @@ int ou_io_puts(const char *str, int size) {
 }
 
 int ou_ipc_check_message(void) { return kernel_syscall_ipc_check_message(); }
+
+int ou_ipc_send_message(int pid) {
+  return kernel_syscall_ipc_send_message(pid);
+}
+
+int ou_ipc_pop_message(void) { return kernel_syscall_ipc_pop_message(); }

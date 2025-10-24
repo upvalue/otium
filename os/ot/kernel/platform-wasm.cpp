@@ -278,7 +278,11 @@ int kernel_syscall_io_puts(const char *str, int size) {
 PageAddr kernel_syscall_get_arg_page(void) { return process_get_arg_page(); }
 
 PageAddr kernel_syscall_get_msg_page(int msg_idx) {
-  return process_get_msg_page(msg_idx);
+  return process_get_msg_page(msg_idx).first;
+}
+
+PageAddr kernel_syscall_get_comm_page(void) {
+  return process_get_comm_page().first;
 }
 
 int kernel_syscall_proc_lookup(const char *name) {
@@ -288,6 +292,10 @@ int kernel_syscall_proc_lookup(const char *name) {
 }
 
 int kernel_syscall_ipc_check_message(void) { return current_proc->msg_count; }
+
+int kernel_syscall_ipc_send_message(int pid) {
+  return ipc_send_message(current_proc, pid);
+}
 
 int kernel_syscall_ipc_pop_message(void) {
   return ipc_pop_message(current_proc);

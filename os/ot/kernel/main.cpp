@@ -37,20 +37,22 @@ extern "C" void proc_mem_test(void) {
 
 // TEST_ALTERNATE: Process A - outputs 1, yields, outputs 3
 extern "C" void proc_alternate_a(void) {
-  while (1) {
-    oprintf("A\n");
-    yield();
-  }
+  oputchar('1');
+  yield();
+  oputchar('3');
+  yield();
   current_proc->state = TERMINATED;
+  yield();
 }
 
 // TEST_ALTERNATE: Process B - outputs 2, yields, outputs 4
 extern "C" void proc_alternate_b(void) {
-  while (1) {
-    oprintf("B\n");
-    yield();
-  }
+  oputchar('2');
+  yield();
+  oputchar('4');
+  yield();
   current_proc->state = TERMINATED;
+  yield();
 }
 
 // Helper to get all pages allocated to a process
@@ -156,6 +158,7 @@ void kernel_start(void) {
         proc_a->pid);
   TRACE(LSOFT, "created proc_b with name %s and pid %d", proc_b->name,
         proc_b->pid);
+  oprintf("TEST: ");
 #else
   // Default/main mode
   char *shell_argv = {"shell"};
@@ -169,8 +172,8 @@ void kernel_start(void) {
   Process *proc_shell = process_create("shell", (const void *)user_program_main,
                                        0, false, &shell_args);
 
-  Process *proc_scratch = process_create(
-      "scratch", (const void *)user_program_main, 0, false, &scratch_args);
+  // Process *proc_scratch = process_create(
+  // "scratch", (const void *)user_program_main, 0, false, &scratch_args);
 #else
   // For RISC-V, load the shell from the embedded binary
   Process *proc_shell = process_create(
@@ -202,6 +205,7 @@ void kernel_start(void) {
   OT_SOFT_ASSERT("reached end of kernel while programs were running",
                  !programs_running());
 
+  oputchar('\n');
   TRACE(LSOFT, "no programs left to run, exiting kernel");
   memory_report();
   kernel_exit();

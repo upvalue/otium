@@ -9,9 +9,9 @@
 
 // Forward declarations for memory allocation functions
 extern "C" {
-void *malloc(size_t size);
-void free(void *ptr);
-void *realloc(void *ptr, size_t size);
+void *tcl_malloc(size_t size);
+void tcl_free(void *ptr);
+void *tcl_realloc(void *ptr, size_t size);
 }
 
 // Placement new operator (avoids needing <new>)
@@ -25,9 +25,9 @@ inline void operator delete(void *, void *) noexcept {}
 
 namespace tcl {
 
-// Memory allocation helpers using malloc/free
+// Memory allocation helpers using tcl_malloc/tcl_free
 template <typename T, typename... Args> T *tcl_new(Args &&...args) {
-  void *mem = malloc(sizeof(T));
+  void *mem = tcl_malloc(sizeof(T));
   if (!mem)
     return nullptr;
   return new (mem) T(static_cast<Args &&>(args)...);
@@ -36,7 +36,7 @@ template <typename T, typename... Args> T *tcl_new(Args &&...args) {
 template <typename T> void tcl_delete(T *ptr) {
   if (ptr) {
     ptr->~T();
-    free(ptr);
+    tcl_free(ptr);
   }
 }
 
@@ -156,13 +156,13 @@ private:
     size_t alloc_cap = cap_ == 0 ? 8 : cap_;
     while (alloc_cap < new_cap)
       alloc_cap *= 2;
-    T *new_data = (T *)malloc(alloc_cap * sizeof(T));
+    T *new_data = (T *)tcl_malloc(alloc_cap * sizeof(T));
     if (data_) {
       for (size_t i = 0; i < size_; i++) {
         new (&new_data[i]) T(static_cast<T &&>(data_[i]));
         data_[i].~T();
       }
-      free(data_);
+      tcl_free(data_);
     }
     data_ = new_data;
     cap_ = alloc_cap;
@@ -176,7 +176,7 @@ public:
       for (size_t i = 0; i < size_; i++) {
         data_[i].~T();
       }
-      free(data_);
+      tcl_free(data_);
     }
   }
 

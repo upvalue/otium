@@ -6,6 +6,13 @@
 #include <string.h>
 #include <vector>
 
+// Provide tcl memory allocation functions using stdlib
+extern "C" {
+void *tcl_malloc(size_t size) { return malloc(size); }
+void tcl_free(void *ptr) { free(ptr); }
+void *tcl_realloc(void *ptr, size_t size) { return realloc(ptr, size); }
+}
+
 // Global flag for quit command
 static bool should_quit = false;
 

@@ -16,7 +16,7 @@ void string::ensure_capacity(size_t new_cap) {
   size_t alloc_cap = cap_ == 0 ? 16 : cap_;
   while (alloc_cap < new_cap)
     alloc_cap *= 2;
-  char *new_data = (char *)realloc(data_, alloc_cap);
+  char *new_data = (char *)tcl_realloc(data_, alloc_cap);
   data_ = new_data;
   cap_ = alloc_cap;
 }
@@ -59,7 +59,7 @@ string::string(string &&other) noexcept
 
 string::~string() {
   if (data_)
-    free(data_);
+    tcl_free(data_);
 }
 
 string &string::operator=(const string &other) {
@@ -78,7 +78,7 @@ string &string::operator=(const string &other) {
 string &string::operator=(string &&other) noexcept {
   if (this != &other) {
     if (data_)
-      free(data_);
+      tcl_free(data_);
     data_ = other.data_;
     len_ = other.len_;
     cap_ = other.cap_;

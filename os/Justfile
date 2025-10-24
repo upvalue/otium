@@ -1,0 +1,7 @@
+# Count lines of code in ot/, excluding vendor folders
+cloc:
+    @echo "=== Non-test code ==="
+    @cloc ot --exclude-dir=vendor --not-match-f='.*-test\.(cpp|h)$$'
+    @echo ""
+    @echo "=== Test code ==="
+    @cloc ot --exclude-dir=vendor --match-f='.*-test\.(cpp|h)$$'

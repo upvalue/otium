@@ -19,7 +19,8 @@ tlsf_t pool = nullptr;
 
 void *tcl_malloc(size_t size) {
   if (!pool) {
-    oprintf("FATAL: tcl_malloc called before pool initialized (size=%d)\n", size);
+    oprintf("FATAL: tcl_malloc called before pool initialized (size=%d)\n",
+            size);
     ou_exit();
   }
   void *result = tlsf_malloc(pool, size);
@@ -61,6 +62,8 @@ void shell_main() {
     ou_alloc_page();
   }
 
+  void *mp_page = ou_alloc_page();
+
   // create memory pool
   pool = tlsf_create_with_pool(memory_begin, SHELL_PAGES * OT_PAGE_SIZE);
   if (!pool) {
@@ -70,6 +73,8 @@ void shell_main() {
 
   tcl::Interp i;
   tcl::register_core_commands(i);
+
+  i.register_mpack_functions(mp_page, OT_PAGE_SIZE);
 
   oprintf("tcl shell ready\n");
 

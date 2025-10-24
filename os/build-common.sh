@@ -20,6 +20,7 @@ COMMON_SHARED_SOURCES=(
   vendor/libmpack/mpack.c
   ot/shared/mpack-reader.cpp
   ot/shared/mpack-utils.cpp
+  ot/shared/vendor/printf.c
 )
 
 # Shared user program source files (platform-independent)

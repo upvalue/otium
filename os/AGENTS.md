@@ -80,3 +80,74 @@ Tests are defined by kernel compile flags:
 2. Add the test to `TEST_PROGRAMS` dict in `test-snapshot.py`
 3. Run `./test-snapshot.py --update` to create the snapshot
 4. Test output lines must start with `TEST:` to be captured
+
+## Tcl
+
+The operating system includes a minimal, self-contained Tcl interpreter implementation that runs in userspace. The interpreter is designed to work in a freestanding environment without standard library dependencies.
+
+### Design
+
+The Tcl implementation (`ot/user/tcl.h` and `ot/user/tcl.cpp`) provides:
+
+- **Custom container classes**: `tcl::string`, `tcl::string_view`, and `tcl::vector<T>` that use only `malloc`/`free`/`realloc`
+- **No standard library dependencies**: Uses placement new and custom allocators instead of `<string>`, `<vector>`, etc.
+- **Lightweight parser**: Handles Tcl syntax including variables (`$var`), command substitution (`[cmd]`), and string quoting
+- **Interpreter**: Maintains command registry, variable scopes (call frames), and evaluation state
+
+### Memory Management
+
+The Tcl interpreter uses the TLSF (Two-Level Segregated Fit) memory allocator:
+
+1. The shell allocates contiguous pages from the OS (currently 10 pages = 40KB)
+2. TLSF provides `malloc`/`free`/`realloc` implementations on top of this pool
+3. All Tcl objects (strings, vectors, commands) allocate from this pool
+4. Memory allocation failures are detected and cause graceful exit with error messages
+
+### Core Commands
+
+The interpreter includes these built-in commands:
+
+- **I/O**: `puts` - print output
+- **Variables**: `set` - get/set variables
+- **Control flow**: `if`, `while`, `break`, `continue`, `return`
+- **Procedures**: `proc` - define new commands
+- **Arithmetic**: `+`, `-`, `*`, `/`
+- **Comparison**: `==`, `!=`, `>`, `<`, `>=`, `<=`
+
+### Shell Program
+
+The shell (`ot/user/prog-shell.cpp`) provides an interactive REPL:
+
+1. Initializes TLSF memory pool on startup
+2. Creates Tcl interpreter and registers core commands
+3. Reads input character-by-character (supports backspace)
+4. Evaluates complete lines when Enter is pressed
+5. Displays results or error messages
+6. Custom commands can be added (e.g., `quit`, `crash` for testing)
+
+### Usage Example
+
+```tcl
+> set x 10
+result: 10
+> set y 20
+result: 20
+> + $x $y
+result: 30
+> proc double {n} { return [* $n 2] }
+result:
+> double 5
+result: 10
+```
+
+### Standalone REPL
+
+A POSIX-compatible standalone Tcl REPL can be built for testing on the host system:
+
+```bash
+./build-tcl-repl.sh
+./bin/tcl-repl              # Interactive mode
+./bin/tcl-repl script.tcl   # Run script
+```
+
+This uses the same Tcl core but with POSIX I/O and the bestline library for line editing.

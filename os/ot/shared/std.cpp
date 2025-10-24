@@ -2,6 +2,16 @@
 
 #include "ot/common.h"
 
+// Forward declarations from mpaland/printf (ot/shared/vendor/printf.c)
+extern "C" {
+int vsnprintf_(char* buffer, size_t count, const char* format, va_list va);
+
+// Dummy _putchar for mpaland printf (not used, but required for linking)
+void _putchar(char character) {
+  (void)character; // Unused
+}
+}
+
 char _ot_scratch_buffer[OT_PAGE_SIZE];
 extern "C" char *ot_scratch_buffer = _ot_scratch_buffer;
 
@@ -63,9 +73,22 @@ int strncmp(const char *s1, const char *s2, size_t n) {
 
 int atoi(const char *s) {
   int result = 0;
-  while (*s)
+  int sign = 1;
+
+  // Handle sign
+  if (*s == '-') {
+    sign = -1;
+    s++;
+  } else if (*s == '+') {
+    s++;
+  }
+
+  // Parse digits
+  while (*s >= '0' && *s <= '9') {
     result = result * 10 + (*s++ - '0');
-  return result;
+  }
+
+  return sign * result;
 }
 
 int memcmp(const void *s1, const void *s2, size_t n) {
@@ -81,75 +104,8 @@ int memcmp(const void *s1, const void *s2, size_t n) {
 }
 
 int ovsnprintf(char *str, size_t size, const char *format, va_list args) {
-  size_t pos = 0;
-
-  auto putchar_buf = [&](char c) {
-    if (pos + 1 < size) {
-      str[pos++] = c;
-    }
-  };
-
-  while (*format && pos + 1 < size) {
-    if (*format == '%') {
-      format++;
-      switch (*format) {
-      case '\0':
-        putchar_buf('%');
-        goto end;
-      case '%':
-        putchar_buf('%');
-        break;
-      case 's': {
-        const char *s = va_arg(args, const char *);
-        while (*s && pos + 1 < size) {
-          putchar_buf(*s);
-          s++;
-        }
-        break;
-      }
-      case 'd': {
-        int value = va_arg(args, int);
-        unsigned magnitude = value;
-        if (value < 0) {
-          putchar_buf('-');
-          magnitude = -magnitude;
-        }
-
-        unsigned divisor = 1;
-        while (magnitude / divisor > 9)
-          divisor *= 10;
-
-        while (divisor > 0 && pos + 1 < size) {
-          putchar_buf('0' + magnitude / divisor);
-          magnitude %= divisor;
-          divisor /= 10;
-        }
-        break;
-      }
-      case 'c': {
-        char c = va_arg(args, int);
-        putchar_buf(c);
-        break;
-      }
-      case 'x': {
-        unsigned value = va_arg(args, unsigned);
-        for (int i = 7; i >= 0 && pos + 1 < size; i--) {
-          unsigned nibble = (value >> (i * 4)) & 0xf;
-          putchar_buf("0123456789abcdef"[nibble]);
-        }
-        break;
-      }
-      }
-    } else {
-      putchar_buf(*format);
-    }
-    format++;
-  }
-
-end:
-  if (size > 0)
-    str[pos] = '\0';
-  return pos;
+  // Use mpaland/printf implementation
+  return vsnprintf_(str, size, format, args);
 }
 
 int osnprintf(char *str, size_t size, const char *format, ...) {

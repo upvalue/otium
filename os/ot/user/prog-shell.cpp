@@ -17,24 +17,6 @@ static bool running = true;
 void *memory_begin = nullptr;
 tlsf_t pool = nullptr;
 
-// static MPackWriter message_writer(nullptr, 0);
-// tcl mpack interface
-
-// mp/reset -> erase scratch buffer
-// mp/array 3
-// mp/string "ipc"
-// mp/string "echo"
-// mp/string "Hello, world!"
-
-// mp/print -> print contents of scratch buffer
-
-// proc/lookup echo
-// lookup pid of echo proc
-
-// set echopid [proc/lookup echo]
-// puts "echo process pid $echopid"
-// ipc/send $echopid
-
 void *malloc(size_t size) {
   if (!pool) {
     oprintf("FATAL: malloc called before pool initialized (size=%d)\n", size);
@@ -69,16 +51,18 @@ void *realloc(void *ptr, size_t size) {
   return result;
 }
 
+#define SHELL_PAGES 10
+
 void shell_main() {
   // allocate some contiguous pages to work with
   memory_begin = ou_alloc_page();
 
-  for (size_t i = 0; i != 9; i++) {
+  for (size_t i = 0; i != SHELL_PAGES - 1; i++) {
     ou_alloc_page();
   }
 
   // create memory pool
-  pool = tlsf_create_with_pool(memory_begin, 10 * OT_PAGE_SIZE);
+  pool = tlsf_create_with_pool(memory_begin, SHELL_PAGES * OT_PAGE_SIZE);
   if (!pool) {
     oprintf("FATAL: failed to create memory pool\n");
     ou_exit();

@@ -2,8 +2,9 @@
 set -euxo pipefail
 mkdir -p bin
 
-# Compile mpack as C
+# Compile C libraries
 clang -DOT_POSIX -DOT_TEST -I. -c vendor/libmpack/mpack.c -o bin/mpack.o
+clang -DOT_POSIX -DOT_TEST -I. -c ot/shared/vendor/printf.c -o bin/printf.o
 
 # Compile and link tests
 clang++ -DOT_POSIX -DOT_TEST -DOT_TRACE_MEM \
@@ -13,6 +14,7 @@ clang++ -DOT_POSIX -DOT_TEST -DOT_TRACE_MEM \
     ot/kernel/memory.cpp \
     ot/kernel/std.cpp \
     ot/shared/std.cpp \
+    ot/shared/printf-test.cpp \
     ot/kernel/platform-test.cpp \
     ot/kernel/process.cpp \
     ot/kernel/process-test.cpp \
@@ -23,6 +25,7 @@ clang++ -DOT_POSIX -DOT_TEST -DOT_TRACE_MEM \
     ot/shared/mpack-utils-test.cpp \
     ot/user/tcl.cpp \
     ot/user/tcl-test.cpp \
-    bin/mpack.o
+    bin/mpack.o \
+    bin/printf.o
 
 ./bin/test

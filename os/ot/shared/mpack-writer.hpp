@@ -34,10 +34,27 @@ private:
   }
 
 public:
+  // Default constructor (buffer must be set via init() before use)
+  MPackWriter()
+      : buf_start_(nullptr), buf_(nullptr), buflen_(0), capacity_(0),
+        error_(true) {
+    mpack_tokbuf_init(&state_);
+  }
+
   // Initialize packer with a buffer
   MPackWriter(void *buffer, size_t size)
       : buf_start_((char *)buffer), buf_((char *)buffer), buflen_(size),
         capacity_(size), error_(false) {
+    mpack_tokbuf_init(&state_);
+  }
+
+  // Initialize with a buffer (for use after default construction)
+  void init(void *buffer, size_t size) {
+    buf_start_ = (char *)buffer;
+    buf_ = (char *)buffer;
+    buflen_ = size;
+    capacity_ = size;
+    error_ = false;
     mpack_tokbuf_init(&state_);
   }
 

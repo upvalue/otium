@@ -362,3 +362,146 @@ TEST_CASE("tcl - complex expressions") {
     CHECK(i.result.compare("17") == 0);
   }
 }
+
+TEST_CASE("tcl - messagepack commands") {
+  tcl::Interp i;
+  tcl::register_core_commands(i);
+  char mpack_buffer[OT_PAGE_SIZE];
+  i.register_mpack_functions(mpack_buffer, OT_PAGE_SIZE);
+
+  SUBCASE("mp/nil") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/nil") == tcl::S_OK);
+    CHECK(i.eval("mp/size") == tcl::S_OK);
+    CHECK(strcmp(i.result.c_str(), "1") == 0);
+    CHECK(i.eval("mp/hex") == tcl::S_OK);
+    CHECK(strcmp(i.result.c_str(), "c0 ") == 0);
+  }
+
+  SUBCASE("mp/bool") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/bool 1") == tcl::S_OK);
+    CHECK(i.eval("mp/hex") == tcl::S_OK);
+    CHECK(strcmp(i.result.c_str(), "c3 ") == 0);
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/bool 0") == tcl::S_OK);
+    CHECK(i.eval("mp/hex") == tcl::S_OK);
+    CHECK(strcmp(i.result.c_str(), "c2 ") == 0);
+  }
+
+  SUBCASE("mp/bool - invalid argument") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/bool 2") == tcl::S_ERR);
+    CHECK(i.eval("mp/bool true") == tcl::S_ERR);
+  }
+
+  SUBCASE("mp/int") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/int 42") == tcl::S_OK);
+    CHECK(i.eval("mp/size") == tcl::S_OK);
+    CHECK(strcmp(i.result.c_str(), "1") == 0);
+    CHECK(i.eval("mp/hex") == tcl::S_OK);
+    CHECK(strcmp(i.result.c_str(), "2a ") == 0);
+  }
+
+  SUBCASE("mp/int - negative") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/int -5") == tcl::S_OK);
+    CHECK(i.eval("mp/hex") == tcl::S_OK);
+    CHECK(strcmp(i.result.c_str(), "fb ") == 0);
+  }
+
+  SUBCASE("mp/uint") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/uint 255") == tcl::S_OK);
+    CHECK(i.eval("mp/size") == tcl::S_OK);
+    CHECK(strcmp(i.result.c_str(), "2") == 0);
+  }
+
+  SUBCASE("mp/uint - invalid") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/uint -1") == tcl::S_ERR);
+    CHECK(i.eval("mp/uint abc") == tcl::S_ERR);
+  }
+
+  SUBCASE("mp/string") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/string {hello}") == tcl::S_OK);
+    CHECK(i.eval("mp/size") == tcl::S_OK);
+    CHECK(strcmp(i.result.c_str(), "6") == 0);
+  }
+
+  SUBCASE("mp/string - empty") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/string {}") == tcl::S_OK);
+    CHECK(i.eval("mp/size") == tcl::S_OK);
+    CHECK(strcmp(i.result.c_str(), "1") == 0);
+  }
+
+  SUBCASE("mp/array") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/array 3") == tcl::S_OK);
+    CHECK(i.eval("mp/int 1") == tcl::S_OK);
+    CHECK(i.eval("mp/int 2") == tcl::S_OK);
+    CHECK(i.eval("mp/int 3") == tcl::S_OK);
+    CHECK(i.eval("mp/size") == tcl::S_OK);
+    // Array header (1 byte) + 3 ints (1 byte each) = 4 bytes
+    CHECK(strcmp(i.result.c_str(), "4") == 0);
+  }
+
+  SUBCASE("mp/array - negative count") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/array -1") == tcl::S_ERR);
+  }
+
+  SUBCASE("mp/map") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/map 2") == tcl::S_OK);
+    CHECK(i.eval("mp/string {key1}") == tcl::S_OK);
+    CHECK(i.eval("mp/int 1") == tcl::S_OK);
+    CHECK(i.eval("mp/string {key2}") == tcl::S_OK);
+    CHECK(i.eval("mp/int 2") == tcl::S_OK);
+    CHECK(i.eval("mp/size") == tcl::S_OK);
+    // Map header + 2 keys (5 bytes each) + 2 values (1 byte each) = 13 bytes
+    CHECK(strcmp(i.result.c_str(), "13") == 0);
+  }
+
+  SUBCASE("mp/map - negative count") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/map -1") == tcl::S_ERR);
+  }
+
+  SUBCASE("mp/reset") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/int 42") == tcl::S_OK);
+    CHECK(i.eval("mp/size") == tcl::S_OK);
+    CHECK(strcmp(i.result.c_str(), "1") == 0);
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/size") == tcl::S_OK);
+    CHECK(strcmp(i.result.c_str(), "0") == 0);
+  }
+
+  SUBCASE("complex structure") {
+    CHECK(i.eval("mp/reset") == tcl::S_OK);
+    CHECK(i.eval("mp/array 3") == tcl::S_OK);
+    CHECK(i.eval("mp/string {ipc}") == tcl::S_OK);
+    CHECK(i.eval("mp/string {echo}") == tcl::S_OK);
+    CHECK(i.eval("mp/string {Hello, world!}") == tcl::S_OK);
+    CHECK(i.eval("mp/size") == tcl::S_OK);
+    // Array (1) + "ipc" (4) + "echo" (5) + "Hello, world!" (14) = 24
+    CHECK(strcmp(i.result.c_str(), "24") == 0);
+  }
+}
+
+TEST_CASE("tcl - messagepack without buffer") {
+  tcl::Interp i;
+  tcl::register_core_commands(i);
+  // Don't register mpack functions
+
+  SUBCASE("commands fail without buffer") {
+    CHECK(i.eval("mp/reset") == tcl::S_ERR);
+    CHECK(i.eval("mp/nil") == tcl::S_ERR);
+    CHECK(i.eval("mp/int 42") == tcl::S_ERR);
+    CHECK(i.eval("mp/string {test}") == tcl::S_ERR);
+  }
+}

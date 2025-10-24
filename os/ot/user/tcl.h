@@ -5,6 +5,7 @@
 #define _TCL_H
 
 #include "ot/common.h"
+#include "ot/shared/mpack-writer.hpp"
 
 // Forward declarations for memory allocation functions
 extern "C" {
@@ -334,6 +335,11 @@ struct Interp {
   string result;
   bool trace_parser;
 
+  // MessagePack support (optional)
+  void *mpack_buffer_;
+  size_t mpack_buffer_size_;
+  MPackWriter mpack_writer_;
+
   Interp();
   ~Interp();
 
@@ -347,6 +353,9 @@ struct Interp {
                    size_t max);
   bool int_check(const string &name, const vector<string> &argv, size_t idx);
   Status eval(const string_view &str);
+
+  // MessagePack functions
+  void register_mpack_functions(void *buffer, size_t size);
 };
 
 // Global functions

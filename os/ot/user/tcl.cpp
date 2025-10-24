@@ -1,6 +1,8 @@
 // tcl.cpp - implementation of minimal dependency Tcl interpreter
 
 #include "ot/user/tcl.h"
+#include "ot/shared/mpack-utils.hpp"
+#include "ot/shared/mpack-writer.hpp"
 
 namespace tcl {
 
@@ -433,7 +435,8 @@ CallFrame::~CallFrame() {
 // INTERP IMPLEMENTATION
 //
 
-Interp::Interp() : trace_parser(false) {
+Interp::Interp()
+    : trace_parser(false), mpack_buffer_(nullptr), mpack_buffer_size_(0) {
   callframes.push_back(tcl_new<CallFrame>());
 }
 
@@ -726,8 +729,7 @@ static Status cmd_return(Interp &i, vector<string> &argv,
   return S_RETURN;
 }
 
-static Status cmd_add(Interp &i, vector<string> &argv,
-                      ProcPrivdata *privdata) {
+static Status cmd_add(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("+", argv, 3, 3)) {
     return S_ERR;
   }
@@ -741,8 +743,7 @@ static Status cmd_add(Interp &i, vector<string> &argv,
   return S_OK;
 }
 
-static Status cmd_sub(Interp &i, vector<string> &argv,
-                      ProcPrivdata *privdata) {
+static Status cmd_sub(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("-", argv, 3, 3)) {
     return S_ERR;
   }
@@ -756,8 +757,7 @@ static Status cmd_sub(Interp &i, vector<string> &argv,
   return S_OK;
 }
 
-static Status cmd_mul(Interp &i, vector<string> &argv,
-                      ProcPrivdata *privdata) {
+static Status cmd_mul(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("*", argv, 3, 3)) {
     return S_ERR;
   }
@@ -771,8 +771,7 @@ static Status cmd_mul(Interp &i, vector<string> &argv,
   return S_OK;
 }
 
-static Status cmd_div(Interp &i, vector<string> &argv,
-                      ProcPrivdata *privdata) {
+static Status cmd_div(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("/", argv, 3, 3)) {
     return S_ERR;
   }
@@ -786,8 +785,7 @@ static Status cmd_div(Interp &i, vector<string> &argv,
   return S_OK;
 }
 
-static Status cmd_eq(Interp &i, vector<string> &argv,
-                     ProcPrivdata *privdata) {
+static Status cmd_eq(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("==", argv, 3, 3)) {
     return S_ERR;
   }
@@ -801,8 +799,7 @@ static Status cmd_eq(Interp &i, vector<string> &argv,
   return S_OK;
 }
 
-static Status cmd_ne(Interp &i, vector<string> &argv,
-                     ProcPrivdata *privdata) {
+static Status cmd_ne(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("!=", argv, 3, 3)) {
     return S_ERR;
   }
@@ -816,8 +813,7 @@ static Status cmd_ne(Interp &i, vector<string> &argv,
   return S_OK;
 }
 
-static Status cmd_gt(Interp &i, vector<string> &argv,
-                     ProcPrivdata *privdata) {
+static Status cmd_gt(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check(">", argv, 3, 3)) {
     return S_ERR;
   }
@@ -831,8 +827,7 @@ static Status cmd_gt(Interp &i, vector<string> &argv,
   return S_OK;
 }
 
-static Status cmd_lt(Interp &i, vector<string> &argv,
-                     ProcPrivdata *privdata) {
+static Status cmd_lt(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("<", argv, 3, 3)) {
     return S_ERR;
   }
@@ -846,8 +841,7 @@ static Status cmd_lt(Interp &i, vector<string> &argv,
   return S_OK;
 }
 
-static Status cmd_gte(Interp &i, vector<string> &argv,
-                      ProcPrivdata *privdata) {
+static Status cmd_gte(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check(">=", argv, 3, 3)) {
     return S_ERR;
   }
@@ -861,8 +855,7 @@ static Status cmd_gte(Interp &i, vector<string> &argv,
   return S_OK;
 }
 
-static Status cmd_lte(Interp &i, vector<string> &argv,
-                      ProcPrivdata *privdata) {
+static Status cmd_lte(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("<=", argv, 3, 3)) {
     return S_ERR;
   }
@@ -895,6 +888,259 @@ void register_core_commands(Interp &i) {
   i.register_command("<", cmd_lt);
   i.register_command(">=", cmd_gte);
   i.register_command("<=", cmd_lte);
+}
+
+//
+// MESSAGEPACK COMMANDS
+//
+
+static Status cmd_mp_reset(Interp &i, vector<string> &argv,
+                           ProcPrivdata *privdata) {
+  if (!i.arity_check("mp/reset", argv, 1, 1)) {
+    return S_ERR;
+  }
+  if (!i.mpack_buffer_) {
+    format_error(i.result, "mp/reset: MessagePack buffer not initialized");
+    return S_ERR;
+  }
+  i.mpack_writer_.reset();
+  return S_OK;
+}
+
+static Status cmd_mp_array(Interp &i, vector<string> &argv,
+                           ProcPrivdata *privdata) {
+  if (!i.arity_check("mp/array", argv, 2, 2)) {
+    return S_ERR;
+  }
+  if (!i.mpack_buffer_) {
+    format_error(i.result, "mp/array: MessagePack buffer not initialized");
+    return S_ERR;
+  }
+  if (!i.int_check("mp/array", argv, 1)) {
+    return S_ERR;
+  }
+  int count = atoi(argv[1].c_str());
+  if (count < 0) {
+    format_error(i.result, "mp/array: count must be non-negative");
+    return S_ERR;
+  }
+  i.mpack_writer_.array((uint32_t)count);
+  if (!i.mpack_writer_.ok()) {
+    format_error(i.result, "mp/array: buffer overflow");
+    return S_ERR;
+  }
+  return S_OK;
+}
+
+static Status cmd_mp_map(Interp &i, vector<string> &argv,
+                         ProcPrivdata *privdata) {
+  if (!i.arity_check("mp/map", argv, 2, 2)) {
+    return S_ERR;
+  }
+  if (!i.mpack_buffer_) {
+    format_error(i.result, "mp/map: MessagePack buffer not initialized");
+    return S_ERR;
+  }
+  if (!i.int_check("mp/map", argv, 1)) {
+    return S_ERR;
+  }
+  int count = atoi(argv[1].c_str());
+  if (count < 0) {
+    format_error(i.result, "mp/map: count must be non-negative");
+    return S_ERR;
+  }
+  i.mpack_writer_.map((uint32_t)count);
+  if (!i.mpack_writer_.ok()) {
+    format_error(i.result, "mp/map: buffer overflow");
+    return S_ERR;
+  }
+  return S_OK;
+}
+
+static Status cmd_mp_string(Interp &i, vector<string> &argv,
+                            ProcPrivdata *privdata) {
+  if (!i.arity_check("mp/string", argv, 2, 2)) {
+    return S_ERR;
+  }
+  if (!i.mpack_buffer_) {
+    format_error(i.result, "mp/string: MessagePack buffer not initialized");
+    return S_ERR;
+  }
+  i.mpack_writer_.str(argv[1].c_str(), (uint32_t)argv[1].length());
+  if (!i.mpack_writer_.ok()) {
+    format_error(i.result, "mp/string: buffer overflow");
+    return S_ERR;
+  }
+  return S_OK;
+}
+
+static Status cmd_mp_int(Interp &i, vector<string> &argv,
+                         ProcPrivdata *privdata) {
+  if (!i.arity_check("mp/int", argv, 2, 2)) {
+    return S_ERR;
+  }
+  if (!i.mpack_buffer_) {
+    format_error(i.result, "mp/int: MessagePack buffer not initialized");
+    return S_ERR;
+  }
+  if (!i.int_check("mp/int", argv, 1)) {
+    return S_ERR;
+  }
+  int32_t value = (int32_t)atoi(argv[1].c_str());
+  i.mpack_writer_.pack(value);
+  if (!i.mpack_writer_.ok()) {
+    format_error(i.result, "mp/int: buffer overflow");
+    return S_ERR;
+  }
+  return S_OK;
+}
+
+static Status cmd_mp_uint(Interp &i, vector<string> &argv,
+                          ProcPrivdata *privdata) {
+  if (!i.arity_check("mp/uint", argv, 2, 2)) {
+    return S_ERR;
+  }
+  if (!i.mpack_buffer_) {
+    format_error(i.result, "mp/uint: MessagePack buffer not initialized");
+    return S_ERR;
+  }
+  // Check that it's a valid non-negative integer
+  for (size_t j = 0; j < argv[1].length(); j++) {
+    char c = argv[1][j];
+    if (c < '0' || c > '9') {
+      format_error(i.result,
+                   "mp/uint: argument must be a non-negative integer");
+      return S_ERR;
+    }
+  }
+  i.mpack_writer_.pack((uint32_t)atoi(argv[1].c_str()));
+  if (!i.mpack_writer_.ok()) {
+    format_error(i.result, "mp/uint: buffer overflow");
+    return S_ERR;
+  }
+  return S_OK;
+}
+
+static Status cmd_mp_bool(Interp &i, vector<string> &argv,
+                          ProcPrivdata *privdata) {
+  if (!i.arity_check("mp/bool", argv, 2, 2)) {
+    return S_ERR;
+  }
+  if (!i.mpack_buffer_) {
+    format_error(i.result, "mp/bool: MessagePack buffer not initialized");
+    return S_ERR;
+  }
+  bool value;
+  if (argv[1].compare("0") == 0) {
+    value = false;
+  } else if (argv[1].compare("1") == 0) {
+    value = true;
+  } else {
+    format_error(i.result, "mp/bool: argument must be 0 or 1");
+    return S_ERR;
+  }
+  i.mpack_writer_.pack(value);
+  if (!i.mpack_writer_.ok()) {
+    format_error(i.result, "mp/bool: buffer overflow");
+    return S_ERR;
+  }
+  return S_OK;
+}
+
+static Status cmd_mp_nil(Interp &i, vector<string> &argv,
+                         ProcPrivdata *privdata) {
+  if (!i.arity_check("mp/nil", argv, 1, 1)) {
+    return S_ERR;
+  }
+  if (!i.mpack_buffer_) {
+    format_error(i.result, "mp/nil: MessagePack buffer not initialized");
+    return S_ERR;
+  }
+  i.mpack_writer_.nil();
+  if (!i.mpack_writer_.ok()) {
+    format_error(i.result, "mp/nil: buffer overflow");
+    return S_ERR;
+  }
+  return S_OK;
+}
+
+static Status cmd_mp_print(Interp &i, vector<string> &argv,
+                           ProcPrivdata *privdata) {
+  if (!i.arity_check("mp/print", argv, 1, 1)) {
+    return S_ERR;
+  }
+  if (!i.mpack_buffer_) {
+    format_error(i.result, "mp/print: MessagePack buffer not initialized");
+    return S_ERR;
+  }
+  if (!i.mpack_writer_.ok()) {
+    format_error(i.result, "mp/print: MessagePack writer is in error state");
+    return S_ERR;
+  }
+  // Use mpack_print with oputchar callback (works in both OT_POSIX and
+  // non-POSIX)
+  mpack_print((const char *)i.mpack_writer_.data(), i.mpack_writer_.size(),
+              [](char ch) -> int {
+                oputchar(ch);
+                return 1;
+              });
+
+  oputchar('\n');
+  return S_OK;
+}
+
+static Status cmd_mp_size(Interp &i, vector<string> &argv,
+                          ProcPrivdata *privdata) {
+  if (!i.arity_check("mp/size", argv, 1, 1)) {
+    return S_ERR;
+  }
+  if (!i.mpack_buffer_) {
+    format_error(i.result, "mp/size: MessagePack buffer not initialized");
+    return S_ERR;
+  }
+  char buf[32];
+  osnprintf(buf, sizeof(buf), "%d", (int)i.mpack_writer_.size());
+  i.result = buf;
+  return S_OK;
+}
+
+static Status cmd_mp_hex(Interp &i, vector<string> &argv,
+                         ProcPrivdata *privdata) {
+  if (!i.arity_check("mp/hex", argv, 1, 1)) {
+    return S_ERR;
+  }
+  if (!i.mpack_buffer_) {
+    format_error(i.result, "mp/hex: MessagePack buffer not initialized");
+    return S_ERR;
+  }
+  const unsigned char *data = (const unsigned char *)i.mpack_writer_.data();
+  uint32_t size = i.mpack_writer_.size();
+  i.result.clear();
+  const char *hexchars = "0123456789abcdef";
+  for (uint32_t j = 0; j < size; j++) {
+    i.result += hexchars[(data[j] >> 4) & 0xf];
+    i.result += hexchars[data[j] & 0xf];
+    i.result += ' ';
+  }
+  return S_OK;
+}
+
+void Interp::register_mpack_functions(void *buffer, size_t size) {
+  mpack_buffer_ = buffer;
+  mpack_buffer_size_ = size;
+  mpack_writer_.init(buffer, size);
+
+  register_command("mp/reset", cmd_mp_reset);
+  register_command("mp/array", cmd_mp_array);
+  register_command("mp/map", cmd_mp_map);
+  register_command("mp/string", cmd_mp_string);
+  register_command("mp/int", cmd_mp_int);
+  register_command("mp/uint", cmd_mp_uint);
+  register_command("mp/bool", cmd_mp_bool);
+  register_command("mp/nil", cmd_mp_nil);
+  register_command("mp/print", cmd_mp_print);
+  register_command("mp/size", cmd_mp_size);
+  register_command("mp/hex", cmd_mp_hex);
 }
 
 } // namespace tcl

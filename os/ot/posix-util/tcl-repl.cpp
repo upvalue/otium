@@ -99,6 +99,12 @@ int main(int argc, char *argv[]) {
   tcl::Interp interp;
   tcl::register_core_commands(interp);
 
+  // Allocate MessagePack buffer and register functions
+  char *mpack_buffer = (char *)malloc(OT_PAGE_SIZE);
+  if (mpack_buffer) {
+    interp.register_mpack_functions(mpack_buffer, OT_PAGE_SIZE);
+  }
+
   // Register quit command
   interp.register_command("quit",
                           [](tcl::Interp &i, tcl::vector<tcl::string> &argv,
@@ -130,10 +136,12 @@ int main(int argc, char *argv[]) {
       run_repl(interp);
     } else {
       if (!run_file(interp, action.filename)) {
+        free(mpack_buffer);
         return 1;
       }
     }
   }
 
+  free(mpack_buffer);
   return 0;
 }

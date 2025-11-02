@@ -2,7 +2,7 @@
 # Common compiler flags and source file lists shared across all architectures
 
 # Flags common to all architectures
-COMMON_CFLAGS="-Os -g3 -Wall -Wextra -Wno-unused-parameter -fno-exceptions -fno-rtti"
+COMMON_CFLAGS="-Os -g3 -Wall -Wextra -Wno-unused-parameter -fno-exceptions "
 COMMON_CPPFLAGS="-I."
 
 # Shared kernel source files (platform-independent)

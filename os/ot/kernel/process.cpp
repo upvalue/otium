@@ -276,6 +276,12 @@ Process *process_next_runnable(void) {
     }
   }
 
+  // for now we just quit when shell exits as a convenience
+  if (procs[1].state == TERMINATED) {
+    oprintf("process 1 terminated; exiting\n");
+    return idle_proc;
+  }
+
   return next;
 }
 

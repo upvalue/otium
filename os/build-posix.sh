@@ -23,7 +23,7 @@ echo "✓ TCL REPL built successfully: bin/tcl-repl"
 # Build TEVL text editor
 clang++ -DOT_POSIX -std=c++17 -I. -o bin/tevl \
     ot/user/tevl.cpp \
-    ot/posix-util/tevl.cpp \
+    ot/posix-util/tevl-posix.cpp \
     ot/posix-util/posix-std.cpp \
     ot/shared/std.cpp \
     bin/printf.o

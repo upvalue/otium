@@ -7,7 +7,7 @@ clang -DOT_POSIX -std=c11 -I. -c ot/posix-util/vendor/bestline.c -o bin/bestline
 clang -DOT_POSIX -std=c11 -I. -c vendor/libmpack/mpack.c -o bin/mpack.o
 clang -DOT_POSIX -std=c11 -I. -c ot/shared/vendor/printf.c -o bin/printf.o
 
-# Compile C++ files and link with C objects
+# Build TCL REPL
 clang++ -DOT_POSIX -std=c++17 -I. -o bin/tcl-repl \
     ot/user/tcl.cpp \
     ot/posix-util/tcl-repl.cpp \
@@ -19,3 +19,13 @@ clang++ -DOT_POSIX -std=c++17 -I. -o bin/tcl-repl \
     bin/printf.o
 
 echo "✓ TCL REPL built successfully: bin/tcl-repl"
+
+# Build TEVL text editor
+clang++ -DOT_POSIX -std=c++17 -I. -o bin/tevl \
+    ot/user/tevl.cpp \
+    ot/posix-util/tevl.cpp \
+    ot/posix-util/posix-std.cpp \
+    ot/shared/std.cpp \
+    bin/printf.o
+
+echo "✓ TEVL built successfully: bin/tevl"

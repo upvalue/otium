@@ -14,6 +14,10 @@ enum class EditorErr {
   FATAL_TERM_TCSETATTR_FAILED,
 };
 
+struct Coord {
+  int x, y;
+};
+
 struct Backend {
   const char *error_msg;
 
@@ -22,6 +26,9 @@ struct Backend {
 
   virtual EditorErr setup() = 0;
   virtual void teardown() = 0;
+  virtual void refresh() = 0;
+  virtual void clear() = 0;
+  virtual Coord getWindowSize() = 0;
 };
 
 void tevl_main(Backend *backend);

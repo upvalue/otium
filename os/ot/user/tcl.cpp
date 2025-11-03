@@ -7,179 +7,6 @@
 namespace tcl {
 
 //
-// STRING IMPLEMENTATION
-//
-
-void string::ensure_capacity(size_t new_cap) {
-  if (new_cap <= cap_)
-    return;
-  size_t alloc_cap = cap_ == 0 ? 16 : cap_;
-  while (alloc_cap < new_cap)
-    alloc_cap *= 2;
-  char *new_data = (char *)tcl_realloc(data_, alloc_cap);
-  data_ = new_data;
-  cap_ = alloc_cap;
-}
-
-string::string() : data_(nullptr), len_(0), cap_(0) {}
-
-string::string(const char *s) : data_(nullptr), len_(0), cap_(0) {
-  if (s) {
-    len_ = strlen(s);
-    ensure_capacity(len_ + 1);
-    memcpy(data_, s, len_);
-    data_[len_] = '\0';
-  }
-}
-
-string::string(const char *s, size_t n) : data_(nullptr), len_(0), cap_(0) {
-  if (s && n > 0) {
-    len_ = n;
-    ensure_capacity(len_ + 1);
-    memcpy(data_, s, len_);
-    data_[len_] = '\0';
-  }
-}
-
-string::string(const string &other) : data_(nullptr), len_(0), cap_(0) {
-  if (other.len_ > 0) {
-    len_ = other.len_;
-    ensure_capacity(len_ + 1);
-    memcpy(data_, other.data_, len_);
-    data_[len_] = '\0';
-  }
-}
-
-string::string(string &&other) noexcept
-    : data_(other.data_), len_(other.len_), cap_(other.cap_) {
-  other.data_ = nullptr;
-  other.len_ = 0;
-  other.cap_ = 0;
-}
-
-string::~string() {
-  if (data_)
-    tcl_free(data_);
-}
-
-string &string::operator=(const string &other) {
-  if (this != &other) {
-    clear();
-    if (other.len_ > 0) {
-      len_ = other.len_;
-      ensure_capacity(len_ + 1);
-      memcpy(data_, other.data_, len_);
-      data_[len_] = '\0';
-    }
-  }
-  return *this;
-}
-
-string &string::operator=(string &&other) noexcept {
-  if (this != &other) {
-    if (data_)
-      tcl_free(data_);
-    data_ = other.data_;
-    len_ = other.len_;
-    cap_ = other.cap_;
-    other.data_ = nullptr;
-    other.len_ = 0;
-    other.cap_ = 0;
-  }
-  return *this;
-}
-
-string &string::operator=(const char *s) {
-  clear();
-  if (s) {
-    len_ = strlen(s);
-    ensure_capacity(len_ + 1);
-    memcpy(data_, s, len_);
-    data_[len_] = '\0';
-  }
-  return *this;
-}
-
-void string::clear() {
-  len_ = 0;
-  if (data_)
-    data_[0] = '\0';
-}
-
-void string::reserve(size_t new_cap) { ensure_capacity(new_cap); }
-
-void string::append(const char *s, size_t n) {
-  if (s && n > 0) {
-    ensure_capacity(len_ + n + 1);
-    memcpy(data_ + len_, s, n);
-    len_ += n;
-    data_[len_] = '\0';
-  }
-}
-
-void string::append(const char *s) {
-  if (s)
-    append(s, strlen(s));
-}
-
-void string::append(const string &s) { append(s.data_, s.len_); }
-
-void string::push_back(char c) {
-  ensure_capacity(len_ + 2);
-  data_[len_++] = c;
-  data_[len_] = '\0';
-}
-
-string &string::operator+=(const char *s) {
-  append(s);
-  return *this;
-}
-
-string &string::operator+=(const string &s) {
-  append(s);
-  return *this;
-}
-
-string &string::operator+=(char c) {
-  push_back(c);
-  return *this;
-}
-
-int string::compare(const char *s) const {
-  if (!data_ && !s)
-    return 0;
-  if (!data_)
-    return -1;
-  if (!s)
-    return 1;
-  return strcmp(data_, s);
-}
-
-int string::compare(const string &s) const { return compare(s.data_); }
-
-int string::compare(const string_view &s) const {
-  if (!data_ && !s.data_)
-    return 0;
-  if (!data_)
-    return -1;
-  if (!s.data_)
-    return 1;
-  size_t minlen = len_ < s.len_ ? len_ : s.len_;
-  int cmp = memcmp(data_, s.data_, minlen);
-  if (cmp == 0)
-    return len_ < s.len_ ? -1 : (len_ > s.len_ ? 1 : 0);
-  return cmp;
-}
-
-string string::substr(size_t pos, size_t len) const {
-  if (pos > len_)
-    pos = len_;
-  if (pos + len > len_)
-    len = len_ - pos;
-  return string(data_ + pos, len);
-}
-
-//
 // HELPER FUNCTIONS
 //
 
@@ -396,8 +223,8 @@ ProcPrivdata::ProcPrivdata(string *args_, string *body_)
     : args(args_), body(body_) {}
 
 ProcPrivdata::~ProcPrivdata() {
-  tcl_delete(args);
-  tcl_delete(body);
+  ou_delete(args);
+  ou_delete(body);
 }
 
 //
@@ -410,7 +237,7 @@ Cmd::Cmd(const string &name_, cmd_func_t func_, ProcPrivdata *privdata_,
 
 Cmd::~Cmd() {
   if (privdata)
-    tcl_delete(privdata);
+    ou_delete(privdata);
 }
 
 //
@@ -418,8 +245,8 @@ Cmd::~Cmd() {
 //
 
 Var::~Var() {
-  tcl_delete(name);
-  tcl_delete(val);
+  ou_delete(name);
+  ou_delete(val);
 }
 
 //
@@ -428,7 +255,7 @@ Var::~Var() {
 
 CallFrame::~CallFrame() {
   for (Var *v : vars) {
-    tcl_delete(v);
+    ou_delete(v);
   }
 }
 
@@ -438,22 +265,22 @@ CallFrame::~CallFrame() {
 
 Interp::Interp()
     : trace_parser(false), mpack_buffer_(nullptr), mpack_buffer_size_(0) {
-  callframes.push_back(tcl_new<CallFrame>());
+  callframes.push_back(ou_new<CallFrame>());
 }
 
 Interp::~Interp() {
   for (CallFrame *cf : callframes) {
-    tcl_delete(cf);
+    ou_delete(cf);
   }
   for (Cmd *c : commands) {
-    tcl_delete(c);
+    ou_delete(c);
   }
 }
 
 void Interp::drop_call_frame() {
   CallFrame *cf = callframes.back();
   callframes.pop_back();
-  tcl_delete(cf);
+  ou_delete(cf);
 }
 
 Cmd *Interp::get_command(const string &name) const {
@@ -472,7 +299,7 @@ Status Interp::register_command(const string &name, cmd_func_t fn,
     format_error(result, "command already defined: '%s'", name.c_str());
     return S_ERR;
   }
-  commands.push_back(tcl_new<Cmd>(name, fn, privdata, docstring));
+  commands.push_back(ou_new<Cmd>(name, fn, privdata, docstring));
   return S_OK;
 }
 
@@ -488,12 +315,12 @@ Var *Interp::get_var(const string_view &name) {
 Status Interp::set_var(const string &name, const string &val) {
   Var *v = get_var(string_view(name));
   if (v) {
-    tcl_delete(v->val);
-    v->val = tcl_new<string>(val);
+    ou_delete(v->val);
+    v->val = ou_new<string>(val);
   } else {
-    v = tcl_new<Var>();
-    v->name = tcl_new<string>(name);
-    v->val = tcl_new<string>(val);
+    v = ou_new<Var>();
+    v->name = ou_new<string>(name);
+    v->val = ou_new<string>(val);
     callframes.back()->vars.push_back(v);
   }
   return S_OK;
@@ -590,7 +417,7 @@ Status Interp::eval(const string_view &str) {
 //
 
 Status call_proc(Interp &i, vector<string> &argv, ProcPrivdata *pd) {
-  CallFrame *cf = tcl_new<CallFrame>();
+  CallFrame *cf = ou_new<CallFrame>();
   i.callframes.push_back(cf);
 
   size_t arity = 0;
@@ -715,7 +542,7 @@ static Status cmd_proc(Interp &i, vector<string> &argv,
     return S_ERR;
   }
   ProcPrivdata *ppd =
-      tcl_new<ProcPrivdata>(tcl_new<string>(argv[2]), tcl_new<string>(argv[3]));
+      ou_new<ProcPrivdata>(ou_new<string>(argv[2]), ou_new<string>(argv[3]));
   i.register_command(argv[1], call_proc, ppd);
   return S_OK;
 }

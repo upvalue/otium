@@ -18,36 +18,36 @@ static bool running = true;
 void *memory_begin = nullptr;
 tlsf_t pool = nullptr;
 
-void *tcl_malloc(size_t size) {
+void *ou_malloc(size_t size) {
   if (!pool) {
-    oprintf("FATAL: tcl_malloc called before pool initialized (size=%d)\n",
+    oprintf("FATAL: ou_malloc called before pool initialized (size=%d)\n",
             size);
     ou_exit();
   }
   void *result = tlsf_malloc(pool, size);
   if (!result && size > 0) {
-    oprintf("FATAL: tcl_malloc failed - out of memory (requested=%d)\n", size);
+    oprintf("FATAL: ou_malloc failed - out of memory (requested=%d)\n", size);
     ou_exit();
   }
   return result;
 }
 
-void tcl_free(void *ptr) {
+void ou_free(void *ptr) {
   if (!pool) {
-    oprintf("WARNING: tcl_free called before pool initialized\n");
+    oprintf("WARNING: ou_free called before pool initialized\n");
     return;
   }
   tlsf_free(pool, ptr);
 }
 
-void *tcl_realloc(void *ptr, size_t size) {
+void *ou_realloc(void *ptr, size_t size) {
   if (!pool) {
-    oprintf("FATAL: tcl_realloc called before pool initialized\n");
+    oprintf("FATAL: ou_realloc called before pool initialized\n");
     ou_exit();
   }
   void *result = tlsf_realloc(pool, ptr, size);
   if (!result && size > 0) {
-    oprintf("FATAL: tcl_realloc failed - out of memory (requested=%d)\n", size);
+    oprintf("FATAL: ou_realloc failed - out of memory (requested=%d)\n", size);
     ou_exit();
   }
   return result;

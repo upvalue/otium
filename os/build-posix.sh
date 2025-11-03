@@ -9,6 +9,7 @@ clang -DOT_POSIX -std=c11 -I. -c ot/shared/vendor/printf.c -o bin/printf.o
 
 # Build TCL REPL
 clang++ -DOT_POSIX -std=c++17 -I. -o bin/tcl-repl \
+    ot/user/string.cpp \
     ot/user/tcl.cpp \
     ot/posix-util/tcl-repl.cpp \
     ot/posix-util/posix-std.cpp \

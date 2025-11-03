@@ -13,6 +13,22 @@ Currently, it targets three systems:
 In general, try to avoid using #ifdef based on platform architecture outside of the
 platform-specific files (those containing riscv or wasm in the name).
 
+### C++ Style
+
+**Header naming:**
+- Use `.hpp` extension for C++ headers (e.g., `ot/user/string.hpp`, `ot/user/vector.hpp`)
+- Use `.h` extension for C headers or headers that need C compatibility
+
+**Formatting:**
+After editing C++ files, run clang-format to ensure consistent formatting:
+
+```bash
+clang-format -i path/to/file.cpp
+clang-format -i path/to/file.hpp
+```
+
+The project uses the clang-format configuration specified in `.clang-format`.
+
 ## Source
 
 The source of the operating system is written in C++. Source files live in the `./ot` directory.
@@ -145,7 +161,7 @@ result: 10
 A POSIX-compatible standalone Tcl REPL can be built for testing on the host system:
 
 ```bash
-./build-tcl-repl.sh
+./build-posix.sh
 ./bin/tcl-repl              # Interactive mode
 ./bin/tcl-repl script.tcl   # Run script
 ```

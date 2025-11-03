@@ -3,15 +3,25 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
+
+// Provide ou memory allocation functions using stdlib
+extern "C" {
+void *ou_malloc(size_t size) { return malloc(size); }
+void ou_free(void *ptr) { free(ptr); }
+void *ou_realloc(void *ptr, size_t size) { return realloc(ptr, size); }
+}
 
 // write some terminal control stuff
 #define tctrl(x)                                                                                                       \
   do {                                                                                                                 \
     write(STDOUT_FILENO, x, sizeof(x) - 1);                                                                            \
   } while (0)
+
+#define CTRL_KEY(c) ((c) & 0x1f)
 
 namespace tevl {
 
@@ -26,12 +36,27 @@ struct PosixTermBackend : Backend {
     raw.c_lflag &= ~(ECHO | ICANON | ISIG);
   }
 
-  virtual Result<char, EditorErr> readKey() override {
+  virtual Result<Key, EditorErr> readKey() override {
     char c = 0;
     if (read(STDIN_FILENO, &c, 1) == -1) {
-      return Result<char, EditorErr>::err(EditorErr::FATAL_TERM_READ_KEY_FAILED);
+      return Result<Key, EditorErr>::err(EditorErr::FATAL_TERM_READ_KEY_FAILED);
     }
-    return Result<char, EditorErr>::ok(c);
+
+    // Translate key
+    Key key;
+
+    key.c = c;
+
+    // TODO: bugs might lurk here
+    for (int i = 'a'; i <= 'z'; i++) {
+      if (c == CTRL_KEY(i)) {
+        key.c = i;
+        key.ctrl = true;
+        break;
+      }
+    }
+
+    return Result<Key, EditorErr>::ok(key);
   }
 
   virtual EditorErr setup() override {
@@ -74,6 +99,8 @@ struct PosixTermBackend : Backend {
     }
     return Coord{ws.ws_col, ws.ws_row};
   }
+
+  virtual void render(const ou::string &s) override { write(STDOUT_FILENO, s.data(), s.length()); }
 };
 
 } // namespace tevl

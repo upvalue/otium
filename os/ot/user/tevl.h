@@ -4,6 +4,8 @@
 
 #include "ot/common.h"
 #include "ot/shared/result.hpp"
+#include "ot/shared/string-view.hpp"
+#include "ot/user/string.hpp"
 
 namespace tevl {
 
@@ -18,17 +20,26 @@ struct Coord {
   int x, y;
 };
 
+struct Key {
+  Key() : c(0), ctrl(false) {}
+
+  char c;
+
+  bool ctrl;
+};
+
 struct Backend {
   const char *error_msg;
 
   /** Checks for keyboard input; does not block */
-  virtual Result<char, EditorErr> readKey() = 0;
+  virtual Result<Key, EditorErr> readKey() = 0;
 
   virtual EditorErr setup() = 0;
   virtual void teardown() = 0;
   virtual void refresh() = 0;
   virtual void clear() = 0;
   virtual Coord getWindowSize() = 0;
+  virtual void render(const ou::string &s) = 0;
 };
 
 void tevl_main(Backend *backend);

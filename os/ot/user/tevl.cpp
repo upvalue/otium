@@ -2,12 +2,17 @@
 #include "ot/user/tevl.h"
 #include "ot/common.h"
 #include "ot/shared/result.hpp"
+#include "ot/user/string.hpp"
 
 static bool running = true;
 static const char *default_error_msg = "no error message set";
 static tevl::Backend *be = nullptr;
 
 #define CTRL_KEY(k) ((k) & 0x1f)
+
+ou::string buffer;
+
+using namespace tevl;
 
 struct Editor {
   int cx, cy;
@@ -20,9 +25,10 @@ void process_key_press() {
     oprintf("failed to read key errcode=%d\n", res.error());
     return;
   }
-  char c = res.value();
 
-  if (c == 'q') {
+  Key k = res.value();
+
+  if (k.ctrl && k.c == 'q') {
     running = false;
   }
 }
@@ -38,8 +44,9 @@ void tevl_main(Backend *be_) {
   }
 
   while (running) {
-
     be->refresh();
+    buffer = "hello world";
+    be->render(buffer);
     process_key_press();
   }
 

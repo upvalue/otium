@@ -15,7 +15,26 @@ ou::string buffer;
 using namespace tevl;
 
 struct Editor {
+  Editor() : cx(0), cy(0) {}
   int cx, cy;
+  /** Lines to render; note that this is only roughly the height of the screen */
+  ou::vector<ou::string> lines;
+
+  void resetLines() {
+    for (int i = 0; i < lines.size(); i++) {
+      lines[i].clear();
+    }
+  }
+
+  void putLine(int y, const ou::string &line) {
+    if (y >= lines.size()) {
+      while (lines.size() <= y) {
+        lines.push_back(ou::string());
+      }
+    }
+    lines[y] = line;
+  }
+
 } e;
 
 void process_key_press() {
@@ -43,10 +62,18 @@ void tevl_main(Backend *be_) {
     return;
   }
 
+  ou::string tilde("~");
   while (running) {
     be->refresh();
-    buffer = "hello world";
-    be->render(buffer);
+
+    e.resetLines();
+
+    auto dim = be->getWindowSize();
+    for (int y = 0; y < dim.y; y++) {
+      e.putLine(y, tilde);
+      // e.putLine(y, "~\r\n");
+    }
+    be->render(e.lines);
     process_key_press();
   }
 

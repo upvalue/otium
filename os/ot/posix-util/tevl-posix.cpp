@@ -1,5 +1,5 @@
 // tevl with posix terminal backend
-#include "ot/user/tevl.h"
+#include "ot/user/tevl.hpp"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -22,6 +22,8 @@ void *ou_realloc(void *ptr, size_t size) { return realloc(ptr, size); }
   } while (0)
 
 #define CTRL_KEY(c) ((c) & 0x1f)
+
+ou::string output_buffer;
 
 namespace tevl {
 
@@ -202,24 +204,40 @@ struct PosixTermBackend : Backend {
     return Coord{ws.ws_col, ws.ws_row};
   }
 
-  virtual void render(const ou::vector<ou::string> &lines) override {
+  virtual void render(int cx, int cy, const ou::vector<ou::string> &lines) override {
+    // Hide cursor
+    tctrl("\x1b[?25l]");
+    // Move cursor to top left for drawing
+    tctrl("\x1b[H");
     Coord ws = getWindowSize();
+    output_buffer.clear();
     for (int i = 0; i < ws.y; i++) {
       if (i < lines.size()) {
-        write(STDOUT_FILENO, lines[i].data(), lines[i].length());
-        // Erase line to the *right* of what we just wrote
-        write(STDOUT_FILENO, "\x1b[K", 3);
-        write(STDOUT_FILENO, "\r\n", 2);
-      } else {
-        write(STDOUT_FILENO, "\r\n", 2);
+        output_buffer.append(lines[i]);
+        if (i != ws.y - 1) {
+          output_buffer.append("\x1b[K");
+          output_buffer.append("\r\n");
+        }
       }
     }
+
+    // Reset cursor position at the end
+    char buf[32];
+    // terminal is 1-indexed
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cy + 1, cx + 1);
+    output_buffer.append(buf);
+
+    write(STDOUT_FILENO, output_buffer.data(), output_buffer.length());
+
+    // Show cursor
+    tctrl("\x1b[?25h");
   }
 };
 
 } // namespace tevl
 
 int main(int argc, char *argv[]) {
+  tevl::Editor e;
   tevl::PosixTermBackend posix_term_backend;
   tevl::tevl_main(&posix_term_backend);
   return 0;

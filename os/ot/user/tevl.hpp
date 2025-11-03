@@ -1,6 +1,6 @@
-// tevl.h - TEVL text editor interface
-#ifndef OT_USER_TEVL_H
-#define OT_USER_TEVL_H
+// tevl.hpp - TEVL text editor interface
+#ifndef OT_USER_TEVL_HPP
+#define OT_USER_TEVL_HPP
 
 #include "ot/common.h"
 #include "ot/shared/result.hpp"
@@ -9,6 +9,39 @@
 #include "ot/user/vector.hpp"
 
 namespace tevl {
+
+struct Editor {
+  Editor() : cx(0), cy(0) {}
+  int cx, cy;
+  /** Lines to render; note that this is only roughly the height of the screen */
+  ou::vector<ou::string> lines;
+
+  void resetLines() {
+    for (int i = 0; i < lines.size(); i++) {
+      lines[i].clear();
+    }
+  }
+
+  /** Overwrite a given row; grows if needed */
+  void putLine(int y, const ou::string &line) {
+    if (y >= lines.size()) {
+      while (lines.size() <= y) {
+        lines.push_back(ou::string());
+      }
+    }
+    lines[y] = line;
+  }
+
+  /** Append to a given row; grows if needed */
+  void appendLine(int y, const ou::string &line) {
+    if (y >= lines.size()) {
+      while (lines.size() <= y) {
+        lines.push_back(ou::string());
+      }
+    }
+    lines[y] += line;
+  }
+};
 
 enum class EditorErr {
   NONE,
@@ -55,7 +88,7 @@ struct Backend {
   virtual void refresh() = 0;
   virtual void clear() = 0;
   virtual Coord getWindowSize() = 0;
-  virtual void render(const ou::vector<ou::string> &lines) = 0;
+  virtual void render(int cx, int cy, const ou::vector<ou::string> &lines) = 0;
   virtual Result<Coord, EditorErr> getCursorPosition() = 0;
 };
 

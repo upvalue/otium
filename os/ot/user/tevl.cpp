@@ -1,5 +1,5 @@
 // tevl.cpp - TEVL text editor core implementation
-#include "ot/user/tevl.h"
+#include "ot/user/tevl.hpp"
 #include "ot/common.h"
 #include "ot/shared/result.hpp"
 #include "ot/user/string.hpp"
@@ -14,39 +14,7 @@ ou::string buffer;
 
 using namespace tevl;
 
-struct Editor {
-  Editor() : cx(0), cy(0) {}
-  int cx, cy;
-  /** Lines to render; note that this is only roughly the height of the screen */
-  ou::vector<ou::string> lines;
-
-  void resetLines() {
-    for (int i = 0; i < lines.size(); i++) {
-      lines[i].clear();
-    }
-  }
-
-  /** Overwrite a given row; grows if needed */
-  void putLine(int y, const ou::string &line) {
-    if (y >= lines.size()) {
-      while (lines.size() <= y) {
-        lines.push_back(ou::string());
-      }
-    }
-    lines[y] = line;
-  }
-
-  /** Append to a given row; grows if needed */
-  void appendLine(int y, const ou::string &line) {
-    if (y >= lines.size()) {
-      while (lines.size() <= y) {
-        lines.push_back(ou::string());
-      }
-    }
-    lines[y] += line;
-  }
-
-} e;
+Editor e;
 
 void process_key_press() {
   auto res = be->readKey();
@@ -77,28 +45,34 @@ void tevl_main(Backend *be_) {
 
   ou::string tevl_welcome("tevl (text editor, vi-like [aspirational])");
   ou::string tevl_padded_welcome;
+
+  Coord previous_ws;
+
   while (running) {
-    be->refresh();
+    // be->refresh();
 
-    auto dim = be->getWindowSize();
-    int center_x = (dim.x - tevl_welcome.length()) / 2;
+    auto ws = be->getWindowSize();
+    int center_x = (ws.x - tevl_welcome.length()) / 2;
 
-    tevl_padded_welcome.clear();
-    tevl_padded_welcome.ensure_capacity(dim.x + tevl_welcome.length());
-    tevl_padded_welcome.append(tilde);
-    for (int i = 0; i < center_x; i++) {
-      tevl_padded_welcome.append(" ");
+    // Render the padded welcome
+    if (ws.x != previous_ws.x || ws.y != previous_ws.y) {
+      tevl_padded_welcome.clear();
+      tevl_padded_welcome.ensure_capacity(ws.x + tevl_welcome.length());
+      tevl_padded_welcome.append(tilde);
+      for (int i = 0; i < center_x; i++) {
+        tevl_padded_welcome.append(" ");
+      }
+      tevl_padded_welcome.append(tevl_welcome);
     }
-    tevl_padded_welcome.append(tevl_welcome);
 
     e.resetLines();
 
-    int center_y = dim.y / 2;
-    for (int y = 0; y < dim.y; y++) {
+    int center_y = ws.y / 2;
+    for (int y = 0; y < ws.y; y++) {
       e.putLine(y, tilde);
     }
     e.putLine(center_y, tevl_padded_welcome);
-    be->render(e.lines);
+    be->render(e.cx, e.cy, e.lines);
     process_key_press();
   }
 

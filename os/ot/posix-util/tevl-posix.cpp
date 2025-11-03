@@ -207,9 +207,11 @@ struct PosixTermBackend : Backend {
     for (int i = 0; i < ws.y; i++) {
       if (i < lines.size()) {
         write(STDOUT_FILENO, lines[i].data(), lines[i].length());
+        // Erase line to the *right* of what we just wrote
+        write(STDOUT_FILENO, "\x1b[K", 3);
         write(STDOUT_FILENO, "\r\n", 2);
       } else {
-        write(STDOUT_FILENO, "\n", 1);
+        write(STDOUT_FILENO, "\r\n", 2);
       }
     }
   }

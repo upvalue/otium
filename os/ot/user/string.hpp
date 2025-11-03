@@ -51,8 +51,6 @@ private:
   size_t len_;
   size_t cap_;
 
-  void ensure_capacity(size_t new_cap);
-
 public:
   string();
   string(const char *s);
@@ -92,6 +90,7 @@ public:
   int compare(const string_view &s) const;
 
   string substr(size_t pos, size_t len) const;
+  void ensure_capacity(size_t new_cap);
 };
 
 /**

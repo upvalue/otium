@@ -26,6 +26,7 @@ struct Editor {
     }
   }
 
+  /** Overwrite a given row; grows if needed */
   void putLine(int y, const ou::string &line) {
     if (y >= lines.size()) {
       while (lines.size() <= y) {
@@ -33,6 +34,16 @@ struct Editor {
       }
     }
     lines[y] = line;
+  }
+
+  /** Append to a given row; grows if needed */
+  void appendLine(int y, const ou::string &line) {
+    if (y >= lines.size()) {
+      while (lines.size() <= y) {
+        lines.push_back(ou::string());
+      }
+    }
+    lines[y] += line;
   }
 
 } e;
@@ -63,16 +74,30 @@ void tevl_main(Backend *be_) {
   }
 
   ou::string tilde("~");
+
+  ou::string tevl_welcome("tevl (text editor, vi-like [aspirational])");
+  ou::string tevl_padded_welcome;
   while (running) {
     be->refresh();
 
+    auto dim = be->getWindowSize();
+    int center_x = (dim.x - tevl_welcome.length()) / 2;
+
+    tevl_padded_welcome.clear();
+    tevl_padded_welcome.ensure_capacity(dim.x + tevl_welcome.length());
+    tevl_padded_welcome.append(tilde);
+    for (int i = 0; i < center_x; i++) {
+      tevl_padded_welcome.append(" ");
+    }
+    tevl_padded_welcome.append(tevl_welcome);
+
     e.resetLines();
 
-    auto dim = be->getWindowSize();
+    int center_y = dim.y / 2;
     for (int y = 0; y < dim.y; y++) {
       e.putLine(y, tilde);
-      // e.putLine(y, "~\r\n");
     }
+    e.putLine(center_y, tevl_padded_welcome);
     be->render(e.lines);
     process_key_press();
   }

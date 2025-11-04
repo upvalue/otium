@@ -24,10 +24,22 @@ void process_key_press() {
     return;
   }
 
+  auto ws = be->getWindowSize();
+
   Key k = res.value();
 
   if (k.ctrl && k.c == 'q') {
     running = false;
+  } else if (k.ext == ExtendedKey::ARROW_LEFT) {
+    if (e.cx > 0)
+      e.cx--;
+  } else if (k.ext == ExtendedKey::ARROW_RIGHT) {
+    e.cx++;
+  } else if (k.ext == ExtendedKey::ARROW_UP) {
+    if (e.cy > 0)
+      e.cy--;
+  } else if (k.ext == ExtendedKey::ARROW_DOWN) {
+    e.cy++;
   }
 }
 
@@ -43,7 +55,7 @@ void tevl_main(Backend *be_) {
 
   ou::string tilde("~");
 
-  ou::string tevl_welcome("tevl (text editor, vi-like [aspirational])");
+  ou::string tevl_welcome("\033[38;5;12mtevl\033[0m (text editor, vi-like [aspirational])");
   ou::string tevl_padded_welcome;
 
   Coord previous_ws;

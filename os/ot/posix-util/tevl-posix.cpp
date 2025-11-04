@@ -15,7 +15,7 @@ void ou_free(void *ptr) { free(ptr); }
 void *ou_realloc(void *ptr, size_t size) { return realloc(ptr, size); }
 }
 
-// write some terminal control stuff
+// write a terminal control sequence with statically known size
 #define tctrl(x)                                                                                                       \
   do {                                                                                                                 \
     write(STDOUT_FILENO, x, sizeof(x) - 1);                                                                            \

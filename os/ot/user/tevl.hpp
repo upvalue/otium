@@ -10,11 +10,21 @@
 
 namespace tevl {
 
+enum class EditorMode {
+  NORMAL,
+  INSERT,
+};
+
 struct Editor {
-  Editor() : cx(0), cy(0) {}
+  Editor() : cx(0), cy(0), mode(EditorMode::NORMAL) {}
+
   int cx, cy;
   /** Lines to render; note that this is only roughly the height of the screen */
   ou::vector<ou::string> lines;
+
+  ou::vector<ou::string> file_lines;
+
+  EditorMode mode;
 
   void resetLines() {
     for (int i = 0; i < lines.size(); i++) {

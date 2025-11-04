@@ -2,6 +2,7 @@
 #include "ot/user/tevl.hpp"
 #include "ot/common.h"
 #include "ot/shared/result.hpp"
+#include "ot/user/file.hpp"
 #include "ot/user/string.hpp"
 
 static bool running = true;
@@ -13,6 +14,7 @@ static tevl::Backend *be = nullptr;
 ou::string buffer;
 
 using namespace tevl;
+using namespace ou;
 
 Editor e;
 
@@ -45,7 +47,7 @@ void process_key_press() {
 
 namespace tevl {
 
-void tevl_main(Backend *be_) {
+void tevl_main(Backend *be_, ou::string *file_path) {
   be = be_;
   be->error_msg = default_error_msg;
   if (be->setup() != EditorErr::NONE) {
@@ -55,35 +57,37 @@ void tevl_main(Backend *be_) {
 
   ou::string tilde("~");
 
-  ou::string tevl_welcome("\033[38;5;12mtevl\033[0m (text editor, vi-like [aspirational])");
-  ou::string tevl_padded_welcome;
+  if (file_path) {
+    ou::File file(file_path->c_str());
+    be->debug_print("opening file ");
+    be->debug_print(*file_path);
+    FileErr err = file.open();
+    if (err != FileErr::NONE) {
+      oprintf("failed to open file %s: %d\n", file_path->c_str(), err);
+      return;
+    }
 
-  Coord previous_ws;
+    file.forEachLine([](const ou::string &line) {
+      be->debug_print("adding line to file: ");
+      e.file_lines.push_back(line);
+    });
+  }
 
   while (running) {
     // be->refresh();
 
     auto ws = be->getWindowSize();
-    int center_x = (ws.x - tevl_welcome.length()) / 2;
 
-    // Render the padded welcome
-    if (ws.x != previous_ws.x || ws.y != previous_ws.y) {
-      tevl_padded_welcome.clear();
-      tevl_padded_welcome.ensure_capacity(ws.x + tevl_welcome.length());
-      tevl_padded_welcome.append(tilde);
-      for (int i = 0; i < center_x; i++) {
-        tevl_padded_welcome.append(" ");
-      }
-      tevl_padded_welcome.append(tevl_welcome);
-    }
+    e.screenResetLines();
 
-    e.resetLines();
-
-    int center_y = ws.y / 2;
     for (int y = 0; y < ws.y; y++) {
-      e.putLine(y, tilde);
+      if (y < e.file_lines.size()) {
+        e.screenPutLine(y, e.file_lines[y]);
+      } else {
+        e.screenPutLine(y, tilde);
+      }
     }
-    e.putLine(center_y, tevl_padded_welcome);
+
     be->render(e.cx, e.cy, e.lines);
     process_key_press();
   }

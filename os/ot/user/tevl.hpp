@@ -21,19 +21,18 @@ struct Editor {
   int cx, cy;
   /** Lines to render; note that this is only roughly the height of the screen */
   ou::vector<ou::string> lines;
-
   ou::vector<ou::string> file_lines;
 
   EditorMode mode;
 
-  void resetLines() {
+  void screenResetLines() {
     for (int i = 0; i < lines.size(); i++) {
       lines[i].clear();
     }
   }
 
   /** Overwrite a given row; grows if needed */
-  void putLine(int y, const ou::string &line) {
+  void screenPutLine(int y, const ou::string &line) {
     if (y >= lines.size()) {
       while (lines.size() <= y) {
         lines.push_back(ou::string());
@@ -43,7 +42,7 @@ struct Editor {
   }
 
   /** Append to a given row; grows if needed */
-  void appendLine(int y, const ou::string &line) {
+  void screenAppendLine(int y, const ou::string &line) {
     if (y >= lines.size()) {
       while (lines.size() <= y) {
         lines.push_back(ou::string());
@@ -100,9 +99,12 @@ struct Backend {
   virtual Coord getWindowSize() = 0;
   virtual void render(int cx, int cy, const ou::vector<ou::string> &lines) = 0;
   virtual Result<Coord, EditorErr> getCursorPosition() = 0;
+
+  /** Debug output to platform-specific location */
+  virtual void debug_print(const ou::string &msg) = 0;
 };
 
-void tevl_main(Backend *backend);
+void tevl_main(Backend *backend, ou::string *file_path);
 
 #endif
 }

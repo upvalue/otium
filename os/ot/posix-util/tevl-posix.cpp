@@ -2,10 +2,13 @@
 #include "ot/user/tevl.hpp"
 
 #include <ctype.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 
 // Provide ou memory allocation functions using stdlib
@@ -29,13 +32,23 @@ namespace tevl {
 
 struct PosixTermBackend : Backend {
   struct termios orig_termios, raw;
+  int debug_fd; // File descriptor for debug output
 
-  PosixTermBackend() {
+  PosixTermBackend() : debug_fd(-1) {
     tcgetattr(STDIN_FILENO, &orig_termios);
     raw = orig_termios;
     raw.c_iflag &= ~(ICRNL);
     raw.c_oflag &= ~(OPOST);
     raw.c_lflag &= ~(ECHO | ICANON | ISIG);
+
+    // Open debug file in append mode
+    debug_fd = open("/tmp/tevl-debug.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
+  }
+
+  ~PosixTermBackend() {
+    if (debug_fd != -1) {
+      close(debug_fd);
+    }
   }
 
   virtual Result<Coord, EditorErr> getCursorPosition() override {
@@ -232,6 +245,27 @@ struct PosixTermBackend : Backend {
     // Show cursor
     tctrl("\x1b[?25h");
   }
+
+  virtual void debug_print(const ou::string &msg) override {
+    if (debug_fd == -1)
+      return; // Debug file not open
+
+    // Add timestamp
+    time_t rawtime;
+    struct tm *timeinfo;
+    char timestamp[32];
+    time(&rawtime);
+    timeinfo = localtime(&rawtime);
+    strftime(timestamp, sizeof(timestamp), "[%Y-%m-%d %H:%M:%S] ", timeinfo);
+
+    // Write timestamp and message
+    write(debug_fd, timestamp, strlen(timestamp));
+    write(debug_fd, msg.data(), msg.length());
+    write(debug_fd, "\n", 1);
+
+    // Flush for immediate output
+    fsync(debug_fd);
+  }
 };
 
 } // namespace tevl
@@ -239,6 +273,13 @@ struct PosixTermBackend : Backend {
 int main(int argc, char *argv[]) {
   tevl::Editor e;
   tevl::PosixTermBackend posix_term_backend;
-  tevl::tevl_main(&posix_term_backend);
+  ou::string *file_path = nullptr;
+  if (argc > 1) {
+    file_path = new ou::string(argv[1]);
+  }
+  tevl::tevl_main(&posix_term_backend, file_path);
+  if (file_path) {
+    delete file_path;
+  }
   return 0;
 }

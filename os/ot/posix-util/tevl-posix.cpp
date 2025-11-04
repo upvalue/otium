@@ -227,8 +227,8 @@ struct PosixTermBackend : Backend {
     for (int i = 0; i < ws.y; i++) {
       if (i < lines.size()) {
         output_buffer.append(lines[i]);
+        output_buffer.append("\x1b[K");
         if (i != ws.y - 1) {
-          output_buffer.append("\x1b[K");
           output_buffer.append("\r\n");
         }
       }
@@ -236,8 +236,8 @@ struct PosixTermBackend : Backend {
 
     // Reset cursor position at the end
     char buf[32];
-    // terminal is 1-indexed
-    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cy + 1, cx + 1);
+    // terminal is 1-indexed so we add 1 to each
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cx + 1, cy + 1);
     output_buffer.append(buf);
 
     write(STDOUT_FILENO, output_buffer.data(), output_buffer.length());

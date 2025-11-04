@@ -36,12 +36,17 @@ void process_key_press() {
     if (e.cx > 0)
       e.cx--;
   } else if (k.ext == ExtendedKey::ARROW_RIGHT) {
-    e.cx++;
+    if (e.cx < e.file_lines[e.cy].length()) {
+      e.cx++;
+    }
   } else if (k.ext == ExtendedKey::ARROW_UP) {
-    if (e.cy > 0)
+    if (e.cy > 0) {
       e.cy--;
+    }
   } else if (k.ext == ExtendedKey::ARROW_DOWN) {
-    e.cy++;
+    if (e.cy < e.file_lines.size() - 1) {
+      e.cy++;
+    }
   }
 }
 
@@ -59,8 +64,8 @@ void tevl_main(Backend *be_, ou::string *file_path) {
 
   if (file_path) {
     ou::File file(file_path->c_str());
-    be->debug_print("opening file ");
-    be->debug_print(*file_path);
+    // be->debug_print("opening file ");
+    // be->debug_print(*file_path);
     FileErr err = file.open();
     if (err != FileErr::NONE) {
       oprintf("failed to open file %s: %d\n", file_path->c_str(), err);
@@ -68,27 +73,38 @@ void tevl_main(Backend *be_, ou::string *file_path) {
     }
 
     file.forEachLine([](const ou::string &line) {
-      be->debug_print("adding line to file: ");
+      // be->debug_print("adding line to file: ");
       e.file_lines.push_back(line);
     });
   }
 
   while (running) {
-    // be->refresh();
-
     auto ws = be->getWindowSize();
 
+    // Handle scroll
+
+    if (e.cy < e.row_offset) {
+      e.row_offset = e.cy;
+    }
+    if (e.cy >= e.row_offset + ws.y) {
+      e.row_offset = e.cy - ws.y + 1;
+    }
+
+    // Render individual rows
     e.screenResetLines();
 
     for (int y = 0; y < ws.y; y++) {
-      if (y < e.file_lines.size()) {
-        e.screenPutLine(y, e.file_lines[y]);
+      int file_row = y + e.row_offset;
+      if (file_row < e.file_lines.size()) {
+        e.screenPutLine(y, e.file_lines[file_row]);
       } else {
         e.screenPutLine(y, tilde);
       }
     }
 
-    be->render(e.cx, e.cy, e.lines);
+    be->render(e.cy - e.row_offset, e.cx, e.lines);
+
+    // Handle user input
     process_key_press();
   }
 

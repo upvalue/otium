@@ -82,7 +82,6 @@ void tevl_main(Backend *be_, ou::string *file_path) {
     auto ws = be->getWindowSize();
 
     // Handle scroll
-
     if (e.cy < e.row_offset) {
       e.row_offset = e.cy;
     }
@@ -96,13 +95,19 @@ void tevl_main(Backend *be_, ou::string *file_path) {
     for (int y = 0; y < ws.y; y++) {
       int file_row = y + e.row_offset;
       if (file_row < e.file_lines.size()) {
+        size_t len = e.file_lines[file_row].length();
+        if (len > ws.x) {
+          len = ws.x;
+        }
         e.screenPutLine(y, e.file_lines[file_row]);
       } else {
         e.screenPutLine(y, tilde);
       }
     }
 
-    be->render(e.cy - e.row_offset, e.cx, e.lines);
+    // be->render(e.cy - e.row_offset, e.cx, e.lines);
+    be->render(e.cx, e.cy - e.row_offset, e.lines);
+    // be->render(e.cy - e.row_offset, e.cx, e.screen_lines);
 
     // Handle user input
     process_key_press();

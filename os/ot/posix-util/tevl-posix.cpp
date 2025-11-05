@@ -214,36 +214,36 @@ struct PosixTermBackend : Backend {
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) {
       return Coord{0, 0};
     }
-    return Coord{ws.ws_col, ws.ws_row};
+    return Coord{ws.ws_col, ws.ws_row - 2};
   }
 
   virtual void render(int cx, int cy, const ou::vector<ou::string> &lines) override {
-    // Hide cursor
-    tctrl("\x1b[?25l]");
-    // Move cursor to top left for drawing
-    tctrl("\x1b[H");
-    Coord ws = getWindowSize();
     output_buffer.clear();
+    // Hide cursor
+    output_buffer.append("\x1b[?25l");
+    // Move cursor to top left for drawing
+    output_buffer.append("\x1b[H");
+    Coord ws = getWindowSize();
+
     for (int i = 0; i < ws.y; i++) {
       if (i < lines.size()) {
         output_buffer.append(lines[i]);
-        output_buffer.append("\x1b[K");
-        if (i != ws.y - 1) {
-          output_buffer.append("\r\n");
-        }
+        // koutput_buffer.append("wut");
+      }
+      output_buffer.append("\x1b[K");
+      if (i != ws.y - 1) {
+        output_buffer.append("\r\n");
       }
     }
 
     // Reset cursor position at the end
     char buf[32];
     // terminal is 1-indexed so we add 1 to each
-    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cx + 1, cy + 1);
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cy + 1, cx + 1);
     output_buffer.append(buf);
 
+    output_buffer.append("\x1b[?25h");
     write(STDOUT_FILENO, output_buffer.data(), output_buffer.length());
-
-    // Show cursor
-    tctrl("\x1b[?25h");
   }
 
   virtual void debug_print(const ou::string &msg) override {

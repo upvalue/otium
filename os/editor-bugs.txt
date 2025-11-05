@@ -16,4 +16,5 @@ a list of editor bugs encountered:
 - status line goes across multiple lines
 
 - 11/5
-- 
+- backspace erases entire line
+- backspacing over tabs doesn't work right

@@ -243,9 +243,6 @@ struct PosixTermBackend : Backend {
         output_buffer.append(ed.lines[i]);
       }
       output_buffer.append("\x1b[K");
-      // if (i != ws.y - 1) {
-      // output_buffer.append("\r\n");
-      // }
       output_buffer.append("\r\n");
     }
 
@@ -256,8 +253,8 @@ struct PosixTermBackend : Backend {
     status_buffer.append("\x1b[30m");
     size_t i = 0;
     status_buffer.push_back(' ');
-    status_buffer.append(ed.file_name);
-    i = ed.file_name.length();
+    status_buffer.append(ed.status_line);
+    i = ed.status_line.length();
     while (i < ws.x - 1) {
       status_buffer.push_back(' ');
       i++;

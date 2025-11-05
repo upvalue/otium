@@ -4,6 +4,7 @@
 #include "ot/shared/result.hpp"
 #include "ot/user/file.hpp"
 #include "ot/user/string.hpp"
+#include "ot/user/tcl.h"
 #include "ot/user/user.hpp"
 
 static bool running = true;
@@ -52,10 +53,11 @@ void editor_insert_char(char c) {
   }
   e.file_lines[e.cy].insert(e.cx, 1, c);
   e.cx++;
+  e.dirty++;
 }
 
 void editor_backspace() {
-  if (e.cx > 0) {
+  if (e.cx > 0 && e.cy < e.file_lines.size()) {
     e.file_lines[e.cy].erase(e.cx - 1, 1);
     e.cx--;
   } else if (e.cy > 0) {
@@ -65,6 +67,7 @@ void editor_backspace() {
     e.file_lines[e.cy].append(e.file_lines[e.cy + 1]);
     e.file_lines.erase(e.cy + 1);
   }
+  e.dirty++;
 }
 
 void editor_insert_newline() {
@@ -185,6 +188,28 @@ void editor_message_clear() {
   }
 }
 
+void generate_status_line() {
+  e.status_line.clear();
+  if (e.mode == EditorMode::INSERT) {
+    e.status_line.append("[insert] ");
+  } else {
+    e.status_line.append("[normal] ");
+  }
+  e.status_line.append(e.file_name);
+  if (e.dirty > 0) {
+    e.status_line.append("*");
+  } else {
+    e.status_line.append(" ");
+  }
+  e.status_line.append(" ");
+
+  // cx/cy
+  char buffer[32];
+  osnprintf(buffer, sizeof(buffer), "%d/%d", e.cy + 1, e.cx + 1);
+  e.status_line.append(buffer);
+  e.status_line.append(" ");
+}
+
 namespace tevl {
 
 void tevl_main(Backend *be_, ou::string *file_path) {
@@ -215,7 +240,6 @@ void tevl_main(Backend *be_, ou::string *file_path) {
   }
 
   while (running) {
-
     // Handle scroll
     auto ws = be->getWindowSize();
     editor_scroll();
@@ -225,6 +249,8 @@ void tevl_main(Backend *be_, ou::string *file_path) {
 
     // Render individual rows
     e.screenResetLines();
+
+    generate_status_line();
 
     for (int y = 0; y < ws.y; y++) {
       int file_row = y + e.row_offset;

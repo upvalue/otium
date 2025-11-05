@@ -16,13 +16,15 @@ enum class EditorMode {
 };
 
 struct Editor {
-  Editor() : row_offset(0), col_offset(0), cx(0), cy(0), mode(EditorMode::NORMAL) {}
+  Editor() : row_offset(0), col_offset(0), cx(0), cy(0), mode(EditorMode::NORMAL), dirty(0) {}
 
   intptr_t row_offset, col_offset;
 
   /** Cursor position on the screen */
   intptr_t cx, cy;
   intptr_t rx;
+  /** how many times file has been modified */
+  intptr_t dirty;
 
   /** Lines to render; note that this is only roughly the height of the screen */
   ou::vector<ou::string> lines;

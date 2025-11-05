@@ -39,7 +39,6 @@ void process_key_press() {
       e.cy--;
       e.cx = e.file_lines[e.cy].length();
     }
-
   } else if (k.ext == ExtendedKey::ARROW_RIGHT) {
     if (e.cx < e.file_lines[e.cy].length()) {
       e.cx++;
@@ -50,25 +49,18 @@ void process_key_press() {
     }
   } else if (k.ext == ExtendedKey::ARROW_UP) {
     if (e.cy > 0) {
-      // adjust cursor to back of prev line
-      if (e.cx > e.file_lines[e.cy - 1].length()) {
-        e.cx = e.file_lines[e.cy - 1].length() - 1;
-      }
-      // handle case where prev line is shorter than current cx
-      if (e.cx > e.file_lines[e.cy - 1].length()) {
-        e.cx = OT_MAX(0, (intptr_t)e.file_lines[e.cy - 1].length() - 1);
-      }
       e.cy--;
     }
   } else if (k.ext == ExtendedKey::ARROW_DOWN) {
-    // if not at end of file
     if (e.cy < e.file_lines.size() - 1) {
-      // handle case where next line is shorter than current cx
-      if (e.cx > e.file_lines[e.cy + 1].length()) {
-        e.cx = OT_MAX(0, (intptr_t)e.file_lines[e.cy + 1].length() - 1);
-      }
       e.cy++;
     }
+  }
+
+  // Correct cx if it's beyond the end of the current line
+  int current_line_len = e.file_lines[e.cy].length();
+  if (e.cx > current_line_len) {
+    e.cx = current_line_len;
   }
 }
 
@@ -79,12 +71,15 @@ void editor_scroll() {
   if (e.cy < e.row_offset) {
     e.row_offset = e.cy;
   }
+
   if (e.cy >= e.row_offset + ws.y) {
     e.row_offset = e.cy - ws.y + 1;
   }
+
   if (e.cx < e.col_offset) {
     e.col_offset = e.cx;
   }
+
   if (e.cx >= e.col_offset + ws.x) {
     e.col_offset = e.cx - ws.x + 1;
   }
@@ -122,7 +117,7 @@ void tevl_main(Backend *be_, ou::string *file_path) {
 
     // Handle scroll
     auto ws = be->getWindowSize();
-    // editor_scroll();
+    editor_scroll();
 
     // Render individual rows
     e.screenResetLines();
@@ -137,14 +132,14 @@ void tevl_main(Backend *be_, ou::string *file_path) {
         if (len > ws.x) {
           len = ws.x;
         }
-        e.screenPutLine(y, e.file_lines[file_row], len);
+        e.screenPutLine(y, e.file_lines[file_row].substr(e.col_offset, len), len);
       } else {
         e.screenPutLine(y, tilde);
       }
     }
 
     // be->render(e.cy - e.row_offset, e.cx, e.lines);
-    be->render(e.cx - e.col_offset, e.cy - e.row_offset, e.lines);
+    be->render(e.col_offset, e.cx - e.col_offset, e.cy - e.row_offset, e.lines);
     // be->render(e.cy - e.row_offset, e.cx, e.screen_lines);
 
     // Handle user input

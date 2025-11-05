@@ -105,7 +105,7 @@ struct Backend {
   virtual void refresh() = 0;
   virtual void clear() = 0;
   virtual Coord getWindowSize() = 0;
-  virtual void render(int cx, int cy, const ou::vector<ou::string> &lines) = 0;
+  virtual void render(intptr_t col_offset, int cx, int cy, const ou::vector<ou::string> &lines) = 0;
   virtual Result<Coord, EditorErr> getCursorPosition() = 0;
 
   /** Debug output to platform-specific location */

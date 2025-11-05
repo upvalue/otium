@@ -1,0 +1,15 @@
+a list of editor bugs encountered: 
+
+11/3
+- first line doesn't render
+- 23rd line doesn't render
+- scrolling down doesn't work right, requires two presses to do anything and renders the wrong thing
+- random ] appears at the end of line sometimes (part of an escape sequence?)
+
+- 11/4
+- editor starts on the second line and you can't scroll up 
+- you can scroll up with mouse but then the first line prints repeatedly
+- horizontal scroll doesn't work
+- horizontal scroll kind of works, but tons of empty space at the end and going up doesn't snap back
+- arrow up snaps to the end of the line instead of the char after it
+

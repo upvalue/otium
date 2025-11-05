@@ -217,7 +217,7 @@ struct PosixTermBackend : Backend {
     return Coord{ws.ws_col, ws.ws_row - 2};
   }
 
-  virtual void render(int cx, int cy, const ou::vector<ou::string> &lines) override {
+  virtual void render(intptr_t col_offset, int cx, int cy, const ou::vector<ou::string> &lines) override {
     output_buffer.clear();
     // Hide cursor
     output_buffer.append("\x1b[?25l");

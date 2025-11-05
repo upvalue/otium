@@ -30,6 +30,25 @@ void *memcpy(void *dst, const void *src, size_t n) {
   return dst;
 }
 
+void *omemmove(void *dst, const void *src, size_t n) {
+  uint8_t *d = (uint8_t *)dst;
+  const uint8_t *s = (const uint8_t *)src;
+
+  // If dst and src don't overlap, or dst is before src, copy forward
+  if (d <= s || d >= s + n) {
+    while (n--)
+      *d++ = *s++;
+  } else {
+    // dst is after src and they overlap, copy backward
+    d += n;
+    s += n;
+    while (n--)
+      *--d = *--s;
+  }
+
+  return dst;
+}
+
 char *strcpy(char *dst, const char *src) {
   char *d = dst;
   while (*src)

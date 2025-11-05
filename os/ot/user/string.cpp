@@ -128,6 +128,44 @@ void string::push_back(char c) {
   data_[len_] = '\0';
 }
 
+void string::insert(size_t pos, size_t count, char c) {
+  if (count == 0)
+    return;
+  if (pos > len_)
+    pos = len_;
+  ensure_capacity(len_ + count + 1);
+  // Move existing characters to make room
+  if (pos < len_) {
+    omemmove(data_ + pos + count, data_ + pos, len_ - pos);
+  }
+  // Insert new characters
+  for (size_t i = 0; i < count; i++) {
+    data_[pos + i] = c;
+  }
+  len_ += count;
+  data_[len_] = '\0';
+}
+
+void string::erase(size_t pos, size_t len) {
+  if (pos >= len_ || len == 0)
+    return;
+  // Clamp len to not go beyond end of string
+  if (pos + len > len_)
+    len = len_ - pos;
+  // Move characters after erased portion to fill the gap
+  omemmove(data_ + pos, data_ + pos + len, len_ - pos - len);
+  len_ -= len;
+  data_[len_] = '\0';
+}
+
+void string::erase(size_t pos) {
+  if (pos >= len_)
+    return;
+  // Erase from pos to end of string
+  len_ = pos;
+  data_[len_] = '\0';
+}
+
 string &string::operator+=(const char *s) {
   append(s);
   return *this;
@@ -175,6 +213,12 @@ string string::substr(size_t pos, size_t len) const {
   if (pos + len > len_)
     len = len_ - pos;
   return string(data_ + pos, len);
+}
+
+string string::substr(size_t pos) const {
+  if (pos > len_)
+    return string();
+  return string(data_ + pos, len_ - pos);
 }
 
 } // namespace ou

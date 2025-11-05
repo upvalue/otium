@@ -10,6 +10,7 @@ static bool running = true;
 static const char *default_error_msg = "no error message set";
 static tevl::Backend *be = nullptr;
 static int TAB_SIZE = 4;
+static int MESSAGE_TIMEOUT_MS = 3000;
 
 ou::string buffer;
 
@@ -44,6 +45,41 @@ void Editor::screenPutLine(int y, const ou::string &line, size_t cutoff) {
 }
 
 Editor e;
+
+void editor_insert_char(char c) {
+  if (e.cy == e.file_lines.size()) {
+    e.file_lines.push_back(ou::string());
+  }
+  e.file_lines[e.cy].insert(e.cx, 1, c);
+  e.cx++;
+}
+
+void editor_backspace() {
+  if (e.cx > 0) {
+    e.file_lines[e.cy].erase(e.cx - 1, 1);
+    e.cx--;
+  } else if (e.cy > 0) {
+    // handle user going back onto previous line
+    e.cy--;
+    e.cx = e.file_lines[e.cy].length();
+    e.file_lines[e.cy].append(e.file_lines[e.cy + 1]);
+    e.file_lines.erase(e.cy + 1);
+  }
+}
+
+void editor_insert_newline() {
+  // Handle case whre there is text after
+  if (e.cx < e.file_lines[e.cy].length()) {
+
+    ou::string text = e.file_lines[e.cy].substr(e.cx);
+    e.file_lines[e.cy].erase(e.cx);
+    e.file_lines.insert(e.cy + 1, text);
+  } else {
+    e.file_lines.insert(e.cy + 1, ou::string());
+  }
+  e.cy++;
+  e.cx = 0;
+}
 
 void process_key_press() {
   auto res = be->readKey();
@@ -85,6 +121,18 @@ void process_key_press() {
     }
   }
 
+  if (true || e.mode == EditorMode::INSERT) {
+    if (k.ext == ExtendedKey::ENTER_KEY) {
+      editor_insert_newline();
+    }
+    if (k.ext == ExtendedKey::BACKSPACE_KEY) {
+      editor_backspace();
+    }
+    if (k.c >= 32 && k.c <= 126) {
+      editor_insert_char(k.c);
+    }
+  }
+
   // Correct cx if it's beyond the end of the current line
   int current_line_len = e.file_lines[e.cy].length();
   if (e.cx > current_line_len) {
@@ -118,19 +166,22 @@ void editor_scroll() {
     e.row_offset = e.cy - ws.y + 1;
   }
 
-  /*
-  if (e.cx < e.col_offset) {
-    e.col_offset = e.cx;
-  }
-
-  if (e.cx >= e.col_offset + ws.x) {
-    e.col_offset = e.cx - ws.x + 1;
-  }*/
   if (e.rx < e.col_offset) {
     e.col_offset = e.rx;
   }
+
   if (e.rx >= e.col_offset + ws.x) {
     e.col_offset = e.rx - ws.x + 1;
+  }
+}
+
+void editor_message_clear() {
+  uint64_t now = o_time_get();
+  char buffer[1024];
+  osnprintf(buffer, sizeof(buffer), "now: %d, last_message_time: %d", now, e.last_message_time);
+  be->debug_print(buffer);
+  if (o_time_get() - e.last_message_time > MESSAGE_TIMEOUT_MS) {
+    e.message_line.clear();
   }
 }
 
@@ -139,6 +190,8 @@ namespace tevl {
 void tevl_main(Backend *be_, ou::string *file_path) {
   be = be_;
   be->error_msg = default_error_msg;
+  e.last_message_time = o_time_get();
+  e.message_line = "Hello!";
   if (be->setup() != EditorErr::NONE) {
     oprintf("failed to setup be: %s\n", be->error_msg);
     return;
@@ -148,8 +201,7 @@ void tevl_main(Backend *be_, ou::string *file_path) {
 
   if (file_path) {
     ou::File file(file_path->c_str());
-    // be->debug_print("opening file ");
-    // be->debug_print(*file_path);
+    e.file_name = file_path->c_str();
     FileErr err = file.open();
     if (err != FileErr::NONE) {
       oprintf("failed to open file %s: %d\n", file_path->c_str(), err);
@@ -167,6 +219,9 @@ void tevl_main(Backend *be_, ou::string *file_path) {
     // Handle scroll
     auto ws = be->getWindowSize();
     editor_scroll();
+
+    // Handle message clear
+    editor_message_clear();
 
     // Render individual rows
     e.screenResetLines();
@@ -187,10 +242,9 @@ void tevl_main(Backend *be_, ou::string *file_path) {
       }
     }
 
-    // be->render(e.cy - e.row_offset, e.cx, e.lines);
-    be->render(e.col_offset, e.rx - e.col_offset, e.cy - e.row_offset, e.render_lines);
-    // be->render(e.cy - e.row_offset, e.cx, e.screen_lines);
-
+    // be->render(e.col_offset, e.rx - e.col_offset, e.cy - e.row_offset, e.render_lines);
+    // be->render(e, e.rx - e.col_offset, e.cy - e.row_offset);
+    be->render(e);
     // Handle user input
     process_key_press();
   }

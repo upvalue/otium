@@ -80,6 +80,9 @@ public:
   void append(const char *s);
   void append(const string &s);
   void push_back(char c);
+  void insert(size_t pos, size_t count, char c);
+  void erase(size_t pos, size_t len);
+  void erase(size_t pos);
 
   string &operator+=(const char *s);
   string &operator+=(const string &s);
@@ -90,6 +93,7 @@ public:
   int compare(const string_view &s) const;
 
   string substr(size_t pos, size_t len) const;
+  string substr(size_t pos) const;
   void ensure_capacity(size_t new_cap);
 };
 

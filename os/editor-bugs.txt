@@ -12,4 +12,8 @@ a list of editor bugs encountered:
 - horizontal scroll doesn't work
 - horizontal scroll kind of works, but tons of empty space at the end and going up doesn't snap back
 - arrow up snaps to the end of the line instead of the char after it
+- a bunch of tildes surf across the screen
+- status line goes across multiple lines
 
+- 11/5
+- 

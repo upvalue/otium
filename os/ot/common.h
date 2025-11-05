@@ -45,6 +45,7 @@ typedef uint32_t uintptr_t;
 // macros in normal stdlib headers and that causes compilation conflicts
 // when this is compiled on a normal system instea dof for a freestanding target
 void *omemset(void *buf, char c, size_t n);
+void *omemmove(void *dst, const void *src, size_t n);
 size_t strlen(const char *s);
 void oprintf(const char *fmt, ...);
 

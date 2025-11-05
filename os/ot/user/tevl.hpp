@@ -29,6 +29,13 @@ struct Editor {
   ou::vector<ou::string> file_lines;
   ou::vector<ou::string> render_lines;
 
+  ou::string file_name;
+  /** status line -- shows info like current col, active file */
+  ou::string status_line;
+  /** message line -- shows either a text notif */
+  ou::string message_line;
+  uint64_t last_message_time;
+
   EditorMode mode;
 
   void screenResetLines() {
@@ -65,6 +72,8 @@ struct Coord {
 
 enum ExtendedKey {
   NONE,
+  ENTER_KEY,
+  BACKSPACE_KEY,
   ARROW_LEFT,
   ARROW_RIGHT,
   ARROW_UP,
@@ -96,7 +105,8 @@ struct Backend {
   virtual void refresh() = 0;
   virtual void clear() = 0;
   virtual Coord getWindowSize() = 0;
-  virtual void render(intptr_t col_offset, int cx, int cy, const ou::vector<ou::string> &lines) = 0;
+  // virtual void render(intptr_t col_offset, int cx, int cy, const ou::vector<ou::string> &lines) = 0;
+  virtual void render(const Editor &ed) = 0;
   virtual Result<Coord, EditorErr> getCursorPosition() = 0;
 
   /** Debug output to platform-specific location */

@@ -26,11 +26,13 @@ void *ou_realloc(void *ptr, size_t size) { return realloc(ptr, size); }
 
 #define CTRL_KEY(c) ((c) & 0x1f)
 
-ou::string output_buffer;
-
 namespace tevl {
 
 struct PosixTermBackend : Backend {
+  ou::string output_buffer;
+  ou::string status_buffer;
+  ou::string message_buffer;
+
   struct termios orig_termios, raw;
   int debug_fd; // File descriptor for debug output
 
@@ -164,6 +166,17 @@ struct PosixTermBackend : Backend {
       }
     }
 
+    // backspace
+    if (c == 127) {
+      key.ext = BACKSPACE_KEY;
+      return Result<Key, EditorErr>::ok(key);
+    }
+
+    if (c == 13) {
+      key.ext = ENTER_KEY;
+      return Result<Key, EditorErr>::ok(key);
+    }
+
     // TODO: bugs might lurk here
     for (int i = 'a'; i <= 'z'; i++) {
       if (c == CTRL_KEY(i)) {
@@ -217,7 +230,7 @@ struct PosixTermBackend : Backend {
     return Coord{ws.ws_col, ws.ws_row - 2};
   }
 
-  virtual void render(intptr_t col_offset, int cx, int cy, const ou::vector<ou::string> &lines) override {
+  virtual void render(const Editor &ed) override {
     output_buffer.clear();
     // Hide cursor
     output_buffer.append("\x1b[?25l");
@@ -226,19 +239,46 @@ struct PosixTermBackend : Backend {
     Coord ws = getWindowSize();
 
     for (int i = 0; i < ws.y; i++) {
-      if (i < lines.size()) {
-        output_buffer.append(lines[i]);
+      if (i < ed.lines.size()) {
+        output_buffer.append(ed.lines[i]);
       }
       output_buffer.append("\x1b[K");
-      if (i != ws.y - 1) {
-        output_buffer.append("\r\n");
-      }
+      // if (i != ws.y - 1) {
+      // output_buffer.append("\r\n");
+      // }
+      output_buffer.append("\r\n");
     }
+
+    // render status line
+    status_buffer.clear();
+    // white background with black text
+    status_buffer.append("\x1b[47m");
+    status_buffer.append("\x1b[30m");
+    size_t i = 0;
+    status_buffer.push_back(' ');
+    status_buffer.append(ed.file_name);
+    i = ed.file_name.length();
+    while (i < ws.x - 1) {
+      status_buffer.push_back(' ');
+      i++;
+    }
+    status_buffer.append("\x1b[0m");
+
+    output_buffer.append(status_buffer);
+    output_buffer.append("\x1b[K");
+    output_buffer.append("\r\n");
+
+    message_buffer.clear();
+    message_buffer.append(ed.message_line);
+
+    output_buffer.append(message_buffer);
+    output_buffer.append("\x1b[K");
+    // output_buffer.append("\r\n");
 
     // Reset cursor position at the end
     char buf[32];
     // terminal is 1-indexed so we add 1 to each
-    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cy + 1, cx + 1);
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", ed.cy - ed.row_offset + 1, ed.cx - ed.col_offset + 1);
     output_buffer.append(buf);
 
     output_buffer.append("\x1b[?25h");

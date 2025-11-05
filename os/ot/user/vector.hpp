@@ -79,6 +79,69 @@ public:
     }
   }
 
+  void insert(size_t pos, const T &val) {
+    if (pos > size_)
+      pos = size_;
+    ensure_capacity(size_ + 1);
+    // Move existing elements to make room
+    for (size_t i = size_; i > pos; i--) {
+      new (&data_[i]) T(static_cast<T &&>(data_[i - 1]));
+      data_[i - 1].~T();
+    }
+    // Insert new element
+    new (&data_[pos]) T(val);
+    size_++;
+  }
+
+  void insert(size_t pos, size_t count, const T &val) {
+    if (count == 0)
+      return;
+    if (pos > size_)
+      pos = size_;
+    ensure_capacity(size_ + count);
+    // Move existing elements to make room
+    for (size_t i = size_ + count - 1; i >= pos + count; i--) {
+      new (&data_[i]) T(static_cast<T &&>(data_[i - count]));
+      data_[i - count].~T();
+    }
+    // Insert new elements
+    for (size_t i = 0; i < count; i++) {
+      new (&data_[pos + i]) T(val);
+    }
+    size_ += count;
+  }
+
+  void erase(size_t pos) {
+    if (pos >= size_)
+      return;
+    // Destroy element at pos
+    data_[pos].~T();
+    // Move elements after pos forward
+    for (size_t i = pos; i < size_ - 1; i++) {
+      new (&data_[i]) T(static_cast<T &&>(data_[i + 1]));
+      data_[i + 1].~T();
+    }
+    size_--;
+  }
+
+  void erase(size_t pos, size_t count) {
+    if (count == 0 || pos >= size_)
+      return;
+    // Clamp count to not go beyond end
+    if (pos + count > size_)
+      count = size_ - pos;
+    // Destroy elements in range
+    for (size_t i = pos; i < pos + count; i++) {
+      data_[i].~T();
+    }
+    // Move elements after erased range forward
+    for (size_t i = pos; i < size_ - count; i++) {
+      new (&data_[i]) T(static_cast<T &&>(data_[i + count]));
+      data_[i + count].~T();
+    }
+    size_ -= count;
+  }
+
   void clear() {
     for (size_t i = 0; i < size_; i++) {
       data_[i].~T();

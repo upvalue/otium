@@ -36,13 +36,17 @@ struct Editor {
   }
 
   /** Overwrite a given row; grows if needed */
-  void screenPutLine(int y, const ou::string &line) {
+  void screenPutLine(int y, const ou::string &line, size_t cutoff = 0) {
     if (y >= lines.size()) {
       while (lines.size() <= y) {
         lines.push_back(ou::string());
       }
     }
-    lines[y] = line;
+    if (cutoff != 0) {
+      lines[y] = line.substr(0, cutoff);
+    } else {
+      lines[y] = line;
+    }
   }
 
   /** Append to a given row; grows if needed */

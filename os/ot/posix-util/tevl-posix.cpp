@@ -228,7 +228,6 @@ struct PosixTermBackend : Backend {
     for (int i = 0; i < ws.y; i++) {
       if (i < lines.size()) {
         output_buffer.append(lines[i]);
-        // koutput_buffer.append("wut");
       }
       output_buffer.append("\x1b[K");
       if (i != ws.y - 1) {

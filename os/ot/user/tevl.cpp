@@ -99,7 +99,7 @@ void tevl_main(Backend *be_, ou::string *file_path) {
         if (len > ws.x) {
           len = ws.x;
         }
-        e.screenPutLine(y, e.file_lines[file_row]);
+        e.screenPutLine(y, e.file_lines[file_row], len);
       } else {
         e.screenPutLine(y, tilde);
       }

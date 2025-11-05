@@ -22,10 +22,12 @@ struct Editor {
 
   /** Cursor position on the screen */
   intptr_t cx, cy;
+  intptr_t rx;
 
   /** Lines to render; note that this is only roughly the height of the screen */
   ou::vector<ou::string> lines;
   ou::vector<ou::string> file_lines;
+  ou::vector<ou::string> render_lines;
 
   EditorMode mode;
 
@@ -35,19 +37,8 @@ struct Editor {
     }
   }
 
-  /** Overwrite a given row; grows if needed */
-  void screenPutLine(int y, const ou::string &line, size_t cutoff = 0) {
-    if (y >= lines.size()) {
-      while (lines.size() <= y) {
-        lines.push_back(ou::string());
-      }
-    }
-    if (cutoff != 0) {
-      lines[y] = line.substr(0, cutoff);
-    } else {
-      lines[y] = line;
-    }
-  }
+  /** Overwrite a given row; grows if needed.  */
+  void screenPutLine(int y, const ou::string &line, size_t cutoff = 0);
 
   /** Append to a given row; grows if needed */
   void screenAppendLine(int y, const ou::string &line) {

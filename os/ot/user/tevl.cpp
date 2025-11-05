@@ -9,11 +9,39 @@
 static bool running = true;
 static const char *default_error_msg = "no error message set";
 static tevl::Backend *be = nullptr;
+static int TAB_SIZE = 4;
 
 ou::string buffer;
 
 using namespace tevl;
 using namespace ou;
+
+void Editor::screenPutLine(int y, const ou::string &line, size_t cutoff) {
+  while (lines.size() <= y) {
+    lines.push_back(ou::string());
+  }
+  while (render_lines.size() <= y) {
+    render_lines.push_back(ou::string());
+  }
+  if (cutoff != 0) {
+    lines[y] = line.substr(0, cutoff);
+  } else {
+    lines[y] = line;
+  }
+
+  // Handle rendering lines
+  render_lines[y].ensure_capacity(line.length());
+  render_lines[y].clear();
+  for (size_t i = 0; i < line.length(); i++) {
+    if (line[i] == '\t') {
+      for (size_t j = 0; j < TAB_SIZE; j++) {
+        render_lines[y].push_back(' ');
+      }
+    } else {
+      render_lines[y].push_back(line[i]);
+    }
+  }
+}
 
 Editor e;
 
@@ -64,8 +92,22 @@ void process_key_press() {
   }
 }
 
+intptr_t editor_cx_to_rx(intptr_t cx) {
+  intptr_t rx = 0;
+  intptr_t j;
+  for (j = 0; j < cx; j++) {
+    if (e.file_lines[e.cy][j] == '\t') {
+      rx += (TAB_SIZE - 1) - (rx % TAB_SIZE);
+    }
+    rx++;
+  }
+
+  return rx;
+}
+
 void editor_scroll() {
   auto ws = be->getWindowSize();
+  e.rx = editor_cx_to_rx(e.cx);
 
   // Handle scroll
   if (e.cy < e.row_offset) {
@@ -76,12 +118,19 @@ void editor_scroll() {
     e.row_offset = e.cy - ws.y + 1;
   }
 
+  /*
   if (e.cx < e.col_offset) {
     e.col_offset = e.cx;
   }
 
   if (e.cx >= e.col_offset + ws.x) {
     e.col_offset = e.cx - ws.x + 1;
+  }*/
+  if (e.rx < e.col_offset) {
+    e.col_offset = e.rx;
+  }
+  if (e.rx >= e.col_offset + ws.x) {
+    e.col_offset = e.rx - ws.x + 1;
   }
 }
 
@@ -139,7 +188,7 @@ void tevl_main(Backend *be_, ou::string *file_path) {
     }
 
     // be->render(e.cy - e.row_offset, e.cx, e.lines);
-    be->render(e.col_offset, e.cx - e.col_offset, e.cy - e.row_offset, e.lines);
+    be->render(e.col_offset, e.rx - e.col_offset, e.cy - e.row_offset, e.render_lines);
     // be->render(e.cy - e.row_offset, e.cx, e.screen_lines);
 
     // Handle user input

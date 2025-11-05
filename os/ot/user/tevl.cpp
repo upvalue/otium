@@ -4,12 +4,11 @@
 #include "ot/shared/result.hpp"
 #include "ot/user/file.hpp"
 #include "ot/user/string.hpp"
+#include "ot/user/user.hpp"
 
 static bool running = true;
 static const char *default_error_msg = "no error message set";
 static tevl::Backend *be = nullptr;
-
-#define CTRL_KEY(k) ((k) & 0x1f)
 
 ou::string buffer;
 
@@ -33,20 +32,61 @@ void process_key_press() {
   if (k.ctrl && k.c == 'q') {
     running = false;
   } else if (k.ext == ExtendedKey::ARROW_LEFT) {
-    if (e.cx > 0)
+    if (e.cx != 0) {
       e.cx--;
+    } else if (e.cy > 0) {
+      // handle user going back onto previous line
+      e.cy--;
+      e.cx = e.file_lines[e.cy].length();
+    }
+
   } else if (k.ext == ExtendedKey::ARROW_RIGHT) {
     if (e.cx < e.file_lines[e.cy].length()) {
       e.cx++;
+    } else if (e.cy < e.file_lines.size() - 1) {
+      // handle user going forward onto next line
+      e.cy++;
+      e.cx = 0;
     }
   } else if (k.ext == ExtendedKey::ARROW_UP) {
     if (e.cy > 0) {
+      // adjust cursor to back of prev line
+      if (e.cx > e.file_lines[e.cy - 1].length()) {
+        e.cx = e.file_lines[e.cy - 1].length() - 1;
+      }
+      // handle case where prev line is shorter than current cx
+      if (e.cx > e.file_lines[e.cy - 1].length()) {
+        e.cx = OT_MAX(0, (intptr_t)e.file_lines[e.cy - 1].length() - 1);
+      }
       e.cy--;
     }
   } else if (k.ext == ExtendedKey::ARROW_DOWN) {
+    // if not at end of file
     if (e.cy < e.file_lines.size() - 1) {
+      // handle case where next line is shorter than current cx
+      if (e.cx > e.file_lines[e.cy + 1].length()) {
+        e.cx = OT_MAX(0, (intptr_t)e.file_lines[e.cy + 1].length() - 1);
+      }
       e.cy++;
     }
+  }
+}
+
+void editor_scroll() {
+  auto ws = be->getWindowSize();
+
+  // Handle scroll
+  if (e.cy < e.row_offset) {
+    e.row_offset = e.cy;
+  }
+  if (e.cy >= e.row_offset + ws.y) {
+    e.row_offset = e.cy - ws.y + 1;
+  }
+  if (e.cx < e.col_offset) {
+    e.col_offset = e.cx;
+  }
+  if (e.cx >= e.col_offset + ws.x) {
+    e.col_offset = e.cx - ws.x + 1;
   }
 }
 
@@ -79,15 +119,10 @@ void tevl_main(Backend *be_, ou::string *file_path) {
   }
 
   while (running) {
-    auto ws = be->getWindowSize();
 
     // Handle scroll
-    if (e.cy < e.row_offset) {
-      e.row_offset = e.cy;
-    }
-    if (e.cy >= e.row_offset + ws.y) {
-      e.row_offset = e.cy - ws.y + 1;
-    }
+    auto ws = be->getWindowSize();
+    // editor_scroll();
 
     // Render individual rows
     e.screenResetLines();
@@ -95,7 +130,10 @@ void tevl_main(Backend *be_, ou::string *file_path) {
     for (int y = 0; y < ws.y; y++) {
       int file_row = y + e.row_offset;
       if (file_row < e.file_lines.size()) {
-        size_t len = e.file_lines[file_row].length();
+        intptr_t len = e.file_lines[file_row].length() - e.col_offset;
+        if (len < 0) {
+          len = 0;
+        }
         if (len > ws.x) {
           len = ws.x;
         }
@@ -106,7 +144,7 @@ void tevl_main(Backend *be_, ou::string *file_path) {
     }
 
     // be->render(e.cy - e.row_offset, e.cx, e.lines);
-    be->render(e.cx, e.cy - e.row_offset, e.lines);
+    be->render(e.cx - e.col_offset, e.cy - e.row_offset, e.lines);
     // be->render(e.cy - e.row_offset, e.cx, e.screen_lines);
 
     // Handle user input

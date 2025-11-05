@@ -42,4 +42,7 @@ struct CommWriter {
   MPackWriter &writer() { return _writer; }
 };
 
+#define OT_MAX(a, b) ((a) > (b) ? (a) : (b))
+#define OT_MIN(a, b) ((a) < (b) ? (a) : (b))
+
 #endif

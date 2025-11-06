@@ -1,6 +1,6 @@
 // tcl.cpp - implementation of minimal dependency Tcl interpreter
 
-#include "ot/user/tcl.h"
+#include "ot/user/tcl.hpp"
 #include "ot/shared/mpack-utils.hpp"
 #include "ot/shared/mpack-writer.hpp"
 

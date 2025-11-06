@@ -2,7 +2,7 @@
 #include "ot/shared/arguments.hpp"
 #include "ot/shared/messages.hpp"
 #include "ot/shared/mpack-utils.hpp"
-#include "ot/user/tcl.h"
+#include "ot/user/tcl.hpp"
 #include "ot/user/user.hpp"
 #include "ot/user/vendor/tlsf.h"
 

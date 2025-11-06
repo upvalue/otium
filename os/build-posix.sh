@@ -26,10 +26,13 @@ clang++ -DOT_POSIX -std=c++17 -I. -o bin/tevl \
     ot/user/string.cpp \
     ot/user/file.cpp \
     ot/user/tevl.cpp \
+    ot/user/tcl.cpp \
+    ot/shared/mpack-utils.cpp \
     ot/posix-util/posix-file.cpp \
     ot/posix-util/tevl-posix.cpp \
     ot/posix-util/posix-std.cpp \
     ot/shared/std.cpp \
-    bin/printf.o
+    bin/printf.o \
+    bin/mpack.o
 
 echo "✓ TEVL built successfully: bin/tevl"

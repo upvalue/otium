@@ -13,6 +13,7 @@ namespace tevl {
 enum class EditorMode {
   NORMAL,
   INSERT,
+  COMMND,
 };
 
 struct Editor {
@@ -37,6 +38,8 @@ struct Editor {
   /** message line -- shows either a text notif */
   ou::string message_line;
   uint64_t last_message_time;
+
+  ou::string command_line;
 
   EditorMode mode;
 
@@ -85,6 +88,7 @@ enum ExtendedKey {
   PAGE_UP,
   PAGE_DOWN,
   DEL_KEY,
+  ESC_KEY,
 };
 
 struct Key {

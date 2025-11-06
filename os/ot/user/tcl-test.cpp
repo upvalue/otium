@@ -1,6 +1,6 @@
 // tcl-test.cpp - unit tests for TCL interpreter
 #include "ot/common.h"
-#include "ot/user/tcl.h"
+#include "ot/user/tcl.hpp"
 #include "vendor/doctest.h"
 
 #ifdef OT_POSIX

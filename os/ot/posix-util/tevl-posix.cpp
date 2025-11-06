@@ -93,10 +93,12 @@ struct PosixTermBackend : Backend {
       char seq[3];
 
       if (read(STDIN_FILENO, &seq[0], 1) != 1) {
+        key.ext = ESC_KEY;
         key.c = '\x1b';
         return Result<Key, EditorErr>::ok(key);
       }
       if (read(STDIN_FILENO, &seq[1], 1) != 1) {
+        key.ext = ESC_KEY;
         key.c = '\x1b';
         return Result<Key, EditorErr>::ok(key);
       }
@@ -268,9 +270,15 @@ struct PosixTermBackend : Backend {
     message_buffer.clear();
     message_buffer.append(ed.message_line);
 
-    output_buffer.append(message_buffer);
+    if (message_buffer.length() > 0) {
+      output_buffer.append(message_buffer);
+      // output_buffer.append("\r\n");
+    } else if (ed.mode == EditorMode::COMMND) {
+      output_buffer.append(";");
+      output_buffer.append(ed.command_line);
+      output_buffer.append("\x1b[K");
+    }
     output_buffer.append("\x1b[K");
-    // output_buffer.append("\r\n");
 
     // Reset cursor position at the end
     char buf[32];

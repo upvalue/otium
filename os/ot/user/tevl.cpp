@@ -4,7 +4,7 @@
 #include "ot/shared/result.hpp"
 #include "ot/user/file.hpp"
 #include "ot/user/string.hpp"
-#include "ot/user/tcl.h"
+#include "ot/user/tcl.hpp"
 #include "ot/user/user.hpp"
 
 static bool running = true;
@@ -46,6 +46,26 @@ void Editor::screenPutLine(int y, const ou::string &line, size_t cutoff) {
 }
 
 Editor e;
+tcl::Interp interp;
+
+void editor_message_set(const ou::string &message) {
+  e.message_line = message;
+  e.last_message_time = o_time_get();
+}
+
+void editor_interpret_command() {
+  if (e.command_line.empty()) {
+    return;
+  }
+
+  be->debug_print("evaluating command");
+  be->debug_print(e.command_line);
+
+  tcl::Status status = interp.eval(e.command_line);
+  if (status != tcl::S_OK) {
+    editor_message_set(interp.result);
+  }
+}
 
 void editor_insert_char(char c) {
   if (e.cy == e.file_lines.size()) {
@@ -96,35 +116,55 @@ void process_key_press() {
 
   Key k = res.value();
 
+  // let ctrl-q quit always for now
   if (k.ctrl && k.c == 'q') {
     running = false;
-  } else if (k.ext == ExtendedKey::ARROW_LEFT) {
-    if (e.cx != 0) {
-      e.cx--;
-    } else if (e.cy > 0) {
-      // handle user going back onto previous line
-      e.cy--;
-      e.cx = e.file_lines[e.cy].length();
-    }
-  } else if (k.ext == ExtendedKey::ARROW_RIGHT) {
-    if (e.cx < e.file_lines[e.cy].length()) {
-      e.cx++;
-    } else if (e.cy < e.file_lines.size() - 1) {
-      // handle user going forward onto next line
-      e.cy++;
-      e.cx = 0;
-    }
-  } else if (k.ext == ExtendedKey::ARROW_UP) {
-    if (e.cy > 0) {
-      e.cy--;
-    }
-  } else if (k.ext == ExtendedKey::ARROW_DOWN) {
-    if (e.cy < e.file_lines.size() - 1) {
-      e.cy++;
+  }
+
+  if (e.mode == EditorMode::NORMAL || e.mode == EditorMode::INSERT) {
+    if (k.ext == ExtendedKey::ARROW_LEFT) {
+      if (e.cx != 0) {
+        e.cx--;
+      } else if (e.cy > 0) {
+        // handle user going back onto previous line
+        e.cy--;
+        e.cx = e.file_lines[e.cy].length();
+      }
+    } else if (k.ext == ExtendedKey::ARROW_RIGHT) {
+      if (e.cx < e.file_lines[e.cy].length()) {
+        e.cx++;
+      } else if (e.cy < e.file_lines.size() - 1) {
+        // handle user going forward onto next line
+        e.cy++;
+        e.cx = 0;
+      }
+    } else if (k.ext == ExtendedKey::ARROW_UP) {
+      if (e.cy > 0) {
+        e.cy--;
+      }
+    } else if (k.ext == ExtendedKey::ARROW_DOWN) {
+      if (e.cy < e.file_lines.size() - 1) {
+        e.cy++;
+      }
     }
   }
 
-  if (true || e.mode == EditorMode::INSERT) {
+  if (e.mode == EditorMode::NORMAL) {
+    if (k.c == 'i') {
+      e.mode = EditorMode::INSERT;
+      return;
+    }
+    if (k.c == ';') {
+      e.mode = EditorMode::COMMND;
+      e.command_line.clear();
+      return;
+    }
+  }
+
+  if (e.mode == EditorMode::INSERT) {
+    if (k.ext == ExtendedKey::ESC_KEY) {
+      e.mode = EditorMode::NORMAL;
+    }
     if (k.ext == ExtendedKey::ENTER_KEY) {
       editor_insert_newline();
     }
@@ -133,6 +173,18 @@ void process_key_press() {
     }
     if (k.c >= 32 && k.c <= 126) {
       editor_insert_char(k.c);
+    }
+  }
+
+  if (e.mode == EditorMode::COMMND) {
+    if (k.ext == ExtendedKey::ENTER_KEY) {
+      editor_interpret_command();
+      e.command_line.clear();
+      e.mode = EditorMode::NORMAL;
+    } else if (k.ext == ExtendedKey::BACKSPACE_KEY) {
+      e.command_line.erase(e.command_line.length() - 1, 1);
+    } else if (k.c >= 32 && k.c <= 126) {
+      e.command_line.push_back(k.c);
     }
   }
 
@@ -192,6 +244,8 @@ void generate_status_line() {
   e.status_line.clear();
   if (e.mode == EditorMode::INSERT) {
     e.status_line.append("[insert] ");
+  } else if (e.mode == EditorMode::COMMND) {
+    e.status_line.append("[commnd] ");
   } else {
     e.status_line.append("[normal] ");
   }
@@ -210,13 +264,42 @@ void generate_status_line() {
   e.status_line.append(" ");
 }
 
+// tcl commands
+tcl::Status tcl_command_hard_quit(tcl::Interp &interp, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  running = false;
+  return tcl::S_OK;
+}
+
+tcl::Status tcl_command_quit(tcl::Interp &interp, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (e.dirty > 0) {
+    interp.result = "file has changes, use q! to quit";
+    return tcl::S_ERR;
+  }
+  return tcl_command_hard_quit(interp, argv, privdata);
+}
+
+tcl::Status tcl_command_write(tcl::Interp &interp, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (e.file_name.empty()) {
+    return tcl::S_ERR;
+  }
+  return tcl::S_OK;
+}
+
 namespace tevl {
 
 void tevl_main(Backend *be_, ou::string *file_path) {
+  tcl::register_core_commands(interp);
+
+  interp.register_command("q", tcl_command_quit);
+  interp.register_command("q!", tcl_command_hard_quit);
+  interp.register_command("quit", tcl_command_quit);
+  interp.register_command("quit!", tcl_command_hard_quit);
+
+  interp.register_command("write", tcl_command_write);
+  interp.register_command("w", tcl_command_write);
+
   be = be_;
   be->error_msg = default_error_msg;
-  e.last_message_time = o_time_get();
-  e.message_line = "Hello!";
   if (be->setup() != EditorErr::NONE) {
     oprintf("failed to setup be: %s\n", be->error_msg);
     return;

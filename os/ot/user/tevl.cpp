@@ -280,8 +280,34 @@ tcl::Status tcl_command_quit(tcl::Interp &interp, tcl::vector<tcl::string> &argv
 
 tcl::Status tcl_command_write(tcl::Interp &interp, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
   if (e.file_name.empty()) {
+    interp.result = "no filename";
     return tcl::S_ERR;
   }
+
+  ou::File file(e.file_name.c_str(), ou::FileMode::WRITE);
+  FileErr err = file.open();
+  if (err != FileErr::NONE) {
+    interp.result = "failed to open file for writing";
+    return tcl::S_ERR;
+  }
+
+  for (size_t i = 0; i < e.file_lines.size(); i++) {
+    err = file.write(e.file_lines[i]);
+    if (err != FileErr::NONE) {
+      interp.result = "failed to write line";
+      return tcl::S_ERR;
+    }
+    if (i < e.file_lines.size() - 1) {
+      err = file.write("\n");
+      if (err != FileErr::NONE) {
+        interp.result = "failed to write newline";
+        return tcl::S_ERR;
+      }
+    }
+  }
+
+  e.dirty = 0;
+  editor_message_set("file written");
   return tcl::S_OK;
 }
 

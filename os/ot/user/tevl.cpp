@@ -121,6 +121,21 @@ void process_key_press() {
     running = false;
   }
 
+  // ctrl-d and ctrl-u page down/up
+  if (k.ctrl && k.c == 'd') {
+    int page_size = ws.y / 2;
+    e.cy += page_size;
+    if (e.cy >= e.file_lines.size()) {
+      e.cy = e.file_lines.size() - 1;
+    }
+  } else if (k.ctrl && k.c == 'u') {
+    int page_size = ws.y / 2;
+    e.cy -= page_size;
+    if (e.cy < 0) {
+      e.cy = 0;
+    }
+  }
+
   if (e.mode == EditorMode::NORMAL || e.mode == EditorMode::INSERT) {
     if (k.ext == ExtendedKey::ARROW_LEFT) {
       if (e.cx != 0) {

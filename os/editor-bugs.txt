@@ -19,3 +19,4 @@ a list of editor bugs encountered:
 - backspace erases entire line
 - backspacing over tabs doesn't work right
 - backspace erases two characters
+- can't quit editor

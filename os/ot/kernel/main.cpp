@@ -9,13 +9,21 @@ void kernel_common(void);
 // Forward declaration for shell_main (defined in prog-user.cpp)
 extern "C" void user_program_main(void);
 #else
-extern "C" char _binary_bin_prog_shell_bin_start[],
-    _binary_bin_prog_shell_bin_size[];
+extern "C" char _binary_bin_prog_shell_bin_start[], _binary_bin_prog_shell_bin_size[];
 #endif
 
 // a basic process that just prints hello world and exits
 extern "C" void proc_hello_world(void) {
   oprintf("TEST: Hello, world!\n");
+  current_proc->state = TERMINATED;
+  yield();
+}
+
+void graphics_demo_main_proc(void);
+
+void proc_gfx_test(void) {
+  // graphics_demo_init();
+  // graphics_demo_main_proc();
   current_proc->state = TERMINATED;
   yield();
 }
@@ -87,35 +95,29 @@ void kernel_start(void) {
   oprintf("TEST: Starting memory recycling test\n");
 
   // Create first process with minimal image to allocate user pages
-  Process *proc1 = process_create("mem_test_1", mem_test_image,
-                                  sizeof(mem_test_image), true, nullptr);
+  Process *proc1 = process_create("mem_test_1", mem_test_image, sizeof(mem_test_image), true, nullptr);
   uintptr_t proc1_pages[16];
   uint32_t proc1_page_count = 0;
   get_process_pages(proc1->pid, proc1_pages, &proc1_page_count);
-  oprintf("TEST: Process 1 (pid %d) allocated %d pages\n", proc1->pid,
-          proc1_page_count);
+  oprintf("TEST: Process 1 (pid %d) allocated %d pages\n", proc1->pid, proc1_page_count);
 
   // Create second process
-  Process *proc2 = process_create("mem_test_2", mem_test_image,
-                                  sizeof(mem_test_image), true, nullptr);
+  Process *proc2 = process_create("mem_test_2", mem_test_image, sizeof(mem_test_image), true, nullptr);
   uintptr_t proc2_pages[16];
   uint32_t proc2_page_count = 0;
   get_process_pages(proc2->pid, proc2_pages, &proc2_page_count);
-  oprintf("TEST: Process 2 (pid %d) allocated %d pages\n", proc2->pid,
-          proc2_page_count);
+  oprintf("TEST: Process 2 (pid %d) allocated %d pages\n", proc2->pid, proc2_page_count);
 
   // Exit process 1 to free its pages
   process_exit(proc1);
   oprintf("TEST: Exited process 1 (freed %d pages)\n", proc1_page_count);
 
   // Create third process - should reuse process 1's pages
-  Process *proc3 = process_create("mem_test_3", mem_test_image,
-                                  sizeof(mem_test_image), true, nullptr);
+  Process *proc3 = process_create("mem_test_3", mem_test_image, sizeof(mem_test_image), true, nullptr);
   uintptr_t proc3_pages[16];
   uint32_t proc3_page_count = 0;
   get_process_pages(proc3->pid, proc3_pages, &proc3_page_count);
-  oprintf("TEST: Process 3 (pid %d) allocated %d pages\n", proc3->pid,
-          proc3_page_count);
+  oprintf("TEST: Process 3 (pid %d) allocated %d pages\n", proc3->pid, proc3_page_count);
 
   // Verify page recycling - check if all of proc3's pages are from proc1
   uint32_t reused_count = 0;
@@ -128,13 +130,11 @@ void kernel_start(void) {
     }
   }
 
-  if (reused_count == proc3_page_count &&
-      proc3_page_count == proc1_page_count) {
-    oprintf("TEST: SUCCESS - Process 3 reused all %d pages from Process 1\n",
-            reused_count);
+  if (reused_count == proc3_page_count && proc3_page_count == proc1_page_count) {
+    oprintf("TEST: SUCCESS - Process 3 reused all %d pages from Process 1\n", reused_count);
   } else {
-    oprintf("TEST: FAILURE - Process 3 reused %d/%d pages (expected %d)\n",
-            reused_count, proc3_page_count, proc1_page_count);
+    oprintf("TEST: FAILURE - Process 3 reused %d/%d pages (expected %d)\n", reused_count, proc3_page_count,
+            proc1_page_count);
   }
 
   // Clean up
@@ -143,21 +143,15 @@ void kernel_start(void) {
 
 #elif KERNEL_PROG == KERNEL_PROG_TEST_HELLO
   // Test mode: run hello world test
-  Process *test_proc = process_create(
-      "test_hello", (const void *)proc_hello_world, 0, false, nullptr);
-  TRACE(LSOFT, "created test proc with name %s and pid %d", test_proc->name,
-        test_proc->pid);
+  Process *test_proc = process_create("test_hello", (const void *)proc_hello_world, 0, false, nullptr);
+  TRACE(LSOFT, "created test proc with name %s and pid %d", test_proc->name, test_proc->pid);
 #elif KERNEL_PROG == KERNEL_PROG_TEST_ALTERNATE
   // Test mode: alternate process execution
   oprintf("TEST: Starting alternate process test (should print 1234)\n");
-  Process *proc_a = process_create(
-      "alternate_a", (const void *)proc_alternate_a, 0, false, nullptr);
-  Process *proc_b = process_create(
-      "alternate_b", (const void *)proc_alternate_b, 0, false, nullptr);
-  TRACE(LSOFT, "created proc_a with name %s and pid %d", proc_a->name,
-        proc_a->pid);
-  TRACE(LSOFT, "created proc_b with name %s and pid %d", proc_b->name,
-        proc_b->pid);
+  Process *proc_a = process_create("alternate_a", (const void *)proc_alternate_a, 0, false, nullptr);
+  Process *proc_b = process_create("alternate_b", (const void *)proc_alternate_b, 0, false, nullptr);
+  TRACE(LSOFT, "created proc_a with name %s and pid %d", proc_a->name, proc_a->pid);
+  TRACE(LSOFT, "created proc_b with name %s and pid %d", proc_b->name, proc_b->pid);
   oprintf("TEST: ");
 #else
   // Default/main mode
@@ -169,26 +163,25 @@ void kernel_start(void) {
   Arguments scratch2_args = {1, &scratch2_argv};
   char *print_server_argv = {"print-server"};
   Arguments print_server_args = {1, &print_server_argv};
+
 #ifdef OT_ARCH_WASM
   // For WASM, call the shell main function directly
-  Process *proc_shell = process_create("shell", (const void *)user_program_main,
-                                       0, false, &shell_args);
+  Process *proc_shell = process_create("shell", (const void *)user_program_main, 0, false, &shell_args);
 
   Process *proc_print_server =
-      process_create("print-server", (const void *)user_program_main, 0, false,
-                     &print_server_args);
+      process_create("print-server", (const void *)user_program_main, 0, false, &print_server_args);
   // Process *proc_scratch = process_create(
   // "scratch", (const void *)user_program_main, 0, false, &scratch_args);
 #else
   // For RISC-V, load the shell from the embedded binary
-  Process *proc_shell = process_create(
-      "shell", (const void *)_binary_bin_prog_shell_bin_start,
-      (size_t)_binary_bin_prog_shell_bin_size, true, &shell_args);
+  Process *proc_shell = process_create("shell", (const void *)_binary_bin_prog_shell_bin_start,
+                                       (size_t)_binary_bin_prog_shell_bin_size, true, &shell_args);
 
-  Process *proc_print_server = process_create(
-      "print-server", (const void *)_binary_bin_prog_shell_bin_start,
-      (size_t)_binary_bin_prog_shell_bin_size, true, &print_server_args);
+  Process *proc_print_server = process_create("print-server", (const void *)_binary_bin_prog_shell_bin_start,
+                                              (size_t)_binary_bin_prog_shell_bin_size, true, &print_server_args);
 
+  Process *proc_gfx_test = process_create("gfx_test", (const void *)graphics_demo_main_proc, 0, false, nullptr);
+  TRACE(LSOFT, "created proc_gfx_test with name %s and pid %d", proc_gfx_test->name, proc_gfx_test->pid);
   /*
   Process *proc_scratch = process_create(
       "scratch", (const void *)_binary_bin_prog_shell_bin_start,
@@ -211,8 +204,7 @@ void kernel_start(void) {
   yield();
 #endif
 
-  OT_SOFT_ASSERT("reached end of kernel while programs were running",
-                 !programs_running());
+  OT_SOFT_ASSERT("reached end of kernel while programs were running", !programs_running());
 
   oputchar('\n');
   TRACE(LSOFT, "no programs left to run, exiting kernel");

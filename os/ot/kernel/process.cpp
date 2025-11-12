@@ -104,6 +104,13 @@ Process *process_create_impl(Process *table, proc_id_t max_procs,
     map_page(page_table.as<uintptr_t>(), paddr, PageAddr(paddr),
              PAGE_R | PAGE_W | PAGE_X, i);
 
+  // Map VirtIO MMIO regions (identity mapped)
+  for (int mmio_idx = 0; mmio_idx < 8; mmio_idx++) {
+    uintptr_t mmio_addr = 0x10001000 + (mmio_idx * 0x1000);
+    map_page(page_table.as<uintptr_t>(), mmio_addr, PageAddr(mmio_addr),
+             PAGE_R | PAGE_W, i);
+  }
+
   // Map user pages.
   if (is_image) {
     TRACE_PROC(LLOUD, "found image. allocating pages");

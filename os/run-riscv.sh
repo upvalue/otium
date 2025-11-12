@@ -11,7 +11,7 @@ DISPLAY=cocoa
 $QEMU \
   -machine virt \
   -bios default \
-  -device ramfb \
+  -device virtio-gpu-device \
   -display $DISPLAY \
   -serial mon:stdio \
   --no-reboot \

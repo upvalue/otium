@@ -48,21 +48,20 @@ struct trap_frame {
   uint32_t sp;
 } __attribute__((packed));
 
-#define READ_CSR(reg)                                                          \
-  ({                                                                           \
-    unsigned long __tmp;                                                       \
-    __asm__ __volatile__("csrr %0, " #reg : "=r"(__tmp));                      \
-    __tmp;                                                                     \
+#define READ_CSR(reg)                                                                                                  \
+  ({                                                                                                                   \
+    unsigned long __tmp;                                                                                               \
+    __asm__ __volatile__("csrr %0, " #reg : "=r"(__tmp));                                                              \
+    __tmp;                                                                                                             \
   })
 
-#define WRITE_CSR(reg, value)                                                  \
-  do {                                                                         \
-    uint32_t __tmp = (value);                                                  \
-    __asm__ __volatile__("csrw " #reg ", %0" ::"r"(__tmp));                    \
+#define WRITE_CSR(reg, value)                                                                                          \
+  do {                                                                                                                 \
+    uint32_t __tmp = (value);                                                                                          \
+    __asm__ __volatile__("csrw " #reg ", %0" ::"r"(__tmp));                                                            \
   } while (0)
 
-struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4,
-                       long arg5, long fid, long eid) {
+struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4, long arg5, long fid, long eid) {
   register long a0 __asm__("a0") = arg0;
   register long a1 __asm__("a1") = arg1;
   register long a2 __asm__("a2") = arg2;
@@ -74,8 +73,7 @@ struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4,
 
   __asm__ __volatile__("ecall"
                        : "=r"(a0), "=r"(a1)
-                       : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5),
-                         "r"(a6), "r"(a7)
+                       : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(a6), "r"(a7)
                        : "memory");
   return (struct sbiret){.error = a0, .value = a1};
 }
@@ -85,15 +83,11 @@ int oputchar(char ch) {
   return 1;
 }
 
-int ogetchar() {
-  return (int)sbi_call(0, 0, 0, 0, 0, 0, 0, 2 /* Console Putchar */).error;
-}
+int ogetchar() { return (int)sbi_call(0, 0, 0, 0, 0, 0, 0, 2 /* Console Putchar */).error; }
 
 #define SBI_EXT_SRST 0x53525354 // "SRST"
 #define SBI_SRST_SHUTDOWN 0
-void kernel_exit(void) {
-  sbi_call(0, 0, 0, 0, 0, 0, SBI_SRST_SHUTDOWN, SBI_EXT_SRST);
-}
+void kernel_exit(void) { sbi_call(0, 0, 0, 0, 0, 0, SBI_SRST_SHUTDOWN, SBI_EXT_SRST); }
 
 void wfi(void) {
   for (;;) {
@@ -114,11 +108,11 @@ void handle_syscall(struct trap_frame *f) {
     f->a0 = oputchar(arg0);
     break;
   case OU_YIELD:
+    yield();
     break;
   case OU_EXIT:
     if (current_proc) {
-      oprintf("Process %s (pid=%d) exited\n", current_proc->name,
-              current_proc->pid);
+      oprintf("Process %s (pid=%d) exited\n", current_proc->name, current_proc->pid);
       current_proc->state = TERMINATED;
     }
     break;
@@ -126,8 +120,7 @@ void handle_syscall(struct trap_frame *f) {
     f->a0 = ogetchar();
     break;
   case OU_ALLOC_PAGE: {
-    Pair<PageAddr, PageAddr> result =
-        process_alloc_mapped_page(current_proc, true, true, false);
+    Pair<PageAddr, PageAddr> result = process_alloc_mapped_page(current_proc, true, true, false);
     f->a0 = result.second.raw();
     break;
   }
@@ -193,7 +186,8 @@ void handle_syscall(struct trap_frame *f) {
   default:
     PANIC("unexpected syscall sysno=%x\n", sysno);
   }
-  yield();
+  // If uncommented, yields after every syscall
+  // yield();
 }
 
 extern "C" void handle_trap(struct trap_frame *f) {
@@ -208,25 +202,24 @@ extern "C" void handle_trap(struct trap_frame *f) {
       current_proc->user_pc = user_pc + 4; // Skip past the ecall instruction
     }
     handle_syscall(f);
-    // user_pc will be restored by yield(), don't write it back here
+    // update sepc to advance past syscall
+    WRITE_CSR(sepc, current_proc->user_pc);
   } else {
     // Check if trap came from user mode
     bool from_user = !(sstatus & SSTATUS_SPP);
 
     if (from_user && current_proc) {
-      oprintf("Process %s (pid=%d) crashed: scause=%x, stval=%x, sepc=%x\n",
-              current_proc->name, current_proc->pid, scause, stval, user_pc);
+      oprintf("Process %s (pid=%d) crashed: scause=%x, stval=%x, sepc=%x\n", current_proc->name, current_proc->pid,
+              scause, stval, user_pc);
       current_proc->state = TERMINATED;
       yield();
     } else {
-      PANIC("unexpected trap in kernel stval=%x, sepc=%x\n", scause, stval,
-            user_pc);
+      PANIC("unexpected trap in kernel stval=%x, sepc=%x\n", scause, stval, user_pc);
     }
   }
 }
 
-__attribute__((naked)) __attribute__((aligned(4))) extern "C" void
-kernel_entry(void) {
+__attribute__((naked)) __attribute__((aligned(4))) extern "C" void kernel_entry(void) {
   __asm__ __volatile__("csrrw sp, sscratch, sp\n"
                        "addi sp, sp, -4 * 31\n"
                        "sw ra,  4 * 0(sp)\n"
@@ -304,8 +297,7 @@ kernel_entry(void) {
                        "sret\n");
 }
 
-__attribute__((naked)) extern "C" void switch_context(uint32_t *prev_sp,
-                                                      uint32_t *next_sp) {
+__attribute__((naked)) extern "C" void switch_context(uint32_t *prev_sp, uint32_t *next_sp) {
   // TODO: Handle stack overflows
   __asm__ __volatile__(
       // Save callee-saved registers onto the current process's stack.
@@ -369,17 +361,17 @@ void yield(void) {
     return;
   }
 
-  __asm__ __volatile__(
-      "sfence.vma\n"
-      "csrw satp, %[satp]\n"
-      "sfence.vma\n"
-      "csrw sscratch, %[sscratch]\n"
-      "csrw sepc, %[sepc]\n" // Restore the next process's PC
-      :
-      // Don't forget the trailing comma!
-      : [satp] "r"(SATP_SV32 | ((uintptr_t)next->page_table / OT_PAGE_SIZE)),
-        [sscratch] "r"((uintptr_t)&next->stack[sizeof(next->stack)]),
-        [sepc] "r"(next->user_pc));
+  TRACE_PROC(LLOUD, "switching to process %s (pid=%d)", next->name, next->pid);
+
+  __asm__ __volatile__("sfence.vma\n"
+                       "csrw satp, %[satp]\n"
+                       "sfence.vma\n"
+                       "csrw sscratch, %[sscratch]\n"
+                       "csrw sepc, %[sepc]\n" // Restore the next process's PC
+                       :
+                       // Don't forget the trailing comma!
+                       : [satp] "r"(SATP_SV32 | ((uintptr_t)next->page_table / OT_PAGE_SIZE)),
+                         [sscratch] "r"((uintptr_t)&next->stack[sizeof(next->stack)]), [sepc] "r"(next->user_pc));
 
   Process *prev = current_proc;
   current_proc = next;
@@ -391,13 +383,10 @@ extern "C" void kernel_main(void) {
   kernel_start();
 }
 
-__attribute__((section(".text.boot"))) __attribute__((naked)) extern "C" void
-boot(void) {
-  __asm__ __volatile__(
-      "mv sp, %[stack_top]\n" // Set the stack pointer
-      "j kernel_main\n"       // Jump to the kernel main function
-      :
-      : [stack_top] "r"(
-          __stack_top) // Pass the stack top address as %[stack_top]
+__attribute__((section(".text.boot"))) __attribute__((naked)) extern "C" void boot(void) {
+  __asm__ __volatile__("mv sp, %[stack_top]\n" // Set the stack pointer
+                       "j kernel_main\n"       // Jump to the kernel main function
+                       :
+                       : [stack_top] "r"(__stack_top) // Pass the stack top address as %[stack_top]
   );
 }

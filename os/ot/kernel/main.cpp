@@ -180,8 +180,8 @@ void kernel_start(void) {
   Process *proc_print_server = process_create("print-server", (const void *)_binary_bin_prog_shell_bin_start,
                                               (size_t)_binary_bin_prog_shell_bin_size, true, &print_server_args);
 
-  Process *proc_gfx_test = process_create("gfx_test", (const void *)graphics_demo_main_proc, 0, false, nullptr);
-  TRACE(LSOFT, "created proc_gfx_test with name %s and pid %d", proc_gfx_test->name, proc_gfx_test->pid);
+  // Process *proc_gfx_test = process_create("gfx_test", (const void *)graphics_demo_main_proc, 0, false, nullptr);
+  // TRACE(LSOFT, "created proc_gfx_test with name %s and pid %d", proc_gfx_test->name, proc_gfx_test->pid);
   /*
   Process *proc_scratch = process_create(
       "scratch", (const void *)_binary_bin_prog_shell_bin_start,

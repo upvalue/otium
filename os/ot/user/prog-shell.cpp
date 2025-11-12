@@ -20,8 +20,7 @@ tlsf_t pool = nullptr;
 
 void *ou_malloc(size_t size) {
   if (!pool) {
-    oprintf("FATAL: ou_malloc called before pool initialized (size=%d)\n",
-            size);
+    oprintf("FATAL: ou_malloc called before pool initialized (size=%d)\n", size);
     ou_exit();
   }
   void *result = tlsf_malloc(pool, size);
@@ -55,8 +54,7 @@ void *ou_realloc(void *ptr, size_t size) {
 
 #define SHELL_PAGES 10
 
-tcl::Status cmd_proc_lookup(tcl::Interp &i, tcl::vector<tcl::string> &argv,
-                            tcl::ProcPrivdata *privdata) {
+tcl::Status cmd_proc_lookup(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
   if (!i.arity_check("proc/lookup", argv, 2, 2)) {
     osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "arity check failed");
     i.result = ot_scratch_buffer;
@@ -74,15 +72,13 @@ tcl::Status cmd_proc_lookup(tcl::Interp &i, tcl::vector<tcl::string> &argv,
   return tcl::S_OK;
 }
 
-tcl::Status cmd_mp_send(tcl::Interp &i, tcl::vector<tcl::string> &argv,
-                        tcl::ProcPrivdata *privdata) {
+tcl::Status cmd_mp_send(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
   if (!i.arity_check("mp/send", argv, 2, 2)) {
     return tcl::S_ERR;
   }
   int proc_pid = atoi(argv[1].c_str());
   if (proc_pid == 0) {
-    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "could not convert %s to int",
-              argv[1].c_str());
+    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "could not convert %s to int", argv[1].c_str());
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
   }
@@ -97,6 +93,7 @@ tcl::Status cmd_mp_send(tcl::Interp &i, tcl::vector<tcl::string> &argv,
 }
 
 void shell_main() {
+  oprintf("SHELL BEGIN\n");
   // allocate some contiguous pages to work with
   memory_begin = ou_alloc_page();
 
@@ -121,25 +118,22 @@ void shell_main() {
   oprintf("tcl shell ready\n");
 
   i.register_command("quit",
-                     [](tcl::Interp &i, tcl::vector<tcl::string> &argv,
-                        tcl::ProcPrivdata *privdata) -> tcl::Status {
+                     [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
                        running = false;
                        return tcl::S_OK;
                      });
 
   // cause a crash by dereferencing a random addr
   i.register_command("crash",
-                     [](tcl::Interp &i, tcl::vector<tcl::string> &argv,
-                        tcl::ProcPrivdata *privdata) -> tcl::Status {
+                     [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
                        char *p = (char *)0x10;
                        (*p) = 0;
                        return tcl::S_OK;
                      });
 
   // Lookup a procedure's PID
-  i.register_command(
-      "proc/lookup", cmd_proc_lookup, nullptr,
-      "[proc/lookup name:string] => pid:int - Lookup a procedure's PID");
+  i.register_command("proc/lookup", cmd_proc_lookup, nullptr,
+                     "[proc/lookup name:string] => pid:int - Lookup a procedure's PID");
 
   i.register_command("mp/send", cmd_mp_send, nullptr,
                      "[mp/send pid:int] => nil - Send MessagePack buffer to "

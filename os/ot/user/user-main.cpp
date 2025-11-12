@@ -8,13 +8,7 @@
 #include "ot/user/user.hpp"
 #include "ot/user/vendor/tlsf.h"
 
-enum ProgramType {
-  UNKNOWN,
-  SHELL,
-  SCRATCH,
-  SCRATCH2,
-  PRINT_SERVER
-} program_type;
+enum ProgramType { UNKNOWN, SHELL, SCRATCH, SCRATCH2, PRINT_SERVER } program_type;
 
 void determine_program_type() {
   program_type = UNKNOWN;
@@ -77,8 +71,7 @@ void print_server_main() {
       oprintf("print-server: got message, msg count: %d\n", msg_count);
       PageAddr msg_page = ou_get_msg_page(msg_count - 1);
       oprintf("printing message received\n");
-      mpack_sprint(msg_page.as<char>(), OT_PAGE_SIZE, ot_scratch_buffer,
-                   OT_PAGE_SIZE);
+      mpack_sprint(msg_page.as<char>(), OT_PAGE_SIZE, ot_scratch_buffer, OT_PAGE_SIZE);
       ou_io_puts(ot_scratch_buffer, strlen(ot_scratch_buffer));
       ou_ipc_pop_message();
       oputchar('\n');
@@ -136,8 +129,7 @@ void scratch2_main() {
       int idx = msg_count - 1;
       PageAddr msg_page = ou_get_msg_page(idx);
       oprintf("printing message received\n");
-      mpack_sprint(msg_page.as<char>(), OT_PAGE_SIZE, ot_scratch_buffer,
-                   OT_PAGE_SIZE);
+      mpack_sprint(msg_page.as<char>(), OT_PAGE_SIZE, ot_scratch_buffer, OT_PAGE_SIZE);
       ou_io_puts(ot_scratch_buffer, strlen(ot_scratch_buffer));
       ou_ipc_pop_message();
       messages_processed++;

@@ -11,13 +11,13 @@
 #define VIRTIO_MMIO_DEVICE_FEATURES_SEL 0x014
 #define VIRTIO_MMIO_DRIVER_FEATURES 0x020
 #define VIRTIO_MMIO_DRIVER_FEATURES_SEL 0x024
-#define VIRTIO_MMIO_GUEST_PAGE_SIZE 0x028  // Legacy only
+#define VIRTIO_MMIO_GUEST_PAGE_SIZE 0x028 // Legacy only
 #define VIRTIO_MMIO_QUEUE_SEL 0x030
 #define VIRTIO_MMIO_QUEUE_NUM_MAX 0x034
 #define VIRTIO_MMIO_QUEUE_NUM 0x038
-#define VIRTIO_MMIO_QUEUE_ALIGN 0x03c       // Legacy only
-#define VIRTIO_MMIO_QUEUE_PFN 0x040         // Legacy only
-#define VIRTIO_MMIO_QUEUE_READY 0x044       // Modern only
+#define VIRTIO_MMIO_QUEUE_ALIGN 0x03c // Legacy only
+#define VIRTIO_MMIO_QUEUE_PFN 0x040   // Legacy only
+#define VIRTIO_MMIO_QUEUE_READY 0x044 // Modern only
 #define VIRTIO_MMIO_QUEUE_NOTIFY 0x050
 #define VIRTIO_MMIO_STATUS 0x070
 #define VIRTIO_MMIO_QUEUE_DESC_LOW 0x080    // Modern only
@@ -275,8 +275,8 @@ public:
   VirtIODevice dev;
   VirtQueue controlq;
   PageAddr framebuffer;
-  PageAddr cmd_page;   // Reusable command page
-  PageAddr resp_page;  // Reusable response page
+  PageAddr cmd_page;  // Reusable command page
+  PageAddr resp_page; // Reusable response page
   uint32_t width;
   uint32_t height;
 
@@ -659,7 +659,9 @@ void graphics_demo_main_proc() {
     }
 
     // Small delay to control frame rate
-    for (volatile int i = 0; i < 10000; i++);
+    for (volatile int i = 0; i < 10000; i++)
+      ;
+    oprintf("yielding\n");
     yield();
   }
 }

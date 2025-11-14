@@ -70,7 +70,6 @@ Process *process_create_impl(Process *table, proc_id_t max_procs, const char *na
 
   free_proc->heap_next_vaddr = 0; // Not used in physical-only mode
 
-
   // Set up initial stack with zeroed out registers
   uintptr_t *sp = (uintptr_t *)&free_proc->stack[sizeof(free_proc->stack)];
   *--sp = 0; // s11
@@ -115,7 +114,6 @@ Process *process_create_impl(Process *table, proc_id_t max_procs, const char *na
 
   // Handle argument array
   if (args) {
-
     Pair<PageAddr, PageAddr> alloc_result = process_alloc_mapped_page(free_proc, true, false, false);
     char *buffer = alloc_result.first.as<char>();
 

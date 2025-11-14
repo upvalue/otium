@@ -15,7 +15,12 @@ extern "C" void proc_hello_world(void) {
   oprintf("TEST: Hello, world!\n");
   // For now, loop forever - we'll add proper exit via syscall later
   while (1) {
-    asm volatile("wfi"); // Wait for interrupt
+#ifdef OT_ARCH_RISCV
+    asm volatile("wfi"); // Wait for interrupt (RISC-V only)
+#else
+    // WASM: just busy wait
+    for (volatile int i = 0; i < 1000; i++);
+#endif
   }
 }
 

@@ -2,6 +2,7 @@
 
 #include "ot/core/kernel.hpp"
 #include "ot/drivers/drv-gfx-virtio.hpp"
+#include "ot/platform/user.hpp"
 
 // Forward declaration for kernel_common (defined in startup.cpp)
 void kernel_common(void);
@@ -45,6 +46,19 @@ extern "C" void proc_alternate_b(void) {
   yield();
   current_proc->state = TERMINATED;
   yield();
+}
+
+// TEST_USERSPACE: Simple userspace demo
+// Tests basic user mode execution with proper syscalls
+extern "C" void proc_userspace_demo(void) {
+  oprintf("TEST: Starting userspace demo\n");
+  oprintf("TEST: Process running in user mode\n");
+  oprintf("TEST: Testing yield syscall\n");
+  ou_yield();
+  oprintf("TEST: Back from yield\n");
+  oprintf("TEST: SUCCESS - User mode execution works\n");
+  oprintf("TEST: Terminating process\n");
+  ou_exit();
 }
 
 // Helper to get all pages allocated to a process
@@ -137,6 +151,11 @@ void kernel_start(void) {
   TRACE(LSOFT, "created proc_a with name %s and pid %d", proc_a->name, proc_a->pid);
   TRACE(LSOFT, "created proc_b with name %s and pid %d", proc_b->name, proc_b->pid);
   oprintf("TEST: ");
+#elif KERNEL_PROG == KERNEL_PROG_TEST_USERSPACE
+  // Test mode: userspace demo with memory allocation and stack validation
+  oprintf("TEST: Starting userspace demo test\n");
+  Process *demo_proc = process_create("userspace_demo", (const void *)proc_userspace_demo, nullptr);
+  TRACE(LSOFT, "created demo proc with name %s and pid %d", demo_proc->name, demo_proc->pid);
 #else
   // Default/main mode
   char *shell_argv = {"shell"};

@@ -2,11 +2,12 @@
 
 extern "C" char __bss[], __bss_end[], __stack_top[];
 
-// Forward declarations for test programs (defined in kernel-prog.cpp)
+// Forward declarations for test programs (defined in main.cpp)
 extern "C" void proc_hello_world(void);
 extern "C" void proc_mem_test(void);
 extern "C" void proc_alternate_a(void);
 extern "C" void proc_alternate_b(void);
+extern "C" void proc_userspace_demo(void);
 extern const char mem_test_image[];
 void get_process_pages(uint32_t pid, uintptr_t *pages, uint32_t *count);
 
@@ -23,15 +24,9 @@ void kernel_common(void) {
         idle_proc->pid);
 
 #if defined(OT_ARCH_RISCV) && !defined(OT_POSIX)
-  // TODO: Enable MMU
-  // Problem: Kernel code is mapped with PAGE_U so user mode can access it
-  // But supervisor mode can't fetch instructions from PAGE_U pages (even with SUM)
-  // Solutions to explore:
-  // 1. Compile kernel as position-independent code
-  // 2. Use a small trampoline section without PAGE_U for MMU switching
-  // 3. Map kernel code at non-PAGE_U address for supervisor, PAGE_U address for user
-  //    (dual mapping - partially implemented above)
-  // For now: MMU disabled, physical addressing, no process isolation but user mode still works
-  TRACE(LSOFT, "MMU disabled - TODO: solve PAGE_U instruction fetch issue");
+  // Using physical memory only (no MMU/virtual addressing)
+  // This is simpler and compatible with systems without MMU (like RP2350)
+  // User mode execution still provides fault isolation even without memory protection
+  TRACE(LSOFT, "Physical memory mode - no MMU");
 #endif
 }

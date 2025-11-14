@@ -196,12 +196,12 @@ void scheduler_loop(void);
 #endif
 
 #define USER_BASE 0x1000000
-#define USER_CODE_BASE 0x40000000  // Virtual address where user-accessible code is mapped
-#define HEAP_BASE 0x2000000
+// Physical memory only - no virtual addressing
+// USER_CODE_BASE and HEAP_BASE removed (not needed without MMU)
 #define SSTATUS_SPIE (1 << 5)
 
-void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr,
-              uint32_t flags, proc_id_t pid);
+// map_page() not used in physical-only mode
+void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr, uint32_t flags, proc_id_t pid);
 
 // inter-process communication
 bool ipc_send_message(Process *sender, int target_pid);

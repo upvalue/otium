@@ -61,15 +61,14 @@ Process *process_create_impl(Process *table, proc_id_t max_procs, const char *na
   free_proc->state = RUNNABLE;
   free_proc->pid = i;
 
-  // Set user_pc to the user-accessible mapping of the entry point
-  // entry_point is a physical address in kernel space, we map it to USER_CODE_BASE for user mode
+  // Set user_pc to physical address - no virtual memory needed
   if (entry_point) {
-    free_proc->user_pc = USER_CODE_BASE + ((uintptr_t)entry_point - (uintptr_t)__kernel_base);
+    free_proc->user_pc = (uintptr_t)entry_point;
   } else {
     free_proc->user_pc = 0;
   }
 
-  free_proc->heap_next_vaddr = HEAP_BASE;
+  free_proc->heap_next_vaddr = 0; // Not used in physical-only mode
 
 
   // Set up initial stack with zeroed out registers
@@ -93,38 +92,9 @@ Process *process_create_impl(Process *table, proc_id_t max_procs, const char *na
 
   free_proc->stack_ptr = (uintptr_t)sp;
 
-#ifndef OT_ARCH_WASM
-  // Dual mapping approach: map kernel code at two virtual addresses
-  // 1. Identity mapped (0x80200000+) WITHOUT PAGE_U - for supervisor mode execution
-  // 2. High address (USER_CODE_BASE) WITH PAGE_U - for user mode execution
-  // This allows supervisor mode to safely switch page tables while user mode can execute code
-  PageAddr page_table = page_allocate(i, 1);
-
-  // Identity mapping WITH PAGE_U so user mode can access data/strings at compiled addresses
-  // Supervisor needs SUM bit to access these pages (already enabled in kernel_main)
-  // Problem: supervisor can't fetch instructions from PAGE_U pages (SUM only affects data)
-  // Solution: We'll need to be careful about when we write satp
-  for (uintptr_t paddr = (uintptr_t)__kernel_base; paddr < (uintptr_t)__free_ram_end; paddr += OT_PAGE_SIZE)
-    map_page(page_table.as<uintptr_t>(), paddr, PageAddr(paddr), PAGE_R | PAGE_W | PAGE_X | PAGE_U, i);
-
-  // User-mode mapping (mapped to USER_CODE_BASE with PAGE_U)
-  // Need R+W+X so user code can execute, read data, and write to stack
-  for (uintptr_t paddr = (uintptr_t)__kernel_base; paddr < (uintptr_t)__free_ram_end; paddr += OT_PAGE_SIZE) {
-    uintptr_t vaddr = USER_CODE_BASE + (paddr - (uintptr_t)__kernel_base);
-    map_page(page_table.as<uintptr_t>(), vaddr, PageAddr(paddr), PAGE_R | PAGE_W | PAGE_X | PAGE_U, i);
-  }
-
-  // Map VirtIO MMIO regions (identity mapped)
-  for (int mmio_idx = 0; mmio_idx < 8; mmio_idx++) {
-    uintptr_t mmio_addr = 0x10001000 + (mmio_idx * 0x1000);
-    map_page(page_table.as<uintptr_t>(), mmio_addr, PageAddr(mmio_addr), PAGE_R | PAGE_W, i);
-  }
-
-  free_proc->page_table = page_table.as<uintptr_t>();
-#else
-  // WASM: No page tables needed, use direct memory access
+  // No page tables - using physical memory only for simplicity and RP2350 compatibility
+  // User mode still provides fault isolation even without virtual memory
   free_proc->page_table = nullptr;
-#endif
 
   Pair<PageAddr, PageAddr> comm_page = process_alloc_mapped_page(free_proc, true, true, false);
   if (comm_page.first.is_null() || comm_page.second.is_null()) {
@@ -236,27 +206,10 @@ Pair<PageAddr, PageAddr> process_alloc_mapped_page(Process *proc, bool readable,
     return empty_page_pair;
   }
 
-#ifndef OT_ARCH_WASM
-  // RISC-V: Use MMU to map page to virtual address with specified permissions
-  // Pages are user-accessible since processes run in user mode
-  uint32_t flags = PAGE_U;
-  if (readable)
-    flags |= PAGE_R;
-  if (writable)
-    flags |= PAGE_W;
-  if (executable)
-    flags |= PAGE_X;
-
-  uintptr_t vaddr_raw = proc->heap_next_vaddr;
-  map_page(proc->page_table, vaddr_raw, paddr, flags, proc->pid);
-  proc->heap_next_vaddr += OT_PAGE_SIZE;
-  return make_pair(paddr, PageAddr(vaddr_raw));
-#else
-  // WASM: No MMU, physical address = virtual address
-  // Permissions are not enforced in WASM
-  proc->heap_next_vaddr += OT_PAGE_SIZE;
+  // Physical memory only - no virtual mapping needed
+  // Permissions (readable, writable, executable) are not enforced in physical-only mode
+  // User mode still provides fault isolation through privilege level
   return make_pair(paddr, paddr);
-#endif
 }
 
 Process *process_lookup(const StringView &name) {

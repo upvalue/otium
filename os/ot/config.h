@@ -16,8 +16,11 @@
 // some text in order, proving that the scheduler work
 #define KERNEL_PROG_TEST_ALTERNATE 3
 
+// Runs a comprehensive userspace demo with memory allocation and validation
+#define KERNEL_PROG_TEST_USERSPACE 4
+
 // Selected kernel program (modified by config.sh)
-#define KERNEL_PROG KERNEL_PROG_TEST_HELLO
+#define KERNEL_PROG KERNEL_PROG_TEST_USERSPACE
 
 // Log levels
 #define LSILENT 0

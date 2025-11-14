@@ -125,7 +125,9 @@ void handle_syscall(struct trap_frame *f) {
     f->a0 = ogetchar();
     break;
   case OU_ALLOC_PAGE: {
+    TRACE(LLOUD, "OU_ALLOC_PAGE syscall");
     Pair<PageAddr, PageAddr> result = process_alloc_mapped_page(current_proc, true, true, false);
+    TRACE(LLOUD, "allocated page: paddr=%x vaddr=%x", result.first.raw(), result.second.raw());
     f->a0 = result.second.raw();
     break;
   }
@@ -357,15 +359,14 @@ __attribute__((naked)) extern "C" void switch_context(uint32_t *prev_sp, uint32_
 }
 
 extern "C" void user_entry(void) {
-  // sepc is already set by yield() to point to USER_CODE_BASE mapping
-  // Switch to user-mode stack (allocated separately from kernel stack)
+  // Simple user mode entry - physical addressing only
+  // Switch to user-mode stack and drop to user privilege level
   uint32_t status = READ_CSR(sstatus);
   status &= ~SSTATUS_SPP;  // Clear SPP to enter user mode
   status |= SSTATUS_SPIE;   // Set SPIE to enable interrupts after sret
-  status |= SSTATUS_SUM;    // Keep SUM enabled (though not used in user mode)
 
-  // Get user stack pointer (top of user stack page)
-  uintptr_t user_sp = current_proc->user_stack.second.raw() + OT_PAGE_SIZE;
+  // Get user stack pointer (top of user stack page) - physical address
+  uintptr_t user_sp = current_proc->user_stack.first.raw() + OT_PAGE_SIZE;
 
   TRACE_PROC(LLOUD, "user_entry: sepc=%x, user_sp=%x, sstatus=%x", READ_CSR(sepc), user_sp, status);
 
@@ -393,12 +394,11 @@ void yield(void) {
 
   TRACE_PROC(LLOUD, "switching to process %s (pid=%d)", next->name, next->pid);
 
-  // TODO: Enable per-process page tables once we solve the PAGE_U + supervisor instruction fetch issue
-  // For now, all processes share the same page table (no memory isolation between processes)
-  // uint32_t new_satp = SATP_SV32 | ((uintptr_t)next->page_table / OT_PAGE_SIZE);
-
+  // Physical addressing only - no page table switching needed
+  // Set supervisor scratch register to next process's kernel stack
+  // Set sepc to next process's user PC (physical address)
   __asm__ __volatile__("csrw sscratch, %[sscratch]\n"
-                       "csrw sepc, %[sepc]\n" // Restore the next process's PC
+                       "csrw sepc, %[sepc]\n"
                        :
                        : [sscratch] "r"((uintptr_t)&next->stack[sizeof(next->stack)]), [sepc] "r"(next->user_pc));
 
@@ -411,9 +411,7 @@ void yield(void) {
 
 extern "C" void kernel_main(void) {
   WRITE_CSR(stvec, (uintptr_t)kernel_entry);
-  // Enable SUM bit so supervisor mode can access user pages (PAGE_U)
-  // Needed because kernel memory is mapped with PAGE_U for user mode access
-  WRITE_CSR(sstatus, READ_CSR(sstatus) | SSTATUS_SUM);
+  // Physical addressing only - no need for SUM bit or page table setup
   kernel_start();
 }
 

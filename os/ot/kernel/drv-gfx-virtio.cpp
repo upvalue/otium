@@ -1,8 +1,5 @@
 #include "ot/kernel/drv-gfx-virtio.hpp"
 
-// Global GPU instance (to avoid dynamic allocation)
-static VirtIOGPU g_gpu;
-
 // Simple PRNG for static effect
 static uint32_t rng_state = 0x12345678;
 static uint32_t rand_u32() {
@@ -17,7 +14,9 @@ void graphics_demo_main_proc() {
   oprintf("=== VirtIO GPU Graphics Demo ===\n");
 
   // Find and initialize GPU
-  VirtIOGPU *gpu = nullptr;
+  // Use placement new to avoid issues with global constructors in freestanding environment
+  static char gfx_buffer[sizeof(VirtioGfx)] __attribute__((aligned(alignof(VirtioGfx))));
+  VirtioGfx *gfx = nullptr;
 
   for (int i = 0; i < VIRTIO_MMIO_COUNT; i++) {
     uintptr_t addr = VIRTIO_MMIO_BASE + (i * VIRTIO_MMIO_SIZE);
@@ -25,13 +24,13 @@ void graphics_demo_main_proc() {
     test_dev.device_id = test_dev.read_reg(VIRTIO_MMIO_DEVICE_ID);
 
     if (test_dev.is_valid() && test_dev.device_id == VIRTIO_ID_GPU) {
-      g_gpu = VirtIOGPU(addr);
-      gpu = &g_gpu;
+      // Construct VirtioGfx in-place using placement new
+      gfx = new (gfx_buffer) VirtioGfx(addr);
       break;
     }
   }
 
-  if (!gpu) {
+  if (!gfx) {
     oprintf("No VirtIO GPU found!\n");
     current_proc->state = TERMINATED;
     while (true) {
@@ -41,7 +40,7 @@ void graphics_demo_main_proc() {
   }
 
   // Initialize the GPU
-  if (!gpu->init()) {
+  if (!gfx->init()) {
     oprintf("Failed to initialize GPU\n");
     current_proc->state = TERMINATED;
     while (true) {
@@ -51,23 +50,22 @@ void graphics_demo_main_proc() {
   }
 
   // Create framebuffer
-  gpu->create_framebuffer();
+  gfx->create_framebuffer();
 
   oprintf("Starting animated static effect...\n");
 
   // Animate static effect
-  uint32_t *fb = gpu->framebuffer.as<uint32_t>();
   uint32_t frame = 0;
   while (true) {
-    // Fill screen with random grayscale pixels
-    for (uint32_t i = 0; i < gpu->width * gpu->height; i++) {
-      uint8_t gray = rand_u32() & 0xFF;
-      // fb[i] = 0xFF000000 | (gray << 16) | (gray << 8) | gray; // BGRA: gray on all channels
-      fb[i] = 0xFF0000FF;
+    // Fill screen with solid blue (user's preference)
+    for (uint32_t y = 0; y < gfx->get_height(); y++) {
+      for (uint32_t x = 0; x < gfx->get_width(); x++) {
+        gfx->put(x, y, 0xFF0000FF);
+      }
     }
 
     // Flush to display
-    gpu->flush();
+    gfx->flush();
 
     frame++;
     if (frame % 60 == 0) {

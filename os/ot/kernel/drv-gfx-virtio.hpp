@@ -2,6 +2,7 @@
 #define OT_KERNEL_DRV_GFX_VIRTIO_HPP
 
 #include "ot/kernel/drv-virtio.hpp"
+#include "ot/kernel/gfx.hpp"
 
 // VirtIO GPU commands
 #define VIRTIO_GPU_CMD_GET_DISPLAY_INFO 0x0100
@@ -88,7 +89,7 @@ struct virtio_gpu_mem_entry {
   uint32_t padding;
 } __attribute__((packed));
 
-class VirtIOGPU {
+class VirtioGfx : public Gfx {
 public:
   VirtIODevice dev;
   VirtQueue controlq;
@@ -98,10 +99,10 @@ public:
   uint32_t width;
   uint32_t height;
 
-  VirtIOGPU() : dev(0), width(1024), height(600) {}
-  VirtIOGPU(uintptr_t addr) : dev(addr), width(1024), height(600) {}
+  VirtioGfx() : dev(0), width(1024), height(600) {}
+  VirtioGfx(uintptr_t addr) : dev(addr), width(1024), height(600) {}
 
-  bool init() {
+  bool init() override {
     if (!dev.is_valid()) {
       oprintf("GPU: Device not valid\n");
       return false;
@@ -331,22 +332,22 @@ public:
     oprintf("Framebuffer setup complete, ready for drawing\n");
   }
 
-  void draw_pixel(uint32_t x, uint32_t y, uint32_t color) {
+  void put(uint32_t x, uint32_t y, Color color) override {
     if (x >= width || y >= height)
       return;
     uint32_t *fb = framebuffer.as<uint32_t>();
     fb[y * width + x] = color;
   }
 
-  void fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
+  void fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, Color color) override {
     for (uint32_t dy = 0; dy < h; dy++) {
       for (uint32_t dx = 0; dx < w; dx++) {
-        draw_pixel(x + dx, y + dy, color);
+        put(x + dx, y + dy, color);
       }
     }
   }
 
-  void flush() {
+  void flush() override {
     // Reuse existing command/response pages
     // Transfer to host
     struct virtio_gpu_transfer_to_host_2d *transfer = cmd_page.as<struct virtio_gpu_transfer_to_host_2d>();
@@ -391,6 +392,10 @@ public:
       return;
     }
   }
+
+  uint32_t get_width() const override { return width; }
+
+  uint32_t get_height() const override { return height; }
 };
 
 void graphics_demo_main_proc();

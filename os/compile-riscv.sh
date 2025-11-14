@@ -8,8 +8,8 @@ source "$SCRIPT_DIR/build-common.sh"
 # Path to clang and compiler flags
 CC=/opt/homebrew/opt/llvm/bin/clang  # Ubuntu users: use CC=clang
 OBJCOPY=/opt/homebrew/opt/llvm/bin/llvm-objcopy
-CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_RISCV "
-CFLAGS="$COMMON_CFLAGS --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib"
+CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_RISCV -DOT_FEAT_GFX=OT_FEAT_GFX_VIRTIO"
+CFLAGS="$COMMON_CFLAGS --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib -fno-rtti"
 
 # Add shared file to shared source
 COMMON_SHARED_SOURCES+=("ot/shared/shared-riscv.cpp")

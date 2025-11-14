@@ -30,4 +30,13 @@
 #define LOG_PROC LSOFT
 #define LOG_IPC LSOFT
 
+// Graphics backend feature flags
+#define OT_FEAT_GFX_UNSUPPORTED 0
+#define OT_FEAT_GFX_VIRTIO 1
+
+// Default to unsupported (can be overridden by build system)
+#ifndef OT_FEAT_GFX
+#define OT_FEAT_GFX OT_FEAT_GFX_UNSUPPORTED
+#endif
+
 #endif

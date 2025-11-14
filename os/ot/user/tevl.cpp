@@ -393,8 +393,6 @@ void tevl_main(Backend *be_, ou::string *file_path) {
       }
     }
 
-    // be->render(e.col_offset, e.rx - e.col_offset, e.cy - e.row_offset, e.render_lines);
-    // be->render(e, e.rx - e.col_offset, e.cy - e.row_offset);
     be->render(e);
     // Handle user input
     process_key_press();

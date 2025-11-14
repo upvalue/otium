@@ -1,11 +1,11 @@
 // tevl.cpp - TEVL text editor core implementation
 // inhsert a comment
-#include "ot/programs/tevl.hpp"
+#include "ot/user/tevl.hpp"
 #include "ot/common.h"
 #include "ot/lib/result.hpp"
 #include "ot/lib/file.hpp"
 #include "ot/lib/string.hpp"
-#include "ot/programs/tcl.hpp"
+#include "ot/user/tcl.hpp"
 #include "ot/platform/user.hpp"
 
 static bool running = true;

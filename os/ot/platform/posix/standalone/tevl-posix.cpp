@@ -1,5 +1,5 @@
 // tevl with posix terminal backend
-#include "ot/programs/tevl.hpp"
+#include "ot/user/tevl.hpp"
 
 #include <ctype.h>
 #include <fcntl.h>

@@ -14,7 +14,7 @@ echo ""
 set -x
 
 # Compiler flags for WASM
-CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_WASM"
+CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_WASM -DBUILDING_KERNEL"
 CFLAGS="$COMMON_CFLAGS"
 
 # Emscripten-specific flags
@@ -28,15 +28,15 @@ EMFLAGS=(
   -s "EXPORT_NAME=OtiumOS"
 )
 
-# Build the complete OS (kernel + programs in single executable)
+# Build the complete OS (kernel + user programs in single executable)
 mkdir -p bin
 $CC $CPPFLAGS $CFLAGS "${EMFLAGS[@]}" -o bin/os.js \
     "${CORE_SOURCES[@]}" \
     "${DRIVER_SOURCES[@]}" \
     "${LIB_SOURCES[@]}" \
-    "${PROGRAM_SOURCES[@]}" \
+    "${USER_SOURCES[@]}" \
     ot/platform/wasm/platform-wasm.cpp \
-    ot/platform/wasm/shared-wasm.cpp \
+    ot/lib/platform/shared-wasm.cpp \
     ot/platform/wasm/user-wasm.cpp
 
 set +x

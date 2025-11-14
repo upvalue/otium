@@ -1,6 +1,6 @@
 // tcl-repl.cpp - Standalone TCL REPL using bestline for line editing
 #include "ot/vendor/bestline/bestline.h"
-#include "ot/programs/tcl.hpp"
+#include "ot/user/tcl.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

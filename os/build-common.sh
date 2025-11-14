@@ -30,11 +30,11 @@ LIB_SOURCES=(
   ot/vendor/printf/printf.c
 )
 
-# Program source files
-PROGRAM_SOURCES=(
+# User program source files
+USER_SOURCES=(
   ot/platform/user-main.cpp
-  ot/programs/prog-shell.cpp
-  ot/programs/tcl.cpp
+  ot/user/prog-shell.cpp
+  ot/user/tcl.cpp
   ot/lib/string.cpp
   ot/vendor/tlsf/tlsf.c
 )

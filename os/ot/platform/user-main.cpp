@@ -4,7 +4,7 @@
 #include "ot/lib/mpack/mpack-reader.hpp"
 #include "ot/lib/mpack/mpack-utils.hpp"
 #include "ot/lib/mpack/mpack-writer.hpp"
-#include "ot/programs/prog-shell.h"
+#include "ot/user/prog-shell.h"
 #include "ot/platform/user.hpp"
 #include "ot/vendor/tlsf/tlsf.h"
 

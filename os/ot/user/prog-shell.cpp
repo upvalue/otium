@@ -2,11 +2,11 @@
 #include "ot/lib/arguments.hpp"
 #include "ot/lib/messages.hpp"
 #include "ot/lib/mpack/mpack-utils.hpp"
-#include "ot/programs/tcl.hpp"
+#include "ot/user/tcl.hpp"
 #include "ot/platform/user.hpp"
 #include "ot/vendor/tlsf/tlsf.h"
 
-#include "ot/programs/prog-shell.h"
+#include "ot/user/prog-shell.h"
 
 // Buffer for storing user commands
 static char buffer[OT_PAGE_SIZE];

@@ -1,6 +1,7 @@
 # otium/os
 
-This is a simple operating system with a kernel and a user-space program.
+This is a simple operating system. It's built as a single executable, but there are separate
+user-space processes (which should not access kernel code or memory). 
 
 Currently, it targets three systems:
 - RISC-V under QEMU with assembly to switch and store stack information by hand

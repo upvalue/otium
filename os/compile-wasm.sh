@@ -17,9 +17,6 @@ set -x
 CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_WASM"
 CFLAGS="$COMMON_CFLAGS"
 
-COMMON_SHARED_SOURCES+=("ot/shared/shared-wasm.cpp")
-
-
 # Emscripten-specific flags
 EMFLAGS=(
   -s ASYNCIFY=1
@@ -31,17 +28,19 @@ EMFLAGS=(
   -s "EXPORT_NAME=OtiumOS"
 )
 
-# Build the complete system
+# Build the complete OS (kernel + programs in single executable)
 mkdir -p bin
-$CC $CPPFLAGS $CFLAGS "${EMFLAGS[@]}" -o bin/kernel.js \
-    "${KERNEL_SHARED_SOURCES[@]}" \
-    ot/kernel/platform-wasm.cpp \
-    ot/user/user-wasm.cpp \
-    "${COMMON_SHARED_SOURCES[@]}" \
-    "${USER_SHARED_SOURCES[@]}"
+$CC $CPPFLAGS $CFLAGS "${EMFLAGS[@]}" -o bin/os.js \
+    "${CORE_SOURCES[@]}" \
+    "${DRIVER_SOURCES[@]}" \
+    "${LIB_SOURCES[@]}" \
+    "${PROGRAM_SOURCES[@]}" \
+    ot/platform/wasm/platform-wasm.cpp \
+    ot/platform/wasm/shared-wasm.cpp \
+    ot/platform/wasm/user-wasm.cpp
 
 set +x
 
 echo "Build complete! Output files:"
-echo "  bin/kernel.js"
-echo "  bin/kernel.wasm"
+echo "  bin/os.js"
+echo "  bin/os.wasm"

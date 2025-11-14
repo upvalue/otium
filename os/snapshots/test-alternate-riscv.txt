@@ -1,2 +1,2 @@
 TEST: Starting alternate process test (should print 1234)
-TEST: 1234
+TEST: 1234process 1 terminated; exiting

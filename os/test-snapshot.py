@@ -56,7 +56,7 @@ def run_qemu(platform_config: dict) -> str:
                 "-nographic",
                 "-serial", "mon:stdio",
                 "--no-reboot",
-                "-kernel", "bin/kernel.elf"
+                "-kernel", "bin/os.elf"
             ],
             capture_output=True,
             text=True,

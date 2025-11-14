@@ -8,7 +8,7 @@ const path = require('path');
 const readline = require('readline');
 
 // Load the compiled WASM module
-const OtiumOS = require('./bin/kernel.js');
+const OtiumOS = require('./bin/os.js');
 
 // Check if we're in test mode
 const isTestMode = process.env.OTIUM_TEST_MODE === '1';

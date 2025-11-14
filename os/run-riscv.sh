@@ -2,9 +2,9 @@
 set -euxo pipefail
 
 QEMU=qemu-system-riscv32
-DISPLAY=cocoa 
+DISPLAY=cocoa
 
-# Build the kernel
+# Build the OS
 ./compile-riscv.sh "$@"
 
 # Start QEMU
@@ -15,4 +15,4 @@ $QEMU \
   -display $DISPLAY \
   -serial mon:stdio \
   --no-reboot \
-    -kernel bin/kernel.elf
+    -kernel bin/os.elf

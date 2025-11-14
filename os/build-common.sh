@@ -5,31 +5,36 @@
 COMMON_CFLAGS="-Os -g3 -Wall -Wextra -Wno-unused-parameter -fno-exceptions "
 COMMON_CPPFLAGS="-I."
 
-# Shared kernel source files (platform-independent)
-KERNEL_SHARED_SOURCES=(
-  ot/kernel/startup.cpp
-  ot/kernel/main.cpp
-  ot/kernel/memory.cpp
-  ot/kernel/ipc.cpp
-  ot/kernel/process.cpp
-  ot/kernel/std.cpp
-  ot/kernel/drv-virtio.cpp
-  ot/kernel/drv-gfx-virtio.cpp
+# Core OS source files (platform-independent)
+CORE_SOURCES=(
+  ot/core/startup.cpp
+  ot/core/main.cpp
+  ot/core/memory.cpp
+  ot/core/ipc.cpp
+  ot/core/process.cpp
+  ot/core/std.cpp
 )
 
-COMMON_SHARED_SOURCES=(
-  ot/shared/std.cpp
-  vendor/libmpack/mpack.c
-  ot/shared/mpack-reader.cpp
-  ot/shared/mpack-utils.cpp
-  ot/shared/vendor/printf.c
+# Driver source files
+DRIVER_SOURCES=(
+  ot/drivers/drv-virtio.cpp
+  ot/drivers/drv-gfx-virtio.cpp
 )
 
-# Shared user program source files (platform-independent)
-USER_SHARED_SOURCES=(
-  ot/user/user-main.cpp
-  ot/user/prog-shell.cpp
-  ot/user/string.cpp
-  ot/user/tcl.cpp
-  ot/user/vendor/tlsf.c
+# Library source files (shared utilities)
+LIB_SOURCES=(
+  ot/lib/std.cpp
+  ot/lib/mpack/mpack-reader.cpp
+  ot/lib/mpack/mpack-utils.cpp
+  ot/vendor/libmpack/mpack.c
+  ot/vendor/printf/printf.c
+)
+
+# Program source files
+PROGRAM_SOURCES=(
+  ot/platform/user-main.cpp
+  ot/programs/prog-shell.cpp
+  ot/programs/tcl.cpp
+  ot/lib/string.cpp
+  ot/vendor/tlsf/tlsf.c
 )

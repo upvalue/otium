@@ -13,7 +13,8 @@ KERNEL_SHARED_SOURCES=(
   ot/kernel/ipc.cpp
   ot/kernel/process.cpp
   ot/kernel/std.cpp
-  ot/kernel/gfx-demo.cpp
+  ot/kernel/drv-virtio.cpp
+  ot/kernel/drv-gfx-virtio.cpp
 )
 
 COMMON_SHARED_SOURCES=(

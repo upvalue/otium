@@ -1,6 +1,7 @@
 // kernel-prog.cpp - Kernel startup logic and test programs
 
 #include "ot/kernel/kernel.hpp"
+#include "ot/kernel/drv-gfx-virtio.hpp"
 
 // Forward declaration for kernel_common (defined in startup.cpp)
 void kernel_common(void);
@@ -18,8 +19,6 @@ extern "C" void proc_hello_world(void) {
   current_proc->state = TERMINATED;
   yield();
 }
-
-void graphics_demo_main_proc(void);
 
 void proc_gfx_test(void) {
   // graphics_demo_init();

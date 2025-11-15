@@ -159,6 +159,7 @@ Process *process_next_runnable(void) {
   Process *next = idle_proc;
   for (size_t i = 0; i < PROCS_MAX; i++) {
     Process *p = &procs[(current_proc->pid + i + 1) % PROCS_MAX];
+    // Skip processes in IPC_WAIT state - they'll be woken when message arrives
     if (p->state == RUNNABLE && p->pid > 0) {
       next = p;
       break;
@@ -172,6 +173,25 @@ Process *process_next_runnable(void) {
   }
 
   return next;
+}
+
+void process_switch_to(Process *target) {
+  Process *prev = current_proc;
+  current_proc = target;
+  TRACE_IPC(LLOUD, "IPC switch from %d to %d", prev->pid, target->pid);
+
+#ifdef OT_ARCH_RISCV
+  // Set supervisor scratch register to target process's kernel stack
+  // Set sepc to target process's user PC
+  __asm__ __volatile__("csrw sscratch, %[sscratch]\n"
+                       "csrw sepc, %[sepc]\n"
+                       :
+                       : [sscratch] "r"((uintptr_t)&target->stack[sizeof(target->stack)]),
+                         [sepc] "r"(target->user_pc)
+                       :);
+#endif
+
+  switch_context(&prev->stack_ptr, &target->stack_ptr);
 }
 
 void process_exit(Process *proc) {
@@ -221,7 +241,10 @@ Process *process_lookup(const StringView &name) {
   size_t i = PROCS_MAX - 1;
   while (true) {
     Process *p = &procs[i];
-    if (p->state == RUNNABLE && strncmp(p->name, name.ptr, name.len) == 0) {
+    // Check if process is running (RUNNABLE or IPC_WAIT - services waiting for messages should be findable)
+    if (process_is_running(p) &&
+        strncmp(p->name, name.ptr, name.len) == 0 &&
+        p->name[name.len] == '\0') {  // Ensure exact match
       return p;
     }
     if (i-- == 0) {
@@ -236,7 +259,8 @@ Process *process_lookup(int pid) {
     return nullptr;
   }
   Process *p = &procs[pid];
-  if (p->state != RUNNABLE) {
+  // Allow lookup of running processes (RUNNABLE or IPC_WAIT - e.g., services waiting for messages)
+  if (!process_is_running(p)) {
     return nullptr;
   }
   return p;

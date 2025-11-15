@@ -5,6 +5,7 @@
 
 #include "ot/lib/address.hpp"
 #include "ot/lib/arguments.hpp"
+#include "ot/lib/ipc.hpp"
 #include "ot/lib/mpack/mpack-writer.hpp"
 
 // system calls
@@ -14,6 +15,9 @@ int ogetchar();
 void ou_yield(void);
 void ou_exit(void);
 void *ou_alloc_page(void);
+IpcResponse ou_ipc_send(int pid, intptr_t method, intptr_t extra);
+IpcMessage ou_ipc_recv(void);
+void ou_ipc_reply(IpcResponse response);
 }
 
 PageAddr ou_get_arg_page(void);

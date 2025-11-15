@@ -1,1 +1,2 @@
 TEST: Hello, world!
+TEST: Process 1 running

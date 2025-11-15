@@ -55,3 +55,15 @@ int ou_io_puts(const char *str, int size) {
   yield();
   return 1;
 }
+
+IpcResponse ou_ipc_send(int, intptr_t, intptr_t) {
+  PANIC("IPC not implemented for WASM");
+}
+
+IpcMessage ou_ipc_recv(void) {
+  PANIC("IPC not implemented for WASM");
+}
+
+void ou_ipc_reply(IpcResponse) {
+  PANIC("IPC not implemented for WASM");
+}

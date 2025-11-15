@@ -1,6 +1,6 @@
 TEST: Starting memory recycling test
-TEST: Process 1 (pid 1) allocated 2 pages
-TEST: Process 2 (pid 2) allocated 2 pages
-TEST: Exited process 1 (freed 2 pages)
-TEST: Process 3 (pid 1) allocated 2 pages
-TEST: SUCCESS - Process 3 reused all 2 pages from Process 1
+TEST: Process 1 (pid 1) allocated 3 pages
+TEST: Process 2 (pid 2) allocated 3 pages
+TEST: Exited process 1 (freed 3 pages)
+TEST: Process 3 (pid 1) allocated 3 pages
+TEST: SUCCESS - Process 3 reused all 3 pages from Process 1

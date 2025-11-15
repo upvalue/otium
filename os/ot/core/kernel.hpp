@@ -4,6 +4,7 @@
 #include "ot/common.h"
 #include "ot/lib/address.hpp"
 #include "ot/lib/arguments.hpp"
+#include "ot/lib/ipc.hpp"
 #include "ot/lib/pair.hpp"
 #include "ot/lib/string-view.hpp"
 
@@ -44,6 +45,13 @@ void *operator new(size_t, void *ptr) noexcept;
   do {                                                                         \
     if (LOG_PROC >= (level)) {                                                 \
       oprintf("[proc] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);   \
+    }                                                                          \
+  } while (0)
+
+#define TRACE_IPC(level, fmt, ...)                                             \
+  do {                                                                         \
+    if (LOG_IPC >= (level)) {                                                  \
+      oprintf("[ipc] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);    \
     }                                                                          \
   } while (0)
 
@@ -93,7 +101,7 @@ extern "C" char *__free_ram, *__free_ram_end;
 #define PAGE_X (1 << 3) // Executable
 #define PAGE_U (1 << 4) // User (accessible in user mode)
 
-enum ProcessState { UNUSED, RUNNABLE, TERMINATED };
+enum ProcessState { UNUSED, RUNNABLE, TERMINATED, IPC_WAIT };
 
 struct Process {
   char name[32];
@@ -132,12 +140,24 @@ struct Process {
   uintptr_t user_pc;         // Save user program counter
   uintptr_t heap_next_vaddr; // Next available heap address
   bool kernel_mode;          // true = runs in kernel/supervisor mode, false = user mode
+
+  // IPC fields
+  IpcMessage pending_message;       // Message waiting to be received
+  bool has_pending_message;         // Flag for message availability
+  Process *blocked_sender;          // Pointer to sender waiting for reply
+  IpcResponse pending_response;     // Response storage for blocked sender
+
 #ifdef OT_ARCH_WASM
   bool started; // For WASM: track if process has been started
   void *fiber;  // emscripten_fiber_t for this process
 #endif
   uint8_t stack[8192] __attribute__((aligned(16)));
 };
+
+// Helper to check if a process is in a running state (RUNNABLE or IPC_WAIT)
+inline bool process_is_running(const Process *p) {
+  return p->state == RUNNABLE || p->state == IPC_WAIT;
+}
 
 // Process management subsystem
 Process *process_create_impl(Process *table, proc_id_t max_procs,
@@ -170,6 +190,7 @@ extern Process procs[PROCS_MAX];
 
 extern "C" void switch_context(uintptr_t *prev_sp, uintptr_t *next_sp);
 void yield(void);
+void process_switch_to(Process *target);
 
 // Process for entering into a loaded userspace program (on RISCV)
 extern "C" void user_entry(void);

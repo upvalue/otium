@@ -74,6 +74,9 @@ int oputsn(const char *str, int n);
 #define OU_GET_SYS_PAGE 6
 #define OU_IO_PUTS 7       // Writes a string in the comm page to the console
 #define OU_PROC_LOOKUP 8   // Look up a process by name
+#define OU_IPC_SEND 9      // Send IPC message to a process
+#define OU_IPC_RECV 10     // Receive IPC message (blocks if none available)
+#define OU_IPC_REPLY 11    // Reply to IPC sender
 
 // Arguments to the get sys page
 #define OU_SYS_PAGE_ARG 0

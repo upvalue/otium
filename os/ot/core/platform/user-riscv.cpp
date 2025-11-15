@@ -25,7 +25,7 @@ SyscallResult syscall(int sysno, int arg0, int arg1, int arg2) {
   register int a7 __asm__("a7") = 0;
 
   __asm__ __volatile__("ecall"
-                       : "=r"(a0)
+                       : "=r"(a0), "=r"(a1), "=r"(a2)
                        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(a6), "r"(a7)
                        : "memory");
 
@@ -80,3 +80,29 @@ int ou_proc_lookup(const char *name) {
   writer.str(name);
   return syscall(OU_PROC_LOOKUP, 0, 0, 0).a0;
 }
+
+extern "C" {
+
+IpcResponse ou_ipc_send(int pid, intptr_t method, intptr_t extra) {
+  SyscallResult result = syscall(OU_IPC_SEND, pid, method, extra);
+  IpcResponse resp;
+  resp.error_code = (ErrorCode)result.a0;
+  resp.a = result.a1;
+  resp.b = result.a2;
+  return resp;
+}
+
+IpcMessage ou_ipc_recv(void) {
+  SyscallResult result = syscall(OU_IPC_RECV, 0, 0, 0);
+  IpcMessage msg;
+  msg.pid = result.a0;
+  msg.method = result.a1;
+  msg.extra = result.a2;
+  return msg;
+}
+
+void ou_ipc_reply(IpcResponse response) {
+  syscall(OU_IPC_REPLY, response.error_code, response.a, response.b);
+}
+
+} // extern "C"

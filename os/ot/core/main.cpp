@@ -15,13 +15,7 @@ extern "C" void proc_hello_world(void) {
   oprintf("TEST: Hello, world!\n");
   // For now, loop forever - we'll add proper exit via syscall later
   while (1) {
-#ifdef OT_ARCH_RISCV
-    asm volatile("wfi"); // Wait for interrupt (RISC-V only)
-#else
-    // WASM: just busy wait
-    for (volatile int i = 0; i < 1000; i++)
-      ;
-#endif
+    current_proc->state = TERMINATED;
   }
 }
 
@@ -65,6 +59,58 @@ extern "C" void proc_userspace_demo(void) {
   oprintf("TEST: SUCCESS - User mode execution works\n");
   oprintf("TEST: Terminating process\n");
   ou_exit();
+}
+
+// Simple fibonacci calculator (naive recursive)
+int calculate_fibonacci(int n) {
+  if (n <= 1)
+    return n;
+  return calculate_fibonacci(n - 1) + calculate_fibonacci(n - 2);
+}
+
+// TEST_IPC: Fibonacci service - receives IPC requests and calculates fibonacci
+extern "C" void proc_fibonacci_service(void) {
+  oprintf("TEST: Fibonacci service started\n");
+  while (true) {
+    IpcMessage msg = ou_ipc_recv();
+    TRACE_IPC(LSOFT, "Fibonacci service received request: method=%d, arg=%d", msg.method, msg.extra);
+
+    IpcResponse resp = {NONE, 0, 0};
+    if (msg.method == 0 && msg.extra >= 0) {
+      resp.a = calculate_fibonacci(msg.extra);
+      oprintf("TEST: Calculated fib(%d) = %d\n", msg.extra, resp.a);
+    } else {
+      resp.error_code = IPC__METHOD_NOT_KNOWN;
+      oprintf("TEST: Unknown method or negative argument\n");
+    }
+    ou_ipc_reply(resp);
+    // After reply, we've switched back to sender and then back to here
+    // Loop to receive next message
+  }
+}
+
+// TEST_IPC: Client - sends fibonacci requests to the service
+extern "C" void proc_ipc_client(void) {
+  ou_yield(); // Let service start first
+
+  int fib_pid = ou_proc_lookup("fibonacci");
+  oprintf("TEST: Client found fibonacci service at PID %d\n", fib_pid);
+
+  int test_values[] = {5, 10, 15};
+  for (int i = 0; i < 3; i++) {
+    int val = test_values[i];
+    oprintf("TEST: Client requesting fib(%d)\n", val);
+    IpcResponse resp = ou_ipc_send(fib_pid, 0, val);
+    if (resp.error_code == NONE) {
+      oprintf("TEST: Client received result: %d\n", resp.a);
+    } else {
+      oprintf("TEST: Client got error %d\n", resp.error_code);
+    }
+  }
+
+  oprintf("TEST: IPC test complete\n");
+  current_proc->state = TERMINATED;
+  yield();
 }
 
 // Helper to get all pages allocated to a process
@@ -160,6 +206,14 @@ void kernel_prog_test_userspace() {
   TRACE(LSOFT, "created demo proc with name %s and pid %d", demo_proc->name, demo_proc->pid);
 }
 
+void kernel_prog_test_ipc() {
+  oprintf("TEST: Starting IPC test\n");
+  Process *proc_fib = process_create("fibonacci", (const void *)proc_fibonacci_service, nullptr, false);
+  Process *proc_client = process_create("client", (const void *)proc_ipc_client, nullptr, false);
+  TRACE(LSOFT, "created fibonacci service with name %s and pid %d", proc_fib->name, proc_fib->pid);
+  TRACE(LSOFT, "created client with name %s and pid %d", proc_client->name, proc_client->pid);
+}
+
 /**
  * the default kernel program (actually run the system)
  */
@@ -188,6 +242,8 @@ void kernel_start(void) {
   kernel_prog_test_alternate();
 #elif KERNEL_PROG == KERNEL_PROG_TEST_USERSPACE
   kernel_prog_test_userspace();
+#elif KERNEL_PROG == KERNEL_PROG_TEST_IPC
+  kernel_prog_test_ipc();
 #else
   kernel_prog_default();
 #endif

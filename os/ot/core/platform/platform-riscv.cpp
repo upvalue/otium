@@ -179,6 +179,92 @@ void handle_syscall(struct trap_frame *f) {
     f->a0 = proc ? proc->pid : 0;
     break;
   }
+  case OU_IPC_SEND: {
+    int target_pid = arg0;
+    intptr_t method = arg1;
+    intptr_t extra = f->a2;
+
+    TRACE_IPC(LSOFT, "IPC send from %d to %d, method=%d", current_proc->pid, target_pid, method);
+
+    Process *target = process_lookup(target_pid);
+    if (!target) {
+      TRACE_IPC(LSOFT, "IPC send failed: target PID %d not found", target_pid);
+      f->a0 = IPC__PID_NOT_FOUND;
+      f->a1 = 0;
+      f->a2 = 0;
+      break;
+    }
+
+    // Set up message
+    target->pending_message.pid = current_proc->pid;
+    target->pending_message.method = method;
+    target->pending_message.extra = extra;
+    target->has_pending_message = true;
+    target->blocked_sender = current_proc;
+
+    TRACE_IPC(LLOUD, "IPC: switching to target process %d", target_pid);
+
+    // If target is waiting, wake it and switch to it immediately
+    if (target->state == IPC_WAIT) {
+      target->state = RUNNABLE;
+      process_switch_to(target);  // Direct context switch - receiver will process and reply
+      // After this returns, we're back in our own context with our stack and trap frame valid
+    } else {
+      TRACE_IPC(LLOUD, "IPC: target not in IPC_WAIT, yielding normally");
+      yield();
+    }
+
+    // When we get here, receiver has replied and switched back to us
+    // Response is in our (sender's) pending_response
+    // Our trap frame 'f' should still be valid since we're back on our own stack
+    TRACE_IPC(LLOUD, "IPC send returning: error=%d, a=%d, b=%d",
+              current_proc->pending_response.error_code,
+              current_proc->pending_response.a,
+              current_proc->pending_response.b);
+    f->a0 = current_proc->pending_response.error_code;
+    f->a1 = current_proc->pending_response.a;
+    f->a2 = current_proc->pending_response.b;
+    break;
+  }
+  case OU_IPC_RECV: {
+    if (current_proc->has_pending_message) {
+      TRACE_IPC(LLOUD, "Process %d receiving pending message", current_proc->pid);
+      f->a0 = current_proc->pending_message.pid;
+      f->a1 = current_proc->pending_message.method;
+      f->a2 = current_proc->pending_message.extra;
+      current_proc->has_pending_message = false;
+    } else {
+      TRACE_IPC(LSOFT, "Process %d entering IPC_WAIT", current_proc->pid);
+      current_proc->state = IPC_WAIT;
+      yield();
+      // Will resume here when message arrives
+      TRACE_IPC(LLOUD, "Process %d woken from IPC_WAIT", current_proc->pid);
+      f->a0 = current_proc->pending_message.pid;
+      f->a1 = current_proc->pending_message.method;
+      f->a2 = current_proc->pending_message.extra;
+      current_proc->has_pending_message = false;
+    }
+    break;
+  }
+  case OU_IPC_REPLY: {
+    TRACE_IPC(LLOUD, "Process %d replying: error=%d, a=%d, b=%d", current_proc->pid, arg0, arg1, f->a2);
+
+    if (current_proc->blocked_sender) {
+      Process* sender = current_proc->blocked_sender;
+
+      // Store response in SENDER's pending_response field (they will read it)
+      sender->pending_response.error_code = (ErrorCode)arg0;
+      sender->pending_response.a = arg1;
+      sender->pending_response.b = f->a2;
+
+      current_proc->blocked_sender = nullptr;
+      TRACE_IPC(LLOUD, "IPC reply sent, switching back to sender %d", sender->pid);
+      process_switch_to(sender);  // Direct context switch back to sender
+    } else {
+      TRACE_IPC(LSOFT, "IPC reply called but no blocked sender");
+    }
+    break;
+  }
   default:
     PANIC("unexpected syscall sysno=%x\n", sysno);
   }

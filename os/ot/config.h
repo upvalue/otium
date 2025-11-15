@@ -18,8 +18,11 @@
 
 #define KERNEL_PROG_TEST_USERSPACE 4
 
+// Runs IPC test with fibonacci service
+#define KERNEL_PROG_TEST_IPC 5
+
 // Selected kernel program (modified by config.sh)
-#define KERNEL_PROG KERNEL_PROG_SHELL
+#define KERNEL_PROG KERNEL_PROG_TEST_IPC
 
 // Log levels
 #define LSILENT 0

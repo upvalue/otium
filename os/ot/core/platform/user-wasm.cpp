@@ -38,8 +38,6 @@ void *ou_alloc_page(void) {
 
 PageAddr ou_get_arg_page(void) { return process_get_arg_page(); }
 
-PageAddr ou_get_msg_page(int msg_idx) { return process_get_msg_page(msg_idx); }
-
 PageAddr ou_get_comm_page(void) { return process_get_comm_page(); }
 
 PageAddr ou_get_storage(void) { return process_get_storage_page(); }
@@ -57,9 +55,3 @@ int ou_io_puts(const char *str, int size) {
   yield();
   return 1;
 }
-
-int ou_ipc_check_message(void) { return current_proc->msg_count; }
-
-int ou_ipc_send_message(int pid) { return ipc_send_message(current_proc, pid); }
-
-int ou_ipc_pop_message(void) { return ipc_pop_message(current_proc); }

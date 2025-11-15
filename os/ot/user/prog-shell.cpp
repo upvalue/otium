@@ -43,26 +43,6 @@ tcl::Status cmd_proc_lookup(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl:
   return tcl::S_OK;
 }
 
-tcl::Status cmd_mp_send(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
-  if (!i.arity_check("mp/send", argv, 2, 2)) {
-    return tcl::S_ERR;
-  }
-  int proc_pid = atoi(argv[1].c_str());
-  if (proc_pid == 0) {
-    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "could not convert %s to int", argv[1].c_str());
-    i.result = ot_scratch_buffer;
-    return tcl::S_ERR;
-  }
-  PageAddr comm_page = ou_get_comm_page();
-  memcpy(comm_page.as<char>(), i.mpack_buffer_, i.mpack_buffer_size_);
-  if (!ou_ipc_send_message(proc_pid)) {
-    mpack_oprint(comm_page.as<char>(), OT_PAGE_SIZE);
-    oputchar('\n');
-    return tcl::S_ERR;
-  }
-  return tcl::S_OK;
-}
-
 void shell_main() {
   oprintf("SHELL BEGIN\n");
 
@@ -97,10 +77,6 @@ void shell_main() {
   // Lookup a procedure's PID
   i.register_command("proc/lookup", cmd_proc_lookup, nullptr,
                      "[proc/lookup name:string] => pid:int - Lookup a procedure's PID");
-
-  i.register_command("mp/send", cmd_mp_send, nullptr,
-                     "[mp/send pid:int] => nil - Send MessagePack buffer to "
-                     "the specified process");
 
   while (s->running) {
     oprintf("> ");

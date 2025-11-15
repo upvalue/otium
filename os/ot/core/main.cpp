@@ -164,27 +164,6 @@ void kernel_prog_test_userspace() {
  * the default kernel program (actually run the system)
  */
 void kernel_prog_default() {
-// Default/main mode
-#if 0
-  char *shell_argv = {"shell"};
-  Arguments shell_args = {1, &shell_argv};
-  char *scratch_argv = {"scratch"};
-  Arguments scratch_args = {1, &scratch_argv};
-  char *scratch2_argv = {"scratch2"};
-  Arguments scratch2_args = {1, &scratch2_argv};
-  char *print_server_argv = {"print-server"};
-  Arguments print_server_args = {1, &print_server_argv};
-
-  // Create processes by calling user_program_main as a function pointer
-  // The user-main.cpp dispatcher will route to the appropriate program based on arguments
-  Process *proc_shell = process_create("shell", (const void *)user_program_main, &shell_args);
-
-  Process *proc_print_server = process_create("print-server", (const void *)user_program_main, &print_server_args);
-  // Process *proc_scratch = process_create("scratch", (const void *)user_program_main, &scratch_args);
-  // TRACE(LSOFT, "created proc with name %s and pid %d", proc_shell->name,
-  //        proc_shell->pid);
-#endif
-
   char *shell_argv = {"shell"};
   Arguments shell_args = {1, &shell_argv};
   Process *proc_shell = process_create("shell", (const void *)user_program_main, &shell_args, false);

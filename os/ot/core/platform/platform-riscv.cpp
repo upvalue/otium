@@ -138,8 +138,6 @@ void handle_syscall(struct trap_frame *f) {
       page = process_get_arg_page();
     } else if (arg0 == OU_SYS_PAGE_COMM) {
       page = process_get_comm_page();
-    } else if (arg0 == OU_SYS_PAGE_MSG) {
-      page = process_get_msg_page(arg1);
     } else if (arg0 == OU_SYS_PAGE_STORAGE) {
       page = process_get_storage_page();
     }
@@ -179,18 +177,6 @@ void handle_syscall(struct trap_frame *f) {
     Process *proc = process_lookup(str);
 
     f->a0 = proc ? proc->pid : 0;
-    break;
-  }
-  case OU_IPC_CHECK_MESSAGE: {
-    f->a0 = current_proc->msg_count;
-    break;
-  }
-  case OU_IPC_SEND_MESSAGE: {
-    f->a0 = ipc_send_message(current_proc, arg0);
-    break;
-  }
-  case OU_IPC_POP_MESSAGE: {
-    f->a0 = ipc_pop_message(current_proc);
     break;
   }
   default:

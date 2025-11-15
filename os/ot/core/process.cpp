@@ -200,13 +200,6 @@ PageAddr process_get_comm_page(void) {
   return current_proc->comm_page;
 }
 
-PageAddr process_get_msg_page(int msg_idx) {
-  if (current_proc == nullptr) {
-    return PageAddr(nullptr);
-  }
-  return current_proc->msg_pages[msg_idx];
-}
-
 PageAddr process_alloc_mapped_page(Process *proc, bool readable, bool writable, bool executable) {
   if (!proc) {
     return PageAddr(nullptr);

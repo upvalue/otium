@@ -10,7 +10,6 @@ CORE_SOURCES=(
   ot/core/startup.cpp
   ot/core/main.cpp
   ot/core/memory.cpp
-  ot/core/ipc.cpp
   ot/core/process.cpp
   ot/core/std.cpp
 )

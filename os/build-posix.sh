@@ -9,7 +9,7 @@ clang -DOT_POSIX -std=c11 -I. -c ot/vendor/printf/printf.c -o bin/printf.o
 
 # Build TCL REPL
 clang++ -DOT_POSIX -std=c++17 -I. -o bin/tcl-repl \
-    ot/lib/string.cpp \
+    ot/user/string.cpp \
     ot/user/tcl.cpp \
     ot/core/platform/tcl-repl.cpp \
     ot/core/platform/posix-std.cpp \
@@ -23,7 +23,7 @@ echo "✓ TCL REPL built successfully: bin/tcl-repl"
 
 # Build TEVL text editor
 clang++ -fsanitize=address -g3 -DOT_POSIX -std=c++17 -I. -o bin/tevl \
-    ot/lib/string.cpp \
+    ot/user/string.cpp \
     ot/lib/file.cpp \
     ot/user/tevl.cpp \
     ot/user/tcl.cpp \

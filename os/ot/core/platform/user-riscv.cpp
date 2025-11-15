@@ -50,7 +50,6 @@ PageAddr ou_get_sys_page(int type, int msg_idx) {
   return PageAddr(syscall(OU_GET_SYS_PAGE, type, msg_idx, 0).a0);
 }
 
-PageAddr ou_get_msg_page(int msg_idx) { return ou_get_sys_page(OU_SYS_PAGE_MSG, msg_idx); }
 PageAddr ou_get_arg_page(void) {
   oprintf("ou_get_arg_page: calling syscall %d\n", OU_SYS_PAGE_ARG);
   return ou_get_sys_page(OU_SYS_PAGE_ARG, 0);
@@ -81,9 +80,3 @@ int ou_proc_lookup(const char *name) {
   writer.str(name);
   return syscall(OU_PROC_LOOKUP, 0, 0, 0).a0;
 }
-
-int ou_ipc_check_message(void) { return syscall(OU_IPC_CHECK_MESSAGE, 0, 0, 0).a0; }
-
-int ou_ipc_send_message(int pid) { return syscall(OU_IPC_SEND_MESSAGE, pid, 0, 0).a0; }
-
-int ou_ipc_pop_message(void) { return syscall(OU_IPC_POP_MESSAGE, 0, 0, 0).a0; }

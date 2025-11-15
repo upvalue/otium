@@ -47,13 +47,6 @@ void *operator new(size_t, void *ptr) noexcept;
     }                                                                          \
   } while (0)
 
-#define TRACE_IPC(level, fmt, ...)                                             \
-  do {                                                                         \
-    if (LOG_IPC >= (level)) {                                                  \
-      oprintf("[ipc] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);    \
-    }                                                                          \
-  } while (0)
-
 // platform specific utility functions
 void wfi(void);
 void kernel_exit(void);
@@ -129,17 +122,6 @@ struct Process {
    */
   PageAddr user_stack;
 
-  /** PID that sent a message, if any */
-  int msg_send_pid[OT_MSG_LIMIT];
-
-  /** Pages for incoming messages */
-  PageAddr msg_pages[OT_MSG_LIMIT];
-
-  /** How many messages are waiting for the process to handle. Note that idx
-   *  of the message in array is msg_count - 1
-   */
-  uint8_t msg_count;
-
   /**
    * Per-process local storage page for user-space data.
    * Updated by kernel on context switch.
@@ -174,7 +156,6 @@ void process_exit(Process *proc);
 PageAddr process_get_arg_page();
 // Gets the comm page pointer of the current process if possible
 PageAddr process_get_comm_page();
-PageAddr process_get_msg_page(int msg_idx);
 // Gets the storage page pointer of the current process if possible
 PageAddr process_get_storage_page();
 
@@ -205,9 +186,5 @@ void scheduler_loop(void);
 
 // map_page() not used in physical-only mode
 void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr, uint32_t flags, proc_id_t pid);
-
-// inter-process communication
-bool ipc_send_message(Process *sender, int target_pid);
-int ipc_pop_message(Process *receiver);
 
 #endif

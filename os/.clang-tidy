@@ -1,0 +1,14 @@
+---
+# Clang-tidy configuration for Otium OS
+# Enforces coding standards for the unikernel architecture
+
+Checks: >
+  cppcoreguidelines-avoid-non-const-global-variables
+
+CheckOptions:
+  - key: cppcoreguidelines-avoid-non-const-global-variables.AllowInternalLinkage
+    value: false
+
+# Global variables (both static and non-static) break process isolation
+# in the unikernel model where multiple process instances share the same
+# address space.

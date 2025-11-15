@@ -3,7 +3,7 @@
 #include "ot/lib/messages.hpp"
 #include "ot/lib/mpack/mpack-utils.hpp"
 #include "ot/user/tcl.hpp"
-#include "ot/platform/user.hpp"
+#include "ot/user/user.hpp"
 #include "ot/vendor/tlsf/tlsf.h"
 
 #include "ot/user/prog-shell.h"

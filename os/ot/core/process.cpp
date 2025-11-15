@@ -31,7 +31,7 @@ void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr, uint32_t flags
 }
 
 Process *process_create_impl(Process *table, proc_id_t max_procs, const char *name, const void *entry_point,
-                             Arguments *args) {
+                             Arguments *args, bool kernel_mode) {
   // Initialize memory tracking on first process creation
   memory_init();
 
@@ -60,6 +60,7 @@ Process *process_create_impl(Process *table, proc_id_t max_procs, const char *na
 
   free_proc->state = RUNNABLE;
   free_proc->pid = i;
+  free_proc->kernel_mode = kernel_mode;
 
   // Set user_pc to physical address - no virtual memory needed
   if (entry_point) {
@@ -86,8 +87,13 @@ Process *process_create_impl(Process *table, proc_id_t max_procs, const char *na
   *--sp = 0; // s0
 
   // All programs now use function pointers (no binary loading)
-  // Use user_entry as ra to drop to user mode before executing entry_point
-  *--sp = (uintptr_t)user_entry; // ra - drops to user mode and jumps to user_pc
+  // For user-mode processes: use user_entry as ra to drop to user mode
+  // For kernel-mode processes: jump directly to entry point
+  if (kernel_mode) {
+    *--sp = (uintptr_t)entry_point; // ra - kernel mode, call entry directly
+  } else {
+    *--sp = (uintptr_t)user_entry; // ra - drops to user mode and jumps to user_pc
+  }
 
   free_proc->stack_ptr = (uintptr_t)sp;
 
@@ -115,6 +121,7 @@ Process *process_create_impl(Process *table, proc_id_t max_procs, const char *na
   // Handle argument array
   if (args) {
     Pair<PageAddr, PageAddr> alloc_result = process_alloc_mapped_page(free_proc, true, false, false);
+    oprintf("arg page alloc_result: %p %p\n", alloc_result.first.raw(), alloc_result.second.raw());
     char *buffer = alloc_result.first.as<char>();
 
     MPackWriter msg(buffer, OT_PAGE_SIZE);
@@ -130,8 +137,8 @@ Process *process_create_impl(Process *table, proc_id_t max_procs, const char *na
   return free_proc;
 }
 
-Process *process_create(const char *name, const void *entry_point, Arguments *args) {
-  Process *p = process_create_impl(procs, PROCS_MAX, name, entry_point, args);
+Process *process_create(const char *name, const void *entry_point, Arguments *args, bool kernel_mode) {
+  Process *p = process_create_impl(procs, PROCS_MAX, name, entry_point, args, kernel_mode);
 
   if (!p) {
     PANIC("reached proc limit");
@@ -174,6 +181,7 @@ PageAddr process_get_arg_page() {
   if (current_proc == nullptr) {
     return paddr;
   }
+  oprintf("process_get_arg_page: pid %d arg_page %p\n", current_proc->pid, current_proc->arg_page.as_ptr());
   return current_proc->arg_page;
 }
 

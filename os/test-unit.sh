@@ -7,14 +7,14 @@ clang -DOT_POSIX -DOT_TEST -I. -c ot/vendor/libmpack/mpack.c -o bin/mpack.o
 clang -DOT_POSIX -DOT_TEST -I. -c ot/vendor/printf/printf.c -o bin/printf.o
 
 # Compile and link tests
-clang++ -DOT_POSIX -DOT_TEST -DOT_TRACE_MEM \
+clang++ -DOT_POSIX -DOT_TEST -DOT_TRACE_MEM -DBUILDING_KERNEL \
     -I. -o bin/test \
     ot/test-linking.cpp \
     ot/core/memory-test.cpp \
     ot/core/memory.cpp \
     ot/core/std.cpp \
     ot/lib/std.cpp \
-    ot/platform/posix/posix-std.cpp \
+    ot/core/platform/posix-std.cpp \
     ot/lib/printf-test.cpp \
     ot/core/platform-test.cpp \
     ot/core/process.cpp \
@@ -28,8 +28,8 @@ clang++ -DOT_POSIX -DOT_TEST -DOT_TRACE_MEM \
     ot/lib/string.cpp \
     ot/lib/string-test.cpp \
     ot/lib/vector-test.cpp \
-    ot/programs/tcl.cpp \
-    ot/programs/tcl-test.cpp \
+    ot/user/tcl.cpp \
+    ot/user/tcl-test.cpp \
     bin/mpack.o \
     bin/printf.o
 

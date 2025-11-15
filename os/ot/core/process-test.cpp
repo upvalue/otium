@@ -80,11 +80,11 @@ TEST_CASE("process_lookup") {
   memset(procs, 0, sizeof(procs));
   StringView str("proc1");
   // Create a few processes
-  process_create(str.ptr, nullptr, 0, false, nullptr);
-  process_create("proc2", nullptr, 0, false, nullptr);
-  process_create("proc3", nullptr, 0, false, nullptr);
+  process_create(str.ptr, nullptr, nullptr);
+  process_create("proc2", nullptr, nullptr);
+  process_create("proc3", nullptr, nullptr);
   // Create with conflict
-  process_create("proc1", nullptr, 0, false, nullptr);
+  process_create("proc1", nullptr, nullptr);
 
   // Lookup each process by name
   Process *proc1 = process_lookup(str);

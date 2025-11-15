@@ -6,7 +6,7 @@
 #include "ot/lib/file.hpp"
 #include "ot/lib/string.hpp"
 #include "ot/user/tcl.hpp"
-#include "ot/platform/user.hpp"
+#include "ot/user/user.hpp"
 
 static bool running = true;
 static const char *default_error_msg = "no error message set";

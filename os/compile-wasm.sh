@@ -35,9 +35,9 @@ $CC $CPPFLAGS $CFLAGS "${EMFLAGS[@]}" -o bin/os.js \
     "${DRIVER_SOURCES[@]}" \
     "${LIB_SOURCES[@]}" \
     "${USER_SOURCES[@]}" \
-    ot/platform/wasm/platform-wasm.cpp \
+    ot/core/platform/platform-wasm.cpp \
     ot/lib/platform/shared-wasm.cpp \
-    ot/platform/wasm/user-wasm.cpp
+    ot/core/platform/user-wasm.cpp
 
 set +x
 

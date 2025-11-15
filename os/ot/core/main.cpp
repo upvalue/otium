@@ -1,8 +1,8 @@
 // kernel-prog.cpp - Kernel startup logic and test programs
 
+#include "ot/core/drivers/drv-gfx-virtio.hpp"
 #include "ot/core/kernel.hpp"
-#include "ot/drivers/drv-gfx-virtio.hpp"
-#include "ot/platform/user.hpp"
+#include "ot/user/user.hpp"
 
 // Forward declaration for kernel_common (defined in startup.cpp)
 void kernel_common(void);
@@ -19,7 +19,8 @@ extern "C" void proc_hello_world(void) {
     asm volatile("wfi"); // Wait for interrupt (RISC-V only)
 #else
     // WASM: just busy wait
-    for (volatile int i = 0; i < 1000; i++);
+    for (volatile int i = 0; i < 1000; i++)
+      ;
 #endif
   }
 }
@@ -89,23 +90,19 @@ bool programs_running() {
   return false;
 }
 
-// Kernel startup - initializes kernel and creates initial processes
-void kernel_start(void) {
-  kernel_common();
-
-#if KERNEL_PROG == KERNEL_PROG_TEST_MEM
+void kernel_prog_test_mem() {
   // Test mode: memory recycling test
   oprintf("TEST: Starting memory recycling test\n");
 
-  // Create first process
-  Process *proc1 = process_create("mem_test_1", (const void *)proc_mem_test, nullptr);
+  // Create first process (kernel mode)
+  Process *proc1 = process_create("mem_test_1", (const void *)proc_mem_test, nullptr, true);
   uintptr_t proc1_pages[16];
   uint32_t proc1_page_count = 0;
   get_process_pages(proc1->pid, proc1_pages, &proc1_page_count);
   oprintf("TEST: Process 1 (pid %d) allocated %d pages\n", proc1->pid, proc1_page_count);
 
-  // Create second process
-  Process *proc2 = process_create("mem_test_2", (const void *)proc_mem_test, nullptr);
+  // Create second process (kernel mode)
+  Process *proc2 = process_create("mem_test_2", (const void *)proc_mem_test, nullptr, true);
   uintptr_t proc2_pages[16];
   uint32_t proc2_page_count = 0;
   get_process_pages(proc2->pid, proc2_pages, &proc2_page_count);
@@ -115,8 +112,8 @@ void kernel_start(void) {
   process_exit(proc1);
   oprintf("TEST: Exited process 1 (freed %d pages)\n", proc1_page_count);
 
-  // Create third process - should reuse process 1's pages
-  Process *proc3 = process_create("mem_test_3", (const void *)proc_mem_test, nullptr);
+  // Create third process - should reuse process 1's pages (kernel mode)
+  Process *proc3 = process_create("mem_test_3", (const void *)proc_mem_test, nullptr, true);
   uintptr_t proc3_pages[16];
   uint32_t proc3_page_count = 0;
   get_process_pages(proc3->pid, proc3_pages, &proc3_page_count);
@@ -143,26 +140,32 @@ void kernel_start(void) {
   // Clean up
   process_exit(proc2);
   process_exit(proc3);
+}
 
-#elif KERNEL_PROG == KERNEL_PROG_TEST_HELLO
-  // Test mode: run hello world test
-  Process *test_proc = process_create("test_hello", (const void *)proc_hello_world, nullptr);
-  TRACE(LSOFT, "created test proc with name %s and pid %d", test_proc->name, test_proc->pid);
-#elif KERNEL_PROG == KERNEL_PROG_TEST_ALTERNATE
-  // Test mode: alternate process execution
+/**
+ * tests that yielding cooperatively between processes works as expected
+ */
+void kernel_prog_test_alternate() {
   oprintf("TEST: Starting alternate process test (should print 1234)\n");
-  Process *proc_a = process_create("alternate_a", (const void *)proc_alternate_a, nullptr);
-  Process *proc_b = process_create("alternate_b", (const void *)proc_alternate_b, nullptr);
+  Process *proc_a = process_create("alternate_a", (const void *)proc_alternate_a, nullptr, true);
+  Process *proc_b = process_create("alternate_b", (const void *)proc_alternate_b, nullptr, true);
   TRACE(LSOFT, "created proc_a with name %s and pid %d", proc_a->name, proc_a->pid);
   TRACE(LSOFT, "created proc_b with name %s and pid %d", proc_b->name, proc_b->pid);
   oprintf("TEST: ");
-#elif KERNEL_PROG == KERNEL_PROG_TEST_USERSPACE
-  // Test mode: userspace demo with memory allocation and stack validation
+}
+
+void kernel_prog_test_userspace() {
   oprintf("TEST: Starting userspace demo test\n");
-  Process *demo_proc = process_create("userspace_demo", (const void *)proc_userspace_demo, nullptr);
+  Process *demo_proc = process_create("userspace_demo", (const void *)proc_userspace_demo, nullptr, false);
   TRACE(LSOFT, "created demo proc with name %s and pid %d", demo_proc->name, demo_proc->pid);
-#else
-  // Default/main mode
+}
+
+/**
+ * the default kernel program (actually run the system)
+ */
+void kernel_prog_default() {
+// Default/main mode
+#if 0
   char *shell_argv = {"shell"};
   Arguments shell_args = {1, &shell_argv};
   char *scratch_argv = {"scratch"};
@@ -176,11 +179,38 @@ void kernel_start(void) {
   // The user-main.cpp dispatcher will route to the appropriate program based on arguments
   Process *proc_shell = process_create("shell", (const void *)user_program_main, &shell_args);
 
-  Process *proc_print_server =
-      process_create("print-server", (const void *)user_program_main, &print_server_args);
+  Process *proc_print_server = process_create("print-server", (const void *)user_program_main, &print_server_args);
   // Process *proc_scratch = process_create("scratch", (const void *)user_program_main, &scratch_args);
   // TRACE(LSOFT, "created proc with name %s and pid %d", proc_shell->name,
-//        proc_shell->pid);
+  //        proc_shell->pid);
+#endif
+
+  char *shell_argv = {"shell"};
+  Arguments shell_args = {1, &shell_argv};
+  Process *proc_shell = process_create("shell", (const void *)user_program_main, &shell_args, false);
+}
+
+// Kernel startup - initializes kernel and creates initial processes
+void kernel_start(void) {
+  kernel_common();
+
+  // Kernel "program" there are a few different programs for testing some functionality
+  // of the kernel end to end
+
+  oprintf("kernel_start: KERNEL_PROG = %d\n", KERNEL_PROG);
+
+#if KERNEL_PROG == KERNEL_PROG_TEST_MEM
+  kernel_prog_test_mem();
+#elif KERNEL_PROG == KERNEL_PROG_TEST_HELLO
+  // Test mode: run hello world test (kernel mode)
+  Process *test_proc = process_create("test_hello", (const void *)proc_hello_world, nullptr, true);
+  TRACE(LSOFT, "created test proc with name %s and pid %d", test_proc->name, test_proc->pid);
+#elif KERNEL_PROG == KERNEL_PROG_TEST_ALTERNATE
+  kernel_prog_test_alternate();
+#elif KERNEL_PROG == KERNEL_PROG_TEST_USERSPACE
+  kernel_prog_test_userspace();
+#else
+  kernel_prog_default();
 #endif
 
 #ifdef OT_ARCH_WASM

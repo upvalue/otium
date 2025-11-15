@@ -9,7 +9,7 @@
         "================================================================\n"
         "ERROR: kernel.hpp contains internal kernel implementation!\n"
         "\n"
-        "User programs should include 'ot/platform/user.hpp' instead.\n"
+        "User programs should include 'ot/user/user.hpp' instead.\n"
         "\n"
         "Available user-space functions:\n"
         "  - ou_yield()       // Yield to scheduler\n"
@@ -166,6 +166,7 @@ struct Process {
   uintptr_t stack_ptr;
   uintptr_t user_pc;         // Save user program counter
   uintptr_t heap_next_vaddr; // Next available heap address
+  bool kernel_mode;          // true = runs in kernel/supervisor mode, false = user mode
 #ifdef OT_ARCH_WASM
   bool started; // For WASM: track if process has been started
   void *fiber;  // emscripten_fiber_t for this process
@@ -176,8 +177,8 @@ struct Process {
 // Process management subsystem
 Process *process_create_impl(Process *table, proc_id_t max_procs,
                              const char *name, const void *entry_point,
-                             Arguments *args);
-Process *process_create(const char *name, const void *entry_point, Arguments *args);
+                             Arguments *args, bool kernel_mode = false);
+Process *process_create(const char *name, const void *entry_point, Arguments *args, bool kernel_mode = false);
 Process *process_next_runnable(void);
 /** Looks up a process by name. Returns highest PID process that matches
  * (conflicts are allowed). */

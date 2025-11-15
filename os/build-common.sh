@@ -17,8 +17,8 @@ CORE_SOURCES=(
 
 # Driver source files
 DRIVER_SOURCES=(
-  ot/drivers/drv-virtio.cpp
-  ot/drivers/drv-gfx-virtio.cpp
+  ot/core/drivers/drv-virtio.cpp
+  ot/core/drivers/drv-gfx-virtio.cpp
 )
 
 # Library source files (shared utilities)
@@ -32,7 +32,7 @@ LIB_SOURCES=(
 
 # User program source files
 USER_SOURCES=(
-  ot/platform/user-main.cpp
+  ot/user/user-main.cpp
   ot/user/prog-shell.cpp
   ot/user/tcl.cpp
   ot/lib/string.cpp

@@ -13,11 +13,11 @@ CFLAGS="$COMMON_CFLAGS --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-prot
 # Build the complete OS (kernel + user programs in single executable)
 mkdir -p bin
 $CC $CPPFLAGS $CFLAGS \
-    -Wl,-Tot/platform/riscv/kernel-link.ld -Wl,-Map=bin/os.map -o bin/os.elf \
+    -Wl,-Tkernel-link-riscv.ld -Wl,-Map=bin/os.map -o bin/os.elf \
     "${CORE_SOURCES[@]}" \
     "${DRIVER_SOURCES[@]}" \
     "${LIB_SOURCES[@]}" \
     "${USER_SOURCES[@]}" \
-    ot/platform/riscv/platform-riscv.cpp \
+    ot/core/platform/platform-riscv.cpp \
     ot/lib/platform/shared-riscv.cpp \
-    ot/platform/riscv/user-riscv.cpp
+    ot/core/platform/user-riscv.cpp

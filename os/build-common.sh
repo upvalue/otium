@@ -9,6 +9,7 @@ COMMON_CPPFLAGS="-I."
 CORE_SOURCES=(
   ot/core/startup.cpp
   ot/core/main.cpp
+  ot/core/kernel-tests.cpp
   ot/core/memory.cpp
   ot/core/process.cpp
   ot/core/std.cpp

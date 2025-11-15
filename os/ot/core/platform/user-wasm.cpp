@@ -7,8 +7,7 @@
 // No need for ecall or trap handling
 
 // For WASM, user programs can directly call kernel functions
-// since everything is linked together. We just provide the
-// user API functions that call kernel syscall handlers.
+// since everything is linked together.
 
 extern "C" {
 
@@ -17,59 +16,48 @@ __attribute__((noreturn)) void exit(int) {
     ;
 }
 
-// Forward declarations of kernel syscall handlers
-void kernel_syscall_putchar(char ch);
-int kernel_syscall_getchar(void);
-void kernel_syscall_yield(void);
-void kernel_syscall_exit(void);
-void *kernel_syscall_alloc_page(void);
+// Note: oputchar is defined in platform-wasm.cpp
+extern int oputchar(char ch);
 
-// Note: oputchar and ogetchar are defined in platform-wasm.cpp
-// and used by both kernel and user code
-
-void ou_yield(void) { kernel_syscall_yield(); }
+void ou_yield(void) { yield(); }
 
 __attribute__((noreturn)) void ou_exit(void) {
-  // kernel_syscall_exit();
   process_exit(current_proc);
-  ou_yield();
+  yield();
 }
 
-void *ou_alloc_page(void) { return kernel_syscall_alloc_page(); }
+void *ou_alloc_page(void) {
+  PageAddr result = process_alloc_mapped_page(current_proc, true, true, false);
+  yield();
+  return result.as_ptr();
+}
 
 // No special start routine needed for WASM
 // The kernel will call shell_main() directly
 }
 
-PageAddr kernel_syscall_get_arg_page(void);
-PageAddr ou_get_arg_page(void) { return kernel_syscall_get_arg_page(); }
+PageAddr ou_get_arg_page(void) { return process_get_arg_page(); }
 
-PageAddr kernel_syscall_get_msg_page(int msg_idx);
-PageAddr ou_get_msg_page(int msg_idx) {
-  return kernel_syscall_get_msg_page(msg_idx);
-}
-PageAddr kernel_syscall_get_comm_page(void);
-PageAddr ou_get_comm_page(void) { return kernel_syscall_get_comm_page(); }
+PageAddr ou_get_msg_page(int msg_idx) { return process_get_msg_page(msg_idx); }
 
-int kernel_syscall_ipc_check_message(void);
-int kernel_syscall_ipc_send_message(int pid);
-int kernel_syscall_proc_lookup(const char *name);
-int kernel_syscall_ipc_pop_message(void);
+PageAddr ou_get_comm_page(void) { return process_get_comm_page(); }
 
 int ou_proc_lookup(const char *name) {
-  return kernel_syscall_proc_lookup(name);
+  Process *proc = process_lookup(name);
+  yield();
+  return proc ? proc->pid : 0;
 }
-
-int kernel_syscall_io_puts(const char *str, int size);
 
 int ou_io_puts(const char *str, int size) {
-  return kernel_syscall_io_puts(str, size);
+  for (int i = 0; i < size; i++) {
+    oputchar(str[i]);
+  }
+  yield();
+  return 1;
 }
 
-int ou_ipc_check_message(void) { return kernel_syscall_ipc_check_message(); }
+int ou_ipc_check_message(void) { return current_proc->msg_count; }
 
-int ou_ipc_send_message(int pid) {
-  return kernel_syscall_ipc_send_message(pid);
-}
+int ou_ipc_send_message(int pid) { return ipc_send_message(current_proc, pid); }
 
-int ou_ipc_pop_message(void) { return kernel_syscall_ipc_pop_message(); }
+int ou_ipc_pop_message(void) { return ipc_pop_message(current_proc); }

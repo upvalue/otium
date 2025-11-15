@@ -221,65 +221,6 @@ void scheduler_loop(void) {
   }
 }
 
-// Syscall handlers for user programs
-extern "C" {
-
-void kernel_syscall_putchar(char ch) {
-  oputchar(ch);
-  yield();
-}
-
-int kernel_syscall_getchar(void) {
-  int ch = ogetchar();
-  yield();
-  return ch;
-}
-
-void kernel_syscall_yield(void) { yield(); }
-
-void kernel_syscall_exit(void) {
-  js_exit();
-  if (current_proc) {
-    oprintf("Process %s (pid=%d) exited\n", current_proc->name, current_proc->pid);
-    current_proc->state = TERMINATED;
-  }
-  yield();
-}
-
-void *kernel_syscall_alloc_page(void) {
-  PageAddr result = process_alloc_mapped_page(current_proc, true, true, false);
-  yield();
-  return result.as_ptr();
-}
-
-} // extern "C"
-
-int kernel_syscall_io_puts(const char *str, int size) {
-  for (int i = 0; i < size; i++) {
-    oputchar(str[i]);
-  }
-  yield();
-  return 1;
-}
-
-PageAddr kernel_syscall_get_arg_page(void) { return process_get_arg_page(); }
-
-PageAddr kernel_syscall_get_msg_page(int msg_idx) { return process_get_msg_page(msg_idx); }
-
-PageAddr kernel_syscall_get_comm_page(void) { return process_get_comm_page(); }
-
-int kernel_syscall_proc_lookup(const char *name) {
-  Process *proc = process_lookup(name);
-  yield();
-  return proc ? proc->pid : 0;
-}
-
-int kernel_syscall_ipc_check_message(void) { return current_proc->msg_count; }
-
-int kernel_syscall_ipc_send_message(int pid) { return ipc_send_message(current_proc, pid); }
-
-int kernel_syscall_ipc_pop_message(void) { return ipc_pop_message(current_proc); }
-
 // Main entry point for WASM
 extern "C" void kernel_main(void) {
   oprintf("Otium OS starting on WASM\n");

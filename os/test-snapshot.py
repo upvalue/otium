@@ -18,11 +18,12 @@ TEST_PROGRAMS = {
     "test-mem": "--test-mem",
     "test-alternate": "--test-alternate",
     "test-ipc": "--test-ipc",
+    "test-ipc-ordering": "--test-ipc-ordering",
 }
 
 # Platform-specific test exclusions
 PLATFORM_EXCLUSIONS = {
-    "wasm": ["test-mem", "test-ipc"],  # Skip memory and IPC tests on WASM for now
+    "wasm": ["test-mem", "test-ipc", "test-ipc-ordering"],  # Skip memory and IPC tests on WASM for now
 }
 
 SNAPSHOT_DIR = Path(__file__).parent / "snapshots"

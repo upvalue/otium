@@ -21,8 +21,11 @@
 // Runs IPC test with fibonacci service
 #define KERNEL_PROG_TEST_IPC 5
 
+// Runs IPC ordering test to verify scheduling behavior
+#define KERNEL_PROG_TEST_IPC_ORDERING 6
+
 // Selected kernel program (modified by config.sh)
-#define KERNEL_PROG KERNEL_PROG_TEST_IPC
+#define KERNEL_PROG KERNEL_PROG_TEST_IPC_ORDERING
 
 // Log levels
 #define LSILENT 0

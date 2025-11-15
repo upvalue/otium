@@ -120,6 +120,7 @@ void handle_syscall(struct trap_frame *f) {
     if (current_proc) {
       oprintf("Process %s (pid=%d) exited\n", current_proc->name, current_proc->pid);
       current_proc->state = TERMINATED;
+      yield();  // Switch to another process - this never returns
     }
     break;
   case OU_GETCHAR:
@@ -258,8 +259,10 @@ void handle_syscall(struct trap_frame *f) {
       sender->pending_response.b = f->a2;
 
       current_proc->blocked_sender = nullptr;
-      TRACE_IPC(LLOUD, "IPC reply sent, switching back to sender %d", sender->pid);
-      process_switch_to(sender);  // Direct context switch back to sender
+      TRACE_IPC(LLOUD, "IPC reply sent, immediately switching back to sender %d", sender->pid);
+      // Switch back to sender immediately - receiver will resume when scheduled again
+      process_switch_to(sender);
+      // After this returns (when we're scheduled again), continue normally
     } else {
       TRACE_IPC(LSOFT, "IPC reply called but no blocked sender");
     }

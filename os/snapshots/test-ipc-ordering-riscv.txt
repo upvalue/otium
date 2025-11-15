@@ -1,0 +1,6 @@
+TEST: Starting IPC ordering test
+TEST: Process 2 starting
+TEST: Test process 4
+TEST: Process 3 handling IPC request
+TEST: 42
+TEST: Process 3 done with IPC, terminating

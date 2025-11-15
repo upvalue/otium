@@ -214,6 +214,75 @@ void kernel_prog_test_ipc() {
   TRACE(LSOFT, "created client with name %s and pid %d", proc_client->name, proc_client->pid);
 }
 
+// Sentinel variable for dummy PID 1 process
+static volatile bool ipc_ordering_test_complete = false;
+
+// TEST_IPC_ORDERING: Process 1 (Dummy) - Keeps PID 1 alive until test completes
+extern "C" void proc_dummy_pid1(void) {
+  while (!ipc_ordering_test_complete) {
+    ou_yield();
+  }
+  ou_exit();
+}
+
+// TEST_IPC_ORDERING: Process 2 - Client that sends IPC to echo server
+extern "C" void proc_ipc_client_ordering(void) {
+  oprintf("TEST: Process 2 starting\n");
+
+  // Yield to let other processes initialize (especially echo server needs to enter IPC_WAIT)
+  ou_yield();
+
+  // Look up echo server by name
+  int echo_pid = ou_proc_lookup("echo_server");
+
+  if (echo_pid == 0) {
+    oprintf("TEST: Failed to find echo server\n");
+    ou_exit();
+  }
+
+  IpcResponse resp = ou_ipc_send(echo_pid, 0, 42);
+  if (resp.error_code == NONE) {
+    oprintf("TEST: %d\n", resp.a);
+  } else {
+    oprintf("TEST: IPC error %d\n", resp.error_code);
+  }
+
+  // Signal that test is complete so dummy PID 1 can exit
+  ipc_ordering_test_complete = true;
+  ou_exit();
+}
+
+// TEST_IPC_ORDERING: Process 3 - Echo server that handles one IPC request then terminates
+extern "C" void proc_ipc_echo_once(void) {
+  // First time through: wait for IPC, handle it, reply
+  IpcMessage msg = ou_ipc_recv(); // Will block in IPC_WAIT
+  oprintf("TEST: Process 3 handling IPC request\n");
+  IpcResponse resp = {NONE, msg.extra, 0}; // Echo the value
+  ou_ipc_reply(resp);
+
+  // After reply returns, we're back here and continue execution
+  // Now just terminate
+  oprintf("TEST: Process 3 done with IPC, terminating\n");
+  ou_exit();
+}
+
+// TEST_IPC_ORDERING: Process 4 - Simple test process
+extern "C" void proc_test_4(void) {
+  oprintf("TEST: Test process 4\n");
+  ou_exit();
+}
+
+void kernel_prog_test_ipc_ordering() {
+  oprintf("TEST: Starting IPC ordering test\n");
+
+  // Create processes with dummy PID 1 to avoid early kernel exit
+  // PIDs will be: dummy=1, ipc_client=2, echo_server=3, test_4=4
+  process_create("dummy", (const void *)proc_dummy_pid1, nullptr, false);
+  process_create("ipc_client", (const void *)proc_ipc_client_ordering, nullptr, false);
+  process_create("echo_server", (const void *)proc_ipc_echo_once, nullptr, false);
+  process_create("test_4", (const void *)proc_test_4, nullptr, false);
+}
+
 /**
  * the default kernel program (actually run the system)
  */
@@ -244,6 +313,8 @@ void kernel_start(void) {
   kernel_prog_test_userspace();
 #elif KERNEL_PROG == KERNEL_PROG_TEST_IPC
   kernel_prog_test_ipc();
+#elif KERNEL_PROG == KERNEL_PROG_TEST_IPC_ORDERING
+  kernel_prog_test_ipc_ordering();
 #else
   kernel_prog_default();
 #endif

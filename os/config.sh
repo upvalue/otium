@@ -35,6 +35,9 @@ for arg in "$@"; do
     --test-ipc)
       MODE="KERNEL_PROG_TEST_IPC"
       ;;
+    --test-ipc-ordering)
+      MODE="KERNEL_PROG_TEST_IPC_ORDERING"
+      ;;
     --log-general=*)
       level="${arg#*=}"
       case $level in
@@ -73,7 +76,7 @@ for arg in "$@"; do
       ;;
     *)
       echo "Unknown option: $arg"
-      echo "Usage: $0 [--default|--shell|--test-hello|--test-mem|--test-alternate|--test-ipc]"
+      echo "Usage: $0 [--default|--shell|--test-hello|--test-mem|--test-alternate|--test-ipc|--test-ipc-ordering]"
       echo "          [--log-general=silent|soft|loud]"
       echo "          [--log-mem=silent|soft|loud]"
       echo "          [--log-proc=silent|soft|loud]"

@@ -6,8 +6,8 @@
 
 #include "ot/common.h"
 #include "ot/lib/mpack/mpack-writer.hpp"
-#include "ot/lib/string.hpp"
-#include "ot/lib/vector.hpp"
+#include "ot/user/string.hpp"
+#include "ot/user/vector.hpp"
 
 namespace tcl {
 

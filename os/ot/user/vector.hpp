@@ -5,7 +5,7 @@
 #define OT_USER_VECTOR_HPP
 
 #include "ot/common.h"
-#include "ot/lib/string.hpp"
+#include "ot/user/string.hpp"
 
 namespace ou {
 

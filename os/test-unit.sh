@@ -25,7 +25,7 @@ clang++ -DOT_POSIX -DOT_TEST -DOT_TRACE_MEM \
     ot/lib/mpack/mpack-utils.cpp \
     ot/lib/mpack/mpack-utils-test.cpp \
     ot/lib/result-test.cpp \
-    ot/lib/string.cpp \
+    ot/user/string.cpp \
     ot/lib/string-test.cpp \
     ot/lib/vector-test.cpp \
     ot/user/tcl.cpp \

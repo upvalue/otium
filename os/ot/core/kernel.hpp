@@ -140,6 +140,12 @@ struct Process {
    */
   uint8_t msg_count;
 
+  /**
+   * Per-process local storage page for user-space data.
+   * Updated by kernel on context switch.
+   */
+  PageAddr storage_page;
+
   uintptr_t stack_ptr;
   uintptr_t user_pc;         // Save user program counter
   uintptr_t heap_next_vaddr; // Next available heap address
@@ -169,6 +175,8 @@ PageAddr process_get_arg_page();
 // Gets the comm page pointer of the current process if possible
 PageAddr process_get_comm_page();
 PageAddr process_get_msg_page(int msg_idx);
+// Gets the storage page pointer of the current process if possible
+PageAddr process_get_storage_page();
 
 // Allocates a page for the given process (physical addressing only)
 // Returns PageAddr of allocated page, or null on failure

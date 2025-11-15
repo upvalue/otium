@@ -1,6 +1,6 @@
 // vector-test.cpp - Unit tests for ou::vector class
 
-#include "ot/lib/vector.hpp"
+#include "ot/user/vector.hpp"
 #include "vendor/doctest.h"
 
 TEST_CASE("vector construction") {

@@ -5,8 +5,8 @@
 #include "ot/common.h"
 #include "ot/lib/result.hpp"
 #include "ot/lib/string-view.hpp"
-#include "ot/lib/string.hpp"
-#include "ot/lib/vector.hpp"
+#include "ot/user/string.hpp"
+#include "ot/user/vector.hpp"
 
 namespace tevl {
 

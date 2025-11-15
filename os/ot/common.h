@@ -83,6 +83,8 @@ int oputsn(const char *str, int n);
 #define OU_SYS_PAGE_COMM 1
 // Get a message page -- next argument must be a valid message number
 #define OU_SYS_PAGE_MSG 2
+// Get the local storage page for the current process
+#define OU_SYS_PAGE_STORAGE 3
 
 // oputchar -- returns 0 in case of failure, 1 otherwise
 int oputchar(char);

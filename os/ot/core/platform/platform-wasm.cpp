@@ -1,6 +1,7 @@
 // platform-wasm.cpp - WASM/Emscripten specific functionality
 
 #include "ot/core/kernel.hpp"
+#include "ot/user/local-storage.hpp"
 #include <emscripten.h>
 #include <emscripten/fiber.h>
 #include <stdlib.h>
@@ -139,6 +140,8 @@ static void fiber_entry_point(void *arg) {
 
   // Set as current process and run
   current_proc = proc;
+  // Update local_storage pointer for user-space access
+  local_storage = (LocalStorage *)proc->storage_page.as_ptr();
   user_entry();
 
   // If we get here, process terminated (returned from user_entry instead of
@@ -178,6 +181,8 @@ void scheduler_loop(void) {
 
     TRACE(LLOUD, "Scheduler picked process %s (pid=%d)", next->name, next->pid);
     current_proc = next;
+    // Update local_storage pointer for user-space access
+    local_storage = (LocalStorage *)next->storage_page.as_ptr();
 
     // Create fiber for this process if not already created
     if (!next->started) {

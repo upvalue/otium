@@ -35,6 +35,7 @@ USER_SOURCES=(
   ot/user/user-main.cpp
   ot/user/prog-shell.cpp
   ot/user/tcl.cpp
-  ot/lib/string.cpp
+  ot/user/string.cpp
+  ot/user/memory-allocator.cpp
   ot/vendor/tlsf/tlsf.c
 )

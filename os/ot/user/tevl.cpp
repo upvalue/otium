@@ -4,7 +4,7 @@
 #include "ot/common.h"
 #include "ot/lib/file.hpp"
 #include "ot/lib/result.hpp"
-#include "ot/lib/string.hpp"
+#include "ot/user/string.hpp"
 #include "ot/user/tcl.hpp"
 #include "ot/user/user.hpp"
 

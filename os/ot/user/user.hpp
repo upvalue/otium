@@ -19,6 +19,7 @@ void *ou_alloc_page(void);
 PageAddr ou_get_arg_page(void);
 PageAddr ou_get_msg_page(int msg_idx);
 PageAddr ou_get_comm_page(void);
+PageAddr ou_get_storage(void);
 int ou_io_puts(const char *str, int size);
 
 int ou_proc_lookup(const char *name);

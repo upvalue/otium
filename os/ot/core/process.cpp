@@ -111,6 +111,15 @@ Process *process_create_impl(Process *table, proc_id_t max_procs, const char *na
 
   free_proc->comm_page = comm_page;
 
+  // Allocate local storage page for process-specific data
+  PageAddr storage_page = process_alloc_mapped_page(free_proc, true, true, false);
+  if (storage_page.is_null()) {
+    PANIC("failed to allocate storage page");
+  }
+  // Zero out the storage page
+  omemset(storage_page.as_ptr(), 0, OT_PAGE_SIZE);
+  free_proc->storage_page = storage_page;
+
   // Allocate user-mode stack (separate from kernel stack)
   PageAddr user_stack = process_alloc_mapped_page(free_proc, true, true, false);
   if (user_stack.is_null()) {
@@ -238,4 +247,11 @@ Process *process_lookup(int pid) {
     return nullptr;
   }
   return p;
+}
+
+PageAddr process_get_storage_page(void) {
+  if (current_proc == nullptr) {
+    return PageAddr(nullptr);
+  }
+  return current_proc->storage_page;
 }

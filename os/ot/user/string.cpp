@@ -1,6 +1,6 @@
 // string.cpp - implementation of generic string class
 
-#include "ot/lib/string.hpp"
+#include "ot/user/string.hpp"
 
 namespace ou {
 

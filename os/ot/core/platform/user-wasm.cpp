@@ -42,6 +42,8 @@ PageAddr ou_get_msg_page(int msg_idx) { return process_get_msg_page(msg_idx); }
 
 PageAddr ou_get_comm_page(void) { return process_get_comm_page(); }
 
+PageAddr ou_get_storage(void) { return process_get_storage_page(); }
+
 int ou_proc_lookup(const char *name) {
   Process *proc = process_lookup(name);
   yield();

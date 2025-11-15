@@ -1,6 +1,6 @@
 // string-test.cpp - Unit tests for ou::string class
 
-#include "ot/lib/string.hpp"
+#include "ot/user/string.hpp"
 #include "vendor/doctest.h"
 
 TEST_CASE("string construction") {

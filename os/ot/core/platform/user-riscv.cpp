@@ -56,6 +56,7 @@ PageAddr ou_get_arg_page(void) {
   return ou_get_sys_page(OU_SYS_PAGE_ARG, 0);
 }
 PageAddr ou_get_comm_page(void) { return ou_get_sys_page(OU_SYS_PAGE_COMM, 0); }
+PageAddr ou_get_storage(void) { return ou_get_sys_page(OU_SYS_PAGE_STORAGE, 0); }
 
 int ou_io_puts(const char *str, int size) {
   PageAddr comm_page = ou_get_comm_page();

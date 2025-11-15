@@ -3,6 +3,7 @@
 #include "ot/core/kernel.hpp"
 #include "ot/lib/messages.hpp"
 #include "ot/lib/mpack/mpack-reader.hpp"
+#include "ot/user/local-storage.hpp"
 
 #define SCAUSE_ECALL 8
 #define SSTATUS_SPP (1 << 8)
@@ -139,6 +140,8 @@ void handle_syscall(struct trap_frame *f) {
       page = process_get_comm_page();
     } else if (arg0 == OU_SYS_PAGE_MSG) {
       page = process_get_msg_page(arg1);
+    } else if (arg0 == OU_SYS_PAGE_STORAGE) {
+      page = process_get_storage_page();
     }
     f->a0 = page.raw();
     break;
@@ -404,6 +407,8 @@ void yield(void) {
 
   Process *prev = current_proc;
   current_proc = next;
+  // Update local_storage pointer for user-space access
+  local_storage = (LocalStorage *)next->storage_page.as_ptr();
   TRACE_PROC(LLOUD, "about to call switch_context, prev=%s next=%s", prev->name, next->name);
   switch_context(&prev->stack_ptr, &current_proc->stack_ptr);
   TRACE_PROC(LLOUD, "returned from switch_context, current=%s", current_proc->name);

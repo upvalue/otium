@@ -22,7 +22,7 @@ clang++ -DOT_POSIX -std=c++17 -I. -o bin/tcl-repl \
 echo "✓ TCL REPL built successfully: bin/tcl-repl"
 
 # Build TEVL text editor
-clang++ -DOT_POSIX -std=c++17 -I. -o bin/tevl \
+clang++ -fsanitize=address -g3 -DOT_POSIX -std=c++17 -I. -o bin/tevl \
     ot/lib/string.cpp \
     ot/lib/file.cpp \
     ot/user/tevl.cpp \

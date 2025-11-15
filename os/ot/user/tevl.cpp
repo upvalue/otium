@@ -1,9 +1,9 @@
 // tevl.cpp - TEVL text editor core implementation
-// inhsert a comment
+
 #include "ot/user/tevl.hpp"
 #include "ot/common.h"
-#include "ot/lib/result.hpp"
 #include "ot/lib/file.hpp"
+#include "ot/lib/result.hpp"
 #include "ot/lib/string.hpp"
 #include "ot/user/tcl.hpp"
 #include "ot/user/user.hpp"
@@ -205,9 +205,11 @@ void process_key_press() {
   }
 
   // Correct cx if it's beyond the end of the current line
-  int current_line_len = e.file_lines[e.cy].length();
-  if (e.cx > current_line_len) {
-    e.cx = current_line_len;
+  if (e.cy < e.file_lines.size()) {
+    int current_line_len = e.file_lines[e.cy].length();
+    if (e.cx > current_line_len) {
+      e.cx = current_line_len;
+    }
   }
 }
 

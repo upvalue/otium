@@ -14,7 +14,7 @@ echo ""
 set -x
 
 # Compiler flags for WASM
-CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_WASM -DBUILDING_KERNEL"
+CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_WASM"
 CFLAGS="$COMMON_CFLAGS"
 
 # Emscripten-specific flags

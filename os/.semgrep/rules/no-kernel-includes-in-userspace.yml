@@ -1,0 +1,32 @@
+rules:
+  - id: no-kernel-includes-in-userspace
+    pattern: |
+      #include "ot/core/kernel.hpp"
+    paths:
+      include:
+        - '**/ot/user/**'
+        - '**/ot/driver/**'
+        - '**/ot/lib/**'
+    languages:
+      - cpp
+      - c
+    severity: ERROR
+    message: |
+      Userspace code must not include kernel headers.
+
+      ot/core/kernel.hpp contains internal kernel implementation and should only
+      be included by kernel code.
+
+      User programs should include 'ot/user/user.hpp' instead.
+
+      Available user-space functions:
+        - ou_yield()       // Yield to scheduler
+        - ou_exit()        // Exit process
+        - ou_alloc_page()  // Allocate memory page
+        - ou_get_arg_page(), ou_get_comm_page(), etc.
+
+      In the unikernel architecture, kernel and userspace share the same address
+      space but maintain a logical separation. Including kernel headers breaks
+      this separation and creates improper dependencies.
+    metadata:
+      category: security

@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/build-common.sh"
 
 # Path to clang and compiler flags
 CC=/opt/homebrew/opt/llvm/bin/clang  # Ubuntu users: use CC=clang
-CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_RISCV -DOT_FEAT_GFX=OT_FEAT_GFX_VIRTIO -DBUILDING_KERNEL"
+CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_RISCV -DOT_FEAT_GFX=OT_FEAT_GFX_VIRTIO"
 CFLAGS="$COMMON_CFLAGS --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib -fno-rtti"
 
 # Build the complete OS (kernel + user programs in single executable)

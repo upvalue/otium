@@ -1,0 +1,37 @@
+rules:
+  - id: no-static-variables-userspace
+    pattern-either:
+      - pattern: static $TYPE $VAR = $INIT;
+      - pattern: static $TYPE $VAR;
+      - pattern: static $TYPE $VAR[$SIZE];
+      - pattern: static $TYPE $VAR[$SIZE] = $INIT;
+    paths:
+      include:
+        - '**/ot/user/**'
+        - '**/ot/kernel/**'
+        - '**/ot/driver/**'
+        - '**/ot/lib/**'
+      exclude:
+        - '**/ot/core/**'
+        - '**/*-test.cpp'
+        - '**/*-test.hpp'
+    languages:
+      - cpp
+      - c
+    severity: ERROR
+    message: |
+      Static variables are not allowed in userspace programs in this unikernel architecture.
+
+      In a unikernel where multiple process instances share the same address space, static
+      variables create shared mutable state between process instances, breaking process
+      isolation.
+
+      Instead, use:
+      - Instance/context structs passed through function parameters
+      - Process-local storage allocated per-process
+      - Global constants (const/constexpr) if the data is truly immutable
+
+      Found static variable: $VAR
+    metadata:
+      category: security
+      cwe: "CWE-543: Use of Singleton pattern without synchronization"

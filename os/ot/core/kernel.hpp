@@ -1,25 +1,6 @@
 #ifndef OT_KERNEL_HPP
 #define OT_KERNEL_HPP
 
-// Kernel internal header protection
-// Only kernel code should include this header
-#ifndef BUILDING_KERNEL
-    static_assert(false,
-        "\n\n"
-        "================================================================\n"
-        "ERROR: kernel.hpp contains internal kernel implementation!\n"
-        "\n"
-        "User programs should include 'ot/user/user.hpp' instead.\n"
-        "\n"
-        "Available user-space functions:\n"
-        "  - ou_yield()       // Yield to scheduler\n"
-        "  - ou_exit()        // Exit process\n"
-        "  - ou_alloc_page()  // Allocate memory page\n"
-        "  - ou_get_arg_page(), ou_get_comm_page(), etc.\n"
-        "================================================================\n"
-        "\n");
-#endif
-
 #include "ot/common.h"
 #include "ot/lib/address.hpp"
 #include "ot/lib/arguments.hpp"

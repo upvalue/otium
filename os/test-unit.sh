@@ -7,7 +7,7 @@ clang -DOT_POSIX -DOT_TEST -I. -c ot/vendor/libmpack/mpack.c -o bin/mpack.o
 clang -DOT_POSIX -DOT_TEST -I. -c ot/vendor/printf/printf.c -o bin/printf.o
 
 # Compile and link tests
-clang++ -DOT_POSIX -DOT_TEST -DOT_TRACE_MEM -DBUILDING_KERNEL \
+clang++ -DOT_POSIX -DOT_TEST -DOT_TRACE_MEM \
     -I. -o bin/test \
     ot/test-linking.cpp \
     ot/core/memory-test.cpp \

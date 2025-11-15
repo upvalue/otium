@@ -247,9 +247,9 @@ void kernel_syscall_exit(void) {
 }
 
 void *kernel_syscall_alloc_page(void) {
-  Pair<PageAddr, PageAddr> result = process_alloc_mapped_page(current_proc, true, true, false);
+  PageAddr result = process_alloc_mapped_page(current_proc, true, true, false);
   yield();
-  return result.second.as_ptr();
+  return result.as_ptr();
 }
 
 } // extern "C"
@@ -264,9 +264,9 @@ int kernel_syscall_io_puts(const char *str, int size) {
 
 PageAddr kernel_syscall_get_arg_page(void) { return process_get_arg_page(); }
 
-PageAddr kernel_syscall_get_msg_page(int msg_idx) { return process_get_msg_page(msg_idx).first; }
+PageAddr kernel_syscall_get_msg_page(int msg_idx) { return process_get_msg_page(msg_idx); }
 
-PageAddr kernel_syscall_get_comm_page(void) { return process_get_comm_page().first; }
+PageAddr kernel_syscall_get_comm_page(void) { return process_get_comm_page(); }
 
 int kernel_syscall_proc_lookup(const char *name) {
   Process *proc = process_lookup(name);

@@ -13,7 +13,6 @@ enum ProgramType { UNKNOWN, SHELL, SCRATCH, SCRATCH2, PRINT_SERVER } program_typ
 void determine_program_type() {
   program_type = UNKNOWN;
   PageAddr arg_page = ou_get_arg_page();
-  oprintf("arg_page: %p\n", arg_page.as_ptr());
 
   MPackReader reader(arg_page.as<char>(), OT_PAGE_SIZE);
 
@@ -104,10 +103,6 @@ void scratch_main() {
   if (!y) {
     oprintf("failed to send message\n");
   }
-
-  /*PageAddr comm_page = ou_get_comm_page();
-  mpack_scratch_print(comm_page.as<char>(), OT_PAGE_SIZE);
-  ou_io_puts(ot_scratch_buffer, strlen(ot_scratch_buffer));*/
 
   while (true) {
     int msg_count = ou_ipc_check_message();

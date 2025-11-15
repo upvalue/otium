@@ -119,9 +119,6 @@ extern "C" char *__free_ram, *__free_ram_end;
 #define PAGE_X (1 << 3) // Executable
 #define PAGE_U (1 << 4) // User (accessible in user mode)
 
-/** A physical and virtual address of pages */
-typedef Pair<PageAddr, PageAddr> PageAddrs;
-
 enum ProcessState { UNUSED, RUNNABLE, TERMINATED };
 
 struct Process {
@@ -144,19 +141,18 @@ struct Process {
    *
    * Should always be a valid msgpack message.
    */
-  PageAddrs comm_page;
+  PageAddr comm_page;
 
   /**
    * User-mode stack (separate from kernel stack)
-   * Physical and virtual addresses of the user stack page
    */
-  PageAddrs user_stack;
+  PageAddr user_stack;
 
   /** PID that sent a message, if any */
   int msg_send_pid[OT_MSG_LIMIT];
 
   /** Pages for incoming messages */
-  Pair<PageAddr, PageAddr> msg_pages[OT_MSG_LIMIT];
+  PageAddr msg_pages[OT_MSG_LIMIT];
 
   /** How many messages are waiting for the process to handle. Note that idx
    *  of the message in array is msg_count - 1
@@ -190,16 +186,14 @@ void process_exit(Process *proc);
 // Gets the argument page pointer of the current process if possible
 PageAddr process_get_arg_page();
 // Gets the comm page pointer of the current process if possible
-Pair<PageAddr, PageAddr> process_get_comm_page();
-Pair<PageAddr, PageAddr> process_get_msg_page(int msg_idx);
+PageAddr process_get_comm_page();
+PageAddr process_get_msg_page(int msg_idx);
 
-// Allocates a page for the given process and maps it appropriately for the
-// current architecture (with MMU for RISC-V, direct for WASM)
-// Returns Pair<paddr, vaddr> where paddr is physical address and vaddr is
-// virtual Returns Pair of null PageAddrs on failure
-Pair<PageAddr, PageAddr> process_alloc_mapped_page(Process *proc, bool readable,
-                                                   bool writable,
-                                                   bool executable);
+// Allocates a page for the given process (physical addressing only)
+// Returns PageAddr of allocated page, or null on failure
+PageAddr process_alloc_mapped_page(Process *proc, bool readable,
+                                   bool writable,
+                                   bool executable);
 
 extern Process *idle_proc, *current_proc;
 extern Process procs[PROCS_MAX];

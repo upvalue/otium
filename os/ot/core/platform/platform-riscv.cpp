@@ -126,25 +126,25 @@ void handle_syscall(struct trap_frame *f) {
     break;
   case OU_ALLOC_PAGE: {
     TRACE(LLOUD, "OU_ALLOC_PAGE syscall");
-    Pair<PageAddr, PageAddr> result = process_alloc_mapped_page(current_proc, true, true, false);
-    TRACE(LLOUD, "allocated page: paddr=%x vaddr=%x", result.first.raw(), result.second.raw());
-    f->a0 = result.second.raw();
+    PageAddr result = process_alloc_mapped_page(current_proc, true, true, false);
+    TRACE(LLOUD, "allocated page: %x", result.raw());
+    f->a0 = result.raw();
     break;
   }
   case OU_GET_SYS_PAGE: {
-    PageAddr vaddr;
+    PageAddr page;
     if (arg0 == OU_SYS_PAGE_ARG) {
-      vaddr = process_get_arg_page();
+      page = process_get_arg_page();
     } else if (arg0 == OU_SYS_PAGE_COMM) {
-      vaddr = process_get_comm_page().second;
+      page = process_get_comm_page();
     } else if (arg0 == OU_SYS_PAGE_MSG) {
-      vaddr = process_get_msg_page(arg1).second;
+      page = process_get_msg_page(arg1);
     }
-    f->a0 = vaddr.raw();
+    f->a0 = page.raw();
     break;
   }
   case OU_IO_PUTS: {
-    PageAddr comm_page = process_get_comm_page().first;
+    PageAddr comm_page = process_get_comm_page();
     if (comm_page.is_null()) {
       oprintf("Failed to get comm page\n");
       f->a0 = 0;
@@ -163,12 +163,12 @@ void handle_syscall(struct trap_frame *f) {
     break;
   }
   case OU_PROC_LOOKUP: {
-    Pair<PageAddr, PageAddr> comm_page = process_get_comm_page();
-    if (comm_page.first.is_null()) {
+    PageAddr comm_page = process_get_comm_page();
+    if (comm_page.is_null()) {
       return;
     }
 
-    MPackReader reader(comm_page.first.as<char>(), OT_PAGE_SIZE);
+    MPackReader reader(comm_page.as<char>(), OT_PAGE_SIZE);
     StringView str;
     if (!reader.read_string(str)) {
       f->a0 = 0;
@@ -366,7 +366,7 @@ extern "C" void user_entry(void) {
   status |= SSTATUS_SPIE; // Set SPIE to enable interrupts after sret
 
   // Get user stack pointer (top of user stack page) - physical address
-  uintptr_t user_sp = current_proc->user_stack.first.raw() + OT_PAGE_SIZE;
+  uintptr_t user_sp = current_proc->user_stack.raw() + OT_PAGE_SIZE;
 
   TRACE_PROC(LLOUD, "user_entry: sepc=%x, user_sp=%x, sstatus=%x", READ_CSR(sepc), user_sp, status);
 

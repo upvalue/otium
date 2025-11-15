@@ -4,7 +4,7 @@
 #include "ot/lib/messages.hpp"
 
 bool ipc_send_message(Process *sender, int target_pid) {
-  PageAddr comm_page = sender->comm_page.first;
+  PageAddr comm_page = sender->comm_page;
   OT_SOFT_ASSERT("ipc_send_message: sender comm page is null", !comm_page.is_null());
   if (comm_page.is_null()) {
     return false;
@@ -38,12 +38,12 @@ bool ipc_send_message(Process *sender, int target_pid) {
   TRACE_IPC(LSOFT, "allocating page for message %d to %d (sender %d %s)", msg_idx, receiver->pid, sender->pid,
             sender->name);
 
-  PageAddr msg_page = receiver->msg_pages[msg_idx].first;
+  PageAddr msg_page = receiver->msg_pages[msg_idx];
 
   if (msg_page.is_null()) {
     receiver->msg_pages[msg_idx] = process_alloc_mapped_page(receiver, true, true, false);
 
-    msg_page = receiver->msg_pages[msg_idx].first;
+    msg_page = receiver->msg_pages[msg_idx];
 
     if (msg_page.is_null()) {
       error.serialize(KERNEL__INVARIANT_VIOLATION, "failed to allocate message page %d (receiver %d %s), sender %d %s",

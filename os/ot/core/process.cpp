@@ -101,35 +101,34 @@ Process *process_create_impl(Process *table, proc_id_t max_procs, const char *na
   // User mode still provides fault isolation even without virtual memory
   free_proc->page_table = nullptr;
 
-  Pair<PageAddr, PageAddr> comm_page = process_alloc_mapped_page(free_proc, true, true, false);
-  if (comm_page.first.is_null() || comm_page.second.is_null()) {
+  PageAddr comm_page = process_alloc_mapped_page(free_proc, true, true, false);
+  if (comm_page.is_null()) {
     PANIC("failed to allocate comm page");
   }
 
-  MPackWriter msg(comm_page.first.as<char>(), OT_PAGE_SIZE);
+  MPackWriter msg(comm_page.as<char>(), OT_PAGE_SIZE);
   msg.nil();
 
   free_proc->comm_page = comm_page;
 
   // Allocate user-mode stack (separate from kernel stack)
-  Pair<PageAddr, PageAddr> user_stack = process_alloc_mapped_page(free_proc, true, true, false);
-  if (user_stack.first.is_null() || user_stack.second.is_null()) {
+  PageAddr user_stack = process_alloc_mapped_page(free_proc, true, true, false);
+  if (user_stack.is_null()) {
     PANIC("failed to allocate user stack");
   }
   free_proc->user_stack = user_stack;
 
   // Handle argument array
   if (args) {
-    Pair<PageAddr, PageAddr> alloc_result = process_alloc_mapped_page(free_proc, true, false, false);
-    oprintf("arg page alloc_result: %p %p\n", alloc_result.first.raw(), alloc_result.second.raw());
-    char *buffer = alloc_result.first.as<char>();
+    PageAddr arg_page = process_alloc_mapped_page(free_proc, true, false, false);
+    if (arg_page.is_null()) {
+      PANIC("failed to allocate arg page");
+    }
 
-    MPackWriter msg(buffer, OT_PAGE_SIZE);
-
+    MPackWriter msg(arg_page.as<char>(), OT_PAGE_SIZE);
     msg.map(1).str("args").stringarray(args->argc, args->argv);
 
-    // Store virtual address for user access
-    free_proc->arg_page = alloc_result.second;
+    free_proc->arg_page = arg_page;
   }
 
   memory_increment_process_count();
@@ -185,37 +184,35 @@ PageAddr process_get_arg_page() {
   return current_proc->arg_page;
 }
 
-Pair<PageAddr, PageAddr> empty_page_pair = make_pair(PageAddr(nullptr), PageAddr(nullptr));
-
-Pair<PageAddr, PageAddr> process_get_comm_page(void) {
+PageAddr process_get_comm_page(void) {
   if (current_proc == nullptr) {
-    return empty_page_pair;
+    return PageAddr(nullptr);
   }
   return current_proc->comm_page;
 }
 
-Pair<PageAddr, PageAddr> process_get_msg_page(int msg_idx) {
+PageAddr process_get_msg_page(int msg_idx) {
   if (current_proc == nullptr) {
-    return empty_page_pair;
+    return PageAddr(nullptr);
   }
   return current_proc->msg_pages[msg_idx];
 }
 
-Pair<PageAddr, PageAddr> process_alloc_mapped_page(Process *proc, bool readable, bool writable, bool executable) {
+PageAddr process_alloc_mapped_page(Process *proc, bool readable, bool writable, bool executable) {
   if (!proc) {
-    return empty_page_pair;
+    return PageAddr(nullptr);
   }
 
   // Allocate physical page
   PageAddr paddr = page_allocate(proc->pid, 1);
   if (paddr.is_null()) {
-    return empty_page_pair;
+    return PageAddr(nullptr);
   }
 
   // Physical memory only - no virtual mapping needed
   // Permissions (readable, writable, executable) are not enforced in physical-only mode
   // User mode still provides fault isolation through privilege level
-  return make_pair(paddr, paddr);
+  return paddr;
 }
 
 Process *process_lookup(const StringView &name) {

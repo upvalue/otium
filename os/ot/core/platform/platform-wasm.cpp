@@ -124,6 +124,10 @@ void yield(void) {
     PANIC("current_proc or idle_proc is null");
   }
 
+  if (!current_proc->fiber) {
+    PANIC("current_proc->fiber is null for process %s (pid=%d)", current_proc->name, current_proc->pid);
+  }
+
   TRACE(LLOUD, "yield: process %s (pid=%d) yielding", current_proc->name, current_proc->pid);
 
   // Switch from process fiber back to scheduler fiber
@@ -135,10 +139,11 @@ void yield(void) {
 
 // WASM-specific: Direct process switch for IPC
 // This sets the next process and yields to the scheduler, which will immediately pick it
-void wasm_switch_to_process(Process *target) {
-  TRACE_IPC(LLOUD, "WASM: requesting direct switch from %d to %d", current_proc->pid, target->pid);
+void wasm_switch_to_process(Process *prev, Process *target) {
+  TRACE_IPC(LLOUD, "WASM: requesting direct switch from %d to %d", prev->pid, target->pid);
   scheduler_next_process = target;
-  yield(); // Return to scheduler, which will pick the target process
+  yield(); // Yields from prev's fiber, scheduler will pick target next
+  // When we return here, we're back in prev's context, scheduler has restored current_proc
 }
 
 // Fiber entry point wrapper - calls user_entry for the process
@@ -229,6 +234,12 @@ void scheduler_loop(void) {
     // Swap to the process fiber
     // First arg is current context (scheduler), second is target (process)
     TRACE(LLOUD, "Swapping to process %s (state=%d) fiber=%p", next->name, next->state, next->fiber);
+
+    // Safety check: ensure fiber is valid before swapping
+    if (!next->fiber) {
+      PANIC("Attempting to swap to process %s (pid=%d) with null fiber!", next->name, next->pid);
+    }
+
     emscripten_fiber_swap(&scheduler_fiber, (emscripten_fiber_t *)next->fiber);
     TRACE(LLOUD, "Returned from process %s (state=%d)", next->name, next->state);
 

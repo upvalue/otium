@@ -75,20 +75,20 @@ IpcResponse ou_ipc_send(int pid, intptr_t method, intptr_t extra) {
   target->has_pending_message = true;
   target->blocked_sender = current_proc;
 
-  // Wake up target if it's waiting
+  TRACE_IPC(LLOUD, "IPC: switching to target process %d", pid);
+
+  // If target is waiting, wake it and switch to it immediately (like RISC-V)
   if (target->state == IPC_WAIT) {
     target->state = RUNNABLE;
-  }
-
-  // Mark that we're waiting for a response (use sentinel value)
-  current_proc->pending_response.error_code = (ErrorCode)-1;
-
-  // Block until response is ready by yielding
-  // We stay RUNNABLE so the scheduler can pick us, but we keep checking if response arrived
-  while (current_proc->pending_response.error_code == (ErrorCode)-1) {
+    process_switch_to(target);  // Direct context switch - receiver will process and reply
+    // After this returns, we're back in our own context with response available
+  } else {
+    TRACE_IPC(LLOUD, "IPC: target not in IPC_WAIT, yielding normally");
     yield();
   }
 
+  // When we get here, receiver has replied and switched back to us
+  // Response is in our (sender's) pending_response
   TRACE_IPC(LLOUD, "IPC send returning: error=%d, a=%d, b=%d", current_proc->pending_response.error_code,
             current_proc->pending_response.a, current_proc->pending_response.b);
 
@@ -127,10 +127,11 @@ void ou_ipc_reply(IpcResponse response) {
     sender->pending_response.a = response.a;
     sender->pending_response.b = response.b;
 
-    // Clear blocked_sender so the sender's while loop will exit
     current_proc->blocked_sender = nullptr;
-
-    TRACE_IPC(LLOUD, "IPC reply sent to sender %d", sender->pid);
+    TRACE_IPC(LLOUD, "IPC reply sent, immediately switching back to sender %d", sender->pid);
+    // Switch back to sender immediately (like RISC-V) - receiver will resume when scheduled again
+    process_switch_to(sender);
+    // After this returns (when we're scheduled again), continue normally
   } else {
     TRACE_IPC(LSOFT, "IPC reply called but no blocked sender");
   }

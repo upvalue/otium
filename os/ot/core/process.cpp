@@ -181,10 +181,10 @@ Process *process_next_runnable(void) {
 
 void process_switch_to(Process *target) {
   Process *prev = current_proc;
-  current_proc = target;
   TRACE_IPC(LLOUD, "IPC switch from %d to %d", prev->pid, target->pid);
 
 #ifdef OT_ARCH_RISCV
+  current_proc = target;
   // Set supervisor scratch register to target process's kernel stack
   // Set sepc to target process's user PC
   __asm__ __volatile__("csrw sscratch, %[sscratch]\n"
@@ -193,15 +193,16 @@ void process_switch_to(Process *target) {
                        : [sscratch] "r"((uintptr_t)&target->stack[sizeof(target->stack)]),
                          [sepc] "r"(target->user_pc)
                        :);
+  switch_context(&prev->stack_ptr, &target->stack_ptr);
 #endif
 
 #ifdef OT_ARCH_WASM
   // For WASM, we can't directly swap between process fibers
   // We must go through the scheduler fiber
-  extern void wasm_switch_to_process(Process *target);
-  wasm_switch_to_process(target);
-#else
-  switch_context(&prev->stack_ptr, &target->stack_ptr);
+  // IMPORTANT: Don't set current_proc yet! yield() needs it to point to prev
+  extern void wasm_switch_to_process(Process *prev, Process *target);
+  wasm_switch_to_process(prev, target);
+  // When we return, scheduler has restored current_proc correctly
 #endif
 }
 

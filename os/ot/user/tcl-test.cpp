@@ -6,11 +6,9 @@
 #ifdef OT_POSIX
 #include <stdlib.h>
 // Provide OU memory functions for test environment
-extern "C" {
 void *ou_malloc(size_t size) { return malloc(size); }
 void ou_free(void *ptr) { free(ptr); }
 void *ou_realloc(void *ptr, size_t size) { return realloc(ptr, size); }
-}
 #endif
 
 TEST_CASE("tcl - basic evaluation") {

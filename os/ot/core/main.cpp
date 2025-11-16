@@ -8,7 +8,7 @@
 void kernel_common(void);
 
 // Forward declaration for user_program_main (defined in user-main.cpp)
-extern "C" void user_program_main(void);
+void user_program_main(void);
 
 // Forward declaration for test entry point (defined in kernel-tests.cpp)
 void kernel_prog_test(void);

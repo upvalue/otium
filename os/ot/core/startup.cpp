@@ -3,11 +3,11 @@
 extern "C" char __bss[], __bss_end[], __stack_top[];
 
 // Forward declarations for test programs (defined in main.cpp)
-extern "C" void proc_hello_world(void);
-extern "C" void proc_mem_test(void);
-extern "C" void proc_alternate_a(void);
-extern "C" void proc_alternate_b(void);
-extern "C" void proc_userspace_demo(void);
+void proc_hello_world(void);
+void proc_mem_test(void);
+void proc_alternate_a(void);
+void proc_alternate_b(void);
+void proc_userspace_demo(void);
 extern const char mem_test_image[];
 void get_process_pages(uint32_t pid, uintptr_t *pages, uint32_t *count);
 

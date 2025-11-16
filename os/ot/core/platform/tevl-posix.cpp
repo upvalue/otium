@@ -12,11 +12,9 @@
 #include <unistd.h>
 
 // Provide ou memory allocation functions using stdlib
-extern "C" {
 void *ou_malloc(size_t size) { return malloc(size); }
 void ou_free(void *ptr) { free(ptr); }
 void *ou_realloc(void *ptr, size_t size) { return realloc(ptr, size); }
-}
 
 // write a terminal control sequence with statically known size
 #define tctrl(x)                                                                                                       \

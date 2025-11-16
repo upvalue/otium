@@ -1,2 +1,2 @@
 TEST: Starting alternate process test (should print 1234)
-TEST: [dbg] ot/core/platform/platform-wasm.cpp:161: Entering WASM scheduler loop
+TEST: [dbg] ot/core/platform/platform-wasm.cpp:159: Entering WASM scheduler loop

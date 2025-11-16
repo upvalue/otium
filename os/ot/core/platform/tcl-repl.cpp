@@ -7,11 +7,9 @@
 #include <vector>
 
 // Provide ou memory allocation functions using stdlib
-extern "C" {
 void *ou_malloc(size_t size) { return malloc(size); }
 void ou_free(void *ptr) { free(ptr); }
 void *ou_realloc(void *ptr, size_t size) { return realloc(ptr, size); }
-}
 
 // Global flag for quit command
 static bool should_quit = false;

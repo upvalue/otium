@@ -194,7 +194,7 @@ void process_switch_to(Process *target);
 
 // Process for entering into a loaded userspace program (on RISCV)
 extern "C" void user_entry(void);
-extern "C" void kernel_start(void);
+void kernel_start(void);
 
 #ifdef OT_ARCH_WASM
 void scheduler_loop(void);

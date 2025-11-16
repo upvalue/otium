@@ -54,7 +54,7 @@ void determine_program_type() {
   }
 }
 
-extern "C" void user_program_main(void) {
+void user_program_main(void) {
   determine_program_type();
 
   if (program_type == SHELL) {

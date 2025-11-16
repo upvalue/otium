@@ -10,14 +10,13 @@
 // since everything is linked together.
 
 extern "C" {
-
 __attribute__((noreturn)) void exit(int) {
   for (;;)
     ;
 }
-
 // Note: oputchar is defined in platform-wasm.cpp
 extern int oputchar(char ch);
+}
 
 void ou_yield(void) { yield(); }
 
@@ -30,10 +29,6 @@ void *ou_alloc_page(void) {
   PageAddr result = process_alloc_mapped_page(current_proc, true, true, false);
   yield();
   return result.as_ptr();
-}
-
-// No special start routine needed for WASM
-// The kernel will call shell_main() directly
 }
 
 PageAddr ou_get_arg_page(void) { return process_get_arg_page(); }

@@ -35,8 +35,6 @@ void LocalStorage::process_storage_init(size_t pages) {
   }
 }
 
-extern "C" {
-
 void *ou_malloc(size_t size) {
   if (!local_storage) {
     oprintf("FATAL: ou_malloc called before local_storage initialized\n");
@@ -83,5 +81,3 @@ void *ou_realloc(void *ptr, size_t size) {
   }
   return result;
 }
-
-} // extern "C"

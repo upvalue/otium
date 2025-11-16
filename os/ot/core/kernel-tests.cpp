@@ -4,7 +4,7 @@
 #include "ot/user/user.hpp"
 
 // a basic process that just prints hello world and exits
-extern "C" void proc_hello_world(void) {
+void proc_hello_world(void) {
   oprintf("TEST: Hello, world!\n");
   // For now, loop forever - we'll add proper exit via syscall later
   while (1) {
@@ -15,14 +15,14 @@ extern "C" void proc_hello_world(void) {
 // Memory test now uses proc_mem_test function pointer (no binary image needed)
 
 // Test process for memory recycling - just does minimal work and exits
-extern "C" void proc_mem_test(void) {
+void proc_mem_test(void) {
   oprintf("TEST: Process %d running\n", current_proc->pid);
   current_proc->state = TERMINATED;
   yield();
 }
 
 // TEST_ALTERNATE: Process A - outputs 1, yields, outputs 3
-extern "C" void proc_alternate_a(void) {
+void proc_alternate_a(void) {
   oputchar('1');
   yield();
   oputchar('3');
@@ -32,7 +32,7 @@ extern "C" void proc_alternate_a(void) {
 }
 
 // TEST_ALTERNATE: Process B - outputs 2, yields, outputs 4
-extern "C" void proc_alternate_b(void) {
+void proc_alternate_b(void) {
   oputchar('2');
   yield();
   oputchar('4');
@@ -43,7 +43,7 @@ extern "C" void proc_alternate_b(void) {
 
 // TEST_USERSPACE: Simple userspace demo
 // Tests basic user mode execution with proper syscalls
-extern "C" void proc_userspace_demo(void) {
+void proc_userspace_demo(void) {
   oprintf("TEST: Starting userspace demo\n");
   oprintf("TEST: Process running in user mode\n");
   oprintf("TEST: Testing yield syscall\n");
@@ -62,7 +62,7 @@ int calculate_fibonacci(int n) {
 }
 
 // TEST_IPC: Fibonacci service - receives IPC requests and calculates fibonacci
-extern "C" void proc_fibonacci_service(void) {
+void proc_fibonacci_service(void) {
   oprintf("TEST: Fibonacci service started\n");
   while (true) {
     IpcMessage msg = ou_ipc_recv();
@@ -83,7 +83,7 @@ extern "C" void proc_fibonacci_service(void) {
 }
 
 // TEST_IPC: Client - sends fibonacci requests to the service
-extern "C" void proc_ipc_client(void) {
+void proc_ipc_client(void) {
   ou_yield(); // Let service start first
 
   int fib_pid = ou_proc_lookup("fibonacci");
@@ -201,7 +201,7 @@ void kernel_prog_test_ipc() {
 static volatile bool ipc_ordering_test_complete = false;
 
 // TEST_IPC_ORDERING: Process 1 (Dummy) - Keeps PID 1 alive until test completes
-extern "C" void proc_dummy_pid1(void) {
+void proc_dummy_pid1(void) {
   while (!ipc_ordering_test_complete) {
     ou_yield();
   }
@@ -209,7 +209,7 @@ extern "C" void proc_dummy_pid1(void) {
 }
 
 // TEST_IPC_ORDERING: Process 2 - Client that sends IPC to echo server
-extern "C" void proc_ipc_client_ordering(void) {
+void proc_ipc_client_ordering(void) {
   oprintf("TEST: Process 2 starting\n");
 
   // Yield to let other processes initialize (especially echo server needs to enter IPC_WAIT)
@@ -236,7 +236,7 @@ extern "C" void proc_ipc_client_ordering(void) {
 }
 
 // TEST_IPC_ORDERING: Process 3 - Echo server that handles one IPC request then terminates
-extern "C" void proc_ipc_echo_once(void) {
+void proc_ipc_echo_once(void) {
   // First time through: wait for IPC, handle it, reply
   IpcMessage msg = ou_ipc_recv(); // Will block in IPC_WAIT
   oprintf("TEST: Process 3 handling IPC request\n");
@@ -250,7 +250,7 @@ extern "C" void proc_ipc_echo_once(void) {
 }
 
 // TEST_IPC_ORDERING: Process 4 - Simple test process
-extern "C" void proc_test_4(void) {
+void proc_test_4(void) {
   oprintf("TEST: Test process 4\n");
   ou_exit();
 }

@@ -7,11 +7,9 @@
 #include "ot/common.h"
 
 // Forward declarations for memory allocation functions
-extern "C" {
 void *ou_malloc(size_t size);
 void ou_free(void *ptr);
 void *ou_realloc(void *ptr, size_t size);
-}
 
 // Placement new operator (avoids needing <new>)
 // In POSIX environments, use standard library version

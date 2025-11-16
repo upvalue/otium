@@ -227,7 +227,7 @@ TEST_CASE("error structure") {
 
   // Test the new serialize with printf-style formatting
   MsgSerializationError err =
-      msg.serialize(KERNEL__IPC_SEND_MESSAGE__PID_NOT_FOUND, "pid %d not found", 42);
+      msg.serialize(IPC__PID_NOT_FOUND, "pid %d not found", 42);
 
   CHECK(err == MSG_SERIALIZATION_OK);
 
@@ -236,7 +236,7 @@ TEST_CASE("error structure") {
   CHECK(result == 1);
 
   // Error messages now include error code string prefix
-  INFO("Expected: [\"error\",2,\"kernel.ipc-send-message.pid-not-found: pid 42 not found\"]");
+  INFO("Expected: [\"error\",2,\"ipc-pid-not-found: pid 42 not found\"]");
   INFO("Got: " << test_output);
-  CHECK(strcmp(test_output, "[\"error\",2,\"kernel.ipc-send-message.pid-not-found: pid 42 not found\"]") == 0);
+  CHECK(strcmp(test_output, "[\"error\",2,\"ipc-pid-not-found: pid 42 not found\"]") == 0);
 }

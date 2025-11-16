@@ -25,7 +25,7 @@
 #define KERNEL_PROG_TEST_IPC_ORDERING 6
 
 // Selected kernel program (modified by config.sh)
-#define KERNEL_PROG KERNEL_PROG_SHELL
+#define KERNEL_PROG KERNEL_PROG_TEST_ALTERNATE
 
 // Log levels
 #define LSILENT 0

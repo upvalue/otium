@@ -37,13 +37,9 @@ SyscallResult syscall(int sysno, int arg0, int arg1, int arg2) {
 // Syscall wrappers for kernel services
 // Note: I/O functions (oputchar/ogetchar) are handled by forwarding SBI calls in trap handler
 
-extern "C" {
-
 void ou_exit(void) { syscall(OU_EXIT, 0, 0, 0); }
 void ou_yield(void) { syscall(OU_YIELD, 0, 0, 0); }
 void *ou_alloc_page(void) { return (void *)syscall(OU_ALLOC_PAGE, 0, 0, 0).a0; }
-
-} // extern "C"
 
 PageAddr ou_get_sys_page(int type, int msg_idx) {
   oprintf("ou_get_sys_page: calling syscall %d %d %d\n", type, msg_idx);
@@ -81,8 +77,6 @@ int ou_proc_lookup(const char *name) {
   return syscall(OU_PROC_LOOKUP, 0, 0, 0).a0;
 }
 
-extern "C" {
-
 IpcResponse ou_ipc_send(int pid, intptr_t method, intptr_t extra) {
   SyscallResult result = syscall(OU_IPC_SEND, pid, method, extra);
   IpcResponse resp;
@@ -104,5 +98,3 @@ IpcMessage ou_ipc_recv(void) {
 void ou_ipc_reply(IpcResponse response) {
   syscall(OU_IPC_REPLY, response.error_code, response.a, response.b);
 }
-
-} // extern "C"

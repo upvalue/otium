@@ -57,9 +57,8 @@ EM_JS(void, js_exit, (), {
 
 } // end extern "C" for EM_JS
 
-// Console I/O functions - must be extern "C" for user programs
+// Console I/O functions
 extern "C" {
-
 int oputchar(char ch) {
   js_putchar(ch);
   return 1;
@@ -83,8 +82,7 @@ int ogetchar() {
   // No character available
   return -1;
 }
-
-} // end extern "C" for console I/O
+}
 
 void kernel_exit(void) {
   oprintf("Kernel exiting\n");

@@ -31,7 +31,6 @@ __attribute__((noreturn)) void ou_exit(void) {
 
 void *ou_alloc_page(void) {
   PageAddr result = process_alloc_mapped_page(current_proc, true, true, false);
-  yield();
   return result.as_ptr();
 }
 
@@ -43,7 +42,6 @@ PageAddr ou_get_storage(void) { return process_get_storage_page(); }
 
 int ou_proc_lookup(const char *name) {
   Process *proc = process_lookup(name);
-  yield();
   return proc ? proc->pid : 0;
 }
 
@@ -51,7 +49,6 @@ int ou_io_puts(const char *str, int size) {
   for (int i = 0; i < size; i++) {
     oputchar(str[i]);
   }
-  yield();
   return 1;
 }
 

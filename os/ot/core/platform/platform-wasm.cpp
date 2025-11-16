@@ -115,9 +115,11 @@ extern "C" void user_entry(void) {
 static emscripten_fiber_t scheduler_fiber;
 static void *scheduler_asyncify_stack = nullptr;
 
-void yield(void) {
-  emscripten_sleep(0);
+// For direct process switching (IPC), we need to go through the scheduler
+// This variable tells the scheduler which process to run next after a direct switch
+static Process *scheduler_next_process = nullptr;
 
+void yield(void) {
   if (!current_proc || !idle_proc) {
     PANIC("current_proc or idle_proc is null");
   }
@@ -129,6 +131,14 @@ void yield(void) {
   emscripten_fiber_swap((emscripten_fiber_t *)current_proc->fiber, &scheduler_fiber);
 
   TRACE(LLOUD, "yield: process %s (pid=%d) resumed", current_proc->name, current_proc->pid);
+}
+
+// WASM-specific: Direct process switch for IPC
+// This sets the next process and yields to the scheduler, which will immediately pick it
+void wasm_switch_to_process(Process *target) {
+  TRACE_IPC(LLOUD, "WASM: requesting direct switch from %d to %d", current_proc->pid, target->pid);
+  scheduler_next_process = target;
+  yield(); // Return to scheduler, which will pick the target process
 }
 
 // Fiber entry point wrapper - calls user_entry for the process
@@ -169,15 +179,23 @@ void scheduler_loop(void) {
   emscripten_fiber_init_from_current_context(&scheduler_fiber, scheduler_asyncify_stack, SCHEDULER_ASYNCIFY_STACK_SIZE);
 
   while (true) {
-    Process *next = process_next_runnable();
+    Process *next;
+
+    // Check if there's a direct switch request (from IPC)
+    if (scheduler_next_process) {
+      next = scheduler_next_process;
+      scheduler_next_process = nullptr;
+      TRACE(LLOUD, "Scheduler: direct switch to process %s (pid=%d)", next->name, next->pid);
+    } else {
+      next = process_next_runnable();
+      TRACE(LLOUD, "Scheduler picked process %s (pid=%d)", next->name, next->pid);
+    }
 
     // Check if we're done (only idle process left or no processes)
     if (!next || next == idle_proc) {
       TRACE(LSOFT, "No more runnable processes, exiting scheduler");
       break;
     }
-
-    TRACE(LLOUD, "Scheduler picked process %s (pid=%d)", next->name, next->pid);
     current_proc = next;
     // Update local_storage pointer for user-space access
     local_storage = (LocalStorage *)next->storage_page.as_ptr();
@@ -210,9 +228,14 @@ void scheduler_loop(void) {
 
     // Swap to the process fiber
     // First arg is current context (scheduler), second is target (process)
-    TRACE(LLOUD, "Swapping to process %s (state=%d)", next->name, next->state);
+    TRACE(LLOUD, "Swapping to process %s (state=%d) fiber=%p", next->name, next->state, next->fiber);
     emscripten_fiber_swap(&scheduler_fiber, (emscripten_fiber_t *)next->fiber);
     TRACE(LLOUD, "Returned from process %s (state=%d)", next->name, next->state);
+
+    if (next->state == TERMINATED) {
+      TRACE(LSOFT, "Process %s terminated, cleaning up", next->name);
+      process_exit(next);
+    }
   }
 
   TRACE(LSOFT, "Scheduler loop finished");

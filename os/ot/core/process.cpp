@@ -2,6 +2,10 @@
 #include "ot/lib/mpack/mpack-writer.hpp"
 #include "ot/lib/page-allocator.hpp"
 
+#ifdef OT_ARCH_WASM
+#include <emscripten/fiber.h>
+#endif
+
 extern char __kernel_base[];
 
 Process procs[PROCS_MAX];
@@ -191,7 +195,14 @@ void process_switch_to(Process *target) {
                        :);
 #endif
 
+#ifdef OT_ARCH_WASM
+  // For WASM, we can't directly swap between process fibers
+  // We must go through the scheduler fiber
+  extern void wasm_switch_to_process(Process *target);
+  wasm_switch_to_process(target);
+#else
   switch_context(&prev->stack_ptr, &target->stack_ptr);
+#endif
 }
 
 void process_exit(Process *proc) {

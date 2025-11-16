@@ -9,6 +9,7 @@ void proc_hello_world(void) {
   // For now, loop forever - we'll add proper exit via syscall later
   while (1) {
     current_proc->state = TERMINATED;
+    yield();
   }
 }
 

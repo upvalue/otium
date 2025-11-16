@@ -23,7 +23,7 @@ TEST_PROGRAMS = {
 
 # Platform-specific test exclusions
 PLATFORM_EXCLUSIONS = {
-    "wasm": ["test-mem", "test-ipc", "test-ipc-ordering"],  # Skip memory and IPC tests on WASM for now
+    "wasm": ["test-mem"],  # Skip memory tests on WASM for now
 }
 
 SNAPSHOT_DIR = Path(__file__).parent / "snapshots"

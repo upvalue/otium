@@ -42,12 +42,62 @@ including some C stdlib like functionality that can be run in either system.
 ### Processes and scheduler
 
 The operating system runs multiple processes. Processes have a PID (unsigned int), a name and a
-state of UNUSED, RUNNABLE or TERMINATED.
+state of UNUSED, RUNNABLE, TERMINATED, or IPC_WAIT.
 
 The scheduler currently is a purely cooperative system where processes yield to the operating
-system, which then selects the next process by PID and runs it.
+system, which then selects the next process by PID and runs it. IPC operations bypass normal
+round-robin scheduling by immediately switching to the target process.
 
 When a process encounters a fault on RISC-V, the process will be terminated by the OS.
+
+### Inter-Process Communication (IPC)
+
+The kernel provides a synchronous IPC mechanism for request-reply communication between processes.
+
+#### Data Structures
+
+- `IpcMessage` - Request from sender to receiver
+  - `pid` - Sender PID (filled by kernel)
+  - `method` - Method ID for routing
+  - `extra` - Additional argument
+
+- `IpcResponse` - Reply from receiver to sender
+  - `error_code` - Error status (`NONE`, `IPC__PID_NOT_FOUND`, `IPC__METHOD_NOT_KNOWN`)
+  - `a`, `b` - Return values
+
+#### Syscalls
+
+- `ou_ipc_send(pid, method, extra)` - Send request and block until reply
+  - Immediately switches to target process if it's waiting in `ou_ipc_recv`
+  - Returns `IpcResponse` with result or error
+
+- `ou_ipc_recv()` - Wait for incoming IPC request
+  - Blocks caller in `IPC_WAIT` state until message arrives
+  - Returns `IpcMessage` with sender info and arguments
+
+- `ou_ipc_reply(response)` - Send reply and resume caller
+  - Immediately switches back to the blocked sender
+  - Sender resumes with the provided response
+
+#### Scheduling Behavior
+
+IPC operations use immediate scheduling (`process_switch_to`) rather than cooperative scheduling:
+
+1. Sender calls `ou_ipc_send` targeting a receiver
+2. If receiver is in `IPC_WAIT`, kernel immediately switches to receiver
+3. Receiver processes request and calls `ou_ipc_reply`
+4. Kernel immediately switches back to sender with response
+
+This bypasses normal round-robin scheduling, allowing synchronous request-reply patterns.
+
+#### Error Codes
+
+- `IPC__PID_NOT_FOUND` - Target process doesn't exist or isn't running
+- `IPC__METHOD_NOT_KNOWN` - Receiver doesn't recognize the method ID
+
+#### Debugging
+
+Enable IPC tracing with `LOG_IPC` config to see IPC operations and context switches.
 
 ### Memory
 

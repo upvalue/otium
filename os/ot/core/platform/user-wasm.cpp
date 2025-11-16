@@ -21,8 +21,12 @@ extern int oputchar(char ch);
 void ou_yield(void) { yield(); }
 
 __attribute__((noreturn)) void ou_exit(void) {
-  process_exit(current_proc);
+  current_proc->state = TERMINATED;
+  // process_exit(current_proc);
   yield();
+  // Should never reach here, but loop to satisfy noreturn attribute
+  for (;;)
+    ;
 }
 
 void *ou_alloc_page(void) {
@@ -51,14 +55,83 @@ int ou_io_puts(const char *str, int size) {
   return 1;
 }
 
-IpcResponse ou_ipc_send(int, intptr_t, intptr_t) {
-  PANIC("IPC not implemented for WASM");
+IpcResponse ou_ipc_send(int pid, intptr_t method, intptr_t extra) {
+  TRACE_IPC(LSOFT, "IPC send from %d to %d, method=%d", current_proc->pid, pid, method);
+
+  Process *target = process_lookup(pid);
+  if (!target) {
+    TRACE_IPC(LSOFT, "IPC send failed: target PID %d not found", pid);
+    IpcResponse resp;
+    resp.error_code = IPC__PID_NOT_FOUND;
+    resp.a = 0;
+    resp.b = 0;
+    return resp;
+  }
+
+  // Set up message
+  target->pending_message.pid = current_proc->pid;
+  target->pending_message.method = method;
+  target->pending_message.extra = extra;
+  target->has_pending_message = true;
+  target->blocked_sender = current_proc;
+
+  // Wake up target if it's waiting
+  if (target->state == IPC_WAIT) {
+    target->state = RUNNABLE;
+  }
+
+  // Mark that we're waiting for a response (use sentinel value)
+  current_proc->pending_response.error_code = (ErrorCode)-1;
+
+  // Block until response is ready by yielding
+  // We stay RUNNABLE so the scheduler can pick us, but we keep checking if response arrived
+  while (current_proc->pending_response.error_code == (ErrorCode)-1) {
+    yield();
+  }
+
+  TRACE_IPC(LLOUD, "IPC send returning: error=%d, a=%d, b=%d", current_proc->pending_response.error_code,
+            current_proc->pending_response.a, current_proc->pending_response.b);
+
+  return current_proc->pending_response;
 }
 
 IpcMessage ou_ipc_recv(void) {
-  PANIC("IPC not implemented for WASM");
+  if (current_proc->has_pending_message) {
+    TRACE_IPC(LLOUD, "Process %d receiving pending message", current_proc->pid);
+    IpcMessage msg = current_proc->pending_message;
+    current_proc->has_pending_message = false;
+    return msg;
+  } else {
+    TRACE_IPC(LSOFT, "Process %d entering IPC_WAIT", current_proc->pid);
+    current_proc->state = IPC_WAIT;
+    yield();
+    // Will resume here when message arrives
+    TRACE_IPC(LLOUD, "Process %d woken from IPC_WAIT, msg: pid=%d method=%d extra=%d", current_proc->pid,
+              current_proc->pending_message.pid, current_proc->pending_message.method,
+              current_proc->pending_message.extra);
+    IpcMessage msg = current_proc->pending_message;
+    current_proc->has_pending_message = false;
+    return msg;
+  }
 }
 
-void ou_ipc_reply(IpcResponse) {
-  PANIC("IPC not implemented for WASM");
+void ou_ipc_reply(IpcResponse response) {
+  TRACE_IPC(LLOUD, "Process %d replying: error=%d, a=%d, b=%d", current_proc->pid, response.error_code, response.a,
+            response.b);
+
+  if (current_proc->blocked_sender) {
+    Process *sender = current_proc->blocked_sender;
+
+    // Store response in SENDER's pending_response field (they will read it)
+    sender->pending_response.error_code = response.error_code;
+    sender->pending_response.a = response.a;
+    sender->pending_response.b = response.b;
+
+    // Clear blocked_sender so the sender's while loop will exit
+    current_proc->blocked_sender = nullptr;
+
+    TRACE_IPC(LLOUD, "IPC reply sent to sender %d", sender->pid);
+  } else {
+    TRACE_IPC(LSOFT, "IPC reply called but no blocked sender");
+  }
 }

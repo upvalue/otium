@@ -120,7 +120,7 @@ void handle_syscall(struct trap_frame *f) {
     if (current_proc) {
       oprintf("Process %s (pid=%d) exited\n", current_proc->name, current_proc->pid);
       current_proc->state = TERMINATED;
-      yield();  // Switch to another process - this never returns
+      yield(); // Switch to another process - this never returns
     }
     break;
   case OU_GETCHAR:
@@ -208,7 +208,7 @@ void handle_syscall(struct trap_frame *f) {
     // If target is waiting, wake it and switch to it immediately
     if (target->state == IPC_WAIT) {
       target->state = RUNNABLE;
-      process_switch_to(target);  // Direct context switch - receiver will process and reply
+      process_switch_to(target); // Direct context switch - receiver will process and reply
       // After this returns, we're back in our own context with our stack and trap frame valid
     } else {
       TRACE_IPC(LLOUD, "IPC: target not in IPC_WAIT, yielding normally");
@@ -218,10 +218,8 @@ void handle_syscall(struct trap_frame *f) {
     // When we get here, receiver has replied and switched back to us
     // Response is in our (sender's) pending_response
     // Our trap frame 'f' should still be valid since we're back on our own stack
-    TRACE_IPC(LLOUD, "IPC send returning: error=%d, a=%d, b=%d",
-              current_proc->pending_response.error_code,
-              current_proc->pending_response.a,
-              current_proc->pending_response.b);
+    TRACE_IPC(LLOUD, "IPC send returning: error=%d, a=%d, b=%d", current_proc->pending_response.error_code,
+              current_proc->pending_response.a, current_proc->pending_response.b);
     f->a0 = current_proc->pending_response.error_code;
     f->a1 = current_proc->pending_response.a;
     f->a2 = current_proc->pending_response.b;
@@ -251,7 +249,7 @@ void handle_syscall(struct trap_frame *f) {
     TRACE_IPC(LLOUD, "Process %d replying: error=%d, a=%d, b=%d", current_proc->pid, arg0, arg1, f->a2);
 
     if (current_proc->blocked_sender) {
-      Process* sender = current_proc->blocked_sender;
+      Process *sender = current_proc->blocked_sender;
 
       // Store response in SENDER's pending_response field (they will read it)
       sender->pending_response.error_code = (ErrorCode)arg0;

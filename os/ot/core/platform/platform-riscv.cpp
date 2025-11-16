@@ -181,11 +181,18 @@ void handle_syscall(struct trap_frame *f) {
     break;
   }
   case OU_IPC_SEND: {
+    // RISC-V: a0=pid, a1=method_and_flags, a2=arg0, a4=arg1, a5=arg2
     int target_pid = arg0;
-    intptr_t method = arg1;
-    intptr_t extra = f->a2;
+    uintptr_t method_and_flags = arg1;
+    intptr_t arg_0 = f->a2;
+    intptr_t arg_1 = f->a4;
+    intptr_t arg_2 = f->a5;
 
-    TRACE_IPC(LSOFT, "IPC send from %d to %d, method=%d", current_proc->pid, target_pid, method);
+    // Unpack method and flags
+    intptr_t method = IPC_UNPACK_METHOD(method_and_flags);
+    uintptr_t flags = IPC_UNPACK_FLAGS(method_and_flags);
+
+    TRACE_IPC(LSOFT, "IPC send from %d to %d, method=%d, flags=%x", current_proc->pid, target_pid, method, flags);
 
     Process *target = process_lookup(target_pid);
     if (!target) {
@@ -196,10 +203,20 @@ void handle_syscall(struct trap_frame *f) {
       break;
     }
 
+    // Handle comm page transfer if requested
+    if (flags & IPC_FLAG_HAS_COMM_DATA) {
+      if (!current_proc->comm_page.is_null() && !target->comm_page.is_null()) {
+        TRACE_IPC(LSOFT, "IPC: copying comm page from %d to %d", current_proc->pid, target_pid);
+        memcpy(target->comm_page.as_ptr(), current_proc->comm_page.as_ptr(), OT_PAGE_SIZE);
+      }
+    }
+
     // Set up message
     target->pending_message.pid = current_proc->pid;
-    target->pending_message.method = method;
-    target->pending_message.extra = extra;
+    target->pending_message.method_and_flags = method_and_flags;
+    target->pending_message.args[0] = arg_0;
+    target->pending_message.args[1] = arg_1;
+    target->pending_message.args[2] = arg_2;
     target->has_pending_message = true;
     target->blocked_sender = current_proc;
 
@@ -218,19 +235,23 @@ void handle_syscall(struct trap_frame *f) {
     // When we get here, receiver has replied and switched back to us
     // Response is in our (sender's) pending_response
     // Our trap frame 'f' should still be valid since we're back on our own stack
-    TRACE_IPC(LLOUD, "IPC send returning: error=%d, a=%d, b=%d", current_proc->pending_response.error_code,
-              current_proc->pending_response.a, current_proc->pending_response.b);
+    TRACE_IPC(LLOUD, "IPC send returning: error=%d, values=[%d, %d, %d]", current_proc->pending_response.error_code,
+              current_proc->pending_response.values[0], current_proc->pending_response.values[1],
+              current_proc->pending_response.values[2]);
     f->a0 = current_proc->pending_response.error_code;
-    f->a1 = current_proc->pending_response.a;
-    f->a2 = current_proc->pending_response.b;
+    f->a1 = current_proc->pending_response.values[0];
+    f->a2 = current_proc->pending_response.values[1];
+    // Note: values[2] is not returned via register on RISC-V due to limited return registers
     break;
   }
   case OU_IPC_RECV: {
     if (current_proc->has_pending_message) {
       TRACE_IPC(LLOUD, "Process %d receiving pending message", current_proc->pid);
       f->a0 = current_proc->pending_message.pid;
-      f->a1 = current_proc->pending_message.method;
-      f->a2 = current_proc->pending_message.extra;
+      f->a1 = current_proc->pending_message.method_and_flags;
+      f->a2 = current_proc->pending_message.args[0];
+      f->a4 = current_proc->pending_message.args[1];
+      f->a5 = current_proc->pending_message.args[2];
       current_proc->has_pending_message = false;
     } else {
       TRACE_IPC(LSOFT, "Process %d entering IPC_WAIT", current_proc->pid);
@@ -239,22 +260,27 @@ void handle_syscall(struct trap_frame *f) {
       // Will resume here when message arrives
       TRACE_IPC(LLOUD, "Process %d woken from IPC_WAIT", current_proc->pid);
       f->a0 = current_proc->pending_message.pid;
-      f->a1 = current_proc->pending_message.method;
-      f->a2 = current_proc->pending_message.extra;
+      f->a1 = current_proc->pending_message.method_and_flags;
+      f->a2 = current_proc->pending_message.args[0];
+      f->a4 = current_proc->pending_message.args[1];
+      f->a5 = current_proc->pending_message.args[2];
       current_proc->has_pending_message = false;
     }
     break;
   }
   case OU_IPC_REPLY: {
-    TRACE_IPC(LLOUD, "Process %d replying: error=%d, a=%d, b=%d", current_proc->pid, arg0, arg1, f->a2);
+    // RISC-V: a0=error_code, a1=values[0], a2=values[1], a4=values[2]
+    TRACE_IPC(LLOUD, "Process %d replying: error=%d, values=[%d, %d, %d]", current_proc->pid, arg0, arg1, f->a2,
+              f->a4);
 
     if (current_proc->blocked_sender) {
       Process *sender = current_proc->blocked_sender;
 
       // Store response in SENDER's pending_response field (they will read it)
       sender->pending_response.error_code = (ErrorCode)arg0;
-      sender->pending_response.a = arg1;
-      sender->pending_response.b = f->a2;
+      sender->pending_response.values[0] = arg1;
+      sender->pending_response.values[1] = f->a2;
+      sender->pending_response.values[2] = f->a4;
 
       current_proc->blocked_sender = nullptr;
       TRACE_IPC(LLOUD, "IPC reply sent, immediately switching back to sender %d", sender->pid);

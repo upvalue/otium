@@ -67,12 +67,13 @@ void proc_fibonacci_service(void) {
   oprintf("TEST: Fibonacci service started\n");
   while (true) {
     IpcMessage msg = ou_ipc_recv();
-    TRACE_IPC(LSOFT, "Fibonacci service received request: method=%d, arg=%d", msg.method, msg.extra);
+    intptr_t method = IPC_UNPACK_METHOD(msg.method_and_flags);
+    TRACE_IPC(LSOFT, "Fibonacci service received request: method=%d, arg=%d", method, msg.args[0]);
 
-    IpcResponse resp = {NONE, 0, 0};
-    if (msg.method == 0 && msg.extra >= 0) {
-      resp.a = calculate_fibonacci(msg.extra);
-      oprintf("TEST: Calculated fib(%d) = %d\n", msg.extra, resp.a);
+    IpcResponse resp = {NONE, {0, 0, 0}};
+    if (method == 0 && msg.args[0] >= 0) {
+      resp.values[0] = calculate_fibonacci(msg.args[0]);
+      oprintf("TEST: Calculated fib(%d) = %d\n", msg.args[0], resp.values[0]);
     } else {
       resp.error_code = IPC__METHOD_NOT_KNOWN;
       oprintf("TEST: Unknown method or negative argument\n");
@@ -94,9 +95,9 @@ void proc_ipc_client(void) {
   for (int i = 0; i < 3; i++) {
     int val = test_values[i];
     oprintf("TEST: Client requesting fib(%d)\n", val);
-    IpcResponse resp = ou_ipc_send(fib_pid, 0, val);
+    IpcResponse resp = ou_ipc_send(fib_pid, IPC_FLAG_NONE, 0, val, 0, 0);
     if (resp.error_code == NONE) {
-      oprintf("TEST: Client received result: %d\n", resp.a);
+      oprintf("TEST: Client received result: %d\n", resp.values[0]);
     } else {
       oprintf("TEST: Client got error %d\n", resp.error_code);
     }
@@ -224,9 +225,9 @@ void proc_ipc_client_ordering(void) {
     ou_exit();
   }
 
-  IpcResponse resp = ou_ipc_send(echo_pid, 0, 42);
+  IpcResponse resp = ou_ipc_send(echo_pid, IPC_FLAG_NONE, 0, 42, 0, 0);
   if (resp.error_code == NONE) {
-    oprintf("TEST: %d\n", resp.a);
+    oprintf("TEST: %d\n", resp.values[0]);
   } else {
     oprintf("TEST: IPC error %d\n", resp.error_code);
   }
@@ -241,7 +242,7 @@ void proc_ipc_echo_once(void) {
   // First time through: wait for IPC, handle it, reply
   IpcMessage msg = ou_ipc_recv(); // Will block in IPC_WAIT
   oprintf("TEST: Process 3 handling IPC request\n");
-  IpcResponse resp = {NONE, msg.extra, 0}; // Echo the value
+  IpcResponse resp = {NONE, {msg.args[0], 0, 0}}; // Echo the value
   ou_ipc_reply(resp);
 
   // After reply returns, we're back here and continue execution

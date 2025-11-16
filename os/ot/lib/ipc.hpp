@@ -5,15 +5,23 @@
 #include "ot/lib/error-codes.hpp"
 
 struct IpcMessage {
-  intptr_t pid;    // Sender PID (filled by kernel)
-  intptr_t method; // Method ID
-  intptr_t extra;  // Additional argument
+  intptr_t pid;                 // Sender PID (filled by kernel)
+  uintptr_t method_and_flags;   // Combined: upper bits = method, lower 8 bits = flags
+  intptr_t args[3];             // Method-specific arguments (increased from 2 to 3)
 };
 
 struct IpcResponse {
   ErrorCode error_code;
-  intptr_t a;
-  intptr_t b;
+  intptr_t values[3];  // Return values
 };
+
+// IPC flags (occupy lower 8 bits)
+#define IPC_FLAG_NONE 0x00          // No special flags
+#define IPC_FLAG_HAS_COMM_DATA 0x01 // Comm page contains msgpack data
+
+// Helper macros for packing/unpacking method and flags
+#define IPC_PACK_METHOD_FLAGS(method, flags) (((uintptr_t)(method)) | ((uintptr_t)(flags)))
+#define IPC_UNPACK_METHOD(method_and_flags) ((intptr_t)((method_and_flags) & ~0xFFUL))
+#define IPC_UNPACK_FLAGS(method_and_flags) ((uintptr_t)((method_and_flags) & 0xFFUL))
 
 #endif

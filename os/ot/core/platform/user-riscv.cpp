@@ -77,24 +77,77 @@ int ou_proc_lookup(const char *name) {
   return syscall(OU_PROC_LOOKUP, 0, 0, 0).a0;
 }
 
-IpcResponse ou_ipc_send(int pid, intptr_t method, intptr_t extra) {
-  SyscallResult result = syscall(OU_IPC_SEND, pid, method, extra);
+IpcResponse ou_ipc_send(int pid, uintptr_t flags, intptr_t method, intptr_t arg0, intptr_t arg1, intptr_t arg2) {
+  // Soft assert: ensure method doesn't overflow into flags field (lower 8 bits should be 0)
+  if ((method & 0xFF) != 0) {
+    oprintf("WARNING: Method ID %d overflows into flags field\n", method);
+  }
+
+  // Pack method and flags into single value
+  uintptr_t method_and_flags = IPC_PACK_METHOD_FLAGS(method, flags);
+
+  // RISC-V: a0=pid, a1=method_and_flags, a2=arg0, a3=syscall_num
+  // Additional args: a4=arg1, a5=arg2
+  register int a0 __asm__("a0") = pid;
+  register int a1 __asm__("a1") = method_and_flags;
+  register int a2 __asm__("a2") = arg0;
+  register int a3 __asm__("a3") = OU_IPC_SEND;
+  register int a4 __asm__("a4") = arg1;
+  register int a5 __asm__("a5") = arg2;
+  register int a6 __asm__("a6") = 0;
+  register int a7 __asm__("a7") = 0;
+
+  __asm__ __volatile__("ecall"
+                       : "=r"(a0), "=r"(a1), "=r"(a2)
+                       : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(a6), "r"(a7)
+                       : "memory");
+
   IpcResponse resp;
-  resp.error_code = (ErrorCode)result.a0;
-  resp.a = result.a1;
-  resp.b = result.a2;
+  resp.error_code = (ErrorCode)a0;
+  resp.values[0] = a1;
+  resp.values[1] = a2;
+  resp.values[2] = 0; // RISC-V only returns 3 registers, need to get third from somewhere else if needed
   return resp;
 }
 
 IpcMessage ou_ipc_recv(void) {
-  SyscallResult result = syscall(OU_IPC_RECV, 0, 0, 0);
+  // RISC-V: Returns pid, method_and_flags in a0-a1, args in a2, a4-a5
+  register int a0 __asm__("a0") = 0;
+  register int a1 __asm__("a1") = 0;
+  register int a2 __asm__("a2") = 0;
+  register int a3 __asm__("a3") = OU_IPC_RECV;
+  register int a4 __asm__("a4") = 0;
+  register int a5 __asm__("a5") = 0;
+  register int a6 __asm__("a6") = 0;
+  register int a7 __asm__("a7") = 0;
+
+  __asm__ __volatile__("ecall"
+                       : "=r"(a0), "=r"(a1), "=r"(a2), "=r"(a4), "=r"(a5)
+                       : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(a6), "r"(a7)
+                       : "memory");
+
   IpcMessage msg;
-  msg.pid = result.a0;
-  msg.method = result.a1;
-  msg.extra = result.a2;
+  msg.pid = a0;
+  msg.method_and_flags = a1;
+  msg.args[0] = a2;
+  msg.args[1] = a4;
+  msg.args[2] = a5;
   return msg;
 }
 
 void ou_ipc_reply(IpcResponse response) {
-  syscall(OU_IPC_REPLY, response.error_code, response.a, response.b);
+  // RISC-V: a0=error_code, a1-a2=values[0-1], a4=values[2]
+  register int a0 __asm__("a0") = response.error_code;
+  register int a1 __asm__("a1") = response.values[0];
+  register int a2 __asm__("a2") = response.values[1];
+  register int a3 __asm__("a3") = OU_IPC_REPLY;
+  register int a4 __asm__("a4") = response.values[2];
+  register int a5 __asm__("a5") = 0;
+  register int a6 __asm__("a6") = 0;
+  register int a7 __asm__("a7") = 0;
+
+  __asm__ __volatile__("ecall"
+                       : "=r"(a0), "=r"(a1), "=r"(a2)
+                       : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(a6), "r"(a7)
+                       : "memory");
 }

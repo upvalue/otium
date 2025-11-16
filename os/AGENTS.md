@@ -58,26 +58,66 @@ The kernel provides a synchronous IPC mechanism for request-reply communication 
 
 - `IpcMessage` - Request from sender to receiver
   - `pid` - Sender PID (filled by kernel)
-  - `method` - Method ID for routing
-  - `extra` - Additional argument
+  - `method_and_flags` - Combined field: upper bits = method ID, lower 8 bits = flags
+  - `args[3]` - Three method-specific arguments
 
 - `IpcResponse` - Reply from receiver to sender
   - `error_code` - Error status (`NONE`, `IPC__PID_NOT_FOUND`, `IPC__METHOD_NOT_KNOWN`)
-  - `a`, `b` - Return values
+  - `values[3]` - Three return values
+
+- IPC Flags (occupy lower 8 bits of method_and_flags)
+  - `IPC_FLAG_NONE` (0x00) - No special flags
+  - `IPC_FLAG_HAS_COMM_DATA` (0x01) - Comm page contains messagepack data to be copied
+
+- Helper Macros
+  - `IPC_PACK_METHOD_FLAGS(method, flags)` - Combine method and flags for internal use
+  - `IPC_UNPACK_METHOD(method_and_flags)` - Extract method ID
+  - `IPC_UNPACK_FLAGS(method_and_flags)` - Extract flags
 
 #### Syscalls
 
-- `ou_ipc_send(pid, method, extra)` - Send request and block until reply
+- `ou_ipc_send(pid, flags, method, arg0, arg1, arg2)` - Send request and block until reply
+  - `flags` specifies IPC behavior (use `IPC_FLAG_NONE` for simple calls)
+  - `method` is the method ID (must not use lower 8 bits - those are reserved for flags)
+  - `arg0`, `arg1`, `arg2` are method-specific arguments passed inline
+  - If `IPC_FLAG_HAS_COMM_DATA` is set, sender's comm page is copied to receiver's comm page
   - Immediately switches to target process if it's waiting in `ou_ipc_recv`
   - Returns `IpcResponse` with result or error
+  - **Note**: Method and flags are packed into a single field internally to save registers
 
 - `ou_ipc_recv()` - Wait for incoming IPC request
   - Blocks caller in `IPC_WAIT` state until message arrives
   - Returns `IpcMessage` with sender info and arguments
+  - Use `IPC_UNPACK_METHOD()` and `IPC_UNPACK_FLAGS()` macros to extract from `method_and_flags`
+  - If `IPC_FLAG_HAS_COMM_DATA` was set, comm page contains messagepack data from sender
 
 - `ou_ipc_reply(response)` - Send reply and resume caller
   - Immediately switches back to the blocked sender
   - Sender resumes with the provided response
+
+#### Out-of-Band Data Transfer
+
+For methods requiring more than 3 arguments or complex data:
+
+1. **Sender** writes messagepack data to its comm page using `CommWriter` or `MPackWriter`
+2. **Sender** calls `ou_ipc_send()` with `IPC_FLAG_HAS_COMM_DATA` set
+3. **Kernel** copies sender's comm page (4KB) to receiver's comm page
+4. **Receiver** reads messagepack data from its comm page using `MPackReader`
+
+This allows transmitting arbitrary structured data while keeping simple calls fast with inline arguments.
+
+#### Register Optimization
+
+To maximize inline data capacity across different architectures, method and flags are packed into a single field:
+- Lower 8 bits: flags (supports up to 256 flag combinations)
+- Upper bits: method ID (supports millions of methods on 32-bit, trillions on 64-bit)
+
+This optimization saves one register, allowing:
+- **RISC-V**: 3 inline arguments (a2, a4, a5) instead of 2
+- **ARM Cortex-M33**: 2 inline arguments (r2, r3) instead of 1
+- **WASM**: No constraint, but maintains API consistency
+
+The packing/unpacking is handled transparently at the syscall boundary with soft assertions to warn if method IDs accidentally use the lower 8 bits.
 
 #### Scheduling Behavior
 

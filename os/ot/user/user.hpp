@@ -18,7 +18,7 @@ int ogetchar();
 void ou_yield(void);
 void ou_exit(void);
 void *ou_alloc_page(void);
-IpcResponse ou_ipc_send(int pid, intptr_t method, intptr_t extra);
+IpcResponse ou_ipc_send(int pid, uintptr_t flags, intptr_t method, intptr_t arg0, intptr_t arg1, intptr_t arg2);
 IpcMessage ou_ipc_recv(void);
 void ou_ipc_reply(IpcResponse response);
 

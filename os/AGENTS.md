@@ -90,6 +90,27 @@ IPC operations use immediate scheduling (`process_switch_to`) rather than cooper
 
 This bypasses normal round-robin scheduling, allowing synchronous request-reply patterns.
 
+#### Platform-Specific Implementation
+
+**RISC-V** (`ot/core/platform/platform-riscv.cpp`, `ot/core/platform/user-riscv.cpp`):
+- IPC implemented as syscalls via `ecall` instruction
+- `process_switch_to()` performs direct stack context switch using `switch_context()`
+- Immediately swaps from sender → receiver → sender with no scheduler involvement
+- Updates `current_proc` before switching, relies on stack swap to maintain correct context
+
+**WASM** (`ot/core/platform/platform-wasm.cpp`, `ot/core/platform/user-wasm.cpp`):
+- IPC implemented as direct function calls (no syscalls needed)
+- `process_switch_to()` must go through scheduler fiber (cannot directly swap between process fibers)
+- Uses `wasm_switch_to_process(prev, target)` which:
+  1. Sets `scheduler_next_process = target` to hint scheduler
+  2. Calls `yield()` from prev's fiber to return to scheduler
+  3. Scheduler immediately picks target fiber
+  4. After target replies and yields back, scheduler picks prev again
+- **Critical**: `current_proc` must remain pointing to prev during yield (not target), or wrong fiber is swapped
+- Behavior is synchronous and deterministic, matching RISC-V despite going through scheduler
+
+**Key Difference**: WASM requires scheduler as intermediary for fiber swaps, but maintains same synchronous semantics as RISC-V through immediate scheduling hints.
+
 #### Error Codes
 
 - `IPC__PID_NOT_FOUND` - Target process doesn't exist or isn't running

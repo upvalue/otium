@@ -160,6 +160,89 @@ This bypasses normal round-robin scheduling, allowing synchronous request-reply 
 
 Enable IPC tracing with `LOG_IPC` config to see IPC operations and context switches.
 
+#### Code Generation
+
+The IPC system includes a code generator that creates type-safe client/server wrappers from service definitions.
+
+**Service Definition** (`services/*.yml`):
+
+```yaml
+name: Fibonacci
+methods:
+  - name: calc_fib
+    params:
+      - name: n
+        type: int
+    returns:
+      - name: result
+        type: int
+  - name: calc_pair
+    params:
+      - name: n
+        type: int
+    returns:
+      - name: fib_n
+        type: int
+      - name: fib_n_plus_1
+        type: int
+```
+
+**Generated Files**:
+
+- `ot/user/gen/fibonacci-client.hpp` - Client wrapper with type-safe method calls
+- `ot/user/gen/fibonacci-server.hpp` - Server interface to implement
+- `ot/user/gen/fibonacci-server-impl.hpp` - Server dispatch logic
+
+**Usage Example**:
+
+```cpp
+// Client side
+FibonacciClient client(fibonacci_pid);
+auto result = client.calc_fib(10);
+if (result.is_ok()) {
+  oprintf("fib(10) = %d\n", result.value());
+}
+
+// Server side
+struct FibonacciServerImpl : public FibonacciServer {
+  Result<int, ErrorCode> calc_fib(int n) override {
+    // Implementation
+    return ok(result);
+  }
+};
+
+void fibonacci_server_main() {
+  FibonacciServerImpl impl;
+  impl.run();  // Process requests in loop
+}
+```
+
+**Type System**:
+
+Service definitions support these parameter types:
+- `int` - Signed integer (maps to `intptr_t`)
+- `uint` - Unsigned integer (maps to `uintptr_t`)
+
+Return values use `Result<T, ErrorCode>` for error handling.
+
+**Method IDs**:
+
+Method IDs auto-increment starting at `0x1000`, incrementing by `0x100` to avoid conflict with the 8-bit flags field. Reserved method IDs (below `0x1000`) include:
+- `IPC_METHOD_SHUTDOWN` (`0x0100`) - Universal shutdown method
+
+**Universal Shutdown**:
+
+All generated servers inherit from `ServerBase` which provides automatic shutdown handling. Clients can call `client.shutdown()` to cleanly terminate a server.
+
+**Build Integration**:
+
+Add services to `build-common.sh`:
+```bash
+IPC_SERVICES="fibonacci calculator"
+```
+
+The build system automatically runs the code generator and includes generated files.
+
 ### Memory
 
 The memory is a simple page system. Pages are kept in a free list. Processes never free pages, but

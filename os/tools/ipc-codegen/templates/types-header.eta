@@ -1,0 +1,15 @@
+#pragma once
+#include "ot/common.h"
+
+// Auto-generated types for <%= it.service.name %> service
+
+<% it.service.methods.forEach(method => { %>
+<% if (method.returns.length > 1) { %>
+struct <%= it.toPascalCase(method.name) %>Result {
+<% method.returns.forEach(ret => { %>
+  <%= it.getType(ret) %> <%= ret.name %>;
+<% }) %>
+};
+
+<% } %>
+<% }) %>

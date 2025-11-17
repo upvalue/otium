@@ -37,5 +37,14 @@ USER_SOURCES=(
   ot/user/tcl.cpp
   ot/user/string.cpp
   ot/user/memory-allocator.cpp
+  ot/user/comm-writer.cpp
   ot/vendor/tlsf/tlsf.c
 )
+
+# Generated IPC code (add service implementations as needed)
+# Uncomment after running ./generate-ipc.sh
+# USER_SOURCES+=(
+#   ot/user/gen/fibonacci-client.cpp
+#   ot/user/gen/fibonacci-server.cpp
+#   ot/user/fibonacci/impl.cpp
+# )

@@ -6,3 +6,6 @@
 /result
 *.html
 bin/
+
+# Generated IPC code
+ot/user/gen/

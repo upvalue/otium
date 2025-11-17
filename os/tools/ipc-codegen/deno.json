@@ -1,0 +1,14 @@
+{
+  "tasks": {
+    "generate": "deno run --allow-read --allow-write main.ts",
+    "fmt": "deno fmt",
+    "lint": "deno lint"
+  },
+  "imports": {
+    "eta": "https://deno.land/x/eta@v3.4.0/src/index.ts",
+    "yaml": "https://deno.land/std@0.208.0/yaml/mod.ts"
+  },
+  "compilerOptions": {
+    "strict": true
+  }
+}

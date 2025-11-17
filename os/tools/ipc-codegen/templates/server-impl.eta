@@ -1,0 +1,43 @@
+#include "ot/user/gen/<%= it.service.name.toLowerCase() %>-server.hpp"
+#include "ot/user/gen/method-ids.hpp"
+
+void <%= it.service.name %>Server::process_request(const IpcMessage& msg) {
+  intptr_t method = IPC_UNPACK_METHOD(msg.method_and_flags);
+  IpcResponse resp = {NONE, {0, 0, 0}};
+
+  switch (method) {
+<% it.service.methods.forEach(method => { %>
+  case MethodIds::<%= it.service.name %>::<%= it.toUpperSnake(method.name) %>: {
+    auto result = handle_<%= method.name %>(<%= it.extractMsgArgs(method) %>);
+    if (result.is_err()) {
+      resp.error_code = result.error();
+    } else {
+<% if (method.returns.length === 0) { %>
+      // No return values
+<% } else if (method.returns.length === 1) { %>
+      resp.values[0] = result.value();
+<% } else { %>
+      auto val = result.value();
+<% method.returns.forEach((ret, i) => { %>
+      resp.values[<%= i %>] = val.<%= ret.name %>;
+<% }) %>
+<% } %>
+    }
+    break;
+  }
+<% }) %>
+  default:
+    resp.error_code = IPC__METHOD_NOT_KNOWN;
+    break;
+  }
+
+  ou_ipc_reply(resp);
+}
+
+void <%= it.service.name %>Server::run(const char* name) {
+  ou_proc_set_name(name);
+  while (true) {
+    IpcMessage msg = ou_ipc_recv();
+    process_request(msg);
+  }
+}

@@ -1,0 +1,32 @@
+# IPC Service Definitions
+# This file defines services, methods, and error codes for code generation
+
+config:
+  method_id_base: 0x1000      # Auto-increment method IDs from here
+  error_code_base: 100         # Auto-increment service error codes from here
+
+services:
+  - name: Fibonacci
+    methods:
+      - name: calc_fib
+        args:
+          - name: n
+        returns:
+          - name: result
+        errors: [INVALID_INPUT]
+
+      - name: calc_pair
+        args:
+          - name: n
+          - name: m
+        returns:
+          - name: fib_n
+          - name: fib_m
+        errors: [INVALID_INPUT]
+
+      - name: get_cache_size
+        args: []
+        returns:
+          - name: size
+            signed: false
+        errors: []

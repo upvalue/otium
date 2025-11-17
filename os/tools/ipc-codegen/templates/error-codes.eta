@@ -1,0 +1,6 @@
+// Auto-generated error codes
+// This file is included by ot/lib/error-codes.hpp
+
+<% it.errorCodes.forEach(error => { %>
+  <%= error.name %> = <%= error.value %>,
+<% }) %>

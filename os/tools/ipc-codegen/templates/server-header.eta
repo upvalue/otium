@@ -1,0 +1,16 @@
+#pragma once
+#include "ot/lib/ipc.hpp"
+#include "ot/lib/result.hpp"
+#include "ot/lib/error-codes.hpp"
+#include "ot/user/gen/<%= it.service.name.toLowerCase() %>-types.hpp"
+
+struct <%= it.service.name %>Server {
+  // Methods to implement
+<% it.service.methods.forEach(method => { %>
+  Result<<%= it.getReturnType(method) %>, ErrorCode> handle_<%= method.name %>(<%= it.formatArgs(method.args) %>);
+<% }) %>
+
+  // Framework methods - handles dispatch
+  void process_request(const IpcMessage& msg);
+  void run(const char* name);
+};

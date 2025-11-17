@@ -1,0 +1,13 @@
+#pragma once
+#include "ot/common.h"
+
+// Auto-generated method IDs
+namespace MethodIds {
+<% it.services.forEach(service => { %>
+  namespace <%= service.name %> {
+<% service.methods.forEach(method => { %>
+    constexpr intptr_t <%= it.toUpperSnake(method.name) %> = <%= it.toHex(method.methodId) %>;
+<% }) %>
+  }
+<% }) %>
+}

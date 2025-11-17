@@ -1,0 +1,15 @@
+#pragma once
+#include "ot/lib/ipc.hpp"
+#include "ot/lib/result.hpp"
+#include "ot/lib/error-codes.hpp"
+#include "ot/user/gen/<%= it.service.name.toLowerCase() %>-types.hpp"
+
+struct <%= it.service.name %>Client {
+  int pid_;
+
+  <%= it.service.name %>Client(int pid) : pid_(pid) {}
+
+<% it.service.methods.forEach(method => { %>
+  Result<<%= it.getReturnType(method) %>, ErrorCode> <%= method.name %>(<%= it.formatArgs(method.args) %>);
+<% }) %>
+};

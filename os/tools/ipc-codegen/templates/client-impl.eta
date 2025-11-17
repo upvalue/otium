@@ -1,0 +1,30 @@
+#include "ot/user/gen/<%= it.service.name.toLowerCase() %>-client.hpp"
+#include "ot/user/gen/method-ids.hpp"
+
+<% it.service.methods.forEach(method => { %>
+Result<<%= it.getReturnType(method) %>, ErrorCode> <%= it.service.name %>Client::<%= method.name %>(<%= it.formatArgs(method.args) %>) {
+  IpcResponse resp = ou_ipc_send(
+    pid_,
+    IPC_FLAG_NONE,
+    MethodIds::<%= it.service.name %>::<%= it.toUpperSnake(method.name) %>,
+    <%= it.formatIpcArgs(method.args) %>
+  );
+
+  if (resp.error_code != NONE) {
+    return Result<<%= it.getReturnType(method) %>, ErrorCode>::err(resp.error_code);
+  }
+
+<% if (method.returns.length === 0) { %>
+  return Result<<%= it.getReturnType(method) %>, ErrorCode>::ok({});
+<% } else if (method.returns.length === 1) { %>
+  return Result<<%= it.getReturnType(method) %>, ErrorCode>::ok(resp.values[0]);
+<% } else { %>
+  <%= it.getReturnType(method) %> result;
+<% method.returns.forEach((ret, i) => { %>
+  result.<%= ret.name %> = resp.values[<%= i %>];
+<% }) %>
+  return Result<<%= it.getReturnType(method) %>, ErrorCode>::ok(result);
+<% } %>
+}
+
+<% }) %>

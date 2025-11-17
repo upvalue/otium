@@ -8,6 +8,8 @@
 
 #include "ot/user/prog-shell.h"
 
+#include "ot/user/gen/tcl-vars.hpp"
+
 #define SHELL_PAGES 10
 
 // Shell-specific storage inheriting from LocalStorage
@@ -135,22 +137,29 @@ void shell_main() {
 
   i.register_mpack_functions(mp_page, OT_PAGE_SIZE);
 
+  // Register IPC method ID variables
+  register_ipc_method_vars(i);
+
   oprintf("tcl shell ready\n");
 
   // Register quit command - uses local_storage global
-  i.register_command("quit",
-                     [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
-                       ((ShellStorage *)local_storage)->running = false;
-                       return tcl::S_OK;
-                     });
+  i.register_command(
+      "quit",
+      [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
+        ((ShellStorage *)local_storage)->running = false;
+        return tcl::S_OK;
+      },
+      nullptr, "[quit] - Quit the shell");
 
   // cause a crash by dereferencing a random addr
-  i.register_command("crash",
-                     [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
-                       char *p = (char *)0x10;
-                       (*p) = 0;
-                       return tcl::S_OK;
-                     });
+  i.register_command(
+      "crash",
+      [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
+        char *p = (char *)0x10;
+        (*p) = 0;
+        return tcl::S_OK;
+      },
+      nullptr, "[crash] - Cause a crash");
 
   // Lookup a procedure's PID
   i.register_command("proc/lookup", cmd_proc_lookup, nullptr,

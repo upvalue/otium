@@ -3,3 +3,5 @@
 
   case FIBONACCI__INVALID_INPUT:
     return "fibonacci-invalid-input";
+  case GRAPHICS__NOT_INITIALIZED:
+    return "graphics-not-initialized";

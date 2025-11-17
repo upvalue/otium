@@ -8,6 +8,11 @@
 #include "ot/user/gen/fibonacci-client.hpp"
 #endif
 
+// Include generated IPC code for graphics test
+#if KERNEL_PROG == KERNEL_PROG_TEST_GRAPHICS
+#include "ot/user/gen/graphics-client.hpp"
+#endif
+
 // a basic process that just prints hello world and exits
 void proc_hello_world(void) {
   oprintf("TEST: Hello, world!\n");
@@ -352,6 +357,104 @@ void kernel_prog_test_ipc_codegen() {
 }
 #endif
 
+// TEST_GRAPHICS: Client that draws test pattern on framebuffer
+#if KERNEL_PROG == KERNEL_PROG_TEST_GRAPHICS
+void proc_graphics_client(void) {
+  oprintf("TEST: Graphics client starting\n");
+
+  // Yield to let driver initialize
+  ou_yield();
+
+  // Look up graphics driver
+  int gfx_pid = ou_proc_lookup("graphics");
+  if (gfx_pid == 0) {
+    oprintf("TEST: Failed to find graphics driver\n");
+    ou_exit();
+  }
+  oprintf("TEST: Found graphics driver at PID %d\n", gfx_pid);
+
+  GraphicsClient client(gfx_pid);
+
+  // Get framebuffer info
+  auto fb_result = client.get_framebuffer();
+  if (fb_result.is_err()) {
+    oprintf("TEST: Failed to get framebuffer: %d\n", fb_result.error());
+    ou_exit();
+  }
+
+  auto fb_info = fb_result.value();
+  uint32_t *fb = (uint32_t *)fb_info.fb_ptr;
+  uint32_t width = (uint32_t)fb_info.width;
+  uint32_t height = (uint32_t)fb_info.height;
+
+  oprintf("TEST: Got framebuffer at 0x%lx, %lux%lu\n", fb_info.fb_ptr, fb_info.width, fb_info.height);
+
+  // Clear to black
+  for (uint32_t i = 0; i < width * height; i++) {
+    fb[i] = 0xFF000000; // Black in BGRA
+  }
+
+  // Draw red square in top-left (4x4)
+  for (uint32_t y = 0; y < 4 && y < height; y++) {
+    for (uint32_t x = 0; x < 4 && x < width; x++) {
+      fb[y * width + x] = 0xFFFF0000; // Red in BGRA
+    }
+  }
+
+  // Draw green square in top-right (4x4)
+  for (uint32_t y = 0; y < 4 && y < height; y++) {
+    for (uint32_t x = 0; x < 4 && x < width; x++) {
+      if (width >= 4 + x) {
+        fb[y * width + (width - 4 + x)] = 0xFF00FF00; // Green in BGRA
+      }
+    }
+  }
+
+  // Draw blue square in bottom-left (4x4)
+  for (uint32_t y = 0; y < 4 && y < height; y++) {
+    for (uint32_t x = 0; x < 4 && x < width; x++) {
+      if (height >= 4 + y) {
+        fb[(height - 4 + y) * width + x] = 0xFF0000FF; // Blue in BGRA
+      }
+    }
+  }
+
+  // Draw white square in center (2x2)
+  uint32_t center_x = width / 2 - 1;
+  uint32_t center_y = height / 2 - 1;
+  for (uint32_t y = 0; y < 2; y++) {
+    for (uint32_t x = 0; x < 2; x++) {
+      fb[(center_y + y) * width + (center_x + x)] = 0xFFFFFFFF; // White in BGRA
+    }
+  }
+
+  oprintf("TEST: Drew test pattern\n");
+
+  // Flush to display
+  auto flush_result = client.flush();
+  if (flush_result.is_ok()) {
+    oprintf("TEST: Flushed framebuffer\n");
+  } else {
+    oprintf("TEST: Flush failed: %d\n", flush_result.error());
+  }
+
+  oprintf("TEST: Graphics test complete\n");
+  ou_exit();
+}
+
+void kernel_prog_test_graphics() {
+  oprintf("TEST: Starting graphics test\n");
+
+  // proc_graphics is defined in ot/user/graphics/impl.cpp
+  extern void proc_graphics(void);
+
+  Process *driver = process_create("graphics", (const void *)proc_graphics, nullptr, false);
+  Process *client = process_create("gfx_client", (const void *)proc_graphics_client, nullptr, false);
+  TRACE(LSOFT, "created graphics driver with name %s and pid %d", driver->name, driver->pid);
+  TRACE(LSOFT, "created graphics client with name %s and pid %d", client->name, client->pid);
+}
+#endif
+
 /**
  * Single entry point for all kernel tests
  */
@@ -374,5 +477,7 @@ void kernel_prog_test() {
   kernel_prog_test_ipc_ordering();
 #elif KERNEL_PROG == KERNEL_PROG_TEST_IPC_CODEGEN
   kernel_prog_test_ipc_codegen();
+#elif KERNEL_PROG == KERNEL_PROG_TEST_GRAPHICS
+  kernel_prog_test_graphics();
 #endif
 }

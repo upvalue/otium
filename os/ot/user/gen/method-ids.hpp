@@ -8,4 +8,8 @@ namespace MethodIds {
     constexpr intptr_t CALC_PAIR = 0x1100;
     constexpr intptr_t GET_CACHE_SIZE = 0x1200;
   }
+  namespace Graphics {
+    constexpr intptr_t GET_FRAMEBUFFER = 0x1300;
+    constexpr intptr_t FLUSH = 0x1400;
+  }
 }

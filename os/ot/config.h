@@ -24,8 +24,14 @@
 // Runs IPC ordering test to verify scheduling behavior
 #define KERNEL_PROG_TEST_IPC_ORDERING 6
 
+// Runs IPC code generation test with generated client
+#define KERNEL_PROG_TEST_IPC_CODEGEN 7
+
+// Runs graphics driver test
+#define KERNEL_PROG_TEST_GRAPHICS 8
+
 // Selected kernel program (modified by config.sh)
-#define KERNEL_PROG KERNEL_PROG_SHELL
+#define KERNEL_PROG KERNEL_PROG_TEST_GRAPHICS
 
 // Log levels
 #define LSILENT 0
@@ -46,5 +52,12 @@
 #ifndef OT_FEAT_GFX
 #define OT_FEAT_GFX OT_FEAT_GFX_UNSUPPORTED
 #endif
+
+// Graphics backend options (for user-space driver)
+#define OT_GRAPHICS_BACKEND_TEST 0
+#define OT_GRAPHICS_BACKEND_VIRTIO 1
+
+// Selected graphics backend (configured by config.sh)
+#define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_TEST
 
 #endif

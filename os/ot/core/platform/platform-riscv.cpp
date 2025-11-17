@@ -241,7 +241,7 @@ void handle_syscall(struct trap_frame *f) {
     f->a0 = current_proc->pending_response.error_code;
     f->a1 = current_proc->pending_response.values[0];
     f->a2 = current_proc->pending_response.values[1];
-    // Note: values[2] is not returned via register on RISC-V due to limited return registers
+    f->a4 = current_proc->pending_response.values[2];
     break;
   }
   case OU_IPC_RECV: {

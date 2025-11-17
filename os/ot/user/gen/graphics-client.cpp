@@ -1,0 +1,52 @@
+#include "ot/user/gen/graphics-client.hpp"
+#include "ot/user/gen/method-ids.hpp"
+#include "ot/user/user.hpp"
+
+Result<GetFramebufferResult, ErrorCode> GraphicsClient::get_framebuffer() {
+  IpcResponse resp = ou_ipc_send(
+    pid_,
+    IPC_FLAG_NONE,
+    MethodIds::Graphics::GET_FRAMEBUFFER,
+    0, 0, 0  );
+
+  if (resp.error_code != NONE) {
+    return Result<GetFramebufferResult, ErrorCode>::err(resp.error_code);
+  }
+
+  GetFramebufferResult result;
+  result.fb_ptr = resp.values[0];
+  result.width = resp.values[1];
+  result.height = resp.values[2];
+  return Result<GetFramebufferResult, ErrorCode>::ok(result);
+}
+
+Result<bool, ErrorCode> GraphicsClient::flush() {
+  IpcResponse resp = ou_ipc_send(
+    pid_,
+    IPC_FLAG_NONE,
+    MethodIds::Graphics::FLUSH,
+    0, 0, 0  );
+
+  if (resp.error_code != NONE) {
+    return Result<bool, ErrorCode>::err(resp.error_code);
+  }
+
+  return Result<bool, ErrorCode>::ok({});
+}
+
+
+Result<bool, ErrorCode> GraphicsClient::shutdown() {
+  IpcResponse resp = ou_ipc_send(
+    pid_,
+    IPC_FLAG_NONE,
+    IPC_METHOD_SHUTDOWN,
+    0, 0, 0
+  );
+
+  if (resp.error_code != NONE) {
+    return Result<bool, ErrorCode>::err(resp.error_code);
+  }
+
+  return Result<bool, ErrorCode>::ok(true);
+}
+

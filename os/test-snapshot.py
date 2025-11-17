@@ -19,6 +19,7 @@ TEST_PROGRAMS = {
     "test-alternate": "--test-alternate",
     "test-ipc": "--test-ipc",
     "test-ipc-ordering": "--test-ipc-ordering",
+    "test-graphics": "--test-graphics",
 }
 
 # Platform-specific test exclusions

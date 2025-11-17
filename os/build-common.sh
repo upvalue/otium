@@ -18,7 +18,6 @@ CORE_SOURCES=(
 # Driver source files
 DRIVER_SOURCES=(
   ot/core/drivers/drv-virtio.cpp
-  ot/core/drivers/drv-gfx-virtio.cpp
 )
 
 # Library source files (shared utilities)
@@ -47,4 +46,7 @@ USER_SOURCES+=(
   ot/user/gen/fibonacci-client.cpp
   ot/user/gen/fibonacci-server.cpp
   ot/user/fibonacci/impl.cpp
+  ot/user/gen/graphics-client.cpp
+  ot/user/gen/graphics-server.cpp
+  ot/user/graphics/impl.cpp
 )

@@ -203,6 +203,13 @@ async function generateGlobalFiles(
     `${outputDir}/error-codes-gen-switch.hpp`,
     errorCodesSwitch,
   );
+
+  // Generate TCL variable registration
+  const tclVars = await renderTemplate(
+    `${templateDir}/tcl-vars.eta`,
+    context,
+  );
+  await writeIfChanged(`${outputDir}/tcl-vars.hpp`, tclVars);
 }
 
 async function createStubImplementation(service: Service, implDir: string) {

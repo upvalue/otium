@@ -1,6 +1,5 @@
 // main.cpp - Kernel startup logic
 
-#include "ot/core/drivers/drv-gfx-virtio.hpp"
 #include "ot/core/kernel.hpp"
 #include "ot/user/user.hpp"
 

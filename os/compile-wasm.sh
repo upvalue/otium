@@ -17,6 +17,9 @@ set -x
 CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_WASM"
 CFLAGS="$COMMON_CFLAGS"
 
+# Use test backend for WASM (no VirtIO support)
+GRAPHICS_SOURCES=()
+
 # Emscripten-specific flags
 EMFLAGS=(
   -s ASYNCIFY=1
@@ -35,6 +38,7 @@ $CC $CPPFLAGS $CFLAGS "${EMFLAGS[@]}" -o bin/os.js \
     "${DRIVER_SOURCES[@]}" \
     "${LIB_SOURCES[@]}" \
     "${USER_SOURCES[@]}" \
+    "${GRAPHICS_SOURCES[@]}" \
     ot/core/platform/platform-wasm.cpp \
     ot/lib/platform/shared-wasm.cpp \
     ot/core/platform/user-wasm.cpp

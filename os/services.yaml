@@ -30,3 +30,21 @@ services:
           - name: size
             signed: false
         errors: []
+
+  - name: Graphics
+    methods:
+      - name: get_framebuffer
+        args: []
+        returns:
+          - name: fb_ptr
+            signed: false
+          - name: width
+            signed: false
+          - name: height
+            signed: false
+        errors: [NOT_INITIALIZED]
+
+      - name: flush
+        args: []
+        returns: []
+        errors: [NOT_INITIALIZED]

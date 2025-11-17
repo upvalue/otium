@@ -17,6 +17,9 @@ LOG_MEM="LSOFT"
 LOG_PROC="LSOFT"
 LOG_IPC="LSOFT"
 
+# Default graphics backend
+GRAPHICS_BACKEND="OT_GRAPHICS_BACKEND_TEST"
+
 # Parse arguments
 for arg in "$@"; do
   case $arg in
@@ -40,6 +43,9 @@ for arg in "$@"; do
       ;;
     --test-ipc-codegen)
       MODE="KERNEL_PROG_TEST_IPC_CODEGEN"
+      ;;
+    --test-graphics)
+      MODE="KERNEL_PROG_TEST_GRAPHICS"
       ;;
     --log-general=*)
       level="${arg#*=}"
@@ -77,13 +83,22 @@ for arg in "$@"; do
         *) echo "Invalid log level: $level (use silent|soft|loud)"; exit 1 ;;
       esac
       ;;
+    --graphics-backend=*)
+      backend="${arg#*=}"
+      case $backend in
+        test) GRAPHICS_BACKEND="OT_GRAPHICS_BACKEND_TEST" ;;
+        virtio) GRAPHICS_BACKEND="OT_GRAPHICS_BACKEND_VIRTIO" ;;
+        *) echo "Invalid graphics backend: $backend (use test|virtio)"; exit 1 ;;
+      esac
+      ;;
     *)
       echo "Unknown option: $arg"
-      echo "Usage: $0 [--default|--shell|--test-hello|--test-mem|--test-alternate|--test-ipc|--test-ipc-ordering|--test-ipc-codegen]"
+      echo "Usage: $0 [--default|--shell|--test-hello|--test-mem|--test-alternate|--test-ipc|--test-ipc-ordering|--test-ipc-codegen|--test-graphics]"
       echo "          [--log-general=silent|soft|loud]"
       echo "          [--log-mem=silent|soft|loud]"
       echo "          [--log-proc=silent|soft|loud]"
       echo "          [--log-ipc=silent|soft|loud]"
+      echo "          [--graphics-backend=test|virtio]"
       exit 1
       ;;
   esac
@@ -95,6 +110,7 @@ sed -e "s/__KERNEL_PROG_PLACEHOLDER__/$MODE/" \
     -e "s/__LOG_MEM__/$LOG_MEM/" \
     -e "s/__LOG_PROC__/$LOG_PROC/" \
     -e "s/__LOG_IPC__/$LOG_IPC/" \
+    -e "s/__GRAPHICS_BACKEND__/$GRAPHICS_BACKEND/" \
     "$TEMPLATE" > "$OUTPUT"
 
-echo "Generated $OUTPUT with KERNEL_PROG=$MODE, LOG_GENERAL=$LOG_GENERAL, LOG_MEM=$LOG_MEM, LOG_PROC=$LOG_PROC, LOG_IPC=$LOG_IPC"
+echo "Generated $OUTPUT with KERNEL_PROG=$MODE, LOG_GENERAL=$LOG_GENERAL, LOG_MEM=$LOG_MEM, LOG_PROC=$LOG_PROC, LOG_IPC=$LOG_IPC, GRAPHICS_BACKEND=$GRAPHICS_BACKEND"

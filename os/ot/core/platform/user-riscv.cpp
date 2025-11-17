@@ -92,7 +92,7 @@ IpcResponse ou_ipc_send(int pid, uintptr_t flags, intptr_t method, intptr_t arg0
   register int a7 __asm__("a7") = 0;
 
   __asm__ __volatile__("ecall"
-                       : "=r"(a0), "=r"(a1), "=r"(a2)
+                       : "=r"(a0), "=r"(a1), "=r"(a2), "=r"(a4)
                        : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5), "r"(a6), "r"(a7)
                        : "memory");
 
@@ -100,7 +100,7 @@ IpcResponse ou_ipc_send(int pid, uintptr_t flags, intptr_t method, intptr_t arg0
   resp.error_code = (ErrorCode)a0;
   resp.values[0] = a1;
   resp.values[1] = a2;
-  resp.values[2] = 0; // RISC-V only returns 3 registers, need to get third from somewhere else if needed
+  resp.values[2] = a4;
   return resp;
 }
 

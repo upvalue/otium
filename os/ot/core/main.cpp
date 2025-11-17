@@ -37,7 +37,7 @@ void proc_fibonacci_server(void) {
 void kernel_prog_default() {
   // create fibonacci ipc server
 
-  Process *proc_fib = process_create("fibonacci", (const void *)proc_fibonacci_server, nullptr, false);
+  Process *proc_fib = process_create("fib", (const void *)proc_fibonacci_server, nullptr, false);
 
   char *shell_argv[] = {(char *)"shell"};
   Arguments shell_args = {1, shell_argv};

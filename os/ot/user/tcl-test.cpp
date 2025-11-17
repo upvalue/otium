@@ -15,17 +15,11 @@ TEST_CASE("tcl - basic evaluation") {
   tcl::Interp i;
   tcl::register_core_commands(i);
 
-  SUBCASE("empty string") {
-    CHECK(i.eval("") == tcl::S_OK);
-  }
+  SUBCASE("empty string") { CHECK(i.eval("") == tcl::S_OK); }
 
-  SUBCASE("simple command") {
-    CHECK(i.eval("set x 42") == tcl::S_OK);
-  }
+  SUBCASE("simple command") { CHECK(i.eval("set x 42") == tcl::S_OK); }
 
-  SUBCASE("multiple commands") {
-    CHECK(i.eval("set x 1; set y 2") == tcl::S_OK);
-  }
+  SUBCASE("multiple commands") { CHECK(i.eval("set x 1; set y 2") == tcl::S_OK); }
 }
 
 TEST_CASE("tcl - variables") {
@@ -203,8 +197,7 @@ TEST_CASE("tcl - while loop") {
 
   SUBCASE("while with break") {
     CHECK(i.eval("set i 0") == tcl::S_OK);
-    CHECK(i.eval("while {< $i 10} {set i [+ $i 1]; if {== $i 3} {break}}") ==
-          tcl::S_OK);
+    CHECK(i.eval("while {< $i 10} {set i [+ $i 1]; if {== $i 3} {break}}") == tcl::S_OK);
     CHECK(i.eval("+ $i 0") == tcl::S_OK);
     CHECK(i.result.compare("3") == 0);
   }
@@ -244,8 +237,7 @@ TEST_CASE("tcl - procedures") {
   }
 
   SUBCASE("procedure with return") {
-    CHECK(i.eval("proc test {x} {if {> $x 5} {return 1}; return 0}") ==
-          tcl::S_OK);
+    CHECK(i.eval("proc test {x} {if {> $x 5} {return 1}; return 0}") == tcl::S_OK);
     CHECK(i.eval("test 10") == tcl::S_OK);
     CHECK(i.result.compare("1") == 0);
     CHECK(i.eval("test 3") == tcl::S_OK);
@@ -309,16 +301,12 @@ TEST_CASE("tcl - error cases") {
 
   SUBCASE("duplicate command registration") {
     tcl::Interp j;
-    CHECK(j.register_command("test", [](tcl::Interp &i,
-                                         tcl::vector<tcl::string> &argv,
-                                         tcl::ProcPrivdata *privdata) {
-            return tcl::S_OK;
-          }) == tcl::S_OK);
-    CHECK(j.register_command("test", [](tcl::Interp &i,
-                                         tcl::vector<tcl::string> &argv,
-                                         tcl::ProcPrivdata *privdata) {
-            return tcl::S_OK;
-          }) == tcl::S_ERR);
+    CHECK(j.register_command("test", [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+      return tcl::S_OK;
+    }) == tcl::S_OK);
+    CHECK(j.register_command("test", [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+      return tcl::S_OK;
+    }) == tcl::S_ERR);
     CHECK(j.result.length() > 0);
   }
 }
@@ -339,8 +327,7 @@ TEST_CASE("tcl - return statement") {
   }
 
   SUBCASE("early return") {
-    CHECK(i.eval("proc test {x} {if {> $x 0} {return 1}; return 0}") ==
-          tcl::S_OK);
+    CHECK(i.eval("proc test {x} {if {> $x 0} {return 1}; return 0}") == tcl::S_OK);
     CHECK(i.eval("test 5") == tcl::S_OK);
     CHECK(i.result.compare("1") == 0);
   }
@@ -511,5 +498,439 @@ TEST_CASE("tcl - messagepack without buffer") {
     CHECK(i.eval("mp/nil") == tcl::S_ERR);
     CHECK(i.eval("mp/int 42") == tcl::S_ERR);
     CHECK(i.eval("mp/string {test}") == tcl::S_ERR);
+  }
+}
+
+TEST_CASE("tcl - list operations") {
+  tcl::Interp i;
+  tcl::register_core_commands(i);
+
+  SUBCASE("list - create empty list") {
+    CHECK(i.eval("list") == tcl::S_OK);
+    CHECK(i.result.length() == 0);
+  }
+
+  SUBCASE("list - create list with single element") {
+    CHECK(i.eval("list hello") == tcl::S_OK);
+    CHECK(i.result.compare("hello") == 0);
+  }
+
+  SUBCASE("list - create list with multiple elements") {
+    CHECK(i.eval("list a b c d") == tcl::S_OK);
+    CHECK(i.result.compare("a b c d") == 0);
+  }
+
+  SUBCASE("list - elements with spaces get braced") {
+    CHECK(i.eval("list hello {world test} foo") == tcl::S_OK);
+    CHECK(i.result.compare("hello {world test} foo") == 0);
+  }
+
+  SUBCASE("llength - empty list") {
+    CHECK(i.eval("llength {}") == tcl::S_OK);
+    CHECK(i.result.compare("0") == 0);
+  }
+
+  SUBCASE("llength - single element") {
+    CHECK(i.eval("llength {hello}") == tcl::S_OK);
+    CHECK(i.result.compare("1") == 0);
+  }
+
+  SUBCASE("llength - multiple elements") {
+    CHECK(i.eval("llength {a b c d}") == tcl::S_OK);
+    CHECK(i.result.compare("4") == 0);
+  }
+
+  SUBCASE("llength - with braced elements") {
+    CHECK(i.eval("llength {hello {world test} foo}") == tcl::S_OK);
+    CHECK(i.result.compare("3") == 0);
+  }
+
+  SUBCASE("lindex - get first element") {
+    CHECK(i.eval("lindex {a b c} 0") == tcl::S_OK);
+    CHECK(i.result.compare("a") == 0);
+  }
+
+  SUBCASE("lindex - get middle element") {
+    CHECK(i.eval("lindex {a b c d} 2") == tcl::S_OK);
+    CHECK(i.result.compare("c") == 0);
+  }
+
+  SUBCASE("lindex - get last element") {
+    CHECK(i.eval("lindex {a b c} 2") == tcl::S_OK);
+    CHECK(i.result.compare("c") == 0);
+  }
+
+  SUBCASE("lindex - out of bounds returns empty") {
+    CHECK(i.eval("lindex {a b c} 5") == tcl::S_OK);
+    CHECK(i.result.length() == 0);
+  }
+
+  SUBCASE("lindex - negative index returns empty") {
+    CHECK(i.eval("lindex {a b c} -1") == tcl::S_OK);
+    CHECK(i.result.length() == 0);
+  }
+
+  SUBCASE("lindex - braced element") {
+    CHECK(i.eval("lindex {hello {world test} foo} 1") == tcl::S_OK);
+    CHECK(i.result.compare("world test") == 0);
+  }
+
+  SUBCASE("lappend - to new variable") {
+    CHECK(i.eval("lappend mylist a") == tcl::S_OK);
+    CHECK(i.result.compare("a") == 0);
+  }
+
+  SUBCASE("lappend - to existing list") {
+    CHECK(i.eval("set mylist {a b}") == tcl::S_OK);
+    CHECK(i.eval("lappend mylist c d") == tcl::S_OK);
+    CHECK(i.result.compare("a b c d") == 0);
+    CHECK(i.eval("+ [llength $mylist] 0") == tcl::S_OK);
+    CHECK(i.result.compare("4") == 0);
+  }
+
+  SUBCASE("lappend - updates variable") {
+    CHECK(i.eval("set mylist {x y}") == tcl::S_OK);
+    CHECK(i.eval("lappend mylist z") == tcl::S_OK);
+    CHECK(i.eval("+ [llength $mylist] 0") == tcl::S_OK);
+    CHECK(i.result.compare("3") == 0);
+  }
+
+  SUBCASE("lrange - entire list") {
+    CHECK(i.eval("lrange {a b c d} 0 3") == tcl::S_OK);
+    CHECK(i.result.compare("a b c d") == 0);
+  }
+
+  SUBCASE("lrange - middle portion") {
+    CHECK(i.eval("lrange {a b c d e} 1 3") == tcl::S_OK);
+    CHECK(i.result.compare("b c d") == 0);
+  }
+
+  SUBCASE("lrange - single element") {
+    CHECK(i.eval("lrange {a b c d} 2 2") == tcl::S_OK);
+    CHECK(i.result.compare("c") == 0);
+  }
+
+  SUBCASE("lrange - end beyond list") {
+    CHECK(i.eval("lrange {a b c} 1 10") == tcl::S_OK);
+    CHECK(i.result.compare("b c") == 0);
+  }
+
+  SUBCASE("lrange - negative start becomes 0") {
+    CHECK(i.eval("lrange {a b c d} -5 2") == tcl::S_OK);
+    CHECK(i.result.compare("a b c") == 0);
+  }
+
+  SUBCASE("split - default delimiter (space)") {
+    CHECK(i.eval("split {hello world test}") == tcl::S_OK);
+    CHECK(i.result.compare("hello world test") == 0);
+  }
+
+  SUBCASE("split - custom delimiter") {
+    CHECK(i.eval("split {hello-world-test} -") == tcl::S_OK);
+    CHECK(i.result.compare("hello world test") == 0);
+  }
+
+  SUBCASE("split - comma delimiter") {
+    CHECK(i.eval("split {a,b,c,d} ,") == tcl::S_OK);
+    CHECK(i.result.compare("a b c d") == 0);
+  }
+
+  SUBCASE("split - colon delimiter") {
+    CHECK(i.eval("split {foo:bar:baz} :") == tcl::S_OK);
+    CHECK(i.result.compare("foo bar baz") == 0);
+  }
+
+  SUBCASE("split - empty parts") {
+    CHECK(i.eval("split {a::b} :") == tcl::S_OK);
+    CHECK(i.result.compare("a {} b") == 0);
+  }
+
+  SUBCASE("split - delimiter error") { CHECK(i.eval("split {test} abc") == tcl::S_ERR); }
+
+  SUBCASE("join - default separator (space)") {
+    CHECK(i.eval("join {a b c}") == tcl::S_OK);
+    CHECK(i.result.compare("a b c") == 0);
+  }
+
+  SUBCASE("join - custom separator") {
+    CHECK(i.eval("join {hello world test} -") == tcl::S_OK);
+    CHECK(i.result.compare("hello-world-test") == 0);
+  }
+
+  SUBCASE("join - comma separator") {
+    CHECK(i.eval("join {a b c d} ,") == tcl::S_OK);
+    CHECK(i.result.compare("a,b,c,d") == 0);
+  }
+
+  SUBCASE("join - empty separator") {
+    CHECK(i.eval("join {h e l l o} {}") == tcl::S_OK);
+    CHECK(i.result.compare("hello") == 0);
+  }
+
+  SUBCASE("join - multi-char separator") {
+    CHECK(i.eval("join {foo bar baz} { :: }") == tcl::S_OK);
+    CHECK(i.result.compare("foo :: bar :: baz") == 0);
+  }
+
+  SUBCASE("split and join roundtrip") {
+    CHECK(i.eval("set orig {hello-world-test}") == tcl::S_OK);
+    CHECK(i.eval("set parts [split $orig -]") == tcl::S_OK);
+    CHECK(i.eval("join $parts -") == tcl::S_OK);
+    CHECK(i.result.compare("hello-world-test") == 0);
+  }
+
+  SUBCASE("complex list operations") {
+    CHECK(i.eval("set mylist [list a b c]") == tcl::S_OK);
+    CHECK(i.eval("lappend mylist d e") == tcl::S_OK);
+    CHECK(i.eval("set sublist [lrange $mylist 1 3]") == tcl::S_OK);
+    CHECK(i.eval("llength $sublist") == tcl::S_OK);
+    CHECK(i.result.compare("3") == 0);
+    CHECK(i.eval("lindex $sublist 1") == tcl::S_OK);
+    CHECK(i.result.compare("c") == 0);
+  }
+}
+
+TEST_CASE("tcl - number conversion - hex") {
+  tcl::Interp i;
+  tcl::register_core_commands(i);
+
+  SUBCASE("hex - simple lowercase") {
+    CHECK(i.eval("hex ff") == tcl::S_OK);
+    CHECK(i.result.compare("255") == 0);
+  }
+
+  SUBCASE("hex - simple uppercase") {
+    CHECK(i.eval("hex FF") == tcl::S_OK);
+    CHECK(i.result.compare("255") == 0);
+  }
+
+  SUBCASE("hex - with 0x prefix lowercase") {
+    CHECK(i.eval("hex 0xff") == tcl::S_OK);
+    CHECK(i.result.compare("255") == 0);
+  }
+
+  SUBCASE("hex - with 0x prefix uppercase") {
+    CHECK(i.eval("hex 0xFF") == tcl::S_OK);
+    CHECK(i.result.compare("255") == 0);
+  }
+
+  SUBCASE("hex - with 0X prefix") {
+    CHECK(i.eval("hex 0XFF") == tcl::S_OK);
+    CHECK(i.result.compare("255") == 0);
+  }
+
+  SUBCASE("hex - zero") {
+    CHECK(i.eval("hex 0") == tcl::S_OK);
+    CHECK(i.result.compare("0") == 0);
+  }
+
+  SUBCASE("hex - single digit") {
+    CHECK(i.eval("hex a") == tcl::S_OK);
+    CHECK(i.result.compare("10") == 0);
+  }
+
+  SUBCASE("hex - large value") {
+    CHECK(i.eval("hex 1a2b") == tcl::S_OK);
+    CHECK(i.result.compare("6699") == 0);
+  }
+
+  SUBCASE("hex - mixed case") {
+    CHECK(i.eval("hex AbCd") == tcl::S_OK);
+    CHECK(i.result.compare("43981") == 0);
+  }
+
+  SUBCASE("hex - all digits") {
+    CHECK(i.eval("hex 123") == tcl::S_OK);
+    CHECK(i.result.compare("291") == 0);
+  }
+
+  SUBCASE("hex - invalid character") {
+    CHECK(i.eval("hex 1g2") == tcl::S_ERR);
+    CHECK(i.result.length() > 0);
+  }
+
+  SUBCASE("hex - empty string") {
+    CHECK(i.eval("hex {}") == tcl::S_ERR);
+    CHECK(i.result.length() > 0);
+  }
+
+  SUBCASE("hex - use in arithmetic") {
+    CHECK(i.eval("+ [hex ff] 1") == tcl::S_OK);
+    CHECK(i.result.compare("256") == 0);
+  }
+}
+
+TEST_CASE("tcl - number conversion - oct") {
+  tcl::Interp i;
+  tcl::register_core_commands(i);
+
+  SUBCASE("oct - simple") {
+    CHECK(i.eval("oct 77") == tcl::S_OK);
+    CHECK(i.result.compare("63") == 0);
+  }
+
+  SUBCASE("oct - with 0o prefix lowercase") {
+    CHECK(i.eval("oct 0o77") == tcl::S_OK);
+    CHECK(i.result.compare("63") == 0);
+  }
+
+  SUBCASE("oct - with 0o prefix uppercase") {
+    CHECK(i.eval("oct 0O77") == tcl::S_OK);
+    CHECK(i.result.compare("63") == 0);
+  }
+
+  SUBCASE("oct - zero") {
+    CHECK(i.eval("oct 0") == tcl::S_OK);
+    CHECK(i.result.compare("0") == 0);
+  }
+
+  SUBCASE("oct - single digit") {
+    CHECK(i.eval("oct 7") == tcl::S_OK);
+    CHECK(i.result.compare("7") == 0);
+  }
+
+  SUBCASE("oct - larger value") {
+    CHECK(i.eval("oct 755") == tcl::S_OK);
+    CHECK(i.result.compare("493") == 0);
+  }
+
+  SUBCASE("oct - all zeros") {
+    CHECK(i.eval("oct 000") == tcl::S_OK);
+    CHECK(i.result.compare("0") == 0);
+  }
+
+  SUBCASE("oct - invalid character 8") {
+    CHECK(i.eval("oct 78") == tcl::S_ERR);
+    CHECK(i.result.length() > 0);
+  }
+
+  SUBCASE("oct - invalid character 9") {
+    CHECK(i.eval("oct 79") == tcl::S_ERR);
+    CHECK(i.result.length() > 0);
+  }
+
+  SUBCASE("oct - empty string") {
+    CHECK(i.eval("oct {}") == tcl::S_ERR);
+    CHECK(i.result.length() > 0);
+  }
+
+  SUBCASE("oct - use in arithmetic") {
+    CHECK(i.eval("+ [oct 10] 2") == tcl::S_OK);
+    CHECK(i.result.compare("10") == 0);
+  }
+}
+
+TEST_CASE("tcl - number conversion - bin") {
+  tcl::Interp i;
+  tcl::register_core_commands(i);
+
+  SUBCASE("bin - simple") {
+    CHECK(i.eval("bin 1111") == tcl::S_OK);
+    CHECK(i.result.compare("15") == 0);
+  }
+
+  SUBCASE("bin - with 0b prefix lowercase") {
+    CHECK(i.eval("bin 0b1111") == tcl::S_OK);
+    CHECK(i.result.compare("15") == 0);
+  }
+
+  SUBCASE("bin - with 0b prefix uppercase") {
+    CHECK(i.eval("bin 0B1111") == tcl::S_OK);
+    CHECK(i.result.compare("15") == 0);
+  }
+
+  SUBCASE("bin - zero") {
+    CHECK(i.eval("bin 0") == tcl::S_OK);
+    CHECK(i.result.compare("0") == 0);
+  }
+
+  SUBCASE("bin - single digit 0") {
+    CHECK(i.eval("bin 0") == tcl::S_OK);
+    CHECK(i.result.compare("0") == 0);
+  }
+
+  SUBCASE("bin - single digit 1") {
+    CHECK(i.eval("bin 1") == tcl::S_OK);
+    CHECK(i.result.compare("1") == 0);
+  }
+
+  SUBCASE("bin - byte value") {
+    CHECK(i.eval("bin 11111111") == tcl::S_OK);
+    CHECK(i.result.compare("255") == 0);
+  }
+
+  SUBCASE("bin - mixed pattern") {
+    CHECK(i.eval("bin 10101010") == tcl::S_OK);
+    CHECK(i.result.compare("170") == 0);
+  }
+
+  SUBCASE("bin - all zeros") {
+    CHECK(i.eval("bin 0000") == tcl::S_OK);
+    CHECK(i.result.compare("0") == 0);
+  }
+
+  SUBCASE("bin - power of 2") {
+    CHECK(i.eval("bin 10000") == tcl::S_OK);
+    CHECK(i.result.compare("16") == 0);
+  }
+
+  SUBCASE("bin - invalid character 2") {
+    CHECK(i.eval("bin 102") == tcl::S_ERR);
+    CHECK(i.result.length() > 0);
+  }
+
+  SUBCASE("bin - invalid character a") {
+    CHECK(i.eval("bin 1a1") == tcl::S_ERR);
+    CHECK(i.result.length() > 0);
+  }
+
+  SUBCASE("bin - empty string") {
+    CHECK(i.eval("bin {}") == tcl::S_ERR);
+    CHECK(i.result.length() > 0);
+  }
+
+  SUBCASE("bin - use in arithmetic") {
+    CHECK(i.eval("+ [bin 1010] [bin 0101]") == tcl::S_OK);
+    CHECK(i.result.compare("15") == 0);
+  }
+}
+
+TEST_CASE("tcl - number conversion - mixed bases") {
+  tcl::Interp i;
+  tcl::register_core_commands(i);
+
+  SUBCASE("mix hex and dec in arithmetic") {
+    CHECK(i.eval("+ [hex 10] 16") == tcl::S_OK);
+    CHECK(i.result.compare("32") == 0);
+  }
+
+  SUBCASE("mix oct and dec in arithmetic") {
+    CHECK(i.eval("+ [oct 10] 8") == tcl::S_OK);
+    CHECK(i.result.compare("16") == 0);
+  }
+
+  SUBCASE("mix bin and dec in arithmetic") {
+    CHECK(i.eval("+ [bin 10] 2") == tcl::S_OK);
+    CHECK(i.result.compare("4") == 0);
+  }
+
+  SUBCASE("all three bases together") {
+    CHECK(i.eval("+ [hex 10] [+ [oct 10] [bin 10]]") == tcl::S_OK);
+    CHECK(i.result.compare("26") == 0);
+  }
+
+  SUBCASE("compare hex values") {
+    CHECK(i.eval("== [hex ff] 255") == tcl::S_OK);
+    CHECK(i.result.compare("1") == 0);
+  }
+
+  SUBCASE("compare oct values") {
+    CHECK(i.eval("== [oct 100] 64") == tcl::S_OK);
+    CHECK(i.result.compare("1") == 0);
+  }
+
+  SUBCASE("compare bin values") {
+    CHECK(i.eval("== [bin 1000] 8") == tcl::S_OK);
+    CHECK(i.result.compare("1") == 0);
   }
 }

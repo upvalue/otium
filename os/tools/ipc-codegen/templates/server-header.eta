@@ -3,8 +3,9 @@
 #include "ot/lib/result.hpp"
 #include "ot/lib/error-codes.hpp"
 #include "ot/user/gen/<%= it.service.name.toLowerCase() %>-types.hpp"
+#include "ot/user/gen/server-base.hpp"
 
-struct <%= it.service.name %>Server {
+struct <%= it.service.name %>Server : ServerBase {
   // Methods to implement
 <% it.service.methods.forEach(method => { %>
   Result<<%= it.getReturnType(method) %>, ErrorCode> handle_<%= method.name %>(<%= it.formatArgs(method.args) %>);
@@ -12,5 +13,5 @@ struct <%= it.service.name %>Server {
 
   // Framework methods - handles dispatch
   void process_request(const IpcMessage& msg);
-  void run(const char* name);
+  void run();
 };

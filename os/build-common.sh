@@ -43,8 +43,8 @@ USER_SOURCES=(
 
 # Generated IPC code (add service implementations as needed)
 # Uncomment after running ./generate-ipc.sh
-# USER_SOURCES+=(
-#   ot/user/gen/fibonacci-client.cpp
-#   ot/user/gen/fibonacci-server.cpp
-#   ot/user/fibonacci/impl.cpp
-# )
+USER_SOURCES+=(
+  ot/user/gen/fibonacci-client.cpp
+  ot/user/gen/fibonacci-server.cpp
+  ot/user/fibonacci/impl.cpp
+)

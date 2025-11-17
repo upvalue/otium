@@ -19,6 +19,9 @@ struct IpcResponse {
 #define IPC_FLAG_NONE 0x00          // No special flags
 #define IPC_FLAG_HAS_COMM_DATA 0x01 // Comm page contains msgpack data
 
+// Reserved method IDs (below user-defined range starting at 0x1000)
+#define IPC_METHOD_SHUTDOWN 0x0100  // Universal shutdown method for all servers
+
 // Helper macros for packing/unpacking method and flags
 #define IPC_PACK_METHOD_FLAGS(method, flags) (((uintptr_t)(method)) | ((uintptr_t)(flags)))
 #define IPC_UNPACK_METHOD(method_and_flags) ((intptr_t)((method_and_flags) & ~0xFFUL))

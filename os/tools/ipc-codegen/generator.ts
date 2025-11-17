@@ -248,7 +248,7 @@ async function createStubImplementation(service: Service, implDir: string) {
   // Add process entry point
   lines.push(`void proc_${serviceLower}(void) {`);
   lines.push(`  ${service.name}Server server;`);
-  lines.push(`  server.run("${serviceLower}");`);
+  lines.push(`  server.run();`);
   lines.push("}");
   lines.push("");
 

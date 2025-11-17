@@ -1,5 +1,6 @@
 #include "ot/user/gen/<%= it.service.name.toLowerCase() %>-client.hpp"
 #include "ot/user/gen/method-ids.hpp"
+#include "ot/user/user.hpp"
 
 <% it.service.methods.forEach(method => { %>
 Result<<%= it.getReturnType(method) %>, ErrorCode> <%= it.service.name %>Client::<%= method.name %>(<%= it.formatArgs(method.args) %>) {
@@ -28,3 +29,19 @@ Result<<%= it.getReturnType(method) %>, ErrorCode> <%= it.service.name %>Client:
 }
 
 <% }) %>
+
+Result<bool, ErrorCode> <%= it.service.name %>Client::shutdown() {
+  IpcResponse resp = ou_ipc_send(
+    pid_,
+    IPC_FLAG_NONE,
+    IPC_METHOD_SHUTDOWN,
+    0, 0, 0
+  );
+
+  if (resp.error_code != NONE) {
+    return Result<bool, ErrorCode>::err(resp.error_code);
+  }
+
+  return Result<bool, ErrorCode>::ok(true);
+}
+

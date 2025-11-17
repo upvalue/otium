@@ -58,6 +58,11 @@ export async function parseIDL(filePath: string): Promise<ParsedIDL> {
   // Track unique error codes across all services
   const seenErrors = new Set<string>();
 
+  // Validate method_id_base doesn't use lower 8 bits (reserved for flags)
+  if (config.method_id_base % 0x100 !== 0) {
+    throw new Error(`method_id_base (0x${config.method_id_base.toString(16)}) must be a multiple of 0x100 to avoid flag bits`);
+  }
+
   // Parse services
   for (const svc of yaml.services || []) {
     const methods: Method[] = [];
@@ -78,8 +83,9 @@ export async function parseIDL(filePath: string): Promise<ParsedIDL> {
         args,
         returns,
         errors: method.errors || [],
-        methodId: nextMethodId++,
+        methodId: nextMethodId,
       });
+      nextMethodId += 0x100; // Increment by 256 to skip flag bits
 
       // Collect unique error codes for this method
       for (const errorName of method.errors || []) {

@@ -3,6 +3,11 @@
 #include "ot/core/kernel.hpp"
 #include "ot/user/user.hpp"
 
+// Include generated IPC code for codegen test
+#if KERNEL_PROG == KERNEL_PROG_TEST_IPC_CODEGEN
+#include "ot/user/gen/fibonacci-client.hpp"
+#endif
+
 // a basic process that just prints hello world and exits
 void proc_hello_world(void) {
   oprintf("TEST: Hello, world!\n");
@@ -268,6 +273,85 @@ void kernel_prog_test_ipc_ordering() {
   process_create("test_4", (const void *)proc_test_4, nullptr, false);
 }
 
+// TEST_IPC_CODEGEN: Client using generated FibonacciClient wrapper
+#if KERNEL_PROG == KERNEL_PROG_TEST_IPC_CODEGEN
+void proc_ipc_codegen_client(void) {
+  ou_yield(); // Let server start first
+
+  int fib_pid = ou_proc_lookup("fibonacci");
+  oprintf("TEST: Client found fibonacci service at PID %d\n", fib_pid);
+
+  FibonacciClient client(fib_pid);
+
+  // Test calc_fib with single return value
+  int test_values[] = {5, 10, 15};
+  for (int i = 0; i < 3; i++) {
+    int val = test_values[i];
+    oprintf("TEST: Client requesting calc_fib(%d)\n", val);
+
+    auto result = client.calc_fib(val);
+    if (result.is_ok()) {
+      oprintf("TEST: Client received result: %ld\n", result.value());
+    } else {
+      oprintf("TEST: Client got error %d\n", result.error());
+    }
+  }
+
+  // Test calc_pair with multiple return values
+  oprintf("TEST: Client requesting calc_pair(7, 8)\n");
+  auto pair_result = client.calc_pair(7, 8);
+  if (pair_result.is_ok()) {
+    auto val = pair_result.value();
+    oprintf("TEST: Client received fib(7)=%ld, fib(8)=%ld\n", val.fib_n, val.fib_m);
+  } else {
+    oprintf("TEST: Client got error %d\n", pair_result.error());
+  }
+
+  // Test get_cache_size with unsigned return
+  oprintf("TEST: Client requesting get_cache_size()\n");
+  auto cache_result = client.get_cache_size();
+  if (cache_result.is_ok()) {
+    oprintf("TEST: Cache size: %lu\n", cache_result.value());
+  } else {
+    oprintf("TEST: Client got error %d\n", cache_result.error());
+  }
+
+  // Test error handling
+  oprintf("TEST: Client requesting calc_fib(50) - should fail\n");
+  auto error_result = client.calc_fib(50);
+  if (error_result.is_err()) {
+    oprintf("TEST: Got expected error: %d (%s)\n",
+            error_result.error(), error_code_to_string(error_result.error()));
+  } else {
+    oprintf("TEST: ERROR - Should have received error but got: %ld\n", error_result.value());
+  }
+
+  // Shutdown the server cleanly
+  oprintf("TEST: Client sending shutdown to server\n");
+  auto shutdown_result = client.shutdown();
+  if (shutdown_result.is_ok()) {
+    oprintf("TEST: Server shutdown initiated\n");
+  } else {
+    oprintf("TEST: Shutdown failed with error %d\n", shutdown_result.error());
+  }
+
+  oprintf("TEST: IPC codegen test complete\n");
+  ou_exit();
+}
+
+void kernel_prog_test_ipc_codegen() {
+  oprintf("TEST: Starting IPC codegen test (using generated client/server)\n");
+
+  // proc_fibonacci is defined in ot/user/fibonacci/impl.cpp
+  extern void proc_fibonacci(void);
+
+  Process *proc_fib = process_create("fibonacci", (const void *)proc_fibonacci, nullptr, false);
+  Process *proc_client = process_create("client", (const void *)proc_ipc_codegen_client, nullptr, false);
+  TRACE(LSOFT, "created fibonacci server with name %s and pid %d", proc_fib->name, proc_fib->pid);
+  TRACE(LSOFT, "created codegen client with name %s and pid %d", proc_client->name, proc_client->pid);
+}
+#endif
+
 /**
  * Single entry point for all kernel tests
  */
@@ -288,5 +372,7 @@ void kernel_prog_test() {
   kernel_prog_test_ipc();
 #elif KERNEL_PROG == KERNEL_PROG_TEST_IPC_ORDERING
   kernel_prog_test_ipc_ordering();
+#elif KERNEL_PROG == KERNEL_PROG_TEST_IPC_CODEGEN
+  kernel_prog_test_ipc_codegen();
 #endif
 }

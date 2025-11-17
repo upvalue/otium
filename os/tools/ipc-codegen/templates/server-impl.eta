@@ -1,7 +1,13 @@
 #include "ot/user/gen/<%= it.service.name.toLowerCase() %>-server.hpp"
 #include "ot/user/gen/method-ids.hpp"
+#include "ot/user/user.hpp"
 
 void <%= it.service.name %>Server::process_request(const IpcMessage& msg) {
+  // Check for shutdown request (handled by base class)
+  if (handle_shutdown_if_requested(msg)) {
+    return;  // Server exits in base class
+  }
+
   intptr_t method = IPC_UNPACK_METHOD(msg.method_and_flags);
   IpcResponse resp = {NONE, {0, 0, 0}};
 
@@ -34,8 +40,7 @@ void <%= it.service.name %>Server::process_request(const IpcMessage& msg) {
   ou_ipc_reply(resp);
 }
 
-void <%= it.service.name %>Server::run(const char* name) {
-  ou_proc_set_name(name);
+void <%= it.service.name %>Server::run() {
   while (true) {
     IpcMessage msg = ou_ipc_recv();
     process_request(msg);

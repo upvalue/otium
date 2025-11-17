@@ -2,7 +2,7 @@
 # This file defines services, methods, and error codes for code generation
 
 config:
-  method_id_base: 0x1000      # Auto-increment method IDs from here
+  method_id_base: 0x1000      # Auto-increment method IDs from here (must be multiple of 256!)
   error_code_base: 100         # Auto-increment service error codes from here
 
 services:

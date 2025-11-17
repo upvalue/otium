@@ -12,4 +12,7 @@ struct <%= it.service.name %>Client {
 <% it.service.methods.forEach(method => { %>
   Result<<%= it.getReturnType(method) %>, ErrorCode> <%= method.name %>(<%= it.formatArgs(method.args) %>);
 <% }) %>
+
+  // Universal shutdown method (sends IPC_METHOD_SHUTDOWN)
+  Result<bool, ErrorCode> shutdown();
 };

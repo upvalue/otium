@@ -2,12 +2,13 @@
 
 // Simple recursive fibonacci (inefficient but demonstrates the concept)
 static intptr_t calculate_fib(intptr_t n) {
-  if (n <= 1) return n;
+  if (n <= 1)
+    return n;
   return calculate_fib(n - 1) + calculate_fib(n - 2);
 }
 
 Result<intptr_t, ErrorCode> FibonacciServer::handle_calc_fib(intptr_t n) {
-  if (n < 0 || n > 40) {  // Limit to prevent slow recursion
+  if (n < 0 || n > 40) { // Limit to prevent slow recursion
     return Result<intptr_t, ErrorCode>::err(FIBONACCI__INVALID_INPUT);
   }
   return Result<intptr_t, ErrorCode>::ok(calculate_fib(n));
@@ -31,5 +32,5 @@ Result<uintptr_t, ErrorCode> FibonacciServer::handle_get_cache_size() {
 
 void proc_fibonacci(void) {
   FibonacciServer server;
-  server.run("fibonacci");
+  server.run();
 }

@@ -84,8 +84,8 @@ bool VirtioGraphicsBackend::init() {
   }
 
   // Set DRIVER_OK
-  dev.write_reg(VIRTIO_MMIO_STATUS, VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK |
-                                        VIRTIO_STATUS_DRIVER_OK);
+  dev.write_reg(VIRTIO_MMIO_STATUS,
+                VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK | VIRTIO_STATUS_DRIVER_OK);
 
   oprintf("Status after DRIVER_OK: 0x%x\n", dev.read_reg(VIRTIO_MMIO_STATUS));
 
@@ -115,17 +115,17 @@ uint32_t VirtioGraphicsBackend::send_command(PageAddr cmd, uint32_t cmd_len, Pag
   // Submit to queue
   controlq.submit(0);
 
-  oprintf("  avail idx: %u->%u, used idx: %u\n", avail_idx_before, controlq.avail->idx, used_idx_before);
+  // oprintf("  avail idx: %u->%u, used idx: %u\n", avail_idx_before, controlq.avail->idx, used_idx_before);
   // Dump raw descriptor bytes
   uint8_t *desc0_bytes = (uint8_t *)&controlq.desc[0];
-  oprintf("  desc[0] raw bytes: ");
+  // oprintf("  desc[0] raw bytes: ");
   for (int i = 0; i < 16; i++) {
-    oprintf("%02x ", desc0_bytes[i]);
+    // oprintf("%02x ", desc0_bytes[i]);
   }
-  oprintf("\n");
-  oprintf("  desc[0]: addr=0x%llx, len=%u, flags=0x%x, next=%u\n", controlq.desc[0].addr, controlq.desc[0].len,
+  // oprintf("\n");
+  /*oprintf("  desc[0]: addr=0x%llx, len=%u, flags=0x%x, next=%u\n", controlq.desc[0].addr, controlq.desc[0].len,
           controlq.desc[0].flags, controlq.desc[0].next);
-  oprintf("  avail->ring[0]=%u\n", controlq.avail->ring[0]);
+  oprintf("  avail->ring[0]=%u\n", controlq.avail->ring[0]);*/
 
   // Notify device
   dev.write_reg(VIRTIO_MMIO_QUEUE_NOTIFY, 0);
@@ -141,12 +141,12 @@ uint32_t VirtioGraphicsBackend::send_command(PageAddr cmd, uint32_t cmd_len, Pag
     return 0xFFFFFFFF;
   }
 
-  oprintf("  Response received, used idx: %u\n", controlq.used->idx);
+  // oprintf("  Response received, used idx: %u\n", controlq.used->idx);
   controlq.get_used();
 
   // Return response type
   struct virtio_gpu_ctrl_hdr *resp_hdr = resp.as<struct virtio_gpu_ctrl_hdr>();
-  oprintf("  Response type: 0x%x, flags: 0x%x\n", resp_hdr->type, resp_hdr->flags);
+  // oprintf("  Response type: 0x%x, flags: 0x%x\n", resp_hdr->type, resp_hdr->flags);
   return resp_hdr->type;
 }
 
@@ -257,9 +257,10 @@ void VirtioGraphicsBackend::flush() {
   transfer->padding = 0;
 
   uint32_t resp_type = send_command(cmd_page, sizeof(*transfer), resp_page, sizeof(struct virtio_gpu_ctrl_hdr));
-  oprintf("Transfer response: 0x%x\n", resp_type);
+  // oprintf("Transfer response: 0x%x\n", resp_type);
   if (resp_type != VIRTIO_GPU_RESP_OK_NODATA) {
-    oprintf("ERROR: Transfer failed!\n");
+    // This seems to happen occasionally
+    // oprintf("ERROR: Transfer failed!\n");
     return;
   }
 
@@ -278,7 +279,7 @@ void VirtioGraphicsBackend::flush() {
   flush_cmd->padding = 0;
 
   resp_type = send_command(cmd_page, sizeof(*flush_cmd), resp_page, sizeof(struct virtio_gpu_ctrl_hdr));
-  oprintf("Flush response: 0x%x\n", resp_type);
+  // oprintf("Flush response: 0x%x\n", resp_type);
   if (resp_type != VIRTIO_GPU_RESP_OK_NODATA) {
     oprintf("ERROR: Flush failed!\n");
     return;

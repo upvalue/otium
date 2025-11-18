@@ -192,7 +192,7 @@ void handle_syscall(struct trap_frame *f) {
     intptr_t method = IPC_UNPACK_METHOD(method_and_flags);
     uintptr_t flags = IPC_UNPACK_FLAGS(method_and_flags);
 
-    TRACE_IPC(LSOFT, "IPC send from %d to %d, method=%d, flags=%x", current_proc->pid, target_pid, method, flags);
+    TRACE_IPC(LLOUD, "IPC send from %d to %d, method=%d, flags=%x", current_proc->pid, target_pid, method, flags);
 
     Process *target = process_lookup(target_pid);
     if (!target) {

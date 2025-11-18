@@ -8,6 +8,7 @@
 
 // EM_JS shims for graphics operations
 // These call into JavaScript, which can use Canvas (browser) or SDL (node)
+// clang-format off
 EM_JS(bool, js_graphics_init, (int width, int height), {
   console.log('[EM_JS] js_graphics_init called with', width, 'x', height);
   if (typeof Module.graphicsInit === 'function') {
@@ -20,7 +21,7 @@ EM_JS(bool, js_graphics_init, (int width, int height), {
   return false;
 });
 
-EM_JS(void, js_graphics_flush, (uint32_t* fb_ptr, int width, int height), {
+EM_JS(void, js_graphics_flush, (uint32_t *fb_ptr, int width, int height), {
   if (typeof Module.graphicsFlush === 'function') {
     // Create a view into WASM memory - no copy needed!
     // fb_ptr is already a byte address, shift right by 2 for uint32 index
@@ -35,6 +36,7 @@ EM_JS(void, js_graphics_cleanup, (), {
     Module.graphicsCleanup();
   }
 });
+// clang-format on
 
 /**
  * WASM graphics backend using EM_JS shims.
@@ -47,7 +49,7 @@ private:
   uint32_t height;
 
 public:
-  WasmGraphicsBackend() : framebuffer(nullptr), width(640), height(480) {}
+  WasmGraphicsBackend() : framebuffer(nullptr), width(1024), height(700) {}
 
   bool init() override {
     oprintf("WasmGraphicsBackend: Initializing %ux%u framebuffer\n", width, height);
@@ -91,9 +93,7 @@ public:
     return true;
   }
 
-  ~WasmGraphicsBackend() {
-    js_graphics_cleanup();
-  }
+  ~WasmGraphicsBackend() { js_graphics_cleanup(); }
 
   uint32_t *get_framebuffer() override { return framebuffer; }
 

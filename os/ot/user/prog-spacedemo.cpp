@@ -10,10 +10,10 @@
 #include "ot/user/user.hpp"
 
 // Constants
-static const int DEMO_WIDTH = 320;
-static const int DEMO_HEIGHT = 200;
-static const int MAX_BACKGROUND_STARS = 30;
-static const int MAX_DEBRIS = 20;
+static const int DEMO_WIDTH = 1024;
+static const int DEMO_HEIGHT = 700;
+static const int MAX_BACKGROUND_STARS = 100; // More stars for larger screen
+static const int MAX_DEBRIS = 50;            // More debris for larger screen
 static const int STREAK_FRAMES = 90;
 
 // Color constants (BGRA format: 0xAARRGGBB)
@@ -22,19 +22,15 @@ static const uint32_t COLOR_WHITE = 0xFFFFFFFF;
 
 // Star system names (from demo.js)
 static const char *STAR_NAMES[] = {
-    "Gliese 581",     "Gliese 876",     "Gliese 832",     "Gliese 667C",
-    "Gliese 163",     "Gliese 357",     "Gliese 180",     "Gliese 682",
-    "Gliese 674",     "Gliese 436",     "Lacaille 9352",  "Lacaille 8760",
-    "Lalande 21185",  "Luyten 726-8",   "Luyten 789-6",   "Groombridge 34",
-    "Groombridge 1618", "Kapteyn's Star", "Barnard's Star", "Wolf 359",
-    "Ross 128",       "Ross 154",       "Ross 248",       "Ross 614",
-    "Teegarden's Star", "Struve 2398",    "Kruger 60",      "61 Cygni",
-    "82 Eridani",     "36 Ophiuchi",    "70 Ophiuchi",    "Stein 2051",
-    "TRAPPIST-1",     "Proxima Centauri", "Epsilon Eridani", "Tau Ceti",
-    "40 Eridani",     "Wolf 1061",      "Kepler-442",     "Kepler-452"};
+    "Gliese 581",       "Gliese 876",   "Gliese 832",   "Gliese 667C",      "Gliese 163",       "Gliese 357",
+    "Gliese 180",       "Gliese 682",   "Gliese 674",   "Gliese 436",       "Lacaille 9352",    "Lacaille 8760",
+    "Lalande 21185",    "Luyten 726-8", "Luyten 789-6", "Groombridge 34",   "Groombridge 1618", "Kapteyn's Star",
+    "Barnard's Star",   "Wolf 359",     "Ross 128",     "Ross 154",         "Ross 248",         "Ross 614",
+    "Teegarden's Star", "Struve 2398",  "Kruger 60",    "61 Cygni",         "82 Eridani",       "36 Ophiuchi",
+    "70 Ophiuchi",      "Stein 2051",   "TRAPPIST-1",   "Proxima Centauri", "Epsilon Eridani",  "Tau Ceti",
+    "40 Eridani",       "Wolf 1061",    "Kepler-442",   "Kepler-452"};
 
-static const int NUM_STAR_NAMES =
-    sizeof(STAR_NAMES) / sizeof(STAR_NAMES[0]);
+static const int NUM_STAR_NAMES = sizeof(STAR_NAMES) / sizeof(STAR_NAMES[0]);
 
 // Star types
 enum StarType { STAR_YELLOW = 0, STAR_BLUE = 1, STAR_RED = 2 };
@@ -131,24 +127,22 @@ void init_background_stars(SpaceDemoStorage *s) {
     s->bg_stars[i].y = xorshift32() % DEMO_HEIGHT;
     // Purple/gray shades
     uint8_t brightness = 64 + (xorshift32() % 8) * 8;
-    s->bg_stars[i].color = 0xFF000000 | (brightness << 16) |
-                           (brightness << 8) | (brightness + 32);
+    s->bg_stars[i].color = 0xFF000000 | (brightness << 16) | (brightness << 8) | (brightness + 32);
   }
 }
 
 // Draw background stars
-void draw_background_stars(SpaceDemoStorage *s, gfx::GfxUtil &gfx,
-                           int offset_x, int offset_y) {
+void draw_background_stars(SpaceDemoStorage *s, gfx::GfxUtil &gfx, int offset_x, int offset_y) {
   for (int i = 0; i < MAX_BACKGROUND_STARS; i++) {
-    gfx.put_pixel(s->bg_stars[i].x + offset_x, s->bg_stars[i].y + offset_y,
-                  s->bg_stars[i].color);
+    gfx.put_pixel(s->bg_stars[i].x + offset_x, s->bg_stars[i].y + offset_y, s->bg_stars[i].color);
   }
 }
 
 // Reset debris particle
 void reset_debris(Debris *d) {
   float angle = randf() * 3.14159f * 2.0f;
-  float radius = randf() * 60.0f + 90.0f;
+  // Scale radius for larger screen (original: 60-150, scaled: 210-525)
+  float radius = randf() * 210.0f + 315.0f;
   d->x = ou_cosf(angle) * radius;
   d->y = ou_sinf(angle) * radius;
   d->z = randf() * 800.0f + 200.0f;
@@ -165,8 +159,7 @@ void init_debris(SpaceDemoStorage *s) {
 }
 
 // Update and draw debris
-void update_debris(SpaceDemoStorage *s, gfx::GfxUtil &gfx, int offset_x,
-                   int offset_y) {
+void update_debris(SpaceDemoStorage *s, gfx::GfxUtil &gfx, int offset_x, int offset_y) {
   for (int i = 0; i < MAX_DEBRIS; i++) {
     Debris *d = &s->debris[i];
     if (!d->active)
@@ -183,15 +176,13 @@ void update_debris(SpaceDemoStorage *s, gfx::GfxUtil &gfx, int offset_x,
     int screen_x = (int)(d->x * scale) + DEMO_WIDTH / 2;
     int screen_y = (int)(d->y * scale) + DEMO_HEIGHT / 2;
 
-    if (screen_x >= 0 && screen_x < DEMO_WIDTH && screen_y >= 0 &&
-        screen_y < DEMO_HEIGHT) {
+    if (screen_x >= 0 && screen_x < DEMO_WIDTH && screen_y >= 0 && screen_y < DEMO_HEIGHT) {
       // Brightness based on distance (closer = brighter)
       float brightness = (1000.0f - d->z) / 1000.0f;
       if (brightness > 1.0f)
         brightness = 1.0f;
 
-      uint32_t color = gfx::GfxUtil::interpolate_color(
-          COLOR_BLACK, d->color, brightness);
+      uint32_t color = gfx::GfxUtil::interpolate_color(COLOR_BLACK, d->color, brightness);
 
       gfx.put_pixel(screen_x + offset_x, screen_y + offset_y, color);
 
@@ -209,7 +200,8 @@ int init_hyperspace_timer() { return 300 + (xorshift32() % 301); }
 // Initialize central star
 void init_star(SpaceDemoStorage *s) {
   float angle = randf() * 3.14159f * 2.0f;
-  float radius = randf() * 70.0f + 50.0f;
+  // Scale radius for larger screen (original: 50-120, scaled: 175-420)
+  float radius = randf() * 245.0f + 175.0f;
   s->central_star.x = ou_cosf(angle) * radius;
   s->central_star.y = ou_sinf(angle) * radius;
   s->central_star.z = 1000.0f;
@@ -223,8 +215,7 @@ void init_star(SpaceDemoStorage *s) {
 }
 
 // Update and draw central star
-void update_star(SpaceDemoStorage *s, gfx::GfxUtil &gfx, int offset_x,
-                 int offset_y) {
+void update_star(SpaceDemoStorage *s, gfx::GfxUtil &gfx, int offset_x, int offset_y) {
   if (!s->central_star.active)
     return;
 
@@ -239,21 +230,19 @@ void update_star(SpaceDemoStorage *s, gfx::GfxUtil &gfx, int offset_x,
   int screen_x = (int)(star->x * scale) + DEMO_WIDTH / 2;
   int screen_y = (int)(star->y * scale) + DEMO_HEIGHT / 2;
 
-  // Size grows as star approaches
-  int size = (int)(40.0f * (1000.0f - star->z) / 1000.0f) + 30;
+  // Size grows as star approaches (scaled for larger screen: 105-245)
+  int size = (int)(140.0f * (1000.0f - star->z) / 1000.0f) + 105;
 
   // Get gradient colors for star type
   uint32_t center_color, edge_color;
   get_star_colors(star->type, center_color, edge_color);
 
   // Draw gradient circle centered in demo area
-  gfx.draw_gradient_circle(screen_x + offset_x, screen_y + offset_y, size,
-                           center_color, edge_color);
+  gfx.draw_gradient_circle(screen_x + offset_x, screen_y + offset_y, size, center_color, edge_color);
 }
 
 // Hyperspace warp effect
-void hyperspace_warp(SpaceDemoStorage *s, gfx::GfxUtil &gfx,
-                     GraphicsClient &client, int offset_x, int offset_y) {
+void hyperspace_warp(SpaceDemoStorage *s, gfx::GfxUtil &gfx, GraphicsClient &client, int offset_x, int offset_y) {
   // saved_screen should already be allocated at startup
 
   // Save current screen (just the demo area)
@@ -261,8 +250,7 @@ void hyperspace_warp(SpaceDemoStorage *s, gfx::GfxUtil &gfx,
   int fb_width = gfx.width();
   for (int y = 0; y < DEMO_HEIGHT; y++) {
     for (int x = 0; x < DEMO_WIDTH; x++) {
-      s->saved_screen[y * DEMO_WIDTH + x] =
-          fb[(y + offset_y) * fb_width + (x + offset_x)];
+      s->saved_screen[y * DEMO_WIDTH + x] = fb[(y + offset_y) * fb_width + (x + offset_x)];
     }
   }
 
@@ -295,8 +283,7 @@ void hyperspace_warp(SpaceDemoStorage *s, gfx::GfxUtil &gfx,
             int draw_x = (int)(center_x + dx * t);
             int draw_y = (int)(center_y + dy * t);
 
-            if (draw_x >= 0 && draw_x < DEMO_WIDTH && draw_y >= 0 &&
-                draw_y < DEMO_HEIGHT) {
+            if (draw_x >= 0 && draw_x < DEMO_WIDTH && draw_y >= 0 && draw_y < DEMO_HEIGHT) {
               uint32_t draw_color = color;
 
               // Fade outer portions
@@ -381,10 +368,9 @@ void spacedemo_main() {
   int width = (int)fb_info.width;
   int height = (int)fb_info.height;
 
-  oprintf("SPACEDEMO: Framebuffer %dx%d, demo rendering at %dx%d\n", width,
-          height, DEMO_WIDTH, DEMO_HEIGHT);
+  oprintf("SPACEDEMO: Framebuffer %dx%d, demo rendering at %dx%d\n", width, height, DEMO_WIDTH, DEMO_HEIGHT);
 
-  // Calculate centering offsets for 320x200 demo area
+  // Calculate centering offsets (will be 0,0 if demo fills screen exactly)
   int offset_x = (width - DEMO_WIDTH) / 2;
   int offset_y = (height - DEMO_HEIGHT) / 2;
 
@@ -392,25 +378,26 @@ void spacedemo_main() {
   gfx::GfxUtil gfx(fb, width, height);
 
   // Allocate saved screen buffer upfront using ou_alloc_page
-  // Need 320x200x4 = 256000 bytes = 63 pages (rounded up for safety)
+  // Need 1024x700x4 = 2,867,200 bytes = 700 pages (assuming 4KB pages)
+  int total_bytes = DEMO_WIDTH * DEMO_HEIGHT * 4;
+  int num_pages = (total_bytes + 4095) / 4096; // Round up
+
   s->saved_screen = (uint32_t *)ou_alloc_page();
   if (s->saved_screen == nullptr) {
     oprintf("SPACEDEMO: Failed to allocate saved screen buffer (page 1)\n");
     ou_exit();
   }
 
-  // Allocate additional pages for the buffer (need ~63 pages total for 256KB)
-  for (int i = 1; i < 63; i++) {
+  // Allocate additional pages for the buffer
+  for (int i = 1; i < num_pages; i++) {
     void *extra_page = ou_alloc_page();
     if (extra_page == nullptr) {
-      oprintf("SPACEDEMO: Failed to allocate saved screen buffer (page %d)\n",
-              i + 1);
+      oprintf("SPACEDEMO: Failed to allocate saved screen buffer (page %d/%d)\n", i + 1, num_pages);
       ou_exit();
     }
   }
 
-  oprintf("SPACEDEMO: Allocated saved screen buffer (%d KB)\n",
-          (DEMO_WIDTH * DEMO_HEIGHT * 4) / 1024);
+  oprintf("SPACEDEMO: Allocated saved screen buffer (%d KB)\n", (DEMO_WIDTH * DEMO_HEIGHT * 4) / 1024);
 
   // Initialize demo state
   init_background_stars(s);
@@ -434,11 +421,12 @@ void spacedemo_main() {
 
       // Draw star system name or jump warning
       if (s->cycle >= s->hyperspace_cycle_time - 60) {
-        gfx.draw_text(offset_x + 10, offset_y + DEMO_HEIGHT - 15,
-                      "JUMP ENGAGED", 0xFFAA6654, 2);
+        gfx.draw_text(offset_x + 20, offset_y + DEMO_HEIGHT - 30, "JUMP ENGAGED", 0xFFAA6654, 3);
       } else {
-        gfx.draw_text(offset_x + 10, offset_y + DEMO_HEIGHT - 15,
-                      STAR_NAMES[s->central_star.name_index], 0xFFAA6654, 2);
+        oprintf("gfx text draw: x=%d, y=%d, text=%s\n", offset_x + 20, offset_y + DEMO_HEIGHT - 30,
+                STAR_NAMES[s->central_star.name_index]);
+        gfx.draw_text(offset_x + 20, offset_y + DEMO_HEIGHT - 30, STAR_NAMES[s->central_star.name_index], 0xFFAA6654,
+                      3);
       }
 
       // Flush to display

@@ -39,6 +39,7 @@ SyscallResult syscall(int sysno, int arg0, int arg1, int arg2) {
 
 void ou_exit(void) { syscall(OU_EXIT, 0, 0, 0); }
 void ou_yield(void) { syscall(OU_YIELD, 0, 0, 0); }
+void ou_shutdown(void) { syscall(OU_SHUTDOWN, 0, 0, 0); }
 void *ou_alloc_page(void) { return (void *)syscall(OU_ALLOC_PAGE, 0, 0, 0).a0; }
 
 PageAddr ou_get_sys_page(int type, int msg_idx) { return PageAddr(syscall(OU_GET_SYS_PAGE, type, msg_idx, 0).a0); }

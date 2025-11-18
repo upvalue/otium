@@ -29,6 +29,12 @@ __attribute__((noreturn)) void ou_exit(void) {
     ;
 }
 
+void ou_shutdown(void) {
+  oprintf("Shutdown syscall invoked by process %s (pid=%d)\n", current_proc->name, current_proc->pid);
+  shutdown_all_processes();
+  // shutdown_all_processes calls kernel_exit() and never returns
+}
+
 void *ou_alloc_page(void) {
   PageAddr result = process_alloc_mapped_page(current_proc, true, true, false);
   return result.as_ptr();

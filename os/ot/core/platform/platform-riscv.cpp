@@ -292,6 +292,11 @@ void handle_syscall(struct trap_frame *f) {
     }
     break;
   }
+  case OU_SHUTDOWN:
+    oprintf("Shutdown syscall invoked by process %s (pid=%d)\n", current_proc->name, current_proc->pid);
+    shutdown_all_processes();
+    // shutdown_all_processes calls kernel_exit() and never returns
+    break;
   default:
     PANIC("unexpected syscall sysno=%x\n", sysno);
   }

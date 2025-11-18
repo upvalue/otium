@@ -4,12 +4,11 @@
 #include "ot/lib/mpack/mpack-reader.hpp"
 #include "ot/lib/mpack/mpack-utils.hpp"
 #include "ot/lib/mpack/mpack-writer.hpp"
-#include "ot/user/prog-scratch.h"
-#include "ot/user/prog-shell.h"
+#include "ot/user/prog.h"
 #include "ot/user/user.hpp"
 #include "ot/vendor/tlsf/tlsf.h"
 
-enum ProgramType { UNKNOWN, SHELL, SCRATCH };
+enum ProgramType { UNKNOWN, SHELL, SCRATCH, SPACEDEMO };
 
 ProgramType determine_program_type() {
   PageAddr arg_page = ou_get_arg_page();
@@ -53,6 +52,9 @@ ProgramType determine_program_type() {
     if (arg.equals("scratch")) {
       return SCRATCH;
     }
+    if (arg.equals("spacedemo")) {
+      return SPACEDEMO;
+    }
   }
 
   return UNKNOWN;
@@ -65,6 +67,8 @@ void user_program_main(void) {
     shell_main();
   } else if (program_type == SCRATCH) {
     scratch_main();
+  } else if (program_type == SPACEDEMO) {
+    spacedemo_main();
   } else {
     const char *str = "unknown program type, exiting\n";
     ou_io_puts(str, strlen(str));

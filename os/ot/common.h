@@ -20,6 +20,8 @@ extern "C" {
 #endif
 
 typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
+typedef short int16_t;
 typedef int int32_t;
 typedef unsigned int uint32_t;
 typedef long long int64_t;
@@ -32,11 +34,11 @@ typedef uint32_t uintptr_t;
 
 #define is_aligned(value, align) __builtin_is_aligned(value, align)
 
-#define OT_SOFT_ASSERT(msg, condition)                                         \
-  do {                                                                         \
-    if (!(condition)) {                                                        \
-      oprintf("SOFT-ASSERT: %s\n", msg);                                       \
-    }                                                                          \
+#define OT_SOFT_ASSERT(msg, condition)                                                                                 \
+  do {                                                                                                                 \
+    if (!(condition)) {                                                                                                \
+      oprintf("SOFT-ASSERT: %s\n", msg);                                                                               \
+    }                                                                                                                  \
   } while (0)
 
 // These are common C stdlib-like functions, callable from anyhwere
@@ -72,11 +74,12 @@ int oputsn(const char *str, int n);
 #define OU_EXIT 4
 #define OU_ALLOC_PAGE 5
 #define OU_GET_SYS_PAGE 6
-#define OU_IO_PUTS 7       // Writes a string in the comm page to the console
-#define OU_PROC_LOOKUP 8   // Look up a process by name
-#define OU_IPC_SEND 9      // Send IPC message to a process
-#define OU_IPC_RECV 10     // Receive IPC message (blocks if none available)
-#define OU_IPC_REPLY 11    // Reply to IPC sender
+#define OU_IO_PUTS 7     // Writes a string in the comm page to the console
+#define OU_PROC_LOOKUP 8 // Look up a process by name
+#define OU_IPC_SEND 9    // Send IPC message to a process
+#define OU_IPC_RECV 10   // Receive IPC message (blocks if none available)
+#define OU_IPC_REPLY 11  // Reply to IPC sender
+#define OU_SHUTDOWN 12   // Shutdown all processes and exit the kernel
 
 // Arguments to the get sys page
 #define OU_SYS_PAGE_ARG 0

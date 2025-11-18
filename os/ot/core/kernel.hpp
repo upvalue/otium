@@ -171,6 +171,7 @@ Process *process_lookup(const StringView &name);
 /** Looks up a process by PID, returns nullptr if process not runnable */
 Process *process_lookup(int pid);
 void process_exit(Process *proc);
+void shutdown_all_processes(void);
 
 // Gets the argument page pointer of the current process if possible
 PageAddr process_get_arg_page();

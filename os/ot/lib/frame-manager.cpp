@@ -1,5 +1,5 @@
 // frame-manager.cpp - Simple frame rate manager implementation
-#include "ot/user/graphics/frame-manager.hpp"
+#include "ot/lib/frame-manager.hpp"
 
 namespace graphics {
 

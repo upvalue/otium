@@ -1,12 +1,12 @@
 // prog-scratch.cpp - Scratch program for testing and experimentation
 #include "ot/lib/messages.hpp"
 #include "ot/user/gen/graphics-client.hpp"
-#include "ot/user/graphics/frame-manager.hpp"
+#include "ot/lib/frame-manager.hpp"
 #include "ot/user/local-storage.hpp"
 #include "ot/user/string.hpp"
 #include "ot/user/user.hpp"
 
-#include "ot/user/prog-scratch.h"
+#include "ot/user/prog.h"
 
 // Scratch-specific storage inheriting from LocalStorage
 struct ScratchStorage : public LocalStorage {

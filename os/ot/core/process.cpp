@@ -216,6 +216,19 @@ void process_exit(Process *proc) {
   proc->state = UNUSED;
 }
 
+void shutdown_all_processes(void) {
+  oprintf("Shutting down all processes...\n");
+  for (int i = 0; i < PROCS_MAX; i++) {
+    Process *proc = &procs[i];
+    if (proc->state != UNUSED) {
+      oprintf("Terminating process %s (pid=%d)\n", proc->name, proc->pid);
+      proc->state = TERMINATED;
+    }
+  }
+  oprintf("All processes terminated, exiting kernel\n");
+  kernel_exit();
+}
+
 PageAddr process_get_arg_page() {
   PageAddr paddr = PageAddr(nullptr);
   if (current_proc == nullptr) {

@@ -46,10 +46,10 @@ void kernel_prog_default() {
   Arguments shell_args = {1, shell_argv};
   process_create("shell", (const void *)user_program_main, &shell_args, false);
 
-  // create scratch process (graphics demo)
-  char *scratch_argv[] = {(char *)"scratch"};
-  Arguments scratch_args = {1, scratch_argv};
-  process_create("scratch", (const void *)user_program_main, &scratch_args, false);
+  // create spacedemo process (graphics demo)
+  char *spacedemo_argv[] = {(char *)"spacedemo"};
+  Arguments spacedemo_args = {1, spacedemo_argv};
+  process_create("spacedemo", (const void *)user_program_main, &spacedemo_args, false);
 }
 
 // Kernel startup - initializes kernel and creates initial processes

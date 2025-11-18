@@ -6,7 +6,7 @@
 #include "ot/user/tcl.hpp"
 #include "ot/user/user.hpp"
 
-#include "ot/user/prog-shell.h"
+#include "ot/user/prog.h"
 
 #include "ot/user/gen/tcl-vars.hpp"
 
@@ -150,6 +150,15 @@ void shell_main() {
         return tcl::S_OK;
       },
       nullptr, "[quit] - Quit the shell");
+
+  // Register shutdown command - terminates all processes and exits kernel
+  i.register_command(
+      "shutdown",
+      [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
+        ou_shutdown();
+        return tcl::S_OK; // Never reached
+      },
+      nullptr, "[shutdown] - Shutdown all processes and exit the kernel");
 
   // cause a crash by dereferencing a random addr
   i.register_command(

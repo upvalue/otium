@@ -50,4 +50,5 @@ USER_SOURCES+=(
   ot/user/gen/graphics-client.cpp
   ot/user/gen/graphics-server.cpp
   ot/user/graphics/impl.cpp
+  ot/user/graphics/frame-manager.cpp
 )

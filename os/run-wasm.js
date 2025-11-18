@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 
 // run-wasm.js - Node.js test runner for Otium OS WASM build
+//
+// Graphics Support:
+// - Graphics runs in headless mode by default (operations complete, no visual output)
+// - For visual graphics output with SDL window, install @kmamal/sdl:
+//   npm install @kmamal/sdl
+// - When enabled, graphics will render in a native SDL window
 
 
 const fs = require('fs');
@@ -22,8 +28,96 @@ let rl = null;
 // Buffer to accumulate output
 let outputBuffer = '';
 
+
+// Graphics setup for Node.js using SDL
+// Note: We delay loading SDL until graphicsInit is called to avoid conflicts
+let sdl = null;
+let sdlAvailable = false;
+let window = null;
+
+// Check if SDL is available without loading it yet
+try {
+  require.resolve('@kmamal/sdl');
+  sdlAvailable = true;
+  console.log('@kmamal/sdl found - graphics will be enabled');
+} catch (e) {
+  console.log('@kmamal/sdl not installed - graphics will run in headless mode');
+  console.log('To enable graphics: npm install @kmamal/sdl');
+}
+
 // Module configuration
 const Module = {
+  // Graphics callbacks called from WASM via EM_JS
+  graphicsInit: function(width, height) {
+    console.log(`Graphics init: ${width}x${height}`);
+
+    if (!sdlAvailable) {
+      console.log('Graphics running in headless mode');
+      return true; // Return true to allow headless operation
+    }
+
+    try {
+      // Lazy load SDL now that we need it
+      if (!sdl) {
+        console.log('Loading @kmamal/sdl...');
+        sdl = require('@kmamal/sdl');
+      }
+
+      // Create SDL window with RGBA format
+      window = sdl.video.createWindow({
+        title: 'Otium OS',
+        width: width,
+        height: height,
+        resizable: false,
+      });
+
+      console.log('SDL window created successfully');
+      return true;
+    } catch (e) {
+      console.error('Failed to initialize graphics:', e);
+      console.error('SDL graphics will be disabled. Continuing in headless mode.');
+      sdlAvailable = false; // Disable for future calls
+      return true; // Return true to continue in headless mode
+    }
+  },
+
+  graphicsFlush: function(pixels, width, height) {
+    if (!sdl || !window) {
+      // Headless mode - skip rendering
+      return;
+    }
+
+    try {
+      // pixels is a Uint32Array view into WASM memory (BGRA format)
+      // SDL expects RGBA, so we need to convert
+      const buffer = Buffer.allocUnsafe(width * height * 4);
+
+      for (let i = 0; i < width * height; i++) {
+        const pixel = pixels[i];
+        const offset = i * 4;
+
+        // WASM has BGRA (0xAARRGGBB), SDL wants RGBA
+        buffer[offset + 0] = (pixel >> 16) & 0xFF; // R
+        buffer[offset + 1] = (pixel >> 8) & 0xFF;  // G
+        buffer[offset + 2] = pixel & 0xFF;         // B
+        buffer[offset + 3] = (pixel >> 24) & 0xFF; // A
+      }
+
+      // Render to SDL window
+      window.render(width, height, width * 4, 'rgba32', buffer);
+    } catch (e) {
+      console.error('Graphics flush error:', e);
+    }
+  },
+
+  graphicsCleanup: function() {
+    console.log('Graphics cleanup');
+    if (window) {
+      window.destroy();
+      window = null;
+    }
+  },
+
   exit: (status) => {
     console.log('process exited with status', status);
     if (isTestMode) {

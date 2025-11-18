@@ -1,24 +1,34 @@
 // prog-scratch.cpp - Scratch program for testing and experimentation
 #include "ot/lib/messages.hpp"
 #include "ot/user/gen/graphics-client.hpp"
+#include "ot/user/graphics/frame-manager.hpp"
 #include "ot/user/local-storage.hpp"
 #include "ot/user/string.hpp"
 #include "ot/user/user.hpp"
 
 #include "ot/user/prog-scratch.h"
 
-#define SCRATCH_PAGES 5
-
 // Scratch-specific storage inheriting from LocalStorage
 struct ScratchStorage : public LocalStorage {
   ScratchStorage() {
-    // Initialize memory allocator
-    process_storage_init(SCRATCH_PAGES);
+    // Initialize memory allocator with 1 page
+    process_storage_init(1);
   }
 };
 
+// Simple PRNG for visual randomness
+static uint32_t rng_state = 0x12345678;
+
+uint32_t simple_rand() {
+  // Xorshift32
+  rng_state ^= rng_state << 13;
+  rng_state ^= rng_state >> 17;
+  rng_state ^= rng_state << 5;
+  return rng_state;
+}
+
 void scratch_main() {
-  oprintf("SCRATCH: Graphics demo starting\n");
+  oprintf("SCRATCH: Purple static demo starting\n");
 
   // Get the storage page and initialize ScratchStorage
   void *storage_page = ou_get_storage().as_ptr();
@@ -51,21 +61,42 @@ void scratch_main() {
 
   oprintf("SCRATCH: Got framebuffer at 0x%lx, %lux%lu\n", fb_info.fb_ptr, fb_info.width, fb_info.height);
 
-  // Fill entire screen with blue (BGRA format: 0xAABBGGRR)
-  for (uint32_t i = 0; i < width * height; i++) {
-    fb[i] = 0xFF0000FF; // Blue in BGRA
+  // Animate purple static at 30 FPS
+  graphics::FrameManager fm(30); // Target 30 FPS
+
+  const int num_frames = 60; // Run for 60 frames
+  int frames_rendered = 0;
+
+  while (frames_rendered < num_frames) {
+    if (fm.begin_frame()) {
+      // Fill screen with random purplish static
+      for (uint32_t i = 0; i < width * height; i++) {
+        uint32_t rand_val = simple_rand();
+
+        // Create purplish colors by biasing red and blue channels
+        uint8_t r = (rand_val & 0xFF);
+        uint8_t g = (rand_val >> 8) & 0x7F;    // Less green (darker)
+        uint8_t b = ((rand_val >> 16) & 0xFF); // Full blue range
+
+        // BGRA format: 0xAARRGGBB
+        fb[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+      }
+
+      // Flush to display
+      auto flush_result = client.flush();
+      if (flush_result.is_err()) {
+        oprintf("SCRATCH: Flush failed: %d\n", flush_result.error());
+        break;
+      }
+
+      fm.end_frame();
+      frames_rendered++;
+    }
+
+    // Always yield to cooperate with other processes
+    ou_yield();
   }
 
-  oprintf("SCRATCH: Filled screen with blue\n");
-
-  // Flush to display
-  auto flush_result = client.flush();
-  if (flush_result.is_ok()) {
-    oprintf("SCRATCH: Flushed framebuffer\n");
-  } else {
-    oprintf("SCRATCH: Flush failed: %d\n", flush_result.error());
-  }
-
-  oprintf("SCRATCH: Graphics demo complete\n");
+  oprintf("SCRATCH: Purple static demo complete (%d frames)\n", num_frames);
   ou_exit();
 }

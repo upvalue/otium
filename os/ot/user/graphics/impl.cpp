@@ -5,6 +5,10 @@
 #include "ot/user/graphics/backend-test.hpp"
 #elif OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_VIRTIO
 #include "ot/user/graphics/backend-virtio.hpp"
+#elif OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_SDL
+#include "ot/user/graphics/backend-sdl.hpp"
+#elif OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_WASM
+#include "ot/user/graphics/backend-wasm.hpp"
 #endif
 
 // Placement new operator (required for freestanding environment)
@@ -72,6 +76,18 @@ void proc_graphics(void) {
   }
 
   VirtioGraphicsBackend &backend = *backend_ptr;
+#elif OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_SDL
+  oprintf("Using SDL graphics backend\n");
+  // Use placement new to avoid static initialization guards
+  static char backend_buffer[sizeof(SdlGraphicsBackend)] __attribute__((aligned(alignof(SdlGraphicsBackend))));
+  SdlGraphicsBackend *backend_ptr = new (backend_buffer) SdlGraphicsBackend();
+  SdlGraphicsBackend &backend = *backend_ptr;
+#elif OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_WASM
+  oprintf("Using WASM graphics backend\n");
+  // Use placement new to avoid static initialization guards
+  static char backend_buffer[sizeof(WasmGraphicsBackend)] __attribute__((aligned(alignof(WasmGraphicsBackend))));
+  WasmGraphicsBackend *backend_ptr = new (backend_buffer) WasmGraphicsBackend();
+  WasmGraphicsBackend &backend = *backend_ptr;
 #else
 #error "Unknown graphics backend"
 #endif

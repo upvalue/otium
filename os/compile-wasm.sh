@@ -17,7 +17,6 @@ set -x
 CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_WASM"
 CFLAGS="$COMMON_CFLAGS"
 
-# WASM only supports test backend (no VirtIO hardware access)
 # Graphics backend sources are included in USER_SOURCES via build-common.sh
 GRAPHICS_SOURCES=()
 

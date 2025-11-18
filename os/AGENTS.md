@@ -250,6 +250,61 @@ when processes are killed or exit the pages are returned to the OS. Pages can be
 and executable and processes can only access pages directly belonging to them, but this enforcement
 only happens on RISC-V (as WASM doesn't have a mechanism for doing so).
 
+### Graphics
+
+The OS includes a framebuffer-based graphics system accessible via IPC. Graphics are provided by a server process that manages the framebuffer and exposes it to clients.
+
+**Backends** (configured with `./config.sh --graphics-backend=<type>`):
+- **test** - 16x16 framebuffer, prints hex dump on flush (for testing)
+- **virtio** - VirtIO GPU for RISC-V/QEMU (1024x600, hardware accelerated)
+- **sdl** - SDL2 for Emscripten builds only
+- **wasm** - WebAssembly backend (640x480, works in browser and Node.js)
+
+**Pixel format**: 32-bit BGRA (`0xAARRGGBB`)
+
+**IPC API** (see `services/graphics.yml`):
+```cpp
+#include "ot/user/gen/graphics-client.hpp"
+
+GraphicsClient client(graphics_pid);
+auto fb = client.get_framebuffer();  // Returns {fb_ptr, width, height}
+uint32_t *pixels = (uint32_t *)fb.value().fb_ptr;
+pixels[y * width + x] = 0xFF0000FF;  // Blue pixel
+client.flush();  // Display framebuffer
+```
+
+**Building**:
+```bash
+./build-wasm-graphics.sh           # WASM with graphics
+./config.sh --graphics-backend=virtio && ./compile-riscv.sh  # RISC-V with VirtIO
+```
+
+**WASM platforms**:
+- Node.js with SDL: Install `@kmamal/sdl` for native window (zero-copy WASM memory access)
+- Node.js headless: Graphics operations succeed but produce no output
+
+**Frame rate management**:
+
+Use `graphics::FrameManager` for consistent frame timing with cooperative yielding:
+
+```cpp
+#include "ot/user/graphics/frame-manager.hpp"
+
+graphics::FrameManager fm(30);  // Target 30 FPS
+
+while (running) {
+  if (fm.begin_frame()) {
+    // Render only when enough time has passed
+    draw_scene();
+    client.flush();
+    fm.end_frame();
+  }
+  ou_yield();  // Always yield for cooperation
+}
+```
+
+The frame manager automatically skips rendering when the process is yielded back too quickly, preventing wasted work.
+
 ## Testing
 
 ### Unit tests

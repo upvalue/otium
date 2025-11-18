@@ -254,7 +254,7 @@ void handle_syscall(struct trap_frame *f) {
       f->a5 = current_proc->pending_message.args[2];
       current_proc->has_pending_message = false;
     } else {
-      TRACE_IPC(LSOFT, "Process %d entering IPC_WAIT", current_proc->pid);
+      TRACE_IPC(LLOUD, "Process %d entering IPC_WAIT", current_proc->pid);
       current_proc->state = IPC_WAIT;
       yield();
       // Will resume here when message arrives
@@ -270,8 +270,7 @@ void handle_syscall(struct trap_frame *f) {
   }
   case OU_IPC_REPLY: {
     // RISC-V: a0=error_code, a1=values[0], a2=values[1], a4=values[2]
-    TRACE_IPC(LLOUD, "Process %d replying: error=%d, values=[%d, %d, %d]", current_proc->pid, arg0, arg1, f->a2,
-              f->a4);
+    TRACE_IPC(LLOUD, "Process %d replying: error=%d, values=[%d, %d, %d]", current_proc->pid, arg0, arg1, f->a2, f->a4);
 
     if (current_proc->blocked_sender) {
       Process *sender = current_proc->blocked_sender;

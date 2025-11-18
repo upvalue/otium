@@ -67,7 +67,7 @@ IpcResponse ou_ipc_send(int pid, uintptr_t flags, intptr_t method, intptr_t arg0
   // Pack method and flags into single value
   uintptr_t method_and_flags = IPC_PACK_METHOD_FLAGS(method, flags);
 
-  TRACE_IPC(LSOFT, "IPC send from %d to %d, method=%d, flags=%x", current_proc->pid, pid, method, flags);
+  TRACE_IPC(LLOUD, "IPC send from %d to %d, method=%d, flags=%x", current_proc->pid, pid, method, flags);
 
   Process *target = process_lookup(pid);
   if (!target) {
@@ -125,7 +125,7 @@ IpcMessage ou_ipc_recv(void) {
     current_proc->has_pending_message = false;
     return msg;
   } else {
-    TRACE_IPC(LSOFT, "Process %d entering IPC_WAIT", current_proc->pid);
+    TRACE_IPC(LLOUD, "Process %d entering IPC_WAIT", current_proc->pid);
     current_proc->state = IPC_WAIT;
     yield();
     // Will resume here when message arrives

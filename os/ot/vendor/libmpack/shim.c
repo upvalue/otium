@@ -19,6 +19,3 @@ typedef int bool;
     }                                                                          \
   } while (0)
 #endif
-
-// Disable floating point support to avoid soft-float dependencies
-#define MPACK_DISABLE_FLOAT 1

@@ -106,6 +106,11 @@ const Module = {
       // Render to SDL window
       window.render(width, height, width * 4, 'rgba32', buffer);
     } catch (e) {
+      // Check if window was destroyed (user closed it)
+      if (e.message && e.message.includes('window is destroyed')) {
+        console.log('\nWindow closed by user, exiting...');
+        process.exit(0);
+      }
       console.error('Graphics flush error:', e);
     }
   },

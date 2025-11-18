@@ -17,7 +17,8 @@ set -x
 CPPFLAGS="$COMMON_CPPFLAGS -DOT_ARCH_WASM"
 CFLAGS="$COMMON_CFLAGS"
 
-# Use test backend for WASM (no VirtIO support)
+# WASM only supports test backend (no VirtIO hardware access)
+# Graphics backend sources are included in USER_SOURCES via build-common.sh
 GRAPHICS_SOURCES=()
 
 # Emscripten-specific flags
@@ -38,7 +39,6 @@ $CC $CPPFLAGS $CFLAGS "${EMFLAGS[@]}" -o bin/os.js \
     "${DRIVER_SOURCES[@]}" \
     "${LIB_SOURCES[@]}" \
     "${USER_SOURCES[@]}" \
-    "${GRAPHICS_SOURCES[@]}" \
     ot/core/platform/platform-wasm.cpp \
     ot/lib/platform/shared-wasm.cpp \
     ot/core/platform/user-wasm.cpp

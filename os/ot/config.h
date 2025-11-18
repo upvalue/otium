@@ -60,4 +60,11 @@
 // Selected graphics backend (configured by config.sh)
 #define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_TEST
 
+// Compile-time validation: WASM only supports test backend
+#ifdef OT_ARCH_WASM
+#if OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_VIRTIO
+#error "VirtIO graphics backend is not supported on WASM. Use test backend instead."
+#endif
+#endif
+
 #endif

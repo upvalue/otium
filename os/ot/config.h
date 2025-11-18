@@ -31,7 +31,7 @@
 #define KERNEL_PROG_TEST_GRAPHICS 8
 
 // Selected kernel program (modified by config.sh)
-#define KERNEL_PROG KERNEL_PROG_TEST_GRAPHICS
+#define KERNEL_PROG KERNEL_PROG_SHELL
 
 // Log levels
 #define LSILENT 0
@@ -58,7 +58,7 @@
 #define OT_GRAPHICS_BACKEND_VIRTIO 1
 
 // Selected graphics backend (configured by config.sh)
-#define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_TEST
+#define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_VIRTIO
 
 // Compile-time validation: WASM only supports test backend
 #ifdef OT_ARCH_WASM

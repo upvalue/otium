@@ -35,12 +35,21 @@ void proc_fibonacci_server(void) {
  */
 void kernel_prog_default() {
   // create fibonacci ipc server
-
   Process *proc_fib = process_create("fib", (const void *)proc_fibonacci_server, nullptr, false);
 
+  // create graphics driver (proc_graphics is defined in ot/user/graphics/impl.cpp)
+  extern void proc_graphics(void);
+  process_create("graphics", (const void *)proc_graphics, nullptr, false);
+
+  // create shell process
   char *shell_argv[] = {(char *)"shell"};
   Arguments shell_args = {1, shell_argv};
   process_create("shell", (const void *)user_program_main, &shell_args, false);
+
+  // create scratch process (graphics demo)
+  char *scratch_argv[] = {(char *)"scratch"};
+  Arguments scratch_args = {1, scratch_argv};
+  process_create("scratch", (const void *)user_program_main, &scratch_args, false);
 }
 
 // Kernel startup - initializes kernel and creates initial processes

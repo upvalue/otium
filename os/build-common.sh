@@ -32,6 +32,7 @@ LIB_SOURCES=(
 # User program source files
 USER_SOURCES=(
   ot/user/user-main.cpp
+  ot/user/prog-scratch.cpp
   ot/user/prog-shell.cpp
   ot/user/tcl.cpp
   ot/user/string.cpp

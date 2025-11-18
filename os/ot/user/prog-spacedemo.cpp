@@ -1,14 +1,13 @@
 // prog-spacedemo.cpp - DOS Space Demo port
 #include "ot/lib/frame-manager.hpp"
 #include "ot/lib/gfx-util.hpp"
+#include "ot/lib/math.hpp"
 #include "ot/lib/messages.hpp"
 #include "ot/user/gen/graphics-client.hpp"
 #include "ot/user/local-storage.hpp"
 #include "ot/user/prog.h"
 #include "ot/user/string.hpp"
 #include "ot/user/user.hpp"
-
-#include <math.h> // For cosf, sinf
 
 // Constants
 static const int DEMO_WIDTH = 320;
@@ -150,8 +149,8 @@ void draw_background_stars(SpaceDemoStorage *s, gfx::GfxUtil &gfx,
 void reset_debris(Debris *d) {
   float angle = randf() * 3.14159f * 2.0f;
   float radius = randf() * 60.0f + 90.0f;
-  d->x = cosf(angle) * radius;
-  d->y = sinf(angle) * radius;
+  d->x = ou_cosf(angle) * radius;
+  d->y = ou_sinf(angle) * radius;
   d->z = randf() * 800.0f + 200.0f;
   d->speed = (randf() * 3.0f + 1.0f) * 0.8f;
   d->color = get_debris_color(xorshift32());
@@ -211,8 +210,8 @@ int init_hyperspace_timer() { return 300 + (xorshift32() % 301); }
 void init_star(SpaceDemoStorage *s) {
   float angle = randf() * 3.14159f * 2.0f;
   float radius = randf() * 70.0f + 50.0f;
-  s->central_star.x = cosf(angle) * radius;
-  s->central_star.y = sinf(angle) * radius;
+  s->central_star.x = ou_cosf(angle) * radius;
+  s->central_star.y = ou_sinf(angle) * radius;
   s->central_star.z = 1000.0f;
 
   float arrival_time = (float)s->hyperspace_cycle_time * 0.9f;

@@ -8,6 +8,8 @@
 // In kernel mode, use custom implementations
 #include "ot/common.h"
 
+#define MPACK_DISABLE_FLOAT 1
+
 typedef int bool;
 #define memset omemset
 

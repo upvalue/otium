@@ -23,8 +23,10 @@ pkgs.stdenv.mkDerivation {
     # Fix shebangs for Nix environment
     patchShebangs config.sh compile-wasm.sh
 
-    # Generate ot/config.h using config.sh
-    ${if testMode != null then "./config.sh --test-${testMode}" else "./config.sh --default"}
+    # Generate ot/config.h using config.sh with WASM backend (no SDL2 dependency)
+    ${if testMode != null
+      then "./config.sh --test-${testMode} --graphics-backend=wasm"
+      else "./config.sh --graphics-backend=wasm"}
 
     # Build using compile-wasm.sh
     ./compile-wasm.sh
@@ -32,13 +34,13 @@ pkgs.stdenv.mkDerivation {
 
   installPhase = ''
     mkdir -p $out/lib
-    cp bin/kernel.js $out/lib/
-    cp bin/kernel.wasm $out/lib/
+    cp bin/os.js $out/lib/
+    cp bin/os.wasm $out/lib/
 
     echo ""
     echo "Output files:"
-    echo "  $out/lib/kernel.js"
-    echo "  $out/lib/kernel.wasm"
+    echo "  $out/lib/os.js"
+    echo "  $out/lib/os.wasm"
   '';
 
   meta = with pkgs.lib; {

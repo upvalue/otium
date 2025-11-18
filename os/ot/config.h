@@ -60,7 +60,7 @@
 #define OT_GRAPHICS_BACKEND_WASM 3
 
 // Selected graphics backend (configured by config.sh)
-#define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_WASM
+#define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_SDL
 
 // Compile-time validation: WASM only supports test and SDL backends
 #ifdef OT_ARCH_WASM

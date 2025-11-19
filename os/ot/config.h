@@ -59,7 +59,7 @@
 #define OT_GRAPHICS_BACKEND_WASM 2
 
 // Selected graphics backend (configured by config.sh)
-#define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_VIRTIO
+#define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_WASM
 
 // Compile-time validation: WASM only supports test and wasm backends
 #ifdef OT_ARCH_WASM

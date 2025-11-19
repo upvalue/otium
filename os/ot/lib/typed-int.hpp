@@ -19,8 +19,7 @@
  *
  * This prevents accidentally passing a Pid where a Pidx is expected.
  */
-template <typename T, typename Tag>
-class TypedInt {
+template <typename T, typename Tag> class TypedInt {
 private:
   T value_;
 
@@ -38,19 +37,19 @@ public:
   explicit operator T() const { return value_; }
 
   // Comparison operators (same type only)
-  bool operator==(const TypedInt& other) const { return value_ == other.value_; }
-  bool operator!=(const TypedInt& other) const { return value_ != other.value_; }
-  bool operator<(const TypedInt& other) const { return value_ < other.value_; }
-  bool operator<=(const TypedInt& other) const { return value_ <= other.value_; }
-  bool operator>(const TypedInt& other) const { return value_ > other.value_; }
-  bool operator>=(const TypedInt& other) const { return value_ >= other.value_; }
+  bool operator==(const TypedInt &other) const { return value_ == other.value_; }
+  bool operator!=(const TypedInt &other) const { return value_ != other.value_; }
+  bool operator<(const TypedInt &other) const { return value_ < other.value_; }
+  bool operator<=(const TypedInt &other) const { return value_ <= other.value_; }
+  bool operator>(const TypedInt &other) const { return value_ > other.value_; }
+  bool operator>=(const TypedInt &other) const { return value_ >= other.value_; }
 
   // Comparison with raw sentinel values (for special cases like -1, 0)
   bool operator==(T raw_val) const { return value_ == raw_val; }
   bool operator!=(T raw_val) const { return value_ != raw_val; }
 
   // Increment/decrement (useful for counters)
-  TypedInt& operator++() {
+  TypedInt &operator++() {
     ++value_;
     return *this;
   }
@@ -61,7 +60,7 @@ public:
     return tmp;
   }
 
-  TypedInt& operator--() {
+  TypedInt &operator--() {
     --value_;
     return *this;
   }
@@ -76,12 +75,12 @@ public:
   TypedInt operator+(T offset) const { return TypedInt(value_ + offset); }
   TypedInt operator-(T offset) const { return TypedInt(value_ - offset); }
 
-  TypedInt& operator+=(T offset) {
+  TypedInt &operator+=(T offset) {
     value_ += offset;
     return *this;
   }
 
-  TypedInt& operator-=(T offset) {
+  TypedInt &operator-=(T offset) {
     value_ -= offset;
     return *this;
   }
@@ -94,9 +93,10 @@ public:
   explicit operator bool() const { return value_ != 0; }
 };
 
-// Tags for different process identifier types
-struct PidTag {};   // Globally unique process ID (never reused)
-struct PidxTag {};  // Process index (0-7, reused when process exits)
+/** Process ID; globally unique identifier for processes (for IPC etc) */
+struct PidTag {};
+/** Process index; kernel-internal index into the process table */
+struct PidxTag {};
 
 // Type definitions
 typedef TypedInt<uintptr_t, PidTag> Pid;

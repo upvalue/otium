@@ -7,6 +7,7 @@
 #include "ot/lib/arguments.hpp"
 #include "ot/lib/ipc.hpp"
 #include "ot/lib/mpack/mpack-writer.hpp"
+#include "ot/lib/typed-int.hpp"
 
 // system calls
 // Note: oputchar/ogetchar are also declared in common.h with C linkage
@@ -19,7 +20,7 @@ void ou_yield(void);
 void ou_exit(void);
 void ou_shutdown(void);
 void *ou_alloc_page(void);
-IpcResponse ou_ipc_send(int pid, uintptr_t flags, intptr_t method, intptr_t arg0, intptr_t arg1, intptr_t arg2);
+IpcResponse ou_ipc_send(Pid target_pid, uintptr_t flags, intptr_t method, intptr_t arg0, intptr_t arg1, intptr_t arg2);
 IpcMessage ou_ipc_recv(void);
 void ou_ipc_reply(IpcResponse response);
 
@@ -28,7 +29,7 @@ PageAddr ou_get_comm_page(void);
 PageAddr ou_get_storage(void);
 int ou_io_puts(const char *str, int size);
 
-int ou_proc_lookup(const char *name);
+Pid ou_proc_lookup(const char *name);
 
 /**
  * Sets up arguments passed to the process or a nullptr if no

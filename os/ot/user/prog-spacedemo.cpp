@@ -348,8 +348,8 @@ void spacedemo_main() {
   ou_yield();
 
   // Look up graphics driver
-  int gfx_pid = ou_proc_lookup("graphics");
-  if (gfx_pid == 0) {
+  Pid gfx_pid = ou_proc_lookup("graphics");
+  if (gfx_pid == PID_NONE) {
     oprintf("SPACEDEMO: Failed to find graphics driver\n");
     ou_exit();
   }

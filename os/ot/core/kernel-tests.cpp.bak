@@ -98,8 +98,8 @@ void proc_fibonacci_service(void) {
 void proc_ipc_client(void) {
   ou_yield(); // Let service start first
 
-  Pid fib_pid = ou_proc_lookup("fibonacci");
-  oprintf("TEST: Client found fibonacci service at PID %lu\n", fib_pid.raw());
+  uintptr_t fib_pid = ou_proc_lookup("fibonacci");
+  oprintf("TEST: Client found fibonacci service at PID %lu\n", fib_pid);
 
   int test_values[] = {5, 10, 15};
   for (int i = 0; i < 3; i++) {
@@ -119,7 +119,7 @@ void proc_ipc_client(void) {
 }
 
 // Helper to get all pages allocated to a process
-void get_process_pages(Pidx pidx, uintptr_t *pages, uint32_t *count) {
+void get_process_pages(int32_t pidx, uintptr_t *pages, uint32_t *count) {
   extern PageInfo *page_infos;
   extern uint32_t total_page_count;
 
@@ -190,23 +190,23 @@ void kernel_prog_test_alternate() {
   oprintf("TEST: Starting alternate process test (should print 1234)\n");
   Process *proc_a = process_create("alternate_a", (const void *)proc_alternate_a, nullptr, true);
   Process *proc_b = process_create("alternate_b", (const void *)proc_alternate_b, nullptr, true);
-  TRACE(LSOFT, "created proc_a with name %s, pidx %d, pid %lu", proc_a->name, proc_a->pidx, proc_a->pid);
-  TRACE(LSOFT, "created proc_b with name %s, pidx %d, pid %lu", proc_b->name, proc_b->pidx, proc_b->pid);
+  TRACE(LSOFT, "created proc_a with name %s and pid %d", proc_a->name, proc_a->pid);
+  TRACE(LSOFT, "created proc_b with name %s and pid %d", proc_b->name, proc_b->pid);
   oprintf("TEST: ");
 }
 
 void kernel_prog_test_userspace() {
   oprintf("TEST: Starting userspace demo test\n");
   Process *demo_proc = process_create("userspace_demo", (const void *)proc_userspace_demo, nullptr, false);
-  TRACE(LSOFT, "created demo proc with name %s, pidx %d, pid %lu", demo_proc->name, demo_proc->pidx, demo_proc->pid);
+  TRACE(LSOFT, "created demo proc with name %s and pid %d", demo_proc->name, demo_proc->pid);
 }
 
 void kernel_prog_test_ipc() {
   oprintf("TEST: Starting IPC test\n");
   Process *proc_fib = process_create("fibonacci", (const void *)proc_fibonacci_service, nullptr, false);
   Process *proc_client = process_create("client", (const void *)proc_ipc_client, nullptr, false);
-  TRACE(LSOFT, "created fibonacci service with name %s, pidx %d, pid %lu", proc_fib->name, proc_fib->pidx, proc_fib->pid);
-  TRACE(LSOFT, "created client with name %s, pidx %d, pid %lu", proc_client->name, proc_client->pidx, proc_client->pid);
+  TRACE(LSOFT, "created fibonacci service with name %s and pid %d", proc_fib->name, proc_fib->pid);
+  TRACE(LSOFT, "created client with name %s and pid %d", proc_client->name, proc_client->pid);
 }
 
 // Sentinel variable for dummy PID 1 process
@@ -228,9 +228,9 @@ void proc_ipc_client_ordering(void) {
   ou_yield();
 
   // Look up echo server by name
-  Pid echo_pid = ou_proc_lookup("echo_server");
+  int echo_pid = ou_proc_lookup("echo_server");
 
-  if (echo_pid == PID_NONE) {
+  if (echo_pid == 0) {
     oprintf("TEST: Failed to find echo server\n");
     ou_exit();
   }
@@ -352,8 +352,8 @@ void kernel_prog_test_ipc_codegen() {
 
   Process *proc_fib = process_create("fibonacci", (const void *)proc_fibonacci, nullptr, false);
   Process *proc_client = process_create("client", (const void *)proc_ipc_codegen_client, nullptr, false);
-  TRACE(LSOFT, "created fibonacci server with name %s, pidx %d, pid %lu", proc_fib->name, proc_fib->pidx, proc_fib->pid);
-  TRACE(LSOFT, "created codegen client with name %s, pidx %d, pid %lu", proc_client->name, proc_client->pidx, proc_client->pid);
+  TRACE(LSOFT, "created fibonacci server with name %s and pid %d", proc_fib->name, proc_fib->pid);
+  TRACE(LSOFT, "created codegen client with name %s and pid %d", proc_client->name, proc_client->pid);
 }
 #endif
 
@@ -366,12 +366,12 @@ void proc_graphics_client(void) {
   ou_yield();
 
   // Look up graphics driver
-  Pid gfx_pid = ou_proc_lookup("graphics");
-  if (gfx_pid == PID_NONE) {
+  int gfx_pid = ou_proc_lookup("graphics");
+  if (gfx_pid == 0) {
     oprintf("TEST: Failed to find graphics driver\n");
     ou_exit();
   }
-  oprintf("TEST: Found graphics driver at PID %lu\n", gfx_pid.raw());
+  oprintf("TEST: Found graphics driver at PID %d\n", gfx_pid);
 
   GraphicsClient client(gfx_pid);
 
@@ -450,8 +450,8 @@ void kernel_prog_test_graphics() {
 
   Process *driver = process_create("graphics", (const void *)proc_graphics, nullptr, false);
   Process *client = process_create("gfx_client", (const void *)proc_graphics_client, nullptr, false);
-  TRACE(LSOFT, "created graphics driver with name %s, pidx %d, pid %lu", driver->name, driver->pidx, driver->pid);
-  TRACE(LSOFT, "created graphics client with name %s, pidx %d, pid %lu", client->name, client->pidx, client->pid);
+  TRACE(LSOFT, "created graphics driver with name %s and pid %d", driver->name, driver->pid);
+  TRACE(LSOFT, "created graphics client with name %s and pid %d", client->name, client->pid);
 }
 #endif
 
@@ -466,7 +466,7 @@ void kernel_prog_test() {
 #elif KERNEL_PROG == KERNEL_PROG_TEST_HELLO
   // Test mode: run hello world test (kernel mode)
   Process *test_proc = process_create("test_hello", (const void *)proc_hello_world, nullptr, true);
-  TRACE(LSOFT, "created test proc with name %s, pidx %d, pid %lu", test_proc->name, test_proc->pidx, test_proc->pid);
+  TRACE(LSOFT, "created test proc with name %s and pid %d", test_proc->name, test_proc->pid);
 #elif KERNEL_PROG == KERNEL_PROG_TEST_ALTERNATE
   kernel_prog_test_alternate();
 #elif KERNEL_PROG == KERNEL_PROG_TEST_USERSPACE

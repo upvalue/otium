@@ -38,12 +38,12 @@ void scratch_main() {
   ou_yield();
 
   // Look up graphics driver
-  int gfx_pid = ou_proc_lookup("graphics");
-  if (gfx_pid == 0) {
+  Pid gfx_pid = ou_proc_lookup("graphics");
+  if (gfx_pid == PID_NONE) {
     oprintf("SCRATCH: Failed to find graphics driver\n");
     ou_exit();
   }
-  oprintf("SCRATCH: Found graphics driver at PID %d\n", gfx_pid);
+  oprintf("SCRATCH: Found graphics driver at PID %lu\n", gfx_pid.raw());
 
   GraphicsClient client(gfx_pid);
 

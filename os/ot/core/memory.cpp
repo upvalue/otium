@@ -58,14 +58,14 @@ void memory_init() {
 
     // Skip pages already allocated for PageInfo array
     if (page_addr.raw() < current_page_addr.raw()) {
-      page_infos[i].pid = 0xFFFFFFFF; // Mark as kernel/system page
+      page_infos[i].pidx = Pidx(-1); // Mark as kernel/system page
       page_infos[i].addr = page_addr;
       page_infos[i].next = nullptr;
       continue;
     }
 
     // Initialize as free page
-    page_infos[i].pid = 0;
+    page_infos[i].pidx = PIDX_NONE;
     page_infos[i].addr = page_addr;
     page_infos[i].next = nullptr;
 
@@ -90,12 +90,12 @@ void memory_init() {
         free_list_head);
 }
 
-PageAddr page_allocate(proc_id_t pid, size_t page_count) {
+PageAddr page_allocate(Pidx pidx, size_t page_count) {
   if (!memory_initialized) {
     PANIC("page_allocate called before memory_init");
   }
 
-  TRACE_MEM(LLOUD, "page_allocate: pid=%d, count=%d", pid, page_count);
+  TRACE_MEM(LLOUD, "page_allocate: pidx=%d, count=%d", pidx.raw(), page_count);
 
   if (page_count == 0) {
     PANIC("Cannot allocate 0 pages");
@@ -117,23 +117,23 @@ PageAddr page_allocate(proc_id_t pid, size_t page_count) {
   // Allocate first page (this is what we'll return)
   PageInfo *first_page = free_list_head;
   free_list_head = first_page->next;
-  first_page->pid = pid;
+  first_page->pidx = pidx;
   first_page->next = nullptr;
   omemset(first_page->addr.as_ptr(), 0, OT_PAGE_SIZE);
 
-  TRACE_MEM(LLOUD, "Allocated page at %x to pid %d", first_page->addr.raw(),
-            pid);
+  TRACE_MEM(LLOUD, "Allocated page at %x to pidx %d", first_page->addr.raw(),
+            pidx.raw());
 
   // Allocate remaining pages
   for (size_t i = 1; i < page_count; i++) {
     PageInfo *page_info = free_list_head;
     free_list_head = page_info->next;
-    page_info->pid = pid;
+    page_info->pidx = pidx;
     page_info->next = nullptr;
     omemset(page_info->addr.as_ptr(), 0, OT_PAGE_SIZE);
 
-    TRACE_MEM(LLOUD, "Allocated page at %x to pid %d", page_info->addr.raw(),
-              pid);
+    TRACE_MEM(LLOUD, "Allocated page at %x to pidx %d", page_info->addr.raw(),
+              pidx.raw());
   }
 
   // Update statistics
@@ -155,24 +155,24 @@ PageInfo *page_info_lookup(PageAddr addr) {
   return nullptr;
 }
 
-void page_free_process(proc_id_t pid) {
+void page_free_process(Pidx pidx) {
   if (!memory_initialized) {
     TRACE_MEM(LSOFT, "Memory not initialized, cannot free pages");
     return;
   }
 
-  TRACE_MEM(LSOFT, "page_free_process: pid=%d", pid);
+  TRACE_MEM(LSOFT, "page_free_process: pidx=%d", pidx.raw());
 
   uint32_t freed_count = 0;
 
   // Scan all pages and free those belonging to this process
   for (uint32_t i = 0; i < total_page_count; i++) {
-    if (page_infos[i].pid == pid) {
+    if (page_infos[i].pidx == pidx) {
       // Clear page contents for security
       omemset(page_infos[i].addr.as_ptr(), 0, OT_PAGE_SIZE);
 
       // Mark as free
-      page_infos[i].pid = 0;
+      page_infos[i].pidx = PIDX_NONE;
 
       // Add to free list
       page_infos[i].next = free_list_head;
@@ -180,8 +180,8 @@ void page_free_process(proc_id_t pid) {
 
       freed_count++;
 
-      TRACE_MEM(LLOUD, "Freed page %x from pid %d", page_infos[i].addr.raw(),
-                pid);
+      TRACE_MEM(LLOUD, "Freed page %x from pidx %d", page_infos[i].addr.raw(),
+                pidx.raw());
     }
   }
 
@@ -189,7 +189,7 @@ void page_free_process(proc_id_t pid) {
   mem_stats.allocated_pages -= freed_count;
   mem_stats.freed_pages += freed_count;
 
-  TRACE_MEM(LSOFT, "Freed %d pages from pid %d", freed_count, pid);
+  TRACE_MEM(LSOFT, "Freed %d pages from pidx %d", freed_count, pidx.raw());
 }
 
 void memory_report() {

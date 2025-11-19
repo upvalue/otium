@@ -62,17 +62,17 @@ int ou_io_puts(const char *str, int size) {
   return syscall(OU_IO_PUTS, 0, 0, 0).a0;
 }
 
-int ou_proc_lookup(const char *name) {
+Pid ou_proc_lookup(const char *name) {
   PageAddr comm_page = ou_get_comm_page();
   if (comm_page.is_null()) {
-    return 0;
+    return PID_NONE;
   }
   MPackWriter writer(comm_page.as<char>(), OT_PAGE_SIZE);
   writer.str(name);
-  return syscall(OU_PROC_LOOKUP, 0, 0, 0).a0;
+  return Pid(syscall(OU_PROC_LOOKUP, 0, 0, 0).a0);
 }
 
-IpcResponse ou_ipc_send(int pid, uintptr_t flags, intptr_t method, intptr_t arg0, intptr_t arg1, intptr_t arg2) {
+IpcResponse ou_ipc_send(Pid target_pid, uintptr_t flags, intptr_t method, intptr_t arg0, intptr_t arg1, intptr_t arg2) {
   // Soft assert: ensure method doesn't overflow into flags field (lower 8 bits should be 0)
   if ((method & 0xFF) != 0) {
     oprintf("WARNING: Method ID %d overflows into flags field\n", method);
@@ -81,9 +81,9 @@ IpcResponse ou_ipc_send(int pid, uintptr_t flags, intptr_t method, intptr_t arg0
   // Pack method and flags into single value
   uintptr_t method_and_flags = IPC_PACK_METHOD_FLAGS(method, flags);
 
-  // RISC-V: a0=pid, a1=method_and_flags, a2=arg0, a3=syscall_num
+  // RISC-V: a0=target_pid, a1=method_and_flags, a2=arg0, a3=syscall_num
   // Additional args: a4=arg1, a5=arg2
-  register int a0 __asm__("a0") = pid;
+  register int a0 __asm__("a0") = target_pid.raw();
   register int a1 __asm__("a1") = method_and_flags;
   register int a2 __asm__("a2") = arg0;
   register int a3 __asm__("a3") = OU_IPC_SEND;
@@ -106,7 +106,7 @@ IpcResponse ou_ipc_send(int pid, uintptr_t flags, intptr_t method, intptr_t arg0
 }
 
 IpcMessage ou_ipc_recv(void) {
-  // RISC-V: Returns pid, method_and_flags in a0-a1, args in a2, a4-a5
+  // RISC-V: Returns sender_pid, method_and_flags in a0-a1, args in a2, a4-a5
   register int a0 __asm__("a0") = 0;
   register int a1 __asm__("a1") = 0;
   register int a2 __asm__("a2") = 0;
@@ -122,7 +122,7 @@ IpcMessage ou_ipc_recv(void) {
                        : "memory");
 
   IpcMessage msg;
-  msg.pid = a0;
+  msg.sender_pid = Pid(a0);
   msg.method_and_flags = a1;
   msg.args[0] = a2;
   msg.args[1] = a4;

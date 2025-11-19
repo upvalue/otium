@@ -33,14 +33,14 @@ tcl::Status cmd_proc_lookup(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl:
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
   }
-  int proc_pid = ou_proc_lookup(argv[1].c_str());
-  if (proc_pid == 0) {
+  Pid proc_pid = ou_proc_lookup(argv[1].c_str());
+  if (proc_pid == PID_NONE) {
     osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "proc not found");
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
   }
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%d", proc_pid);
+  osnprintf(buf, sizeof(buf), "%lu", proc_pid.raw());
   i.result = buf;
   return tcl::S_OK;
 }
@@ -55,7 +55,7 @@ tcl::Status cmd_ipc_send(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
   if (!i.int_check("ipc/send", argv, 1)) {
     return tcl::S_ERR;
   }
-  int pid = atoi(argv[1].c_str());
+  Pid pid = Pid((uintptr_t)atoi(argv[1].c_str()));
 
   // Validate and parse method
   if (!i.int_check("ipc/send", argv, 2)) {

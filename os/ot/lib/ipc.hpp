@@ -3,9 +3,10 @@
 
 #include "ot/common.h"
 #include "ot/lib/error-codes.hpp"
+#include "ot/lib/typed-int.hpp"
 
 struct IpcMessage {
-  intptr_t pid;                 // Sender PID (filled by kernel)
+  Pid sender_pid;               // Sender's globally unique PID (filled by kernel)
   uintptr_t method_and_flags;   // Combined: upper bits = method, lower 8 bits = flags
   intptr_t args[3];             // Method-specific arguments (increased from 2 to 3)
 };

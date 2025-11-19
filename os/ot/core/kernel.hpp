@@ -7,6 +7,7 @@
 #include "ot/lib/ipc.hpp"
 #include "ot/lib/pair.hpp"
 #include "ot/lib/string-view.hpp"
+#include "ot/lib/typed-int.hpp"
 
 #ifdef OT_POSIX
 #include <stdlib.h>
@@ -62,10 +63,8 @@ void kernel_exit(void);
 void kernel_common(void);
 
 // memory management
-typedef int32_t proc_id_t;
-
 struct PageInfo {
-  int32_t pid;    // Process ID that owns this page (0 = free)
+  Pidx pidx;      // Process index that owns this page (PIDX_NONE = free)
   PageAddr addr;  // Physical address of the page
   PageInfo *next; // For free list linking
 };
@@ -78,10 +77,10 @@ struct MemoryStats {
   uint32_t peak_usage_pages;
 };
 
-PageAddr page_allocate(proc_id_t pid, size_t page_count);
+PageAddr page_allocate(Pidx pidx, size_t page_count);
 /** Look up PageInfo given an address. */
 PageInfo *page_info_lookup(PageAddr);
-void page_free_process(proc_id_t pid);
+void page_free_process(Pidx pidx);
 void memory_init();
 void memory_report();
 void memory_increment_process_count();
@@ -103,9 +102,16 @@ extern "C" char *__free_ram, *__free_ram_end;
 
 enum ProcessState { UNUSED, RUNNABLE, TERMINATED, IPC_WAIT };
 
+// Globally unique process ID counter (never reused)
+extern Pid proc_pid_counter;
+
+// Lookup table: indexed by pidx, contains pid (PID_NONE if unused)
+extern Pid process_pids[PROCS_MAX];
+
 struct Process {
   char name[32];
-  int pid;
+  Pidx pidx;             // Process index (0-7, reused) - kernel internal only
+  Pid pid;               // Process ID (globally unique, never reused) - user-facing
   ProcessState state;
 
   // TODO: Not necessary on WASM
@@ -159,17 +165,20 @@ inline bool process_is_running(const Process *p) {
   return p->state == RUNNABLE || p->state == IPC_WAIT;
 }
 
+// Helper to find pidx from pid (returns PIDX_INVALID if not found)
+Pidx process_lookup_by_pid(Pid pid);
+
 // Process management subsystem
-Process *process_create_impl(Process *table, proc_id_t max_procs,
+Process *process_create_impl(Process *table, int max_procs,
                              const char *name, const void *entry_point,
                              Arguments *args, bool kernel_mode = false);
 Process *process_create(const char *name, const void *entry_point, Arguments *args, bool kernel_mode = false);
 Process *process_next_runnable(void);
-/** Looks up a process by name. Returns highest PID process that matches
- * (conflicts are allowed). */
-Process *process_lookup(const StringView &name);
-/** Looks up a process by PID, returns nullptr if process not runnable */
-Process *process_lookup(int pid);
+/** Looks up a process by name. Returns pid (globally unique, user-facing).
+ * Returns highest pidx process that matches (conflicts are allowed). */
+Pid process_lookup(const StringView &name);
+/** Internal: Looks up a process by pidx, returns nullptr if process not runnable */
+Process *process_lookup_by_pidx(Pidx pidx);
 void process_exit(Process *proc);
 void shutdown_all_processes(void);
 
@@ -185,6 +194,9 @@ PageAddr process_get_storage_page();
 PageAddr process_alloc_mapped_page(Process *proc, bool readable,
                                    bool writable,
                                    bool executable);
+
+// map_page() not used in physical-only mode
+void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr, uint32_t flags, Pidx pidx);
 
 extern Process *idle_proc, *current_proc;
 extern Process procs[PROCS_MAX];
@@ -205,8 +217,5 @@ void scheduler_loop(void);
 // Physical memory only - no virtual addressing
 // USER_CODE_BASE and HEAP_BASE removed (not needed without MMU)
 #define SSTATUS_SPIE (1 << 5)
-
-// map_page() not used in physical-only mode
-void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr, uint32_t flags, proc_id_t pid);
 
 #endif

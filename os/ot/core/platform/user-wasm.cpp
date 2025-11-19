@@ -30,7 +30,7 @@ __attribute__((noreturn)) void ou_exit(void) {
 }
 
 void ou_shutdown(void) {
-  oprintf("Shutdown syscall invoked by process %s (pid=%d)\n", current_proc->name, current_proc->pid);
+  oprintf("Shutdown syscall invoked by process %s (pidx=%d, pid=%lu)\n", current_proc->name, current_proc->pidx, current_proc->pid);
   shutdown_all_processes();
   // shutdown_all_processes calls kernel_exit() and never returns
 }
@@ -46,9 +46,9 @@ PageAddr ou_get_comm_page(void) { return process_get_comm_page(); }
 
 PageAddr ou_get_storage(void) { return process_get_storage_page(); }
 
-int ou_proc_lookup(const char *name) {
-  Process *proc = process_lookup(name);
-  return proc ? proc->pid : 0;
+Pid ou_proc_lookup(const char *name) {
+  // process_lookup now returns Pid directly
+  return process_lookup(StringView(name));
 }
 
 int ou_io_puts(const char *str, int size) {
@@ -58,7 +58,7 @@ int ou_io_puts(const char *str, int size) {
   return 1;
 }
 
-IpcResponse ou_ipc_send(int pid, uintptr_t flags, intptr_t method, intptr_t arg0, intptr_t arg1, intptr_t arg2) {
+IpcResponse ou_ipc_send(Pid target_pid, uintptr_t flags, intptr_t method, intptr_t arg0, intptr_t arg1, intptr_t arg2) {
   // Soft assert: ensure method doesn't overflow into flags field (lower 8 bits should be 0)
   if ((method & 0xFF) != 0) {
     oprintf("WARNING: Method ID %d overflows into flags field\n", method);
@@ -67,11 +67,12 @@ IpcResponse ou_ipc_send(int pid, uintptr_t flags, intptr_t method, intptr_t arg0
   // Pack method and flags into single value
   uintptr_t method_and_flags = IPC_PACK_METHOD_FLAGS(method, flags);
 
-  TRACE_IPC(LLOUD, "IPC send from %d to %d, method=%d, flags=%x", current_proc->pid, pid, method, flags);
+  TRACE_IPC(LLOUD, "IPC send from pidx %d (pid %lu) to pid %lu, method=%d, flags=%x", current_proc->pidx.raw(), current_proc->pid.raw(), target_pid.raw(), method, flags);
 
-  Process *target = process_lookup(pid);
-  if (!target) {
-    TRACE_IPC(LSOFT, "IPC send failed: target PID %d not found", pid);
+  // Look up target by pid
+  Pidx target_pidx = process_lookup_by_pid(target_pid);
+  if (target_pidx == PIDX_INVALID) {
+    TRACE_IPC(LSOFT, "IPC send failed: target pid %lu not found", target_pid.raw());
     IpcResponse resp;
     resp.error_code = IPC__PID_NOT_FOUND;
     resp.values[0] = 0;
@@ -80,16 +81,18 @@ IpcResponse ou_ipc_send(int pid, uintptr_t flags, intptr_t method, intptr_t arg0
     return resp;
   }
 
+  Process *target = process_lookup_by_pidx(target_pidx);
+
   // Handle comm page transfer if requested
   if (flags & IPC_FLAG_HAS_COMM_DATA) {
     if (!current_proc->comm_page.is_null() && !target->comm_page.is_null()) {
-      TRACE_IPC(LSOFT, "IPC: copying comm page from %d to %d", current_proc->pid, pid);
+      TRACE_IPC(LSOFT, "IPC: copying comm page from pidx %d to pidx %d", current_proc->pidx.raw(), target_pidx.raw());
       memcpy(target->comm_page.as_ptr(), current_proc->comm_page.as_ptr(), OT_PAGE_SIZE);
     }
   }
 
   // Set up message
-  target->pending_message.pid = current_proc->pid;
+  target->pending_message.sender_pid = current_proc->pid;  // Fill in sender's globally unique PID
   target->pending_message.method_and_flags = method_and_flags;
   target->pending_message.args[0] = arg0;
   target->pending_message.args[1] = arg1;
@@ -97,7 +100,7 @@ IpcResponse ou_ipc_send(int pid, uintptr_t flags, intptr_t method, intptr_t arg0
   target->has_pending_message = true;
   target->blocked_sender = current_proc;
 
-  TRACE_IPC(LLOUD, "IPC: switching to target process %d", pid);
+  TRACE_IPC(LLOUD, "IPC: switching to target process pidx %d (pid %lu)", target_pidx.raw(), target_pid.raw());
 
   // If target is waiting, wake it and switch to it immediately (like RISC-V)
   if (target->state == IPC_WAIT) {
@@ -120,19 +123,19 @@ IpcResponse ou_ipc_send(int pid, uintptr_t flags, intptr_t method, intptr_t arg0
 
 IpcMessage ou_ipc_recv(void) {
   if (current_proc->has_pending_message) {
-    TRACE_IPC(LLOUD, "Process %d receiving pending message", current_proc->pid);
+    TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) receiving pending message from pid %lu", current_proc->pidx.raw(), current_proc->pid.raw(), current_proc->pending_message.sender_pid.raw());
     IpcMessage msg = current_proc->pending_message;
     current_proc->has_pending_message = false;
     return msg;
   } else {
-    TRACE_IPC(LLOUD, "Process %d entering IPC_WAIT", current_proc->pid);
+    TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) entering IPC_WAIT", current_proc->pidx.raw(), current_proc->pid.raw());
     current_proc->state = IPC_WAIT;
     yield();
     // Will resume here when message arrives
     intptr_t method = IPC_UNPACK_METHOD(current_proc->pending_message.method_and_flags);
     uintptr_t flags = IPC_UNPACK_FLAGS(current_proc->pending_message.method_and_flags);
-    TRACE_IPC(LLOUD, "Process %d woken from IPC_WAIT, msg: pid=%d flags=%x method=%d args=[%d, %d, %d]",
-              current_proc->pid, current_proc->pending_message.pid, flags, method,
+    TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) woken from IPC_WAIT, msg: sender_pid=%lu flags=%x method=%d args=[%d, %d, %d]",
+              current_proc->pidx.raw(), current_proc->pid.raw(), current_proc->pending_message.sender_pid.raw(), flags, method,
               current_proc->pending_message.args[0], current_proc->pending_message.args[1],
               current_proc->pending_message.args[2]);
     IpcMessage msg = current_proc->pending_message;
@@ -142,7 +145,7 @@ IpcMessage ou_ipc_recv(void) {
 }
 
 void ou_ipc_reply(IpcResponse response) {
-  TRACE_IPC(LLOUD, "Process %d replying: error=%d, values=[%d, %d, %d]", current_proc->pid, response.error_code,
+  TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) replying: error=%d, values=[%d, %d, %d]", current_proc->pidx.raw(), current_proc->pid.raw(), response.error_code,
             response.values[0], response.values[1], response.values[2]);
 
   if (current_proc->blocked_sender) {
@@ -155,7 +158,7 @@ void ou_ipc_reply(IpcResponse response) {
     sender->pending_response.values[2] = response.values[2];
 
     current_proc->blocked_sender = nullptr;
-    TRACE_IPC(LLOUD, "IPC reply sent, immediately switching back to sender %d", sender->pid);
+    TRACE_IPC(LLOUD, "IPC reply sent, immediately switching back to sender pidx %d (pid %lu)", sender->pidx, sender->pid);
     // Switch back to sender immediately (like RISC-V) - receiver will resume when scheduled again
     process_switch_to(sender);
     // After this returns (when we're scheduled again), continue normally

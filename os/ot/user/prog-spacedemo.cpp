@@ -423,8 +423,6 @@ void spacedemo_main() {
       if (s->cycle >= s->hyperspace_cycle_time - 60) {
         gfx.draw_text(offset_x + 20, offset_y + DEMO_HEIGHT - 30, "JUMP ENGAGED", 0xFFAA6654, 3);
       } else {
-        oprintf("gfx text draw: x=%d, y=%d, text=%s\n", offset_x + 20, offset_y + DEMO_HEIGHT - 30,
-                STAR_NAMES[s->central_star.name_index]);
         gfx.draw_text(offset_x + 20, offset_y + DEMO_HEIGHT - 30, STAR_NAMES[s->central_star.name_index], 0xFFAA6654,
                       3);
       }

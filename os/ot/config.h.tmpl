@@ -56,16 +56,15 @@
 // Graphics backend options (for user-space driver)
 #define OT_GRAPHICS_BACKEND_TEST 0
 #define OT_GRAPHICS_BACKEND_VIRTIO 1
-#define OT_GRAPHICS_BACKEND_SDL 2
-#define OT_GRAPHICS_BACKEND_WASM 3
+#define OT_GRAPHICS_BACKEND_WASM 2
 
 // Selected graphics backend (configured by config.sh)
 #define OT_GRAPHICS_BACKEND __GRAPHICS_BACKEND__
 
-// Compile-time validation: WASM only supports test and SDL backends
+// Compile-time validation: WASM only supports test and wasm backends
 #ifdef OT_ARCH_WASM
 #if OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_VIRTIO
-#error "VirtIO graphics backend is not supported on WASM. Use test or sdl backend instead."
+#error "VirtIO graphics backend is not supported on WASM. Use test or wasm backend instead."
 #endif
 #endif
 

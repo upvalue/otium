@@ -256,9 +256,8 @@ The OS includes a framebuffer-based graphics system accessible via IPC. Graphics
 
 **Backends** (configured with `./config.sh --graphics-backend=<type>`):
 - **test** - 16x16 framebuffer, prints hex dump on flush (for testing)
-- **virtio** - VirtIO GPU for RISC-V/QEMU (1024x600, hardware accelerated)
-- **sdl** - SDL2 for Emscripten builds only
-- **wasm** - WebAssembly backend (640x480, works in browser and Node.js)
+- **virtio** - VirtIO GPU for RISC-V/QEMU (1024×700, hardware accelerated)
+- **wasm** - WebAssembly backend (1024×700, works in browser and Node.js)
 
 **Pixel format**: 32-bit BGRA (`0xAARRGGBB`)
 

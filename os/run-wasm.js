@@ -34,6 +34,7 @@ let outputBuffer = '';
 let sdl = null;
 let sdlAvailable = false;
 let window = null;
+let pixelBuffer = null;  // Reused buffer for BGRA->RGBA conversion
 
 // Check if SDL is available without loading it yet
 try {
@@ -71,6 +72,9 @@ const Module = {
         resizable: false,
       });
 
+      // Allocate reusable buffer for pixel format conversion
+      pixelBuffer = Buffer.allocUnsafe(width * height * 4);
+
       console.log('SDL window created successfully');
       return true;
     } catch (e) {
@@ -82,7 +86,7 @@ const Module = {
   },
 
   graphicsFlush: function(pixels, width, height) {
-    if (!sdl || !window) {
+    if (!sdl || !window || !pixelBuffer) {
       // Headless mode - skip rendering
       return;
     }
@@ -90,21 +94,21 @@ const Module = {
     try {
       // pixels is a Uint32Array view into WASM memory (BGRA format)
       // SDL expects RGBA, so we need to convert
-      const buffer = Buffer.allocUnsafe(width * height * 4);
+      // Reuse the pre-allocated buffer instead of allocating on every frame
 
       for (let i = 0; i < width * height; i++) {
         const pixel = pixels[i];
         const offset = i * 4;
 
         // WASM has BGRA (0xAARRGGBB), SDL wants RGBA
-        buffer[offset + 0] = (pixel >> 16) & 0xFF; // R
-        buffer[offset + 1] = (pixel >> 8) & 0xFF;  // G
-        buffer[offset + 2] = pixel & 0xFF;         // B
-        buffer[offset + 3] = (pixel >> 24) & 0xFF; // A
+        pixelBuffer[offset + 0] = (pixel >> 16) & 0xFF; // R
+        pixelBuffer[offset + 1] = (pixel >> 8) & 0xFF;  // G
+        pixelBuffer[offset + 2] = pixel & 0xFF;         // B
+        pixelBuffer[offset + 3] = (pixel >> 24) & 0xFF; // A
       }
 
       // Render to SDL window
-      window.render(width, height, width * 4, 'rgba32', buffer);
+      window.render(width, height, width * 4, 'rgba32', pixelBuffer);
     } catch (e) {
       // Check if window was destroyed (user closed it)
       if (e.message && e.message.includes('window is destroyed')) {
@@ -121,6 +125,7 @@ const Module = {
       window.destroy();
       window = null;
     }
+    pixelBuffer = null;  // Release buffer reference
   },
 
   exit: (status) => {

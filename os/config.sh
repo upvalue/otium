@@ -88,9 +88,8 @@ for arg in "$@"; do
       case $backend in
         test) GRAPHICS_BACKEND="OT_GRAPHICS_BACKEND_TEST" ;;
         virtio) GRAPHICS_BACKEND="OT_GRAPHICS_BACKEND_VIRTIO" ;;
-        sdl) GRAPHICS_BACKEND="OT_GRAPHICS_BACKEND_SDL" ;;
         wasm) GRAPHICS_BACKEND="OT_GRAPHICS_BACKEND_WASM" ;;
-        *) echo "Invalid graphics backend: $backend (use test|virtio|sdl|wasm)"; exit 1 ;;
+        *) echo "Invalid graphics backend: $backend (use test|virtio|wasm)"; exit 1 ;;
       esac
       ;;
     *)
@@ -100,7 +99,7 @@ for arg in "$@"; do
       echo "          [--log-mem=silent|soft|loud]"
       echo "          [--log-proc=silent|soft|loud]"
       echo "          [--log-ipc=silent|soft|loud]"
-      echo "          [--graphics-backend=test|virtio|sdl|wasm]"
+      echo "          [--graphics-backend=test|virtio|wasm]"
       exit 1
       ;;
   esac

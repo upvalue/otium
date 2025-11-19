@@ -3,8 +3,6 @@
 
 #include <stdint.h>
 
-#include "ot/core/drivers/gfx.hpp"
-
 /**
  * Abstract graphics backend interface.
  * Implementations provide platform-specific rendering backends for user-space.

@@ -21,7 +21,6 @@ mkdir -p bin
 $CC $CPPFLAGS $CFLAGS \
     -Wl,-Tkernel-link-riscv.ld -Wl,-Map=bin/os.map -o bin/os.elf \
     "${CORE_SOURCES[@]}" \
-    "${DRIVER_SOURCES[@]}" \
     "${LIB_SOURCES[@]}" \
     "${USER_SOURCES[@]}" \
     "${GRAPHICS_SOURCES[@]}" \

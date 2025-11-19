@@ -35,7 +35,6 @@ EMFLAGS=(
 mkdir -p bin
 $CC $CPPFLAGS $CFLAGS "${EMFLAGS[@]}" -o bin/os.js \
     "${CORE_SOURCES[@]}" \
-    "${DRIVER_SOURCES[@]}" \
     "${LIB_SOURCES[@]}" \
     "${USER_SOURCES[@]}" \
     ot/core/platform/platform-wasm.cpp \

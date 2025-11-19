@@ -15,10 +15,6 @@ CORE_SOURCES=(
   ot/core/std.cpp
 )
 
-# Driver source files
-DRIVER_SOURCES=(
-  ot/core/drivers/drv-virtio.cpp
-)
 
 # Library source files (shared utilities)
 LIB_SOURCES=(

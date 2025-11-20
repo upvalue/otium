@@ -3,9 +3,10 @@
 #include "ot/user/user.hpp"
 
 Result<intptr_t, ErrorCode> FibonacciClient::calc_fib(intptr_t n) {
+
   IpcResponse resp = ou_ipc_send(
     pid_,
-    IPC_FLAG_NONE,
+    0,
     MethodIds::Fibonacci::CALC_FIB,
     n, 0, 0  );
 
@@ -17,9 +18,10 @@ Result<intptr_t, ErrorCode> FibonacciClient::calc_fib(intptr_t n) {
 }
 
 Result<CalcPairResult, ErrorCode> FibonacciClient::calc_pair(intptr_t n, intptr_t m) {
+
   IpcResponse resp = ou_ipc_send(
     pid_,
-    IPC_FLAG_NONE,
+    0,
     MethodIds::Fibonacci::CALC_PAIR,
     n, m, 0  );
 
@@ -34,9 +36,10 @@ Result<CalcPairResult, ErrorCode> FibonacciClient::calc_pair(intptr_t n, intptr_
 }
 
 Result<uintptr_t, ErrorCode> FibonacciClient::get_cache_size() {
+
   IpcResponse resp = ou_ipc_send(
     pid_,
-    IPC_FLAG_NONE,
+    0,
     MethodIds::Fibonacci::GET_CACHE_SIZE,
     0, 0, 0  );
 

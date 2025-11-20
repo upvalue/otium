@@ -48,3 +48,96 @@ services:
         args: []
         returns: []
         errors: [NOT_INITIALIZED]
+
+  - name: Filesystem
+    methods:
+      # File handle operations
+      - name: open
+        args:
+          - name: path
+            type: string
+          - name: flags
+            type: uint
+        returns:
+          - name: handle
+            type: uint
+        errors: [FILE_NOT_FOUND, PATH_TOO_LONG, TOO_MANY_OPEN_FILES]
+
+      - name: read
+        args:
+          - name: handle
+            type: uint
+          - name: offset
+            type: uint
+          - name: length
+            type: uint
+        returns:
+          - name: bytes_read
+            type: uint
+        returns_comm_data: true
+        errors: [INVALID_HANDLE, IO_ERROR]
+
+      - name: write
+        args:
+          - name: handle
+            type: uint
+          - name: offset
+            type: uint
+          - name: data
+            type: buffer
+        returns:
+          - name: bytes_written
+            type: uint
+        errors: [INVALID_HANDLE, IO_ERROR]
+
+      - name: close
+        args:
+          - name: handle
+            type: uint
+        returns: []
+        errors: [INVALID_HANDLE]
+
+      # Whole-file helpers
+      - name: read_all
+        args:
+          - name: path
+            type: string
+        returns:
+          - name: size
+            type: uint
+        returns_comm_data: true
+        errors: [FILE_NOT_FOUND, FILE_TOO_LARGE]
+
+      - name: write_all
+        args:
+          - name: path
+            type: string
+          - name: data
+            type: buffer
+        returns: []
+        errors: [IO_ERROR]
+
+      # Directory operations
+      - name: create_dir
+        args:
+          - name: path
+            type: string
+        returns: []
+        errors: [ALREADY_EXISTS, PARENT_NOT_FOUND, PATH_TOO_LONG]
+
+      - name: delete_file
+        args:
+          - name: path
+            type: string
+        returns: []
+        errors: [FILE_NOT_FOUND]
+
+      - name: delete_dir
+        args:
+          - name: path
+            type: string
+        returns: []
+        errors: [DIR_NOT_FOUND, NOT_EMPTY]
+
+    # Service-level errors
+    errors: [UNIMPLEMENTED]

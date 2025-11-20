@@ -4,6 +4,10 @@
 #include "ot/lib/error-codes.hpp"
 #include "ot/lib/typed-int.hpp"
 #include "ot/user/gen/<%= it.service.name.toLowerCase() %>-types.hpp"
+<% if (it.service.methods.some(m => it.hasComplexArgs(m))) { %>
+#include "ot/user/string.hpp"
+#include "ot/user/vector.hpp"
+<% } %>
 
 struct <%= it.service.name %>Client {
   Pid pid_;
@@ -11,7 +15,7 @@ struct <%= it.service.name %>Client {
   <%= it.service.name %>Client(Pid pid) : pid_(pid) {}
 
 <% it.service.methods.forEach(method => { %>
-  Result<<%= it.getReturnType(method) %>, ErrorCode> <%= method.name %>(<%= it.formatArgs(method.args) %>);
+  Result<<%~ it.getReturnType(method) %>, ErrorCode> <%~ method.name %>(<%~ it.formatArgs(method.args) %>);
 <% }) %>
 
   // Universal shutdown method (sends IPC_METHOD_SHUTDOWN)

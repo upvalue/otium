@@ -1,0 +1,16 @@
+{
+  "graphics": {
+    "backend": "OT_GRAPHICS_BACKEND_TEST",
+    "enabled": true
+  },
+  "filesystem": {
+    "backend": "OT_FILESYSTEM_BACKEND_MEMORY",
+    "enabled": true
+  },
+  "shell": {
+    "enabled": true
+  },
+  "spacedemo": {
+    "enabled": false
+  }
+}

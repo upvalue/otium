@@ -20,6 +20,15 @@ LOG_IPC="LSOFT"
 # Default graphics backend
 GRAPHICS_BACKEND="OT_GRAPHICS_BACKEND_TEST"
 
+# Default filesystem backend
+FILESYSTEM_BACKEND="OT_FILESYSTEM_BACKEND_MEMORY"
+
+# Default shell enable
+SHELL_ENABLE="#define ENABLE_SHELL"
+
+# Default spacedemo disable
+SPACEDEMO_ENABLE="// #define ENABLE_SPACEDEMO"
+
 # Parse arguments
 for arg in "$@"; do
   case $arg in
@@ -83,13 +92,38 @@ for arg in "$@"; do
         *) echo "Invalid log level: $level (use silent|soft|loud)"; exit 1 ;;
       esac
       ;;
-    --graphics-backend=*)
+    --graphics-backend=*|--graphics=*)
       backend="${arg#*=}"
       case $backend in
+        none) GRAPHICS_BACKEND="OT_GRAPHICS_BACKEND_NONE" ;;
         test) GRAPHICS_BACKEND="OT_GRAPHICS_BACKEND_TEST" ;;
         virtio) GRAPHICS_BACKEND="OT_GRAPHICS_BACKEND_VIRTIO" ;;
         wasm) GRAPHICS_BACKEND="OT_GRAPHICS_BACKEND_WASM" ;;
-        *) echo "Invalid graphics backend: $backend (use test|virtio|wasm)"; exit 1 ;;
+        *) echo "Invalid graphics backend: $backend (use none|test|virtio|wasm)"; exit 1 ;;
+      esac
+      ;;
+    --filesystem-backend=*|--filesystem=*)
+      backend="${arg#*=}"
+      case $backend in
+        none) FILESYSTEM_BACKEND="OT_FILESYSTEM_BACKEND_NONE" ;;
+        memory) FILESYSTEM_BACKEND="OT_FILESYSTEM_BACKEND_MEMORY" ;;
+        *) echo "Invalid filesystem backend: $backend (use none|memory)"; exit 1 ;;
+      esac
+      ;;
+    --shell=*)
+      value="${arg#*=}"
+      case $value in
+        true) SHELL_ENABLE="#define ENABLE_SHELL" ;;
+        false) SHELL_ENABLE="// #define ENABLE_SHELL" ;;
+        *) echo "Invalid shell value: $value (use true|false)"; exit 1 ;;
+      esac
+      ;;
+    --spacedemo=*)
+      value="${arg#*=}"
+      case $value in
+        true) SPACEDEMO_ENABLE="#define ENABLE_SPACEDEMO" ;;
+        false) SPACEDEMO_ENABLE="// #define ENABLE_SPACEDEMO" ;;
+        *) echo "Invalid spacedemo value: $value (use true|false)"; exit 1 ;;
       esac
       ;;
     *)
@@ -99,7 +133,10 @@ for arg in "$@"; do
       echo "          [--log-mem=silent|soft|loud]"
       echo "          [--log-proc=silent|soft|loud]"
       echo "          [--log-ipc=silent|soft|loud]"
-      echo "          [--graphics-backend=test|virtio|wasm]"
+      echo "          [--graphics-backend=none|test|virtio|wasm]"
+      echo "          [--filesystem-backend=none|memory]"
+      echo "          [--shell=true|false]"
+      echo "          [--spacedemo=true|false]"
       exit 1
       ;;
   esac
@@ -112,6 +149,46 @@ sed -e "s/__KERNEL_PROG_PLACEHOLDER__/$MODE/" \
     -e "s/__LOG_PROC__/$LOG_PROC/" \
     -e "s/__LOG_IPC__/$LOG_IPC/" \
     -e "s/__GRAPHICS_BACKEND__/$GRAPHICS_BACKEND/" \
+    -e "s/__FILESYSTEM_BACKEND__/$FILESYSTEM_BACKEND/" \
+    -e "s|__SHELL_ENABLE__|$SHELL_ENABLE|" \
+    -e "s|__SPACEDEMO_ENABLE__|$SPACEDEMO_ENABLE|" \
     "$TEMPLATE" > "$OUTPUT"
 
-echo "Generated $OUTPUT with KERNEL_PROG=$MODE, LOG_GENERAL=$LOG_GENERAL, LOG_MEM=$LOG_MEM, LOG_PROC=$LOG_PROC, LOG_IPC=$LOG_IPC, GRAPHICS_BACKEND=$GRAPHICS_BACKEND"
+# Create build directory if it doesn't exist
+mkdir -p "$SCRIPT_DIR/build"
+
+# Generate runtime config files for scripts
+RUNTIME_CONFIG_SH="$SCRIPT_DIR/build/runtime-config.sh"
+RUNTIME_CONFIG_JSON="$SCRIPT_DIR/build/runtime-config.json"
+
+# Shell script version
+cat > "$RUNTIME_CONFIG_SH" << EOF
+# Generated runtime configuration (sourced by run scripts)
+RUNTIME_GRAPHICS_BACKEND="$GRAPHICS_BACKEND"
+RUNTIME_FILESYSTEM_BACKEND="$FILESYSTEM_BACKEND"
+RUNTIME_SHELL_ENABLED=$([ "$SHELL_ENABLE" = "#define ENABLE_SHELL" ] && echo "true" || echo "false")
+RUNTIME_SPACEDEMO_ENABLED=$([ "$SPACEDEMO_ENABLE" = "#define ENABLE_SPACEDEMO" ] && echo "true" || echo "false")
+EOF
+
+# JSON version
+cat > "$RUNTIME_CONFIG_JSON" << EOF
+{
+  "graphics": {
+    "backend": "$GRAPHICS_BACKEND",
+    "enabled": $([ "$GRAPHICS_BACKEND" = "OT_GRAPHICS_BACKEND_NONE" ] && echo "false" || echo "true")
+  },
+  "filesystem": {
+    "backend": "$FILESYSTEM_BACKEND",
+    "enabled": $([ "$FILESYSTEM_BACKEND" = "OT_FILESYSTEM_BACKEND_NONE" ] && echo "false" || echo "true")
+  },
+  "shell": {
+    "enabled": $([ "$SHELL_ENABLE" = "#define ENABLE_SHELL" ] && echo "true" || echo "false")
+  },
+  "spacedemo": {
+    "enabled": $([ "$SPACEDEMO_ENABLE" = "#define ENABLE_SPACEDEMO" ] && echo "true" || echo "false")
+  }
+}
+EOF
+
+echo "Generated $OUTPUT with KERNEL_PROG=$MODE, LOG_GENERAL=$LOG_GENERAL, LOG_MEM=$LOG_MEM, LOG_PROC=$LOG_PROC, LOG_IPC=$LOG_IPC, GRAPHICS_BACKEND=$GRAPHICS_BACKEND, FILESYSTEM_BACKEND=$FILESYSTEM_BACKEND, SHELL=$SHELL_ENABLE, SPACEDEMO=$SPACEDEMO_ENABLE"
+echo "Generated $RUNTIME_CONFIG_SH and $RUNTIME_CONFIG_JSON for run scripts"

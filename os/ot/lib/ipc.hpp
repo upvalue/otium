@@ -17,8 +17,10 @@ struct IpcResponse {
 };
 
 // IPC flags (occupy lower 8 bits)
-#define IPC_FLAG_NONE 0x00          // No special flags
-#define IPC_FLAG_HAS_COMM_DATA 0x01 // Comm page contains msgpack data
+#define IPC_FLAG_NONE 0x00              // No special flags
+#define IPC_FLAG_SEND_COMM_DATA 0x01    // Request has data in comm page (copy to server)
+#define IPC_FLAG_RECV_COMM_DATA 0x02    // Response will have data in comm page (copy from server)
+#define IPC_FLAG_HAS_COMM_DATA IPC_FLAG_SEND_COMM_DATA  // Legacy alias
 
 // Reserved method IDs (below user-defined range starting at 0x1000)
 #define IPC_METHOD_SHUTDOWN 0x0100  // Universal shutdown method for all servers

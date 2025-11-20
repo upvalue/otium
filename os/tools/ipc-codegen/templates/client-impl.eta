@@ -1,30 +1,49 @@
 #include "ot/user/gen/<%= it.service.name.toLowerCase() %>-client.hpp"
 #include "ot/user/gen/method-ids.hpp"
 #include "ot/user/user.hpp"
+<% if (it.service.methods.some(m => it.hasComplexArgs(m) || m.returns_comm_data)) { %>
+#include "ot/lib/mpack/mpack-reader.hpp"
+<% } %>
 
 <% it.service.methods.forEach(method => { %>
-Result<<%= it.getReturnType(method) %>, ErrorCode> <%= it.service.name %>Client::<%= method.name %>(<%= it.formatArgs(method.args) %>) {
+Result<<%~ it.getReturnType(method) %>, ErrorCode> <%~ it.service.name %>Client::<%~ method.name %>(<%~ it.formatArgs(method.args) %>) {
+<% if (it.hasComplexArgs(method)) { %>
+  // Serialize complex arguments to comm page
+  CommWriter writer;
+<% method.args.filter(arg => it.isComplexType(arg)).forEach(arg => { %>
+<% if (arg.type === "string") { %>
+  writer.writer().str(<%~ arg.name %>.c_str());
+<% } else if (arg.type === "buffer") { %>
+  writer.writer().bin(<%~ arg.name %>.data(), <%~ arg.name %>.size());
+<% } %>
+<% }) %>
+<% } %>
+
   IpcResponse resp = ou_ipc_send(
     pid_,
-    IPC_FLAG_NONE,
-    MethodIds::<%= it.service.name %>::<%= it.toUpperSnake(method.name) %>,
-    <%= it.formatIpcArgs(method.args) %>
+    <%~ (it.hasComplexArgs(method) ? 'IPC_FLAG_SEND_COMM_DATA' : '0') + (method.returns_comm_data ? ' | IPC_FLAG_RECV_COMM_DATA' : '') || 'IPC_FLAG_NONE' %>,
+    MethodIds::<%~ it.service.name %>::<%~ it.toUpperSnake(method.name) %>,
+    <%~ it.formatIpcArgs(method.args) %>
   );
 
   if (resp.error_code != NONE) {
-    return Result<<%= it.getReturnType(method) %>, ErrorCode>::err(resp.error_code);
+    return Result<<%~ it.getReturnType(method) %>, ErrorCode>::err(resp.error_code);
   }
 
+<% if (method.returns_comm_data) { %>
+  // Response data is in comm page - caller reads it with MPackReader
+  // Return value indicates size or count
+<% } %>
 <% if (method.returns.length === 0) { %>
-  return Result<<%= it.getReturnType(method) %>, ErrorCode>::ok({});
+  return Result<<%~ it.getReturnType(method) %>, ErrorCode>::ok({});
 <% } else if (method.returns.length === 1) { %>
-  return Result<<%= it.getReturnType(method) %>, ErrorCode>::ok(resp.values[0]);
+  return Result<<%~ it.getReturnType(method) %>, ErrorCode>::ok(resp.values[0]);
 <% } else { %>
-  <%= it.getReturnType(method) %> result;
+  <%~ it.getReturnType(method) %> result;
 <% method.returns.forEach((ret, i) => { %>
-  result.<%= ret.name %> = resp.values[<%= i %>];
+  result.<%~ ret.name %> = resp.values[<%~ i %>];
 <% }) %>
-  return Result<<%= it.getReturnType(method) %>, ErrorCode>::ok(result);
+  return Result<<%~ it.getReturnType(method) %>, ErrorCode>::ok(result);
 <% } %>
 }
 

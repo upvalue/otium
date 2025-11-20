@@ -9,6 +9,7 @@ void GraphicsServer::process_request(const IpcMessage& msg) {
   }
 
   intptr_t method = IPC_UNPACK_METHOD(msg.method_and_flags);
+  uint8_t flags = IPC_UNPACK_FLAGS(msg.method_and_flags);
   IpcResponse resp = {NONE, {0, 0, 0}};
 
   switch (method) {

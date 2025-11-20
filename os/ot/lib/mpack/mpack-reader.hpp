@@ -46,6 +46,9 @@ public:
   // Read string (zero-copy - returns view into msgpack buffer)
   bool read_string(StringView& str);
 
+  // Read binary data (zero-copy - returns view into msgpack buffer)
+  bool read_bin(StringView& bin);
+
   // ===== Container Reading =====
 
   // Enter array, returns element count

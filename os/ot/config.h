@@ -54,12 +54,26 @@
 #endif
 
 // Graphics backend options (for user-space driver)
-#define OT_GRAPHICS_BACKEND_TEST 0
-#define OT_GRAPHICS_BACKEND_VIRTIO 1
-#define OT_GRAPHICS_BACKEND_WASM 2
+#define OT_GRAPHICS_BACKEND_NONE 0
+#define OT_GRAPHICS_BACKEND_TEST 1
+#define OT_GRAPHICS_BACKEND_VIRTIO 2
+#define OT_GRAPHICS_BACKEND_WASM 3
 
 // Selected graphics backend (configured by config.sh)
-#define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_WASM
+#define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_TEST
+
+// Filesystem backend options
+#define OT_FILESYSTEM_BACKEND_NONE 0
+#define OT_FILESYSTEM_BACKEND_MEMORY 1
+
+// Selected filesystem backend (configured by config.sh)
+#define OT_FILESYSTEM_BACKEND OT_FILESYSTEM_BACKEND_MEMORY
+
+// Shell enable/disable (configured by config.sh)
+#define ENABLE_SHELL
+
+// Spacedemo enable/disable (configured by config.sh)
+// #define ENABLE_SPACEDEMO
 
 // Compile-time validation: WASM only supports test and wasm backends
 #ifdef OT_ARCH_WASM

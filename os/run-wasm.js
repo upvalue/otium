@@ -19,6 +19,16 @@ const OtiumOS = require('./bin/os.js');
 // Check if we're in test mode
 const isTestMode = process.env.OTIUM_TEST_MODE === '1';
 
+// Read runtime config if it exists
+let graphicsEnabled = true;  // Default to enabled for backward compatibility
+try {
+  const configPath = path.join(__dirname, 'build', 'runtime-config.json');
+  const configData = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  graphicsEnabled = configData.graphics.enabled;
+} catch (e) {
+  // Config file doesn't exist or can't be read, use default
+}
+
 // Input buffer for getchar
 const inputBuffer = [];
 
@@ -37,13 +47,17 @@ let window = null;
 let pixelBuffer = null;  // Reused buffer for BGRA->RGBA conversion
 
 // Check if SDL is available without loading it yet
-try {
-  require.resolve('@kmamal/sdl');
-  sdlAvailable = true;
-  console.log('@kmamal/sdl found - graphics will be enabled');
-} catch (e) {
-  console.log('@kmamal/sdl not installed - graphics will run in headless mode');
-  console.log('To enable graphics: npm install @kmamal/sdl');
+if (graphicsEnabled) {
+  try {
+    require.resolve('@kmamal/sdl');
+    sdlAvailable = true;
+    console.log('@kmamal/sdl found - graphics will be enabled');
+  } catch (e) {
+    console.log('@kmamal/sdl not installed - graphics will run in headless mode');
+    console.log('To enable graphics: npm install @kmamal/sdl');
+  }
+} else {
+  console.log('Graphics disabled by config - skipping SDL check');
 }
 
 // Module configuration

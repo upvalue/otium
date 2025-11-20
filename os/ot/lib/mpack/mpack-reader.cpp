@@ -159,6 +159,27 @@ bool MPackReader::read_string(StringView& str) {
   return true;
 }
 
+bool MPackReader::read_bin(StringView& bin) {
+  mpack_token_t tok;
+
+  // Read binary header
+  if (!read_next(tok) || tok.type != MPACK_TOKEN_BIN) {
+    error_ = true;
+    return false;
+  }
+
+  bin.len = tok.length;
+
+  // Read chunk (the actual binary data)
+  if (!read_next(tok) || tok.type != MPACK_TOKEN_CHUNK) {
+    error_ = true;
+    return false;
+  }
+
+  bin.ptr = tok.data.chunk_ptr;  // Zero-copy!
+  return true;
+}
+
 bool MPackReader::enter_array(uint32_t& count) {
   mpack_token_t tok;
   if (!read_next(tok) || tok.type != MPACK_TOKEN_ARRAY) {

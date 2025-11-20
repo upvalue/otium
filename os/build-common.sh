@@ -32,6 +32,7 @@ USER_SOURCES=(
   ot/user/prog-scratch.cpp
   ot/user/prog-shell.cpp
   ot/user/prog-spacedemo.cpp
+  ot/user/prog-fstest.cpp
   ot/user/tcl.cpp
   ot/user/string.cpp
   ot/user/memory-allocator.cpp
@@ -48,5 +49,17 @@ USER_SOURCES+=(
   ot/user/gen/graphics-client.cpp
   ot/user/gen/graphics-server.cpp
   ot/user/graphics/impl.cpp
+  ot/user/gen/filesystem-client.cpp
+  ot/user/gen/filesystem-server.cpp
   ot/lib/frame-manager.cpp
 )
+
+# Add filesystem implementation based on config
+if grep -q "^#define OT_FILESYSTEM_BACKEND OT_FILESYSTEM_BACKEND_MEMORY" ot/config.h 2>/dev/null; then
+  USER_SOURCES+=(ot/user/filesystem/impl-memory.cpp)
+elif grep -q "^#define OT_FILESYSTEM_BACKEND OT_FILESYSTEM_BACKEND_NONE" ot/config.h 2>/dev/null; then
+  USER_SOURCES+=(ot/user/filesystem/impl-none.cpp)
+else
+  # Default to memory if config doesn't exist yet
+  USER_SOURCES+=(ot/user/filesystem/impl-memory.cpp)
+fi

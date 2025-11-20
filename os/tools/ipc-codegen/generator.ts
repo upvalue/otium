@@ -17,6 +17,8 @@ interface TemplateContext {
   formatArgs: (args: Arg[]) => string;
   formatIpcArgs: (args: Arg[]) => string;
   extractMsgArgs: (method: Method) => string;
+  isComplexType: (arg: Arg | Return) => boolean;
+  hasComplexArgs: (method: Method) => boolean;
 }
 
 function toPascalCase(str: string): string {
@@ -45,7 +47,21 @@ function toHex(num: number): string {
 }
 
 function getType(arg: Arg | Return): string {
+  const type = arg.type || "int";
+  if (type === "string") return "const ou::string&";
+  if (type === "buffer") return "const ou::vector<uint8_t>&";
+  if (type === "uint") return "uintptr_t";
+  // Default: int or check signed flag
   return arg.signed ?? true ? "intptr_t" : "uintptr_t";
+}
+
+function isComplexType(arg: Arg | Return): boolean {
+  const type = arg.type || "int";
+  return type === "string" || type === "buffer";
+}
+
+function hasComplexArgs(method: Method): boolean {
+  return method.args.some(isComplexType);
 }
 
 function getReturnType(method: Method): string {
@@ -64,7 +80,9 @@ function formatArgs(args: Arg[]): string {
 }
 
 function formatIpcArgs(args: Arg[]): string {
-  const argNames = args.map((arg) => arg.name);
+  // Only include non-complex (int/uint) args for IPC inline args
+  const simpleArgs = args.filter(arg => !isComplexType(arg));
+  const argNames = simpleArgs.map((arg) => arg.name);
   // Pad to 3 arguments
   while (argNames.length < 3) {
     argNames.push("0");
@@ -91,6 +109,8 @@ function createContext(data: Partial<TemplateContext>): TemplateContext {
     formatArgs,
     formatIpcArgs,
     extractMsgArgs,
+    isComplexType,
+    hasComplexArgs,
   };
 }
 

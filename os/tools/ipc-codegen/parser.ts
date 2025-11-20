@@ -7,12 +7,14 @@ export interface Config {
 
 export interface Arg {
   name: string;
-  signed?: boolean; // Defaults to true if omitted
+  type?: string;    // Type: "int" (default), "uint", "string", "buffer"
+  signed?: boolean; // Defaults to true if omitted (for backward compat with int/uint)
 }
 
 export interface Return {
   name: string;
-  signed?: boolean; // Defaults to true if omitted
+  type?: string;    // Type: "int" (default), "uint", "string", "buffer"
+  signed?: boolean; // Defaults to true if omitted (for backward compat with int/uint)
 }
 
 export interface Method {
@@ -21,6 +23,7 @@ export interface Method {
   returns: Return[];
   errors: string[];
   methodId?: number; // Assigned during parsing
+  returns_comm_data?: boolean; // True if method returns data via comm page
 }
 
 export interface Service {
@@ -68,15 +71,23 @@ export async function parseIDL(filePath: string): Promise<ParsedIDL> {
     const methods: Method[] = [];
 
     for (const method of svc.methods || []) {
-      const args: Arg[] = (method.args || []).map((arg: any) => ({
-        name: typeof arg === "string" ? arg : arg.name,
-        signed: typeof arg === "object" ? (arg.signed ?? true) : true,
-      }));
+      const args: Arg[] = (method.args || []).map((arg: any) => {
+        if (typeof arg === "string") {
+          return { name: arg, type: "int", signed: true };
+        }
+        const type = arg.type || "int";
+        const signed = arg.signed ?? (type === "int");
+        return { name: arg.name, type, signed };
+      });
 
-      const returns: Return[] = (method.returns || []).map((ret: any) => ({
-        name: typeof ret === "string" ? ret : ret.name,
-        signed: typeof ret === "object" ? (ret.signed ?? true) : true,
-      }));
+      const returns: Return[] = (method.returns || []).map((ret: any) => {
+        if (typeof ret === "string") {
+          return { name: ret, type: "int", signed: true };
+        }
+        const type = ret.type || "int";
+        const signed = ret.signed ?? (type === "int");
+        return { name: ret.name, type, signed };
+      });
 
       methods.push({
         name: method.name,
@@ -84,6 +95,7 @@ export async function parseIDL(filePath: string): Promise<ParsedIDL> {
         returns,
         errors: method.errors || [],
         methodId: nextMethodId,
+        returns_comm_data: method.returns_comm_data ?? false,
       });
       nextMethodId += 0x100; // Increment by 256 to skip flag bits
 

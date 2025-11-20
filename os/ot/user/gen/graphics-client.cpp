@@ -3,9 +3,10 @@
 #include "ot/user/user.hpp"
 
 Result<GetFramebufferResult, ErrorCode> GraphicsClient::get_framebuffer() {
+
   IpcResponse resp = ou_ipc_send(
     pid_,
-    IPC_FLAG_NONE,
+    0,
     MethodIds::Graphics::GET_FRAMEBUFFER,
     0, 0, 0  );
 
@@ -21,9 +22,10 @@ Result<GetFramebufferResult, ErrorCode> GraphicsClient::get_framebuffer() {
 }
 
 Result<bool, ErrorCode> GraphicsClient::flush() {
+
   IpcResponse resp = ou_ipc_send(
     pid_,
-    IPC_FLAG_NONE,
+    0,
     MethodIds::Graphics::FLUSH,
     0, 0, 0  );
 

@@ -83,10 +83,10 @@ IpcResponse ou_ipc_send(Pid target_pid, uintptr_t flags, intptr_t method, intptr
 
   Process *target = process_lookup_by_pidx(target_pidx);
 
-  // Handle comm page transfer if requested
-  if (flags & IPC_FLAG_HAS_COMM_DATA) {
+  // Handle comm page transfer if requested (send direction)
+  if (flags & IPC_FLAG_SEND_COMM_DATA) {
     if (!current_proc->comm_page.is_null() && !target->comm_page.is_null()) {
-      TRACE_IPC(LSOFT, "IPC: copying comm page from pidx %d to pidx %d", current_proc->pidx.raw(), target_pidx.raw());
+      TRACE_IPC(LSOFT, "IPC: copying comm page from sender pidx %d to receiver pidx %d", current_proc->pidx.raw(), target_pidx.raw());
       memcpy(target->comm_page.as_ptr(), current_proc->comm_page.as_ptr(), OT_PAGE_SIZE);
     }
   }
@@ -150,6 +150,15 @@ void ou_ipc_reply(IpcResponse response) {
 
   if (current_proc->blocked_sender) {
     Process *sender = current_proc->blocked_sender;
+
+    // Copy comm page back if response has comm data (receive direction)
+    uint8_t request_flags = IPC_UNPACK_FLAGS(current_proc->pending_message.method_and_flags);
+    if (request_flags & IPC_FLAG_RECV_COMM_DATA) {
+      if (!current_proc->comm_page.is_null() && !sender->comm_page.is_null()) {
+        TRACE_IPC(LSOFT, "IPC reply: copying comm page from server pidx %d back to client pidx %d", current_proc->pidx.raw(), sender->pidx.raw());
+        memcpy(sender->comm_page.as_ptr(), current_proc->comm_page.as_ptr(), OT_PAGE_SIZE);
+      }
+    }
 
     // Store response in SENDER's pending_response field (they will read it)
     sender->pending_response.error_code = response.error_code;

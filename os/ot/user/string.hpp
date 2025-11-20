@@ -90,6 +90,11 @@ public:
   int compare(const string &s) const;
   int compare(const string_view &s) const;
 
+  bool operator==(const string &other) const { return compare(other) == 0; }
+  bool operator==(const char *s) const { return compare(s) == 0; }
+  bool operator!=(const string &other) const { return compare(other) != 0; }
+  bool operator!=(const char *s) const { return compare(s) != 0; }
+
   string substr(size_t pos, size_t len) const;
   string substr(size_t pos) const;
   void ensure_capacity(size_t new_cap);

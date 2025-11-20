@@ -37,19 +37,36 @@ void kernel_prog_default() {
   // create fibonacci ipc server
   Process *proc_fib = process_create("fib", (const void *)proc_fibonacci_server, nullptr, false);
 
+#if OT_GRAPHICS_BACKEND != OT_GRAPHICS_BACKEND_NONE
   // create graphics driver (proc_graphics is defined in ot/user/graphics/impl.cpp)
   extern void proc_graphics(void);
   process_create("graphics", (const void *)proc_graphics, nullptr, false);
+#endif
 
+#if OT_FILESYSTEM_BACKEND != OT_FILESYSTEM_BACKEND_NONE
+  // create filesystem server (proc_filesystem is defined in ot/user/filesystem/impl.cpp)
+  extern void proc_filesystem(void);
+  process_create("filesystem", (const void *)proc_filesystem, nullptr, false);
+
+  // create filesystem test program
+  char *fstest_argv[] = {(char *)"fstest"};
+  Arguments fstest_args = {1, fstest_argv};
+  process_create("fstest", (const void *)user_program_main, &fstest_args, false);
+#endif
+
+#ifdef ENABLE_SHELL
   // create shell process
   char *shell_argv[] = {(char *)"shell"};
   Arguments shell_args = {1, shell_argv};
   process_create("shell", (const void *)user_program_main, &shell_args, false);
+#endif
 
+#ifdef ENABLE_SPACEDEMO
   // create spacedemo process (graphics demo)
   char *spacedemo_argv[] = {(char *)"spacedemo"};
   Arguments spacedemo_args = {1, spacedemo_argv};
   process_create("spacedemo", (const void *)user_program_main, &spacedemo_args, false);
+#endif
 }
 
 // Kernel startup - initializes kernel and creates initial processes

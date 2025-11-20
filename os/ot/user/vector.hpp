@@ -48,11 +48,22 @@ public:
     }
   }
 
+  // Move constructor
+  vector(vector &&other) noexcept : data_(other.data_), size_(other.size_), cap_(other.cap_) {
+    other.data_ = nullptr;
+    other.size_ = 0;
+    other.cap_ = 0;
+  }
+
+  // Copy is deleted
   vector(const vector &) = delete;
   vector &operator=(const vector &) = delete;
 
   size_t size() const { return size_; }
   bool empty() const { return size_ == 0; }
+
+  T *data() { return data_; }
+  const T *data() const { return data_; }
 
   T &operator[](size_t i) { return data_[i]; }
   const T &operator[](size_t i) const { return data_[i]; }
@@ -77,6 +88,30 @@ public:
       size_--;
       data_[size_].~T();
     }
+  }
+
+  void resize(size_t new_size, const T& default_value = T()) {
+    if (new_size < size_) {
+      // Shrink: destroy extra elements
+      for (size_t i = new_size; i < size_; i++) {
+        data_[i].~T();
+      }
+      size_ = new_size;
+    } else if (new_size > size_) {
+      // Grow: add default elements
+      ensure_capacity(new_size);
+      for (size_t i = size_; i < new_size; i++) {
+        new (&data_[i]) T(default_value);
+      }
+      size_ = new_size;
+    }
+  }
+
+  void clear() {
+    for (size_t i = 0; i < size_; i++) {
+      data_[i].~T();
+    }
+    size_ = 0;
   }
 
   void insert(size_t pos, const T &val) {
@@ -140,13 +175,6 @@ public:
       data_[i + count].~T();
     }
     size_ -= count;
-  }
-
-  void clear() {
-    for (size_t i = 0; i < size_; i++) {
-      data_[i].~T();
-    }
-    size_ = 0;
   }
 
   // Iterator support (minimal)

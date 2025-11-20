@@ -1,7 +1,9 @@
 #include "ot/user/gen/graphics-server.hpp"
 #include "ot/user/graphics/backend.hpp"
 
-#if OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_TEST
+#if OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_NONE
+#include "ot/user/graphics/backend-none.hpp"
+#elif OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_TEST
 #include "ot/user/graphics/backend-test.hpp"
 #elif OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_VIRTIO
 #include "ot/user/graphics/backend-virtio.hpp"
@@ -44,7 +46,13 @@ void proc_graphics(void) {
   oprintf("Graphics driver starting...\n");
 
 // Select and initialize backend based on compile-time configuration
-#if OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_TEST
+#if OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_NONE
+  oprintf("Using none graphics backend (unimplemented)\n");
+  // Use placement new to avoid static initialization guards
+  static char backend_buffer[sizeof(NoneGraphicsBackend)] __attribute__((aligned(alignof(NoneGraphicsBackend))));
+  NoneGraphicsBackend *backend_ptr = new (backend_buffer) NoneGraphicsBackend();
+  NoneGraphicsBackend &backend = *backend_ptr;
+#elif OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_TEST
   oprintf("Using test graphics backend\n");
   // Use placement new to avoid static initialization guards
   static char backend_buffer[sizeof(TestGraphicsBackend)] __attribute__((aligned(alignof(TestGraphicsBackend))));

@@ -9,8 +9,5 @@
   },
   "shell": {
     "enabled": true
-  },
-  "spacedemo": {
-    "enabled": false
   }
 }

@@ -61,12 +61,10 @@ void kernel_prog_default() {
   process_create("shell", (const void *)user_program_main, &shell_args, false);
 #endif
 
-#ifdef ENABLE_SPACEDEMO
-  // create spacedemo process (graphics demo)
-  char *spacedemo_argv[] = {(char *)"spacedemo"};
-  Arguments spacedemo_args = {1, spacedemo_argv};
-  process_create("spacedemo", (const void *)user_program_main, &spacedemo_args, false);
-#endif
+  // Uncomment to enable spacedemo (graphics demo)
+  // char *spacedemo_argv[] = {(char *)"spacedemo"};
+  // Arguments spacedemo_args = {1, spacedemo_argv};
+  // process_create("spacedemo", (const void *)user_program_main, &spacedemo_args, false);
 }
 
 // Kernel startup - initializes kernel and creates initial processes

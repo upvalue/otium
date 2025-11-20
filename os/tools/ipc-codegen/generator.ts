@@ -51,6 +51,10 @@ function getType(arg: Arg | Return): string {
   if (type === "string") return "const ou::string&";
   if (type === "buffer") return "const ou::vector<uint8_t>&";
   if (type === "uint") return "uintptr_t";
+
+  // Support custom typed-int aliases (they behave like uintptr_t for IPC)
+  if (type === "FileHandleId") return "FileHandleId";
+
   // Default: int or check signed flag
   return arg.signed ?? true ? "intptr_t" : "uintptr_t";
 }

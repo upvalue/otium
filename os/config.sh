@@ -26,9 +26,6 @@ FILESYSTEM_BACKEND="OT_FILESYSTEM_BACKEND_MEMORY"
 # Default shell enable
 SHELL_ENABLE="#define ENABLE_SHELL"
 
-# Default spacedemo disable
-SPACEDEMO_ENABLE="// #define ENABLE_SPACEDEMO"
-
 # Parse arguments
 for arg in "$@"; do
   case $arg in
@@ -118,14 +115,6 @@ for arg in "$@"; do
         *) echo "Invalid shell value: $value (use true|false)"; exit 1 ;;
       esac
       ;;
-    --spacedemo=*)
-      value="${arg#*=}"
-      case $value in
-        true) SPACEDEMO_ENABLE="#define ENABLE_SPACEDEMO" ;;
-        false) SPACEDEMO_ENABLE="// #define ENABLE_SPACEDEMO" ;;
-        *) echo "Invalid spacedemo value: $value (use true|false)"; exit 1 ;;
-      esac
-      ;;
     *)
       echo "Unknown option: $arg"
       echo "Usage: $0 [--default|--shell|--test-hello|--test-mem|--test-alternate|--test-ipc|--test-ipc-ordering|--test-ipc-codegen|--test-graphics]"
@@ -136,7 +125,6 @@ for arg in "$@"; do
       echo "          [--graphics-backend=none|test|virtio|wasm]"
       echo "          [--filesystem-backend=none|memory]"
       echo "          [--shell=true|false]"
-      echo "          [--spacedemo=true|false]"
       exit 1
       ;;
   esac
@@ -151,7 +139,6 @@ sed -e "s/__KERNEL_PROG_PLACEHOLDER__/$MODE/" \
     -e "s/__GRAPHICS_BACKEND__/$GRAPHICS_BACKEND/" \
     -e "s/__FILESYSTEM_BACKEND__/$FILESYSTEM_BACKEND/" \
     -e "s|__SHELL_ENABLE__|$SHELL_ENABLE|" \
-    -e "s|__SPACEDEMO_ENABLE__|$SPACEDEMO_ENABLE|" \
     "$TEMPLATE" > "$OUTPUT"
 
 # Create build directory if it doesn't exist
@@ -167,7 +154,6 @@ cat > "$RUNTIME_CONFIG_SH" << EOF
 RUNTIME_GRAPHICS_BACKEND="$GRAPHICS_BACKEND"
 RUNTIME_FILESYSTEM_BACKEND="$FILESYSTEM_BACKEND"
 RUNTIME_SHELL_ENABLED=$([ "$SHELL_ENABLE" = "#define ENABLE_SHELL" ] && echo "true" || echo "false")
-RUNTIME_SPACEDEMO_ENABLED=$([ "$SPACEDEMO_ENABLE" = "#define ENABLE_SPACEDEMO" ] && echo "true" || echo "false")
 EOF
 
 # JSON version
@@ -183,12 +169,9 @@ cat > "$RUNTIME_CONFIG_JSON" << EOF
   },
   "shell": {
     "enabled": $([ "$SHELL_ENABLE" = "#define ENABLE_SHELL" ] && echo "true" || echo "false")
-  },
-  "spacedemo": {
-    "enabled": $([ "$SPACEDEMO_ENABLE" = "#define ENABLE_SPACEDEMO" ] && echo "true" || echo "false")
   }
 }
 EOF
 
-echo "Generated $OUTPUT with KERNEL_PROG=$MODE, LOG_GENERAL=$LOG_GENERAL, LOG_MEM=$LOG_MEM, LOG_PROC=$LOG_PROC, LOG_IPC=$LOG_IPC, GRAPHICS_BACKEND=$GRAPHICS_BACKEND, FILESYSTEM_BACKEND=$FILESYSTEM_BACKEND, SHELL=$SHELL_ENABLE, SPACEDEMO=$SPACEDEMO_ENABLE"
+echo "Generated $OUTPUT with KERNEL_PROG=$MODE, LOG_GENERAL=$LOG_GENERAL, LOG_MEM=$LOG_MEM, LOG_PROC=$LOG_PROC, LOG_IPC=$LOG_IPC, GRAPHICS_BACKEND=$GRAPHICS_BACKEND, FILESYSTEM_BACKEND=$FILESYSTEM_BACKEND, SHELL=$SHELL_ENABLE"
 echo "Generated $RUNTIME_CONFIG_SH and $RUNTIME_CONFIG_JSON for run scripts"

@@ -72,9 +72,6 @@
 // Shell enable/disable (configured by config.sh)
 #define ENABLE_SHELL
 
-// Spacedemo enable/disable (configured by config.sh)
-// #define ENABLE_SPACEDEMO
-
 // Compile-time validation: WASM only supports test and wasm backends
 #ifdef OT_ARCH_WASM
 #if OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_VIRTIO

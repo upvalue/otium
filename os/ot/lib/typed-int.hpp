@@ -97,14 +97,18 @@ public:
 struct PidTag {};
 /** Process index; kernel-internal index into the process table */
 struct PidxTag {};
+/** File handle ID; unique identifier for open file handles in filesystem */
+struct FileHandleIdTag {};
 
 // Type definitions
 typedef TypedInt<uintptr_t, PidTag> Pid;
 typedef TypedInt<int, PidxTag> Pidx;
+typedef TypedInt<uintptr_t, FileHandleIdTag> FileHandleId;
 
 // Special sentinel values
 static const Pidx PIDX_INVALID = Pidx(-1);
 static const Pidx PIDX_NONE = Pidx(0);
 static const Pid PID_NONE = Pid(0);
+static const FileHandleId FILE_HANDLE_INVALID = FileHandleId(0);
 
 #endif

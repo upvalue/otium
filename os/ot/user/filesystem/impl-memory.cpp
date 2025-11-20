@@ -49,7 +49,7 @@ static Result<uint32_t, ErrorCode> resolve_path(const ou::string& path) {
   return Result<uint32_t, ErrorCode>::ok(current_inode);
 }
 
-Result<uintptr_t, ErrorCode> FilesystemServer::handle_open(const ou::string& path, uintptr_t flags) {
+Result<FileHandleId, ErrorCode> FilesystemServer::handle_open(const ou::string& path, uintptr_t flags) {
   auto inode_result = resolve_path(path);
 
   uint32_t inode_num = 0;
@@ -58,7 +58,7 @@ Result<uintptr_t, ErrorCode> FilesystemServer::handle_open(const ou::string& pat
       PathComponents components;
       split_path(path, components);
       if (components.parts.empty()) {
-        return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__FILE_NOT_FOUND);
+        return Result<FileHandleId, ErrorCode>::err(FILESYSTEM__FILE_NOT_FOUND);
       }
 
       ou::string parent_path = "/";
@@ -69,13 +69,13 @@ Result<uintptr_t, ErrorCode> FilesystemServer::handle_open(const ou::string& pat
 
       auto parent_result = resolve_path(parent_path);
       if (parent_result.is_err()) {
-        return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__PARENT_NOT_FOUND);
+        return Result<FileHandleId, ErrorCode>::err(FILESYSTEM__PARENT_NOT_FOUND);
       }
 
       uint32_t parent_inode_num = parent_result.value();
       INode* parent = g_storage->find_inode(parent_inode_num);
       if (!parent || parent->type != NodeType::DIRECTORY) {
-        return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__PARENT_NOT_FOUND);
+        return Result<FileHandleId, ErrorCode>::err(FILESYSTEM__PARENT_NOT_FOUND);
       }
 
       INode new_file;
@@ -90,7 +90,7 @@ Result<uintptr_t, ErrorCode> FilesystemServer::handle_open(const ou::string& pat
       g_storage->inodes.push_back(static_cast<INode&&>(new_file));
       inode_num = new_file.inode_num;
     } else {
-      return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__FILE_NOT_FOUND);
+      return Result<FileHandleId, ErrorCode>::err(FILESYSTEM__FILE_NOT_FOUND);
     }
   } else {
     inode_num = inode_result.value();
@@ -104,17 +104,17 @@ Result<uintptr_t, ErrorCode> FilesystemServer::handle_open(const ou::string& pat
 
   FileHandle* handle = g_storage->allocate_handle();
   if (!handle) {
-    return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__TOO_MANY_OPEN_FILES);
+    return Result<FileHandleId, ErrorCode>::err(FILESYSTEM__TOO_MANY_OPEN_FILES);
   }
 
   handle->inode_num = inode_num;
   handle->flags = flags;
 
-  return Result<uintptr_t, ErrorCode>::ok(handle->handle_id);
+  return Result<FileHandleId, ErrorCode>::ok(FileHandleId(handle->handle_id));
 }
 
-Result<uintptr_t, ErrorCode> FilesystemServer::handle_read(uintptr_t handle_id, uintptr_t offset, uintptr_t length) {
-  FileHandle* handle = g_storage->find_handle(handle_id);
+Result<uintptr_t, ErrorCode> FilesystemServer::handle_read(FileHandleId handle_id, uintptr_t offset, uintptr_t length) {
+  FileHandle* handle = g_storage->find_handle(handle_id.raw());
   if (!handle) {
     return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__INVALID_HANDLE);
   }
@@ -139,8 +139,8 @@ Result<uintptr_t, ErrorCode> FilesystemServer::handle_read(uintptr_t handle_id, 
   return Result<uintptr_t, ErrorCode>::ok(bytes_to_read);
 }
 
-Result<uintptr_t, ErrorCode> FilesystemServer::handle_write(uintptr_t handle_id, uintptr_t offset, const ou::vector<uint8_t>& data) {
-  FileHandle* handle = g_storage->find_handle(handle_id);
+Result<uintptr_t, ErrorCode> FilesystemServer::handle_write(FileHandleId handle_id, uintptr_t offset, const ou::vector<uint8_t>& data) {
+  FileHandle* handle = g_storage->find_handle(handle_id.raw());
   if (!handle) {
     return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__INVALID_HANDLE);
   }
@@ -165,8 +165,8 @@ Result<uintptr_t, ErrorCode> FilesystemServer::handle_write(uintptr_t handle_id,
   return Result<uintptr_t, ErrorCode>::ok(length);
 }
 
-Result<bool, ErrorCode> FilesystemServer::handle_close(uintptr_t handle_id) {
-  FileHandle* handle = g_storage->find_handle(handle_id);
+Result<bool, ErrorCode> FilesystemServer::handle_close(FileHandleId handle_id) {
+  FileHandle* handle = g_storage->find_handle(handle_id.raw());
   if (!handle) {
     return Result<bool, ErrorCode>::err(FILESYSTEM__INVALID_HANDLE);
   }

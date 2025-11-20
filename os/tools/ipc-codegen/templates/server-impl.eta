@@ -44,6 +44,11 @@ void <%= it.service.name %>Server::process_request(const IpcMessage& msg) {
       if (it.isComplexType(arg)) {
         return arg.name;
       } else {
+        const argType = arg.type || "int";
+        // If it's an int alias, wrap the raw value
+        if (it.getType(arg) !== 'uintptr_t' && it.getType(arg) !== 'intptr_t') {
+          return `${it.getType(arg)}(msg.args[${simpleArgIdx++}])`;
+        }
         return `msg.args[${simpleArgIdx++}]`;
       }
     }).join(', ');
@@ -54,11 +59,20 @@ void <%= it.service.name %>Server::process_request(const IpcMessage& msg) {
 <% if (method.returns.length === 0) { %>
       // No return values
 <% } else if (method.returns.length === 1) { %>
+<% const ret = method.returns[0]; %>
+<% if (it.getType(ret) !== 'uintptr_t' && it.getType(ret) !== 'intptr_t' && !it.isComplexType(ret)) { %>
+      resp.values[0] = result.value().raw();
+<% } else { %>
       resp.values[0] = result.value();
+<% } %>
 <% } else { %>
       auto val = result.value();
 <% method.returns.forEach((ret, i) => { %>
+<% if (it.getType(ret) !== 'uintptr_t' && it.getType(ret) !== 'intptr_t' && !it.isComplexType(ret)) { %>
+      resp.values[<%= i %>] = val.<%= ret.name %>.raw();
+<% } else { %>
       resp.values[<%= i %>] = val.<%= ret.name %>;
+<% } %>
 <% }) %>
 <% } %>
     }

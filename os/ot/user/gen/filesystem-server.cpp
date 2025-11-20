@@ -25,12 +25,12 @@ void FilesystemServer::process_request(const IpcMessage& msg) {
     if (result.is_err()) {
       resp.error_code = result.error();
     } else {
-      resp.values[0] = result.value();
+      resp.values[0] = result.value().raw();
     }
     break;
   }
   case MethodIds::Filesystem::READ: {
-    auto result = handle_read(msg.args[0], msg.args[1], msg.args[2]);
+    auto result = handle_read(FileHandleId(msg.args[0]), msg.args[1], msg.args[2]);
     if (result.is_err()) {
       resp.error_code = result.error();
     } else {
@@ -48,7 +48,7 @@ void FilesystemServer::process_request(const IpcMessage& msg) {
     for (size_t i = 0; i < data_view.len; i++) {
       data.push_back(static_cast<uint8_t>(data_view.ptr[i]));
     }
-    auto result = handle_write(msg.args[0], msg.args[1], data);
+    auto result = handle_write(FileHandleId(msg.args[0]), msg.args[1], data);
     if (result.is_err()) {
       resp.error_code = result.error();
     } else {
@@ -57,7 +57,7 @@ void FilesystemServer::process_request(const IpcMessage& msg) {
     break;
   }
   case MethodIds::Filesystem::CLOSE: {
-    auto result = handle_close(msg.args[0]);
+    auto result = handle_close(FileHandleId(msg.args[0]));
     if (result.is_err()) {
       resp.error_code = result.error();
     } else {

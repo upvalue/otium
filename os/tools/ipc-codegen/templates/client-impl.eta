@@ -37,11 +37,23 @@ Result<<%~ it.getReturnType(method) %>, ErrorCode> <%~ it.service.name %>Client:
 <% if (method.returns.length === 0) { %>
   return Result<<%~ it.getReturnType(method) %>, ErrorCode>::ok({});
 <% } else if (method.returns.length === 1) { %>
+<% const ret = method.returns[0]; %>
+<% const retType = ret.type || "int"; %>
+<% if (it.getType(ret) !== 'uintptr_t' && it.getType(ret) !== 'intptr_t' && !it.isComplexType(ret)) { %>
+  // Convert raw IPC value to typed value
+  return Result<<%~ it.getReturnType(method) %>, ErrorCode>::ok(<%~ it.getType(ret) %>(resp.values[0]));
+<% } else { %>
   return Result<<%~ it.getReturnType(method) %>, ErrorCode>::ok(resp.values[0]);
+<% } %>
 <% } else { %>
   <%~ it.getReturnType(method) %> result;
 <% method.returns.forEach((ret, i) => { %>
+<% const retType = ret.type || "int"; %>
+<% if (it.getType(ret) !== 'uintptr_t' && it.getType(ret) !== 'intptr_t' && !it.isComplexType(ret)) { %>
+  result.<%~ ret.name %> = <%~ it.getType(ret) %>(resp.values[<%~ i %>]);
+<% } else { %>
   result.<%~ ret.name %> = resp.values[<%~ i %>];
+<% } %>
 <% }) %>
   return Result<<%~ it.getReturnType(method) %>, ErrorCode>::ok(result);
 <% } %>

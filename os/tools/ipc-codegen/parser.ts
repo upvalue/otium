@@ -5,6 +5,11 @@ export interface Config {
   error_code_base: number;
 }
 
+export interface IntAlias {
+  name: string;
+  signed: boolean;
+}
+
 export interface Arg {
   name: string;
   type?: string;    // Type: "int" (default), "uint", "string", "buffer"
@@ -39,6 +44,7 @@ export interface ErrorCodeDef {
 
 export interface ParsedIDL {
   config: Config;
+  intAliases: IntAlias[];
   services: Service[];
   errorCodes: ErrorCodeDef[];
 }
@@ -51,6 +57,18 @@ export async function parseIDL(filePath: string): Promise<ParsedIDL> {
     method_id_base: yaml.config?.method_id_base ?? 0x1000,
     error_code_base: yaml.config?.error_code_base ?? 100,
   };
+
+  // Parse int aliases
+  const intAliases: IntAlias[] = [];
+  if (yaml.int_aliases) {
+    for (const [name, def] of Object.entries(yaml.int_aliases)) {
+      const aliasDef = def as any;
+      intAliases.push({
+        name,
+        signed: aliasDef.signed ?? false,
+      });
+    }
+  }
 
   const services: Service[] = [];
   const errorCodes: ErrorCodeDef[] = [];
@@ -121,6 +139,7 @@ export async function parseIDL(filePath: string): Promise<ParsedIDL> {
 
   return {
     config,
+    intAliases,
     services,
     errorCodes,
   };

@@ -1,12 +1,16 @@
 import { Eta } from "eta";
-import { Arg, ErrorCodeDef, Method, ParsedIDL, Return, Service } from "./parser.ts";
+import { Arg, ErrorCodeDef, IntAlias, Method, ParsedIDL, Return, Service } from "./parser.ts";
 
 const eta = new Eta();
+
+// Global int aliases map (populated during generation)
+let intAliasMap: Map<string, IntAlias> = new Map();
 
 interface TemplateContext {
   service?: Service;
   services?: Service[];
   errorCodes?: ErrorCodeDef[];
+  intAliases?: IntAlias[];
   // Helper functions
   toPascalCase: (str: string) => string;
   toUpperSnake: (str: string) => string;
@@ -19,6 +23,7 @@ interface TemplateContext {
   extractMsgArgs: (method: Method) => string;
   isComplexType: (arg: Arg | Return) => boolean;
   hasComplexArgs: (method: Method) => boolean;
+  usesIntAliases: (service: Service) => boolean;
 }
 
 function toPascalCase(str: string): string {
@@ -52,8 +57,10 @@ function getType(arg: Arg | Return): string {
   if (type === "buffer") return "const ou::vector<uint8_t>&";
   if (type === "uint") return "uintptr_t";
 
-  // Support custom typed-int aliases (they behave like uintptr_t for IPC)
-  if (type === "FileHandleId") return "FileHandleId";
+  // Check if this is an int alias
+  if (intAliasMap.has(type)) {
+    return type;
+  }
 
   // Default: int or check signed flag
   return arg.signed ?? true ? "intptr_t" : "uintptr_t";
@@ -86,7 +93,14 @@ function formatArgs(args: Arg[]): string {
 function formatIpcArgs(args: Arg[]): string {
   // Only include non-complex (int/uint) args for IPC inline args
   const simpleArgs = args.filter(arg => !isComplexType(arg));
-  const argNames = simpleArgs.map((arg) => arg.name);
+  const argNames = simpleArgs.map((arg) => {
+    const type = arg.type || "int";
+    // If it's an int alias, extract raw value
+    if (intAliasMap.has(type)) {
+      return `${arg.name}.raw()`;
+    }
+    return arg.name;
+  });
   // Pad to 3 arguments
   while (argNames.length < 3) {
     argNames.push("0");
@@ -99,6 +113,26 @@ function extractMsgArgs(method: Method): string {
   return method.args
     .map((_, index) => `msg.args[${index}]`)
     .join(", ");
+}
+
+function usesIntAliases(service: Service): boolean {
+  for (const method of service.methods) {
+    // Check args
+    for (const arg of method.args) {
+      const type = arg.type || "int";
+      if (intAliasMap.has(type)) {
+        return true;
+      }
+    }
+    // Check returns
+    for (const ret of method.returns) {
+      const type = ret.type || "int";
+      if (intAliasMap.has(type)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function createContext(data: Partial<TemplateContext>): TemplateContext {
@@ -115,6 +149,7 @@ function createContext(data: Partial<TemplateContext>): TemplateContext {
     extractMsgArgs,
     isComplexType,
     hasComplexArgs,
+    usesIntAliases,
   };
 }
 
@@ -294,6 +329,12 @@ export async function generate(
   projectRoot: string,
 ) {
   console.log("\nGenerating IPC code...");
+
+  // Initialize int alias map
+  intAliasMap = new Map();
+  for (const alias of idl.intAliases) {
+    intAliasMap.set(alias.name, alias);
+  }
 
   // Ensure output directory exists
   await ensureDir(outputDir);

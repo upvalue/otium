@@ -3,7 +3,7 @@
 #include "ot/user/user.hpp"
 #include "ot/lib/mpack/mpack-reader.hpp"
 
-Result<uintptr_t, ErrorCode> FilesystemClient::open(const ou::string& path, uintptr_t flags) {
+Result<FileHandleId, ErrorCode> FilesystemClient::open(const ou::string& path, uintptr_t flags) {
   // Serialize complex arguments to comm page
   CommWriter writer;
   writer.writer().str(path.c_str());
@@ -15,19 +15,20 @@ Result<uintptr_t, ErrorCode> FilesystemClient::open(const ou::string& path, uint
     flags, 0, 0  );
 
   if (resp.error_code != NONE) {
-    return Result<uintptr_t, ErrorCode>::err(resp.error_code);
+    return Result<FileHandleId, ErrorCode>::err(resp.error_code);
   }
 
-  return Result<uintptr_t, ErrorCode>::ok(resp.values[0]);
+  // Convert raw IPC value to typed value
+  return Result<FileHandleId, ErrorCode>::ok(FileHandleId(resp.values[0]));
 }
 
-Result<uintptr_t, ErrorCode> FilesystemClient::read(uintptr_t handle, uintptr_t offset, uintptr_t length) {
+Result<uintptr_t, ErrorCode> FilesystemClient::read(FileHandleId handle, uintptr_t offset, uintptr_t length) {
 
   IpcResponse resp = ou_ipc_send(
     pid_,
     0 | IPC_FLAG_RECV_COMM_DATA,
     MethodIds::Filesystem::READ,
-    handle, offset, length  );
+    handle.raw(), offset, length  );
 
   if (resp.error_code != NONE) {
     return Result<uintptr_t, ErrorCode>::err(resp.error_code);
@@ -38,7 +39,7 @@ Result<uintptr_t, ErrorCode> FilesystemClient::read(uintptr_t handle, uintptr_t 
   return Result<uintptr_t, ErrorCode>::ok(resp.values[0]);
 }
 
-Result<uintptr_t, ErrorCode> FilesystemClient::write(uintptr_t handle, uintptr_t offset, const ou::vector<uint8_t>& data) {
+Result<uintptr_t, ErrorCode> FilesystemClient::write(FileHandleId handle, uintptr_t offset, const ou::vector<uint8_t>& data) {
   // Serialize complex arguments to comm page
   CommWriter writer;
   writer.writer().bin(data.data(), data.size());
@@ -47,7 +48,7 @@ Result<uintptr_t, ErrorCode> FilesystemClient::write(uintptr_t handle, uintptr_t
     pid_,
     IPC_FLAG_SEND_COMM_DATA,
     MethodIds::Filesystem::WRITE,
-    handle, offset, 0  );
+    handle.raw(), offset, 0  );
 
   if (resp.error_code != NONE) {
     return Result<uintptr_t, ErrorCode>::err(resp.error_code);
@@ -56,13 +57,13 @@ Result<uintptr_t, ErrorCode> FilesystemClient::write(uintptr_t handle, uintptr_t
   return Result<uintptr_t, ErrorCode>::ok(resp.values[0]);
 }
 
-Result<bool, ErrorCode> FilesystemClient::close(uintptr_t handle) {
+Result<bool, ErrorCode> FilesystemClient::close(FileHandleId handle) {
 
   IpcResponse resp = ou_ipc_send(
     pid_,
     0,
     MethodIds::Filesystem::CLOSE,
-    handle, 0, 0  );
+    handle.raw(), 0, 0  );
 
   if (resp.error_code != NONE) {
     return Result<bool, ErrorCode>::err(resp.error_code);

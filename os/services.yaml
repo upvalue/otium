@@ -5,6 +5,10 @@ config:
   method_id_base: 0x1000      # Auto-increment method IDs from here (must be multiple of 256!)
   error_code_base: 100         # Auto-increment service error codes from here
 
+int_aliases:
+  FileHandleId:
+    signed: false
+
 services:
   - name: Fibonacci
     methods:
@@ -60,13 +64,13 @@ services:
             type: uint
         returns:
           - name: handle
-            type: uint
+            type: FileHandleId
         errors: [FILE_NOT_FOUND, PATH_TOO_LONG, TOO_MANY_OPEN_FILES]
 
       - name: read
         args:
           - name: handle
-            type: uint
+            type: FileHandleId
           - name: offset
             type: uint
           - name: length
@@ -80,7 +84,7 @@ services:
       - name: write
         args:
           - name: handle
-            type: uint
+            type: FileHandleId
           - name: offset
             type: uint
           - name: data
@@ -93,7 +97,7 @@ services:
       - name: close
         args:
           - name: handle
-            type: uint
+            type: FileHandleId
         returns: []
         errors: [INVALID_HANDLE]
 

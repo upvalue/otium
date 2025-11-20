@@ -12,10 +12,10 @@ struct FilesystemClient {
 
   FilesystemClient(Pid pid) : pid_(pid) {}
 
-  Result<uintptr_t, ErrorCode> open(const ou::string& path, uintptr_t flags);
-  Result<uintptr_t, ErrorCode> read(uintptr_t handle, uintptr_t offset, uintptr_t length);
-  Result<uintptr_t, ErrorCode> write(uintptr_t handle, uintptr_t offset, const ou::vector<uint8_t>& data);
-  Result<bool, ErrorCode> close(uintptr_t handle);
+  Result<FileHandleId, ErrorCode> open(const ou::string& path, uintptr_t flags);
+  Result<uintptr_t, ErrorCode> read(FileHandleId handle, uintptr_t offset, uintptr_t length);
+  Result<uintptr_t, ErrorCode> write(FileHandleId handle, uintptr_t offset, const ou::vector<uint8_t>& data);
+  Result<bool, ErrorCode> close(FileHandleId handle);
   Result<uintptr_t, ErrorCode> read_all(const ou::string& path);
   Result<bool, ErrorCode> write_all(const ou::string& path, const ou::vector<uint8_t>& data);
   Result<bool, ErrorCode> create_dir(const ou::string& path);

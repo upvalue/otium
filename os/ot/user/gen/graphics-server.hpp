@@ -2,6 +2,7 @@
 #include "ot/lib/ipc.hpp"
 #include "ot/lib/result.hpp"
 #include "ot/lib/error-codes.hpp"
+#include "ot/lib/typed-int.hpp"
 #include "ot/user/gen/graphics-types.hpp"
 #include "ot/user/gen/server-base.hpp"
 

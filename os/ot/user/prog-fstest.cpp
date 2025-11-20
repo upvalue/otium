@@ -113,8 +113,8 @@ void fstest_main() {
     // Open file for writing (create)
     auto open_result = client.open(path, 0x04 | 0x02);  // CREATE | WRITE
     TEST_ASSERT(open_result.is_ok(), "Failed to open file for writing");
-    uintptr_t handle = open_result.value();
-    oprintf("  Opened file, handle: %lu\n", handle);
+    FileHandleId handle = open_result.value();
+    oprintf("  Opened file, handle: %lu\n", handle.raw());
 
     // Write some data
     ou::vector<uint8_t> write_data;

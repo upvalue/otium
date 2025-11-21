@@ -34,7 +34,7 @@
 #define KERNEL_PROG_TEST_FILESYSTEM 9
 
 // Selected kernel program (modified by config.sh)
-#define KERNEL_PROG KERNEL_PROG_TEST_FILESYSTEM
+#define KERNEL_PROG KERNEL_PROG_SHELL
 
 // Log levels
 #define LSILENT 0

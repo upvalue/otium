@@ -28,12 +28,8 @@ void <%= it.service.name %>Server::process_request(const IpcMessage& msg) {
     reader.read_string(<%~ arg.name %>_view);
     ou::string <%~ arg.name %>(<%~ arg.name %>_view.ptr, <%~ arg.name %>_view.len);
 <% } else if (arg.type === "buffer") { %>
-    StringView <%~ arg.name %>_view;
-    reader.read_bin(<%~ arg.name %>_view);  // Binary data
-    ou::vector<uint8_t> <%~ arg.name %>;
-    for (size_t i = 0; i < <%~ arg.name %>_view.len; i++) {
-      <%~ arg.name %>.push_back(static_cast<uint8_t>(<%~ arg.name %>_view.ptr[i]));
-    }
+    StringView <%~ arg.name %>;
+    reader.read_bin(<%~ arg.name %>);  // Zero-copy binary data from comm page
 <% } %>
 <% }) %>
 <% } %>

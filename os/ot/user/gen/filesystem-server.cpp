@@ -42,12 +42,8 @@ void FilesystemServer::process_request(const IpcMessage& msg) {
     // Deserialize complex arguments from comm page
     PageAddr comm = ou_get_comm_page();
     MPackReader reader(comm.as_ptr(), OT_PAGE_SIZE);
-    StringView data_view;
-    reader.read_bin(data_view);  // Binary data
-    ou::vector<uint8_t> data;
-    for (size_t i = 0; i < data_view.len; i++) {
-      data.push_back(static_cast<uint8_t>(data_view.ptr[i]));
-    }
+    StringView data;
+    reader.read_bin(data);  // Zero-copy binary data from comm page
     auto result = handle_write(FileHandleId(msg.args[0]), msg.args[1], data);
     if (result.is_err()) {
       resp.error_code = result.error();
@@ -87,12 +83,8 @@ void FilesystemServer::process_request(const IpcMessage& msg) {
     StringView path_view;
     reader.read_string(path_view);
     ou::string path(path_view.ptr, path_view.len);
-    StringView data_view;
-    reader.read_bin(data_view);  // Binary data
-    ou::vector<uint8_t> data;
-    for (size_t i = 0; i < data_view.len; i++) {
-      data.push_back(static_cast<uint8_t>(data_view.ptr[i]));
-    }
+    StringView data;
+    reader.read_bin(data);  // Zero-copy binary data from comm page
     auto result = handle_write_all(path, data);
     if (result.is_err()) {
       resp.error_code = result.error();

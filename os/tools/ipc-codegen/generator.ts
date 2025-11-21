@@ -17,8 +17,10 @@ interface TemplateContext {
   toKebabCase: (str: string) => string;
   toHex: (num: number) => string;
   getType: (arg: Arg | Return) => string;
+  getServerType: (arg: Arg | Return) => string;
   getReturnType: (method: Method) => string;
   formatArgs: (args: Arg[]) => string;
+  formatServerArgs: (args: Arg[]) => string;
   formatIpcArgs: (args: Arg[]) => string;
   extractMsgArgs: (method: Method) => string;
   isComplexType: (arg: Arg | Return) => boolean;
@@ -66,6 +68,22 @@ function getType(arg: Arg | Return): string {
   return arg.signed ?? true ? "intptr_t" : "uintptr_t";
 }
 
+// Server-side type for parameters - uses StringView for buffers (zero-copy)
+function getServerType(arg: Arg | Return): string {
+  const type = arg.type || "int";
+  if (type === "string") return "const ou::string&";
+  if (type === "buffer") return "const StringView&";  // Zero-copy from comm page
+  if (type === "uint") return "uintptr_t";
+
+  // Check if this is an int alias
+  if (intAliasMap.has(type)) {
+    return type;
+  }
+
+  // Default: int or check signed flag
+  return arg.signed ?? true ? "intptr_t" : "uintptr_t";
+}
+
 function isComplexType(arg: Arg | Return): boolean {
   const type = arg.type || "int";
   return type === "string" || type === "buffer";
@@ -88,6 +106,12 @@ function getReturnType(method: Method): string {
 function formatArgs(args: Arg[]): string {
   if (args.length === 0) return "";
   return args.map((arg) => `${getType(arg)} ${arg.name}`).join(", ");
+}
+
+// Server-side argument formatting - uses StringView for buffers
+function formatServerArgs(args: Arg[]): string {
+  if (args.length === 0) return "";
+  return args.map((arg) => `${getServerType(arg)} ${arg.name}`).join(", ");
 }
 
 function formatIpcArgs(args: Arg[]): string {
@@ -143,8 +167,10 @@ function createContext(data: Partial<TemplateContext>): TemplateContext {
     toKebabCase,
     toHex,
     getType,
+    getServerType,
     getReturnType,
     formatArgs,
+    formatServerArgs,
     formatIpcArgs,
     extractMsgArgs,
     isComplexType,

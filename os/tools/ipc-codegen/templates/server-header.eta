@@ -3,17 +3,17 @@
 #include "ot/lib/result.hpp"
 #include "ot/lib/error-codes.hpp"
 #include "ot/lib/typed-int.hpp"
+#include "ot/lib/string-view.hpp"
 #include "ot/user/gen/<%= it.service.name.toLowerCase() %>-types.hpp"
 #include "ot/user/gen/server-base.hpp"
 <% if (it.service.methods.some(m => it.hasComplexArgs(m))) { %>
 #include "ot/user/string.hpp"
-#include "ot/user/vector.hpp"
 <% } %>
 
 struct <%= it.service.name %>Server : ServerBase {
   // Methods to implement
 <% it.service.methods.forEach(method => { %>
-  Result<<%~ it.getReturnType(method) %>, ErrorCode> handle_<%~ method.name %>(<%~ it.formatArgs(method.args) %>);
+  Result<<%~ it.getReturnType(method) %>, ErrorCode> handle_<%~ method.name %>(<%~ it.formatServerArgs(method.args) %>);
 <% }) %>
 
   // Framework methods - handles dispatch

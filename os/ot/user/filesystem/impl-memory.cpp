@@ -1,15 +1,15 @@
-#include "ot/user/gen/filesystem-server.hpp"
-#include "ot/user/filesystem/types.hpp"
 #include "ot/lib/mpack/mpack-writer.hpp"
+#include "ot/user/filesystem/types.hpp"
+#include "ot/user/gen/filesystem-server.hpp"
 #include "ot/user/user.hpp"
 
 using namespace filesystem;
 
 // Global storage for memory backend
-static FilesystemStorage* g_storage = nullptr;
+static FilesystemStorage *g_storage = nullptr;
 
 // Resolve path to inode number
-static Result<uint32_t, ErrorCode> resolve_path(const ou::string& path) {
+static Result<uint32_t, ErrorCode> resolve_path(const ou::string &path) {
   if (path.length() > MAX_PATH_LENGTH) {
     return Result<uint32_t, ErrorCode>::err(FILESYSTEM__PATH_TOO_LONG);
   }
@@ -22,8 +22,8 @@ static Result<uint32_t, ErrorCode> resolve_path(const ou::string& path) {
 
   // Traverse path components
   for (size_t i = 0; i < components.parts.size(); i++) {
-    const ou::string& name = components.parts[i];
-    INode* current = g_storage->find_inode(current_inode);
+    const ou::string &name = components.parts[i];
+    INode *current = g_storage->find_inode(current_inode);
 
     if (!current || current->type != NodeType::DIRECTORY) {
       return Result<uint32_t, ErrorCode>::err(FILESYSTEM__FILE_NOT_FOUND);
@@ -33,7 +33,7 @@ static Result<uint32_t, ErrorCode> resolve_path(const ou::string& path) {
     bool found = false;
     for (size_t j = 0; j < current->children.size(); j++) {
       uint32_t child_inode_num = current->children[j];
-      INode* child = g_storage->find_inode(child_inode_num);
+      INode *child = g_storage->find_inode(child_inode_num);
       if (child && child->name == name) {
         current_inode = child_inode_num;
         found = true;
@@ -49,7 +49,7 @@ static Result<uint32_t, ErrorCode> resolve_path(const ou::string& path) {
   return Result<uint32_t, ErrorCode>::ok(current_inode);
 }
 
-Result<FileHandleId, ErrorCode> FilesystemServer::handle_open(const ou::string& path, uintptr_t flags) {
+Result<FileHandleId, ErrorCode> FilesystemServer::handle_open(const ou::string &path, uintptr_t flags) {
   auto inode_result = resolve_path(path);
 
   uint32_t inode_num = 0;
@@ -73,7 +73,7 @@ Result<FileHandleId, ErrorCode> FilesystemServer::handle_open(const ou::string& 
       }
 
       uint32_t parent_inode_num = parent_result.value();
-      INode* parent = g_storage->find_inode(parent_inode_num);
+      INode *parent = g_storage->find_inode(parent_inode_num);
       if (!parent || parent->type != NodeType::DIRECTORY) {
         return Result<FileHandleId, ErrorCode>::err(FILESYSTEM__PARENT_NOT_FOUND);
       }
@@ -87,14 +87,14 @@ Result<FileHandleId, ErrorCode> FilesystemServer::handle_open(const ou::string& 
       new_file.modified_time = 0;
 
       parent->children.push_back(new_file.inode_num);
-      g_storage->inodes.push_back(static_cast<INode&&>(new_file));
+      g_storage->inodes.push_back(static_cast<INode &&>(new_file));
       inode_num = new_file.inode_num;
     } else {
       return Result<FileHandleId, ErrorCode>::err(FILESYSTEM__FILE_NOT_FOUND);
     }
   } else {
     inode_num = inode_result.value();
-    INode* inode = g_storage->find_inode(inode_num);
+    INode *inode = g_storage->find_inode(inode_num);
 
     if (inode && (flags & OPEN_TRUNCATE) && inode->type == NodeType::FILE) {
       inode->data.clear();
@@ -102,7 +102,7 @@ Result<FileHandleId, ErrorCode> FilesystemServer::handle_open(const ou::string& 
     }
   }
 
-  FileHandle* handle = g_storage->allocate_handle();
+  FileHandle *handle = g_storage->allocate_handle();
   if (!handle) {
     return Result<FileHandleId, ErrorCode>::err(FILESYSTEM__TOO_MANY_OPEN_FILES);
   }
@@ -114,12 +114,12 @@ Result<FileHandleId, ErrorCode> FilesystemServer::handle_open(const ou::string& 
 }
 
 Result<uintptr_t, ErrorCode> FilesystemServer::handle_read(FileHandleId handle_id, uintptr_t offset, uintptr_t length) {
-  FileHandle* handle = g_storage->find_handle(handle_id.raw());
+  FileHandle *handle = g_storage->find_handle(handle_id.raw());
   if (!handle) {
     return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__INVALID_HANDLE);
   }
 
-  INode* inode = g_storage->find_inode(handle->inode_num);
+  INode *inode = g_storage->find_inode(handle->inode_num);
   if (!inode || inode->type != NodeType::FILE) {
     return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__IO_ERROR);
   }
@@ -139,25 +139,26 @@ Result<uintptr_t, ErrorCode> FilesystemServer::handle_read(FileHandleId handle_i
   return Result<uintptr_t, ErrorCode>::ok(bytes_to_read);
 }
 
-Result<uintptr_t, ErrorCode> FilesystemServer::handle_write(FileHandleId handle_id, uintptr_t offset, const ou::vector<uint8_t>& data) {
-  FileHandle* handle = g_storage->find_handle(handle_id.raw());
+Result<uintptr_t, ErrorCode> FilesystemServer::handle_write(FileHandleId handle_id, uintptr_t offset,
+                                                            const StringView &data) {
+  FileHandle *handle = g_storage->find_handle(handle_id.raw());
   if (!handle) {
     return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__INVALID_HANDLE);
   }
 
-  INode* inode = g_storage->find_inode(handle->inode_num);
+  INode *inode = g_storage->find_inode(handle->inode_num);
   if (!inode || inode->type != NodeType::FILE) {
     return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__IO_ERROR);
   }
 
-  size_t length = data.size();
+  size_t length = data.len;
   size_t required_size = offset + length;
   if (inode->data.size() < required_size) {
     inode->data.resize(required_size, 0);
   }
 
   for (size_t i = 0; i < length; i++) {
-    inode->data[offset + i] = data[i];
+    inode->data[offset + i] = static_cast<uint8_t>(data.ptr[i]);
   }
 
   inode->modified_time = 0;
@@ -166,7 +167,7 @@ Result<uintptr_t, ErrorCode> FilesystemServer::handle_write(FileHandleId handle_
 }
 
 Result<bool, ErrorCode> FilesystemServer::handle_close(FileHandleId handle_id) {
-  FileHandle* handle = g_storage->find_handle(handle_id.raw());
+  FileHandle *handle = g_storage->find_handle(handle_id.raw());
   if (!handle) {
     return Result<bool, ErrorCode>::err(FILESYSTEM__INVALID_HANDLE);
   }
@@ -175,13 +176,13 @@ Result<bool, ErrorCode> FilesystemServer::handle_close(FileHandleId handle_id) {
   return Result<bool, ErrorCode>::ok(true);
 }
 
-Result<uintptr_t, ErrorCode> FilesystemServer::handle_read_all(const ou::string& path) {
+Result<uintptr_t, ErrorCode> FilesystemServer::handle_read_all(const ou::string &path) {
   auto inode_result = resolve_path(path);
   if (inode_result.is_err()) {
     return Result<uintptr_t, ErrorCode>::err(inode_result.error());
   }
 
-  INode* inode = g_storage->find_inode(inode_result.value());
+  INode *inode = g_storage->find_inode(inode_result.value());
   if (!inode || inode->type != NodeType::FILE) {
     return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__FILE_NOT_FOUND);
   }
@@ -199,20 +200,20 @@ Result<uintptr_t, ErrorCode> FilesystemServer::handle_read_all(const ou::string&
   return Result<uintptr_t, ErrorCode>::ok(file_size);
 }
 
-Result<bool, ErrorCode> FilesystemServer::handle_write_all(const ou::string& path, const ou::vector<uint8_t>& data) {
+Result<bool, ErrorCode> FilesystemServer::handle_write_all(const ou::string &path, const StringView &data) {
   auto inode_result = resolve_path(path);
   uint32_t inode_num = 0;
 
   if (inode_result.is_ok()) {
     inode_num = inode_result.value();
-    INode* inode = g_storage->find_inode(inode_num);
+    INode *inode = g_storage->find_inode(inode_num);
     if (!inode || inode->type != NodeType::FILE) {
       return Result<bool, ErrorCode>::err(FILESYSTEM__IO_ERROR);
     }
 
     inode->data.clear();
-    for (size_t i = 0; i < data.size(); i++) {
-      inode->data.push_back(data[i]);
+    for (size_t i = 0; i < data.len; i++) {
+      inode->data.push_back(static_cast<uint8_t>(data.ptr[i]));
     }
     inode->modified_time = 0;
   } else {
@@ -234,7 +235,7 @@ Result<bool, ErrorCode> FilesystemServer::handle_write_all(const ou::string& pat
     }
 
     uint32_t parent_inode_num = parent_result.value();
-    INode* parent = g_storage->find_inode(parent_inode_num);
+    INode *parent = g_storage->find_inode(parent_inode_num);
     if (!parent || parent->type != NodeType::DIRECTORY) {
       return Result<bool, ErrorCode>::err(FILESYSTEM__IO_ERROR);
     }
@@ -244,20 +245,20 @@ Result<bool, ErrorCode> FilesystemServer::handle_write_all(const ou::string& pat
     new_file.type = NodeType::FILE;
     new_file.name = components.parts[components.parts.size() - 1];
     new_file.parent_inode = parent_inode_num;
-    for (size_t i = 0; i < data.size(); i++) {
-      new_file.data.push_back(data[i]);
+    for (size_t i = 0; i < data.len; i++) {
+      new_file.data.push_back(static_cast<uint8_t>(data.ptr[i]));
     }
     new_file.created_time = 0;
     new_file.modified_time = 0;
 
     parent->children.push_back(new_file.inode_num);
-    g_storage->inodes.push_back(static_cast<INode&&>(new_file));
+    g_storage->inodes.push_back(static_cast<INode &&>(new_file));
   }
 
   return Result<bool, ErrorCode>::ok(true);
 }
 
-Result<bool, ErrorCode> FilesystemServer::handle_create_dir(const ou::string& path) {
+Result<bool, ErrorCode> FilesystemServer::handle_create_dir(const ou::string &path) {
   if (path.length() > MAX_PATH_LENGTH) {
     return Result<bool, ErrorCode>::err(FILESYSTEM__PATH_TOO_LONG);
   }
@@ -285,7 +286,7 @@ Result<bool, ErrorCode> FilesystemServer::handle_create_dir(const ou::string& pa
   }
 
   uint32_t parent_inode_num = parent_result.value();
-  INode* parent = g_storage->find_inode(parent_inode_num);
+  INode *parent = g_storage->find_inode(parent_inode_num);
   if (!parent || parent->type != NodeType::DIRECTORY) {
     return Result<bool, ErrorCode>::err(FILESYSTEM__PARENT_NOT_FOUND);
   }
@@ -299,24 +300,24 @@ Result<bool, ErrorCode> FilesystemServer::handle_create_dir(const ou::string& pa
   new_dir.modified_time = 0;
 
   parent->children.push_back(new_dir.inode_num);
-  g_storage->inodes.push_back(static_cast<INode&&>(new_dir));
+  g_storage->inodes.push_back(static_cast<INode &&>(new_dir));
 
   return Result<bool, ErrorCode>::ok(true);
 }
 
-Result<bool, ErrorCode> FilesystemServer::handle_delete_file(const ou::string& path) {
+Result<bool, ErrorCode> FilesystemServer::handle_delete_file(const ou::string &path) {
   auto inode_result = resolve_path(path);
   if (inode_result.is_err()) {
     return Result<bool, ErrorCode>::err(FILESYSTEM__FILE_NOT_FOUND);
   }
 
   uint32_t inode_num = inode_result.value();
-  INode* inode = g_storage->find_inode(inode_num);
+  INode *inode = g_storage->find_inode(inode_num);
   if (!inode || inode->type != NodeType::FILE) {
     return Result<bool, ErrorCode>::err(FILESYSTEM__FILE_NOT_FOUND);
   }
 
-  INode* parent = g_storage->find_inode(inode->parent_inode);
+  INode *parent = g_storage->find_inode(inode->parent_inode);
   if (parent) {
     for (size_t i = 0; i < parent->children.size(); i++) {
       if (parent->children[i] == inode_num) {
@@ -335,14 +336,14 @@ Result<bool, ErrorCode> FilesystemServer::handle_delete_file(const ou::string& p
   return Result<bool, ErrorCode>::ok(true);
 }
 
-Result<bool, ErrorCode> FilesystemServer::handle_delete_dir(const ou::string& path) {
+Result<bool, ErrorCode> FilesystemServer::handle_delete_dir(const ou::string &path) {
   auto inode_result = resolve_path(path);
   if (inode_result.is_err()) {
     return Result<bool, ErrorCode>::err(FILESYSTEM__DIR_NOT_FOUND);
   }
 
   uint32_t inode_num = inode_result.value();
-  INode* inode = g_storage->find_inode(inode_num);
+  INode *inode = g_storage->find_inode(inode_num);
   if (!inode || inode->type != NodeType::DIRECTORY) {
     return Result<bool, ErrorCode>::err(FILESYSTEM__DIR_NOT_FOUND);
   }
@@ -351,7 +352,7 @@ Result<bool, ErrorCode> FilesystemServer::handle_delete_dir(const ou::string& pa
     return Result<bool, ErrorCode>::err(FILESYSTEM__NOT_EMPTY);
   }
 
-  INode* parent = g_storage->find_inode(inode->parent_inode);
+  INode *parent = g_storage->find_inode(inode->parent_inode);
   if (parent) {
     for (size_t i = 0; i < parent->children.size(); i++) {
       if (parent->children[i] == inode_num) {
@@ -382,7 +383,7 @@ void proc_filesystem(void) {
   root.parent_inode = 0;
   root.created_time = 0;
   root.modified_time = 0;
-  g_storage->inodes.push_back(static_cast<INode&&>(root));
+  g_storage->inodes.push_back(static_cast<INode &&>(root));
   g_storage->next_inode_num = 1;
 
   // Create and run server

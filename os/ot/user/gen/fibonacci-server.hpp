@@ -3,6 +3,7 @@
 #include "ot/lib/result.hpp"
 #include "ot/lib/error-codes.hpp"
 #include "ot/lib/typed-int.hpp"
+#include "ot/lib/string-view.hpp"
 #include "ot/user/gen/fibonacci-types.hpp"
 #include "ot/user/gen/server-base.hpp"
 

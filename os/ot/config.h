@@ -63,7 +63,7 @@
 #define OT_GRAPHICS_BACKEND_WASM 3
 
 // Selected graphics backend (configured by config.sh)
-#define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_TEST
+#define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_VIRTIO
 
 // Filesystem backend options
 #define OT_FILESYSTEM_BACKEND_NONE 0

@@ -2,7 +2,7 @@
 #include "ot/user/gen/method-ids.hpp"
 #include "ot/user/user.hpp"
 
-void GraphicsServer::process_request(const IpcMessage& msg) {
+void GraphicsServerBase::process_request(const IpcMessage& msg) {
   // Check for shutdown request (handled by base class)
   if (handle_shutdown_if_requested(msg)) {
     return;  // Server exits in base class
@@ -42,7 +42,7 @@ void GraphicsServer::process_request(const IpcMessage& msg) {
   ou_ipc_reply(resp);
 }
 
-void GraphicsServer::run() {
+void GraphicsServerBase::run() {
   while (true) {
     IpcMessage msg = ou_ipc_recv();
     process_request(msg);

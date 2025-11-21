@@ -10,10 +10,13 @@
 #include "ot/user/string.hpp"
 <% } %>
 
-struct <%= it.service.name %>Server : ServerBase {
-  // Methods to implement
+struct <%= it.service.name %>ServerBase : ServerBase {
+  // Virtual destructor for proper cleanup
+  virtual ~<%= it.service.name %>ServerBase() = default;
+
+  // Pure virtual methods to implement in derived class
 <% it.service.methods.forEach(method => { %>
-  Result<<%~ it.getReturnType(method) %>, ErrorCode> handle_<%~ method.name %>(<%~ it.formatServerArgs(method.args) %>);
+  virtual Result<<%~ it.getReturnType(method) %>, ErrorCode> handle_<%~ method.name %>(<%~ it.formatServerArgs(method.args) %>) = 0;
 <% }) %>
 
   // Framework methods - handles dispatch

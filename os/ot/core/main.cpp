@@ -3,8 +3,6 @@
 #include "ot/core/kernel.hpp"
 #include "ot/user/user.hpp"
 
-#include "ot/user/gen/fibonacci-server.hpp"
-
 // Forward declaration for kernel_common (defined in startup.cpp)
 void kernel_common(void);
 
@@ -24,18 +22,13 @@ bool programs_running() {
   return false;
 }
 
-void proc_fibonacci_server(void) {
-  oprintf("Fibonacci server started\n");
-  FibonacciServer server;
-  server.run();
-}
-
 /**
  * the default kernel program (actually run the system)
  */
 void kernel_prog_default() {
-  // create fibonacci ipc server
-  Process *proc_fib = process_create("fib", (const void *)proc_fibonacci_server, nullptr, false);
+  // create fibonacci ipc server (proc_fibonacci is defined in ot/user/fibonacci/impl.cpp)
+  extern void proc_fibonacci(void);
+  Process *proc_fib = process_create("fib", (const void *)proc_fibonacci, nullptr, false);
 
 #if OT_GRAPHICS_BACKEND != OT_GRAPHICS_BACKEND_NONE
   // create graphics driver (proc_graphics is defined in ot/user/graphics/impl.cpp)

@@ -7,10 +7,13 @@
 #include "ot/user/gen/graphics-types.hpp"
 #include "ot/user/gen/server-base.hpp"
 
-struct GraphicsServer : ServerBase {
-  // Methods to implement
-  Result<GetFramebufferResult, ErrorCode> handle_get_framebuffer();
-  Result<bool, ErrorCode> handle_flush();
+struct GraphicsServerBase : ServerBase {
+  // Virtual destructor for proper cleanup
+  virtual ~GraphicsServerBase() = default;
+
+  // Pure virtual methods to implement in derived class
+  virtual Result<GetFramebufferResult, ErrorCode> handle_get_framebuffer() = 0;
+  virtual Result<bool, ErrorCode> handle_flush() = 0;
 
   // Framework methods - handles dispatch
   void process_request(const IpcMessage& msg);

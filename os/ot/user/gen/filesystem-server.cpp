@@ -3,7 +3,7 @@
 #include "ot/user/user.hpp"
 #include "ot/lib/mpack/mpack-reader.hpp"
 
-void FilesystemServer::process_request(const IpcMessage& msg) {
+void FilesystemServerBase::process_request(const IpcMessage& msg) {
   // Check for shutdown request (handled by base class)
   if (handle_shutdown_if_requested(msg)) {
     return;  // Server exits in base class
@@ -146,7 +146,7 @@ void FilesystemServer::process_request(const IpcMessage& msg) {
   ou_ipc_reply(resp);
 }
 
-void FilesystemServer::run() {
+void FilesystemServerBase::run() {
   while (true) {
     IpcMessage msg = ou_ipc_recv();
     process_request(msg);

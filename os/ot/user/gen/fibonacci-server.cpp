@@ -2,7 +2,7 @@
 #include "ot/user/gen/method-ids.hpp"
 #include "ot/user/user.hpp"
 
-void FibonacciServer::process_request(const IpcMessage& msg) {
+void FibonacciServerBase::process_request(const IpcMessage& msg) {
   // Check for shutdown request (handled by base class)
   if (handle_shutdown_if_requested(msg)) {
     return;  // Server exits in base class
@@ -50,7 +50,7 @@ void FibonacciServer::process_request(const IpcMessage& msg) {
   ou_ipc_reply(resp);
 }
 
-void FibonacciServer::run() {
+void FibonacciServerBase::run() {
   while (true) {
     IpcMessage msg = ou_ipc_recv();
     process_request(msg);

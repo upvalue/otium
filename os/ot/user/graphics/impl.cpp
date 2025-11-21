@@ -14,33 +14,37 @@
 // Placement new operator (required for freestanding environment)
 inline void *operator new(decltype(sizeof(0)), void *ptr) noexcept { return ptr; }
 
-// Global backend instance (initialized in proc_graphics)
-static GraphicsBackend *g_backend = nullptr;
+// Graphics server implementation with instance state
+struct GraphicsServer : GraphicsServerBase {
+  GraphicsBackend *backend;
 
-Result<GetFramebufferResult, ErrorCode> GraphicsServer::handle_get_framebuffer() {
-  if (!g_backend || !g_backend->get_framebuffer()) {
-    return Result<GetFramebufferResult, ErrorCode>::err(GRAPHICS__NOT_INITIALIZED);
+  GraphicsServer() : backend(nullptr) {}
+
+  Result<GetFramebufferResult, ErrorCode> handle_get_framebuffer() override {
+    if (!backend || !backend->get_framebuffer()) {
+      return Result<GetFramebufferResult, ErrorCode>::err(GRAPHICS__NOT_INITIALIZED);
+    }
+
+    GetFramebufferResult result;
+    result.fb_ptr = (uintptr_t)backend->get_framebuffer();
+    result.width = backend->get_width();
+    result.height = backend->get_height();
+
+    oprintf("[graphics] Returning fb_ptr=0x%lx, width=%lu, height=%lu\n",
+            result.fb_ptr, result.width, result.height);
+
+    return Result<GetFramebufferResult, ErrorCode>::ok(result);
   }
 
-  GetFramebufferResult result;
-  result.fb_ptr = (uintptr_t)g_backend->get_framebuffer();
-  result.width = g_backend->get_width();
-  result.height = g_backend->get_height();
+  Result<bool, ErrorCode> handle_flush() override {
+    if (!backend) {
+      return Result<bool, ErrorCode>::err(GRAPHICS__NOT_INITIALIZED);
+    }
 
-  oprintf("[graphics] Returning fb_ptr=0x%lx, width=%lu, height=%lu\n",
-          result.fb_ptr, result.width, result.height);
-
-  return Result<GetFramebufferResult, ErrorCode>::ok(result);
-}
-
-Result<bool, ErrorCode> GraphicsServer::handle_flush() {
-  if (!g_backend) {
-    return Result<bool, ErrorCode>::err(GRAPHICS__NOT_INITIALIZED);
+    backend->flush();
+    return Result<bool, ErrorCode>::ok(true);
   }
-
-  g_backend->flush();
-  return Result<bool, ErrorCode>::ok(true);
-}
+};
 
 void proc_graphics(void) {
   oprintf("Graphics driver starting...\n");
@@ -92,8 +96,6 @@ void proc_graphics(void) {
 #error "Unknown graphics backend"
 #endif
 
-  g_backend = &backend;
-
   if (!backend.init()) {
     oprintf("ERROR: Failed to initialize graphics backend\n");
     ou_exit();
@@ -103,7 +105,10 @@ void proc_graphics(void) {
   oprintf("Framebuffer: %ux%u at 0x%lx\n", backend.get_width(), backend.get_height(),
           (uintptr_t)backend.get_framebuffer());
 
-  // Run IPC server loop
+  // Create server and set backend pointer
   GraphicsServer server;
+  server.backend = &backend;
+
+  // Run IPC server loop
   server.run();
 }

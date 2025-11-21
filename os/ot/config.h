@@ -30,8 +30,11 @@
 // Runs graphics driver test
 #define KERNEL_PROG_TEST_GRAPHICS 8
 
+// Runs filesystem test with in-memory backend
+#define KERNEL_PROG_TEST_FILESYSTEM 9
+
 // Selected kernel program (modified by config.sh)
-#define KERNEL_PROG KERNEL_PROG_SHELL
+#define KERNEL_PROG KERNEL_PROG_TEST_FILESYSTEM
 
 // Log levels
 #define LSILENT 0

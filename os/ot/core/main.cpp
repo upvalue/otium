@@ -47,11 +47,6 @@ void kernel_prog_default() {
   // create filesystem server (proc_filesystem is defined in ot/user/filesystem/impl.cpp)
   extern void proc_filesystem(void);
   process_create("filesystem", (const void *)proc_filesystem, nullptr, false);
-
-  // create filesystem test program
-  char *fstest_argv[] = {(char *)"fstest"};
-  Arguments fstest_args = {1, fstest_argv};
-  process_create("fstest", (const void *)user_program_main, &fstest_args, false);
 #endif
 
 #ifdef ENABLE_SHELL

@@ -285,6 +285,15 @@ void handle_syscall(struct trap_frame *f) {
       sender->pending_response.values[1] = f->a2;
       sender->pending_response.values[2] = f->a4;
 
+      // Handle comm page transfer back to sender if IPC_FLAG_RECV_COMM_DATA was set
+      uintptr_t request_flags = IPC_UNPACK_FLAGS(current_proc->pending_message.method_and_flags);
+      if (request_flags & IPC_FLAG_RECV_COMM_DATA) {
+        if (!current_proc->comm_page.is_null() && !sender->comm_page.is_null()) {
+          TRACE_IPC(LSOFT, "IPC reply: copying comm page from server pidx %d back to client pidx %d", current_proc->pidx.raw(), sender->pidx.raw());
+          memcpy(sender->comm_page.as_ptr(), current_proc->comm_page.as_ptr(), OT_PAGE_SIZE);
+        }
+      }
+
       current_proc->blocked_sender = nullptr;
       TRACE_IPC(LLOUD, "IPC reply sent, immediately switching back to sender pidx %d (pid %lu)", sender->pidx, sender->pid);
       // Switch back to sender immediately - receiver will resume when scheduled again

@@ -32,7 +32,6 @@ USER_SOURCES=(
   ot/user/prog-scratch.cpp
   ot/user/prog-shell.cpp
   ot/user/prog-spacedemo.cpp
-  ot/user/prog-fstest.cpp
   ot/user/tcl.cpp
   ot/user/string.cpp
   ot/user/memory-allocator.cpp

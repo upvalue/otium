@@ -8,7 +8,7 @@
 #include "ot/user/user.hpp"
 #include "ot/vendor/tlsf/tlsf.h"
 
-enum ProgramType { UNKNOWN, SHELL, SCRATCH, SPACEDEMO, FSTEST };
+enum ProgramType { UNKNOWN, SHELL, SCRATCH, SPACEDEMO };
 
 ProgramType determine_program_type() {
   PageAddr arg_page = ou_get_arg_page();
@@ -55,9 +55,6 @@ ProgramType determine_program_type() {
     if (arg.equals("spacedemo")) {
       return SPACEDEMO;
     }
-    if (arg.equals("fstest")) {
-      return FSTEST;
-    }
   }
 
   return UNKNOWN;
@@ -72,8 +69,6 @@ void user_program_main(void) {
     scratch_main();
   } else if (program_type == SPACEDEMO) {
     spacedemo_main();
-  } else if (program_type == FSTEST) {
-    fstest_main();
   } else {
     const char *str = "unknown program type, exiting\n";
     ou_io_puts(str, strlen(str));

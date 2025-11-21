@@ -1,0 +1,18 @@
+TEST: Starting filesystem test
+TEST: Filesystem test starting
+TEST: Found filesystem service
+TEST: Test 1: Creating directory /testdir
+TEST: Test 2: Writing file /testdir/hello.txt
+TEST: Test 3: Reading file /testdir/hello.txt
+TEST: Content verified!
+TEST: Test 4: Testing handle-based operations
+TEST: File closed
+TEST: Data verified!
+TEST: Test 5: Creating nested directory
+TEST: Test 6: Writing to nested directory
+TEST: Test 7: Reading from nested directory
+TEST: Test 8: Deleting file
+TEST: Test 9: Testing error handling
+TEST: ===========================================
+TEST: ALL FILESYSTEM TESTS PASSED!
+TEST: ===========================================

@@ -20,6 +20,7 @@ TEST_PROGRAMS = {
     "test-ipc": "--test-ipc",
     "test-ipc-ordering": "--test-ipc-ordering",
     "test-graphics": "--test-graphics",
+    "test-filesystem": "--test-filesystem",
 }
 
 # Platform-specific test exclusions

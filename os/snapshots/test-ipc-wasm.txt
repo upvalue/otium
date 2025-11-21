@@ -1,6 +1,6 @@
 TEST: Starting IPC test
 TEST: Fibonacci service started
-TEST: Client found fibonacci service at PID 1
+TEST: Client found fibonacci service at PID 2
 TEST: Client requesting fib(5)
 TEST: Calculated fib(5) = 5
 TEST: Client received result: 5

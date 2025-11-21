@@ -53,6 +53,9 @@ for arg in "$@"; do
     --test-graphics)
       MODE="KERNEL_PROG_TEST_GRAPHICS"
       ;;
+    --test-filesystem)
+      MODE="KERNEL_PROG_TEST_FILESYSTEM"
+      ;;
     --log-general=*)
       level="${arg#*=}"
       case $level in

@@ -23,9 +23,6 @@
     while (1) {                                                                \
     }                                                                          \
   } while (0)
-
-// Placement new operator declaration (implemented in std.cpp)
-void *operator new(size_t, void *ptr) noexcept;
 #endif
 
 #define TRACE(level, fmt, ...)                                                 \

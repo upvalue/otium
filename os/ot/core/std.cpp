@@ -21,10 +21,8 @@ void __cxa_pure_virtual() {
 }
 }
 
-// Placement new operator (for constructing objects in pre-allocated memory)
-void *operator new(size_t, void *ptr) noexcept { return ptr; }
-
-// Operator delete stubs (we don't use dynamic allocation for graphics classes)
+// Operator delete implementations (declared in common.h)
+// We don't use dynamic allocation in freestanding environment
 void operator delete(void *) noexcept {}
 void operator delete(void *, unsigned int) noexcept {}
 void operator delete(void *, unsigned long) noexcept {}

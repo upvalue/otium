@@ -112,6 +112,22 @@ extern char *ot_scratch_buffer;
 
 // C++ functions
 BoolResult<int> parse_int(const char *s);
+
+// Placement new/delete operators for freestanding environment
+// In POSIX builds, use standard library implementation
+#ifdef OT_POSIX
+#include <new>
+#else
+// Placement new for constructing objects in pre-allocated memory
+inline void *operator new(size_t, void *ptr) noexcept { return ptr; }
+inline void operator delete(void *, void *) noexcept {}
+// Regular delete operators (we don't use dynamic allocation in freestanding)
+// Note: Cannot be inline per C++ standard for replacement operators
+void operator delete(void *) noexcept;
+void operator delete(void *, unsigned int) noexcept;
+void operator delete(void *, unsigned long) noexcept;
+#endif
+
 #endif
 
 #endif

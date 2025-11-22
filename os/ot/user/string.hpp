@@ -11,15 +11,6 @@ void *ou_malloc(size_t size);
 void ou_free(void *ptr);
 void *ou_realloc(void *ptr, size_t size);
 
-// Placement new operator (avoids needing <new>)
-// In POSIX environments, use standard library version
-#ifdef OT_POSIX
-#include <new>
-#else
-inline void *operator new(size_t, void *p) noexcept { return p; }
-inline void operator delete(void *, void *) noexcept {}
-#endif
-
 namespace ou {
 
 // Memory allocation helpers using ou_malloc/ou_free

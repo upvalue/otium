@@ -11,9 +11,6 @@
 #include "ot/user/graphics/backend-wasm.hpp"
 #endif
 
-// Placement new operator (required for freestanding environment)
-inline void *operator new(decltype(sizeof(0)), void *ptr) noexcept { return ptr; }
-
 // Graphics server implementation with instance state
 struct GraphicsServer : GraphicsServerBase {
   GraphicsBackend *backend;

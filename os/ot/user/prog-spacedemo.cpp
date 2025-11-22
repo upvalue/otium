@@ -18,7 +18,6 @@ static const int STREAK_FRAMES = 90;
 
 // Color constants (BGRA format: 0xAARRGGBB)
 static const uint32_t COLOR_BLACK = 0xFF000000;
-static const uint32_t COLOR_WHITE = 0xFFFFFFFF;
 
 // Star system names (from demo.js)
 static const char *STAR_NAMES[] = {
@@ -71,20 +70,41 @@ uint32_t xorshift32() {
 // Random float between 0 and 1
 float randf() { return (float)(xorshift32() % 10000) / 10000.0f; }
 
-// Get gradient color for star type
-void get_star_colors(StarType type, uint32_t &center, uint32_t &edge) {
+// Get retro palette colors for star type (limited color bands)
+void get_star_palette(StarType type, uint32_t palette[8]) {
   switch (type) {
   case STAR_YELLOW:
-    center = 0xFFD0FFFF; // Yellow-white
-    edge = 0xFF0080E0;   // Orange
+    // Yellow/orange star - warm tones
+    palette[0] = 0xFF002A62; // Dark orange
+    palette[1] = 0xFF093B75;
+    palette[2] = 0xFF124F85;
+    palette[3] = 0xFF20659E;
+    palette[4] = 0xFF2E88BA;
+    palette[5] = 0xFF39AAD1;
+    palette[6] = 0xFF4BD2E8;
+    palette[7] = 0xFF4FF6FF; // Bright yellow-white
     break;
   case STAR_BLUE:
-    center = 0xFFFFD0A0; // Light blue
-    edge = 0xFFA07020;   // Dark blue
+    // Blue star - cool tones
+    palette[0] = 0xFF401B00; // Dark blue
+    palette[1] = 0xFF5F3103;
+    palette[2] = 0xFF7C4807;
+    palette[3] = 0xFFA25D10;
+    palette[4] = 0xFFC07614;
+    palette[5] = 0xFFEA9740;
+    palette[6] = 0xFFF1B155;
+    palette[7] = 0xFFFFCC6D; // Bright cyan
     break;
   case STAR_RED:
-    center = 0xFFC0D0FF; // Pink-red
-    edge = 0xFF2010E0;   // Dark red
+    // Red/pink star
+    palette[0] = 0xFF26095F; // Dark red
+    palette[1] = 0xFF34246E;
+    palette[2] = 0xFF474690;
+    palette[3] = 0xFF5F60A7;
+    palette[4] = 0xFF647DBD;
+    palette[5] = 0xFF7097CE;
+    palette[6] = 0xFF7CB6ED;
+    palette[7] = 0xFF7FD4ED; // Bright pink
     break;
   }
 }
@@ -214,6 +234,34 @@ void init_star(SpaceDemoStorage *s) {
   s->central_star.active = true;
 }
 
+// Draw retro palette-based circle with discrete color bands
+void draw_palette_circle(gfx::GfxUtil &gfx, int cx, int cy, int radius, uint32_t palette[8]) {
+  // Draw filled circle with 8 discrete color bands
+  int radius_sq = radius * radius;
+  for (int y = -radius; y <= radius; y++) {
+    for (int x = -radius; x <= radius; x++) {
+      int dist_sq = x * x + y * y;
+      if (dist_sq <= radius_sq) {
+        // Map squared distance to one of 8 color bands (approximate)
+        int band = (int)((float)dist_sq / (float)radius_sq * 7.99f);
+        if (band > 7)
+          band = 7;
+        if (band < 0)
+          band = 0;
+
+        // Invert so center is brightest (palette[7]) and edge is darkest (palette[0])
+        uint32_t color = palette[7 - band];
+
+        int px = cx + x;
+        int py = cy + y;
+        if (px >= 0 && px < gfx.width() && py >= 0 && py < gfx.height()) {
+          gfx.put_pixel(px, py, color);
+        }
+      }
+    }
+  }
+}
+
 // Update and draw central star
 void update_star(SpaceDemoStorage *s, gfx::GfxUtil &gfx, int offset_x, int offset_y) {
   if (!s->central_star.active)
@@ -233,12 +281,12 @@ void update_star(SpaceDemoStorage *s, gfx::GfxUtil &gfx, int offset_x, int offse
   // Size grows as star approaches (scaled for larger screen: 105-245)
   int size = (int)(140.0f * (1000.0f - star->z) / 1000.0f) + 105;
 
-  // Get gradient colors for star type
-  uint32_t center_color, edge_color;
-  get_star_colors(star->type, center_color, edge_color);
+  // Get palette colors for star type
+  uint32_t palette[8];
+  get_star_palette(star->type, palette);
 
-  // Draw gradient circle centered in demo area
-  gfx.draw_gradient_circle(screen_x + offset_x, screen_y + offset_y, size, center_color, edge_color);
+  // Draw retro palette-based circle centered in demo area
+  draw_palette_circle(gfx, screen_x + offset_x, screen_y + offset_y, size, palette);
 }
 
 // Hyperspace warp effect
@@ -259,7 +307,7 @@ void hyperspace_warp(SpaceDemoStorage *s, gfx::GfxUtil &gfx, GraphicsClient &cli
   int center_y = DEMO_HEIGHT / 2;
 
   // Streak animation (90 frames)
-  for (int frame = 0; frame < STREAK_FRAMES; frame++) {
+  for (int frame = 0; frame < STREAK_FRAMES;) {
     if (fm.begin_frame()) {
       float streak_amount = (float)frame / (float)STREAK_FRAMES;
 
@@ -270,7 +318,11 @@ void hyperspace_warp(SpaceDemoStorage *s, gfx::GfxUtil &gfx, GraphicsClient &cli
       for (int sy = 0; sy < DEMO_HEIGHT; sy++) {
         for (int sx = 0; sx < DEMO_WIDTH; sx++) {
           uint32_t color = s->saved_screen[sy * DEMO_WIDTH + sx];
-          if (color == COLOR_BLACK)
+          // Skip pure black pixels (background)
+          uint8_t r = (color >> 16) & 0xFF;
+          uint8_t g = (color >> 8) & 0xFF;
+          uint8_t b = color & 0xFF;
+          if (r == 0 && g == 0 && b == 0)
             continue;
 
           int dx = sx - center_x;
@@ -307,6 +359,7 @@ void hyperspace_warp(SpaceDemoStorage *s, gfx::GfxUtil &gfx, GraphicsClient &cli
 
       client.flush();
       fm.end_frame();
+      frame++;
     }
     ou_yield();
   }
@@ -382,22 +435,29 @@ void spacedemo_main() {
   int total_bytes = DEMO_WIDTH * DEMO_HEIGHT * 4;
   int num_pages = (total_bytes + 4095) / 4096; // Round up
 
+  // Allocate pages contiguously by calling ou_alloc_page multiple times
+  // and verifying they are contiguous (on most systems they should be)
   s->saved_screen = (uint32_t *)ou_alloc_page();
   if (s->saved_screen == nullptr) {
     oprintf("SPACEDEMO: Failed to allocate saved screen buffer (page 1)\n");
     ou_exit();
   }
 
-  // Allocate additional pages for the buffer
+  uint8_t *expected_addr = (uint8_t *)s->saved_screen + 4096;
   for (int i = 1; i < num_pages; i++) {
     void *extra_page = ou_alloc_page();
     if (extra_page == nullptr) {
       oprintf("SPACEDEMO: Failed to allocate saved screen buffer (page %d/%d)\n", i + 1, num_pages);
       ou_exit();
     }
+    // Warn if pages aren't contiguous (they should be in practice)
+    if (extra_page != expected_addr) {
+      oprintf("SPACEDEMO: Warning - page %d not contiguous (expected %p, got %p)\n", i + 1, expected_addr, extra_page);
+    }
+    expected_addr += 4096;
   }
 
-  oprintf("SPACEDEMO: Allocated saved screen buffer (%d KB)\n", (DEMO_WIDTH * DEMO_HEIGHT * 4) / 1024);
+  oprintf("SPACEDEMO: Allocated saved screen buffer (%d KB, %d pages)\n", total_bytes / 1024, num_pages);
 
   // Initialize demo state
   init_background_stars(s);

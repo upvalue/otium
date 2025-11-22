@@ -1,6 +1,7 @@
 #include "ot/user/gen/fibonacci-client.hpp"
 #include "ot/user/gen/method-ids.hpp"
 #include "ot/user/user.hpp"
+#include "ot/lib/mpack/mpack-reader.hpp"
 
 Result<intptr_t, ErrorCode> FibonacciClient::calc_fib(intptr_t n) {
 
@@ -48,6 +49,54 @@ Result<uintptr_t, ErrorCode> FibonacciClient::get_cache_size() {
   }
 
   return Result<uintptr_t, ErrorCode>::ok(resp.values[0]);
+}
+
+Result<FibResult, ErrorCode> FibonacciClient::calc_fib_detailed(uintptr_t n) {
+
+  IpcResponse resp = ou_ipc_send(
+    pid_,
+    0 | IPC_FLAG_RECV_COMM_DATA,
+    MethodIds::Fibonacci::CALC_FIB_DETAILED,
+    n, 0, 0  );
+
+  if (resp.error_code != NONE) {
+    return Result<FibResult, ErrorCode>::err(resp.error_code);
+  }
+
+  // Response data is in comm page - caller reads it with MPackReader
+  // Return value indicates size or count
+  // Deserialize message type from comm page
+  PageAddr comm = ou_get_comm_page();
+  MPackReader reader(comm.as_ptr(), OT_PAGE_SIZE);
+  auto result = FibResult::unpack(reader);
+  if (result.is_err()) {
+    return Result<FibResult, ErrorCode>::err(result.error());
+  }
+  return Result<FibResult, ErrorCode>::ok(static_cast<FibResult&&>(result.value()));
+}
+
+Result<ou::vector<uintptr_t>, ErrorCode> FibonacciClient::calc_sequence(uintptr_t start, uintptr_t count) {
+
+  IpcResponse resp = ou_ipc_send(
+    pid_,
+    0 | IPC_FLAG_RECV_COMM_DATA,
+    MethodIds::Fibonacci::CALC_SEQUENCE,
+    start, count, 0  );
+
+  if (resp.error_code != NONE) {
+    return Result<ou::vector<uintptr_t>, ErrorCode>::err(resp.error_code);
+  }
+
+  // Response data is in comm page - caller reads it with MPackReader
+  // Return value indicates size or count
+  // Deserialize message type from comm page
+  PageAddr comm = ou_get_comm_page();
+  MPackReader reader(comm.as_ptr(), OT_PAGE_SIZE);
+  auto result = FibArrayHelper::unpack(reader);
+  if (result.is_err()) {
+    return Result<ou::vector<uintptr_t>, ErrorCode>::err(result.error());
+  }
+  return Result<ou::vector<uintptr_t>, ErrorCode>::ok(static_cast<ou::vector<uintptr_t>&&>(result.value()));
 }
 
 

@@ -16,6 +16,9 @@ private:
   Result(bool success, const T& value, const E& error)
     : success_(success), value_(value), error_(error) {}
 
+  Result(bool success, T&& value, E&& error)
+    : success_(success), value_(static_cast<T&&>(value)), error_(static_cast<E&&>(error)) {}
+
 public:
   // Default copy and move constructors/assignment work fine
   Result(const Result&) = default;
@@ -26,19 +29,23 @@ public:
 
   // Factory methods for creating Result instances
   static Result ok(const T& value) {
-    return Result(true, value, E{});
+    E dummy_error{};
+    return Result(true, value, dummy_error);
   }
 
   static Result ok(T&& value) {
-    return Result(true, static_cast<T&&>(value), E{});
+    E dummy_error{};
+    return Result(true, static_cast<T&&>(value), static_cast<E&&>(dummy_error));
   }
 
   static Result err(const E& error) {
-    return Result(false, T{}, error);
+    T dummy_value{};
+    return Result(false, static_cast<T&&>(dummy_value), E(error));
   }
 
   static Result err(E&& error) {
-    return Result(false, T{}, static_cast<E&&>(error));
+    T dummy_value{};
+    return Result(false, static_cast<T&&>(dummy_value), static_cast<E&&>(error));
   }
 
   // Query methods

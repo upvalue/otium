@@ -33,7 +33,7 @@ Result<bool, ErrorCode> GraphicsClient::flush() {
     return Result<bool, ErrorCode>::err(resp.error_code);
   }
 
-  return Result<bool, ErrorCode>::ok({});
+  return Result<bool, ErrorCode>::ok(true);
 }
 
 

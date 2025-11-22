@@ -283,8 +283,8 @@ void kernel_prog_test_ipc_ordering() {
 void proc_ipc_codegen_client(void) {
   ou_yield(); // Let server start first
 
-  int fib_pid = ou_proc_lookup("fibonacci");
-  oprintf("TEST: Client found fibonacci service at PID %d\n", fib_pid);
+  Pid fib_pid = ou_proc_lookup("fibonacci");
+  oprintf("TEST: Client found fibonacci service at PID %lu\n", fib_pid.raw());
 
   FibonacciClient client(fib_pid);
 
@@ -331,6 +331,41 @@ void proc_ipc_codegen_client(void) {
     oprintf("TEST: ERROR - Should have received error but got: %ld\n", error_result.value());
   }
 
+  // Test calc_fib_detailed with message type return
+  oprintf("TEST: Client requesting calc_fib_detailed(10)\n");
+  auto detailed_result = client.calc_fib_detailed(10);
+  if (detailed_result.is_ok()) {
+    auto val = detailed_result.value();
+    oprintf("TEST: Received FibResult: value=%lu, is_cached=%d\n", val.value, val.is_cached);
+  } else {
+    oprintf("TEST: Client got error %d\n", detailed_result.error());
+  }
+
+  // Test calc_sequence with array message type return
+  oprintf("TEST: Client requesting calc_sequence(5, 8)\n");
+  auto sequence_result = client.calc_sequence(5, 8);
+  if (sequence_result.is_ok()) {
+    const auto& values = sequence_result.value();
+    oprintf("TEST: Received %lu fibonacci values: ", values.size());
+    for (size_t i = 0; i < values.size(); i++) {
+      oprintf("%lu", values[i]);
+      if (i < values.size() - 1) oprintf(", ");
+    }
+    oprintf("\n");
+  } else {
+    oprintf("TEST: Client got error %d\n", sequence_result.error());
+  }
+
+  // Test calc_sequence with count that's too large
+  oprintf("TEST: Client requesting calc_sequence(0, 50) - should fail\n");
+  auto bad_sequence_result = client.calc_sequence(0, 50);
+  if (bad_sequence_result.is_err()) {
+    oprintf("TEST: Got expected error: %d (%s)\n",
+            bad_sequence_result.error(), error_code_to_string(bad_sequence_result.error()));
+  } else {
+    oprintf("TEST: ERROR - Should have received error\n");
+  }
+
   // Shutdown the server cleanly
   oprintf("TEST: Client sending shutdown to server\n");
   auto shutdown_result = client.shutdown();
@@ -340,7 +375,7 @@ void proc_ipc_codegen_client(void) {
     oprintf("TEST: Shutdown failed with error %d\n", shutdown_result.error());
   }
 
-  oprintf("TEST: IPC codegen test complete\n");
+  oprintf("TEST: IPC codegen test complete (including message types!)\n");
   ou_exit();
 }
 

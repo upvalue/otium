@@ -69,7 +69,7 @@ Result<bool, ErrorCode> FilesystemClient::close(FileHandleId handle) {
     return Result<bool, ErrorCode>::err(resp.error_code);
   }
 
-  return Result<bool, ErrorCode>::ok({});
+  return Result<bool, ErrorCode>::ok(true);
 }
 
 Result<uintptr_t, ErrorCode> FilesystemClient::read_all(const ou::string& path) {
@@ -108,7 +108,7 @@ Result<bool, ErrorCode> FilesystemClient::write_all(const ou::string& path, cons
     return Result<bool, ErrorCode>::err(resp.error_code);
   }
 
-  return Result<bool, ErrorCode>::ok({});
+  return Result<bool, ErrorCode>::ok(true);
 }
 
 Result<bool, ErrorCode> FilesystemClient::create_dir(const ou::string& path) {
@@ -126,7 +126,7 @@ Result<bool, ErrorCode> FilesystemClient::create_dir(const ou::string& path) {
     return Result<bool, ErrorCode>::err(resp.error_code);
   }
 
-  return Result<bool, ErrorCode>::ok({});
+  return Result<bool, ErrorCode>::ok(true);
 }
 
 Result<bool, ErrorCode> FilesystemClient::delete_file(const ou::string& path) {
@@ -144,7 +144,7 @@ Result<bool, ErrorCode> FilesystemClient::delete_file(const ou::string& path) {
     return Result<bool, ErrorCode>::err(resp.error_code);
   }
 
-  return Result<bool, ErrorCode>::ok({});
+  return Result<bool, ErrorCode>::ok(true);
 }
 
 Result<bool, ErrorCode> FilesystemClient::delete_dir(const ou::string& path) {
@@ -162,7 +162,7 @@ Result<bool, ErrorCode> FilesystemClient::delete_dir(const ou::string& path) {
     return Result<bool, ErrorCode>::err(resp.error_code);
   }
 
-  return Result<bool, ErrorCode>::ok({});
+  return Result<bool, ErrorCode>::ok(true);
 }
 
 

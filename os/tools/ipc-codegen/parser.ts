@@ -10,9 +10,23 @@ export interface IntAlias {
   signed: boolean;
 }
 
+// Message type definitions
+export interface MessageField {
+  name: string;
+  type: string;  // Can be primitive, array, or another message type
+  element?: string; // For array types, specifies the element type
+}
+
+export interface MessageType {
+  name: string;
+  kind: "struct" | "array";
+  fields?: MessageField[]; // For struct types
+  element?: string; // For array types
+}
+
 export interface Arg {
   name: string;
-  type?: string;    // Type: "int" (default), "uint", "string", "buffer"
+  type?: string;    // Type: "int" (default), "uint", "string", "buffer", or message type name
   signed?: boolean; // Defaults to true if omitted (for backward compat with int/uint)
 }
 
@@ -45,6 +59,7 @@ export interface ErrorCodeDef {
 export interface ParsedIDL {
   config: Config;
   intAliases: IntAlias[];
+  messageTypes: MessageType[];
   services: Service[];
   errorCodes: ErrorCodeDef[];
 }
@@ -67,6 +82,35 @@ export async function parseIDL(filePath: string): Promise<ParsedIDL> {
         name,
         signed: aliasDef.signed ?? false,
       });
+    }
+  }
+
+  // Parse message types
+  const messageTypes: MessageType[] = [];
+  if (yaml.types) {
+    for (const [name, def] of Object.entries(yaml.types)) {
+      const typeDef = def as any;
+
+      if (typeDef.type === "array") {
+        // Array type: { type: "array", element: "uint" }
+        messageTypes.push({
+          name,
+          kind: "array",
+          element: typeDef.element,
+        });
+      } else if (typeDef.type === "struct") {
+        // Struct type: { type: "struct", fields: [...] }
+        const fields: MessageField[] = (typeDef.fields || []).map((field: any) => ({
+          name: field.name,
+          type: field.type,
+          element: field.element, // For array fields
+        }));
+        messageTypes.push({
+          name,
+          kind: "struct",
+          fields,
+        });
+      }
     }
   }
 
@@ -107,13 +151,20 @@ export async function parseIDL(filePath: string): Promise<ParsedIDL> {
         return { name: ret.name, type, signed };
       });
 
+      // Auto-detect if method returns complex data that needs comm page
+      const needsCommData = method.returns_comm_data ??
+        returns.some(ret => {
+          const type = ret.type || "int";
+          return type === "string" || type === "buffer" || messageTypes.some(mt => mt.name === type);
+        });
+
       methods.push({
         name: method.name,
         args,
         returns,
         errors: method.errors || [],
         methodId: nextMethodId,
-        returns_comm_data: method.returns_comm_data ?? false,
+        returns_comm_data: needsCommData,
       });
       nextMethodId += 0x100; // Increment by 256 to skip flag bits
 
@@ -140,6 +191,7 @@ export async function parseIDL(filePath: string): Promise<ParsedIDL> {
   return {
     config,
     intAliases,
+    messageTypes,
     services,
     errorCodes,
   };

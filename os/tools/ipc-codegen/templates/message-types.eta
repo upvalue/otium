@@ -1,0 +1,253 @@
+#pragma once
+#include "ot/common.h"
+#include "ot/user/string.hpp"
+#include "ot/user/vector.hpp"
+#include "ot/lib/string-view.hpp"
+#include "ot/lib/array-view.hpp"
+#include "ot/lib/buffer-view.hpp"
+#include "ot/lib/mpack/mpack-reader.hpp"
+#include "ot/lib/mpack/mpack-writer.hpp"
+#include "ot/lib/result.hpp"
+#include "ot/lib/error-codes.hpp"
+
+// Auto-generated message types
+
+<% it.messageTypes.forEach(msgType => { %>
+<% if (msgType.kind === "array") { %>
+// Array type: <%~ msgType.name %>
+
+// Element type: <%~ msgType.element %>
+
+using <%~ msgType.name %> = ou::vector<<%~ it.getFieldType({type: msgType.element}) %>>;
+using <%~ msgType.name %>View = ArrayView<<%~ it.getFieldServerType({type: msgType.element}) %>>;
+
+// Helper functions for <%~ msgType.name %>
+
+namespace <%~ msgType.name %>Helper {
+
+  inline void pack(const <%= msgType.name %>& arr, MPackWriter& writer) {
+    writer.array(arr.size());
+    for (const auto& elem : arr) {
+<% if (msgType.element === "uint" || msgType.element === "int") { %>
+      writer.u64(elem);
+<% } else if (msgType.element === "bool") { %>
+      writer.boolean(elem);
+<% } else if (msgType.element === "string") { %>
+      writer.str(elem.c_str());
+<% } else if (it.isMessageType(msgType.element)) { %>
+      elem.pack(writer);
+<% } %>
+    }
+  }
+
+  inline Result<<%= msgType.name %>, ErrorCode> unpack(MPackReader& reader) {
+    if (!reader.is_array()) {
+      return Result<<%= msgType.name %>, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+    }
+    uint32_t count = reader.array_size();
+    <%= msgType.name %> result;
+    result.reserve(count);
+    for (uint32_t i = 0; i < count; i++) {
+<% if (msgType.element === "uint" || msgType.element === "int") { %>
+      uint64_t val;
+      if (!reader.read_u64(val)) {
+        return Result<<%= msgType.name %>, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+      }
+      result.push_back(val);
+<% } else if (msgType.element === "bool") { %>
+      bool val;
+      if (!reader.read_bool(val)) {
+        return Result<<%= msgType.name %>, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+      }
+      result.push_back(val);
+<% } else if (msgType.element === "string") { %>
+      StringView val;
+      if (!reader.read_string(val)) {
+        return Result<<%= msgType.name %>, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+      }
+      result.push_back(ou::string(val.ptr, val.len));
+<% } else if (it.isMessageType(msgType.element)) { %>
+      auto elem_result = <%= msgType.element %>::unpack(reader);
+      if (elem_result.is_err()) {
+        return Result<<%= msgType.name %>, ErrorCode>::err(elem_result.error());
+      }
+      result.push_back(elem_result.value());
+<% } %>
+    }
+    return Result<<%= msgType.name %>, ErrorCode>::ok(static_cast<<%= msgType.name %>&&>(result));
+  }
+}
+
+<% } else if (msgType.kind === "struct") { %>
+// Struct type: <%= msgType.name %> (owning version)
+struct <%= msgType.name %> {
+<% msgType.fields.forEach(field => { %>
+  <%= it.getFieldType(field) %> <%= field.name %>;
+<% }) %>
+
+  // Serialize to messagepack
+  void pack(MPackWriter& writer) const {
+    writer.map(<%= msgType.fields.length %>);
+<% msgType.fields.forEach(field => { %>
+    writer.str("<%= field.name %>");
+<% if (field.type === "array") { %>
+    writer.array(<%= field.name %>.size());
+    for (const auto& elem : <%= field.name %>) {
+<% if (field.element === "uint" || field.element === "int") { %>
+      writer.u64(elem);
+<% } else if (field.element === "bool") { %>
+      writer.boolean(elem);
+<% } else if (field.element === "string") { %>
+      writer.str(elem.c_str());
+<% } else if (it.isMessageType(field.element)) { %>
+      elem.pack(writer);
+<% } %>
+    }
+<% } else if (field.type === "string") { %>
+    writer.str(<%= field.name %>.c_str());
+<% } else if (field.type === "uint" || field.type === "int") { %>
+    writer.u64(<%= field.name %>);
+<% } else if (field.type === "bool") { %>
+    writer.boolean(<%= field.name %>);
+<% } else if (it.isMessageType(field.type)) { %>
+    <%= field.name %>.pack(writer);
+<% } %>
+<% }) %>
+  }
+
+  // Deserialize from messagepack
+  static Result<<%= msgType.name %>, ErrorCode> unpack(MPackReader& reader) {
+    <%= msgType.name %> result;
+
+    if (!reader.is_map()) {
+      return Result<<%= msgType.name %>, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+    }
+
+    size_t map_size = reader.map_size();
+    for (size_t i = 0; i < map_size; i++) {
+      StringView key;
+      if (!reader.read_string(key)) {
+        return Result<<%= msgType.name %>, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+      }
+
+<% msgType.fields.forEach((field, index) => { %>
+      <% if (index > 0) { %> else <% } %>if (key.equals("<%= field.name %>")) {
+<% if (field.type === "array") { %>
+        if (!reader.is_array()) {
+          return Result<<%= msgType.name %>, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+        }
+        size_t array_size = reader.array_size();
+        result.<%= field.name %>.reserve(array_size);
+        for (size_t j = 0; j < array_size; j++) {
+<% if (field.element === "uint" || field.element === "int") { %>
+          uint64_t val;
+          if (!reader.read_u64(val)) {
+            return Result<<%= msgType.name %>, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+          }
+          result.<%= field.name %>.push_back(val);
+<% } else if (field.element === "bool") { %>
+          bool val;
+          if (!reader.read_bool(val)) {
+            return Result<<%= msgType.name %>, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+          }
+          result.<%= field.name %>.push_back(val);
+<% } else if (field.element === "string") { %>
+          StringView val;
+          if (!reader.read_string(val)) {
+            return Result<<%= msgType.name %>, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+          }
+          result.<%= field.name %>.push_back(ou::string(val.ptr, val.len));
+<% } else if (it.isMessageType(field.element)) { %>
+          auto elem_result = <%= field.element %>::unpack(reader);
+          if (elem_result.is_err()) {
+            return Result<<%= msgType.name %>, ErrorCode>::err(elem_result.error());
+          }
+          result.<%= field.name %>.push_back(elem_result.value());
+<% } %>
+        }
+<% } else if (field.type === "string") { %>
+        StringView val;
+        if (!reader.read_string(val)) {
+          return Result<<%= msgType.name %>, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+        }
+        result.<%= field.name %> = ou::string(val.ptr, val.len);
+<% } else if (field.type === "uint" || field.type === "int") { %>
+        uint64_t val;
+        if (!reader.read_u64(val)) {
+          return Result<<%= msgType.name %>, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+        }
+        result.<%= field.name %> = val;
+<% } else if (field.type === "bool") { %>
+        bool val;
+        if (!reader.read_bool(val)) {
+          return Result<<%= msgType.name %>, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+        }
+        result.<%= field.name %> = val;
+<% } else if (it.isMessageType(field.type)) { %>
+        auto val_result = <%= field.type %>::unpack(reader);
+        if (val_result.is_err()) {
+          return Result<<%= msgType.name %>, ErrorCode>::err(val_result.error());
+        }
+        result.<%= field.name %> = val_result.value();
+<% } %>
+      }
+<% }) %>
+    }
+
+    return Result<<%= msgType.name %>, ErrorCode>::ok(static_cast<<%= msgType.name %>&&>(result));
+  }
+};
+
+// Struct type: <%= msgType.name %>View (zero-copy view version)
+struct <%= msgType.name %>View {
+<% msgType.fields.forEach(field => { %>
+  <%= it.getFieldServerType(field) %> <%= field.name %>;
+<% }) %>
+
+  // Deserialize from messagepack (zero-copy where possible)
+  static Result<<%= msgType.name %>View, ErrorCode> unpack_view(MPackReader& reader) {
+    <%= msgType.name %>View result;
+
+    if (!reader.is_map()) {
+      return Result<<%= msgType.name %>View, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+    }
+
+    size_t map_size = reader.map_size();
+    for (size_t i = 0; i < map_size; i++) {
+      StringView key;
+      if (!reader.read_string(key)) {
+        return Result<<%= msgType.name %>View, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+      }
+
+<% msgType.fields.forEach((field, index) => { %>
+      <% if (index > 0) { %> else <% } %>if (key.equals("<%= field.name %>")) {
+<% if (field.type === "string") { %>
+        if (!reader.read_string(result.<%= field.name %>)) {
+          return Result<<%= msgType.name %>View, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+        }
+<% } else if (field.type === "uint" || field.type === "int") { %>
+        uint64_t val;
+        if (!reader.read_u64(val)) {
+          return Result<<%= msgType.name %>View, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+        }
+        result.<%= field.name %> = val;
+<% } else if (field.type === "bool") { %>
+        bool val;
+        if (!reader.read_bool(val)) {
+          return Result<<%= msgType.name %>View, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+        }
+        result.<%= field.name %> = val;
+<% } else { %>
+        // TODO: Implement zero-copy view for <%= field.type %>
+        return Result<<%= msgType.name %>View, ErrorCode>::err(ErrorCode::IPC__INVALID_MSG);
+<% } %>
+      }
+<% }) %>
+    }
+
+    return Result<<%= msgType.name %>View, ErrorCode>::ok(result);
+  }
+};
+
+<% } %>
+<% }) %>

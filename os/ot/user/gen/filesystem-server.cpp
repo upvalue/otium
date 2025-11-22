@@ -2,6 +2,7 @@
 #include "ot/user/gen/method-ids.hpp"
 #include "ot/user/user.hpp"
 #include "ot/lib/mpack/mpack-reader.hpp"
+#include "ot/lib/mpack/mpack-writer.hpp"
 
 void FilesystemServerBase::process_request(const IpcMessage& msg) {
   // Check for shutdown request (handled by base class)

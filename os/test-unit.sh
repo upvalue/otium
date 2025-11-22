@@ -16,6 +16,7 @@ clang++ -DOT_POSIX -DOT_TEST -DOT_TRACE_MEM \
     ot/lib/std.cpp \
     ot/core/platform/posix-std.cpp \
     ot/lib/printf-test.cpp \
+    ot/lib/array-view-test.cpp \
     ot/core/platform-test.cpp \
     ot/core/process.cpp \
     ot/core/process-test.cpp \

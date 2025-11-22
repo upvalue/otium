@@ -1,16 +1,19 @@
 import { Eta } from "eta";
-import { Arg, ErrorCodeDef, IntAlias, Method, ParsedIDL, Return, Service } from "./parser.ts";
+import { Arg, ErrorCodeDef, IntAlias, MessageType, Method, ParsedIDL, Return, Service } from "./parser.ts";
 
 const eta = new Eta();
 
 // Global int aliases map (populated during generation)
 let intAliasMap: Map<string, IntAlias> = new Map();
+// Global message types map (populated during generation)
+let messageTypeMap: Map<string, MessageType> = new Map();
 
 interface TemplateContext {
   service?: Service;
   services?: Service[];
   errorCodes?: ErrorCodeDef[];
   intAliases?: IntAlias[];
+  messageTypes?: MessageType[];
   // Helper functions
   toPascalCase: (str: string) => string;
   toUpperSnake: (str: string) => string;
@@ -24,8 +27,11 @@ interface TemplateContext {
   formatIpcArgs: (args: Arg[]) => string;
   extractMsgArgs: (method: Method) => string;
   isComplexType: (arg: Arg | Return) => boolean;
+  isMessageType: (typeName: string) => boolean;
   hasComplexArgs: (method: Method) => boolean;
   usesIntAliases: (service: Service) => boolean;
+  getFieldType: (field: any) => string;
+  getFieldServerType: (field: any) => string;
 }
 
 function toPascalCase(str: string): string {
@@ -53,15 +59,32 @@ function toHex(num: number): string {
   return `0x${num.toString(16)}`;
 }
 
-function getType(arg: Arg | Return): string {
+function getType(arg: Arg | Return, isReturnValue: boolean = false): string {
   const type = arg.type || "int";
-  if (type === "string") return "const ou::string&";
-  if (type === "buffer") return "const ou::vector<uint8_t>&";
+
+  // For arguments (not return values), use const references for complex types
+  const useRef = !isReturnValue;
+
+  if (type === "string") return useRef ? "const ou::string&" : "ou::string";
+  if (type === "buffer") return useRef ? "const ou::vector<uint8_t>&" : "ou::vector<uint8_t>";
   if (type === "uint") return "uintptr_t";
 
   // Check if this is an int alias
   if (intAliasMap.has(type)) {
     return type;
+  }
+
+  // Check if this is a message type
+  if (isMessageType(type)) {
+    const msgType = messageTypeMap.get(type)!;
+    if (msgType.kind === "array") {
+      // For array types, return ou::vector<element_type>
+      const vectorType = `ou::vector<${getFieldType({type: msgType.element})}>`;
+      return useRef ? `const ${vectorType}&` : vectorType;
+    } else {
+      // For struct types
+      return useRef ? `const ${type}&` : type;
+    }
   }
 
   // Default: int or check signed flag
@@ -80,24 +103,97 @@ function getServerType(arg: Arg | Return): string {
     return type;
   }
 
+  // Check if this is a message type - use view version for server
+  if (isMessageType(type)) {
+    const msgType = messageTypeMap.get(type)!;
+    if (msgType.kind === "array") {
+      // For array types, return ArrayView<element_type>
+      return `const ArrayView<${getFieldServerType({type: msgType.element})}>&`;
+    } else {
+      // For struct types, return const reference to view version
+      return `const ${type}View&`;
+    }
+  }
+
   // Default: int or check signed flag
   return arg.signed ?? true ? "intptr_t" : "uintptr_t";
 }
 
+function isMessageType(typeName: string): boolean {
+  return messageTypeMap.has(typeName);
+}
+
 function isComplexType(arg: Arg | Return): boolean {
   const type = arg.type || "int";
-  return type === "string" || type === "buffer";
+  return type === "string" || type === "buffer" || isMessageType(type);
 }
 
 function hasComplexArgs(method: Method): boolean {
   return method.args.some(isComplexType);
 }
 
+// Get C++ type for a message field
+function getFieldType(field: any): string {
+  const type = field.type || "int";
+
+  if (type === "array") {
+    // Array field with element type
+    const elemType = field.element;
+    if (elemType === "uint") return "ou::vector<uintptr_t>";
+    if (elemType === "int") return "ou::vector<intptr_t>";
+    if (elemType === "string") return "ou::vector<ou::string>";
+    if (elemType === "bool") return "ou::vector<bool>";
+    // Check if element is a message type
+    if (isMessageType(elemType)) {
+      return `ou::vector<${elemType}>`;
+    }
+    return `ou::vector<${elemType}>`;
+  }
+
+  // Regular types
+  if (type === "string") return "ou::string";
+  if (type === "buffer") return "ou::vector<uint8_t>";
+  if (type === "uint") return "uintptr_t";
+  if (type === "bool") return "bool";
+  if (intAliasMap.has(type)) return type;
+  if (isMessageType(type)) return type;
+
+  return "intptr_t"; // default
+}
+
+// Get C++ type for server-side (zero-copy views)
+function getFieldServerType(field: any): string {
+  const type = field.type || "int";
+
+  if (type === "array") {
+    // Array field with element type
+    const elemType = field.element;
+    if (elemType === "uint") return "ArrayView<uintptr_t>";
+    if (elemType === "int") return "ArrayView<intptr_t>";
+    if (elemType === "string") return "ArrayView<StringView>"; // Array of string views
+    if (elemType === "bool") return "ArrayView<bool>";
+    if (isMessageType(elemType)) {
+      return `ArrayView<${elemType}View>`;
+    }
+    return `ArrayView<${elemType}>`;
+  }
+
+  // Regular types
+  if (type === "string") return "StringView";
+  if (type === "buffer") return "BufferView";
+  if (type === "uint") return "uintptr_t";
+  if (type === "bool") return "bool";
+  if (intAliasMap.has(type)) return type;
+  if (isMessageType(type)) return `${type}View`;
+
+  return "intptr_t"; // default
+}
+
 function getReturnType(method: Method): string {
   if (method.returns.length === 0) {
     return "bool"; // For void methods, return bool (always true on success)
   } else if (method.returns.length === 1) {
-    return getType(method.returns[0]);
+    return getType(method.returns[0], true); // Pass true for isReturnValue
   } else {
     return `${toPascalCase(method.name)}Result`;
   }
@@ -174,8 +270,11 @@ function createContext(data: Partial<TemplateContext>): TemplateContext {
     formatIpcArgs,
     extractMsgArgs,
     isComplexType,
+    isMessageType,
     hasComplexArgs,
     usesIntAliases,
+    getFieldType,
+    getFieldServerType,
   };
 }
 
@@ -217,9 +316,10 @@ async function generateService(
   service: Service,
   outputDir: string,
   templateDir: string,
+  messageTypes: MessageType[],
 ) {
   const serviceLower = service.name.toLowerCase();
-  const context = createContext({ service });
+  const context = createContext({ service, messageTypes });
 
   // Generate types header
   const typesHeader = await renderTemplate(
@@ -263,7 +363,17 @@ async function generateGlobalFiles(
   const context = createContext({
     services: idl.services,
     errorCodes: idl.errorCodes,
+    messageTypes: idl.messageTypes,
   });
+
+  // Generate message types
+  if (idl.messageTypes.length > 0) {
+    const messageTypes = await renderTemplate(
+      `${templateDir}/message-types.eta`,
+      context,
+    );
+    await writeIfChanged(`${outputDir}/message-types.hpp`, messageTypes);
+  }
 
   // Generate method IDs
   const methodIds = await renderTemplate(
@@ -362,13 +472,19 @@ export async function generate(
     intAliasMap.set(alias.name, alias);
   }
 
+  // Initialize message type map
+  messageTypeMap = new Map();
+  for (const msgType of idl.messageTypes) {
+    messageTypeMap.set(msgType.name, msgType);
+  }
+
   // Ensure output directory exists
   await ensureDir(outputDir);
 
   // Generate per-service files
   for (const service of idl.services) {
     console.log(`\nService: ${service.name}`);
-    await generateService(service, outputDir, templateDir);
+    await generateService(service, outputDir, templateDir, idl.messageTypes);
 
     // Create implementation directory and stub file
     const implDir = `${projectRoot}/ot/user/${service.name.toLowerCase()}`;

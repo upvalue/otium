@@ -11,6 +11,8 @@ enum ErrorCode {
   IPC__PID_NOT_FOUND = 2,
   /** Method not known by receiver */
   IPC__METHOD_NOT_KNOWN = 3,
+  /** Invalid message format */
+  IPC__INVALID_MSG = 4,
 
   // Generated service error codes (starting at 100)
   #include "ot/user/gen/error-codes-gen.hpp"
@@ -26,6 +28,8 @@ inline const char *error_code_to_string(ErrorCode code) {
     return "ipc-pid-not-found";
   case IPC__METHOD_NOT_KNOWN:
     return "ipc-method-not-known";
+  case IPC__INVALID_MSG:
+    return "ipc-invalid-msg";
 
   // Generated service error code cases
   #include "ot/user/gen/error-codes-gen-switch.hpp"

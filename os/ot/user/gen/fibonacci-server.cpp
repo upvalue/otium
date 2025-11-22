@@ -1,6 +1,7 @@
 #include "ot/user/gen/fibonacci-server.hpp"
 #include "ot/user/gen/method-ids.hpp"
 #include "ot/user/user.hpp"
+#include "ot/lib/mpack/mpack-writer.hpp"
 
 void FibonacciServerBase::process_request(const IpcMessage& msg) {
   // Check for shutdown request (handled by base class)
@@ -39,6 +40,36 @@ void FibonacciServerBase::process_request(const IpcMessage& msg) {
       resp.error_code = result.error();
     } else {
       resp.values[0] = result.value();
+    }
+    break;
+  }
+  case MethodIds::Fibonacci::CALC_FIB_DETAILED: {
+    auto result = handle_calc_fib_detailed(msg.args[0]);
+    if (result.is_err()) {
+      resp.error_code = result.error();
+    } else {
+      // Serialize message type to comm page
+      PageAddr comm = ou_get_comm_page();
+      MPackWriter writer(comm.as_ptr(), OT_PAGE_SIZE);
+      result.value().pack(writer);
+      if (!writer.ok()) {
+        resp.error_code = IPC__INVALID_MSG;
+      }
+    }
+    break;
+  }
+  case MethodIds::Fibonacci::CALC_SEQUENCE: {
+    auto result = handle_calc_sequence(msg.args[0], msg.args[1]);
+    if (result.is_err()) {
+      resp.error_code = result.error();
+    } else {
+      // Serialize message type to comm page
+      PageAddr comm = ou_get_comm_page();
+      MPackWriter writer(comm.as_ptr(), OT_PAGE_SIZE);
+      FibArrayHelper::pack(result.value(), writer);
+      if (!writer.ok()) {
+        resp.error_code = IPC__INVALID_MSG;
+      }
     }
     break;
   }

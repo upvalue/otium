@@ -313,6 +313,9 @@ There are some unit tests with doctest that run on the host system; these can be
  
 ### Snapshot tests
 
+Tests for the kernel are ot/core/kernel-tests.cpp; each test is compiled with a specific KERNEL_PROG
+define and this determines what test run. New tests should be added there.
+
 The kernel uses snapshot testing to verify behavior. Tests are defined in `test-snapshot.py` and run
 specific kernel configurations by compiling with test flags.
 

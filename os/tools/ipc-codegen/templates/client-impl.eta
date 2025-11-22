@@ -35,13 +35,31 @@ Result<<%~ it.getReturnType(method) %>, ErrorCode> <%~ it.service.name %>Client:
   // Return value indicates size or count
 <% } %>
 <% if (method.returns.length === 0) { %>
-  return Result<<%~ it.getReturnType(method) %>, ErrorCode>::ok({});
+  return Result<<%~ it.getReturnType(method) %>, ErrorCode>::ok(true);
 <% } else if (method.returns.length === 1) { %>
 <% const ret = method.returns[0]; %>
 <% const retType = ret.type || "int"; %>
-<% if (it.getType(ret) !== 'uintptr_t' && it.getType(ret) !== 'intptr_t' && !it.isComplexType(ret)) { %>
+<% if (it.isMessageType(retType)) { %>
+  // Deserialize message type from comm page
+  PageAddr comm = ou_get_comm_page();
+  MPackReader reader(comm.as_ptr(), OT_PAGE_SIZE);
+<% const msgType = it.messageTypes.find(mt => mt.name === retType); %>
+<% if (msgType && msgType.kind === "array") { %>
+  auto result = <%~ retType %>Helper::unpack(reader);
+<% } else { %>
+  auto result = <%~ retType %>::unpack(reader);
+<% } %>
+  if (result.is_err()) {
+    return Result<<%~ it.getReturnType(method) %>, ErrorCode>::err(result.error());
+  }
+<% if (msgType && msgType.kind === "array") { %>
+  return Result<<%~ it.getReturnType(method) %>, ErrorCode>::ok(static_cast<<%~ it.getReturnType(method) %>&&>(result.value()));
+<% } else { %>
+  return Result<<%~ it.getReturnType(method) %>, ErrorCode>::ok(static_cast<<%~ retType %>&&>(result.value()));
+<% } %>
+<% } else if (it.getType(ret, true) !== 'uintptr_t' && it.getType(ret, true) !== 'intptr_t' && !it.isComplexType(ret)) { %>
   // Convert raw IPC value to typed value
-  return Result<<%~ it.getReturnType(method) %>, ErrorCode>::ok(<%~ it.getType(ret) %>(resp.values[0]));
+  return Result<<%~ it.getReturnType(method) %>, ErrorCode>::ok(<%~ it.getType(ret, true) %>(resp.values[0]));
 <% } else { %>
   return Result<<%~ it.getReturnType(method) %>, ErrorCode>::ok(resp.values[0]);
 <% } %>

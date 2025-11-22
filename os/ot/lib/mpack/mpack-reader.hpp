@@ -49,6 +49,26 @@ public:
   // Read binary data (zero-copy - returns view into msgpack buffer)
   bool read_bin(StringView& bin);
 
+  // Convenience method aliases for generated code
+  bool read_u32(uint32_t& value) { return read_uint(value); }
+  bool read_u64(uint64_t& value) {
+    uint32_t v32;
+    if (read_uint(v32)) {
+      value = v32;
+      return true;
+    }
+    return false;
+  }
+  bool read_i32(int32_t& value) { return read_int(value); }
+  bool read_i64(int64_t& value) {
+    int32_t v32;
+    if (read_int(v32)) {
+      value = v32;
+      return true;
+    }
+    return false;
+  }
+
   // ===== Container Reading =====
 
   // Enter array, returns element count
@@ -56,6 +76,22 @@ public:
 
   // Enter map, returns pair count
   bool enter_map(uint32_t& count);
+
+  // Convenience methods for generated code
+  bool is_array() { return peek_type() == MPACK_TOKEN_ARRAY; }
+  bool is_map() { return peek_type() == MPACK_TOKEN_MAP; }
+
+  uint32_t array_size() {
+    uint32_t count = 0;
+    if (enter_array(count)) return count;
+    return 0;
+  }
+
+  uint32_t map_size() {
+    uint32_t count = 0;
+    if (enter_map(count)) return count;
+    return 0;
+  }
 
   // ===== Convenience Methods =====
 

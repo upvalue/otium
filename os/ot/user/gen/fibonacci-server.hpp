@@ -15,6 +15,8 @@ struct FibonacciServerBase : ServerBase {
   virtual Result<intptr_t, ErrorCode> handle_calc_fib(intptr_t n) = 0;
   virtual Result<CalcPairResult, ErrorCode> handle_calc_pair(intptr_t n, intptr_t m) = 0;
   virtual Result<uintptr_t, ErrorCode> handle_get_cache_size() = 0;
+  virtual Result<FibResult, ErrorCode> handle_calc_fib_detailed(uintptr_t n) = 0;
+  virtual Result<ou::vector<uintptr_t>, ErrorCode> handle_calc_sequence(uintptr_t start, uintptr_t count) = 0;
 
   // Framework methods - handles dispatch
   void process_request(const IpcMessage& msg);

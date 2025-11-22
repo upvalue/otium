@@ -34,7 +34,7 @@
 #define KERNEL_PROG_TEST_FILESYSTEM 9
 
 // Selected kernel program (modified by config.sh)
-#define KERNEL_PROG KERNEL_PROG_SHELL
+#define KERNEL_PROG KERNEL_PROG_TEST_IPC_CODEGEN
 
 // Log levels
 #define LSILENT 0
@@ -63,7 +63,7 @@
 #define OT_GRAPHICS_BACKEND_WASM 3
 
 // Selected graphics backend (configured by config.sh)
-#define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_VIRTIO
+#define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_TEST
 
 // Filesystem backend options
 #define OT_FILESYSTEM_BACKEND_NONE 0

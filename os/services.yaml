@@ -9,6 +9,20 @@ int_aliases:
   FileHandleId:
     signed: false
 
+# Message type definitions
+types:
+  FibArray:
+    type: array
+    element: uint
+
+  FibResult:
+    type: struct
+    fields:
+      - name: value
+        type: uint
+      - name: is_cached
+        type: bool
+
 services:
   - name: Fibonacci
     methods:
@@ -34,6 +48,27 @@ services:
           - name: size
             signed: false
         errors: []
+
+      # New methods using message types
+      - name: calc_fib_detailed
+        args:
+          - name: n
+            type: uint
+        returns:
+          - name: result
+            type: FibResult
+        errors: [INVALID_INPUT]
+
+      - name: calc_sequence
+        args:
+          - name: start
+            type: uint
+          - name: count
+            type: uint
+        returns:
+          - name: values
+            type: FibArray
+        errors: [INVALID_INPUT]
 
   - name: Graphics
     methods:

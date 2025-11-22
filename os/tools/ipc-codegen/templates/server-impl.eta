@@ -1,8 +1,11 @@
 #include "ot/user/gen/<%= it.service.name.toLowerCase() %>-server.hpp"
 #include "ot/user/gen/method-ids.hpp"
 #include "ot/user/user.hpp"
-<% if (it.service.methods.some(m => it.hasComplexArgs(m) || m.returns_comm_data)) { %>
+<% if (it.service.methods.some(m => it.hasComplexArgs(m))) { %>
 #include "ot/lib/mpack/mpack-reader.hpp"
+<% } %>
+<% if (it.service.methods.some(m => m.returns_comm_data)) { %>
+#include "ot/lib/mpack/mpack-writer.hpp"
 <% } %>
 
 void <%= it.service.name %>ServerBase::process_request(const IpcMessage& msg) {
@@ -56,7 +59,21 @@ void <%= it.service.name %>ServerBase::process_request(const IpcMessage& msg) {
       // No return values
 <% } else if (method.returns.length === 1) { %>
 <% const ret = method.returns[0]; %>
-<% if (it.getType(ret) !== 'uintptr_t' && it.getType(ret) !== 'intptr_t' && !it.isComplexType(ret)) { %>
+<% const retType = ret.type || "int"; %>
+<% if (it.isMessageType(retType)) { %>
+      // Serialize message type to comm page
+      PageAddr comm = ou_get_comm_page();
+      MPackWriter writer(comm.as_ptr(), OT_PAGE_SIZE);
+<% const msgType = it.messageTypes.find(mt => mt.name === retType); %>
+<% if (msgType && msgType.kind === "array") { %>
+      <%~ retType %>Helper::pack(result.value(), writer);
+<% } else { %>
+      result.value().pack(writer);
+<% } %>
+      if (!writer.ok()) {
+        resp.error_code = IPC__INVALID_MSG;
+      }
+<% } else if (it.getType(ret, true) !== 'uintptr_t' && it.getType(ret, true) !== 'intptr_t' && !it.isComplexType(ret)) { %>
       resp.values[0] = result.value().raw();
 <% } else { %>
       resp.values[0] = result.value();

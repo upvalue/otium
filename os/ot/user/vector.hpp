@@ -61,6 +61,11 @@ public:
 
   size_t size() const { return size_; }
   bool empty() const { return size_ == 0; }
+  size_t capacity() const { return cap_; }
+
+  void reserve(size_t new_cap) {
+    ensure_capacity(new_cap);
+  }
 
   T *data() { return data_; }
   const T *data() const { return data_; }

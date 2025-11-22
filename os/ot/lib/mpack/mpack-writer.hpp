@@ -93,6 +93,20 @@ public:
     return *this;
   }
 
+  // Convenience method aliases for generated code
+  MPackWriter &boolean(bool v) { return pack(v); }
+  MPackWriter &u32(uint32_t v) { return pack(v); }
+  MPackWriter &u64(uint64_t v) {
+    // For 64-bit, use uint packing (libmpack will choose appropriate format)
+    write_token(mpack_pack_uint(v));
+    return *this;
+  }
+  MPackWriter &i32(int32_t v) { return pack(v); }
+  MPackWriter &i64(int64_t v) {
+    write_token(mpack_pack_sint(v));
+    return *this;
+  }
+
   // ===== Strings =====
 
   // Pack null-terminated string

@@ -25,29 +25,33 @@ inline void register_ipc_method_vars(tcl::Interp &i) {
   i.set_var("FIBONACCI_CALC_PAIR", buf);
   osnprintf(buf, sizeof(buf), "%d", 0x1200);
   i.set_var("FIBONACCI_GET_CACHE_SIZE", buf);
-  // Graphics service methods
   osnprintf(buf, sizeof(buf), "%d", 0x1300);
-  i.set_var("GRAPHICS_GET_FRAMEBUFFER", buf);
+  i.set_var("FIBONACCI_CALC_FIB_DETAILED", buf);
   osnprintf(buf, sizeof(buf), "%d", 0x1400);
+  i.set_var("FIBONACCI_CALC_SEQUENCE", buf);
+  // Graphics service methods
+  osnprintf(buf, sizeof(buf), "%d", 0x1500);
+  i.set_var("GRAPHICS_GET_FRAMEBUFFER", buf);
+  osnprintf(buf, sizeof(buf), "%d", 0x1600);
   i.set_var("GRAPHICS_FLUSH", buf);
   // Filesystem service methods
-  osnprintf(buf, sizeof(buf), "%d", 0x1500);
-  i.set_var("FILESYSTEM_OPEN", buf);
-  osnprintf(buf, sizeof(buf), "%d", 0x1600);
-  i.set_var("FILESYSTEM_READ", buf);
   osnprintf(buf, sizeof(buf), "%d", 0x1700);
-  i.set_var("FILESYSTEM_WRITE", buf);
+  i.set_var("FILESYSTEM_OPEN", buf);
   osnprintf(buf, sizeof(buf), "%d", 0x1800);
-  i.set_var("FILESYSTEM_CLOSE", buf);
+  i.set_var("FILESYSTEM_READ", buf);
   osnprintf(buf, sizeof(buf), "%d", 0x1900);
-  i.set_var("FILESYSTEM_READ_ALL", buf);
+  i.set_var("FILESYSTEM_WRITE", buf);
   osnprintf(buf, sizeof(buf), "%d", 0x1a00);
-  i.set_var("FILESYSTEM_WRITE_ALL", buf);
+  i.set_var("FILESYSTEM_CLOSE", buf);
   osnprintf(buf, sizeof(buf), "%d", 0x1b00);
-  i.set_var("FILESYSTEM_CREATE_DIR", buf);
+  i.set_var("FILESYSTEM_READ_ALL", buf);
   osnprintf(buf, sizeof(buf), "%d", 0x1c00);
-  i.set_var("FILESYSTEM_DELETE_FILE", buf);
+  i.set_var("FILESYSTEM_WRITE_ALL", buf);
   osnprintf(buf, sizeof(buf), "%d", 0x1d00);
+  i.set_var("FILESYSTEM_CREATE_DIR", buf);
+  osnprintf(buf, sizeof(buf), "%d", 0x1e00);
+  i.set_var("FILESYSTEM_DELETE_FILE", buf);
+  osnprintf(buf, sizeof(buf), "%d", 0x1f00);
   i.set_var("FILESYSTEM_DELETE_DIR", buf);
 
   // Error codes

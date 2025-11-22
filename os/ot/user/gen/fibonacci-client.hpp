@@ -13,6 +13,8 @@ struct FibonacciClient {
   Result<intptr_t, ErrorCode> calc_fib(intptr_t n);
   Result<CalcPairResult, ErrorCode> calc_pair(intptr_t n, intptr_t m);
   Result<uintptr_t, ErrorCode> get_cache_size();
+  Result<FibResult, ErrorCode> calc_fib_detailed(uintptr_t n);
+  Result<ou::vector<uintptr_t>, ErrorCode> calc_sequence(uintptr_t start, uintptr_t count);
 
   // Universal shutdown method (sends IPC_METHOD_SHUTDOWN)
   Result<bool, ErrorCode> shutdown();

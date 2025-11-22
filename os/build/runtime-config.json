@@ -1,6 +1,6 @@
 {
   "graphics": {
-    "backend": "OT_GRAPHICS_BACKEND_VIRTIO",
+    "backend": "OT_GRAPHICS_BACKEND_TEST",
     "enabled": true
   },
   "filesystem": {

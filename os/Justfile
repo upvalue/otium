@@ -41,6 +41,12 @@ build-run-riscv: compile-riscv run-riscv
 # Compile and run WASM
 build-run-wasm: compile-wasm run-wasm
 
+# Run unit tests with Meson
+test-unit:
+    @echo "=== Running unit tests ==="
+    @test -d build-posix || meson setup build-posix
+    meson test -C build-posix -v
+
 # Clean Meson build artifacts
 clean:
     @echo "=== Cleaning Meson builds ==="

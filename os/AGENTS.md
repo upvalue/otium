@@ -56,16 +56,24 @@ Configuration is handled by Meson and generates platform-specific `ot/config.h` 
 - **WASM**: WASM graphics backend, memory filesystem
 - **POSIX**: No graphics, no filesystem (standalone tools only)
 
-**Configuration options** (future - not yet implemented):
+**Configuration options:**
 ```bash
-# Example of how configuration options will work:
+# Build with a specific kernel program
 meson setup build-riscv --cross-file=cross/riscv32.txt \
-  -Dkernel_prog=test_graphics \
+  -Dkernel_prog=test_graphics
+
+# Configure log levels
+meson setup build-riscv --cross-file=cross/riscv32.txt \
   -Dlog_ipc=loud \
-  -Dgraphics_backend=none
+  -Dlog_mem=silent
+
+# Reconfigure an existing build
+meson setup build-riscv --reconfigure -Dkernel_prog=test_hello
 ```
 
-Currently, configuration changes require editing `meson.build` directly, but the infrastructure is in place to add command-line options.
+Available options (see `meson_options.txt` for full list):
+- `kernel_prog`: shell, test_hello, test_mem, test_alternate, test_ipc, etc.
+- `log_general`, `log_mem`, `log_proc`, `log_ipc`: silent, soft, loud
 
 ### Build Directories
 
@@ -102,6 +110,36 @@ Cross-compilation files are in `cross/`:
 ### Legacy Build System
 
 The original shell script build system (`compile-riscv.sh`, `compile-wasm.sh`, etc.) and `config.sh` are still present and functional, but **Meson is now the recommended build system**.
+
+## Testing
+
+The project has several types of tests:
+
+### Snapshot Tests
+
+Snapshot tests verify kernel behavior by comparing `TEST:` output lines against saved snapshots.
+
+```bash
+./test-snapshot.py                   # Run all tests
+./test-snapshot.py --platform=riscv  # Test RISC-V only
+./test-snapshot.py --update          # Update snapshots
+```
+
+Tests automatically use Meson's `-Dkernel_prog` option to run different test programs.
+
+### Unit Tests
+
+```bash
+just test-unit  # Run doctest-based unit tests
+```
+
+### Lint Tests
+
+```bash
+./test-lint.sh  # Run clang-tidy and semgrep checks
+```
+
+See `TESTING.md` for detailed testing documentation.
 
 ## Source
 
@@ -381,43 +419,34 @@ The frame manager automatically skips rendering when the process is yielded back
 
 ### Unit tests
 
-There are some unit tests with doctest that run on the host system; these can be run with
-`./test-unit.sh`.
- 
-### Snapshot tests
-
-The kernel uses snapshot testing to verify behavior. Tests are defined in `test-snapshot.py` and run
-specific kernel configurations by compiling with test flags.
-
-#### Running tests
+Unit tests use the doctest framework and run on the host system. They test core functionality like memory management, process management, data structures, and the TCL interpreter.
 
 ```bash
-# Run all tests
-./test-snapshot.py
-
-# Update snapshots after making changes
-./test-snapshot.py --update
+just test-unit  # Run all unit tests with Meson
 ```
 
-#### Test infrastructure
+The tests compile to a `unit-test` executable in the POSIX build directory and include comprehensive coverage of:
+- Memory allocation and page recycling
+- Process creation and lookup
+- String and vector containers
+- MessagePack serialization
+- TCL interpreter
+- Printf implementation
+- Result type error handling
 
-- `compile-riscv.sh` - Compiles the kernel with optional test flags (e.g., `--test-hello`)
-- `test-snapshot.py` - Snapshot test runner that captures TEST: output lines
-- `snapshots/` - Directory containing expected output for each test
+### Snapshot tests
 
-#### Available test modes
+The kernel uses snapshot testing to verify behavior across different test modes and platforms (RISC-V and WASM). Tests automatically use Meson's configuration system to select which kernel program to run.
 
-Tests are defined by kernel compile flags:
+```bash
+./test-snapshot.py                   # Run all tests on all platforms
+./test-snapshot.py --platform=riscv  # Test RISC-V only
+./test-snapshot.py --update          # Update snapshots after changes
+```
 
-- `KERNEL_PROG_TEST_HELLO` - Runs a simple hello world process that prints and exits
-- Default (no flag) - Runs the shell program
+The test runner captures lines starting with `TEST:` from the kernel output and compares them against saved snapshots in the `snapshots/` directory. Each test runs in an isolated build directory (`build-riscv-test/`, `build-wasm-test/`) to avoid interfering with development builds.
 
-#### Adding new tests
-
-1. Add a new test mode in `otk/kernel.cpp` using `#ifdef` directives
-2. Add the test to `TEST_PROGRAMS` dict in `test-snapshot.py`
-3. Run `./test-snapshot.py --update` to create the snapshot
-4. Test output lines must start with `TEST:` to be captured
+See `TESTING.md` for complete testing documentation.
 
 ## Tcl
 

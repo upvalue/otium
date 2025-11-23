@@ -20,14 +20,21 @@ message('Building for target:', target_arch)
 # Generate config.h from template based on target
 config_data = configuration_data()
 
-# Kernel program mode (default to shell for now, can be made configurable)
-config_data.set('KERNEL_PROG', 'KERNEL_PROG_SHELL')
+# Kernel program mode from options
+kernel_prog = get_option('kernel_prog')
+kernel_prog_constant = 'KERNEL_PROG_' + kernel_prog.to_upper()
+config_data.set('KERNEL_PROG', kernel_prog_constant)
 
-# Log levels (default to LSOFT, can be made configurable)
-config_data.set('LOG_GENERAL', 'LSOFT')
-config_data.set('LOG_MEM', 'LSOFT')
-config_data.set('LOG_PROC', 'LSOFT')
-config_data.set('LOG_IPC', 'LSOFT')
+# Log levels from options
+log_levels = {
+  'silent': 'LSILENT',
+  'soft': 'LSOFT',
+  'loud': 'LLOUD',
+}
+config_data.set('LOG_GENERAL', log_levels[get_option('log_general')])
+config_data.set('LOG_MEM', log_levels[get_option('log_mem')])
+config_data.set('LOG_PROC', log_levels[get_option('log_proc')])
+config_data.set('LOG_IPC', log_levels[get_option('log_ipc')])
 
 # Shell enable
 config_data.set('SHELL_ENABLE', '#define ENABLE_SHELL')
@@ -133,6 +140,42 @@ if is_posix
     link_with: [printf_lib, mpack_lib],
     install: true,
   )
+
+  # Unit tests executable
+  unit_test_sources = [
+    'ot/test-linking.cpp',
+    'ot/core/memory-test.cpp',
+    'ot/core/memory.cpp',
+    'ot/core/std.cpp',
+    'ot/lib/std.cpp',
+    'ot/core/platform/posix-std.cpp',
+    'ot/lib/printf-test.cpp',
+    'ot/core/platform-test.cpp',
+    'ot/core/process.cpp',
+    'ot/core/process-test.cpp',
+    'ot/lib/mpack/mpack-writer-test.cpp',
+    'ot/lib/mpack/mpack-reader.cpp',
+    'ot/lib/mpack/mpack-reader-test.cpp',
+    'ot/lib/mpack/mpack-utils.cpp',
+    'ot/lib/mpack/mpack-utils-test.cpp',
+    'ot/lib/result-test.cpp',
+    'ot/user/string.cpp',
+    'ot/lib/string-test.cpp',
+    'ot/lib/vector-test.cpp',
+    'ot/user/tcl.cpp',
+    'ot/user/tcl-test.cpp',
+  ]
+
+  test_exe = executable('unit-test',
+    unit_test_sources,
+    cpp_args: common_cpp_args + ['-DOT_TEST', '-DOT_TRACE_MEM'],
+    include_directories: inc,
+    link_with: [mpack_lib, printf_lib],
+    install: false,
+  )
+
+  # Register with Meson's test system
+  test('unit tests', test_exe)
 endif
 
 # =============================================================================

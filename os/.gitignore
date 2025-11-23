@@ -13,3 +13,5 @@ bin/
 /build-riscv
 /build-wasm
 ot/config.h
+/build-riscv-test
+/build-wasm-test

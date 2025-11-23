@@ -1,2 +1,26 @@
 # Build configuration options for otium-os
-# These can be expanded later to match config.sh functionality
+
+# Kernel program mode - which program to run in the kernel
+option('kernel_prog',
+  type: 'combo',
+  choices: [
+    'shell',
+    'test_hello',
+    'test_mem',
+    'test_alternate',
+    'test_userspace',
+    'test_ipc',
+    'test_ipc_ordering',
+    'test_ipc_codegen',
+    'test_graphics',
+    'test_filesystem',
+  ],
+  value: 'shell',
+  description: 'Which kernel program to run'
+)
+
+# Log levels for different subsystems
+option('log_general', type: 'combo', choices: ['silent', 'soft', 'loud'], value: 'soft')
+option('log_mem', type: 'combo', choices: ['silent', 'soft', 'loud'], value: 'soft')
+option('log_proc', type: 'combo', choices: ['silent', 'soft', 'loud'], value: 'soft')
+option('log_ipc', type: 'combo', choices: ['silent', 'soft', 'loud'], value: 'soft')

@@ -4,6 +4,8 @@ Snapshot test runner for the Otium kernel.
 
 Runs test programs, captures TEST: output lines, and compares against saved snapshots.
 Supports both RISC-V (via QEMU) and WASM (via Node.js) platforms.
+
+Uses Meson for building.
 """
 
 import subprocess
@@ -12,15 +14,16 @@ import os
 from pathlib import Path
 from typing import List, Tuple, Callable
 
-# Test programs to run (map of test name to config.sh flag)
+# Test programs to run (map of test name to kernel prog constant)
+# TODO: These should become Meson configuration options
 TEST_PROGRAMS = {
-    "test-hello": "--test-hello",
-    "test-mem": "--test-mem",
-    "test-alternate": "--test-alternate",
-    "test-ipc": "--test-ipc",
-    "test-ipc-ordering": "--test-ipc-ordering",
-    "test-graphics": "--test-graphics",
-    "test-filesystem": "--test-filesystem",
+    "test-hello": "KERNEL_PROG_TEST_HELLO",
+    "test-mem": "KERNEL_PROG_TEST_MEM",
+    "test-alternate": "KERNEL_PROG_TEST_ALTERNATE",
+    "test-ipc": "KERNEL_PROG_TEST_IPC",
+    "test-ipc-ordering": "KERNEL_PROG_TEST_IPC_ORDERING",
+    "test-graphics": "KERNEL_PROG_TEST_GRAPHICS",
+    "test-filesystem": "KERNEL_PROG_TEST_FILESYSTEM",
 }
 
 # Platform-specific test exclusions
@@ -29,61 +32,40 @@ PLATFORM_EXCLUSIONS = {
 }
 
 SNAPSHOT_DIR = Path(__file__).parent / "snapshots"
-CONFIG_SCRIPT = Path(__file__).parent / "config.sh"
+PROJECT_ROOT = Path(__file__).parent
 
 # Platform-specific configuration
 PLATFORMS = {
     "riscv": {
-        "compile_script": Path(__file__).parent / "compile-riscv.sh",
+        "build_dir": PROJECT_ROOT / "build-riscv-test",
+        "cross_file": "cross/riscv32.txt",
+        "binary": "os.elf",
         "timeout": 10,
-        "qemu_cmd": "qemu-system-riscv32",
+        "runner": PROJECT_ROOT / "tools" / "run-qemu-riscv.sh",
     },
     "wasm": {
-        "compile_script": Path(__file__).parent / "compile-wasm.sh",
+        "build_dir": PROJECT_ROOT / "build-wasm-test",
+        "cross_file": "cross/wasm.txt",
+        "binary": "os.js",
         "timeout": 5,
-        "node_script": Path(__file__).parent / "run-wasm.js",
+        "runner": PROJECT_ROOT / "tools" / "run-wasm.sh",
     }
 }
 
 
-def run_qemu(platform_config: dict) -> str:
-    """Run QEMU and capture output."""
+def run_platform(platform_config: dict) -> str:
+    """Run the platform using the appropriate runner script."""
     timeout = platform_config["timeout"]
-    qemu_cmd = platform_config["qemu_cmd"]
+    runner = platform_config["runner"]
+    build_dir = platform_config["build_dir"]
 
-    try:
-        result = subprocess.run(
-            [
-                qemu_cmd,
-                "-machine", "virt",
-                "-bios", "default",
-                "-nographic",
-                "-serial", "mon:stdio",
-                "--no-reboot",
-                "-kernel", "bin/os.elf"
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
-        return result.stdout + result.stderr
-    except subprocess.TimeoutExpired as e:
-        # Timeout is expected for some tests
-        return (e.stdout or "") + (e.stderr or "")
-
-
-def run_node_wasm(platform_config: dict) -> str:
-    """Run Node.js with WASM kernel and capture output."""
-    timeout = platform_config["timeout"]
-    node_script = platform_config["node_script"]
-
-    # Set test mode environment variable
+    # Set test mode environment variable for WASM
     env = os.environ.copy()
     env['OTIUM_TEST_MODE'] = '1'
 
     try:
         result = subprocess.run(
-            ["node", str(node_script)],
+            [str(runner), str(build_dir)],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -104,13 +86,13 @@ def extract_test_lines(output: str) -> List[str]:
     ]
 
 
-def run_test(test_name: str, config_flag: str, platform: str) -> List[str]:
+def run_test(test_name: str, kernel_prog: str, platform: str) -> List[str]:
     """
     Compile and run a test program on specified platform.
 
     Args:
         test_name: Name of the test
-        config_flag: Flag to pass to config.sh
+        kernel_prog: Kernel program constant (e.g., KERNEL_PROG_TEST_HELLO)
         platform: "riscv" or "wasm"
 
     Returns:
@@ -119,30 +101,47 @@ def run_test(test_name: str, config_flag: str, platform: str) -> List[str]:
     print(f"Running test: {test_name} on {platform}")
 
     platform_config = PLATFORMS[platform]
+    build_dir = platform_config["build_dir"]
+    cross_file = platform_config["cross_file"]
 
-    # Generate configuration
-    print(f"  Configuring with flag: {config_flag}")
+    # Convert kernel_prog constant to meson option value
+    # KERNEL_PROG_TEST_HELLO -> test_hello
+    kernel_prog_option = kernel_prog.replace('KERNEL_PROG_', '').lower()
+
+    print(f"  Configuring with kernel_prog={kernel_prog_option}")
+
+    # Always reconfigure to ensure correct test mode
+    # Use --reconfigure to update options without full rebuild
+    print(f"  Setting up Meson build in {build_dir}")
     try:
+        setup_cmd = [
+            "meson", "setup", str(build_dir),
+            f"--cross-file={cross_file}",
+            f"-Dkernel_prog={kernel_prog_option}",
+            "--reconfigure"
+        ]
         subprocess.run(
-            [str(CONFIG_SCRIPT), config_flag],
+            setup_cmd,
             check=True,
             capture_output=True,
-            text=True
+            text=True,
+            cwd=str(PROJECT_ROOT)
         )
     except subprocess.CalledProcessError as e:
-        print(f"  ERROR: Configuration failed")
+        print(f"  ERROR: Meson setup failed")
         print(f"  stdout: {e.stdout}")
         print(f"  stderr: {e.stderr}")
         raise
 
-    # Compile the kernel with platform-specific script
-    print(f"  Compiling for {platform}...")
+    # Compile with Meson
+    print(f"  Compiling with Meson...")
     try:
         subprocess.run(
-            [str(platform_config["compile_script"])],
+            ["meson", "compile", "-C", str(build_dir)],
             check=True,
             capture_output=True,
-            text=True
+            text=True,
+            cwd=str(PROJECT_ROOT)
         )
     except subprocess.CalledProcessError as e:
         print(f"  ERROR: Compilation failed")
@@ -150,14 +149,9 @@ def run_test(test_name: str, config_flag: str, platform: str) -> List[str]:
         print(f"  stderr: {e.stderr}")
         raise
 
-    # Run with platform-specific runner
+    # Run with platform runner script
     print(f"  Running on {platform} (timeout: {platform_config['timeout']}s)")
-    if platform == "riscv":
-        output = run_qemu(platform_config)
-    elif platform == "wasm":
-        output = run_node_wasm(platform_config)
-    else:
-        raise ValueError(f"Unknown platform: {platform}")
+    output = run_platform(platform_config)
 
     # Extract TEST: lines
     test_lines = extract_test_lines(output)
@@ -246,7 +240,7 @@ def main():
     results = {}
 
     for platform in platforms_to_test:
-        for test_name, config_flag in TEST_PROGRAMS.items():
+        for test_name, kernel_prog in TEST_PROGRAMS.items():
             # Skip tests excluded for this platform
             if test_name in PLATFORM_EXCLUSIONS.get(platform, []):
                 print(f"Skipping {test_name} on {platform} (excluded)")
@@ -256,7 +250,7 @@ def main():
 
             try:
                 # Run the test
-                actual_output = run_test(test_name, config_flag, platform)
+                actual_output = run_test(test_name, kernel_prog, platform)
 
                 if args.update:
                     # Update mode: save the snapshot

@@ -5,7 +5,7 @@ project('otium-os', ['c', 'cpp'],
     'cpp_std=c++17',
     'warning_level=2',
     'werror=false',
-    'optimization=s',  # -Os
+    'optimization=0',  # No optimization by default, cross-files add -Os explicitly
   ])
 
 # Detect target architecture
@@ -45,26 +45,52 @@ if target_arch == 'riscv'
   is_posix = false
   is_riscv = true
   is_wasm = false
-  config_data.set('GRAPHICS_BACKEND', 'OT_GRAPHICS_BACKEND_VIRTIO')
-  config_data.set('FILESYSTEM_BACKEND', 'OT_FILESYSTEM_BACKEND_MEMORY')
+  default_graphics_backend = 'virtio'
+  default_filesystem_backend = 'memory'
 elif target_arch == 'wasm'
   arch_defines = ['-DOT_ARCH_WASM']
   is_posix = false
   is_riscv = false
   is_wasm = true
-  config_data.set('GRAPHICS_BACKEND', 'OT_GRAPHICS_BACKEND_WASM')
-  config_data.set('FILESYSTEM_BACKEND', 'OT_FILESYSTEM_BACKEND_MEMORY')
+  default_graphics_backend = 'wasm'
+  default_filesystem_backend = 'memory'
 elif target_arch == 'posix'
   arch_defines = ['-DOT_POSIX']
   is_posix = true
   is_riscv = false
   is_wasm = false
-  # POSIX doesn't need these configs, but set them anyway
-  config_data.set('GRAPHICS_BACKEND', 'OT_GRAPHICS_BACKEND_NONE')
-  config_data.set('FILESYSTEM_BACKEND', 'OT_FILESYSTEM_BACKEND_NONE')
+  default_graphics_backend = 'none'
+  default_filesystem_backend = 'none'
 else
   error('Unknown target architecture: ' + target_arch)
 endif
+
+# Get backend options (use 'auto' to select platform default)
+graphics_backend = get_option('graphics_backend')
+if graphics_backend == 'auto'
+  graphics_backend = default_graphics_backend
+endif
+
+filesystem_backend = get_option('filesystem_backend')
+if filesystem_backend == 'auto'
+  filesystem_backend = default_filesystem_backend
+endif
+
+# Set backend configuration
+graphics_backend_map = {
+  'none': 'OT_GRAPHICS_BACKEND_NONE',
+  'test': 'OT_GRAPHICS_BACKEND_TEST',
+  'virtio': 'OT_GRAPHICS_BACKEND_VIRTIO',
+  'wasm': 'OT_GRAPHICS_BACKEND_WASM',
+}
+
+filesystem_backend_map = {
+  'none': 'OT_FILESYSTEM_BACKEND_NONE',
+  'memory': 'OT_FILESYSTEM_BACKEND_MEMORY',
+}
+
+config_data.set('GRAPHICS_BACKEND', graphics_backend_map[graphics_backend])
+config_data.set('FILESYSTEM_BACKEND', filesystem_backend_map[filesystem_backend])
 
 # Generate config.h in the build directory under ot/ subdir
 # We'll do this in a subdir call to ot/meson.build

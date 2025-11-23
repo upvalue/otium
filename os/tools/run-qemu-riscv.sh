@@ -64,6 +64,8 @@ echo "Graphics backend: $RUNTIME_GRAPHICS_BACKEND"
 echo "Display args: $DISPLAY_ARGS"
 echo ""
 
+set -x 
+
 exec qemu-system-riscv32 \
     -machine virt \
     -bios default \

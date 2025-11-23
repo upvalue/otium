@@ -62,6 +62,10 @@ Configuration is handled by Meson and generates platform-specific `ot/config.h` 
 meson setup build-riscv --cross-file=cross/riscv32.txt \
   -Dkernel_prog=test_graphics
 
+# Configure graphics backend
+meson setup build-riscv --cross-file=cross/riscv32.txt \
+  -Dgraphics_backend=test
+
 # Configure log levels
 meson setup build-riscv --cross-file=cross/riscv32.txt \
   -Dlog_ipc=loud \
@@ -69,10 +73,18 @@ meson setup build-riscv --cross-file=cross/riscv32.txt \
 
 # Reconfigure an existing build
 meson setup build-riscv --reconfigure -Dkernel_prog=test_hello
+
+# Multiple options at once
+meson setup build-riscv --cross-file=cross/riscv32.txt \
+  -Dkernel_prog=test_graphics \
+  -Dgraphics_backend=virtio \
+  -Dlog_general=loud
 ```
 
 Available options (see `meson_options.txt` for full list):
 - `kernel_prog`: shell, test_hello, test_mem, test_alternate, test_ipc, etc.
+- `graphics_backend`: auto (platform default), none, test, virtio, wasm
+- `filesystem_backend`: auto (platform default), none, memory
 - `log_general`, `log_mem`, `log_proc`, `log_ipc`: silent, soft, loud
 
 ### Build Directories

@@ -24,3 +24,19 @@ option('log_general', type: 'combo', choices: ['silent', 'soft', 'loud'], value:
 option('log_mem', type: 'combo', choices: ['silent', 'soft', 'loud'], value: 'soft')
 option('log_proc', type: 'combo', choices: ['silent', 'soft', 'loud'], value: 'soft')
 option('log_ipc', type: 'combo', choices: ['silent', 'soft', 'loud'], value: 'soft')
+
+# Graphics backend - auto selects platform default if not specified
+option('graphics_backend',
+  type: 'combo',
+  choices: ['auto', 'none', 'test', 'virtio', 'wasm'],
+  value: 'auto',
+  description: 'Graphics backend to use (auto = platform default)'
+)
+
+# Filesystem backend - auto selects platform default if not specified
+option('filesystem_backend',
+  type: 'combo',
+  choices: ['auto', 'none', 'memory'],
+  value: 'auto',
+  description: 'Filesystem backend to use (auto = platform default)'
+)

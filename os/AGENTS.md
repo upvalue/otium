@@ -30,6 +30,79 @@ clang-format -i path/to/file.hpp
 
 The project uses the clang-format configuration specified in `.clang-format`.
 
+## Build System
+
+The project uses **Meson** as its primary build system with **Just** as a convenient command runner.
+
+### Quick Start
+
+```bash
+# Build all platforms (POSIX, RISC-V, WASM)
+just compile-all
+
+# Build and run individual platforms
+just build-run-riscv    # RISC-V in QEMU
+just build-run-wasm     # WASM in Node.js
+```
+
+### Build Configuration
+
+Configuration is handled by Meson and generates platform-specific `ot/config.h` files in each build directory.
+
+**Default configuration:**
+- **Kernel program**: `KERNEL_PROG_SHELL` (interactive shell)
+- **Log levels**: `LSOFT` for all subsystems (general, memory, process, IPC)
+- **RISC-V**: VirtIO graphics backend, memory filesystem
+- **WASM**: WASM graphics backend, memory filesystem
+- **POSIX**: No graphics, no filesystem (standalone tools only)
+
+**Configuration options** (future - not yet implemented):
+```bash
+# Example of how configuration options will work:
+meson setup build-riscv --cross-file=cross/riscv32.txt \
+  -Dkernel_prog=test_graphics \
+  -Dlog_ipc=loud \
+  -Dgraphics_backend=none
+```
+
+Currently, configuration changes require editing `meson.build` directly, but the infrastructure is in place to add command-line options.
+
+### Build Directories
+
+Each platform has its own isolated build directory with platform-specific configuration:
+
+- `build-posix/` - Native tools (tcl-repl, tevl)
+- `build-riscv/` - RISC-V kernel (os.elf)
+  - `build-riscv/ot/config.h` - Generated with `OT_GRAPHICS_BACKEND_VIRTIO`
+  - `build-riscv/runtime-config.sh` - Runtime configuration for QEMU scripts
+- `build-wasm/` - WebAssembly build (os.js, os.wasm)
+  - `build-wasm/ot/config.h` - Generated with `OT_GRAPHICS_BACKEND_WASM`
+  - `build-wasm/runtime-config.sh` - Runtime configuration for Node.js scripts
+
+### Direct Meson Usage
+
+While `just` provides convenient shortcuts, you can use Meson directly:
+
+```bash
+# Setup a build directory
+meson setup build-riscv --cross-file=cross/riscv32.txt
+
+# Compile with verbose output
+meson compile -C build-riscv -v
+
+# Clean and reconfigure
+rm -rf build-riscv
+meson setup build-riscv --cross-file=cross/riscv32.txt
+```
+
+Cross-compilation files are in `cross/`:
+- `cross/riscv32.txt` - RISC-V 32-bit with LLVM
+- `cross/wasm.txt` - WebAssembly with Emscripten
+
+### Legacy Build System
+
+The original shell script build system (`compile-riscv.sh`, `compile-wasm.sh`, etc.) and `config.sh` are still present and functional, but **Meson is now the recommended build system**.
+
 ## Source
 
 The source of the operating system is written in C++. Source files live in the `./ot` directory.

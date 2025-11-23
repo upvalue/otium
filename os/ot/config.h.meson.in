@@ -34,7 +34,7 @@
 #define KERNEL_PROG_TEST_FILESYSTEM 9
 
 // Selected kernel program (modified by config.sh)
-#define KERNEL_PROG KERNEL_PROG_SHELL
+#define KERNEL_PROG @KERNEL_PROG@
 
 // Log levels
 #define LSILENT 0
@@ -42,10 +42,10 @@
 #define LLOUD 2
 
 // Subsystem log levels (configured by config.sh)
-#define LOG_GENERAL LSOFT
-#define LOG_MEM LSOFT
-#define LOG_PROC LSOFT
-#define LOG_IPC LSOFT
+#define LOG_GENERAL @LOG_GENERAL@
+#define LOG_MEM @LOG_MEM@
+#define LOG_PROC @LOG_PROC@
+#define LOG_IPC @LOG_IPC@
 
 // Graphics backend feature flags
 #define OT_FEAT_GFX_UNSUPPORTED 0
@@ -63,17 +63,17 @@
 #define OT_GRAPHICS_BACKEND_WASM 3
 
 // Selected graphics backend (configured by config.sh)
-#define OT_GRAPHICS_BACKEND OT_GRAPHICS_BACKEND_VIRTIO
+#define OT_GRAPHICS_BACKEND @GRAPHICS_BACKEND@
 
 // Filesystem backend options
 #define OT_FILESYSTEM_BACKEND_NONE 0
 #define OT_FILESYSTEM_BACKEND_MEMORY 1
 
 // Selected filesystem backend (configured by config.sh)
-#define OT_FILESYSTEM_BACKEND OT_FILESYSTEM_BACKEND_MEMORY
+#define OT_FILESYSTEM_BACKEND @FILESYSTEM_BACKEND@
 
 // Shell enable/disable (configured by config.sh)
-#define ENABLE_SHELL
+@SHELL_ENABLE@
 
 // Compile-time validation: WASM only supports test and wasm backends
 #ifdef OT_ARCH_WASM

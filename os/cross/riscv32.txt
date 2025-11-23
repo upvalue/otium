@@ -1,0 +1,21 @@
+[binaries]
+c = '/opt/homebrew/opt/llvm/bin/clang'
+cpp = '/opt/homebrew/opt/llvm/bin/clang++'
+ar = '/opt/homebrew/opt/llvm/bin/llvm-ar'
+strip = '/opt/homebrew/opt/llvm/bin/llvm-strip'
+
+[properties]
+# Custom property to identify this as RISC-V build
+target_arch = 'riscv'
+
+[built-in options]
+c_args = ['--target=riscv32-unknown-elf', '-march=rv32imf', '-mabi=ilp32f', '-fno-stack-protector', '-ffreestanding', '-nostdlib']
+cpp_args = ['--target=riscv32-unknown-elf', '-march=rv32imf', '-mabi=ilp32f', '-fno-stack-protector', '-ffreestanding', '-nostdlib', '-fno-rtti']
+c_link_args = ['--target=riscv32-unknown-elf', '-march=rv32imf', '-mabi=ilp32f', '-fuse-ld=lld', '-nostdlib']
+cpp_link_args = ['--target=riscv32-unknown-elf', '-march=rv32imf', '-mabi=ilp32f', '-fuse-ld=lld', '-nostdlib']
+
+[host_machine]
+system = 'bare'
+cpu_family = 'riscv32'
+cpu = 'rv32imf'
+endian = 'little'

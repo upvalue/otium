@@ -5,3 +5,44 @@ cloc:
     @echo ""
     @echo "=== Test code ==="
     @cloc ot --exclude-dir=vendor --match-f='.*-test\.(cpp|h)$$'
+
+# Compile POSIX binaries with Meson
+compile-posix:
+    @echo "=== Compiling POSIX binaries with Meson ==="
+    @test -d build-posix || meson setup build-posix
+    meson compile -C build-posix -v
+
+# Compile RISC-V kernel with Meson
+compile-riscv:
+    @echo "=== Compiling RISC-V kernel with Meson ==="
+    @test -d build-riscv || meson setup build-riscv --cross-file=cross/riscv32.txt
+    meson compile -C build-riscv -v
+
+# Compile WASM with Meson
+compile-wasm:
+    @echo "=== Compiling WASM with Meson ==="
+    @test -d build-wasm || meson setup build-wasm --cross-file=cross/wasm.txt
+    meson compile -C build-wasm -v
+
+# Compile all targets (POSIX + RISC-V + WASM)
+compile-all: compile-posix compile-riscv compile-wasm
+
+# Run RISC-V kernel in QEMU (without recompiling)
+run-riscv:
+    tools/run-qemu-riscv.sh build-riscv
+
+# Run WASM in Node.js (without recompiling)
+run-wasm:
+    tools/run-wasm.sh build-wasm
+
+# Compile and run RISC-V kernel
+build-run-riscv: compile-riscv run-riscv
+
+# Compile and run WASM
+build-run-wasm: compile-wasm run-wasm
+
+# Clean Meson build artifacts
+clean:
+    @echo "=== Cleaning Meson builds ==="
+    rm -rf build-posix build-riscv build-wasm
+    @echo "Clean complete. Run 'just compile-*' to rebuild."

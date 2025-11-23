@@ -1,0 +1,21 @@
+[binaries]
+c = 'emcc'
+cpp = 'em++'
+ar = 'emar'
+strip = 'emstrip'
+
+[properties]
+# Custom property to identify this as WASM build
+target_arch = 'wasm'
+
+[built-in options]
+c_args = ['-DOT_ARCH_WASM']
+cpp_args = ['-DOT_ARCH_WASM']
+c_link_args = ['-s', 'ASYNCIFY=1', '-s', 'INITIAL_MEMORY=67108864', '-s', 'ALLOW_MEMORY_GROWTH=1', '-s', 'EXPORTED_FUNCTIONS=[_main]', '-s', 'EXPORTED_RUNTIME_METHODS=[ccall,cwrap,print]', '-s', 'MODULARIZE=1', '-s', 'EXPORT_NAME=OtiumOS']
+cpp_link_args = ['-s', 'ASYNCIFY=1', '-s', 'INITIAL_MEMORY=67108864', '-s', 'ALLOW_MEMORY_GROWTH=1', '-s', 'EXPORTED_FUNCTIONS=[_main]', '-s', 'EXPORTED_RUNTIME_METHODS=[ccall,cwrap,print]', '-s', 'MODULARIZE=1', '-s', 'EXPORT_NAME=OtiumOS']
+
+[host_machine]
+system = 'emscripten'
+cpu_family = 'wasm32'
+cpu = 'wasm32'
+endian = 'little'

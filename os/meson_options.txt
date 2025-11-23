@@ -1,0 +1,2 @@
+# Build configuration options for otium-os
+# These can be expanded later to match config.sh functionality

@@ -8,3 +8,8 @@
 bin/
 
 /node_modules
+
+/build-posix
+/build-riscv
+/build-wasm
+ot/config.h

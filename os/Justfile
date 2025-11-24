@@ -33,7 +33,7 @@ run-riscv:
 
 # Run WASM in Node.js (without recompiling)
 run-wasm:
-    tools/run-wasm.sh build-wasm
+  node run-wasm.js
 
 # Compile and run RISC-V kernel
 build-run-riscv: compile-riscv run-riscv

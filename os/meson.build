@@ -93,7 +93,6 @@ config_data.set('GRAPHICS_BACKEND', graphics_backend_map[graphics_backend])
 config_data.set('FILESYSTEM_BACKEND', filesystem_backend_map[filesystem_backend])
 
 # Generate config.h in the build directory under ot/ subdir
-# We'll do this in a subdir call to ot/meson.build
 subdir('ot')
 
 # Include directories
@@ -205,15 +204,14 @@ if is_posix
 endif
 
 # =============================================================================
-# RISC-V build (full OS kernel)
+# Kernel builds (RISC-V and WASM)
 # =============================================================================
 
-if is_riscv
+if is_riscv or is_wasm
   # Generate runtime configuration for run scripts
-  # For now, hardcode virtio graphics backend (can be made configurable later)
   runtime_config = configuration_data()
-  runtime_config.set('GRAPHICS_BACKEND', 'OT_GRAPHICS_BACKEND_VIRTIO')
-  runtime_config.set('FILESYSTEM_BACKEND', 'OT_FILESYSTEM_BACKEND_MEMORY')
+  runtime_config.set('GRAPHICS_BACKEND', graphics_backend_map[graphics_backend])
+  runtime_config.set('FILESYSTEM_BACKEND', filesystem_backend_map[filesystem_backend])
 
   configure_file(
     output: 'runtime-config.sh',
@@ -222,7 +220,8 @@ if is_riscv
     format: 'cmake',  # Use @VAR@ syntax
     input: files('tools/runtime-config.sh.in'),
   )
-  # Core OS source files
+
+  # Shared source files for both RISC-V and WASM
   core_sources = [
     'ot/core/startup.cpp',
     'ot/core/main.cpp',
@@ -232,7 +231,6 @@ if is_riscv
     'ot/core/std.cpp',
   ]
 
-  # Library source files
   lib_sources = [
     'ot/lib/std.cpp',
     'ot/lib/gfx-util.cpp',
@@ -242,7 +240,6 @@ if is_riscv
     'ot/vendor/printf/printf.c',
   ]
 
-  # User program source files
   user_sources = [
     'ot/user/user-main.cpp',
     'ot/user/prog-scratch.cpp',
@@ -253,10 +250,7 @@ if is_riscv
     'ot/user/memory-allocator.cpp',
     'ot/user/comm-writer.cpp',
     'ot/vendor/tlsf/tlsf.c',
-  ]
-
-  # Generated IPC code
-  user_sources += [
+    # Generated IPC code
     'ot/user/gen/fibonacci-client.cpp',
     'ot/user/gen/fibonacci-server.cpp',
     'ot/user/fibonacci/impl.cpp',
@@ -266,132 +260,50 @@ if is_riscv
     'ot/user/gen/filesystem-client.cpp',
     'ot/user/gen/filesystem-server.cpp',
     'ot/lib/frame-manager.cpp',
+    # Filesystem implementation
+    'ot/user/filesystem/impl-memory.cpp',
   ]
 
-  # Filesystem implementation (for now, hardcode to memory backend)
-  user_sources += ['ot/user/filesystem/impl-memory.cpp']
+  # Platform-specific sources and configuration
+  if is_riscv
+    graphics_sources = ['ot/user/graphics/backend-virtio.cpp']
+    platform_sources = [
+      'ot/core/platform/platform-riscv.cpp',
+      'ot/lib/platform/shared-riscv.cpp',
+      'ot/core/platform/user-riscv.cpp',
+    ]
+    all_sources = core_sources + lib_sources + user_sources + graphics_sources + platform_sources
+    linker_script = meson.current_source_dir() / 'kernel-link-riscv.ld'
 
-  # Graphics backend sources
-  graphics_sources = [
-    'ot/user/graphics/backend-virtio.cpp',
-  ]
+    executable('os.elf',
+      all_sources,
+      c_args: common_c_args,
+      cpp_args: common_cpp_args,
+      link_args: [
+        '-Wl,-T' + linker_script,
+        '-Wl,-Map=@0@/os.map'.format(meson.current_build_dir()),
+      ],
+      include_directories: inc,
+      install: true,
+    )
+  endif
 
-  # Platform-specific sources
-  platform_sources = [
-    'ot/core/platform/platform-riscv.cpp',
-    'ot/lib/platform/shared-riscv.cpp',
-    'ot/core/platform/user-riscv.cpp',
-  ]
+  if is_wasm
+    platform_sources = [
+      'ot/core/platform/platform-wasm.cpp',
+      'ot/lib/platform/shared-wasm.cpp',
+      'ot/core/platform/user-wasm.cpp',
+    ]
+    all_sources = core_sources + lib_sources + user_sources + platform_sources
 
-  # All sources combined
-  all_sources = core_sources + lib_sources + user_sources + graphics_sources + platform_sources
-
-  # Get the linker script path
-  linker_script = meson.current_source_dir() / 'kernel-link-riscv.ld'
-
-  # Build the OS kernel executable
-  executable('os.elf',
-    all_sources,
-    c_args: common_c_args,
-    cpp_args: common_cpp_args,
-    link_args: [
-      '-Wl,-T' + linker_script,
-      '-Wl,-Map=@0@/os.map'.format(meson.current_build_dir()),
-    ],
-    include_directories: inc,
-    install: true,
-  )
-endif
-
-# =============================================================================
-# WASM build (full OS kernel compiled to WebAssembly)
-# =============================================================================
-
-if is_wasm
-  # Generate runtime configuration for run scripts
-  runtime_config = configuration_data()
-  runtime_config.set('GRAPHICS_BACKEND', 'OT_GRAPHICS_BACKEND_WASM')
-  runtime_config.set('FILESYSTEM_BACKEND', 'OT_FILESYSTEM_BACKEND_MEMORY')
-
-  configure_file(
-    output: 'runtime-config.sh',
-    configuration: runtime_config,
-    install: false,
-    format: 'cmake',
-    input: files('tools/runtime-config.sh.in'),
-  )
-
-  # Core OS source files (same as RISC-V)
-  core_sources = [
-    'ot/core/startup.cpp',
-    'ot/core/main.cpp',
-    'ot/core/kernel-tests.cpp',
-    'ot/core/memory.cpp',
-    'ot/core/process.cpp',
-    'ot/core/std.cpp',
-  ]
-
-  # Library source files
-  lib_sources = [
-    'ot/lib/std.cpp',
-    'ot/lib/gfx-util.cpp',
-    'ot/lib/mpack/mpack-reader.cpp',
-    'ot/lib/mpack/mpack-utils.cpp',
-    'ot/vendor/libmpack/mpack.c',
-    'ot/vendor/printf/printf.c',
-  ]
-
-  # User program source files
-  user_sources = [
-    'ot/user/user-main.cpp',
-    'ot/user/prog-scratch.cpp',
-    'ot/user/prog-shell.cpp',
-    'ot/user/prog-spacedemo.cpp',
-    'ot/user/tcl.cpp',
-    'ot/user/string.cpp',
-    'ot/user/memory-allocator.cpp',
-    'ot/user/comm-writer.cpp',
-    'ot/vendor/tlsf/tlsf.c',
-  ]
-
-  # Generated IPC code
-  user_sources += [
-    'ot/user/gen/fibonacci-client.cpp',
-    'ot/user/gen/fibonacci-server.cpp',
-    'ot/user/fibonacci/impl.cpp',
-    'ot/user/gen/graphics-client.cpp',
-    'ot/user/gen/graphics-server.cpp',
-    'ot/user/graphics/impl.cpp',
-    'ot/user/gen/filesystem-client.cpp',
-    'ot/user/gen/filesystem-server.cpp',
-    'ot/lib/frame-manager.cpp',
-  ]
-
-  # Filesystem implementation
-  user_sources += ['ot/user/filesystem/impl-memory.cpp']
-
-  # Graphics backend sources - WASM uses its own backend
-  # Graphics sources are conditionally included in build-common.sh
-  # For WASM we don't need separate graphics sources as they're inline
-
-  # Platform-specific sources
-  platform_sources = [
-    'ot/core/platform/platform-wasm.cpp',
-    'ot/lib/platform/shared-wasm.cpp',
-    'ot/core/platform/user-wasm.cpp',
-  ]
-
-  # All sources combined
-  all_sources = core_sources + lib_sources + user_sources + platform_sources
-
-  # Build the WASM executable
-  # Emscripten will generate both os.js and os.wasm files
-  executable('os',
-    all_sources,
-    c_args: common_c_args,
-    cpp_args: common_cpp_args,
-    include_directories: inc,
-    install: true,
-    name_suffix: 'js',  # This tells Meson the output is os.js
-  )
+    # WASM graphics backend is inline, no separate source file needed
+    executable('os',
+      all_sources,
+      c_args: common_c_args,
+      cpp_args: common_cpp_args,
+      include_directories: inc,
+      install: true,
+      name_suffix: 'js',  # Emscripten generates os.js and os.wasm
+    )
+  endif
 endif

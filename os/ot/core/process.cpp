@@ -1,6 +1,7 @@
 #include "ot/core/kernel.hpp"
 #include "ot/lib/mpack/mpack-writer.hpp"
 #include "ot/lib/page-allocator.hpp"
+#include "ot/user/local-storage.hpp"
 
 #ifdef OT_ARCH_WASM
 #include <emscripten/fiber.h>
@@ -196,6 +197,12 @@ void process_switch_to(Process *target) {
 
 #ifdef OT_ARCH_RISCV
   current_proc = target;
+
+  // Update local_storage to point to target process's storage
+  // This is critical for memory allocation (TLSF) to use the correct pool
+  extern LocalStorage *local_storage;
+  local_storage = (LocalStorage *)target->storage_page.as_ptr();
+
   // Set supervisor scratch register to target process's kernel stack
   // Set sepc to target process's user PC
   __asm__ __volatile__("csrw sscratch, %[sscratch]\n"
@@ -213,7 +220,7 @@ void process_switch_to(Process *target) {
   // IMPORTANT: Don't set current_proc yet! yield() needs it to point to prev
   extern void wasm_switch_to_process(Process *prev, Process *target);
   wasm_switch_to_process(prev, target);
-  // When we return, scheduler has restored current_proc correctly
+  // When we return, scheduler has restored current_proc and local_storage correctly
 #endif
 }
 

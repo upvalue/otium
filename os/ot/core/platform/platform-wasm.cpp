@@ -151,10 +151,8 @@ static void fiber_entry_point(void *arg) {
   Process *proc = (Process *)arg;
   TRACE(LLOUD, "fiber_entry_point: starting process %s (pid=%d)", proc->name, proc->pid);
 
-  // Set as current process and run
-  current_proc = proc;
-  // Update local_storage pointer for user-space access
-  local_storage = (LocalStorage *)proc->storage_page.as_ptr();
+  // Note: current_proc and local_storage are already set by scheduler_loop
+  // before swapping to this fiber, so no need to set them here
   user_entry();
 
   // If we get here, process terminated (returned from user_entry instead of

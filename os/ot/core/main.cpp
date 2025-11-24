@@ -26,9 +26,7 @@ bool programs_running() {
  * the default kernel program (actually run the system)
  */
 void kernel_prog_default() {
-  // create fibonacci ipc server (proc_fibonacci is defined in ot/user/fibonacci/impl.cpp)
-  extern void proc_fibonacci(void);
-  Process *proc_fib = process_create("fib", (const void *)proc_fibonacci, nullptr, false);
+  // Fibonacci server is only created for IPC tests, not for default program
 
 #if OT_GRAPHICS_BACKEND != OT_GRAPHICS_BACKEND_NONE
   // create graphics driver (proc_graphics is defined in ot/user/graphics/impl.cpp)

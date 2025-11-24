@@ -63,9 +63,12 @@ def run_platform(platform_config: dict) -> str:
     env = os.environ.copy()
     env['OTIUM_TEST_MODE'] = '1'
 
+    run_cmd = [str(runner), str(build_dir)]
+    print(f"  $ {' '.join(run_cmd)}")
+
     try:
         result = subprocess.run(
-            [str(runner), str(build_dir)],
+            run_cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -86,7 +89,7 @@ def extract_test_lines(output: str) -> List[str]:
     ]
 
 
-def run_test(test_name: str, kernel_prog: str, platform: str) -> List[str]:
+def run_test(test_name: str, kernel_prog: str, platform: str) -> Tuple[List[str], str]:
     """
     Compile and run a test program on specified platform.
 
@@ -96,7 +99,7 @@ def run_test(test_name: str, kernel_prog: str, platform: str) -> List[str]:
         platform: "riscv" or "wasm"
 
     Returns:
-        List of TEST: output lines
+        Tuple of (List of TEST: output lines, Full output string)
     """
     print(f"Running test: {test_name} on {platform}")
 
@@ -120,6 +123,7 @@ def run_test(test_name: str, kernel_prog: str, platform: str) -> List[str]:
             f"-Dkernel_prog={kernel_prog_option}",
             "--reconfigure"
         ]
+        print(f"  $ {' '.join(setup_cmd)}")
         subprocess.run(
             setup_cmd,
             check=True,
@@ -136,8 +140,10 @@ def run_test(test_name: str, kernel_prog: str, platform: str) -> List[str]:
     # Compile with Meson
     print(f"  Compiling with Meson...")
     try:
+        compile_cmd = ["meson", "compile", "-C", str(build_dir)]
+        print(f"  $ {' '.join(compile_cmd)}")
         subprocess.run(
-            ["meson", "compile", "-C", str(build_dir)],
+            compile_cmd,
             check=True,
             capture_output=True,
             text=True,
@@ -157,7 +163,7 @@ def run_test(test_name: str, kernel_prog: str, platform: str) -> List[str]:
     test_lines = extract_test_lines(output)
 
     print(f"  Captured {len(test_lines)} TEST: lines")
-    return test_lines
+    return test_lines, output
 
 
 def get_snapshot_path(test_name: str, platform: str) -> Path:
@@ -188,9 +194,15 @@ def load_snapshot(test_name: str, platform: str) -> List[str]:
         return [line.strip() for line in f if line.strip()]
 
 
-def compare_snapshots(test_name: str, actual: List[str], expected: List[str]) -> bool:
+def compare_snapshots(test_name: str, actual: List[str], expected: List[str], full_output: str = "") -> bool:
     """
     Compare actual output against expected snapshot.
+
+    Args:
+        test_name: Name of the test
+        actual: Actual TEST: lines captured
+        expected: Expected TEST: lines from snapshot
+        full_output: Full output from the test run (shown on mismatch)
 
     Returns:
         True if snapshots match, False otherwise
@@ -209,6 +221,14 @@ def compare_snapshots(test_name: str, actual: List[str], expected: List[str]) ->
         print("  Actual:")
         for line in actual:
             print(f"    {line}")
+
+        # Show full output to help debug
+        if full_output:
+            print("\n  Full output from test:")
+            print("  " + "-" * 60)
+            for line in full_output.split('\n'):
+                print(f"  {line}")
+            print("  " + "-" * 60)
 
         return False
 
@@ -229,6 +249,12 @@ def main():
         default="all",
         help="Platform to test (riscv, wasm, or all)"
     )
+    parser.add_argument(
+        "--test-pattern",
+        type=str,
+        default=None,
+        help="Only run tests whose name contains this pattern (case-insensitive)"
+    )
     args = parser.parse_args()
 
     # Determine which platforms to test
@@ -237,10 +263,26 @@ def main():
         else [args.platform]
     )
 
+    # Filter tests by pattern if provided
+    tests_to_run = TEST_PROGRAMS
+    if args.test_pattern:
+        pattern = args.test_pattern.lower()
+        tests_to_run = {
+            name: prog for name, prog in TEST_PROGRAMS.items()
+            if pattern in name.lower()
+        }
+        if not tests_to_run:
+            print(f"No tests match pattern '{args.test_pattern}'")
+            sys.exit(1)
+        print(f"Running {len(tests_to_run)} test(s) matching pattern '{args.test_pattern}':")
+        for name in tests_to_run:
+            print(f"  - {name}")
+        print()
+
     results = {}
 
     for platform in platforms_to_test:
-        for test_name, kernel_prog in TEST_PROGRAMS.items():
+        for test_name, kernel_prog in tests_to_run.items():
             # Skip tests excluded for this platform
             if test_name in PLATFORM_EXCLUSIONS.get(platform, []):
                 print(f"Skipping {test_name} on {platform} (excluded)")
@@ -250,7 +292,7 @@ def main():
 
             try:
                 # Run the test
-                actual_output = run_test(test_name, kernel_prog, platform)
+                actual_output, full_output = run_test(test_name, kernel_prog, platform)
 
                 if args.update:
                     # Update mode: save the snapshot
@@ -265,7 +307,7 @@ def main():
                         print(f"  Run with --update to create snapshot")
                         results[test_key] = "NO_SNAPSHOT"
                     else:
-                        passed = compare_snapshots(test_name, actual_output, expected_output)
+                        passed = compare_snapshots(test_name, actual_output, expected_output, full_output)
                         results[test_key] = "PASS" if passed else "FAIL"
 
             except Exception as e:

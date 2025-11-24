@@ -511,7 +511,7 @@ void proc_filesystem_test_client(void) {
     ou::string path = "/testdir/hello.txt";
     ou::string content = "Hello, filesystem!";
 
-    File file(path.c_str(), FileMode::WRITE);
+    ou::File file(path.c_str(), ou::FileMode::WRITE);
     ErrorCode err = file.open();
     TEST_ASSERT(err == NONE, "Failed to open file for writing");
 
@@ -524,7 +524,7 @@ void proc_filesystem_test_client(void) {
   {
     ou::string path = "/testdir/hello.txt";
 
-    File file(path.c_str(), FileMode::READ);
+    ou::File file(path.c_str(), ou::FileMode::READ);
     ErrorCode err = file.open();
     TEST_ASSERT(err == NONE, "Failed to open file for reading");
 
@@ -617,7 +617,7 @@ void proc_filesystem_test_client(void) {
     ou::string path = "/testdir/subdir/nested.txt";
     ou::string content = "Nested!";
 
-    File file(path.c_str(), FileMode::WRITE);
+    ou::File file(path.c_str(), ou::FileMode::WRITE);
     ErrorCode err = file.open();
     TEST_ASSERT(err == NONE, "Failed to open file in nested directory");
 
@@ -630,7 +630,7 @@ void proc_filesystem_test_client(void) {
   {
     ou::string path = "/testdir/subdir/nested.txt";
 
-    File file(path.c_str(), FileMode::READ);
+    ou::File file(path.c_str(), ou::FileMode::READ);
     ErrorCode err = file.open();
     TEST_ASSERT(err == NONE, "Failed to open nested file");
 
@@ -648,7 +648,7 @@ void proc_filesystem_test_client(void) {
     TEST_ASSERT(result.is_ok(), "Failed to delete file");
 
     // Verify file is gone by trying to open it
-    File file(path.c_str(), FileMode::READ);
+    ou::File file(path.c_str(), ou::FileMode::READ);
     ErrorCode err = file.open();
     TEST_ASSERT(err != NONE, "File should not exist after deletion");
   }
@@ -657,7 +657,7 @@ void proc_filesystem_test_client(void) {
   TEST_PRINT("Test 9: Testing error handling");
   {
     ou::string path = "/nonexistent.txt";
-    File file(path.c_str(), FileMode::READ);
+    ou::File file(path.c_str(), ou::FileMode::READ);
     ErrorCode err = file.open();
     TEST_ASSERT(err != NONE, "Should fail for nonexistent file");
     TEST_ASSERT(err == FILESYSTEM__FILE_NOT_FOUND, "Wrong error code");

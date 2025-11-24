@@ -513,20 +513,13 @@ void yield(void) {
 
   TRACE_PROC(LLOUD, "switching to process %s (pidx=%d, pid=%lu)", next->name, next->pidx, next->pid);
 
-  // Physical addressing only - no page table switching needed
-  // Set supervisor scratch register to next process's kernel stack
-  // Set sepc to next process's user PC (physical address)
-  __asm__ __volatile__("csrw sscratch, %[sscratch]\n"
-                       "csrw sepc, %[sepc]\n"
-                       :
-                       : [sscratch] "r"((uintptr_t)&next->stack[sizeof(next->stack)]), [sepc] "r"(next->user_pc));
+  // Use process_switch_to for all context switching - it handles:
+  // - Updating current_proc
+  // - Updating local_storage
+  // - Setting sscratch and sepc registers
+  // - Calling switch_context
+  process_switch_to(next);
 
-  Process *prev = current_proc;
-  current_proc = next;
-  // Update local_storage pointer for user-space access
-  local_storage = (LocalStorage *)next->storage_page.as_ptr();
-  TRACE_PROC(LLOUD, "about to call switch_context, prev=%s next=%s", prev->name, next->name);
-  switch_context(&prev->stack_ptr, &current_proc->stack_ptr);
   TRACE_PROC(LLOUD, "returned from switch_context, current=%s", current_proc->name);
 }
 

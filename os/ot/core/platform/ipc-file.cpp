@@ -2,6 +2,7 @@
 #include "ot/lib/mpack/mpack-reader.hpp"
 #include "ot/user/gen/filesystem-client.hpp"
 #include "ot/user/user.hpp"
+#include "ot/user/filesystem/types.hpp"
 
 namespace ou {
 
@@ -30,17 +31,19 @@ ErrorCode File::open() {
   }
   fs_pid = g_fs_pid;
 
-  // Map FileMode to flags
+  // Map FileMode to filesystem flags
   uintptr_t flags = 0;
   switch (mode_) {
   case FileMode::READ:
-    flags = 0; // Read mode
+    flags = filesystem::OPEN_READ;
     break;
   case FileMode::WRITE:
-    flags = 1; // Write mode
+    // Write mode: create if doesn't exist, truncate if exists, allow writing
+    flags = filesystem::OPEN_WRITE | filesystem::OPEN_CREATE | filesystem::OPEN_TRUNCATE;
     break;
   case FileMode::APPEND:
-    flags = 2; // Append mode
+    // Append mode: create if doesn't exist, don't truncate, allow writing
+    flags = filesystem::OPEN_WRITE | filesystem::OPEN_CREATE;
     break;
   }
 

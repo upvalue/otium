@@ -40,14 +40,12 @@ inline void register_ipc_method_vars(tcl::Interp &i) {
   osnprintf(buf, sizeof(buf), "%d", 0x1800);
   i.set_var("FILESYSTEM_CLOSE", buf);
   osnprintf(buf, sizeof(buf), "%d", 0x1900);
-  i.set_var("FILESYSTEM_READ_ALL", buf);
+  i.set_var("FILESYSTEM_CREATE_FILE", buf);
   osnprintf(buf, sizeof(buf), "%d", 0x1a00);
-  i.set_var("FILESYSTEM_WRITE_ALL", buf);
-  osnprintf(buf, sizeof(buf), "%d", 0x1b00);
   i.set_var("FILESYSTEM_CREATE_DIR", buf);
-  osnprintf(buf, sizeof(buf), "%d", 0x1c00);
+  osnprintf(buf, sizeof(buf), "%d", 0x1b00);
   i.set_var("FILESYSTEM_DELETE_FILE", buf);
-  osnprintf(buf, sizeof(buf), "%d", 0x1d00);
+  osnprintf(buf, sizeof(buf), "%d", 0x1c00);
   i.set_var("FILESYSTEM_DELETE_DIR", buf);
 
   // Error codes
@@ -68,8 +66,6 @@ inline void register_ipc_method_vars(tcl::Interp &i) {
   i.set_var("ERROR_FILESYSTEM__INVALID_HANDLE", buf);
   osnprintf(buf, sizeof(buf), "%d", ErrorCode::FILESYSTEM__IO_ERROR);
   i.set_var("ERROR_FILESYSTEM__IO_ERROR", buf);
-  osnprintf(buf, sizeof(buf), "%d", ErrorCode::FILESYSTEM__FILE_TOO_LARGE);
-  i.set_var("ERROR_FILESYSTEM__FILE_TOO_LARGE", buf);
   osnprintf(buf, sizeof(buf), "%d", ErrorCode::FILESYSTEM__ALREADY_EXISTS);
   i.set_var("ERROR_FILESYSTEM__ALREADY_EXISTS", buf);
   osnprintf(buf, sizeof(buf), "%d", ErrorCode::FILESYSTEM__PARENT_NOT_FOUND);

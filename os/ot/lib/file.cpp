@@ -2,9 +2,9 @@
 
 namespace ou {
 
-FileErr File::forEachLine(LineCallback callback) {
+ErrorCode File::forEachLine(LineCallback callback) {
   if (!opened) {
-    return FileErr::NOT_OPENED;
+    return FILESYSTEM__INVALID_HANDLE;
   }
   buffer.clear();
   while (true) {
@@ -26,6 +26,6 @@ FileErr File::forEachLine(LineCallback callback) {
   if (buffer.length() > 0) {
     callback(buffer);
   }
-  return FileErr::NONE;
+  return NONE;
 }
 } // namespace ou

@@ -16,8 +16,7 @@ struct FilesystemClient {
   Result<uintptr_t, ErrorCode> read(FileHandleId handle, uintptr_t offset, uintptr_t length);
   Result<uintptr_t, ErrorCode> write(FileHandleId handle, uintptr_t offset, const ou::vector<uint8_t>& data);
   Result<bool, ErrorCode> close(FileHandleId handle);
-  Result<uintptr_t, ErrorCode> read_all(const ou::string& path);
-  Result<bool, ErrorCode> write_all(const ou::string& path, const ou::vector<uint8_t>& data);
+  Result<bool, ErrorCode> create_file(const ou::string& path);
   Result<bool, ErrorCode> create_dir(const ou::string& path);
   Result<bool, ErrorCode> delete_file(const ou::string& path);
   Result<bool, ErrorCode> delete_dir(const ou::string& path);

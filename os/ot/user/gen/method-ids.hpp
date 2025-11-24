@@ -17,10 +17,9 @@ namespace MethodIds {
     constexpr intptr_t READ = 0x1600;
     constexpr intptr_t WRITE = 0x1700;
     constexpr intptr_t CLOSE = 0x1800;
-    constexpr intptr_t READ_ALL = 0x1900;
-    constexpr intptr_t WRITE_ALL = 0x1a00;
-    constexpr intptr_t CREATE_DIR = 0x1b00;
-    constexpr intptr_t DELETE_FILE = 0x1c00;
-    constexpr intptr_t DELETE_DIR = 0x1d00;
+    constexpr intptr_t CREATE_FILE = 0x1900;
+    constexpr intptr_t CREATE_DIR = 0x1a00;
+    constexpr intptr_t DELETE_FILE = 0x1b00;
+    constexpr intptr_t DELETE_DIR = 0x1c00;
   }
 }

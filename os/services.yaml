@@ -101,25 +101,13 @@ services:
         returns: []
         errors: [INVALID_HANDLE]
 
-      # Whole-file helpers
-      - name: read_all
+      # File creation
+      - name: create_file
         args:
           - name: path
             type: string
-        returns:
-          - name: size
-            type: uint
-        returns_comm_data: true
-        errors: [FILE_NOT_FOUND, FILE_TOO_LARGE]
-
-      - name: write_all
-        args:
-          - name: path
-            type: string
-          - name: data
-            type: buffer
         returns: []
-        errors: [IO_ERROR]
+        errors: [ALREADY_EXISTS, PARENT_NOT_FOUND, PATH_TOO_LONG]
 
       # Directory operations
       - name: create_dir

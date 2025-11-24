@@ -1,6 +1,7 @@
 // tcl-repl.cpp - Standalone TCL REPL using bestline for line editing
 #include "ot/vendor/bestline/bestline.h"
 #include "ot/user/tcl.hpp"
+#include "ot/lib/file.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -99,6 +100,81 @@ bool run_file(tcl::Interp &interp, const char *filename) {
   return true;
 }
 
+// Filesystem commands for POSIX
+static tcl::Status cmd_fs_read(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("fs/read", argv, 2, 2)) {
+    return tcl::S_ERR;
+  }
+
+  ou::File file(argv[1].c_str(), ou::FileMode::READ);
+  ErrorCode err = file.open();
+  if (err != ErrorCode::NONE) {
+    char buf[256];
+    osnprintf(buf, sizeof(buf), "fs/read: failed to open file '%s': %s",
+              argv[1].c_str(), error_code_to_string(err));
+    i.result = buf;
+    return tcl::S_ERR;
+  }
+
+  ou::string content;
+  err = file.read_all(content);
+  if (err != ErrorCode::NONE) {
+    char buf[256];
+    osnprintf(buf, sizeof(buf), "fs/read: failed to read file '%s': %s",
+              argv[1].c_str(), error_code_to_string(err));
+    i.result = buf;
+    return tcl::S_ERR;
+  }
+
+  i.result = content;
+  return tcl::S_OK;
+}
+
+static tcl::Status cmd_fs_write(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("fs/write", argv, 3, 3)) {
+    return tcl::S_ERR;
+  }
+
+  ou::File file(argv[1].c_str(), ou::FileMode::WRITE);
+  ErrorCode err = file.open();
+  if (err != ErrorCode::NONE) {
+    char buf[256];
+    osnprintf(buf, sizeof(buf), "fs/write: failed to open file '%s': %s",
+              argv[1].c_str(), error_code_to_string(err));
+    i.result = buf;
+    return tcl::S_ERR;
+  }
+
+  err = file.write_all(argv[2]);
+  if (err != ErrorCode::NONE) {
+    char buf[256];
+    osnprintf(buf, sizeof(buf), "fs/write: failed to write file '%s': %s",
+              argv[1].c_str(), error_code_to_string(err));
+    i.result = buf;
+    return tcl::S_ERR;
+  }
+
+  return tcl::S_OK;
+}
+
+static tcl::Status cmd_fs_create(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("fs/create", argv, 2, 2)) {
+    return tcl::S_ERR;
+  }
+
+  // Create empty file using fopen
+  FILE *f = fopen(argv[1].c_str(), "w");
+  if (!f) {
+    char buf[256];
+    osnprintf(buf, sizeof(buf), "fs/create: failed to create file '%s'", argv[1].c_str());
+    i.result = buf;
+    return tcl::S_ERR;
+  }
+  fclose(f);
+
+  return tcl::S_OK;
+}
+
 int main(int argc, char *argv[]) {
   // Create TCL interpreter
   tcl::Interp interp;
@@ -117,6 +193,14 @@ int main(int argc, char *argv[]) {
                             should_quit = true;
                             return tcl::S_OK;
                           });
+
+  // Register filesystem commands
+  interp.register_command("fs/read", cmd_fs_read, nullptr,
+                          "[fs/read filename] => string - Read entire file into a string");
+  interp.register_command("fs/write", cmd_fs_write, nullptr,
+                          "[fs/write filename content] => nil - Write string to a file");
+  interp.register_command("fs/create", cmd_fs_create, nullptr,
+                          "[fs/create filename] => nil - Create a new empty file");
 
   // Parse arguments into actions
   std::vector<Action> actions;

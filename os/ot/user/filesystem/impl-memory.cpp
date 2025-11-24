@@ -181,84 +181,55 @@ public:
     return Result<bool, ErrorCode>::ok(true);
   }
 
-  Result<uintptr_t, ErrorCode> handle_read_all(const ou::string &path) override {
-    auto inode_result = resolve_path(path);
-    if (inode_result.is_err()) {
-      return Result<uintptr_t, ErrorCode>::err(inode_result.error());
+  Result<bool, ErrorCode> handle_create_file(const ou::string &path) override {
+    if (path.length() > MAX_PATH_LENGTH) {
+      return Result<bool, ErrorCode>::err(FILESYSTEM__PATH_TOO_LONG);
     }
 
-    INode *inode = storage->find_inode(inode_result.value());
-    if (!inode || inode->type != NodeType::FILE) {
-      return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__FILE_NOT_FOUND);
+    // Check if file already exists
+    auto existing = resolve_path(path);
+    if (existing.is_ok()) {
+      return Result<bool, ErrorCode>::err(FILESYSTEM__ALREADY_EXISTS);
     }
 
-    size_t file_size = inode->data.size();
-
-    if (file_size > OT_PAGE_SIZE - 64) {
-      return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__FILE_TOO_LARGE);
+    // Split path and verify parent exists
+    PathComponents components;
+    split_path(path, components);
+    if (components.parts.empty()) {
+      return Result<bool, ErrorCode>::err(FILESYSTEM__PARENT_NOT_FOUND);
     }
 
-    PageAddr comm = ou_get_comm_page();
-    MPackWriter writer(comm.as_ptr(), OT_PAGE_SIZE);
-    writer.bin(inode->data.data(), file_size);
-
-    return Result<uintptr_t, ErrorCode>::ok(file_size);
-  }
-
-  Result<bool, ErrorCode> handle_write_all(const ou::string &path, const StringView &data) override {
-    auto inode_result = resolve_path(path);
-    uint32_t inode_num = 0;
-
-    if (inode_result.is_ok()) {
-      inode_num = inode_result.value();
-      INode *inode = storage->find_inode(inode_num);
-      if (!inode || inode->type != NodeType::FILE) {
-        return Result<bool, ErrorCode>::err(FILESYSTEM__IO_ERROR);
-      }
-
-      inode->data.clear();
-      for (size_t i = 0; i < data.len; i++) {
-        inode->data.push_back(static_cast<uint8_t>(data.ptr[i]));
-      }
-      inode->modified_time = 0;
-    } else {
-      PathComponents components;
-      split_path(path, components);
-      if (components.parts.empty()) {
-        return Result<bool, ErrorCode>::err(FILESYSTEM__IO_ERROR);
-      }
-
-      ou::string parent_path = "/";
-      for (size_t i = 0; i < components.parts.size() - 1; i++) {
-        parent_path.append(components.parts[i]);
-        parent_path.append("/");
-      }
-
-      auto parent_result = resolve_path(parent_path);
-      if (parent_result.is_err()) {
-        return Result<bool, ErrorCode>::err(FILESYSTEM__IO_ERROR);
-      }
-
-      uint32_t parent_inode_num = parent_result.value();
-      INode *parent = storage->find_inode(parent_inode_num);
-      if (!parent || parent->type != NodeType::DIRECTORY) {
-        return Result<bool, ErrorCode>::err(FILESYSTEM__IO_ERROR);
-      }
-
-      INode new_file;
-      new_file.inode_num = storage->next_inode_num++;
-      new_file.type = NodeType::FILE;
-      new_file.name = components.parts[components.parts.size() - 1];
-      new_file.parent_inode = parent_inode_num;
-      for (size_t i = 0; i < data.len; i++) {
-        new_file.data.push_back(static_cast<uint8_t>(data.ptr[i]));
-      }
-      new_file.created_time = 0;
-      new_file.modified_time = 0;
-
-      parent->children.push_back(new_file.inode_num);
-      storage->inodes.push_back(static_cast<INode &&>(new_file));
+    // Build parent path
+    ou::string parent_path = "/";
+    for (size_t i = 0; i < components.parts.size() - 1; i++) {
+      parent_path.append(components.parts[i]);
+      parent_path.append("/");
     }
+
+    // Verify parent exists and is a directory
+    auto parent_result = resolve_path(parent_path);
+    if (parent_result.is_err()) {
+      return Result<bool, ErrorCode>::err(FILESYSTEM__PARENT_NOT_FOUND);
+    }
+
+    uint32_t parent_inode_num = parent_result.value();
+    INode *parent = storage->find_inode(parent_inode_num);
+    if (!parent || parent->type != NodeType::DIRECTORY) {
+      return Result<bool, ErrorCode>::err(FILESYSTEM__PARENT_NOT_FOUND);
+    }
+
+    // Create new file inode
+    INode new_file;
+    new_file.inode_num = storage->next_inode_num++;
+    new_file.type = NodeType::FILE;
+    new_file.name = components.parts[components.parts.size() - 1];
+    new_file.parent_inode = parent_inode_num;
+    new_file.created_time = 0;
+    new_file.modified_time = 0;
+
+    // Add to parent's children and storage
+    parent->children.push_back(new_file.inode_num);
+    storage->inodes.push_back(static_cast<INode &&>(new_file));
 
     return Result<bool, ErrorCode>::ok(true);
   }

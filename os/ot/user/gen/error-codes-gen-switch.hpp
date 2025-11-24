@@ -15,8 +15,6 @@
     return "filesystem-invalid-handle";
   case FILESYSTEM__IO_ERROR:
     return "filesystem-io-error";
-  case FILESYSTEM__FILE_TOO_LARGE:
-    return "filesystem-file-too-large";
   case FILESYSTEM__ALREADY_EXISTS:
     return "filesystem-already-exists";
   case FILESYSTEM__PARENT_NOT_FOUND:

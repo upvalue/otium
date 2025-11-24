@@ -1056,6 +1056,13 @@ static Status cmd_bin(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   return S_OK;
 }
 
+static Status cmd_eval(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
+  if (!i.arity_check("eval", argv, 2, 2)) {
+    return S_ERR;
+  }
+  return i.eval(string_view(argv[1]));
+}
+
 void register_core_commands(Interp &i) {
   // I/O commands
   i.register_command("puts", cmd_puts, nullptr, "[puts string] => nil - Print string to output");
@@ -1122,6 +1129,9 @@ void register_core_commands(Interp &i) {
                      "[oct string] => int - Parse octal string to decimal (supports 0o prefix)");
   i.register_command("bin", cmd_bin, nullptr,
                      "[bin string] => int - Parse binary string to decimal (supports 0b prefix)");
+
+  // Eval command
+  i.register_command("eval", cmd_eval, nullptr, "[eval string] => any - Evaluate a Tcl string and return the result");
 }
 
 //

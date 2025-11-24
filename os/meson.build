@@ -130,7 +130,9 @@ if is_posix
   tcl_repl_sources = [
     'ot/user/string.cpp',
     'ot/user/tcl.cpp',
+    'ot/lib/file.cpp',
     'ot/core/platform/tcl-repl.cpp',
+    'ot/core/platform/posix-file.cpp',
     'ot/core/platform/posix-std.cpp',
     'ot/lib/std.cpp',
     'ot/lib/mpack/mpack-utils.cpp',
@@ -221,6 +223,20 @@ if is_riscv or is_wasm
     input: files('tools/runtime-config.sh.in'),
   )
 
+  # Generate shellrc header from fs/shellrc.tcl
+  shellrc_header = custom_target(
+    'shellrc-header',
+    input: files('fs/shellrc.tcl'),
+    output: 'shellrc.hpp',
+    command: [
+      find_program('python3'),
+      files('tools/embed-file.py'),
+      '@INPUT@',
+      '@OUTPUT@',
+      'shellrc_content'
+    ],
+  )
+
   # Shared source files for both RISC-V and WASM
   core_sources = [
     'ot/core/startup.cpp',
@@ -236,6 +252,7 @@ if is_riscv or is_wasm
     'ot/lib/gfx-util.cpp',
     'ot/lib/mpack/mpack-reader.cpp',
     'ot/lib/mpack/mpack-utils.cpp',
+    'ot/lib/file.cpp',
     'ot/vendor/libmpack/mpack.c',
     'ot/vendor/printf/printf.c',
   ]
@@ -267,16 +284,17 @@ if is_riscv or is_wasm
   # Platform-specific sources and configuration
   if is_riscv
     graphics_sources = ['ot/user/graphics/backend-virtio.cpp']
+    file_backend_sources = ['ot/core/platform/ipc-file.cpp']
     platform_sources = [
       'ot/core/platform/platform-riscv.cpp',
       'ot/lib/platform/shared-riscv.cpp',
       'ot/core/platform/user-riscv.cpp',
     ]
-    all_sources = core_sources + lib_sources + user_sources + graphics_sources + platform_sources
+    all_sources = core_sources + lib_sources + user_sources + graphics_sources + file_backend_sources + platform_sources
     linker_script = meson.current_source_dir() / 'kernel-link-riscv.ld'
 
     executable('os.elf',
-      all_sources,
+      all_sources + [shellrc_header],
       c_args: common_c_args,
       cpp_args: common_cpp_args,
       link_args: [
@@ -289,16 +307,17 @@ if is_riscv or is_wasm
   endif
 
   if is_wasm
+    file_backend_sources = ['ot/core/platform/ipc-file.cpp']
     platform_sources = [
       'ot/core/platform/platform-wasm.cpp',
       'ot/lib/platform/shared-wasm.cpp',
       'ot/core/platform/user-wasm.cpp',
     ]
-    all_sources = core_sources + lib_sources + user_sources + platform_sources
+    all_sources = core_sources + lib_sources + user_sources + file_backend_sources + platform_sources
 
     # WASM graphics backend is inline, no separate source file needed
     executable('os',
-      all_sources,
+      all_sources + [shellrc_header],
       c_args: common_c_args,
       cpp_args: common_cpp_args,
       include_directories: inc,

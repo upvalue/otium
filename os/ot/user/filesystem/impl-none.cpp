@@ -19,14 +19,6 @@ Result<bool, ErrorCode> FilesystemServer::handle_close(uintptr_t handle) {
   return Result<bool, ErrorCode>::err(FILESYSTEM__UNIMPLEMENTED);
 }
 
-Result<uintptr_t, ErrorCode> FilesystemServer::handle_read_all(const ou::string& path) {
-  return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__UNIMPLEMENTED);
-}
-
-Result<bool, ErrorCode> FilesystemServer::handle_write_all(const ou::string& path, const ou::vector<uint8_t>& data) {
-  return Result<bool, ErrorCode>::err(FILESYSTEM__UNIMPLEMENTED);
-}
-
 Result<bool, ErrorCode> FilesystemServer::handle_create_dir(const ou::string& path) {
   return Result<bool, ErrorCode>::err(FILESYSTEM__UNIMPLEMENTED);
 }

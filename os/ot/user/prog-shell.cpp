@@ -1,7 +1,9 @@
 // prog-shell.cpp - TCL shell implementation
 #include "ot/lib/arguments.hpp"
+#include "ot/lib/file.hpp"
 #include "ot/lib/messages.hpp"
 #include "ot/lib/mpack/mpack-utils.hpp"
+#include "ot/user/gen/filesystem-client.hpp"
 #include "ot/user/local-storage.hpp"
 #include "ot/user/tcl.hpp"
 #include "ot/user/user.hpp"
@@ -123,6 +125,84 @@ tcl::Status cmd_error_string(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl
   return tcl::S_OK;
 }
 
+tcl::Status cmd_fs_read(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("fs/read", argv, 2, 2)) {
+    return tcl::S_ERR;
+  }
+
+  ou::File file(argv[1].c_str(), ou::FileMode::READ);
+  ErrorCode err = file.open();
+  if (err != ErrorCode::NONE) {
+    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/read: failed to open file '%s': %s", argv[1].c_str(),
+              error_code_to_string(err));
+    i.result = ot_scratch_buffer;
+    return tcl::S_ERR;
+  }
+
+  ou::string content;
+  err = file.read_all(content);
+  if (err != ErrorCode::NONE) {
+    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/read: failed to read file '%s': %s", argv[1].c_str(),
+              error_code_to_string(err));
+    i.result = ot_scratch_buffer;
+    return tcl::S_ERR;
+  }
+
+  i.result = content;
+  return tcl::S_OK;
+}
+
+tcl::Status cmd_fs_write(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("fs/write", argv, 3, 3)) {
+    return tcl::S_ERR;
+  }
+
+  ou::File file(argv[1].c_str(), ou::FileMode::WRITE);
+  ErrorCode err = file.open();
+  if (err != ErrorCode::NONE) {
+    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/write: failed to open file '%s': %s", argv[1].c_str(),
+              error_code_to_string(err));
+    i.result = ot_scratch_buffer;
+    return tcl::S_ERR;
+  }
+
+  err = file.write_all(argv[2]);
+  if (err != ErrorCode::NONE) {
+    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/write: failed to write file '%s': %s", argv[1].c_str(),
+              error_code_to_string(err));
+    i.result = ot_scratch_buffer;
+    return tcl::S_ERR;
+  }
+
+  return tcl::S_OK;
+}
+
+tcl::Status cmd_fs_create(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("fs/create", argv, 2, 2)) {
+    return tcl::S_ERR;
+  }
+
+  // Lookup filesystem server
+  Pid fs_pid = ou_proc_lookup("filesystem");
+  if (fs_pid == PID_NONE) {
+    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/create: filesystem server not found");
+    i.result = ot_scratch_buffer;
+    return tcl::S_ERR;
+  }
+
+  // Call create_file via IPC
+  FilesystemClient client(fs_pid);
+  auto result = client.create_file(argv[1]);
+  if (result.is_err()) {
+    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/create: failed to create file '%s': %s", argv[1].c_str(),
+              error_code_to_string(result.error()));
+    i.result = ot_scratch_buffer;
+    return tcl::S_ERR;
+  }
+
+  return tcl::S_OK;
+}
+
 void shell_main() {
   oprintf("SHELL BEGIN\n");
 
@@ -139,6 +219,9 @@ void shell_main() {
 
   // Register IPC method ID variables
   register_ipc_method_vars(i);
+
+  // Execute shellrc startup script
+#include "shellrc.hpp"
 
   oprintf("tcl shell ready\n");
 
@@ -182,6 +265,20 @@ void shell_main() {
   // Error code to string conversion
   i.register_command("error/string", cmd_error_string, nullptr,
                      "[error/string code:int] => string - Convert error code to string");
+
+  // Filesystem commands
+  i.register_command("fs/read", cmd_fs_read, nullptr,
+                     "[fs/read filename:string] => string - Read entire file into a string");
+  i.register_command("fs/write", cmd_fs_write, nullptr,
+                     "[fs/write filename:string content:string] => nil - Write string to a file");
+  i.register_command("fs/create", cmd_fs_create, nullptr,
+                     "[fs/create filename:string] => nil - Create a new empty file");
+
+  // load shellrc
+  tcl::Status shellrc_status = i.eval(tcl::string_view(shellrc_content));
+  if (shellrc_status != tcl::S_OK) {
+    oprintf("shellrc error: %s\n", i.result.c_str());
+  }
 
   while (s->running) {
     oprintf("> ");

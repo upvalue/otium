@@ -281,7 +281,7 @@ void VirtioGraphicsBackend::flush() {
   resp_type = send_command(cmd_page, sizeof(*flush_cmd), resp_page, sizeof(struct virtio_gpu_ctrl_hdr));
   // oprintf("Flush response: 0x%x\n", resp_type);
   if (resp_type != VIRTIO_GPU_RESP_OK_NODATA) {
-    oprintf("ERROR: Flush failed!\n");
+    // oprintf("ERROR: Flush failed!\n");
     return;
   }
 }

@@ -61,31 +61,14 @@ void FilesystemServerBase::process_request(const IpcMessage& msg) {
     }
     break;
   }
-  case MethodIds::Filesystem::READ_ALL: {
+  case MethodIds::Filesystem::CREATE_FILE: {
     // Deserialize complex arguments from comm page
     PageAddr comm = ou_get_comm_page();
     MPackReader reader(comm.as_ptr(), OT_PAGE_SIZE);
     StringView path_view;
     reader.read_string(path_view);
     ou::string path(path_view.ptr, path_view.len);
-    auto result = handle_read_all(path);
-    if (result.is_err()) {
-      resp.error_code = result.error();
-    } else {
-      resp.values[0] = result.value();
-    }
-    break;
-  }
-  case MethodIds::Filesystem::WRITE_ALL: {
-    // Deserialize complex arguments from comm page
-    PageAddr comm = ou_get_comm_page();
-    MPackReader reader(comm.as_ptr(), OT_PAGE_SIZE);
-    StringView path_view;
-    reader.read_string(path_view);
-    ou::string path(path_view.ptr, path_view.len);
-    StringView data;
-    reader.read_bin(data);  // Zero-copy binary data from comm page
-    auto result = handle_write_all(path, data);
+    auto result = handle_create_file(path);
     if (result.is_err()) {
       resp.error_code = result.error();
     } else {

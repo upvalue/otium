@@ -460,6 +460,7 @@ void kernel_prog_test_graphics() {
 #include "ot/user/gen/filesystem-client.hpp"
 #include "ot/user/local-storage.hpp"
 #include "ot/lib/mpack/mpack-reader.hpp"
+#include "ot/lib/file.hpp"
 
 // Test storage for filesystem client
 struct FsTestStorage : public LocalStorage {
@@ -504,45 +505,40 @@ void proc_filesystem_test_client(void) {
     TEST_ASSERT(result.is_ok(), "Failed to create directory");
   }
 
-  // Test 2: Write a small file using write_all
+  // Test 2: Write a small file using File::write_all
   TEST_PRINT("Test 2: Writing file /testdir/hello.txt");
   {
     ou::string path = "/testdir/hello.txt";
     ou::string content = "Hello, filesystem!";
 
-    ou::vector<uint8_t> data;
-    for (size_t i = 0; i < content.length(); i++) {
-      data.push_back(static_cast<uint8_t>(content[i]));
-    }
+    File file(path.c_str(), FileMode::WRITE);
+    ErrorCode err = file.open();
+    TEST_ASSERT(err == NONE, "Failed to open file for writing");
 
-    auto result = client.write_all(path, data);
-    TEST_ASSERT(result.is_ok(), "Failed to write file");
+    err = file.write_all(content);
+    TEST_ASSERT(err == NONE, "Failed to write file");
   }
 
-  // Test 3: Read the file back using read_all
+  // Test 3: Read the file back using File::read_all
   TEST_PRINT("Test 3: Reading file /testdir/hello.txt");
   {
     ou::string path = "/testdir/hello.txt";
-    auto result = client.read_all(path);
-    TEST_ASSERT(result.is_ok(), "Failed to read file");
 
-    uintptr_t size = result.value();
-    TEST_ASSERT(size == 18, "File size mismatch");
+    File file(path.c_str(), FileMode::READ);
+    ErrorCode err = file.open();
+    TEST_ASSERT(err == NONE, "Failed to open file for reading");
 
-    // Read data from comm page
-    PageAddr comm = ou_get_comm_page();
-    MPackReader reader(comm.as_ptr(), OT_PAGE_SIZE);
+    ou::string content;
+    err = file.read_all(content);
+    TEST_ASSERT(err == NONE, "Failed to read file");
 
-    StringView content_view;
-    reader.read_bin(content_view);
-
-    TEST_ASSERT(content_view.len == 18, "Content length mismatch");
+    TEST_ASSERT(content.length() == 18, "File size mismatch");
 
     // Verify content
     const char* expected = "Hello, filesystem!";
     bool match = true;
-    for (size_t i = 0; i < content_view.len; i++) {
-      if (content_view.ptr[i] != expected[i]) {
+    for (size_t i = 0; i < content.length(); i++) {
+      if (content[i] != expected[i]) {
         match = false;
         break;
       }
@@ -621,22 +617,27 @@ void proc_filesystem_test_client(void) {
     ou::string path = "/testdir/subdir/nested.txt";
     ou::string content = "Nested!";
 
-    ou::vector<uint8_t> data;
-    for (size_t i = 0; i < content.length(); i++) {
-      data.push_back(static_cast<uint8_t>(content[i]));
-    }
+    File file(path.c_str(), FileMode::WRITE);
+    ErrorCode err = file.open();
+    TEST_ASSERT(err == NONE, "Failed to open file in nested directory");
 
-    auto result = client.write_all(path, data);
-    TEST_ASSERT(result.is_ok(), "Failed to write to nested directory");
+    err = file.write_all(content);
+    TEST_ASSERT(err == NONE, "Failed to write to nested directory");
   }
 
   // Test 7: Read from nested directory
   TEST_PRINT("Test 7: Reading from nested directory");
   {
     ou::string path = "/testdir/subdir/nested.txt";
-    auto result = client.read_all(path);
-    TEST_ASSERT(result.is_ok(), "Failed to read from nested directory");
-    TEST_ASSERT(result.value() == 7, "Nested file size mismatch");
+
+    File file(path.c_str(), FileMode::READ);
+    ErrorCode err = file.open();
+    TEST_ASSERT(err == NONE, "Failed to open nested file");
+
+    ou::string content;
+    err = file.read_all(content);
+    TEST_ASSERT(err == NONE, "Failed to read from nested directory");
+    TEST_ASSERT(content.length() == 7, "Nested file size mismatch");
   }
 
   // Test 8: Delete file
@@ -646,18 +647,20 @@ void proc_filesystem_test_client(void) {
     auto result = client.delete_file(path);
     TEST_ASSERT(result.is_ok(), "Failed to delete file");
 
-    // Verify file is gone
-    auto read_result = client.read_all(path);
-    TEST_ASSERT(read_result.is_err(), "File should not exist after deletion");
+    // Verify file is gone by trying to open it
+    File file(path.c_str(), FileMode::READ);
+    ErrorCode err = file.open();
+    TEST_ASSERT(err != NONE, "File should not exist after deletion");
   }
 
   // Test 9: Error handling - file not found
   TEST_PRINT("Test 9: Testing error handling");
   {
     ou::string path = "/nonexistent.txt";
-    auto result = client.read_all(path);
-    TEST_ASSERT(result.is_err(), "Should fail for nonexistent file");
-    TEST_ASSERT(result.error() == FILESYSTEM__FILE_NOT_FOUND, "Wrong error code");
+    File file(path.c_str(), FileMode::READ);
+    ErrorCode err = file.open();
+    TEST_ASSERT(err != NONE, "Should fail for nonexistent file");
+    TEST_ASSERT(err == FILESYSTEM__FILE_NOT_FOUND, "Wrong error code");
   }
 
   TEST_PRINT("===========================================");

@@ -31,6 +31,11 @@ PLATFORM_EXCLUSIONS = {
     "wasm": ["test-mem"],  # Skip memory tests on WASM for now
 }
 
+# Test-specific Meson options
+TEST_MESON_OPTIONS = {
+    "test-graphics": ["-Dgraphics_backend=test"],  # Use 16x16 test backend for snapshot testing
+}
+
 SNAPSHOT_DIR = Path(__file__).parent / "snapshots"
 PROJECT_ROOT = Path(__file__).parent
 
@@ -123,6 +128,11 @@ def run_test(test_name: str, kernel_prog: str, platform: str) -> Tuple[List[str]
             f"-Dkernel_prog={kernel_prog_option}",
             "--reconfigure"
         ]
+
+        # Add test-specific Meson options if defined
+        if test_name in TEST_MESON_OPTIONS:
+            setup_cmd.extend(TEST_MESON_OPTIONS[test_name])
+
         print(f"  $ {' '.join(setup_cmd)}")
         subprocess.run(
             setup_cmd,

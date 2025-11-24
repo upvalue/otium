@@ -13,8 +13,14 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 
+// Get build directory from command line args or use default
+const buildDirArg = process.argv[2] || 'build-wasm';
+const buildDir = path.isAbsolute(buildDirArg)
+  ? buildDirArg
+  : path.join(__dirname, buildDirArg);
+
 // Load the compiled WASM module
-const OtiumOS = require('./build-wasm/os.js');
+const OtiumOS = require(path.join(buildDir, 'os.js'));
 
 // Check if we're in test mode
 const isTestMode = process.env.OTIUM_TEST_MODE === '1';
@@ -22,7 +28,7 @@ const isTestMode = process.env.OTIUM_TEST_MODE === '1';
 // Read runtime config if it exists
 let graphicsEnabled = true;  // Default to enabled for backward compatibility
 try {
-  const configPath = path.join(__dirname, 'build', 'runtime-config.json');
+  const configPath = path.join(buildDir, 'runtime-config.json');
   const configData = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   graphicsEnabled = configData.graphics.enabled;
 } catch (e) {

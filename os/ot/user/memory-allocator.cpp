@@ -16,11 +16,23 @@ void LocalStorage::process_storage_init(size_t pages) {
     ou_exit();
   }
 
+  pool = tlsf_create_with_pool(memory_begin, OT_PAGE_SIZE);
+
+  if (!pool) {
+    oprintf("FATAL: failed to create TLSF memory pool\n");
+    ou_exit();
+  }
+
   // Allocate additional pages to get a contiguous region
   for (size_t i = 1; i < pages; i++) {
     void *page = ou_alloc_page();
     if (!page) {
       oprintf("FATAL: process_storage_init failed to allocate page %d of %d\n", i, pages);
+      ou_exit();
+    }
+
+    if (!tlsf_add_pool(pool, page, OT_PAGE_SIZE)) {
+      oprintf("FATAL: failed to add page %d to TLSF memory pool\n", i);
       ou_exit();
     }
   }

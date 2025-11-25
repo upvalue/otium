@@ -30,13 +30,19 @@ __attribute__((noreturn)) void ou_exit(void) {
 }
 
 void ou_shutdown(void) {
-  oprintf("Shutdown syscall invoked by process %s (pidx=%d, pid=%lu)\n", current_proc->name, current_proc->pidx, current_proc->pid);
+  oprintf("Shutdown syscall invoked by process %s (pidx=%d, pid=%lu)\n", current_proc->name, current_proc->pidx,
+          current_proc->pid);
   shutdown_all_processes();
   // shutdown_all_processes calls kernel_exit() and never returns
 }
 
 void *ou_alloc_page(void) {
   PageAddr result = process_alloc_mapped_page(current_proc, true, true, false);
+  return result.as_ptr();
+}
+
+void *ou_lock_known_memory(KnownMemory km, size_t page_count) {
+  PageAddr result = known_memory_lock(km, page_count, current_proc->pidx);
   return result.as_ptr();
 }
 
@@ -67,7 +73,8 @@ IpcResponse ou_ipc_send(Pid target_pid, uintptr_t flags, intptr_t method, intptr
   // Pack method and flags into single value
   uintptr_t method_and_flags = IPC_PACK_METHOD_FLAGS(method, flags);
 
-  TRACE_IPC(LLOUD, "IPC send from pidx %d (pid %lu) to pid %lu, method=%d, flags=%x", current_proc->pidx.raw(), current_proc->pid.raw(), target_pid.raw(), method, flags);
+  TRACE_IPC(LLOUD, "IPC send from pidx %d (pid %lu) to pid %lu, method=%d, flags=%x", current_proc->pidx.raw(),
+            current_proc->pid.raw(), target_pid.raw(), method, flags);
 
   // Look up target by pid
   Pidx target_pidx = process_lookup_by_pid(target_pid);
@@ -86,13 +93,14 @@ IpcResponse ou_ipc_send(Pid target_pid, uintptr_t flags, intptr_t method, intptr
   // Handle comm page transfer if requested (send direction)
   if (flags & IPC_FLAG_SEND_COMM_DATA) {
     if (!current_proc->comm_page.is_null() && !target->comm_page.is_null()) {
-      TRACE_IPC(LSOFT, "IPC: copying comm page from sender pidx %d to receiver pidx %d", current_proc->pidx.raw(), target_pidx.raw());
+      TRACE_IPC(LLOUD, "IPC: copying comm page from sender pidx %d to receiver pidx %d", current_proc->pidx.raw(),
+                target_pidx.raw());
       memcpy(target->comm_page.as_ptr(), current_proc->comm_page.as_ptr(), OT_PAGE_SIZE);
     }
   }
 
   // Set up message
-  target->pending_message.sender_pid = current_proc->pid;  // Fill in sender's globally unique PID
+  target->pending_message.sender_pid = current_proc->pid; // Fill in sender's globally unique PID
   target->pending_message.method_and_flags = method_and_flags;
   target->pending_message.args[0] = arg0;
   target->pending_message.args[1] = arg1;
@@ -123,7 +131,8 @@ IpcResponse ou_ipc_send(Pid target_pid, uintptr_t flags, intptr_t method, intptr
 
 IpcMessage ou_ipc_recv(void) {
   if (current_proc->has_pending_message) {
-    TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) receiving pending message from pid %lu", current_proc->pidx.raw(), current_proc->pid.raw(), current_proc->pending_message.sender_pid.raw());
+    TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) receiving pending message from pid %lu", current_proc->pidx.raw(),
+              current_proc->pid.raw(), current_proc->pending_message.sender_pid.raw());
     IpcMessage msg = current_proc->pending_message;
     current_proc->has_pending_message = false;
     return msg;
@@ -134,9 +143,10 @@ IpcMessage ou_ipc_recv(void) {
     // Will resume here when message arrives
     intptr_t method = IPC_UNPACK_METHOD(current_proc->pending_message.method_and_flags);
     uintptr_t flags = IPC_UNPACK_FLAGS(current_proc->pending_message.method_and_flags);
-    TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) woken from IPC_WAIT, msg: sender_pid=%lu flags=%x method=%d args=[%d, %d, %d]",
-              current_proc->pidx.raw(), current_proc->pid.raw(), current_proc->pending_message.sender_pid.raw(), flags, method,
-              current_proc->pending_message.args[0], current_proc->pending_message.args[1],
+    TRACE_IPC(LLOUD,
+              "Process pidx %d (pid %lu) woken from IPC_WAIT, msg: sender_pid=%lu flags=%x method=%d args=[%d, %d, %d]",
+              current_proc->pidx.raw(), current_proc->pid.raw(), current_proc->pending_message.sender_pid.raw(), flags,
+              method, current_proc->pending_message.args[0], current_proc->pending_message.args[1],
               current_proc->pending_message.args[2]);
     IpcMessage msg = current_proc->pending_message;
     current_proc->has_pending_message = false;
@@ -145,8 +155,8 @@ IpcMessage ou_ipc_recv(void) {
 }
 
 void ou_ipc_reply(IpcResponse response) {
-  TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) replying: error=%d, values=[%d, %d, %d]", current_proc->pidx.raw(), current_proc->pid.raw(), response.error_code,
-            response.values[0], response.values[1], response.values[2]);
+  TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) replying: error=%d, values=[%d, %d, %d]", current_proc->pidx.raw(),
+            current_proc->pid.raw(), response.error_code, response.values[0], response.values[1], response.values[2]);
 
   if (current_proc->blocked_sender) {
     Process *sender = current_proc->blocked_sender;
@@ -155,7 +165,8 @@ void ou_ipc_reply(IpcResponse response) {
     uint8_t request_flags = IPC_UNPACK_FLAGS(current_proc->pending_message.method_and_flags);
     if (request_flags & IPC_FLAG_RECV_COMM_DATA) {
       if (!current_proc->comm_page.is_null() && !sender->comm_page.is_null()) {
-        TRACE_IPC(LSOFT, "IPC reply: copying comm page from server pidx %d back to client pidx %d", current_proc->pidx.raw(), sender->pidx.raw());
+        TRACE_IPC(LLOUD, "IPC reply: copying comm page from server pidx %d back to client pidx %d",
+                  current_proc->pidx.raw(), sender->pidx.raw());
         memcpy(sender->comm_page.as_ptr(), current_proc->comm_page.as_ptr(), OT_PAGE_SIZE);
       }
     }
@@ -167,7 +178,8 @@ void ou_ipc_reply(IpcResponse response) {
     sender->pending_response.values[2] = response.values[2];
 
     current_proc->blocked_sender = nullptr;
-    TRACE_IPC(LLOUD, "IPC reply sent, immediately switching back to sender pidx %d (pid %lu)", sender->pidx, sender->pid);
+    TRACE_IPC(LLOUD, "IPC reply sent, immediately switching back to sender pidx %d (pid %lu)", sender->pidx,
+              sender->pid);
     // Switch back to sender immediately (like RISC-V) - receiver will resume when scheduled again
     process_switch_to(sender);
     // After this returns (when we're scheduled again), continue normally

@@ -54,29 +54,20 @@ public:
   bool init() override {
     oprintf("WasmGraphicsBackend: Initializing %ux%u framebuffer\n", width, height);
 
-    // Allocate framebuffer from user-space page allocator
+    // Allocate framebuffer from known memory (guaranteed contiguous)
     uint32_t fb_size = width * height * sizeof(uint32_t);
     uint32_t pages_needed = (fb_size + OT_PAGE_SIZE - 1) / OT_PAGE_SIZE;
 
-    oprintf("WasmGraphicsBackend: Allocating %u pages for framebuffer\n", pages_needed);
+    oprintf("WasmGraphicsBackend: Locking %u pages for framebuffer\n", pages_needed);
 
-    // Allocate enough pages to hold the framebuffer
-    PageAddr first_page = PageAddr((uintptr_t)ou_alloc_page());
-    if (first_page.raw() == 0) {
-      oprintf("WasmGraphicsBackend: Failed to allocate first framebuffer page\n");
+    // Lock known framebuffer memory (guaranteed contiguous)
+    void *fb_ptr = ou_lock_known_memory(KNOWN_MEMORY_FRAMEBUFFER, pages_needed);
+    if (!fb_ptr) {
+      oprintf("WasmGraphicsBackend: Failed to lock framebuffer memory\n");
       return false;
     }
 
-    framebuffer = first_page.as<uint32_t>();
-
-    // Allocate additional pages if needed
-    for (uint32_t i = 1; i < pages_needed; i++) {
-      PageAddr page = PageAddr((uintptr_t)ou_alloc_page());
-      if (page.raw() == 0) {
-        oprintf("WasmGraphicsBackend: Failed to allocate framebuffer page %u\n", i);
-        return false;
-      }
-    }
+    framebuffer = (uint32_t *)fb_ptr;
 
     // Clear framebuffer to black
     for (uint32_t i = 0; i < width * height; i++) {

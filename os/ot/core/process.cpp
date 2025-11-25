@@ -227,6 +227,9 @@ void process_switch_to(Process *target) {
 void process_exit(Process *proc) {
   TRACE_PROC(LSOFT, "Process pidx=%d pid=%lu (%s) exiting", proc->pidx.raw(), proc->pid.raw(), proc->name);
 
+  // Release any known memory regions held by this process
+  known_memory_release_process(proc->pidx);
+
   // Free all pages allocated to this process
   page_free_process(proc->pidx);
 

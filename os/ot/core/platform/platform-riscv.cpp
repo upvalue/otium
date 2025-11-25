@@ -193,7 +193,8 @@ void handle_syscall(struct trap_frame *f) {
     intptr_t method = IPC_UNPACK_METHOD(method_and_flags);
     uintptr_t flags = IPC_UNPACK_FLAGS(method_and_flags);
 
-    TRACE_IPC(LLOUD, "IPC send from pidx %d (pid %lu) to pid %lu, method=%d, flags=%x", current_proc->pidx.raw(), current_proc->pid.raw(), target_pid.raw(), method, flags);
+    TRACE_IPC(LLOUD, "IPC send from pidx %d (pid %lu) to pid %lu, method=%d, flags=%x", current_proc->pidx.raw(),
+              current_proc->pid.raw(), target_pid.raw(), method, flags);
 
     // Look up target by pid
     Pidx target_pidx = process_lookup_by_pid(target_pid);
@@ -210,13 +211,13 @@ void handle_syscall(struct trap_frame *f) {
     // Handle comm page transfer if requested
     if (flags & IPC_FLAG_HAS_COMM_DATA) {
       if (!current_proc->comm_page.is_null() && !target->comm_page.is_null()) {
-        TRACE_IPC(LSOFT, "IPC: copying comm page from pidx %d to pidx %d", current_proc->pidx.raw(), target_pidx.raw());
+        TRACE_IPC(LLOUD, "IPC: copying comm page from pidx %d to pidx %d", current_proc->pidx.raw(), target_pidx.raw());
         memcpy(target->comm_page.as_ptr(), current_proc->comm_page.as_ptr(), OT_PAGE_SIZE);
       }
     }
 
     // Set up message
-    target->pending_message.sender_pid = current_proc->pid;  // Fill in sender's globally unique PID
+    target->pending_message.sender_pid = current_proc->pid; // Fill in sender's globally unique PID
     target->pending_message.method_and_flags = method_and_flags;
     target->pending_message.args[0] = arg_0;
     target->pending_message.args[1] = arg_1;
@@ -250,7 +251,8 @@ void handle_syscall(struct trap_frame *f) {
   }
   case OU_IPC_RECV: {
     if (current_proc->has_pending_message) {
-      TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) receiving pending message from pid %lu", current_proc->pidx.raw(), current_proc->pid.raw(), current_proc->pending_message.sender_pid.raw());
+      TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) receiving pending message from pid %lu", current_proc->pidx.raw(),
+                current_proc->pid.raw(), current_proc->pending_message.sender_pid.raw());
       f->a0 = current_proc->pending_message.sender_pid.raw();
       f->a1 = current_proc->pending_message.method_and_flags;
       f->a2 = current_proc->pending_message.args[0];
@@ -258,11 +260,13 @@ void handle_syscall(struct trap_frame *f) {
       f->a5 = current_proc->pending_message.args[2];
       current_proc->has_pending_message = false;
     } else {
-      TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) entering IPC_WAIT", current_proc->pidx.raw(), current_proc->pid.raw());
+      TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) entering IPC_WAIT", current_proc->pidx.raw(),
+                current_proc->pid.raw());
       current_proc->state = IPC_WAIT;
       yield();
       // Will resume here when message arrives
-      TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) woken from IPC_WAIT with message from pid %lu", current_proc->pidx.raw(), current_proc->pid.raw(), current_proc->pending_message.sender_pid.raw());
+      TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) woken from IPC_WAIT with message from pid %lu",
+                current_proc->pidx.raw(), current_proc->pid.raw(), current_proc->pending_message.sender_pid.raw());
       f->a0 = current_proc->pending_message.sender_pid.raw();
       f->a1 = current_proc->pending_message.method_and_flags;
       f->a2 = current_proc->pending_message.args[0];
@@ -274,7 +278,8 @@ void handle_syscall(struct trap_frame *f) {
   }
   case OU_IPC_REPLY: {
     // RISC-V: a0=error_code, a1=values[0], a2=values[1], a4=values[2]
-    TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) replying: error=%d, values=[%d, %d, %d]", current_proc->pidx.raw(), current_proc->pid.raw(), arg0, arg1, f->a2, f->a4);
+    TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) replying: error=%d, values=[%d, %d, %d]", current_proc->pidx.raw(),
+              current_proc->pid.raw(), arg0, arg1, f->a2, f->a4);
 
     if (current_proc->blocked_sender) {
       Process *sender = current_proc->blocked_sender;
@@ -289,13 +294,15 @@ void handle_syscall(struct trap_frame *f) {
       uintptr_t request_flags = IPC_UNPACK_FLAGS(current_proc->pending_message.method_and_flags);
       if (request_flags & IPC_FLAG_RECV_COMM_DATA) {
         if (!current_proc->comm_page.is_null() && !sender->comm_page.is_null()) {
-          TRACE_IPC(LSOFT, "IPC reply: copying comm page from server pidx %d back to client pidx %d", current_proc->pidx.raw(), sender->pidx.raw());
+          TRACE_IPC(LSOFT, "IPC reply: copying comm page from server pidx %d back to client pidx %d",
+                    current_proc->pidx.raw(), sender->pidx.raw());
           memcpy(sender->comm_page.as_ptr(), current_proc->comm_page.as_ptr(), OT_PAGE_SIZE);
         }
       }
 
       current_proc->blocked_sender = nullptr;
-      TRACE_IPC(LLOUD, "IPC reply sent, immediately switching back to sender pidx %d (pid %lu)", sender->pidx, sender->pid);
+      TRACE_IPC(LLOUD, "IPC reply sent, immediately switching back to sender pidx %d (pid %lu)", sender->pidx,
+                sender->pid);
       // Switch back to sender immediately - receiver will resume when scheduled again
       process_switch_to(sender);
       // After this returns (when we're scheduled again), continue normally
@@ -305,10 +312,18 @@ void handle_syscall(struct trap_frame *f) {
     break;
   }
   case OU_SHUTDOWN:
-    oprintf("Shutdown syscall invoked by process %s (pidx=%d, pid=%lu)\n", current_proc->name, current_proc->pidx, current_proc->pid);
+    oprintf("Shutdown syscall invoked by process %s (pidx=%d, pid=%lu)\n", current_proc->name, current_proc->pidx,
+            current_proc->pid);
     shutdown_all_processes();
     // shutdown_all_processes calls kernel_exit() and never returns
     break;
+  case OU_LOCK_KNOWN_MEMORY: {
+    KnownMemory km = (KnownMemory)arg0;
+    size_t page_count = arg1;
+    PageAddr result = known_memory_lock(km, page_count, current_proc->pidx);
+    f->a0 = result.raw();
+    break;
+  }
   default:
     PANIC("unexpected syscall sysno=%x\n", sysno);
   }
@@ -347,8 +362,8 @@ extern "C" void handle_trap(struct trap_frame *f) {
     bool from_user = !(sstatus & SSTATUS_SPP);
 
     if (from_user && current_proc) {
-      oprintf("Process %s (pidx=%d, pid=%lu) crashed: scause=%x, stval=%x, sepc=%x\n", current_proc->name, current_proc->pidx, current_proc->pid,
-              scause, stval, user_pc);
+      oprintf("Process %s (pidx=%d, pid=%lu) crashed: scause=%x, stval=%x, sepc=%x\n", current_proc->name,
+              current_proc->pidx, current_proc->pid, scause, stval, user_pc);
       current_proc->state = TERMINATED;
       yield();
     } else {

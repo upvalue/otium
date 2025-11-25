@@ -87,6 +87,19 @@ extern "C" char __free_ram[], __free_ram_end[];
 extern "C" char *__free_ram, *__free_ram_end;
 #endif
 
+// Known memory reservation system
+struct KnownMemoryInfo {
+  PageAddr addr;        // Base address of reserved memory
+  size_t page_count;    // Number of pages reserved
+  Pidx holder_pidx;     // Process holding the lock (PIDX_NONE = free)
+};
+
+extern KnownMemoryInfo known_memory_table[KNOWN_MEMORY_COUNT];
+
+void known_memory_init();
+PageAddr known_memory_lock(KnownMemory km, size_t page_count, Pidx pidx);
+void known_memory_release_process(Pidx pidx);
+
 // process management
 #define PROCS_MAX 8
 

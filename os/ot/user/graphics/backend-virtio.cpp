@@ -154,17 +154,19 @@ uint32_t VirtioGraphicsBackend::send_command(PageAddr cmd, uint32_t cmd_len, Pag
 void VirtioGraphicsBackend::create_framebuffer() {
   l.log("Creating framebuffer (%ux%u)...", width, height);
 
-  // Allocate framebuffer memory (need multiple pages)
+  // Allocate framebuffer memory (need multiple contiguous pages)
   uint32_t fb_size = width * height * 4; // 4 bytes per pixel (BGRA)
   uint32_t fb_pages = (fb_size + OT_PAGE_SIZE - 1) / OT_PAGE_SIZE;
 
-  // Allocate pages one by one
-  framebuffer = PageAddr((uintptr_t)ou_alloc_page());
-  for (uint32_t i = 1; i < fb_pages; i++) {
-    ou_alloc_page(); // Allocate additional contiguous pages
+  // Lock known framebuffer memory (guaranteed contiguous)
+  void *fb_ptr = ou_lock_known_memory(KNOWN_MEMORY_FRAMEBUFFER, fb_pages);
+  if (!fb_ptr) {
+    l.log("ERROR: Failed to lock framebuffer memory (%u pages)", fb_pages);
+    return;
   }
+  framebuffer = PageAddr((uintptr_t)fb_ptr);
 
-  l.log("Allocated %u pages for framebuffer at 0x%x", fb_pages, framebuffer.raw());
+  l.log("Locked %u contiguous pages for framebuffer at 0x%x", fb_pages, framebuffer.raw());
 
   // Allocate command/response pages (reused for all commands)
   cmd_page = PageAddr((uintptr_t)ou_alloc_page());

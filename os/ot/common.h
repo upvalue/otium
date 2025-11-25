@@ -80,6 +80,14 @@ int oputsn(const char *str, int n);
 #define OU_IPC_RECV 10   // Receive IPC message (blocks if none available)
 #define OU_IPC_REPLY 11  // Reply to IPC sender
 #define OU_SHUTDOWN 12   // Shutdown all processes and exit the kernel
+#define OU_LOCK_KNOWN_MEMORY 13  // Lock a known memory region
+
+// Known memory region identifiers
+typedef enum {
+  KNOWN_MEMORY_NONE = 0,
+  KNOWN_MEMORY_FRAMEBUFFER = 1,
+  KNOWN_MEMORY_COUNT
+} KnownMemory;
 
 // Arguments to the get sys page
 #define OU_SYS_PAGE_ARG 0

@@ -11,6 +11,9 @@ static MemoryStats mem_stats = {0, 0, 0, 0, 0};
 static bool memory_initialized = false;
 uint32_t total_page_count = 0;
 
+// Known memory regions - globally reserved contiguous memory
+KnownMemoryInfo known_memory_table[KNOWN_MEMORY_COUNT];
+
 // Bootstrap allocator - only used during memory_init to allocate PageInfo array
 static PageAddr page_allocate_bootstrap(size_t page_count) {
   PageAddr page_addr = next_page_addr;
@@ -86,6 +89,10 @@ void memory_init() {
   mem_stats.peak_usage_pages = page_infos_pages;
 
   memory_initialized = true;
+
+  // Initialize known memory regions (must happen early before fragmentation)
+  known_memory_init();
+
   TRACE(LSOFT, "Memory initialization complete. Free list head: %x",
         free_list_head);
 }
@@ -205,3 +212,71 @@ void memory_report() {
 }
 
 void memory_increment_process_count() { mem_stats.processes_created++; }
+
+// Known memory management
+
+void known_memory_init() {
+  // Initialize all entries to empty - allocation happens on first lock
+  for (int i = 0; i < KNOWN_MEMORY_COUNT; i++) {
+    known_memory_table[i].addr = PageAddr(nullptr);
+    known_memory_table[i].page_count = 0;
+    known_memory_table[i].holder_pidx = PIDX_NONE;
+  }
+}
+
+PageAddr known_memory_lock(KnownMemory km, size_t page_count, Pidx pidx) {
+  if (km <= KNOWN_MEMORY_NONE || km >= KNOWN_MEMORY_COUNT) {
+    TRACE_MEM(LSOFT, "known_memory_lock: invalid km=%d", km);
+    return PageAddr(nullptr);
+  }
+
+  KnownMemoryInfo *info = &known_memory_table[km];
+
+  // Check if already locked by another process
+  if (info->holder_pidx != PIDX_NONE && info->holder_pidx != pidx) {
+    TRACE_MEM(LSOFT, "known_memory_lock: km=%d already held by pidx=%d", km,
+              info->holder_pidx.raw());
+    return PageAddr(nullptr);
+  }
+
+  // Allocate on first lock
+  if (info->addr.is_null()) {
+    // Use Pidx(-1) to mark as kernel-reserved memory
+    PageAddr addr = page_allocate(Pidx(-1), page_count);
+    if (addr.is_null()) {
+      TRACE_MEM(LSOFT, "known_memory_lock: failed to allocate %d pages", page_count);
+      return PageAddr(nullptr);
+    }
+    info->addr = addr;
+    info->page_count = page_count;
+    TRACE_MEM(LSOFT, "known_memory_lock: allocated %d pages at %x for km=%d",
+              page_count, addr.raw(), km);
+  }
+
+  // Check if requested size fits within allocated region
+  if (page_count > info->page_count) {
+    TRACE_MEM(LSOFT,
+              "known_memory_lock: requested %d pages but only %d allocated",
+              page_count, info->page_count);
+    return PageAddr(nullptr);
+  }
+
+  // Lock the memory to this process
+  info->holder_pidx = pidx;
+  TRACE_MEM(LSOFT, "known_memory_lock: pidx=%d locked km=%d (%d pages) at %x",
+            pidx.raw(), km, page_count, info->addr.raw());
+
+  return info->addr;
+}
+
+void known_memory_release_process(Pidx pidx) {
+  // Release any known memory regions held by this process
+  for (int i = 0; i < KNOWN_MEMORY_COUNT; i++) {
+    if (known_memory_table[i].holder_pidx == pidx) {
+      TRACE_MEM(LSOFT, "Releasing known memory region %d from pidx %d", i,
+                pidx.raw());
+      known_memory_table[i].holder_pidx = PIDX_NONE;
+      // Note: We don't free the memory, just release the lock
+    }
+  }
+}

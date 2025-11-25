@@ -1,25 +1,26 @@
 #include "ot/user/graphics/backend-virtio.hpp"
+#include "ot/lib/logger.hpp"
 
 bool VirtioGraphicsBackend::init() {
   if (!dev.is_valid()) {
-    oprintf("GPU: Device not valid\n");
+    l.log("GPU: Device not valid");
     return false;
   }
 
   // Read device ID
   dev.device_id = dev.read_reg(VIRTIO_MMIO_DEVICE_ID);
   if (dev.device_id != VIRTIO_ID_GPU) {
-    oprintf("GPU: Not a GPU device (id=%u)\n", dev.device_id);
+    l.log("GPU: Not a GPU device (id=%u)", dev.device_id);
     return false;
   }
 
-  oprintf("Initializing VirtIO GPU...\n");
+  l.log("Initializing VirtIO GPU...");
 
   // Check version
   uint32_t version = dev.read_reg(VIRTIO_MMIO_VERSION);
-  oprintf("VirtIO version: %u\n", version);
+  l.log("VirtIO version: %u", version);
   if (version != 1 && version != 2) {
-    oprintf("GPU: Unsupported version\n");
+    l.log("GPU: Unsupported version");
     return false;
   }
 
@@ -40,20 +41,20 @@ bool VirtioGraphicsBackend::init() {
 
   // Check FEATURES_OK
   if (!(dev.read_reg(VIRTIO_MMIO_STATUS) & VIRTIO_STATUS_FEATURES_OK)) {
-    oprintf("GPU: Feature negotiation failed\n");
+    l.log("GPU: Feature negotiation failed");
     return false;
   }
 
   // Setup controlq (queue 0)
   dev.write_reg(VIRTIO_MMIO_QUEUE_SEL, 0);
   uint32_t max_queue_size = dev.read_reg(VIRTIO_MMIO_QUEUE_NUM_MAX);
-  oprintf("Queue 0 max size: %u\n", max_queue_size);
+  l.log("Queue 0 max size: %u", max_queue_size);
   if (max_queue_size == 0) {
-    oprintf("GPU: Queue 0 not available\n");
+    l.log("GPU: Queue 0 not available");
     return false;
   }
   if (QUEUE_SIZE > max_queue_size) {
-    oprintf("GPU: QUEUE_SIZE (%u) > max (%u)\n", QUEUE_SIZE, max_queue_size);
+    l.log("GPU: QUEUE_SIZE (%u) > max (%u)", QUEUE_SIZE, max_queue_size);
     return false;
   }
 
@@ -61,7 +62,7 @@ bool VirtioGraphicsBackend::init() {
   PageAddr queue_mem = PageAddr((uintptr_t)ou_alloc_page());
   controlq.init(queue_mem, QUEUE_SIZE);
 
-  oprintf("Queue physical addr: 0x%x\n", queue_mem.raw());
+  l.log("Queue physical addr: 0x%x", queue_mem.raw());
 
   // Configure queue (version-specific)
   dev.write_reg(VIRTIO_MMIO_QUEUE_NUM, QUEUE_SIZE);
@@ -71,7 +72,7 @@ bool VirtioGraphicsBackend::init() {
     dev.write_reg(VIRTIO_MMIO_GUEST_PAGE_SIZE, OT_PAGE_SIZE);
     dev.write_reg(VIRTIO_MMIO_QUEUE_ALIGN, OT_PAGE_SIZE);
     dev.write_reg(VIRTIO_MMIO_QUEUE_PFN, queue_mem.raw() / OT_PAGE_SIZE);
-    oprintf("Legacy mode: PFN = 0x%x\n", queue_mem.raw() / OT_PAGE_SIZE);
+    l.log("Legacy mode: PFN = 0x%x", queue_mem.raw() / OT_PAGE_SIZE);
   } else {
     // Modern interface: use separate desc/avail/used addresses
     dev.write_reg(VIRTIO_MMIO_QUEUE_DESC_LOW, (uint32_t)(uintptr_t)controlq.desc);
@@ -87,9 +88,9 @@ bool VirtioGraphicsBackend::init() {
   dev.write_reg(VIRTIO_MMIO_STATUS,
                 VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK | VIRTIO_STATUS_DRIVER_OK);
 
-  oprintf("Status after DRIVER_OK: 0x%x\n", dev.read_reg(VIRTIO_MMIO_STATUS));
+  l.log("Status after DRIVER_OK: 0x%x", dev.read_reg(VIRTIO_MMIO_STATUS));
 
-  oprintf("GPU: Initialization complete\n");
+  l.log("GPU: Initialization complete");
 
   // Create framebuffer
   create_framebuffer();
@@ -137,7 +138,7 @@ uint32_t VirtioGraphicsBackend::send_command(PageAddr cmd, uint32_t cmd_len, Pag
   }
 
   if (timeout == 0) {
-    oprintf("GPU: Command timeout! used idx still: %u\n", controlq.used->idx);
+    l.log("GPU: Command timeout! used idx still: %u", controlq.used->idx);
     return 0xFFFFFFFF;
   }
 
@@ -151,7 +152,7 @@ uint32_t VirtioGraphicsBackend::send_command(PageAddr cmd, uint32_t cmd_len, Pag
 }
 
 void VirtioGraphicsBackend::create_framebuffer() {
-  oprintf("Creating framebuffer (%ux%u)...\n", width, height);
+  l.log("Creating framebuffer (%ux%u)...", width, height);
 
   // Allocate framebuffer memory (need multiple pages)
   uint32_t fb_size = width * height * 4; // 4 bytes per pixel (BGRA)
@@ -163,13 +164,13 @@ void VirtioGraphicsBackend::create_framebuffer() {
     ou_alloc_page(); // Allocate additional contiguous pages
   }
 
-  oprintf("Allocated %u pages for framebuffer at 0x%x\n", fb_pages, framebuffer.raw());
+  l.log("Allocated %u pages for framebuffer at 0x%x", fb_pages, framebuffer.raw());
 
   // Allocate command/response pages (reused for all commands)
   cmd_page = PageAddr((uintptr_t)ou_alloc_page());
   resp_page = PageAddr((uintptr_t)ou_alloc_page());
 
-  oprintf("CMD page: 0x%x, RESP page: 0x%x\n", cmd_page.raw(), resp_page.raw());
+  l.log("CMD page: 0x%x, RESP page: 0x%x", cmd_page.raw(), resp_page.raw());
 
   struct virtio_gpu_resource_create_2d *cmd = cmd_page.as<struct virtio_gpu_resource_create_2d>();
   omemset(cmd, 0, sizeof(*cmd));
@@ -183,12 +184,12 @@ void VirtioGraphicsBackend::create_framebuffer() {
   cmd->width = width;
   cmd->height = height;
 
-  oprintf("Sending CREATE_2D: res_id=%u, fmt=%u, %ux%u\n", cmd->resource_id, cmd->format, cmd->width, cmd->height);
+  l.log("Sending CREATE_2D: res_id=%u, fmt=%u, %ux%u", cmd->resource_id, cmd->format, cmd->width, cmd->height);
 
   uint32_t resp_type = send_command(cmd_page, sizeof(*cmd), resp_page, sizeof(struct virtio_gpu_ctrl_hdr));
-  oprintf("Resource create response: 0x%x\n", resp_type);
+  l.log("Resource create response: 0x%x", resp_type);
   if (resp_type != VIRTIO_GPU_RESP_OK_NODATA) {
-    oprintf("ERROR: Resource creation failed!\n");
+    l.log("ERROR: Resource creation failed!");
     return;
   }
 
@@ -209,9 +210,9 @@ void VirtioGraphicsBackend::create_framebuffer() {
 
   resp_type = send_command(cmd_page, sizeof(*attach_cmd) + sizeof(struct virtio_gpu_mem_entry), resp_page,
                            sizeof(struct virtio_gpu_ctrl_hdr));
-  oprintf("Attach backing response: 0x%x\n", resp_type);
+  l.log("Attach backing response: 0x%x", resp_type);
   if (resp_type != VIRTIO_GPU_RESP_OK_NODATA) {
-    oprintf("ERROR: Attach backing failed!\n");
+    l.log("ERROR: Attach backing failed!");
     return;
   }
 
@@ -230,13 +231,13 @@ void VirtioGraphicsBackend::create_framebuffer() {
   scanout->resource_id = 1;
 
   resp_type = send_command(cmd_page, sizeof(*scanout), resp_page, sizeof(struct virtio_gpu_ctrl_hdr));
-  oprintf("Set scanout response: 0x%x\n", resp_type);
+  l.log("Set scanout response: 0x%x", resp_type);
   if (resp_type != VIRTIO_GPU_RESP_OK_NODATA) {
-    oprintf("ERROR: Set scanout failed!\n");
+    l.log("ERROR: Set scanout failed!");
     return;
   }
 
-  oprintf("Framebuffer setup complete, ready for drawing\n");
+  l.log("Framebuffer setup complete, ready for drawing");
 }
 
 void VirtioGraphicsBackend::flush() {
@@ -257,7 +258,7 @@ void VirtioGraphicsBackend::flush() {
   transfer->padding = 0;
 
   uint32_t resp_type = send_command(cmd_page, sizeof(*transfer), resp_page, sizeof(struct virtio_gpu_ctrl_hdr));
-  // oprintf("Transfer response: 0x%x\n", resp_type);
+  // l.log("Transfer response: 0x%x", resp_type);
   if (resp_type != VIRTIO_GPU_RESP_OK_NODATA) {
     // This seems to happen occasionally
     // oprintf("ERROR: Transfer failed!\n");

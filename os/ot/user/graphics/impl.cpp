@@ -1,3 +1,4 @@
+#include "ot/lib/logger.hpp"
 #include "ot/user/gen/graphics-server.hpp"
 #include "ot/user/graphics/backend.hpp"
 
@@ -14,8 +15,9 @@
 // Graphics server implementation with instance state
 struct GraphicsServer : GraphicsServerBase {
   GraphicsBackend *backend;
+  Logger l;
 
-  GraphicsServer() : backend(nullptr) {}
+  GraphicsServer() : backend(nullptr), l("gfx") {}
 
   Result<GetFramebufferResult, ErrorCode> handle_get_framebuffer() override {
     if (!backend || !backend->get_framebuffer()) {
@@ -27,8 +29,7 @@ struct GraphicsServer : GraphicsServerBase {
     result.width = backend->get_width();
     result.height = backend->get_height();
 
-    oprintf("[graphics] Returning fb_ptr=0x%lx, width=%lu, height=%lu\n",
-            result.fb_ptr, result.width, result.height);
+    l.log("Returning fb_ptr=0x%lx, width=%lu, height=%lu", result.fb_ptr, result.width, result.height);
 
     return Result<GetFramebufferResult, ErrorCode>::ok(result);
   }
@@ -44,23 +45,24 @@ struct GraphicsServer : GraphicsServerBase {
 };
 
 void proc_graphics(void) {
-  oprintf("Graphics driver starting...\n");
+  Logger l("gfx");
+  l.log("Graphics driver starting...");
 
 // Select and initialize backend based on compile-time configuration
 #if OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_NONE
-  oprintf("Using none graphics backend (unimplemented)\n");
+  l.log("Using none graphics backend (unimplemented)");
   // Use placement new to avoid static initialization guards
   static char backend_buffer[sizeof(NoneGraphicsBackend)] __attribute__((aligned(alignof(NoneGraphicsBackend))));
   NoneGraphicsBackend *backend_ptr = new (backend_buffer) NoneGraphicsBackend();
   NoneGraphicsBackend &backend = *backend_ptr;
 #elif OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_TEST
-  oprintf("Using test graphics backend\n");
+  l.log("Using test graphics backend");
   // Use placement new to avoid static initialization guards
   static char backend_buffer[sizeof(TestGraphicsBackend)] __attribute__((aligned(alignof(TestGraphicsBackend))));
   TestGraphicsBackend *backend_ptr = new (backend_buffer) TestGraphicsBackend();
   TestGraphicsBackend &backend = *backend_ptr;
 #elif OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_VIRTIO
-  oprintf("Using VirtIO graphics backend\n");
+  l.log("Using VirtIO graphics backend");
   // Find VirtIO GPU device
   static char backend_buffer[sizeof(VirtioGraphicsBackend)] __attribute__((aligned(alignof(VirtioGraphicsBackend))));
   VirtioGraphicsBackend *backend_ptr = nullptr;
@@ -78,13 +80,13 @@ void proc_graphics(void) {
   }
 
   if (!backend_ptr) {
-    oprintf("ERROR: No VirtIO GPU device found!\n");
+    l.log("ERROR: No VirtIO GPU device found!");
     ou_exit();
   }
 
   VirtioGraphicsBackend &backend = *backend_ptr;
 #elif OT_GRAPHICS_BACKEND == OT_GRAPHICS_BACKEND_WASM
-  oprintf("Using WASM graphics backend\n");
+  l.log("Using WASM graphics backend");
   // Use placement new to avoid static initialization guards
   static char backend_buffer[sizeof(WasmGraphicsBackend)] __attribute__((aligned(alignof(WasmGraphicsBackend))));
   WasmGraphicsBackend *backend_ptr = new (backend_buffer) WasmGraphicsBackend();
@@ -94,13 +96,12 @@ void proc_graphics(void) {
 #endif
 
   if (!backend.init()) {
-    oprintf("ERROR: Failed to initialize graphics backend\n");
+    l.log("ERROR: Failed to initialize graphics backend");
     ou_exit();
   }
 
-  oprintf("Graphics driver initialized successfully\n");
-  oprintf("Framebuffer: %ux%u at 0x%lx\n", backend.get_width(), backend.get_height(),
-          (uintptr_t)backend.get_framebuffer());
+  l.log("Graphics driver initialized successfully");
+  l.log("Framebuffer: %ux%u at 0x%lx", backend.get_width(), backend.get_height(), (uintptr_t)backend.get_framebuffer());
 
   // Create server and set backend pointer
   GraphicsServer server;

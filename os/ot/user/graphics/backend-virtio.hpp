@@ -1,6 +1,7 @@
 #ifndef OT_USER_GRAPHICS_BACKEND_VIRTIO_HPP
 #define OT_USER_GRAPHICS_BACKEND_VIRTIO_HPP
 
+#include "ot/lib/logger.hpp"
 #include "ot/user/graphics/backend.hpp"
 #include "ot/user/virtio/virtio.hpp"
 
@@ -98,9 +99,10 @@ public:
   PageAddr resp_page; // Reusable response page
   uint32_t width;
   uint32_t height;
+  Logger l;
 
-  VirtioGraphicsBackend() : dev(0), width(1024), height(700) {}
-  VirtioGraphicsBackend(uintptr_t addr) : dev(addr), width(1024), height(700) {}
+  VirtioGraphicsBackend() : dev(0), width(1024), height(700), l("gfx") {}
+  VirtioGraphicsBackend(uintptr_t addr) : dev(addr), width(1024), height(700), l("gfx") {}
 
   bool init() override;
   uint32_t *get_framebuffer() override { return framebuffer.as<uint32_t>(); }

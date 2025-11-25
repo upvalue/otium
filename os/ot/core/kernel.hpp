@@ -11,46 +11,46 @@
 
 #ifdef OT_POSIX
 #include <stdlib.h>
-#define PANIC(fmt, ...)                                                        \
-  do {                                                                         \
-    oprintf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);     \
-    exit(1);                                                                   \
+#define PANIC(fmt, ...)                                                                                                \
+  do {                                                                                                                 \
+    oprintf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);                                             \
+    exit(1);                                                                                                           \
   } while (0)
 #else
-#define PANIC(fmt, ...)                                                        \
-  do {                                                                         \
-    oprintf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);     \
-    while (1) {                                                                \
-    }                                                                          \
+#define PANIC(fmt, ...)                                                                                                \
+  do {                                                                                                                 \
+    oprintf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);                                             \
+    while (1) {                                                                                                        \
+    }                                                                                                                  \
   } while (0)
 #endif
 
-#define TRACE(level, fmt, ...)                                                 \
-  do {                                                                         \
-    if (LOG_GENERAL >= (level)) {                                              \
-      oprintf("[dbg] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);    \
-    }                                                                          \
+#define TRACE(level, fmt, ...)                                                                                         \
+  do {                                                                                                                 \
+    if (LOG_GENERAL >= (level)) {                                                                                      \
+      oprintf("[dbg] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);                                            \
+    }                                                                                                                  \
   } while (0)
 
-#define TRACE_MEM(level, fmt, ...)                                             \
-  do {                                                                         \
-    if (LOG_MEM >= (level)) {                                                  \
-      oprintf("[mem] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);    \
-    }                                                                          \
+#define TRACE_MEM(level, fmt, ...)                                                                                     \
+  do {                                                                                                                 \
+    if (LOG_MEM >= (level)) {                                                                                          \
+      oprintf("[mem] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);                                            \
+    }                                                                                                                  \
   } while (0)
 
-#define TRACE_PROC(level, fmt, ...)                                            \
-  do {                                                                         \
-    if (LOG_PROC >= (level)) {                                                 \
-      oprintf("[proc] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);   \
-    }                                                                          \
+#define TRACE_PROC(level, fmt, ...)                                                                                    \
+  do {                                                                                                                 \
+    if (LOG_PROC >= (level)) {                                                                                         \
+      oprintf("[proc] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);                                           \
+    }                                                                                                                  \
   } while (0)
 
-#define TRACE_IPC(level, fmt, ...)                                             \
-  do {                                                                         \
-    if (LOG_IPC >= (level)) {                                                  \
-      oprintf("[ipc] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);    \
-    }                                                                          \
+#define TRACE_IPC(level, fmt, ...)                                                                                     \
+  do {                                                                                                                 \
+    if (LOG_IPC >= (level)) {                                                                                          \
+      oprintf("[ipc] %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);                                            \
+    }                                                                                                                  \
   } while (0)
 
 // platform specific utility functions
@@ -89,9 +89,9 @@ extern "C" char *__free_ram, *__free_ram_end;
 
 // Known memory reservation system
 struct KnownMemoryInfo {
-  PageAddr addr;        // Base address of reserved memory
-  size_t page_count;    // Number of pages reserved
-  Pidx holder_pidx;     // Process holding the lock (PIDX_NONE = free)
+  PageAddr addr;     // Base address of reserved memory
+  size_t page_count; // Number of pages reserved
+  Pidx holder_pidx;  // Process holding the lock (PIDX_NONE = free)
 };
 
 extern KnownMemoryInfo known_memory_table[KNOWN_MEMORY_COUNT];
@@ -101,7 +101,7 @@ PageAddr known_memory_lock(KnownMemory km, size_t page_count, Pidx pidx);
 void known_memory_release_process(Pidx pidx);
 
 // process management
-#define PROCS_MAX 8
+#define PROCS_MAX 16
 
 #define SATP_SV32 (1u << 31)
 #define PAGE_V (1 << 0) // "Valid" bit (entry is enabled)
@@ -120,8 +120,8 @@ extern Pid process_pids[PROCS_MAX];
 
 struct Process {
   char name[32];
-  Pidx pidx;             // Process index (0-7, reused) - kernel internal only
-  Pid pid;               // Process ID (globally unique, never reused) - user-facing
+  Pidx pidx; // Process index (0-7, reused) - kernel internal only
+  Pid pid;   // Process ID (globally unique, never reused) - user-facing
   ProcessState state;
 
   // TODO: Not necessary on WASM
@@ -158,10 +158,10 @@ struct Process {
   bool kernel_mode;          // true = runs in kernel/supervisor mode, false = user mode
 
   // IPC fields
-  IpcMessage pending_message;       // Message waiting to be received
-  bool has_pending_message;         // Flag for message availability
-  Process *blocked_sender;          // Pointer to sender waiting for reply
-  IpcResponse pending_response;     // Response storage for blocked sender
+  IpcMessage pending_message;   // Message waiting to be received
+  bool has_pending_message;     // Flag for message availability
+  Process *blocked_sender;      // Pointer to sender waiting for reply
+  IpcResponse pending_response; // Response storage for blocked sender
 
 #ifdef OT_ARCH_WASM
   bool started; // For WASM: track if process has been started
@@ -171,17 +171,14 @@ struct Process {
 };
 
 // Helper to check if a process is in a running state (RUNNABLE or IPC_WAIT)
-inline bool process_is_running(const Process *p) {
-  return p->state == RUNNABLE || p->state == IPC_WAIT;
-}
+inline bool process_is_running(const Process *p) { return p->state == RUNNABLE || p->state == IPC_WAIT; }
 
 // Helper to find pidx from pid (returns PIDX_INVALID if not found)
 Pidx process_lookup_by_pid(Pid pid);
 
 // Process management subsystem
-Process *process_create_impl(Process *table, int max_procs,
-                             const char *name, const void *entry_point,
-                             Arguments *args, bool kernel_mode = false);
+Process *process_create_impl(Process *table, int max_procs, const char *name, const void *entry_point, Arguments *args,
+                             bool kernel_mode = false);
 Process *process_create(const char *name, const void *entry_point, Arguments *args, bool kernel_mode = false);
 Process *process_next_runnable(void);
 /** Looks up a process by name. Returns pid (globally unique, user-facing).
@@ -201,9 +198,7 @@ PageAddr process_get_storage_page();
 
 // Allocates a page for the given process (physical addressing only)
 // Returns PageAddr of allocated page, or null on failure
-PageAddr process_alloc_mapped_page(Process *proc, bool readable,
-                                   bool writable,
-                                   bool executable);
+PageAddr process_alloc_mapped_page(Process *proc, bool readable, bool writable, bool executable);
 
 // map_page() not used in physical-only mode
 void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr, uint32_t flags, Pidx pidx);

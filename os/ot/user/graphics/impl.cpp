@@ -67,17 +67,13 @@ void proc_graphics(void) {
   static char backend_buffer[sizeof(VirtioGraphicsBackend)] __attribute__((aligned(alignof(VirtioGraphicsBackend))));
   VirtioGraphicsBackend *backend_ptr = nullptr;
 
-  for (int i = 0; i < VIRTIO_MMIO_COUNT; i++) {
-    uintptr_t addr = VIRTIO_MMIO_BASE + (i * VIRTIO_MMIO_SIZE);
-    VirtIODevice test_dev(addr);
-    test_dev.device_id = test_dev.read_reg(VIRTIO_MMIO_DEVICE_ID);
-
-    if (test_dev.is_valid() && test_dev.device_id == VIRTIO_ID_GPU) {
-      // Construct VirtioGraphicsBackend in-place using placement new
-      backend_ptr = new (backend_buffer) VirtioGraphicsBackend(addr);
-      break;
-    }
+  Result<uintptr_t, ErrorCode> result = VirtIODevice::scan_for_device(VIRTIO_ID_GPU);
+  if (result.is_err()) {
+    l.log("ERROR: No VirtIO GPU device found!");
+    ou_exit();
   }
+
+  backend_ptr = new (backend_buffer) VirtioGraphicsBackend(result.value());
 
   if (!backend_ptr) {
     l.log("ERROR: No VirtIO GPU device found!");

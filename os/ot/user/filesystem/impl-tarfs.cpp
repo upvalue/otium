@@ -2,6 +2,7 @@
 #include "ot/user/filesystem/types.hpp"
 #include "ot/user/gen/filesystem-server.hpp"
 #include "ot/user/user.hpp"
+#include "ot/user/virtio/virtio.hpp"
 
 using namespace filesystem;
 
@@ -50,6 +51,22 @@ void proc_filesystem(void) {
 
   LocalStorage *ls = new (storage_page) LocalStorage();
   ls->process_storage_init(10);
+
+  auto res = VirtIODevice::scan_for_device(VIRTIO_ID_BLOCK);
+  if (!res.is_ok()) {
+    oprintf("ERROR: VirtIO block device not found: %s\n", error_code_to_string(res.error()));
+    ou_exit();
+  }
+
+  auto addr = res.value();
+  VirtIODevice dev(addr);
+  dev.probe();
+  dev.read_reg(VIRTIO_MMIO_DEVICE_ID);
+  dev.read_reg(VIRTIO_MMIO_VENDOR_ID);
+  dev.read_reg(VIRTIO_MMIO_DEVICE_FEATURES);
+  dev.read_reg(VIRTIO_MMIO_DEVICE_FEATURES_SEL);
+  dev.read_reg(VIRTIO_MMIO_DRIVER_FEATURES);
+  dev.read_reg(VIRTIO_MMIO_DRIVER_FEATURES_SEL);
 
   // Create server and set storage pointer
   FilesystemServer server;

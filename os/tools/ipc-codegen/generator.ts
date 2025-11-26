@@ -44,7 +44,7 @@ function toUpperSnake(str: string): string {
 
 function toKebabCase(str: string): string {
   return str
-    .replace(/__/g, "-")
+    .replace(/__/g, ".")  // Subsystem separator: GRAPHICS__FOO -> graphics.foo
     .replace(/_/g, "-")
     .toLowerCase();
 }

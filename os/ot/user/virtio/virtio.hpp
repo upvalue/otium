@@ -5,6 +5,7 @@
 
 #include "ot/common.h"
 #include "ot/lib/address.hpp"
+#include "ot/lib/error-codes.hpp"
 #include "ot/user/user.hpp"
 
 // VirtIO MMIO register offsets
@@ -31,6 +32,10 @@
 #define VIRTIO_MMIO_QUEUE_DRIVER_HIGH 0x094 // Modern only
 #define VIRTIO_MMIO_QUEUE_DEVICE_LOW 0x0a0  // Modern only
 #define VIRTIO_MMIO_QUEUE_DEVICE_HIGH 0x0a4 // Modern only
+
+// expected values from registers
+#define VIRTIO_MMIO_MAGIC_VALUE_EXPECTED 0x74726976
+#define VIRTIO_MMIO_VERSION_EXPECTED 1
 
 // VirtIO status bits
 #define VIRTIO_STATUS_ACKNOWLEDGE 1
@@ -135,6 +140,34 @@ public:
 
     oprintf("  Vendor ID: 0x%x\n", vendor_id);
     oprintf("  Features: 0x%x\n", features);
+  }
+
+  static uint32_t read_base_reg(uintptr_t offset) { return ((volatile uint32_t *)VIRTIO_MMIO_BASE)[offset / 4]; }
+
+  /**
+   * Scans for a VirtIO device by ID return address if found
+   */
+  static Result<uintptr_t, ErrorCode> scan_for_device(uintptr_t device_id) {
+    // sanity checks
+
+    if (read_base_reg(VIRTIO_MMIO_MAGIC_VALUE) != VIRTIO_MMIO_MAGIC_VALUE_EXPECTED) {
+      return Result<uintptr_t, ErrorCode>::err(VIRTIO__SETUP_FAIL);
+    }
+
+    if (read_base_reg(VIRTIO_MMIO_VERSION) != VIRTIO_MMIO_VERSION_EXPECTED) {
+      return Result<uintptr_t, ErrorCode>::err(VIRTIO__SETUP_FAIL);
+    }
+
+    //
+    for (int i = 0; i < VIRTIO_MMIO_COUNT; i++) {
+      uintptr_t addr = VIRTIO_MMIO_BASE + (i * VIRTIO_MMIO_SIZE);
+      VirtIODevice dev(addr);
+      dev.device_id = dev.read_reg(VIRTIO_MMIO_DEVICE_ID);
+      if (dev.is_valid() && dev.device_id == device_id) {
+        return Result<uintptr_t, ErrorCode>::ok(addr);
+      }
+    }
+    return Result<uintptr_t, ErrorCode>::err(VIRTIO__DEVICE_NOT_FOUND);
   }
 };
 

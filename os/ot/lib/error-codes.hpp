@@ -14,6 +14,9 @@ enum ErrorCode {
   /** Method known but not implemented */
   IPC__METHOD_NOT_IMPLEMENTED = 4,
 
+  VIRTIO__DEVICE_NOT_FOUND = 5,
+  VIRTIO__SETUP_FAIL = 6,
+
 // Generated service error codes (starting at 100)
 #include "ot/user/gen/error-codes-gen.hpp"
 };
@@ -23,13 +26,17 @@ inline const char *error_code_to_string(ErrorCode code) {
   case NONE:
     return "none";
   case KERNEL__INVARIANT_VIOLATION:
-    return "kernel-invariant-violation";
+    return "kernel.invariant-violation";
   case IPC__PID_NOT_FOUND:
-    return "ipc-pid-not-found";
+    return "ipc.pid-not-found";
   case IPC__METHOD_NOT_KNOWN:
-    return "ipc-method-not-known";
+    return "ipc.method-not-known";
   case IPC__METHOD_NOT_IMPLEMENTED:
-    return "ipc-method-not-implemented";
+    return "ipc.method-not-implemented";
+  case VIRTIO__DEVICE_NOT_FOUND:
+    return "virtio.device-not-found";
+  case VIRTIO__SETUP_FAIL:
+    return "virtio.setup-fail";
 
 // Generated service error code cases
 #include "ot/user/gen/error-codes-gen-switch.hpp"

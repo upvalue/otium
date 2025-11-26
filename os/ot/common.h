@@ -55,6 +55,10 @@ void oprintf(const char *fmt, ...);
 void *memcpy(void *dst, const void *src, size_t n);
 #endif
 
+#ifndef memset
+void *memset(void *buf, int c, size_t n);
+#endif
+
 #ifndef strcpy
 char *strcpy(char *dst, const char *src);
 #endif

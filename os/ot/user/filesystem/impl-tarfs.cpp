@@ -44,12 +44,17 @@ struct FilesystemServer : FilesystemServerBase {
   }
 };
 
+struct TarFSStorage : LocalStorage {
+  VirtIODevice dev;
+  VirtQueue queue;
+};
+
 void proc_filesystem(void) {
   // Initialize storage
   void *storage_page = ou_get_storage().as_ptr();
   // FilesystemStorage *fs_storage = new (storage_page) FilesystemStorage();
 
-  LocalStorage *ls = new (storage_page) LocalStorage();
+  TarFSStorage *ls = new (storage_page) TarFSStorage();
   ls->process_storage_init(10);
 
   auto res = VirtIODevice::scan_for_device(VIRTIO_ID_BLOCK);
@@ -59,14 +64,18 @@ void proc_filesystem(void) {
   }
 
   auto addr = res.value();
-  VirtIODevice dev(addr);
-  dev.probe();
-  dev.read_reg(VIRTIO_MMIO_DEVICE_ID);
-  dev.read_reg(VIRTIO_MMIO_VENDOR_ID);
-  dev.read_reg(VIRTIO_MMIO_DEVICE_FEATURES);
-  dev.read_reg(VIRTIO_MMIO_DEVICE_FEATURES_SEL);
-  dev.read_reg(VIRTIO_MMIO_DRIVER_FEATURES);
-  dev.read_reg(VIRTIO_MMIO_DRIVER_FEATURES_SEL);
+  VirtIODevice &dev = ls->dev;
+  dev.set_base(addr);
+
+  dev.write_reg(VIRTIO_MMIO_STATUS, 0);
+  dev.write_reg(VIRTIO_MMIO_STATUS, VIRTIO_STATUS_ACKNOWLEDGE);
+  dev.write_reg(VIRTIO_MMIO_STATUS, VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER);
+  dev.write_reg(VIRTIO_MMIO_STATUS, VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK);
+
+  if (!(dev.read_reg(VIRTIO_MMIO_STATUS) & VIRTIO_STATUS_FEATURES_OK)) {
+    oprintf("ERROR: VirtIO block device feature negotiation failed\n");
+    ou_exit();
+  }
 
   // Create server and set storage pointer
   FilesystemServer server;

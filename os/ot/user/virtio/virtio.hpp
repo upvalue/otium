@@ -91,14 +91,19 @@ struct virtq_used {
 } __attribute__((packed));
 
 class VirtIODevice {
-public:
+private:
   volatile uint32_t *base;
+
+public:
   uint32_t device_id;
   uint32_t vendor_id;
 
-  VirtIODevice(uintptr_t addr) : base((volatile uint32_t *)addr) {}
+  VirtIODevice() : base(nullptr), device_id(0), vendor_id(0) {}
+  VirtIODevice(uintptr_t addr) : base((volatile uint32_t *)addr), device_id(0), vendor_id(0) {}
 
   uint32_t read_reg(uint32_t offset) { return base[offset / 4]; }
+
+  void set_base(uintptr_t addr) { base = (volatile uint32_t *)addr; }
 
   void write_reg(uint32_t offset, uint32_t value) { base[offset / 4] = value; }
 

@@ -41,8 +41,8 @@ void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr, uint32_t flags
   table0[vpn0] = ((paddr.raw() / OT_PAGE_SIZE) << 10) | flags | PAGE_V;
 }
 
-Process *process_create_impl(Process *table, int max_procs, const char *name, const void *entry_point,
-                             Arguments *args, bool kernel_mode) {
+Process *process_create_impl(Process *table, int max_procs, const char *name, const void *entry_point, Arguments *args,
+                             bool kernel_mode) {
   // Initialize memory tracking on first process creation
   memory_init();
 
@@ -192,8 +192,7 @@ Process *process_next_runnable(void) {
 
 void process_switch_to(Process *target) {
   Process *prev = current_proc;
-  TRACE_IPC(LLOUD, "IPC switch from pidx %d to %d (pid %lu to %lu)",
-            prev->pidx, target->pidx, prev->pid, target->pid);
+  TRACE_IPC(LLOUD, "IPC switch from pidx %d to %d (pid %lu to %lu)", prev->pidx, target->pidx, prev->pid, target->pid);
 
 #ifdef OT_ARCH_RISCV
   current_proc = target;
@@ -208,8 +207,7 @@ void process_switch_to(Process *target) {
   __asm__ __volatile__("csrw sscratch, %[sscratch]\n"
                        "csrw sepc, %[sepc]\n"
                        :
-                       : [sscratch] "r"((uintptr_t)&target->stack[sizeof(target->stack)]),
-                         [sepc] "r"(target->user_pc)
+                       : [sscratch] "r"((uintptr_t)&target->stack[sizeof(target->stack)]), [sepc] "r"(target->user_pc)
                        :);
   switch_context(&prev->stack_ptr, &target->stack_ptr);
 #endif
@@ -218,25 +216,30 @@ void process_switch_to(Process *target) {
   // For WASM, we can't directly swap between process fibers
   // We must go through the scheduler fiber
   // IMPORTANT: Don't set current_proc yet! yield() needs it to point to prev
-  extern void wasm_switch_to_process(Process *prev, Process *target);
+  extern void wasm_switch_to_process(Process * prev, Process * target);
   wasm_switch_to_process(prev, target);
   // When we return, scheduler has restored current_proc and local_storage correctly
 #endif
 }
 
-void process_exit(Process *proc) {
+void process_exit(Process *proc, bool zero_proc) {
   TRACE_PROC(LSOFT, "Process pidx=%d pid=%lu (%s) exiting", proc->pidx.raw(), proc->pid.raw(), proc->name);
 
   // Release any known memory regions held by this process
-  known_memory_release_process(proc->pidx);
+  uint32_t known_released = known_memory_release_process(proc->pidx);
 
   // Free all pages allocated to this process
-  page_free_process(proc->pidx);
+  uint32_t pages_freed = page_free_process(proc->pidx);
+
+  TRACE_MEM(LSOFT, "Process %s (pidx=%d) freed %d pages, released %d known memory regions", proc->name,
+            proc->pidx.raw(), pages_freed, known_released);
 
   // Clear lookup table entry
   process_pids[proc->pidx.raw()] = PID_NONE;
 
-  omemset(proc, 0, sizeof(Process));
+  if (zero_proc) {
+    omemset(proc, 0, sizeof(Process));
+  }
   proc->state = UNUSED;
 }
 
@@ -246,7 +249,7 @@ void shutdown_all_processes(void) {
     Process *proc = &procs[i];
     if (proc->state != UNUSED) {
       oprintf("Terminating process %s (pidx=%d, pid=%lu)\n", proc->name, proc->pidx.raw(), proc->pid.raw());
-      proc->state = TERMINATED;
+      process_exit(proc, false);
     }
   }
   oprintf("All processes terminated, exiting kernel\n");
@@ -258,7 +261,8 @@ PageAddr process_get_arg_page() {
   if (current_proc == nullptr) {
     return paddr;
   }
-  oprintf("process_get_arg_page: pidx %d pid %lu arg_page %p\n", current_proc->pidx.raw(), current_proc->pid.raw(), current_proc->arg_page.as_ptr());
+  oprintf("process_get_arg_page: pidx %d pid %lu arg_page %p\n", current_proc->pidx.raw(), current_proc->pid.raw(),
+          current_proc->arg_page.as_ptr());
   return current_proc->arg_page;
 }
 
@@ -293,7 +297,7 @@ Pidx process_lookup_by_pid(Pid pid) {
       return Pidx(i);
     }
   }
-  return PIDX_INVALID;  // Not found
+  return PIDX_INVALID; // Not found
 }
 
 // Lookup process by name, returns pid (user-facing identifier)
@@ -302,16 +306,15 @@ Pid process_lookup(const StringView &name) {
   while (true) {
     Process *p = &procs[i];
     // Check if process is running (RUNNABLE or IPC_WAIT - services waiting for messages should be findable)
-    if (process_is_running(p) &&
-        strncmp(p->name, name.ptr, name.len) == 0 &&
-        p->name[name.len] == '\0') {  // Ensure exact match
-      return p->pid;  // Return pid (not pidx)
+    if (process_is_running(p) && strncmp(p->name, name.ptr, name.len) == 0 &&
+        p->name[name.len] == '\0') { // Ensure exact match
+      return p->pid;                 // Return pid (not pidx)
     }
     if (i-- == 0) {
       break;
     }
   }
-  return PID_NONE;  // Not found
+  return PID_NONE; // Not found
 }
 
 // Internal: lookup process by pidx

@@ -294,7 +294,7 @@ void handle_syscall(struct trap_frame *f) {
       uintptr_t request_flags = IPC_UNPACK_FLAGS(current_proc->pending_message.method_and_flags);
       if (request_flags & IPC_FLAG_RECV_COMM_DATA) {
         if (!current_proc->comm_page.is_null() && !sender->comm_page.is_null()) {
-          TRACE_IPC(LSOFT, "IPC reply: copying comm page from server pidx %d back to client pidx %d",
+          TRACE_IPC(LLOUD, "IPC reply: copying comm page from server pidx %d back to client pidx %d",
                     current_proc->pidx.raw(), sender->pidx.raw());
           memcpy(sender->comm_page.as_ptr(), current_proc->comm_page.as_ptr(), OT_PAGE_SIZE);
         }

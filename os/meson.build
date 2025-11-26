@@ -65,15 +65,16 @@ else
   error('Unknown target architecture: ' + target_arch)
 endif
 
-# Get backend options (use 'auto' to select platform default)
-graphics_backend = get_option('graphics_backend')
-if graphics_backend == 'auto'
-  graphics_backend = default_graphics_backend
-endif
 
 filesystem_backend = get_option('filesystem_backend')
 if filesystem_backend == 'auto'
   filesystem_backend = default_filesystem_backend
+endif
+
+# Get backend options (use 'auto' to select platform default)
+graphics_backend = get_option('graphics_backend')
+if graphics_backend == 'auto'
+  graphics_backend = default_graphics_backend
 endif
 
 # Set backend configuration
@@ -87,6 +88,7 @@ graphics_backend_map = {
 filesystem_backend_map = {
   'none': 'OT_FILESYSTEM_BACKEND_NONE',
   'memory': 'OT_FILESYSTEM_BACKEND_MEMORY',
+  'tarfs': 'OT_FILESYSTEM_BACKEND_TARFS',
 }
 
 config_data.set('GRAPHICS_BACKEND', graphics_backend_map[graphics_backend])
@@ -277,9 +279,15 @@ if is_riscv or is_wasm
     'ot/user/gen/filesystem-client.cpp',
     'ot/user/gen/filesystem-server.cpp',
     'ot/lib/frame-manager.cpp',
-    # Filesystem implementation
-    'ot/user/filesystem/impl-memory.cpp',
+    # 'ot/user/filesystem/impl-memory.cpp',
   ]
+
+  # Filesystem implementation
+  if filesystem_backend == 'memory'
+    user_sources += ['ot/user/filesystem/impl-memory.cpp']
+  elif filesystem_backend == 'tarfs'
+    user_sources += ['ot/user/filesystem/impl-tarfs.cpp']
+  endif
 
   # Platform-specific sources and configuration
   if is_riscv

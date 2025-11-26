@@ -23,8 +23,7 @@ static PageAddr page_allocate_bootstrap(size_t page_count) {
     PANIC("out of memory during bootstrap");
   }
 
-  TRACE_MEM(LLOUD, "Bootstrap allocated %d pages at address %x", page_count,
-            page_addr.raw());
+  TRACE_MEM(LLOUD, "Bootstrap allocated %d pages at address %x", page_count, page_addr.raw());
 
   omemset(page_addr.as_ptr(), 0, page_count * OT_PAGE_SIZE);
   return page_addr;
@@ -49,8 +48,7 @@ void memory_init() {
   PageAddr page_infos_addr = page_allocate_bootstrap(page_infos_pages);
   page_infos = page_infos_addr.as<PageInfo>();
 
-  TRACE(LSOFT, "Allocated %d pages for PageInfo array at %x", page_infos_pages,
-        page_infos_addr.raw());
+  TRACE(LSOFT, "Allocated %d pages for PageInfo array at %x", page_infos_pages, page_infos_addr.raw());
 
   // Initialize page tracking structures
   PageAddr current_page_addr = next_page_addr;
@@ -93,8 +91,7 @@ void memory_init() {
   // Initialize known memory regions (must happen early before fragmentation)
   known_memory_init();
 
-  TRACE(LSOFT, "Memory initialization complete. Free list head: %x",
-        free_list_head);
+  TRACE(LSOFT, "Memory initialization complete. Free list head: %x", free_list_head);
 }
 
 PageAddr page_allocate(Pidx pidx, size_t page_count) {
@@ -117,8 +114,7 @@ PageAddr page_allocate(Pidx pidx, size_t page_count) {
   }
 
   if (available < page_count) {
-    PANIC("Out of memory - requested %d pages, only %d available", page_count,
-          available);
+    PANIC("Out of memory - requested %d pages, only %d available", page_count, available);
   }
 
   // Allocate first page (this is what we'll return)
@@ -128,8 +124,7 @@ PageAddr page_allocate(Pidx pidx, size_t page_count) {
   first_page->next = nullptr;
   omemset(first_page->addr.as_ptr(), 0, OT_PAGE_SIZE);
 
-  TRACE_MEM(LLOUD, "Allocated page at %x to pidx %d", first_page->addr.raw(),
-            pidx.raw());
+  TRACE_MEM(LLOUD, "Allocated page at %x to pidx %d", first_page->addr.raw(), pidx.raw());
 
   // Allocate remaining pages
   for (size_t i = 1; i < page_count; i++) {
@@ -139,8 +134,7 @@ PageAddr page_allocate(Pidx pidx, size_t page_count) {
     page_info->next = nullptr;
     omemset(page_info->addr.as_ptr(), 0, OT_PAGE_SIZE);
 
-    TRACE_MEM(LLOUD, "Allocated page at %x to pidx %d", page_info->addr.raw(),
-              pidx.raw());
+    TRACE_MEM(LLOUD, "Allocated page at %x to pidx %d", page_info->addr.raw(), pidx.raw());
   }
 
   // Update statistics
@@ -162,13 +156,16 @@ PageInfo *page_info_lookup(PageAddr addr) {
   return nullptr;
 }
 
-void page_free_process(Pidx pidx) {
+uint32_t page_free_process(Pidx pidx) {
   if (!memory_initialized) {
     TRACE_MEM(LSOFT, "Memory not initialized, cannot free pages");
-    return;
+    return 0;
   }
 
-  TRACE_MEM(LSOFT, "page_free_process: pidx=%d", pidx.raw());
+  if (pidx == PIDX_NONE)
+    return 0;
+
+  TRACE_MEM(LLOUD, "page_free_process: pidx=%d", pidx.raw());
 
   uint32_t freed_count = 0;
 
@@ -187,8 +184,7 @@ void page_free_process(Pidx pidx) {
 
       freed_count++;
 
-      TRACE_MEM(LLOUD, "Freed page %x from pidx %d", page_infos[i].addr.raw(),
-                pidx.raw());
+      TRACE_MEM(LLOUD, "Freed page %x from pidx %d", page_infos[i].addr.raw(), pidx.raw());
     }
   }
 
@@ -196,7 +192,7 @@ void page_free_process(Pidx pidx) {
   mem_stats.allocated_pages -= freed_count;
   mem_stats.freed_pages += freed_count;
 
-  TRACE_MEM(LSOFT, "Freed %d pages from pidx %d", freed_count, pidx.raw());
+  return freed_count;
 }
 
 void memory_report() {
@@ -206,8 +202,7 @@ void memory_report() {
   oprintf("Current allocated pages: %d\n", mem_stats.allocated_pages);
   oprintf("Total pages freed: %d\n", mem_stats.freed_pages);
   oprintf("Peak memory usage: %d pages\n", mem_stats.peak_usage_pages);
-  oprintf("Current memory usage: %d KB\n",
-          (mem_stats.allocated_pages * OT_PAGE_SIZE) / 1024);
+  oprintf("Current memory usage: %d KB\n", (mem_stats.allocated_pages * OT_PAGE_SIZE) / 1024);
   oprintf("=========================\n");
 }
 
@@ -234,8 +229,7 @@ PageAddr known_memory_lock(KnownMemory km, size_t page_count, Pidx pidx) {
 
   // Check if already locked by another process
   if (info->holder_pidx != PIDX_NONE && info->holder_pidx != pidx) {
-    TRACE_MEM(LSOFT, "known_memory_lock: km=%d already held by pidx=%d", km,
-              info->holder_pidx.raw());
+    TRACE_MEM(LSOFT, "known_memory_lock: km=%d already held by pidx=%d", km, info->holder_pidx.raw());
     return PageAddr(nullptr);
   }
 
@@ -249,34 +243,35 @@ PageAddr known_memory_lock(KnownMemory km, size_t page_count, Pidx pidx) {
     }
     info->addr = addr;
     info->page_count = page_count;
-    TRACE_MEM(LSOFT, "known_memory_lock: allocated %d pages at %x for km=%d",
-              page_count, addr.raw(), km);
+    TRACE_MEM(LSOFT, "known_memory_lock: allocated %d pages at %x for km=%d", page_count, addr.raw(), km);
   }
 
   // Check if requested size fits within allocated region
   if (page_count > info->page_count) {
-    TRACE_MEM(LSOFT,
-              "known_memory_lock: requested %d pages but only %d allocated",
-              page_count, info->page_count);
+    TRACE_MEM(LSOFT, "known_memory_lock: requested %d pages but only %d allocated", page_count, info->page_count);
     return PageAddr(nullptr);
   }
 
   // Lock the memory to this process
   info->holder_pidx = pidx;
-  TRACE_MEM(LSOFT, "known_memory_lock: pidx=%d locked km=%d (%d pages) at %x",
-            pidx.raw(), km, page_count, info->addr.raw());
+  TRACE_MEM(LSOFT, "known_memory_lock: pidx=%d locked km=%d (%d pages) at %x", pidx.raw(), km, page_count,
+            info->addr.raw());
 
   return info->addr;
 }
 
-void known_memory_release_process(Pidx pidx) {
+uint32_t known_memory_release_process(Pidx pidx) {
+  uint32_t released_count = 0;
+
   // Release any known memory regions held by this process
   for (int i = 0; i < KNOWN_MEMORY_COUNT; i++) {
-    if (known_memory_table[i].holder_pidx == pidx) {
-      TRACE_MEM(LSOFT, "Releasing known memory region %d from pidx %d", i,
-                pidx.raw());
+    if (pidx != PIDX_NONE && known_memory_table[i].holder_pidx == pidx) {
+      TRACE_MEM(LLOUD, "Releasing known memory region %d from pidx %d", i, pidx.raw());
       known_memory_table[i].holder_pidx = PIDX_NONE;
+      released_count++;
       // Note: We don't free the memory, just release the lock
     }
   }
+
+  return released_count;
 }

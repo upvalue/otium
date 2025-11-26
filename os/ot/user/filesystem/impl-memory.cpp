@@ -7,7 +7,7 @@ using namespace filesystem;
 
 // Filesystem server implementation with instance state
 struct FilesystemServer : FilesystemServerBase {
-  FilesystemStorage *storage;
+  MemoryFilesystemStorage *storage;
 
   FilesystemServer() : storage(nullptr) {}
 
@@ -144,8 +144,7 @@ public:
     return Result<uintptr_t, ErrorCode>::ok(bytes_to_read);
   }
 
-  Result<uintptr_t, ErrorCode> handle_write(FileHandleId handle_id, uintptr_t offset,
-                                            const StringView &data) override {
+  Result<uintptr_t, ErrorCode> handle_write(FileHandleId handle_id, uintptr_t offset, const StringView &data) override {
     FileHandle *handle = storage->find_handle(handle_id.raw());
     if (!handle) {
       return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__INVALID_HANDLE);
@@ -350,7 +349,7 @@ public:
 void proc_filesystem(void) {
   // Initialize storage
   void *storage_page = ou_get_storage().as_ptr();
-  FilesystemStorage *fs_storage = new (storage_page) FilesystemStorage();
+  MemoryFilesystemStorage *fs_storage = new (storage_page) MemoryFilesystemStorage();
 
   // Create root directory
   INode root;

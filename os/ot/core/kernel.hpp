@@ -77,7 +77,7 @@ struct MemoryStats {
 PageAddr page_allocate(Pidx pidx, size_t page_count);
 /** Look up PageInfo given an address. */
 PageInfo *page_info_lookup(PageAddr);
-void page_free_process(Pidx pidx);
+uint32_t page_free_process(Pidx pidx);
 void memory_init();
 void memory_report();
 void memory_increment_process_count();
@@ -98,7 +98,7 @@ extern KnownMemoryInfo known_memory_table[KNOWN_MEMORY_COUNT];
 
 void known_memory_init();
 PageAddr known_memory_lock(KnownMemory km, size_t page_count, Pidx pidx);
-void known_memory_release_process(Pidx pidx);
+uint32_t known_memory_release_process(Pidx pidx);
 
 // process management
 #define PROCS_MAX 16
@@ -186,7 +186,7 @@ Process *process_next_runnable(void);
 Pid process_lookup(const StringView &name);
 /** Internal: Looks up a process by pidx, returns nullptr if process not runnable */
 Process *process_lookup_by_pidx(Pidx pidx);
-void process_exit(Process *proc);
+void process_exit(Process *proc, bool zero_proc = true);
 void shutdown_all_processes(void);
 
 // Gets the argument page pointer of the current process if possible

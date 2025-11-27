@@ -1,3 +1,4 @@
+#include "ot/lib/logger.hpp"
 #include "ot/lib/mpack/mpack-writer.hpp"
 #include "ot/user/filesystem/types.hpp"
 #include "ot/user/gen/filesystem-server.hpp"
@@ -6,10 +7,13 @@
 
 using namespace filesystem;
 
-// Filesystem server implementation with instance state
-struct FilesystemServer : FilesystemServerBase {
-  FilesystemServer() {}
+struct TarFSServer : LocalStorage, FilesystemServerBase {
+  VirtIODevice dev;
+  VirtQueue queue;
 
+  TarFSServer() {}
+
+private:
   Result<FileHandleId, ErrorCode> handle_open(const ou::string &path, uintptr_t flags) override {
     return Result<FileHandleId, ErrorCode>::err(IPC__METHOD_NOT_IMPLEMENTED);
   }
@@ -44,27 +48,26 @@ struct FilesystemServer : FilesystemServerBase {
   }
 };
 
-struct TarFSStorage : LocalStorage {
-  VirtIODevice dev;
-  VirtQueue queue;
-};
-
 void proc_filesystem(void) {
   // Initialize storage
   void *storage_page = ou_get_storage().as_ptr();
+  Logger l("fs/tar");
   // FilesystemStorage *fs_storage = new (storage_page) FilesystemStorage();
 
-  TarFSStorage *ls = new (storage_page) TarFSStorage();
-  ls->process_storage_init(10);
+  // TarFSStorage *ls = new (storage_page) TarFSStorage();
+  TarFSServer *server = new (storage_page) TarFSServer();
+  server->process_storage_init(1);
+  PageAddr queue_mem = PageAddr((uintptr_t)ou_alloc_page());
+  // ls->process_storage_init(10);
 
   auto res = VirtIODevice::scan_for_device(VIRTIO_ID_BLOCK);
   if (!res.is_ok()) {
-    oprintf("ERROR: VirtIO block device not found: %s\n", error_code_to_string(res.error()));
+    l.log("ERROR: VirtIO block device not found: %s\n", error_code_to_string(res.error()));
     ou_exit();
   }
 
   auto addr = res.value();
-  VirtIODevice &dev = ls->dev;
+  VirtIODevice &dev = server->dev;
   dev.set_base(addr);
 
   dev.write_reg(VIRTIO_MMIO_STATUS, 0);
@@ -72,15 +75,26 @@ void proc_filesystem(void) {
   dev.write_reg(VIRTIO_MMIO_STATUS, VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER);
   dev.write_reg(VIRTIO_MMIO_STATUS, VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK);
 
+  uint32_t version = dev.read_reg(VIRTIO_MMIO_VERSION);
+
+  if (version != 1) {
+    l.log("ERROR: Unsupported VirtIO version: %u", version);
+    ou_exit();
+  }
+
+  VirtQueue &q = server->queue;
+  q.init(queue_mem, QUEUE_SIZE);
+
+  l.log("Queue physical addr: 0x%x", queue_mem.raw());
+
   if (!(dev.read_reg(VIRTIO_MMIO_STATUS) & VIRTIO_STATUS_FEATURES_OK)) {
     oprintf("ERROR: VirtIO block device feature negotiation failed\n");
     ou_exit();
   }
 
   // Create server and set storage pointer
-  FilesystemServer server;
   // server.storage = fs_storage;
 
   // Run server
-  server.run();
+  server->run();
 }

@@ -65,6 +65,25 @@ else
   error('Unknown target architecture: ' + target_arch)
 endif
 
+# Picolibc for RISC-V builds
+picolibc_dep = []
+if is_riscv
+  picolibc_proj = subproject('picolibc', default_options: [
+    'multilib=false',
+    'picocrt=false',           # We have our own startup code
+    'picolib=false',
+    'semihost=false',
+    'tests=false',
+    'tinystdio=true',          # Use tinystdio for printf
+    'format-default=integer',  # Integer-only printf (no float, matches mpaland/printf config)
+    'io-long-long=false',      # Match current printf config
+    'io-float-exact=false',
+    'newlib-global-errno=true',
+    'thread-local-storage=false',
+  ])
+  picolibc_dep = picolibc_proj.get_variable('picolibc_dep')
+  arch_defines += ['-DUSE_PICOLIBC']
+endif
 
 filesystem_backend = get_option('filesystem_backend')
 if filesystem_backend == 'auto'
@@ -256,8 +275,13 @@ if is_riscv or is_wasm
     'ot/lib/mpack/mpack-utils.cpp',
     'ot/lib/file.cpp',
     'ot/vendor/libmpack/mpack.c',
-    'ot/vendor/printf/printf.c',
   ]
+
+  # Only include mpaland/printf for non-picolibc builds (WASM)
+  # RISC-V uses picolibc's tinystdio instead
+  if not is_riscv
+    lib_sources += ['ot/vendor/printf/printf.c']
+  endif
 
   user_sources = [
     'ot/user/user-main.cpp',
@@ -310,6 +334,7 @@ if is_riscv or is_wasm
         '-Wl,-Map=@0@/os.map'.format(meson.current_build_dir()),
       ],
       include_directories: inc,
+      dependencies: picolibc_dep,
       install: true,
     )
   endif

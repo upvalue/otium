@@ -2,6 +2,27 @@
 
 #include "ot/common.h"
 
+#if defined(USE_PICOLIBC)
+// Picolibc provides all standard libc functions via tinystdio
+#include <stdio.h>
+#include <string.h>
+
+// Define stdout for picolibc tinystdio
+// The put function signature: int (*put)(char c, FILE *stream)
+static int _ot_stdout_put(char c, FILE *stream) {
+  (void)stream;
+  return oputchar(c);
+}
+
+// Create the stdout FILE structure
+static FILE _ot_stdout_file = FDEV_SETUP_STREAM(_ot_stdout_put, NULL, NULL, __SWR);
+
+// Export as stdout (picolibc expects this)
+FILE *const stdout = &_ot_stdout_file;
+
+#else
+// Non-picolibc builds: use mpaland/printf
+
 // Forward declarations from mpaland/printf (ot/lib/vendor/printf.c)
 extern "C" {
 int vsnprintf_(char* buffer, size_t count, const char* format, va_list va);
@@ -12,17 +33,23 @@ void _putchar(char character) {
 }
 }
 
+#endif // USE_PICOLIBC
+
 char _ot_scratch_buffer[OT_PAGE_SIZE];
 extern "C" char *ot_scratch_buffer = _ot_scratch_buffer;
 
-void *omemset(void *buf, char c, size_t n) {
+// ============================================================================
+// Standard libc implementations (only when NOT using picolibc or system libc)
+// ============================================================================
+
+#if !defined(USE_PICOLIBC) && !defined(OT_POSIX) && !defined(OT_ARCH_WASM)
+
+void *memset(void *buf, int c, size_t n) {
   uint8_t *p = (uint8_t *)buf;
   while (n--)
-    *p++ = c;
+    *p++ = (uint8_t)c;
   return buf;
 }
-
-void *memset(void *buf, int c, size_t n) { return omemset(buf, (char)c, n); }
 
 void *memcpy(void *dst, const void *src, size_t n) {
   uint8_t *d = (uint8_t *)dst;
@@ -32,7 +59,7 @@ void *memcpy(void *dst, const void *src, size_t n) {
   return dst;
 }
 
-void *omemmove(void *dst, const void *src, size_t n) {
+void *memmove(void *dst, const void *src, size_t n) {
   uint8_t *d = (uint8_t *)dst;
   const uint8_t *s = (const uint8_t *)src;
 
@@ -124,10 +151,39 @@ int memcmp(const void *s1, const void *s2, size_t n) {
   return 0;
 }
 
+#endif // !USE_PICOLIBC && !OT_POSIX && !OT_ARCH_WASM
+
+// ============================================================================
+// Otium-specific wrappers (always provided)
+// ============================================================================
+
+void *omemset(void *buf, char c, size_t n) {
+  return memset(buf, (int)(unsigned char)c, n);
+}
+
+void *omemmove(void *dst, const void *src, size_t n) {
+  return memmove(dst, src, n);
+}
+
+// ============================================================================
+// Printf functions
+// ============================================================================
+
+#if defined(USE_PICOLIBC)
+// Use picolibc's tinystdio vsnprintf
+
 int ovsnprintf(char *str, size_t size, const char *format, va_list args) {
-  // Use mpaland/printf implementation
+  return vsnprintf(str, size, format, args);
+}
+
+#else
+// Use mpaland/printf implementation
+
+int ovsnprintf(char *str, size_t size, const char *format, va_list args) {
   return vsnprintf_(str, size, format, args);
 }
+
+#endif // USE_PICOLIBC
 
 int osnprintf(char *str, size_t size, const char *format, ...) {
   va_list args;

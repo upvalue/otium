@@ -5,7 +5,8 @@
 
 extern char __stack_top[];
 
-__attribute__((noreturn)) extern "C" void exit(void) {
+__attribute__((noreturn)) extern "C" void exit(int status) {
+  (void)status;  // Bare-metal: ignore status, just spin
   for (;;)
     ;
 }

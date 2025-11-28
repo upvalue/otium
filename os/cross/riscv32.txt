@@ -10,7 +10,7 @@ target_arch = 'riscv'
 
 [built-in options]
 c_args = ['--target=riscv32-unknown-elf', '-march=rv32imf', '-mabi=ilp32f', '-fno-stack-protector', '-ffreestanding', '-nostdlib', '-Os']
-cpp_args = ['--target=riscv32-unknown-elf', '-march=rv32imf', '-mabi=ilp32f', '-fno-stack-protector', '-ffreestanding', '-nostdlib', '-fno-rtti', '-Os']
+cpp_args = ['--target=riscv32-unknown-elf', '-march=rv32imf', '-mabi=ilp32f', '-fno-stack-protector', '-ffreestanding', '-nostdlib', '-nostdinc++', '-fno-rtti', '-Os']
 c_link_args = ['--target=riscv32-unknown-elf', '-march=rv32imf', '-mabi=ilp32f', '-fuse-ld=lld', '-nostdlib']
 cpp_link_args = ['--target=riscv32-unknown-elf', '-march=rv32imf', '-mabi=ilp32f', '-fuse-ld=lld', '-nostdlib']
 

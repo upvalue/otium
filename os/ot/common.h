@@ -13,7 +13,16 @@ extern "C" {
 #if defined(OT_POSIX) || defined(OT_ARCH_WASM)
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
+#elif defined(USE_PICOLIBC)
+// Picolibc provides standard headers
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
 #else
+// Hand-rolled types for freestanding without picolibc
 
 #ifndef NULL
 #define NULL 0
@@ -41,15 +50,19 @@ typedef uint32_t uintptr_t;
     }                                                                                                                  \
   } while (0)
 
-// These are common C stdlib-like functions, callable from anyhwere
+// These are common C stdlib-like functions, callable from anywhere
 
-// In a few cases, they're prefixed with "o" because these are sometimes
-// macros in normal stdlib headers and that causes compilation conflicts
-// when this is compiled on a normal system instea dof for a freestanding target
+// Otium-specific wrappers (always declared, different signature from stdlib)
 void *omemset(void *buf, char c, size_t n);
 void *omemmove(void *dst, const void *src, size_t n);
-size_t strlen(const char *s);
 void oprintf(const char *fmt, ...);
+int ovsnprintf(char *str, size_t size, const char *format, va_list args);
+int osnprintf(char *str, size_t size, const char *format, ...);
+int oputsn(const char *str, int n);
+
+// Standard libc functions - only declare if not provided by libc
+#if !defined(USE_PICOLIBC) && !defined(OT_POSIX) && !defined(OT_ARCH_WASM)
+size_t strlen(const char *s);
 
 #ifndef memcpy
 void *memcpy(void *dst, const void *src, size_t n);
@@ -67,9 +80,7 @@ int strcmp(const char *s1, const char *s2);
 int strncmp(const char *s1, const char *s2, size_t n);
 int atoi(const char *s);
 int memcmp(const void *s1, const void *s2, size_t n);
-int ovsnprintf(char *str, size_t size, const char *format, va_list args);
-int osnprintf(char *str, size_t size, const char *format, ...);
-int oputsn(const char *str, int n);
+#endif
 
 // System calls
 #define OU_YIELD 1

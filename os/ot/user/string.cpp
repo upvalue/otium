@@ -136,7 +136,7 @@ void string::insert(size_t pos, size_t count, char c) {
   ensure_capacity(len_ + count + 1);
   // Move existing characters to make room
   if (pos < len_) {
-    omemmove(data_ + pos + count, data_ + pos, len_ - pos);
+    memmove(data_ + pos + count, data_ + pos, len_ - pos);
   }
   // Insert new characters
   for (size_t i = 0; i < count; i++) {
@@ -153,7 +153,7 @@ void string::erase(size_t pos, size_t len) {
   if (pos + len > len_)
     len = len_ - pos;
   // Move characters after erased portion to fill the gap
-  omemmove(data_ + pos, data_ + pos + len, len_ - pos - len);
+  memmove(data_ + pos, data_ + pos + len, len_ - pos - len);
   len_ -= len;
   data_[len_] = '\0';
 }

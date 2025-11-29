@@ -60,7 +60,7 @@ Process *process_create_impl(Process *table, int max_procs, const char *name, co
     return nullptr;
   }
 
-  omemset(free_proc, 0, sizeof(Process));
+  memset(free_proc, 0, sizeof(Process));
 
   for (int j = 0; j < 32; j++) {
     if (!name[j]) {
@@ -132,7 +132,7 @@ Process *process_create_impl(Process *table, int max_procs, const char *name, co
     PANIC("failed to allocate storage page");
   }
   // Zero out the storage page
-  omemset(storage_page.as_ptr(), 0, OT_PAGE_SIZE);
+  memset(storage_page.as_ptr(), 0, OT_PAGE_SIZE);
   free_proc->storage_page = storage_page;
 
   // Allocate user-mode stack (separate from kernel stack)
@@ -238,7 +238,7 @@ void process_exit(Process *proc, bool zero_proc) {
   process_pids[proc->pidx.raw()] = PID_NONE;
 
   if (zero_proc) {
-    omemset(proc, 0, sizeof(Process));
+    memset(proc, 0, sizeof(Process));
   }
   proc->state = UNUSED;
 }

@@ -25,9 +25,7 @@ extern "C" {
 
 // These are common C stdlib-like functions, callable from anywhere
 
-// Otium-specific wrappers (always declared, different signature from stdlib)
-void *omemset(void *buf, char c, size_t n);
-void *omemmove(void *dst, const void *src, size_t n);
+// Otium-specific wrappers
 void oprintf(const char *fmt, ...);
 int ovsnprintf(char *str, size_t size, const char *format, va_list args);
 int osnprintf(char *str, size_t size, const char *format, ...);

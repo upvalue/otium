@@ -14,7 +14,7 @@ void get_process_pages(uint32_t pid, uintptr_t *pages, uint32_t *count);
 // Common kernel initialization - sets up idle process
 void kernel_common(void) {
 #ifndef OT_ARCH_WASM
-  omemset(__bss, 0, (size_t)__bss_end - (size_t)__bss);
+  memset(__bss, 0, (size_t)__bss_end - (size_t)__bss);
 #endif
   TRACE(LSOFT, "hello from kernel_common");
 

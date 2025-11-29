@@ -39,14 +39,6 @@ char _ot_scratch_buffer[OT_PAGE_SIZE];
 extern "C" char *ot_scratch_buffer = _ot_scratch_buffer;
 
 // ============================================================================
-// Otium-specific wrappers (always provided)
-// ============================================================================
-
-void *omemset(void *buf, char c, size_t n) { return memset(buf, (int)(unsigned char)c, n); }
-
-void *omemmove(void *dst, const void *src, size_t n) { return memmove(dst, src, n); }
-
-// ============================================================================
 // Printf functions
 // ============================================================================
 

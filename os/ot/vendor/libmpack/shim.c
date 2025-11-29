@@ -11,7 +11,6 @@
 #define MPACK_DISABLE_FLOAT 1
 
 typedef int bool;
-#define memset omemset
 
 #define assert(condition)                                                      \
   do {                                                                         \

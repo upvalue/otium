@@ -100,7 +100,7 @@ bool VirtioGraphicsBackend::init() {
 
 uint32_t VirtioGraphicsBackend::send_command(PageAddr cmd, uint32_t cmd_len, PageAddr resp, uint32_t resp_len) {
   // Zero out response buffer
-  omemset(resp.as_ptr(), 0, resp_len);
+  memset(resp.as_ptr(), 0, resp_len);
 
   // Use descriptor 0 for command, descriptor 1 for response
   controlq.add_buf(0, cmd, cmd_len, false);
@@ -175,7 +175,7 @@ void VirtioGraphicsBackend::create_framebuffer() {
   l.log("CMD page: 0x%x, RESP page: 0x%x", cmd_page.raw(), resp_page.raw());
 
   struct virtio_gpu_resource_create_2d *cmd = cmd_page.as<struct virtio_gpu_resource_create_2d>();
-  omemset(cmd, 0, sizeof(*cmd));
+  memset(cmd, 0, sizeof(*cmd));
   cmd->hdr.type = VIRTIO_GPU_CMD_RESOURCE_CREATE_2D;
   cmd->hdr.flags = 0;
   cmd->hdr.fence_id = 0;

@@ -25,7 +25,7 @@ static PageAddr page_allocate_bootstrap(size_t page_count) {
 
   TRACE_MEM(LLOUD, "Bootstrap allocated %d pages at address %x", page_count, page_addr.raw());
 
-  omemset(page_addr.as_ptr(), 0, page_count * OT_PAGE_SIZE);
+  memset(page_addr.as_ptr(), 0, page_count * OT_PAGE_SIZE);
   return page_addr;
 }
 
@@ -122,7 +122,7 @@ PageAddr page_allocate(Pidx pidx, size_t page_count) {
   free_list_head = first_page->next;
   first_page->pidx = pidx;
   first_page->next = nullptr;
-  omemset(first_page->addr.as_ptr(), 0, OT_PAGE_SIZE);
+  memset(first_page->addr.as_ptr(), 0, OT_PAGE_SIZE);
 
   TRACE_MEM(LLOUD, "Allocated page at %x to pidx %d", first_page->addr.raw(), pidx.raw());
 
@@ -132,7 +132,7 @@ PageAddr page_allocate(Pidx pidx, size_t page_count) {
     free_list_head = page_info->next;
     page_info->pidx = pidx;
     page_info->next = nullptr;
-    omemset(page_info->addr.as_ptr(), 0, OT_PAGE_SIZE);
+    memset(page_info->addr.as_ptr(), 0, OT_PAGE_SIZE);
 
     TRACE_MEM(LLOUD, "Allocated page at %x to pidx %d", page_info->addr.raw(), pidx.raw());
   }
@@ -173,7 +173,7 @@ uint32_t page_free_process(Pidx pidx) {
   for (uint32_t i = 0; i < total_page_count; i++) {
     if (page_infos[i].pidx == pidx) {
       // Clear page contents for security
-      omemset(page_infos[i].addr.as_ptr(), 0, OT_PAGE_SIZE);
+      memset(page_infos[i].addr.as_ptr(), 0, OT_PAGE_SIZE);
 
       // Mark as free
       page_infos[i].pidx = PIDX_NONE;

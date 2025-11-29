@@ -199,9 +199,9 @@ public:
     used = (struct virtq_used *)used_addr;
 
     // Zero out the queue
-    omemset(desc, 0, sizeof(struct virtq_desc) * size);
-    omemset(avail, 0, sizeof(struct virtq_avail) + sizeof(uint16_t) * size);
-    omemset(used, 0, sizeof(struct virtq_used) + sizeof(struct virtq_used_elem) * size);
+    memset(desc, 0, sizeof(struct virtq_desc) * size);
+    memset(avail, 0, sizeof(struct virtq_avail) + sizeof(uint16_t) * size);
+    memset(used, 0, sizeof(struct virtq_used) + sizeof(struct virtq_used_elem) * size);
   }
 
   void add_buf(uint16_t desc_idx, PageAddr buf, uint32_t len, bool write) {

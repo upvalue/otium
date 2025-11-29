@@ -9,37 +9,10 @@ extern "C" {
 #endif
 
 #include <stdarg.h>
-
-#if defined(OT_POSIX) || defined(OT_ARCH_WASM)
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 #include <stdlib.h>
-#elif defined(USE_PICOLIBC)
-// Picolibc provides standard headers
-#include <stddef.h>
-#include <stdint.h>
 #include <string.h>
-#include <stdlib.h>
-#else
-// Hand-rolled types for freestanding without picolibc
-
-#ifndef NULL
-#define NULL 0
-#endif
-
-typedef unsigned char uint8_t;
-typedef unsigned short uint16_t;
-typedef short int16_t;
-typedef int int32_t;
-typedef unsigned int uint32_t;
-typedef long long int64_t;
-typedef unsigned long long uint64_t;
-typedef uint32_t size_t;
-typedef int32_t intptr_t;
-typedef uint32_t uintptr_t;
-
-#endif
 
 #define is_aligned(value, align) __builtin_is_aligned(value, align)
 
@@ -60,28 +33,6 @@ int ovsnprintf(char *str, size_t size, const char *format, va_list args);
 int osnprintf(char *str, size_t size, const char *format, ...);
 int oputsn(const char *str, int n);
 
-// Standard libc functions - only declare if not provided by libc
-#if !defined(USE_PICOLIBC) && !defined(OT_POSIX) && !defined(OT_ARCH_WASM)
-size_t strlen(const char *s);
-
-#ifndef memcpy
-void *memcpy(void *dst, const void *src, size_t n);
-#endif
-
-#ifndef memset
-void *memset(void *buf, int c, size_t n);
-#endif
-
-#ifndef strcpy
-char *strcpy(char *dst, const char *src);
-#endif
-
-int strcmp(const char *s1, const char *s2);
-int strncmp(const char *s1, const char *s2, size_t n);
-int atoi(const char *s);
-int memcmp(const void *s1, const void *s2, size_t n);
-#endif
-
 // System calls
 #define OU_YIELD 1
 #define OU_PUTCHAR 2
@@ -89,20 +40,16 @@ int memcmp(const void *s1, const void *s2, size_t n);
 #define OU_EXIT 4
 #define OU_ALLOC_PAGE 5
 #define OU_GET_SYS_PAGE 6
-#define OU_IO_PUTS 7     // Writes a string in the comm page to the console
-#define OU_PROC_LOOKUP 8 // Look up a process by name
-#define OU_IPC_SEND 9    // Send IPC message to a process
-#define OU_IPC_RECV 10   // Receive IPC message (blocks if none available)
-#define OU_IPC_REPLY 11  // Reply to IPC sender
-#define OU_SHUTDOWN 12   // Shutdown all processes and exit the kernel
-#define OU_LOCK_KNOWN_MEMORY 13  // Lock a known memory region
+#define OU_IO_PUTS 7            // Writes a string in the comm page to the console
+#define OU_PROC_LOOKUP 8        // Look up a process by name
+#define OU_IPC_SEND 9           // Send IPC message to a process
+#define OU_IPC_RECV 10          // Receive IPC message (blocks if none available)
+#define OU_IPC_REPLY 11         // Reply to IPC sender
+#define OU_SHUTDOWN 12          // Shutdown all processes and exit the kernel
+#define OU_LOCK_KNOWN_MEMORY 13 // Lock a known memory region
 
 // Known memory region identifiers
-typedef enum {
-  KNOWN_MEMORY_NONE = 0,
-  KNOWN_MEMORY_FRAMEBUFFER = 1,
-  KNOWN_MEMORY_COUNT
-} KnownMemory;
+typedef enum { KNOWN_MEMORY_NONE = 0, KNOWN_MEMORY_FRAMEBUFFER = 1, KNOWN_MEMORY_COUNT } KnownMemory;
 
 // Arguments to the get sys page
 #define OU_SYS_PAGE_ARG 0

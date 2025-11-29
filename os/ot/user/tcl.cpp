@@ -1,5 +1,7 @@
 // tcl.cpp - implementation of minimal dependency Tcl interpreter
 
+#include <stdio.h>
+
 #include "ot/user/tcl.hpp"
 #include "ot/lib/mpack/mpack-utils.hpp"
 #include "ot/lib/mpack/mpack-writer.hpp"
@@ -36,7 +38,7 @@ void format_error(string &result, const char *fmt, ...) {
   char buffer[4096];
   va_list args;
   va_start(args, fmt);
-  ovsnprintf(buffer, sizeof(buffer), fmt, args);
+  vsnprintf(buffer, sizeof(buffer), fmt, args);
   va_end(args);
   result = buffer;
 }
@@ -547,7 +549,7 @@ static Status cmd_add(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   }
   int result = atoi(argv[1].c_str()) + atoi(argv[2].c_str());
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%d", result);
+  snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
   return S_OK;
 }
@@ -561,7 +563,7 @@ static Status cmd_sub(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   }
   int result = atoi(argv[1].c_str()) - atoi(argv[2].c_str());
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%d", result);
+  snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
   return S_OK;
 }
@@ -575,7 +577,7 @@ static Status cmd_mul(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   }
   int result = atoi(argv[1].c_str()) * atoi(argv[2].c_str());
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%d", result);
+  snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
   return S_OK;
 }
@@ -589,7 +591,7 @@ static Status cmd_div(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   }
   int result = atoi(argv[1].c_str()) / atoi(argv[2].c_str());
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%d", result);
+  snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
   return S_OK;
 }
@@ -603,7 +605,7 @@ static Status cmd_eq(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   }
   int result = atoi(argv[1].c_str()) == atoi(argv[2].c_str());
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%d", result);
+  snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
   return S_OK;
 }
@@ -617,7 +619,7 @@ static Status cmd_ne(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   }
   int result = atoi(argv[1].c_str()) != atoi(argv[2].c_str());
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%d", result);
+  snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
   return S_OK;
 }
@@ -631,7 +633,7 @@ static Status cmd_gt(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   }
   int result = atoi(argv[1].c_str()) > atoi(argv[2].c_str());
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%d", result);
+  snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
   return S_OK;
 }
@@ -645,7 +647,7 @@ static Status cmd_lt(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   }
   int result = atoi(argv[1].c_str()) < atoi(argv[2].c_str());
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%d", result);
+  snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
   return S_OK;
 }
@@ -659,7 +661,7 @@ static Status cmd_gte(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   }
   int result = atoi(argv[1].c_str()) >= atoi(argv[2].c_str());
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%d", result);
+  snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
   return S_OK;
 }
@@ -673,7 +675,7 @@ static Status cmd_lte(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   }
   int result = atoi(argv[1].c_str()) <= atoi(argv[2].c_str());
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%d", result);
+  snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
   return S_OK;
 }
@@ -860,7 +862,7 @@ static Status cmd_llength(Interp &i, vector<string> &argv, ProcPrivdata *privdat
   list_parse(string_view(argv[1]), elements);
 
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%d", (int)elements.size());
+  snprintf(buf, sizeof(buf), "%d", (int)elements.size());
   i.result = buf;
   return S_OK;
 }
@@ -983,7 +985,7 @@ static Status cmd_hex(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   }
 
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%ld", (long)result);
+  snprintf(buf, sizeof(buf), "%ld", (long)result);
   i.result = buf;
   return S_OK;
 }
@@ -1017,7 +1019,7 @@ static Status cmd_oct(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   }
 
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%ld", (long)result);
+  snprintf(buf, sizeof(buf), "%ld", (long)result);
   i.result = buf;
   return S_OK;
 }
@@ -1051,7 +1053,7 @@ static Status cmd_bin(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   }
 
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%ld", (long)result);
+  snprintf(buf, sizeof(buf), "%ld", (long)result);
   i.result = buf;
   return S_OK;
 }
@@ -1331,7 +1333,7 @@ static Status cmd_mp_size(Interp &i, vector<string> &argv, ProcPrivdata *privdat
     return S_ERR;
   }
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%d", (int)i.mpack_writer_.size());
+  snprintf(buf, sizeof(buf), "%d", (int)i.mpack_writer_.size());
   i.result = buf;
   return S_OK;
 }

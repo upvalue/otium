@@ -1,7 +1,9 @@
 #pragma once
 
-#include "ot/common.h"
 #include <stdarg.h>
+#include <stdio.h>
+
+#include "ot/common.h"
 
 class Logger {
 private:
@@ -15,7 +17,7 @@ public:
 
     va_list args;
     va_start(args, format);
-    ovsnprintf(buffer, sizeof(buffer), format, args);
+    vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
 
     oprintf("[%s] %s\n", prefix, buffer);

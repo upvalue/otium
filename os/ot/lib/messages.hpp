@@ -2,6 +2,8 @@
 #ifndef OT_SHARED_MESSAGES_HPP
 #define OT_SHARED_MESSAGES_HPP
 
+#include <stdio.h>
+
 #include "ot/common.h"
 #include "ot/lib/address.hpp"
 #include "ot/lib/error-codes.hpp"
@@ -82,12 +84,12 @@ struct MsgError : MPackBuffer {
     // Format the user message
     va_list args;
     va_start(args, fmt);
-    ovsnprintf(ot_scratch_buffer, OT_PAGE_SIZE, fmt, args);
+    vsnprintf(ot_scratch_buffer, OT_PAGE_SIZE, fmt, args);
     va_end(args);
 
     // Prepend error code string
     char final_msg[OT_PAGE_SIZE];
-    osnprintf(final_msg, OT_PAGE_SIZE, "%s: %s", error_code_to_string(code),
+    snprintf(final_msg, OT_PAGE_SIZE, "%s: %s", error_code_to_string(code),
               ot_scratch_buffer);
 
     // Serialize as array

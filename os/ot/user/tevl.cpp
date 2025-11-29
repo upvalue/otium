@@ -1,5 +1,7 @@
 // tevl.cpp - TEVL text editor core implementation
 
+#include <stdio.h>
+
 #include "ot/user/tevl.hpp"
 #include "ot/common.h"
 #include "ot/lib/file.hpp"
@@ -251,7 +253,7 @@ void editor_scroll() {
 void editor_message_clear() {
   uint64_t now = o_time_get();
   char buffer[1024];
-  osnprintf(buffer, sizeof(buffer), "now: %d, last_message_time: %d", now, e.last_message_time);
+  snprintf(buffer, sizeof(buffer), "now: %d, last_message_time: %d", now, e.last_message_time);
   be->debug_print(buffer);
   if (o_time_get() - e.last_message_time > MESSAGE_TIMEOUT_MS) {
     e.message_line.clear();
@@ -277,7 +279,7 @@ void generate_status_line() {
 
   // cx/cy
   char buffer[32];
-  osnprintf(buffer, sizeof(buffer), "%d/%d", e.cy + 1, e.cx + 1);
+  snprintf(buffer, sizeof(buffer), "%d/%d", e.cy + 1, e.cx + 1);
   e.status_line.append(buffer);
   e.status_line.append(" ");
 }

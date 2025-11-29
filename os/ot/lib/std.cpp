@@ -21,17 +21,8 @@ static FILE _ot_stdout_file = FDEV_SETUP_STREAM(_ot_stdout_put, NULL, NULL, __SW
 FILE *const stdout = &_ot_stdout_file;
 
 #else
-// Non-picolibc builds: use mpaland/printf
-
-// Forward declarations from mpaland/printf (ot/lib/vendor/printf.c)
-extern "C" {
-int vsnprintf_(char *buffer, size_t count, const char *format, va_list va);
-
-// Dummy _putchar for mpaland printf (not used, but required for linking)
-void _putchar(char character) {
-  (void)character; // Unused
-}
-}
+// Non-picolibc builds: use standard library
+#include <stdio.h>
 
 #endif // USE_PICOLIBC
 
@@ -42,30 +33,10 @@ extern "C" char *ot_scratch_buffer = _ot_scratch_buffer;
 // Printf functions
 // ============================================================================
 
-#if defined(USE_PICOLIBC)
-// Use picolibc's tinystdio vsnprintf
-
-int ovsnprintf(char *str, size_t size, const char *format, va_list args) { return vsnprintf(str, size, format, args); }
-
-#else
-// Use mpaland/printf implementation
-
-int ovsnprintf(char *str, size_t size, const char *format, va_list args) { return vsnprintf_(str, size, format, args); }
-
-#endif // USE_PICOLIBC
-
-int osnprintf(char *str, size_t size, const char *format, ...) {
-  va_list args;
-  va_start(args, format);
-  int r = ovsnprintf(str, size, format, args);
-  va_end(args);
-  return r;
-}
-
 void oprintf(const char *fmt, ...) {
   va_list args;
   va_start(args, fmt);
-  int len = ovsnprintf(ot_scratch_buffer, OT_PAGE_SIZE, fmt, args);
+  int len = vsnprintf(ot_scratch_buffer, OT_PAGE_SIZE, fmt, args);
   va_end(args);
   oputsn(ot_scratch_buffer, len);
 }

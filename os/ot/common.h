@@ -27,8 +27,6 @@ extern "C" {
 
 // Otium-specific wrappers
 void oprintf(const char *fmt, ...);
-int ovsnprintf(char *str, size_t size, const char *format, va_list args);
-int osnprintf(char *str, size_t size, const char *format, ...);
 int oputsn(const char *str, int n);
 
 // System calls

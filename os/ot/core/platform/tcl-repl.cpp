@@ -110,7 +110,7 @@ static tcl::Status cmd_fs_read(tcl::Interp &i, tcl::vector<tcl::string> &argv, t
   ErrorCode err = file.open();
   if (err != ErrorCode::NONE) {
     char buf[256];
-    osnprintf(buf, sizeof(buf), "fs/read: failed to open file '%s': %s",
+    snprintf(buf, sizeof(buf), "fs/read: failed to open file '%s': %s",
               argv[1].c_str(), error_code_to_string(err));
     i.result = buf;
     return tcl::S_ERR;
@@ -120,7 +120,7 @@ static tcl::Status cmd_fs_read(tcl::Interp &i, tcl::vector<tcl::string> &argv, t
   err = file.read_all(content);
   if (err != ErrorCode::NONE) {
     char buf[256];
-    osnprintf(buf, sizeof(buf), "fs/read: failed to read file '%s': %s",
+    snprintf(buf, sizeof(buf), "fs/read: failed to read file '%s': %s",
               argv[1].c_str(), error_code_to_string(err));
     i.result = buf;
     return tcl::S_ERR;
@@ -139,7 +139,7 @@ static tcl::Status cmd_fs_write(tcl::Interp &i, tcl::vector<tcl::string> &argv, 
   ErrorCode err = file.open();
   if (err != ErrorCode::NONE) {
     char buf[256];
-    osnprintf(buf, sizeof(buf), "fs/write: failed to open file '%s': %s",
+    snprintf(buf, sizeof(buf), "fs/write: failed to open file '%s': %s",
               argv[1].c_str(), error_code_to_string(err));
     i.result = buf;
     return tcl::S_ERR;
@@ -148,7 +148,7 @@ static tcl::Status cmd_fs_write(tcl::Interp &i, tcl::vector<tcl::string> &argv, 
   err = file.write_all(argv[2]);
   if (err != ErrorCode::NONE) {
     char buf[256];
-    osnprintf(buf, sizeof(buf), "fs/write: failed to write file '%s': %s",
+    snprintf(buf, sizeof(buf), "fs/write: failed to write file '%s': %s",
               argv[1].c_str(), error_code_to_string(err));
     i.result = buf;
     return tcl::S_ERR;
@@ -166,7 +166,7 @@ static tcl::Status cmd_fs_create(tcl::Interp &i, tcl::vector<tcl::string> &argv,
   FILE *f = fopen(argv[1].c_str(), "w");
   if (!f) {
     char buf[256];
-    osnprintf(buf, sizeof(buf), "fs/create: failed to create file '%s'", argv[1].c_str());
+    snprintf(buf, sizeof(buf), "fs/create: failed to create file '%s'", argv[1].c_str());
     i.result = buf;
     return tcl::S_ERR;
   }

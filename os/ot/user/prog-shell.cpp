@@ -1,4 +1,6 @@
 // prog-shell.cpp - TCL shell implementation
+#include <stdio.h>
+
 #include "ot/lib/arguments.hpp"
 #include "ot/lib/file.hpp"
 #include "ot/lib/messages.hpp"
@@ -31,18 +33,18 @@ struct ShellStorage : public LocalStorage {
 
 tcl::Status cmd_proc_lookup(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
   if (!i.arity_check("proc/lookup", argv, 2, 2)) {
-    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "arity check failed");
+    snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "arity check failed");
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
   }
   Pid proc_pid = ou_proc_lookup(argv[1].c_str());
   if (proc_pid == PID_NONE) {
-    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "proc not found");
+    snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "proc not found");
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
   }
   char buf[32];
-  osnprintf(buf, sizeof(buf), "%lu", proc_pid.raw());
+  snprintf(buf, sizeof(buf), "%lu", proc_pid.raw());
   i.result = buf;
   return tcl::S_OK;
 }
@@ -102,7 +104,7 @@ tcl::Status cmd_ipc_send(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
 
   // Format response as a list: <error_code> <value1> <value2> <value3>
   char buf[256];
-  osnprintf(buf, sizeof(buf), "%d %ld %ld %ld", (int)resp.error_code, (long)resp.values[0], (long)resp.values[1],
+  snprintf(buf, sizeof(buf), "%d %ld %ld %ld", (int)resp.error_code, (long)resp.values[0], (long)resp.values[1],
             (long)resp.values[2]);
   i.result = buf;
 
@@ -133,7 +135,7 @@ tcl::Status cmd_fs_read(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pro
   ou::File file(argv[1].c_str(), ou::FileMode::READ);
   ErrorCode err = file.open();
   if (err != ErrorCode::NONE) {
-    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/read: failed to open file '%s': %s", argv[1].c_str(),
+    snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/read: failed to open file '%s': %s", argv[1].c_str(),
               error_code_to_string(err));
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
@@ -142,7 +144,7 @@ tcl::Status cmd_fs_read(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pro
   ou::string content;
   err = file.read_all(content);
   if (err != ErrorCode::NONE) {
-    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/read: failed to read file '%s': %s", argv[1].c_str(),
+    snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/read: failed to read file '%s': %s", argv[1].c_str(),
               error_code_to_string(err));
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
@@ -160,7 +162,7 @@ tcl::Status cmd_fs_write(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
   ou::File file(argv[1].c_str(), ou::FileMode::WRITE);
   ErrorCode err = file.open();
   if (err != ErrorCode::NONE) {
-    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/write: failed to open file '%s': %s", argv[1].c_str(),
+    snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/write: failed to open file '%s': %s", argv[1].c_str(),
               error_code_to_string(err));
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
@@ -168,7 +170,7 @@ tcl::Status cmd_fs_write(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
 
   err = file.write_all(argv[2]);
   if (err != ErrorCode::NONE) {
-    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/write: failed to write file '%s': %s", argv[1].c_str(),
+    snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/write: failed to write file '%s': %s", argv[1].c_str(),
               error_code_to_string(err));
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
@@ -185,7 +187,7 @@ tcl::Status cmd_fs_create(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::P
   // Lookup filesystem server
   Pid fs_pid = ou_proc_lookup("filesystem");
   if (fs_pid == PID_NONE) {
-    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/create: filesystem server not found");
+    snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/create: filesystem server not found");
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
   }
@@ -194,7 +196,7 @@ tcl::Status cmd_fs_create(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::P
   FilesystemClient client(fs_pid);
   auto result = client.create_file(argv[1]);
   if (result.is_err()) {
-    osnprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/create: failed to create file '%s': %s", argv[1].c_str(),
+    snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/create: failed to create file '%s': %s", argv[1].c_str(),
               error_code_to_string(result.error()));
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;

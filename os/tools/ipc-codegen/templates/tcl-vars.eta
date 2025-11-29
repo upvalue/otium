@@ -1,5 +1,6 @@
 // Auto-generated TCL variable registration for IPC method IDs, flags, and error codes
 #pragma once
+#include <stdio.h>
 #include "ot/lib/ipc.hpp"
 #include "ot/lib/error-codes.hpp"
 #include "ot/user/tcl.hpp"
@@ -8,30 +9,30 @@ inline void register_ipc_method_vars(tcl::Interp &i) {
   char buf[32];
 
   // Universal IPC methods
-  osnprintf(buf, sizeof(buf), "%d", IPC_METHOD_SHUTDOWN);
+  snprintf(buf, sizeof(buf), "%d", IPC_METHOD_SHUTDOWN);
   i.set_var("IPC_METHOD_SHUTDOWN", buf);
 
   // IPC flags
-  osnprintf(buf, sizeof(buf), "%d", IPC_FLAG_NONE);
+  snprintf(buf, sizeof(buf), "%d", IPC_FLAG_NONE);
   i.set_var("IPC_FLAG_NONE", buf);
 
-  osnprintf(buf, sizeof(buf), "%d", IPC_FLAG_HAS_COMM_DATA);
+  snprintf(buf, sizeof(buf), "%d", IPC_FLAG_HAS_COMM_DATA);
   i.set_var("IPC_FLAG_HAS_COMM_DATA", buf);
 
 <% it.services.forEach(service => { %>
   // <%= service.name %> service methods
 <% service.methods.forEach(method => { %>
-  osnprintf(buf, sizeof(buf), "%d", <%= it.toHex(method.methodId) %>);
+  snprintf(buf, sizeof(buf), "%d", <%= it.toHex(method.methodId) %>);
   i.set_var("<%= service.name.toUpperCase() %>_<%= it.toUpperSnake(method.name) %>", buf);
 <% }) %>
 <% }) %>
 
   // Error codes
-  osnprintf(buf, sizeof(buf), "%d", ErrorCode::NONE);
+  snprintf(buf, sizeof(buf), "%d", ErrorCode::NONE);
   i.set_var("ERROR_NONE", buf);
 
 <% it.errorCodes.forEach(error => { %>
-  osnprintf(buf, sizeof(buf), "%d", ErrorCode::<%= error.name %>);
+  snprintf(buf, sizeof(buf), "%d", ErrorCode::<%= error.name %>);
   i.set_var("ERROR_<%= error.name %>", buf);
 <% }) %>
 }

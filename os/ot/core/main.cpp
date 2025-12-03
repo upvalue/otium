@@ -55,9 +55,13 @@ void kernel_prog_default() {
 
   // Start typedemo (keyboard typing demo) when graphics and keyboard are enabled
 #if OT_GRAPHICS_BACKEND != OT_GRAPHICS_BACKEND_NONE && OT_KEYBOARD_BACKEND != OT_KEYBOARD_BACKEND_NONE
-  char *typedemo_argv[] = {(char *)"typedemo"};
+  /*char *typedemo_argv[] = {(char *)"typedemo"};
   Arguments typedemo_args = {1, typedemo_argv};
-  process_create("typedemo", (const void *)user_program_main, &typedemo_args, false);
+  process_create("typedemo", (const void *)user_program_main, &typedemo_args, false);*/
+
+  char *spacedemo_argv[] = {(char *)"spacedemo"};
+  Arguments spacedemo_args = {1, spacedemo_argv};
+  process_create("spacedemo", (const void *)user_program_main, &spacedemo_args, false);
 #endif
 }
 

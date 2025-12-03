@@ -1,19 +1,23 @@
 // prog-typedemo.cpp - Keyboard typing demo
 #include "ot/lib/frame-manager.hpp"
-#include "ot/lib/gfx-util.hpp"
+#include "ot/lib/app-framework.hpp"
 #include "ot/user/gen/graphics-client.hpp"
 #include "ot/user/gen/keyboard-client.hpp"
 #include "ot/user/keyboard/backend.hpp"
+#include "ot/user/local-storage.hpp"
 #include "ot/user/prog.h"
 #include "ot/user/user.hpp"
 
 // Constants
-static const int SCREEN_WIDTH = 1024;
-static const int SCREEN_HEIGHT = 700;
-static const int CHAR_WIDTH = 8;
-static const int CHAR_HEIGHT = 16;
 static const int MAX_CHARS = 256;
-static const int IDLE_TIMEOUT_FRAMES = 300;  // 5 seconds at 60 FPS
+static const int IDLE_TIMEOUT_FRAMES = 300; // 5 seconds at 60 FPS
+
+// Font sizes (pixels)
+static const int TITLE_SIZE = 28;
+static const int SUBTITLE_SIZE = 16;
+static const int BODY_SIZE = 18;
+static const int CHAR_WIDTH = 11; // Approximate for monospace at BODY_SIZE
+static const int LINE_HEIGHT = 22;
 
 // Display buffer
 static char display_buffer[MAX_CHARS];
@@ -94,7 +98,7 @@ char scancode_to_ascii(uint16_t code) {
   if (code == KEY_ENTER)
     return '\n';
 
-  return 0;  // Unmapped key
+  return 0; // Unmapped key
 }
 
 void handle_key_event(uint16_t code, uint8_t flags) {
@@ -120,7 +124,15 @@ void handle_key_event(uint16_t code, uint8_t flags) {
   }
 }
 
+struct TypeDemoStorage : public LocalStorage {
+  // Need ~20 pages for TTF font rendering (glyph buffers, etc.)
+  TypeDemoStorage() { process_storage_init(20); }
+};
+
 void typedemo_main() {
+  void *storage_page = ou_get_storage().as_ptr();
+  TypeDemoStorage *s = new (storage_page) TypeDemoStorage();
+
   oprintf("TYPEDEMO: Starting keyboard typing demo\n");
 
   // Yield to let graphics and keyboard drivers initialize
@@ -158,7 +170,15 @@ void typedemo_main() {
   oprintf("TYPEDEMO: Framebuffer %dx%d\n", width, height);
 
   // Create graphics utility wrapper
-  gfx::GfxUtil gfx(fb, width, height);
+  app::Framework gfx(fb, width, height);
+
+  // Initialize TTF font
+  auto ttf_result = gfx.init_ttf();
+  if (ttf_result.is_err()) {
+    oprintf("TYPEDEMO: Failed to init TTF font: %s\n", error_code_to_string(ttf_result.error()));
+    ou_exit();
+  }
+  oprintf("TYPEDEMO: TTF font initialized\n");
 
   // Initialize display buffer
   memset(display_buffer, 0, MAX_CHARS);
@@ -168,7 +188,8 @@ void typedemo_main() {
   // Run demo at 60 FPS
   graphics::FrameManager fm(60);
 
-  oprintf("TYPEDEMO: Running (type to see characters, backspace to delete, 5s idle clears)\n");
+  oprintf("TYPEDEMO: Running (type to see characters, backspace to delete, "
+          "5s idle clears)\n");
 
   while (true) {
     if (fm.begin_frame()) {
@@ -193,42 +214,43 @@ void typedemo_main() {
       // Clear screen to dark blue background
       gfx.clear(0xFF1A1A2E);
 
-      // Draw title
-      gfx.draw_text(20, 20, "KEYBOARD TYPING DEMO", 0xFFEEEEEE, 3);
-      gfx.draw_text(20, 50, "Type to see characters appear. Backspace to delete. 5s idle clears.", 0xFFCCCCCC, 2);
+      // Draw title and instructions
+      gfx.draw_ttf_text(20, 20, "KEYBOARD TYPING DEMO", 0xFFEEEEEE, TITLE_SIZE);
+      gfx.draw_ttf_text(20, 55, "Type to see characters appear. Backspace to delete. 5s idle clears.", 0xFFCCCCCC,
+                        SUBTITLE_SIZE);
 
       // Draw display buffer as text (simple word wrap)
       int x = 20;
-      int y = 100;
+      int y = 90;
       for (int i = 0; i < buffer_pos; i++) {
         char ch = display_buffer[i];
 
         if (ch == '\n') {
           // Newline
           x = 20;
-          y += CHAR_HEIGHT * 2;
+          y += LINE_HEIGHT;
         } else {
           // Draw character
           char str[2] = {ch, 0};
-          gfx.draw_text(x, y, str, 0xFFFFFFFF, 2);
-          x += CHAR_WIDTH * 2;
+          gfx.draw_ttf_text(x, y, str, 0xFFFFFFFF, BODY_SIZE);
+          x += CHAR_WIDTH;
 
           // Word wrap
-          if (x + CHAR_WIDTH * 2 >= width - 20) {
+          if (x + CHAR_WIDTH >= width - 20) {
             x = 20;
-            y += CHAR_HEIGHT * 2;
+            y += LINE_HEIGHT;
           }
         }
 
         // Stop if we run out of vertical space
-        if (y + CHAR_HEIGHT * 2 >= height - 20) {
+        if (y + BODY_SIZE >= height - 20) {
           break;
         }
       }
 
       // Draw cursor
       if ((idle_frames / 30) % 2 == 0) {
-        gfx.draw_text(x, y, "_", 0xFFFFFF00, 2);
+        gfx.draw_ttf_text(x, y, "_", 0xFFFFFF00, BODY_SIZE);
       }
 
       // Flush to display

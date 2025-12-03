@@ -50,7 +50,7 @@ void LocalStorage::process_storage_init(size_t pages) {
   }
 }
 
-void *ou_malloc(size_t size) {
+extern "C" void *ou_malloc(size_t size) {
   if (!local_storage) {
     oprintf("FATAL: ou_malloc called before local_storage initialized\n");
     ou_exit();
@@ -68,7 +68,7 @@ void *ou_malloc(size_t size) {
   return result;
 }
 
-void ou_free(void *ptr) {
+extern "C" void ou_free(void *ptr) {
   if (!local_storage) {
     oprintf("WARNING: ou_free called before local_storage initialized\n");
     return;
@@ -80,7 +80,7 @@ void ou_free(void *ptr) {
   tlsf_free(local_storage->pool, ptr);
 }
 
-void *ou_realloc(void *ptr, size_t size) {
+extern "C" void *ou_realloc(void *ptr, size_t size) {
   if (!local_storage) {
     oprintf("FATAL: ou_realloc called before local_storage initialized\n");
     ou_exit();

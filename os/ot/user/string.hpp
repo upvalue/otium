@@ -7,9 +7,9 @@
 #include "ot/common.h"
 
 // Forward declarations for memory allocation functions
-void *ou_malloc(size_t size);
-void ou_free(void *ptr);
-void *ou_realloc(void *ptr, size_t size);
+extern "C" void *ou_malloc(size_t size);
+extern "C" void ou_free(void *ptr);
+extern "C" void *ou_realloc(void *ptr, size_t size);
 
 namespace ou {
 

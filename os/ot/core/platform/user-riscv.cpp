@@ -6,10 +6,28 @@
 extern char __stack_top[];
 
 __attribute__((noreturn)) extern "C" void exit(int status) {
-  (void)status;  // Bare-metal: ignore status, just spin
+  (void)status; // Bare-metal: ignore status, just spin
   for (;;)
     ;
 }
+
+// Stubs required by picolibc
+__attribute__((noreturn)) extern "C" void _exit(int status) {
+  (void)status;
+  for (;;)
+    ;
+}
+
+// Stub sbrk for malloc - we use TLSF allocator instead, but picolibc needs this
+extern "C" void *sbrk(intptr_t increment) {
+  (void)increment;
+  return (void *)-1; // Always fail - we don't use this
+}
+
+// Dummy stderr for assert (picolibc declares as FILE *const)
+#include <stdio.h>
+static FILE _stderr_file;
+FILE *const stderr = &_stderr_file;
 
 struct SyscallResult {
   int a0, a1, a2;

@@ -1,9 +1,9 @@
-// gfx-font-data.hpp - Blit16 3x5 bitmap font data
+// font-blit16.hpp - Blit16 3x5 bitmap font data
 #pragma once
 
 #include "ot/common.h"
 
-namespace gfx {
+namespace blit16 {
 
 // Blit16 font: 3x5 pixel bitmap font
 // Supports ASCII characters 32-126 (95 glyphs)
@@ -29,4 +29,4 @@ static const int FONT_WIDTH = 3;
 static const int FONT_HEIGHT = 5;
 static const int FONT_ADVANCE = 4;  // Horizontal spacing between characters
 
-} // namespace gfx
+} // namespace blit16

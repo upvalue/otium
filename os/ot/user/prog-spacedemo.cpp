@@ -1,6 +1,6 @@
 // prog-spacedemo.cpp - DOS Space Demo port
 #include "ot/lib/frame-manager.hpp"
-#include "ot/lib/gfx-util.hpp"
+#include "ot/lib/app-framework.hpp"
 #include "ot/lib/math.hpp"
 #include "ot/lib/messages.hpp"
 #include "ot/user/gen/graphics-client.hpp"
@@ -152,7 +152,7 @@ void init_background_stars(SpaceDemoStorage *s) {
 }
 
 // Draw background stars
-void draw_background_stars(SpaceDemoStorage *s, gfx::GfxUtil &gfx, int offset_x, int offset_y) {
+void draw_background_stars(SpaceDemoStorage *s, app::Framework &gfx, int offset_x, int offset_y) {
   for (int i = 0; i < MAX_BACKGROUND_STARS; i++) {
     gfx.put_pixel(s->bg_stars[i].x + offset_x, s->bg_stars[i].y + offset_y, s->bg_stars[i].color);
   }
@@ -179,7 +179,7 @@ void init_debris(SpaceDemoStorage *s) {
 }
 
 // Update and draw debris
-void update_debris(SpaceDemoStorage *s, gfx::GfxUtil &gfx, int offset_x, int offset_y) {
+void update_debris(SpaceDemoStorage *s, app::Framework &gfx, int offset_x, int offset_y) {
   for (int i = 0; i < MAX_DEBRIS; i++) {
     Debris *d = &s->debris[i];
     if (!d->active)
@@ -202,7 +202,7 @@ void update_debris(SpaceDemoStorage *s, gfx::GfxUtil &gfx, int offset_x, int off
       if (brightness > 1.0f)
         brightness = 1.0f;
 
-      uint32_t color = gfx::GfxUtil::interpolate_color(COLOR_BLACK, d->color, brightness);
+      uint32_t color = app::Framework::interpolate_color(COLOR_BLACK, d->color, brightness);
 
       gfx.put_pixel(screen_x + offset_x, screen_y + offset_y, color);
 
@@ -235,7 +235,7 @@ void init_star(SpaceDemoStorage *s) {
 }
 
 // Draw retro palette-based circle with discrete color bands
-void draw_palette_circle(gfx::GfxUtil &gfx, int cx, int cy, int radius, uint32_t palette[8]) {
+void draw_palette_circle(app::Framework &gfx, int cx, int cy, int radius, uint32_t palette[8]) {
   // Draw filled circle with 8 discrete color bands
   int radius_sq = radius * radius;
   for (int y = -radius; y <= radius; y++) {
@@ -263,7 +263,7 @@ void draw_palette_circle(gfx::GfxUtil &gfx, int cx, int cy, int radius, uint32_t
 }
 
 // Update and draw central star
-void update_star(SpaceDemoStorage *s, gfx::GfxUtil &gfx, int offset_x, int offset_y) {
+void update_star(SpaceDemoStorage *s, app::Framework &gfx, int offset_x, int offset_y) {
   if (!s->central_star.active)
     return;
 
@@ -290,7 +290,7 @@ void update_star(SpaceDemoStorage *s, gfx::GfxUtil &gfx, int offset_x, int offse
 }
 
 // Hyperspace warp effect
-void hyperspace_warp(SpaceDemoStorage *s, gfx::GfxUtil &gfx, GraphicsClient &client, int offset_x, int offset_y) {
+void hyperspace_warp(SpaceDemoStorage *s, app::Framework &gfx, GraphicsClient &client, int offset_x, int offset_y) {
   // saved_screen should already be allocated at startup
 
   // Save current screen (just the demo area)
@@ -428,7 +428,7 @@ void spacedemo_main() {
   int offset_y = (height - DEMO_HEIGHT) / 2;
 
   // Create graphics utility wrapper
-  gfx::GfxUtil gfx(fb, width, height);
+  app::Framework gfx(fb, width, height);
 
   // Allocate saved screen buffer upfront using ou_alloc_page
   // Need 1024x700x4 = 2,867,200 bytes = 700 pages (assuming 4KB pages)
@@ -479,12 +479,12 @@ void spacedemo_main() {
       update_star(s, gfx, offset_x, offset_y);
       update_debris(s, gfx, offset_x, offset_y);
 
-      // Draw star system name or jump warning
+      // Draw star system name or jump warning (using blit16 for retro aesthetic)
       if (s->cycle >= s->hyperspace_cycle_time - 60) {
-        gfx.draw_text(offset_x + 20, offset_y + DEMO_HEIGHT - 30, "JUMP ENGAGED", 0xFFAA6654, 3);
+        gfx.draw_blit16_text(offset_x + 20, offset_y + DEMO_HEIGHT - 30, "JUMP ENGAGED", 0xFFAA6654, 3);
       } else {
-        gfx.draw_text(offset_x + 20, offset_y + DEMO_HEIGHT - 30, STAR_NAMES[s->central_star.name_index], 0xFFAA6654,
-                      3);
+        gfx.draw_blit16_text(offset_x + 20, offset_y + DEMO_HEIGHT - 30, STAR_NAMES[s->central_star.name_index],
+                             0xFFAA6654, 3);
       }
 
       // Flush to display

@@ -17,6 +17,14 @@ enum ErrorCode {
   VIRTIO__DEVICE_NOT_FOUND = 5,
   VIRTIO__SETUP_FAIL = 6,
 
+  // App framework errors (fonts, graphics, etc.)
+  APP__FONT_NOT_LOADED = 10,
+  APP__FONT_LOAD_FAILED = 11,
+  APP__GLYPH_LOOKUP_FAILED = 12,
+  APP__GLYPH_METRICS_FAILED = 13,
+  APP__GLYPH_RENDER_FAILED = 14,
+  APP__MEMORY_ALLOC_FAILED = 15,
+
 // Generated service error codes (starting at 100)
 #include "ot/user/gen/error-codes-gen.hpp"
 };
@@ -37,6 +45,18 @@ inline const char *error_code_to_string(ErrorCode code) {
     return "virtio.device-not-found";
   case VIRTIO__SETUP_FAIL:
     return "virtio.setup-fail";
+  case APP__FONT_NOT_LOADED:
+    return "app.font-not-loaded";
+  case APP__FONT_LOAD_FAILED:
+    return "app.font-load-failed";
+  case APP__GLYPH_LOOKUP_FAILED:
+    return "app.glyph-lookup-failed";
+  case APP__GLYPH_METRICS_FAILED:
+    return "app.glyph-metrics-failed";
+  case APP__GLYPH_RENDER_FAILED:
+    return "app.glyph-render-failed";
+  case APP__MEMORY_ALLOC_FAILED:
+    return "app.memory-alloc-failed";
 
 // Generated service error code cases
 #include "ot/user/gen/error-codes-gen-switch.hpp"

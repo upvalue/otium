@@ -1,15 +1,26 @@
-// gfx-util.hpp - Graphics utility class for framebuffer manipulation
+// app-framework.hpp - Application framework for graphics and UI
 #pragma once
 
 #include "ot/common.h"
+#include "ot/lib/error-codes.hpp"
+#include "ot/lib/result.hpp"
 
-namespace gfx {
+// Forward declare libschrift types
+struct SFT_Font;
+
+// Forward declare arena type
+namespace lib {
+class Arena;
+}
+
+namespace app {
 
 // Utility class for framebuffer graphics operations
-class GfxUtil {
+class Framework {
 public:
-  GfxUtil(uint32_t *framebuffer, int width, int height)
-      : fb_(framebuffer), width_(width), height_(height) {}
+  Framework(uint32_t *framebuffer, int width, int height);  // Defined in .cpp
+
+  ~Framework();
 
   // Accessors
   int width() const { return width_; }
@@ -81,8 +92,7 @@ public:
   }
 
   // Draw a filled circle with gradient from center to edge
-  void draw_gradient_circle(int cx, int cy, int radius, uint32_t center_color,
-                            uint32_t edge_color) {
+  void draw_gradient_circle(int cx, int cy, int radius, uint32_t center_color, uint32_t edge_color) {
     int radius_sq = radius * radius;
 
     for (int dy = -radius; dy <= radius; dy++) {
@@ -98,8 +108,7 @@ public:
             float dist_ratio = (float)dist_sq / (float)radius_sq;
 
             // Interpolate from center to edge color
-            uint32_t color =
-                interpolate_color(center_color, edge_color, dist_ratio);
+            uint32_t color = interpolate_color(center_color, edge_color, dist_ratio);
 
             fb_[py * width_ + px] = color;
           }
@@ -108,14 +117,39 @@ public:
     }
   }
 
-  // Font rendering
-  void draw_char(int x, int y, char c, uint32_t color, int scale = 1);
-  void draw_text(int x, int y, const char *text, uint32_t color, int scale = 1);
+  // === BLIT16 FONT (3x5 pixel bitmap) ===
+  // Tiny pixel font - good for retro/pixel art aesthetics
+  void draw_blit16_char(int x, int y, char c, uint32_t color, int scale = 1);
+  void draw_blit16_text(int x, int y, const char *text, uint32_t color, int scale = 1);
+
+  // === TTF FONT (Proggy Vector) ===
+  // Initialize TTF font - call before using draw_ttf_* methods
+  Result<bool, ErrorCode> init_ttf();
+
+  // Check if TTF font is initialized
+  bool ttf_available() const { return ttf_font_ != nullptr; }
+
+  // Draw TTF text (size_px is font size in pixels)
+  // Returns advance width on success, or error
+  Result<int, ErrorCode> draw_ttf_char(int x, int y, uint32_t codepoint, uint32_t color, int size_px);
+  Result<int, ErrorCode> draw_ttf_text(int x, int y, const char *text, uint32_t color, int size_px);
 
 private:
   uint32_t *fb_;
   int width_;
   int height_;
+
+  // TTF font state
+  SFT_Font *ttf_font_;
+
+  // Arena allocator for TTF rendering (avoids per-glyph malloc/free)
+  // Memory is allocated via ou_alloc_page() in constructor
+  static constexpr size_t ARENA_NUM_PAGES = 2;
+  void *arena_memory_;   // Points to allocated page(s)
+  lib::Arena *arena_;    // Placement-new'd into first part of arena_memory_
+
+  // Internal helper to blend a grayscale pixel onto framebuffer
+  void blend_pixel(int x, int y, uint32_t color, uint8_t alpha);
 };
 
-} // namespace gfx
+} // namespace app

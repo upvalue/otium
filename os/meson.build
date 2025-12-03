@@ -285,11 +285,13 @@ if is_riscv or is_wasm
 
   lib_sources = [
     'ot/lib/std.cpp',
-    'ot/lib/gfx-util.cpp',
+    'ot/lib/arena.cpp',
+    'ot/lib/app-framework.cpp',
     'ot/lib/mpack/mpack-reader.cpp',
     'ot/lib/mpack/mpack-utils.cpp',
     'ot/lib/file.cpp',
     'ot/vendor/libmpack/mpack.c',
+    'ot/vendor/libschrift/schrift.c',
   ]
 
   # Only include mpaland/printf for non-picolibc builds (WASM)

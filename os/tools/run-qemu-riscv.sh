@@ -45,10 +45,10 @@ case "$RUNTIME_GRAPHICS_BACKEND" in
     OT_GRAPHICS_BACKEND_VIRTIO)
         # Use cocoa on macOS for graphical display
         if [[ "$OSTYPE" == "darwin"* ]]; then
-            DISPLAY_ARGS="-device virtio-gpu-device -display cocoa"
+            DISPLAY_ARGS="-device virtio-gpu-device -device virtio-keyboard-device -display cocoa"
         else
             # On Linux, use gtk or sdl
-            DISPLAY_ARGS="-device virtio-gpu-device -display gtk"
+            DISPLAY_ARGS="-device virtio-gpu-device -device virtio-keyboard-device -display gtk"
         fi
         ;;
     *)

@@ -9,6 +9,7 @@ extern "C" {
 void shell_main();
 void scratch_main();
 void spacedemo_main();
+void typedemo_main();
 
 #ifdef __cplusplus
 }

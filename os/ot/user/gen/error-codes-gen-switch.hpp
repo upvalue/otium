@@ -23,3 +23,5 @@
     return "filesystem.dir-not-found";
   case FILESYSTEM__NOT_EMPTY:
     return "filesystem.not-empty";
+  case KEYBOARD__NOT_INITIALIZED:
+    return "keyboard.not-initialized";

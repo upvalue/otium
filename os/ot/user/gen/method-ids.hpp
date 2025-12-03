@@ -22,4 +22,7 @@ namespace MethodIds {
     constexpr intptr_t DELETE_FILE = 0x1b00;
     constexpr intptr_t DELETE_DIR = 0x1c00;
   }
+  namespace Keyboard {
+    constexpr intptr_t POLL_KEY = 0x1d00;
+  }
 }

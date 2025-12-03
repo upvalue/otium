@@ -48,6 +48,9 @@ inline void register_ipc_method_vars(tcl::Interp &i) {
   i.set_var("FILESYSTEM_DELETE_FILE", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1c00);
   i.set_var("FILESYSTEM_DELETE_DIR", buf);
+  // Keyboard service methods
+  snprintf(buf, sizeof(buf), "%d", 0x1d00);
+  i.set_var("KEYBOARD_POLL_KEY", buf);
 
   // Error codes
   snprintf(buf, sizeof(buf), "%d", ErrorCode::NONE);
@@ -75,4 +78,6 @@ inline void register_ipc_method_vars(tcl::Interp &i) {
   i.set_var("ERROR_FILESYSTEM__DIR_NOT_FOUND", buf);
   snprintf(buf, sizeof(buf), "%d", ErrorCode::FILESYSTEM__NOT_EMPTY);
   i.set_var("ERROR_FILESYSTEM__NOT_EMPTY", buf);
+  snprintf(buf, sizeof(buf), "%d", ErrorCode::KEYBOARD__NOT_INITIALIZED);
+  i.set_var("ERROR_KEYBOARD__NOT_INITIALIZED", buf);
 }

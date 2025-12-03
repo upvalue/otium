@@ -40,3 +40,11 @@ option('filesystem_backend',
   value: 'auto',
   description: 'Filesystem backend to use (auto = platform default)'
 )
+
+# Keyboard backend - auto selects platform default if not specified
+option('keyboard_backend',
+  type: 'combo',
+  choices: ['auto', 'none', 'virtio'],
+  value: 'auto',
+  description: 'Keyboard backend to use (auto = platform default)'
+)

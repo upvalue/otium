@@ -96,6 +96,15 @@ if graphics_backend == 'auto'
   graphics_backend = default_graphics_backend
 endif
 
+keyboard_backend = get_option('keyboard_backend')
+if keyboard_backend == 'auto'
+  if is_riscv
+    keyboard_backend = 'virtio'
+  else
+    keyboard_backend = 'none'
+  endif
+endif
+
 # Set backend configuration
 graphics_backend_map = {
   'none': 'OT_GRAPHICS_BACKEND_NONE',
@@ -110,8 +119,14 @@ filesystem_backend_map = {
   'onefile': 'OT_FILESYSTEM_BACKEND_ONEFILE',
 }
 
+keyboard_backend_map = {
+  'none': 'OT_KEYBOARD_BACKEND_NONE',
+  'virtio': 'OT_KEYBOARD_BACKEND_VIRTIO',
+}
+
 config_data.set('GRAPHICS_BACKEND', graphics_backend_map[graphics_backend])
 config_data.set('FILESYSTEM_BACKEND', filesystem_backend_map[filesystem_backend])
+config_data.set('KEYBOARD_BACKEND', keyboard_backend_map[keyboard_backend])
 
 # Generate config.h in the build directory under ot/ subdir
 subdir('ot')
@@ -288,6 +303,7 @@ if is_riscv or is_wasm
     'ot/user/prog-scratch.cpp',
     'ot/user/prog-shell.cpp',
     'ot/user/prog-spacedemo.cpp',
+    'ot/user/prog-typedemo.cpp',
     'ot/user/tcl.cpp',
     'ot/user/string.cpp',
     'ot/user/memory-allocator.cpp',
@@ -302,6 +318,9 @@ if is_riscv or is_wasm
     'ot/user/graphics/impl.cpp',
     'ot/user/gen/filesystem-client.cpp',
     'ot/user/gen/filesystem-server.cpp',
+    'ot/user/gen/keyboard-client.cpp',
+    'ot/user/gen/keyboard-server.cpp',
+    'ot/user/keyboard/impl.cpp',
     'ot/lib/frame-manager.cpp',
     # 'ot/user/filesystem/impl-memory.cpp',
   ]
@@ -316,13 +335,17 @@ if is_riscv or is_wasm
   # Platform-specific sources and configuration
   if is_riscv
     graphics_sources = ['ot/user/graphics/backend-virtio.cpp']
+    keyboard_sources = []
+    if keyboard_backend == 'virtio'
+      keyboard_sources += ['ot/user/keyboard/backend-virtio.cpp']
+    endif
     file_backend_sources = ['ot/core/platform/ipc-file.cpp']
     platform_sources = [
       'ot/core/platform/platform-riscv.cpp',
       'ot/lib/platform/shared-riscv.cpp',
       'ot/core/platform/user-riscv.cpp',
     ]
-    all_sources = core_sources + lib_sources + user_sources + graphics_sources + file_backend_sources + platform_sources
+    all_sources = core_sources + lib_sources + user_sources + graphics_sources + keyboard_sources + file_backend_sources + platform_sources
     linker_script = meson.current_source_dir() / 'kernel-link-riscv.ld'
 
     executable('os.elf',

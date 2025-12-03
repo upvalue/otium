@@ -40,6 +40,12 @@ void kernel_prog_default() {
   process_create("filesystem", (const void *)proc_filesystem, nullptr, false);
 #endif
 
+#if OT_KEYBOARD_BACKEND != OT_KEYBOARD_BACKEND_NONE
+  // create keyboard driver (proc_keyboard is defined in ot/user/keyboard/impl.cpp)
+  extern void proc_keyboard(void);
+  process_create("keyboard", (const void *)proc_keyboard, nullptr, false);
+#endif
+
 #ifdef ENABLE_SHELL
   // create shell process
   char *shell_argv[] = {(char *)"shell"};
@@ -47,10 +53,12 @@ void kernel_prog_default() {
   process_create("shell", (const void *)user_program_main, &shell_args, false);
 #endif
 
-  // Uncomment to enable spacedemo (graphics demo)
-  char *spacedemo_argv[] = {(char *)"spacedemo"};
-  Arguments spacedemo_args = {1, spacedemo_argv};
-  process_create("spacedemo", (const void *)user_program_main, &spacedemo_args, false);
+  // Start typedemo (keyboard typing demo) when graphics and keyboard are enabled
+#if OT_GRAPHICS_BACKEND != OT_GRAPHICS_BACKEND_NONE && OT_KEYBOARD_BACKEND != OT_KEYBOARD_BACKEND_NONE
+  char *typedemo_argv[] = {(char *)"typedemo"};
+  Arguments typedemo_args = {1, typedemo_argv};
+  process_create("typedemo", (const void *)user_program_main, &typedemo_args, false);
+#endif
 }
 
 // Kernel startup - initializes kernel and creates initial processes

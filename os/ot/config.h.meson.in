@@ -73,6 +73,13 @@
 // Selected filesystem backend (configured by config.sh)
 #define OT_FILESYSTEM_BACKEND @FILESYSTEM_BACKEND@
 
+// Keyboard backend options
+#define OT_KEYBOARD_BACKEND_NONE 0
+#define OT_KEYBOARD_BACKEND_VIRTIO 1
+
+// Selected keyboard backend (configured by meson)
+#define OT_KEYBOARD_BACKEND @KEYBOARD_BACKEND@
+
 // Shell enable/disable (configured by config.sh)
 @SHELL_ENABLE@
 

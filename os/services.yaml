@@ -133,3 +133,16 @@ services:
 
     # Service-level errors
     errors: [UNIMPLEMENTED]
+
+  - name: Keyboard
+    methods:
+      - name: poll_key
+        args: []
+        returns:
+          - name: has_key
+            signed: false   # 0 = no key, 1 = key event available
+          - name: code
+            signed: false   # Key scan code (Linux input codes)
+          - name: flags
+            signed: false   # Bit 0: pressed, Bit 1: shift, Bit 2: ctrl, Bit 3: alt
+        errors: [NOT_INITIALIZED]

@@ -9,6 +9,9 @@
 LocalStorage *local_storage = nullptr;
 
 void LocalStorage::process_storage_init(size_t pages) {
+  if (pages == 0) {
+    return;
+  }
   // Allocate contiguous pages for the memory pool
   memory_begin = (char *)ou_alloc_page();
   if (!memory_begin) {

@@ -68,7 +68,7 @@
 // Filesystem backend options
 #define OT_FILESYSTEM_BACKEND_NONE 0
 #define OT_FILESYSTEM_BACKEND_MEMORY 1
-#define OT_FILESYSTEM_BACKEND_TARFS 2
+#define OT_FILESYSTEM_BACKEND_ONEFILE 2
 
 // Selected filesystem backend (configured by config.sh)
 #define OT_FILESYSTEM_BACKEND @FILESYSTEM_BACKEND@

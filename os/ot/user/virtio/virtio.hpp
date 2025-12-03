@@ -90,6 +90,8 @@ struct virtq_used {
   uint16_t avail_event;
 } __attribute__((packed));
 
+class VirtQueue; // Forward declaration
+
 class VirtIODevice {
 private:
   volatile uint32_t *base;
@@ -110,6 +112,25 @@ public:
   bool is_valid() {
     uint32_t magic = read_reg(VIRTIO_MMIO_MAGIC_VALUE);
     return magic == 0x74726976; // "virt" in little-endian
+  }
+
+  // Initialize device status sequence, returns false if feature negotiation fails
+  bool init() {
+    write_reg(VIRTIO_MMIO_STATUS, 0); // Reset
+    write_reg(VIRTIO_MMIO_STATUS, VIRTIO_STATUS_ACKNOWLEDGE);
+    write_reg(VIRTIO_MMIO_STATUS, VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER);
+    write_reg(VIRTIO_MMIO_DRIVER_FEATURES, 0); // Accept no optional features
+    write_reg(VIRTIO_MMIO_STATUS, VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK);
+    return read_reg(VIRTIO_MMIO_STATUS) & VIRTIO_STATUS_FEATURES_OK;
+  }
+
+  // Configure a virtqueue on the device (handles both legacy and modern)
+  inline void setup_queue(uint32_t idx, VirtQueue &q, PageAddr mem, uint16_t size);
+
+  // Mark device ready to process requests
+  void set_driver_ok() {
+    write_reg(VIRTIO_MMIO_STATUS,
+              VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK | VIRTIO_STATUS_DRIVER_OK);
   }
 
   void probe() {
@@ -204,11 +225,10 @@ public:
     memset(used, 0, sizeof(struct virtq_used) + sizeof(struct virtq_used_elem) * size);
   }
 
-  void add_buf(uint16_t desc_idx, PageAddr buf, uint32_t len, bool write) {
-    // buf is already a physical address (PageAddr), use it directly
+  void add_buf(uint16_t desc_idx, PageAddr buf, uint32_t len, uint16_t flags) {
     desc[desc_idx].addr = (uint64_t)buf.raw();
     desc[desc_idx].len = len;
-    desc[desc_idx].flags = write ? VIRTQ_DESC_F_WRITE : 0;
+    desc[desc_idx].flags = flags;
     desc[desc_idx].next = 0;
   }
 
@@ -228,6 +248,68 @@ public:
     last_used_idx++;
     return used->ring[idx].id;
   }
+
+  inline class VirtQueueChain chain(uint16_t start = 0);
 };
+
+// Builder for chaining descriptors ergonomically
+class VirtQueueChain {
+private:
+  VirtQueue &queue;
+  uint16_t start_idx;
+  uint16_t current_idx;
+  int16_t prev_idx; // -1 if no previous
+
+public:
+  VirtQueueChain(VirtQueue &q, uint16_t start = 0) : queue(q), start_idx(start), current_idx(start), prev_idx(-1) {}
+
+  // Device-readable buffer (data sent TO device)
+  VirtQueueChain &out(PageAddr buf, uint32_t len) { return add(buf, len, 0); }
+
+  // Device-writable buffer (data received FROM device)
+  VirtQueueChain &in(PageAddr buf, uint32_t len) { return add(buf, len, VIRTQ_DESC_F_WRITE); }
+
+  // Conditional: out if is_out is true, otherwise in
+  VirtQueueChain &out_or_in(bool is_out, PageAddr buf, uint32_t len) { return is_out ? out(buf, len) : in(buf, len); }
+
+  void submit() { queue.submit(start_idx); }
+
+private:
+  VirtQueueChain &add(PageAddr buf, uint32_t len, uint16_t flags) {
+    // Link previous descriptor to this one
+    if (prev_idx >= 0) {
+      queue.desc[prev_idx].flags |= VIRTQ_DESC_F_NEXT;
+      queue.desc[prev_idx].next = current_idx;
+    }
+
+    queue.add_buf(current_idx, buf, len, flags);
+    prev_idx = current_idx;
+    current_idx++;
+    return *this;
+  }
+};
+
+inline VirtQueueChain VirtQueue::chain(uint16_t start) { return VirtQueueChain(*this, start); }
+
+inline void VirtIODevice::setup_queue(uint32_t idx, VirtQueue &q, PageAddr mem, uint16_t size) {
+  q.init(mem, size);
+  write_reg(VIRTIO_MMIO_QUEUE_SEL, idx);
+  write_reg(VIRTIO_MMIO_QUEUE_NUM, size);
+
+  uint32_t version = read_reg(VIRTIO_MMIO_VERSION);
+  if (version == 1) {
+    write_reg(VIRTIO_MMIO_GUEST_PAGE_SIZE, OT_PAGE_SIZE);
+    write_reg(VIRTIO_MMIO_QUEUE_ALIGN, OT_PAGE_SIZE);
+    write_reg(VIRTIO_MMIO_QUEUE_PFN, mem.raw() / OT_PAGE_SIZE);
+  } else {
+    write_reg(VIRTIO_MMIO_QUEUE_DESC_LOW, (uint32_t)(uintptr_t)q.desc);
+    write_reg(VIRTIO_MMIO_QUEUE_DESC_HIGH, 0);
+    write_reg(VIRTIO_MMIO_QUEUE_DRIVER_LOW, (uint32_t)(uintptr_t)q.avail);
+    write_reg(VIRTIO_MMIO_QUEUE_DRIVER_HIGH, 0);
+    write_reg(VIRTIO_MMIO_QUEUE_DEVICE_LOW, (uint32_t)(uintptr_t)q.used);
+    write_reg(VIRTIO_MMIO_QUEUE_DEVICE_HIGH, 0);
+    write_reg(VIRTIO_MMIO_QUEUE_READY, 1);
+  }
+}
 
 #endif

@@ -16,36 +16,12 @@ bool VirtioGraphicsBackend::init() {
 
   l.log("Initializing VirtIO GPU...");
 
-  // Check version
-  uint32_t version = dev.read_reg(VIRTIO_MMIO_VERSION);
-  l.log("VirtIO version: %u", version);
-  if (version != 1 && version != 2) {
-    l.log("GPU: Unsupported version");
-    return false;
-  }
-
-  // Reset device
-  dev.write_reg(VIRTIO_MMIO_STATUS, 0);
-
-  // Set ACKNOWLEDGE status bit
-  dev.write_reg(VIRTIO_MMIO_STATUS, VIRTIO_STATUS_ACKNOWLEDGE);
-
-  // Set DRIVER status bit
-  dev.write_reg(VIRTIO_MMIO_STATUS, VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER);
-
-  // Negotiate features (we accept whatever is offered for simplicity)
-  dev.write_reg(VIRTIO_MMIO_DRIVER_FEATURES, 0);
-
-  // Set FEATURES_OK
-  dev.write_reg(VIRTIO_MMIO_STATUS, VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK);
-
-  // Check FEATURES_OK
-  if (!(dev.read_reg(VIRTIO_MMIO_STATUS) & VIRTIO_STATUS_FEATURES_OK)) {
+  if (!dev.init()) {
     l.log("GPU: Feature negotiation failed");
     return false;
   }
 
-  // Setup controlq (queue 0)
+  // Check queue availability
   dev.write_reg(VIRTIO_MMIO_QUEUE_SEL, 0);
   uint32_t max_queue_size = dev.read_reg(VIRTIO_MMIO_QUEUE_NUM_MAX);
   l.log("Queue 0 max size: %u", max_queue_size);
@@ -58,36 +34,12 @@ bool VirtioGraphicsBackend::init() {
     return false;
   }
 
-  // Allocate memory for the queue
+  // Setup queue
   PageAddr queue_mem = PageAddr((uintptr_t)ou_alloc_page());
-  controlq.init(queue_mem, QUEUE_SIZE);
-
+  dev.setup_queue(0, controlq, queue_mem, QUEUE_SIZE);
   l.log("Queue physical addr: 0x%x", queue_mem.raw());
 
-  // Configure queue (version-specific)
-  dev.write_reg(VIRTIO_MMIO_QUEUE_NUM, QUEUE_SIZE);
-
-  if (version == 1) {
-    // Legacy interface: use guest page size and PFN
-    dev.write_reg(VIRTIO_MMIO_GUEST_PAGE_SIZE, OT_PAGE_SIZE);
-    dev.write_reg(VIRTIO_MMIO_QUEUE_ALIGN, OT_PAGE_SIZE);
-    dev.write_reg(VIRTIO_MMIO_QUEUE_PFN, queue_mem.raw() / OT_PAGE_SIZE);
-    l.log("Legacy mode: PFN = 0x%x", queue_mem.raw() / OT_PAGE_SIZE);
-  } else {
-    // Modern interface: use separate desc/avail/used addresses
-    dev.write_reg(VIRTIO_MMIO_QUEUE_DESC_LOW, (uint32_t)(uintptr_t)controlq.desc);
-    dev.write_reg(VIRTIO_MMIO_QUEUE_DESC_HIGH, 0);
-    dev.write_reg(VIRTIO_MMIO_QUEUE_DRIVER_LOW, (uint32_t)(uintptr_t)controlq.avail);
-    dev.write_reg(VIRTIO_MMIO_QUEUE_DRIVER_HIGH, 0);
-    dev.write_reg(VIRTIO_MMIO_QUEUE_DEVICE_LOW, (uint32_t)(uintptr_t)controlq.used);
-    dev.write_reg(VIRTIO_MMIO_QUEUE_DEVICE_HIGH, 0);
-    dev.write_reg(VIRTIO_MMIO_QUEUE_READY, 1);
-  }
-
-  // Set DRIVER_OK
-  dev.write_reg(VIRTIO_MMIO_STATUS,
-                VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK | VIRTIO_STATUS_DRIVER_OK);
-
+  dev.set_driver_ok();
   l.log("Status after DRIVER_OK: 0x%x", dev.read_reg(VIRTIO_MMIO_STATUS));
 
   l.log("GPU: Initialization complete");
@@ -102,19 +54,8 @@ uint32_t VirtioGraphicsBackend::send_command(PageAddr cmd, uint32_t cmd_len, Pag
   // Zero out response buffer
   memset(resp.as_ptr(), 0, resp_len);
 
-  // Use descriptor 0 for command, descriptor 1 for response
-  controlq.add_buf(0, cmd, cmd_len, false);
-  controlq.add_buf(1, resp, resp_len, true);
-
-  // Chain descriptors
-  controlq.desc[0].flags |= VIRTQ_DESC_F_NEXT;
-  controlq.desc[0].next = 1;
-
-  uint16_t avail_idx_before = controlq.avail->idx;
-  uint16_t used_idx_before = controlq.used->idx;
-
-  // Submit to queue
-  controlq.submit(0);
+  // Chain command (out) -> response (in) and submit
+  controlq.chain().out(cmd, cmd_len).in(resp, resp_len).submit();
 
   // oprintf("  avail idx: %u->%u, used idx: %u\n", avail_idx_before, controlq.avail->idx, used_idx_before);
   // Dump raw descriptor bytes

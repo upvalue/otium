@@ -261,8 +261,8 @@ PageAddr process_get_arg_page() {
   if (current_proc == nullptr) {
     return paddr;
   }
-  oprintf("process_get_arg_page: pidx %d pid %lu arg_page %p\n", current_proc->pidx.raw(), current_proc->pid.raw(),
-          current_proc->arg_page.as_ptr());
+  /*oprintf("process_get_arg_page: pidx %d pid %lu arg_page %p\n", current_proc->pidx.raw(), current_proc->pid.raw(),
+          current_proc->arg_page.as_ptr());*/
   return current_proc->arg_page;
 }
 

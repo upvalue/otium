@@ -107,7 +107,7 @@ graphics_backend_map = {
 filesystem_backend_map = {
   'none': 'OT_FILESYSTEM_BACKEND_NONE',
   'memory': 'OT_FILESYSTEM_BACKEND_MEMORY',
-  'tarfs': 'OT_FILESYSTEM_BACKEND_TARFS',
+  'onefile': 'OT_FILESYSTEM_BACKEND_ONEFILE',
 }
 
 config_data.set('GRAPHICS_BACKEND', graphics_backend_map[graphics_backend])
@@ -309,8 +309,8 @@ if is_riscv or is_wasm
   # Filesystem implementation
   if filesystem_backend == 'memory'
     user_sources += ['ot/user/filesystem/impl-memory.cpp']
-  elif filesystem_backend == 'tarfs'
-    user_sources += ['ot/user/filesystem/impl-tarfs.cpp']
+  elif filesystem_backend == 'onefile'
+    user_sources += ['ot/user/filesystem/impl-onefile.cpp']
   endif
 
   # Platform-specific sources and configuration

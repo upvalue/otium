@@ -34,8 +34,9 @@ bool VirtioGraphicsBackend::init() {
     return false;
   }
 
-  // Setup queue
+  // Setup queue (2 pages for legacy VirtIO - used ring must be page-aligned)
   PageAddr queue_mem = PageAddr((uintptr_t)ou_alloc_page());
+  ou_alloc_page(); // Second page for used ring
   dev.setup_queue(0, controlq, queue_mem, QUEUE_SIZE);
   l.log("Queue physical addr: 0x%x", queue_mem.raw());
 

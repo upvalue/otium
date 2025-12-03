@@ -200,8 +200,8 @@ public:
 class VirtQueue {
 public:
   struct virtq_desc *desc;
-  struct virtq_avail *avail;
-  struct virtq_used *used;
+  volatile struct virtq_avail *avail;
+  volatile struct virtq_used *used;
   uint16_t last_used_idx;
   uint16_t queue_size;
 
@@ -209,20 +209,19 @@ public:
     queue_size = size;
     last_used_idx = 0;
 
-    // Layout: descriptors, then avail ring, then used ring
-    // VirtIO requires: desc (16-byte aligned), avail (2-byte), used (4-byte)
+    // Layout for legacy VirtIO: descriptors, avail ring, then used ring (page-aligned)
     desc = mem.as<struct virtq_desc>();
-    avail = (struct virtq_avail *)(desc + size);
+    avail = (volatile struct virtq_avail *)(desc + size);
 
-    // Calculate used ring address with proper 4-byte alignment
+    // For legacy VirtIO, used ring must be page-aligned
     uintptr_t used_addr = (uintptr_t)avail + sizeof(struct virtq_avail) + sizeof(uint16_t) * size;
-    used_addr = (used_addr + 3) & ~3; // Round up to 4-byte boundary
-    used = (struct virtq_used *)used_addr;
+    used_addr = (used_addr + OT_PAGE_SIZE - 1) & ~(OT_PAGE_SIZE - 1);
+    used = (volatile struct virtq_used *)used_addr;
 
     // Zero out the queue
     memset(desc, 0, sizeof(struct virtq_desc) * size);
-    memset(avail, 0, sizeof(struct virtq_avail) + sizeof(uint16_t) * size);
-    memset(used, 0, sizeof(struct virtq_used) + sizeof(struct virtq_used_elem) * size);
+    memset((void *)avail, 0, sizeof(struct virtq_avail) + sizeof(uint16_t) * size);
+    memset((void *)used, 0, sizeof(struct virtq_used) + sizeof(struct virtq_used_elem) * size);
   }
 
   void add_buf(uint16_t desc_idx, PageAddr buf, uint32_t len, uint16_t flags) {

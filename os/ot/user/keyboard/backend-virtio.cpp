@@ -20,12 +20,13 @@ bool VirtioKeyboardBackend::init() {
     return false;
   }
 
-  // Allocate memory for virtqueue structures (descriptors, avail, used rings)
+  // Allocate memory for virtqueue structures (2 pages for legacy VirtIO)
   queue_memory = PageAddr((uintptr_t)ou_alloc_page());
   if (queue_memory.raw() == 0) {
     l.log("ERROR: Failed to allocate queue memory");
     return false;
   }
+  ou_alloc_page(); // Second page for used ring (page-aligned in legacy VirtIO)
 
   // Setup event queue (queue 0)
   dev.setup_queue(0, eventq, queue_memory, QUEUE_SIZE);

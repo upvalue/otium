@@ -90,7 +90,9 @@ void proc_filesystem(void) {
   // TarFSStorage *ls = new (storage_page) TarFSStorage();
   TarFSServer *server = new (storage_page) TarFSServer();
   server->process_storage_init(0);
+  // Allocate 2 pages for legacy VirtIO queue (used ring must be page-aligned)
   PageAddr queue_mem = PageAddr((uintptr_t)ou_alloc_page());
+  ou_alloc_page(); // Second page for used ring
   // ls->process_storage_init(10);
 
     auto res = VirtIODevice::scan_for_device(VIRTIO_ID_BLOCK);

@@ -6,6 +6,9 @@
 // Runs an interactive Tcl shell
 #define KERNEL_PROG_SHELL 0
 
+// Runs a graphical UI shell
+#define KERNEL_PROG_UISHELL 10
+
 // Runs a program that prints hello world and exits
 #define KERNEL_PROG_TEST_HELLO 1
 

@@ -5,6 +5,7 @@ option('kernel_prog',
   type: 'combo',
   choices: [
     'shell',
+    'uishell',
     'test_hello',
     'test_mem',
     'test_alternate',

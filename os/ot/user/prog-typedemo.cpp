@@ -1,6 +1,7 @@
 // prog-typedemo.cpp - Keyboard typing demo
-#include "ot/lib/frame-manager.hpp"
 #include "ot/lib/app-framework.hpp"
+#include "ot/lib/frame-manager.hpp"
+#include "ot/lib/keyboard-utils.hpp"
 #include "ot/user/gen/graphics-client.hpp"
 #include "ot/user/gen/keyboard-client.hpp"
 #include "ot/user/keyboard/backend.hpp"
@@ -16,90 +17,15 @@ static const int IDLE_TIMEOUT_FRAMES = 300; // 5 seconds at 60 FPS
 static const int TITLE_SIZE = 28;
 static const int SUBTITLE_SIZE = 16;
 static const int BODY_SIZE = 18;
-static const int CHAR_WIDTH = 11; // Approximate for monospace at BODY_SIZE
-static const int LINE_HEIGHT = 22;
+static const int WRAP_WIDTH = 300;     // Text wrapping width
+static const int WRAP_LINE_OFFSET = 5; // Offset for wrap indicator line
+static const int TEXT_START_X = 20;
+static const int TEXT_START_Y = 90;
 
 // Display buffer
 static char display_buffer[MAX_CHARS];
 static int buffer_pos = 0;
 static int idle_frames = 0;
-
-// Map key scan code to ASCII character (simple US-QWERTY layout)
-char scancode_to_ascii(uint16_t code) {
-  // Numbers (KEY_1 = 2 to KEY_9 = 10, KEY_0 = 11)
-  if (code >= KEY_1 && code <= KEY_9) {
-    return '1' + (code - KEY_1);
-  }
-  if (code == KEY_0) {
-    return '0';
-  }
-
-  // Top row letters (Q-P)
-  if (code == KEY_Q)
-    return 'q';
-  if (code == KEY_W)
-    return 'w';
-  if (code == KEY_E)
-    return 'e';
-  if (code == KEY_R)
-    return 'r';
-  if (code == KEY_T)
-    return 't';
-  if (code == KEY_Y)
-    return 'y';
-  if (code == KEY_U)
-    return 'u';
-  if (code == KEY_I)
-    return 'i';
-  if (code == KEY_O)
-    return 'o';
-  if (code == KEY_P)
-    return 'p';
-
-  // Home row letters (A-L)
-  if (code == KEY_A)
-    return 'a';
-  if (code == KEY_S)
-    return 's';
-  if (code == KEY_D)
-    return 'd';
-  if (code == KEY_F)
-    return 'f';
-  if (code == KEY_G)
-    return 'g';
-  if (code == KEY_H)
-    return 'h';
-  if (code == KEY_J)
-    return 'j';
-  if (code == KEY_K)
-    return 'k';
-  if (code == KEY_L)
-    return 'l';
-
-  // Bottom row letters (Z-M)
-  if (code == KEY_Z)
-    return 'z';
-  if (code == KEY_X)
-    return 'x';
-  if (code == KEY_C)
-    return 'c';
-  if (code == KEY_V)
-    return 'v';
-  if (code == KEY_B)
-    return 'b';
-  if (code == KEY_N)
-    return 'n';
-  if (code == KEY_M)
-    return 'm';
-
-  // Special keys
-  if (code == KEY_SPACE)
-    return ' ';
-  if (code == KEY_ENTER)
-    return '\n';
-
-  return 0; // Unmapped key
-}
 
 void handle_key_event(uint16_t code, uint8_t flags) {
   // Only process key press events (not release)
@@ -116,8 +42,10 @@ void handle_key_event(uint16_t code, uint8_t flags) {
     return;
   }
 
-  // Map to ASCII
-  char ch = scancode_to_ascii(code);
+  // Map to ASCII (with shift support)
+  bool shift = (flags & KEY_FLAG_SHIFT) != 0;
+  char ch = keyboard::scancode_to_ascii(code, shift);
+  oprintf("TYPEDEMO: char: %c %d\n", ch, code);
   if (ch && buffer_pos < MAX_CHARS - 1) {
     display_buffer[buffer_pos++] = ch;
     idle_frames = 0;
@@ -215,42 +143,40 @@ void typedemo_main() {
       gfx.clear(0xFF1A1A2E);
 
       // Draw title and instructions
-      gfx.draw_ttf_text(20, 20, "KEYBOARD TYPING DEMO", 0xFFEEEEEE, TITLE_SIZE);
-      gfx.draw_ttf_text(20, 55, "Type to see characters appear. Backspace to delete. 5s idle clears.", 0xFFCCCCCC,
-                        SUBTITLE_SIZE);
+      gfx.draw_ttf_text(TEXT_START_X, 20, "KEYBOARD TYPING DEMO", 0xFFEEEEEE, TITLE_SIZE);
+      gfx.draw_ttf_text(TEXT_START_X, 55, "Type to see characters appear. Backspace to delete. 5s idle clears.",
+                        0xFFCCCCCC, SUBTITLE_SIZE);
 
-      // Draw display buffer as text (simple word wrap)
-      int x = 20;
-      int y = 90;
-      for (int i = 0; i < buffer_pos; i++) {
-        char ch = display_buffer[i];
+      // Draw red wrap indicator line (5px after the wrap boundary)
+      int wrap_line_x = TEXT_START_X + WRAP_WIDTH + WRAP_LINE_OFFSET;
+      gfx.draw_vline(wrap_line_x, TEXT_START_Y, height - TEXT_START_Y - 20, 0xFF4444AA); // Red line
 
-        if (ch == '\n') {
-          // Newline
-          x = 20;
-          y += LINE_HEIGHT;
-        } else {
-          // Draw character
-          char str[2] = {ch, 0};
-          gfx.draw_ttf_text(x, y, str, 0xFFFFFFFF, BODY_SIZE);
-          x += CHAR_WIDTH;
+      // Draw display buffer as text with wrapping
+      display_buffer[buffer_pos] = '\0'; // Null-terminate for drawing
+      auto wrap_result =
+          gfx.draw_ttf_text_wrapped(TEXT_START_X, TEXT_START_Y, WRAP_WIDTH, display_buffer, 0xFFFFFFFF, BODY_SIZE);
 
-          // Word wrap
-          if (x + CHAR_WIDTH >= width - 20) {
-            x = 20;
-            y += LINE_HEIGHT;
+      // Draw cursor at end of text
+      if ((idle_frames / 30) % 2 == 0) {
+        int cursor_y = TEXT_START_Y;
+        if (wrap_result.is_ok()) {
+          cursor_y = TEXT_START_Y + wrap_result.value() - BODY_SIZE - 2; // Adjust to last line
+        }
+        // Measure last line to find cursor x position
+        int cursor_x = TEXT_START_X;
+        // Find start of last line
+        int last_line_start = 0;
+        for (int i = buffer_pos - 1; i >= 0; i--) {
+          if (display_buffer[i] == '\n') {
+            last_line_start = i + 1;
+            break;
           }
         }
-
-        // Stop if we run out of vertical space
-        if (y + BODY_SIZE >= height - 20) {
-          break;
+        auto measure_result = gfx.measure_ttf_text(display_buffer + last_line_start, BODY_SIZE);
+        if (measure_result.is_ok()) {
+          cursor_x = TEXT_START_X + (measure_result.value() % WRAP_WIDTH);
         }
-      }
-
-      // Draw cursor
-      if ((idle_frames / 30) % 2 == 0) {
-        gfx.draw_ttf_text(x, y, "_", 0xFFFFFF00, BODY_SIZE);
+        gfx.draw_ttf_text(cursor_x, cursor_y, "_", 0xFFFFFF00, BODY_SIZE);
       }
 
       // Flush to display

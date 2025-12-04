@@ -47,21 +47,27 @@ void kernel_prog_default() {
 #endif
 
 #ifdef ENABLE_SHELL
-  // create shell process
+  // Create shell process - choose UI shell or text shell based on kernel program
+#if KERNEL_PROG == KERNEL_PROG_UISHELL
+  char *shell_argv[] = {(char *)"uishell"};
+  Arguments shell_args = {1, shell_argv};
+  process_create("uishell", (const void *)user_program_main, &shell_args, false);
+#else
   char *shell_argv[] = {(char *)"shell"};
   Arguments shell_args = {1, shell_argv};
   process_create("shell", (const void *)user_program_main, &shell_args, false);
 #endif
+#endif
 
-  // Start typedemo (keyboard typing demo) when graphics and keyboard are enabled
-#if OT_GRAPHICS_BACKEND != OT_GRAPHICS_BACKEND_NONE && OT_KEYBOARD_BACKEND != OT_KEYBOARD_BACKEND_NONE
-  /*char *typedemo_argv[] = {(char *)"typedemo"};
+  // Start typedemo (keyboard typing demo) when graphics and keyboard are enabled (but not for uishell mode)
+#if OT_GRAPHICS_BACKEND != OT_GRAPHICS_BACKEND_NONE && OT_KEYBOARD_BACKEND != OT_KEYBOARD_BACKEND_NONE && KERNEL_PROG != KERNEL_PROG_UISHELL
+  char *typedemo_argv[] = {(char *)"typedemo"};
   Arguments typedemo_args = {1, typedemo_argv};
-  process_create("typedemo", (const void *)user_program_main, &typedemo_args, false);*/
+  process_create("typedemo", (const void *)user_program_main, &typedemo_args, false);
 
-  char *spacedemo_argv[] = {(char *)"spacedemo"};
-  Arguments spacedemo_args = {1, spacedemo_argv};
-  process_create("spacedemo", (const void *)user_program_main, &spacedemo_args, false);
+  // char *spacedemo_argv[] = {(char *)"spacedemo"};
+  // Arguments spacedemo_args = {1, spacedemo_argv};
+  // process_create("spacedemo", (const void *)user_program_main, &spacedemo_args, false);
 #endif
 }
 
@@ -72,7 +78,7 @@ void kernel_start(void) {
   // Kernel "program" there are a few different programs for testing some functionality
   // of the kernel end to end
 
-#if KERNEL_PROG == KERNEL_PROG_DEFAULT
+#if KERNEL_PROG == KERNEL_PROG_DEFAULT || KERNEL_PROG == KERNEL_PROG_SHELL || KERNEL_PROG == KERNEL_PROG_UISHELL
   kernel_prog_default();
 #else
   kernel_prog_test();

@@ -16,8 +16,7 @@ extern "C" void oprintf(const char *fmt, ...);
 namespace app {
 
 Framework::Framework(uint32_t *framebuffer, int width, int height)
-    : fb_(framebuffer), width_(width), height_(height), ttf_font_(nullptr),
-      arena_memory_(nullptr), arena_(nullptr) {
+    : fb_(framebuffer), width_(width), height_(height), ttf_font_(nullptr), arena_memory_(nullptr), arena_(nullptr) {
   // Allocate pages for arena
   arena_memory_ = ou_alloc_page();
   for (size_t i = 1; i < ARENA_NUM_PAGES; i++) {
@@ -163,7 +162,7 @@ Result<int, ErrorCode> Framework::draw_ttf_char(int x, int y, uint32_t codepoint
   sft.xOffset = 0;
   sft.yOffset = 0;
   sft.flags = SFT_DOWNWARD_Y;
-  sft.arena = arena_;  // Use arena allocator for outline data
+  sft.arena = arena_; // Use arena allocator for outline data
 
   // Lookup glyph ID
   SFT_Glyph glyph;
@@ -181,14 +180,6 @@ Result<int, ErrorCode> Framework::draw_ttf_char(int x, int y, uint32_t codepoint
 
   int glyph_w = metrics.minWidth;
   int glyph_h = metrics.minHeight;
-
-  // Debug: log first character of each render
-  static int log_count = 0;
-  if (log_count < 5) {
-    oprintf("[app] draw_ttf_char: cp=%u w=%d h=%d adv=%d\n",
-            codepoint, glyph_w, glyph_h, (int)metrics.advanceWidth);
-    log_count++;
-  }
 
   if (glyph_w <= 0 || glyph_h <= 0) {
     // Space or empty glyph - just return advance
@@ -232,7 +223,8 @@ Result<int, ErrorCode> Framework::draw_ttf_char(int x, int y, uint32_t codepoint
   for (int py = 0; py < glyph_h; py++) {
     for (int px = 0; px < glyph_w; px++) {
       uint8_t alpha = pixels[py * glyph_w + px];
-      if (alpha > 0) nonzero_alpha++;
+      if (alpha > 0)
+        nonzero_alpha++;
       blend_pixel(draw_x + px, draw_y + py, color, alpha);
     }
   }
@@ -281,6 +273,106 @@ Result<int, ErrorCode> Framework::draw_ttf_text(int x, int y, const char *text, 
   }
 
   return Result<int, ErrorCode>::ok(cursor_x - start_x);
+}
+
+Result<int, ErrorCode> Framework::measure_ttf_text(const char *text, int size_px) {
+  if (!ttf_font_) {
+    return Result<int, ErrorCode>::err(APP__FONT_NOT_LOADED);
+  }
+  if (!text) {
+    return Result<int, ErrorCode>::ok(0);
+  }
+
+  SFT sft = {};
+  sft.font = ttf_font_;
+  sft.xScale = (float)size_px;
+  sft.yScale = (float)size_px;
+  sft.flags = SFT_DOWNWARD_Y;
+
+  int total_width = 0;
+  for (const char *p = text; *p; p++) {
+    if (*p == '\n') {
+      continue; // Newlines don't contribute to width
+    }
+
+    SFT_Glyph glyph;
+    if (sft_lookup(&sft, (uint32_t)(unsigned char)*p, &glyph) < 0) {
+      continue;
+    }
+
+    SFT_GMetrics metrics;
+    if (sft_gmetrics(&sft, glyph, &metrics) < 0) {
+      continue;
+    }
+
+    total_width += (int)metrics.advanceWidth;
+  }
+
+  return Result<int, ErrorCode>::ok(total_width);
+}
+
+Result<int, ErrorCode> Framework::draw_ttf_text_wrapped(int x, int y, int max_width, const char *text, uint32_t color,
+                                                        int size_px) {
+  if (!ttf_font_) {
+    return Result<int, ErrorCode>::err(APP__FONT_NOT_LOADED);
+  }
+  if (!text) {
+    return Result<int, ErrorCode>::ok(0);
+  }
+
+  // Get line metrics for proper line height
+  SFT sft = {};
+  sft.font = ttf_font_;
+  sft.xScale = (float)size_px;
+  sft.yScale = (float)size_px;
+  sft.flags = SFT_DOWNWARD_Y;
+  sft.arena = arena_;
+
+  SFT_LMetrics lmetrics;
+  if (sft_lmetrics(&sft, &lmetrics) < 0) {
+    return Result<int, ErrorCode>::err(APP__GLYPH_METRICS_FAILED);
+  }
+  int line_height = (int)(lmetrics.ascender - lmetrics.descender) + 2;
+
+  int cursor_x = x;
+  int cursor_y = y;
+  int start_x = x;
+
+  for (const char *p = text; *p; p++) {
+    if (*p == '\n') {
+      cursor_x = start_x;
+      cursor_y += line_height;
+      continue;
+    }
+
+    // Get glyph metrics to check if it fits
+    SFT_Glyph glyph;
+    if (sft_lookup(&sft, (uint32_t)(unsigned char)*p, &glyph) < 0) {
+      continue;
+    }
+
+    SFT_GMetrics metrics;
+    if (sft_gmetrics(&sft, glyph, &metrics) < 0) {
+      continue;
+    }
+
+    int advance = (int)metrics.advanceWidth;
+
+    // Wrap if this character would exceed max_width
+    if (cursor_x + advance > start_x + max_width && cursor_x > start_x) {
+      cursor_x = start_x;
+      cursor_y += line_height;
+    }
+
+    // Draw the character
+    auto result = draw_ttf_char(cursor_x, cursor_y, (uint32_t)(unsigned char)*p, color, size_px);
+    if (result.is_ok()) {
+      cursor_x += result.value();
+    }
+  }
+
+  // Return total height used
+  return Result<int, ErrorCode>::ok(cursor_y - y + line_height);
 }
 
 } // namespace app

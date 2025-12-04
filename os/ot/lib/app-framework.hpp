@@ -18,7 +18,7 @@ namespace app {
 // Utility class for framebuffer graphics operations
 class Framework {
 public:
-  Framework(uint32_t *framebuffer, int width, int height);  // Defined in .cpp
+  Framework(uint32_t *framebuffer, int width, int height); // Defined in .cpp
 
   ~Framework();
 
@@ -63,6 +63,13 @@ public:
   void draw_hline(int x, int y, int length, uint32_t color) {
     for (int i = 0; i < length; i++) {
       put_pixel(x + i, y, color);
+    }
+  }
+
+  // Draw a vertical line
+  void draw_vline(int x, int y, int length, uint32_t color) {
+    for (int i = 0; i < length; i++) {
+      put_pixel(x, y + i, color);
     }
   }
 
@@ -134,6 +141,13 @@ public:
   Result<int, ErrorCode> draw_ttf_char(int x, int y, uint32_t codepoint, uint32_t color, int size_px);
   Result<int, ErrorCode> draw_ttf_text(int x, int y, const char *text, uint32_t color, int size_px);
 
+  // Measure text width without drawing (useful for layout)
+  Result<int, ErrorCode> measure_ttf_text(const char *text, int size_px);
+
+  // Draw wrapped text within max_width, returns total height used
+  Result<int, ErrorCode> draw_ttf_text_wrapped(int x, int y, int max_width, const char *text, uint32_t color,
+                                               int size_px);
+
 private:
   uint32_t *fb_;
   int width_;
@@ -145,8 +159,8 @@ private:
   // Arena allocator for TTF rendering (avoids per-glyph malloc/free)
   // Memory is allocated via ou_alloc_page() in constructor
   static constexpr size_t ARENA_NUM_PAGES = 2;
-  void *arena_memory_;   // Points to allocated page(s)
-  lib::Arena *arena_;    // Placement-new'd into first part of arena_memory_
+  void *arena_memory_; // Points to allocated page(s)
+  lib::Arena *arena_;  // Placement-new'd into first part of arena_memory_
 
   // Internal helper to blend a grayscale pixel onto framebuffer
   void blend_pixel(int x, int y, uint32_t color, uint8_t alpha);

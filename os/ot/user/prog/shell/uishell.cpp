@@ -1,0 +1,342 @@
+// uishell.cpp - Graphical TCL shell implementation
+#include "ot/lib/app-framework.hpp"
+#include "ot/lib/frame-manager.hpp"
+#include "ot/lib/keyboard-utils.hpp"
+#include "ot/lib/mpack/mpack-utils.hpp"
+#include "ot/user/gen/graphics-client.hpp"
+#include "ot/user/gen/keyboard-client.hpp"
+#include "ot/user/gen/tcl-vars.hpp"
+#include "ot/user/keyboard/backend.hpp"
+#include "ot/user/local-storage.hpp"
+#include "ot/user/prog.h"
+#include "ot/user/prog/shell/commands.hpp"
+#include "ot/user/tcl.hpp"
+#include "ot/user/user.hpp"
+
+// Constants
+static const int MAX_OUTPUT_LINES = 100;
+static const int MAX_LINE_LENGTH = 256;
+static const int TITLE_SIZE = 28;
+static const int SUBTITLE_SIZE = 14;
+static const int BODY_SIZE = 16;
+static const int TEXT_START_X = 15;
+static const int TEXT_START_Y = 80;
+static const int LINE_SPACING = 20;
+
+// UI Shell storage
+struct UIShellStorage : public LocalStorage {
+  char input_buffer[MAX_LINE_LENGTH];
+  size_t input_pos;
+
+  // Circular buffer for output lines
+  char output_lines[MAX_OUTPUT_LINES][MAX_LINE_LENGTH];
+  int output_start; // Index of first line in buffer
+  int output_count; // Number of lines in buffer
+
+  bool running;
+  bool cursor_visible;
+  int cursor_blink_counter;
+
+  UIShellStorage() {
+    process_storage_init(25); // Need more pages for TTF rendering
+    input_pos = 0;
+    output_start = 0;
+    output_count = 0;
+    running = true;
+    cursor_visible = true;
+    cursor_blink_counter = 0;
+    memset(input_buffer, 0, MAX_LINE_LENGTH);
+  }
+
+  // Add a line to output buffer
+  void add_output_line(const char *text) {
+    int write_idx = (output_start + output_count) % MAX_OUTPUT_LINES;
+
+    if (output_count == MAX_OUTPUT_LINES) {
+      // Buffer is full, overwrite oldest line
+      output_start = (output_start + 1) % MAX_OUTPUT_LINES;
+    } else {
+      output_count++;
+    }
+
+    snprintf(output_lines[write_idx], MAX_LINE_LENGTH, "%s", text);
+  }
+
+  // Get line at index (0 = oldest)
+  const char *get_output_line(int idx) {
+    if (idx >= output_count) return nullptr;
+    int real_idx = (output_start + idx) % MAX_OUTPUT_LINES;
+    return output_lines[real_idx];
+  }
+
+  // Clear all output
+  void clear_output() {
+    output_start = 0;
+    output_count = 0;
+  }
+};
+
+void handle_key_event(UIShellStorage *s, tcl::Interp &i, uint16_t code, uint8_t flags) {
+  // Only process key press events
+  if (!(flags & KEY_FLAG_PRESSED)) {
+    return;
+  }
+
+  // Backspace
+  if (code == KEY_BACKSPACE) {
+    if (s->input_pos > 0) {
+      s->input_pos--;
+      s->input_buffer[s->input_pos] = 0;
+    }
+    s->cursor_blink_counter = 0;
+    s->cursor_visible = true;
+    return;
+  }
+
+  // Enter - execute command
+  if (code == KEY_ENTER) {
+    // Add input line to output with prompt
+    char prompt_line[MAX_LINE_LENGTH];
+    snprintf(prompt_line, MAX_LINE_LENGTH, "> %s", s->input_buffer);
+    s->add_output_line(prompt_line);
+
+    // Evaluate TCL command
+    s->input_buffer[s->input_pos] = 0;
+    tcl::Status status = i.eval(s->input_buffer);
+
+    // Add result to output
+    if (status != tcl::S_OK) {
+      char error_line[MAX_LINE_LENGTH];
+      snprintf(error_line, MAX_LINE_LENGTH, "error: %s", i.result.c_str());
+      s->add_output_line(error_line);
+    } else {
+      // Always show result (even if empty) to provide feedback
+      if (i.result.size() > 0) {
+        // Split multi-line results
+        const char *result = i.result.c_str();
+        char line_buf[MAX_LINE_LENGTH];
+        int line_pos = 0;
+
+        for (size_t j = 0; j <= i.result.size(); j++) {
+          if (j == i.result.size() || result[j] == '\n') {
+            line_buf[line_pos] = 0;
+            if (line_pos > 0) {  // Only add non-empty lines
+              s->add_output_line(line_buf);
+            }
+            line_pos = 0;
+          } else if (line_pos < MAX_LINE_LENGTH - 1) {
+            line_buf[line_pos++] = result[j];
+          }
+        }
+      }
+      // Note: we don't add anything for empty results to keep UI clean
+      // Commands like "puts" that want output should use add_output_line directly
+    }
+
+    // Clear input
+    s->input_pos = 0;
+    s->input_buffer[0] = 0;
+    s->cursor_blink_counter = 0;
+    s->cursor_visible = true;
+    return;
+  }
+
+  // Regular character input
+  bool shift = (flags & KEY_FLAG_SHIFT) != 0;
+  char ch = keyboard::scancode_to_ascii(code, shift);
+  if (ch && s->input_pos < MAX_LINE_LENGTH - 1) {
+    s->input_buffer[s->input_pos++] = ch;
+    s->input_buffer[s->input_pos] = 0;
+    s->cursor_blink_counter = 0;
+    s->cursor_visible = true;
+  }
+}
+
+void uishell_main() {
+  void *storage_page = ou_get_storage().as_ptr();
+  UIShellStorage *s = new (storage_page) UIShellStorage();
+
+  oprintf("UISHELL: Starting graphical shell\n");
+
+  // Yield to let drivers initialize
+  ou_yield();
+
+  // Look up graphics driver
+  Pid gfx_pid = ou_proc_lookup("graphics");
+  if (gfx_pid == PID_NONE) {
+    oprintf("UISHELL: Failed to find graphics driver\n");
+    ou_exit();
+  }
+
+  // Look up keyboard driver
+  Pid kbd_pid = ou_proc_lookup("keyboard");
+  if (kbd_pid == PID_NONE) {
+    oprintf("UISHELL: Failed to find keyboard driver\n");
+    ou_exit();
+  }
+
+  GraphicsClient gfx_client(gfx_pid);
+  KeyboardClient kbd_client(kbd_pid);
+
+  // Get framebuffer info
+  auto fb_result = gfx_client.get_framebuffer();
+  if (fb_result.is_err()) {
+    oprintf("UISHELL: Failed to get framebuffer: %d\n", fb_result.error());
+    ou_exit();
+  }
+
+  auto fb_info = fb_result.value();
+  uint32_t *fb = (uint32_t *)fb_info.fb_ptr;
+  int width = (int)fb_info.width;
+  int height = (int)fb_info.height;
+
+  oprintf("UISHELL: Framebuffer %dx%d\n", width, height);
+
+  // Create graphics framework
+  app::Framework gfx(fb, width, height);
+
+  // Initialize TTF font
+  auto ttf_result = gfx.init_ttf();
+  if (ttf_result.is_err()) {
+    oprintf("UISHELL: Failed to init TTF font: %s\n", error_code_to_string(ttf_result.error()));
+    ou_exit();
+  }
+  oprintf("UISHELL: TTF font initialized\n");
+
+  // Allocate page for messagepack
+  char *mp_page = (char *)ou_alloc_page();
+
+  // Initialize TCL interpreter
+  tcl::Interp i;
+  tcl::register_core_commands(i);
+  i.register_mpack_functions(mp_page, OT_PAGE_SIZE);
+  register_ipc_method_vars(i);
+
+  // Register shared shell commands
+  shell::register_shell_commands(i);
+
+  // Register UI shell-specific commands
+  i.register_command(
+      "quit",
+      [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
+        ((UIShellStorage *)local_storage)->running = false;
+        return tcl::S_OK;
+      },
+      nullptr, "[quit] - Quit the shell");
+
+  i.register_command(
+      "shutdown",
+      [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
+        ou_shutdown();
+        return tcl::S_OK;
+      },
+      nullptr, "[shutdown] - Shutdown all processes and exit the kernel");
+
+  i.register_command(
+      "clear",
+      [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
+        ((UIShellStorage *)local_storage)->clear_output();
+        return tcl::S_OK;
+      },
+      nullptr, "[clear] - Clear output history");
+
+  // Override puts to output to screen instead of console
+  i.register_command(
+      "puts",
+      [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
+        if (!i.arity_check("puts", argv, 2, 2)) {
+          return tcl::S_ERR;
+        }
+        ((UIShellStorage *)local_storage)->add_output_line(argv[1].c_str());
+        return tcl::S_OK;
+      },
+      nullptr, "[puts string] - Print string to screen");
+
+  // Execute shellrc startup script
+#include "shellrc.hpp"
+  tcl::Status shellrc_status = i.eval(tcl::string_view(shellrc_content));
+  if (shellrc_status != tcl::S_OK) {
+    s->add_output_line("shellrc error");
+    s->add_output_line(i.result.c_str());
+  }
+
+  s->add_output_line("OTIUM Graphical Shell");
+  s->add_output_line("Type 'help' for commands");
+
+  // Run at 60 FPS
+  graphics::FrameManager fm(60);
+
+  oprintf("UISHELL: Running\n");
+
+  while (s->running) {
+    if (fm.begin_frame()) {
+      // Poll keyboard
+      auto key_result = kbd_client.poll_key();
+      if (key_result.is_ok()) {
+        auto key_data = key_result.value();
+        if (key_data.has_key) {
+          handle_key_event(s, i, key_data.code, key_data.flags);
+        }
+      }
+
+      // Update cursor blink
+      s->cursor_blink_counter++;
+      if (s->cursor_blink_counter >= 30) { // Blink every 0.5s at 60 FPS
+        s->cursor_visible = !s->cursor_visible;
+        s->cursor_blink_counter = 0;
+      }
+
+      // Clear screen to dark blue
+      gfx.clear(0xFF1A1A2E);
+
+      // Draw title
+      gfx.draw_ttf_text(TEXT_START_X, 15, "OTIUM SHELL", 0xFFEEEEEE, TITLE_SIZE);
+      gfx.draw_ttf_text(TEXT_START_X, 48, "Interactive TCL Shell", 0xFFCCCCCC, SUBTITLE_SIZE);
+
+      // Draw separator line
+      gfx.draw_hline(TEXT_START_X, 68, width - TEXT_START_X * 2, 0xFF444444);
+
+      // Calculate how many lines fit on screen
+      int available_height = height - TEXT_START_Y - 40; // Leave margin at bottom
+      int max_visible_lines = available_height / LINE_SPACING;
+
+      // Draw output history (most recent lines at bottom)
+      int y = TEXT_START_Y;
+      int start_line = (s->output_count > max_visible_lines) ? (s->output_count - max_visible_lines) : 0;
+
+      for (int i = start_line; i < s->output_count; i++) {
+        const char *line = s->get_output_line(i);
+        if (line) {
+          gfx.draw_ttf_text(TEXT_START_X, y, line, 0xFFFFFFFF, BODY_SIZE);
+          y += LINE_SPACING;
+        }
+      }
+
+      // Draw prompt and input line
+      char prompt_with_input[MAX_LINE_LENGTH + 10];
+      snprintf(prompt_with_input, sizeof(prompt_with_input), "> %s", s->input_buffer);
+      gfx.draw_ttf_text(TEXT_START_X, y, prompt_with_input, 0xFF88FF88, BODY_SIZE);
+
+      // Draw cursor
+      if (s->cursor_visible) {
+        // Measure text up to cursor position
+        auto measure_result = gfx.measure_ttf_text(prompt_with_input, BODY_SIZE);
+        int cursor_x = TEXT_START_X;
+        if (measure_result.is_ok()) {
+          cursor_x += measure_result.value();
+        }
+        gfx.draw_ttf_text(cursor_x, y, "_", 0xFFFFFF00, BODY_SIZE);
+      }
+
+      // Flush to display
+      gfx_client.flush();
+      fm.end_frame();
+    }
+
+    // Always yield
+    ou_yield();
+  }
+
+  oprintf("UISHELL: Exiting\n");
+  ou_exit();
+}

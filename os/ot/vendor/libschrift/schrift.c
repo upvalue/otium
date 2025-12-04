@@ -218,7 +218,7 @@ static inline void *outl_alloc(Outline *outl, size_t size) {
 static inline void *outl_realloc(Outline *outl, void *ptr, size_t size) {
   if (outl->arena) {
     /* Arena doesn't support true realloc - just allocate new */
-    /* Old memory remains until arena reset (acceptable for per-render lifetime) */
+    /* NOTE: Caller MUST copy data if needed! */
     (void)ptr;
     return sft_arena_alloc(outl->arena, size);
   }
@@ -684,53 +684,66 @@ static void free_outline(Outline *outl) {
 }
 
 /* Arena-aware reallocarray for outline buffers */
-static void *outl_reallocarray(Outline *outl, void *optr, size_t nmemb, size_t size) {
-  if ((nmemb >= MUL_NO_OVERFLOW || size >= MUL_NO_OVERFLOW) && nmemb > 0 && SIZE_MAX / nmemb < size) {
+static void *outl_reallocarray(Outline *outl, void *optr, size_t old_nmemb, size_t new_nmemb, size_t size) {
+  if ((new_nmemb >= MUL_NO_OVERFLOW || size >= MUL_NO_OVERFLOW) && new_nmemb > 0 && SIZE_MAX / new_nmemb < size) {
     errno = ENOMEM;
     return NULL;
   }
-  return outl_realloc(outl, optr, size * nmemb);
+
+  size_t new_size = size * new_nmemb;
+  void *new_ptr = outl_realloc(outl, optr, new_size);
+
+  /* If using arena, we need to manually copy old data */
+  if (outl->arena && new_ptr && optr && old_nmemb > 0) {
+    size_t old_size = size * old_nmemb;
+    memcpy(new_ptr, optr, old_size < new_size ? old_size : new_size);
+  }
+
+  return new_ptr;
 }
 
 static int grow_points(Outline *outl) {
   void *mem;
-  uint_fast16_t cap;
+  uint_fast16_t old_cap, new_cap;
   assert(outl->capPoints);
   /* Since we use uint_fast16_t for capacities, we have to be extra careful not to trigger integer overflow. */
   if (outl->capPoints > UINT16_MAX / 2)
     return -1;
-  cap = (uint_fast16_t)(2U * outl->capPoints);
-  if (!(mem = outl_reallocarray(outl, outl->points, cap, sizeof *outl->points)))
+  old_cap = outl->capPoints;
+  new_cap = (uint_fast16_t)(2U * old_cap);
+  if (!(mem = outl_reallocarray(outl, outl->points, old_cap, new_cap, sizeof *outl->points)))
     return -1;
-  outl->capPoints = (uint_least16_t)cap;
+  outl->capPoints = (uint_least16_t)new_cap;
   outl->points = (Point *)mem;
   return 0;
 }
 
 static int grow_curves(Outline *outl) {
   void *mem;
-  uint_fast16_t cap;
+  uint_fast16_t old_cap, new_cap;
   assert(outl->capCurves);
   if (outl->capCurves > UINT16_MAX / 2)
     return -1;
-  cap = (uint_fast16_t)(2U * outl->capCurves);
-  if (!(mem = outl_reallocarray(outl, outl->curves, cap, sizeof *outl->curves)))
+  old_cap = outl->capCurves;
+  new_cap = (uint_fast16_t)(2U * old_cap);
+  if (!(mem = outl_reallocarray(outl, outl->curves, old_cap, new_cap, sizeof *outl->curves)))
     return -1;
-  outl->capCurves = (uint_least16_t)cap;
+  outl->capCurves = (uint_least16_t)new_cap;
   outl->curves = (Curve *)mem;
   return 0;
 }
 
 static int grow_lines(Outline *outl) {
   void *mem;
-  uint_fast16_t cap;
+  uint_fast16_t old_cap, new_cap;
   assert(outl->capLines);
   if (outl->capLines > UINT16_MAX / 2)
     return -1;
-  cap = (uint_fast16_t)(2U * outl->capLines);
-  if (!(mem = outl_reallocarray(outl, outl->lines, cap, sizeof *outl->lines)))
+  old_cap = outl->capLines;
+  new_cap = (uint_fast16_t)(2U * old_cap);
+  if (!(mem = outl_reallocarray(outl, outl->lines, old_cap, new_cap, sizeof *outl->lines)))
     return -1;
-  outl->capLines = (uint_least16_t)cap;
+  outl->capLines = (uint_least16_t)new_cap;
   outl->lines = (Line *)mem;
   return 0;
 }

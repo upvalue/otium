@@ -287,6 +287,7 @@ if is_riscv or is_wasm
     'ot/lib/std.cpp',
     'ot/lib/arena.cpp',
     'ot/lib/app-framework.cpp',
+    'ot/lib/keyboard-utils.cpp',
     'ot/lib/mpack/mpack-reader.cpp',
     'ot/lib/mpack/mpack-utils.cpp',
     'ot/lib/file.cpp',
@@ -303,7 +304,9 @@ if is_riscv or is_wasm
   user_sources = [
     'ot/user/user-main.cpp',
     'ot/user/prog-scratch.cpp',
-    'ot/user/prog-shell.cpp',
+    'ot/user/prog/shell/commands.cpp',
+    'ot/user/prog/shell/textshell.cpp',
+    'ot/user/prog/shell/uishell.cpp',
     'ot/user/prog-spacedemo.cpp',
     'ot/user/prog-typedemo.cpp',
     'ot/user/tcl.cpp',

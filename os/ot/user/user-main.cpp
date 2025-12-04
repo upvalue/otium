@@ -8,7 +8,7 @@
 #include "ot/user/user.hpp"
 #include "ot/vendor/tlsf/tlsf.h"
 
-enum ProgramType { UNKNOWN, SHELL, SCRATCH, SPACEDEMO, TYPEDEMO };
+enum ProgramType { UNKNOWN, SHELL, UISHELL, SCRATCH, SPACEDEMO, TYPEDEMO };
 
 ProgramType determine_program_type() {
   PageAddr arg_page = ou_get_arg_page();
@@ -49,6 +49,9 @@ ProgramType determine_program_type() {
     if (arg.equals("shell")) {
       return SHELL;
     }
+    if (arg.equals("uishell")) {
+      return UISHELL;
+    }
     if (arg.equals("scratch")) {
       return SCRATCH;
     }
@@ -68,6 +71,8 @@ void user_program_main(void) {
 
   if (program_type == SHELL) {
     shell_main();
+  } else if (program_type == UISHELL) {
+    uishell_main();
   } else if (program_type == SCRATCH) {
     scratch_main();
   } else if (program_type == SPACEDEMO) {

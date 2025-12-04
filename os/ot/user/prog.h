@@ -7,6 +7,7 @@ extern "C" {
 #endif
 
 void shell_main();
+void uishell_main();
 void scratch_main();
 void spacedemo_main();
 void typedemo_main();

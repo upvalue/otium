@@ -28,10 +28,11 @@ struct UIShellStorage : public LocalStorage {
   char input_buffer[MAX_LINE_LENGTH];
   size_t input_pos;
 
-  // Circular buffer for output lines
-  char output_lines[MAX_OUTPUT_LINES][MAX_LINE_LENGTH];
-  int output_start; // Index of first line in buffer
-  int output_count; // Number of lines in buffer
+  // Circular buffer for output lines (dynamically allocated)
+  char **output_lines; // Array of pointers to lines
+  int output_start;    // Index of first line in buffer
+  int output_count;    // Number of lines in buffer
+  int scroll_offset;   // Lines scrolled from bottom (0 = at bottom)
 
   bool running;
   bool cursor_visible;
@@ -39,9 +40,18 @@ struct UIShellStorage : public LocalStorage {
 
   UIShellStorage() {
     process_storage_init(25); // Need more pages for TTF rendering
+
+    // Allocate output buffer dynamically
+    output_lines = (char **)ou_malloc(MAX_OUTPUT_LINES * sizeof(char *));
+    for (int i = 0; i < MAX_OUTPUT_LINES; i++) {
+      output_lines[i] = (char *)ou_malloc(MAX_LINE_LENGTH);
+      output_lines[i][0] = '\0';
+    }
+
     input_pos = 0;
     output_start = 0;
     output_count = 0;
+    scroll_offset = 0;
     running = true;
     cursor_visible = true;
     cursor_blink_counter = 0;
@@ -60,11 +70,15 @@ struct UIShellStorage : public LocalStorage {
     }
 
     snprintf(output_lines[write_idx], MAX_LINE_LENGTH, "%s", text);
+
+    // Auto-scroll to bottom on new output
+    scroll_offset = 0;
   }
 
   // Get line at index (0 = oldest)
   const char *get_output_line(int idx) {
-    if (idx >= output_count) return nullptr;
+    if (idx >= output_count)
+      return nullptr;
     int real_idx = (output_start + idx) % MAX_OUTPUT_LINES;
     return output_lines[real_idx];
   }
@@ -79,6 +93,32 @@ struct UIShellStorage : public LocalStorage {
 void handle_key_event(UIShellStorage *s, tcl::Interp &i, uint16_t code, uint8_t flags) {
   // Only process key press events
   if (!(flags & KEY_FLAG_PRESSED)) {
+    return;
+  }
+
+  bool ctrl = (flags & KEY_FLAG_CTRL) != 0;
+
+  // Ctrl+U - Page up (scroll back in history)
+  if (ctrl && code == KEY_U) {
+    int available_height = 700 - TEXT_START_Y - 40; // Approximate
+    int page_size = available_height / LINE_SPACING;
+    s->scroll_offset += page_size;
+    // Clamp to available scrollback
+    int max_scroll = s->output_count > page_size ? s->output_count - page_size : 0;
+    if (s->scroll_offset > max_scroll) {
+      s->scroll_offset = max_scroll;
+    }
+    return;
+  }
+
+  // Ctrl+D - Page down (scroll forward)
+  if (ctrl && code == KEY_D) {
+    int available_height = 700 - TEXT_START_Y - 40;
+    int page_size = available_height / LINE_SPACING;
+    s->scroll_offset -= page_size;
+    if (s->scroll_offset < 0) {
+      s->scroll_offset = 0;
+    }
     return;
   }
 
@@ -120,7 +160,7 @@ void handle_key_event(UIShellStorage *s, tcl::Interp &i, uint16_t code, uint8_t 
         for (size_t j = 0; j <= i.result.size(); j++) {
           if (j == i.result.size() || result[j] == '\n') {
             line_buf[line_pos] = 0;
-            if (line_pos > 0) {  // Only add non-empty lines
+            if (line_pos > 0) { // Only add non-empty lines
               s->add_output_line(line_buf);
             }
             line_pos = 0;
@@ -300,10 +340,14 @@ void uishell_main() {
       int available_height = height - TEXT_START_Y - 40; // Leave margin at bottom
       int max_visible_lines = available_height / LINE_SPACING;
 
-      // Draw output history (most recent lines at bottom)
+      // Draw output history (most recent lines at bottom, adjusted for scroll)
       int y = TEXT_START_Y;
-      int start_line = (s->output_count > max_visible_lines) ? (s->output_count - max_visible_lines) : 0;
+      int start_line =
+          (s->output_count > max_visible_lines) ? (s->output_count - max_visible_lines - s->scroll_offset) : 0;
+      if (start_line < 0)
+        start_line = 0;
 
+      // Debug: log output rendering state (once)
       for (int i = start_line; i < s->output_count; i++) {
         const char *line = s->get_output_line(i);
         if (line) {

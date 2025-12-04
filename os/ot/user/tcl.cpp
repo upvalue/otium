@@ -291,10 +291,19 @@ Cmd *Interp::get_command(const string &name) const {
 }
 
 Status Interp::register_command(const string &name, cmd_func_t fn, ProcPrivdata *privdata, const string &docstring) {
-  if (get_command(name) != nullptr) {
-    format_error(result, "command already defined: '%s'", name.c_str());
-    return S_ERR;
+  // Check if command already exists
+  Cmd *existing = get_command(name);
+  if (existing != nullptr) {
+    // Reuse existing command, just update fields and free old privdata
+    if (existing->privdata) {
+      ou_delete(existing->privdata);
+    }
+    existing->func = fn;
+    existing->privdata = privdata;
+    existing->docstring = docstring;
+    return S_OK;
   }
+  // Register new command
   commands.push_back(ou_new<Cmd>(name, fn, privdata, docstring));
   return S_OK;
 }

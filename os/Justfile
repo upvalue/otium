@@ -52,3 +52,19 @@ clean:
     @echo "=== Cleaning Meson builds ==="
     rm -rf build-posix build-riscv build-wasm
     @echo "Clean complete. Run 'just compile-*' to rebuild."
+
+# Disk management (default disk: disk-stable.fat.img)
+# List files in disk image
+disk-dir DISK="disk-stable.fat.img":
+  mdir -i {{DISK}}
+
+# Copy file from host to disk image
+# Usage: just cp-to local/file.txt [DISK]
+cp-to FILE DISK="disk-stable.fat.img":
+  mcopy -i {{DISK}} {{FILE}} ::
+
+# Copy file from disk image to host
+# Usage: just cp-from remote-file.txt [DISK]
+cp-from FILE DISK="disk-stable.fat.img":
+  mcopy -i {{DISK}} ::{{FILE}} .
+

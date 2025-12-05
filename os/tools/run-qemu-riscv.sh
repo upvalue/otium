@@ -69,7 +69,7 @@ set -x
 exec qemu-system-riscv32 \
     -machine virt \
     -bios default \
-    -drive id=drive0,file=test.txt,format=raw,if=none \
+    -drive id=drive0,file=disk.fat.img,format=raw,if=none \
     -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0 \
     $DISPLAY_ARGS \
     -serial mon:stdio \

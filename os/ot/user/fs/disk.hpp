@@ -9,6 +9,12 @@
 /**
  * Abstract disk interface for filesystem backends.
  * Provides sector-based read/write operations.
+ *
+ * Error codes used:
+ * - NONE: Success
+ * - DISK__OUT_OF_BOUNDS: Sector number exceeds disk capacity
+ * - DISK__IO_ERROR: I/O operation failed
+ * - DISK__DEVICE_ERROR: Device reported an error
  */
 class Disk {
 public:
@@ -18,17 +24,17 @@ public:
    * Read a single sector into buffer.
    * @param sector Sector number to read
    * @param buf Buffer to read into (must be DISK_SECTOR_SIZE bytes)
-   * @return true on success, false on failure
+   * @return NONE on success, error code on failure
    */
-  virtual bool read_sector(uint64_t sector, uint8_t *buf) = 0;
+  virtual ErrorCode read_sector(uint64_t sector, uint8_t *buf) = 0;
 
   /**
    * Write a single sector from buffer.
    * @param sector Sector number to write
    * @param buf Buffer to write from (must be DISK_SECTOR_SIZE bytes)
-   * @return true on success, false on failure
+   * @return NONE on success, error code on failure
    */
-  virtual bool write_sector(uint64_t sector, const uint8_t *buf) = 0;
+  virtual ErrorCode write_sector(uint64_t sector, const uint8_t *buf) = 0;
 
   /**
    * Get disk capacity in sectors.

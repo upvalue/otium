@@ -17,6 +17,11 @@ enum ErrorCode {
   VIRTIO__DEVICE_NOT_FOUND = 5,
   VIRTIO__SETUP_FAIL = 6,
 
+  // Disk errors
+  DISK__OUT_OF_BOUNDS = 7,
+  DISK__IO_ERROR = 8,
+  DISK__DEVICE_ERROR = 9,
+
   // App framework errors (fonts, graphics, etc.)
   APP__FONT_NOT_LOADED = 10,
   APP__FONT_LOAD_FAILED = 11,
@@ -45,6 +50,12 @@ inline const char *error_code_to_string(ErrorCode code) {
     return "virtio.device-not-found";
   case VIRTIO__SETUP_FAIL:
     return "virtio.setup-fail";
+  case DISK__OUT_OF_BOUNDS:
+    return "disk.out-of-bounds";
+  case DISK__IO_ERROR:
+    return "disk.io-error";
+  case DISK__DEVICE_ERROR:
+    return "disk.device-error";
   case APP__FONT_NOT_LOADED:
     return "app.font-not-loaded";
   case APP__FONT_LOAD_FAILED:

@@ -47,7 +47,7 @@ Result<VirtioDisk *, ErrorCode> VirtioDisk::create() {
   return Result<VirtioDisk *, ErrorCode>::ok(disk);
 }
 
-bool VirtioDisk::do_sector_request(uint64_t sector, bool is_write) {
+ErrorCode VirtioDisk::do_sector_request(uint64_t sector, bool is_write) {
   VirtioBlkRequest &req = *request;
   req.header.sector = sector;
   req.header.type = is_write ? VIRTIO_BLK_REQUEST_TYPE_WRITE : VIRTIO_BLK_REQUEST_TYPE_READ;
@@ -65,32 +65,34 @@ bool VirtioDisk::do_sector_request(uint64_t sector, bool is_write) {
   }
   queue.get_used(); // Consume the used descriptor to update last_used_idx
 
-  return req.status == 0;
+  // VirtIO block device status: 0 = success, 1 = ioerr, 2 = unsupp
+  if (req.status == 0) {
+    return NONE;
+  } else {
+    return DISK__DEVICE_ERROR;
+  }
 }
 
-bool VirtioDisk::read_sector(uint64_t sector, uint8_t *buf) {
+ErrorCode VirtioDisk::read_sector(uint64_t sector, uint8_t *buf) {
   if (sector >= capacity_sectors) {
-    return false;
+    return DISK__OUT_OF_BOUNDS;
   }
 
-  if (!do_sector_request(sector, false)) {
-    return false;
+  ErrorCode err = do_sector_request(sector, false);
+  if (err != NONE) {
+    return err;
   }
 
   memcpy(buf, request->data, DISK_SECTOR_SIZE);
-  return true;
+  return NONE;
 }
 
-bool VirtioDisk::write_sector(uint64_t sector, const uint8_t *buf) {
+ErrorCode VirtioDisk::write_sector(uint64_t sector, const uint8_t *buf) {
   if (sector >= capacity_sectors) {
-    return false;
+    return DISK__OUT_OF_BOUNDS;
   }
 
   memcpy(request->data, buf, DISK_SECTOR_SIZE);
 
-  if (!do_sector_request(sector, true)) {
-    return false;
-  }
-
-  return true;
+  return do_sector_request(sector, true);
 }

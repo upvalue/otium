@@ -34,6 +34,7 @@ void kernel_prog_default() {
   process_create("graphics", (const void *)proc_graphics, nullptr, false);
 #endif
 
+  oprintf("OT_FILESYSTEM_BACKEND: %d\n", OT_FILESYSTEM_BACKEND);
 #if OT_FILESYSTEM_BACKEND != OT_FILESYSTEM_BACKEND_NONE
   // create filesystem server (proc_filesystem is defined in ot/user/filesystem/impl.cpp)
   extern void proc_filesystem(void);

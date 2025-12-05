@@ -39,9 +39,10 @@ private:
 
     // Read sector 0
     uint8_t sector_buf[DISK_SECTOR_SIZE];
-    if (!disk->read_sector(0, sector_buf)) {
-      oprintf("[onefile] ERROR: sector read failed\n");
-      return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__IO_ERROR);
+    ErrorCode disk_err = disk->read_sector(0, sector_buf);
+    if (disk_err != NONE) {
+      oprintf("[onefile] ERROR: sector read failed: %s\n", error_code_to_string(disk_err));
+      return Result<uintptr_t, ErrorCode>::err(disk_err);
     }
 
     // Calculate where actual data starts (after filename + space)
@@ -103,9 +104,10 @@ private:
     oprintf("[onefile] write: filename='%s', data_len=%u, total=%u\n", stored_filename, (unsigned)data.len,
             (unsigned)(pos + content_len));
 
-    if (!disk->write_sector(0, sector_buf)) {
-      oprintf("[onefile] ERROR: sector write failed\n");
-      return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__IO_ERROR);
+    ErrorCode disk_err = disk->write_sector(0, sector_buf);
+    if (disk_err != NONE) {
+      oprintf("[onefile] ERROR: sector write failed: %s\n", error_code_to_string(disk_err));
+      return Result<uintptr_t, ErrorCode>::err(disk_err);
     }
 
     oprintf("[onefile] === Write successful ===\n");

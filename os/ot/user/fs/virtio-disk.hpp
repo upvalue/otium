@@ -23,8 +23,8 @@ public:
    */
   static Result<VirtioDisk *, ErrorCode> create();
 
-  bool read_sector(uint64_t sector, uint8_t *buf) override;
-  bool write_sector(uint64_t sector, const uint8_t *buf) override;
+  ErrorCode read_sector(uint64_t sector, uint8_t *buf) override;
+  ErrorCode write_sector(uint64_t sector, const uint8_t *buf) override;
   uint64_t sector_count() const override { return capacity_sectors; }
 
 private:
@@ -34,9 +34,9 @@ private:
    * Internal helper for sector read/write operations.
    * @param sector Sector number to access
    * @param is_write true for write, false for read
-   * @return true on success, false on failure
+   * @return NONE on success, error code on failure
    */
-  bool do_sector_request(uint64_t sector, bool is_write);
+  ErrorCode do_sector_request(uint64_t sector, bool is_write);
 };
 
 #endif

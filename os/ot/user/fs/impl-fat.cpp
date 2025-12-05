@@ -7,6 +7,42 @@
 
 using namespace filesystem;
 
+// https://wiki.osdev.org/FAT#FAT_32
+
+struct FatBoot {
+  // There's a lot of BIOS parameters which we don't care about
+  // here
+
+  // offset 0
+  uint8_t jmp[3];
+  // offset 3
+  uint8_t _oem_name[8];
+  // offset 11
+  uint16_t bytes_per_sector;
+  // 13
+  uint8_t sectors_per_cluster;
+  // 14
+  uint16_t reserved_sectors;
+  // 16
+  uint8_t fat_count;
+  // 17
+  uint16_t root_entry_count;
+  // 19
+  uint16_t total_sectors_16;
+  // 21
+  uint8_t media_type;
+  // 22
+  uint16_t fat_size_16;
+  // 24
+  uint16_t sectors_per_track;
+  // 26
+  uint16_t head_count;
+  // 28
+  uint32_t hidden_sectors;
+  // 32
+  uint32_t total_sectors_32;
+} __attribute__((packed));
+
 /**
  * FAT filesystem implementation (stub).
  * Currently unimplemented - all operations return errors.
@@ -54,6 +90,8 @@ void proc_filesystem(void) {
   void *storage_page = ou_get_storage().as_ptr();
   Logger l("fs/fat");
 
+  l.log("Starting FAT filesystem initialization");
+
   // Create VirtIO disk
   auto disk_result = VirtioDisk::create();
   if (disk_result.is_err()) {
@@ -62,8 +100,35 @@ void proc_filesystem(void) {
   }
 
   Disk *disk = disk_result.value();
+
+  // Begin by sanity checking boot information
+  uint8_t *buffer_page = (uint8_t *)ou_alloc_page();
+
+  ErrorCode disk_err = disk->read_sector(0, buffer_page);
+
+  if (disk_err != NONE) {
+    l.log("ERROR: Failed to read boot sector: %s", error_code_to_string(disk_err));
+    ou_exit();
+  }
+
+  FatBoot *boot = (FatBoot *)buffer_page;
+
+  char oem_name[9];
+  memcpy(oem_name, boot->_oem_name, 8);
+  oem_name[8] = '\0';
+
+  l.log("OEM name: %s", oem_name);
+  l.log("Bytes per sector: %d", boot->bytes_per_sector);
+
+  l.log("Sectors per cluster: %d", boot->sectors_per_cluster);
+
   l.log("FAT filesystem initialized (stub - not yet implemented)");
   l.log("Disk capacity: %llu sectors", disk->sector_count());
+
+  if (boot->bytes_per_sector != DISK_SECTOR_SIZE) {
+    l.log("ERROR: Bytes per sector is not equal to %d", DISK_SECTOR_SIZE);
+    ou_exit();
+  }
 
   // Create filesystem server with disk
   FatFilesystemServer *server = new (storage_page) FatFilesystemServer(disk);

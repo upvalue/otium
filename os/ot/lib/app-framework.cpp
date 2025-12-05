@@ -216,7 +216,6 @@ Result<int, ErrorCode> Framework::draw_ttf_char(int x, int y, uint32_t codepoint
   int draw_y = y + (int)lmetrics.ascender + metrics.yOffset;
 
   // Debug: count non-zero alpha pixels
-  static int draw_log_count = 0;
   int nonzero_alpha = 0;
 
   // Blit to framebuffer with alpha blending
@@ -227,11 +226,6 @@ Result<int, ErrorCode> Framework::draw_ttf_char(int x, int y, uint32_t codepoint
         nonzero_alpha++;
       blend_pixel(draw_x + px, draw_y + py, color, alpha);
     }
-  }
-
-  if (draw_log_count < 3) {
-    oprintf("[app] blit: pos=(%d,%d) nonzero=%d\n", draw_x, draw_y, nonzero_alpha);
-    draw_log_count++;
   }
 
   ou_free(pixels);

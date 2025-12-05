@@ -2,7 +2,7 @@
 #include "ot/lib/mpack/mpack-reader.hpp"
 #include "ot/user/gen/filesystem-client.hpp"
 #include "ot/user/user.hpp"
-#include "ot/user/filesystem/types.hpp"
+#include "ot/user/fs/types.hpp"
 
 namespace ou {
 

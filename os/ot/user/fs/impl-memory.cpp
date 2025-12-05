@@ -1,5 +1,5 @@
 #include "ot/lib/mpack/mpack-writer.hpp"
-#include "ot/user/filesystem/types.hpp"
+#include "ot/user/fs/types.hpp"
 #include "ot/user/gen/filesystem-server.hpp"
 #include "ot/user/user.hpp"
 

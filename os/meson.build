@@ -117,6 +117,7 @@ filesystem_backend_map = {
   'none': 'OT_FILESYSTEM_BACKEND_NONE',
   'memory': 'OT_FILESYSTEM_BACKEND_MEMORY',
   'onefile': 'OT_FILESYSTEM_BACKEND_ONEFILE',
+  'fat': 'OT_FILESYSTEM_BACKEND_FAT',
 }
 
 keyboard_backend_map = {
@@ -332,9 +333,17 @@ if is_riscv or is_wasm
 
   # Filesystem implementation
   if filesystem_backend == 'memory'
-    user_sources += ['ot/user/filesystem/impl-memory.cpp']
+    user_sources += ['ot/user/fs/impl-memory.cpp']
   elif filesystem_backend == 'onefile'
-    user_sources += ['ot/user/filesystem/impl-onefile.cpp']
+    user_sources += [
+      'ot/user/fs/impl-onefile.cpp',
+      'ot/user/fs/virtio-disk.cpp',
+    ]
+  elif filesystem_backend == 'fat'
+    user_sources += [
+      'ot/user/fs/impl-fat.cpp',
+      'ot/user/fs/virtio-disk.cpp',
+    ]
   endif
 
   # Platform-specific sources and configuration

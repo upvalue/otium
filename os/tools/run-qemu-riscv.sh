@@ -1,12 +1,32 @@
 #!/usr/bin/env bash
 # Run RISC-V kernel in QEMU
 # This script reads configuration from the Meson build directory
+#
+# Usage: run-qemu-riscv.sh [build-dir] [disk-image]
+#
+# If disk-image is not specified:
+#   - Creates disk image from fs-in/ contents before running
+#   - Extracts disk contents to fs-out/ after running
+# If disk-image is specified:
+#   - Uses that image directly (no create/extract)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="${1:-$PROJECT_ROOT/build-riscv}"
+DISK_IMAGE="${2:-}"
+
+# Determine disk image path and whether to manage it
+if [ -n "$DISK_IMAGE" ]; then
+    # Explicit disk image provided - use it directly
+    MANAGE_DISK=false
+else
+    # No disk image specified - create from fs-in/
+    DISK_IMAGE="$PROJECT_ROOT/disk.fat.img"
+    MANAGE_DISK=true
+    "$SCRIPT_DIR/create-disk-image.sh" "$DISK_IMAGE"
+fi
 
 # Check if build directory exists
 if [ ! -d "$BUILD_DIR" ]; then
@@ -64,14 +84,21 @@ echo "Graphics backend: $RUNTIME_GRAPHICS_BACKEND"
 echo "Display args: $DISPLAY_ARGS"
 echo ""
 
-set -x 
+set -x
 
-exec qemu-system-riscv32 \
+qemu-system-riscv32 \
     -machine virt \
     -bios default \
-    -drive id=drive0,file=disk.fat.img,format=raw,if=none \
+    -drive id=drive0,file="$DISK_IMAGE",format=raw,if=none \
     -device virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0 \
     $DISPLAY_ARGS \
     -serial mon:stdio \
     --no-reboot \
     -kernel "$KERNEL_ELF"
+
+set +x
+
+# Extract disk contents to fs-out/ (only when managing disk)
+if [ "$MANAGE_DISK" = true ]; then
+    "$SCRIPT_DIR/extract-disk-image.sh" "$DISK_IMAGE" || true
+fi

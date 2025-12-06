@@ -15,6 +15,7 @@ option('kernel_prog',
     'test_ipc_codegen',
     'test_graphics',
     'test_filesystem',
+    'test_filesystem_fat',
   ],
   value: 'shell',
   description: 'Which kernel program to run'

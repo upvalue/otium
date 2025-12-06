@@ -1,0 +1,17 @@
+TEST: Starting FAT filesystem test
+TEST: FAT filesystem test starting
+TEST: Found filesystem service at PID 1
+TEST: Reading /LOREM8K.TXT (8192 bytes)
+TEST: File opened successfully
+TEST: Read 8192 bytes total
+TEST: Computed MD5: 2b7dd37b7729fc91446f0ca09670ed3d
+TEST: Expected MD5: 2b7dd37b7729fc91446f0ca09670ed3d
+TEST: MD5 VERIFIED!
+TEST: Creating and writing /TEST.TXT
+TEST: File written successfully
+TEST: Reading back /TEST.TXT
+TEST: Content verified!
+TEST: ===========================================
+TEST: ALL FAT FILESYSTEM TESTS PASSED!
+TEST: ===========================================
+TEST: IMAGE_SHA256=992a41b8658d9554f104ed85502761b26dc6ba0009d347a59bc2eef2bf4462e2

@@ -16,3 +16,9 @@ ot/config.h
 /build-riscv-test
 /build-wasm-test
 
+# Disk images (generated from fs-in/)
+*.img
+
+# Extracted filesystem contents
+/fs-out
+

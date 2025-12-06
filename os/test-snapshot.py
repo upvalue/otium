@@ -11,8 +11,11 @@ Uses Meson for building.
 import subprocess
 import sys
 import os
+import shutil
+import hashlib
+import gzip
 from pathlib import Path
-from typing import List, Tuple, Callable
+from typing import List, Tuple, Callable, Optional
 
 # Test programs to run (map of test name to kernel prog constant)
 # TODO: These should become Meson configuration options
@@ -24,20 +27,31 @@ TEST_PROGRAMS = {
     "test-ipc-ordering": "KERNEL_PROG_TEST_IPC_ORDERING",
     "test-graphics": "KERNEL_PROG_TEST_GRAPHICS",
     "test-filesystem": "KERNEL_PROG_TEST_FILESYSTEM",
+    "test-filesystem-fat": "KERNEL_PROG_TEST_FILESYSTEM_FAT",
 }
 
 # Platform-specific test exclusions
 PLATFORM_EXCLUSIONS = {
-    "wasm": ["test-mem"],  # Skip memory tests on WASM for now
+    "wasm": ["test-mem", "test-filesystem-fat"],  # Skip memory tests and FAT tests on WASM
 }
+
+# Tests that require disk image handling
+FILESYSTEM_DISK_TESTS = {"test-filesystem-fat"}
 
 # Test-specific Meson options
 TEST_MESON_OPTIONS = {
     "test-graphics": ["-Dgraphics_backend=test"],  # Use 16x16 test backend for snapshot testing
+    "test-filesystem": ["-Dfilesystem_backend=memory"],  # Use in-memory filesystem backend
+    "test-filesystem-fat": ["-Dfilesystem_backend=fat"],  # Use FAT filesystem backend
 }
 
 SNAPSHOT_DIR = Path(__file__).parent / "snapshots"
 PROJECT_ROOT = Path(__file__).parent
+
+# Disk image paths
+TEST_IMAGES_DIR = PROJECT_ROOT / "test-images"
+BASELINE_DISK_IMAGE_GZ = TEST_IMAGES_DIR / "fat-baseline.img.gz"
+WORKING_DISK_IMAGE = PROJECT_ROOT / "disk.fat.img"
 
 # Platform-specific configuration
 PLATFORMS = {
@@ -58,7 +72,34 @@ PLATFORMS = {
 }
 
 
-def run_platform(platform_config: dict) -> str:
+def compute_sha256(file_path: Path) -> str:
+    """Compute SHA256 hash of a file."""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            sha256_hash.update(chunk)
+    return sha256_hash.hexdigest()
+
+
+def setup_disk_image(test_name: str) -> None:
+    """Decompress baseline disk image for tests that need it."""
+    if test_name in FILESYSTEM_DISK_TESTS:
+        if not BASELINE_DISK_IMAGE_GZ.exists():
+            raise FileNotFoundError(f"Baseline disk image not found: {BASELINE_DISK_IMAGE_GZ}")
+        print(f"  Decompressing {BASELINE_DISK_IMAGE_GZ.name} to {WORKING_DISK_IMAGE}")
+        with gzip.open(BASELINE_DISK_IMAGE_GZ, 'rb') as f_in:
+            with open(WORKING_DISK_IMAGE, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+
+
+def get_disk_image_sha256(test_name: str) -> Optional[str]:
+    """Get SHA256 of the working disk image after test completes."""
+    if test_name in FILESYSTEM_DISK_TESTS and WORKING_DISK_IMAGE.exists():
+        return compute_sha256(WORKING_DISK_IMAGE)
+    return None
+
+
+def run_platform(platform_config: dict, disk_image: Optional[Path] = None) -> str:
     """Run the platform using the appropriate runner script."""
     timeout = platform_config["timeout"]
     runner = platform_config["runner"]
@@ -69,6 +110,8 @@ def run_platform(platform_config: dict) -> str:
     env['OTIUM_TEST_MODE'] = '1'
 
     run_cmd = [str(runner), str(build_dir)]
+    if disk_image:
+        run_cmd.append(str(disk_image))
     print(f"  $ {' '.join(run_cmd)}")
 
     try:
@@ -165,12 +208,23 @@ def run_test(test_name: str, kernel_prog: str, platform: str) -> Tuple[List[str]
         print(f"  stderr: {e.stderr}")
         raise
 
+    # Set up disk image if needed (before running)
+    setup_disk_image(test_name)
+
     # Run with platform runner script
+    # For filesystem tests, pass the disk image path to skip create/extract
+    disk_image = WORKING_DISK_IMAGE if test_name in FILESYSTEM_DISK_TESTS else None
     print(f"  Running on {platform} (timeout: {platform_config['timeout']}s)")
-    output = run_platform(platform_config)
+    output = run_platform(platform_config, disk_image)
 
     # Extract TEST: lines
     test_lines = extract_test_lines(output)
+
+    # Add disk image sha256 if this test uses disk images
+    disk_sha256 = get_disk_image_sha256(test_name)
+    if disk_sha256:
+        test_lines.append(f"TEST: IMAGE_SHA256={disk_sha256}")
+        print(f"  Disk image SHA256: {disk_sha256}")
 
     print(f"  Captured {len(test_lines)} TEST: lines")
     return test_lines, output

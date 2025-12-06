@@ -36,6 +36,9 @@
 // Runs filesystem test with in-memory backend
 #define KERNEL_PROG_TEST_FILESYSTEM 9
 
+// Runs FAT filesystem test (reads file from disk, verifies MD5)
+#define KERNEL_PROG_TEST_FILESYSTEM_FAT 11
+
 // Selected kernel program (modified by config.sh)
 #define KERNEL_PROG @KERNEL_PROG@
 

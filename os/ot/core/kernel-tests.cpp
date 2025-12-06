@@ -387,7 +387,7 @@ void proc_graphics_client(void) {
   uint32_t width = (uint32_t)fb_info.width;
   uint32_t height = (uint32_t)fb_info.height;
 
-  oprintf("TEST: Got framebuffer at 0x%lx, %lux%lu\n", fb_info.fb_ptr, fb_info.width, fb_info.height);
+  oprintf("TEST: Got framebuffer %lux%lu\n", fb_info.width, fb_info.height);
 
   // Clear to black
   for (uint32_t i = 0; i < width * height; i++) {
@@ -683,6 +683,208 @@ void kernel_prog_test_filesystem() {
 }
 #endif
 
+// TEST_FILESYSTEM_FAT: FAT filesystem test that reads a large file and verifies MD5
+#if KERNEL_PROG == KERNEL_PROG_TEST_FILESYSTEM_FAT
+#include "ot/user/gen/filesystem-client.hpp"
+#include "ot/user/local-storage.hpp"
+#include "ot/lib/mpack/mpack-reader.hpp"
+#include "ot/lib/file.hpp"
+#include "ot/lib/md5.hpp"
+
+// Expected MD5 of the 8KB lorem ipsum file: 2b7dd37b7729fc91446f0ca09670ed3d
+static const char EXPECTED_MD5[] = "2b7dd37b7729fc91446f0ca09670ed3d";
+
+// Test storage for filesystem client
+struct FatTestStorage : public LocalStorage {
+  FatTestStorage() {
+    process_storage_init(10);  // 40KB for test data
+  }
+};
+
+void proc_fat_filesystem_test_client(void) {
+  oprintf("TEST: FAT filesystem test starting\n");
+
+  // Initialize storage
+  void *storage_page = ou_get_storage().as_ptr();
+  FatTestStorage *s = new (storage_page) FatTestStorage();
+
+  // Yield to let filesystem initialize
+  ou_yield();
+
+  // Look up filesystem service
+  Pid fs_pid = ou_proc_lookup("filesystem");
+  if (fs_pid == PID_NONE) {
+    oprintf("TEST: FAILED - Could not find filesystem service\n");
+    ou_exit();
+  }
+  oprintf("TEST: Found filesystem service at PID %lu\n", fs_pid.raw());
+
+  FilesystemClient client(fs_pid);
+
+  // Test 1: Read the large lorem ipsum file from disk
+  oprintf("TEST: Reading /LOREM8K.TXT (8192 bytes)\n");
+  {
+    ou::string path = "/LOREM8K.TXT";
+
+    // Open file for reading
+    auto open_result = client.open(path, 0x01);  // READ
+    if (open_result.is_err()) {
+      oprintf("TEST: FAILED - Could not open file: %d\n", open_result.error());
+      ou_exit();
+    }
+    FileHandleId handle = open_result.value();
+    oprintf("TEST: File opened successfully\n");
+
+    // Read file in chunks and compute MD5
+    MD5Context md5_ctx;
+    md5_init(&md5_ctx);
+
+    size_t total_read = 0;
+    const size_t file_size = 8192;
+    const size_t chunk_size = 4000;  // Read in chunks smaller than page size
+
+    while (total_read < file_size) {
+      size_t to_read = chunk_size;
+      if (total_read + to_read > file_size) {
+        to_read = file_size - total_read;
+      }
+
+      auto read_result = client.read(handle, total_read, to_read);
+      if (read_result.is_err()) {
+        oprintf("TEST: FAILED - Read error at offset %u: %d\n", (unsigned)total_read, read_result.error());
+        ou_exit();
+      }
+
+      uintptr_t bytes_read = read_result.value();
+      if (bytes_read == 0) {
+        oprintf("TEST: FAILED - Unexpected EOF at offset %u\n", (unsigned)total_read);
+        ou_exit();
+      }
+
+      // Get data from comm page
+      PageAddr comm = ou_get_comm_page();
+      MPackReader reader(comm.as_ptr(), OT_PAGE_SIZE);
+
+      StringView data_view;
+      reader.read_bin(data_view);
+
+      // Update MD5
+      md5_update(&md5_ctx, (const uint8_t*)data_view.ptr, data_view.len);
+
+      total_read += bytes_read;
+    }
+
+    oprintf("TEST: Read %u bytes total\n", (unsigned)total_read);
+
+    // Close file
+    client.close(handle);
+
+    // Finalize MD5
+    uint8_t digest[16];
+    md5_final(&md5_ctx, digest);
+
+    char hex[33];
+    md5_digest_to_hex(digest, hex);
+
+    oprintf("TEST: Computed MD5: %s\n", hex);
+    oprintf("TEST: Expected MD5: %s\n", EXPECTED_MD5);
+
+    // Compare
+    bool match = true;
+    for (int i = 0; i < 32; i++) {
+      if (hex[i] != EXPECTED_MD5[i]) {
+        match = false;
+        break;
+      }
+    }
+
+    if (match) {
+      oprintf("TEST: MD5 VERIFIED!\n");
+    } else {
+      oprintf("TEST: FAILED - MD5 mismatch!\n");
+      ou_exit();
+    }
+  }
+
+  // Test 2: Write a new file and read it back
+  oprintf("TEST: Creating and writing /TEST.TXT\n");
+  {
+    ou::string path = "/TEST.TXT";
+    ou::string content = "FAT filesystem write test!";
+
+    ou::File file(path.c_str(), ou::FileMode::WRITE);
+    ErrorCode err = file.open();
+    if (err != NONE) {
+      oprintf("TEST: FAILED - Could not create file: %d\n", err);
+      ou_exit();
+    }
+
+    err = file.write_all(content);
+    if (err != NONE) {
+      oprintf("TEST: FAILED - Could not write file: %d\n", err);
+      ou_exit();
+    }
+    oprintf("TEST: File written successfully\n");
+  }
+
+  // Test 3: Read the file back
+  oprintf("TEST: Reading back /TEST.TXT\n");
+  {
+    ou::string path = "/TEST.TXT";
+
+    ou::File file(path.c_str(), ou::FileMode::READ);
+    ErrorCode err = file.open();
+    if (err != NONE) {
+      oprintf("TEST: FAILED - Could not open file for reading: %d\n", err);
+      ou_exit();
+    }
+
+    ou::string content;
+    err = file.read_all(content);
+    if (err != NONE) {
+      oprintf("TEST: FAILED - Could not read file: %d\n", err);
+      ou_exit();
+    }
+
+    const char* expected = "FAT filesystem write test!";
+    bool match = (content.length() == 26);
+    if (match) {
+      for (size_t i = 0; i < content.length(); i++) {
+        if (content[i] != expected[i]) {
+          match = false;
+          break;
+        }
+      }
+    }
+
+    if (match) {
+      oprintf("TEST: Content verified!\n");
+    } else {
+      oprintf("TEST: FAILED - Content mismatch! Got %u bytes\n", (unsigned)content.length());
+      ou_exit();
+    }
+  }
+
+  oprintf("TEST: ===========================================\n");
+  oprintf("TEST: ALL FAT FILESYSTEM TESTS PASSED!\n");
+  oprintf("TEST: ===========================================\n");
+
+  ou_exit();
+}
+
+void kernel_prog_test_filesystem_fat() {
+  oprintf("TEST: Starting FAT filesystem test\n");
+
+  // proc_filesystem is defined in ot/user/fs/impl-fat.cpp
+  extern void proc_filesystem(void);
+
+  Process *fs_server = process_create("filesystem", (const void *)proc_filesystem, nullptr, false);
+  Process *test_client = process_create("fat_test_client", (const void *)proc_fat_filesystem_test_client, nullptr, false);
+  TRACE(LSOFT, "created filesystem server with name %s, pidx %d, pid %lu", fs_server->name, fs_server->pidx, fs_server->pid);
+  TRACE(LSOFT, "created FAT test client with name %s, pidx %d, pid %lu", test_client->name, test_client->pidx, test_client->pid);
+}
+#endif
+
 /**
  * Single entry point for all kernel tests
  */
@@ -709,5 +911,7 @@ void kernel_prog_test() {
   kernel_prog_test_graphics();
 #elif KERNEL_PROG == KERNEL_PROG_TEST_FILESYSTEM
   kernel_prog_test_filesystem();
+#elif KERNEL_PROG == KERNEL_PROG_TEST_FILESYSTEM_FAT
+  kernel_prog_test_filesystem_fat();
 #endif
 }

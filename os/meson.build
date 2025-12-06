@@ -260,10 +260,10 @@ if is_riscv or is_wasm
     input: files('tools/runtime-config.sh.in'),
   )
 
-  # Generate shellrc header from fs/shellrc.tcl
+  # Generate shellrc header from fs-in/shellrc.tcl
   shellrc_header = custom_target(
     'shellrc-header',
-    input: files('fs/shellrc.tcl'),
+    input: files('fs-in/shellrc.tcl'),
     output: 'shellrc.hpp',
     command: [
       find_program('python3'),
@@ -292,6 +292,7 @@ if is_riscv or is_wasm
     'ot/lib/mpack/mpack-reader.cpp',
     'ot/lib/mpack/mpack-utils.cpp',
     'ot/lib/file.cpp',
+    'ot/lib/md5.cpp',
     'ot/vendor/libmpack/mpack.c',
     'ot/vendor/libschrift/schrift.c',
   ]
@@ -343,6 +344,8 @@ if is_riscv or is_wasm
     user_sources += [
       'ot/user/fs/impl-fat.cpp',
       'ot/user/fs/virtio-disk.cpp',
+      'ot/user/fs/fatfs-diskio.cpp',
+      'ot/vendor/fatfs/ff.c',
     ]
   endif
 

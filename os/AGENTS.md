@@ -84,7 +84,7 @@ meson setup build-riscv --cross-file=cross/riscv32.txt \
 Available options (see `meson_options.txt` for full list):
 - `kernel_prog`: shell, test_hello, test_mem, test_alternate, test_ipc, etc.
 - `graphics_backend`: auto (platform default), none, test, virtio, wasm
-- `filesystem_backend`: auto (platform default), none, memory
+- `filesystem_backend`: auto (platform default), none, memory, fat
 - `log_general`, `log_mem`, `log_proc`, `log_ipc`: silent, soft, loud
 
 ### Build Directories
@@ -372,6 +372,22 @@ The memory is a simple page system. Pages are kept in a free list. Processes nev
 when processes are killed or exit the pages are returned to the OS. Pages can be readable, writable
 and executable and processes can only access pages directly belonging to them, but this enforcement
 only happens on RISC-V (as WASM doesn't have a mechanism for doing so).
+
+### Filesystem
+
+The OS provides a filesystem abstraction through an IPC-based server process. Available backends:
+
+- **memory** - In-memory filesystem (volatile, for testing)
+- **fat** - FAT32 filesystem via FatFs library (RISC-V only, uses VirtIO block device)
+
+Configure with `-Dfilesystem_backend=<backend>`.
+
+See `agent-docs/filesystem.md` for detailed documentation including:
+- FatFs integration and configuration
+- Disk I/O layer implementation
+- IPC API reference
+- Testing with disk images
+- Creating FAT32 test images
 
 ### Graphics
 

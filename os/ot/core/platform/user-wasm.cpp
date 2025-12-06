@@ -36,8 +36,8 @@ void ou_shutdown(void) {
   // shutdown_all_processes calls kernel_exit() and never returns
 }
 
-void *ou_alloc_page(void) {
-  PageAddr result = process_alloc_mapped_page(current_proc, true, true, false);
+void *ou_alloc_pages(size_t count) {
+  PageAddr result = process_alloc_mapped_pages(current_proc, count, true, true, false);
   return result.as_ptr();
 }
 

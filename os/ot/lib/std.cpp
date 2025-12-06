@@ -38,6 +38,11 @@ void oprintf(const char *fmt, ...) {
   va_start(args, fmt);
   int len = vsnprintf(ot_scratch_buffer, OT_PAGE_SIZE, fmt, args);
   va_end(args);
+  // vsnprintf returns the length it WOULD have written, not actual written length
+  // Cap to buffer size to avoid reading past the buffer
+  if (len > OT_PAGE_SIZE - 1) {
+    len = OT_PAGE_SIZE - 1;
+  }
   oputsn(ot_scratch_buffer, len);
 }
 

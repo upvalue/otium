@@ -149,10 +149,8 @@ ErrorCode File::read_all(ou::string &out_data) {
       return FILESYSTEM__IO_ERROR;
     }
 
-    // Append to output string
-    for (size_t i = 0; i < bin.len; i++) {
-      out_data.push_back(bin.ptr[i]);
-    }
+    // Append entire chunk at once (much more efficient than char-by-char)
+    out_data.append(bin.ptr, bin.len);
 
     offset += bytes_read;
 

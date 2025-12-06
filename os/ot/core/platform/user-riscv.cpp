@@ -59,7 +59,7 @@ SyscallResult syscall(int sysno, int arg0, int arg1, int arg2) {
 void ou_exit(void) { syscall(OU_EXIT, 0, 0, 0); }
 void ou_yield(void) { syscall(OU_YIELD, 0, 0, 0); }
 void ou_shutdown(void) { syscall(OU_SHUTDOWN, 0, 0, 0); }
-void *ou_alloc_page(void) { return (void *)syscall(OU_ALLOC_PAGE, 0, 0, 0).a0; }
+void *ou_alloc_pages(size_t count) { return (void *)syscall(OU_ALLOC_PAGE, (int)count, 0, 0).a0; }
 
 void *ou_lock_known_memory(KnownMemory km, size_t page_count) {
   return (void *)syscall(OU_LOCK_KNOWN_MEMORY, (int)km, (int)page_count, 0).a0;

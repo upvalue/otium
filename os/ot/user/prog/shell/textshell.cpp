@@ -9,7 +9,7 @@
 #include "ot/user/tcl.hpp"
 #include "ot/user/user.hpp"
 
-#define SHELL_PAGES 10
+#define SHELL_PAGES 20
 
 // Shell-specific storage inheriting from LocalStorage
 struct ShellStorage : public LocalStorage {

@@ -105,36 +105,72 @@ PageAddr page_allocate(Pidx pidx, size_t page_count) {
     PANIC("Cannot allocate 0 pages");
   }
 
-  // Check if we have enough free pages
-  PageInfo *check = free_list_head;
-  size_t available = 0;
-  while (check && available < page_count) {
-    available++;
-    check = check->next;
+  // For multiple pages, we need to find a contiguous run
+  // Scan the free list to find page_count consecutive pages in physical memory
+  PageInfo *run_start = nullptr;
+  PageInfo *run_prev = nullptr;   // Node before the run (for unlinking)
+  PageInfo *prev = nullptr;
+  PageInfo *current = free_list_head;
+  size_t run_length = 0;
+  uintptr_t expected_addr = 0;
+
+  while (current) {
+    if (run_length == 0) {
+      // Start a new run
+      run_start = current;
+      run_prev = prev;
+      run_length = 1;
+      expected_addr = current->addr.raw() + OT_PAGE_SIZE;
+    } else if (current->addr.raw() == expected_addr) {
+      // Continue the run
+      run_length++;
+      expected_addr += OT_PAGE_SIZE;
+    } else {
+      // Break in contiguity, start new run
+      run_start = current;
+      run_prev = prev;
+      run_length = 1;
+      expected_addr = current->addr.raw() + OT_PAGE_SIZE;
+    }
+
+    if (run_length >= page_count) {
+      // Found enough contiguous pages
+      break;
+    }
+
+    prev = current;
+    current = current->next;
   }
 
-  if (available < page_count) {
-    PANIC("Out of memory - requested %d pages, only %d available", page_count, available);
+  if (run_length < page_count) {
+    // Could not find contiguous run - return null instead of panicking
+    TRACE_MEM(LSOFT, "page_allocate: cannot find %d contiguous pages", page_count);
+    return PageAddr(nullptr);
   }
 
-  // Allocate first page (this is what we'll return)
-  PageInfo *first_page = free_list_head;
-  free_list_head = first_page->next;
-  first_page->pidx = pidx;
-  first_page->next = nullptr;
-  memset(first_page->addr.as_ptr(), 0, OT_PAGE_SIZE);
-
-  TRACE_MEM(LLOUD, "Allocated page at %x to pidx %d", first_page->addr.raw(), pidx.raw());
-
-  // Allocate remaining pages
+  // Unlink the run from the free list
+  // run_start points to first page of run, run_prev points to node before run
+  PageInfo *run_end = run_start;
   for (size_t i = 1; i < page_count; i++) {
-    PageInfo *page_info = free_list_head;
-    free_list_head = page_info->next;
-    page_info->pidx = pidx;
-    page_info->next = nullptr;
-    memset(page_info->addr.as_ptr(), 0, OT_PAGE_SIZE);
+    run_end = run_end->next;
+  }
+  PageInfo *after_run = run_end->next;
 
-    TRACE_MEM(LLOUD, "Allocated page at %x to pidx %d", page_info->addr.raw(), pidx.raw());
+  if (run_prev) {
+    run_prev->next = after_run;
+  } else {
+    free_list_head = after_run;
+  }
+
+  // Mark all pages in run as allocated and clear them
+  current = run_start;
+  for (size_t i = 0; i < page_count; i++) {
+    current->pidx = pidx;
+    PageInfo *next = current->next;
+    current->next = nullptr;
+    memset(current->addr.as_ptr(), 0, OT_PAGE_SIZE);
+    TRACE_MEM(LLOUD, "Allocated page at %x to pidx %d", current->addr.raw(), pidx.raw());
+    current = next;
   }
 
   // Update statistics
@@ -143,7 +179,7 @@ PageAddr page_allocate(Pidx pidx, size_t page_count) {
     mem_stats.peak_usage_pages = mem_stats.allocated_pages;
   }
 
-  return first_page->addr;
+  return run_start->addr;
 }
 
 PageInfo *page_info_lookup(PageAddr addr) {

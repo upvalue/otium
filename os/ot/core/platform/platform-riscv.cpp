@@ -127,9 +127,10 @@ void handle_syscall(struct trap_frame *f) {
     f->a0 = ogetchar();
     break;
   case OU_ALLOC_PAGE: {
-    TRACE(LLOUD, "OU_ALLOC_PAGE syscall");
-    PageAddr result = process_alloc_mapped_page(current_proc, true, true, false);
-    TRACE(LLOUD, "allocated page: %x", result.raw());
+    size_t page_count = arg0 > 0 ? (size_t)arg0 : 1;
+    TRACE(LLOUD, "OU_ALLOC_PAGE syscall: %d pages", page_count);
+    PageAddr result = process_alloc_mapped_pages(current_proc, page_count, true, true, false);
+    TRACE(LLOUD, "allocated pages: %x", result.raw());
     f->a0 = result.raw();
     break;
   }

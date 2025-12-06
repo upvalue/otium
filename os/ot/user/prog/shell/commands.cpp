@@ -106,6 +106,16 @@ tcl::Status cmd_error_string(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl
   return tcl::S_OK;
 }
 
+tcl::Status cmd_length(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("length", argv, 2, 2)) {
+    return tcl::S_ERR;
+  }
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%zu", argv[1].length());
+  i.result = buf;
+  return tcl::S_OK;
+}
+
 tcl::Status cmd_fs_read(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
   if (!i.arity_check("fs/read", argv, 2, 2)) {
     return tcl::S_ERR;
@@ -197,6 +207,10 @@ void register_shell_commands(tcl::Interp &i) {
   // Error code to string conversion
   i.register_command("error/string", cmd_error_string, nullptr,
                      "[error/string code:int] => string - Convert error code to string");
+
+  // String commands
+  i.register_command("length", cmd_length, nullptr,
+                     "[length str:string] => int - Return the length of a string");
 
   // Filesystem commands
   i.register_command("fs/read", cmd_fs_read, nullptr,

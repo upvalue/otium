@@ -199,6 +199,7 @@ PageAddr process_get_storage_page();
 // Allocates a page for the given process (physical addressing only)
 // Returns PageAddr of allocated page, or null on failure
 PageAddr process_alloc_mapped_page(Process *proc, bool readable, bool writable, bool executable);
+PageAddr process_alloc_mapped_pages(Process *proc, size_t page_count, bool readable, bool writable, bool executable);
 
 // map_page() not used in physical-only mode
 void map_page(uintptr_t *table1, uintptr_t vaddr, PageAddr paddr, uint32_t flags, Pidx pidx);

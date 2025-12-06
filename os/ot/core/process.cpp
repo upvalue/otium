@@ -274,12 +274,16 @@ PageAddr process_get_comm_page(void) {
 }
 
 PageAddr process_alloc_mapped_page(Process *proc, bool readable, bool writable, bool executable) {
+  return process_alloc_mapped_pages(proc, 1, readable, writable, executable);
+}
+
+PageAddr process_alloc_mapped_pages(Process *proc, size_t page_count, bool readable, bool writable, bool executable) {
   if (!proc) {
     return PageAddr(nullptr);
   }
 
-  // Allocate physical page
-  PageAddr paddr = page_allocate(proc->pidx, 1);
+  // Allocate contiguous physical pages
+  PageAddr paddr = page_allocate(proc->pidx, page_count);
   if (paddr.is_null()) {
     return PageAddr(nullptr);
   }

@@ -12,42 +12,23 @@ void LocalStorage::process_storage_init(size_t pages) {
   if (pages == 0) {
     return;
   }
+
   // Allocate contiguous pages for the memory pool
-  memory_begin = (char *)ou_alloc_page();
+  // This allows TLSF to allocate blocks larger than a single page
+  memory_begin = (char *)ou_alloc_pages(pages);
   if (!memory_begin) {
-    oprintf("FATAL: process_storage_init failed to allocate first page\n");
+    oprintf("FATAL: process_storage_init failed to allocate %d contiguous pages\n", pages);
     ou_exit();
   }
 
-  pool = tlsf_create_with_pool(memory_begin, OT_PAGE_SIZE);
-
-  if (!pool) {
-    oprintf("FATAL: failed to create TLSF memory pool\n");
-    ou_exit();
-  }
-
-  // Allocate additional pages to get a contiguous region
-  for (size_t i = 1; i < pages; i++) {
-    void *page = ou_alloc_page();
-    if (!page) {
-      oprintf("FATAL: process_storage_init failed to allocate page %d of %d\n", i, pages);
-      ou_exit();
-    }
-
-    if (!tlsf_add_pool(pool, page, OT_PAGE_SIZE)) {
-      oprintf("FATAL: failed to add page %d to TLSF memory pool\n", i);
-      ou_exit();
-    }
-  }
-
-  memory_pages_allocated = pages;
-
-  // Create TLSF pool from the allocated memory
+  // Create TLSF pool from the contiguous memory region
   pool = tlsf_create_with_pool(memory_begin, pages * OT_PAGE_SIZE);
   if (!pool) {
     oprintf("FATAL: failed to create TLSF memory pool\n");
     ou_exit();
   }
+
+  memory_pages_allocated = pages;
 }
 
 extern "C" void *ou_malloc(size_t size) {

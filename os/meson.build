@@ -53,7 +53,7 @@ elif target_arch == 'wasm'
   is_riscv = false
   is_wasm = true
   default_graphics_backend = 'wasm'
-  default_filesystem_backend = 'memory'
+  default_filesystem_backend = 'wasm'
 elif target_arch == 'posix'
   arch_defines = ['-DOT_POSIX']
   is_posix = true
@@ -118,6 +118,7 @@ filesystem_backend_map = {
   'memory': 'OT_FILESYSTEM_BACKEND_MEMORY',
   'onefile': 'OT_FILESYSTEM_BACKEND_ONEFILE',
   'fat': 'OT_FILESYSTEM_BACKEND_FAT',
+  'wasm': 'OT_FILESYSTEM_BACKEND_WASM',
 }
 
 keyboard_backend_map = {
@@ -347,6 +348,8 @@ if is_riscv or is_wasm
       'ot/user/fs/fatfs-diskio.cpp',
       'ot/vendor/fatfs/ff.c',
     ]
+  elif filesystem_backend == 'wasm'
+    user_sources += ['ot/user/fs/impl-wasm.cpp']
   endif
 
   # Platform-specific sources and configuration

@@ -1,0 +1,364 @@
+// wasm-support.js - Runtime support for Otium OS WASM builds
+//
+// This module provides:
+// - In-memory filesystem with fs-in/fs-out sync (Node.js)
+// - Graphics support via SDL (optional)
+// - Module callbacks for WASM runtime
+
+const fs = require('fs');
+const path = require('path');
+
+// =============================================================================
+// Filesystem Storage
+// =============================================================================
+
+// In-memory filesystem storage: path -> { type: 'file'|'dir', data: Uint8Array }
+const fsStorage = new Map();
+
+// Initialize root directory
+fsStorage.set('/', { type: 'dir', data: null, children: new Set() });
+
+/**
+ * Normalize a path: remove trailing slashes, handle . and ..
+ */
+function normalizePath(p) {
+  if (!p || p === '') return '/';
+  if (!p.startsWith('/')) p = '/' + p;
+  while (p.length > 1 && p.endsWith('/')) {
+    p = p.slice(0, -1);
+  }
+  return p;
+}
+
+/**
+ * Get parent path
+ */
+function getParentPath(p) {
+  const normalized = normalizePath(p);
+  if (normalized === '/') return '/';
+  const lastSlash = normalized.lastIndexOf('/');
+  if (lastSlash === 0) return '/';
+  return normalized.slice(0, lastSlash);
+}
+
+/**
+ * Get basename (last component of path)
+ */
+function getBasename(p) {
+  const normalized = normalizePath(p);
+  if (normalized === '/') return '';
+  const lastSlash = normalized.lastIndexOf('/');
+  return normalized.slice(lastSlash + 1);
+}
+
+/**
+ * Ensure all parent directories exist
+ */
+function ensureParentDirs(p) {
+  const normalized = normalizePath(p);
+  const parts = normalized.split('/').filter(x => x);
+  let current = '';
+  for (let i = 0; i < parts.length - 1; i++) {
+    current += '/' + parts[i];
+    if (!fsStorage.has(current)) {
+      fsStorage.set(current, { type: 'dir', data: null, children: new Set() });
+      const parent = getParentPath(current);
+      const parentEntry = fsStorage.get(parent);
+      if (parentEntry && parentEntry.type === 'dir') {
+        parentEntry.children.add(getBasename(current));
+      }
+    }
+  }
+}
+
+/**
+ * Load files from a directory into the virtual filesystem
+ */
+function loadFilesFromDir(baseDir) {
+  if (!fs.existsSync(baseDir)) {
+    return 0;
+  }
+
+  function loadDir(diskPath, virtualPath) {
+    const entries = fs.readdirSync(diskPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const diskEntryPath = path.join(diskPath, entry.name);
+      const virtualEntryPath = virtualPath + '/' + entry.name;
+      const normalizedPath = normalizePath(virtualEntryPath);
+
+      if (entry.isDirectory()) {
+        fsStorage.set(normalizedPath, { type: 'dir', data: null, children: new Set() });
+        const parent = getParentPath(normalizedPath);
+        const parentEntry = fsStorage.get(parent);
+        if (parentEntry && parentEntry.type === 'dir') {
+          parentEntry.children.add(entry.name);
+        }
+        loadDir(diskEntryPath, virtualEntryPath);
+      } else if (entry.isFile()) {
+        const content = fs.readFileSync(diskEntryPath);
+        fsStorage.set(normalizedPath, { type: 'file', data: new Uint8Array(content) });
+        const parent = getParentPath(normalizedPath);
+        const parentEntry = fsStorage.get(parent);
+        if (parentEntry && parentEntry.type === 'dir') {
+          parentEntry.children.add(entry.name);
+        }
+      }
+    }
+  }
+
+  loadDir(baseDir, '');
+  return fsStorage.size - 1;
+}
+
+/**
+ * Save virtual filesystem to a directory
+ */
+function saveFilesToDir(outDir) {
+  if (!fs.existsSync(outDir)) {
+    fs.mkdirSync(outDir, { recursive: true });
+  }
+
+  for (const [virtualPath, entry] of fsStorage) {
+    if (virtualPath === '/') continue;
+
+    const diskPath = path.join(outDir, virtualPath);
+    const diskParent = path.dirname(diskPath);
+
+    if (!fs.existsSync(diskParent)) {
+      fs.mkdirSync(diskParent, { recursive: true });
+    }
+
+    if (entry.type === 'dir') {
+      if (!fs.existsSync(diskPath)) {
+        fs.mkdirSync(diskPath, { recursive: true });
+      }
+    } else if (entry.type === 'file') {
+      fs.writeFileSync(diskPath, entry.data);
+    }
+  }
+  return fsStorage.size - 1;
+}
+
+// =============================================================================
+// Graphics Support
+// =============================================================================
+
+let sdl = null;
+let sdlAvailable = false;
+let window = null;
+let pixelBuffer = null;
+
+function checkSdlAvailable() {
+  try {
+    require.resolve('@kmamal/sdl');
+    sdlAvailable = true;
+    return true;
+  } catch (e) {
+    sdlAvailable = false;
+    return false;
+  }
+}
+
+function graphicsInit(width, height) {
+  if (!sdlAvailable) {
+    return true; // Headless mode
+  }
+
+  try {
+    if (!sdl) {
+      sdl = require('@kmamal/sdl');
+    }
+
+    window = sdl.video.createWindow({
+      title: 'Otium OS',
+      width: width,
+      height: height,
+      resizable: false,
+    });
+
+    pixelBuffer = Buffer.allocUnsafe(width * height * 4);
+    return true;
+  } catch (e) {
+    console.error('Failed to initialize graphics:', e);
+    sdlAvailable = false;
+    return true; // Continue in headless mode
+  }
+}
+
+function graphicsFlush(pixels, width, height) {
+  if (!sdl || !window || !pixelBuffer) {
+    return;
+  }
+
+  try {
+    // Convert BGRA to RGBA
+    for (let i = 0; i < width * height; i++) {
+      const pixel = pixels[i];
+      const offset = i * 4;
+      pixelBuffer[offset + 0] = (pixel >> 16) & 0xFF; // R
+      pixelBuffer[offset + 1] = (pixel >> 8) & 0xFF;  // G
+      pixelBuffer[offset + 2] = pixel & 0xFF;         // B
+      pixelBuffer[offset + 3] = (pixel >> 24) & 0xFF; // A
+    }
+    window.render(width, height, width * 4, 'rgba32', pixelBuffer);
+  } catch (e) {
+    if (e.message && e.message.includes('window is destroyed')) {
+      console.log('\nWindow closed by user, exiting...');
+      process.exit(0);
+    }
+    console.error('Graphics flush error:', e);
+  }
+}
+
+function graphicsCleanup() {
+  if (window) {
+    window.destroy();
+    window = null;
+  }
+  pixelBuffer = null;
+}
+
+// =============================================================================
+// Filesystem Callbacks (for WASM Module)
+// =============================================================================
+
+const filesystemCallbacks = {
+  fsExists(pathStr) {
+    const normalized = normalizePath(pathStr);
+    const entry = fsStorage.get(normalized);
+    if (!entry) return null;
+    return entry.type;
+  },
+
+  fsFileSize(pathStr) {
+    const normalized = normalizePath(pathStr);
+    const entry = fsStorage.get(normalized);
+    if (!entry || entry.type !== 'file') return -1;
+    return entry.data ? entry.data.length : 0;
+  },
+
+  fsReadFile(pathStr) {
+    const normalized = normalizePath(pathStr);
+    const entry = fsStorage.get(normalized);
+    if (!entry || entry.type !== 'file') return null;
+    return entry.data || new Uint8Array(0);
+  },
+
+  fsWriteFile(pathStr, data) {
+    const normalized = normalizePath(pathStr);
+    const entry = fsStorage.get(normalized);
+
+    if (entry && entry.type === 'dir') {
+      return false;
+    }
+
+    if (!entry) {
+      ensureParentDirs(normalized);
+    }
+
+    fsStorage.set(normalized, { type: 'file', data: data });
+
+    const parent = getParentPath(normalized);
+    const parentEntry = fsStorage.get(parent);
+    if (parentEntry && parentEntry.type === 'dir') {
+      parentEntry.children.add(getBasename(normalized));
+    }
+
+    return true;
+  },
+
+  fsCreateFile(pathStr) {
+    const normalized = normalizePath(pathStr);
+
+    if (fsStorage.has(normalized)) {
+      return false;
+    }
+
+    ensureParentDirs(normalized);
+    fsStorage.set(normalized, { type: 'file', data: new Uint8Array(0) });
+
+    const parent = getParentPath(normalized);
+    const parentEntry = fsStorage.get(parent);
+    if (parentEntry && parentEntry.type === 'dir') {
+      parentEntry.children.add(getBasename(normalized));
+    }
+
+    return true;
+  },
+
+  fsCreateDir(pathStr) {
+    const normalized = normalizePath(pathStr);
+
+    if (fsStorage.has(normalized)) {
+      return false;
+    }
+
+    ensureParentDirs(normalized);
+    fsStorage.set(normalized, { type: 'dir', data: null, children: new Set() });
+
+    const parent = getParentPath(normalized);
+    const parentEntry = fsStorage.get(parent);
+    if (parentEntry && parentEntry.type === 'dir') {
+      parentEntry.children.add(getBasename(normalized));
+    }
+
+    return true;
+  },
+
+  fsDeleteFile(pathStr) {
+    const normalized = normalizePath(pathStr);
+    const entry = fsStorage.get(normalized);
+
+    if (!entry || entry.type !== 'file') {
+      return false;
+    }
+
+    const parent = getParentPath(normalized);
+    const parentEntry = fsStorage.get(parent);
+    if (parentEntry && parentEntry.type === 'dir') {
+      parentEntry.children.delete(getBasename(normalized));
+    }
+
+    fsStorage.delete(normalized);
+    return true;
+  },
+
+  fsDeleteDir(pathStr) {
+    const normalized = normalizePath(pathStr);
+    const entry = fsStorage.get(normalized);
+
+    if (!entry || entry.type !== 'dir') {
+      return false;
+    }
+
+    if (entry.children && entry.children.size > 0) {
+      return false;
+    }
+
+    const parent = getParentPath(normalized);
+    const parentEntry = fsStorage.get(parent);
+    if (parentEntry && parentEntry.type === 'dir') {
+      parentEntry.children.delete(getBasename(normalized));
+    }
+
+    fsStorage.delete(normalized);
+    return true;
+  },
+};
+
+// =============================================================================
+// Exports
+// =============================================================================
+
+module.exports = {
+  // Filesystem
+  loadFilesFromDir,
+  saveFilesToDir,
+  filesystemCallbacks,
+
+  // Graphics
+  checkSdlAvailable,
+  graphicsInit,
+  graphicsFlush,
+  graphicsCleanup,
+};

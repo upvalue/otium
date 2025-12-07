@@ -38,7 +38,7 @@ option('graphics_backend',
 # Filesystem backend - auto selects platform default if not specified
 option('filesystem_backend',
   type: 'combo',
-  choices: ['auto', 'none', 'memory', 'onefile', 'fat'],
+  choices: ['auto', 'none', 'memory', 'onefile', 'fat', 'wasm'],
   value: 'auto',
   description: 'Filesystem backend to use (auto = platform default)'
 )

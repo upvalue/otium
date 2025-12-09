@@ -192,16 +192,19 @@ if is_posix
     'ot/user/tcl.cpp',
     'ot/lib/mpack/mpack-utils.cpp',
     'ot/core/platform/posix-file.cpp',
-    'ot/core/platform/tevl-posix.cpp',
+    'ot/core/platform/tevl-termbox.cpp',
     'ot/core/platform/posix-std.cpp',
     'ot/lib/std.cpp',
   ]
+
+  # Include vendor directory for termbox2
+  vendor_inc = include_directories('vendor')
 
   executable('tevl',
     tevl_sources,
     cpp_args: common_cpp_args + ['-fsanitize=address', '-g3'],
     link_args: ['-fsanitize=address'],
-    include_directories: inc,
+    include_directories: [inc, vendor_inc],
     link_with: [printf_lib, mpack_lib],
     install: true,
   )
@@ -229,6 +232,11 @@ if is_posix
     'ot/lib/vector-test.cpp',
     'ot/user/tcl.cpp',
     'ot/user/tcl-test.cpp',
+    'ot/user/tevl.cpp',
+    'ot/user/tevl-test.cpp',
+    'ot/core/platform/tevl-test.cpp',
+    'ot/core/platform/posix-file.cpp',
+    'ot/lib/file.cpp',
   ]
 
   test_exe = executable('unit-test',

@@ -546,3 +546,15 @@ A POSIX-compatible standalone Tcl REPL can be built for testing on the host syst
 ```
 
 This uses the same Tcl core but with POSIX I/O and the bestline library for line editing.
+
+## TEVL Editor
+
+TEVL is a minimal vim-like text editor that runs as a standalone POSIX tool. It uses termbox2 for terminal rendering and has three modes: NORMAL, INSERT, and COMMAND (entered with `;`).
+
+```bash
+# Build and run
+meson compile -C build-posix tevl
+./build-posix/tevl <filename>
+```
+
+See `agent-docs/editor.md` for detailed documentation including.

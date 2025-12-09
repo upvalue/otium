@@ -21,7 +21,7 @@ pkgs.stdenv.mkDerivation {
   ];
 
   configurePhase = ''
-    meson setup build-wasm --cross-file=cross/wasm.txt
+    meson setup build-wasm --cross-file=cross/wasm.txt --
   '';
 
   buildPhase = ''

@@ -2,17 +2,17 @@
 
 #include <stdio.h>
 
-#include "ot/user/tevl.hpp"
 #include "ot/common.h"
 #include "ot/lib/file.hpp"
 #include "ot/lib/result.hpp"
 #include "ot/user/string.hpp"
 #include "ot/user/tcl.hpp"
+#include "ot/user/tevl.hpp"
 #include "ot/user/user.hpp"
 
-static bool running = true;
+bool running = true;
 static const char *default_error_msg = "no error message set";
-static tevl::Backend *be = nullptr;
+tevl::Backend *be = nullptr;
 static int TAB_SIZE = 4;
 static int MESSAGE_TIMEOUT_MS = 3000;
 
@@ -20,6 +20,227 @@ ou::string buffer;
 
 using namespace tevl;
 using namespace ou;
+
+// Default keybinding table
+static Keybinding default_bindings[] = {
+    // Global (any mode)
+    {key_ctrl('d'), ANY_MODE, Action::PAGE_DOWN},
+    {key_ctrl('u'), ANY_MODE, Action::PAGE_UP},
+
+    // NORMAL + INSERT mode movement (arrow keys)
+    {key_left(), EditorMode::NORMAL, Action::MOVE_LEFT},
+    {key_right(), EditorMode::NORMAL, Action::MOVE_RIGHT},
+    {key_up(), EditorMode::NORMAL, Action::MOVE_UP},
+    {key_down(), EditorMode::NORMAL, Action::MOVE_DOWN},
+    {key_left(), EditorMode::INSERT, Action::MOVE_LEFT},
+    {key_right(), EditorMode::INSERT, Action::MOVE_RIGHT},
+    {key_up(), EditorMode::INSERT, Action::MOVE_UP},
+    {key_down(), EditorMode::INSERT, Action::MOVE_DOWN},
+
+    // NORMAL mode - motions
+    {key_char('h'), EditorMode::NORMAL, Action::MOVE_LEFT},
+    {key_char('j'), EditorMode::NORMAL, Action::MOVE_DOWN},
+    {key_char('k'), EditorMode::NORMAL, Action::MOVE_UP},
+    {key_char('l'), EditorMode::NORMAL, Action::MOVE_RIGHT},
+    {key_char('0'), EditorMode::NORMAL, Action::MOVE_LINE_START},
+    {key_char('$'), EditorMode::NORMAL, Action::MOVE_LINE_END},
+
+    // NORMAL mode - operators
+    {key_char('d'), EditorMode::NORMAL, Action::OPERATOR_DELETE},
+
+    // NORMAL mode - other
+    {key_char('i'), EditorMode::NORMAL, Action::ENTER_INSERT_MODE},
+    {key_char(';'), EditorMode::NORMAL, Action::ENTER_COMMAND_MODE},
+
+    // INSERT mode specific
+    {key_esc(), EditorMode::INSERT, Action::EXIT_TO_NORMAL},
+    {key_enter(), EditorMode::INSERT, Action::INSERT_NEWLINE},
+    {key_backspace(), EditorMode::INSERT, Action::DELETE_CHAR_BACK},
+
+    // COMMAND mode specific
+    {key_enter(), EditorMode::COMMND, Action::COMMAND_EXECUTE},
+    {key_backspace(), EditorMode::COMMND, Action::COMMAND_BACKSPACE},
+};
+static const size_t num_bindings = sizeof(default_bindings) / sizeof(default_bindings[0]);
+
+// Compare two keys for equality
+bool keys_match(const Key &a, const Key &b) {
+  if (a.ext != ExtendedKey::NONE || b.ext != ExtendedKey::NONE) {
+    return a.ext == b.ext && a.ctrl == b.ctrl;
+  }
+  return a.c == b.c && a.ctrl == b.ctrl;
+}
+
+// Look up action for a key in the given mode
+Action lookup_action(EditorMode mode, const Key &key) {
+  for (size_t i = 0; i < num_bindings; i++) {
+    const Keybinding &binding = default_bindings[i];
+    if (binding.mode != ANY_MODE && binding.mode != mode) {
+      continue;
+    }
+    if (keys_match(binding.key, key)) {
+      return binding.action;
+    }
+  }
+  return Action::NONE;
+}
+
+// Check if an action is a motion (can be used with operators)
+bool is_motion(Action action) {
+  switch (action) {
+  case Action::MOVE_LEFT:
+  case Action::MOVE_RIGHT:
+  case Action::MOVE_UP:
+  case Action::MOVE_DOWN:
+  case Action::MOVE_LINE_START:
+  case Action::MOVE_LINE_END:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// Forward declarations
+extern Editor e;
+extern tevl::Backend *be;
+
+// Execute a motion action (moves the cursor)
+void execute_motion(Action action) {
+  switch (action) {
+  case Action::MOVE_LEFT:
+    if (e.cx != 0) {
+      e.cx--;
+    } else if (e.cy > 0) {
+      e.cy--;
+      e.cx = e.file_lines[e.cy].length();
+    }
+    break;
+  case Action::MOVE_RIGHT:
+    if (e.cy < e.file_lines.size() && e.cx < e.file_lines[e.cy].length()) {
+      e.cx++;
+    } else if (e.cy < e.file_lines.size() - 1) {
+      e.cy++;
+      e.cx = 0;
+    }
+    break;
+  case Action::MOVE_UP:
+    if (e.cy > 0) {
+      e.cy--;
+    }
+    break;
+  case Action::MOVE_DOWN:
+    if (e.cy < e.file_lines.size() - 1) {
+      e.cy++;
+    }
+    break;
+  case Action::MOVE_LINE_START:
+    e.cx = 0;
+    break;
+  case Action::MOVE_LINE_END:
+    if (e.cy < e.file_lines.size()) {
+      e.cx = e.file_lines[e.cy].length();
+    }
+    break;
+  case Action::PAGE_UP: {
+    auto ws = be->getWindowSize();
+    int page_size = ws.y / 2;
+    e.cy -= page_size;
+    if (e.cy < 0) {
+      e.cy = 0;
+    }
+    break;
+  }
+  case Action::PAGE_DOWN: {
+    auto ws = be->getWindowSize();
+    int page_size = ws.y / 2;
+    e.cy += page_size;
+    if (e.cy >= e.file_lines.size()) {
+      e.cy = e.file_lines.size() - 1;
+    }
+    break;
+  }
+  default:
+    break;
+  }
+}
+
+// Delete an entire line
+void delete_line(intptr_t line) {
+  if (line < e.file_lines.size()) {
+    e.file_lines.erase(line);
+    if (e.file_lines.empty()) {
+      e.file_lines.push_back(ou::string());
+    }
+    if (e.cy >= e.file_lines.size()) {
+      e.cy = e.file_lines.size() - 1;
+    }
+    e.cx = 0;
+    e.dirty++;
+  }
+}
+
+// Apply operator to a range (same line only for now)
+void apply_operator(Operator op, intptr_t start_x, intptr_t start_y, intptr_t end_x, intptr_t end_y) {
+  if (op == Operator::DELETE) {
+    if (start_y == end_y && start_y < e.file_lines.size()) {
+      // Same line: delete characters between start_x and end_x
+      if (start_x > end_x) {
+        intptr_t tmp = start_x;
+        start_x = end_x;
+        end_x = tmp;
+      }
+      e.file_lines[start_y].erase(start_x, end_x - start_x);
+      e.cx = start_x;
+      e.dirty++;
+    }
+    // Multi-line delete can be added later
+  }
+}
+
+// Forward declarations for functions used by execute_action
+void editor_insert_newline();
+void editor_backspace();
+void editor_interpret_command();
+
+// Execute a non-motion action
+void execute_action(Action action, const Key &key) {
+  switch (action) {
+  case Action::OPERATOR_DELETE:
+    e.pending_operator = Operator::DELETE;
+    break;
+  case Action::ENTER_INSERT_MODE:
+    e.mode = EditorMode::INSERT;
+    break;
+  case Action::ENTER_COMMAND_MODE:
+    e.mode = EditorMode::COMMND;
+    e.command_line.clear();
+    break;
+  case Action::EXIT_TO_NORMAL:
+    e.mode = EditorMode::NORMAL;
+    break;
+  case Action::INSERT_NEWLINE:
+    editor_insert_newline();
+    break;
+  case Action::DELETE_CHAR_BACK:
+    editor_backspace();
+    break;
+  case Action::COMMAND_EXECUTE:
+    editor_interpret_command();
+    e.command_line.clear();
+    e.mode = EditorMode::NORMAL;
+    break;
+  case Action::COMMAND_BACKSPACE:
+    if (!e.command_line.empty()) {
+      e.command_line.erase(e.command_line.length() - 1, 1);
+    }
+    break;
+  case Action::FORCE_QUIT:
+    running = false;
+    break;
+  default:
+    break;
+  }
+}
 
 void Editor::screenPutLine(int y, const ou::string &line, size_t cutoff) {
   while (lines.size() <= y) {
@@ -107,6 +328,11 @@ void editor_insert_newline() {
   e.cx = 0;
 }
 
+// Check if a key is empty (no input)
+bool is_empty_key(const Key &k) {
+  return k.c == 0 && k.ext == ExtendedKey::NONE && !k.ctrl;
+}
+
 void process_key_press() {
   auto res = be->readKey();
 
@@ -115,100 +341,52 @@ void process_key_press() {
     return;
   }
 
-  auto ws = be->getWindowSize();
-
   Key k = res.value();
 
-  // let ctrl-q quit always for now
-  if (k.ctrl && k.c == 'q') {
-    running = false;
+  // Ignore empty keys (timeout with no input)
+  if (is_empty_key(k)) {
+    return;
   }
 
-  // ctrl-d and ctrl-u page down/up
-  if (k.ctrl && k.c == 'd') {
-    int page_size = ws.y / 2;
-    e.cy += page_size;
-    if (e.cy >= e.file_lines.size()) {
-      e.cy = e.file_lines.size() - 1;
-    }
-  } else if (k.ctrl && k.c == 'u') {
-    int page_size = ws.y / 2;
-    e.cy -= page_size;
-    if (e.cy < 0) {
-      e.cy = 0;
-    }
-  }
+  Action action = lookup_action(e.mode, k);
 
-  if (e.mode == EditorMode::NORMAL || e.mode == EditorMode::INSERT) {
-    if (k.ext == ExtendedKey::ARROW_LEFT) {
-      if (e.cx != 0) {
-        e.cx--;
-      } else if (e.cy > 0) {
-        // handle user going back onto previous line
-        e.cy--;
-        e.cx = e.file_lines[e.cy].length();
+  // Handle operator-pending state
+  if (e.pending_operator != Operator::NONE) {
+    if (is_motion(action)) {
+      // Calculate motion endpoint
+      intptr_t start_x = e.cx, start_y = e.cy;
+      execute_motion(action);
+      apply_operator(e.pending_operator, start_x, start_y, e.cx, e.cy);
+      e.pending_operator = Operator::NONE;
+    } else if (action == Action::OPERATOR_DELETE && e.pending_operator == Operator::DELETE) {
+      // dd - delete entire line
+      delete_line(e.cy);
+      e.pending_operator = Operator::NONE;
+    } else {
+      // Cancel on Esc or any other key
+      e.pending_operator = Operator::NONE;
+    }
+  } else {
+    // Normal execution
+    if (action != Action::NONE) {
+      if (is_motion(action)) {
+        execute_motion(action);
+      } else {
+        execute_action(action, k);
       }
-    } else if (k.ext == ExtendedKey::ARROW_RIGHT) {
-      if (e.cx < e.file_lines[e.cy].length()) {
-        e.cx++;
-      } else if (e.cy < e.file_lines.size() - 1) {
-        // handle user going forward onto next line
-        e.cy++;
-        e.cx = 0;
+    } else {
+      // Fallback for unbound printable chars
+      if (e.mode == EditorMode::INSERT && k.c >= 32 && k.c <= 126) {
+        editor_insert_char(k.c);
+      } else if (e.mode == EditorMode::COMMND && k.c >= 32 && k.c <= 126) {
+        e.command_line.push_back(k.c);
       }
-    } else if (k.ext == ExtendedKey::ARROW_UP) {
-      if (e.cy > 0) {
-        e.cy--;
-      }
-    } else if (k.ext == ExtendedKey::ARROW_DOWN) {
-      if (e.cy < e.file_lines.size() - 1) {
-        e.cy++;
-      }
-    }
-  }
-
-  if (e.mode == EditorMode::NORMAL) {
-    if (k.c == 'i') {
-      e.mode = EditorMode::INSERT;
-      return;
-    }
-    if (k.c == ';') {
-      e.mode = EditorMode::COMMND;
-      e.command_line.clear();
-      return;
-    }
-  }
-
-  if (e.mode == EditorMode::INSERT) {
-    if (k.ext == ExtendedKey::ESC_KEY) {
-      e.mode = EditorMode::NORMAL;
-    }
-    if (k.ext == ExtendedKey::ENTER_KEY) {
-      editor_insert_newline();
-    }
-    if (k.ext == ExtendedKey::BACKSPACE_KEY) {
-      editor_backspace();
-    }
-    if (k.c >= 32 && k.c <= 126) {
-      editor_insert_char(k.c);
-    }
-  }
-
-  if (e.mode == EditorMode::COMMND) {
-    if (k.ext == ExtendedKey::ENTER_KEY) {
-      editor_interpret_command();
-      e.command_line.clear();
-      e.mode = EditorMode::NORMAL;
-    } else if (k.ext == ExtendedKey::BACKSPACE_KEY) {
-      e.command_line.erase(e.command_line.length() - 1, 1);
-    } else if (k.c >= 32 && k.c <= 126) {
-      e.command_line.push_back(k.c);
     }
   }
 
   // Correct cx if it's beyond the end of the current line
   if (e.cy < e.file_lines.size()) {
-    int current_line_len = e.file_lines[e.cy].length();
+    intptr_t current_line_len = e.file_lines[e.cy].length();
     if (e.cx > current_line_len) {
       e.cx = current_line_len;
     }
@@ -266,6 +444,12 @@ void generate_status_line() {
     e.status_line.append("[insert] ");
   } else if (e.mode == EditorMode::COMMND) {
     e.status_line.append("[commnd] ");
+  } else if (e.mode == EditorMode::NORMAL) {
+    if (e.pending_operator == Operator::DELETE) {
+      e.status_line.append("[normal d] ");
+    } else {
+      e.status_line.append("[normal] ");
+    }
   } else {
     e.status_line.append("[normal] ");
   }

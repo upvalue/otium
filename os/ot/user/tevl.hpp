@@ -16,8 +16,17 @@ enum class EditorMode {
   COMMND,
 };
 
+// Operators that can be combined with motions (forward declaration for Editor)
+enum class Operator {
+  NONE,
+  DELETE, // d
+  // Future: YANK, CHANGE, etc.
+};
+
 struct Editor {
-  Editor() : row_offset(0), col_offset(0), cx(0), cy(0), mode(EditorMode::NORMAL), dirty(0) {}
+  Editor()
+      : row_offset(0), col_offset(0), cx(0), cy(0), mode(EditorMode::NORMAL), dirty(0),
+        pending_operator(Operator::NONE) {}
 
   intptr_t row_offset, col_offset;
 
@@ -42,6 +51,7 @@ struct Editor {
   ou::string command_line;
 
   EditorMode mode;
+  Operator pending_operator; // Set when waiting for motion (e.g., after 'd')
 
   void screenResetLines() {
     for (int i = 0; i < lines.size(); i++) {
@@ -100,6 +110,77 @@ struct Key {
   bool ctrl;
 };
 
+// Helper functions for building key sequences (useful for testing)
+inline Key key_char(char c) {
+  Key k;
+  k.c = c;
+  return k;
+}
+inline Key key_ctrl(char c) {
+  Key k;
+  k.c = c;
+  k.ctrl = true;
+  return k;
+}
+inline Key key_ext(ExtendedKey ext) {
+  Key k;
+  k.ext = ext;
+  return k;
+}
+
+// Convenience aliases
+inline Key key_esc() { return key_ext(ExtendedKey::ESC_KEY); }
+inline Key key_enter() { return key_ext(ExtendedKey::ENTER_KEY); }
+inline Key key_backspace() { return key_ext(ExtendedKey::BACKSPACE_KEY); }
+inline Key key_up() { return key_ext(ExtendedKey::ARROW_UP); }
+inline Key key_down() { return key_ext(ExtendedKey::ARROW_DOWN); }
+inline Key key_left() { return key_ext(ExtendedKey::ARROW_LEFT); }
+inline Key key_right() { return key_ext(ExtendedKey::ARROW_RIGHT); }
+
+// Actions that can be triggered by keybindings
+enum class Action {
+  NONE,
+
+  // Movement (also used as motions for operators)
+  MOVE_LEFT,
+  MOVE_RIGHT,
+  MOVE_UP,
+  MOVE_DOWN,
+  MOVE_LINE_START, // vim: 0
+  MOVE_LINE_END,   // vim: $
+  PAGE_UP,
+  PAGE_DOWN,
+
+  // Operators (enter operator-pending mode)
+  OPERATOR_DELETE, // vim: d
+
+  // Mode changes
+  ENTER_INSERT_MODE,
+  ENTER_COMMAND_MODE,
+  EXIT_TO_NORMAL,
+
+  // Editing (INSERT mode)
+  INSERT_NEWLINE,
+  DELETE_CHAR_BACK,
+
+  // Command mode
+  COMMAND_EXECUTE,
+  COMMAND_BACKSPACE,
+
+  // Global
+  FORCE_QUIT,
+};
+
+// Special mode value for bindings that work in any mode
+constexpr EditorMode ANY_MODE = static_cast<EditorMode>(-1);
+
+// Keybinding entry mapping a key to an action
+struct Keybinding {
+  Key key;
+  EditorMode mode;
+  Action action;
+};
+
 struct Backend {
   const char *error_msg;
 
@@ -111,9 +192,7 @@ struct Backend {
   virtual void refresh() = 0;
   virtual void clear() = 0;
   virtual Coord getWindowSize() = 0;
-  // virtual void render(intptr_t col_offset, int cx, int cy, const ou::vector<ou::string> &lines) = 0;
   virtual void render(const Editor &ed) = 0;
-  virtual Result<Coord, EditorErr> getCursorPosition() = 0;
 
   /** Debug output to platform-specific location */
   virtual void debug_print(const ou::string &msg) = 0;
@@ -121,5 +200,10 @@ struct Backend {
 
 void tevl_main(Backend *backend, ou::string *file_path);
 
+// Test helper - runs editor with scripted keys, returns final file contents
+ou::vector<ou::string> tevl_test_run(const Key *keys, size_t count,
+                                     const ou::vector<ou::string> *initial_lines = nullptr);
+
+} // namespace tevl
+
 #endif
-}

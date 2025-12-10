@@ -1,6 +1,8 @@
 // textshell.cpp - Text-based TCL shell implementation
 #include <stdio.h>
 
+#include "ot/lib/file.hpp"
+#include "ot/lib/mpack/mpack-reader.hpp"
 #include "ot/lib/mpack/mpack-utils.hpp"
 #include "ot/user/gen/tcl-vars.hpp"
 #include "ot/user/local-storage.hpp"
@@ -81,6 +83,41 @@ void shell_main() {
   tcl::Status shellrc_status = i.eval(tcl::string_view(shellrc_content));
   if (shellrc_status != tcl::S_OK) {
     oprintf("shellrc error: %s\n", i.result.c_str());
+  }
+
+  // Check for script filename argument
+  PageAddr arg_page = ou_get_arg_page();
+  MPackReader reader(arg_page.as<char>(), OT_PAGE_SIZE);
+
+  constexpr size_t MAX_ARGS = 8;
+  StringView argv[MAX_ARGS];
+  size_t argc = 0;
+
+  if (reader.read_args_map(argv, MAX_ARGS, argc) && argc > 1) {
+    // Filename provided - execute script and exit
+    ou::string filename(argv[1].ptr, argv[1].len);
+    ou::File file(filename.c_str(), ou::FileMode::READ);
+
+    ErrorCode err = file.open();
+    if (err != ErrorCode::NONE) {
+      oprintf("failed to open file '%s': %s\n", filename.c_str(), error_code_to_string(err));
+      return;
+    }
+
+    ou::string content;
+    err = file.read_all(content);
+    if (err != ErrorCode::NONE) {
+      oprintf("failed to read file '%s': %s\n", filename.c_str(), error_code_to_string(err));
+      return;
+    }
+
+    tcl::Status status = i.eval(content);
+    if (status != tcl::S_OK) {
+      oprintf("script error: %s\n", i.result.c_str());
+    } else if (!i.result.empty()) {
+      oprintf("%s\n", i.result.c_str());
+    }
+    return;
   }
 
   while (s->running) {

@@ -194,6 +194,32 @@ tcl::Status cmd_fs_create(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::P
   return tcl::S_OK;
 }
 
+tcl::Status cmd_dofile(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("dofile", argv, 2, 2)) {
+    return tcl::S_ERR;
+  }
+
+  ou::File file(argv[1].c_str(), ou::FileMode::READ);
+  ErrorCode err = file.open();
+  if (err != ErrorCode::NONE) {
+    snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "dofile: failed to open file '%s': %s", argv[1].c_str(),
+             error_code_to_string(err));
+    i.result = ot_scratch_buffer;
+    return tcl::S_ERR;
+  }
+
+  ou::string content;
+  err = file.read_all(content);
+  if (err != ErrorCode::NONE) {
+    snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "dofile: failed to read file '%s': %s", argv[1].c_str(),
+             error_code_to_string(err));
+    i.result = ot_scratch_buffer;
+    return tcl::S_ERR;
+  }
+
+  return i.eval(content);
+}
+
 tcl::Status cmd_proc_is_alive(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
   if (!i.arity_check("proc/is-alive", argv, 2, 2)) {
     return tcl::S_ERR;
@@ -267,6 +293,7 @@ void register_shell_commands(tcl::Interp &i) {
                      "[fs/write filename:string content:string] => nil - Write string to a file");
   i.register_command("fs/create", cmd_fs_create, nullptr,
                      "[fs/create filename:string] => nil - Create a new empty file");
+  i.register_command("dofile", cmd_dofile, nullptr, "[dofile filename:string] => result - Execute a Tcl script file");
 
   // Process spawning
   i.register_command("run", cmd_run, nullptr,

@@ -934,3 +934,92 @@ TEST_CASE("tcl - number conversion - mixed bases") {
     CHECK(i.result.compare("1") == 0);
   }
 }
+
+TEST_CASE("tcl - escape sequences in quoted strings") {
+  tcl::Interp i;
+  tcl::register_core_commands(i);
+
+  SUBCASE("escaped quote") {
+    CHECK(i.eval("set x \"hello \\\"world\\\"\"") == tcl::S_OK);
+    tcl::Var *v = i.get_var(tcl::string_view("x"));
+    CHECK(v != nullptr);
+    CHECK(v->val->compare("hello \"world\"") == 0);
+  }
+
+  SUBCASE("escaped backslash") {
+    CHECK(i.eval("set x \"path\\\\to\\\\file\"") == tcl::S_OK);
+    tcl::Var *v = i.get_var(tcl::string_view("x"));
+    CHECK(v != nullptr);
+    CHECK(v->val->compare("path\\to\\file") == 0);
+  }
+
+  SUBCASE("newline escape") {
+    CHECK(i.eval("set x \"line1\\nline2\"") == tcl::S_OK);
+    tcl::Var *v = i.get_var(tcl::string_view("x"));
+    CHECK(v != nullptr);
+    CHECK(v->val->compare("line1\nline2") == 0);
+  }
+
+  SUBCASE("tab escape") {
+    CHECK(i.eval("set x \"col1\\tcol2\"") == tcl::S_OK);
+    tcl::Var *v = i.get_var(tcl::string_view("x"));
+    CHECK(v != nullptr);
+    CHECK(v->val->compare("col1\tcol2") == 0);
+  }
+
+  SUBCASE("carriage return escape") {
+    CHECK(i.eval("set x \"text\\rmore\"") == tcl::S_OK);
+    tcl::Var *v = i.get_var(tcl::string_view("x"));
+    CHECK(v != nullptr);
+    CHECK(v->val->compare("text\rmore") == 0);
+  }
+
+  SUBCASE("mixed escapes") {
+    CHECK(i.eval("set x \"say \\\"hi\\\\there\\\"\"") == tcl::S_OK);
+    tcl::Var *v = i.get_var(tcl::string_view("x"));
+    CHECK(v != nullptr);
+    CHECK(v->val->compare("say \"hi\\there\"") == 0);
+  }
+
+  SUBCASE("escape at start and end") {
+    CHECK(i.eval("set x \"\\\"quoted\\\"\"") == tcl::S_OK);
+    tcl::Var *v = i.get_var(tcl::string_view("x"));
+    CHECK(v != nullptr);
+    CHECK(v->val->compare("\"quoted\"") == 0);
+  }
+
+  SUBCASE("unknown escape passes through") {
+    CHECK(i.eval("set x \"test\\xvalue\"") == tcl::S_OK);
+    tcl::Var *v = i.get_var(tcl::string_view("x"));
+    CHECK(v != nullptr);
+    CHECK(v->val->compare("test\\xvalue") == 0);
+  }
+
+  SUBCASE("no escapes - unchanged behavior") {
+    CHECK(i.eval("set x \"hello world\"") == tcl::S_OK);
+    tcl::Var *v = i.get_var(tcl::string_view("x"));
+    CHECK(v != nullptr);
+    CHECK(v->val->compare("hello world") == 0);
+  }
+
+  SUBCASE("braced strings unchanged") {
+    CHECK(i.eval("set x {no \\\"escape\\\" here}") == tcl::S_OK);
+    tcl::Var *v = i.get_var(tcl::string_view("x"));
+    CHECK(v != nullptr);
+    CHECK(v->val->compare("no \\\"escape\\\" here") == 0);
+  }
+
+  SUBCASE("empty string with escapes") {
+    CHECK(i.eval("set x \"\\\"\\\"\"") == tcl::S_OK);
+    tcl::Var *v = i.get_var(tcl::string_view("x"));
+    CHECK(v != nullptr);
+    CHECK(v->val->compare("\"\"") == 0);
+  }
+
+  SUBCASE("multiple newlines") {
+    CHECK(i.eval("set x \"a\\nb\\nc\"") == tcl::S_OK);
+    tcl::Var *v = i.get_var(tcl::string_view("x"));
+    CHECK(v != nullptr);
+    CHECK(v->val->compare("a\nb\nc") == 0);
+  }
+}

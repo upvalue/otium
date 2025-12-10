@@ -2,9 +2,9 @@
 
 #include <stdio.h>
 
-#include "ot/user/tcl.hpp"
 #include "ot/lib/mpack/mpack-utils.hpp"
 #include "ot/lib/mpack/mpack-writer.hpp"
+#include "ot/user/tcl.hpp"
 
 namespace tcl {
 
@@ -43,13 +43,53 @@ void format_error(string &result, const char *fmt, ...) {
   result = buffer;
 }
 
+static string process_escapes(const string_view &input) {
+  string result;
+  for (size_t i = 0; i < input.length(); i++) {
+    if (input[i] == '\\' && i + 1 < input.length()) {
+      char next = input[i + 1];
+      switch (next) {
+      case '"':
+        result += '"';
+        i++;
+        break;
+      case '\\':
+        result += '\\';
+        i++;
+        break;
+      case 'n':
+        result += '\n';
+        i++;
+        break;
+      case 't':
+        result += '\t';
+        i++;
+        break;
+      case 'r':
+        result += '\r';
+        i++;
+        break;
+      default:
+        // Unknown escape: pass through literally
+        result += input[i];
+        break;
+      }
+    } else {
+      result += input[i];
+    }
+  }
+  return result;
+}
+
 //
 // PARSER IMPLEMENTATION
 //
 
 Parser::Parser(const string_view &body_, bool trace_parser_)
     : body(body_), cursor(0), begin(0), end(0), trace_parser(trace_parser_), in_string(false), in_brace(false),
-      in_quote(false), brace_level(0), token(TK_EOL), terminating_char(0) {}
+      in_quote(false), has_escapes_(false), brace_level(0), token(TK_EOL), terminating_char(0) {}
+
+bool Parser::has_escapes() const { return has_escapes_; }
 
 Parser::~Parser() {}
 
@@ -90,6 +130,7 @@ void Parser::recurse(Parser &sub, char terminating_char) {
 
 Token Parser::_next_token() {
   int adj = 0;
+  has_escapes_ = false;
 start:
   if (done()) {
     if (token != TK_EOL && token != TK_EOF) {
@@ -167,7 +208,20 @@ start:
       }
       goto start;
     }
+    case '\\': {
+      if (in_quote && !done()) {
+        char next = peek();
+        if (next == '"' || next == '\\' || next == 'n' || next == 't' || next == 'r') {
+          getc(); // consume escaped char so \" doesn't end the string
+          has_escapes_ = true;
+        }
+        // For unknown escapes, backslash passes through
+      }
+      continue;
+    }
     case '\"': {
+      if (in_brace)
+        continue; // quotes inside braces are literal
       if (in_quote) {
         in_quote = false;
         adj = 1;
@@ -401,10 +455,11 @@ Status Interp::eval(const string_view &str) {
       continue;
     }
 
+    string token_str = p.has_escapes() ? process_escapes(t) : string(t.data(), t.length());
     if (prevtype == TK_SEP || prevtype == TK_EOL) {
-      argv.push_back(string(t.data(), t.length()));
+      argv.push_back(token_str);
     } else {
-      argv[argv.size() - 1] += string(t.data(), t.length());
+      argv[argv.size() - 1] += token_str;
     }
     prevtype = token;
   }

@@ -12,11 +12,11 @@
 namespace tcl {
 
 // Import ou:: types into tcl:: namespace for convenience
+using ou::ou_delete;
+using ou::ou_new;
 using ou::string;
 using ou::string_view;
 using ou::vector;
-using ou::ou_new;
-using ou::ou_delete;
 
 /**
  * Status codes
@@ -61,6 +61,7 @@ struct Parser {
   bool in_string;
   bool in_brace;
   bool in_quote;
+  bool has_escapes_;
   size_t brace_level;
   Token token;
   char terminating_char;
@@ -74,6 +75,7 @@ struct Parser {
   void recurse(Parser &sub, char terminating_char);
   Token _next_token();
   Token next_token();
+  bool has_escapes() const;
 };
 
 /**
@@ -89,15 +91,13 @@ struct ProcPrivdata {
 /**
  * Command function type
  */
-typedef Status (*cmd_func_t)(Interp &i, vector<string> &argv,
-                             ProcPrivdata *privdata);
+typedef Status (*cmd_func_t)(Interp &i, vector<string> &argv, ProcPrivdata *privdata);
 
 /**
  * Command struct
  */
 struct Cmd {
-  Cmd(const string &name_, cmd_func_t func_, ProcPrivdata *privdata_ = nullptr,
-      const string &docstring_ = "");
+  Cmd(const string &name_, cmd_func_t func_, ProcPrivdata *privdata_ = nullptr, const string &docstring_ = "");
   ~Cmd();
   string name;
   cmd_func_t func;
@@ -140,13 +140,11 @@ struct Interp {
 
   void drop_call_frame();
   Cmd *get_command(const string &name) const;
-  Status register_command(const string &name, cmd_func_t fn,
-                          ProcPrivdata *privdata = nullptr,
+  Status register_command(const string &name, cmd_func_t fn, ProcPrivdata *privdata = nullptr,
                           const string &docstring = "");
   Var *get_var(const string_view &name);
   Status set_var(const string &name, const string &val);
-  bool arity_check(const string &name, const vector<string> &argv, size_t min,
-                   size_t max);
+  bool arity_check(const string &name, const vector<string> &argv, size_t min, size_t max);
   bool int_check(const string &name, const vector<string> &argv, size_t idx);
   Status eval(const string_view &str);
 

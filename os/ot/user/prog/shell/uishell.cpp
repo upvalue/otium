@@ -322,7 +322,7 @@ void uishell_main() {
     // Check if we should render (are we the active app?)
     // oprintf("UISHELL[%lu]: calling should_render\n", reg_result.value());
     // oprintf("UISHELL: calling should_render with gfx_client %p and gfx pid %lu\n", &gfx_client, gfx_pid.raw());
-    oprintf("UISHELL gfx_client %p with pid %lu\n", &gfx_client, gfx_pid.raw());
+    // oprintf("UISHELL gfx_client %p with pid %lu\n", &gfx_client, gfx_pid.raw());
     auto should = gfx_client.should_render();
     // oprintf("UISHELL[%lu]: should_render returned %d\n", reg_result.value(), should.is_ok() ? (int)should.value() :
     // -1);
@@ -334,10 +334,10 @@ void uishell_main() {
     }
     if (should.value() == 0) {
       sentinel++;
-      printf("UISHELL: gfx_client %p with pid %lu before yield\n", &gfx_client, gfx_pid.raw());
+      // printf("UISHELL: gfx_client %p with pid %lu before yield\n", &gfx_client, gfx_pid.raw());
       // Not active, just yield
       ou_yield();
-      printf("UISHELL: gfx_client %p with pid %lu after yield\n", &gfx_client, gfx_pid.raw());
+      // printf("UISHELL: gfx_client %p with pid %lu after yield\n", &gfx_client, gfx_pid.raw());
       continue;
     }
 

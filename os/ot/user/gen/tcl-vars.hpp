@@ -52,8 +52,10 @@ inline void register_ipc_method_vars(tcl::Interp &i) {
   i.set_var("FILESYSTEM_DELETE_FILE", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1e00);
   i.set_var("FILESYSTEM_DELETE_DIR", buf);
-  // Keyboard service methods
   snprintf(buf, sizeof(buf), "%d", 0x1f00);
+  i.set_var("FILESYSTEM_LIST_DIR", buf);
+  // Keyboard service methods
+  snprintf(buf, sizeof(buf), "%d", 0x2000);
   i.set_var("KEYBOARD_POLL_KEY", buf);
 
   // Error codes

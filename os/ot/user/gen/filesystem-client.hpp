@@ -20,6 +20,7 @@ struct FilesystemClient {
   Result<bool, ErrorCode> create_dir(const ou::string& path);
   Result<bool, ErrorCode> delete_file(const ou::string& path);
   Result<bool, ErrorCode> delete_dir(const ou::string& path);
+  Result<uintptr_t, ErrorCode> list_dir(const ou::string& path);
 
   // Universal shutdown method (sends IPC_METHOD_SHUTDOWN)
   Result<bool, ErrorCode> shutdown();

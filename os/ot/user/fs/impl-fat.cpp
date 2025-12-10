@@ -314,6 +314,46 @@ private:
 
     return Result<bool, ErrorCode>::ok(true);
   }
+
+  Result<uintptr_t, ErrorCode> handle_list_dir(const ou::string &path) override {
+    // Handle empty path as root
+    const char *fpath = path.empty() ? "" : convert_path(path);
+
+    DIR dir;
+    FRESULT fr = f_opendir(&dir, fpath);
+    if (fr != FR_OK) {
+      return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__DIR_NOT_FOUND);
+    }
+
+    // First pass: count entries
+    FILINFO fno;
+    size_t count = 0;
+    while (f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != 0) {
+      count++;
+    }
+
+    // Reopen and write to comm page
+    f_closedir(&dir);
+    fr = f_opendir(&dir, fpath);
+    if (fr != FR_OK) {
+      return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__DIR_NOT_FOUND);
+    }
+
+    PageAddr comm = ou_get_comm_page();
+    MPackWriter writer(comm.as_ptr(), OT_PAGE_SIZE);
+    writer.array((uint32_t)count);
+
+    while (f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != 0) {
+      ou::string name(fno.fname);
+      if (fno.fattrib & AM_DIR) {
+        name.push_back('/');
+      }
+      writer.str(name.c_str(), (uint32_t)name.length());
+    }
+
+    f_closedir(&dir);
+    return Result<uintptr_t, ErrorCode>::ok(count);
+  }
 };
 
 void proc_filesystem(void) {

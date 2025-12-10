@@ -10,13 +10,9 @@
 #include "ot/user/tevl.hpp"
 #include "ot/user/user.hpp"
 
-bool running = true;
 static const char *default_error_msg = "no error message set";
-tevl::Backend *be = nullptr;
 static int TAB_SIZE = 4;
 static int MESSAGE_TIMEOUT_MS = 3000;
-
-ou::string buffer;
 
 using namespace tevl;
 using namespace ou;
@@ -64,7 +60,7 @@ static Keybinding default_bindings[] = {
 static const size_t num_bindings = sizeof(default_bindings) / sizeof(default_bindings[0]);
 
 // Compare two keys for equality
-bool keys_match(const Key &a, const Key &b) {
+static bool keys_match(const Key &a, const Key &b) {
   if (a.ext != ExtendedKey::NONE || b.ext != ExtendedKey::NONE) {
     return a.ext == b.ext && a.ctrl == b.ctrl;
   }
@@ -72,7 +68,7 @@ bool keys_match(const Key &a, const Key &b) {
 }
 
 // Look up action for a key in the given mode
-Action lookup_action(EditorMode mode, const Key &key) {
+static Action lookup_action(EditorMode mode, const Key &key) {
   for (size_t i = 0; i < num_bindings; i++) {
     const Keybinding &binding = default_bindings[i];
     if (binding.mode != ANY_MODE && binding.mode != mode) {
@@ -86,7 +82,7 @@ Action lookup_action(EditorMode mode, const Key &key) {
 }
 
 // Check if an action is a motion (can be used with operators)
-bool is_motion(Action action) {
+static bool is_motion(Action action) {
   switch (action) {
   case Action::MOVE_LEFT:
   case Action::MOVE_RIGHT:
@@ -100,62 +96,66 @@ bool is_motion(Action action) {
   }
 }
 
-// Forward declarations
-extern Editor e;
-extern tevl::Backend *be;
+// Check if a key is empty (no input)
+static bool is_empty_key(const Key &k) {
+  return k.c == 0 && k.ext == ExtendedKey::NONE && !k.ctrl;
+}
 
-// Execute a motion action (moves the cursor)
-void execute_motion(Action action) {
+//
+// Editor method implementations
+//
+
+void Editor::execute_motion(Action action) {
   switch (action) {
   case Action::MOVE_LEFT:
-    if (e.cx != 0) {
-      e.cx--;
-    } else if (e.cy > 0) {
-      e.cy--;
-      e.cx = e.file_lines[e.cy].length();
+    if (cx != 0) {
+      cx--;
+    } else if (cy > 0) {
+      cy--;
+      cx = file_lines[cy].length();
     }
     break;
   case Action::MOVE_RIGHT:
-    if (e.cy < e.file_lines.size() && e.cx < e.file_lines[e.cy].length()) {
-      e.cx++;
-    } else if (e.cy < e.file_lines.size() - 1) {
-      e.cy++;
-      e.cx = 0;
+    if (cy < file_lines.size() && cx < file_lines[cy].length()) {
+      cx++;
+    } else if (cy < file_lines.size() - 1) {
+      cy++;
+      cx = 0;
     }
     break;
   case Action::MOVE_UP:
-    if (e.cy > 0) {
-      e.cy--;
+    if (cy > 0) {
+      cy--;
     }
     break;
   case Action::MOVE_DOWN:
-    if (e.cy < e.file_lines.size() - 1) {
-      e.cy++;
+    if (cy < file_lines.size() - 1) {
+      cy++;
     }
     break;
   case Action::MOVE_LINE_START:
-    e.cx = 0;
+    cx = 0;
     break;
   case Action::MOVE_LINE_END:
-    if (e.cy < e.file_lines.size()) {
-      e.cx = e.file_lines[e.cy].length();
+    if (cy < file_lines.size()) {
+      cx = file_lines[cy].length();
     }
     break;
   case Action::PAGE_UP: {
     auto ws = be->getWindowSize();
     int page_size = ws.y / 2;
-    e.cy -= page_size;
-    if (e.cy < 0) {
-      e.cy = 0;
+    cy -= page_size;
+    if (cy < 0) {
+      cy = 0;
     }
     break;
   }
   case Action::PAGE_DOWN: {
     auto ws = be->getWindowSize();
     int page_size = ws.y / 2;
-    e.cy += page_size;
-    if (e.cy >= e.file_lines.size()) {
-      e.cy = e.file_lines.size() - 1;
+    cy += page_size;
+    if (cy >= file_lines.size()) {
+      cy = file_lines.size() - 1;
     }
     break;
   }
@@ -164,74 +164,67 @@ void execute_motion(Action action) {
   }
 }
 
-// Delete an entire line
-void delete_line(intptr_t line) {
-  if (line < e.file_lines.size()) {
-    e.file_lines.erase(line);
-    if (e.file_lines.empty()) {
-      e.file_lines.push_back(ou::string());
+void Editor::delete_line(intptr_t line) {
+  if (line < file_lines.size()) {
+    file_lines.erase(line);
+    if (file_lines.empty()) {
+      file_lines.push_back(ou::string());
     }
-    if (e.cy >= e.file_lines.size()) {
-      e.cy = e.file_lines.size() - 1;
+    if (cy >= file_lines.size()) {
+      cy = file_lines.size() - 1;
     }
-    e.cx = 0;
-    e.dirty++;
+    cx = 0;
+    dirty++;
   }
 }
 
-// Apply operator to a range (same line only for now)
-void apply_operator(Operator op, intptr_t start_x, intptr_t start_y, intptr_t end_x, intptr_t end_y) {
+void Editor::apply_operator(Operator op, intptr_t start_x, intptr_t start_y, intptr_t end_x,
+                            intptr_t end_y) {
   if (op == Operator::DELETE) {
-    if (start_y == end_y && start_y < e.file_lines.size()) {
+    if (start_y == end_y && start_y < file_lines.size()) {
       // Same line: delete characters between start_x and end_x
       if (start_x > end_x) {
         intptr_t tmp = start_x;
         start_x = end_x;
         end_x = tmp;
       }
-      e.file_lines[start_y].erase(start_x, end_x - start_x);
-      e.cx = start_x;
-      e.dirty++;
+      file_lines[start_y].erase(start_x, end_x - start_x);
+      cx = start_x;
+      dirty++;
     }
     // Multi-line delete can be added later
   }
 }
 
-// Forward declarations for functions used by execute_action
-void editor_insert_newline();
-void editor_backspace();
-void editor_interpret_command();
-
-// Execute a non-motion action
-void execute_action(Action action, const Key &key) {
+void Editor::execute_action(Action action, const Key &key) {
   switch (action) {
   case Action::OPERATOR_DELETE:
-    e.pending_operator = Operator::DELETE;
+    pending_operator = Operator::DELETE;
     break;
   case Action::ENTER_INSERT_MODE:
-    e.mode = EditorMode::INSERT;
+    mode = EditorMode::INSERT;
     break;
   case Action::ENTER_COMMAND_MODE:
-    e.mode = EditorMode::COMMND;
-    e.command_line.clear();
+    mode = EditorMode::COMMND;
+    command_line.clear();
     break;
   case Action::EXIT_TO_NORMAL:
-    e.mode = EditorMode::NORMAL;
+    mode = EditorMode::NORMAL;
     break;
   case Action::INSERT_NEWLINE:
-    editor_insert_newline();
+    insert_newline();
     break;
   case Action::DELETE_CHAR_BACK:
-    editor_backspace();
+    backspace();
     break;
   case Action::COMMAND_EXECUTE:
-    editor_interpret_command();
-    e.command_line.clear();
-    e.mode = EditorMode::NORMAL;
+    interpret_command();
+    command_line.clear();
+    mode = EditorMode::NORMAL;
     break;
   case Action::COMMAND_BACKSPACE:
-    if (!e.command_line.empty()) {
-      e.command_line.erase(e.command_line.length() - 1, 1);
+    if (!command_line.empty()) {
+      command_line.erase(command_line.length() - 1, 1);
     }
     break;
   case Action::FORCE_QUIT:
@@ -269,71 +262,62 @@ void Editor::screenPutLine(int y, const ou::string &line, size_t cutoff) {
   }
 }
 
-Editor e;
-tcl::Interp interp;
-
-void editor_message_set(const ou::string &message) {
-  e.message_line = message;
-  e.last_message_time = o_time_get();
+void Editor::message_set(const ou::string &message) {
+  message_line = message;
+  last_message_time = o_time_get();
 }
 
-void editor_interpret_command() {
-  if (e.command_line.empty()) {
+void Editor::interpret_command() {
+  if (command_line.empty()) {
     return;
   }
 
   be->debug_print("evaluating command");
-  be->debug_print(e.command_line);
+  be->debug_print(command_line);
 
-  tcl::Status status = interp.eval(e.command_line);
+  tcl::Status status = interp->eval(command_line);
   if (status != tcl::S_OK) {
-    editor_message_set(interp.result);
+    message_set(interp->result);
   }
 }
 
-void editor_insert_char(char c) {
-  if (e.cy == e.file_lines.size()) {
-    e.file_lines.push_back(ou::string());
+void Editor::insert_char(char c) {
+  if (cy == file_lines.size()) {
+    file_lines.push_back(ou::string());
   }
-  e.file_lines[e.cy].insert(e.cx, 1, c);
-  e.cx++;
-  e.dirty++;
+  file_lines[cy].insert(cx, 1, c);
+  cx++;
+  dirty++;
 }
 
-void editor_backspace() {
-  if (e.cx > 0 && e.cy < e.file_lines.size()) {
-    e.file_lines[e.cy].erase(e.cx - 1, 1);
-    e.cx--;
-  } else if (e.cy > 0) {
+void Editor::backspace() {
+  if (cx > 0 && cy < file_lines.size()) {
+    file_lines[cy].erase(cx - 1, 1);
+    cx--;
+  } else if (cy > 0) {
     // handle user going back onto previous line
-    e.cy--;
-    e.cx = e.file_lines[e.cy].length();
-    e.file_lines[e.cy].append(e.file_lines[e.cy + 1]);
-    e.file_lines.erase(e.cy + 1);
+    cy--;
+    cx = file_lines[cy].length();
+    file_lines[cy].append(file_lines[cy + 1]);
+    file_lines.erase(cy + 1);
   }
-  e.dirty++;
+  dirty++;
 }
 
-void editor_insert_newline() {
-  // Handle case whre there is text after
-  if (e.cx < e.file_lines[e.cy].length()) {
-
-    ou::string text = e.file_lines[e.cy].substr(e.cx);
-    e.file_lines[e.cy].erase(e.cx);
-    e.file_lines.insert(e.cy + 1, text);
+void Editor::insert_newline() {
+  // Handle case where there is text after
+  if (cx < file_lines[cy].length()) {
+    ou::string text = file_lines[cy].substr(cx);
+    file_lines[cy].erase(cx);
+    file_lines.insert(cy + 1, text);
   } else {
-    e.file_lines.insert(e.cy + 1, ou::string());
+    file_lines.insert(cy + 1, ou::string());
   }
-  e.cy++;
-  e.cx = 0;
+  cy++;
+  cx = 0;
 }
 
-// Check if a key is empty (no input)
-bool is_empty_key(const Key &k) {
-  return k.c == 0 && k.ext == ExtendedKey::NONE && !k.ctrl;
-}
-
-void process_key_press() {
+void Editor::process_key_press() {
   auto res = be->readKey();
 
   if (res.is_err()) {
@@ -348,23 +332,23 @@ void process_key_press() {
     return;
   }
 
-  Action action = lookup_action(e.mode, k);
+  Action action = lookup_action(mode, k);
 
   // Handle operator-pending state
-  if (e.pending_operator != Operator::NONE) {
+  if (pending_operator != Operator::NONE) {
     if (is_motion(action)) {
       // Calculate motion endpoint
-      intptr_t start_x = e.cx, start_y = e.cy;
+      intptr_t start_x = cx, start_y = cy;
       execute_motion(action);
-      apply_operator(e.pending_operator, start_x, start_y, e.cx, e.cy);
-      e.pending_operator = Operator::NONE;
-    } else if (action == Action::OPERATOR_DELETE && e.pending_operator == Operator::DELETE) {
+      apply_operator(pending_operator, start_x, start_y, cx, cy);
+      pending_operator = Operator::NONE;
+    } else if (action == Action::OPERATOR_DELETE && pending_operator == Operator::DELETE) {
       // dd - delete entire line
-      delete_line(e.cy);
-      e.pending_operator = Operator::NONE;
+      delete_line(cy);
+      pending_operator = Operator::NONE;
     } else {
       // Cancel on Esc or any other key
-      e.pending_operator = Operator::NONE;
+      pending_operator = Operator::NONE;
     }
   } else {
     // Normal execution
@@ -376,113 +360,128 @@ void process_key_press() {
       }
     } else {
       // Fallback for unbound printable chars
-      if (e.mode == EditorMode::INSERT && k.c >= 32 && k.c <= 126) {
-        editor_insert_char(k.c);
-      } else if (e.mode == EditorMode::COMMND && k.c >= 32 && k.c <= 126) {
-        e.command_line.push_back(k.c);
+      if (mode == EditorMode::INSERT && k.c >= 32 && k.c <= 126) {
+        insert_char(k.c);
+      } else if (mode == EditorMode::COMMND && k.c >= 32 && k.c <= 126) {
+        command_line.push_back(k.c);
       }
     }
   }
 
   // Correct cx if it's beyond the end of the current line
-  if (e.cy < e.file_lines.size()) {
-    intptr_t current_line_len = e.file_lines[e.cy].length();
-    if (e.cx > current_line_len) {
-      e.cx = current_line_len;
+  if (cy < file_lines.size()) {
+    intptr_t current_line_len = file_lines[cy].length();
+    if (cx > current_line_len) {
+      cx = current_line_len;
     }
   }
 }
 
-intptr_t editor_cx_to_rx(intptr_t cx) {
-  intptr_t rx = 0;
-  intptr_t j;
-  for (j = 0; j < cx; j++) {
-    if (e.file_lines[e.cy][j] == '\t') {
-      rx += (TAB_SIZE - 1) - (rx % TAB_SIZE);
+intptr_t Editor::cx_to_rx(intptr_t cx_arg) {
+  intptr_t result = 0;
+  for (intptr_t j = 0; j < cx_arg; j++) {
+    if (file_lines[cy][j] == '\t') {
+      result += (TAB_SIZE - 1) - (result % TAB_SIZE);
     }
-    rx++;
+    result++;
   }
-
-  return rx;
+  return result;
 }
 
-void editor_scroll() {
+void Editor::scroll() {
   auto ws = be->getWindowSize();
-  e.rx = editor_cx_to_rx(e.cx);
+  rx = cx_to_rx(cx);
 
   // Handle scroll
-  if (e.cy < e.row_offset) {
-    e.row_offset = e.cy;
+  if (cy < row_offset) {
+    row_offset = cy;
   }
 
-  if (e.cy >= e.row_offset + ws.y) {
-    e.row_offset = e.cy - ws.y + 1;
+  if (cy >= row_offset + ws.y) {
+    row_offset = cy - ws.y + 1;
   }
 
-  if (e.rx < e.col_offset) {
-    e.col_offset = e.rx;
+  if (rx < col_offset) {
+    col_offset = rx;
   }
 
-  if (e.rx >= e.col_offset + ws.x) {
-    e.col_offset = e.rx - ws.x + 1;
+  if (rx >= col_offset + ws.x) {
+    col_offset = rx - ws.x + 1;
   }
 }
 
-void editor_message_clear() {
+void Editor::message_clear() {
   uint64_t now = o_time_get();
   char buffer[1024];
-  snprintf(buffer, sizeof(buffer), "now: %d, last_message_time: %d", now, e.last_message_time);
+  snprintf(buffer, sizeof(buffer), "now: %llu, last_message_time: %llu",
+           (unsigned long long)now, (unsigned long long)last_message_time);
   be->debug_print(buffer);
-  if (o_time_get() - e.last_message_time > MESSAGE_TIMEOUT_MS) {
-    e.message_line.clear();
+  if (o_time_get() - last_message_time > MESSAGE_TIMEOUT_MS) {
+    message_line.clear();
   }
 }
 
-void generate_status_line() {
-  e.status_line.clear();
-  if (e.mode == EditorMode::INSERT) {
-    e.status_line.append("[insert] ");
-  } else if (e.mode == EditorMode::COMMND) {
-    e.status_line.append("[commnd] ");
-  } else if (e.mode == EditorMode::NORMAL) {
-    if (e.pending_operator == Operator::DELETE) {
-      e.status_line.append("[normal d] ");
+void Editor::generate_status_line() {
+  status_line.clear();
+  if (mode == EditorMode::INSERT) {
+    status_line.append("[insert] ");
+  } else if (mode == EditorMode::COMMND) {
+    status_line.append("[commnd] ");
+  } else if (mode == EditorMode::NORMAL) {
+    if (pending_operator == Operator::DELETE) {
+      status_line.append("[normal d] ");
     } else {
-      e.status_line.append("[normal] ");
+      status_line.append("[normal] ");
     }
   } else {
-    e.status_line.append("[normal] ");
+    status_line.append("[normal] ");
   }
-  e.status_line.append(e.file_name);
-  if (e.dirty > 0) {
-    e.status_line.append("*");
+  status_line.append(file_name);
+  if (dirty > 0) {
+    status_line.append("*");
   } else {
-    e.status_line.append(" ");
+    status_line.append(" ");
   }
-  e.status_line.append(" ");
+  status_line.append(" ");
 
   // cx/cy
   char buffer[32];
-  snprintf(buffer, sizeof(buffer), "%d/%d", e.cy + 1, e.cx + 1);
-  e.status_line.append(buffer);
-  e.status_line.append(" ");
+  snprintf(buffer, sizeof(buffer), "%ld/%ld", (long)(cy + 1), (long)(cx + 1));
+  status_line.append(buffer);
+  status_line.append(" ");
 }
 
+//
+// TCL command privdata to access Editor
+//
+struct TclEditorPrivdata : public tcl::ProcPrivdata {
+  Editor *editor;
+  TclEditorPrivdata(Editor *e) : tcl::ProcPrivdata(), editor(e) {}
+};
+
 // tcl commands
-tcl::Status tcl_command_hard_quit(tcl::Interp &interp, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
-  running = false;
+static tcl::Status tcl_command_hard_quit(tcl::Interp &interp, tcl::vector<tcl::string> &argv,
+                                         tcl::ProcPrivdata *privdata) {
+  auto *pd = static_cast<TclEditorPrivdata *>(privdata);
+  pd->editor->running = false;
   return tcl::S_OK;
 }
 
-tcl::Status tcl_command_quit(tcl::Interp &interp, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
-  if (e.dirty > 0) {
+static tcl::Status tcl_command_quit(tcl::Interp &interp, tcl::vector<tcl::string> &argv,
+                                    tcl::ProcPrivdata *privdata) {
+  auto *pd = static_cast<TclEditorPrivdata *>(privdata);
+  if (pd->editor->dirty > 0) {
     interp.result = "file has changes, use q! to quit";
     return tcl::S_ERR;
   }
   return tcl_command_hard_quit(interp, argv, privdata);
 }
 
-tcl::Status tcl_command_write(tcl::Interp &interp, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+static tcl::Status tcl_command_write(tcl::Interp &interp, tcl::vector<tcl::string> &argv,
+                                     tcl::ProcPrivdata *privdata) {
+  auto *pd = static_cast<TclEditorPrivdata *>(privdata);
+  Editor &e = *pd->editor;
+
   if (e.file_name.empty()) {
     interp.result = "no filename";
     return tcl::S_ERR;
@@ -511,27 +510,37 @@ tcl::Status tcl_command_write(tcl::Interp &interp, tcl::vector<tcl::string> &arg
   }
 
   e.dirty = 0;
-  editor_message_set("file written");
+  e.message_set("file written");
   return tcl::S_OK;
 }
 
 namespace tevl {
 
-void tevl_main(Backend *be_, ou::string *file_path) {
-  tcl::register_core_commands(interp);
+void tevl_main(Backend *be_, Editor *editor, tcl::Interp *interp, ou::string *file_path) {
+  // Set up editor's runtime pointers
+  editor->be = be_;
+  editor->interp = interp;
+  editor->running = true;
 
-  interp.register_command("q", tcl_command_quit);
-  interp.register_command("q!", tcl_command_hard_quit);
-  interp.register_command("quit", tcl_command_quit);
-  interp.register_command("quit!", tcl_command_hard_quit);
+  // Create privdata for tcl commands
+  TclEditorPrivdata privdata(editor);
 
-  interp.register_command("write", tcl_command_write);
-  interp.register_command("w", tcl_command_write);
+  // Register tcl commands if interp is provided
+  if (interp) {
+    tcl::register_core_commands(*interp);
 
-  be = be_;
-  be->error_msg = default_error_msg;
-  if (be->setup() != EditorErr::NONE) {
-    oprintf("failed to setup be: %s\n", be->error_msg);
+    interp->register_command("q", tcl_command_quit, &privdata);
+    interp->register_command("q!", tcl_command_hard_quit, &privdata);
+    interp->register_command("quit", tcl_command_quit, &privdata);
+    interp->register_command("quit!", tcl_command_hard_quit, &privdata);
+
+    interp->register_command("write", tcl_command_write, &privdata);
+    interp->register_command("w", tcl_command_write, &privdata);
+  }
+
+  be_->error_msg = default_error_msg;
+  if (be_->setup() != EditorErr::NONE) {
+    oprintf("failed to setup be: %s\n", be_->error_msg);
     return;
   }
 
@@ -539,60 +548,87 @@ void tevl_main(Backend *be_, ou::string *file_path) {
 
   if (file_path) {
     ou::File file(file_path->c_str());
-    e.file_name = file_path->c_str();
+    editor->file_name = file_path->c_str();
     ErrorCode err = file.open();
     if (err != ErrorCode::NONE) {
       oprintf("failed to open file %s: %d\n", file_path->c_str(), err);
       return;
     }
 
-    file.forEachLine([](const ou::string &line) {
-      // be->debug_print("adding line to file: ");
-      e.file_lines.push_back(line);
-    });
+    // Read file contents and split into lines
+    ou::string content;
+    err = file.read_all(content);
+    if (err != ErrorCode::NONE) {
+      oprintf("failed to read file %s: %d\n", file_path->c_str(), err);
+      return;
+    }
+
+    // Split content by newlines
+    ou::string current_line;
+    for (size_t i = 0; i < content.length(); i++) {
+      if (content[i] == '\n') {
+        editor->file_lines.push_back(current_line);
+        current_line.clear();
+      } else {
+        current_line.push_back(content[i]);
+      }
+    }
+    // Add last line if file doesn't end with newline
+    if (!current_line.empty() || content.empty()) {
+      editor->file_lines.push_back(current_line);
+    }
   }
 
-  while (running) {
+  while (editor->running) {
+    // Check if we should process this frame (for cooperative scheduling)
+    if (!be_->begin_frame()) {
+      be_->yield();
+      continue;
+    }
+
     // Handle scroll
-    auto ws = be->getWindowSize();
-    editor_scroll();
+    auto ws = be_->getWindowSize();
+    editor->scroll();
 
     // Handle message clear
-    editor_message_clear();
+    editor->message_clear();
 
     // Render individual rows
-    e.screenResetLines();
+    editor->screenResetLines();
 
-    generate_status_line();
+    editor->generate_status_line();
 
     for (int y = 0; y < ws.y; y++) {
-      int file_row = y + e.row_offset;
-      if (file_row < e.file_lines.size()) {
-        intptr_t len = e.file_lines[file_row].length() - e.col_offset;
+      intptr_t file_row = y + editor->row_offset;
+      if (file_row < editor->file_lines.size()) {
+        intptr_t len = editor->file_lines[file_row].length() - editor->col_offset;
         if (len < 0) {
           len = 0;
         }
         if (len > ws.x) {
           len = ws.x;
         }
-        e.screenPutLine(y, e.file_lines[file_row].substr(e.col_offset, len), len);
+        editor->screenPutLine(y, editor->file_lines[file_row].substr(editor->col_offset, len), len);
       } else {
-        e.screenPutLine(y, tilde);
+        editor->screenPutLine(y, tilde);
       }
     }
 
-    be->render(e);
+    be_->render(*editor);
     // Handle user input
-    process_key_press();
+    editor->process_key_press();
+
+    be_->end_frame();
+    be_->yield();
   }
 
-  be->teardown();
+  be_->teardown();
 
-  if (be->error_msg != default_error_msg) {
-    oprintf("error: %s\n", be->error_msg);
+  if (be_->error_msg != default_error_msg) {
+    oprintf("error: %s\n", be_->error_msg);
   }
 
-  be->clear();
+  be_->clear();
   return;
 }
 

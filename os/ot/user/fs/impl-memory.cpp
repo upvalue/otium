@@ -344,6 +344,40 @@ public:
 
     return Result<bool, ErrorCode>::ok(true);
   }
+
+  Result<uintptr_t, ErrorCode> handle_list_dir(const ou::string &path) override {
+    // Handle empty path as root
+    ou::string lookup_path = path.empty() ? "/" : path;
+
+    auto inode_result = resolve_path(lookup_path);
+    if (inode_result.is_err()) {
+      return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__DIR_NOT_FOUND);
+    }
+
+    INode *dir = storage->find_inode(inode_result.value());
+    if (!dir || dir->type != NodeType::DIRECTORY) {
+      return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__DIR_NOT_FOUND);
+    }
+
+    // Write entries to comm page as msgpack array of strings
+    PageAddr comm = ou_get_comm_page();
+    MPackWriter writer(comm.as_ptr(), OT_PAGE_SIZE);
+    writer.array((uint32_t)dir->children.size());
+
+    for (size_t i = 0; i < dir->children.size(); i++) {
+      uint32_t child_num = dir->children[i];
+      INode *child = storage->find_inode(child_num);
+      if (child) {
+        ou::string name = child->name;
+        if (child->type == NodeType::DIRECTORY) {
+          name.push_back('/');
+        }
+        writer.str(name.c_str(), (uint32_t)name.length());
+      }
+    }
+
+    return Result<uintptr_t, ErrorCode>::ok(dir->children.size());
+  }
 };
 
 void proc_filesystem(void) {

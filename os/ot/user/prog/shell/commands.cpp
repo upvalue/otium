@@ -5,6 +5,7 @@
 
 #include "ot/lib/file.hpp"
 #include "ot/lib/messages.hpp"
+#include "ot/lib/mpack/mpack-reader.hpp"
 #include "ot/user/gen/filesystem-client.hpp"
 #include "ot/user/user.hpp"
 
@@ -234,7 +235,8 @@ tcl::Status cmd_proc_is_alive(tcl::Interp &i, tcl::vector<tcl::string> &argv, tc
 }
 
 tcl::Status cmd_run(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
-  if (!i.arity_check("run", argv, 2, -1)) { // At least program name, unlimited args
+  constexpr size_t MAX_SPAWN_ARGS = 32;
+  if (!i.arity_check("run", argv, 2, MAX_SPAWN_ARGS + 2)) { // At least program name, unlimited args
     return tcl::S_ERR;
   }
 
@@ -242,7 +244,6 @@ tcl::Status cmd_run(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPri
 
   // Build argv array for the spawned process
   // argv[0] should be the program name
-  constexpr size_t MAX_SPAWN_ARGS = 32;
   char *spawn_argv[MAX_SPAWN_ARGS];
   int spawn_argc = 0;
 
@@ -262,6 +263,46 @@ tcl::Status cmd_run(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPri
   char buf[32];
   snprintf(buf, sizeof(buf), "%lu", new_pid.raw());
   i.result = buf;
+  return tcl::S_OK;
+}
+
+tcl::Status cmd_dir_ls(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("dir/ls", argv, 1, 2)) {
+    return tcl::S_ERR;
+  }
+
+  Pid fs_pid = ou_proc_lookup("filesystem");
+  if (fs_pid == PID_NONE) {
+    i.result = "dir/ls: filesystem server not found";
+    return tcl::S_ERR;
+  }
+
+  FilesystemClient client(fs_pid);
+  ou::string path = (argv.size() > 1) ? argv[1].c_str() : "/";
+
+  auto result = client.list_dir(path);
+  if (result.is_err()) {
+    snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "dir/ls: %s", error_code_to_string(result.error()));
+    i.result = ot_scratch_buffer;
+    return tcl::S_ERR;
+  }
+
+  // Read msgpack array from comm page
+  PageAddr comm = ou_get_comm_page();
+  MPackReader reader(comm.as_ptr(), OT_PAGE_SIZE);
+
+  uint32_t count;
+  reader.enter_array(count);
+
+  // Build Tcl list result
+  tcl::vector<tcl::string> entries;
+  for (uint32_t j = 0; j < count; j++) {
+    StringView sv;
+    reader.read_string(sv);
+    entries.push_back(tcl::string(sv.ptr, sv.len));
+  }
+
+  tcl::list_format(entries, i.result);
   return tcl::S_OK;
 }
 
@@ -294,6 +335,10 @@ void register_shell_commands(tcl::Interp &i) {
   i.register_command("fs/create", cmd_fs_create, nullptr,
                      "[fs/create filename:string] => nil - Create a new empty file");
   i.register_command("dofile", cmd_dofile, nullptr, "[dofile filename:string] => result - Execute a Tcl script file");
+
+  // Directory commands
+  i.register_command("dir/ls", cmd_dir_ls, nullptr,
+                     "[dir/ls path?] => list - List directory contents (dirs have trailing /)");
 
   // Process spawning
   i.register_command("run", cmd_run, nullptr,

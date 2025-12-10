@@ -144,6 +144,26 @@ Result<bool, ErrorCode> FilesystemClient::delete_dir(const ou::string& path) {
   return Result<bool, ErrorCode>::ok({});
 }
 
+Result<uintptr_t, ErrorCode> FilesystemClient::list_dir(const ou::string& path) {
+  // Serialize complex arguments to comm page
+  CommWriter writer;
+  writer.writer().str(path.c_str());
+
+  IpcResponse resp = ou_ipc_send(
+    pid_,
+    IPC_FLAG_SEND_COMM_DATA | IPC_FLAG_RECV_COMM_DATA,
+    MethodIds::Filesystem::LIST_DIR,
+    0, 0, 0  );
+
+  if (resp.error_code != NONE) {
+    return Result<uintptr_t, ErrorCode>::err(resp.error_code);
+  }
+
+  // Response data is in comm page - caller reads it with MPackReader
+  // Return value indicates size or count
+  return Result<uintptr_t, ErrorCode>::ok(resp.values[0]);
+}
+
 
 Result<bool, ErrorCode> FilesystemClient::shutdown() {
   IpcResponse resp = ou_ipc_send(

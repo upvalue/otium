@@ -79,11 +79,13 @@ struct Parser {
 };
 
 /**
- * ProcPrivdata for Tcl-defined procedures
+ * Base class for command private data.
+ * Can be subclassed to pass custom data to command functions.
  */
 struct ProcPrivdata {
+  ProcPrivdata() : args(nullptr), body(nullptr) {}
   ProcPrivdata(string *args_, string *body_);
-  ~ProcPrivdata();
+  virtual ~ProcPrivdata();
   string *args;
   string *body;
 };
@@ -161,6 +163,10 @@ const char *token_type_str(TokenType t);
 
 // String formatting helper (replaces ostringstream)
 void format_error(string &result, const char *fmt, ...);
+
+// List helper functions
+void list_parse(const string_view &list_str, vector<string> &elements);
+void list_format(const vector<string> &elements, string &result);
 
 } // namespace tcl
 

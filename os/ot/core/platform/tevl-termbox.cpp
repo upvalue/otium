@@ -2,6 +2,7 @@
 #define TB_IMPL
 #include "vendor/termbox2/termbox2.h"
 
+#include "ot/user/tcl.hpp"
 #include "ot/user/tevl.hpp"
 
 #include <fcntl.h>
@@ -214,13 +215,17 @@ struct TermboxBackend : Backend {
 } // namespace tevl
 
 int main(int argc, char *argv[]) {
-  tevl::Editor e;
+  tevl::Editor editor;
+  tcl::Interp interp;
   tevl::TermboxBackend termbox_backend;
+
   ou::string *file_path = nullptr;
   if (argc > 1) {
     file_path = new ou::string(argv[1]);
   }
-  tevl::tevl_main(&termbox_backend, file_path);
+
+  tevl::tevl_main(&termbox_backend, &editor, &interp, file_path);
+
   if (file_path) {
     delete file_path;
   }

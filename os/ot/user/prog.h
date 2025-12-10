@@ -13,6 +13,7 @@ void spacedemo_main();
 void typedemo_main();
 void echo_main();
 void gfxscratch_main();
+void edit_main();
 
 #ifdef __cplusplus
 }

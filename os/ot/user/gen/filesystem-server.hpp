@@ -21,6 +21,7 @@ struct FilesystemServerBase : ServerBase {
   virtual Result<bool, ErrorCode> handle_create_dir(const ou::string& path) = 0;
   virtual Result<bool, ErrorCode> handle_delete_file(const ou::string& path) = 0;
   virtual Result<bool, ErrorCode> handle_delete_dir(const ou::string& path) = 0;
+  virtual Result<uintptr_t, ErrorCode> handle_list_dir(const ou::string& path) = 0;
 
   // Framework methods - handles dispatch
   void process_request(const IpcMessage& msg);

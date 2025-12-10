@@ -121,6 +121,21 @@ void FilesystemServerBase::process_request(const IpcMessage& msg) {
     }
     break;
   }
+  case MethodIds::Filesystem::LIST_DIR: {
+    // Deserialize complex arguments from comm page
+    PageAddr comm = ou_get_comm_page();
+    MPackReader reader(comm.as_ptr(), OT_PAGE_SIZE);
+    StringView path_view;
+    reader.read_string(path_view);
+    ou::string path(path_view.ptr, path_view.len);
+    auto result = handle_list_dir(path);
+    if (result.is_err()) {
+      resp.error_code = result.error();
+    } else {
+      resp.values[0] = result.value();
+    }
+    break;
+  }
   default:
     resp.error_code = IPC__METHOD_NOT_KNOWN;
     break;

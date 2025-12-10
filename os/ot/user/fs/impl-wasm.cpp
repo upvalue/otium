@@ -116,6 +116,32 @@ EM_JS(int, js_fs_delete_dir, (const char *path), {
   }
   return 0;
 });
+
+// List directory contents. Returns the number of entries, or -1 on error.
+// Each entry is written as a null-terminated string to buf, separated by nulls.
+// If entry is a directory, it ends with '/'.
+EM_JS(int, js_fs_list_dir, (const char *path, char *buf, int max_len), {
+  const pathStr = UTF8ToString(path);
+  if (typeof Module.fsListDir === 'function') {
+    const entries = Module.fsListDir(pathStr);
+    if (entries === null || entries === undefined) {
+      return -1;
+    }
+    let offset = 0;
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      if (offset + entry.length + 1 > max_len) {
+        break; // Buffer full
+      }
+      for (let j = 0; j < entry.length; j++) {
+        HEAPU8[buf + offset++] = entry.charCodeAt(j);
+      }
+      HEAPU8[buf + offset++] = 0; // Null terminator
+    }
+    return entries.length;
+  }
+  return -1;
+});
 // clang-format on
 
 // ============================================================================
@@ -362,6 +388,39 @@ private:
     }
 
     return Result<bool, ErrorCode>::ok(true);
+  }
+
+  Result<uintptr_t, ErrorCode> handle_list_dir(const ou::string &path) override {
+    // Handle empty path as root
+    ou::string lookup_path = path.empty() ? "/" : path;
+
+    // Check if path exists and is a directory
+    int exists = js_fs_exists(lookup_path.c_str());
+    if (exists != 2) { // Must be a directory
+      return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__DIR_NOT_FOUND);
+    }
+
+    // Use scratch buffer to get directory listing from JS
+    // Format: null-separated strings with entries ending in '/' for directories
+    int count = js_fs_list_dir(lookup_path.c_str(), ot_scratch_buffer, OT_PAGE_SIZE);
+    if (count < 0) {
+      return Result<uintptr_t, ErrorCode>::err(FILESYSTEM__DIR_NOT_FOUND);
+    }
+
+    // Parse entries from scratch buffer and write to comm page as msgpack
+    PageAddr comm = ou_get_comm_page();
+    MPackWriter writer(comm.as_ptr(), OT_PAGE_SIZE);
+    writer.array((uint32_t)count);
+
+    // Parse null-separated strings from scratch buffer
+    const char *ptr = ot_scratch_buffer;
+    for (int i = 0; i < count; i++) {
+      size_t len = strlen(ptr);
+      writer.str(ptr, (uint32_t)len);
+      ptr += len + 1; // Skip past null terminator
+    }
+
+    return Result<uintptr_t, ErrorCode>::ok((uintptr_t)count);
   }
 };
 

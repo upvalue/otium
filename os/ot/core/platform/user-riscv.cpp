@@ -118,7 +118,7 @@ IpcResponse ou_ipc_send(Pid target_pid, uintptr_t flags, intptr_t method, intptr
     oprintf("WARNING: Method ID %d overflows into flags field\n", method);
   }
 
-  oprintf("OU_IPC_SEND: sending to pid %lu, method %d, flags %x\n", target_pid.raw(), method, flags);
+  // oprintf("OU_IPC_SEND: sending to pid %lu, method %d, flags %x\n", target_pid.raw(), method, flags);
 
   // Pack method and flags into single value
   uintptr_t method_and_flags = IPC_PACK_METHOD_FLAGS(method, flags);

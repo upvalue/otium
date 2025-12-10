@@ -322,6 +322,8 @@ if is_riscv or is_wasm
     'ot/user/prog/shell/uishell.cpp',
     'ot/user/prog-spacedemo.cpp',
     'ot/user/prog-typedemo.cpp',
+    'ot/user/prog/editor/uieditor.cpp',
+    'ot/user/tevl.cpp',
     'ot/user/tcl.cpp',
     'ot/user/string.cpp',
     'ot/user/memory-allocator.cpp',

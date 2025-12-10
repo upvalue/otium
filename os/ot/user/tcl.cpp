@@ -791,7 +791,7 @@ static Status cmd_commands(Interp &i, vector<string> &argv, ProcPrivdata *privda
 //
 
 // Parse a list string into a vector of elements
-static void list_parse(const string_view &list_str, vector<string> &elements) {
+void list_parse(const string_view &list_str, vector<string> &elements) {
   elements.clear();
   size_t i = 0;
   while (i < list_str.length()) {
@@ -831,7 +831,7 @@ static void list_parse(const string_view &list_str, vector<string> &elements) {
 }
 
 // Format a vector of elements as a list string
-static void list_format(const vector<string> &elements, string &result) {
+void list_format(const vector<string> &elements, string &result) {
   result.clear();
   for (size_t i = 0; i < elements.size(); i++) {
     if (i > 0)
@@ -1005,6 +1005,60 @@ static Status cmd_join(Interp &i, vector<string> &argv, ProcPrivdata *privdata) 
     if (j > 0)
       i.result += separator;
     i.result += elements[j];
+  }
+
+  return S_OK;
+}
+
+static Status cmd_lloop(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
+  // lloop list {idx item} body
+  // lloop list item body
+  if (!i.arity_check("lloop", argv, 4, 4)) {
+    return S_ERR;
+  }
+
+  // Parse the list
+  vector<string> elements;
+  list_parse(string_view(argv[1]), elements);
+
+  // Parse variable names from argv[2]
+  // Could be "{idx item}" for index+value or just "item" for value only
+  vector<string> var_names;
+  list_parse(string_view(argv[2]), var_names);
+
+  bool has_index = (var_names.size() == 2);
+  string idx_var, item_var;
+  if (has_index) {
+    idx_var = var_names[0];
+    item_var = var_names[1];
+  } else if (var_names.size() == 1) {
+    item_var = var_names[0];
+  } else {
+    format_error(i.result, "lloop: expected 1 or 2 variable names, got %zu", var_names.size());
+    return S_ERR;
+  }
+
+  // Iterate over list elements
+  for (size_t j = 0; j < elements.size(); j++) {
+    // Set index variable if requested
+    if (has_index) {
+      char buf[32];
+      snprintf(buf, sizeof(buf), "%zu", j);
+      i.set_var(idx_var, buf);
+    }
+
+    // Set item variable
+    i.set_var(item_var, elements[j]);
+
+    // Execute body
+    Status s = i.eval(string_view(argv[3]));
+    if (s == S_CONTINUE || s == S_OK) {
+      continue;
+    } else if (s == S_BREAK) {
+      return S_OK;
+    } else {
+      return s;
+    }
   }
 
   return S_OK;
@@ -1187,6 +1241,9 @@ void register_core_commands(Interp &i) {
                      "[split string delimiter?] => list - Split string into list (default delimiter: space)");
   i.register_command("join", cmd_join, nullptr,
                      "[join list separator?] => string - Join list elements into string (default separator: space)");
+  i.register_command("lloop", cmd_lloop, nullptr,
+                     "[lloop list {idx item} body] or [lloop list item body] => nil - "
+                     "Iterate over list elements with break/continue support");
 
   // Number conversion commands
   i.register_command("hex", cmd_hex, nullptr,

@@ -92,12 +92,12 @@ void gfxscratch_main() {
   oprintf("GFXSCRATCH: Running main loop\n");
 
   while (s->running) {
-    oprintf("GFXSCRATCH: gfx_client at %p with pid %lu (frame %d)\n", &gfx_client, gfx_client.pid_.raw(),
-            s->frame_count);
+    // oprintf("GFXSCRATCH: gfx_client at %p with pid %lu (frame %d)\n", &gfx_client, gfx_client.pid_.raw(),
+    //  s->frame_count);
 
     auto should = gfx_client.should_render();
     if (should.is_err()) {
-      oprintf("GFXSCRATCH: should_render error: %d\n", should.error());
+      // oprintf("GFXSCRATCH: should_render error: %d\n", should.error());
       ou_exit();
     }
 

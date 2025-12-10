@@ -353,8 +353,8 @@ struct ProgramEntry {
 };
 
 static const ProgramEntry program_registry[] = {
-    {"shell"},  {"uishell"}, {"scratch"}, {"spacedemo"}, {"typedemo"}, {"echo"}, {"gfxscratch"},
-    {nullptr} // Sentinel
+    {"shell"}, {"uishell"},    {"scratch"}, {"spacedemo"}, {"typedemo"},
+    {"echo"},  {"gfxscratch"}, {"edit"},    {nullptr} // Sentinel
 };
 
 // Helper to check if program name is in registry

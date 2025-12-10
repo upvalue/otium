@@ -8,7 +8,17 @@
 #include "ot/user/string.hpp"
 #include "ot/user/vector.hpp"
 
+// Forward declarations
+namespace tcl {
+struct Interp;
+}
+
 namespace tevl {
+
+// Forward declarations
+struct Backend;
+struct Key;
+enum class Action;
 
 enum class EditorMode {
   NORMAL,
@@ -25,8 +35,9 @@ enum class Operator {
 
 struct Editor {
   Editor()
-      : row_offset(0), col_offset(0), cx(0), cy(0), mode(EditorMode::NORMAL), dirty(0),
-        pending_operator(Operator::NONE) {}
+      : row_offset(0), col_offset(0), cx(0), cy(0), rx(0), dirty(0), last_message_time(0),
+        mode(EditorMode::NORMAL), pending_operator(Operator::NONE), be(nullptr), interp(nullptr),
+        running(true) {}
 
   intptr_t row_offset, col_offset;
 
@@ -53,8 +64,14 @@ struct Editor {
   EditorMode mode;
   Operator pending_operator; // Set when waiting for motion (e.g., after 'd')
 
+  // Runtime state (set by tevl_main)
+  Backend *be;
+  tcl::Interp *interp;
+  bool running;
+
+  // Screen management
   void screenResetLines() {
-    for (int i = 0; i < lines.size(); i++) {
+    for (size_t i = 0; i < lines.size(); i++) {
       lines[i].clear();
     }
   }
@@ -71,6 +88,23 @@ struct Editor {
     }
     lines[y] += line;
   }
+
+  // Editor operations (converted from freestanding functions)
+  void execute_motion(Action action);
+  void execute_action(Action action, const Key &key);
+  void process_key_press();
+  void scroll();
+  void insert_char(char c);
+  void backspace();
+  void insert_newline();
+  void interpret_command();
+  void message_set(const ou::string &msg);
+  void message_clear();
+  void generate_status_line();
+  void delete_line(intptr_t line);
+  void apply_operator(Operator op, intptr_t start_x, intptr_t start_y, intptr_t end_x,
+                      intptr_t end_y);
+  intptr_t cx_to_rx(intptr_t cx);
 };
 
 enum class EditorErr {
@@ -196,9 +230,18 @@ struct Backend {
 
   /** Debug output to platform-specific location */
   virtual void debug_print(const ou::string &msg) = 0;
+
+  /** Called before processing a frame; return false to skip (e.g., app not active) */
+  virtual bool begin_frame() { return true; }
+
+  /** Called after rendering */
+  virtual void end_frame() {}
+
+  /** Called at end of each loop iteration; for cooperative scheduling */
+  virtual void yield() {}
 };
 
-void tevl_main(Backend *backend, ou::string *file_path);
+void tevl_main(Backend *backend, Editor *editor, tcl::Interp *interp, ou::string *file_path);
 
 // Test helper - runs editor with scripted keys, returns final file contents
 ou::vector<ou::string> tevl_test_run(const Key *keys, size_t count,

@@ -299,15 +299,20 @@ TEST_CASE("tcl - error cases") {
     CHECK(i.result.length() > 0);
   }
 
-  SUBCASE("duplicate command registration") {
+  SUBCASE("duplicate command registration replaces existing") {
     tcl::Interp j;
     CHECK(j.register_command("test", [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+      i.result = "first";
       return tcl::S_OK;
     }) == tcl::S_OK);
+    // Re-registering should succeed and replace the command
     CHECK(j.register_command("test", [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+      i.result = "second";
       return tcl::S_OK;
-    }) == tcl::S_ERR);
-    CHECK(j.result.length() > 0);
+    }) == tcl::S_OK);
+    // Calling should use the new implementation
+    CHECK(j.eval("test") == tcl::S_OK);
+    CHECK(j.result.compare("second") == 0);
   }
 }
 
@@ -1021,5 +1026,66 @@ TEST_CASE("tcl - escape sequences in quoted strings") {
     tcl::Var *v = i.get_var(tcl::string_view("x"));
     CHECK(v != nullptr);
     CHECK(v->val->compare("a\nb\nc") == 0);
+  }
+}
+
+TEST_CASE("tcl - lloop") {
+  tcl::Interp i;
+  tcl::register_core_commands(i);
+
+  SUBCASE("lloop with item only") {
+    CHECK(i.eval("set result {}") == tcl::S_OK);
+    CHECK(i.eval("lloop {a b c} item { lappend result $item }") == tcl::S_OK);
+    CHECK(i.eval("llength $result") == tcl::S_OK);
+    CHECK(i.result.compare("3") == 0);
+    CHECK(i.eval("lindex $result 0") == tcl::S_OK);
+    CHECK(i.result.compare("a") == 0);
+    CHECK(i.eval("lindex $result 2") == tcl::S_OK);
+    CHECK(i.result.compare("c") == 0);
+  }
+
+  SUBCASE("lloop with index and item") {
+    CHECK(i.eval("set result {}") == tcl::S_OK);
+    CHECK(i.eval("lloop {x y z} {idx val} { lappend result $idx }") == tcl::S_OK);
+    CHECK(i.eval("lindex $result 0") == tcl::S_OK);
+    CHECK(i.result.compare("0") == 0);
+    CHECK(i.eval("lindex $result 1") == tcl::S_OK);
+    CHECK(i.result.compare("1") == 0);
+    CHECK(i.eval("lindex $result 2") == tcl::S_OK);
+    CHECK(i.result.compare("2") == 0);
+  }
+
+  SUBCASE("lloop with break") {
+    CHECK(i.eval("set result {}") == tcl::S_OK);
+    CHECK(i.eval("lloop {1 2 3 4 5} n { if {== $n 3} { break }; lappend result $n }") == tcl::S_OK);
+    CHECK(i.eval("llength $result") == tcl::S_OK);
+    CHECK(i.result.compare("2") == 0);
+  }
+
+  SUBCASE("lloop with continue") {
+    CHECK(i.eval("set result {}") == tcl::S_OK);
+    CHECK(i.eval("lloop {1 2 3 4 5} n { if {== $n 3} { continue }; lappend result $n }") == tcl::S_OK);
+    CHECK(i.eval("llength $result") == tcl::S_OK);
+    CHECK(i.result.compare("4") == 0);
+  }
+
+  SUBCASE("lloop empty list") {
+    CHECK(i.eval("set result {}") == tcl::S_OK);
+    CHECK(i.eval("lloop {} item { lappend result $item }") == tcl::S_OK);
+    CHECK(i.eval("llength $result") == tcl::S_OK);
+    CHECK(i.result.compare("0") == 0);
+  }
+
+  SUBCASE("lloop with nested list elements") {
+    CHECK(i.eval("set result {}") == tcl::S_OK);
+    CHECK(i.eval("lloop {{a b} {c d}} item { lappend result [lindex $item 0] }") == tcl::S_OK);
+    CHECK(i.eval("lindex $result 0") == tcl::S_OK);
+    CHECK(i.result.compare("a") == 0);
+    CHECK(i.eval("lindex $result 1") == tcl::S_OK);
+    CHECK(i.result.compare("c") == 0);
+  }
+
+  SUBCASE("lloop wrong number of vars") {
+    CHECK(i.eval("lloop {a b c} {x y z} { puts $x }") == tcl::S_ERR);
   }
 }

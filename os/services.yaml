@@ -147,6 +147,16 @@ services:
         returns: []
         errors: [DIR_NOT_FOUND, NOT_EMPTY]
 
+      - name: list_dir
+        args:
+          - name: path
+            type: string
+        returns:
+          - name: count
+            type: uint
+        returns_comm_data: true
+        errors: [DIR_NOT_FOUND, PATH_TOO_LONG]
+
     # Service-level errors
     errors: [UNIMPLEMENTED]
 

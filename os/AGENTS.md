@@ -391,57 +391,32 @@ See `agent-docs/filesystem.md` for detailed documentation including:
 
 ### Graphics
 
-The OS includes a framebuffer-based graphics system accessible via IPC. Graphics are provided by a server process that manages the framebuffer and exposes it to clients.
+The OS includes a framebuffer-based graphics system with multi-application support. The graphics server manages a 32-bit BGRA framebuffer and renders a taskbar showing all registered apps.
 
-**Backends** (configured with `./config.sh --graphics-backend=<type>`):
-- **test** - 16x16 framebuffer, prints hex dump on flush (for testing)
-- **virtio** - VirtIO GPU for RISC-V/QEMU (1024×700, hardware accelerated)
-- **wasm** - WebAssembly backend (1024×700, works in browser and Node.js)
+**Key features:**
+- Multi-app support (up to 10 apps, most recent is active)
+- Automatic dead process reaping
+- 28px taskbar with TTF font rendering
+- `app::Framework` utility class for drawing (primitives, bitmap and TTF fonts)
 
-**Pixel format**: 32-bit BGRA (`0xAARRGGBB`)
-
-**IPC API** (see `services/graphics.yml`):
+**Quick example:**
 ```cpp
-#include "ot/user/gen/graphics-client.hpp"
-
-GraphicsClient client(graphics_pid);
-auto fb = client.get_framebuffer();  // Returns {fb_ptr, width, height}
-uint32_t *pixels = (uint32_t *)fb.value().fb_ptr;
-pixels[y * width + x] = 0xFF0000FF;  // Blue pixel
-client.flush();  // Display framebuffer
-```
-
-**Building**:
-```bash
-./build-wasm-graphics.sh           # WASM with graphics
-./config.sh --graphics-backend=virtio && ./compile-riscv.sh  # RISC-V with VirtIO
-```
-
-**WASM platforms**:
-- Node.js with SDL: Install `@kmamal/sdl` for native window (zero-copy WASM memory access)
-- Node.js headless: Graphics operations succeed but produce no output
-
-**Frame rate management**:
-
-Use `graphics::FrameManager` for consistent frame timing with cooperative yielding:
-
-```cpp
-#include "ot/user/graphics/frame-manager.hpp"
-
-graphics::FrameManager fm(30);  // Target 30 FPS
+GraphicsClient gfx(graphics_pid);
+gfx.register_app("myapp");
 
 while (running) {
-  if (fm.begin_frame()) {
-    // Render only when enough time has passed
-    draw_scene();
-    client.flush();
-    fm.end_frame();
+  if (gfx.should_render().value()) {
+    auto fb = gfx.get_framebuffer();
+    // Draw to framebuffer...
+    gfx.flush();
   }
-  ou_yield();  // Always yield for cooperation
+  ou_yield();
 }
 ```
 
-The frame manager automatically skips rendering when the process is yielded back too quickly, preventing wasted work.
+**Backends:** test, virtio (RISC-V), wasm
+
+See `agent-docs/graphics-apps.md` for detailed documentation including the application framework, memory requirements, and graphics server internals.
 
 ## Testing
 

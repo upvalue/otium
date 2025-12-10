@@ -5,6 +5,10 @@
     return "fibonacci.invalid-input";
   case GRAPHICS__NOT_INITIALIZED:
     return "graphics.not-initialized";
+  case GRAPHICS__TOO_MANY_APPS:
+    return "graphics.too-many-apps";
+  case GRAPHICS__NOT_REGISTERED:
+    return "graphics.not-registered";
   case FILESYSTEM__FILE_NOT_FOUND:
     return "filesystem.file-not-found";
   case FILESYSTEM__PATH_TOO_LONG:

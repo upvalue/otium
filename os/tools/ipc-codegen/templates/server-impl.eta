@@ -27,6 +27,9 @@ void <%= it.service.name %>ServerBase::process_request(const IpcMessage& msg) {
     StringView <%~ arg.name %>_view;
     reader.read_string(<%~ arg.name %>_view);
     ou::string <%~ arg.name %>(<%~ arg.name %>_view.ptr, <%~ arg.name %>_view.len);
+<% } else if (arg.type === "cstring") { %>
+    StringView <%~ arg.name %>;
+    reader.read_string(<%~ arg.name %>);  // Zero-copy string from comm page
 <% } else if (arg.type === "buffer") { %>
     StringView <%~ arg.name %>;
     reader.read_bin(<%~ arg.name %>);  // Zero-copy binary data from comm page

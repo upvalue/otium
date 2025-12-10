@@ -1,6 +1,7 @@
 #include "ot/user/gen/graphics-server.hpp"
 #include "ot/user/gen/method-ids.hpp"
 #include "ot/user/user.hpp"
+#include "ot/lib/mpack/mpack-reader.hpp"
 
 void GraphicsServerBase::process_request(const IpcMessage& msg) {
   // Check for shutdown request (handled by base class)
@@ -31,6 +32,29 @@ void GraphicsServerBase::process_request(const IpcMessage& msg) {
       resp.error_code = result.error();
     } else {
       // No return values
+    }
+    break;
+  }
+  case MethodIds::Graphics::REGISTER_APP: {
+    // Deserialize complex arguments from comm page
+    PageAddr comm = ou_get_comm_page();
+    MPackReader reader(comm.as_ptr(), OT_PAGE_SIZE);
+    StringView name;
+    reader.read_string(name);  // Zero-copy string from comm page
+    auto result = handle_register_app(name);
+    if (result.is_err()) {
+      resp.error_code = result.error();
+    } else {
+      resp.values[0] = result.value();
+    }
+    break;
+  }
+  case MethodIds::Graphics::SHOULD_RENDER: {
+    auto result = handle_should_render();
+    if (result.is_err()) {
+      resp.error_code = result.error();
+    } else {
+      resp.values[0] = result.value();
     }
     break;
   }

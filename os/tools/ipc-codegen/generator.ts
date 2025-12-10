@@ -56,6 +56,7 @@ function toHex(num: number): string {
 function getType(arg: Arg | Return): string {
   const type = arg.type || "int";
   if (type === "string") return "const ou::string&";
+  if (type === "cstring") return "const char*";  // No allocation needed
   if (type === "buffer") return "const ou::vector<uint8_t>&";
   if (type === "uint") return "uintptr_t";
 
@@ -72,6 +73,7 @@ function getType(arg: Arg | Return): string {
 function getServerType(arg: Arg | Return): string {
   const type = arg.type || "int";
   if (type === "string") return "const ou::string&";
+  if (type === "cstring") return "const StringView&";  // Zero-copy from comm page
   if (type === "buffer") return "const StringView&";  // Zero-copy from comm page
   if (type === "uint") return "uintptr_t";
 
@@ -86,7 +88,7 @@ function getServerType(arg: Arg | Return): string {
 
 function isComplexType(arg: Arg | Return): boolean {
   const type = arg.type || "int";
-  return type === "string" || type === "buffer";
+  return type === "string" || type === "cstring" || type === "buffer";
 }
 
 function hasComplexArgs(method: Method): boolean {

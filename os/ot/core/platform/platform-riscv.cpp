@@ -325,6 +325,12 @@ void handle_syscall(struct trap_frame *f) {
     f->a0 = result.raw();
     break;
   }
+  case OU_PROC_IS_ALIVE: {
+    Pid pid = Pid(arg0);
+    Pidx pidx = process_lookup_by_pid(pid);
+    f->a0 = (pidx != PIDX_INVALID) ? 1 : 0;
+    break;
+  }
   default:
     PANIC("unexpected syscall sysno=%x\n", sysno);
   }

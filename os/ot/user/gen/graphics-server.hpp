@@ -6,6 +6,7 @@
 #include "ot/lib/string-view.hpp"
 #include "ot/user/gen/graphics-types.hpp"
 #include "ot/user/gen/server-base.hpp"
+#include "ot/user/string.hpp"
 
 struct GraphicsServerBase : ServerBase {
   // Virtual destructor for proper cleanup
@@ -14,6 +15,8 @@ struct GraphicsServerBase : ServerBase {
   // Pure virtual methods to implement in derived class
   virtual Result<GetFramebufferResult, ErrorCode> handle_get_framebuffer() = 0;
   virtual Result<bool, ErrorCode> handle_flush() = 0;
+  virtual Result<uintptr_t, ErrorCode> handle_register_app(const StringView& name) = 0;
+  virtual Result<uintptr_t, ErrorCode> handle_should_render() = 0;
 
   // Framework methods - handles dispatch
   void process_request(const IpcMessage& msg);

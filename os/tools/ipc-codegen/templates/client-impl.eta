@@ -13,6 +13,8 @@ Result<<%~ it.getReturnType(method) %>, ErrorCode> <%~ it.service.name %>Client:
 <% method.args.filter(arg => it.isComplexType(arg)).forEach(arg => { %>
 <% if (arg.type === "string") { %>
   writer.writer().str(<%~ arg.name %>.c_str());
+<% } else if (arg.type === "cstring") { %>
+  writer.writer().str(<%~ arg.name %>);
 <% } else if (arg.type === "buffer") { %>
   writer.writer().bin(<%~ arg.name %>.data(), <%~ arg.name %>.size());
 <% } %>

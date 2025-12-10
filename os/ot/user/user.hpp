@@ -32,6 +32,7 @@ PageAddr ou_get_storage(void);
 int ou_io_puts(const char *str, int size);
 
 Pid ou_proc_lookup(const char *name);
+bool ou_proc_is_alive(Pid pid);
 
 /**
  * Sets up arguments passed to the process or a nullptr if no

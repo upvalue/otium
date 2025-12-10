@@ -53,6 +53,22 @@ services:
         returns: []
         errors: [NOT_INITIALIZED]
 
+      - name: register_app
+        args:
+          - name: name
+            type: cstring
+        returns:
+          - name: app_id
+            signed: false
+        errors: [TOO_MANY_APPS]
+
+      - name: should_render
+        args: []
+        returns:
+          - name: active
+            signed: false
+        errors: [NOT_REGISTERED]
+
   - name: Filesystem
     methods:
       # File handle operations

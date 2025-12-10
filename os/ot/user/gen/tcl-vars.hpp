@@ -31,25 +31,29 @@ inline void register_ipc_method_vars(tcl::Interp &i) {
   i.set_var("GRAPHICS_GET_FRAMEBUFFER", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1400);
   i.set_var("GRAPHICS_FLUSH", buf);
-  // Filesystem service methods
   snprintf(buf, sizeof(buf), "%d", 0x1500);
-  i.set_var("FILESYSTEM_OPEN", buf);
+  i.set_var("GRAPHICS_REGISTER_APP", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1600);
-  i.set_var("FILESYSTEM_READ", buf);
+  i.set_var("GRAPHICS_SHOULD_RENDER", buf);
+  // Filesystem service methods
   snprintf(buf, sizeof(buf), "%d", 0x1700);
-  i.set_var("FILESYSTEM_WRITE", buf);
+  i.set_var("FILESYSTEM_OPEN", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1800);
-  i.set_var("FILESYSTEM_CLOSE", buf);
+  i.set_var("FILESYSTEM_READ", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1900);
-  i.set_var("FILESYSTEM_CREATE_FILE", buf);
+  i.set_var("FILESYSTEM_WRITE", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1a00);
-  i.set_var("FILESYSTEM_CREATE_DIR", buf);
+  i.set_var("FILESYSTEM_CLOSE", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1b00);
-  i.set_var("FILESYSTEM_DELETE_FILE", buf);
+  i.set_var("FILESYSTEM_CREATE_FILE", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1c00);
+  i.set_var("FILESYSTEM_CREATE_DIR", buf);
+  snprintf(buf, sizeof(buf), "%d", 0x1d00);
+  i.set_var("FILESYSTEM_DELETE_FILE", buf);
+  snprintf(buf, sizeof(buf), "%d", 0x1e00);
   i.set_var("FILESYSTEM_DELETE_DIR", buf);
   // Keyboard service methods
-  snprintf(buf, sizeof(buf), "%d", 0x1d00);
+  snprintf(buf, sizeof(buf), "%d", 0x1f00);
   i.set_var("KEYBOARD_POLL_KEY", buf);
 
   // Error codes
@@ -60,6 +64,10 @@ inline void register_ipc_method_vars(tcl::Interp &i) {
   i.set_var("ERROR_FIBONACCI__INVALID_INPUT", buf);
   snprintf(buf, sizeof(buf), "%d", ErrorCode::GRAPHICS__NOT_INITIALIZED);
   i.set_var("ERROR_GRAPHICS__NOT_INITIALIZED", buf);
+  snprintf(buf, sizeof(buf), "%d", ErrorCode::GRAPHICS__TOO_MANY_APPS);
+  i.set_var("ERROR_GRAPHICS__TOO_MANY_APPS", buf);
+  snprintf(buf, sizeof(buf), "%d", ErrorCode::GRAPHICS__NOT_REGISTERED);
+  i.set_var("ERROR_GRAPHICS__NOT_REGISTERED", buf);
   snprintf(buf, sizeof(buf), "%d", ErrorCode::FILESYSTEM__FILE_NOT_FOUND);
   i.set_var("ERROR_FILESYSTEM__FILE_NOT_FOUND", buf);
   snprintf(buf, sizeof(buf), "%d", ErrorCode::FILESYSTEM__PATH_TOO_LONG);

@@ -83,6 +83,14 @@ void typedemo_main() {
   GraphicsClient gfx_client(gfx_pid);
   KeyboardClient kbd_client(kbd_pid);
 
+  // Register with graphics driver
+  auto reg_result = gfx_client.register_app("typedemo");
+  if (reg_result.is_err()) {
+    oprintf("TYPEDEMO: Failed to register with graphics driver: %d\n", reg_result.error());
+    ou_exit();
+  }
+  oprintf("TYPEDEMO: Registered as app %lu\n", reg_result.value());
+
   // Get framebuffer info
   auto fb_result = gfx_client.get_framebuffer();
   if (fb_result.is_err()) {
@@ -120,6 +128,14 @@ void typedemo_main() {
           "5s idle clears)\n");
 
   while (true) {
+    // Check if we should render (are we the active app?)
+    auto should = gfx_client.should_render();
+    if (should.is_err() || should.value() == 0) {
+      // Not active, just yield
+      ou_yield();
+      continue;
+    }
+
     if (fm.begin_frame()) {
       // Poll for keyboard events
       auto key_result = kbd_client.poll_key();

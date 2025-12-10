@@ -95,6 +95,8 @@ Pid ou_proc_lookup(const char *name) {
   return Pid(syscall(OU_PROC_LOOKUP, 0, 0, 0).a0);
 }
 
+bool ou_proc_is_alive(Pid pid) { return syscall(OU_PROC_IS_ALIVE, (int)pid.raw(), 0, 0).a0 != 0; }
+
 IpcResponse ou_ipc_send(Pid target_pid, uintptr_t flags, intptr_t method, intptr_t arg0, intptr_t arg1, intptr_t arg2) {
   // Soft assert: ensure method doesn't overflow into flags field (lower 8 bits should be 0)
   if ((method & 0xFF) != 0) {

@@ -57,6 +57,11 @@ Pid ou_proc_lookup(const char *name) {
   return process_lookup(StringView(name));
 }
 
+bool ou_proc_is_alive(Pid pid) {
+  Pidx pidx = process_lookup_by_pid(pid);
+  return pidx != PIDX_INVALID;
+}
+
 int ou_io_puts(const char *str, int size) {
   for (int i = 0; i < size; i++) {
     oputchar(str[i]);

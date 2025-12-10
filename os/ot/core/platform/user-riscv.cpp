@@ -97,11 +97,28 @@ Pid ou_proc_lookup(const char *name) {
 
 bool ou_proc_is_alive(Pid pid) { return syscall(OU_PROC_IS_ALIVE, (int)pid.raw(), 0, 0).a0 != 0; }
 
+Pid ou_proc_spawn(const char *name, int argc, char **argv) {
+  PageAddr comm_page = ou_get_comm_page();
+  if (comm_page.is_null()) {
+    return PID_NONE;
+  }
+  // Write spawn request to comm page: {"name": "...", "args": [...]}
+  MPackWriter writer(comm_page.as<char>(), OT_PAGE_SIZE);
+  writer.map(2);
+  writer.str("name");
+  writer.str(name);
+  writer.str("args");
+  writer.stringarray(argc, argv);
+  return Pid(syscall(OU_PROC_SPAWN, 0, 0, 0).a0);
+}
+
 IpcResponse ou_ipc_send(Pid target_pid, uintptr_t flags, intptr_t method, intptr_t arg0, intptr_t arg1, intptr_t arg2) {
   // Soft assert: ensure method doesn't overflow into flags field (lower 8 bits should be 0)
   if ((method & 0xFF) != 0) {
     oprintf("WARNING: Method ID %d overflows into flags field\n", method);
   }
+
+  oprintf("OU_IPC_SEND: sending to pid %lu, method %d, flags %x\n", target_pid.raw(), method, flags);
 
   // Pack method and flags into single value
   uintptr_t method_and_flags = IPC_PACK_METHOD_FLAGS(method, flags);

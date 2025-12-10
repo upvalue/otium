@@ -19,8 +19,10 @@ Framework::Framework(uint32_t *framebuffer, int width, int height)
     : fb_(framebuffer), width_(width), height_(height), ttf_font_(nullptr), arena_memory_(nullptr), arena_(nullptr) {
   // Allocate pages for arena
   arena_memory_ = ou_alloc_page();
+  oprintf("[app] Framework: arena page 0 at %p\n", arena_memory_);
   for (size_t i = 1; i < ARENA_NUM_PAGES; i++) {
-    ou_alloc_page(); // Allocate additional contiguous pages
+    void *page = ou_alloc_page(); // Allocate additional contiguous pages
+    oprintf("[app] Framework: arena page %d at %p\n", i, page);
   }
 
   if (arena_memory_) {
@@ -31,8 +33,10 @@ Framework::Framework(uint32_t *framebuffer, int width, int height)
     uint8_t *arena_start = (uint8_t *)arena_memory_ + arena_obj_size;
     size_t arena_size = total_size - arena_obj_size;
 
+    oprintf("[app] Framework: arena region %p - %p (size %d)\n",
+            arena_start, arena_start + arena_size, arena_size);
+
     arena_ = new (arena_memory_) lib::Arena(arena_start, arena_size);
-    arena_->set_fallback(ou_malloc, ou_free);
   }
 }
 
@@ -230,9 +234,8 @@ Result<int, ErrorCode> Framework::draw_ttf_char(int x, int y, uint32_t codepoint
 
   ou_free(pixels);
 
-  // Reset arena for next glyph (frees any fallback allocations too)
+  // Reset arena for next glyph
   if (arena_) {
-    arena_->free_fallbacks();
     arena_->reset();
   }
 

@@ -196,11 +196,20 @@ void handle_syscall(struct trap_frame *f) {
 
     TRACE_IPC(LLOUD, "IPC send from pidx %d (pid %lu) to pid %lu, method=%d, flags=%x", current_proc->pidx.raw(),
               current_proc->pid.raw(), target_pid.raw(), method, flags);
+    // oprintf("IPC send from pidx %d (pid %lu) to pid %lu, method=%d, flags=%x\n", current_proc->pidx.raw(),
+    //            current_proc->pid.raw(), target_pid.raw(), method, flags);
 
     // Look up target by pid
     Pidx target_pidx = process_lookup_by_pid(target_pid);
     if (target_pidx == PIDX_INVALID) {
-      TRACE_IPC(LSOFT, "IPC send failed: target pid %lu not found", target_pid.raw());
+      static bool logged_pid_not_found = false;
+      if (!logged_pid_not_found) {
+        logged_pid_not_found = true;
+        oprintf("IPC send from pidx %d (pid %lu) to pid %lu failed: target pid %lu not found\n",
+                current_proc->pidx.raw(), current_proc->pid.raw(), target_pid.raw(), target_pid.raw());
+      }
+      // TRACE_IPC(LSOFT, "IPC send from pidx %d (pid %lu) to pid %lu failed: target pid %lu not found",
+      // current_proc->pidx.raw(), current_proc->pid.raw(), target_pid.raw(), target_pid.raw());
       f->a0 = IPC__PID_NOT_FOUND;
       f->a1 = 0;
       f->a2 = 0;
@@ -329,6 +338,74 @@ void handle_syscall(struct trap_frame *f) {
     Pid pid = Pid(arg0);
     Pidx pidx = process_lookup_by_pid(pid);
     f->a0 = (pidx != PIDX_INVALID) ? 1 : 0;
+    break;
+  }
+  case OU_PROC_SPAWN: {
+    // Read spawn request from comm page: {"name": "...", "args": [...]}
+    PageAddr comm_page = process_get_comm_page();
+    if (comm_page.is_null()) {
+      f->a0 = PID_NONE.raw();
+      break;
+    }
+
+    MPackReader reader(comm_page.as<char>(), OT_PAGE_SIZE);
+
+    uint32_t map_count;
+    if (!reader.enter_map(map_count) || map_count < 2) {
+      f->a0 = PID_NONE.raw();
+      break;
+    }
+
+    StringView name;
+    StringView key;
+    char name_buf[64] = {0};
+
+    // Read "name" field
+    if (!reader.read_string(key) || !key.equals("name") || !reader.read_string(name)) {
+      f->a0 = PID_NONE.raw();
+      break;
+    }
+    size_t name_len = name.len < 63 ? name.len : 63;
+    memcpy(name_buf, name.ptr, name_len);
+
+    // Read "args" field
+    if (!reader.read_string(key) || !key.equals("args")) {
+      f->a0 = PID_NONE.raw();
+      break;
+    }
+
+    // Read args array
+    constexpr size_t MAX_ARGS = 32;
+    StringView argv_views[MAX_ARGS];
+    size_t argc = 0;
+
+    uint32_t array_count;
+    if (!reader.enter_array(array_count)) {
+      f->a0 = PID_NONE.raw();
+      break;
+    }
+
+    for (uint32_t i = 0; i < array_count && i < MAX_ARGS; i++) {
+      if (!reader.read_string(argv_views[i])) {
+        break;
+      }
+      argc++;
+    }
+
+    // Convert StringViews to null-terminated strings in a static buffer
+    // This is safe because we spawn immediately and the buffer is only used during this syscall
+    static char arg_storage[MAX_ARGS][128];
+    static char *argv_ptrs[MAX_ARGS];
+
+    for (size_t i = 0; i < argc; i++) {
+      size_t len = argv_views[i].len < 127 ? argv_views[i].len : 127;
+      memcpy(arg_storage[i], argv_views[i].ptr, len);
+      arg_storage[i][len] = '\0';
+      argv_ptrs[i] = arg_storage[i];
+    }
+
+    Pid new_pid = kernel_spawn_process(name_buf, (int)argc, argv_ptrs);
+    f->a0 = new_pid.raw();
     break;
   }
   default:

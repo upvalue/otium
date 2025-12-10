@@ -62,6 +62,10 @@ bool ou_proc_is_alive(Pid pid) {
   return pidx != PIDX_INVALID;
 }
 
+Pid ou_proc_spawn(const char *name, int argc, char **argv) {
+  return kernel_spawn_process(name, argc, argv);
+}
+
 int ou_io_puts(const char *str, int size) {
   for (int i = 0; i < size; i++) {
     oputchar(str[i]);

@@ -17,7 +17,8 @@ Process *current_proc = nullptr, *idle_proc = nullptr;
 Pid proc_pid_counter = Pid(1);
 
 // Lookup table: indexed by pidx, contains pid (PID_NONE if unused)
-Pid process_pids[PROCS_MAX] = {PID_NONE, PID_NONE, PID_NONE, PID_NONE, PID_NONE, PID_NONE, PID_NONE, PID_NONE};
+// Zero-initialized; PID_NONE == Pid(0) so this is correct
+Pid process_pids[PROCS_MAX] = {};
 
 // Binary loading removed - all code now linked together in single executable
 
@@ -340,4 +341,50 @@ PageAddr process_get_storage_page(void) {
     return PageAddr(nullptr);
   }
   return current_proc->storage_page;
+}
+
+// Forward declaration for user_program_main
+extern void user_program_main(void);
+
+// Program registry - maps name to entry point
+// All user programs go through user_program_main which reads the name from args
+struct ProgramEntry {
+  const char *name;
+};
+
+static const ProgramEntry program_registry[] = {
+    {"shell"},  {"uishell"}, {"scratch"}, {"spacedemo"}, {"typedemo"}, {"echo"}, {"gfxscratch"},
+    {nullptr} // Sentinel
+};
+
+// Helper to check if program name is in registry
+static bool is_valid_program(const char *name) {
+  for (int i = 0; program_registry[i].name != nullptr; i++) {
+    if (strcmp(program_registry[i].name, name) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+Pid kernel_spawn_process(const char *name, int argc, char **argv) {
+  // Validate program name
+  if (!is_valid_program(name)) {
+    TRACE_PROC(LSOFT, "spawn failed: unknown program '%s'", name);
+    return PID_NONE;
+  }
+
+  // Build arguments - use the provided argv
+  Arguments args = {(uintptr_t)argc, argv};
+
+  // All user programs use user_program_main as entry point
+  // The program name in argv[0] determines which *_main() gets called
+  Process *proc = process_create(name, (const void *)user_program_main, &args, false);
+  if (proc == nullptr) {
+    TRACE_PROC(LSOFT, "spawn failed: could not create process for '%s'", name);
+    return PID_NONE;
+  }
+
+  TRACE_PROC(LSOFT, "spawned process '%s' with pid %lu", name, proc->pid.raw());
+  return proc->pid;
 }

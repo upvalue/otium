@@ -25,10 +25,10 @@ private:
 
 public:
   // Default constructor - zero value
-  TypedInt() : value_(0) {}
+  constexpr TypedInt() : value_(0) {}
 
   // Explicit constructor from raw value (prevents implicit conversions)
-  explicit TypedInt(T val) : value_(val) {}
+  constexpr explicit TypedInt(T val) : value_(val) {}
 
   // Get raw value
   T raw() const { return value_; }
@@ -106,9 +106,10 @@ typedef TypedInt<int, PidxTag> Pidx;
 typedef TypedInt<uintptr_t, FileHandleIdTag> FileHandleId;
 
 // Special sentinel values
-static const Pidx PIDX_INVALID = Pidx(-1);
-static const Pidx PIDX_NONE = Pidx(0);
-static const Pid PID_NONE = Pid(0);
-static const FileHandleId FILE_HANDLE_INVALID = FileHandleId(0);
+// Using inline constexpr to ensure single definition across translation units
+inline constexpr Pidx PIDX_INVALID = Pidx(-1);
+inline constexpr Pidx PIDX_NONE = Pidx(0);
+inline constexpr Pid PID_NONE = Pid(0);
+inline constexpr FileHandleId FILE_HANDLE_INVALID = FileHandleId(0);
 
 #endif

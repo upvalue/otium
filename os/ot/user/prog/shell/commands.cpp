@@ -84,7 +84,7 @@ tcl::Status cmd_ipc_send(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
   // Format response as a list: <error_code> <value1> <value2> <value3>
   char buf[256];
   snprintf(buf, sizeof(buf), "%d %ld %ld %ld", (int)resp.error_code, (long)resp.values[0], (long)resp.values[1],
-            (long)resp.values[2]);
+           (long)resp.values[2]);
   i.result = buf;
 
   return tcl::S_OK;
@@ -125,7 +125,7 @@ tcl::Status cmd_fs_read(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pro
   ErrorCode err = file.open();
   if (err != ErrorCode::NONE) {
     snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/read: failed to open file '%s': %s", argv[1].c_str(),
-              error_code_to_string(err));
+             error_code_to_string(err));
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
   }
@@ -134,7 +134,7 @@ tcl::Status cmd_fs_read(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pro
   err = file.read_all(content);
   if (err != ErrorCode::NONE) {
     snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/read: failed to read file '%s': %s", argv[1].c_str(),
-              error_code_to_string(err));
+             error_code_to_string(err));
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
   }
@@ -152,7 +152,7 @@ tcl::Status cmd_fs_write(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
   ErrorCode err = file.open();
   if (err != ErrorCode::NONE) {
     snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/write: failed to open file '%s': %s", argv[1].c_str(),
-              error_code_to_string(err));
+             error_code_to_string(err));
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
   }
@@ -160,7 +160,7 @@ tcl::Status cmd_fs_write(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
   err = file.write_all(argv[2]);
   if (err != ErrorCode::NONE) {
     snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/write: failed to write file '%s': %s", argv[1].c_str(),
-              error_code_to_string(err));
+             error_code_to_string(err));
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
   }
@@ -186,7 +186,7 @@ tcl::Status cmd_fs_create(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::P
   auto result = client.create_file(argv[1]);
   if (result.is_err()) {
     snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "fs/create: failed to create file '%s': %s", argv[1].c_str(),
-              error_code_to_string(result.error()));
+             error_code_to_string(result.error()));
     i.result = ot_scratch_buffer;
     return tcl::S_ERR;
   }
@@ -194,10 +194,59 @@ tcl::Status cmd_fs_create(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::P
   return tcl::S_OK;
 }
 
+tcl::Status cmd_proc_is_alive(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("proc/is-alive", argv, 2, 2)) {
+    return tcl::S_ERR;
+  }
+  if (!i.int_check("proc/is-alive", argv, 1)) {
+    return tcl::S_ERR;
+  }
+  Pid pid = Pid((uintptr_t)atoi(argv[1].c_str()));
+  bool alive = ou_proc_is_alive(pid);
+  i.result = alive ? "1" : "0";
+  return tcl::S_OK;
+}
+
+tcl::Status cmd_run(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("run", argv, 2, -1)) { // At least program name, unlimited args
+    return tcl::S_ERR;
+  }
+
+  const char *program_name = argv[1].c_str();
+
+  // Build argv array for the spawned process
+  // argv[0] should be the program name
+  constexpr size_t MAX_SPAWN_ARGS = 32;
+  char *spawn_argv[MAX_SPAWN_ARGS];
+  int spawn_argc = 0;
+
+  for (size_t j = 1; j < argv.size() && spawn_argc < (int)MAX_SPAWN_ARGS; j++) {
+    spawn_argv[spawn_argc++] = (char *)argv[j].c_str();
+  }
+
+  Pid new_pid = ou_proc_spawn(program_name, spawn_argc, spawn_argv);
+
+  if (new_pid == PID_NONE) {
+    snprintf(ot_scratch_buffer, OT_PAGE_SIZE, "run: failed to spawn '%s' (unknown program or process limit)",
+             program_name);
+    i.result = ot_scratch_buffer;
+    return tcl::S_ERR;
+  }
+
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%lu", new_pid.raw());
+  i.result = buf;
+  return tcl::S_OK;
+}
+
 void register_shell_commands(tcl::Interp &i) {
   // Lookup a procedure's PID
   i.register_command("proc/lookup", cmd_proc_lookup, nullptr,
                      "[proc/lookup name:string] => pid:int - Lookup a procedure's PID");
+
+  // Check if a process is alive
+  i.register_command("proc/is-alive", cmd_proc_is_alive, nullptr,
+                     "[proc/is-alive pid:int] => bool - Check if a process is alive (1=alive, 0=dead)");
 
   // IPC command
   i.register_command("ipc/send", cmd_ipc_send, nullptr,
@@ -209,8 +258,7 @@ void register_shell_commands(tcl::Interp &i) {
                      "[error/string code:int] => string - Convert error code to string");
 
   // String commands
-  i.register_command("length", cmd_length, nullptr,
-                     "[length str:string] => int - Return the length of a string");
+  i.register_command("length", cmd_length, nullptr, "[length str:string] => int - Return the length of a string");
 
   // Filesystem commands
   i.register_command("fs/read", cmd_fs_read, nullptr,
@@ -219,6 +267,10 @@ void register_shell_commands(tcl::Interp &i) {
                      "[fs/write filename:string content:string] => nil - Write string to a file");
   i.register_command("fs/create", cmd_fs_create, nullptr,
                      "[fs/create filename:string] => nil - Create a new empty file");
+
+  // Process spawning
+  i.register_command("run", cmd_run, nullptr,
+                     "[run program:string args...] => pid:int - Spawn a new process and return its PID");
 }
 
 } // namespace shell

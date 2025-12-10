@@ -11,6 +11,8 @@ void uishell_main();
 void scratch_main();
 void spacedemo_main();
 void typedemo_main();
+void echo_main();
+void gfxscratch_main();
 
 #ifdef __cplusplus
 }

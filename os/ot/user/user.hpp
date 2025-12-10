@@ -33,6 +33,7 @@ int ou_io_puts(const char *str, int size);
 
 Pid ou_proc_lookup(const char *name);
 bool ou_proc_is_alive(Pid pid);
+Pid ou_proc_spawn(const char *name, int argc, char **argv);
 
 /**
  * Sets up arguments passed to the process or a nullptr if no

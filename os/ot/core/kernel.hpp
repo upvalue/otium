@@ -189,6 +189,10 @@ Process *process_lookup_by_pidx(Pidx pidx);
 void process_exit(Process *proc, bool zero_proc = true);
 void shutdown_all_processes(void);
 
+// Spawn a new process by program name with arguments
+// Returns the new process's PID, or PID_NONE on failure
+Pid kernel_spawn_process(const char *name, int argc, char **argv);
+
 // Gets the argument page pointer of the current process if possible
 PageAddr process_get_arg_page();
 // Gets the comm page pointer of the current process if possible

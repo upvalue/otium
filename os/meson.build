@@ -314,7 +314,9 @@ if is_riscv or is_wasm
 
   user_sources = [
     'ot/user/user-main.cpp',
+    'ot/user/prog-echo.cpp',
     'ot/user/prog-scratch.cpp',
+    'ot/user/prog-gfxscratch.cpp',
     'ot/user/prog/shell/commands.cpp',
     'ot/user/prog/shell/textshell.cpp',
     'ot/user/prog/shell/uishell.cpp',

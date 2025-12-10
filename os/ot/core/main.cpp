@@ -63,9 +63,11 @@ void kernel_prog_default() {
   // Start typedemo (keyboard typing demo) when graphics and keyboard are enabled (but not for uishell mode)
 #if OT_GRAPHICS_BACKEND != OT_GRAPHICS_BACKEND_NONE && OT_KEYBOARD_BACKEND != OT_KEYBOARD_BACKEND_NONE &&              \
     KERNEL_PROG != KERNEL_PROG_UISHELL
+#if 0
   char *typedemo_argv[] = {(char *)"typedemo"};
   Arguments typedemo_args = {1, typedemo_argv};
   process_create("typedemo", (const void *)user_program_main, &typedemo_args, false);
+#endif
 
   // char *spacedemo_argv[] = {(char *)"spacedemo"};
   // Arguments spacedemo_args = {1, spacedemo_argv};

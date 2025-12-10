@@ -206,8 +206,10 @@ static int grow_points(Outline *outl);
 static int grow_curves(Outline *outl);
 static int grow_lines(Outline *outl);
 
+#define USE_ARENA 1
+
 /* Arena-aware allocation helpers for outline */
-#if defined(OT_ARCH_RISCV) || defined(OT_ARCH_WASM)
+#if (defined(OT_ARCH_RISCV) || defined(OT_ARCH_WASM)) && USE_ARENA
 static inline void *outl_alloc(Outline *outl, size_t size) {
   if (outl->arena) {
     return sft_arena_alloc(outl->arena, size);

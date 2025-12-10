@@ -21,6 +21,9 @@ void LocalStorage::process_storage_init(size_t pages) {
     ou_exit();
   }
 
+  oprintf("[mem] process_storage_init: %d pages at %p - %p\n",
+          pages, memory_begin, memory_begin + pages * OT_PAGE_SIZE);
+
   // Create TLSF pool from the contiguous memory region
   pool = tlsf_create_with_pool(memory_begin, pages * OT_PAGE_SIZE);
   if (!pool) {

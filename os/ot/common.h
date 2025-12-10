@@ -44,6 +44,7 @@ int oputsn(const char *str, int n);
 #define OU_SHUTDOWN 12          // Shutdown all processes and exit the kernel
 #define OU_LOCK_KNOWN_MEMORY 13 // Lock a known memory region
 #define OU_PROC_IS_ALIVE 14     // Check if a process is still alive by PID
+#define OU_PROC_SPAWN 15        // Spawn a new process by name with args
 
 // Known memory region identifiers
 typedef enum { KNOWN_MEMORY_NONE = 0, KNOWN_MEMORY_FRAMEBUFFER = 1, KNOWN_MEMORY_COUNT } KnownMemory;

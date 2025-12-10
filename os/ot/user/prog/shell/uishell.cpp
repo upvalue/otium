@@ -39,7 +39,7 @@ struct UIShellStorage : public LocalStorage {
   int cursor_blink_counter;
 
   UIShellStorage() {
-    process_storage_init(50); // Need more pages for TTF rendering
+    process_storage_init(25); // Need more pages for TTF rendering
 
     // Allocate output buffer dynamically
     output_lines = (char **)ou_malloc(MAX_OUTPUT_LINES * sizeof(char *));
@@ -215,10 +215,22 @@ void uishell_main() {
     ou_exit();
   }
 
-  int sentinel = 0xcafebabe;
-
+  volatile uint32_t canary_before = 0xDEADBEEF;
   GraphicsClient gfx_client(gfx_pid);
+  volatile uint32_t canary_after = 0xCAFEBABE;
   KeyboardClient kbd_client(kbd_pid);
+
+  // Print stack layout for debugging
+  uintptr_t sp;
+  __asm__ __volatile__("mv %0, sp" : "=r"(sp));
+  oprintf("UISHELL: Stack layout:\n");
+  oprintf("  sp = %p\n", sp);
+  oprintf("  &gfx_pid = %p (val=%lu)\n", &gfx_pid, gfx_pid.raw());
+  oprintf("  &kbd_pid = %p (val=%lu)\n", &kbd_pid, kbd_pid.raw());
+  oprintf("  &canary_before = %p (val=0x%x)\n", &canary_before, canary_before);
+  oprintf("  &gfx_client.pid_ = %p (val=%lu)\n", &gfx_client.pid_, gfx_client.pid_.raw());
+  oprintf("  &canary_after = %p (val=0x%x)\n", &canary_after, canary_after);
+  oprintf("  &kbd_client.pid_ = %p (val=%lu)\n", &kbd_client.pid_, kbd_client.pid_.raw());
 
   // Register with graphics server as an app
   auto reg_result = gfx_client.register_app("uishell");
@@ -322,22 +334,20 @@ void uishell_main() {
     // Check if we should render (are we the active app?)
     // oprintf("UISHELL[%lu]: calling should_render\n", reg_result.value());
     // oprintf("UISHELL: calling should_render with gfx_client %p and gfx pid %lu\n", &gfx_client, gfx_pid.raw());
-    oprintf("UISHELL gfx_client %p with pid %lu\n", &gfx_client, gfx_pid.raw());
     auto should = gfx_client.should_render();
     // oprintf("UISHELL[%lu]: should_render returned %d\n", reg_result.value(), should.is_ok() ? (int)should.value() :
     // -1);
     if (should.is_err()) {
-      oprintf("sentinel: %x\n", sentinel);
-      printf("UISHELL: gfx_client %p with pid %lu after error\n", &gfx_client, gfx_pid.raw());
-      oprintf("UISHELL: should_render returned error: %d\n", should.error());
+      oprintf("UISHELL: should_render returned error: error=%s\n", error_code_to_string(should.error()));
+      oprintf("UISHELL: gfx_pid=%p val=%lu (expect 2)\n", &gfx_pid, gfx_pid.raw());
+      oprintf("UISHELL: canary_before=%p val=0x%x (expect 0xDEADBEEF)\n", &canary_before, canary_before);
+      oprintf("UISHELL: gfx_client.pid_=%p val=%lu (expect 2)\n", &gfx_client.pid_, gfx_client.pid_.raw());
+      oprintf("UISHELL: canary_after=%p val=0x%x (expect 0xCAFEBABE)\n", &canary_after, canary_after);
       ou_exit();
     }
     if (should.value() == 0) {
-      sentinel++;
-      printf("UISHELL: gfx_client %p with pid %lu before yield\n", &gfx_client, gfx_pid.raw());
       // Not active, just yield
       ou_yield();
-      printf("UISHELL: gfx_client %p with pid %lu after yield\n", &gfx_client, gfx_pid.raw());
       continue;
     }
 

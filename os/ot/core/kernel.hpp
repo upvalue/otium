@@ -228,4 +228,8 @@ void scheduler_loop(void);
 // USER_CODE_BASE and HEAP_BASE removed (not needed without MMU)
 #define SSTATUS_SPIE (1 << 5)
 
+// Stack canary for overflow detection
+// Placed at bottom of user stack, checked on syscall entry
+#define STACK_CANARY_VALUE 0xDEAD57AC  // "DEAD STACK"
+
 #endif

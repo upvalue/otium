@@ -7,7 +7,8 @@
 
 #define SCAUSE_ECALL 8
 #define SSTATUS_SPP (1 << 8)
-#define SSTATUS_SUM (1 << 18) // Permit Supervisor User Memory access
+#define SSTATUS_SUM (1 << 18)  // Permit Supervisor User Memory access
+#define SSTATUS_FS (3 << 13)   // Floating-point Status: 3 = Dirty (FP enabled)
 
 extern "C" char __bss[], __bss_end[], __stack_top[];
 
@@ -196,20 +197,12 @@ void handle_syscall(struct trap_frame *f) {
 
     TRACE_IPC(LLOUD, "IPC send from pidx %d (pid %lu) to pid %lu, method=%d, flags=%x", current_proc->pidx.raw(),
               current_proc->pid.raw(), target_pid.raw(), method, flags);
-    // oprintf("IPC send from pidx %d (pid %lu) to pid %lu, method=%d, flags=%x\n", current_proc->pidx.raw(),
-    //            current_proc->pid.raw(), target_pid.raw(), method, flags);
 
     // Look up target by pid
     Pidx target_pidx = process_lookup_by_pid(target_pid);
     if (target_pidx == PIDX_INVALID) {
-      static bool logged_pid_not_found = false;
-      if (!logged_pid_not_found) {
-        logged_pid_not_found = true;
-        oprintf("IPC send from pidx %d (pid %lu) to pid %lu failed: target pid %lu not found\n",
+      TRACE_IPC(LSOFT, "IPC send from pidx %d (pid %lu) to pid %lu failed: target pid %lu not found",
                 current_proc->pidx.raw(), current_proc->pid.raw(), target_pid.raw(), target_pid.raw());
-      }
-      // TRACE_IPC(LSOFT, "IPC send from pidx %d (pid %lu) to pid %lu failed: target pid %lu not found",
-      // current_proc->pidx.raw(), current_proc->pid.raw(), target_pid.raw(), target_pid.raw());
       f->a0 = IPC__PID_NOT_FOUND;
       f->a1 = 0;
       f->a2 = 0;
@@ -421,6 +414,26 @@ extern "C" void handle_trap(struct trap_frame *f) {
   uint32_t user_pc = READ_CSR(sepc);
   uint32_t sstatus = READ_CSR(sstatus);
 
+  // Check stack canary for ALL user processes (detect stack overflow from any process)
+  for (int i = 0; i < PROCS_MAX; i++) {
+    Process *p = process_lookup_by_pidx(Pidx(i));
+    if (p && p->state != UNUSED && p->state != TERMINATED && !p->user_stack.is_null()) {
+      volatile uint32_t *canary_ptr = (volatile uint32_t *)p->user_stack.as_ptr();
+      uint32_t canary_val = *canary_ptr;
+      if (canary_val != STACK_CANARY_VALUE) {
+        oprintf("STACK OVERFLOW: Process %s (pidx=%d, pid=%lu) corrupted stack canary at %p\n", p->name, p->pidx,
+                p->pid, canary_ptr);
+        oprintf("  Expected: 0x%08x, Found: 0x%08x\n", STACK_CANARY_VALUE, canary_val);
+        oprintf("  (Detected during trap from process %s)\n", current_proc ? current_proc->name : "none");
+        p->state = TERMINATED;
+        if (p == current_proc) {
+          yield();
+          return;
+        }
+      }
+    }
+  }
+
   if (scause == SCAUSE_ECALL) {
     // Check if this is an SBI call (a7 contains extension ID) or kernel syscall (a3 contains sysno)
     // SBI calls should be forwarded to firmware, kernel syscalls handled by handle_syscall
@@ -456,9 +469,18 @@ extern "C" void handle_trap(struct trap_frame *f) {
   }
 }
 
+// Trap frame layout (63 words = 252 bytes):
+// Slots 0-29: integer registers (ra, gp, tp, t0-t6, a0-a7, s0-s11)
+// Slot 30: user sp
+// Slots 31-62: floating point registers (f0-f31)
+#define TRAP_FRAME_SIZE (4 * 63)
+
 __attribute__((naked)) __attribute__((aligned(4))) extern "C" void kernel_entry(void) {
-  __asm__ __volatile__("csrrw sp, sscratch, sp\n"
-                       "addi sp, sp, -4 * 31\n"
+  __asm__ __volatile__(
+                       "csrrw sp, sscratch, sp\n"
+                       "addi sp, sp, -%0\n"
+
+                       // Save integer registers
                        "sw ra,  4 * 0(sp)\n"
                        "sw gp,  4 * 1(sp)\n"
                        "sw tp,  4 * 2(sp)\n"
@@ -493,13 +515,82 @@ __attribute__((naked)) __attribute__((aligned(4))) extern "C" void kernel_entry(
                        "csrr a0, sscratch\n"
                        "sw a0, 4 * 30(sp)\n"
 
-                       // Reset the kernel stack.
-                       "addi a0, sp, 4 * 31\n"
+                       // Save floating point registers (f0-f31)
+                       "fsw f0,  4 * 31(sp)\n"
+                       "fsw f1,  4 * 32(sp)\n"
+                       "fsw f2,  4 * 33(sp)\n"
+                       "fsw f3,  4 * 34(sp)\n"
+                       "fsw f4,  4 * 35(sp)\n"
+                       "fsw f5,  4 * 36(sp)\n"
+                       "fsw f6,  4 * 37(sp)\n"
+                       "fsw f7,  4 * 38(sp)\n"
+                       "fsw f8,  4 * 39(sp)\n"
+                       "fsw f9,  4 * 40(sp)\n"
+                       "fsw f10, 4 * 41(sp)\n"
+                       "fsw f11, 4 * 42(sp)\n"
+                       "fsw f12, 4 * 43(sp)\n"
+                       "fsw f13, 4 * 44(sp)\n"
+                       "fsw f14, 4 * 45(sp)\n"
+                       "fsw f15, 4 * 46(sp)\n"
+                       "fsw f16, 4 * 47(sp)\n"
+                       "fsw f17, 4 * 48(sp)\n"
+                       "fsw f18, 4 * 49(sp)\n"
+                       "fsw f19, 4 * 50(sp)\n"
+                       "fsw f20, 4 * 51(sp)\n"
+                       "fsw f21, 4 * 52(sp)\n"
+                       "fsw f22, 4 * 53(sp)\n"
+                       "fsw f23, 4 * 54(sp)\n"
+                       "fsw f24, 4 * 55(sp)\n"
+                       "fsw f25, 4 * 56(sp)\n"
+                       "fsw f26, 4 * 57(sp)\n"
+                       "fsw f27, 4 * 58(sp)\n"
+                       "fsw f28, 4 * 59(sp)\n"
+                       "fsw f29, 4 * 60(sp)\n"
+                       "fsw f30, 4 * 61(sp)\n"
+                       "fsw f31, 4 * 62(sp)\n"
+
+                       // Reset the kernel stack
+                       "addi a0, sp, %0\n"
                        "csrw sscratch, a0\n"
 
                        "mv a0, sp\n"
                        "call handle_trap\n"
 
+                       // Restore floating point registers (f0-f31)
+                       "flw f0,  4 * 31(sp)\n"
+                       "flw f1,  4 * 32(sp)\n"
+                       "flw f2,  4 * 33(sp)\n"
+                       "flw f3,  4 * 34(sp)\n"
+                       "flw f4,  4 * 35(sp)\n"
+                       "flw f5,  4 * 36(sp)\n"
+                       "flw f6,  4 * 37(sp)\n"
+                       "flw f7,  4 * 38(sp)\n"
+                       "flw f8,  4 * 39(sp)\n"
+                       "flw f9,  4 * 40(sp)\n"
+                       "flw f10, 4 * 41(sp)\n"
+                       "flw f11, 4 * 42(sp)\n"
+                       "flw f12, 4 * 43(sp)\n"
+                       "flw f13, 4 * 44(sp)\n"
+                       "flw f14, 4 * 45(sp)\n"
+                       "flw f15, 4 * 46(sp)\n"
+                       "flw f16, 4 * 47(sp)\n"
+                       "flw f17, 4 * 48(sp)\n"
+                       "flw f18, 4 * 49(sp)\n"
+                       "flw f19, 4 * 50(sp)\n"
+                       "flw f20, 4 * 51(sp)\n"
+                       "flw f21, 4 * 52(sp)\n"
+                       "flw f22, 4 * 53(sp)\n"
+                       "flw f23, 4 * 54(sp)\n"
+                       "flw f24, 4 * 55(sp)\n"
+                       "flw f25, 4 * 56(sp)\n"
+                       "flw f26, 4 * 57(sp)\n"
+                       "flw f27, 4 * 58(sp)\n"
+                       "flw f28, 4 * 59(sp)\n"
+                       "flw f29, 4 * 60(sp)\n"
+                       "flw f30, 4 * 61(sp)\n"
+                       "flw f31, 4 * 62(sp)\n"
+
+                       // Restore integer registers
                        "lw ra,  4 * 0(sp)\n"
                        "lw gp,  4 * 1(sp)\n"
                        "lw tp,  4 * 2(sp)\n"
@@ -531,15 +622,22 @@ __attribute__((naked)) __attribute__((aligned(4))) extern "C" void kernel_entry(
                        "lw s10, 4 * 28(sp)\n"
                        "lw s11, 4 * 29(sp)\n"
                        "lw sp,  4 * 30(sp)\n"
-                       "sret\n");
+                       "sret\n"
+                       :
+                       : "i"(TRAP_FRAME_SIZE)
+                       );
 }
 
 __attribute__((naked)) extern "C" void switch_context(uint32_t *prev_sp, uint32_t *next_sp) {
-  // TODO: Handle stack overflows
+  // Save/restore callee-saved integer registers (ra, s0-s11) and
+  // callee-saved FP registers (fs0-fs11 = f8-f9, f18-f27)
+  // Total: 13 integer + 12 FP = 25 registers
   __asm__ __volatile__(
-      // Save callee-saved registers onto the current process's stack.
-      "addi sp, sp, -13 * 4\n" // Allocate stack space for 13 4-byte registers
-      "sw ra,  0  * 4(sp)\n"   // Save callee-saved registers only
+      // Save callee-saved registers onto the current process's stack
+      "addi sp, sp, -25 * 4\n" // Allocate stack space for 25 4-byte registers
+
+      // Save integer callee-saved registers
+      "sw ra,  0  * 4(sp)\n"
       "sw s0,  1  * 4(sp)\n"
       "sw s1,  2  * 4(sp)\n"
       "sw s2,  3  * 4(sp)\n"
@@ -553,12 +651,26 @@ __attribute__((naked)) extern "C" void switch_context(uint32_t *prev_sp, uint32_
       "sw s10, 11 * 4(sp)\n"
       "sw s11, 12 * 4(sp)\n"
 
-      // Switch the stack pointer.
+      // Save FP callee-saved registers (fs0-fs11 = f8-f9, f18-f27)
+      "fsw f8,  13 * 4(sp)\n"  // fs0
+      "fsw f9,  14 * 4(sp)\n"  // fs1
+      "fsw f18, 15 * 4(sp)\n"  // fs2
+      "fsw f19, 16 * 4(sp)\n"  // fs3
+      "fsw f20, 17 * 4(sp)\n"  // fs4
+      "fsw f21, 18 * 4(sp)\n"  // fs5
+      "fsw f22, 19 * 4(sp)\n"  // fs6
+      "fsw f23, 20 * 4(sp)\n"  // fs7
+      "fsw f24, 21 * 4(sp)\n"  // fs8
+      "fsw f25, 22 * 4(sp)\n"  // fs9
+      "fsw f26, 23 * 4(sp)\n"  // fs10
+      "fsw f27, 24 * 4(sp)\n"  // fs11
+
+      // Switch the stack pointer
       "sw sp, (a0)\n" // *prev_sp = sp;
       "lw sp, (a1)\n" // Switch stack pointer (sp) here
 
-      // Restore callee-saved registers from the next process's stack.
-      "lw ra,  0  * 4(sp)\n" // Restore callee-saved registers only
+      // Restore integer callee-saved registers
+      "lw ra,  0  * 4(sp)\n"
       "lw s0,  1  * 4(sp)\n"
       "lw s1,  2  * 4(sp)\n"
       "lw s2,  3  * 4(sp)\n"
@@ -571,8 +683,22 @@ __attribute__((naked)) extern "C" void switch_context(uint32_t *prev_sp, uint32_
       "lw s9,  10 * 4(sp)\n"
       "lw s10, 11 * 4(sp)\n"
       "lw s11, 12 * 4(sp)\n"
-      "addi sp, sp, 13 * 4\n" // We've popped 13 4-byte registers from the
-                              // stack
+
+      // Restore FP callee-saved registers (fs0-fs11 = f8-f9, f18-f27)
+      "flw f8,  13 * 4(sp)\n"  // fs0
+      "flw f9,  14 * 4(sp)\n"  // fs1
+      "flw f18, 15 * 4(sp)\n"  // fs2
+      "flw f19, 16 * 4(sp)\n"  // fs3
+      "flw f20, 17 * 4(sp)\n"  // fs4
+      "flw f21, 18 * 4(sp)\n"  // fs5
+      "flw f22, 19 * 4(sp)\n"  // fs6
+      "flw f23, 20 * 4(sp)\n"  // fs7
+      "flw f24, 21 * 4(sp)\n"  // fs8
+      "flw f25, 22 * 4(sp)\n"  // fs9
+      "flw f26, 23 * 4(sp)\n"  // fs10
+      "flw f27, 24 * 4(sp)\n"  // fs11
+
+      "addi sp, sp, 25 * 4\n" // Deallocate stack space
       "ret\n");
 }
 
@@ -582,6 +708,7 @@ extern "C" void user_entry(void) {
   uint32_t status = READ_CSR(sstatus);
   status &= ~SSTATUS_SPP; // Clear SPP to enter user mode
   status |= SSTATUS_SPIE; // Set SPIE to enable interrupts after sret
+  status |= SSTATUS_FS;   // Enable floating-point unit
 
   // Get user stack pointer (top of user stack page) - physical address
   uintptr_t user_sp = current_proc->user_stack.raw() + OT_PAGE_SIZE;
@@ -624,14 +751,29 @@ void yield(void) {
 
 extern "C" void kernel_main(void) {
   WRITE_CSR(stvec, (uintptr_t)kernel_entry);
+
+  // Enable floating-point unit in supervisor mode
+  // This is required for the kernel to save/restore FP registers during context switches
+  uint32_t sstatus = READ_CSR(sstatus);
+  sstatus |= SSTATUS_FS;
+  WRITE_CSR(sstatus, sstatus);
+
   // Physical addressing only - no need for SUM bit or page table setup
   kernel_start();
 }
 
 __attribute__((section(".text.boot"))) __attribute__((naked)) extern "C" void boot(void) {
-  __asm__ __volatile__("mv sp, %[stack_top]\n" // Set the stack pointer
+  __asm__ __volatile__(
+                       "mv sp, %[stack_top]\n" // Set the stack pointer
+
+                       // Enable floating-point unit in supervisor mode
+                       // FS field (bits 14:13) = 3 (Dirty) to enable FP
+                       "li t0, (3 << 13)\n"
+                       "csrs sstatus, t0\n"
+
                        "j kernel_main\n"       // Jump to the kernel main function
                        :
-                       : [stack_top] "r"(__stack_top) // Pass the stack top address as %[stack_top]
+                       : [stack_top] "r"(__stack_top)
+                       : "t0"
   );
 }

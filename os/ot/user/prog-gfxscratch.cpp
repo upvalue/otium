@@ -50,6 +50,14 @@ void gfxscratch_main() {
   oprintf("GFXSCRATCH: Found graphics at PID %lu\n", gfx_pid.raw());
 
   GraphicsClient gfx_client(gfx_pid);
+
+  // Print stack layout for debugging
+  uintptr_t sp;
+  __asm__ __volatile__("mv %0, sp" : "=r"(sp));
+  oprintf("GFXSCRATCH: Stack layout:\n");
+  oprintf("  sp = %p\n", sp);
+  oprintf("  &gfx_pid = %p\n", &gfx_pid);
+  oprintf("  &gfx_client.pid_ = %p\n", &gfx_client.pid_);
   oprintf("GFXSCRATCH: gfx_client at %p with pid %lu\n", &gfx_client, gfx_client.pid_.raw());
 
   // Register with graphics server

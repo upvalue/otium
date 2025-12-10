@@ -143,6 +143,11 @@ Process *process_create_impl(Process *table, int max_procs, const char *name, co
   }
   free_proc->user_stack = user_stack;
 
+  // Place stack canary at bottom of user stack for overflow detection
+  // Stack grows downward, so canary is at lowest address
+  volatile uint32_t *canary_ptr = (volatile uint32_t *)user_stack.as_ptr();
+  *canary_ptr = STACK_CANARY_VALUE;
+
   // Handle argument array
   if (args) {
     PageAddr arg_page = process_alloc_mapped_page(free_proc, true, false, false);
@@ -385,6 +390,7 @@ Pid kernel_spawn_process(const char *name, int argc, char **argv) {
     return PID_NONE;
   }
 
-  TRACE_PROC(LSOFT, "spawned process '%s' with pid %lu", name, proc->pid.raw());
+  TRACE_PROC(LSOFT, "spawned process '%s' with pid %lu, user_stack=%p-%p", name, proc->pid.raw(),
+             proc->user_stack.raw(), proc->user_stack.raw() + OT_PAGE_SIZE);
   return proc->pid;
 }

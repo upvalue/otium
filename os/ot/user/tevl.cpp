@@ -5,6 +5,7 @@
 #include "ot/common.h"
 #include "ot/lib/file.hpp"
 #include "ot/lib/result.hpp"
+#include "ot/lib/error-codes.hpp"
 #include "ot/user/string.hpp"
 #include "ot/user/tcl.hpp"
 #include "ot/user/tevl.hpp"
@@ -97,9 +98,7 @@ static bool is_motion(Action action) {
 }
 
 // Check if a key is empty (no input)
-static bool is_empty_key(const Key &k) {
-  return k.c == 0 && k.ext == ExtendedKey::NONE && !k.ctrl;
-}
+static bool is_empty_key(const Key &k) { return k.c == 0 && k.ext == ExtendedKey::NONE && !k.ctrl; }
 
 //
 // Editor method implementations
@@ -178,8 +177,7 @@ void Editor::delete_line(intptr_t line) {
   }
 }
 
-void Editor::apply_operator(Operator op, intptr_t start_x, intptr_t start_y, intptr_t end_x,
-                            intptr_t end_y) {
+void Editor::apply_operator(Operator op, intptr_t start_x, intptr_t start_y, intptr_t end_x, intptr_t end_y) {
   if (op == Operator::DELETE) {
     if (start_y == end_y && start_y < file_lines.size()) {
       // Same line: delete characters between start_x and end_x
@@ -413,9 +411,9 @@ void Editor::scroll() {
 void Editor::message_clear() {
   uint64_t now = o_time_get();
   char buffer[1024];
-  snprintf(buffer, sizeof(buffer), "now: %llu, last_message_time: %llu",
+  /*snprintf(buffer, sizeof(buffer), "now: %llu, last_message_time: %llu",
            (unsigned long long)now, (unsigned long long)last_message_time);
-  be->debug_print(buffer);
+  be->debug_print(buffer);*/
   if (o_time_get() - last_message_time > MESSAGE_TIMEOUT_MS) {
     message_line.clear();
   }
@@ -467,8 +465,7 @@ static tcl::Status tcl_command_hard_quit(tcl::Interp &interp, tcl::vector<tcl::s
   return tcl::S_OK;
 }
 
-static tcl::Status tcl_command_quit(tcl::Interp &interp, tcl::vector<tcl::string> &argv,
-                                    tcl::ProcPrivdata *privdata) {
+static tcl::Status tcl_command_quit(tcl::Interp &interp, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
   auto *pd = static_cast<TclEditorPrivdata *>(privdata);
   if (pd->editor->dirty > 0) {
     interp.result = "file has changes, use q! to quit";
@@ -477,8 +474,7 @@ static tcl::Status tcl_command_quit(tcl::Interp &interp, tcl::vector<tcl::string
   return tcl_command_hard_quit(interp, argv, privdata);
 }
 
-static tcl::Status tcl_command_write(tcl::Interp &interp, tcl::vector<tcl::string> &argv,
-                                     tcl::ProcPrivdata *privdata) {
+static tcl::Status tcl_command_write(tcl::Interp &interp, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
   auto *pd = static_cast<TclEditorPrivdata *>(privdata);
   Editor &e = *pd->editor;
 
@@ -550,32 +546,38 @@ void tevl_main(Backend *be_, Editor *editor, tcl::Interp *interp, ou::string *fi
     ou::File file(file_path->c_str());
     editor->file_name = file_path->c_str();
     ErrorCode err = file.open();
-    if (err != ErrorCode::NONE) {
+
+    if (err == FILESYSTEM__FILE_NOT_FOUND) {
+      // New file - start with empty buffer
+      editor->file_lines.push_back(ou::string());
+      editor->message_set("[New File]");
+    } else if (err != ErrorCode::NONE) {
+      // Other error - exit
       oprintf("failed to open file %s: %d\n", file_path->c_str(), err);
       return;
-    }
-
-    // Read file contents and split into lines
-    ou::string content;
-    err = file.read_all(content);
-    if (err != ErrorCode::NONE) {
-      oprintf("failed to read file %s: %d\n", file_path->c_str(), err);
-      return;
-    }
-
-    // Split content by newlines
-    ou::string current_line;
-    for (size_t i = 0; i < content.length(); i++) {
-      if (content[i] == '\n') {
-        editor->file_lines.push_back(current_line);
-        current_line.clear();
-      } else {
-        current_line.push_back(content[i]);
+    } else {
+      // File exists - read contents
+      ou::string content;
+      err = file.read_all(content);
+      if (err != ErrorCode::NONE) {
+        oprintf("failed to read file %s: %d\n", file_path->c_str(), err);
+        return;
       }
-    }
-    // Add last line if file doesn't end with newline
-    if (!current_line.empty() || content.empty()) {
-      editor->file_lines.push_back(current_line);
+
+      // Split content by newlines
+      ou::string current_line;
+      for (size_t i = 0; i < content.length(); i++) {
+        if (content[i] == '\n') {
+          editor->file_lines.push_back(current_line);
+          current_line.clear();
+        } else {
+          current_line.push_back(content[i]);
+        }
+      }
+      // Add last line if file doesn't end with newline
+      if (!current_line.empty() || content.empty()) {
+        editor->file_lines.push_back(current_line);
+      }
     }
   }
 

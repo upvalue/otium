@@ -8,7 +8,15 @@
 struct FibonacciClient {
   Pid pid_;
 
+  FibonacciClient() : pid_(Pid(0)) {}
   FibonacciClient(Pid pid) : pid_(pid) {}
+
+  FibonacciClient& operator=(const FibonacciClient& other) {
+    pid_ = other.pid_;
+    return *this;
+  }
+
+  void set_pid(Pid pid) { pid_ = pid; }
 
   Result<intptr_t, ErrorCode> calc_fib(intptr_t n);
   Result<CalcPairResult, ErrorCode> calc_pair(intptr_t n, intptr_t m);

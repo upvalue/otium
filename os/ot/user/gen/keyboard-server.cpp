@@ -2,10 +2,10 @@
 #include "ot/user/gen/method-ids.hpp"
 #include "ot/user/user.hpp"
 
-void KeyboardServerBase::process_request(const IpcMessage& msg) {
+void KeyboardServerBase::process_request(const IpcMessage &msg) {
   // Check for shutdown request (handled by base class)
   if (handle_shutdown_if_requested(msg)) {
-    return;  // Server exits in base class
+    return; // Server exits in base class
   }
 
   intptr_t method = IPC_UNPACK_METHOD(msg.method_and_flags);
@@ -29,6 +29,9 @@ void KeyboardServerBase::process_request(const IpcMessage& msg) {
     resp.error_code = IPC__METHOD_NOT_KNOWN;
     break;
   }
+
+  oprintf("keyboard server replying to method: %d with has_key, code, flags %d %d %d\n", method, resp.values[0],
+          resp.values[1], resp.values[2]);
 
   ou_ipc_reply(resp);
 }

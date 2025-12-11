@@ -10,7 +10,15 @@
 struct GraphicsClient {
   Pid pid_;
 
+  GraphicsClient() : pid_(Pid(0)) {}
   GraphicsClient(Pid pid) : pid_(pid) {}
+
+  GraphicsClient& operator=(const GraphicsClient& other) {
+    pid_ = other.pid_;
+    return *this;
+  }
+
+  void set_pid(Pid pid) { pid_ = pid; }
 
   Result<GetFramebufferResult, ErrorCode> get_framebuffer();
   Result<bool, ErrorCode> flush();

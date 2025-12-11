@@ -12,7 +12,15 @@
 struct <%= it.service.name %>Client {
   Pid pid_;
 
+  <%= it.service.name %>Client() : pid_(Pid(0)) {}
   <%= it.service.name %>Client(Pid pid) : pid_(pid) {}
+
+  <%= it.service.name %>Client& operator=(const <%= it.service.name %>Client& other) {
+    pid_ = other.pid_;
+    return *this;
+  }
+
+  void set_pid(Pid pid) { pid_ = pid; }
 
 <% it.service.methods.forEach(method => { %>
   Result<<%~ it.getReturnType(method) %>, ErrorCode> <%~ method.name %>(<%~ it.formatArgs(method.args) %>);

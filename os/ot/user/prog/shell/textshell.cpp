@@ -45,6 +45,8 @@ void shell_main() {
   // Register IPC method ID variables
   register_ipc_method_vars(i);
 
+  i.set_var("features_ui", "0");
+
   // Execute shellrc startup script
 #include "shellrc.hpp"
 

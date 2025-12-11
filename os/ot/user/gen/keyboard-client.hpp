@@ -8,7 +8,15 @@
 struct KeyboardClient {
   Pid pid_;
 
+  KeyboardClient() : pid_(Pid(0)) {}
   KeyboardClient(Pid pid) : pid_(pid) {}
+
+  KeyboardClient& operator=(const KeyboardClient& other) {
+    pid_ = other.pid_;
+    return *this;
+  }
+
+  void set_pid(Pid pid) { pid_ = pid; }
 
   Result<PollKeyResult, ErrorCode> poll_key();
 

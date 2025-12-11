@@ -10,7 +10,15 @@
 struct FilesystemClient {
   Pid pid_;
 
+  FilesystemClient() : pid_(Pid(0)) {}
   FilesystemClient(Pid pid) : pid_(pid) {}
+
+  FilesystemClient& operator=(const FilesystemClient& other) {
+    pid_ = other.pid_;
+    return *this;
+  }
+
+  void set_pid(Pid pid) { pid_ = pid; }
 
   Result<FileHandleId, ErrorCode> open(const ou::string& path, uintptr_t flags);
   Result<uintptr_t, ErrorCode> read(FileHandleId handle, uintptr_t offset, uintptr_t length);

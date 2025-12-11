@@ -7,6 +7,7 @@
 #include "ot/lib/messages.hpp"
 #include "ot/lib/mpack/mpack-reader.hpp"
 #include "ot/user/gen/filesystem-client.hpp"
+#include "ot/user/prog/shell/shell.hpp"
 #include "ot/user/user.hpp"
 
 namespace shell {
@@ -266,6 +267,16 @@ tcl::Status cmd_run(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPri
   return tcl::S_OK;
 }
 
+tcl::Status cmd_quit(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  ((ShellStorage *)local_storage)->running = false;
+  return tcl::S_OK;
+}
+
+tcl::Status cmd_shutdown(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  ou_shutdown();
+  return tcl::S_OK; // Never reached
+}
+
 tcl::Status cmd_dir_ls(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
   if (!i.arity_check("dir/ls", argv, 1, 2)) {
     return tcl::S_ERR;
@@ -343,6 +354,10 @@ void register_shell_commands(tcl::Interp &i) {
   // Process spawning
   i.register_command("run", cmd_run, nullptr,
                      "[run program:string args...] => pid:int - Spawn a new process and return its PID");
+
+  // Shell control commands
+  i.register_command("quit", cmd_quit, nullptr, "[quit] - Quit the shell");
+  i.register_command("shutdown", cmd_shutdown, nullptr, "[shutdown] - Shutdown all processes and exit the kernel");
 }
 
 } // namespace shell

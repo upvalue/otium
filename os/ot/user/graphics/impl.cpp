@@ -375,17 +375,14 @@ struct GraphicsServer : GraphicsServerBase {
   }
 
   Result<uintptr_t, ErrorCode> handle_handle_key(uintptr_t code, uintptr_t flags) override {
-    l.log("handle_key: code=%d flags=0x%x", (int)code, (int)flags);
 
     // Only handle key press events
     if (!(flags & KEY_FLAG_PRESSED)) {
-      l.log("handle_key: not pressed, returning 0");
       return Result<uintptr_t, ErrorCode>::ok(0);
     }
 
     // Check for Alt+1-9 to switch apps
     if (flags & KEY_FLAG_ALT) {
-      l.log("handle_key: ALT is held");
       if (code >= KEY_1 && code <= KEY_9) {
         uint8_t target_app_id = (uint8_t)(code - KEY_1 + 1);
         int slot = find_app_by_id(target_app_id);
@@ -397,7 +394,6 @@ struct GraphicsServer : GraphicsServerBase {
       }
     }
 
-    l.log("handle_key: returning 0 (not consumed)");
     return Result<uintptr_t, ErrorCode>::ok(0); // not consumed
   }
 };

@@ -108,7 +108,7 @@ void VirtioKeyboardBackend::process_raw_event(const virtio_input_event *ev, KeyE
 bool VirtioKeyboardBackend::poll_key(KeyEvent *out_event) {
   // Check if any used buffers are available
   if (!eventq.has_used()) {
-    return false;  // No events available
+    return false; // No events available
   }
 
   // Get the used buffer

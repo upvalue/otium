@@ -3,13 +3,14 @@
 #include "ot/lib/frame-manager.hpp"
 #include "ot/lib/keyboard-utils.hpp"
 #include "ot/lib/mpack/mpack-utils.hpp"
+#include "ot/lib/string-view.hpp"
 #include "ot/user/gen/graphics-client.hpp"
 #include "ot/user/gen/keyboard-client.hpp"
 #include "ot/user/gen/tcl-vars.hpp"
 #include "ot/user/keyboard/backend.hpp"
-#include "ot/user/local-storage.hpp"
 #include "ot/user/prog.h"
 #include "ot/user/prog/shell/commands.hpp"
+#include "ot/user/prog/shell/shell.hpp"
 #include "ot/user/tcl.hpp"
 #include "ot/user/user.hpp"
 
@@ -23,10 +24,17 @@ static const int TEXT_START_X = 15;
 static const int TEXT_START_Y = 80;
 static const int LINE_SPACING = 20;
 
+using ou::string_view;
+using tcl::Interp;
+using tcl::Status;
+
 // UI Shell storage
-struct UIShellStorage : public LocalStorage {
+struct UIShellStorage : public shell::ShellStorage {
   char input_buffer[MAX_LINE_LENGTH];
   size_t input_pos;
+  GraphicsClient gfxc;
+  KeyboardClient kbdc;
+  app::Framework *app;
 
   // Circular buffer for output lines (dynamically allocated)
   char **output_lines; // Array of pointers to lines
@@ -34,7 +42,6 @@ struct UIShellStorage : public LocalStorage {
   int output_count;    // Number of lines in buffer
   int scroll_offset;   // Lines scrolled from bottom (0 = at bottom)
 
-  bool running;
   bool cursor_visible;
   int cursor_blink_counter;
 
@@ -52,7 +59,6 @@ struct UIShellStorage : public LocalStorage {
     output_start = 0;
     output_count = 0;
     scroll_offset = 0;
-    running = true;
     cursor_visible = true;
     cursor_blink_counter = 0;
     memset(input_buffer, 0, MAX_LINE_LENGTH);
@@ -192,6 +198,153 @@ void handle_key_event(UIShellStorage *s, tcl::Interp &i, uint16_t code, uint8_t 
   }
 }
 
+// Basic graphics commands
+
+Status cmd_gfx_rectangle(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("gfx/rectangle", argv, 6, 6)) {
+    return tcl::S_ERR;
+  }
+
+  UIShellStorage *s = (UIShellStorage *)local_storage;
+
+  BoolResult<int> color_result = parse_int(argv[1].c_str());
+  if (color_result.is_err()) {
+    i.result = "Invalid color";
+    return tcl::S_ERR;
+  }
+  int color = color_result.value();
+
+  BoolResult<int> x_result = parse_int(argv[2].c_str());
+  if (x_result.is_err()) {
+    i.result = "Invalid x";
+    return tcl::S_ERR;
+  }
+  int x = x_result.value();
+
+  BoolResult<int> y_result = parse_int(argv[3].c_str());
+  if (y_result.is_err()) {
+    i.result = "Invalid y";
+    return tcl::S_ERR;
+  }
+  int y = y_result.value();
+
+  BoolResult<int> width_result = parse_int(argv[4].c_str());
+  if (width_result.is_err()) {
+    i.result = "Invalid width";
+    return tcl::S_ERR;
+  }
+  int width = width_result.value();
+
+  BoolResult<int> height_result = parse_int(argv[5].c_str());
+  if (height_result.is_err()) {
+    i.result = "Invalid height";
+    return tcl::S_ERR;
+  }
+  int height = height_result.value();
+
+  s->app->fill_rect(x, y, width, height, color);
+
+  return tcl::S_OK;
+}
+
+tcl::Status cmd_gfx_loop(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("gfx/loop", argv, 3, 3)) {
+    return tcl::S_ERR;
+  }
+
+  UIShellStorage *s = (UIShellStorage *)local_storage;
+
+  auto fb_result = s->gfxc.get_framebuffer();
+  if (fb_result.is_err()) {
+    oprintf("gfx/loop: failed to get framebuffer: %d\n", fb_result.error());
+    return tcl::S_ERR;
+  }
+  auto fb_info = fb_result.value();
+  uint32_t *fb = (uint32_t *)fb_info.fb_ptr;
+  int width = (int)fb_info.width;
+  int height = (int)fb_info.height;
+
+  app::Framework gfx(fb, width, height);
+
+  // Framerate
+  BoolResult<int> framerate_result = parse_int(argv[1].c_str());
+  if (framerate_result.is_err()) {
+    i.result = "Invalid framerate";
+    return tcl::S_ERR;
+  }
+
+  graphics::FrameManager fm(framerate_result.value());
+  oprintf("gfx/loop: starting loop at %d FPS\n", framerate_result.value());
+  while (s->running) {
+    auto should = s->gfxc.should_render();
+    if (should.is_err()) {
+      oprintf("gfx/loop: should_render error: %d\n", should.error());
+      return tcl::S_ERR;
+    }
+    if (should.value() == 0) {
+      ou_yield();
+      continue;
+    }
+
+    if (fm.begin_frame()) {
+      gfx.clear(0xff0000ff);
+
+      Status s = i.eval(string_view(argv[2]));
+      if (s != tcl::S_OK)
+        break;
+
+      ou_yield();
+
+      fm.end_frame();
+    }
+  }
+
+  return tcl::S_OK;
+}
+
+Status cmd_gfx_loop_iter(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("gfx/loop-iter", argv, 1, 2)) {
+    return tcl::S_ERR;
+  }
+
+  // oprintf("gfx/loop iter-called\n");
+  UIShellStorage *s = (UIShellStorage *)local_storage;
+
+  // oprintf("kbdc pid %d\n", s->kbdc.pid_);
+  auto key_result = s->kbdc.poll_key();
+  if (key_result.is_err()) {
+    oprintf("gfx/loop-iter: poll_key error: %d\n", key_result.error());
+    return tcl::S_ERR;
+  }
+  auto key_data = key_result.value();
+  if (key_data.has_key) {
+    return tcl::S_OK;
+  }
+
+  // oprintf("checking key %d %d\n", key_data.code, key_data.flags);
+  bool consumed = s->app->pass_key_to_server(s->gfxc, key_data.code, key_data.flags);
+  // oprintf("consumed %d\n", consumed);
+  /*
+  if (!consumed) {
+    handle_key_event(s, i, key_data.code, key_data.flags);
+  }*/
+
+  if (key_data.code != 0) {
+    oprintf("non-zero key code %d\n", key_data.code);
+  }
+
+  // Alt-Q to quit
+  if (key_data.flags & KEY_FLAG_ALT) {
+    if (key_data.code == KEY_Q) {
+      s->running = false;
+    }
+  }
+
+  // s->running = false;
+
+  return tcl::S_OK;
+}
+
 void uishell_main() {
   void *storage_page = ou_get_storage().as_ptr();
   UIShellStorage *s = new (storage_page) UIShellStorage();
@@ -215,11 +368,11 @@ void uishell_main() {
     ou_exit();
   }
 
-  GraphicsClient gfx_client(gfx_pid);
-  KeyboardClient kbd_client(kbd_pid);
+  s->gfxc.set_pid(gfx_pid);
+  s->kbdc.set_pid(kbd_pid);
 
   // Register with graphics server as an app
-  auto reg_result = gfx_client.register_app("uishell");
+  auto reg_result = s->gfxc.register_app("uishell");
   if (reg_result.is_err()) {
     oprintf("UISHELL: Failed to register with graphics driver: %d\n", reg_result.error());
     ou_exit();
@@ -227,7 +380,7 @@ void uishell_main() {
   oprintf("UISHELL: Registered as app %lu\n", reg_result.value());
 
   // Get framebuffer info
-  auto fb_result = gfx_client.get_framebuffer();
+  auto fb_result = s->gfxc.get_framebuffer();
   if (fb_result.is_err()) {
     oprintf("UISHELL: Failed to get framebuffer: %d\n", fb_result.error());
     ou_exit();
@@ -241,7 +394,10 @@ void uishell_main() {
   oprintf("UISHELL: Framebuffer %dx%d\n", width, height);
 
   // Create graphics framework
-  app::Framework gfx(fb, width, height);
+  app::Framework *gfxh = new (ou_malloc(sizeof(app::Framework))) app::Framework(fb, width, height);
+  app::Framework &gfx = *gfxh;
+
+  s->app = gfxh;
 
   // Initialize TTF font
   auto ttf_result = gfx.init_ttf();
@@ -256,30 +412,17 @@ void uishell_main() {
 
   // Initialize TCL interpreter
   tcl::Interp i;
+
   tcl::register_core_commands(i);
   i.register_mpack_functions(mp_page, OT_PAGE_SIZE);
   register_ipc_method_vars(i);
+
+  i.set_var("features_ui", "1");
 
   // Register shared shell commands
   shell::register_shell_commands(i);
 
   // Register UI shell-specific commands
-  i.register_command(
-      "quit",
-      [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
-        ((UIShellStorage *)local_storage)->running = false;
-        return tcl::S_OK;
-      },
-      nullptr, "[quit] - Quit the shell");
-
-  i.register_command(
-      "shutdown",
-      [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
-        ou_shutdown();
-        return tcl::S_OK;
-      },
-      nullptr, "[shutdown] - Shutdown all processes and exit the kernel");
-
   i.register_command(
       "clear",
       [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
@@ -300,6 +443,15 @@ void uishell_main() {
       },
       nullptr, "[puts string] - Print string to screen");
 
+  i.register_command("gfx/loop", cmd_gfx_loop, nullptr,
+                     "[gfx/loop framerate:int body:string] - Loop a body at a given framerate");
+
+  i.register_command("gfx/rect", cmd_gfx_rectangle, nullptr,
+                     "[gfx/rect color:int x:int y:int width:int height:int] - Draw a rectangle");
+
+  i.register_command("gfx/loop-iter", cmd_gfx_loop_iter, nullptr,
+                     "[gfx/loop-iter] - Should be called in gfx/loop body to properly yield to operating system");
+
   // Execute shellrc startup script
 #include "shellrc.hpp"
   tcl::Status shellrc_status = i.eval(tcl::string_view(shellrc_content));
@@ -318,7 +470,7 @@ void uishell_main() {
 
   while (s->running) {
     // Check if we should render (are we the active app?)
-    auto should = gfx_client.should_render();
+    auto should = s->gfxc.should_render();
     if (should.is_err()) {
       oprintf("UISHELL: should_render returned error: %d\n", should.error());
       ou_exit();
@@ -331,16 +483,16 @@ void uishell_main() {
 
     if (fm.begin_frame()) {
       // Poll keyboard
-      auto key_result = kbd_client.poll_key();
+      auto key_result = s->kbdc.poll_key();
       if (key_result.is_err()) {
         oprintf("UISHELL: poll_key error: %d\n", key_result.error());
       } else {
         auto key_data = key_result.value();
         if (key_data.has_key) {
-          oprintf("UISHELL: got key code=%d flags=%d\n", (int)key_data.code, (int)key_data.flags);
+          // oprintf("UISHELL: got key code=%d flags=%d\n", (int)key_data.code, (int)key_data.flags);
           // Pass key to graphics server first for global hotkeys (Alt+1-9 app switching)
-          bool consumed = gfx.pass_key_to_server(gfx_client, key_data.code, key_data.flags);
-          oprintf("UISHELL: pass_key_to_server returned %d\n", consumed);
+          bool consumed = gfx.pass_key_to_server(s->gfxc, key_data.code, key_data.flags);
+          // oprintf("UISHELL: pass_key_to_server returned %d\n", consumed);
           if (!consumed) {
             // Key not consumed by server, handle locally
             handle_key_event(s, i, key_data.code, key_data.flags);
@@ -402,7 +554,7 @@ void uishell_main() {
       }
 
       // Flush to display
-      gfx_client.flush();
+      s->gfxc.flush();
       fm.end_frame();
     }
 
@@ -411,7 +563,7 @@ void uishell_main() {
   }
 
   // Unregister before exit
-  gfx_client.unregister_app();
+  s->gfxc.unregister_app();
 
   oprintf("UISHELL: Exiting\n");
   ou_exit();

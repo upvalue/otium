@@ -744,6 +744,25 @@ static Status cmd_lte(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   return S_OK;
 }
 
+static Status cmd_notn(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
+  if (!i.arity_check("!", argv, 2, 2)) {
+    return S_ERR;
+  }
+  if (!i.int_check("!", argv, 1)) {
+    return S_ERR;
+  }
+
+  BoolResult<int> res = parse_int(argv[1].c_str());
+  if (res.is_err()) {
+    return S_ERR;
+  }
+  int result = !res.value();
+  char buf[10];
+  snprintf(buf, sizeof(buf), "%d", result);
+  i.result = buf;
+  return S_OK;
+}
+
 static Status cmd_help(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (argv.size() == 1) {
     // List all commands with their docstrings
@@ -1223,6 +1242,7 @@ void register_core_commands(Interp &i) {
   i.register_command("<=", cmd_lte, nullptr,
                      "[<= a:int b:int] => bool - Test if a is less than or "
                      "equal to b (returns 1 or 0)");
+  i.register_command("!", cmd_notn, nullptr, "[! value] => bool - Test if value is false (returns 1 or 0)");
 
   // Help commands
   i.register_command("help", cmd_help, nullptr,

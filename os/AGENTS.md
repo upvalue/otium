@@ -91,7 +91,7 @@ Available options (see `meson_options.txt` for full list):
 
 Each platform has its own isolated build directory with platform-specific configuration:
 
-- `build-posix/` - Native tools (tcl-repl, tevl)
+- `build-posix/` - Native tools (tcl-repl, edit)
 - `build-riscv/` - RISC-V kernel (os.elf)
   - `build-riscv/ot/config.h` - Generated with `OT_GRAPHICS_BACKEND_VIRTIO`
   - `build-riscv/runtime-config.sh` - Runtime configuration for QEMU scripts
@@ -522,14 +522,14 @@ A POSIX-compatible standalone Tcl REPL can be built for testing on the host syst
 
 This uses the same Tcl core but with POSIX I/O and the bestline library for line editing.
 
-## TEVL Editor
+## Text Editor
 
-TEVL is a minimal vim-like text editor that runs as a standalone POSIX tool. It uses termbox2 for terminal rendering and has three modes: NORMAL, INSERT, and COMMAND (entered with `;`).
+The OS includes a minimal vim-like text editor that runs as a standalone POSIX tool. It uses termbox2 for terminal rendering and has three modes: NORMAL, INSERT, and COMMAND (entered with `;`).
 
 ```bash
 # Build and run
-meson compile -C build-posix tevl
-./build-posix/tevl <filename>
+meson compile -C build-posix edit
+./build-posix/edit <filename>
 ```
 
-See `agent-docs/editor.md` for detailed documentation including.
+See `agent-docs/edit.md` for detailed documentation.

@@ -17,6 +17,7 @@ struct GraphicsServerBase : ServerBase {
   virtual Result<bool, ErrorCode> handle_flush() = 0;
   virtual Result<uintptr_t, ErrorCode> handle_register_app(const StringView& name) = 0;
   virtual Result<uintptr_t, ErrorCode> handle_should_render() = 0;
+  virtual Result<bool, ErrorCode> handle_unregister_app() = 0;
 
   // Framework methods - handles dispatch
   void process_request(const IpcMessage& msg);

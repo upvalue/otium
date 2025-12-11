@@ -69,6 +69,11 @@ services:
             signed: false
         errors: [NOT_REGISTERED]
 
+      - name: unregister_app
+        args: []
+        returns: []
+        errors: [NOT_REGISTERED]
+
   - name: Filesystem
     methods:
       # File handle operations

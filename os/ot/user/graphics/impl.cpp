@@ -19,7 +19,7 @@
 static const int MAX_REGISTERED_APPS = 10;
 static const int TASKBAR_HEIGHT = 28;
 static const int TASKBAR_FONT_SIZE = 16;
-static const uint32_t TASKBAR_BG_COLOR = 0xFF1a1a2e;      // Dark blue-gray
+static const uint32_t TASKBAR_BG_COLOR = 0xFF1a1a2e;     // Dark blue-gray
 static const uint32_t TASKBAR_BORDER_COLOR = 0xFF2d2d44; // Lighter blue-gray border
 static const uint32_t TASKBAR_TEXT_COLOR = 0xFF888899;   // Muted blue-gray text
 static const uint32_t TASKBAR_ACTIVE_COLOR = 0xFFccccdd; // Bright text for active app
@@ -44,8 +44,8 @@ struct GraphicsServer : GraphicsServerBase {
 
   // Multi-app state
   RegisteredApp apps[MAX_REGISTERED_APPS];
-  int active_app_index;  // Index of most recently registered app (-1 if none)
-  uint8_t next_app_id;   // Next ID to assign
+  int active_app_index;   // Index of most recently registered app (-1 if none)
+  uint8_t next_app_id;    // Next ID to assign
   IpcMessage current_msg; // Current message being processed (for sender_pid access)
 
   GraphicsServer() : backend(nullptr), l("gfx"), fw(nullptr), active_app_index(-1), next_app_id(1) {
@@ -61,8 +61,7 @@ struct GraphicsServer : GraphicsServerBase {
 
     // Use placement new with static buffer to avoid heap allocation for Framework object
     static char fw_buffer[sizeof(app::Framework)] __attribute__((aligned(alignof(app::Framework))));
-    fw = new (fw_buffer)
-        app::Framework(backend->get_framebuffer(), backend->get_width(), backend->get_height());
+    fw = new (fw_buffer) app::Framework(backend->get_framebuffer(), backend->get_width(), backend->get_height());
 
     auto result = fw->init_ttf();
     if (result.is_err()) {
@@ -126,6 +125,11 @@ struct GraphicsServer : GraphicsServerBase {
       // If we lost the active app, make the last registered one active
       if (active_app_index == -1 && last_used_index >= 0) {
         active_app_index = last_used_index;
+      }
+
+      // If no apps remain, show idle screen
+      if (last_used_index < 0) {
+        render_idle_screen();
       }
     }
   }
@@ -198,6 +202,48 @@ struct GraphicsServer : GraphicsServerBase {
         }
       }
     }
+  }
+
+  // Count how many apps are currently registered
+  int count_active_apps() {
+    int count = 0;
+    for (int i = 0; i < MAX_REGISTERED_APPS; i++) {
+      if (apps[i].used) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  // Render idle screen when no apps are running
+  void render_idle_screen() {
+    if (!backend)
+      return;
+
+    uint32_t *fb = backend->get_framebuffer();
+    int width = backend->get_width();
+    int height = backend->get_height();
+
+    // Clear to dark background
+    for (int i = 0; i < width * height; i++) {
+      fb[i] = TASKBAR_BG_COLOR;
+    }
+
+    // Render centered "No apps running" message
+    if (fw && fw->ttf_available()) {
+      const char *msg = "No apps running";
+      auto measure = fw->measure_ttf_text(msg, 20);
+      if (measure.is_ok()) {
+        int text_x = (width - measure.value()) / 2;
+        int text_y = (height - TASKBAR_HEIGHT) / 2;
+        fw->draw_ttf_text(text_x, text_y, msg, 0xFF666666, 20);
+      }
+    }
+
+    // Render empty taskbar for consistent UI
+    render_taskbar();
+
+    backend->flush();
   }
 
   Result<GetFramebufferResult, ErrorCode> handle_get_framebuffer() override {
@@ -274,6 +320,44 @@ struct GraphicsServer : GraphicsServerBase {
     // Return 1 if this app is active, 0 otherwise
     uintptr_t active = (slot == active_app_index) ? 1 : 0;
     return Result<uintptr_t, ErrorCode>::ok(active);
+  }
+
+  Result<bool, ErrorCode> handle_unregister_app() override {
+    int slot = find_app_by_pid(sender_pid());
+    if (slot < 0) {
+      return Result<bool, ErrorCode>::err(GRAPHICS__NOT_REGISTERED);
+    }
+
+    l.log("Unregistering app: %s (pid=%lu)", apps[slot].name, apps[slot].pid.raw());
+    apps[slot].used = false;
+
+    // If this was the active app, clear it
+    if (active_app_index == slot) {
+      active_app_index = -1;
+    }
+
+    // Renumber remaining apps sequentially and find new active
+    uint8_t new_id = 1;
+    int last_used_index = -1;
+    for (int i = 0; i < MAX_REGISTERED_APPS; i++) {
+      if (apps[i].used) {
+        apps[i].app_id = new_id++;
+        last_used_index = i;
+      }
+    }
+    next_app_id = new_id;
+
+    // If we lost the active app, make the last registered one active
+    if (active_app_index == -1 && last_used_index >= 0) {
+      active_app_index = last_used_index;
+    }
+
+    // If no apps remain, show idle screen
+    if (count_active_apps() == 0) {
+      render_idle_screen();
+    }
+
+    return Result<bool, ErrorCode>::ok(true);
   }
 };
 

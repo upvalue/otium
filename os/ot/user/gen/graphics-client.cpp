@@ -70,6 +70,21 @@ Result<uintptr_t, ErrorCode> GraphicsClient::should_render() {
   return Result<uintptr_t, ErrorCode>::ok(resp.values[0]);
 }
 
+Result<bool, ErrorCode> GraphicsClient::unregister_app() {
+
+  IpcResponse resp = ou_ipc_send(
+    pid_,
+    0,
+    MethodIds::Graphics::UNREGISTER_APP,
+    0, 0, 0  );
+
+  if (resp.error_code != NONE) {
+    return Result<bool, ErrorCode>::err(resp.error_code);
+  }
+
+  return Result<bool, ErrorCode>::ok({});
+}
+
 
 Result<bool, ErrorCode> GraphicsClient::shutdown() {
   IpcResponse resp = ou_ipc_send(

@@ -35,27 +35,29 @@ inline void register_ipc_method_vars(tcl::Interp &i) {
   i.set_var("GRAPHICS_REGISTER_APP", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1600);
   i.set_var("GRAPHICS_SHOULD_RENDER", buf);
-  // Filesystem service methods
   snprintf(buf, sizeof(buf), "%d", 0x1700);
-  i.set_var("FILESYSTEM_OPEN", buf);
+  i.set_var("GRAPHICS_UNREGISTER_APP", buf);
+  // Filesystem service methods
   snprintf(buf, sizeof(buf), "%d", 0x1800);
-  i.set_var("FILESYSTEM_READ", buf);
+  i.set_var("FILESYSTEM_OPEN", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1900);
-  i.set_var("FILESYSTEM_WRITE", buf);
+  i.set_var("FILESYSTEM_READ", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1a00);
-  i.set_var("FILESYSTEM_CLOSE", buf);
+  i.set_var("FILESYSTEM_WRITE", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1b00);
-  i.set_var("FILESYSTEM_CREATE_FILE", buf);
+  i.set_var("FILESYSTEM_CLOSE", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1c00);
-  i.set_var("FILESYSTEM_CREATE_DIR", buf);
+  i.set_var("FILESYSTEM_CREATE_FILE", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1d00);
-  i.set_var("FILESYSTEM_DELETE_FILE", buf);
+  i.set_var("FILESYSTEM_CREATE_DIR", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1e00);
-  i.set_var("FILESYSTEM_DELETE_DIR", buf);
+  i.set_var("FILESYSTEM_DELETE_FILE", buf);
   snprintf(buf, sizeof(buf), "%d", 0x1f00);
+  i.set_var("FILESYSTEM_DELETE_DIR", buf);
+  snprintf(buf, sizeof(buf), "%d", 0x2000);
   i.set_var("FILESYSTEM_LIST_DIR", buf);
   // Keyboard service methods
-  snprintf(buf, sizeof(buf), "%d", 0x2000);
+  snprintf(buf, sizeof(buf), "%d", 0x2100);
   i.set_var("KEYBOARD_POLL_KEY", buf);
 
   // Error codes

@@ -184,15 +184,15 @@ if is_posix
     install: true,
   )
 
-  # TEVL text editor executable
-  tevl_sources = [
+  # Text editor executable
+  edit_sources = [
     'ot/user/string.cpp',
     'ot/lib/file.cpp',
-    'ot/user/tevl.cpp',
+    'ot/user/edit.cpp',
     'ot/user/tcl.cpp',
     'ot/lib/mpack/mpack-utils.cpp',
     'ot/core/platform/posix-file.cpp',
-    'ot/core/platform/tevl-termbox.cpp',
+    'ot/core/platform/edit-termbox.cpp',
     'ot/core/platform/posix-std.cpp',
     'ot/lib/std.cpp',
   ]
@@ -200,8 +200,8 @@ if is_posix
   # Include vendor directory for termbox2
   vendor_inc = include_directories('vendor')
 
-  executable('tevl',
-    tevl_sources,
+  executable('edit',
+    edit_sources,
     cpp_args: common_cpp_args + ['-fsanitize=address', '-g3'],
     link_args: ['-fsanitize=address'],
     include_directories: [inc, vendor_inc],
@@ -232,9 +232,9 @@ if is_posix
     'ot/lib/vector-test.cpp',
     'ot/user/tcl.cpp',
     'ot/user/tcl-test.cpp',
-    'ot/user/tevl.cpp',
-    'ot/user/tevl-test.cpp',
-    'ot/core/platform/tevl-test.cpp',
+    'ot/user/edit.cpp',
+    'ot/user/edit-test.cpp',
+    'ot/core/platform/edit-test.cpp',
     'ot/core/platform/posix-file.cpp',
     'ot/lib/file.cpp',
   ]
@@ -323,7 +323,7 @@ if is_riscv or is_wasm
     'ot/user/prog-spacedemo.cpp',
     'ot/user/prog-typedemo.cpp',
     'ot/user/prog/editor/uieditor.cpp',
-    'ot/user/tevl.cpp',
+    'ot/user/edit.cpp',
     'ot/user/tcl.cpp',
     'ot/user/string.cpp',
     'ot/user/memory-allocator.cpp',

@@ -16,6 +16,7 @@ struct GraphicsClient {
   Result<bool, ErrorCode> flush();
   Result<uintptr_t, ErrorCode> register_app(const char* name);
   Result<uintptr_t, ErrorCode> should_render();
+  Result<bool, ErrorCode> unregister_app();
 
   // Universal shutdown method (sends IPC_METHOD_SHUTDOWN)
   Result<bool, ErrorCode> shutdown();

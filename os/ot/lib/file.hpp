@@ -37,6 +37,7 @@ struct File {
 #else
   Pid fs_pid;            // Filesystem server PID
   uintptr_t handle;      // IPC file handle (FileHandleId)
+  uintptr_t write_offset_; // Current write position
 #endif
 
   ErrorCode open();

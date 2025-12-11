@@ -1,9 +1,9 @@
-// tevl with termbox2 terminal backend
+// Text editor with termbox2 terminal backend
 #define TB_IMPL
 #include "vendor/termbox2/termbox2.h"
 
+#include "ot/user/edit.hpp"
 #include "ot/user/tcl.hpp"
-#include "ot/user/tevl.hpp"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -16,14 +16,14 @@ void *ou_malloc(size_t size) { return malloc(size); }
 void ou_free(void *ptr) { free(ptr); }
 void *ou_realloc(void *ptr, size_t size) { return realloc(ptr, size); }
 
-namespace tevl {
+namespace edit {
 
 struct TermboxBackend : Backend {
   int debug_fd;
 
   TermboxBackend() : debug_fd(-1) {
     // Open debug file in append mode
-    debug_fd = open("/tmp/tevl-debug.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
+    debug_fd = open("/tmp/edit-debug.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
   }
 
   ~TermboxBackend() {
@@ -212,19 +212,19 @@ struct TermboxBackend : Backend {
   }
 };
 
-} // namespace tevl
+} // namespace edit
 
 int main(int argc, char *argv[]) {
-  tevl::Editor editor;
+  edit::Editor editor;
   tcl::Interp interp;
-  tevl::TermboxBackend termbox_backend;
+  edit::TermboxBackend termbox_backend;
 
   ou::string *file_path = nullptr;
   if (argc > 1) {
     file_path = new ou::string(argv[1]);
   }
 
-  tevl::tevl_main(&termbox_backend, &editor, &interp, file_path);
+  edit::edit_run(&termbox_backend, &editor, &interp, file_path);
 
   if (file_path) {
     delete file_path;

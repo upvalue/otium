@@ -58,6 +58,15 @@ void GraphicsServerBase::process_request(const IpcMessage& msg) {
     }
     break;
   }
+  case MethodIds::Graphics::UNREGISTER_APP: {
+    auto result = handle_unregister_app();
+    if (result.is_err()) {
+      resp.error_code = result.error();
+    } else {
+      // No return values
+    }
+    break;
+  }
   default:
     resp.error_code = IPC__METHOD_NOT_KNOWN;
     break;

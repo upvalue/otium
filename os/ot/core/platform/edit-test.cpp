@@ -1,10 +1,10 @@
-// tevl-test.cpp - Test backend for TEVL editor
+// edit-test.cpp - Test backend for text editor
 // Allows scripted key input for automated testing without a real terminal
 
+#include "ot/user/edit.hpp"
 #include "ot/user/tcl.hpp"
-#include "ot/user/tevl.hpp"
 
-namespace tevl {
+namespace edit {
 
 // Global editor instance for tests
 static Editor test_editor;
@@ -38,7 +38,7 @@ struct TestBackend : Backend {
   void debug_print(const ou::string &msg) override {}
 };
 
-ou::vector<ou::string> tevl_test_run(const Key *keys, size_t count, const ou::vector<ou::string> *initial_lines) {
+ou::vector<ou::string> edit_test_run(const Key *keys, size_t count, const ou::vector<ou::string> *initial_lines) {
   // Reset editor state
   test_editor.row_offset = 0;
   test_editor.col_offset = 0;
@@ -67,10 +67,10 @@ ou::vector<ou::string> tevl_test_run(const Key *keys, size_t count, const ou::ve
 
   // Create and run with test backend
   TestBackend test_backend(keys, count, &test_editor);
-  tevl_main(&test_backend, &test_editor, nullptr, nullptr);
+  edit_run(&test_backend, &test_editor, nullptr, nullptr);
 
   // Return the final file contents by moving
   return static_cast<ou::vector<ou::string> &&>(test_editor.file_lines);
 }
 
-} // namespace tevl
+} // namespace edit

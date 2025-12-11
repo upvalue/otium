@@ -1,19 +1,19 @@
-# TEVL Text Editor
+# Text Editor
 
-TEVL is a minimal vim-like text editor for the Otium OS. It runs as a standalone POSIX tool and uses termbox2 for terminal rendering.
+A minimal vim-like text editor for the Otium OS. It runs as a standalone POSIX tool and uses termbox2 for terminal rendering.
 
 ## Architecture
 
 ```
 ┌─────────────────────┐
-│   tevl_main()       │  Core editor logic (platform-agnostic)
-│   ot/user/tevl.cpp  │
+│   edit_run()        │  Core editor logic (platform-agnostic)
+│   ot/user/edit.cpp  │
 └─────────────────────┘
           │
           ▼
 ┌─────────────────────┐
 │   Backend Interface │  Abstract terminal interface
-│   ot/user/tevl.hpp  │
+│   ot/user/edit.hpp  │
 └─────────────────────┘
           │
     ┌─────┴─────┐
@@ -28,12 +28,12 @@ TEVL is a minimal vim-like text editor for the Otium OS. It runs as a standalone
 
 | Backend | File | Purpose |
 |---------|------|---------|
-| Termbox | `ot/core/platform/tevl-termbox.cpp` | Real terminal via termbox2 library |
-| Test | `ot/core/platform/tevl-test.cpp` | Scripted input for unit tests |
+| Termbox | `ot/core/platform/edit-termbox.cpp` | Real terminal via termbox2 library |
+| Test | `ot/core/platform/edit-test.cpp` | Scripted input for unit tests |
 
 ## Editor Modes
 
-TEVL has three modes, similar to vim:
+The editor has three modes, similar to vim:
 
 | Mode | Status Line | Description |
 |------|-------------|-------------|
@@ -95,20 +95,20 @@ All standard Tcl commands (`set`, `if`, `while`, `proc`, etc.) are also availabl
 ## Building
 
 ```bash
-# Build TEVL
-meson compile -C build-posix tevl
+# Build the editor
+meson compile -C build-posix edit
 
 # Run
-./build-posix/tevl <filename>
+./build-posix/edit <filename>
 ```
 
 ## Testing
 
-TEVL has a test backend that accepts scripted key sequences:
+The editor has a test backend that accepts scripted key sequences:
 
 ```cpp
-#include "ot/user/tevl.hpp"
-using namespace tevl;
+#include "ot/user/edit.hpp"
+using namespace edit;
 
 // Create key sequence
 Key script[] = {
@@ -118,7 +118,7 @@ Key script[] = {
 };
 
 // Run and get final buffer contents
-auto result = tevl_test_run(script, sizeof(script)/sizeof(script[0]));
+auto result = edit_test_run(script, sizeof(script)/sizeof(script[0]));
 CHECK(result[0] == "Hi");
 ```
 
@@ -130,18 +130,18 @@ Helper functions for building key sequences:
 
 Run tests:
 ```bash
-./build-posix/unit-test --test-case="tevl*"
+./build-posix/unit-test --test-case="edit*"
 ```
 
 ## Source Files
 
 | File | Purpose |
 |------|---------|
-| `ot/user/tevl.hpp` | Editor interface, Key struct, Backend class |
-| `ot/user/tevl.cpp` | Core editor logic |
-| `ot/core/platform/tevl-termbox.cpp` | Termbox2 terminal backend + main() |
-| `ot/core/platform/tevl-test.cpp` | Test backend + `tevl_test_run()` |
-| `ot/user/tevl-test.cpp` | Unit tests |
+| `ot/user/edit.hpp` | Editor interface, Key struct, Backend class |
+| `ot/user/edit.cpp` | Core editor logic |
+| `ot/core/platform/edit-termbox.cpp` | Termbox2 terminal backend + main() |
+| `ot/core/platform/edit-test.cpp` | Test backend + `edit_test_run()` |
+| `ot/user/edit-test.cpp` | Unit tests |
 | `vendor/termbox2/termbox2.h` | Termbox2 library (single header) |
 
 ## Keybinding Architecture

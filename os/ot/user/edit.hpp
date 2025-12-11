@@ -1,6 +1,6 @@
-// tevl.hpp - TEVL text editor interface
-#ifndef OT_USER_TEVL_HPP
-#define OT_USER_TEVL_HPP
+// edit.hpp - Text editor interface
+#ifndef OT_USER_EDIT_HPP
+#define OT_USER_EDIT_HPP
 
 #include "ot/common.h"
 #include "ot/lib/result.hpp"
@@ -13,7 +13,7 @@ namespace tcl {
 struct Interp;
 }
 
-namespace tevl {
+namespace edit {
 
 // Forward declarations
 struct Backend;
@@ -35,9 +35,8 @@ enum class Operator {
 
 struct Editor {
   Editor()
-      : row_offset(0), col_offset(0), cx(0), cy(0), rx(0), dirty(0), last_message_time(0),
-        mode(EditorMode::NORMAL), pending_operator(Operator::NONE), be(nullptr), interp(nullptr),
-        running(true) {}
+      : row_offset(0), col_offset(0), cx(0), cy(0), rx(0), dirty(0), last_message_time(0), mode(EditorMode::NORMAL),
+        pending_operator(Operator::NONE), be(nullptr), interp(nullptr), running(true) {}
 
   intptr_t row_offset, col_offset;
 
@@ -64,7 +63,7 @@ struct Editor {
   EditorMode mode;
   Operator pending_operator; // Set when waiting for motion (e.g., after 'd')
 
-  // Runtime state (set by tevl_main)
+  // Runtime state (set by edit_main)
   Backend *be;
   tcl::Interp *interp;
   bool running;
@@ -102,8 +101,7 @@ struct Editor {
   void message_clear();
   void generate_status_line();
   void delete_line(intptr_t line);
-  void apply_operator(Operator op, intptr_t start_x, intptr_t start_y, intptr_t end_x,
-                      intptr_t end_y);
+  void apply_operator(Operator op, intptr_t start_x, intptr_t start_y, intptr_t end_x, intptr_t end_y);
   intptr_t cx_to_rx(intptr_t cx);
 };
 
@@ -241,12 +239,12 @@ struct Backend {
   virtual void yield() {}
 };
 
-void tevl_main(Backend *backend, Editor *editor, tcl::Interp *interp, ou::string *file_path);
+void edit_run(Backend *backend, Editor *editor, tcl::Interp *interp, ou::string *file_path);
 
 // Test helper - runs editor with scripted keys, returns final file contents
-ou::vector<ou::string> tevl_test_run(const Key *keys, size_t count,
+ou::vector<ou::string> edit_test_run(const Key *keys, size_t count,
                                      const ou::vector<ou::string> *initial_lines = nullptr);
 
-} // namespace tevl
+} // namespace edit
 
 #endif

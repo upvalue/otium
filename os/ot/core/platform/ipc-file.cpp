@@ -11,7 +11,7 @@ namespace ou {
 // Static cache for filesystem server PID
 static Pid g_fs_pid = PID_NONE;
 
-File::File(const char *path, FileMode mode) : path_(path), mode_(mode), opened(false), fs_pid(PID_NONE), handle(0) {}
+File::File(const char *path, FileMode mode) : path_(path), mode_(mode), opened(false), fs_pid(PID_NONE), handle(0), write_offset_(0) {}
 
 File::~File() {
   if (opened) {
@@ -106,10 +106,13 @@ ErrorCode File::write(const ou::string &data) {
   }
 
   FilesystemClient client(fs_pid);
-  auto result = client.write(FileHandleId(handle), 0, vec);
+  auto result = client.write(FileHandleId(handle), write_offset_, vec);
   if (result.is_err()) {
     return result.error();
   }
+
+  // Advance write position
+  write_offset_ += result.value();
 
   return NONE;
 }

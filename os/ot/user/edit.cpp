@@ -1,21 +1,21 @@
-// tevl.cpp - TEVL text editor core implementation
+// edit.cpp - Text editor core implementation
 
 #include <stdio.h>
 
 #include "ot/common.h"
+#include "ot/lib/error-codes.hpp"
 #include "ot/lib/file.hpp"
 #include "ot/lib/result.hpp"
-#include "ot/lib/error-codes.hpp"
+#include "ot/user/edit.hpp"
 #include "ot/user/string.hpp"
 #include "ot/user/tcl.hpp"
-#include "ot/user/tevl.hpp"
 #include "ot/user/user.hpp"
 
 static const char *default_error_msg = "no error message set";
 static int TAB_SIZE = 4;
 static int MESSAGE_TIMEOUT_MS = 3000;
 
-using namespace tevl;
+using namespace edit;
 using namespace ou;
 
 // Default keybinding table
@@ -490,29 +490,35 @@ static tcl::Status tcl_command_write(tcl::Interp &interp, tcl::vector<tcl::strin
     return tcl::S_ERR;
   }
 
+  oprintf("WRITE: %zu lines to write\n", e.file_lines.size());
   for (size_t i = 0; i < e.file_lines.size(); i++) {
+    oprintf("WRITE: line %zu: len=%zu content=\"%s\"\n", i, e.file_lines[i].length(), e.file_lines[i].c_str());
     err = file.write(e.file_lines[i]);
+    oprintf("WRITE: write result=%d\n", (int)err);
     if (err != ErrorCode::NONE) {
       interp.result = "failed to write line";
       return tcl::S_ERR;
     }
     if (i < e.file_lines.size() - 1) {
+      oprintf("WRITE: writing newline\n");
       err = file.write("\n");
+      oprintf("WRITE: newline result=%d\n", (int)err);
       if (err != ErrorCode::NONE) {
         interp.result = "failed to write newline";
         return tcl::S_ERR;
       }
     }
   }
+  oprintf("WRITE: done\n");
 
   e.dirty = 0;
   e.message_set("file written");
   return tcl::S_OK;
 }
 
-namespace tevl {
+namespace edit {
 
-void tevl_main(Backend *be_, Editor *editor, tcl::Interp *interp, ou::string *file_path) {
+void edit_run(Backend *be_, Editor *editor, tcl::Interp *interp, ou::string *file_path) {
   // Set up editor's runtime pointers
   editor->be = be_;
   editor->interp = interp;
@@ -634,4 +640,4 @@ void tevl_main(Backend *be_, Editor *editor, tcl::Interp *interp, ou::string *fi
   return;
 }
 
-} // namespace tevl
+} // namespace edit

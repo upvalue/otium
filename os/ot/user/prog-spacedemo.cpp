@@ -1,6 +1,6 @@
 // prog-spacedemo.cpp - DOS Space Demo port
-#include "ot/lib/frame-manager.hpp"
 #include "ot/lib/app-framework.hpp"
+#include "ot/lib/frame-manager.hpp"
 #include "ot/lib/math.hpp"
 #include "ot/lib/messages.hpp"
 #include "ot/user/gen/graphics-client.hpp"
@@ -409,6 +409,14 @@ void spacedemo_main() {
 
   GraphicsClient client(gfx_pid);
 
+  // Register with graphics driver
+  auto reg_result = client.register_app("spacedemo");
+  if (reg_result.is_err()) {
+    oprintf("SPACEDEMO: Failed to register with graphics driver: %d\n", reg_result.error());
+    ou_exit();
+  }
+  oprintf("SPACEDEMO: Registered as app %lu\n", reg_result.value());
+
   // Get framebuffer info
   auto fb_result = client.get_framebuffer();
   if (fb_result.is_err()) {
@@ -470,6 +478,14 @@ void spacedemo_main() {
   graphics::FrameManager fm(60);
 
   while (true) {
+    // Check if we should render (are we the active app?)
+    auto should = client.should_render();
+    if (should.is_err() || should.value() == 0) {
+      // Not active, just yield
+      ou_yield();
+      continue;
+    }
+
     if (fm.begin_frame()) {
       // Clear entire screen to black
       gfx.clear(COLOR_BLACK);

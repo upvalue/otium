@@ -3,6 +3,7 @@
 #include "ot/lib/string-view.hpp"
 #include "ot/user/gen/graphics-server.hpp"
 #include "ot/user/graphics/backend.hpp"
+#include "ot/user/keyboard/backend.hpp"
 #include "ot/user/local-storage.hpp"
 #include "ot/user/user.hpp"
 
@@ -16,7 +17,7 @@
 #include "ot/user/graphics/backend-wasm.hpp"
 #endif
 
-static const int MAX_REGISTERED_APPS = 10;
+static const int MAX_REGISTERED_APPS = 9;
 static const int TASKBAR_HEIGHT = 28;
 static const int TASKBAR_FONT_SIZE = 16;
 static const uint32_t TASKBAR_BG_COLOR = 0xFF1a1a2e;     // Dark blue-gray
@@ -87,6 +88,16 @@ struct GraphicsServer : GraphicsServerBase {
   int find_app_by_pid(Pid pid) {
     for (int i = 0; i < MAX_REGISTERED_APPS; i++) {
       if (apps[i].used && apps[i].pid == pid) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  // Find app slot by app_id (1-based), returns -1 if not found
+  int find_app_by_id(uint8_t app_id) {
+    for (int i = 0; i < MAX_REGISTERED_APPS; i++) {
+      if (apps[i].used && apps[i].app_id == app_id) {
         return i;
       }
     }
@@ -353,11 +364,41 @@ struct GraphicsServer : GraphicsServerBase {
     }
 
     // If no apps remain, show idle screen
-    if (count_active_apps() == 0) {
+    int remaining = count_active_apps();
+    l.log("After unregister: %d apps remaining", remaining);
+    if (remaining == 0) {
+      l.log("No apps remaining, rendering idle screen");
       render_idle_screen();
     }
 
     return Result<bool, ErrorCode>::ok(true);
+  }
+
+  Result<uintptr_t, ErrorCode> handle_handle_key(uintptr_t code, uintptr_t flags) override {
+    l.log("handle_key: code=%d flags=0x%x", (int)code, (int)flags);
+
+    // Only handle key press events
+    if (!(flags & KEY_FLAG_PRESSED)) {
+      l.log("handle_key: not pressed, returning 0");
+      return Result<uintptr_t, ErrorCode>::ok(0);
+    }
+
+    // Check for Alt+1-9 to switch apps
+    if (flags & KEY_FLAG_ALT) {
+      l.log("handle_key: ALT is held");
+      if (code >= KEY_1 && code <= KEY_9) {
+        uint8_t target_app_id = (uint8_t)(code - KEY_1 + 1);
+        int slot = find_app_by_id(target_app_id);
+        if (slot >= 0) {
+          active_app_index = slot;
+          l.log("Switched to app %d: %s (pid=%lu)", target_app_id, apps[slot].name, apps[slot].pid.raw());
+        }
+        return Result<uintptr_t, ErrorCode>::ok(1); // consumed
+      }
+    }
+
+    l.log("handle_key: returning 0 (not consumed)");
+    return Result<uintptr_t, ErrorCode>::ok(0); // not consumed
   }
 };
 

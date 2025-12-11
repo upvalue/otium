@@ -130,6 +130,9 @@ void gfxscratch_main() {
     ou_yield();
   }
 
+  // Unregister before exit
+  gfx_client.unregister_app();
+
   oprintf("GFXSCRATCH: Exiting\n");
   ou_exit();
 }

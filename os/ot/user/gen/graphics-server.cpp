@@ -67,6 +67,15 @@ void GraphicsServerBase::process_request(const IpcMessage& msg) {
     }
     break;
   }
+  case MethodIds::Graphics::HANDLE_KEY: {
+    auto result = handle_handle_key(msg.args[0], msg.args[1]);
+    if (result.is_err()) {
+      resp.error_code = result.error();
+    } else {
+      resp.values[0] = result.value();
+    }
+    break;
+  }
   default:
     resp.error_code = IPC__METHOD_NOT_KNOWN;
     break;

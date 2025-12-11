@@ -1,7 +1,7 @@
 // prog-scratch.cpp - Scratch program for testing and experimentation
+#include "ot/lib/frame-manager.hpp"
 #include "ot/lib/messages.hpp"
 #include "ot/user/gen/graphics-client.hpp"
-#include "ot/lib/frame-manager.hpp"
 #include "ot/user/local-storage.hpp"
 #include "ot/user/string.hpp"
 #include "ot/user/user.hpp"
@@ -47,6 +47,14 @@ void scratch_main() {
 
   GraphicsClient client(gfx_pid);
 
+  // Register with graphics driver
+  auto reg_result = client.register_app("scratch");
+  if (reg_result.is_err()) {
+    oprintf("SCRATCH: Failed to register with graphics driver: %d\n", reg_result.error());
+    ou_exit();
+  }
+  oprintf("SCRATCH: Registered as app %lu\n", reg_result.value());
+
   // Get framebuffer info
   auto fb_result = client.get_framebuffer();
   if (fb_result.is_err()) {
@@ -68,6 +76,13 @@ void scratch_main() {
   int frames_rendered = 0;
 
   while (frames_rendered < num_frames) {
+    // Check if we should render (are we the active app?)
+    auto should = client.should_render();
+    if (should.is_err() || should.value() == 0) {
+      ou_yield();
+      continue;
+    }
+
     if (fm.begin_frame()) {
       // Fill screen with random purplish static
       for (uint32_t i = 0; i < width * height; i++) {
@@ -96,6 +111,9 @@ void scratch_main() {
     // Always yield to cooperate with other processes
     ou_yield();
   }
+
+  // Unregister before exit
+  client.unregister_app();
 
   oprintf("SCRATCH: Purple static demo complete (%d frames)\n", num_frames);
   ou_exit();

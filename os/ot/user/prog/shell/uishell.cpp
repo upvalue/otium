@@ -215,8 +215,6 @@ void uishell_main() {
     ou_exit();
   }
 
-  int sentinel = 0xcafebabe;
-
   GraphicsClient gfx_client(gfx_pid);
   KeyboardClient kbd_client(kbd_pid);
 
@@ -320,34 +318,33 @@ void uishell_main() {
 
   while (s->running) {
     // Check if we should render (are we the active app?)
-    // oprintf("UISHELL[%lu]: calling should_render\n", reg_result.value());
-    // oprintf("UISHELL: calling should_render with gfx_client %p and gfx pid %lu\n", &gfx_client, gfx_pid.raw());
-    // oprintf("UISHELL gfx_client %p with pid %lu\n", &gfx_client, gfx_pid.raw());
     auto should = gfx_client.should_render();
-    // oprintf("UISHELL[%lu]: should_render returned %d\n", reg_result.value(), should.is_ok() ? (int)should.value() :
-    // -1);
     if (should.is_err()) {
-      oprintf("sentinel: %x\n", sentinel);
-      printf("UISHELL: gfx_client %p with pid %lu after error\n", &gfx_client, gfx_pid.raw());
       oprintf("UISHELL: should_render returned error: %d\n", should.error());
       ou_exit();
     }
     if (should.value() == 0) {
-      sentinel++;
-      // printf("UISHELL: gfx_client %p with pid %lu before yield\n", &gfx_client, gfx_pid.raw());
       // Not active, just yield
       ou_yield();
-      // printf("UISHELL: gfx_client %p with pid %lu after yield\n", &gfx_client, gfx_pid.raw());
       continue;
     }
 
     if (fm.begin_frame()) {
       // Poll keyboard
       auto key_result = kbd_client.poll_key();
-      if (key_result.is_ok()) {
+      if (key_result.is_err()) {
+        oprintf("UISHELL: poll_key error: %d\n", key_result.error());
+      } else {
         auto key_data = key_result.value();
         if (key_data.has_key) {
-          handle_key_event(s, i, key_data.code, key_data.flags);
+          oprintf("UISHELL: got key code=%d flags=%d\n", (int)key_data.code, (int)key_data.flags);
+          // Pass key to graphics server first for global hotkeys (Alt+1-9 app switching)
+          bool consumed = gfx.pass_key_to_server(gfx_client, key_data.code, key_data.flags);
+          oprintf("UISHELL: pass_key_to_server returned %d\n", consumed);
+          if (!consumed) {
+            // Key not consumed by server, handle locally
+            handle_key_event(s, i, key_data.code, key_data.flags);
+          }
         }
       }
 
@@ -412,6 +409,9 @@ void uishell_main() {
     // Always yield
     ou_yield();
   }
+
+  // Unregister before exit
+  gfx_client.unregister_app();
 
   oprintf("UISHELL: Exiting\n");
   ou_exit();

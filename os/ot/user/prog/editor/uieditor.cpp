@@ -229,6 +229,11 @@ edit::EditorErr GraphicsEditorBackend::setup() {
 }
 
 void GraphicsEditorBackend::teardown() {
+  // Unregister from graphics server before cleaning up
+  if (gfx_client) {
+    gfx_client->unregister_app();
+  }
+
   // Clean up pointers (storage is in parent struct, no delete needed)
   frame_manager = nullptr;
   gfx = nullptr;
@@ -268,6 +273,13 @@ Result<edit::Key, edit::EditorErr> GraphicsEditorBackend::readKey() {
 
   auto key_data = key_result.value();
   if (!key_data.has_key) {
+    return Result<edit::Key, edit::EditorErr>::ok(edit::Key{});
+  }
+
+  // Pass key to graphics server first for global hotkeys (Alt+1-9 app switching)
+  if (gfx && gfx_client &&
+      gfx->pass_key_to_server(*gfx_client, (uint16_t)key_data.code, (uint8_t)key_data.flags)) {
+    // Key consumed by server, return empty key
     return Result<edit::Key, edit::EditorErr>::ok(edit::Key{});
   }
 
@@ -403,13 +415,8 @@ void edit_main() {
   ou::string file_path(argv[1].ptr, argv[1].len);
   oprintf("EDIT: Opening file: %s\n", file_path.c_str());
 
-  // Run the editor
+  // Run the editor (teardown() handles unregistering from graphics)
   edit::edit_run(&s->backend, s->editor, s->interp, &file_path);
-
-  // Clean up graphics registration before exit
-  if (s->backend.gfx_client) {
-    s->backend.gfx_client->unregister_app();
-  }
 
   oprintf("EDIT: Exiting\n");
   ou_exit();

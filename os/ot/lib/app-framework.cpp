@@ -3,6 +3,7 @@
 #include "ot/lib/arena.hpp"
 #include "ot/lib/font-blit16.hpp"
 #include "ot/lib/font-proggy.hpp"
+#include "ot/user/gen/graphics-client.hpp"
 #include "ot/user/user.hpp"
 #include "ot/vendor/libschrift/schrift.h"
 
@@ -370,6 +371,16 @@ Result<int, ErrorCode> Framework::draw_ttf_text_wrapped(int x, int y, int max_wi
 
   // Return total height used
   return Result<int, ErrorCode>::ok(cursor_y - y + line_height);
+}
+
+// === KEY EVENT PASSTHROUGH ===
+
+bool Framework::pass_key_to_server(GraphicsClient &gfx_client, uint16_t code, uint8_t flags) {
+  auto result = gfx_client.handle_key(code, flags);
+  if (result.is_ok()) {
+    return result.value() != 0;
+  }
+  return false;
 }
 
 } // namespace app

@@ -13,6 +13,9 @@ namespace lib {
 class Arena;
 }
 
+// Forward declare GraphicsClient for key passthrough
+struct GraphicsClient;
+
 namespace app {
 
 // Utility class for framebuffer graphics operations
@@ -147,6 +150,11 @@ public:
   // Draw wrapped text within max_width, returns total height used
   Result<int, ErrorCode> draw_ttf_text_wrapped(int x, int y, int max_width, const char *text, uint32_t color,
                                                int size_px);
+
+  // === KEY EVENT PASSTHROUGH ===
+  // Pass key event to graphics server for global hotkey handling (e.g., Alt+1-9 app switching)
+  // Returns true if key was consumed by the server, false if app should handle it
+  bool pass_key_to_server(GraphicsClient &gfx_client, uint16_t code, uint8_t flags);
 
 private:
   uint32_t *fb_;

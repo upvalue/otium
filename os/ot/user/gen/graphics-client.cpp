@@ -85,6 +85,21 @@ Result<bool, ErrorCode> GraphicsClient::unregister_app() {
   return Result<bool, ErrorCode>::ok({});
 }
 
+Result<uintptr_t, ErrorCode> GraphicsClient::handle_key(uintptr_t code, uintptr_t flags) {
+
+  IpcResponse resp = ou_ipc_send(
+    pid_,
+    0,
+    MethodIds::Graphics::HANDLE_KEY,
+    code, flags, 0  );
+
+  if (resp.error_code != NONE) {
+    return Result<uintptr_t, ErrorCode>::err(resp.error_code);
+  }
+
+  return Result<uintptr_t, ErrorCode>::ok(resp.values[0]);
+}
+
 
 Result<bool, ErrorCode> GraphicsClient::shutdown() {
   IpcResponse resp = ou_ipc_send(

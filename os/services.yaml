@@ -74,6 +74,17 @@ services:
         returns: []
         errors: [NOT_REGISTERED]
 
+      - name: handle_key
+        args:
+          - name: code
+            signed: false
+          - name: flags
+            signed: false
+        returns:
+          - name: consumed
+            signed: false
+        errors: []
+
   - name: Filesystem
     methods:
       # File handle operations

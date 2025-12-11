@@ -92,6 +92,16 @@ extern void *sft_arena_alloc(void *arena, size_t size);
 extern void *sft_arena_alloc_zeroed(void *arena, size_t size);
 #endif
 
+/* Set to 0 to always use heap allocation instead of stack for temporary buffers.
+ * Useful for embedded environments with small stacks. */
+#if !defined(USE_STACK_ALLOC)
+#if defined(OT_ARCH_RISCV) || defined(OT_ARCH_WASM)
+#define USE_STACK_ALLOC 0
+#else
+#define USE_STACK_ALLOC 1
+#endif
+#endif
+
 #define SCHRIFT_VERSION "0.10f.2"
 
 #define FILE_MAGIC_ONE 0x00010000
@@ -122,12 +132,20 @@ extern void *sft_arena_alloc_zeroed(void *arena, size_t size);
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 /* Allocate values on the stack if they are small enough, else spill to heap. */
+#if USE_STACK_ALLOC
 #define STACK_ALLOC(var, type, thresh, count)                                                                          \
   type var##_stack_[thresh];                                                                                           \
   var = (count) <= (thresh) ? var##_stack_ : calloc(sizeof(type), count);
 #define STACK_FREE(var)                                                                                                \
   if (var != var##_stack_)                                                                                             \
     free(var);
+#else
+/* Heap-only allocation for environments with small stacks */
+#define STACK_ALLOC(var, type, thresh, count)                                                                          \
+  (void)0;                                                                                                             \
+  var = calloc(sizeof(type), count);
+#define STACK_FREE(var) free(var);
+#endif
 
 enum { SrcMapping, SrcUser };
 

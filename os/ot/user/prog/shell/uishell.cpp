@@ -242,6 +242,8 @@ Status cmd_gfx_rectangle(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
   }
   int height = height_result.value();
 
+  oprintf("gfx/rectangle: x=%d y=%d width=%d height=%d color=%d\n", x, y, width, height, color);
+
   s->app->fill_rect(x, y, width, height, color);
 
   return tcl::S_OK;
@@ -317,17 +319,8 @@ Status cmd_gfx_loop_iter(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
     return tcl::S_ERR;
   }
   auto key_data = key_result.value();
-  if (key_data.has_key) {
-    return tcl::S_OK;
-  }
 
-  // oprintf("checking key %d %d\n", key_data.code, key_data.flags);
   bool consumed = s->app->pass_key_to_server(s->gfxc, key_data.code, key_data.flags);
-  // oprintf("consumed %d\n", consumed);
-  /*
-  if (!consumed) {
-    handle_key_event(s, i, key_data.code, key_data.flags);
-  }*/
 
   if (key_data.code != 0) {
     oprintf("non-zero key code %d\n", key_data.code);
@@ -336,11 +329,12 @@ Status cmd_gfx_loop_iter(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
   // Alt-Q to quit
   if (key_data.flags & KEY_FLAG_ALT) {
     if (key_data.code == KEY_Q) {
-      s->running = false;
+      oprintf("gfx loop iter: quitting\n");
+      return tcl::S_BREAK;
     }
   }
 
-  // s->running = false;
+  s->gfxc.flush();
 
   return tcl::S_OK;
 }
@@ -418,6 +412,7 @@ void uishell_main() {
   register_ipc_method_vars(i);
 
   i.set_var("features_ui", "1");
+  i.set_var("uishell_output_to_console", "0");
 
   // Register shared shell commands
   shell::register_shell_commands(i);
@@ -435,10 +430,17 @@ void uishell_main() {
   i.register_command(
       "puts",
       [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
+        UIShellStorage *s = (UIShellStorage *)local_storage;
         if (!i.arity_check("puts", argv, 2, 2)) {
           return tcl::S_ERR;
         }
-        ((UIShellStorage *)local_storage)->add_output_line(argv[1].c_str());
+        auto output_to_console_var = i.get_var("uishell_output_to_console");
+        auto output_to_console = parse_int(output_to_console_var->val->c_str());
+        if (output_to_console.is_ok() && output_to_console.value() == 1) {
+          oprintf("puts: %s\n", argv[1].c_str());
+        } else {
+          s->add_output_line(argv[1].c_str());
+        }
         return tcl::S_OK;
       },
       nullptr, "[puts string] - Print string to screen");

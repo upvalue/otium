@@ -120,12 +120,14 @@ IpcResponse ou_ipc_send(Pid target_pid, uintptr_t flags, intptr_t method, intptr
   TRACE_IPC(LLOUD, "IPC: switching to target process pidx %d (pid %lu)", target_pidx.raw(), target_pid.raw());
 
   // If target is waiting, wake it and switch to it immediately (like RISC-V)
-  if (target->state == IPC_WAIT) {
+  if (target->state == IPC_RECV_WAIT) {
     target->state = RUNNABLE;
     process_switch_to(target); // Direct context switch - receiver will process and reply
     // After this returns, we're back in our own context with response available
   } else {
-    TRACE_IPC(LLOUD, "IPC: target not in IPC_WAIT, yielding normally");
+    // Target is busy - block sender until reply arrives
+    TRACE_IPC(LLOUD, "IPC: target not in IPC_RECV_WAIT, blocking sender");
+    current_proc->state = IPC_SEND_WAIT;
     yield();
   }
 
@@ -146,14 +148,14 @@ IpcMessage ou_ipc_recv(void) {
     current_proc->has_pending_message = false;
     return msg;
   } else {
-    TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) entering IPC_WAIT", current_proc->pidx.raw(), current_proc->pid.raw());
-    current_proc->state = IPC_WAIT;
+    TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) entering IPC_RECV_WAIT", current_proc->pidx.raw(), current_proc->pid.raw());
+    current_proc->state = IPC_RECV_WAIT;
     yield();
     // Will resume here when message arrives
     intptr_t method = IPC_UNPACK_METHOD(current_proc->pending_message.method_and_flags);
     uintptr_t flags = IPC_UNPACK_FLAGS(current_proc->pending_message.method_and_flags);
     TRACE_IPC(LLOUD,
-              "Process pidx %d (pid %lu) woken from IPC_WAIT, msg: sender_pid=%lu flags=%x method=%d args=[%d, %d, %d]",
+              "Process pidx %d (pid %lu) woken from IPC_RECV_WAIT, msg: sender_pid=%lu flags=%x method=%d args=[%d, %d, %d]",
               current_proc->pidx.raw(), current_proc->pid.raw(), current_proc->pending_message.sender_pid.raw(), flags,
               method, current_proc->pending_message.args[0], current_proc->pending_message.args[1],
               current_proc->pending_message.args[2]);
@@ -187,6 +189,8 @@ void ou_ipc_reply(IpcResponse response) {
     sender->pending_response.values[2] = response.values[2];
 
     current_proc->blocked_sender = nullptr;
+    // Wake sender from IPC_SEND_WAIT
+    sender->state = RUNNABLE;
     TRACE_IPC(LLOUD, "IPC reply sent, immediately switching back to sender pidx %d (pid %lu)", sender->pidx,
               sender->pid);
     // Switch back to sender immediately (like RISC-V) - receiver will resume when scheduled again

@@ -238,12 +238,15 @@ void handle_syscall(struct trap_frame *f) {
     TRACE_IPC(LLOUD, "IPC: switching to target process pidx %d (pid %lu)", target_pidx.raw(), target_pid.raw());
 
     // If target is waiting, wake it and switch to it immediately
-    if (target->state == IPC_WAIT) {
+    if (target->state == IPC_RECV_WAIT) {
       target->state = RUNNABLE;
       process_switch_to(target); // Direct context switch - receiver will process and reply
       // After this returns, we're back in our own context with our stack and trap frame valid
     } else {
-      TRACE_IPC(LLOUD, "IPC: target not in IPC_WAIT, yielding normally");
+      // Target is busy - block sender until reply arrives
+      TRACE_IPC(LLOUD, "IPC: Process pidx %d (pid %lu) target %d not in IPC_RECV_WAIT, blocking sender",
+                current_proc->pidx.raw(), current_proc->pid.raw(), target_pid.raw());
+      current_proc->state = IPC_SEND_WAIT;
       yield();
     }
 
@@ -270,12 +273,12 @@ void handle_syscall(struct trap_frame *f) {
       f->a5 = current_proc->pending_message.args[2];
       current_proc->has_pending_message = false;
     } else {
-      TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) entering IPC_WAIT", current_proc->pidx.raw(),
+      TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) entering IPC_RECV_WAIT", current_proc->pidx.raw(),
                 current_proc->pid.raw());
-      current_proc->state = IPC_WAIT;
+      current_proc->state = IPC_RECV_WAIT;
       yield();
       // Will resume here when message arrives
-      TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) woken from IPC_WAIT with message from pid %lu",
+      TRACE_IPC(LLOUD, "Process pidx %d (pid %lu) woken from IPC_RECV_WAIT with message from pid %lu",
                 current_proc->pidx.raw(), current_proc->pid.raw(), current_proc->pending_message.sender_pid.raw());
       f->a0 = current_proc->pending_message.sender_pid.raw();
       f->a1 = current_proc->pending_message.method_and_flags;
@@ -311,6 +314,8 @@ void handle_syscall(struct trap_frame *f) {
       }
 
       current_proc->blocked_sender = nullptr;
+      // Wake sender from IPC_SEND_WAIT
+      sender->state = RUNNABLE;
       TRACE_IPC(LLOUD, "IPC reply sent, immediately switching back to sender pidx %d (pid %lu)", sender->pidx,
                 sender->pid);
       // Switch back to sender immediately - receiver will resume when scheduled again

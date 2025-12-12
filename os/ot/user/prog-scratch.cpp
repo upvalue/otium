@@ -45,7 +45,15 @@ void scratch_main() {
   }
   oprintf("SCRATCH: Found graphics driver at PID %lu\n", gfx_pid.raw());
 
+  Pid kbd_pid = ou_proc_lookup("keyboard");
+  if (kbd_pid == PID_NONE) {
+    oprintf("SCRATCH: Failed to find keyboard driver\n");
+    ou_exit();
+  }
+  oprintf("SCRATCH: Found keyboard driver at PID %lu\n", kbd_pid.raw());
+
   GraphicsClient client(gfx_pid);
+  // KeyboardClient kbd(kbd_pid);
 
   // Register with graphics driver
   auto reg_result = client.register_app("scratch");
@@ -75,7 +83,9 @@ void scratch_main() {
   const int num_frames = 60; // Run for 60 frames
   int frames_rendered = 0;
 
-  while (frames_rendered < num_frames) {
+  bool running = true;
+
+  while (running) {
     // Check if we should render (are we the active app?)
     auto should = client.should_render();
     if (should.is_err() || should.value() == 0) {
@@ -84,6 +94,7 @@ void scratch_main() {
     }
 
     if (fm.begin_frame()) {
+
       // Fill screen with random purplish static
       for (uint32_t i = 0; i < width * height; i++) {
         uint32_t rand_val = simple_rand();

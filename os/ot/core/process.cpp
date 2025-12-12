@@ -175,7 +175,7 @@ Process *process_next_runnable(void) {
   Process *next = idle_proc;
   for (size_t i = 0; i < PROCS_MAX; i++) {
     Process *p = &procs[(current_proc->pidx.raw() + i + 1) % PROCS_MAX];
-    // Skip processes in IPC_WAIT state - they'll be woken when message arrives
+    // Skip processes in IPC_RECV_WAIT or IPC_SEND_WAIT state - they'll be woken when message arrives or reply returns
     if (p->state == RUNNABLE && p->pidx > Pidx(0)) {
       next = p;
       break;
@@ -310,7 +310,7 @@ Pid process_lookup(const StringView &name) {
   size_t i = PROCS_MAX - 1;
   while (true) {
     Process *p = &procs[i];
-    // Check if process is running (RUNNABLE or IPC_WAIT - services waiting for messages should be findable)
+    // Check if process is running (RUNNABLE, IPC_RECV_WAIT, or IPC_SEND_WAIT - services waiting for messages should be findable)
     if (process_is_running(p) && strncmp(p->name, name.ptr, name.len) == 0 &&
         p->name[name.len] == '\0') { // Ensure exact match
       return p->pid;                 // Return pid (not pidx)
@@ -329,7 +329,7 @@ Process *process_lookup_by_pidx(Pidx pidx) {
     return nullptr;
   }
   Process *p = &procs[idx];
-  // Allow lookup of running processes (RUNNABLE or IPC_WAIT - e.g., services waiting for messages)
+  // Allow lookup of running processes (RUNNABLE, IPC_RECV_WAIT, or IPC_SEND_WAIT - e.g., services waiting for messages)
   if (!process_is_running(p)) {
     return nullptr;
   }

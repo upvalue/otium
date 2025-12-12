@@ -5,5 +5,6 @@ puts "shellrc loaded"
 
 # on startup
 if {! $features_ui} {
+  # run scratch
   run uishell
 }

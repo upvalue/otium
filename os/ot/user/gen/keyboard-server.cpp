@@ -30,8 +30,8 @@ void KeyboardServerBase::process_request(const IpcMessage &msg) {
     break;
   }
 
-  oprintf("keyboard server replying to method: %d with has_key, code, flags %d %d %d\n", method, resp.values[0],
-          resp.values[1], resp.values[2]);
+  /*oprintf("keyboard server replying to method: %d with has_key, code, flags %d %d %d\n", method, resp.values[0],
+          resp.values[1], resp.values[2]);*/
 
   ou_ipc_reply(resp);
 }

@@ -224,7 +224,7 @@ void proc_dummy_pid1(void) {
 void proc_ipc_client_ordering(void) {
   oprintf("TEST: Process 2 starting\n");
 
-  // Yield to let other processes initialize (especially echo server needs to enter IPC_WAIT)
+  // Yield to let other processes initialize (especially echo server needs to enter IPC_RECV_WAIT)
   ou_yield();
 
   // Look up echo server by name
@@ -250,7 +250,7 @@ void proc_ipc_client_ordering(void) {
 // TEST_IPC_ORDERING: Process 3 - Echo server that handles one IPC request then terminates
 void proc_ipc_echo_once(void) {
   // First time through: wait for IPC, handle it, reply
-  IpcMessage msg = ou_ipc_recv(); // Will block in IPC_WAIT
+  IpcMessage msg = ou_ipc_recv(); // Will block in IPC_RECV_WAIT
   oprintf("TEST: Process 3 handling IPC request\n");
   IpcResponse resp = {NONE, {msg.args[0], 0, 0}}; // Echo the value
   ou_ipc_reply(resp);

@@ -110,7 +110,7 @@ uint32_t known_memory_release_process(Pidx pidx);
 #define PAGE_X (1 << 3) // Executable
 #define PAGE_U (1 << 4) // User (accessible in user mode)
 
-enum ProcessState { UNUSED, RUNNABLE, TERMINATED, IPC_WAIT };
+enum ProcessState { UNUSED, RUNNABLE, TERMINATED, IPC_RECV_WAIT, IPC_SEND_WAIT };
 
 // Globally unique process ID counter (never reused)
 extern Pid proc_pid_counter;
@@ -170,8 +170,10 @@ struct Process {
   uint8_t stack[8192] __attribute__((aligned(16)));
 };
 
-// Helper to check if a process is in a running state (RUNNABLE or IPC_WAIT)
-inline bool process_is_running(const Process *p) { return p->state == RUNNABLE || p->state == IPC_WAIT; }
+// Helper to check if a process is in a running state (RUNNABLE or IPC_RECV_WAIT or IPC_SEND_WAIT)
+inline bool process_is_running(const Process *p) {
+  return p->state == RUNNABLE || p->state == IPC_RECV_WAIT || p->state == IPC_SEND_WAIT;
+}
 
 // Helper to find pidx from pid (returns PIDX_INVALID if not found)
 Pidx process_lookup_by_pid(Pid pid);

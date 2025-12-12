@@ -13,22 +13,24 @@ enum ErrorCode {
   IPC__METHOD_NOT_KNOWN = 3,
   /** Method known but not implemented */
   IPC__METHOD_NOT_IMPLEMENTED = 4,
+  /** Receiver's IPC wait queue is full */
+  IPC__QUEUE_FULL = 5,
 
-  VIRTIO__DEVICE_NOT_FOUND = 5,
-  VIRTIO__SETUP_FAIL = 6,
+  VIRTIO__DEVICE_NOT_FOUND = 6,
+  VIRTIO__SETUP_FAIL = 7,
 
   // Disk errors
-  DISK__OUT_OF_BOUNDS = 7,
-  DISK__IO_ERROR = 8,
-  DISK__DEVICE_ERROR = 9,
+  DISK__OUT_OF_BOUNDS = 8,
+  DISK__IO_ERROR = 9,
+  DISK__DEVICE_ERROR = 10,
 
   // App framework errors (fonts, graphics, etc.)
-  APP__FONT_NOT_LOADED = 10,
-  APP__FONT_LOAD_FAILED = 11,
-  APP__GLYPH_LOOKUP_FAILED = 12,
-  APP__GLYPH_METRICS_FAILED = 13,
-  APP__GLYPH_RENDER_FAILED = 14,
-  APP__MEMORY_ALLOC_FAILED = 15,
+  APP__FONT_NOT_LOADED = 11,
+  APP__FONT_LOAD_FAILED = 12,
+  APP__GLYPH_LOOKUP_FAILED = 13,
+  APP__GLYPH_METRICS_FAILED = 14,
+  APP__GLYPH_RENDER_FAILED = 15,
+  APP__MEMORY_ALLOC_FAILED = 16,
 
 // Generated service error codes (starting at 100)
 #include "ot/user/gen/error-codes-gen.hpp"
@@ -46,6 +48,8 @@ inline const char *error_code_to_string(ErrorCode code) {
     return "ipc.method-not-known";
   case IPC__METHOD_NOT_IMPLEMENTED:
     return "ipc.method-not-implemented";
+  case IPC__QUEUE_FULL:
+    return "ipc.queue-full";
   case VIRTIO__DEVICE_NOT_FOUND:
     return "virtio.device-not-found";
   case VIRTIO__SETUP_FAIL:

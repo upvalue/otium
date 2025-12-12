@@ -160,8 +160,17 @@ struct Process {
   // IPC fields
   IpcMessage pending_message;   // Message waiting to be received
   bool has_pending_message;     // Flag for message availability
-  Process *blocked_sender;      // Pointer to sender waiting for reply
+  Process *blocked_sender;      // Pointer to sender waiting for reply (acts as lock)
   IpcResponse pending_response; // Response storage for blocked sender
+
+  // IPC request queue - for senders waiting to acquire lock
+  struct QueuedRequest {
+    Process *sender;
+    IpcMessage message;
+    bool has_comm_data;
+  };
+  QueuedRequest ipc_wait_queue[PROCS_MAX];
+  size_t ipc_wait_queue_len;
 
 #ifdef OT_ARCH_WASM
   bool started; // For WASM: track if process has been started

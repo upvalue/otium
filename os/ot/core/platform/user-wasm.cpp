@@ -99,7 +99,45 @@ IpcResponse ou_ipc_send(Pid target_pid, uintptr_t flags, intptr_t method, intptr
 
   Process *target = process_lookup_by_pidx(target_pidx);
 
-  // Handle comm page transfer if requested (send direction)
+  // Try to acquire lock on receiver
+  if (target->blocked_sender != nullptr) {
+    // Receiver is locked by another sender - queue our request
+    if (target->ipc_wait_queue_len >= PROCS_MAX) {
+      TRACE_IPC(LSOFT, "IPC: receiver pidx %d queue full", target_pidx.raw());
+      IpcResponse resp;
+      resp.error_code = IPC__QUEUE_FULL;
+      resp.values[0] = 0;
+      resp.values[1] = 0;
+      resp.values[2] = 0;
+      return resp;
+    }
+
+    TRACE_IPC(LLOUD, "IPC: receiver pidx %d locked by pidx %d, queuing sender pidx %d (queue_len=%d)",
+              target_pidx.raw(), target->blocked_sender->pidx.raw(), current_proc->pidx.raw(),
+              target->ipc_wait_queue_len);
+
+    // Capture message in queue
+    Process::QueuedRequest *req = &target->ipc_wait_queue[target->ipc_wait_queue_len++];
+    req->sender = current_proc;
+    req->message.sender_pid = current_proc->pid;
+    req->message.method_and_flags = method_and_flags;
+    req->message.args[0] = arg0;
+    req->message.args[1] = arg1;
+    req->message.args[2] = arg2;
+    req->has_comm_data = (flags & IPC_FLAG_SEND_COMM_DATA);
+
+    // Block until processed
+    current_proc->state = IPC_SEND_WAIT;
+    yield();
+
+    // When we wake, receiver has replied to us
+    TRACE_IPC(LLOUD, "IPC send (queued) returning: error=%d, values=[%d, %d, %d]",
+              current_proc->pending_response.error_code, current_proc->pending_response.values[0],
+              current_proc->pending_response.values[1], current_proc->pending_response.values[2]);
+    return current_proc->pending_response;
+  }
+
+  // Lock acquired - handle comm page transfer if requested (send direction)
   if (flags & IPC_FLAG_SEND_COMM_DATA) {
     if (!current_proc->comm_page.is_null() && !target->comm_page.is_null()) {
       TRACE_IPC(LLOUD, "IPC: copying comm page from sender pidx %d to receiver pidx %d", current_proc->pidx.raw(),
@@ -108,7 +146,7 @@ IpcResponse ou_ipc_send(Pid target_pid, uintptr_t flags, intptr_t method, intptr
     }
   }
 
-  // Set up message
+  // Set up message (we own the lock)
   target->pending_message.sender_pid = current_proc->pid; // Fill in sender's globally unique PID
   target->pending_message.method_and_flags = method_and_flags;
   target->pending_message.args[0] = arg0;
@@ -189,6 +227,37 @@ void ou_ipc_reply(IpcResponse response) {
     sender->pending_response.values[2] = response.values[2];
 
     current_proc->blocked_sender = nullptr;
+
+    // Activate next queued request (if any)
+    if (current_proc->ipc_wait_queue_len > 0) {
+      Process::QueuedRequest req = current_proc->ipc_wait_queue[0];
+
+      // Dequeue (shift array left)
+      for (size_t i = 0; i < current_proc->ipc_wait_queue_len - 1; i++) {
+        current_proc->ipc_wait_queue[i] = current_proc->ipc_wait_queue[i + 1];
+      }
+      current_proc->ipc_wait_queue_len--;
+
+      TRACE_IPC(LLOUD, "IPC: activating queued request from sender pidx %d (queue_len now %d)", req.sender->pidx.raw(),
+                current_proc->ipc_wait_queue_len);
+
+      // Copy comm data from queued sender NOW (while they're still blocked)
+      if (req.has_comm_data) {
+        if (!req.sender->comm_page.is_null() && !current_proc->comm_page.is_null()) {
+          TRACE_IPC(LLOUD, "IPC: copying queued comm page from sender pidx %d to receiver pidx %d",
+                    req.sender->pidx.raw(), current_proc->pidx.raw());
+          memcpy(current_proc->comm_page.as_ptr(), req.sender->comm_page.as_ptr(), OT_PAGE_SIZE);
+        }
+      }
+
+      // Set up as current request
+      current_proc->pending_message = req.message;
+      current_proc->has_pending_message = true;
+      current_proc->blocked_sender = req.sender;
+
+      // Note: req.sender stays blocked! They'll be woken when we reply to THEM
+    }
+
     // Wake sender from IPC_SEND_WAIT
     sender->state = RUNNABLE;
     TRACE_IPC(LLOUD, "IPC reply sent, immediately switching back to sender pidx %d (pid %lu)", sender->pidx,

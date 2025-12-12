@@ -226,6 +226,57 @@ void process_switch_to(Process *target) {
 void process_exit(Process *proc, bool zero_proc) {
   TRACE_PROC(LSOFT, "Process pidx=%d pid=%lu (%s) exiting", proc->pidx.raw(), proc->pid.raw(), proc->name);
 
+  // IPC cleanup: Release locks and wake waiting senders
+  for (size_t i = 0; i < PROCS_MAX; i++) {
+    Process *p = &procs[i];
+    if (p->state == UNUSED) {
+      continue;
+    }
+
+    // 1. If this process was holding a lock on another process, release it
+    if (p->blocked_sender == proc) {
+      TRACE_IPC(LSOFT, "Process pidx %d exited while holding lock on pidx %d", proc->pidx.raw(), p->pidx.raw());
+
+      p->blocked_sender = nullptr;
+
+      // Activate next queued sender if any
+      if (p->ipc_wait_queue_len > 0) {
+        Process::QueuedRequest req = p->ipc_wait_queue[0];
+
+        // Dequeue
+        for (size_t j = 0; j < p->ipc_wait_queue_len - 1; j++) {
+          p->ipc_wait_queue[j] = p->ipc_wait_queue[j + 1];
+        }
+        p->ipc_wait_queue_len--;
+
+        TRACE_IPC(LSOFT, "Granting lock to queued sender pidx %d after lock holder exit", req.sender->pidx.raw());
+
+        // Copy comm data if needed
+        if (req.has_comm_data && !req.sender->comm_page.is_null() && !p->comm_page.is_null()) {
+          memcpy(p->comm_page.as_ptr(), req.sender->comm_page.as_ptr(), OT_PAGE_SIZE);
+        }
+
+        // Set up as current request
+        p->pending_message = req.message;
+        p->has_pending_message = true;
+        p->blocked_sender = req.sender;
+      }
+    }
+
+    // 2. Remove this process from any wait queues
+    for (size_t j = 0; j < p->ipc_wait_queue_len; j++) {
+      if (p->ipc_wait_queue[j].sender == proc) {
+        // Remove from queue (shift left)
+        for (size_t k = j; k < p->ipc_wait_queue_len - 1; k++) {
+          p->ipc_wait_queue[k] = p->ipc_wait_queue[k + 1];
+        }
+        p->ipc_wait_queue_len--;
+        TRACE_IPC(LSOFT, "Removed dead process pidx %d from wait queue of pidx %d", proc->pidx.raw(), p->pidx.raw());
+        break;
+      }
+    }
+  }
+
   // Release any known memory regions held by this process
   uint32_t known_released = known_memory_release_process(proc->pidx);
 

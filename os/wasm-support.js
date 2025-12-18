@@ -529,6 +529,27 @@ const filesystemCallbacks = {
     fsStorage.delete(normalized);
     return true;
   },
+
+  fsListDir(pathStr) {
+    const normalized = normalizePath(pathStr);
+    const entry = fsStorage.get(normalized);
+    if (!entry || entry.type !== 'dir') {
+      return null;
+    }
+
+    // Return array of entry names (with '/' suffix for directories)
+    const result = [];
+    if (entry.children) {
+      for (const childName of entry.children) {
+        const childPath = normalized === '/' ? '/' + childName : normalized + '/' + childName;
+        const childEntry = fsStorage.get(childPath);
+        if (childEntry) {
+          result.push(childEntry.type === 'dir' ? childName + '/' : childName);
+        }
+      }
+    }
+    return result;
+  },
 };
 
 // =============================================================================

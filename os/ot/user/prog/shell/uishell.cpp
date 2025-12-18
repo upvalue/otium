@@ -507,6 +507,13 @@ void uishell_main() {
           // oprintf("UISHELL: got key code=%d flags=%d\n", (int)key_data.code, (int)key_data.flags);
           // Pass key to graphics server first for global hotkeys (Alt+1-9 app switching)
           bool consumed = gfx.pass_key_to_server(s->gfxc, key_data.code, key_data.flags);
+
+          // Check for Alt+Q to quit
+          if ((key_data.flags & KEY_FLAG_ALT) && (key_data.code == KEY_Q)) {
+            oprintf("UISHELL: Alt+Q pressed, exiting\n");
+            s->running = false;
+          }
+
           // oprintf("UISHELL: pass_key_to_server returned %d\n", consumed);
           if (!consumed) {
             // Key not consumed by server, handle locally
@@ -527,7 +534,9 @@ void uishell_main() {
 
       // Draw title
       gfx.draw_ttf_text(TEXT_START_X, 15, "OTIUM SHELL", 0xFFEEEEEE, TITLE_SIZE);
-      gfx.draw_ttf_text(TEXT_START_X, 48, "Interactive TCL Shell", 0xFFCCCCCC, SUBTITLE_SIZE);
+      gfx.draw_ttf_text(TEXT_START_X, 48,
+                        "Interactive TCL Shell; Ctrl-U = scroll up, Ctrl-D = scroll down, Alt-Q = quit", 0xFFCCCCCC,
+                        SUBTITLE_SIZE);
 
       // Draw separator line
       gfx.draw_hline(TEXT_START_X, 68, width - TEXT_START_X * 2, 0xFF444444);

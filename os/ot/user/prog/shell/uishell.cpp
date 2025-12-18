@@ -28,8 +28,20 @@ using ou::string_view;
 using tcl::Interp;
 using tcl::Status;
 
-// UI Shell storage - implements TclIO to redirect interpreter output to the UI
-struct UIShellStorage : public shell::ShellStorage, public tcl::TclIO {
+// Forward declaration
+struct UIShellStorage;
+
+// TclIO implementation for UI shell
+struct UIShellTclIO : public tcl::TclIO {
+  UIShellStorage *storage;
+
+  UIShellTclIO(UIShellStorage *s) : storage(s) {}
+  void write(const char *str) override;
+  void write_error(const char *str) override;
+};
+
+// UI Shell storage - uses composition for TclIO instead of inheritance
+struct UIShellStorage : public shell::ShellStorage {
   char input_buffer[MAX_LINE_LENGTH];
   size_t input_pos;
   GraphicsClient gfxc;
@@ -45,7 +57,10 @@ struct UIShellStorage : public shell::ShellStorage, public tcl::TclIO {
   bool cursor_visible;
   int cursor_blink_counter;
 
-  UIShellStorage() {
+  // TclIO implementation (composition instead of inheritance)
+  UIShellTclIO tcl_io;
+
+  UIShellStorage() : tcl_io(this) {
     process_storage_init(50); // Need more pages for TTF rendering
 
     // Allocate output buffer dynamically
@@ -94,37 +109,37 @@ struct UIShellStorage : public shell::ShellStorage, public tcl::TclIO {
     output_start = 0;
     output_count = 0;
   }
-
-  // TclIO interface - redirect output to the UI buffer
-  void write(const char *str) override {
-    // Split on newlines and add each line separately
-    char line_buf[MAX_LINE_LENGTH];
-    int line_pos = 0;
-
-    for (const char *p = str; *p; p++) {
-      if (*p == '\n') {
-        line_buf[line_pos] = '\0';
-        if (line_pos > 0) {
-          add_output_line(line_buf);
-        }
-        line_pos = 0;
-      } else if (line_pos < MAX_LINE_LENGTH - 1) {
-        line_buf[line_pos++] = *p;
-      }
-    }
-    // Handle any trailing content without newline
-    if (line_pos > 0) {
-      line_buf[line_pos] = '\0';
-      add_output_line(line_buf);
-    }
-  }
-
-  void write_error(const char *str) override {
-    // Write to both UI buffer and console
-    write(str);
-    oprintf("%s", str);
-  }
 };
+
+// Implement TclIO methods
+void UIShellTclIO::write(const char *str) {
+  // Split on newlines and add each line separately
+  char line_buf[MAX_LINE_LENGTH];
+  int line_pos = 0;
+
+  for (const char *p = str; *p; p++) {
+    if (*p == '\n') {
+      line_buf[line_pos] = '\0';
+      if (line_pos > 0) {
+        storage->add_output_line(line_buf);
+      }
+      line_pos = 0;
+    } else if (line_pos < MAX_LINE_LENGTH - 1) {
+      line_buf[line_pos++] = *p;
+    }
+  }
+  // Handle any trailing content without newline
+  if (line_pos > 0) {
+    line_buf[line_pos] = '\0';
+    storage->add_output_line(line_buf);
+  }
+}
+
+void UIShellTclIO::write_error(const char *str) {
+  // Write to both UI buffer and console
+  write(str);
+  oprintf("%s", str);
+}
 
 void handle_key_event(UIShellStorage *s, tcl::Interp &i, uint16_t code, uint8_t flags) {
   // Only process key press events
@@ -288,7 +303,7 @@ tcl::Status cmd_gfx_loop(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
 
   auto fb_result = s->gfxc.get_framebuffer();
   if (fb_result.is_err()) {
-    oprintf("gfx/loop: failed to get framebuffer: %d\n", fb_result.error());
+    oprintf("gfx/loop: failed to get framebuffer from pid %d: %d\n", s->gfxc.pid_.raw(), fb_result.error());
     return tcl::S_ERR;
   }
   auto fb_info = fb_result.value();
@@ -321,8 +336,8 @@ tcl::Status cmd_gfx_loop(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
     if (fm.begin_frame()) {
       gfx.clear(0xff0000ff);
 
-      Status s = i.eval(string_view(argv[2]));
-      if (s != tcl::S_OK)
+      Status eval_status = i.eval(string_view(argv[2]));
+      if (eval_status != tcl::S_OK)
         break;
 
       ou_yield();
@@ -438,7 +453,7 @@ void uishell_main() {
   tcl::Interp i;
 
   // Set I/O backend to redirect puts, help, etc. to the UI
-  i.set_io(s);
+  i.set_io(&s->tcl_io);
 
   tcl::register_core_commands(i);
   i.register_mpack_functions(mp_page, OT_PAGE_SIZE);

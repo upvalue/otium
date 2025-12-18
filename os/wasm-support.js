@@ -12,14 +12,16 @@ const path = require('path');
 // Filesystem Storage
 // =============================================================================
 
-// In-memory filesystem storage: path -> { type: 'file'|'dir', data: Uint8Array }
+// In-memory filesystem storage: lowercase path -> { type: 'file'|'dir', data: Uint8Array, displayName: string }
+// Case-insensitive like FAT, but preserves case for display
 const fsStorage = new Map();
 
 // Initialize root directory
-fsStorage.set('/', { type: 'dir', data: null, children: new Set() });
+fsStorage.set('/', { type: 'dir', data: null, children: new Map(), displayName: '' });
 
 /**
  * Normalize a path: remove trailing slashes, handle . and ..
+ * Returns lowercase path for lookups (case-insensitive)
  */
 function normalizePath(p) {
   if (!p || p === '') return '/';
@@ -27,11 +29,11 @@ function normalizePath(p) {
   while (p.length > 1 && p.endsWith('/')) {
     p = p.slice(0, -1);
   }
-  return p;
+  return p.toLowerCase(); // Case-insensitive
 }
 
 /**
- * Get parent path
+ * Get parent path (lowercase)
  */
 function getParentPath(p) {
   const normalized = normalizePath(p);
@@ -42,13 +44,27 @@ function getParentPath(p) {
 }
 
 /**
- * Get basename (last component of path)
+ * Get basename (last component of path, lowercase)
  */
 function getBasename(p) {
   const normalized = normalizePath(p);
   if (normalized === '/') return '';
   const lastSlash = normalized.lastIndexOf('/');
   return normalized.slice(lastSlash + 1);
+}
+
+/**
+ * Get display name from original path (preserves case)
+ */
+function getDisplayName(p) {
+  if (!p || p === '' || p === '/') return '';
+  let path = p;
+  if (!path.startsWith('/')) path = '/' + path;
+  while (path.length > 1 && path.endsWith('/')) {
+    path = path.slice(0, -1);
+  }
+  const lastSlash = path.lastIndexOf('/');
+  return path.slice(lastSlash + 1);
 }
 
 /**
@@ -59,13 +75,15 @@ function ensureParentDirs(p) {
   const parts = normalized.split('/').filter(x => x);
   let current = '';
   for (let i = 0; i < parts.length - 1; i++) {
+    const displayPart = getDisplayName('/' + parts[i]);
     current += '/' + parts[i];
     if (!fsStorage.has(current)) {
-      fsStorage.set(current, { type: 'dir', data: null, children: new Set() });
+      fsStorage.set(current, { type: 'dir', data: null, children: new Map(), displayName: displayPart });
       const parent = getParentPath(current);
       const parentEntry = fsStorage.get(parent);
       if (parentEntry && parentEntry.type === 'dir') {
-        parentEntry.children.add(getBasename(current));
+        const basename = getBasename(current);
+        parentEntry.children.set(basename, displayPart);
       }
     }
   }
@@ -87,20 +105,22 @@ function loadFilesFromDir(baseDir) {
       const normalizedPath = normalizePath(virtualEntryPath);
 
       if (entry.isDirectory()) {
-        fsStorage.set(normalizedPath, { type: 'dir', data: null, children: new Set() });
+        fsStorage.set(normalizedPath, { type: 'dir', data: null, children: new Map(), displayName: entry.name });
         const parent = getParentPath(normalizedPath);
         const parentEntry = fsStorage.get(parent);
         if (parentEntry && parentEntry.type === 'dir') {
-          parentEntry.children.add(entry.name);
+          const basename = getBasename(normalizedPath);
+          parentEntry.children.set(basename, entry.name);
         }
         loadDir(diskEntryPath, virtualEntryPath);
       } else if (entry.isFile()) {
         const content = fs.readFileSync(diskEntryPath);
-        fsStorage.set(normalizedPath, { type: 'file', data: new Uint8Array(content) });
+        fsStorage.set(normalizedPath, { type: 'file', data: new Uint8Array(content), displayName: entry.name });
         const parent = getParentPath(normalizedPath);
         const parentEntry = fsStorage.get(parent);
         if (parentEntry && parentEntry.type === 'dir') {
-          parentEntry.children.add(entry.name);
+          const basename = getBasename(normalizedPath);
+          parentEntry.children.set(basename, entry.name);
         }
       }
     }
@@ -118,12 +138,23 @@ function saveFilesToDir(outDir) {
     fs.mkdirSync(outDir, { recursive: true });
   }
 
-  for (const [virtualPath, entry] of fsStorage) {
-    if (virtualPath === '/') continue;
+  // Build paths using display names for proper case
+  function savePath(virtualPath, entry) {
+    if (virtualPath === '/') return;
 
-    const diskPath = path.join(outDir, virtualPath);
+    // Reconstruct path using display names
+    const parts = virtualPath.split('/').filter(x => x);
+    let diskPath = outDir;
+    let currentVirtualPath = '';
+
+    for (const part of parts) {
+      currentVirtualPath += '/' + part;
+      const currentEntry = fsStorage.get(currentVirtualPath);
+      const displayName = currentEntry ? currentEntry.displayName : part;
+      diskPath = path.join(diskPath, displayName);
+    }
+
     const diskParent = path.dirname(diskPath);
-
     if (!fs.existsSync(diskParent)) {
       fs.mkdirSync(diskParent, { recursive: true });
     }
@@ -135,6 +166,10 @@ function saveFilesToDir(outDir) {
     } else if (entry.type === 'file') {
       fs.writeFileSync(diskPath, entry.data);
     }
+  }
+
+  for (const [virtualPath, entry] of fsStorage) {
+    savePath(virtualPath, entry);
   }
   return fsStorage.size - 1;
 }
@@ -437,16 +472,19 @@ const filesystemCallbacks = {
       return false;
     }
 
+    const displayName = getDisplayName(pathStr);
+
     if (!entry) {
       ensureParentDirs(normalized);
     }
 
-    fsStorage.set(normalized, { type: 'file', data: data });
+    fsStorage.set(normalized, { type: 'file', data: data, displayName: displayName });
 
     const parent = getParentPath(normalized);
     const parentEntry = fsStorage.get(parent);
     if (parentEntry && parentEntry.type === 'dir') {
-      parentEntry.children.add(getBasename(normalized));
+      const basename = getBasename(normalized);
+      parentEntry.children.set(basename, displayName);
     }
 
     return true;
@@ -459,13 +497,16 @@ const filesystemCallbacks = {
       return false;
     }
 
+    const displayName = getDisplayName(pathStr);
+
     ensureParentDirs(normalized);
-    fsStorage.set(normalized, { type: 'file', data: new Uint8Array(0) });
+    fsStorage.set(normalized, { type: 'file', data: new Uint8Array(0), displayName: displayName });
 
     const parent = getParentPath(normalized);
     const parentEntry = fsStorage.get(parent);
     if (parentEntry && parentEntry.type === 'dir') {
-      parentEntry.children.add(getBasename(normalized));
+      const basename = getBasename(normalized);
+      parentEntry.children.set(basename, displayName);
     }
 
     return true;
@@ -478,13 +519,16 @@ const filesystemCallbacks = {
       return false;
     }
 
+    const displayName = getDisplayName(pathStr);
+
     ensureParentDirs(normalized);
-    fsStorage.set(normalized, { type: 'dir', data: null, children: new Set() });
+    fsStorage.set(normalized, { type: 'dir', data: null, children: new Map(), displayName: displayName });
 
     const parent = getParentPath(normalized);
     const parentEntry = fsStorage.get(parent);
     if (parentEntry && parentEntry.type === 'dir') {
-      parentEntry.children.add(getBasename(normalized));
+      const basename = getBasename(normalized);
+      parentEntry.children.set(basename, displayName);
     }
 
     return true;
@@ -537,14 +581,14 @@ const filesystemCallbacks = {
       return null;
     }
 
-    // Return array of entry names (with '/' suffix for directories)
+    // Return array of entry names using display names (with '/' suffix for directories)
     const result = [];
     if (entry.children) {
-      for (const childName of entry.children) {
-        const childPath = normalized === '/' ? '/' + childName : normalized + '/' + childName;
+      for (const [lowercaseBasename, displayName] of entry.children) {
+        const childPath = normalized === '/' ? '/' + lowercaseBasename : normalized + '/' + lowercaseBasename;
         const childEntry = fsStorage.get(childPath);
         if (childEntry) {
-          result.push(childEntry.type === 'dir' ? childName + '/' : childName);
+          result.push(childEntry.type === 'dir' ? displayName + '/' : displayName);
         }
       }
     }

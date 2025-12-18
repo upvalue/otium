@@ -7,6 +7,8 @@
 #include "ot/user/keyboard/backend-none.hpp"
 #elif OT_KEYBOARD_BACKEND == OT_KEYBOARD_BACKEND_VIRTIO
 #include "ot/user/keyboard/backend-virtio.hpp"
+#elif OT_KEYBOARD_BACKEND == OT_KEYBOARD_BACKEND_WASM
+#include "ot/user/keyboard/backend-wasm.hpp"
 #endif
 
 // Keyboard server implementation with instance state
@@ -69,6 +71,11 @@ void proc_keyboard(void) {
   }
 
   VirtioKeyboardBackend &backend = *backend_ptr;
+#elif OT_KEYBOARD_BACKEND == OT_KEYBOARD_BACKEND_WASM
+  l.log("Using WASM keyboard backend");
+  static char backend_buffer[sizeof(WasmKeyboardBackend)] __attribute__((aligned(alignof(WasmKeyboardBackend))));
+  WasmKeyboardBackend *backend_ptr = new (backend_buffer) WasmKeyboardBackend();
+  WasmKeyboardBackend &backend = *backend_ptr;
 #else
 #error "Unknown keyboard backend"
 #endif

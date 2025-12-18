@@ -46,6 +46,7 @@ if target_arch == 'riscv'
   is_wasm = false
   default_graphics_backend = 'virtio'
   default_filesystem_backend = 'memory'
+  default_keyboard_backend = 'virtio'
 elif target_arch == 'wasm'
   arch_defines = ['-DOT_ARCH_WASM']
   is_posix = false
@@ -53,6 +54,7 @@ elif target_arch == 'wasm'
   is_wasm = true
   default_graphics_backend = 'wasm'
   default_filesystem_backend = 'wasm'
+  default_keyboard_backend = 'wasm'
 elif target_arch == 'posix'
   arch_defines = ['-DOT_POSIX']
   is_posix = true
@@ -60,6 +62,7 @@ elif target_arch == 'posix'
   is_wasm = false
   default_graphics_backend = 'none'
   default_filesystem_backend = 'none'
+  default_keyboard_backend = 'none'
 else
   error('Unknown target architecture: ' + target_arch)
 endif
@@ -97,11 +100,7 @@ endif
 
 keyboard_backend = get_option('keyboard_backend')
 if keyboard_backend == 'auto'
-  if is_riscv
-    keyboard_backend = 'virtio'
-  else
-    keyboard_backend = 'none'
-  endif
+  keyboard_backend = default_keyboard_backend
 endif
 
 # Set backend configuration
@@ -123,6 +122,7 @@ filesystem_backend_map = {
 keyboard_backend_map = {
   'none': 'OT_KEYBOARD_BACKEND_NONE',
   'virtio': 'OT_KEYBOARD_BACKEND_VIRTIO',
+  'wasm': 'OT_KEYBOARD_BACKEND_WASM',
 }
 
 config_data.set('GRAPHICS_BACKEND', graphics_backend_map[graphics_backend])

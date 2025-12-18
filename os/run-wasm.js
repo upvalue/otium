@@ -77,6 +77,11 @@ const Module = {
     support.graphicsCleanup();
   },
 
+  // Keyboard callbacks
+  keyboardInit: support.keyboardInit,
+  keyboardPoll: support.keyboardPoll,
+  keyboardCleanup: support.keyboardCleanup,
+
   // Filesystem callbacks
   ...support.filesystemCallbacks,
 

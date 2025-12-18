@@ -84,6 +84,7 @@
 // Keyboard backend options
 #define OT_KEYBOARD_BACKEND_NONE 0
 #define OT_KEYBOARD_BACKEND_VIRTIO 1
+#define OT_KEYBOARD_BACKEND_WASM 2
 
 // Selected keyboard backend (configured by meson)
 #define OT_KEYBOARD_BACKEND @KEYBOARD_BACKEND@

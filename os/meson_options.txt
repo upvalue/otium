@@ -46,7 +46,7 @@ option('filesystem_backend',
 # Keyboard backend - auto selects platform default if not specified
 option('keyboard_backend',
   type: 'combo',
-  choices: ['auto', 'none', 'virtio'],
+  choices: ['auto', 'none', 'virtio', 'wasm'],
   value: 'auto',
   description: 'Keyboard backend to use (auto = platform default)'
 )

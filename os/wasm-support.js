@@ -148,6 +148,48 @@ let sdlAvailable = false;
 let window = null;
 let pixelBuffer = null;
 
+// SDL key (string) to DOM code mapping
+// SDL returns key as a string like "a", "escape", etc.
+const SDL_TO_DOM_KEYCODE = {
+  // Special keys
+  'escape': 'Escape',
+  'return': 'Enter',
+  'backspace': 'Backspace',
+  'tab': 'Tab',
+  'space': 'Space',
+  // Letters (SDL gives lowercase)
+  'a': 'KeyA', 'b': 'KeyB', 'c': 'KeyC', 'd': 'KeyD', 'e': 'KeyE',
+  'f': 'KeyF', 'g': 'KeyG', 'h': 'KeyH', 'i': 'KeyI', 'j': 'KeyJ',
+  'k': 'KeyK', 'l': 'KeyL', 'm': 'KeyM', 'n': 'KeyN', 'o': 'KeyO',
+  'p': 'KeyP', 'q': 'KeyQ', 'r': 'KeyR', 's': 'KeyS', 't': 'KeyT',
+  'u': 'KeyU', 'v': 'KeyV', 'w': 'KeyW', 'x': 'KeyX', 'y': 'KeyY',
+  'z': 'KeyZ',
+  // Numbers
+  '0': 'Digit0', '1': 'Digit1', '2': 'Digit2', '3': 'Digit3', '4': 'Digit4',
+  '5': 'Digit5', '6': 'Digit6', '7': 'Digit7', '8': 'Digit8', '9': 'Digit9',
+  // Punctuation
+  '-': 'Minus', '=': 'Equal', '[': 'BracketLeft', ']': 'BracketRight',
+  ';': 'Semicolon', "'": 'Quote', '`': 'Backquote', '\\': 'Backslash',
+  ',': 'Comma', '.': 'Period', '/': 'Slash',
+  // Modifiers (SDL can report generic or specific names)
+  'shift': 'ShiftLeft',
+  'left shift': 'ShiftLeft', 'right shift': 'ShiftRight',
+  'ctrl': 'ControlLeft',
+  'left ctrl': 'ControlLeft', 'right ctrl': 'ControlRight',
+  'alt': 'AltLeft',
+  'left alt': 'AltLeft', 'right alt': 'AltRight',
+};
+
+// SDL scancode to DOM code mapping (fallback for when key is null/unknown)
+const SDL_SCANCODE_TO_DOM = {
+  229: 'ShiftLeft',   // Left Shift
+  225: 'ShiftRight',  // Right Shift
+  224: 'ControlLeft', // Left Ctrl
+  228: 'ControlRight',// Right Ctrl
+  226: 'AltLeft',     // Left Alt
+  230: 'AltRight',    // Right Alt
+};
+
 function checkSdlAvailable() {
   try {
     require.resolve('@kmamal/sdl');
@@ -177,6 +219,36 @@ function graphicsInit(width, height) {
     });
 
     pixelBuffer = Buffer.allocUnsafe(width * height * 4);
+
+    // Set up keyboard event handlers now that window exists
+    window.on('keyDown', (event) => {
+      let domCode = SDL_TO_DOM_KEYCODE[event.key];
+
+      // Fallback to scancode if key is null or unmapped
+      if (!domCode && event.scancode) {
+        domCode = SDL_SCANCODE_TO_DOM[event.scancode];
+      }
+
+      if (domCode) {
+        keyboardHandleEvent(domCode, true);
+      } else {
+        console.log(`[SDL] Unknown key: "${event.key}", scancode: ${event.scancode}`);
+      }
+    });
+
+    window.on('keyUp', (event) => {
+      let domCode = SDL_TO_DOM_KEYCODE[event.key];
+
+      // Fallback to scancode if key is null or unmapped
+      if (!domCode && event.scancode) {
+        domCode = SDL_SCANCODE_TO_DOM[event.scancode];
+      }
+
+      if (domCode) {
+        keyboardHandleEvent(domCode, false);
+      }
+    });
+
     return true;
   } catch (e) {
     console.error('Failed to initialize graphics:', e);
@@ -216,6 +288,119 @@ function graphicsCleanup() {
     window = null;
   }
   pixelBuffer = null;
+}
+
+// =============================================================================
+// Keyboard Support
+// =============================================================================
+
+// Event queue: {code: uint16, flags: uint8}
+const keyboardEventQueue = [];
+
+// Modifier state
+const keyboardModifiers = {
+  shift: false,
+  ctrl: false,
+  alt: false,
+};
+
+// DOM key code to Linux input code mapping
+const DOM_TO_LINUX_KEYCODE = {
+  'Escape': 1,
+  'Digit1': 2, 'Digit2': 3, 'Digit3': 4, 'Digit4': 5, 'Digit5': 6,
+  'Digit6': 7, 'Digit7': 8, 'Digit8': 9, 'Digit9': 10, 'Digit0': 11,
+  'Minus': 12, 'Equal': 13, 'Backspace': 14, 'Tab': 15,
+  'KeyQ': 16, 'KeyW': 17, 'KeyE': 18, 'KeyR': 19, 'KeyT': 20,
+  'KeyY': 21, 'KeyU': 22, 'KeyI': 23, 'KeyO': 24, 'KeyP': 25,
+  'BracketLeft': 26, 'BracketRight': 27, 'Enter': 28,
+  'KeyA': 30, 'KeyS': 31, 'KeyD': 32, 'KeyF': 33, 'KeyG': 34,
+  'KeyH': 35, 'KeyJ': 36, 'KeyK': 37, 'KeyL': 38,
+  'Semicolon': 39, 'Quote': 40, 'Backquote': 41, 'Backslash': 43,
+  'KeyZ': 44, 'KeyX': 45, 'KeyC': 46, 'KeyV': 47, 'KeyB': 48,
+  'KeyN': 49, 'KeyM': 50, 'Comma': 51, 'Period': 52, 'Slash': 53,
+  'Space': 57,
+  'ShiftLeft': 42, 'ShiftRight': 54,
+  'ControlLeft': 29, 'ControlRight': 97,
+  'AltLeft': 56, 'AltRight': 100,
+};
+
+function isModifierKey(code) {
+  return code === 42 || code === 54 ||  // Shift
+         code === 29 || code === 97 ||  // Ctrl
+         code === 56 || code === 100;   // Alt
+}
+
+function keyboardHandleEvent(domCode, isKeyDown) {
+  const linuxCode = DOM_TO_LINUX_KEYCODE[domCode];
+  if (linuxCode === undefined) {
+    console.log(`[KB] Unknown DOM code: ${domCode}`);
+    return;
+  }
+
+  // Update modifier state
+  if (linuxCode === 42 || linuxCode === 54) {
+    keyboardModifiers.shift = isKeyDown;
+  } else if (linuxCode === 29 || linuxCode === 97) {
+    keyboardModifiers.ctrl = isKeyDown;
+  } else if (linuxCode === 56 || linuxCode === 100) {
+    keyboardModifiers.alt = isKeyDown;
+  }
+
+  // Build flags
+  let flags = 0;
+  if (isKeyDown) flags |= 0x01; // KEY_FLAG_PRESSED
+  if (keyboardModifiers.shift) flags |= 0x02;
+  if (keyboardModifiers.ctrl) flags |= 0x04;
+  if (keyboardModifiers.alt) flags |= 0x08;
+
+  // Don't queue modifier-only events (matches VirtIO backend behavior)
+  if (!isModifierKey(linuxCode)) {
+    keyboardEventQueue.push({ code: linuxCode, flags: flags });
+  }
+}
+
+function keyboardInit() {
+  console.log('Keyboard init');
+
+  // Check if we're in a browser environment
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    // Browser: attach to canvas or document
+    const target = document.querySelector('canvas') || document;
+
+    target.addEventListener('keydown', (e) => {
+      e.preventDefault();
+      keyboardHandleEvent(e.code, true);
+    });
+
+    target.addEventListener('keyup', (e) => {
+      e.preventDefault();
+      keyboardHandleEvent(e.code, false);
+    });
+
+    // Make sure canvas can receive keyboard events
+    if (target.tagName === 'CANVAS') {
+      target.tabIndex = 1;
+      target.focus();
+    }
+
+    console.log('Keyboard: Browser mode initialized');
+  } else if (typeof process !== 'undefined') {
+    // Node.js: SDL keyboard events are registered in graphicsInit when window is created
+    console.log('Keyboard: Node.js mode (SDL events registered in graphicsInit)');
+  }
+
+  return true;
+}
+
+function keyboardPoll() {
+  if (keyboardEventQueue.length > 0) {
+    return keyboardEventQueue.shift();
+  }
+  return null;
+}
+
+function keyboardCleanup() {
+  keyboardEventQueue.length = 0;
 }
 
 // =============================================================================
@@ -361,4 +546,10 @@ module.exports = {
   graphicsInit,
   graphicsFlush,
   graphicsCleanup,
+
+  // Keyboard
+  keyboardInit,
+  keyboardPoll,
+  keyboardCleanup,
+  keyboardHandleEvent,
 };

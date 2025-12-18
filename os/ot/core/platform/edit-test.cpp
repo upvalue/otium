@@ -38,7 +38,8 @@ struct TestBackend : Backend {
   void debug_print(const ou::string &msg) override {}
 };
 
-ou::vector<ou::string> edit_test_run(const Key *keys, size_t count, const ou::vector<ou::string> *initial_lines) {
+ou::vector<ou::string> edit_test_run(const Key *keys, size_t count, const ou::vector<ou::string> *initial_lines,
+                                     EditorStyle style) {
   // Reset editor state
   test_editor.row_offset = 0;
   test_editor.col_offset = 0;
@@ -46,7 +47,9 @@ ou::vector<ou::string> edit_test_run(const Key *keys, size_t count, const ou::ve
   test_editor.cy = 0;
   test_editor.rx = 0;
   test_editor.dirty = 0;
-  test_editor.mode = EditorMode::NORMAL;
+  test_editor.style = style;
+  // Set mode based on style
+  test_editor.mode = (style == EditorStyle::SIMPLE) ? EditorMode::INSERT : EditorMode::NORMAL;
   test_editor.pending_operator = Operator::NONE;
   test_editor.lines.clear();
   test_editor.file_lines.clear();

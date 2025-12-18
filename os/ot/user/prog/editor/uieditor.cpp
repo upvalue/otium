@@ -63,6 +63,7 @@ struct GraphicsEditorBackend : edit::Backend {
     edit::Key key;
     bool ctrl = (flags & KEY_FLAG_CTRL) != 0;
     bool shift = (flags & KEY_FLAG_SHIFT) != 0;
+    bool alt = (flags & KEY_FLAG_ALT) != 0;
 
     // Extended keys (non-printable)
     switch (code) {
@@ -110,6 +111,16 @@ struct GraphicsEditorBackend : edit::Backend {
       if (ch >= 'a' && ch <= 'z') {
         key.c = ch;
         key.ctrl = true;
+        return key;
+      }
+    }
+
+    // Alt combinations
+    if (alt) {
+      char ch = keyboard::scancode_to_ascii(code, false);
+      if (ch >= 'a' && ch <= 'z') {
+        key.c = ch;
+        key.alt = true;
         return key;
       }
     }

@@ -179,3 +179,46 @@ TEST_CASE("edit: d followed by Esc cancels") {
     CHECK(result[0] == "XHello");
   }
 }
+
+// Simple mode tests
+TEST_CASE("edit: simple mode starts in INSERT") {
+  Key script[] = {
+      key_char('H'), key_char('e'), key_char('l'), key_char('l'), key_char('o'),
+  };
+  auto result = edit_test_run(script, sizeof(script) / sizeof(script[0]), nullptr, EditorStyle::SIMPLE);
+  CHECK(result.size() >= 1);
+  if (result.size() >= 1) {
+    CHECK(result[0] == "Hello");
+  }
+}
+
+TEST_CASE("edit: simple mode C-a moves to line start") {
+  ou::vector<ou::string> initial;
+  initial.push_back("Hello");
+
+  Key script[] = {
+      key_right(), key_right(), key_right(), // Move to middle
+      key_ctrl('a'),                         // Move to start
+      key_char('X'),
+  };
+  auto result = edit_test_run(script, sizeof(script) / sizeof(script[0]), &initial, EditorStyle::SIMPLE);
+  CHECK(result.size() >= 1);
+  if (result.size() >= 1) {
+    CHECK(result[0] == "XHello");
+  }
+}
+
+TEST_CASE("edit: simple mode C-e moves to line end") {
+  ou::vector<ou::string> initial;
+  initial.push_back("Hello");
+
+  Key script[] = {
+      key_ctrl('e'), // Move to end
+      key_char('!'),
+  };
+  auto result = edit_test_run(script, sizeof(script) / sizeof(script[0]), &initial, EditorStyle::SIMPLE);
+  CHECK(result.size() >= 1);
+  if (result.size() >= 1) {
+    CHECK(result[0] == "Hello!");
+  }
+}

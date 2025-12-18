@@ -26,6 +26,12 @@ enum class EditorMode {
   COMMND,
 };
 
+// Editor style (keybinding mode)
+enum class EditorStyle {
+  SIMPLE, // Non-vim mode (default) - starts in INSERT, emacs-style keybindings
+  VIM,    // Traditional vim mode - starts in NORMAL, vim keybindings
+};
+
 // Operators that can be combined with motions (forward declaration for Editor)
 enum class Operator {
   NONE,
@@ -35,8 +41,8 @@ enum class Operator {
 
 struct Editor {
   Editor()
-      : row_offset(0), col_offset(0), cx(0), cy(0), rx(0), dirty(0), last_message_time(0), mode(EditorMode::NORMAL),
-        pending_operator(Operator::NONE), be(nullptr), interp(nullptr), running(true) {}
+      : row_offset(0), col_offset(0), cx(0), cy(0), rx(0), dirty(0), last_message_time(0), mode(EditorMode::INSERT),
+        pending_operator(Operator::NONE), style(EditorStyle::SIMPLE), be(nullptr), interp(nullptr), running(true) {}
 
   intptr_t row_offset, col_offset;
 
@@ -62,6 +68,7 @@ struct Editor {
 
   EditorMode mode;
   Operator pending_operator; // Set when waiting for motion (e.g., after 'd')
+  EditorStyle style;         // Current keybinding style (SIMPLE or VIM)
 
   // Runtime state (set by edit_main)
   Backend *be;
@@ -134,12 +141,13 @@ enum ExtendedKey {
 };
 
 struct Key {
-  Key() : c(0), ext(ExtendedKey::NONE), ctrl(false) {}
+  Key() : c(0), ext(ExtendedKey::NONE), ctrl(false), alt(false) {}
 
   char c;
   ExtendedKey ext;
 
   bool ctrl;
+  bool alt;
 };
 
 // Helper functions for building key sequences (useful for testing)
@@ -152,6 +160,12 @@ inline Key key_ctrl(char c) {
   Key k;
   k.c = c;
   k.ctrl = true;
+  return k;
+}
+inline Key key_alt(char c) {
+  Key k;
+  k.c = c;
+  k.alt = true;
   return k;
 }
 inline Key key_ext(ExtendedKey ext) {
@@ -243,7 +257,8 @@ void edit_run(Backend *backend, Editor *editor, tcl::Interp *interp, ou::string 
 
 // Test helper - runs editor with scripted keys, returns final file contents
 ou::vector<ou::string> edit_test_run(const Key *keys, size_t count,
-                                     const ou::vector<ou::string> *initial_lines = nullptr);
+                                     const ou::vector<ou::string> *initial_lines = nullptr,
+                                     EditorStyle style = EditorStyle::VIM);
 
 } // namespace edit
 

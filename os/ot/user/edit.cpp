@@ -60,18 +60,58 @@ static Keybinding default_bindings[] = {
 };
 static const size_t num_bindings = sizeof(default_bindings) / sizeof(default_bindings[0]);
 
+// Simple (non-vim) keybindings - emacs-style
+static Keybinding simple_bindings[] = {
+    // Global (any mode)
+    {key_alt('x'), ANY_MODE, Action::ENTER_COMMAND_MODE}, // M-x enters command mode
+
+    // Movement in INSERT mode
+    {key_left(), EditorMode::INSERT, Action::MOVE_LEFT},
+    {key_right(), EditorMode::INSERT, Action::MOVE_RIGHT},
+    {key_up(), EditorMode::INSERT, Action::MOVE_UP},
+    {key_down(), EditorMode::INSERT, Action::MOVE_DOWN},
+    {key_ctrl('a'), EditorMode::INSERT, Action::MOVE_LINE_START}, // C-a
+    {key_ctrl('e'), EditorMode::INSERT, Action::MOVE_LINE_END},   // C-e
+
+    // Page navigation
+    {key_ctrl('d'), ANY_MODE, Action::PAGE_DOWN},
+    {key_ctrl('u'), ANY_MODE, Action::PAGE_UP},
+
+    // Editing (INSERT mode)
+    {key_enter(), EditorMode::INSERT, Action::INSERT_NEWLINE},
+    {key_backspace(), EditorMode::INSERT, Action::DELETE_CHAR_BACK},
+
+    // Command mode
+    {key_enter(), EditorMode::COMMND, Action::COMMAND_EXECUTE},
+    {key_backspace(), EditorMode::COMMND, Action::COMMAND_BACKSPACE},
+};
+static const size_t num_simple_bindings = sizeof(simple_bindings) / sizeof(simple_bindings[0]);
+
 // Compare two keys for equality
 static bool keys_match(const Key &a, const Key &b) {
   if (a.ext != ExtendedKey::NONE || b.ext != ExtendedKey::NONE) {
-    return a.ext == b.ext && a.ctrl == b.ctrl;
+    return a.ext == b.ext && a.ctrl == b.ctrl && a.alt == b.alt;
   }
-  return a.c == b.c && a.ctrl == b.ctrl;
+  return a.c == b.c && a.ctrl == b.ctrl && a.alt == b.alt;
 }
 
-// Look up action for a key in the given mode
-static Action lookup_action(EditorMode mode, const Key &key) {
-  for (size_t i = 0; i < num_bindings; i++) {
-    const Keybinding &binding = default_bindings[i];
+// Look up action for a key in the given mode and style
+static Action lookup_action(EditorStyle style, EditorMode mode, const Key &key) {
+  const Keybinding *bindings;
+  size_t count;
+
+  // Select keybinding table based on style
+  if (style == EditorStyle::VIM) {
+    bindings = default_bindings;
+    count = num_bindings;
+  } else {
+    bindings = simple_bindings;
+    count = num_simple_bindings;
+  }
+
+  // Look up action in selected table
+  for (size_t i = 0; i < count; i++) {
+    const Keybinding &binding = bindings[i];
     if (binding.mode != ANY_MODE && binding.mode != mode) {
       continue;
     }
@@ -218,7 +258,8 @@ void Editor::execute_action(Action action, const Key &key) {
   case Action::COMMAND_EXECUTE:
     interpret_command();
     command_line.clear();
-    mode = EditorMode::NORMAL;
+    // In simple mode, return to INSERT; in vim mode, return to NORMAL
+    mode = (style == EditorStyle::SIMPLE) ? EditorMode::INSERT : EditorMode::NORMAL;
     break;
   case Action::COMMAND_BACKSPACE:
     if (!command_line.empty()) {
@@ -330,7 +371,7 @@ void Editor::process_key_press() {
     return;
   }
 
-  Action action = lookup_action(mode, k);
+  Action action = lookup_action(style, mode, k);
 
   // Handle operator-pending state
   if (pending_operator != Operator::NONE) {
@@ -421,19 +462,31 @@ void Editor::message_clear() {
 
 void Editor::generate_status_line() {
   status_line.clear();
-  if (mode == EditorMode::INSERT) {
-    status_line.append("[insert] ");
-  } else if (mode == EditorMode::COMMND) {
-    status_line.append("[commnd] ");
-  } else if (mode == EditorMode::NORMAL) {
-    if (pending_operator == Operator::DELETE) {
-      status_line.append("[normal d] ");
+
+  // Show style and mode
+  if (style == EditorStyle::SIMPLE) {
+    if (mode == EditorMode::COMMND) {
+      status_line.append("[commnd] ");
+    } else {
+      status_line.append("[simple] ");
+    }
+  } else {
+    // VIM style - show traditional vim modes
+    if (mode == EditorMode::INSERT) {
+      status_line.append("[insert] ");
+    } else if (mode == EditorMode::COMMND) {
+      status_line.append("[commnd] ");
+    } else if (mode == EditorMode::NORMAL) {
+      if (pending_operator == Operator::DELETE) {
+        status_line.append("[normal d] ");
+      } else {
+        status_line.append("[normal] ");
+      }
     } else {
       status_line.append("[normal] ");
     }
-  } else {
-    status_line.append("[normal] ");
   }
+
   status_line.append(file_name);
   if (dirty > 0) {
     status_line.append("*");
@@ -516,6 +569,23 @@ static tcl::Status tcl_command_write(tcl::Interp &interp, tcl::vector<tcl::strin
   return tcl::S_OK;
 }
 
+static tcl::Status tcl_command_togglemode(tcl::Interp &interp, tcl::vector<tcl::string> &argv,
+                                          tcl::ProcPrivdata *privdata) {
+  auto *pd = static_cast<TclEditorPrivdata *>(privdata);
+  Editor &e = *pd->editor;
+
+  if (e.style == EditorStyle::SIMPLE) {
+    e.style = EditorStyle::VIM;
+    e.mode = EditorMode::NORMAL;
+    e.message_set("vim mode");
+  } else {
+    e.style = EditorStyle::SIMPLE;
+    e.mode = EditorMode::INSERT;
+    e.message_set("simple mode");
+  }
+  return tcl::S_OK;
+}
+
 namespace edit {
 
 void edit_run(Backend *be_, Editor *editor, tcl::Interp *interp, ou::string *file_path) {
@@ -538,6 +608,8 @@ void edit_run(Backend *be_, Editor *editor, tcl::Interp *interp, ou::string *fil
 
     interp->register_command("write", tcl_command_write, &privdata);
     interp->register_command("w", tcl_command_write, &privdata);
+
+    interp->register_command("togglemode", tcl_command_togglemode, &privdata);
   }
 
   be_->error_msg = default_error_msg;

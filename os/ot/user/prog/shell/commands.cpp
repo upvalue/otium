@@ -278,7 +278,7 @@ tcl::Status cmd_shutdown(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
 }
 
 tcl::Status cmd_dir_ls(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
-  if (!i.arity_check("dir/ls", argv, 1, 2)) {
+  if (!i.arity_check("fs/ls-dir", argv, 1, 2)) {
     return tcl::S_ERR;
   }
 
@@ -348,8 +348,8 @@ void register_shell_commands(tcl::Interp &i) {
   i.register_command("dofile", cmd_dofile, nullptr, "[dofile filename:string] => result - Execute a Tcl script file");
 
   // Directory commands
-  i.register_command("dir/ls", cmd_dir_ls, nullptr,
-                     "[dir/ls path?] => list - List directory contents (dirs have trailing /)");
+  i.register_command("fs/ls-dir", cmd_dir_ls, nullptr,
+                     "[fs/ls-dir path?] => list - List directory contents (dirs have trailing /)");
 
   // Process spawning
   i.register_command("run", cmd_run, nullptr,

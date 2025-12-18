@@ -1,6 +1,17 @@
 # Text Editor
 
-A minimal vim-like text editor for the Otium OS. It runs as a standalone POSIX tool and uses termbox2 for terminal rendering.
+A minimal text editor for the Otium OS with two editing styles: **simple mode** (default, emacs-style keybindings) and **vim mode** (traditional vim keybindings). It runs as a standalone POSIX tool and uses termbox2 for terminal rendering.
+
+## Editor Styles
+
+The editor supports two keybinding styles that can be toggled with the `togglemode` command:
+
+| Style | Default Mode | Description |
+|-------|--------------|-------------|
+| **Simple** (default) | INSERT | Non-modal editing with emacs-style keybindings. Typing works immediately. |
+| **Vim** | NORMAL | Traditional vim modal editing with vim keybindings. |
+
+Switch between styles using the `;togglemode` command (or `M-x togglemode` in simple mode).
 
 ## Architecture
 
@@ -33,7 +44,18 @@ A minimal vim-like text editor for the Otium OS. It runs as a standalone POSIX t
 
 ## Editor Modes
 
-The editor has three modes, similar to vim:
+The editor's behavior depends on the current **style**:
+
+### Simple Style (Default)
+
+| Mode | Status Line | Description |
+|------|-------------|-------------|
+| INSERT | `[simple]` | Normal editing - type text, use navigation keys |
+| COMMND | `[commnd]` | Enter Tcl commands (entered via `M-x`) |
+
+Simple mode is non-modal - you stay in INSERT mode and can type/navigate freely without mode switching.
+
+### Vim Style
 
 | Mode | Status Line | Description |
 |------|-------------|-------------|
@@ -44,18 +66,40 @@ The editor has three modes, similar to vim:
 
 ## Key Bindings
 
-### All Modes
+### Simple Style Keybindings
+
+**Navigation:**
+- Arrow keys - Move cursor
+- `Ctrl-A` - Move to beginning of line
+- `Ctrl-E` - Move to end of line
+- `Ctrl-D` - Page down (half screen)
+- `Ctrl-U` - Page up (half screen)
+
+**Editing:**
+- `Enter` - Insert newline
+- `Backspace` - Delete character before cursor
+- Printable chars - Insert at cursor
+
+**Commands:**
+- `M-x` (Alt+x) - Enter command mode
+- In command mode:
+  - `Enter` - Execute command
+  - `Backspace` - Delete character
+
+### Vim Style Keybindings
+
+**Global (all modes):**
 - `Ctrl-D` - Page down (half screen)
 - `Ctrl-U` - Page up (half screen)
 - Arrow keys - Move cursor
 
-### Normal Mode
+**Normal Mode:**
 
-**Mode changes:**
+*Mode changes:*
 - `i` - Enter insert mode
 - `;` - Enter command mode (note: `;` not `:`)
 
-**Motions:**
+*Motions:*
 - `h` - Move left
 - `j` - Move down
 - `k` - Move up
@@ -63,22 +107,21 @@ The editor has three modes, similar to vim:
 - `0` - Move to beginning of line
 - `$` - Move to end of line
 
-**Operators:**
+*Operators:*
 - `d` + motion - Delete text covered by motion
   - `d$` - Delete to end of line
   - `d0` - Delete to beginning of line
   - `dd` - Delete entire line
 
-### Insert Mode
+**Insert Mode:**
 - `Esc` - Return to normal mode
 - `Enter` - Insert newline
 - `Backspace` - Delete character before cursor
 - Printable chars - Insert at cursor
 
-### Command Mode
+**Command Mode:**
 - `Enter` - Execute command
 - `Backspace` - Delete character
-- `Esc` - (not implemented, use Enter with empty command)
 
 ## Commands
 
@@ -89,6 +132,7 @@ Commands are Tcl expressions. Built-in editor commands:
 | `q` | `quit` | Quit (fails if unsaved changes) |
 | `q!` | `quit!` | Force quit without saving |
 | `w` | `write` | Write file to disk |
+| `togglemode` | - | Toggle between simple and vim editing styles |
 
 All standard Tcl commands (`set`, `if`, `while`, `proc`, etc.) are also available.
 

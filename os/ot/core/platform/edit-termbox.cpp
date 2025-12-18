@@ -20,8 +20,10 @@ namespace edit {
 
 struct TermboxBackend : Backend {
   int debug_fd;
+  bool pending_alt;  // True if we saw ESC and are waiting for next key
+  uint64_t esc_time; // Time when ESC was pressed
 
-  TermboxBackend() : debug_fd(-1) {
+  TermboxBackend() : debug_fd(-1), pending_alt(false), esc_time(0) {
     // Open debug file in append mode
     debug_fd = open("/tmp/edit-debug.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
   }
@@ -38,6 +40,7 @@ struct TermboxBackend : Backend {
       error_msg = tb_strerror(rv);
       return EditorErr::FATAL_TERM_TCSETATTR_FAILED;
     }
+    // Stay in TB_INPUT_ESC mode (default) - we'll detect Alt manually
     return EditorErr::NONE;
   }
 
@@ -52,8 +55,17 @@ struct TermboxBackend : Backend {
     return Coord{tb_width(), tb_height() - 2};
   }
 
-  Key translateKey(struct tb_event &ev) {
+  uint64_t get_time_ms() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+  }
+
+  Key translateKey(struct tb_event &ev, bool is_alt_sequence) {
     Key key;
+
+    // Set alt flag if this is part of an Alt sequence
+    key.alt = is_alt_sequence;
 
     // Handle extended keys
     switch (ev.key) {
@@ -115,8 +127,31 @@ struct TermboxBackend : Backend {
     struct tb_event ev;
     int ret = tb_peek_event(&ev, 10); // 10ms timeout for responsiveness
 
+    // If we have a pending ESC and timeout has passed (100ms), return ESC key
+    if (pending_alt && ret != TB_OK) {
+      uint64_t now = get_time_ms();
+      if (now - esc_time > 100) {
+        pending_alt = false;
+        Key esc_key;
+        esc_key.ext = ExtendedKey::ESC_KEY;
+        return Result<Key, EditorErr>::ok(esc_key);
+      }
+    }
+
     if (ret == TB_OK && ev.type == TB_EVENT_KEY) {
-      return Result<Key, EditorErr>::ok(translateKey(ev));
+      // Check if this is ESC - start Alt sequence detection
+      if (ev.key == TB_KEY_ESC) {
+        pending_alt = true;
+        esc_time = get_time_ms();
+        // Don't return yet - wait for next key to see if it's Alt+key
+        return Result<Key, EditorErr>::ok(Key{});
+      }
+
+      // If we had a pending ESC and now got another key, this is Alt+key
+      bool is_alt = pending_alt;
+      pending_alt = false;
+
+      return Result<Key, EditorErr>::ok(translateKey(ev, is_alt));
     }
 
     // No key available - return empty key

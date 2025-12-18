@@ -45,9 +45,15 @@ static Keybinding default_bindings[] = {
     // NORMAL mode - operators
     {key_char('d'), EditorMode::NORMAL, Action::OPERATOR_DELETE},
 
-    // NORMAL mode - other
+    // NORMAL mode - mode changes
     {key_char('i'), EditorMode::NORMAL, Action::ENTER_INSERT_MODE},
+    {key_char('a'), EditorMode::NORMAL, Action::ENTER_INSERT_APPEND},
+    {key_char('A'), EditorMode::NORMAL, Action::ENTER_INSERT_APPEND_EOL},
+    {key_char('o'), EditorMode::NORMAL, Action::ENTER_INSERT_OPEN_BELOW},
     {key_char(';'), EditorMode::NORMAL, Action::ENTER_COMMAND_MODE},
+
+    // NORMAL mode - editing
+    {key_char('x'), EditorMode::NORMAL, Action::DELETE_CHAR_UNDER},
 
     // INSERT mode specific
     {key_esc(), EditorMode::INSERT, Action::EXIT_TO_NORMAL},
@@ -242,6 +248,32 @@ void Editor::execute_action(Action action, const Key &key) {
   case Action::ENTER_INSERT_MODE:
     mode = EditorMode::INSERT;
     break;
+  case Action::ENTER_INSERT_APPEND:
+    // Move cursor right one position (or to end of line if at end)
+    if (cy < file_lines.size() && cx < file_lines[cy].length()) {
+      cx++;
+    }
+    mode = EditorMode::INSERT;
+    break;
+  case Action::ENTER_INSERT_APPEND_EOL:
+    // Move cursor to end of line
+    if (cy < file_lines.size()) {
+      cx = file_lines[cy].length();
+    }
+    mode = EditorMode::INSERT;
+    break;
+  case Action::ENTER_INSERT_OPEN_BELOW:
+    // Insert a new line below current line and move to it
+    if (cy < file_lines.size()) {
+      file_lines.insert(cy + 1, ou::string());
+    } else {
+      file_lines.push_back(ou::string());
+    }
+    cy++;
+    cx = 0;
+    dirty++;
+    mode = EditorMode::INSERT;
+    break;
   case Action::ENTER_COMMAND_MODE:
     mode = EditorMode::COMMND;
     command_line.clear();
@@ -254,6 +286,13 @@ void Editor::execute_action(Action action, const Key &key) {
     break;
   case Action::DELETE_CHAR_BACK:
     backspace();
+    break;
+  case Action::DELETE_CHAR_UNDER:
+    // Delete character under cursor (vim 'x')
+    if (cy < file_lines.size() && cx < file_lines[cy].length()) {
+      file_lines[cy].erase(cx, 1);
+      dirty++;
+    }
     break;
   case Action::COMMAND_EXECUTE:
     interpret_command();

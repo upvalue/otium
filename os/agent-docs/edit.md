@@ -96,7 +96,10 @@ Simple mode is non-modal - you stay in INSERT mode and can type/navigate freely 
 **Normal Mode:**
 
 *Mode changes:*
-- `i` - Enter insert mode
+- `i` - Enter insert mode (at cursor)
+- `a` - Append (enter insert mode after cursor)
+- `A` - Append at end of line
+- `o` - Open line below (insert new line and enter insert mode)
 - `;` - Enter command mode (note: `;` not `:`)
 
 *Motions:*
@@ -106,6 +109,9 @@ Simple mode is non-modal - you stay in INSERT mode and can type/navigate freely 
 - `l` - Move right
 - `0` - Move to beginning of line
 - `$` - Move to end of line
+
+*Editing:*
+- `x` - Delete character under cursor
 
 *Operators:*
 - `d` + motion - Delete text covered by motion

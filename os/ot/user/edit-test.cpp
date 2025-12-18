@@ -222,3 +222,72 @@ TEST_CASE("edit: simple mode C-e moves to line end") {
     CHECK(result[0] == "Hello!");
   }
 }
+
+// Vim mode additional commands
+TEST_CASE("edit: vim x deletes char under cursor") {
+  ou::vector<ou::string> initial;
+  initial.push_back("Hello");
+
+  Key script[] = {
+      key_right(), key_right(), // Move to 'l'
+      key_char('x'),            // Delete 'l'
+  };
+  auto result = edit_test_run(script, sizeof(script) / sizeof(script[0]), &initial);
+  CHECK(result.size() >= 1);
+  if (result.size() >= 1) {
+    CHECK(result[0] == "Helo");
+  }
+}
+
+TEST_CASE("edit: vim a appends after cursor") {
+  ou::vector<ou::string> initial;
+  initial.push_back("Hello");
+
+  Key script[] = {
+      key_right(), key_right(), // Move to 'l'
+      key_char('a'),            // Append after cursor (now at second 'l')
+      key_char('X'),
+      key_esc(),
+  };
+  auto result = edit_test_run(script, sizeof(script) / sizeof(script[0]), &initial);
+  CHECK(result.size() >= 1);
+  if (result.size() >= 1) {
+    CHECK(result[0] == "HelXlo");
+  }
+}
+
+TEST_CASE("edit: vim A appends at end of line") {
+  ou::vector<ou::string> initial;
+  initial.push_back("Hello");
+
+  Key script[] = {
+      key_char('A'),  // Append at end of line
+      key_char('!'),
+      key_esc(),
+  };
+  auto result = edit_test_run(script, sizeof(script) / sizeof(script[0]), &initial);
+  CHECK(result.size() >= 1);
+  if (result.size() >= 1) {
+    CHECK(result[0] == "Hello!");
+  }
+}
+
+TEST_CASE("edit: vim o opens line below") {
+  ou::vector<ou::string> initial;
+  initial.push_back("Line 1");
+  initial.push_back("Line 3");
+
+  Key script[] = {
+      key_char('o'),            // Open line below
+      key_char('L'), key_char('i'), key_char('n'), key_char('e'),
+      key_char(' '), key_char('2'),
+      key_esc(),
+  };
+  auto result = edit_test_run(script, sizeof(script) / sizeof(script[0]), &initial);
+  CHECK(result.size() >= 3);
+  if (result.size() >= 3) {
+    CHECK(result[0] == "Line 1");
+    CHECK(result[1] == "Line 2");
+    CHECK(result[2] == "Line 3");
+  }
+}

@@ -202,12 +202,16 @@ enum class Action {
 
   // Mode changes
   ENTER_INSERT_MODE,
+  ENTER_INSERT_APPEND,      // vim: a - append after cursor
+  ENTER_INSERT_APPEND_EOL,  // vim: A - append at end of line
+  ENTER_INSERT_OPEN_BELOW,  // vim: o - open line below
   ENTER_COMMAND_MODE,
   EXIT_TO_NORMAL,
 
   // Editing (INSERT mode)
   INSERT_NEWLINE,
   DELETE_CHAR_BACK,
+  DELETE_CHAR_UNDER,  // vim: x - delete char under cursor
 
   // Command mode
   COMMAND_EXECUTE,

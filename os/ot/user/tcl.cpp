@@ -316,8 +316,26 @@ CallFrame::~CallFrame() {
 // INTERP IMPLEMENTATION
 //
 
-Interp::Interp() : trace_parser(false), mpack_buffer_(nullptr), mpack_buffer_size_(0) {
+Interp::Interp() : trace_parser(false), mpack_buffer_(nullptr), mpack_buffer_size_(0), io_(nullptr) {
   callframes.push_back(ou_new<CallFrame>());
+}
+
+void Interp::set_io(TclIO *io) { io_ = io; }
+
+void Interp::write(const char *str) {
+  if (io_) {
+    io_->write(str);
+  } else {
+    oprintf("%s", str);
+  }
+}
+
+void Interp::write_error(const char *str) {
+  if (io_) {
+    io_->write_error(str);
+  } else {
+    oprintf("%s", str);
+  }
 }
 
 Interp::~Interp() {
@@ -519,7 +537,10 @@ static Status cmd_puts(Interp &i, vector<string> &argv, ProcPrivdata *privdata) 
   if (!i.arity_check("puts", argv, 2, 2)) {
     return S_ERR;
   }
-  oprintf("%s\n", argv[1].c_str());
+  // Build string with newline and use write()
+  char buf[4096];
+  snprintf(buf, sizeof(buf), "%s\n", argv[1].c_str());
+  i.write(buf);
   return S_OK;
 }
 
@@ -764,28 +785,55 @@ static Status cmd_notn(Interp &i, vector<string> &argv, ProcPrivdata *privdata) 
 }
 
 static Status cmd_help(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
+  char buf[512];
   if (argv.size() == 1) {
     // List all commands with their docstrings
-    oprintf("Available commands:\n");
+    i.write("Available commands:\n");
     for (Cmd *c : i.commands) {
       if (!c->docstring.empty()) {
-        oprintf("  %s\n    %s\n", c->name.c_str(), c->docstring.c_str());
+        snprintf(buf, sizeof(buf), "  %s\n    %s\n", c->name.c_str(), c->docstring.c_str());
+        i.write(buf);
       } else {
-        oprintf("  %s\n", c->name.c_str());
+        snprintf(buf, sizeof(buf), "  %s\n", c->name.c_str());
+        i.write(buf);
       }
     }
   } else if (argv.size() == 2) {
-    // Show help for specific command
+    // First try exact match
     Cmd *cmd = i.get_command(argv[1]);
     if (cmd) {
       if (!cmd->docstring.empty()) {
-        oprintf("%s: %s\n", cmd->name.c_str(), cmd->docstring.c_str());
+        snprintf(buf, sizeof(buf), "%s: %s\n", cmd->name.c_str(), cmd->docstring.c_str());
+        i.write(buf);
       } else {
-        oprintf("%s: no documentation available\n", cmd->name.c_str());
+        snprintf(buf, sizeof(buf), "%s: no documentation available\n", cmd->name.c_str());
+        i.write(buf);
       }
     } else {
-      format_error(i.result, "command not found: '%s'", argv[1].c_str());
-      return S_ERR;
+      // No exact match - search for commands containing the substring
+      const char *search = argv[1].c_str();
+      int found = 0;
+      for (Cmd *c : i.commands) {
+        // Check if command name contains the search string
+        if (strstr(c->name.c_str(), search) != nullptr) {
+          if (found == 0) {
+            snprintf(buf, sizeof(buf), "Commands matching '%s':\n", search);
+            i.write(buf);
+          }
+          if (!c->docstring.empty()) {
+            snprintf(buf, sizeof(buf), "  %s\n    %s\n", c->name.c_str(), c->docstring.c_str());
+            i.write(buf);
+          } else {
+            snprintf(buf, sizeof(buf), "  %s\n", c->name.c_str());
+            i.write(buf);
+          }
+          found++;
+        }
+      }
+      if (found == 0) {
+        format_error(i.result, "no commands found matching '%s'", search);
+        return S_ERR;
+      }
     }
   } else {
     format_error(i.result, "[help]: expected 0 or 1 arguments");
@@ -798,10 +846,14 @@ static Status cmd_commands(Interp &i, vector<string> &argv, ProcPrivdata *privda
   if (!i.arity_check("commands", argv, 1, 1)) {
     return S_ERR;
   }
+  // Build the full list in a buffer
+  string output;
   for (Cmd *c : i.commands) {
-    oprintf("%s ", c->name.c_str());
+    output += c->name;
+    output += ' ';
   }
-  oprintf("\n");
+  output += '\n';
+  i.write(output.c_str());
   return S_OK;
 }
 
@@ -1246,7 +1298,7 @@ void register_core_commands(Interp &i) {
 
   // Help commands
   i.register_command("help", cmd_help, nullptr,
-                     "[help cmd?] => nil - Show help for all commands or a specific command");
+                     "[help pattern?] => nil - Show help for all commands, a specific command, or search by substring");
   i.register_command("commands", cmd_commands, nullptr, "[commands] => nil - List all available commands");
 
   // List commands
@@ -1454,14 +1506,17 @@ static Status cmd_mp_print(Interp &i, vector<string> &argv, ProcPrivdata *privda
     format_error(i.result, "mp/print: MessagePack writer is in error state");
     return S_ERR;
   }
-  // Use mpack_print with oputchar callback (works in both OT_POSIX and
-  // non-POSIX)
-  mpack_print((const char *)i.mpack_writer_.data(), i.mpack_writer_.size(), [](char ch) -> int {
-    oputchar(ch);
-    return 1;
-  });
-
-  oputchar('\n');
+  // Buffer the output and use write() so it goes through the I/O backend
+  char print_buf[4096];
+  int len =
+      mpack_sprint((const char *)i.mpack_writer_.data(), i.mpack_writer_.size(), print_buf, sizeof(print_buf) - 1);
+  if (len < 0) {
+    format_error(i.result, "mp/print: output buffer too small");
+    return S_ERR;
+  }
+  print_buf[len] = '\n';
+  print_buf[len + 1] = '\0';
+  i.write(print_buf);
   return S_OK;
 }
 

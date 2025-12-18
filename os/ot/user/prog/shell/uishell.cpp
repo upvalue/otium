@@ -28,8 +28,8 @@ using ou::string_view;
 using tcl::Interp;
 using tcl::Status;
 
-// UI Shell storage
-struct UIShellStorage : public shell::ShellStorage {
+// UI Shell storage - implements TclIO to redirect interpreter output to the UI
+struct UIShellStorage : public shell::ShellStorage, public tcl::TclIO {
   char input_buffer[MAX_LINE_LENGTH];
   size_t input_pos;
   GraphicsClient gfxc;
@@ -93,6 +93,36 @@ struct UIShellStorage : public shell::ShellStorage {
   void clear_output() {
     output_start = 0;
     output_count = 0;
+  }
+
+  // TclIO interface - redirect output to the UI buffer
+  void write(const char *str) override {
+    // Split on newlines and add each line separately
+    char line_buf[MAX_LINE_LENGTH];
+    int line_pos = 0;
+
+    for (const char *p = str; *p; p++) {
+      if (*p == '\n') {
+        line_buf[line_pos] = '\0';
+        if (line_pos > 0) {
+          add_output_line(line_buf);
+        }
+        line_pos = 0;
+      } else if (line_pos < MAX_LINE_LENGTH - 1) {
+        line_buf[line_pos++] = *p;
+      }
+    }
+    // Handle any trailing content without newline
+    if (line_pos > 0) {
+      line_buf[line_pos] = '\0';
+      add_output_line(line_buf);
+    }
+  }
+
+  void write_error(const char *str) override {
+    // Write to both UI buffer and console
+    write(str);
+    oprintf("%s", str);
   }
 };
 
@@ -407,12 +437,14 @@ void uishell_main() {
   // Initialize TCL interpreter
   tcl::Interp i;
 
+  // Set I/O backend to redirect puts, help, etc. to the UI
+  i.set_io(s);
+
   tcl::register_core_commands(i);
   i.register_mpack_functions(mp_page, OT_PAGE_SIZE);
   register_ipc_method_vars(i);
 
   i.set_var("features_ui", "1");
-  i.set_var("uishell_output_to_console", "0");
 
   // Register shared shell commands
   shell::register_shell_commands(i);
@@ -425,25 +457,6 @@ void uishell_main() {
         return tcl::S_OK;
       },
       nullptr, "[clear] - Clear output history");
-
-  // Override puts to output to screen instead of console
-  i.register_command(
-      "puts",
-      [](tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) -> tcl::Status {
-        UIShellStorage *s = (UIShellStorage *)local_storage;
-        if (!i.arity_check("puts", argv, 2, 2)) {
-          return tcl::S_ERR;
-        }
-        auto output_to_console_var = i.get_var("uishell_output_to_console");
-        auto output_to_console = parse_int(output_to_console_var->val->c_str());
-        if (output_to_console.is_ok() && output_to_console.value() == 1) {
-          oprintf("puts: %s\n", argv[1].c_str());
-        } else {
-          s->add_output_line(argv[1].c_str());
-        }
-        return tcl::S_OK;
-      },
-      nullptr, "[puts string] - Print string to screen");
 
   i.register_command("gfx/loop", cmd_gfx_loop, nullptr,
                      "[gfx/loop framerate:int body:string] - Loop a body at a given framerate");

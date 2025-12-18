@@ -47,6 +47,17 @@ struct Var;
 struct CallFrame;
 
 /**
+ * I/O backend interface for interpreter output.
+ * Override to redirect puts, help, etc. output to custom destinations.
+ * Default (nullptr) writes to console via oprintf.
+ */
+struct TclIO {
+  virtual void write(const char *str) = 0;
+  virtual void write_error(const char *str) = 0;
+  virtual ~TclIO() = default;
+};
+
+/**
  * Parser
  */
 struct Parser {
@@ -137,6 +148,9 @@ struct Interp {
   size_t mpack_buffer_size_;
   MPackWriter mpack_writer_;
 
+  // I/O backend (nullptr = default console output)
+  TclIO *io_;
+
   Interp();
   ~Interp();
 
@@ -149,6 +163,11 @@ struct Interp {
   bool arity_check(const string &name, const vector<string> &argv, size_t min, size_t max);
   bool int_check(const string &name, const vector<string> &argv, size_t idx);
   Status eval(const string_view &str);
+
+  // I/O methods - use configured backend or default to console
+  void set_io(TclIO *io);
+  void write(const char *str);
+  void write_error(const char *str);
 
   // MessagePack functions
   void register_mpack_functions(char *buffer, size_t size);

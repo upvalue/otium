@@ -17,14 +17,20 @@ pkgs.stdenv.mkDerivation {
   nativeBuildInputs = with pkgs; [
     meson
     ninja
+    python3
+    which
     emscripten
   ];
 
   configurePhase = ''
-    meson setup build-wasm --cross-file=cross/wasm.txt --
+    # Set up Emscripten cache to avoid broken path issues in Nix
+    export EM_CACHE=$(mktemp -d)
+
+    meson setup build-wasm --cross-file=cross/wasm.txt --wipe
   '';
 
   buildPhase = ''
+    export EM_CACHE=$(mktemp -d)
     meson compile -C build-wasm -v
   '';
 

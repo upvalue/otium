@@ -1,9 +1,11 @@
 // prog-spacedemo.cpp - DOS Space Demo port
 #include "ot/lib/app-framework.hpp"
 #include "ot/lib/frame-manager.hpp"
+#include "ot/lib/keyboard-utils.hpp"
 #include "ot/lib/math.hpp"
 #include "ot/lib/messages.hpp"
 #include "ot/user/gen/graphics-client.hpp"
+#include "ot/user/gen/keyboard-client.hpp"
 #include "ot/user/local-storage.hpp"
 #include "ot/user/prog.h"
 #include "ot/user/string.hpp"
@@ -132,6 +134,7 @@ struct SpaceDemoStorage : public LocalStorage {
   int cycle;
   int hyperspace_cycle_time;
   uint32_t *saved_screen;
+  KeyboardClient kbdc;
 
   SpaceDemoStorage() {
     // Don't need TLSF allocator, just basic storage
@@ -407,7 +410,15 @@ void spacedemo_main() {
     ou_exit();
   }
 
+  // Look up keyboard driver
+  Pid kbd_pid = ou_proc_lookup("keyboard");
+  if (kbd_pid == PID_NONE) {
+    oprintf("SPACEDEMO: Failed to find keyboard driver\n");
+    ou_exit();
+  }
+
   GraphicsClient client(gfx_pid);
+  s->kbdc.set_pid(kbd_pid);
 
   // Register with graphics driver
   auto reg_result = client.register_app("spacedemo");
@@ -477,7 +488,8 @@ void spacedemo_main() {
   // Run demo at 60 FPS
   graphics::FrameManager fm(60);
 
-  while (true) {
+  bool running = true;
+  while (running) {
     // Check if we should render (are we the active app?)
     auto should = client.should_render();
     if (should.is_err() || should.value() == 0) {
@@ -487,6 +499,21 @@ void spacedemo_main() {
     }
 
     if (fm.begin_frame()) {
+      // Poll keyboard
+      auto key_result = s->kbdc.poll_key();
+      if (key_result.is_ok()) {
+        auto key_data = key_result.value();
+        if (key_data.has_key) {
+          // Pass key to graphics server for global hotkeys (Alt+1-9 app switching)
+          gfx.pass_key_to_server(client, key_data.code, key_data.flags);
+
+          // Check for Alt+Q to quit
+          if ((key_data.flags & KEY_FLAG_ALT) && (key_data.code == KEY_Q)) {
+            oprintf("SPACEDEMO: Alt+Q pressed, exiting\n");
+            running = false;
+          }
+        }
+      }
       // Clear entire screen to black
       gfx.clear(COLOR_BLACK);
 
@@ -521,5 +548,9 @@ void spacedemo_main() {
     ou_yield();
   }
 
+  // Unregister before exit
+  client.unregister_app();
+
+  oprintf("SPACEDEMO: Exiting\n");
   ou_exit();
 }

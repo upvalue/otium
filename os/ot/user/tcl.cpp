@@ -81,6 +81,41 @@ static string process_escapes(const string_view &input) {
   return result;
 }
 
+// Validate and parse integer in one pass (eliminates duplicate atoi calls)
+static BoolResult<int> parse_and_check_int(const string &str) {
+  if (str.empty()) {
+    return BoolResult<int>::err(false);
+  }
+
+  size_t i = 0;
+  bool negative = false;
+
+  // Handle sign
+  if (str[0] == '-') {
+    negative = true;
+    i++;
+  } else if (str[0] == '+') {
+    i++;
+  }
+
+  // Need at least one digit after sign
+  if (i >= str.length()) {
+    return BoolResult<int>::err(false);
+  }
+
+  // Parse digits and validate
+  int result = 0;
+  for (; i < str.length(); i++) {
+    char c = str[i];
+    if (c < '0' || c > '9') {
+      return BoolResult<int>::err(false);
+    }
+    result = result * 10 + (c - '0');
+  }
+
+  return BoolResult<int>::ok(negative ? -result : result);
+}
+
 //
 // PARSER IMPLEMENTATION
 //
@@ -354,17 +389,8 @@ void Interp::drop_call_frame() {
 }
 
 Cmd *Interp::get_command(const string &name) const {
-#ifdef TCL_OPT_COMMAND_HASH
   Cmd *const *ptr = cmd_hash_.find(name);
   return ptr ? *ptr : nullptr;
-#else
-  for (Cmd *c : commands) {
-    if (c->name.compare(name) == 0) {
-      return c;
-    }
-  }
-  return nullptr;
-#endif
 }
 
 Status Interp::register_command(const string &name, cmd_func_t fn, ProcPrivdata *privdata, const string &docstring) {
@@ -383,9 +409,7 @@ Status Interp::register_command(const string &name, cmd_func_t fn, ProcPrivdata 
   // Register new command
   Cmd *cmd = ou_new<Cmd>(name, fn, privdata, docstring);
   commands.push_back(cmd);
-#ifdef TCL_OPT_COMMAND_HASH
   cmd_hash_.insert(cmd->name, cmd);
-#endif
   return S_OK;
 }
 
@@ -641,10 +665,13 @@ static Status cmd_add(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("+", argv, 3, 3)) {
     return S_ERR;
   }
-  if (!i.int_check("+", argv, 1) || !i.int_check("+", argv, 2)) {
+  auto a = parse_and_check_int(argv[1]);
+  auto b = parse_and_check_int(argv[2]);
+  if (a.is_err() || b.is_err()) {
+    format_error(i.result, "[+]: arguments must be integers");
     return S_ERR;
   }
-  int result = atoi(argv[1].c_str()) + atoi(argv[2].c_str());
+  int result = a.value() + b.value();
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
@@ -655,10 +682,13 @@ static Status cmd_sub(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("-", argv, 3, 3)) {
     return S_ERR;
   }
-  if (!i.int_check("-", argv, 1) || !i.int_check("-", argv, 2)) {
+  auto a = parse_and_check_int(argv[1]);
+  auto b = parse_and_check_int(argv[2]);
+  if (a.is_err() || b.is_err()) {
+    format_error(i.result, "[-]: arguments must be integers");
     return S_ERR;
   }
-  int result = atoi(argv[1].c_str()) - atoi(argv[2].c_str());
+  int result = a.value() - b.value();
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
@@ -669,10 +699,13 @@ static Status cmd_mul(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("*", argv, 3, 3)) {
     return S_ERR;
   }
-  if (!i.int_check("*", argv, 1) || !i.int_check("*", argv, 2)) {
+  auto a = parse_and_check_int(argv[1]);
+  auto b = parse_and_check_int(argv[2]);
+  if (a.is_err() || b.is_err()) {
+    format_error(i.result, "[*]: arguments must be integers");
     return S_ERR;
   }
-  int result = atoi(argv[1].c_str()) * atoi(argv[2].c_str());
+  int result = a.value() * b.value();
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
@@ -683,10 +716,13 @@ static Status cmd_div(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("/", argv, 3, 3)) {
     return S_ERR;
   }
-  if (!i.int_check("/", argv, 1) || !i.int_check("/", argv, 2)) {
+  auto a = parse_and_check_int(argv[1]);
+  auto b = parse_and_check_int(argv[2]);
+  if (a.is_err() || b.is_err()) {
+    format_error(i.result, "[/]: arguments must be integers");
     return S_ERR;
   }
-  int result = atoi(argv[1].c_str()) / atoi(argv[2].c_str());
+  int result = a.value() / b.value();
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
@@ -697,10 +733,13 @@ static Status cmd_mod(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("%", argv, 3, 3)) {
     return S_ERR;
   }
-  if (!i.int_check("%", argv, 1) || !i.int_check("%", argv, 2)) {
+  auto a = parse_and_check_int(argv[1]);
+  auto b = parse_and_check_int(argv[2]);
+  if (a.is_err() || b.is_err()) {
+    format_error(i.result, "[%]: arguments must be integers");
     return S_ERR;
   }
-  int result = atoi(argv[1].c_str()) % atoi(argv[2].c_str());
+  int result = a.value() % b.value();
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
@@ -711,10 +750,13 @@ static Status cmd_and(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("&", argv, 3, 3)) {
     return S_ERR;
   }
-  if (!i.int_check("&", argv, 1) || !i.int_check("&", argv, 2)) {
+  auto a = parse_and_check_int(argv[1]);
+  auto b = parse_and_check_int(argv[2]);
+  if (a.is_err() || b.is_err()) {
+    format_error(i.result, "[&]: arguments must be integers");
     return S_ERR;
   }
-  int result = atoi(argv[1].c_str()) & atoi(argv[2].c_str());
+  int result = a.value() & b.value();
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
@@ -725,10 +767,13 @@ static Status cmd_shl(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("<<", argv, 3, 3)) {
     return S_ERR;
   }
-  if (!i.int_check("<<", argv, 1) || !i.int_check("<<", argv, 2)) {
+  auto a = parse_and_check_int(argv[1]);
+  auto b = parse_and_check_int(argv[2]);
+  if (a.is_err() || b.is_err()) {
+    format_error(i.result, "[<<]: arguments must be integers");
     return S_ERR;
   }
-  int result = atoi(argv[1].c_str()) << atoi(argv[2].c_str());
+  int result = a.value() << b.value();
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
@@ -739,10 +784,13 @@ static Status cmd_shr(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check(">>", argv, 3, 3)) {
     return S_ERR;
   }
-  if (!i.int_check(">>", argv, 1) || !i.int_check(">>", argv, 2)) {
+  auto a = parse_and_check_int(argv[1]);
+  auto b = parse_and_check_int(argv[2]);
+  if (a.is_err() || b.is_err()) {
+    format_error(i.result, "[>>]: arguments must be integers");
     return S_ERR;
   }
-  int result = atoi(argv[1].c_str()) >> atoi(argv[2].c_str());
+  int result = a.value() >> b.value();
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
@@ -753,10 +801,13 @@ static Status cmd_eq(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("==", argv, 3, 3)) {
     return S_ERR;
   }
-  if (!i.int_check("==", argv, 1) || !i.int_check("==", argv, 2)) {
+  auto a = parse_and_check_int(argv[1]);
+  auto b = parse_and_check_int(argv[2]);
+  if (a.is_err() || b.is_err()) {
+    format_error(i.result, "[==]: arguments must be integers");
     return S_ERR;
   }
-  int result = atoi(argv[1].c_str()) == atoi(argv[2].c_str());
+  int result = a.value() == b.value();
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
@@ -767,10 +818,13 @@ static Status cmd_ne(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("!=", argv, 3, 3)) {
     return S_ERR;
   }
-  if (!i.int_check("!=", argv, 1) || !i.int_check("!=", argv, 2)) {
+  auto a = parse_and_check_int(argv[1]);
+  auto b = parse_and_check_int(argv[2]);
+  if (a.is_err() || b.is_err()) {
+    format_error(i.result, "[!=]: arguments must be integers");
     return S_ERR;
   }
-  int result = atoi(argv[1].c_str()) != atoi(argv[2].c_str());
+  int result = a.value() != b.value();
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
@@ -781,10 +835,13 @@ static Status cmd_gt(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check(">", argv, 3, 3)) {
     return S_ERR;
   }
-  if (!i.int_check(">", argv, 1) || !i.int_check(">", argv, 2)) {
+  auto a = parse_and_check_int(argv[1]);
+  auto b = parse_and_check_int(argv[2]);
+  if (a.is_err() || b.is_err()) {
+    format_error(i.result, "[>]: arguments must be integers");
     return S_ERR;
   }
-  int result = atoi(argv[1].c_str()) > atoi(argv[2].c_str());
+  int result = a.value() > b.value();
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
@@ -795,10 +852,13 @@ static Status cmd_lt(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("<", argv, 3, 3)) {
     return S_ERR;
   }
-  if (!i.int_check("<", argv, 1) || !i.int_check("<", argv, 2)) {
+  auto a = parse_and_check_int(argv[1]);
+  auto b = parse_and_check_int(argv[2]);
+  if (a.is_err() || b.is_err()) {
+    format_error(i.result, "[<]: arguments must be integers");
     return S_ERR;
   }
-  int result = atoi(argv[1].c_str()) < atoi(argv[2].c_str());
+  int result = a.value() < b.value();
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
@@ -809,10 +869,13 @@ static Status cmd_gte(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check(">=", argv, 3, 3)) {
     return S_ERR;
   }
-  if (!i.int_check(">=", argv, 1) || !i.int_check(">=", argv, 2)) {
+  auto a = parse_and_check_int(argv[1]);
+  auto b = parse_and_check_int(argv[2]);
+  if (a.is_err() || b.is_err()) {
+    format_error(i.result, "[>=]: arguments must be integers");
     return S_ERR;
   }
-  int result = atoi(argv[1].c_str()) >= atoi(argv[2].c_str());
+  int result = a.value() >= b.value();
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
@@ -823,10 +886,13 @@ static Status cmd_lte(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
   if (!i.arity_check("<=", argv, 3, 3)) {
     return S_ERR;
   }
-  if (!i.int_check("<=", argv, 1) || !i.int_check("<=", argv, 2)) {
+  auto a = parse_and_check_int(argv[1]);
+  auto b = parse_and_check_int(argv[2]);
+  if (a.is_err() || b.is_err()) {
+    format_error(i.result, "[<=]: arguments must be integers");
     return S_ERR;
   }
-  int result = atoi(argv[1].c_str()) <= atoi(argv[2].c_str());
+  int result = a.value() <= b.value();
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;

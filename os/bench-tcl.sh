@@ -14,12 +14,10 @@ BUILD_DIR="$SCRIPT_DIR/build-bench"
 # Optimization flag configurations to test
 declare -a CONFIG_NAMES=(
   "baseline"
-  "command-hash"
 )
 
 declare -a CONFIG_FLAGS=(
   ""
-  "-DTCL_OPT_COMMAND_HASH"
 )
 
 # Colors for output

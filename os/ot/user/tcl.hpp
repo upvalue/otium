@@ -4,16 +4,11 @@
 #ifndef _TCL_H
 #define _TCL_H
 
-// Tcl optimization flags - define to enable
-// #define TCL_OPT_COMMAND_HASH  // Hash table for command lookup
-
 #include "ot/common.h"
 #include "ot/lib/mpack/mpack-writer.hpp"
+#include "ot/user/hashmap.hpp"
 #include "ot/user/string.hpp"
 #include "ot/user/vector.hpp"
-#ifdef TCL_OPT_COMMAND_HASH
-#include "ot/user/hashmap.hpp"
-#endif
 
 namespace tcl {
 
@@ -23,9 +18,7 @@ using ou::ou_new;
 using ou::string;
 using ou::string_view;
 using ou::vector;
-#ifdef TCL_OPT_COMMAND_HASH
 template <typename V> using HashMap = ou::StringHashMap<V>;
-#endif
 
 /**
  * Status codes
@@ -148,9 +141,7 @@ struct CallFrame {
  */
 struct Interp {
   vector<Cmd *> commands;
-#ifdef TCL_OPT_COMMAND_HASH
   HashMap<Cmd *> cmd_hash_;
-#endif
   vector<CallFrame *> callframes;
   string result;
   bool trace_parser;

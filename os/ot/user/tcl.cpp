@@ -81,40 +81,6 @@ static string process_escapes(const string_view &input) {
   return result;
 }
 
-// Validate and parse integer in one pass (eliminates duplicate atoi calls)
-static BoolResult<int> parse_and_check_int(const string &str) {
-  if (str.empty()) {
-    return BoolResult<int>::err(false);
-  }
-
-  size_t i = 0;
-  bool negative = false;
-
-  // Handle sign
-  if (str[0] == '-') {
-    negative = true;
-    i++;
-  } else if (str[0] == '+') {
-    i++;
-  }
-
-  // Need at least one digit after sign
-  if (i >= str.length()) {
-    return BoolResult<int>::err(false);
-  }
-
-  // Parse digits and validate
-  int result = 0;
-  for (; i < str.length(); i++) {
-    char c = str[i];
-    if (c < '0' || c > '9') {
-      return BoolResult<int>::err(false);
-    }
-    result = result * 10 + (c - '0');
-  }
-
-  return BoolResult<int>::ok(negative ? -result : result);
-}
 
 //
 // PARSER IMPLEMENTATION
@@ -439,17 +405,6 @@ Status Interp::set_var(const string &name, const string &val) {
   return S_OK;
 }
 
-bool Interp::arity_check(const string &name, const vector<string> &argv, size_t min, size_t max) {
-  if (min == max && argv.size() != min) {
-    format_error(result, "wrong number of args for %s (expected %zu)", name.c_str(), min);
-    return false;
-  }
-  if (argv.size() < min || argv.size() > max) {
-    format_error(result, "[%s]: wrong number of args (expected %zu to %zu)", name.c_str(), min, max);
-    return false;
-  }
-  return true;
-}
 
 bool Interp::int_check(const string &name, const vector<string> &argv, size_t idx) {
   const string &arg = argv[idx];

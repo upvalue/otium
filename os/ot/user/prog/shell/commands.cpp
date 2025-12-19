@@ -108,6 +108,11 @@ tcl::Status cmd_error_string(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl
   return tcl::S_OK;
 }
 
+tcl::Status cmd_yield(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  ou_yield();
+  return tcl::S_OK;
+}
+
 tcl::Status cmd_length(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
   if (!i.arity_check("length", argv, 2, 2)) {
     return tcl::S_ERR;
@@ -337,6 +342,8 @@ void register_shell_commands(tcl::Interp &i) {
 
   // String commands
   i.register_command("length", cmd_length, nullptr, "[length str:string] => int - Return the length of a string");
+
+  i.register_command("ot_yield", cmd_yield, nullptr, "[ot_yield] - Yields to the OS scheduler");
 
   // Filesystem commands
   i.register_command("fs/read", cmd_fs_read, nullptr,

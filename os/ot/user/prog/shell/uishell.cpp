@@ -394,8 +394,6 @@ tcl::Status cmd_gfx_loop(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
     }
 
     if (fm.begin_frame()) {
-      gfx.clear(0xff0000ff);
-
       Status eval_status = i.eval(string_view(argv[2]));
       if (eval_status != tcl::S_OK)
         break;
@@ -440,6 +438,57 @@ Status cmd_gfx_loop_iter(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
   }
 
   s->gfxc.flush();
+
+  return tcl::S_OK;
+}
+
+Status cmd_gfx_flush(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("gfx/flush", argv, 1, 1)) {
+    return tcl::S_ERR;
+  }
+
+  UIShellStorage *s = (UIShellStorage *)local_storage;
+  s->gfxc.flush();
+
+  return tcl::S_OK;
+}
+
+Status cmd_gfx_text(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("gfx/text", argv, 5, 5)) {
+    return tcl::S_ERR;
+  }
+
+  UIShellStorage *s = (UIShellStorage *)local_storage;
+
+  const char *text = argv[1].c_str();
+
+  BoolResult<int> x_result = parse_int(argv[2].c_str());
+  if (x_result.is_err()) {
+    i.result = "Invalid x";
+    return tcl::S_ERR;
+  }
+  int x = x_result.value();
+
+  BoolResult<int> y_result = parse_int(argv[3].c_str());
+  if (y_result.is_err()) {
+    i.result = "Invalid y";
+    return tcl::S_ERR;
+  }
+  int y = y_result.value();
+
+  BoolResult<int> color_result = parse_int(argv[4].c_str());
+  if (color_result.is_err()) {
+    i.result = "Invalid color";
+    return tcl::S_ERR;
+  }
+  uint32_t color = (uint32_t)color_result.value();
+
+  // Use size 16 for text rendering
+  auto result = s->app->draw_ttf_text(x, y, text, color, 16);
+  if (result.is_err()) {
+    i.result = "Text rendering failed";
+    return tcl::S_ERR;
+  }
 
   return tcl::S_OK;
 }
@@ -545,6 +594,12 @@ void uishell_main() {
 
   i.register_command("gfx/loop-iter", cmd_gfx_loop_iter, nullptr,
                      "[gfx/loop-iter] - Should be called in gfx/loop body to properly yield to operating system");
+
+  i.register_command("gfx/flush", cmd_gfx_flush, nullptr,
+                     "[gfx/flush] - Flush the graphics buffer to screen");
+
+  i.register_command("gfx/text", cmd_gfx_text, nullptr,
+                     "[gfx/text text:string x:int y:int color:int] - Draw text at position with color");
 
   // Execute shellrc startup script
 #include "shellrc.hpp"

@@ -3,17 +3,15 @@
 
 set uishell_output_to_console 1
 
-puts "testing output"
-
 set MAX_ITER 32
 set WIDTH 128
 set HEIGHT 100
 
 # Mandelbrot bounds in fixed-point (scaled by 256):
-# Real: -2.0 to 1.0  => -512 to 256
+# Real: -2.0 to 2.0  => -512 to 512 (doubled X_MAX)
 # Imag: -1.0 to 1.0  => -256 to 256
 set X_MIN -512
-set X_MAX 256
+set X_MAX 512
 set Y_MIN -256
 set Y_MAX 256
 
@@ -37,12 +35,23 @@ proc get_color {iter max_iter} {
 }
 
 proc draw_mandelbrot {} {
+  # Calculate centering offset (assuming 640x480 framebuffer)
+  set FB_WIDTH 640
+  set FB_HEIGHT 480
+  set OFFSET_X [/ [- $FB_WIDTH $WIDTH] 2]
+  set OFFSET_Y [/ [- $FB_HEIGHT $HEIGHT] 2]
+
+  ot_yield
   set x_range [- $X_MAX $X_MIN]
   set y_range [- $Y_MAX $Y_MIN]
 
+  # Show initial status message
+  gfx/text "Rendering Mandelbrot..." 10 10 [hex ffffffff]
+  gfx/flush
+
   set py 0
   while {< $py $HEIGHT} {
-    puts "entering py loop"
+    ot_yield
     # Map py to imaginary coordinate (fixed-point)
     set c_imag [+ $Y_MIN [/ [* $py $y_range] $HEIGHT]]
 
@@ -74,20 +83,29 @@ proc draw_mandelbrot {} {
         set iter [+ $iter 1]
       }
 
-      gfx/pixel [get_color $iter $MAX_ITER] $px $py
+      # Draw pixel centered on screen
+      gfx/pixel [get_color $iter $MAX_ITER] [+ $px $OFFSET_X] [+ $py $OFFSET_Y]
       set px [+ $px 1]
     }
+
+    # Flush after each line so user sees progressive rendering
+    gfx/flush
     set py [+ $py 1]
   }
+
+  # Show completion message
+  gfx/text "Rendering complete!" 10 10 [hex ffffffff]
+  gfx/flush
 }
 
-puts "hi"
-
-# Render once
+# Render once, then keep looping to maintain the display
+set rendered 0
 gfx/loop 60 {
-  puts "entering draw_mandelbrot"
-  draw_mandelbrot
-  puts "ending draw_mandelbrot"
+  if {== $rendered 0} {
+    # Clear to black background
+    gfx/rect [hex ff000000] 0 0 640 480
+    draw_mandelbrot
+    set rendered 1
+  }
   gfx/loop-iter
-  break
 }

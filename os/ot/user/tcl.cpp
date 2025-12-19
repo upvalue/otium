@@ -354,12 +354,17 @@ void Interp::drop_call_frame() {
 }
 
 Cmd *Interp::get_command(const string &name) const {
+#ifdef TCL_OPT_COMMAND_HASH
+  Cmd *const *ptr = cmd_hash_.find(name);
+  return ptr ? *ptr : nullptr;
+#else
   for (Cmd *c : commands) {
     if (c->name.compare(name) == 0) {
       return c;
     }
   }
   return nullptr;
+#endif
 }
 
 Status Interp::register_command(const string &name, cmd_func_t fn, ProcPrivdata *privdata, const string &docstring) {
@@ -376,7 +381,11 @@ Status Interp::register_command(const string &name, cmd_func_t fn, ProcPrivdata 
     return S_OK;
   }
   // Register new command
-  commands.push_back(ou_new<Cmd>(name, fn, privdata, docstring));
+  Cmd *cmd = ou_new<Cmd>(name, fn, privdata, docstring);
+  commands.push_back(cmd);
+#ifdef TCL_OPT_COMMAND_HASH
+  cmd_hash_.insert(cmd->name, cmd);
+#endif
   return S_OK;
 }
 

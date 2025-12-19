@@ -381,9 +381,12 @@ Status Interp::register_command(const string &name, cmd_func_t fn, ProcPrivdata 
 }
 
 Var *Interp::get_var(const string_view &name) {
-  for (Var *v : callframes.back()->vars) {
-    if (v->name->compare(name) == 0) {
-      return v;
+  // Search from innermost to outermost scope
+  for (int i = callframes.size() - 1; i >= 0; i--) {
+    for (Var *v : callframes[i]->vars) {
+      if (v->name->compare(name) == 0) {
+        return v;
+      }
     }
   }
   return nullptr;
@@ -675,6 +678,62 @@ static Status cmd_div(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
     return S_ERR;
   }
   int result = atoi(argv[1].c_str()) / atoi(argv[2].c_str());
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%d", result);
+  i.result = buf;
+  return S_OK;
+}
+
+static Status cmd_mod(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
+  if (!i.arity_check("%", argv, 3, 3)) {
+    return S_ERR;
+  }
+  if (!i.int_check("%", argv, 1) || !i.int_check("%", argv, 2)) {
+    return S_ERR;
+  }
+  int result = atoi(argv[1].c_str()) % atoi(argv[2].c_str());
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%d", result);
+  i.result = buf;
+  return S_OK;
+}
+
+static Status cmd_and(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
+  if (!i.arity_check("&", argv, 3, 3)) {
+    return S_ERR;
+  }
+  if (!i.int_check("&", argv, 1) || !i.int_check("&", argv, 2)) {
+    return S_ERR;
+  }
+  int result = atoi(argv[1].c_str()) & atoi(argv[2].c_str());
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%d", result);
+  i.result = buf;
+  return S_OK;
+}
+
+static Status cmd_shl(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
+  if (!i.arity_check("<<", argv, 3, 3)) {
+    return S_ERR;
+  }
+  if (!i.int_check("<<", argv, 1) || !i.int_check("<<", argv, 2)) {
+    return S_ERR;
+  }
+  int result = atoi(argv[1].c_str()) << atoi(argv[2].c_str());
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%d", result);
+  i.result = buf;
+  return S_OK;
+}
+
+static Status cmd_shr(Interp &i, vector<string> &argv, ProcPrivdata *privdata) {
+  if (!i.arity_check(">>", argv, 3, 3)) {
+    return S_ERR;
+  }
+  if (!i.int_check(">>", argv, 1) || !i.int_check(">>", argv, 2)) {
+    return S_ERR;
+  }
+  int result = atoi(argv[1].c_str()) >> atoi(argv[2].c_str());
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", result);
   i.result = buf;
@@ -1280,6 +1339,12 @@ void register_core_commands(Interp &i) {
   i.register_command("-", cmd_sub, nullptr, "[- a:int b:int] => int - Subtract b from a");
   i.register_command("*", cmd_mul, nullptr, "[* a:int b:int] => int - Multiply two integers");
   i.register_command("/", cmd_div, nullptr, "[/ a:int b:int] => int - Divide a by b (integer division)");
+  i.register_command("%", cmd_mod, nullptr, "[% a:int b:int] => int - Modulo (remainder of a / b)");
+
+  // Bitwise commands
+  i.register_command("&", cmd_and, nullptr, "[& a:int b:int] => int - Bitwise AND");
+  i.register_command("<<", cmd_shl, nullptr, "[<< a:int n:int] => int - Shift a left by n bits");
+  i.register_command(">>", cmd_shr, nullptr, "[>> a:int n:int] => int - Shift a right by n bits");
 
   // Comparison commands
   i.register_command("==", cmd_eq, nullptr, "[== a:int b:int] => bool - Test if a equals b (returns 1 or 0)");

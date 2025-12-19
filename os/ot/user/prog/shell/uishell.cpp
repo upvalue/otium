@@ -34,8 +34,9 @@ struct UIShellStorage;
 // TclIO implementation for UI shell
 struct UIShellTclIO : public tcl::TclIO {
   UIShellStorage *storage;
+  tcl::Interp *interp;
 
-  UIShellTclIO(UIShellStorage *s) : storage(s) {}
+  UIShellTclIO(UIShellStorage *s) : storage(s), interp(nullptr) {}
   void write(const char *str) override;
   void write_error(const char *str) override;
 };
@@ -113,6 +114,20 @@ struct UIShellStorage : public shell::ShellStorage {
 
 // Implement TclIO methods
 void UIShellTclIO::write(const char *str) {
+  // Check if we should output to console instead of UI
+  bool output_to_console = false;
+  if (interp) {
+    tcl::Var *v = interp->get_var(tcl::string_view("uishell_output_to_console"));
+    if (v && v->val->compare("1") == 0) {
+      output_to_console = true;
+    }
+  }
+
+  if (output_to_console) {
+    oprintf("%s", str);
+    return;
+  }
+
   // Split on newlines and add each line separately
   char line_buf[MAX_LINE_LENGTH];
   int line_pos = 0;
@@ -136,9 +151,21 @@ void UIShellTclIO::write(const char *str) {
 }
 
 void UIShellTclIO::write_error(const char *str) {
-  // Write to both UI buffer and console
-  write(str);
+  // Always write errors to console
   oprintf("%s", str);
+
+  // Also write to UI buffer if not in console mode
+  bool output_to_console = false;
+  if (interp) {
+    tcl::Var *v = interp->get_var(tcl::string_view("uishell_output_to_console"));
+    if (v && v->val->compare("1") == 0) {
+      output_to_console = true;
+    }
+  }
+
+  if (!output_to_console) {
+    write(str);
+  }
 }
 
 void handle_key_event(UIShellStorage *s, tcl::Interp &i, uint16_t code, uint8_t flags) {
@@ -290,6 +317,39 @@ Status cmd_gfx_rectangle(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::Pr
   oprintf("gfx/rectangle: x=%d y=%d width=%d height=%d color=%d\n", x, y, width, height, color);
 
   s->app->fill_rect(x, y, width, height, color);
+
+  return tcl::S_OK;
+}
+
+Status cmd_gfx_pixel(tcl::Interp &i, tcl::vector<tcl::string> &argv, tcl::ProcPrivdata *privdata) {
+  if (!i.arity_check("gfx/pixel", argv, 4, 4)) {
+    return tcl::S_ERR;
+  }
+
+  UIShellStorage *s = (UIShellStorage *)local_storage;
+
+  BoolResult<int> color_result = parse_int(argv[1].c_str());
+  if (color_result.is_err()) {
+    i.result = "Invalid color";
+    return tcl::S_ERR;
+  }
+  int color = color_result.value();
+
+  BoolResult<int> x_result = parse_int(argv[2].c_str());
+  if (x_result.is_err()) {
+    i.result = "Invalid x";
+    return tcl::S_ERR;
+  }
+  int x = x_result.value();
+
+  BoolResult<int> y_result = parse_int(argv[3].c_str());
+  if (y_result.is_err()) {
+    i.result = "Invalid y";
+    return tcl::S_ERR;
+  }
+  int y = y_result.value();
+
+  s->app->put_pixel(x, y, color);
 
   return tcl::S_OK;
 }
@@ -453,6 +513,7 @@ void uishell_main() {
   tcl::Interp i;
 
   // Set I/O backend to redirect puts, help, etc. to the UI
+  s->tcl_io.interp = &i;
   i.set_io(&s->tcl_io);
 
   tcl::register_core_commands(i);
@@ -478,6 +539,9 @@ void uishell_main() {
 
   i.register_command("gfx/rect", cmd_gfx_rectangle, nullptr,
                      "[gfx/rect color:int x:int y:int width:int height:int] - Draw a rectangle");
+
+  i.register_command("gfx/pixel", cmd_gfx_pixel, nullptr,
+                     "[gfx/pixel color:int x:int y:int] - Draw a single pixel");
 
   i.register_command("gfx/loop-iter", cmd_gfx_loop_iter, nullptr,
                      "[gfx/loop-iter] - Should be called in gfx/loop body to properly yield to operating system");

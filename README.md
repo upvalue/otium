@@ -1,5 +1,7 @@
 # otium
 
+# [Try the live demo](https://otium.sh/demo/) 
+
 Otium is a little operating system project that I worked on from September to December of 2025.
 
 It's a simple microkernel that runs on RISC-V (under QEMU) or on WebAssembly.
@@ -10,6 +12,9 @@ Features:
 - Graphics, filesystems and input devices support are just processes, which can crash normally
   without impacting the overall system
 - A cooperative scheduler, which is implemented using Emscripten fibers on WebAssembly
+
+For more information including instructions on how to build and use the
+operating system, see the website at [otium.sh](https://otium.sh). 
 
 ## Screenshots
 

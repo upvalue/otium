@@ -1,14 +1,25 @@
 ---
 marp: true
-theme: gaia
+theme: default
 class: invert
 paginate: true
 ---
 
+<style>
+    .float-left{
+    height:500px;
+    float:left;
+    }
+    .float-right {
+    float:right;
+    height:500px;
+    }
+</style>
+
 
 # otium
 
-[https://otium.sh](https://otium.sh)
+# [https://otium.sh](https://otium.sh)
 
 <!-- 
 
@@ -18,13 +29,9 @@ for the first half of my batch at RC i worked on a little operating system
 
 it's available at this URL if you want to check it out
 
-today i wanted to talk through some of the things i learned about while working on the operating system
+today i wanted to talk about some of the things i learned about while working on the operating system
 
 -->
-
----
-
-# lies your operating system is telling you
 
 ---
 
@@ -48,20 +55,18 @@ what even is an operating system?
 
 the google ai answer is actually the most interesting to me
 
-the operating system provides abstractions or lies that allow our programs to be simple even though they're really not
+the operating system provides abstractions which i will refer to as lies that allow programs to be written simply even though they're not
+
 -->
 
 ---
 
 # lie #1: code executes sequentially
 
-```c
-int main(void) {
-  int a = 2;
-  int b = 3;
-  printf("2 + 3 = %d\n", a + b);
-  return 0;
-}
+```python
+print("one")
+print("two")
+print("three")
 ```
 
 <!-- 
@@ -83,16 +88,13 @@ these statements are definitely going to execute one after the other
 
 # so our nice sequential program
 
-```c
-int main(void) {
-  int a = 2;
-  // might get interrupted here
-  int b = 3;
-  // or here
-  printf("2 + 3 = %d\n", a + b);
-  // or even here
-  return 0;
-}
+```python
+# might get interrupted here
+print("one")
+# or here
+print("two")
+# or even here
+print("three")
 ```
 
 <!--
@@ -110,18 +112,20 @@ so doesn't matter whether your program is single threaded or not
 * has to handle potentially bad programs
     * ex what if we do `while(true) continue;`
 * has to handle saving registers and other finite resources 
-* is pretty hard to implement!
 
 <!--
 
-i bailed out short of implementing a real scheduler, and just made a cooperative
-scheduler
+-->
 
-in a cooperative scheduler, programs choose when to yield
+---
 
-easy to implement and reason about, but not a great strategy for general purpose operating systems
+# pretty hard to implement
 
-one badly behaved program can totally wreck your computer
+![height:500px](./concurrency-meme.png)
+
+<!--
+is a concurrent program
+is the engine of concurrency
 
 -->
 
@@ -129,27 +133,36 @@ one badly behaved program can totally wreck your computer
 
 # lie #2: memory is infinite
 
-```c
+```python
 int main(void) {
-  void* mem = malloc(4096*4);
+  void* mem = malloc(1024);
   printf("%p\n", mem);
 }
 ```
 
 * when I run this program, I get something like `0x14d808800`
 * is this an offset into ram? 
-    * does reading to or writing to it do something physical?
+
+<!--
+when i run this program which just allocates a little bit of memory and prints out its address
+-->
+
 
 ---
 
 # virtual memory 
 
 - `0x14d808800` does not guarantee a physical spot in ram
-* reading or writing it goes through a page table
-    * memory is divided into chunks (pages)
-    * only the OS can access memory with its physical address
+* only the operating system can access memory by its physical address
 * it might not even be backed by ram!
-    * memory might be copied to the hard drive and back (swap)
+    * memory might be copied to storage and back (swap)
+* so `0x14d808800` gets looked up in a table the operating system has
+    * something like `(*mem) = 5;` might actually be pretty complicated
+
+<!--
+
+because of virtual memory subsystem, it is not a physical address
+-->
 
 ---
 
@@ -160,12 +173,15 @@ int main(void) {
 <!-- 
 there are many reasons for virtual memory, but one is that ram is expensive
 
+like say you have the new 128gb macbook pro, but you also want to open a web
+browser and slack at the same time, so you don't have enough memory. virtual
+memory is what lets you do that.
 
 --->
 
 ---
 
-# lie #3: storage devices are key/value stores
+# lie #3: storage devices are simple key/value stores
 
 ```python
 with open("./asdf.txt", "r") as f:
@@ -174,25 +190,21 @@ with open('./asdf.txt', "w") as f:
     f.write("hello world!")
 ```
 
-* does this code translate to a simple, physical operations that happen in sequence?
+* does this code translate to simple, physical operations that happen in sequence?
 
 * (does that sound familiar?)
 
----
-
-# filesystems
-
-* storage: actually pretty complicated!
-* things to worry about:
-    * physical operations are expensive, need to be minimized
-    * application use of files needs to be tracked
-    * different hardware behaves differently
-        * e.g. flash storage tries to distribute use evenly
+<!-- we're almost done hang in there -->
 
 ---
 
-# so our simple file example might...
+# but filesystems
 
+<!--![height:500px](fs-chart.png)-->
+<img src="fs-chart.png" class="float-left"/>
+<img src="hard-drive-meme.jpeg" class="float-right"/>
+
+<!--
 ```python
 # check if location of the file is cached in memory
 with open("./asdf.txt", "r") as f:
@@ -205,6 +217,7 @@ with open('./asdf.txt', "w") as f:
     # buffer small writes to the storage in case more happens
     f.write("hello world!")
 ```
+-->
 
 <!-- 
 * check to see if the location of the file is cached in memory
@@ -214,48 +227,34 @@ with open('./asdf.txt', "w") as f:
 * buffer writes to the storage in case more happen
 -->
 
-<!--
 ---
-
-# why not combine them all
-
-* you can `mmap` files into virtual memory, and treat them like they're memory
-* you can share memory between processes with `shmem`
-* you can enjoy scheduling problems in your own code by writing multithreaded code
--->
-
-<!--
-
-if all these subsystems weren't confusing enough, they can interact with eachother in interesting ways 
-
---->
-
----
-
 
 # thank you operating systems
 
-* operating systems are tricky
+- operating systems are tricky
 * abstractions: actually pretty great
     * i apologize for calling them lies
 
 <!-- 
 if that feels like a lot, it's because it is
 
-my main takeaway from this is that i as a non operating systems developer don't have to worry about this stuff too much, but that's because someone else did a lot
+my main takeaway from this is that i as a non operating systems developer don't have to worry about this stuff too much, but that's because a lot of people did, a lot
 
-lots of ongoing work/research goes into making them reliable
+abstractions actually pretty great i can't wait to get a job again and allocate memory with reckless abandon 
 
-i can't wait to get a job again and allocate memory with reckless abandon 
 -->
 
 ---
 
-# thanks
+# thank you recurse
 
 ## Operating Systems: Three Easy Pieces
 
 [https://ostep.org](https://ostep.org)
+
+## my lil os
+
+[https://otium.sh](https://otium.sh)
 
 <!-- 
 if you found any of these things interesting, ostep is a good book

@@ -82,7 +82,7 @@ these statements are definitely going to execute one after the other
 * this code is executed on the processor
 * other programs would also like to use the processor
 * but the processor has finite resources
-* even with multi core processors you still have way less than &lt;running programs worth of resources
+* way more programs than processor cores
 
 ---
 
@@ -107,25 +107,19 @@ so doesn't matter whether your program is single threaded or not
 
 # a scheduler
 
-- the component that handles this is a scheduler
-* interleaves execution of different programs
-* has to handle potentially bad programs
-    * ex what if we do `while(true) continue;`
-* has to handle saving registers and other finite resources 
-
-<!--
-
--->
-
----
-
-# pretty hard to implement
-
 ![height:500px](./concurrency-meme.png)
 
 <!--
+
+program that does this is called a scheduler
+
+is pretty hard to implement
+
 is a concurrent program
+
 is the engine of concurrency
+
+needs to handle programs that are misbehaved or go idle
 
 -->
 
@@ -153,7 +147,6 @@ when i run this program which just allocates a little bit of memory and prints o
 # virtual memory 
 
 - `0x14d808800` does not guarantee a physical spot in ram
-* only the operating system can access memory by its physical address
 * it might not even be backed by ram!
     * memory might be copied to storage and back (swap)
 * so `0x14d808800` gets looked up in a table the operating system has
@@ -181,51 +174,23 @@ memory is what lets you do that.
 
 ---
 
-# lie #3: storage devices are simple key/value stores
+# but wait! there's more!
 
-```python
-with open("./asdf.txt", "r") as f:
-    stuff = f.read()
-with open('./asdf.txt', "w") as f:
-    f.write("hello world!")
-```
+<img src="hard-drive-meme.jpeg" class="float-right" />
 
-* does this code translate to simple, physical operations that happen in sequence?
+* operating system has to handle wildly differing needs
+    * with no visibility into what programs actually do!
 
-* (does that sound familiar?)
-
-<!-- we're almost done hang in there -->
-
----
-
-# but filesystems
-
-<!--![height:500px](fs-chart.png)-->
-<img src="fs-chart.png" class="float-left"/>
-<img src="hard-drive-meme.jpeg" class="float-right"/>
-
-<!--
-```python
-# check if location of the file is cached in memory
-with open("./asdf.txt", "r") as f:
-    # check if contents are cached in memory
-    # if not, walk through filesystem structures to find physical location
-    # actually read the storage
-    stuff = f.read()
-# same as above
-with open('./asdf.txt', "w") as f:
-    # buffer small writes to the storage in case more happens
-    f.write("hello world!")
-```
--->
 
 <!-- 
-* check to see if the location of the file is cached in memory
-* check to see if contents are cached in memory
-* walk through filesystem structures to find the actual physical location
-* actually read the storage
-* buffer writes to the storage in case more happen
+
+there's even more stuff that i couldn't fit into 5 minutes
+
+what i find interesting about this is that the operating system has to handle wildly different needs
+
+with no visibility into what programs actually do
 -->
+
 
 ---
 

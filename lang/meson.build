@@ -1,6 +1,6 @@
-project('otium', 'cpp',
+project('otium', 'c', 'cpp',
   version : '0.0.1',
-  default_options : ['cpp_std=c++20', 'warning_level=2'])
+  default_options : ['c_std=c99', 'cpp_std=c++20', 'warning_level=2'])
 
 # Runtime library: no exceptions, no RTTI (only the lib — doctest needs
 # exceptions on in the test binary).
@@ -10,6 +10,11 @@ if get_option('gc_stress')
 endif
 
 lib_inc = include_directories('src')
+bestline_inc = include_directories('vendor/bestline')
+bestline = static_library('bestline',
+  'vendor/bestline/bestline.c',
+  include_directories : bestline_inc,
+  override_options : ['warning_level=0', 'werror=false'])
 
 # Embedded prelude: .scm -> C array headers, included by vm.cpp when
 # OT_EMBED_PRELUDE is defined (the ad-hoc doctest compile line skips both).
@@ -47,10 +52,10 @@ libotium = static_library('otium',
   include_directories : lib_inc,
   cpp_args : lib_args)
 
-executable('otium',
+otium = executable('otium',
   'repl/main.cpp',
-  include_directories : lib_inc,
-  link_with : libotium)
+  include_directories : [lib_inc, bestline_inc],
+  link_with : [libotium, bestline])
 
 # Test binary: doctest (vendored single header at tests/doctest.h),
 # exceptions ON (meson default), gc_stress flag still applies to the
@@ -69,3 +74,7 @@ otium_tests = executable('otium-tests',
   link_with : libotium)
 
 test('otium-tests', otium_tests)
+
+cli_tests = find_program('tests/test_cli.py')
+test('otium-cli', cli_tests,
+  args : [otium, join_paths(meson.current_source_dir(), 'tests', 'cli-load.scm')])

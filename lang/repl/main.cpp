@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "bestline.h"
 #include "common.hpp"
 #include "vec.hpp"
 #include "value.hpp"
@@ -213,26 +214,36 @@ static void run_repl(Vm& vm) {
   vm.push(predFn);
   (void)hslot;
 
-  char* line = nullptr;
-  size_t cap = 0;
   for (;;) {
-    fputs("otium> ", stdout);
-    fflush(stdout);
-    ssize_t len = getline(&line, &cap, stdin);
-    if (len < 0) {
-      if (g_sigint) { g_sigint = 0; vm.interruptFlag = false; clearerr(stdin); fputc('\n', stdout); continue; }
+    char* line = bestlineWithHistory("otium> ", "otium");
+    if (!line) {
+      if (g_sigint) {
+        g_sigint = 0;
+        vm.interruptFlag = false;
+        continue;
+      }
       break;  // EOF
     }
     // skip blank lines
     bool blank = true;
-    for (ssize_t i = 0; i < len; ++i)
-      if (!isspace((unsigned char)line[i])) { blank = false; break; }
-    if (blank) continue;
+    size_t len = strlen(line);
+    for (size_t i = 0; i < len; ++i)
+      if (!isspace((unsigned char)line[i])) {
+        blank = false;
+        break;
+      }
+    if (blank) {
+      bestlineFree(line);
+      continue;
+    }
 
     ot::Reader rd(vm, line, (u32)len, "<repl>");
     for (;;) {
       Value form = rd.next();
-      if (form.tag == Tag::Unwind) { print_value(vm, vm.unwindCondition, stderr); break; }
+      if (form.tag == Tag::Unwind) {
+        print_value(vm, vm.unwindCondition, stderr);
+        break;
+      }
       if (rd.atEof()) break;
 
       // Install the interactive restart-offering handler around this eval.
@@ -254,29 +265,67 @@ static void run_repl(Vm& vm) {
       }
       print_value(vm, result, stdout);  // PoC: print everything, incl. nil
     }
+    bestlineFree(line);
   }
-  free(line);
+  bestlineHistoryFree();
   putchar('\n');
 }
 
 // ---------------------------------------------------------------------------
 // main
 
-int main(int argc, char** argv) {
+struct CliOptions {
   const char* script = nullptr;
+  bool repl = false;
+};
+
+static void print_usage(FILE* to) {
+  fputs("Usage: otium [OPTIONS] [FILE]\n"
+        "Run FILE, or start a REPL when no FILE is given.\n"
+        "\n"
+        "Options:\n"
+        "  --repl       Start a REPL after loading FILE\n"
+        "  --path DIR   Add DIR to the module search path (repeatable)\n"
+        "  -h, --help   Show this help\n",
+        to);
+}
+
+static int parse_args(int argc, char** argv, CliOptions& options) {
+  bool positionalOnly = false;
   for (int i = 1; i < argc; ++i) {
-    if (strcmp(argv[i], "--path") == 0 && i + 1 < argc) {
-      g_loadPath.push_back(argv[++i]);
-    } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-      printf("usage: otium [--path DIR]... [script.scm]\n");
-      return 0;
-    } else if (!script) {
-      script = argv[i];
+    const char* arg = argv[i];
+    if (!positionalOnly && strcmp(arg, "--") == 0) {
+      positionalOnly = true;
+    } else if (!positionalOnly && strcmp(arg, "--repl") == 0) {
+      options.repl = true;
+    } else if (!positionalOnly && strcmp(arg, "--path") == 0) {
+      if (++i == argc) {
+        fputs("otium: --path requires a directory\n", stderr);
+        return 2;
+      }
+      g_loadPath.push_back(argv[i]);
+    } else if (!positionalOnly && (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0)) {
+      print_usage(stdout);
+      return 1;
+    } else if (!positionalOnly && arg[0] == '-' && arg[1] != '\0') {
+      fprintf(stderr, "otium: unknown option %s\n", arg);
+      fputs("Try 'otium --help' for more information.\n", stderr);
+      return 2;
+    } else if (!options.script) {
+      options.script = arg;
     } else {
-      fprintf(stderr, "otium: unexpected argument %s\n", argv[i]);
+      fprintf(stderr, "otium: unexpected argument %s\n", arg);
       return 2;
     }
   }
+  return 0;
+}
+
+int main(int argc, char** argv) {
+  CliOptions options;
+  int parseStatus = parse_args(argc, argv, options);
+  if (parseStatus != 0) return parseStatus == 1 ? 0 : parseStatus;
+
   if (const char* env = getenv("OTIUM_PATH")) {
     std::string s(env);
     size_t start = 0;
@@ -305,9 +354,11 @@ int main(int argc, char** argv) {
   sa.sa_handler = on_sigint;
   sigaction(SIGINT, &sa, nullptr);
 
-  int status;
-  if (script) status = run_file(*vm, script);
-  else { run_repl(*vm); status = 0; }
+  int status = 0;
+  if (options.script) status = run_file(*vm, options.script);
+  if (status == 0 && (options.repl || !options.script)) {
+    run_repl(*vm);
+  }
 
   vm->destroy();
   g_vm = nullptr;

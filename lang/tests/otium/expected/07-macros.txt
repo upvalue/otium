@@ -1,0 +1,22 @@
+when-true: 2
+when-false: nil
+unless-false: 3
+unless-true: nil
+thread-first: 12
+thread-first-bare: 7
+thread-last: -4
+thread-last-list: 9
+dotimes: 0
+dotimes: 1
+dotimes: 2
+defn: 6
+twice: 42
+capture: 105
+gensym-no-collide: 14
+macro-calls-fn: 42
+splice: 10
+expand-1: (+ 2 1)
+expand-1-nonmacro: (+ 1 2)
+expand-1-atom: 42
+expand-1-once: (m1 5)
+expand-full: (+ 5 1)

@@ -1,0 +1,28 @@
+if-true: 1
+if-false: 2
+if-no-else: nil
+if-nil-test: 2
+cond-first-truthy: 2
+cond-one-element: 42
+cond-no-clause: nil
+cond-else: 3
+cond-body-last: 3
+cond-truthy-value: 2
+and-empty: #t
+or-empty: #f
+and-all-truthy: 3
+and-first-falsy: nil
+and-false: #f
+or-first-truthy: 7
+or-all-falsy: #f
+or-last-nil: nil
+and-truthy-empty-list: 5
+let-seq: (1 2 6)
+let-shadow: (2 2)
+let-empty-body: nil
+while-sum: 10
+while-i: 5
+while-value: nil
+begin-last: 3
+begin-empty: nil
+do-alias: 2

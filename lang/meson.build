@@ -1,0 +1,71 @@
+project('otium', 'cpp',
+  version : '0.0.1',
+  default_options : ['cpp_std=c++20', 'warning_level=2'])
+
+# Runtime library: no exceptions, no RTTI (only the lib — doctest needs
+# exceptions on in the test binary).
+lib_args = ['-fno-exceptions', '-fno-rtti']
+if get_option('gc_stress')
+  lib_args += ['-DOT_GC_STRESS']
+endif
+
+lib_inc = include_directories('src')
+
+# Embedded prelude: .scm -> C array headers, included by vm.cpp when
+# OT_EMBED_PRELUDE is defined (the ad-hoc doctest compile line skips both).
+python = find_program('python3')
+embed_py = files('tools/embed.py')
+expander_h = custom_target('ot_expander_scm',
+  input : 'prelude/expander.scm',
+  output : 'ot_expander_scm.h',
+  command : [python, embed_py, '@INPUT@', 'ot_expander_scm', '@OUTPUT@'])
+prelude_h = custom_target('ot_prelude_scm',
+  input : 'prelude/prelude.scm',
+  output : 'ot_prelude_scm.h',
+  command : [python, embed_py, '@INPUT@', 'ot_prelude_scm', '@OUTPUT@'])
+lib_args += ['-DOT_EMBED_PRELUDE']
+
+# INTEGRATION: full source list per the interface contract. Files owned by
+# other agents are listed unconditionally; if one is missing at integration
+# time, comment it out here with a note.
+lib_sources = files(
+  'src/heap.cpp',
+  'src/intern.cpp',
+  'src/vm.cpp',
+  'src/ns.cpp',
+  'src/eval.cpp',
+  'src/reader.cpp',
+  'src/printer.cpp',
+  'src/builtins/arith.cpp',
+  'src/builtins/data.cpp',
+  'src/builtins/string.cpp',
+  'src/builtins/sys.cpp',
+)
+
+libotium = static_library('otium',
+  lib_sources, expander_h, prelude_h,
+  include_directories : lib_inc,
+  cpp_args : lib_args)
+
+executable('otium',
+  'repl/main.cpp',
+  include_directories : lib_inc,
+  link_with : libotium)
+
+# Test binary: doctest (vendored single header at tests/doctest.h),
+# exceptions ON (meson default), gc_stress flag still applies to the
+# lib objects it links.
+test_sources = files(
+  'tests/main.cpp',
+  'tests/test_substrate.cpp',
+  'tests/test_reader.cpp',
+  'tests/test_eval.cpp',
+  'tests/test_builtins.cpp',
+)
+otium_tests = executable('otium-tests',
+  test_sources,
+  include_directories : [lib_inc, include_directories('tests')],
+  cpp_args : get_option('gc_stress') ? ['-DOT_GC_STRESS'] : [],
+  link_with : libotium)
+
+test('otium-tests', otium_tests)

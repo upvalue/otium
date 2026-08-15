@@ -1,0 +1,26 @@
+quote-sugar-car: quote
+quote-sugar-cadr: x
+quote-sugar-len: 2
+bracket-is-list: #t
+bracket-head: array
+bracket-second: 1
+bracket-len: 3
+brace-head: table
+array-type: :array
+table-type: :table
+pair-car: 1
+pair-cdr: 2
+improper-tail: c
+pair-type: :pair
+pair-not-list: #f
+hex-ff: 255
+hex-10: 16
+float-int: 3.0
+float-exp: 1000.0
+float-neg: -0.5
+float-plain: 3.5
+float-type: :float
+int-type: :int
+esc-len: 7
+esc-tab: a	b
+esc-quote: say "hi"

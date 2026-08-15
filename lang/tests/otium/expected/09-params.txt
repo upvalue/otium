@@ -1,0 +1,14 @@
+default: 0
+default-str: top
+outer-bind: 1
+inner-bind: 2 inner
+after-inner: 1 top
+after-outer: 0 top
+sequential: at-10
+dyn-out: 0
+dyn-in: 5
+dyn-restored: 0
+after-raise: 0
+restart-exit: ok
+after-restart: 0
+param-type: :param

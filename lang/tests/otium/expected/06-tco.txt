@@ -1,0 +1,8 @@
+mutual-even: #t
+mutual-odd: #t
+count-up: 200000
+cond-tail: done
+and-tail: and-done
+or-tail: or-done
+let-tail: let-done
+begin-tail: begin-done

@@ -1,0 +1,28 @@
+try-catch: boom
+try-normal: 7
+cond-type: error
+error-data: [1 2]
+handler-saw: oops
+then-caught: oops
+signal-unhandled: nil
+restart-resume: 42
+restart-normal: 3
+restart-innermost: inner-got-inner
+find-restart-name: my-restart
+find-restart-desc: helps humans
+find-restart-type: :restart
+find-missing: nil
+cleanup-inner
+cleanup-outer
+after-cleanups: unwinding
+cleanup-normal
+unwind-value: 7
+cleanup-restart
+restart-thru-cleanup: 5
+subtype-self: #t
+subtype-parent: #t
+subtype-grand: #t
+subtype-reverse: #f
+subtype-unrelated: #f
+catch-subtype: missing.txt
+pred-specific: right-clause

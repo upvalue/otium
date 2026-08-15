@@ -1,2 +1,0 @@
-dev:
-  npx @marp-team/marp-cli@latest -w os-talk.md

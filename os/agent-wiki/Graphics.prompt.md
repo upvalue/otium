@@ -1,0 +1,1 @@
+Describe the Otium operating system graphics component. Detail how the graphics tests work, relevant build configuration options. Discuss how to make a simple graphical application using the AppFramework. Include a discussion of the IPC interface for the graphics server.

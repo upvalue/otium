@@ -1,6 +1,8 @@
 project('otium', 'c', 'cpp',
   version : '0.0.1',
-  default_options : ['c_std=c99', 'cpp_std=c++20', 'warning_level=2'])
+  default_options : ['c_std=c99', 'cpp_std=c++20', 'warning_level=2', 'werror=true'])
+
+add_project_arguments('-Wshadow', language : 'cpp')
 
 # Runtime library: no exceptions, no RTTI (only the lib — doctest needs
 # exceptions on in the test binary).

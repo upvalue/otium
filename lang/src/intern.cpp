@@ -4,7 +4,10 @@ namespace ot {
 
 static u32 fnv1a(const char* s, u32 len) {
   u32 h = 2166136261u;
-  for (u32 i = 0; i < len; i++) { h ^= (u8)s[i]; h *= 16777619u; }
+  for (u32 i = 0; i < len; i++) {
+    h ^= (u8)s[i];
+    h *= 16777619u;
+  }
   return h;
 }
 
@@ -28,7 +31,8 @@ void Intern::grow() {
     ns[j] = id;
   }
   free(slots);
-  slots = ns; slotCap = ncap;
+  slots = ns;
+  slotCap = ncap;
 }
 
 u32 Intern::intern(const char* s, u32 len) {
@@ -50,10 +54,13 @@ u32 Intern::intern(const char* s, u32 len) {
 }
 
 const char* Intern::name(u32 id, u32* lenOut) {
-  if (id == 0 || id > names.len) { if (lenOut) *lenOut = 0; return nullptr; }
+  if (id == 0 || id > names.len) {
+    if (lenOut) *lenOut = 0;
+    return nullptr;
+  }
   Name& n = names.data[id - 1];
   if (lenOut) *lenOut = n.len;
   return n.s;
 }
 
-} // namespace ot
+}  // namespace ot

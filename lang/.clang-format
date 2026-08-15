@@ -1,0 +1,33 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++20
+
+ColumnLimit: 100
+IndentWidth: 2
+ContinuationIndentWidth: 4
+UseTab: Never
+
+BreakBeforeBraces: Attach
+BreakTemplateDeclarations: Yes
+IndentCaseLabels: true
+NamespaceIndentation: None
+
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+IncludeBlocks: Preserve
+SortIncludes: Never
+
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortEnumsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortLoopsOnASingleLine: true
+
+BinPackArguments: true
+BinPackParameters: true
+ReflowComments: false
+SpacesBeforeTrailingComments: 2
+...

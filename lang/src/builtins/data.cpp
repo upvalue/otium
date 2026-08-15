@@ -1,10 +1,10 @@
 // builtins/data.cpp — compact dict, structural equality/hashing, data natives.
 // Spec 10.3, 10.5, 2.4; compact-dict layout per 2.7.
 #include "../builtins.hpp"
-#include "../heap.hpp"     // Obj, PairData, StringData, ArrayData, as_* accessors, make_*
-#include "../vm.hpp"       // Vm, raise_error
+#include "../heap.hpp"  // Obj, PairData, StringData, ArrayData, as_* accessors, make_*
+#include "../vm.hpp"    // Vm, raise_error
 #include "../ns.hpp"
-#include "../eval.hpp"     // apply() for update!
+#include "../eval.hpp"  // apply() for update!
 #include <cmath>
 
 namespace ot {
@@ -17,24 +17,29 @@ bool val_equal(Vm& vm, Value a, Value b) {
   for (;;) {
     if (a.tag != b.tag) return false;
     switch (a.tag) {
-      case Tag::Nil: case Tag::Null: case Tag::False: case Tag::True:
-      case Tag::Unwind:
-        return true;
-      case Tag::Int:   return a.i == b.i;
+      case Tag::Nil:
+      case Tag::Null:
+      case Tag::False:
+      case Tag::True:
+      case Tag::Unwind: return true;
+      case Tag::Int: return a.i == b.i;
       case Tag::Float:
         if (std::isnan(a.f) && std::isnan(b.f)) return true;
-        return a.f == b.f;                     // covers 0.0 == -0.0
-      case Tag::Symbol: case Tag::Keyword:
-        return a.id == b.id;
+        return a.f == b.f;  // covers 0.0 == -0.0
+      case Tag::Symbol:
+      case Tag::Keyword: return a.id == b.id;
       case Tag::String: {
-        StringData* sa = as_string(a); StringData* sb = as_string(b);
+        StringData* sa = as_string(a);
+        StringData* sb = as_string(b);
         if (sa->len != sb->len) return false;
         return memcmp((const char*)(sa + 1), (const char*)(sb + 1), sa->len) == 0;
       }
       case Tag::Pair: {
-        PairData* pa = as_pair(a); PairData* pb = as_pair(b);
+        PairData* pa = as_pair(a);
+        PairData* pb = as_pair(b);
         if (!val_equal(vm, pa->car, pb->car)) return false;
-        a = pa->cdr; b = pb->cdr;              // iterate on cdr
+        a = pa->cdr;
+        b = pb->cdr;  // iterate on cdr
         break;
       }
       default:  // mutables + functions/macros/params/restarts: identity
@@ -46,7 +51,7 @@ bool val_equal(Vm& vm, Value a, Value b) {
 // ---------------------------------------------------------------------------
 // Structural hash with equal? semantics.
 
-static inline u64 mix64(u64 x) {   // splitmix64 finalizer
+static inline u64 mix64(u64 x) {  // splitmix64 finalizer
   x += 0x9E3779B97F4A7C15ull;
   x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
   x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
@@ -56,24 +61,26 @@ static inline u64 mix64(u64 x) {   // splitmix64 finalizer
 u64 val_hash(Vm& vm, Value v) {
   u64 seed = 0xA0761D64ull + (u64)v.tag * 0x9E3779B97F4A7C15ull;
   switch (v.tag) {
-    case Tag::Nil: case Tag::Null: case Tag::False: case Tag::True:
-    case Tag::Unwind:
-      return mix64(seed);
-    case Tag::Int:   return mix64(seed ^ (u64)v.i);
+    case Tag::Nil:
+    case Tag::Null:
+    case Tag::False:
+    case Tag::True:
+    case Tag::Unwind: return mix64(seed);
+    case Tag::Int: return mix64(seed ^ (u64)v.i);
     case Tag::Float: {
       f64 f = v.f;
-      if (std::isnan(f)) return mix64(seed ^ 0x7FF8DEADBEEFull); // all NaNs equal
+      if (std::isnan(f)) return mix64(seed ^ 0x7FF8DEADBEEFull);  // all NaNs equal
       u64 bits;
-      if (f == 0.0) bits = 0;                   // normalize -0.0 to 0.0
+      if (f == 0.0) bits = 0;  // normalize -0.0 to 0.0
       else memcpy(&bits, &f, sizeof bits);
       return mix64(seed ^ bits);
     }
-    case Tag::Symbol: case Tag::Keyword:
-      return mix64(seed ^ (u64)v.id);
+    case Tag::Symbol:
+    case Tag::Keyword: return mix64(seed ^ (u64)v.id);
     case Tag::String: {
       StringData* s = as_string(v);
       const char* p = (const char*)(s + 1);
-      u64 h = seed ^ 0xCBF29CE484222325ull;     // FNV-1a over bytes
+      u64 h = seed ^ 0xCBF29CE484222325ull;  // FNV-1a over bytes
       for (u32 i = 0; i < s->len; i++) h = (h ^ (u8)p[i]) * 0x100000001B3ull;
       return mix64(h);
     }
@@ -120,7 +127,8 @@ static void table_rebuild_index(TableData* t, u32 cap) {
   u32 width = (t->entriesCap + 1 <= 0xFF) ? 1 : (t->entriesCap + 1 <= 0xFFFF) ? 2 : 4;
   t->index = (u8*)calloc((size_t)cap, width);
   if (!t->index) ot_fatal("table: out of memory");
-  t->indexCap = cap; t->indexWidth = width;
+  t->indexCap = cap;
+  t->indexWidth = width;
   for (u32 i = 0; i < t->entriesLen; i++) {
     if (is_tomb(t->entries[i])) continue;
     u32 slot = (u32)(t->entries[i].hash & (cap - 1));
@@ -145,7 +153,8 @@ static void table_ensure(TableData* t, u32 extra) {
     while (ncap < t->entriesLen + extra) ncap *= 2;
     TableEntry* ne = (TableEntry*)realloc(t->entries, (size_t)ncap * sizeof(TableEntry));
     if (!ne) ot_fatal("table: out of memory");
-    t->entries = ne; t->entriesCap = ncap;
+    t->entries = ne;
+    t->entriesCap = ncap;
     // entriesCap growth may bump the needed index width — rebuild if so.
     u32 width = (ncap + 1 <= 0xFF) ? 1 : (ncap + 1 <= 0xFFFF) ? 2 : 4;
     if (t->index && width != t->indexWidth) table_rebuild_index(t, t->indexCap);
@@ -167,8 +176,7 @@ static i64 table_find(Vm& vm, TableData* t, u64 hash, Value key) {
     u32 e = idx_get(t, slot);
     if (e == 0) return -1;
     TableEntry& ent = t->entries[e - 1];
-    if (!is_tomb(ent) && ent.hash == hash && val_equal(vm, ent.key, key))
-      return (i64)(e - 1);
+    if (!is_tomb(ent) && ent.hash == hash && val_equal(vm, ent.key, key)) return (i64)(e - 1);
     slot = (slot + 1) & (t->indexCap - 1);
   }
 }
@@ -183,20 +191,21 @@ Value table_put(Vm& vm, Value table, Value key, Value v) {
   TableData* t = as_table(table);
   u64 h = val_hash(vm, key);
   i64 e = table_find(vm, t, h, key);
-  if (is_nil(v)) {                       // storing nil deletes
+  if (is_nil(v)) {  // storing nil deletes
     if (e >= 0) {
       t->entries[e].key = TOMB;
       t->entries[e].val = nil_v();
-      t->count--; t->tombstones++;
+      t->count--;
+      t->tombstones++;
       if (t->tombstones > t->count) table_compact(t);
     }
     return table;
   }
-  if (e >= 0) {                          // update keeps position
+  if (e >= 0) {  // update keeps position
     t->entries[e].val = v;
     return table;
   }
-  table_ensure(t, 1);                    // insert (or re-insert) at the end
+  table_ensure(t, 1);  // insert (or re-insert) at the end
   u32 idx = t->entriesLen++;
   t->entries[idx].hash = h;
   t->entries[idx].key = key;
@@ -224,7 +233,11 @@ bool table_entry_at(Value table, u32 i, Value* k, Value* v) {
   u32 live = 0;
   for (u32 j = 0; j < t->entriesLen; j++) {
     if (is_tomb(t->entries[j])) continue;
-    if (live == i) { *k = t->entries[j].key; *v = t->entries[j].val; return true; }
+    if (live == i) {
+      *k = t->entries[j].key;
+      *v = t->entries[j].val;
+      return true;
+    }
     live++;
   }
   return false;
@@ -239,13 +252,14 @@ Value array_get(Value arr, i64 idx) {
   return a->items[idx];
 }
 
-void array_push(Vm& vm, Value arr, Value v) {
+void array_push(Vm&, Value arr, Value v) {
   ArrayData* a = as_array(arr);
   if (a->len == a->cap) {
     u32 ncap = a->cap ? a->cap * 2 : 8;
     Value* ni = (Value*)realloc(a->items, (size_t)ncap * sizeof(Value));
     if (!ni) ot_fatal("array: out of memory");
-    a->items = ni; a->cap = ncap;
+    a->items = ni;
+    a->cap = ncap;
   }
   a->items[a->len++] = v;
 }
@@ -327,7 +341,7 @@ static Value nat_append(Vm& vm, u32 base, u32 argc) {
     // collect elements onto the VM stack (a GC root — a C++ Vec's copies
     // would go stale when make_pair below collects)
     u32 ebase = vm.stack.len;
-    for (Value p = lst; p.tag != Tag::Null; ) {  // no allocation in this walk
+    for (Value p = lst; p.tag != Tag::Null;) {  // no allocation in this walk
       if (p.tag != Tag::Pair) {
         vm.popTo(root);
         return raise_error(vm, "append: improper list");
@@ -347,7 +361,8 @@ static Value nat_append(Vm& vm, u32 base, u32 argc) {
 
 static u32 utf8_count(const char* p, u32 n) {
   u32 c = 0;
-  for (u32 i = 0; i < n; i++) if (((u8)p[i] & 0xC0) != 0x80) c++;
+  for (u32 i = 0; i < n; i++)
+    if (((u8)p[i] & 0xC0) != 0x80) c++;
   return c;
 }
 
@@ -364,8 +379,8 @@ static Value nat_length(Vm& vm, u32 base, u32 argc) {
       }
       return int_v(n);
     }
-    case Tag::Array:  return int_v((i64)as_array(v)->len);
-    case Tag::Table:  return int_v((i64)as_table(v)->count);
+    case Tag::Array: return int_v((i64)as_array(v)->len);
+    case Tag::Table: return int_v((i64)as_table(v)->count);
     case Tag::String: return int_v((i64)as_string(v)->nchars);
     case Tag::Buffer: {
       BufferData* b = as_buffer(v);
@@ -378,14 +393,16 @@ static Value nat_length(Vm& vm, u32 base, u32 argc) {
 static Value nat_reverse(Vm& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "reverse", argc, 1, 1));
   Value v = ARG(0);
-  if (is_nil(v)) return nil_v();          // kind-preserving: nothing to preserve
+  if (is_nil(v)) return nil_v();  // kind-preserving: nothing to preserve
   if (v.tag == Tag::Null) return null_v();
   if (v.tag == Tag::Pair) {
-    u32 root = vm.push(null_v());   // acc
-    u32 pS = vm.push(v);            // cursor, rooted across make_pair
+    u32 root = vm.push(null_v());  // acc
+    u32 pS = vm.push(v);           // cursor, rooted across make_pair
     while (vm.stack[pS].tag != Tag::Null) {
-      if (vm.stack[pS].tag != Tag::Pair)
-        { vm.popTo(root); return raise_error(vm, "reverse: improper list"); }
+      if (vm.stack[pS].tag != Tag::Pair) {
+        vm.popTo(root);
+        return raise_error(vm, "reverse: improper list");
+      }
       Value acc = make_pair(vm, as_pair(vm.stack[pS])->car, vm.stack[root]);
       vm.stack[root] = acc;
       vm.stack[pS] = as_pair(vm.stack[pS])->cdr;
@@ -414,7 +431,10 @@ static Value nat_list_to_array(Vm& vm, u32 base, u32 argc) {
   u32 root = vm.push(out);
   // re-read the list from its rooted arg slot: make_array collected
   for (Value p = ARG(0); p.tag != Tag::Null; p = as_pair(p)->cdr) {
-    if (p.tag != Tag::Pair) { vm.popTo(root); return raise_error(vm, "list->array: improper list"); }
+    if (p.tag != Tag::Pair) {
+      vm.popTo(root);
+      return raise_error(vm, "list->array: improper list");
+    }
     array_push(vm, out, as_pair(p)->car);  // no GC allocation in this loop
   }
   vm.popTo(root);
@@ -476,7 +496,7 @@ static Value string_char_at(Vm& vm, Value s, i64 idx) {
 static Value do_get(Vm& vm, Value coll, Value key, Value dflt) {
   Value r = nil_v();
   switch (coll.tag) {
-    case Tag::Nil: break;                                   // miss
+    case Tag::Nil: break;  // miss
     case Tag::Table: r = table_get(vm, coll, key); break;
     case Tag::Array:
       if (key.tag == Tag::Int) r = array_get(coll, key.i);
@@ -509,7 +529,10 @@ static Value nat_get_in(Vm& vm, u32 base, u32 argc) {
     u32 pS = vm.push(path);
     while (vm.stack[pS].tag == Tag::Pair) {
       coll = do_get(vm, coll, as_pair(vm.stack[pS])->car, nil_v());
-      if (coll.tag == Tag::Unwind) { vm.popTo(pS); return coll; }
+      if (coll.tag == Tag::Unwind) {
+        vm.popTo(pS);
+        return coll;
+      }
       vm.stack[pS] = as_pair(vm.stack[pS])->cdr;
     }
     vm.popTo(pS);
@@ -520,7 +543,10 @@ static Value nat_get_in(Vm& vm, u32 base, u32 argc) {
 }
 
 static Value do_put(Vm& vm, Value coll, Value k, Value v) {
-  if (coll.tag == Tag::Table) { table_put(vm, coll, k, v); return coll; }
+  if (coll.tag == Tag::Table) {
+    table_put(vm, coll, k, v);
+    return coll;
+  }
   if (coll.tag == Tag::Array) {
     if (k.tag != Tag::Int) return raise_error(vm, "put!: array index must be an int");
     ArrayData* a = as_array(coll);
@@ -539,8 +565,7 @@ static Value nat_put(Vm& vm, u32 base, u32 argc) {
 }
 
 static Value nat_push(Vm& vm, u32 base, u32 argc) {
-  if (argc < 1 || ARG(0).tag != Tag::Array)
-    return raise_error(vm, "push!: expected array");
+  if (argc < 1 || ARG(0).tag != Tag::Array) return raise_error(vm, "push!: expected array");
   for (u32 i = 1; i < argc; i++) array_push(vm, ARG(0), ARG(i));
   return ARG(0);
 }
@@ -597,7 +622,7 @@ static Value nat_values(Vm& vm, u32 base, u32 argc) {
 static Value nat_copy(Vm& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "copy", argc, 1, 1));
   Value v = ARG(0);
-  if (is_nil(v)) return nil_v();          // kind-preserving over absence
+  if (is_nil(v)) return nil_v();  // kind-preserving over absence
   if (v.tag == Tag::Array) {
     Value out = make_array(vm, as_array(v)->len);
     u32 root = vm.push(out);
@@ -611,8 +636,7 @@ static Value nat_copy(Vm& vm, u32 base, u32 argc) {
     u32 root = vm.push(out);
     TableData* t = as_table(ARG(0));  // re-read: make_table collected
     for (u32 i = 0; i < t->entriesLen; i++)
-      if (!is_tomb(t->entries[i]))
-        table_put(vm, out, t->entries[i].key, t->entries[i].val);
+      if (!is_tomb(t->entries[i])) table_put(vm, out, t->entries[i].key, t->entries[i].val);
     vm.popTo(root);
     return out;
   }
@@ -645,4 +669,4 @@ void register_data(Vm& vm) {
   def_native(vm, "copy", nat_copy);
 }
 
-} // namespace ot
+}  // namespace ot

@@ -116,9 +116,8 @@ TEST_CASE("array items survive GC; dead array items freed") {
   roots.push(arr);
   {
     Value s = make_string_h(heap, "elem", 4);
-    ArrayData* d = as_array(roots[0]);
     array_reserve(roots[0], 1);
-    d = as_array(roots[0]);
+    ArrayData* d = as_array(roots[0]);
     d->items[d->len++] = s;
   }
   // dead array (unrooted) — its C-heap items must be freed by the sweep
@@ -159,8 +158,7 @@ TEST_CASE("heap grows when live exceeds half") {
   Heap heap(nullptr, 1024);
   Vec<Value> roots;
   heap.addRoots(walkVecRoots, &roots);
-  for (int i = 0; i < 200; i++)
-    roots.push(make_string_h(heap, "live-string-payload-xx", 22));
+  for (int i = 0; i < 200; i++) roots.push(make_string_h(heap, "live-string-payload-xx", 22));
   CHECK(heap.spaceSize > 1024);
   // all still reachable and intact
   for (u32 i = 0; i < roots.len; i++)

@@ -2,7 +2,7 @@
 id: lan-c7gk
 status: open
 deps: []
-links: []
+links: [lan-6mpt]
 created: 2026-08-15T23:20:48Z
 type: bug
 priority: 1

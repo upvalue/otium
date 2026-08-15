@@ -46,4 +46,4 @@ private:
   Value parseNumber(const char* tok, u32 n, u32 line, u32 col);
 };
 
-} // namespace ot
+}  // namespace ot

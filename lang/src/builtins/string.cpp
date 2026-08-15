@@ -29,12 +29,6 @@ static u32 utf8_offset(const char* p, u32 len, u32 n) {
   return i;
 }
 
-static u32 utf8_len(const char* p, u32 len) {
-  u32 c = 0;
-  for (u32 i = 0; i < len; i++) if (!is_cont((u8)p[i])) c++;
-  return c;
-}
-
 static Value need_string(Vm& vm, const char* who, Value v) {
   if (v.tag != Tag::String) return raise_error(vm, "%s: expected string", who);
   return nil_v();
@@ -72,15 +66,19 @@ static Value nat_substring(Vm& vm, u32 base, u32 argc) {
   StringData* s = as_string(ARG(0));
   i64 nchars = (i64)s->nchars;
   i64 start = ARG(1).i, end = argc == 3 ? ARG(2).i : nchars;
-  if (start < 0) start = 0; if (start > nchars) start = nchars;
-  if (end < 0) end = 0;     if (end > nchars) end = nchars;
+  if (start < 0) start = 0;
+  if (start > nchars) start = nchars;
+  if (end < 0) end = 0;
+  if (end > nchars) end = nchars;
   if (end < start) return make_string(vm, "", 0);
   u32 b0 = utf8_offset(sbytes(s), s->len, (u32)start);
   u32 b1 = utf8_offset(sbytes(s), s->len, (u32)end);
   return make_string(vm, sbytes(s) + b0, b1 - b0);
 }
 
-static bool is_ws(u8 c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; }
+static bool is_ws(u8 c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
 
 static Value nat_string_split(Vm& vm, u32 base, u32 argc) {
   if (argc < 1 || argc > 2) return raise_error(vm, "string-split: expected 1-2 arguments");
@@ -93,13 +91,18 @@ static Value nat_string_split(Vm& vm, u32 base, u32 argc) {
   if (argc == 2) {
     OT_TRY(need_string(vm, "string-split", ARG(1)));
     StringData* sep = as_string(ARG(1));
-    if (sep->len == 0) { vm.popTo(root); return raise_error(vm, "string-split: empty separator"); }
+    if (sep->len == 0) {
+      vm.popTo(root);
+      return raise_error(vm, "string-split: empty separator");
+    }
     // re-fetch pointers after each allocation: make_string may GC-move objects.
     u32 start = 0, i = 0;
     while (i + sep->len <= n) {
       if (memcmp(p + i, sbytes(sep), sep->len) == 0) {
         array_push(vm, out, make_string(vm, p + start, i - start));
-        s = as_string(ARG(0)); sep = as_string(ARG(1)); p = sbytes(s); // re-fetch
+        s = as_string(ARG(0));
+        sep = as_string(ARG(1));
+        p = sbytes(s);  // re-fetch
         i += sep->len;
         start = i;
       } else i++;
@@ -113,7 +116,8 @@ static Value nat_string_split(Vm& vm, u32 base, u32 argc) {
       while (i < n && !is_ws((u8)p[i])) i++;
       if (i > start) {
         array_push(vm, out, make_string(vm, p + start, i - start));
-        s = as_string(ARG(0)); p = sbytes(s);   // re-fetch after alloc
+        s = as_string(ARG(0));
+        p = sbytes(s);  // re-fetch after alloc
       }
     }
   }
@@ -161,8 +165,12 @@ static Value case_op(Vm& vm, u32 base, u32 argc, const char* who, bool up) {
   return make_string(vm, out.data ? out.data : "", out.len);
 }
 
-static Value nat_upcase(Vm& vm, u32 base, u32 argc)   { return case_op(vm, base, argc, "string-upcase", true); }
-static Value nat_downcase(Vm& vm, u32 base, u32 argc) { return case_op(vm, base, argc, "string-downcase", false); }
+static Value nat_upcase(Vm& vm, u32 base, u32 argc) {
+  return case_op(vm, base, argc, "string-upcase", true);
+}
+static Value nat_downcase(Vm& vm, u32 base, u32 argc) {
+  return case_op(vm, base, argc, "string-downcase", false);
+}
 
 static Value nat_trim(Vm& vm, u32 base, u32 argc) {
   if (argc != 1) return raise_error(vm, "string-trim: expected 1 argument");
@@ -178,7 +186,10 @@ static Value nat_trim(Vm& vm, u32 base, u32 argc) {
 static bool bytes_find(const char* hay, u32 hn, const char* nee, u32 nn, u32* at) {
   if (nn > hn) return false;
   for (u32 i = 0; i + nn <= hn; i++)
-    if (memcmp(hay + i, nee, nn) == 0) { if (at) *at = i; return true; }
+    if (memcmp(hay + i, nee, nn) == 0) {
+      if (at) *at = i;
+      return true;
+    }
   return false;
 }
 
@@ -202,21 +213,23 @@ static Value nat_string_lt(Vm& vm, u32 base, u32 argc) {
 
 static Value nat_containsp(Vm& vm, u32 base, u32 argc) {
   OT_TRY(two_strings(vm, "string-contains?", base, argc));
-  StringData* s = as_string(ARG(0)); StringData* t = as_string(ARG(1));
+  StringData* s = as_string(ARG(0));
+  StringData* t = as_string(ARG(1));
   return bool_v(bytes_find(sbytes(s), s->len, sbytes(t), t->len, nullptr));
 }
 
 static Value nat_startsp(Vm& vm, u32 base, u32 argc) {
   OT_TRY(two_strings(vm, "string-starts-with?", base, argc));
-  StringData* s = as_string(ARG(0)); StringData* t = as_string(ARG(1));
+  StringData* s = as_string(ARG(0));
+  StringData* t = as_string(ARG(1));
   return bool_v(t->len <= s->len && memcmp(sbytes(s), sbytes(t), t->len) == 0);
 }
 
 static Value nat_endsp(Vm& vm, u32 base, u32 argc) {
   OT_TRY(two_strings(vm, "string-ends-with?", base, argc));
-  StringData* s = as_string(ARG(0)); StringData* t = as_string(ARG(1));
-  return bool_v(t->len <= s->len &&
-                memcmp(sbytes(s) + (s->len - t->len), sbytes(t), t->len) == 0);
+  StringData* s = as_string(ARG(0));
+  StringData* t = as_string(ARG(1));
+  return bool_v(t->len <= s->len && memcmp(sbytes(s) + (s->len - t->len), sbytes(t), t->len) == 0);
 }
 
 static Value nat_replace(Vm& vm, u32 base, u32 argc) {
@@ -225,7 +238,7 @@ static Value nat_replace(Vm& vm, u32 base, u32 argc) {
   StringData* s = as_string(ARG(0));
   StringData* from = as_string(ARG(1));
   StringData* to = as_string(ARG(2));
-  if (from->len == 0) return ARG(0);       // nothing to replace
+  if (from->len == 0) return ARG(0);  // nothing to replace
   Buf out;
   const char* p = sbytes(s);
   u32 i = 0;
@@ -295,7 +308,8 @@ static Value nat_symbol_to_string(Vm& vm, u32 base, u32 argc) {
 // coerce a string/symbol/keyword to an intern id, or return Unwind
 static Value coerce_id(Vm& vm, const char* who, Value v, u32* out) {
   switch (v.tag) {
-    case Tag::Symbol: case Tag::Keyword: *out = v.id; return nil_v();
+    case Tag::Symbol:
+    case Tag::Keyword: *out = v.id; return nil_v();
     case Tag::String: {
       StringData* s = as_string(v);
       *out = vm.intern.intern(sbytes(s), s->len);
@@ -307,14 +321,14 @@ static Value coerce_id(Vm& vm, const char* who, Value v, u32* out) {
 
 static Value nat_symbol(Vm& vm, u32 base, u32 argc) {
   if (argc != 1) return raise_error(vm, "symbol: expected 1 argument");
-  u32 id;
+  u32 id = 0;
   OT_TRY(coerce_id(vm, "symbol", ARG(0), &id));
   return symbol_v(id);
 }
 
 static Value nat_keyword(Vm& vm, u32 base, u32 argc) {
   if (argc != 1) return raise_error(vm, "keyword: expected 1 argument");
-  u32 id;
+  u32 id = 0;
   OT_TRY(coerce_id(vm, "keyword", ARG(0), &id));
   return keyword_v(id);
 }
@@ -389,4 +403,4 @@ void register_string(Vm& vm) {
   def_native(vm, "buffer->string", nat_buffer_to_string);
 }
 
-} // namespace ot
+}  // namespace ot

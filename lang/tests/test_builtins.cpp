@@ -18,9 +18,7 @@ static Vm* make_vm() {
   return Vm::create(cfg);
 }
 
-static Value str_v(Vm& vm, const char* s) {
-  return make_string(vm, s, (u32)strlen(s));
-}
+static Value str_v(Vm& vm, const char* s) { return make_string(vm, s, (u32)strlen(s)); }
 
 // ---------------------------------------------------------------------------
 
@@ -86,7 +84,7 @@ TEST_CASE("compact dict lifecycle") {
     Value s1 = str_v(*vm, "hello");
     u32 r1 = vm->push(s1);
     table_put(*vm, t, s1, int_v(42));
-    Value s2 = str_v(*vm, "hello");   // different object, equal bytes
+    Value s2 = str_v(*vm, "hello");  // different object, equal bytes
     CHECK(table_get(*vm, t, s2).i == 42);
     vm->popTo(r1);
 
@@ -111,11 +109,11 @@ TEST_CASE("compact dict lifecycle") {
     Value a1 = make_array(*vm, 4);
     u32 r = vm->push(a1);
     table_put(*vm, t, a1, int_v(5));
-    Value a2 = make_array(*vm, 4);   // distinct identity, same shape
+    Value a2 = make_array(*vm, 4);  // distinct identity, same shape
     u32 r2 = vm->push(a2);
     CHECK(is_nil(table_get(*vm, t, a2)));
-    vm->heap.collect();              // key must survive by stamped identity
-    a1 = vm->stack[r];               // re-fetch possibly-moved values
+    vm->heap.collect();  // key must survive by stamped identity
+    a1 = vm->stack[r];   // re-fetch possibly-moved values
     t = vm->stack[root];
     CHECK(table_get(*vm, t, a1).i == 5);
     vm->popTo(r);
@@ -157,7 +155,7 @@ TEST_CASE("equality matrix (spec 2.4)") {
   Value s2 = str_v(*vm, "abc");
   u32 r2 = vm->push(s2);
   CHECK(val_equal(*vm, s1, s2));
-  CHECK(!val_eq(s1, s2));                     // distinct objects
+  CHECK(!val_eq(s1, s2));  // distinct objects
   CHECK(val_eq(s1, s1));
 
   // pairs: recursive
@@ -183,7 +181,10 @@ TEST_CASE("equality matrix (spec 2.4)") {
   CHECK(val_hash(*vm, int_v(1)) != val_hash(*vm, float_v(1.0)));  // type-strict
 
   vm->popTo(r);
-  (void)r2; (void)r3; (void)r4; (void)r5;
+  (void)r2;
+  (void)r3;
+  (void)r4;
+  (void)r5;
   vm->destroy();
 }
 
@@ -250,7 +251,7 @@ TEST_CASE("arithmetic wraps two's-complement") {
   r = nat_div(*vm, b, 2);
   vm->popTo(b);
   CHECK(r.tag == Tag::Unwind);
-  vm->unwindCondition = nil_v();   // clear for cleanliness
+  vm->unwindCondition = nil_v();  // clear for cleanliness
 
   vm->destroy();
 }

@@ -18,4 +18,4 @@ void print_display(Vm& vm, Value v, Buf& out);
 u32 printer_table_count(Vm& vm, Value table);
 bool printer_table_entry(Vm& vm, Value table, u32 i, Value* k, Value* v);
 
-} // namespace ot
+}  // namespace ot

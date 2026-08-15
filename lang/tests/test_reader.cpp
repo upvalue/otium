@@ -60,7 +60,7 @@ TEST_CASE("keywords") {
   Value v = read1(":foo");
   CHECK(v.tag == Tag::Keyword);
   CHECK(rr(":foo") == ":foo");
-  CHECK(read_errors(":"));           // bare colon
+  CHECK(read_errors(":"));  // bare colon
   CHECK(rr(":a/b") == ":a/b");
 }
 
@@ -85,8 +85,8 @@ TEST_CASE("numbers") {
     CHECK(rr("3.5") == "3.5");
     CHECK(rr("-.5") == "-0.5");
     CHECK(rr("1e3") == "1000.0");
-    CHECK(rr("3.0") == "3.0");       // integral floats keep .0
-    CHECK(rr("0.1") == "0.1");       // shortest round-trip
+    CHECK(rr("3.0") == "3.0");  // integral floats keep .0
+    CHECK(rr("0.1") == "0.1");  // shortest round-trip
   }
   SUBCASE("starts-numerically must parse as a number") {
     CHECK(read_errors("12abc"));
@@ -100,7 +100,7 @@ TEST_CASE("numbers") {
     CHECK(read1("+").tag == Tag::Symbol);
     CHECK(read1("-").tag == Tag::Symbol);
     CHECK(read1("->").tag == Tag::Symbol);
-    CHECK(read1(".").tag == Tag::Symbol);   // lone dot outside a list
+    CHECK(read1(".").tag == Tag::Symbol);  // lone dot outside a list
   }
 }
 
@@ -120,7 +120,7 @@ TEST_CASE("strings") {
   CHECK(rr("\"esc\\e\"") == "\"esc\\e\"");
   CHECK(rr("\"nul\\0nul\"") == "\"nul\\0nul\"");
   CHECK(rr("\"multi\nline\"") == "\"multi\\nline\"");  // literal newline ok
-  CHECK(read_errors("\"bad\\qesc\""));                  // unknown escape
+  CHECK(read_errors("\"bad\\qesc\""));                 // unknown escape
   CHECK(read_errors("\"unterminated"));
   // display renders raw
   Buf b;
@@ -136,10 +136,10 @@ TEST_CASE("lists and pairs") {
   CHECK(rr("(a b . c)") == "(a b . c)");
   CHECK(rr("(1 (2 3) 4)") == "(1 (2 3) 4)");
   SUBCASE("dotted-tail errors") {
-    CHECK(read_errors("(. b)"));       // no preceding element
-    CHECK(read_errors("(a . b c)"));   // content after tail
-    CHECK(read_errors("(a .)"));       // no tail form
-    CHECK(read_errors("(a b"));        // unterminated
+    CHECK(read_errors("(. b)"));      // no preceding element
+    CHECK(read_errors("(a . b c)"));  // content after tail
+    CHECK(read_errors("(a .)"));      // no tail form
+    CHECK(read_errors("(a b"));       // unterminated
     CHECK(read_errors(")"));
   }
 }
@@ -163,7 +163,7 @@ TEST_CASE("quote sugar") {
   CHECK(rr(",@x") == "(unquote-splicing x)");
   CHECK(rr("`(a ,b ,@c)") == "(quasiquote (a (unquote b) (unquote-splicing c)))");
   CHECK(rr("''x") == "(quote (quote x))");
-  CHECK(read_errors("'"));   // nothing to quote
+  CHECK(read_errors("'"));  // nothing to quote
 }
 
 TEST_CASE("comments and whitespace") {
@@ -186,13 +186,34 @@ TEST_CASE("multiple forms and eof") {
 
 TEST_CASE("read -> print -> read fixpoint") {
   const char* corpus[] = {
-    "nil", "#t", "#f", "()", "42", "-7", "255", "3.5", "-0.5", "1000.0",
-    "0.1", "1e300", ":kw", "sym", "foo-bar!", "/", "->",
-    "\"hi\"", "\"a\\nb\\t\\\\\\\"\\e\\0\"",
-    "(a b c)", "(a . b)", "(a b . c)", "(1 (2 (3)) 4)",
-    "(array 1 2)", "(table :a 1 :b (array))",
-    "(quote x)", "(quasiquote (a (unquote b) (unquote-splicing c)))",
-    "(define (f x) (+ x 1))",
+      "nil",
+      "#t",
+      "#f",
+      "()",
+      "42",
+      "-7",
+      "255",
+      "3.5",
+      "-0.5",
+      "1000.0",
+      "0.1",
+      "1e300",
+      ":kw",
+      "sym",
+      "foo-bar!",
+      "/",
+      "->",
+      "\"hi\"",
+      "\"a\\nb\\t\\\\\\\"\\e\\0\"",
+      "(a b c)",
+      "(a . b)",
+      "(a b . c)",
+      "(1 (2 (3)) 4)",
+      "(array 1 2)",
+      "(table :a 1 :b (array))",
+      "(quote x)",
+      "(quasiquote (a (unquote b) (unquote-splicing c)))",
+      "(define (f x) (+ x 1))",
   };
   for (const char* src : corpus) {
     CAPTURE(src);
@@ -205,7 +226,7 @@ TEST_CASE("read -> print -> read fixpoint") {
     CHECK(s1 == s2);
   }
   // sugar and bracket forms normalize to their list spellings, then fix
-  const char* sugared[] = { "'x", "`(a ,b)", "[1 [2] 3]", "{:k 'v}" };
+  const char* sugared[] = {"'x", "`(a ,b)", "[1 [2] 3]", "{:k 'v}"};
   for (const char* src : sugared) {
     CAPTURE(src);
     std::string s1 = rr(src);

@@ -3,8 +3,8 @@
 #include "heap.hpp"
 #include "vm.hpp"
 #include <cstring>
-#include <cstdio>    // snprintf (deviation from allowed-header list; noted)
-#include <cstdlib>   // strtod
+#include <cstdio>   // snprintf (deviation from allowed-header list; noted)
+#include <cstdlib>  // strtod
 #include <cmath>
 
 namespace ot {
@@ -33,14 +33,23 @@ static void append_escaped(Buf& out, const char* s, u32 n) {
 // Shortest round-tripping float representation; integral values keep ".0".
 static void print_float(f64 f, Buf& out) {
   char tmp[40];
-  if (std::isnan(f)) { out.appendCstr("nan"); return; }
-  if (std::isinf(f)) { out.appendCstr(f < 0 ? "-inf" : "inf"); return; }
+  if (std::isnan(f)) {
+    out.appendCstr("nan");
+    return;
+  }
+  if (std::isinf(f)) {
+    out.appendCstr(f < 0 ? "-inf" : "inf");
+    return;
+  }
   int len = 0;
   // Integral values stay in decimal notation (spec: `1000.0`, not `1e+03`)
   // while the integer part is exactly representable.
   if (f == std::floor(f) && std::fabs(f) < 1e17) {
     len = snprintf(tmp, sizeof(tmp), "%.1f", f);
-    if (strtod(tmp, nullptr) == f) { out.append(tmp, (u32)len); return; }
+    if (strtod(tmp, nullptr) == f) {
+      out.append(tmp, (u32)len);
+      return;
+    }
   }
   for (int prec = 1; prec <= 17; prec++) {
     len = snprintf(tmp, sizeof(tmp), "%.*g", prec, f);
@@ -49,7 +58,10 @@ static void print_float(f64 f, Buf& out) {
   out.append(tmp, (u32)len);
   bool hasMark = false;
   for (int i = 0; i < len; i++)
-    if (tmp[i] == '.' || tmp[i] == 'e' || tmp[i] == 'E') { hasMark = true; break; }
+    if (tmp[i] == '.' || tmp[i] == 'e' || tmp[i] == 'E') {
+      hasMark = true;
+      break;
+    }
   if (!hasMark) out.appendCstr(".0");
 }
 
@@ -65,9 +77,7 @@ static void print_named(Vm& vm, const char* kind, u32 nameId, Buf& out) {
   out.push('>');
 }
 
-static const char* string_bytes(StringData* sd) {
-  return (const char*)sd + sizeof(StringData);
-}
+static const char* string_bytes(StringData* sd) { return (const char*)sd + sizeof(StringData); }
 
 static void print_val(Vm& vm, Value v, Buf& out, bool display) {
   switch (v.tag) {
@@ -168,4 +178,4 @@ static void print_val(Vm& vm, Value v, Buf& out, bool display) {
 void print_repr(Vm& vm, Value v, Buf& out) { print_val(vm, v, out, false); }
 void print_display(Vm& vm, Value v, Buf& out) { print_val(vm, v, out, true); }
 
-} // namespace ot
+}  // namespace ot

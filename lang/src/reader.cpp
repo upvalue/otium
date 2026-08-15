@@ -3,7 +3,7 @@
 #include "heap.hpp"
 #include "vm.hpp"
 #include <cstring>
-#include <cstdlib>   // strtod (deviation from allowed-header list; noted)
+#include <cstdlib>  // strtod (deviation from allowed-header list; noted)
 
 namespace ot {
 
@@ -16,11 +16,18 @@ static bool is_ws(char c) {
 // Characters that terminate an atom (spec 1.2): ( ) [ ] { } ; " , ' `
 static bool is_delim(char c) {
   switch (c) {
-    case '(': case ')': case '[': case ']': case '{': case '}':
-    case ';': case '"': case ',': case '\'': case '`':
-      return true;
-    default:
-      return false;
+    case '(':
+    case ')':
+    case '[':
+    case ']':
+    case '{':
+    case '}':
+    case ';':
+    case '"':
+    case ',':
+    case '\'':
+    case '`': return true;
+    default: return false;
   }
 }
 
@@ -39,14 +46,22 @@ Reader::Reader(Vm& vm, const char* src, u32 len, const char* filename)
 
 void Reader::advance() {
   if (pos_ >= len_) return;
-  if (src_[pos_] == '\n') { line_++; col_ = 1; } else { col_++; }
+  if (src_[pos_] == '\n') {
+    line_++;
+    col_ = 1;
+  } else {
+    col_++;
+  }
   pos_++;
 }
 
 void Reader::skipWs() {
   while (!eof()) {
     char c = peek();
-    if (is_ws(c)) { advance(); continue; }
+    if (is_ws(c)) {
+      advance();
+      continue;
+    }
     if (c == ';') {
       while (!eof() && peek() != '\n') advance();
       continue;
@@ -61,7 +76,10 @@ Value Reader::err(u32 line, u32 col, const char* what) {
 
 Value Reader::next() {
   skipWs();
-  if (eof()) { eof_ = true; return nil_v(); }
+  if (eof()) {
+    eof_ = true;
+    return nil_v();
+  }
   return readForm();
 }
 
@@ -74,17 +92,20 @@ Value Reader::readForm() {
     case '(': advance(); return readList(')', line, col, nullptr);
     case '[': advance(); return readList(']', line, col, "array");
     case '{': advance(); return readList('}', line, col, "table");
-    case ')': case ']': case '}':
-      return err(line, col, "unexpected closing delimiter");
+    case ')':
+    case ']':
+    case '}': return err(line, col, "unexpected closing delimiter");
     case '"': advance(); return readString(line, col);
     case '\'': advance(); return readSugar("quote", 5);
     case '`': advance(); return readSugar("quasiquote", 10);
     case ',':
       advance();
-      if (!eof() && peek() == '@') { advance(); return readSugar("unquote-splicing", 16); }
+      if (!eof() && peek() == '@') {
+        advance();
+        return readSugar("unquote-splicing", 16);
+      }
       return readSugar("unquote", 7);
-    default:
-      return readAtom();
+    default: return readAtom();
   }
 }
 
@@ -100,9 +121,15 @@ Value Reader::readList(char close, u32 openLine, u32 openCol, const char* ctorSy
 
   for (;;) {
     skipWs();
-    if (eof()) { vm_.popTo(base); return err(openLine, openCol, "unterminated list"); }
+    if (eof()) {
+      vm_.popTo(base);
+      return err(openLine, openCol, "unterminated list");
+    }
     char c = peek();
-    if (c == close) { advance(); break; }
+    if (c == close) {
+      advance();
+      break;
+    }
     if (c == ')' || c == ']' || c == '}') {
       vm_.popTo(base);
       return err(line_, col_, "mismatched closing delimiter");
@@ -111,10 +138,19 @@ Value Reader::readList(char close, u32 openLine, u32 openCol, const char* ctorSy
     if (c == '.' && (pos_ + 1 >= len_ || atom_end(src_[pos_ + 1]))) {
       u32 dl = line_, dc = col_;
       advance();
-      if (count == 0) { vm_.popTo(base); return err(dl, dc, "dotted tail with no preceding element"); }
-      if (close != ')') { vm_.popTo(base); return err(dl, dc, "dotted tail not allowed in collection literal"); }
+      if (count == 0) {
+        vm_.popTo(base);
+        return err(dl, dc, "dotted tail with no preceding element");
+      }
+      if (close != ')') {
+        vm_.popTo(base);
+        return err(dl, dc, "dotted tail not allowed in collection literal");
+      }
       Value t = readForm();
-      if (t.tag == Tag::Unwind) { vm_.popTo(base); return t; }
+      if (t.tag == Tag::Unwind) {
+        vm_.popTo(base);
+        return t;
+      }
       tailSlot = vm_.push(t);
       haveTail = true;
       skipWs();
@@ -126,7 +162,10 @@ Value Reader::readList(char close, u32 openLine, u32 openCol, const char* ctorSy
       break;
     }
     Value v = readForm();
-    if (v.tag == Tag::Unwind) { vm_.popTo(base); return v; }
+    if (v.tag == Tag::Unwind) {
+      vm_.popTo(base);
+      return v;
+    }
     vm_.push(v);
     count++;
   }
@@ -135,13 +174,19 @@ Value Reader::readList(char close, u32 openLine, u32 openCol, const char* ctorSy
   u32 accSlot = vm_.push(haveTail ? vm_.stack[tailSlot] : null_v());
   for (u32 i = count; i > 0; i--) {
     Value p = make_pair(vm_, vm_.stack[base + i - 1], vm_.stack[accSlot]);
-    if (p.tag == Tag::Unwind) { vm_.popTo(base); return p; }
+    if (p.tag == Tag::Unwind) {
+      vm_.popTo(base);
+      return p;
+    }
     vm_.stack[accSlot] = p;
   }
   if (ctorSym) {
     Value head = symbol_v(vm_.intern.intern(ctorSym, (u32)strlen(ctorSym)));
     Value p = make_pair(vm_, head, vm_.stack[accSlot]);
-    if (p.tag == Tag::Unwind) { vm_.popTo(base); return p; }
+    if (p.tag == Tag::Unwind) {
+      vm_.popTo(base);
+      return p;
+    }
     vm_.stack[accSlot] = p;
   }
   Value result = vm_.stack[accSlot];
@@ -186,11 +231,17 @@ Value Reader::readSugar(const char* sym, u32 symLen) {
   u32 base = vm_.stack.len;
   u32 slot = vm_.push(inner);
   Value tail = make_pair(vm_, vm_.stack[slot], null_v());
-  if (tail.tag == Tag::Unwind) { vm_.popTo(base); return tail; }
+  if (tail.tag == Tag::Unwind) {
+    vm_.popTo(base);
+    return tail;
+  }
   vm_.stack[slot] = tail;
   Value head = symbol_v(vm_.intern.intern(sym, symLen));
   Value form = make_pair(vm_, head, vm_.stack[slot]);
-  if (form.tag == Tag::Unwind) { vm_.popTo(base); return form; }
+  if (form.tag == Tag::Unwind) {
+    vm_.popTo(base);
+    return form;
+  }
   if (is_heap(form)) reader_set_pos(vm_, form.obj, line, col);
   vm_.popTo(base);
   return form;
@@ -223,21 +274,22 @@ Value Reader::classifyAtom(const char* tok, u32 n, u32 line, u32 col) {
     return bool_v(true);
   if (tok_eq(tok, n, "#f") || tok_eq(tok, n, "#false") || tok_eq(tok, n, "false"))
     return bool_v(false);
-  if (n > 0 && tok[0] == '#')
-    return err(line, col, "reserved # syntax");
+  if (n > 0 && tok[0] == '#') return err(line, col, "reserved # syntax");
   if (n > 0 && tok[0] == ':') {
     if (n == 1) return err(line, col, "bare : is not a keyword");
     return keyword_v(vm_.intern.intern(tok + 1, n - 1));
   }
-  if (starts_numerically(tok, n))
-    return parseNumber(tok, n, line, col);
+  if (starts_numerically(tok, n)) return parseNumber(tok, n, line, col);
   return symbol_v(vm_.intern.intern(tok, n));
 }
 
 Value Reader::parseNumber(const char* tok, u32 n, u32 line, u32 col) {
   u32 i = 0;
   bool neg = false;
-  if (tok[i] == '+' || tok[i] == '-') { neg = tok[i] == '-'; i++; }
+  if (tok[i] == '+' || tok[i] == '-') {
+    neg = tok[i] == '-';
+    i++;
+  }
 
   // hexadecimal: 0x...
   if (n - i > 2 && tok[i] == '0' && (tok[i + 1] == 'x' || tok[i + 1] == 'X')) {
@@ -258,7 +310,10 @@ Value Reader::parseNumber(const char* tok, u32 n, u32 line, u32 col) {
   bool isFloat = false;
   for (u32 j = i; j < n; j++) {
     char c = tok[j];
-    if (c == '.' || c == 'e' || c == 'E') { isFloat = true; break; }
+    if (c == '.' || c == 'e' || c == 'E') {
+      isFloat = true;
+      break;
+    }
   }
 
   if (!isFloat) {
@@ -286,4 +341,4 @@ Value Reader::parseNumber(const char* tok, u32 n, u32 line, u32 col) {
   return float_v(f);
 }
 
-} // namespace ot
+}  // namespace ot

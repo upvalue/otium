@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(dirname "$0")
+project_dir=$(CDPATH= cd "$script_dir/.." && pwd)
+
+if [ -n "${CLANG_FORMAT:-}" ]; then
+  formatter_bin=$CLANG_FORMAT
+elif command -v clang-format >/dev/null 2>&1; then
+  formatter_bin=clang-format
+elif command -v xcrun >/dev/null 2>&1; then
+  formatter_bin=$(xcrun --find clang-format 2>/dev/null || true)
+else
+  formatter_bin=
+fi
+
+if [ -z "$formatter_bin" ]; then
+  echo "clang-format was not found. Set CLANG_FORMAT to its path." >&2
+  exit 127
+fi
+
+cd "$project_dir"
+
+case "${1:-}" in
+  "")
+    git ls-files -z -- '*.cpp' '*.hpp' ':!tests/doctest.h' |
+      xargs -0 "$formatter_bin" --style=file -i
+    ;;
+  --check)
+    git ls-files -z -- '*.cpp' '*.hpp' ':!tests/doctest.h' |
+      xargs -0 "$formatter_bin" --style=file --dry-run --Werror
+    ;;
+  *)
+    echo "usage: tools/format-cpp [--check]" >&2
+    exit 2
+    ;;
+esac

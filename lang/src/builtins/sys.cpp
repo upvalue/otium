@@ -4,7 +4,7 @@
 #include "../vm.hpp"
 #include "../ns.hpp"
 #include "../heap.hpp"
-#include "../eval.hpp"      // FunctionData, eval_form, apply
+#include "../eval.hpp"  // FunctionData, eval_form, apply
 #include "../reader.hpp"
 #include "../printer.hpp"
 #include "../intern.hpp"
@@ -38,30 +38,31 @@ static Value one_arg(Vm& vm, const char* who, u32 argc) {
   return nil_v();
 }
 
-#define TAG_PRED(cname, lname, expr)                            \
-  static Value cname(Vm& vm, u32 base, u32 argc) {              \
-    OT_TRY(one_arg(vm, lname, argc));                           \
-    Value v = ARG(0); (void)v;                                  \
-    return bool_v(expr);                                        \
+#define TAG_PRED(cname, lname, expr)                                                               \
+  static Value cname(Vm& vm, u32 base, u32 argc) {                                                 \
+    OT_TRY(one_arg(vm, lname, argc));                                                              \
+    Value v = ARG(0);                                                                              \
+    (void)v;                                                                                       \
+    return bool_v(expr);                                                                           \
   }
 
-TAG_PRED(nat_nilp,      "nil?",      v.tag == Tag::Nil)
-TAG_PRED(nat_nullp,     "null?",     v.tag == Tag::Null)
-TAG_PRED(nat_booleanp,  "boolean?",  v.tag == Tag::True || v.tag == Tag::False)
-TAG_PRED(nat_intp,      "int?",      v.tag == Tag::Int)
-TAG_PRED(nat_floatp,    "float?",    v.tag == Tag::Float)
-TAG_PRED(nat_numberp,   "number?",   v.tag == Tag::Int || v.tag == Tag::Float)
-TAG_PRED(nat_symbolp,   "symbol?",   v.tag == Tag::Symbol)
-TAG_PRED(nat_keywordp,  "keyword?",  v.tag == Tag::Keyword)
-TAG_PRED(nat_stringp,   "string?",   v.tag == Tag::String)
-TAG_PRED(nat_pairp,     "pair?",     v.tag == Tag::Pair)
-TAG_PRED(nat_arrayp,    "array?",    v.tag == Tag::Array)
-TAG_PRED(nat_tablep,    "table?",    v.tag == Tag::Table)
-TAG_PRED(nat_bufferp,   "buffer?",   v.tag == Tag::Buffer)
-TAG_PRED(nat_macrop,    "macro?",    v.tag == Tag::Macro)
-TAG_PRED(nat_procedurep,"procedure?",v.tag == Tag::Function)
-TAG_PRED(nat_truep,     "true?",     v.tag == Tag::True)
-TAG_PRED(nat_falsep,    "false?",    v.tag == Tag::False)
+TAG_PRED(nat_nilp, "nil?", v.tag == Tag::Nil)
+TAG_PRED(nat_nullp, "null?", v.tag == Tag::Null)
+TAG_PRED(nat_booleanp, "boolean?", v.tag == Tag::True || v.tag == Tag::False)
+TAG_PRED(nat_intp, "int?", v.tag == Tag::Int)
+TAG_PRED(nat_floatp, "float?", v.tag == Tag::Float)
+TAG_PRED(nat_numberp, "number?", v.tag == Tag::Int || v.tag == Tag::Float)
+TAG_PRED(nat_symbolp, "symbol?", v.tag == Tag::Symbol)
+TAG_PRED(nat_keywordp, "keyword?", v.tag == Tag::Keyword)
+TAG_PRED(nat_stringp, "string?", v.tag == Tag::String)
+TAG_PRED(nat_pairp, "pair?", v.tag == Tag::Pair)
+TAG_PRED(nat_arrayp, "array?", v.tag == Tag::Array)
+TAG_PRED(nat_tablep, "table?", v.tag == Tag::Table)
+TAG_PRED(nat_bufferp, "buffer?", v.tag == Tag::Buffer)
+TAG_PRED(nat_macrop, "macro?", v.tag == Tag::Macro)
+TAG_PRED(nat_procedurep, "procedure?", v.tag == Tag::Function)
+TAG_PRED(nat_truep, "true?", v.tag == Tag::True)
+TAG_PRED(nat_falsep, "false?", v.tag == Tag::False)
 
 static Value nat_listp(Vm& vm, u32 base, u32 argc) {
   OT_TRY(one_arg(vm, "list?", argc));
@@ -79,10 +80,11 @@ static Value nat_emptyp(Vm& vm, u32 base, u32 argc) {
   OT_TRY(one_arg(vm, "empty?", argc));
   Value v = ARG(0);
   switch (v.tag) {
-    case Tag::Nil: case Tag::Null: return bool_v(true);
-    case Tag::Pair:   return bool_v(false);
-    case Tag::Array:  return bool_v(as_array(v)->len == 0);
-    case Tag::Table:  return bool_v(as_table(v)->count == 0);
+    case Tag::Nil:
+    case Tag::Null: return bool_v(true);
+    case Tag::Pair: return bool_v(false);
+    case Tag::Array: return bool_v(as_array(v)->len == 0);
+    case Tag::Table: return bool_v(as_table(v)->count == 0);
     case Tag::String: return bool_v(as_string(v)->nchars == 0);
     case Tag::Buffer: return bool_v(as_buffer(v)->buf.len == 0);
     default: return raise_error(vm, "empty?: unsupported type");
@@ -103,7 +105,8 @@ static const char* type_name(Tag t) {
   switch (t) {
     case Tag::Nil: return "nil";
     case Tag::Null: return "null";
-    case Tag::False: case Tag::True: return "boolean";
+    case Tag::False:
+    case Tag::True: return "boolean";
     case Tag::Int: return "int";
     case Tag::Float: return "float";
     case Tag::Symbol: return "symbol";
@@ -146,13 +149,21 @@ static Value print_all(Vm& vm, u32 base, u32 argc, bool repr, bool nl) {
   return nil_v();
 }
 
-static Value nat_display(Vm& vm, u32 base, u32 argc) { return print_all(vm, base, argc, false, false); }
-static Value nat_write(Vm& vm, u32 base, u32 argc)   { return print_all(vm, base, argc, true, false); }
-static Value nat_println(Vm& vm, u32 base, u32 argc) { return print_all(vm, base, argc, false, true); }
+static Value nat_display(Vm& vm, u32 base, u32 argc) {
+  return print_all(vm, base, argc, false, false);
+}
+static Value nat_write(Vm& vm, u32 base, u32 argc) {
+  return print_all(vm, base, argc, true, false);
+}
+static Value nat_println(Vm& vm, u32 base, u32 argc) {
+  return print_all(vm, base, argc, false, true);
+}
 
 static Value nat_newline(Vm& vm, u32 base, u32 argc) {
-  (void)base; (void)argc;
-  Buf out; out.push('\n');
+  (void)base;
+  (void)argc;
+  Buf out;
+  out.push('\n');
   write_out(vm, out);
   return nil_v();
 }
@@ -248,8 +259,14 @@ static Value nat_macroexpand(Vm& vm, u32 base, u32 argc) {
   for (;;) {
     bool e;
     Value next = expand_once(vm, form, &e);
-    if (next.tag == Tag::Unwind) { vm.popTo(root); return next; }
-    if (!e) { vm.popTo(root); return next; }
+    if (next.tag == Tag::Unwind) {
+      vm.popTo(root);
+      return next;
+    }
+    if (!e) {
+      vm.popTo(root);
+      return next;
+    }
     form = next;
     vm.stack[root] = form;
   }
@@ -326,4 +343,4 @@ void register_sys(Vm& vm) {
   def_native(vm, "describe", nat_describe);
 }
 
-} // namespace ot
+}  // namespace ot

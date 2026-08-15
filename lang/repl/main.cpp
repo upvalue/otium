@@ -17,15 +17,19 @@
 #include "vec.hpp"
 #include "value.hpp"
 #include "heap.hpp"
-#include "vm.hpp"      // INTEGRATION: expected per interfaces.md (Vm, VmConfig, NativeFn)
+#include "vm.hpp"  // INTEGRATION: expected per interfaces.md (Vm, VmConfig, NativeFn)
 #include "reader.hpp"
-#include "printer.hpp" // INTEGRATION: expected per interfaces.md (print_repr)
-#include "eval.hpp"    // INTEGRATION: expected per interfaces.md (eval_form, apply)
-#include "ns.hpp"      // INTEGRATION: expected per interfaces.md (ns_resolve)
+#include "printer.hpp"  // INTEGRATION: expected per interfaces.md (print_repr)
+#include "eval.hpp"     // INTEGRATION: expected per interfaces.md (eval_form, apply)
+#include "ns.hpp"       // INTEGRATION: expected per interfaces.md (ns_resolve)
 
 // vm_push_handler/vm_pop_handler come from vm.hpp; make_native from eval.hpp.
 
-using ot::Vm; using ot::Value; using ot::Tag; using ot::Buf; using ot::u32;
+using ot::Buf;
+using ot::Tag;
+using ot::u32;
+using ot::Value;
+using ot::Vm;
 
 // ---------------------------------------------------------------------------
 // globals
@@ -47,14 +51,13 @@ static void on_sigint(int) {
 // ---------------------------------------------------------------------------
 // host callbacks
 
-static void host_write(void*, const char* s, u32 n) {
-  fwrite(s, 1, n, stdout);
-}
+static void host_write(void*, const char* s, u32 n) { fwrite(s, 1, n, stdout); }
 
 // require callback: ns name dots->slashes + ".scm", searched across load path.
 static bool host_load(void*, const char* nsName, Buf* srcOut) {
   std::string rel(nsName);
-  for (auto& c : rel) if (c == '.') c = '/';
+  for (auto& c : rel)
+    if (c == '.') c = '/';
   rel += ".scm";
   for (const auto& dir : g_loadPath) {
     std::string path = dir.empty() ? rel : dir + "/" + rel;
@@ -62,8 +65,7 @@ static bool host_load(void*, const char* nsName, Buf* srcOut) {
     if (!f) continue;
     char chunk[4096];
     size_t n;
-    while ((n = fread(chunk, 1, sizeof chunk, f)) > 0)
-      srcOut->append(chunk, (u32)n);
+    while ((n = fread(chunk, 1, sizeof chunk, f)) > 0) srcOut->append(chunk, (u32)n);
     fclose(f);
     return true;
   }
@@ -94,7 +96,10 @@ static void print_value(Vm& vm, Value v, FILE* to) {
 
 static bool was_interrupt(Vm& vm) {
   // The evaluator marks ^C (and any future (quit)) as UnwindKind::Quit.
-  if (vm.unwindKind == ot::UnwindKind::Quit) { g_sigint = 0; return true; }
+  if (vm.unwindKind == ot::UnwindKind::Quit) {
+    g_sigint = 0;
+    return true;
+  }
   return false;
 }
 
@@ -146,8 +151,14 @@ static Value repl_condition_handler(Vm& vm, u32 base, u32 argc) {
     fputs("restart #? (or press enter to unwind) ", stderr);
     fflush(stderr);
     char buf[128];
-    if (!fgets(buf, sizeof buf, stdin)) { vm.popTo(rslot); return ot::nil_v(); }
-    if (buf[0] == '\n') { vm.popTo(rslot); return ot::nil_v(); }  // decline
+    if (!fgets(buf, sizeof buf, stdin)) {
+      vm.popTo(rslot);
+      return ot::nil_v();
+    }
+    if (buf[0] == '\n') {
+      vm.popTo(rslot);
+      return ot::nil_v();
+    }  // decline
     char* end = nullptr;
     long idx = strtol(buf, &end, 10);
     if (end == buf || idx < 0 || idx >= count) {
@@ -175,7 +186,10 @@ static Value always_true_pred(Vm& vm, u32, u32) {
 
 static int run_file(Vm& vm, const char* path) {
   FILE* f = fopen(path, "rb");
-  if (!f) { fprintf(stderr, "otium: cannot open %s\n", path); return 1; }
+  if (!f) {
+    fprintf(stderr, "otium: cannot open %s\n", path);
+    return 1;
+  }
   std::string src;
   char chunk[4096];
   size_t n;
@@ -331,7 +345,8 @@ int main(int argc, char** argv) {
     size_t start = 0;
     while (start <= s.size()) {
       size_t colon = s.find(':', start);
-      std::string part = s.substr(start, colon == std::string::npos ? std::string::npos : colon - start);
+      std::string part =
+          s.substr(start, colon == std::string::npos ? std::string::npos : colon - start);
       if (!part.empty()) g_loadPath.push_back(part);
       if (colon == std::string::npos) break;
       start = colon + 1;
@@ -344,10 +359,15 @@ int main(int argc, char** argv) {
   cfg.stackSlots = 4096;
   cfg.maxDepth = 512;
   Vm* vm = Vm::create(cfg);
-  if (!vm) { fputs("otium: vm creation failed\n", stderr); return 1; }
+  if (!vm) {
+    fputs("otium: vm creation failed\n", stderr);
+    return 1;
+  }
   g_vm = vm;
-  vm->writeFn = host_write; vm->writeUd = nullptr;
-  vm->loadFn = host_load;   vm->loadUd = nullptr;
+  vm->writeFn = host_write;
+  vm->writeUd = nullptr;
+  vm->loadFn = host_load;
+  vm->loadUd = nullptr;
 
   struct sigaction sa;
   memset(&sa, 0, sizeof sa);

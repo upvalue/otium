@@ -9,9 +9,9 @@ static u32 align8(u32 n) { return (n + 7u) & ~7u; }
 static u32 objTotalSize(Obj* o) { return (u32)sizeof(Obj) + align8(o->size); }
 
 Heap::Heap(Vm* vm_, u32 initialBytes)
-    : vm(vm_), spaceSize(initialBytes < 1024 ? 1024 : align8(initialBytes)),
-      used(0), maxBytes(64u * 1024 * 1024), nextIdent(1), collections(0),
-      toSpace(nullptr), toSize(0), toUsed(0) {
+    : vm(vm_), spaceSize(initialBytes < 1024 ? 1024 : align8(initialBytes)), used(0),
+      maxBytes(64u * 1024 * 1024), nextIdent(1), collections(0), toSpace(nullptr), toSize(0),
+      toUsed(0) {
   space = (char*)malloc(spaceSize);
   if (!space) ot_fatal("heap: cannot allocate initial space");
 }
@@ -21,10 +21,11 @@ Heap::~Heap() {
   for (u32 i = 0; i < finalizable.len; i++) {
     Obj* o = finalizable.data[i];
     switch (o->type) {
-      case ObjType::Array:  free(((ArrayData*)obj_payload(o))->items); break;
+      case ObjType::Array: free(((ArrayData*)obj_payload(o))->items); break;
       case ObjType::Table: {
         TableData* td = (TableData*)obj_payload(o);
-        free(td->entries); free(td->index);
+        free(td->entries);
+        free(td->index);
         break;
       }
       case ObjType::Buffer: ((BufferData*)obj_payload(o))->buf.~Buf(); break;
@@ -34,14 +35,25 @@ Heap::~Heap() {
   free(space);
 }
 
-void Heap::addRoots(RootWalkFn fn, void* ud) {
-  rootWalkers.push(RootEntry{fn, ud});
-}
+void Heap::addRoots(RootWalkFn fn, void* ud) { rootWalkers.push(RootEntry{fn, ud}); }
 
 Obj* Heap::alloc(ObjType t, u32 payloadBytes) {
   u32 total = (u32)sizeof(Obj) + align8(payloadBytes);
 #ifdef OT_GC_STRESS
-  collect();
+  // Collect every OT_GC_STRESS_EVERY-th alloc (default 1 = every alloc).
+  // The throttle keeps stress iteration tolerable on alloc-heavy tests;
+  // the final gate runs at 1.
+  static u32 stressEvery = 0;
+  static u32 stressTick = 0;
+  if (stressEvery == 0) {
+    const char* e = getenv("OT_GC_STRESS_EVERY");
+    stressEvery = e ? (u32)atoi(e) : 1;
+    if (stressEvery == 0) stressEvery = 1;
+  }
+  if (++stressTick >= stressEvery) {
+    stressTick = 0;
+    collect();
+  }
 #endif
   if (used + total > spaceSize) {
     collect();
@@ -52,11 +64,14 @@ Obj* Heap::alloc(ObjType t, u32 payloadBytes) {
   }
   Obj* o = (Obj*)(space + used);
   used += total;
-  o->type = t; o->flags = 0; o->_pad = 0; o->size = payloadBytes;
-  o->forward = nullptr; o->ident = 0;
+  o->type = t;
+  o->flags = 0;
+  o->_pad = 0;
+  o->size = payloadBytes;
+  o->forward = nullptr;
+  o->ident = 0;
   memset(obj_payload(o), 0, payloadBytes);
-  if (t == ObjType::Array || t == ObjType::Table || t == ObjType::Buffer)
-    finalizable.push(o);
+  if (t == ObjType::Array || t == ObjType::Table || t == ObjType::Buffer) finalizable.push(o);
   return o;
 }
 
@@ -76,9 +91,7 @@ void Heap::visitSlot(Value* slot) {
   if (is_heap(*slot) && slot->obj) slot->obj = copyObj(slot->obj);
 }
 
-static void visitTrampoline(void* ctx, Value* slot) {
-  ((Heap*)ctx)->visitSlot(slot);
-}
+static void visitTrampoline(void* ctx, Value* slot) { ((Heap*)ctx)->visitSlot(slot); }
 
 void Heap::collect() { collectInto(spaceSize); }
 
@@ -91,8 +104,7 @@ void Heap::collectInto(u32 newSize) {
   // 1. Copy roots (registered walkers + internal temp roots).
   for (u32 i = 0; i < rootWalkers.len; i++)
     rootWalkers.data[i].fn(rootWalkers.data[i].ud, visitTrampoline, this);
-  for (u32 i = 0; i < tempRoots.len; i++)
-    visitSlot(&tempRoots.data[i]);
+  for (u32 i = 0; i < tempRoots.len; i++) visitSlot(&tempRoots.data[i]);
 
   // 2. Cheney scan: walk to-space, tracing each copied object's fields.
   u32 scan = 0;
@@ -102,7 +114,8 @@ void Heap::collectInto(u32 newSize) {
     switch (o->type) {
       case ObjType::Pair: {
         PairData* d = (PairData*)p;
-        visitSlot(&d->car); visitSlot(&d->cdr);
+        visitSlot(&d->car);
+        visitSlot(&d->cdr);
         break;
       }
       case ObjType::Array: {
@@ -122,15 +135,17 @@ void Heap::collectInto(u32 newSize) {
       case ObjType::Function:
       case ObjType::Macro: {
         FunctionData* d = (FunctionData*)p;
-        visitSlot(&d->params); visitSlot(&d->body); visitSlot(&d->env);
-        visitSlot(&d->nsName); visitSlot(&d->docstring);
+        visitSlot(&d->params);
+        visitSlot(&d->body);
+        visitSlot(&d->env);
+        visitSlot(&d->nsName);
+        visitSlot(&d->docstring);
         break;
       }
-      case ObjType::Param:   visitSlot(&((ParamData*)p)->defaultVal); break;
+      case ObjType::Param: visitSlot(&((ParamData*)p)->defaultVal); break;
       case ObjType::Restart: visitSlot(&((RestartData*)p)->description); break;
       case ObjType::String:
-      case ObjType::Buffer:
-        break;
+      case ObjType::Buffer: break;
     }
     scan += objTotalSize(o);
   }
@@ -145,10 +160,11 @@ void Heap::collectInto(u32 newSize) {
     } else {
       void* p = obj_payload(o);
       switch (o->type) {
-        case ObjType::Array:  free(((ArrayData*)p)->items); break;
+        case ObjType::Array: free(((ArrayData*)p)->items); break;
         case ObjType::Table: {
           TableData* td = (TableData*)p;
-          free(td->entries); free(td->index);
+          free(td->entries);
+          free(td->index);
           break;
         }
         case ObjType::Buffer: ((BufferData*)p)->buf.~Buf(); break;
@@ -164,14 +180,17 @@ void Heap::collectInto(u32 newSize) {
   memset(space, 0xAB, spaceSize);
 #endif
   free(space);
-  space = toSpace; spaceSize = toSize; used = toUsed;
-  toSpace = nullptr; toSize = 0; toUsed = 0;
+  space = toSpace;
+  spaceSize = toSize;
+  used = toUsed;
+  toSpace = nullptr;
+  toSize = 0;
+  toUsed = 0;
   collections++;
 
   // Grow policy: if live > 50% after the copy, double next time via an
   // immediate re-collect into a bigger space (cheap: live set is small).
-  if (used > spaceSize / 2 && spaceSize * 2 <= maxBytes)
-    collectInto(spaceSize * 2);
+  if (used > spaceSize / 2 && spaceSize * 2 <= maxBytes) collectInto(spaceSize * 2);
 }
 
 u32 Heap::identityOf(Obj* o) {
@@ -207,7 +226,8 @@ Value make_string_h(Heap& h, const char* bytes, u32 len) {
 Value make_array_h(Heap& h, u32 cap) {
   Obj* o = h.alloc(ObjType::Array, sizeof(ArrayData));
   ArrayData* d = (ArrayData*)obj_payload(o);
-  d->len = 0; d->cap = cap;
+  d->len = 0;
+  d->cap = cap;
   d->items = cap ? (Value*)malloc((size_t)cap * sizeof(Value)) : nullptr;
   if (cap && !d->items) ot_fatal("array: out of memory");
   return obj_v(Tag::Array, o);
@@ -216,9 +236,14 @@ Value make_array_h(Heap& h, u32 cap) {
 Value make_table_h(Heap& h) {
   Obj* o = h.alloc(ObjType::Table, sizeof(TableData));
   TableData* d = (TableData*)obj_payload(o);
-  d->count = 0; d->tombstones = 0;
-  d->entries = nullptr; d->entriesLen = 0; d->entriesCap = 0;
-  d->index = nullptr; d->indexCap = 0; d->indexWidth = 0;
+  d->count = 0;
+  d->tombstones = 0;
+  d->entries = nullptr;
+  d->entriesLen = 0;
+  d->entriesCap = 0;
+  d->index = nullptr;
+  d->indexCap = 0;
+  d->indexWidth = 0;
   return obj_v(Tag::Table, o);
 }
 
@@ -236,7 +261,8 @@ void array_reserve(Value arr, u32 n) {
   while (ncap < n) ncap *= 2;
   Value* ni = (Value*)realloc(d->items, (size_t)ncap * sizeof(Value));
   if (!ni) ot_fatal("array: out of memory");
-  d->items = ni; d->cap = ncap;
+  d->items = ni;
+  d->cap = ncap;
 }
 
 // Vm-taking variants. Per interfaces.md, Vm's FIRST member is `Heap heap`,
@@ -251,4 +277,4 @@ Value make_array(Vm& vm, u32 cap) { return make_array_h(heap_of(vm), cap); }
 Value make_table(Vm& vm) { return make_table_h(heap_of(vm)); }
 Value make_buffer(Vm& vm) { return make_buffer_h(heap_of(vm)); }
 
-} // namespace ot
+}  // namespace ot

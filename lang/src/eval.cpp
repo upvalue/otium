@@ -10,8 +10,8 @@ namespace ot {
 
 static Value car_(Value v) { return as_pair(v)->car; }
 static Value cdr_(Value v) { return as_pair(v)->cdr; }
-static bool  pairp(Value v) { return v.tag == Tag::Pair; }
-static bool  sym_is(Value v, u32 id) { return v.tag == Tag::Symbol && v.id == id; }
+static bool pairp(Value v) { return v.tag == Tag::Pair; }
+static bool sym_is(Value v, u32 id) { return v.tag == Tag::Symbol && v.id == id; }
 
 static Value quit_condition(Vm& vm) {
   u32 r = vm.stack.len;
@@ -52,7 +52,7 @@ static Value make_box(Vm& vm, Value v) {
   return b;
 }
 static Value box_get(Value b) { return as_array(b)->items[0]; }
-static void  box_set(Value b, Value v) { as_array(b)->items[0] = v; }
+static void box_set(Value b, Value v) { as_array(b)->items[0] = v; }
 
 static Value env_lookup_box(Vm& vm, Value env, Value sym) {
   while (pairp(env)) {
@@ -93,10 +93,14 @@ static Value lookup_symbol(Vm& vm, Value sym, Value env) {
 static Value make_closure(Vm& vm, u32 name, Value params, Value body, Value env, bool macro) {
   Value doc = nil_v();
   if (pairp(body) && car_(body).tag == Tag::String && pairp(cdr_(body))) {
-    doc = car_(body); body = cdr_(body);
+    doc = car_(body);
+    body = cdr_(body);
   }
   u32 r = vm.stack.len;
-  vm.push(params); vm.push(body); vm.push(env); vm.push(doc);
+  vm.push(params);
+  vm.push(body);
+  vm.push(env);
+  vm.push(doc);
   Obj* o = vm.heap.alloc(macro ? ObjType::Macro : ObjType::Function, sizeof(FunctionData));
   Value fv = obj_v(macro ? Tag::Macro : Tag::Function, o);
   FunctionData* fd = fn_data(fv);
@@ -116,7 +120,9 @@ Value make_native(Vm& vm, const char* name, NativeFn fn) {
   Value fv = obj_v(Tag::Function, o);
   FunctionData* fd = fn_data(fv);
   fd->name = vm.intern.intern(name, (u32)strlen(name));
-  fd->params = nil_v(); fd->body = nil_v(); fd->env = nil_v();
+  fd->params = nil_v();
+  fd->body = nil_v();
+  fd->env = nil_v();
   fd->nsName = symbol_v(vm.syms.otiumCore_);
   fd->native = fn;
   fd->docstring = nil_v();
@@ -143,22 +149,31 @@ static Value bind_param_list(Vm& vm, Value frame, Value ps, Value argsList) {
     Value p = car_(vm.stack[pS]);  // param names are symbols: immediate, safe
     if (sym_is(p, vm.syms.amp_)) {
       vm.stack[pS] = cdr_(vm.stack[pS]);
-      if (!pairp(vm.stack[pS])) { vm.popTo(r); return raise_error(vm, "malformed rest parameter"); }
+      if (!pairp(vm.stack[pS])) {
+        vm.popTo(r);
+        return raise_error(vm, "malformed rest parameter");
+      }
       frame_bind(vm, vm.stack[r], car_(vm.stack[pS]), vm.stack[aS]);
       vm.popTo(r);
       return nil_v();
     }
-    if (!pairp(vm.stack[aS])) { vm.popTo(r); return raise_error(vm, "too few arguments"); }
+    if (!pairp(vm.stack[aS])) {
+      vm.popTo(r);
+      return raise_error(vm, "too few arguments");
+    }
     frame_bind(vm, vm.stack[r], p, car_(vm.stack[aS]));
     vm.stack[aS] = cdr_(vm.stack[aS]);
     vm.stack[pS] = cdr_(vm.stack[pS]);
   }
-  if (vm.stack[pS].tag == Tag::Symbol) { // dotted rest
+  if (vm.stack[pS].tag == Tag::Symbol) {  // dotted rest
     frame_bind(vm, vm.stack[r], vm.stack[pS], vm.stack[aS]);
     vm.popTo(r);
     return nil_v();
   }
-  if (pairp(vm.stack[aS])) { vm.popTo(r); return raise_error(vm, "too many arguments"); }
+  if (pairp(vm.stack[aS])) {
+    vm.popTo(r);
+    return raise_error(vm, "too many arguments");
+  }
   vm.popTo(r);
   return nil_v();
 }
@@ -173,9 +188,11 @@ static Value bind_params_stack(Vm& vm, Value callee, u32 base, u32 argc) {
   Value frame = make_table(vm);
   vm.push(frame);
   vm.push(fn_data(vm.stack[r])->env);
-  Value err = bind_param_list(vm, vm.stack[r + 2], fn_data(vm.stack[r])->params,
-                              vm.stack[r + 1]);
-  if (err.tag == Tag::Unwind) { vm.popTo(r); return err; }
+  Value err = bind_param_list(vm, vm.stack[r + 2], fn_data(vm.stack[r])->params, vm.stack[r + 1]);
+  if (err.tag == Tag::Unwind) {
+    vm.popTo(r);
+    return err;
+  }
   Value env = make_pair(vm, vm.stack[r + 2], vm.stack[r + 3]);
   vm.popTo(r);
   return env;
@@ -211,9 +228,12 @@ Value apply(Vm& vm, Value callee, u32 base, u32 argc) {
     case Tag::Macro:
     case Tag::Function: {
       if (fn_data(callee)->native) return fn_data(callee)->native(vm, base, argc);
-      u32 c = vm.push(callee);           // binding below allocates
+      u32 c = vm.push(callee);  // binding below allocates
       Value env = bind_params_stack(vm, vm.stack[c], base, argc);
-      if (env.tag == Tag::Unwind) { vm.popTo(c); return env; }
+      if (env.tag == Tag::Unwind) {
+        vm.popTo(c);
+        return env;
+      }
       u32 savedNs = vm.currentNs;
       FunctionData* fd = fn_data(vm.stack[c]);
       vm.currentNs = fd->nsName.id;
@@ -246,16 +266,16 @@ Value apply(Vm& vm, Value callee, u32 base, u32 argc) {
       if (argc != 0) return raise_error(vm, "params take no arguments");
       return param_read(vm, callee);
     }
-    default:
-      return raise_error(vm, "value is not callable");
+    default: return raise_error(vm, "value is not callable");
   }
 }
 
 // ---------------------------------------------------------------- quasiquote
 
-static Value list_append2(Vm& vm, Value a, Value b) { // copies a
+static Value list_append2(Vm& vm, Value a, Value b) {  // copies a
   if (!pairp(a)) return b;
-  u32 r = vm.push(a); vm.push(b);
+  u32 r = vm.push(a);
+  vm.push(b);
   // count then build backwards
   u32 n = 0;
   for (Value c = a; pairp(c); c = cdr_(c)) n++;
@@ -301,21 +321,35 @@ static Value qq(Vm& vm, Value t, int depth, Value env) {
   u32 eS = vm.push(env);
   if (pairp(h) && sym_is(car_(h), vm.syms.unquoteSplicing_) && depth == 1) {
     Value lst = eval_in(vm, car_(cdr_(h)), env);
-    if (lst.tag == Tag::Unwind) { vm.popTo(tS); return lst; }
-    if (!pairp(lst) && lst.tag != Tag::Null)
-      { vm.popTo(tS); return raise_error(vm, "unquote-splicing: not a list"); }
+    if (lst.tag == Tag::Unwind) {
+      vm.popTo(tS);
+      return lst;
+    }
+    if (!pairp(lst) && lst.tag != Tag::Null) {
+      vm.popTo(tS);
+      return raise_error(vm, "unquote-splicing: not a list");
+    }
     u32 r = vm.push(lst);
     Value rest = qq(vm, cdr_(vm.stack[tS]), depth, vm.stack[eS]);
-    if (rest.tag == Tag::Unwind) { vm.popTo(tS); return rest; }
+    if (rest.tag == Tag::Unwind) {
+      vm.popTo(tS);
+      return rest;
+    }
     Value out = list_append2(vm, vm.stack[r], rest);
     vm.popTo(tS);
     return out;
   }
   Value eh = qq(vm, h, depth, env);
-  if (eh.tag == Tag::Unwind) { vm.popTo(tS); return eh; }
+  if (eh.tag == Tag::Unwind) {
+    vm.popTo(tS);
+    return eh;
+  }
   u32 r = vm.push(eh);
   Value et = qq(vm, cdr_(vm.stack[tS]), depth, vm.stack[eS]);
-  if (et.tag == Tag::Unwind) { vm.popTo(tS); return et; }
+  if (et.tag == Tag::Unwind) {
+    vm.popTo(tS);
+    return et;
+  }
   Value out = make_pair(vm, vm.stack[r], et);
   vm.popTo(tS);
   return out;
@@ -323,7 +357,7 @@ static Value qq(Vm& vm, Value t, int depth, Value env) {
 
 // ---------------------------------------------------------------- require
 
-static u32 name_id_of(Vm& vm, Value v) { // symbol/keyword id; string interned; 0 if none
+static u32 name_id_of(Vm& vm, Value v) {  // symbol/keyword id; string interned; 0 if none
   if (v.tag == Tag::Symbol || v.tag == Tag::Keyword) return v.id;
   if (v.tag == Tag::String) {
     StringData* s = as_string(v);
@@ -339,11 +373,11 @@ static Value unwrap_quote(Vm& vm, Value v) {
 
 static Value require_load(Vm& vm, u32 nsName) {
   if (!is_nil(ns_lookup(vm, nsName))) return nil_v();
-  u32 len; const char* nm = vm.intern.name(nsName, &len);
+  u32 len;
+  const char* nm = vm.intern.name(nsName, &len);
   if (!vm.loadFn) return raise_error(vm, "namespace not found: %.*s", (int)len, nm);
   for (u32 i = 0; i < vm.loadingNs.len; i++)
-    if (vm.loadingNs[i] == nsName)
-      return raise_error(vm, "circular require: %.*s", (int)len, nm);
+    if (vm.loadingNs[i] == nsName) return raise_error(vm, "circular require: %.*s", (int)len, nm);
   Buf src;
   char cname[256];
   snprintf(cname, sizeof cname, "%.*s", (int)len, nm);
@@ -356,7 +390,10 @@ static Value require_load(Vm& vm, u32 nsName) {
   Value r = nil_v();
   while (!rd.atEof()) {
     Value f = rd.next();
-    if (f.tag == Tag::Unwind) { r = f; break; }
+    if (f.tag == Tag::Unwind) {
+      r = f;
+      break;
+    }
     if (rd.atEof()) break;
     r = eval_form(vm, f);
     if (r.tag == Tag::Unwind) break;
@@ -381,7 +418,10 @@ static Value require_spec(Vm& vm, Value spec) {
   u32 optS = vm.push(opts);
   {
     Value r = require_load(vm, target);
-    if (r.tag == Tag::Unwind) { vm.popTo(optS); return r; }
+    if (r.tag == Tag::Unwind) {
+      vm.popTo(optS);
+      return r;
+    }
   }
   Value cur = ns_get_or_create(vm, vm.currentNs);
   u32 curRoot = vm.push(cur);
@@ -389,13 +429,18 @@ static Value require_spec(Vm& vm, Value spec) {
     Value opt = car_(vm.stack[optS]);
     if (opt.tag == Tag::Keyword && opt.id == vm.syms.kwAs) {
       vm.stack[optS] = cdr_(vm.stack[optS]);
-      if (!pairp(vm.stack[optS])) { vm.popTo(optS); return raise_error(vm, "require: :as needs a name"); }
+      if (!pairp(vm.stack[optS])) {
+        vm.popTo(optS);
+        return raise_error(vm, "require: :as needs a name");
+      }
       Value alias = unwrap_quote(vm, car_(vm.stack[optS]));
-      table_put(vm, ns_field(vm, vm.stack[curRoot], vm.syms.kwAliases),
-                alias, symbol_v(target));
+      table_put(vm, ns_field(vm, vm.stack[curRoot], vm.syms.kwAliases), alias, symbol_v(target));
     } else if (opt.tag == Tag::Keyword && opt.id == vm.syms.kwRefer) {
       vm.stack[optS] = cdr_(vm.stack[optS]);
-      if (!pairp(vm.stack[optS])) { vm.popTo(optS); return raise_error(vm, "require: :refer needs a list"); }
+      if (!pairp(vm.stack[optS])) {
+        vm.popTo(optS);
+        return raise_error(vm, "require: :refer needs a list");
+      }
       Value names = unwrap_quote(vm, car_(vm.stack[optS]));
       if (pairp(names) && sym_is(car_(names), vm.syms.array_)) names = cdr_(names);
       Value tgt = ns_lookup(vm, target);
@@ -405,13 +450,14 @@ static Value require_spec(Vm& vm, Value spec) {
         Value var = table_get(vm, ns_field(vm, tgt, vm.syms.kwVars), sym);
         if (is_nil(var) || var_private(var)) {
           vm.popTo(optS);
-          u32 l; const char* s = vm.intern.name(sym.id, &l);
+          u32 l;
+          const char* s = vm.intern.name(sym.id, &l);
           return raise_error(vm, "cannot refer %.*s", (int)l, s);
         }
         table_put(vm, ns_field(vm, vm.stack[curRoot], vm.syms.kwRefers), sym, var);
         tgt = ns_lookup(vm, target);
       }
-    } // :reload and unknown options tolerated / ignored in stage 0
+    }  // :reload and unknown options tolerated / ignored in stage 0
     vm.stack[optS] = cdr_(vm.stack[optS]);
   }
   vm.popTo(optS);
@@ -432,32 +478,36 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
   u32 rootBase = vm.stack.len;
   vm.push(form);
   vm.push(env);
-  vm.push(nil_v());   // rootBase+2: the active special form's list cursor
+  vm.push(nil_v());  // rootBase+2: the active special form's list cursor
   bool enteredClosure = false;
   u32 restoreNs = vm.currentNs;
 
 #define ARGS (vm.stack[rootBase + 2])
-#define RET(x)                                                        \
-  do {                                                                \
-    Value _r = (x);                                                   \
-    vm.popTo(rootBase);                                               \
-    if (topLevel && enteredClosure) vm.currentNs = restoreNs;         \
-    return _r;                                                        \
+#define RET(x)                                                                                     \
+  do {                                                                                             \
+    Value _r = (x);                                                                                \
+    vm.popTo(rootBase);                                                                            \
+    if (topLevel && enteredClosure) vm.currentNs = restoreNs;                                      \
+    return _r;                                                                                     \
   } while (0)
-#define EVAL_OR_RET(dst, f)                                           \
-  Value dst = eval_in(vm, (f), env);                                  \
-  if (dst.tag == Tag::Unwind) RET(dst);                               \
-  form = vm.stack[rootBase]; env = vm.stack[rootBase + 1];
+#define EVAL_OR_RET(dst, f)                                                                        \
+  Value dst = eval_in(vm, (f), env);                                                               \
+  if ((dst).tag == Tag::Unwind) RET(dst);                                                          \
+  form = vm.stack[rootBase];                                                                       \
+  env = vm.stack[rootBase + 1];
 
   for (;;) {
     vm.stack[rootBase] = form;
     vm.stack[rootBase + 1] = env;
     vm.stack[rootBase + 2] = form.tag == Tag::Pair ? cdr_(form) : nil_v();
 
-    if (vm.interruptFlag) { vm.interruptFlag = false; RET(start_quit(vm)); }
+    if (vm.interruptFlag) {
+      vm.interruptFlag = false;
+      RET(start_quit(vm));
+    }
 
     if (form.tag == Tag::Symbol) RET(lookup_symbol(vm, form, env));
-    if (form.tag != Tag::Pair) RET(form); // self-evaluating (incl. ())
+    if (form.tag != Tag::Pair) RET(form);  // self-evaluating (incl. ())
 
     Value head = car_(form);
     Value args = cdr_(form);
@@ -474,7 +524,10 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
       if (h == S.if_) {
         if (!pairp(args) || !pairp(cdr_(args))) RET(raise_error(vm, "if: bad form"));
         EVAL_OR_RET(t, car_(args));
-        if (is_truthy(t)) { form = car_(cdr_(ARGS)); continue; }
+        if (is_truthy(t)) {
+          form = car_(cdr_(ARGS));
+          continue;
+        }
         Value elseTail = cdr_(cdr_(ARGS));
         if (!pairp(elseTail)) RET(nil_v());
         form = car_(elseTail);
@@ -487,13 +540,13 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         Value target = car_(args);
         Value name, valueV;
         bool hasDoc;
-        if (pairp(target)) { // (define (name . params) [doc] body...)
+        if (pairp(target)) {  // (define (name . params) [doc] body...)
           name = car_(target);
           Value body = cdr_(args);
           hasDoc = pairp(body) && car_(body).tag == Tag::String && pairp(cdr_(body));
           if (hasDoc) body = cdr_(body);
           valueV = make_closure(vm, name.id, cdr_(target), body, env, false);
-          env = vm.stack[rootBase + 1]; // make_closure may have collected
+          env = vm.stack[rootBase + 1];  // make_closure may have collected
         } else {
           name = target;
           Value rest = cdr_(args);
@@ -502,7 +555,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
           if (!pairp(rest)) RET(raise_error(vm, "define: missing value"));
           EVAL_OR_RET(v, car_(rest));
           valueV = v;
-          if (valueV.tag == Tag::Function) { // name an anonymous closure
+          if (valueV.tag == Tag::Function) {  // name an anonymous closure
             FunctionData* fd = fn_data(valueV);
             if (!fd->native && fd->name == 0) fd->name = name.id;
           }
@@ -511,13 +564,14 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         // re-derive the docstring from the rooted form: the reads above
         // predate allocations
         Value doc = hasDoc ? car_(cdr_(ARGS)) : nil_v();
-        if (!pairp(env)) { // top level: namespace var
-          u32 r = vm.push(valueV); vm.push(doc);
+        if (!pairp(env)) {  // top level: namespace var
+          u32 r = vm.push(valueV);
+          vm.push(doc);
           Value res = ns_define(vm, name.id, vm.stack[r], priv, vm.stack[r + 1]);
           vm.popTo(r);
           RET(res);
         }
-        frame_bind(vm, car_(env), name, valueV); // local binding
+        frame_bind(vm, car_(env), name, valueV);  // local binding
         RET(valueV);
       }
 
@@ -528,11 +582,15 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         if (name.tag != Tag::Symbol) RET(raise_error(vm, "set!: name must be a symbol"));
         if (!sym_qualified(vm, name.id)) {
           Value box = env_lookup_box(vm, env, name);
-          if (!is_nil(box)) { box_set(box, v); RET(v); }
+          if (!is_nil(box)) {
+            box_set(box, v);
+            RET(v);
+          }
         }
         Value var = ns_resolve_var(vm, name);
         if (is_nil(var)) {
-          u32 l; const char* s = vm.intern.name(name.id, &l);
+          u32 l;
+          const char* s = vm.intern.name(name.id, &l);
           RET(raise_error(vm, "set!: unbound %.*s", (int)l, s));
         }
         var_set(var, v);
@@ -579,20 +637,31 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         }
         while (pairp(vm.stack[bS])) {
           Value pair = car_(vm.stack[bS]);
-          if (!pairp(pair) || !pairp(cdr_(pair)))
-            { vm.popTo(er); RET(raise_error(vm, "let: bad binding")); }
-          Value bv = eval_in(vm, car_(cdr_(pair)), vm.stack[er]); // sequential
-          if (bv.tag == Tag::Unwind) { vm.popTo(er); RET(bv); }
-          pair = car_(vm.stack[bS]); // re-read: the eval may have collected
+          if (!pairp(pair) || !pairp(cdr_(pair))) {
+            vm.popTo(er);
+            RET(raise_error(vm, "let: bad binding"));
+          }
+          Value bv = eval_in(vm, car_(cdr_(pair)), vm.stack[er]);  // sequential
+          if (bv.tag == Tag::Unwind) {
+            vm.popTo(er);
+            RET(bv);
+          }
+          pair = car_(vm.stack[bS]);  // re-read: the eval may have collected
           frame_bind(vm, car_(vm.stack[er]), car_(pair), bv);
           vm.stack[bS] = cdr_(vm.stack[bS]);
         }
         vm.stack[bS] = cdr_(ARGS);  // reuse the cursor for the body walk
-        if (!pairp(vm.stack[bS])) { vm.popTo(er); RET(nil_v()); }
-        vm.stack[rootBase + 1] = vm.stack[er]; // keep env2 rooted past the pop
+        if (!pairp(vm.stack[bS])) {
+          vm.popTo(er);
+          RET(nil_v());
+        }
+        vm.stack[rootBase + 1] = vm.stack[er];  // keep env2 rooted past the pop
         while (pairp(cdr_(vm.stack[bS]))) {
           Value r = eval_in(vm, car_(vm.stack[bS]), vm.stack[rootBase + 1]);
-          if (r.tag == Tag::Unwind) { vm.popTo(er); RET(r); }
+          if (r.tag == Tag::Unwind) {
+            vm.popTo(er);
+            RET(r);
+          }
           vm.stack[bS] = cdr_(vm.stack[bS]);
         }
         form = car_(vm.stack[bS]);
@@ -604,7 +673,10 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
       if (h == S.while_) {
         u32 bS = vm.push(nil_v());  // body cursor
         for (;;) {
-          if (vm.interruptFlag) { vm.interruptFlag = false; RET(start_quit(vm)); }
+          if (vm.interruptFlag) {
+            vm.interruptFlag = false;
+            RET(start_quit(vm));
+          }
           if (!pairp(ARGS)) RET(raise_error(vm, "while: bad form"));
           EVAL_OR_RET(t, car_(ARGS));
           if (is_falsy(t)) RET(nil_v());
@@ -657,7 +729,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
           }
           if (is_truthy(t)) {
             vm.stack[bS] = cdr_(car_(ARGS));
-            if (!pairp(vm.stack[bS])) RET(t); // one-element clause
+            if (!pairp(vm.stack[bS])) RET(t);  // one-element clause
             while (pairp(cdr_(vm.stack[bS]))) {
               EVAL_OR_RET(r, car_(vm.stack[bS]));
               (void)r;
@@ -682,15 +754,14 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         RET(raise_error(vm, "unquote outside quasiquote"));
 
       if (h == S.ns_) {
-        if (!pairp(args) || car_(args).tag != Tag::Symbol)
-          RET(raise_error(vm, "ns: bad form"));
+        if (!pairp(args) || car_(args).tag != Tag::Symbol) RET(raise_error(vm, "ns: bad form"));
         ns_switch(vm, car_(args).id);
-        ARGS = cdr_(args);              // clause cursor (require_spec allocates)
-        u32 spS = vm.push(nil_v());     // spec cursor
+        ARGS = cdr_(args);           // clause cursor (require_spec allocates)
+        u32 spS = vm.push(nil_v());  // spec cursor
         while (pairp(ARGS)) {
           Value clause = car_(ARGS);
-          if (pairp(clause) && clause.tag == Tag::Pair &&
-              car_(clause).tag == Tag::Keyword && car_(clause).id == S.kwRequire) {
+          if (pairp(clause) && clause.tag == Tag::Pair && car_(clause).tag == Tag::Keyword &&
+              car_(clause).id == S.kwRequire) {
             vm.stack[spS] = cdr_(clause);
             while (pairp(vm.stack[spS])) {
               Value r = require_spec(vm, car_(vm.stack[spS]));
@@ -733,15 +804,25 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         }
         while (pairp(vm.stack[cS])) {
           Value cl = car_(vm.stack[cS]);
-          if (!pairp(cl) || !pairp(cdr_(cl)))
-            { vm.popTo(sbase); RET(raise_error(vm, "handler-bind: bad binding")); }
+          if (!pairp(cl) || !pairp(cdr_(cl))) {
+            vm.popTo(sbase);
+            RET(raise_error(vm, "handler-bind: bad binding"));
+          }
           Value pr = eval_in(vm, car_(cl), env);
-          if (pr.tag == Tag::Unwind) { vm.handlers.len = hbase; vm.popTo(sbase); RET(pr); }
+          if (pr.tag == Tag::Unwind) {
+            vm.handlers.len = hbase;
+            vm.popTo(sbase);
+            RET(pr);
+          }
           env = vm.stack[rootBase + 1];
           u32 pi = vm.push(pr);
           cl = car_(vm.stack[cS]);  // re-read after the eval
           Value hd = eval_in(vm, car_(cdr_(cl)), env);
-          if (hd.tag == Tag::Unwind) { vm.handlers.len = hbase; vm.popTo(sbase); RET(hd); }
+          if (hd.tag == Tag::Unwind) {
+            vm.handlers.len = hbase;
+            vm.popTo(sbase);
+            RET(hd);
+          }
           env = vm.stack[rootBase + 1];
           u32 hi = vm.push(hd);
           vm.handlers.push({vm.stack[pi], vm.stack[hi]});
@@ -762,8 +843,11 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         u32 cS = vm.push(cdr_(ARGS));  // clause cursor (the alloc below moves pairs)
         while (pairp(vm.stack[cS])) {
           Value cl = car_(vm.stack[cS]);
-          if (!pairp(cl) || car_(cl).tag != Tag::Symbol)
-            { vm.restarts.len = rbase; vm.popTo(sbase); RET(raise_error(vm, "restart-case: bad clause")); }
+          if (!pairp(cl) || car_(cl).tag != Tag::Symbol) {
+            vm.restarts.len = rbase;
+            vm.popTo(sbase);
+            RET(raise_error(vm, "restart-case: bad clause"));
+          }
           Value desc = nil_v();
           Value rest2 = cdr_(cl);
           if (pairp(rest2) && car_(rest2).tag == Tag::String && pairp(cdr_(rest2)))
@@ -775,7 +859,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
           rd->name = car_(car_(vm.stack[cS])).id;  // re-read: the alloc collected
           rd->description = vm.stack[dr];
           rd->restartId = ++vm.restartIdCounter;
-          vm.stack[dr] = rv;      // keep rooted
+          vm.stack[dr] = rv;  // keep rooted
           vm.restarts.push({rv});
           count++;
           vm.stack[cS] = cdr_(vm.stack[cS]);
@@ -790,7 +874,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
           cl = car_(cl);
           Value rest2 = cdr_(cl);
           if (pairp(rest2) && car_(rest2).tag == Tag::String && pairp(cdr_(rest2)))
-            rest2 = cdr_(rest2); // skip description
+            rest2 = cdr_(rest2);  // skip description
           vm.stack[cS] = rest2;   // keep the clause tail rooted across binding
           Value clArgs = vm.unwindRestartArgs;
           vm.unwindKind = UnwindKind::None;
@@ -800,7 +884,10 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
           Value frame = make_table(vm);
           u32 fr = vm.push(frame);
           Value be = bind_param_list(vm, vm.stack[fr], car_(vm.stack[cS]), vm.stack[ar]);
-          if (be.tag == Tag::Unwind) { vm.popTo(sbase); RET(be); }
+          if (be.tag == Tag::Unwind) {
+            vm.popTo(sbase);
+            RET(be);
+          }
           env = vm.stack[rootBase + 1];
           Value env2 = make_pair(vm, vm.stack[fr], env);
           vm.push(env2);
@@ -812,12 +899,11 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
 
       if (h == S.try_) {
         u32 sbase = vm.stack.len;
-        u32 bS = vm.push(args);      // body cursor
+        u32 bS = vm.push(args);  // body cursor
         u32 catchS = vm.push(null_v());
         {
-          Value b = args;            // split body / trailing catch clauses
-          while (pairp(b) && !(pairp(car_(b)) && sym_is(car_(car_(b)), S.catch_)))
-            b = cdr_(b);
+          Value b = args;  // split body / trailing catch clauses
+          while (pairp(b) && !(pairp(car_(b)) && sym_is(car_(car_(b)), S.catch_))) b = cdr_(b);
           vm.stack[catchS] = b;
         }
         Value r = nil_v();
@@ -833,17 +919,25 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
           vm.unwindKind = UnwindKind::None;
           vm.stack[bS] = vm.stack[catchS];  // reuse as the catch-clause cursor
           while (pairp(vm.stack[bS])) {
-            Value cl = car_(vm.stack[bS]); // (catch (pred var) forms...)
-            if (!pairp(cdr_(cl)) || !pairp(car_(cdr_(cl))))
-              { vm.popTo(sbase); RET(raise_error(vm, "try: bad catch clause")); }
+            Value cl = car_(vm.stack[bS]);  // (catch (pred var) forms...)
+            if (!pairp(cdr_(cl)) || !pairp(car_(cdr_(cl)))) {
+              vm.popTo(sbase);
+              RET(raise_error(vm, "try: bad catch clause"));
+            }
             Value pf = eval_in(vm, car_(car_(cdr_(cl))), env);
-            if (pf.tag == Tag::Unwind) { vm.popTo(sbase); RET(pf); }
+            if (pf.tag == Tag::Unwind) {
+              vm.popTo(sbase);
+              RET(pf);
+            }
             env = vm.stack[rootBase + 1];
             u32 pr = vm.push(pf);
             u32 ab = vm.push(vm.stack[cr]);
             Value t = apply(vm, vm.stack[pr], ab, 1);
             vm.popTo(pr);
-            if (t.tag == Tag::Unwind) { vm.popTo(sbase); RET(t); }
+            if (t.tag == Tag::Unwind) {
+              vm.popTo(sbase);
+              RET(t);
+            }
             env = vm.stack[rootBase + 1];
             if (is_truthy(t)) {
               Value frame = make_table(vm);
@@ -880,7 +974,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         u32 cS = vm.push(cdr_(ARGS));  // cleanup cursor
         while (pairp(vm.stack[cS])) {
           Value cr = eval_in(vm, car_(vm.stack[cS]), env);
-          if (cr.tag == Tag::Unwind) { // cleanup's unwind replaces in-flight state
+          if (cr.tag == Tag::Unwind) {  // cleanup's unwind replaces in-flight state
             r = cr;
             k = vm.unwindKind;
             vm.stack[condR] = vm.unwindCondition;
@@ -911,8 +1005,9 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         if (hasDoc) rest = cdr_(rest);
         if (!pairp(rest)) RET(raise_error(vm, "defparam: missing default"));
         EVAL_OR_RET(d, car_(rest));
-        Value doc = hasDoc ? car_(cdr_(ARGS)) : nil_v(); // re-read post-eval
-        u32 dr = vm.push(d); vm.push(doc);
+        Value doc = hasDoc ? car_(cdr_(ARGS)) : nil_v();  // re-read post-eval
+        u32 dr = vm.push(d);
+        vm.push(doc);
         Obj* o = vm.heap.alloc(ObjType::Param, sizeof(ParamData));
         Value pv = obj_v(Tag::Param, o);
         ParamData* pd = param_data(pv);
@@ -937,18 +1032,25 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         Value r = nil_v();
         while (pairp(vm.stack[bS])) {
           Value pair = car_(vm.stack[bS]);
-          if (!pairp(pair) || !pairp(cdr_(pair)))
-            { r = raise_error(vm, "with-params: bad binding"); goto wp_done; }
+          if (!pairp(pair) || !pairp(cdr_(pair))) {
+            r = raise_error(vm, "with-params: bad binding");
+            goto wp_done;
+          }
           r = eval_in(vm, car_(pair), env);
           if (r.tag == Tag::Unwind) goto wp_done;
-          if (r.tag != Tag::Param)
-            { r = raise_error(vm, "with-params: not a param"); goto wp_done; }
+          if (r.tag != Tag::Param) {
+            r = raise_error(vm, "with-params: not a param");
+            goto wp_done;
+          }
           env = vm.stack[rootBase + 1];
           {
             u32 pi = vm.push(r);
-            pair = car_(vm.stack[bS]);  // re-read after the eval
-            Value v = eval_in(vm, car_(cdr_(pair)), env); // sees earlier bindings
-            if (v.tag == Tag::Unwind) { r = v; goto wp_done; }
+            pair = car_(vm.stack[bS]);                     // re-read after the eval
+            Value v = eval_in(vm, car_(cdr_(pair)), env);  // sees earlier bindings
+            if (v.tag == Tag::Unwind) {
+              r = v;
+              goto wp_done;
+            }
             env = vm.stack[rootBase + 1];
             u32 vi = vm.push(v);
             vm.paramBindings.push({vm.stack[pi], vm.stack[vi]});
@@ -957,7 +1059,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         }
         r = eval_body(vm, cdr_(ARGS), env);
       wp_done:
-        vm.paramBindings.len = pbase; // removed on every exit path
+        vm.paramBindings.len = pbase;  // removed on every exit path
         vm.popTo(sbase);
         RET(r);
       }
@@ -971,44 +1073,67 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
     u32 abase = vm.stack.len;
     {
       Value hv = eval_in(vm, head, env);
-      if (hv.tag == Tag::Unwind) { vm.popTo(cursor); RET(hv); }
+      if (hv.tag == Tag::Unwind) {
+        vm.popTo(cursor);
+        RET(hv);
+      }
       vm.push(hv);
     }
     u32 argc = 0;
     while (pairp(vm.stack[cursor])) {
       Value av = eval_in(vm, car_(vm.stack[cursor]), vm.stack[rootBase + 1]);
-      if (av.tag == Tag::Unwind) { vm.popTo(cursor); RET(av); }
+      if (av.tag == Tag::Unwind) {
+        vm.popTo(cursor);
+        RET(av);
+      }
       vm.push(av);
       vm.stack[cursor] = cdr_(vm.stack[cursor]);
       argc++;
     }
     env = vm.stack[rootBase + 1];
-    if (vm.stack[cursor].tag != Tag::Null)
-      { vm.popTo(cursor); RET(raise_error(vm, "dotted call form")); }
+    if (vm.stack[cursor].tag != Tag::Null) {
+      vm.popTo(cursor);
+      RET(raise_error(vm, "dotted call form"));
+    }
     Value callee = vm.stack[abase];
     if (callee.tag == Tag::Function && !fn_data(callee)->native) {
       // tail-call: rebind (form, env) and continue — constant stack
       Value env2 = bind_params_stack(vm, callee, abase + 1, argc);
-      if (env2.tag == Tag::Unwind) { vm.popTo(cursor); RET(env2); }
-      callee = vm.stack[abase]; // re-read: binding may have collected
+      if (env2.tag == Tag::Unwind) {
+        vm.popTo(cursor);
+        RET(env2);
+      }
+      callee = vm.stack[abase];  // re-read: binding may have collected
       FunctionData* fd = fn_data(callee);
-      if (!enteredClosure) { restoreNs = vm.currentNs; enteredClosure = true; }
+      if (!enteredClosure) {
+        restoreNs = vm.currentNs;
+        enteredClosure = true;
+      }
       vm.currentNs = fd->nsName.id;
-      if (!pairp(fd->body)) { vm.popTo(cursor); RET(nil_v()); }
+      if (!pairp(fd->body)) {
+        vm.popTo(cursor);
+        RET(nil_v());
+      }
       env = env2;
       vm.stack[rootBase + 1] = env;
       vm.stack[cursor] = fd->body;  // reuse the rooted slot for the body walk
       while (pairp(cdr_(vm.stack[cursor]))) {
         Value r = eval_in(vm, car_(vm.stack[cursor]), env);
-        if (r.tag == Tag::Unwind) { vm.popTo(cursor); RET(r); }
-        env = vm.stack[rootBase + 1]; // re-read after possible collection
+        if (r.tag == Tag::Unwind) {
+          vm.popTo(cursor);
+          RET(r);
+        }
+        env = vm.stack[rootBase + 1];  // re-read after possible collection
         vm.stack[cursor] = cdr_(vm.stack[cursor]);
       }
       form = car_(vm.stack[cursor]);
       vm.popTo(cursor);
       continue;
     }
-    if (callee.tag == Tag::Macro) { vm.popTo(cursor); RET(raise_error(vm, "macro used as function")); }
+    if (callee.tag == Tag::Macro) {
+      vm.popTo(cursor);
+      RET(raise_error(vm, "macro used as function"));
+    }
     {
       Value r = apply(vm, callee, abase + 1, argc);
       vm.popTo(cursor);
@@ -1020,14 +1145,12 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
 }
 
 Value eval_in(Vm& vm, Value form, Value env) {
-  if (vm.depth >= vm.cfg.maxDepth)
-    return raise_overflow(vm, "recursion depth exceeded");
-  if (vm.stack.len + 16 >= vm.cfg.stackSlots)
-    return raise_overflow(vm, "value stack overflow");
+  if (vm.depth >= vm.cfg.maxDepth) return raise_overflow(vm, "recursion depth exceeded");
+  if (vm.stack.len + 16 >= vm.cfg.stackSlots) return raise_overflow(vm, "value stack overflow");
   vm.depth++;
   u32 savedNs = vm.currentNs;
   Value r = eval_tr(vm, form, env, false);
-  vm.currentNs = savedNs; // ns switches never leak out of nested evaluation
+  vm.currentNs = savedNs;  // ns switches never leak out of nested evaluation
   vm.depth--;
   return r;
 }
@@ -1036,8 +1159,7 @@ Value eval_form(Vm& vm, Value form) {
   // Route through the expansion hook *expander* in otium.core.
   Value core = ns_lookup(vm, vm.syms.otiumCore_);
   if (!is_nil(core)) {
-    Value var = table_get(vm, ns_field(vm, core, vm.syms.kwVars),
-                          symbol_v(vm.syms.expander_));
+    Value var = table_get(vm, ns_field(vm, core, vm.syms.kwVars), symbol_v(vm.syms.expander_));
     if (!is_nil(var) && var_value(var).tag == Tag::Function) {
       u32 b = vm.push(form);
       u32 savedExpandNs = vm.expandNs;
@@ -1095,16 +1217,23 @@ static Value nat_invoke_restart(Vm& vm, u32 base, u32 argc) {
   Value target = nil_v();
   if (which.tag == Tag::Restart) {
     for (u32 i = vm.restarts.len; i-- > 0;)
-      if (vm.restarts[i].restart.obj == which.obj) { target = which; break; }
+      if (vm.restarts[i].restart.obj == which.obj) {
+        target = which;
+        break;
+      }
     if (is_nil(target)) return raise_error(vm, "invoke-restart: restart is no longer active");
   } else {
     u32 nid = name_id_of(vm, which);
     if (!nid) return raise_error(vm, "invoke-restart: bad restart name");
     for (u32 i = vm.restarts.len; i-- > 0;) {
-      if (restart_data(vm.restarts[i].restart)->name == nid) { target = vm.restarts[i].restart; break; }
+      if (restart_data(vm.restarts[i].restart)->name == nid) {
+        target = vm.restarts[i].restart;
+        break;
+      }
     }
     if (is_nil(target)) {
-      u32 l; const char* s = vm.intern.name(nid, &l);
+      u32 l;
+      const char* s = vm.intern.name(nid, &l);
       return raise_error(vm, "no active restart named %.*s", (int)l, s);
     }
   }
@@ -1116,11 +1245,12 @@ static Value nat_invoke_restart(Vm& vm, u32 base, u32 argc) {
 }
 
 static Value nat_compute_restarts(Vm& vm, u32 base, u32 argc) {
-  (void)base; (void)argc;
+  (void)base;
+  (void)argc;
   u32 r = vm.stack.len;
   Value arr = make_array(vm, vm.restarts.len);
   vm.push(arr);
-  for (u32 i = vm.restarts.len; i-- > 0;) // innermost first
+  for (u32 i = vm.restarts.len; i-- > 0;)  // innermost first
     array_push(vm, vm.stack[r], vm.restarts[i].restart);
   arr = vm.stack[r];
   vm.popTo(r);
@@ -1154,7 +1284,7 @@ static Value nat_define_condition(Vm& vm, u32 base, u32 argc) {
   if (!tid) return raise_error(vm, "define-condition: bad type");
   Value parent = vm.stack[base + 1];
   if (is_nil(parent)) {
-    table_put(vm, vm.typeParents, symbol_v(tid), nil_v()); // delete = root
+    table_put(vm, vm.typeParents, symbol_v(tid), nil_v());  // delete = root
     return symbol_v(tid);
   }
   u32 pid = name_id_of(vm, parent);
@@ -1207,12 +1337,18 @@ static Value expand0(Vm& vm, Value form);
 
 static Value expand0_list(Vm& vm, Value l) {
   if (!pairp(l)) return l;
-  u32 lS = vm.push(l);              // expand0 allocates; keep the cursor rooted
+  u32 lS = vm.push(l);  // expand0 allocates; keep the cursor rooted
   Value h = expand0(vm, car_(vm.stack[lS]));
-  if (h.tag == Tag::Unwind) { vm.popTo(lS); return h; }
+  if (h.tag == Tag::Unwind) {
+    vm.popTo(lS);
+    return h;
+  }
   u32 r = vm.push(h);
   Value t = expand0_list(vm, cdr_(vm.stack[lS]));
-  if (t.tag == Tag::Unwind) { vm.popTo(lS); return t; }
+  if (t.tag == Tag::Unwind) {
+    vm.popTo(lS);
+    return t;
+  }
   Value out = make_pair(vm, vm.stack[r], t);
   vm.popTo(lS);
   return out;
@@ -1231,11 +1367,14 @@ static Value expand0(Vm& vm, Value form) {
     u32 mslot = vm.push(var_value(var));
     u32 base = vm.stack.len;
     u32 argc = 0;
-    for (Value a = cdr_(form); pairp(a); a = cdr_(a)) { vm.push(car_(a)); argc++; }
+    for (Value a = cdr_(form); pairp(a); a = cdr_(a)) {
+      vm.push(car_(a));
+      argc++;
+    }
     Value r = apply(vm, vm.stack[mslot], base, argc);
     vm.popTo(mslot);
     OT_TRY(r);
-    form = r; // re-expand the replacement
+    form = r;  // re-expand the replacement
   }
   // recurse into subforms
   return expand0_list(vm, form);
@@ -1271,7 +1410,8 @@ static Value nat_expander_macro_var(Vm& vm, u32 base, u32 argc) {
 }
 
 static Value nat_current_ns(Vm& vm, u32 base, u32 argc) {
-  (void)base; (void)argc;
+  (void)base;
+  (void)argc;
   return symbol_v(vm.currentNs);
 }
 
@@ -1303,4 +1443,4 @@ void register_eval_natives(Vm& vm) {
   vm.currentNs = saved;
 }
 
-} // namespace ot
+}  // namespace ot

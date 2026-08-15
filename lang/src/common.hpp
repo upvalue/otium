@@ -8,8 +8,14 @@
 
 namespace ot {
 
-using u8 = uint8_t;  using u16 = uint16_t; using u32 = uint32_t; using u64 = uint64_t;
-using i8 = int8_t;   using i16 = int16_t;  using i32 = int32_t;  using i64 = int64_t;
+using u8 = uint8_t;
+using u16 = uint16_t;
+using u32 = uint32_t;
+using u64 = uint64_t;
+using i8 = int8_t;
+using i16 = int16_t;
+using i32 = int32_t;
+using i64 = int64_t;
 using f64 = double;
 
 // Abort with a message. Host hook may replace this later.
@@ -18,11 +24,16 @@ using f64 = double;
   abort();
 }
 
-} // namespace ot
+}  // namespace ot
 
 #ifndef NDEBUG
-#define OT_ASSERT(cond) \
-  do { if (!(cond)) ::ot::ot_fatal("assertion failed: " #cond); } while (0)
+#define OT_ASSERT(cond)                                                                            \
+  do {                                                                                             \
+    if (!(cond)) ::ot::ot_fatal("assertion failed: " #cond);                                       \
+  } while (0)
 #else
-#define OT_ASSERT(cond) do { (void)sizeof(cond); } while (0)
+#define OT_ASSERT(cond)                                                                            \
+  do {                                                                                             \
+    (void)sizeof(cond);                                                                            \
+  } while (0)
 #endif

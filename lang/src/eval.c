@@ -10,10 +10,10 @@
 // ---------------------------------------------------------------- helpers
 
 static Value quit_condition(State* vm) {
-  u32 sc = scope_begin(vm);
-  Slot c = scope_push(vm, make_table(vm));
-  table_put(vm, slot_get(c), keyword_v(vm->syms.kwType), symbol_v(vm->syms.quit_));
-  return scope_exit(vm, sc, slot_get(c));
+  OT_SCOPE(vm);
+  Ref c = ref_push(vm, make_table(vm));
+  table_put(vm, ref_get(vm, c), keyword_v(vm->syms.kwType), symbol_v(vm->syms.quit_));
+  return ref_get(vm, c);
 }
 
 Value start_quit(State* vm) {
@@ -141,48 +141,53 @@ static Value require_spec(State* vm, Value spec) {
   u32 target = name_id_of(vm, nameV);
   if (!target) return raise_error(vm, "require: bad namespace name");
   // require_load evaluates a whole file: root the opts cursor across it.
-  u32 sc = scope_begin(vm);
-  Slot optS = scope_push(vm, opts);
-  OT_TRYS(vm, sc, require_load(vm, target));
-  Slot curS = scope_push(vm, ns_get_or_create(vm, vm->currentNs));
-  while (pairp(slot_get(optS))) {
-    Value opt = car_(slot_get(optS));
+  OT_SCOPE(vm);
+  Ref optS = ref_push(vm, opts);
+  Value loaded = require_load(vm, target);
+  if (loaded.tag == Tag_Unwind) return loaded;
+  Ref curS = ref_push(vm, ns_get_or_create(vm, vm->currentNs));
+  Ref names = ref_push(vm, nil_v());
+  Ref sym = ref_push(vm, nil_v());
+  Ref var = ref_push(vm, nil_v());
+  while (pairp(ref_get(vm, optS))) {
+    Value opt = car_(ref_get(vm, optS));
     if (opt.tag == Tag_Keyword && opt.id == vm->syms.kwAs) {
-      slot_set(optS, cdr_(slot_get(optS)));
-      if (!pairp(slot_get(optS)))
-        return scope_exit(vm, sc, raise_error(vm, "require: :as needs a name"));
-      Value alias = unwrap_quote(vm, car_(slot_get(optS)));
-      table_put(vm, ns_field(vm, slot_get(curS), vm->syms.kwAliases), alias, symbol_v(target));
+      ref_set(vm, optS, cdr_(ref_get(vm, optS)));
+      if (!pairp(ref_get(vm, optS))) return raise_error(vm, "require: :as needs a name");
+      Value alias = unwrap_quote(vm, car_(ref_get(vm, optS)));
+      table_put(vm, ns_field(vm, ref_get(vm, curS), vm->syms.kwAliases), alias,
+                symbol_v(target));
     } else if (opt.tag == Tag_Keyword && opt.id == vm->syms.kwRefer) {
-      slot_set(optS, cdr_(slot_get(optS)));
-      if (!pairp(slot_get(optS)))
-        return scope_exit(vm, sc, raise_error(vm, "require: :refer needs a list"));
-      Value names = unwrap_quote(vm, car_(slot_get(optS)));
-      names = strip_array_literal_head(names, vm->syms.array_);
-      Value tgt = ns_lookup(vm, target);
-      // table_put/table_get never touch the GC heap, so this walk is safe
-      // (raise_error below allocates, but only on the return-out path)
-      for (Value n = names; pairp(n); n = cdr_(n)) {
-        Value sym = car_(n);
-        Value var = table_get(vm, ns_field(vm, tgt, vm->syms.kwVars), sym);
-        if (is_nil(var) || var_private(var)) {
-          return scope_exit(vm, sc, raise_error_sym(vm, "cannot refer %.*s", sym.id));
-        }
-        table_put(vm, ns_field(vm, slot_get(curS), vm->syms.kwRefers), sym, var);
-        tgt = ns_lookup(vm, target);
+      ref_set(vm, optS, cdr_(ref_get(vm, optS)));
+      if (!pairp(ref_get(vm, optS))) return raise_error(vm, "require: :refer needs a list");
+      ref_set(vm, names,
+              strip_array_literal_head(unwrap_quote(vm, car_(ref_get(vm, optS))),
+                                       vm->syms.array_));
+      // The target namespace is re-looked-up each iteration rather than hoisted:
+      // table_put allocates once table storage is GC-owned.
+      while (pairp(ref_get(vm, names))) {
+        ref_set(vm, sym, car_(ref_get(vm, names)));
+        ref_set(vm, var, table_get(vm, ns_field(vm, ns_lookup(vm, target), vm->syms.kwVars),
+                                   ref_get(vm, sym)));
+        if (is_nil(ref_get(vm, var)) || var_private(ref_get(vm, var)))
+          return raise_error_sym(vm, "cannot refer %.*s", ref_get(vm, sym).id);
+        table_put(vm, ns_field(vm, ref_get(vm, curS), vm->syms.kwRefers), ref_get(vm, sym),
+                  ref_get(vm, var));
+        ref_set(vm, names, cdr_(ref_get(vm, names)));
       }
     }  // :reload and unknown options tolerated / ignored in stage 0
-    slot_set(optS, cdr_(slot_get(optS)));
+    ref_set(vm, optS, cdr_(ref_get(vm, optS)));
   }
-  return scope_exit(vm, sc, nil_v());
+  return nil_v();
 }
 
 static Value control_apply0(State* vm, Value fn) { return apply(vm, fn, vm->stack.len, 0); }
 
 static Value control_apply1(State* vm, Value fn, Value arg) {
-  u32 sc = scope_begin(vm);
-  Slot argRoot = scope_push(vm, arg);
-  return scope_exit(vm, sc, apply(vm, fn, argRoot.idx, 1));
+  OT_SCOPE(vm);
+  Ref fnRoot = ref_push(vm, fn);
+  Ref argRoot = ref_push(vm, arg);
+  return apply(vm, ref_get(vm, fnRoot), argRoot.i, 1);
 }
 
 Value vm_control_handler_bind(State* vm, u32 base, u32 argc) {
@@ -223,19 +228,20 @@ Value vm_control_restart_case(State* vm, u32 base, u32 argc) {
     return result;
 
   u32 selected = (u32)(vm->unwindRestartId - firstId);
-  u32 sc = scope_begin(vm);
-  Slot args = scope_push(vm, vm->unwindRestartArgs);
+  OT_SCOPE(vm);
+  Ref args = ref_push(vm, vm->unwindRestartArgs);
   vm->unwindKind = UnwindKind_None;
   vm->unwindCondition = nil_v();
   vm->unwindRestartArgs = nil_v();
   u32 argBase = vm->stack.len;
   u32 argCount = 0;
-  for (Value cursor = slot_get(args); cursor.tag == Tag_Pair; cursor = as_pair(cursor)->cdr) {
+  // state_push does not allocate, so walking the list with a raw cursor is
+  // safe; re-read through `args` if that ever stops holding.
+  for (Value cursor = ref_get(vm, args); cursor.tag == Tag_Pair; cursor = as_pair(cursor)->cdr) {
     state_push(vm, as_pair(cursor)->car);
     argCount++;
   }
-  Value handler = vm->stack.data[base + 1 + selected * 3 + 2];
-  return scope_exit(vm, sc, apply(vm, handler, argBase, argCount));
+  return apply(vm, vm->stack.data[base + 1 + selected * 3 + 2], argBase, argCount);
 }
 
 Value vm_control_try(State* vm, u32 base, u32 argc) {
@@ -252,30 +258,31 @@ Value vm_control_try(State* vm, u32 base, u32 argc) {
   }
   if (result.tag != Tag_Unwind || vm->unwindKind != UnwindKind_Condition) return result;
 
-  u32 sc = scope_begin(vm);
-  Slot condition = scope_push(vm, vm->unwindCondition);
+  OT_SCOPE(vm);
+  Ref condition = ref_push(vm, vm->unwindCondition);
+  Ref predicate = ref_push(vm, nil_v());
   vm->unwindKind = UnwindKind_None;
   u32 catches = base + 1 + bodyCount;
   for (u32 arg = catches; arg < base + argc; arg += 2) {
-    Value predicate = control_apply0(vm, vm->stack.data[arg]);
-    if (predicate.tag == Tag_Unwind) return scope_exit(vm, sc, predicate);
-    Value matches = control_apply1(vm, predicate, slot_get(condition));
-    if (matches.tag == Tag_Unwind) return scope_exit(vm, sc, matches);
+    ref_set(vm, predicate, control_apply0(vm, vm->stack.data[arg]));
+    if (ref_get(vm, predicate).tag == Tag_Unwind) return unwind_v();
+    Value matches = control_apply1(vm, ref_get(vm, predicate), ref_get(vm, condition));
+    if (matches.tag == Tag_Unwind) return matches;
     if (is_truthy(matches))
-      return scope_exit(vm, sc, control_apply1(vm, vm->stack.data[arg + 1], slot_get(condition)));
+      return control_apply1(vm, vm->stack.data[arg + 1], ref_get(vm, condition));
   }
   vm->unwindKind = UnwindKind_Condition;
-  vm->unwindCondition = slot_get(condition);
-  return scope_exit(vm, sc, unwind_v());
+  vm->unwindCondition = ref_get(vm, condition);
+  return unwind_v();
 }
 
 Value vm_control_unwind_protect(State* vm, u32 base, u32 argc) {
   if (argc == 0) return raise_error(vm, "unwind-protect: bad compiled form");
   Value result = control_apply0(vm, vm->stack.data[base]);
   UnwindKind kind = vm->unwindKind;
-  u32 sc = scope_begin(vm);
-  Slot condition = scope_push(vm, vm->unwindCondition);
-  Slot restartArgs = scope_push(vm, vm->unwindRestartArgs);
+  OT_SCOPE(vm);
+  Ref condition = ref_push(vm, vm->unwindCondition);
+  Ref restartArgs = ref_push(vm, vm->unwindRestartArgs);
   u64 restartId = vm->unwindRestartId;
   if (result.tag == Tag_Unwind) vm->unwindKind = UnwindKind_None;
   for (u32 i = 1; i < argc; i++) {
@@ -283,47 +290,46 @@ Value vm_control_unwind_protect(State* vm, u32 base, u32 argc) {
     if (cleanup.tag == Tag_Unwind) {
       result = cleanup;
       kind = vm->unwindKind;
-      slot_set(condition, vm->unwindCondition);
-      slot_set(restartArgs, vm->unwindRestartArgs);
+      ref_set(vm, condition, vm->unwindCondition);
+      ref_set(vm, restartArgs, vm->unwindRestartArgs);
       restartId = vm->unwindRestartId;
       vm->unwindKind = UnwindKind_None;
     }
   }
   if (result.tag == Tag_Unwind) {
     vm->unwindKind = kind;
-    vm->unwindCondition = slot_get(condition);
-    vm->unwindRestartArgs = slot_get(restartArgs);
+    vm->unwindCondition = ref_get(vm, condition);
+    vm->unwindRestartArgs = ref_get(vm, restartArgs);
     vm->unwindRestartId = restartId;
   }
-  return scope_exit(vm, sc, result);
+  return result;
 }
 
 Value vm_control_with_params(State* vm, u32 base, u32 argc) {
   if (argc == 0 || (argc - 1) % 2 != 0) return raise_error(vm, "with-params: bad compiled form");
   u32 paramBase = vm->paramBindings.len;
-  u32 sc = scope_begin(vm);
+  OT_SCOPE(vm);
   for (u32 i = 0; i + 1 < argc; i += 2) {
-    Value param = control_apply0(vm, vm->stack.data[base + i]);
-    if (param.tag == Tag_Unwind) {
+    Ref paramRoot = ref_push(vm, control_apply0(vm, vm->stack.data[base + i]));
+    if (ref_get(vm, paramRoot).tag == Tag_Unwind) {
       vm->paramBindings.len = paramBase;
-      return scope_exit(vm, sc, param);
+      return unwind_v();
     }
-    if (param.tag != Tag_Param) {
+    if (ref_get(vm, paramRoot).tag != Tag_Param) {
       vm->paramBindings.len = paramBase;
-      return scope_exit(vm, sc, raise_error(vm, "with-params: not a param"));
+      return raise_error(vm, "with-params: not a param");
     }
-    Slot paramRoot = scope_push(vm, param);
-    Value value = control_apply0(vm, vm->stack.data[base + i + 1]);
-    if (value.tag == Tag_Unwind) {
+    Ref valueRoot = ref_push(vm, control_apply0(vm, vm->stack.data[base + i + 1]));
+    if (ref_get(vm, valueRoot).tag == Tag_Unwind) {
       vm->paramBindings.len = paramBase;
-      return scope_exit(vm, sc, value);
+      return unwind_v();
     }
-    Slot valueRoot = scope_push(vm, value);
-    vec_push(&vm->paramBindings, ((ParamBinding){slot_get(paramRoot), slot_get(valueRoot)}));
+    vec_push(&vm->paramBindings,
+             ((ParamBinding){ref_get(vm, paramRoot), ref_get(vm, valueRoot)}));
   }
   Value result = control_apply0(vm, vm->stack.data[base + argc - 1]);
   vm->paramBindings.len = paramBase;
-  return scope_exit(vm, sc, result);
+  return result;
 }
 
 Value vm_control_defparam(State* vm, u32 base, u32 argc) {
@@ -332,32 +338,34 @@ Value vm_control_defparam(State* vm, u32 base, u32 argc) {
   Obj* object = heap_alloc(&vm->heap, ObjType_Param, sizeof(ParamData));
   Value param = obj_v(Tag_Param, object);
   ParamData* data = as_param(param);
-  data->name = vm->stack.data[base].id;
+  u32 paramName = vm->stack.data[base].id;
+  data->name = paramName;
   data->defaultVal = vm->stack.data[base + 2];
-  u32 sc = scope_begin(vm);
-  Slot paramRoot = scope_push(vm, param);
-  return scope_exit(
-      vm, sc, ns_define(vm, data->name, slot_get(paramRoot), false, vm->stack.data[base + 1]));
+  OT_SCOPE(vm);
+  Ref paramRoot = ref_push(vm, param);
+  Ref doc = ref_push(vm, vm->stack.data[base + 1]);
+  // `data` is not read past here: ns_define allocates and would strand it.
+  return ns_define(vm, paramName, ref_get(vm, paramRoot), false, ref_get(vm, doc));
 }
 
 Value vm_control_ns(State* vm, u32 base, u32 argc) {
   if (argc == 0 || vm->stack.data[base].tag != Tag_Symbol)
     return raise_error(vm, "ns: bad compiled form");
   ns_switch(vm, vm->stack.data[base].id);
-  u32 sc = scope_begin(vm);
-  Slot specs = scope_push(vm, nil_v());
+  OT_SCOPE(vm);
+  Ref specs = ref_push(vm, nil_v());
   for (u32 i = 1; i < argc; i++) {
     Value clause = vm->stack.data[base + i];
     if (!pairp(clause) || car_(clause).tag != Tag_Keyword || car_(clause).id != vm->syms.kwRequire)
       continue;
-    slot_set(specs, cdr_(clause));
-    while (pairp(slot_get(specs))) {
-      Value result = require_spec(vm, car_(slot_get(specs)));
-      if (result.tag == Tag_Unwind) return scope_exit(vm, sc, result);
-      slot_set(specs, cdr_(slot_get(specs)));
+    ref_set(vm, specs, cdr_(clause));
+    while (pairp(ref_get(vm, specs))) {
+      Value result = require_spec(vm, car_(ref_get(vm, specs)));
+      if (result.tag == Tag_Unwind) return result;
+      ref_set(vm, specs, cdr_(ref_get(vm, specs)));
     }
   }
-  return scope_exit(vm, sc, nil_v());
+  return nil_v();
 }
 
 Value vm_control_in_ns(State* vm, u32 base, u32 argc) {
@@ -385,23 +393,23 @@ Value eval_form(State* vm, Value form) {
     if (!is_nil(var) && var_value(var).tag == Tag_Function) {
       Value expanded;
       {
-        u32 s = scope_begin(vm);
-        Slot b = scope_push(vm, form);
+        OT_SCOPE(vm);
+        Ref expander = ref_push(vm, var_value(var));
+        Ref b = ref_push(vm, form);
         u32 savedExpandNs = vm->expandNs;
         vm->expandNs = vm->currentNs;
-        expanded = apply(vm, var_value(var), b.idx, 1);
+        expanded = apply(vm, ref_get(vm, expander), b.i, 1);
         vm->expandNs = savedExpandNs;
-        scope_pop_to(vm, s);
       }
       if (expanded.tag == Tag_Unwind) return expanded;
       form = expanded;
     }
   }
-  u32 sc = scope_begin(vm);
-  Slot formRoot = scope_push(vm, form);
-  Slot code = scope_push(vm, compile_form(vm, slot_get(formRoot)));
-  if (slot_get(code).tag == Tag_Unwind) return scope_exit(vm, sc, slot_get(code));
-  return scope_exit(vm, sc, vm_execute_code(vm, slot_get(code)));
+  OT_SCOPE(vm);
+  Ref formRoot = ref_push(vm, form);
+  Ref code = ref_push(vm, compile_form(vm, ref_get(vm, formRoot)));
+  if (ref_get(vm, code).tag == Tag_Unwind) return unwind_v();
+  return vm_execute_code(vm, ref_get(vm, code));
 }
 
 Value eval_source_policy(State* vm, const char* src, u32 len, const char* name,

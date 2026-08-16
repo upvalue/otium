@@ -1,13 +1,13 @@
 implementation,benchmark,variant,parity,input,sample,reported_seconds,wall_seconds,status,reason,platform,runtime_flags,upstream_commit,otium_commit
-otium-485b875-dirty,fib,port,A,d857d40b3504,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
-otium-485b875-dirty,ack,port,A,048eeeb21989,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
-otium-485b875-dirty,tak,port,A,ed71c0699831,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
-otium-485b875-dirty,cpstak,port,A,a6bb105b10c7,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
-otium-485b875-dirty,takl,port,A,36a534a6b461,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
-otium-485b875-dirty,nqueens,port,A,758d4996647c,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
-otium-485b875-dirty,deriv,port,A,0000b6f0cff8,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
-otium-485b875-dirty,destruc,port,A,f9b248ac8534,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
-otium-485b875-dirty,mperm,port,B,a3a48b55679c,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 2147483648,85f6acdc4cc4,485b875
-otium-485b875-dirty,gcbench,port,B,d3c713afeed5,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 1073741824,85f6acdc4cc4,485b875
-otium-485b875-dirty,quicksort,port,B,a806d5a4c5a0,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
-otium-485b875-dirty,fft,port,B,764ca3870170,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
+otium-a631847-dirty,fib:40:5,port,A,d857d40b3504,1,86.179025750,86.182571667,ok,,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,a631847
+otium-a631847-dirty,ack,port,A,048eeeb21989,1,,0.139083042,crashed,"{:type error :message ""recursion depth exceeded""} ",Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,a631847
+otium-a631847-dirty,tak:40:20:11:1,port,A,ed71c0699831,1,44.488389833,44.492388958,ok,,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,a631847
+otium-a631847-dirty,cpstak,port,A,a6bb105b10c7,1,,120.000000000,timeout,timed out after 120s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,a631847
+otium-a631847-dirty,takl,port,A,36a534a6b461,1,,120.000000000,timeout,timed out after 120s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,a631847
+otium-a631847-dirty,nqueens,port,A,758d4996647c,1,,120.000000000,timeout,timed out after 120s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,a631847
+otium-a631847-dirty,deriv:10000000,port,A,0000b6f0cff8,1,31.134023084,31.138636917,ok,,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,a631847
+otium-a631847-dirty,destruc:600:50:4000,port,A,f9b248ac8534,1,40.443892666,40.448526333,ok,,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,a631847
+otium-a631847-dirty,mperm:20:10:2:1,port,B,a3a48b55679c,1,62.957405125,68.387851083,ok,,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 2147483648,85f6acdc4cc4,a631847
+otium-a631847-dirty,gcbench:20:1,port,B,d3c713afeed5,1,11.217529959,11.252621291,ok,,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 1073741824,85f6acdc4cc4,a631847
+otium-a631847-dirty,quicksort:10000:2500,port,B,a806d5a4c5a0,1,54.357789541,54.371792250,ok,,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,a631847
+otium-a631847-dirty,fft:65536:100,port,B,764ca3870170,1,15.274564292,15.281003333,ok,,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,a631847

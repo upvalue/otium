@@ -13,7 +13,7 @@
 namespace ot {
 
 // ---------------------------------------------------------------------------
-// def_native — wrap a NativeFn in a Function object, define it in otium.core.
+// def_native — wrap a NativeFn in a Function object, define it in currentNs.
 
 void def_native(Vm& vm, const char* name, NativeFn f) {
   Scope s(vm);
@@ -45,6 +45,7 @@ TAG_PRED(nat_pairp, "pair?", v.tag == Tag::Pair)
 TAG_PRED(nat_arrayp, "array?", v.tag == Tag::Array)
 TAG_PRED(nat_tablep, "table?", v.tag == Tag::Table)
 TAG_PRED(nat_bufferp, "buffer?", v.tag == Tag::Buffer)
+TAG_PRED(nat_foreignp, "foreign?", v.tag == Tag::Foreign)
 TAG_PRED(nat_macrop, "macro?", v.tag == Tag::Macro)
 TAG_PRED(nat_procedurep, "procedure?", v.tag == Tag::Function)
 TAG_PRED(nat_truep, "true?", v.tag == Tag::True)
@@ -91,6 +92,7 @@ static const char* type_name(Tag t) {
     case Tag::Macro: return "macro";
     case Tag::Param: return "param";
     case Tag::Restart: return "restart";
+    case Tag::Foreign: return "foreign";
     default: return "unknown";
   }
 }
@@ -307,6 +309,7 @@ void register_sys(Vm& vm) {
   def_native(vm, "array?", nat_arrayp);
   def_native(vm, "table?", nat_tablep);
   def_native(vm, "buffer?", nat_bufferp);
+  def_native(vm, "foreign?", nat_foreignp);
   def_native(vm, "macro?", nat_macrop);
   def_native(vm, "procedure?", nat_procedurep);
   def_native(vm, "list?", nat_listp);

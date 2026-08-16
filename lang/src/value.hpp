@@ -22,6 +22,7 @@ enum class Tag : u8 {
   Macro,
   Param,
   Restart,
+  Foreign,
   Unwind,  // internal sentinel: an unwind is in flight
 };
 
@@ -54,7 +55,7 @@ inline bool is_nil(Value v) { return v.tag == Tag::Nil; }
 inline bool is_falsy(Value v) { return v.tag == Tag::Nil || v.tag == Tag::False; }
 inline bool is_truthy(Value v) { return !is_falsy(v); }
 inline bool is_unwind(Value v) { return v.tag == Tag::Unwind; }
-inline bool is_heap(Value v) { return v.tag >= Tag::String && v.tag <= Tag::Restart; }
+inline bool is_heap(Value v) { return v.tag >= Tag::String && v.tag <= Tag::Foreign; }
 
 // eq? semantics: identity for heap values, value equality for immediates.
 inline bool val_eq(Value a, Value b) {

@@ -19,6 +19,13 @@
 #include "eval.hpp"
 #include "ns.hpp"
 
+#ifdef OT_EXT_DEMO
+#include "../ext/demo/demo_ext.hpp"
+#endif
+#ifdef OT_EXT_RAYLIB
+#include "../ext/raylib/raylib_ext.hpp"
+#endif
+
 // vm_push_handler/vm_pop_handler come from vm.hpp; make_native from eval.hpp.
 
 using ot::Buf;
@@ -460,6 +467,13 @@ int main(int argc, char** argv) {
   vm->writeUd = nullptr;
   vm->loadFn = host_load;
   vm->loadUd = nullptr;
+
+#ifdef OT_EXT_DEMO
+  ot::register_demo_extension(*vm);
+#endif
+#ifdef OT_EXT_RAYLIB
+  ot::register_raylib_extension(*vm);
+#endif
 
   struct sigaction sa;
   memset(&sa, 0, sizeof sa);

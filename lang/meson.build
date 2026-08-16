@@ -33,6 +33,7 @@ prelude_h = custom_target('ot_prelude_scm',
 
 lib_sources = files(
   'src/heap.cpp',
+  'src/foreign.cpp',
   'src/intern.cpp',
   'src/vm.cpp',
   'src/ns.cpp',
@@ -52,10 +53,29 @@ libotium = static_library('otium',
   include_directories : lib_inc,
   cpp_args : lib_args)
 
+otium_sources = files('repl/main.cpp')
+otium_cpp_args = []
+otium_links = [libotium, bestline]
+otium_dependencies = []
+
+if get_option('ext_demo')
+  otium_sources += files('ext/demo/demo_ext.cpp')
+  otium_cpp_args += ['-DOT_EXT_DEMO']
+endif
+
+if get_option('ext_raylib')
+  raylib_dep = dependency('raylib', required : true)
+  otium_sources += files('ext/raylib/raylib_ext.cpp')
+  otium_cpp_args += ['-DOT_EXT_RAYLIB']
+  otium_dependencies += [raylib_dep]
+endif
+
 otium = executable('otium',
-  'repl/main.cpp',
+  otium_sources,
   include_directories : [lib_inc, bestline_inc],
-  link_with : [libotium, bestline])
+  cpp_args : otium_cpp_args,
+  dependencies : otium_dependencies,
+  link_with : otium_links)
 
 # Test binary: doctest (vendored single header at tests/doctest.h),
 # exceptions ON (meson default), gc_stress flag still applies to the
@@ -80,3 +100,21 @@ cli_tests = find_program('tests/test_cli.py')
 test('otium-cli', cli_tests,
   args : [otium, join_paths(meson.current_source_dir(), 'tests', 'cli-load.scm')],
   timeout : test_timeout)
+
+if get_option('ext_demo')
+  test('otium-demo-extension', otium,
+    args : [
+      '--path', join_paths(meson.current_source_dir(), 'ext', 'demo'),
+      join_paths(meson.current_source_dir(), 'tests', 'ext-demo.scm'),
+    ],
+    timeout : test_timeout)
+endif
+
+if get_option('ext_raylib')
+  test('otium-raylib-extension', otium,
+    args : [
+      '--path', join_paths(meson.current_source_dir(), 'ext', 'raylib'),
+      join_paths(meson.current_source_dir(), 'tests', 'ext-raylib.scm'),
+    ],
+    timeout : test_timeout)
+endif

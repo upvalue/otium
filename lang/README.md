@@ -44,3 +44,12 @@ benchmarks/run.py path/to/otium --warmups 2 --runs 10 benchmarks/fib.scm
 
 See [benchmarks/README.md](benchmarks/README.md) for how to add cases and what
 the measurements include.
+
+## Native extensions
+
+Optional native modules are statically linked into the `otium` executable and
+left out of `libotium`. The normal build includes none of them.
+
+The repository includes a dependency-free demo and a Raylib binding. See
+[ext/README.md](ext/README.md) for build commands, the extension API, and the
+Raylib example.

@@ -319,21 +319,38 @@ static Value unwrap_quote(Vm& vm, Value v) {
 }
 
 static Value require_load(Vm& vm, u32 nsName) {
-  if (!is_nil(ns_lookup(vm, nsName))) return nil_v();
   u32 len;
   const char* nm = vm.intern.name(nsName, &len);
-  if (!vm.loadFn) return raise_error(vm, "namespace not found: %.*s", (int)len, nm);
+  NativeModule* native = find_native_module(vm, nsName);
+  if (!native && !is_nil(ns_lookup(vm, nsName))) return nil_v();
+  if (native && native->initialized && !is_nil(ns_lookup(vm, nsName))) return nil_v();
   for (u32 i = 0; i < vm.loadingNs.len; i++)
     if (vm.loadingNs[i] == nsName) return raise_error(vm, "circular require: %.*s", (int)len, nm);
-  Buf src;
   char cname[256];
   snprintf(cname, sizeof cname, "%.*s", (int)len, nm);
-  if (!vm.loadFn(vm.loadUd, cname, &src))
-    return raise_error(vm, "namespace not found on load path: %s", cname);
   vm.loadingNs.push(nsName);
   u32 savedNs = vm.currentNs;
-  ns_switch(vm, nsName);
-  Value r = eval_source(vm, src.data, src.len, cname);
+
+  bool nativeHit = native != nullptr;
+  if (native && !native->initialized) {
+    // Mark first: an init callback may register another module and reallocate
+    // nativeModules, invalidating the pointer above.
+    NativeModuleInit init = native->init;
+    native->initialized = true;
+    ns_switch(vm, nsName);
+    init(vm);
+  }
+
+  Buf src;
+  bool sourceHit = vm.loadFn && vm.loadFn(vm.loadUd, cname, &src);
+  Value r = nil_v();
+  if (sourceHit) {
+    ns_switch(vm, nsName);
+    r = eval_source(vm, src.data, src.len, cname);
+  } else if (!nativeHit) {
+    r = vm.loadFn ? raise_error(vm, "namespace not found on load path: %s", cname)
+                  : raise_error(vm, "namespace not found: %.*s", (int)len, nm);
+  }
   vm.currentNs = savedNs;
   vm.loadingNs.pop();
   if (r.tag == Tag::Unwind) return r;

@@ -25,6 +25,18 @@ static Vm* make_vm() {
 
 static Value str_v(Vm& vm, const char* s) { return make_string(vm, s, (u32)strlen(s)); }
 
+static i32 inline_finalized = 0;
+static i32 pointer_finalized = 0;
+static u32 pointer_finalizer_ns = 0;
+
+static void finalize_inline(Vm&, void* payload) { inline_finalized += *(i32*)payload; }
+
+static void finalize_pointer(Vm& vm, void* payload) {
+  pointer_finalized += *(i32*)payload;
+  pointer_finalizer_ns = vm.currentNs;
+  free(payload);
+}
+
 static bool child_aborts(void (*fn)()) {
   fflush(nullptr);
   pid_t pid = fork();
@@ -39,6 +51,64 @@ static bool child_aborts(void (*fn)()) {
   int status = 0;
   if (waitpid(pid, &status, 0) != pid) return false;
   return WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT;
+}
+
+// ---------------------------------------------------------------------------
+
+TEST_CASE("foreign objects move, compare by identity, and finalize once") {
+  inline_finalized = 0;
+  pointer_finalized = 0;
+  pointer_finalizer_ns = 0;
+  Vm* vm = make_vm();
+  u32 inlineType = register_foreign_type(*vm, "test/inline", finalize_inline);
+  u32 pointerType = register_foreign_type(*vm, "test/pointer", finalize_pointer);
+  CHECK(register_foreign_type(*vm, "test/inline", finalize_inline) == inlineType);
+
+  u32 base = vm->stack.len;
+  i32 inlinePayload = 7;
+  vm->push(make_foreign_inline(*vm, inlineType, &inlinePayload, sizeof inlinePayload));
+  i32* pointerPayload = (i32*)malloc(sizeof *pointerPayload);
+  REQUIRE(pointerPayload != nullptr);
+  *pointerPayload = 11;
+  vm->push(make_foreign_pointer(*vm, pointerType, pointerPayload));
+
+  Value before = vm->stack[base];
+  u64 hash = val_hash(*vm, before);
+  vm->heap.collect();
+  CHECK(vm->stack[base].obj != before.obj);
+  CHECK(val_eq(vm->stack[base], vm->stack[base]));
+  CHECK(!val_eq(vm->stack[base], vm->stack[base + 1]));
+  CHECK(val_equal(*vm, vm->stack[base], vm->stack[base]));
+  CHECK(val_hash(*vm, vm->stack[base]) == hash);
+
+  Buf repr;
+  print_repr(*vm, vm->stack[base], repr);
+  CHECK(std::string(repr.data, repr.len) == "#<test/inline>");
+
+  void* checked = nullptr;
+  CHECK(!is_unwind(foreign_check(*vm, "test", vm->stack[base], inlineType, &checked)));
+  REQUIRE(checked != nullptr);
+  CHECK(*(i32*)checked == 7);
+  CHECK(!is_unwind(foreign_release(*vm, "test", vm->stack[base], inlineType)));
+  CHECK(inline_finalized == 7);
+  CHECK(foreign_dead(vm->stack[base]));
+  Value deadUse = foreign_check(*vm, "test", vm->stack[base], inlineType, &checked);
+  CHECK(is_unwind(deadUse));
+  vm_cancel_unwind(*vm);
+
+  vm->popTo(base);  // both objects become collectible
+  vm->heap.collect();
+  CHECK(inline_finalized == 7);    // explicit release was not repeated
+  CHECK(pointer_finalized == 11);  // unreachable pointer payload was finalized
+
+  i32* teardownPayload = (i32*)malloc(sizeof *teardownPayload);
+  REQUIRE(teardownPayload != nullptr);
+  *teardownPayload = 13;
+  vm->push(make_foreign_pointer(*vm, pointerType, teardownPayload));
+  u32 teardownNs = vm->currentNs;
+  vm->destroy();
+  CHECK(pointer_finalized == 24);             // live resources finalize at VM teardown
+  CHECK(pointer_finalizer_ns == teardownNs);  // the Vm is intact during teardown finalization
 }
 
 // ---------------------------------------------------------------------------

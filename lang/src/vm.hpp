@@ -17,6 +17,7 @@ struct VmConfig {
 
 using WriteFn = void (*)(void* ud, const char* s, u32 n);
 using LoadFn = bool (*)(void* ud, const char* nsName, Buf* srcOut);
+using NativeModuleInit = void (*)(Vm& vm);
 
 // What kind of unwind is in flight when a Tag::Unwind value propagates.
 enum class UnwindKind : u8 { None, Condition, Restart, Quit };
@@ -32,6 +33,11 @@ struct RestartRec {
 };  // Tag::Restart value
 struct ParamBinding {
   Value param, value;
+};
+struct NativeModule {
+  u32 nameSym;
+  NativeModuleInit init;
+  bool initialized;
 };
 
 // Pre-interned symbol/keyword name ids.
@@ -81,6 +87,7 @@ struct Vm {
   Vec<RestartRec> restarts;         // innermost last
   Vec<ParamBinding> paramBindings;  // innermost last
   Vec<u32> loadingNs;               // require cycle detection
+  Vec<NativeModule> nativeModules;  // statically linked optional modules
 
   Syms syms;
 
@@ -95,6 +102,7 @@ struct Vm {
   void popTo(u32 base) { stack.len = base; }
 
   explicit Vm(const VmConfig&);
+  ~Vm();
 };
 
 // --- rooted-slot handles ----------------------------------------------------
@@ -165,5 +173,10 @@ void vm_pop_handler(Vm&);
 // Sanctioned cancel for an in-flight unwind (e.g. macroexpand probing a
 // head symbol that doesn't resolve). Clears all unwind state.
 void vm_cancel_unwind(Vm&);
+
+// Register a statically linked module for resolution by `require`. The init
+// callback runs once with currentNs pre-switched to the module namespace.
+void register_native_module(Vm&, const char* name, NativeModuleInit init);
+NativeModule* find_native_module(Vm&, u32 nameSym);
 
 }  // namespace ot

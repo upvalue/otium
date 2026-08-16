@@ -166,6 +166,20 @@ static void print_val(Vm& vm, Value v, Buf& out, bool display) {
     case Tag::Macro: print_named(vm, "macro", as_function(v)->name, out); return;
     case Tag::Param: print_named(vm, "param", as_param(v)->name, out); return;
     case Tag::Restart: print_named(vm, "restart", as_restart(v)->name, out); return;
+    case Tag::Foreign: {
+      const ForeignType* type = vm.heap.foreignType(as_foreign(v)->typeId);
+      out.appendCstr("#<");
+      if (type) {
+        u32 len = 0;
+        const char* name = vm.intern.name(type->nameSym, &len);
+        if (name) out.append(name, len);
+        else out.appendCstr("foreign");
+      } else {
+        out.appendCstr("foreign");
+      }
+      out.push('>');
+      return;
+    }
     case Tag::Unwind: out.appendCstr("#<unwind>"); return;
   }
   out.appendCstr("#<unknown>");

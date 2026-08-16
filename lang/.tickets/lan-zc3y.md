@@ -1,6 +1,6 @@
 ---
 id: lan-zc3y
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-08-16T02:02:05Z
@@ -59,3 +59,16 @@ PUNTED: stable C ABI for out-of-tree extensions; Values-in-userdata/trace hooks;
 - A demo extension under ext/ behind a meson option builds when enabled, is absent when disabled, and libotium itself contains no extension-specific code.
 - def_native comment corrected.
 
+## Notes
+
+**2026-08-16T02:35:19Z**
+
+Implemented Foreign inline and pointer payloads, collection and teardown finalization, identity printing/equality/hashing, native require sequencing, optional demo and Raylib extensions, companion Scheme layers, tests, docs, and a Raylib example. Verified the default build (2 tests) and demo+Raylib build against local Raylib 6.0 (4 tests); formatting and diff checks pass.
+
+**2026-08-16T02:50:26Z**
+
+Expanding the Raylib surface with the grid text, input, scaling, window, timing, and RNG primitives needed for a small Brogue-like roguelike, plus a playable example.
+
+**2026-08-16T02:56:42Z**
+
+Added the roguelike-ready Raylib slice: allocation-free codepoint drawing, default and owned font handles, measurement, texture-region and scaled render-target drawing, resize/fullscreen controls, scissoring and line primitives, key and Unicode queues, fuller mouse input, timing, and seeded integer RNG. Added a parsed 60x30 playable roguelike example. Default tests pass 2/2 and extension-enabled tests pass 4/4 with Raylib 6.0; formatting and diff checks pass.

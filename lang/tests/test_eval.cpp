@@ -4,6 +4,7 @@
 #include "../src/eval.hpp"
 #include "../src/ns.hpp"
 #include "../src/reader.hpp"
+#include "../src/builtins.hpp"
 #include <string>
 
 using namespace ot;
@@ -31,6 +32,39 @@ static Value t_numeq(Vm& vm, u32 base, u32 argc) {
   for (u32 i = 1; i < argc; i++)
     if (vm.stack[base].i != vm.stack[base + i].i) return bool_v(false);
   return bool_v(true);
+}
+
+static u32 native_init_calls = 0;
+static u32 native_init_ns = 0;
+
+static Value t_native_answer(Vm&, u32, u32) { return int_v(40); }
+
+static void t_native_init(Vm& vm) {
+  native_init_calls++;
+  native_init_ns = vm.currentNs;
+  def_native(vm, "native-answer", t_native_answer);
+  // An extension may enter a sub-namespace while installing more bindings.
+  // The require harness must still load sugar in the module and restore its caller.
+  ns_switch(vm, vm.intern.intern("test.native.sub", 15));
+}
+
+struct TestLoader {
+  u32 calls = 0;
+  bool sugar = false;
+};
+
+static bool t_load(void* ud, const char* nsName, Buf* out) {
+  TestLoader& loader = *(TestLoader*)ud;
+  loader.calls++;
+  if (loader.sugar && strcmp(nsName, "test.native") == 0) {
+    out->appendCstr("(define sugar (+ (native-answer) 2))");
+    return true;
+  }
+  if (strcmp(nsName, "test.source") == 0) {
+    out->appendCstr("(define source-value 9)");
+    return true;
+  }
+  return false;
 }
 
 static Vm* mkvm(u32 maxDepth = 2000) {
@@ -149,6 +183,47 @@ TEST_CASE("namespace switching and qualified refs") {
   CHECK(r.tag == Tag::Unwind);
   CHECK(vm->unwindKind == UnwindKind::Condition);
   vm->unwindKind = UnwindKind::None;
+  vm->destroy();
+}
+
+TEST_CASE("require initializes native modules before optional source sugar") {
+  native_init_calls = 0;
+  native_init_ns = 0;
+  Vm* vm = mkvm();
+  u32 callerNs = vm->currentNs;
+  u32 targetNs = vm->intern.intern("test.native", 11);
+  register_native_module(*vm, "test.native", t_native_init);
+  TestLoader loader;
+  loader.sugar = true;
+  vm->loadFn = t_load;
+  vm->loadUd = &loader;
+
+  Value r = run(*vm, "(require 'test.native) test.native/sugar");
+  CHECK(is_int(r, 42));
+  CHECK(native_init_calls == 1);
+  CHECK(native_init_ns == targetNs);
+  CHECK(vm->currentNs == callerNs);
+  CHECK(loader.calls == 1);
+
+  r = run(*vm, "(require 'test.native) (test.native/native-answer)");
+  CHECK(is_int(r, 40));
+  CHECK(native_init_calls == 1);
+  CHECK(loader.calls == 1);
+
+  // A registered module needs no companion source file.
+  register_native_module(*vm, "test.bare", t_native_init);
+  r = run(*vm, "(require 'test.bare) (test.bare/native-answer)");
+  CHECK(is_int(r, 40));
+  CHECK(native_init_calls == 2);
+  CHECK(vm->currentNs == callerNs);
+
+  // Unregistered modules retain the original source-only and missing paths.
+  r = run(*vm, "(require 'test.source) test.source/source-value");
+  CHECK(is_int(r, 9));
+  r = run(*vm, "(require 'test.missing)");
+  CHECK(is_unwind(r));
+  CHECK(condition_message(*vm) == "namespace not found on load path: test.missing");
+  vm_cancel_unwind(*vm);
   vm->destroy();
 }
 

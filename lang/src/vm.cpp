@@ -144,7 +144,30 @@ Vm::Vm(const VmConfig& c) : heap(this, c.heapBytes), intern(), stack(), cfg(c) {
 }
 
 Vm* Vm::create(const VmConfig& cfg) { return new Vm(cfg); }
+Vm::~Vm() {
+  // Run extension finalizers while every Vm member is still alive. Heap is
+  // the first member and is destroyed last; waiting for Heap::~Heap would
+  // expose finalizers to an already-destroyed Intern, stack, and registries.
+  heap.finalizeForeignObjects();
+}
 void Vm::destroy() { delete this; }
+
+void register_native_module(Vm& vm, const char* name, NativeModuleInit init) {
+  u32 nameSym = vm.intern.intern(name, (u32)strlen(name));
+  for (u32 i = 0; i < vm.nativeModules.len; i++) {
+    NativeModule& module = vm.nativeModules[i];
+    if (module.nameSym != nameSym) continue;
+    if (module.init != init) ot_fatal("native module registered twice");
+    return;
+  }
+  vm.nativeModules.push(NativeModule{nameSym, init, false});
+}
+
+NativeModule* find_native_module(Vm& vm, u32 nameSym) {
+  for (u32 i = 0; i < vm.nativeModules.len; i++)
+    if (vm.nativeModules[i].nameSym == nameSym) return &vm.nativeModules[i];
+  return nullptr;
+}
 
 Value vm_push_handler(Vm& vm, Value pred, Value handler) {
   vm.handlers.push(HandlerBinding{pred, handler});

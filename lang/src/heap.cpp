@@ -4,6 +4,13 @@
 
 namespace ot {
 
+static void* foreignPayload(ForeignData* d) {
+  if (!(d->flags & ForeignExternal)) return d + 1;
+  void* payload = nullptr;
+  memcpy(&payload, d + 1, sizeof payload);
+  return payload;
+}
+
 static u32 align8(u32 n) {
   if (n > UINT32_MAX - 7u) ot_fatal("heap: size overflow");
   return (n + 7u) & ~7u;
@@ -38,6 +45,7 @@ Heap::~Heap() {
         break;
       }
       case ObjType::Buffer: ((BufferData*)obj_payload(o))->buf.~Buf(); break;
+      case ObjType::Foreign: finalizeForeign(o); break;
       default: break;
     }
   }
@@ -84,7 +92,8 @@ Obj* Heap::alloc(ObjType t, u32 payloadBytes) {
   o->forward = nullptr;
   o->ident = 0;
   memset(obj_payload(o), 0, payloadBytes);
-  if (t == ObjType::Array || t == ObjType::Table || t == ObjType::Buffer) finalizable.push(o);
+  if (t == ObjType::Array || t == ObjType::Table || t == ObjType::Buffer || t == ObjType::Foreign)
+    finalizable.push(o);
   return o;
 }
 
@@ -158,7 +167,8 @@ void Heap::collectInto(u32 newSize) {
       case ObjType::Param: visitSlot(&((ParamData*)p)->defaultVal); break;
       case ObjType::Restart: visitSlot(&((RestartData*)p)->description); break;
       case ObjType::String:
-      case ObjType::Buffer: break;
+      case ObjType::Buffer:
+      case ObjType::Foreign: break;
     }
     scan += objTotalSize(o);
   }
@@ -181,6 +191,7 @@ void Heap::collectInto(u32 newSize) {
           break;
         }
         case ObjType::Buffer: ((BufferData*)p)->buf.~Buf(); break;
+        case ObjType::Foreign: finalizeForeign(o); break;
         default: break;
       }
     }
@@ -209,6 +220,35 @@ void Heap::collectInto(u32 newSize) {
 u32 Heap::identityOf(Obj* o) {
   if (o->ident == 0) o->ident = nextIdent++;
   return o->ident;
+}
+
+u32 Heap::addForeignType(u32 nameSym, ForeignFinalizer finalize) {
+  for (u32 i = 0; i < foreignTypes.len; i++) {
+    if (foreignTypes[i].nameSym != nameSym) continue;
+    if (foreignTypes[i].finalize != finalize) ot_fatal("foreign type registered twice");
+    return i + 1;
+  }
+  foreignTypes.push(ForeignType{nameSym, finalize});
+  return foreignTypes.len;
+}
+
+const ForeignType* Heap::foreignType(u32 typeId) const {
+  if (typeId == 0 || typeId > foreignTypes.len) return nullptr;
+  return &foreignTypes.data[typeId - 1];
+}
+
+void Heap::finalizeForeign(Obj* o) {
+  OT_ASSERT(o && o->type == ObjType::Foreign);
+  ForeignData* d = (ForeignData*)obj_payload(o);
+  if (d->flags & ForeignDead) return;
+  d->flags |= ForeignDead;
+  const ForeignType* type = foreignType(d->typeId);
+  if (type && type->finalize && vm) type->finalize(*vm, foreignPayload(d));
+}
+
+void Heap::finalizeForeignObjects() {
+  for (u32 i = 0; i < finalizable.len; i++)
+    if (finalizable[i]->type == ObjType::Foreign) finalizeForeign(finalizable[i]);
 }
 
 // ---------- helper constructors ----------

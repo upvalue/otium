@@ -9,7 +9,18 @@ namespace ot {
 
 struct Vm;  // opaque here; heap never dereferences it
 
-enum class ObjType : u8 { String, Pair, Array, Table, Buffer, Function, Macro, Param, Restart };
+enum class ObjType : u8 {
+  String,
+  Pair,
+  Array,
+  Table,
+  Buffer,
+  Function,
+  Macro,
+  Param,
+  Restart,
+  Foreign
+};
 
 struct Obj {
   ObjType type;
@@ -76,6 +87,25 @@ struct RestartData {
   u64 restartId;
 };
 
+// Foreign payloads deliberately cannot contain Values: the collector moves
+// them byte-for-byte and does not trace their contents. Inline payload bytes
+// follow ForeignData; external payloads store one pointer in that space.
+enum ForeignFlag : u32 {
+  ForeignDead = 1u << 0,
+  ForeignExternal = 1u << 1,
+};
+struct ForeignData {
+  u32 typeId;  // 1-based index into Heap::foreignTypes
+  u32 flags;
+  u32 payloadSize;  // inline byte count; sizeof(void*) for external mode
+  u32 _pad;
+};
+using ForeignFinalizer = void (*)(Vm&, void* payload);
+struct ForeignType {
+  u32 nameSym;
+  ForeignFinalizer finalize;
+};
+
 inline void* obj_payload(Obj* o) { return (void*)((char*)o + sizeof(Obj)); }
 
 struct Heap {
@@ -90,6 +120,10 @@ struct Heap {
   Obj* alloc(ObjType t, u32 payloadBytes);  // may collect
   void collect();
   u32 identityOf(Obj* o);  // stamp lazily, stable across GC
+  u32 addForeignType(u32 nameSym, ForeignFinalizer finalize);
+  const ForeignType* foreignType(u32 typeId) const;
+  void finalizeForeign(Obj* o);
+  void finalizeForeignObjects();
 
   // The heap does not scan Vm directly. Register a walker for every external
   // root source; each walker must visit all of its Value slots on collection.
@@ -111,7 +145,8 @@ struct Heap {
   };
   Vec<RootEntry> rootWalkers;
   Vec<Value> tempRoots;   // internal rooting for make_* argument values
-  Vec<Obj*> finalizable;  // objects owning C-heap storage (Array/Table/Buffer)
+  Vec<Obj*> finalizable;  // objects owning C-heap storage or foreign resources
+  Vec<ForeignType> foreignTypes;
 
   // scavenge state (valid only during collect)
   char* toSpace;
@@ -153,6 +188,20 @@ inline BufferData* as_buffer(Value v) { return (BufferData*)obj_payload(v.obj); 
 inline FunctionData* as_function(Value v) { return (FunctionData*)obj_payload(v.obj); }
 inline ParamData* as_param(Value v) { return (ParamData*)obj_payload(v.obj); }
 inline RestartData* as_restart(Value v) { return (RestartData*)obj_payload(v.obj); }
+inline ForeignData* as_foreign(Value v) { return (ForeignData*)obj_payload(v.obj); }
+inline bool foreign_dead(Value v) { return (as_foreign(v)->flags & ForeignDead) != 0; }
+
+// Extension-facing API. Type ids are per-VM and must be retained by the
+// registering extension. Finalizers must not allocate on the Otium heap: GC
+// invokes them while a collection is in progress.
+u32 register_foreign_type(Vm& vm, const char* name, ForeignFinalizer finalize = nullptr);
+Value make_foreign_inline(Vm& vm, u32 typeId, const void* payload, u32 payloadBytes);
+Value make_foreign_pointer(Vm& vm, u32 typeId, void* payload);
+// On success, writes the inline payload address or external pointer to out.
+// On type/dead errors, raises a condition and returns Tag::Unwind.
+Value foreign_check(Vm& vm, const char* who, Value value, u32 expectedType, void** out);
+// Runs the registered finalizer once and marks the object dead.
+Value foreign_release(Vm& vm, const char* who, Value value, u32 expectedType);
 
 // Array item growth helper (items live in the C heap; realloc-based).
 void array_reserve(Value arr, u32 n);

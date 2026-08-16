@@ -2,7 +2,7 @@
 id: lan-pzh6
 status: open
 deps: []
-links: [lan-ygfd, lan-dm0j, lan-iuyk, lan-d41h]
+links: [lan-ygfd, lan-dm0j, lan-iuyk, lan-d41h, lan-p4j2]
 created: 2026-08-16T20:04:23Z
 type: task
 priority: 1

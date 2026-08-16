@@ -43,6 +43,23 @@ TEST_CASE("compiler uses lexical slots for sequential let and set") {
   state->destroy();
 }
 
+TEST_CASE("compiler hoists defines out of let bodies") {
+  State* state = compiler_state();
+  // Mutually recursive defines under a let, capturing each other and the
+  // let bindings (the mperm.scm shape).
+  Value result = run_compiled(*state,
+                              "((lambda (n)"
+                              "   (let ((acc 2))"
+                              "     (define (even? k) (if (= k 0) #t (odd? (- k 1))))"
+                              "     (define (odd? k) (if (= k 0) #f (even? (- k 1))))"
+                              "     (set! acc (+ acc (if (even? n) 40 0)))"
+                              "     acc))"
+                              " 10)");
+  CHECK(result.tag == Tag::Int);
+  CHECK(result.i == 42);
+  state->destroy();
+}
+
 TEST_CASE("compiler creates flat closures for captured locals") {
   State* state = compiler_state();
   Value result = run_compiled(*state, "((let ((x 40)) (lambda (y) (+ x y))) 2)");

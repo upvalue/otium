@@ -18,6 +18,7 @@ enum class Tag : u8 {
   Array,
   Table,
   Buffer,
+  Code,
   Function,
   Macro,
   Param,

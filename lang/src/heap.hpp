@@ -9,7 +9,18 @@ namespace ot {
 
 struct State;  // opaque here; heap never dereferences it
 
-enum class ObjType : u8 { String, Pair, Array, Table, Buffer, Function, Macro, Param, Restart };
+enum class ObjType : u8 {
+  String,
+  Pair,
+  Array,
+  Table,
+  Buffer,
+  Code,
+  Function,
+  Macro,
+  Param,
+  Restart
+};
 
 struct Obj {
   ObjType type;
@@ -55,6 +66,18 @@ struct TableData {
 struct BufferData {
   Buf buf;
 };
+struct CodeData {
+  u8* bytes;
+  Value* consts;
+  u32 len;
+  u32 constCount;
+  u32 nfixed;
+  u32 hasRest;
+  u32 nupvals;
+  u32 nlocals;
+  u32 maxStack;
+  u32 name;
+};
 using NativeFn = Value (*)(State& vm, u32 base, u32 argc);
 // The collector needs the complete layout to trace every Value field.
 struct FunctionData {
@@ -97,7 +120,7 @@ struct Heap {
   void addRoots(RootWalkFn fn, void* ud);
 
   // --- internals ---
-  State* vm;       // opaque back-pointer for the owner; unused by heap
+  State* vm;    // opaque back-pointer for the owner; unused by heap
   char* space;  // active space
   u32 spaceSize;
   u32 used;      // bump offset into space
@@ -111,7 +134,7 @@ struct Heap {
   };
   Vec<RootEntry> rootWalkers;
   Vec<Value> tempRoots;   // internal rooting for make_* argument values
-  Vec<Obj*> finalizable;  // objects owning C-heap storage (Array/Table/Buffer)
+  Vec<Obj*> finalizable;  // objects owning C-heap storage (Array/Table/Buffer/Code)
 
   // scavenge state (valid only during collect)
   char* toSpace;
@@ -150,6 +173,7 @@ inline const char* string_bytes(Value v) { return string_bytes(as_string(v)); }
 inline ArrayData* as_array(Value v) { return (ArrayData*)obj_payload(v.obj); }
 inline TableData* as_table(Value v) { return (TableData*)obj_payload(v.obj); }
 inline BufferData* as_buffer(Value v) { return (BufferData*)obj_payload(v.obj); }
+inline CodeData* as_code(Value v) { return (CodeData*)obj_payload(v.obj); }
 inline FunctionData* as_function(Value v) { return (FunctionData*)obj_payload(v.obj); }
 inline ParamData* as_param(Value v) { return (ParamData*)obj_payload(v.obj); }
 inline RestartData* as_restart(Value v) { return (RestartData*)obj_payload(v.obj); }
@@ -165,7 +189,7 @@ void array_reserve(Value arr, u32 n);
 // re-audited (grep for "alloc-free" first).
 Value table_get(State&, Value table, Value key);           // nil on miss
 Value table_put(State&, Value table, Value key, Value v);  // nil value deletes; returns table
-Value array_get(Value arr, i64 idx);                    // nil out of range
+Value array_get(Value arr, i64 idx);                       // nil out of range
 void array_push(State&, Value arr, Value v);
 
 }  // namespace ot

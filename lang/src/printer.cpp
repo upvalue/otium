@@ -2,6 +2,7 @@
 #include "value.hpp"
 #include "heap.hpp"
 #include "state.hpp"
+#include "code.hpp"
 #include <cstring>
 #include <cstdio>   // snprintf (deviation from allowed-header list; noted)
 #include <cstdlib>  // strtod
@@ -162,6 +163,11 @@ static void print_val(State& vm, Value v, Buf& out, bool display) {
       }
       return;
     }
+    case Tag::Code:
+      out.appendCstr("#<code ");
+      code_print_ascii(v, out);
+      out.push('>');
+      return;
     case Tag::Function: print_named(vm, "fn", as_function(v)->name, out); return;
     case Tag::Macro: print_named(vm, "macro", as_function(v)->name, out); return;
     case Tag::Param: print_named(vm, "param", as_param(v)->name, out); return;

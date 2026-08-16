@@ -25,7 +25,7 @@ void def_native(State& vm, const char* name, NativeFn f) {
 // Predicates.
 
 #define TAG_PRED(cname, lname, expr)                                                               \
-  static Value cname(State& vm, u32 base, u32 argc) {                                                 \
+  static Value cname(State& vm, u32 base, u32 argc) {                                              \
     OT_TRY(need_argc(vm, lname, argc, 1, 1));                                                      \
     Value v = ARG(0);                                                                              \
     (void)v;                                                                                       \
@@ -87,6 +87,7 @@ static const char* type_name(Tag t) {
     case Tag::Array: return "array";
     case Tag::Table: return "table";
     case Tag::Buffer: return "buffer";
+    case Tag::Code: return "code";
     case Tag::Function: return "function";
     case Tag::Macro: return "macro";
     case Tag::Param: return "param";

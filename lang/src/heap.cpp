@@ -38,6 +38,12 @@ Heap::~Heap() {
         break;
       }
       case ObjType::Buffer: ((BufferData*)obj_payload(o))->buf.~Buf(); break;
+      case ObjType::Code: {
+        CodeData* d = (CodeData*)obj_payload(o);
+        free(d->bytes);
+        free(d->consts);
+        break;
+      }
       default: break;
     }
   }
@@ -84,7 +90,8 @@ Obj* Heap::alloc(ObjType t, u32 payloadBytes) {
   o->forward = nullptr;
   o->ident = 0;
   memset(obj_payload(o), 0, payloadBytes);
-  if (t == ObjType::Array || t == ObjType::Table || t == ObjType::Buffer) finalizable.push(o);
+  if (t == ObjType::Array || t == ObjType::Table || t == ObjType::Buffer || t == ObjType::Code)
+    finalizable.push(o);
   return o;
 }
 
@@ -155,6 +162,11 @@ void Heap::collectInto(u32 newSize) {
         visitSlot(&d->docstring);
         break;
       }
+      case ObjType::Code: {
+        CodeData* d = (CodeData*)p;
+        for (u32 i = 0; i < d->constCount; i++) visitSlot(&d->consts[i]);
+        break;
+      }
       case ObjType::Param: visitSlot(&((ParamData*)p)->defaultVal); break;
       case ObjType::Restart: visitSlot(&((RestartData*)p)->description); break;
       case ObjType::String:
@@ -181,6 +193,12 @@ void Heap::collectInto(u32 newSize) {
           break;
         }
         case ObjType::Buffer: ((BufferData*)p)->buf.~Buf(); break;
+        case ObjType::Code: {
+          CodeData* d = (CodeData*)p;
+          free(d->bytes);
+          free(d->consts);
+          break;
+        }
         default: break;
       }
     }

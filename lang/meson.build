@@ -10,10 +10,6 @@ lib_args = ['-fno-exceptions', '-fno-rtti']
 if get_option('gc_stress')
   lib_args += ['-DOT_GC_STRESS']
 endif
-if get_option('use_vm')
-  lib_args += ['-DOT_USE_VM']
-endif
-
 cpp = meson.get_compiler('cpp')
 has_computed_goto = cpp.compiles('''
   int main() {

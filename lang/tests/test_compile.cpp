@@ -53,25 +53,22 @@ TEST_CASE("compiler creates flat closures for captured locals") {
 
 TEST_CASE("compiler hoists mutually recursive internal definitions") {
   State* state = compiler_state(8);
-  Value result = run_compiled(
-      *state,
-      "((lambda (n)"
-      "   (define (even x) (if (= x 0) #t (odd (- x 1))))"
-      "   (define (odd x) (if (= x 0) #f (even (- x 1))))"
-      "   (even n))"
-      " 10000)");
+  Value result = run_compiled(*state, "((lambda (n)"
+                                      "   (define (even x) (if (= x 0) #t (odd (- x 1))))"
+                                      "   (define (odd x) (if (= x 0) #f (even (- x 1))))"
+                                      "   (even n))"
+                                      " 10000)");
   CHECK(result.tag == Tag::True);
   state->destroy();
 }
 
 TEST_CASE("compiled globals resolve late and retain live var cells") {
   State* state = compiler_state();
-  Value result = run_compiled(*state,
-                              "(begin"
-                              "  (define vm-compiled-global 1)"
-                              "  (define (get-vm-compiled-global) vm-compiled-global)"
-                              "  (set! vm-compiled-global 2)"
-                              "  (get-vm-compiled-global))");
+  Value result = run_compiled(*state, "(begin"
+                                      "  (define vm-compiled-global 1)"
+                                      "  (define (get-vm-compiled-global) vm-compiled-global)"
+                                      "  (set! vm-compiled-global 2)"
+                                      "  (get-vm-compiled-global))");
   CHECK(result.tag == Tag::Int);
   CHECK(result.i == 2);
   state->destroy();
@@ -79,8 +76,7 @@ TEST_CASE("compiled globals resolve late and retain live var cells") {
 
 TEST_CASE("compiler lowers while loops without recursive C evaluation") {
   State* state = compiler_state();
-  Value result =
-      run_compiled(*state, "(let ((i 0)) (while (< i 5) (set! i (+ i 1))) i)");
+  Value result = run_compiled(*state, "(let ((i 0)) (while (< i 5) (set! i (+ i 1))) i)");
   CHECK(result.tag == Tag::Int);
   CHECK(result.i == 5);
   state->destroy();
@@ -88,8 +84,8 @@ TEST_CASE("compiler lowers while loops without recursive C evaluation") {
 
 TEST_CASE("compiler lowers cond clauses including their truthy test value") {
   State* state = compiler_state();
-  Value result = run_compiled(
-      *state, "(list (cond ((= 1 2) 0) ((= 2 2) 42) (else 9)) (cond (#f 1) (7)))");
+  Value result =
+      run_compiled(*state, "(list (cond ((= 1 2) 0) ((= 2 2) 42) (else 9)) (cond (#f 1) (7)))");
   REQUIRE(result.tag == Tag::Pair);
   CHECK(as_pair(result)->car.tag == Tag::Int);
   CHECK(as_pair(result)->car.i == 42);
@@ -124,5 +120,15 @@ TEST_CASE("compiled macros retain their privileged apply path") {
     CHECK(expanded.tag == Tag::Int);
     CHECK(expanded.i == 5);
   }
+  state->destroy();
+}
+
+TEST_CASE("compiled function definitions retain names and docstrings") {
+  State* state = compiler_state();
+  Value result = run_compiled(
+      *state, "(begin (define (vm-documented x) \"compiler docs\" x) (describe 'vm-documented))");
+  REQUIRE(result.tag == Tag::String);
+  StringData* string = as_string(result);
+  CHECK(std::string(string_bytes(string), string->len) == "user/vm-documented: compiler docs");
   state->destroy();
 }

@@ -33,9 +33,6 @@ Value make_compiled_function(State& state, Value code, Value captures, Value nsN
   Value fnValue = obj_v(tag, object);
   FunctionData* fn = as_function(fnValue);
   fn->name = name;
-  fn->params = nil_v();
-  fn->body = nil_v();
-  fn->env = nil_v();
   fn->code = codeRoot.get();
   fn->nsName = nsRoot.get();
   fn->native = nullptr;
@@ -312,6 +309,7 @@ Value vm_execute(State& state, u32 floor) {
   VM_OP(ToMacro) {
     if (state.stack.len <= stackBase || state.stack[state.stack.len - 1].tag != Tag::Function)
       return unwind_to(state, floor);
+    state.stack[state.stack.len - 1].obj->type = ObjType::Macro;
     state.stack[state.stack.len - 1].tag = Tag::Macro;
     VM_DISPATCH();
   }
@@ -530,8 +528,14 @@ Value vm_execute(State& state, u32 floor) {
       doc = data->items[2];
     }
     if (name.tag != Tag::Symbol) return unwind_to(state, floor);
+    Value value = state.stack[state.stack.len - 1];
+    if (value.tag == Tag::Function || value.tag == Tag::Macro) {
+      FunctionData* definedFunction = as_function(value);
+      if (definedFunction->name == 0) definedFunction->name = name.id;
+      if (!is_nil(doc)) definedFunction->docstring = doc;
+    }
     VM_SAVE_IP();
-    Value defined = ns_define(state, name.id, state.stack[state.stack.len - 1], isPrivate, doc);
+    Value defined = ns_define(state, name.id, value, isPrivate, doc);
     if (defined.tag == Tag::Unwind) return unwind_to(state, floor);
     VM_LOAD_FRAME();
     VM_DISPATCH();

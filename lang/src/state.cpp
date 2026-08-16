@@ -110,7 +110,6 @@ State::State(const StateConfig& c) : heap(this, c.heapBytes), intern(), stack(),
   expandNs = 0;
   gensymCounter = 0;
   restartIdCounter = 0;
-  depth = 0;
   interruptFlag = false;
   writeFn = nullptr;
   writeUd = nullptr;

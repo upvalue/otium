@@ -641,8 +641,7 @@ static bool emit_define(Compiler& compiler, Value form, bool isPrivate) {
     args = cdr(formRoot.get());
     Value rest = cdr(args);
     Value doc = nil_v();
-    if (!pairp(target) && pairp(rest) && car(rest).tag == Tag::String && pairp(cdr(rest)))
-      doc = car(rest);
+    if (pairp(rest) && car(rest).tag == Tag::String && pairp(cdr(rest))) doc = car(rest);
     Slot docRoot = roots.push(doc);
     Slot descriptor = roots.push(make_array(compiler.state, 3));
     array_push(compiler.state, descriptor.get(), name);
@@ -667,10 +666,17 @@ static bool emit_defmacro(Compiler& compiler, Value form) {
   if (!emit_lambda(compiler, car(rest), cdr(rest), name.id)) return false;
   emit_op(compiler, Op::ToMacro);
 
+  args = cdr(formRoot.get());
+  rest = cdr(args);
+  Value body = cdr(rest);
+  Value doc = nil_v();
+  if (pairp(body) && car(body).tag == Tag::String && pairp(cdr(body))) doc = car(body);
+  Slot docRoot = roots.push(doc);
+
   Slot descriptor = roots.push(make_array(compiler.state, 3));
   array_push(compiler.state, descriptor.get(), name);
   array_push(compiler.state, descriptor.get(), bool_v(false));
-  array_push(compiler.state, descriptor.get(), nil_v());
+  array_push(compiler.state, descriptor.get(), docRoot.get());
   emit_op(compiler, Op::DefGlobal);
   emit_u16(compiler, add_constant(compiler, descriptor.get()));
   return true;
@@ -1201,6 +1207,8 @@ static Value compile_lambda(State& state, LambdaInfo& info, Value params, Value 
   (void)params;
   Scope roots(state);
   Slot bodyRoot = roots.push(body);
+  if (pairp(bodyRoot.get()) && car(bodyRoot.get()).tag == Tag::String && pairp(cdr(bodyRoot.get())))
+    bodyRoot.set(cdr(bodyRoot.get()));
   Slot constants = roots.push(make_array(state, 8));
   Compiler compiler(state, info, constants);
 

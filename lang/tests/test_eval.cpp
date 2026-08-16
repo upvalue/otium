@@ -171,12 +171,12 @@ TEST_CASE("in-ns is a special form with consistent name handling") {
   vm->destroy();
 }
 
-TEST_CASE("million-iteration mutual tail recursion under small depth cap") {
+TEST_CASE("three-million-iteration mutual tail recursion under small depth cap") {
   State* vm = mkvm(200);
 #ifdef OT_GC_STRESS
   const char* iterations = "1000";
 #else
-  const char* iterations = "1000000";
+  const char* iterations = "3000000";
 #endif
   std::string source = "(define (ev n) (if (= n 0) #t (od (- n 1))))"
                        "(define (od n) (if (= n 0) #f (ev (- n 1))))"

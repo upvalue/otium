@@ -2,5 +2,3 @@ option('gc_stress', type : 'boolean', value : false,
   description : 'Collect on every allocation (defines OT_GC_STRESS). Extremely expensive, avoid during normal development.')
 option('computed_goto', type : 'feature', value : 'auto',
   description : 'Use labels-as-values dispatch when the compiler supports it')
-option('use_vm', type : 'boolean', value : true,
-  description : 'Compile expanded forms to bytecode instead of using eval_tr')

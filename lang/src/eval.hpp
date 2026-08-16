@@ -1,23 +1,15 @@
-// eval.hpp — stage-0 evaluator: trampoline with TCO, special forms,
-// conditions/restarts, dynamic params.
+// eval.hpp - top-level compilation, application, and VM control helpers.
 #pragma once
 #include "state.hpp"
 
 namespace ot {
 
-// FunctionData is defined in heap.hpp (the scavenger needs its layout).
-// Local aliases for the payload accessors:
+// FunctionData is defined in heap.hpp because the scavenger needs its layout.
 inline FunctionData* fn_data(Value v) { return as_function(v); }
 inline ParamData* param_data(Value v) { return as_param(v); }
 inline RestartData* restart_data(Value v) { return as_restart(v); }
 
-// Lexical environments are chains: () is the empty env; a non-empty env is
-// (pair frame parent-env) where `frame` is a table mapping name-symbol -> a
-// one-element array "box" whose slot 0 holds the binding's value (boxing
-// keeps nil storable and gives set! a mutable cell).
-
 Value eval_form(State&, Value form);  // expand (via *expander*) + evaluate one top-level form
-Value eval_in(State&, Value form, Value env);  // evaluate with lexical env; restores current ns
 Value apply(State&, Value callee, u32 base, u32 argc);  // args on vm stack
 Value start_quit(State&);                               // begin an uncatchable quit unwind
 

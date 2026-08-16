@@ -82,10 +82,7 @@ using NativeFn = Value (*)(State& vm, u32 base, u32 argc);
 // The collector needs the complete layout to trace every Value field.
 struct FunctionData {
   u32 name;         // intern id or 0
-  Value params;     // the parameter list form
-  Value body;       // list of body forms
-  Value env;        // captured lexical env (nil for natives)
-  Value code;       // Code for compiled functions, nil for tree/native functions
+  Value code;       // Code for compiled functions, nil for natives
   Value nsName;     // defining namespace (symbol)
   NativeFn native;  // non-null for natives
   Value docstring;

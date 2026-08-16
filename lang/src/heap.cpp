@@ -155,9 +155,6 @@ void Heap::collectInto(u32 newSize) {
       case ObjType::Function:
       case ObjType::Macro: {
         FunctionData* d = (FunctionData*)p;
-        visitSlot(&d->params);
-        visitSlot(&d->body);
-        visitSlot(&d->env);
         visitSlot(&d->code);
         visitSlot(&d->nsName);
         visitSlot(&d->docstring);

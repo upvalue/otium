@@ -70,8 +70,6 @@ struct State {
                       // switches currentNs to its defining ns
   u64 gensymCounter;
   u64 restartIdCounter;
-  u32 depth;  // non-tail eval nesting
-
   volatile bool interruptFlag;
   WriteFn writeFn;
   void* writeUd;
@@ -135,8 +133,7 @@ struct Scope {
   State& vm;
   u32 base;
   explicit Scope(State& v) : vm(v), base(v.stack.len) {}
-  // Guarded: an enclosing frame may already have popped below base on an
-  // early-return path (eval_tr's RET) — never grow the stack back.
+  // Guarded because an enclosing VM unwind may already have popped below base.
   ~Scope() {
     if (vm.stack.len > base) vm.popTo(base);
   }

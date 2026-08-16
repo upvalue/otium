@@ -309,31 +309,30 @@ TEST(table_printing_preserves_insertion_order) {
 TEST(pair_mutation_preserves_acyclic_and_table_key_invariants) {
   State* vm = make_vm();
   {
-    u32 sc = scope_begin(vm);
-    Slot pair = scope_push(vm, make_pair(vm, int_v(1), null_v()));
+    OT_SCOPE(vm);
+    Ref pair = ref_push(vm, make_pair(vm, int_v(1), null_v()));
 
-    Value r = CALL(vm, "set-car!", slot_get(pair), int_v(2));
+    Value r = CALL(vm, "set-car!", ref_get(vm, pair), int_v(2));
     CHECK(r.tag == Tag_Pair);
-    CHECK(as_pair(slot_get(pair))->car.i == 2);
+    CHECK(as_pair(ref_get(vm, pair))->car.i == 2);
     // Root the new pair before the call rather than allocating inside CALL's
-    // argument list: the compound literal would read slot_get(pair) into the
+    // argument list: the compound literal would read ref_get(vm, pair) into the
     // array and then make_pair could collect and move it.
-    Slot fresh = scope_push(vm, make_pair(vm, int_v(3), null_v()));
-    r = CALL(vm, "set-cdr!", slot_get(pair), slot_get(fresh));
+    Ref fresh = ref_push(vm, make_pair(vm, int_v(3), null_v()));
+    r = CALL(vm, "set-cdr!", ref_get(vm, pair), ref_get(vm, fresh));
     CHECK(r.tag == Tag_Pair);
-    CHECK(as_pair(as_pair(slot_get(pair))->cdr)->car.i == 3);
+    CHECK(as_pair(as_pair(ref_get(vm, pair))->cdr)->car.i == 3);
 
-    r = CALL(vm, "set-cdr!", slot_get(pair), slot_get(pair));
+    r = CALL(vm, "set-cdr!", ref_get(vm, pair), ref_get(vm, pair));
     CHECK(r.tag == Tag_Unwind);
     state_cancel_unwind(vm);
 
-    Slot table = scope_push(vm, make_table(vm));
-    table_put(vm, slot_get(table), slot_get(pair), int_v(9));
-    r = CALL(vm, "set-car!", slot_get(pair), int_v(4));
+    Ref table = ref_push(vm, make_table(vm));
+    table_put(vm, ref_get(vm, table), ref_get(vm, pair), int_v(9));
+    r = CALL(vm, "set-car!", ref_get(vm, pair), int_v(4));
     CHECK(r.tag == Tag_Unwind);
     state_cancel_unwind(vm);
-    CHECK(table_get(vm, slot_get(table), slot_get(pair)).i == 9);
-    scope_pop_to(vm, sc);
+    CHECK(table_get(vm, ref_get(vm, table), ref_get(vm, pair)).i == 9);
   }
   state_destroy(vm);
 }
@@ -343,7 +342,7 @@ TEST(pair_mutation_preserves_acyclic_and_table_key_invariants) {
 TEST(equality_matrix_spec_2_4) {
   State* vm = make_vm();
   {
-    u32 sc = scope_begin(vm);
+    OT_SCOPE(vm);
 
     // type-strict across the board
     CHECK(!val_equal(vm, int_v(1), float_v(1.0)));
@@ -366,37 +365,36 @@ TEST(equality_matrix_spec_2_4) {
     CHECK(!val_equal(vm, symbol_v(id), keyword_v(id)));  // different types
 
     // strings: deep structural
-    Slot s1 = scope_push(vm, str_v(vm, "abc"));
-    Slot s2 = scope_push(vm, str_v(vm, "abc"));
-    CHECK(val_equal(vm, slot_get(s1), slot_get(s2)));
-    CHECK(!val_eq(slot_get(s1), slot_get(s2)));  // distinct objects
-    CHECK(val_eq(slot_get(s1), slot_get(s1)));
+    Ref s1 = ref_push(vm, str_v(vm, "abc"));
+    Ref s2 = ref_push(vm, str_v(vm, "abc"));
+    CHECK(val_equal(vm, ref_get(vm, s1), ref_get(vm, s2)));
+    CHECK(!val_eq(ref_get(vm, s1), ref_get(vm, s2)));  // distinct objects
+    CHECK(val_eq(ref_get(vm, s1), ref_get(vm, s1)));
 
     // pairs: recursive
-    Slot p1 = scope_push(vm, make_pair(vm, int_v(1), make_pair(vm, str_v(vm, "x"), null_v())));
-    Slot p2 = scope_push(vm, make_pair(vm, int_v(1), make_pair(vm, str_v(vm, "x"), null_v())));
-    CHECK(val_equal(vm, slot_get(p1), slot_get(p2)));
-    CHECK(!val_eq(slot_get(p1), slot_get(p2)));
+    Ref p1 = ref_push(vm, make_pair(vm, int_v(1), make_pair(vm, str_v(vm, "x"), null_v())));
+    Ref p2 = ref_push(vm, make_pair(vm, int_v(1), make_pair(vm, str_v(vm, "x"), null_v())));
+    CHECK(val_equal(vm, ref_get(vm, p1), ref_get(vm, p2)));
+    CHECK(!val_eq(ref_get(vm, p1), ref_get(vm, p2)));
 
     // arrays compare structurally
-    Slot a1 = scope_push(vm, make_array(vm, 2));
-    Slot a2 = scope_push(vm, make_array(vm, 2));
-    array_push(vm, slot_get(a1), int_v(1));
-    array_push(vm, slot_get(a1), slot_get(p1));
-    array_push(vm, slot_get(a2), int_v(1));
-    array_push(vm, slot_get(a2), slot_get(p2));
-    CHECK(val_equal(vm, slot_get(a1), slot_get(a2)));
-    CHECK(val_equal(vm, slot_get(a1), slot_get(a1)));
-    as_array(slot_get(a2))->items[0] = int_v(2);
-    CHECK(!val_equal(vm, slot_get(a1), slot_get(a2)));
+    Ref a1 = ref_push(vm, make_array(vm, 2));
+    Ref a2 = ref_push(vm, make_array(vm, 2));
+    array_push(vm, ref_get(vm, a1), int_v(1));
+    array_push(vm, ref_get(vm, a1), ref_get(vm, p1));
+    array_push(vm, ref_get(vm, a2), int_v(1));
+    array_push(vm, ref_get(vm, a2), ref_get(vm, p2));
+    CHECK(val_equal(vm, ref_get(vm, a1), ref_get(vm, a2)));
+    CHECK(val_equal(vm, ref_get(vm, a1), ref_get(vm, a1)));
+    as_array(ref_get(vm, a2))->items[0] = int_v(2);
+    CHECK(!val_equal(vm, ref_get(vm, a1), ref_get(vm, a2)));
 
     // hashes agree with equal?
-    CHECK(val_hash(vm, slot_get(s1)) == val_hash(vm, slot_get(s2)));
-    CHECK(val_hash(vm, slot_get(p1)) == val_hash(vm, slot_get(p2)));
+    CHECK(val_hash(vm, ref_get(vm, s1)) == val_hash(vm, ref_get(vm, s2)));
+    CHECK(val_hash(vm, ref_get(vm, p1)) == val_hash(vm, ref_get(vm, p2)));
     CHECK(val_hash(vm, float_v(0.0)) == val_hash(vm, float_v(-0.0)));
     CHECK(val_hash(vm, float_v(NAN)) == val_hash(vm, float_v(NAN)));
     CHECK(val_hash(vm, int_v(1)) != val_hash(vm, float_v(1.0)));  // type-strict
-    scope_pop_to(vm, sc);
   }
   state_destroy(vm);
 }

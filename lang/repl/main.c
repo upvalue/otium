@@ -273,6 +273,21 @@ static bool load_project(State* vm, const char* named) {
 // ---------------------------------------------------------------------------
 // flagship: native handler that offers restarts interactively
 
+// Reads one restart's name and description, false once the index runs off the
+// end. Its own function so the scope does not nest inside the listing loop.
+static bool describe_restart(State* vm, Ref restarts, i64 index, Value* name, Value* desc) {
+  OT_SCOPE(vm);
+  Ref r = ref_push(vm, array_get(ref_get(vm, restarts), index));
+  if (is_nil(ref_get(vm, r))) return false;
+  u32 ab = vm->stack.len;
+  state_push(vm, ref_get(vm, r));
+  *name = call_named(vm, "restart-name", ab, 1);
+  state_pop_to(vm, ab);
+  state_push(vm, ref_get(vm, r));
+  *desc = call_named(vm, "restart-description", ab, 1);
+  return true;
+}
+
 static Value repl_condition_handler(State* vm, u32 base, u32 argc) {
   Value cond = argc > 0 ? vm->stack.data[base] : nil_v();
 
@@ -283,28 +298,14 @@ static Value repl_condition_handler(State* vm, u32 base, u32 argc) {
   u32 b = vm->stack.len;
   Value restarts = call_named(vm, "compute-restarts", b, 0);
   if (restarts.tag == Tag_Unwind) return restarts;
-  u32 sc = scope_begin(vm);
-  Slot rS = scope_push(vm, restarts);  // root across allocations below
+  OT_SCOPE(vm);
+  Ref rS = ref_push(vm, restarts);  // root across allocations below
 
   // list them
   i64 count = 0;
   for (;; ++count) {
     Value name, desc;
-    {
-      u32 s2 = scope_begin(vm);
-      Slot r = scope_push(vm, array_get(slot_get(rS), count));
-      if (is_nil(slot_get(r))) {
-        scope_pop_to(vm, s2);
-        break;
-      }
-      u32 ab = vm->stack.len;
-      state_push(vm, slot_get(r));
-      name = call_named(vm, "restart-name", ab, 1);
-      state_pop_to(vm, ab);
-      state_push(vm, slot_get(r));
-      desc = call_named(vm, "restart-description", ab, 1);
-      scope_pop_to(vm, s2);
-    }
+    if (!describe_restart(vm, rS, count, &name, &desc)) break;
     // name is a symbol (immediate); desc is used with no allocation between
     // the call above and the prints below (Buf/print_display are C-heap only)
     Buf line = {0};
@@ -321,15 +322,15 @@ static Value repl_condition_handler(State* vm, u32 base, u32 argc) {
 
   if (count == 0) {
     fputs("(no active restarts)\n", stderr);
-    return scope_exit(vm, sc, nil_v());  // decline; condition unwinds to the REPL loop
+    return nil_v();  // decline; condition unwinds to the REPL loop
   }
 
   for (;;) {
     fputs("restart #? (or press enter to unwind) ", stderr);
     fflush(stderr);
     char buf[128];
-    if (!fgets(buf, sizeof buf, stdin)) return scope_exit(vm, sc, nil_v());
-    if (buf[0] == '\n') return scope_exit(vm, sc, nil_v());  // decline
+    if (!fgets(buf, sizeof buf, stdin)) return nil_v();
+    if (buf[0] == '\n') return nil_v();  // decline
     char* end = nullptr;
     long idx = strtol(buf, &end, 10);
     if (end == buf || idx < 0 || idx >= count) {
@@ -337,10 +338,10 @@ static Value repl_condition_handler(State* vm, u32 base, u32 argc) {
       continue;
     }
     u32 ib = vm->stack.len;
-    state_push(vm, array_get(slot_get(rS), idx));
+    state_push(vm, array_get(ref_get(vm, rS), idx));
     // invoke-restart with a restart value unwinds to exactly that restart;
     // the resulting Unwind propagates out of this handler and resumes there.
-    return scope_exit(vm, sc, call_named(vm, "invoke-restart", ib, 1));
+    return call_named(vm, "invoke-restart", ib, 1);
   }
 }
 
@@ -380,13 +381,13 @@ static int run_file(State* vm, const char* path) {
 // REPL
 
 typedef struct ReplEvalContext {
-  Slot pred;
-  Slot handler;
+  Ref pred;
+  Ref handler;
 } ReplEvalContext;
 
 static Value eval_repl_form(State* vm, Value form, void* data) {
   ReplEvalContext* context = (ReplEvalContext*)data;
-  Value pushed = state_push_handler(vm, slot_get(context->pred), slot_get(context->handler));
+  Value pushed = state_push_handler(vm, ref_get(vm, context->pred), ref_get(vm, context->handler));
   (void)pushed;
   Value result = eval_form(vm, form);
   state_pop_handler(vm);
@@ -473,10 +474,10 @@ static void run_repl(State* vm) {
   // Both natives stay rooted in these slots for the whole session; read them
   // through the slots at each install — a raw copy would go stale as soon as
   // an eval allocates.
-  Slot handlerFn = {
-      vm, state_push(vm, make_native(vm, "repl-condition-handler", repl_condition_handler))};
-  Slot predFn = {vm, state_push(vm, nil_v())};
-  slot_set(predFn, make_native(vm, "repl-any-pred", always_true_pred));
+  Ref handlerFn = {
+      state_push(vm, make_native(vm, "repl-condition-handler", repl_condition_handler))};
+  Ref predFn = {state_push(vm, nil_v())};
+  ref_set(vm, predFn, make_native(vm, "repl-any-pred", always_true_pred));
 
   Buf pending = {0};
   for (;;) {

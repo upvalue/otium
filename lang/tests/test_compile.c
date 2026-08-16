@@ -21,12 +21,12 @@ static State* compiler_state(u32 maxDepth) {
 static Value run_compiled(State* state, const char* source) {
   Reader reader;
   reader_init(&reader, state, source, (u32)strlen(source), "<compiler-test>");
-  u32 sc = scope_begin(state);
-  Slot form = scope_push(state, reader_next(&reader));
-  if (slot_get(form).tag == Tag_Unwind) return scope_exit(state, sc, slot_get(form));
-  Slot code = scope_push(state, compile_form(state, slot_get(form)));
-  if (slot_get(code).tag == Tag_Unwind) return scope_exit(state, sc, slot_get(code));
-  return scope_exit(state, sc, vm_execute_code(state, slot_get(code)));
+  OT_SCOPE(state);
+  Ref form = ref_push(state, reader_next(&reader));
+  if (ref_get(state, form).tag == Tag_Unwind) return ref_get(state, form);
+  Ref code = ref_push(state, compile_form(state, ref_get(state, form)));
+  if (ref_get(state, code).tag == Tag_Unwind) return ref_get(state, code);
+  return vm_execute_code(state, ref_get(state, code));
 }
 
 TEST(compiler_emits_literals_branches_and_short_circuit_forms) {
@@ -176,14 +176,13 @@ TEST(compiled_macros_retain_their_privileged_apply_path) {
   Value result = run_compiled(state, "(begin (defmacro vm-id (x) x) vm-id)");
   CHECK(result.tag == Tag_Macro);
   if (result.tag == Tag_Macro) {
-    u32 sc = scope_begin(state);
-    Slot macro = scope_push(state, result);
+    OT_SCOPE(state);
+    Ref macro = ref_push(state, result);
     u32 base = state->stack.len;
     state_push(state, int_v(5));
-    Value expanded = apply(state, slot_get(macro), base, 1);
+    Value expanded = apply(state, ref_get(state, macro), base, 1);
     CHECK(expanded.tag == Tag_Int);
     CHECK(expanded.i == 5);
-    scope_pop_to(state, sc);
   }
   state_destroy(state);
 }

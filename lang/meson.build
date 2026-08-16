@@ -1,15 +1,16 @@
 project('otium', 'c', 'cpp',
   version : '0.0.1',
-  default_options : ['c_std=c99', 'cpp_std=c++20', 'warning_level=2', 'werror=true'])
+  # Meson's own default buildtype is 'debug' (-O0), which made every benchmark
+  # figure recorded before this a measurement of unoptimized code. Default to
+  # -O2 with symbols; override with -Dbuildtype=debug when stepping through.
+  default_options : ['c_std=c99', 'cpp_std=c++20', 'warning_level=2', 'werror=true',
+                     'buildtype=debugoptimized'])
 
 add_project_arguments('-Wshadow', language : 'cpp')
 
 # Runtime library: no exceptions, no RTTI (only the lib — doctest needs
 # exceptions on in the test binary).
 lib_args = ['-fno-exceptions', '-fno-rtti']
-if get_option('gc_stress')
-  lib_args += ['-DOT_GC_STRESS']
-endif
 cpp = meson.get_compiler('cpp')
 has_computed_goto = cpp.compiles('''
   int main() {
@@ -97,8 +98,7 @@ otium = executable('otium',
   link_with : otium_links)
 
 # Test binary: doctest (vendored single header at tests/doctest.h),
-# exceptions ON (meson default), gc_stress flag still applies to the
-# lib objects it links.
+# exceptions ON (meson default).
 test_sources = files(
   'tests/main.cpp',
   'tests/test_substrate.cpp',
@@ -111,10 +111,9 @@ test_sources = files(
 otium_tests = executable('otium-tests',
   test_sources,
   include_directories : [lib_inc, include_directories('tests')],
-  cpp_args : get_option('gc_stress') ? ['-DOT_GC_STRESS'] : [],
   link_with : libotium)
 
-test_timeout = get_option('gc_stress') ? 300 : 30
+test_timeout = 30
 test('otium-tests', otium_tests, timeout : test_timeout)
 
 cli_tests = find_program('tests/test_cli.py')

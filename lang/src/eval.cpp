@@ -655,7 +655,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
       if (h == S.ns_) {
         if (!pairp(args) || car_(args).tag != Tag::Symbol) RET(raise_error(vm, "ns: bad form"));
         ns_switch(vm, car_(args).id);
-        ARGS = cdr_(args);  // clause cursor (require_spec allocates)
+        ARGS = cdr_(ARGS);  // clause cursor (require_spec allocates)
         Scope s(vm);
         Slot spS = s.push();  // spec cursor
         while (pairp(ARGS)) {

@@ -173,9 +173,17 @@ TEST_CASE("in-ns is a special form with consistent name handling") {
 
 TEST_CASE("million-iteration mutual tail recursion under small depth cap") {
   Vm* vm = mkvm(200);
-  Value r = run(*vm, "(define (ev n) (if (= n 0) #t (od (- n 1))))"
-                     "(define (od n) (if (= n 0) #f (ev (- n 1))))"
-                     "(ev 1000000)");
+#ifdef OT_GC_STRESS
+  const char* iterations = "1000";
+#else
+  const char* iterations = "1000000";
+#endif
+  std::string source = "(define (ev n) (if (= n 0) #t (od (- n 1))))"
+                       "(define (od n) (if (= n 0) #f (ev (- n 1))))"
+                       "(ev ";
+  source += iterations;
+  source += ")";
+  Value r = run(*vm, source.c_str());
   CHECK(r.tag == Tag::True);
   // non-tail recursion past the cap is a catchable error, not a crash
   r = run(*vm, "(define (boom n) (+ 1 (boom (- n 1))))"

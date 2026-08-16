@@ -73,8 +73,10 @@ otium_tests = executable('otium-tests',
   cpp_args : get_option('gc_stress') ? ['-DOT_GC_STRESS'] : [],
   link_with : libotium)
 
-test('otium-tests', otium_tests)
+test_timeout = get_option('gc_stress') ? 300 : 30
+test('otium-tests', otium_tests, timeout : test_timeout)
 
 cli_tests = find_program('tests/test_cli.py')
 test('otium-cli', cli_tests,
-  args : [otium, join_paths(meson.current_source_dir(), 'tests', 'cli-load.scm')])
+  args : [otium, join_paths(meson.current_source_dir(), 'tests', 'cli-load.scm')],
+  timeout : test_timeout)

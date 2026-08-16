@@ -69,24 +69,25 @@ static Value nat_substring(State* vm, u32 base, u32 argc) {
 static Value nat_string_split(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "string-split", argc, 1, 2));
   OT_TRY(need_string(vm, "string-split", ARG(0)));
-  u32 sc = scope_begin(vm);
-  Slot out = scope_push(vm, make_array(vm, 8));
+  OT_SCOPE(vm);
+  Ref out = ref_push(vm, make_array(vm, 8));
   // Fetch source pointers only after the array alloc above — and re-fetch
   // after every subsequent allocation.
   StringData* s = as_string(ARG(0));
   const char* p = string_data_bytes(s);
   u32 n = s->len;
   if (argc == 2) {
-    OT_TRYS(vm, sc, need_string(vm, "string-split", ARG(1)));
+    Value check = need_string(vm, "string-split", ARG(1));
+    if (check.tag == Tag_Unwind) return check;
     StringData* sep = as_string(ARG(1));
-    if (sep->len == 0) return scope_exit(vm, sc, raise_error(vm, "string-split: empty separator"));
+    if (sep->len == 0) return raise_error(vm, "string-split: empty separator");
     // re-fetch pointers after each allocation: make_string_from may GC-move
     // objects (it roots the source internally; out is re-read from its slot).
     u32 start = 0, i = 0;
     while (i + sep->len <= n) {
       if (memcmp(p + i, string_data_bytes(sep), sep->len) == 0) {
         Value piece = make_string_from(vm, ARG(0), start, i - start);
-        array_push(vm, slot_get(out), piece);
+        array_push(vm, ref_get(vm, out), piece);
         s = as_string(ARG(0));
         sep = as_string(ARG(1));
         p = string_data_bytes(s);  // re-fetch
@@ -95,7 +96,7 @@ static Value nat_string_split(State* vm, u32 base, u32 argc) {
       } else i++;
     }
     Value piece = make_string_from(vm, ARG(0), start, n - start);
-    array_push(vm, slot_get(out), piece);
+    array_push(vm, ref_get(vm, out), piece);
   } else {
     u32 i = 0;
     while (i < n) {
@@ -104,23 +105,23 @@ static Value nat_string_split(State* vm, u32 base, u32 argc) {
       while (i < n && !ascii_whitespace((u8)p[i])) i++;
       if (i > start) {
         Value piece = make_string_from(vm, ARG(0), start, i - start);
-        array_push(vm, slot_get(out), piece);
+        array_push(vm, ref_get(vm, out), piece);
         s = as_string(ARG(0));
         p = string_data_bytes(s);  // re-fetch after alloc
       }
     }
   }
-  return scope_exit(vm, sc, slot_get(out));
+  return ref_get(vm, out);
 }
 
 static Value nat_string_join(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "string-join", argc, 2, 2));
   OT_TRY(need_string(vm, "string-join", ARG(0)));
-  u32 sc = scope_begin(vm);
-  Slot cursor = scope_push(vm, ARG(1));
-  Slot item = scope_push(vm, nil_v());
+  OT_SCOPE(vm);
+  Ref cursor = ref_push(vm, ARG(1));
+  Ref item = ref_push(vm, nil_v());
   SeqIter iter;
-  seq_iter_init(&iter, cursor);
+  seq_iter_init(&iter, vm, cursor);
   Buf out = {0};
   bool first = true;
   for (;;) {
@@ -128,18 +129,18 @@ static Value nat_string_join(State* vm, u32 base, u32 argc) {
     if (step == SeqStep_End) break;
     if (step != SeqStep_Item) {
       buf_deinit(&out);
-      return scope_exit(vm, sc, sequence_error(vm, "string-join", step));
+      return sequence_error(vm, "string-join", step);
     }
     if (!first) {
       StringData* sep = as_string(ARG(0));
       buf_append(&out, string_data_bytes(sep), sep->len);
     }
-    print_display(vm, slot_get(item), &out);
+    print_display(vm, ref_get(vm, item), &out);
     first = false;
   }
   Value r = make_string_buf(vm, &out);
   buf_deinit(&out);
-  return scope_exit(vm, sc, r);
+  return r;
 }
 
 static Value case_op(State* vm, u32 base, u32 argc, const char* who, bool up) {
@@ -336,15 +337,16 @@ static Value nat_name(State* vm, u32 base, u32 argc) {
 
 static Value nat_buffer(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "buffer", argc, 0, 1));
-  u32 sc = scope_begin(vm);
-  Slot b = scope_push(vm, make_buffer(vm));
+  OT_SCOPE(vm);
+  Ref b = ref_push(vm, make_buffer(vm));
   if (argc == 1) {
     Buf tmp = {0};
     print_display(vm, ARG(0), &tmp);
-    buf_append(&as_buffer(slot_get(b))->buf, tmp.data ? tmp.data : "", tmp.len);
+    // as_buffer is re-derived after print_display, which allocates.
+    buf_append(&as_buffer(ref_get(vm, b))->buf, tmp.data ? tmp.data : "", tmp.len);
     buf_deinit(&tmp);
   }
-  return scope_exit(vm, sc, slot_get(b));
+  return ref_get(vm, b);
 }
 
 static Value nat_buffer_push(State* vm, u32 base, u32 argc) {

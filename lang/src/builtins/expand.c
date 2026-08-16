@@ -24,44 +24,48 @@ static Value expand0(State* vm, Value form);
 
 static Value expand0_list(State* vm, Value l) {
   if (!pairp(l)) return l;
-  u32 sc = scope_begin(vm);
-  Slot lS = scope_push(vm, l);  // expand0 allocates; keep the cursor rooted
-  Value h = expand0(vm, car_(slot_get(lS)));
-  OT_TRYS(vm, sc, h);
-  Slot r = scope_push(vm, h);
-  Value t = expand0_list(vm, cdr_(slot_get(lS)));
-  OT_TRYS(vm, sc, t);
-  return scope_exit(vm, sc, make_pair(vm, slot_get(r), t));
+  OT_SCOPE(vm);
+  Ref lS = ref_push(vm, l);  // expand0 allocates; keep the cursor rooted
+  Value h = expand0(vm, car_(ref_get(vm, lS)));
+  if (h.tag == Tag_Unwind) return h;
+  Ref head = ref_push(vm, h);
+  Value t = expand0_list(vm, cdr_(ref_get(vm, lS)));
+  if (t.tag == Tag_Unwind) return t;
+  Ref tail = ref_push(vm, t);
+  return make_pair(vm, ref_get(vm, head), ref_get(vm, tail));
+}
+
+// Applies `macro` to the unevaluated argument forms of `form`. Its own function
+// so the scope guard does not nest inside expand0's loop.
+static Value apply_macro(State* vm, Value macro, Ref form) {
+  OT_SCOPE(vm);
+  Ref mslot = ref_push(vm, macro);
+  u32 base = vm->stack.len;
+  u32 argc = 0;
+  // state_push does not allocate, so walking the form while pushing is safe.
+  for (Value a = cdr_(ref_get(vm, form)); pairp(a); a = cdr_(a)) {
+    state_push(vm, car_(a));
+    argc++;
+  }
+  return apply(vm, ref_get(vm, mslot), base, argc);
 }
 
 static Value expand0(State* vm, Value form) {
+  OT_SCOPE(vm);
+  Ref cur = ref_push(vm, form);
   for (u32 guard = 0; guard < 1000; guard++) {
-    if (!pairp(form)) return form;
-    Value h = car_(form);
+    if (!pairp(ref_get(vm, cur))) return ref_get(vm, cur);
+    Value h = car_(ref_get(vm, cur));
     if (h.tag != Tag_Symbol) break;
-    if (h.id == vm->syms.quote_) return form;
+    if (h.id == vm->syms.quote_) return ref_get(vm, cur);
     Value var = ns_resolve_var(vm, h);
     if (is_nil(var) || var_value(var).tag != Tag_Macro) break;
-    // call the macro on the unevaluated argument forms (state_push doesn't
-    // allocate on the GC heap, so walking the form while pushing is safe)
-    Value r;
-    {
-      u32 sc = scope_begin(vm);
-      Slot mslot = scope_push(vm, var_value(var));
-      u32 base = vm->stack.len;
-      u32 argc = 0;
-      for (Value a = cdr_(form); pairp(a); a = cdr_(a)) {
-        state_push(vm, car_(a));
-        argc++;
-      }
-      r = apply(vm, slot_get(mslot), base, argc);
-      scope_pop_to(vm, sc);
-    }
+    Value r = apply_macro(vm, var_value(var), cur);
     OT_TRY(r);
-    form = r;  // re-expand the replacement
+    ref_set(vm, cur, r);  // re-expand the replacement
   }
   // recurse into subforms
-  return expand0_list(vm, form);
+  return expand0_list(vm, ref_get(vm, cur));
 }
 
 static Value nat_expander(State* vm, u32 base, u32 argc) {

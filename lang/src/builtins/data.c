@@ -382,38 +382,32 @@ static Value nat_cddr(State* vm, u32 base, u32 argc) {
 }
 
 static Value nat_list(State* vm, u32 base, u32 argc) {
-  u32 sc = scope_begin(vm);
-  Slot acc = scope_push(vm, null_v());
-  for (u32 i = argc; i-- > 0;) {
-    Value cell = make_pair(vm, ARG(i), slot_get(acc));
-    slot_set(acc, cell);
-  }
-  return scope_exit(vm, sc, slot_get(acc));
+  OT_SCOPE(vm);
+  Ref acc = ref_push(vm, null_v());
+  for (u32 i = argc; i-- > 0;) ref_set(vm, acc, make_pair(vm, ARG(i), ref_get(vm, acc)));
+  return ref_get(vm, acc);
 }
 
 static Value nat_append(State* vm, u32 base, u32 argc) {
-  u32 sc = scope_begin(vm);
-  Slot acc = scope_push(vm, null_v());
+  OT_SCOPE(vm);
+  Ref acc = ref_push(vm, null_v());
   for (u32 i = argc; i-- > 0;) {
     // reverse the i-th list onto a temp, then cons onto acc
-    Value lst = ARG(i);
-    if (lst.tag != Tag_Null && lst.tag != Tag_Pair)
-      return scope_exit(vm, sc, raise_error(vm, "append: expected proper list"));
-    // collect elements onto the VM stack (a GC root — a C-heap vec's copies
-    // would go stale when make_pair below collects)
+    if (ARG(i).tag != Tag_Null && ARG(i).tag != Tag_Pair)
+      return raise_error(vm, "append: expected proper list");
+    // Elements are collected onto the VM stack, which is a GC root: copies in a
+    // C-heap vec would go stale when make_pair below collects.
     u32 ebase = vm->stack.len;
-    for (Value p = lst; p.tag != Tag_Null;) {  // no allocation in this walk
-      if (p.tag != Tag_Pair) return scope_exit(vm, sc, raise_error(vm, "append: improper list"));
+    for (Value p = ARG(i); p.tag != Tag_Null;) {  // no allocation in this walk
+      if (p.tag != Tag_Pair) return raise_error(vm, "append: improper list");
       state_push(vm, as_pair(p)->car);
       p = as_pair(p)->cdr;
     }
-    for (u32 j = vm->stack.len; j-- > ebase;) {
-      Value cell = make_pair(vm, vm->stack.data[j], slot_get(acc));
-      slot_set(acc, cell);
-    }
+    for (u32 j = vm->stack.len; j-- > ebase;)
+      ref_set(vm, acc, make_pair(vm, vm->stack.data[j], ref_get(vm, acc)));
     state_pop_to(vm, ebase);
   }
-  return scope_exit(vm, sc, slot_get(acc));
+  return ref_get(vm, acc);
 }
 
 static Value nat_length(State* vm, u32 base, u32 argc) {
@@ -446,25 +440,25 @@ static Value nat_reverse(State* vm, u32 base, u32 argc) {
   if (is_nil(v)) return nil_v();  // kind-preserving: nothing to preserve
   if (v.tag == Tag_Null) return null_v();
   if (v.tag == Tag_Pair) {
-    u32 sc = scope_begin(vm);
-    Slot acc = scope_push(vm, null_v());
-    Slot p = scope_push(vm, v);  // cursor, rooted across make_pair
-    while (slot_get(p).tag != Tag_Null) {
-      if (slot_get(p).tag != Tag_Pair)
-        return scope_exit(vm, sc, raise_error(vm, "reverse: improper list"));
-      Value cell = make_pair(vm, as_pair(slot_get(p))->car, slot_get(acc));
-      slot_set(acc, cell);
-      slot_set(p, as_pair(slot_get(p))->cdr);
+    OT_SCOPE(vm);
+    Ref acc = ref_push(vm, null_v());
+    Ref p = ref_push(vm, v);  // cursor, rooted across make_pair
+    while (ref_get(vm, p).tag != Tag_Null) {
+      if (ref_get(vm, p).tag != Tag_Pair) return raise_error(vm, "reverse: improper list");
+      Value cell = make_pair(vm, as_pair(ref_get(vm, p))->car, ref_get(vm, acc));
+      ref_set(vm, acc, cell);
+      ref_set(vm, p, as_pair(ref_get(vm, p))->cdr);
     }
-    return scope_exit(vm, sc, slot_get(acc));
+    return ref_get(vm, acc);
   }
   if (v.tag == Tag_Array) {
-    u32 sc = scope_begin(vm);
-    Slot out = scope_push(vm, make_array(vm, as_array(ARG(0))->len));
-    // re-read: make_array collected; cached across array_push only (alloc-free)
-    ArrayData* src = as_array(ARG(0));
-    for (u32 i = src->len; i-- > 0;) array_push(vm, slot_get(out), src->items[i]);
-    return scope_exit(vm, sc, slot_get(out));
+    OT_SCOPE(vm);
+    Ref out = ref_push(vm, make_array(vm, as_array(ARG(0))->len));
+    // The source is re-derived from its rooted arg slot every iteration:
+    // array_push allocates once array storage is GC-owned.
+    for (u32 i = as_array(ARG(0))->len; i-- > 0;)
+      array_push(vm, ref_get(vm, out), as_array(ARG(0))->items[i]);
+    return ref_get(vm, out);
   }
   return raise_error(vm, "reverse: expected sequence");
 }
@@ -473,43 +467,44 @@ static Value nat_list_to_array(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "list->array", argc, 1, 1));
   Value v = ARG(0);
   if (v.tag != Tag_Null && v.tag != Tag_Pair) return raise_error(vm, "list->array: expected list");
-  u32 sc = scope_begin(vm);
-  Slot out = scope_push(vm, make_array(vm, 8));
-  // re-read the list from its rooted arg slot: make_array collected
-  for (Value p = ARG(0); p.tag != Tag_Null; p = as_pair(p)->cdr) {
-    if (p.tag != Tag_Pair) return scope_exit(vm, sc, raise_error(vm, "list->array: improper list"));
-    array_push(vm, slot_get(out), as_pair(p)->car);  // no GC allocation in this loop
+  OT_SCOPE(vm);
+  Ref out = ref_push(vm, make_array(vm, 8));
+  // The cursor is rooted rather than raw: array_push allocates once array
+  // storage is GC-owned, which would move the rest of the list.
+  Ref p = ref_push(vm, ARG(0));
+  while (ref_get(vm, p).tag != Tag_Null) {
+    if (ref_get(vm, p).tag != Tag_Pair) return raise_error(vm, "list->array: improper list");
+    array_push(vm, ref_get(vm, out), as_pair(ref_get(vm, p))->car);
+    ref_set(vm, p, as_pair(ref_get(vm, p))->cdr);
   }
-  return scope_exit(vm, sc, slot_get(out));
+  return ref_get(vm, out);
 }
 
 static Value nat_array_to_list(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "array->list", argc, 1, 1));
   OT_TRY(need_array(vm, "array->list", ARG(0)));
-  u32 sc = scope_begin(vm);
-  Slot acc = scope_push(vm, null_v());
+  OT_SCOPE(vm);
+  Ref acc = ref_push(vm, null_v());
   // re-read the array through its rooted arg slot every iteration: each
   // make_pair can collect and move it
-  for (u32 i = as_array(ARG(0))->len; i-- > 0;) {
-    Value cell = make_pair(vm, as_array(ARG(0))->items[i], slot_get(acc));
-    slot_set(acc, cell);
-  }
-  return scope_exit(vm, sc, slot_get(acc));
+  for (u32 i = as_array(ARG(0))->len; i-- > 0;)
+    ref_set(vm, acc, make_pair(vm, as_array(ARG(0))->items[i], ref_get(vm, acc)));
+  return ref_get(vm, acc);
 }
 
 static Value nat_array(State* vm, u32 base, u32 argc) {
-  u32 sc = scope_begin(vm);
-  Slot out = scope_push(vm, make_array(vm, argc ? argc : 4));
-  for (u32 i = 0; i < argc; i++) array_push(vm, slot_get(out), ARG(i));
-  return scope_exit(vm, sc, slot_get(out));
+  OT_SCOPE(vm);
+  Ref out = ref_push(vm, make_array(vm, argc ? argc : 4));
+  for (u32 i = 0; i < argc; i++) array_push(vm, ref_get(vm, out), ARG(i));
+  return ref_get(vm, out);
 }
 
 static Value nat_table(State* vm, u32 base, u32 argc) {
   if (argc % 2 != 0) return raise_error(vm, "table: odd argument count");
-  u32 sc = scope_begin(vm);
-  Slot t = scope_push(vm, make_table(vm));
-  for (u32 i = 0; i < argc; i += 2) table_put(vm, slot_get(t), ARG(i), ARG(i + 1));
-  return scope_exit(vm, sc, slot_get(t));
+  OT_SCOPE(vm);
+  Ref t = ref_push(vm, make_table(vm));
+  for (u32 i = 0; i < argc; i += 2) table_put(vm, ref_get(vm, t), ARG(i), ARG(i + 1));
+  return ref_get(vm, t);
 }
 
 // String code-point index -> one-character string, or nil.
@@ -543,10 +538,10 @@ static Value do_get(State* vm, Value coll, Value key, Value dflt) {
     case Tag_String:
       if (key.tag == Tag_Int) {
         // string_char_at allocates — root dflt across it
-        u32 sc = scope_begin(vm);
-        Slot dS = scope_push(vm, dflt);
+        OT_SCOPE(vm);
+        Ref dS = ref_push(vm, dflt);
         r = string_char_at(vm, coll, key.i);
-        return scope_exit(vm, sc, is_nil(r) ? slot_get(dS) : r);
+        return is_nil(r) ? ref_get(vm, dS) : r;
       }
       break;
     default: return raise_error(vm, "get: unsupported collection type");
@@ -600,37 +595,43 @@ static Value nat_update(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "update!", argc, 3, UINT32_MAX));
   Value cur;
   OT_TRY(cur = do_get(vm, ARG(0), ARG(1), nil_v()));
-  u32 sc = scope_begin(vm);
+  OT_SCOPE(vm);
   u32 cbase = state_push(vm, cur);
   for (u32 i = 3; i < argc; i++) state_push(vm, ARG(i));
   Value nv = apply(vm, ARG(2), cbase, argc - 2);  // re-read fn: do_get may have collected
-  OT_TRYS(vm, sc, nv);
-  OT_TRYS(vm, sc, do_put(vm, ARG(0), ARG(1), nv));  // re-read; do_put is alloc-free with nv
-  return scope_exit(vm, sc, ARG(0));
+  if (nv.tag == Tag_Unwind) return nv;
+  Ref newValue = ref_push(vm, nv);
+  Value stored = do_put(vm, ARG(0), ARG(1), ref_get(vm, newValue));
+  if (stored.tag == Tag_Unwind) return stored;
+  return ARG(0);
 }
 
 static Value nat_keys(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "keys", argc, 1, 1));
   if (is_nil(ARG(0))) return make_array(vm, 8);
   if (ARG(0).tag != Tag_Table) return raise_error(vm, "keys: expected table");
-  u32 sc = scope_begin(vm);
-  Slot out = scope_push(vm, make_array(vm, 8));
-  TableData* t = as_table(ARG(0));  // cached across array_push only (alloc-free)
-  for (u32 i = 0; i < t->entriesLen; i++)
-    if (!is_tomb(&t->entries[i])) array_push(vm, slot_get(out), t->entries[i].key);
-  return scope_exit(vm, sc, slot_get(out));
+  OT_SCOPE(vm);
+  Ref out = ref_push(vm, make_array(vm, 8));
+  // The table is re-derived from its rooted arg slot every iteration:
+  // array_push allocates once array storage is GC-owned.
+  for (u32 i = 0; i < as_table(ARG(0))->entriesLen; i++) {
+    if (is_tomb(&as_table(ARG(0))->entries[i])) continue;
+    array_push(vm, ref_get(vm, out), as_table(ARG(0))->entries[i].key);
+  }
+  return ref_get(vm, out);
 }
 
 static Value nat_values(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "values", argc, 1, 1));
   if (is_nil(ARG(0))) return make_array(vm, 8);
   if (ARG(0).tag != Tag_Table) return raise_error(vm, "values: expected table");
-  u32 sc = scope_begin(vm);
-  Slot out = scope_push(vm, make_array(vm, 8));
-  TableData* t = as_table(ARG(0));  // cached across array_push only (alloc-free)
-  for (u32 i = 0; i < t->entriesLen; i++)
-    if (!is_tomb(&t->entries[i])) array_push(vm, slot_get(out), t->entries[i].val);
-  return scope_exit(vm, sc, slot_get(out));
+  OT_SCOPE(vm);
+  Ref out = ref_push(vm, make_array(vm, 8));
+  for (u32 i = 0; i < as_table(ARG(0))->entriesLen; i++) {
+    if (is_tomb(&as_table(ARG(0))->entries[i])) continue;
+    array_push(vm, ref_get(vm, out), as_table(ARG(0))->entries[i].val);
+  }
+  return ref_get(vm, out);
 }
 
 static Value nat_copy(State* vm, u32 base, u32 argc) {
@@ -638,22 +639,21 @@ static Value nat_copy(State* vm, u32 base, u32 argc) {
   Value v = ARG(0);
   if (is_nil(v)) return nil_v();  // kind-preserving over absence
   if (v.tag == Tag_Array) {
-    u32 sc = scope_begin(vm);
-    Slot out = scope_push(vm, make_array(vm, as_array(v)->len));
-    // re-read: make_array collected; cached across array_push only (alloc-free)
-    ArrayData* a = as_array(ARG(0));
-    for (u32 i = 0; i < a->len; i++) array_push(vm, slot_get(out), a->items[i]);
-    return scope_exit(vm, sc, slot_get(out));
+    OT_SCOPE(vm);
+    Ref out = ref_push(vm, make_array(vm, as_array(v)->len));
+    for (u32 i = 0; i < as_array(ARG(0))->len; i++)
+      array_push(vm, ref_get(vm, out), as_array(ARG(0))->items[i]);
+    return ref_get(vm, out);
   }
   if (v.tag == Tag_Table) {
-    u32 sc = scope_begin(vm);
-    Slot out = scope_push(vm, make_table(vm));
-    // re-read: make_table collected; cached across table_put only (alloc-free)
-    TableData* t = as_table(ARG(0));
-    for (u32 i = 0; i < t->entriesLen; i++)
-      if (!is_tomb(&t->entries[i]))
-        table_put(vm, slot_get(out), t->entries[i].key, t->entries[i].val);
-    return scope_exit(vm, sc, slot_get(out));
+    OT_SCOPE(vm);
+    Ref out = ref_push(vm, make_table(vm));
+    for (u32 i = 0; i < as_table(ARG(0))->entriesLen; i++) {
+      if (is_tomb(&as_table(ARG(0))->entries[i])) continue;
+      table_put(vm, ref_get(vm, out), as_table(ARG(0))->entries[i].key,
+                as_table(ARG(0))->entries[i].val);
+    }
+    return ref_get(vm, out);
   }
   return raise_error(vm, "copy: expected array, table, or nil");
 }

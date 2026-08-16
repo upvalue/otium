@@ -2,10 +2,13 @@
 #include "../builtins.h"
 
 static Value list_from_stack(State* vm, u32 base, u32 n) {
-  u32 sc = scope_begin(vm);
-  Slot acc = scope_push(vm, null_v());
-  for (u32 j = n; j-- > 0;) slot_set(acc, make_pair_slots(vm, (Slot){vm, base + j}, acc));
-  return scope_exit(vm, sc, slot_get(acc));
+  OT_SCOPE(vm);
+  Ref acc = ref_push(vm, null_v());
+  // Both operands are read at the call, out of rooted slots, so make_pair
+  // moving either of them is harmless.
+  for (u32 j = n; j-- > 0;)
+    ref_set(vm, acc, make_pair(vm, vm->stack.data[base + j], ref_get(vm, acc)));
+  return ref_get(vm, acc);
 }
 
 static Value build_condition(State* vm, const char* who, u32 base, u32 argc) {
@@ -15,16 +18,17 @@ static Value build_condition(State* vm, const char* who, u32 base, u32 argc) {
     if (argc > 1) return raise_error(vm, "extra arguments after a non-string condition");
     return first;
   }
-  u32 sc = scope_begin(vm);
-  Slot c = scope_push(vm, make_table(vm));
-  table_put(vm, slot_get(c), keyword_v(vm->syms.kwType), symbol_v(vm->syms.error_));
-  table_put(vm, slot_get(c), keyword_v(vm->syms.kwMessage), vm->stack.data[base]);
+  OT_SCOPE(vm);
+  Ref c = ref_push(vm, make_table(vm));
+  table_put(vm, ref_get(vm, c), keyword_v(vm->syms.kwType), symbol_v(vm->syms.error_));
+  table_put(vm, ref_get(vm, c), keyword_v(vm->syms.kwMessage), vm->stack.data[base]);
   if (argc > 1) {
-    Slot data = scope_push(vm, make_array(vm, argc - 1));
-    for (u32 i = 1; i < argc; i++) array_push(vm, slot_get(data), vm->stack.data[base + i]);
-    table_put(vm, slot_get(c), keyword_v(vm->syms.kwData), slot_get(data));
+    Ref data = ref_push(vm, make_array(vm, argc - 1));
+    for (u32 i = 1; i < argc; i++)
+      array_push(vm, ref_get(vm, data), vm->stack.data[base + i]);
+    table_put(vm, ref_get(vm, c), keyword_v(vm->syms.kwData), ref_get(vm, data));
   }
-  return scope_exit(vm, sc, slot_get(c));
+  return ref_get(vm, c);
 }
 
 static Value nat_signal(State* vm, u32 base, u32 argc) {
@@ -74,11 +78,11 @@ static Value nat_invoke_restart(State* vm, u32 base, u32 argc) {
 static Value nat_compute_restarts(State* vm, u32 base, u32 argc) {
   (void)base;
   OT_TRY(need_argc(vm, "compute-restarts", argc, 0, 0));
-  u32 sc = scope_begin(vm);
-  Slot arr = scope_push(vm, make_array(vm, vm->restarts.len));
+  OT_SCOPE(vm);
+  Ref arr = ref_push(vm, make_array(vm, vm->restarts.len));
   for (u32 i = vm->restarts.len; i-- > 0;)                        // innermost first
-    array_push(vm, slot_get(arr), vm->restarts.data[i].restart);  // alloc-free
-  return scope_exit(vm, sc, slot_get(arr));
+    array_push(vm, ref_get(vm, arr), vm->restarts.data[i].restart);
+  return ref_get(vm, arr);
 }
 
 static Value nat_find_restart(State* vm, u32 base, u32 argc) {

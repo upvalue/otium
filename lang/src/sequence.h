@@ -16,21 +16,24 @@ typedef enum SeqKind : u8 {
   SeqKind_Array,
 } SeqKind;
 
-// The caller owns both slots for the iterator's lifetime. Keeping the cursor
+// The caller owns both handles for the iterator's lifetime. Keeping the cursor
 // and current item on the VM stack makes them safe across a moving collection.
+// Ref is a bare index, so the iterator carries the State it indexes into.
 typedef struct SeqIter {
-  Slot cursor;
+  State* vm;
+  Ref cursor;
   u32 index;
   u32 limit;
   SeqKind kind;
 } SeqIter;
 
-static inline void seq_iter_init(SeqIter* it, Slot rootedSequence) {
+static inline void seq_iter_init(SeqIter* it, State* vm, Ref rootedSequence) {
+  it->vm = vm;
   it->cursor = rootedSequence;
   it->index = 0;
   it->limit = 0;
   it->kind = SeqKind_Invalid;
-  Value seq = slot_get(it->cursor);
+  Value seq = ref_get(vm, it->cursor);
   if (seq.tag == Tag_Array) {
     it->kind = SeqKind_Array;
     it->limit = as_array(seq)->len;
@@ -41,26 +44,28 @@ static inline void seq_iter_init(SeqIter* it, Slot rootedSequence) {
   }
 }
 
-static inline SeqStep seq_iter_next(SeqIter* it, Slot item) {
+static inline SeqStep seq_iter_next(SeqIter* it, Ref item) {
   switch (it->kind) {
     case SeqKind_Empty: return SeqStep_End;
     case SeqKind_Invalid: return SeqStep_NotSequence;
     case SeqKind_Array: {
       if (it->index >= it->limit) return SeqStep_End;
-      ArrayData* array = as_array(slot_get(it->cursor));
+      // Re-derived from the rooted cursor on every step: a callback between
+      // steps can allocate and move the backing store.
+      ArrayData* array = as_array(ref_get(it->vm, it->cursor));
       // for-each historically snapshots the length and uses get for each
       // index, so shrinking during a callback yields nil for removed slots.
-      slot_set(item, it->index < array->len ? array->items[it->index] : nil_v());
+      ref_set(it->vm, item, it->index < array->len ? array->items[it->index] : nil_v());
       it->index++;
       return SeqStep_Item;
     }
     case SeqKind_List: {
-      Value cursor = slot_get(it->cursor);
+      Value cursor = ref_get(it->vm, it->cursor);
       if (cursor.tag == Tag_Null) return SeqStep_End;
       if (cursor.tag != Tag_Pair) return SeqStep_Improper;
       PairData* pair = as_pair(cursor);
-      slot_set(item, pair->car);
-      slot_set(it->cursor, pair->cdr);
+      ref_set(it->vm, item, pair->car);
+      ref_set(it->vm, it->cursor, pair->cdr);
       return SeqStep_Item;
     }
   }

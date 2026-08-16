@@ -14,10 +14,10 @@
 // def_native — wrap a NativeFn in a Function object, define it in currentNs.
 
 void def_native(State* vm, const char* name, NativeFn f) {
-  u32 sc = scope_begin(vm);
-  Slot native = scope_push(vm, make_native(vm, name, f));
-  ns_define(vm, intern_id(&vm->intern, name, (u32)strlen(name)), slot_get(native), false, nil_v());
-  scope_pop_to(vm, sc);
+  OT_SCOPE(vm);
+  Ref native = ref_push(vm, make_native(vm, name, f));
+  ns_define(vm, intern_id(&vm->intern, name, (u32)strlen(name)), ref_get(vm, native), false,
+            nil_v());
 }
 
 // ---------------------------------------------------------------------------
@@ -159,41 +159,43 @@ static Value nat_quit(State* vm, u32 base, u32 argc) {
 
 static Value nat_apply(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "apply", argc, 2, UINT32_MAX));
-  u32 sc = scope_begin(vm);
-  Slot cursor = scope_push(vm, ARG(argc - 1));
-  Slot item = scope_push(vm, nil_v());
+  OT_SCOPE(vm);
+  Ref cursor = ref_push(vm, ARG(argc - 1));
+  Ref item = ref_push(vm, nil_v());
   SeqIter iter;
-  seq_iter_init(&iter, cursor);
+  seq_iter_init(&iter, vm, cursor);
   u32 argBase = vm->stack.len;
   for (u32 i = 1; i + 1 < argc; i++) state_push(vm, ARG(i));
   for (;;) {
     SeqStep step = seq_iter_next(&iter, item);
     if (step == SeqStep_End) break;
-    if (step != SeqStep_Item) return scope_exit(vm, sc, sequence_error(vm, "apply", step));
-    state_push(vm, slot_get(item));
+    if (step != SeqStep_Item) return sequence_error(vm, "apply", step);
+    state_push(vm, ref_get(vm, item));
   }
-  return scope_exit(vm, sc, apply(vm, ARG(0), argBase, vm->stack.len - argBase));
+  return apply(vm, ARG(0), argBase, vm->stack.len - argBase);
+}
+
+// One-argument callback in its own scope: a second OT_SCOPE inside nat_for_each
+// would shadow the first.
+static Value call_with_item(State* vm, Value fn, Ref item) {
+  OT_SCOPE(vm);
+  Ref arg = ref_push(vm, ref_get(vm, item));
+  return apply(vm, fn, arg.i, 1);
 }
 
 static Value nat_for_each(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "for-each", argc, 2, 2));
-  u32 sc = scope_begin(vm);
-  Slot cursor = scope_push(vm, ARG(1));
-  Slot item = scope_push(vm, nil_v());
+  OT_SCOPE(vm);
+  Ref cursor = ref_push(vm, ARG(1));
+  Ref item = ref_push(vm, nil_v());
   SeqIter iter;
-  seq_iter_init(&iter, cursor);
+  seq_iter_init(&iter, vm, cursor);
   for (;;) {
     SeqStep step = seq_iter_next(&iter, item);
-    if (step == SeqStep_End) return scope_exit(vm, sc, nil_v());
-    if (step != SeqStep_Item) return scope_exit(vm, sc, sequence_error(vm, "for-each", step));
-    Value result;
-    {
-      u32 call = scope_begin(vm);
-      scope_push(vm, slot_get(item));
-      result = apply(vm, ARG(0), call, 1);
-      scope_pop_to(vm, call);
-    }
-    OT_TRYS(vm, sc, result);
+    if (step == SeqStep_End) return nil_v();
+    if (step != SeqStep_Item) return sequence_error(vm, "for-each", step);
+    Value result = call_with_item(vm, ARG(0), item);
+    if (result.tag == Tag_Unwind) return result;
   }
 }
 
@@ -225,19 +227,19 @@ static Value nat_read_string(State* vm, u32 base, u32 argc) {
   }
   // Reader returns nil for both EOF and a nil literal, so only a zero-byte
   // source can be identified as empty here.
-  u32 sc = scope_begin(vm);
-  Slot formS = scope_push(vm, form);
+  OT_SCOPE(vm);
+  Ref formS = ref_push(vm, form);
   Value trailing = reader_next(&r);
   if (trailing.tag == Tag_Unwind) {
     buf_deinit(&src);
-    return scope_exit(vm, sc, trailing);
+    return trailing;
   }
   if (!reader_at_eof(&r)) {
     buf_deinit(&src);
-    return scope_exit(vm, sc, raise_error(vm, "read-string: trailing input"));
+    return raise_error(vm, "read-string: trailing input");
   }
   buf_deinit(&src);
-  return scope_exit(vm, sc, slot_get(formS));
+  return ref_get(vm, formS);
 }
 
 // If form is (sym args...) and sym resolves to a macro, expand once.
@@ -247,28 +249,28 @@ static Value expand_once(State* vm, Value form, bool* expanded) {
   if (form.tag != Tag_Pair) return form;
   Value head = as_pair(form)->car;
   if (head.tag != Tag_Symbol) return form;
-  u32 sc = scope_begin(vm);
-  Slot formS = scope_push(vm, form);  // ns_resolve allocates
+  OT_SCOPE(vm);
+  Ref formS = ref_push(vm, form);  // ns_resolve allocates
   Value callee = ns_resolve(vm, head);
   if (callee.tag == Tag_Unwind) {
     // unresolvable head is not a macro call; swallow the unwind
     state_cancel_unwind(vm);
-    return scope_exit(vm, sc, slot_get(formS));
+    return ref_get(vm, formS);
   }
-  if (callee.tag != Tag_Macro) return scope_exit(vm, sc, slot_get(formS));
+  if (callee.tag != Tag_Macro) return ref_get(vm, formS);
   // push unevaluated argument forms and call the macro (state_push doesn't
   // allocate on the GC heap, so walking the form while pushing is safe)
-  Slot calleeS = scope_push(vm, callee);
+  Ref calleeS = ref_push(vm, callee);
   u32 cbase = vm->stack.len;
   u32 n = 0;
-  for (Value p = as_pair(slot_get(formS))->cdr; p.tag == Tag_Pair; p = as_pair(p)->cdr) {
+  for (Value p = as_pair(ref_get(vm, formS))->cdr; p.tag == Tag_Pair; p = as_pair(p)->cdr) {
     state_push(vm, as_pair(p)->car);
     n++;
   }
-  Value r = apply(vm, slot_get(calleeS), cbase, n);
-  if (r.tag == Tag_Unwind) return scope_exit(vm, sc, r);
+  Value r = apply(vm, ref_get(vm, calleeS), cbase, n);
+  if (r.tag == Tag_Unwind) return r;
   *expanded = true;
-  return scope_exit(vm, sc, r);
+  return r;
 }
 
 static Value nat_macroexpand_1(State* vm, u32 base, u32 argc) {
@@ -279,13 +281,13 @@ static Value nat_macroexpand_1(State* vm, u32 base, u32 argc) {
 
 static Value nat_macroexpand(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "macroexpand", argc, 1, 1));
-  u32 sc = scope_begin(vm);
-  Slot formS = scope_push(vm, ARG(0));
+  OT_SCOPE(vm);
+  Ref formS = ref_push(vm, ARG(0));
   for (;;) {
     bool e;
-    Value next = expand_once(vm, slot_get(formS), &e);
-    if (next.tag == Tag_Unwind || !e) return scope_exit(vm, sc, next);
-    slot_set(formS, next);
+    Value next = expand_once(vm, ref_get(vm, formS), &e);
+    if (next.tag == Tag_Unwind || !e) return next;
+    ref_set(vm, formS, next);
   }
 }
 

@@ -1,7 +1,7 @@
 ;; prelude.scm -- the derived core (spec 10.x), loaded through the real
 ;; expander, so defmacro and everything native is available.
 ;;
-;; Natives assumed from STK-15: cons car cdr list append length reverse
+;; Runtime dependencies: cons car cdr list append length reverse for-each
 ;; get put! push! pop! keys values copy table array apply identity
 ;; arithmetic, comparisons, string natives (10.6), type predicates, not,
 ;; eq? equal?, error, condition-of-type?, gensym.
@@ -123,18 +123,6 @@
         ((buffer? coll) (= (length coll) 0))
         ((or (array? coll) (table? coll)) (= (length coll) 0))
         (else (error "empty?: unsupported type"))))
-
-(define (for-each f seq)
-  (if (array? seq)
-      (let ((i 0) (n (length seq)))
-        (while (< i n)
-          (f (get seq i))
-          (set! i (+ i 1))))
-      (let ((s (to-list seq)))
-        (while (pair? s)
-          (f (car s))
-          (set! s (cdr s)))))
-  nil)
 
 (define (map f seq)
   "Kind-preserving: list in, list out; array in, array out; nil -> ()."

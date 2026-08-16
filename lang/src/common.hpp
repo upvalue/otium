@@ -18,6 +18,19 @@ using i32 = int32_t;
 using i64 = int64_t;
 using f64 = double;
 
+inline bool ascii_whitespace(u8 c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
+
+// UTF-8 code points are counted as non-continuation bytes. Invalid input
+// therefore degrades to a byte-ish count rather than raising an error.
+inline u32 utf8_count(const char* bytes, u32 len) {
+  u32 count = 0;
+  for (u32 i = 0; i < len; i++)
+    if (((u8)bytes[i] & 0xC0) != 0x80) count++;
+  return count;
+}
+
 // Abort with a message. Host hook may replace this later.
 [[noreturn]] inline void ot_fatal(const char* msg) {
   fprintf(stderr, "otium fatal: %s\n", msg ? msg : "(null)");

@@ -12,6 +12,12 @@ static Value car_(Value v) { return as_pair(v)->car; }
 static Value cdr_(Value v) { return as_pair(v)->cdr; }
 static bool pairp(Value v) { return v.tag == Tag::Pair; }
 static bool sym_is(Value v, u32 id) { return v.tag == Tag::Symbol && v.id == id; }
+static bool has_leading_docstring(Value forms) {
+  return pairp(forms) && car_(forms).tag == Tag::String && pairp(cdr_(forms));
+}
+static Value strip_array_literal_head(Value forms, u32 arrayId) {
+  return pairp(forms) && sym_is(car_(forms), arrayId) ? cdr_(forms) : forms;
+}
 
 static Value quit_condition(Vm& vm) {
   Scope s(vm);
@@ -20,7 +26,7 @@ static Value quit_condition(Vm& vm) {
   return c.get();
 }
 
-static Value start_quit(Vm& vm) {
+Value start_quit(Vm& vm) {
   vm.unwindCondition = quit_condition(vm);
   vm.unwindKind = UnwindKind::Quit;
   return unwind_v();
@@ -83,7 +89,7 @@ static Value lookup_symbol(Vm& vm, Value sym, Value env) {
 
 static Value make_closure(Vm& vm, u32 name, Value params, Value body, Value env, bool macro) {
   Value doc = nil_v();
-  if (pairp(body) && car_(body).tag == Tag::String && pairp(cdr_(body))) {
+  if (has_leading_docstring(body)) {
     doc = car_(body);
     body = cdr_(body);
   }
@@ -133,7 +139,7 @@ static Value bind_param_list(Vm& vm, Value frame, Value ps, Value argsList) {
     frame_bind(vm, f.get(), pS.get(), aS.get());
     return nil_v();
   }
-  if (pairp(pS.get()) && sym_is(car_(pS.get()), vm.syms.array_)) pS.set(cdr_(pS.get()));
+  pS.set(strip_array_literal_head(pS.get(), vm.syms.array_));
   while (pairp(pS.get())) {
     Value p = car_(pS.get());  // param names are symbols: immediate, safe
     if (sym_is(p, vm.syms.amp_)) {
@@ -282,8 +288,7 @@ static Value qq(Vm& vm, Value t, int depth, Value env) {
   if (pairp(h) && sym_is(car_(h), vm.syms.unquoteSplicing_) && depth == 1) {
     Value lst = eval_in(vm, car_(cdr_(h)), env);
     OT_TRY(lst);
-    if (!pairp(lst) && lst.tag != Tag::Null)
-      return raise_error(vm, "unquote-splicing: not a list");
+    if (!pairp(lst) && lst.tag != Tag::Null) return raise_error(vm, "unquote-splicing: not a list");
     Slot r = s.push(lst);
     Value rest = qq(vm, cdr_(tS.get()), depth, eS.get());
     OT_TRY(rest);
@@ -303,7 +308,7 @@ static u32 name_id_of(Vm& vm, Value v) {  // symbol/keyword id; string interned;
   if (v.tag == Tag::Symbol || v.tag == Tag::Keyword) return v.id;
   if (v.tag == Tag::String) {
     StringData* s = as_string(v);
-    return vm.intern.intern((const char*)(s + 1), s->len);
+    return vm.intern.intern(string_bytes(s), s->len);
   }
   return 0;
 }
@@ -328,18 +333,7 @@ static Value require_load(Vm& vm, u32 nsName) {
   vm.loadingNs.push(nsName);
   u32 savedNs = vm.currentNs;
   ns_switch(vm, nsName);
-  Reader rd(vm, src.data, src.len, cname);
-  Value r = nil_v();
-  while (!rd.atEof()) {
-    Value f = rd.next();
-    if (f.tag == Tag::Unwind) {
-      r = f;
-      break;
-    }
-    if (rd.atEof()) break;
-    r = eval_form(vm, f);
-    if (r.tag == Tag::Unwind) break;
-  }
+  Value r = eval_source(vm, src.data, src.len, cname);
   vm.currentNs = savedNs;
   vm.loadingNs.pop();
   if (r.tag == Tag::Unwind) return r;
@@ -372,7 +366,7 @@ static Value require_spec(Vm& vm, Value spec) {
       optS.set(cdr_(optS.get()));
       if (!pairp(optS.get())) return raise_error(vm, "require: :refer needs a list");
       Value names = unwrap_quote(vm, car_(optS.get()));
-      if (pairp(names) && sym_is(car_(names), vm.syms.array_)) names = cdr_(names);
+      names = strip_array_literal_head(names, vm.syms.array_);
       Value tgt = ns_lookup(vm, target);
       // table_put/table_get never touch the GC heap, so this walk is safe
       // (raise_error below allocates, but only on the return-out path)
@@ -380,9 +374,7 @@ static Value require_spec(Vm& vm, Value spec) {
         Value sym = car_(n);
         Value var = table_get(vm, ns_field(vm, tgt, vm.syms.kwVars), sym);
         if (is_nil(var) || var_private(var)) {
-          u32 l;
-          const char* s = vm.intern.name(sym.id, &l);
-          return raise_error(vm, "cannot refer %.*s", (int)l, s);
+          return raise_error_sym(vm, "cannot refer %.*s", sym.id);
         }
         table_put(vm, ns_field(vm, curS.get(), vm.syms.kwRefers), sym, var);
         tgt = ns_lookup(vm, target);
@@ -472,14 +464,14 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         if (pairp(target)) {  // (define (name . params) [doc] body...)
           name = car_(target);
           Value body = cdr_(args);
-          hasDoc = pairp(body) && car_(body).tag == Tag::String && pairp(cdr_(body));
+          hasDoc = has_leading_docstring(body);
           if (hasDoc) body = cdr_(body);
           valueV = make_closure(vm, name.id, cdr_(target), body, env, false);
           env = vm.stack[rootBase + 1];  // make_closure may have collected
         } else {
           name = target;
           Value rest = cdr_(args);
-          hasDoc = pairp(rest) && car_(rest).tag == Tag::String && pairp(cdr_(rest));
+          hasDoc = has_leading_docstring(rest);
           if (hasDoc) rest = cdr_(rest);
           if (!pairp(rest)) RET(raise_error(vm, "define: missing value"));
           EVAL_OR_RET(v, car_(rest));
@@ -517,9 +509,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         }
         Value var = ns_resolve_var(vm, name);
         if (is_nil(var)) {
-          u32 l;
-          const char* s = vm.intern.name(name.id, &l);
-          RET(raise_error(vm, "set!: unbound %.*s", (int)l, s));
+          RET(raise_error_sym(vm, "set!: unbound %.*s", name.id));
         }
         var_set(var, v);
         RET(v);
@@ -555,11 +545,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         Slot envS = s.push(make_table(vm));
         envS.set(make_pair(vm, envS.get(), vm.stack[rootBase + 1]));
         Slot bS = s.push();  // bindings cursor
-        {
-          Value b = car_(ARGS);
-          if (pairp(b) && sym_is(car_(b), S.array_)) b = cdr_(b);
-          bS.set(b);
-        }
+        { bS.set(strip_array_literal_head(car_(ARGS), S.array_)); }
         while (pairp(bS.get())) {
           Value pair = car_(bS.get());
           if (!pairp(pair) || !pairp(cdr_(pair))) RET(raise_error(vm, "let: bad binding"));
@@ -674,8 +660,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         Slot spS = s.push();  // spec cursor
         while (pairp(ARGS)) {
           Value clause = car_(ARGS);
-          if (pairp(clause) && car_(clause).tag == Tag::Keyword &&
-              car_(clause).id == S.kwRequire) {
+          if (pairp(clause) && car_(clause).tag == Tag::Keyword && car_(clause).id == S.kwRequire) {
             spS.set(cdr_(clause));
             while (pairp(spS.get())) {
               Value r = require_spec(vm, car_(spS.get()));
@@ -711,11 +696,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         Scope s(vm);
         u32 hbase = vm.handlers.len;
         Slot cS = s.push();  // clause cursor
-        {
-          Value clauses = car_(ARGS);
-          if (pairp(clauses) && sym_is(car_(clauses), S.array_)) clauses = cdr_(clauses);
-          cS.set(clauses);
-        }
+        { cS.set(strip_array_literal_head(car_(ARGS), S.array_)); }
         while (pairp(cS.get())) {
           Value cl = car_(cS.get());
           if (!pairp(cl) || !pairp(cdr_(cl))) {
@@ -762,8 +743,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
           }
           Value desc = nil_v();
           Value rest2 = cdr_(cl);
-          if (pairp(rest2) && car_(rest2).tag == Tag::String && pairp(cdr_(rest2)))
-            desc = car_(rest2);
+          if (has_leading_docstring(rest2)) desc = car_(rest2);
           Slot dr = s.push(desc);
           Obj* o = vm.heap.alloc(ObjType::Restart, sizeof(RestartData));
           Value rv = obj_v(Tag::Restart, o);
@@ -785,9 +765,8 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
           for (u32 i = 0; i < k; i++) cl = cdr_(cl);
           cl = car_(cl);
           Value rest2 = cdr_(cl);
-          if (pairp(rest2) && car_(rest2).tag == Tag::String && pairp(cdr_(rest2)))
-            rest2 = cdr_(rest2);  // skip description
-          cS.set(rest2);          // keep the clause tail rooted across binding
+          if (has_leading_docstring(rest2)) rest2 = cdr_(rest2);  // skip description
+          cS.set(rest2);  // keep the clause tail rooted across binding
           Value clArgs = vm.unwindRestartArgs;
           vm.unwindKind = UnwindKind::None;
           vm.unwindCondition = nil_v();
@@ -819,8 +798,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
           env = vm.stack[rootBase + 1];
           bS.set(cdr_(bS.get()));
         }
-        if (r.tag == Tag::Unwind && vm.unwindKind == UnwindKind::Condition &&
-            pairp(catchS.get())) {
+        if (r.tag == Tag::Unwind && vm.unwindKind == UnwindKind::Condition && pairp(catchS.get())) {
           Slot cr = s.push(vm.unwindCondition);
           vm.unwindKind = UnwindKind::None;
           bS.set(catchS.get());  // reuse as the catch-clause cursor
@@ -896,7 +874,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
           RET(raise_error(vm, "defparam: bad form"));
         Value name = car_(args);
         Value rest = cdr_(args);
-        bool hasDoc = pairp(rest) && car_(rest).tag == Tag::String && pairp(cdr_(rest));
+        bool hasDoc = has_leading_docstring(rest);
         if (hasDoc) rest = cdr_(rest);
         if (!pairp(rest)) RET(raise_error(vm, "defparam: missing default"));
         EVAL_OR_RET(d, car_(rest));
@@ -918,11 +896,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         Scope s(vm);
         u32 pbase = vm.paramBindings.len;
         Slot bS = s.push();  // bindings cursor
-        {
-          Value b = car_(ARGS);
-          if (pairp(b) && sym_is(car_(b), S.array_)) b = cdr_(b);
-          bS.set(b);
-        }
+        { bS.set(strip_array_literal_head(car_(ARGS), S.array_)); }
         Value r = nil_v();
         while (pairp(bS.get())) {
           Value pair = car_(bS.get());
@@ -1045,263 +1019,34 @@ Value eval_form(Vm& vm, Value form) {
   return eval_tr(vm, form, null_v(), true);
 }
 
-// ---------------------------------------------------------------- natives
+Value eval_source(Vm& vm, const char* src, u32 len, const char* name,
+                  const EvalSourcePolicy& policy) {
+  EvalSourceState localState;
+  EvalSourceState& state = policy.state ? *policy.state : localState;
+  state = {};
 
-static Value build_condition(Vm& vm, u32 base, u32 argc) {
-  if (argc == 0) return raise_error(vm, "signal: needs an argument");
-  Value first = vm.stack[base];
-  if (first.tag != Tag::String) {
-    if (argc > 1) return raise_error(vm, "extra arguments after a non-string condition");
-    return first;
-  }
-  Scope s(vm);
-  Slot c = s.push(make_table(vm));
-  table_put(vm, c.get(), keyword_v(vm.syms.kwType), symbol_v(vm.syms.error_));
-  table_put(vm, c.get(), keyword_v(vm.syms.kwMessage), vm.stack[base]);
-  if (argc > 1) {
-    Slot data = s.push(make_array(vm, argc - 1));
-    for (u32 i = 1; i < argc; i++) array_push(vm, data.get(), vm.stack[base + i]);
-    table_put(vm, c.get(), keyword_v(vm.syms.kwData), data.get());
-  }
-  return c.get();
-}
-
-static Value nat_signal(Vm& vm, u32 base, u32 argc) {
-  Value c = build_condition(vm, base, argc);
-  OT_TRY(c);
-  return signal_value(vm, c, false);
-}
-
-static Value nat_error(Vm& vm, u32 base, u32 argc) {
-  Value c = build_condition(vm, base, argc);
-  OT_TRY(c);
-  return signal_value(vm, c, true);
-}
-
-static Value nat_invoke_restart(Vm& vm, u32 base, u32 argc) {
-  if (argc < 1) return raise_error(vm, "invoke-restart: needs a restart");
-  Value which = vm.stack[base];
-  Value target = nil_v();
-  if (which.tag == Tag::Restart) {
-    for (u32 i = vm.restarts.len; i-- > 0;)
-      if (vm.restarts[i].restart.obj == which.obj) {
-        target = which;
-        break;
-      }
-    if (is_nil(target)) return raise_error(vm, "invoke-restart: restart is no longer active");
-  } else {
-    u32 nid = name_id_of(vm, which);
-    if (!nid) return raise_error(vm, "invoke-restart: bad restart name");
-    for (u32 i = vm.restarts.len; i-- > 0;) {
-      if (restart_data(vm.restarts[i].restart)->name == nid) {
-        target = vm.restarts[i].restart;
-        break;
-      }
+  Reader reader(vm, src, len, name);
+  Value last = nil_v();
+  for (;;) {
+    Value form = reader.next();
+    if (form.tag == Tag::Unwind) {
+      state.readError = true;
+      state.incomplete = reader.incomplete();
+      return form;
     }
-    if (is_nil(target)) {
-      u32 l;
-      const char* s = vm.intern.name(nid, &l);
-      return raise_error(vm, "no active restart named %.*s", (int)l, s);
+    if (reader.atEof()) {
+      state.consumed = len;
+      return last;
     }
+    last = policy.eval ? policy.eval(vm, form, policy.data) : eval_form(vm, form);
+    if (last.tag == Tag::Unwind) return last;
+    state.consumed = reader.position();
+    if (policy.afterEval) policy.afterEval(vm, last, state.consumed, policy.data);
   }
-  // Read the id before list_from_stack allocates — `target` is a raw local
-  // and would dangle across the collect.
-  u64 rid = restart_data(target)->restartId;
-  vm.unwindRestartArgs = list_from_stack(vm, base + 1, argc - 1);
-  vm.unwindRestartId = rid;
-  vm.unwindCondition = nil_v();
-  vm.unwindKind = UnwindKind::Restart;
-  return unwind_v();
 }
 
-static Value nat_compute_restarts(Vm& vm, u32 base, u32 argc) {
-  (void)base;
-  (void)argc;
-  Scope s(vm);
-  Slot arr = s.push(make_array(vm, vm.restarts.len));
-  for (u32 i = vm.restarts.len; i-- > 0;)  // innermost first
-    array_push(vm, arr.get(), vm.restarts[i].restart);  // alloc-free
-  return arr.get();
-}
-
-static Value nat_find_restart(Vm& vm, u32 base, u32 argc) {
-  if (argc < 1) return raise_error(vm, "find-restart: needs a name");
-  u32 nid = name_id_of(vm, vm.stack[base]);
-  if (!nid) return raise_error(vm, "find-restart: bad name");
-  for (u32 i = vm.restarts.len; i-- > 0;)
-    if (restart_data(vm.restarts[i].restart)->name == nid) return vm.restarts[i].restart;
-  return nil_v();
-}
-
-static Value nat_restart_name(Vm& vm, u32 base, u32 argc) {
-  if (argc != 1 || vm.stack[base].tag != Tag::Restart)
-    return raise_error(vm, "restart-name: needs a restart");
-  return symbol_v(restart_data(vm.stack[base])->name);
-}
-
-static Value nat_restart_description(Vm& vm, u32 base, u32 argc) {
-  if (argc != 1 || vm.stack[base].tag != Tag::Restart)
-    return raise_error(vm, "restart-description: needs a restart");
-  return restart_data(vm.stack[base])->description;
-}
-
-static Value nat_define_condition(Vm& vm, u32 base, u32 argc) {
-  if (argc != 2) return raise_error(vm, "define-condition: type and parent");
-  u32 tid = name_id_of(vm, vm.stack[base]);
-  if (!tid) return raise_error(vm, "define-condition: bad type");
-  Value parent = vm.stack[base + 1];
-  if (is_nil(parent)) {
-    table_put(vm, vm.typeParents, symbol_v(tid), nil_v());  // delete = root
-    return symbol_v(tid);
-  }
-  u32 pid = name_id_of(vm, parent);
-  if (!pid) return raise_error(vm, "define-condition: bad parent");
-  // cycle check: would tid become its own ancestor?
-  u32 cur = pid;
-  for (u32 guard = 0; guard < 1000; guard++) {
-    if (cur == tid) return raise_error(vm, "define-condition: cycle");
-    Value nxt = table_get(vm, vm.typeParents, symbol_v(cur));
-    if (nxt.tag != Tag::Symbol) break;
-    cur = nxt.id;
-  }
-  table_put(vm, vm.typeParents, symbol_v(tid), symbol_v(pid));
-  return symbol_v(tid);
-}
-
-static Value nat_condition_of_type(Vm& vm, u32 base, u32 argc) {
-  if (argc != 2) return raise_error(vm, "condition-of-type?: condition and type");
-  Value c = vm.stack[base];
-  u32 tid = name_id_of(vm, vm.stack[base + 1]);
-  if (c.tag != Tag::Table) return bool_v(false);
-  Value ct = table_get(vm, c, keyword_v(vm.syms.kwType));
-  if (ct.tag != Tag::Symbol && ct.tag != Tag::Keyword) return bool_v(false);
-  u32 cur = ct.id;
-  for (u32 guard = 0; guard < 1000; guard++) {
-    if (cur == tid) return bool_v(true);
-    Value nxt = table_get(vm, vm.typeParents, symbol_v(cur));
-    if (nxt.tag != Tag::Symbol) return bool_v(false);
-    cur = nxt.id;
-  }
-  return bool_v(false);
-}
-
-static Value nat_gensym(Vm& vm, u32 base, u32 argc) {
-  char buf[128];
-  const char* prefix = "G";
-  u32 plen = 1;
-  if (argc >= 1) {
-    u32 id = name_id_of(vm, vm.stack[base]);
-    if (id) prefix = vm.intern.name(id, &plen);
-  }
-  int n = snprintf(buf, sizeof buf, "%.*s__%llu", (int)plen, prefix,
-                   (unsigned long long)++vm.gensymCounter);
-  return symbol_v(vm.intern.intern(buf, (u32)n));
-}
-
-// Stage-0 expander: expand macro calls in head position, recursively, and
-// recurse into subforms (skipping quote). Identity for everything else.
-static Value expand0(Vm& vm, Value form);
-
-static Value expand0_list(Vm& vm, Value l) {
-  if (!pairp(l)) return l;
-  Scope s(vm);
-  Slot lS = s.push(l);  // expand0 allocates; keep the cursor rooted
-  Value h = expand0(vm, car_(lS.get()));
-  OT_TRY(h);
-  Slot r = s.push(h);
-  Value t = expand0_list(vm, cdr_(lS.get()));
-  OT_TRY(t);
-  return make_pair(vm, r.get(), t);
-}
-
-static Value expand0(Vm& vm, Value form) {
-  for (u32 guard = 0; guard < 1000; guard++) {
-    if (!pairp(form)) return form;
-    Value h = car_(form);
-    if (h.tag != Tag::Symbol) break;
-    if (h.id == vm.syms.quote_) return form;
-    Value var = ns_resolve_var(vm, h);
-    if (is_nil(var) || var_value(var).tag != Tag::Macro) break;
-    // call the macro on the unevaluated argument forms (vm.push doesn't
-    // allocate on the GC heap, so walking the form while pushing is safe)
-    Value r;
-    {
-      Scope s(vm);
-      Slot mslot = s.push(var_value(var));
-      u32 base = vm.stack.len;
-      u32 argc = 0;
-      for (Value a = cdr_(form); pairp(a); a = cdr_(a)) {
-        vm.push(car_(a));
-        argc++;
-      }
-      r = apply(vm, mslot.get(), base, argc);
-    }
-    OT_TRY(r);
-    form = r;  // re-expand the replacement
-  }
-  // recurse into subforms
-  return expand0_list(vm, form);
-}
-
-static Value nat_expander(Vm& vm, u32 base, u32 argc) {
-  if (argc != 1) return raise_error(vm, "*expander*: one argument");
-  return expand0(vm, vm.stack[base]);
-}
-
-static Value nat_expander_lexical(Vm& vm, u32 base, u32 argc) {
-  if (argc != 2) return raise_error(vm, "expander-lexical?: env-handle and symbol");
-  Value env = vm.stack[base];
-  Value sym = vm.stack[base + 1];
-  while (pairp(env)) {
-    if (!is_nil(table_get(vm, car_(env), sym))) return bool_v(true);
-    env = cdr_(env);
-  }
-  return bool_v(false);
-}
-
-static Value nat_expander_macro_var(Vm& vm, u32 base, u32 argc) {
-  if (argc != 1 || vm.stack[base].tag != Tag::Symbol) return nil_v();
-  // Resolve in the namespace of the form being expanded, not in whatever
-  // namespace the expander closure itself was defined in.
-  u32 savedNs = vm.currentNs;
-  if (vm.expandNs) vm.currentNs = vm.expandNs;
-  Value var = ns_resolve_var(vm, vm.stack[base]);
-  vm.currentNs = savedNs;
-  if (is_nil(var)) return nil_v();
-  Value v = var_value(var);
-  return (v.tag == Tag::Macro) ? v : nil_v();
-}
-
-static Value nat_current_ns(Vm& vm, u32 base, u32 argc) {
-  (void)base;
-  (void)argc;
-  return symbol_v(vm.currentNs);
-}
-
-static void def_native(Vm& vm, const char* name, NativeFn fn) {
-  Scope s(vm);
-  Slot f = s.push(make_native(vm, name, fn));
-  ns_define(vm, vm.intern.intern(name, (u32)strlen(name)), f.get(), false, nil_v());
-}
-
-void register_eval_natives(Vm& vm) {
-  u32 saved = vm.currentNs;
-  vm.currentNs = vm.syms.otiumCore_;
-  def_native(vm, "signal", nat_signal);
-  def_native(vm, "error", nat_error);
-  def_native(vm, "invoke-restart", nat_invoke_restart);
-  def_native(vm, "compute-restarts", nat_compute_restarts);
-  def_native(vm, "find-restart", nat_find_restart);
-  def_native(vm, "restart-name", nat_restart_name);
-  def_native(vm, "restart-description", nat_restart_description);
-  def_native(vm, "define-condition", nat_define_condition);
-  def_native(vm, "condition-of-type?", nat_condition_of_type);
-  def_native(vm, "gensym", nat_gensym);
-  def_native(vm, "current-ns", nat_current_ns);
-  def_native(vm, "*expander*", nat_expander);
-  def_native(vm, "expander-lexical?", nat_expander_lexical);
-  def_native(vm, "expander-macro-var", nat_expander_macro_var);
-  vm.currentNs = saved;
+Value eval_source(Vm& vm, const char* src, u32 len, const char* name) {
+  return eval_source(vm, src, len, name, EvalSourcePolicy{});
 }
 
 }  // namespace ot

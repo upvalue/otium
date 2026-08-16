@@ -19,13 +19,30 @@ inline RestartData* restart_data(Value v) { return as_restart(v); }
 Value eval_form(Vm&, Value form);           // expand (via *expander*) + evaluate one top-level form
 Value eval_in(Vm&, Value form, Value env);  // evaluate with lexical env; restores current ns
 Value apply(Vm&, Value callee, u32 base, u32 argc);  // args on vm stack
+Value start_quit(Vm&);                               // begin an uncatchable quit unwind
+
+struct EvalSourceState {
+  u32 consumed = 0;
+  bool readError = false;
+  bool incomplete = false;
+};
+
+struct EvalSourcePolicy {
+  void* data = nullptr;
+  Value (*eval)(Vm&, Value form, void* data) = nullptr;
+  void (*afterEval)(Vm&, Value result, u32 consumed, void* data) = nullptr;
+  EvalSourceState* state = nullptr;
+};
+
+// Read and evaluate forms in order, returning the last value (nil for an
+// empty source) or the first read/evaluation unwind.
+Value eval_source(Vm&, const char* src, u32 len, const char* name);
+Value eval_source(Vm&, const char* src, u32 len, const char* name, const EvalSourcePolicy& policy);
 
 Value make_native(Vm&, const char* name, NativeFn);
-void register_eval_natives(
-    Vm&);  // defines signal/error/restart/condition/oracle natives into otium.core
 
 // ---------------------------------------------------------------------------
-// EXPANDER ORACLE API (for the prelude / self-hosted expander agent)
+// EXPANDER ORACLE API (for the self-hosted expander)
 //
 // Every top-level form is routed through the var `*expander*` in otium.core
 // before evaluation: ((*expander*-value) form) -> expanded-form. The initial

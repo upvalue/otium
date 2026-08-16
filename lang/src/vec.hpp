@@ -62,48 +62,7 @@ struct Vec {
   void clear() { len = 0; }
 };
 
-struct Buf {
-  char* data;
-  u32 len;
-  u32 cap;
-
-  Buf() : data(nullptr), len(0), cap(0) {}
-  ~Buf() { free(data); }
-  Buf(const Buf&) = delete;
-  Buf& operator=(const Buf&) = delete;
-  Buf(Buf&& o) : data(o.data), len(o.len), cap(o.cap) {
-    o.data = nullptr;
-    o.len = 0;
-    o.cap = 0;
-  }
-  Buf& operator=(Buf&& o) {
-    if (this != &o) {
-      free(data);
-      data = o.data;
-      len = o.len;
-      cap = o.cap;
-      o.data = nullptr;
-      o.len = 0;
-      o.cap = 0;
-    }
-    return *this;
-  }
-
-  void reserve(u32 n) {
-    if (n <= cap) return;
-    u32 ncap = cap ? cap : 16;
-    while (ncap < n) ncap *= 2;
-    char* nd = (char*)realloc(data, ncap);
-    if (!nd) ot_fatal("Buf: out of memory");
-    data = nd;
-    cap = ncap;
-  }
-
-  void push(char c) {
-    reserve(len + 1);
-    data[len++] = c;
-  }
-
+struct Buf : Vec<char> {
   void append(const char* s, u32 n) {
     if (!n) return;
     reserve(len + n);
@@ -127,8 +86,6 @@ struct Buf {
     }
     va_end(ap2);
   }
-
-  void clear() { len = 0; }
 };
 
 }  // namespace ot

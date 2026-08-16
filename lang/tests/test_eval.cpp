@@ -4,10 +4,12 @@
 #include "../src/eval.hpp"
 #include "../src/ns.hpp"
 #include "../src/reader.hpp"
+#include <string>
 
 using namespace ot;
 
-// Minimal arithmetic natives so tests don't depend on the builtins agent.
+// Minimal arithmetic natives keep evaluator tests independent of builtin
+// registration.
 static Value t_add(Vm& vm, u32 base, u32 argc) {
   i64 s = 0;
   for (u32 i = 0; i < argc; i++) s += vm.stack[base + i].i;
@@ -62,6 +64,64 @@ static Value run(Vm& vm, const char* src) {
 
 static bool is_int(Value v, i64 n) { return v.tag == Tag::Int && v.i == n; }
 
+static std::string condition_message(Vm& vm) {
+  Value message = table_get(vm, vm.unwindCondition, keyword_v(vm.syms.kwMessage));
+  if (message.tag != Tag::String) return {};
+  StringData* s = as_string(message);
+  return std::string(string_bytes(s), s->len);
+}
+
+TEST_CASE("native validators report consistent arity and type errors") {
+  Vm* vm = mkvm();
+
+  Value r = run(*vm, "(string-length)");
+  CHECK(r.tag == Tag::Unwind);
+  CHECK(condition_message(*vm) == "string-length: wrong number of arguments (0)");
+  vm_cancel_unwind(*vm);
+
+  r = run(*vm, "(car)");
+  CHECK(r.tag == Tag::Unwind);
+  CHECK(condition_message(*vm) == "car: wrong number of arguments (0)");
+  vm_cancel_unwind(*vm);
+
+  r = run(*vm, "(newline 1)");
+  CHECK(r.tag == Tag::Unwind);
+  CHECK(condition_message(*vm) == "newline: wrong number of arguments (1)");
+  vm_cancel_unwind(*vm);
+
+  r = run(*vm, "(string-length 1)");
+  CHECK(r.tag == Tag::Unwind);
+  CHECK(condition_message(*vm) == "string-length: expected string");
+  vm_cancel_unwind(*vm);
+
+  r = run(*vm, "(car 1)");
+  CHECK(r.tag == Tag::Unwind);
+  CHECK(condition_message(*vm) == "car: expected pair");
+  vm_cancel_unwind(*vm);
+
+  vm->destroy();
+}
+
+TEST_CASE("eval_source shares EOF, unwind, and consumed-prefix semantics") {
+  Vm* vm = mkvm();
+  const char* complete = "(define answer 40) (+ answer 2)";
+  CHECK(is_int(eval_source(*vm, complete, (u32)strlen(complete), "test"), 42));
+
+  const char* partial = "(define hits 0) (set! hits (+ hits 1)) (+ 1";
+  EvalSourceState state;
+  EvalSourcePolicy policy;
+  policy.state = &state;
+  Value result = eval_source(*vm, partial, (u32)strlen(partial), "test", policy);
+  CHECK(result.tag == Tag::Unwind);
+  CHECK(state.readError);
+  CHECK(state.incomplete);
+  CHECK(state.consumed > 0);
+  CHECK(state.consumed < (u32)strlen(partial));
+  vm_cancel_unwind(*vm);
+  CHECK(is_int(run(*vm, "hits"), 1));
+  vm->destroy();
+}
+
 TEST_CASE("closures capture and let is sequential") {
   Vm* vm = mkvm();
   Value r = run(*vm, "(define (mk n) (lambda (x) (+ x n)))"
@@ -88,6 +148,25 @@ TEST_CASE("namespace switching and qualified refs") {
   r = run(*vm, "t.a/hidden");
   CHECK(r.tag == Tag::Unwind);
   CHECK(vm->unwindKind == UnwindKind::Condition);
+  vm->unwindKind = UnwindKind::None;
+  vm->destroy();
+}
+
+TEST_CASE("in-ns is a special form with consistent name handling") {
+  Vm* vm = mkvm();
+  Value r = run(*vm, "(ns t.symbol) (define marker 1)"
+                     "(ns t.keyword) (define marker 2)"
+                     "(ns t.string) (define marker 3)"
+                     "(in-ns 't.symbol) marker");
+  CHECK(is_int(r, 1));
+  r = run(*vm, "(in-ns :t.keyword) marker");
+  CHECK(is_int(r, 2));
+  r = run(*vm, "(in-ns \"t.string\") marker");
+  CHECK(is_int(r, 3));
+
+  // Like other special forms, in-ns has no independent higher-order value.
+  r = run(*vm, "in-ns");
+  CHECK(r.tag == Tag::Unwind);
   vm->unwindKind = UnwindKind::None;
   vm->destroy();
 }

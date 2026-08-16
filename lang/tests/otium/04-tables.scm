@@ -29,7 +29,8 @@
   (println "merge-keys:" (keys m))
   (println "merge-values:" (values m)))
 
-; merge skips nil arguments; nil values delete
+; merge skips nil arguments. The later literal has no :a entry because its nil
+; value deletes :a before merge is called, so the earlier :a remains.
 (let ((m (merge {:a 1 :b 2} nil {:a nil :c 3})))
   (println "merge-nil-keys:" (keys m))
   (println "merge-nil-values:" (values m)))

@@ -2,11 +2,16 @@
 // int wrap-on-overflow. Needs the full runtime to link (Vm::create).
 #include "doctest.h"
 #include "../src/builtins.hpp"
+#include "../src/printer.hpp"
 #include "../src/value.hpp"
 #include "../src/vm.hpp"
 #include "../src/heap.hpp"
 #include <cmath>
+#include <csignal>
 #include <cstdint>
+#include <string>
+#include <sys/wait.h>
+#include <unistd.h>
 
 using namespace ot;
 
@@ -19,6 +24,22 @@ static Vm* make_vm() {
 }
 
 static Value str_v(Vm& vm, const char* s) { return make_string(vm, s, (u32)strlen(s)); }
+
+static bool child_aborts(void (*fn)()) {
+  fflush(nullptr);
+  pid_t pid = fork();
+  if (pid < 0) return false;
+  if (pid == 0) {
+    (void)freopen("/dev/null", "w", stdout);
+    (void)freopen("/dev/null", "w", stderr);
+    std::signal(SIGABRT, SIG_DFL);
+    fn();
+    _exit(0);
+  }
+  int status = 0;
+  if (waitpid(pid, &status, 0) != pid) return false;
+  return WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -40,7 +61,8 @@ TEST_CASE("compact dict lifecycle") {
     // update keeps position
     table_put(*vm, t, ka, int_v(10));
     Value k, v;
-    REQUIRE(table_entry_at(t, 0, &k, &v));
+    u32 cursor = 0;
+    REQUIRE(table_iter_next(t, &cursor, &k, &v));
     CHECK(val_eq(k, ka));
     CHECK(v.i == 10);
 
@@ -48,12 +70,16 @@ TEST_CASE("compact dict lifecycle") {
     table_put(*vm, t, ka, nil_v());
     CHECK(table_entry_count(t) == 2);
     CHECK(is_nil(table_get(*vm, t, ka)));
-    REQUIRE(table_entry_at(t, 0, &k, &v));
+    cursor = 0;
+    REQUIRE(table_iter_next(t, &cursor, &k, &v));
     CHECK(val_eq(k, kb));
 
     table_put(*vm, t, ka, int_v(99));
     CHECK(table_entry_count(t) == 3);
-    REQUIRE(table_entry_at(t, 2, &k, &v));  // fresh first insertion: at the end
+    cursor = 0;
+    REQUIRE(table_iter_next(t, &cursor, &k, &v));
+    REQUIRE(table_iter_next(t, &cursor, &k, &v));
+    REQUIRE(table_iter_next(t, &cursor, &k, &v));  // fresh insertion: at the end
     CHECK(val_eq(k, ka));
     CHECK(v.i == 99);
   }
@@ -71,10 +97,12 @@ TEST_CASE("compact dict lifecycle") {
     }
     // order preserved among survivors
     Value k, v;
+    u32 cursor = 0;
     for (u32 j = 0; j < 100; j++) {
-      REQUIRE(table_entry_at(t, j, &k, &v));
+      REQUIRE(table_iter_next(t, &cursor, &k, &v));
       CHECK(k.i == (i64)(2 * j + 1));
     }
+    CHECK(!table_iter_next(t, &cursor, &k, &v));
     // misses stay misses
     CHECK(is_nil(table_get(*vm, t, int_v(0))));
     CHECK(is_nil(table_get(*vm, t, int_v(500))));
@@ -119,6 +147,60 @@ TEST_CASE("compact dict lifecycle") {
     vm->popTo(r);
     (void)r2;
   }
+
+  vm->popTo(root);
+  vm->destroy();
+}
+
+// ---------------------------------------------------------------------------
+
+TEST_CASE("table capacity overflow guards abort before allocating") {
+  CHECK(child_aborts([] {
+    Vm* vm = make_vm();
+    Value table = make_table(*vm);
+    TableData* data = as_table(table);
+    data->entriesLen = UINT32_MAX;
+    data->entriesCap = UINT32_MAX;
+    (void)table_put(*vm, table, int_v(1), int_v(2));
+  }));
+  CHECK(child_aborts([] {
+    Vm* vm = make_vm();
+    Value table = make_table(*vm);
+    TableData* data = as_table(table);
+    data->entriesLen = UINT32_MAX / 2 + 1;
+    data->entriesCap = UINT32_MAX / 2 + 1;
+    (void)table_put(*vm, table, int_v(1), int_v(2));
+  }));
+}
+
+// ---------------------------------------------------------------------------
+
+TEST_CASE("table printing preserves insertion order") {
+  Vm* vm = make_vm();
+  Value t = make_table(*vm);
+  u32 root = vm->push(t);
+  Value ka = keyword_v(vm->intern.intern("a", 1));
+  Value kb = keyword_v(vm->intern.intern("b", 1));
+  Value kc = keyword_v(vm->intern.intern("c", 1));
+
+  table_put(*vm, t, ka, int_v(1));
+  table_put(*vm, t, kb, int_v(2));
+  table_put(*vm, t, kc, int_v(3));
+
+  Buf out;
+  print_repr(*vm, t, out);
+  CHECK(std::string(out.data, out.len) == "{:a 1 :b 2 :c 3}");
+
+  // One tombstone remains in storage: it is skipped, and reinsertion appends.
+  table_put(*vm, t, kb, nil_v());
+  out.clear();
+  print_repr(*vm, t, out);
+  CHECK(std::string(out.data, out.len) == "{:a 1 :c 3}");
+
+  table_put(*vm, t, kb, int_v(20));
+  out.clear();
+  print_repr(*vm, t, out);
+  CHECK(std::string(out.data, out.len) == "{:a 1 :c 3 :b 20}");
 
   vm->popTo(root);
   vm->destroy();

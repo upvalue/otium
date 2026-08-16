@@ -13,6 +13,8 @@ struct Reader {
   // input is exhausted, or a Tag::Unwind value on a read error.
   Value next();
   bool atEof() const { return eof_; }
+  bool incomplete() const { return incomplete_; }
+  u32 position() const { return pos_; }
 
 private:
   Vm& vm_;
@@ -23,6 +25,7 @@ private:
   u32 line_ = 1;
   u32 col_ = 1;
   bool eof_ = false;
+  bool incomplete_ = false;
 
   // helpers
   bool eof() const { return pos_ >= len_; }
@@ -32,6 +35,7 @@ private:
   void skipWs();
 
   Value err(u32 line, u32 col, const char* what);
+  Value needMore(u32 line, u32 col, const char* what);
   Value readForm();
   Value readList(char close, u32 line, u32 col, const char* ctorSym);
   Value readString(u32 line, u32 col);

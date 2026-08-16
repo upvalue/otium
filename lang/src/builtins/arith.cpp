@@ -7,15 +7,7 @@
 
 namespace ot {
 
-
-static inline bool is_num(Value v) { return v.tag == Tag::Int || v.tag == Tag::Float; }
 static inline f64 as_f(Value v) { return v.tag == Tag::Int ? (f64)v.i : v.f; }
-
-static Value need_nums(Vm& vm, const char* who, u32 base, u32 argc) {
-  for (u32 i = 0; i < argc; i++)
-    if (!is_num(ARG(i))) return raise_error(vm, "%s: expected number", who);
-  return nil_v();
-}
 
 static bool any_float(Vm& vm, u32 base, u32 argc) {
   for (u32 i = 0; i < argc; i++)
@@ -48,7 +40,7 @@ Value nat_mul(Vm& vm, u32 base, u32 argc) {
 }
 
 Value nat_sub(Vm& vm, u32 base, u32 argc) {
-  if (argc < 1) return raise_error(vm, "-: expected at least 1 argument");
+  OT_TRY(need_argc(vm, "-", argc, 1, UINT32_MAX));
   OT_TRY(need_nums(vm, "-", base, argc));
   if (any_float(vm, base, argc)) {
     f64 acc = as_f(ARG(0));
@@ -72,7 +64,7 @@ static i64 idiv_wrap(i64 a, i64 b) {
 }
 
 Value nat_div(Vm& vm, u32 base, u32 argc) {
-  if (argc < 1) return raise_error(vm, "/: expected at least 1 argument");
+  OT_TRY(need_argc(vm, "/", argc, 1, UINT32_MAX));
   OT_TRY(need_nums(vm, "/", base, argc));
   // (/ n) = 1/n
   u32 first = 0;
@@ -97,22 +89,25 @@ Value nat_div(Vm& vm, u32 base, u32 argc) {
 }
 
 static Value nat_quotient(Vm& vm, u32 base, u32 argc) {
-  if (argc != 2 || ARG(0).tag != Tag::Int || ARG(1).tag != Tag::Int)
-    return raise_error(vm, "quotient: expected two ints");
+  OT_TRY(need_argc(vm, "quotient", argc, 2, 2));
+  OT_TRY(need_int(vm, "quotient", ARG(0)));
+  OT_TRY(need_int(vm, "quotient", ARG(1)));
   if (ARG(1).i == 0) return raise_error(vm, "quotient: division by zero");
   return int_v(idiv_wrap(ARG(0).i, ARG(1).i));
 }
 
 static Value nat_remainder(Vm& vm, u32 base, u32 argc) {
-  if (argc != 2 || ARG(0).tag != Tag::Int || ARG(1).tag != Tag::Int)
-    return raise_error(vm, "remainder: expected two ints");
+  OT_TRY(need_argc(vm, "remainder", argc, 2, 2));
+  OT_TRY(need_int(vm, "remainder", ARG(0)));
+  OT_TRY(need_int(vm, "remainder", ARG(1)));
   if (ARG(1).i == 0) return raise_error(vm, "remainder: division by zero");
   return int_v(a_rem(ARG(0).i, ARG(1).i));  // sign of the dividend (C semantics)
 }
 
 static Value nat_modulo(Vm& vm, u32 base, u32 argc) {
-  if (argc != 2 || ARG(0).tag != Tag::Int || ARG(1).tag != Tag::Int)
-    return raise_error(vm, "modulo: expected two ints");
+  OT_TRY(need_argc(vm, "modulo", argc, 2, 2));
+  OT_TRY(need_int(vm, "modulo", ARG(0)));
+  OT_TRY(need_int(vm, "modulo", ARG(1)));
   i64 b = ARG(1).i;
   if (b == 0) return raise_error(vm, "modulo: division by zero");
   i64 r = a_rem(ARG(0).i, b);
@@ -121,8 +116,8 @@ static Value nat_modulo(Vm& vm, u32 base, u32 argc) {
 }
 
 static Value nat_abs(Vm& vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "abs", argc, 1, 1));
   OT_TRY(need_nums(vm, "abs", base, argc));
-  if (argc != 1) return raise_error(vm, "abs: expected 1 argument");
   Value v = ARG(0);
   if (v.tag == Tag::Float) return float_v(std::fabs(v.f));
   return v.i < 0 ? int_v((i64)(0 - (u64)v.i)) : v;  // INT64_MIN wraps to itself
@@ -136,7 +131,7 @@ static int num_cmp(Value a, Value b) {
 }
 
 static Value nat_min(Vm& vm, u32 base, u32 argc) {
-  if (argc < 1) return raise_error(vm, "min: expected at least 1 argument");
+  OT_TRY(need_argc(vm, "min", argc, 1, UINT32_MAX));
   OT_TRY(need_nums(vm, "min", base, argc));
   Value best = ARG(0);
   for (u32 i = 1; i < argc; i++)
@@ -145,7 +140,7 @@ static Value nat_min(Vm& vm, u32 base, u32 argc) {
 }
 
 static Value nat_max(Vm& vm, u32 base, u32 argc) {
-  if (argc < 1) return raise_error(vm, "max: expected at least 1 argument");
+  OT_TRY(need_argc(vm, "max", argc, 1, UINT32_MAX));
   OT_TRY(need_nums(vm, "max", base, argc));
   Value best = ARG(0);
   for (u32 i = 1; i < argc; i++)
@@ -162,7 +157,8 @@ static Value float_to_int(Vm& vm, const char* who, f64 f) {
 }
 
 static Value round_like(Vm& vm, u32 base, u32 argc, const char* who, f64 (*op)(f64)) {
-  if (argc != 1 || !is_num(ARG(0))) return raise_error(vm, "%s: expected one number", who);
+  OT_TRY(need_argc(vm, who, argc, 1, 1));
+  OT_TRY(need_nums(vm, who, base, argc));
   Value v = ARG(0);
   if (v.tag == Tag::Int) return v;
   return float_to_int(vm, who, op(v.f));
@@ -184,7 +180,7 @@ static Value nat_round(Vm& vm, u32 base, u32 argc) {
 
 // comparison chains
 static Value chain(Vm& vm, u32 base, u32 argc, const char* who, bool (*ok)(int cmp)) {
-  if (argc < 2) return raise_error(vm, "%s: expected at least 2 arguments", who);
+  OT_TRY(need_argc(vm, who, argc, 2, UINT32_MAX));
   OT_TRY(need_nums(vm, who, base, argc));
   for (u32 i = 0; i + 1 < argc; i++) {
     // NaN: all comparisons (and =) are false
@@ -208,18 +204,21 @@ static Value nat_le(Vm& vm, u32 base, u32 argc) { return chain(vm, base, argc, "
 static Value nat_ge(Vm& vm, u32 base, u32 argc) { return chain(vm, base, argc, ">=", ok_ge); }
 
 static Value nat_inc(Vm& vm, u32 base, u32 argc) {
-  if (argc != 1 || !is_num(ARG(0))) return raise_error(vm, "inc: expected one number");
+  OT_TRY(need_argc(vm, "inc", argc, 1, 1));
+  OT_TRY(need_nums(vm, "inc", base, argc));
   Value v = ARG(0);
   return v.tag == Tag::Int ? int_v((i64)((u64)v.i + 1)) : float_v(v.f + 1.0);
 }
 static Value nat_dec(Vm& vm, u32 base, u32 argc) {
-  if (argc != 1 || !is_num(ARG(0))) return raise_error(vm, "dec: expected one number");
+  OT_TRY(need_argc(vm, "dec", argc, 1, 1));
+  OT_TRY(need_nums(vm, "dec", base, argc));
   Value v = ARG(0);
   return v.tag == Tag::Int ? int_v((i64)((u64)v.i - 1)) : float_v(v.f - 1.0);
 }
 
 static Value sign_test(Vm& vm, u32 base, u32 argc, const char* who, int want) {
-  if (argc != 1 || !is_num(ARG(0))) return raise_error(vm, "%s: expected one number", who);
+  OT_TRY(need_argc(vm, who, argc, 1, 1));
+  OT_TRY(need_nums(vm, who, base, argc));
   Value v = ARG(0);
   int s;
   if (v.tag == Tag::Int) s = v.i < 0 ? -1 : v.i > 0 ? 1 : 0;
@@ -232,11 +231,13 @@ static Value nat_posp(Vm& vm, u32 base, u32 argc) { return sign_test(vm, base, a
 static Value nat_negp(Vm& vm, u32 base, u32 argc) { return sign_test(vm, base, argc, "neg?", -1); }
 
 static Value nat_evenp(Vm& vm, u32 base, u32 argc) {
-  if (argc != 1 || ARG(0).tag != Tag::Int) return raise_error(vm, "even?: expected an int");
+  OT_TRY(need_argc(vm, "even?", argc, 1, 1));
+  OT_TRY(need_int(vm, "even?", ARG(0)));
   return bool_v((ARG(0).i & 1) == 0);
 }
 static Value nat_oddp(Vm& vm, u32 base, u32 argc) {
-  if (argc != 1 || ARG(0).tag != Tag::Int) return raise_error(vm, "odd?: expected an int");
+  OT_TRY(need_argc(vm, "odd?", argc, 1, 1));
+  OT_TRY(need_int(vm, "odd?", ARG(0)));
   return bool_v((ARG(0).i & 1) != 0);
 }
 

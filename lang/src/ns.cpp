@@ -39,8 +39,8 @@ Value ns_get_or_create(Vm& vm, u32 nsName) {
   table_put(vm, vm.nsRegistry, symbol_v(nsName), nsS.get());
 
   // Auto-refer all public otium.core vars present at creation time (7.1).
-  // The whole walk is alloc-free (table_get/table_put contract, heap.hpp),
-  // so the raw locals below are safe.
+  // table_get/table_put do not allocate on the GC heap, so these raw locals
+  // remain valid for the whole walk.
   if (nsName != vm.syms.otiumCore_) {
     Value core = ns_lookup(vm, vm.syms.otiumCore_);
     if (!is_nil(core)) {
@@ -121,11 +121,11 @@ static Value resolve_var_impl(Vm& vm, Value sym, bool raiseErr) {
     }
     Value var = table_get(vm, ns_field(vm, target, vm.syms.kwVars), symbol_v(n));
     if (is_nil(var)) {
-      if (raiseErr) raise_error(vm, "no such var: %.*s", (int)len, s);
+      if (raiseErr) raise_error_sym(vm, "no such var: %.*s", sym.id);
       return nil_v();
     }
     if (var_private(var) && nsName != vm.currentNs) {
-      if (raiseErr) raise_error(vm, "var is private: %.*s", (int)len, s);
+      if (raiseErr) raise_error_sym(vm, "var is private: %.*s", sym.id);
       return nil_v();
     }
     return var;
@@ -139,7 +139,7 @@ static Value resolve_var_impl(Vm& vm, Value sym, bool raiseErr) {
     var = table_get(vm, ns_field(vm, cur, vm.syms.kwRefers), sym);
     if (!is_nil(var)) return var;
   }
-  if (raiseErr) raise_error(vm, "unresolved symbol: %.*s", (int)len, s);
+  if (raiseErr) raise_error_sym(vm, "unresolved symbol: %.*s", sym.id);
   return nil_v();
 }
 

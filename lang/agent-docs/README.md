@@ -1,1 +1,1 @@
-agent generated and read documents
+Language specifications and design notes.

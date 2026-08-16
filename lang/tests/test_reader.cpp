@@ -184,6 +184,25 @@ TEST_CASE("multiple forms and eof") {
   CHECK(r.atEof());
 }
 
+TEST_CASE("incomplete input is distinct from a final read error") {
+  Vm& vm = *test_vm();
+  const char* incomplete[] = {"(a b", "[1 2", "{:a 1", "\"open", "'", "(a . b"};
+  for (const char* src : incomplete) {
+    Reader r(vm, src, (u32)strlen(src), "<test>");
+    CHECK(r.next().tag == Tag::Unwind);
+    CHECK(r.incomplete());
+    vm_cancel_unwind(vm);
+  }
+
+  const char* invalid[] = {")", "(a]", "\"bad\\q\"", "(a . b c)"};
+  for (const char* src : invalid) {
+    Reader r(vm, src, (u32)strlen(src), "<test>");
+    CHECK(r.next().tag == Tag::Unwind);
+    CHECK_FALSE(r.incomplete());
+    vm_cancel_unwind(vm);
+  }
+}
+
 TEST_CASE("read -> print -> read fixpoint") {
   const char* corpus[] = {
       "nil",

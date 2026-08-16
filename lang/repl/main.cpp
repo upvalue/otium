@@ -1,8 +1,5 @@
-// repl/main.cpp — Otium CLI + REPL (STK-18)
-//
-// The one file where std headers and OS APIs are welcome. Everything else is
-// written strictly against agent-docs/interfaces.md; spots where the contract
-// is silent are marked // INTEGRATION:.
+// Otium CLI + REPL. Host-facing standard-library and OS integration lives
+// here rather than in the low-memory runtime.
 
 #include <cstdio>
 #include <cstdlib>
@@ -17,11 +14,10 @@
 #include "vec.hpp"
 #include "value.hpp"
 #include "heap.hpp"
-#include "vm.hpp"  // INTEGRATION: expected per interfaces.md (Vm, VmConfig, NativeFn)
-#include "reader.hpp"
-#include "printer.hpp"  // INTEGRATION: expected per interfaces.md (print_repr)
-#include "eval.hpp"     // INTEGRATION: expected per interfaces.md (eval_form, apply)
-#include "ns.hpp"       // INTEGRATION: expected per interfaces.md (ns_resolve)
+#include "vm.hpp"
+#include "printer.hpp"
+#include "eval.hpp"
+#include "ns.hpp"
 
 // vm_push_handler/vm_pop_handler come from vm.hpp; make_native from eval.hpp.
 
@@ -37,6 +33,7 @@ using ot::Vm;
 static Vm* g_vm = nullptr;
 static volatile sig_atomic_t g_sigint = 0;
 static bool g_replMode = false;
+static bool g_quitRequested = false;
 static std::vector<std::string> g_loadPath;
 
 static void on_sigint(int) {
@@ -94,13 +91,16 @@ static void print_value(Vm& vm, Value v, FILE* to) {
   fputc('\n', to);
 }
 
-static bool was_interrupt(Vm& vm) {
-  // The evaluator marks ^C (and any future (quit)) as UnwindKind::Quit.
-  if (vm.unwindKind == ot::UnwindKind::Quit) {
+enum class QuitReason { None, Interrupt, Requested };
+
+static QuitReason take_quit(Vm& vm) {
+  if (vm.unwindKind != ot::UnwindKind::Quit) return QuitReason::None;
+  if (g_sigint) {
     g_sigint = 0;
-    return true;
+    return QuitReason::Interrupt;
   }
-  return false;
+  g_quitRequested = true;
+  return QuitReason::Requested;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,20 +192,15 @@ static int run_file(Vm& vm, const char* path) {
   while ((n = fread(chunk, 1, sizeof chunk, f)) > 0) src.append(chunk, n);
   fclose(f);
 
-  ot::Reader rd(vm, src.data(), (u32)src.size(), path);
-  for (;;) {
-    Value form = rd.next();
-    if (form.tag == Tag::Unwind) {
-      print_value(vm, vm.unwindCondition, stderr);
-      return 1;
+  Value result = ot::eval_source(vm, src.data(), (u32)src.size(), path);
+  if (result.tag == Tag::Unwind) {
+    QuitReason reason = take_quit(vm);
+    if (reason != QuitReason::None) {
+      ot::vm_cancel_unwind(vm);
+      return reason == QuitReason::Interrupt ? 130 : 0;
     }
-    if (rd.atEof()) break;
-    Value result = ot::eval_form(vm, form);
-    if (result.tag == Tag::Unwind) {
-      if (was_interrupt(vm)) return 130;
-      print_value(vm, vm.unwindCondition, stderr);
-      return 1;
-    }
+    print_value(vm, vm.unwindCondition, stderr);
+    return 1;
   }
   return 0;
 }
@@ -213,25 +208,45 @@ static int run_file(Vm& vm, const char* path) {
 // ---------------------------------------------------------------------------
 // REPL
 
+struct ReplEvalContext {
+  ot::Slot pred;
+  ot::Slot handler;
+};
+
+static Value eval_repl_form(Vm& vm, Value form, void* data) {
+  ReplEvalContext& context = *(ReplEvalContext*)data;
+  Value pushed = ot::vm_push_handler(vm, context.pred.get(), context.handler.get());
+  (void)pushed;
+  Value result = ot::eval_form(vm, form);
+  ot::vm_pop_handler(vm);
+  return result;
+}
+
+static void print_repl_result(Vm& vm, Value result, u32, void*) {
+  // A REPL reports every evaluation result, including nil.
+  print_value(vm, result, stdout);
+}
+
 static void run_repl(Vm& vm) {
   g_replMode = true;
   printf("otium repl — ^C interrupts, ^D exits\n");
-  // PoC note: one complete form per line. Multi-line accumulation would retry
-  // the read on an unterminated-form error; kept simple for now.
   // Both natives stay rooted in these slots for the whole session; read them
   // through the slots at each install — a raw copy would go stale as soon as
   // an eval allocates.
-  ot::Slot handlerFn{&vm, vm.push(ot::make_native(vm, "repl-condition-handler",
-                                                  repl_condition_handler))};
+  ot::Slot handlerFn{
+      &vm, vm.push(ot::make_native(vm, "repl-condition-handler", repl_condition_handler))};
   ot::Slot predFn{&vm, vm.push(ot::nil_v())};
   predFn.set(ot::make_native(vm, "repl-any-pred", always_true_pred));
 
+  std::string pending;
   for (;;) {
-    char* line = bestlineWithHistory("ot> ", "otium");
+    const char* prompt = pending.empty() ? "ot> " : "..> ";
+    char* line = bestlineWithHistory(prompt, "otium");
     if (!line) {
       if (g_sigint) {
         g_sigint = 0;
         vm.interruptFlag = false;
+        pending.clear();
         continue;
       }
       break;  // EOF
@@ -244,40 +259,50 @@ static void run_repl(Vm& vm) {
         blank = false;
         break;
       }
-    if (blank) {
+    if (blank && pending.empty()) {
       bestlineFree(line);
       continue;
     }
 
-    ot::Reader rd(vm, line, (u32)len, "<repl>");
-    for (;;) {
-      Value form = rd.next();
-      if (form.tag == Tag::Unwind) {
-        print_value(vm, vm.unwindCondition, stderr);
-        break;
-      }
-      if (rd.atEof()) break;
+    if (!pending.empty()) pending.push_back('\n');
+    pending.append(line, len);
+    bestlineFree(line);
 
-      // Install the interactive restart-offering handler around this eval.
-      Value ph = ot::vm_push_handler(vm, predFn.get(), handlerFn.get());
-      (void)ph;
-      Value result = ot::eval_form(vm, form);
-      ot::vm_pop_handler(vm);
-
-      if (result.tag == Tag::Unwind) {
-        if (was_interrupt(vm)) {
+    bool needMore = false;
+    bool stop = false;
+    ot::EvalSourceState sourceState;
+    ReplEvalContext context{predFn, handlerFn};
+    ot::EvalSourcePolicy policy{&context, eval_repl_form, print_repl_result, &sourceState};
+    Value result = ot::eval_source(vm, pending.data(), (u32)pending.size(), "<repl>", policy);
+    u32 consumed = sourceState.consumed;
+    if (result.tag == Tag::Unwind) {
+      if (sourceState.readError) {
+        if (sourceState.incomplete) {
+          ot::vm_cancel_unwind(vm);
+          needMore = true;
+        } else {
+          print_value(vm, vm.unwindCondition, stderr);
+          ot::vm_cancel_unwind(vm);
+          consumed = (u32)pending.size();
+        }
+      } else {
+        QuitReason reason = take_quit(vm);
+        if (reason == QuitReason::Interrupt) {
           vm.interruptFlag = false;
           puts("interrupted");
-        } else {
+        } else if (reason == QuitReason::None) {
           fputs("error: ", stderr);
           print_value(vm, vm.unwindCondition, stderr);
+        } else {
+          stop = true;
         }
         ot::vm_cancel_unwind(vm);
-        break;
+        consumed = (u32)pending.size();
       }
-      print_value(vm, result, stdout);  // PoC: print everything, incl. nil
     }
-    bestlineFree(line);
+    if (consumed) pending.erase(0, consumed);
+    if (stop) break;
+    if (needMore) continue;
   }
   bestlineHistoryFree();
   putchar('\n');
@@ -374,7 +399,7 @@ int main(int argc, char** argv) {
 
   int status = 0;
   if (options.script) status = run_file(*vm, options.script);
-  if (status == 0 && (options.repl || !options.script)) {
+  if (status == 0 && !g_quitRequested && (options.repl || !options.script)) {
     run_repl(*vm);
   }
 

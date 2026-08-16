@@ -7,10 +7,6 @@
 
 namespace ot {
 
-static bool is_ws(char c) {
-  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-}
-
 // Characters that terminate an atom (spec 1.2): ( ) [ ] { } ; " , ' `
 static bool is_delim(char c) {
   switch (c) {
@@ -29,7 +25,7 @@ static bool is_delim(char c) {
   }
 }
 
-static bool atom_end(char c) { return is_ws(c) || is_delim(c); }
+static bool atom_end(char c) { return ascii_whitespace((u8)c) || is_delim(c); }
 
 static bool is_digit(char c) { return c >= '0' && c <= '9'; }
 static int hex_val(char c) {
@@ -56,7 +52,7 @@ void Reader::advance() {
 void Reader::skipWs() {
   while (!eof()) {
     char c = peek();
-    if (is_ws(c)) {
+    if (ascii_whitespace((u8)c)) {
       advance();
       continue;
     }
@@ -72,6 +68,11 @@ Value Reader::err(u32 line, u32 col, const char* what) {
   return raise_error(vm_, "read error at %u:%u: %s", line, col, what);
 }
 
+Value Reader::needMore(u32 line, u32 col, const char* what) {
+  incomplete_ = true;
+  return err(line, col, what);
+}
+
 Value Reader::next() {
   skipWs();
   if (eof()) {
@@ -83,7 +84,7 @@ Value Reader::next() {
 
 Value Reader::readForm() {
   skipWs();
-  if (eof()) return err(line_, col_, "unexpected end of input");
+  if (eof()) return needMore(line_, col_, "unexpected end of input");
   u32 line = line_, col = col_;
   char c = peek();
   switch (c) {
@@ -120,14 +121,13 @@ Value Reader::readList(char close, u32 openLine, u32 openCol, const char* ctorSy
 
   for (;;) {
     skipWs();
-    if (eof()) return err(openLine, openCol, "unterminated list");
+    if (eof()) return needMore(openLine, openCol, "unterminated list");
     char c = peek();
     if (c == close) {
       advance();
       break;
     }
-    if (c == ')' || c == ']' || c == '}')
-      return err(line_, col_, "mismatched closing delimiter");
+    if (c == ')' || c == ']' || c == '}') return err(line_, col_, "mismatched closing delimiter");
     // dotted-tail marker: a lone `.` followed by whitespace/delimiter/eof
     if (c == '.' && (pos_ + 1 >= len_ || atom_end(src_[pos_ + 1]))) {
       u32 dl = line_, dc = col_;
@@ -139,7 +139,8 @@ Value Reader::readList(char close, u32 openLine, u32 openCol, const char* ctorSy
       tail = sc.push(t);
       haveTail = true;
       skipWs();
-      if (eof() || peek() != close) return err(line_, col_, "expected ) after dotted tail");
+      if (eof()) return needMore(line_, col_, "expected ) after dotted tail");
+      if (peek() != close) return err(line_, col_, "expected ) after dotted tail");
       advance();
       break;
     }
@@ -163,12 +164,12 @@ Value Reader::readList(char close, u32 openLine, u32 openCol, const char* ctorSy
 Value Reader::readString(u32 openLine, u32 openCol) {
   Buf out;
   for (;;) {
-    if (eof()) return err(openLine, openCol, "unterminated string");
+    if (eof()) return needMore(openLine, openCol, "unterminated string");
     char c = peek();
     advance();
     if (c == '"') break;
     if (c == '\\') {
-      if (eof()) return err(openLine, openCol, "unterminated string");
+      if (eof()) return needMore(openLine, openCol, "unterminated string");
       char e = peek();
       u32 el = line_, ec = col_;
       advance();
@@ -186,7 +187,7 @@ Value Reader::readString(u32 openLine, u32 openCol) {
     }
     out.push(c);
   }
-  return make_string(vm_, out.data ? out.data : "", out.len);
+  return make_string(vm_, out);
 }
 
 Value Reader::readSugar(const char* sym, u32 symLen) {

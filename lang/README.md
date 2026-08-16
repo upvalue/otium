@@ -2,6 +2,19 @@
 
 experimental little programming language
 
+## Build and bootstrap
+
+The supported runtime always embeds `prelude/expander.scm` and
+`prelude/prelude.scm`. Meson generates C headers for both files and the VM loads
+them before it creates the `user` namespace. A prelude-free runtime is not a
+supported build mode.
+
+```sh
+meson setup build
+meson compile -C build
+meson test -C build
+```
+
 ## Formatting
 
 Run `tools/format-cpp` to format the C++ sources. Run

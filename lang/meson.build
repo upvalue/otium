@@ -18,8 +18,8 @@ bestline = static_library('bestline',
   include_directories : bestline_inc,
   override_options : ['warning_level=0', 'werror=false'])
 
-# Embedded prelude: .scm -> C array headers, included by vm.cpp when
-# OT_EMBED_PRELUDE is defined (the ad-hoc doctest compile line skips both).
+# The embedded expander and prelude are required runtime components. Generate
+# them as C arrays so every supported VM starts with the same core bindings.
 python = find_program('python3')
 embed_py = files('tools/embed.py')
 expander_h = custom_target('ot_expander_scm',
@@ -30,11 +30,7 @@ prelude_h = custom_target('ot_prelude_scm',
   input : 'prelude/prelude.scm',
   output : 'ot_prelude_scm.h',
   command : [python, embed_py, '@INPUT@', 'ot_prelude_scm', '@OUTPUT@'])
-lib_args += ['-DOT_EMBED_PRELUDE']
 
-# INTEGRATION: full source list per the interface contract. Files owned by
-# other agents are listed unconditionally; if one is missing at integration
-# time, comment it out here with a note.
 lib_sources = files(
   'src/heap.cpp',
   'src/intern.cpp',
@@ -44,7 +40,9 @@ lib_sources = files(
   'src/reader.cpp',
   'src/printer.cpp',
   'src/builtins/arith.cpp',
+  'src/builtins/cond.cpp',
   'src/builtins/data.cpp',
+  'src/builtins/expand.cpp',
   'src/builtins/string.cpp',
   'src/builtins/sys.cpp',
 )

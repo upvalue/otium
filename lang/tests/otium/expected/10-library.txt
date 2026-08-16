@@ -7,6 +7,7 @@ filter-nil: ()
 reduce-sum: 10
 reduce-list: 103
 reduce-nil: 5
+for-each-snapshot: [1 2 nil]
 reverse-list: (3 2 1)
 reverse-array: [3 2 1]
 take-basic: [1 2]
@@ -45,6 +46,10 @@ substring-inverted: <>
 split-sep: [a b c]
 split-ws: [a b c]
 join: 1-2-3
+join-list: 1:2:3
+join-empty: <> <>
+join-improper: string-join: improper list
+join-not-sequence: string-join: expected sequence
 str-concat: 1x:ksym2.5
 str-empty: <>
 string-len: 5
@@ -59,6 +64,9 @@ to-number: 42 3.5 nil
 first-string: a
 apply: 10
 apply-array: 9
+apply-empty: () ()
+apply-improper: apply: improper list
+apply-not-sequence: apply: expected sequence
 partial: 6
 comp: 3
 comp-order: 5

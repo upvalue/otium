@@ -12,10 +12,8 @@ struct Vm;
 void print_repr(Vm& vm, Value v, Buf& out);
 void print_display(Vm& vm, Value v, Buf& out);
 
-// Table iteration hooks for the printer (insertion order). Weak defaults in
-// printer.cpp report zero entries; the integrator supplies strong definitions
-// backed by the table_iter machinery from heap.hpp/builtins/data.cpp.
-u32 printer_table_count(Vm& vm, Value table);
-bool printer_table_entry(Vm& vm, Value table, u32 i, Value* k, Value* v);
+// Table iteration hook for the printer (insertion order). The weak default in
+// printer.cpp reports no entries; data.cpp supplies the table-backed cursor.
+bool printer_table_next(Vm& vm, Value table, u32* cursor, Value* k, Value* v);
 
 }  // namespace ot

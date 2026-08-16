@@ -142,9 +142,11 @@ including `()`, `0`, `0.0`, and `""`.
 
 `nil` means *absence* and is not a storable table value. Looking up a
 missing key yields `nil`, and storing `nil` under a key **deletes** the
-key (in `table`/`{...}`, `put!`, `assoc`, `merge`). "Present with nil" is
-unrepresentable. Sequence functions treat `nil` as an empty sequence, and
-lookups on `nil` yield `nil`, so access chains compose over misses.
+key (in `table`/`{...}`, `put!`, and `assoc`). "Present with nil" is
+unrepresentable. `merge` reads live entries from its table arguments, so a
+missing key in a later table does not delete an earlier value. Sequence
+functions treat `nil` as an empty sequence, and lookups on `nil` yield `nil`,
+so access chains compose over misses.
 
 The rule behind the library's treatment of `nil`, and the razor for
 extending it: **read operations are total over absence** -- `count`,
@@ -818,6 +820,9 @@ table, string, buffer; other types error.
 These accept any sequence (list / array / nil) and never error on
 emptiness; misses yield `nil`.
 
+Whole-sequence traversal requires proper lists. `for-each`, `apply`,
+`string-join`, and `get-in` raise an error when a list has a dotted tail.
+
 | form | behavior |
 |---|---|
 | `(first seq)` | First element or `nil`. On a pair, the car; on a string, the first character as a string or `nil`. |
@@ -855,7 +860,7 @@ emptiness; misses yield `nil`.
 | `(dissoc coll k…)` → copy | Copy without the keys. |
 | `(update coll k f args…)` → copy | `assoc` of `(f (get coll k) args…)`. |
 | `(keys t)` / `(values t)` → array | Insertion order; `nil` gives `[]`. |
-| `(merge t…)` → table | New table, left to right; `nil` arguments skipped; `nil` values delete. |
+| `(merge t…)` → table | New table, left to right; `nil` arguments skipped; live entries in later tables update matching keys. |
 | `(copy coll)` | Shallow copy of an array or table; `(copy nil)` is `nil`. |
 
 ### 10.6 Strings, buffers, names

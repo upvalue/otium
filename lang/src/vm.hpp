@@ -68,10 +68,9 @@ struct Vm {
   LoadFn loadFn;
   void* loadUd;
 
-  // Unwind state, valid while a Tag::Unwind value is propagating.
-  // NOTE for the heap agent: unwindCondition and unwindRestartArgs (and the
-  // handlers/restarts/paramBindings vectors) must be traced as GC roots in
-  // addition to `stack` and the namespace registry.
+  // Unwind state, valid while a Tag::Unwind value is propagating. The Value
+  // fields here and in handlers/restarts/paramBindings are GC roots alongside
+  // the stack and namespace registry.
   UnwindKind unwindKind;
   Value unwindCondition;
   u64 unwindRestartId;      // target restart when unwindKind==Restart
@@ -98,7 +97,7 @@ struct Vm {
   explicit Vm(const VmConfig&);
 };
 
-// --- rooted-slot handles (the internal GC discipline, see lan-6mpt) --------
+// --- rooted-slot handles ----------------------------------------------------
 //
 // A raw heap Value in a C++ local goes stale at the next allocating call
 // (semispace collect moves everything). Internal code therefore keeps heap
@@ -148,6 +147,9 @@ inline Value make_string_from(Vm& vm, Slot src, u32 byteOff, u32 len) {
 // Build {:type 'error :message <formatted>}, signal it through active
 // handlers, and (if all decline) start a condition unwind. Returns Unwind.
 Value raise_error(Vm&, const char* fmt, ...);
+
+// Format an interned name into an error message at a `%.*s` placeholder.
+Value raise_error_sym(Vm&, const char* fmt, u32 symId);
 
 // Signal-site walk (spec 8.2). Handlers run innermost-out with the stack
 // intact; a handler and everything inner to it is invisible while it runs.

@@ -14,8 +14,6 @@
 namespace ot {
 
 struct Vm;
-struct VarData;  // opaque per contract; concretely a heap Array, slots below
-
 enum VarSlot : u32 { VAR_VALUE = 0, VAR_NAME, VAR_NS, VAR_DOC, VAR_PRIVATE, VAR_SLOTS };
 
 // Registry access

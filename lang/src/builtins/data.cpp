@@ -32,7 +32,7 @@ bool val_equal(Vm& vm, Value a, Value b) {
         StringData* sa = as_string(a);
         StringData* sb = as_string(b);
         if (sa->len != sb->len) return false;
-        return memcmp((const char*)(sa + 1), (const char*)(sb + 1), sa->len) == 0;
+        return memcmp(string_bytes(sa), string_bytes(sb), sa->len) == 0;
       }
       case Tag::Pair: {
         PairData* pa = as_pair(a);
@@ -79,7 +79,7 @@ u64 val_hash(Vm& vm, Value v) {
     case Tag::Keyword: return mix64(seed ^ (u64)v.id);
     case Tag::String: {
       StringData* s = as_string(v);
-      const char* p = (const char*)(s + 1);
+      const char* p = string_bytes(s);
       u64 h = seed ^ 0xCBF29CE484222325ull;  // FNV-1a over bytes
       for (u32 i = 0; i < s->len; i++) h = (h ^ (u8)p[i]) * 0x100000001B3ull;
       return mix64(h);
@@ -121,10 +121,14 @@ static inline void idx_set(TableData* t, u32 slot, u32 v) {
   }
 }
 
+static u32 table_index_width(u32 entriesCap) {
+  return entriesCap < 0xFF ? 1 : entriesCap < 0xFFFF ? 2 : 4;
+}
+
 // Rebuild the index for the current entries array at capacity `cap` (pow2).
 static void table_rebuild_index(TableData* t, u32 cap) {
   free(t->index);
-  u32 width = (t->entriesCap + 1 <= 0xFF) ? 1 : (t->entriesCap + 1 <= 0xFFFF) ? 2 : 4;
+  u32 width = table_index_width(t->entriesCap);
   t->index = (u8*)calloc((size_t)cap, width);
   if (!t->index) ot_fatal("table: out of memory");
   t->indexCap = cap;
@@ -148,22 +152,30 @@ static void table_compact(TableData* t) {
 }
 
 static void table_ensure(TableData* t, u32 extra) {
-  if (t->entriesLen + extra > t->entriesCap) {
-    u32 ncap = t->entriesCap ? t->entriesCap * 2 : 8;
-    while (ncap < t->entriesLen + extra) ncap *= 2;
+  if (extra > UINT32_MAX - t->entriesLen) ot_fatal("table: capacity overflow");
+  u32 need = t->entriesLen + extra;
+  if (need > t->entriesCap) {
+    u32 ncap = t->entriesCap ? t->entriesCap : 8;
+    while (ncap < need) {
+      if (ncap > UINT32_MAX / 2) ot_fatal("table: capacity overflow");
+      ncap *= 2;
+    }
     TableEntry* ne = (TableEntry*)realloc(t->entries, (size_t)ncap * sizeof(TableEntry));
     if (!ne) ot_fatal("table: out of memory");
     t->entries = ne;
     t->entriesCap = ncap;
     // entriesCap growth may bump the needed index width — rebuild if so.
-    u32 width = (ncap + 1 <= 0xFF) ? 1 : (ncap + 1 <= 0xFFFF) ? 2 : 4;
+    u32 width = table_index_width(ncap);
     if (t->index && width != t->indexWidth) table_rebuild_index(t, t->indexCap);
   }
   // keep index load factor <= 3/4 (claimed slots = entriesLen incl tombstones)
-  u32 need = t->entriesLen + extra;
-  if (!t->index || (need + 1) * 4 > t->indexCap * 3) {
+  auto index_overloaded = [need](u32 cap) { return ((u64)need + 1u) * 4u > (u64)cap * 3u; };
+  if (!t->index || index_overloaded(t->indexCap)) {
     u32 cap = t->indexCap ? t->indexCap : 8;
-    while ((need + 1) * 4 > cap * 3) cap *= 2;
+    while (index_overloaded(cap)) {
+      if (cap > UINT32_MAX / 2) ot_fatal("table: capacity overflow");
+      cap *= 2;
+    }
     table_rebuild_index(t, cap);
   }
 }
@@ -219,28 +231,24 @@ Value table_put(Vm& vm, Value table, Value key, Value v) {
 
 u32 table_entry_count(Value table) { return as_table(table)->count; }
 
-// Strong definitions for the printer's table hooks (weak no-ops in printer.cpp).
-u32 printer_table_count(Vm&, Value table) { return table_entry_count(table); }
-bool printer_table_entry(Vm&, Value table, u32 i, Value* k, Value* v) {
-  return table_entry_at(table, i, k, v);
-}
-
-// i-th live entry in insertion order. O(entriesLen) worst case per call when
-// tombstones exist; callers iterating 0..count and remembering position could
-// do better, but compaction keeps tombstones < count so it's fine for a POC.
-bool table_entry_at(Value table, u32 i, Value* k, Value* v) {
+// Advance through the insertion-order storage, skipping tombstones. The cursor
+// is a storage position rather than a live-entry index, so a complete traversal
+// examines every stored entry at most once.
+bool table_iter_next(Value table, u32* cursor, Value* k, Value* v) {
   TableData* t = as_table(table);
-  u32 live = 0;
-  for (u32 j = 0; j < t->entriesLen; j++) {
-    if (is_tomb(t->entries[j])) continue;
-    if (live == i) {
-      *k = t->entries[j].key;
-      *v = t->entries[j].val;
-      return true;
-    }
-    live++;
+  while (*cursor < t->entriesLen) {
+    TableEntry& entry = t->entries[(*cursor)++];
+    if (is_tomb(entry)) continue;
+    *k = entry.key;
+    *v = entry.val;
+    return true;
   }
   return false;
+}
+
+// Strong definition for the printer's table hook (weak no-op in printer.cpp).
+bool printer_table_next(Vm&, Value table, u32* cursor, Value* k, Value* v) {
+  return table_iter_next(table, cursor, k, v);
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +263,7 @@ Value array_get(Value arr, i64 idx) {
 void array_push(Vm&, Value arr, Value v) {
   ArrayData* a = as_array(arr);
   if (a->len == a->cap) {
+    if (a->cap > UINT32_MAX / 2) ot_fatal("array: capacity overflow");
     u32 ncap = a->cap ? a->cap * 2 : 8;
     Value* ni = (Value*)realloc(a->items, (size_t)ncap * sizeof(Value));
     if (!ni) ot_fatal("array: out of memory");
@@ -267,20 +276,9 @@ void array_push(Vm&, Value arr, Value v) {
 // ---------------------------------------------------------------------------
 // Natives.
 
-static Value need_argc(Vm& vm, const char* who, u32 argc, u32 min, u32 max) {
-  if (argc < min || (max != (u32)-1 && argc > max))
-    return raise_error(vm, "%s: wrong number of arguments (%u)", who, argc);
-  return nil_v();
-}
-
 static Value nat_cons(Vm& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "cons", argc, 2, 2));
   return make_pair(vm, ARG(0), ARG(1));
-}
-
-static Value need_pair(Vm& vm, const char* who, Value v) {
-  if (v.tag != Tag::Pair) return raise_error(vm, "%s: expected pair", who);
-  return nil_v();
 }
 
 static Value nat_car(Vm& vm, u32 base, u32 argc) {
@@ -345,13 +343,6 @@ static Value nat_append(Vm& vm, u32 base, u32 argc) {
     vm.popTo(ebase);
   }
   return acc.get();
-}
-
-static u32 utf8_count(const char* p, u32 n) {
-  u32 c = 0;
-  for (u32 i = 0; i < n; i++)
-    if (((u8)p[i] & 0xC0) != 0x80) c++;
-  return c;
 }
 
 static Value nat_length(Vm& vm, u32 base, u32 argc) {
@@ -423,7 +414,7 @@ static Value nat_list_to_array(Vm& vm, u32 base, u32 argc) {
 
 static Value nat_array_to_list(Vm& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "array->list", argc, 1, 1));
-  if (ARG(0).tag != Tag::Array) return raise_error(vm, "array->list: expected array");
+  OT_TRY(need_array(vm, "array->list", ARG(0)));
   Scope s(vm);
   Slot acc = s.push(null_v());
   // re-read the array through its rooted arg slot every iteration: each
@@ -454,7 +445,7 @@ static Value nat_table(Vm& vm, u32 base, u32 argc) {
 static Value string_char_at(Vm& vm, Value s, i64 idx) {
   StringData* sd = as_string(s);
   if (idx < 0 || (u64)idx >= sd->nchars) return nil_v();
-  const char* p = (const char*)(sd + 1);
+  const char* p = string_bytes(sd);
   u32 i = 0;
   i64 c = -1;
   u32 start = 0;
@@ -473,7 +464,7 @@ static Value string_char_at(Vm& vm, Value s, i64 idx) {
 static Value do_get(Vm& vm, Value coll, Value key, Value dflt) {
   Value r = nil_v();
   switch (coll.tag) {
-    case Tag::Nil: break;  // miss
+    case Tag::Nil: break;                                  // miss
     case Tag::Table: r = table_get(vm, coll, key); break;  // alloc-free
     case Tag::Array:
       if (key.tag == Tag::Int) r = array_get(coll, key.i);
@@ -497,34 +488,6 @@ static Value nat_get(Vm& vm, u32 base, u32 argc) {
   return do_get(vm, ARG(0), ARG(1), argc == 3 ? ARG(2) : nil_v());
 }
 
-static Value nat_get_in(Vm& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "get-in", argc, 2, 3));
-  Value path = ARG(1);
-  // path is a sequence (list / array / nil). do_get can allocate (string
-  // indexing) — keep the accumulated coll and the list cursor in rooted
-  // slots and re-read them around each step.
-  Scope s(vm);
-  Slot cS = s.push(ARG(0));
-  if (path.tag == Tag::Array) {
-    for (u32 i = 0; i < as_array(ARG(1))->len; i++) {
-      Value r = do_get(vm, cS.get(), as_array(ARG(1))->items[i], nil_v());
-      OT_TRY(r);
-      cS.set(r);
-    }
-  } else if (path.tag == Tag::Pair || path.tag == Tag::Null) {
-    Slot pS = s.push(path);
-    while (pS.get().tag == Tag::Pair) {
-      Value r = do_get(vm, cS.get(), as_pair(pS.get())->car, nil_v());
-      OT_TRY(r);
-      cS.set(r);
-      pS.set(as_pair(pS.get())->cdr);
-    }
-  } else if (!is_nil(path)) {
-    return raise_error(vm, "get-in: path must be a sequence");
-  }
-  return is_nil(cS.get()) ? (argc == 3 ? ARG(2) : nil_v()) : cS.get();
-}
-
 static Value do_put(Vm& vm, Value coll, Value k, Value v) {
   if (coll.tag == Tag::Table) {
     table_put(vm, coll, k, v);
@@ -541,28 +504,29 @@ static Value do_put(Vm& vm, Value coll, Value k, Value v) {
 }
 
 static Value nat_put(Vm& vm, u32 base, u32 argc) {
-  if (argc < 3 || (argc - 1) % 2 != 0)
-    return raise_error(vm, "put!: expected coll plus key/value pairs");
+  OT_TRY(need_argc(vm, "put!", argc, 3, UINT32_MAX));
+  if ((argc - 1) % 2 != 0) return raise_error(vm, "put!: expected coll plus key/value pairs");
   for (u32 i = 1; i < argc; i += 2) OT_TRY(do_put(vm, ARG(0), ARG(i), ARG(i + 1)));
   return ARG(0);
 }
 
 static Value nat_push(Vm& vm, u32 base, u32 argc) {
-  if (argc < 1 || ARG(0).tag != Tag::Array) return raise_error(vm, "push!: expected array");
+  OT_TRY(need_argc(vm, "push!", argc, 1, UINT32_MAX));
+  OT_TRY(need_array(vm, "push!", ARG(0)));
   for (u32 i = 1; i < argc; i++) array_push(vm, ARG(0), ARG(i));
   return ARG(0);
 }
 
 static Value nat_pop(Vm& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "pop!", argc, 1, 1));
-  if (ARG(0).tag != Tag::Array) return raise_error(vm, "pop!: expected array");
+  OT_TRY(need_array(vm, "pop!", ARG(0)));
   ArrayData* a = as_array(ARG(0));
   if (a->len == 0) return nil_v();
   return a->items[--a->len];
 }
 
 static Value nat_update(Vm& vm, u32 base, u32 argc) {
-  if (argc < 3) return raise_error(vm, "update!: expected coll, key, fn");
+  OT_TRY(need_argc(vm, "update!", argc, 3, UINT32_MAX));
   Value cur;
   OT_TRY(cur = do_get(vm, ARG(0), ARG(1), nil_v()));
   Scope s(vm);
@@ -638,7 +602,6 @@ void register_data(Vm& vm) {
   def_native(vm, "array", nat_array);
   def_native(vm, "table", nat_table);
   def_native(vm, "get", nat_get);
-  def_native(vm, "get-in", nat_get_in);
   def_native(vm, "put!", nat_put);
   def_native(vm, "push!", nat_push);
   def_native(vm, "pop!", nat_pop);

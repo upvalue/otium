@@ -1,37 +1,4 @@
-// heap.hpp — semispace Cheney scavenger and heap object layouts.
-//
-// Design notes (read me, integrators):
-//
-// * Collection model: a single active space; collect() mallocs a fresh
-//   to-space (same size, or doubled when live > 50% after the copy, capped
-//   at maxBytes), Cheney-copies live objects into it, then frees the old
-//   space. Functionally identical to a classic semispace, but growth is
-//   trivial and idle memory is not held.
-//
-// * Roots: the heap does NOT reach into Vm directly (vm.cpp is a separate
-//   compilation unit owned by another agent, and tests run with vm == null).
-//   Instead, root sources register a walker:
-//
-//       heap.addRoots(&walkFn, userData);
-//
-//   where walkFn is called during collect() and must invoke visit(slot) for
-//   every Value* it wants kept alive / updated. The Vm MUST register its
-//   value stack (and its namespace registry) this way in Vm::create:
-//
-//       static void walkStack(void* ud, ot::Heap::VisitFn visit, void* ctx) {
-//         Vm* vm = (Vm*)ud;
-//         for (u32 i = 0; i < vm->stack.len; i++) visit(ctx, &vm->stack.data[i]);
-//       }
-//       vm->heap.addRoots(walkStack, vm);
-//
-// * C-heap payloads: ArrayData::items and TableData::entries live in the C
-//   heap (malloc), owned by the object; BufferData::buf owns its bytes too.
-//   The heap keeps a list of such "finalizable" objects; after each scavenge
-//   the list is swept — dead entries have their C-heap storage freed, live
-//   entries are updated to the moved object.
-//
-// * FunctionData is defined here (not eval.hpp) because the scavenger needs
-//   its layout to trace params/body/env/nsName/docstring.
+// Semispace Cheney scavenger and heap object layouts.
 
 #pragma once
 #include "common.hpp"
@@ -89,6 +56,7 @@ struct BufferData {
   Buf buf;
 };
 using NativeFn = Value (*)(Vm& vm, u32 base, u32 argc);
+// The collector needs the complete layout to trace every Value field.
 struct FunctionData {
   u32 name;         // intern id or 0
   Value params;     // the parameter list form
@@ -123,8 +91,9 @@ struct Heap {
   void collect();
   u32 identityOf(Obj* o);  // stamp lazily, stable across GC
 
-  // Register a root walker; called on every collect. Not deregisterable
-  // (walkers live as long as the heap).
+  // The heap does not scan Vm directly. Register a walker for every external
+  // root source; each walker must visit all of its Value slots on collection.
+  // Walkers live as long as the heap and cannot be deregistered.
   void addRoots(RootWalkFn fn, void* ud);
 
   // --- internals ---
@@ -154,9 +123,7 @@ struct Heap {
   void collectInto(u32 newSize);
 };
 
-// Helper constructors. Take Vm& per the contract, but only use vm.heap —
-// declared here, defined in heap.cpp via an extern accessor the Vm provides.
-// For substrate tests, the heap-taking variants are also provided.
+// Heap-taking constructors support substrate code without a complete Vm.
 Value make_pair_h(Heap& h, Value car, Value cdr);
 Value make_string_h(Heap& h, const char* bytes, u32 len);
 // Substring copy from a heap string; roots src across the alloc. Use this
@@ -169,6 +136,7 @@ Value make_buffer_h(Heap& h);
 
 Value make_pair(Vm& vm, Value car, Value cdr);
 Value make_string(Vm& vm, const char* bytes, u32 len);
+Value make_string(Vm& vm, const Buf& bytes);
 Value make_string_from(Vm& vm, Value src, u32 byteOff, u32 len);
 Value make_array(Vm& vm, u32 cap);
 Value make_table(Vm& vm);
@@ -177,9 +145,8 @@ Value make_buffer(Vm& vm);
 // Accessors.
 inline PairData* as_pair(Value v) { return (PairData*)obj_payload(v.obj); }
 inline StringData* as_string(Value v) { return (StringData*)obj_payload(v.obj); }
-inline const char* string_bytes(Value v) {
-  return (const char*)((char*)obj_payload(v.obj) + sizeof(StringData));
-}
+inline const char* string_bytes(const StringData* s) { return (const char*)(s + 1); }
+inline const char* string_bytes(Value v) { return string_bytes(as_string(v)); }
 inline ArrayData* as_array(Value v) { return (ArrayData*)obj_payload(v.obj); }
 inline TableData* as_table(Value v) { return (TableData*)obj_payload(v.obj); }
 inline BufferData* as_buffer(Value v) { return (BufferData*)obj_payload(v.obj); }
@@ -190,9 +157,8 @@ inline RestartData* as_restart(Value v) { return (RestartData*)obj_payload(v.obj
 // Array item growth helper (items live in the C heap; realloc-based).
 void array_reserve(Value arr, u32 n);
 
-// Table API — implemented in builtins/data.cpp, declared here per contract.
-//
-// CONTRACT (alloc-free): table_get, table_put, array_get, array_push, and
+// Table API — implemented in builtins/data.cpp.
+// table_get, table_put, array_get, array_push, and
 // array_reserve never allocate on the GC heap — all their storage growth is
 // C-heap malloc/realloc. Callers may hold raw Values across these calls.
 // If any of them ever needs a GC allocation, every such caller must be

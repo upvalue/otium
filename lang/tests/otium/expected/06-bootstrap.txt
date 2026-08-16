@@ -1,0 +1,9 @@
+empty-empty: #t #t #t #t #t #t
+empty-nonempty: #f #f #f #f #f
+get-in-array-path: 7
+get-in-list-path: 8
+get-in-default: 9
+get-in-empty-path: 42
+get-in-nil-path: 42
+get-in-allocating-path: a
+get-in-improper: for-each: improper list

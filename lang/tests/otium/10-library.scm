@@ -11,6 +11,9 @@
 (println "reduce-sum:" (reduce + 0 [1 2 3 4]))
 (println "reduce-list:" (reduce + 100 '(1 2)))
 (println "reduce-nil:" (reduce + 5 nil))
+(let ((a [1 2 3]) (seen []))
+  (for-each (fn (x) (push! seen x) (pop! a)) a)
+  (println "for-each-snapshot:" seen))
 (println "reverse-list:" (reverse '(1 2 3)))
 (println "reverse-array:" (reverse [1 2 3]))
 
@@ -78,6 +81,16 @@
 (println "split-sep:" (string-split "a,b,c" ","))
 (println "split-ws:" (string-split "  a b   c "))
 (println "join:" (string-join "-" [1 2 3]))
+(println "join-list:" (string-join ":" '(1 2 3)))
+(println "join-empty:"
+  (str "<" (string-join ":" '()) ">")
+  (str "<" (string-join ":" nil) ">"))
+(println "join-improper:"
+  (try (string-join ":" '(1 . 2))
+    (catch (error? e) (condition-message e))))
+(println "join-not-sequence:"
+  (try (string-join ":" 1)
+    (catch (error? e) (condition-message e))))
 (println "str-concat:" (str 1 "x" :k 'sym 2.5))
 (println "str-empty:" (str "<" (str) ">"))
 (println "string-len:" (string-length "héllo"))
@@ -94,6 +107,13 @@
 ; apply / partial / comp / range
 (println "apply:" (apply + 1 2 '(3 4)))
 (println "apply-array:" (apply max [3 9 2]))
+(println "apply-empty:" (apply list '()) (apply list nil))
+(println "apply-improper:"
+  (try (apply list '(1 . 2))
+    (catch (error? e) (condition-message e))))
+(println "apply-not-sequence:"
+  (try (apply list 1)
+    (catch (error? e) (condition-message e))))
 (println "partial:" ((partial + 1 2) 3))
 (println "comp:" ((comp inc inc) 1))
 (println "comp-order:" ((comp str inc) 4))

@@ -4,9 +4,18 @@
 
 namespace ot {
 
-static u32 align8(u32 n) { return (n + 7u) & ~7u; }
+static u32 align8(u32 n) {
+  if (n > UINT32_MAX - 7u) ot_fatal("heap: size overflow");
+  return (n + 7u) & ~7u;
+}
 
-static u32 objTotalSize(Obj* o) { return (u32)sizeof(Obj) + align8(o->size); }
+static u32 objTotalSize(u32 payloadBytes) {
+  u32 payloadSize = align8(payloadBytes);
+  if (payloadSize > UINT32_MAX - (u32)sizeof(Obj)) ot_fatal("heap: size overflow");
+  return (u32)sizeof(Obj) + payloadSize;
+}
+
+static u32 objTotalSize(Obj* o) { return objTotalSize(o->size); }
 
 Heap::Heap(Vm* vm_, u32 initialBytes)
     : vm(vm_), spaceSize(initialBytes < 1024 ? 1024 : align8(initialBytes)), used(0),
@@ -38,7 +47,10 @@ Heap::~Heap() {
 void Heap::addRoots(RootWalkFn fn, void* ud) { rootWalkers.push(RootEntry{fn, ud}); }
 
 Obj* Heap::alloc(ObjType t, u32 payloadBytes) {
-  u32 total = (u32)sizeof(Obj) + align8(payloadBytes);
+  // Check the configured cap before alignment/header arithmetic can wrap.
+  if (payloadBytes > maxBytes) ot_fatal("heap: allocation exceeds cap");
+  u32 total = objTotalSize(payloadBytes);
+  if (total > maxBytes) ot_fatal("heap: allocation exceeds cap");
 #ifdef OT_GC_STRESS
   // Collect every OT_GC_STRESS_EVERY-th alloc (default 1 = every alloc).
   // The throttle keeps stress iteration tolerable on alloc-heavy tests;
@@ -55,10 +67,11 @@ Obj* Heap::alloc(ObjType t, u32 payloadBytes) {
     collect();
   }
 #endif
-  if (used + total > spaceSize) {
+  OT_ASSERT(used <= spaceSize);
+  if (total > spaceSize - used) {
     collect();
-    while (used + total > spaceSize) {
-      if (spaceSize * 2 > maxBytes) ot_fatal("heap: out of memory (cap reached)");
+    while (total > spaceSize - used) {
+      if (spaceSize > maxBytes / 2) ot_fatal("heap: out of memory (cap reached)");
       collectInto(spaceSize * 2);
     }
   }
@@ -190,7 +203,7 @@ void Heap::collectInto(u32 newSize) {
 
   // Grow policy: if live > 50% after the copy, double next time via an
   // immediate re-collect into a bigger space (cheap: live set is small).
-  if (used > spaceSize / 2 && spaceSize * 2 <= maxBytes) collectInto(spaceSize * 2);
+  if (used > spaceSize / 2 && spaceSize <= maxBytes / 2) collectInto(spaceSize * 2);
 }
 
 u32 Heap::identityOf(Obj* o) {
@@ -212,17 +225,14 @@ Value make_pair_h(Heap& h, Value car, Value cdr) {
   return obj_v(Tag::Pair, o);
 }
 
-// utf8 code points = bytes that are not continuation bytes. Invalid utf8
-// degrades to a byte-ish count rather than erroring.
-static u32 utf8_count(const char* p, u32 len) {
-  u32 n = 0;
-  for (u32 i = 0; i < len; i++)
-    if (((u8)p[i] & 0xC0) != 0x80) n++;
-  return n;
+static u32 stringPayloadSize(u32 len) {
+  constexpr u32 overhead = (u32)sizeof(StringData) + 1u;
+  if (len > UINT32_MAX - overhead) ot_fatal("string: size overflow");
+  return overhead + len;
 }
 
 Value make_string_h(Heap& h, const char* bytes, u32 len) {
-  Obj* o = h.alloc(ObjType::String, (u32)sizeof(StringData) + len + 1);
+  Obj* o = h.alloc(ObjType::String, stringPayloadSize(len));
   StringData* d = (StringData*)obj_payload(o);
   d->len = len;
   char* dst = (char*)obj_payload(o) + sizeof(StringData);
@@ -234,10 +244,11 @@ Value make_string_h(Heap& h, const char* bytes, u32 len) {
 
 Value make_string_from_h(Heap& h, Value src, u32 byteOff, u32 len) {
   // Copy bytes out of a heap string. The alloc may move `src`, so root it in
-  // tempRoots and re-derive the source pointer after — passing sbytes(src)
+  // tempRoots and re-derive the source pointer after — passing string_bytes(src)
   // into make_string_h directly is a use-after-free under a moving collect.
+  u32 payloadSize = stringPayloadSize(len);
   h.tempRoots.push(src);
-  Obj* o = h.alloc(ObjType::String, (u32)sizeof(StringData) + len + 1);
+  Obj* o = h.alloc(ObjType::String, payloadSize);
   src = h.tempRoots.pop();
   StringData* d = (StringData*)obj_payload(o);
   d->len = len;
@@ -283,21 +294,23 @@ void array_reserve(Value arr, u32 n) {
   ArrayData* d = as_array(arr);
   if (n <= d->cap) return;
   u32 ncap = d->cap ? d->cap : 8;
-  while (ncap < n) ncap *= 2;
+  while (ncap < n) {
+    if (ncap > UINT32_MAX / 2) ot_fatal("array: capacity overflow");
+    ncap *= 2;
+  }
   Value* ni = (Value*)realloc(d->items, (size_t)ncap * sizeof(Value));
   if (!ni) ot_fatal("array: out of memory");
   d->items = ni;
   d->cap = ncap;
 }
 
-// Vm-taking variants. Per interfaces.md, Vm's FIRST member is `Heap heap`,
-// so &vm reinterpreted as Heap* is the heap. This avoids a link-time
-// dependency on vm.cpp (needed so substrate tests link standalone).
-// INTEGRATION: if Vm's layout changes, replace with `vm.heap`.
+// Access Vm's leading Heap without introducing a vm.cpp link dependency in
+// substrate tests. Vm::heap must remain its first data member.
 static Heap& heap_of(Vm& vm) { return *reinterpret_cast<Heap*>(&vm); }
 
 Value make_pair(Vm& vm, Value car, Value cdr) { return make_pair_h(heap_of(vm), car, cdr); }
 Value make_string(Vm& vm, const char* b, u32 n) { return make_string_h(heap_of(vm), b, n); }
+Value make_string(Vm& vm, const Buf& b) { return make_string(vm, b.data ? b.data : "", b.len); }
 Value make_string_from(Vm& vm, Value src, u32 off, u32 n) {
   return make_string_from_h(heap_of(vm), src, off, n);
 }

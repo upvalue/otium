@@ -7,8 +7,28 @@
 #include "value.hpp"
 #include "heap.hpp"
 #include "intern.hpp"
+#include <csignal>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <utility>
 
 using namespace ot;
+
+static bool child_aborts(void (*fn)()) {
+  fflush(nullptr);
+  pid_t pid = fork();
+  if (pid < 0) return false;
+  if (pid == 0) {
+    (void)freopen("/dev/null", "w", stdout);
+    (void)freopen("/dev/null", "w", stderr);
+    std::signal(SIGABRT, SIG_DFL);
+    fn();
+    _exit(0);
+  }
+  int status = 0;
+  if (waitpid(pid, &status, 0) != pid) return false;
+  return WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT;
+}
 
 TEST_CASE("Vec growth and basic ops") {
   Vec<int> v;
@@ -24,12 +44,42 @@ TEST_CASE("Vec growth and basic ops") {
   CHECK(v.len == 0);
 }
 
+TEST_CASE("shared byte helpers") {
+  CHECK(ascii_whitespace(' '));
+  CHECK(ascii_whitespace('\t'));
+  CHECK(ascii_whitespace('\n'));
+  CHECK(ascii_whitespace('\r'));
+  CHECK(ascii_whitespace('\f'));
+  CHECK(ascii_whitespace('\v'));
+  CHECK(!ascii_whitespace('x'));
+
+  const char utf8[] = {'h', (char)0xC3, (char)0xA9, (char)0xE2, (char)0x98, (char)0x83};
+  CHECK(utf8_count(utf8, sizeof utf8) == 3);
+  CHECK(utf8_count(nullptr, 0) == 0);
+}
+
 TEST_CASE("Buf append and printf") {
   Buf b;
   b.appendCstr("abc");
   b.printf(" %d-%s", 42, "x");
   CHECK(b.len == 8);
   CHECK(memcmp(b.data, "abc 42-x", 8) == 0);
+
+  Buf moved(std::move(b));
+  CHECK(b.data == nullptr);
+  CHECK(b.len == 0);
+  CHECK(b.cap == 0);
+  CHECK(moved.len == 8);
+  CHECK(memcmp(moved.data, "abc 42-x", 8) == 0);
+
+  Buf assigned;
+  assigned.appendCstr("discarded");
+  assigned = std::move(moved);
+  CHECK(moved.data == nullptr);
+  CHECK(moved.len == 0);
+  CHECK(moved.cap == 0);
+  CHECK(assigned.len == 8);
+  CHECK(memcmp(assigned.data, "abc 42-x", 8) == 0);
 }
 
 TEST_CASE("Value tag round-trips") {
@@ -64,6 +114,41 @@ TEST_CASE("Value tag round-trips") {
 static void walkVecRoots(void* ud, Heap::VisitFn visit, void* ctx) {
   Vec<Value>* roots = (Vec<Value>*)ud;
   for (u32 i = 0; i < roots->len; i++) visit(ctx, &roots->data[i]);
+}
+
+TEST_CASE("heap buffer payload placement lifetime") {
+  Heap heap(nullptr, 4096);
+  Vec<Value> roots;
+  heap.addRoots(walkVecRoots, &roots);
+
+  roots.push(make_buffer_h(heap));
+  as_buffer(roots[0])->buf.appendCstr("survives collection");
+  heap.collect();
+  Buf& live = as_buffer(roots[0])->buf;
+  CHECK(live.len == 19);
+  CHECK(memcmp(live.data, "survives collection", 19) == 0);
+
+  // Dropping the root makes the next sweep invoke BufferData::buf.~Buf().
+  roots.clear();
+  heap.collect();
+}
+
+TEST_CASE("heap size overflow guards abort before allocating") {
+  CHECK(child_aborts([] {
+    Heap heap(nullptr, 1024);
+    heap.maxBytes = UINT32_MAX;
+    (void)heap.alloc(ObjType::String, UINT32_MAX);
+  }));
+  CHECK(child_aborts([] {
+    Heap heap(nullptr, 1024);
+    (void)make_string_h(heap, "", UINT32_MAX);
+  }));
+  CHECK(child_aborts([] {
+    Heap heap(nullptr, 1024);
+    Value array = make_array_h(heap, 0);
+    as_array(array)->cap = UINT32_MAX / 2 + 1;
+    array_reserve(array, UINT32_MAX);
+  }));
 }
 
 TEST_CASE("alloc + scavenge keeps live, drops dead") {

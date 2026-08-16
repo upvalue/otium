@@ -183,9 +183,7 @@
 
 ;; --- macro invocation -------------------------------------------------------
 
-;; INTEGRATION: assumes `apply` accepts a macro object here (the expander's
-;; privileged call).  If the evaluator rejects that, provide a native
-;; (macro-call m arg-list) and swap the body below.
+;; The expander invokes macro objects through apply's privileged macro path.
 (define (exp-call-macro m args) (apply m args))
 
 ;; --- the expander proper ----------------------------------------------------
@@ -239,7 +237,6 @@
 
 (define (expand form) (exp-form form '()))
 
-;; INTEGRATION: hook var is `*expander*` in otium.core; the evaluator calls
-;; (*expander* form) on each top-level form (and from eval / macroexpand)
-;; once this file has been loaded.  Oracle assumed: (expander-macro-var sym).
+;; The evaluator calls (*expander* form) for each top-level form and from
+;; eval/macroexpand. Macro lookup is provided by expander-macro-var.
 (define *expander* expand)

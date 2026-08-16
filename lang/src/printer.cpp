@@ -9,8 +9,7 @@
 
 namespace ot {
 
-__attribute__((weak)) u32 printer_table_count(Vm&, Value) { return 0; }
-__attribute__((weak)) bool printer_table_entry(Vm&, Value, u32, Value*, Value*) { return false; }
+__attribute__((weak)) bool printer_table_next(Vm&, Value, u32*, Value*, Value*) { return false; }
 
 static void print_val(Vm& vm, Value v, Buf& out, bool display);
 
@@ -77,8 +76,6 @@ static void print_named(Vm& vm, const char* kind, u32 nameId, Buf& out) {
   out.push('>');
 }
 
-static const char* string_bytes(StringData* sd) { return (const char*)sd + sizeof(StringData); }
-
 static void print_val(Vm& vm, Value v, Buf& out, bool display) {
   switch (v.tag) {
     case Tag::Nil: out.appendCstr("nil"); return;
@@ -141,11 +138,10 @@ static void print_val(Vm& vm, Value v, Buf& out, bool display) {
     }
     case Tag::Table: {
       out.push('{');
-      u32 n = printer_table_count(vm, v);
       bool first = true;
-      for (u32 i = 0; i < n; i++) {
-        Value k, val;
-        if (!printer_table_entry(vm, v, i, &k, &val)) continue;
+      u32 cursor = 0;
+      Value k, val;
+      while (printer_table_next(vm, v, &cursor, &k, &val)) {
         if (!first) out.push(' ');
         first = false;
         print_val(vm, k, out, display);

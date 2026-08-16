@@ -24,7 +24,7 @@ The first target is 12 benchmarks:
 
 ## Source and port layout
 
-Keep a pinned, unmodified copy of the upstream source and input files under `benchmarks/r7rs/vendor/`. Record the repository URL and commit in `PROVENANCE.md`. The reference snapshot studied for this ticket is ecraven/r7rs-benchmarks commit `85f6acdc4cc4e2b857f307ba56bd0ba931dcccd1`.
+Keep the upstream repository as a git submodule under `benchmarks/r7rs/vendor/`, pinned to commit `85f6acdc4cc4e2b857f307ba56bd0ba931dcccd1`. Record the repository URL and commit in `PROVENANCE.md`. Do not put Otium-specific changes in the submodule.
 
 Put Otium ports under `benchmarks/r7rs/ports/`. Shared Otium benchmark code belongs under `benchmarks/r7rs/lib/`; it is a benchmark API, not an R7RS prelude.
 
@@ -83,11 +83,12 @@ Timeouts and crashes are results. An incorrect answer is never a timing result.
 
 ## Acceptance criteria
 
-1. The upstream snapshot is pinned and unmodified, with provenance recorded.
-2. All 12 initial Otium ports use the canonical upstream inputs and report the expected result.
+1. The upstream repository is an unmodified submodule pinned to the recorded commit, and a normal recursive clone or `git submodule update --init` supplies it.
+2. All 12 initial Otium ports pass reduced-input correctness checks and can be launched with the canonical upstream inputs unchanged. Canonical timeouts and crashes are recorded as results rather than treated as correctness failures.
 3. Every port has a reviewed parity grade and documented deviations.
-4. `python benchmarks/r7rs/run.py build/otium fib` emits a correct `+!CSVLINE!+otium-...,fib:40:5,<seconds>` line and records both reported and wall-clock time.
+4. Completed runs emit a correct `+!CSVLINE!+otium-...,<benchmark>:<input>,<seconds>` line and record both reported and wall-clock time. Timed-out runs record the timeout without fabricating a timing result.
 5. `results.csv` and `STATUS.md` distinguish ok, incorrect, crashed, timeout, and unsupported results.
 6. At least one upstream Scheme implementation can be run through the comparison workflow on the same host; unavailable executables are reported as unsupported, not as failed benchmarks.
-7. New Otium primitives and CLI flags have doctest and CLI coverage. Normal and `gc_stress=true` Meson test suites pass.
+7. New Otium primitives and CLI flags have doctest and CLI coverage. The normal Meson suite and focused benchmark-port regression tests pass.
 8. `NOTES.md` records porting friction and follow-up language ideas without turning benchmark-specific workarounds into core features.
+9. `agent-docs/r7rs-benchmarks.md` explains the layout, provenance rules, normal test workflow, comparison model, result fields, and how to add another port.

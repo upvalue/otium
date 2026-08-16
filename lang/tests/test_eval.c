@@ -355,3 +355,75 @@ TEST(condition_types_and_macros) {
   CHECK(is_int(r, 42));
   state_destroy(vm);
 }
+
+// --- rooted-handle scope machinery (state.h) --------------------------------
+//
+// These exercise the contract directly rather than through a converted caller,
+// so a regression in the scope guard itself is not diagnosed as a bug in
+// whatever happens to be using it.
+
+// Pushes scratch, then returns one value: depth must land at entry + 1.
+static Status t_scope_ok(State* vm, Ref src) {
+  OT_SCOPE(vm);
+  Ref a = ref_push(vm, int_v(1));
+  Ref b = ref_push(vm, int_v(2));
+  (void)a;
+  (void)b;
+  OT_RETURN(ref_get(vm, src));
+}
+
+// Pushes scratch, then fails: depth must land back at entry.
+static Status t_scope_unwind(State* vm) {
+  OT_SCOPE(vm);
+  ref_push(vm, int_v(7));
+  ref_push(vm, int_v(8));
+  return Status_Unwind;
+}
+
+// Propagation through OT_CHECK must unwind both scopes, not just the inner one.
+static Status t_scope_nested(State* vm) {
+  OT_SCOPE(vm);
+  ref_push(vm, int_v(9));
+  OT_CHECK(t_scope_unwind(vm));
+  OT_RETURN(int_v(0));  // unreachable
+}
+
+TEST(scope_ok_leaves_exactly_one_value) {
+  State* vm = state_create(nullptr);
+  u32 base = vm->stack.len;
+  Ref src = ref_push(vm, int_v(42));
+  CHECK(t_scope_ok(vm, src) == Status_Ok);
+  CHECK(vm->stack.len == base + 2);  // src, then the one returned value
+  CHECK(ref_get(vm, ref_top(vm)).i == 42);
+  vm->stack.len = base;
+  state_destroy(vm);
+}
+
+TEST(scope_unwind_restores_entry_depth) {
+  State* vm = state_create(nullptr);
+  u32 base = vm->stack.len;
+  CHECK(t_scope_unwind(vm) == Status_Unwind);
+  CHECK(vm->stack.len == base);
+  state_destroy(vm);
+}
+
+TEST(scope_unwind_propagates_through_nesting) {
+  State* vm = state_create(nullptr);
+  u32 base = vm->stack.len;
+  CHECK(t_scope_nested(vm) == Status_Unwind);
+  CHECK(vm->stack.len == base);
+  state_destroy(vm);
+}
+
+// The point of the handle: a ref survives a collection that moves its object.
+TEST(ref_survives_collection) {
+  State* vm = state_create(nullptr);
+  u32 base = vm->stack.len;
+  Ref s = ref_push(vm, make_string(vm, "durable", 7));
+  for (int i = 0; i < 64; i++) (void)make_string(vm, "garbage", 7);
+  heap_collect(&vm->heap);
+  CHECK(ref_get(vm, s).tag == Tag_String);
+  CHECK(memcmp(string_bytes(ref_get(vm, s)), "durable", 7) == 0);
+  vm->stack.len = base;
+  state_destroy(vm);
+}

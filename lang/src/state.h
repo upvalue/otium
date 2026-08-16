@@ -199,6 +199,86 @@ typedef struct Slot {
 static inline Value slot_get(Slot s) { return vec_at(&s.vm->stack, s.idx); }
 static inline void slot_set(Slot s, Value v) { vec_at(&s.vm->stack, s.idx) = v; }
 
+// --- rooted handles, scoped (the convention all new code follows) -----------
+//
+// The rule this replaces the old one with: a heap value lives on the value
+// stack, and nothing else. A raw Value may exist only between a ref_get and
+// its immediate use, with no allocating call in between.
+//
+// A function that can return a heap value returns it ON THE STACK and reports
+// control flow through Status:
+//
+//   Status_Ok      => exactly one value pushed above the entry depth
+//   Status_Unwind  => stack restored to the entry depth, unwind in flight
+//
+// Shape:
+//
+//   [[nodiscard]] Status build(State* vm, Ref src) {
+//     OT_SCOPE(vm);
+//     Ref tmp = ref_push(vm, ref_get(vm, src));
+//     OT_CHECK(other(vm, tmp));        // on unwind, OT_SCOPE pops for us
+//     Ref made = ref_top(vm);
+//     OT_RETURN(ref_get(vm, made));
+//   }
+//
+// OT_SCOPE arms a cleanup handler, so every path out of the region restores
+// the stack without the function naming a pop. OT_RETURN disarms it, pops to
+// the entry depth and pushes the single result; nothing allocates between that
+// pop and that push, so the raw Value it carries cannot go stale.
+typedef enum Status : u8 {
+  Status_Ok,
+  Status_Unwind,
+} Status;
+
+// A handle on a rooted stack cell. Deliberately a struct so it cannot be
+// confused with an index, and deliberately not convertible to or from Value:
+// passing a transient where a rooted operand belongs is a type error.
+typedef struct Ref {
+  u32 i;
+} Ref;
+
+static inline Value ref_get(State* vm, Ref r) { return vec_at(&vm->stack, r.i); }
+static inline void ref_set(State* vm, Ref r, Value v) { vec_at(&vm->stack, r.i) = v; }
+static inline Ref ref_push(State* vm, Value v) { return (Ref){state_push(vm, v)}; }
+// The cell a just-returned Status_Ok callee pushed its result into.
+static inline Ref ref_top(State* vm) {
+  OT_ASSERT(vm->stack.len > 0);
+  return (Ref){vm->stack.len - 1};
+}
+
+typedef struct ScopeGuard {
+  State* vm;  // null once disarmed by scope_return
+  u32 base;
+} ScopeGuard;
+
+static inline void scope_release(ScopeGuard* g) {
+  if (g->vm && g->vm->stack.len > g->base) g->vm->stack.len = g->base;
+}
+
+// Disarm, drop the scope's temporaries, and leave `result` as the one value
+// the Status_Ok contract promises. No allocation occurs between the pop and
+// the push, so `result` cannot be moved out from under us in between.
+static inline Status scope_return(ScopeGuard* g, Value result) {
+  State* vm = g->vm;
+  u32 base = g->base;
+  g->vm = nullptr;
+  if (vm->stack.len > base) vm->stack.len = base;
+  state_push(vm, result);
+  return Status_Ok;
+}
+
+#define OT_SCOPE(vm)                                                                               \
+  [[maybe_unused]] ScopeGuard _otScope __attribute__((cleanup(scope_release))) = {                 \
+      (vm), (vm)->stack.len}
+#define OT_RETURN(result) return scope_return(&_otScope, (result))
+// Propagate a callee's unwind. The enclosing OT_SCOPE does the popping.
+// Named OT_CHECK only while the old Value-returning OT_TRY in value.h still
+// exists; it takes that name once the last Value-returning caller is gone.
+#define OT_CHECK(expr)                                                                             \
+  do {                                                                                             \
+    if ((expr) != Status_Ok) return Status_Unwind;                                                 \
+  } while (0)
+
 // Scope replaces the C++ RAII guard: scope_begin snapshots the stack length,
 // and EVERY exit from the region must restore it — normal returns go through
 // scope_exit(vm, sc, result), unwind propagation goes through OT_TRYS(vm, sc, e).

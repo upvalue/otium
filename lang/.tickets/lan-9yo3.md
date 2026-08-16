@@ -2,7 +2,7 @@
 id: lan-9yo3
 status: open
 deps: []
-links: []
+links: [lan-67q1]
 created: 2026-08-16T15:25:38Z
 type: task
 priority: 2

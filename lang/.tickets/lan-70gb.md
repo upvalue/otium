@@ -2,7 +2,7 @@
 id: lan-70gb
 status: in_progress
 deps: []
-links: [lan-p1e2]
+links: [lan-p1e2, lan-iuyk]
 created: 2026-08-16T02:08:43Z
 type: epic
 priority: 1

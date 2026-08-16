@@ -2,7 +2,7 @@
 id: lan-5je1
 status: open
 deps: []
-links: [lan-q4lf, lan-515h]
+links: [lan-q4lf, lan-515h, lan-67q1]
 created: 2026-08-16T02:22:20Z
 type: epic
 priority: 1

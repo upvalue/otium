@@ -2,7 +2,7 @@
 id: lan-qwff
 status: in_progress
 deps: []
-links: [lan-q4lf]
+links: [lan-q4lf, lan-ius2, lan-ab4w, lan-hfil]
 created: 2026-08-16T01:37:50Z
 type: feature
 priority: 2

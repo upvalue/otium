@@ -2,7 +2,7 @@
 id: lan-p1e2
 status: open
 deps: []
-links: [lan-70gb]
+links: [lan-70gb, lan-67q1]
 created: 2026-08-16T04:26:30Z
 type: epic
 priority: 2

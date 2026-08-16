@@ -2,7 +2,7 @@
 
 static void* default_alloc(void* ud, size_t n) {
   (void)ud;
-  return malloc(n);
+  return calloc(1, n);
 }
 static void* default_realloc(void* ud, void* p, size_t n) {
   (void)ud;

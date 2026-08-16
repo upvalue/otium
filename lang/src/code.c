@@ -41,13 +41,13 @@ Value make_code(State* vm, const u8* bytes, u32 len, Value constants, const Code
   code->name = spec->name;
 
   if (len) {
-    code->bytes = (u8*)malloc(len);
+    code->bytes = (u8*)ot_alloc(len);
     if (!code->bytes) ot_fatal("code: cannot allocate bytecode");
     memcpy(code->bytes, bytes, len);
   }
   if (code->constCount) {
     if (code->constCount > UINT32_MAX / sizeof(Value)) ot_fatal("code: constant pool overflow");
-    code->consts = (Value*)malloc((size_t)code->constCount * sizeof(Value));
+    code->consts = (Value*)ot_alloc((size_t)code->constCount * sizeof(Value));
     if (!code->consts) ot_fatal("code: cannot allocate constant pool");
     ArrayData* source = as_array(slot_get(constantsRoot));
     memcpy(code->consts, source->items, (size_t)code->constCount * sizeof(Value));
@@ -71,8 +71,11 @@ bool code_verify(Value value, Buf* error) {
     return false;
   }
 
-  u8* boundaries = (u8*)calloc(code->len + 1u, 1);
+  // ot_alloc does not promise zeroed memory (see common.h); the boundary table
+  // is read before every slot is written, so zero it explicitly.
+  u8* boundaries = (u8*)ot_alloc((size_t)code->len + 1u);
   if (!boundaries) ot_fatal("code verifier: out of memory");
+  memset(boundaries, 0, (size_t)code->len + 1u);
   u32 ip = 0;
   bool ok = true;
   while (ip < code->len) {
@@ -117,7 +120,7 @@ bool code_verify(Value value, Buf* error) {
       ip += width;
     }
   }
-  free(boundaries);
+  ot_free(boundaries);
   return ok;
 }
 

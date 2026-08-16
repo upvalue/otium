@@ -47,9 +47,15 @@ static inline u32 grow_capacity(u32 cap, u32 need, const char* overflowMessage) 
 }
 
 // Host allocator seam. All C-heap storage in the runtime (Vec, heap payloads,
-// interned names) goes through these; the default is malloc-backed. Embedded
+// interned names) goes through these; the default is calloc-backed. Embedded
 // hosts install their own before creating a State. Process-global by design:
 // low-memory targets run one VM.
+//
+// Nothing may call malloc/calloc/realloc/free directly outside vec.c, which
+// implements the default backend (enforced by tests/check_hygiene.py). Callers
+// must not assume returned memory is zeroed: the default backend zeroes, but a
+// host backend need not, and ot_realloc cannot zero the grown tail either way.
+// Zero explicitly where it matters.
 typedef struct OtAllocator {
   void* (*alloc)(void* ud, size_t n);
   void* (*realloc)(void* ud, void* p, size_t n);

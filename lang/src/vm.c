@@ -12,17 +12,17 @@ static bool compiled_function(Value value) {
 
 Value make_compiled_function(State* vm, Value code, Value captures, Value nsName, u32 name,
                              bool macro) {
-  u32 sc = scope_begin(vm);
-  Slot codeRoot = scope_push(vm, code);
-  Slot capturesRoot = scope_push(vm, captures);
-  Slot nsRoot = scope_push(vm, nsName);
-  if (slot_get(codeRoot).tag != Tag_Code)
-    return scope_exit(vm, sc, raise_error(vm, "compiled function needs code"));
-  if (slot_get(capturesRoot).tag != Tag_Array)
-    return scope_exit(vm, sc, raise_error(vm, "compiled function captures must be an array"));
-  u32 count = as_array(slot_get(capturesRoot))->len;
-  if (count != as_code(slot_get(codeRoot))->nupvals)
-    return scope_exit(vm, sc, raise_error(vm, "compiled function capture count mismatch"));
+  OT_SCOPE(vm);
+  Ref codeRoot = ref_push(vm, code);
+  Ref capturesRoot = ref_push(vm, captures);
+  Ref nsRoot = ref_push(vm, nsName);
+  if (ref_get(vm, codeRoot).tag != Tag_Code)
+    return raise_error(vm, "compiled function needs code");
+  if (ref_get(vm, capturesRoot).tag != Tag_Array)
+    return raise_error(vm, "compiled function captures must be an array");
+  u32 count = as_array(ref_get(vm, capturesRoot))->len;
+  if (count != as_code(ref_get(vm, codeRoot))->nupvals)
+    return raise_error(vm, "compiled function capture count mismatch");
   if (count > (UINT32_MAX - (u32)sizeof(FunctionData)) / (u32)sizeof(Value))
     ot_fatal("compiled function: capture size overflow");
   u32 size = (u32)sizeof(FunctionData) + count * (u32)sizeof(Value);
@@ -32,14 +32,16 @@ Value make_compiled_function(State* vm, Value code, Value captures, Value nsName
   Value fnValue = obj_v(tag, object);
   FunctionData* fn = as_function(fnValue);
   fn->name = name;
-  fn->code = slot_get(codeRoot);
-  fn->nsName = slot_get(nsRoot);
+  fn->code = ref_get(vm, codeRoot);
+  fn->nsName = ref_get(vm, nsRoot);
   fn->native = nullptr;
   fn->docstring = nil_v();
   fn->nupvals = count;
-  ArrayData* source = as_array(slot_get(capturesRoot));
+  // Nothing allocates between here and the last write, so both interior
+  // pointers stay valid for the copy.
+  ArrayData* source = as_array(ref_get(vm, capturesRoot));
   for (u32 i = 0; i < count; i++) function_upvals(fn)[i] = source->items[i];
-  return scope_exit(vm, sc, fnValue);
+  return fnValue;
 }
 
 static Value enter_frame(State* vm, Value fnValue, u32 callBase, u32 argc, bool tail,
@@ -74,12 +76,7 @@ static Value enter_frame(State* vm, Value fnValue, u32 callBase, u32 argc, bool 
   CallFrame* frame = &vm->frames.data[vm->frames.len - 1];
   if (hasRest) {
     u32 extra = argc - nfixed;
-    Slot rest = {vm, state_push(vm, null_v())};
-    for (u32 i = extra; i-- > 0;) {
-      Slot item = {vm, frame->base + nfixed + i};
-      slot_set(rest, make_pair_slots(vm, item, rest));
-    }
-    Value list = slot_get(rest);
+    Value list = list_from_stack(vm, frame->base + nfixed, extra);
     state_pop_to(vm, frame->base + nfixed);
     state_push(vm, list);
   } else {
@@ -293,10 +290,11 @@ Value vm_execute(State* vm, u32 floor) {
   }
   VM_OP(MakeBox) {
     VM_NEED_OPERANDS(1);
-    Slot value = {vm, vm->stack.len - 1};
-    Value box = make_array(vm, 1);
-    array_push(vm, box, slot_get(value));
-    slot_set(value, box);
+    Ref value = {vm->stack.len - 1};
+    Ref box = ref_push(vm, make_array(vm, 1));
+    array_push(vm, ref_get(vm, box), ref_get(vm, value));
+    ref_set(vm, value, ref_get(vm, box));
+    (void)vec_pop(&vm->stack);
     VM_DISPATCH();
   }
   VM_OP(GetUpval) {
@@ -325,7 +323,7 @@ Value vm_execute(State* vm, u32 floor) {
     VM_NEED(nested.tag == Tag_Code && as_array(descriptor)->len - 1 == as_code(nested)->nupvals,
             "vm: bad closure descriptor");
     u32 captureCount = as_code(nested)->nupvals;
-    Slot captures = {vm, state_push(vm, make_array(vm, captureCount))};
+    Ref captures = {state_push(vm, make_array(vm, captureCount))};
     for (u32 i = 0; i < captureCount; i++) {
       // Re-derive through the frame: make_array above may have moved headers.
       FunctionData* parent = VM_FN();
@@ -342,14 +340,14 @@ Value vm_execute(State* vm, u32 floor) {
         box = function_upvals(parent)[upvalue];
       }
       VM_NEED(box_cell(box), "vm: capture is not a box");
-      array_push(vm, slot_get(captures), box);
+      array_push(vm, ref_get(vm, captures), box);
     }
     FunctionData* parent = VM_FN();
     nested = as_array(as_code(parent->code)->consts[index])->items[0];
-    Value closure = make_compiled_function(vm, nested, slot_get(captures), parent->nsName,
+    Value closure = make_compiled_function(vm, nested, ref_get(vm, captures), parent->nsName,
                                            as_code(nested)->name, false);
     VM_PROPAGATE(closure);
-    slot_set(captures, closure);
+    ref_set(vm, captures, closure);
     VM_DISPATCH();
   }
   VM_OP(ToMacro) {
@@ -443,9 +441,8 @@ Value vm_execute(State* vm, u32 floor) {
   }
   VM_OP(Cons) {
     VM_NEED_OPERANDS(2);
-    Slot car = {vm, vm->stack.len - 2};
-    Slot cdr = {vm, vm->stack.len - 1};
-    Value pair = make_pair_slots(vm, car, cdr);
+    Value pair = make_pair(vm, vm->stack.data[vm->stack.len - 2],
+                           vm->stack.data[vm->stack.len - 1]);
     vm->stack.len--;
     vm->stack.data[vm->stack.len - 1] = pair;
     VM_DISPATCH();
@@ -454,10 +451,7 @@ Value vm_execute(State* vm, u32 floor) {
     u16 count = VM_U16();
     VM_NEED_OPERANDS(count);
     u32 first = vm->stack.len - count;
-    Slot result = {vm, state_push(vm, null_v())};
-    for (u32 i = count; i-- > 0;)
-      slot_set(result, make_pair_slots(vm, (Slot){vm, first + i}, result));
-    Value list = slot_get(result);
+    Value list = list_from_stack(vm, first, count);
     state_pop_to(vm, first);
     state_push(vm, list);
     VM_DISPATCH();
@@ -472,10 +466,10 @@ Value vm_execute(State* vm, u32 floor) {
       cursor = as_pair(cursor)->cdr;
     }
     if (cursor.tag != Tag_Null) VM_FAULT("unquote-splicing: expected proper list");
-    Slot result = {vm, left + 1};
-    for (u32 i = vm->stack.len; i-- > elements;)
-      slot_set(result, make_pair_slots(vm, (Slot){vm, i}, result));
-    Value value = slot_get(result);
+    // Folds onto the right-hand operand at left+1, which is the tail this
+    // splice appends in front of -- not onto the empty list.
+    Value value =
+        list_from_stack_onto(vm, elements, vm->stack.len - elements, vm->stack.data[left + 1]);
     state_pop_to(vm, left);
     state_push(vm, value);
     VM_DISPATCH();
@@ -565,30 +559,29 @@ Value vm_call(State* vm, Value callee, u32 base, u32 argc) {
 }
 
 Value vm_execute_code(State* vm, Value code) {
-  u32 sc = scope_begin(vm);
-  Slot codeRoot = scope_push(vm, code);
-  if (slot_get(codeRoot).tag != Tag_Code)
-    return scope_exit(vm, sc, raise_error(vm, "vm: expected code"));
+  OT_SCOPE(vm);
+  Ref codeRoot = ref_push(vm, code);
+  if (ref_get(vm, codeRoot).tag != Tag_Code) return raise_error(vm, "vm: expected code");
   Buf verifyError = {0};
-  if (!code_verify(slot_get(codeRoot), &verifyError)) {
+  if (!code_verify(ref_get(vm, codeRoot), &verifyError)) {
     vec_push(&verifyError, '\0');
     Value raised = raise_error(vm, "vm: %s", verifyError.data);
     buf_deinit(&verifyError);
-    return scope_exit(vm, sc, raised);
+    return raised;
   }
   buf_deinit(&verifyError);
-  Slot captures = scope_push(vm, make_array(vm, 0));
-  Slot fn = scope_push(vm, make_compiled_function(vm, slot_get(codeRoot), slot_get(captures),
+  Ref captures = ref_push(vm, make_array(vm, 0));
+  Ref fn = ref_push(vm, make_compiled_function(vm, ref_get(vm, codeRoot), ref_get(vm, captures),
                                                   symbol_v(vm->currentNs),
-                                                  as_code(slot_get(codeRoot))->name, false));
-  if (slot_get(fn).tag == Tag_Unwind) return scope_exit(vm, sc, slot_get(fn));
+                                               as_code(ref_get(vm, codeRoot))->name, false));
+  if (ref_get(vm, fn).tag == Tag_Unwind) return unwind_v();
   u32 floor = vm->frames.len;
   u32 callBase = vm->stack.len;
-  state_push(vm, slot_get(fn));
+  state_push(vm, ref_get(vm, fn));
   Value entered = enter_frame(vm, vm->stack.data[callBase], callBase, 0, false, false);
   if (entered.tag == Tag_Unwind) {
     state_pop_to(vm, callBase);
-    return scope_exit(vm, sc, entered);
+    return entered;
   }
-  return scope_exit(vm, sc, vm_execute(vm, floor));
+  return vm_execute(vm, floor);
 }

@@ -1,16 +1,6 @@
 // builtins/cond.c — conditions and restarts (spec 8).
 #include "../builtins.h"
 
-static Value list_from_stack(State* vm, u32 base, u32 n) {
-  OT_SCOPE(vm);
-  Ref acc = ref_push(vm, null_v());
-  // Both operands are read at the call, out of rooted slots, so make_pair
-  // moving either of them is harmless.
-  for (u32 j = n; j-- > 0;)
-    ref_set(vm, acc, make_pair(vm, vm->stack.data[base + j], ref_get(vm, acc)));
-  return ref_get(vm, acc);
-}
-
 static Value build_condition(State* vm, const char* who, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, who, argc, 1, UINT32_MAX));
   Value first = vm->stack.data[base];

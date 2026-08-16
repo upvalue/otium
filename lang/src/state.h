@@ -315,6 +315,23 @@ static inline Slot scope_slot(State* vm, u32 base, u32 i) {  // i-th push of thi
   return (Slot){vm, base + i};
 }
 
+// Build a list from `n` values sitting in consecutive stack slots at `base`,
+// folding right to left onto `tail`. The elements stay where they are and are
+// read by index, so the make_pair chain moving them is harmless: their slots
+// are roots. `tail` is rooted by the first push, before anything allocates.
+// This fold was re-derived by hand in five places before it lived here.
+static inline Value list_from_stack_onto(State* vm, u32 base, u32 n, Value tail) {
+  OT_SCOPE(vm);
+  Ref acc = ref_push(vm, tail);
+  for (u32 i = n; i-- > 0;)
+    ref_set(vm, acc, make_pair(vm, vec_at(&vm->stack, base + i), ref_get(vm, acc)));
+  return ref_get(vm, acc);
+}
+
+static inline Value list_from_stack(State* vm, u32 base, u32 n) {
+  return list_from_stack_onto(vm, base, n, null_v());
+}
+
 // Slot-taking constructor sugar: operands are read from their rooted slots
 // at call time (the underlying helpers root their Value args internally via
 // heap tempRoots, so the raw forms are also safe — these exist so call

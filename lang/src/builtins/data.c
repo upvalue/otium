@@ -382,10 +382,7 @@ static Value nat_cddr(State* vm, u32 base, u32 argc) {
 }
 
 static Value nat_list(State* vm, u32 base, u32 argc) {
-  OT_SCOPE(vm);
-  Ref acc = ref_push(vm, null_v());
-  for (u32 i = argc; i-- > 0;) ref_set(vm, acc, make_pair(vm, ARG(i), ref_get(vm, acc)));
-  return ref_get(vm, acc);
+  return list_from_stack(vm, base, argc);  // args are already contiguous at base
 }
 
 static Value nat_append(State* vm, u32 base, u32 argc) {

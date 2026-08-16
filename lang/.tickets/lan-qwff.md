@@ -1,6 +1,6 @@
 ---
 id: lan-qwff
-status: open
+status: in_progress
 deps: []
 links: [lan-q4lf]
 created: 2026-08-16T01:37:50Z
@@ -33,3 +33,9 @@ Phase 2 — LSP proper (deferred): thin adapter over the live VM. Go-to-definiti
 
 Phase 0: otium files get correct highlighting and structural editing in neovim. Phase 1b: from a neovim buffer, can eval form at point, see docs on a symbol, macroexpand at point, and get live completions (with signatures/docs) via cmp-conjure; server mode never deadlocks on the restart prompt.
 
+
+## Notes
+
+**2026-08-16T02:38:08Z**
+
+Phase 1b first slice: added a framed --server stdio mode and an Otium Conjure client with live eval, docs, macroexpand, start/stop, and interrupt support. Live completion/reflection remains.

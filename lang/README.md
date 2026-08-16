@@ -23,6 +23,10 @@ Run `tools/format-cpp` to format the C++ sources. Run
 The script looks for `clang-format` on `PATH` and through Xcode's `xcrun`.
 Set `CLANG_FORMAT` to use a specific binary.
 
+## Editor support
+
+Vim and Neovim runtime files are available in [`vim/`](vim/README.md).
+
 ## Benchmarks
 
 Pass an optimized `otium` binary to the benchmark runner:

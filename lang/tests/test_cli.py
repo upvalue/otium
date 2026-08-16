@@ -23,6 +23,7 @@ def expect(result, status, stdout=None, stderr=None):
 
 
 expect(run("--help"), 0, stdout="--repl")
+expect(run("--help"), 0, stdout="--server")
 expect(run(), 0, stdout="otium repl")
 
 file_only = run(fixture)
@@ -33,6 +34,27 @@ expect(run(fixture, "--repl"), 0, stdout="loaded-from-file\notium repl")
 expect(run("--repl", fixture), 0, stdout="loaded-from-file\notium repl")
 expect(run("--unknown"), 2, stderr="unknown option --unknown")
 expect(run("--path"), 2, stderr="--path requires a directory")
+expect(run("--repl", "--server"), 2, stderr="cannot be used together")
+
+
+def frame(source):
+    return source + "\n\x1f\n"
+
+
+server = run(
+    "--server",
+    input_text=(
+        frame("(+ 1 2)")
+        + frame('(restart-case (error "server") (use-value (v) v))')
+        + frame("(+ 3 4)")
+    ),
+)
+expect(server, 0, stdout="3\n\x1eot> ")
+assert server.stdout.count("\x1eot> ") == 3, server
+assert "error:" in server.stdout, server
+assert "7\n\x1eot> " in server.stdout, server
+assert "restart #?" not in server.stdout, server
+assert server.stderr == "", server
 
 multiline = run(input_text="(+ 1\n 2)\nnil\n(quit)\n(println \"after-quit\")\n")
 expect(multiline, 0, stdout="3\n")

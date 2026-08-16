@@ -227,6 +227,67 @@ static void print_repl_result(Vm& vm, Value result, u32, void*) {
   print_value(vm, result, stdout);
 }
 
+// The server protocol uses one control character per direction. A request is
+// source text followed by a line containing US; each response ends with RS
+// and "ot> ". Source can contain any number of lines and top-level forms.
+static constexpr char SERVER_REQUEST_END = '\x1f';
+static constexpr const char* SERVER_RESPONSE_END = "\x1eot> ";
+
+static bool read_server_line(std::string& line) {
+  line.clear();
+  for (;;) {
+    int c = fgetc(stdin);
+    if (c == EOF) return !line.empty();
+    if (c == '\n') return true;
+    line.push_back((char)c);
+  }
+}
+
+static Value eval_server_form(Vm& vm, Value form, void*) { return ot::eval_form(vm, form); }
+
+static void finish_server_response() {
+  fputs(SERVER_RESPONSE_END, stdout);
+  fflush(stdout);
+}
+
+static void run_server(Vm& vm) {
+  g_replMode = true;
+  std::string source;
+  std::string line;
+
+  while (read_server_line(line)) {
+    if (!(line.size() == 1 && line[0] == SERVER_REQUEST_END)) {
+      if (!source.empty()) source.push_back('\n');
+      source.append(line);
+      continue;
+    }
+
+    bool stop = false;
+    if (!source.empty()) {
+      ot::EvalSourceState sourceState;
+      ot::EvalSourcePolicy policy{nullptr, eval_server_form, print_repl_result, &sourceState};
+      Value result = ot::eval_source(vm, source.data(), (u32)source.size(), "<server>", policy);
+      if (result.tag == Tag::Unwind) {
+        QuitReason reason = take_quit(vm);
+        if (reason == QuitReason::Interrupt) {
+          vm.interruptFlag = false;
+          puts("interrupted");
+        } else if (reason == QuitReason::Requested) {
+          stop = true;
+        } else {
+          fputs("error: ", stdout);
+          print_value(vm, vm.unwindCondition, stdout);
+        }
+        ot::vm_cancel_unwind(vm);
+      }
+    }
+
+    source.clear();
+    if (stop) break;
+    finish_server_response();
+  }
+}
+
 static void run_repl(Vm& vm) {
   g_replMode = true;
   printf("otium repl — ^C interrupts, ^D exits\n");
@@ -314,6 +375,7 @@ static void run_repl(Vm& vm) {
 struct CliOptions {
   const char* script = nullptr;
   bool repl = false;
+  bool server = false;
 };
 
 static void print_usage(FILE* to) {
@@ -322,6 +384,7 @@ static void print_usage(FILE* to) {
         "\n"
         "Options:\n"
         "  --repl       Start a REPL after loading FILE\n"
+        "  --server     Run the framed stdio evaluation server\n"
         "  --path DIR   Add DIR to the module search path (repeatable)\n"
         "  -h, --help   Show this help\n",
         to);
@@ -335,6 +398,8 @@ static int parse_args(int argc, char** argv, CliOptions& options) {
       positionalOnly = true;
     } else if (!positionalOnly && strcmp(arg, "--repl") == 0) {
       options.repl = true;
+    } else if (!positionalOnly && strcmp(arg, "--server") == 0) {
+      options.server = true;
     } else if (!positionalOnly && strcmp(arg, "--path") == 0) {
       if (++i == argc) {
         fputs("otium: --path requires a directory\n", stderr);
@@ -354,6 +419,10 @@ static int parse_args(int argc, char** argv, CliOptions& options) {
       fprintf(stderr, "otium: unexpected argument %s\n", arg);
       return 2;
     }
+  }
+  if (options.repl && options.server) {
+    fputs("otium: --repl and --server cannot be used together\n", stderr);
+    return 2;
   }
   return 0;
 }
@@ -399,7 +468,9 @@ int main(int argc, char** argv) {
 
   int status = 0;
   if (options.script) status = run_file(*vm, options.script);
-  if (status == 0 && !g_quitRequested && (options.repl || !options.script)) {
+  if (status == 0 && !g_quitRequested && options.server) {
+    run_server(*vm);
+  } else if (status == 0 && !g_quitRequested && (options.repl || !options.script)) {
     run_repl(*vm);
   }
 

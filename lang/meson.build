@@ -53,6 +53,7 @@ lib_sources = files(
   'src/state.cpp',
   'src/code.cpp',
   'src/vm.cpp',
+  'src/compile.cpp',
   'src/ns.cpp',
   'src/eval.cpp',
   'src/reader.cpp',
@@ -85,6 +86,7 @@ test_sources = files(
   'tests/test_eval.cpp',
   'tests/test_builtins.cpp',
   'tests/test_vm.cpp',
+  'tests/test_compile.cpp',
 )
 otium_tests = executable('otium-tests',
   test_sources,

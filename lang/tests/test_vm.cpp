@@ -2,6 +2,7 @@
 #include "../src/code.hpp"
 #include "../src/eval.hpp"
 #include "../src/heap.hpp"
+#include "../src/ns.hpp"
 #include "../src/state.hpp"
 #include "../src/vm.hpp"
 #include <cstring>
@@ -44,7 +45,7 @@ TEST_CASE("bytecode executes and prints as shifted ASCII") {
 
     Buf printed;
     code_print_ascii(codeRoot.get(), printed);
-    CHECK(std::string(printed.data, printed.len) == "\"6ZF\"");
+    CHECK(std::string(printed.data, printed.len) == "\"6ZG\"");
   }
   state->destroy();
 }
@@ -277,6 +278,31 @@ TEST_CASE("unwinds discard compiled frames to the execution floor") {
     CHECK(state->frames.len == 0);
     CHECK(state->currentNs == savedNs);
     state_cancel_unwind(*state);
+  }
+  state->destroy();
+}
+
+TEST_CASE("cached global cells observe later redefinition") {
+  State* state = vm_state();
+  {
+    Scope roots(*state);
+    u32 name = state->intern.intern("vm-global", 9);
+    ns_define(*state, name, int_v(1), false, nil_v());
+    Slot constants = roots.push(make_array(*state, 1));
+    array_push(*state, constants.get(), symbol_v(name));
+    const u8 bytes[] = {(u8)Op::GetGlobal, 0, 0, (u8)Op::Return};
+    CodeSpec spec;
+    spec.maxStack = 1;
+    Slot codeValue = roots.push(code(*state, bytes, sizeof(bytes), constants.get(), spec));
+    Slot fn = roots.push(function(*state, codeValue.get()));
+    Value first = vm_call(*state, fn.get(), state->stack.len, 0);
+    CHECK(first.tag == Tag::Int);
+    CHECK(first.i == 1);
+    ns_define(*state, name, int_v(2), false, nil_v());
+    Value second = vm_call(*state, fn.get(), state->stack.len, 0);
+    CHECK(second.tag == Tag::Int);
+    CHECK(second.i == 2);
+    CHECK(as_code(codeValue.get())->consts[0].tag == Tag::Array);
   }
   state->destroy();
 }

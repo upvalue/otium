@@ -34,6 +34,7 @@ enum class Operand : u8 { None, U8, U16, I32 };
   X(SetGlobal, "set-global", U16)                                                                  \
   X(DefGlobal, "def-global", U16)                                                                  \
   X(Closure, "closure", U16)                                                                       \
+  X(ToMacro, "to-macro", None)                                                                     \
   X(Call, "call", U16)                                                                             \
   X(TailCall, "tailcall", U16)                                                                     \
   X(Return, "return", None)                                                                        \
@@ -43,7 +44,8 @@ enum class Operand : u8 { None, U8, U16, I32 };
   X(JumpTruePeek, "jump-true-peek", I32)                                                           \
   X(Loop, "loop", I32)                                                                             \
   X(Cons, "cons", None)                                                                            \
-  X(List, "list", U16)
+  X(List, "list", U16)                                                                             \
+  X(Append2, "append2", None)
 
 enum class Op : u8 {
 #define OT_ENUM(name, text, operand) name,

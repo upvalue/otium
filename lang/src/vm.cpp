@@ -2,6 +2,7 @@
 #include "code.hpp"
 #include "eval.hpp"
 #include "heap.hpp"
+#include "ns.hpp"
 #include "state.hpp"
 
 namespace ot {
@@ -307,6 +308,12 @@ Value vm_execute(State& state, u32 floor) {
     captures.set(closure);
     VM_DISPATCH();
   }
+  VM_OP(ToMacro) {
+    if (state.stack.len <= stackBase || state.stack[state.stack.len - 1].tag != Tag::Function)
+      return unwind_to(state, floor);
+    state.stack[state.stack.len - 1].tag = Tag::Macro;
+    VM_DISPATCH();
+  }
   VM_OP(Call) {
     u16 argc = code_read_u16(ip);
     ip += 2;
@@ -314,6 +321,10 @@ Value vm_execute(State& state, u32 floor) {
     u32 callBase = state.stack.len - argc - 1;
     Value callee = state.stack[callBase];
     VM_SAVE_IP();
+    if (callee.tag == Tag::Macro) {
+      (void)raise_error(state, "macro used as function");
+      return unwind_to(state, floor);
+    }
     if (compiled_function(callee)) {
       Value entered = enter_frame(state, callee, callBase, argc, false);
       if (entered.tag == Tag::Unwind) return unwind_to(state, floor);
@@ -333,6 +344,11 @@ Value vm_execute(State& state, u32 floor) {
     if (argc + 1u > state.stack.len - stackBase) return unwind_to(state, floor);
     u32 source = state.stack.len - argc - 1;
     Value callee = state.stack[source];
+    if (callee.tag == Tag::Macro) {
+      VM_SAVE_IP();
+      (void)raise_error(state, "macro used as function");
+      return unwind_to(state, floor);
+    }
     if (compiled_function(callee)) {
       u32 destination = state.frames[state.frames.len - 1].callBase;
       memmove(&state.stack[destination], &state.stack[source], (size_t)(argc + 1) * sizeof(Value));
@@ -424,12 +440,91 @@ Value vm_execute(State& state, u32 floor) {
     state.push(list);
     VM_DISPATCH();
   }
+  VM_OP(Append2) {
+    if (state.stack.len - stackBase < 2) return unwind_to(state, floor);
+    u32 left = state.stack.len - 2;
+    u32 elements = state.stack.len;
+    Value cursor = state.stack[left];
+    while (cursor.tag == Tag::Pair) {
+      state.push(as_pair(cursor)->car);
+      cursor = as_pair(cursor)->cdr;
+    }
+    if (cursor.tag != Tag::Null) {
+      VM_SAVE_IP();
+      (void)raise_error(state, "unquote-splicing: expected proper list");
+      return unwind_to(state, floor);
+    }
+    Slot result{&state, left + 1};
+    for (u32 i = state.stack.len; i-- > elements;)
+      result.set(make_pair(state, Slot{&state, i}, result));
+    Value value = result.get();
+    state.popTo(left);
+    state.push(value);
+    VM_DISPATCH();
+  }
 
-  // Global cells land with the compiler because their miss and definition
-  // behavior depends on compilation namespace state.
-  VM_OP(GetGlobal) { return unwind_to(state, floor); }
-  VM_OP(SetGlobal) { return unwind_to(state, floor); }
-  VM_OP(DefGlobal) { return unwind_to(state, floor); }
+  VM_OP(GetGlobal) {
+    u16 index = code_read_u16(ip);
+    ip += 2;
+    FunctionData* fn = as_function(state.frames[state.frames.len - 1].fn);
+    CodeData* code = as_code(fn->code);
+    Value var = code->consts[index];
+    if (var.tag == Tag::Symbol) {
+      var = ns_resolve_var(state, var);
+      if (is_nil(var)) {
+        VM_SAVE_IP();
+        raise_error_sym(state, "unresolved symbol: %.*s", code->consts[index].id);
+        return unwind_to(state, floor);
+      }
+      code->consts[index] = var;
+    }
+    if (var.tag != Tag::Array || as_array(var)->len != VAR_SLOTS) return unwind_to(state, floor);
+    state.push(var_value(var));
+    VM_DISPATCH();
+  }
+  VM_OP(SetGlobal) {
+    u16 index = code_read_u16(ip);
+    ip += 2;
+    if (state.stack.len <= stackBase) return unwind_to(state, floor);
+    FunctionData* fn = as_function(state.frames[state.frames.len - 1].fn);
+    CodeData* code = as_code(fn->code);
+    Value var = code->consts[index];
+    if (var.tag == Tag::Symbol) {
+      var = ns_resolve_var(state, var);
+      if (is_nil(var)) {
+        VM_SAVE_IP();
+        raise_error_sym(state, "set!: unbound %.*s", code->consts[index].id);
+        return unwind_to(state, floor);
+      }
+      code->consts[index] = var;
+    }
+    if (var.tag != Tag::Array || as_array(var)->len != VAR_SLOTS) return unwind_to(state, floor);
+    var_set(var, state.stack[state.stack.len - 1]);
+    VM_DISPATCH();
+  }
+  VM_OP(DefGlobal) {
+    u16 index = code_read_u16(ip);
+    ip += 2;
+    if (state.stack.len <= stackBase) return unwind_to(state, floor);
+    FunctionData* fn = as_function(state.frames[state.frames.len - 1].fn);
+    Value descriptor = as_code(fn->code)->consts[index];
+    Value name = descriptor;
+    Value doc = nil_v();
+    bool isPrivate = false;
+    if (descriptor.tag == Tag::Array) {
+      ArrayData* data = as_array(descriptor);
+      if (data->len != 3) return unwind_to(state, floor);
+      name = data->items[0];
+      isPrivate = is_truthy(data->items[1]);
+      doc = data->items[2];
+    }
+    if (name.tag != Tag::Symbol) return unwind_to(state, floor);
+    VM_SAVE_IP();
+    Value defined = ns_define(state, name.id, state.stack[state.stack.len - 1], isPrivate, doc);
+    if (defined.tag == Tag::Unwind) return unwind_to(state, floor);
+    VM_LOAD_FRAME();
+    VM_DISPATCH();
+  }
 
 #ifndef OT_COMPUTED_GOTO
   default: return unwind_to(state, floor);

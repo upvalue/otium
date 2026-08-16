@@ -1,0 +1,24 @@
+# Meson and compiler output
+/build/
+/builddir/
+/compile_commands.json
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Test and tooling caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.cache/
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

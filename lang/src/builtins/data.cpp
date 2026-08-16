@@ -1,8 +1,8 @@
 // builtins/data.cpp — compact dict, structural equality/hashing, data natives.
 // Spec 10.3, 10.5, 2.4; compact-dict layout per 2.7.
 #include "../builtins.hpp"
-#include "../heap.hpp"  // Obj, PairData, StringData, ArrayData, as_* accessors, make_*
-#include "../state.hpp"    // State, raise_error
+#include "../heap.hpp"   // Obj, PairData, StringData, ArrayData, as_* accessors, make_*
+#include "../state.hpp"  // State, raise_error
 #include "../ns.hpp"
 #include "../eval.hpp"  // apply() for update!
 #include <cmath>

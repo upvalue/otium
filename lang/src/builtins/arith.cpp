@@ -334,9 +334,15 @@ static Value sign_test(State& vm, u32 base, u32 argc, const char* who, int want)
   return bool_v(s == want);
 }
 
-static Value nat_zerop(State& vm, u32 base, u32 argc) { return sign_test(vm, base, argc, "zero?", 0); }
-static Value nat_posp(State& vm, u32 base, u32 argc) { return sign_test(vm, base, argc, "pos?", 1); }
-static Value nat_negp(State& vm, u32 base, u32 argc) { return sign_test(vm, base, argc, "neg?", -1); }
+static Value nat_zerop(State& vm, u32 base, u32 argc) {
+  return sign_test(vm, base, argc, "zero?", 0);
+}
+static Value nat_posp(State& vm, u32 base, u32 argc) {
+  return sign_test(vm, base, argc, "pos?", 1);
+}
+static Value nat_negp(State& vm, u32 base, u32 argc) {
+  return sign_test(vm, base, argc, "neg?", -1);
+}
 
 static Value nat_evenp(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "even?", argc, 1, 1));

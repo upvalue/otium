@@ -80,8 +80,8 @@ u64 val_hash(State& vm, Value v);
 // val_eq is inline in value.hpp.
 
 // Table/array API declared in heap.hpp and implemented by the builtins.
-Value table_get(State&, Value table, Value key);                        // nil on miss
-Value table_put(State&, Value table, Value key, Value v);               // nil deletes; returns table
+Value table_get(State&, Value table, Value key);                     // nil on miss
+Value table_put(State&, Value table, Value key, Value v);            // nil deletes; returns table
 u32 table_entry_count(Value table);                                  // live entries
 bool table_iter_next(Value table, u32* cursor, Value* k, Value* v);  // cursor starts at 0
 Value array_get(Value arr, i64 idx);                                 // nil out of range

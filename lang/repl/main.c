@@ -89,23 +89,31 @@ static void append_path(Buf* out, const char* dir, const char* name, u32 nameLen
   buf_append(out, name, nameLen);
 }
 
-// require callback: ns name dots->slashes + ".scm", searched across load path.
+// require callback: ns name dots->slashes plus a source extension, searched
+// across the load path. Both extensions are accepted while the tree migrates
+// from .scm to .ot; .ot wins when a directory somehow holds both.
+static const char* const kSourceExtensions[] = {".ot", ".scm"};
+
 static bool host_load(void* ud, const char* nsName, Buf* srcOut) {
   (void)ud;
   Buf rel = {0};
   buf_append_cstr(&rel, nsName);
   for (u32 i = 0; i < rel.len; i++)
     if (rel.data[i] == '.') rel.data[i] = '/';
-  buf_append_cstr(&rel, ".scm");
+  u32 stemLen = rel.len;
   for (u32 d = 0; d < g_loadPath.len; d++) {
-    Buf path = {0};
-    append_path(&path, g_loadPath.data[d], rel.data, rel.len);
-    buf_append(&path, "\0", 1);  // NUL-terminate for fopen
-    bool ok = read_whole_file(path.data, srcOut);
-    buf_deinit(&path);
-    if (!ok) continue;
-    buf_deinit(&rel);
-    return true;
+    for (u32 e = 0; e < sizeof kSourceExtensions / sizeof *kSourceExtensions; e++) {
+      rel.len = stemLen;
+      buf_append_cstr(&rel, kSourceExtensions[e]);
+      Buf path = {0};
+      append_path(&path, g_loadPath.data[d], rel.data, rel.len);
+      buf_append(&path, "\0", 1);  // NUL-terminate for fopen
+      bool ok = read_whole_file(path.data, srcOut);
+      buf_deinit(&path);
+      if (!ok) continue;
+      buf_deinit(&rel);
+      return true;
+    }
   }
   buf_deinit(&rel);
   return false;

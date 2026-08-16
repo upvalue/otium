@@ -77,6 +77,14 @@ State* state_create(const StateConfig* cfg) {
   vm->unwindRestartArgs = nil_v();
   vm->handlerVisible = 0xffffffffu;
 
+  // Both limits are enforced as hard ceilings in enter_frame, so reserve their
+  // storage once here rather than reallocating up to it from a capacity of 8.
+  // The VM cannot exceed either; C-side scope pushes are not capped and may
+  // still grow the stack, so this removes the steady-state realloc traffic
+  // without making the stack's address stable.
+  vec_reserve(&vm->stack, c.stackSlots);
+  vec_reserve(&vm->frames, c.maxDepth);
+
   init_syms(vm);
   vm->nsRegistry = make_table(vm);
   state_push(vm, vm->nsRegistry);  // stack[0]: permanent root

@@ -1,22 +1,23 @@
 ;; leetcode-1-two-sum.scm - https://leetcode.com/problems/two-sum/
 
 (define (two-sum nums target)
-    (define seent {})
-    (define result #f)
-    (dotimes (i (length nums))
-        ;(println seent)
-        ;(println i)
-        (unless result)
-            (let ((n (nums i)))
-                (when (seent (- target n))
-                    (begin
-                        ;(println "crash1")
-                        (set! result (array i ((seent (- target n)) 1))))
-                        ;(println "crash2")
-                    )
-                (put! seent n (array (- target n) i))))
+  "Find the indices of two numbers in the array which add up to the target"
+  (define seent {})
+  (define result #f)
+  (dotimes (i (length nums))
+    ;(println seent)
+    ;(println i)
+    (unless result)
+    (let ((n (nums i)))
+      (when (seent (- target n))
+        (begin
+          ;(println "crash1")
+          (set! result (array i ((seent (- target n)) 1))))
+        ;(println "crash2")
+        )
+      (put! seent n (array (- target n) i))))
 
-    result)
+  result)
 
 
 (println (two-sum [2 7 11 15] 9))

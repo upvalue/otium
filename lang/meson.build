@@ -123,7 +123,9 @@ test('source-hygiene', python,
 
 cli_tests = find_program('tests/test_cli.py')
 test('otium-cli', cli_tests,
-  args : [otium, join_paths(meson.current_source_dir(), 'tests', 'cli-load.scm')],
+  args : [otium,
+    join_paths(meson.current_source_dir(), 'tests', 'cli-load.scm'),
+    join_paths(meson.current_source_dir(), 'tests', 'cli-load-second.scm')],
   timeout : test_timeout)
 
 r7rs_port_tests = find_program('benchmarks/r7rs/test_ports.py')

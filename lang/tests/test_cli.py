@@ -6,6 +6,7 @@ import sys
 
 otium = sys.argv[1]
 fixture = sys.argv[2]
+second_fixture = sys.argv[3]
 
 
 def run(*args, input_text=""):
@@ -33,6 +34,11 @@ assert "otium repl" not in file_only.stdout, file_only
 
 expect(run(fixture, "--repl"), 0, stdout="loaded-from-file\notium repl")
 expect(run("--repl", fixture), 0, stdout="loaded-from-file\notium repl")
+multiple_files = run(fixture, second_fixture)
+expect(multiple_files, 0, stdout="loaded-from-file\nloaded-from-second-file\n")
+assert "otium repl" not in multiple_files.stdout, multiple_files
+expect(run("--repl", fixture, second_fixture), 0,
+       stdout="loaded-from-file\nloaded-from-second-file\notium repl")
 expect(run("--unknown"), 2, stderr="unknown option --unknown")
 expect(run("--path"), 2, stderr="--path requires a directory")
 expect(run("--repl", "--server"), 2, stderr="cannot be used together")

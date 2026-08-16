@@ -417,7 +417,7 @@ static void run_repl(State* vm) {
 // main
 
 typedef struct CliOptions {
-  const char* script;
+  VecStr files;
   bool repl;
   bool server;
   u32 maxDepth;
@@ -427,11 +427,11 @@ typedef struct CliOptions {
 } CliOptions;
 
 static void print_usage(FILE* to) {
-  fputs("Usage: otium [OPTIONS] [FILE]\n"
-        "Run FILE, or start a REPL when no FILE is given.\n"
+  fputs("Usage: otium [OPTIONS] [FILE ...]\n"
+        "Run FILEs in order, or start a REPL when no FILE is given.\n"
         "\n"
         "Options:\n"
-        "  --repl             Start a REPL after loading FILE\n"
+        "  --repl             Start a REPL after loading FILEs\n"
         "  --server           Run the framed stdio evaluation server\n"
         "  --path DIR         Add DIR to the module search path (repeatable)\n"
         "  --max-depth N      Maximum evaluator recursion depth\n"
@@ -497,11 +497,8 @@ static int parse_args(int argc, char** argv, CliOptions* options) {
       fprintf(stderr, "otium: unknown option %s\n", arg);
       fputs("Try 'otium --help' for more information.\n", stderr);
       return 2;
-    } else if (!options->script) {
-      options->script = arg;
     } else {
-      fprintf(stderr, "otium: unexpected argument %s\n", arg);
-      return 2;
+      vec_push(&options->files, (char*)arg);
     }
   }
   if (options->repl && options->server) {
@@ -521,7 +518,7 @@ static int parse_args(int argc, char** argv, CliOptions* options) {
 
 int main(int argc, char** argv) {
   CliOptions options = {
-      .script = nullptr,
+      .files = {0},
       .repl = false,
       .server = false,
       .maxDepth = 512,
@@ -574,14 +571,16 @@ int main(int argc, char** argv) {
   sigaction(SIGINT, &sa, nullptr);
 
   int status = 0;
-  if (options.script) status = run_file(vm, options.script);
+  for (u32 i = 0; status == 0 && !g_quitRequested && i < options.files.len; ++i)
+    status = run_file(vm, options.files.data[i]);
   if (status == 0 && !g_quitRequested && options.server) {
     run_server(vm);
-  } else if (status == 0 && !g_quitRequested && (options.repl || !options.script)) {
+  } else if (status == 0 && !g_quitRequested && (options.repl || options.files.len == 0)) {
     run_repl(vm);
   }
 
   state_destroy(vm);
   g_vm = nullptr;
+  vec_deinit(&options.files);
   return status;
 }

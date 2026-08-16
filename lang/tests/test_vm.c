@@ -1,9 +1,10 @@
+#define OT_HEAP_INTERNALS
 #include "ctest.h"
 #include "../src/code.h"
 #include "../src/eval.h"
 #include "../src/heap.h"
-#include "../src/ns.h"
 #include "../src/state.h"
+#include "../src/collections.h"
 #include "../src/vm.h"
 #include <string.h>
 
@@ -17,13 +18,31 @@ static State* vm_state(u32 maxDepth) {
   return state;
 }
 
+static void define_int(State* state, u32 name, i64 value) {
+  OT_SCOPE(state);
+  Ref rooted = ot_push(state);
+  Ref doc = ot_push(state);
+  ot_set_int(state, rooted, value);
+  ot_define(state, rooted, name, rooted, false, doc);
+}
+
+static bool verify_code(State* state, Value value) {
+  OT_SCOPE(state);
+  Ref codeRoot = ot_push(state);
+  ot_set_return(state, codeRoot, value);
+  return code_verify_ref(state, codeRoot, nullptr);
+}
+
 static Value code(State* state, const u8* bytes, u32 len, Value constants, const CodeSpec* spec) {
   CodeSpec defaultSpec = {0};
   if (!spec) spec = &defaultSpec;
   OT_SCOPE(state);
-  Ref pool = ref_push(state, constants);
-  if (ref_get(state, pool).tag != Tag_Array) ref_set(state, pool, make_array(state, 0));
-  return make_code(state, bytes, len, ref_get(state, pool), spec);
+  Ref pool = ot_push(state);
+  Ref result = ot_push(state);
+  ot_set_return(state, pool, constants);
+  if (ot_tag(state, pool) != Tag_Array) ot_make_array(state, pool, 0);
+  OT_TRY(make_code_ref(state, result, bytes, len, pool, spec));
+  return ot_ret(state, result);
 }
 
 static Value function(State* state, Value codeValue) {
@@ -48,7 +67,7 @@ TEST(bytecode_executes_and_prints_as_shifted_ascii) {
       CHECK(result.i == 42);
 
       Buf printed = {0};
-      code_print_ascii(ref_get(state, codeRoot), &printed);
+      code_print_ascii_ref(state, codeRoot, &printed);
       CHECK_MEM(printed.data, printed.len, "\"5ZE\"");
       buf_deinit(&printed);
     }
@@ -62,7 +81,7 @@ TEST(code_constants_are_traced_in_pinned_storage) {
     OT_SCOPE(state);
     Ref pool = ref_push(state, make_array(state, 1));
     Ref item = ref_push(state, make_string(state, "kept", 4));
-    array_push(state, ref_get(state, pool), ref_get(state, item));
+    array_push(state, pool, item);
     const u8 bytes[] = {(u8)Op_Const, 0, 0, (u8)Op_Return};
     Ref codeRoot = ref_push(state, code(state, bytes, sizeof(bytes), ref_get(state, pool), nullptr));
     heap_collect(&state->heap);
@@ -81,12 +100,12 @@ TEST(bytecode_verifier_rejects_bad_instructions_and_jump_targets) {
   {
     const u8 bytes[] = {255};
     Value bad = code(state, bytes, sizeof(bytes), nil_v(), nullptr);
-    CHECK(!code_verify(bad, nullptr));
+    CHECK(!verify_code(state, bad));
   }
   {
     const u8 bytes[] = {(u8)Op_Jump, 1, 0, 0, 0, (u8)Op_Return};
     Value bad = code(state, bytes, sizeof(bytes), nil_v(), nullptr);
-    CHECK(!code_verify(bad, nullptr));
+    CHECK(!verify_code(state, bad));
   }
   state_destroy(state);
 }
@@ -122,7 +141,7 @@ TEST(call_enters_compiled_functions_without_a_c_apply) {
     Ref inner = ref_push(
         state, function(state, code(state, innerBytes, sizeof(innerBytes), nil_v(), &innerSpec)));
     Ref constants = ref_push(state, make_array(state, 1));
-    array_push(state, ref_get(state, constants), ref_get(state, inner));
+    array_push(state, constants, inner);
     const u8 outerBytes[] = {(u8)Op_Const, 0, 0, (u8)Op_Int8, 42, (u8)Op_Call, 1, 0, (u8)Op_Return};
     CodeSpec outerSpec = {0};
     outerSpec.maxStack = 3;
@@ -148,7 +167,7 @@ TEST(tailcall_reuses_the_frame_under_a_depth_limit_of_one) {
     Ref inner = ref_push(
         state, function(state, code(state, innerBytes, sizeof(innerBytes), nil_v(), &innerSpec)));
     Ref constants = ref_push(state, make_array(state, 1));
-    array_push(state, ref_get(state, constants), ref_get(state, inner));
+    array_push(state, constants, inner);
     const u8 outerBytes[] = {(u8)Op_Const, 0, 0, (u8)Op_GetLocal, 0, 0, (u8)Op_TailCall, 1, 0};
     CodeSpec outerSpec = {0};
     outerSpec.nfixed = 1;
@@ -207,10 +226,10 @@ TEST(flat_closures_retain_boxed_captures_across_collection) {
         ref_push(state, code(state, innerBytes, sizeof(innerBytes), nil_v(), &innerSpec));
 
     Ref descriptor = ref_push(state, make_array(state, 2));
-    array_push(state, ref_get(state, descriptor), ref_get(state, innerCode));
-    array_push(state, ref_get(state, descriptor), int_v(0));
+    array_push(state, descriptor, innerCode);
+    array_push_im(state, descriptor, int_v(0));
     Ref constants = ref_push(state, make_array(state, 1));
-    array_push(state, ref_get(state, constants), ref_get(state, descriptor));
+    array_push(state, constants, descriptor);
     const u8 outerBytes[] = {
         (u8)Op_GetLocal, 0, 0, (u8)Op_MakeBox, (u8)Op_SetLocal, 0, 0, (u8)Op_Pop,
         (u8)Op_Closure,  0, 0, (u8)Op_Return,
@@ -258,10 +277,11 @@ TEST(native_callbacks_reenter_only_to_their_frame_floor) {
     Ref callback = ref_push(
         state,
         function(state, code(state, callbackBytes, sizeof(callbackBytes), nil_v(), &callbackSpec)));
-    Ref native = ref_push(state, make_native(state, "native-reenter", native_reenter));
+    Ref native = ot_push(state);
+    ot_make_native(state, native, "native-reenter", native_reenter);
     Ref constants = ref_push(state, make_array(state, 2));
-    array_push(state, ref_get(state, constants), ref_get(state, native));
-    array_push(state, ref_get(state, constants), ref_get(state, callback));
+    array_push(state, constants, native);
+    array_push(state, constants, callback);
     const u8 outerBytes[] = {(u8)Op_Const, 0, 0, (u8)Op_Const, 1, 0, (u8)Op_Int8, 9,
                              (u8)Op_Call,  2, 0, (u8)Op_Return};
     CodeSpec outerSpec = {0};
@@ -280,9 +300,10 @@ TEST(unwinds_discard_compiled_frames_to_the_execution_floor) {
   State* state = vm_state(1000);
   {
     OT_SCOPE(state);
-    Ref native = ref_push(state, make_native(state, "native-fail", native_fail));
+    Ref native = ot_push(state);
+    ot_make_native(state, native, "native-fail", native_fail);
     Ref constants = ref_push(state, make_array(state, 1));
-    array_push(state, ref_get(state, constants), ref_get(state, native));
+    array_push(state, constants, native);
     const u8 bytes[] = {(u8)Op_Const, 0, 0, (u8)Op_Call, 0, 0, (u8)Op_Return};
     CodeSpec spec = {0};
     spec.maxStack = 1;
@@ -304,9 +325,9 @@ TEST(cached_global_cells_observe_later_redefinition) {
   {
     OT_SCOPE(state);
     u32 name = intern_id(&state->intern, "vm-global", 9);
-    ns_define(state, name, int_v(1), false, nil_v());
+    define_int(state, name, 1);
     Ref constants = ref_push(state, make_array(state, 1));
-    array_push(state, ref_get(state, constants), symbol_v(name));
+    array_push_im(state, constants, symbol_v(name));
     const u8 bytes[] = {(u8)Op_GetGlobal, 0, 0, (u8)Op_Return};
     CodeSpec spec = {0};
     spec.maxStack = 1;
@@ -316,7 +337,7 @@ TEST(cached_global_cells_observe_later_redefinition) {
     Value first = vm_call(state, ref_get(state, fn), state->stack.len, 0);
     CHECK(first.tag == Tag_Int);
     CHECK(first.i == 1);
-    ns_define(state, name, int_v(2), false, nil_v());
+    define_int(state, name, 2);
     Value second = vm_call(state, ref_get(state, fn), state->stack.len, 0);
     CHECK(second.tag == Tag_Int);
     CHECK(second.i == 2);

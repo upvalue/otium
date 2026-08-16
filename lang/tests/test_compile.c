@@ -1,3 +1,4 @@
+#define OT_HEAP_INTERNALS
 #include "ctest.h"
 #include "../src/compile.h"
 #include "../src/eval.h"
@@ -18,15 +19,24 @@ static State* compiler_state(u32 maxDepth) {
   return state;
 }
 
+static void repr_value(State* state, Value value, Buf* out) {
+  OT_SCOPE(state);
+  Ref rooted = ot_push(state);
+  ot_set_return(state, rooted, value);
+  ot_repr(state, rooted, out);
+}
+
 static Value run_compiled(State* state, const char* source) {
   Reader reader;
   reader_init(&reader, state, source, (u32)strlen(source), "<compiler-test>");
   OT_SCOPE(state);
-  Ref form = ref_push(state, reader_next(&reader));
-  if (ref_get(state, form).tag == Tag_Unwind) return ref_get(state, form);
-  Ref code = ref_push(state, compile_form(state, ref_get(state, form)));
-  if (ref_get(state, code).tag == Tag_Unwind) return ref_get(state, code);
-  return vm_execute_code(state, ref_get(state, code));
+  Ref form = ot_push(state);
+  Ref code = ot_push(state);
+  Ref result = ot_push(state);
+  OT_TRY(reader_next_ref(&reader, form));
+  OT_TRY(compile_form_ref(state, code, form));
+  OT_TRY(ot_execute_code(state, result, code));
+  return ot_ret(state, result);
 }
 
 TEST(compiler_emits_literals_branches_and_short_circuit_forms) {
@@ -160,12 +170,12 @@ TEST(compiler_lowers_quasiquote_and_unquote_splicing) {
   Value result = run_compiled(state, "`(a ,(+ 1 2) ,@(list 4 5) . tail)");
   if (result.tag == Tag_Unwind) {
     Buf condition = {0};
-    print_repr(state, state->unwindCondition, &condition);
+    repr_value(state, state->unwindCondition, &condition);
     fprintf(stderr, "  unwind: %.*s\n", (int)condition.len, condition.data ? condition.data : "");
     buf_deinit(&condition);
   }
   Buf printed = {0};
-  print_repr(state, result, &printed);
+  repr_value(state, result, &printed);
   CHECK_MEM(printed.data, printed.len, "(a 3 4 5 . tail)");
   buf_deinit(&printed);
   state_destroy(state);

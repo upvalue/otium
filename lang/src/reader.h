@@ -1,5 +1,6 @@
 #pragma once
 #include "common.h"
+#include "slots.h"
 #include "value.h"
 
 typedef struct State State;
@@ -19,9 +20,9 @@ typedef struct Reader {
 
 void reader_init(Reader* r, State* vm, const char* src, u32 len, const char* filename);
 
-// Reads one form. Returns the form, or nil_v() with reader_at_eof()==true when
-// the input is exhausted, or a Tag_Unwind value on a read error.
-Value reader_next(Reader* r);
+// Returns nil on success or the unwind
+// sentinel on a read error, writing the form (or nil at EOF) into dst.
+Value reader_next_ref(Reader* r, Ref dst);
 static inline bool reader_at_eof(const Reader* r) { return r->eofFlag; }
 static inline bool reader_incomplete(const Reader* r) { return r->incompleteFlag; }
 static inline u32 reader_position(const Reader* r) { return r->pos; }

@@ -1,24 +1,6 @@
 // builtins/sys.c — type predicates (10.2), output (10.7), functions and
-// evaluation (10.8), namespaces (10.10), plus def_native.
+// evaluation (10.8), namespaces (10.10).
 #include "../builtins.h"
-#include "../state.h"
-#include "../ns.h"
-#include "../heap.h"
-#include "../eval.h"  // FunctionData, eval_form, apply
-#include "../reader.h"
-#include "../printer.h"
-#include "../intern.h"
-#include "../sequence.h"
-
-// ---------------------------------------------------------------------------
-// def_native — wrap a NativeFn in a Function object, define it in currentNs.
-
-void def_native(State* vm, const char* name, NativeFn f) {
-  OT_SCOPE(vm);
-  Ref native = ref_push(vm, make_native(vm, name, f));
-  ns_define(vm, intern_id(&vm->intern, name, (u32)strlen(name)), ref_get(vm, native), false,
-            nil_v());
-}
 
 // ---------------------------------------------------------------------------
 // Predicates.
@@ -26,50 +8,51 @@ void def_native(State* vm, const char* name, NativeFn f) {
 #define TAG_PRED(cname, lname, expr)                                                               \
   static Value cname(State* vm, u32 base, u32 argc) {                                              \
     OT_TRY(need_argc(vm, lname, argc, 1, 1));                                                      \
-    Value v = ARG(0);                                                                              \
-    (void)v;                                                                                       \
+    Tag t = ot_tag(vm, ARG(0));                                                                    \
+    (void)t;                                                                                       \
     return bool_v(expr);                                                                           \
   }
 
-TAG_PRED(nat_nilp, "nil?", v.tag == Tag_Nil)
-TAG_PRED(nat_nullp, "null?", v.tag == Tag_Null)
-TAG_PRED(nat_booleanp, "boolean?", v.tag == Tag_True || v.tag == Tag_False)
-TAG_PRED(nat_intp, "int?", v.tag == Tag_Int)
-TAG_PRED(nat_floatp, "float?", v.tag == Tag_Float)
-TAG_PRED(nat_numberp, "number?", v.tag == Tag_Int || v.tag == Tag_Float)
-TAG_PRED(nat_symbolp, "symbol?", v.tag == Tag_Symbol)
-TAG_PRED(nat_keywordp, "keyword?", v.tag == Tag_Keyword)
-TAG_PRED(nat_stringp, "string?", v.tag == Tag_String)
-TAG_PRED(nat_pairp, "pair?", v.tag == Tag_Pair)
-TAG_PRED(nat_arrayp, "array?", v.tag == Tag_Array)
-TAG_PRED(nat_tablep, "table?", v.tag == Tag_Table)
-TAG_PRED(nat_bufferp, "buffer?", v.tag == Tag_Buffer)
-TAG_PRED(nat_foreignp, "foreign?", v.tag == Tag_Foreign)
-TAG_PRED(nat_macrop, "macro?", v.tag == Tag_Macro)
-TAG_PRED(nat_procedurep, "procedure?", v.tag == Tag_Function)
-TAG_PRED(nat_truep, "true?", v.tag == Tag_True)
-TAG_PRED(nat_falsep, "false?", v.tag == Tag_False)
+TAG_PRED(nat_nilp, "nil?", t == Tag_Nil)
+TAG_PRED(nat_nullp, "null?", t == Tag_Null)
+TAG_PRED(nat_booleanp, "boolean?", t == Tag_True || t == Tag_False)
+TAG_PRED(nat_intp, "int?", t == Tag_Int)
+TAG_PRED(nat_floatp, "float?", t == Tag_Float)
+TAG_PRED(nat_numberp, "number?", t == Tag_Int || t == Tag_Float)
+TAG_PRED(nat_symbolp, "symbol?", t == Tag_Symbol)
+TAG_PRED(nat_keywordp, "keyword?", t == Tag_Keyword)
+TAG_PRED(nat_stringp, "string?", t == Tag_String)
+TAG_PRED(nat_pairp, "pair?", t == Tag_Pair)
+TAG_PRED(nat_arrayp, "array?", t == Tag_Array)
+TAG_PRED(nat_tablep, "table?", t == Tag_Table)
+TAG_PRED(nat_bufferp, "buffer?", t == Tag_Buffer)
+TAG_PRED(nat_foreignp, "foreign?", t == Tag_Foreign)
+TAG_PRED(nat_macrop, "macro?", t == Tag_Macro)
+TAG_PRED(nat_procedurep, "procedure?", t == Tag_Function)
+TAG_PRED(nat_truep, "true?", t == Tag_True)
+TAG_PRED(nat_falsep, "false?", t == Tag_False)
 
 static Value nat_listp(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "list?", argc, 1, 1));
-  Value v = ARG(0);
-  while (v.tag == Tag_Pair) v = as_pair(v)->cdr;
-  return bool_v(v.tag == Tag_Null);
+  OT_SCOPE(vm);
+  Ref p = ot_push_copy(vm, ARG(0));
+  while (ot_tag(vm, p) == Tag_Pair) ot_cdr(vm, p, p);
+  return bool_v(ot_tag(vm, p) == Tag_Null);
 }
 
 static Value nat_not(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "not", argc, 1, 1));
-  return bool_v(is_falsy(ARG(0)));
+  return bool_v(!ot_truthy(vm, ARG(0)));
 }
 
 static Value nat_eqp(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "eq?", argc, 2, 2));
-  return bool_v(val_eq(ARG(0), ARG(1)));
+  return bool_v(ot_eq(vm, ARG(0), ARG(1)));
 }
 
 static Value nat_equalp(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "equal?", argc, 2, 2));
-  return bool_v(val_equal(vm, ARG(0), ARG(1)));
+  return bool_v(ot_equal(vm, ARG(0), ARG(1)));
 }
 
 static const char* type_name(Tag t) {
@@ -99,26 +82,22 @@ static const char* type_name(Tag t) {
 
 static Value nat_type(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "type", argc, 1, 1));
-  const char* n = type_name(ARG(0).tag);
-  return keyword_v(intern_id(&vm->intern, n, (u32)strlen(n)));
+  const char* n = type_name(ot_tag(vm, ARG(0)));
+  return keyword_v(ot_intern(vm, n, (u32)strlen(n)));
 }
 
 // ---------------------------------------------------------------------------
-// Output (10.7). All through vm->writeFn.
-
-static void write_out(State* vm, Buf* b) {
-  if (vm->writeFn && b->len) vm->writeFn(vm->writeUd, b->data, b->len);
-}
+// Output (10.7). All through the host's write seam.
 
 static Value print_all(State* vm, u32 base, u32 argc, bool repr, bool nl) {
   Buf out = {0};
   for (u32 i = 0; i < argc; i++) {
     if (i) vec_push(&out, ' ');
-    if (repr) print_repr(vm, ARG(i), &out);
-    else print_display(vm, ARG(i), &out);
+    if (repr) ot_repr(vm, ARG(i), &out);
+    else ot_display(vm, ARG(i), &out);
   }
   if (nl) vec_push(&out, '\n');
-  write_out(vm, &out);
+  ot_write_out(vm, out.data, out.len);
   buf_deinit(&out);
   return nil_v();
 }
@@ -136,10 +115,7 @@ static Value nat_println(State* vm, u32 base, u32 argc) {
 static Value nat_newline(State* vm, u32 base, u32 argc) {
   (void)base;
   OT_TRY(need_argc(vm, "newline", argc, 0, 0));
-  Buf out = {0};
-  vec_push(&out, '\n');
-  write_out(vm, &out);
-  buf_deinit(&out);
+  ot_write_out(vm, "\n", 1);
   return nil_v();
 }
 
@@ -148,146 +124,143 @@ static Value nat_newline(State* vm, u32 base, u32 argc) {
 
 static Value nat_identity(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "identity", argc, 1, 1));
-  return ARG(0);
+  return ot_ret(vm, ARG(0));
 }
 
 static Value nat_quit(State* vm, u32 base, u32 argc) {
   (void)base;
   OT_TRY(need_argc(vm, "quit", argc, 0, 0));
-  return start_quit(vm);
+  return ot_start_quit(vm);
 }
 
 static Value nat_apply(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "apply", argc, 2, UINT32_MAX));
   OT_SCOPE(vm);
-  Ref cursor = ref_push(vm, ARG(argc - 1));
-  Ref item = ref_push(vm, nil_v());
+  Ref result = ot_push(vm);
+  Ref cursor = ot_push_copy(vm, ARG(argc - 1));
+  Ref item = ot_push(vm);
   SeqIter iter;
   seq_iter_init(&iter, vm, cursor);
-  u32 argBase = vm->stack.len;
-  for (u32 i = 1; i + 1 < argc; i++) state_push(vm, ARG(i));
+  u32 argBase = ot_top(vm);
+  for (u32 i = 1; i + 1 < argc; i++) ot_push_copy(vm, ARG(i));
   for (;;) {
     SeqStep step = seq_iter_next(&iter, item);
     if (step == SeqStep_End) break;
     if (step != SeqStep_Item) return sequence_error(vm, "apply", step);
-    state_push(vm, ref_get(vm, item));
+    ot_push_copy(vm, item);
   }
-  return apply(vm, ARG(0), argBase, vm->stack.len - argBase);
+  OT_TRY(ot_apply(vm, result, ARG(0), argBase, ot_top(vm) - argBase));
+  return ot_ret(vm, result);
 }
 
 // One-argument callback in its own scope: a second OT_SCOPE inside nat_for_each
 // would shadow the first.
-static Value call_with_item(State* vm, Value fn, Ref item) {
+static Value call_with_item(State* vm, Ref fn, Ref item) {
   OT_SCOPE(vm);
-  Ref arg = ref_push(vm, ref_get(vm, item));
-  return apply(vm, fn, arg.i, 1);
+  Ref result = ot_push(vm);
+  u32 argBase = ot_top(vm);
+  ot_push_copy(vm, item);
+  return ot_apply(vm, result, fn, argBase, 1);
 }
 
 static Value nat_for_each(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "for-each", argc, 2, 2));
   OT_SCOPE(vm);
-  Ref cursor = ref_push(vm, ARG(1));
-  Ref item = ref_push(vm, nil_v());
+  Ref cursor = ot_push_copy(vm, ARG(1));
+  Ref item = ot_push(vm);
   SeqIter iter;
   seq_iter_init(&iter, vm, cursor);
   for (;;) {
     SeqStep step = seq_iter_next(&iter, item);
     if (step == SeqStep_End) return nil_v();
     if (step != SeqStep_Item) return sequence_error(vm, "for-each", step);
-    Value result = call_with_item(vm, ARG(0), item);
-    if (result.tag == Tag_Unwind) return result;
+    OT_TRY(call_with_item(vm, ARG(0), item));
   }
 }
 
 static Value nat_eval(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "eval", argc, 1, 1));
-  return eval_form(vm, ARG(0));
+  OT_SCOPE(vm);
+  Ref result = ot_push(vm);
+  OT_TRY(ot_eval(vm, result, ARG(0)));
+  return ot_ret(vm, result);
 }
 
 static Value nat_read_string(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "read-string", argc, 1, 1));
   OT_TRY(need_string(vm, "read-string", ARG(0)));
-  // Snapshot the source into a C-heap Buf: the Reader keeps a raw pointer to
-  // the source for its whole (allocating) lifetime, so it must never point
-  // into the GC heap.
-  StringData* s = as_string(ARG(0));
-  u32 srcNchars = s->nchars;
-  Buf src = {0};
-  buf_append(&src, string_data_bytes(s), s->len);
-  Reader r;
-  reader_init(&r, vm, src.data ? src.data : "", src.len, "<read-string>");
-  Value form = reader_next(&r);
-  if (form.tag == Tag_Unwind) {
-    buf_deinit(&src);
-    return form;
-  }
-  if (reader_at_eof(&r) && is_nil(form) && srcNchars == 0) {
-    buf_deinit(&src);
-    return raise_error(vm, "read-string: empty input");
-  }
-  // Reader returns nil for both EOF and a nil literal, so only a zero-byte
-  // source can be identified as empty here.
   OT_SCOPE(vm);
-  Ref formS = ref_push(vm, form);
-  Value trailing = reader_next(&r);
-  if (trailing.tag == Tag_Unwind) {
-    buf_deinit(&src);
-    return trailing;
-  }
-  if (!reader_at_eof(&r)) {
-    buf_deinit(&src);
-    return raise_error(vm, "read-string: trailing input");
-  }
-  buf_deinit(&src);
-  return ref_get(vm, formS);
+  Ref form = ot_push(vm);
+  u32 outcome = 0;
+  OT_TRY(ot_read_string(vm, form, ARG(0), &outcome));
+  if (outcome == 1) return raise_error(vm, "read-string: empty input");
+  if (outcome == 2) return raise_error(vm, "read-string: trailing input");
+  return ot_ret(vm, form);
 }
 
-// If form is (sym args...) and sym resolves to a macro, expand once.
-// Returns bool via *expanded; result (or original form) as return value.
-static Value expand_once(State* vm, Value form, bool* expanded) {
+// If form is (sym args...) and sym resolves to a macro, expand once into dst.
+// Returns bool via *expanded; nil or an unwind as the return value.
+static Value expand_once(State* vm, Ref dst, Ref form, bool* expanded) {
   *expanded = false;
-  if (form.tag != Tag_Pair) return form;
-  Value head = as_pair(form)->car;
-  if (head.tag != Tag_Symbol) return form;
-  OT_SCOPE(vm);
-  Ref formS = ref_push(vm, form);  // ns_resolve allocates
-  Value callee = ns_resolve(vm, head);
-  if (callee.tag == Tag_Unwind) {
-    // unresolvable head is not a macro call; swallow the unwind
-    state_cancel_unwind(vm);
-    return ref_get(vm, formS);
+  if (ot_tag(vm, form) != Tag_Pair) {
+    ot_copy(vm, dst, form);
+    return nil_v();
   }
-  if (callee.tag != Tag_Macro) return ref_get(vm, formS);
-  // push unevaluated argument forms and call the macro (state_push doesn't
-  // allocate on the GC heap, so walking the form while pushing is safe)
-  Ref calleeS = ref_push(vm, callee);
-  u32 cbase = vm->stack.len;
+  OT_SCOPE(vm);
+  Ref formS = ot_push_copy(vm, form);  // dst may alias form
+  Ref head = ot_push(vm);
+  ot_car(vm, head, formS);
+  if (ot_tag(vm, head) != Tag_Symbol) {
+    ot_copy(vm, dst, formS);
+    return nil_v();
+  }
+  Ref callee = ot_push(vm);
+  Value resolved = ot_resolve(vm, callee, head);
+  if (resolved.tag == Tag_Unwind) {
+    // unresolvable head is not a macro call; swallow the unwind
+    ot_cancel_unwind(vm);
+    ot_copy(vm, dst, formS);
+    return nil_v();
+  }
+  if (ot_tag(vm, callee) != Tag_Macro) {
+    ot_copy(vm, dst, formS);
+    return nil_v();
+  }
+  // push unevaluated argument forms and call the macro
+  Ref result = ot_push(vm);
+  Ref cursor = ot_push(vm);
+  ot_cdr(vm, cursor, formS);
+  u32 cbase = ot_top(vm);
   u32 n = 0;
-  for (Value p = as_pair(ref_get(vm, formS))->cdr; p.tag == Tag_Pair; p = as_pair(p)->cdr) {
-    state_push(vm, as_pair(p)->car);
+  while (ot_tag(vm, cursor) == Tag_Pair) {
+    Ref arg = ot_push(vm);
+    ot_car(vm, arg, cursor);
+    ot_cdr(vm, cursor, cursor);
     n++;
   }
-  Value r = apply(vm, ref_get(vm, calleeS), cbase, n);
-  if (r.tag == Tag_Unwind) return r;
+  OT_TRY(ot_apply(vm, result, callee, cbase, n));
   *expanded = true;
-  return r;
+  ot_copy(vm, dst, result);
+  return nil_v();
 }
 
 static Value nat_macroexpand_1(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "macroexpand-1", argc, 1, 1));
   bool e;
-  return expand_once(vm, ARG(0), &e);
+  OT_SCOPE(vm);
+  Ref out = ot_push(vm);
+  OT_TRY(expand_once(vm, out, ARG(0), &e));
+  return ot_ret(vm, out);
 }
 
 static Value nat_macroexpand(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "macroexpand", argc, 1, 1));
   OT_SCOPE(vm);
-  Ref formS = ref_push(vm, ARG(0));
+  Ref form = ot_push_copy(vm, ARG(0));
   for (;;) {
     bool e;
-    Value next = expand_once(vm, ref_get(vm, formS), &e);
-    if (next.tag == Tag_Unwind || !e) return next;
-    ref_set(vm, formS, next);
+    OT_TRY(expand_once(vm, form, form, &e));
+    if (!e) return ot_ret(vm, form);
   }
 }
 
@@ -295,63 +268,68 @@ static Value nat_macroexpand(State* vm, u32 base, u32 argc) {
 static Value nat_describe(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "describe", argc, 1, 1));
   OT_TRY(need_symbol(vm, "describe", ARG(0)));
-  Value var = ns_resolve_var(vm, ARG(0));
-  if (is_nil(var)) return nil_v();
+  OT_SCOPE(vm);
+  Ref var = ot_push(vm);
+  if (!ot_resolve_var(vm, var, ARG(0))) return nil_v();
+  Ref field = ot_push(vm);
   Buf out = {0};
-  print_display(vm, array_get(var, VAR_NS), &out);
+  ot_array_get(vm, field, var, OT_VAR_NS);
+  ot_display(vm, field, &out);
   vec_push(&out, '/');
-  print_display(vm, array_get(var, VAR_NAME), &out);
-  Value doc = array_get(var, VAR_DOC);
-  if (!is_nil(doc)) {
+  ot_array_get(vm, field, var, OT_VAR_NAME);
+  ot_display(vm, field, &out);
+  ot_array_get(vm, field, var, OT_VAR_DOC);
+  if (!ot_nil(vm, field)) {
     buf_append_cstr(&out, ": ");
-    print_display(vm, doc, &out);
+    ot_display(vm, field, &out);
   }
-  Value result = make_string_buf(vm, &out);
+  Ref result = ot_push(vm);
+  ot_make_string_buf(vm, result, &out);
   buf_deinit(&out);
-  return result;
+  return ot_ret(vm, result);
 }
 
 // ---------------------------------------------------------------------------
 
 void register_sys(State* vm) {
-  def_native(vm, "nil?", nat_nilp);
-  def_native(vm, "null?", nat_nullp);
-  def_native(vm, "boolean?", nat_booleanp);
-  def_native(vm, "int?", nat_intp);
-  def_native(vm, "float?", nat_floatp);
-  def_native(vm, "number?", nat_numberp);
-  def_native(vm, "symbol?", nat_symbolp);
-  def_native(vm, "keyword?", nat_keywordp);
-  def_native(vm, "string?", nat_stringp);
-  def_native(vm, "pair?", nat_pairp);
-  def_native(vm, "array?", nat_arrayp);
-  def_native(vm, "table?", nat_tablep);
-  def_native(vm, "buffer?", nat_bufferp);
-  def_native(vm, "foreign?", nat_foreignp);
-  def_native(vm, "macro?", nat_macrop);
-  def_native(vm, "procedure?", nat_procedurep);
-  def_native(vm, "list?", nat_listp);
-  def_native(vm, "true?", nat_truep);
-  def_native(vm, "false?", nat_falsep);
-  def_native(vm, "not", nat_not);
-  def_native(vm, "eq?", nat_eqp);
-  def_native(vm, "equal?", nat_equalp);
-  def_native(vm, "type", nat_type);
-  def_native(vm, "display", nat_display);
-  def_native(vm, "print", nat_display);
-  def_native(vm, "write", nat_write);
-  def_native(vm, "println", nat_println);
-  def_native(vm, "newline", nat_newline);
-  def_native(vm, "apply", nat_apply);
-  def_native(vm, "for-each", nat_for_each);
-  def_native(vm, "identity", nat_identity);
-  def_native(vm, "quit", nat_quit);
-  def_native(vm, "exit", nat_quit);
-  def_native(vm, "eval", nat_eval);
-  def_native(vm, "read-string", nat_read_string);
+  ot_def_native(vm, "nil?", nat_nilp);
+  ot_def_native(vm, "null?", nat_nullp);
+  ot_def_native(vm, "boolean?", nat_booleanp);
+  ot_def_native(vm, "int?", nat_intp);
+  ot_def_native(vm, "float?", nat_floatp);
+  ot_def_native(vm, "number?", nat_numberp);
+  ot_def_native(vm, "symbol?", nat_symbolp);
+  ot_def_native(vm, "keyword?", nat_keywordp);
+  ot_def_native(vm, "string?", nat_stringp);
+  ot_def_native(vm, "pair?", nat_pairp);
+  ot_def_native(vm, "array?", nat_arrayp);
+  ot_def_native(vm, "table?", nat_tablep);
+  ot_def_native(vm, "buffer?", nat_bufferp);
+  ot_def_native(vm, "foreign?", nat_foreignp);
+  ot_def_native(vm, "macro?", nat_macrop);
+  ot_def_native(vm, "procedure?", nat_procedurep);
+  ot_def_native(vm, "list?", nat_listp);
+  ot_def_native(vm, "true?", nat_truep);
+  ot_def_native(vm, "false?", nat_falsep);
+  ot_def_native(vm, "not", nat_not);
+  ot_def_native(vm, "eq?", nat_eqp);
+  ot_def_native(vm, "equal?", nat_equalp);
+  ot_def_native(vm, "type", nat_type);
+  ot_def_native(vm, "display", nat_display);
+  ot_def_native(vm, "print", nat_display);
+  ot_def_native(vm, "write", nat_write);
+  ot_def_native(vm, "println", nat_println);
+  ot_def_native(vm, "newline", nat_newline);
+  ot_def_native(vm, "apply", nat_apply);
+  ot_def_native(vm, "for-each", nat_for_each);
+  ot_def_native(vm, "identity", nat_identity);
+  ot_def_native(vm, "quit", nat_quit);
+  ot_def_native(vm, "exit", nat_quit);
+  ot_def_native(vm, "eval", nat_eval);
+  ot_def_native(vm, "read-string", nat_read_string);
   // gensym and current-ns are registered by register_expand (they use
   // the State's counter and current-ns field); don't shadow them here.
-  def_native(vm, "macroexpand-1", nat_macroexpand_1);
-  def_native(vm, "macroexpand", nat_macroexpand);
-  def_native(vm, "describe", nat_describe);
+  ot_def_native(vm, "macroexpand-1", nat_macroexpand_1);
+  ot_def_native(vm, "macroexpand", nat_macroexpand);
+  ot_def_native(vm, "describe", nat_describe);
 }

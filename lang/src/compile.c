@@ -1,10 +1,6 @@
 #include "compile.h"
 #include "code.h"
 #include "eval.h"
-#include "form.h"
-#include "heap.h"
-#include "ns.h"
-#include "state.h"
 
 typedef struct Binding {
   u32 name;
@@ -99,37 +95,102 @@ static i32 capture_name(LambdaInfo* li, u32 name) {
   return (i32)(li->captures.len - 1);
 }
 
-static void analyze_expr(State* vm, LambdaInfo* li, Value form);
-static Value defined_name(Value form);
-static void analyze_body(State* vm, LambdaInfo* li, Value forms);
+static void analyze_expr(State* vm, LambdaInfo* li, Ref form);
+static void analyze_body(State* vm, LambdaInfo* li, Ref forms);
 
-static void analyze_quasiquote(State* vm, LambdaInfo* li, Value form, u32 depth) {
-  if (!pairp(form)) return;
-  Value head = car_(form);
-  if (sym_is(head, vm->syms.unquote_)) {
-    Value args = cdr_(form);
-    if (pairp(args)) {
-      if (depth == 1) analyze_expr(vm, li, car_(args));
-      else analyze_quasiquote(vm, li, car_(args), depth - 1);
+static bool symbol_is(State* vm, Ref value, u32 name) {
+  return ot_tag(vm, value) == Tag_Symbol && ot_id(vm, value) == name;
+}
+
+static void strip_array_head(State* vm, Ref dst, Ref forms) {
+  if (ot_tag(vm, forms) != Tag_Pair) {
+    ot_copy(vm, dst, forms);
+    return;
+  }
+  OT_SCOPE(vm);
+  Ref head = ot_push(vm);
+  ot_car(vm, head, forms);
+  if (symbol_is(vm, head, ot_syms(vm)->array_)) ot_cdr(vm, dst, forms);
+  else ot_copy(vm, dst, forms);
+}
+
+static void skip_docstring_ref(State* vm, Ref dst, Ref doc, Ref forms) {
+  ot_set_nil(vm, doc);
+  if (ot_tag(vm, forms) != Tag_Pair) {
+    ot_copy(vm, dst, forms);
+    return;
+  }
+  OT_SCOPE(vm);
+  Ref first = ot_push(vm);
+  Ref rest = ot_push(vm);
+  ot_car(vm, first, forms);
+  ot_cdr(vm, rest, forms);
+  if (ot_tag(vm, first) == Tag_String && ot_tag(vm, rest) == Tag_Pair) {
+    ot_copy(vm, doc, first);
+    ot_copy(vm, dst, rest);
+  } else {
+    ot_copy(vm, dst, forms);
+  }
+}
+
+static void defined_name(State* vm, Ref dst, Ref form) {
+  OT_SCOPE(vm);
+  Ref args = ot_push(vm);
+  ot_cdr(vm, args, form);
+  if (ot_tag(vm, args) != Tag_Pair) {
+    ot_set_nil(vm, dst);
+    return;
+  }
+  ot_car(vm, dst, args);
+  if (ot_tag(vm, dst) == Tag_Pair) ot_car(vm, dst, dst);
+}
+
+static void analyze_quasiquote(State* vm, LambdaInfo* li, Ref form, u32 depth) {
+  if (ot_tag(vm, form) != Tag_Pair) return;
+  OT_SCOPE(vm);
+  const Syms* syms = ot_syms(vm);
+  Ref head = ot_push(vm);
+  Ref args = ot_push(vm);
+  Ref part = ot_push(vm);
+  ot_car(vm, head, form);
+  if (symbol_is(vm, head, syms->unquote_)) {
+    ot_cdr(vm, args, form);
+    if (ot_tag(vm, args) == Tag_Pair) {
+      ot_car(vm, part, args);
+      if (depth == 1) analyze_expr(vm, li, part);
+      else analyze_quasiquote(vm, li, part, depth - 1);
     }
     return;
   }
-  if (sym_is(head, vm->syms.quasiquote_)) {
-    Value args = cdr_(form);
-    if (pairp(args)) analyze_quasiquote(vm, li, car_(args), depth + 1);
+  if (symbol_is(vm, head, syms->quasiquote_)) {
+    ot_cdr(vm, args, form);
+    if (ot_tag(vm, args) == Tag_Pair) {
+      ot_car(vm, part, args);
+      analyze_quasiquote(vm, li, part, depth + 1);
+    }
     return;
   }
-  if (pairp(head) && sym_is(car_(head), vm->syms.unquoteSplicing_) && depth == 1) {
-    Value spliceArgs = cdr_(head);
-    if (pairp(spliceArgs)) analyze_expr(vm, li, car_(spliceArgs));
+  bool splice = false;
+  if (ot_tag(vm, head) == Tag_Pair && depth == 1) {
+    ot_car(vm, part, head);
+    splice = symbol_is(vm, part, syms->unquoteSplicing_);
+  }
+  if (splice) {
+    ot_cdr(vm, args, head);
+    if (ot_tag(vm, args) == Tag_Pair) {
+      ot_car(vm, part, args);
+      analyze_expr(vm, li, part);
+    }
   } else {
     analyze_quasiquote(vm, li, head, depth);
   }
-  analyze_quasiquote(vm, li, cdr_(form), depth);
+  ot_cdr(vm, part, form);
+  analyze_quasiquote(vm, li, part, depth);
 }
 
 static bool is_define_head(State* vm, u32 name) {
-  return name == vm->syms.define_ || name == vm->syms.def_ || name == vm->syms.definePriv_;
+  const Syms* syms = ot_syms(vm);
+  return name == syms->define_ || name == syms->def_ || name == syms->definePriv_;
 }
 
 static LambdaInfo* add_compiler_thunk(LambdaInfo* parent) {
@@ -139,116 +200,150 @@ static LambdaInfo* add_compiler_thunk(LambdaInfo* parent) {
   return child;
 }
 
-static void analyze_thunk_expr(State* vm, LambdaInfo* parent, Value form) {
+static void analyze_thunk_expr(State* vm, LambdaInfo* parent, Ref form) {
   LambdaInfo* child = add_compiler_thunk(parent);
-  if (child->userDepth > 0 && pairp(form) && car_(form).tag == Tag_Symbol) {
-    u32 head = car_(form).id;
+  OT_SCOPE(vm);
+  Ref part = ot_push(vm);
+  if (child->userDepth > 0 && ot_tag(vm, form) == Tag_Pair) {
+    ot_car(vm, part, form);
+    u32 head = ot_tag(vm, part) == Tag_Symbol ? ot_id(vm, part) : 0;
     if (is_define_head(vm, head)) {
-      Value name = defined_name(form);
-      if (name.tag == Tag_Symbol) add_binding(child, name.id);
+      defined_name(vm, part, form);
+      if (ot_tag(vm, part) == Tag_Symbol) add_binding(child, ot_id(vm, part));
     }
   }
   child->initialCount = child->bindings.len;
   analyze_expr(vm, child, form);
 }
 
-static void analyze_thunk_body(State* vm, LambdaInfo* parent, Value forms) {
+static void analyze_thunk_body(State* vm, LambdaInfo* parent, Ref forms) {
   LambdaInfo* child = add_compiler_thunk(parent);
   analyze_body(vm, child, forms);
 }
 
-static void analyze_binding_control(State* vm, LambdaInfo* li, Value args, bool thunkBindings) {
-  if (!pairp(args)) return;
-  Value bindings = strip_array_literal_head(car_(args), vm->syms.array_);
-  for (Value cursor = bindings; pairp(cursor); cursor = cdr_(cursor)) {
-    Value binding = car_(cursor);
-    if (pairp(binding)) {
-      if (thunkBindings) analyze_thunk_expr(vm, li, car_(binding));
-      else analyze_expr(vm, li, car_(binding));
+static void analyze_binding_control(State* vm, LambdaInfo* li, Ref args, bool thunkBindings) {
+  if (ot_tag(vm, args) != Tag_Pair) return;
+  OT_SCOPE(vm);
+  Ref bindings = ot_push(vm);
+  Ref cursor = ot_push(vm);
+  Ref binding = ot_push(vm);
+  Ref part = ot_push(vm);
+  ot_car(vm, bindings, args);
+  strip_array_head(vm, bindings, bindings);
+  ot_copy(vm, cursor, bindings);
+  while (ot_tag(vm, cursor) == Tag_Pair) {
+    ot_car(vm, binding, cursor);
+    if (ot_tag(vm, binding) == Tag_Pair) {
+      ot_car(vm, part, binding);
+      if (thunkBindings) analyze_thunk_expr(vm, li, part);
+      else analyze_expr(vm, li, part);
+      ot_cdr(vm, part, binding);
+      if (ot_tag(vm, part) == Tag_Pair) {
+        ot_car(vm, part, part);
+        if (thunkBindings) analyze_thunk_expr(vm, li, part);
+        else analyze_expr(vm, li, part);
+      }
     }
-    if (pairp(binding) && pairp(cdr_(binding))) {
-      if (thunkBindings) analyze_thunk_expr(vm, li, car_(cdr_(binding)));
-      else analyze_expr(vm, li, car_(cdr_(binding)));
-    }
+    ot_cdr(vm, cursor, cursor);
   }
-  analyze_thunk_body(vm, li, cdr_(args));
+  ot_cdr(vm, part, args);
+  analyze_thunk_body(vm, li, part);
 }
 
-static void analyze_one_arg_lambda(State* vm, LambdaInfo* parent, Value param, Value body) {
+static void analyze_one_arg_lambda(State* vm, LambdaInfo* parent, Ref param, Ref body) {
   LambdaInfo* child = (LambdaInfo*)ot_alloc(sizeof(LambdaInfo));
   lambda_info_init(child, parent, parent->userDepth + 1);
   vec_push(&parent->children, child);
-  if (param.tag == Tag_Symbol) {
-    add_binding(child, param.id);
+  if (ot_tag(vm, param) == Tag_Symbol) {
+    add_binding(child, ot_id(vm, param));
     child->nfixed = 1;
   }
   analyze_body(vm, child, body);
 }
 
-static bool parse_params(State* vm, LambdaInfo* li, Value params) {
-  if (params.tag == Tag_Symbol) {
+static bool parse_params(State* vm, LambdaInfo* li, Ref params) {
+  if (ot_tag(vm, params) == Tag_Symbol) {
     li->hasRest = true;
-    add_binding(li, params.id);
+    add_binding(li, ot_id(vm, params));
     return true;
   }
-  params = strip_array_literal_head(params, vm->syms.array_);
-  while (pairp(params)) {
-    Value param = car_(params);
-    if (sym_is(param, vm->syms.amp_)) {
-      params = cdr_(params);
-      if (!pairp(params) || car_(params).tag != Tag_Symbol) return false;
+  OT_SCOPE(vm);
+  Ref cursor = ot_push_copy(vm, params);
+  Ref param = ot_push(vm);
+  strip_array_head(vm, cursor, cursor);
+  while (ot_tag(vm, cursor) == Tag_Pair) {
+    ot_car(vm, param, cursor);
+    if (symbol_is(vm, param, ot_syms(vm)->amp_)) {
+      ot_cdr(vm, cursor, cursor);
+      if (ot_tag(vm, cursor) != Tag_Pair) return false;
+      ot_car(vm, param, cursor);
+      if (ot_tag(vm, param) != Tag_Symbol) return false;
       li->hasRest = true;
-      add_binding(li, car_(params).id);
-      return cdr_(params).tag == Tag_Null;
+      add_binding(li, ot_id(vm, param));
+      ot_cdr(vm, cursor, cursor);
+      return ot_tag(vm, cursor) == Tag_Null;
     }
-    if (param.tag != Tag_Symbol) return false;
-    add_binding(li, param.id);
+    if (ot_tag(vm, param) != Tag_Symbol) return false;
+    add_binding(li, ot_id(vm, param));
     li->nfixed++;
-    params = cdr_(params);
+    ot_cdr(vm, cursor, cursor);
   }
-  if (params.tag == Tag_Symbol) {
+  if (ot_tag(vm, cursor) == Tag_Symbol) {
     li->hasRest = true;
-    add_binding(li, params.id);
+    add_binding(li, ot_id(vm, cursor));
     return true;
   }
-  return params.tag == Tag_Null;
-}
-
-static Value defined_name(Value form) {
-  Value args = cdr_(form);
-  if (!pairp(args)) return nil_v();
-  Value target = car_(args);
-  return pairp(target) ? car_(target) : target;
+  return ot_tag(vm, cursor) == Tag_Null;
 }
 
 // The name a body form hoists to a local slot, or nil when it is not one of
 // the defining forms. Both passes walk bodies through this so they cannot
 // disagree about which forms allocate a slot.
-static Value body_define_name(State* vm, Value form) {
-  if (!pairp(form) || car_(form).tag != Tag_Symbol) return nil_v();
-  u32 head = car_(form).id;
-  if (!is_define_head(vm, head)) return nil_v();
-  Value name = defined_name(form);
-  return name.tag == Tag_Symbol ? name : nil_v();
+static void body_define_name(State* vm, Ref dst, Ref form) {
+  if (ot_tag(vm, form) != Tag_Pair) {
+    ot_set_nil(vm, dst);
+    return;
+  }
+  OT_SCOPE(vm);
+  Ref head = ot_push(vm);
+  ot_car(vm, head, form);
+  if (ot_tag(vm, head) != Tag_Symbol || !is_define_head(vm, ot_id(vm, head))) {
+    ot_set_nil(vm, dst);
+    return;
+  }
+  defined_name(vm, dst, form);
+  if (ot_tag(vm, dst) != Tag_Symbol) ot_set_nil(vm, dst);
 }
 
-static void collect_body_defines(State* vm, LambdaInfo* li, Value forms) {
+static void collect_body_defines(State* vm, LambdaInfo* li, Ref forms) {
   if (li->userDepth == 0) return;
-  for (Value cursor = forms; pairp(cursor); cursor = cdr_(cursor)) {
-    Value name = body_define_name(vm, car_(cursor));
-    if (is_nil(name) || find_active(li, name.id) >= 0) continue;
-    add_binding(li, name.id);
+  OT_SCOPE(vm);
+  Ref cursor = ot_push_copy(vm, forms);
+  Ref form = ot_push(vm);
+  Ref name = ot_push(vm);
+  while (ot_tag(vm, cursor) == Tag_Pair) {
+    ot_car(vm, form, cursor);
+    body_define_name(vm, name, form);
+    if (!ot_nil(vm, name) && find_active(li, ot_id(vm, name)) < 0)
+      add_binding(li, ot_id(vm, name));
+    ot_cdr(vm, cursor, cursor);
   }
 }
 
-static void analyze_body(State* vm, LambdaInfo* li, Value forms) {
+static void analyze_body(State* vm, LambdaInfo* li, Ref forms) {
   collect_body_defines(vm, li, forms);
   li->initialCount = li->bindings.len;
-  for (Value cursor = forms; pairp(cursor); cursor = cdr_(cursor))
-    analyze_expr(vm, li, car_(cursor));
+  OT_SCOPE(vm);
+  Ref cursor = ot_push_copy(vm, forms);
+  Ref form = ot_push(vm);
+  while (ot_tag(vm, cursor) == Tag_Pair) {
+    ot_car(vm, form, cursor);
+    analyze_expr(vm, li, form);
+    ot_cdr(vm, cursor, cursor);
+  }
 }
 
-static void analyze_lambda(State* vm, LambdaInfo* parent, Value params, Value body) {
+static void analyze_lambda(State* vm, LambdaInfo* parent, Ref params, Ref body) {
   LambdaInfo* child = (LambdaInfo*)ot_alloc(sizeof(LambdaInfo));
   lambda_info_init(child, parent, parent->userDepth + 1);
   vec_push(&parent->children, child);
@@ -256,126 +351,201 @@ static void analyze_lambda(State* vm, LambdaInfo* parent, Value params, Value bo
   analyze_body(vm, child, body);
 }
 
-static void analyze_expr(State* vm, LambdaInfo* li, Value form) {
-  if (form.tag == Tag_Symbol) {
-    if (!sym_qualified(vm, form.id) && find_active(li, form.id) < 0)
-      (void)capture_name(li, form.id);
+static void analyze_expr(State* vm, LambdaInfo* li, Ref form) {
+  if (ot_tag(vm, form) == Tag_Symbol) {
+    u32 id = ot_id(vm, form);
+    if (!ot_sym_qualified(vm, id) && find_active(li, id) < 0) (void)capture_name(li, id);
     return;
   }
-  if (!pairp(form)) return;
-  Value head = car_(form);
-  Value args = cdr_(form);
-  if (head.tag == Tag_Symbol) {
-    u32 name = head.id;
-    if (name == vm->syms.quote_) return;
-    if (name == vm->syms.quasiquote_) {
-      if (pairp(args)) analyze_quasiquote(vm, li, car_(args), 1);
+  if (ot_tag(vm, form) != Tag_Pair) return;
+  OT_SCOPE(vm);
+  const Syms* syms = ot_syms(vm);
+  Ref head = ot_push(vm);
+  Ref args = ot_push(vm);
+  Ref part = ot_push(vm);
+  Ref rest = ot_push(vm);
+  Ref cursor = ot_push(vm);
+  Ref clause = ot_push(vm);
+  Ref scratch = ot_push(vm);
+  ot_car(vm, head, form);
+  ot_cdr(vm, args, form);
+  if (ot_tag(vm, head) == Tag_Symbol) {
+    u32 name = ot_id(vm, head);
+    if (name == syms->quote_) return;
+    if (name == syms->quasiquote_) {
+      if (ot_tag(vm, args) == Tag_Pair) {
+        ot_car(vm, part, args);
+        analyze_quasiquote(vm, li, part, 1);
+      }
       return;
     }
-    if (name == vm->syms.lambda_ || name == vm->syms.fn_) {
-      if (pairp(args)) analyze_lambda(vm, li, car_(args), cdr_(args));
+    if (name == syms->lambda_ || name == syms->fn_) {
+      if (ot_tag(vm, args) == Tag_Pair) {
+        ot_car(vm, part, args);
+        ot_cdr(vm, rest, args);
+        analyze_lambda(vm, li, part, rest);
+      }
       return;
     }
     if (is_define_head(vm, name)) {
-      if (!pairp(args)) return;
-      Value target = car_(args);
-      Value rest = cdr_(args);
-      if (pairp(target)) analyze_lambda(vm, li, cdr_(target), rest);
+      if (ot_tag(vm, args) != Tag_Pair) return;
+      ot_car(vm, part, args);
+      ot_cdr(vm, rest, args);
+      if (ot_tag(vm, part) == Tag_Pair) {
+        ot_cdr(vm, part, part);
+        analyze_lambda(vm, li, part, rest);
+      }
       else {
-        rest = skip_docstring(rest, nullptr);
-        if (pairp(rest)) analyze_expr(vm, li, car_(rest));
-      }
-      return;
-    }
-    if (name == vm->syms.defmacro_) {
-      if (pairp(args) && pairp(cdr_(args)))
-        analyze_lambda(vm, li, car_(cdr_(args)), cdr_(cdr_(args)));
-      return;
-    }
-    if (name == vm->syms.setBang_) {
-      if (pairp(args) && car_(args).tag == Tag_Symbol && !sym_qualified(vm, car_(args).id) &&
-          find_active(li, car_(args).id) < 0)
-        (void)capture_name(li, car_(args).id);
-      if (pairp(args) && pairp(cdr_(args))) analyze_expr(vm, li, car_(cdr_(args)));
-      return;
-    }
-    if (name == vm->syms.let_) {
-      if (!pairp(args)) return;
-      u32 activeBase = li->active.len;
-      Value bindings = car_(args);
-      bindings = strip_array_literal_head(bindings, vm->syms.array_);
-      while (pairp(bindings)) {
-        Value binding = car_(bindings);
-        if (pairp(binding) && pairp(cdr_(binding))) {
-          analyze_expr(vm, li, car_(cdr_(binding)));
-          if (car_(binding).tag == Tag_Symbol) add_binding(li, car_(binding).id);
+        skip_docstring_ref(vm, rest, scratch, rest);
+        if (ot_tag(vm, rest) == Tag_Pair) {
+          ot_car(vm, part, rest);
+          analyze_expr(vm, li, part);
         }
-        bindings = cdr_(bindings);
       }
-      collect_body_defines(vm, li, cdr_(args));
-      for (Value body = cdr_(args); pairp(body); body = cdr_(body))
-        analyze_expr(vm, li, car_(body));
+      return;
+    }
+    if (name == syms->defmacro_) {
+      if (ot_tag(vm, args) == Tag_Pair) {
+        ot_cdr(vm, rest, args);
+        if (ot_tag(vm, rest) == Tag_Pair) {
+          ot_car(vm, part, rest);
+          ot_cdr(vm, rest, rest);
+          analyze_lambda(vm, li, part, rest);
+        }
+      }
+      return;
+    }
+    if (name == syms->setBang_) {
+      if (ot_tag(vm, args) == Tag_Pair) {
+        ot_car(vm, part, args);
+        if (ot_tag(vm, part) == Tag_Symbol) {
+          u32 id = ot_id(vm, part);
+          if (!ot_sym_qualified(vm, id) && find_active(li, id) < 0) (void)capture_name(li, id);
+        }
+        ot_cdr(vm, rest, args);
+        if (ot_tag(vm, rest) == Tag_Pair) {
+          ot_car(vm, part, rest);
+          analyze_expr(vm, li, part);
+        }
+      }
+      return;
+    }
+    if (name == syms->let_) {
+      if (ot_tag(vm, args) != Tag_Pair) return;
+      u32 activeBase = li->active.len;
+      ot_car(vm, cursor, args);
+      strip_array_head(vm, cursor, cursor);
+      while (ot_tag(vm, cursor) == Tag_Pair) {
+        ot_car(vm, clause, cursor);
+        if (ot_tag(vm, clause) == Tag_Pair) {
+          ot_car(vm, part, clause);
+          ot_cdr(vm, rest, clause);
+          if (ot_tag(vm, rest) == Tag_Pair) {
+            ot_car(vm, scratch, rest);
+            analyze_expr(vm, li, scratch);
+            if (ot_tag(vm, part) == Tag_Symbol) add_binding(li, ot_id(vm, part));
+          }
+        }
+        ot_cdr(vm, cursor, cursor);
+      }
+      ot_cdr(vm, cursor, args);
+      collect_body_defines(vm, li, cursor);
+      while (ot_tag(vm, cursor) == Tag_Pair) {
+        ot_car(vm, part, cursor);
+        analyze_expr(vm, li, part);
+        ot_cdr(vm, cursor, cursor);
+      }
       li->active.len = activeBase;
       return;
     }
-    if (name == vm->syms.ns_ || name == vm->syms.inNs_ || name == vm->syms.require_) return;
-    if (name == vm->syms.handlerBind_) {
+    if (name == syms->ns_ || name == syms->inNs_ || name == syms->require_) return;
+    if (name == syms->handlerBind_) {
       analyze_binding_control(vm, li, args, false);
       return;
     }
-    if (name == vm->syms.restartCase_) {
-      if (!pairp(args)) return;
-      analyze_thunk_expr(vm, li, car_(args));
-      for (Value cursor = cdr_(args); pairp(cursor); cursor = cdr_(cursor)) {
-        Value clause = car_(cursor);
-        if (!pairp(clause)) continue;
-        Value rest = cdr_(clause);
-        rest = skip_docstring(rest, nullptr);
-        if (pairp(rest)) analyze_lambda(vm, li, car_(rest), cdr_(rest));
-      }
-      return;
-    }
-    if (name == vm->syms.try_) {
-      Value cursor = args;
-      while (pairp(cursor)) {
-        Value part = car_(cursor);
-        if (pairp(part) && sym_is(car_(part), vm->syms.catch_)) break;
-        analyze_thunk_expr(vm, li, part);
-        cursor = cdr_(cursor);
-      }
-      while (pairp(cursor)) {
-        Value clause = car_(cursor);
-        if (pairp(clause) && pairp(cdr_(clause))) {
-          Value spec = car_(cdr_(clause));
-          if (pairp(spec)) {
-            analyze_thunk_expr(vm, li, car_(spec));
-            if (pairp(cdr_(spec)))
-              analyze_one_arg_lambda(vm, li, car_(cdr_(spec)), cdr_(cdr_(clause)));
+    if (name == syms->restartCase_) {
+      if (ot_tag(vm, args) != Tag_Pair) return;
+      ot_car(vm, part, args);
+      analyze_thunk_expr(vm, li, part);
+      ot_cdr(vm, cursor, args);
+      while (ot_tag(vm, cursor) == Tag_Pair) {
+        ot_car(vm, clause, cursor);
+        if (ot_tag(vm, clause) == Tag_Pair) {
+          ot_cdr(vm, rest, clause);
+          skip_docstring_ref(vm, rest, scratch, rest);
+          if (ot_tag(vm, rest) == Tag_Pair) {
+            ot_car(vm, part, rest);
+            ot_cdr(vm, rest, rest);
+            analyze_lambda(vm, li, part, rest);
           }
         }
-        cursor = cdr_(cursor);
+        ot_cdr(vm, cursor, cursor);
       }
       return;
     }
-    if (name == vm->syms.unwindProtect_ || name == vm->syms.defer_) {
-      for (Value cursor = args; pairp(cursor); cursor = cdr_(cursor))
-        analyze_thunk_expr(vm, li, car_(cursor));
+    if (name == syms->try_) {
+      ot_copy(vm, cursor, args);
+      while (ot_tag(vm, cursor) == Tag_Pair) {
+        ot_car(vm, part, cursor);
+        if (ot_tag(vm, part) == Tag_Pair) {
+          ot_car(vm, scratch, part);
+          if (symbol_is(vm, scratch, syms->catch_)) break;
+        }
+        analyze_thunk_expr(vm, li, part);
+        ot_cdr(vm, cursor, cursor);
+      }
+      while (ot_tag(vm, cursor) == Tag_Pair) {
+        ot_car(vm, clause, cursor);
+        if (ot_tag(vm, clause) == Tag_Pair) {
+          ot_cdr(vm, rest, clause);
+          if (ot_tag(vm, rest) == Tag_Pair) {
+            ot_car(vm, part, rest);
+            if (ot_tag(vm, part) == Tag_Pair) {
+              ot_car(vm, scratch, part);
+              analyze_thunk_expr(vm, li, scratch);
+              ot_cdr(vm, part, part);
+              if (ot_tag(vm, part) == Tag_Pair) {
+                ot_car(vm, scratch, part);
+                ot_cdr(vm, rest, rest);
+                analyze_one_arg_lambda(vm, li, scratch, rest);
+              }
+            }
+          }
+        }
+        ot_cdr(vm, cursor, cursor);
+      }
       return;
     }
-    if (name == vm->syms.withParams_) {
+    if (name == syms->unwindProtect_ || name == syms->defer_) {
+      ot_copy(vm, cursor, args);
+      while (ot_tag(vm, cursor) == Tag_Pair) {
+        ot_car(vm, part, cursor);
+        analyze_thunk_expr(vm, li, part);
+        ot_cdr(vm, cursor, cursor);
+      }
+      return;
+    }
+    if (name == syms->withParams_) {
       analyze_binding_control(vm, li, args, true);
       return;
     }
-    if (name == vm->syms.defparam_) {
-      if (!pairp(args)) return;
-      Value rest = cdr_(args);
-      rest = skip_docstring(rest, nullptr);
-      if (pairp(rest)) analyze_expr(vm, li, car_(rest));
+    if (name == syms->defparam_) {
+      if (ot_tag(vm, args) != Tag_Pair) return;
+      ot_cdr(vm, rest, args);
+      skip_docstring_ref(vm, rest, scratch, rest);
+      if (ot_tag(vm, rest) == Tag_Pair) {
+        ot_car(vm, part, rest);
+        analyze_expr(vm, li, part);
+      }
       return;
     }
   }
-  for (Value cursor = form; pairp(cursor); cursor = cdr_(cursor))
-    analyze_expr(vm, li, car_(cursor));
+  ot_copy(vm, cursor, form);
+  while (ot_tag(vm, cursor) == Tag_Pair) {
+    ot_car(vm, part, cursor);
+    analyze_expr(vm, li, part);
+    ot_cdr(vm, cursor, cursor);
+  }
 }
 
 typedef enum ResolvedKind : u8 {
@@ -473,17 +643,19 @@ static void patch_jump(Compiler* c, u32 operand, u32 target) {
 // The pool grows by array_push, which allocates, so the candidate must already
 // be rooted: taking a Ref makes passing a transient like car_(form) impossible.
 static u32 add_constant(Compiler* c, Ref value) {
-  Value pool = ref_get(c->vm, c->constants);
-  for (u32 i = 0; i < as_array(pool)->len; i++)
-    if (val_eq(array_items(pool)[i], ref_get(c->vm, value))) return i;
-  if (as_array(pool)->len >= UINT16_MAX) {
+  OT_SCOPE(c->vm);
+  Ref item = ot_push(c->vm);
+  u32 len = ot_array_len(c->vm, c->constants);
+  for (u32 i = 0; i < len; i++) {
+    ot_array_get(c->vm, item, c->constants, i);
+    if (ot_eq(c->vm, item, value)) return i;
+  }
+  if (len >= UINT16_MAX) {
     compiler_error(c, "too many constants");
     return 0;
   }
-  // Read the length again through the rooted handle: `pool` is stale the
-  // moment compiler_error above allocates a condition.
-  u32 index = as_array(ref_get(c->vm, c->constants))->len;
-  array_push(c->vm, ref_get(c->vm, c->constants), ref_get(c->vm, value));
+  u32 index = ot_array_len(c->vm, c->constants);
+  ot_array_push(c->vm, c->constants, value);
   return index;
 }
 
@@ -491,13 +663,12 @@ static u32 add_constant(Compiler* c, Ref value) {
 // point rather than an overload so the assert catches a heap value arriving
 // through the door that does not root it.
 static u32 add_constant_imm(Compiler* c, Value immediate) {
-  OT_ASSERT(!is_heap(immediate));
   OT_SCOPE(c->vm);
-  return add_constant(c, ref_push(c->vm, immediate));
+  return add_constant(c, ot_push_im(c->vm, immediate));
 }
 
 static Resolved resolve(Compiler* c, u32 name) {
-  if (!sym_qualified(c->vm, name)) {
+  if (!ot_sym_qualified(c->vm, name)) {
     for (u32 i = c->active.len; i-- > 0;) {
       Binding* binding = &c->info->bindings.data[c->active.data[i]];
       if (binding->name == name)
@@ -507,10 +678,10 @@ static Resolved resolve(Compiler* c, u32 name) {
     if (capture >= 0) return (Resolved){ResolvedKind_Upval, (u32)capture, true};
   }
   OT_SCOPE(c->vm);
-  Value symbol = symbol_v(name);
-  // ns_resolve_var is allocation-free, so `var` is safe until it is rooted here.
-  Value var = ns_resolve_var(c->vm, symbol);
-  Ref constant = ref_push(c->vm, is_nil(var) ? symbol : var);
+  Ref constant = ot_push(c->vm);
+  Ref var = ot_push(c->vm);
+  ot_set_symbol(c->vm, constant, name);
+  if (ot_resolve_var(c->vm, var, constant)) ot_copy(c->vm, constant, var);
   return (Resolved){ResolvedKind_Global, add_constant(c, constant), false};
 }
 
@@ -554,27 +725,30 @@ static void emit_store(Compiler* c, Resolved resolved) {
 static bool emit_body(Compiler* c, Ref forms, bool tail) {
   State* vm = c->vm;
   OT_SCOPE(vm);
-  Ref cursor = ref_push(vm, ref_get(vm, forms));
-  if (!pairp(ref_get(vm, cursor))) {
+  Ref cursor = ot_push_copy(vm, forms);
+  if (ot_tag(vm, cursor) != Tag_Pair) {
     emit_op(c, Op_Nil);
     push_depth(c);
     return true;
   }
   // One reused slot for the form being emitted rather than a push per
   // iteration, so the scope's depth does not track the length of the body.
-  Ref item = ref_push(vm, nil_v());
-  while (pairp(cdr_(ref_get(vm, cursor)))) {
-    ref_set(vm, item, car_(ref_get(vm, cursor)));
+  Ref item = ot_push(vm);
+  Ref rest = ot_push(vm);
+  ot_cdr(vm, rest, cursor);
+  while (ot_tag(vm, rest) == Tag_Pair) {
+    ot_car(vm, item, cursor);
     if (!emit_expr(c, item, false)) return false;
     emit_op(c, Op_Pop);
     pop_depth(c, 1);
-    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
+    ot_copy(vm, cursor, rest);
+    ot_cdr(vm, rest, cursor);
   }
-  ref_set(vm, item, car_(ref_get(vm, cursor)));
+  ot_car(vm, item, cursor);
   return emit_expr(c, item, tail);
 }
 
-static Status compile_lambda(State* vm, LambdaInfo* info, Ref body, u32 name);
+static Value compile_lambda(State* vm, LambdaInfo* info, Ref dst, Ref body, u32 name);
 
 // The parameter list is not passed down: parse_params already recorded the
 // arity and the formals' slots on `child` during analysis.
@@ -586,17 +760,19 @@ static bool emit_lambda(Compiler* c, Ref body, u32 name) {
   LambdaInfo* child = c->info->children.data[c->childCursor++];
   State* vm = c->vm;
   OT_SCOPE(vm);
-  if (compile_lambda(vm, child, body, name) != Status_Ok) {
+  Ref nested = ot_push(vm);
+  Value status = compile_lambda(vm, child, nested, body, name);
+  if (status.tag == Tag_Unwind) {
     c->failed = true;
     return true;
   }
-  Ref nested = ref_top(vm);
-  Ref descriptor = ref_push(vm, make_array(vm, child->captures.len + 1));
-  array_push(vm, ref_get(vm, descriptor), ref_get(vm, nested));
+  Ref descriptor = ot_push(vm);
+  ot_make_array(vm, descriptor, child->captures.len + 1);
+  ot_array_push(vm, descriptor, nested);
   for (u32 i = 0; i < child->captures.len; i++) {
     Capture capture = child->captures.data[i];
     i64 encoded = capture.local ? (i64)capture.index : -(i64)capture.index - 1;
-    array_push(vm, ref_get(vm, descriptor), int_v(encoded));
+    ot_array_push_im(vm, descriptor, int_v(encoded));
   }
   u32 constant = add_constant(c, descriptor);
   emit_op(c, Op_Closure);
@@ -607,17 +783,24 @@ static bool emit_lambda(Compiler* c, Ref body, u32 name) {
 
 static bool emit_if(Compiler* c, Ref args, bool tail) {
   State* vm = c->vm;
-  if (!pairp(ref_get(vm, args)) || !pairp(cdr_(ref_get(vm, args)))) {
+  if (ot_tag(vm, args) != Tag_Pair) {
     compiler_error(c, "bad if");
     return true;
   }
   OT_SCOPE(vm);
-  Ref part = ref_push(vm, car_(ref_get(vm, args)));
+  Ref part = ot_push(vm);
+  Ref rest = ot_push(vm);
+  ot_car(vm, part, args);
+  ot_cdr(vm, rest, args);
+  if (ot_tag(vm, rest) != Tag_Pair) {
+    compiler_error(c, "bad if");
+    return true;
+  }
   if (!emit_expr(c, part, false)) return false;
   u32 branchDepth = c->depth - 1;
   u32 falseJump = emit_jump(c, Op_JumpFalse);
   pop_depth(c, 1);
-  ref_set(vm, part, car_(cdr_(ref_get(vm, args))));
+  ot_car(vm, part, rest);
   bool thenFalls = emit_expr(c, part, tail);
   u32 thenDepth = c->depth;
   u32 endJump = 0;
@@ -626,8 +809,9 @@ static bool emit_if(Compiler* c, Ref args, bool tail) {
   patch_jump(c, falseJump, elseStart);
   c->depth = branchDepth;
   bool elseFalls;
-  if (pairp(cdr_(cdr_(ref_get(vm, args))))) {
-    ref_set(vm, part, car_(cdr_(cdr_(ref_get(vm, args)))));
+  ot_cdr(vm, rest, rest);
+  if (ot_tag(vm, rest) == Tag_Pair) {
+    ot_car(vm, part, rest);
     elseFalls = emit_expr(c, part, tail);
   } else {
     emit_op(c, Op_Nil);
@@ -674,59 +858,69 @@ static bool bind_next_slot(Compiler* c, u32 name) {
 
 static bool emit_let(Compiler* c, Ref args, bool tail) {
   State* vm = c->vm;
-  if (!pairp(ref_get(vm, args))) {
+  if (ot_tag(vm, args) != Tag_Pair) {
     compiler_error(c, "bad let");
     return true;
   }
   OT_SCOPE(vm);
-  Ref bindings = ref_push(vm, car_(ref_get(vm, args)));
-  ref_set(vm, bindings, strip_array_literal_head(ref_get(vm, bindings), vm->syms.array_));
+  Ref bindings = ot_push(vm);
+  ot_car(vm, bindings, args);
+  strip_array_head(vm, bindings, bindings);
   u32 activeBase = c->active.len;
-  Ref bindingRoot = ref_push(vm, nil_v());
-  Ref init = ref_push(vm, nil_v());
-  while (pairp(ref_get(vm, bindings))) {
-    ref_set(vm, bindingRoot, car_(ref_get(vm, bindings)));
-    if (!pairp(ref_get(vm, bindingRoot)) || !pairp(cdr_(ref_get(vm, bindingRoot))) ||
-        car_(ref_get(vm, bindingRoot)).tag != Tag_Symbol) {
+  Ref bindingRoot = ot_push(vm);
+  Ref init = ot_push(vm);
+  Ref name = ot_push(vm);
+  Ref rest = ot_push(vm);
+  while (ot_tag(vm, bindings) == Tag_Pair) {
+    ot_car(vm, bindingRoot, bindings);
+    if (ot_tag(vm, bindingRoot) != Tag_Pair) {
       compiler_error(c, "bad let binding");
       break;
     }
-    ref_set(vm, init, car_(cdr_(ref_get(vm, bindingRoot))));
+    ot_car(vm, name, bindingRoot);
+    ot_cdr(vm, rest, bindingRoot);
+    if (ot_tag(vm, name) != Tag_Symbol || ot_tag(vm, rest) != Tag_Pair) {
+      compiler_error(c, "bad let binding");
+      break;
+    }
+    ot_car(vm, init, rest);
     if (!emit_expr(c, init, false)) break;
-    if (!bind_next_slot(c, car_(ref_get(vm, bindingRoot)).id)) break;
-    ref_set(vm, bindings, cdr_(ref_get(vm, bindings)));
+    if (!bind_next_slot(c, ot_id(vm, name))) break;
+    ot_cdr(vm, bindings, bindings);
   }
   // Mirror the analyzer's collect_body_defines for this let body: allocate a
   // nil-initialized (boxed if captured) slot per hoisted define, in the same
   // order, so bindingCursor stays in lockstep.
   if (c->info->userDepth > 0) {
-    Ref body = ref_push(vm, cdr_(ref_get(vm, args)));
-    while (pairp(ref_get(vm, body))) {
-      Value name = body_define_name(vm, car_(ref_get(vm, body)));
-      if (!is_nil(name) && !active_has(c, name.id)) {
+    Ref body = ot_push(vm);
+    ot_cdr(vm, body, args);
+    Ref form = ot_push(vm);
+    while (ot_tag(vm, body) == Tag_Pair) {
+      ot_car(vm, form, body);
+      body_define_name(vm, name, form);
+      if (!ot_nil(vm, name) && !active_has(c, ot_id(vm, name))) {
         emit_op(c, Op_Nil);
         push_depth(c);
-        if (!bind_next_slot(c, name.id)) break;
+        if (!bind_next_slot(c, ot_id(vm, name))) break;
       }
-      ref_set(vm, body, cdr_(ref_get(vm, body)));
+      ot_cdr(vm, body, body);
     }
   }
-  Ref bodyForms = ref_push(vm, cdr_(ref_get(vm, args)));
+  Ref bodyForms = ot_push(vm);
+  ot_cdr(vm, bodyForms, args);
   bool falls = emit_body(c, bodyForms, tail);
   c->active.len = activeBase;
   return falls;
 }
 
-// `name` is a symbol, which is an immediate, so it needs no rooting; `doc` is a
-// string and does.
-static void emit_def_global(Compiler* c, Value name, bool isPrivate, Ref doc) {
+static void emit_def_global(Compiler* c, u32 name, bool isPrivate, Ref doc) {
   State* vm = c->vm;
-  OT_ASSERT(name.tag == Tag_Symbol);
   OT_SCOPE(vm);
-  Ref descriptor = ref_push(vm, make_array(vm, 3));
-  array_push(vm, ref_get(vm, descriptor), name);
-  array_push(vm, ref_get(vm, descriptor), bool_v(isPrivate));
-  array_push(vm, ref_get(vm, descriptor), ref_get(vm, doc));
+  Ref descriptor = ot_push(vm);
+  ot_make_array(vm, descriptor, 3);
+  ot_array_push_im(vm, descriptor, symbol_v(name));
+  ot_array_push_im(vm, descriptor, bool_v(isPrivate));
+  ot_array_push(vm, descriptor, doc);
   emit_op(c, Op_DefGlobal);
   emit_u16(c, add_constant(c, descriptor));
 }
@@ -734,44 +928,48 @@ static void emit_def_global(Compiler* c, Value name, bool isPrivate, Ref doc) {
 static bool emit_define(Compiler* c, Ref form, bool isPrivate) {
   State* vm = c->vm;
   OT_SCOPE(vm);
-  Ref args = ref_push(vm, cdr_(ref_get(vm, form)));
-  if (!pairp(ref_get(vm, args))) {
+  Ref args = ot_push(vm);
+  ot_cdr(vm, args, form);
+  if (ot_tag(vm, args) != Tag_Pair) {
     compiler_error(c, "bad define");
     return true;
   }
-  Ref target = ref_push(vm, car_(ref_get(vm, args)));
-  Value name = pairp(ref_get(vm, target)) ? car_(ref_get(vm, target)) : ref_get(vm, target);
-  if (name.tag != Tag_Symbol) {
+  Ref target = ot_push(vm);
+  Ref name = ot_push(vm);
+  ot_car(vm, target, args);
+  if (ot_tag(vm, target) == Tag_Pair) ot_car(vm, name, target);
+  else ot_copy(vm, name, target);
+  if (ot_tag(vm, name) != Tag_Symbol) {
     compiler_error(c, "define name must be a symbol");
     return true;
   }
-  Ref rest = ref_push(vm, nil_v());
-  if (pairp(ref_get(vm, target))) {
-    ref_set(vm, rest, cdr_(ref_get(vm, args)));
-    if (!emit_lambda(c, rest, name.id)) return false;
+  u32 nameId = ot_id(vm, name);
+  Ref rest = ot_push(vm);
+  Ref doc = ot_push(vm);
+  ot_cdr(vm, rest, args);
+  if (ot_tag(vm, target) == Tag_Pair) {
+    if (!emit_lambda(c, rest, nameId)) return false;
   } else {
-    ref_set(vm, rest, skip_docstring(cdr_(ref_get(vm, args)), nullptr));
-    if (!pairp(ref_get(vm, rest))) {
+    skip_docstring_ref(vm, rest, doc, rest);
+    if (ot_tag(vm, rest) != Tag_Pair) {
       compiler_error(c, "define is missing a value");
       return true;
     }
-    ref_set(vm, rest, car_(ref_get(vm, rest)));
+    ot_car(vm, rest, rest);
     if (!emit_expr(c, rest, false)) return false;
   }
 
   if (c->info->userDepth > 0) {
-    Resolved local = resolve(c, name.id);
+    Resolved local = resolve(c, nameId);
     if (local.kind == ResolvedKind_Global) {
       compiler_error(c, "internal define was not hoisted");
       return true;
     }
     emit_store(c, local);
   } else {
-    Ref doc = ref_push(vm, nil_v());
-    Value found = nil_v();
-    skip_docstring(cdr_(ref_get(vm, args)), &found);
-    ref_set(vm, doc, found);
-    emit_def_global(c, name, isPrivate, doc);
+    ot_cdr(vm, rest, args);
+    skip_docstring_ref(vm, rest, doc, rest);
+    emit_def_global(c, nameId, isPrivate, doc);
   }
   return true;
 }
@@ -779,22 +977,29 @@ static bool emit_define(Compiler* c, Ref form, bool isPrivate) {
 static bool emit_defmacro(Compiler* c, Ref form) {
   State* vm = c->vm;
   OT_SCOPE(vm);
-  Ref args = ref_push(vm, cdr_(ref_get(vm, form)));
-  if (!pairp(ref_get(vm, args)) || car_(ref_get(vm, args)).tag != Tag_Symbol ||
-      !pairp(cdr_(ref_get(vm, args)))) {
+  Ref args = ot_push(vm);
+  Ref name = ot_push(vm);
+  Ref rest = ot_push(vm);
+  ot_cdr(vm, args, form);
+  if (ot_tag(vm, args) != Tag_Pair) {
     compiler_error(c, "bad defmacro");
     return true;
   }
-  Value name = car_(ref_get(vm, args));
-  Ref body = ref_push(vm, cdr_(cdr_(ref_get(vm, args))));
-  if (!emit_lambda(c, body, name.id)) return false;
+  ot_car(vm, name, args);
+  ot_cdr(vm, rest, args);
+  if (ot_tag(vm, name) != Tag_Symbol || ot_tag(vm, rest) != Tag_Pair) {
+    compiler_error(c, "bad defmacro");
+    return true;
+  }
+  u32 nameId = ot_id(vm, name);
+  Ref body = ot_push(vm);
+  ot_cdr(vm, body, rest);
+  if (!emit_lambda(c, body, nameId)) return false;
   emit_op(c, Op_ToMacro);
 
-  Ref doc = ref_push(vm, nil_v());
-  Value found = nil_v();
-  skip_docstring(cdr_(cdr_(ref_get(vm, args))), &found);
-  ref_set(vm, doc, found);
-  emit_def_global(c, name, false, doc);
+  Ref doc = ot_push(vm);
+  skip_docstring_ref(vm, body, doc, body);
+  emit_def_global(c, nameId, false, doc);
   return true;
 }
 
@@ -808,18 +1013,19 @@ static bool finish_control_call(Compiler* c, u32 argc, bool tail) {
 static bool emit_call(Compiler* c, Ref form, bool tail) {
   State* vm = c->vm;
   OT_SCOPE(vm);
-  Ref cursor = ref_push(vm, ref_get(vm, form));
-  Ref item = ref_push(vm, car_(ref_get(vm, cursor)));
+  Ref cursor = ot_push_copy(vm, form);
+  Ref item = ot_push(vm);
+  ot_car(vm, item, cursor);
   if (!emit_expr(c, item, false)) return false;
-  ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
+  ot_cdr(vm, cursor, cursor);
   u32 argc = 0;
-  while (pairp(ref_get(vm, cursor))) {
-    ref_set(vm, item, car_(ref_get(vm, cursor)));
+  while (ot_tag(vm, cursor) == Tag_Pair) {
+    ot_car(vm, item, cursor);
     if (!emit_expr(c, item, false)) return false;
     argc++;
-    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
+    ot_cdr(vm, cursor, cursor);
   }
-  if (ref_get(vm, cursor).tag != Tag_Null) {
+  if (ot_tag(vm, cursor) != Tag_Null) {
     compiler_error(c, "dotted call");
     return true;
   }
@@ -828,23 +1034,25 @@ static bool emit_call(Compiler* c, Ref form, bool tail) {
 
 static bool emit_while(Compiler* c, Ref args) {
   State* vm = c->vm;
-  if (!pairp(ref_get(vm, args))) {
+  if (ot_tag(vm, args) != Tag_Pair) {
     compiler_error(c, "bad while");
     return true;
   }
   OT_SCOPE(vm);
   u32 start = c->bytes.len;
-  Ref item = ref_push(vm, car_(ref_get(vm, args)));
+  Ref item = ot_push(vm);
+  ot_car(vm, item, args);
   if (!emit_expr(c, item, false)) return false;
   u32 exit = emit_jump(c, Op_JumpFalse);
   pop_depth(c, 1);
-  Ref body = ref_push(vm, cdr_(ref_get(vm, args)));
-  while (pairp(ref_get(vm, body))) {
-    ref_set(vm, item, car_(ref_get(vm, body)));
+  Ref body = ot_push(vm);
+  ot_cdr(vm, body, args);
+  while (ot_tag(vm, body) == Tag_Pair) {
+    ot_car(vm, item, body);
     if (!emit_expr(c, item, false)) return false;
     emit_op(c, Op_Pop);
     pop_depth(c, 1);
-    ref_set(vm, body, cdr_(ref_get(vm, body)));
+    ot_cdr(vm, body, body);
   }
   emit_op(c, Op_Loop);
   u32 operand = c->bytes.len;
@@ -857,17 +1065,19 @@ static bool emit_while(Compiler* c, Ref args) {
 
 static bool emit_short_circuit(Compiler* c, Ref args, bool isAnd, bool tail) {
   State* vm = c->vm;
-  if (!pairp(ref_get(vm, args))) {
+  if (ot_tag(vm, args) != Tag_Pair) {
     emit_op(c, isAnd ? Op_True : Op_False);
     push_depth(c);
     return true;
   }
   OT_SCOPE(vm);
-  Ref cursor = ref_push(vm, ref_get(vm, args));
-  Ref item = ref_push(vm, nil_v());
+  Ref cursor = ot_push_copy(vm, args);
+  Ref item = ot_push(vm);
+  Ref rest = ot_push(vm);
   VecU32 exits = {0};
-  while (pairp(cdr_(ref_get(vm, cursor)))) {
-    ref_set(vm, item, car_(ref_get(vm, cursor)));
+  ot_cdr(vm, rest, cursor);
+  while (ot_tag(vm, rest) == Tag_Pair) {
+    ot_car(vm, item, cursor);
     if (!emit_expr(c, item, false)) {
       vec_deinit(&exits);
       return false;
@@ -875,9 +1085,10 @@ static bool emit_short_circuit(Compiler* c, Ref args, bool isAnd, bool tail) {
     vec_push(&exits, emit_jump(c, isAnd ? Op_JumpFalsePeek : Op_JumpTruePeek));
     emit_op(c, Op_Pop);
     pop_depth(c, 1);
-    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
+    ot_copy(vm, cursor, rest);
+    ot_cdr(vm, rest, cursor);
   }
-  ref_set(vm, item, car_(ref_get(vm, cursor)));
+  ot_car(vm, item, cursor);
   bool falls = emit_expr(c, item, tail);
   u32 end = c->bytes.len;
   for (u32 i = 0; i < exits.len; i++) patch_jump(c, exits.data[i], end);
@@ -889,40 +1100,42 @@ static bool emit_short_circuit(Compiler* c, Ref args, bool isAnd, bool tail) {
 static bool emit_cond(Compiler* c, Ref clauses, bool tail) {
   State* vm = c->vm;
   OT_SCOPE(vm);
-  Ref cursor = ref_push(vm, ref_get(vm, clauses));
+  Ref cursor = ot_push_copy(vm, clauses);
   VecU32 exits = {0};
   const u32 baseDepth = c->depth;
   bool anyFalls = false;
   bool hasElse = false;
-  Ref clauseRoot = ref_push(vm, nil_v());
-  Ref part = ref_push(vm, nil_v());
+  Ref clauseRoot = ot_push(vm);
+  Ref part = ot_push(vm);
+  Ref rest = ot_push(vm);
 
-  while (pairp(ref_get(vm, cursor))) {
-    ref_set(vm, clauseRoot, car_(ref_get(vm, cursor)));
-    if (!pairp(ref_get(vm, clauseRoot))) {
+  while (ot_tag(vm, cursor) == Tag_Pair) {
+    ot_car(vm, clauseRoot, cursor);
+    if (ot_tag(vm, clauseRoot) != Tag_Pair) {
       compiler_error(c, "bad cond clause");
       vec_deinit(&exits);
       return true;
     }
-    if (sym_is(car_(ref_get(vm, clauseRoot)), vm->syms.else_)) {
-      if (!pairp(cdr_(ref_get(vm, clauseRoot)))) {
+    ot_car(vm, part, clauseRoot);
+    ot_cdr(vm, rest, clauseRoot);
+    if (symbol_is(vm, part, ot_syms(vm)->else_)) {
+      if (ot_tag(vm, rest) != Tag_Pair) {
         compiler_error(c, "cond else needs a body");
         vec_deinit(&exits);
         return true;
       }
       hasElse = true;
-      ref_set(vm, part, cdr_(ref_get(vm, clauseRoot)));
+      ot_copy(vm, part, rest);
       bool falls = emit_body(c, part, tail);
       anyFalls = anyFalls || falls;
       break;
     }
 
-    ref_set(vm, part, car_(ref_get(vm, clauseRoot)));
     if (!emit_expr(c, part, false)) {
       vec_deinit(&exits);
       return false;
     }
-    if (!pairp(cdr_(ref_get(vm, clauseRoot)))) {
+    if (ot_tag(vm, rest) != Tag_Pair) {
       // The clause's own test value is the result, so this exit reaches the end
       // of the cond carrying a value: the form falls through even if every
       // clause body below ends in a tail call.
@@ -935,7 +1148,7 @@ static bool emit_cond(Compiler* c, Ref clauses, bool tail) {
     } else {
       u32 next = emit_jump(c, Op_JumpFalse);
       pop_depth(c, 1);
-      ref_set(vm, part, cdr_(ref_get(vm, clauseRoot)));
+      ot_copy(vm, part, rest);
       bool falls = emit_body(c, part, tail);
       if (falls) {
         vec_push(&exits, emit_jump(c, Op_Jump));
@@ -944,7 +1157,7 @@ static bool emit_cond(Compiler* c, Ref clauses, bool tail) {
       patch_jump(c, next, c->bytes.len);
     }
     c->depth = baseDepth;
-    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
+    ot_cdr(vm, cursor, cursor);
   }
 
   if (!hasElse) {
@@ -968,37 +1181,41 @@ static void emit_quoted_symbol(Compiler* c, u32 name) {
 static bool emit_quasiquote(Compiler* c, Ref form, u32 depth) {
   State* vm = c->vm;
   OT_SCOPE(vm);
-  if (!pairp(ref_get(vm, form))) {
+  if (ot_tag(vm, form) != Tag_Pair) {
     emit_op(c, Op_Const);
     emit_u16(c, add_constant(c, form));
     push_depth(c);
     return true;
   }
 
-  // `head` and `args` are read back off `form` at each use rather than held in
-  // a local: emit_quoted_symbol reaches add_constant, which allocates.
-  Ref part = ref_push(vm, nil_v());
-  if (sym_is(car_(ref_get(vm, form)), vm->syms.unquote_)) {
-    if (!pairp(cdr_(ref_get(vm, form)))) {
+  const Syms* syms = ot_syms(vm);
+  Ref head = ot_push(vm);
+  Ref args = ot_push(vm);
+  Ref part = ot_push(vm);
+  Ref rest = ot_push(vm);
+  ot_car(vm, head, form);
+  ot_cdr(vm, args, form);
+  if (symbol_is(vm, head, syms->unquote_)) {
+    if (ot_tag(vm, args) != Tag_Pair) {
       compiler_error(c, "bad unquote");
       return true;
     }
-    ref_set(vm, part, car_(cdr_(ref_get(vm, form))));
+    ot_car(vm, part, args);
     if (depth == 1) return emit_expr(c, part, false);
-    emit_quoted_symbol(c, vm->syms.unquote_);
+    emit_quoted_symbol(c, syms->unquote_);
     if (!emit_quasiquote(c, part, depth - 1)) return false;
     emit_op(c, Op_List);
     emit_u16(c, 2);
     pop_depth(c, 1);
     return true;
   }
-  if (sym_is(car_(ref_get(vm, form)), vm->syms.quasiquote_)) {
-    if (!pairp(cdr_(ref_get(vm, form)))) {
+  if (symbol_is(vm, head, syms->quasiquote_)) {
+    if (ot_tag(vm, args) != Tag_Pair) {
       compiler_error(c, "bad nested quasiquote");
       return true;
     }
-    ref_set(vm, part, car_(cdr_(ref_get(vm, form))));
-    emit_quoted_symbol(c, vm->syms.quasiquote_);
+    ot_car(vm, part, args);
+    emit_quoted_symbol(c, syms->quasiquote_);
     if (!emit_quasiquote(c, part, depth + 1)) return false;
     emit_op(c, Op_List);
     emit_u16(c, 2);
@@ -1006,25 +1223,29 @@ static bool emit_quasiquote(Compiler* c, Ref form, u32 depth) {
     return true;
   }
 
-  if (pairp(car_(ref_get(vm, form))) &&
-      sym_is(car_(car_(ref_get(vm, form))), vm->syms.unquoteSplicing_) && depth == 1) {
-    if (!pairp(cdr_(car_(ref_get(vm, form))))) {
+  bool splice = false;
+  if (depth == 1 && ot_tag(vm, head) == Tag_Pair) {
+    ot_car(vm, part, head);
+    splice = symbol_is(vm, part, syms->unquoteSplicing_);
+  }
+  if (splice) {
+    ot_cdr(vm, args, head);
+    if (ot_tag(vm, args) != Tag_Pair) {
       compiler_error(c, "bad unquote-splicing");
       return true;
     }
-    ref_set(vm, part, car_(cdr_(car_(ref_get(vm, form)))));
+    ot_car(vm, part, args);
     if (!emit_expr(c, part, false)) return false;
-    ref_set(vm, part, cdr_(ref_get(vm, form)));
-    if (!emit_quasiquote(c, part, depth)) return false;
+    ot_cdr(vm, rest, form);
+    if (!emit_quasiquote(c, rest, depth)) return false;
     emit_op(c, Op_Append2);
     pop_depth(c, 1);
     return true;
   }
 
-  ref_set(vm, part, car_(ref_get(vm, form)));
-  if (!emit_quasiquote(c, part, depth)) return false;
-  ref_set(vm, part, cdr_(ref_get(vm, form)));
-  if (!emit_quasiquote(c, part, depth)) return false;
+  if (!emit_quasiquote(c, head, depth)) return false;
+  ot_cdr(vm, rest, form);
+  if (!emit_quasiquote(c, rest, depth)) return false;
   emit_op(c, Op_Cons);
   pop_depth(c, 1);
   return true;
@@ -1045,14 +1266,18 @@ static void emit_constant_imm(Compiler* c, Value immediate) {
 static void emit_native(Compiler* c, const char* name, NativeFn native) {
   State* vm = c->vm;
   OT_SCOPE(vm);
-  Ref function = ref_push(vm, make_native(vm, name, native));
+  Ref function = ot_push(vm);
+  ot_make_native(vm, function, name, native);
   emit_constant(c, function);
 }
 
 static bool emit_thunk_expr(Compiler* c, Ref form) {
   State* vm = c->vm;
   OT_SCOPE(vm);
-  Ref body = ref_push(vm, make_pair(vm, ref_get(vm, form), null_v()));
+  Ref body = ot_push(vm);
+  Ref empty = ot_push(vm);
+  ot_set_null(vm, empty);
+  ot_cons(vm, body, form, empty);
   return emit_lambda(c, body, 0);
 }
 
@@ -1062,31 +1287,38 @@ static bool emit_binding_control(Compiler* c, Ref args, bool tail, const char* b
                                  const char* badBinding, const char* nativeName, NativeFn native,
                                  bool thunkBindings) {
   State* vm = c->vm;
-  if (!pairp(ref_get(vm, args))) {
+  if (ot_tag(vm, args) != Tag_Pair) {
     compiler_error(c, badForm);
     return true;
   }
   OT_SCOPE(vm);
   emit_native(c, nativeName, native);
-  Ref bindings = ref_push(vm, car_(ref_get(vm, args)));
-  ref_set(vm, bindings, strip_array_literal_head(ref_get(vm, bindings), vm->syms.array_));
+  Ref bindings = ot_push(vm);
+  Ref binding = ot_push(vm);
+  Ref part = ot_push(vm);
+  Ref rest = ot_push(vm);
+  ot_car(vm, bindings, args);
+  strip_array_head(vm, bindings, bindings);
   u32 argc = 0;
-  Ref bindingRoot = ref_push(vm, nil_v());
-  Ref part = ref_push(vm, nil_v());
-  while (pairp(ref_get(vm, bindings))) {
-    ref_set(vm, bindingRoot, car_(ref_get(vm, bindings)));
-    if (!pairp(ref_get(vm, bindingRoot)) || !pairp(cdr_(ref_get(vm, bindingRoot)))) {
+  while (ot_tag(vm, bindings) == Tag_Pair) {
+    ot_car(vm, binding, bindings);
+    if (ot_tag(vm, binding) != Tag_Pair) {
       compiler_error(c, badBinding);
       return true;
     }
-    ref_set(vm, part, car_(ref_get(vm, bindingRoot)));
+    ot_car(vm, part, binding);
+    ot_cdr(vm, rest, binding);
+    if (ot_tag(vm, rest) != Tag_Pair) {
+      compiler_error(c, badBinding);
+      return true;
+    }
     if (thunkBindings ? !emit_thunk_expr(c, part) : !emit_expr(c, part, false)) return false;
-    ref_set(vm, part, car_(cdr_(ref_get(vm, bindingRoot))));
+    ot_car(vm, part, rest);
     if (thunkBindings ? !emit_thunk_expr(c, part) : !emit_expr(c, part, false)) return false;
     argc += 2;
-    ref_set(vm, bindings, cdr_(ref_get(vm, bindings)));
+    ot_cdr(vm, bindings, bindings);
   }
-  ref_set(vm, part, cdr_(ref_get(vm, args)));
+  ot_cdr(vm, part, args);
   if (!emit_thunk_body(c, part)) return false;
   return finish_control_call(c, argc + 1, tail);
 }
@@ -1098,40 +1330,46 @@ static bool emit_handler_bind(Compiler* c, Ref args, bool tail) {
 
 static bool emit_restart_case(Compiler* c, Ref args, bool tail) {
   State* vm = c->vm;
-  if (!pairp(ref_get(vm, args))) {
+  if (ot_tag(vm, args) != Tag_Pair) {
     compiler_error(c, "bad restart-case");
     return true;
   }
   OT_SCOPE(vm);
   emit_native(c, "%restart-case", vm_control_restart_case);
-  Ref part = ref_push(vm, car_(ref_get(vm, args)));
+  Ref part = ot_push(vm);
+  Ref clauses = ot_push(vm);
+  Ref clause = ot_push(vm);
+  Ref name = ot_push(vm);
+  Ref rest = ot_push(vm);
+  Ref doc = ot_push(vm);
+  ot_car(vm, part, args);
   if (!emit_thunk_expr(c, part)) return false;
   u32 argc = 1;
-  Ref clauses = ref_push(vm, cdr_(ref_get(vm, args)));
-  Ref clause = ref_push(vm, nil_v());
-  Ref doc = ref_push(vm, nil_v());
-  while (pairp(ref_get(vm, clauses))) {
-    ref_set(vm, clause, car_(ref_get(vm, clauses)));
-    if (!pairp(ref_get(vm, clause)) || car_(ref_get(vm, clause)).tag != Tag_Symbol) {
+  ot_cdr(vm, clauses, args);
+  while (ot_tag(vm, clauses) == Tag_Pair) {
+    ot_car(vm, clause, clauses);
+    if (ot_tag(vm, clause) != Tag_Pair) {
       compiler_error(c, "bad restart-case clause");
       return true;
     }
-    Value found = nil_v();
-    Value rest = skip_docstring(cdr_(ref_get(vm, clause)), &found);
-    if (!pairp(rest)) {
+    ot_car(vm, name, clause);
+    if (ot_tag(vm, name) != Tag_Symbol) {
+      compiler_error(c, "bad restart-case clause");
+      return true;
+    }
+    ot_cdr(vm, rest, clause);
+    skip_docstring_ref(vm, rest, doc, rest);
+    if (ot_tag(vm, rest) != Tag_Pair) {
       compiler_error(c, "restart-case clause needs parameters");
       return true;
     }
-    // Root before emitting: emit_constant allocates, which would strand `rest`
-    // and `found` if they stayed raw locals.
-    ref_set(vm, doc, found);
-    ref_set(vm, part, cdr_(rest));
-    u32 clauseName = car_(ref_get(vm, clause)).id;
-    emit_constant_imm(c, car_(ref_get(vm, clause)));
+    u32 clauseName = ot_id(vm, name);
+    emit_constant_imm(c, symbol_v(clauseName));
     emit_constant(c, doc);
+    ot_cdr(vm, part, rest);
     if (!emit_lambda(c, part, clauseName)) return false;
     argc += 3;
-    ref_set(vm, clauses, cdr_(ref_get(vm, clauses)));
+    ot_cdr(vm, clauses, clauses);
   }
   return finish_control_call(c, argc, tail);
 }
@@ -1139,64 +1377,88 @@ static bool emit_restart_case(Compiler* c, Ref args, bool tail) {
 static bool emit_try(Compiler* c, Ref args, bool tail) {
   State* vm = c->vm;
   OT_SCOPE(vm);
-  Ref cursor = ref_push(vm, ref_get(vm, args));
+  Ref cursor = ot_push_copy(vm, args);
+  Ref scan = ot_push_copy(vm, args);
+  Ref form = ot_push(vm);
+  Ref head = ot_push(vm);
   u32 bodyCount = 0;
-  for (Value scan = ref_get(vm, cursor); pairp(scan); scan = cdr_(scan)) {
-    Value form = car_(scan);
-    if (pairp(form) && sym_is(car_(form), vm->syms.catch_)) break;
+  while (ot_tag(vm, scan) == Tag_Pair) {
+    ot_car(vm, form, scan);
+    if (ot_tag(vm, form) == Tag_Pair) {
+      ot_car(vm, head, form);
+      if (symbol_is(vm, head, ot_syms(vm)->catch_)) break;
+    }
     bodyCount++;
+    ot_cdr(vm, scan, scan);
   }
 
   emit_native(c, "%try", vm_control_try);
   emit_constant_imm(c, int_v(bodyCount));
   u32 argc = 1;
-  Ref part = ref_push(vm, nil_v());
+  Ref part = ot_push(vm);
   for (u32 i = 0; i < bodyCount; i++) {
-    ref_set(vm, part, car_(ref_get(vm, cursor)));
+    ot_car(vm, part, cursor);
     if (!emit_thunk_expr(c, part)) return false;
     argc++;
-    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
+    ot_cdr(vm, cursor, cursor);
   }
-  Ref clauseRoot = ref_push(vm, nil_v());
-  while (pairp(ref_get(vm, cursor))) {
-    ref_set(vm, clauseRoot, car_(ref_get(vm, cursor)));
-    if (!pairp(ref_get(vm, clauseRoot)) ||
-        !sym_is(car_(ref_get(vm, clauseRoot)), vm->syms.catch_) ||
-        !pairp(cdr_(ref_get(vm, clauseRoot)))) {
+  Ref clause = ot_push(vm);
+  Ref rest = ot_push(vm);
+  Ref spec = ot_push(vm);
+  Ref specRest = ot_push(vm);
+  while (ot_tag(vm, cursor) == Tag_Pair) {
+    ot_car(vm, clause, cursor);
+    if (ot_tag(vm, clause) != Tag_Pair) {
       compiler_error(c, "bad catch clause");
       return true;
     }
-    Value spec = car_(cdr_(ref_get(vm, clauseRoot)));
-    if (!pairp(spec) || !pairp(cdr_(spec)) || car_(cdr_(spec)).tag != Tag_Symbol) {
+    ot_car(vm, head, clause);
+    ot_cdr(vm, rest, clause);
+    if (!symbol_is(vm, head, ot_syms(vm)->catch_) || ot_tag(vm, rest) != Tag_Pair) {
+      compiler_error(c, "bad catch clause");
+      return true;
+    }
+    ot_car(vm, spec, rest);
+    if (ot_tag(vm, spec) != Tag_Pair) {
       compiler_error(c, "bad catch specification");
       return true;
     }
-    ref_set(vm, part, car_(spec));
+    ot_cdr(vm, specRest, spec);
+    if (ot_tag(vm, specRest) != Tag_Pair) {
+      compiler_error(c, "bad catch specification");
+      return true;
+    }
+    ot_car(vm, head, specRest);
+    if (ot_tag(vm, head) != Tag_Symbol) {
+      compiler_error(c, "bad catch specification");
+      return true;
+    }
+    ot_car(vm, part, spec);
     if (!emit_thunk_expr(c, part)) return false;
-    ref_set(vm, part, cdr_(cdr_(ref_get(vm, clauseRoot))));
+    ot_cdr(vm, part, rest);
     if (!emit_lambda(c, part, 0)) return false;
     argc += 2;
-    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
+    ot_cdr(vm, cursor, cursor);
   }
   return finish_control_call(c, argc, tail);
 }
 
 static bool emit_unwind_protect(Compiler* c, Ref args, bool tail) {
   State* vm = c->vm;
-  if (!pairp(ref_get(vm, args))) {
+  if (ot_tag(vm, args) != Tag_Pair) {
     compiler_error(c, "bad unwind-protect");
     return true;
   }
   OT_SCOPE(vm);
-  Ref cursor = ref_push(vm, ref_get(vm, args));
-  Ref part = ref_push(vm, nil_v());
+  Ref cursor = ot_push_copy(vm, args);
+  Ref part = ot_push(vm);
   emit_native(c, "%unwind-protect", vm_control_unwind_protect);
   u32 argc = 0;
-  while (pairp(ref_get(vm, cursor))) {
-    ref_set(vm, part, car_(ref_get(vm, cursor)));
+  while (ot_tag(vm, cursor) == Tag_Pair) {
+    ot_car(vm, part, cursor);
     if (!emit_thunk_expr(c, part)) return false;
     argc++;
-    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
+    ot_cdr(vm, cursor, cursor);
   }
   return finish_control_call(c, argc, tail);
 }
@@ -1212,25 +1474,29 @@ static bool emit_defparam(Compiler* c, Ref args, bool tail) {
     compiler_error(c, "defparam only allowed at top level");
     return true;
   }
-  if (!pairp(ref_get(vm, args)) || car_(ref_get(vm, args)).tag != Tag_Symbol) {
+  OT_SCOPE(vm);
+  Ref name = ot_push(vm);
+  Ref rest = ot_push(vm);
+  Ref doc = ot_push(vm);
+  if (ot_tag(vm, args) != Tag_Pair) {
     compiler_error(c, "bad defparam");
     return true;
   }
-  OT_SCOPE(vm);
-  Value name = car_(ref_get(vm, args));
-  Ref rest = ref_push(vm, cdr_(ref_get(vm, args)));
-  Ref doc = ref_push(vm, nil_v());
-  Value found = nil_v();
-  ref_set(vm, rest, skip_docstring(ref_get(vm, rest), &found));
-  ref_set(vm, doc, found);
-  if (!pairp(ref_get(vm, rest))) {
+  ot_car(vm, name, args);
+  if (ot_tag(vm, name) != Tag_Symbol) {
+    compiler_error(c, "bad defparam");
+    return true;
+  }
+  ot_cdr(vm, rest, args);
+  skip_docstring_ref(vm, rest, doc, rest);
+  if (ot_tag(vm, rest) != Tag_Pair) {
     compiler_error(c, "defparam missing default");
     return true;
   }
   emit_native(c, "%defparam", vm_control_defparam);
-  emit_constant_imm(c, name);
+  emit_constant_imm(c, symbol_v(ot_id(vm, name)));
   emit_constant(c, doc);
-  ref_set(vm, rest, car_(ref_get(vm, rest)));
+  ot_car(vm, rest, rest);
   if (!emit_expr(c, rest, false)) return false;
   return finish_control_call(c, 3, tail);
 }
@@ -1239,19 +1505,19 @@ static bool emit_data_control(Compiler* c, Ref args, bool tail, const char* help
                               NativeFn native, bool requireArg) {
   State* vm = c->vm;
   OT_SCOPE(vm);
-  Ref cursor = ref_push(vm, ref_get(vm, args));
-  if (requireArg && !pairp(ref_get(vm, cursor))) {
+  Ref cursor = ot_push_copy(vm, args);
+  if (requireArg && ot_tag(vm, cursor) != Tag_Pair) {
     compiler_error(c, "missing control form argument");
     return true;
   }
   emit_native(c, helperName, native);
   u32 argc = 0;
-  Ref part = ref_push(vm, nil_v());
-  while (pairp(ref_get(vm, cursor))) {
-    ref_set(vm, part, car_(ref_get(vm, cursor)));
+  Ref part = ot_push(vm);
+  while (ot_tag(vm, cursor) == Tag_Pair) {
+    ot_car(vm, part, cursor);
     emit_constant(c, part);
     argc++;
-    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
+    ot_cdr(vm, cursor, cursor);
   }
   return finish_control_call(c, argc, tail);
 }
@@ -1259,26 +1525,28 @@ static bool emit_data_control(Compiler* c, Ref args, bool tail, const char* help
 static bool emit_expr(Compiler* c, Ref form, bool tail) {
   State* vm = c->vm;
   OT_SCOPE(vm);
-  Value immediate = ref_get(vm, form);
-  if (immediate.tag == Tag_Symbol) {
-    emit_load(c, resolve(c, immediate.id));
+  Tag tag = ot_tag(vm, form);
+  if (tag == Tag_Symbol) {
+    emit_load(c, resolve(c, ot_id(vm, form)));
     return true;
   }
-  if (!pairp(immediate)) {
-    switch (immediate.tag) {
+  if (tag != Tag_Pair) {
+    switch (tag) {
       case Tag_Nil: emit_op(c, Op_Nil); break;
       case Tag_True: emit_op(c, Op_True); break;
       case Tag_False: emit_op(c, Op_False); break;
       case Tag_Null: emit_op(c, Op_Null); break;
-      case Tag_Int:
-        if (immediate.i >= INT8_MIN && immediate.i <= INT8_MAX) {
+      case Tag_Int: {
+        i64 n = ot_int(vm, form);
+        if (n >= INT8_MIN && n <= INT8_MAX) {
           emit_op(c, Op_Int8);
-          vec_push(&c->bytes, (char)(i8)immediate.i);
+          vec_push(&c->bytes, (char)(i8)n);
         } else {
           emit_op(c, Op_Const);
           emit_u16(c, add_constant(c, form));
         }
         break;
+      }
       default:
         emit_op(c, Op_Const);
         emit_u16(c, add_constant(c, form));
@@ -1288,80 +1556,96 @@ static bool emit_expr(Compiler* c, Ref form, bool tail) {
     return true;
   }
 
-  Ref args = ref_push(vm, cdr_(ref_get(vm, form)));
-  Value head = car_(ref_get(vm, form));
-  if (head.tag == Tag_Symbol) {
-    u32 name = head.id;
-    if (name == vm->syms.quote_) {
-      if (!pairp(ref_get(vm, args))) compiler_error(c, "bad quote");
-      Ref quoted = ref_push(
-          vm, pairp(ref_get(vm, args)) ? car_(ref_get(vm, args)) : nil_v());
+  const Syms* syms = ot_syms(vm);
+  Ref head = ot_push(vm);
+  Ref args = ot_push(vm);
+  Ref part = ot_push(vm);
+  Ref rest = ot_push(vm);
+  ot_car(vm, head, form);
+  ot_cdr(vm, args, form);
+  if (ot_tag(vm, head) == Tag_Symbol) {
+    u32 name = ot_id(vm, head);
+    if (name == syms->quote_) {
+      if (ot_tag(vm, args) != Tag_Pair) {
+        compiler_error(c, "bad quote");
+        ot_set_nil(vm, part);
+      } else {
+        ot_car(vm, part, args);
+      }
       emit_op(c, Op_Const);
-      emit_u16(c, add_constant(c, quoted));
+      emit_u16(c, add_constant(c, part));
       push_depth(c);
       return true;
     }
-    if (name == vm->syms.quasiquote_) {
-      if (!pairp(ref_get(vm, args))) {
+    if (name == syms->quasiquote_) {
+      if (ot_tag(vm, args) != Tag_Pair) {
         compiler_error(c, "bad quasiquote");
         return true;
       }
-      Ref quoted = ref_push(vm, car_(ref_get(vm, args)));
-      return emit_quasiquote(c, quoted, 1);
+      ot_car(vm, part, args);
+      return emit_quasiquote(c, part, 1);
     }
-    if (name == vm->syms.unquote_ || name == vm->syms.unquoteSplicing_) {
+    if (name == syms->unquote_ || name == syms->unquoteSplicing_) {
       compiler_error(c, "unquote outside quasiquote");
       return true;
     }
-    if (name == vm->syms.if_) return emit_if(c, args, tail);
-    if (name == vm->syms.begin_ || name == vm->syms.do_) return emit_body(c, args, tail);
-    if (name == vm->syms.lambda_ || name == vm->syms.fn_) {
-      if (!pairp(ref_get(vm, args))) {
+    if (name == syms->if_) return emit_if(c, args, tail);
+    if (name == syms->begin_ || name == syms->do_) return emit_body(c, args, tail);
+    if (name == syms->lambda_ || name == syms->fn_) {
+      if (ot_tag(vm, args) != Tag_Pair) {
         compiler_error(c, "bad lambda");
         return true;
       }
-      Ref body = ref_push(vm, cdr_(ref_get(vm, args)));
-      return emit_lambda(c, body, 0);
+      ot_cdr(vm, part, args);
+      return emit_lambda(c, part, 0);
     }
-    if (name == vm->syms.let_) return emit_let(c, args, tail);
-    if (is_define_head(vm, name)) return emit_define(c, form, name == vm->syms.definePriv_);
-    if (name == vm->syms.defmacro_) return emit_defmacro(c, form);
-    if (name == vm->syms.setBang_) {
-      if (!pairp(ref_get(vm, args)) || car_(ref_get(vm, args)).tag != Tag_Symbol ||
-          !pairp(cdr_(ref_get(vm, args)))) {
+    if (name == syms->let_) return emit_let(c, args, tail);
+    if (is_define_head(vm, name)) return emit_define(c, form, name == syms->definePriv_);
+    if (name == syms->defmacro_) return emit_defmacro(c, form);
+    if (name == syms->setBang_) {
+      if (ot_tag(vm, args) != Tag_Pair) {
         compiler_error(c, "bad set!");
         return true;
       }
-      u32 target = car_(ref_get(vm, args)).id;
-      Ref value = ref_push(vm, car_(cdr_(ref_get(vm, args))));
-      if (!emit_expr(c, value, false)) return false;
+      ot_car(vm, part, args);
+      ot_cdr(vm, rest, args);
+      if (ot_tag(vm, part) != Tag_Symbol || ot_tag(vm, rest) != Tag_Pair) {
+        compiler_error(c, "bad set!");
+        return true;
+      }
+      u32 target = ot_id(vm, part);
+      ot_car(vm, part, rest);
+      if (!emit_expr(c, part, false)) return false;
       emit_store(c, resolve(c, target));
       return true;
     }
-    if (name == vm->syms.while_) return emit_while(c, args);
-    if (name == vm->syms.and_) return emit_short_circuit(c, args, true, tail);
-    if (name == vm->syms.or_) return emit_short_circuit(c, args, false, tail);
-    if (name == vm->syms.cond_) return emit_cond(c, args, tail);
-    if (name == vm->syms.handlerBind_) return emit_handler_bind(c, args, tail);
-    if (name == vm->syms.restartCase_) return emit_restart_case(c, args, tail);
-    if (name == vm->syms.try_) return emit_try(c, args, tail);
-    if (name == vm->syms.unwindProtect_ || name == vm->syms.defer_)
+    if (name == syms->while_) return emit_while(c, args);
+    if (name == syms->and_) return emit_short_circuit(c, args, true, tail);
+    if (name == syms->or_) return emit_short_circuit(c, args, false, tail);
+    if (name == syms->cond_) return emit_cond(c, args, tail);
+    if (name == syms->handlerBind_) return emit_handler_bind(c, args, tail);
+    if (name == syms->restartCase_) return emit_restart_case(c, args, tail);
+    if (name == syms->try_) return emit_try(c, args, tail);
+    if (name == syms->unwindProtect_ || name == syms->defer_)
       return emit_unwind_protect(c, args, tail);
-    if (name == vm->syms.withParams_) return emit_with_params(c, args, tail);
-    if (name == vm->syms.defparam_) return emit_defparam(c, args, tail);
-    if (name == vm->syms.ns_) return emit_data_control(c, args, tail, "%ns", vm_control_ns, true);
-    if (name == vm->syms.inNs_)
+    if (name == syms->withParams_) return emit_with_params(c, args, tail);
+    if (name == syms->defparam_) return emit_defparam(c, args, tail);
+    if (name == syms->ns_) return emit_data_control(c, args, tail, "%ns", vm_control_ns, true);
+    if (name == syms->inNs_)
       return emit_data_control(c, args, tail, "%in-ns", vm_control_in_ns, true);
-    if (name == vm->syms.require_)
+    if (name == syms->require_)
       return emit_data_control(c, args, tail, "%require", vm_control_require, false);
   }
   return emit_call(c, form, tail);
 }
 
-static Status compile_lambda(State* vm, LambdaInfo* info, Ref body, u32 name) {
+static Value compile_lambda(State* vm, LambdaInfo* info, Ref dst, Ref body, u32 name) {
   OT_SCOPE(vm);
-  Ref bodyRoot = ref_push(vm, skip_docstring(ref_get(vm, body), nullptr));
-  Ref constants = ref_push(vm, make_array(vm, 8));
+  Ref bodyRoot = ot_push(vm);
+  Ref doc = ot_push(vm);
+  skip_docstring_ref(vm, bodyRoot, doc, body);
+  Ref constants = ot_push(vm);
+  ot_make_array(vm, constants, 8);
   Compiler compiler;
   compiler_init(&compiler, vm, info, constants);
 
@@ -1382,7 +1666,7 @@ static Status compile_lambda(State* vm, LambdaInfo* info, Ref body, u32 name) {
   if (falls) emit_op(&compiler, Op_Return);
   if (compiler.failed) {
     compiler_deinit(&compiler);
-    return Status_Unwind;
+    return unwind_v();
   }
   CodeSpec spec = {
       .nfixed = info->nfixed,
@@ -1392,23 +1676,22 @@ static Status compile_lambda(State* vm, LambdaInfo* info, Ref body, u32 name) {
       .maxStack = compiler.maxDepth,
       .name = name,
   };
-  Value result = make_code(vm, (const u8*)compiler.bytes.data, compiler.bytes.len,
-                           ref_get(vm, constants), &spec);
-  // compiler_deinit only releases C-heap buffers, so `result` cannot move here.
+  Value status = make_code_ref(vm, dst, (const u8*)compiler.bytes.data, compiler.bytes.len,
+                               constants, &spec);
   compiler_deinit(&compiler);
-  OT_RETURN(result);
+  return status;
 }
 
-// Boundary with the still-Value-returning evaluator: converts the Status
-// contract back to a Value. eval.c takes the same treatment next.
-Value compile_form(State* vm, Value expanded) {
+Value compile_form_ref(State* vm, Ref dst, Ref expanded) {
   OT_SCOPE(vm);
-  Ref body = ref_push(vm, make_pair(vm, expanded, null_v()));
+  Ref body = ot_push(vm);
+  Ref empty = ot_push(vm);
+  ot_set_null(vm, empty);
+  ot_cons(vm, body, expanded, empty);
   LambdaInfo top;
   lambda_info_init(&top, nullptr, 0);
-  analyze_body(vm, &top, ref_get(vm, body));
-  Status status = compile_lambda(vm, &top, body, 0);
+  analyze_body(vm, &top, body);
+  Value status = compile_lambda(vm, &top, dst, body, 0);
   lambda_info_deinit(&top);
-  if (status != Status_Ok) return unwind_v();
-  return ref_get(vm, ref_top(vm));
+  return status;
 }

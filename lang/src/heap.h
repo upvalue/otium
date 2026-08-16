@@ -1,4 +1,7 @@
 // Semispace Cheney scavenger and heap object layouts.
+#ifndef OT_HEAP_INTERNALS
+#error "heap.h is internal; use slots.h"
+#endif
 #pragma once
 #include "common.h"
 #include "vec.h"
@@ -272,9 +275,6 @@ Value make_bytes(State* vm, u32 cap);
 // allocation -- read it, use it, do not keep it.
 static inline char* buffer_data(Value b) { return (char*)bytes_items(as_buffer(b)->bytes); }
 static inline u32 buffer_len(Value b) { return as_buffer(b)->len; }
-// Appends `n` bytes. Allocates, so `buffer` must be rooted. `src` must NOT
-// point into the GC heap: growth can collect and would move it underneath us.
-void buffer_append(State* vm, Value buffer, const char* src, u32 n);
 // Copy a buffer's contents into a fresh string, rooting across the allocation.
 Value make_string_from_buffer(State* vm, Value buffer);
 static inline CodeData* as_code(Value v) { return (CodeData*)obj_payload(v.obj); }
@@ -289,32 +289,5 @@ static inline RestartData* as_restart(Value v) { return (RestartData*)obj_payloa
 static inline ForeignData* as_foreign(Value v) { return (ForeignData*)obj_payload(v.obj); }
 static inline bool foreign_dead(Value v) { return (as_foreign(v)->flags & ForeignDead) != 0; }
 
-// Extension-facing API. Type ids are per-VM and must be retained by the
-// registering extension. Finalizers must not allocate on the Otium heap: GC
-// invokes them while a collection is in progress.
-u32 register_foreign_type(State* vm, const char* name, ForeignFinalizer finalize);
-Value make_foreign_inline(State* vm, u32 typeId, const void* payload, u32 payloadBytes);
-Value make_foreign_pointer(State* vm, u32 typeId, void* payload);
-// On success, writes the inline payload address or external pointer to out.
-// On type/dead errors, raises a condition and returns Tag_Unwind.
-Value foreign_check(State* vm, const char* who, Value value, u32 expectedType, void** out);
-// Runs the registered finalizer once and marks the object dead.
-Value foreign_release(State* vm, const char* who, Value value, u32 expectedType);
-
-// Grow an array's backing storage. Allocates.
-void array_reserve(State* vm, Value arr, u32 n);
-
-// Table API — implemented in builtins/data.c.
-//
-// array_push, array_reserve and table_put ALLOCATE: storage lives on the GC
-// heap, so growth can collect and move everything, including the collection
-// being mutated and any storage pointer taken from it. Callers must keep the
-// collection in a rooted handle and re-derive interior pointers (ArrayData*,
-// TableEntry*, array_items(), table_entries()) after every such call. See the
-// rooting rules in AGENTS.md.
-//
-// table_get and array_get do not allocate.
-Value table_get(State* vm, Value table, Value key);           // nil on miss
-Value table_put(State* vm, Value table, Value key, Value v);  // nil value deletes; returns table
-Value array_get(Value arr, i64 idx);                          // nil out of range
-void array_push(State* vm, Value arr, Value v);
+// The collection APIs (tables, array/buffer mutators, equality, hashing) live
+// in collections.h; the allocating mutators there take rooted Refs.

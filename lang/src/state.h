@@ -4,7 +4,16 @@
 #include "common.h"
 #include "vec.h"
 #include "value.h"
+#include "slots.h"
+#ifndef OT_HEAP_INTERNALS
+#define OT_STATE_HEAP_INCLUDE
+#define OT_HEAP_INTERNALS
+#endif
 #include "heap.h"
+#ifdef OT_STATE_HEAP_INCLUDE
+#undef OT_HEAP_INTERNALS
+#undef OT_STATE_HEAP_INCLUDE
+#endif
 #include "intern.h"
 
 // Ceilings are error limits, not reservations: the stack and frame vector start
@@ -83,66 +92,8 @@ OT_VEC_TYPE(ParamBinding, VecParamBinding);
 OT_VEC_TYPE(CallFrame, VecCallFrame);
 OT_VEC_TYPE(NativeModule, VecNativeModule);
 
-// Pre-interned symbol/keyword name ids. This list generates both storage and
-// initialization so adding a field cannot leave it silently uninitialized.
-#define OT_SYM_LIST(X)                                                                             \
-  X(quote_, "quote")                                                                               \
-  X(if_, "if")                                                                                     \
-  X(define_, "define")                                                                             \
-  X(def_, "def")                                                                                   \
-  X(definePriv_, "define-")                                                                        \
-  X(setBang_, "set!")                                                                              \
-  X(lambda_, "lambda")                                                                             \
-  X(fn_, "fn")                                                                                     \
-  X(defmacro_, "defmacro")                                                                         \
-  X(begin_, "begin")                                                                               \
-  X(do_, "do")                                                                                     \
-  X(let_, "let")                                                                                   \
-  X(while_, "while")                                                                               \
-  X(and_, "and")                                                                                   \
-  X(or_, "or")                                                                                     \
-  X(cond_, "cond")                                                                                 \
-  X(else_, "else")                                                                                 \
-  X(quasiquote_, "quasiquote")                                                                     \
-  X(unquote_, "unquote")                                                                           \
-  X(unquoteSplicing_, "unquote-splicing")                                                          \
-  X(ns_, "ns")                                                                                     \
-  X(inNs_, "in-ns")                                                                                \
-  X(require_, "require")                                                                           \
-  X(handlerBind_, "handler-bind")                                                                  \
-  X(restartCase_, "restart-case")                                                                  \
-  X(try_, "try")                                                                                   \
-  X(catch_, "catch")                                                                               \
-  X(unwindProtect_, "unwind-protect")                                                              \
-  X(defer_, "defer")                                                                               \
-  X(defparam_, "defparam")                                                                         \
-  X(withParams_, "with-params")                                                                    \
-  X(array_, "array")                                                                               \
-  X(table_, "table")                                                                               \
-  X(amp_, "&")                                                                                     \
-  X(otiumCore_, "otium.core")                                                                      \
-  X(user_, "user")                                                                                 \
-  X(expander_, "*expander*")                                                                       \
-  X(error_, "error")                                                                               \
-  X(quit_, "quit")                                                                                 \
-  X(kwType, "type")                                                                                \
-  X(kwMessage, "message")                                                                          \
-  X(kwData, "data")                                                                                \
-  X(kwName, "name")                                                                                \
-  X(kwVars, "vars")                                                                                \
-  X(kwAliases, "aliases")                                                                          \
-  X(kwRefers, "refers")                                                                            \
-  X(kwOrder, "order")                                                                              \
-  X(kwAs, "as")                                                                                    \
-  X(kwRefer, "refer")                                                                              \
-  X(kwReload, "reload")                                                                            \
-  X(kwRequire, "require")
-
-typedef struct Syms {
-#define OT_SYM_FIELD(field, text) u32 field;
-  OT_SYM_LIST(OT_SYM_FIELD)
-#undef OT_SYM_FIELD
-} Syms;
+// Pre-interned symbol/keyword name ids: OT_SYM_LIST and Syms live in
+// slots.h so any file can name them through ot_syms.
 
 struct State {
   Heap heap;  // must remain the first data member (heap_of relies on it)
@@ -221,17 +172,9 @@ static inline void state_pop_to(State* vm, u32 base) { vm->stack.len = base; }
 // the stack without the function naming a pop. OT_RETURN disarms it, pops to
 // the entry depth and pushes the single result; nothing allocates between that
 // pop and that push, so the raw Value it carries cannot go stale.
-typedef enum Status : u8 {
-  Status_Ok,
-  Status_Unwind,
-} Status;
-
-// A handle on a rooted stack cell. Deliberately a struct so it cannot be
-// confused with an index, and deliberately not convertible to or from Value:
-// passing a transient where a rooted operand belongs is a type error.
-typedef struct Ref {
-  u32 i;
-} Ref;
+//
+// Ref, Status, ScopeGuard and OT_SCOPE itself are defined in slots.h; the
+// pieces below are the raw-Value half, for files with direct heap access.
 
 static inline Value ref_get(State* vm, Ref r) { return vec_at(&vm->stack, r.i); }
 static inline void ref_set(State* vm, Ref r, Value v) { vec_at(&vm->stack, r.i) = v; }
@@ -240,15 +183,6 @@ static inline Ref ref_push(State* vm, Value v) { return (Ref){state_push(vm, v)}
 static inline Ref ref_top(State* vm) {
   OT_ASSERT(vm->stack.len > 0);
   return (Ref){vm->stack.len - 1};
-}
-
-typedef struct ScopeGuard {
-  State* vm;  // null once disarmed by scope_return
-  u32 base;
-} ScopeGuard;
-
-static inline void scope_release(ScopeGuard* g) {
-  if (g->vm && g->vm->stack.len > g->base) g->vm->stack.len = g->base;
 }
 
 // Disarm, drop the scope's temporaries, and leave `result` as the one value
@@ -263,18 +197,11 @@ static inline Status scope_return(ScopeGuard* g, Value result) {
   return Status_Ok;
 }
 
-// One OT_SCOPE per function. A second one shadows the first, which -Wshadow
-// rejects under -Werror, so a region that wants its own scope becomes its own
-// function. That is the intended shape: the scope and the function agree.
-#define OT_SCOPE(vm)                                                                               \
-  [[maybe_unused]] ScopeGuard _otScope __attribute__((cleanup(scope_release))) = {                 \
-      (vm), (vm)->stack.len}
+// One OT_SCOPE per function (defined in slots.h). A second one shadows the
+// first, which -Wshadow rejects under -Werror, so a region that wants its own
+// scope becomes its own function. That is the intended shape: the scope and
+// the function agree.
 #define OT_RETURN(result) return scope_return(&_otScope, (result))
-// Propagate a callee's unwind. The enclosing OT_SCOPE does the popping.
-#define OT_CHECK(expr)                                                                             \
-  do {                                                                                             \
-    if ((expr) != Status_Ok) return Status_Unwind;                                                 \
-  } while (0)
 
 // Build a list from `n` values sitting in consecutive stack slots at `base`,
 // folding right to left onto `tail`. The elements stay where they are and are

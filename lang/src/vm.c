@@ -1,8 +1,9 @@
+#define OT_HEAP_INTERNALS
 #include "vm.h"
 #include "code.h"
+#include "collections.h"
 #include "eval.h"
 #include "heap.h"
-#include "ns.h"
 #include "state.h"
 
 static bool compiled_function(Value value) {
@@ -112,19 +113,26 @@ static Value* box_cell(Value box) {
 // not a var at all.
 //
 // `fn` and the CodeData behind it are GC-heap pointers, so this relies on
-// ns_resolve_var being allocation-free (it is: ns_lookup/table_get never touch
-// the GC heap, and the raiseErr=false path cannot signal). If that ever
+// ot_resolve_var being allocation-free (namespace/table lookup never touches
+// the GC heap, and the no-error path cannot signal). If that ever
 // changes, this write-back has to re-derive from the frame instead.
 static Value global_cell(State* vm, FunctionData* fn, u16 index) {
   Value var = code_consts(as_code(fn->code))[index];
   if (var.tag == Tag_Symbol) {
-    var = ns_resolve_var(vm, var);
-    if (is_nil(var)) return unwind_v();
+    OT_SCOPE(vm);
+    Ref symbol = ot_push_im(vm, var);
+    Ref resolved = ot_push(vm);
+    if (!ot_resolve_var(vm, resolved, symbol)) return unwind_v();
+    var = ot_ret(vm, resolved);
     code_consts(as_code(fn->code))[index] = var;
   }
-  if (var.tag != Tag_Array || as_array(var)->len != VAR_SLOTS) return nil_v();
+  if (var.tag != Tag_Array || as_array(var)->len != OT_VAR_SLOTS) return nil_v();
   return var;
 }
+
+static Value vm_var_value(Value var) { return array_items(var)[OT_VAR_VALUE]; }
+
+static void vm_var_set(Value var, Value value) { array_items(var)[OT_VAR_VALUE] = value; }
 
 static Value unwind_to(State* vm, u32 floor) {
   while (vm->frames.len > floor) {
@@ -196,7 +204,7 @@ Value vm_execute(State* vm, u32 floor) {
   do {                                                                                             \
     if (vm->interruptFlag) {                                                                       \
       vm->interruptFlag = false;                                                                   \
-      start_quit(vm);                                                                              \
+      ot_start_quit(vm);                                                                           \
       return unwind_to(vm, floor);                                                                 \
     }                                                                                              \
   } while (0)
@@ -304,7 +312,7 @@ Value vm_execute(State* vm, u32 floor) {
     VM_NEED_OPERANDS(1);
     Ref value = {vm->stack.len - 1};
     Ref box = ref_push(vm, make_array(vm, 1));
-    array_push(vm, ref_get(vm, box), ref_get(vm, value));
+    array_push(vm, box, value);
     ref_set(vm, value, ref_get(vm, box));
     (void)vec_pop(&vm->stack);
     VM_RELOAD();
@@ -337,6 +345,7 @@ Value vm_execute(State* vm, u32 floor) {
             "vm: bad closure descriptor");
     u32 captureCount = as_code(nested)->nupvals;
     Ref captures = {state_push(vm, make_array(vm, captureCount))};
+    Ref boxSlot = ref_push(vm, nil_v());  // scratch: roots each box across the push
     for (u32 i = 0; i < captureCount; i++) {
       // Re-derive through the frame: make_array above may have moved headers.
       FunctionData* parent = VM_FN();
@@ -353,8 +362,10 @@ Value vm_execute(State* vm, u32 floor) {
         box = function_upvals(parent)[upvalue];
       }
       VM_NEED(box_cell(box), "vm: capture is not a box");
-      array_push(vm, ref_get(vm, captures), box);
+      ref_set(vm, boxSlot, box);
+      array_push(vm, captures, boxSlot);
     }
+    (void)vec_pop(&vm->stack);  // boxSlot
     FunctionData* parent = VM_FN();
     nested = array_items(code_consts(as_code(parent->code))[index])[0];
     Value closure = make_compiled_function(vm, nested, ref_get(vm, captures), parent->nsName,
@@ -497,7 +508,7 @@ Value vm_execute(State* vm, u32 floor) {
     Value var = global_cell(vm, VM_FN(), index);
     if (var.tag == Tag_Unwind) VM_FAULT_SYM(index, "unresolved symbol: %.*s");
     VM_NEED(!is_nil(var), "vm: global constant is not a var");
-    state_push(vm, var_value(var));
+    state_push(vm, vm_var_value(var));
     VM_DISPATCH();
   }
   VM_OP(SetGlobal) {
@@ -506,7 +517,7 @@ Value vm_execute(State* vm, u32 floor) {
     Value var = global_cell(vm, VM_FN(), index);
     if (var.tag == Tag_Unwind) VM_FAULT_SYM(index, "set!: unbound %.*s");
     VM_NEED(!is_nil(var), "vm: global constant is not a var");
-    var_set(var, vm->stack.data[vm->stack.len - 1]);
+    vm_var_set(var, vm->stack.data[vm->stack.len - 1]);
     VM_DISPATCH();
   }
   VM_OP(DefGlobal) {
@@ -531,8 +542,10 @@ Value vm_execute(State* vm, u32 floor) {
       if (!is_nil(doc)) definedFunction->docstring = doc;
     }
     VM_SAVE_IP();
-    Value defined = ns_define(vm, name.id, value, isPrivate, doc);
-    VM_PROPAGATE(defined);
+    u32 valueSlot = vm->stack.len - 1;
+    Ref docRoot = ref_push(vm, doc);
+    ot_define(vm, (Ref){valueSlot}, name.id, (Ref){valueSlot}, isPrivate, docRoot);
+    state_pop_to(vm, valueSlot + 1);
     VM_LOAD_FRAME();
     VM_DISPATCH();
   }
@@ -580,7 +593,7 @@ Value vm_execute_code(State* vm, Value code) {
   Ref codeRoot = ref_push(vm, code);
   if (ref_get(vm, codeRoot).tag != Tag_Code) return raise_error(vm, "vm: expected code");
   Buf verifyError = {0};
-  if (!code_verify(ref_get(vm, codeRoot), &verifyError)) {
+  if (!code_verify_ref(vm, codeRoot, &verifyError)) {
     vec_push(&verifyError, '\0');
     Value raised = raise_error(vm, "vm: %s", verifyError.data);
     buf_deinit(&verifyError);

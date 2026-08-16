@@ -17,18 +17,29 @@ static State* test_vm(void) {
   return vm;
 }
 
+static Value read_next(Reader* reader) {
+  OT_SCOPE(reader->vm);
+  Ref form = ot_push(reader->vm);
+  Value status = reader_next_ref(reader, form);
+  return is_unwind(status) ? status : ot_ret(reader->vm, form);
+}
+
 // Read a single form from src.
 static Value read1(const char* src) {
   Reader r;
   reader_init(&r, test_vm(), src, (u32)strlen(src), "<test>");
-  return reader_next(&r);
+  return read_next(&r);
 }
 
 // repr into a static NUL-terminated buffer (valid until the next call).
 static const char* repr_of(Value v) {
   static Buf b;
   buf_clear(&b);
-  print_repr(test_vm(), v, &b);
+  State* vm = test_vm();
+  OT_SCOPE(vm);
+  Ref rooted = ot_push(vm);
+  ot_set_return(vm, rooted, v);
+  ot_repr(vm, rooted, &b);
   vec_push(&b, '\0');
   b.len--;  // keep len as the string length
   return b.data;
@@ -126,7 +137,11 @@ TEST(strings) {
   CHECK(read_errors("\"unterminated"));
   // display renders raw
   Buf b = {0};
-  print_display(test_vm(), read1("\"a\\tb\""), &b);
+  State* vm = test_vm();
+  OT_SCOPE(vm);
+  Ref displayed = ot_push(vm);
+  ot_set_return(vm, displayed, read1("\"a\\tb\""));
+  ot_display(vm, displayed, &b);
   CHECK_MEM(b.data, b.len, "a\tb");
   buf_deinit(&b);
 }
@@ -180,11 +195,11 @@ TEST(multiple_forms_and_eof) {
   const char* src = "1 2 3";
   Reader r;
   reader_init(&r, vm, src, (u32)strlen(src), "<test>");
-  CHECK_STR(repr_of(reader_next(&r)), "1");
+  CHECK_STR(repr_of(read_next(&r)), "1");
   CHECK(!reader_at_eof(&r));
-  CHECK_STR(repr_of(reader_next(&r)), "2");
-  CHECK_STR(repr_of(reader_next(&r)), "3");
-  Value v = reader_next(&r);
+  CHECK_STR(repr_of(read_next(&r)), "2");
+  CHECK_STR(repr_of(read_next(&r)), "3");
+  Value v = read_next(&r);
   CHECK(v.tag == Tag_Nil);
   CHECK(reader_at_eof(&r));
 }
@@ -196,7 +211,7 @@ TEST(incomplete_input_is_distinct_from_a_final_read_error) {
     const char* src = incomplete[i];
     Reader r;
     reader_init(&r, vm, src, (u32)strlen(src), "<test>");
-    CHECK(reader_next(&r).tag == Tag_Unwind);
+    CHECK(read_next(&r).tag == Tag_Unwind);
     CHECK(reader_incomplete(&r));
     state_cancel_unwind(vm);
   }
@@ -206,7 +221,7 @@ TEST(incomplete_input_is_distinct_from_a_final_read_error) {
     const char* src = invalid[i];
     Reader r;
     reader_init(&r, vm, src, (u32)strlen(src), "<test>");
-    CHECK(reader_next(&r).tag == Tag_Unwind);
+    CHECK(read_next(&r).tag == Tag_Unwind);
     CHECK(!reader_incomplete(&r));
     state_cancel_unwind(vm);
   }

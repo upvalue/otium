@@ -1,6 +1,7 @@
 // code.h - bytecode objects, instruction metadata, verification, and dumps.
 #pragma once
 #include "common.h"
+#include "slots.h"
 #include "value.h"
 #include "vec.h"
 
@@ -69,13 +70,20 @@ u32 operand_width(Operand operand);
 
 // constants must be an Array. It is rooted across allocation and copied into
 // the Code object's pinned C-heap constant area.
-Value make_code(State* vm, const u8* bytes, u32 len, Value constants, const CodeSpec* spec);
+Value make_code_ref(State* vm, Ref dst, const u8* bytes, u32 len, Ref constants,
+                    const CodeSpec* spec);
 
-// Diagnostic helpers. code_print_ascii uses femtolisp's byte+48 convention,
-// escaping bytes that are awkward in a quoted ASCII string.
-bool code_verify(Value code, Buf* error);  // error may be NULL
-void code_print_ascii(Value code, Buf* out);
-void code_disassemble(State* vm, Value code, Buf* out);
+u32 code_len_ref(State* vm, Ref code);
+u32 code_const_count_ref(State* vm, Ref code);
+u32 code_name_ref(State* vm, Ref code);
+u8 code_byte_ref(State* vm, Ref code, u32 at);
+void code_constant_ref(State* vm, Ref dst, Ref code, u32 index);
+
+// Diagnostic helpers. code_print_ascii_ref uses femtolisp's byte+48
+// convention, escaping bytes that are awkward in a quoted ASCII string.
+bool code_verify_ref(State* vm, Ref code, Buf* error);
+void code_print_ascii_ref(State* vm, Ref code, Buf* out);
+void code_disassemble_ref(State* vm, Ref code, Buf* out);
 
 static inline u16 code_read_u16(const u8* p) { return (u16)((u16)p[0] | ((u16)p[1] << 8)); }
 static inline i32 code_read_i32(const u8* p) {

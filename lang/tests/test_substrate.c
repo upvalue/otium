@@ -1,5 +1,6 @@
 // Low-level tests: Vec, Value tags, bare-Heap allocation/scavenging, identity,
 // and interning. Bare-Heap cases pass nullptr for its optional State owner.
+#define OT_HEAP_INTERNALS
 #include "ctest.h"
 #include "common.h"
 #include "vec.h"

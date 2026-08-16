@@ -47,7 +47,7 @@ static Value nat_current_second(State* vm, u32 base, u32 argc) {
 }
 
 void register_time(State* vm) {
-  def_native(vm, "current-jiffy", nat_current_jiffy);
-  def_native(vm, "jiffies-per-second", nat_jiffies_per_second);
-  def_native(vm, "current-second", nat_current_second);
+  ot_def_native(vm, "current-jiffy", nat_current_jiffy);
+  ot_def_native(vm, "jiffies-per-second", nat_jiffies_per_second);
+  ot_def_native(vm, "current-second", nat_current_second);
 }

@@ -14,11 +14,9 @@
 #include "common.h"
 #include "vec.h"
 #include "value.h"
-#include "heap.h"
 #include "state.h"
 #include "printer.h"
 #include "eval.h"
-#include "ns.h"
 #include "reader.h"
 
 #ifdef OT_EXT_DEMO
@@ -28,7 +26,7 @@
 #include "../ext/ray/ray_ext.h"
 #endif
 
-// state_push_handler/state_pop_handler come from state.h; make_native from eval.h.
+// state_push_handler/state_pop_handler come from state.h.
 
 // ---------------------------------------------------------------------------
 // globals
@@ -123,8 +121,12 @@ static bool host_load(void* ud, const char* nsName, Buf* srcOut) {
 // small helpers
 
 static Value resolve_named(State* vm, const char* name) {
-  u32 id = intern_id(&vm->intern, name, (u32)strlen(name));
-  return ns_resolve(vm, symbol_v(id));
+  OT_SCOPE(vm);
+  Ref symbol = ot_push(vm);
+  Ref value = ot_push(vm);
+  ot_set_symbol(vm, symbol, ot_intern(vm, name, (u32)strlen(name)));
+  OT_TRY(ot_resolve(vm, value, symbol));
+  return ot_ret(vm, value);
 }
 
 // call an otium function by name with argc args already pushed at `base`
@@ -134,9 +136,29 @@ static Value call_named(State* vm, const char* name, u32 base, u32 argc) {
   return apply(vm, fn, base, argc);
 }
 
+static Value eval_value(State* vm, Value form) {
+  OT_SCOPE(vm);
+  Ref formRoot = ot_push(vm);
+  Ref result = ot_push(vm);
+  ot_set_return(vm, formRoot, form);
+  OT_TRY(ot_eval(vm, result, formRoot));
+  return ot_ret(vm, result);
+}
+
 static void print_value(State* vm, Value v, FILE* to) {
+  OT_SCOPE(vm);
+  Ref value = ot_push(vm);
+  ref_set(vm, value, v);
   Buf out = {0};
-  print_repr(vm, v, &out);
+  ot_repr(vm, value, &out);
+  fwrite(out.data, 1, out.len, to);
+  fputc('\n', to);
+  buf_deinit(&out);
+}
+
+static void print_value_ref(State* vm, Ref value, FILE* to) {
+  Buf out = {0};
+  ot_repr(vm, value, &out);
   fwrite(out.data, 1, out.len, to);
   fputc('\n', to);
   buf_deinit(&out);
@@ -195,34 +217,49 @@ static bool find_project_dir(Buf* dir) {
   }
 }
 
-static bool symbol_is(State* vm, Value v, const char* name) {
-  return v.tag == Tag_Symbol && v.id == intern_id(&vm->intern, name, (u32)strlen(name));
+static bool symbol_is(State* vm, Ref value, const char* name) {
+  return ot_tag(vm, value) == Tag_Symbol &&
+         ot_id(vm, value) == ot_intern(vm, name, (u32)strlen(name));
 }
 
 // Appends one (paths ...) entry to the load path. Relative entries resolve
 // against the project directory, not the working directory, so that the same
 // file works from any subdirectory of the checkout.
-static void add_project_path(Value item, const char* dir, const char* path) {
-  if (item.tag != Tag_String) {
+static void add_project_path(State* vm, Ref item, const char* dir, const char* path) {
+  if (ot_tag(vm, item) != Tag_String) {
     fprintf(stderr, "otium: %s: paths takes strings\n", path);
     return;
   }
-  const char* bytes = string_bytes(item);
-  u32 len = as_string(item)->len;
+  u32 len = ot_string_len(vm, item);
   if (!len) return;
+  Buf bytes = {0};
+  ot_string_copy(vm, item, 0, len, &bytes);
   Buf resolved = {0};
-  append_path(&resolved, bytes[0] == '/' ? "" : dir, bytes, len);
+  append_path(&resolved, bytes.data[0] == '/' ? "" : dir, bytes.data, bytes.len);
   vec_push(&g_loadPath, dup_cstr(resolved.data, resolved.len));
   buf_deinit(&resolved);
+  buf_deinit(&bytes);
 }
 
-static void apply_project_form(State* vm, Value form, const char* dir, const char* path) {
-  if (form.tag != Tag_Pair || !symbol_is(vm, as_pair(form)->car, "paths")) {
+static void apply_project_form(State* vm, Ref form, const char* dir, const char* path) {
+  OT_SCOPE(vm);
+  Ref cursor = ot_push_copy(vm, form);
+  Ref item = ot_push(vm);
+  if (ot_tag(vm, cursor) != Tag_Pair) {
     fprintf(stderr, "otium: %s: ignoring unrecognized directive\n", path);
     return;
   }
-  for (Value rest = as_pair(form)->cdr; rest.tag == Tag_Pair; rest = as_pair(rest)->cdr)
-    add_project_path(as_pair(rest)->car, dir, path);
+  ot_car(vm, item, cursor);
+  if (!symbol_is(vm, item, "paths")) {
+    fprintf(stderr, "otium: %s: ignoring unrecognized directive\n", path);
+    return;
+  }
+  ot_cdr(vm, cursor, cursor);
+  while (ot_tag(vm, cursor) == Tag_Pair) {
+    ot_car(vm, item, cursor);
+    add_project_path(vm, item, dir, path);
+    ot_cdr(vm, cursor, cursor);
+  }
 }
 
 // Reads a project file and appends its directories to the load path. `named`
@@ -257,9 +294,11 @@ static bool load_project(State* vm, const char* named) {
   if (read_whole_file(path.data, &src)) {
     Reader r;
     reader_init(&r, vm, src.data, src.len, path.data);
+    OT_SCOPE(vm);
+    Ref form = ot_push(vm);
     for (;;) {
-      Value form = reader_next(&r);
-      if (form.tag == Tag_Unwind) {
+      Value status = reader_next_ref(&r, form);
+      if (status.tag == Tag_Unwind) {
         fprintf(stderr, "otium: %s: ", path.data);
         print_value(vm, vm->unwindCondition, stderr);
         state_cancel_unwind(vm);
@@ -283,45 +322,45 @@ static bool load_project(State* vm, const char* named) {
 
 // Reads one restart's name and description, false once the index runs off the
 // end. Its own function so the scope does not nest inside the listing loop.
-static bool describe_restart(State* vm, Ref restarts, i64 index, Value* name, Value* desc) {
+static bool describe_restart(State* vm, Ref restarts, i64 index, Ref name, Ref desc) {
   OT_SCOPE(vm);
-  Ref r = ref_push(vm, array_get(ref_get(vm, restarts), index));
-  if (is_nil(ref_get(vm, r))) return false;
+  Ref r = ot_push(vm);
+  ot_array_get(vm, r, restarts, index);
+  if (ot_nil(vm, r)) return false;
   u32 ab = vm->stack.len;
-  state_push(vm, ref_get(vm, r));
-  *name = call_named(vm, "restart-name", ab, 1);
+  ot_push_copy(vm, r);
+  ref_set(vm, name, call_named(vm, "restart-name", ab, 1));
   state_pop_to(vm, ab);
-  state_push(vm, ref_get(vm, r));
-  *desc = call_named(vm, "restart-description", ab, 1);
+  ot_push_copy(vm, r);
+  ref_set(vm, desc, call_named(vm, "restart-description", ab, 1));
   return true;
 }
 
 static Value repl_condition_handler(State* vm, u32 base, u32 argc) {
-  Value cond = argc > 0 ? vm->stack.data[base] : nil_v();
+  OT_SCOPE(vm);
+  Ref condition = argc > 0 ? (Ref){base} : ot_push(vm);
 
   fputs("\nUnhandled condition: ", stderr);
-  print_value(vm, cond, stderr);
+  print_value_ref(vm, condition, stderr);
 
   // compute-restarts -> array, innermost first (spec 8.5)
   u32 b = vm->stack.len;
   Value restarts = call_named(vm, "compute-restarts", b, 0);
   if (restarts.tag == Tag_Unwind) return restarts;
-  OT_SCOPE(vm);
   Ref rS = ref_push(vm, restarts);  // root across allocations below
+  Ref name = ot_push(vm);
+  Ref desc = ot_push(vm);
 
   // list them
   i64 count = 0;
   for (;; ++count) {
-    Value name, desc;
-    if (!describe_restart(vm, rS, count, &name, &desc)) break;
-    // name is a symbol (immediate); desc is used with no allocation between
-    // the call above and the prints below (Buf/print_display are C-heap only)
+    if (!describe_restart(vm, rS, count, name, desc)) break;
     Buf line = {0};
     buf_printf(&line, "  [%lld] ", (long long)count);
-    if (name.tag != Tag_Unwind) print_display(vm, name, &line);
-    if (desc.tag != Tag_Unwind && !is_nil(desc)) {
+    if (ot_tag(vm, name) != Tag_Unwind) ot_display(vm, name, &line);
+    if (ot_tag(vm, desc) != Tag_Unwind && !ot_nil(vm, desc)) {
       buf_append_cstr(&line, " — ");
-      print_display(vm, desc, &line);
+      ot_display(vm, desc, &line);
     }
     fwrite(line.data, 1, line.len, stderr);
     fputc('\n', stderr);
@@ -346,7 +385,8 @@ static Value repl_condition_handler(State* vm, u32 base, u32 argc) {
       continue;
     }
     u32 ib = vm->stack.len;
-    state_push(vm, array_get(ref_get(vm, rS), idx));
+    Ref selected = ot_push(vm);
+    ot_array_get(vm, selected, rS, idx);
     // invoke-restart with a restart value unwinds to exactly that restart;
     // the resulting Unwind propagates out of this handler and resumes there.
     return call_named(vm, "invoke-restart", ib, 1);
@@ -397,7 +437,7 @@ static Value eval_repl_form(State* vm, Value form, void* data) {
   ReplEvalContext* context = (ReplEvalContext*)data;
   Value pushed = state_push_handler(vm, ref_get(vm, context->pred), ref_get(vm, context->handler));
   (void)pushed;
-  Value result = eval_form(vm, form);
+  Value result = eval_value(vm, form);
   state_pop_handler(vm);
   return result;
 }
@@ -428,7 +468,7 @@ static bool read_server_line(Buf* line) {
 
 static Value eval_server_form(State* vm, Value form, void* data) {
   (void)data;
-  return eval_form(vm, form);
+  return eval_value(vm, form);
 }
 
 static void finish_server_response(void) {
@@ -482,10 +522,10 @@ static void run_repl(State* vm) {
   // Both natives stay rooted in these slots for the whole session; read them
   // through the slots at each install — a raw copy would go stale as soon as
   // an eval allocates.
-  Ref handlerFn = {
-      state_push(vm, make_native(vm, "repl-condition-handler", repl_condition_handler))};
+  Ref handlerFn = {state_push(vm, nil_v())};
   Ref predFn = {state_push(vm, nil_v())};
-  ref_set(vm, predFn, make_native(vm, "repl-any-pred", always_true_pred));
+  ot_make_native(vm, handlerFn, "repl-condition-handler", repl_condition_handler);
+  ot_make_native(vm, predFn, "repl-any-pred", always_true_pred);
 
   Buf pending = {0};
   for (;;) {

@@ -1,101 +1,124 @@
 // ns.c — namespaces, vars, resolution (spec 7 and 3.1).
-#include "ns.h"
-#include "state.h"
+//
+// Namespace records and var cells live on the moving heap, so this file only
+// handles them through rooted slots.
+#include "slots.h"
 
-Value var_value(Value var) { return array_items(var)[VAR_VALUE]; }
-void var_set(Value var, Value v) { array_items(var)[VAR_VALUE] = v; }
-bool var_private(Value var) { return is_truthy(array_items(var)[VAR_PRIVATE]); }
+void ot_var_value(State* vm, Ref dst, Ref var) { ot_array_get(vm, dst, var, OT_VAR_VALUE); }
 
-Value ns_field(State* vm, Value nsRec, u32 kwId) { return table_get(vm, nsRec, keyword_v(kwId)); }
+void ot_var_set(State* vm, Ref var, Ref value) {
+  OT_ASSERT(ot_array_set(vm, var, OT_VAR_VALUE, value));
+}
 
-Value ns_lookup(State* vm, u32 nsName) { return table_get(vm, vm->nsRegistry, symbol_v(nsName)); }
-
-// Each sub-structure is rooted before it is stored: table_put allocates, so a
-// make_* result left in a raw local could be moved before the put reads it.
-Value ns_get_or_create(State* vm, u32 nsName) {
-  Value ns = ns_lookup(vm, nsName);
-  if (!is_nil(ns)) return ns;
+bool ot_var_private(State* vm, Ref var) {
   OT_SCOPE(vm);
-  Ref nsS = ref_push(vm, make_table(vm));
-  Ref field = ref_push(vm, nil_v());
-  table_put(vm, ref_get(vm, nsS), keyword_v(vm->syms.kwName), symbol_v(nsName));
-  ref_set(vm, field, make_table(vm));
-  table_put(vm, ref_get(vm, nsS), keyword_v(vm->syms.kwVars), ref_get(vm, field));
-  ref_set(vm, field, make_table(vm));
-  table_put(vm, ref_get(vm, nsS), keyword_v(vm->syms.kwAliases), ref_get(vm, field));
-  ref_set(vm, field, make_table(vm));
-  table_put(vm, ref_get(vm, nsS), keyword_v(vm->syms.kwRefers), ref_get(vm, field));
-  ref_set(vm, field, make_array(vm, 8));
-  table_put(vm, ref_get(vm, nsS), keyword_v(vm->syms.kwOrder), ref_get(vm, field));
-  table_put(vm, vm->nsRegistry, symbol_v(nsName), ref_get(vm, nsS));
+  Ref flag = ot_push(vm);
+  ot_array_get(vm, flag, var, OT_VAR_PRIVATE);
+  return ot_truthy(vm, flag);
+}
+
+void ot_ns_field(State* vm, Ref dst, Ref nsRecord, u32 kwId) {
+  ot_table_get_im(vm, dst, nsRecord, keyword_v(kwId));
+}
+
+bool ot_ns_lookup(State* vm, Ref dst, u32 nsName) {
+  // The registry is permanently rooted in stack[0] (see state_create).
+  ot_table_get_im(vm, dst, (Ref){0}, symbol_v(nsName));
+  return !ot_nil(vm, dst);
+}
+
+void ot_ns_get_or_create(State* vm, Ref dst, u32 nsName) {
+  if (ot_ns_lookup(vm, dst, nsName)) return;
+
+  OT_SCOPE(vm);
+  const Syms* syms = ot_syms(vm);
+  Ref ns = ot_push(vm);
+  Ref field = ot_push(vm);
+  ot_make_table(vm, ns);
+  ot_table_put_im2(vm, ns, keyword_v(syms->kwName), symbol_v(nsName));
+  ot_make_table(vm, field);
+  ot_table_put_im(vm, ns, keyword_v(syms->kwVars), field);
+  ot_make_table(vm, field);
+  ot_table_put_im(vm, ns, keyword_v(syms->kwAliases), field);
+  ot_make_table(vm, field);
+  ot_table_put_im(vm, ns, keyword_v(syms->kwRefers), field);
+  ot_make_array(vm, field, 8);
+  ot_table_put_im(vm, ns, keyword_v(syms->kwOrder), field);
+  ot_table_put_im(vm, (Ref){0}, symbol_v(nsName), ns);
 
   // Auto-refer all public otium.core vars present at creation time (7.1).
-  if (nsName != vm->syms.otiumCore_) {
-    Ref core = ref_push(vm, ns_lookup(vm, vm->syms.otiumCore_));
-    if (!is_nil(ref_get(vm, core))) {
-      Ref cvars = ref_push(vm, ns_field(vm, ref_get(vm, core), vm->syms.kwVars));
-      Ref order = ref_push(vm, ns_field(vm, ref_get(vm, core), vm->syms.kwOrder));
-      Ref refers = ref_push(vm, ns_field(vm, ref_get(vm, nsS), vm->syms.kwRefers));
-      Ref nameSym = ref_push(vm, nil_v());
-      Ref var = ref_push(vm, nil_v());
-      // The bound and the element are re-read through `order` every iteration.
-      // Caching an ArrayData* across the table_put would strand it the moment
-      // table storage lives on the GC heap and the put can collect.
-      for (u32 i = 0; i < as_array(ref_get(vm, order))->len; i++) {
-        ref_set(vm, nameSym, array_items(ref_get(vm, order))[i]);
-        ref_set(vm, var, table_get(vm, ref_get(vm, cvars), ref_get(vm, nameSym)));
-        if (!is_nil(ref_get(vm, var)) && !var_private(ref_get(vm, var)))
-          table_put(vm, ref_get(vm, refers), ref_get(vm, nameSym), ref_get(vm, var));
+  if (nsName != syms->otiumCore_) {
+    Ref core = ot_push(vm);
+    if (ot_ns_lookup(vm, core, syms->otiumCore_)) {
+      Ref coreVars = ot_push(vm);
+      Ref order = ot_push(vm);
+      Ref refers = ot_push(vm);
+      Ref name = ot_push(vm);
+      Ref var = ot_push(vm);
+      ot_ns_field(vm, coreVars, core, syms->kwVars);
+      ot_ns_field(vm, order, core, syms->kwOrder);
+      ot_ns_field(vm, refers, ns, syms->kwRefers);
+      for (u32 i = 0; i < ot_array_len(vm, order); i++) {
+        ot_array_get(vm, name, order, i);
+        ot_table_get(vm, var, coreVars, name);
+        if (!ot_nil(vm, var) && !ot_var_private(vm, var)) ot_table_put(vm, refers, name, var);
       }
     }
   }
-  return ref_get(vm, nsS);
+
+  ot_copy(vm, dst, ns);
 }
 
-Value ns_define(State* vm, u32 name, Value v, bool isPrivate, Value docstring) {
+void ot_define(State* vm, Ref dst, u32 name, Ref value, bool isPrivate, Ref docstring) {
   OT_SCOPE(vm);
-  Ref vS = ref_push(vm, v);
-  Ref dS = ref_push(vm, docstring);
-  Ref nsS = ref_push(vm, ns_get_or_create(vm, vm->currentNs));
-  Ref var = ref_push(vm, table_get(vm, ns_field(vm, ref_get(vm, nsS), vm->syms.kwVars),
-                                   symbol_v(name)));
-  if (is_nil(ref_get(vm, var))) {
-    Ref varS = ref_push(vm, make_array(vm, VAR_SLOTS));
-    array_push(vm, ref_get(vm, varS), ref_get(vm, vS));  // value
-    array_push(vm, ref_get(vm, varS), symbol_v(name));
-    array_push(vm, ref_get(vm, varS), symbol_v(vm->currentNs));
-    array_push(vm, ref_get(vm, varS), ref_get(vm, dS));  // docstring
-    array_push(vm, ref_get(vm, varS), bool_v(isPrivate));
-    // ns_field is re-read after each mutation rather than hoisted: array_push
-    // and table_put both allocate.
-    table_put(vm, ns_field(vm, ref_get(vm, nsS), vm->syms.kwVars), symbol_v(name),
-              ref_get(vm, varS));
-    array_push(vm, ns_field(vm, ref_get(vm, nsS), vm->syms.kwOrder), symbol_v(name));
+  const Syms* syms = ot_syms(vm);
+  u32 currentNs = ot_current_ns(vm);
+  Ref ns = ot_push(vm);
+  Ref vars = ot_push(vm);
+  Ref var = ot_push(vm);
+  ot_ns_get_or_create(vm, ns, currentNs);
+  ot_ns_field(vm, vars, ns, syms->kwVars);
+  ot_table_get_im(vm, var, vars, symbol_v(name));
+
+  if (ot_nil(vm, var)) {
+    ot_make_array(vm, var, OT_VAR_PRIVATE + 1);
+    ot_array_push(vm, var, value);
+    ot_array_push_im(vm, var, symbol_v(name));
+    ot_array_push_im(vm, var, symbol_v(currentNs));
+    ot_array_push(vm, var, docstring);
+    ot_array_push_im(vm, var, bool_v(isPrivate));
+    ot_table_put_im(vm, vars, symbol_v(name), var);
+
+    Ref order = ot_push(vm);
+    ot_ns_field(vm, order, ns, syms->kwOrder);
+    ot_array_push_im(vm, order, symbol_v(name));
   } else {
-    // No allocation between these reads and writes, so the interior pointer is
-    // safe for the length of the block.
-    Value* a = array_items(ref_get(vm, var));
-    a[VAR_VALUE] = ref_get(vm, vS);
-    a[VAR_DOC] = ref_get(vm, dS);
-    a[VAR_PRIVATE] = bool_v(isPrivate);
+    OT_ASSERT(ot_array_set(vm, var, OT_VAR_VALUE, value));
+    OT_ASSERT(ot_array_set(vm, var, OT_VAR_DOC, docstring));
+    Ref flag = ot_push(vm);
+    ot_set_bool(vm, flag, isPrivate);
+    OT_ASSERT(ot_array_set(vm, var, OT_VAR_PRIVATE, flag));
   }
-  return ref_get(vm, vS);
+
+  ot_copy(vm, dst, value);
 }
 
-bool sym_qualified(State* vm, u32 symId) {
-  u32 len;
-  const char* s = intern_name(&vm->intern, symId, &len);
+bool ot_sym_qualified(State* vm, u32 symId) {
+  u32 len = 0;
+  const char* s = ot_intern_name(vm, symId, &len);
   for (u32 i = 1; i + 1 < len; i++)
     if (s[i] == '/') return true;
   return false;
 }
 
-// Resolve a var cell; nil if not found. When raiseErr, a miss also raises a
-// condition (raise_error stores it in vm->unwindCondition; its return value
-// is always the immediate Unwind sentinel, so callers just return unwind_v()).
-static Value resolve_var_impl(State* vm, Value sym, bool raiseErr) {
-  u32 len;
-  const char* s = intern_name(&vm->intern, sym.id, &len);
+// Resolve a var cell into dst. When raiseErr, a miss also starts a condition
+// unwind; false is still returned so the caller can propagate unwind_v().
+static bool resolve_var_impl(State* vm, Ref dst, Ref symbol, bool raiseErr) {
+  OT_SCOPE(vm);
+  const Syms* syms = ot_syms(vm);
+  u32 symbolId = ot_id(vm, symbol);
+  u32 len = 0;
+  const char* s = ot_intern_name(vm, symbolId, &len);
   u32 slash = 0;
   for (u32 i = 1; i + 1 < len; i++)
     if (s[i] == '/') {
@@ -103,53 +126,78 @@ static Value resolve_var_impl(State* vm, Value sym, bool raiseErr) {
       break;
     }
 
+  Ref ns = ot_push(vm);
+  Ref field = ot_push(vm);
+  Ref key = ot_push(vm);
+  Ref var = ot_push(vm);
+
   if (slash) {  // qualified p/n
-    u32 p = intern_id(&vm->intern, s, slash);
-    u32 n = intern_id(&vm->intern, s + slash + 1, len - slash - 1);
-    Value cur = ns_lookup(vm, vm->currentNs);
-    u32 nsName = p;
-    if (!is_nil(cur)) {
-      Value alias = table_get(vm, ns_field(vm, cur, vm->syms.kwAliases), symbol_v(p));
-      if (alias.tag == Tag_Symbol) nsName = alias.id;
+    u32 prefix = ot_intern(vm, s, slash);
+    u32 name = ot_intern(vm, s + slash + 1, len - slash - 1);
+    u32 nsName = prefix;
+    if (ot_ns_lookup(vm, ns, ot_current_ns(vm))) {
+      ot_ns_field(vm, field, ns, syms->kwAliases);
+      ot_set_symbol(vm, key, prefix);
+      ot_table_get(vm, var, field, key);
+      if (ot_tag(vm, var) == Tag_Symbol) nsName = ot_id(vm, var);
     }
-    Value target = ns_lookup(vm, nsName);
-    if (is_nil(target)) {
+
+    if (!ot_ns_lookup(vm, ns, nsName)) {
       if (raiseErr) raise_error(vm, "no such namespace: %.*s", (int)slash, s);
-      return nil_v();
+      ot_set_nil(vm, dst);
+      return false;
     }
-    Value var = table_get(vm, ns_field(vm, target, vm->syms.kwVars), symbol_v(n));
-    if (is_nil(var)) {
-      if (raiseErr) raise_error_sym(vm, "no such var: %.*s", sym.id);
-      return nil_v();
+    ot_ns_field(vm, field, ns, syms->kwVars);
+    ot_set_symbol(vm, key, name);
+    ot_table_get(vm, var, field, key);
+    if (ot_nil(vm, var)) {
+      if (raiseErr) raise_error_sym(vm, "no such var: %.*s", symbolId);
+      ot_set_nil(vm, dst);
+      return false;
     }
-    if (var_private(var) && nsName != vm->currentNs) {
-      if (raiseErr) raise_error_sym(vm, "var is private: %.*s", sym.id);
-      return nil_v();
+    if (ot_var_private(vm, var) && nsName != ot_current_ns(vm)) {
+      if (raiseErr) raise_error_sym(vm, "var is private: %.*s", symbolId);
+      ot_set_nil(vm, dst);
+      return false;
     }
-    return var;
+    ot_copy(vm, dst, var);
+    return true;
   }
 
   // unqualified: own vars -> refers
-  Value cur = ns_lookup(vm, vm->currentNs);
-  if (!is_nil(cur)) {
-    Value var = table_get(vm, ns_field(vm, cur, vm->syms.kwVars), sym);
-    if (!is_nil(var)) return var;
-    var = table_get(vm, ns_field(vm, cur, vm->syms.kwRefers), sym);
-    if (!is_nil(var)) return var;
+  if (ot_ns_lookup(vm, ns, ot_current_ns(vm))) {
+    ot_ns_field(vm, field, ns, syms->kwVars);
+    ot_table_get(vm, var, field, symbol);
+    if (!ot_nil(vm, var)) {
+      ot_copy(vm, dst, var);
+      return true;
+    }
+    ot_ns_field(vm, field, ns, syms->kwRefers);
+    ot_table_get(vm, var, field, symbol);
+    if (!ot_nil(vm, var)) {
+      ot_copy(vm, dst, var);
+      return true;
+    }
   }
-  if (raiseErr) raise_error_sym(vm, "unresolved symbol: %.*s", sym.id);
+
+  if (raiseErr) raise_error_sym(vm, "unresolved symbol: %.*s", symbolId);
+  ot_set_nil(vm, dst);
+  return false;
+}
+
+bool ot_resolve_var(State* vm, Ref dst, Ref symbol) {
+  return resolve_var_impl(vm, dst, symbol, false);
+}
+
+Value ot_resolve(State* vm, Ref dst, Ref symbol) {
+  if (!resolve_var_impl(vm, dst, symbol, true)) return unwind_v();
+  ot_var_value(vm, dst, dst);
   return nil_v();
 }
 
-Value ns_resolve_var(State* vm, Value symbol) { return resolve_var_impl(vm, symbol, false); }
-
-Value ns_resolve(State* vm, Value symbol) {
-  Value var = resolve_var_impl(vm, symbol, true);
-  if (is_nil(var)) return unwind_v();
-  return var_value(var);
-}
-
-void ns_switch(State* vm, u32 nsName) {
-  ns_get_or_create(vm, nsName);
-  vm->currentNs = nsName;
+void ot_switch_ns(State* vm, u32 nsName) {
+  OT_SCOPE(vm);
+  Ref ns = ot_push(vm);
+  ot_ns_get_or_create(vm, ns, nsName);
+  ot_set_current_ns(vm, nsName);
 }

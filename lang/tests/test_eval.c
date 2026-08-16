@@ -1,8 +1,9 @@
 // test_eval.c — State / namespaces / evaluator / conditions / restarts / params.
+#define OT_HEAP_INTERNALS
 #include "ctest.h"
 #include "../src/state.h"
+#include "../src/collections.h"
 #include "../src/eval.h"
-#include "../src/ns.h"
 #include "../src/reader.h"
 #include "../src/builtins.h"
 #include <string.h>
@@ -45,10 +46,18 @@ static Value t_native_answer(State* vm, u32 base, u32 argc) {
 static void t_native_init(State* vm) {
   native_init_calls++;
   native_init_ns = vm->currentNs;
-  def_native(vm, "native-answer", t_native_answer);
+  ot_def_native(vm, "native-answer", t_native_answer);
   // An extension may enter a sub-namespace while installing more bindings.
   // The require harness must still load sugar in the module and restore its caller.
-  ns_switch(vm, intern_id(&vm->intern, "test.native.sub", 15));
+  ot_switch_ns(vm, ot_intern(vm, "test.native.sub", 15));
+}
+
+static void t_def_native(State* vm, const char* name, NativeFn fn) {
+  OT_SCOPE(vm);
+  Ref native = ot_push(vm);
+  Ref doc = ot_push(vm);
+  ot_make_native(vm, native, name, fn);
+  ot_define(vm, native, ot_intern(vm, name, (u32)strlen(name)), native, false, doc);
 }
 
 typedef struct TestLoader {  // zero-init
@@ -78,30 +87,29 @@ static State* mkvm(u32 maxDepth) {
   State* vm = state_create(&cfg);
   u32 saved = vm->currentNs;
   vm->currentNs = vm->syms.otiumCore_;
-  ns_define(vm, intern_id(&vm->intern, "+", 1), make_native(vm, "+", t_add), false, nil_v());
-  ns_define(vm, intern_id(&vm->intern, "-", 1), make_native(vm, "-", t_sub), false, nil_v());
-  ns_define(vm, intern_id(&vm->intern, "=", 1), make_native(vm, "=", t_numeq), false, nil_v());
-  ns_define(vm, intern_id(&vm->intern, "trip!", 5), make_native(vm, "trip!", t_trip), false,
-            nil_v());
+  t_def_native(vm, "+", t_add);
+  t_def_native(vm, "-", t_sub);
+  t_def_native(vm, "=", t_numeq);
+  t_def_native(vm, "trip!", t_trip);
   vm->currentNs = saved;
   // `user` was created before these defs; run tests from a fresh namespace
   // created now, whose auto-refer snapshot includes them.
-  ns_switch(vm, intern_id(&vm->intern, "test.main", 9));
+  ot_switch_ns(vm, ot_intern(vm, "test.main", 9));
   return vm;
 }
 
 static Value run(State* vm, const char* src) {
   Reader rd;
   reader_init(&rd, vm, src, (u32)strlen(src), "test");
-  Value last = nil_v();
+  OT_SCOPE(vm);
+  Ref form = ot_push(vm);
+  Ref last = ot_push(vm);
   for (;;) {
-    Value f = reader_next(&rd);
-    if (f.tag == Tag_Unwind) return f;
+    OT_TRY(reader_next_ref(&rd, form));
     if (reader_at_eof(&rd)) break;
-    last = eval_form(vm, f);
-    if (last.tag == Tag_Unwind) return last;
+    OT_TRY(ot_eval(vm, last, form));
   }
-  return last;
+  return ot_ret(vm, last);
 }
 
 static bool is_int(Value v, i64 n) { return v.tag == Tag_Int && v.i == n; }

@@ -1,7 +1,4 @@
 #include "reader.h"
-#include "value.h"
-#include "heap.h"
-#include "state.h"
 #include "numio.h"
 
 // Characters that terminate an atom (spec 1.2): ( ) [ ] { } ; " , ' `
@@ -23,8 +20,8 @@ static bool is_delim(char c) {
 }
 
 static bool atom_end(char c) { return ascii_whitespace((u8)c) || is_delim(c); }
-
 static bool is_digit(char c) { return c >= '0' && c <= '9'; }
+
 static int hex_val(char c) {
   if (c >= '0' && c <= '9') return c - '0';
   if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -58,7 +55,7 @@ static void advance(Reader* r) {
   r->pos++;
 }
 
-static void skipWs(Reader* r) {
+static void skip_ws(Reader* r) {
   while (!eof(r)) {
     char c = peek(r);
     if (ascii_whitespace((u8)c)) {
@@ -77,28 +74,28 @@ static Value err(Reader* r, u32 line, u32 col, const char* what) {
   return raise_error(r->vm, "read error at %u:%u: %s", line, col, what);
 }
 
-static Value needMore(Reader* r, u32 line, u32 col, const char* what) {
+static Value need_more(Reader* r, u32 line, u32 col, const char* what) {
   r->incompleteFlag = true;
   return err(r, line, col, what);
 }
 
-static Value readForm(Reader* r);
+static Value read_form(Reader* r, Ref dst);
 
-// Reads elements up to `close`. If ctorSym is non-null the result is a proper
-// list whose head is the interned symbol (array/table literals, spec 1.7);
-// dotted tails are then a read error inside brackets/braces because a `.`
-// token there still follows the dotted-pair rule of the plain-list grammar.
-static Value readList(Reader* r, char close, u32 openLine, u32 openCol, const char* ctorSym) {
+// Reads elements up to `close`. Collection literals are represented as a
+// proper list headed by ctorSym. Every partial form stays in a stack slot
+// while later elements allocate.
+static Value read_list(Reader* r, Ref dst, char close, u32 openLine, u32 openCol,
+                       const char* ctorSym) {
   State* vm = r->vm;
   OT_SCOPE(vm);
-  u32 base = vm->stack.len;
+  u32 base = ot_top(vm);
   u32 count = 0;
   bool haveTail = false;
   Ref tail = {0};
 
   for (;;) {
-    skipWs(r);
-    if (eof(r)) return needMore(r, openLine, openCol, "unterminated list");
+    skip_ws(r);
+    if (eof(r)) return need_more(r, openLine, openCol, "unterminated list");
     char c = peek(r);
     if (c == close) {
       advance(r);
@@ -106,47 +103,46 @@ static Value readList(Reader* r, char close, u32 openLine, u32 openCol, const ch
     }
     if (c == ')' || c == ']' || c == '}')
       return err(r, r->line, r->col, "mismatched closing delimiter");
-    // dotted-tail marker: a lone `.` followed by whitespace/delimiter/eof
     if (c == '.' && (r->pos + 1 >= r->len || atom_end(r->src[r->pos + 1]))) {
-      u32 dl = r->line, dc = r->col;
+      u32 dotLine = r->line, dotCol = r->col;
       advance(r);
-      if (count == 0) return err(r, dl, dc, "dotted tail with no preceding element");
-      if (close != ')') return err(r, dl, dc, "dotted tail not allowed in collection literal");
-      Value t = readForm(r);
-      if (t.tag == Tag_Unwind) return t;
-      tail = ref_push(vm, t);
+      if (count == 0) return err(r, dotLine, dotCol, "dotted tail with no preceding element");
+      if (close != ')')
+        return err(r, dotLine, dotCol, "dotted tail not allowed in collection literal");
+      tail = ot_push(vm);
+      OT_TRY(read_form(r, tail));
       haveTail = true;
-      skipWs(r);
-      if (eof(r)) return needMore(r, r->line, r->col, "expected ) after dotted tail");
+      skip_ws(r);
+      if (eof(r)) return need_more(r, r->line, r->col, "expected ) after dotted tail");
       if (peek(r) != close) return err(r, r->line, r->col, "expected ) after dotted tail");
       advance(r);
       break;
     }
-    Value v = readForm(r);
-    if (v.tag == Tag_Unwind) return v;
-    state_push(vm, v);  // elements stay contiguous at base..base+count
+
+    Ref item = ot_push(vm);
+    OT_TRY(read_form(r, item));
     count++;
   }
 
-  // Fold right-to-left into a chain of pairs, keeping the accumulator rooted.
-  // The elements are read out of the stack by index, so make_pair moving them
-  // is fine: their slots are roots.
-  Ref acc = ref_push(vm, haveTail ? ref_get(vm, tail) : null_v());
-  for (u32 i = count; i > 0; i--)
-    ref_set(vm, acc, make_pair(vm, vm->stack.data[base + i - 1], ref_get(vm, acc)));
+  Ref acc = ot_push(vm);
+  if (haveTail) ot_copy(vm, acc, tail);
+  else ot_set_null(vm, acc);
+  ot_list_from_stack(vm, acc, base, count, acc);
   if (ctorSym) {
-    Value head = symbol_v(intern_id(&vm->intern, ctorSym, (u32)strlen(ctorSym)));
-    ref_set(vm, acc, make_pair(vm, head, ref_get(vm, acc)));
+    Ref head = ot_push(vm);
+    ot_set_symbol(vm, head, ot_intern(vm, ctorSym, (u32)strlen(ctorSym)));
+    ot_cons(vm, acc, head, acc);
   }
-  return ref_get(vm, acc);
+  ot_copy(vm, dst, acc);
+  return nil_v();
 }
 
-static Value readString(Reader* r, u32 openLine, u32 openCol) {
+static Value read_string(Reader* r, Ref dst, u32 openLine, u32 openCol) {
   Buf out = {0};
   for (;;) {
     if (eof(r)) {
       buf_deinit(&out);
-      return needMore(r, openLine, openCol, "unterminated string");
+      return need_more(r, openLine, openCol, "unterminated string");
     }
     char c = peek(r);
     advance(r);
@@ -154,12 +150,12 @@ static Value readString(Reader* r, u32 openLine, u32 openCol) {
     if (c == '\\') {
       if (eof(r)) {
         buf_deinit(&out);
-        return needMore(r, openLine, openCol, "unterminated string");
+        return need_more(r, openLine, openCol, "unterminated string");
       }
-      char e = peek(r);
-      u32 el = r->line, ec = r->col;
+      char escaped = peek(r);
+      u32 line = r->line, col = r->col;
       advance(r);
-      switch (e) {
+      switch (escaped) {
         case 'n': vec_push(&out, '\n'); break;
         case 't': vec_push(&out, '\t'); break;
         case 'r': vec_push(&out, '\r'); break;
@@ -167,29 +163,35 @@ static Value readString(Reader* r, u32 openLine, u32 openCol) {
         case 'e': vec_push(&out, '\x1b'); break;
         case '"': vec_push(&out, '"'); break;
         case '\\': vec_push(&out, '\\'); break;
-        default: buf_deinit(&out); return err(r, el, ec, "unknown string escape");
+        default:
+          buf_deinit(&out);
+          return err(r, line, col, "unknown string escape");
       }
       continue;
     }
     vec_push(&out, c);
   }
-  Value s = make_string_buf(r->vm, &out);
+  ot_make_string_buf(r->vm, dst, &out);
   buf_deinit(&out);
-  return s;
+  return nil_v();
 }
 
-static Value readSugar(Reader* r, const char* sym, u32 symLen) {
+static Value read_sugar(Reader* r, Ref dst, const char* sym, u32 symLen) {
   State* vm = r->vm;
-  Value inner = readForm(r);
-  OT_TRY(inner);
   OT_SCOPE(vm);
-  Ref wrapped = ref_push(vm, inner);
-  ref_set(vm, wrapped, make_pair(vm, ref_get(vm, wrapped), null_v()));
-  Value head = symbol_v(intern_id(&vm->intern, sym, symLen));
-  return make_pair(vm, head, ref_get(vm, wrapped));
+  Ref inner = ot_push(vm);
+  Ref empty = ot_push(vm);
+  Ref wrapped = ot_push(vm);
+  Ref head = ot_push(vm);
+  OT_TRY(read_form(r, inner));
+  ot_set_null(vm, empty);
+  ot_cons(vm, wrapped, inner, empty);
+  ot_set_symbol(vm, head, ot_intern(vm, sym, symLen));
+  ot_cons(vm, dst, head, wrapped);
+  return nil_v();
 }
 
-static Value parseNumber(Reader* r, const char* tok, u32 n, u32 line, u32 col) {
+static Value parse_number(Reader* r, Ref dst, const char* tok, u32 n, u32 line, u32 col) {
   u32 i = 0;
   bool neg = false;
   if (tok[i] == '+' || tok[i] == '-') {
@@ -197,124 +199,119 @@ static Value parseNumber(Reader* r, const char* tok, u32 n, u32 line, u32 col) {
     i++;
   }
 
-  // hexadecimal: 0x...
   if (n - i > 2 && tok[i] == '0' && (tok[i + 1] == 'x' || tok[i + 1] == 'X')) {
     u64 acc = 0;
     for (u32 j = i + 2; j < n; j++) {
       int h = hex_val(tok[j]);
       if (h < 0) return err(r, line, col, "invalid hexadecimal literal");
-      if (acc > (u64)0x0FFFFFFFFFFFFFFFull)  // acc*16 would overflow u64
+      if (acc > (u64)0x0FFFFFFFFFFFFFFFull)
         return err(r, line, col, "integer literal out of range");
       acc = acc * 16 + (u64)h;
     }
     u64 limit = neg ? (u64)1 << 63 : ((u64)1 << 63) - 1;
     if (acc > limit) return err(r, line, col, "integer literal out of range");
-    i64 value = neg ? (acc == ((u64)1 << 63) ? INT64_MIN : -(i64)acc) : (i64)acc;
-    return int_v(value);
+    ot_set_int(r->vm, dst, neg ? (acc == ((u64)1 << 63) ? INT64_MIN : -(i64)acc) : (i64)acc);
+    return nil_v();
   }
 
-  // classify int vs float by presence of . e E
   bool isFloat = false;
-  for (u32 j = i; j < n; j++) {
-    char c = tok[j];
-    if (c == '.' || c == 'e' || c == 'E') {
+  for (u32 j = i; j < n; j++)
+    if (tok[j] == '.' || tok[j] == 'e' || tok[j] == 'E') {
       isFloat = true;
       break;
     }
-  }
 
   if (!isFloat) {
-    // Hand-rolled (never a libc call), so this stays here rather than behind
-    // the numio seam; num_parse_i64 extracts the same accumulation for hosts.
     u64 acc = 0;
     for (u32 j = i; j < n; j++) {
       if (!is_digit(tok[j])) return err(r, line, col, "invalid number");
-      u32 d = (u32)(tok[j] - '0');
-      if (acc > ((u64)0xFFFFFFFFFFFFFFFFull - d) / 10)
+      u32 digit = (u32)(tok[j] - '0');
+      if (acc > (UINT64_MAX - digit) / 10)
         return err(r, line, col, "integer literal out of range");
-      acc = acc * 10 + d;
+      acc = acc * 10 + digit;
     }
     u64 limit = neg ? (u64)1 << 63 : ((u64)1 << 63) - 1;
     if (acc > limit) return err(r, line, col, "integer literal out of range");
-    i64 value = neg ? (acc == ((u64)1 << 63) ? INT64_MIN : -(i64)acc) : (i64)acc;
-    return int_v(value);
+    ot_set_int(r->vm, dst, neg ? (acc == ((u64)1 << 63) ? INT64_MIN : -(i64)acc) : (i64)acc);
+    return nil_v();
   }
 
-  // float: numio NUL-terminates a copy, parses with strtod, requires full
-  // consumption; its 64-byte scratch bound is surfaced as a distinct error.
   if (n >= 64) return err(r, line, col, "number literal too long");
-  f64 f = 0;
-  if (!num_parse_f64(tok, n, &f)) return err(r, line, col, "invalid number");
-  return float_v(f);
+  f64 value = 0;
+  if (!num_parse_f64(tok, n, &value)) return err(r, line, col, "invalid number");
+  ot_set_float(r->vm, dst, value);
+  return nil_v();
 }
 
 static bool tok_eq(const char* tok, u32 n, const char* lit) {
-  u32 l = (u32)strlen(lit);
-  return n == l && memcmp(tok, lit, n) == 0;
+  u32 len = (u32)strlen(lit);
+  return n == len && memcmp(tok, lit, n) == 0;
 }
 
 static bool starts_numerically(const char* tok, u32 n) {
   u32 i = 0;
   if (i < n && (tok[i] == '+' || tok[i] == '-')) i++;
   if (i < n && is_digit(tok[i])) return true;
-  if (i < n && tok[i] == '.' && n - i >= 2) return true;
-  return false;
+  return i < n && tok[i] == '.' && n - i >= 2;
 }
 
-static Value classifyAtom(Reader* r, const char* tok, u32 n, u32 line, u32 col) {
-  // Spec 1.3 classification order.
-  if (tok_eq(tok, n, "nil")) return nil_v();
-  if (tok_eq(tok, n, "#t") || tok_eq(tok, n, "#true") || tok_eq(tok, n, "true"))
-    return bool_v(true);
-  if (tok_eq(tok, n, "#f") || tok_eq(tok, n, "#false") || tok_eq(tok, n, "false"))
-    return bool_v(false);
-  if (n > 0 && tok[0] == '#') return err(r, line, col, "reserved # syntax");
-  if (n > 0 && tok[0] == ':') {
+static Value classify_atom(Reader* r, Ref dst, const char* tok, u32 n, u32 line, u32 col) {
+  if (tok_eq(tok, n, "nil")) ot_set_nil(r->vm, dst);
+  else if (tok_eq(tok, n, "#t") || tok_eq(tok, n, "#true") || tok_eq(tok, n, "true"))
+    ot_set_bool(r->vm, dst, true);
+  else if (tok_eq(tok, n, "#f") || tok_eq(tok, n, "#false") || tok_eq(tok, n, "false"))
+    ot_set_bool(r->vm, dst, false);
+  else if (n > 0 && tok[0] == '#')
+    return err(r, line, col, "reserved # syntax");
+  else if (n > 0 && tok[0] == ':') {
     if (n == 1) return err(r, line, col, "bare : is not a keyword");
-    return keyword_v(intern_id(&r->vm->intern, tok + 1, n - 1));
-  }
-  if (starts_numerically(tok, n)) return parseNumber(r, tok, n, line, col);
-  return symbol_v(intern_id(&r->vm->intern, tok, n));
+    ot_set_keyword(r->vm, dst, ot_intern(r->vm, tok + 1, n - 1));
+  } else if (starts_numerically(tok, n))
+    return parse_number(r, dst, tok, n, line, col);
+  else
+    ot_set_symbol(r->vm, dst, ot_intern(r->vm, tok, n));
+  return nil_v();
 }
 
-static Value readAtom(Reader* r) {
+static Value read_atom(Reader* r, Ref dst) {
   u32 line = r->line, col = r->col;
   u32 start = r->pos;
   while (!eof(r) && !atom_end(peek(r))) advance(r);
-  return classifyAtom(r, r->src + start, r->pos - start, line, col);
+  return classify_atom(r, dst, r->src + start, r->pos - start, line, col);
 }
 
-static Value readForm(Reader* r) {
-  skipWs(r);
-  if (eof(r)) return needMore(r, r->line, r->col, "unexpected end of input");
+static Value read_form(Reader* r, Ref dst) {
+  skip_ws(r);
+  if (eof(r)) return need_more(r, r->line, r->col, "unexpected end of input");
   u32 line = r->line, col = r->col;
   char c = peek(r);
   switch (c) {
-    case '(': advance(r); return readList(r, ')', line, col, nullptr);
-    case '[': advance(r); return readList(r, ']', line, col, "array");
-    case '{': advance(r); return readList(r, '}', line, col, "table");
+    case '(': advance(r); return read_list(r, dst, ')', line, col, nullptr);
+    case '[': advance(r); return read_list(r, dst, ']', line, col, "array");
+    case '{': advance(r); return read_list(r, dst, '}', line, col, "table");
     case ')':
     case ']':
     case '}': return err(r, line, col, "unexpected closing delimiter");
-    case '"': advance(r); return readString(r, line, col);
-    case '\'': advance(r); return readSugar(r, "quote", 5);
-    case '`': advance(r); return readSugar(r, "quasiquote", 10);
+    case '"': advance(r); return read_string(r, dst, line, col);
+    case '\'': advance(r); return read_sugar(r, dst, "quote", 5);
+    case '`': advance(r); return read_sugar(r, dst, "quasiquote", 10);
     case ',':
       advance(r);
       if (!eof(r) && peek(r) == '@') {
         advance(r);
-        return readSugar(r, "unquote-splicing", 16);
+        return read_sugar(r, dst, "unquote-splicing", 16);
       }
-      return readSugar(r, "unquote", 7);
-    default: return readAtom(r);
+      return read_sugar(r, dst, "unquote", 7);
+    default: return read_atom(r, dst);
   }
 }
 
-Value reader_next(Reader* r) {
-  skipWs(r);
+Value reader_next_ref(Reader* r, Ref dst) {
+  skip_ws(r);
   if (eof(r)) {
     r->eofFlag = true;
+    ot_set_nil(r->vm, dst);
     return nil_v();
   }
-  return readForm(r);
+  return read_form(r, dst);
 }

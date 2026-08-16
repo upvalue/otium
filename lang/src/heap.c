@@ -1,4 +1,5 @@
 // heap.c — semispace Cheney scavenger. See heap.h for the design notes.
+#define OT_HEAP_INTERNALS
 #include "heap.h"
 
 static void* foreign_payload(ForeignData* d) {
@@ -440,10 +441,6 @@ Value make_entries(State* vm, u32 cap) { return make_entries_h(heap_of(vm), cap)
 Value make_bytes(State* vm, u32 cap) { return make_bytes_h(heap_of(vm), cap); }
 Value make_table(State* vm) { return make_table_h(heap_of(vm)); }
 Value make_buffer(State* vm) { return make_buffer_h(heap_of(vm)); }
-void array_reserve(State* vm, Value arr, u32 n) { array_reserve_h(heap_of(vm), arr, n); }
-void buffer_append(State* vm, Value b, const char* src, u32 n) {
-  buffer_append_h(heap_of(vm), b, src, n);
-}
 Value make_string_from_buffer(State* vm, Value b) {
   return make_string_from_buffer_h(heap_of(vm), b);
 }

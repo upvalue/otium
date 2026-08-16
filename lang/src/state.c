@@ -1,6 +1,5 @@
 // state.c — State construction, unwind plumbing, signal-site handler walk.
 #include "state.h"
-#include "ns.h"
 #include "eval.h"
 #include "builtins.h"
 #include "printer.h"
@@ -44,12 +43,21 @@ static void state_walk_roots(void* ud, VisitFn visit, void* ctx) {
 static void eval_embedded(State* vm, const char* name, const char* src, u32 len) {
   Value result = eval_source(vm, src, len, name);
   if (result.tag == Tag_Unwind) {
+    OT_SCOPE(vm);
+    Ref condition = ot_push(vm);
+    ot_set_return(vm, condition, vm->unwindCondition);
     Buf msg = {0};
     buf_printf(&msg, "bootstrap failed in %s: ", name);
-    print_repr(vm, vm->unwindCondition, &msg);
+    ot_repr(vm, condition, &msg);
     vec_push(&msg, '\0');
     ot_fatal(msg.data);
   }
+}
+
+static void ensure_namespace(State* vm, u32 name) {
+  OT_SCOPE(vm);
+  Ref ns = ot_push(vm);
+  ot_ns_get_or_create(vm, ns, name);
 }
 
 State* state_create(const StateConfig* cfg) {
@@ -85,13 +93,15 @@ State* state_create(const StateConfig* cfg) {
   vec_reserve(&vm->frames, c.framesInitial < c.maxDepth ? c.framesInitial : c.maxDepth);
 
   init_syms(vm);
-  vm->nsRegistry = make_table(vm);
-  state_push(vm, vm->nsRegistry);  // stack[0]: permanent root
-  vm->typeParents = make_table(vm);
-  state_push(vm, vm->typeParents);  // stack[1]: permanent root
+  Ref registry = {state_push(vm, nil_v())};  // stack[0]: permanent root
+  ot_make_table(vm, registry);
+  vm->nsRegistry = ref_get(vm, registry);
+  Ref typeParents = {state_push(vm, nil_v())};  // stack[1]: permanent root
+  ot_make_table(vm, typeParents);
+  vm->typeParents = ref_get(vm, typeParents);
 
   vm->currentNs = vm->syms.otiumCore_;
-  ns_get_or_create(vm, vm->syms.otiumCore_);
+  ensure_namespace(vm, vm->syms.otiumCore_);
   register_cond(vm);
   register_expand(vm);
   register_arith(vm);
@@ -103,7 +113,7 @@ State* state_create(const StateConfig* cfg) {
   // is created so the user's auto-refer snapshot includes its public bindings.
   eval_embedded(vm, "<expander.scm>", ot_expander_scm, ot_expander_scm_len);
   eval_embedded(vm, "<prelude.scm>", ot_prelude_scm, ot_prelude_scm_len);
-  ns_get_or_create(vm, vm->syms.user_);
+  ensure_namespace(vm, vm->syms.user_);
   vm->currentNs = vm->syms.user_;
   return vm;
 }
@@ -166,10 +176,12 @@ Value raise_error(State* vm, const char* fmt, ...) {
   vsnprintf(msg, sizeof msg, fmt, ap);
   va_end(ap);
   OT_SCOPE(vm);
-  Ref c = ref_push(vm, make_table(vm));
-  table_put(vm, ref_get(vm, c), keyword_v(vm->syms.kwType), symbol_v(vm->syms.error_));
-  Ref message = ref_push(vm, make_string(vm, msg, (u32)strlen(msg)));
-  table_put(vm, ref_get(vm, c), keyword_v(vm->syms.kwMessage), ref_get(vm, message));
+  Ref c = ot_push(vm);
+  Ref message = ot_push(vm);
+  ot_make_table(vm, c);
+  ot_table_put_im2(vm, c, keyword_v(vm->syms.kwType), symbol_v(vm->syms.error_));
+  ot_make_string(vm, message, msg, (u32)strlen(msg));
+  ot_table_put_im(vm, c, keyword_v(vm->syms.kwMessage), message);
   return signal_value(vm, ref_get(vm, c), true);
 }
 
@@ -184,8 +196,12 @@ Value raise_error_sym(State* vm, const char* fmt, u32 symId) {
 // -Wshadow rejects -- and a region that needs its own scope is a function.
 static Value call_with_condition(State* vm, Value fn, Ref condition) {
   OT_SCOPE(vm);
-  Ref arg = ref_push(vm, ref_get(vm, condition));
-  return apply(vm, fn, arg.i, 1);
+  Ref result = ot_push(vm);
+  Ref fnRoot = ot_push(vm);
+  ot_set_return(vm, fnRoot, fn);
+  Ref arg = ot_push_copy(vm, condition);
+  OT_TRY(ot_apply(vm, result, fnRoot, arg.i, 1));
+  return ot_ret(vm, result);
 }
 
 Value signal_value(State* vm, Value c, bool unwindIfUnhandled) {

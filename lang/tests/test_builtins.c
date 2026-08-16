@@ -1,10 +1,11 @@
 // test_builtins.c — compact dict lifecycle, equality matrix (spec 2.4),
 // int wrap-on-overflow. Needs the full runtime to link (state_create).
+#define OT_HEAP_INTERNALS
 #include "ctest.h"
 #include "../src/builtins.h"
+#include "../src/collections.h"
 #include "../src/eval.h"
 #include "../src/printer.h"
-#include "../src/ns.h"
 #include "../src/value.h"
 #include "../src/state.h"
 #include "../src/heap.h"
@@ -21,6 +22,22 @@ static State* make_vm(void) {
 }
 
 static Value str_v(State* vm, const char* s) { return make_string(vm, s, (u32)strlen(s)); }
+
+static void repr_value(State* vm, Value value, Buf* out) {
+  OT_SCOPE(vm);
+  Ref rooted = ot_push(vm);
+  ot_set_return(vm, rooted, value);
+  ot_repr(vm, rooted, out);
+}
+
+// Test convenience: root a transient key/value pair, then put. The pushes
+// happen before anything can allocate, so raw arguments are safe here.
+static void tput(State* vm, Ref table, Value k, Value v) {
+  OT_SCOPE(vm);
+  Ref kr = ref_push(vm, k);
+  Ref vr = ref_push(vm, v);
+  table_put(vm, table, kr, vr);
+}
 
 static bool approx(f64 a, f64 b) {
   f64 scale = fabs(b) > 1.0 ? fabs(b) : 1.0;
@@ -43,13 +60,19 @@ static void finalize_pointer(State* vm, void* payload) {
 }
 
 static Value call_core(State* vm, const char* name, const Value* args, u32 n) {
-  Value fn = ns_resolve(vm, symbol_v(intern_id(&vm->intern, name, (u32)strlen(name))));
-  if (fn.tag == Tag_Unwind) return fn;
-  u32 base = vm->stack.len;
-  for (u32 i = 0; i < n; i++) state_push(vm, args[i]);
-  Value result = apply(vm, fn, base, n);
-  state_pop_to(vm, base);
-  return result;
+  OT_SCOPE(vm);
+  Ref result = ot_push(vm);
+  Ref fn = ot_push(vm);
+  Ref symbol = ot_push(vm);
+  ot_set_symbol(vm, symbol, ot_intern(vm, name, (u32)strlen(name)));
+  OT_TRY(ot_resolve(vm, fn, symbol));
+  u32 base = ot_top(vm);
+  for (u32 i = 0; i < n; i++) {
+    Ref arg = ot_push(vm);
+    ot_set_return(vm, arg, args[i]);
+  }
+  OT_TRY(ot_apply(vm, result, fn, base, n));
+  return ot_ret(vm, result);
 }
 #define CALL0(vm, name) call_core((vm), (name), nullptr, 0)
 #define CALL(vm, name, ...)                                                                        \
@@ -63,17 +86,19 @@ TEST(foreign_objects_move_compare_by_identity_and_finalize_once) {
   pointer_finalized = 0;
   pointer_finalizer_ns = 0;
   State* vm = make_vm();
-  u32 inlineType = register_foreign_type(vm, "test/inline", finalize_inline);
-  u32 pointerType = register_foreign_type(vm, "test/pointer", finalize_pointer);
-  CHECK(register_foreign_type(vm, "test/inline", finalize_inline) == inlineType);
+  u32 inlineType = ot_register_foreign_type(vm, "test/inline", finalize_inline);
+  u32 pointerType = ot_register_foreign_type(vm, "test/pointer", finalize_pointer);
+  CHECK(ot_register_foreign_type(vm, "test/inline", finalize_inline) == inlineType);
 
   u32 base = vm->stack.len;
   i32 inlinePayload = 7;
-  state_push(vm, make_foreign_inline(vm, inlineType, &inlinePayload, sizeof inlinePayload));
+  Ref inlineObject = {state_push(vm, nil_v())};
+  ot_make_foreign_inline(vm, inlineObject, inlineType, &inlinePayload, sizeof inlinePayload);
   i32* pointerPayload = (i32*)malloc(sizeof *pointerPayload);
   CHECK(pointerPayload != nullptr);
   *pointerPayload = 11;
-  state_push(vm, make_foreign_pointer(vm, pointerType, pointerPayload));
+  Ref pointerObject = {state_push(vm, nil_v())};
+  ot_make_foreign_pointer(vm, pointerObject, pointerType, pointerPayload);
 
   Value before = vm->stack.data[base];
   u64 hash = val_hash(vm, before);
@@ -85,18 +110,18 @@ TEST(foreign_objects_move_compare_by_identity_and_finalize_once) {
   CHECK(val_hash(vm, vm->stack.data[base]) == hash);
 
   Buf repr = {0};
-  print_repr(vm, vm->stack.data[base], &repr);
+  repr_value(vm, vm->stack.data[base], &repr);
   CHECK_MEM(repr.data, repr.len, "#<test/inline>");
   buf_deinit(&repr);
 
   void* checked = nullptr;
-  CHECK(!is_unwind(foreign_check(vm, "test", vm->stack.data[base], inlineType, &checked)));
+  CHECK(!is_unwind(ot_foreign_check(vm, "test", inlineObject, inlineType, &checked)));
   CHECK(checked != nullptr);
   if (checked) CHECK(*(i32*)checked == 7);
-  CHECK(!is_unwind(foreign_release(vm, "test", vm->stack.data[base], inlineType)));
+  CHECK(!is_unwind(ot_foreign_release(vm, "test", inlineObject, inlineType)));
   CHECK(inline_finalized == 7);
   CHECK(foreign_dead(vm->stack.data[base]));
-  Value deadUse = foreign_check(vm, "test", vm->stack.data[base], inlineType, &checked);
+  Value deadUse = ot_foreign_check(vm, "test", inlineObject, inlineType, &checked);
   CHECK(is_unwind(deadUse));
   state_cancel_unwind(vm);
 
@@ -108,7 +133,8 @@ TEST(foreign_objects_move_compare_by_identity_and_finalize_once) {
   i32* teardownPayload = (i32*)malloc(sizeof *teardownPayload);
   CHECK(teardownPayload != nullptr);
   *teardownPayload = 13;
-  state_push(vm, make_foreign_pointer(vm, pointerType, teardownPayload));
+  Ref teardownObject = {state_push(vm, nil_v())};
+  ot_make_foreign_pointer(vm, teardownObject, pointerType, teardownPayload);
   u32 teardownNs = vm->currentNs;
   state_destroy(vm);
   CHECK(pointer_finalized == 24);             // live resources finalize at VM teardown
@@ -125,14 +151,14 @@ TEST(compact_dict_insert_update_delete_reinsert_ordering) {
   Value ka = keyword_v(intern_id(&vm->intern, "a", 1));
   Value kb = keyword_v(intern_id(&vm->intern, "b", 1));
   Value kc = keyword_v(intern_id(&vm->intern, "c", 1));
-  table_put(vm, vm->stack.data[root], ka, int_v(1));
-  table_put(vm, vm->stack.data[root], kb, int_v(2));
-  table_put(vm, vm->stack.data[root], kc, int_v(3));
+  tput(vm, (Ref){root}, ka, int_v(1));
+  tput(vm, (Ref){root}, kb, int_v(2));
+  tput(vm, (Ref){root}, kc, int_v(3));
   CHECK(table_entry_count(vm->stack.data[root]) == 3);
   CHECK(table_get(vm, vm->stack.data[root], kb).i == 2);
 
   // update keeps position
-  table_put(vm, vm->stack.data[root], ka, int_v(10));
+  tput(vm, (Ref){root}, ka, int_v(10));
   Value k, v;
   u32 cursor = 0;
   CHECK(table_iter_next(vm->stack.data[root], &cursor, &k, &v));
@@ -140,14 +166,14 @@ TEST(compact_dict_insert_update_delete_reinsert_ordering) {
   CHECK(v.i == 10);
 
   // delete (store nil), then re-insert moves to end
-  table_put(vm, vm->stack.data[root], ka, nil_v());
+  tput(vm, (Ref){root}, ka, nil_v());
   CHECK(table_entry_count(vm->stack.data[root]) == 2);
   CHECK(is_nil(table_get(vm, vm->stack.data[root], ka)));
   cursor = 0;
   CHECK(table_iter_next(vm->stack.data[root], &cursor, &k, &v));
   CHECK(val_eq(k, kb));
 
-  table_put(vm, vm->stack.data[root], ka, int_v(99));
+  tput(vm, (Ref){root}, ka, int_v(99));
   CHECK(table_entry_count(vm->stack.data[root]) == 3);
   cursor = 0;
   CHECK(table_iter_next(vm->stack.data[root], &cursor, &k, &v));
@@ -165,9 +191,9 @@ TEST(compact_dict_many_inserts_and_deletes_trigger_compaction) {
   u32 root = state_push(vm, make_table(vm));
 
   // insert 200 int keys, delete the even ones, verify odds intact + ordered
-  for (i64 i = 0; i < 200; i++) table_put(vm, vm->stack.data[root], int_v(i), int_v(i * 2));
+  for (i64 i = 0; i < 200; i++) tput(vm, (Ref){root}, int_v(i), int_v(i * 2));
   CHECK(table_entry_count(vm->stack.data[root]) == 200);
-  for (i64 i = 0; i < 200; i += 2) table_put(vm, vm->stack.data[root], int_v(i), nil_v());
+  for (i64 i = 0; i < 200; i += 2) tput(vm, (Ref){root}, int_v(i), nil_v());
   CHECK(table_entry_count(vm->stack.data[root]) == 100);
   for (i64 i = 1; i < 200; i += 2) {
     Value v = table_get(vm, vm->stack.data[root], int_v(i));
@@ -196,14 +222,14 @@ TEST(compact_dict_structural_keys_equal_strings_and_pairs_hit_same_slot) {
 
   Value s1 = str_v(vm, "hello");
   u32 r1 = state_push(vm, s1);
-  table_put(vm, vm->stack.data[root], s1, int_v(42));
+  tput(vm, (Ref){root}, s1, int_v(42));
   Value s2 = str_v(vm, "hello");  // different object, equal bytes
   CHECK(table_get(vm, vm->stack.data[root], s2).i == 42);
   state_pop_to(vm, r1);
 
   Value p1 = make_pair(vm, int_v(1), int_v(2));
   u32 r2 = state_push(vm, p1);
-  table_put(vm, vm->stack.data[root], p1, int_v(7));
+  tput(vm, (Ref){root}, p1, int_v(7));
   Value p2 = make_pair(vm, int_v(1), int_v(2));
   CHECK(table_get(vm, vm->stack.data[root], p2).i == 7);
   state_pop_to(vm, r2);
@@ -216,9 +242,9 @@ TEST(compact_dict_float_keys_nan_hits_nan_negzero_hits_zero) {
   State* vm = make_vm();
   u32 root = state_push(vm, make_table(vm));
 
-  table_put(vm, vm->stack.data[root], float_v(NAN), int_v(1));
+  tput(vm, (Ref){root}, float_v(NAN), int_v(1));
   CHECK(table_get(vm, vm->stack.data[root], float_v(NAN)).i == 1);
-  table_put(vm, vm->stack.data[root], float_v(0.0), int_v(2));
+  tput(vm, (Ref){root}, float_v(0.0), int_v(2));
   CHECK(table_get(vm, vm->stack.data[root], float_v(-0.0)).i == 2);
   // type-strict: int 0 is a different key from float 0.0
   CHECK(is_nil(table_get(vm, vm->stack.data[root], int_v(0))));
@@ -233,7 +259,7 @@ TEST(compact_dict_mutable_keys_identity_stable_across_gc) {
 
   Value a1 = make_array(vm, 4);
   u32 r = state_push(vm, a1);
-  table_put(vm, vm->stack.data[root], a1, int_v(5));
+  tput(vm, (Ref){root}, a1, int_v(5));
   Value a2 = make_array(vm, 4);  // distinct identity, same shape
   u32 r2 = state_push(vm, a2);
   CHECK(is_nil(table_get(vm, vm->stack.data[root], a2)));
@@ -251,20 +277,20 @@ TEST(compact_dict_mutable_keys_identity_stable_across_gc) {
 
 static void abort_table_overflow_full(void) {
   State* vm = make_vm();
-  Value table = make_table(vm);
-  TableData* data = as_table(table);
+  u32 root = state_push(vm, make_table(vm));
+  TableData* data = as_table(vm->stack.data[root]);
   data->entriesLen = UINT32_MAX;
   data->entriesCap = UINT32_MAX;
-  (void)table_put(vm, table, int_v(1), int_v(2));
+  table_put_ii(vm, (Ref){root}, int_v(1), int_v(2));
 }
 
 static void abort_table_overflow_half(void) {
   State* vm = make_vm();
-  Value table = make_table(vm);
-  TableData* data = as_table(table);
+  u32 root = state_push(vm, make_table(vm));
+  TableData* data = as_table(vm->stack.data[root]);
   data->entriesLen = UINT32_MAX / 2 + 1;
   data->entriesCap = UINT32_MAX / 2 + 1;
-  (void)table_put(vm, table, int_v(1), int_v(2));
+  table_put_ii(vm, (Ref){root}, int_v(1), int_v(2));
 }
 
 TEST(table_capacity_overflow_guards_abort_before_allocating) {
@@ -284,23 +310,23 @@ TEST(table_printing_preserves_insertion_order) {
   Value kb = keyword_v(intern_id(&vm->intern, "b", 1));
   Value kc = keyword_v(intern_id(&vm->intern, "c", 1));
 
-  table_put(vm, T, ka, int_v(1));
-  table_put(vm, T, kb, int_v(2));
-  table_put(vm, T, kc, int_v(3));
+  tput(vm, (Ref){root}, ka, int_v(1));
+  tput(vm, (Ref){root}, kb, int_v(2));
+  tput(vm, (Ref){root}, kc, int_v(3));
 
   Buf out = {0};
-  print_repr(vm, T, &out);
+  repr_value(vm, T, &out);
   CHECK_MEM(out.data, out.len, "{:a 1 :b 2 :c 3}");
 
   // One tombstone remains in storage: it is skipped, and reinsertion appends.
-  table_put(vm, T, kb, nil_v());
+  tput(vm, (Ref){root}, kb, nil_v());
   buf_clear(&out);
-  print_repr(vm, T, &out);
+  repr_value(vm, T, &out);
   CHECK_MEM(out.data, out.len, "{:a 1 :c 3}");
 
-  table_put(vm, T, kb, int_v(20));
+  tput(vm, (Ref){root}, kb, int_v(20));
   buf_clear(&out);
-  print_repr(vm, T, &out);
+  repr_value(vm, T, &out);
   CHECK_MEM(out.data, out.len, "{:a 1 :c 3 :b 20}");
   buf_deinit(&out);
 
@@ -331,7 +357,7 @@ TEST(pair_mutation_preserves_acyclic_and_table_key_invariants) {
     state_cancel_unwind(vm);
 
     Ref table = ref_push(vm, make_table(vm));
-    table_put(vm, ref_get(vm, table), ref_get(vm, pair), int_v(9));
+    tput(vm, table, ref_get(vm, pair), int_v(9));
     r = CALL(vm, "set-car!", ref_get(vm, pair), int_v(4));
     CHECK(r.tag == Tag_Unwind);
     state_cancel_unwind(vm);
@@ -383,10 +409,10 @@ TEST(equality_matrix_spec_2_4) {
     // arrays compare structurally
     Ref a1 = ref_push(vm, make_array(vm, 2));
     Ref a2 = ref_push(vm, make_array(vm, 2));
-    array_push(vm, ref_get(vm, a1), int_v(1));
-    array_push(vm, ref_get(vm, a1), ref_get(vm, p1));
-    array_push(vm, ref_get(vm, a2), int_v(1));
-    array_push(vm, ref_get(vm, a2), ref_get(vm, p2));
+    array_push_im(vm, a1, int_v(1));
+    array_push(vm, a1, p1);
+    array_push_im(vm, a2, int_v(1));
+    array_push(vm, a2, p2);
     CHECK(val_equal(vm, ref_get(vm, a1), ref_get(vm, a2)));
     CHECK(val_equal(vm, ref_get(vm, a1), ref_get(vm, a1)));
     array_items(ref_get(vm, a2))[0] = int_v(2);

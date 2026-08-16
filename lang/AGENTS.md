@@ -14,27 +14,27 @@ Use `ticket --help` to interact with the ticketing system.
 
 - Objects that belong to the language itself should be managed on the GC heap.
 
-## GC and rooting
+## GC values
 
-The collector is a moving semispace scavenger: every live object relocates when
-it runs, so anything you hold across an allocation is stale. The value stack is
-the root set. `Ref` names a slot in it, `OT_SCOPE(vm)` opens a region and
-unwinds it on every exit path, and `ref_get`/`ref_set` go through the slot so
-you always see the current address. Collections hold their backing storage in
-separate GC objects, which is why `array_push`, `array_reserve`, `table_put` and
-`buffer_append` allocate and can move the collection itself.
+`src/slots.h` is how code touches language values. Put heap values in `Ref`
+slots, open one `OT_SCOPE(vm)` per function, and use the `ot_*` operations. An
+operation writes a heap result to a caller-owned `Ref`; scalars such as ints,
+intern ids, and copied bytes can stay in C locals. Raw `Value` is for
+immediates, nil-or-unwind control flow, and `ot_ret(vm, ref)` in return position.
 
-So: take `Ref` for parameters that can carry a heap value, keep a raw `Value`
-only between a `ref_get` and its immediate use, and re-derive interior pointers
-(`ArrayData*`, `TableEntry*`, string bytes, bytecode) after anything that can
-allocate. `src/state.h` and `src/heap.h` hold the details, including `Status`
-for functions that return a heap value.
+The collector moves every live object. Only these files work on heap internals
+directly:
 
-Breaking the rule is fine for immediates and for stretches you have checked
-cannot allocate. Say so at the site, with what would have to change for it to
-stop holding.
+- `src/heap.c`
+- `src/vm.c`
+- `src/slots.c`
+- `src/collections.c`
 
-`OT_GC_STRESS` collects on every allocation. It is the only thing that reliably
-catches a missed root, and it is slow enough to be worth it only when you are in
-the collector, the VM core, or the rooting machinery itself -- not for routine
-work. `OT_GC_STRESS_EVERY=N` throttles it.
+Those files define `OT_HEAP_INTERNALS` before including `heap.h`. They may use
+raw heap values and interior pointers, but must root anything held across an
+allocation and re-derive pointers afterward. Keep the non-allocating stretch
+clear at the call site.
+
+Do not add another permitted file to get around the slot API. `heap.h` rejects
+unpermitted includes, and `tests/check_hygiene.py` rejects heap layout access
+outside the list. Focused low-level tests have explicit permits of their own.

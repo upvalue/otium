@@ -1,14 +1,9 @@
 // eval.h - top-level compilation, application, and VM control helpers.
 #pragma once
-#include "state.h"
+#include "slots.h"
 
-// FunctionData is defined in heap.h because the scavenger needs its layout.
-static inline FunctionData* fn_data(Value v) { return as_function(v); }
-static inline ParamData* param_data(Value v) { return as_param(v); }
-
-Value eval_form(State* vm, Value form);  // expand (via *expander*) + evaluate one top-level form
+Value eval_form_ref(State* vm, Ref dst, Ref form);  // expand and evaluate one top-level form
 Value apply(State* vm, Value callee, u32 base, u32 argc);  // args on vm stack
-Value start_quit(State* vm);                               // begin an uncatchable quit unwind
 
 typedef struct EvalSourceState {  // zero-init
   u32 consumed;
@@ -28,8 +23,6 @@ typedef struct EvalSourcePolicy {  // zero-init
 Value eval_source(State* vm, const char* src, u32 len, const char* name);
 Value eval_source_policy(State* vm, const char* src, u32 len, const char* name,
                          const EvalSourcePolicy* policy);
-
-Value make_native(State* vm, const char* name, NativeFn fn);
 
 // Compiler-only control primitives. The compiler stores these native
 // functions directly in Code constant pools and passes compiled thunks for

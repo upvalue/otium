@@ -674,7 +674,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
         Slot spS = s.push();  // spec cursor
         while (pairp(ARGS)) {
           Value clause = car_(ARGS);
-          if (pairp(clause) && clause.tag == Tag::Pair && car_(clause).tag == Tag::Keyword &&
+          if (pairp(clause) && car_(clause).tag == Tag::Keyword &&
               car_(clause).id == S.kwRequire) {
             spS.set(cdr_(clause));
             while (pairp(spS.get())) {

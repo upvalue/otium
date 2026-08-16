@@ -1,5 +1,5 @@
-// builtins/string.cpp — spec 10.6. All positions are code points over UTF-8
-// storage. Case operations are ASCII-only.
+// String, symbol, keyword, and mutable-buffer natives. String positions are
+// code points over UTF-8 storage; case operations are ASCII-only.
 #include "../builtins.hpp"
 #include "../vm.hpp"
 #include "../ns.hpp"

@@ -7,8 +7,6 @@
 
 namespace ot {
 
-__attribute__((weak)) void reader_set_pos(Vm&, Obj*, u32, u32) {}
-
 static bool is_ws(char c) {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
 }
@@ -159,7 +157,6 @@ Value Reader::readList(char close, u32 openLine, u32 openCol, const char* ctorSy
     acc.set(make_pair(vm_, head, acc.get()));
   }
   Value result = acc.get();
-  if (is_heap(result)) reader_set_pos(vm_, result.obj, openLine, openCol);
   return result;
 }
 
@@ -193,16 +190,13 @@ Value Reader::readString(u32 openLine, u32 openCol) {
 }
 
 Value Reader::readSugar(const char* sym, u32 symLen) {
-  u32 line = line_, col = col_;
   Value inner = readForm();
   if (inner.tag == Tag::Unwind) return inner;
   Scope sc(vm_);
   Slot slot = sc.push(inner);
   slot.set(make_pair(vm_, slot.get(), null_v()));
   Value head = symbol_v(vm_.intern.intern(sym, symLen));
-  Value form = make_pair(vm_, head, slot.get());
-  if (is_heap(form)) reader_set_pos(vm_, form.obj, line, col);
-  return form;
+  return make_pair(vm_, head, slot.get());
 }
 
 Value Reader::readAtom() {

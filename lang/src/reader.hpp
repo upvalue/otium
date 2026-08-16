@@ -5,11 +5,6 @@
 namespace ot {
 
 struct Vm;
-struct Obj;
-
-// Position side-table hook. Weak no-op default lives in reader.cpp; the
-// integrator provides a strong definition wired to vm.setPos(Obj*,line,col).
-void reader_set_pos(Vm& vm, Obj* o, u32 line, u32 col);
 
 struct Reader {
   Reader(Vm& vm, const char* src, u32 len, const char* filename);

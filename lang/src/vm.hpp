@@ -145,8 +145,6 @@ inline Value make_string_from(Vm& vm, Slot src, u32 byteOff, u32 len) {
   return make_string_from(vm, src.get(), byteOff, len);
 }
 
-using NativeFn = Value (*)(Vm& vm, u32 base, u32 argc);
-
 // Build {:type 'error :message <formatted>}, signal it through active
 // handlers, and (if all decline) start a condition unwind. Returns Unwind.
 Value raise_error(Vm&, const char* fmt, ...);

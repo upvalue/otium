@@ -39,62 +39,15 @@ struct Value {  // 16 bytes
 static_assert(sizeof(Value) == 16, "Value must be 16 bytes");
 
 // constructors
-inline Value nil_v() {
-  Value v;
-  v.tag = Tag::Nil;
-  v.i = 0;
-  return v;
-}
-inline Value null_v() {
-  Value v;
-  v.tag = Tag::Null;
-  v.i = 0;
-  return v;
-}
-inline Value bool_v(bool b) {
-  Value v;
-  v.tag = b ? Tag::True : Tag::False;
-  v.i = 0;
-  return v;
-}
-inline Value int_v(i64 i) {
-  Value v;
-  v.tag = Tag::Int;
-  v.i = i;
-  return v;
-}
-inline Value float_v(f64 f) {
-  Value v;
-  v.tag = Tag::Float;
-  v.f = f;
-  return v;
-}
-inline Value symbol_v(u32 id) {
-  Value v;
-  v.tag = Tag::Symbol;
-  v.i = 0;
-  v.id = id;
-  return v;
-}
-inline Value keyword_v(u32 id) {
-  Value v;
-  v.tag = Tag::Keyword;
-  v.i = 0;
-  v.id = id;
-  return v;
-}
-inline Value obj_v(Tag t, Obj* o) {
-  Value v;
-  v.tag = t;
-  v.obj = o;
-  return v;
-}
-inline Value unwind_v() {
-  Value v;
-  v.tag = Tag::Unwind;
-  v.i = 0;
-  return v;
-}
+inline Value nil_v() { return {.tag = Tag::Nil, .i = 0}; }
+inline Value null_v() { return {.tag = Tag::Null, .i = 0}; }
+inline Value bool_v(bool b) { return {.tag = b ? Tag::True : Tag::False, .i = 0}; }
+inline Value int_v(i64 i) { return {.tag = Tag::Int, .i = i}; }
+inline Value float_v(f64 f) { return {.tag = Tag::Float, .f = f}; }
+inline Value symbol_v(u32 id) { return {.tag = Tag::Symbol, .id = id}; }
+inline Value keyword_v(u32 id) { return {.tag = Tag::Keyword, .id = id}; }
+inline Value obj_v(Tag t, Obj* o) { return {.tag = t, .obj = o}; }
+inline Value unwind_v() { return {.tag = Tag::Unwind, .i = 0}; }
 
 // tests
 inline bool is_nil(Value v) { return v.tag == Tag::Nil; }

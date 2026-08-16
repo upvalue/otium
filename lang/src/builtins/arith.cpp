@@ -87,7 +87,7 @@ Value nat_div(Vm& vm, u32 base, u32 argc) {
     Value b = ARG(i);
     if (acc.tag == Tag::Int && b.tag == Tag::Int) {
       if (b.i == 0) return raise_error(vm, "/: division by zero");
-      if (b.i != 0 && a_rem(acc.i, b.i) == 0) acc = int_v(idiv_wrap(acc.i, b.i));
+      if (a_rem(acc.i, b.i) == 0) acc = int_v(idiv_wrap(acc.i, b.i));
       else acc = float_v((f64)acc.i / (f64)b.i);
     } else {
       acc = float_v(as_f(acc) / as_f(b));

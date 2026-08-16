@@ -66,12 +66,10 @@ struct ArrayData {
   u32 len;
   u32 cap;
 };  // items in C heap, owned
-// Compact-dict table layout (canonical here so the scavenger can trace it;
-// builtins.hpp guards its copy behind OT_TABLEDATA_DEFINED). Insertion-ordered
-// entry vector + open-addressed index array, both C-heap, owned by the object.
-// Tombstones are marked key.tag == Tag::Unwind and are not traced.
-#ifndef OT_TABLEDATA_DEFINED
-#define OT_TABLEDATA_DEFINED
+// Compact-dict table layout (canonical here so the scavenger can trace it).
+// Insertion-ordered entry vector + open-addressed index array, both C-heap,
+// owned by the object. Tombstones are marked key.tag == Tag::Unwind and are not
+// traced.
 struct TableEntry {
   u64 hash;
   Value key;
@@ -87,18 +85,17 @@ struct TableData {
   u32 indexCap;    // else entryIndex+1. Power-of-two capacity.
   u32 indexWidth;  // bytes per slot: 1, 2, or 4
 };
-#endif
 struct BufferData {
   Buf buf;
 };
-using NativeFnPtr = Value (*)(Vm& vm, u32 base, u32 argc);
+using NativeFn = Value (*)(Vm& vm, u32 base, u32 argc);
 struct FunctionData {
-  u32 name;            // intern id or 0
-  Value params;        // the parameter list form
-  Value body;          // list of body forms
-  Value env;           // captured lexical env (nil for natives)
-  Value nsName;        // defining namespace (symbol)
-  NativeFnPtr native;  // non-null for natives
+  u32 name;         // intern id or 0
+  Value params;     // the parameter list form
+  Value body;       // list of body forms
+  Value env;        // captured lexical env (nil for natives)
+  Value nsName;     // defining namespace (symbol)
+  NativeFn native;  // non-null for natives
   Value docstring;
 };
 struct ParamData {

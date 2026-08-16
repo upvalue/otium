@@ -29,3 +29,7 @@ State construction reserves stack and frames to cfg.stackSlots / cfg.maxDepth. N
 **2026-08-16T21:39:41Z**
 
 Partly done; premise was wrong. Reserving to the cap is the wrong shape -- Lua treats the cap as an error limit. StateConfig now splits initial from ceiling; defaults 1 Mi slots / depth 200000. Slot-as-pointer payoff is off the table.
+
+**2026-08-16T21:41:06Z**
+
+Retitle: reserving to the cap is wrong. Initial sizes now split from ceilings.

@@ -87,3 +87,7 @@ Neither is decided yet.
 **2026-08-16T21:39:40Z**
 
 Done except Status adoption. Ref is a bare index -- the stack still moves, so pointer handles are out. OT_SCOPE via cleanup attr; one-per-function, enforced by -Wshadow. Open question 1 (Tag_Unwind out of Value) not taken up.
+
+**2026-08-16T21:41:07Z**
+
+Ref/OT_SCOPE done across src/. Remaining: Status adoption at the Value-returning boundaries.

@@ -10,76 +10,76 @@ Value ns_field(State* vm, Value nsRec, u32 kwId) { return table_get(vm, nsRec, k
 
 Value ns_lookup(State* vm, u32 nsName) { return table_get(vm, vm->nsRegistry, symbol_v(nsName)); }
 
+// Each sub-structure is rooted before it is stored: table_put allocates, so a
+// make_* result left in a raw local could be moved before the put reads it.
 Value ns_get_or_create(State* vm, u32 nsName) {
   Value ns = ns_lookup(vm, nsName);
   if (!is_nil(ns)) return ns;
-  // Allocate each sub-structure BEFORE reading the ns slot: a make_* in
-  // argument position would move the table out from under table_put.
-  u32 sc = scope_begin(vm);
-  Slot nsS = scope_push(vm, make_table(vm));
-  table_put(vm, slot_get(nsS), keyword_v(vm->syms.kwName), symbol_v(nsName));
-  {
-    Value t = make_table(vm);
-    table_put(vm, slot_get(nsS), keyword_v(vm->syms.kwVars), t);
-  }
-  {
-    Value t = make_table(vm);
-    table_put(vm, slot_get(nsS), keyword_v(vm->syms.kwAliases), t);
-  }
-  {
-    Value t = make_table(vm);
-    table_put(vm, slot_get(nsS), keyword_v(vm->syms.kwRefers), t);
-  }
-  {
-    Value a = make_array(vm, 8);
-    table_put(vm, slot_get(nsS), keyword_v(vm->syms.kwOrder), a);
-  }
-  table_put(vm, vm->nsRegistry, symbol_v(nsName), slot_get(nsS));
+  OT_SCOPE(vm);
+  Ref nsS = ref_push(vm, make_table(vm));
+  Ref field = ref_push(vm, nil_v());
+  table_put(vm, ref_get(vm, nsS), keyword_v(vm->syms.kwName), symbol_v(nsName));
+  ref_set(vm, field, make_table(vm));
+  table_put(vm, ref_get(vm, nsS), keyword_v(vm->syms.kwVars), ref_get(vm, field));
+  ref_set(vm, field, make_table(vm));
+  table_put(vm, ref_get(vm, nsS), keyword_v(vm->syms.kwAliases), ref_get(vm, field));
+  ref_set(vm, field, make_table(vm));
+  table_put(vm, ref_get(vm, nsS), keyword_v(vm->syms.kwRefers), ref_get(vm, field));
+  ref_set(vm, field, make_array(vm, 8));
+  table_put(vm, ref_get(vm, nsS), keyword_v(vm->syms.kwOrder), ref_get(vm, field));
+  table_put(vm, vm->nsRegistry, symbol_v(nsName), ref_get(vm, nsS));
 
   // Auto-refer all public otium.core vars present at creation time (7.1).
-  // table_get/table_put do not allocate on the GC heap, so these raw locals
-  // remain valid for the whole walk.
   if (nsName != vm->syms.otiumCore_) {
-    Value core = ns_lookup(vm, vm->syms.otiumCore_);
-    if (!is_nil(core)) {
-      Value cvars = ns_field(vm, core, vm->syms.kwVars);
-      Value order = ns_field(vm, core, vm->syms.kwOrder);
-      Value refers = ns_field(vm, slot_get(nsS), vm->syms.kwRefers);
-      ArrayData* od = as_array(order);
-      for (u32 i = 0; i < od->len; i++) {
-        Value nameSym = od->items[i];
-        Value var = table_get(vm, cvars, nameSym);
-        if (!is_nil(var) && !var_private(var)) table_put(vm, refers, nameSym, var);
+    Ref core = ref_push(vm, ns_lookup(vm, vm->syms.otiumCore_));
+    if (!is_nil(ref_get(vm, core))) {
+      Ref cvars = ref_push(vm, ns_field(vm, ref_get(vm, core), vm->syms.kwVars));
+      Ref order = ref_push(vm, ns_field(vm, ref_get(vm, core), vm->syms.kwOrder));
+      Ref refers = ref_push(vm, ns_field(vm, ref_get(vm, nsS), vm->syms.kwRefers));
+      Ref nameSym = ref_push(vm, nil_v());
+      Ref var = ref_push(vm, nil_v());
+      // The bound and the element are re-read through `order` every iteration.
+      // Caching an ArrayData* across the table_put would strand it the moment
+      // table storage lives on the GC heap and the put can collect.
+      for (u32 i = 0; i < as_array(ref_get(vm, order))->len; i++) {
+        ref_set(vm, nameSym, as_array(ref_get(vm, order))->items[i]);
+        ref_set(vm, var, table_get(vm, ref_get(vm, cvars), ref_get(vm, nameSym)));
+        if (!is_nil(ref_get(vm, var)) && !var_private(ref_get(vm, var)))
+          table_put(vm, ref_get(vm, refers), ref_get(vm, nameSym), ref_get(vm, var));
       }
     }
   }
-  return scope_exit(vm, sc, slot_get(nsS));
+  return ref_get(vm, nsS);
 }
 
 Value ns_define(State* vm, u32 name, Value v, bool isPrivate, Value docstring) {
-  u32 sc = scope_begin(vm);
-  Slot vS = scope_push(vm, v);
-  Slot dS = scope_push(vm, docstring);
-  Slot nsS = scope_push(vm, ns_get_or_create(vm, vm->currentNs));
-  Value vars = ns_field(vm, slot_get(nsS), vm->syms.kwVars);
-  Value var = table_get(vm, vars, symbol_v(name));
-  if (is_nil(var)) {
-    Slot varS = scope_push(vm, make_array(vm, VAR_SLOTS));
-    // array_push/table_put are alloc-free; the var cell re-reads are cheap
-    array_push(vm, slot_get(varS), slot_get(vS));  // value
-    array_push(vm, slot_get(varS), symbol_v(name));
-    array_push(vm, slot_get(varS), symbol_v(vm->currentNs));
-    array_push(vm, slot_get(varS), slot_get(dS));  // docstring
-    array_push(vm, slot_get(varS), bool_v(isPrivate));
-    table_put(vm, ns_field(vm, slot_get(nsS), vm->syms.kwVars), symbol_v(name), slot_get(varS));
-    array_push(vm, ns_field(vm, slot_get(nsS), vm->syms.kwOrder), symbol_v(name));
+  OT_SCOPE(vm);
+  Ref vS = ref_push(vm, v);
+  Ref dS = ref_push(vm, docstring);
+  Ref nsS = ref_push(vm, ns_get_or_create(vm, vm->currentNs));
+  Ref var = ref_push(vm, table_get(vm, ns_field(vm, ref_get(vm, nsS), vm->syms.kwVars),
+                                   symbol_v(name)));
+  if (is_nil(ref_get(vm, var))) {
+    Ref varS = ref_push(vm, make_array(vm, VAR_SLOTS));
+    array_push(vm, ref_get(vm, varS), ref_get(vm, vS));  // value
+    array_push(vm, ref_get(vm, varS), symbol_v(name));
+    array_push(vm, ref_get(vm, varS), symbol_v(vm->currentNs));
+    array_push(vm, ref_get(vm, varS), ref_get(vm, dS));  // docstring
+    array_push(vm, ref_get(vm, varS), bool_v(isPrivate));
+    // ns_field is re-read after each mutation rather than hoisted: array_push
+    // and table_put both allocate.
+    table_put(vm, ns_field(vm, ref_get(vm, nsS), vm->syms.kwVars), symbol_v(name),
+              ref_get(vm, varS));
+    array_push(vm, ns_field(vm, ref_get(vm, nsS), vm->syms.kwOrder), symbol_v(name));
   } else {
-    ArrayData* a = as_array(var);
-    a->items[VAR_VALUE] = slot_get(vS);
-    a->items[VAR_DOC] = slot_get(dS);
+    // No allocation between these reads and writes, so the interior pointer is
+    // safe for the length of the block.
+    ArrayData* a = as_array(ref_get(vm, var));
+    a->items[VAR_VALUE] = ref_get(vm, vS);
+    a->items[VAR_DOC] = ref_get(vm, dS);
     a->items[VAR_PRIVATE] = bool_v(isPrivate);
   }
-  return scope_exit(vm, sc, slot_get(vS));
+  return ref_get(vm, vS);
 }
 
 bool sym_qualified(State* vm, u32 symId) {

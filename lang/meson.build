@@ -131,7 +131,105 @@ test('r7rs-ports', r7rs_port_tests,
   args : [otium],
   timeout : test_timeout)
 
+# --- C port (parallel tree under c/) ----------------------------------------
+# Ported from the C++ runtime; validated against the same language-level test
+# corpus. Requires a C23-capable compiler (GCC >= 13 / Clang >= 17).
+cc = meson.get_compiler('c')
+c_std_opt = 'c_std=c2x'
+c_has_computed_goto = cc.compiles('''
+  int main() {
+    static void* labels[] = {&&done};
+    goto *labels[0];
+  done:
+    return 0;
+  }
+''', name : 'computed goto (c)')
+c_lib_args = ['-Wshadow']
+if not get_option('computed_goto').disabled() and c_has_computed_goto
+  c_lib_args += ['-DOT_COMPUTED_GOTO']
+endif
+
+c_lib_inc = include_directories('c/src')
+c_lib_sources = files(
+  'c/src/vec.c',
+  'c/src/numio.c',
+  'c/src/heap.c',
+  'c/src/foreign.c',
+  'c/src/intern.c',
+  'c/src/state.c',
+  'c/src/code.c',
+  'c/src/vm.c',
+  'c/src/compile.c',
+  'c/src/ns.c',
+  'c/src/eval.c',
+  'c/src/reader.c',
+  'c/src/printer.c',
+  'c/src/builtins/arith.c',
+  'c/src/builtins/cond.c',
+  'c/src/builtins/data.c',
+  'c/src/builtins/expand.c',
+  'c/src/builtins/string.c',
+  'c/src/builtins/sys.c',
+  'c/src/builtins/time.c',
+)
+
+libotium_c = static_library('otium_c',
+  c_lib_sources, expander_h, prelude_h,
+  include_directories : c_lib_inc,
+  c_args : c_lib_args,
+  override_options : [c_std_opt])
+
+otium_c_sources = files('c/repl/main.c')
+otium_c_args = []
+otium_c_dependencies = []
 if get_option('ext_demo')
+  otium_c_sources += files('c/ext/demo/demo_ext.c')
+  otium_c_args += ['-DOT_EXT_DEMO']
+endif
+if get_option('ext_raylib')
+  otium_c_sources += files('c/ext/raylib/raylib_ext.c')
+  otium_c_args += ['-DOT_EXT_RAYLIB']
+  otium_c_dependencies += [dependency('raylib', required : true)]
+endif
+
+otium_c = executable('otium-c',
+  otium_c_sources,
+  include_directories : [c_lib_inc, bestline_inc],
+  c_args : otium_c_args,
+  dependencies : otium_c_dependencies,
+  link_with : [libotium_c, bestline],
+  override_options : [c_std_opt])
+
+c_test_sources = files(
+  'c/tests/main.c',
+  'c/tests/test_substrate.c',
+  'c/tests/test_reader.c',
+  'c/tests/test_eval.c',
+  'c/tests/test_builtins.c',
+  'c/tests/test_vm.c',
+  'c/tests/test_compile.c',
+)
+otium_c_tests = executable('otium-c-tests',
+  c_test_sources,
+  include_directories : [c_lib_inc, include_directories('c/tests')],
+  link_with : libotium_c,
+  override_options : [c_std_opt])
+
+test('otium-c-tests', otium_c_tests, timeout : test_timeout)
+test('otium-c-cli', cli_tests,
+  args : [otium_c, join_paths(meson.current_source_dir(), 'tests', 'cli-load.scm')],
+  timeout : test_timeout)
+test('r7rs-ports-c', r7rs_port_tests,
+  args : [otium_c],
+  timeout : test_timeout)
+
+if get_option('ext_demo')
+  test('otium-demo-extension-c', otium_c,
+    args : [
+      '--path', join_paths(meson.current_source_dir(), 'ext', 'demo'),
+      join_paths(meson.current_source_dir(), 'tests', 'ext-demo.scm'),
+    ],
+    timeout : test_timeout)
   test('otium-demo-extension', otium,
     args : [
       '--path', join_paths(meson.current_source_dir(), 'ext', 'demo'),
@@ -141,6 +239,12 @@ if get_option('ext_demo')
 endif
 
 if get_option('ext_raylib')
+  test('otium-raylib-extension-c', otium_c,
+    args : [
+      '--path', join_paths(meson.current_source_dir(), 'ext', 'raylib'),
+      join_paths(meson.current_source_dir(), 'tests', 'ext-raylib.scm'),
+    ],
+    timeout : test_timeout)
   test('otium-raylib-extension', otium,
     args : [
       '--path', join_paths(meson.current_source_dir(), 'ext', 'raylib'),

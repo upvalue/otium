@@ -33,8 +33,14 @@ In practice:
   caller passing a transient like `car_(form)`, so prefer it to taking `Value`
   and rooting on entry.
 - Never hoist an interior pointer (`ArrayData*`, `TableData*`, `StringData*`,
-  `const char*` into a string) across anything that can allocate. Re-derive it
-  from the rooted handle each time.
+  `TableEntry*`, a string's `const char*`, a Code object's bytecode pointer)
+  across anything that can allocate. Re-derive it from the rooted handle each
+  time.
+- `array_push`, `array_reserve`, `table_put` and `buffer_append` **allocate**.
+  Backing storage is on the GC heap, so growth can collect and move both the
+  collection and any pointer into it. Keep the collection in a handle and read
+  it back at every call; a raw local goes stale the first time one of these
+  grows. This is the single easiest mistake to make in this codebase.
 
 Functions that can return a heap value should return `Status` and leave the
 result on the stack: `Status_Ok` means exactly one value pushed, `Status_Unwind`
@@ -59,9 +65,16 @@ the site*, with what would have to change for it to stop holding -- a bare
 ### Core work
 
 Editing the collector, `heap.c`, or the stack machinery itself means working
-below the abstraction, and there the rule cannot help you. Two things to know:
+below the abstraction, and there the rule cannot help you. Things to know:
 
 - `heap_alloc` can collect on any call, including the first.
+- `heap.c` roots through `Heap::tempRoots` rather than the value stack, because
+  the `*_h` constructors take a bare `Heap` and have no `State` to push onto.
+  That is the one place two rooting mechanisms still coexist, and it is why.
+- Bytecode is stored inline in the `Code` object, so `vm_execute`'s cached
+  `bytes`/`ip`/`end` die at any allocation. Every opcode that can allocate ends
+  with `VM_RELOAD()`. Adding an allocating opcode without one is a live bug that
+  only `OT_GC_STRESS` will catch.
 - `OT_GC_STRESS` collects on every single allocation. Build with it and run the
   suite before claiming a rooting change is correct; `OT_GC_STRESS_EVERY=N`
   throttles it when the full rate is too slow. This is the gate that makes a

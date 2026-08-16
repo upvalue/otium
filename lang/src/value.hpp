@@ -73,9 +73,9 @@ inline bool val_eq(Value a, Value b) {
   }
 }
 
-struct Vm;
+struct State;
 // equal? semantics (deep) — defined in builtins/data.cpp
-bool val_equal(Vm& vm, Value a, Value b);
+bool val_equal(State& vm, Value a, Value b);
 
 #define OT_TRY(expr)                                                                               \
   {                                                                                                \

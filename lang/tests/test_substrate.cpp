@@ -1,5 +1,5 @@
 // Substrate tests: Vec, Value tags, heap alloc/scavenge, identity, intern.
-// Runs standalone against src/heap.cpp + src/intern.cpp (no vm.cpp needed:
+// Runs standalone against src/heap.cpp + src/intern.cpp (no state.cpp needed:
 // Heap is constructed with vm == nullptr and roots registered via addRoots).
 #include "doctest.h"
 #include "common.hpp"

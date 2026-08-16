@@ -1,7 +1,7 @@
 // builtins/sys.cpp — type predicates (10.2), output (10.7), functions and
 // evaluation (10.8), namespaces (10.10), plus def_native.
 #include "../builtins.hpp"
-#include "../vm.hpp"
+#include "../state.hpp"
 #include "../ns.hpp"
 #include "../heap.hpp"
 #include "../eval.hpp"  // FunctionData, eval_form, apply
@@ -15,7 +15,7 @@ namespace ot {
 // ---------------------------------------------------------------------------
 // def_native — wrap a NativeFn in a Function object, define it in otium.core.
 
-void def_native(Vm& vm, const char* name, NativeFn f) {
+void def_native(State& vm, const char* name, NativeFn f) {
   Scope s(vm);
   Slot native = s.push(make_native(vm, name, f));
   ns_define(vm, vm.intern.intern(name, (u32)strlen(name)), native.get(), false, nil_v());
@@ -25,7 +25,7 @@ void def_native(Vm& vm, const char* name, NativeFn f) {
 // Predicates.
 
 #define TAG_PRED(cname, lname, expr)                                                               \
-  static Value cname(Vm& vm, u32 base, u32 argc) {                                                 \
+  static Value cname(State& vm, u32 base, u32 argc) {                                                 \
     OT_TRY(need_argc(vm, lname, argc, 1, 1));                                                      \
     Value v = ARG(0);                                                                              \
     (void)v;                                                                                       \
@@ -50,24 +50,24 @@ TAG_PRED(nat_procedurep, "procedure?", v.tag == Tag::Function)
 TAG_PRED(nat_truep, "true?", v.tag == Tag::True)
 TAG_PRED(nat_falsep, "false?", v.tag == Tag::False)
 
-static Value nat_listp(Vm& vm, u32 base, u32 argc) {
+static Value nat_listp(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "list?", argc, 1, 1));
   Value v = ARG(0);
   while (v.tag == Tag::Pair) v = as_pair(v)->cdr;
   return bool_v(v.tag == Tag::Null);
 }
 
-static Value nat_not(Vm& vm, u32 base, u32 argc) {
+static Value nat_not(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "not", argc, 1, 1));
   return bool_v(is_falsy(ARG(0)));
 }
 
-static Value nat_eqp(Vm& vm, u32 base, u32 argc) {
+static Value nat_eqp(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "eq?", argc, 2, 2));
   return bool_v(val_eq(ARG(0), ARG(1)));
 }
 
-static Value nat_equalp(Vm& vm, u32 base, u32 argc) {
+static Value nat_equalp(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "equal?", argc, 2, 2));
   return bool_v(val_equal(vm, ARG(0), ARG(1)));
 }
@@ -95,7 +95,7 @@ static const char* type_name(Tag t) {
   }
 }
 
-static Value nat_type(Vm& vm, u32 base, u32 argc) {
+static Value nat_type(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "type", argc, 1, 1));
   const char* n = type_name(ARG(0).tag);
   return keyword_v(vm.intern.intern(n, (u32)strlen(n)));
@@ -104,11 +104,11 @@ static Value nat_type(Vm& vm, u32 base, u32 argc) {
 // ---------------------------------------------------------------------------
 // Output (10.7). All through vm.writeFn.
 
-static void write_out(Vm& vm, Buf& b) {
+static void write_out(State& vm, Buf& b) {
   if (vm.writeFn && b.len) vm.writeFn(vm.writeUd, b.data, b.len);
 }
 
-static Value print_all(Vm& vm, u32 base, u32 argc, bool repr, bool nl) {
+static Value print_all(State& vm, u32 base, u32 argc, bool repr, bool nl) {
   Buf out;
   for (u32 i = 0; i < argc; i++) {
     if (i) out.push(' ');
@@ -120,17 +120,17 @@ static Value print_all(Vm& vm, u32 base, u32 argc, bool repr, bool nl) {
   return nil_v();
 }
 
-static Value nat_display(Vm& vm, u32 base, u32 argc) {
+static Value nat_display(State& vm, u32 base, u32 argc) {
   return print_all(vm, base, argc, false, false);
 }
-static Value nat_write(Vm& vm, u32 base, u32 argc) {
+static Value nat_write(State& vm, u32 base, u32 argc) {
   return print_all(vm, base, argc, true, false);
 }
-static Value nat_println(Vm& vm, u32 base, u32 argc) {
+static Value nat_println(State& vm, u32 base, u32 argc) {
   return print_all(vm, base, argc, false, true);
 }
 
-static Value nat_newline(Vm& vm, u32 base, u32 argc) {
+static Value nat_newline(State& vm, u32 base, u32 argc) {
   (void)base;
   OT_TRY(need_argc(vm, "newline", argc, 0, 0));
   Buf out;
@@ -142,22 +142,22 @@ static Value nat_newline(Vm& vm, u32 base, u32 argc) {
 // ---------------------------------------------------------------------------
 // Functions and evaluation (10.8).
 
-static Value nat_identity(Vm& vm, u32 base, u32 argc) {
+static Value nat_identity(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "identity", argc, 1, 1));
   return ARG(0);
 }
 
-static Value nat_quit(Vm& vm, u32, u32 argc) {
+static Value nat_quit(State& vm, u32, u32 argc) {
   OT_TRY(need_argc(vm, "quit", argc, 0, 0));
   return start_quit(vm);
 }
 
-static Value nat_exit(Vm& vm, u32, u32 argc) {
+static Value nat_exit(State& vm, u32, u32 argc) {
   OT_TRY(need_argc(vm, "exit", argc, 0, 0));
   return start_quit(vm);
 }
 
-static Value nat_apply(Vm& vm, u32 base, u32 argc) {
+static Value nat_apply(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "apply", argc, 2, UINT32_MAX));
   Scope roots(vm);
   Slot cursor = roots.push(ARG(argc - 1));
@@ -174,7 +174,7 @@ static Value nat_apply(Vm& vm, u32 base, u32 argc) {
   return apply(vm, ARG(0), argBase, vm.stack.len - argBase);
 }
 
-static Value nat_for_each(Vm& vm, u32 base, u32 argc) {
+static Value nat_for_each(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "for-each", argc, 2, 2));
   Scope roots(vm);
   Slot cursor = roots.push(ARG(1));
@@ -194,12 +194,12 @@ static Value nat_for_each(Vm& vm, u32 base, u32 argc) {
   }
 }
 
-static Value nat_eval(Vm& vm, u32 base, u32 argc) {
+static Value nat_eval(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "eval", argc, 1, 1));
   return eval_form(vm, ARG(0));
 }
 
-static Value nat_read_string(Vm& vm, u32 base, u32 argc) {
+static Value nat_read_string(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "read-string", argc, 1, 1));
   OT_TRY(need_string(vm, "read-string", ARG(0)));
   // Snapshot the source into a C-heap Buf: the Reader keeps a raw pointer to
@@ -226,7 +226,7 @@ static Value nat_read_string(Vm& vm, u32 base, u32 argc) {
 
 // If form is (sym args...) and sym resolves to a macro, expand once.
 // Returns bool via *expanded; result (or original form) as return value.
-static Value expand_once(Vm& vm, Value form, bool* expanded) {
+static Value expand_once(State& vm, Value form, bool* expanded) {
   *expanded = false;
   if (form.tag != Tag::Pair) return form;
   Value head = as_pair(form)->car;
@@ -236,7 +236,7 @@ static Value expand_once(Vm& vm, Value form, bool* expanded) {
   Value callee = ns_resolve(vm, head);
   if (callee.tag == Tag::Unwind) {
     // unresolvable head is not a macro call; swallow the unwind
-    vm_cancel_unwind(vm);
+    state_cancel_unwind(vm);
     return formS.get();
   }
   if (callee.tag != Tag::Macro) return formS.get();
@@ -255,13 +255,13 @@ static Value expand_once(Vm& vm, Value form, bool* expanded) {
   return r;
 }
 
-static Value nat_macroexpand_1(Vm& vm, u32 base, u32 argc) {
+static Value nat_macroexpand_1(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "macroexpand-1", argc, 1, 1));
   bool e;
   return expand_once(vm, ARG(0), &e);
 }
 
-static Value nat_macroexpand(Vm& vm, u32 base, u32 argc) {
+static Value nat_macroexpand(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "macroexpand", argc, 1, 1));
   Scope s(vm);
   Slot formS = s.push(ARG(0));
@@ -274,7 +274,7 @@ static Value nat_macroexpand(Vm& vm, u32 base, u32 argc) {
 }
 
 // "ns/name: docstring" for a resolvable var (spec 10.10), nil otherwise.
-static Value nat_describe(Vm& vm, u32 base, u32 argc) {
+static Value nat_describe(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "describe", argc, 1, 1));
   OT_TRY(need_symbol(vm, "describe", ARG(0)));
   Value var = ns_resolve_var(vm, ARG(0));
@@ -293,7 +293,7 @@ static Value nat_describe(Vm& vm, u32 base, u32 argc) {
 
 // ---------------------------------------------------------------------------
 
-void register_sys(Vm& vm) {
+void register_sys(State& vm) {
   def_native(vm, "nil?", nat_nilp);
   def_native(vm, "null?", nat_nullp);
   def_native(vm, "boolean?", nat_booleanp);
@@ -329,7 +329,7 @@ void register_sys(Vm& vm) {
   def_native(vm, "eval", nat_eval);
   def_native(vm, "read-string", nat_read_string);
   // gensym and current-ns are registered by register_expand (they use
-  // the Vm's counter and current-ns field); don't shadow them here.
+  // the State's counter and current-ns field); don't shadow them here.
   def_native(vm, "macroexpand-1", nat_macroexpand_1);
   def_native(vm, "macroexpand", nat_macroexpand);
   def_native(vm, "describe", nat_describe);

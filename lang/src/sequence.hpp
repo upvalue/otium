@@ -1,6 +1,6 @@
 // Rooted iteration over the sequence kinds shared by native consumers.
 #pragma once
-#include "vm.hpp"
+#include "state.hpp"
 
 namespace ot {
 
@@ -57,7 +57,7 @@ private:
   Kind kind_ = Kind::Invalid;
 };
 
-inline Value sequence_error(Vm& vm, const char* who, SeqStep step) {
+inline Value sequence_error(State& vm, const char* who, SeqStep step) {
   if (step == SeqStep::Improper) return raise_error(vm, "%s: improper list", who);
   return raise_error(vm, "%s: expected sequence", who);
 }

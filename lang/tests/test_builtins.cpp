@@ -1,10 +1,10 @@
 // test_builtins.cpp — compact dict lifecycle, equality matrix (spec 2.4),
-// int wrap-on-overflow. Needs the full runtime to link (Vm::create).
+// int wrap-on-overflow. Needs the full runtime to link (State::create).
 #include "doctest.h"
 #include "../src/builtins.hpp"
 #include "../src/printer.hpp"
 #include "../src/value.hpp"
-#include "../src/vm.hpp"
+#include "../src/state.hpp"
 #include "../src/heap.hpp"
 #include <cmath>
 #include <csignal>
@@ -15,15 +15,15 @@
 
 using namespace ot;
 
-static Vm* make_vm() {
-  VmConfig cfg;
+static State* make_vm() {
+  StateConfig cfg;
   cfg.heapBytes = 1 << 20;
   cfg.stackSlots = 1024;
   cfg.maxDepth = 256;
-  return Vm::create(cfg);
+  return State::create(cfg);
 }
 
-static Value str_v(Vm& vm, const char* s) { return make_string(vm, s, (u32)strlen(s)); }
+static Value str_v(State& vm, const char* s) { return make_string(vm, s, (u32)strlen(s)); }
 
 static bool child_aborts(void (*fn)()) {
   fflush(nullptr);
@@ -44,7 +44,7 @@ static bool child_aborts(void (*fn)()) {
 // ---------------------------------------------------------------------------
 
 TEST_CASE("compact dict lifecycle") {
-  Vm* vm = make_vm();
+  State* vm = make_vm();
   u32 root = vm->push(make_table(*vm));
 
   SUBCASE("insert, update, delete, re-insert ordering") {
@@ -154,7 +154,7 @@ TEST_CASE("compact dict lifecycle") {
 
 TEST_CASE("table capacity overflow guards abort before allocating") {
   CHECK(child_aborts([] {
-    Vm* vm = make_vm();
+    State* vm = make_vm();
     Value table = make_table(*vm);
     TableData* data = as_table(table);
     data->entriesLen = UINT32_MAX;
@@ -162,7 +162,7 @@ TEST_CASE("table capacity overflow guards abort before allocating") {
     (void)table_put(*vm, table, int_v(1), int_v(2));
   }));
   CHECK(child_aborts([] {
-    Vm* vm = make_vm();
+    State* vm = make_vm();
     Value table = make_table(*vm);
     TableData* data = as_table(table);
     data->entriesLen = UINT32_MAX / 2 + 1;
@@ -174,7 +174,7 @@ TEST_CASE("table capacity overflow guards abort before allocating") {
 // ---------------------------------------------------------------------------
 
 TEST_CASE("table printing preserves insertion order") {
-  Vm* vm = make_vm();
+  State* vm = make_vm();
   Value t = make_table(*vm);
   u32 root = vm->push(t);
   Value ka = keyword_v(vm->intern.intern("a", 1));
@@ -207,7 +207,7 @@ TEST_CASE("table printing preserves insertion order") {
 // ---------------------------------------------------------------------------
 
 TEST_CASE("equality matrix (spec 2.4)") {
-  Vm* vm = make_vm();
+  State* vm = make_vm();
   {
     Scope roots(*vm);
 
@@ -263,7 +263,7 @@ TEST_CASE("equality matrix (spec 2.4)") {
 // ---------------------------------------------------------------------------
 
 TEST_CASE("arithmetic wraps two's-complement") {
-  Vm* vm = make_vm();
+  State* vm = make_vm();
   const i64 MAX = INT64_MAX, MIN = INT64_MIN;
 
   // (+ MAX 1) wraps to MIN

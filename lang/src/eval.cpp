@@ -19,14 +19,14 @@ static Value strip_array_literal_head(Value forms, u32 arrayId) {
   return pairp(forms) && sym_is(car_(forms), arrayId) ? cdr_(forms) : forms;
 }
 
-static Value quit_condition(Vm& vm) {
+static Value quit_condition(State& vm) {
   Scope s(vm);
   Slot c = s.push(make_table(vm));
   table_put(vm, c.get(), keyword_v(vm.syms.kwType), symbol_v(vm.syms.quit_));
   return c.get();
 }
 
-Value start_quit(Vm& vm) {
+Value start_quit(State& vm) {
   vm.unwindCondition = quit_condition(vm);
   vm.unwindKind = UnwindKind::Quit;
   return unwind_v();
@@ -34,7 +34,7 @@ Value start_quit(Vm& vm) {
 
 // Overflow errors unwind directly (no handler walk) so that reporting the
 // overflow cannot itself overflow.
-static Value raise_overflow(Vm& vm, const char* msg) {
+static Value raise_overflow(State& vm, const char* msg) {
   Scope s(vm);
   Slot c = s.push(make_table(vm));
   table_put(vm, c.get(), keyword_v(vm.syms.kwType), symbol_v(vm.syms.error_));
@@ -46,7 +46,7 @@ static Value raise_overflow(Vm& vm, const char* msg) {
 }
 
 // one-element array "box" for a lexical binding
-static Value make_box(Vm& vm, Value v) {
+static Value make_box(State& vm, Value v) {
   Scope s(vm);
   Slot vS = s.push(v);
   Slot b = s.push(make_array(vm, 1));
@@ -56,7 +56,7 @@ static Value make_box(Vm& vm, Value v) {
 static Value box_get(Value b) { return as_array(b)->items[0]; }
 static void box_set(Value b, Value v) { as_array(b)->items[0] = v; }
 
-static Value env_lookup_box(Vm& vm, Value env, Value sym) {
+static Value env_lookup_box(State& vm, Value env, Value sym) {
   while (pairp(env)) {
     Value b = table_get(vm, car_(env), sym);
     if (!is_nil(b)) return b;
@@ -65,21 +65,21 @@ static Value env_lookup_box(Vm& vm, Value env, Value sym) {
   return nil_v();
 }
 
-static void frame_bind(Vm& vm, Value frame, Value sym, Value v) {
+static void frame_bind(State& vm, Value frame, Value sym, Value v) {
   Scope s(vm);
   Slot f = s.push(frame);
   Value box = make_box(vm, v);
   table_put(vm, f.get(), sym, box);  // alloc-free; sym is an immediate
 }
 
-static Value list_from_stack(Vm& vm, u32 base, u32 n) {
+static Value list_from_stack(State& vm, u32 base, u32 n) {
   Scope s(vm);
   Slot acc = s.push(null_v());
   for (u32 j = n; j-- > 0;) acc.set(make_pair(vm, Slot{&vm, base + j}, acc));
   return acc.get();
 }
 
-static Value lookup_symbol(Vm& vm, Value sym, Value env) {
+static Value lookup_symbol(State& vm, Value sym, Value env) {
   if (!sym_qualified(vm, sym.id)) {
     Value box = env_lookup_box(vm, env, sym);
     if (!is_nil(box)) return box_get(box);
@@ -87,7 +87,7 @@ static Value lookup_symbol(Vm& vm, Value sym, Value env) {
   return ns_resolve(vm, sym);
 }
 
-static Value make_closure(Vm& vm, u32 name, Value params, Value body, Value env, bool macro) {
+static Value make_closure(State& vm, u32 name, Value params, Value body, Value env, bool macro) {
   Value doc = nil_v();
   if (has_leading_docstring(body)) {
     doc = car_(body);
@@ -111,7 +111,7 @@ static Value make_closure(Vm& vm, u32 name, Value params, Value body, Value env,
   return fv;
 }
 
-Value make_native(Vm& vm, const char* name, NativeFn fn) {
+Value make_native(State& vm, const char* name, NativeFn fn) {
   Obj* o = vm.heap.alloc(ObjType::Function, sizeof(FunctionData));
   Value fv = obj_v(Tag::Function, o);
   FunctionData* fd = fn_data(fv);
@@ -128,7 +128,7 @@ Value make_native(Vm& vm, const char* name, NativeFn fn) {
 // Bind a parameter-list form against a list of argument values into `frame`.
 // Handles fixed params, `. rest` (improper tail), `& rest`, bare symbol, and
 // the [a b] array-literal spelling (leading `array` symbol skipped).
-static Value bind_param_list(Vm& vm, Value frame, Value ps, Value argsList) {
+static Value bind_param_list(State& vm, Value frame, Value ps, Value argsList) {
   // frame_bind allocates, so the ps/args cursors live in rooted slots and
   // every read goes through them (GC rewrites the slots, not our locals).
   Scope s(vm);
@@ -164,7 +164,7 @@ static Value bind_param_list(Vm& vm, Value frame, Value ps, Value argsList) {
 // Build the callee's env from stack args. Returns env or Unwind.
 // callee must be a Function/Macro Value; it is rooted here so fd-> reads stay
 // valid across the allocations below.
-static Value bind_params_stack(Vm& vm, Value callee, u32 base, u32 argc) {
+static Value bind_params_stack(State& vm, Value callee, u32 base, u32 argc) {
   Scope s(vm);
   Slot c = s.push(callee);
   Slot args = s.push(list_from_stack(vm, base, argc));
@@ -174,7 +174,7 @@ static Value bind_params_stack(Vm& vm, Value callee, u32 base, u32 argc) {
   return make_pair(vm, frame, env);
 }
 
-static Value param_read(Vm& vm, Value p) {
+static Value param_read(State& vm, Value p) {
   for (u32 i = vm.paramBindings.len; i-- > 0;) {
     if (vm.paramBindings[i].param.obj == p.obj) return vm.paramBindings[i].value;
   }
@@ -183,7 +183,7 @@ static Value param_read(Vm& vm, Value p) {
 
 // ---------------------------------------------------------------- apply
 
-static Value eval_body(Vm& vm, Value body, Value env) {
+static Value eval_body(State& vm, Value body, Value env) {
   // eval_in can collect; keep the cursor and env in rooted slots.
   Scope s(vm);
   Slot b = s.push(body);
@@ -197,7 +197,7 @@ static Value eval_body(Vm& vm, Value body, Value env) {
   return r;
 }
 
-Value apply(Vm& vm, Value callee, u32 base, u32 argc) {
+Value apply(State& vm, Value callee, u32 base, u32 argc) {
   switch (callee.tag) {
     // Tag::Macro shares FunctionData; direct apply is the expander's
     // privileged call path (call position still rejects macros in eval_tr).
@@ -245,7 +245,7 @@ Value apply(Vm& vm, Value callee, u32 base, u32 argc) {
 
 // ---------------------------------------------------------------- quasiquote
 
-static Value list_append2(Vm& vm, Value a, Value b) {  // copies a
+static Value list_append2(State& vm, Value a, Value b) {  // copies a
   if (!pairp(a)) return b;
   Scope s(vm);
   Slot aS = s.push(a);
@@ -263,7 +263,7 @@ static Value list_append2(Vm& vm, Value a, Value b) {  // copies a
   return out.get();
 }
 
-static Value qq(Vm& vm, Value t, int depth, Value env) {
+static Value qq(State& vm, Value t, int depth, Value env) {
   if (!pairp(t)) return t;
   Value h = car_(t);
   if (sym_is(h, vm.syms.unquote_)) {
@@ -304,7 +304,7 @@ static Value qq(Vm& vm, Value t, int depth, Value env) {
 
 // ---------------------------------------------------------------- require
 
-static u32 name_id_of(Vm& vm, Value v) {  // symbol/keyword id; string interned; 0 if none
+static u32 name_id_of(State& vm, Value v) {  // symbol/keyword id; string interned; 0 if none
   if (v.tag == Tag::Symbol || v.tag == Tag::Keyword) return v.id;
   if (v.tag == Tag::String) {
     StringData* s = as_string(v);
@@ -313,12 +313,12 @@ static u32 name_id_of(Vm& vm, Value v) {  // symbol/keyword id; string interned;
   return 0;
 }
 
-static Value unwrap_quote(Vm& vm, Value v) {
+static Value unwrap_quote(State& vm, Value v) {
   if (pairp(v) && sym_is(car_(v), vm.syms.quote_) && pairp(cdr_(v))) return car_(cdr_(v));
   return v;
 }
 
-static Value require_load(Vm& vm, u32 nsName) {
+static Value require_load(State& vm, u32 nsName) {
   if (!is_nil(ns_lookup(vm, nsName))) return nil_v();
   u32 len;
   const char* nm = vm.intern.name(nsName, &len);
@@ -340,7 +340,7 @@ static Value require_load(Vm& vm, u32 nsName) {
   return nil_v();
 }
 
-static Value require_spec(Vm& vm, Value spec) {
+static Value require_spec(State& vm, Value spec) {
   spec = unwrap_quote(vm, spec);
   Value nameV = spec;
   Value opts = null_v();
@@ -395,7 +395,7 @@ static Value require_spec(Vm& vm, Value spec) {
 // rooted slots (rootBase..rootBase+2) that the collector rewrites in place.
 // After any allocating call, re-read through the slots (EVAL_OR_RET refreshes
 // form/env automatically; ARGS always reads the cursor slot).
-static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
+static Value eval_tr(State& vm, Value form, Value env, bool topLevel) {
   u32 rootBase = vm.stack.len;
   vm.push(form);
   vm.push(env);
@@ -710,7 +710,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
           }
           env = vm.stack[rootBase + 1];
           // pi roots pr across the handler eval below; once pushed into
-          // vm.handlers both are traced by the root walker (vm.cpp).
+          // vm.handlers both are traced by the root walker (state.cpp).
           Slot pi = s.push(pr);
           cl = car_(cS.get());  // re-read after the eval
           Value hd = eval_in(vm, car_(cdr_(cl)), env);
@@ -986,7 +986,7 @@ static Value eval_tr(Vm& vm, Value form, Value env, bool topLevel) {
 #undef EVAL_OR_RET
 }
 
-Value eval_in(Vm& vm, Value form, Value env) {
+Value eval_in(State& vm, Value form, Value env) {
   if (vm.depth >= vm.cfg.maxDepth) return raise_overflow(vm, "recursion depth exceeded");
   if (vm.stack.len + 16 >= vm.cfg.stackSlots) return raise_overflow(vm, "value stack overflow");
   vm.depth++;
@@ -997,7 +997,7 @@ Value eval_in(Vm& vm, Value form, Value env) {
   return r;
 }
 
-Value eval_form(Vm& vm, Value form) {
+Value eval_form(State& vm, Value form) {
   // Route through the expansion hook *expander* in otium.core.
   Value core = ns_lookup(vm, vm.syms.otiumCore_);
   if (!is_nil(core)) {
@@ -1019,7 +1019,7 @@ Value eval_form(Vm& vm, Value form) {
   return eval_tr(vm, form, null_v(), true);
 }
 
-Value eval_source(Vm& vm, const char* src, u32 len, const char* name,
+Value eval_source(State& vm, const char* src, u32 len, const char* name,
                   const EvalSourcePolicy& policy) {
   EvalSourceState localState;
   EvalSourceState& state = policy.state ? *policy.state : localState;
@@ -1045,7 +1045,7 @@ Value eval_source(Vm& vm, const char* src, u32 len, const char* name,
   }
 }
 
-Value eval_source(Vm& vm, const char* src, u32 len, const char* name) {
+Value eval_source(State& vm, const char* src, u32 len, const char* name) {
   return eval_source(vm, src, len, name, EvalSourcePolicy{});
 }
 

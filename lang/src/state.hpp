@@ -1,4 +1,4 @@
-// vm.hpp — the Vm: heap, intern table, value stack (GC root), namespace
+// state.hpp — the State: heap, intern table, value stack (GC root), namespace
 // registry, unwind state, handler/restart/param stacks.
 #pragma once
 #include "common.hpp"
@@ -9,7 +9,7 @@
 
 namespace ot {
 
-struct VmConfig {
+struct StateConfig {
   u32 heapBytes;
   u32 stackSlots;
   u32 maxDepth;
@@ -22,7 +22,7 @@ using LoadFn = bool (*)(void* ud, const char* nsName, Buf* srcOut);
 enum class UnwindKind : u8 { None, Condition, Restart, Quit };
 
 // The handlers/restarts/paramBindings vectors are traced directly by the
-// root walker (vm_walk_roots in vm.cpp); entries need no extra stack rooting
+// root walker (state_walk_roots in state.cpp); entries need no extra stack rooting
 // once pushed.
 struct HandlerBinding {
   Value pred, handler;
@@ -45,11 +45,11 @@ struct Syms {
       kwReload, kwRequire;
 };
 
-struct Vm {
+struct State {
   Heap heap;
   Intern intern;
   Vec<Value> stack;  // GC root: the value stack
-  VmConfig cfg;
+  StateConfig cfg;
 
   Value nsRegistry;   // table nsName -> ns record (also in stack[0])
   Value typeParents;  // condition type registry (also in stack[1])
@@ -84,7 +84,7 @@ struct Vm {
 
   Syms syms;
 
-  static Vm* create(const VmConfig&);
+  static State* create(const StateConfig&);
   void destroy();
 
   // native calling convention: args at stack[base..base+argc)
@@ -94,7 +94,7 @@ struct Vm {
   }
   void popTo(u32 base) { stack.len = base; }
 
-  explicit Vm(const VmConfig&);
+  explicit State(const StateConfig&);
 };
 
 // --- rooted-slot handles ----------------------------------------------------
@@ -110,7 +110,7 @@ struct Vm {
 // vm.stack, so the collector's forwarding is picked up for free. (It must
 // never cache a Value* — Vec reallocs on push.)
 struct Slot {
-  Vm* vm;
+  State* vm;
   u32 idx;
   Value get() const { return vm->stack[idx]; }
   void set(Value v) const { vm->stack[idx] = v; }
@@ -121,9 +121,9 @@ struct Slot {
 // Nest strictly: a Scope must not outlive values pushed after it by other
 // means it doesn't know about.
 struct Scope {
-  Vm& vm;
+  State& vm;
   u32 base;
-  explicit Scope(Vm& v) : vm(v), base(v.stack.len) {}
+  explicit Scope(State& v) : vm(v), base(v.stack.len) {}
   // Guarded: an enclosing frame may already have popped below base on an
   // early-return path (eval_tr's RET) — never grow the stack back.
   ~Scope() {
@@ -139,31 +139,31 @@ struct Scope {
 // at call time (the underlying helpers root their Value args internally via
 // Heap::tempRoots, so the raw forms are also safe — these exist so call
 // sites don't need a raw Value at all).
-inline Value make_pair(Vm& vm, Slot car, Slot cdr) { return make_pair(vm, car.get(), cdr.get()); }
-inline Value make_string_from(Vm& vm, Slot src, u32 byteOff, u32 len) {
+inline Value make_pair(State& vm, Slot car, Slot cdr) { return make_pair(vm, car.get(), cdr.get()); }
+inline Value make_string_from(State& vm, Slot src, u32 byteOff, u32 len) {
   return make_string_from(vm, src.get(), byteOff, len);
 }
 
 // Build {:type 'error :message <formatted>}, signal it through active
 // handlers, and (if all decline) start a condition unwind. Returns Unwind.
-Value raise_error(Vm&, const char* fmt, ...);
+Value raise_error(State&, const char* fmt, ...);
 
 // Format an interned name into an error message at a `%.*s` placeholder.
-Value raise_error_sym(Vm&, const char* fmt, u32 symId);
+Value raise_error_sym(State&, const char* fmt, u32 symId);
 
 // Signal-site walk (spec 8.2). Handlers run innermost-out with the stack
 // intact; a handler and everything inner to it is invisible while it runs.
 // If all decline: starts an unwind when unwindIfUnhandled, else returns nil.
-Value signal_value(Vm&, Value condition, bool unwindIfUnhandled);
+Value signal_value(State&, Value condition, bool unwindIfUnhandled);
 
 // Host-side handler installation (the REPL's interactive restart chooser).
 // pred and handler are callable Values; the binding is GC-rooted by the
 // handlers vector itself. Push/pop must nest.
-Value vm_push_handler(Vm&, Value pred, Value handler);
-void vm_pop_handler(Vm&);
+Value state_push_handler(State&, Value pred, Value handler);
+void state_pop_handler(State&);
 
 // Sanctioned cancel for an in-flight unwind (e.g. macroexpand probing a
 // head symbol that doesn't resolve). Clears all unwind state.
-void vm_cancel_unwind(Vm&);
+void state_cancel_unwind(State&);
 
 }  // namespace ot

@@ -1,7 +1,7 @@
 // eval.hpp — stage-0 evaluator: trampoline with TCO, special forms,
 // conditions/restarts, dynamic params.
 #pragma once
-#include "vm.hpp"
+#include "state.hpp"
 
 namespace ot {
 
@@ -16,10 +16,10 @@ inline RestartData* restart_data(Value v) { return as_restart(v); }
 // one-element array "box" whose slot 0 holds the binding's value (boxing
 // keeps nil storable and gives set! a mutable cell).
 
-Value eval_form(Vm&, Value form);           // expand (via *expander*) + evaluate one top-level form
-Value eval_in(Vm&, Value form, Value env);  // evaluate with lexical env; restores current ns
-Value apply(Vm&, Value callee, u32 base, u32 argc);  // args on vm stack
-Value start_quit(Vm&);                               // begin an uncatchable quit unwind
+Value eval_form(State&, Value form);           // expand (via *expander*) + evaluate one top-level form
+Value eval_in(State&, Value form, Value env);  // evaluate with lexical env; restores current ns
+Value apply(State&, Value callee, u32 base, u32 argc);  // args on vm stack
+Value start_quit(State&);                               // begin an uncatchable quit unwind
 
 struct EvalSourceState {
   u32 consumed = 0;
@@ -29,17 +29,17 @@ struct EvalSourceState {
 
 struct EvalSourcePolicy {
   void* data = nullptr;
-  Value (*eval)(Vm&, Value form, void* data) = nullptr;
-  void (*afterEval)(Vm&, Value result, u32 consumed, void* data) = nullptr;
+  Value (*eval)(State&, Value form, void* data) = nullptr;
+  void (*afterEval)(State&, Value result, u32 consumed, void* data) = nullptr;
   EvalSourceState* state = nullptr;
 };
 
 // Read and evaluate forms in order, returning the last value (nil for an
 // empty source) or the first read/evaluation unwind.
-Value eval_source(Vm&, const char* src, u32 len, const char* name);
-Value eval_source(Vm&, const char* src, u32 len, const char* name, const EvalSourcePolicy& policy);
+Value eval_source(State&, const char* src, u32 len, const char* name);
+Value eval_source(State&, const char* src, u32 len, const char* name, const EvalSourcePolicy& policy);
 
-Value make_native(Vm&, const char* name, NativeFn);
+Value make_native(State&, const char* name, NativeFn);
 
 // ---------------------------------------------------------------------------
 // EXPANDER ORACLE API (for the self-hosted expander)

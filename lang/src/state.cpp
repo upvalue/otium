@@ -1,5 +1,5 @@
-// vm.cpp — Vm construction, unwind plumbing, signal-site handler walk.
-#include "vm.hpp"
+// state.cpp — State construction, unwind plumbing, signal-site handler walk.
+#include "state.hpp"
 #include "ns.hpp"
 #include "eval.hpp"
 #include "builtins.hpp"
@@ -13,7 +13,7 @@ namespace ot {
 
 static u32 I(Intern& in, const char* s) { return in.intern(s, (u32)strlen(s)); }
 
-static void init_syms(Vm& vm) {
+static void init_syms(State& vm) {
   Intern& in = vm.intern;
   Syms& S = vm.syms;
   S.quote_ = I(in, "quote");
@@ -69,9 +69,9 @@ static void init_syms(Vm& vm) {
   S.kwRequire = I(in, "require");
 }
 
-// GC root walker: everything the Vm holds live values in.
-static void vm_walk_roots(void* ud, Heap::VisitFn visit, void* ctx) {
-  Vm* vm = (Vm*)ud;
+// GC root walker: everything the State holds live values in.
+static void state_walk_roots(void* ud, Heap::VisitFn visit, void* ctx) {
+  State* vm = (State*)ud;
   for (u32 i = 0; i < vm->stack.len; i++) visit(ctx, &vm->stack[i]);
   visit(ctx, &vm->nsRegistry);
   visit(ctx, &vm->typeParents);
@@ -90,7 +90,7 @@ static void vm_walk_roots(void* ud, Heap::VisitFn visit, void* ctx) {
 
 // Evaluate one embedded bootstrap file; any read or eval error here is a
 // build defect, so fail hard with the condition's printed form.
-static void eval_embedded(Vm& vm, const char* name, const char* src, u32 len) {
+static void eval_embedded(State& vm, const char* name, const char* src, u32 len) {
   Value result = eval_source(vm, src, len, name);
   if (result.tag == Tag::Unwind) {
     Buf msg;
@@ -101,8 +101,8 @@ static void eval_embedded(Vm& vm, const char* name, const char* src, u32 len) {
   }
 }
 
-Vm::Vm(const VmConfig& c) : heap(this, c.heapBytes), intern(), stack(), cfg(c) {
-  heap.addRoots(vm_walk_roots, this);
+State::State(const StateConfig& c) : heap(this, c.heapBytes), intern(), stack(), cfg(c) {
+  heap.addRoots(state_walk_roots, this);
   nsRegistry = nil_v();
   typeParents = nil_v();
   currentNs = 0;
@@ -143,26 +143,26 @@ Vm::Vm(const VmConfig& c) : heap(this, c.heapBytes), intern(), stack(), cfg(c) {
   currentNs = syms.user_;
 }
 
-Vm* Vm::create(const VmConfig& cfg) { return new Vm(cfg); }
-void Vm::destroy() { delete this; }
+State* State::create(const StateConfig& cfg) { return new State(cfg); }
+void State::destroy() { delete this; }
 
-Value vm_push_handler(Vm& vm, Value pred, Value handler) {
+Value state_push_handler(State& vm, Value pred, Value handler) {
   vm.handlers.push(HandlerBinding{pred, handler});
   return nil_v();
 }
 
-void vm_pop_handler(Vm& vm) {
+void state_pop_handler(State& vm) {
   if (vm.handlers.len) vm.handlers.pop();
 }
 
-void vm_cancel_unwind(Vm& vm) {
+void state_cancel_unwind(State& vm) {
   vm.unwindKind = UnwindKind::None;
   vm.unwindCondition = nil_v();
   vm.unwindRestartId = 0;
   vm.unwindRestartArgs = nil_v();
 }
 
-Value raise_error(Vm& vm, const char* fmt, ...) {
+Value raise_error(State& vm, const char* fmt, ...) {
   char msg[512];
   va_list ap;
   va_start(ap, fmt);
@@ -178,13 +178,13 @@ Value raise_error(Vm& vm, const char* fmt, ...) {
   return signal_value(vm, c.get(), true);
 }
 
-Value raise_error_sym(Vm& vm, const char* fmt, u32 symId) {
+Value raise_error_sym(State& vm, const char* fmt, u32 symId) {
   u32 len;
   const char* name = vm.intern.name(symId, &len);
   return raise_error(vm, fmt, (int)len, name);
 }
 
-Value signal_value(Vm& vm, Value c, bool unwindIfUnhandled) {
+Value signal_value(State& vm, Value c, bool unwindIfUnhandled) {
   Scope sc(vm);
   Slot croot = sc.push(c);
   u32 limit = vm.handlerVisible < vm.handlers.len ? vm.handlerVisible : vm.handlers.len;

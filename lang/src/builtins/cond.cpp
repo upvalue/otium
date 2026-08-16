@@ -1,10 +1,10 @@
 // builtins/cond.cpp — conditions and restarts (spec 8).
 #include "../builtins.hpp"
-#include "../vm.hpp"
+#include "../state.hpp"
 
 namespace ot {
 
-static u32 name_id_of(Vm& vm, Value v) {
+static u32 name_id_of(State& vm, Value v) {
   if (v.tag == Tag::Symbol || v.tag == Tag::Keyword) return v.id;
   if (v.tag == Tag::String) {
     StringData* s = as_string(v);
@@ -13,14 +13,14 @@ static u32 name_id_of(Vm& vm, Value v) {
   return 0;
 }
 
-static Value list_from_stack(Vm& vm, u32 base, u32 n) {
+static Value list_from_stack(State& vm, u32 base, u32 n) {
   Scope s(vm);
   Slot acc = s.push(null_v());
   for (u32 j = n; j-- > 0;) acc.set(make_pair(vm, Slot{&vm, base + j}, acc));
   return acc.get();
 }
 
-static Value build_condition(Vm& vm, const char* who, u32 base, u32 argc) {
+static Value build_condition(State& vm, const char* who, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, who, argc, 1, UINT32_MAX));
   Value first = vm.stack[base];
   if (first.tag != Tag::String) {
@@ -39,19 +39,19 @@ static Value build_condition(Vm& vm, const char* who, u32 base, u32 argc) {
   return c.get();
 }
 
-static Value nat_signal(Vm& vm, u32 base, u32 argc) {
+static Value nat_signal(State& vm, u32 base, u32 argc) {
   Value c = build_condition(vm, "signal", base, argc);
   OT_TRY(c);
   return signal_value(vm, c, false);
 }
 
-static Value nat_error(Vm& vm, u32 base, u32 argc) {
+static Value nat_error(State& vm, u32 base, u32 argc) {
   Value c = build_condition(vm, "error", base, argc);
   OT_TRY(c);
   return signal_value(vm, c, true);
 }
 
-static Value nat_invoke_restart(Vm& vm, u32 base, u32 argc) {
+static Value nat_invoke_restart(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "invoke-restart", argc, 1, UINT32_MAX));
   Value which = vm.stack[base];
   Value target = nil_v();
@@ -83,7 +83,7 @@ static Value nat_invoke_restart(Vm& vm, u32 base, u32 argc) {
   return unwind_v();
 }
 
-static Value nat_compute_restarts(Vm& vm, u32 base, u32 argc) {
+static Value nat_compute_restarts(State& vm, u32 base, u32 argc) {
   (void)base;
   OT_TRY(need_argc(vm, "compute-restarts", argc, 0, 0));
   Scope s(vm);
@@ -93,7 +93,7 @@ static Value nat_compute_restarts(Vm& vm, u32 base, u32 argc) {
   return arr.get();
 }
 
-static Value nat_find_restart(Vm& vm, u32 base, u32 argc) {
+static Value nat_find_restart(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "find-restart", argc, 1, UINT32_MAX));
   u32 nid = name_id_of(vm, vm.stack[base]);
   if (!nid) return raise_error(vm, "find-restart: bad name");
@@ -102,19 +102,19 @@ static Value nat_find_restart(Vm& vm, u32 base, u32 argc) {
   return nil_v();
 }
 
-static Value nat_restart_name(Vm& vm, u32 base, u32 argc) {
+static Value nat_restart_name(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "restart-name", argc, 1, 1));
   OT_TRY(need_restart(vm, "restart-name", vm.stack[base]));
   return symbol_v(as_restart(vm.stack[base])->name);
 }
 
-static Value nat_restart_description(Vm& vm, u32 base, u32 argc) {
+static Value nat_restart_description(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "restart-description", argc, 1, 1));
   OT_TRY(need_restart(vm, "restart-description", vm.stack[base]));
   return as_restart(vm.stack[base])->description;
 }
 
-static Value nat_define_condition(Vm& vm, u32 base, u32 argc) {
+static Value nat_define_condition(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "define-condition", argc, 2, 2));
   u32 tid = name_id_of(vm, vm.stack[base]);
   if (!tid) return raise_error(vm, "define-condition: bad type");
@@ -137,7 +137,7 @@ static Value nat_define_condition(Vm& vm, u32 base, u32 argc) {
   return symbol_v(tid);
 }
 
-static Value nat_condition_of_type(Vm& vm, u32 base, u32 argc) {
+static Value nat_condition_of_type(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "condition-of-type?", argc, 2, 2));
   Value c = vm.stack[base];
   u32 tid = name_id_of(vm, vm.stack[base + 1]);
@@ -154,7 +154,7 @@ static Value nat_condition_of_type(Vm& vm, u32 base, u32 argc) {
   return bool_v(false);
 }
 
-void register_cond(Vm& vm) {
+void register_cond(State& vm) {
   u32 saved = vm.currentNs;
   vm.currentNs = vm.syms.otiumCore_;
   def_native(vm, "signal", nat_signal);

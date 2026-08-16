@@ -2,7 +2,7 @@
 // Spec 10.3, 10.5, 2.4; compact-dict layout per 2.7.
 #include "../builtins.hpp"
 #include "../heap.hpp"  // Obj, PairData, StringData, ArrayData, as_* accessors, make_*
-#include "../vm.hpp"    // Vm, raise_error
+#include "../state.hpp"    // State, raise_error
 #include "../ns.hpp"
 #include "../eval.hpp"  // apply() for update!
 #include <cmath>
@@ -13,7 +13,7 @@ namespace ot {
 // equal? — deep structural for immutables, identity for mutables, type-strict.
 // NaN == NaN and 0.0 == -0.0 (for table keys).
 
-bool val_equal(Vm& vm, Value a, Value b) {
+bool val_equal(State& vm, Value a, Value b) {
   for (;;) {
     if (a.tag != b.tag) return false;
     switch (a.tag) {
@@ -58,7 +58,7 @@ static inline u64 mix64(u64 x) {  // splitmix64 finalizer
   return x ^ (x >> 31);
 }
 
-u64 val_hash(Vm& vm, Value v) {
+u64 val_hash(State& vm, Value v) {
   u64 seed = 0xA0761D64ull + (u64)v.tag * 0x9E3779B97F4A7C15ull;
   switch (v.tag) {
     case Tag::Nil:
@@ -181,7 +181,7 @@ static void table_ensure(TableData* t, u32 extra) {
 }
 
 // Find live entry index for key, or -1.
-static i64 table_find(Vm& vm, TableData* t, u64 hash, Value key) {
+static i64 table_find(State& vm, TableData* t, u64 hash, Value key) {
   if (!t->index || t->indexCap == 0) return -1;
   u32 slot = (u32)(hash & (t->indexCap - 1));
   for (;;) {
@@ -193,13 +193,13 @@ static i64 table_find(Vm& vm, TableData* t, u64 hash, Value key) {
   }
 }
 
-Value table_get(Vm& vm, Value table, Value key) {
+Value table_get(State& vm, Value table, Value key) {
   TableData* t = as_table(table);
   i64 e = table_find(vm, t, val_hash(vm, key), key);
   return e < 0 ? nil_v() : t->entries[e].val;
 }
 
-Value table_put(Vm& vm, Value table, Value key, Value v) {
+Value table_put(State& vm, Value table, Value key, Value v) {
   TableData* t = as_table(table);
   u64 h = val_hash(vm, key);
   i64 e = table_find(vm, t, h, key);
@@ -247,7 +247,7 @@ bool table_iter_next(Value table, u32* cursor, Value* k, Value* v) {
 }
 
 // Strong definition for the printer's table hook (weak no-op in printer.cpp).
-bool printer_table_next(Vm&, Value table, u32* cursor, Value* k, Value* v) {
+bool printer_table_next(State&, Value table, u32* cursor, Value* k, Value* v) {
   return table_iter_next(table, cursor, k, v);
 }
 
@@ -260,7 +260,7 @@ Value array_get(Value arr, i64 idx) {
   return a->items[idx];
 }
 
-void array_push(Vm&, Value arr, Value v) {
+void array_push(State&, Value arr, Value v) {
   ArrayData* a = as_array(arr);
   if (a->len == a->cap) {
     if (a->cap > UINT32_MAX / 2) ot_fatal("array: capacity overflow");
@@ -276,41 +276,41 @@ void array_push(Vm&, Value arr, Value v) {
 // ---------------------------------------------------------------------------
 // Natives.
 
-static Value nat_cons(Vm& vm, u32 base, u32 argc) {
+static Value nat_cons(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "cons", argc, 2, 2));
   return make_pair(vm, ARG(0), ARG(1));
 }
 
-static Value nat_car(Vm& vm, u32 base, u32 argc) {
+static Value nat_car(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "car", argc, 1, 1));
   OT_TRY(need_pair(vm, "car", ARG(0)));
   return as_pair(ARG(0))->car;
 }
-static Value nat_cdr(Vm& vm, u32 base, u32 argc) {
+static Value nat_cdr(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "cdr", argc, 1, 1));
   OT_TRY(need_pair(vm, "cdr", ARG(0)));
   return as_pair(ARG(0))->cdr;
 }
-static Value nat_caar(Vm& vm, u32 base, u32 argc) {
+static Value nat_caar(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "caar", argc, 1, 1));
   OT_TRY(need_pair(vm, "caar", ARG(0)));
   OT_TRY(need_pair(vm, "caar", as_pair(ARG(0))->car));
   return as_pair(as_pair(ARG(0))->car)->car;
 }
-static Value nat_cadr(Vm& vm, u32 base, u32 argc) {
+static Value nat_cadr(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "cadr", argc, 1, 1));
   OT_TRY(need_pair(vm, "cadr", ARG(0)));
   OT_TRY(need_pair(vm, "cadr", as_pair(ARG(0))->cdr));
   return as_pair(as_pair(ARG(0))->cdr)->car;
 }
-static Value nat_cddr(Vm& vm, u32 base, u32 argc) {
+static Value nat_cddr(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "cddr", argc, 1, 1));
   OT_TRY(need_pair(vm, "cddr", ARG(0)));
   OT_TRY(need_pair(vm, "cddr", as_pair(ARG(0))->cdr));
   return as_pair(as_pair(ARG(0))->cdr)->cdr;
 }
 
-static Value nat_list(Vm& vm, u32 base, u32 argc) {
+static Value nat_list(State& vm, u32 base, u32 argc) {
   Scope s(vm);
   Slot acc = s.push(null_v());
   for (u32 i = argc; i-- > 0;) {
@@ -320,7 +320,7 @@ static Value nat_list(Vm& vm, u32 base, u32 argc) {
   return acc.get();
 }
 
-static Value nat_append(Vm& vm, u32 base, u32 argc) {
+static Value nat_append(State& vm, u32 base, u32 argc) {
   Scope s(vm);
   Slot acc = s.push(null_v());
   for (u32 i = argc; i-- > 0;) {
@@ -345,7 +345,7 @@ static Value nat_append(Vm& vm, u32 base, u32 argc) {
   return acc.get();
 }
 
-static Value nat_length(Vm& vm, u32 base, u32 argc) {
+static Value nat_length(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "length", argc, 1, 1));
   Value v = ARG(0);
   switch (v.tag) {
@@ -369,7 +369,7 @@ static Value nat_length(Vm& vm, u32 base, u32 argc) {
   }
 }
 
-static Value nat_reverse(Vm& vm, u32 base, u32 argc) {
+static Value nat_reverse(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "reverse", argc, 1, 1));
   Value v = ARG(0);
   if (is_nil(v)) return nil_v();  // kind-preserving: nothing to preserve
@@ -397,7 +397,7 @@ static Value nat_reverse(Vm& vm, u32 base, u32 argc) {
   return raise_error(vm, "reverse: expected sequence");
 }
 
-static Value nat_list_to_array(Vm& vm, u32 base, u32 argc) {
+static Value nat_list_to_array(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "list->array", argc, 1, 1));
   Value v = ARG(0);
   if (v.tag != Tag::Null && v.tag != Tag::Pair)
@@ -412,7 +412,7 @@ static Value nat_list_to_array(Vm& vm, u32 base, u32 argc) {
   return out.get();
 }
 
-static Value nat_array_to_list(Vm& vm, u32 base, u32 argc) {
+static Value nat_array_to_list(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "array->list", argc, 1, 1));
   OT_TRY(need_array(vm, "array->list", ARG(0)));
   Scope s(vm);
@@ -426,14 +426,14 @@ static Value nat_array_to_list(Vm& vm, u32 base, u32 argc) {
   return acc.get();
 }
 
-static Value nat_array(Vm& vm, u32 base, u32 argc) {
+static Value nat_array(State& vm, u32 base, u32 argc) {
   Scope s(vm);
   Slot out = s.push(make_array(vm, argc ? argc : 4));
   for (u32 i = 0; i < argc; i++) array_push(vm, out.get(), ARG(i));
   return out.get();
 }
 
-static Value nat_table(Vm& vm, u32 base, u32 argc) {
+static Value nat_table(State& vm, u32 base, u32 argc) {
   if (argc % 2 != 0) return raise_error(vm, "table: odd argument count");
   Scope s(vm);
   Slot t = s.push(make_table(vm));
@@ -442,7 +442,7 @@ static Value nat_table(Vm& vm, u32 base, u32 argc) {
 }
 
 // String code-point index -> one-character string, or nil.
-static Value string_char_at(Vm& vm, Value s, i64 idx) {
+static Value string_char_at(State& vm, Value s, i64 idx) {
   StringData* sd = as_string(s);
   if (idx < 0 || (u64)idx >= sd->nchars) return nil_v();
   const char* p = string_bytes(sd);
@@ -461,7 +461,7 @@ static Value string_char_at(Vm& vm, Value s, i64 idx) {
   return make_string_from(vm, s, start, end - start);
 }
 
-static Value do_get(Vm& vm, Value coll, Value key, Value dflt) {
+static Value do_get(State& vm, Value coll, Value key, Value dflt) {
   Value r = nil_v();
   switch (coll.tag) {
     case Tag::Nil: break;                                  // miss
@@ -483,12 +483,12 @@ static Value do_get(Vm& vm, Value coll, Value key, Value dflt) {
   return is_nil(r) ? dflt : r;
 }
 
-static Value nat_get(Vm& vm, u32 base, u32 argc) {
+static Value nat_get(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "get", argc, 2, 3));
   return do_get(vm, ARG(0), ARG(1), argc == 3 ? ARG(2) : nil_v());
 }
 
-static Value do_put(Vm& vm, Value coll, Value k, Value v) {
+static Value do_put(State& vm, Value coll, Value k, Value v) {
   if (coll.tag == Tag::Table) {
     table_put(vm, coll, k, v);
     return coll;
@@ -503,21 +503,21 @@ static Value do_put(Vm& vm, Value coll, Value k, Value v) {
   return raise_error(vm, "put!: expected table or array");
 }
 
-static Value nat_put(Vm& vm, u32 base, u32 argc) {
+static Value nat_put(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "put!", argc, 3, UINT32_MAX));
   if ((argc - 1) % 2 != 0) return raise_error(vm, "put!: expected coll plus key/value pairs");
   for (u32 i = 1; i < argc; i += 2) OT_TRY(do_put(vm, ARG(0), ARG(i), ARG(i + 1)));
   return ARG(0);
 }
 
-static Value nat_push(Vm& vm, u32 base, u32 argc) {
+static Value nat_push(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "push!", argc, 1, UINT32_MAX));
   OT_TRY(need_array(vm, "push!", ARG(0)));
   for (u32 i = 1; i < argc; i++) array_push(vm, ARG(0), ARG(i));
   return ARG(0);
 }
 
-static Value nat_pop(Vm& vm, u32 base, u32 argc) {
+static Value nat_pop(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "pop!", argc, 1, 1));
   OT_TRY(need_array(vm, "pop!", ARG(0)));
   ArrayData* a = as_array(ARG(0));
@@ -525,7 +525,7 @@ static Value nat_pop(Vm& vm, u32 base, u32 argc) {
   return a->items[--a->len];
 }
 
-static Value nat_update(Vm& vm, u32 base, u32 argc) {
+static Value nat_update(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "update!", argc, 3, UINT32_MAX));
   Value cur;
   OT_TRY(cur = do_get(vm, ARG(0), ARG(1), nil_v()));
@@ -538,7 +538,7 @@ static Value nat_update(Vm& vm, u32 base, u32 argc) {
   return ARG(0);
 }
 
-static Value nat_keys(Vm& vm, u32 base, u32 argc) {
+static Value nat_keys(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "keys", argc, 1, 1));
   if (is_nil(ARG(0))) return make_array(vm, 8);
   if (ARG(0).tag != Tag::Table) return raise_error(vm, "keys: expected table");
@@ -550,7 +550,7 @@ static Value nat_keys(Vm& vm, u32 base, u32 argc) {
   return out.get();
 }
 
-static Value nat_values(Vm& vm, u32 base, u32 argc) {
+static Value nat_values(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "values", argc, 1, 1));
   if (is_nil(ARG(0))) return make_array(vm, 8);
   if (ARG(0).tag != Tag::Table) return raise_error(vm, "values: expected table");
@@ -562,7 +562,7 @@ static Value nat_values(Vm& vm, u32 base, u32 argc) {
   return out.get();
 }
 
-static Value nat_copy(Vm& vm, u32 base, u32 argc) {
+static Value nat_copy(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "copy", argc, 1, 1));
   Value v = ARG(0);
   if (is_nil(v)) return nil_v();  // kind-preserving over absence
@@ -586,7 +586,7 @@ static Value nat_copy(Vm& vm, u32 base, u32 argc) {
   return raise_error(vm, "copy: expected array, table, or nil");
 }
 
-void register_data(Vm& vm) {
+void register_data(State& vm) {
   def_native(vm, "cons", nat_cons);
   def_native(vm, "car", nat_car);
   def_native(vm, "cdr", nat_cdr);

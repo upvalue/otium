@@ -1,7 +1,7 @@
 #include "printer.hpp"
 #include "value.hpp"
 #include "heap.hpp"
-#include "vm.hpp"
+#include "state.hpp"
 #include <cstring>
 #include <cstdio>   // snprintf (deviation from allowed-header list; noted)
 #include <cstdlib>  // strtod
@@ -9,9 +9,9 @@
 
 namespace ot {
 
-__attribute__((weak)) bool printer_table_next(Vm&, Value, u32*, Value*, Value*) { return false; }
+__attribute__((weak)) bool printer_table_next(State&, Value, u32*, Value*, Value*) { return false; }
 
-static void print_val(Vm& vm, Value v, Buf& out, bool display);
+static void print_val(State& vm, Value v, Buf& out, bool display);
 
 static void append_escaped(Buf& out, const char* s, u32 n) {
   for (u32 i = 0; i < n; i++) {
@@ -64,7 +64,7 @@ static void print_float(f64 f, Buf& out) {
   if (!hasMark) out.appendCstr(".0");
 }
 
-static void print_named(Vm& vm, const char* kind, u32 nameId, Buf& out) {
+static void print_named(State& vm, const char* kind, u32 nameId, Buf& out) {
   out.appendCstr("#<");
   out.appendCstr(kind);
   if (nameId != 0) {
@@ -76,7 +76,7 @@ static void print_named(Vm& vm, const char* kind, u32 nameId, Buf& out) {
   out.push('>');
 }
 
-static void print_val(Vm& vm, Value v, Buf& out, bool display) {
+static void print_val(State& vm, Value v, Buf& out, bool display) {
   switch (v.tag) {
     case Tag::Nil: out.appendCstr("nil"); return;
     case Tag::Null: out.appendCstr("()"); return;
@@ -171,7 +171,7 @@ static void print_val(Vm& vm, Value v, Buf& out, bool display) {
   out.appendCstr("#<unknown>");
 }
 
-void print_repr(Vm& vm, Value v, Buf& out) { print_val(vm, v, out, false); }
-void print_display(Vm& vm, Value v, Buf& out) { print_val(vm, v, out, true); }
+void print_repr(State& vm, Value v, Buf& out) { print_val(vm, v, out, false); }
+void print_display(State& vm, Value v, Buf& out) { print_val(vm, v, out, true); }
 
 }  // namespace ot

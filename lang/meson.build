@@ -34,7 +34,7 @@ prelude_h = custom_target('ot_prelude_scm',
 lib_sources = files(
   'src/heap.cpp',
   'src/intern.cpp',
-  'src/vm.cpp',
+  'src/state.cpp',
   'src/ns.cpp',
   'src/eval.cpp',
   'src/reader.cpp',

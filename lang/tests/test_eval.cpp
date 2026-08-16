@@ -1,6 +1,6 @@
-// test_eval.cpp — Vm / namespaces / evaluator / conditions / restarts / params.
+// test_eval.cpp — State / namespaces / evaluator / conditions / restarts / params.
 #include "doctest.h"
-#include "../src/vm.hpp"
+#include "../src/state.hpp"
 #include "../src/eval.hpp"
 #include "../src/ns.hpp"
 #include "../src/reader.hpp"
@@ -10,32 +10,32 @@ using namespace ot;
 
 // Minimal arithmetic natives keep evaluator tests independent of builtin
 // registration.
-static Value t_add(Vm& vm, u32 base, u32 argc) {
+static Value t_add(State& vm, u32 base, u32 argc) {
   i64 s = 0;
   for (u32 i = 0; i < argc; i++) s += vm.stack[base + i].i;
   return int_v(s);
 }
-static Value t_sub(Vm& vm, u32 base, u32 argc) {
+static Value t_sub(State& vm, u32 base, u32 argc) {
   if (argc == 1) return int_v(-vm.stack[base].i);
   i64 s = vm.stack[base].i;
   for (u32 i = 1; i < argc; i++) s -= vm.stack[base + i].i;
   return int_v(s);
 }
-static Value t_trip(Vm& vm, u32 base, u32 argc) {  // request interruption
+static Value t_trip(State& vm, u32 base, u32 argc) {  // request interruption
   (void)base;
   (void)argc;
   vm.interruptFlag = true;
   return nil_v();
 }
-static Value t_numeq(Vm& vm, u32 base, u32 argc) {
+static Value t_numeq(State& vm, u32 base, u32 argc) {
   for (u32 i = 1; i < argc; i++)
     if (vm.stack[base].i != vm.stack[base + i].i) return bool_v(false);
   return bool_v(true);
 }
 
-static Vm* mkvm(u32 maxDepth = 2000) {
-  VmConfig cfg{4u << 20, 8192, maxDepth};
-  Vm* vm = Vm::create(cfg);
+static State* mkvm(u32 maxDepth = 2000) {
+  StateConfig cfg{4u << 20, 8192, maxDepth};
+  State* vm = State::create(cfg);
   u32 saved = vm->currentNs;
   vm->currentNs = vm->syms.otiumCore_;
   ns_define(*vm, vm->intern.intern("+", 1), make_native(*vm, "+", t_add), false, nil_v());
@@ -49,7 +49,7 @@ static Vm* mkvm(u32 maxDepth = 2000) {
   return vm;
 }
 
-static Value run(Vm& vm, const char* src) {
+static Value run(State& vm, const char* src) {
   Reader rd(vm, src, (u32)strlen(src), "test");
   Value last = nil_v();
   for (;;) {
@@ -64,7 +64,7 @@ static Value run(Vm& vm, const char* src) {
 
 static bool is_int(Value v, i64 n) { return v.tag == Tag::Int && v.i == n; }
 
-static std::string condition_message(Vm& vm) {
+static std::string condition_message(State& vm) {
   Value message = table_get(vm, vm.unwindCondition, keyword_v(vm.syms.kwMessage));
   if (message.tag != Tag::String) return {};
   StringData* s = as_string(message);
@@ -72,38 +72,38 @@ static std::string condition_message(Vm& vm) {
 }
 
 TEST_CASE("native validators report consistent arity and type errors") {
-  Vm* vm = mkvm();
+  State* vm = mkvm();
 
   Value r = run(*vm, "(string-length)");
   CHECK(r.tag == Tag::Unwind);
   CHECK(condition_message(*vm) == "string-length: wrong number of arguments (0)");
-  vm_cancel_unwind(*vm);
+  state_cancel_unwind(*vm);
 
   r = run(*vm, "(car)");
   CHECK(r.tag == Tag::Unwind);
   CHECK(condition_message(*vm) == "car: wrong number of arguments (0)");
-  vm_cancel_unwind(*vm);
+  state_cancel_unwind(*vm);
 
   r = run(*vm, "(newline 1)");
   CHECK(r.tag == Tag::Unwind);
   CHECK(condition_message(*vm) == "newline: wrong number of arguments (1)");
-  vm_cancel_unwind(*vm);
+  state_cancel_unwind(*vm);
 
   r = run(*vm, "(string-length 1)");
   CHECK(r.tag == Tag::Unwind);
   CHECK(condition_message(*vm) == "string-length: expected string");
-  vm_cancel_unwind(*vm);
+  state_cancel_unwind(*vm);
 
   r = run(*vm, "(car 1)");
   CHECK(r.tag == Tag::Unwind);
   CHECK(condition_message(*vm) == "car: expected pair");
-  vm_cancel_unwind(*vm);
+  state_cancel_unwind(*vm);
 
   vm->destroy();
 }
 
 TEST_CASE("eval_source shares EOF, unwind, and consumed-prefix semantics") {
-  Vm* vm = mkvm();
+  State* vm = mkvm();
   const char* complete = "(define answer 40) (+ answer 2)";
   CHECK(is_int(eval_source(*vm, complete, (u32)strlen(complete), "test"), 42));
 
@@ -117,13 +117,13 @@ TEST_CASE("eval_source shares EOF, unwind, and consumed-prefix semantics") {
   CHECK(state.incomplete);
   CHECK(state.consumed > 0);
   CHECK(state.consumed < (u32)strlen(partial));
-  vm_cancel_unwind(*vm);
+  state_cancel_unwind(*vm);
   CHECK(is_int(run(*vm, "hits"), 1));
   vm->destroy();
 }
 
 TEST_CASE("closures capture and let is sequential") {
-  Vm* vm = mkvm();
+  State* vm = mkvm();
   Value r = run(*vm, "(define (mk n) (lambda (x) (+ x n)))"
                      "(define f (mk 10))"
                      "(f 5)");
@@ -136,7 +136,7 @@ TEST_CASE("closures capture and let is sequential") {
 }
 
 TEST_CASE("namespace switching and qualified refs") {
-  Vm* vm = mkvm();
+  State* vm = mkvm();
   Value r = run(*vm, "(ns t.a) (define x 41) (define- hidden 9)"
                      "(ns t.b) (define x 1)"
                      "(+ t.a/x x)");
@@ -153,7 +153,7 @@ TEST_CASE("namespace switching and qualified refs") {
 }
 
 TEST_CASE("in-ns is a special form with consistent name handling") {
-  Vm* vm = mkvm();
+  State* vm = mkvm();
   Value r = run(*vm, "(ns t.symbol) (define marker 1)"
                      "(ns t.keyword) (define marker 2)"
                      "(ns t.string) (define marker 3)"
@@ -172,7 +172,7 @@ TEST_CASE("in-ns is a special form with consistent name handling") {
 }
 
 TEST_CASE("million-iteration mutual tail recursion under small depth cap") {
-  Vm* vm = mkvm(200);
+  State* vm = mkvm(200);
 #ifdef OT_GC_STRESS
   const char* iterations = "1000";
 #else
@@ -193,7 +193,7 @@ TEST_CASE("million-iteration mutual tail recursion under small depth cap") {
 }
 
 TEST_CASE("handler declines, outer handler handles") {
-  Vm* vm = mkvm();
+  State* vm = mkvm();
   Value r = run(*vm, "(define hits 0)"
                      "(handler-bind (((lambda (c) #t) (lambda (c) (set! hits (+ hits 2)))))"
                      "  (handler-bind (((lambda (c) #t) (lambda (c) (set! hits (+ hits 1)))))"
@@ -204,7 +204,7 @@ TEST_CASE("handler declines, outer handler handles") {
 }
 
 TEST_CASE("handler invokes a restart below it; computation resumes") {
-  Vm* vm = mkvm();
+  State* vm = mkvm();
   Value r = run(*vm, "(define (compute)"
                      "  (restart-case (begin (error \"boom\") 99)"
                      "    (use-value \"substitute a value\" (v) (+ v 1))))"
@@ -216,7 +216,7 @@ TEST_CASE("handler invokes a restart below it; computation resumes") {
 }
 
 TEST_CASE("unwind-protect cleanups run under restart transfer") {
-  Vm* vm = mkvm();
+  State* vm = mkvm();
   Value r = run(*vm, "(define cleaned 0)"
                      "(handler-bind (((lambda (c) #t)"
                      "                (lambda (c) (invoke-restart 'give 5))))"
@@ -228,7 +228,7 @@ TEST_CASE("unwind-protect cleanups run under restart transfer") {
 }
 
 TEST_CASE("try catches unwinding conditions but never quit") {
-  Vm* vm = mkvm();
+  State* vm = mkvm();
   Value r = run(*vm, "(try (error \"b\") (catch ((lambda (c) #t) c) :caught))");
   CHECK(r.tag == Tag::Keyword);
 
@@ -246,7 +246,7 @@ TEST_CASE("try catches unwinding conditions but never quit") {
 }
 
 TEST_CASE("dynamic params: defaults, with-params, removal on unwind") {
-  Vm* vm = mkvm();
+  State* vm = mkvm();
   Value r = run(*vm, "(defparam *w* 80)"
                      "(define (width) (*w*))"
                      "(+ (width) (with-params ((*w* 20)) (width)))");
@@ -262,7 +262,7 @@ TEST_CASE("dynamic params: defaults, with-params, removal on unwind") {
 }
 
 TEST_CASE("condition types and macros") {
-  Vm* vm = mkvm();
+  State* vm = mkvm();
   Value r = run(*vm, "(define-condition 'file-error 'error)"
                      "(condition-of-type? {:type 'file-error} 'error)");
   CHECK(r.tag == Tag::True);

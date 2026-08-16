@@ -1,7 +1,7 @@
 #include "reader.hpp"
 #include "value.hpp"
 #include "heap.hpp"
-#include "vm.hpp"
+#include "state.hpp"
 #include <cstring>
 #include <cstdlib>  // strtod (deviation from allowed-header list; noted)
 
@@ -35,7 +35,7 @@ static int hex_val(char c) {
   return -1;
 }
 
-Reader::Reader(Vm& vm, const char* src, u32 len, const char* filename)
+Reader::Reader(State& vm, const char* src, u32 len, const char* filename)
     : vm_(vm), src_(src), len_(len), filename_(filename) {}
 
 void Reader::advance() {

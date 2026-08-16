@@ -13,30 +13,30 @@
 
 namespace ot {
 
-struct Vm;
+struct State;
 enum VarSlot : u32 { VAR_VALUE = 0, VAR_NAME, VAR_NS, VAR_DOC, VAR_PRIVATE, VAR_SLOTS };
 
 // Registry access
-Value ns_lookup(Vm&, u32 nsName);         // ns record or nil
-Value ns_get_or_create(Vm&, u32 nsName);  // creates + auto-refers otium.core
+Value ns_lookup(State&, u32 nsName);         // ns record or nil
+Value ns_get_or_create(State&, u32 nsName);  // creates + auto-refers otium.core
 
 // Fields of an ns record (kw is one of vm.syms.kwVars / kwAliases / ...)
-Value ns_field(Vm&, Value nsRecord, u32 kwId);
+Value ns_field(State&, Value nsRecord, u32 kwId);
 
 // Full 3.1 resolution (non-lexical part): own vars -> refers; qualified via
 // alias table then literal name; privacy enforced. Returns the VALUE, or
 // Unwind if unresolvable.
-Value ns_resolve(Vm&, Value symbol);
+Value ns_resolve(State&, Value symbol);
 
 // Same walk but returns the var CELL, or nil (never raises). Used by set!
 // and the expander oracle.
-Value ns_resolve_var(Vm&, Value symbol);
+Value ns_resolve_var(State&, Value symbol);
 
 // Define (or redefine, reusing the cell) `name` in the current namespace.
 // Returns v, or Unwind.
-Value ns_define(Vm&, u32 name, Value v, bool isPrivate, Value docstring);
+Value ns_define(State&, u32 name, Value v, bool isPrivate, Value docstring);
 
-void ns_switch(Vm&, u32 nsName);  // creates if needed
+void ns_switch(State&, u32 nsName);  // creates if needed
 
 // Helpers over var cells
 Value var_value(Value var);
@@ -44,6 +44,6 @@ void var_set(Value var, Value v);
 bool var_private(Value var);
 
 // True if the symbol has an interior '/' (namespace-qualified form).
-bool sym_qualified(Vm&, u32 symId);
+bool sym_qualified(State&, u32 symId);
 
 }  // namespace ot

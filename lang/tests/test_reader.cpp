@@ -3,27 +3,27 @@
 #include <cstring>
 
 #include "../src/value.hpp"
-#include "../src/vm.hpp"
+#include "../src/state.hpp"
 #include "../src/reader.hpp"
 #include "../src/printer.hpp"
 
 using namespace ot;
 
-static Vm* test_vm() {
-  static Vm* vm = nullptr;
+static State* test_vm() {
+  static State* vm = nullptr;
   if (!vm) {
-    VmConfig cfg{};
+    StateConfig cfg{};
     cfg.heapBytes = 1 << 20;
     cfg.stackSlots = 1024;
     cfg.maxDepth = 256;
-    vm = Vm::create(cfg);
+    vm = State::create(cfg);
   }
   return vm;
 }
 
 // Read a single form from src.
 static Value read1(const char* src) {
-  Vm& vm = *test_vm();
+  State& vm = *test_vm();
   Reader r(vm, src, (u32)strlen(src), "<test>");
   return r.next();
 }
@@ -172,7 +172,7 @@ TEST_CASE("comments and whitespace") {
 }
 
 TEST_CASE("multiple forms and eof") {
-  Vm& vm = *test_vm();
+  State& vm = *test_vm();
   const char* src = "1 2 3";
   Reader r(vm, src, (u32)strlen(src), "<test>");
   CHECK(repr_of(r.next()) == "1");
@@ -185,13 +185,13 @@ TEST_CASE("multiple forms and eof") {
 }
 
 TEST_CASE("incomplete input is distinct from a final read error") {
-  Vm& vm = *test_vm();
+  State& vm = *test_vm();
   const char* incomplete[] = {"(a b", "[1 2", "{:a 1", "\"open", "'", "(a . b"};
   for (const char* src : incomplete) {
     Reader r(vm, src, (u32)strlen(src), "<test>");
     CHECK(r.next().tag == Tag::Unwind);
     CHECK(r.incomplete());
-    vm_cancel_unwind(vm);
+    state_cancel_unwind(vm);
   }
 
   const char* invalid[] = {")", "(a]", "\"bad\\q\"", "(a . b c)"};
@@ -199,7 +199,7 @@ TEST_CASE("incomplete input is distinct from a final read error") {
     Reader r(vm, src, (u32)strlen(src), "<test>");
     CHECK(r.next().tag == Tag::Unwind);
     CHECK_FALSE(r.incomplete());
-    vm_cancel_unwind(vm);
+    state_cancel_unwind(vm);
   }
 }
 

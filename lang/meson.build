@@ -10,6 +10,21 @@ lib_args = ['-fno-exceptions', '-fno-rtti']
 if get_option('gc_stress')
   lib_args += ['-DOT_GC_STRESS']
 endif
+cpp = meson.get_compiler('cpp')
+has_computed_goto = cpp.compiles('''
+  int main() {
+    static void* labels[] = {&&done};
+    goto *labels[0];
+  done:
+    return 0;
+  }
+''', name : 'computed goto')
+if get_option('computed_goto').enabled() and not has_computed_goto
+  error('computed goto was requested but the C++ compiler does not support it')
+endif
+if not get_option('computed_goto').disabled() and has_computed_goto
+  lib_args += ['-DOT_COMPUTED_GOTO']
+endif
 
 lib_inc = include_directories('src')
 bestline_inc = include_directories('vendor/bestline')
@@ -35,7 +50,10 @@ lib_sources = files(
   'src/heap.cpp',
   'src/foreign.cpp',
   'src/intern.cpp',
+  'src/state.cpp',
+  'src/code.cpp',
   'src/vm.cpp',
+  'src/compile.cpp',
   'src/ns.cpp',
   'src/eval.cpp',
   'src/reader.cpp',
@@ -87,6 +105,8 @@ test_sources = files(
   'tests/test_reader.cpp',
   'tests/test_eval.cpp',
   'tests/test_builtins.cpp',
+  'tests/test_vm.cpp',
+  'tests/test_compile.cpp',
 )
 otium_tests = executable('otium-tests',
   test_sources,

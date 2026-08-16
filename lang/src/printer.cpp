@@ -1,7 +1,8 @@
 #include "printer.hpp"
 #include "value.hpp"
 #include "heap.hpp"
-#include "vm.hpp"
+#include "state.hpp"
+#include "code.hpp"
 #include <cstring>
 #include <cstdio>   // snprintf (deviation from allowed-header list; noted)
 #include <cstdlib>  // strtod
@@ -9,9 +10,9 @@
 
 namespace ot {
 
-__attribute__((weak)) bool printer_table_next(Vm&, Value, u32*, Value*, Value*) { return false; }
+__attribute__((weak)) bool printer_table_next(State&, Value, u32*, Value*, Value*) { return false; }
 
-static void print_val(Vm& vm, Value v, Buf& out, bool display);
+static void print_val(State& vm, Value v, Buf& out, bool display);
 
 static void append_escaped(Buf& out, const char* s, u32 n) {
   for (u32 i = 0; i < n; i++) {
@@ -64,7 +65,7 @@ static void print_float(f64 f, Buf& out) {
   if (!hasMark) out.appendCstr(".0");
 }
 
-static void print_named(Vm& vm, const char* kind, u32 nameId, Buf& out) {
+static void print_named(State& vm, const char* kind, u32 nameId, Buf& out) {
   out.appendCstr("#<");
   out.appendCstr(kind);
   if (nameId != 0) {
@@ -76,7 +77,26 @@ static void print_named(Vm& vm, const char* kind, u32 nameId, Buf& out) {
   out.push('>');
 }
 
-static void print_val(Vm& vm, Value v, Buf& out, bool display) {
+static void print_function(State& vm, Value value, const char* kind, Buf& out) {
+  FunctionData* fn = as_function(value);
+  if (fn->code.tag != Tag::Code) {
+    print_named(vm, kind, fn->name, out);
+    return;
+  }
+  out.appendCstr("#<");
+  out.appendCstr(kind);
+  if (fn->name) {
+    out.push(' ');
+    u32 len = 0;
+    const char* name = vm.intern.name(fn->name, &len);
+    if (name) out.append(name, len);
+  }
+  out.push(' ');
+  code_print_ascii(fn->code, out);
+  out.push('>');
+}
+
+static void print_val(State& vm, Value v, Buf& out, bool display) {
   switch (v.tag) {
     case Tag::Nil: out.appendCstr("nil"); return;
     case Tag::Null: out.appendCstr("()"); return;
@@ -162,8 +182,13 @@ static void print_val(Vm& vm, Value v, Buf& out, bool display) {
       }
       return;
     }
-    case Tag::Function: print_named(vm, "fn", as_function(v)->name, out); return;
-    case Tag::Macro: print_named(vm, "macro", as_function(v)->name, out); return;
+    case Tag::Code:
+      out.appendCstr("#<code ");
+      code_print_ascii(v, out);
+      out.push('>');
+      return;
+    case Tag::Function: print_function(vm, v, "fn", out); return;
+    case Tag::Macro: print_function(vm, v, "macro", out); return;
     case Tag::Param: print_named(vm, "param", as_param(v)->name, out); return;
     case Tag::Restart: print_named(vm, "restart", as_restart(v)->name, out); return;
     case Tag::Foreign: {
@@ -185,7 +210,7 @@ static void print_val(Vm& vm, Value v, Buf& out, bool display) {
   out.appendCstr("#<unknown>");
 }
 
-void print_repr(Vm& vm, Value v, Buf& out) { print_val(vm, v, out, false); }
-void print_display(Vm& vm, Value v, Buf& out) { print_val(vm, v, out, true); }
+void print_repr(State& vm, Value v, Buf& out) { print_val(vm, v, out, false); }
+void print_display(State& vm, Value v, Buf& out) { print_val(vm, v, out, true); }
 
 }  // namespace ot

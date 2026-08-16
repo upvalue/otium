@@ -4,10 +4,10 @@
 
 namespace ot {
 
-struct Vm;
+struct State;
 
 struct Reader {
-  Reader(Vm& vm, const char* src, u32 len, const char* filename);
+  Reader(State& vm, const char* src, u32 len, const char* filename);
 
   // Reads one form. Returns the form, or nil_v() with atEof()==true when the
   // input is exhausted, or a Tag::Unwind value on a read error.
@@ -17,7 +17,7 @@ struct Reader {
   u32 position() const { return pos_; }
 
 private:
-  Vm& vm_;
+  State& vm_;
   const char* src_;
   u32 len_;
   [[maybe_unused]] const char* filename_;  // reserved for position records

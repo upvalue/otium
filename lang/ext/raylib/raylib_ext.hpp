@@ -2,7 +2,7 @@
 
 namespace ot {
 
-struct Vm;
-void register_raylib_extension(Vm& vm);
+struct State;
+void register_raylib_extension(State& vm);
 
 }  // namespace ot

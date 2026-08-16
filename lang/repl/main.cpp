@@ -16,7 +16,7 @@
 #include "vec.hpp"
 #include "value.hpp"
 #include "heap.hpp"
-#include "vm.hpp"
+#include "state.hpp"
 #include "printer.hpp"
 #include "eval.hpp"
 #include "ns.hpp"
@@ -28,18 +28,18 @@
 #include "../ext/raylib/raylib_ext.hpp"
 #endif
 
-// vm_push_handler/vm_pop_handler come from vm.hpp; make_native from eval.hpp.
+// state_push_handler/state_pop_handler come from state.hpp; make_native from eval.hpp.
 
 using ot::Buf;
 using ot::Tag;
 using ot::u32;
 using ot::Value;
-using ot::Vm;
+using ot::State;
 
 // ---------------------------------------------------------------------------
 // globals
 
-static Vm* g_vm = nullptr;
+static State* g_vm = nullptr;
 static volatile sig_atomic_t g_sigint = 0;
 static bool g_replMode = false;
 static bool g_quitRequested = false;
@@ -81,19 +81,19 @@ static bool host_load(void*, const char* nsName, Buf* srcOut) {
 // ---------------------------------------------------------------------------
 // small helpers
 
-static Value resolve_named(Vm& vm, const char* name) {
+static Value resolve_named(State& vm, const char* name) {
   u32 id = vm.intern.intern(name, (u32)strlen(name));
   return ot::ns_resolve(vm, ot::symbol_v(id));
 }
 
 // call an otium function by name with argc args already pushed at `base`
-static Value call_named(Vm& vm, const char* name, u32 base, u32 argc) {
+static Value call_named(State& vm, const char* name, u32 base, u32 argc) {
   Value fn = resolve_named(vm, name);
   if (fn.tag == Tag::Unwind) return fn;
   return ot::apply(vm, fn, base, argc);
 }
 
-static void print_value(Vm& vm, Value v, FILE* to) {
+static void print_value(State& vm, Value v, FILE* to) {
   Buf out;
   ot::print_repr(vm, v, out);
   fwrite(out.data, 1, out.len, to);
@@ -102,7 +102,7 @@ static void print_value(Vm& vm, Value v, FILE* to) {
 
 enum class QuitReason { None, Interrupt, Requested };
 
-static QuitReason take_quit(Vm& vm) {
+static QuitReason take_quit(State& vm) {
   if (vm.unwindKind != ot::UnwindKind::Quit) return QuitReason::None;
   if (g_sigint) {
     g_sigint = 0;
@@ -115,7 +115,7 @@ static QuitReason take_quit(Vm& vm) {
 // ---------------------------------------------------------------------------
 // flagship: native handler that offers restarts interactively
 
-static Value repl_condition_handler(Vm& vm, u32 base, u32 argc) {
+static Value repl_condition_handler(State& vm, u32 base, u32 argc) {
   Value cond = argc > 0 ? vm.stack[base] : ot::nil_v();
 
   fputs("\nUnhandled condition: ", stderr);
@@ -181,7 +181,7 @@ static Value repl_condition_handler(Vm& vm, u32 base, u32 argc) {
   }
 }
 
-static Value always_true_pred(Vm& vm, u32, u32) {
+static Value always_true_pred(State& vm, u32, u32) {
   (void)vm;
   return ot::bool_v(true);
 }
@@ -189,7 +189,7 @@ static Value always_true_pred(Vm& vm, u32, u32) {
 // ---------------------------------------------------------------------------
 // file runner
 
-static int run_file(Vm& vm, const char* path) {
+static int run_file(State& vm, const char* path) {
   FILE* f = fopen(path, "rb");
   if (!f) {
     fprintf(stderr, "otium: cannot open %s\n", path);
@@ -205,7 +205,7 @@ static int run_file(Vm& vm, const char* path) {
   if (result.tag == Tag::Unwind) {
     QuitReason reason = take_quit(vm);
     if (reason != QuitReason::None) {
-      ot::vm_cancel_unwind(vm);
+      ot::state_cancel_unwind(vm);
       return reason == QuitReason::Interrupt ? 130 : 0;
     }
     print_value(vm, vm.unwindCondition, stderr);
@@ -222,16 +222,16 @@ struct ReplEvalContext {
   ot::Slot handler;
 };
 
-static Value eval_repl_form(Vm& vm, Value form, void* data) {
+static Value eval_repl_form(State& vm, Value form, void* data) {
   ReplEvalContext& context = *(ReplEvalContext*)data;
-  Value pushed = ot::vm_push_handler(vm, context.pred.get(), context.handler.get());
+  Value pushed = ot::state_push_handler(vm, context.pred.get(), context.handler.get());
   (void)pushed;
   Value result = ot::eval_form(vm, form);
-  ot::vm_pop_handler(vm);
+  ot::state_pop_handler(vm);
   return result;
 }
 
-static void print_repl_result(Vm& vm, Value result, u32, void*) {
+static void print_repl_result(State& vm, Value result, u32, void*) {
   // A REPL reports every evaluation result, including nil.
   print_value(vm, result, stdout);
 }
@@ -252,14 +252,14 @@ static bool read_server_line(std::string& line) {
   }
 }
 
-static Value eval_server_form(Vm& vm, Value form, void*) { return ot::eval_form(vm, form); }
+static Value eval_server_form(State& vm, Value form, void*) { return ot::eval_form(vm, form); }
 
 static void finish_server_response() {
   fputs(SERVER_RESPONSE_END, stdout);
   fflush(stdout);
 }
 
-static void run_server(Vm& vm) {
+static void run_server(State& vm) {
   g_replMode = true;
   std::string source;
   std::string line;
@@ -287,7 +287,7 @@ static void run_server(Vm& vm) {
           fputs("error: ", stdout);
           print_value(vm, vm.unwindCondition, stdout);
         }
-        ot::vm_cancel_unwind(vm);
+        ot::state_cancel_unwind(vm);
       }
     }
 
@@ -297,7 +297,7 @@ static void run_server(Vm& vm) {
   }
 }
 
-static void run_repl(Vm& vm) {
+static void run_repl(State& vm) {
   g_replMode = true;
   printf("otium repl — ^C interrupts, ^D exits\n");
   // Both natives stay rooted in these slots for the whole session; read them
@@ -348,11 +348,11 @@ static void run_repl(Vm& vm) {
     if (result.tag == Tag::Unwind) {
       if (sourceState.readError) {
         if (sourceState.incomplete) {
-          ot::vm_cancel_unwind(vm);
+          ot::state_cancel_unwind(vm);
           needMore = true;
         } else {
           print_value(vm, vm.unwindCondition, stderr);
-          ot::vm_cancel_unwind(vm);
+          ot::state_cancel_unwind(vm);
           consumed = (u32)pending.size();
         }
       } else {
@@ -366,7 +366,7 @@ static void run_repl(Vm& vm) {
         } else {
           stop = true;
         }
-        ot::vm_cancel_unwind(vm);
+        ot::state_cancel_unwind(vm);
         consumed = (u32)pending.size();
       }
     }
@@ -495,12 +495,12 @@ int main(int argc, char** argv) {
   }
   if (g_loadPath.empty()) g_loadPath.push_back(".");
 
-  ot::VmConfig cfg;
+  ot::StateConfig cfg;
   cfg.heapBytes = options.heapInit;
   cfg.stackSlots = options.stackSlots;
   cfg.maxDepth = options.maxDepth;
   cfg.heapMaxBytes = options.heapMax;
-  Vm* vm = Vm::create(cfg);
+  State* vm = State::create(cfg);
   if (!vm) {
     fputs("otium: vm creation failed\n", stderr);
     return 1;

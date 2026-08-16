@@ -1,6 +1,6 @@
 // ns.cpp — namespaces, vars, resolution (spec 7 and 3.1).
 #include "ns.hpp"
-#include "vm.hpp"
+#include "state.hpp"
 
 namespace ot {
 
@@ -8,11 +8,11 @@ Value var_value(Value var) { return as_array(var)->items[VAR_VALUE]; }
 void var_set(Value var, Value v) { as_array(var)->items[VAR_VALUE] = v; }
 bool var_private(Value var) { return is_truthy(as_array(var)->items[VAR_PRIVATE]); }
 
-Value ns_field(Vm& vm, Value nsRec, u32 kwId) { return table_get(vm, nsRec, keyword_v(kwId)); }
+Value ns_field(State& vm, Value nsRec, u32 kwId) { return table_get(vm, nsRec, keyword_v(kwId)); }
 
-Value ns_lookup(Vm& vm, u32 nsName) { return table_get(vm, vm.nsRegistry, symbol_v(nsName)); }
+Value ns_lookup(State& vm, u32 nsName) { return table_get(vm, vm.nsRegistry, symbol_v(nsName)); }
 
-Value ns_get_or_create(Vm& vm, u32 nsName) {
+Value ns_get_or_create(State& vm, u32 nsName) {
   Value ns = ns_lookup(vm, nsName);
   if (!is_nil(ns)) return ns;
   // Allocate each sub-structure BEFORE reading the ns slot: a make_* in
@@ -58,7 +58,7 @@ Value ns_get_or_create(Vm& vm, u32 nsName) {
   return nsS.get();
 }
 
-Value ns_define(Vm& vm, u32 name, Value v, bool isPrivate, Value docstring) {
+Value ns_define(State& vm, u32 name, Value v, bool isPrivate, Value docstring) {
   Scope sc(vm);
   Slot vS = sc.push(v);
   Slot dS = sc.push(docstring);
@@ -84,7 +84,7 @@ Value ns_define(Vm& vm, u32 name, Value v, bool isPrivate, Value docstring) {
   return vS.get();
 }
 
-bool sym_qualified(Vm& vm, u32 symId) {
+bool sym_qualified(State& vm, u32 symId) {
   u32 len;
   const char* s = vm.intern.name(symId, &len);
   for (u32 i = 1; i + 1 < len; i++)
@@ -95,7 +95,7 @@ bool sym_qualified(Vm& vm, u32 symId) {
 // Resolve a var cell; nil if not found. When raiseErr, a miss also raises a
 // condition (raise_error stores it in vm.unwindCondition; its return value
 // is always the immediate Unwind sentinel, so callers just return unwind_v()).
-static Value resolve_var_impl(Vm& vm, Value sym, bool raiseErr) {
+static Value resolve_var_impl(State& vm, Value sym, bool raiseErr) {
   u32 len;
   const char* s = vm.intern.name(sym.id, &len);
   u32 slash = 0;
@@ -143,15 +143,15 @@ static Value resolve_var_impl(Vm& vm, Value sym, bool raiseErr) {
   return nil_v();
 }
 
-Value ns_resolve_var(Vm& vm, Value symbol) { return resolve_var_impl(vm, symbol, false); }
+Value ns_resolve_var(State& vm, Value symbol) { return resolve_var_impl(vm, symbol, false); }
 
-Value ns_resolve(Vm& vm, Value symbol) {
+Value ns_resolve(State& vm, Value symbol) {
   Value var = resolve_var_impl(vm, symbol, true);
   if (is_nil(var)) return unwind_v();
   return var_value(var);
 }
 
-void ns_switch(Vm& vm, u32 nsName) {
+void ns_switch(State& vm, u32 nsName) {
   ns_get_or_create(vm, nsName);
   vm.currentNs = nsName;
 }

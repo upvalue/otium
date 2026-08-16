@@ -1,6 +1,6 @@
 ---
 id: lan-q4lf
-status: in_progress
+status: closed
 deps: []
 links: [lan-qwff, lan-70gb, lan-5je1]
 created: 2026-08-16T01:28:30Z

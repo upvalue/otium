@@ -1,7 +1,7 @@
 // String, symbol, keyword, and mutable-buffer natives. String positions are
 // code points over UTF-8 storage; case operations are ASCII-only.
 #include "../builtins.hpp"
-#include "../vm.hpp"
+#include "../state.hpp"
 #include "../ns.hpp"
 #include "../heap.hpp"
 #include "../printer.hpp"
@@ -28,13 +28,13 @@ static u32 utf8_offset(const char* p, u32 len, u32 n) {
 
 // --- natives ----------------------------------------------------------------
 
-static Value nat_str(Vm& vm, u32 base, u32 argc) {
+static Value nat_str(State& vm, u32 base, u32 argc) {
   Buf out;
   for (u32 i = 0; i < argc; i++) print_display(vm, ARG(i), out);
   return make_string(vm, out);
 }
 
-static Value nat_string_append(Vm& vm, u32 base, u32 argc) {
+static Value nat_string_append(State& vm, u32 base, u32 argc) {
   OT_TRY(need_strings(vm, "string-append", base, argc));
   Buf out;
   for (u32 i = 0; i < argc; i++) {
@@ -44,13 +44,13 @@ static Value nat_string_append(Vm& vm, u32 base, u32 argc) {
   return make_string(vm, out);
 }
 
-static Value nat_string_length(Vm& vm, u32 base, u32 argc) {
+static Value nat_string_length(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "string-length", argc, 1, 1));
   OT_TRY(need_string(vm, "string-length", ARG(0)));
   return int_v((i64)as_string(ARG(0))->nchars);
 }
 
-static Value nat_substring(Vm& vm, u32 base, u32 argc) {
+static Value nat_substring(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "substring", argc, 2, 3));
   OT_TRY(need_string(vm, "substring", ARG(0)));
   if (ARG(1).tag != Tag::Int || (argc == 3 && ARG(2).tag != Tag::Int))
@@ -68,7 +68,7 @@ static Value nat_substring(Vm& vm, u32 base, u32 argc) {
   return make_string_from(vm, ARG(0), b0, b1 - b0);
 }
 
-static Value nat_string_split(Vm& vm, u32 base, u32 argc) {
+static Value nat_string_split(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "string-split", argc, 1, 2));
   OT_TRY(need_string(vm, "string-split", ARG(0)));
   Scope scope(vm);
@@ -115,7 +115,7 @@ static Value nat_string_split(Vm& vm, u32 base, u32 argc) {
   return out.get();
 }
 
-static Value nat_string_join(Vm& vm, u32 base, u32 argc) {
+static Value nat_string_join(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "string-join", argc, 2, 2));
   OT_TRY(need_string(vm, "string-join", ARG(0)));
   Scope roots(vm);
@@ -138,7 +138,7 @@ static Value nat_string_join(Vm& vm, u32 base, u32 argc) {
   return make_string(vm, out);
 }
 
-static Value case_op(Vm& vm, u32 base, u32 argc, const char* who, bool up) {
+static Value case_op(State& vm, u32 base, u32 argc, const char* who, bool up) {
   OT_TRY(need_argc(vm, who, argc, 1, 1));
   OT_TRY(need_string(vm, who, ARG(0)));
   StringData* s = as_string(ARG(0));
@@ -152,14 +152,14 @@ static Value case_op(Vm& vm, u32 base, u32 argc, const char* who, bool up) {
   return make_string(vm, out);
 }
 
-static Value nat_upcase(Vm& vm, u32 base, u32 argc) {
+static Value nat_upcase(State& vm, u32 base, u32 argc) {
   return case_op(vm, base, argc, "string-upcase", true);
 }
-static Value nat_downcase(Vm& vm, u32 base, u32 argc) {
+static Value nat_downcase(State& vm, u32 base, u32 argc) {
   return case_op(vm, base, argc, "string-downcase", false);
 }
 
-static Value nat_trim(Vm& vm, u32 base, u32 argc) {
+static Value nat_trim(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "string-trim", argc, 1, 1));
   OT_TRY(need_string(vm, "string-trim", ARG(0)));
   StringData* s = as_string(ARG(0));
@@ -181,7 +181,7 @@ static bool bytes_find(const char* hay, u32 hn, const char* nee, u32 nn, u32* at
 }
 
 // Lexicographic order; byte compare == code-point order for UTF-8.
-static Value nat_string_lt(Vm& vm, u32 base, u32 argc) {
+static Value nat_string_lt(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "string<?", argc, 2, 2));
   OT_TRY(need_strings(vm, "string<?", base, argc));
   StringData* a = as_string(ARG(0));
@@ -191,7 +191,7 @@ static Value nat_string_lt(Vm& vm, u32 base, u32 argc) {
   return bool_v(c < 0 || (c == 0 && a->len < b->len));
 }
 
-static Value nat_containsp(Vm& vm, u32 base, u32 argc) {
+static Value nat_containsp(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "string-contains?", argc, 2, 2));
   OT_TRY(need_strings(vm, "string-contains?", base, argc));
   StringData* s = as_string(ARG(0));
@@ -199,7 +199,7 @@ static Value nat_containsp(Vm& vm, u32 base, u32 argc) {
   return bool_v(bytes_find(string_bytes(s), s->len, string_bytes(t), t->len, nullptr));
 }
 
-static Value nat_startsp(Vm& vm, u32 base, u32 argc) {
+static Value nat_startsp(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "string-starts-with?", argc, 2, 2));
   OT_TRY(need_strings(vm, "string-starts-with?", base, argc));
   StringData* s = as_string(ARG(0));
@@ -207,7 +207,7 @@ static Value nat_startsp(Vm& vm, u32 base, u32 argc) {
   return bool_v(t->len <= s->len && memcmp(string_bytes(s), string_bytes(t), t->len) == 0);
 }
 
-static Value nat_endsp(Vm& vm, u32 base, u32 argc) {
+static Value nat_endsp(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "string-ends-with?", argc, 2, 2));
   OT_TRY(need_strings(vm, "string-ends-with?", base, argc));
   StringData* s = as_string(ARG(0));
@@ -216,7 +216,7 @@ static Value nat_endsp(Vm& vm, u32 base, u32 argc) {
                 memcmp(string_bytes(s) + (s->len - t->len), string_bytes(t), t->len) == 0);
 }
 
-static Value nat_replace(Vm& vm, u32 base, u32 argc) {
+static Value nat_replace(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "string-replace", argc, 3, 3));
   OT_TRY(need_strings(vm, "string-replace", base, argc));
   StringData* s = as_string(ARG(0));
@@ -237,7 +237,7 @@ static Value nat_replace(Vm& vm, u32 base, u32 argc) {
   return make_string(vm, out);
 }
 
-static Value nat_string_to_number(Vm& vm, u32 base, u32 argc) {
+static Value nat_string_to_number(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "string->number", argc, 1, 1));
   OT_TRY(need_string(vm, "string->number", ARG(0)));
   StringData* s = as_string(ARG(0));
@@ -266,7 +266,7 @@ static Value nat_string_to_number(Vm& vm, u32 base, u32 argc) {
   return nil_v();
 }
 
-static Value nat_number_to_string(Vm& vm, u32 base, u32 argc) {
+static Value nat_number_to_string(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "number->string", argc, 1, 1));
   OT_TRY(need_nums(vm, "number->string", base, argc));
   Buf out;
@@ -274,14 +274,14 @@ static Value nat_number_to_string(Vm& vm, u32 base, u32 argc) {
   return make_string(vm, out);
 }
 
-static Value nat_string_to_symbol(Vm& vm, u32 base, u32 argc) {
+static Value nat_string_to_symbol(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "string->symbol", argc, 1, 1));
   OT_TRY(need_string(vm, "string->symbol", ARG(0)));
   StringData* s = as_string(ARG(0));
   return symbol_v(vm.intern.intern(string_bytes(s), s->len));
 }
 
-static Value nat_symbol_to_string(Vm& vm, u32 base, u32 argc) {
+static Value nat_symbol_to_string(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "symbol->string", argc, 1, 1));
   OT_TRY(need_symbol(vm, "symbol->string", ARG(0)));
   u32 len;
@@ -290,7 +290,7 @@ static Value nat_symbol_to_string(Vm& vm, u32 base, u32 argc) {
 }
 
 // coerce a string/symbol/keyword to an intern id, or return Unwind
-static Value coerce_id(Vm& vm, const char* who, Value v, u32* out) {
+static Value coerce_id(State& vm, const char* who, Value v, u32* out) {
   switch (v.tag) {
     case Tag::Symbol:
     case Tag::Keyword: *out = v.id; return nil_v();
@@ -303,21 +303,21 @@ static Value coerce_id(Vm& vm, const char* who, Value v, u32* out) {
   }
 }
 
-static Value nat_symbol(Vm& vm, u32 base, u32 argc) {
+static Value nat_symbol(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "symbol", argc, 1, 1));
   u32 id = 0;
   OT_TRY(coerce_id(vm, "symbol", ARG(0), &id));
   return symbol_v(id);
 }
 
-static Value nat_keyword(Vm& vm, u32 base, u32 argc) {
+static Value nat_keyword(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "keyword", argc, 1, 1));
   u32 id = 0;
   OT_TRY(coerce_id(vm, "keyword", ARG(0), &id));
   return keyword_v(id);
 }
 
-static Value nat_name(Vm& vm, u32 base, u32 argc) {
+static Value nat_name(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "name", argc, 1, 1));
   Value v = ARG(0);
   if (v.tag == Tag::String) return v;
@@ -329,7 +329,7 @@ static Value nat_name(Vm& vm, u32 base, u32 argc) {
   return raise_error(vm, "name: expected symbol, keyword, or string");
 }
 
-static Value nat_buffer(Vm& vm, u32 base, u32 argc) {
+static Value nat_buffer(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "buffer", argc, 0, 1));
   Scope scope(vm);
   Slot b = scope.push(make_buffer(vm));
@@ -341,7 +341,7 @@ static Value nat_buffer(Vm& vm, u32 base, u32 argc) {
   return b.get();
 }
 
-static Value nat_buffer_push(Vm& vm, u32 base, u32 argc) {
+static Value nat_buffer_push(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "buffer-push!", argc, 1, UINT32_MAX));
   OT_TRY(need_buffer(vm, "buffer-push!", ARG(0)));
   for (u32 i = 1; i < argc; i++) {
@@ -352,14 +352,14 @@ static Value nat_buffer_push(Vm& vm, u32 base, u32 argc) {
   return ARG(0);
 }
 
-static Value nat_buffer_to_string(Vm& vm, u32 base, u32 argc) {
+static Value nat_buffer_to_string(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "buffer->string", argc, 1, 1));
   OT_TRY(need_buffer(vm, "buffer->string", ARG(0)));
   BufferData* b = as_buffer(ARG(0));
   return make_string(vm, b->buf);
 }
 
-void register_string(Vm& vm) {
+void register_string(State& vm) {
   def_native(vm, "str", nat_str);
   def_native(vm, "string-append", nat_string_append);
   def_native(vm, "string-length", nat_string_length);

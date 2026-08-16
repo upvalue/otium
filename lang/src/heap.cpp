@@ -24,7 +24,7 @@ static u32 objTotalSize(u32 payloadBytes) {
 
 static u32 objTotalSize(Obj* o) { return objTotalSize(o->size); }
 
-Heap::Heap(Vm* vm_, u32 initialBytes, u32 maxBytes_)
+Heap::Heap(State* vm_, u32 initialBytes, u32 maxBytes_)
     : vm(vm_), spaceSize(initialBytes < 1024 ? 1024 : align8(initialBytes)), used(0),
       maxBytes(maxBytes_), nextIdent(1), collections(0), toSpace(nullptr), toSize(0), toUsed(0) {
   if (maxBytes < 1024 || spaceSize > maxBytes) ot_fatal("heap: invalid size limits");
@@ -46,6 +46,12 @@ Heap::~Heap() {
       }
       case ObjType::Buffer: ((BufferData*)obj_payload(o))->buf.~Buf(); break;
       case ObjType::Foreign: finalizeForeign(o); break;
+      case ObjType::Code: {
+        CodeData* d = (CodeData*)obj_payload(o);
+        free(d->bytes);
+        free(d->consts);
+        break;
+      }
       default: break;
     }
   }
@@ -92,7 +98,8 @@ Obj* Heap::alloc(ObjType t, u32 payloadBytes) {
   o->forward = nullptr;
   o->ident = 0;
   memset(obj_payload(o), 0, payloadBytes);
-  if (t == ObjType::Array || t == ObjType::Table || t == ObjType::Buffer || t == ObjType::Foreign)
+  if (t == ObjType::Array || t == ObjType::Table || t == ObjType::Buffer || t == ObjType::Code ||
+      t == ObjType::Foreign)
     finalizable.push(o);
   return o;
 }
@@ -157,11 +164,15 @@ void Heap::collectInto(u32 newSize) {
       case ObjType::Function:
       case ObjType::Macro: {
         FunctionData* d = (FunctionData*)p;
-        visitSlot(&d->params);
-        visitSlot(&d->body);
-        visitSlot(&d->env);
+        visitSlot(&d->code);
         visitSlot(&d->nsName);
         visitSlot(&d->docstring);
+        for (u32 i = 0; i < d->nupvals; i++) visitSlot(&function_upvals(d)[i]);
+        break;
+      }
+      case ObjType::Code: {
+        CodeData* d = (CodeData*)p;
+        for (u32 i = 0; i < d->constCount; i++) visitSlot(&d->consts[i]);
         break;
       }
       case ObjType::Param: visitSlot(&((ParamData*)p)->defaultVal); break;
@@ -192,6 +203,12 @@ void Heap::collectInto(u32 newSize) {
         }
         case ObjType::Buffer: ((BufferData*)p)->buf.~Buf(); break;
         case ObjType::Foreign: finalizeForeign(o); break;
+        case ObjType::Code: {
+          CodeData* d = (CodeData*)p;
+          free(d->bytes);
+          free(d->consts);
+          break;
+        }
         default: break;
       }
     }
@@ -344,18 +361,18 @@ void array_reserve(Value arr, u32 n) {
   d->cap = ncap;
 }
 
-// Access Vm's leading Heap without introducing a vm.cpp link dependency in
-// substrate tests. Vm::heap must remain its first data member.
-static Heap& heap_of(Vm& vm) { return *reinterpret_cast<Heap*>(&vm); }
+// Access State's leading Heap without introducing a state.cpp link dependency in
+// substrate tests. State::heap must remain its first data member.
+static Heap& heap_of(State& vm) { return *reinterpret_cast<Heap*>(&vm); }
 
-Value make_pair(Vm& vm, Value car, Value cdr) { return make_pair_h(heap_of(vm), car, cdr); }
-Value make_string(Vm& vm, const char* b, u32 n) { return make_string_h(heap_of(vm), b, n); }
-Value make_string(Vm& vm, const Buf& b) { return make_string(vm, b.data ? b.data : "", b.len); }
-Value make_string_from(Vm& vm, Value src, u32 off, u32 n) {
+Value make_pair(State& vm, Value car, Value cdr) { return make_pair_h(heap_of(vm), car, cdr); }
+Value make_string(State& vm, const char* b, u32 n) { return make_string_h(heap_of(vm), b, n); }
+Value make_string(State& vm, const Buf& b) { return make_string(vm, b.data ? b.data : "", b.len); }
+Value make_string_from(State& vm, Value src, u32 off, u32 n) {
   return make_string_from_h(heap_of(vm), src, off, n);
 }
-Value make_array(Vm& vm, u32 cap) { return make_array_h(heap_of(vm), cap); }
-Value make_table(Vm& vm) { return make_table_h(heap_of(vm)); }
-Value make_buffer(Vm& vm) { return make_buffer_h(heap_of(vm)); }
+Value make_array(State& vm, u32 cap) { return make_array_h(heap_of(vm), cap); }
+Value make_table(State& vm) { return make_table_h(heap_of(vm)); }
+Value make_buffer(State& vm) { return make_buffer_h(heap_of(vm)); }
 
 }  // namespace ot

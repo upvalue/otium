@@ -1,12 +1,12 @@
 // test_builtins.cpp — compact dict lifecycle, equality matrix (spec 2.4),
-// int wrap-on-overflow. Needs the full runtime to link (Vm::create).
+// int wrap-on-overflow. Needs the full runtime to link (State::create).
 #include "doctest.h"
 #include "../src/builtins.hpp"
 #include "../src/eval.hpp"
 #include "../src/printer.hpp"
 #include "../src/ns.hpp"
 #include "../src/value.hpp"
-#include "../src/vm.hpp"
+#include "../src/state.hpp"
 #include "../src/heap.hpp"
 #include <cmath>
 #include <csignal>
@@ -17,29 +17,29 @@
 
 using namespace ot;
 
-static Vm* make_vm() {
-  VmConfig cfg;
+static State* make_vm() {
+  StateConfig cfg;
   cfg.heapBytes = 1 << 20;
   cfg.stackSlots = 1024;
   cfg.maxDepth = 256;
-  return Vm::create(cfg);
+  return State::create(cfg);
 }
 
-static Value str_v(Vm& vm, const char* s) { return make_string(vm, s, (u32)strlen(s)); }
+static Value str_v(State& vm, const char* s) { return make_string(vm, s, (u32)strlen(s)); }
 
 static i32 inline_finalized = 0;
 static i32 pointer_finalized = 0;
 static u32 pointer_finalizer_ns = 0;
 
-static void finalize_inline(Vm&, void* payload) { inline_finalized += *(i32*)payload; }
+static void finalize_inline(State&, void* payload) { inline_finalized += *(i32*)payload; }
 
-static void finalize_pointer(Vm& vm, void* payload) {
+static void finalize_pointer(State& vm, void* payload) {
   pointer_finalized += *(i32*)payload;
   pointer_finalizer_ns = vm.currentNs;
   free(payload);
 }
 
-static Value call_core(Vm& vm, const char* name, std::initializer_list<Value> args) {
+static Value call_core(State& vm, const char* name, std::initializer_list<Value> args) {
   Value fn = ns_resolve(vm, symbol_v(vm.intern.intern(name, (u32)strlen(name))));
   if (fn.tag == Tag::Unwind) return fn;
   u32 base = vm.stack.len;
@@ -71,7 +71,7 @@ TEST_CASE("foreign objects move, compare by identity, and finalize once") {
   inline_finalized = 0;
   pointer_finalized = 0;
   pointer_finalizer_ns = 0;
-  Vm* vm = make_vm();
+  State* vm = make_vm();
   u32 inlineType = register_foreign_type(*vm, "test/inline", finalize_inline);
   u32 pointerType = register_foreign_type(*vm, "test/pointer", finalize_pointer);
   CHECK(register_foreign_type(*vm, "test/inline", finalize_inline) == inlineType);
@@ -106,7 +106,7 @@ TEST_CASE("foreign objects move, compare by identity, and finalize once") {
   CHECK(foreign_dead(vm->stack[base]));
   Value deadUse = foreign_check(*vm, "test", vm->stack[base], inlineType, &checked);
   CHECK(is_unwind(deadUse));
-  vm_cancel_unwind(*vm);
+  state_cancel_unwind(*vm);
 
   vm->popTo(base);  // both objects become collectible
   vm->heap.collect();
@@ -120,13 +120,13 @@ TEST_CASE("foreign objects move, compare by identity, and finalize once") {
   u32 teardownNs = vm->currentNs;
   vm->destroy();
   CHECK(pointer_finalized == 24);             // live resources finalize at VM teardown
-  CHECK(pointer_finalizer_ns == teardownNs);  // the Vm is intact during teardown finalization
+  CHECK(pointer_finalizer_ns == teardownNs);  // the State is intact during teardown finalization
 }
 
 // ---------------------------------------------------------------------------
 
 TEST_CASE("compact dict lifecycle") {
-  Vm* vm = make_vm();
+  State* vm = make_vm();
   u32 root = vm->push(make_table(*vm));
 
   SUBCASE("insert, update, delete, re-insert ordering") {
@@ -236,7 +236,7 @@ TEST_CASE("compact dict lifecycle") {
 
 TEST_CASE("table capacity overflow guards abort before allocating") {
   CHECK(child_aborts([] {
-    Vm* vm = make_vm();
+    State* vm = make_vm();
     Value table = make_table(*vm);
     TableData* data = as_table(table);
     data->entriesLen = UINT32_MAX;
@@ -244,7 +244,7 @@ TEST_CASE("table capacity overflow guards abort before allocating") {
     (void)table_put(*vm, table, int_v(1), int_v(2));
   }));
   CHECK(child_aborts([] {
-    Vm* vm = make_vm();
+    State* vm = make_vm();
     Value table = make_table(*vm);
     TableData* data = as_table(table);
     data->entriesLen = UINT32_MAX / 2 + 1;
@@ -256,7 +256,7 @@ TEST_CASE("table capacity overflow guards abort before allocating") {
 // ---------------------------------------------------------------------------
 
 TEST_CASE("table printing preserves insertion order") {
-  Vm* vm = make_vm();
+  State* vm = make_vm();
   Value t = make_table(*vm);
   u32 root = vm->push(t);
   Value ka = keyword_v(vm->intern.intern("a", 1));
@@ -287,7 +287,7 @@ TEST_CASE("table printing preserves insertion order") {
 }
 
 TEST_CASE("pair mutation preserves acyclic and table-key invariants") {
-  Vm* vm = make_vm();
+  State* vm = make_vm();
   {
     Scope roots(*vm);
     Slot pair = roots.push(make_pair(*vm, int_v(1), null_v()));
@@ -301,13 +301,13 @@ TEST_CASE("pair mutation preserves acyclic and table-key invariants") {
 
     r = call_core(*vm, "set-cdr!", {pair.get(), pair.get()});
     CHECK(r.tag == Tag::Unwind);
-    vm_cancel_unwind(*vm);
+    state_cancel_unwind(*vm);
 
     Slot table = roots.push(make_table(*vm));
     table_put(*vm, table.get(), pair.get(), int_v(9));
     r = call_core(*vm, "set-car!", {pair.get(), int_v(4)});
     CHECK(r.tag == Tag::Unwind);
-    vm_cancel_unwind(*vm);
+    state_cancel_unwind(*vm);
     CHECK(table_get(*vm, table.get(), pair.get()).i == 9);
   }
   vm->destroy();
@@ -316,7 +316,7 @@ TEST_CASE("pair mutation preserves acyclic and table-key invariants") {
 // ---------------------------------------------------------------------------
 
 TEST_CASE("equality matrix (spec 2.4)") {
-  Vm* vm = make_vm();
+  State* vm = make_vm();
   {
     Scope roots(*vm);
 
@@ -372,7 +372,7 @@ TEST_CASE("equality matrix (spec 2.4)") {
 // ---------------------------------------------------------------------------
 
 TEST_CASE("arithmetic wraps two's-complement") {
-  Vm* vm = make_vm();
+  State* vm = make_vm();
   const i64 MAX = INT64_MAX, MIN = INT64_MIN;
 
   // (+ MAX 1) wraps to MIN
@@ -438,7 +438,7 @@ TEST_CASE("arithmetic wraps two's-complement") {
 }
 
 TEST_CASE("numeric extensions") {
-  Vm* vm = make_vm();
+  State* vm = make_vm();
 
   CHECK(call_core(*vm, "sqrt", {int_v(9)}).f == doctest::Approx(3.0));
   CHECK(call_core(*vm, "sin", {float_v(0.0)}).f == doctest::Approx(0.0));
@@ -465,12 +465,12 @@ TEST_CASE("numeric extensions") {
 
   r = call_core(*vm, "exact", {float_v(1.5)});
   CHECK(r.tag == Tag::Unwind);
-  vm_cancel_unwind(*vm);
+  state_cancel_unwind(*vm);
   vm->destroy();
 }
 
 TEST_CASE("clock extensions") {
-  Vm* vm = make_vm();
+  State* vm = make_vm();
   Value hz = call_core(*vm, "jiffies-per-second", {});
   REQUIRE(hz.tag == Tag::Int);
   CHECK(hz.i == 1000000000);

@@ -2,7 +2,7 @@
 #include "../builtins.hpp"
 #include "../eval.hpp"
 #include "../ns.hpp"
-#include "../vm.hpp"
+#include "../state.hpp"
 
 namespace ot {
 
@@ -10,7 +10,7 @@ static bool pairp(Value v) { return v.tag == Tag::Pair; }
 static Value car_(Value v) { return as_pair(v)->car; }
 static Value cdr_(Value v) { return as_pair(v)->cdr; }
 
-static u32 name_id_of(Vm& vm, Value v) {
+static u32 name_id_of(State& vm, Value v) {
   if (v.tag == Tag::Symbol || v.tag == Tag::Keyword) return v.id;
   if (v.tag == Tag::String) {
     StringData* s = as_string(v);
@@ -19,7 +19,7 @@ static u32 name_id_of(Vm& vm, Value v) {
   return 0;
 }
 
-static Value nat_gensym(Vm& vm, u32 base, u32 argc) {
+static Value nat_gensym(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "gensym", argc, 0, 1));
   char buf[128];
   const char* prefix = "G";
@@ -35,9 +35,9 @@ static Value nat_gensym(Vm& vm, u32 base, u32 argc) {
 
 // Stage-0 expander: expand macro calls in head position, recursively, and
 // recurse into subforms (skipping quote). Identity for everything else.
-static Value expand0(Vm& vm, Value form);
+static Value expand0(State& vm, Value form);
 
-static Value expand0_list(Vm& vm, Value l) {
+static Value expand0_list(State& vm, Value l) {
   if (!pairp(l)) return l;
   Scope s(vm);
   Slot lS = s.push(l);  // expand0 allocates; keep the cursor rooted
@@ -49,7 +49,7 @@ static Value expand0_list(Vm& vm, Value l) {
   return make_pair(vm, r.get(), t);
 }
 
-static Value expand0(Vm& vm, Value form) {
+static Value expand0(State& vm, Value form) {
   for (u32 guard = 0; guard < 1000; guard++) {
     if (!pairp(form)) return form;
     Value h = car_(form);
@@ -78,12 +78,12 @@ static Value expand0(Vm& vm, Value form) {
   return expand0_list(vm, form);
 }
 
-static Value nat_expander(Vm& vm, u32 base, u32 argc) {
+static Value nat_expander(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "*expander*", argc, 1, 1));
   return expand0(vm, vm.stack[base]);
 }
 
-static Value nat_expander_lexical(Vm& vm, u32 base, u32 argc) {
+static Value nat_expander_lexical(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "expander-lexical?", argc, 2, 2));
   Value env = vm.stack[base];
   Value sym = vm.stack[base + 1];
@@ -94,7 +94,7 @@ static Value nat_expander_lexical(Vm& vm, u32 base, u32 argc) {
   return bool_v(false);
 }
 
-static Value nat_expander_macro_var(Vm& vm, u32 base, u32 argc) {
+static Value nat_expander_macro_var(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "expander-macro-var", argc, 1, 1));
   if (vm.stack[base].tag != Tag::Symbol) return nil_v();
   // Resolve in the namespace of the form being expanded, not in whatever
@@ -108,13 +108,13 @@ static Value nat_expander_macro_var(Vm& vm, u32 base, u32 argc) {
   return (v.tag == Tag::Macro) ? v : nil_v();
 }
 
-static Value nat_current_ns(Vm& vm, u32 base, u32 argc) {
+static Value nat_current_ns(State& vm, u32 base, u32 argc) {
   (void)base;
   OT_TRY(need_argc(vm, "current-ns", argc, 0, 0));
   return symbol_v(vm.currentNs);
 }
 
-void register_expand(Vm& vm) {
+void register_expand(State& vm) {
   u32 saved = vm.currentNs;
   vm.currentNs = vm.syms.otiumCore_;
   def_native(vm, "gensym", nat_gensym);

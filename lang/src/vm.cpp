@@ -179,49 +179,47 @@ Value raise_error(Vm& vm, const char* fmt, ...) {
   va_start(ap, fmt);
   vsnprintf(msg, sizeof msg, fmt, ap);
   va_end(ap);
-  u32 root = vm.push(make_table(vm));
-  table_put(vm, vm.stack[root], keyword_v(vm.syms.kwType), symbol_v(vm.syms.error_));
+  Scope sc(vm);
+  Slot c = sc.push(make_table(vm));
+  table_put(vm, c.get(), keyword_v(vm.syms.kwType), symbol_v(vm.syms.error_));
   {
     Value s = make_string(vm, msg, (u32)strlen(msg));  // may move the table
-    table_put(vm, vm.stack[root], keyword_v(vm.syms.kwMessage), s);
+    table_put(vm, c.get(), keyword_v(vm.syms.kwMessage), s);
   }
-  Value r = signal_value(vm, vm.stack[root], true);
-  vm.popTo(root);
-  return r;
+  return signal_value(vm, c.get(), true);
 }
 
 Value signal_value(Vm& vm, Value c, bool unwindIfUnhandled) {
-  u32 croot = vm.push(c);
+  Scope sc(vm);
+  Slot croot = sc.push(c);
   u32 limit = vm.handlerVisible < vm.handlers.len ? vm.handlerVisible : vm.handlers.len;
   for (u32 i = limit; i-- > 0;) {
     // read pred/handler through the handlers vector (a GC root) at each use:
     // a copy would go stale across the pred call's allocations
-    u32 b = vm.push(vm.stack[croot]);
-    Value t = apply(vm, vm.handlers[i].pred, b, 1);
-    vm.popTo(b);
-    if (t.tag == Tag::Unwind) {
-      vm.popTo(croot);
-      return t;
+    Value t;
+    {
+      Scope s2(vm);
+      Slot b = s2.push(croot.get());
+      t = apply(vm, vm.handlers[i].pred, b.idx, 1);
     }
+    OT_TRY(t);
     if (is_truthy(t)) {
       u32 savedVis = vm.handlerVisible;
       vm.handlerVisible = i;  // this binding + inner ones invisible
-      u32 b2 = vm.push(vm.stack[croot]);
-      Value hr = apply(vm, vm.handlers[i].handler, b2, 1);
-      vm.popTo(b2);
-      vm.handlerVisible = savedVis;
-      if (hr.tag == Tag::Unwind) {
-        vm.popTo(croot);
-        return hr;
+      Value hr;
+      {
+        Scope s2(vm);
+        Slot b2 = s2.push(croot.get());
+        hr = apply(vm, vm.handlers[i].handler, b2.idx, 1);
       }
+      vm.handlerVisible = savedVis;
+      OT_TRY(hr);
       // handler declined: continue outward
     }
   }
-  Value cv = vm.stack[croot];
-  vm.popTo(croot);
   if (unwindIfUnhandled) {
     vm.unwindKind = UnwindKind::Condition;
-    vm.unwindCondition = cv;
+    vm.unwindCondition = croot.get();
     return unwind_v();
   }
   return nil_v();

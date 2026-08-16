@@ -10,8 +10,6 @@
 
 namespace ot {
 
-#define ARG(n) vm.stack[base + (n)]
-
 static inline const char* sbytes(StringData* s) { return (const char*)(s + 1); }
 
 // --- small UTF-8 helpers (positions in code points) ------------------------
@@ -73,7 +71,7 @@ static Value nat_substring(Vm& vm, u32 base, u32 argc) {
   if (end < start) return make_string(vm, "", 0);
   u32 b0 = utf8_offset(sbytes(s), s->len, (u32)start);
   u32 b1 = utf8_offset(sbytes(s), s->len, (u32)end);
-  return make_string(vm, sbytes(s) + b0, b1 - b0);
+  return make_string_from(vm, ARG(0), b0, b1 - b0);
 }
 
 static bool is_ws(u8 c) {
@@ -83,23 +81,24 @@ static bool is_ws(u8 c) {
 static Value nat_string_split(Vm& vm, u32 base, u32 argc) {
   if (argc < 1 || argc > 2) return raise_error(vm, "string-split: expected 1-2 arguments");
   OT_TRY(need_string(vm, "string-split", ARG(0)));
+  Scope scope(vm);
+  Slot out = scope.push(make_array(vm, 8));
+  // Fetch source pointers only after the array alloc above — and re-fetch
+  // after every subsequent allocation.
   StringData* s = as_string(ARG(0));
   const char* p = sbytes(s);
   u32 n = s->len;
-  Value out = make_array(vm, 8);
-  u32 root = vm.push(out);
   if (argc == 2) {
     OT_TRY(need_string(vm, "string-split", ARG(1)));
     StringData* sep = as_string(ARG(1));
-    if (sep->len == 0) {
-      vm.popTo(root);
-      return raise_error(vm, "string-split: empty separator");
-    }
-    // re-fetch pointers after each allocation: make_string may GC-move objects.
+    if (sep->len == 0) return raise_error(vm, "string-split: empty separator");
+    // re-fetch pointers after each allocation: make_string_from may GC-move
+    // objects (it roots the source internally; out is re-read from its slot).
     u32 start = 0, i = 0;
     while (i + sep->len <= n) {
       if (memcmp(p + i, sbytes(sep), sep->len) == 0) {
-        array_push(vm, out, make_string(vm, p + start, i - start));
+        Value piece = make_string_from(vm, ARG(0), start, i - start);
+        array_push(vm, out.get(), piece);
         s = as_string(ARG(0));
         sep = as_string(ARG(1));
         p = sbytes(s);  // re-fetch
@@ -107,7 +106,8 @@ static Value nat_string_split(Vm& vm, u32 base, u32 argc) {
         start = i;
       } else i++;
     }
-    array_push(vm, out, make_string(vm, p + start, n - start));
+    Value piece = make_string_from(vm, ARG(0), start, n - start);
+    array_push(vm, out.get(), piece);
   } else {
     u32 i = 0;
     while (i < n) {
@@ -115,14 +115,14 @@ static Value nat_string_split(Vm& vm, u32 base, u32 argc) {
       u32 start = i;
       while (i < n && !is_ws((u8)p[i])) i++;
       if (i > start) {
-        array_push(vm, out, make_string(vm, p + start, i - start));
+        Value piece = make_string_from(vm, ARG(0), start, i - start);
+        array_push(vm, out.get(), piece);
         s = as_string(ARG(0));
         p = sbytes(s);  // re-fetch after alloc
       }
     }
   }
-  vm.popTo(root);
-  return out;
+  return out.get();
 }
 
 static Value nat_string_join(Vm& vm, u32 base, u32 argc) {
@@ -180,7 +180,7 @@ static Value nat_trim(Vm& vm, u32 base, u32 argc) {
   u32 a = 0, b = s->len;
   while (a < b && is_ws((u8)p[a])) a++;
   while (b > a && is_ws((u8)p[b - 1])) b--;
-  return make_string(vm, p + a, b - a);
+  return make_string_from(vm, ARG(0), a, b - a);
 }
 
 static bool bytes_find(const char* hay, u32 hn, const char* nee, u32 nn, u32* at) {
@@ -347,15 +347,14 @@ static Value nat_name(Vm& vm, u32 base, u32 argc) {
 
 static Value nat_buffer(Vm& vm, u32 base, u32 argc) {
   if (argc > 1) return raise_error(vm, "buffer: expected 0-1 arguments");
-  Value b = make_buffer(vm);
+  Scope scope(vm);
+  Slot b = scope.push(make_buffer(vm));
   if (argc == 1) {
-    u32 root = vm.push(b);
     Buf tmp;
     print_display(vm, ARG(0), tmp);
-    as_buffer(b)->buf.append(tmp.data ? tmp.data : "", tmp.len);
-    vm.popTo(root);
+    as_buffer(b.get())->buf.append(tmp.data ? tmp.data : "", tmp.len);
   }
-  return b;
+  return b.get();
 }
 
 static Value nat_buffer_push(Vm& vm, u32 base, u32 argc) {

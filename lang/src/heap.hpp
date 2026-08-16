@@ -162,12 +162,17 @@ struct Heap {
 // For substrate tests, the heap-taking variants are also provided.
 Value make_pair_h(Heap& h, Value car, Value cdr);
 Value make_string_h(Heap& h, const char* bytes, u32 len);
+// Substring copy from a heap string; roots src across the alloc. Use this
+// (never make_string with a string_bytes-derived pointer) when the source
+// bytes live on the GC heap.
+Value make_string_from_h(Heap& h, Value src, u32 byteOff, u32 len);
 Value make_array_h(Heap& h, u32 cap);
 Value make_table_h(Heap& h);
 Value make_buffer_h(Heap& h);
 
 Value make_pair(Vm& vm, Value car, Value cdr);
 Value make_string(Vm& vm, const char* bytes, u32 len);
+Value make_string_from(Vm& vm, Value src, u32 byteOff, u32 len);
 Value make_array(Vm& vm, u32 cap);
 Value make_table(Vm& vm);
 Value make_buffer(Vm& vm);
@@ -189,6 +194,12 @@ inline RestartData* as_restart(Value v) { return (RestartData*)obj_payload(v.obj
 void array_reserve(Value arr, u32 n);
 
 // Table API — implemented in builtins/data.cpp, declared here per contract.
+//
+// CONTRACT (alloc-free): table_get, table_put, array_get, array_push, and
+// array_reserve never allocate on the GC heap — all their storage growth is
+// C-heap malloc/realloc. Callers may hold raw Values across these calls.
+// If any of them ever needs a GC allocation, every such caller must be
+// re-audited (grep for "alloc-free" first).
 Value table_get(Vm&, Value table, Value key);           // nil on miss
 Value table_put(Vm&, Value table, Value key, Value v);  // nil value deletes; returns table
 Value array_get(Value arr, i64 idx);                    // nil out of range

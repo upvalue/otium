@@ -10,8 +10,8 @@ in test order as results arrive. Exit code is the number of failing tests.
 
 Options:
   --filter SUBSTR   only run tests whose name contains SUBSTR
-  --timeout SEC     per-test timeout in seconds (default 60; stress builds
-                    of alloc-heavy tests like 06-tco may need more)
+  --skip SUBSTR     skip tests whose name contains SUBSTR (repeatable)
+  --timeout SEC     per-test timeout in seconds (default 60)
   --jobs N          max concurrent tests (default: cpu count)
 """
 
@@ -70,6 +70,7 @@ def run_one(binary, here, expected_dir, test, timeout):
 def main():
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("--filter", default=None)
+    ap.add_argument("--skip", action="append", default=[])
     ap.add_argument("--timeout", type=float, default=60.0)
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     ap.add_argument("binary", nargs="?")
@@ -93,6 +94,8 @@ def main():
                  if t in only or t[: -len(".scm")] in only]
     if args.filter:
         tests = [t for t in tests if args.filter in t]
+    for pat in args.skip:
+        tests = [t for t in tests if pat not in t]
     if not tests:
         print("no tests found", file=sys.stderr)
         return 2

@@ -102,8 +102,12 @@ struct Heap {
 ```
 
 Helper constructors (in heap.hpp or value.hpp): `Value make_pair(Vm&, Value, Value)`,
-`Value make_string(Vm&, const char* bytes, u32 len)`, `Value make_array(Vm&, u32 cap)`,
-`Value make_table(Vm&)`, `Value make_buffer(Vm&)`. Accessors: `PairData* as_pair(Value)`, etc.
+`Value make_string(Vm&, const char* bytes, u32 len)`,
+`Value make_string_from(Vm&, Value src, u32 byteOff, u32 len)` (substring copy that roots
+`src` across the alloc — required whenever the source bytes live on the GC heap),
+`Value make_array(Vm&, u32 cap)`, `Value make_table(Vm&)`, `Value make_buffer(Vm&)`.
+The Value-taking constructors root their arguments internally (Heap::tempRoots).
+Accessors: `PairData* as_pair(Value)`, etc.
 
 Table API (implemented in builtins/data.cpp but declared in heap.hpp):
 ```cpp
@@ -114,6 +118,9 @@ void  table_iter(Vm&, Value table, /* callback or index-based: */ u32 entryCount
 Value array_get(Value arr, i64 idx);                 // nil out of range
 void  array_push(Vm&, Value arr, Value v);
 ```
+CONTRACT: table_get/table_put/array_get/array_push/array_reserve never allocate on the
+GC heap (C-heap storage only); raw Values may be held across them. Everything else that
+constructs values can collect and move every heap object.
 
 ## intern.hpp
 
@@ -149,6 +156,19 @@ struct Vm {
   void popTo(u32 base);
 };
 using NativeFn = Value (*)(Vm& vm, u32 base, u32 argc);
+
+// GC rooting discipline (lan-6mpt): internal code keeps heap values in rooted
+// vm.stack slots and reads them at point of use; a raw Value local must never
+// live across an allocating call. The handle types (vm.hpp):
+struct Slot  { Value get() const; void set(Value) const; };  // names a stack cell
+struct Scope {                       // RAII push/popTo balance; early-return safe
+  explicit Scope(Vm&);               // base = current stack top; ~Scope pops to it
+  Slot push(Value v = nil_v());
+  Slot slot(u32 i);                  // i-th push of this scope
+};
+// Natives read arguments via ARG(n) (builtins.hpp) — an lvalue into vm.stack —
+// at point of use, never via a copy held across an allocating call. Returning
+// a Value is safe when the caller immediately roots or returns it.
 
 // raising from native code:
 Value raise_error(Vm&, const char* fmt, ...);  // builds {:type 'error :message ...}, returns Unwind

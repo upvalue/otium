@@ -21,15 +21,18 @@ using LoadFn = bool (*)(void* ud, const char* nsName, Buf* srcOut);
 // What kind of unwind is in flight when a Tag::Unwind value propagates.
 enum class UnwindKind : u8 { None, Condition, Restart, Quit };
 
+// The handlers/restarts/paramBindings vectors are traced directly by the
+// root walker (vm_walk_roots in vm.cpp); entries need no extra stack rooting
+// once pushed.
 struct HandlerBinding {
   Value pred, handler;
-};  // rooted by handler-bind's stack slots
+};
 struct RestartRec {
   Value restart;
-};  // Tag::Restart value, rooted by restart-case
+};  // Tag::Restart value
 struct ParamBinding {
   Value param, value;
-};  // rooted by with-params
+};
 
 // Pre-interned symbol/keyword name ids.
 struct Syms {
@@ -94,6 +97,53 @@ struct Vm {
 
   explicit Vm(const VmConfig&);
 };
+
+// --- rooted-slot handles (the internal GC discipline, see lan-6mpt) --------
+//
+// A raw heap Value in a C++ local goes stale at the next allocating call
+// (semispace collect moves everything). Internal code therefore keeps heap
+// values in rooted vm.stack slots and reads them through Slot at point of
+// use; a raw Value may exist only transiently between a get() and its use,
+// with no allocation in between. Returning a Value is safe when the caller
+// immediately roots or returns it.
+//
+// Slot is a stable name for a stack cell: reads/writes always go through
+// vm.stack, so the collector's forwarding is picked up for free. (It must
+// never cache a Value* — Vec reallocs on push.)
+struct Slot {
+  Vm* vm;
+  u32 idx;
+  Value get() const { return vm->stack[idx]; }
+  void set(Value v) const { vm->stack[idx] = v; }
+};
+
+// Scope pairs a run of pushes with the popTo that balances them, surviving
+// early returns (which is what makes OT_TRY safe inside a Scope'd frame).
+// Nest strictly: a Scope must not outlive values pushed after it by other
+// means it doesn't know about.
+struct Scope {
+  Vm& vm;
+  u32 base;
+  explicit Scope(Vm& v) : vm(v), base(v.stack.len) {}
+  // Guarded: an enclosing frame may already have popped below base on an
+  // early-return path (eval_tr's RET) — never grow the stack back.
+  ~Scope() {
+    if (vm.stack.len > base) vm.popTo(base);
+  }
+  Scope(const Scope&) = delete;
+  Scope& operator=(const Scope&) = delete;
+  Slot push(Value v = nil_v()) { return Slot{&vm, vm.push(v)}; }
+  Slot slot(u32 i) { return Slot{&vm, base + i}; }  // i-th push of this scope
+};
+
+// Slot-taking constructor sugar: operands are read from their rooted slots
+// at call time (the underlying helpers root their Value args internally via
+// Heap::tempRoots, so the raw forms are also safe — these exist so call
+// sites don't need a raw Value at all).
+inline Value make_pair(Vm& vm, Slot car, Slot cdr) { return make_pair(vm, car.get(), cdr.get()); }
+inline Value make_string_from(Vm& vm, Slot src, u32 byteOff, u32 len) {
+  return make_string_from(vm, src.get(), byteOff, len);
+}
 
 using NativeFn = Value (*)(Vm& vm, u32 base, u32 argc);
 

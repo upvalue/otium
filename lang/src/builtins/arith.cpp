@@ -7,7 +7,6 @@
 
 namespace ot {
 
-#define ARG(n) vm.stack[base + (n)]
 
 static inline bool is_num(Value v) { return v.tag == Tag::Int || v.tag == Tag::Float; }
 static inline f64 as_f(Value v) { return v.tag == Tag::Int ? (f64)v.i : v.f; }

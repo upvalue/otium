@@ -1,6 +1,6 @@
 ---
 id: lan-6mpt
-status: open
+status: closed
 deps: []
 links: [lan-c7gk, lan-8ixg]
 created: 2026-08-15T23:27:54Z
@@ -29,3 +29,13 @@ Alternative rejected for now (discussed 2026-08-15): switching to non-moving mar
 ## Acceptance Criteria
 
 No raw heap Value locals held across allocating calls anywhere in src/ (grep/lint clean by whatever enforcement we pick); full conformance suite green against the gc_stress+ASan build; interfaces.md updated to the slot-based signatures
+
+## Notes
+
+**2026-08-16T00:17:09Z**
+
+Implemented (2026-08-15): Slot/Scope handle API in vm.hpp; eval.cpp/ns.cpp/vm.cpp/reader.cpp/builtins/*/repl converted — no raw heap Value locals across allocating calls; shared ARG macro in builtins.hpp; alloc-free contract for table_get/table_put/array_* documented in heap.hpp and interfaces.md. Decision with Phil: keep Value returns + Unwind sentinel (native signature unchanged); enforcement mechanism (lint / debug non-copyable Value) DEFERRED for now — revisit later, gc_stress+ASan remains the backstop. resolve_var_impl's Value* err out-param replaced with a bool (the out-value was only ever the immediate Unwind sentinel).
+
+**2026-08-16T00:22:27Z**
+
+Acceptance met (2026-08-15): no raw heap Value locals across allocating calls in src/ + repl/ (structural via Slot/Scope; verified by gc_stress+ASan gate, 8/9 with only the non-GC lan-t86k failure); interfaces.md updated to the handle discipline. Enforcement mechanism deferred by decision — reopen or ticket separately when wanted. Closing.

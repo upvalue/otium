@@ -17,76 +17,71 @@ Value ns_get_or_create(Vm& vm, u32 nsName) {
   if (!is_nil(ns)) return ns;
   // Allocate each sub-structure BEFORE reading the ns slot: a make_* in
   // argument position would move the table out from under table_put.
-  u32 root = vm.stack.len;
-  u32 nsS = vm.push(make_table(vm));
-  table_put(vm, vm.stack[nsS], keyword_v(vm.syms.kwName), symbol_v(nsName));
+  Scope sc(vm);
+  Slot nsS = sc.push(make_table(vm));
+  table_put(vm, nsS.get(), keyword_v(vm.syms.kwName), symbol_v(nsName));
   {
     Value t = make_table(vm);
-    table_put(vm, vm.stack[nsS], keyword_v(vm.syms.kwVars), t);
+    table_put(vm, nsS.get(), keyword_v(vm.syms.kwVars), t);
   }
   {
     Value t = make_table(vm);
-    table_put(vm, vm.stack[nsS], keyword_v(vm.syms.kwAliases), t);
+    table_put(vm, nsS.get(), keyword_v(vm.syms.kwAliases), t);
   }
   {
     Value t = make_table(vm);
-    table_put(vm, vm.stack[nsS], keyword_v(vm.syms.kwRefers), t);
+    table_put(vm, nsS.get(), keyword_v(vm.syms.kwRefers), t);
   }
   {
     Value a = make_array(vm, 8);
-    table_put(vm, vm.stack[nsS], keyword_v(vm.syms.kwOrder), a);
+    table_put(vm, nsS.get(), keyword_v(vm.syms.kwOrder), a);
   }
-  table_put(vm, vm.nsRegistry, symbol_v(nsName), vm.stack[nsS]);
-  ns = vm.stack[nsS];
+  table_put(vm, vm.nsRegistry, symbol_v(nsName), nsS.get());
 
   // Auto-refer all public otium.core vars present at creation time (7.1).
+  // The whole walk is alloc-free (table_get/table_put contract, heap.hpp),
+  // so the raw locals below are safe.
   if (nsName != vm.syms.otiumCore_) {
     Value core = ns_lookup(vm, vm.syms.otiumCore_);
     if (!is_nil(core)) {
       Value cvars = ns_field(vm, core, vm.syms.kwVars);
       Value order = ns_field(vm, core, vm.syms.kwOrder);
-      Value refers = ns_field(vm, ns, vm.syms.kwRefers);
+      Value refers = ns_field(vm, nsS.get(), vm.syms.kwRefers);
       ArrayData* od = as_array(order);
       for (u32 i = 0; i < od->len; i++) {
         Value nameSym = od->items[i];
         Value var = table_get(vm, cvars, nameSym);
         if (!is_nil(var) && !var_private(var)) table_put(vm, refers, nameSym, var);
-        od = as_array(order);  // table_put may have allocated / moved
       }
     }
   }
-  vm.popTo(root);
-  return ns;
+  return nsS.get();
 }
 
 Value ns_define(Vm& vm, u32 name, Value v, bool isPrivate, Value docstring) {
-  u32 root = vm.stack.len;
-  vm.push(v);
-  vm.push(docstring);
-  Value ns = ns_get_or_create(vm, vm.currentNs);
-  vm.push(ns);
-  Value vars = ns_field(vm, ns, vm.syms.kwVars);
+  Scope sc(vm);
+  Slot vS = sc.push(v);
+  Slot dS = sc.push(docstring);
+  Slot nsS = sc.push(ns_get_or_create(vm, vm.currentNs));
+  Value vars = ns_field(vm, nsS.get(), vm.syms.kwVars);
   Value var = table_get(vm, vars, symbol_v(name));
   if (is_nil(var)) {
-    var = make_array(vm, VAR_SLOTS);
-    vm.push(var);
-    array_push(vm, var, vm.stack[root]);  // value
-    array_push(vm, var, symbol_v(name));
-    array_push(vm, var, symbol_v(vm.currentNs));
-    array_push(vm, var, vm.stack[root + 1]);  // docstring
-    array_push(vm, var, bool_v(isPrivate));
-    vars = ns_field(vm, vm.stack[root + 2], vm.syms.kwVars);
-    table_put(vm, vars, symbol_v(name), var);
-    array_push(vm, ns_field(vm, vm.stack[root + 2], vm.syms.kwOrder), symbol_v(name));
+    Slot varS = sc.push(make_array(vm, VAR_SLOTS));
+    // array_push/table_put are alloc-free; the var cell re-reads are cheap
+    array_push(vm, varS.get(), vS.get());  // value
+    array_push(vm, varS.get(), symbol_v(name));
+    array_push(vm, varS.get(), symbol_v(vm.currentNs));
+    array_push(vm, varS.get(), dS.get());  // docstring
+    array_push(vm, varS.get(), bool_v(isPrivate));
+    table_put(vm, ns_field(vm, nsS.get(), vm.syms.kwVars), symbol_v(name), varS.get());
+    array_push(vm, ns_field(vm, nsS.get(), vm.syms.kwOrder), symbol_v(name));
   } else {
     ArrayData* a = as_array(var);
-    a->items[VAR_VALUE] = vm.stack[root];
-    a->items[VAR_DOC] = vm.stack[root + 1];
+    a->items[VAR_VALUE] = vS.get();
+    a->items[VAR_DOC] = dS.get();
     a->items[VAR_PRIVATE] = bool_v(isPrivate);
   }
-  Value out = vm.stack[root];
-  vm.popTo(root);
-  return out;
+  return vS.get();
 }
 
 bool sym_qualified(Vm& vm, u32 symId) {
@@ -97,8 +92,10 @@ bool sym_qualified(Vm& vm, u32 symId) {
   return false;
 }
 
-// Resolve a var cell; nil if not found or (when errOut) sets a condition.
-static Value resolve_var_impl(Vm& vm, Value sym, Value* err) {
+// Resolve a var cell; nil if not found. When raiseErr, a miss also raises a
+// condition (raise_error stores it in vm.unwindCondition; its return value
+// is always the immediate Unwind sentinel, so callers just return unwind_v()).
+static Value resolve_var_impl(Vm& vm, Value sym, bool raiseErr) {
   u32 len;
   const char* s = vm.intern.name(sym.id, &len);
   u32 slash = 0;
@@ -119,16 +116,16 @@ static Value resolve_var_impl(Vm& vm, Value sym, Value* err) {
     }
     Value target = ns_lookup(vm, nsName);
     if (is_nil(target)) {
-      if (err) *err = raise_error(vm, "no such namespace: %.*s", (int)slash, s);
+      if (raiseErr) raise_error(vm, "no such namespace: %.*s", (int)slash, s);
       return nil_v();
     }
     Value var = table_get(vm, ns_field(vm, target, vm.syms.kwVars), symbol_v(n));
     if (is_nil(var)) {
-      if (err) *err = raise_error(vm, "no such var: %.*s", (int)len, s);
+      if (raiseErr) raise_error(vm, "no such var: %.*s", (int)len, s);
       return nil_v();
     }
     if (var_private(var) && nsName != vm.currentNs) {
-      if (err) *err = raise_error(vm, "var is private: %.*s", (int)len, s);
+      if (raiseErr) raise_error(vm, "var is private: %.*s", (int)len, s);
       return nil_v();
     }
     return var;
@@ -142,16 +139,15 @@ static Value resolve_var_impl(Vm& vm, Value sym, Value* err) {
     var = table_get(vm, ns_field(vm, cur, vm.syms.kwRefers), sym);
     if (!is_nil(var)) return var;
   }
-  if (err) *err = raise_error(vm, "unresolved symbol: %.*s", (int)len, s);
+  if (raiseErr) raise_error(vm, "unresolved symbol: %.*s", (int)len, s);
   return nil_v();
 }
 
-Value ns_resolve_var(Vm& vm, Value symbol) { return resolve_var_impl(vm, symbol, nullptr); }
+Value ns_resolve_var(Vm& vm, Value symbol) { return resolve_var_impl(vm, symbol, false); }
 
 Value ns_resolve(Vm& vm, Value symbol) {
-  Value err = nil_v();
-  Value var = resolve_var_impl(vm, symbol, &err);
-  if (is_nil(var)) return err;
+  Value var = resolve_var_impl(vm, symbol, true);
+  if (is_nil(var)) return unwind_v();
   return var_value(var);
 }
 

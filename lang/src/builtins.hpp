@@ -21,6 +21,12 @@ void register_sys(Vm&);
 // Wrap a NativeFn in a Function object and ns_define it (implemented in sys.cpp).
 void def_native(Vm& vm, const char* name, NativeFn f);
 
+// Argument accessor for natives: reads the rooted stack slot at use time.
+// GC DISCIPLINE: use ARG(n) (or a Slot) at the point of use — never copy it
+// into a local that lives across an allocating call; the semispace collector
+// moves everything. See vm.hpp (Slot/Scope) and lan-6mpt.
+#define ARG(n) vm.stack[base + (n)]
+
 // Structural hash with equal? semantics (data.cpp): mixes the type tag
 // (equal? is type-strict), normalizes -0.0 to 0.0, hashes NaN to a constant,
 // immutables structurally, mutables via heap.identityOf (stable across GC).

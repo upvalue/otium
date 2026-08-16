@@ -11,8 +11,6 @@
 
 namespace ot {
 
-#define ARG(n) vm.stack[base + (n)]
-
 // ---------------------------------------------------------------------------
 // def_native — wrap a NativeFn in a Function object, define it in otium.core.
 
@@ -178,22 +176,20 @@ static Value nat_identity(Vm& vm, u32 base, u32 argc) {
 
 static Value nat_apply(Vm& vm, u32 base, u32 argc) {
   if (argc < 2) return raise_error(vm, "apply: expected at least 2 arguments");
-  Value f = ARG(0);
-  Value seq = ARG(argc - 1);
-  u32 cbase = vm.stack.len;
+  Scope s(vm);
   for (u32 i = 1; i + 1 < argc; i++) vm.push(ARG(i));
+  // vm.push doesn't allocate on the GC heap, so walking seq while pushing is
+  // safe; f and seq are re-read from their rooted arg slots at use time.
+  Value seq = ARG(argc - 1);
   if (seq.tag == Tag::Array) {
     ArrayData* a = as_array(seq);
     for (u32 i = 0; i < a->len; i++) vm.push(a->items[i]);
   } else if (seq.tag == Tag::Pair || seq.tag == Tag::Null || is_nil(seq)) {
     for (Value p = seq; p.tag == Tag::Pair; p = as_pair(p)->cdr) vm.push(as_pair(p)->car);
   } else {
-    vm.popTo(cbase);
     return raise_error(vm, "apply: last argument must be a sequence");
   }
-  Value r = apply(vm, f, cbase, vm.stack.len - cbase);
-  vm.popTo(cbase);
-  return r;
+  return apply(vm, ARG(0), s.base, vm.stack.len - s.base);
 }
 
 static Value nat_eval(Vm& vm, u32 base, u32 argc) {
@@ -204,18 +200,26 @@ static Value nat_eval(Vm& vm, u32 base, u32 argc) {
 static Value nat_read_string(Vm& vm, u32 base, u32 argc) {
   OT_TRY(one_arg(vm, "read-string", argc));
   if (ARG(0).tag != Tag::String) return raise_error(vm, "read-string: expected string");
+  // Snapshot the source into a C-heap Buf: the Reader keeps a raw pointer to
+  // the source for its whole (allocating) lifetime, so it must never point
+  // into the GC heap.
   StringData* s = as_string(ARG(0));
-  Reader r(vm, (const char*)(s + 1), s->len, "<read-string>");
+  u32 srcNchars = s->nchars;
+  Buf src;
+  src.append((const char*)(s + 1), s->len);
+  Reader r(vm, src.data ? src.data : "", src.len, "<read-string>");
   Value form = r.next();
   OT_TRY(form);
-  if (r.atEof() && is_nil(form) && s->nchars == 0)
+  if (r.atEof() && is_nil(form) && srcNchars == 0)
     return raise_error(vm, "read-string: empty input");
   // INTEGRATION: Reader contract makes "no form at all" vs "read nil literal"
   // hard to distinguish; treating eof-with-nil as empty input.
+  Scope sc(vm);
+  Slot formS = sc.push(form);
   Value trailing = r.next();
   OT_TRY(trailing);
   if (!r.atEof()) return raise_error(vm, "read-string: trailing input");
-  return form;
+  return formS.get();
 }
 
 // If form is (sym args...) and sym resolves to a macro, expand once.
@@ -225,22 +229,25 @@ static Value expand_once(Vm& vm, Value form, bool* expanded) {
   if (form.tag != Tag::Pair) return form;
   Value head = as_pair(form)->car;
   if (head.tag != Tag::Symbol) return form;
+  Scope s(vm);
+  Slot formS = s.push(form);  // ns_resolve allocates
   Value callee = ns_resolve(vm, head);
   if (callee.tag == Tag::Unwind) {
     // unresolvable head is not a macro call; swallow the unwind
     vm_cancel_unwind(vm);
-    return form;
+    return formS.get();
   }
-  if (callee.tag != Tag::Macro) return form;
-  // push unevaluated argument forms and call the macro
+  if (callee.tag != Tag::Macro) return formS.get();
+  // push unevaluated argument forms and call the macro (vm.push doesn't
+  // allocate on the GC heap, so walking the form while pushing is safe)
+  Slot calleeS = s.push(callee);
   u32 cbase = vm.stack.len;
   u32 n = 0;
-  for (Value p = as_pair(form)->cdr; p.tag == Tag::Pair; p = as_pair(p)->cdr) {
+  for (Value p = as_pair(formS.get())->cdr; p.tag == Tag::Pair; p = as_pair(p)->cdr) {
     vm.push(as_pair(p)->car);
     n++;
   }
-  Value r = apply(vm, callee, cbase, n);
-  vm.popTo(cbase);
+  Value r = apply(vm, calleeS.get(), cbase, n);
   if (r.tag == Tag::Unwind) return r;
   *expanded = true;
   return r;
@@ -254,21 +261,13 @@ static Value nat_macroexpand_1(Vm& vm, u32 base, u32 argc) {
 
 static Value nat_macroexpand(Vm& vm, u32 base, u32 argc) {
   OT_TRY(one_arg(vm, "macroexpand", argc));
-  Value form = ARG(0);
-  u32 root = vm.push(form);
+  Scope s(vm);
+  Slot formS = s.push(ARG(0));
   for (;;) {
     bool e;
-    Value next = expand_once(vm, form, &e);
-    if (next.tag == Tag::Unwind) {
-      vm.popTo(root);
-      return next;
-    }
-    if (!e) {
-      vm.popTo(root);
-      return next;
-    }
-    form = next;
-    vm.stack[root] = form;
+    Value next = expand_once(vm, formS.get(), &e);
+    if (next.tag == Tag::Unwind || !e) return next;
+    formS.set(next);
   }
 }
 

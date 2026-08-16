@@ -116,20 +116,26 @@ static Value repl_condition_handler(Vm& vm, u32 base, u32 argc) {
   u32 b = vm.stack.len;
   Value restarts = call_named(vm, "compute-restarts", b, 0);
   if (restarts.tag == Tag::Unwind) return restarts;
-  u32 rslot = vm.push(restarts);  // root across allocations below
+  ot::Scope sc(vm);
+  ot::Slot rS = sc.push(restarts);  // root across allocations below
 
   // list them
   ot::i64 count = 0;
   for (;; ++count) {
-    Value r = ot::array_get(restarts, count);
-    if (ot::is_nil(r)) break;
-    u32 ab = vm.stack.len;
-    vm.push(r);
-    Value name = call_named(vm, "restart-name", ab, 1);
-    vm.popTo(ab);
-    vm.push(r);
-    Value desc = call_named(vm, "restart-description", ab, 1);
-    vm.popTo(ab);
+    Value name, desc;
+    {
+      ot::Scope s2(vm);
+      ot::Slot r = s2.push(ot::array_get(rS.get(), count));
+      if (ot::is_nil(r.get())) break;
+      u32 ab = vm.stack.len;
+      vm.push(r.get());
+      name = call_named(vm, "restart-name", ab, 1);
+      vm.popTo(ab);
+      vm.push(r.get());
+      desc = call_named(vm, "restart-description", ab, 1);
+    }
+    // name is a symbol (immediate); desc is used with no allocation between
+    // the call above and the prints below (Buf/print_display are C-heap only)
     Buf line;
     line.printf("  [%lld] ", (long long)count);
     if (name.tag != Tag::Unwind) ot::print_display(vm, name, line);
@@ -143,7 +149,6 @@ static Value repl_condition_handler(Vm& vm, u32 base, u32 argc) {
 
   if (count == 0) {
     fputs("(no active restarts)\n", stderr);
-    vm.popTo(rslot);
     return ot::nil_v();  // decline; condition unwinds to the REPL loop
   }
 
@@ -151,28 +156,19 @@ static Value repl_condition_handler(Vm& vm, u32 base, u32 argc) {
     fputs("restart #? (or press enter to unwind) ", stderr);
     fflush(stderr);
     char buf[128];
-    if (!fgets(buf, sizeof buf, stdin)) {
-      vm.popTo(rslot);
-      return ot::nil_v();
-    }
-    if (buf[0] == '\n') {
-      vm.popTo(rslot);
-      return ot::nil_v();
-    }  // decline
+    if (!fgets(buf, sizeof buf, stdin)) return ot::nil_v();
+    if (buf[0] == '\n') return ot::nil_v();  // decline
     char* end = nullptr;
     long idx = strtol(buf, &end, 10);
     if (end == buf || idx < 0 || idx >= count) {
       fputs("invalid choice\n", stderr);
       continue;
     }
-    Value chosen = ot::array_get(restarts, idx);
     u32 ib = vm.stack.len;
-    vm.push(chosen);
+    vm.push(ot::array_get(rS.get(), idx));
     // invoke-restart with a restart value unwinds to exactly that restart;
     // the resulting Unwind propagates out of this handler and resumes there.
-    Value r = call_named(vm, "invoke-restart", ib, 1);
-    vm.popTo(rslot);
-    return r;
+    return call_named(vm, "invoke-restart", ib, 1);
   }
 }
 
@@ -222,11 +218,13 @@ static void run_repl(Vm& vm) {
   printf("otium repl — ^C interrupts, ^D exits\n");
   // PoC note: one complete form per line. Multi-line accumulation would retry
   // the read on an unterminated-form error; kept simple for now.
-  Value handlerFn = ot::make_native(vm, "repl-condition-handler", repl_condition_handler);
-  u32 hslot = vm.push(handlerFn);
-  Value predFn = ot::make_native(vm, "repl-any-pred", always_true_pred);
-  vm.push(predFn);
-  (void)hslot;
+  // Both natives stay rooted in these slots for the whole session; read them
+  // through the slots at each install — a raw copy would go stale as soon as
+  // an eval allocates.
+  ot::Slot handlerFn{&vm, vm.push(ot::make_native(vm, "repl-condition-handler",
+                                                  repl_condition_handler))};
+  ot::Slot predFn{&vm, vm.push(ot::nil_v())};
+  predFn.set(ot::make_native(vm, "repl-any-pred", always_true_pred));
 
   for (;;) {
     char* line = bestlineWithHistory("otium> ", "otium");
@@ -261,7 +259,7 @@ static void run_repl(Vm& vm) {
       if (rd.atEof()) break;
 
       // Install the interactive restart-offering handler around this eval.
-      Value ph = ot::vm_push_handler(vm, predFn, handlerFn);
+      Value ph = ot::vm_push_handler(vm, predFn.get(), handlerFn.get());
       (void)ph;
       Value result = ot::eval_form(vm, form);
       ot::vm_pop_handler(vm);

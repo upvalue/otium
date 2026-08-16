@@ -212,14 +212,39 @@ Value make_pair_h(Heap& h, Value car, Value cdr) {
   return obj_v(Tag::Pair, o);
 }
 
+// utf8 code points = bytes that are not continuation bytes. Invalid utf8
+// degrades to a byte-ish count rather than erroring.
+static u32 utf8_count(const char* p, u32 len) {
+  u32 n = 0;
+  for (u32 i = 0; i < len; i++)
+    if (((u8)p[i] & 0xC0) != 0x80) n++;
+  return n;
+}
+
 Value make_string_h(Heap& h, const char* bytes, u32 len) {
   Obj* o = h.alloc(ObjType::String, (u32)sizeof(StringData) + len + 1);
   StringData* d = (StringData*)obj_payload(o);
   d->len = len;
-  d->nchars = len;  // caller/reader may fix up for multibyte utf8
   char* dst = (char*)obj_payload(o) + sizeof(StringData);
   memcpy(dst, bytes, len);
   dst[len] = 0;
+  d->nchars = utf8_count(dst, len);
+  return obj_v(Tag::String, o);
+}
+
+Value make_string_from_h(Heap& h, Value src, u32 byteOff, u32 len) {
+  // Copy bytes out of a heap string. The alloc may move `src`, so root it in
+  // tempRoots and re-derive the source pointer after — passing sbytes(src)
+  // into make_string_h directly is a use-after-free under a moving collect.
+  h.tempRoots.push(src);
+  Obj* o = h.alloc(ObjType::String, (u32)sizeof(StringData) + len + 1);
+  src = h.tempRoots.pop();
+  StringData* d = (StringData*)obj_payload(o);
+  d->len = len;
+  char* dst = (char*)obj_payload(o) + sizeof(StringData);
+  memcpy(dst, string_bytes(src) + byteOff, len);
+  dst[len] = 0;
+  d->nchars = utf8_count(dst, len);
   return obj_v(Tag::String, o);
 }
 
@@ -273,6 +298,9 @@ static Heap& heap_of(Vm& vm) { return *reinterpret_cast<Heap*>(&vm); }
 
 Value make_pair(Vm& vm, Value car, Value cdr) { return make_pair_h(heap_of(vm), car, cdr); }
 Value make_string(Vm& vm, const char* b, u32 n) { return make_string_h(heap_of(vm), b, n); }
+Value make_string_from(Vm& vm, Value src, u32 off, u32 n) {
+  return make_string_from_h(heap_of(vm), src, off, n);
+}
 Value make_array(Vm& vm, u32 cap) { return make_array_h(heap_of(vm), cap); }
 Value make_table(Vm& vm) { return make_table_h(heap_of(vm)); }
 Value make_buffer(Vm& vm) { return make_buffer_h(heap_of(vm)); }

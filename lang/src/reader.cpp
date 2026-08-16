@@ -114,84 +114,52 @@ Value Reader::readForm() {
 // dotted tails are then a read error inside brackets/braces because a `.`
 // token there still follows the dotted-pair rule of the plain-list grammar.
 Value Reader::readList(char close, u32 openLine, u32 openCol, const char* ctorSym) {
-  u32 base = vm_.stack.len;
+  Scope sc(vm_);
+  u32 base = sc.base;
   u32 count = 0;
   bool haveTail = false;
-  u32 tailSlot = 0;
+  Slot tail{&vm_, 0};
 
   for (;;) {
     skipWs();
-    if (eof()) {
-      vm_.popTo(base);
-      return err(openLine, openCol, "unterminated list");
-    }
+    if (eof()) return err(openLine, openCol, "unterminated list");
     char c = peek();
     if (c == close) {
       advance();
       break;
     }
-    if (c == ')' || c == ']' || c == '}') {
-      vm_.popTo(base);
+    if (c == ')' || c == ']' || c == '}')
       return err(line_, col_, "mismatched closing delimiter");
-    }
     // dotted-tail marker: a lone `.` followed by whitespace/delimiter/eof
     if (c == '.' && (pos_ + 1 >= len_ || atom_end(src_[pos_ + 1]))) {
       u32 dl = line_, dc = col_;
       advance();
-      if (count == 0) {
-        vm_.popTo(base);
-        return err(dl, dc, "dotted tail with no preceding element");
-      }
-      if (close != ')') {
-        vm_.popTo(base);
-        return err(dl, dc, "dotted tail not allowed in collection literal");
-      }
+      if (count == 0) return err(dl, dc, "dotted tail with no preceding element");
+      if (close != ')') return err(dl, dc, "dotted tail not allowed in collection literal");
       Value t = readForm();
-      if (t.tag == Tag::Unwind) {
-        vm_.popTo(base);
-        return t;
-      }
-      tailSlot = vm_.push(t);
+      if (t.tag == Tag::Unwind) return t;
+      tail = sc.push(t);
       haveTail = true;
       skipWs();
-      if (eof() || peek() != close) {
-        vm_.popTo(base);
-        return err(line_, col_, "expected ) after dotted tail");
-      }
+      if (eof() || peek() != close) return err(line_, col_, "expected ) after dotted tail");
       advance();
       break;
     }
     Value v = readForm();
-    if (v.tag == Tag::Unwind) {
-      vm_.popTo(base);
-      return v;
-    }
-    vm_.push(v);
+    if (v.tag == Tag::Unwind) return v;
+    vm_.push(v);  // elements stay contiguous at base..base+count
     count++;
   }
 
   // Fold right-to-left into a chain of pairs, keeping the accumulator rooted.
-  u32 accSlot = vm_.push(haveTail ? vm_.stack[tailSlot] : null_v());
-  for (u32 i = count; i > 0; i--) {
-    Value p = make_pair(vm_, vm_.stack[base + i - 1], vm_.stack[accSlot]);
-    if (p.tag == Tag::Unwind) {
-      vm_.popTo(base);
-      return p;
-    }
-    vm_.stack[accSlot] = p;
-  }
+  Slot acc = sc.push(haveTail ? tail.get() : null_v());
+  for (u32 i = count; i > 0; i--) acc.set(make_pair(vm_, vm_.stack[base + i - 1], acc.get()));
   if (ctorSym) {
     Value head = symbol_v(vm_.intern.intern(ctorSym, (u32)strlen(ctorSym)));
-    Value p = make_pair(vm_, head, vm_.stack[accSlot]);
-    if (p.tag == Tag::Unwind) {
-      vm_.popTo(base);
-      return p;
-    }
-    vm_.stack[accSlot] = p;
+    acc.set(make_pair(vm_, head, acc.get()));
   }
-  Value result = vm_.stack[accSlot];
+  Value result = acc.get();
   if (is_heap(result)) reader_set_pos(vm_, result.obj, openLine, openCol);
-  vm_.popTo(base);
   return result;
 }
 
@@ -228,22 +196,12 @@ Value Reader::readSugar(const char* sym, u32 symLen) {
   u32 line = line_, col = col_;
   Value inner = readForm();
   if (inner.tag == Tag::Unwind) return inner;
-  u32 base = vm_.stack.len;
-  u32 slot = vm_.push(inner);
-  Value tail = make_pair(vm_, vm_.stack[slot], null_v());
-  if (tail.tag == Tag::Unwind) {
-    vm_.popTo(base);
-    return tail;
-  }
-  vm_.stack[slot] = tail;
+  Scope sc(vm_);
+  Slot slot = sc.push(inner);
+  slot.set(make_pair(vm_, slot.get(), null_v()));
   Value head = symbol_v(vm_.intern.intern(sym, symLen));
-  Value form = make_pair(vm_, head, vm_.stack[slot]);
-  if (form.tag == Tag::Unwind) {
-    vm_.popTo(base);
-    return form;
-  }
+  Value form = make_pair(vm_, head, slot.get());
   if (is_heap(form)) reader_set_pos(vm_, form.obj, line, col);
-  vm_.popTo(base);
   return form;
 }
 

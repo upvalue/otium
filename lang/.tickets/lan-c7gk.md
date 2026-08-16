@@ -1,6 +1,6 @@
 ---
 id: lan-c7gk
-status: open
+status: closed
 deps: []
 links: [lan-6mpt]
 created: 2026-08-15T23:20:48Z
@@ -16,3 +16,13 @@ The semispace GC moves everything on collect; any C++ local holding a heap Value
 
 tests/otium/run-tests.py against the gc_stress+ASan binary: 10/10 (with a suitable timeout for 06-tco)
 
+
+## Notes
+
+**2026-08-16T00:17:10Z**
+
+Fixed (2026-08-15): make_string_from(_h) roots source across alloc — converted substring/trim/split/string_char_at; nat_read_string snapshots source into a C-heap Buf (Reader never points into GC heap) and roots the parsed form across the trailing-input probe; nat_invoke_restart reads restartId before list_from_stack; nat_get_in roots coll; do_get rooted dflt; nat_update reads f at apply-site; REPL handler natives + restart chooser read through rooted slots. Also: run-tests.py parallel + --filter/--timeout/--jobs; OT_GC_STRESS_EVERY env throttle for iteration (default 1). Full EVERY=1 gate in progress.
+
+**2026-08-16T00:22:26Z**
+
+Gate result (2026-08-15): stress suite (gc_stress EVERY=1 + ASan, 06-tco deleted from the suite per Phil — low value under stress, quadratic) is 8/9 in ~75s wall. The one failure is the merge-nil spec/test contradiction (lan-t86k), identical in the normal build and unrelated to GC; no ASan reports. All GC-staleness failures resolved. Closing.

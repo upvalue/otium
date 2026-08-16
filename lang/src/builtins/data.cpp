@@ -267,8 +267,6 @@ void array_push(Vm&, Value arr, Value v) {
 // ---------------------------------------------------------------------------
 // Natives.
 
-#define ARG(n) vm.stack[base + (n)]
-
 static Value need_argc(Vm& vm, const char* who, u32 argc, u32 min, u32 max) {
   if (argc < min || (max != (u32)-1 && argc > max))
     return raise_error(vm, "%s: wrong number of arguments (%u)", who, argc);
@@ -298,65 +296,55 @@ static Value nat_cdr(Vm& vm, u32 base, u32 argc) {
 static Value nat_caar(Vm& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "caar", argc, 1, 1));
   OT_TRY(need_pair(vm, "caar", ARG(0)));
-  Value h = as_pair(ARG(0))->car;
-  OT_TRY(need_pair(vm, "caar", h));
-  return as_pair(h)->car;
+  OT_TRY(need_pair(vm, "caar", as_pair(ARG(0))->car));
+  return as_pair(as_pair(ARG(0))->car)->car;
 }
 static Value nat_cadr(Vm& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "cadr", argc, 1, 1));
   OT_TRY(need_pair(vm, "cadr", ARG(0)));
-  Value t = as_pair(ARG(0))->cdr;
-  OT_TRY(need_pair(vm, "cadr", t));
-  return as_pair(t)->car;
+  OT_TRY(need_pair(vm, "cadr", as_pair(ARG(0))->cdr));
+  return as_pair(as_pair(ARG(0))->cdr)->car;
 }
 static Value nat_cddr(Vm& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "cddr", argc, 1, 1));
   OT_TRY(need_pair(vm, "cddr", ARG(0)));
-  Value t = as_pair(ARG(0))->cdr;
-  OT_TRY(need_pair(vm, "cddr", t));
-  return as_pair(t)->cdr;
+  OT_TRY(need_pair(vm, "cddr", as_pair(ARG(0))->cdr));
+  return as_pair(as_pair(ARG(0))->cdr)->cdr;
 }
 
 static Value nat_list(Vm& vm, u32 base, u32 argc) {
-  Value acc = null_v();
-  u32 root = vm.push(acc);
+  Scope s(vm);
+  Slot acc = s.push(null_v());
   for (u32 i = argc; i-- > 0;) {
-    acc = make_pair(vm, ARG(i), acc);
-    vm.stack[root] = acc;
+    Value cell = make_pair(vm, ARG(i), acc.get());
+    acc.set(cell);
   }
-  vm.popTo(root);
-  return acc;
+  return acc.get();
 }
 
 static Value nat_append(Vm& vm, u32 base, u32 argc) {
-  Value acc = null_v();
-  u32 root = vm.push(acc);
+  Scope s(vm);
+  Slot acc = s.push(null_v());
   for (u32 i = argc; i-- > 0;) {
     // reverse the i-th list onto a temp, then cons onto acc
     Value lst = ARG(i);
-    if (lst.tag != Tag::Null && lst.tag != Tag::Pair) {
-      vm.popTo(root);
+    if (lst.tag != Tag::Null && lst.tag != Tag::Pair)
       return raise_error(vm, "append: expected proper list");
-    }
     // collect elements onto the VM stack (a GC root — a C++ Vec's copies
     // would go stale when make_pair below collects)
     u32 ebase = vm.stack.len;
     for (Value p = lst; p.tag != Tag::Null;) {  // no allocation in this walk
-      if (p.tag != Tag::Pair) {
-        vm.popTo(root);
-        return raise_error(vm, "append: improper list");
-      }
+      if (p.tag != Tag::Pair) return raise_error(vm, "append: improper list");
       vm.push(as_pair(p)->car);
       p = as_pair(p)->cdr;
     }
     for (u32 j = vm.stack.len; j-- > ebase;) {
-      acc = make_pair(vm, vm.stack[j], vm.stack[root]);
-      vm.stack[root] = acc;
+      Value cell = make_pair(vm, vm.stack[j], acc.get());
+      acc.set(cell);
     }
     vm.popTo(ebase);
   }
-  vm.popTo(root);
-  return acc;
+  return acc.get();
 }
 
 static u32 utf8_count(const char* p, u32 n) {
@@ -396,28 +384,24 @@ static Value nat_reverse(Vm& vm, u32 base, u32 argc) {
   if (is_nil(v)) return nil_v();  // kind-preserving: nothing to preserve
   if (v.tag == Tag::Null) return null_v();
   if (v.tag == Tag::Pair) {
-    u32 root = vm.push(null_v());  // acc
-    u32 pS = vm.push(v);           // cursor, rooted across make_pair
-    while (vm.stack[pS].tag != Tag::Null) {
-      if (vm.stack[pS].tag != Tag::Pair) {
-        vm.popTo(root);
-        return raise_error(vm, "reverse: improper list");
-      }
-      Value acc = make_pair(vm, as_pair(vm.stack[pS])->car, vm.stack[root]);
-      vm.stack[root] = acc;
-      vm.stack[pS] = as_pair(vm.stack[pS])->cdr;
+    Scope s(vm);
+    Slot acc = s.push(null_v());
+    Slot p = s.push(v);  // cursor, rooted across make_pair
+    while (p.get().tag != Tag::Null) {
+      if (p.get().tag != Tag::Pair) return raise_error(vm, "reverse: improper list");
+      Value cell = make_pair(vm, as_pair(p.get())->car, acc.get());
+      acc.set(cell);
+      p.set(as_pair(p.get())->cdr);
     }
-    Value acc = vm.stack[root];
-    vm.popTo(root);
-    return acc;
+    return acc.get();
   }
   if (v.tag == Tag::Array) {
-    Value out = make_array(vm, as_array(ARG(0))->len);
-    u32 root = vm.push(out);
-    ArrayData* src = as_array(ARG(0));  // re-read: make_array collected
-    for (u32 i = src->len; i-- > 0;) array_push(vm, out, src->items[i]);
-    vm.popTo(root);
-    return out;
+    Scope s(vm);
+    Slot out = s.push(make_array(vm, as_array(ARG(0))->len));
+    // re-read: make_array collected; cached across array_push only (alloc-free)
+    ArrayData* src = as_array(ARG(0));
+    for (u32 i = src->len; i-- > 0;) array_push(vm, out.get(), src->items[i]);
+    return out.get();
   }
   return raise_error(vm, "reverse: expected sequence");
 }
@@ -427,50 +411,43 @@ static Value nat_list_to_array(Vm& vm, u32 base, u32 argc) {
   Value v = ARG(0);
   if (v.tag != Tag::Null && v.tag != Tag::Pair)
     return raise_error(vm, "list->array: expected list");
-  Value out = make_array(vm, 8);
-  u32 root = vm.push(out);
+  Scope s(vm);
+  Slot out = s.push(make_array(vm, 8));
   // re-read the list from its rooted arg slot: make_array collected
   for (Value p = ARG(0); p.tag != Tag::Null; p = as_pair(p)->cdr) {
-    if (p.tag != Tag::Pair) {
-      vm.popTo(root);
-      return raise_error(vm, "list->array: improper list");
-    }
-    array_push(vm, out, as_pair(p)->car);  // no GC allocation in this loop
+    if (p.tag != Tag::Pair) return raise_error(vm, "list->array: improper list");
+    array_push(vm, out.get(), as_pair(p)->car);  // no GC allocation in this loop
   }
-  vm.popTo(root);
-  return out;
+  return out.get();
 }
 
 static Value nat_array_to_list(Vm& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "array->list", argc, 1, 1));
   if (ARG(0).tag != Tag::Array) return raise_error(vm, "array->list: expected array");
-  u32 root = vm.push(null_v());
+  Scope s(vm);
+  Slot acc = s.push(null_v());
   // re-read the array through its rooted arg slot every iteration: each
   // make_pair can collect and move it
   for (u32 i = as_array(ARG(0))->len; i-- > 0;) {
-    Value acc = make_pair(vm, as_array(ARG(0))->items[i], vm.stack[root]);
-    vm.stack[root] = acc;
+    Value cell = make_pair(vm, as_array(ARG(0))->items[i], acc.get());
+    acc.set(cell);
   }
-  Value acc = vm.stack[root];
-  vm.popTo(root);
-  return acc;
+  return acc.get();
 }
 
 static Value nat_array(Vm& vm, u32 base, u32 argc) {
-  Value out = make_array(vm, argc ? argc : 4);
-  u32 root = vm.push(out);
-  for (u32 i = 0; i < argc; i++) array_push(vm, out, ARG(i));
-  vm.popTo(root);
-  return out;
+  Scope s(vm);
+  Slot out = s.push(make_array(vm, argc ? argc : 4));
+  for (u32 i = 0; i < argc; i++) array_push(vm, out.get(), ARG(i));
+  return out.get();
 }
 
 static Value nat_table(Vm& vm, u32 base, u32 argc) {
   if (argc % 2 != 0) return raise_error(vm, "table: odd argument count");
-  Value t = make_table(vm);
-  u32 root = vm.push(t);
-  for (u32 i = 0; i < argc; i += 2) table_put(vm, t, ARG(i), ARG(i + 1));
-  vm.popTo(root);
-  return t;
+  Scope s(vm);
+  Slot t = s.push(make_table(vm));
+  for (u32 i = 0; i < argc; i += 2) table_put(vm, t.get(), ARG(i), ARG(i + 1));
+  return t.get();
 }
 
 // String code-point index -> one-character string, or nil.
@@ -490,19 +467,25 @@ static Value string_char_at(Vm& vm, Value s, i64 idx) {
   }
   u32 end = (c == idx) ? sd->len : i;
   if (c < idx) return nil_v();
-  return make_string(vm, p + start, end - start);
+  return make_string_from(vm, s, start, end - start);
 }
 
 static Value do_get(Vm& vm, Value coll, Value key, Value dflt) {
   Value r = nil_v();
   switch (coll.tag) {
     case Tag::Nil: break;  // miss
-    case Tag::Table: r = table_get(vm, coll, key); break;
+    case Tag::Table: r = table_get(vm, coll, key); break;  // alloc-free
     case Tag::Array:
       if (key.tag == Tag::Int) r = array_get(coll, key.i);
       break;
     case Tag::String:
-      if (key.tag == Tag::Int) r = string_char_at(vm, coll, key.i);
+      if (key.tag == Tag::Int) {
+        // string_char_at allocates — root dflt across it
+        Scope s(vm);
+        Slot dS = s.push(dflt);
+        r = string_char_at(vm, coll, key.i);
+        return is_nil(r) ? dS.get() : r;
+      }
       break;
     default: return raise_error(vm, "get: unsupported collection type");
   }
@@ -516,30 +499,30 @@ static Value nat_get(Vm& vm, u32 base, u32 argc) {
 
 static Value nat_get_in(Vm& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "get-in", argc, 2, 3));
-  Value coll = ARG(0);
   Value path = ARG(1);
-  Value dflt = argc == 3 ? ARG(2) : nil_v();
-  // path is a sequence (list / array / nil)
-  // do_get can allocate (string indexing) — read path/cursor via rooted slots
+  // path is a sequence (list / array / nil). do_get can allocate (string
+  // indexing) — keep the accumulated coll and the list cursor in rooted
+  // slots and re-read them around each step.
+  Scope s(vm);
+  Slot cS = s.push(ARG(0));
   if (path.tag == Tag::Array) {
     for (u32 i = 0; i < as_array(ARG(1))->len; i++) {
-      OT_TRY(coll = do_get(vm, coll, as_array(ARG(1))->items[i], nil_v()));
+      Value r = do_get(vm, cS.get(), as_array(ARG(1))->items[i], nil_v());
+      OT_TRY(r);
+      cS.set(r);
     }
   } else if (path.tag == Tag::Pair || path.tag == Tag::Null) {
-    u32 pS = vm.push(path);
-    while (vm.stack[pS].tag == Tag::Pair) {
-      coll = do_get(vm, coll, as_pair(vm.stack[pS])->car, nil_v());
-      if (coll.tag == Tag::Unwind) {
-        vm.popTo(pS);
-        return coll;
-      }
-      vm.stack[pS] = as_pair(vm.stack[pS])->cdr;
+    Slot pS = s.push(path);
+    while (pS.get().tag == Tag::Pair) {
+      Value r = do_get(vm, cS.get(), as_pair(pS.get())->car, nil_v());
+      OT_TRY(r);
+      cS.set(r);
+      pS.set(as_pair(pS.get())->cdr);
     }
-    vm.popTo(pS);
   } else if (!is_nil(path)) {
     return raise_error(vm, "get-in: path must be a sequence");
   }
-  return is_nil(coll) ? dflt : coll;
+  return is_nil(cS.get()) ? (argc == 3 ? ARG(2) : nil_v()) : cS.get();
 }
 
 static Value do_put(Vm& vm, Value coll, Value k, Value v) {
@@ -580,43 +563,39 @@ static Value nat_pop(Vm& vm, u32 base, u32 argc) {
 
 static Value nat_update(Vm& vm, u32 base, u32 argc) {
   if (argc < 3) return raise_error(vm, "update!: expected coll, key, fn");
-  Value coll = ARG(0), k = ARG(1), f = ARG(2);
   Value cur;
-  OT_TRY(cur = do_get(vm, coll, k, nil_v()));
-  u32 cbase = vm.stack.len;
-  vm.push(cur);
+  OT_TRY(cur = do_get(vm, ARG(0), ARG(1), nil_v()));
+  Scope s(vm);
+  u32 cbase = vm.push(cur);
   for (u32 i = 3; i < argc; i++) vm.push(ARG(i));
-  Value nv = apply(vm, f, cbase, argc - 2);
-  vm.popTo(cbase);
+  Value nv = apply(vm, ARG(2), cbase, argc - 2);  // re-read fn: do_get may have collected
   OT_TRY(nv);
-  OT_TRY(do_put(vm, ARG(0), ARG(1), nv));  // re-read: apply may have collected
+  OT_TRY(do_put(vm, ARG(0), ARG(1), nv));  // re-read; do_put is alloc-free with nv
   return ARG(0);
 }
 
 static Value nat_keys(Vm& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "keys", argc, 1, 1));
-  Value out = make_array(vm, 8);
-  if (is_nil(ARG(0))) return out;
+  if (is_nil(ARG(0))) return make_array(vm, 8);
   if (ARG(0).tag != Tag::Table) return raise_error(vm, "keys: expected table");
-  u32 root = vm.push(out);
-  TableData* t = as_table(ARG(0));
+  Scope s(vm);
+  Slot out = s.push(make_array(vm, 8));
+  TableData* t = as_table(ARG(0));  // cached across array_push only (alloc-free)
   for (u32 i = 0; i < t->entriesLen; i++)
-    if (!is_tomb(t->entries[i])) array_push(vm, out, t->entries[i].key);
-  vm.popTo(root);
-  return out;
+    if (!is_tomb(t->entries[i])) array_push(vm, out.get(), t->entries[i].key);
+  return out.get();
 }
 
 static Value nat_values(Vm& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "values", argc, 1, 1));
-  Value out = make_array(vm, 8);
-  if (is_nil(ARG(0))) return out;
+  if (is_nil(ARG(0))) return make_array(vm, 8);
   if (ARG(0).tag != Tag::Table) return raise_error(vm, "values: expected table");
-  u32 root = vm.push(out);
-  TableData* t = as_table(ARG(0));
+  Scope s(vm);
+  Slot out = s.push(make_array(vm, 8));
+  TableData* t = as_table(ARG(0));  // cached across array_push only (alloc-free)
   for (u32 i = 0; i < t->entriesLen; i++)
-    if (!is_tomb(t->entries[i])) array_push(vm, out, t->entries[i].val);
-  vm.popTo(root);
-  return out;
+    if (!is_tomb(t->entries[i])) array_push(vm, out.get(), t->entries[i].val);
+  return out.get();
 }
 
 static Value nat_copy(Vm& vm, u32 base, u32 argc) {
@@ -624,21 +603,21 @@ static Value nat_copy(Vm& vm, u32 base, u32 argc) {
   Value v = ARG(0);
   if (is_nil(v)) return nil_v();  // kind-preserving over absence
   if (v.tag == Tag::Array) {
-    Value out = make_array(vm, as_array(v)->len);
-    u32 root = vm.push(out);
-    ArrayData* a = as_array(ARG(0));  // re-read: make_array collected
-    for (u32 i = 0; i < a->len; i++) array_push(vm, out, a->items[i]);
-    vm.popTo(root);
-    return out;
+    Scope s(vm);
+    Slot out = s.push(make_array(vm, as_array(v)->len));
+    // re-read: make_array collected; cached across array_push only (alloc-free)
+    ArrayData* a = as_array(ARG(0));
+    for (u32 i = 0; i < a->len; i++) array_push(vm, out.get(), a->items[i]);
+    return out.get();
   }
   if (v.tag == Tag::Table) {
-    Value out = make_table(vm);
-    u32 root = vm.push(out);
-    TableData* t = as_table(ARG(0));  // re-read: make_table collected
+    Scope s(vm);
+    Slot out = s.push(make_table(vm));
+    // re-read: make_table collected; cached across table_put only (alloc-free)
+    TableData* t = as_table(ARG(0));
     for (u32 i = 0; i < t->entriesLen; i++)
-      if (!is_tomb(t->entries[i])) table_put(vm, out, t->entries[i].key, t->entries[i].val);
-    vm.popTo(root);
-    return out;
+      if (!is_tomb(t->entries[i])) table_put(vm, out.get(), t->entries[i].key, t->entries[i].val);
+    return out.get();
   }
   return raise_error(vm, "copy: expected array, table, or nil");
 }

@@ -1,10 +1,14 @@
 // Thin, allocation-conscious Raylib bindings. Vector2, Rectangle, and Color
 // cross the boundary as flat numbers; only owning GPU handles use Foreign.
-#include "raylib_ext.h"
+#include "ray_ext.h"
 #include "builtins.h"
 #include "heap.h"
 #include "vm.h"
 #include <raylib.h>
+#include <rlgl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 static Value need_number(State* vm, const char* who, Value value) {
   if (value.tag != Tag_Int && value.tag != Tag_Float)
@@ -54,13 +58,13 @@ static void finalize_render_texture(State* vm, void* payload) {
 }
 
 static u32 texture_type(State* vm) {
-  return register_foreign_type(vm, "raylib/texture", finalize_texture);
+  return register_foreign_type(vm, "ray/texture", finalize_texture);
 }
 
-static u32 font_type(State* vm) { return register_foreign_type(vm, "raylib/font", finalize_font); }
+static u32 font_type(State* vm) { return register_foreign_type(vm, "ray/font", finalize_font); }
 
 static u32 render_texture_type(State* vm) {
-  return register_foreign_type(vm, "raylib/render-texture", finalize_render_texture);
+  return register_foreign_type(vm, "ray/render-texture", finalize_render_texture);
 }
 
 static Value texture_payload(State* vm, const char* who, Value value, Texture2D** out) {
@@ -622,7 +626,59 @@ static Value nat_draw_render_texture_pro(State* vm, u32 base, u32 argc) {
   return nil_v();
 }
 
-static void init_raylib(State* vm) {
+static Value nat_set_font_filter(State* vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "set-font-filter!", argc, 2, 2));
+  OT_TRY(need_int(vm, "set-font-filter!", ARG(1)));
+  OT_TRY(need_window(vm, "set-font-filter!"));
+  Font* font = nullptr;
+  OT_TRY(font_payload(vm, "set-font-filter!", ARG(0), &font));
+  SetTextureFilter(font->texture, (int)ARG(1).i);
+  return nil_v();
+}
+
+static Value nat_set_render_texture_filter(State* vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "set-render-texture-filter!", argc, 2, 2));
+  OT_TRY(need_int(vm, "set-render-texture-filter!", ARG(1)));
+  OT_TRY(need_window(vm, "set-render-texture-filter!"));
+  RenderTexture2D* target = nullptr;
+  OT_TRY(render_texture_payload(vm, "set-render-texture-filter!", ARG(0), &target));
+  SetTextureFilter(target->texture, (int)ARG(1).i);
+  return nil_v();
+}
+
+static Value nat_take_screenshot(State* vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "take-screenshot!", argc, 1, 1));
+  OT_TRY(need_string(vm, "take-screenshot!", ARG(0)));
+  OT_TRY(need_window(vm, "take-screenshot!"));
+  // Flush the pending draw batch so a capture taken between drawing and
+  // end-drawing sees the finished frame, not just the background clear.
+  rlDrawRenderBatchActive();
+  Image image = LoadImageFromScreen();
+  bool ok = ExportImage(image, string_value(ARG(0)));
+  UnloadImage(image);
+  if (!ok) return raise_error(vm, "take-screenshot!: Raylib could not export the image");
+  return nil_v();
+}
+
+static Value nat_file_exists(State* vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "file-exists?", argc, 1, 1));
+  OT_TRY(need_string(vm, "file-exists?", ARG(0)));
+  FILE* f = fopen(string_value(ARG(0)), "rb");
+  if (f) fclose(f);
+  return bool_v(f != nullptr);
+}
+
+// Environment access lives here so scripts can support unattended harness runs
+// (frame budgets, scripted input, screenshot paths) without a core dependency.
+static Value nat_env(State* vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "env", argc, 1, 1));
+  OT_TRY(need_string(vm, "env", ARG(0)));
+  const char* value = getenv(string_value(ARG(0)));
+  if (!value) return nil_v();
+  return make_string(vm, value, (u32)strlen(value));
+}
+
+static void init_ray(State* vm) {
   (void)texture_type(vm);
   (void)font_type(vm);
   (void)render_texture_type(vm);
@@ -688,6 +744,11 @@ static void init_raylib(State* vm) {
   def_native(vm, "render-texture-height", nat_render_texture_height);
   def_native(vm, "draw-render-texture", nat_draw_render_texture);
   def_native(vm, "draw-render-texture-pro", nat_draw_render_texture_pro);
+  def_native(vm, "set-font-filter!", nat_set_font_filter);
+  def_native(vm, "set-render-texture-filter!", nat_set_render_texture_filter);
+  def_native(vm, "take-screenshot!", nat_take_screenshot);
+  def_native(vm, "file-exists?", nat_file_exists);
+  def_native(vm, "env", nat_env);
 }
 
-void register_raylib_extension(State* vm) { register_native_module(vm, "raylib", init_raylib); }
+void register_ray_extension(State* vm) { register_native_module(vm, "ray", init_ray); }

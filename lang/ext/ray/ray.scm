@@ -65,3 +65,44 @@
 (define mouse-left 0)
 (define mouse-right 1)
 (define mouse-middle 2)
+
+(define filter-point 0)
+(define filter-bilinear 1)
+
+; Unattended-run harness for agents and CI. RAY_FRAMES bounds the run to a
+; frame count, RAY_SCREENSHOT saves a capture of the final frame, and
+; RAY_INPUT feeds a comma-separated token per frame to (harness-next-input!).
+; Call (harness-continue?) once per frame after all drawing but before
+; end-drawing, so the capture reads the finished back buffer:
+;
+;   (while (and running (not (window-should-close?)))
+;     ...update and draw...
+;     (set! running (harness-continue?))
+;     (end-drawing))
+(define harness-frames
+  (if (nil? (env "RAY_FRAMES")) nil (string->number (env "RAY_FRAMES"))))
+(define harness-screenshot (env "RAY_SCREENSHOT"))
+(define harness-input
+  (if (nil? (env "RAY_INPUT")) (array) (string-split (env "RAY_INPUT") ",")))
+(define harness-input-index 0)
+(define harness-frame 0)
+
+(define (harness-next-input!)
+  (let ((token (get harness-input harness-input-index nil)))
+    (if (nil? token)
+        nil
+        (begin
+          (set! harness-input-index (+ harness-input-index 1))
+          token))))
+
+(define (harness-continue?)
+  (set! harness-frame (+ harness-frame 1))
+  (if (nil? harness-frames)
+      #t
+      (if (< harness-frame harness-frames)
+          #t
+          (begin
+            (if (nil? harness-screenshot)
+                nil
+                (take-screenshot! harness-screenshot))
+            #f))))

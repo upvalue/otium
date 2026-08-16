@@ -22,8 +22,8 @@
 #ifdef OT_EXT_DEMO
 #include "../ext/demo/demo_ext.h"
 #endif
-#ifdef OT_EXT_RAYLIB
-#include "../ext/raylib/raylib_ext.h"
+#ifdef OT_EXT_RAY
+#include "../ext/ray/ray_ext.h"
 #endif
 
 // state_push_handler/state_pop_handler come from state.h; make_native from eval.h.
@@ -564,8 +564,8 @@ int main(int argc, char** argv) {
 #ifdef OT_EXT_DEMO
   register_demo_extension(vm);
 #endif
-#ifdef OT_EXT_RAYLIB
-  register_raylib_extension(vm);
+#ifdef OT_EXT_RAY
+  register_ray_extension(vm);
 #endif
 
   struct sigaction sa;

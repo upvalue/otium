@@ -84,10 +84,10 @@ if get_option('ext_demo')
   otium_c_args += ['-DOT_EXT_DEMO']
 endif
 
-if get_option('ext_raylib')
+if get_option('ext_ray')
   raylib_dep = dependency('raylib', required : true)
-  otium_sources += files('ext/raylib/raylib_ext.c')
-  otium_c_args += ['-DOT_EXT_RAYLIB']
+  otium_sources += files('ext/ray/ray_ext.c')
+  otium_c_args += ['-DOT_EXT_RAY']
   otium_dependencies += [raylib_dep]
 endif
 
@@ -140,11 +140,11 @@ if get_option('ext_demo')
     timeout : test_timeout)
 endif
 
-if get_option('ext_raylib')
-  test('otium-raylib-extension', otium,
+if get_option('ext_ray')
+  test('otium-ray-extension', otium,
     args : [
-      '--path', join_paths(meson.current_source_dir(), 'ext', 'raylib'),
-      join_paths(meson.current_source_dir(), 'tests', 'ext-raylib.scm'),
+      '--path', join_paths(meson.current_source_dir(), 'ext', 'ray'),
+      join_paths(meson.current_source_dir(), 'tests', 'ext-ray.scm'),
     ],
     timeout : test_timeout)
 endif

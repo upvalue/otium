@@ -27,12 +27,12 @@ u32 operand_width(Operand operand) {
 
 Value make_code(State* vm, const u8* bytes, u32 len, Value constants, const CodeSpec* spec) {
   if (constants.tag != Tag_Array) return raise_error(vm, "code constants must be an array");
-  u32 sc = scope_begin(vm);
-  Slot constantsRoot = scope_push(vm, constants);
+  OT_SCOPE(vm);
+  Ref constantsRoot = ref_push(vm, constants);
   Obj* obj = heap_alloc(&vm->heap, ObjType_Code, sizeof(CodeData));
   CodeData* code = as_code(obj_v(Tag_Code, obj));
   code->len = len;
-  code->constCount = as_array(slot_get(constantsRoot))->len;
+  code->constCount = as_array(ref_get(vm, constantsRoot))->len;
   code->nfixed = spec->nfixed;
   code->hasRest = spec->hasRest;
   code->nupvals = spec->nupvals;
@@ -49,10 +49,10 @@ Value make_code(State* vm, const u8* bytes, u32 len, Value constants, const Code
     if (code->constCount > UINT32_MAX / sizeof(Value)) ot_fatal("code: constant pool overflow");
     code->consts = (Value*)ot_alloc((size_t)code->constCount * sizeof(Value));
     if (!code->consts) ot_fatal("code: cannot allocate constant pool");
-    ArrayData* source = as_array(slot_get(constantsRoot));
+    ArrayData* source = as_array(ref_get(vm, constantsRoot));
     memcpy(code->consts, source->items, (size_t)code->constCount * sizeof(Value));
   }
-  return scope_exit(vm, sc, obj_v(Tag_Code, obj));
+  return obj_v(Tag_Code, obj);
 }
 
 static bool fail(Buf* error, const char* fmt, u32 at) {
@@ -146,17 +146,18 @@ void code_print_ascii(Value value, Buf* out) {
 
 void code_disassemble(State* vm, Value value, Buf* out) {
   OT_ASSERT(value.tag == Tag_Code);
-  u32 sc = scope_begin(vm);
-  Slot codeRoot = scope_push(vm, value);
+  OT_SCOPE(vm);
+  Ref codeRoot = ref_push(vm, value);
   u32 ip = 0;
-  while (ip < as_code(slot_get(codeRoot))->len) {
-    CodeData* code = as_code(slot_get(codeRoot));
+  // print_repr can allocate, so the CodeData* is re-derived each iteration
+  // rather than hoisted out of the loop.
+  while (ip < as_code(ref_get(vm, codeRoot))->len) {
+    CodeData* code = as_code(ref_get(vm, codeRoot));
     u32 at = ip;
     u8 raw = code->bytes[ip++];
     buf_printf(out, "%04x  ", at);
     if (raw >= (u8)Op_Count) {
       buf_printf(out, "<invalid %u>\n", raw);
-      scope_pop_to(vm, sc);
       return;
     }
     Op op = (Op)raw;
@@ -181,5 +182,4 @@ void code_disassemble(State* vm, Value value, Buf* out) {
     ip += operand_width(info->operand);
     vec_push(out, '\n');
   }
-  scope_pop_to(vm, sc);
 }

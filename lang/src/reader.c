@@ -90,58 +90,55 @@ static Value readForm(Reader* r);
 // token there still follows the dotted-pair rule of the plain-list grammar.
 static Value readList(Reader* r, char close, u32 openLine, u32 openCol, const char* ctorSym) {
   State* vm = r->vm;
-  u32 sc = scope_begin(vm);
-  u32 base = sc;
+  OT_SCOPE(vm);
+  u32 base = vm->stack.len;
   u32 count = 0;
   bool haveTail = false;
-  Slot tail = {vm, 0};
+  Ref tail = {0};
 
   for (;;) {
     skipWs(r);
-    if (eof(r)) return scope_exit(vm, sc, needMore(r, openLine, openCol, "unterminated list"));
+    if (eof(r)) return needMore(r, openLine, openCol, "unterminated list");
     char c = peek(r);
     if (c == close) {
       advance(r);
       break;
     }
     if (c == ')' || c == ']' || c == '}')
-      return scope_exit(vm, sc, err(r, r->line, r->col, "mismatched closing delimiter"));
+      return err(r, r->line, r->col, "mismatched closing delimiter");
     // dotted-tail marker: a lone `.` followed by whitespace/delimiter/eof
     if (c == '.' && (r->pos + 1 >= r->len || atom_end(r->src[r->pos + 1]))) {
       u32 dl = r->line, dc = r->col;
       advance(r);
-      if (count == 0)
-        return scope_exit(vm, sc, err(r, dl, dc, "dotted tail with no preceding element"));
-      if (close != ')')
-        return scope_exit(vm, sc, err(r, dl, dc, "dotted tail not allowed in collection literal"));
+      if (count == 0) return err(r, dl, dc, "dotted tail with no preceding element");
+      if (close != ')') return err(r, dl, dc, "dotted tail not allowed in collection literal");
       Value t = readForm(r);
-      OT_TRYS(vm, sc, t);
-      tail = scope_push(vm, t);
+      if (t.tag == Tag_Unwind) return t;
+      tail = ref_push(vm, t);
       haveTail = true;
       skipWs(r);
-      if (eof(r))
-        return scope_exit(vm, sc, needMore(r, r->line, r->col, "expected ) after dotted tail"));
-      if (peek(r) != close)
-        return scope_exit(vm, sc, err(r, r->line, r->col, "expected ) after dotted tail"));
+      if (eof(r)) return needMore(r, r->line, r->col, "expected ) after dotted tail");
+      if (peek(r) != close) return err(r, r->line, r->col, "expected ) after dotted tail");
       advance(r);
       break;
     }
     Value v = readForm(r);
-    OT_TRYS(vm, sc, v);
+    if (v.tag == Tag_Unwind) return v;
     state_push(vm, v);  // elements stay contiguous at base..base+count
     count++;
   }
 
   // Fold right-to-left into a chain of pairs, keeping the accumulator rooted.
-  Slot acc = scope_push(vm, haveTail ? slot_get(tail) : null_v());
+  // The elements are read out of the stack by index, so make_pair moving them
+  // is fine: their slots are roots.
+  Ref acc = ref_push(vm, haveTail ? ref_get(vm, tail) : null_v());
   for (u32 i = count; i > 0; i--)
-    slot_set(acc, make_pair(vm, vm->stack.data[base + i - 1], slot_get(acc)));
+    ref_set(vm, acc, make_pair(vm, vm->stack.data[base + i - 1], ref_get(vm, acc)));
   if (ctorSym) {
     Value head = symbol_v(intern_id(&vm->intern, ctorSym, (u32)strlen(ctorSym)));
-    slot_set(acc, make_pair(vm, head, slot_get(acc)));
+    ref_set(vm, acc, make_pair(vm, head, ref_get(vm, acc)));
   }
-  Value result = slot_get(acc);
-  return scope_exit(vm, sc, result);
+  return ref_get(vm, acc);
 }
 
 static Value readString(Reader* r, u32 openLine, u32 openCol) {
@@ -185,11 +182,11 @@ static Value readSugar(Reader* r, const char* sym, u32 symLen) {
   State* vm = r->vm;
   Value inner = readForm(r);
   OT_TRY(inner);
-  u32 sc = scope_begin(vm);
-  Slot slot = scope_push(vm, inner);
-  slot_set(slot, make_pair(vm, slot_get(slot), null_v()));
+  OT_SCOPE(vm);
+  Ref wrapped = ref_push(vm, inner);
+  ref_set(vm, wrapped, make_pair(vm, ref_get(vm, wrapped), null_v()));
   Value head = symbol_v(intern_id(&vm->intern, sym, symLen));
-  return scope_exit(vm, sc, make_pair(vm, head, slot_get(slot)));
+  return make_pair(vm, head, ref_get(vm, wrapped));
 }
 
 static Value parseNumber(Reader* r, const char* tok, u32 n, u32 line, u32 col) {

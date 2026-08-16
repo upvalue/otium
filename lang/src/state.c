@@ -165,14 +165,12 @@ Value raise_error(State* vm, const char* fmt, ...) {
   va_start(ap, fmt);
   vsnprintf(msg, sizeof msg, fmt, ap);
   va_end(ap);
-  u32 sc = scope_begin(vm);
-  Slot c = scope_push(vm, make_table(vm));
-  table_put(vm, slot_get(c), keyword_v(vm->syms.kwType), symbol_v(vm->syms.error_));
-  {
-    Value s = make_string(vm, msg, (u32)strlen(msg));  // may move the table
-    table_put(vm, slot_get(c), keyword_v(vm->syms.kwMessage), s);
-  }
-  return scope_exit(vm, sc, signal_value(vm, slot_get(c), true));
+  OT_SCOPE(vm);
+  Ref c = ref_push(vm, make_table(vm));
+  table_put(vm, ref_get(vm, c), keyword_v(vm->syms.kwType), symbol_v(vm->syms.error_));
+  Ref message = ref_push(vm, make_string(vm, msg, (u32)strlen(msg)));
+  table_put(vm, ref_get(vm, c), keyword_v(vm->syms.kwMessage), ref_get(vm, message));
+  return signal_value(vm, ref_get(vm, c), true);
 }
 
 Value raise_error_sym(State* vm, const char* fmt, u32 symId) {
@@ -181,40 +179,37 @@ Value raise_error_sym(State* vm, const char* fmt, u32 symId) {
   return raise_error(vm, fmt, (int)len, name);
 }
 
+// One-argument call in its own scope. Separate function rather than an inner
+// OT_SCOPE because two guards in one function shadow each other, which
+// -Wshadow rejects -- and a region that needs its own scope is a function.
+static Value call_with_condition(State* vm, Value fn, Ref condition) {
+  OT_SCOPE(vm);
+  Ref arg = ref_push(vm, ref_get(vm, condition));
+  return apply(vm, fn, arg.i, 1);
+}
+
 Value signal_value(State* vm, Value c, bool unwindIfUnhandled) {
-  u32 sc = scope_begin(vm);
-  Slot croot = scope_push(vm, c);
+  OT_SCOPE(vm);
+  Ref croot = ref_push(vm, c);
   u32 limit = vm->handlerVisible < vm->handlers.len ? vm->handlerVisible : vm->handlers.len;
   for (u32 i = limit; i-- > 0;) {
-    // read pred/handler through the handlers vector (a GC root) at each use:
-    // a copy would go stale across the pred call's allocations
-    Value t;
-    {
-      u32 s2 = scope_begin(vm);
-      Slot b = scope_push(vm, slot_get(croot));
-      t = apply(vm, vm->handlers.data[i].pred, b.idx, 1);
-      scope_pop_to(vm, s2);
-    }
-    OT_TRYS(vm, sc, t);
+    // pred/handler are read through the handlers vector (itself a GC root) at
+    // each use: a copy would go stale across the pred call's allocations.
+    Value t = call_with_condition(vm, vm->handlers.data[i].pred, croot);
+    if (t.tag == Tag_Unwind) return t;
     if (is_truthy(t)) {
       u32 savedVis = vm->handlerVisible;
       vm->handlerVisible = i;  // this binding + inner ones invisible
-      Value hr;
-      {
-        u32 s2 = scope_begin(vm);
-        Slot b2 = scope_push(vm, slot_get(croot));
-        hr = apply(vm, vm->handlers.data[i].handler, b2.idx, 1);
-        scope_pop_to(vm, s2);
-      }
+      Value hr = call_with_condition(vm, vm->handlers.data[i].handler, croot);
       vm->handlerVisible = savedVis;
-      OT_TRYS(vm, sc, hr);
+      if (hr.tag == Tag_Unwind) return hr;
       // handler declined: continue outward
     }
   }
   if (unwindIfUnhandled) {
     vm->unwindKind = UnwindKind_Condition;
-    vm->unwindCondition = slot_get(croot);
-    return scope_exit(vm, sc, unwind_v());
+    vm->unwindCondition = ref_get(vm, croot);
+    return unwind_v();
   }
-  return scope_exit(vm, sc, nil_v());
+  return nil_v();
 }

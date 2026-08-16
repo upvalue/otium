@@ -281,6 +281,9 @@ static inline Status scope_return(ScopeGuard* g, Value result) {
   return Status_Ok;
 }
 
+// One OT_SCOPE per function. A second one shadows the first, which -Wshadow
+// rejects under -Werror, so a region that wants its own scope becomes its own
+// function. That is the intended shape: the scope and the function agree.
 #define OT_SCOPE(vm)                                                                               \
   [[maybe_unused]] ScopeGuard _otScope __attribute__((cleanup(scope_release))) = {                 \
       (vm), (vm)->stack.len}

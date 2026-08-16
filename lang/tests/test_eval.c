@@ -110,8 +110,7 @@ static bool condition_message_is(State* vm, const char* expected) {
   Value message = table_get(vm, vm->unwindCondition, keyword_v(vm->syms.kwMessage));
   if (message.tag != Tag_String) return false;
   StringData* s = as_string(message);
-  return s->len == (u32)strlen(expected) &&
-         memcmp(string_data_bytes(s), expected, s->len) == 0;
+  return s->len == (u32)strlen(expected) && memcmp(string_data_bytes(s), expected, s->len) == 0;
 }
 
 TEST(native_validators_report_consistent_arity_and_type_errors) {

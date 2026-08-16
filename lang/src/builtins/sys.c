@@ -16,8 +16,7 @@
 void def_native(State* vm, const char* name, NativeFn f) {
   u32 sc = scope_begin(vm);
   Slot native = scope_push(vm, make_native(vm, name, f));
-  ns_define(vm, intern_id(&vm->intern, name, (u32)strlen(name)), slot_get(native), false,
-            nil_v());
+  ns_define(vm, intern_id(&vm->intern, name, (u32)strlen(name)), slot_get(native), false, nil_v());
   scope_pop_to(vm, sc);
 }
 

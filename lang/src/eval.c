@@ -262,8 +262,7 @@ Value vm_control_try(State* vm, u32 base, u32 argc) {
     Value matches = control_apply1(vm, predicate, slot_get(condition));
     if (matches.tag == Tag_Unwind) return scope_exit(vm, sc, matches);
     if (is_truthy(matches))
-      return scope_exit(vm, sc,
-                        control_apply1(vm, vm->stack.data[arg + 1], slot_get(condition)));
+      return scope_exit(vm, sc, control_apply1(vm, vm->stack.data[arg + 1], slot_get(condition)));
   }
   vm->unwindKind = UnwindKind_Condition;
   vm->unwindCondition = slot_get(condition);
@@ -349,8 +348,7 @@ Value vm_control_ns(State* vm, u32 base, u32 argc) {
   Slot specs = scope_push(vm, nil_v());
   for (u32 i = 1; i < argc; i++) {
     Value clause = vm->stack.data[base + i];
-    if (!pairp(clause) || car_(clause).tag != Tag_Keyword ||
-        car_(clause).id != vm->syms.kwRequire)
+    if (!pairp(clause) || car_(clause).tag != Tag_Keyword || car_(clause).id != vm->syms.kwRequire)
       continue;
     slot_set(specs, cdr_(clause));
     while (pairp(slot_get(specs))) {

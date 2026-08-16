@@ -76,8 +76,8 @@ static Value nat_compute_restarts(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "compute-restarts", argc, 0, 0));
   u32 sc = scope_begin(vm);
   Slot arr = scope_push(vm, make_array(vm, vm->restarts.len));
-  for (u32 i = vm->restarts.len; i-- > 0;)                          // innermost first
-    array_push(vm, slot_get(arr), vm->restarts.data[i].restart);    // alloc-free
+  for (u32 i = vm->restarts.len; i-- > 0;)                        // innermost first
+    array_push(vm, slot_get(arr), vm->restarts.data[i].restart);  // alloc-free
   return scope_exit(vm, sc, slot_get(arr));
 }
 

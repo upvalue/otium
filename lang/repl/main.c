@@ -334,9 +334,8 @@ static void run_repl(State* vm) {
   // Both natives stay rooted in these slots for the whole session; read them
   // through the slots at each install — a raw copy would go stale as soon as
   // an eval allocates.
-  Slot handlerFn = {vm,
-                    state_push(vm, make_native(vm, "repl-condition-handler",
-                                               repl_condition_handler))};
+  Slot handlerFn = {
+      vm, state_push(vm, make_native(vm, "repl-condition-handler", repl_condition_handler))};
   Slot predFn = {vm, state_push(vm, nil_v())};
   slot_set(predFn, make_native(vm, "repl-any-pred", always_true_pred));
 

@@ -18,5 +18,5 @@ typedef struct Intern {
 
 void intern_init(Intern* in);
 void intern_deinit(Intern* in);
-u32 intern_id(Intern* in, const char* s, u32 len);       // idempotent
+u32 intern_id(Intern* in, const char* s, u32 len);         // idempotent
 const char* intern_name(Intern* in, u32 id, u32* lenOut);  // null if id invalid

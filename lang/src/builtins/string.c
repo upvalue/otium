@@ -79,8 +79,7 @@ static Value nat_string_split(State* vm, u32 base, u32 argc) {
   if (argc == 2) {
     OT_TRYS(vm, sc, need_string(vm, "string-split", ARG(1)));
     StringData* sep = as_string(ARG(1));
-    if (sep->len == 0)
-      return scope_exit(vm, sc, raise_error(vm, "string-split: empty separator"));
+    if (sep->len == 0) return scope_exit(vm, sc, raise_error(vm, "string-split: empty separator"));
     // re-fetch pointers after each allocation: make_string_from may GC-move
     // objects (it roots the source internally; out is re-read from its slot).
     u32 start = 0, i = 0;
@@ -220,9 +219,8 @@ static Value nat_endsp(State* vm, u32 base, u32 argc) {
   OT_TRY(need_strings(vm, "string-ends-with?", base, argc));
   StringData* s = as_string(ARG(0));
   StringData* t = as_string(ARG(1));
-  return bool_v(t->len <= s->len &&
-                memcmp(string_data_bytes(s) + (s->len - t->len), string_data_bytes(t), t->len) ==
-                    0);
+  return bool_v(t->len <= s->len && memcmp(string_data_bytes(s) + (s->len - t->len),
+                                           string_data_bytes(t), t->len) == 0);
 }
 
 static Value nat_replace(State* vm, u32 base, u32 argc) {

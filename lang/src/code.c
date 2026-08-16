@@ -105,8 +105,8 @@ bool code_verify(Value value, Buf* error) {
       u32 at = ip;
       Op op = (Op)code->bytes[ip++];
       u32 width = operand_width(op_info(op)->operand);
-      if (op == Op_Jump || op == Op_JumpFalse || op == Op_JumpFalsePeek ||
-          op == Op_JumpTruePeek || op == Op_Loop) {
+      if (op == Op_Jump || op == Op_JumpFalse || op == Op_JumpFalsePeek || op == Op_JumpTruePeek ||
+          op == Op_Loop) {
         i32 rel = code_read_i32(code->bytes + ip);
         i64 target = (i64)ip + 4 + rel;
         if (target < 0 || target >= code->len || !boundaries[(u32)target]) {

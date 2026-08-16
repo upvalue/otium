@@ -17,8 +17,7 @@ static State* vm_state(u32 maxDepth) {
   return state;
 }
 
-static Value code(State* state, const u8* bytes, u32 len, Value constants,
-                  const CodeSpec* spec) {
+static Value code(State* state, const u8* bytes, u32 len, Value constants, const CodeSpec* spec) {
   CodeSpec defaultSpec = {0};
   if (!spec) spec = &defaultSpec;
   u32 sc = scope_begin(state);
@@ -128,8 +127,7 @@ TEST(call_enters_compiled_functions_without_a_c_apply) {
         state, function(state, code(state, innerBytes, sizeof(innerBytes), nil_v(), &innerSpec)));
     Slot constants = scope_push(state, make_array(state, 1));
     array_push(state, slot_get(constants), slot_get(inner));
-    const u8 outerBytes[] = {(u8)Op_Const, 0, 0, (u8)Op_Int8,  42,
-                             (u8)Op_Call,  1, 0, (u8)Op_Return};
+    const u8 outerBytes[] = {(u8)Op_Const, 0, 0, (u8)Op_Int8, 42, (u8)Op_Call, 1, 0, (u8)Op_Return};
     CodeSpec outerSpec = {0};
     outerSpec.maxStack = 3;
     Slot outer = scope_push(

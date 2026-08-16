@@ -57,14 +57,13 @@ TEST(compiler_hoists_defines_out_of_let_bodies) {
   State* state = compiler_state(1000);
   // Mutually recursive defines under a let, capturing each other and the
   // let bindings (the mperm.scm shape).
-  Value result = run_compiled(state,
-                              "((lambda (n)"
-                              "   (let ((acc 2))"
-                              "     (define (even? k) (if (= k 0) #t (odd? (- k 1))))"
-                              "     (define (odd? k) (if (= k 0) #f (even? (- k 1))))"
-                              "     (set! acc (+ acc (if (even? n) 40 0)))"
-                              "     acc))"
-                              " 10)");
+  Value result = run_compiled(state, "((lambda (n)"
+                                     "   (let ((acc 2))"
+                                     "     (define (even? k) (if (= k 0) #t (odd? (- k 1))))"
+                                     "     (define (odd? k) (if (= k 0) #f (even? (- k 1))))"
+                                     "     (set! acc (+ acc (if (even? n) 40 0)))"
+                                     "     acc))"
+                                     " 10)");
   CHECK(result.tag == Tag_Int);
   CHECK(result.i == 42);
   state_destroy(state);

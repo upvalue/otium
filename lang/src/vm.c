@@ -90,8 +90,7 @@ static Value enter_frame(State* vm, Value fnValue, u32 callBase, u32 argc, bool 
   return nil_v();
 }
 
-static void load_frame(State* vm, const u8** bytes, const u8** ip, const u8** end,
-                       u32* stackBase) {
+static void load_frame(State* vm, const u8** bytes, const u8** ip, const u8** end, u32* stackBase) {
   CallFrame* frame = &vm->frames.data[vm->frames.len - 1];
   CodeData* code = as_code(as_function(frame->fn)->code);
   *bytes = code->bytes;

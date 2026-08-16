@@ -261,7 +261,8 @@ TEST(heap_grows_when_live_exceeds_half) {
   heap_init(&heap, nullptr, 1024, OT_HEAP_MAX_DEFAULT);
   VecValue roots = {0};
   heap_add_roots(&heap, walk_vec_roots, &roots);
-  for (int i = 0; i < 200; i++) vec_push(&roots, make_string_h(&heap, "live-string-payload-xx", 22));
+  for (int i = 0; i < 200; i++)
+    vec_push(&roots, make_string_h(&heap, "live-string-payload-xx", 22));
   CHECK(heap.spaceSize > 1024);
   // all still reachable and intact
   for (u32 i = 0; i < roots.len; i++)

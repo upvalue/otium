@@ -1091,9 +1091,7 @@ static bool emit_thunk_expr(Compiler* c, Value form) {
   return result;
 }
 
-static bool emit_thunk_body(Compiler* c, Value forms) {
-  return emit_lambda(c, forms, 0);
-}
+static bool emit_thunk_body(Compiler* c, Value forms) { return emit_lambda(c, forms, 0); }
 
 static bool emit_binding_control(Compiler* c, Value args, bool tail, const char* badForm,
                                  const char* badBinding, const char* nativeName, NativeFn native,
@@ -1534,8 +1532,8 @@ static Value compile_lambda(State* vm, LambdaInfo* info, Value body, u32 name) {
       .maxStack = compiler.maxDepth,
       .name = name,
   };
-  Value result = make_code(vm, (const u8*)compiler.bytes.data, compiler.bytes.len,
-                           slot_get(constants), &spec);
+  Value result =
+      make_code(vm, (const u8*)compiler.bytes.data, compiler.bytes.len, slot_get(constants), &spec);
   compiler_deinit(&compiler);
   return scope_exit(vm, sc, result);
 }

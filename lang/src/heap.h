@@ -143,8 +143,8 @@ typedef struct Heap {
   u64 collections;  // stats: number of collects run
 
   VecRootEntry rootWalkers;
-  VecValue tempRoots;      // internal rooting for make_* argument values
-  VecObjPtr finalizable;   // objects owning C-heap storage or foreign resources
+  VecValue tempRoots;     // internal rooting for make_* argument values
+  VecObjPtr finalizable;  // objects owning C-heap storage or foreign resources
   VecForeignType foreignTypes;
 
   // scavenge state (valid only during collect)

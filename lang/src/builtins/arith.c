@@ -226,8 +226,7 @@ OT_NUM_PRED(nat_exactp, "exact?", ARG(0).tag == Tag_Int)
 OT_NUM_PRED(nat_inexactp, "inexact?", ARG(0).tag == Tag_Float)
 OT_NUM_PRED(nat_integerp, "integer?",
             ARG(0).tag == Tag_Int ||
-                (ARG(0).tag == Tag_Float && isfinite(ARG(0).f) &&
-                 trunc(ARG(0).f) == ARG(0).f))
+                (ARG(0).tag == Tag_Float && isfinite(ARG(0).f) && trunc(ARG(0).f) == ARG(0).f))
 OT_NUM_PRED(nat_nanp, "nan?", ARG(0).tag == Tag_Float && isnan(ARG(0).f))
 OT_NUM_PRED(nat_infinitep, "infinite?", ARG(0).tag == Tag_Float && isinf(ARG(0).f))
 OT_NUM_PRED(nat_finitep, "finite?", ARG(0).tag == Tag_Int || isfinite(ARG(0).f))

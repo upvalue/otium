@@ -237,8 +237,8 @@ TEST(compact_dict_mutable_keys_identity_stable_across_gc) {
   Value a2 = make_array(vm, 4);  // distinct identity, same shape
   u32 r2 = state_push(vm, a2);
   CHECK(is_nil(table_get(vm, vm->stack.data[root], a2)));
-  heap_collect(&vm->heap);      // key must survive by stamped identity
-  a1 = vm->stack.data[r];       // re-fetch possibly-moved values
+  heap_collect(&vm->heap);  // key must survive by stamped identity
+  a1 = vm->stack.data[r];   // re-fetch possibly-moved values
   CHECK(table_get(vm, vm->stack.data[root], a1).i == 5);
   state_pop_to(vm, r);
   (void)r2;

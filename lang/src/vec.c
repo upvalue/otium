@@ -16,10 +16,8 @@ static void default_free(void* ud, void* p) {
 static OtAllocator g_alloc = {default_alloc, default_realloc, default_free, nullptr};
 
 void ot_set_allocator(const OtAllocator* a) {
-  if (a)
-    g_alloc = *a;
-  else
-    g_alloc = (OtAllocator){default_alloc, default_realloc, default_free, nullptr};
+  if (a) g_alloc = *a;
+  else g_alloc = (OtAllocator){default_alloc, default_realloc, default_free, nullptr};
 }
 void* ot_alloc(size_t n) { return g_alloc.alloc(g_alloc.ud, n); }
 void* ot_realloc(void* p, size_t n) { return g_alloc.realloc(g_alloc.ud, p, n); }

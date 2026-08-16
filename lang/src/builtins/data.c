@@ -472,14 +472,12 @@ static Value nat_reverse(State* vm, u32 base, u32 argc) {
 static Value nat_list_to_array(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "list->array", argc, 1, 1));
   Value v = ARG(0);
-  if (v.tag != Tag_Null && v.tag != Tag_Pair)
-    return raise_error(vm, "list->array: expected list");
+  if (v.tag != Tag_Null && v.tag != Tag_Pair) return raise_error(vm, "list->array: expected list");
   u32 sc = scope_begin(vm);
   Slot out = scope_push(vm, make_array(vm, 8));
   // re-read the list from its rooted arg slot: make_array collected
   for (Value p = ARG(0); p.tag != Tag_Null; p = as_pair(p)->cdr) {
-    if (p.tag != Tag_Pair)
-      return scope_exit(vm, sc, raise_error(vm, "list->array: improper list"));
+    if (p.tag != Tag_Pair) return scope_exit(vm, sc, raise_error(vm, "list->array: improper list"));
     array_push(vm, slot_get(out), as_pair(p)->car);  // no GC allocation in this loop
   }
   return scope_exit(vm, sc, slot_get(out));

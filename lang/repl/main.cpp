@@ -227,7 +227,7 @@ static void run_repl(Vm& vm) {
   predFn.set(ot::make_native(vm, "repl-any-pred", always_true_pred));
 
   for (;;) {
-    char* line = bestlineWithHistory("otium> ", "otium");
+    char* line = bestlineWithHistory("ot> ", "otium");
     if (!line) {
       if (g_sigint) {
         g_sigint = 0;

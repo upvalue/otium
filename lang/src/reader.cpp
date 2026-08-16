@@ -256,7 +256,8 @@ Value Reader::parseNumber(const char* tok, u32 n, u32 line, u32 col) {
     }
     u64 limit = neg ? (u64)1 << 63 : ((u64)1 << 63) - 1;
     if (acc > limit) return err(line, col, "integer literal out of range");
-    return int_v(neg ? -(i64)acc : (i64)acc);
+    i64 value = neg ? (acc == ((u64)1 << 63) ? INT64_MIN : -(i64)acc) : (i64)acc;
+    return int_v(value);
   }
 
   // classify int vs float by presence of . e E
@@ -280,7 +281,8 @@ Value Reader::parseNumber(const char* tok, u32 n, u32 line, u32 col) {
     }
     u64 limit = neg ? (u64)1 << 63 : ((u64)1 << 63) - 1;
     if (acc > limit) return err(line, col, "integer literal out of range");
-    return int_v(neg ? -(i64)acc : (i64)acc);
+    i64 value = neg ? (acc == ((u64)1 << 63) ? INT64_MIN : -(i64)acc) : (i64)acc;
+    return int_v(value);
   }
 
   // float: NUL-terminate a copy, parse with strtod, require full consumption

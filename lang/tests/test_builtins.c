@@ -315,7 +315,11 @@ TEST(pair_mutation_preserves_acyclic_and_table_key_invariants) {
     Value r = CALL(vm, "set-car!", slot_get(pair), int_v(2));
     CHECK(r.tag == Tag_Pair);
     CHECK(as_pair(slot_get(pair))->car.i == 2);
-    r = CALL(vm, "set-cdr!", slot_get(pair), make_pair(vm, int_v(3), null_v()));
+    // Root the new pair before the call rather than allocating inside CALL's
+    // argument list: the compound literal would read slot_get(pair) into the
+    // array and then make_pair could collect and move it.
+    Slot fresh = scope_push(vm, make_pair(vm, int_v(3), null_v()));
+    r = CALL(vm, "set-cdr!", slot_get(pair), slot_get(fresh));
     CHECK(r.tag == Tag_Pair);
     CHECK(as_pair(as_pair(slot_get(pair))->cdr)->car.i == 3);
 

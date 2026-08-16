@@ -393,7 +393,7 @@ typedef struct Compiler {
   State* vm;
   LambdaInfo* info;
   Buf bytes;
-  Slot constants;
+  Ref constants;
   VecU32 active;
   u32 bindingCursor;
   u32 childCursor;
@@ -402,7 +402,7 @@ typedef struct Compiler {
   bool failed;
 } Compiler;
 
-static void compiler_init(Compiler* c, State* vm, LambdaInfo* info, Slot constants) {
+static void compiler_init(Compiler* c, State* vm, LambdaInfo* info, Ref constants) {
   c->vm = vm;
   c->info = info;
   c->bytes = (Buf){0};
@@ -470,17 +470,28 @@ static void patch_jump(Compiler* c, u32 operand, u32 target) {
   for (u32 i = 0; i < 4; i++) c->bytes.data[operand + i] = (char)(bits >> (i * 8));
 }
 
-static u32 add_constant(Compiler* c, Value value) {
-  ArrayData* constants = as_array(slot_get(c->constants));
+// The pool grows by array_push, which allocates, so the candidate must already
+// be rooted: taking a Ref makes passing a transient like car_(form) impossible.
+static u32 add_constant(Compiler* c, Ref value) {
+  ArrayData* constants = as_array(ref_get(c->vm, c->constants));
   for (u32 i = 0; i < constants->len; i++)
-    if (val_eq(constants->items[i], value)) return i;
+    if (val_eq(constants->items[i], ref_get(c->vm, value))) return i;
   if (constants->len >= UINT16_MAX) {
     compiler_error(c, "too many constants");
     return 0;
   }
   u32 index = constants->len;
-  array_push(c->vm, slot_get(c->constants), value);
+  array_push(c->vm, ref_get(c->vm, c->constants), ref_get(c->vm, value));
   return index;
+}
+
+// Immediates carry no heap pointer, so they need no rooting. Separate entry
+// point rather than an overload so the assert catches a heap value arriving
+// through the door that does not root it.
+static u32 add_constant_imm(Compiler* c, Value immediate) {
+  OT_ASSERT(!is_heap(immediate));
+  OT_SCOPE(c->vm);
+  return add_constant(c, ref_push(c->vm, immediate));
 }
 
 static Resolved resolve(Compiler* c, u32 name) {
@@ -493,12 +504,15 @@ static Resolved resolve(Compiler* c, u32 name) {
     i32 capture = find_capture(c->info, name);
     if (capture >= 0) return (Resolved){ResolvedKind_Upval, (u32)capture, true};
   }
+  OT_SCOPE(c->vm);
   Value symbol = symbol_v(name);
+  // ns_resolve_var is allocation-free, so `var` is safe until it is rooted here.
   Value var = ns_resolve_var(c->vm, symbol);
-  return (Resolved){ResolvedKind_Global, add_constant(c, is_nil(var) ? symbol : var), false};
+  Ref constant = ref_push(c->vm, is_nil(var) ? symbol : var);
+  return (Resolved){ResolvedKind_Global, add_constant(c, constant), false};
 }
 
-static bool emit_expr(Compiler* c, Value form, bool tail);
+static bool emit_expr(Compiler* c, Ref form, bool tail);
 
 static void emit_load(Compiler* c, Resolved resolved) {
   switch (resolved.kind) {
@@ -535,90 +549,85 @@ static void emit_store(Compiler* c, Resolved resolved) {
   }
 }
 
-static bool emit_body(Compiler* c, Value forms, bool tail) {
+static bool emit_body(Compiler* c, Ref forms, bool tail) {
   State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot cursor = scope_push(vm, forms);
-  if (!pairp(slot_get(cursor))) {
+  OT_SCOPE(vm);
+  Ref cursor = ref_push(vm, ref_get(vm, forms));
+  if (!pairp(ref_get(vm, cursor))) {
     emit_op(c, Op_Nil);
     push_depth(c);
-    scope_pop_to(vm, sc);
     return true;
   }
-  while (pairp(cdr_(slot_get(cursor)))) {
-    if (!emit_expr(c, car_(slot_get(cursor)), false)) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
+  // One reused slot for the form being emitted rather than a push per
+  // iteration, so the scope's depth does not track the length of the body.
+  Ref item = ref_push(vm, nil_v());
+  while (pairp(cdr_(ref_get(vm, cursor)))) {
+    ref_set(vm, item, car_(ref_get(vm, cursor)));
+    if (!emit_expr(c, item, false)) return false;
     emit_op(c, Op_Pop);
     pop_depth(c, 1);
-    slot_set(cursor, cdr_(slot_get(cursor)));
+    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
   }
-  bool falls = emit_expr(c, car_(slot_get(cursor)), tail);
-  scope_pop_to(vm, sc);
-  return falls;
+  ref_set(vm, item, car_(ref_get(vm, cursor)));
+  return emit_expr(c, item, tail);
 }
 
-static Value compile_lambda(State* vm, LambdaInfo* info, Value body, u32 name);
+static Status compile_lambda(State* vm, LambdaInfo* info, Ref body, u32 name);
 
 // The parameter list is not passed down: parse_params already recorded the
 // arity and the formals' slots on `child` during analysis.
-static bool emit_lambda(Compiler* c, Value body, u32 name) {
+static bool emit_lambda(Compiler* c, Ref body, u32 name) {
   if (c->childCursor >= c->info->children.len) {
     compiler_error(c, "lambda analysis mismatch");
     return true;
   }
   LambdaInfo* child = c->info->children.data[c->childCursor++];
   State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot bodyRoot = scope_push(vm, body);
-  Slot nested = scope_push(vm, compile_lambda(vm, child, slot_get(bodyRoot), name));
-  if (slot_get(nested).tag == Tag_Unwind) {
+  OT_SCOPE(vm);
+  if (compile_lambda(vm, child, body, name) != Status_Ok) {
     c->failed = true;
-    scope_pop_to(vm, sc);
     return true;
   }
-  Slot descriptor = scope_push(vm, make_array(vm, child->captures.len + 1));
-  array_push(vm, slot_get(descriptor), slot_get(nested));
+  Ref nested = ref_top(vm);
+  Ref descriptor = ref_push(vm, make_array(vm, child->captures.len + 1));
+  array_push(vm, ref_get(vm, descriptor), ref_get(vm, nested));
   for (u32 i = 0; i < child->captures.len; i++) {
     Capture capture = child->captures.data[i];
     i64 encoded = capture.local ? (i64)capture.index : -(i64)capture.index - 1;
-    array_push(vm, slot_get(descriptor), int_v(encoded));
+    array_push(vm, ref_get(vm, descriptor), int_v(encoded));
   }
-  u32 constant = add_constant(c, slot_get(descriptor));
+  u32 constant = add_constant(c, descriptor);
   emit_op(c, Op_Closure);
   emit_u16(c, constant);
   push_depth(c);
-  scope_pop_to(vm, sc);
   return true;
 }
 
-static bool emit_if(Compiler* c, Value args, bool tail) {
-  if (!pairp(args) || !pairp(cdr_(args))) {
+static bool emit_if(Compiler* c, Ref args, bool tail) {
+  State* vm = c->vm;
+  if (!pairp(ref_get(vm, args)) || !pairp(cdr_(ref_get(vm, args)))) {
     compiler_error(c, "bad if");
     return true;
   }
-  State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot argsRoot = scope_push(vm, args);
-  if (!emit_expr(c, car_(slot_get(argsRoot)), false)) {
-    scope_pop_to(vm, sc);
-    return false;
-  }
+  OT_SCOPE(vm);
+  Ref part = ref_push(vm, car_(ref_get(vm, args)));
+  if (!emit_expr(c, part, false)) return false;
   u32 branchDepth = c->depth - 1;
   u32 falseJump = emit_jump(c, Op_JumpFalse);
   pop_depth(c, 1);
-  bool thenFalls = emit_expr(c, car_(cdr_(slot_get(argsRoot))), tail);
+  ref_set(vm, part, car_(cdr_(ref_get(vm, args))));
+  bool thenFalls = emit_expr(c, part, tail);
   u32 thenDepth = c->depth;
   u32 endJump = 0;
   if (thenFalls) endJump = emit_jump(c, Op_Jump);
   u32 elseStart = c->bytes.len;
   patch_jump(c, falseJump, elseStart);
   c->depth = branchDepth;
-  Value elseForms = cdr_(cdr_(slot_get(argsRoot)));
   bool elseFalls;
-  if (pairp(elseForms)) elseFalls = emit_expr(c, car_(elseForms), tail);
-  else {
+  if (pairp(cdr_(cdr_(ref_get(vm, args))))) {
+    ref_set(vm, part, car_(cdr_(cdr_(ref_get(vm, args)))));
+    elseFalls = emit_expr(c, part, tail);
+  } else {
     emit_op(c, Op_Nil);
     push_depth(c);
     elseFalls = true;
@@ -629,7 +638,6 @@ static bool emit_if(Compiler* c, Value args, bool tail) {
   if (thenFalls && elseFalls && thenDepth != elseDepth)
     compiler_error(c, "if branches have different stack depths");
   c->depth = thenFalls ? thenDepth : elseDepth;
-  scope_pop_to(vm, sc);
   return thenFalls || elseFalls;
 }
 
@@ -662,138 +670,129 @@ static bool bind_next_slot(Compiler* c, u32 name) {
   return true;
 }
 
-static bool emit_let(Compiler* c, Value args, bool tail) {
-  if (!pairp(args)) {
+static bool emit_let(Compiler* c, Ref args, bool tail) {
+  State* vm = c->vm;
+  if (!pairp(ref_get(vm, args))) {
     compiler_error(c, "bad let");
     return true;
   }
-  State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot argsRoot = scope_push(vm, args);
-  Slot bindings = scope_push(vm, car_(slot_get(argsRoot)));
-  slot_set(bindings, strip_array_literal_head(slot_get(bindings), vm->syms.array_));
+  OT_SCOPE(vm);
+  Ref bindings = ref_push(vm, car_(ref_get(vm, args)));
+  ref_set(vm, bindings, strip_array_literal_head(ref_get(vm, bindings), vm->syms.array_));
   u32 activeBase = c->active.len;
-  Slot bindingRoot = scope_push(vm, nil_v());
-  while (pairp(slot_get(bindings))) {
-    slot_set(bindingRoot, car_(slot_get(bindings)));
-    if (!pairp(slot_get(bindingRoot)) || !pairp(cdr_(slot_get(bindingRoot))) ||
-        car_(slot_get(bindingRoot)).tag != Tag_Symbol) {
+  Ref bindingRoot = ref_push(vm, nil_v());
+  Ref init = ref_push(vm, nil_v());
+  while (pairp(ref_get(vm, bindings))) {
+    ref_set(vm, bindingRoot, car_(ref_get(vm, bindings)));
+    if (!pairp(ref_get(vm, bindingRoot)) || !pairp(cdr_(ref_get(vm, bindingRoot))) ||
+        car_(ref_get(vm, bindingRoot)).tag != Tag_Symbol) {
       compiler_error(c, "bad let binding");
       break;
     }
-    if (!emit_expr(c, car_(cdr_(slot_get(bindingRoot))), false)) break;
-    if (!bind_next_slot(c, car_(slot_get(bindingRoot)).id)) break;
-    slot_set(bindings, cdr_(slot_get(bindings)));
+    ref_set(vm, init, car_(cdr_(ref_get(vm, bindingRoot))));
+    if (!emit_expr(c, init, false)) break;
+    if (!bind_next_slot(c, car_(ref_get(vm, bindingRoot)).id)) break;
+    ref_set(vm, bindings, cdr_(ref_get(vm, bindings)));
   }
   // Mirror the analyzer's collect_body_defines for this let body: allocate a
   // nil-initialized (boxed if captured) slot per hoisted define, in the same
   // order, so bindingCursor stays in lockstep.
   if (c->info->userDepth > 0) {
-    for (Value body = cdr_(slot_get(argsRoot)); pairp(body); body = cdr_(body)) {
-      Value name = body_define_name(vm, car_(body));
-      if (is_nil(name) || active_has(c, name.id)) continue;
-      emit_op(c, Op_Nil);
-      push_depth(c);
-      if (!bind_next_slot(c, name.id)) break;
+    Ref body = ref_push(vm, cdr_(ref_get(vm, args)));
+    while (pairp(ref_get(vm, body))) {
+      Value name = body_define_name(vm, car_(ref_get(vm, body)));
+      if (!is_nil(name) && !active_has(c, name.id)) {
+        emit_op(c, Op_Nil);
+        push_depth(c);
+        if (!bind_next_slot(c, name.id)) break;
+      }
+      ref_set(vm, body, cdr_(ref_get(vm, body)));
     }
   }
-  bool falls = emit_body(c, cdr_(slot_get(argsRoot)), tail);
+  Ref bodyForms = ref_push(vm, cdr_(ref_get(vm, args)));
+  bool falls = emit_body(c, bodyForms, tail);
   c->active.len = activeBase;
-  scope_pop_to(vm, sc);
   return falls;
 }
 
-static void emit_def_global(Compiler* c, Value name, bool isPrivate, Value doc) {
+// `name` is a symbol, which is an immediate, so it needs no rooting; `doc` is a
+// string and does.
+static void emit_def_global(Compiler* c, Value name, bool isPrivate, Ref doc) {
   State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot docRoot = scope_push(vm, doc);
-  Slot descriptor = scope_push(vm, make_array(vm, 3));
-  array_push(vm, slot_get(descriptor), name);
-  array_push(vm, slot_get(descriptor), bool_v(isPrivate));
-  array_push(vm, slot_get(descriptor), slot_get(docRoot));
+  OT_ASSERT(name.tag == Tag_Symbol);
+  OT_SCOPE(vm);
+  Ref descriptor = ref_push(vm, make_array(vm, 3));
+  array_push(vm, ref_get(vm, descriptor), name);
+  array_push(vm, ref_get(vm, descriptor), bool_v(isPrivate));
+  array_push(vm, ref_get(vm, descriptor), ref_get(vm, doc));
   emit_op(c, Op_DefGlobal);
-  emit_u16(c, add_constant(c, slot_get(descriptor)));
-  scope_pop_to(vm, sc);
+  emit_u16(c, add_constant(c, descriptor));
 }
 
-static bool emit_define(Compiler* c, Value form, bool isPrivate) {
+static bool emit_define(Compiler* c, Ref form, bool isPrivate) {
   State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot formRoot = scope_push(vm, form);
-  Value args = cdr_(slot_get(formRoot));
-  if (!pairp(args)) {
+  OT_SCOPE(vm);
+  Ref args = ref_push(vm, cdr_(ref_get(vm, form)));
+  if (!pairp(ref_get(vm, args))) {
     compiler_error(c, "bad define");
-    scope_pop_to(vm, sc);
     return true;
   }
-  Value target = car_(args);
-  Value name = pairp(target) ? car_(target) : target;
+  Ref target = ref_push(vm, car_(ref_get(vm, args)));
+  Value name = pairp(ref_get(vm, target)) ? car_(ref_get(vm, target)) : ref_get(vm, target);
   if (name.tag != Tag_Symbol) {
     compiler_error(c, "define name must be a symbol");
-    scope_pop_to(vm, sc);
     return true;
   }
-  if (pairp(target)) {
-    if (!emit_lambda(c, cdr_(args), name.id)) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
+  Ref rest = ref_push(vm, nil_v());
+  if (pairp(ref_get(vm, target))) {
+    ref_set(vm, rest, cdr_(ref_get(vm, args)));
+    if (!emit_lambda(c, rest, name.id)) return false;
   } else {
-    Value rest = cdr_(args);
-    rest = skip_docstring(rest, nullptr);
-    if (!pairp(rest)) {
+    ref_set(vm, rest, skip_docstring(cdr_(ref_get(vm, args)), nullptr));
+    if (!pairp(ref_get(vm, rest))) {
       compiler_error(c, "define is missing a value");
-      scope_pop_to(vm, sc);
       return true;
     }
-    if (!emit_expr(c, car_(rest), false)) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
+    ref_set(vm, rest, car_(ref_get(vm, rest)));
+    if (!emit_expr(c, rest, false)) return false;
   }
 
   if (c->info->userDepth > 0) {
     Resolved local = resolve(c, name.id);
     if (local.kind == ResolvedKind_Global) {
       compiler_error(c, "internal define was not hoisted");
-      scope_pop_to(vm, sc);
       return true;
     }
     emit_store(c, local);
   } else {
-    args = cdr_(slot_get(formRoot));
-    Value doc = nil_v();
-    skip_docstring(cdr_(args), &doc);
+    Ref doc = ref_push(vm, nil_v());
+    Value found = nil_v();
+    skip_docstring(cdr_(ref_get(vm, args)), &found);
+    ref_set(vm, doc, found);
     emit_def_global(c, name, isPrivate, doc);
   }
-  scope_pop_to(vm, sc);
   return true;
 }
 
-static bool emit_defmacro(Compiler* c, Value form) {
+static bool emit_defmacro(Compiler* c, Ref form) {
   State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot formRoot = scope_push(vm, form);
-  Value args = cdr_(slot_get(formRoot));
-  if (!pairp(args) || car_(args).tag != Tag_Symbol || !pairp(cdr_(args))) {
+  OT_SCOPE(vm);
+  Ref args = ref_push(vm, cdr_(ref_get(vm, form)));
+  if (!pairp(ref_get(vm, args)) || car_(ref_get(vm, args)).tag != Tag_Symbol ||
+      !pairp(cdr_(ref_get(vm, args)))) {
     compiler_error(c, "bad defmacro");
-    scope_pop_to(vm, sc);
     return true;
   }
-  Value name = car_(args);
-  Value rest = cdr_(args);
-  if (!emit_lambda(c, cdr_(rest), name.id)) {
-    scope_pop_to(vm, sc);
-    return false;
-  }
+  Value name = car_(ref_get(vm, args));
+  Ref body = ref_push(vm, cdr_(cdr_(ref_get(vm, args))));
+  if (!emit_lambda(c, body, name.id)) return false;
   emit_op(c, Op_ToMacro);
 
-  args = cdr_(slot_get(formRoot));
-  rest = cdr_(args);
-  Value doc = nil_v();
-  skip_docstring(cdr_(rest), &doc);
+  Ref doc = ref_push(vm, nil_v());
+  Value found = nil_v();
+  skip_docstring(cdr_(cdr_(ref_get(vm, args))), &found);
+  ref_set(vm, doc, found);
   emit_def_global(c, name, false, doc);
-  scope_pop_to(vm, sc);
   return true;
 }
 
@@ -804,57 +803,46 @@ static bool finish_control_call(Compiler* c, u32 argc, bool tail) {
   return !tail;
 }
 
-static bool emit_call(Compiler* c, Value form, bool tail) {
+static bool emit_call(Compiler* c, Ref form, bool tail) {
   State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot cursor = scope_push(vm, form);
-  if (!emit_expr(c, car_(slot_get(cursor)), false)) {
-    scope_pop_to(vm, sc);
-    return false;
-  }
-  slot_set(cursor, cdr_(slot_get(cursor)));
+  OT_SCOPE(vm);
+  Ref cursor = ref_push(vm, ref_get(vm, form));
+  Ref item = ref_push(vm, car_(ref_get(vm, cursor)));
+  if (!emit_expr(c, item, false)) return false;
+  ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
   u32 argc = 0;
-  while (pairp(slot_get(cursor))) {
-    if (!emit_expr(c, car_(slot_get(cursor)), false)) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
+  while (pairp(ref_get(vm, cursor))) {
+    ref_set(vm, item, car_(ref_get(vm, cursor)));
+    if (!emit_expr(c, item, false)) return false;
     argc++;
-    slot_set(cursor, cdr_(slot_get(cursor)));
+    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
   }
-  if (slot_get(cursor).tag != Tag_Null) {
+  if (ref_get(vm, cursor).tag != Tag_Null) {
     compiler_error(c, "dotted call");
-    scope_pop_to(vm, sc);
     return true;
   }
-  scope_pop_to(vm, sc);
   return finish_control_call(c, argc, tail);
 }
 
-static bool emit_while(Compiler* c, Value args) {
-  if (!pairp(args)) {
+static bool emit_while(Compiler* c, Ref args) {
+  State* vm = c->vm;
+  if (!pairp(ref_get(vm, args))) {
     compiler_error(c, "bad while");
     return true;
   }
-  State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot argsRoot = scope_push(vm, args);
+  OT_SCOPE(vm);
   u32 start = c->bytes.len;
-  if (!emit_expr(c, car_(slot_get(argsRoot)), false)) {
-    scope_pop_to(vm, sc);
-    return false;
-  }
+  Ref item = ref_push(vm, car_(ref_get(vm, args)));
+  if (!emit_expr(c, item, false)) return false;
   u32 exit = emit_jump(c, Op_JumpFalse);
   pop_depth(c, 1);
-  Slot body = scope_push(vm, cdr_(slot_get(argsRoot)));
-  while (pairp(slot_get(body))) {
-    if (!emit_expr(c, car_(slot_get(body)), false)) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
+  Ref body = ref_push(vm, cdr_(ref_get(vm, args)));
+  while (pairp(ref_get(vm, body))) {
+    ref_set(vm, item, car_(ref_get(vm, body)));
+    if (!emit_expr(c, item, false)) return false;
     emit_op(c, Op_Pop);
     pop_depth(c, 1);
-    slot_set(body, cdr_(slot_get(body)));
+    ref_set(vm, body, cdr_(ref_get(vm, body)));
   }
   emit_op(c, Op_Loop);
   u32 operand = c->bytes.len;
@@ -862,78 +850,77 @@ static bool emit_while(Compiler* c, Value args) {
   patch_jump(c, exit, c->bytes.len);
   emit_op(c, Op_Nil);
   push_depth(c);
-  scope_pop_to(vm, sc);
   return true;
 }
 
-static bool emit_short_circuit(Compiler* c, Value args, bool isAnd, bool tail) {
-  if (!pairp(args)) {
+static bool emit_short_circuit(Compiler* c, Ref args, bool isAnd, bool tail) {
+  State* vm = c->vm;
+  if (!pairp(ref_get(vm, args))) {
     emit_op(c, isAnd ? Op_True : Op_False);
     push_depth(c);
     return true;
   }
-  State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot cursor = scope_push(vm, args);
+  OT_SCOPE(vm);
+  Ref cursor = ref_push(vm, ref_get(vm, args));
+  Ref item = ref_push(vm, nil_v());
   VecU32 exits = {0};
-  while (pairp(cdr_(slot_get(cursor)))) {
-    if (!emit_expr(c, car_(slot_get(cursor)), false)) {
+  while (pairp(cdr_(ref_get(vm, cursor)))) {
+    ref_set(vm, item, car_(ref_get(vm, cursor)));
+    if (!emit_expr(c, item, false)) {
       vec_deinit(&exits);
-      scope_pop_to(vm, sc);
       return false;
     }
     vec_push(&exits, emit_jump(c, isAnd ? Op_JumpFalsePeek : Op_JumpTruePeek));
     emit_op(c, Op_Pop);
     pop_depth(c, 1);
-    slot_set(cursor, cdr_(slot_get(cursor)));
+    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
   }
-  bool falls = emit_expr(c, car_(slot_get(cursor)), tail);
+  ref_set(vm, item, car_(ref_get(vm, cursor)));
+  bool falls = emit_expr(c, item, tail);
   u32 end = c->bytes.len;
   for (u32 i = 0; i < exits.len; i++) patch_jump(c, exits.data[i], end);
   bool result = exits.len ? true : falls;
   vec_deinit(&exits);
-  scope_pop_to(vm, sc);
   return result;
 }
 
-static bool emit_cond(Compiler* c, Value clauses, bool tail) {
+static bool emit_cond(Compiler* c, Ref clauses, bool tail) {
   State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot cursor = scope_push(vm, clauses);
+  OT_SCOPE(vm);
+  Ref cursor = ref_push(vm, ref_get(vm, clauses));
   VecU32 exits = {0};
   const u32 baseDepth = c->depth;
   bool anyFalls = false;
   bool hasElse = false;
-  Slot clauseRoot = scope_push(vm, nil_v());
+  Ref clauseRoot = ref_push(vm, nil_v());
+  Ref part = ref_push(vm, nil_v());
 
-  while (pairp(slot_get(cursor))) {
-    slot_set(clauseRoot, car_(slot_get(cursor)));
-    if (!pairp(slot_get(clauseRoot))) {
+  while (pairp(ref_get(vm, cursor))) {
+    ref_set(vm, clauseRoot, car_(ref_get(vm, cursor)));
+    if (!pairp(ref_get(vm, clauseRoot))) {
       compiler_error(c, "bad cond clause");
       vec_deinit(&exits);
-      scope_pop_to(vm, sc);
       return true;
     }
-    Value test = car_(slot_get(clauseRoot));
-    if (sym_is(test, vm->syms.else_)) {
-      if (!pairp(cdr_(slot_get(clauseRoot)))) {
+    if (sym_is(car_(ref_get(vm, clauseRoot)), vm->syms.else_)) {
+      if (!pairp(cdr_(ref_get(vm, clauseRoot)))) {
         compiler_error(c, "cond else needs a body");
         vec_deinit(&exits);
-        scope_pop_to(vm, sc);
         return true;
       }
       hasElse = true;
-      bool falls = emit_body(c, cdr_(slot_get(clauseRoot)), tail);
+      ref_set(vm, part, cdr_(ref_get(vm, clauseRoot)));
+      bool falls = emit_body(c, part, tail);
       anyFalls = anyFalls || falls;
       break;
     }
 
-    if (!emit_expr(c, test, false)) {
+    ref_set(vm, part, car_(ref_get(vm, clauseRoot)));
+    if (!emit_expr(c, part, false)) {
       vec_deinit(&exits);
-      scope_pop_to(vm, sc);
       return false;
     }
-    if (!pairp(cdr_(slot_get(clauseRoot)))) {
+    if (!pairp(cdr_(ref_get(vm, clauseRoot)))) {
       // The clause's own test value is the result, so this exit reaches the end
       // of the cond carrying a value: the form falls through even if every
       // clause body below ends in a tail call.
@@ -946,7 +933,8 @@ static bool emit_cond(Compiler* c, Value clauses, bool tail) {
     } else {
       u32 next = emit_jump(c, Op_JumpFalse);
       pop_depth(c, 1);
-      bool falls = emit_body(c, cdr_(slot_get(clauseRoot)), tail);
+      ref_set(vm, part, cdr_(ref_get(vm, clauseRoot)));
+      bool falls = emit_body(c, part, tail);
       if (falls) {
         vec_push(&exits, emit_jump(c, Op_Jump));
         anyFalls = true;
@@ -954,7 +942,7 @@ static bool emit_cond(Compiler* c, Value clauses, bool tail) {
       patch_jump(c, next, c->bytes.len);
     }
     c->depth = baseDepth;
-    slot_set(cursor, cdr_(slot_get(cursor)));
+    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
   }
 
   if (!hasElse) {
@@ -966,377 +954,324 @@ static bool emit_cond(Compiler* c, Value clauses, bool tail) {
   for (u32 i = 0; i < exits.len; i++) patch_jump(c, exits.data[i], end);
   c->depth = anyFalls ? baseDepth + 1 : baseDepth;
   vec_deinit(&exits);
-  scope_pop_to(vm, sc);
   return anyFalls;
 }
 
 static void emit_quoted_symbol(Compiler* c, u32 name) {
   emit_op(c, Op_Const);
-  emit_u16(c, add_constant(c, symbol_v(name)));
+  emit_u16(c, add_constant_imm(c, symbol_v(name)));
   push_depth(c);
 }
 
-static bool emit_quasiquote(Compiler* c, Value form, u32 depth) {
+static bool emit_quasiquote(Compiler* c, Ref form, u32 depth) {
   State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot formRoot = scope_push(vm, form);
-  if (!pairp(slot_get(formRoot))) {
+  OT_SCOPE(vm);
+  if (!pairp(ref_get(vm, form))) {
     emit_op(c, Op_Const);
-    emit_u16(c, add_constant(c, slot_get(formRoot)));
+    emit_u16(c, add_constant(c, form));
     push_depth(c);
-    scope_pop_to(vm, sc);
     return true;
   }
 
-  Value head = car_(slot_get(formRoot));
-  if (sym_is(head, vm->syms.unquote_)) {
-    Value args = cdr_(slot_get(formRoot));
-    if (!pairp(args)) {
+  // `head` and `args` are read back off `form` at each use rather than held in
+  // a local: emit_quoted_symbol reaches add_constant, which allocates.
+  Ref part = ref_push(vm, nil_v());
+  if (sym_is(car_(ref_get(vm, form)), vm->syms.unquote_)) {
+    if (!pairp(cdr_(ref_get(vm, form)))) {
       compiler_error(c, "bad unquote");
-      scope_pop_to(vm, sc);
       return true;
     }
-    if (depth == 1) {
-      bool result = emit_expr(c, car_(args), false);
-      scope_pop_to(vm, sc);
-      return result;
-    }
+    ref_set(vm, part, car_(cdr_(ref_get(vm, form))));
+    if (depth == 1) return emit_expr(c, part, false);
     emit_quoted_symbol(c, vm->syms.unquote_);
-    if (!emit_quasiquote(c, car_(args), depth - 1)) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
+    if (!emit_quasiquote(c, part, depth - 1)) return false;
     emit_op(c, Op_List);
     emit_u16(c, 2);
     pop_depth(c, 1);
-    scope_pop_to(vm, sc);
     return true;
   }
-  if (sym_is(head, vm->syms.quasiquote_)) {
-    Value args = cdr_(slot_get(formRoot));
-    if (!pairp(args)) {
+  if (sym_is(car_(ref_get(vm, form)), vm->syms.quasiquote_)) {
+    if (!pairp(cdr_(ref_get(vm, form)))) {
       compiler_error(c, "bad nested quasiquote");
-      scope_pop_to(vm, sc);
       return true;
     }
+    ref_set(vm, part, car_(cdr_(ref_get(vm, form))));
     emit_quoted_symbol(c, vm->syms.quasiquote_);
-    if (!emit_quasiquote(c, car_(args), depth + 1)) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
+    if (!emit_quasiquote(c, part, depth + 1)) return false;
     emit_op(c, Op_List);
     emit_u16(c, 2);
     pop_depth(c, 1);
-    scope_pop_to(vm, sc);
     return true;
   }
 
-  if (pairp(head) && sym_is(car_(head), vm->syms.unquoteSplicing_) && depth == 1) {
-    Value spliceArgs = cdr_(head);
-    if (!pairp(spliceArgs)) {
+  if (pairp(car_(ref_get(vm, form))) &&
+      sym_is(car_(car_(ref_get(vm, form))), vm->syms.unquoteSplicing_) && depth == 1) {
+    if (!pairp(cdr_(car_(ref_get(vm, form))))) {
       compiler_error(c, "bad unquote-splicing");
-      scope_pop_to(vm, sc);
       return true;
     }
-    Slot spliceRoot = scope_push(vm, spliceArgs);
-    if (!emit_expr(c, car_(slot_get(spliceRoot)), false)) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
-    if (!emit_quasiquote(c, cdr_(slot_get(formRoot)), depth)) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
+    ref_set(vm, part, car_(cdr_(car_(ref_get(vm, form)))));
+    if (!emit_expr(c, part, false)) return false;
+    ref_set(vm, part, cdr_(ref_get(vm, form)));
+    if (!emit_quasiquote(c, part, depth)) return false;
     emit_op(c, Op_Append2);
     pop_depth(c, 1);
-    scope_pop_to(vm, sc);
     return true;
   }
 
-  if (!emit_quasiquote(c, car_(slot_get(formRoot)), depth)) {
-    scope_pop_to(vm, sc);
-    return false;
-  }
-  if (!emit_quasiquote(c, cdr_(slot_get(formRoot)), depth)) {
-    scope_pop_to(vm, sc);
-    return false;
-  }
+  ref_set(vm, part, car_(ref_get(vm, form)));
+  if (!emit_quasiquote(c, part, depth)) return false;
+  ref_set(vm, part, cdr_(ref_get(vm, form)));
+  if (!emit_quasiquote(c, part, depth)) return false;
   emit_op(c, Op_Cons);
   pop_depth(c, 1);
-  scope_pop_to(vm, sc);
   return true;
 }
 
-static void emit_constant(Compiler* c, Value value) {
+static void emit_constant(Compiler* c, Ref value) {
   emit_op(c, Op_Const);
   emit_u16(c, add_constant(c, value));
   push_depth(c);
 }
 
+static void emit_constant_imm(Compiler* c, Value immediate) {
+  emit_op(c, Op_Const);
+  emit_u16(c, add_constant_imm(c, immediate));
+  push_depth(c);
+}
+
 static void emit_native(Compiler* c, const char* name, NativeFn native) {
   State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot function = scope_push(vm, make_native(vm, name, native));
-  emit_constant(c, slot_get(function));
-  scope_pop_to(vm, sc);
+  OT_SCOPE(vm);
+  Ref function = ref_push(vm, make_native(vm, name, native));
+  emit_constant(c, function);
 }
 
-static bool emit_thunk_expr(Compiler* c, Value form) {
+static bool emit_thunk_expr(Compiler* c, Ref form) {
   State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot formRoot = scope_push(vm, form);
-  Slot body = scope_push(vm, make_pair(vm, slot_get(formRoot), null_v()));
-  bool result = emit_lambda(c, slot_get(body), 0);
-  scope_pop_to(vm, sc);
-  return result;
+  OT_SCOPE(vm);
+  Ref body = ref_push(vm, make_pair(vm, ref_get(vm, form), null_v()));
+  return emit_lambda(c, body, 0);
 }
 
-static bool emit_thunk_body(Compiler* c, Value forms) { return emit_lambda(c, forms, 0); }
+static bool emit_thunk_body(Compiler* c, Ref forms) { return emit_lambda(c, forms, 0); }
 
-static bool emit_binding_control(Compiler* c, Value args, bool tail, const char* badForm,
+static bool emit_binding_control(Compiler* c, Ref args, bool tail, const char* badForm,
                                  const char* badBinding, const char* nativeName, NativeFn native,
                                  bool thunkBindings) {
-  if (!pairp(args)) {
+  State* vm = c->vm;
+  if (!pairp(ref_get(vm, args))) {
     compiler_error(c, badForm);
     return true;
   }
-  State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot argsRoot = scope_push(vm, args);
+  OT_SCOPE(vm);
   emit_native(c, nativeName, native);
-  Slot bindings = scope_push(vm, car_(slot_get(argsRoot)));
-  slot_set(bindings, strip_array_literal_head(slot_get(bindings), vm->syms.array_));
+  Ref bindings = ref_push(vm, car_(ref_get(vm, args)));
+  ref_set(vm, bindings, strip_array_literal_head(ref_get(vm, bindings), vm->syms.array_));
   u32 argc = 0;
-  Slot bindingRoot = scope_push(vm, nil_v());
-  while (pairp(slot_get(bindings))) {
-    slot_set(bindingRoot, car_(slot_get(bindings)));
-    if (!pairp(slot_get(bindingRoot)) || !pairp(cdr_(slot_get(bindingRoot)))) {
+  Ref bindingRoot = ref_push(vm, nil_v());
+  Ref part = ref_push(vm, nil_v());
+  while (pairp(ref_get(vm, bindings))) {
+    ref_set(vm, bindingRoot, car_(ref_get(vm, bindings)));
+    if (!pairp(ref_get(vm, bindingRoot)) || !pairp(cdr_(ref_get(vm, bindingRoot)))) {
       compiler_error(c, badBinding);
-      scope_pop_to(vm, sc);
       return true;
     }
-    if (thunkBindings) {
-      if (!emit_thunk_expr(c, car_(slot_get(bindingRoot))) ||
-          !emit_thunk_expr(c, car_(cdr_(slot_get(bindingRoot))))) {
-        scope_pop_to(vm, sc);
-        return false;
-      }
-    } else if (!emit_expr(c, car_(slot_get(bindingRoot)), false) ||
-               !emit_expr(c, car_(cdr_(slot_get(bindingRoot))), false)) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
+    ref_set(vm, part, car_(ref_get(vm, bindingRoot)));
+    if (thunkBindings ? !emit_thunk_expr(c, part) : !emit_expr(c, part, false)) return false;
+    ref_set(vm, part, car_(cdr_(ref_get(vm, bindingRoot))));
+    if (thunkBindings ? !emit_thunk_expr(c, part) : !emit_expr(c, part, false)) return false;
     argc += 2;
-    slot_set(bindings, cdr_(slot_get(bindings)));
+    ref_set(vm, bindings, cdr_(ref_get(vm, bindings)));
   }
-  if (!emit_thunk_body(c, cdr_(slot_get(argsRoot)))) {
-    scope_pop_to(vm, sc);
-    return false;
-  }
-  scope_pop_to(vm, sc);
+  ref_set(vm, part, cdr_(ref_get(vm, args)));
+  if (!emit_thunk_body(c, part)) return false;
   return finish_control_call(c, argc + 1, tail);
 }
 
-static bool emit_handler_bind(Compiler* c, Value args, bool tail) {
+static bool emit_handler_bind(Compiler* c, Ref args, bool tail) {
   return emit_binding_control(c, args, tail, "bad handler-bind", "bad handler-bind binding",
                               "%handler-bind", vm_control_handler_bind, false);
 }
 
-static bool emit_restart_case(Compiler* c, Value args, bool tail) {
-  if (!pairp(args)) {
+static bool emit_restart_case(Compiler* c, Ref args, bool tail) {
+  State* vm = c->vm;
+  if (!pairp(ref_get(vm, args))) {
     compiler_error(c, "bad restart-case");
     return true;
   }
-  State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot argsRoot = scope_push(vm, args);
+  OT_SCOPE(vm);
   emit_native(c, "%restart-case", vm_control_restart_case);
-  if (!emit_thunk_expr(c, car_(slot_get(argsRoot)))) {
-    scope_pop_to(vm, sc);
-    return false;
-  }
+  Ref part = ref_push(vm, car_(ref_get(vm, args)));
+  if (!emit_thunk_expr(c, part)) return false;
   u32 argc = 1;
-  Slot clauses = scope_push(vm, cdr_(slot_get(argsRoot)));
-  while (pairp(slot_get(clauses))) {
-    Value clause = car_(slot_get(clauses));
-    if (!pairp(clause) || car_(clause).tag != Tag_Symbol) {
+  Ref clauses = ref_push(vm, cdr_(ref_get(vm, args)));
+  Ref clause = ref_push(vm, nil_v());
+  Ref doc = ref_push(vm, nil_v());
+  while (pairp(ref_get(vm, clauses))) {
+    ref_set(vm, clause, car_(ref_get(vm, clauses)));
+    if (!pairp(ref_get(vm, clause)) || car_(ref_get(vm, clause)).tag != Tag_Symbol) {
       compiler_error(c, "bad restart-case clause");
-      scope_pop_to(vm, sc);
       return true;
     }
-    Value doc = nil_v();
-    Value rest = skip_docstring(cdr_(clause), &doc);
+    Value found = nil_v();
+    Value rest = skip_docstring(cdr_(ref_get(vm, clause)), &found);
     if (!pairp(rest)) {
       compiler_error(c, "restart-case clause needs parameters");
-      scope_pop_to(vm, sc);
       return true;
     }
-    emit_constant(c, car_(clause));
+    // Root before emitting: emit_constant allocates, which would strand `rest`
+    // and `found` if they stayed raw locals.
+    ref_set(vm, doc, found);
+    ref_set(vm, part, cdr_(rest));
+    u32 clauseName = car_(ref_get(vm, clause)).id;
+    emit_constant_imm(c, car_(ref_get(vm, clause)));
     emit_constant(c, doc);
-    if (!emit_lambda(c, cdr_(rest), car_(clause).id)) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
+    if (!emit_lambda(c, part, clauseName)) return false;
     argc += 3;
-    slot_set(clauses, cdr_(slot_get(clauses)));
+    ref_set(vm, clauses, cdr_(ref_get(vm, clauses)));
   }
-  scope_pop_to(vm, sc);
   return finish_control_call(c, argc, tail);
 }
 
-static bool emit_try(Compiler* c, Value args, bool tail) {
+static bool emit_try(Compiler* c, Ref args, bool tail) {
   State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot cursor = scope_push(vm, args);
+  OT_SCOPE(vm);
+  Ref cursor = ref_push(vm, ref_get(vm, args));
   u32 bodyCount = 0;
-  for (Value scan = slot_get(cursor); pairp(scan); scan = cdr_(scan)) {
-    Value part = car_(scan);
-    if (pairp(part) && sym_is(car_(part), vm->syms.catch_)) break;
+  for (Value scan = ref_get(vm, cursor); pairp(scan); scan = cdr_(scan)) {
+    Value form = car_(scan);
+    if (pairp(form) && sym_is(car_(form), vm->syms.catch_)) break;
     bodyCount++;
   }
 
   emit_native(c, "%try", vm_control_try);
-  emit_constant(c, int_v(bodyCount));
+  emit_constant_imm(c, int_v(bodyCount));
   u32 argc = 1;
+  Ref part = ref_push(vm, nil_v());
   for (u32 i = 0; i < bodyCount; i++) {
-    if (!emit_thunk_expr(c, car_(slot_get(cursor)))) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
+    ref_set(vm, part, car_(ref_get(vm, cursor)));
+    if (!emit_thunk_expr(c, part)) return false;
     argc++;
-    slot_set(cursor, cdr_(slot_get(cursor)));
+    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
   }
-  Slot clauseRoot = scope_push(vm, nil_v());
-  while (pairp(slot_get(cursor))) {
-    slot_set(clauseRoot, car_(slot_get(cursor)));
-    if (!pairp(slot_get(clauseRoot)) || !sym_is(car_(slot_get(clauseRoot)), vm->syms.catch_) ||
-        !pairp(cdr_(slot_get(clauseRoot)))) {
+  Ref clauseRoot = ref_push(vm, nil_v());
+  while (pairp(ref_get(vm, cursor))) {
+    ref_set(vm, clauseRoot, car_(ref_get(vm, cursor)));
+    if (!pairp(ref_get(vm, clauseRoot)) ||
+        !sym_is(car_(ref_get(vm, clauseRoot)), vm->syms.catch_) ||
+        !pairp(cdr_(ref_get(vm, clauseRoot)))) {
       compiler_error(c, "bad catch clause");
-      scope_pop_to(vm, sc);
       return true;
     }
-    Value spec = car_(cdr_(slot_get(clauseRoot)));
+    Value spec = car_(cdr_(ref_get(vm, clauseRoot)));
     if (!pairp(spec) || !pairp(cdr_(spec)) || car_(cdr_(spec)).tag != Tag_Symbol) {
       compiler_error(c, "bad catch specification");
-      scope_pop_to(vm, sc);
       return true;
     }
-    if (!emit_thunk_expr(c, car_(spec))) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
-    if (!emit_lambda(c, cdr_(cdr_(slot_get(clauseRoot))), 0)) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
+    ref_set(vm, part, car_(spec));
+    if (!emit_thunk_expr(c, part)) return false;
+    ref_set(vm, part, cdr_(cdr_(ref_get(vm, clauseRoot))));
+    if (!emit_lambda(c, part, 0)) return false;
     argc += 2;
-    slot_set(cursor, cdr_(slot_get(cursor)));
+    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
   }
-  scope_pop_to(vm, sc);
   return finish_control_call(c, argc, tail);
 }
 
-static bool emit_unwind_protect(Compiler* c, Value args, bool tail) {
-  if (!pairp(args)) {
+static bool emit_unwind_protect(Compiler* c, Ref args, bool tail) {
+  State* vm = c->vm;
+  if (!pairp(ref_get(vm, args))) {
     compiler_error(c, "bad unwind-protect");
     return true;
   }
-  State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot cursor = scope_push(vm, args);
+  OT_SCOPE(vm);
+  Ref cursor = ref_push(vm, ref_get(vm, args));
+  Ref part = ref_push(vm, nil_v());
   emit_native(c, "%unwind-protect", vm_control_unwind_protect);
   u32 argc = 0;
-  while (pairp(slot_get(cursor))) {
-    if (!emit_thunk_expr(c, car_(slot_get(cursor)))) {
-      scope_pop_to(vm, sc);
-      return false;
-    }
+  while (pairp(ref_get(vm, cursor))) {
+    ref_set(vm, part, car_(ref_get(vm, cursor)));
+    if (!emit_thunk_expr(c, part)) return false;
     argc++;
-    slot_set(cursor, cdr_(slot_get(cursor)));
+    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
   }
-  scope_pop_to(vm, sc);
   return finish_control_call(c, argc, tail);
 }
 
-static bool emit_with_params(Compiler* c, Value args, bool tail) {
+static bool emit_with_params(Compiler* c, Ref args, bool tail) {
   return emit_binding_control(c, args, tail, "bad with-params", "bad with-params binding",
                               "%with-params", vm_control_with_params, true);
 }
 
-static bool emit_defparam(Compiler* c, Value args, bool tail) {
+static bool emit_defparam(Compiler* c, Ref args, bool tail) {
+  State* vm = c->vm;
   if (c->info->userDepth > 0 || c->active.len > c->info->initialCount) {
     compiler_error(c, "defparam only allowed at top level");
     return true;
   }
-  if (!pairp(args) || car_(args).tag != Tag_Symbol) {
+  if (!pairp(ref_get(vm, args)) || car_(ref_get(vm, args)).tag != Tag_Symbol) {
     compiler_error(c, "bad defparam");
     return true;
   }
-  State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot argsRoot = scope_push(vm, args);
-  Value name = car_(slot_get(argsRoot));
-  Slot rest = scope_push(vm, cdr_(slot_get(argsRoot)));
-  Value doc = nil_v();
-  slot_set(rest, skip_docstring(slot_get(rest), &doc));
-  Slot docRoot = scope_push(vm, doc);
-  if (!pairp(slot_get(rest))) {
+  OT_SCOPE(vm);
+  Value name = car_(ref_get(vm, args));
+  Ref rest = ref_push(vm, cdr_(ref_get(vm, args)));
+  Ref doc = ref_push(vm, nil_v());
+  Value found = nil_v();
+  ref_set(vm, rest, skip_docstring(ref_get(vm, rest), &found));
+  ref_set(vm, doc, found);
+  if (!pairp(ref_get(vm, rest))) {
     compiler_error(c, "defparam missing default");
-    scope_pop_to(vm, sc);
     return true;
   }
   emit_native(c, "%defparam", vm_control_defparam);
-  emit_constant(c, name);
-  emit_constant(c, slot_get(docRoot));
-  if (!emit_expr(c, car_(slot_get(rest)), false)) {
-    scope_pop_to(vm, sc);
-    return false;
-  }
-  scope_pop_to(vm, sc);
+  emit_constant_imm(c, name);
+  emit_constant(c, doc);
+  ref_set(vm, rest, car_(ref_get(vm, rest)));
+  if (!emit_expr(c, rest, false)) return false;
   return finish_control_call(c, 3, tail);
 }
 
-static bool emit_data_control(Compiler* c, Value args, bool tail, const char* helperName,
+static bool emit_data_control(Compiler* c, Ref args, bool tail, const char* helperName,
                               NativeFn native, bool requireArg) {
   State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot cursor = scope_push(vm, args);
-  if (requireArg && !pairp(slot_get(cursor))) {
+  OT_SCOPE(vm);
+  Ref cursor = ref_push(vm, ref_get(vm, args));
+  if (requireArg && !pairp(ref_get(vm, cursor))) {
     compiler_error(c, "missing control form argument");
-    scope_pop_to(vm, sc);
     return true;
   }
   emit_native(c, helperName, native);
   u32 argc = 0;
-  while (pairp(slot_get(cursor))) {
-    emit_constant(c, car_(slot_get(cursor)));
+  Ref part = ref_push(vm, nil_v());
+  while (pairp(ref_get(vm, cursor))) {
+    ref_set(vm, part, car_(ref_get(vm, cursor)));
+    emit_constant(c, part);
     argc++;
-    slot_set(cursor, cdr_(slot_get(cursor)));
+    ref_set(vm, cursor, cdr_(ref_get(vm, cursor)));
   }
-  scope_pop_to(vm, sc);
   return finish_control_call(c, argc, tail);
 }
 
-static bool emit_expr(Compiler* c, Value form, bool tail) {
+static bool emit_expr(Compiler* c, Ref form, bool tail) {
   State* vm = c->vm;
-  u32 sc = scope_begin(vm);
-  Slot formRoot = scope_push(vm, form);
-  form = slot_get(formRoot);
-  if (form.tag == Tag_Symbol) {
-    emit_load(c, resolve(c, form.id));
-    scope_pop_to(vm, sc);
+  OT_SCOPE(vm);
+  Value immediate = ref_get(vm, form);
+  if (immediate.tag == Tag_Symbol) {
+    emit_load(c, resolve(c, immediate.id));
     return true;
   }
-  if (!pairp(form)) {
-    switch (form.tag) {
+  if (!pairp(immediate)) {
+    switch (immediate.tag) {
       case Tag_Nil: emit_op(c, Op_Nil); break;
       case Tag_True: emit_op(c, Op_True); break;
       case Tag_False: emit_op(c, Op_False); break;
       case Tag_Null: emit_op(c, Op_Null); break;
       case Tag_Int:
-        if (form.i >= INT8_MIN && form.i <= INT8_MAX) {
+        if (immediate.i >= INT8_MIN && immediate.i <= INT8_MAX) {
           emit_op(c, Op_Int8);
-          vec_push(&c->bytes, (char)(i8)form.i);
+          vec_push(&c->bytes, (char)(i8)immediate.i);
         } else {
           emit_op(c, Op_Const);
           emit_u16(c, add_constant(c, form));
@@ -1348,160 +1283,83 @@ static bool emit_expr(Compiler* c, Value form, bool tail) {
         break;
     }
     push_depth(c);
-    scope_pop_to(vm, sc);
     return true;
   }
 
-  Value head = car_(slot_get(formRoot));
-  Value args = cdr_(slot_get(formRoot));
+  Ref args = ref_push(vm, cdr_(ref_get(vm, form)));
+  Value head = car_(ref_get(vm, form));
   if (head.tag == Tag_Symbol) {
     u32 name = head.id;
     if (name == vm->syms.quote_) {
-      if (!pairp(args)) compiler_error(c, "bad quote");
-      Value quoted = pairp(args) ? car_(args) : nil_v();
+      if (!pairp(ref_get(vm, args))) compiler_error(c, "bad quote");
+      Ref quoted = ref_push(
+          vm, pairp(ref_get(vm, args)) ? car_(ref_get(vm, args)) : nil_v());
       emit_op(c, Op_Const);
       emit_u16(c, add_constant(c, quoted));
       push_depth(c);
-      scope_pop_to(vm, sc);
       return true;
     }
     if (name == vm->syms.quasiquote_) {
-      if (!pairp(args)) {
+      if (!pairp(ref_get(vm, args))) {
         compiler_error(c, "bad quasiquote");
-        scope_pop_to(vm, sc);
         return true;
       }
-      bool r = emit_quasiquote(c, car_(args), 1);
-      scope_pop_to(vm, sc);
-      return r;
+      Ref quoted = ref_push(vm, car_(ref_get(vm, args)));
+      return emit_quasiquote(c, quoted, 1);
     }
     if (name == vm->syms.unquote_ || name == vm->syms.unquoteSplicing_) {
       compiler_error(c, "unquote outside quasiquote");
-      scope_pop_to(vm, sc);
       return true;
     }
-    if (name == vm->syms.if_) {
-      bool r = emit_if(c, args, tail);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.begin_ || name == vm->syms.do_) {
-      bool r = emit_body(c, args, tail);
-      scope_pop_to(vm, sc);
-      return r;
-    }
+    if (name == vm->syms.if_) return emit_if(c, args, tail);
+    if (name == vm->syms.begin_ || name == vm->syms.do_) return emit_body(c, args, tail);
     if (name == vm->syms.lambda_ || name == vm->syms.fn_) {
-      if (!pairp(args)) compiler_error(c, "bad lambda");
-      bool r = pairp(args) ? emit_lambda(c, cdr_(args), 0) : true;
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.let_) {
-      bool r = emit_let(c, args, tail);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (is_define_head(vm, name)) {
-      bool r = emit_define(c, slot_get(formRoot), name == vm->syms.definePriv_);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.defmacro_) {
-      bool r = emit_defmacro(c, slot_get(formRoot));
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.setBang_) {
-      if (!pairp(args) || car_(args).tag != Tag_Symbol || !pairp(cdr_(args))) {
-        compiler_error(c, "bad set!");
-        scope_pop_to(vm, sc);
+      if (!pairp(ref_get(vm, args))) {
+        compiler_error(c, "bad lambda");
         return true;
       }
-      Value target = car_(args);
-      if (!emit_expr(c, car_(cdr_(args)), false)) {
-        scope_pop_to(vm, sc);
-        return false;
+      Ref body = ref_push(vm, cdr_(ref_get(vm, args)));
+      return emit_lambda(c, body, 0);
+    }
+    if (name == vm->syms.let_) return emit_let(c, args, tail);
+    if (is_define_head(vm, name)) return emit_define(c, form, name == vm->syms.definePriv_);
+    if (name == vm->syms.defmacro_) return emit_defmacro(c, form);
+    if (name == vm->syms.setBang_) {
+      if (!pairp(ref_get(vm, args)) || car_(ref_get(vm, args)).tag != Tag_Symbol ||
+          !pairp(cdr_(ref_get(vm, args)))) {
+        compiler_error(c, "bad set!");
+        return true;
       }
-      emit_store(c, resolve(c, target.id));
-      scope_pop_to(vm, sc);
+      u32 target = car_(ref_get(vm, args)).id;
+      Ref value = ref_push(vm, car_(cdr_(ref_get(vm, args))));
+      if (!emit_expr(c, value, false)) return false;
+      emit_store(c, resolve(c, target));
       return true;
     }
-    if (name == vm->syms.while_) {
-      bool r = emit_while(c, args);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.and_) {
-      bool r = emit_short_circuit(c, args, true, tail);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.or_) {
-      bool r = emit_short_circuit(c, args, false, tail);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.cond_) {
-      bool r = emit_cond(c, args, tail);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.handlerBind_) {
-      bool r = emit_handler_bind(c, args, tail);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.restartCase_) {
-      bool r = emit_restart_case(c, args, tail);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.try_) {
-      bool r = emit_try(c, args, tail);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.unwindProtect_ || name == vm->syms.defer_) {
-      bool r = emit_unwind_protect(c, args, tail);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.withParams_) {
-      bool r = emit_with_params(c, args, tail);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.defparam_) {
-      bool r = emit_defparam(c, args, tail);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.ns_) {
-      bool r = emit_data_control(c, args, tail, "%ns", vm_control_ns, true);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.inNs_) {
-      bool r = emit_data_control(c, args, tail, "%in-ns", vm_control_in_ns, true);
-      scope_pop_to(vm, sc);
-      return r;
-    }
-    if (name == vm->syms.require_) {
-      bool r = emit_data_control(c, args, tail, "%require", vm_control_require, false);
-      scope_pop_to(vm, sc);
-      return r;
-    }
+    if (name == vm->syms.while_) return emit_while(c, args);
+    if (name == vm->syms.and_) return emit_short_circuit(c, args, true, tail);
+    if (name == vm->syms.or_) return emit_short_circuit(c, args, false, tail);
+    if (name == vm->syms.cond_) return emit_cond(c, args, tail);
+    if (name == vm->syms.handlerBind_) return emit_handler_bind(c, args, tail);
+    if (name == vm->syms.restartCase_) return emit_restart_case(c, args, tail);
+    if (name == vm->syms.try_) return emit_try(c, args, tail);
+    if (name == vm->syms.unwindProtect_ || name == vm->syms.defer_)
+      return emit_unwind_protect(c, args, tail);
+    if (name == vm->syms.withParams_) return emit_with_params(c, args, tail);
+    if (name == vm->syms.defparam_) return emit_defparam(c, args, tail);
+    if (name == vm->syms.ns_) return emit_data_control(c, args, tail, "%ns", vm_control_ns, true);
+    if (name == vm->syms.inNs_)
+      return emit_data_control(c, args, tail, "%in-ns", vm_control_in_ns, true);
+    if (name == vm->syms.require_)
+      return emit_data_control(c, args, tail, "%require", vm_control_require, false);
   }
-  bool r = emit_call(c, slot_get(formRoot), tail);
-  scope_pop_to(vm, sc);
-  return r;
+  return emit_call(c, form, tail);
 }
 
-static Value compile_lambda(State* vm, LambdaInfo* info, Value body, u32 name) {
-  u32 sc = scope_begin(vm);
-  Slot bodyRoot = scope_push(vm, body);
-  slot_set(bodyRoot, skip_docstring(slot_get(bodyRoot), nullptr));
-  Slot constants = scope_push(vm, make_array(vm, 8));
+static Status compile_lambda(State* vm, LambdaInfo* info, Ref body, u32 name) {
+  OT_SCOPE(vm);
+  Ref bodyRoot = ref_push(vm, skip_docstring(ref_get(vm, body), nullptr));
+  Ref constants = ref_push(vm, make_array(vm, 8));
   Compiler compiler;
   compiler_init(&compiler, vm, info, constants);
 
@@ -1518,11 +1376,11 @@ static Value compile_lambda(State* vm, LambdaInfo* info, Value body, u32 name) {
     pop_depth(&compiler, 1);
   }
 
-  bool falls = emit_body(&compiler, slot_get(bodyRoot), true);
+  bool falls = emit_body(&compiler, bodyRoot, true);
   if (falls) emit_op(&compiler, Op_Return);
   if (compiler.failed) {
     compiler_deinit(&compiler);
-    return scope_exit(vm, sc, unwind_v());
+    return Status_Unwind;
   }
   CodeSpec spec = {
       .nfixed = info->nfixed,
@@ -1532,21 +1390,23 @@ static Value compile_lambda(State* vm, LambdaInfo* info, Value body, u32 name) {
       .maxStack = compiler.maxDepth,
       .name = name,
   };
-  Value result =
-      make_code(vm, (const u8*)compiler.bytes.data, compiler.bytes.len, slot_get(constants), &spec);
+  Value result = make_code(vm, (const u8*)compiler.bytes.data, compiler.bytes.len,
+                           ref_get(vm, constants), &spec);
+  // compiler_deinit only releases C-heap buffers, so `result` cannot move here.
   compiler_deinit(&compiler);
-  return scope_exit(vm, sc, result);
+  OT_RETURN(result);
 }
 
+// Boundary with the still-Value-returning evaluator: converts the Status
+// contract back to a Value. eval.c takes the same treatment next.
 Value compile_form(State* vm, Value expanded) {
-  u32 sc = scope_begin(vm);
-  Slot formRoot = scope_push(vm, expanded);
+  OT_SCOPE(vm);
+  Ref body = ref_push(vm, make_pair(vm, expanded, null_v()));
   LambdaInfo top;
   lambda_info_init(&top, nullptr, 0);
-  Value bodyPair = make_pair(vm, slot_get(formRoot), null_v());
-  Slot body = scope_push(vm, bodyPair);
-  analyze_body(vm, &top, slot_get(body));
-  Value result = compile_lambda(vm, &top, slot_get(body), 0);
+  analyze_body(vm, &top, ref_get(vm, body));
+  Status status = compile_lambda(vm, &top, body, 0);
   lambda_info_deinit(&top);
-  return scope_exit(vm, sc, result);
+  if (status != Status_Ok) return unwind_v();
+  return ref_get(vm, ref_top(vm));
 }

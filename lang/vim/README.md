@@ -40,6 +40,12 @@ vim.g["conjure#client#otium#stdio#command"] = {
 }
 ```
 
+The client does not need to know about a checkout's load path. Otium reads that
+from the nearest `project.ot`, and the client passes `--project` with the file
+nearest the current buffer so the result does not depend on where Neovim was
+started. A command that already names `--project` or `--no-project` is left
+alone, which is also how you point the client at a different project file.
+
 Conjure starts one live Otium process. Its normal evaluation mappings work,
 including `<localleader>ee` for the current form, `<localleader>eb` for the
 buffer, and `K` for documentation. `<localleader>mx` macroexpands the current

@@ -15,6 +15,27 @@ meson compile -C build
 meson test -C build
 ```
 
+## Project files
+
+A checkout can record the load-path directories it needs in a `project.ot` at
+its root. `otium` searches the working directory and its ancestors for the
+nearest one and appends its directories to the module search path, so a source
+file runs the same way from the shell, from CI, and from an editor client that
+only controls the working directory:
+
+```lisp
+(paths "ext/ray" "ext/demo")
+```
+
+Relative entries resolve against the directory holding the file, not the working
+directory. `--path` and `OTIUM_PATH` keep their higher priority, and
+`--no-project` ignores the file entirely.
+
+The file holds directive forms rather than a data literal, and it is read but
+never evaluated: `{...}` and `[...]` read as constructor calls, and starting a
+program by running arbitrary code is a trapdoor a path list does not need.
+`paths` is the only directive so far; anything else is reported and skipped.
+
 ## Formatting
 
 Run `tools/format-c` to format the C sources. Run

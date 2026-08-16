@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
+#include <unistd.h>
 
 #include "bestline.h"
 #include "common.h"
@@ -18,6 +19,7 @@
 #include "printer.h"
 #include "eval.h"
 #include "ns.h"
+#include "reader.h"
 
 #ifdef OT_EXT_DEMO
 #include "../ext/demo/demo_ext.h"
@@ -57,6 +59,36 @@ static void host_write(void* ud, const char* s, u32 n) {
   fwrite(s, 1, n, stdout);
 }
 
+static char* dup_cstr(const char* s, size_t n) {
+  char* copy = malloc(n + 1);
+  if (!copy) ot_fatal("out of memory");
+  memcpy(copy, s, n);
+  copy[n] = '\0';
+  return copy;
+}
+
+// Appends the whole file to `out`. False means the file could not be opened;
+// a short read leaves whatever was read in place.
+static bool read_whole_file(const char* path, Buf* out) {
+  FILE* f = fopen(path, "rb");
+  if (!f) return false;
+  char chunk[4096];
+  size_t n;
+  while ((n = fread(chunk, 1, sizeof chunk, f)) > 0) buf_append(out, chunk, (u32)n);
+  fclose(f);
+  return true;
+}
+
+// Joins a directory and a relative name with a single separator.
+static void append_path(Buf* out, const char* dir, const char* name, u32 nameLen) {
+  u32 dirLen = (u32)strlen(dir);
+  if (dirLen) {
+    buf_append(out, dir, dirLen);
+    if (dir[dirLen - 1] != '/') buf_append_cstr(out, "/");
+  }
+  buf_append(out, name, nameLen);
+}
+
 // require callback: ns name dots->slashes + ".scm", searched across load path.
 static bool host_load(void* ud, const char* nsName, Buf* srcOut) {
   (void)ud;
@@ -66,21 +98,12 @@ static bool host_load(void* ud, const char* nsName, Buf* srcOut) {
     if (rel.data[i] == '.') rel.data[i] = '/';
   buf_append_cstr(&rel, ".scm");
   for (u32 d = 0; d < g_loadPath.len; d++) {
-    const char* dir = g_loadPath.data[d];
     Buf path = {0};
-    if (dir[0] != '\0') {
-      buf_append_cstr(&path, dir);
-      buf_append_cstr(&path, "/");
-    }
-    buf_append(&path, rel.data, rel.len);
+    append_path(&path, g_loadPath.data[d], rel.data, rel.len);
     buf_append(&path, "\0", 1);  // NUL-terminate for fopen
-    FILE* f = fopen(path.data, "rb");
+    bool ok = read_whole_file(path.data, srcOut);
     buf_deinit(&path);
-    if (!f) continue;
-    char chunk[4096];
-    size_t n;
-    while ((n = fread(chunk, 1, sizeof chunk, f)) > 0) buf_append(srcOut, chunk, (u32)n);
-    fclose(f);
+    if (!ok) continue;
     buf_deinit(&rel);
     return true;
   }
@@ -125,6 +148,126 @@ static QuitReason take_quit(State* vm) {
   }
   g_quitRequested = true;
   return QuitReason_Requested;
+}
+
+// ---------------------------------------------------------------------------
+// project file
+
+// A checkout records the load-path directories it needs in a project.ot at its
+// root, so that a source file runs the same way from the shell, from CI, and
+// from an editor client that only controls the working directory.
+//
+// The file holds directive forms rather than a data literal, and it is read but
+// never evaluated: `{...}` and `[...]` read as constructor calls, and running
+// arbitrary code before the requested program is a trapdoor a path list does
+// not need. The only directive so far is (paths "dir" ...).
+
+#define PROJECT_FILE "project.ot"
+
+// Writes the directory holding the nearest project file to `dir`, searching the
+// working directory and its ancestors. False when there is none.
+static bool find_project_dir(Buf* dir) {
+  char cwd[PATH_MAX];
+  if (!getcwd(cwd, sizeof cwd)) return false;
+  for (size_t len = strlen(cwd);;) {
+    Buf candidate = {0};
+    buf_append(&candidate, cwd, (u32)len);
+    if (len > 1) buf_append_cstr(&candidate, "/");  // len == 1 is the root itself
+    buf_append_cstr(&candidate, PROJECT_FILE);
+    buf_append(&candidate, "\0", 1);
+    bool found = access(candidate.data, R_OK) == 0;
+    buf_deinit(&candidate);
+    if (found) {
+      buf_append(dir, cwd, (u32)len);
+      return true;
+    }
+    if (len <= 1) return false;
+    while (len > 1 && cwd[len - 1] != '/') len--;  // strip the last component
+    if (len > 1) len--;                            // and its separator
+  }
+}
+
+static bool symbol_is(State* vm, Value v, const char* name) {
+  return v.tag == Tag_Symbol && v.id == intern_id(&vm->intern, name, (u32)strlen(name));
+}
+
+// Appends one (paths ...) entry to the load path. Relative entries resolve
+// against the project directory, not the working directory, so that the same
+// file works from any subdirectory of the checkout.
+static void add_project_path(Value item, const char* dir, const char* path) {
+  if (item.tag != Tag_String) {
+    fprintf(stderr, "otium: %s: paths takes strings\n", path);
+    return;
+  }
+  const char* bytes = string_bytes(item);
+  u32 len = as_string(item)->len;
+  if (!len) return;
+  Buf resolved = {0};
+  append_path(&resolved, bytes[0] == '/' ? "" : dir, bytes, len);
+  vec_push(&g_loadPath, dup_cstr(resolved.data, resolved.len));
+  buf_deinit(&resolved);
+}
+
+static void apply_project_form(State* vm, Value form, const char* dir, const char* path) {
+  if (form.tag != Tag_Pair || !symbol_is(vm, as_pair(form)->car, "paths")) {
+    fprintf(stderr, "otium: %s: ignoring unrecognized directive\n", path);
+    return;
+  }
+  for (Value rest = as_pair(form)->cdr; rest.tag == Tag_Pair; rest = as_pair(rest)->cdr)
+    add_project_path(as_pair(rest)->car, dir, path);
+}
+
+// Reads a project file and appends its directories to the load path. `named`
+// is the --project argument, or null to search for the nearest file. Explicit
+// --path and OTIUM_PATH entries keep their higher priority because they are
+// already in place by the time this runs. False means a named file was
+// unreadable; a search that finds nothing is not a failure.
+static bool load_project(State* vm, const char* named) {
+  Buf dir = {0};
+  Buf path = {0};
+  if (named) {
+    const char* slash = strrchr(named, '/');
+    // A file at the root has an empty parent, which append_path would then read
+    // as "relative to the working directory".
+    buf_append_cstr(&dir, slash == named ? "/" : "");
+    if (slash > named) buf_append(&dir, named, (u32)(slash - named));
+    buf_append(&dir, "\0", 1);
+    buf_append_cstr(&path, named);
+  } else {
+    if (!find_project_dir(&dir)) {
+      buf_deinit(&dir);
+      buf_deinit(&path);
+      return true;
+    }
+    buf_append(&dir, "\0", 1);  // append_path reads it as a C string
+    append_path(&path, dir.data, PROJECT_FILE, (u32)strlen(PROJECT_FILE));
+  }
+  buf_append(&path, "\0", 1);
+
+  bool ok = true;
+  Buf src = {0};
+  if (read_whole_file(path.data, &src)) {
+    Reader r;
+    reader_init(&r, vm, src.data, src.len, path.data);
+    for (;;) {
+      Value form = reader_next(&r);
+      if (form.tag == Tag_Unwind) {
+        fprintf(stderr, "otium: %s: ", path.data);
+        print_value(vm, vm->unwindCondition, stderr);
+        state_cancel_unwind(vm);
+        break;
+      }
+      if (reader_at_eof(&r)) break;
+      apply_project_form(vm, form, dir.data, path.data);
+    }
+  } else {
+    fprintf(stderr, "otium: cannot open %s\n", path.data);
+    ok = false;
+  }
+  buf_deinit(&src);
+  buf_deinit(&path);
+  buf_deinit(&dir);
+  return ok;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,16 +355,12 @@ static Value always_true_pred(State* vm, u32 base, u32 argc) {
 // file runner
 
 static int run_file(State* vm, const char* path) {
-  FILE* f = fopen(path, "rb");
-  if (!f) {
+  Buf src = {0};
+  if (!read_whole_file(path, &src)) {
+    buf_deinit(&src);
     fprintf(stderr, "otium: cannot open %s\n", path);
     return 1;
   }
-  Buf src = {0};
-  char chunk[4096];
-  size_t n;
-  while ((n = fread(chunk, 1, sizeof chunk, f)) > 0) buf_append(&src, chunk, (u32)n);
-  fclose(f);
 
   Value result = eval_source(vm, src.data, src.len, path);
   buf_deinit(&src);
@@ -420,6 +559,8 @@ typedef struct CliOptions {
   VecStr files;
   bool repl;
   bool server;
+  bool noProject;
+  const char* projectFile;
   u32 maxDepth;
   u32 stackSlots;
   u32 heapInit;
@@ -434,6 +575,8 @@ static void print_usage(FILE* to) {
         "  --repl             Start a REPL after loading FILEs\n"
         "  --server           Run the framed stdio evaluation server\n"
         "  --path DIR         Add DIR to the module search path (repeatable)\n"
+        "  --project FILE     Read FILE instead of searching for " PROJECT_FILE "\n"
+        "  --no-project       Ignore the nearest " PROJECT_FILE "\n"
         "  --max-depth N      Maximum evaluator recursion depth\n"
         "  --stack-slots N    Maximum live value-stack slots\n"
         "  --heap-init BYTES  Initial semispace size\n"
@@ -454,14 +597,6 @@ static bool parse_u32_arg(const char* option, const char* text, u32* out) {
   return true;
 }
 
-static char* dup_cstr(const char* s, size_t n) {
-  char* copy = malloc(n + 1);
-  if (!copy) ot_fatal("out of memory");
-  memcpy(copy, s, n);
-  copy[n] = '\0';
-  return copy;
-}
-
 static int parse_args(int argc, char** argv, CliOptions* options) {
   bool positionalOnly = false;
   for (int i = 1; i < argc; ++i) {
@@ -472,6 +607,14 @@ static int parse_args(int argc, char** argv, CliOptions* options) {
       options->repl = true;
     } else if (!positionalOnly && strcmp(arg, "--server") == 0) {
       options->server = true;
+    } else if (!positionalOnly && strcmp(arg, "--no-project") == 0) {
+      options->noProject = true;
+    } else if (!positionalOnly && strcmp(arg, "--project") == 0) {
+      if (++i == argc) {
+        fputs("otium: --project requires a file\n", stderr);
+        return 2;
+      }
+      options->projectFile = argv[i];
     } else if (!positionalOnly && strcmp(arg, "--path") == 0) {
       if (++i == argc) {
         fputs("otium: --path requires a directory\n", stderr);
@@ -501,6 +644,10 @@ static int parse_args(int argc, char** argv, CliOptions* options) {
       vec_push(&options->files, (char*)arg);
     }
   }
+  if (options->noProject && options->projectFile) {
+    fputs("otium: --project and --no-project cannot be used together\n", stderr);
+    return 2;
+  }
   if (options->repl && options->server) {
     fputs("otium: --repl and --server cannot be used together\n", stderr);
     return 2;
@@ -524,6 +671,8 @@ int main(int argc, char** argv) {
       .files = {0},
       .repl = false,
       .server = false,
+      .noProject = false,
+      .projectFile = nullptr,
       .maxDepth = defaults.maxDepth,
       .stackSlots = defaults.stackSlots,
       .heapInit = defaults.heapBytes,
@@ -560,6 +709,13 @@ int main(int argc, char** argv) {
   vm->writeUd = nullptr;
   vm->loadFn = host_load;
   vm->loadUd = nullptr;
+
+  // Needs the VM for the reader, so it lands after state_create; the load path
+  // is not consulted until the first require, which is later still.
+  if (!options.noProject && !load_project(vm, options.projectFile)) {
+    state_destroy(vm);
+    return 1;
+  }
 
 #ifdef OT_EXT_DEMO
   register_demo_extension(vm);

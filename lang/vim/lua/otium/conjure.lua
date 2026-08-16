@@ -36,12 +36,34 @@ local function cfg(keys)
   return config["get-in"](path)
 end
 
+-- Otium finds the nearest project.ot itself, but it searches from its working
+-- directory, and Conjure spawns the server with Neovim's. Name the file that is
+-- nearest the current buffer instead, so the load path is right even when
+-- Neovim was started somewhere else.
+local function server_command()
+  local command = vim.deepcopy(cfg({ "command" }))
+  if vim.tbl_contains(command, "--project") or vim.tbl_contains(command, "--no-project") then
+    return command
+  end
+  local from = vim.fn.expand("%:p:h")
+  if from == "" then
+    from = vim.fn.getcwd()
+  end
+  local found = vim.fs.find("project.ot", { upward = true, type = "file", path = from })
+  if found[1] then
+    table.insert(command, "--project")
+    table.insert(command, found[1])
+  end
+  return command
+end
+
 local state = client["new-state"](function()
-  return { repl = nil }
+  return { repl = nil, command = nil }
 end)
 
 local function display_status(status)
-  log.append({ M["comment-prefix"] .. vim.inspect(cfg({ "command" })) .. " (" .. status .. ")" }, {
+  local command = state().command or cfg({ "command" })
+  log.append({ M["comment-prefix"] .. vim.inspect(command) .. " (" .. status .. ")" }, {
     ["break?"] = true,
   })
 end
@@ -123,8 +145,9 @@ function M.start()
     return
   end
 
+  state().command = server_command()
   state().repl = stdio.start({
-    cmd = cfg({ "command" }),
+    cmd = state().command,
     ["prompt-pattern"] = cfg({ "prompt_pattern" }),
     ["on-success"] = function()
       display_status("started")

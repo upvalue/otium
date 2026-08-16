@@ -1,0 +1,5 @@
+; Load-path directories this checkout needs. Read, never evaluated.
+; vim: set filetype=otium :
+
+; The prelude and expander are embedded at build time and deliberately absent.
+(paths "ext/ray" "ext/demo")

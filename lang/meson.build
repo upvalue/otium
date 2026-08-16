@@ -136,6 +136,9 @@ test('r7rs-ports', r7rs_port_tests,
 if get_option('ext_demo')
   test('otium-demo-extension', otium,
     args : [
+      # These name their own load path, so the checkout's project.ot must not
+      # decide what they resolve.
+      '--no-project',
       '--path', join_paths(meson.current_source_dir(), 'ext', 'demo'),
       join_paths(meson.current_source_dir(), 'tests', 'ext-demo.scm'),
     ],
@@ -145,6 +148,9 @@ endif
 if get_option('ext_ray')
   test('otium-ray-extension', otium,
     args : [
+      # These name their own load path, so the checkout's project.ot must not
+      # decide what they resolve.
+      '--no-project',
       '--path', join_paths(meson.current_source_dir(), 'ext', 'ray'),
       join_paths(meson.current_source_dir(), 'tests', 'ext-ray.scm'),
     ],

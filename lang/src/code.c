@@ -29,29 +29,27 @@ Value make_code(State* vm, const u8* bytes, u32 len, Value constants, const Code
   if (constants.tag != Tag_Array) return raise_error(vm, "code constants must be an array");
   OT_SCOPE(vm);
   Ref constantsRoot = ref_push(vm, constants);
-  Obj* obj = heap_alloc(&vm->heap, ObjType_Code, sizeof(CodeData));
-  CodeData* code = as_code(obj_v(Tag_Code, obj));
+  u32 constCount = as_array(ref_get(vm, constantsRoot))->len;
+  // constants first so they land 8-aligned, then the bytecode.
+  if (constCount > (UINT32_MAX - (u32)sizeof(CodeData) - len) / (u32)sizeof(Value))
+    ot_fatal("code: size overflow");
+  u32 size = (u32)sizeof(CodeData) + constCount * (u32)sizeof(Value) + len;
+  Obj* obj = heap_alloc(&vm->heap, ObjType_Code, size);
+  CodeData* code = (CodeData*)obj_payload(obj);
   code->len = len;
-  code->constCount = as_array(ref_get(vm, constantsRoot))->len;
+  code->constCount = constCount;
   code->nfixed = spec->nfixed;
   code->hasRest = spec->hasRest;
   code->nupvals = spec->nupvals;
   code->nlocals = spec->nlocals;
   code->maxStack = spec->maxStack;
   code->name = spec->name;
-
-  if (len) {
-    code->bytes = (u8*)ot_alloc(len);
-    if (!code->bytes) ot_fatal("code: cannot allocate bytecode");
-    memcpy(code->bytes, bytes, len);
-  }
-  if (code->constCount) {
-    if (code->constCount > UINT32_MAX / sizeof(Value)) ot_fatal("code: constant pool overflow");
-    code->consts = (Value*)ot_alloc((size_t)code->constCount * sizeof(Value));
-    if (!code->consts) ot_fatal("code: cannot allocate constant pool");
-    ArrayData* source = as_array(ref_get(vm, constantsRoot));
-    memcpy(code->consts, source->items, (size_t)code->constCount * sizeof(Value));
-  }
+  // Both copies happen after the last allocation, so the source pointer taken
+  // from the rooted constants array cannot move underneath them.
+  if (constCount)
+    memcpy(code_consts(code), array_items(ref_get(vm, constantsRoot)),
+           (size_t)constCount * sizeof(Value));
+  if (len) memcpy(code_bytes(code), bytes, len);
   return obj_v(Tag_Code, obj);
 }
 
@@ -81,7 +79,7 @@ bool code_verify(Value value, Buf* error) {
   while (ip < code->len) {
     u32 at = ip;
     boundaries[at] = 1;
-    u8 raw = code->bytes[ip++];
+    u8 raw = code_bytes(code)[ip++];
     if (raw >= (u8)Op_Count) {
       ok = fail(error, "invalid opcode at %u", at);
       break;
@@ -94,7 +92,7 @@ bool code_verify(Value value, Buf* error) {
     }
     if ((op == Op_Const || op == Op_GetGlobal || op == Op_SetGlobal || op == Op_DefGlobal ||
          op == Op_Closure) &&
-        code_read_u16(code->bytes + ip) >= code->constCount) {
+        code_read_u16(code_bytes(code) + ip) >= code->constCount) {
       ok = fail(error, "constant index out of range at %u", at);
       break;
     }
@@ -106,11 +104,11 @@ bool code_verify(Value value, Buf* error) {
     ip = 0;
     while (ip < code->len) {
       u32 at = ip;
-      Op op = (Op)code->bytes[ip++];
+      Op op = (Op)code_bytes(code)[ip++];
       u32 width = operand_width(op_info(op)->operand);
       if (op == Op_Jump || op == Op_JumpFalse || op == Op_JumpFalsePeek || op == Op_JumpTruePeek ||
           op == Op_Loop) {
-        i32 rel = code_read_i32(code->bytes + ip);
+        i32 rel = code_read_i32(code_bytes(code) + ip);
         i64 target = (i64)ip + 4 + rel;
         if (target < 0 || target >= code->len || !boundaries[(u32)target]) {
           ok = fail(error, "jump target is not an instruction at %u", at);
@@ -136,7 +134,7 @@ void code_print_ascii(Value value, Buf* out) {
   CodeData* code = as_code(value);
   vec_push(out, '"');
   for (u32 i = 0; i < code->len; i++) {
-    u8 shifted = (u8)(code->bytes[i] + (u8)'0');
+    u8 shifted = (u8)(code_bytes(code)[i] + (u8)'0');
     if (shifted >= 0x20 && shifted <= 0x7e && shifted != '"' && shifted != '\\')
       vec_push(out, (char)shifted);
     else append_hex_escape(out, shifted);
@@ -154,7 +152,7 @@ void code_disassemble(State* vm, Value value, Buf* out) {
   while (ip < as_code(ref_get(vm, codeRoot))->len) {
     CodeData* code = as_code(ref_get(vm, codeRoot));
     u32 at = ip;
-    u8 raw = code->bytes[ip++];
+    u8 raw = code_bytes(code)[ip++];
     buf_printf(out, "%04x  ", at);
     if (raw >= (u8)Op_Count) {
       buf_printf(out, "<invalid %u>\n", raw);
@@ -165,19 +163,19 @@ void code_disassemble(State* vm, Value value, Buf* out) {
     buf_append_cstr(out, info->name);
     switch (info->operand) {
       case Operand_None: break;
-      case Operand_U8: buf_printf(out, " %u", code->bytes[ip]); break;
+      case Operand_U8: buf_printf(out, " %u", code_bytes(code)[ip]); break;
       case Operand_U16: {
-        u16 operand = code_read_u16(code->bytes + ip);
+        u16 operand = code_read_u16(code_bytes(code) + ip);
         buf_printf(out, " %u", operand);
         if ((op == Op_Const || op == Op_GetGlobal || op == Op_SetGlobal || op == Op_DefGlobal ||
              op == Op_Closure) &&
             operand < code->constCount) {
           buf_append_cstr(out, " ; ");
-          print_repr(vm, code->consts[operand], out);
+          print_repr(vm, code_consts(code)[operand], out);
         }
         break;
       }
-      case Operand_I32: buf_printf(out, " %d", code_read_i32(code->bytes + ip)); break;
+      case Operand_I32: buf_printf(out, " %d", code_read_i32(code_bytes(code) + ip)); break;
     }
     ip += operand_width(info->operand);
     vec_push(out, '\n');

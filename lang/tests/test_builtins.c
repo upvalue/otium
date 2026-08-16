@@ -276,32 +276,35 @@ TEST(table_capacity_overflow_guards_abort_before_allocating) {
 
 TEST(table_printing_preserves_insertion_order) {
   State* vm = make_vm();
-  Value t = make_table(vm);
-  u32 root = state_push(vm, t);
+  // Read the table through its rooted slot: table_put allocates, so a raw
+  // local goes stale the moment growth moves the object.
+  u32 root = state_push(vm, make_table(vm));
+#define T (vm->stack.data[root])
   Value ka = keyword_v(intern_id(&vm->intern, "a", 1));
   Value kb = keyword_v(intern_id(&vm->intern, "b", 1));
   Value kc = keyword_v(intern_id(&vm->intern, "c", 1));
 
-  table_put(vm, t, ka, int_v(1));
-  table_put(vm, t, kb, int_v(2));
-  table_put(vm, t, kc, int_v(3));
+  table_put(vm, T, ka, int_v(1));
+  table_put(vm, T, kb, int_v(2));
+  table_put(vm, T, kc, int_v(3));
 
   Buf out = {0};
-  print_repr(vm, t, &out);
+  print_repr(vm, T, &out);
   CHECK_MEM(out.data, out.len, "{:a 1 :b 2 :c 3}");
 
   // One tombstone remains in storage: it is skipped, and reinsertion appends.
-  table_put(vm, t, kb, nil_v());
+  table_put(vm, T, kb, nil_v());
   buf_clear(&out);
-  print_repr(vm, t, &out);
+  print_repr(vm, T, &out);
   CHECK_MEM(out.data, out.len, "{:a 1 :c 3}");
 
-  table_put(vm, t, kb, int_v(20));
+  table_put(vm, T, kb, int_v(20));
   buf_clear(&out);
-  print_repr(vm, t, &out);
+  print_repr(vm, T, &out);
   CHECK_MEM(out.data, out.len, "{:a 1 :c 3 :b 20}");
   buf_deinit(&out);
 
+#undef T
   state_pop_to(vm, root);
   state_destroy(vm);
 }
@@ -386,7 +389,7 @@ TEST(equality_matrix_spec_2_4) {
     array_push(vm, ref_get(vm, a2), ref_get(vm, p2));
     CHECK(val_equal(vm, ref_get(vm, a1), ref_get(vm, a2)));
     CHECK(val_equal(vm, ref_get(vm, a1), ref_get(vm, a1)));
-    as_array(ref_get(vm, a2))->items[0] = int_v(2);
+    array_items(ref_get(vm, a2))[0] = int_v(2);
     CHECK(!val_equal(vm, ref_get(vm, a1), ref_get(vm, a2)));
 
     // hashes agree with equal?

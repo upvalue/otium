@@ -110,15 +110,24 @@ TEST(heap_buffer_payload_placement_lifetime) {
   heap_add_roots(&heap, walk_vec_roots, &roots);
 
   vec_push(&roots, make_buffer_h(&heap));
-  buf_append_cstr(&as_buffer(roots.data[0])->buf, "survives collection");
+  buffer_append_h(&heap, roots.data[0], "survives collection", 19);
+  // Buffer bytes are a GC object, so the collector moves them with everything
+  // else and nothing has to be freed when the buffer dies.
   heap_collect(&heap);
-  Buf* live = &as_buffer(roots.data[0])->buf;
-  CHECK(live->len == 19);
-  CHECK(memcmp(live->data, "survives collection", 19) == 0);
+  CHECK(buffer_len(roots.data[0]) == 19);
+  CHECK(memcmp(buffer_data(roots.data[0]), "survives collection", 19) == 0);
 
-  // Dropping the root makes the next sweep call buf_deinit on BufferData::buf.
+  // Growth past the initial capacity reallocates the storage object.
+  for (u32 i = 0; i < 100; i++) buffer_append_h(&heap, roots.data[0], "xyz", 3);
+  CHECK(buffer_len(roots.data[0]) == 19 + 300);
+  heap_collect(&heap);
+  CHECK(buffer_len(roots.data[0]) == 19 + 300);
+  CHECK(memcmp(buffer_data(roots.data[0]), "survives collection", 19) == 0);
+
   vec_clear(&roots);
   heap_collect(&heap);
+  // Nothing but Foreign is ever finalizable now.
+  CHECK(heap.finalizable.len == 0);
   heap_deinit(&heap);
   vec_deinit(&roots);
 }
@@ -144,9 +153,9 @@ static void abort_string_size_overflow(void) {
 static void abort_array_reserve_overflow(void) {
   Heap heap;
   heap_init(&heap, nullptr, 1024, OT_HEAP_MAX_DEFAULT);
-  Value array = make_array_h(&heap, 0);
-  as_array(array)->cap = UINT32_MAX / 2 + 1;
-  array_reserve(array, UINT32_MAX);
+  // A capacity this large overflows the storage payload size before any
+  // allocation is attempted.
+  array_reserve_h(&heap, make_array_h(&heap, 0), UINT32_MAX);
 }
 
 TEST(heap_size_overflow_guards_abort_before_allocating) {
@@ -213,20 +222,31 @@ TEST(array_items_survive_gc_dead_array_items_freed) {
   vec_push(&roots, arr);
   {
     Value s = make_string_h(&heap, "elem", 4);
-    array_reserve(roots.data[0], 1);
+    array_reserve_h(&heap, roots.data[0], 1);
+    // Derived after the reserve: growth moves the storage object.
     ArrayData* d = as_array(roots.data[0]);
-    d->items[d->len++] = s;
+    array_items(roots.data[0])[d->len++] = s;
   }
-  // dead array (unrooted) — its C-heap items must be freed by the sweep
+  // A dead unrooted array needs no sweeping: its storage is just garbage.
   (void)make_array_h(&heap, 16);
-  CHECK(heap.finalizable.len >= 2);
+  CHECK(heap.finalizable.len == 0);
 
   heap_collect(&heap);
-  CHECK(heap.finalizable.len == 1);
-  ArrayData* d = as_array(roots.data[0]);
-  CHECK(d->len == 1);
-  CHECK(d->items[0].tag == Tag_String);
-  CHECK(memcmp(string_bytes(d->items[0]), "elem", 4) == 0);
+  CHECK(heap.finalizable.len == 0);
+  CHECK(as_array(roots.data[0])->len == 1);
+  CHECK(array_items(roots.data[0])[0].tag == Tag_String);
+  CHECK(memcmp(string_bytes(array_items(roots.data[0])[0]), "elem", 4) == 0);
+
+  // Growth across a collection keeps the elements and moves the storage.
+  for (u32 i = 0; i < 64; i++) {
+    array_reserve_h(&heap, roots.data[0], as_array(roots.data[0])->len + 1);
+    ArrayData* d = as_array(roots.data[0]);
+    array_items(roots.data[0])[d->len++] = int_v((i64)i);
+  }
+  heap_collect(&heap);
+  CHECK(as_array(roots.data[0])->len == 65);
+  CHECK(memcmp(string_bytes(array_items(roots.data[0])[0]), "elem", 4) == 0);
+  CHECK(array_items(roots.data[0])[64].i == 63);
   heap_deinit(&heap);
   vec_deinit(&roots);
 }
@@ -296,4 +316,42 @@ TEST(intern_idempotence_and_dense_ids) {
   CHECK(intern_id(&in, "sym250", 6) == 253);
   CHECK(intern_id(&in, "foo", 3) == 1);
   intern_deinit(&in);
+}
+
+// The point of moving backing storage onto the GC heap: heapMaxBytes bounds it.
+// Before, array/table/buffer bulk sat in the C heap and escaped the cap
+// entirely, so a program could exhaust memory while nominally inside its limit.
+TEST(collection_storage_is_accounted_against_the_heap) {
+  Heap heap;
+  heap_init(&heap, nullptr, 1 << 20, OT_HEAP_MAX_DEFAULT);
+  VecValue roots = {0};
+  heap_add_roots(&heap, walk_vec_roots, &roots);
+
+  vec_push(&roots, make_array_h(&heap, 0));
+  u32 before = heap.used;
+  const u32 count = 4096;
+  for (u32 i = 0; i < count; i++) {
+    array_reserve_h(&heap, roots.data[0], as_array(roots.data[0])->len + 1);
+    ArrayData* d = as_array(roots.data[0]);
+    array_items(roots.data[0])[d->len++] = int_v((i64)i);
+  }
+  // The live elements alone are count * sizeof(Value); the heap must have grown
+  // by at least that much, which is only true if the storage lives here.
+  CHECK(heap.used - before >= count * sizeof(Value));
+  CHECK(as_array(roots.data[0])->len == count);
+
+  heap_collect(&heap);
+  CHECK(as_array(roots.data[0])->len == count);
+  CHECK(array_items(roots.data[0])[count - 1].i == count - 1);
+  // A collection with the array live must retain its storage, and nothing is
+  // finalizable because nothing owns C-heap memory any more.
+  CHECK(heap.used >= count * sizeof(Value));
+  CHECK(heap.finalizable.len == 0);
+
+  vec_clear(&roots);
+  heap_collect(&heap);
+  CHECK(heap.used < count * sizeof(Value));  // storage collected with the array
+
+  heap_deinit(&heap);
+  vec_deinit(&roots);
 }

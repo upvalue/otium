@@ -52,10 +52,11 @@ static inline SeqStep seq_iter_next(SeqIter* it, Ref item) {
       if (it->index >= it->limit) return SeqStep_End;
       // Re-derived from the rooted cursor on every step: a callback between
       // steps can allocate and move the backing store.
-      ArrayData* array = as_array(ref_get(it->vm, it->cursor));
+      Value seq = ref_get(it->vm, it->cursor);
       // for-each historically snapshots the length and uses get for each
       // index, so shrinking during a callback yields nil for removed slots.
-      ref_set(it->vm, item, it->index < array->len ? array->items[it->index] : nil_v());
+      ref_set(it->vm, item,
+              it->index < as_array(seq)->len ? array_items(seq)[it->index] : nil_v());
       it->index++;
       return SeqStep_Item;
     }

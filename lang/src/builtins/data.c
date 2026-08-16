@@ -43,11 +43,11 @@ static bool value_equal(State* vm, Value a, Value b, bool structuralArrays) {
       case Tag_Array: {
         if (a.obj == b.obj) return true;
         if (!structuralArrays) return false;
-        ArrayData* aa = as_array(a);
-        ArrayData* ab = as_array(b);
-        if (aa->len != ab->len) return false;
-        for (u32 i = 0; i < aa->len; i++)
-          if (!value_equal(vm, aa->items[i], ab->items[i], true)) return false;
+        if (as_array(a)->len != as_array(b)->len) return false;
+        Value* ia = array_items(a);
+        Value* ib = array_items(b);
+        for (u32 i = 0; i < as_array(a)->len; i++)
+          if (!value_equal(vm, ia[i], ib[i], true)) return false;
         return true;
       }
       default:  // other mutables + functions/macros/params/restarts: identity
@@ -163,18 +163,24 @@ static void freeze_pair_key(Value root) {
   vec_deinit(&pending);
 }
 
-static inline u32 idx_get(TableData* t, u32 slot) {
-  switch (t->indexWidth) {
-    case 1: return t->index[slot];
-    case 2: return ((u16*)t->index)[slot];
-    default: return ((u32*)t->index)[slot];
+// The index and entry arrays are GC objects, so every helper below takes the
+// table through a rooted handle and re-derives its pointers after anything that
+// can allocate. Nothing here may cache a TableEntry* or u8* across a make_*.
+
+static inline u32 idx_get(Value table, u32 slot) {
+  const u8* index = table_index(table);
+  switch (as_table(table)->indexWidth) {
+    case 1: return index[slot];
+    case 2: return ((const u16*)index)[slot];
+    default: return ((const u32*)index)[slot];
   }
 }
-static inline void idx_set(TableData* t, u32 slot, u32 v) {
-  switch (t->indexWidth) {
-    case 1: t->index[slot] = (u8)v; break;
-    case 2: ((u16*)t->index)[slot] = (u16)v; break;
-    default: ((u32*)t->index)[slot] = v; break;
+static inline void idx_set(Value table, u32 slot, u32 v) {
+  u8* index = table_index(table);
+  switch (as_table(table)->indexWidth) {
+    case 1: index[slot] = (u8)v; break;
+    case 2: ((u16*)index)[slot] = (u16)v; break;
+    default: ((u32*)index)[slot] = v; break;
   }
 }
 
@@ -182,31 +188,37 @@ static u32 table_index_width(u32 entriesCap) {
   return entriesCap < 0xFF ? 1 : entriesCap < 0xFFFF ? 2 : 4;
 }
 
-// Rebuild the index for the current entries array at capacity `cap` (pow2).
-static void table_rebuild_index(TableData* t, u32 cap) {
-  ot_free(t->index);
-  u32 width = table_index_width(t->entriesCap);
-  t->index = (u8*)ot_alloc((size_t)cap * width);
-  if (!t->index) ot_fatal("table: out of memory");
-  memset(t->index, 0, (size_t)cap * width);
+// Rebuild the index for the current entries at capacity `cap` (pow2).
+static void table_rebuild_index(State* vm, Ref table, u32 cap) {
+  u32 width = table_index_width(as_table(ref_get(vm, table))->entriesCap);
+  if (cap > UINT32_MAX / width) ot_fatal("table: index size overflow");
+  // heap_alloc zeroes object payloads, so the fresh index starts all-empty.
+  Value fresh = make_bytes(vm, cap * width);
+  TableData* t = as_table(ref_get(vm, table));
+  t->index = fresh;
   t->indexCap = cap;
   t->indexWidth = width;
+  // No allocation past this point, so the entry pointer is stable.
+  TableEntry* entries = table_entries(ref_get(vm, table));
   for (u32 i = 0; i < t->entriesLen; i++) {
-    if (is_tomb(&t->entries[i])) continue;
-    u32 slot = (u32)(t->entries[i].hash & (cap - 1));
-    while (idx_get(t, slot) != 0) slot = (slot + 1) & (cap - 1);
-    idx_set(t, slot, i + 1);
+    if (is_tomb(&entries[i])) continue;
+    u32 slot = (u32)(entries[i].hash & (cap - 1));
+    while (idx_get(ref_get(vm, table), slot) != 0) slot = (slot + 1) & (cap - 1);
+    idx_set(ref_get(vm, table), slot, i + 1);
   }
 }
 
 // Drop tombstones (preserving order) and rebuild the index.
-static void table_compact(TableData* t) {
+static void table_compact(State* vm, Ref table) {
+  TableData* t = as_table(ref_get(vm, table));
+  TableEntry* entries = table_entries(ref_get(vm, table));
   u32 w = 0;
   for (u32 i = 0; i < t->entriesLen; i++)
-    if (!is_tomb(&t->entries[i])) t->entries[w++] = t->entries[i];
+    if (!is_tomb(&entries[i])) entries[w++] = entries[i];
   t->entriesLen = w;
   t->tombstones = 0;
-  table_rebuild_index(t, t->indexCap);
+  u32 indexCap = t->indexCap;
+  table_rebuild_index(vm, table, indexCap);  // t and entries are stale after this
 }
 
 // keep index load factor <= 3/4 (claimed slots = entriesLen incl tombstones)
@@ -214,77 +226,94 @@ static inline bool index_overloaded(u32 need, u32 cap) {
   return ((u64)need + 1u) * 4u > (u64)cap * 3u;
 }
 
-static void table_ensure(TableData* t, u32 extra) {
+static void table_ensure(State* vm, Ref table, u32 extra) {
+  TableData* t = as_table(ref_get(vm, table));
   if (extra > UINT32_MAX - t->entriesLen) ot_fatal("table: capacity overflow");
   u32 need = t->entriesLen + extra;
   if (need > t->entriesCap) {
     u32 ncap = grow_capacity(t->entriesCap, need, "table: capacity overflow");
-    TableEntry* ne = (TableEntry*)ot_realloc(t->entries, (size_t)ncap * sizeof(TableEntry));
-    if (!ne) ot_fatal("table: out of memory");
-    t->entries = ne;
+    Value grown = make_entries(vm, ncap);
+    t = as_table(ref_get(vm, table));  // re-derive: make_entries may have moved it
+    TableEntry* dst = entries_items(grown);
+    TableEntry* src = table_entries(ref_get(vm, table));
+    for (u32 i = 0; i < t->entriesLen; i++) dst[i] = src[i];
+    t->entries = grown;
     t->entriesCap = ncap;
     // entriesCap growth may bump the needed index width — rebuild if so.
     u32 width = table_index_width(ncap);
-    if (t->index && width != t->indexWidth) table_rebuild_index(t, t->indexCap);
+    if (!is_nil(t->index) && width != t->indexWidth) {
+      u32 indexCap = t->indexCap;
+      table_rebuild_index(vm, table, indexCap);
+    }
   }
-  if (!t->index || index_overloaded(need, t->indexCap)) {
+  t = as_table(ref_get(vm, table));
+  if (is_nil(t->index) || index_overloaded(need, t->indexCap)) {
     u32 cap = t->indexCap ? t->indexCap : 8;
     while (index_overloaded(need, cap)) {
       if (cap > UINT32_MAX / 2) ot_fatal("table: capacity overflow");
       cap *= 2;
     }
-    table_rebuild_index(t, cap);
+    table_rebuild_index(vm, table, cap);
   }
 }
 
-// Find live entry index for key, or -1.
-static i64 table_find(State* vm, TableData* t, u64 hash, Value key) {
-  if (!t->index || t->indexCap == 0) return -1;
+// Find live entry index for key, or -1. Allocation-free.
+static i64 table_find(State* vm, Value table, u64 hash, Value key) {
+  TableData* t = as_table(table);
+  if (is_nil(t->index) || t->indexCap == 0) return -1;
+  TableEntry* entries = table_entries(table);
   u32 slot = (u32)(hash & (t->indexCap - 1));
   for (;;) {
-    u32 e = idx_get(t, slot);
+    u32 e = idx_get(table, slot);
     if (e == 0) return -1;
-    TableEntry* ent = &t->entries[e - 1];
+    TableEntry* ent = &entries[e - 1];
     if (!is_tomb(ent) && ent->hash == hash && key_equal(vm, ent->key, key)) return (i64)(e - 1);
     slot = (slot + 1) & (t->indexCap - 1);
   }
 }
 
 Value table_get(State* vm, Value table, Value key) {
-  TableData* t = as_table(table);
-  i64 e = table_find(vm, t, val_hash(vm, key), key);
-  return e < 0 ? nil_v() : t->entries[e].val;
+  i64 e = table_find(vm, table, val_hash(vm, key), key);
+  return e < 0 ? nil_v() : table_entries(table)[e].val;
 }
 
 Value table_put(State* vm, Value table, Value key, Value v) {
-  TableData* t = as_table(table);
-  u64 h = val_hash(vm, key);
-  i64 e = table_find(vm, t, h, key);
-  if (is_nil(v)) {  // storing nil deletes
+  OT_SCOPE(vm);
+  Ref tRef = ref_push(vm, table);
+  Ref kRef = ref_push(vm, key);
+  Ref vRef = ref_push(vm, v);
+  u64 h = val_hash(vm, ref_get(vm, kRef));
+  i64 e = table_find(vm, ref_get(vm, tRef), h, ref_get(vm, kRef));
+  if (is_nil(ref_get(vm, vRef))) {  // storing nil deletes
     if (e >= 0) {
-      t->entries[e].key = unwind_v();  // tombstone
-      t->entries[e].val = nil_v();
+      TableData* t = as_table(ref_get(vm, tRef));
+      TableEntry* entries = table_entries(ref_get(vm, tRef));
+      entries[e].key = unwind_v();  // tombstone
+      entries[e].val = nil_v();
       t->count--;
       t->tombstones++;
-      if (t->tombstones > t->count) table_compact(t);
+      if (t->tombstones > t->count) table_compact(vm, tRef);
     }
-    return table;
+    return ref_get(vm, tRef);
   }
   if (e >= 0) {  // update keeps position
-    t->entries[e].val = v;
-    return table;
+    table_entries(ref_get(vm, tRef))[e].val = ref_get(vm, vRef);
+    return ref_get(vm, tRef);
   }
-  freeze_pair_key(key);
-  table_ensure(t, 1);  // insert (or re-insert) at the end
+  freeze_pair_key(ref_get(vm, kRef));
+  table_ensure(vm, tRef, 1);  // insert (or re-insert) at the end; allocates
+  // Everything below is derived after the last allocation.
+  TableData* t = as_table(ref_get(vm, tRef));
+  TableEntry* entries = table_entries(ref_get(vm, tRef));
   u32 idx = t->entriesLen++;
-  t->entries[idx].hash = h;
-  t->entries[idx].key = key;
-  t->entries[idx].val = v;
+  entries[idx].hash = h;
+  entries[idx].key = ref_get(vm, kRef);
+  entries[idx].val = ref_get(vm, vRef);
   u32 slot = (u32)(h & (t->indexCap - 1));
-  while (idx_get(t, slot) != 0) slot = (slot + 1) & (t->indexCap - 1);
-  idx_set(t, slot, idx + 1);
+  while (idx_get(ref_get(vm, tRef), slot) != 0) slot = (slot + 1) & (t->indexCap - 1);
+  idx_set(ref_get(vm, tRef), slot, idx + 1);
   t->count++;
-  return table;
+  return ref_get(vm, tRef);
 }
 
 u32 table_entry_count(Value table) { return as_table(table)->count; }
@@ -294,8 +323,9 @@ u32 table_entry_count(Value table) { return as_table(table)->count; }
 // examines every stored entry at most once.
 bool table_iter_next(Value table, u32* cursor, Value* k, Value* v) {
   TableData* t = as_table(table);
+  TableEntry* entries = table_entries(table);
   while (*cursor < t->entriesLen) {
-    TableEntry* entry = &t->entries[(*cursor)++];
+    TableEntry* entry = &entries[(*cursor)++];
     if (is_tomb(entry)) continue;
     *k = entry->key;
     *v = entry->val;
@@ -310,21 +340,19 @@ bool table_iter_next(Value table, u32* cursor, Value* k, Value* v) {
 Value array_get(Value arr, i64 idx) {
   ArrayData* a = as_array(arr);
   if (idx < 0 || (u64)idx >= a->len) return nil_v();
-  return a->items[idx];
+  return array_items(arr)[idx];
 }
 
+// Allocates when the storage is full. `arr` and `v` are rooted here so callers
+// need not; the storage pointer is taken only after the last allocation.
 void array_push(State* vm, Value arr, Value v) {
-  (void)vm;
-  ArrayData* a = as_array(arr);
-  if (a->len == a->cap) {
-    if (a->cap > UINT32_MAX / 2) ot_fatal("array: capacity overflow");
-    u32 ncap = a->cap ? a->cap * 2 : 8;
-    Value* ni = (Value*)ot_realloc(a->items, (size_t)ncap * sizeof(Value));
-    if (!ni) ot_fatal("array: out of memory");
-    a->items = ni;
-    a->cap = ncap;
-  }
-  a->items[a->len++] = v;
+  OT_SCOPE(vm);
+  Ref a = ref_push(vm, arr);
+  Ref item = ref_push(vm, v);
+  u32 len = as_array(ref_get(vm, a))->len;
+  if (len == array_cap(ref_get(vm, a))) array_reserve(vm, ref_get(vm, a), len ? len * 2 : 8);
+  array_items(ref_get(vm, a))[len] = ref_get(vm, item);
+  as_array(ref_get(vm, a))->len = len + 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -423,10 +451,7 @@ static Value nat_length(State* vm, u32 base, u32 argc) {
     case Tag_Array: return int_v((i64)as_array(v)->len);
     case Tag_Table: return int_v((i64)as_table(v)->count);
     case Tag_String: return int_v((i64)as_string(v)->nchars);
-    case Tag_Buffer: {
-      BufferData* b = as_buffer(v);
-      return int_v((i64)utf8_count(b->buf.data, b->buf.len));
-    }
+    case Tag_Buffer: return int_v((i64)utf8_count(buffer_data(v), buffer_len(v)));
     default: return raise_error(vm, "length: unsupported type");
   }
 }
@@ -454,7 +479,7 @@ static Value nat_reverse(State* vm, u32 base, u32 argc) {
     // The source is re-derived from its rooted arg slot every iteration:
     // array_push allocates once array storage is GC-owned.
     for (u32 i = as_array(ARG(0))->len; i-- > 0;)
-      array_push(vm, ref_get(vm, out), as_array(ARG(0))->items[i]);
+      array_push(vm, ref_get(vm, out), array_items(ARG(0))[i]);
     return ref_get(vm, out);
   }
   return raise_error(vm, "reverse: expected sequence");
@@ -485,7 +510,7 @@ static Value nat_array_to_list(State* vm, u32 base, u32 argc) {
   // re-read the array through its rooted arg slot every iteration: each
   // make_pair can collect and move it
   for (u32 i = as_array(ARG(0))->len; i-- > 0;)
-    ref_set(vm, acc, make_pair(vm, as_array(ARG(0))->items[i], ref_get(vm, acc)));
+    ref_set(vm, acc, make_pair(vm, array_items(ARG(0))[i], ref_get(vm, acc)));
   return ref_get(vm, acc);
 }
 
@@ -558,9 +583,9 @@ static Value do_put(State* vm, Value coll, Value k, Value v) {
   }
   if (coll.tag == Tag_Array) {
     if (k.tag != Tag_Int) return raise_error(vm, "put!: array index must be an int");
-    ArrayData* a = as_array(coll);
-    if (k.i < 0 || (u64)k.i >= a->len) return raise_error(vm, "put!: array index out of range");
-    a->items[k.i] = v;
+    if (k.i < 0 || (u64)k.i >= as_array(coll)->len)
+      return raise_error(vm, "put!: array index out of range");
+    array_items(coll)[k.i] = v;
     return coll;
   }
   return raise_error(vm, "put!: expected table or array");
@@ -585,7 +610,11 @@ static Value nat_pop(State* vm, u32 base, u32 argc) {
   OT_TRY(need_array(vm, "pop!", ARG(0)));
   ArrayData* a = as_array(ARG(0));
   if (a->len == 0) return nil_v();
-  return a->items[--a->len];
+  Value popped = array_items(ARG(0))[--a->len];
+  // Clear the vacated slot: storage traces its whole capacity, so leaving the
+  // value there would keep it alive after the pop.
+  array_items(ARG(0))[a->len] = nil_v();
+  return popped;
 }
 
 static Value nat_update(State* vm, u32 base, u32 argc) {
@@ -612,8 +641,8 @@ static Value nat_keys(State* vm, u32 base, u32 argc) {
   // The table is re-derived from its rooted arg slot every iteration:
   // array_push allocates once array storage is GC-owned.
   for (u32 i = 0; i < as_table(ARG(0))->entriesLen; i++) {
-    if (is_tomb(&as_table(ARG(0))->entries[i])) continue;
-    array_push(vm, ref_get(vm, out), as_table(ARG(0))->entries[i].key);
+    if (is_tomb(&table_entries(ARG(0))[i])) continue;
+    array_push(vm, ref_get(vm, out), table_entries(ARG(0))[i].key);
   }
   return ref_get(vm, out);
 }
@@ -625,8 +654,8 @@ static Value nat_values(State* vm, u32 base, u32 argc) {
   OT_SCOPE(vm);
   Ref out = ref_push(vm, make_array(vm, 8));
   for (u32 i = 0; i < as_table(ARG(0))->entriesLen; i++) {
-    if (is_tomb(&as_table(ARG(0))->entries[i])) continue;
-    array_push(vm, ref_get(vm, out), as_table(ARG(0))->entries[i].val);
+    if (is_tomb(&table_entries(ARG(0))[i])) continue;
+    array_push(vm, ref_get(vm, out), table_entries(ARG(0))[i].val);
   }
   return ref_get(vm, out);
 }
@@ -639,16 +668,16 @@ static Value nat_copy(State* vm, u32 base, u32 argc) {
     OT_SCOPE(vm);
     Ref out = ref_push(vm, make_array(vm, as_array(v)->len));
     for (u32 i = 0; i < as_array(ARG(0))->len; i++)
-      array_push(vm, ref_get(vm, out), as_array(ARG(0))->items[i]);
+      array_push(vm, ref_get(vm, out), array_items(ARG(0))[i]);
     return ref_get(vm, out);
   }
   if (v.tag == Tag_Table) {
     OT_SCOPE(vm);
     Ref out = ref_push(vm, make_table(vm));
     for (u32 i = 0; i < as_table(ARG(0))->entriesLen; i++) {
-      if (is_tomb(&as_table(ARG(0))->entries[i])) continue;
-      table_put(vm, ref_get(vm, out), as_table(ARG(0))->entries[i].key,
-                as_table(ARG(0))->entries[i].val);
+      if (is_tomb(&table_entries(ARG(0))[i])) continue;
+      table_put(vm, ref_get(vm, out), table_entries(ARG(0))[i].key,
+                table_entries(ARG(0))[i].val);
     }
     return ref_get(vm, out);
   }

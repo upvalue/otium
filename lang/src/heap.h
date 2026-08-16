@@ -18,6 +18,14 @@ typedef enum ObjType : u8 {
   ObjType_Param,
   ObjType_Restart,
   ObjType_Foreign,
+  // Backing storage for the growable types. These are ordinary GC objects that
+  // nothing outside the collection that owns them ever holds: growth allocates
+  // a bigger one and copies, and the old one becomes garbage like anything
+  // else. Keeping the bulk here rather than in the C heap is what makes
+  // heapMaxBytes an actual bound on runtime memory.
+  ObjType_Slots,    // Value[cap], traced
+  ObjType_Entries,  // TableEntry[cap], traced
+  ObjType_Bytes,    // u8[cap], untraced
 } ObjType;
 
 struct Obj {
@@ -39,14 +47,28 @@ typedef struct StringData {
   u32 len;
   u32 nchars; /* utf8 bytes follow */
 } StringData;
-typedef struct ArrayData {
-  Value* items;
-  u32 len;
+// Backing-storage payloads. The explicit padding keeps the element array that
+// follows 8-byte aligned, which Value and TableEntry both require.
+typedef struct SlotsData {
   u32 cap;
-} ArrayData;  // items in C heap, owned
+  u32 _pad;
+} SlotsData;  // Value[cap] follows
+typedef struct EntriesData {
+  u32 cap;
+  u32 _pad;
+} EntriesData;  // TableEntry[cap] follows
+typedef struct BytesData {
+  u32 cap;
+  u32 _pad;
+} BytesData;  // u8[cap] follows
+
+typedef struct ArrayData {
+  Value slots;  // Slots object, or nil while empty
+  u32 len;
+} ArrayData;
 // Compact-dict table layout (canonical here so the scavenger can trace it).
-// Insertion-ordered entry vector + open-addressed index array, both C-heap,
-// owned by the object. Tombstones are marked key.tag == Tag_Unwind and are not
+// Insertion-ordered entry vector + open-addressed index array, both GC objects
+// owned by this one. Tombstones are marked key.tag == Tag_Unwind and are not
 // traced.
 typedef struct TableEntry {
   u64 hash;
@@ -56,19 +78,22 @@ typedef struct TableEntry {
 typedef struct TableData {
   u32 count;       // live entries
   u32 tombstones;  // dead entries still in `entries`
-  TableEntry* entries;
+  Value entries;   // Entries object, or nil
   u32 entriesLen;
   u32 entriesCap;  // insertion order
-  u8* index;       // open-addressed slot array, scaled width; 0 = empty,
+  Value index;     // Bytes object, or nil. 0 = empty slot,
   u32 indexCap;    // else entryIndex+1. Power-of-two capacity.
   u32 indexWidth;  // bytes per slot: 1, 2, or 4
 } TableData;
 typedef struct BufferData {
-  Buf buf;
+  Value bytes;  // Bytes object, or nil
+  u32 len;
 } BufferData;
+// Bytecode and constant pool are stored inline, constants first so they stay
+// 8-aligned: both sizes are fixed at creation, so neither needs to be a
+// separate object. This is why the collector traces Code directly and why the
+// byte pointer MOVES whenever the Code object does -- see vm_execute.
 typedef struct CodeData {
-  u8* bytes;
-  Value* consts;
   u32 len;
   u32 constCount;
   u32 nfixed;
@@ -178,6 +203,12 @@ Value make_string_from_h(Heap* h, Value src, u32 byteOff, u32 len);
 Value make_array_h(Heap* h, u32 cap);
 Value make_table_h(Heap* h);
 Value make_buffer_h(Heap* h);
+Value make_slots_h(Heap* h, u32 cap);
+Value make_entries_h(Heap* h, u32 cap);
+Value make_bytes_h(Heap* h, u32 cap);
+void array_reserve_h(Heap* h, Value arr, u32 n);
+void buffer_append_h(Heap* h, Value buffer, const char* src, u32 n);
+Value make_string_from_buffer_h(Heap* h, Value buffer);
 
 Value make_pair(State* vm, Value car, Value cdr);
 Value make_string(State* vm, const char* bytes, u32 len);
@@ -195,7 +226,62 @@ static inline const char* string_bytes(Value v) { return string_data_bytes(as_st
 static inline ArrayData* as_array(Value v) { return (ArrayData*)obj_payload(v.obj); }
 static inline TableData* as_table(Value v) { return (TableData*)obj_payload(v.obj); }
 static inline BufferData* as_buffer(Value v) { return (BufferData*)obj_payload(v.obj); }
+
+// Backing-storage accessors. Each returns null for the nil (unallocated) case,
+// so an empty collection needs no special-casing at the call sites.
+static inline SlotsData* as_slots(Value v) {
+  return is_nil(v) ? nullptr : (SlotsData*)obj_payload(v.obj);
+}
+static inline EntriesData* as_entries(Value v) {
+  return is_nil(v) ? nullptr : (EntriesData*)obj_payload(v.obj);
+}
+static inline BytesData* as_bytes(Value v) {
+  return is_nil(v) ? nullptr : (BytesData*)obj_payload(v.obj);
+}
+static inline Value* slots_items(Value v) {
+  SlotsData* d = as_slots(v);
+  return d ? (Value*)(d + 1) : nullptr;
+}
+static inline TableEntry* entries_items(Value v) {
+  EntriesData* d = as_entries(v);
+  return d ? (TableEntry*)(d + 1) : nullptr;
+}
+static inline u8* bytes_items(Value v) {
+  BytesData* d = as_bytes(v);
+  return d ? (u8*)(d + 1) : nullptr;
+}
+static inline u32 slots_cap(Value v) {
+  SlotsData* d = as_slots(v);
+  return d ? d->cap : 0;
+}
+
+// Array element access goes through the storage object. `items` is deliberately
+// not cached on ArrayData: any allocation can move the storage, so call sites
+// re-derive rather than hold a pointer.
+static inline Value* array_items(Value arr) { return slots_items(as_array(arr)->slots); }
+static inline u32 array_cap(Value arr) { return slots_cap(as_array(arr)->slots); }
+static inline TableEntry* table_entries(Value t) { return entries_items(as_table(t)->entries); }
+static inline u8* table_index(Value t) { return bytes_items(as_table(t)->index); }
+
+// Allocate backing storage. Each may collect, so the owner must be rooted.
+Value make_slots(State* vm, u32 cap);
+Value make_entries(State* vm, u32 cap);
+Value make_bytes(State* vm, u32 cap);
+
+// Buffer contents. The data pointer is into the GC heap, so it dies at the next
+// allocation -- read it, use it, do not keep it.
+static inline char* buffer_data(Value b) { return (char*)bytes_items(as_buffer(b)->bytes); }
+static inline u32 buffer_len(Value b) { return as_buffer(b)->len; }
+// Appends `n` bytes. Allocates, so `buffer` must be rooted. `src` must NOT
+// point into the GC heap: growth can collect and would move it underneath us.
+void buffer_append(State* vm, Value buffer, const char* src, u32 n);
+// Copy a buffer's contents into a fresh string, rooting across the allocation.
+Value make_string_from_buffer(State* vm, Value buffer);
 static inline CodeData* as_code(Value v) { return (CodeData*)obj_payload(v.obj); }
+// Inline storage. Both pointers die at the next allocation, like any other
+// interior pointer into the GC heap.
+static inline Value* code_consts(CodeData* d) { return (Value*)(d + 1); }
+static inline u8* code_bytes(CodeData* d) { return (u8*)(code_consts(d) + d->constCount); }
 static inline FunctionData* as_function(Value v) { return (FunctionData*)obj_payload(v.obj); }
 static inline Value* function_upvals(FunctionData* fn) { return (Value*)(fn + 1); }
 static inline ParamData* as_param(Value v) { return (ParamData*)obj_payload(v.obj); }
@@ -215,15 +301,19 @@ Value foreign_check(State* vm, const char* who, Value value, u32 expectedType, v
 // Runs the registered finalizer once and marks the object dead.
 Value foreign_release(State* vm, const char* who, Value value, u32 expectedType);
 
-// Array item growth helper (items live in the C heap; realloc-based).
-void array_reserve(Value arr, u32 n);
+// Grow an array's backing storage. Allocates.
+void array_reserve(State* vm, Value arr, u32 n);
 
 // Table API — implemented in builtins/data.c.
-// table_get, table_put, array_get, array_push, and
-// array_reserve never allocate on the GC heap — all their storage growth is
-// C-heap alloc/realloc. Callers may hold raw Values across these calls.
-// If any of them ever needs a GC allocation, every such caller must be
-// re-audited (grep for "alloc-free" first).
+//
+// array_push, array_reserve and table_put ALLOCATE: storage lives on the GC
+// heap, so growth can collect and move everything, including the collection
+// being mutated and any storage pointer taken from it. Callers must keep the
+// collection in a rooted handle and re-derive interior pointers (ArrayData*,
+// TableEntry*, array_items(), table_entries()) after every such call. See the
+// rooting rules in AGENTS.md.
+//
+// table_get and array_get do not allocate.
 Value table_get(State* vm, Value table, Value key);           // nil on miss
 Value table_put(State* vm, Value table, Value key, Value v);  // nil value deletes; returns table
 Value array_get(Value arr, i64 idx);                          // nil out of range

@@ -2,9 +2,9 @@
 #include "ns.h"
 #include "state.h"
 
-Value var_value(Value var) { return as_array(var)->items[VAR_VALUE]; }
-void var_set(Value var, Value v) { as_array(var)->items[VAR_VALUE] = v; }
-bool var_private(Value var) { return is_truthy(as_array(var)->items[VAR_PRIVATE]); }
+Value var_value(Value var) { return array_items(var)[VAR_VALUE]; }
+void var_set(Value var, Value v) { array_items(var)[VAR_VALUE] = v; }
+bool var_private(Value var) { return is_truthy(array_items(var)[VAR_PRIVATE]); }
 
 Value ns_field(State* vm, Value nsRec, u32 kwId) { return table_get(vm, nsRec, keyword_v(kwId)); }
 
@@ -42,7 +42,7 @@ Value ns_get_or_create(State* vm, u32 nsName) {
       // Caching an ArrayData* across the table_put would strand it the moment
       // table storage lives on the GC heap and the put can collect.
       for (u32 i = 0; i < as_array(ref_get(vm, order))->len; i++) {
-        ref_set(vm, nameSym, as_array(ref_get(vm, order))->items[i]);
+        ref_set(vm, nameSym, array_items(ref_get(vm, order))[i]);
         ref_set(vm, var, table_get(vm, ref_get(vm, cvars), ref_get(vm, nameSym)));
         if (!is_nil(ref_get(vm, var)) && !var_private(ref_get(vm, var)))
           table_put(vm, ref_get(vm, refers), ref_get(vm, nameSym), ref_get(vm, var));
@@ -74,10 +74,10 @@ Value ns_define(State* vm, u32 name, Value v, bool isPrivate, Value docstring) {
   } else {
     // No allocation between these reads and writes, so the interior pointer is
     // safe for the length of the block.
-    ArrayData* a = as_array(ref_get(vm, var));
-    a->items[VAR_VALUE] = ref_get(vm, vS);
-    a->items[VAR_DOC] = ref_get(vm, dS);
-    a->items[VAR_PRIVATE] = bool_v(isPrivate);
+    Value* a = array_items(ref_get(vm, var));
+    a[VAR_VALUE] = ref_get(vm, vS);
+    a[VAR_DOC] = ref_get(vm, dS);
+    a[VAR_PRIVATE] = bool_v(isPrivate);
   }
   return ref_get(vm, vS);
 }

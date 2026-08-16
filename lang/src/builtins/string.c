@@ -342,8 +342,8 @@ static Value nat_buffer(State* vm, u32 base, u32 argc) {
   if (argc == 1) {
     Buf tmp = {0};
     print_display(vm, ARG(0), &tmp);
-    // as_buffer is re-derived after print_display, which allocates.
-    buf_append(&as_buffer(ref_get(vm, b))->buf, tmp.data ? tmp.data : "", tmp.len);
+    // tmp is C-heap, so it survives the growth allocation inside buffer_append.
+    buffer_append(vm, ref_get(vm, b), tmp.data ? tmp.data : "", tmp.len);
     buf_deinit(&tmp);
   }
   return ref_get(vm, b);
@@ -355,7 +355,7 @@ static Value nat_buffer_push(State* vm, u32 base, u32 argc) {
   for (u32 i = 1; i < argc; i++) {
     Buf tmp = {0};
     print_display(vm, ARG(i), &tmp);
-    buf_append(&as_buffer(ARG(0))->buf, tmp.data ? tmp.data : "", tmp.len);
+    buffer_append(vm, ARG(0), tmp.data ? tmp.data : "", tmp.len);
     buf_deinit(&tmp);
   }
   return ARG(0);
@@ -364,8 +364,7 @@ static Value nat_buffer_push(State* vm, u32 base, u32 argc) {
 static Value nat_buffer_to_string(State* vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "buffer->string", argc, 1, 1));
   OT_TRY(need_buffer(vm, "buffer->string", ARG(0)));
-  BufferData* b = as_buffer(ARG(0));
-  return make_string_buf(vm, &b->buf);
+  return make_string_from_buffer(vm, ARG(0));
 }
 
 void register_string(State* vm) {

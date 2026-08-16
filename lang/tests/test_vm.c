@@ -320,7 +320,7 @@ TEST(cached_global_cells_observe_later_redefinition) {
     Value second = vm_call(state, ref_get(state, fn), state->stack.len, 0);
     CHECK(second.tag == Tag_Int);
     CHECK(second.i == 2);
-    CHECK(as_code(ref_get(state, codeValue))->consts[0].tag == Tag_Array);
+    CHECK(code_consts(as_code(ref_get(state, codeValue)))[0].tag == Tag_Array);
   }
   state_destroy(state);
 }

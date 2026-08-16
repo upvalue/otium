@@ -39,8 +39,8 @@ Value make_compiled_function(State* vm, Value code, Value captures, Value nsName
   fn->nupvals = count;
   // Nothing allocates between here and the last write, so both interior
   // pointers stay valid for the copy.
-  ArrayData* source = as_array(ref_get(vm, capturesRoot));
-  for (u32 i = 0; i < count; i++) function_upvals(fn)[i] = source->items[i];
+  Value* source = array_items(ref_get(vm, capturesRoot));
+  for (u32 i = 0; i < count; i++) function_upvals(fn)[i] = source[i];
   return fnValue;
 }
 
@@ -90,9 +90,11 @@ static Value enter_frame(State* vm, Value fnValue, u32 callBase, u32 argc, bool 
 static void load_frame(State* vm, const u8** bytes, const u8** ip, const u8** end, u32* stackBase) {
   CallFrame* frame = &vm->frames.data[vm->frames.len - 1];
   CodeData* code = as_code(as_function(frame->fn)->code);
-  *bytes = code->bytes;
-  *ip = code->bytes + frame->ip;
-  *end = code->bytes + code->len;
+  // Bytecode is inline in the Code object, so these pointers are only valid
+  // until the next allocation. VM_RELOAD re-derives them.
+  *bytes = code_bytes(code);
+  *ip = code_bytes(code) + frame->ip;
+  *end = code_bytes(code) + code->len;
   *stackBase = frame->stackBase;
 }
 
@@ -100,7 +102,7 @@ static void load_frame(State* vm, const u8** bytes, const u8** ip, const u8** en
 // null if the value is not a well-formed box.
 static Value* box_cell(Value box) {
   if (box.tag != Tag_Array || as_array(box)->len != 1) return nullptr;
-  return &as_array(box)->items[0];
+  return &array_items(box)[0];
 }
 
 // Resolve a global-reference constant to its var cell, caching the resolution
@@ -114,11 +116,11 @@ static Value* box_cell(Value box) {
 // the GC heap, and the raiseErr=false path cannot signal). If that ever
 // changes, this write-back has to re-derive from the frame instead.
 static Value global_cell(State* vm, FunctionData* fn, u16 index) {
-  Value var = as_code(fn->code)->consts[index];
+  Value var = code_consts(as_code(fn->code))[index];
   if (var.tag == Tag_Symbol) {
     var = ns_resolve_var(vm, var);
     if (is_nil(var)) return unwind_v();
-    as_code(fn->code)->consts[index] = var;
+    code_consts(as_code(fn->code))[index] = var;
   }
   if (var.tag != Tag_Array || as_array(var)->len != VAR_SLOTS) return nil_v();
   return var;
@@ -146,9 +148,19 @@ Value vm_execute(State* vm, u32 floor) {
     vm->frames.data[vm->frames.len - 1].ip = (u32)(ip - bytes);                                    \
   } while (0)
 #define VM_LOAD_FRAME() load_frame(vm, &bytes, &ip, &end, &stackBase)
+// Bytecode lives inline in the Code object, so any allocation can move it and
+// invalidate the cached bytes/ip/end. Every opcode that can allocate ends with
+// this: save ip as a frame-relative offset, then re-derive the pointers.
+// OT_GC_STRESS collects on every allocation, so a missing VM_RELOAD fails the
+// suite rather than waiting for an unlucky collection in production.
+#define VM_RELOAD()                                                                                \
+  do {                                                                                             \
+    VM_SAVE_IP();                                                                                  \
+    VM_LOAD_FRAME();                                                                               \
+  } while (0)
 #define VM_FRAME() vm->frames.data[vm->frames.len - 1]
 #define VM_FN() as_function(VM_FRAME().fn)
-#define VM_CONSTS() as_code(VM_FN()->code)->consts
+#define VM_CONSTS() code_consts(as_code(VM_FN()->code))
 // Read this instruction's u16 operand and step past it.
 #define VM_U16() (ip += 2, code_read_u16(ip - 2))
 
@@ -295,6 +307,7 @@ Value vm_execute(State* vm, u32 floor) {
     array_push(vm, ref_get(vm, box), ref_get(vm, value));
     ref_set(vm, value, ref_get(vm, box));
     (void)vec_pop(&vm->stack);
+    VM_RELOAD();
     VM_DISPATCH();
   }
   VM_OP(GetUpval) {
@@ -319,7 +332,7 @@ Value vm_execute(State* vm, u32 floor) {
     Value descriptor = VM_CONSTS()[index];
     VM_NEED(descriptor.tag == Tag_Array && as_array(descriptor)->len != 0,
             "vm: bad closure descriptor");
-    Value nested = as_array(descriptor)->items[0];
+    Value nested = array_items(descriptor)[0];
     VM_NEED(nested.tag == Tag_Code && as_array(descriptor)->len - 1 == as_code(nested)->nupvals,
             "vm: bad closure descriptor");
     u32 captureCount = as_code(nested)->nupvals;
@@ -327,7 +340,7 @@ Value vm_execute(State* vm, u32 floor) {
     for (u32 i = 0; i < captureCount; i++) {
       // Re-derive through the frame: make_array above may have moved headers.
       FunctionData* parent = VM_FN();
-      Value capture = as_array(as_code(parent->code)->consts[index])->items[i + 1];
+      Value capture = array_items(code_consts(as_code(parent->code))[index])[i + 1];
       VM_NEED(capture.tag == Tag_Int, "vm: bad capture descriptor");
       Value box;
       if (capture.i >= 0) {
@@ -343,11 +356,12 @@ Value vm_execute(State* vm, u32 floor) {
       array_push(vm, ref_get(vm, captures), box);
     }
     FunctionData* parent = VM_FN();
-    nested = as_array(as_code(parent->code)->consts[index])->items[0];
+    nested = array_items(code_consts(as_code(parent->code))[index])[0];
     Value closure = make_compiled_function(vm, nested, ref_get(vm, captures), parent->nsName,
                                            as_code(nested)->name, false);
     VM_PROPAGATE(closure);
     ref_set(vm, captures, closure);
+    VM_RELOAD();
     VM_DISPATCH();
   }
   VM_OP(ToMacro) {
@@ -445,6 +459,7 @@ Value vm_execute(State* vm, u32 floor) {
                            vm->stack.data[vm->stack.len - 1]);
     vm->stack.len--;
     vm->stack.data[vm->stack.len - 1] = pair;
+    VM_RELOAD();
     VM_DISPATCH();
   }
   VM_OP(List) {
@@ -454,6 +469,7 @@ Value vm_execute(State* vm, u32 floor) {
     Value list = list_from_stack(vm, first, count);
     state_pop_to(vm, first);
     state_push(vm, list);
+    VM_RELOAD();
     VM_DISPATCH();
   }
   VM_OP(Append2) {
@@ -472,6 +488,7 @@ Value vm_execute(State* vm, u32 floor) {
         list_from_stack_onto(vm, elements, vm->stack.len - elements, vm->stack.data[left + 1]);
     state_pop_to(vm, left);
     state_push(vm, value);
+    VM_RELOAD();
     VM_DISPATCH();
   }
 
@@ -500,11 +517,11 @@ Value vm_execute(State* vm, u32 floor) {
     Value doc = nil_v();
     bool isPrivate = false;
     if (descriptor.tag == Tag_Array) {
-      ArrayData* data = as_array(descriptor);
-      VM_NEED(data->len == 3, "vm: bad define descriptor");
-      name = data->items[0];
-      isPrivate = is_truthy(data->items[1]);
-      doc = data->items[2];
+      VM_NEED(as_array(descriptor)->len == 3, "vm: bad define descriptor");
+      Value* data = array_items(descriptor);
+      name = data[0];
+      isPrivate = is_truthy(data[1]);
+      doc = data[2];
     }
     VM_NEED(name.tag == Tag_Symbol, "vm: define name is not a symbol");
     Value value = vm->stack.data[vm->stack.len - 1];

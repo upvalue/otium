@@ -38,27 +38,10 @@ void heap_init(Heap* h, State* vm, u32 initialBytes, u32 maxBytes) {
 }
 
 void heap_deinit(Heap* h) {
-  // Free C-heap storage owned by still-live finalizable objects.
+  // Only Foreign objects own anything the collector cannot reclaim itself.
   for (u32 i = 0; i < h->finalizable.len; i++) {
     Obj* o = h->finalizable.data[i];
-    switch (o->type) {
-      case ObjType_Array: ot_free(((ArrayData*)obj_payload(o))->items); break;
-      case ObjType_Table: {
-        TableData* td = (TableData*)obj_payload(o);
-        ot_free(td->entries);
-        ot_free(td->index);
-        break;
-      }
-      case ObjType_Buffer: buf_deinit(&((BufferData*)obj_payload(o))->buf); break;
-      case ObjType_Foreign: heap_finalize_foreign(h, o); break;
-      case ObjType_Code: {
-        CodeData* d = (CodeData*)obj_payload(o);
-        ot_free(d->bytes);
-        ot_free(d->consts);
-        break;
-      }
-      default: break;
-    }
+    if (o->type == ObjType_Foreign) heap_finalize_foreign(h, o);
   }
   ot_free(h->space);
   vec_deinit(&h->rootWalkers);
@@ -111,9 +94,7 @@ Obj* heap_alloc(Heap* h, ObjType t, u32 payloadBytes) {
   o->forward = nullptr;
   o->ident = 0;
   memset(obj_payload(o), 0, payloadBytes);
-  if (t == ObjType_Array || t == ObjType_Table || t == ObjType_Buffer || t == ObjType_Code ||
-      t == ObjType_Foreign)
-    vec_push(&h->finalizable, o);
+  if (t == ObjType_Foreign) vec_push(&h->finalizable, o);
   return o;
 }
 
@@ -160,17 +141,29 @@ static void heap_collect_into(Heap* h, u32 newSize) {
         visit_slot(h, &d->cdr);
         break;
       }
-      case ObjType_Array: {
-        ArrayData* d = (ArrayData*)p;
-        for (u32 i = 0; i < d->len; i++) visit_slot(h, &d->items[i]);
-        break;
-      }
+      case ObjType_Array: visit_slot(h, &((ArrayData*)p)->slots); break;
       case ObjType_Table: {
         TableData* d = (TableData*)p;
-        for (u32 i = 0; i < d->entriesLen; i++) {
-          if (d->entries[i].key.tag == Tag_Unwind) continue;  // tombstone
-          visit_slot(h, &d->entries[i].key);
-          visit_slot(h, &d->entries[i].val);
+        visit_slot(h, &d->entries);
+        visit_slot(h, &d->index);
+        break;
+      }
+      case ObjType_Buffer: visit_slot(h, &((BufferData*)p)->bytes); break;
+      // Storage objects trace their whole capacity. heap_alloc zeroes payloads
+      // and Tag_Nil is 0, so slots past the owner's length are valid nils.
+      case ObjType_Slots: {
+        SlotsData* d = (SlotsData*)p;
+        Value* items = (Value*)(d + 1);
+        for (u32 i = 0; i < d->cap; i++) visit_slot(h, &items[i]);
+        break;
+      }
+      case ObjType_Entries: {
+        EntriesData* d = (EntriesData*)p;
+        TableEntry* items = (TableEntry*)(d + 1);
+        for (u32 i = 0; i < d->cap; i++) {
+          if (items[i].key.tag == Tag_Unwind) continue;  // tombstone
+          visit_slot(h, &items[i].key);
+          visit_slot(h, &items[i].val);
         }
         break;
       }
@@ -185,46 +178,26 @@ static void heap_collect_into(Heap* h, u32 newSize) {
       }
       case ObjType_Code: {
         CodeData* d = (CodeData*)p;
-        for (u32 i = 0; i < d->constCount; i++) visit_slot(h, &d->consts[i]);
+        Value* consts = code_consts(d);
+        for (u32 i = 0; i < d->constCount; i++) visit_slot(h, &consts[i]);
         break;
       }
       case ObjType_Param: visit_slot(h, &((ParamData*)p)->defaultVal); break;
       case ObjType_Restart: visit_slot(h, &((RestartData*)p)->description); break;
       case ObjType_String:
-      case ObjType_Buffer:
+      case ObjType_Bytes:
       case ObjType_Foreign: break;
     }
     scan += obj_total_size_of(o);
   }
 
-  // 3. Sweep finalizable list: free C-heap storage of dead objects, update
-  //    survivors to their new addresses.
+  // 3. Sweep the finalizable list: run finalizers for dead Foreign objects and
+  //    forward the survivors. Everything else the collector reclaims itself.
   u32 keep = 0;
   for (u32 i = 0; i < h->finalizable.len; i++) {
     Obj* o = h->finalizable.data[i];
-    if (o->forward) {
-      h->finalizable.data[keep++] = o->forward;
-    } else {
-      void* p = obj_payload(o);
-      switch (o->type) {
-        case ObjType_Array: ot_free(((ArrayData*)p)->items); break;
-        case ObjType_Table: {
-          TableData* td = (TableData*)p;
-          ot_free(td->entries);
-          ot_free(td->index);
-          break;
-        }
-        case ObjType_Buffer: buf_deinit(&((BufferData*)p)->buf); break;
-        case ObjType_Foreign: heap_finalize_foreign(h, o); break;
-        case ObjType_Code: {
-          CodeData* d = (CodeData*)p;
-          ot_free(d->bytes);
-          ot_free(d->consts);
-          break;
-        }
-        default: break;
-      }
-    }
+    if (o->forward) h->finalizable.data[keep++] = o->forward;
+    else if (o->type == ObjType_Foreign) heap_finalize_foreign(h, o);
   }
   h->finalizable.len = keep;
 
@@ -331,13 +304,48 @@ Value make_string_from_h(Heap* h, Value src, u32 byteOff, u32 len) {
   return obj_v(Tag_String, o);
 }
 
+// --- backing storage --------------------------------------------------------
+//
+// Sizes are fixed at creation; growth means allocating a bigger storage object
+// and copying. Each of these can collect, so the owning collection must already
+// be rooted when they are called.
+
+static u32 storage_payload(u32 header, u32 cap, u32 elem, const char* what) {
+  if (cap > (UINT32_MAX - header) / elem) ot_fatal(what);
+  return header + cap * elem;
+}
+
+Value make_slots_h(Heap* h, u32 cap) {
+  u32 size = storage_payload((u32)sizeof(SlotsData), cap, (u32)sizeof(Value), "array: size overflow");
+  Obj* o = heap_alloc(h, ObjType_Slots, size);
+  ((SlotsData*)obj_payload(o))->cap = cap;
+  return obj_v(Tag_Array, o);  // tag is unused for storage; never escapes
+}
+
+Value make_entries_h(Heap* h, u32 cap) {
+  u32 size =
+      storage_payload((u32)sizeof(EntriesData), cap, (u32)sizeof(TableEntry), "table: size overflow");
+  Obj* o = heap_alloc(h, ObjType_Entries, size);
+  ((EntriesData*)obj_payload(o))->cap = cap;
+  return obj_v(Tag_Array, o);
+}
+
+Value make_bytes_h(Heap* h, u32 cap) {
+  u32 size = storage_payload((u32)sizeof(BytesData), cap, 1u, "buffer: size overflow");
+  Obj* o = heap_alloc(h, ObjType_Bytes, size);
+  ((BytesData*)obj_payload(o))->cap = cap;
+  return obj_v(Tag_Array, o);
+}
+
 Value make_array_h(Heap* h, u32 cap) {
+  // The storage is allocated first so the array never exists in a state where
+  // a collection could see a half-built object.
+  Value slots = cap ? make_slots_h(h, cap) : nil_v();
+  vec_push(&h->tempRoots, slots);
   Obj* o = heap_alloc(h, ObjType_Array, sizeof(ArrayData));
   ArrayData* d = (ArrayData*)obj_payload(o);
   d->len = 0;
-  d->cap = cap;
-  d->items = cap ? (Value*)ot_alloc((size_t)cap * sizeof(Value)) : nullptr;
-  if (cap && !d->items) ot_fatal("array: out of memory");
+  d->slots = vec_pop(&h->tempRoots);
   return obj_v(Tag_Array, o);
 }
 
@@ -346,10 +354,10 @@ Value make_table_h(Heap* h) {
   TableData* d = (TableData*)obj_payload(o);
   d->count = 0;
   d->tombstones = 0;
-  d->entries = nullptr;
+  d->entries = nil_v();
   d->entriesLen = 0;
   d->entriesCap = 0;
-  d->index = nullptr;
+  d->index = nil_v();
   d->indexCap = 0;
   d->indexWidth = 0;
   return obj_v(Tag_Table, o);
@@ -358,18 +366,60 @@ Value make_table_h(Heap* h) {
 Value make_buffer_h(Heap* h) {
   Obj* o = heap_alloc(h, ObjType_Buffer, sizeof(BufferData));
   BufferData* d = (BufferData*)obj_payload(o);
-  memset(&d->buf, 0, sizeof(Buf));  // zero-init; heap sweeps it via finalizable
+  d->bytes = nil_v();
+  d->len = 0;
   return obj_v(Tag_Buffer, o);
 }
 
-void array_reserve(Value arr, u32 n) {
+// Grow an array's storage to at least `n`. Allocates, so `arr` must be rooted;
+// re-derive any ArrayData* across this call.
+void array_reserve_h(Heap* h, Value arr, u32 n) {
+  if (n <= array_cap(arr)) return;
+  u32 ncap = grow_capacity(array_cap(arr), n, "array: capacity overflow");
+  vec_push(&h->tempRoots, arr);
+  Value grown = make_slots_h(h, ncap);
+  arr = vec_pop(&h->tempRoots);
+  // Both pointers are derived after the last allocation.
   ArrayData* d = as_array(arr);
-  if (n <= d->cap) return;
-  u32 ncap = grow_capacity(d->cap, n, "array: capacity overflow");
-  Value* ni = (Value*)ot_realloc(d->items, (size_t)ncap * sizeof(Value));
-  if (!ni) ot_fatal("array: out of memory");
-  d->items = ni;
-  d->cap = ncap;
+  Value* dst = (Value*)((SlotsData*)obj_payload(grown.obj) + 1);
+  Value* src = slots_items(d->slots);
+  for (u32 i = 0; i < d->len; i++) dst[i] = src[i];
+  d->slots = grown;
+}
+
+void buffer_append_h(Heap* h, Value buffer, const char* src, u32 n) {
+  if (!n) return;
+  u32 len = as_buffer(buffer)->len;
+  if (n > UINT32_MAX - len) ot_fatal("buffer: capacity overflow");
+  u32 need = len + n;
+  u32 cap = as_bytes(as_buffer(buffer)->bytes) ? as_bytes(as_buffer(buffer)->bytes)->cap : 0;
+  if (need > cap) {
+    u32 ncap = grow_capacity(cap, need, "buffer: capacity overflow");
+    vec_push(&h->tempRoots, buffer);
+    Value grown = make_bytes_h(h, ncap);
+    buffer = vec_pop(&h->tempRoots);
+    BufferData* d = as_buffer(buffer);
+    if (d->len) memcpy(bytes_items(grown), bytes_items(d->bytes), d->len);
+    d->bytes = grown;
+  }
+  // Derived after the last allocation.
+  memcpy(buffer_data(buffer) + as_buffer(buffer)->len, src, n);
+  as_buffer(buffer)->len += n;
+}
+
+Value make_string_from_buffer_h(Heap* h, Value buffer) {
+  u32 len = as_buffer(buffer)->len;
+  // The alloc moves the buffer, so re-derive the source pointer after it.
+  vec_push(&h->tempRoots, buffer);
+  Obj* o = heap_alloc(h, ObjType_String, string_payload_size(len));
+  buffer = vec_pop(&h->tempRoots);
+  StringData* d = (StringData*)obj_payload(o);
+  d->len = len;
+  char* dst = (char*)obj_payload(o) + sizeof(StringData);
+  if (len) memcpy(dst, buffer_data(buffer), len);
+  dst[len] = 0;
+  d->nchars = utf8_count(dst, len);
+  return obj_v(Tag_String, o);
 }
 
 // Access State's leading Heap without introducing a state.c link dependency in
@@ -385,5 +435,15 @@ Value make_string_from(State* vm, Value src, u32 off, u32 n) {
   return make_string_from_h(heap_of(vm), src, off, n);
 }
 Value make_array(State* vm, u32 cap) { return make_array_h(heap_of(vm), cap); }
+Value make_slots(State* vm, u32 cap) { return make_slots_h(heap_of(vm), cap); }
+Value make_entries(State* vm, u32 cap) { return make_entries_h(heap_of(vm), cap); }
+Value make_bytes(State* vm, u32 cap) { return make_bytes_h(heap_of(vm), cap); }
 Value make_table(State* vm) { return make_table_h(heap_of(vm)); }
 Value make_buffer(State* vm) { return make_buffer_h(heap_of(vm)); }
+void array_reserve(State* vm, Value arr, u32 n) { array_reserve_h(heap_of(vm), arr, n); }
+void buffer_append(State* vm, Value b, const char* src, u32 n) {
+  buffer_append_h(heap_of(vm), b, src, n);
+}
+Value make_string_from_buffer(State* vm, Value b) {
+  return make_string_from_buffer_h(heap_of(vm), b);
+}

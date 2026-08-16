@@ -473,14 +473,16 @@ static void patch_jump(Compiler* c, u32 operand, u32 target) {
 // The pool grows by array_push, which allocates, so the candidate must already
 // be rooted: taking a Ref makes passing a transient like car_(form) impossible.
 static u32 add_constant(Compiler* c, Ref value) {
-  ArrayData* constants = as_array(ref_get(c->vm, c->constants));
-  for (u32 i = 0; i < constants->len; i++)
-    if (val_eq(constants->items[i], ref_get(c->vm, value))) return i;
-  if (constants->len >= UINT16_MAX) {
+  Value pool = ref_get(c->vm, c->constants);
+  for (u32 i = 0; i < as_array(pool)->len; i++)
+    if (val_eq(array_items(pool)[i], ref_get(c->vm, value))) return i;
+  if (as_array(pool)->len >= UINT16_MAX) {
     compiler_error(c, "too many constants");
     return 0;
   }
-  u32 index = constants->len;
+  // Read the length again through the rooted handle: `pool` is stale the
+  // moment compiler_error above allocates a condition.
+  u32 index = as_array(ref_get(c->vm, c->constants))->len;
   array_push(c->vm, ref_get(c->vm, c->constants), ref_get(c->vm, value));
   return index;
 }

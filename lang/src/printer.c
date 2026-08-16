@@ -119,11 +119,11 @@ static void print_val(State* vm, Value v, Buf* out, bool display) {
       return;
     }
     case Tag_Array: {
-      ArrayData* a = as_array(v);
       vec_push(out, '[');
-      for (u32 i = 0; i < a->len; i++) {
+      for (u32 i = 0; i < as_array(v)->len; i++) {
         if (i) vec_push(out, ' ');
-        print_val(vm, a->items[i], out, display);
+        // Re-read: print_val can allocate and move the backing store.
+        print_val(vm, array_items(v)[i], out, display);
       }
       vec_push(out, ']');
       return;
@@ -144,12 +144,11 @@ static void print_val(State* vm, Value v, Buf* out, bool display) {
       return;
     }
     case Tag_Buffer: {
-      BufferData* b = as_buffer(v);
       if (display) {
-        buf_append(out, b->buf.data, b->buf.len);
+        buf_append(out, buffer_data(v), buffer_len(v));
       } else {
         buf_append_cstr(out, "#<buffer \"");
-        append_escaped(out, b->buf.data, b->buf.len);
+        append_escaped(out, buffer_data(v), buffer_len(v));
         buf_append_cstr(out, "\">");
       }
       return;

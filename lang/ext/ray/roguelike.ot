@@ -4,7 +4,7 @@
 ; them, gold is picked up by stepping on it, stairs deepen the depth counter.
 ;
 ; Unattended runs for agents:
-;   RAY_FRAMES=30 RAY_SCREENSHOT=shot.png RAY_INPUT=l,l,j otium ext/ray/roguelike.scm
+;   RAY_FRAMES=30 RAY_SCREENSHOT=shot.png RAY_INPUT=l,l,j otium ext/ray/roguelike.ot
 (require 'ray)
 
 (define columns 60)
@@ -23,7 +23,7 @@
 (define window-height (* (+ map-rows status-rows) screen-cell))
 (define fov-radius 13)
 
-; Terrain codes index the per-terrain glyph and color tables below.
+; Terrain codes index the per-terrain glyph and 0xRRGGBB color tables.
 (define t-floor 0)
 (define t-wall 1)
 (define t-water 2)
@@ -33,116 +33,88 @@
 (define t-gold 6)
 
 (define glyphs (array 46 35 126 34 43 62 36))
-(define bg-red (array 34 118 16 26 52 40 34))
-(define bg-green (array 36 96 42 42 38 44 36))
-(define bg-blue (array 46 60 84 30 24 56 46))
-(define fg-red (array 132 62 92 104 236 250 255))
-(define fg-green (array 130 48 158 178 172 250 216))
-(define fg-blue (array 144 30 228 74 70 240 74))
+(define bg-colors (array 0x22242e 0x76603c 0x102a54 0x1a2a1e 0x342618 0x282c38 0x22242e))
+(define fg-colors (array 0x848290 0x3e301e 0x5c9ee4 0x68b24a 0xecac46 0xfafaf0 0xffd84a))
 
+(define (chan-r c) (quotient c 65536))
+(define (chan-g c) (modulo (quotient c 256) 256))
+(define (chan-b c) (modulo c 256))
 (define (clamp255 v) (exact (floor (min 255.0 (max 0.0 v)))))
 
-; Remembered-but-unseen tiles render in fixed cold, dim colors: precompute one
-; packed pair per terrain so the memory path does no per-frame math.
+; Torchlight: scale a packed color by a light factor, skewed slightly warm.
+(define (shade c k)
+  (ray/rgb (clamp255 (* (chan-r c) k 1.08))
+           (clamp255 (* (chan-g c) k))
+           (clamp255 (* (chan-b c) k 0.92))))
+
+; Memory tiles: dim per-channel scale plus a cold blue bias.
+(define (cold c sr sg sb ar ag ab)
+  (ray/rgb (clamp255 (+ (* (chan-r c) sr) ar))
+           (clamp255 (+ (* (chan-g c) sg) ag))
+           (clamp255 (+ (* (chan-b c) sb) ab))))
+
+; Precompute one packed pair per terrain so remembered tiles cost no math.
 (define mem-bg (array))
 (define mem-fg (array))
-(define mem-i 0)
-(while (< mem-i 7)
-  (push! mem-bg (ray/rgb (clamp255 (+ (* (get bg-red mem-i) 0.10) 6.0))
-                         (clamp255 (+ (* (get bg-green mem-i) 0.11) 7.0))
-                         (clamp255 (+ (* (get bg-blue mem-i) 0.16) 13.0))))
-  (push! mem-fg (ray/rgb (clamp255 (+ (* (get fg-red mem-i) 0.16) 14.0))
-                         (clamp255 (+ (* (get fg-green mem-i) 0.18) 16.0))
-                         (clamp255 (+ (* (get fg-blue mem-i) 0.26) 30.0))))
-  (set! mem-i (+ mem-i 1)))
+(dotimes (t 7)
+  (push! mem-bg (cold (get bg-colors t) 0.10 0.11 0.16 6 7 13))
+  (push! mem-fg (cold (get fg-colors t) 0.16 0.18 0.26 14 16 30)))
 
 ; --- map ------------------------------------------------------------------
 
 (define terrain (array))
 (define visible (array))
 (define seen (array))
-(define fill-i 0)
-(while (< fill-i (* columns map-rows))
+(dotimes (i (* columns map-rows))
   (push! terrain t-wall)
   (push! visible #f)
-  (push! seen #f)
-  (set! fill-i (+ fill-i 1)))
+  (push! seen #f))
 
 (define (idx x y) (+ (* y columns) x))
 (define (terrain-at x y) (get terrain (idx x y)))
 (define (set-terrain! x y t) (put! terrain (idx x y) t))
 
-(define (carve-rect! x0 y0 x1 y1 t)
-  (let ((y y0))
-    (while (<= y y1)
-      (let ((x x0))
-        (while (<= x x1)
-          (set-terrain! x y t)
-          (set! x (+ x 1))))
-      (set! y (+ y 1)))))
+(define (for-rect x0 y0 x1 y1 f)
+  (dotimes (row (+ (- y1 y0) 1))
+    (dotimes (col (+ (- x1 x0) 1))
+      (f (+ x0 col) (+ y0 row)))))
 
 ; Deterministic per-tile hash in [0, 96] for color jitter and grass placement.
 (define (tile-hash x y) (modulo (+ (* x 92821) (* y 68917)) 97))
 
-; Great hall with pillar rows.
-(carve-rect! 3 3 20 12 t-floor)
-(set-terrain! 7 6 t-wall)
-(set-terrain! 11 6 t-wall)
-(set-terrain! 15 6 t-wall)
-(set-terrain! 7 9 t-wall)
-(set-terrain! 11 9 t-wall)
-(set-terrain! 15 9 t-wall)
-(set-terrain! 17 10 t-gold)
+; Rooms and corridors carved as floor, x0 y0 x1 y1 per row: great hall, lake
+; cavern, east vault, garden, south chamber, stairs room, then six corridors.
+(define rooms
+  (array 3 3 20 12    25 2 44 13    48 3 57 10
+         4 16 17 27   22 17 37 26   42 16 56 27
+         21 7 24 7    45 6 47 6     10 13 10 15
+         30 14 30 16  38 21 41 21   18 22 21 22))
+(dotimes (r 12)
+  (let ((o (* r 4)))
+    (for-rect (get rooms o) (get rooms (+ o 1)) (get rooms (+ o 2)) (get rooms (+ o 3))
+              (lambda (x y) (set-terrain! x y t-floor)))))
 
-; Lake cavern: an elliptical pool inside a broad chamber.
-(carve-rect! 25 2 44 13 t-floor)
-(let ((y 2))
-  (while (<= y 13)
-    (let ((x 25))
-      (while (<= x 44)
-        (let ((nx (/ (- x 34.5) 7.0)) (ny (/ (- y 7.5) 4.0)))
-          (if (<= (+ (* nx nx) (* ny ny)) 1.0)
-              (set-terrain! x y t-water)
-              nil))
-        (set! x (+ x 1))))
-    (set! y (+ y 1))))
+; Lake cavern pool and the overgrown garden.
+(for-rect 25 2 44 13
+          (lambda (x y)
+            (let ((nx (/ (- x 34.5) 7.0)) (ny (/ (- y 7.5) 4.0)))
+              (when (<= (+ (* nx nx) (* ny ny)) 1.0)
+                (set-terrain! x y t-water)))))
+(for-rect 4 16 17 27
+          (lambda (x y)
+            (when (< (tile-hash x y) 55) (set-terrain! x y t-grass))))
 
-; East vault.
-(carve-rect! 48 3 57 10 t-floor)
-(set-terrain! 53 6 t-gold)
-
-; Overgrown garden.
-(carve-rect! 4 16 17 27 t-floor)
-(let ((y 16))
-  (while (<= y 27)
-    (let ((x 4))
-      (while (<= x 17)
-        (if (< (tile-hash x y) 55)
-            (set-terrain! x y t-grass)
-            nil)
-        (set! x (+ x 1))))
-    (set! y (+ y 1))))
-(set-terrain! 15 25 t-gold)
-
-; South chamber and the stairs room.
-(carve-rect! 22 17 37 26 t-floor)
-(set-terrain! 30 21 t-gold)
-(carve-rect! 42 16 56 27 t-floor)
-(set-terrain! 52 24 t-stairs)
-
-; Corridors and their doors.
-(carve-rect! 21 7 24 7 t-floor)
-(set-terrain! 21 7 t-door)
-(carve-rect! 45 6 47 6 t-floor)
-(set-terrain! 47 6 t-door)
-(carve-rect! 10 13 10 15 t-floor)
-(set-terrain! 10 15 t-door)
-(carve-rect! 30 14 30 16 t-floor)
-(set-terrain! 30 16 t-door)
-(carve-rect! 38 21 41 21 t-floor)
-(set-terrain! 41 21 t-door)
-(carve-rect! 18 22 21 22 t-floor)
-(set-terrain! 18 22 t-door)
+; Point features, x y terrain per row: hall pillars, gold, stairs, doors.
+(define spots
+  (array 7 6 t-wall   11 6 t-wall   15 6 t-wall
+         7 9 t-wall   11 9 t-wall   15 9 t-wall
+         17 10 t-gold 53 6 t-gold   15 25 t-gold  30 21 t-gold
+         52 24 t-stairs
+         21 7 t-door  47 6 t-door   10 15 t-door
+         30 16 t-door 41 21 t-door  18 22 t-door))
+(dotimes (s 17)
+  (let ((o (* s 3)))
+    (set-terrain! (get spots o) (get spots (+ o 1)) (get spots (+ o 2)))))
 
 ; --- field of view --------------------------------------------------------
 
@@ -163,31 +135,23 @@
                 (i 1)
                 (clear #t))
             (while (and clear (< i steps))
-              (if (opaque? (exact (round (+ player-x (* sx i))))
-                           (exact (round (+ player-y (* sy i)))))
-                  (set! clear #f)
-                  nil)
+              (when (opaque? (exact (round (+ player-x (* sx i))))
+                             (exact (round (+ player-y (* sy i)))))
+                (set! clear #f))
               (set! i (+ i 1)))
             clear)))))
 
 (define (recompute-fov!)
-  (let ((i 0))
-    (while (< i (* columns map-rows))
-      (put! visible i #f)
-      (set! i (+ i 1))))
-  (let ((y (max 0 (- player-y fov-radius))))
-    (while (<= y (min (- map-rows 1) (+ player-y fov-radius)))
-      (let ((x (max 0 (- player-x fov-radius))))
-        (while (<= x (min (- columns 1) (+ player-x fov-radius)))
-          (let ((dx (- x player-x)) (dy (- y player-y)))
-            (if (and (<= (+ (* dx dx) (* dy dy)) (* fov-radius fov-radius))
-                     (los-clear? x y))
-                (begin
+  (dotimes (i (* columns map-rows)) (put! visible i #f))
+  (for-rect (max 0 (- player-x fov-radius)) (max 0 (- player-y fov-radius))
+            (min (- columns 1) (+ player-x fov-radius))
+            (min (- map-rows 1) (+ player-y fov-radius))
+            (lambda (x y)
+              (let ((dx (- x player-x)) (dy (- y player-y)))
+                (when (and (<= (+ (* dx dx) (* dy dy)) (* fov-radius fov-radius))
+                           (los-clear? x y))
                   (put! visible (idx x y) #t)
-                  (put! seen (idx x y) #t))
-                nil))
-          (set! x (+ x 1))))
-      (set! y (+ y 1)))))
+                  (put! seen (idx x y) #t))))))
 
 ; --- window and font ------------------------------------------------------
 
@@ -198,19 +162,19 @@
 
 (define font-path (ray/env "RAY_FONT"))
 (define (try-font path)
-  (if (and (nil? font-path) (ray/file-exists? path))
-      (set! font-path path)
-      nil))
+  (when (and (nil? font-path) (ray/file-exists? path))
+    (set! font-path path)))
 ; Raylib reads plain .ttf/.otf files only, so skip .ttc collections here.
-(try-font "/System/Library/Fonts/Monaco.ttf")
-(try-font "/System/Library/Fonts/Supplemental/Andale Mono.ttf")
-(try-font "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf")
+(for-each try-font
+          (list "/System/Library/Fonts/Monaco.ttf"
+                "/System/Library/Fonts/Supplemental/Andale Mono.ttf"
+                "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"))
 ; The atlas renders at exactly the render cell size, so map glyphs never
 ; scale. Bilinear filtering is identity for those integer-aligned 1:1 draws
 ; and only smooths the slightly-downscaled status text and window resizes.
 (define font
   (if (nil? font-path) (ray/default-font) (ray/load-font-ex font-path cell)))
-(if (nil? font-path) nil (ray/set-font-filter! font ray/filter-bilinear))
+(unless (nil? font-path) (ray/set-font-filter! font ray/filter-bilinear))
 
 ; Center glyphs in their cells from the measured advance instead of a guessed
 ; pixel nudge; every glyph in a monospace face shares one advance.
@@ -228,51 +192,45 @@
 (define running #t)
 (define next-x 0)
 (define next-y 0)
-(define moved #f)
 (define now 0.0)
 (define flicker 1.0)
 
-(define (want-move dx dy)
-  (set! next-x (+ player-x dx))
-  (set! next-y (+ player-y dy)))
+; Movement rows: harness token, letter key, arrow key (0 = none; raylib
+; treats key 0 as never pressed), then the step. Covers hjkl, arrows, yubn.
+(define moves
+  (array "h" ray/key-h ray/key-left -1 0
+         "l" ray/key-l ray/key-right 1 0
+         "k" ray/key-k ray/key-up 0 -1
+         "j" ray/key-j ray/key-down 0 1
+         "y" ray/key-y 0 -1 -1
+         "u" ray/key-u 0 1 -1
+         "b" ray/key-b 0 -1 1
+         "n" ray/key-n 0 1 1))
 
-(define (apply-input token)
-  (if (or (equal? token "h") (ray/key-pressed? ray/key-left)) (want-move -1 0) nil)
-  (if (or (equal? token "l") (ray/key-pressed? ray/key-right)) (want-move 1 0) nil)
-  (if (or (equal? token "k") (ray/key-pressed? ray/key-up)) (want-move 0 -1) nil)
-  (if (or (equal? token "j") (ray/key-pressed? ray/key-down)) (want-move 0 1) nil)
-  (if (equal? token "y") (want-move -1 -1) nil)
-  (if (equal? token "u") (want-move 1 -1) nil)
-  (if (equal? token "b") (want-move -1 1) nil)
-  (if (equal? token "n") (want-move 1 1) nil))
-
-(define (key-token)
-  ; Map live key presses onto the same tokens the harness feeds in.
-  (if (ray/key-pressed? ray/key-h) "h"
-      (if (ray/key-pressed? ray/key-l) "l"
-          (if (ray/key-pressed? ray/key-k) "k"
-              (if (ray/key-pressed? ray/key-j) "j"
-                  (if (ray/key-pressed? ray/key-y) "y"
-                      (if (ray/key-pressed? ray/key-u) "u"
-                          (if (ray/key-pressed? ray/key-b) "b"
-                              (if (ray/key-pressed? ray/key-n) "n" nil)))))))))
+(define (read-input! token)
+  (dotimes (m 8)
+    (let ((o (* m 5)))
+      (when (or (equal? token (get moves o))
+                (ray/key-pressed? (get moves (+ o 1)))
+                (ray/key-pressed? (get moves (+ o 2))))
+        (set! next-x (+ player-x (get moves (+ o 3))))
+        (set! next-y (+ player-y (get moves (+ o 4))))))))
 
 (define (step-onto! x y)
   (let ((t (terrain-at x y)))
-    (if (= t t-door) (set-terrain! x y t-floor) nil)
-    (if (= t t-gold)
-        (begin (set! gold (+ gold 1)) (set-terrain! x y t-floor))
-        nil)
-    (if (= t t-stairs) (set! depth (+ depth 1)) nil)
+    (when (= t t-door) (set-terrain! x y t-floor))
+    (when (= t t-gold)
+      (set! gold (+ gold 1))
+      (set-terrain! x y t-floor))
+    (when (= t t-stairs) (set! depth (+ depth 1)))
     (set! player-x x)
     (set! player-y y)
     (recompute-fov!)))
 
 (define (draw-tile x y)
-  (let ((i (idx x y)))
+  (let ((i (idx x y)) (t (terrain-at x y)))
     (if (get visible i)
-        (let ((t (terrain-at x y))
-              (dx (- x player-x))
+        (let ((dx (- x player-x))
               (dy (- y player-y))
               (jit (/ (tile-hash x y) 97.0)))
           (let ((dist (sqrt (+ (* dx dx) (* dy dy) 0.0)))
@@ -282,78 +240,60 @@
                      (if (= t t-gold)
                          (+ 0.85 (* 0.15 (sin (+ (* now 6.0) x))))
                          1.0))))
-            ; Warm torchlight: falls off with distance, flickers slightly, and
-            ; per-tile jitter keeps large surfaces from reading as flat fills.
+            ; Torchlight falls off with distance and flickers; per-tile jitter
+            ; keeps large surfaces from reading as flat fills.
             (let ((light (* (+ 0.42 (* 0.62 (- 1.0 (/ dist (+ fov-radius 1.5)))))
                             flicker
                             (+ 0.90 (* 0.20 jit))
                             shimmer)))
               (ray/draw-rectangle (* x cell) (* y cell) cell cell
-                                  (ray/rgb (clamp255 (* (get bg-red t) light 1.08))
-                                           (clamp255 (* (get bg-green t) light))
-                                           (clamp255 (* (get bg-blue t) light 0.92))))
+                                  (shade (get bg-colors t) light))
               (ray/draw-codepoint font (get glyphs t)
                                   (+ (* x cell) glyph-dx) (+ (* y cell) glyph-dy) cell
-                                  (ray/rgb (clamp255 (* (get fg-red t) light 1.08))
-                                           (clamp255 (* (get fg-green t) light))
-                                           (clamp255 (* (get fg-blue t) light 0.92)))))))
-        (if (get seen i)
-            (let ((t (terrain-at x y)))
-              (ray/draw-rectangle (* x cell) (* y cell) cell cell (get mem-bg t))
-              (ray/draw-codepoint font (get glyphs t)
-                                  (+ (* x cell) glyph-dx) (+ (* y cell) glyph-dy) cell
-                                  (get mem-fg t)))
-            nil))))
+                                  (shade (get fg-colors t) light)))))
+        (when (get seen i)
+          (ray/draw-rectangle (* x cell) (* y cell) cell cell (get mem-bg t))
+          (ray/draw-codepoint font (get glyphs t)
+                              (+ (* x cell) glyph-dx) (+ (* y cell) glyph-dy) cell
+                              (get mem-fg t))))))
 
 (define (draw-status)
   (let ((top (* map-rows cell)))
-    (ray/draw-rectangle 0 top world-width (* status-rows cell) (ray/rgb 13 14 19))
-    (ray/draw-line 0 top world-width top 2 (ray/rgb 52 50 62))
-    (ray/draw-font font "@: Rogue" 20 (+ top 10) 30 2 (ray/rgb 232 226 200))
-    (ray/draw-font font (string-append "Depth " (number->string depth))
-                   240 (+ top 10) 30 2 (ray/rgb 150 150 170))
-    (ray/draw-font font (string-append "$ " (number->string gold))
-                   440 (+ top 10) 30 2 (ray/rgb 250 208 66))
-    (ray/draw-font font "HP" 620 (+ top 10) 30 2 (ray/rgb 150 150 170))
-    (let ((seg 0))
-      (while (< seg 10)
+    (let ((label (lambda (x text color)
+                   (ray/draw-font font text x (+ top 10) 30 2 color))))
+      (ray/draw-rectangle 0 top world-width (* status-rows cell) (ray/rgb 13 14 19))
+      (ray/draw-line 0 top world-width top 2 (ray/rgb 52 50 62))
+      (label 20 "@: Rogue" (ray/rgb 232 226 200))
+      (label 240 (string-append "Depth " (number->string depth)) (ray/rgb 150 150 170))
+      (label 440 (string-append "$ " (number->string gold)) (ray/rgb 250 208 66))
+      (label 620 "HP" (ray/rgb 150 150 170))
+      (dotimes (seg 10)
         (ray/draw-rectangle (+ 690 (* seg 26)) (+ top 14) 22 18
-                            (if (< seg 8) (ray/rgb 178 52 44) (ray/rgb 58 22 20)))
-        (set! seg (+ seg 1))))
-    (ray/draw-font font "move: hjkl / arrows / yubn    F11: fullscreen"
-                   20 (+ top 40) 26 2 (ray/rgb 96 96 112))))
+                            (if (< seg 8) (ray/rgb 178 52 44) (ray/rgb 58 22 20))))
+      (ray/draw-font font "move: hjkl / arrows / yubn    F11: fullscreen"
+                     20 (+ top 40) 26 2 (ray/rgb 96 96 112)))))
 
 (recompute-fov!)
 
 (unwind-protect
   (while (and running (not (ray/window-should-close?)))
-    (if (ray/key-pressed? ray/key-f11) (ray/toggle-fullscreen!) nil)
+    (when (ray/key-pressed? ray/key-f11) (ray/toggle-fullscreen!))
     (set! now (ray/time))
     (set! flicker (+ 0.94 (* 0.045 (sin (* now 8.0))) (* 0.015 (sin (* now 23.0)))))
 
     (set! next-x player-x)
     (set! next-y player-y)
-    (let ((token (ray/harness-next-input!)))
-      (apply-input (if (nil? token) (key-token) token)))
-    (set! moved (or (not (= next-x player-x)) (not (= next-y player-y))))
-    (if (and moved (not (= (terrain-at next-x next-y) t-wall)))
-        (step-onto! next-x next-y)
-        nil)
+    (read-input! (ray/harness-next-input!))
+    (let ((moved (or (not (= next-x player-x)) (not (= next-y player-y)))))
+      (when (and moved (not (= (terrain-at next-x next-y) t-wall)))
+        (step-onto! next-x next-y)))
 
     (ray/begin-texture-mode target)
     (ray/clear-background (ray/rgb 7 8 12))
-    (let ((y 0))
-      (while (< y map-rows)
-        (let ((x 0))
-          (while (< x columns)
-            (draw-tile x y)
-            (set! x (+ x 1))))
-        (set! y (+ y 1))))
+    (for-rect 0 0 (- columns 1) (- map-rows 1) draw-tile)
     ; The player glows: a warm halo cell under a bright @.
     (ray/draw-rectangle (* player-x cell) (* player-y cell) cell cell
-                        (ray/rgb (clamp255 (* 96.0 flicker))
-                                 (clamp255 (* 74.0 flicker))
-                                 (clamp255 (* 34.0 flicker))))
+                        (shade 0x604a22 flicker))
     (ray/draw-codepoint font 64
                         (+ (* player-x cell) glyph-dx) (+ (* player-y cell) glyph-dy) cell
                         (ray/rgb 255 244 214))

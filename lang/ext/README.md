@@ -52,10 +52,10 @@ meson compile -C build
 build/otium ext/ray/example.scm
 ```
 
-`ext/ray/roguelike.scm` is a larger example aimed at a grid game:
+`ext/ray/roguelike.ot` is a larger example aimed at a grid game:
 
 ```sh
-build/otium ext/ray/roguelike.scm
+build/otium ext/ray/roguelike.ot
 ```
 
 It draws a Brogue-styled 60 by 30 glyph dungeon into a render texture: line of
@@ -76,7 +76,7 @@ human at the keyboard. Three environment variables control it:
 
 ```sh
 RAY_FRAMES=60 RAY_SCREENSHOT=shot.png RAY_INPUT=l,l,j \
-  build/otium ext/ray/roguelike.scm
+  build/otium ext/ray/roguelike.ot
 ```
 
 A script opts in by calling `(ray/harness-continue?)` once per frame, after

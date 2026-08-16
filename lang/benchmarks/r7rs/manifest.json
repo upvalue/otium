@@ -1,0 +1,28 @@
+{
+  "upstream_commit": "85f6acdc4cc4e2b857f307ba56bd0ba931dcccd1",
+  "benchmarks": {
+    "fib": {"parity": "A", "deviation": "syntax and benchmark API only"},
+    "ack": {"parity": "A", "deviation": "syntax and benchmark API only"},
+    "tak": {"parity": "A", "deviation": "syntax and benchmark API only"},
+    "cpstak": {"parity": "A", "deviation": "syntax and benchmark API only"},
+    "takl": {"parity": "A", "deviation": "syntax and benchmark API only"},
+    "nqueens": {"parity": "A", "deviation": "named let translated to local recursion"},
+    "deriv": {"parity": "A", "deviation": "syntax and benchmark API only"},
+    "destruc": {"parity": "A", "deviation": "do loops translated to while loops"},
+    "mperm": {
+      "parity": "B",
+      "deviation": "Scheme vectors use Otium arrays",
+      "heap_max": 2147483648
+    },
+    "gcbench": {
+      "parity": "B",
+      "deviation": "records and vectors use fixed-layout Otium arrays",
+      "heap_max": 1073741824
+    },
+    "quicksort": {
+      "parity": "B",
+      "deviation": "vectors use arrays; the untimed escape-continuation checker is a boolean loop"
+    },
+    "fft": {"parity": "B", "deviation": "Scheme vectors use Otium arrays"}
+  }
+}

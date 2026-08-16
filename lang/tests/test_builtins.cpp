@@ -2,7 +2,9 @@
 // int wrap-on-overflow. Needs the full runtime to link (Vm::create).
 #include "doctest.h"
 #include "../src/builtins.hpp"
+#include "../src/eval.hpp"
 #include "../src/printer.hpp"
+#include "../src/ns.hpp"
 #include "../src/value.hpp"
 #include "../src/vm.hpp"
 #include "../src/heap.hpp"
@@ -35,6 +37,16 @@ static void finalize_pointer(Vm& vm, void* payload) {
   pointer_finalized += *(i32*)payload;
   pointer_finalizer_ns = vm.currentNs;
   free(payload);
+}
+
+static Value call_core(Vm& vm, const char* name, std::initializer_list<Value> args) {
+  Value fn = ns_resolve(vm, symbol_v(vm.intern.intern(name, (u32)strlen(name))));
+  if (fn.tag == Tag::Unwind) return fn;
+  u32 base = vm.stack.len;
+  for (Value arg : args) vm.push(arg);
+  Value result = apply(vm, fn, base, (u32)args.size());
+  vm.popTo(base);
+  return result;
 }
 
 static bool child_aborts(void (*fn)()) {
@@ -274,6 +286,33 @@ TEST_CASE("table printing preserves insertion order") {
   vm->destroy();
 }
 
+TEST_CASE("pair mutation preserves acyclic and table-key invariants") {
+  Vm* vm = make_vm();
+  {
+    Scope roots(*vm);
+    Slot pair = roots.push(make_pair(*vm, int_v(1), null_v()));
+
+    Value r = call_core(*vm, "set-car!", {pair.get(), int_v(2)});
+    REQUIRE(r.tag == Tag::Pair);
+    CHECK(as_pair(pair.get())->car.i == 2);
+    r = call_core(*vm, "set-cdr!", {pair.get(), make_pair(*vm, int_v(3), null_v())});
+    REQUIRE(r.tag == Tag::Pair);
+    CHECK(as_pair(as_pair(pair.get())->cdr)->car.i == 3);
+
+    r = call_core(*vm, "set-cdr!", {pair.get(), pair.get()});
+    CHECK(r.tag == Tag::Unwind);
+    vm_cancel_unwind(*vm);
+
+    Slot table = roots.push(make_table(*vm));
+    table_put(*vm, table.get(), pair.get(), int_v(9));
+    r = call_core(*vm, "set-car!", {pair.get(), int_v(4)});
+    CHECK(r.tag == Tag::Unwind);
+    vm_cancel_unwind(*vm);
+    CHECK(table_get(*vm, table.get(), pair.get()).i == 9);
+  }
+  vm->destroy();
+}
+
 // ---------------------------------------------------------------------------
 
 TEST_CASE("equality matrix (spec 2.4)") {
@@ -395,5 +434,55 @@ TEST_CASE("arithmetic wraps two's-complement") {
   CHECK(r.tag == Tag::Unwind);
   vm->unwindCondition = nil_v();  // clear for cleanliness
 
+  vm->destroy();
+}
+
+TEST_CASE("numeric extensions") {
+  Vm* vm = make_vm();
+
+  CHECK(call_core(*vm, "sqrt", {int_v(9)}).f == doctest::Approx(3.0));
+  CHECK(call_core(*vm, "sin", {float_v(0.0)}).f == doctest::Approx(0.0));
+  CHECK(call_core(*vm, "cos", {float_v(0.0)}).f == doctest::Approx(1.0));
+  CHECK(call_core(*vm, "atan", {int_v(0), int_v(-1)}).f == doctest::Approx(std::atan2(0, -1)));
+
+  Value r = call_core(*vm, "expt", {int_v(2), int_v(10)});
+  REQUIRE(r.tag == Tag::Int);
+  CHECK(r.i == 1024);
+  r = call_core(*vm, "expt", {int_v(4), int_v(-1)});
+  REQUIRE(r.tag == Tag::Float);
+  CHECK(r.f == doctest::Approx(0.25));
+
+  CHECK(call_core(*vm, "truncate", {float_v(-3.75)}).i == -3);
+  CHECK(call_core(*vm, "exact", {float_v(7.0)}).i == 7);
+  CHECK(call_core(*vm, "inexact", {int_v(7)}).f == doctest::Approx(7.0));
+  CHECK(is_truthy(call_core(*vm, "exact?", {int_v(1)})));
+  CHECK(is_truthy(call_core(*vm, "inexact?", {float_v(1.0)})));
+  CHECK(is_truthy(call_core(*vm, "integer?", {float_v(1.0)})));
+  CHECK(is_truthy(call_core(*vm, "nan?", {float_v(NAN)})));
+  CHECK(is_truthy(call_core(*vm, "infinite?", {float_v(INFINITY)})));
+  CHECK(is_truthy(call_core(*vm, "finite?", {int_v(1)})));
+  CHECK(is_falsy(call_core(*vm, "finite?", {float_v(INFINITY)})));
+
+  r = call_core(*vm, "exact", {float_v(1.5)});
+  CHECK(r.tag == Tag::Unwind);
+  vm_cancel_unwind(*vm);
+  vm->destroy();
+}
+
+TEST_CASE("clock extensions") {
+  Vm* vm = make_vm();
+  Value hz = call_core(*vm, "jiffies-per-second", {});
+  REQUIRE(hz.tag == Tag::Int);
+  CHECK(hz.i == 1000000000);
+
+  Value j0 = call_core(*vm, "current-jiffy", {});
+  Value j1 = call_core(*vm, "current-jiffy", {});
+  REQUIRE(j0.tag == Tag::Int);
+  REQUIRE(j1.tag == Tag::Int);
+  CHECK(j1.i >= j0.i);
+
+  Value seconds = call_core(*vm, "current-second", {});
+  REQUIRE(seconds.tag == Tag::Float);
+  CHECK(seconds.f > 0.0);
   vm->destroy();
 }

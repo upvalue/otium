@@ -24,6 +24,7 @@ def expect(result, status, stdout=None, stderr=None):
 
 expect(run("--help"), 0, stdout="--repl")
 expect(run("--help"), 0, stdout="--server")
+expect(run("--help"), 0, stdout="--heap-max")
 expect(run(), 0, stdout="otium repl")
 
 file_only = run(fixture)
@@ -55,6 +56,25 @@ assert "error:" in server.stdout, server
 assert "7\n\x1eot> " in server.stdout, server
 assert "restart #?" not in server.stdout, server
 assert server.stderr == "", server
+
+expect(run("--max-depth"), 2, stderr="--max-depth requires a value")
+expect(run("--max-depth", "nope"), 2, stderr="requires an integer")
+expect(run("--stack-slots", "0"), 2, stderr="requires an integer")
+expect(run("--heap-init", "512"), 2, stderr="must be at least 1024")
+expect(run("--heap-max", "1024"), 2, stderr="must be at least --heap-init")
+
+limited = run(
+    "--max-depth",
+    "1024",
+    "--stack-slots",
+    "8192",
+    "--heap-init",
+    str(1 << 20),
+    "--heap-max",
+    str(8 << 20),
+    fixture,
+)
+expect(limited, 0, stdout="loaded-from-file\n")
 
 multiline = run(input_text="(+ 1\n 2)\nnil\n(quit)\n(println \"after-quit\")\n")
 expect(multiline, 0, stdout="3\n")

@@ -6,6 +6,8 @@
 #include <cstring>
 #include <csignal>
 #include <cctype>
+#include <cerrno>
+#include <climits>
 #include <string>
 #include <vector>
 
@@ -383,6 +385,10 @@ struct CliOptions {
   const char* script = nullptr;
   bool repl = false;
   bool server = false;
+  u32 maxDepth = 512;
+  u32 stackSlots = 4096;
+  u32 heapInit = 4u * 1024 * 1024;
+  u32 heapMax = 64u * 1024 * 1024;
 };
 
 static void print_usage(FILE* to) {
@@ -390,11 +396,27 @@ static void print_usage(FILE* to) {
         "Run FILE, or start a REPL when no FILE is given.\n"
         "\n"
         "Options:\n"
-        "  --repl       Start a REPL after loading FILE\n"
-        "  --server     Run the framed stdio evaluation server\n"
-        "  --path DIR   Add DIR to the module search path (repeatable)\n"
-        "  -h, --help   Show this help\n",
+        "  --repl             Start a REPL after loading FILE\n"
+        "  --server           Run the framed stdio evaluation server\n"
+        "  --path DIR         Add DIR to the module search path (repeatable)\n"
+        "  --max-depth N      Maximum evaluator recursion depth\n"
+        "  --stack-slots N    Maximum live value-stack slots\n"
+        "  --heap-init BYTES  Initial semispace size\n"
+        "  --heap-max BYTES   Maximum semispace size\n"
+        "  -h, --help         Show this help\n",
         to);
+}
+
+static bool parse_u32_arg(const char* option, const char* text, u32* out) {
+  errno = 0;
+  char* end = nullptr;
+  unsigned long long n = strtoull(text, &end, 10);
+  if (errno || end == text || *end != '\0' || n == 0 || n > UINT32_MAX) {
+    fprintf(stderr, "otium: %s requires an integer from 1 to %u\n", option, UINT32_MAX);
+    return false;
+  }
+  *out = (u32)n;
+  return true;
 }
 
 static int parse_args(int argc, char** argv, CliOptions& options) {
@@ -413,6 +435,18 @@ static int parse_args(int argc, char** argv, CliOptions& options) {
         return 2;
       }
       g_loadPath.push_back(argv[i]);
+    } else if (!positionalOnly &&
+               (strcmp(arg, "--max-depth") == 0 || strcmp(arg, "--stack-slots") == 0 ||
+                strcmp(arg, "--heap-init") == 0 || strcmp(arg, "--heap-max") == 0)) {
+      if (++i == argc) {
+        fprintf(stderr, "otium: %s requires a value\n", arg);
+        return 2;
+      }
+      u32* target = strcmp(arg, "--max-depth") == 0     ? &options.maxDepth
+                    : strcmp(arg, "--stack-slots") == 0 ? &options.stackSlots
+                    : strcmp(arg, "--heap-init") == 0   ? &options.heapInit
+                                                        : &options.heapMax;
+      if (!parse_u32_arg(arg, argv[i], target)) return 2;
     } else if (!positionalOnly && (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0)) {
       print_usage(stdout);
       return 1;
@@ -429,6 +463,14 @@ static int parse_args(int argc, char** argv, CliOptions& options) {
   }
   if (options.repl && options.server) {
     fputs("otium: --repl and --server cannot be used together\n", stderr);
+    return 2;
+  }
+  if (options.heapInit < 1024) {
+    fputs("otium: --heap-init must be at least 1024 bytes\n", stderr);
+    return 2;
+  }
+  if (options.heapMax < options.heapInit) {
+    fputs("otium: --heap-max must be at least --heap-init\n", stderr);
     return 2;
   }
   return 0;
@@ -454,9 +496,10 @@ int main(int argc, char** argv) {
   if (g_loadPath.empty()) g_loadPath.push_back(".");
 
   ot::VmConfig cfg;
-  cfg.heapBytes = 4 * 1024 * 1024;
-  cfg.stackSlots = 4096;
-  cfg.maxDepth = 512;
+  cfg.heapBytes = options.heapInit;
+  cfg.stackSlots = options.stackSlots;
+  cfg.maxDepth = options.maxDepth;
+  cfg.heapMaxBytes = options.heapMax;
   Vm* vm = Vm::create(cfg);
   if (!vm) {
     fputs("otium: vm creation failed\n", stderr);

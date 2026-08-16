@@ -1,0 +1,13 @@
+implementation,benchmark,variant,parity,input,sample,reported_seconds,wall_seconds,status,reason,platform,runtime_flags,upstream_commit,otium_commit
+otium-485b875-dirty,fib,port,A,d857d40b3504,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
+otium-485b875-dirty,ack,port,A,048eeeb21989,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
+otium-485b875-dirty,tak,port,A,ed71c0699831,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
+otium-485b875-dirty,cpstak,port,A,a6bb105b10c7,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
+otium-485b875-dirty,takl,port,A,36a534a6b461,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
+otium-485b875-dirty,nqueens,port,A,758d4996647c,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
+otium-485b875-dirty,deriv,port,A,0000b6f0cff8,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
+otium-485b875-dirty,destruc,port,A,f9b248ac8534,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
+otium-485b875-dirty,mperm,port,B,a3a48b55679c,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 2147483648,85f6acdc4cc4,485b875
+otium-485b875-dirty,gcbench,port,B,d3c713afeed5,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 1073741824,85f6acdc4cc4,485b875
+otium-485b875-dirty,quicksort,port,B,a806d5a4c5a0,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875
+otium-485b875-dirty,fft,port,B,764ca3870170,1,,1.000000000,timeout,timed out after 1s,Darwin 24.6.0 arm64,--max-depth 2000 --stack-slots 65536 --heap-max 67108864,85f6acdc4cc4,485b875

@@ -178,6 +178,114 @@ static Value nat_round(Vm& vm, u32 base, u32 argc) {
   return round_like(vm, base, argc, "round", op_round);
 }
 
+static f64 op_truncate(f64 f) { return std::trunc(f); }
+
+static Value nat_truncate(Vm& vm, u32 base, u32 argc) {
+  return round_like(vm, base, argc, "truncate", op_truncate);
+}
+
+static Value unary_float(Vm& vm, u32 base, u32 argc, const char* who, f64 (*op)(f64)) {
+  OT_TRY(need_argc(vm, who, argc, 1, 1));
+  OT_TRY(need_nums(vm, who, base, argc));
+  return float_v(op(as_f(ARG(0))));
+}
+
+static Value nat_sqrt(Vm& vm, u32 base, u32 argc) {
+  return unary_float(vm, base, argc, "sqrt", std::sqrt);
+}
+static Value nat_exp(Vm& vm, u32 base, u32 argc) {
+  return unary_float(vm, base, argc, "exp", std::exp);
+}
+static Value nat_log(Vm& vm, u32 base, u32 argc) {
+  return unary_float(vm, base, argc, "log", std::log);
+}
+static Value nat_sin(Vm& vm, u32 base, u32 argc) {
+  return unary_float(vm, base, argc, "sin", std::sin);
+}
+static Value nat_cos(Vm& vm, u32 base, u32 argc) {
+  return unary_float(vm, base, argc, "cos", std::cos);
+}
+static Value nat_tan(Vm& vm, u32 base, u32 argc) {
+  return unary_float(vm, base, argc, "tan", std::tan);
+}
+static Value nat_asin(Vm& vm, u32 base, u32 argc) {
+  return unary_float(vm, base, argc, "asin", std::asin);
+}
+static Value nat_acos(Vm& vm, u32 base, u32 argc) {
+  return unary_float(vm, base, argc, "acos", std::acos);
+}
+
+static Value nat_atan(Vm& vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "atan", argc, 1, 2));
+  OT_TRY(need_nums(vm, "atan", base, argc));
+  return float_v(argc == 1 ? std::atan(as_f(ARG(0))) : std::atan2(as_f(ARG(0)), as_f(ARG(1))));
+}
+
+static Value nat_expt(Vm& vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "expt", argc, 2, 2));
+  OT_TRY(need_nums(vm, "expt", base, argc));
+  if (ARG(0).tag == Tag::Int && ARG(1).tag == Tag::Int && ARG(1).i >= 0) {
+    u64 factor = (u64)ARG(0).i;
+    u64 result = 1;
+    u64 exponent = (u64)ARG(1).i;
+    while (exponent) {
+      if (exponent & 1) result *= factor;
+      exponent >>= 1;
+      if (exponent) factor *= factor;
+    }
+    return int_v((i64)result);
+  }
+  return float_v(std::pow(as_f(ARG(0)), as_f(ARG(1))));
+}
+
+static Value nat_exact(Vm& vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "exact", argc, 1, 1));
+  OT_TRY(need_nums(vm, "exact", base, argc));
+  if (ARG(0).tag == Tag::Int) return ARG(0);
+  if (!std::isfinite(ARG(0).f) || std::trunc(ARG(0).f) != ARG(0).f)
+    return raise_error(vm, "exact: expected an integer-valued finite number");
+  return float_to_int(vm, "exact", ARG(0).f);
+}
+
+static Value nat_inexact(Vm& vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "inexact", argc, 1, 1));
+  OT_TRY(need_nums(vm, "inexact", base, argc));
+  return float_v(as_f(ARG(0)));
+}
+
+static Value nat_exactp(Vm& vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "exact?", argc, 1, 1));
+  OT_TRY(need_nums(vm, "exact?", base, argc));
+  return bool_v(ARG(0).tag == Tag::Int);
+}
+static Value nat_inexactp(Vm& vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "inexact?", argc, 1, 1));
+  OT_TRY(need_nums(vm, "inexact?", base, argc));
+  return bool_v(ARG(0).tag == Tag::Float);
+}
+static Value nat_integerp(Vm& vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "integer?", argc, 1, 1));
+  OT_TRY(need_nums(vm, "integer?", base, argc));
+  bool result = ARG(0).tag == Tag::Int || (ARG(0).tag == Tag::Float && std::isfinite(ARG(0).f) &&
+                                           std::trunc(ARG(0).f) == ARG(0).f);
+  return bool_v(result);
+}
+static Value nat_nanp(Vm& vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "nan?", argc, 1, 1));
+  OT_TRY(need_nums(vm, "nan?", base, argc));
+  return bool_v(ARG(0).tag == Tag::Float && std::isnan(ARG(0).f));
+}
+static Value nat_infinitep(Vm& vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "infinite?", argc, 1, 1));
+  OT_TRY(need_nums(vm, "infinite?", base, argc));
+  return bool_v(ARG(0).tag == Tag::Float && std::isinf(ARG(0).f));
+}
+static Value nat_finitep(Vm& vm, u32 base, u32 argc) {
+  OT_TRY(need_argc(vm, "finite?", argc, 1, 1));
+  OT_TRY(need_nums(vm, "finite?", base, argc));
+  return bool_v(ARG(0).tag == Tag::Int || std::isfinite(ARG(0).f));
+}
+
 // comparison chains
 static Value chain(Vm& vm, u32 base, u32 argc, const char* who, bool (*ok)(int cmp)) {
   OT_TRY(need_argc(vm, who, argc, 2, UINT32_MAX));
@@ -255,6 +363,25 @@ void register_arith(Vm& vm) {
   def_native(vm, "floor", nat_floor);
   def_native(vm, "ceiling", nat_ceiling);
   def_native(vm, "round", nat_round);
+  def_native(vm, "truncate", nat_truncate);
+  def_native(vm, "sqrt", nat_sqrt);
+  def_native(vm, "exp", nat_exp);
+  def_native(vm, "log", nat_log);
+  def_native(vm, "sin", nat_sin);
+  def_native(vm, "cos", nat_cos);
+  def_native(vm, "tan", nat_tan);
+  def_native(vm, "asin", nat_asin);
+  def_native(vm, "acos", nat_acos);
+  def_native(vm, "atan", nat_atan);
+  def_native(vm, "expt", nat_expt);
+  def_native(vm, "exact", nat_exact);
+  def_native(vm, "inexact", nat_inexact);
+  def_native(vm, "exact?", nat_exactp);
+  def_native(vm, "inexact?", nat_inexactp);
+  def_native(vm, "integer?", nat_integerp);
+  def_native(vm, "nan?", nat_nanp);
+  def_native(vm, "infinite?", nat_infinitep);
+  def_native(vm, "finite?", nat_finitep);
   def_native(vm, "=", nat_num_eq);
   def_native(vm, "<", nat_lt);
   def_native(vm, ">", nat_gt);

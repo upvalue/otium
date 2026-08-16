@@ -24,10 +24,10 @@ static u32 objTotalSize(u32 payloadBytes) {
 
 static u32 objTotalSize(Obj* o) { return objTotalSize(o->size); }
 
-Heap::Heap(Vm* vm_, u32 initialBytes)
+Heap::Heap(Vm* vm_, u32 initialBytes, u32 maxBytes_)
     : vm(vm_), spaceSize(initialBytes < 1024 ? 1024 : align8(initialBytes)), used(0),
-      maxBytes(64u * 1024 * 1024), nextIdent(1), collections(0), toSpace(nullptr), toSize(0),
-      toUsed(0) {
+      maxBytes(maxBytes_), nextIdent(1), collections(0), toSpace(nullptr), toSize(0), toUsed(0) {
+  if (maxBytes < 1024 || spaceSize > maxBytes) ot_fatal("heap: invalid size limits");
   space = (char*)malloc(spaceSize);
   if (!space) ot_fatal("heap: cannot allocate initial space");
 }

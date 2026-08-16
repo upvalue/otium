@@ -101,7 +101,7 @@ static void eval_embedded(Vm& vm, const char* name, const char* src, u32 len) {
   }
 }
 
-Vm::Vm(const VmConfig& c) : heap(this, c.heapBytes), intern(), stack(), cfg(c) {
+Vm::Vm(const VmConfig& c) : heap(this, c.heapBytes, c.heapMaxBytes), intern(), stack(), cfg(c) {
   heap.addRoots(vm_walk_roots, this);
   nsRegistry = nil_v();
   typeParents = nil_v();
@@ -132,6 +132,7 @@ Vm::Vm(const VmConfig& c) : heap(this, c.heapBytes), intern(), stack(), cfg(c) {
   register_cond(*this);
   register_expand(*this);
   register_arith(*this);
+  register_time(*this);
   register_data(*this);
   register_string(*this);
   register_sys(*this);

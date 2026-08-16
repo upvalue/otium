@@ -1,3 +1,6 @@
 [submodule "os/subprojects/picolibc"]
 	path = os/subprojects/picolibc
 	url = https://github.com/picolibc/picolibc.git
+[submodule "lang/benchmarks/r7rs/vendor"]
+	path = lang/benchmarks/r7rs/vendor
+	url = https://github.com/ecraven/r7rs-benchmarks.git

@@ -11,6 +11,7 @@ void register_data(Vm&);
 void register_expand(Vm&);
 void register_string(Vm&);
 void register_sys(Vm&);
+void register_time(Vm&);
 
 // Wrap a NativeFn in a Function object and ns_define it (implemented in sys.cpp).
 void def_native(Vm& vm, const char* name, NativeFn f);

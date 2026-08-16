@@ -46,6 +46,7 @@ lib_sources = files(
   'src/builtins/expand.cpp',
   'src/builtins/string.cpp',
   'src/builtins/sys.cpp',
+  'src/builtins/time.cpp',
 )
 
 libotium = static_library('otium',
@@ -99,6 +100,11 @@ test('otium-tests', otium_tests, timeout : test_timeout)
 cli_tests = find_program('tests/test_cli.py')
 test('otium-cli', cli_tests,
   args : [otium, join_paths(meson.current_source_dir(), 'tests', 'cli-load.scm')],
+  timeout : test_timeout)
+
+r7rs_port_tests = find_program('benchmarks/r7rs/test_ports.py')
+test('r7rs-ports', r7rs_port_tests,
+  args : [otium],
   timeout : test_timeout)
 
 if get_option('ext_demo')

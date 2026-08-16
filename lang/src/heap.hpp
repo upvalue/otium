@@ -31,6 +31,8 @@ struct Obj {
   u32 ident;     // lazy identity id, 0 = unstamped
 };
 
+constexpr u8 OBJ_PAIR_KEY = 1u << 0;
+
 // Payload structs follow the header (8-byte aligned).
 struct PairData {
   Value car, cdr;
@@ -112,7 +114,7 @@ struct Heap {
   using VisitFn = void (*)(void* ctx, Value* slot);
   using RootWalkFn = void (*)(void* ud, VisitFn visit, void* ctx);
 
-  explicit Heap(Vm* vm, u32 initialBytes);
+  explicit Heap(Vm* vm, u32 initialBytes, u32 maxBytes = 64u * 1024 * 1024);
   ~Heap();
   Heap(const Heap&) = delete;
   Heap& operator=(const Heap&) = delete;

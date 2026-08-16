@@ -10,9 +10,10 @@
 namespace ot {
 
 struct VmConfig {
-  u32 heapBytes;
-  u32 stackSlots;
-  u32 maxDepth;
+  u32 heapBytes = 4u * 1024 * 1024;
+  u32 stackSlots = 4096;
+  u32 maxDepth = 512;
+  u32 heapMaxBytes = 64u * 1024 * 1024;
 };
 
 using WriteFn = void (*)(void* ud, const char* s, u32 n);

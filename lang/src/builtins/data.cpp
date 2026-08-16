@@ -106,6 +106,43 @@ u64 val_hash(Vm& vm, Value v) {
 static const Value TOMB = unwind_v();
 static inline bool is_tomb(const TableEntry& e) { return e.key.tag == Tag::Unwind; }
 
+static bool pair_graph_contains(Value root, Obj* needle) {
+  if (root.tag != Tag::Pair) return false;
+  Vec<Obj*> pending;
+  Vec<Obj*> seen;
+  pending.push(root.obj);
+  while (pending.len) {
+    Obj* obj = pending.pop();
+    if (obj == needle) return true;
+    bool known = false;
+    for (u32 i = 0; i < seen.len; i++)
+      if (seen[i] == obj) {
+        known = true;
+        break;
+      }
+    if (known) continue;
+    seen.push(obj);
+    PairData* pair = (PairData*)obj_payload(obj);
+    if (pair->car.tag == Tag::Pair) pending.push(pair->car.obj);
+    if (pair->cdr.tag == Tag::Pair) pending.push(pair->cdr.obj);
+  }
+  return false;
+}
+
+static void freeze_pair_key(Value root) {
+  if (root.tag != Tag::Pair) return;
+  Vec<Obj*> pending;
+  pending.push(root.obj);
+  while (pending.len) {
+    Obj* obj = pending.pop();
+    if (obj->flags & OBJ_PAIR_KEY) continue;
+    obj->flags |= OBJ_PAIR_KEY;
+    PairData* pair = (PairData*)obj_payload(obj);
+    if (pair->car.tag == Tag::Pair) pending.push(pair->car.obj);
+    if (pair->cdr.tag == Tag::Pair) pending.push(pair->cdr.obj);
+  }
+}
+
 static inline u32 idx_get(TableData* t, u32 slot) {
   switch (t->indexWidth) {
     case 1: return t->index[slot];
@@ -217,6 +254,7 @@ Value table_put(Vm& vm, Value table, Value key, Value v) {
     t->entries[e].val = v;
     return table;
   }
+  freeze_pair_key(key);
   table_ensure(t, 1);  // insert (or re-insert) at the end
   u32 idx = t->entriesLen++;
   t->entries[idx].hash = h;
@@ -290,6 +328,23 @@ static Value nat_cdr(Vm& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "cdr", argc, 1, 1));
   OT_TRY(need_pair(vm, "cdr", ARG(0)));
   return as_pair(ARG(0))->cdr;
+}
+static Value set_pair_field(Vm& vm, u32 base, u32 argc, const char* who, bool car) {
+  OT_TRY(need_argc(vm, who, argc, 2, 2));
+  OT_TRY(need_pair(vm, who, ARG(0)));
+  if (ARG(0).obj->flags & OBJ_PAIR_KEY)
+    return raise_error(vm, "%s: cannot mutate a pair used as a table key", who);
+  if (pair_graph_contains(ARG(1), ARG(0).obj))
+    return raise_error(vm, "%s: cyclic pair structure is not supported", who);
+  if (car) as_pair(ARG(0))->car = ARG(1);
+  else as_pair(ARG(0))->cdr = ARG(1);
+  return ARG(0);
+}
+static Value nat_set_car(Vm& vm, u32 base, u32 argc) {
+  return set_pair_field(vm, base, argc, "set-car!", true);
+}
+static Value nat_set_cdr(Vm& vm, u32 base, u32 argc) {
+  return set_pair_field(vm, base, argc, "set-cdr!", false);
 }
 static Value nat_caar(Vm& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "caar", argc, 1, 1));
@@ -590,6 +645,8 @@ void register_data(Vm& vm) {
   def_native(vm, "cons", nat_cons);
   def_native(vm, "car", nat_car);
   def_native(vm, "cdr", nat_cdr);
+  def_native(vm, "set-car!", nat_set_car);
+  def_native(vm, "set-cdr!", nat_set_cdr);
   def_native(vm, "caar", nat_caar);
   def_native(vm, "cadr", nat_cadr);
   def_native(vm, "cddr", nat_cddr);

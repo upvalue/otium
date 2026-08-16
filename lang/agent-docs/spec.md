@@ -118,7 +118,7 @@ symbol.
 | `symbol` | `foo` | -- | |
 | `keyword` | `:foo` | -- | self-evaluating |
 | `string` | `"hi"` | -- | Unicode; indexed and measured by code point |
-| `pair` | `(1 . 2)` | -- | **immutable**, so list structure can never be cyclic |
+| `pair` | `(1 . 2)` | yes | mutable with `set-car!` / `set-cdr!`; cycles are rejected |
 | `array` | `[1 2]` | yes | growable vector |
 | `table` | `{:a 1}` | yes | insertion-ordered map, arbitrary keys |
 | `buffer` | `#<buffer "…">` | yes | mutable string builder |
@@ -181,7 +181,7 @@ Three notions, coarsest to finest:
 
 - **`=`** -- numeric equality across int/float: `(= 1 1.0)` is `#t`.
   Arguments must be numbers.
-- **`equal?`** -- deep structural equality for immutable data (pairs
+- **`equal?`** -- deep structural equality for pairs and immutable data (pairs
   recursively, strings, symbols, keywords, numbers *of the same type*),
   identity for mutable objects (arrays, tables, buffers) and functions.
   Type-strict: `(equal? 1 1.0)` is `#f`, and `nil`, `()`, `#f` are all
@@ -198,6 +198,9 @@ Three notions, coarsest to finest:
 Table keys are compared with `equal?` semantics. A hashing implementation
 must therefore hash immutables structurally and mutables by an identity
 that is stable across GC -- a stored id, never an address.
+Pairs used as table keys, including pairs reachable through them, become
+frozen while still retaining structural equality. Attempting to mutate one
+is an error. This keeps a stored key's structural hash stable.
 
 ### 2.5 Ordering
 
@@ -224,9 +227,11 @@ Programs may rely on the following costs. `n` is the element count of the
 collection involved unless stated otherwise; "expected" means a hashed
 operation whose worst case may degrade under adversarial keys.
 
-**Pairs and lists** are immutable singly-linked chains:
+**Pairs and lists** are singly-linked chains. Mutation may create shared
+structure, but an operation that would introduce a cycle is an error:
 
 - `cons`, `car`, `cdr`, `first`, `rest`: O(1)
+- `set-car!`, `set-cdr!`: O(size of the proposed new value), to reject cycles
 - `length`, `nth`, `last`, `reverse`, `list?`: O(n)
 - `append`, `concat`: O(total length of the arguments)
 
@@ -776,7 +781,14 @@ to float.
 | `(modulo a b)` → int | Modulus, sign of the divisor. |
 | `(abs n)` → num | Absolute value. |
 | `(min n n…)` / `(max n n…)` → num | Extremum (numeric comparison). |
-| `(floor n)` `(ceiling n)` `(round n)` → int | Round a float to int (identity on ints); result outside int range errors. `round` rounds half away from zero. |
+| `(floor n)` `(ceiling n)` `(round n)` `(truncate n)` → int | Round a float to int (identity on ints); result outside int range errors. `round` rounds half away from zero; `truncate` rounds toward zero. |
+| `(sqrt n)` `(exp n)` `(log n)` → float | Standard floating-point functions. Domain and range results follow the host math library. |
+| `(sin n)` `(cos n)` `(tan n)` `(asin n)` `(acos n)` → float | Standard trigonometric functions using radians. |
+| `(atan y [x])` → float | One argument computes arctangent. Two arguments compute the quadrant-aware angle of `y/x`. |
+| `(expt base exponent)` → num | Non-negative int powers of ints stay int and wrap on overflow. Other inputs use floating-point exponentiation. |
+| `(exact n)` / `(inexact n)` → num | Convert an integer-valued finite float to int, or a number to float. |
+| `(exact? n)` `(inexact? n)` `(integer? n)` → bool | Numeric representation and integer-value tests. |
+| `(nan? n)` `(infinite? n)` `(finite? n)` → bool | Floating-point classification. Ints are finite. |
 | `(= n n…)` → bool | Numeric equality chain across int/float. |
 | `(< …)` `(> …)` `(<= …)` `(>= …)` → bool | Comparison chains; at least two arguments. |
 | `(inc n)` / `(dec n)` → num | `n±1`. |
@@ -808,6 +820,7 @@ table, string, buffer; other types error.
 |---|---|
 | `(cons a d)` → pair | |
 | `(car p)` / `(cdr p)` | Head/tail of a **pair**; strict, `(car '())` is an error. |
+| `(set-car! p v)` / `(set-cdr! p v)` → p | Mutate a pair. Cycles and mutation of pairs frozen as table keys are errors. |
 | `(caar p)` `(cadr p)` `(cddr p)` | Compositions. |
 | `(list x…)` → list | |
 | `(append list…)` → list | Concatenation; arguments must be proper lists. |
@@ -899,7 +912,18 @@ Output goes to the host-defined output sink.
 | `(println x…)` → nil | `display` plus a newline. |
 | `(newline)` → nil | |
 
-### 10.8 Functions and evaluation
+### 10.8 Time
+
+Time procedures use a monotonic clock for elapsed-time measurement and the
+system clock for civil time:
+
+| form | behavior |
+|---|---|
+| `(current-jiffy)` → int | Monotonic nanosecond counter with an unspecified epoch. |
+| `(jiffies-per-second)` → int | `1000000000`. |
+| `(current-second)` → float | Seconds since the Unix epoch according to the system clock. |
+
+### 10.9 Functions and evaluation
 
 | form | behavior |
 |---|---|
@@ -913,7 +937,7 @@ Output goes to the host-defined output sink.
 | `(macroexpand form)` → value | `macroexpand-1` repeated until the head is no longer a macro call. Neither function descends into subforms. |
 | `(gensym [prefix])` → symbol | Section 6. |
 
-### 10.9 Conditions
+### 10.10 Conditions
 
 `error`, `signal`, `invoke-restart` -- section 8; `define-condition`,
 `condition-of-type?` -- 8.1; `compute-restarts`, `find-restart`,
@@ -924,7 +948,7 @@ table else `nil`; `(condition-message c)` is `:message` or `nil`;
 predicate matching conditions whose type is `t` or a registered subtype
 of it (8.1).
 
-### 10.10 Namespaces and reflection
+### 10.11 Namespaces and reflection
 
 `in-ns` (7.2); `(current-ns)` is the current namespace's name as a
 symbol; `(describe sym)` is `"ns/name: docstring"` for the var `sym`
@@ -932,7 +956,7 @@ resolves to (or a no-documentation placeholder), `nil` if unresolvable.
 Params are made and bound by the special forms `defparam` and
 `with-params` (section 9), not by library functions.
 
-### 10.11 Macros (prelude)
+### 10.12 Macros (prelude)
 
 | form | behavior |
 |---|---|

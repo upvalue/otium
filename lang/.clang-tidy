@@ -5,14 +5,9 @@ Checks: >
   -clang-analyzer-unix.Stream,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
-  -bugprone-exception-escape,
   misc-unused-*,
-  performance-move-const-arg,
   performance-no-int-to-ptr,
-  performance-type-promotion-in-math-fn,
-  performance-unnecessary-copy-initialization,
-  -modernize-*,
-  -cppcoreguidelines-*
+  performance-type-promotion-in-math-fn
 WarningsAsErrors: '*'
-ExcludeHeaderFilterRegex: '(^|/)(tests/doctest\.h|vendor/)'
+ExcludeHeaderFilterRegex: '(^|/)vendor/'
 ...

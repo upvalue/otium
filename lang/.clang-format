@@ -1,7 +1,7 @@
 ---
+# clang-format has no separate C mode; "Cpp" covers C sources.
 Language: Cpp
 BasedOnStyle: LLVM
-Standard: c++20
 
 ColumnLimit: 100
 IndentWidth: 2
@@ -9,9 +9,7 @@ ContinuationIndentWidth: 4
 UseTab: Never
 
 BreakBeforeBraces: Attach
-BreakTemplateDeclarations: Yes
 IndentCaseLabels: true
-NamespaceIndentation: None
 
 DerivePointerAlignment: false
 PointerAlignment: Left

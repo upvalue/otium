@@ -23,15 +23,15 @@ cd "$project_dir"
 
 case "${1:-}" in
   "")
-    git ls-files -z -- '*.cpp' '*.hpp' ':!tests/doctest.h' |
+    git ls-files -z -- '*.c' '*.h' ':!vendor/*' ':!tests/ctest.h' |
       xargs -0 "$formatter_bin" --style=file -i
     ;;
   --check)
-    git ls-files -z -- '*.cpp' '*.hpp' ':!tests/doctest.h' |
+    git ls-files -z -- '*.c' '*.h' ':!vendor/*' ':!tests/ctest.h' |
       xargs -0 "$formatter_bin" --style=file --dry-run --Werror
     ;;
   *)
-    echo "usage: tools/format-cpp [--check]" >&2
+    echo "usage: tools/format-c [--check]" >&2
     exit 2
     ;;
 esac

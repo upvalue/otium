@@ -1,6 +1,6 @@
 # Native extensions
 
-Extensions are optional C++ modules linked into the `otium` executable. They
+Extensions are optional C modules linked into the `otium` executable. They
 are not linked into `libotium`, and there is no dynamic loading or stable C ABI
 yet.
 
@@ -21,7 +21,7 @@ need to be compiled into the executable.
 
 ## Foreign objects
 
-`src/heap.hpp` exposes the extension-facing API:
+`src/heap.h` exposes the extension-facing API:
 
 - `register_foreign_type` registers a per-VM type name and optional finalizer.
 - `make_foreign_inline` stores a small POD value in the moving heap object.

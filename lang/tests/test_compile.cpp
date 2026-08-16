@@ -112,6 +112,24 @@ TEST_CASE("compiler lowers cond clauses including their truthy test value") {
   state->destroy();
 }
 
+TEST_CASE("a bodyless cond clause falls through past a tail-calling else") {
+  // The bodyless clause's exit jump carries the test value to the end of the
+  // cond, so the form falls through even though the else ends in a tail call
+  // and emits no return of its own.
+  State* state = compiler_state();
+  Value result = run_compiled(*state, "(do (define (g) 7)"
+                                      "    (define (f x) (cond (x) (else (g))))"
+                                      "    (list (f 5) (f #f)))");
+  REQUIRE(result.tag == Tag::Pair);
+  Value taken = as_pair(result)->car;
+  Value fallthrough = as_pair(as_pair(result)->cdr)->car;
+  CHECK(taken.tag == Tag::Int);
+  CHECK(taken.i == 5);
+  CHECK(fallthrough.tag == Tag::Int);
+  CHECK(fallthrough.i == 7);
+  state->destroy();
+}
+
 TEST_CASE("compiler lowers quasiquote and unquote splicing") {
   State* state = compiler_state();
   Value result = run_compiled(*state, "`(a ,(+ 1 2) ,@(list 4 5) . tail)");

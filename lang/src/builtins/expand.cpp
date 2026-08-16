@@ -1,14 +1,11 @@
 // builtins/expand.cpp — stage-0 macro expansion and expander oracles.
 #include "../builtins.hpp"
 #include "../eval.hpp"
+#include "../form.hpp"
 #include "../ns.hpp"
 #include "../state.hpp"
 
 namespace ot {
-
-static bool pairp(Value v) { return v.tag == Tag::Pair; }
-static Value car_(Value v) { return as_pair(v)->car; }
-static Value cdr_(Value v) { return as_pair(v)->cdr; }
 
 static u32 name_id_of(State& vm, Value v) {
   if (v.tag == Tag::Symbol || v.tag == Tag::Keyword) return v.id;

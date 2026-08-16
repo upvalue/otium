@@ -1,6 +1,7 @@
 // eval.cpp - top-level expansion/compilation, application, and control helpers.
 #include "eval.hpp"
 #include "compile.hpp"
+#include "form.hpp"
 #include "ns.hpp"
 #include "reader.hpp"
 #include "vm.hpp"
@@ -8,14 +9,6 @@
 namespace ot {
 
 // ---------------------------------------------------------------- helpers
-
-static Value car_(Value v) { return as_pair(v)->car; }
-static Value cdr_(Value v) { return as_pair(v)->cdr; }
-static bool pairp(Value v) { return v.tag == Tag::Pair; }
-static bool sym_is(Value v, u32 id) { return v.tag == Tag::Symbol && v.id == id; }
-static Value strip_array_literal_head(Value forms, u32 arrayId) {
-  return pairp(forms) && sym_is(car_(forms), arrayId) ? cdr_(forms) : forms;
-}
 
 static Value quit_condition(State& vm) {
   Scope s(vm);

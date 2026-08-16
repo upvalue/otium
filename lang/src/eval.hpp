@@ -16,7 +16,7 @@ inline RestartData* restart_data(Value v) { return as_restart(v); }
 // one-element array "box" whose slot 0 holds the binding's value (boxing
 // keeps nil storable and gives set! a mutable cell).
 
-Value eval_form(State&, Value form);           // expand (via *expander*) + evaluate one top-level form
+Value eval_form(State&, Value form);  // expand (via *expander*) + evaluate one top-level form
 Value eval_in(State&, Value form, Value env);  // evaluate with lexical env; restores current ns
 Value apply(State&, Value callee, u32 base, u32 argc);  // args on vm stack
 Value start_quit(State&);                               // begin an uncatchable quit unwind
@@ -37,9 +37,23 @@ struct EvalSourcePolicy {
 // Read and evaluate forms in order, returning the last value (nil for an
 // empty source) or the first read/evaluation unwind.
 Value eval_source(State&, const char* src, u32 len, const char* name);
-Value eval_source(State&, const char* src, u32 len, const char* name, const EvalSourcePolicy& policy);
+Value eval_source(State&, const char* src, u32 len, const char* name,
+                  const EvalSourcePolicy& policy);
 
 Value make_native(State&, const char* name, NativeFn);
+
+// Compiler-only control primitives. The compiler stores these native
+// functions directly in Code constant pools and passes compiled thunks for
+// bodies that need a dynamic extent or may intercept an unwind.
+Value vm_control_handler_bind(State&, u32 base, u32 argc);
+Value vm_control_restart_case(State&, u32 base, u32 argc);
+Value vm_control_try(State&, u32 base, u32 argc);
+Value vm_control_unwind_protect(State&, u32 base, u32 argc);
+Value vm_control_with_params(State&, u32 base, u32 argc);
+Value vm_control_defparam(State&, u32 base, u32 argc);
+Value vm_control_ns(State&, u32 base, u32 argc);
+Value vm_control_in_ns(State&, u32 base, u32 argc);
+Value vm_control_require(State&, u32 base, u32 argc);
 
 // ---------------------------------------------------------------------------
 // EXPANDER ORACLE API (for the self-hosted expander)

@@ -1,6 +1,7 @@
 // eval.cpp — stage-0 evaluator: trampoline with proper tail calls, special
 // forms, application, conditions/restarts (spec 8), dynamic params (spec 9).
 #include "eval.hpp"
+#include "compile.hpp"
 #include "ns.hpp"
 #include "reader.hpp"
 #include "vm.hpp"
@@ -387,6 +388,202 @@ static Value require_spec(State& vm, Value spec) {
       }
     }  // :reload and unknown options tolerated / ignored in stage 0
     optS.set(cdr_(optS.get()));
+  }
+  return nil_v();
+}
+
+static Value control_apply0(State& vm, Value fn) { return apply(vm, fn, vm.stack.len, 0); }
+
+static Value control_apply1(State& vm, Value fn, Value arg) {
+  Scope roots(vm);
+  Slot argRoot = roots.push(arg);
+  return apply(vm, fn, argRoot.idx, 1);
+}
+
+Value vm_control_handler_bind(State& vm, u32 base, u32 argc) {
+  if (argc == 0 || (argc - 1) % 2 != 0) return raise_error(vm, "handler-bind: bad compiled form");
+  u32 handlerBase = vm.handlers.len;
+  for (u32 i = 0; i + 1 < argc; i += 2)
+    vm.handlers.push(HandlerBinding{vm.stack[base + i], vm.stack[base + i + 1]});
+  Value result = control_apply0(vm, vm.stack[base + argc - 1]);
+  vm.handlers.len = handlerBase;
+  return result;
+}
+
+Value vm_control_restart_case(State& vm, u32 base, u32 argc) {
+  if (argc == 0 || (argc - 1) % 3 != 0) return raise_error(vm, "restart-case: bad compiled form");
+  u32 restartBase = vm.restarts.len;
+  u64 firstId = vm.restartIdCounter + 1;
+  u32 count = (argc - 1) / 3;
+  for (u32 i = 0; i < count; i++) {
+    u32 arg = base + 1 + i * 3;
+    if (vm.stack[arg].tag != Tag::Symbol) {
+      vm.restarts.len = restartBase;
+      return raise_error(vm, "restart-case: bad name");
+    }
+    Obj* object = vm.heap.alloc(ObjType::Restart, sizeof(RestartData));
+    Value restart = obj_v(Tag::Restart, object);
+    RestartData* data = as_restart(restart);
+    data->name = vm.stack[arg].id;
+    data->description = vm.stack[arg + 1];
+    data->restartId = ++vm.restartIdCounter;
+    vm.restarts.push(RestartRec{restart});
+  }
+
+  Value result = control_apply0(vm, vm.stack[base]);
+  vm.restarts.len = restartBase;
+  if (result.tag != Tag::Unwind || vm.unwindKind != UnwindKind::Restart ||
+      vm.unwindRestartId < firstId || vm.unwindRestartId >= firstId + count)
+    return result;
+
+  u32 selected = (u32)(vm.unwindRestartId - firstId);
+  Scope roots(vm);
+  Slot args = roots.push(vm.unwindRestartArgs);
+  vm.unwindKind = UnwindKind::None;
+  vm.unwindCondition = nil_v();
+  vm.unwindRestartArgs = nil_v();
+  u32 argBase = vm.stack.len;
+  u32 argCount = 0;
+  for (Value cursor = args.get(); cursor.tag == Tag::Pair; cursor = as_pair(cursor)->cdr) {
+    vm.push(as_pair(cursor)->car);
+    argCount++;
+  }
+  Value handler = vm.stack[base + 1 + selected * 3 + 2];
+  return apply(vm, handler, argBase, argCount);
+}
+
+Value vm_control_try(State& vm, u32 base, u32 argc) {
+  if (argc == 0 || vm.stack[base].tag != Tag::Int || vm.stack[base].i < 0)
+    return raise_error(vm, "try: bad compiled form");
+  u64 bodyCount64 = (u64)vm.stack[base].i;
+  if (bodyCount64 > argc - 1 || (argc - 1 - bodyCount64) % 2 != 0)
+    return raise_error(vm, "try: bad compiled form");
+  u32 bodyCount = (u32)bodyCount64;
+  Value result = nil_v();
+  for (u32 i = 0; i < bodyCount; i++) {
+    result = control_apply0(vm, vm.stack[base + 1 + i]);
+    if (result.tag == Tag::Unwind) break;
+  }
+  if (result.tag != Tag::Unwind || vm.unwindKind != UnwindKind::Condition) return result;
+
+  Scope roots(vm);
+  Slot condition = roots.push(vm.unwindCondition);
+  vm.unwindKind = UnwindKind::None;
+  u32 catches = base + 1 + bodyCount;
+  for (u32 arg = catches; arg < base + argc; arg += 2) {
+    Value predicate = control_apply0(vm, vm.stack[arg]);
+    if (predicate.tag == Tag::Unwind) return predicate;
+    Value matches = control_apply1(vm, predicate, condition.get());
+    if (matches.tag == Tag::Unwind) return matches;
+    if (is_truthy(matches)) return control_apply1(vm, vm.stack[arg + 1], condition.get());
+  }
+  vm.unwindKind = UnwindKind::Condition;
+  vm.unwindCondition = condition.get();
+  return unwind_v();
+}
+
+Value vm_control_unwind_protect(State& vm, u32 base, u32 argc) {
+  if (argc == 0) return raise_error(vm, "unwind-protect: bad compiled form");
+  Value result = control_apply0(vm, vm.stack[base]);
+  UnwindKind kind = vm.unwindKind;
+  Scope roots(vm);
+  Slot condition = roots.push(vm.unwindCondition);
+  Slot restartArgs = roots.push(vm.unwindRestartArgs);
+  u64 restartId = vm.unwindRestartId;
+  if (result.tag == Tag::Unwind) vm.unwindKind = UnwindKind::None;
+  for (u32 i = 1; i < argc; i++) {
+    Value cleanup = control_apply0(vm, vm.stack[base + i]);
+    if (cleanup.tag == Tag::Unwind) {
+      result = cleanup;
+      kind = vm.unwindKind;
+      condition.set(vm.unwindCondition);
+      restartArgs.set(vm.unwindRestartArgs);
+      restartId = vm.unwindRestartId;
+      vm.unwindKind = UnwindKind::None;
+    }
+  }
+  if (result.tag == Tag::Unwind) {
+    vm.unwindKind = kind;
+    vm.unwindCondition = condition.get();
+    vm.unwindRestartArgs = restartArgs.get();
+    vm.unwindRestartId = restartId;
+  }
+  return result;
+}
+
+Value vm_control_with_params(State& vm, u32 base, u32 argc) {
+  if (argc == 0 || (argc - 1) % 2 != 0) return raise_error(vm, "with-params: bad compiled form");
+  u32 paramBase = vm.paramBindings.len;
+  Scope roots(vm);
+  for (u32 i = 0; i + 1 < argc; i += 2) {
+    Value param = control_apply0(vm, vm.stack[base + i]);
+    if (param.tag == Tag::Unwind) {
+      vm.paramBindings.len = paramBase;
+      return param;
+    }
+    if (param.tag != Tag::Param) {
+      vm.paramBindings.len = paramBase;
+      return raise_error(vm, "with-params: not a param");
+    }
+    Slot paramRoot = roots.push(param);
+    Value value = control_apply0(vm, vm.stack[base + i + 1]);
+    if (value.tag == Tag::Unwind) {
+      vm.paramBindings.len = paramBase;
+      return value;
+    }
+    Slot valueRoot = roots.push(value);
+    vm.paramBindings.push(ParamBinding{paramRoot.get(), valueRoot.get()});
+  }
+  Value result = control_apply0(vm, vm.stack[base + argc - 1]);
+  vm.paramBindings.len = paramBase;
+  return result;
+}
+
+Value vm_control_defparam(State& vm, u32 base, u32 argc) {
+  if (argc != 3 || vm.stack[base].tag != Tag::Symbol)
+    return raise_error(vm, "defparam: bad compiled form");
+  Obj* object = vm.heap.alloc(ObjType::Param, sizeof(ParamData));
+  Value param = obj_v(Tag::Param, object);
+  ParamData* data = as_param(param);
+  data->name = vm.stack[base].id;
+  data->defaultVal = vm.stack[base + 2];
+  Scope roots(vm);
+  Slot paramRoot = roots.push(param);
+  return ns_define(vm, data->name, paramRoot.get(), false, vm.stack[base + 1]);
+}
+
+Value vm_control_ns(State& vm, u32 base, u32 argc) {
+  if (argc == 0 || vm.stack[base].tag != Tag::Symbol)
+    return raise_error(vm, "ns: bad compiled form");
+  ns_switch(vm, vm.stack[base].id);
+  Scope roots(vm);
+  Slot specs = roots.push();
+  for (u32 i = 1; i < argc; i++) {
+    Value clause = vm.stack[base + i];
+    if (!pairp(clause) || car_(clause).tag != Tag::Keyword || car_(clause).id != vm.syms.kwRequire)
+      continue;
+    specs.set(cdr_(clause));
+    while (pairp(specs.get())) {
+      Value result = require_spec(vm, car_(specs.get()));
+      if (result.tag == Tag::Unwind) return result;
+      specs.set(cdr_(specs.get()));
+    }
+  }
+  return nil_v();
+}
+
+Value vm_control_in_ns(State& vm, u32 base, u32 argc) {
+  if (argc != 1) return raise_error(vm, "in-ns: one argument");
+  u32 name = name_id_of(vm, unwrap_quote(vm, vm.stack[base]));
+  if (!name) return raise_error(vm, "in-ns: bad namespace name");
+  ns_switch(vm, name);
+  return nil_v();
+}
+
+Value vm_control_require(State& vm, u32 base, u32 argc) {
+  for (u32 i = 0; i < argc; i++) {
+    Value result = require_spec(vm, vm.stack[base + i]);
+    if (result.tag == Tag::Unwind) return result;
   }
   return nil_v();
 }
@@ -1023,7 +1220,15 @@ Value eval_form(State& vm, Value form) {
       form = expanded;
     }
   }
+#ifdef OT_USE_VM
+  Scope roots(vm);
+  Slot formRoot = roots.push(form);
+  Slot code = roots.push(compile_form(vm, formRoot.get()));
+  if (code.get().tag == Tag::Unwind) return code.get();
+  return vm_execute_code(vm, code.get());
+#else
   return eval_tr(vm, form, null_v(), true);
+#endif
 }
 
 Value eval_source(State& vm, const char* src, u32 len, const char* name,

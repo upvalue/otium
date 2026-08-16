@@ -46,7 +46,8 @@ Value make_compiled_function(State& state, Value code, Value captures, Value nsN
   return fnValue;
 }
 
-static Value enter_frame(State& state, Value fnValue, u32 callBase, u32 argc, bool tail) {
+static Value enter_frame(State& state, Value fnValue, u32 callBase, u32 argc, bool tail,
+                         bool restoreNs = true) {
   FunctionData* fn = as_function(fnValue);
   CodeData* code = as_code(fn->code);
   u32 nfixed = code->nfixed;
@@ -70,8 +71,8 @@ static Value enter_frame(State& state, Value fnValue, u32 callBase, u32 argc, bo
     frame.base = callBase + 1;
     frame.stackBase = frame.base + nlocals;
   } else {
-    state.frames.push(
-        CallFrame{fnValue, 0, callBase, callBase + 1, callBase + 1 + nlocals, state.currentNs});
+    state.frames.push(CallFrame{fnValue, 0, callBase, callBase + 1, callBase + 1 + nlocals,
+                                state.currentNs, restoreNs});
   }
 
   CallFrame& frame = state.frames[state.frames.len - 1];
@@ -106,7 +107,7 @@ static void load_frame(State& state, const u8** bytes, const u8** ip, const u8**
 static Value unwind_to(State& state, u32 floor) {
   while (state.frames.len > floor) {
     CallFrame frame = state.frames.pop();
-    state.currentNs = frame.savedNs;
+    if (frame.restoreNs) state.currentNs = frame.savedNs;
     state.popTo(frame.callBase);
   }
   return unwind_v();
@@ -154,7 +155,7 @@ Value vm_execute(State& state, u32 floor) {
   VM_OP(Halt) {
     Value result = state.stack.len > stackBase ? state.stack[state.stack.len - 1] : nil_v();
     CallFrame frame = state.frames.pop();
-    state.currentNs = frame.savedNs;
+    if (frame.restoreNs) state.currentNs = frame.savedNs;
     state.popTo(frame.callBase);
     if (state.frames.len == floor) return result;
     state.push(result);
@@ -333,6 +334,11 @@ Value vm_execute(State& state, u32 floor) {
     }
     Value result = apply(state, callee, callBase + 1, argc);
     if (result.tag == Tag::Unwind) return unwind_to(state, floor);
+    if (state.interruptFlag) {
+      state.interruptFlag = false;
+      start_quit(state);
+      return unwind_to(state, floor);
+    }
     state.popTo(callBase);
     state.push(result);
     VM_LOAD_FRAME();
@@ -361,8 +367,13 @@ Value vm_execute(State& state, u32 floor) {
     }
     Value result = apply(state, callee, source + 1, argc);
     if (result.tag == Tag::Unwind) return unwind_to(state, floor);
+    if (state.interruptFlag) {
+      state.interruptFlag = false;
+      start_quit(state);
+      return unwind_to(state, floor);
+    }
     CallFrame frame = state.frames.pop();
-    state.currentNs = frame.savedNs;
+    if (frame.restoreNs) state.currentNs = frame.savedNs;
     state.popTo(frame.callBase);
     if (state.frames.len == floor) return result;
     state.push(result);
@@ -373,7 +384,7 @@ Value vm_execute(State& state, u32 floor) {
     if (state.stack.len <= stackBase) return unwind_to(state, floor);
     Value result = state.stack[state.stack.len - 1];
     CallFrame frame = state.frames.pop();
-    state.currentNs = frame.savedNs;
+    if (frame.restoreNs) state.currentNs = frame.savedNs;
     state.popTo(frame.callBase);
     if (state.frames.len == floor) return result;
     state.push(result);
@@ -566,7 +577,15 @@ Value vm_execute_code(State& state, Value code) {
       roots.push(make_compiled_function(state, codeRoot.get(), captures.get(),
                                         symbol_v(state.currentNs), as_code(codeRoot.get())->name));
   if (fn.get().tag == Tag::Unwind) return fn.get();
-  return vm_call(state, fn.get(), state.stack.len, 0);
+  u32 floor = state.frames.len;
+  u32 callBase = state.stack.len;
+  state.push(fn.get());
+  Value entered = enter_frame(state, state.stack[callBase], callBase, 0, false, false);
+  if (entered.tag == Tag::Unwind) {
+    state.popTo(callBase);
+    return entered;
+  }
+  return vm_execute(state, floor);
 }
 
 }  // namespace ot

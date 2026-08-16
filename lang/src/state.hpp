@@ -41,6 +41,7 @@ struct CallFrame {
   u32 base;       // first local slot
   u32 stackBase;  // first operand slot
   u32 savedNs;
+  bool restoreNs;
 };
 
 // Pre-interned symbol/keyword name ids.

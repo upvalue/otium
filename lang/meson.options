@@ -1,2 +1,2 @@
 option('gc_stress', type : 'boolean', value : false,
-  description : 'Collect on every allocation (defines OT_GC_STRESS)')
+  description : 'Collect on every allocation (defines OT_GC_STRESS). Extremely expensive, avoid during normal development.')

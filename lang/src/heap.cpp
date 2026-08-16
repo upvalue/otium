@@ -158,8 +158,10 @@ void Heap::collectInto(u32 newSize) {
         visitSlot(&d->params);
         visitSlot(&d->body);
         visitSlot(&d->env);
+        visitSlot(&d->code);
         visitSlot(&d->nsName);
         visitSlot(&d->docstring);
+        for (u32 i = 0; i < d->nupvals; i++) visitSlot(&function_upvals(d)[i]);
         break;
       }
       case ObjType::Code: {

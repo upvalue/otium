@@ -34,6 +34,15 @@ struct ParamBinding {
   Value param, value;
 };
 
+struct CallFrame {
+  Value fn;       // roots the closure and its Code object
+  u32 ip;         // byte offset in fn's pinned code
+  u32 callBase;   // callee slot; result replaces callee + arguments
+  u32 base;       // first local slot
+  u32 stackBase;  // first operand slot
+  u32 savedNs;
+};
+
 // Pre-interned symbol/keyword name ids.
 struct Syms {
   u32 quote_, if_, define_, def_, definePriv_, setBang_, lambda_, fn_, defmacro_, begin_, do_, let_,
@@ -81,6 +90,7 @@ struct State {
   Vec<RestartRec> restarts;         // innermost last
   Vec<ParamBinding> paramBindings;  // innermost last
   Vec<u32> loadingNs;               // require cycle detection
+  Vec<CallFrame> frames;            // compiled calls; innermost last
 
   Syms syms;
 
@@ -139,7 +149,9 @@ struct Scope {
 // at call time (the underlying helpers root their Value args internally via
 // Heap::tempRoots, so the raw forms are also safe — these exist so call
 // sites don't need a raw Value at all).
-inline Value make_pair(State& vm, Slot car, Slot cdr) { return make_pair(vm, car.get(), cdr.get()); }
+inline Value make_pair(State& vm, Slot car, Slot cdr) {
+  return make_pair(vm, car.get(), cdr.get());
+}
 inline Value make_string_from(State& vm, Slot src, u32 byteOff, u32 len) {
   return make_string_from(vm, src.get(), byteOff, len);
 }

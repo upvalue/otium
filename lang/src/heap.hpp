@@ -85,9 +85,11 @@ struct FunctionData {
   Value params;     // the parameter list form
   Value body;       // list of body forms
   Value env;        // captured lexical env (nil for natives)
+  Value code;       // Code for compiled functions, nil for tree/native functions
   Value nsName;     // defining namespace (symbol)
   NativeFn native;  // non-null for natives
   Value docstring;
+  u32 nupvals;  // boxed captures stored inline after this struct
 };
 struct ParamData {
   u32 name;
@@ -175,6 +177,7 @@ inline TableData* as_table(Value v) { return (TableData*)obj_payload(v.obj); }
 inline BufferData* as_buffer(Value v) { return (BufferData*)obj_payload(v.obj); }
 inline CodeData* as_code(Value v) { return (CodeData*)obj_payload(v.obj); }
 inline FunctionData* as_function(Value v) { return (FunctionData*)obj_payload(v.obj); }
+inline Value* function_upvals(FunctionData* fn) { return (Value*)(fn + 1); }
 inline ParamData* as_param(Value v) { return (ParamData*)obj_payload(v.obj); }
 inline RestartData* as_restart(Value v) { return (RestartData*)obj_payload(v.obj); }
 

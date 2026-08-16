@@ -86,6 +86,7 @@ static void state_walk_roots(void* ud, Heap::VisitFn visit, void* ctx) {
     visit(ctx, &vm->paramBindings[i].param);
     visit(ctx, &vm->paramBindings[i].value);
   }
+  for (u32 i = 0; i < vm->frames.len; i++) visit(ctx, &vm->frames[i].fn);
 }
 
 // Evaluate one embedded bootstrap file; any read or eval error here is a

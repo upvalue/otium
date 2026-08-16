@@ -3,6 +3,7 @@
 #include "eval.hpp"
 #include "ns.hpp"
 #include "reader.hpp"
+#include "vm.hpp"
 
 namespace ot {
 
@@ -105,9 +106,11 @@ static Value make_closure(State& vm, u32 name, Value params, Value body, Value e
   fd->params = pS.get();
   fd->body = bS.get();
   fd->env = eS.get();
+  fd->code = nil_v();
   fd->nsName = symbol_v(vm.currentNs);
   fd->native = nullptr;
   fd->docstring = dS.get();
+  fd->nupvals = 0;
   return fv;
 }
 
@@ -119,9 +122,11 @@ Value make_native(State& vm, const char* name, NativeFn fn) {
   fd->params = nil_v();
   fd->body = nil_v();
   fd->env = nil_v();
+  fd->code = nil_v();
   fd->nsName = symbol_v(vm.syms.otiumCore_);
   fd->native = fn;
   fd->docstring = nil_v();
+  fd->nupvals = 0;
   return fv;
 }
 
@@ -204,6 +209,7 @@ Value apply(State& vm, Value callee, u32 base, u32 argc) {
     case Tag::Macro:
     case Tag::Function: {
       if (fn_data(callee)->native) return fn_data(callee)->native(vm, base, argc);
+      if (fn_data(callee)->code.tag == Tag::Code) return vm_call(vm, callee, base, argc);
       Scope s(vm);
       Slot c = s.push(callee);  // binding below allocates
       Value env = bind_params_stack(vm, c.get(), base, argc);
@@ -955,7 +961,8 @@ static Value eval_tr(State& vm, Value form, Value env, bool topLevel) {
     env = vm.stack[rootBase + 1];
     if (cursor.get().tag != Tag::Null) RET(raise_error(vm, "dotted call form"));
     Value callee = vm.stack[abase];
-    if (callee.tag == Tag::Function && !fn_data(callee)->native) {
+    if (callee.tag == Tag::Function && !fn_data(callee)->native &&
+        fn_data(callee)->code.tag != Tag::Code) {
       // tail-call: rebind (form, env) and continue — constant stack
       Value env2 = bind_params_stack(vm, callee, abase + 1, argc);
       if (env2.tag == Tag::Unwind) RET(env2);

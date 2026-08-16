@@ -77,6 +77,25 @@ static void print_named(State& vm, const char* kind, u32 nameId, Buf& out) {
   out.push('>');
 }
 
+static void print_function(State& vm, Value value, const char* kind, Buf& out) {
+  FunctionData* fn = as_function(value);
+  if (fn->code.tag != Tag::Code) {
+    print_named(vm, kind, fn->name, out);
+    return;
+  }
+  out.appendCstr("#<");
+  out.appendCstr(kind);
+  if (fn->name) {
+    out.push(' ');
+    u32 len = 0;
+    const char* name = vm.intern.name(fn->name, &len);
+    if (name) out.append(name, len);
+  }
+  out.push(' ');
+  code_print_ascii(fn->code, out);
+  out.push('>');
+}
+
 static void print_val(State& vm, Value v, Buf& out, bool display) {
   switch (v.tag) {
     case Tag::Nil: out.appendCstr("nil"); return;
@@ -168,8 +187,8 @@ static void print_val(State& vm, Value v, Buf& out, bool display) {
       code_print_ascii(v, out);
       out.push('>');
       return;
-    case Tag::Function: print_named(vm, "fn", as_function(v)->name, out); return;
-    case Tag::Macro: print_named(vm, "macro", as_function(v)->name, out); return;
+    case Tag::Function: print_function(vm, v, "fn", out); return;
+    case Tag::Macro: print_function(vm, v, "macro", out); return;
     case Tag::Param: print_named(vm, "param", as_param(v)->name, out); return;
     case Tag::Restart: print_named(vm, "restart", as_restart(v)->name, out); return;
     case Tag::Unwind: out.appendCstr("#<unwind>"); return;

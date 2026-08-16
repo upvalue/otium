@@ -517,14 +517,17 @@ static int parse_args(int argc, char** argv, CliOptions* options) {
 }
 
 int main(int argc, char** argv) {
+  // Track the runtime's own defaults rather than restating them; --max-depth
+  // and --stack-slots only override what state_config_default already picked.
+  const StateConfig defaults = state_config_default();
   CliOptions options = {
       .files = {0},
       .repl = false,
       .server = false,
-      .maxDepth = 512,
-      .stackSlots = 4096,
-      .heapInit = 4u * 1024 * 1024,
-      .heapMax = 64u * 1024 * 1024,
+      .maxDepth = defaults.maxDepth,
+      .stackSlots = defaults.stackSlots,
+      .heapInit = defaults.heapBytes,
+      .heapMax = defaults.heapMaxBytes,
   };
   int parseStatus = parse_args(argc, argv, &options);
   if (parseStatus != 0) return parseStatus == 1 ? 0 : parseStatus;

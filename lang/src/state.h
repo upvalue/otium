@@ -7,18 +7,32 @@
 #include "heap.h"
 #include "intern.h"
 
+// Ceilings are error limits, not reservations: the stack and frame vector start
+// at the *Initial* sizes and grow on demand up to the *Slots*/*Depth* caps,
+// where exceeding them raises a catchable condition rather than aborting. This
+// follows Lua, whose LUAI_MAXSTACK is a million slots against a stack that
+// starts at a few dozen. An embedded host that wants a known worst case sets
+// the caps down to the initial sizes and gets a fixed allocation.
+//
+// Growth reallocs, so the stack's address is not stable. Rooted handles are
+// indices for that reason (see Ref below) -- the same reason Lua's C API
+// addresses its stack by index rather than by TValue*.
 typedef struct StateConfig {
-  u32 heapBytes;     // default 4 MiB
-  u32 stackSlots;    // default 4096
-  u32 maxDepth;      // default 512
-  u32 heapMaxBytes;  // default 64 MiB
+  u32 heapBytes;      // default 4 MiB
+  u32 stackSlots;     // ceiling, default 1 Mi slots (16 MiB if ever reached)
+  u32 stackInitial;   // reserved up front, default 4096 slots (64 KiB)
+  u32 maxDepth;       // call depth ceiling, default 200000
+  u32 framesInitial;  // reserved up front, default 256 frames
+  u32 heapMaxBytes;   // default 64 MiB
 } StateConfig;
 
 static inline StateConfig state_config_default(void) {
   return (StateConfig){
       .heapBytes = 4u * 1024 * 1024,
-      .stackSlots = 4096,
-      .maxDepth = 512,
+      .stackSlots = 1u << 20,
+      .stackInitial = 4096,
+      .maxDepth = 200000,
+      .framesInitial = 256,
       .heapMaxBytes = OT_HEAP_MAX_DEFAULT,
   };
 }

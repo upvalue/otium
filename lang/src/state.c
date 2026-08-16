@@ -77,13 +77,12 @@ State* state_create(const StateConfig* cfg) {
   vm->unwindRestartArgs = nil_v();
   vm->handlerVisible = 0xffffffffu;
 
-  // Both limits are enforced as hard ceilings in enter_frame, so reserve their
-  // storage once here rather than reallocating up to it from a capacity of 8.
-  // The VM cannot exceed either; C-side scope pushes are not capped and may
-  // still grow the stack, so this removes the steady-state realloc traffic
-  // without making the stack's address stable.
-  vec_reserve(&vm->stack, c.stackSlots);
-  vec_reserve(&vm->frames, c.maxDepth);
+  // Reserve the working sizes, not the ceilings: growing from a capacity of 8
+  // means a dozen reallocs before a program does anything, while reserving the
+  // full cap would commit 16 MiB of stack no one asked for. Past these, both
+  // grow on demand until enter_frame refuses at the configured ceiling.
+  vec_reserve(&vm->stack, c.stackInitial < c.stackSlots ? c.stackInitial : c.stackSlots);
+  vec_reserve(&vm->frames, c.framesInitial < c.maxDepth ? c.framesInitial : c.maxDepth);
 
   init_syms(vm);
   vm->nsRegistry = make_table(vm);

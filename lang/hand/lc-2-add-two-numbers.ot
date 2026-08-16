@@ -1,0 +1,16 @@
+;; leetcode-2-add-two-numbers.scm - https://leetcode.com/problems/add-two-numbers/description/
+
+(define (add-two-numbers-impl a b accum)
+  (println a b accum)
+  555t 
+  ;(if (or (eq? a '()) (eq? b '()))
+  ;  accum
+  ;  (add-two-numbers-impl (cdr a) (cdr b) (+ accum (car a) (car b))))
+  )
+
+(define (add-two-numbers a b) (add-two-numbers-impl a b 0))
+
+(println (add-two-numbers '(2 4 3) '(5 6 4)))
+
+
+

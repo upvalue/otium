@@ -2,7 +2,7 @@
 id: lan-q4lf
 status: in_progress
 deps: []
-links: [lan-qwff]
+links: [lan-qwff, lan-70gb, lan-5je1]
 created: 2026-08-16T01:28:30Z
 type: task
 priority: 1

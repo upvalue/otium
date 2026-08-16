@@ -16,57 +16,9 @@ static u32 I(Intern& in, const char* s) { return in.intern(s, (u32)strlen(s)); }
 static void init_syms(State& vm) {
   Intern& in = vm.intern;
   Syms& S = vm.syms;
-  S.quote_ = I(in, "quote");
-  S.if_ = I(in, "if");
-  S.define_ = I(in, "define");
-  S.def_ = I(in, "def");
-  S.definePriv_ = I(in, "define-");
-  S.setBang_ = I(in, "set!");
-  S.lambda_ = I(in, "lambda");
-  S.fn_ = I(in, "fn");
-  S.defmacro_ = I(in, "defmacro");
-  S.begin_ = I(in, "begin");
-  S.do_ = I(in, "do");
-  S.let_ = I(in, "let");
-  S.while_ = I(in, "while");
-  S.and_ = I(in, "and");
-  S.or_ = I(in, "or");
-  S.cond_ = I(in, "cond");
-  S.else_ = I(in, "else");
-  S.quasiquote_ = I(in, "quasiquote");
-  S.unquote_ = I(in, "unquote");
-  S.unquoteSplicing_ = I(in, "unquote-splicing");
-  S.ns_ = I(in, "ns");
-  S.inNs_ = I(in, "in-ns");
-  S.require_ = I(in, "require");
-  S.handlerBind_ = I(in, "handler-bind");
-  S.restartCase_ = I(in, "restart-case");
-  S.try_ = I(in, "try");
-  S.catch_ = I(in, "catch");
-  S.unwindProtect_ = I(in, "unwind-protect");
-  S.defer_ = I(in, "defer");
-  S.defparam_ = I(in, "defparam");
-  S.withParams_ = I(in, "with-params");
-  S.array_ = I(in, "array");
-  S.table_ = I(in, "table");
-  S.amp_ = I(in, "&");
-  S.otiumCore_ = I(in, "otium.core");
-  S.user_ = I(in, "user");
-  S.expander_ = I(in, "*expander*");
-  S.error_ = I(in, "error");
-  S.quit_ = I(in, "quit");
-  S.kwType = I(in, "type");
-  S.kwMessage = I(in, "message");
-  S.kwData = I(in, "data");
-  S.kwName = I(in, "name");
-  S.kwVars = I(in, "vars");
-  S.kwAliases = I(in, "aliases");
-  S.kwRefers = I(in, "refers");
-  S.kwOrder = I(in, "order");
-  S.kwAs = I(in, "as");
-  S.kwRefer = I(in, "refer");
-  S.kwReload = I(in, "reload");
-  S.kwRequire = I(in, "require");
+#define OT_INIT_SYM(field, text) S.field = I(in, text);
+  OT_SYM_LIST(OT_INIT_SYM)
+#undef OT_INIT_SYM
 }
 
 // GC root walker: everything the State holds live values in.

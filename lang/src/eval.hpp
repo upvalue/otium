@@ -7,7 +7,6 @@ namespace ot {
 // FunctionData is defined in heap.hpp because the scavenger needs its layout.
 inline FunctionData* fn_data(Value v) { return as_function(v); }
 inline ParamData* param_data(Value v) { return as_param(v); }
-inline RestartData* restart_data(Value v) { return as_restart(v); }
 
 Value eval_form(State&, Value form);  // expand (via *expander*) + evaluate one top-level form
 Value apply(State&, Value callee, u32 base, u32 argc);  // args on vm stack

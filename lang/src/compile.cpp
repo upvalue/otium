@@ -59,8 +59,7 @@ static u32 add_binding(LambdaInfo& lambda, u32 name) {
   return index;
 }
 
-static i32 capture_name(State& state, LambdaInfo& lambda, u32 name) {
-  (void)state;
+static i32 capture_name(LambdaInfo& lambda, u32 name) {
   i32 existing = find_capture(lambda, name);
   if (existing >= 0) return existing;
   if (!lambda.parent) return -1;
@@ -71,7 +70,7 @@ static i32 capture_name(State& state, LambdaInfo& lambda, u32 name) {
     capture.local = true;
     capture.index = lambda.parent->bindings[(u32)local].slot;
   } else {
-    i32 parentCapture = capture_name(state, *lambda.parent, name);
+    i32 parentCapture = capture_name(*lambda.parent, name);
     if (parentCapture < 0) return -1;
     capture.index = (u32)parentCapture;
   }
@@ -108,6 +107,10 @@ static void analyze_quasiquote(State& state, LambdaInfo& lambda, Value form, u32
   analyze_quasiquote(state, lambda, cdr_(form), depth);
 }
 
+static bool is_define_head(State& state, u32 name) {
+  return name == state.syms.define_ || name == state.syms.def_ || name == state.syms.definePriv_;
+}
+
 static LambdaInfo& add_compiler_thunk(LambdaInfo& parent) {
   LambdaInfo* child = new LambdaInfo(&parent, parent.userDepth);
   parent.children.push(child);
@@ -118,7 +121,7 @@ static void analyze_thunk_expr(State& state, LambdaInfo& parent, Value form) {
   LambdaInfo& child = add_compiler_thunk(parent);
   if (child.userDepth > 0 && pairp(form) && car_(form).tag == Tag::Symbol) {
     u32 head = car_(form).id;
-    if (head == state.syms.define_ || head == state.syms.def_ || head == state.syms.definePriv_) {
+    if (is_define_head(state, head)) {
       Value name = defined_name(form);
       if (name.tag == Tag::Symbol) add_binding(child, name.id);
     }
@@ -130,6 +133,24 @@ static void analyze_thunk_expr(State& state, LambdaInfo& parent, Value form) {
 static void analyze_thunk_body(State& state, LambdaInfo& parent, Value forms) {
   LambdaInfo& child = add_compiler_thunk(parent);
   analyze_body(state, child, forms);
+}
+
+static void analyze_binding_control(State& state, LambdaInfo& lambda, Value args,
+                                    bool thunkBindings) {
+  if (!pairp(args)) return;
+  Value bindings = strip_array_literal_head(car_(args), state.syms.array_);
+  for (Value cursor = bindings; pairp(cursor); cursor = cdr_(cursor)) {
+    Value binding = car_(cursor);
+    if (pairp(binding)) {
+      if (thunkBindings) analyze_thunk_expr(state, lambda, car_(binding));
+      else analyze_expr(state, lambda, car_(binding));
+    }
+    if (pairp(binding) && pairp(cdr_(binding))) {
+      if (thunkBindings) analyze_thunk_expr(state, lambda, car_(cdr_(binding)));
+      else analyze_expr(state, lambda, car_(cdr_(binding)));
+    }
+  }
+  analyze_thunk_body(state, lambda, cdr_(args));
 }
 
 static void analyze_one_arg_lambda(State& state, LambdaInfo& parent, Value param, Value body) {
@@ -184,8 +205,7 @@ static Value defined_name(Value form) {
 static Value body_define_name(State& state, Value form) {
   if (!pairp(form) || car_(form).tag != Tag::Symbol) return nil_v();
   u32 head = car_(form).id;
-  if (head != state.syms.define_ && head != state.syms.def_ && head != state.syms.definePriv_)
-    return nil_v();
+  if (!is_define_head(state, head)) return nil_v();
   Value name = defined_name(form);
   return name.tag == Tag::Symbol ? name : nil_v();
 }
@@ -216,7 +236,7 @@ static void analyze_lambda(State& state, LambdaInfo& parent, Value params, Value
 static void analyze_expr(State& state, LambdaInfo& lambda, Value form) {
   if (form.tag == Tag::Symbol) {
     if (!sym_qualified(state, form.id) && find_active(lambda, form.id) < 0)
-      (void)capture_name(state, lambda, form.id);
+      (void)capture_name(lambda, form.id);
     return;
   }
   if (!pairp(form)) return;
@@ -233,7 +253,7 @@ static void analyze_expr(State& state, LambdaInfo& lambda, Value form) {
       if (pairp(args)) analyze_lambda(state, lambda, car_(args), cdr_(args));
       return;
     }
-    if (name == state.syms.define_ || name == state.syms.def_ || name == state.syms.definePriv_) {
+    if (is_define_head(state, name)) {
       if (!pairp(args)) return;
       Value target = car_(args);
       Value rest = cdr_(args);
@@ -252,7 +272,7 @@ static void analyze_expr(State& state, LambdaInfo& lambda, Value form) {
     if (name == state.syms.setBang_) {
       if (pairp(args) && car_(args).tag == Tag::Symbol && !sym_qualified(state, car_(args).id) &&
           find_active(lambda, car_(args).id) < 0)
-        (void)capture_name(state, lambda, car_(args).id);
+        (void)capture_name(lambda, car_(args).id);
       if (pairp(args) && pairp(cdr_(args))) analyze_expr(state, lambda, car_(cdr_(args)));
       return;
     }
@@ -277,15 +297,7 @@ static void analyze_expr(State& state, LambdaInfo& lambda, Value form) {
     }
     if (name == state.syms.ns_ || name == state.syms.inNs_ || name == state.syms.require_) return;
     if (name == state.syms.handlerBind_) {
-      if (!pairp(args)) return;
-      Value bindings = car_(args);
-      bindings = strip_array_literal_head(bindings, state.syms.array_);
-      for (Value cursor = bindings; pairp(cursor); cursor = cdr_(cursor)) {
-        Value binding = car_(cursor);
-        if (pairp(binding)) analyze_expr(state, lambda, car_(binding));
-        if (pairp(binding) && pairp(cdr_(binding))) analyze_expr(state, lambda, car_(cdr_(binding)));
-      }
-      analyze_thunk_body(state, lambda, cdr_(args));
+      analyze_binding_control(state, lambda, args, false);
       return;
     }
     if (name == state.syms.restartCase_) {
@@ -328,16 +340,7 @@ static void analyze_expr(State& state, LambdaInfo& lambda, Value form) {
       return;
     }
     if (name == state.syms.withParams_) {
-      if (!pairp(args)) return;
-      Value bindings = car_(args);
-      bindings = strip_array_literal_head(bindings, state.syms.array_);
-      for (Value cursor = bindings; pairp(cursor); cursor = cdr_(cursor)) {
-        Value binding = car_(cursor);
-        if (pairp(binding)) analyze_thunk_expr(state, lambda, car_(binding));
-        if (pairp(binding) && pairp(cdr_(binding)))
-          analyze_thunk_expr(state, lambda, car_(cdr_(binding)));
-      }
-      analyze_thunk_body(state, lambda, cdr_(args));
+      analyze_binding_control(state, lambda, args, true);
       return;
     }
     if (name == state.syms.defparam_) {
@@ -613,14 +616,16 @@ static bool emit_let(Compiler& compiler, Value args, bool tail) {
   Slot bindings = roots.push(car_(argsRoot.get()));
   bindings.set(strip_array_literal_head(bindings.get(), compiler.state.syms.array_));
   u32 activeBase = compiler.active.len;
+  Slot bindingRoot = roots.push();
   while (pairp(bindings.get())) {
-    Value binding = car_(bindings.get());
-    if (!pairp(binding) || !pairp(cdr_(binding)) || car_(binding).tag != Tag::Symbol) {
+    bindingRoot.set(car_(bindings.get()));
+    if (!pairp(bindingRoot.get()) || !pairp(cdr_(bindingRoot.get())) ||
+        car_(bindingRoot.get()).tag != Tag::Symbol) {
       compiler_error(compiler, "bad let binding");
       break;
     }
-    if (!emit_expr(compiler, car_(cdr_(binding)), false)) break;
-    if (!bind_next_slot(compiler, car_(binding).id)) break;
+    if (!emit_expr(compiler, car_(cdr_(bindingRoot.get())), false)) break;
+    if (!bind_next_slot(compiler, car_(bindingRoot.get()).id)) break;
     bindings.set(cdr_(bindings.get()));
   }
   // Mirror the analyzer's collect_body_defines for this let body: allocate a
@@ -638,6 +643,17 @@ static bool emit_let(Compiler& compiler, Value args, bool tail) {
   bool falls = emit_body(compiler, cdr_(argsRoot.get()), tail);
   compiler.active.len = activeBase;
   return falls;
+}
+
+static void emit_def_global(Compiler& compiler, Value name, bool isPrivate, Value doc) {
+  Scope roots(compiler.state);
+  Slot docRoot = roots.push(doc);
+  Slot descriptor = roots.push(make_array(compiler.state, 3));
+  array_push(compiler.state, descriptor.get(), name);
+  array_push(compiler.state, descriptor.get(), bool_v(isPrivate));
+  array_push(compiler.state, descriptor.get(), docRoot.get());
+  emit_op(compiler, Op::DefGlobal);
+  emit_u16(compiler, add_constant(compiler, descriptor.get()));
 }
 
 static bool emit_define(Compiler& compiler, Value form, bool isPrivate) {
@@ -677,13 +693,7 @@ static bool emit_define(Compiler& compiler, Value form, bool isPrivate) {
     args = cdr_(formRoot.get());
     Value doc = nil_v();
     skip_docstring(cdr_(args), &doc);
-    Slot docRoot = roots.push(doc);
-    Slot descriptor = roots.push(make_array(compiler.state, 3));
-    array_push(compiler.state, descriptor.get(), name);
-    array_push(compiler.state, descriptor.get(), bool_v(isPrivate));
-    array_push(compiler.state, descriptor.get(), docRoot.get());
-    emit_op(compiler, Op::DefGlobal);
-    emit_u16(compiler, add_constant(compiler, descriptor.get()));
+    emit_def_global(compiler, name, isPrivate, doc);
   }
   return true;
 }
@@ -705,15 +715,15 @@ static bool emit_defmacro(Compiler& compiler, Value form) {
   rest = cdr_(args);
   Value doc = nil_v();
   skip_docstring(cdr_(rest), &doc);
-  Slot docRoot = roots.push(doc);
-
-  Slot descriptor = roots.push(make_array(compiler.state, 3));
-  array_push(compiler.state, descriptor.get(), name);
-  array_push(compiler.state, descriptor.get(), bool_v(false));
-  array_push(compiler.state, descriptor.get(), docRoot.get());
-  emit_op(compiler, Op::DefGlobal);
-  emit_u16(compiler, add_constant(compiler, descriptor.get()));
+  emit_def_global(compiler, name, false, doc);
   return true;
+}
+
+static bool finish_control_call(Compiler& compiler, u32 argc, bool tail) {
+  emit_op(compiler, tail ? Op::TailCall : Op::Call);
+  emit_u16(compiler, argc);
+  pop_depth(compiler, argc);
+  return !tail;
 }
 
 static bool emit_call(Compiler& compiler, Value form, bool tail) {
@@ -731,10 +741,7 @@ static bool emit_call(Compiler& compiler, Value form, bool tail) {
     compiler_error(compiler, "dotted call");
     return true;
   }
-  emit_op(compiler, tail ? Op::TailCall : Op::Call);
-  emit_u16(compiler, argc);
-  pop_depth(compiler, argc);
-  return !tail;
+  return finish_control_call(compiler, argc, tail);
 }
 
 static bool emit_while(Compiler& compiler, Value args) {
@@ -793,28 +800,28 @@ static bool emit_cond(Compiler& compiler, Value clauses, bool tail) {
   const u32 baseDepth = compiler.depth;
   bool anyFalls = false;
   bool hasElse = false;
+  Slot clauseRoot = roots.push();
 
   while (pairp(cursor.get())) {
-    Value clause = car_(cursor.get());
-    if (!pairp(clause)) {
+    clauseRoot.set(car_(cursor.get()));
+    if (!pairp(clauseRoot.get())) {
       compiler_error(compiler, "bad cond clause");
       return true;
     }
-    Value test = car_(clause);
-    Value body = cdr_(clause);
+    Value test = car_(clauseRoot.get());
     if (sym_is(test, compiler.state.syms.else_)) {
-      if (!pairp(body)) {
+      if (!pairp(cdr_(clauseRoot.get()))) {
         compiler_error(compiler, "cond else needs a body");
         return true;
       }
       hasElse = true;
-      bool falls = emit_body(compiler, body, tail);
+      bool falls = emit_body(compiler, cdr_(clauseRoot.get()), tail);
       anyFalls = anyFalls || falls;
       break;
     }
 
     if (!emit_expr(compiler, test, false)) return false;
-    if (!pairp(body)) {
+    if (!pairp(cdr_(clauseRoot.get()))) {
       // The clause's own test value is the result, so this exit reaches the end
       // of the cond carrying a value: the form falls through even if every
       // clause body below ends in a tail call.
@@ -827,7 +834,7 @@ static bool emit_cond(Compiler& compiler, Value clauses, bool tail) {
     } else {
       u32 next = emit_jump(compiler, Op::JumpFalse);
       pop_depth(compiler);
-      bool falls = emit_body(compiler, body, tail);
+      bool falls = emit_body(compiler, cdr_(clauseRoot.get()), tail);
       if (falls) {
         exits.push(emit_jump(compiler, Op::Jump));
         anyFalls = true;
@@ -938,21 +945,16 @@ static bool emit_thunk_body(Compiler& compiler, Value forms) {
   return emit_lambda(compiler, forms, 0);
 }
 
-static bool finish_control_call(Compiler& compiler, u32 argc, bool tail) {
-  emit_op(compiler, tail ? Op::TailCall : Op::Call);
-  emit_u16(compiler, argc);
-  pop_depth(compiler, argc);
-  return !tail;
-}
-
-static bool emit_handler_bind(Compiler& compiler, Value args, bool tail) {
+static bool emit_binding_control(Compiler& compiler, Value args, bool tail, const char* badForm,
+                                 const char* badBinding, const char* nativeName, NativeFn native,
+                                 bool thunkBindings) {
   if (!pairp(args)) {
-    compiler_error(compiler, "bad handler-bind");
+    compiler_error(compiler, badForm);
     return true;
   }
   Scope roots(compiler.state);
   Slot argsRoot = roots.push(args);
-  emit_native(compiler, "%handler-bind", vm_control_handler_bind);
+  emit_native(compiler, nativeName, native);
   Slot bindings = roots.push(car_(argsRoot.get()));
   bindings.set(strip_array_literal_head(bindings.get(), compiler.state.syms.array_));
   u32 argc = 0;
@@ -960,17 +962,27 @@ static bool emit_handler_bind(Compiler& compiler, Value args, bool tail) {
   while (pairp(bindings.get())) {
     bindingRoot.set(car_(bindings.get()));
     if (!pairp(bindingRoot.get()) || !pairp(cdr_(bindingRoot.get()))) {
-      compiler_error(compiler, "bad handler-bind binding");
+      compiler_error(compiler, badBinding);
       return true;
     }
-    if (!emit_expr(compiler, car_(bindingRoot.get()), false) ||
-        !emit_expr(compiler, car_(cdr_(bindingRoot.get())), false))
+    if (thunkBindings) {
+      if (!emit_thunk_expr(compiler, car_(bindingRoot.get())) ||
+          !emit_thunk_expr(compiler, car_(cdr_(bindingRoot.get()))))
+        return false;
+    } else if (!emit_expr(compiler, car_(bindingRoot.get()), false) ||
+               !emit_expr(compiler, car_(cdr_(bindingRoot.get())), false)) {
       return false;
+    }
     argc += 2;
     bindings.set(cdr_(bindings.get()));
   }
   if (!emit_thunk_body(compiler, cdr_(argsRoot.get()))) return false;
   return finish_control_call(compiler, argc + 1, tail);
+}
+
+static bool emit_handler_bind(Compiler& compiler, Value args, bool tail) {
+  return emit_binding_control(compiler, args, tail, "bad handler-bind", "bad handler-bind binding",
+                              "%handler-bind", vm_control_handler_bind, false);
 }
 
 static bool emit_restart_case(Compiler& compiler, Value args, bool tail) {
@@ -1062,31 +1074,8 @@ static bool emit_unwind_protect(Compiler& compiler, Value args, bool tail) {
 }
 
 static bool emit_with_params(Compiler& compiler, Value args, bool tail) {
-  if (!pairp(args)) {
-    compiler_error(compiler, "bad with-params");
-    return true;
-  }
-  Scope roots(compiler.state);
-  Slot argsRoot = roots.push(args);
-  Slot bindings = roots.push(car_(argsRoot.get()));
-  bindings.set(strip_array_literal_head(bindings.get(), compiler.state.syms.array_));
-  emit_native(compiler, "%with-params", vm_control_with_params);
-  u32 argc = 0;
-  Slot bindingRoot = roots.push();
-  while (pairp(bindings.get())) {
-    bindingRoot.set(car_(bindings.get()));
-    if (!pairp(bindingRoot.get()) || !pairp(cdr_(bindingRoot.get()))) {
-      compiler_error(compiler, "bad with-params binding");
-      return true;
-    }
-    if (!emit_thunk_expr(compiler, car_(bindingRoot.get())) ||
-        !emit_thunk_expr(compiler, car_(cdr_(bindingRoot.get()))))
-      return false;
-    argc += 2;
-    bindings.set(cdr_(bindings.get()));
-  }
-  if (!emit_thunk_body(compiler, cdr_(argsRoot.get()))) return false;
-  return finish_control_call(compiler, argc + 1, tail);
+  return emit_binding_control(compiler, args, tail, "bad with-params", "bad with-params binding",
+                              "%with-params", vm_control_with_params, true);
 }
 
 static bool emit_defparam(Compiler& compiler, Value args, bool tail) {
@@ -1197,8 +1186,7 @@ static bool emit_expr(Compiler& compiler, Value form, bool tail) {
       return pairp(args) ? emit_lambda(compiler, cdr_(args), 0) : true;
     }
     if (name == compiler.state.syms.let_) return emit_let(compiler, args, tail);
-    if (name == compiler.state.syms.define_ || name == compiler.state.syms.def_ ||
-        name == compiler.state.syms.definePriv_)
+    if (is_define_head(compiler.state, name))
       return emit_define(compiler, formRoot.get(), name == compiler.state.syms.definePriv_);
     if (name == compiler.state.syms.defmacro_) return emit_defmacro(compiler, formRoot.get());
     if (name == compiler.state.syms.setBang_) {

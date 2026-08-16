@@ -208,11 +208,7 @@ static void table_ensure(TableData* t, u32 extra) {
   if (extra > UINT32_MAX - t->entriesLen) ot_fatal("table: capacity overflow");
   u32 need = t->entriesLen + extra;
   if (need > t->entriesCap) {
-    u32 ncap = t->entriesCap ? t->entriesCap : 8;
-    while (ncap < need) {
-      if (ncap > UINT32_MAX / 2) ot_fatal("table: capacity overflow");
-      ncap *= 2;
-    }
+    u32 ncap = grow_capacity(t->entriesCap, need, "table: capacity overflow");
     TableEntry* ne = (TableEntry*)realloc(t->entries, (size_t)ncap * sizeof(TableEntry));
     if (!ne) ot_fatal("table: out of memory");
     t->entries = ne;
@@ -298,11 +294,6 @@ bool table_iter_next(Value table, u32* cursor, Value* k, Value* v) {
     return true;
   }
   return false;
-}
-
-// Strong definition for the printer's table hook (weak no-op in printer.cpp).
-bool printer_table_next(State&, Value table, u32* cursor, Value* k, Value* v) {
-  return table_iter_next(table, cursor, k, v);
 }
 
 // ---------------------------------------------------------------------------

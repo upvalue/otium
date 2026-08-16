@@ -16,6 +16,16 @@ void register_time(State&);
 // Wrap a NativeFn in a Function object and ns_define it (implemented in sys.cpp).
 void def_native(State& vm, const char* name, NativeFn f);
 
+// Symbol/keyword id; strings are interned; unsupported values return 0.
+inline u32 name_id_of(State& vm, Value v) {
+  if (v.tag == Tag::Symbol || v.tag == Tag::Keyword) return v.id;
+  if (v.tag == Tag::String) {
+    StringData* string = as_string(v);
+    return vm.intern.intern(string_bytes(string), string->len);
+  }
+  return 0;
+}
+
 // Argument accessor for natives: reads the rooted stack slot at use time.
 // Use ARG(n) (or a Slot) at the point of use — never copy it
 // into a local that lives across an allocating call; the semispace collector
@@ -44,9 +54,6 @@ inline Value need_pair(State& vm, const char* who, Value v) {
 inline Value need_array(State& vm, const char* who, Value v) {
   return need_tag(vm, who, v, Tag::Array, "array");
 }
-inline Value need_table(State& vm, const char* who, Value v) {
-  return need_tag(vm, who, v, Tag::Table, "table");
-}
 inline Value need_buffer(State& vm, const char* who, Value v) {
   return need_tag(vm, who, v, Tag::Buffer, "buffer");
 }
@@ -66,6 +73,10 @@ inline Value need_nums(State& vm, const char* who, u32 base, u32 argc) {
     if (!is_num(vm.stack[base + i])) return raise_error(vm, "%s: expected number", who);
   return nil_v();
 }
+inline Value need_num_args(State& vm, const char* who, u32 base, u32 argc, u32 min, u32 max) {
+  OT_TRY(need_argc(vm, who, argc, min, max));
+  return need_nums(vm, who, base, argc);
+}
 inline Value need_strings(State& vm, const char* who, u32 base, u32 argc) {
   for (u32 i = 0; i < argc; i++) OT_TRY(need_string(vm, who, vm.stack[base + i]));
   return nil_v();
@@ -76,8 +87,8 @@ inline Value need_strings(State& vm, const char* who, u32 base, u32 argc) {
 // immutables structurally, mutables via heap.identityOf (stable across GC).
 u64 val_hash(State& vm, Value v);
 
-// val_equal is declared in value.hpp; defined in data.cpp.
-// val_eq is inline in value.hpp.
+// Deep equal? semantics; val_eq is the inline identity operation in value.hpp.
+bool val_equal(State& vm, Value a, Value b);
 
 // Table/array API declared in heap.hpp and implemented by the builtins.
 Value table_get(State&, Value table, Value key);                     // nil on miss

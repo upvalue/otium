@@ -350,11 +350,7 @@ Value make_buffer_h(Heap& h) {
 void array_reserve(Value arr, u32 n) {
   ArrayData* d = as_array(arr);
   if (n <= d->cap) return;
-  u32 ncap = d->cap ? d->cap : 8;
-  while (ncap < n) {
-    if (ncap > UINT32_MAX / 2) ot_fatal("array: capacity overflow");
-    ncap *= 2;
-  }
+  u32 ncap = grow_capacity(d->cap, n, "array: capacity overflow");
   Value* ni = (Value*)realloc(d->items, (size_t)ncap * sizeof(Value));
   if (!ni) ot_fatal("array: out of memory");
   d->items = ni;

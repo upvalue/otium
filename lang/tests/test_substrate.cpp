@@ -1,6 +1,5 @@
-// Substrate tests: Vec, Value tags, heap alloc/scavenge, identity, intern.
-// Runs standalone against src/heap.cpp + src/intern.cpp (no state.cpp needed:
-// Heap is constructed with vm == nullptr and roots registered via addRoots).
+// Low-level tests: Vec, Value tags, bare-Heap allocation/scavenging, identity,
+// and interning. Bare-Heap cases pass nullptr for its optional State owner.
 #include "doctest.h"
 #include "common.hpp"
 #include "vec.hpp"
@@ -134,6 +133,10 @@ TEST_CASE("heap buffer payload placement lifetime") {
 }
 
 TEST_CASE("heap size overflow guards abort before allocating") {
+  CHECK(child_aborts([] {
+    Vec<int> values;
+    values.reserve(UINT32_MAX);
+  }));
   CHECK(child_aborts([] {
     Heap heap(nullptr, 1024);
     heap.maxBytes = UINT32_MAX;

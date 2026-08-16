@@ -51,15 +51,65 @@ struct CallFrame {
   bool restoreNs;
 };
 
-// Pre-interned symbol/keyword name ids.
+// Pre-interned symbol/keyword name ids. This list generates both storage and
+// initialization so adding a field cannot leave it silently uninitialized.
+#define OT_SYM_LIST(X)                                                                             \
+  X(quote_, "quote")                                                                              \
+  X(if_, "if")                                                                                    \
+  X(define_, "define")                                                                            \
+  X(def_, "def")                                                                                  \
+  X(definePriv_, "define-")                                                                       \
+  X(setBang_, "set!")                                                                             \
+  X(lambda_, "lambda")                                                                            \
+  X(fn_, "fn")                                                                                    \
+  X(defmacro_, "defmacro")                                                                        \
+  X(begin_, "begin")                                                                              \
+  X(do_, "do")                                                                                    \
+  X(let_, "let")                                                                                  \
+  X(while_, "while")                                                                              \
+  X(and_, "and")                                                                                  \
+  X(or_, "or")                                                                                    \
+  X(cond_, "cond")                                                                                \
+  X(else_, "else")                                                                                \
+  X(quasiquote_, "quasiquote")                                                                    \
+  X(unquote_, "unquote")                                                                          \
+  X(unquoteSplicing_, "unquote-splicing")                                                         \
+  X(ns_, "ns")                                                                                    \
+  X(inNs_, "in-ns")                                                                               \
+  X(require_, "require")                                                                          \
+  X(handlerBind_, "handler-bind")                                                                 \
+  X(restartCase_, "restart-case")                                                                 \
+  X(try_, "try")                                                                                  \
+  X(catch_, "catch")                                                                              \
+  X(unwindProtect_, "unwind-protect")                                                             \
+  X(defer_, "defer")                                                                              \
+  X(defparam_, "defparam")                                                                        \
+  X(withParams_, "with-params")                                                                   \
+  X(array_, "array")                                                                              \
+  X(table_, "table")                                                                              \
+  X(amp_, "&")                                                                                    \
+  X(otiumCore_, "otium.core")                                                                     \
+  X(user_, "user")                                                                                \
+  X(expander_, "*expander*")                                                                      \
+  X(error_, "error")                                                                              \
+  X(quit_, "quit")                                                                                \
+  X(kwType, "type")                                                                               \
+  X(kwMessage, "message")                                                                         \
+  X(kwData, "data")                                                                               \
+  X(kwName, "name")                                                                               \
+  X(kwVars, "vars")                                                                               \
+  X(kwAliases, "aliases")                                                                         \
+  X(kwRefers, "refers")                                                                           \
+  X(kwOrder, "order")                                                                             \
+  X(kwAs, "as")                                                                                   \
+  X(kwRefer, "refer")                                                                             \
+  X(kwReload, "reload")                                                                           \
+  X(kwRequire, "require")
+
 struct Syms {
-  u32 quote_, if_, define_, def_, definePriv_, setBang_, lambda_, fn_, defmacro_, begin_, do_, let_,
-      while_, and_, or_, cond_, else_, quasiquote_, unquote_, unquoteSplicing_, ns_, inNs_,
-      require_, handlerBind_, restartCase_, try_, catch_, unwindProtect_, defer_, defparam_,
-      withParams_, array_, table_, amp_, otiumCore_, user_, expander_, error_, quit_;
-  // keyword name ids
-  u32 kwType, kwMessage, kwData, kwName, kwVars, kwAliases, kwRefers, kwOrder, kwAs, kwRefer,
-      kwReload, kwRequire;
+#define OT_SYM_FIELD(field, text) u32 field;
+  OT_SYM_LIST(OT_SYM_FIELD)
+#undef OT_SYM_FIELD
 };
 
 struct State {

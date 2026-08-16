@@ -171,6 +171,10 @@ Value vm_execute(State& state, u32 floor) {
   do {                                                                                             \
     if (!(cond)) VM_FAULT(__VA_ARGS__);                                                            \
   } while (0)
+#define VM_PROPAGATE(value)                                                                        \
+  do {                                                                                             \
+    if ((value).tag == Tag::Unwind) return unwind_to(state, floor);                                \
+  } while (0)
 // Fault naming the unresolved symbol still sitting in the constant pool.
 #define VM_FAULT_SYM(index, fmt)                                                                   \
   do {                                                                                             \
@@ -230,9 +234,6 @@ Value vm_execute(State& state, u32 floor) {
     switch (instruction) {
 #endif
 
-  VM_OP(Halt) {
-    VM_LEAVE_FRAME(state.stack.len > stackBase ? state.stack[state.stack.len - 1] : nil_v());
-  }
   VM_OP(Const) {
     state.push(VM_CONSTS()[VM_U16()]);
     VM_DISPATCH();
@@ -260,14 +261,6 @@ Value vm_execute(State& state, u32 floor) {
   VM_OP(Pop) {
     VM_NEED_OPERANDS(1);
     state.stack.pop();
-    VM_DISPATCH();
-  }
-  VM_OP(PopNKeep1) {
-    u16 count = VM_U16();
-    VM_NEED_OPERANDS(count + 1u);
-    Value top = state.stack[state.stack.len - 1];
-    state.stack.len -= count;
-    state.stack[state.stack.len - 1] = top;
     VM_DISPATCH();
   }
   VM_OP(GetLocal) {
@@ -357,7 +350,7 @@ Value vm_execute(State& state, u32 floor) {
     nested = as_array(as_code(parent->code)->consts[index])->items[0];
     Value closure = make_compiled_function(state, nested, captures.get(), parent->nsName,
                                            as_code(nested)->name, false);
-    if (closure.tag == Tag::Unwind) return unwind_to(state, floor);
+    VM_PROPAGATE(closure);
     captures.set(closure);
     VM_DISPATCH();
   }
@@ -377,12 +370,12 @@ Value vm_execute(State& state, u32 floor) {
     VM_NEED(callee.tag != Tag::Macro, "macro used as function");
     if (compiled_function(callee)) {
       Value entered = enter_frame(state, callee, callBase, argc, false);
-      if (entered.tag == Tag::Unwind) return unwind_to(state, floor);
+      VM_PROPAGATE(entered);
       VM_LOAD_FRAME();
       VM_DISPATCH();
     }
     Value result = apply(state, callee, callBase + 1, argc);
-    if (result.tag == Tag::Unwind) return unwind_to(state, floor);
+    VM_PROPAGATE(result);
     VM_POLL_INTERRUPT();
     state.popTo(callBase);
     state.push(result);
@@ -401,13 +394,13 @@ Value vm_execute(State& state, u32 floor) {
       memmove(&state.stack[destination], &state.stack[source], (size_t)(argc + 1) * sizeof(Value));
       state.stack.len = destination + argc + 1;
       Value entered = enter_frame(state, state.stack[destination], destination, argc, true);
-      if (entered.tag == Tag::Unwind) return unwind_to(state, floor);
+      VM_PROPAGATE(entered);
       VM_POLL_INTERRUPT();
       VM_LOAD_FRAME();
       VM_DISPATCH();
     }
     Value result = apply(state, callee, source + 1, argc);
-    if (result.tag == Tag::Unwind) return unwind_to(state, floor);
+    VM_PROPAGATE(result);
     VM_POLL_INTERRUPT();
     VM_LEAVE_FRAME(result);
   }
@@ -478,11 +471,7 @@ Value vm_execute(State& state, u32 floor) {
       state.push(as_pair(cursor)->car);
       cursor = as_pair(cursor)->cdr;
     }
-    if (cursor.tag != Tag::Null) {
-      VM_SAVE_IP();
-      (void)raise_error(state, "unquote-splicing: expected proper list");
-      return unwind_to(state, floor);
-    }
+    if (cursor.tag != Tag::Null) VM_FAULT("unquote-splicing: expected proper list");
     Slot result{&state, left + 1};
     for (u32 i = state.stack.len; i-- > elements;)
       result.set(make_pair(state, Slot{&state, i}, result));
@@ -532,7 +521,7 @@ Value vm_execute(State& state, u32 floor) {
     }
     VM_SAVE_IP();
     Value defined = ns_define(state, name.id, value, isPrivate, doc);
-    if (defined.tag == Tag::Unwind) return unwind_to(state, floor);
+    VM_PROPAGATE(defined);
     VM_LOAD_FRAME();
     VM_DISPATCH();
   }
@@ -549,6 +538,7 @@ Value vm_execute(State& state, u32 floor) {
 #undef VM_NEED_LOCAL
 #undef VM_NEED_OPERANDS
 #undef VM_NEED
+#undef VM_PROPAGATE
 #undef VM_FAULT
 #undef VM_U16
 #undef VM_CONSTS

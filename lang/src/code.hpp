@@ -14,7 +14,6 @@ enum class Operand : u8 { None, U8, U16, I32 };
 // computed-goto labels are all generated from it so adding an instruction
 // cannot silently put the two interpreters out of sync.
 #define OT_OPCODE_LIST(X)                                                                          \
-  X(Halt, "halt", None)                                                                            \
   X(Const, "const", U16)                                                                           \
   X(Nil, "nil", None)                                                                              \
   X(True, "true", None)                                                                            \
@@ -22,7 +21,6 @@ enum class Operand : u8 { None, U8, U16, I32 };
   X(Null, "null", None)                                                                            \
   X(Int8, "int8", U8)                                                                              \
   X(Pop, "pop", None)                                                                              \
-  X(PopNKeep1, "popn-keep1", U16)                                                                  \
   X(GetLocal, "get-local", U16)                                                                    \
   X(SetLocal, "set-local", U16)                                                                    \
   X(GetBoxed, "get-boxed", U16)                                                                    \

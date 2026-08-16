@@ -37,6 +37,16 @@ inline u32 utf8_count(const char* bytes, u32 len) {
   abort();
 }
 
+inline u32 grow_capacity(u32 cap, u32 need, const char* overflowMessage) {
+  if (need <= cap) return cap;
+  u32 grown = cap ? cap : 8;
+  while (grown < need) {
+    if (grown > UINT32_MAX / 2) ot_fatal(overflowMessage);
+    grown *= 2;
+  }
+  return grown;
+}
+
 }  // namespace ot
 
 #ifndef NDEBUG

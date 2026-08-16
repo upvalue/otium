@@ -3,7 +3,7 @@
 #include "heap.hpp"
 #include "state.hpp"
 #include <cstring>
-#include <cstdlib>  // strtod (deviation from allowed-header list; noted)
+#include <cstdlib>  // strtod
 
 namespace ot {
 

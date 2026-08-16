@@ -1,16 +1,15 @@
 #include "printer.hpp"
+#include "builtins.hpp"
 #include "value.hpp"
 #include "heap.hpp"
 #include "state.hpp"
 #include "code.hpp"
 #include <cstring>
-#include <cstdio>   // snprintf (deviation from allowed-header list; noted)
+#include <cstdio>   // snprintf
 #include <cstdlib>  // strtod
 #include <cmath>
 
 namespace ot {
-
-__attribute__((weak)) bool printer_table_next(State&, Value, u32*, Value*, Value*) { return false; }
 
 static void print_val(State& vm, Value v, Buf& out, bool display);
 
@@ -161,7 +160,7 @@ static void print_val(State& vm, Value v, Buf& out, bool display) {
       bool first = true;
       u32 cursor = 0;
       Value k, val;
-      while (printer_table_next(vm, v, &cursor, &k, &val)) {
+      while (table_iter_next(v, &cursor, &k, &val)) {
         if (!first) out.push(' ');
         first = false;
         print_val(vm, k, out, display);

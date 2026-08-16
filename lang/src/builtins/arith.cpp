@@ -40,8 +40,7 @@ Value nat_mul(State& vm, u32 base, u32 argc) {
 }
 
 Value nat_sub(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "-", argc, 1, UINT32_MAX));
-  OT_TRY(need_nums(vm, "-", base, argc));
+  OT_TRY(need_num_args(vm, "-", base, argc, 1, UINT32_MAX));
   if (any_float(vm, base, argc)) {
     f64 acc = as_f(ARG(0));
     if (argc == 1) return float_v(-acc);
@@ -64,8 +63,7 @@ static i64 idiv_wrap(i64 a, i64 b) {
 }
 
 Value nat_div(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "/", argc, 1, UINT32_MAX));
-  OT_TRY(need_nums(vm, "/", base, argc));
+  OT_TRY(need_num_args(vm, "/", base, argc, 1, UINT32_MAX));
   // (/ n) = 1/n
   u32 first = 0;
   Value acc;
@@ -116,8 +114,7 @@ static Value nat_modulo(State& vm, u32 base, u32 argc) {
 }
 
 static Value nat_abs(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "abs", argc, 1, 1));
-  OT_TRY(need_nums(vm, "abs", base, argc));
+  OT_TRY(need_num_args(vm, "abs", base, argc, 1, 1));
   Value v = ARG(0);
   if (v.tag == Tag::Float) return float_v(std::fabs(v.f));
   return v.i < 0 ? int_v((i64)(0 - (u64)v.i)) : v;  // INT64_MIN wraps to itself
@@ -131,8 +128,7 @@ static int num_cmp(Value a, Value b) {
 }
 
 static Value nat_min(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "min", argc, 1, UINT32_MAX));
-  OT_TRY(need_nums(vm, "min", base, argc));
+  OT_TRY(need_num_args(vm, "min", base, argc, 1, UINT32_MAX));
   Value best = ARG(0);
   for (u32 i = 1; i < argc; i++)
     if (num_cmp(ARG(i), best) < 0) best = ARG(i);
@@ -140,8 +136,7 @@ static Value nat_min(State& vm, u32 base, u32 argc) {
 }
 
 static Value nat_max(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "max", argc, 1, UINT32_MAX));
-  OT_TRY(need_nums(vm, "max", base, argc));
+  OT_TRY(need_num_args(vm, "max", base, argc, 1, UINT32_MAX));
   Value best = ARG(0);
   for (u32 i = 1; i < argc; i++)
     if (num_cmp(ARG(i), best) > 0) best = ARG(i);
@@ -157,73 +152,48 @@ static Value float_to_int(State& vm, const char* who, f64 f) {
 }
 
 static Value round_like(State& vm, u32 base, u32 argc, const char* who, f64 (*op)(f64)) {
-  OT_TRY(need_argc(vm, who, argc, 1, 1));
-  OT_TRY(need_nums(vm, who, base, argc));
+  OT_TRY(need_num_args(vm, who, base, argc, 1, 1));
   Value v = ARG(0);
   if (v.tag == Tag::Int) return v;
   return float_to_int(vm, who, op(v.f));
 }
 
-static f64 op_floor(f64 f) { return std::floor(f); }
-static f64 op_ceil(f64 f) { return std::ceil(f); }
-static f64 op_round(f64 f) { return std::round(f); }  // half away from zero
-
-static Value nat_floor(State& vm, u32 base, u32 argc) {
-  return round_like(vm, base, argc, "floor", op_floor);
-}
-static Value nat_ceiling(State& vm, u32 base, u32 argc) {
-  return round_like(vm, base, argc, "ceiling", op_ceil);
-}
-static Value nat_round(State& vm, u32 base, u32 argc) {
-  return round_like(vm, base, argc, "round", op_round);
-}
-
-static f64 op_truncate(f64 f) { return std::trunc(f); }
-
-static Value nat_truncate(State& vm, u32 base, u32 argc) {
-  return round_like(vm, base, argc, "truncate", op_truncate);
-}
+#define OT_ROUND_NATIVE(cname, lname, op)                                                          \
+  static Value cname(State& vm, u32 base, u32 argc) {                                             \
+    return round_like(vm, base, argc, lname, [](f64 value) { return std::op(value); });            \
+  }
+OT_ROUND_NATIVE(nat_floor, "floor", floor)
+OT_ROUND_NATIVE(nat_ceiling, "ceiling", ceil)
+OT_ROUND_NATIVE(nat_round, "round", round)
+OT_ROUND_NATIVE(nat_truncate, "truncate", trunc)
+#undef OT_ROUND_NATIVE
 
 static Value unary_float(State& vm, u32 base, u32 argc, const char* who, f64 (*op)(f64)) {
-  OT_TRY(need_argc(vm, who, argc, 1, 1));
-  OT_TRY(need_nums(vm, who, base, argc));
+  OT_TRY(need_num_args(vm, who, base, argc, 1, 1));
   return float_v(op(as_f(ARG(0))));
 }
 
-static Value nat_sqrt(State& vm, u32 base, u32 argc) {
-  return unary_float(vm, base, argc, "sqrt", std::sqrt);
-}
-static Value nat_exp(State& vm, u32 base, u32 argc) {
-  return unary_float(vm, base, argc, "exp", std::exp);
-}
-static Value nat_log(State& vm, u32 base, u32 argc) {
-  return unary_float(vm, base, argc, "log", std::log);
-}
-static Value nat_sin(State& vm, u32 base, u32 argc) {
-  return unary_float(vm, base, argc, "sin", std::sin);
-}
-static Value nat_cos(State& vm, u32 base, u32 argc) {
-  return unary_float(vm, base, argc, "cos", std::cos);
-}
-static Value nat_tan(State& vm, u32 base, u32 argc) {
-  return unary_float(vm, base, argc, "tan", std::tan);
-}
-static Value nat_asin(State& vm, u32 base, u32 argc) {
-  return unary_float(vm, base, argc, "asin", std::asin);
-}
-static Value nat_acos(State& vm, u32 base, u32 argc) {
-  return unary_float(vm, base, argc, "acos", std::acos);
-}
+#define OT_UNARY_FLOAT_NATIVE(cname, lname, op)                                                    \
+  static Value cname(State& vm, u32 base, u32 argc) {                                             \
+    return unary_float(vm, base, argc, lname, [](f64 value) { return std::op(value); });           \
+  }
+OT_UNARY_FLOAT_NATIVE(nat_sqrt, "sqrt", sqrt)
+OT_UNARY_FLOAT_NATIVE(nat_exp, "exp", exp)
+OT_UNARY_FLOAT_NATIVE(nat_log, "log", log)
+OT_UNARY_FLOAT_NATIVE(nat_sin, "sin", sin)
+OT_UNARY_FLOAT_NATIVE(nat_cos, "cos", cos)
+OT_UNARY_FLOAT_NATIVE(nat_tan, "tan", tan)
+OT_UNARY_FLOAT_NATIVE(nat_asin, "asin", asin)
+OT_UNARY_FLOAT_NATIVE(nat_acos, "acos", acos)
+#undef OT_UNARY_FLOAT_NATIVE
 
 static Value nat_atan(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "atan", argc, 1, 2));
-  OT_TRY(need_nums(vm, "atan", base, argc));
+  OT_TRY(need_num_args(vm, "atan", base, argc, 1, 2));
   return float_v(argc == 1 ? std::atan(as_f(ARG(0))) : std::atan2(as_f(ARG(0)), as_f(ARG(1))));
 }
 
 static Value nat_expt(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "expt", argc, 2, 2));
-  OT_TRY(need_nums(vm, "expt", base, argc));
+  OT_TRY(need_num_args(vm, "expt", base, argc, 2, 2));
   if (ARG(0).tag == Tag::Int && ARG(1).tag == Tag::Int && ARG(1).i >= 0) {
     u64 factor = (u64)ARG(0).i;
     u64 result = 1;
@@ -239,8 +209,7 @@ static Value nat_expt(State& vm, u32 base, u32 argc) {
 }
 
 static Value nat_exact(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "exact", argc, 1, 1));
-  OT_TRY(need_nums(vm, "exact", base, argc));
+  OT_TRY(need_num_args(vm, "exact", base, argc, 1, 1));
   if (ARG(0).tag == Tag::Int) return ARG(0);
   if (!std::isfinite(ARG(0).f) || std::trunc(ARG(0).f) != ARG(0).f)
     return raise_error(vm, "exact: expected an integer-valued finite number");
@@ -248,48 +217,29 @@ static Value nat_exact(State& vm, u32 base, u32 argc) {
 }
 
 static Value nat_inexact(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "inexact", argc, 1, 1));
-  OT_TRY(need_nums(vm, "inexact", base, argc));
+  OT_TRY(need_num_args(vm, "inexact", base, argc, 1, 1));
   return float_v(as_f(ARG(0)));
 }
 
-static Value nat_exactp(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "exact?", argc, 1, 1));
-  OT_TRY(need_nums(vm, "exact?", base, argc));
-  return bool_v(ARG(0).tag == Tag::Int);
-}
-static Value nat_inexactp(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "inexact?", argc, 1, 1));
-  OT_TRY(need_nums(vm, "inexact?", base, argc));
-  return bool_v(ARG(0).tag == Tag::Float);
-}
-static Value nat_integerp(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "integer?", argc, 1, 1));
-  OT_TRY(need_nums(vm, "integer?", base, argc));
-  bool result = ARG(0).tag == Tag::Int || (ARG(0).tag == Tag::Float && std::isfinite(ARG(0).f) &&
-                                           std::trunc(ARG(0).f) == ARG(0).f);
-  return bool_v(result);
-}
-static Value nat_nanp(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "nan?", argc, 1, 1));
-  OT_TRY(need_nums(vm, "nan?", base, argc));
-  return bool_v(ARG(0).tag == Tag::Float && std::isnan(ARG(0).f));
-}
-static Value nat_infinitep(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "infinite?", argc, 1, 1));
-  OT_TRY(need_nums(vm, "infinite?", base, argc));
-  return bool_v(ARG(0).tag == Tag::Float && std::isinf(ARG(0).f));
-}
-static Value nat_finitep(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "finite?", argc, 1, 1));
-  OT_TRY(need_nums(vm, "finite?", base, argc));
-  return bool_v(ARG(0).tag == Tag::Int || std::isfinite(ARG(0).f));
-}
+#define OT_NUM_PRED(cname, lname, ...)                                                             \
+  static Value cname(State& vm, u32 base, u32 argc) {                                             \
+    OT_TRY(need_num_args(vm, lname, base, argc, 1, 1));                                            \
+    return bool_v((__VA_ARGS__));                                                                  \
+  }
+OT_NUM_PRED(nat_exactp, "exact?", ARG(0).tag == Tag::Int)
+OT_NUM_PRED(nat_inexactp, "inexact?", ARG(0).tag == Tag::Float)
+OT_NUM_PRED(nat_integerp, "integer?",
+            ARG(0).tag == Tag::Int ||
+                (ARG(0).tag == Tag::Float && std::isfinite(ARG(0).f) &&
+                 std::trunc(ARG(0).f) == ARG(0).f))
+OT_NUM_PRED(nat_nanp, "nan?", ARG(0).tag == Tag::Float && std::isnan(ARG(0).f))
+OT_NUM_PRED(nat_infinitep, "infinite?", ARG(0).tag == Tag::Float && std::isinf(ARG(0).f))
+OT_NUM_PRED(nat_finitep, "finite?", ARG(0).tag == Tag::Int || std::isfinite(ARG(0).f))
+#undef OT_NUM_PRED
 
 // comparison chains
 static Value chain(State& vm, u32 base, u32 argc, const char* who, bool (*ok)(int cmp)) {
-  OT_TRY(need_argc(vm, who, argc, 2, UINT32_MAX));
-  OT_TRY(need_nums(vm, who, base, argc));
+  OT_TRY(need_num_args(vm, who, base, argc, 2, UINT32_MAX));
   for (u32 i = 0; i + 1 < argc; i++) {
     // NaN: all comparisons (and =) are false
     if (ARG(i).tag == Tag::Float && std::isnan(ARG(i).f)) return bool_v(false);
@@ -312,21 +262,18 @@ static Value nat_le(State& vm, u32 base, u32 argc) { return chain(vm, base, argc
 static Value nat_ge(State& vm, u32 base, u32 argc) { return chain(vm, base, argc, ">=", ok_ge); }
 
 static Value nat_inc(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "inc", argc, 1, 1));
-  OT_TRY(need_nums(vm, "inc", base, argc));
+  OT_TRY(need_num_args(vm, "inc", base, argc, 1, 1));
   Value v = ARG(0);
   return v.tag == Tag::Int ? int_v((i64)((u64)v.i + 1)) : float_v(v.f + 1.0);
 }
 static Value nat_dec(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "dec", argc, 1, 1));
-  OT_TRY(need_nums(vm, "dec", base, argc));
+  OT_TRY(need_num_args(vm, "dec", base, argc, 1, 1));
   Value v = ARG(0);
   return v.tag == Tag::Int ? int_v((i64)((u64)v.i - 1)) : float_v(v.f - 1.0);
 }
 
 static Value sign_test(State& vm, u32 base, u32 argc, const char* who, int want) {
-  OT_TRY(need_argc(vm, who, argc, 1, 1));
-  OT_TRY(need_nums(vm, who, base, argc));
+  OT_TRY(need_num_args(vm, who, base, argc, 1, 1));
   Value v = ARG(0);
   int s;
   if (v.tag == Tag::Int) s = v.i < 0 ? -1 : v.i > 0 ? 1 : 0;

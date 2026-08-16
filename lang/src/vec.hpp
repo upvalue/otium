@@ -2,6 +2,7 @@
 #pragma once
 #include "common.hpp"
 #include <cstdarg>
+#include <type_traits>
 
 namespace ot {
 
@@ -35,9 +36,9 @@ struct Vec {
   }
 
   void reserve(u32 n) {
+    static_assert(std::is_trivially_copyable_v<T>, "Vec storage requires trivially copyable T");
     if (n <= cap) return;
-    u32 ncap = cap ? cap : 8;
-    while (ncap < n) ncap *= 2;
+    u32 ncap = grow_capacity(cap, n, "Vec: capacity overflow");
     T* nd = (T*)realloc(static_cast<void*>(data), (size_t)ncap * sizeof(T));
     if (!nd) ot_fatal("Vec: out of memory");
     data = nd;

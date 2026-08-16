@@ -45,7 +45,7 @@ TEST_CASE("bytecode executes and prints as shifted ASCII") {
 
     Buf printed;
     code_print_ascii(codeRoot.get(), printed);
-    CHECK(std::string(printed.data, printed.len) == "\"6ZG\"");
+    CHECK(std::string(printed.data, printed.len) == "\"5ZE\"");
   }
   state->destroy();
 }

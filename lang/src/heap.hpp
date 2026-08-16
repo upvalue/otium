@@ -172,7 +172,7 @@ struct Heap {
   void collectInto(u32 newSize);
 };
 
-// Heap-taking constructors support substrate code without a complete State.
+// Heap-taking constructors support focused tests built around a bare Heap.
 Value make_pair_h(Heap& h, Value car, Value cdr);
 Value make_string_h(Heap& h, const char* bytes, u32 len);
 // Substring copy from a heap string; roots src across the alloc. Use this

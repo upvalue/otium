@@ -30,7 +30,6 @@ private:
   // helpers
   bool eof() const { return pos_ >= len_; }
   char peek() const { return src_[pos_]; }
-  char peekAt(u32 off) const { return pos_ + off < len_ ? src_[pos_ + off] : '\0'; }
   void advance();
   void skipWs();
 

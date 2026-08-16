@@ -267,8 +267,7 @@ static Value nat_string_to_number(State& vm, u32 base, u32 argc) {
 }
 
 static Value nat_number_to_string(State& vm, u32 base, u32 argc) {
-  OT_TRY(need_argc(vm, "number->string", argc, 1, 1));
-  OT_TRY(need_nums(vm, "number->string", base, argc));
+  OT_TRY(need_num_args(vm, "number->string", base, argc, 1, 1));
   Buf out;
   print_display(vm, ARG(0), out);
   return make_string(vm, out);
@@ -291,16 +290,10 @@ static Value nat_symbol_to_string(State& vm, u32 base, u32 argc) {
 
 // coerce a string/symbol/keyword to an intern id, or return Unwind
 static Value coerce_id(State& vm, const char* who, Value v, u32* out) {
-  switch (v.tag) {
-    case Tag::Symbol:
-    case Tag::Keyword: *out = v.id; return nil_v();
-    case Tag::String: {
-      StringData* s = as_string(v);
-      *out = vm.intern.intern(string_bytes(s), s->len);
-      return nil_v();
-    }
-    default: return raise_error(vm, "%s: expected string, symbol, or keyword", who);
-  }
+  if (v.tag != Tag::String && v.tag != Tag::Symbol && v.tag != Tag::Keyword)
+    return raise_error(vm, "%s: expected string, symbol, or keyword", who);
+  *out = name_id_of(vm, v);
+  return nil_v();
 }
 
 static Value nat_symbol(State& vm, u32 base, u32 argc) {

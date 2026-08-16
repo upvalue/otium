@@ -4,15 +4,6 @@
 
 namespace ot {
 
-static u32 name_id_of(State& vm, Value v) {
-  if (v.tag == Tag::Symbol || v.tag == Tag::Keyword) return v.id;
-  if (v.tag == Tag::String) {
-    StringData* s = as_string(v);
-    return vm.intern.intern(string_bytes(s), s->len);
-  }
-  return 0;
-}
-
 static Value list_from_stack(State& vm, u32 base, u32 n) {
   Scope s(vm);
   Slot acc = s.push(null_v());

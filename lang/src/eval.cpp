@@ -1,5 +1,6 @@
 // eval.cpp - top-level expansion/compilation, application, and control helpers.
 #include "eval.hpp"
+#include "builtins.hpp"
 #include "compile.hpp"
 #include "form.hpp"
 #include "ns.hpp"
@@ -84,15 +85,6 @@ Value apply(State& vm, Value callee, u32 base, u32 argc) {
 }
 
 // ---------------------------------------------------------------- require
-
-static u32 name_id_of(State& vm, Value v) {  // symbol/keyword id; string interned; 0 if none
-  if (v.tag == Tag::Symbol || v.tag == Tag::Keyword) return v.id;
-  if (v.tag == Tag::String) {
-    StringData* s = as_string(v);
-    return vm.intern.intern(string_bytes(s), s->len);
-  }
-  return 0;
-}
 
 static Value unwrap_quote(State& vm, Value v) {
   if (pairp(v) && sym_is(car_(v), vm.syms.quote_) && pairp(cdr_(v))) return car_(cdr_(v));

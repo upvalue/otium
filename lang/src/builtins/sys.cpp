@@ -155,11 +155,6 @@ static Value nat_quit(State& vm, u32, u32 argc) {
   return start_quit(vm);
 }
 
-static Value nat_exit(State& vm, u32, u32 argc) {
-  OT_TRY(need_argc(vm, "exit", argc, 0, 0));
-  return start_quit(vm);
-}
-
 static Value nat_apply(State& vm, u32 base, u32 argc) {
   OT_TRY(need_argc(vm, "apply", argc, 2, UINT32_MAX));
   Scope roots(vm);
@@ -329,7 +324,7 @@ void register_sys(State& vm) {
   def_native(vm, "for-each", nat_for_each);
   def_native(vm, "identity", nat_identity);
   def_native(vm, "quit", nat_quit);
-  def_native(vm, "exit", nat_exit);
+  def_native(vm, "exit", nat_quit);
   def_native(vm, "eval", nat_eval);
   def_native(vm, "read-string", nat_read_string);
   // gensym and current-ns are registered by register_expand (they use

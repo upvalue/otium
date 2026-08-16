@@ -116,6 +116,11 @@ otium_tests = executable('otium-tests',
 test_timeout = 30
 test('otium-tests', otium_tests, timeout : test_timeout)
 
+hygiene_check = files('tests/check_hygiene.py')
+test('source-hygiene', python,
+  args : [hygiene_check, meson.current_source_dir()],
+  timeout : test_timeout)
+
 cli_tests = find_program('tests/test_cli.py')
 test('otium-cli', cli_tests,
   args : [otium, join_paths(meson.current_source_dir(), 'tests', 'cli-load.scm')],

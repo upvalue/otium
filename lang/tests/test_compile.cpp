@@ -43,6 +43,14 @@ TEST_CASE("compiler uses lexical slots for sequential let and set") {
   state->destroy();
 }
 
+TEST_CASE("compiler roots let bindings while compiling allocating initializers") {
+  State* state = compiler_state();
+  Value result = run_compiled(*state, "(let ((f (fn () 41))) (+ (f) 1))");
+  CHECK(result.tag == Tag::Int);
+  CHECK(result.i == 42);
+  state->destroy();
+}
+
 TEST_CASE("compiler hoists defines out of let bodies") {
   State* state = compiler_state();
   // Mutually recursive defines under a let, capturing each other and the
@@ -109,6 +117,14 @@ TEST_CASE("compiler lowers cond clauses including their truthy test value") {
   Value second = as_pair(as_pair(result)->cdr)->car;
   CHECK(second.tag == Tag::Int);
   CHECK(second.i == 7);
+  state->destroy();
+}
+
+TEST_CASE("compiler roots cond clauses while compiling allocating tests") {
+  State* state = compiler_state();
+  Value result = run_compiled(*state, "(cond (((fn () #t)) 42) (else 0))");
+  CHECK(result.tag == Tag::Int);
+  CHECK(result.i == 42);
   state->destroy();
 }
 

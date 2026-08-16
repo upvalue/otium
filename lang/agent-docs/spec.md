@@ -181,9 +181,10 @@ Three notions, coarsest to finest:
 
 - **`=`** -- numeric equality across int/float: `(= 1 1.0)` is `#t`.
   Arguments must be numbers.
-- **`equal?`** -- deep structural equality for pairs and immutable data (pairs
-  recursively, strings, symbols, keywords, numbers *of the same type*),
-  identity for mutable objects (arrays, tables, buffers) and functions.
+- **`equal?`** -- deep structural equality for pairs, arrays, and immutable data
+  (pairs and arrays recursively, strings, symbols, keywords, numbers *of the
+  same type*), identity for tables, buffers, and functions. Distinct cyclic
+  arrays are unsupported; `equal?` is not required to terminate for them.
   Type-strict: `(equal? 1 1.0)` is `#f`, and `nil`, `()`, `#f` are all
   distinct. For the benefit of table keys, `NaN` equals `NaN` and `0.0`
   equals `-0.0`.
@@ -195,9 +196,10 @@ Three notions, coarsest to finest:
   (equal literals, say) is unspecified, so compare strings with
   `equal?`.
 
-Table keys are compared with `equal?` semantics. A hashing implementation
-must therefore hash immutables structurally and mutables by an identity
-that is stable across GC -- a stored id, never an address.
+Table keys compare immutable values and pairs structurally. Mutable keys,
+including arrays, compare by an identity that is stable across GC -- a stored
+id, never an address. This deliberately differs from user-facing structural
+array equality so mutating an array cannot invalidate a stored key's hash.
 Pairs used as table keys, including pairs reachable through them, become
 frozen while still retaining structural equality. Attempting to mutate one
 is an error. This keeps a stored key's structural hash stable.
@@ -258,8 +260,8 @@ may store them as UTF-8, so `string-length`, indexed `get`, and
 O(total length). **Buffers** exist to make repeated appending cheap:
 `buffer-push!` is amortized O(length appended), `buffer->string` O(n).
 
-**Equality:** `eq?` is O(1). `equal?` is O(size of the smaller value)
-(deep for immutable structure, O(1) once it reaches mutables).
+**Equality:** `eq?` is O(1). `equal?` is O(size of the smaller value), descending
+through pairs and arrays and stopping at other mutable values.
 
 **Library functions** over sequences (`map`, `filter`, `reduce`,
 `group-by`, `frequencies`, …) are O(n) in elements visited, times the

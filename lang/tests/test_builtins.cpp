@@ -353,11 +353,17 @@ TEST_CASE("equality matrix (spec 2.4)") {
     CHECK(val_equal(*vm, p1.get(), p2.get()));
     CHECK(!val_eq(p1.get(), p2.get()));
 
-    // mutables: identity only
+    // arrays compare structurally
     Slot a1 = roots.push(make_array(*vm, 2));
     Slot a2 = roots.push(make_array(*vm, 2));
-    CHECK(!val_equal(*vm, a1.get(), a2.get()));
+    array_push(*vm, a1.get(), int_v(1));
+    array_push(*vm, a1.get(), p1.get());
+    array_push(*vm, a2.get(), int_v(1));
+    array_push(*vm, a2.get(), p2.get());
+    CHECK(val_equal(*vm, a1.get(), a2.get()));
     CHECK(val_equal(*vm, a1.get(), a1.get()));
+    as_array(a2.get())->items[0] = int_v(2);
+    CHECK(!val_equal(*vm, a1.get(), a2.get()));
 
     // hashes agree with equal?
     CHECK(val_hash(*vm, s1.get()) == val_hash(*vm, s2.get()));

@@ -8,6 +8,10 @@
     "takl": {"parity": "A", "deviation": "syntax and benchmark API only"},
     "nqueens": {"parity": "A", "deviation": "named let translated to local recursion"},
     "deriv": {"parity": "A", "deviation": "syntax and benchmark API only"},
+    "equal": {
+      "parity": "B",
+      "deviation": "Scheme vectors use Otium arrays; the upstream-disabled cyclic helper is omitted"
+    },
     "destruc": {"parity": "A", "deviation": "do loops translated to while loops"},
     "mperm": {
       "parity": "B",

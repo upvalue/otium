@@ -33,6 +33,7 @@ INPUTS = {
     "gcbench": "1\n8\n0\n",
     "quicksort": "1\n100\n1000\nignored\n",
     "fft": "1\n16\n0.0\n0.0\n",
+    "equal": "4\n4\n4\n10\n10\n20\n#t\n",
 }
 
 

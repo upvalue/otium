@@ -10,10 +10,10 @@
 namespace ot {
 
 // ---------------------------------------------------------------------------
-// equal? — deep structural for immutables, identity for mutables, type-strict.
-// NaN == NaN and 0.0 == -0.0 (for table keys).
+// equal? -- deep structural for pairs and arrays, identity for other mutables,
+// type-strict. Cyclic arrays are not supported.
 
-bool val_equal(State& vm, Value a, Value b) {
+static bool value_equal(State& vm, Value a, Value b, bool structuralArrays) {
   for (;;) {
     if (a.tag != b.tag) return false;
     switch (a.tag) {
@@ -37,19 +37,35 @@ bool val_equal(State& vm, Value a, Value b) {
       case Tag::Pair: {
         PairData* pa = as_pair(a);
         PairData* pb = as_pair(b);
-        if (!val_equal(vm, pa->car, pb->car)) return false;
+        if (!value_equal(vm, pa->car, pb->car, structuralArrays)) return false;
         a = pa->cdr;
         b = pb->cdr;  // iterate on cdr
         break;
       }
-      default:  // mutables + functions/macros/params/restarts: identity
+      case Tag::Array: {
+        if (a.obj == b.obj) return true;
+        if (!structuralArrays) return false;
+        ArrayData* aa = as_array(a);
+        ArrayData* ab = as_array(b);
+        if (aa->len != ab->len) return false;
+        for (u32 i = 0; i < aa->len; i++)
+          if (!value_equal(vm, aa->items[i], ab->items[i], true)) return false;
+        return true;
+      }
+      default:  // other mutables + functions/macros/params/restarts: identity
         return a.obj == b.obj;
     }
   }
 }
 
+bool val_equal(State& vm, Value a, Value b) { return value_equal(vm, a, b, true); }
+
+// Mutable table keys retain identity semantics even where user-facing equal?
+// is structural. This keeps their hashes stable as their contents change.
+static bool key_equal(State& vm, Value a, Value b) { return value_equal(vm, a, b, false); }
+
 // ---------------------------------------------------------------------------
-// Structural hash with equal? semantics.
+// Hash with table-key semantics.
 
 static inline u64 mix64(u64 x) {  // splitmix64 finalizer
   x += 0x9E3779B97F4A7C15ull;
@@ -225,7 +241,7 @@ static i64 table_find(State& vm, TableData* t, u64 hash, Value key) {
     u32 e = idx_get(t, slot);
     if (e == 0) return -1;
     TableEntry& ent = t->entries[e - 1];
-    if (!is_tomb(ent) && ent.hash == hash && val_equal(vm, ent.key, key)) return (i64)(e - 1);
+    if (!is_tomb(ent) && ent.hash == hash && key_equal(vm, ent.key, key)) return (i64)(e - 1);
     slot = (slot + 1) & (t->indexCap - 1);
   }
 }

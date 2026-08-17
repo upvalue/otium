@@ -161,6 +161,19 @@ OT_VEC_TYPE(ForeignType, VecForeignType);
 
 #define OT_HEAP_MAX_DEFAULT (64u * 1024 * 1024)
 
+// Cumulative collector activity plus a snapshot of the current semispace.
+// Byte counts include object headers and alignment, matching actual heap use.
+typedef struct HeapStats {
+  u64 allocations;
+  u64 allocatedBytes;
+  u64 collections;
+  u64 copiedBytes;
+  u64 reclaimedBytes;
+  u32 usedBytes;
+  u32 peakUsedBytes;
+  u32 capacityBytes;
+} HeapStats;
+
 typedef struct Heap {
   State* vm;    // opaque back-pointer for the owner; unused by heap
   char* space;  // active space
@@ -168,7 +181,12 @@ typedef struct Heap {
   u32 used;      // bump offset into space
   u32 maxBytes;  // growth cap (default 64 MiB)
   u32 nextIdent;
-  u64 collections;  // stats: number of collects run
+  u64 allocations;
+  u64 allocatedBytes;
+  u64 collections;
+  u64 copiedBytes;
+  u64 reclaimedBytes;
+  u32 peakUsed;
 
   VecRootEntry rootWalkers;
   VecValue tempRoots;     // internal rooting for make_* argument values
@@ -185,6 +203,7 @@ void heap_init(Heap* h, State* vm, u32 initialBytes, u32 maxBytes);
 void heap_deinit(Heap* h);
 Obj* heap_alloc(Heap* h, ObjType t, u32 payloadBytes);  // may collect
 void heap_collect(Heap* h);
+HeapStats heap_stats(const Heap* h);
 u32 heap_identity_of(Heap* h, Obj* o);  // stamp lazily, stable across GC
 u32 heap_add_foreign_type(Heap* h, u32 nameSym, ForeignFinalizer finalize);
 const ForeignType* heap_foreign_type(const Heap* h, u32 typeId);

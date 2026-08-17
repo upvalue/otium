@@ -137,6 +137,7 @@ struct State {
 
 State* state_create(const StateConfig* cfg);  // NULL cfg = defaults
 void state_destroy(State* vm);
+HeapStats state_gc_stats(const State* vm);
 
 // native calling convention: args at stack[base..base+argc)
 static inline u32 state_push(State* vm, Value v) {

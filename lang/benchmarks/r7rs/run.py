@@ -158,10 +158,6 @@ def main():
             input_id = hashlib.sha256(input_path.read_bytes()).hexdigest()[:12]
             heap_max = entry.get("heap_max", 64 * 1024 * 1024)
             flags = [
-                "--max-depth",
-                "2000",
-                "--stack-slots",
-                "65536",
                 "--heap-max",
                 str(heap_max),
             ]

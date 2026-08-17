@@ -2,10 +2,11 @@ project('otium', 'c',
   version : '0.0.1',
   # Meson's own default buildtype is 'debug' (-O0), which made every benchmark
   # figure recorded before this a measurement of unoptimized code. Default to
-  # -O2 with symbols; override with -Dbuildtype=debug when stepping through.
+  # -O3 with symbols and cross-module optimization; override with
+  # -Dbuildtype=debug -Db_lto=false when stepping through.
   # c2x = C23; the runtime requires GCC >= 13 or Clang >= 17.
   default_options : ['c_std=c2x', 'warning_level=2', 'werror=true',
-                     'buildtype=debugoptimized'])
+                     'buildtype=debugoptimized', 'optimization=3', 'b_lto=true'])
 
 add_project_arguments('-Wshadow', language : 'c')
 

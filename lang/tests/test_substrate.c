@@ -187,6 +187,41 @@ TEST(alloc_scavenge_keeps_live_drops_dead) {
   vec_deinit(&roots);
 }
 
+TEST(heap_stats_track_allocations_and_collection_work) {
+  Heap heap;
+  heap_init(&heap, nullptr, 4096, OT_HEAP_MAX_DEFAULT);
+  VecValue roots = {0};
+  heap_add_roots(&heap, walk_vec_roots, &roots);
+
+  HeapStats initial = heap_stats(&heap);
+  CHECK(initial.allocations == 0);
+  CHECK(initial.allocatedBytes == 0);
+  CHECK(initial.collections == 0);
+  CHECK(initial.usedBytes == 0);
+  CHECK(initial.peakUsedBytes == 0);
+  CHECK(initial.capacityBytes == 4096);
+
+  vec_push(&roots, make_string_h(&heap, "live", 4));
+  (void)make_string_h(&heap, "garbage", 7);
+  HeapStats before = heap_stats(&heap);
+  CHECK(before.allocations == 2);
+  CHECK(before.allocatedBytes >= before.usedBytes);
+  CHECK(before.peakUsedBytes <= before.allocatedBytes);
+
+  heap_collect(&heap);
+  HeapStats after = heap_stats(&heap);
+  CHECK(after.allocations == before.allocations);
+  CHECK(after.allocatedBytes == before.allocatedBytes);
+  CHECK(after.collections == before.collections + 1);
+  CHECK(after.copiedBytes == before.copiedBytes + after.usedBytes);
+  CHECK(after.reclaimedBytes == before.reclaimedBytes + before.usedBytes - after.usedBytes);
+  CHECK(after.peakUsedBytes == before.peakUsedBytes);
+  CHECK(after.capacityBytes == before.capacityBytes);
+
+  heap_deinit(&heap);
+  vec_deinit(&roots);
+}
+
 TEST(pairs_traced_transitively_slots_updated_after_move) {
   Heap heap;
   heap_init(&heap, nullptr, 4096, OT_HEAP_MAX_DEFAULT);

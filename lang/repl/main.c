@@ -608,6 +608,7 @@ typedef struct CliOptions {
   VecStr files;
   bool repl;
   bool server;
+  bool gcStats;
   bool noProject;
   const char* projectFile;
   u32 maxDepth;
@@ -623,6 +624,7 @@ static void print_usage(FILE* to) {
         "Options:\n"
         "  --repl             Start a REPL after loading FILEs\n"
         "  --server           Run the framed stdio evaluation server\n"
+        "  --gc-stats         Print garbage collector statistics at exit\n"
         "  --path DIR         Add DIR to the module search path (repeatable)\n"
         "  --project FILE     Read FILE instead of searching for " PROJECT_FILE "\n"
         "  --no-project       Ignore the nearest " PROJECT_FILE "\n"
@@ -656,6 +658,8 @@ static int parse_args(int argc, char** argv, CliOptions* options) {
       options->repl = true;
     } else if (!positionalOnly && strcmp(arg, "--server") == 0) {
       options->server = true;
+    } else if (!positionalOnly && strcmp(arg, "--gc-stats") == 0) {
+      options->gcStats = true;
     } else if (!positionalOnly && strcmp(arg, "--no-project") == 0) {
       options->noProject = true;
     } else if (!positionalOnly && strcmp(arg, "--project") == 0) {
@@ -712,6 +716,34 @@ static int parse_args(int argc, char** argv, CliOptions* options) {
   return 0;
 }
 
+static void print_byte_stat(const char* name, u64 bytes) {
+  static const char* const units[] = {"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"};
+  double size = (double)bytes;
+  u32 unit = 0;
+  while (size >= 1024.0 && unit + 1 < sizeof units / sizeof *units) {
+    size /= 1024.0;
+    unit++;
+  }
+  if (unit == 0)
+    fprintf(stderr, "  %s: %llu (%llu B)\n", name, (unsigned long long)bytes,
+            (unsigned long long)bytes);
+  else
+    fprintf(stderr, "  %s: %llu (%.2f %s)\n", name, (unsigned long long)bytes, size,
+            units[unit]);
+}
+
+static void print_gc_stats(State* vm) {
+  HeapStats stats = state_gc_stats(vm);
+  fprintf(stderr, "GC stats:\n  allocations: %llu\n", (unsigned long long)stats.allocations);
+  print_byte_stat("allocated bytes", stats.allocatedBytes);
+  fprintf(stderr, "  collections: %llu\n", (unsigned long long)stats.collections);
+  print_byte_stat("copied bytes", stats.copiedBytes);
+  print_byte_stat("reclaimed bytes", stats.reclaimedBytes);
+  print_byte_stat("heap used bytes", stats.usedBytes);
+  print_byte_stat("peak heap used bytes", stats.peakUsedBytes);
+  print_byte_stat("heap capacity bytes", stats.capacityBytes);
+}
+
 int main(int argc, char** argv) {
   // Track the runtime's own defaults rather than restating them; --max-depth
   // and --stack-slots only override what state_config_default already picked.
@@ -720,6 +752,7 @@ int main(int argc, char** argv) {
       .files = {0},
       .repl = false,
       .server = false,
+      .gcStats = false,
       .noProject = false,
       .projectFile = nullptr,
       .maxDepth = defaults.maxDepth,
@@ -762,6 +795,7 @@ int main(int argc, char** argv) {
   // Needs the VM for the reader, so it lands after state_create; the load path
   // is not consulted until the first require, which is later still.
   if (!options.noProject && !load_project(vm, options.projectFile)) {
+    if (options.gcStats) print_gc_stats(vm);
     state_destroy(vm);
     return 1;
   }
@@ -787,6 +821,7 @@ int main(int argc, char** argv) {
     run_repl(vm);
   }
 
+  if (options.gcStats) print_gc_stats(vm);
   state_destroy(vm);
   g_vm = nullptr;
   vec_deinit(&options.files);

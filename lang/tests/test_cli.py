@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import re
 import subprocess
 import sys
 
@@ -26,6 +27,7 @@ def expect(result, status, stdout=None, stderr=None):
 expect(run("--help"), 0, stdout="--repl")
 expect(run("--help"), 0, stdout="--server")
 expect(run("--help"), 0, stdout="--heap-max")
+expect(run("--help"), 0, stdout="--gc-stats")
 expect(run(), 0, stdout="otium repl")
 
 file_only = run(fixture)
@@ -81,6 +83,29 @@ limited = run(
     fixture,
 )
 expect(limited, 0, stdout="loaded-from-file\n")
+
+gc_stats = run("--gc-stats", fixture)
+expect(gc_stats, 0, stdout="loaded-from-file\n", stderr="GC stats:\n")
+for field in ("allocations", "collections"):
+    assert re.search(rf"^  {field}: \d+$", gc_stats.stderr, re.MULTILINE), gc_stats
+for field in (
+    "allocated bytes",
+    "copied bytes",
+    "reclaimed bytes",
+    "heap used bytes",
+    "peak heap used bytes",
+    "heap capacity bytes",
+):
+    assert re.search(
+        rf"^  {field}: \d+ \(\d+(?:\.\d{{2}})? (?:B|KiB|MiB|GiB|TiB|PiB|EiB)\)$",
+        gc_stats.stderr,
+        re.MULTILINE,
+    ), gc_stats
+assert re.search(
+    r"^  heap capacity bytes: 4194304 \(4\.00 MiB\)$",
+    gc_stats.stderr,
+    re.MULTILINE,
+), gc_stats
 
 multiline = run(input_text="(+ 1\n 2)\nnil\n(quit)\n(println \"after-quit\")\n")
 expect(multiline, 0, stdout="3\n")

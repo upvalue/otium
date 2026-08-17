@@ -29,7 +29,12 @@ void heap_init(Heap* h, State* vm, u32 initialBytes, u32 maxBytes) {
   h->used = 0;
   h->maxBytes = maxBytes;
   h->nextIdent = 1;
+  h->allocations = 0;
+  h->allocatedBytes = 0;
   h->collections = 0;
+  h->copiedBytes = 0;
+  h->reclaimedBytes = 0;
+  h->peakUsed = 0;
   h->toSpace = nullptr;
   h->toSize = 0;
   h->toUsed = 0;
@@ -88,6 +93,9 @@ Obj* heap_alloc(Heap* h, ObjType t, u32 payloadBytes) {
   }
   Obj* o = (Obj*)(h->space + h->used);
   h->used += total;
+  h->allocations++;
+  h->allocatedBytes += total;
+  if (h->used > h->peakUsed) h->peakUsed = h->used;
   o->type = t;
   o->flags = 0;
   o->_pad = 0;
@@ -120,6 +128,7 @@ static void visit_trampoline(void* ctx, Value* slot) { visit_slot((Heap*)ctx, sl
 void heap_collect(Heap* h) { heap_collect_into(h, h->spaceSize); }
 
 static void heap_collect_into(Heap* h, u32 newSize) {
+  u32 fromUsed = h->used;
   h->toSize = newSize;
   h->toSpace = (char*)ot_alloc(h->toSize);
   if (!h->toSpace) ot_fatal("heap: cannot allocate to-space");
@@ -215,11 +224,26 @@ static void heap_collect_into(Heap* h, u32 newSize) {
   h->toSize = 0;
   h->toUsed = 0;
   h->collections++;
+  h->copiedBytes += h->used;
+  h->reclaimedBytes += fromUsed - h->used;
 
   // Grow policy: if live > 50% after the copy, double next time via an
   // immediate re-collect into a bigger space (cheap: live set is small).
   if (h->used > h->spaceSize / 2 && h->spaceSize <= h->maxBytes / 2)
     heap_collect_into(h, h->spaceSize * 2);
+}
+
+HeapStats heap_stats(const Heap* h) {
+  return (HeapStats){
+      .allocations = h->allocations,
+      .allocatedBytes = h->allocatedBytes,
+      .collections = h->collections,
+      .copiedBytes = h->copiedBytes,
+      .reclaimedBytes = h->reclaimedBytes,
+      .usedBytes = h->used,
+      .peakUsedBytes = h->peakUsed,
+      .capacityBytes = h->spaceSize,
+  };
 }
 
 u32 heap_identity_of(Heap* h, Obj* o) {

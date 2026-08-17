@@ -118,6 +118,8 @@ State* state_create(const StateConfig* cfg) {
   return vm;
 }
 
+HeapStats state_gc_stats(const State* vm) { return heap_stats(&vm->heap); }
+
 void state_destroy(State* vm) {
   // Run extension finalizers while every State member is still alive. Heap is
   // the first member and is destroyed last; waiting for heap_deinit would

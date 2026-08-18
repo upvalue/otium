@@ -1,6 +1,0 @@
-option('ext_demo', type : 'boolean', value : true,
-  description : 'Build the dependency-free demo native extension into the otium executable.')
-option('ext_ray', type : 'boolean', value : true,
-  description : 'Build the `ray` native extension into the otium executable (requires raylib).')
-option('computed_goto', type : 'feature', value : 'auto',
-  description : 'Use labels-as-values dispatch when the compiler supports it')

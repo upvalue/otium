@@ -102,7 +102,7 @@ for field in (
         re.MULTILINE,
     ), gc_stats
 assert re.search(
-    r"^  heap capacity bytes: 4194304 \(4\.00 MiB\)$",
+    r"^  heap capacity bytes: 1048576 \(1\.00 MiB\)$",
     gc_stats.stderr,
     re.MULTILINE,
 ), gc_stats

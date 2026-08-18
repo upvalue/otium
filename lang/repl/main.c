@@ -728,8 +728,7 @@ static void print_byte_stat(const char* name, u64 bytes) {
     fprintf(stderr, "  %s: %llu (%llu B)\n", name, (unsigned long long)bytes,
             (unsigned long long)bytes);
   else
-    fprintf(stderr, "  %s: %llu (%.2f %s)\n", name, (unsigned long long)bytes, size,
-            units[unit]);
+    fprintf(stderr, "  %s: %llu (%.2f %s)\n", name, (unsigned long long)bytes, size, units[unit]);
 }
 
 static void print_gc_stats(State* vm) {

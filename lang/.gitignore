@@ -1,7 +1,8 @@
-# Meson and compiler output
+# Build and compiler output
 /build/
 /builddir/
 /compile_commands.json
+/site.mk
 *.o
 *.a
 *.so

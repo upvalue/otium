@@ -29,8 +29,7 @@ From `lang/`, build Otium normally:
 
 ```sh
 git submodule update --init benchmarks/r7rs/vendor
-meson setup build
-meson compile -C build
+make
 ```
 
 Cloning the parent repository with `--recurse-submodules` performs the first
@@ -67,7 +66,7 @@ live sets. These limits are recorded in each result row.
 Run the normal suite:
 
 ```sh
-meson test -C build --print-errorlogs
+python3 benchmarks/r7rs/test_ports.py build/otium
 ```
 
 The `r7rs-ports` test exercises all ports with reduced inputs and checks their

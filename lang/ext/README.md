@@ -4,40 +4,37 @@ Extensions are optional C modules linked into the `otium` executable. They
 are not linked into `libotium`, and there is no dynamic loading or stable C ABI
 yet.
 
-Extensions build by default (`-Dext_demo=true -Dext_ray=true`); pass `false` to
-drop one, e.g. on a machine without raylib:
+The demo extension always builds. The Raylib extension builds when `pkg-config`
+finds Raylib. Override detection in `site.mk` when needed:
 
 ```sh
-meson setup build -Dext_ray=false
+WITH_RAY = 0
 ```
-
-Note that changed option defaults do not apply to an already-configured build
-directory; update one with `meson configure build -Dext_ray=true`.
 
 An extension registers a native module name. `(require 'demo)` creates and
 enters the `demo` namespace, runs the native initializer once, restores the
-caller's namespace, then looks for `demo.scm` on the normal load path. The
+caller's namespace, then looks for `demo.ot` on the normal load path. The
 source file is optional. It is useful for wrappers and constants that do not
 need to be compiled into the executable.
 
-## Foreign objects
+## Extension values
 
-`src/heap.h` exposes the extension-facing API:
+`src/otium.h` exposes the extension-facing API:
 
-- `register_foreign_type` registers a per-VM type name and optional finalizer.
-- `make_foreign_inline` stores a small POD value in the moving heap object.
-- `make_foreign_pointer` stores an external pointer owned by the Foreign object.
-- `foreign_check` validates the type and live flag, returning an Otium condition
+- `ot_ext_type` registers a per-state type and optional finalizer.
+- `ot_ext_inline` stores a small POD value in the moving heap object.
+- `ot_ext_pointer` stores an external pointer owned by the object.
+- `ot_ext_check` validates the type and live flag, returning a condition
   for a wrong or released value.
-- `foreign_release` finalizes once and marks the value released.
+- `ot_ext_release` finalizes once and marks the value released.
 
-Inline bytes move safely with the Cheney collector. Foreign payloads cannot
+Inline bytes move safely with the Cheney collector. Extension payloads cannot
 contain Otium `Value`s because there is no extension trace callback in this
 version. Finalizers run during collection and must not allocate on the Otium
 heap or re-enter evaluation.
 
-Native functions use the same `Slot`, `Scope`, and `ARG` rooting discipline as
-the builtins. A raw heap `Value` cannot live across an allocating call.
+C functions use the same `OT_FRAME` rooting discipline as the builtins. A
+raw heap `otv` cannot live across an allocating call.
 
 `ext/demo` is the small reference implementation. It has both an inline
 counter and a malloc-owned counter, plus explicit release behavior.
@@ -48,7 +45,7 @@ The `ray` extension wraps Raylib and requires a system Raylib package
 discoverable by `pkg-config`:
 
 ```sh
-meson compile -C build
+make
 build/otium ext/ray/example.scm
 ```
 
@@ -93,7 +90,7 @@ Colors are packed `0xRRGGBBAA` integers. The companion module defines `rgb`,
 `rgba`, common colors, keys, and mouse buttons. Positions and rectangles use
 flat numeric arguments instead of allocating temporary vector objects.
 
-Textures, fonts, and render textures are inline Foreign handles. Call
+Textures, fonts, and render textures are owned extension handles. Call
 `unload-texture!`, `unload-font!`, or `unload-render-texture!` while the window
 is still open. Their GC finalizers are a backstop and do nothing after the
 graphics context has closed. Using an explicitly unloaded handle raises an

@@ -5,15 +5,19 @@ experimental little programming language
 ## Build and bootstrap
 
 The supported runtime always embeds `prelude/expander.scm` and
-`prelude/prelude.scm`. Meson generates C headers for both files and the VM loads
-them before it creates the `user` namespace. A prelude-free runtime is not a
-supported build mode.
+`prelude/prelude.scm`. Make generates C headers for both files and the runtime
+loads them before it creates the `user` namespace. A prelude-free runtime is
+not a supported build mode.
 
 ```sh
-meson setup build
-meson compile -C build
-meson test -C build
+make
+make test
 ```
+
+`make lib` builds the embeddable runtime as `build/libotium.a`; `make bench`
+runs the benchmark suite. Defaults and feature switches live in `config.mk`.
+Put machine-local overrides such as sanitizer flags or Raylib paths in an
+untracked `site.mk`.
 
 ## Project files
 
@@ -69,7 +73,9 @@ the measurements include.
 ## Native extensions
 
 Optional native modules are statically linked into the `otium` executable and
-left out of `libotium`. The normal build includes none of them.
+left out of `libotium`. The demo module is always available. The Raylib module
+is included when `pkg-config` finds Raylib; set `WITH_RAY=0` in `site.mk` to
+disable it.
 
 The repository includes a dependency-free demo and a Raylib binding. See
 [ext/README.md](ext/README.md) for build commands, the extension API, and the

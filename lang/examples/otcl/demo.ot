@@ -1,0 +1,13 @@
+(require '(otcl :as otcl))
+
+(define interpreter (otcl/make-interpreter))
+
+(otcl/eval-script interpreter
+  "proc fib {x} {
+     if {$x <= 1} {
+       return $x
+     }
+     expr [fib [expr $x-1]] + [fib [expr $x-2]]
+   }
+
+   puts [fib 10]")

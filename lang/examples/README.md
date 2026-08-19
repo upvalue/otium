@@ -3,6 +3,13 @@
 `hand/` contains code written by people. Agents may copy it when reorganizing
 the tree, but should not edit it. The other directories are maintained examples.
 
+## otcl
+
+`otcl/` contains a Tcl interpreter written in Otium. It follows the parser,
+call-frame, command-table, and expression-evaluator design of Picol. See
+[`otcl/README.md`](otcl/README.md) for its supported commands and a runnable
+Fibonacci example.
+
 ## Native extensions
 
 Extensions are optional C modules linked into the `otium` executable. They

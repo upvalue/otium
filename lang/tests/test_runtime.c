@@ -246,6 +246,59 @@ static void test_eval_integration(void) {
   ot_destroy(state);
 }
 
+static bool condition_message_is(ots* state, const char* expected) {
+  otv key = ot_make_keyword(state, "message", 7);
+  otv condition = ot_condition(state);
+  otv message = ot_table_get(state, condition, key, ot_nil);
+  const char* bytes = NULL;
+  size_t length = 0;
+  size_t expected_length = strlen(expected);
+  return ot_string_bytes(message, &bytes, &length) && length == expected_length &&
+         memcmp(bytes, expected, length) == 0;
+}
+
+static void test_named_let(void) {
+  ot_config config = ot_config_default();
+  config.gc_stress = true;
+  config.max_depth = 64;
+  ots* state = ot_create(&config);
+  check(state != NULL, "create named-let runtime state");
+  if (state == NULL) return;
+  otv value = ot_nil;
+
+  check(evaluate(state, "(let loop () #t)", &value) && value == ot_true,
+        "named let accepts no bindings");
+  check(evaluate(state,
+                 "(let sum ((n 50000) (total 0)) "
+                 "  (if (= n 0) total (sum (- n 1) (+ total n))))",
+                 &value) &&
+            ot_is_int(value) && ot_get_int(value) == INT64_C(1250025000),
+        "named let recursion uses the evaluator trampoline");
+  check(evaluate(state,
+                 "(let ((x 10)) "
+                 "  (let loop ((x 1) (outer-x x)) outer-x))",
+                 &value) &&
+            ot_is_int(value) && ot_get_int(value) == 10,
+        "named let initializers use the enclosing scope");
+  check(evaluate(state, "(let loop (broken) #t)", &value) == false &&
+            condition_message_is(state, "let: invalid binding"),
+        "named let rejects an invalid binding");
+  ot_clear_condition(state);
+  check(evaluate(state, "(let loop 42 #t)", &value) == false &&
+            condition_message_is(state, "let: bad bindings"),
+        "named let rejects a non-list binding set");
+  ot_clear_condition(state);
+  check(evaluate(state, "(let 42 () #t)", &value) == false &&
+            condition_message_is(state, "let: bad bindings"),
+        "let rejects a non-symbol named-let name");
+  ot_clear_condition(state);
+  check(evaluate(state, "(let loop ((value missing)) value)", &value) == false &&
+            condition_message_is(state, "unbound symbol: missing"),
+        "named let propagates initializer errors");
+
+  ot_destroy(state);
+}
+
 static void test_try_ast_reuse(void) {
   ots* state = test_state(true);
   if (state == NULL) return;
@@ -378,12 +431,13 @@ static void test_interrupt(void) {
 }
 
 static const test_case tests[] = {
-    {"config", test_config_validation},          {"immediates", test_immediate_values},
-    {"heap-values", test_heap_values},           {"float-equality", test_float_and_equality},
-    {"reentrant", test_reentrant_states},        {"eval", test_eval_integration},
-    {"try-ast-reuse", test_try_ast_reuse},       {"writer", test_writer_callback},
-    {"modules-loader", test_modules_and_loader}, {"roots-stats", test_roots_and_stats},
-    {"extensions", test_extension_values},       {"interrupt", test_interrupt},
+    {"config", test_config_validation},    {"immediates", test_immediate_values},
+    {"heap-values", test_heap_values},     {"float-equality", test_float_and_equality},
+    {"reentrant", test_reentrant_states},  {"eval", test_eval_integration},
+    {"named-let", test_named_let},         {"try-ast-reuse", test_try_ast_reuse},
+    {"writer", test_writer_callback},      {"modules-loader", test_modules_and_loader},
+    {"roots-stats", test_roots_and_stats}, {"extensions", test_extension_values},
+    {"interrupt", test_interrupt},
 };
 
 int main(int argc, char** argv) {

@@ -30,6 +30,24 @@
 (println "let-shadow:" (let ((x 1)) (let ((x 2) (y x)) (list x y))))
 (println "let-empty-body:" (let ((x 1))))
 
+; named let is a local recursive function; its initializers use the outer scope
+(println "named-let-zero:" (let loop () #t))
+(println "named-let-empty-body:" (let loop ()))
+(println "named-let-sum:"
+         (let sum ((n 10) (acc 0))
+           (if (= n 0) acc (sum (- n 1) (+ acc n)))))
+(println "named-let-initializers:"
+         (let ((x 10))
+           (let loop ((x 1) (outer-x x)) (list x outer-x))))
+(println "named-let-scope:"
+         (let ((walk 'outer))
+           (list (let walk ((n 2))
+                   (if (= n 0) 'inner (walk (- n 1))))
+                 walk)))
+(println "named-let-tail:"
+         (let count ((n 50000) (acc 0))
+           (if (= n 0) acc (count (- n 1) (+ acc n)))))
+
 ; while returns nil, loops while truthy
 (let ((i 0) (acc 0))
   (while (< i 5)

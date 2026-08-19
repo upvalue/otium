@@ -20,6 +20,12 @@ and-truthy-empty-list: 5
 let-seq: (1 2 6)
 let-shadow: (2 2)
 let-empty-body: nil
+named-let-zero: #t
+named-let-empty-body: nil
+named-let-sum: 55
+named-let-initializers: (1 10)
+named-let-scope: (inner outer)
+named-let-tail: 1250025000
 while-sum: 10
 while-i: 5
 while-value: nil

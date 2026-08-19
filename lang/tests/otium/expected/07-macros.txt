@@ -20,3 +20,5 @@ expand-1-nonmacro: (+ 1 2)
 expand-1-atom: 42
 expand-1-once: (m1 5)
 expand-full: (+ 5 1)
+named-let-init-macro: 42
+named-let-shadows-macro: 0

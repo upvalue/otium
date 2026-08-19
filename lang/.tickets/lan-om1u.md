@@ -1,6 +1,6 @@
 ---
 id: lan-om1u
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-08-16T02:49:28Z

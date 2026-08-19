@@ -2107,7 +2107,85 @@ static eval_step eval_special(ots* state, otv form, otv env) {
   if (symbol_is(head, "let")) {
     otv bindings = form_arg(state, form, 1, "let");
     if (bindings == OT_UNWIND) return step_value(bindings);
+    bool named = is_type(bindings, OBJ_SYMBOL);
+    otv named_name = ot_nil;
+    otv body = ot_nil;
+    OT_FRAME_SCOPED(state, &named_name, &body);
+    if (named) {
+      named_name = bindings;
+      bindings = form_arg(state, form, 2, "let");
+      if (bindings == OT_UNWIND) return step_value(bindings);
+      body = list_tail(form, 3);
+    } else {
+      body = list_tail(form, 2);
+    }
     if (!proper_list(bindings)) return step_value(ot_raise(state, "let: bad bindings"));
+
+    if (named) {
+      for (otv cursor = bindings; is_type(cursor, OBJ_PAIR); cursor = as_pair(cursor)->cdr) {
+        otv binding = as_pair(cursor)->car;
+        otv binding_name;
+        otv expression;
+        if (!list_nth(binding, 0, &binding_name) || !list_nth(binding, 1, &expression) ||
+            list_tail(binding, 2) != ot_null || !is_type(binding_name, OBJ_SYMBOL))
+          return step_value(ot_raise(state, "let: invalid binding"));
+      }
+
+      size_t count = list_length(bindings);
+      size_t slots_count = count == 0 ? 1 : count;
+      otv values[slots_count];
+      otv* roots[slots_count];
+      for (size_t i = 0; i < slots_count; i++) {
+        values[i] = ot_nil;
+        roots[i] = &values[i];
+      }
+      ot_frame values_frame;
+
+      otv params = ot_null;
+      otv params_tail = ot_nil;
+      otv cursor = bindings;
+      otv named_env = ot_nil;
+      otv function = ot_nil;
+      otv call_env = ot_nil;
+      OT_FRAME_SCOPED(state, &params, &params_tail, &cursor, &named_env, &function, &call_env);
+      ot_frame_push(state, &values_frame, roots, slots_count);
+      size_t index = 0;
+      while (is_type(cursor, OBJ_PAIR)) {
+        otv binding = as_pair(cursor)->car;
+        otv binding_name = ot_nil;
+        otv expression = ot_nil;
+        otv cell = ot_nil;
+        otv* binding_roots[] = {&binding, &binding_name, &expression, &cell};
+        ot_frame binding_frame;
+        ot_frame_push(state, &binding_frame, binding_roots,
+                      sizeof binding_roots / sizeof binding_roots[0]);
+        (void)list_nth(binding, 0, &binding_name);
+        (void)list_nth(binding, 1, &expression);
+        values[index] = eval_value(state, expression, env);
+        if (values[index] == OT_UNWIND) {
+          ot_frame_pop(state, &binding_frame);
+          ot_frame_pop(state, &values_frame);
+          return step_value(OT_UNWIND);
+        }
+        index++;
+        cell = ot_cons(state, binding_name, ot_null);
+        if (params == ot_null) params = cell;
+        else as_pair(params_tail)->cdr = cell;
+        params_tail = cell;
+        cursor = as_pair(cursor)->cdr;
+        ot_frame_pop(state, &binding_frame);
+      }
+
+      named_env = make_env(state, env, env_namespace(state, env));
+      function =
+          make_function(state, params, body, named_env, env_namespace(state, env), named_name);
+      env_bind(state, &named_env, named_name, function);
+      call_env = bind_parameters(state, function, values, count);
+      ot_frame_pop(state, &values_frame);
+      if (call_env == OT_UNWIND) return step_value(call_env);
+      return tail_sequence(state, body, call_env);
+    }
+
     otv let_env = ot_nil;
     OT_FRAME_SCOPED(state, &let_env, &bindings);
     let_env = make_env(state, env, env_namespace(state, env));

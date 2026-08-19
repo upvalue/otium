@@ -50,3 +50,11 @@
 (defmacro m2 (x) `(m1 ,x))
 (println "expand-1-once:" (macroexpand-1 '(m2 5)))
 (println "expand-full:" (macroexpand '(m2 5)))
+
+; a named-let name shadows a macro in its body, but not in initializers
+(defmacro macro-loop (x) `(+ ,x 40))
+(println "named-let-init-macro:"
+         (let macro-loop ((n (macro-loop 2))) n))
+(println "named-let-shadows-macro:"
+         (let macro-loop ((n 3))
+           (if (= n 0) n (macro-loop (- n 1)))))

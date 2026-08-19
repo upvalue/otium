@@ -83,9 +83,54 @@
             (cons (cons (list name ex) (car r)) (cdr r)))))
       (cons '() scope)))
 
+(define (exp-let-binding? b)
+  (and (pair? b)
+       (symbol? (car b))
+       (pair? (cdr b))
+       (null? (cdr (cdr b)))))
+
+(define (exp-let-binding-list? bs)
+  (cond ((null? bs) #t)
+        ((pair? bs)
+         (and (exp-let-binding? (car bs))
+              (exp-let-binding-list? (cdr bs))))
+        (else #f)))
+
+;; Named-let initializers share the outer scope.  Returns
+;; (expanded-bindings . parameter-names).
+(define (exp-named-let-bindings bs scope)
+  (if (pair? bs)
+      (let ((b (car bs)))
+        (let ((name (car b))
+              (ex (exp-form (car (cdr b)) scope)))
+          (let ((r (exp-named-let-bindings (cdr bs) scope)))
+            (cons (cons (list name ex) (car r))
+                  (cons name (cdr r))))))
+      (cons '() '())))
+
+(define (exp-named-let form scope)
+  (let ((name (car (cdr form)))
+        (bindings (car (cdr (cdr form)))))
+    (if (exp-let-binding-list? bindings)
+        (let ((r (exp-named-let-bindings bindings scope)))
+          (cons 'let
+                (cons name
+                      (cons (car r)
+                            (exp-body (cdr (cdr (cdr form)))
+                                      (cons name (append (cdr r) scope)))))))
+        form)))
+
 (define (exp-let form scope)
-  (let ((r (exp-let-bindings (car (cdr form)) scope)))
-    (cons 'let (cons (car r) (exp-body (cdr (cdr form)) (cdr r))))))
+  (if (pair? (cdr form))
+      (if (symbol? (car (cdr form)))
+          (if (pair? (cdr (cdr form)))
+              (exp-named-let form scope)
+              form)
+          (if (exp-let-binding-list? (car (cdr form)))
+              (let ((r (exp-let-bindings (car (cdr form)) scope)))
+                (cons 'let (cons (car r) (exp-body (cdr (cdr form)) (cdr r)))))
+              form))
+      form))
 
 (define (exp-lambda form scope)
   (let ((params (car (cdr form))))

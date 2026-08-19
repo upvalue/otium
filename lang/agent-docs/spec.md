@@ -429,9 +429,18 @@ when empty. `do` is an alias.
 
 **`(let bindings body…)`** -- `bindings` is a list of `(name expr)`
 pairs. Binding is **sequential**: each `expr` sees the bindings before it
-(what Scheme calls `let*`). That is the only `let` the language has --
-there is no parallel form and no `let*` alias. The body evaluates in the
-new scope; an empty body yields `nil`.
+(what Scheme calls `let*`). There is no parallel form and no `let*`
+alias. The body evaluates in the new scope; an empty body yields `nil`.
+
+**`(let name bindings body…)`** -- named `let`. Creates a local function
+called `name`, with one parameter per binding, and immediately calls it
+with the initializer values. The function name and all parameters are in
+scope only in `body`, so the function can call itself recursively and a
+macro with the same name is shadowed there. Initializers evaluate left to
+right in the enclosing scope: unlike ordinary `let`, an initializer does
+not see earlier binding names or the new function name. The body is a tail
+position, and tail-recursive named lets run in constant stack space. An
+empty binding list is valid; an empty body yields `nil`.
 
 **`(while test body…)`** -- re-evaluates `test` before each iteration;
 runs the body while it is truthy. Returns `nil`.
@@ -481,7 +490,8 @@ is evaluated, it is fully expanded:
   another macro call). Lexical bindings shadow macros in head position:
   the expander tracks the bindings introduced by `lambda`, `let`, and
   body-level `define`, and a head symbol bound by one of them is a plain
-  application, never a macro call.
+  application, never a macro call. A named-let name and its parameters
+  are tracked in its body, but not in its initializer expressions.
 - Any other form has its subforms expanded recursively, except positions
   the special forms treat as data: `quote`d forms, parameter lists,
   binding and clause names, `ns`/`require` specs. Inside `quasiquote`,

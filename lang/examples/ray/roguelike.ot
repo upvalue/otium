@@ -4,7 +4,7 @@
 ; them, gold is picked up by stepping on it, stairs deepen the depth counter.
 ;
 ; Unattended runs for agents:
-;   RAY_FRAMES=30 RAY_SCREENSHOT=shot.png RAY_INPUT=l,l,j otium ext/ray/roguelike.ot
+;   RAY_FRAMES=30 RAY_SCREENSHOT=shot.png RAY_INPUT=l,l,j otium examples/ray/roguelike.ot
 (require 'ray)
 
 (define columns 60)

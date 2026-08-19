@@ -256,7 +256,7 @@ must not allocate on the Otium heap or re-enter evaluation.
 
 `ot-ext-demo.c` is the dependency-free reference. `ot-ext-ray.c` is the
 raylib binding, built when raylib is found (or forced off in `site.mk`); its
-companion module and examples stay under `ext/ray/` as Otium source.
+companion module and examples stay under `examples/ray/` as Otium source.
 
 ## Testing
 

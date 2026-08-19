@@ -74,9 +74,9 @@ test: all $(BUILD)/test-runtime hygiene
 	$(BUILD)/test-runtime
 	$(PYTHON) tests/otium/run-tests.py $(BUILD)/otium
 	$(PYTHON) tests/test_cli.py $(BUILD)/otium tests/cli-load.scm tests/cli-load-second.scm
-	$(BUILD)/otium --no-project --path ext/demo tests/ext-demo.scm
+	$(BUILD)/otium --no-project --path examples/demo tests/ext-demo.scm
 ifeq ($(WITH_RAY),1)
-	$(BUILD)/otium --no-project --path ext/ray tests/ext-ray.scm
+	$(BUILD)/otium --no-project --path examples/ray tests/ext-ray.scm
 endif
 
 bench: all

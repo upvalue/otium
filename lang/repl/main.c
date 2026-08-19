@@ -20,10 +20,10 @@
 #include "reader.h"
 
 #ifdef OT_EXT_DEMO
-#include "../ext/demo/demo_ext.h"
+#include "../examples/demo/demo_ext.h"
 #endif
 #ifdef OT_EXT_RAY
-#include "../ext/ray/ray_ext.h"
+#include "../examples/ray/ray_ext.h"
 #endif
 
 // state_push_handler/state_pop_handler come from state.h.

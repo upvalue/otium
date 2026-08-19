@@ -1,4 +1,9 @@
-# Native extensions
+# Examples
+
+`hand/` contains code written by people. Agents may copy it when reorganizing
+the tree, but should not edit it. The other directories are maintained examples.
+
+## Native extensions
 
 Extensions are optional C modules linked into the `otium` executable. They
 are not linked into `libotium`, and there is no dynamic loading or stable C ABI
@@ -36,7 +41,7 @@ heap or re-enter evaluation.
 C functions use the same `OT_FRAME` rooting discipline as the builtins. A
 raw heap `otv` cannot live across an allocating call.
 
-`ext/demo` is the small reference implementation. It has both an inline
+`examples/demo` is the small reference implementation. It has both an inline
 counter and a malloc-owned counter, plus explicit release behavior.
 
 ## Ray
@@ -46,13 +51,13 @@ discoverable by `pkg-config`:
 
 ```sh
 make
-build/otium ext/ray/example.scm
+build/otium examples/ray/example.scm
 ```
 
-`ext/ray/roguelike.ot` is a larger example aimed at a grid game:
+`examples/ray/roguelike.ot` is a larger example aimed at a grid game:
 
 ```sh
-build/otium ext/ray/roguelike.ot
+build/otium examples/ray/roguelike.ot
 ```
 
 It draws a Brogue-styled 60 by 30 glyph dungeon into a render texture: line of
@@ -73,7 +78,7 @@ human at the keyboard. Three environment variables control it:
 
 ```sh
 RAY_FRAMES=60 RAY_SCREENSHOT=shot.png RAY_INPUT=l,l,j \
-  build/otium ext/ray/roguelike.ot
+  build/otium examples/ray/roguelike.ot
 ```
 
 A script opts in by calling `(ray/harness-continue?)` once per frame, after

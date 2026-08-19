@@ -28,7 +28,7 @@ file runs the same way from the shell, from CI, and from an editor client that
 only controls the working directory:
 
 ```lisp
-(paths "ext/ray" "ext/demo")
+(paths "examples/ray" "examples/demo")
 ```
 
 Relative entries resolve against the directory holding the file, not the working
@@ -78,5 +78,5 @@ is included when `pkg-config` finds Raylib; set `WITH_RAY=0` in `site.mk` to
 disable it.
 
 The repository includes a dependency-free demo and a Raylib binding. See
-[ext/README.md](ext/README.md) for build commands, the extension API, and the
+[examples/README.md](examples/README.md) for build commands, the extension API, and the
 Raylib example.

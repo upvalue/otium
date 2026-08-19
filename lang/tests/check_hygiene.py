@@ -25,7 +25,7 @@ def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
     failures = []
     paths = []
-    for source_dir in ("src", "repl", "ext", "tests"):
+    for source_dir in ("src", "repl", "examples", "tests"):
         paths.extend((root / source_dir).rglob("*"))
     for path in sorted(paths):
         if path.suffix not in {".c", ".cc", ".cpp", ".h", ".hh", ".hpp"}:

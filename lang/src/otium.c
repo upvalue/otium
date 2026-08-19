@@ -1346,16 +1346,20 @@ static otv list_tail(otv list, size_t count) {
   return list;
 }
 
-static otv eval_sequence(ots* state, otv forms, otv env) {
+static otv eval_sequence_until(ots* state, otv forms, otv stop, otv env) {
   otv result = ot_nil;
-  OT_FRAME_SCOPED(state, &forms, &env, &result);
-  while (is_type(forms, OBJ_PAIR)) {
+  OT_FRAME_SCOPED(state, &forms, &stop, &env, &result);
+  while (forms != stop) {
+    if (!is_type(forms, OBJ_PAIR)) return ot_raise(state, "body must be a proper list");
     result = eval_value(state, as_pair(forms)->car, env);
     if (result == OT_UNWIND) return result;
     forms = as_pair(forms)->cdr;
   }
-  if (forms != ot_null) return ot_raise(state, "body must be a proper list");
   return result;
+}
+
+static otv eval_sequence(ots* state, otv forms, otv env) {
+  return eval_sequence_until(state, forms, ot_null, env);
 }
 
 static otv bind_parameters(ots* state, otv function_value, otv* args, size_t argc) {
@@ -1780,22 +1784,17 @@ static otv require_forms(ots* state, otv specs) {
 }
 
 static eval_step eval_try(ots* state, otv args, otv env) {
-  otv body = args;
   otv catches = ot_null;
   otv cursor = args;
-  otv previous = ot_nil;
-  OT_FRAME_SCOPED(state, &body, &catches, &cursor, &previous, &env);
+  OT_FRAME_SCOPED(state, &args, &catches, &cursor, &env);
   while (is_type(cursor, OBJ_PAIR)) {
     if (is_catch_clause(as_pair(cursor)->car)) {
       catches = cursor;
-      if (previous == ot_nil) body = ot_null;
-      else as_pair(previous)->cdr = ot_null;
       break;
     }
-    previous = cursor;
     cursor = as_pair(cursor)->cdr;
   }
-  otv result = eval_sequence(state, body, env);
+  otv result = eval_sequence_until(state, args, catches, env);
   if (result != OT_UNWIND || state->unwind_kind != UNWIND_CONDITION) return step_value(result);
   otv condition = state->condition;
   OT_FRAME_SCOPED(state, &condition);

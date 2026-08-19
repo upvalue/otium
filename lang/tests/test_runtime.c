@@ -246,6 +246,23 @@ static void test_eval_integration(void) {
   ot_destroy(state);
 }
 
+static void test_try_ast_reuse(void) {
+  ots* state = test_state(true);
+  if (state == NULL) return;
+  otv value = ot_nil;
+  const char* program = "(define (recover message) "
+                        "  (try (+ 1 2) (error message) "
+                        "    (catch (error? e) (condition-message e)))) "
+                        "(recover \"first\") "
+                        "(recover \"second\")";
+  const char* bytes = NULL;
+  size_t length = 0;
+  check(evaluate(state, program, &value) && ot_string_bytes(value, &bytes, &length) &&
+            length == 6 && memcmp(bytes, "second", length) == 0,
+        "try retains catch clauses across function calls");
+  ot_destroy(state);
+}
+
 static void test_writer_callback(void) {
   ots* state = test_state(false);
   if (state == NULL) return;
@@ -361,12 +378,12 @@ static void test_interrupt(void) {
 }
 
 static const test_case tests[] = {
-    {"config", test_config_validation},    {"immediates", test_immediate_values},
-    {"heap-values", test_heap_values},     {"float-equality", test_float_and_equality},
-    {"reentrant", test_reentrant_states},  {"eval", test_eval_integration},
-    {"writer", test_writer_callback},      {"modules-loader", test_modules_and_loader},
-    {"roots-stats", test_roots_and_stats}, {"extensions", test_extension_values},
-    {"interrupt", test_interrupt},
+    {"config", test_config_validation},          {"immediates", test_immediate_values},
+    {"heap-values", test_heap_values},           {"float-equality", test_float_and_equality},
+    {"reentrant", test_reentrant_states},        {"eval", test_eval_integration},
+    {"try-ast-reuse", test_try_ast_reuse},       {"writer", test_writer_callback},
+    {"modules-loader", test_modules_and_loader}, {"roots-stats", test_roots_and_stats},
+    {"extensions", test_extension_values},       {"interrupt", test_interrupt},
 };
 
 int main(int argc, char** argv) {

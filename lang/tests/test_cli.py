@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 
+import os
 import re
+import select
+import signal
 import subprocess
 import sys
+import time
 
 
 otium = sys.argv[1]
@@ -64,6 +68,93 @@ assert "error:" in server.stdout, server
 assert "7\n\x1eot> " in server.stdout, server
 assert "restart #?" not in server.stdout, server
 assert server.stderr == "", server
+
+
+def read_server_response(process):
+    marker = b"\x1eot> "
+    output = b""
+    deadline = time.monotonic() + 2
+    while marker not in output:
+        timeout = deadline - time.monotonic()
+        assert timeout > 0, ("server response timed out", output, process.poll())
+        ready, _, _ = select.select([process.stdout], [], [], timeout)
+        assert ready, ("server response timed out", output, process.poll())
+        chunk = os.read(process.stdout.fileno(), 4096)
+        assert chunk, ("server closed its output", output, process.poll())
+        output += chunk
+    return output.decode()
+
+
+interactive = subprocess.Popen(
+    [otium, "--no-project", "--server"],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+)
+try:
+    interactive.stdin.write(frame("(+ 1 1)").encode())
+    interactive.stdin.flush()
+    assert "2\n\x1eot> " in read_server_response(interactive)
+
+    interactive.stdin.write(
+        frame(
+            "(begin (define counter 0) (define cleaned #f) "
+            "(unwind-protect "
+            "  (while #t (set! counter (+ counter 1))) "
+            "  (set! cleaned #t)))"
+        ).encode()
+    )
+    interactive.stdin.flush()
+    time.sleep(0.05)
+    interactive.send_signal(signal.SIGINT)
+    assert "paused\n\x1eot> " in read_server_response(interactive)
+
+    interactive.stdin.write(frame("(not (nil? (find-restart 'continue)))").encode())
+    interactive.stdin.flush()
+    assert "#t\n\x1eot> " in read_server_response(interactive)
+
+    interactive.stdin.write(frame("(invoke-restart 'continue)").encode())
+    interactive.stdin.flush()
+    time.sleep(0.05)
+    assert interactive.poll() is None, interactive.poll()
+    interactive.send_signal(signal.SIGINT)
+    assert "paused\n\x1eot> " in read_server_response(interactive)
+
+    interactive.stdin.write(frame("(invoke-restart 'abort)").encode())
+    interactive.stdin.flush()
+    assert "interrupted\n\x1eot> " in read_server_response(interactive)
+
+    interactive.stdin.write(frame("cleaned").encode())
+    interactive.stdin.flush()
+    assert "#t\n\x1eot> " in read_server_response(interactive)
+
+    interactive.stdin.write(frame("counter").encode())
+    interactive.stdin.flush()
+    counter_response = read_server_response(interactive)
+    assert int(counter_response.splitlines()[0]) > 0, counter_response
+
+    interactive.stdin.write(frame("(while #t nil)").encode())
+    interactive.stdin.flush()
+    time.sleep(0.05)
+    interactive.send_signal(signal.SIGINT)
+    assert "paused\n\x1eot> " in read_server_response(interactive)
+    interactive.send_signal(signal.SIGINT)
+    assert "interrupted\n\x1eot> " in read_server_response(interactive)
+
+    interactive.stdin.write(frame("(+ 20 22)").encode())
+    interactive.stdin.flush()
+    assert "42\n\x1eot> " in read_server_response(interactive)
+
+    interactive.stdin.write(frame("(quit)").encode())
+    interactive.stdin.flush()
+    remaining, error_output = interactive.communicate(timeout=2)
+    assert interactive.returncode == 0, interactive.returncode
+    assert remaining == b"", remaining
+    assert error_output == b"", error_output
+finally:
+    if interactive.poll() is None:
+        interactive.kill()
+        interactive.communicate()
 
 expect(run("--max-depth"), 2, stderr="--max-depth requires a value")
 expect(run("--max-depth", "nope"), 2, stderr="requires an integer")

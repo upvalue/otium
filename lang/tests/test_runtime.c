@@ -22,6 +22,11 @@ static int finalized[8];
 static size_t finalized_count;
 static int module_init_count;
 
+typedef struct interrupt_probe {
+  const char* restart;
+  int calls;
+} interrupt_probe;
+
 static void check(bool condition, const char* message) {
   if (condition) return;
   fprintf(stderr, "FAIL: %s\n", message);
@@ -30,6 +35,16 @@ static void check(bool condition, const char* message) {
 
 static bool evaluate(ots* state, const char* source, otv* out) {
   return ot_eval_src(state, source, strlen(source), "<runtime-test>", out);
+}
+
+static ot_interrupt_action invoke_interrupt_restart(ots* state, void* userdata) {
+  interrupt_probe* probe = userdata;
+  probe->calls++;
+  otv ignored = ot_nil;
+  const char* source = strcmp(probe->restart, "continue") == 0 ? "(invoke-restart 'continue)"
+                                                               : "(invoke-restart 'abort)";
+  check(!evaluate(state, source, &ignored), "interrupt restart transfers control");
+  return strcmp(probe->restart, "continue") == 0 ? OT_INTERRUPT_ABORT : OT_INTERRUPT_CONTINUE;
 }
 
 static ots* test_state(bool stress) {
@@ -418,15 +433,30 @@ static void test_extension_values(void) {
 }
 
 static void test_interrupt(void) {
-  ots* state = test_state(false);
+  ots* state = test_state(true);
   if (state == NULL) return;
-  ot_interrupt(state);
   otv value = ot_nil;
-  check(!evaluate(state,
-                  "(define (spin n) (if (= n 0) n (spin (- n 1)))) "
-                  "(spin 5000)",
-                  &value),
+  check(evaluate(state, "(define (spin n) (if (= n 0) n (spin (- n 1))))", &value),
+        "define interrupt test loop");
+  ot_interrupt(state);
+  check(!evaluate(state, "(spin 5000)", &value),
         "pending interrupt stops evaluation at a poll point");
+  ot_clear_condition(state);
+
+  interrupt_probe probe = {.restart = "continue"};
+  ot_set_interrupt_hook(state, invoke_interrupt_restart, &probe);
+  ot_interrupt(state);
+  check(evaluate(state, "(spin 5000)", &value) && ot_is_int(value) && ot_get_int(value) == 0,
+        "continue restart resumes interrupted evaluation");
+  check(probe.calls == 1, "interrupt hook runs once for continue");
+
+  probe.restart = "abort";
+  ot_interrupt(state);
+  check(!evaluate(state, "(spin 5000)", &value), "abort restart stops interrupted evaluation");
+  check(probe.calls == 2, "interrupt hook runs once for abort");
+  ot_clear_condition(state);
+  check(evaluate(state, "(+ 20 22)", &value) && ot_get_int(value) == 42,
+        "state evaluates again after interrupt abort");
   ot_destroy(state);
 }
 

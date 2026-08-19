@@ -1331,6 +1331,62 @@ static otv make_function(ots* state, otv params, otv body, otv env, otv namespac
   return ot_from_obj(function);
 }
 
+static otv make_restart(ots* state, const char* name_text, const char* description_text) {
+  otv name = ot_intern(state, name_text, strlen(name_text), false);
+  otv description = ot_nil;
+  OT_FRAME_SCOPED(state, &name, &description);
+  description = ot_make_string(state, description_text, strlen(description_text));
+  ot_restart_obj* restart = must_alloc(state, sizeof(*restart), OBJ_RESTART);
+  restart->name = name;
+  restart->description = description;
+  restart->id = ++state->next_restart_id;
+  return ot_from_obj(restart);
+}
+
+static otv interrupt_unwind(ots* state) {
+  state->unwind_kind = UNWIND_QUIT;
+  state->condition = ot_intern(state, "interrupt", 9, false);
+  return OT_UNWIND;
+}
+
+static otv run_interrupt_hook(ots* state) {
+  if (state->interrupt_hook == NULL || state->in_interrupt_hook) return interrupt_unwind(state);
+
+  otv continue_restart = make_restart(state, "continue", "Resume the interrupted evaluation.");
+  OT_FRAME_SCOPED(state, &continue_restart);
+  otv abort_restart = make_restart(state, "abort", "Abort the interrupted evaluation.");
+  OT_FRAME_SCOPED(state, &abort_restart);
+  ot_restart_clause clauses[2] = {
+      {.restart = abort_restart, .params = ot_null, .body = ot_null},
+      {.restart = continue_restart, .params = ot_null, .body = ot_null},
+  };
+  ot_restart_frame frame = {.prev = state->restarts, .clauses = clauses, .count = 2};
+  state->restarts = &frame;
+  state->in_interrupt_hook = true;
+  ot_interrupt_action action = state->interrupt_hook(state, state->interrupt_userdata);
+  state->in_interrupt_hook = false;
+  state->restarts = frame.prev;
+  bool interrupted_again = atomic_exchange(&state->interrupted, false);
+
+  if (state->unwind_kind == UNWIND_RESTART) {
+    uint64_t continue_id = ((ot_restart_obj*)ot_as_obj(continue_restart))->id;
+    uint64_t abort_id = ((ot_restart_obj*)ot_as_obj(abort_restart))->id;
+    if (state->unwind_restart_id == continue_id || state->unwind_restart_id == abort_id) {
+      action = state->unwind_restart_id == continue_id ? OT_INTERRUPT_CONTINUE : OT_INTERRUPT_ABORT;
+      state->unwind_kind = UNWIND_NONE;
+      state->unwind_restart_id = 0;
+      state->unwind_args = ot_nil;
+    } else {
+      return OT_UNWIND;
+    }
+  } else if (state->unwind_kind != UNWIND_NONE) {
+    return OT_UNWIND;
+  }
+
+  if (interrupted_again) action = OT_INTERRUPT_ABORT;
+  return action == OT_INTERRUPT_CONTINUE ? ot_nil : interrupt_unwind(state);
+}
+
 static bool list_nth(otv list, size_t index, otv* out) {
   while (index != 0 && is_type(list, OBJ_PAIR)) {
     list = as_pair(list)->cdr;
@@ -1494,9 +1550,8 @@ static otv eval_loop(ots* state, otv form, otv env) {
     if (++state->poll_count >= 1024) {
       state->poll_count = 0;
       if (atomic_exchange(&state->interrupted, false)) {
-        state->unwind_kind = UNWIND_QUIT;
-        state->condition = ot_intern(state, "quit", 4, false);
-        return OT_UNWIND;
+        otv interrupted = run_interrupt_hook(state);
+        if (interrupted == OT_UNWIND) return interrupted;
       }
     }
     if (is_type(form, OBJ_SYMBOL)) return resolve_value(state, env, form);
@@ -4081,6 +4136,11 @@ void ot_set_writer(ots* state, ot_writer writer, void* userdata) {
 void ot_set_loader(ots* state, ot_loader loader, void* userdata) {
   state->loader = loader;
   state->loader_userdata = userdata;
+}
+
+void ot_set_interrupt_hook(ots* state, ot_interrupt_hook hook, void* userdata) {
+  state->interrupt_hook = hook;
+  state->interrupt_userdata = userdata;
 }
 
 void ot_interrupt(ots* state) { atomic_store(&state->interrupted, true); }

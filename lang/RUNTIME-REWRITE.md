@@ -195,6 +195,7 @@ ot_config ot_config_default(void);   /* heap init/max, max depth */
 void ot_set_writer(ots *, void (*)(void *ud, const char *, size_t), void *ud);
 void ot_set_loader(ots *, bool (*)(void *ud, const char *ns,
                                    char **src, size_t *len), void *ud);
+void ot_set_interrupt_hook(ots *, ot_interrupt_hook, void *ud);
 void ot_interrupt(ots *);
 
 /* true: *out valid. false: inspect the condition via ot_condition(S). */
@@ -224,7 +225,9 @@ framed argument area, and return an `otv` or the unwind sentinel.
   the REPL should show it off.
 - `(quit)` / `(exit)` leave the REPL or server cleanly. SIGINT sets the
   interrupt flag: in the REPL it cancels the current evaluation, in script
-  mode it exits.
+  mode it exits, and in server mode it enters a break loop with `continue` and
+  `abort` restarts. Break-loop evaluations share the paused runtime state; a
+  second SIGINT aborts the parked evaluation.
 - Load path: `--path DIR` (repeatable), the `OTIUM_PATH` environment
   variable, then the nearest `project.ot` found by walking up from the
   working directory (`--project FILE` names one explicitly, `--no-project`

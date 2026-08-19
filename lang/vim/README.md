@@ -51,3 +51,9 @@ including `<localleader>ee` for the current form, `<localleader>eb` for the
 buffer, and `K` for documentation. `<localleader>mx` macroexpands the current
 form. The client adds `<localleader>cs`, `<localleader>cS`, and
 `<localleader>ei` to start, stop, and interrupt the process.
+
+Interrupting a running evaluation pauses it instead of stopping the server.
+Forms evaluated while paused share the program's globals and namespace.
+`<localleader>ec` continues the paused evaluation; `<localleader>ea` aborts it
+and returns to the ordinary server prompt. Aborting still runs active
+`unwind-protect` cleanups. Sending interrupt again while paused also aborts.

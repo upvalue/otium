@@ -364,11 +364,13 @@ error.
 ### 3.6 Interruption
 
 A host may interrupt a running program asynchronously. The interpreter
-checks an interrupt flag at bounded intervals during evaluation; when
-set, evaluation unwinds with the distinguished **quit** condition, which
-`try`/`handler-bind` cannot intercept but `unwind-protect` cleanups do
-run through. This is the only preemption in the language; there are no
-threads.
+checks an interrupt flag at bounded intervals during evaluation. An
+interactive host may enter a break loop at that point with dynamically active
+`continue` and `abort` restarts. Invoking `continue` returns to the interrupted
+evaluation. Invoking `abort`, or interrupting a host without a break loop,
+unwinds with the distinguished **interrupt** condition. `try` and
+`handler-bind` cannot intercept that unwind, but `unwind-protect` cleanups do
+run through. This is the only preemption in the language; there are no threads.
 
 ---
 
@@ -642,8 +644,10 @@ handler declines, `signal` returns `nil`.
 with the condition: it never returns. An unwinding condition propagates
 outward until caught by `try` or it reaches the host.
 
-The **quit** condition (3.6) never passes through handlers and is not
-catchable by `try`; only `unwind-protect` cleanups observe its passage.
+The **interrupt** control transfer (3.6) never passes through handlers and is
+not catchable by `try`; only `unwind-protect` cleanups observe its passage.
+`quit` and `exit` use the same uncatchable path but additionally tell the host
+to end the current session.
 
 ### 8.3 `handler-bind`
 

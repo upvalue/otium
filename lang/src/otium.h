@@ -60,6 +60,11 @@ typedef otv (*ot_nat)(ots* state, otv* args, int argc);
 typedef void (*ot_writer)(void* userdata, const char* bytes, size_t length);
 typedef bool (*ot_loader)(void* userdata, const char* namespace_name, char** source,
                           size_t* length);
+typedef enum ot_interrupt_action {
+  OT_INTERRUPT_CONTINUE,
+  OT_INTERRUPT_ABORT,
+} ot_interrupt_action;
+typedef ot_interrupt_action (*ot_interrupt_hook)(ots* state, void* userdata);
 typedef void (*ot_ext_finalizer)(ots* state, void* payload);
 typedef void (*ot_module_init)(ots* state);
 
@@ -80,6 +85,9 @@ void ot_destroy(ots* state);
 /* Replace the state's output and namespace-loading callbacks. */
 void ot_set_writer(ots* state, ot_writer writer, void* userdata);
 void ot_set_loader(ots* state, ot_loader loader, void* userdata);
+/* Run synchronously at an interrupt safepoint, never in the signal handler.
+ * The hook may re-enter evaluation; continue and abort restarts are active. */
+void ot_set_interrupt_hook(ots* state, ot_interrupt_hook hook, void* userdata);
 /* Request a cooperative evaluator interruption; safe from a signal handler. */
 void ot_interrupt(ots* state);
 
@@ -440,7 +448,10 @@ struct ot_state {
   void* writer_userdata;
   ot_loader loader;
   void* loader_userdata;
+  ot_interrupt_hook interrupt_hook;
+  void* interrupt_userdata;
   ot_gc_stats stats;
+  bool in_interrupt_hook;
 };
 
 static inline bool ot_is_ptr(otv value) { return value != 0 && (value & 3u) == 0; }

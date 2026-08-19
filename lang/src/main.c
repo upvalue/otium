@@ -154,24 +154,36 @@ static void finish_server_response(void) {
   fflush(stdout);
 }
 
-static void run_server(ots* state) {
-  bytes request = {0};
+static bool read_server_request(bytes* request) {
   char line[4096];
   while (fgets(line, sizeof line, stdin) != NULL) {
     size_t length = strlen(line);
     bool end =
         (length == 2 && line[0] == '\x1f' && line[1] == '\n') || (length == 1 && line[0] == '\x1f');
     if (!end) {
-      bytes_append(&request, line, length);
+      bytes_append(request, line, length);
       continue;
     }
+    return true;
+  }
+  return false;
+}
+
+static ot_interrupt_action run_server_break(ots* state, void* userdata) {
+  (void)userdata;
+  saw_interrupt = 0;
+  fputs("paused\n", stdout);
+  finish_server_response();
+
+  bytes request = {0};
+  while (read_server_request(&request)) {
     if (request.length != 0) {
       otv result;
       if (ot_eval_src(state, request.data, request.length, "<server>", &result)) {
         print_value(state, result, stdout);
-      } else if (state->unwind_kind == UNWIND_QUIT) {
-        ot_clear_condition(state);
-        break;
+      } else if (state->unwind_kind == UNWIND_RESTART || state->unwind_kind == UNWIND_QUIT) {
+        ot_host_free(request.data);
+        return OT_INTERRUPT_ABORT;
       } else {
         fputs("error: ", stdout);
         print_value(state, ot_condition(state), stdout);
@@ -181,6 +193,35 @@ static void run_server(ots* state) {
     request.length = 0;
     finish_server_response();
   }
+  clearerr(stdin);
+  ot_host_free(request.data);
+  return OT_INTERRUPT_ABORT;
+}
+
+static void run_server(ots* state) {
+  bytes request = {0};
+  ot_set_interrupt_hook(state, run_server_break, NULL);
+  while (read_server_request(&request)) {
+    bool stop = false;
+    if (request.length != 0) {
+      otv result;
+      if (ot_eval_src(state, request.data, request.length, "<server>", &result)) {
+        print_value(state, result, stdout);
+      } else if (state->unwind_kind == UNWIND_QUIT) {
+        stop = state->quit_requested;
+        if (!stop) fputs("interrupted\n", stdout);
+        ot_clear_condition(state);
+      } else {
+        fputs("error: ", stdout);
+        print_value(state, ot_condition(state), stdout);
+        ot_clear_condition(state);
+      }
+    }
+    request.length = 0;
+    if (stop) break;
+    finish_server_response();
+  }
+  ot_set_interrupt_hook(state, NULL, NULL);
   ot_host_free(request.data);
 }
 

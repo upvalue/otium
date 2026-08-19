@@ -23,6 +23,8 @@ config.merge({
           start = "cs",
           stop = "cS",
           interrupt = "ei",
+          continue = "ec",
+          abort = "ea",
           macroexpand = "mx",
         },
       },
@@ -178,10 +180,28 @@ function M.interrupt()
   end)
 end
 
+local function invoke_interrupt_restart(name)
+  return M["eval-str"]({
+    action = "eval",
+    code = "(invoke-restart '" .. name .. ")",
+    origin = name,
+  })
+end
+
+M["continue"] = function()
+  return invoke_interrupt_restart("continue")
+end
+
+M.abort = function()
+  return invoke_interrupt_restart("abort")
+end
+
 M["on-filetype"] = function()
   mapping.buf("OtiumStart", cfg({ "mapping", "start" }), M.start, { desc = "Start the Otium server" })
   mapping.buf("OtiumStop", cfg({ "mapping", "stop" }), M.stop, { desc = "Stop the Otium server" })
   mapping.buf("OtiumInterrupt", cfg({ "mapping", "interrupt" }), M.interrupt, { desc = "Interrupt Otium evaluation" })
+  mapping.buf("OtiumContinue", cfg({ "mapping", "continue" }), M["continue"], { desc = "Continue paused Otium evaluation" })
+  mapping.buf("OtiumAbort", cfg({ "mapping", "abort" }), M.abort, { desc = "Abort paused Otium evaluation" })
   mapping.buf(
     "OtiumMacroexpand",
     cfg({ "mapping", "macroexpand" }),

@@ -2,7 +2,7 @@
 ;;
 ;; Loaded by the stage-0 evaluator BEFORE any macro exists, so this file may
 ;; use only special forms (quote if define set! lambda begin let while and or
-;; cond quasiquote) and natives.  No when/unless/defn/-> anywhere here.
+;; cond quasiquote) and natives.  No when/unless/-> anywhere here.
 ;;
 ;; Scope is tracked in Otium data (a plain list of symbols) -- no native
 ;; lexical oracle is needed.  The single native oracle used:

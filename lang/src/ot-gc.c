@@ -74,9 +74,7 @@ static void trace_object(ots* state, ot_obj* object) {
   otv value = ot_from_obj(object);
   switch (ot_object_type(value)) {
     case OBJ_FLOAT:
-    case OBJ_BYTES:
-    case OBJ_PID:
-    case OBJ_REF: break;
+    case OBJ_BYTES: break;
     case OBJ_SYMBOL:
     case OBJ_KEYWORD: {
       ot_name_obj* name = (ot_name_obj*)object;
@@ -208,62 +206,30 @@ static void trace_object(ots* state, ot_obj* object) {
   }
 }
 
-static void trace_process(ots* state, ot_process* process) {
-  ot_gc_trace_value(state, &process->current_namespace);
-  ot_gc_trace_value(state, &process->pid);
-  ot_gc_trace_value(state, &process->condition);
-  ot_gc_trace_value(state, &process->unwind_args);
-  ot_gc_trace_value(state, &process->exit_value);
-  for (size_t i = 0; i < process->mailbox_count; i++) {
-    size_t index = (process->mailbox_head + i) % state->config.mailbox_count;
-    ot_gc_trace_value(state, &process->mailbox[index]);
+static void trace_vm(ots* state, ot_vm* vm) {
+  ot_gc_trace_value(state, &vm->current_namespace);
+  ot_gc_trace_value(state, &vm->condition);
+  ot_gc_trace_value(state, &vm->unwind_args);
+
+  for (size_t i = 0; i < vm->vm_stack_count; i++) ot_gc_trace_value(state, &vm->vm_stack[i]);
+  for (size_t i = 0; i < vm->vm_frame_count; i++) {
+    ot_gc_trace_value(state, &vm->vm_frames[i].function);
+    ot_gc_trace_value(state, &vm->vm_frames[i].env);
   }
 
-  for (size_t i = 0; i < process->vm_stack_count; i++)
-    ot_gc_trace_value(state, &process->vm_stack[i]);
-  for (size_t i = 0; i < process->vm_frame_count; i++) {
-    ot_gc_trace_value(state, &process->vm_frames[i].function);
-    ot_gc_trace_value(state, &process->vm_frames[i].env);
-  }
-
-  for (ot_handler_frame* handler = process->handlers; handler != NULL; handler = handler->prev) {
+  for (ot_handler_frame* handler = vm->handlers; handler != NULL; handler = handler->prev) {
     ot_gc_trace_value(state, &handler->pred);
     ot_gc_trace_value(state, &handler->handler);
   }
-  for (ot_restart_frame* frame = process->restarts; frame != NULL; frame = frame->prev)
+  for (ot_restart_frame* frame = vm->restarts; frame != NULL; frame = frame->prev)
     for (size_t i = 0; i < frame->count; i++) {
       ot_gc_trace_value(state, &frame->clauses[i].restart);
       ot_gc_trace_value(state, &frame->clauses[i].params);
       ot_gc_trace_value(state, &frame->clauses[i].body);
     }
-  for (ot_param_frame* param = process->params; param != NULL; param = param->prev) {
+  for (ot_param_frame* param = vm->params; param != NULL; param = param->prev) {
     ot_gc_trace_value(state, &param->param);
     ot_gc_trace_value(state, &param->value);
-  }
-  for (ot_vm_continuation* continuation = process->continuations; continuation != NULL;
-       continuation = continuation->prev) {
-    ot_gc_trace_value(state, &continuation->descriptor);
-    ot_gc_trace_value(state, &continuation->env);
-    ot_gc_trace_value(state, &continuation->namespace_value);
-    ot_gc_trace_value(state, &continuation->value);
-    ot_gc_trace_value(state, &continuation->auxiliary);
-    ot_gc_trace_value(state, &continuation->saved_condition);
-    ot_gc_trace_value(state, &continuation->saved_args);
-    for (size_t i = 0; i < continuation->count; i++) {
-      if (continuation->handler_frames != NULL) {
-        ot_gc_trace_value(state, &continuation->handler_frames[i].pred);
-        ot_gc_trace_value(state, &continuation->handler_frames[i].handler);
-      }
-      if (continuation->restart_clauses != NULL) {
-        ot_gc_trace_value(state, &continuation->restart_clauses[i].restart);
-        ot_gc_trace_value(state, &continuation->restart_clauses[i].params);
-        ot_gc_trace_value(state, &continuation->restart_clauses[i].body);
-      }
-      if (continuation->param_frames != NULL) {
-        ot_gc_trace_value(state, &continuation->param_frames[i].param);
-        ot_gc_trace_value(state, &continuation->param_frames[i].value);
-      }
-    }
   }
 }
 
@@ -278,8 +244,7 @@ static void trace_roots(ots* state) {
   ot_gc_trace_value(state, &state->core_namespace);
   ot_gc_trace_value(state, &state->expander);
   ot_gc_trace_value(state, &state->type_parents);
-  for (ot_process* process = state->processes; process != NULL; process = process->next)
-    trace_process(state, process);
+  trace_vm(state, &state->vm);
 }
 
 static void finish_exts(ots* state, otv old_exts) {
@@ -313,71 +278,29 @@ static void validate_value(ots* state, otv value, const char* owner) {
   }
 }
 
-static void validate_process(ots* state, const ot_process* process) {
-  if (process->state != state) {
-    fputs("otium: process belongs to a different runtime\n", stderr);
-    abort();
+static void validate_vm(ots* state, const ot_vm* vm) {
+  validate_value(state, vm->current_namespace, "VM namespace");
+  validate_value(state, vm->condition, "VM condition");
+  validate_value(state, vm->unwind_args, "VM unwind args");
+  for (size_t i = 0; i < vm->vm_stack_count; i++)
+    validate_value(state, vm->vm_stack[i], "VM operand stack");
+  for (size_t i = 0; i < vm->vm_frame_count; i++) {
+    validate_value(state, vm->vm_frames[i].function, "VM function");
+    validate_value(state, vm->vm_frames[i].env, "VM environment");
   }
-  validate_value(state, process->current_namespace, "process namespace");
-  validate_value(state, process->pid, "process pid");
-  validate_value(state, process->condition, "process condition");
-  validate_value(state, process->unwind_args, "process unwind args");
-  validate_value(state, process->exit_value, "process exit value");
-  for (size_t i = 0; i < process->mailbox_count; i++) {
-    size_t index = (process->mailbox_head + i) % state->config.mailbox_count;
-    validate_value(state, process->mailbox[index], "process mailbox");
+  for (ot_handler_frame* handler = vm->handlers; handler != NULL; handler = handler->prev) {
+    validate_value(state, handler->pred, "VM handler predicate");
+    validate_value(state, handler->handler, "VM handler");
   }
-  for (size_t i = 0; i < process->vm_stack_count; i++)
-    validate_value(state, process->vm_stack[i], "process operand stack");
-  for (size_t i = 0; i < process->vm_frame_count; i++) {
-    validate_value(state, process->vm_frames[i].function, "process VM function");
-    validate_value(state, process->vm_frames[i].env, "process VM environment");
-  }
-  for (ot_handler_frame* handler = process->handlers; handler != NULL; handler = handler->prev) {
-    validate_value(state, handler->pred, "process handler predicate");
-    validate_value(state, handler->handler, "process handler");
-  }
-  for (ot_restart_frame* frame = process->restarts; frame != NULL; frame = frame->prev)
+  for (ot_restart_frame* frame = vm->restarts; frame != NULL; frame = frame->prev)
     for (size_t i = 0; i < frame->count; i++) {
-      validate_value(state, frame->clauses[i].restart, "process restart");
-      validate_value(state, frame->clauses[i].params, "process restart parameters");
-      validate_value(state, frame->clauses[i].body, "process restart body");
+      validate_value(state, frame->clauses[i].restart, "VM restart");
+      validate_value(state, frame->clauses[i].params, "VM restart parameters");
+      validate_value(state, frame->clauses[i].body, "VM restart body");
     }
-  for (ot_param_frame* param = process->params; param != NULL; param = param->prev) {
-    validate_value(state, param->param, "process parameter");
-    validate_value(state, param->value, "process parameter value");
-  }
-  for (ot_vm_continuation* continuation = process->continuations; continuation != NULL;
-       continuation = continuation->prev) {
-    validate_value(state, continuation->descriptor, "process continuation descriptor");
-    validate_value(state, continuation->env, "process continuation environment");
-    validate_value(state, continuation->namespace_value, "process continuation namespace");
-    validate_value(state, continuation->value, "process continuation value");
-    validate_value(state, continuation->auxiliary, "process continuation auxiliary value");
-    validate_value(state, continuation->saved_condition, "process continuation condition");
-    validate_value(state, continuation->saved_args, "process continuation arguments");
-    for (size_t i = 0; i < continuation->count; i++) {
-      if (continuation->handler_frames != NULL) {
-        validate_value(state, continuation->handler_frames[i].pred,
-                       "process continuation handler predicate");
-        validate_value(state, continuation->handler_frames[i].handler,
-                       "process continuation handler");
-      }
-      if (continuation->restart_clauses != NULL) {
-        validate_value(state, continuation->restart_clauses[i].restart,
-                       "process continuation restart");
-        validate_value(state, continuation->restart_clauses[i].params,
-                       "process continuation restart parameters");
-        validate_value(state, continuation->restart_clauses[i].body,
-                       "process continuation restart body");
-      }
-      if (continuation->param_frames != NULL) {
-        validate_value(state, continuation->param_frames[i].param,
-                       "process continuation parameter");
-        validate_value(state, continuation->param_frames[i].value,
-                       "process continuation parameter value");
-      }
-    }
+  for (ot_param_frame* param = vm->params; param != NULL; param = param->prev) {
+    validate_value(state, param->param, "VM parameter");
+    validate_value(state, param->value, "VM parameter value");
   }
 }
 
@@ -390,8 +313,7 @@ static void validate_heap(ots* state) {
   validate_value(state, state->core_namespace, "core namespace");
   validate_value(state, state->expander, "expander");
   validate_value(state, state->type_parents, "condition types");
-  for (ot_process* process = state->processes; process != NULL; process = process->next)
-    validate_process(state, process);
+  validate_vm(state, &state->vm);
   unsigned char* scan = state->from_space;
   while (scan < state->alloc) {
     otv value = ot_from_obj(scan);

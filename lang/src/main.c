@@ -138,7 +138,7 @@ static int run_file(ots* state, const char* path) {
   bool ok = ot_eval_src(state, source, length, path, &result);
   ot_host_free(source);
   if (ok) return 0;
-  if (state->current_process->unwind_kind == UNWIND_QUIT) {
+  if (state->vm.unwind_kind == UNWIND_QUIT) {
     ot_clear_condition(state);
     return state->quit_requested ? 0 : 130;
   }
@@ -181,8 +181,7 @@ static ot_interrupt_action run_server_break(ots* state, void* userdata) {
       otv result;
       if (ot_eval_src(state, request.data, request.length, "<server>", &result)) {
         print_value(state, result, stdout);
-      } else if (state->current_process->unwind_kind == UNWIND_RESTART ||
-                 state->current_process->unwind_kind == UNWIND_QUIT) {
+      } else if (state->vm.unwind_kind == UNWIND_RESTART || state->vm.unwind_kind == UNWIND_QUIT) {
         ot_host_free(request.data);
         return OT_INTERRUPT_ABORT;
       } else {
@@ -208,7 +207,7 @@ static void run_server(ots* state) {
       otv result;
       if (ot_eval_src(state, request.data, request.length, "<server>", &result)) {
         print_value(state, result, stdout);
-      } else if (state->current_process->unwind_kind == UNWIND_QUIT) {
+      } else if (state->vm.unwind_kind == UNWIND_QUIT) {
         stop = state->quit_requested;
         if (!stop) fputs("interrupted\n", stdout);
         ot_clear_condition(state);
@@ -250,7 +249,7 @@ static bool repl_evaluate(ots* state, bytes* pending) {
     ot_clear_condition(state);
     return true;
   }
-  if (state->current_process->unwind_kind == UNWIND_QUIT) {
+  if (state->vm.unwind_kind == UNWIND_QUIT) {
     ot_clear_condition(state);
     return false;
   }

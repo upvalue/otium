@@ -20,6 +20,12 @@
 #ifndef OT_MAX_DEPTH
 #define OT_MAX_DEPTH 200000
 #endif
+#ifndef OT_MAILBOX_COUNT
+#define OT_MAILBOX_COUNT 32
+#endif
+#ifndef OT_REDUCTIONS_PER_SLICE
+#define OT_REDUCTIONS_PER_SLICE 1024
+#endif
 
 #define BUF_INLINE_SIZE 256
 
@@ -284,6 +290,34 @@ static bool is_type(otv value, ot_obj_type type) {
   return ot_is_ptr(value) && ot_object_type(value) == type;
 }
 
+static otv make_pid(ots* state) {
+  ot_pid_obj* pid = must_alloc(state, sizeof(*pid), OBJ_PID);
+  pid->id = ++state->next_pid_id;
+  pid->generation = ++state->next_pid_generation;
+  return ot_from_obj(pid);
+}
+
+static otv make_ref(ots* state) {
+  ot_ref_obj* ref = must_alloc(state, sizeof(*ref), OBJ_REF);
+  ref->id = ++state->next_ref_id;
+  return ot_from_obj(ref);
+}
+
+static ot_process* process_find(ots* state, otv value) {
+  if (!is_type(value, OBJ_PID)) return NULL;
+  ot_pid_obj* wanted = (ot_pid_obj*)ot_as_obj(value);
+  for (ot_process* process = state->processes; process != NULL; process = process->next) {
+    ot_pid_obj* pid = (ot_pid_obj*)ot_as_obj(process->pid);
+    if (pid->id == wanted->id && pid->generation == wanted->generation) return process;
+  }
+  return NULL;
+}
+
+static otv process_spawn(ots* state, otv function, otv* args, size_t argc);
+static void scheduler_enqueue(ots* state, ot_process* process);
+static void scheduler_drain(ots* state);
+static bool transfer_copy(ots* state, otv value, otv* out);
+
 ot_type ot_value_type(otv value) {
   if (ot_is_int(value)) return OT_TYPE_INT;
   if (value == ot_nil) return OT_TYPE_NIL;
@@ -304,6 +338,8 @@ ot_type ot_value_type(otv value) {
     case OBJ_MACRO: return OT_TYPE_MACRO;
     case OBJ_PARAM: return OT_TYPE_PARAM;
     case OBJ_RESTART: return OT_TYPE_RESTART;
+    case OBJ_PID: return OT_TYPE_PID;
+    case OBJ_REF: return OT_TYPE_REF;
     case OBJ_EXT: return OT_TYPE_EXT;
     default: return OT_TYPE_INTERNAL;
   }
@@ -441,6 +477,12 @@ bool ot_equal(ots* state, otv left, otv right, bool structural) {
     case OBJ_ARRAY: {
       return false;
     }
+    case OBJ_PID: {
+      ot_pid_obj* a = (ot_pid_obj*)ot_as_obj(left);
+      ot_pid_obj* b = (ot_pid_obj*)ot_as_obj(right);
+      return a->id == b->id && a->generation == b->generation;
+    }
+    case OBJ_REF: return ((ot_ref_obj*)ot_as_obj(left))->id == ((ot_ref_obj*)ot_as_obj(right))->id;
     default: return false;
   }
 }
@@ -486,6 +528,14 @@ static uint32_t value_hash(ots* state, otv value) {
       ot_table_obj* table = as_table(value);
       if (table->stable_id == 0) table->stable_id = ++state->next_stable_id;
       return (uint32_t)table->stable_id;
+    }
+    case OBJ_PID: {
+      ot_pid_obj* pid = (ot_pid_obj*)ot_as_obj(value);
+      return (uint32_t)(pid->id ^ (pid->id >> 32u) ^ pid->generation);
+    }
+    case OBJ_REF: {
+      uint64_t id = ((ot_ref_obj*)ot_as_obj(value))->id;
+      return (uint32_t)(id ^ (id >> 32u));
     }
     default: return (uint32_t)((uintptr_t)value >> 3u);
   }
@@ -812,6 +862,12 @@ static void render_value(ots* state, buf* out, otv value, bool display, unsigned
       buf_byte(out, '>');
       break;
     }
+    case OBJ_PID: {
+      ot_pid_obj* pid = (ot_pid_obj*)ot_as_obj(value);
+      buf_printf(out, "#<pid %" PRIu64 ".%" PRIu64 ">", pid->id, pid->generation);
+      break;
+    }
+    case OBJ_REF: buf_printf(out, "#<ref %" PRIu64 ">", ((ot_ref_obj*)ot_as_obj(value))->id); break;
     case OBJ_EXT: buf_cstr(out, "#<foreign>"); break;
     default: buf_cstr(out, "#<internal>"); break;
   }
@@ -2611,6 +2667,13 @@ static bool vm_enter_call(ots* state, size_t argc, bool tail) {
   otv result = apply_value(state, callable, values, argc, false);
   ot_frame_pop(state, &values_frame);
   if (result == OT_UNWIND) return false;
+  if (state->current_process->suspend_kind != SUSPEND_NONE) {
+    state->current_process->vm_stack_count = call_base;
+    vm_push(state, result);
+    state->current_process->suspend_stack_index = call_base;
+    state->current_process->suspend_tail = tail;
+    return true;
+  }
   if (!tail) {
     state->current_process->vm_stack_count = call_base;
     vm_push(state, result);
@@ -2637,6 +2700,21 @@ static bool vm_budget_exhausted(ot_process* process) {
 
 static otv vm_execute_loop(ots* state, size_t floor) {
   while (state->current_process->vm_frame_count > floor) {
+    if (state->current_process->suspend_kind != SUSPEND_NONE &&
+        state->current_process->suspend_ready) {
+      bool tail = state->current_process->suspend_tail;
+      state->current_process->suspend_kind = SUSPEND_NONE;
+      state->current_process->suspend_tail = false;
+      state->current_process->suspend_ready = false;
+      if (tail) {
+        otv result = state->current_process->vm_stack[state->current_process->suspend_stack_index];
+        ot_vm_frame leaving =
+            state->current_process->vm_frames[--state->current_process->vm_frame_count];
+        state->current_process->vm_stack_count = leaving.base;
+        if (state->current_process->vm_frame_count == floor) return result;
+        vm_push(state, result);
+      }
+    }
     if (state->current_process->vm_frame_count > state->current_process->frame_limit) {
       (void)vm_unwind_to(state, floor);
       return ot_raise(state, "maximum VM frame depth exceeded");
@@ -2879,6 +2957,8 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       size_t before = state->current_process->vm_frame_count;
       if (!vm_enter_call(state, operand, instruction == BC_TAIL_CALL))
         return vm_unwind_to(state, floor);
+      if (state->current_process->suspend_kind == SUSPEND_RECEIVE) return OT_VM_BLOCK;
+      if (state->current_process->suspend_kind == SUSPEND_YIELD) return OT_YIELD;
       if (instruction == BC_TAIL_CALL && state->current_process->vm_frame_count < before &&
           state->current_process->vm_frame_count == floor) {
         otv result = state->current_process->vm_stack[state->current_process->vm_stack_count - 1];
@@ -3029,6 +3109,10 @@ static ot_run_result vm_execute_run(ots* state, size_t floor, ot_vm_continuation
     otv value = vm_execute_loop(state, run_floor);
     if (value == OT_YIELD) {
       result = (ot_run_result){.status = OT_RUN_YIELDED, .value = ot_nil};
+      break;
+    }
+    if (value == OT_VM_BLOCK) {
+      result = (ot_run_result){.status = OT_RUN_BLOCKED, .value = ot_nil};
       break;
     }
     if (value == OT_VM_CONTINUE) continue;
@@ -3945,8 +4029,116 @@ TYPE_PRED(nat_array_p, OT_TYPE_ARRAY)
 TYPE_PRED(nat_table_p, OT_TYPE_TABLE)
 TYPE_PRED(nat_buffer_p, OT_TYPE_BUFFER)
 TYPE_PRED(nat_macro_p, OT_TYPE_MACRO)
+TYPE_PRED(nat_pid_p, OT_TYPE_PID)
+TYPE_PRED(nat_ref_p, OT_TYPE_REF)
 TYPE_PRED(nat_ext_p, OT_TYPE_EXT)
 #undef TYPE_PRED
+
+static otv nat_self(ots* state, otv* args, int argc) {
+  (void)args;
+  if (need_arity(state, "self", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
+  return state->current_process->pid;
+}
+
+static otv nat_alive_p(ots* state, otv* args, int argc) {
+  if (need_arity(state, "alive?", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_PID)) return ot_raise(state, "alive?: expected pid");
+  return process_find(state, args[0]) != NULL ? ot_true : ot_false;
+}
+
+static otv nat_make_ref(ots* state, otv* args, int argc) {
+  (void)args;
+  if (need_arity(state, "make-ref", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
+  return make_ref(state);
+}
+
+static otv nat_spawn(ots* state, otv* args, int argc) {
+  if (argc < 1) return ot_raise(state, "spawn: expected function and optional arguments");
+  return process_spawn(state, args[0], args + 1, (size_t)argc - 1);
+}
+
+static otv nat_yield(ots* state, otv* args, int argc) {
+  (void)args;
+  if (need_arity(state, "yield", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
+  ot_process* process = state->current_process;
+  if (!process->run_active || process->vm_run_depth != 1)
+    return ot_raise(state, "yield: not in a schedulable process call");
+  process->suspend_kind = SUSPEND_YIELD;
+  process->suspend_ready = true;
+  return ot_nil;
+}
+
+typedef enum process_send_result {
+  PROCESS_SEND_OK,
+  PROCESS_SEND_FULL,
+  PROCESS_SEND_DEAD,
+  PROCESS_SEND_NOT_SENDABLE,
+} process_send_result;
+
+static process_send_result process_send(ots* state, otv pid, otv value) {
+  ot_process* target = process_find(state, pid);
+  if (target == NULL) return PROCESS_SEND_DEAD;
+  if (!(target->status == PROCESS_BLOCKED && target->suspend_kind == SUSPEND_RECEIVE) &&
+      target->mailbox_count == state->config.mailbox_count)
+    return PROCESS_SEND_FULL;
+  otv message = ot_nil;
+  OT_FRAME_SCOPED(state, &message);
+  if (!transfer_copy(state, value, &message)) return PROCESS_SEND_NOT_SENDABLE;
+  if (target->status == PROCESS_BLOCKED && target->suspend_kind == SUSPEND_RECEIVE) {
+    target->vm_stack[target->suspend_stack_index] = message;
+    target->suspend_ready = true;
+    target->status = PROCESS_RUNNABLE;
+    scheduler_enqueue(state, target);
+  } else {
+    size_t tail = (target->mailbox_head + target->mailbox_count) % state->config.mailbox_count;
+    target->mailbox[tail] = message;
+    target->mailbox_count++;
+  }
+  return PROCESS_SEND_OK;
+}
+
+static const char* process_send_name(process_send_result result) {
+  switch (result) {
+    case PROCESS_SEND_OK: return "ok";
+    case PROCESS_SEND_FULL: return "full";
+    case PROCESS_SEND_DEAD: return "dead";
+    case PROCESS_SEND_NOT_SENDABLE: return "not-sendable";
+  }
+  return "unknown";
+}
+
+static otv nat_send(ots* state, otv* args, int argc) {
+  if (need_arity(state, "send", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_PID)) return ot_raise(state, "send: expected pid");
+  const char* name = process_send_name(process_send(state, args[0], args[1]));
+  return ot_intern(state, name, strlen(name), true);
+}
+
+static otv nat_send_bang(ots* state, otv* args, int argc) {
+  if (need_arity(state, "send!", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_PID)) return ot_raise(state, "send!: expected pid");
+  process_send_result result = process_send(state, args[0], args[1]);
+  if (result != PROCESS_SEND_OK) return ot_raise(state, "send!: %s", process_send_name(result));
+  return args[1];
+}
+
+static otv nat_receive(ots* state, otv* args, int argc) {
+  (void)args;
+  if (need_arity(state, "receive", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
+  ot_process* process = state->current_process;
+  if (process->mailbox_count != 0) {
+    otv message = process->mailbox[process->mailbox_head];
+    process->mailbox[process->mailbox_head] = ot_nil;
+    process->mailbox_head = (process->mailbox_head + 1) % state->config.mailbox_count;
+    process->mailbox_count--;
+    return message;
+  }
+  if (!process->run_active || process->vm_run_depth != 1)
+    return ot_raise(state, "receive: not in a schedulable process call");
+  process->suspend_kind = SUSPEND_RECEIVE;
+  process->suspend_ready = false;
+  return ot_nil;
+}
 
 static otv nat_number_p(ots* state, otv* args, int argc) {
   if (need_arity(state, "number?", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
@@ -3991,9 +4183,10 @@ static otv nat_equal(ots* state, otv* args, int argc) {
 
 static otv nat_type(ots* state, otv* args, int argc) {
   if (need_arity(state, "type", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
-  static const char* names[] = {"nil",      "null",   "boolean", "int",     "float",   "symbol",
-                                "keyword",  "string", "pair",    "array",   "table",   "buffer",
-                                "function", "macro",  "param",   "restart", "foreign", "internal"};
+  static const char* names[] = {"nil",     "null",    "boolean",  "int",     "float",
+                                "symbol",  "keyword", "string",   "pair",    "array",
+                                "table",   "buffer",  "function", "macro",   "param",
+                                "restart", "pid",     "ref",      "foreign", "internal"};
   ot_type type = ot_value_type(args[0]);
   return ot_intern(state, names[type], strlen(names[type]), true);
 }
@@ -5161,6 +5354,8 @@ static const nat_def core_nats[] = {
     {"table?", nat_table_p},
     {"buffer?", nat_buffer_p},
     {"macro?", nat_macro_p},
+    {"pid?", nat_pid_p},
+    {"ref?", nat_ref_p},
     {"procedure?", nat_procedure_p},
     {"foreign?", nat_ext_p},
     {"list?", nat_list_p},
@@ -5169,6 +5364,14 @@ static const nat_def core_nats[] = {
     {"eq?", nat_eq},
     {"equal?", nat_equal},
     {"type", nat_type},
+    {"self", nat_self},
+    {"alive?", nat_alive_p},
+    {"make-ref", nat_make_ref},
+    {"spawn", nat_spawn},
+    {"yield", nat_yield},
+    {"send", nat_send},
+    {"send!", nat_send_bang},
+    {"receive", nat_receive},
     {"cons", nat_cons},
     {"car", nat_car},
     {"cdr", nat_cdr},
@@ -5299,6 +5502,7 @@ bool ot_eval_partial(ots* state, const char* source, size_t length, const char* 
     form = read_form(&input);
     if (form == OT_UNDEFINED) {
       *consumed = input.offset;
+      scheduler_drain(state);
       if (out != NULL) *out = result;
       return true;
     }
@@ -5324,9 +5528,39 @@ bool ot_eval_partial(ots* state, const char* source, size_t length, const char* 
   }
 }
 
+static bool process_init(ots* state, ot_process* process) {
+  memset(process, 0, sizeof(*process));
+  process->state = state;
+  process->frame_limit = state->config.max_depth;
+  process->status = PROCESS_RUNNABLE;
+  process->pid = ot_nil;
+  process->condition = ot_nil;
+  process->unwind_args = ot_nil;
+  process->exit_value = ot_nil;
+  process->current_namespace = state->core_namespace == 0 ? ot_nil : state->core_namespace;
+  process->mailbox = ot_host_alloc(state->config.mailbox_count * sizeof(*process->mailbox));
+  if (process->mailbox == NULL) return false;
+  for (size_t i = 0; i < state->config.mailbox_count; i++) process->mailbox[i] = ot_nil;
+  atomic_init(&process->interrupted, false);
+  return true;
+}
+
+static void process_dispose(ot_process* process) {
+  while (process->continuations != NULL) {
+    ot_vm_continuation* continuation = process->continuations;
+    process->continuations = continuation->prev;
+    vm_free_continuation(continuation);
+  }
+  ot_host_free(process->mailbox);
+  ot_host_free(process->vm_frames);
+  ot_host_free(process->vm_stack);
+}
+
 ot_config ot_config_default(void) {
   return (ot_config){.heap_init = OT_HEAP_INIT,
                      .heap_max = OT_HEAP_MAX,
+                     .mailbox_count = OT_MAILBOX_COUNT,
+                     .reductions_per_slice = OT_REDUCTIONS_PER_SLICE,
                      .max_depth = OT_MAX_DEPTH,
                      .gc_stress = false};
 }
@@ -5334,18 +5568,25 @@ ot_config ot_config_default(void) {
 ots* ot_create(const ot_config* configuration) {
   ot_config config = configuration == NULL ? ot_config_default() : *configuration;
   if (config.heap_init < 1024 || config.heap_max < config.heap_init ||
-      config.heap_max > SIZE_MAX / 2 || config.max_depth == 0)
+      config.heap_max > SIZE_MAX / 2 || config.mailbox_count == 0 ||
+      config.mailbox_count > SIZE_MAX / sizeof(otv) || config.reductions_per_slice == 0 ||
+      config.max_depth == 0)
     return NULL;
   ots* state = ot_host_alloc(sizeof(*state));
   if (state == NULL) return NULL;
   memset(state, 0, sizeof(*state));
-  state->current_process = &state->root_process;
-  state->root_process.state = state;
-  state->root_process.frame_limit = config.max_depth;
   state->config = config;
   state->config.gc_stress = false;
+  if (!process_init(state, &state->root_process)) {
+    ot_host_free(state);
+    return NULL;
+  }
+  state->current_process = &state->root_process;
+  state->processes = &state->root_process;
+  state->root_process.status = PROCESS_RUNNING;
   state->reservation = ot_host_alloc(config.heap_max * 2);
   if (state->reservation == NULL) {
+    process_dispose(&state->root_process);
     ot_host_free(state);
     return NULL;
   }
@@ -5365,7 +5606,10 @@ ots* ot_create(const ot_config* configuration) {
   state->exts = ot_nil;
   state->writer = ot_default_write;
   state->next_stable_id = 1;
-  atomic_init(&state->current_process->interrupted, false);
+  state->next_pid_id = 0;
+  state->next_pid_generation = 0;
+  state->next_ref_id = 0;
+  state->root_process.pid = make_pid(state);
 
   otv core_name = ot_intern(state, "otium.core", 10, false);
   state->core_namespace = namespace_find(state, core_name, true);
@@ -5421,13 +5665,13 @@ void ot_destroy(ots* state) {
   }
   for (size_t i = 0; i < state->ext_type_count; i++) ot_host_free(state->ext_types[i].name);
   ot_host_free(state->ext_types);
-  while (state->root_process.continuations != NULL) {
-    ot_vm_continuation* continuation = state->root_process.continuations;
-    state->root_process.continuations = continuation->prev;
-    vm_free_continuation(continuation);
+  ot_process* process = state->processes;
+  while (process != NULL) {
+    ot_process* next = process->next;
+    process_dispose(process);
+    if (process != &state->root_process) ot_host_free(process);
+    process = next;
   }
-  ot_host_free(state->root_process.vm_frames);
-  ot_host_free(state->root_process.vm_stack);
   ot_host_free(state->reservation);
   ot_host_free(state);
 }
@@ -5449,15 +5693,15 @@ void ot_set_interrupt_hook(ots* state, ot_interrupt_hook hook, void* userdata) {
 
 void ot_interrupt(ots* state) { atomic_store(&state->current_process->interrupted, true); }
 
-bool ot_start_call(ots* state, otv function, otv* args, size_t argc) {
-  ot_process* process = &state->root_process;
-  if (state->current_process != process || process->run_active || process->vm_frame_count != 0 ||
-      process->vm_stack_count != 0) {
-    (void)ot_raise(state, "root process is already running");
+static bool process_start_call(ots* state, ot_process* process, otv function, otv* args,
+                               size_t argc) {
+  ot_process* caller = state->current_process;
+  if (process->run_active || process->vm_frame_count != 0 || process->vm_stack_count != 0) {
+    (void)ot_raise(state, "process is already running");
     return false;
   }
   if (!is_type(function, OBJ_FUNCTION)) {
-    (void)ot_raise(state, "root process entry must be an interpreted function");
+    (void)ot_raise(state, "process entry must be an interpreted function");
     return false;
   }
 
@@ -5468,17 +5712,273 @@ bool ot_start_call(ots* state, otv function, otv* args, size_t argc) {
   for (size_t i = 0; i < root_count; i++) roots[i] = argc == 0 ? &dummy : &args[i];
   ot_frame args_frame;
   ot_frame_push(state, &args_frame, roots, root_count);
+  state->current_process = process;
   otv env = bind_parameters(state, function, args, argc);
+  state->current_process = caller;
   ot_frame_pop(state, &args_frame);
   if (env == OT_UNWIND) return false;
   OT_FRAME_SCOPED(state, &env);
 
+  state->current_process = process;
   process->reductions = 0;
   process->reduction_budget = 0;
   process->yield_pending = false;
   vm_push_frame(state, function, env, 0);
   process->run_active = true;
+  process->status = PROCESS_RUNNABLE;
+  state->current_process = caller;
   return true;
+}
+
+typedef struct transfer_entry {
+  uint64_t stable_id;
+  ot_obj_type type;
+  otv source;
+  otv copy;
+} transfer_entry;
+
+typedef struct transfer_map {
+  transfer_entry* entries;
+  size_t count;
+  size_t capacity;
+} transfer_map;
+
+static transfer_entry* transfer_find(transfer_map* map, uint64_t stable_id) {
+  for (size_t i = 0; i < map->count; i++)
+    if (map->entries[i].stable_id == stable_id) return &map->entries[i];
+  return NULL;
+}
+
+static bool transfer_add(transfer_map* map, uint64_t stable_id, ot_obj_type type, otv source) {
+  if (map->count == map->capacity) {
+    size_t capacity = map->capacity == 0 ? 16 : map->capacity * 2;
+    if (capacity < map->capacity || capacity > SIZE_MAX / sizeof(*map->entries)) return false;
+    transfer_entry* entries = ot_host_realloc(map->entries, capacity * sizeof(*map->entries));
+    if (entries == NULL) return false;
+    map->entries = entries;
+    map->capacity = capacity;
+  }
+  map->entries[map->count++] =
+      (transfer_entry){.stable_id = stable_id, .type = type, .source = source, .copy = ot_nil};
+  return true;
+}
+
+static bool transfer_scan(ots* state, otv value, transfer_map* map, unsigned depth) {
+  if (!ot_is_ptr(value)) return true;
+  switch (ot_object_type(value)) {
+    case OBJ_FLOAT:
+    case OBJ_SYMBOL:
+    case OBJ_KEYWORD:
+    case OBJ_STRING:
+    case OBJ_NAT:
+    case OBJ_PID:
+    case OBJ_REF: return true;
+    case OBJ_FUNCTION: return ((ot_function_obj*)ot_as_obj(value))->env == ot_nil;
+    case OBJ_PAIR: {
+      if (depth >= 10000) return false;
+      ot_pair_obj* pair = as_pair(value);
+      if (pair->stable_id == 0) pair->stable_id = ++state->next_stable_id;
+      if (transfer_find(map, pair->stable_id) != NULL) return true;
+      if (!transfer_add(map, pair->stable_id, OBJ_PAIR, value)) return false;
+      return transfer_scan(state, pair->car, map, depth + 1) &&
+             transfer_scan(state, pair->cdr, map, depth + 1);
+    }
+    case OBJ_ARRAY: {
+      if (depth >= 10000) return false;
+      ot_array_obj* array = as_array(value);
+      if (array->stable_id == 0) array->stable_id = ++state->next_stable_id;
+      if (transfer_find(map, array->stable_id) != NULL) return true;
+      if (!transfer_add(map, array->stable_id, OBJ_ARRAY, value)) return false;
+      ot_slots_obj* slots = as_slots(array->slots);
+      for (size_t i = 0; i < array->length; i++)
+        if (!transfer_scan(state, slots->values[i], map, depth + 1)) return false;
+      return true;
+    }
+    default: return false;
+  }
+}
+
+static bool transfer_copy_value(ots* state, otv value, transfer_map* map, otv* out,
+                                unsigned depth) {
+  if (!ot_is_ptr(value) ||
+      (ot_object_type(value) != OBJ_PAIR && ot_object_type(value) != OBJ_ARRAY)) {
+    *out = value;
+    return true;
+  }
+  if (depth >= 10000) return false;
+  uint64_t stable_id =
+      ot_object_type(value) == OBJ_PAIR ? as_pair(value)->stable_id : as_array(value)->stable_id;
+  transfer_entry* entry = transfer_find(map, stable_id);
+  if (entry == NULL) return false;
+  if (entry->copy != ot_nil) {
+    *out = entry->copy;
+    return true;
+  }
+  if (entry->type == OBJ_PAIR) {
+    entry->copy = ot_cons(state, ot_nil, ot_nil);
+    ot_pair_obj* source = as_pair(entry->source);
+    otv car;
+    otv cdr;
+    if (!transfer_copy_value(state, source->car, map, &car, depth + 1)) return false;
+    as_pair(entry->copy)->car = car;
+    if (!transfer_copy_value(state, as_pair(entry->source)->cdr, map, &cdr, depth + 1))
+      return false;
+    as_pair(entry->copy)->cdr = cdr;
+  } else {
+    size_t length = as_array(entry->source)->length;
+    entry->copy = ot_array_new(state, length);
+    as_array(entry->copy)->length = length;
+    for (size_t i = 0; i < length; i++) {
+      otv element;
+      ot_array_obj* source = as_array(entry->source);
+      if (!transfer_copy_value(state, as_slots(source->slots)->values[i], map, &element, depth + 1))
+        return false;
+      ot_array_obj* copy = as_array(entry->copy);
+      as_slots(copy->slots)->values[i] = element;
+    }
+  }
+  *out = entry->copy;
+  return true;
+}
+
+static bool transfer_copy(ots* state, otv value, otv* out) {
+  transfer_map map = {0};
+  if (!transfer_scan(state, value, &map, 0)) {
+    ot_host_free(map.entries);
+    return false;
+  }
+  if (map.count == 0) {
+    *out = value;
+    ot_host_free(map.entries);
+    return true;
+  }
+  if (map.count > SIZE_MAX / 2 || map.count * 2 > SIZE_MAX / sizeof(otv*)) {
+    ot_host_free(map.entries);
+    return false;
+  }
+  otv** roots = ot_host_alloc(map.count * 2 * sizeof(*roots));
+  if (roots == NULL) {
+    ot_host_free(map.entries);
+    return false;
+  }
+  for (size_t i = 0; i < map.count; i++) {
+    roots[i * 2] = &map.entries[i].source;
+    roots[i * 2 + 1] = &map.entries[i].copy;
+  }
+  ot_frame frame;
+  ot_frame_push(state, &frame, roots, map.count * 2);
+  bool ok = transfer_copy_value(state, value, &map, out, 0);
+  ot_frame_pop(state, &frame);
+  ot_host_free(roots);
+  ot_host_free(map.entries);
+  return ok;
+}
+
+static void scheduler_enqueue(ots* state, ot_process* process) {
+  if (process->run_queued || process->status == PROCESS_EXITED) return;
+  process->run_next = NULL;
+  process->run_queued = true;
+  if (state->run_tail == NULL) state->run_head = process;
+  else state->run_tail->run_next = process;
+  state->run_tail = process;
+}
+
+static void process_unlink(ots* state, ot_process* process) {
+  ot_process** link = &state->processes;
+  while (*link != NULL && *link != process) link = &(*link)->next;
+  if (*link == process) *link = process->next;
+}
+
+static otv process_spawn(ots* state, otv function, otv* args, size_t argc) {
+  if (!is_type(function, OBJ_FUNCTION))
+    return ot_raise(state, "spawn: expected interpreted function");
+  if (((ot_function_obj*)ot_as_obj(function))->env != ot_nil)
+    return ot_raise(state, "spawn: function captures mutable process-local state");
+  OT_FRAME_SCOPED(state, &function);
+  size_t copied_count = argc == 0 ? 1 : argc;
+  otv copied[copied_count];
+  otv* roots[copied_count];
+  for (size_t i = 0; i < copied_count; i++) {
+    copied[i] = ot_nil;
+    roots[i] = &copied[i];
+  }
+  ot_frame copied_frame;
+  ot_frame_push(state, &copied_frame, roots, copied_count);
+  for (size_t i = 0; i < argc; i++)
+    if (!transfer_copy(state, args[i], &copied[i])) {
+      ot_frame_pop(state, &copied_frame);
+      return ot_raise(state, "spawn: argument is not sendable");
+    }
+
+  ot_process* parent = state->current_process;
+  ot_process* process = ot_host_alloc(sizeof(*process));
+  if (process == NULL) {
+    ot_frame_pop(state, &copied_frame);
+    return ot_raise(state, "spawn: host allocation failed");
+  }
+  if (!process_init(state, process)) {
+    ot_host_free(process);
+    ot_frame_pop(state, &copied_frame);
+    return ot_raise(state, "spawn: mailbox allocation failed");
+  }
+  process->current_namespace = parent->current_namespace;
+  process->next = state->processes;
+  state->processes = process;
+  process->pid = make_pid(state);
+  if (!process_start_call(state, process, function, copied, argc)) {
+    process_unlink(state, process);
+    process_dispose(process);
+    ot_host_free(process);
+    state->current_process = parent;
+    ot_frame_pop(state, &copied_frame);
+    return ot_raise(state, "spawn: could not start process");
+  }
+  ot_frame_pop(state, &copied_frame);
+  scheduler_enqueue(state, process);
+  return process->pid;
+}
+
+static void scheduler_drain(ots* state) {
+  ot_process* caller = state->current_process;
+  while (state->run_head != NULL) {
+    ot_process* process = state->run_head;
+    state->run_head = process->run_next;
+    if (state->run_head == NULL) state->run_tail = NULL;
+    process->run_next = NULL;
+    process->run_queued = false;
+    if (process->status == PROCESS_EXITED) continue;
+
+    state->current_process = process;
+    process->status = PROCESS_RUNNING;
+    process->reductions = 0;
+    process->reduction_budget = state->config.reductions_per_slice;
+    process->yield_pending = false;
+    ot_run_result result = vm_execute_run(state, 0, NULL);
+    state->current_process = caller;
+    if (result.status == OT_RUN_YIELDED) {
+      process->status = PROCESS_RUNNABLE;
+      scheduler_enqueue(state, process);
+    } else if (result.status == OT_RUN_BLOCKED) {
+      process->status = PROCESS_BLOCKED;
+    } else {
+      process->status = PROCESS_EXITED;
+      process->exit_value = result.value;
+      process->run_active = false;
+      process_unlink(state, process);
+      process_dispose(process);
+      ot_host_free(process);
+    }
+  }
+  state->current_process = caller;
+}
+
+bool ot_start_call(ots* state, otv function, otv* args, size_t argc) {
+  ot_process* process = &state->root_process;
+  if (state->current_process != process) {
+    (void)ot_raise(state, "root process is already running");
+    return false;
+  }
+  return process_start_call(state, process, function, args, argc);
 }
 
 ot_run_result ot_run(ots* state, uint64_t reduction_budget) {
@@ -5499,7 +5999,12 @@ ot_run_result ot_run(ots* state, uint64_t reduction_budget) {
 }
 
 bool ot_eval_src(ots* state, const char* source, size_t length, const char* name, otv* out) {
-  return eval_source(state, source, length, name == NULL ? "<input>" : name, true, out);
+  otv result = ot_nil;
+  OT_FRAME_SCOPED(state, &result);
+  bool ok = eval_source(state, source, length, name == NULL ? "<input>" : name, true, &result);
+  if (ok) scheduler_drain(state);
+  if (ok && out != NULL) *out = result;
+  return ok;
 }
 
 otv ot_condition(const ots* state) { return state->current_process->condition; }

@@ -1,152 +1,141 @@
 # Concurrency handoff
 
-The root process can yield and resume. Single-process programs, the REPL,
-loaders, native calls, and interrupt behavior still use the existing synchronous
-path.
+Otium can now run basic concurrent programs. The runtime has multiple
+lightweight processes, preemptive round-robin bytecode scheduling, opaque
+process identities, bounded FIFO mailboxes, blocking receive, and copied
+mutable messages.
 
-Read `agent-docs/concurrency-proposal.md` first. It describes the larger
-process model and the order after this milestone.
+Read `agent-docs/concurrency-proposal.md` for the intended larger model. This
+document describes the implemented boundary and the remaining gaps.
 
-## Current state
+## Implemented process model
 
-Every registered special form compiles to printable ASCII bytecode. The VM does
-not interpret or recompile an AST while executing. Dynamic-form descriptors
-hold precompiled `OBJ_CODE` values.
+`ots` retains an embedded root process and owns a linked list of every live
+process. Each process owns its VM frames and operand stack, dynamic
+continuations, condition and unwind state, namespace cursor, reduction
+accounting, PID, scheduler state, and mailbox.
 
-`ots` now owns one embedded `root_process` and points at it through
-`current_process`. Evaluation-owned state lives on `ot_process`:
+The collector traces and validates every live process, including blocked
+processes. It updates process identities, VM state, dynamic extents, suspended
+native-call results, and mailbox values during a moving collection.
 
-- VM operand and frame arrays, counts, capacities, and frame limit.
-- Current namespace and reduction accounting.
-- Handler, restart, and dynamic-parameter stacks.
-- Condition and unwind state.
-- Interrupt and run state.
-- Process-owned dynamic continuation records.
+The scheduler is single-threaded and round-robin. A configurable bytecode
+reduction budget preempts CPU-bound Otium code; explicit `yield` ends a slice
+early. Native code remains cooperative until it returns. Successful source and
+REPL evaluation drain the runnable queue until every child has exited or is
+blocked.
 
-Runtime-wide heap, namespace, module, extension, loader, writer, and publisher
-state remains on `ots`. Native functions still receive `ots*` and reach the
-active process through `current_process`.
-
-## Resumable execution
-
-The public run boundary is:
+The existing embedding boundary remains available:
 
 ```c
 bool ot_start_call(ots* state, otv function, otv* args, size_t argc);
 ot_run_result ot_run(ots* state, uint64_t reduction_budget);
 ```
 
-`ot_start_call` seeds an interpreted function call in the root process.
-`ot_run` returns `OT_RUN_COMPLETED`, `OT_RUN_YIELDED`, or
-`OT_RUN_FAILED` with the returned or failed value. `OT_RUN_BLOCKED` is
-reserved for scheduler and mailbox work. A zero budget runs without a reduction
-limit.
+`ot_config` also has `reductions_per_slice` and `mailbox_count`. Their defaults
+are 1024 bytecode reductions and 32 messages.
 
-`ot_eval_src` remains synchronous. This keeps the existing embedding API,
-bootstrap, loader, REPL, and extension behavior unchanged.
+## Language surface
 
-Reduction checks happen at bytecode instruction boundaries. A nested synchronous
-VM entry from a native function or interrupt hook cannot park because its C
-caller is still live. Budget exhaustion there sets a pending yield; the outer
-process-owned VM boundary yields as soon as the nested call returns. Native code
-is still cooperative and can delay a scheduling slice until it returns.
+The initial process API is:
 
-## Dynamic continuations
+```lisp
+(spawn function argument ...)
+(self)
+(pid? value)
+(alive? pid)
+(make-ref)
+(ref? value)
+(yield)
+(send pid value)
+(send! pid value)
+(receive)
+```
 
-These opcodes no longer keep their active extent in `vm_execute_dynamic` C
-locals:
+`spawn` accepts an interpreted function plus arguments. It returns immediately
+with the child PID; the child is placed on the runnable queue. The child exits
+when the function returns or an unhandled condition escapes it.
 
-- `BC_TRY`
-- `BC_HANDLER_BIND`
-- `BC_RESTART_CASE`
-- `BC_UNWIND_PROTECT`
-- `BC_WITH_PARAMS`
+`send` returns one of `:ok`, `:full`, `:dead`, or `:not-sendable`. `send!`
+returns the original value on success and raises a condition for the other
+outcomes. A receive from an empty mailbox suspends the process. Sending to that
+process installs the result at the suspended bytecode call site and makes the
+process runnable. This works for ordinary and tail-position calls.
 
-Each opcode creates an `ot_vm_continuation` with an explicit phase, owner frame
-and stack boundary, descriptor, environment, namespace, and opcode-specific
-saved values. Handler, restart, and parameter frames that must survive a yield
-are host-allocated with the continuation.
+PIDs contain an ID and generation and print as `#<pid ID.GENERATION>`. Keeping
+a PID does not keep an exited process alive. References are unique opaque
+values and print as `#<ref ID>`.
 
-The continuation driver runs precompiled code until it returns, fails, creates a
-nested dynamic continuation, or exhausts the budget. It then advances the
-opcode state machine or propagates the unwind to the next continuation. No
-source-form opcode or second evaluator was added.
+## Message isolation
 
-The moving collector traces and validates:
+Immediate values, numbers, names, strings, PIDs, references, native functions,
+and interpreted functions without captured lexical state are shared as
+immutable values. Mutable pair and array graphs are copied. Copying preserves
+cycles and internal sharing, and the sender retains its original graph.
 
-- Suspended operand values and VM frames.
-- Continuation descriptors, environments, namespaces, saved results,
-  conditions, and restart arguments.
-- Host-owned handler, restart, and parameter records.
+Tables, buffers, extension values, active runtime objects, and interpreted
+closures with captured lexical environments are currently rejected. The
+rejection is atomic: no partial message is left in the mailbox.
 
-The root process may be collected between any two yielded slices.
+Spawn arguments cross the same copying boundary. Until closure-environment
+copying exists, spawn a named function and pass its state as explicit
+arguments.
 
-## Tests added
+## Examples and tests
 
-`tests/test_runtime.c` now starts root calls with small budgets and forces a
-moving collection after every yield. It covers:
+Run the two demos with:
 
-- CPU-bound tail calls returning the uninterrupted result.
-- Normal completion and explicit failed results.
-- `try` condition handling.
-- Dynamic parameter bindings.
-- Nested handlers, restart invocation, and unwind cleanup order.
-- Interrupt unwinding through suspended cleanup code.
-- Non-tail frame-limit failure after resumptions.
+```text
+build/otium --no-project examples/concurrency-basic.scm
+build/otium --no-project examples/concurrency-mailbox.scm
+```
 
-The dynamic tests use a budget of one instruction, so they park inside the
-precompiled bodies rather than only around the dynamic opcode.
+The first shows stable round-robin interleaving and distinct PIDs. The second
+shows blocking receive, wakeup, FIFO delivery, and copied array/list messages.
+
+`tests/otium/11-concurrency.scm` covers the language surface and deterministic
+scheduling. The C runtime concurrency test runs with collection on every
+allocation, a one-message mailbox, and three-reduction slices. It covers full
+and dead mailboxes, blocked wakeup, ordinary and tail receive, unsupported
+values, copied arrays, cyclic graphs, isolated child failure, and result rooting
+while the scheduler runs.
+
+## Known gaps
+
+This is the basic-demo milestone, not the complete proposal:
+
+- Published namespace Vars are still runtime-wide. `defvar` and distinct
+  process-local bytecode operations are the next isolation-critical feature.
+- Tables, buffers, closure environments, and extension values are not copied.
+  There is no public transitive `freeze` operation yet.
+- Exit metadata is discarded when a child exits. There are no monitors, links,
+  supervision messages, cancellation, or process inspection.
+- Receive is FIFO only; it has no pattern selection or timeout.
+- Child failures are isolated but currently silent.
+- Scheduling happens at evaluation boundaries. There is no public embedding API
+  for independently pumping the child scheduler yet.
+- The heap is still runtime-wide physically. The implemented transfer boundary
+  prevents ordinary pair/array aliasing, but per-process heaps remain future
+  work.
 
 ## Next work
 
 Proceed in this order:
 
-1. Add immutable PID and reference values.
-2. Generalize process allocation and GC traversal beyond the embedded root.
-3. Add a single-threaded round-robin runnable queue using `ot_run`.
-4. Add `defvar` storage and distinct process-local lookup and assignment
-   opcodes.
-5. Add freezing and shareability checks.
-6. Add graph copying for mutable messages.
-7. Add bounded FIFO mailboxes and blocking send/receive.
-8. Add exit reasons, monitors, links, supervision, inspection, and termination.
+1. Add `defvar` storage plus explicit process-local load and assignment
+   bytecodes, and prohibit mutation of published definitions from processes.
+2. Add transitive freezing and extend the graph copier to tables, buffers, and
+   closure environments.
+3. Retain exit reasons and add monitors before links and supervision.
+4. Add scheduler inspection, cancellation, receive timeouts, and an embedding
+   scheduler-pump API.
+5. Move toward per-process heaps and only then M:N workers.
 
-The compiler already distinguishes lexical and published names. Keep
-process-local `defvar` reads and writes as a third opcode family. There is no
-`unvar` operation.
+Keep platform-neutral VM and scheduler code in `src/otium.c`. Preserve printable
+ASCII bytecode and do not reintroduce an AST evaluator escape path. The
+computed-goto ticket `lan-vboy` and resume-record rename `lan-47ft` are
+independent work.
 
-The embedded root process is intentional for this milestone. Before adding
-children, change GC process tracing from one direct `root_process` call to an
-iteration over every live process, including blocked and exited processes whose
-metadata is still retained.
-
-## Constraints
-
-- Keep platform-neutral VM and scheduler code in `src/otium.c`.
-- Put clock, polling, wakeup, and other OS operations behind
-  `src/ot-posix.c`.
-- Preserve printable ASCII bytecode and four hexadecimal digits per operand.
-- Do not add an AST evaluator or generic special-form escape opcode.
-- Do not change the extension transfer API in the next pass.
-- Do not port the roguelike or extension examples to processes yet.
-- Ticket `lan-vboy` is independent computed-goto performance work.
-
-## Verification
-
-The current tree passes:
-
-```text
-make test
-tools/format-c --check
-for otium_test in tests/otium/*.scm; do
-  OTIUM_GC_STRESS=1 build/otium --no-project "$otium_test" >/dev/null || exit
-done
-```
-
-All 14 C runtime tests also pass with AddressSanitizer,
-UndefinedBehaviorSanitizer, `OT_GC_VALIDATE`, and GC stress enabled.
-
-The working tree contains a pre-existing deletion of `RUNTIME-REWRITE.md` and
-a pre-existing edit to `prelude/expander.scm`. Preserve both. The bytecode and
-root-process work modifies `src/main.c`, `src/otium.h`, `src/otium.c`,
-`src/ot-gc.c`, and `tests/test_runtime.c`.
+The working tree contains a pre-existing deletion of `RUNTIME-REWRITE.md`, a
+pre-existing edit to `prelude/expander.scm`, and pre-existing untracked ticket
+files. Preserve them when committing this milestone.

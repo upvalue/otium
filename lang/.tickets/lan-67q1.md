@@ -98,3 +98,7 @@ Spec note: spec.md 3.6 currently says "there are no threads" normatively; this i
 **2026-08-20T03:04:32Z**
 
 Implemented the first process milestone: one root process owns VM and dynamic state, ot_start_call/ot_run provide budgeted yield and resume, the five dynamic opcodes use process-owned continuations, and suspended state is traced by the moving collector. The full suite, GC-stress conformance, and ASan/UBSan with OT_GC_VALIDATE pass.
+
+**2026-08-20T03:28:56Z**
+
+Implemented the basic M:1 concurrency milestone: PID/ref values, live-process GC traversal, round-robin reduction scheduling, spawn/self/yield, bounded FIFO send/receive, pair/array graph copying with cycles and sharing, blocking wakeup, demos, and GC-stress/sanitizer coverage. Remaining epic work starts with defvar/process-local bindings, broader transfer/freeze semantics, and exit monitoring/supervision.

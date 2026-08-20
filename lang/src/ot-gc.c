@@ -74,7 +74,9 @@ static void trace_object(ots* state, ot_obj* object) {
   otv value = ot_from_obj(object);
   switch (ot_object_type(value)) {
     case OBJ_FLOAT:
-    case OBJ_BYTES: break;
+    case OBJ_BYTES:
+    case OBJ_PID:
+    case OBJ_REF: break;
     case OBJ_SYMBOL:
     case OBJ_KEYWORD: {
       ot_name_obj* name = (ot_name_obj*)object;
@@ -208,8 +210,14 @@ static void trace_object(ots* state, ot_obj* object) {
 
 static void trace_process(ots* state, ot_process* process) {
   ot_gc_trace_value(state, &process->current_namespace);
+  ot_gc_trace_value(state, &process->pid);
   ot_gc_trace_value(state, &process->condition);
   ot_gc_trace_value(state, &process->unwind_args);
+  ot_gc_trace_value(state, &process->exit_value);
+  for (size_t i = 0; i < process->mailbox_count; i++) {
+    size_t index = (process->mailbox_head + i) % state->config.mailbox_count;
+    ot_gc_trace_value(state, &process->mailbox[index]);
+  }
 
   for (size_t i = 0; i < process->vm_stack_count; i++)
     ot_gc_trace_value(state, &process->vm_stack[i]);
@@ -270,7 +278,8 @@ static void trace_roots(ots* state) {
   ot_gc_trace_value(state, &state->core_namespace);
   ot_gc_trace_value(state, &state->expander);
   ot_gc_trace_value(state, &state->type_parents);
-  trace_process(state, &state->root_process);
+  for (ot_process* process = state->processes; process != NULL; process = process->next)
+    trace_process(state, process);
 }
 
 static void finish_exts(ots* state, otv old_exts) {
@@ -310,8 +319,14 @@ static void validate_process(ots* state, const ot_process* process) {
     abort();
   }
   validate_value(state, process->current_namespace, "process namespace");
+  validate_value(state, process->pid, "process pid");
   validate_value(state, process->condition, "process condition");
   validate_value(state, process->unwind_args, "process unwind args");
+  validate_value(state, process->exit_value, "process exit value");
+  for (size_t i = 0; i < process->mailbox_count; i++) {
+    size_t index = (process->mailbox_head + i) % state->config.mailbox_count;
+    validate_value(state, process->mailbox[index], "process mailbox");
+  }
   for (size_t i = 0; i < process->vm_stack_count; i++)
     validate_value(state, process->vm_stack[i], "process operand stack");
   for (size_t i = 0; i < process->vm_frame_count; i++) {
@@ -375,7 +390,8 @@ static void validate_heap(ots* state) {
   validate_value(state, state->core_namespace, "core namespace");
   validate_value(state, state->expander, "expander");
   validate_value(state, state->type_parents, "condition types");
-  validate_process(state, &state->root_process);
+  for (ot_process* process = state->processes; process != NULL; process = process->next)
+    validate_process(state, process);
   unsigned char* scan = state->from_space;
   while (scan < state->alloc) {
     otv value = ot_from_obj(scan);

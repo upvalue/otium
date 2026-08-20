@@ -103,6 +103,8 @@ static void test_config_validation(void) {
   ot_config config = ot_config_default();
   check(config.heap_init == 1024u * 1024u, "default initial heap is one MiB");
   check(config.heap_max == 64u * 1024u * 1024u, "default maximum heap is 64 MiB");
+  check(config.mailbox_count == 32, "default mailbox count");
+  check(config.reductions_per_slice == 1024, "default scheduler reduction slice");
   check(config.max_depth == 200000, "default VM frame depth");
   check(!config.gc_stress, "stress collection is off by default");
 
@@ -114,6 +116,12 @@ static void test_config_validation(void) {
   config = ot_config_default();
   config.max_depth = 0;
   check(ot_create(&config) == NULL, "reject a zero VM frame depth");
+  config = ot_config_default();
+  config.mailbox_count = 0;
+  check(ot_create(&config) == NULL, "reject a zero mailbox count");
+  config = ot_config_default();
+  config.reductions_per_slice = 0;
+  check(ot_create(&config) == NULL, "reject a zero scheduler reduction slice");
 }
 
 static void test_immediate_values(void) {
@@ -638,6 +646,71 @@ static void test_interrupt(void) {
   ot_destroy(state);
 }
 
+static void test_concurrency(void) {
+  ot_config config = ot_config_default();
+  config.gc_stress = true;
+  config.mailbox_count = 1;
+  config.reductions_per_slice = 3;
+  ots* state = ot_create(&config);
+  check(state != NULL, "create concurrency test state");
+  if (state == NULL) return;
+  capture output = {0};
+  ot_set_writer(state, capture_write, &output);
+  otv value = ot_nil;
+  OT_FRAME(state, &value);
+
+  check(evaluate(state,
+                 "(define (take-one) (println (receive))) "
+                 "(define target (spawn take-one)) "
+                 "(println (send target 1)) "
+                 "(println (send target 2))",
+                 &value),
+        "run bounded mailbox processes");
+  check(evaluate(state, "(alive? target)", &value) && value == ot_false,
+        "completed process is no longer alive");
+  check(evaluate(state, "(eq? (send target 3) :dead)", &value) && value == ot_true,
+        "sending to an exited process reports dead");
+
+  check(evaluate(state, "(define blocked (spawn take-one))", &value),
+        "leave a process blocked on receive");
+  check(evaluate(state, "(eq? (send blocked {}) :not-sendable)", &value) && value == ot_true,
+        "reject unsupported mutable message values");
+  check(evaluate(state, "(send! blocked [7 8])", &value) && ot_value_type(value) == OT_TYPE_ARRAY &&
+            ot_array_length(value) == 2 && ot_get_int(ot_array_get(value, 0, ot_nil)) == 7,
+        "wake a blocked process with a copied array");
+  check(evaluate(state, "(alive? blocked)", &value) && value == ot_false,
+        "woken receiver runs to completion");
+
+  check(evaluate(state, "(define (wait-tail) (receive)) (define tailer (spawn wait-tail))", &value),
+        "block receive in tail position");
+  check(evaluate(state, "(send! tailer '(done))", &value), "resume tail-position receive");
+  check(evaluate(state, "(alive? tailer)", &value) && value == ot_false,
+        "tail-position receive returns and exits");
+
+  check(evaluate(state,
+                 "(define cyclic (spawn wait-tail)) "
+                 "(define cycle [nil]) "
+                 "(put! cycle 0 cycle) "
+                 "(send! cyclic cycle)",
+                 &value) &&
+            ot_array_get(value, 0, ot_nil) == value,
+        "copy a cyclic mutable message graph");
+  check(evaluate(state, "(alive? cyclic)", &value) && value == ot_false,
+        "cyclic-message receiver exits normally");
+
+  check(evaluate(state, "(define (boom) (error \"child failed\")) (spawn boom)", &value),
+        "unhandled child condition does not fail the root evaluation");
+  check(evaluate(state, "(+ 20 22)", &value) && ot_get_int(value) == 42,
+        "runtime remains usable after child failure");
+
+  const char expected[] = ":ok\n:full\n1\n[7 8]\n";
+  check(output.length == sizeof expected - 1 &&
+            memcmp(output.data, expected, sizeof expected - 1) == 0,
+        "scheduler output shows bounded FIFO delivery");
+  OT_FRAME_POP(state);
+  ot_destroy(state);
+}
+
 static const test_case tests[] = {
     {"config", test_config_validation},          {"immediates", test_immediate_values},
     {"heap-values", test_heap_values},           {"float-equality", test_float_and_equality},
@@ -646,6 +719,7 @@ static const test_case tests[] = {
     {"try-ast-reuse", test_try_ast_reuse},       {"writer", test_writer_callback},
     {"modules-loader", test_modules_and_loader}, {"roots-stats", test_roots_and_stats},
     {"extensions", test_extension_values},       {"interrupt", test_interrupt},
+    {"concurrency", test_concurrency},
 };
 
 int main(int argc, char** argv) {

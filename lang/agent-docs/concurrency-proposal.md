@@ -1,8 +1,10 @@
 # Processes and concurrency in Otium
 
-**Status:** process model proposal. The bytecode prerequisite and resumable root
-process are implemented. PIDs, scheduling, process-local Vars, copying, and
-mailboxes are not implemented.
+**Status:** process model proposal. The bytecode prerequisite, resumable root,
+PIDs and references, an M:1 scheduler, pair/array copying, and bounded FIFO
+mailboxes are implemented. Process-local Vars, complete value transfer,
+monitors, links, supervision, and per-process heaps remain proposal work. See
+`agent-docs/concurrency-handoff.md` for the exact implemented boundary.
 
 Otium should use isolated processes with FIFO mailboxes. A process executes one
 thing at a time, owns its mutable state, and communicates by sending values.
@@ -19,11 +21,11 @@ calls `spawn` still runs in a root process, and local mutation works as it does
 today. The isolation boundary becomes visible when a value is published or
 crosses from one process to another.
 
-## Implementation handoff
+## Implementation history
 
-The bytecode parity work and first process milestone are in the current working
-tree. One root process can exhaust a reduction budget, return to its caller,
-survive a moving collection, and resume.
+The bytecode parity work, resumable root, and basic concurrency milestone are
+implemented. Multiple processes can exhaust reduction budgets, survive moving
+collections, block on receive, wake on send, and resume.
 
 The implementation follows the existing file layout. The compiler, VM, and
 dynamic-form opcode helpers are in `src/otium.c`; object and state layouts are in
@@ -72,11 +74,13 @@ namespace, but calls do not change the process's current namespace. The latter
 matters to macro expansion: the core expander must continue looking up new
 macros in the caller's current namespace.
 
-`ot_state` embeds one root `ot_process` and exposes it internally through
-`current_process`. `ot_start_call` seeds an interpreted root function and
-`ot_run` executes it with a bytecode reduction budget. The result reports
-completed, yielded, blocked, or failed status plus a value. Blocked is reserved
-for later mailbox work. Existing `ot_eval_src` evaluation remains synchronous.
+`ot_state` embeds one root `ot_process`, tracks all live processes, and exposes
+the active one internally through `current_process`. `ot_start_call` seeds an
+interpreted root function and `ot_run` executes it with a bytecode reduction
+budget. Child scheduling uses the same VM run result internally. Existing
+source evaluation remains synchronous from the embedding caller's perspective:
+after evaluating the source, it drains runnable children until they exit or
+block.
 
 Nested synchronous VM entry from native functions and interrupt hooks defers a
 pending yield until it returns to the process-owned boundary. Native code can
@@ -127,22 +131,13 @@ Performance ticket `lan-vboy` tracks a computed-goto dispatch loop for
 GCC/Clang with a portable fallback. It should be treated as a modest dispatch
 improvement, not a substitute for fixing lexical access and call allocation.
 
-### Boundary for the next agent
+### Current implementation boundary
 
-The next milestone starts with immutable PID and reference values, then adds
-more process records and a round-robin scheduler. The root process is embedded
-in `ot_state`; generalize GC traversal to visit every live process before a
-child can be suspended or blocked.
-
-Use `ot_run` as the scheduler slice boundary. A zero budget means unlimited
-execution, and budget exhaustion returns `OT_RUN_YIELDED` without creating a
-condition. `OT_RUN_BLOCKED` exists for receive and timer work but is not emitted
-yet.
-
-After PID/ref and scheduling, add `defvar` opcodes and storage,
-freezing/shareability, graph copying, and bounded mailboxes. Do not change the
-extension transfer API or port the roguelike and extension examples in this
-pass.
+The exact current surface, transfer rules, tests, limitations, and next steps
+live in `agent-docs/concurrency-handoff.md`. In short, the next
+isolation-critical milestone is `defvar` plus explicit process-local bytecode,
+followed by freezing and broader graph copying. Do not change the extension
+transfer API or port the roguelike and extension examples in that pass.
 
 The working tree also contains a pre-existing deletion of
 `RUNTIME-REWRITE.md` and a pre-existing edit to `prelude/expander.scm`. They are

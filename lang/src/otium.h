@@ -21,6 +21,8 @@ static inline intptr_t ot_get_int(otv value) { return ((intptr_t)value) >> 1u; }
 typedef struct ot_config {
   size_t heap_init;
   size_t heap_max;
+  size_t mailbox_count;
+  uint64_t reductions_per_slice;
   unsigned max_depth;
   bool gc_stress;
 } ot_config;
@@ -65,6 +67,8 @@ typedef enum ot_type {
   OT_TYPE_MACRO,
   OT_TYPE_PARAM,
   OT_TYPE_RESTART,
+  OT_TYPE_PID,
+  OT_TYPE_REF,
   OT_TYPE_EXT,
   OT_TYPE_INTERNAL,
 } ot_type;
@@ -187,6 +191,7 @@ void ot_collect(ots* state);
 #define OT_TOMBSTONE ((otv)26u)
 #define OT_YIELD ((otv)30u)
 #define OT_VM_CONTINUE ((otv)34u)
+#define OT_VM_BLOCK ((otv)38u)
 
 typedef enum ot_obj_type {
   OBJ_FLOAT = 1,
@@ -211,6 +216,8 @@ typedef enum ot_obj_type {
   OBJ_MACRO,
   OBJ_PARAM,
   OBJ_RESTART,
+  OBJ_PID,
+  OBJ_REF,
   OBJ_EXT,
 } ot_obj_type;
 
@@ -380,6 +387,17 @@ typedef struct ot_restart_obj {
   uint64_t id;
 } ot_restart_obj;
 
+typedef struct ot_pid_obj {
+  uintptr_t header;
+  uint64_t id;
+  uint64_t generation;
+} ot_pid_obj;
+
+typedef struct ot_ref_obj {
+  uintptr_t header;
+  uint64_t id;
+} ot_ref_obj;
+
 typedef struct ot_ext_obj {
   uintptr_t header;
   otv next;
@@ -474,8 +492,23 @@ typedef struct ot_vm_continuation {
   size_t count;
 } ot_vm_continuation;
 
+typedef enum ot_process_status {
+  PROCESS_RUNNABLE,
+  PROCESS_RUNNING,
+  PROCESS_BLOCKED,
+  PROCESS_EXITED,
+} ot_process_status;
+
+typedef enum ot_suspend_kind {
+  SUSPEND_NONE,
+  SUSPEND_YIELD,
+  SUSPEND_RECEIVE,
+} ot_suspend_kind;
+
 struct ot_process {
   ots* state;
+  struct ot_process* next;
+  struct ot_process* run_next;
   ot_handler_frame* handlers;
   ot_restart_frame* restarts;
   ot_param_frame* params;
@@ -487,8 +520,13 @@ struct ot_process {
   size_t vm_frame_count;
   size_t vm_frame_capacity;
   otv current_namespace;
+  otv pid;
   otv condition;
   otv unwind_args;
+  otv exit_value;
+  otv* mailbox;
+  size_t mailbox_head;
+  size_t mailbox_count;
   ot_unwind_kind unwind_kind;
   uint64_t unwind_restart_id;
   uint64_t next_restart_id;
@@ -498,10 +536,16 @@ struct ot_process {
   unsigned frame_limit;
   unsigned poll_count;
   unsigned vm_run_depth;
+  size_t suspend_stack_index;
+  ot_process_status status;
+  ot_suspend_kind suspend_kind;
   atomic_bool interrupted;
   bool in_interrupt_hook;
   bool run_active;
   bool yield_pending;
+  bool run_queued;
+  bool suspend_tail;
+  bool suspend_ready;
 };
 
 struct ot_state {
@@ -520,6 +564,9 @@ struct ot_state {
   size_t ext_type_capacity;
   ot_process root_process;
   ot_process* current_process;
+  ot_process* processes;
+  ot_process* run_head;
+  ot_process* run_tail;
   otv symbols;
   otv namespaces;
   otv core_namespace;
@@ -528,6 +575,9 @@ struct ot_state {
   otv exts;
   uint64_t next_stable_id;
   uint64_t gensym_id;
+  uint64_t next_pid_id;
+  uint64_t next_pid_generation;
+  uint64_t next_ref_id;
   bool quit_requested;
   ot_writer writer;
   void* writer_userdata;

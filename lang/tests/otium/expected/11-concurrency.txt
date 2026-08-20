@@ -1,0 +1,12 @@
+self-pid: #t :pid #t
+refs: #t :ref #t #f
+count: :alpha 1
+count: :beta 1
+send: :ok
+send: :ok
+count: :alpha 2
+count: :beta 2
+message: [:left 1]
+message: [:right 1]
+message: (:left 2)
+message: (:right 2)

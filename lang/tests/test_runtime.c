@@ -103,7 +103,7 @@ static void test_config_validation(void) {
   ot_config config = ot_config_default();
   check(config.heap_init == 1024u * 1024u, "default initial heap is one MiB");
   check(config.heap_max == 64u * 1024u * 1024u, "default maximum heap is 64 MiB");
-  check(config.max_depth == 200000, "default evaluator depth");
+  check(config.max_depth == 200000, "default VM frame depth");
   check(!config.gc_stress, "stress collection is off by default");
 
   config.heap_init = 512;
@@ -113,7 +113,7 @@ static void test_config_validation(void) {
   check(ot_create(&config) == NULL, "reject a maximum below the initial heap");
   config = ot_config_default();
   config.max_depth = 0;
-  check(ot_create(&config) == NULL, "reject a zero evaluator depth");
+  check(ot_create(&config) == NULL, "reject a zero VM frame depth");
 }
 
 static void test_immediate_values(void) {
@@ -248,7 +248,33 @@ static void test_eval_integration(void) {
                         "(tail 50000 0)";
   check(evaluate(state, program, &value) && ot_is_int(value) &&
             ot_get_int(value) == INT64_C(1250025000),
-        "deep tail call uses the evaluator trampoline");
+        "deep tail call reuses its VM frame");
+  check(evaluate(state, "(fn (x) (if x (+ x 1) 0))", &value), "compile a function");
+  const char* bytecode = NULL;
+  size_t bytecode_length = 0;
+  check(ot_function_bytecode(value, &bytecode, &bytecode_length) && bytecode_length != 0,
+        "interpreted functions expose bytecode");
+  bool printable = bytecode_length != 0;
+  for (size_t i = 0; i < bytecode_length; i++)
+    if ((unsigned char)bytecode[i] < 0x20 || (unsigned char)bytecode[i] > 0x7e) printable = false;
+  check(printable, "bytecode uses only printable ASCII bytes");
+  check(memchr(bytecode, 'B', bytecode_length) != NULL &&
+            memchr(bytecode, 'C', bytecode_length) != NULL,
+        "compiler separates lexical and published loads");
+  check(evaluate(state, "(fn (x) (set! x global-value) (set! global-value x))", &value) &&
+            ot_function_bytecode(value, &bytecode, &bytecode_length) &&
+            memchr(bytecode, 'Q', bytecode_length) != NULL &&
+            memchr(bytecode, 'R', bytecode_length) != NULL,
+        "compiler separates lexical and published assignment");
+  check(evaluate(state,
+                 "(fn (message) "
+                 "  (try (error message) (catch (error? e) (condition-message e))))",
+                 &value) &&
+            ot_function_bytecode(value, &bytecode, &bytecode_length) &&
+            memchr(bytecode, '!', bytecode_length) != NULL &&
+            memchr(bytecode, 'D', bytecode_length) == NULL &&
+            memchr(bytecode, 'I', bytecode_length) == NULL,
+        "dynamic forms compile without evaluator escape opcodes");
   check(evaluate(state,
                  "(restart-case (error \"boom\") "
                  "  (use-value (value) value))",
@@ -258,6 +284,138 @@ static void test_eval_integration(void) {
   ot_clear_condition(state);
   check(evaluate(state, "(+ 20 22)", &value) && ot_get_int(value) == 42,
         "state evaluates again after clearing a condition");
+  ot_destroy(state);
+}
+
+static ot_run_result run_in_slices(ots* state, uint64_t budget, size_t* yields) {
+  for (size_t slices = 0; slices < 100000; slices++) {
+    ot_run_result result = ot_run(state, budget);
+    if (result.status != OT_RUN_YIELDED) return result;
+    (*yields)++;
+    ot_collect(state);
+  }
+  check(false, "sliced root process eventually finishes");
+  return (ot_run_result){.status = OT_RUN_FAILED, .value = ot_nil};
+}
+
+static void test_yield_resume(void) {
+  ots* state = test_state(true);
+  if (state == NULL) return;
+
+  otv function = ot_nil;
+  otv argument = ot_make_int(1000);
+  OT_FRAME(state, &function, &argument);
+  check(evaluate(state,
+                 "(fn (n) "
+                 "  (let loop ((n n) (total 0)) "
+                 "    (if (= n 0) total (loop (- n 1) (+ total n)))))",
+                 &function),
+        "compile resumable root function");
+  check(ot_start_call(state, function, &argument, 1), "start root process call");
+  size_t yields = 0;
+  ot_run_result result = run_in_slices(state, 7, &yields);
+  check(result.status == OT_RUN_COMPLETED && ot_is_int(result.value) &&
+            ot_get_int(result.value) == 500500,
+        "root process resumes to the uninterrupted result");
+  check(yields > 100, "small reduction budget yields repeatedly");
+
+  check(evaluate(state,
+                 "(defparam sliced-depth 0) "
+                 "(fn (n) "
+                 "  (with-params ((sliced-depth 9)) "
+                 "    (let loop ((n n)) "
+                 "      (if (= n 0) (sliced-depth) (loop (- n 1))))))",
+                 &function),
+        "compile dynamic-extent root function");
+  argument = ot_make_int(200);
+  check(ot_start_call(state, function, &argument, 1), "start dynamic-extent root call");
+  yields = 0;
+  result = run_in_slices(state, 1, &yields);
+  check(result.status == OT_RUN_COMPLETED && ot_is_int(result.value) &&
+            ot_get_int(result.value) == 9,
+        "safe-boundary yielding preserves dynamic parameter state");
+  check(yields != 0, "dynamic-extent call yields at safe boundaries");
+
+  check(evaluate(state,
+                 "(fn (n) "
+                 "  (try "
+                 "    (let loop ((n n)) "
+                 "      (if (= n 0) (error \"caught after slices\") (loop (- n 1)))) "
+                 "    (catch (error? condition) 41)))",
+                 &function),
+        "compile resumable condition handler");
+  argument = ot_make_int(200);
+  check(ot_start_call(state, function, &argument, 1), "start resumable condition handler");
+  yields = 0;
+  result = run_in_slices(state, 1, &yields);
+  check(result.status == OT_RUN_COMPLETED && ot_is_int(result.value) &&
+            ot_get_int(result.value) == 41,
+        "try continuation catches a condition after resumptions");
+  check(yields > 100, "try body yields while its continuation is suspended");
+
+  check(evaluate(state,
+                 "(fn (n) "
+                 "  (let ((cleaned 0)) "
+                 "    (let ((answer "
+                 "      (handler-bind "
+                 "        (((type-pred 'error) "
+                 "          (fn (condition) (invoke-restart 'use-value 40)))) "
+                 "        (restart-case "
+                 "          (unwind-protect "
+                 "            (let loop ((n n)) "
+                 "              (if (= n 0) (error \"restart after slices\") "
+                 "                  (loop (- n 1)))) "
+                 "            (set! cleaned (+ cleaned 1))) "
+                 "          (use-value (value) (+ value cleaned)))))) "
+                 "      (+ answer cleaned))))",
+                 &function),
+        "compile nested dynamic continuations");
+  argument = ot_make_int(200);
+  check(ot_start_call(state, function, &argument, 1), "start nested dynamic continuations");
+  yields = 0;
+  result = run_in_slices(state, 1, &yields);
+  check(result.status == OT_RUN_COMPLETED && ot_is_int(result.value) &&
+            ot_get_int(result.value) == 42,
+        "handlers, restarts, and cleanup resume in the right order");
+  check(yields > 100, "nested dynamic continuation bodies yield repeatedly");
+
+  check(evaluate(state,
+                 "(def sliced-interrupt-cleaned 0) "
+                 "(fn (n) "
+                 "  (unwind-protect "
+                 "    (let loop ((n n)) (if (= n 0) n (loop (- n 1)))) "
+                 "    (set! sliced-interrupt-cleaned 1)))",
+                 &function),
+        "compile interruptible cleanup function");
+  argument = ot_make_int(5000);
+  check(ot_start_call(state, function, &argument, 1), "start interruptible root call");
+  result = ot_run(state, 7);
+  check(result.status == OT_RUN_YIELDED, "root call yields before interruption");
+  ot_interrupt(state);
+  yields = 1;
+  result = run_in_slices(state, 7, &yields);
+  check(result.status == OT_RUN_FAILED, "interrupt fails the resumed root call");
+  ot_clear_condition(state);
+  check(evaluate(state, "sliced-interrupt-cleaned", &argument) && ot_is_int(argument) &&
+            ot_get_int(argument) == 1,
+        "interrupt unwind runs suspended cleanup code");
+
+  check(evaluate(state,
+                 "(fn (n) "
+                 "  (let loop ((n n)) "
+                 "    (if (= n 0) (error \"sliced failure\") (loop (- n 1)))))",
+                 &function),
+        "compile failing resumable root function");
+  argument = ot_make_int(100);
+  check(ot_start_call(state, function, &argument, 1), "start failing root call");
+  yields = 0;
+  result = run_in_slices(state, 3, &yields);
+  check(result.status == OT_RUN_FAILED && result.value == ot_condition(state),
+        "failed root process returns its condition");
+  check(yields != 0, "failing root process resumes before failure");
+  ot_clear_condition(state);
+
+  OT_FRAME_POP(state);
   ot_destroy(state);
 }
 
@@ -288,7 +446,7 @@ static void test_named_let(void) {
                  "  (if (= n 0) total (sum (- n 1) (+ total n))))",
                  &value) &&
             ot_is_int(value) && ot_get_int(value) == INT64_C(1250025000),
-        "named let recursion uses the evaluator trampoline");
+        "named let recursion reuses its VM frame");
   check(evaluate(state,
                  "(let ((x 10)) "
                  "  (let loop ((x 1) (outer-x x)) outer-x))",
@@ -310,6 +468,26 @@ static void test_named_let(void) {
   check(evaluate(state, "(let loop ((value missing)) value)", &value) == false &&
             condition_message_is(state, "unbound symbol: missing"),
         "named let propagates initializer errors");
+  ot_clear_condition(state);
+  check(evaluate(state,
+                 "(define (deep n) (if (= n 0) 0 (+ 1 (deep (- n 1))))) "
+                 "(deep 100)",
+                 &value) == false &&
+            condition_message_is(state, "maximum VM frame depth exceeded"),
+        "non-tail recursion observes the VM frame limit");
+  ot_clear_condition(state);
+  check(evaluate(state, "deep", &value), "load deep function for sliced execution");
+  otv depth = ot_make_int(100);
+  check(ot_start_call(state, value, &depth, 1), "start sliced frame-limit call");
+  size_t yields = 0;
+  ot_run_result result = run_in_slices(state, 3, &yields);
+  check(result.status == OT_RUN_FAILED &&
+            condition_message_is(state, "maximum VM frame depth exceeded"),
+        "resumed non-tail recursion observes the VM frame limit");
+  check(yields != 0, "non-tail recursion yields before reaching its frame limit");
+  ot_clear_condition(state);
+  check(evaluate(state, "(+ 20 22)", &value) && ot_get_int(value) == 42,
+        "VM runs again after a frame-limit unwind");
 
   ot_destroy(state);
 }
@@ -461,13 +639,13 @@ static void test_interrupt(void) {
 }
 
 static const test_case tests[] = {
-    {"config", test_config_validation},    {"immediates", test_immediate_values},
-    {"heap-values", test_heap_values},     {"float-equality", test_float_and_equality},
-    {"reentrant", test_reentrant_states},  {"eval", test_eval_integration},
-    {"named-let", test_named_let},         {"try-ast-reuse", test_try_ast_reuse},
-    {"writer", test_writer_callback},      {"modules-loader", test_modules_and_loader},
-    {"roots-stats", test_roots_and_stats}, {"extensions", test_extension_values},
-    {"interrupt", test_interrupt},
+    {"config", test_config_validation},          {"immediates", test_immediate_values},
+    {"heap-values", test_heap_values},           {"float-equality", test_float_and_equality},
+    {"reentrant", test_reentrant_states},        {"eval", test_eval_integration},
+    {"yield-resume", test_yield_resume},         {"named-let", test_named_let},
+    {"try-ast-reuse", test_try_ast_reuse},       {"writer", test_writer_callback},
+    {"modules-loader", test_modules_and_loader}, {"roots-stats", test_roots_and_stats},
+    {"extensions", test_extension_values},       {"interrupt", test_interrupt},
 };
 
 int main(int argc, char** argv) {

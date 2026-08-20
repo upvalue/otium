@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 typedef struct ot_state ots;
+typedef struct ot_process ot_process;
 typedef uintptr_t otv;
 
 #define ot_nil ((otv)2u)
@@ -34,6 +35,18 @@ typedef struct ot_gc_stats {
   size_t peak_used_bytes;
   size_t capacity_bytes;
 } ot_gc_stats;
+
+typedef enum ot_run_status {
+  OT_RUN_COMPLETED,
+  OT_RUN_YIELDED,
+  OT_RUN_BLOCKED,
+  OT_RUN_FAILED,
+} ot_run_status;
+
+typedef struct ot_run_result {
+  ot_run_status status;
+  otv value;
+} ot_run_result;
 
 typedef enum ot_type {
   OT_TYPE_NIL,
@@ -88,13 +101,19 @@ void ot_set_loader(ots* state, ot_loader loader, void* userdata);
 /* Run synchronously at an interrupt safepoint, never in the signal handler.
  * The hook may re-enter evaluation; continue and abort restarts are active. */
 void ot_set_interrupt_hook(ots* state, ot_interrupt_hook hook, void* userdata);
-/* Request a cooperative evaluator interruption; safe from a signal handler. */
+/* Request a cooperative VM interruption; safe from a signal handler. */
 void ot_interrupt(ots* state);
 
 /* Evaluate all forms in source. On failure, inspect ot_condition(state). */
 bool ot_eval_src(ots* state, const char* source, size_t length, const char* name, otv* out);
 otv ot_condition(const ots* state);
 void ot_clear_condition(ots* state);
+
+/* Start an interpreted function call in the root process, then run it for at
+ * most reduction_budget bytecode instructions. A zero budget runs without a
+ * limit. Resume a yielded call by invoking ot_run again. */
+bool ot_start_call(ots* state, otv function, otv* args, size_t argc);
+ot_run_result ot_run(ots* state, uint64_t reduction_budget);
 
 /* Inspect and construct values. Constructors may move every unrooted value. */
 ot_type ot_value_type(otv value);
@@ -116,6 +135,9 @@ bool ot_equal(ots* state, otv left, otv right, bool structural);
 bool ot_float_value(otv value, double* out);
 /* The returned byte span stays valid only until the next heap allocation. */
 bool ot_string_bytes(otv value, const char** out, size_t* length);
+/* Inspect an interpreted function's printable ASCII bytecode. The span stays
+ * valid only until the next heap allocation. */
+bool ot_function_bytecode(otv function, const char** out, size_t* length);
 
 /* Stack frames let the moving collector update C locals in place. */
 void ot_frame_push(ots* state, ot_frame* frame, otv** slots, size_t count);
@@ -163,6 +185,8 @@ void ot_collect(ots* state);
 #define OT_UNDEFINED ((otv)18u)
 #define OT_UNWIND ((otv)22u)
 #define OT_TOMBSTONE ((otv)26u)
+#define OT_YIELD ((otv)30u)
+#define OT_VM_CONTINUE ((otv)34u)
 
 typedef enum ot_obj_type {
   OBJ_FLOAT = 1,
@@ -181,6 +205,7 @@ typedef enum ot_obj_type {
   OBJ_VAR,
   OBJ_ALIAS,
   OBJ_NAMESPACE,
+  OBJ_CODE,
   OBJ_FUNCTION,
   OBJ_NAT,
   OBJ_MACRO,
@@ -313,10 +338,19 @@ typedef struct ot_namespace_obj {
   bool loading;
 } ot_namespace_obj;
 
+typedef struct ot_code_obj {
+  uintptr_t header;
+  otv bytes;
+  otv constants;
+  otv params;
+  otv name;
+  size_t length;
+  size_t constant_count;
+} ot_code_obj;
+
 typedef struct ot_function_obj {
   uintptr_t header;
-  otv params;
-  otv body;
+  otv code;
   otv env;
   otv namespace_value;
   otv name;
@@ -401,12 +435,74 @@ typedef struct ot_ext_type_info {
   ot_ext_finalizer finalizer;
 } ot_ext_type_info;
 
+typedef struct ot_vm_frame {
+  otv function;
+  otv env;
+  size_t ip;
+  size_t base;
+} ot_vm_frame;
+
 typedef enum ot_unwind_kind {
   UNWIND_NONE,
   UNWIND_CONDITION,
   UNWIND_RESTART,
   UNWIND_QUIT,
 } ot_unwind_kind;
+
+typedef struct ot_vm_continuation {
+  struct ot_vm_continuation* prev;
+  unsigned char instruction;
+  unsigned phase;
+  size_t index;
+  size_t owner_frame_count;
+  size_t owner_stack_count;
+  otv descriptor;
+  otv env;
+  otv namespace_value;
+  otv value;
+  otv auxiliary;
+  otv saved_condition;
+  otv saved_args;
+  ot_unwind_kind saved_unwind_kind;
+  uint64_t saved_restart_id;
+  ot_handler_frame* old_handlers;
+  ot_handler_frame* handler_frames;
+  ot_restart_frame restart_frame;
+  ot_restart_clause* restart_clauses;
+  ot_param_frame* old_params;
+  ot_param_frame* param_frames;
+  size_t count;
+} ot_vm_continuation;
+
+struct ot_process {
+  ots* state;
+  ot_handler_frame* handlers;
+  ot_restart_frame* restarts;
+  ot_param_frame* params;
+  ot_vm_continuation* continuations;
+  otv* vm_stack;
+  size_t vm_stack_count;
+  size_t vm_stack_capacity;
+  ot_vm_frame* vm_frames;
+  size_t vm_frame_count;
+  size_t vm_frame_capacity;
+  otv current_namespace;
+  otv condition;
+  otv unwind_args;
+  ot_unwind_kind unwind_kind;
+  uint64_t unwind_restart_id;
+  uint64_t next_restart_id;
+  uint64_t reductions;
+  uint64_t reduction_budget;
+  uint64_t total_reductions;
+  unsigned frame_limit;
+  unsigned poll_count;
+  unsigned vm_run_depth;
+  atomic_bool interrupted;
+  bool in_interrupt_hook;
+  bool run_active;
+  bool yield_pending;
+};
 
 struct ot_state {
   ot_config config;
@@ -418,31 +514,20 @@ struct ot_state {
   size_t capacity;
   ot_frame* frames;
   ot_global_root* globals;
-  ot_handler_frame* handlers;
-  ot_restart_frame* restarts;
-  ot_param_frame* params;
   ot_module* modules;
   ot_ext_type_info* ext_types;
   size_t ext_type_count;
   size_t ext_type_capacity;
+  ot_process root_process;
+  ot_process* current_process;
   otv symbols;
   otv namespaces;
   otv core_namespace;
-  otv current_namespace;
   otv expander;
   otv type_parents;
-  otv condition;
-  otv unwind_args;
   otv exts;
-  ot_unwind_kind unwind_kind;
-  uint64_t unwind_restart_id;
   uint64_t next_stable_id;
-  uint64_t next_restart_id;
   uint64_t gensym_id;
-  unsigned eval_depth;
-  unsigned poll_count;
-  atomic_bool interrupted;
-  bool bootstrapping;
   bool quit_requested;
   ot_writer writer;
   void* writer_userdata;
@@ -451,7 +536,6 @@ struct ot_state {
   ot_interrupt_hook interrupt_hook;
   void* interrupt_userdata;
   ot_gc_stats stats;
-  bool in_interrupt_hook;
 };
 
 static inline bool ot_is_ptr(otv value) { return value != 0 && (value & 3u) == 0; }

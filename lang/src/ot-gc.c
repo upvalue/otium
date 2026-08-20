@@ -164,10 +164,17 @@ static void trace_object(ots* state, ot_obj* object) {
       ot_gc_trace_value(state, &space->next);
       break;
     }
+    case OBJ_CODE: {
+      ot_code_obj* code = (ot_code_obj*)object;
+      ot_gc_trace_value(state, &code->bytes);
+      ot_gc_trace_value(state, &code->constants);
+      ot_gc_trace_value(state, &code->params);
+      ot_gc_trace_value(state, &code->name);
+      break;
+    }
     case OBJ_FUNCTION: {
       ot_function_obj* function = (ot_function_obj*)object;
-      ot_gc_trace_value(state, &function->params);
-      ot_gc_trace_value(state, &function->body);
+      ot_gc_trace_value(state, &function->code);
       ot_gc_trace_value(state, &function->env);
       ot_gc_trace_value(state, &function->namespace_value);
       ot_gc_trace_value(state, &function->name);
@@ -199,6 +206,59 @@ static void trace_object(ots* state, ot_obj* object) {
   }
 }
 
+static void trace_process(ots* state, ot_process* process) {
+  ot_gc_trace_value(state, &process->current_namespace);
+  ot_gc_trace_value(state, &process->condition);
+  ot_gc_trace_value(state, &process->unwind_args);
+
+  for (size_t i = 0; i < process->vm_stack_count; i++)
+    ot_gc_trace_value(state, &process->vm_stack[i]);
+  for (size_t i = 0; i < process->vm_frame_count; i++) {
+    ot_gc_trace_value(state, &process->vm_frames[i].function);
+    ot_gc_trace_value(state, &process->vm_frames[i].env);
+  }
+
+  for (ot_handler_frame* handler = process->handlers; handler != NULL; handler = handler->prev) {
+    ot_gc_trace_value(state, &handler->pred);
+    ot_gc_trace_value(state, &handler->handler);
+  }
+  for (ot_restart_frame* frame = process->restarts; frame != NULL; frame = frame->prev)
+    for (size_t i = 0; i < frame->count; i++) {
+      ot_gc_trace_value(state, &frame->clauses[i].restart);
+      ot_gc_trace_value(state, &frame->clauses[i].params);
+      ot_gc_trace_value(state, &frame->clauses[i].body);
+    }
+  for (ot_param_frame* param = process->params; param != NULL; param = param->prev) {
+    ot_gc_trace_value(state, &param->param);
+    ot_gc_trace_value(state, &param->value);
+  }
+  for (ot_vm_continuation* continuation = process->continuations; continuation != NULL;
+       continuation = continuation->prev) {
+    ot_gc_trace_value(state, &continuation->descriptor);
+    ot_gc_trace_value(state, &continuation->env);
+    ot_gc_trace_value(state, &continuation->namespace_value);
+    ot_gc_trace_value(state, &continuation->value);
+    ot_gc_trace_value(state, &continuation->auxiliary);
+    ot_gc_trace_value(state, &continuation->saved_condition);
+    ot_gc_trace_value(state, &continuation->saved_args);
+    for (size_t i = 0; i < continuation->count; i++) {
+      if (continuation->handler_frames != NULL) {
+        ot_gc_trace_value(state, &continuation->handler_frames[i].pred);
+        ot_gc_trace_value(state, &continuation->handler_frames[i].handler);
+      }
+      if (continuation->restart_clauses != NULL) {
+        ot_gc_trace_value(state, &continuation->restart_clauses[i].restart);
+        ot_gc_trace_value(state, &continuation->restart_clauses[i].params);
+        ot_gc_trace_value(state, &continuation->restart_clauses[i].body);
+      }
+      if (continuation->param_frames != NULL) {
+        ot_gc_trace_value(state, &continuation->param_frames[i].param);
+        ot_gc_trace_value(state, &continuation->param_frames[i].value);
+      }
+    }
+  }
+}
+
 static void trace_roots(ots* state) {
   for (ot_frame* frame = state->frames; frame != NULL; frame = frame->prev)
     for (size_t i = 0; i < frame->count; i++) ot_gc_trace_value(state, frame->slots[i]);
@@ -208,26 +268,9 @@ static void trace_roots(ots* state) {
   ot_gc_trace_value(state, &state->symbols);
   ot_gc_trace_value(state, &state->namespaces);
   ot_gc_trace_value(state, &state->core_namespace);
-  ot_gc_trace_value(state, &state->current_namespace);
   ot_gc_trace_value(state, &state->expander);
   ot_gc_trace_value(state, &state->type_parents);
-  ot_gc_trace_value(state, &state->condition);
-  ot_gc_trace_value(state, &state->unwind_args);
-
-  for (ot_handler_frame* handler = state->handlers; handler != NULL; handler = handler->prev) {
-    ot_gc_trace_value(state, &handler->pred);
-    ot_gc_trace_value(state, &handler->handler);
-  }
-  for (ot_restart_frame* frame = state->restarts; frame != NULL; frame = frame->prev)
-    for (size_t i = 0; i < frame->count; i++) {
-      ot_gc_trace_value(state, &frame->clauses[i].restart);
-      ot_gc_trace_value(state, &frame->clauses[i].params);
-      ot_gc_trace_value(state, &frame->clauses[i].body);
-    }
-  for (ot_param_frame* param = state->params; param != NULL; param = param->prev) {
-    ot_gc_trace_value(state, &param->param);
-    ot_gc_trace_value(state, &param->value);
-  }
+  trace_process(state, &state->root_process);
 }
 
 static void finish_exts(ots* state, otv old_exts) {
@@ -261,6 +304,68 @@ static void validate_value(ots* state, otv value, const char* owner) {
   }
 }
 
+static void validate_process(ots* state, const ot_process* process) {
+  if (process->state != state) {
+    fputs("otium: process belongs to a different runtime\n", stderr);
+    abort();
+  }
+  validate_value(state, process->current_namespace, "process namespace");
+  validate_value(state, process->condition, "process condition");
+  validate_value(state, process->unwind_args, "process unwind args");
+  for (size_t i = 0; i < process->vm_stack_count; i++)
+    validate_value(state, process->vm_stack[i], "process operand stack");
+  for (size_t i = 0; i < process->vm_frame_count; i++) {
+    validate_value(state, process->vm_frames[i].function, "process VM function");
+    validate_value(state, process->vm_frames[i].env, "process VM environment");
+  }
+  for (ot_handler_frame* handler = process->handlers; handler != NULL; handler = handler->prev) {
+    validate_value(state, handler->pred, "process handler predicate");
+    validate_value(state, handler->handler, "process handler");
+  }
+  for (ot_restart_frame* frame = process->restarts; frame != NULL; frame = frame->prev)
+    for (size_t i = 0; i < frame->count; i++) {
+      validate_value(state, frame->clauses[i].restart, "process restart");
+      validate_value(state, frame->clauses[i].params, "process restart parameters");
+      validate_value(state, frame->clauses[i].body, "process restart body");
+    }
+  for (ot_param_frame* param = process->params; param != NULL; param = param->prev) {
+    validate_value(state, param->param, "process parameter");
+    validate_value(state, param->value, "process parameter value");
+  }
+  for (ot_vm_continuation* continuation = process->continuations; continuation != NULL;
+       continuation = continuation->prev) {
+    validate_value(state, continuation->descriptor, "process continuation descriptor");
+    validate_value(state, continuation->env, "process continuation environment");
+    validate_value(state, continuation->namespace_value, "process continuation namespace");
+    validate_value(state, continuation->value, "process continuation value");
+    validate_value(state, continuation->auxiliary, "process continuation auxiliary value");
+    validate_value(state, continuation->saved_condition, "process continuation condition");
+    validate_value(state, continuation->saved_args, "process continuation arguments");
+    for (size_t i = 0; i < continuation->count; i++) {
+      if (continuation->handler_frames != NULL) {
+        validate_value(state, continuation->handler_frames[i].pred,
+                       "process continuation handler predicate");
+        validate_value(state, continuation->handler_frames[i].handler,
+                       "process continuation handler");
+      }
+      if (continuation->restart_clauses != NULL) {
+        validate_value(state, continuation->restart_clauses[i].restart,
+                       "process continuation restart");
+        validate_value(state, continuation->restart_clauses[i].params,
+                       "process continuation restart parameters");
+        validate_value(state, continuation->restart_clauses[i].body,
+                       "process continuation restart body");
+      }
+      if (continuation->param_frames != NULL) {
+        validate_value(state, continuation->param_frames[i].param,
+                       "process continuation parameter");
+        validate_value(state, continuation->param_frames[i].value,
+                       "process continuation parameter value");
+      }
+    }
+  }
+}
+
 static void validate_heap(ots* state) {
   if (!state->config.gc_stress) return;
   for (ot_frame* frame = state->frames; frame != NULL; frame = frame->prev)
@@ -268,11 +373,9 @@ static void validate_heap(ots* state) {
   validate_value(state, state->symbols, "symbols");
   validate_value(state, state->namespaces, "namespaces");
   validate_value(state, state->core_namespace, "core namespace");
-  validate_value(state, state->current_namespace, "current namespace");
   validate_value(state, state->expander, "expander");
   validate_value(state, state->type_parents, "condition types");
-  validate_value(state, state->condition, "condition");
-  validate_value(state, state->unwind_args, "unwind args");
+  validate_process(state, &state->root_process);
   unsigned char* scan = state->from_space;
   while (scan < state->alloc) {
     otv value = ot_from_obj(scan);
@@ -340,9 +443,14 @@ static void validate_heap(ots* state) {
         validate_value(state, ((ot_namespace_obj*)scan)->aliases, "namespace.aliases");
         validate_value(state, ((ot_namespace_obj*)scan)->next, "namespace.next");
         break;
+      case OBJ_CODE:
+        validate_value(state, ((ot_code_obj*)scan)->bytes, "code.bytes");
+        validate_value(state, ((ot_code_obj*)scan)->constants, "code.constants");
+        validate_value(state, ((ot_code_obj*)scan)->params, "code.params");
+        validate_value(state, ((ot_code_obj*)scan)->name, "code.name");
+        break;
       case OBJ_FUNCTION:
-        validate_value(state, ((ot_function_obj*)scan)->params, "function.params");
-        validate_value(state, ((ot_function_obj*)scan)->body, "function.body");
+        validate_value(state, ((ot_function_obj*)scan)->code, "function.code");
         validate_value(state, ((ot_function_obj*)scan)->env, "function.env");
         validate_value(state, ((ot_function_obj*)scan)->namespace_value, "function.namespace");
         validate_value(state, ((ot_function_obj*)scan)->name, "function.name");

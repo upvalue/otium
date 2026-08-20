@@ -1,6 +1,6 @@
 ---
 id: lan-67q1
-status: open
+status: in_progress
 deps: []
 links: [lan-9yo3, lan-p1e2, lan-5je1]
 created: 2026-08-16T15:46:48Z
@@ -92,3 +92,9 @@ Core (scheduler, processes, mailboxes, links, send-copy) is ours to write regard
 
 Spec note: spec.md 3.6 currently says "there are no threads" normatively; this is a spec change when it happens.
 
+
+## Notes
+
+**2026-08-20T03:04:32Z**
+
+Implemented the first process milestone: one root process owns VM and dynamic state, ot_start_call/ot_run provide budgeted yield and resume, the five dynamic opcodes use process-owned continuations, and suspended state is traced by the moving collector. The full suite, GC-stress conformance, and ASan/UBSan with OT_GC_VALIDATE pass.

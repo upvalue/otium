@@ -168,6 +168,7 @@ static bool special_name(const char* bytes, size_t length) {
 #define as_array(V) ((ot_array_obj*)ot_as_obj(V))
 #define as_entries(V) ((ot_entries_obj*)ot_as_obj(V))
 #define as_table(V) ((ot_table_obj*)ot_as_obj(V))
+#define as_code(V) ((ot_code_obj*)ot_as_obj(V))
 
 /* =========================================================================
  * 2. CORE VALUES AND COLLECTIONS
@@ -232,6 +233,16 @@ bool ot_string_bytes(otv value, const char** out, size_t* length) {
   ot_string_obj* string = as_string(value);
   *out = (const char*)as_bytes(string->bytes)->data;
   *length = string->length;
+  return true;
+}
+
+bool ot_function_bytecode(otv value, const char** out, size_t* length) {
+  if (!ot_has_type(value, OBJ_FUNCTION)) return false;
+  otv code_value = ((ot_function_obj*)ot_as_obj(value))->code;
+  if (!ot_has_type(code_value, OBJ_CODE)) return false;
+  ot_code_obj* code = as_code(code_value);
+  *out = (const char*)as_bytes(code->bytes)->data;
+  *length = code->length;
   return true;
 }
 
@@ -1183,7 +1194,7 @@ static otv env_binding(otv env_value, otv name) {
 
 static otv env_namespace(ots* state, otv env) {
   return is_type(env, OBJ_ENV) ? ((ot_env_obj*)ot_as_obj(env))->namespace_value
-                               : state->current_namespace;
+                               : state->current_process->current_namespace;
 }
 
 static otv namespace_alias(otv namespace_value, otv name) {
@@ -1227,39 +1238,35 @@ static otv resolve_var(ots* state, otv namespace_value, otv symbol, bool report_
   return ot_nil;
 }
 
-static otv resolve_value(ots* state, otv env, otv symbol) {
-  otv binding = env_binding(env, symbol);
-  if (is_type(binding, OBJ_BINDING)) return ((ot_binding_obj*)ot_as_obj(binding))->value;
-  otv var = resolve_var(state, env_namespace(state, env), symbol, true);
-  if (var == OT_UNWIND) return var;
-  return ((ot_var_obj*)ot_as_obj(var))->value;
-}
-
 /* =========================================================================
  * 6. CONDITIONS AND CALLABLES
  * ========================================================================= */
 
-static otv eval_value(ots* state, otv form, otv env);
+static otv compile_and_run_form(ots* state, otv form, otv env);
 static otv apply_value(ots* state, otv callable, otv* args, size_t argc, bool allow_macro);
 static bool eval_source(ots* state, const char* source, size_t length, const char* name,
                         bool expand, otv* out);
+static otv compile_forms(ots* state, otv forms, otv env, otv params, otv name);
+static bool is_catch_clause(otv form);
+static otv unwrap_quote(otv value);
 
 static otv signal_condition(ots* state, otv condition) {
   /* Handlers run with themselves hidden, which prevents recursive re-entry
    * while leaving outer handlers visible to predicates and handler bodies. */
   OT_FRAME_SCOPED(state, &condition);
-  for (ot_handler_frame* frame = state->handlers; frame != NULL; frame = frame->prev) {
-    ot_handler_frame* saved = state->handlers;
+  for (ot_handler_frame* frame = state->current_process->handlers; frame != NULL;
+       frame = frame->prev) {
+    ot_handler_frame* saved = state->current_process->handlers;
     otv pred_function = frame->pred;
     otv handler_function = frame->handler;
     OT_FRAME_SCOPED(state, &pred_function, &handler_function);
-    state->handlers = frame->prev;
+    state->current_process->handlers = frame->prev;
     otv pred_args[1] = {condition};
     otv pred = apply_value(state, pred_function, pred_args, 1, false);
     if (pred == OT_UNWIND) {
       frame->pred = pred_function;
       frame->handler = handler_function;
-      state->handlers = saved;
+      state->current_process->handlers = saved;
       return pred;
     }
     if (!is_falsy(pred)) {
@@ -1267,12 +1274,12 @@ static otv signal_condition(ots* state, otv condition) {
       otv result = apply_value(state, handler_function, handler_args, 1, false);
       frame->pred = pred_function;
       frame->handler = handler_function;
-      state->handlers = saved;
+      state->current_process->handlers = saved;
       if (result == OT_UNWIND) return result;
     } else {
       frame->pred = pred_function;
       frame->handler = handler_function;
-      state->handlers = saved;
+      state->current_process->handlers = saved;
     }
   }
   return ot_nil;
@@ -1280,11 +1287,11 @@ static otv signal_condition(ots* state, otv condition) {
 
 otv ot_raise_value(ots* state, otv condition) {
   OT_FRAME_SCOPED(state, &condition);
-  if (state->unwind_kind == UNWIND_QUIT) return OT_UNWIND;
+  if (state->current_process->unwind_kind == UNWIND_QUIT) return OT_UNWIND;
   otv signalled = signal_condition(state, condition);
   if (signalled == OT_UNWIND) return signalled;
-  state->condition = condition;
-  state->unwind_kind = UNWIND_CONDITION;
+  state->current_process->condition = condition;
+  state->current_process->unwind_kind = UNWIND_CONDITION;
   return OT_UNWIND;
 }
 
@@ -1320,15 +1327,55 @@ otv ot_raise(ots* state, const char* format, ...) {
   return ot_raise_value(state, condition);
 }
 
-static otv make_function(ots* state, otv params, otv body, otv env, otv namespace_value, otv name) {
+static otv compile_function_code(ots* state, otv params, otv body, otv env, otv namespace_value,
+                                 otv name) {
   OT_FRAME_SCOPED(state, &params, &body, &env, &namespace_value, &name);
-  ot_function_obj* function = must_alloc(state, sizeof(*function), OBJ_FUNCTION);
-  function->params = params;
-  function->body = body;
-  function->env = env;
-  function->namespace_value = namespace_value;
-  function->name = name;
-  return ot_from_obj(function);
+  otv compile_env = make_env(state, env, namespace_value);
+  OT_FRAME_SCOPED(state, &compile_env);
+  otv cursor = params;
+  OT_FRAME_SCOPED(state, &cursor);
+  if (is_type(cursor, OBJ_PAIR) && symbol_is(as_pair(cursor)->car, "array"))
+    cursor = as_pair(cursor)->cdr;
+  if (is_type(cursor, OBJ_SYMBOL)) {
+    env_bind(state, &compile_env, cursor, ot_nil);
+  } else {
+    while (is_type(cursor, OBJ_PAIR)) {
+      otv parameter = as_pair(cursor)->car;
+      cursor = as_pair(cursor)->cdr;
+      OT_FRAME_SCOPED(state, &parameter);
+      if (!is_type(parameter, OBJ_SYMBOL)) return ot_raise(state, "parameter must be a symbol");
+      if (symbol_is(parameter, "&")) {
+        if (!is_type(cursor, OBJ_PAIR) || !is_type(as_pair(cursor)->car, OBJ_SYMBOL) ||
+            as_pair(cursor)->cdr != ot_null)
+          return ot_raise(state, "invalid & rest parameter");
+        parameter = as_pair(cursor)->car;
+        env_bind(state, &compile_env, parameter, ot_nil);
+        cursor = ot_null;
+        break;
+      }
+      env_bind(state, &compile_env, parameter, ot_nil);
+    }
+    if (is_type(cursor, OBJ_SYMBOL)) env_bind(state, &compile_env, cursor, ot_nil);
+    else if (cursor != ot_null) return ot_raise(state, "invalid parameter list");
+  }
+  if (is_type(env, OBJ_ENV) && is_type(name, OBJ_SYMBOL))
+    env_bind(state, &compile_env, name, ot_nil);
+  for (cursor = body; is_type(cursor, OBJ_PAIR); cursor = as_pair(cursor)->cdr) {
+    otv definition = as_pair(cursor)->car;
+    if (!is_type(definition, OBJ_PAIR)) continue;
+    otv definition_head = as_pair(definition)->car;
+    if (!is_type(definition_head, OBJ_SYMBOL) ||
+        (!symbol_is(definition_head, "define") && !symbol_is(definition_head, "def") &&
+         !symbol_is(definition_head, "define-")))
+      continue;
+    otv definition_args = as_pair(definition)->cdr;
+    if (!is_type(definition_args, OBJ_PAIR)) continue;
+    otv definition_name = as_pair(definition_args)->car;
+    if (is_type(definition_name, OBJ_PAIR)) definition_name = as_pair(definition_name)->car;
+    if (is_type(definition_name, OBJ_SYMBOL))
+      env_bind(state, &compile_env, definition_name, ot_nil);
+  }
+  return compile_forms(state, body, compile_env, params, name);
 }
 
 static otv make_restart(ots* state, const char* name_text, const char* description_text) {
@@ -1339,18 +1386,19 @@ static otv make_restart(ots* state, const char* name_text, const char* descripti
   ot_restart_obj* restart = must_alloc(state, sizeof(*restart), OBJ_RESTART);
   restart->name = name;
   restart->description = description;
-  restart->id = ++state->next_restart_id;
+  restart->id = ++state->current_process->next_restart_id;
   return ot_from_obj(restart);
 }
 
 static otv interrupt_unwind(ots* state) {
-  state->unwind_kind = UNWIND_QUIT;
-  state->condition = ot_intern(state, "interrupt", 9, false);
+  state->current_process->unwind_kind = UNWIND_QUIT;
+  state->current_process->condition = ot_intern(state, "interrupt", 9, false);
   return OT_UNWIND;
 }
 
 static otv run_interrupt_hook(ots* state) {
-  if (state->interrupt_hook == NULL || state->in_interrupt_hook) return interrupt_unwind(state);
+  if (state->interrupt_hook == NULL || state->current_process->in_interrupt_hook)
+    return interrupt_unwind(state);
 
   otv continue_restart = make_restart(state, "continue", "Resume the interrupted evaluation.");
   OT_FRAME_SCOPED(state, &continue_restart);
@@ -1360,26 +1408,29 @@ static otv run_interrupt_hook(ots* state) {
       {.restart = abort_restart, .params = ot_null, .body = ot_null},
       {.restart = continue_restart, .params = ot_null, .body = ot_null},
   };
-  ot_restart_frame frame = {.prev = state->restarts, .clauses = clauses, .count = 2};
-  state->restarts = &frame;
-  state->in_interrupt_hook = true;
+  ot_restart_frame frame = {
+      .prev = state->current_process->restarts, .clauses = clauses, .count = 2};
+  state->current_process->restarts = &frame;
+  state->current_process->in_interrupt_hook = true;
   ot_interrupt_action action = state->interrupt_hook(state, state->interrupt_userdata);
-  state->in_interrupt_hook = false;
-  state->restarts = frame.prev;
-  bool interrupted_again = atomic_exchange(&state->interrupted, false);
+  state->current_process->in_interrupt_hook = false;
+  state->current_process->restarts = frame.prev;
+  bool interrupted_again = atomic_exchange(&state->current_process->interrupted, false);
 
-  if (state->unwind_kind == UNWIND_RESTART) {
+  if (state->current_process->unwind_kind == UNWIND_RESTART) {
     uint64_t continue_id = ((ot_restart_obj*)ot_as_obj(continue_restart))->id;
     uint64_t abort_id = ((ot_restart_obj*)ot_as_obj(abort_restart))->id;
-    if (state->unwind_restart_id == continue_id || state->unwind_restart_id == abort_id) {
-      action = state->unwind_restart_id == continue_id ? OT_INTERRUPT_CONTINUE : OT_INTERRUPT_ABORT;
-      state->unwind_kind = UNWIND_NONE;
-      state->unwind_restart_id = 0;
-      state->unwind_args = ot_nil;
+    if (state->current_process->unwind_restart_id == continue_id ||
+        state->current_process->unwind_restart_id == abort_id) {
+      action = state->current_process->unwind_restart_id == continue_id ? OT_INTERRUPT_CONTINUE
+                                                                        : OT_INTERRUPT_ABORT;
+      state->current_process->unwind_kind = UNWIND_NONE;
+      state->current_process->unwind_restart_id = 0;
+      state->current_process->unwind_args = ot_nil;
     } else {
       return OT_UNWIND;
     }
-  } else if (state->unwind_kind != UNWIND_NONE) {
+  } else if (state->current_process->unwind_kind != UNWIND_NONE) {
     return OT_UNWIND;
   }
 
@@ -1402,28 +1453,13 @@ static otv list_tail(otv list, size_t count) {
   return list;
 }
 
-static otv eval_sequence_until(ots* state, otv forms, otv stop, otv env) {
-  otv result = ot_nil;
-  OT_FRAME_SCOPED(state, &forms, &stop, &env, &result);
-  while (forms != stop) {
-    if (!is_type(forms, OBJ_PAIR)) return ot_raise(state, "body must be a proper list");
-    result = eval_value(state, as_pair(forms)->car, env);
-    if (result == OT_UNWIND) return result;
-    forms = as_pair(forms)->cdr;
-  }
-  return result;
-}
-
-static otv eval_sequence(ots* state, otv forms, otv env) {
-  return eval_sequence_until(state, forms, ot_null, env);
-}
-
 static otv bind_parameters(ots* state, otv function_value, otv* args, size_t argc) {
   OT_FRAME_SCOPED(state, &function_value);
   ot_function_obj* function = (ot_function_obj*)ot_as_obj(function_value);
   otv parent = function->env;
   otv namespace_value = function->namespace_value;
-  otv params = function->params;
+  if (!is_type(function->code, OBJ_CODE)) return ot_raise(state, "function has no bytecode");
+  otv params = as_code(function->code)->params;
   OT_FRAME_SCOPED(state, &parent, &namespace_value, &params);
   otv env = make_env(state, parent, namespace_value);
   OT_FRAME_SCOPED(state, &env);
@@ -1438,12 +1474,15 @@ static otv bind_parameters(ots* state, otv function_value, otv* args, size_t arg
   while (is_type(params, OBJ_PAIR)) {
     otv name = as_pair(params)->car;
     otv next = as_pair(params)->cdr;
+    OT_FRAME_SCOPED(state, &name, &next);
     if (is_type(name, OBJ_SYMBOL) && symbol_is(name, "&")) {
       if (!is_type(next, OBJ_PAIR) || !is_type(as_pair(next)->car, OBJ_SYMBOL) ||
           as_pair(next)->cdr != ot_null)
         return ot_raise(state, "invalid & rest parameter");
       otv rest = list_from_array(state, args + index, argc - index);
-      env_bind(state, &env, as_pair(next)->car, rest);
+      OT_FRAME_SCOPED(state, &rest);
+      name = as_pair(next)->car;
+      env_bind(state, &env, name, rest);
       return env;
     }
     if (!is_type(name, OBJ_SYMBOL)) return ot_raise(state, "parameter must be a symbol");
@@ -1460,173 +1499,1023 @@ static otv bind_parameters(ots* state, otv function_value, otv* args, size_t arg
   return env;
 }
 
-static otv eval_quasiquote(ots* state, otv value, otv env, unsigned depth) {
-  OT_FRAME_SCOPED(state, &value, &env);
-  if (!is_type(value, OBJ_PAIR)) return value;
+/* =========================================================================
+ * 7. BYTECODE COMPILER, VM, AND SPECIAL FORMS
+ * ========================================================================= */
+
+/* Bytecode is deliberately an ASCII string. Opcodes are printable bytes and
+ * every operand is four hexadecimal digits, so code has no byte order and can
+ * be embedded in a readable function representation without a binary escape
+ * layer. Constants, including nested code and opcode descriptors, live in a
+ * separate pool. */
+typedef enum bytecode_op {
+  BC_CONST = 'A',
+  BC_GET_LEXICAL = 'B',
+  BC_GET_GLOBAL = 'C',
+  BC_CALL = 'E',
+  BC_TAIL_CALL = 'F',
+  BC_POP = 'G',
+  BC_RETURN = 'H',
+  BC_JUMP = 'J',
+  BC_JUMP_IF_FALSE = 'K',
+  BC_DUP = 'L',
+  BC_JUMP_IF_TRUE = 'M',
+  BC_SCOPE = 'N',
+  BC_BIND = 'O',
+  BC_UNSCOPE = 'P',
+  BC_SET_LEXICAL = 'Q',
+  BC_SET_GLOBAL = 'R',
+  BC_CLOSURE = 'S',
+  BC_DEFINE_LEXICAL = 'T',
+  BC_DEFINE_GLOBAL = 'U',
+  BC_DEFINE_PRIVATE = 'V',
+  BC_MACRO = 'W',
+  BC_DEF_PARAM = 'X',
+  BC_NAMED_LET = 'Y',
+  BC_TAIL_NAMED_LET = 'Z',
+  BC_TRY = '!',
+  BC_HANDLER_BIND = '"',
+  BC_RESTART_CASE = '#',
+  BC_UNWIND_PROTECT = '$',
+  BC_WITH_PARAMS = '%',
+  BC_IN_NS = '&',
+  BC_REQUIRE = '\'',
+  BC_CONS = '(',
+  BC_APPEND = ')',
+} bytecode_op;
+
+typedef struct bytecode_compiler {
+  buf bytes;
+  otv constants;
+} bytecode_compiler;
+
+static char hex_digit(unsigned value) {
+  return (char)(value < 10 ? '0' + value : 'a' + (value - 10));
+}
+
+static int hex_value(unsigned char byte) {
+  if (byte >= '0' && byte <= '9') return byte - '0';
+  if (byte >= 'a' && byte <= 'f') return byte - 'a' + 10;
+  if (byte >= 'A' && byte <= 'F') return byte - 'A' + 10;
+  return -1;
+}
+
+static void bytecode_emit(bytecode_compiler* compiler, bytecode_op op) {
+  buf_byte(&compiler->bytes, (char)op);
+}
+
+static void bytecode_emit_u16(bytecode_compiler* compiler, size_t value) {
+  if (value > UINT16_MAX) {
+    compiler->bytes.failed = true;
+    return;
+  }
+  for (unsigned shift = 12;; shift -= 4) {
+    buf_byte(&compiler->bytes, hex_digit((unsigned)(value >> shift) & 15u));
+    if (shift == 0) break;
+  }
+}
+
+static size_t bytecode_emit_jump(bytecode_compiler* compiler, bytecode_op op) {
+  bytecode_emit(compiler, op);
+  size_t operand = compiler->bytes.length;
+  bytecode_emit_u16(compiler, 0);
+  return operand;
+}
+
+static void bytecode_patch_u16(bytecode_compiler* compiler, size_t operand, size_t value) {
+  if (value > UINT16_MAX || operand > compiler->bytes.length ||
+      compiler->bytes.length - operand < 4) {
+    compiler->bytes.failed = true;
+    return;
+  }
+  for (unsigned shift = 12;; shift -= 4) {
+    compiler->bytes.data[operand++] = hex_digit((unsigned)(value >> shift) & 15u);
+    if (shift == 0) break;
+  }
+}
+
+static size_t bytecode_constant(ots* state, bytecode_compiler* compiler, otv value) {
+  OT_FRAME_SCOPED(state, &compiler->constants, &value);
+  ot_array_obj* constants = as_array(compiler->constants);
+  otv* values = as_slots(constants->slots)->values;
+  for (size_t i = 0; i < constants->length; i++)
+    if (values[i] == value) return i;
+  size_t index = constants->length;
+  array_push(state, &compiler->constants, value);
+  return index;
+}
+
+static void bytecode_emit_constant(ots* state, bytecode_compiler* compiler, bytecode_op op,
+                                   otv value) {
+  size_t index = bytecode_constant(state, compiler, value);
+  bytecode_emit(compiler, op);
+  bytecode_emit_u16(compiler, index);
+}
+
+static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form, otv env,
+                               bool tail);
+
+static otv make_descriptor(ots* state, otv* values, size_t count) {
+  size_t root_count = count + 1;
+  otv descriptor = ot_nil;
+  otv* roots[root_count];
+  for (size_t i = 0; i < count; i++) roots[i] = &values[i];
+  roots[count] = &descriptor;
+  ot_frame values_frame;
+  ot_frame_push(state, &values_frame, roots, root_count);
+  descriptor = ot_array_new(state, count);
+  for (size_t i = 0; i < count; i++) array_push(state, &descriptor, values[i]);
+  ot_frame_pop(state, &values_frame);
+  return descriptor;
+}
+
+static otv compile_expression_code(ots* state, otv form, otv env) {
+  OT_FRAME_SCOPED(state, &form, &env);
+  otv forms = ot_cons(state, form, ot_null);
+  OT_FRAME_SCOPED(state, &forms);
+  return compile_function_code(state, ot_null, forms, env, env_namespace(state, env), ot_nil);
+}
+
+static otv copy_forms_until(ots* state, otv forms, otv stop) {
+  otv result = ot_null;
+  otv tail = ot_nil;
+  OT_FRAME_SCOPED(state, &forms, &stop, &result, &tail);
+  while (forms != stop) {
+    if (!is_type(forms, OBJ_PAIR)) return ot_raise(state, "body must be a proper list");
+    otv cell = ot_cons(state, as_pair(forms)->car, ot_null);
+    if (result == ot_null) result = cell;
+    else as_pair(tail)->cdr = cell;
+    tail = cell;
+    forms = as_pair(forms)->cdr;
+  }
+  return result;
+}
+
+static bool compile_quasiquote(ots* state, bytecode_compiler* compiler, otv value, otv env,
+                               unsigned depth) {
+  OT_FRAME_SCOPED(state, &compiler->constants, &value, &env);
+  if (!is_type(value, OBJ_PAIR)) {
+    bytecode_emit_constant(state, compiler, BC_CONST, value);
+    return !compiler->bytes.failed;
+  }
   otv head = as_pair(value)->car;
   if (is_type(head, OBJ_SYMBOL) && symbol_is(head, "unquote")) {
     otv expression;
-    if (!list_nth(value, 1, &expression) || list_tail(value, 2) != ot_null)
-      return ot_raise(state, "unquote: expected one argument");
-    if (depth == 1) return eval_value(state, expression, env);
-    otv inner = eval_quasiquote(state, expression, env, depth - 1);
-    otv tail = ot_cons(state, inner, ot_null);
-    return ot_cons(state, head, tail);
+    if (!list_nth(value, 1, &expression) || list_tail(value, 2) != ot_null) {
+      (void)ot_raise(state, "unquote: expected one argument");
+      return false;
+    }
+    if (depth == 1) return compile_expression(state, compiler, expression, env, false);
+    bytecode_emit_constant(state, compiler, BC_CONST, head);
+    if (!compile_quasiquote(state, compiler, expression, env, depth - 1)) return false;
+    bytecode_emit_constant(state, compiler, BC_CONST, ot_null);
+    bytecode_emit(compiler, BC_CONS);
+    bytecode_emit(compiler, BC_CONS);
+    return !compiler->bytes.failed;
   }
   if (is_type(head, OBJ_SYMBOL) && symbol_is(head, "quasiquote")) {
     otv expression;
-    if (!list_nth(value, 1, &expression)) return ot_raise(state, "bad quasiquote");
-    OT_FRAME_SCOPED(state, &head, &expression);
-    otv inner = eval_quasiquote(state, expression, env, depth + 1);
-    otv tail = ot_cons(state, inner, ot_null);
-    return ot_cons(state, head, tail);
+    if (!list_nth(value, 1, &expression) || list_tail(value, 2) != ot_null) {
+      (void)ot_raise(state, "quasiquote: expected one argument");
+      return false;
+    }
+    bytecode_emit_constant(state, compiler, BC_CONST, head);
+    if (!compile_quasiquote(state, compiler, expression, env, depth + 1)) return false;
+    bytecode_emit_constant(state, compiler, BC_CONST, ot_null);
+    bytecode_emit(compiler, BC_CONS);
+    bytecode_emit(compiler, BC_CONS);
+    return !compiler->bytes.failed;
+  }
+  otv car = as_pair(value)->car;
+  otv cdr = as_pair(value)->cdr;
+  OT_FRAME_SCOPED(state, &car, &cdr);
+  if (depth == 1 && is_type(car, OBJ_PAIR) && is_type(as_pair(car)->car, OBJ_SYMBOL) &&
+      symbol_is(as_pair(car)->car, "unquote-splicing")) {
+    otv expression;
+    if (!list_nth(car, 1, &expression) || list_tail(car, 2) != ot_null) {
+      (void)ot_raise(state, "unquote-splicing: expected one argument");
+      return false;
+    }
+    if (!compile_expression(state, compiler, expression, env, false)) return false;
+    if (!compile_quasiquote(state, compiler, cdr, env, depth)) return false;
+    bytecode_emit(compiler, BC_APPEND);
+    return !compiler->bytes.failed;
+  }
+  if (!compile_quasiquote(state, compiler, car, env, depth)) return false;
+  if (!compile_quasiquote(state, compiler, cdr, env, depth)) return false;
+  bytecode_emit(compiler, BC_CONS);
+  return !compiler->bytes.failed;
+}
+
+static bool compile_sequence(ots* state, bytecode_compiler* compiler, otv forms, otv env,
+                             bool tail) {
+  OT_FRAME_SCOPED(state, &compiler->constants, &forms, &env);
+  if (is_type(env, OBJ_ENV)) {
+    for (otv scan = forms; is_type(scan, OBJ_PAIR); scan = as_pair(scan)->cdr) {
+      otv definition = as_pair(scan)->car;
+      if (!is_type(definition, OBJ_PAIR)) continue;
+      otv definition_head = as_pair(definition)->car;
+      if (!is_type(definition_head, OBJ_SYMBOL) ||
+          (!symbol_is(definition_head, "define") && !symbol_is(definition_head, "def") &&
+           !symbol_is(definition_head, "define-")))
+        continue;
+      otv definition_args = as_pair(definition)->cdr;
+      if (!is_type(definition_args, OBJ_PAIR)) continue;
+      otv definition_name = as_pair(definition_args)->car;
+      if (is_type(definition_name, OBJ_PAIR)) definition_name = as_pair(definition_name)->car;
+      if (is_type(definition_name, OBJ_SYMBOL) &&
+          !is_type(env_binding(env, definition_name), OBJ_BINDING))
+        env_bind(state, &env, definition_name, ot_nil);
+    }
+  }
+  if (forms == ot_null) {
+    bytecode_emit_constant(state, compiler, BC_CONST, ot_nil);
+    return !compiler->bytes.failed;
+  }
+  while (is_type(forms, OBJ_PAIR)) {
+    bool last = as_pair(forms)->cdr == ot_null;
+    if (!compile_expression(state, compiler, as_pair(forms)->car, env, tail && last)) return false;
+    otv next = as_pair(forms)->cdr;
+    if (next != ot_null) bytecode_emit(compiler, BC_POP);
+    forms = next;
+  }
+  if (forms != ot_null) {
+    (void)ot_raise(state, "body must be a proper list");
+    return false;
+  }
+  return !compiler->bytes.failed;
+}
+
+static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form, otv env,
+                               bool tail) {
+  OT_FRAME_SCOPED(state, &compiler->constants, &form, &env);
+  if (is_type(form, OBJ_SYMBOL)) {
+    bytecode_op op = is_type(env_binding(env, form), OBJ_BINDING) ? BC_GET_LEXICAL : BC_GET_GLOBAL;
+    bytecode_emit_constant(state, compiler, op, form);
+    return !compiler->bytes.failed;
+  }
+  if (!is_type(form, OBJ_PAIR)) {
+    bytecode_emit_constant(state, compiler, BC_CONST, form);
+    return !compiler->bytes.failed;
   }
 
-  otv output = ot_null;
-  otv tail = ot_nil;
-  otv cursor = value;
-  otv item = ot_nil;
-  OT_FRAME_SCOPED(state, &output, &tail, &cursor, &item);
-  while (is_type(cursor, OBJ_PAIR)) {
-    otv form = as_pair(cursor)->car;
-    bool splice = false;
-    otv expression = ot_nil;
-    if (depth == 1 && is_type(form, OBJ_PAIR) && is_type(as_pair(form)->car, OBJ_SYMBOL) &&
-        symbol_is(as_pair(form)->car, "unquote-splicing")) {
-      splice = list_nth(form, 1, &expression);
-    }
-    if (splice) {
-      item = eval_value(state, expression, env);
-      if (item == OT_UNWIND) return item;
-      if (!proper_list(item)) return ot_raise(state, "unquote-splicing: expected list");
-      otv values = item;
-      OT_FRAME_SCOPED(state, &values);
-      while (is_type(values, OBJ_PAIR)) {
-        otv element = as_pair(values)->car;
-        values = as_pair(values)->cdr;
-        otv cell = ot_cons(state, element, ot_null);
-        if (output == ot_null) output = cell;
-        else as_pair(tail)->cdr = cell;
-        tail = cell;
+  otv head = as_pair(form)->car;
+  OT_FRAME_SCOPED(state, &head);
+  if (is_type(head, OBJ_SYMBOL) && as_name(head)->special_form) {
+    otv args = as_pair(form)->cdr;
+    OT_FRAME_SCOPED(state, &args);
+    if (symbol_is(head, "quote")) {
+      otv value;
+      if (!list_nth(args, 0, &value) || list_tail(args, 1) != ot_null) {
+        (void)ot_raise(state, "quote: expected one argument");
+        return false;
       }
-    } else {
-      item = eval_quasiquote(state, form, env, depth);
-      if (item == OT_UNWIND) return item;
-      otv cell = ot_cons(state, item, ot_null);
-      if (output == ot_null) output = cell;
-      else as_pair(tail)->cdr = cell;
-      tail = cell;
+      bytecode_emit_constant(state, compiler, BC_CONST, value);
+      return !compiler->bytes.failed;
     }
+    if (symbol_is(head, "lambda") || symbol_is(head, "fn")) {
+      otv params;
+      if (!list_nth(args, 0, &params)) {
+        (void)ot_raise(state, "lambda: missing parameter list");
+        return false;
+      }
+      otv body = list_tail(args, 1);
+      OT_FRAME_SCOPED(state, &params, &body);
+      otv code = compile_function_code(state, params, body, env, env_namespace(state, env), ot_nil);
+      if (code == OT_UNWIND) return false;
+      bytecode_emit_constant(state, compiler, BC_CLOSURE, code);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "define") || symbol_is(head, "def") || symbol_is(head, "define-")) {
+      otv target;
+      if (!list_nth(args, 0, &target)) {
+        (void)ot_raise(state, "define: missing name");
+        return false;
+      }
+      otv name = target;
+      otv doc = ot_nil;
+      otv value_form = ot_nil;
+      OT_FRAME_SCOPED(state, &target, &name, &doc, &value_form);
+      if (is_type(target, OBJ_PAIR)) {
+        name = as_pair(target)->car;
+        if (!is_type(name, OBJ_SYMBOL)) {
+          (void)ot_raise(state, "define: bad name");
+          return false;
+        }
+        otv body = list_tail(args, 1);
+        if (is_type(body, OBJ_PAIR) && is_type(as_pair(body)->car, OBJ_STRING) &&
+            is_type(as_pair(body)->cdr, OBJ_PAIR)) {
+          doc = as_pair(body)->car;
+          body = as_pair(body)->cdr;
+        }
+        OT_FRAME_SCOPED(state, &body);
+        otv code = compile_function_code(state, as_pair(target)->cdr, body, env,
+                                         env_namespace(state, env), name);
+        if (code == OT_UNWIND) return false;
+        bytecode_emit_constant(state, compiler, BC_CLOSURE, code);
+      } else {
+        if (!is_type(name, OBJ_SYMBOL)) {
+          (void)ot_raise(state, "define: bad name");
+          return false;
+        }
+        otv values = list_tail(args, 1);
+        if (is_type(values, OBJ_PAIR) && is_type(as_pair(values)->car, OBJ_STRING) &&
+            is_type(as_pair(values)->cdr, OBJ_PAIR)) {
+          doc = as_pair(values)->car;
+          values = as_pair(values)->cdr;
+        }
+        if (!is_type(values, OBJ_PAIR) || as_pair(values)->cdr != ot_null) {
+          (void)ot_raise(state, "define: expected one value");
+          return false;
+        }
+        value_form = as_pair(values)->car;
+        if (!compile_expression(state, compiler, value_form, env, false)) return false;
+      }
+      otv fields[] = {name, doc};
+      otv descriptor = make_descriptor(state, fields, 2);
+      bytecode_emit_constant(
+          state, compiler,
+          is_type(env, OBJ_ENV)
+              ? BC_DEFINE_LEXICAL
+              : (symbol_is(head, "define-") ? BC_DEFINE_PRIVATE : BC_DEFINE_GLOBAL),
+          descriptor);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "begin") || symbol_is(head, "do"))
+      return compile_sequence(state, compiler, args, env, tail);
+    if (symbol_is(head, "if")) {
+      size_t count = proper_list(args) ? list_length(args) : 0;
+      if (count < 2 || count > 3) {
+        (void)ot_raise(state, "if: expected 2 or 3 arguments");
+        return false;
+      }
+      otv test = as_pair(args)->car;
+      otv consequent = as_pair(as_pair(args)->cdr)->car;
+      otv alternate = count == 3 ? as_pair(as_pair(as_pair(args)->cdr)->cdr)->car : ot_nil;
+      OT_FRAME_SCOPED(state, &test, &consequent, &alternate);
+      if (!compile_expression(state, compiler, test, env, false)) return false;
+      size_t false_jump = bytecode_emit_jump(compiler, BC_JUMP_IF_FALSE);
+      if (!compile_expression(state, compiler, consequent, env, tail)) return false;
+      size_t end_jump = bytecode_emit_jump(compiler, BC_JUMP);
+      bytecode_patch_u16(compiler, false_jump, compiler->bytes.length);
+      if (!compile_expression(state, compiler, alternate, env, tail)) return false;
+      bytecode_patch_u16(compiler, end_jump, compiler->bytes.length);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "and") || symbol_is(head, "or")) {
+      bool is_and = symbol_is(head, "and");
+      if (args == ot_null) {
+        bytecode_emit_constant(state, compiler, BC_CONST, is_and ? ot_true : ot_false);
+        return !compiler->bytes.failed;
+      }
+      otv cursor = args;
+      OT_FRAME_SCOPED(state, &cursor);
+      size_t jumps_count = list_length(args);
+      size_t jumps[jumps_count == 0 ? 1 : jumps_count];
+      size_t jump_count = 0;
+      while (is_type(cursor, OBJ_PAIR)) {
+        bool last = as_pair(cursor)->cdr == ot_null;
+        if (!compile_expression(state, compiler, as_pair(cursor)->car, env, tail && last))
+          return false;
+        otv next = as_pair(cursor)->cdr;
+        if (next != ot_null) {
+          bytecode_emit(compiler, BC_DUP);
+          jumps[jump_count++] =
+              bytecode_emit_jump(compiler, is_and ? BC_JUMP_IF_FALSE : BC_JUMP_IF_TRUE);
+          bytecode_emit(compiler, BC_POP);
+        }
+        cursor = next;
+      }
+      if (cursor != ot_null) {
+        (void)ot_raise(state, "%s: improper form", is_and ? "and" : "or");
+        return false;
+      }
+      for (size_t i = 0; i < jump_count; i++)
+        bytecode_patch_u16(compiler, jumps[i], compiler->bytes.length);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "cond")) {
+      otv clauses = args;
+      OT_FRAME_SCOPED(state, &clauses);
+      size_t clause_count = list_length(clauses);
+      size_t end_jumps[clause_count == 0 ? 1 : clause_count];
+      size_t end_count = 0;
+      while (is_type(clauses, OBJ_PAIR)) {
+        otv clause = as_pair(clauses)->car;
+        if (!is_type(clause, OBJ_PAIR)) {
+          (void)ot_raise(state, "cond: bad clause");
+          return false;
+        }
+        otv test = as_pair(clause)->car;
+        otv body = as_pair(clause)->cdr;
+        OT_FRAME_SCOPED(state, &clause, &test, &body);
+        bool is_else = is_type(test, OBJ_SYMBOL) && symbol_is(test, "else");
+        if (body == ot_null) {
+          if (is_else) {
+            bytecode_emit_constant(state, compiler, BC_CONST, ot_true);
+            end_jumps[end_count++] = bytecode_emit_jump(compiler, BC_JUMP);
+          } else {
+            if (!compile_expression(state, compiler, test, env, false)) return false;
+            bytecode_emit(compiler, BC_DUP);
+            size_t false_jump = bytecode_emit_jump(compiler, BC_JUMP_IF_FALSE);
+            end_jumps[end_count++] = bytecode_emit_jump(compiler, BC_JUMP);
+            bytecode_patch_u16(compiler, false_jump, compiler->bytes.length);
+            bytecode_emit(compiler, BC_POP);
+          }
+          clauses = as_pair(clauses)->cdr;
+          continue;
+        }
+        size_t next_jump = SIZE_MAX;
+        if (!is_else) {
+          if (!compile_expression(state, compiler, test, env, false)) return false;
+          next_jump = bytecode_emit_jump(compiler, BC_JUMP_IF_FALSE);
+        }
+        if (!compile_sequence(state, compiler, body, env, tail)) return false;
+        end_jumps[end_count++] = bytecode_emit_jump(compiler, BC_JUMP);
+        if (next_jump != SIZE_MAX) bytecode_patch_u16(compiler, next_jump, compiler->bytes.length);
+        clauses = as_pair(clauses)->cdr;
+      }
+      if (clauses != ot_null) {
+        (void)ot_raise(state, "cond: improper clauses");
+        return false;
+      }
+      bytecode_emit_constant(state, compiler, BC_CONST, ot_nil);
+      for (size_t i = 0; i < end_count; i++)
+        bytecode_patch_u16(compiler, end_jumps[i], compiler->bytes.length);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "let") && is_type(args, OBJ_PAIR) &&
+        is_type(as_pair(args)->car, OBJ_SYMBOL)) {
+      otv name = as_pair(args)->car;
+      otv rest = as_pair(args)->cdr;
+      if (!is_type(rest, OBJ_PAIR)) {
+        (void)ot_raise(state, "let: missing bindings");
+        return false;
+      }
+      otv bindings = as_pair(rest)->car;
+      otv body = as_pair(rest)->cdr;
+      if (!proper_list(bindings)) {
+        (void)ot_raise(state, "let: bad bindings");
+        return false;
+      }
+      otv params = ot_null;
+      otv params_tail = ot_nil;
+      otv cursor = bindings;
+      OT_FRAME_SCOPED(state, &name, &bindings, &body, &params, &params_tail, &cursor);
+      size_t count = 0;
+      while (is_type(cursor, OBJ_PAIR)) {
+        otv binding = as_pair(cursor)->car;
+        otv binding_name;
+        otv expression;
+        if (!list_nth(binding, 0, &binding_name) || !list_nth(binding, 1, &expression) ||
+            list_tail(binding, 2) != ot_null || !is_type(binding_name, OBJ_SYMBOL)) {
+          (void)ot_raise(state, "let: invalid binding");
+          return false;
+        }
+        OT_FRAME_SCOPED(state, &binding, &binding_name, &expression);
+        if (!compile_expression(state, compiler, expression, env, false)) return false;
+        otv cell = ot_cons(state, binding_name, ot_null);
+        if (params == ot_null) params = cell;
+        else as_pair(params_tail)->cdr = cell;
+        params_tail = cell;
+        count++;
+        cursor = as_pair(cursor)->cdr;
+      }
+      otv named_compile_env = make_env(state, env, env_namespace(state, env));
+      OT_FRAME_SCOPED(state, &named_compile_env);
+      env_bind(state, &named_compile_env, name, ot_nil);
+      otv code = compile_function_code(state, params, body, named_compile_env,
+                                       env_namespace(state, env), name);
+      if (code == OT_UNWIND) return false;
+      otv fields[] = {name, code, ot_make_int((intptr_t)count)};
+      otv descriptor = make_descriptor(state, fields, 3);
+      bytecode_emit_constant(state, compiler, tail ? BC_TAIL_NAMED_LET : BC_NAMED_LET, descriptor);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "let") && is_type(args, OBJ_PAIR) &&
+        !is_type(as_pair(args)->car, OBJ_SYMBOL)) {
+      otv bindings = as_pair(args)->car;
+      otv body = as_pair(args)->cdr;
+      if (!proper_list(bindings)) {
+        (void)ot_raise(state, "let: bad bindings");
+        return false;
+      }
+      OT_FRAME_SCOPED(state, &bindings, &body);
+      otv let_env = make_env(state, env, env_namespace(state, env));
+      OT_FRAME_SCOPED(state, &let_env);
+      bytecode_emit(compiler, BC_SCOPE);
+      while (is_type(bindings, OBJ_PAIR)) {
+        otv binding = as_pair(bindings)->car;
+        otv name;
+        otv expression;
+        if (!list_nth(binding, 0, &name) || !list_nth(binding, 1, &expression) ||
+            list_tail(binding, 2) != ot_null || !is_type(name, OBJ_SYMBOL)) {
+          (void)ot_raise(state, "let: invalid binding");
+          return false;
+        }
+        OT_FRAME_SCOPED(state, &binding, &name, &expression);
+        if (!compile_expression(state, compiler, expression, let_env, false)) return false;
+        bytecode_emit_constant(state, compiler, BC_BIND, name);
+        env_bind(state, &let_env, name, ot_nil);
+        bindings = as_pair(bindings)->cdr;
+      }
+      if (!compile_sequence(state, compiler, body, let_env, tail)) return false;
+      if (!tail) bytecode_emit(compiler, BC_UNSCOPE);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "set!")) {
+      otv name;
+      otv expression;
+      if (!list_nth(args, 0, &name) || !list_nth(args, 1, &expression) ||
+          list_tail(args, 2) != ot_null || !is_type(name, OBJ_SYMBOL)) {
+        (void)ot_raise(state, "set!: expected name and value");
+        return false;
+      }
+      OT_FRAME_SCOPED(state, &name, &expression);
+      if (!compile_expression(state, compiler, expression, env, false)) return false;
+      bytecode_emit_constant(
+          state, compiler,
+          is_type(env_binding(env, name), OBJ_BINDING) ? BC_SET_LEXICAL : BC_SET_GLOBAL, name);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "while")) {
+      otv test;
+      if (!list_nth(args, 0, &test)) {
+        (void)ot_raise(state, "while: missing test");
+        return false;
+      }
+      otv body = list_tail(args, 1);
+      OT_FRAME_SCOPED(state, &test, &body);
+      size_t loop = compiler->bytes.length;
+      if (!compile_expression(state, compiler, test, env, false)) return false;
+      size_t done = bytecode_emit_jump(compiler, BC_JUMP_IF_FALSE);
+      if (!compile_sequence(state, compiler, body, env, false)) return false;
+      bytecode_emit(compiler, BC_POP);
+      bytecode_emit(compiler, BC_JUMP);
+      bytecode_emit_u16(compiler, loop);
+      bytecode_patch_u16(compiler, done, compiler->bytes.length);
+      bytecode_emit_constant(state, compiler, BC_CONST, ot_nil);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "quasiquote")) {
+      otv value;
+      if (!list_nth(args, 0, &value) || list_tail(args, 1) != ot_null) {
+        (void)ot_raise(state, "quasiquote: expected one argument");
+        return false;
+      }
+      return compile_quasiquote(state, compiler, value, env, 1);
+    }
+    if (symbol_is(head, "unquote") || symbol_is(head, "unquote-splicing")) {
+      (void)ot_raise(state, "%s outside quasiquote",
+                     symbol_is(head, "unquote") ? "unquote" : "unquote-splicing");
+      return false;
+    }
+    if (symbol_is(head, "defmacro")) {
+      if (is_type(env, OBJ_ENV)) {
+        (void)ot_raise(state, "defmacro: top level only");
+        return false;
+      }
+      otv name;
+      otv params;
+      if (!list_nth(args, 0, &name) || !list_nth(args, 1, &params) || !is_type(name, OBJ_SYMBOL)) {
+        (void)ot_raise(state, "defmacro: invalid definition");
+        return false;
+      }
+      otv body = list_tail(args, 2);
+      OT_FRAME_SCOPED(state, &name, &params, &body);
+      otv code = compile_function_code(state, params, body, env, env_namespace(state, env), name);
+      if (code == OT_UNWIND) return false;
+      bytecode_emit_constant(state, compiler, BC_CLOSURE, code);
+      bytecode_emit(compiler, BC_MACRO);
+      otv fields[] = {name, ot_nil};
+      otv descriptor = make_descriptor(state, fields, 2);
+      bytecode_emit_constant(state, compiler, BC_DEFINE_GLOBAL, descriptor);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "defparam")) {
+      if (is_type(env, OBJ_ENV)) {
+        (void)ot_raise(state, "defparam: top level only");
+        return false;
+      }
+      otv name;
+      if (!list_nth(args, 0, &name)) {
+        (void)ot_raise(state, "defparam: invalid definition");
+        return false;
+      }
+      otv values = list_tail(args, 1);
+      otv doc = ot_nil;
+      OT_FRAME_SCOPED(state, &name, &values, &doc);
+      if (is_type(values, OBJ_PAIR) && is_type(as_pair(values)->car, OBJ_STRING) &&
+          is_type(as_pair(values)->cdr, OBJ_PAIR)) {
+        doc = as_pair(values)->car;
+        values = as_pair(values)->cdr;
+      }
+      if (!is_type(name, OBJ_SYMBOL) || !is_type(values, OBJ_PAIR) ||
+          as_pair(values)->cdr != ot_null) {
+        (void)ot_raise(state, "defparam: invalid definition");
+        return false;
+      }
+      if (!compile_expression(state, compiler, as_pair(values)->car, env, false)) return false;
+      otv fields[] = {name, doc};
+      otv descriptor = make_descriptor(state, fields, 2);
+      bytecode_emit_constant(state, compiler, BC_DEF_PARAM, descriptor);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "try")) {
+      otv catches = ot_null;
+      for (otv cursor = args; is_type(cursor, OBJ_PAIR); cursor = as_pair(cursor)->cdr)
+        if (is_catch_clause(as_pair(cursor)->car)) {
+          catches = cursor;
+          break;
+        }
+      otv body = ot_nil;
+      OT_FRAME_SCOPED(state, &catches, &body);
+      body = copy_forms_until(state, args, catches);
+      if (body == OT_UNWIND) return false;
+      otv body_code =
+          compile_function_code(state, ot_null, body, env, env_namespace(state, env), ot_nil);
+      if (body_code == OT_UNWIND) return false;
+      OT_FRAME_SCOPED(state, &body_code);
+      otv compiled_catches = ot_nil;
+      OT_FRAME_SCOPED(state, &compiled_catches);
+      compiled_catches = ot_array_new(state, list_length(catches));
+      while (is_type(catches, OBJ_PAIR)) {
+        otv clause = as_pair(catches)->car;
+        otv spec;
+        otv pred_form;
+        otv var;
+        if (!list_nth(clause, 1, &spec) || !is_type(spec, OBJ_PAIR) ||
+            !list_nth(spec, 0, &pred_form) || !list_nth(spec, 1, &var) ||
+            list_tail(spec, 2) != ot_null || !is_type(var, OBJ_SYMBOL)) {
+          (void)ot_raise(state, "try: invalid catch clause");
+          return false;
+        }
+        otv pred_code = ot_nil;
+        otv params = ot_nil;
+        OT_FRAME_SCOPED(state, &clause, &spec, &pred_form, &var, &pred_code, &params);
+        pred_code = compile_expression_code(state, pred_form, env);
+        if (pred_code == OT_UNWIND) return false;
+        params = ot_cons(state, var, ot_null);
+        otv handler_code = compile_function_code(state, params, list_tail(clause, 2), env,
+                                                 env_namespace(state, env), ot_nil);
+        if (handler_code == OT_UNWIND) return false;
+        otv fields[] = {pred_code, handler_code};
+        otv compiled = make_descriptor(state, fields, 2);
+        array_push(state, &compiled_catches, compiled);
+        catches = as_pair(catches)->cdr;
+      }
+      otv fields[] = {body_code, compiled_catches};
+      otv descriptor = make_descriptor(state, fields, 2);
+      bytecode_emit_constant(state, compiler, BC_TRY, descriptor);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "handler-bind") || symbol_is(head, "with-params")) {
+      otv bindings;
+      if (!list_nth(args, 0, &bindings) || !proper_list(bindings)) {
+        (void)ot_raise(state, "%s: bad bindings",
+                       symbol_is(head, "handler-bind") ? "handler-bind" : "with-params");
+        return false;
+      }
+      otv compiled_bindings = ot_nil;
+      otv cursor = bindings;
+      OT_FRAME_SCOPED(state, &bindings, &compiled_bindings, &cursor);
+      compiled_bindings = ot_array_new(state, list_length(bindings));
+      while (is_type(cursor, OBJ_PAIR)) {
+        otv binding = as_pair(cursor)->car;
+        otv left;
+        otv right;
+        if (!list_nth(binding, 0, &left) || !list_nth(binding, 1, &right) ||
+            list_tail(binding, 2) != ot_null) {
+          (void)ot_raise(state, "%s: invalid binding",
+                         symbol_is(head, "handler-bind") ? "handler-bind" : "with-params");
+          return false;
+        }
+        otv left_code = ot_nil;
+        OT_FRAME_SCOPED(state, &binding, &left, &right, &left_code);
+        left_code = compile_expression_code(state, left, env);
+        if (left_code == OT_UNWIND) return false;
+        otv right_code = compile_expression_code(state, right, env);
+        if (right_code == OT_UNWIND) return false;
+        otv fields[] = {left_code, right_code};
+        otv compiled = make_descriptor(state, fields, 2);
+        array_push(state, &compiled_bindings, compiled);
+        cursor = as_pair(cursor)->cdr;
+      }
+      otv body = list_tail(args, 1);
+      OT_FRAME_SCOPED(state, &body);
+      otv body_code =
+          compile_function_code(state, ot_null, body, env, env_namespace(state, env), ot_nil);
+      if (body_code == OT_UNWIND) return false;
+      otv fields[] = {compiled_bindings, body_code};
+      otv descriptor = make_descriptor(state, fields, 2);
+      bytecode_emit_constant(state, compiler,
+                             symbol_is(head, "handler-bind") ? BC_HANDLER_BIND : BC_WITH_PARAMS,
+                             descriptor);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "restart-case")) {
+      otv expression;
+      if (!list_nth(args, 0, &expression)) {
+        (void)ot_raise(state, "restart-case: missing expression");
+        return false;
+      }
+      otv expression_code = ot_nil;
+      otv clauses = ot_nil;
+      otv compiled_clauses = ot_nil;
+      OT_FRAME_SCOPED(state, &expression, &expression_code, &clauses, &compiled_clauses);
+      expression_code = compile_expression_code(state, expression, env);
+      if (expression_code == OT_UNWIND) return false;
+      clauses = list_tail(args, 1);
+      if (!proper_list(clauses)) {
+        (void)ot_raise(state, "restart-case: invalid clauses");
+        return false;
+      }
+      compiled_clauses = ot_array_new(state, list_length(clauses));
+      while (is_type(clauses, OBJ_PAIR)) {
+        otv clause = as_pair(clauses)->car;
+        otv name;
+        if (!list_nth(clause, 0, &name) || !is_type(name, OBJ_SYMBOL)) {
+          (void)ot_raise(state, "restart-case: invalid name");
+          return false;
+        }
+        otv rest = list_tail(clause, 1);
+        otv description = ot_nil;
+        if (is_type(rest, OBJ_PAIR) && is_type(as_pair(rest)->car, OBJ_STRING) &&
+            is_type(as_pair(rest)->cdr, OBJ_PAIR)) {
+          description = as_pair(rest)->car;
+          rest = as_pair(rest)->cdr;
+        }
+        if (!is_type(rest, OBJ_PAIR)) {
+          (void)ot_raise(state, "restart-case: missing parameter list");
+          return false;
+        }
+        otv params = as_pair(rest)->car;
+        otv body = as_pair(rest)->cdr;
+        OT_FRAME_SCOPED(state, &clause, &name, &rest, &description, &params, &body);
+        otv clause_code =
+            compile_function_code(state, params, body, env, env_namespace(state, env), ot_nil);
+        if (clause_code == OT_UNWIND) return false;
+        otv fields[] = {name, description, clause_code};
+        otv compiled = make_descriptor(state, fields, 3);
+        array_push(state, &compiled_clauses, compiled);
+        clauses = as_pair(clauses)->cdr;
+      }
+      otv fields[] = {expression_code, compiled_clauses};
+      otv descriptor = make_descriptor(state, fields, 2);
+      bytecode_emit_constant(state, compiler, BC_RESTART_CASE, descriptor);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "unwind-protect") || symbol_is(head, "defer")) {
+      otv expression;
+      if (!list_nth(args, 0, &expression)) {
+        (void)ot_raise(state, "unwind-protect: missing expression");
+        return false;
+      }
+      otv expression_code = ot_nil;
+      otv cleanup = ot_nil;
+      OT_FRAME_SCOPED(state, &expression, &expression_code, &cleanup);
+      expression_code = compile_expression_code(state, expression, env);
+      if (expression_code == OT_UNWIND) return false;
+      cleanup = list_tail(args, 1);
+      otv cleanup_code =
+          compile_function_code(state, ot_null, cleanup, env, env_namespace(state, env), ot_nil);
+      if (cleanup_code == OT_UNWIND) return false;
+      otv fields[] = {expression_code, cleanup_code};
+      otv descriptor = make_descriptor(state, fields, 2);
+      bytecode_emit_constant(state, compiler, BC_UNWIND_PROTECT, descriptor);
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "in-ns") || symbol_is(head, "ns")) {
+      otv name;
+      if (!list_nth(args, 0, &name)) {
+        (void)ot_raise(state, "%s: missing name", symbol_is(head, "ns") ? "ns" : "in-ns");
+        return false;
+      }
+      name = unwrap_quote(name);
+      if (is_type(name, OBJ_KEYWORD))
+        name = ot_intern(state, as_name(name)->bytes, as_name(name)->length, false);
+      else if (is_type(name, OBJ_STRING)) {
+        const char* bytes;
+        size_t length;
+        ot_string_bytes(name, &bytes, &length);
+        name = ot_intern(state, bytes, length, false);
+      }
+      if (!is_type(name, OBJ_SYMBOL)) {
+        (void)ot_raise(state, "in-ns: invalid name");
+        return false;
+      }
+      bytecode_emit_constant(state, compiler, BC_IN_NS, name);
+      if (symbol_is(head, "ns")) {
+        otv clauses = list_tail(args, 1);
+        while (is_type(clauses, OBJ_PAIR)) {
+          otv clause = as_pair(clauses)->car;
+          if (is_type(clause, OBJ_PAIR) && is_type(as_pair(clause)->car, OBJ_KEYWORD) &&
+              as_name(as_pair(clause)->car)->length == 7 &&
+              memcmp(as_name(as_pair(clause)->car)->bytes, "require", 7) == 0) {
+            bytecode_emit(compiler, BC_POP);
+            bytecode_emit_constant(state, compiler, BC_REQUIRE, as_pair(clause)->cdr);
+          }
+          clauses = as_pair(clauses)->cdr;
+        }
+        if (clauses != ot_null) {
+          (void)ot_raise(state, "ns: improper clauses");
+          return false;
+        }
+      }
+      return !compiler->bytes.failed;
+    }
+    if (symbol_is(head, "require")) {
+      bytecode_emit_constant(state, compiler, BC_REQUIRE, args);
+      return !compiler->bytes.failed;
+    }
+    (void)ot_raise(state, "compiler: unsupported special form");
+    return false;
+  }
+
+  size_t length;
+  if (!proper_list_length(form, &length)) {
+    (void)ot_raise(state, "application must be a proper list");
+    return false;
+  }
+  if (length == 0 || length - 1 > UINT16_MAX) {
+    (void)ot_raise(state, "application has too many arguments");
+    return false;
+  }
+  otv cursor = form;
+  OT_FRAME_SCOPED(state, &cursor);
+  while (is_type(cursor, OBJ_PAIR)) {
+    if (!compile_expression(state, compiler, as_pair(cursor)->car, env, false)) return false;
     cursor = as_pair(cursor)->cdr;
   }
-  if (cursor != ot_null) {
-    item = eval_quasiquote(state, cursor, env, depth);
-    if (item == OT_UNWIND) return item;
-    if (tail == ot_nil) return item;
-    as_pair(tail)->cdr = item;
-  }
-  return output;
+  bytecode_emit(compiler, tail ? BC_TAIL_CALL : BC_CALL);
+  bytecode_emit_u16(compiler, length - 1);
+  return !compiler->bytes.failed;
 }
 
-typedef struct eval_step {
-  bool handled;
-  bool tail;
-  otv value;
-  otv form;
-  otv env;
-} eval_step;
+static otv make_code(ots* state, const buf* bytes, otv constants, otv params, otv name) {
+  OT_FRAME_SCOPED(state, &constants, &params, &name);
+  otv byte_values = make_bytes(state, bytes->length);
+  OT_FRAME_SCOPED(state, &byte_values);
+  if (bytes->length != 0) memcpy(as_bytes(byte_values)->data, bytes->data, bytes->length);
+  ot_code_obj* code = must_alloc(state, sizeof(*code), OBJ_CODE);
+  code->bytes = byte_values;
+  code->constants = constants;
+  code->params = params;
+  code->name = name;
+  code->length = bytes->length;
+  code->constant_count = as_array(constants)->length;
+  return ot_from_obj(code);
+}
 
-/* =========================================================================
- * 7. EVALUATION AND SPECIAL FORMS
- * ========================================================================= */
+static otv compile_forms(ots* state, otv forms, otv env, otv params, otv name) {
+  OT_FRAME_SCOPED(state, &forms, &env, &params, &name);
+  bytecode_compiler compiler = {.constants = ot_nil};
+  compiler.constants = ot_array_new(state, 8);
+  OT_FRAME_SCOPED(state, &compiler.constants);
+  if (!compile_sequence(state, &compiler, forms, env, true)) {
+    buf_free(&compiler.bytes);
+    return OT_UNWIND;
+  }
+  bytecode_emit(&compiler, BC_RETURN);
+  if (compiler.bytes.failed) {
+    buf_free(&compiler.bytes);
+    return ot_raise(state, "bytecode exceeds implementation limits");
+  }
+  otv code = make_code(state, &compiler.bytes, compiler.constants, params, name);
+  buf_free(&compiler.bytes);
+  return code;
+}
 
-static eval_step eval_special(ots* state, otv form, otv env);
-
-static otv eval_loop(ots* state, otv form, otv env) {
-  /* Tail positions replace form and env in this loop. Only non-tail operands
-   * recurse through eval_value, where max_depth bounds the C stack. */
+static otv compile_form(ots* state, otv form, otv env) {
   OT_FRAME_SCOPED(state, &form, &env);
-  for (;;) {
-    if (++state->poll_count >= 1024) {
-      state->poll_count = 0;
-      if (atomic_exchange(&state->interrupted, false)) {
-        otv interrupted = run_interrupt_hook(state);
-        if (interrupted == OT_UNWIND) return interrupted;
-      }
-    }
-    if (is_type(form, OBJ_SYMBOL)) return resolve_value(state, env, form);
-    if (!is_type(form, OBJ_PAIR)) return form;
-
-    eval_step special = eval_special(state, form, env);
-    if (special.handled) {
-      if (!special.tail) return special.value;
-      form = special.form;
-      env = special.env;
-      continue;
-    }
-
-    size_t form_length;
-    if (!proper_list_length(form, &form_length))
-      return ot_raise(state, "application must be a proper list");
-    otv callable = eval_value(state, as_pair(form)->car, env);
-    if (callable == OT_UNWIND) return callable;
-    OT_FRAME_SCOPED(state, &callable);
-    size_t argc = form_length - 1;
-    size_t slots_count = argc == 0 ? 1 : argc;
-    otv args[slots_count];
-    otv* roots[slots_count];
-    for (size_t i = 0; i < slots_count; i++) {
-      args[i] = ot_nil;
-      roots[i] = &args[i];
-    }
-    otv cursor = as_pair(form)->cdr;
-    OT_FRAME_SCOPED(state, &cursor);
-    ot_frame args_frame;
-    ot_frame_push(state, &args_frame, roots, slots_count);
-    for (size_t i = 0; i < argc; i++) {
-      args[i] = eval_value(state, as_pair(cursor)->car, env);
-      if (args[i] == OT_UNWIND) {
-        ot_frame_pop(state, &args_frame);
-        return OT_UNWIND;
-      }
-      cursor = as_pair(cursor)->cdr;
-    }
-    if (is_type(callable, OBJ_FUNCTION)) {
-      otv next_env = bind_parameters(state, callable, args, argc);
-      ot_frame_pop(state, &args_frame);
-      if (next_env == OT_UNWIND) return next_env;
-      ot_function_obj* function = (ot_function_obj*)ot_as_obj(callable);
-      otv body = function->body;
-      OT_FRAME_SCOPED(state, &next_env, &body);
-      if (body == ot_null) return ot_nil;
-      while (is_type(body, OBJ_PAIR) && is_type(as_pair(body)->cdr, OBJ_PAIR)) {
-        otv result = eval_value(state, as_pair(body)->car, next_env);
-        if (result == OT_UNWIND) return result;
-        body = as_pair(body)->cdr;
-      }
-      if (!is_type(body, OBJ_PAIR) || as_pair(body)->cdr != ot_null)
-        return ot_raise(state, "function body must be a proper list");
-      form = as_pair(body)->car;
-      env = next_env;
-      continue;
-    }
-    if (is_type(callable, OBJ_NAT)) {
-      otv result = ((ot_nat_obj*)ot_as_obj(callable))->function(state, args, (int)argc);
-      ot_frame_pop(state, &args_frame);
-      return result;
-    }
-    otv result = apply_value(state, callable, args, argc, false);
-    ot_frame_pop(state, &args_frame);
-    return result;
-  }
+  otv forms = ot_cons(state, form, ot_null);
+  OT_FRAME_SCOPED(state, &forms);
+  return compile_forms(state, forms, env, ot_null, ot_nil);
 }
 
-static otv eval_value(ots* state, otv form, otv env) {
-  if (state->eval_depth >= state->config.max_depth)
-    return ot_raise(state, "maximum evaluation depth exceeded");
-  state->eval_depth++;
-  otv result = eval_loop(state, form, env);
-  state->eval_depth--;
+static void vm_stack_reserve(ots* state, size_t count) {
+  if (count <= state->current_process->vm_stack_capacity) return;
+  size_t capacity = state->current_process->vm_stack_capacity == 0
+                        ? 256
+                        : state->current_process->vm_stack_capacity;
+  while (capacity < count) capacity *= 2;
+  void* grown = ot_host_realloc(state->current_process->vm_stack,
+                                capacity * sizeof(*state->current_process->vm_stack));
+  if (grown == NULL) abort();
+  state->current_process->vm_stack = grown;
+  state->current_process->vm_stack_capacity = capacity;
+}
+
+static void vm_push(ots* state, otv value) {
+  vm_stack_reserve(state, state->current_process->vm_stack_count + 1);
+  state->current_process->vm_stack[state->current_process->vm_stack_count++] = value;
+}
+
+static void vm_frames_reserve(ots* state, size_t count) {
+  if (count <= state->current_process->vm_frame_capacity) return;
+  size_t capacity = state->current_process->vm_frame_capacity == 0
+                        ? 32
+                        : state->current_process->vm_frame_capacity;
+  while (capacity < count) capacity *= 2;
+  void* grown = ot_host_realloc(state->current_process->vm_frames,
+                                capacity * sizeof(*state->current_process->vm_frames));
+  if (grown == NULL) abort();
+  state->current_process->vm_frames = grown;
+  state->current_process->vm_frame_capacity = capacity;
+}
+
+static void vm_push_frame(ots* state, otv function, otv env, size_t base) {
+  vm_frames_reserve(state, state->current_process->vm_frame_count + 1);
+  state->current_process->vm_frames[state->current_process->vm_frame_count++] = (ot_vm_frame){
+      .function = function,
+      .env = env,
+      .ip = 0,
+      .base = base,
+  };
+}
+
+static otv make_bytecode_function(ots* state, otv code, otv env, otv namespace_value, otv name) {
+  OT_FRAME_SCOPED(state, &code, &env, &namespace_value, &name);
+  ot_function_obj* function = must_alloc(state, sizeof(*function), OBJ_FUNCTION);
+  function->code = code;
+  function->env = env;
+  function->namespace_value = namespace_value;
+  function->name = name;
+  return ot_from_obj(function);
+}
+
+static bool bytecode_read_u16(ot_code_obj* code, size_t* ip, size_t* out) {
+  if (*ip > code->length || code->length - *ip < 4) return false;
+  unsigned value = 0;
+  unsigned char* bytes = as_bytes(code->bytes)->data;
+  for (size_t i = 0; i < 4; i++) {
+    int digit = hex_value(bytes[(*ip)++]);
+    if (digit < 0) return false;
+    value = (value << 4) | (unsigned)digit;
+  }
+  *out = value;
+  return true;
+}
+
+static otv vm_unwind_to(ots* state, size_t floor) {
+  while (state->current_process->vm_frame_count > floor) {
+    ot_vm_frame frame = state->current_process->vm_frames[--state->current_process->vm_frame_count];
+    state->current_process->vm_stack_count = frame.base;
+  }
+  return OT_UNWIND;
+}
+
+typedef enum vm_continuation_status {
+  VM_CONTINUATION_SCHEDULED,
+  VM_CONTINUATION_COMPLETED,
+  VM_CONTINUATION_PROPAGATED,
+} vm_continuation_status;
+
+typedef struct vm_continuation_result {
+  vm_continuation_status status;
+  otv value;
+} vm_continuation_result;
+
+static otv vm_execute(ots* state, size_t floor);
+static ot_run_result vm_execute_run(ots* state, size_t floor, ot_vm_continuation* boundary);
+static otv require_forms(ots* state, otv specs);
+static bool vm_begin_dynamic(ots* state, unsigned char instruction, otv descriptor, otv env,
+                             otv namespace_value);
+static vm_continuation_result vm_resume_dynamic(ots* state, ot_vm_continuation* continuation,
+                                                otv input);
+static void vm_free_continuation(ot_vm_continuation* continuation);
+
+static otv vm_call_function(ots* state, otv callable, otv* args, size_t argc) {
+  OT_FRAME_SCOPED(state, &callable);
+  otv env = bind_parameters(state, callable, args, argc);
+  if (env == OT_UNWIND) return env;
+  OT_FRAME_SCOPED(state, &env);
+  size_t floor = state->current_process->vm_frame_count;
+  size_t base = state->current_process->vm_stack_count;
+  vm_push_frame(state, callable, env, base);
+  return vm_execute(state, floor);
+}
+
+static otv descriptor_value(otv descriptor, size_t index) {
+  if (!is_type(descriptor, OBJ_ARRAY) || index >= as_array(descriptor)->length) return ot_nil;
+  return as_slots(as_array(descriptor)->slots)->values[index];
+}
+
+static otv append_values(ots* state, otv left, otv right) {
+  OT_FRAME_SCOPED(state, &left, &right);
+  if (!proper_list(left)) return ot_raise(state, "unquote-splicing: expected list");
+  if (left == ot_null) return right;
+  otv result = ot_null;
+  otv tail = ot_nil;
+  OT_FRAME_SCOPED(state, &result, &tail);
+  while (is_type(left, OBJ_PAIR)) {
+    otv cell = ot_cons(state, as_pair(left)->car, ot_null);
+    if (result == ot_null) result = cell;
+    else as_pair(tail)->cdr = cell;
+    tail = cell;
+    left = as_pair(left)->cdr;
+  }
+  as_pair(tail)->cdr = right;
   return result;
 }
 
@@ -1642,9 +2531,7 @@ static otv apply_value(ots* state, otv callable, otv* args, size_t argc, bool al
   if (is_type(callable, OBJ_NAT)) {
     result = ((ot_nat_obj*)ot_as_obj(callable))->function(state, args, (int)argc);
   } else if (is_type(callable, OBJ_FUNCTION)) {
-    otv env = bind_parameters(state, callable, args, argc);
-    if (env == OT_UNWIND) result = env;
-    else result = eval_sequence(state, ((ot_function_obj*)ot_as_obj(callable))->body, env);
+    result = vm_call_function(state, callable, args, argc);
   } else if (is_type(callable, OBJ_MACRO) && allow_macro) {
     result = apply_value(state, ((ot_macro_obj*)ot_as_obj(callable))->function, args, argc, false);
   } else if (is_type(callable, OBJ_TABLE)) {
@@ -1668,7 +2555,8 @@ static otv apply_value(ots* state, otv callable, otv* args, size_t argc, bool al
     if (argc != 0) result = ot_raise(state, "param call: expected no arguments");
     else {
       result = ((ot_param_obj*)ot_as_obj(callable))->value;
-      for (ot_param_frame* frame = state->params; frame != NULL; frame = frame->prev)
+      for (ot_param_frame* frame = state->current_process->params; frame != NULL;
+           frame = frame->prev)
         if (frame->param == callable) {
           result = frame->value;
           break;
@@ -1681,33 +2569,502 @@ static otv apply_value(ots* state, otv callable, otv* args, size_t argc, bool al
   return result;
 }
 
-static eval_step step_value(otv value) {
-  return (eval_step){.handled = true, .tail = false, .value = value};
-}
-
-static eval_step step_tail(otv form, otv env) {
-  return (eval_step){.handled = true, .tail = true, .form = form, .env = env};
-}
-
-static eval_step step_no(void) { return (eval_step){0}; }
-
-static eval_step tail_sequence(ots* state, otv forms, otv env) {
-  OT_FRAME_SCOPED(state, &forms, &env);
-  if (forms == ot_null) return step_value(ot_nil);
-  while (is_type(forms, OBJ_PAIR) && is_type(as_pair(forms)->cdr, OBJ_PAIR)) {
-    otv result = eval_value(state, as_pair(forms)->car, env);
-    if (result == OT_UNWIND) return step_value(result);
-    forms = as_pair(forms)->cdr;
+static bool vm_enter_call(ots* state, size_t argc, bool tail) {
+  if (state->current_process->vm_stack_count < argc + 1) {
+    (void)ot_raise(state, "vm: operand stack underflow");
+    return false;
   }
-  if (!is_type(forms, OBJ_PAIR) || as_pair(forms)->cdr != ot_null)
-    return step_value(ot_raise(state, "body must be a proper list"));
-  return step_tail(as_pair(forms)->car, env);
+  size_t call_base = state->current_process->vm_stack_count - argc - 1;
+  otv callable = state->current_process->vm_stack[call_base];
+  OT_FRAME_SCOPED(state, &callable);
+  if (is_type(callable, OBJ_FUNCTION)) {
+    otv env =
+        bind_parameters(state, callable, state->current_process->vm_stack + call_base + 1, argc);
+    if (env == OT_UNWIND) return false;
+    OT_FRAME_SCOPED(state, &env);
+    size_t base =
+        tail ? state->current_process->vm_frames[state->current_process->vm_frame_count - 1].base
+             : call_base;
+    if (tail) {
+      ot_vm_frame* frame =
+          &state->current_process->vm_frames[state->current_process->vm_frame_count - 1];
+      state->current_process->vm_stack_count = base;
+      frame->function = callable;
+      frame->env = env;
+      frame->ip = 0;
+    } else {
+      state->current_process->vm_stack_count = call_base;
+      vm_push_frame(state, callable, env, base);
+    }
+    return true;
+  }
+
+  size_t values_count = argc == 0 ? 1 : argc;
+  otv values[values_count];
+  otv* roots[values_count];
+  for (size_t i = 0; i < values_count; i++) {
+    values[i] = argc == 0 ? ot_nil : state->current_process->vm_stack[call_base + 1 + i];
+    roots[i] = &values[i];
+  }
+  ot_frame values_frame;
+  ot_frame_push(state, &values_frame, roots, values_count);
+  otv result = apply_value(state, callable, values, argc, false);
+  ot_frame_pop(state, &values_frame);
+  if (result == OT_UNWIND) return false;
+  if (!tail) {
+    state->current_process->vm_stack_count = call_base;
+    vm_push(state, result);
+    return true;
+  }
+
+  ot_vm_frame leaving = state->current_process->vm_frames[--state->current_process->vm_frame_count];
+  state->current_process->vm_stack_count = leaving.base;
+  vm_push(state, result);
+  return true;
 }
 
-static otv form_arg(ots* state, otv form, size_t index, const char* who) {
-  otv value;
-  if (!list_nth(form, index, &value)) return ot_raise(state, "%s: missing argument", who);
-  return value;
+static bool vm_budget_exhausted(ot_process* process) {
+  bool exhausted = process->yield_pending || (process->reduction_budget != 0 &&
+                                              process->reductions >= process->reduction_budget);
+  if (!exhausted) return false;
+  if (process->vm_run_depth != 1) {
+    process->yield_pending = true;
+    return false;
+  }
+  process->yield_pending = false;
+  return true;
+}
+
+static otv vm_execute_loop(ots* state, size_t floor) {
+  while (state->current_process->vm_frame_count > floor) {
+    if (state->current_process->vm_frame_count > state->current_process->frame_limit) {
+      (void)vm_unwind_to(state, floor);
+      return ot_raise(state, "maximum VM frame depth exceeded");
+    }
+    if (vm_budget_exhausted(state->current_process)) return OT_YIELD;
+    state->current_process->reductions++;
+    state->current_process->total_reductions++;
+    if (++state->current_process->poll_count >= 1024) {
+      state->current_process->poll_count = 0;
+      if (atomic_exchange(&state->current_process->interrupted, false)) {
+        otv interrupted = run_interrupt_hook(state);
+        if (interrupted == OT_UNWIND) return vm_unwind_to(state, floor);
+      }
+    }
+
+    ot_vm_frame* frame =
+        &state->current_process->vm_frames[state->current_process->vm_frame_count - 1];
+    ot_function_obj* function = (ot_function_obj*)ot_as_obj(frame->function);
+    if (!is_type(function->code, OBJ_CODE)) {
+      (void)ot_raise(state, "vm: function has no bytecode");
+      return vm_unwind_to(state, floor);
+    }
+    ot_code_obj* code = as_code(function->code);
+    if (frame->ip >= code->length) {
+      (void)ot_raise(state, "vm: instruction pointer outside bytecode");
+      return vm_unwind_to(state, floor);
+    }
+    unsigned char instruction = as_bytes(code->bytes)->data[frame->ip++];
+    size_t operand = 0;
+    if (instruction == BC_CONST || instruction == BC_GET_LEXICAL || instruction == BC_GET_GLOBAL ||
+        instruction == BC_CALL || instruction == BC_TAIL_CALL || instruction == BC_JUMP ||
+        instruction == BC_JUMP_IF_FALSE || instruction == BC_JUMP_IF_TRUE ||
+        instruction == BC_BIND || instruction == BC_SET_LEXICAL || instruction == BC_SET_GLOBAL ||
+        instruction == BC_CLOSURE || instruction == BC_DEFINE_LEXICAL ||
+        instruction == BC_DEFINE_GLOBAL || instruction == BC_DEFINE_PRIVATE ||
+        instruction == BC_DEF_PARAM || instruction == BC_NAMED_LET ||
+        instruction == BC_TAIL_NAMED_LET || instruction == BC_TRY ||
+        instruction == BC_HANDLER_BIND || instruction == BC_RESTART_CASE ||
+        instruction == BC_UNWIND_PROTECT || instruction == BC_WITH_PARAMS ||
+        instruction == BC_IN_NS || instruction == BC_REQUIRE) {
+      if (!bytecode_read_u16(code, &frame->ip, &operand)) {
+        (void)ot_raise(state, "vm: malformed ASCII operand");
+        return vm_unwind_to(state, floor);
+      }
+    }
+
+    if (instruction == BC_CONST || instruction == BC_GET_LEXICAL || instruction == BC_GET_GLOBAL) {
+      if (operand >= code->constant_count) {
+        (void)ot_raise(state, "vm: constant index out of range");
+        return vm_unwind_to(state, floor);
+      }
+      otv value = as_slots(as_array(code->constants)->slots)->values[operand];
+      if (instruction == BC_CONST) {
+        vm_push(state, value);
+        continue;
+      }
+      if (instruction == BC_GET_LEXICAL) {
+        otv binding = env_binding(frame->env, value);
+        if (!is_type(binding, OBJ_BINDING)) {
+          (void)ot_raise(state, "vm: missing lexical binding");
+          return vm_unwind_to(state, floor);
+        }
+        vm_push(state, ((ot_binding_obj*)ot_as_obj(binding))->value);
+        continue;
+      }
+      if (instruction == BC_GET_GLOBAL) {
+        otv var = resolve_var(state, function->namespace_value, value, true);
+        if (var == OT_UNWIND) return vm_unwind_to(state, floor);
+        vm_push(state, ((ot_var_obj*)ot_as_obj(var))->value);
+        continue;
+      }
+    }
+
+    if (instruction == BC_CLOSURE) {
+      if (operand >= code->constant_count) {
+        (void)ot_raise(state, "vm: closure constant out of range");
+        return vm_unwind_to(state, floor);
+      }
+      otv nested_code = as_slots(as_array(code->constants)->slots)->values[operand];
+      if (!is_type(nested_code, OBJ_CODE)) {
+        (void)ot_raise(state, "vm: closure constant is not code");
+        return vm_unwind_to(state, floor);
+      }
+      otv closure = make_bytecode_function(state, nested_code, frame->env,
+                                           function->namespace_value, as_code(nested_code)->name);
+      vm_push(state, closure);
+      continue;
+    }
+    if (instruction == BC_DEFINE_LEXICAL || instruction == BC_DEFINE_GLOBAL ||
+        instruction == BC_DEFINE_PRIVATE) {
+      if (operand >= code->constant_count ||
+          state->current_process->vm_stack_count <= frame->base) {
+        (void)ot_raise(state, "vm: invalid definition");
+        return vm_unwind_to(state, floor);
+      }
+      otv descriptor = as_slots(as_array(code->constants)->slots)->values[operand];
+      otv name = descriptor_value(descriptor, 0);
+      otv doc = descriptor_value(descriptor, 1);
+      otv value = state->current_process->vm_stack[state->current_process->vm_stack_count - 1];
+      if (!is_type(name, OBJ_SYMBOL)) {
+        (void)ot_raise(state, "vm: invalid definition descriptor");
+        return vm_unwind_to(state, floor);
+      }
+      if (is_type(value, OBJ_FUNCTION)) ((ot_function_obj*)ot_as_obj(value))->name = name;
+      if (instruction == BC_DEFINE_LEXICAL) env_bind(state, &frame->env, name, value);
+      else
+        define_var(state, state->current_process->current_namespace, name, value, doc,
+                   instruction == BC_DEFINE_PRIVATE);
+      continue;
+    }
+    if (instruction == BC_MACRO) {
+      if (state->current_process->vm_stack_count <= frame->base ||
+          !is_type(state->current_process->vm_stack[state->current_process->vm_stack_count - 1],
+                   OBJ_FUNCTION)) {
+        (void)ot_raise(state, "vm: macro requires a function");
+        return vm_unwind_to(state, floor);
+      }
+      otv function_value =
+          state->current_process->vm_stack[state->current_process->vm_stack_count - 1];
+      OT_FRAME_SCOPED(state, &function_value);
+      ot_macro_obj* macro = must_alloc(state, sizeof(*macro), OBJ_MACRO);
+      macro->function = function_value;
+      state->current_process->vm_stack[state->current_process->vm_stack_count - 1] =
+          ot_from_obj(macro);
+      continue;
+    }
+    if (instruction == BC_DEF_PARAM) {
+      if (operand >= code->constant_count ||
+          state->current_process->vm_stack_count <= frame->base) {
+        (void)ot_raise(state, "vm: invalid parameter definition");
+        return vm_unwind_to(state, floor);
+      }
+      otv descriptor = as_slots(as_array(code->constants)->slots)->values[operand];
+      otv name = descriptor_value(descriptor, 0);
+      otv doc = descriptor_value(descriptor, 1);
+      otv value = state->current_process->vm_stack[state->current_process->vm_stack_count - 1];
+      OT_FRAME_SCOPED(state, &descriptor, &name, &doc, &value);
+      if (!is_type(name, OBJ_SYMBOL)) {
+        (void)ot_raise(state, "vm: invalid parameter descriptor");
+        return vm_unwind_to(state, floor);
+      }
+      ot_param_obj* param = must_alloc(state, sizeof(*param), OBJ_PARAM);
+      param->name = name;
+      param->value = value;
+      otv made = ot_from_obj(param);
+      state->current_process->vm_stack[state->current_process->vm_stack_count - 1] = made;
+      define_var(state, state->current_process->current_namespace, name, made, doc, false);
+      continue;
+    }
+    if (instruction == BC_NAMED_LET || instruction == BC_TAIL_NAMED_LET) {
+      if (operand >= code->constant_count) {
+        (void)ot_raise(state, "vm: named let constant out of range");
+        return vm_unwind_to(state, floor);
+      }
+      otv descriptor = as_slots(as_array(code->constants)->slots)->values[operand];
+      otv name = descriptor_value(descriptor, 0);
+      otv nested_code = descriptor_value(descriptor, 1);
+      otv count_value = descriptor_value(descriptor, 2);
+      if (!is_type(name, OBJ_SYMBOL) || !is_type(nested_code, OBJ_CODE) ||
+          !ot_is_int(count_value) || ot_get_int(count_value) < 0) {
+        (void)ot_raise(state, "vm: invalid named let descriptor");
+        return vm_unwind_to(state, floor);
+      }
+      size_t count = (size_t)ot_get_int(count_value);
+      if (state->current_process->vm_stack_count < frame->base + count) {
+        (void)ot_raise(state, "vm: named let operand stack underflow");
+        return vm_unwind_to(state, floor);
+      }
+      size_t call_base = state->current_process->vm_stack_count - count;
+      otv named_env = ot_nil;
+      otv named_namespace = function->namespace_value;
+      OT_FRAME_SCOPED(state, &descriptor, &name, &nested_code, &named_env, &named_namespace);
+      named_env = make_env(state, frame->env, named_namespace);
+      otv callable = make_bytecode_function(state, nested_code, named_env, named_namespace, name);
+      OT_FRAME_SCOPED(state, &callable);
+      env_bind(state, &named_env, name, callable);
+      otv call_env =
+          bind_parameters(state, callable, state->current_process->vm_stack + call_base, count);
+      if (call_env == OT_UNWIND) return vm_unwind_to(state, floor);
+      OT_FRAME_SCOPED(state, &call_env);
+      if (instruction == BC_TAIL_NAMED_LET) {
+        size_t base = frame->base;
+        state->current_process->vm_stack_count = base;
+        frame->function = callable;
+        frame->env = call_env;
+        frame->ip = 0;
+      } else {
+        state->current_process->vm_stack_count = call_base;
+        vm_push_frame(state, callable, call_env, call_base);
+      }
+      continue;
+    }
+    if (instruction == BC_TRY || instruction == BC_HANDLER_BIND || instruction == BC_RESTART_CASE ||
+        instruction == BC_UNWIND_PROTECT || instruction == BC_WITH_PARAMS) {
+      if (operand >= code->constant_count) {
+        (void)ot_raise(state, "vm: dynamic form constant out of range");
+        return vm_unwind_to(state, floor);
+      }
+      otv descriptor = as_slots(as_array(code->constants)->slots)->values[operand];
+      otv dynamic_env = frame->env;
+      otv dynamic_namespace = function->namespace_value;
+      OT_FRAME_SCOPED(state, &descriptor, &dynamic_env, &dynamic_namespace);
+      if (!vm_begin_dynamic(state, instruction, descriptor, dynamic_env, dynamic_namespace))
+        return vm_unwind_to(state, floor);
+      return OT_VM_CONTINUE;
+    }
+    if (instruction == BC_IN_NS || instruction == BC_REQUIRE) {
+      if (operand >= code->constant_count) {
+        (void)ot_raise(state, "vm: namespace constant out of range");
+        return vm_unwind_to(state, floor);
+      }
+      otv value = as_slots(as_array(code->constants)->slots)->values[operand];
+      otv result = ot_nil;
+      if (instruction == BC_IN_NS) {
+        if (!is_type(value, OBJ_SYMBOL)) result = ot_raise(state, "vm: invalid namespace name");
+        else state->current_process->current_namespace = namespace_find(state, value, true);
+      } else {
+        result = require_forms(state, value);
+      }
+      if (result == OT_UNWIND) return vm_unwind_to(state, floor);
+      vm_push(state, result);
+      continue;
+    }
+    if (instruction == BC_CONS || instruction == BC_APPEND) {
+      if (state->current_process->vm_stack_count < frame->base + 2) {
+        (void)ot_raise(state, "vm: constructor operand stack underflow");
+        return vm_unwind_to(state, floor);
+      }
+      otv right = state->current_process->vm_stack[--state->current_process->vm_stack_count];
+      otv left = state->current_process->vm_stack[--state->current_process->vm_stack_count];
+      OT_FRAME_SCOPED(state, &left, &right);
+      otv value =
+          instruction == BC_CONS ? ot_cons(state, left, right) : append_values(state, left, right);
+      if (value == OT_UNWIND) return vm_unwind_to(state, floor);
+      vm_push(state, value);
+      continue;
+    }
+
+    if (instruction == BC_CALL || instruction == BC_TAIL_CALL) {
+      size_t before = state->current_process->vm_frame_count;
+      if (!vm_enter_call(state, operand, instruction == BC_TAIL_CALL))
+        return vm_unwind_to(state, floor);
+      if (instruction == BC_TAIL_CALL && state->current_process->vm_frame_count < before &&
+          state->current_process->vm_frame_count == floor) {
+        otv result = state->current_process->vm_stack[state->current_process->vm_stack_count - 1];
+        state->current_process->vm_stack_count--;
+        return result;
+      }
+      continue;
+    }
+    if (instruction == BC_SET_LEXICAL || instruction == BC_SET_GLOBAL) {
+      if (operand >= code->constant_count ||
+          state->current_process->vm_stack_count <= frame->base) {
+        (void)ot_raise(state, "vm: invalid assignment");
+        return vm_unwind_to(state, floor);
+      }
+      otv name = as_slots(as_array(code->constants)->slots)->values[operand];
+      otv assigned = state->current_process->vm_stack[state->current_process->vm_stack_count - 1];
+      if (instruction == BC_SET_LEXICAL) {
+        otv binding = env_binding(frame->env, name);
+        if (!is_type(binding, OBJ_BINDING)) {
+          (void)ot_raise(state, "vm: missing lexical binding");
+          return vm_unwind_to(state, floor);
+        }
+        ((ot_binding_obj*)ot_as_obj(binding))->value = assigned;
+      } else {
+        otv var = resolve_var(state, function->namespace_value, name, true);
+        if (var == OT_UNWIND) return vm_unwind_to(state, floor);
+        ((ot_var_obj*)ot_as_obj(var))->value = assigned;
+      }
+      continue;
+    }
+    if (instruction == BC_DUP) {
+      if (state->current_process->vm_stack_count <= frame->base) {
+        (void)ot_raise(state, "vm: operand stack underflow");
+        return vm_unwind_to(state, floor);
+      }
+      vm_push(state, state->current_process->vm_stack[state->current_process->vm_stack_count - 1]);
+      continue;
+    }
+    if (instruction == BC_SCOPE) {
+      frame->env = make_env(state, frame->env, env_namespace(state, frame->env));
+      continue;
+    }
+    if (instruction == BC_BIND) {
+      if (operand >= code->constant_count ||
+          state->current_process->vm_stack_count <= frame->base) {
+        (void)ot_raise(state, "vm: invalid lexical bind");
+        return vm_unwind_to(state, floor);
+      }
+      otv name = as_slots(as_array(code->constants)->slots)->values[operand];
+      otv bound = state->current_process->vm_stack[--state->current_process->vm_stack_count];
+      OT_FRAME_SCOPED(state, &name, &bound);
+      env_bind(state, &frame->env, name, bound);
+      continue;
+    }
+    if (instruction == BC_UNSCOPE) {
+      if (!is_type(frame->env, OBJ_ENV)) {
+        (void)ot_raise(state, "vm: lexical scope underflow");
+        return vm_unwind_to(state, floor);
+      }
+      frame->env = ((ot_env_obj*)ot_as_obj(frame->env))->parent;
+      continue;
+    }
+    if (instruction == BC_JUMP) {
+      if (operand >= code->length) {
+        (void)ot_raise(state, "vm: jump target outside bytecode");
+        return vm_unwind_to(state, floor);
+      }
+      frame->ip = operand;
+      continue;
+    }
+    if (instruction == BC_JUMP_IF_FALSE || instruction == BC_JUMP_IF_TRUE) {
+      if (state->current_process->vm_stack_count <= frame->base) {
+        (void)ot_raise(state, "vm: operand stack underflow");
+        return vm_unwind_to(state, floor);
+      }
+      otv condition = state->current_process->vm_stack[--state->current_process->vm_stack_count];
+      if ((instruction == BC_JUMP_IF_FALSE && is_falsy(condition)) ||
+          (instruction == BC_JUMP_IF_TRUE && !is_falsy(condition))) {
+        if (operand >= code->length) {
+          (void)ot_raise(state, "vm: jump target outside bytecode");
+          return vm_unwind_to(state, floor);
+        }
+        frame->ip = operand;
+      }
+      continue;
+    }
+    if (instruction == BC_POP) {
+      if (state->current_process->vm_stack_count <= frame->base) {
+        (void)ot_raise(state, "vm: operand stack underflow");
+        return vm_unwind_to(state, floor);
+      }
+      state->current_process->vm_stack_count--;
+      continue;
+    }
+    if (instruction == BC_RETURN) {
+      otv result =
+          state->current_process->vm_stack_count > frame->base
+              ? state->current_process->vm_stack[state->current_process->vm_stack_count - 1]
+              : ot_nil;
+      ot_vm_frame leaving =
+          state->current_process->vm_frames[--state->current_process->vm_frame_count];
+      state->current_process->vm_stack_count = leaving.base;
+      if (state->current_process->vm_frame_count == floor) return result;
+      vm_push(state, result);
+      continue;
+    }
+    (void)ot_raise(state, "vm: unknown opcode 0x%02x", instruction);
+    return vm_unwind_to(state, floor);
+  }
+  return ot_nil;
+}
+
+static ot_run_result vm_execute_run(ots* state, size_t floor, ot_vm_continuation* boundary) {
+  ot_process* process = state->current_process;
+  bool input_ready = false;
+  otv input = ot_nil;
+  ot_run_result result = {.status = OT_RUN_COMPLETED, .value = ot_nil};
+  process->vm_run_depth++;
+  for (;;) {
+    ot_vm_continuation* continuation = process->continuations;
+    if (input_ready) {
+      vm_continuation_result resumed = vm_resume_dynamic(state, continuation, input);
+      input_ready = false;
+      if (resumed.status == VM_CONTINUATION_SCHEDULED) continue;
+
+      process->continuations = continuation->prev;
+      if (resumed.status == VM_CONTINUATION_COMPLETED) {
+        process->vm_stack_count = continuation->owner_stack_count;
+        vm_free_continuation(continuation);
+        vm_push(state, resumed.value);
+        continue;
+      }
+
+      vm_free_continuation(continuation);
+      continuation = process->continuations;
+      size_t unwind_floor = continuation != boundary ? continuation->owner_frame_count : floor;
+      (void)vm_unwind_to(state, unwind_floor);
+      if (continuation != boundary) {
+        input = OT_UNWIND;
+        input_ready = true;
+        continue;
+      }
+      result = (ot_run_result){.status = OT_RUN_FAILED, .value = process->condition};
+      break;
+    }
+
+    size_t run_floor = continuation != boundary ? continuation->owner_frame_count : floor;
+    otv value = vm_execute_loop(state, run_floor);
+    if (value == OT_YIELD) {
+      result = (ot_run_result){.status = OT_RUN_YIELDED, .value = ot_nil};
+      break;
+    }
+    if (value == OT_VM_CONTINUE) continue;
+    if (continuation != boundary) {
+      input = value;
+      input_ready = true;
+      continue;
+    }
+    if (value == OT_UNWIND)
+      result = (ot_run_result){.status = OT_RUN_FAILED, .value = process->condition};
+    else result = (ot_run_result){.status = OT_RUN_COMPLETED, .value = value};
+    break;
+  }
+  process->vm_run_depth--;
+  return result;
+}
+
+static otv vm_execute(ots* state, size_t floor) {
+  ot_run_result result = vm_execute_run(state, floor, state->current_process->continuations);
+  if (result.status == OT_RUN_COMPLETED) return result.value;
+  if (result.status == OT_RUN_FAILED) return OT_UNWIND;
+  fputs("otium: attempted to suspend a synchronous VM entry\n", stderr);
+  abort();
+}
+
+static otv compile_and_run_form(ots* state, otv form, otv env) {
+  OT_FRAME_SCOPED(state, &form, &env);
+  otv code = compile_form(state, form, env);
+  if (code == OT_UNWIND) return code;
+  OT_FRAME_SCOPED(state, &code);
+  otv function = make_bytecode_function(state, code, env, env_namespace(state, env), ot_nil);
+  OT_FRAME_SCOPED(state, &function);
+  size_t floor = state->current_process->vm_frame_count;
+  size_t base = state->current_process->vm_stack_count;
+  vm_push_frame(state, function, env, base);
+  return vm_execute(state, floor);
 }
 
 static bool is_catch_clause(otv form) {
@@ -1755,7 +3112,7 @@ static otv require_one(ots* state, otv spec, otv caller) {
   if (!space->loaded || reload) {
     if (space->loading) return ot_raise(state, "require: circular load");
     space->loading = true;
-    state->current_namespace = target;
+    state->current_process->current_namespace = target;
     ot_module* module = find_module(state, name);
     if (module != NULL && (!module->initialized || reload)) {
       module->init(state);
@@ -1770,17 +3127,17 @@ static otv require_one(ots* state, otv spec, otv caller) {
       bool ok = eval_source(state, source, length, as_name(name)->bytes, true, &ignored);
       ot_host_free(source);
       if (!ok) {
-        state->current_namespace = caller;
+        state->current_process->current_namespace = caller;
         ((ot_namespace_obj*)ot_as_obj(target))->loading = false;
         return OT_UNWIND;
       }
     } else if (module == NULL) {
-      state->current_namespace = caller;
+      state->current_process->current_namespace = caller;
       ((ot_namespace_obj*)ot_as_obj(target))->loading = false;
       return ot_raise(state, "require: namespace %.*s not found", (int)as_name(name)->length,
                       as_name(name)->bytes);
     }
-    state->current_namespace = caller;
+    state->current_process->current_namespace = caller;
     space = (ot_namespace_obj*)ot_as_obj(target);
     space->loading = false;
     space->loaded = true;
@@ -1828,7 +3185,7 @@ static otv require_one(ots* state, otv spec, otv caller) {
 }
 
 static otv require_forms(ots* state, otv specs) {
-  otv caller = state->current_namespace;
+  otv caller = state->current_process->current_namespace;
   OT_FRAME_SCOPED(state, &caller, &specs);
   while (is_type(specs, OBJ_PAIR)) {
     otv result = require_one(state, as_pair(specs)->car, caller);
@@ -1838,561 +3195,497 @@ static otv require_forms(ots* state, otv specs) {
   return specs == ot_null ? ot_nil : ot_raise(state, "require: improper specs");
 }
 
-static eval_step eval_try(ots* state, otv args, otv env) {
-  otv catches = ot_null;
-  otv cursor = args;
-  OT_FRAME_SCOPED(state, &args, &catches, &cursor, &env);
-  while (is_type(cursor, OBJ_PAIR)) {
-    if (is_catch_clause(as_pair(cursor)->car)) {
-      catches = cursor;
-      break;
-    }
-    cursor = as_pair(cursor)->cdr;
-  }
-  otv result = eval_sequence_until(state, args, catches, env);
-  if (result != OT_UNWIND || state->unwind_kind != UNWIND_CONDITION) return step_value(result);
-  otv condition = state->condition;
-  OT_FRAME_SCOPED(state, &condition);
-  state->unwind_kind = UNWIND_NONE;
-  state->condition = ot_nil;
-  while (is_type(catches, OBJ_PAIR)) {
-    otv clause = as_pair(catches)->car;
-    otv spec;
-    if (!list_nth(clause, 1, &spec) || !is_type(spec, OBJ_PAIR)) {
-      result = ot_raise(state, "try: invalid catch clause");
-      break;
-    }
-    otv pred = ot_nil;
-    OT_FRAME_SCOPED(state, &clause, &spec, &pred);
-    pred = eval_value(state, as_pair(spec)->car, env);
-    if (pred == OT_UNWIND) {
-      result = pred;
-      break;
-    }
-    otv pred_args[1] = {condition};
-    otv match = apply_value(state, pred, pred_args, 1, false);
-    if (match == OT_UNWIND) {
-      result = match;
-      break;
-    }
-    if (!is_falsy(match)) {
-      otv var;
-      if (!list_nth(spec, 1, &var) || !is_type(var, OBJ_SYMBOL)) {
-        result = ot_raise(state, "try: catch variable must be a symbol");
-        break;
-      }
-      OT_FRAME_SCOPED(state, &var);
-      otv catch_env = make_env(state, env, env_namespace(state, env));
-      OT_FRAME_SCOPED(state, &catch_env);
-      env_bind(state, &catch_env, var, condition);
-      result = eval_sequence(state, list_tail(clause, 2), catch_env);
-      return step_value(result);
-    }
-    catches = as_pair(catches)->cdr;
-  }
-  if (state->unwind_kind == UNWIND_NONE) {
-    state->condition = condition;
-    state->unwind_kind = UNWIND_CONDITION;
-  }
-  return step_value(OT_UNWIND);
+enum {
+  TRY_BODY,
+  TRY_PREDICATE_EXPRESSION,
+  TRY_PREDICATE_CALL,
+  TRY_HANDLER,
+  HANDLER_PREDICATE,
+  HANDLER_FUNCTION,
+  HANDLER_BODY,
+  RESTART_EXPRESSION,
+  RESTART_CLAUSE,
+  UNWIND_EXPRESSION,
+  UNWIND_CLEANUP,
+  PARAM_PARAMETER,
+  PARAM_VALUE,
+  PARAM_BODY,
+};
+
+typedef enum vm_call_schedule_status {
+  VM_CALL_SCHEDULED,
+  VM_CALL_COMPLETED,
+  VM_CALL_FAILED,
+} vm_call_schedule_status;
+
+typedef struct vm_call_schedule_result {
+  vm_call_schedule_status status;
+  otv value;
+} vm_call_schedule_result;
+
+static vm_continuation_result vm_continuation_scheduled(void) {
+  return (vm_continuation_result){.status = VM_CONTINUATION_SCHEDULED, .value = ot_nil};
 }
 
-static eval_step eval_handler_bind(ots* state, otv args, otv env) {
-  otv bindings = form_arg(state, args, 0, "handler-bind");
-  if (bindings == OT_UNWIND) return step_value(bindings);
-  if (!proper_list(bindings)) return step_value(ot_raise(state, "handler-bind: bad bindings"));
-  size_t count = list_length(bindings);
-  ot_handler_frame frames[count == 0 ? 1 : count];
-  ot_handler_frame* old = state->handlers;
-  otv cursor = bindings;
-  OT_FRAME_SCOPED(state, &args, &cursor, &env);
-  for (size_t i = 0; i < count; i++) {
-    otv binding = as_pair(cursor)->car;
-    otv pred_form;
-    otv handler_form;
-    if (!list_nth(binding, 0, &pred_form) || !list_nth(binding, 1, &handler_form) ||
-        list_tail(binding, 2) != ot_null) {
-      state->handlers = old;
-      return step_value(ot_raise(state, "handler-bind: invalid binding"));
-    }
-    otv pred = ot_nil;
-    otv handler = ot_nil;
-    OT_FRAME_SCOPED(state, &binding, &pred_form, &handler_form, &pred, &handler);
-    pred = eval_value(state, pred_form, env);
-    if (pred == OT_UNWIND) {
-      state->handlers = old;
-      return step_value(pred);
-    }
-    handler = eval_value(state, handler_form, env);
-    if (handler == OT_UNWIND) {
-      state->handlers = old;
-      return step_value(handler);
-    }
-    frames[i] = (ot_handler_frame){.prev = state->handlers, .pred = pred, .handler = handler};
-    state->handlers = &frames[i];
-    cursor = as_pair(cursor)->cdr;
-  }
-  otv result = eval_sequence(state, list_tail(args, 1), env);
-  state->handlers = old;
-  return step_value(result);
+static vm_continuation_result vm_continuation_completed(otv value) {
+  return (vm_continuation_result){.status = VM_CONTINUATION_COMPLETED, .value = value};
 }
 
-static eval_step eval_restart_case(ots* state, otv args, otv env) {
-  otv expression = form_arg(state, args, 0, "restart-case");
-  if (expression == OT_UNWIND) return step_value(expression);
-  otv clause_forms = list_tail(args, 1);
-  if (!proper_list(clause_forms))
-    return step_value(ot_raise(state, "restart-case: invalid clauses"));
-  size_t count = list_length(clause_forms);
-  ot_restart_clause clauses[count == 0 ? 1 : count];
-  ot_restart_frame frame = {.prev = state->restarts, .clauses = clauses, .count = 0};
-  state->restarts = &frame;
-  otv cursor = clause_forms;
-  OT_FRAME_SCOPED(state, &expression, &cursor, &env);
-  for (size_t i = 0; i < count; i++) {
-    otv clause = as_pair(cursor)->car;
-    otv name;
-    if (!list_nth(clause, 0, &name) || !is_type(name, OBJ_SYMBOL)) {
-      state->restarts = frame.prev;
-      return step_value(ot_raise(state, "restart-case: invalid name"));
-    }
-    otv rest = list_tail(clause, 1);
-    otv description = ot_nil;
-    if (is_type(rest, OBJ_PAIR) && is_type(as_pair(rest)->car, OBJ_STRING) &&
-        is_type(as_pair(rest)->cdr, OBJ_PAIR)) {
-      description = as_pair(rest)->car;
-      rest = as_pair(rest)->cdr;
-    }
-    if (!is_type(rest, OBJ_PAIR)) {
-      state->restarts = frame.prev;
-      return step_value(ot_raise(state, "restart-case: missing parameter list"));
-    }
-    OT_FRAME_SCOPED(state, &clause, &name, &rest, &description);
-    ot_restart_obj* restart = must_alloc(state, sizeof(*restart), OBJ_RESTART);
-    restart->name = name;
-    restart->description = description;
-    restart->id = ++state->next_restart_id;
-    clauses[i] = (ot_restart_clause){
-        .restart = ot_from_obj(restart), .params = as_pair(rest)->car, .body = as_pair(rest)->cdr};
-    frame.count++;
-    cursor = as_pair(cursor)->cdr;
-  }
-  otv result = eval_value(state, expression, env);
-  if (result == OT_UNWIND && state->unwind_kind == UNWIND_RESTART) {
-    for (size_t i = 0; i < count; i++) {
-      ot_restart_obj* restart = (ot_restart_obj*)ot_as_obj(clauses[i].restart);
-      if (restart->id != state->unwind_restart_id) continue;
-      otv invoke_args = state->unwind_args;
-      OT_FRAME_SCOPED(state, &invoke_args);
-      state->unwind_kind = UNWIND_NONE;
-      state->unwind_args = ot_nil;
-      size_t argc = proper_list(invoke_args) ? list_length(invoke_args) : 0;
-      otv values[argc == 0 ? 1 : argc];
-      otv* roots[argc == 0 ? 1 : argc];
-      otv list = invoke_args;
-      for (size_t j = 0; j < (argc == 0 ? 1 : argc); j++) {
-        values[j] = argc == 0 ? ot_nil : as_pair(list)->car;
-        roots[j] = &values[j];
-        if (argc != 0) list = as_pair(list)->cdr;
-      }
-      ot_frame arg_frame;
-      ot_frame_push(state, &arg_frame, roots, argc == 0 ? 1 : argc);
-      otv clause_fn = make_function(state, clauses[i].params, clauses[i].body, env,
-                                    env_namespace(state, env), ot_nil);
-      result = apply_value(state, clause_fn, values, argc, false);
-      ot_frame_pop(state, &arg_frame);
-      break;
-    }
-  }
-  state->restarts = frame.prev;
-  return step_value(result);
+static vm_continuation_result vm_continuation_propagated(void) {
+  return (vm_continuation_result){.status = VM_CONTINUATION_PROPAGATED, .value = OT_UNWIND};
 }
 
-static eval_step eval_unwind_protect(ots* state, otv args, otv env) {
-  otv expression = form_arg(state, args, 0, "unwind-protect");
-  if (expression == OT_UNWIND) return step_value(expression);
-  OT_FRAME_SCOPED(state, &args, &expression, &env);
-  otv result = eval_value(state, expression, env);
-  otv saved_condition = state->condition;
-  otv saved_args = state->unwind_args;
-  ot_unwind_kind saved_kind = state->unwind_kind;
-  uint64_t saved_restart = state->unwind_restart_id;
-  OT_FRAME_SCOPED(state, &args, &result, &saved_condition, &saved_args, &env);
-  state->unwind_kind = UNWIND_NONE;
-  state->condition = ot_nil;
-  state->unwind_args = ot_nil;
-  otv cleanup = eval_sequence(state, list_tail(args, 1), env);
-  if (cleanup == OT_UNWIND) return step_value(cleanup);
-  state->condition = saved_condition;
-  state->unwind_args = saved_args;
-  state->unwind_kind = saved_kind;
-  state->unwind_restart_id = saved_restart;
-  return step_value(result);
+static bool vm_schedule_code(ots* state, otv code, otv env, otv namespace_value, otv* args,
+                             size_t argc) {
+  OT_FRAME_SCOPED(state, &code, &env, &namespace_value);
+  if (!is_type(code, OBJ_CODE)) {
+    (void)ot_raise(state, "vm: dynamic continuation requires bytecode");
+    return false;
+  }
+  size_t argument_root_count = argc == 0 ? 1 : argc;
+  size_t root_count = argument_root_count + 1;
+  otv dummy = ot_nil;
+  otv function = ot_nil;
+  otv* roots[root_count];
+  roots[0] = &function;
+  for (size_t i = 0; i < argument_root_count; i++) roots[i + 1] = argc == 0 ? &dummy : &args[i];
+  ot_frame args_frame;
+  ot_frame_push(state, &args_frame, roots, root_count);
+  function = make_bytecode_function(state, code, env, namespace_value, ot_nil);
+  otv call_env = bind_parameters(state, function, args, argc);
+  ot_frame_pop(state, &args_frame);
+  if (call_env == OT_UNWIND) return false;
+  OT_FRAME_SCOPED(state, &call_env);
+  size_t base = state->current_process->vm_stack_count;
+  vm_push_frame(state, function, call_env, base);
+  return true;
 }
 
-static eval_step eval_with_params(ots* state, otv args, otv env) {
-  otv bindings = form_arg(state, args, 0, "with-params");
-  if (bindings == OT_UNWIND) return step_value(bindings);
-  if (!proper_list(bindings)) return step_value(ot_raise(state, "with-params: bad bindings"));
-  size_t count = list_length(bindings);
-  ot_param_frame frames[count == 0 ? 1 : count];
-  ot_param_frame* old = state->params;
-  otv cursor = bindings;
-  OT_FRAME_SCOPED(state, &args, &cursor, &env);
-  for (size_t i = 0; i < count; i++) {
-    otv binding = as_pair(cursor)->car;
-    otv param_form;
-    otv value_form;
-    if (!list_nth(binding, 0, &param_form) || !list_nth(binding, 1, &value_form) ||
-        list_tail(binding, 2) != ot_null) {
-      state->params = old;
-      return step_value(ot_raise(state, "with-params: invalid binding"));
-    }
-    otv param = ot_nil;
-    otv value = ot_nil;
-    OT_FRAME_SCOPED(state, &binding, &param_form, &value_form, &param, &value);
-    param = eval_value(state, param_form, env);
-    if (param == OT_UNWIND) {
-      state->params = old;
-      return step_value(param);
-    }
-    if (!is_type(param, OBJ_PARAM)) {
-      state->params = old;
-      return step_value(ot_raise(state, "with-params: expected param"));
-    }
-    value = eval_value(state, value_form, env);
-    if (value == OT_UNWIND) {
-      state->params = old;
-      return step_value(value);
-    }
-    frames[i] = (ot_param_frame){.prev = state->params, .param = param, .value = value};
-    state->params = &frames[i];
-    cursor = as_pair(cursor)->cdr;
+static vm_call_schedule_result vm_schedule_callable(ots* state, otv callable, otv* args,
+                                                    size_t argc) {
+  ot_process* process = state->current_process;
+  size_t base = process->vm_stack_count;
+  size_t frame_count = process->vm_frame_count;
+  vm_push(state, callable);
+  for (size_t i = 0; i < argc; i++) vm_push(state, args[i]);
+  if (!vm_enter_call(state, argc, false)) {
+    process->vm_stack_count = base;
+    return (vm_call_schedule_result){.status = VM_CALL_FAILED, .value = OT_UNWIND};
   }
-  otv result = eval_sequence(state, list_tail(args, 1), env);
-  state->params = old;
-  return step_value(result);
+  if (process->vm_frame_count > frame_count)
+    return (vm_call_schedule_result){.status = VM_CALL_SCHEDULED, .value = ot_nil};
+  otv value = process->vm_stack[process->vm_stack_count - 1];
+  process->vm_stack_count = base;
+  return (vm_call_schedule_result){.status = VM_CALL_COMPLETED, .value = value};
 }
 
-static eval_step eval_special(ots* state, otv form, otv env) {
-  otv head = as_pair(form)->car;
-  if (!is_type(head, OBJ_SYMBOL) || !as_name(head)->special_form) return step_no();
-  otv args = as_pair(form)->cdr;
-  OT_FRAME_SCOPED(state, &form, &env, &head, &args);
+static void vm_free_continuation(ot_vm_continuation* continuation) {
+  ot_host_free(continuation->handler_frames);
+  ot_host_free(continuation->restart_clauses);
+  ot_host_free(continuation->param_frames);
+  ot_host_free(continuation);
+}
 
-  if (symbol_is(head, "quote")) {
-    otv value = form_arg(state, form, 1, "quote");
-    if (value == OT_UNWIND) return step_value(value);
-    if (list_tail(form, 2) != ot_null)
-      return step_value(ot_raise(state, "quote: expected one argument"));
-    return step_value(value);
-  }
-  if (symbol_is(head, "if")) {
-    otv test = form_arg(state, form, 1, "if");
-    if (test == OT_UNWIND) return step_value(test);
-    size_t count = proper_list(args) ? list_length(args) : 0;
-    if (count < 2 || count > 3) return step_value(ot_raise(state, "if: expected 2 or 3 arguments"));
-    otv condition = eval_value(state, test, env);
-    if (condition == OT_UNWIND) return step_value(condition);
-    otv branch = is_falsy(condition) ? (count == 3 ? form_arg(state, form, 3, "if") : ot_nil)
-                                     : form_arg(state, form, 2, "if");
-    return step_tail(branch, env);
-  }
-  if (symbol_is(head, "begin") || symbol_is(head, "do")) return tail_sequence(state, args, env);
-  if (symbol_is(head, "lambda") || symbol_is(head, "fn")) {
-    otv params = form_arg(state, form, 1, "lambda");
-    if (params == OT_UNWIND) return step_value(params);
-    return step_value(
-        make_function(state, params, list_tail(form, 2), env, env_namespace(state, env), ot_nil));
-  }
-  if (symbol_is(head, "define") || symbol_is(head, "def") || symbol_is(head, "define-")) {
-    otv target = form_arg(state, form, 1, "define");
-    if (target == OT_UNWIND) return step_value(target);
-    otv name = target;
-    otv value = ot_nil;
-    otv doc = ot_nil;
-    OT_FRAME_SCOPED(state, &target, &name, &value, &doc);
-    if (is_type(target, OBJ_PAIR)) {
-      name = as_pair(target)->car;
-      if (!is_type(name, OBJ_SYMBOL)) return step_value(ot_raise(state, "define: bad name"));
-      otv body = list_tail(form, 2);
-      if (is_type(body, OBJ_PAIR) && is_type(as_pair(body)->car, OBJ_STRING) &&
-          is_type(as_pair(body)->cdr, OBJ_PAIR)) {
-        doc = as_pair(body)->car;
-        body = as_pair(body)->cdr;
-      }
-      value =
-          make_function(state, as_pair(target)->cdr, body, env, env_namespace(state, env), name);
-    } else {
-      if (!is_type(name, OBJ_SYMBOL)) return step_value(ot_raise(state, "define: bad name"));
-      otv values = list_tail(form, 2);
-      if (is_type(values, OBJ_PAIR) && is_type(as_pair(values)->car, OBJ_STRING) &&
-          is_type(as_pair(values)->cdr, OBJ_PAIR)) {
-        doc = as_pair(values)->car;
-        values = as_pair(values)->cdr;
-      }
-      if (!is_type(values, OBJ_PAIR) || as_pair(values)->cdr != ot_null)
-        return step_value(ot_raise(state, "define: expected one value"));
-      value = eval_value(state, as_pair(values)->car, env);
-      if (value == OT_UNWIND) return step_value(value);
-      if (is_type(value, OBJ_FUNCTION)) ((ot_function_obj*)ot_as_obj(value))->name = name;
-    }
-    if (is_type(env, OBJ_ENV)) env_bind(state, &env, name, value);
-    else define_var(state, state->current_namespace, name, value, doc, symbol_is(head, "define-"));
-    return step_value(value);
-  }
-  if (symbol_is(head, "set!")) {
-    otv name = form_arg(state, form, 1, "set!");
-    otv expression = form_arg(state, form, 2, "set!");
-    if (name == OT_UNWIND || expression == OT_UNWIND) return step_value(OT_UNWIND);
-    if (!is_type(name, OBJ_SYMBOL) || list_tail(form, 3) != ot_null)
-      return step_value(ot_raise(state, "set!: expected name and value"));
-    OT_FRAME_SCOPED(state, &name, &expression);
-    otv value = eval_value(state, expression, env);
-    if (value == OT_UNWIND) return step_value(value);
-    otv binding = env_binding(env, name);
-    if (is_type(binding, OBJ_BINDING)) ((ot_binding_obj*)ot_as_obj(binding))->value = value;
-    else {
-      otv var = resolve_var(state, env_namespace(state, env), name, true);
-      if (var == OT_UNWIND) return step_value(var);
-      ((ot_var_obj*)ot_as_obj(var))->value = value;
-    }
-    return step_value(value);
-  }
-  if (symbol_is(head, "let")) {
-    otv bindings = form_arg(state, form, 1, "let");
-    if (bindings == OT_UNWIND) return step_value(bindings);
-    bool named = is_type(bindings, OBJ_SYMBOL);
-    otv named_name = ot_nil;
-    otv body = ot_nil;
-    OT_FRAME_SCOPED(state, &named_name, &body);
-    if (named) {
-      named_name = bindings;
-      bindings = form_arg(state, form, 2, "let");
-      if (bindings == OT_UNWIND) return step_value(bindings);
-      body = list_tail(form, 3);
-    } else {
-      body = list_tail(form, 2);
-    }
-    if (!proper_list(bindings)) return step_value(ot_raise(state, "let: bad bindings"));
+static void vm_restore_dynamic_stack(ots* state, ot_vm_continuation* continuation) {
+  ot_process* process = state->current_process;
+  if (continuation->instruction == BC_HANDLER_BIND) process->handlers = continuation->old_handlers;
+  else if (continuation->instruction == BC_RESTART_CASE)
+    process->restarts = continuation->restart_frame.prev;
+  else if (continuation->instruction == BC_WITH_PARAMS) process->params = continuation->old_params;
+}
 
-    if (named) {
-      for (otv cursor = bindings; is_type(cursor, OBJ_PAIR); cursor = as_pair(cursor)->cdr) {
-        otv binding = as_pair(cursor)->car;
-        otv binding_name;
-        otv expression;
-        if (!list_nth(binding, 0, &binding_name) || !list_nth(binding, 1, &expression) ||
-            list_tail(binding, 2) != ot_null || !is_type(binding_name, OBJ_SYMBOL))
-          return step_value(ot_raise(state, "let: invalid binding"));
-      }
+static bool vm_dynamic_begin_failed(ots* state, ot_vm_continuation* continuation) {
+  vm_restore_dynamic_stack(state, continuation);
+  state->current_process->continuations = continuation->prev;
+  vm_free_continuation(continuation);
+  return false;
+}
 
-      size_t count = list_length(bindings);
-      size_t slots_count = count == 0 ? 1 : count;
-      otv values[slots_count];
-      otv* roots[slots_count];
-      for (size_t i = 0; i < slots_count; i++) {
-        values[i] = ot_nil;
-        roots[i] = &values[i];
-      }
-      ot_frame values_frame;
+static bool vm_begin_dynamic(ots* state, unsigned char instruction, otv descriptor, otv env,
+                             otv namespace_value) {
+  ot_process* process = state->current_process;
+  ot_vm_continuation* continuation = ot_host_alloc(sizeof(*continuation));
+  if (continuation == NULL) abort();
+  memset(continuation, 0, sizeof(*continuation));
+  continuation->prev = process->continuations;
+  continuation->instruction = instruction;
+  continuation->owner_frame_count = process->vm_frame_count;
+  continuation->owner_stack_count = process->vm_stack_count;
+  continuation->descriptor = descriptor;
+  continuation->env = env;
+  continuation->namespace_value = namespace_value;
+  continuation->value = ot_nil;
+  continuation->auxiliary = ot_nil;
+  continuation->saved_condition = ot_nil;
+  continuation->saved_args = ot_nil;
+  process->continuations = continuation;
 
-      otv params = ot_null;
-      otv params_tail = ot_nil;
-      otv cursor = bindings;
-      otv named_env = ot_nil;
-      otv function = ot_nil;
-      otv call_env = ot_nil;
-      OT_FRAME_SCOPED(state, &params, &params_tail, &cursor, &named_env, &function, &call_env);
-      ot_frame_push(state, &values_frame, roots, slots_count);
-      size_t index = 0;
-      while (is_type(cursor, OBJ_PAIR)) {
-        otv binding = as_pair(cursor)->car;
-        otv binding_name = ot_nil;
-        otv expression = ot_nil;
-        otv cell = ot_nil;
-        otv* binding_roots[] = {&binding, &binding_name, &expression, &cell};
-        ot_frame binding_frame;
-        ot_frame_push(state, &binding_frame, binding_roots,
-                      sizeof binding_roots / sizeof binding_roots[0]);
-        (void)list_nth(binding, 0, &binding_name);
-        (void)list_nth(binding, 1, &expression);
-        values[index] = eval_value(state, expression, env);
-        if (values[index] == OT_UNWIND) {
-          ot_frame_pop(state, &binding_frame);
-          ot_frame_pop(state, &values_frame);
-          return step_value(OT_UNWIND);
-        }
-        index++;
-        cell = ot_cons(state, binding_name, ot_null);
-        if (params == ot_null) params = cell;
-        else as_pair(params_tail)->cdr = cell;
-        params_tail = cell;
-        cursor = as_pair(cursor)->cdr;
-        ot_frame_pop(state, &binding_frame);
-      }
+  if (instruction == BC_TRY) {
+    otv body_code = descriptor_value(continuation->descriptor, 0);
+    otv catches = descriptor_value(continuation->descriptor, 1);
+    if (!is_type(body_code, OBJ_CODE) || !is_type(catches, OBJ_ARRAY)) {
+      (void)ot_raise(state, "vm: invalid catch descriptor");
+      return vm_dynamic_begin_failed(state, continuation);
+    }
+    continuation->phase = TRY_BODY;
+    if (!vm_schedule_code(state, body_code, continuation->env, continuation->namespace_value, NULL,
+                          0))
+      return vm_dynamic_begin_failed(state, continuation);
+    return true;
+  }
 
-      named_env = make_env(state, env, env_namespace(state, env));
-      function =
-          make_function(state, params, body, named_env, env_namespace(state, env), named_name);
-      env_bind(state, &named_env, named_name, function);
-      call_env = bind_parameters(state, function, values, count);
-      ot_frame_pop(state, &values_frame);
-      if (call_env == OT_UNWIND) return step_value(call_env);
-      return tail_sequence(state, body, call_env);
+  if (instruction == BC_HANDLER_BIND) {
+    otv bindings = descriptor_value(continuation->descriptor, 0);
+    if (!is_type(bindings, OBJ_ARRAY)) {
+      (void)ot_raise(state, "vm: invalid handler descriptor");
+      return vm_dynamic_begin_failed(state, continuation);
+    }
+    continuation->count = as_array(bindings)->length;
+    continuation->old_handlers = process->handlers;
+    if (continuation->count != 0) {
+      continuation->handler_frames =
+          ot_host_alloc(continuation->count * sizeof(*continuation->handler_frames));
+      if (continuation->handler_frames == NULL) abort();
+      memset(continuation->handler_frames, 0,
+             continuation->count * sizeof(*continuation->handler_frames));
+    }
+    continuation->phase = continuation->count == 0 ? HANDLER_BODY : HANDLER_PREDICATE;
+    otv code = continuation->count == 0 ? descriptor_value(continuation->descriptor, 1)
+                                        : descriptor_value(descriptor_value(bindings, 0), 0);
+    if (!vm_schedule_code(state, code, continuation->env, continuation->namespace_value, NULL, 0))
+      return vm_dynamic_begin_failed(state, continuation);
+    return true;
+  }
+
+  if (instruction == BC_RESTART_CASE) {
+    otv clauses = descriptor_value(continuation->descriptor, 1);
+    if (!is_type(clauses, OBJ_ARRAY)) {
+      (void)ot_raise(state, "vm: invalid restart descriptor");
+      return vm_dynamic_begin_failed(state, continuation);
+    }
+    continuation->count = as_array(clauses)->length;
+    if (continuation->count != 0) {
+      continuation->restart_clauses =
+          ot_host_alloc(continuation->count * sizeof(*continuation->restart_clauses));
+      if (continuation->restart_clauses == NULL) abort();
+      memset(continuation->restart_clauses, 0,
+             continuation->count * sizeof(*continuation->restart_clauses));
+    }
+    continuation->restart_frame = (ot_restart_frame){
+        .prev = process->restarts,
+        .clauses = continuation->restart_clauses,
+        .count = 0,
+    };
+    process->restarts = &continuation->restart_frame;
+    for (size_t i = 0; i < continuation->count; i++) {
+      otv compiled = descriptor_value(clauses, i);
+      otv name = descriptor_value(compiled, 0);
+      otv description = descriptor_value(compiled, 1);
+      otv clause_code = descriptor_value(compiled, 2);
+      OT_FRAME_SCOPED(state, &compiled, &name, &description, &clause_code);
+      if (!is_type(name, OBJ_SYMBOL) || !is_type(clause_code, OBJ_CODE)) {
+        (void)ot_raise(state, "vm: invalid restart clause");
+        return vm_dynamic_begin_failed(state, continuation);
+      }
+      ot_restart_obj* restart = must_alloc(state, sizeof(*restart), OBJ_RESTART);
+      restart->name = name;
+      restart->description = description;
+      restart->id = ++process->next_restart_id;
+      continuation->restart_clauses[i] = (ot_restart_clause){
+          .restart = ot_from_obj(restart),
+          .params = as_code(clause_code)->params,
+          .body = clause_code,
+      };
+      continuation->restart_frame.count++;
+    }
+    continuation->phase = RESTART_EXPRESSION;
+    otv expression = descriptor_value(continuation->descriptor, 0);
+    if (!vm_schedule_code(state, expression, continuation->env, continuation->namespace_value, NULL,
+                          0))
+      return vm_dynamic_begin_failed(state, continuation);
+    return true;
+  }
+
+  if (instruction == BC_UNWIND_PROTECT) {
+    continuation->phase = UNWIND_EXPRESSION;
+    otv expression = descriptor_value(continuation->descriptor, 0);
+    if (!vm_schedule_code(state, expression, continuation->env, continuation->namespace_value, NULL,
+                          0))
+      return vm_dynamic_begin_failed(state, continuation);
+    return true;
+  }
+
+  if (instruction == BC_WITH_PARAMS) {
+    otv bindings = descriptor_value(continuation->descriptor, 0);
+    if (!is_type(bindings, OBJ_ARRAY)) {
+      (void)ot_raise(state, "vm: invalid params descriptor");
+      return vm_dynamic_begin_failed(state, continuation);
+    }
+    continuation->count = as_array(bindings)->length;
+    continuation->old_params = process->params;
+    if (continuation->count != 0) {
+      continuation->param_frames =
+          ot_host_alloc(continuation->count * sizeof(*continuation->param_frames));
+      if (continuation->param_frames == NULL) abort();
+      memset(continuation->param_frames, 0,
+             continuation->count * sizeof(*continuation->param_frames));
+    }
+    continuation->phase = continuation->count == 0 ? PARAM_BODY : PARAM_PARAMETER;
+    otv code = continuation->count == 0 ? descriptor_value(continuation->descriptor, 1)
+                                        : descriptor_value(descriptor_value(bindings, 0), 0);
+    if (!vm_schedule_code(state, code, continuation->env, continuation->namespace_value, NULL, 0))
+      return vm_dynamic_begin_failed(state, continuation);
+    return true;
+  }
+
+  (void)ot_raise(state, "vm: unknown dynamic opcode");
+  return vm_dynamic_begin_failed(state, continuation);
+}
+
+static vm_continuation_result vm_resume_try(ots* state, ot_vm_continuation* continuation,
+                                            otv input) {
+  ot_process* process = state->current_process;
+  for (;;) {
+    if (continuation->phase == TRY_BODY) {
+      if (input != OT_UNWIND) return vm_continuation_completed(input);
+      if (process->unwind_kind != UNWIND_CONDITION) return vm_continuation_propagated();
+      continuation->value = process->condition;
+      process->condition = ot_nil;
+      process->unwind_kind = UNWIND_NONE;
+      continuation->index = 0;
+    } else if (continuation->phase == TRY_PREDICATE_EXPRESSION) {
+      if (input == OT_UNWIND) return vm_continuation_propagated();
+      continuation->auxiliary = input;
+      continuation->phase = TRY_PREDICATE_CALL;
+      otv args[] = {continuation->value};
+      vm_call_schedule_result call = vm_schedule_callable(state, continuation->auxiliary, args, 1);
+      if (call.status == VM_CALL_SCHEDULED) return vm_continuation_scheduled();
+      input = call.status == VM_CALL_FAILED ? OT_UNWIND : call.value;
+      continue;
+    } else if (continuation->phase == TRY_PREDICATE_CALL) {
+      if (input == OT_UNWIND) return vm_continuation_propagated();
+      if (!is_falsy(input)) {
+        otv catches = descriptor_value(continuation->descriptor, 1);
+        otv clause = descriptor_value(catches, continuation->index);
+        otv handler = descriptor_value(clause, 1);
+        continuation->phase = TRY_HANDLER;
+        otv args[] = {continuation->value};
+        if (!vm_schedule_code(state, handler, continuation->env, continuation->namespace_value,
+                              args, 1))
+          return vm_continuation_propagated();
+        return vm_continuation_scheduled();
+      }
+      continuation->index++;
+    } else if (continuation->phase == TRY_HANDLER) {
+      return input == OT_UNWIND ? vm_continuation_propagated() : vm_continuation_completed(input);
     }
 
-    otv let_env = ot_nil;
-    OT_FRAME_SCOPED(state, &let_env, &bindings);
-    let_env = make_env(state, env, env_namespace(state, env));
-    while (is_type(bindings, OBJ_PAIR)) {
-      otv binding = as_pair(bindings)->car;
-      otv name;
-      otv expression;
-      if (!list_nth(binding, 0, &name) || !list_nth(binding, 1, &expression) ||
-          list_tail(binding, 2) != ot_null || !is_type(name, OBJ_SYMBOL))
-        return step_value(ot_raise(state, "let: invalid binding"));
-      OT_FRAME_SCOPED(state, &binding, &name, &expression);
-      otv value = eval_value(state, expression, let_env);
-      if (value == OT_UNWIND) return step_value(value);
-      env_bind(state, &let_env, name, value);
-      bindings = as_pair(bindings)->cdr;
+    otv catches = descriptor_value(continuation->descriptor, 1);
+    if (continuation->index >= as_array(catches)->length) {
+      process->condition = continuation->value;
+      process->unwind_kind = UNWIND_CONDITION;
+      return vm_continuation_propagated();
     }
-    return tail_sequence(state, list_tail(form, 2), let_env);
+    otv clause = descriptor_value(catches, continuation->index);
+    continuation->phase = TRY_PREDICATE_EXPRESSION;
+    if (!vm_schedule_code(state, descriptor_value(clause, 0), continuation->env,
+                          continuation->namespace_value, NULL, 0))
+      return vm_continuation_propagated();
+    return vm_continuation_scheduled();
   }
-  if (symbol_is(head, "while")) {
-    otv test = form_arg(state, form, 1, "while");
-    if (test == OT_UNWIND) return step_value(test);
-    otv body = list_tail(form, 2);
-    OT_FRAME_SCOPED(state, &test, &body);
-    for (;;) {
-      otv condition = eval_value(state, test, env);
-      if (condition == OT_UNWIND) return step_value(condition);
-      if (is_falsy(condition)) return step_value(ot_nil);
-      otv result = eval_sequence(state, body, env);
-      if (result == OT_UNWIND) return step_value(result);
+}
+
+static vm_continuation_result vm_resume_handler_bind(ots* state, ot_vm_continuation* continuation,
+                                                     otv input) {
+  ot_process* process = state->current_process;
+  if (continuation->phase == HANDLER_BODY) {
+    process->handlers = continuation->old_handlers;
+    return input == OT_UNWIND ? vm_continuation_propagated() : vm_continuation_completed(input);
+  }
+  if (input == OT_UNWIND) {
+    process->handlers = continuation->old_handlers;
+    return vm_continuation_propagated();
+  }
+
+  otv bindings = descriptor_value(continuation->descriptor, 0);
+  otv binding = descriptor_value(bindings, continuation->index);
+  if (continuation->phase == HANDLER_PREDICATE) {
+    continuation->value = input;
+    continuation->phase = HANDLER_FUNCTION;
+    if (!vm_schedule_code(state, descriptor_value(binding, 1), continuation->env,
+                          continuation->namespace_value, NULL, 0)) {
+      process->handlers = continuation->old_handlers;
+      return vm_continuation_propagated();
     }
+    return vm_continuation_scheduled();
   }
-  if (symbol_is(head, "and") || symbol_is(head, "or")) {
-    bool is_and = symbol_is(head, "and");
-    if (args == ot_null) return step_value(is_and ? ot_true : ot_false);
-    otv cursor = args;
-    OT_FRAME_SCOPED(state, &cursor);
-    while (is_type(cursor, OBJ_PAIR) && is_type(as_pair(cursor)->cdr, OBJ_PAIR)) {
-      otv value = eval_value(state, as_pair(cursor)->car, env);
-      if (value == OT_UNWIND) return step_value(value);
-      if ((is_and && is_falsy(value)) || (!is_and && !is_falsy(value))) return step_value(value);
-      cursor = as_pair(cursor)->cdr;
+
+  continuation->handler_frames[continuation->index] = (ot_handler_frame){
+      .prev = process->handlers,
+      .pred = continuation->value,
+      .handler = input,
+  };
+  process->handlers = &continuation->handler_frames[continuation->index];
+  continuation->index++;
+  otv code;
+  if (continuation->index < continuation->count) {
+    binding = descriptor_value(bindings, continuation->index);
+    continuation->phase = HANDLER_PREDICATE;
+    code = descriptor_value(binding, 0);
+  } else {
+    continuation->phase = HANDLER_BODY;
+    code = descriptor_value(continuation->descriptor, 1);
+  }
+  if (!vm_schedule_code(state, code, continuation->env, continuation->namespace_value, NULL, 0)) {
+    process->handlers = continuation->old_handlers;
+    return vm_continuation_propagated();
+  }
+  return vm_continuation_scheduled();
+}
+
+static vm_continuation_result vm_resume_restart_case(ots* state, ot_vm_continuation* continuation,
+                                                     otv input) {
+  ot_process* process = state->current_process;
+  if (continuation->phase == RESTART_CLAUSE) {
+    process->restarts = continuation->restart_frame.prev;
+    return input == OT_UNWIND ? vm_continuation_propagated() : vm_continuation_completed(input);
+  }
+  if (input != OT_UNWIND) {
+    process->restarts = continuation->restart_frame.prev;
+    return vm_continuation_completed(input);
+  }
+  if (process->unwind_kind != UNWIND_RESTART) {
+    process->restarts = continuation->restart_frame.prev;
+    return vm_continuation_propagated();
+  }
+
+  for (size_t i = 0; i < continuation->count; i++) {
+    ot_restart_obj* restart = (ot_restart_obj*)ot_as_obj(continuation->restart_clauses[i].restart);
+    if (restart->id != process->unwind_restart_id) continue;
+    continuation->value = process->unwind_args;
+    process->unwind_kind = UNWIND_NONE;
+    process->unwind_restart_id = 0;
+    process->unwind_args = ot_nil;
+    if (!proper_list(continuation->value)) {
+      (void)ot_raise(state, "invoke-restart: invalid argument list");
+      process->restarts = continuation->restart_frame.prev;
+      return vm_continuation_propagated();
     }
-    if (!is_type(cursor, OBJ_PAIR) || as_pair(cursor)->cdr != ot_null)
-      return step_value(ot_raise(state, "%s: improper form", is_and ? "and" : "or"));
-    return step_tail(as_pair(cursor)->car, env);
-  }
-  if (symbol_is(head, "cond")) {
-    otv clauses = args;
-    OT_FRAME_SCOPED(state, &clauses);
-    while (is_type(clauses, OBJ_PAIR)) {
-      otv clause = as_pair(clauses)->car;
-      if (!is_type(clause, OBJ_PAIR)) return step_value(ot_raise(state, "cond: bad clause"));
-      otv test_form = as_pair(clause)->car;
-      OT_FRAME_SCOPED(state, &clause, &test_form);
-      otv test = symbol_is(test_form, "else") ? ot_true : eval_value(state, test_form, env);
-      if (test == OT_UNWIND) return step_value(test);
-      if (!is_falsy(test)) {
-        otv body = as_pair(clause)->cdr;
-        if (body == ot_null) return step_value(test);
-        return tail_sequence(state, body, env);
-      }
-      clauses = as_pair(clauses)->cdr;
+    size_t argc = list_length(continuation->value);
+    size_t value_count = argc == 0 ? 1 : argc;
+    otv values[value_count];
+    otv cursor = continuation->value;
+    for (size_t j = 0; j < value_count; j++) {
+      values[j] = argc == 0 ? ot_nil : as_pair(cursor)->car;
+      if (argc != 0) cursor = as_pair(cursor)->cdr;
     }
-    return clauses == ot_null ? step_value(ot_nil)
-                              : step_value(ot_raise(state, "cond: improper clauses"));
-  }
-  if (symbol_is(head, "quasiquote")) {
-    otv value = form_arg(state, form, 1, "quasiquote");
-    if (value == OT_UNWIND) return step_value(value);
-    return step_value(eval_quasiquote(state, value, env, 1));
-  }
-  if (symbol_is(head, "unquote") || symbol_is(head, "unquote-splicing"))
-    return step_value(ot_raise(state, "%s outside quasiquote",
-                               symbol_is(head, "unquote") ? "unquote" : "unquote-splicing"));
-  if (symbol_is(head, "defmacro")) {
-    if (is_type(env, OBJ_ENV)) return step_value(ot_raise(state, "defmacro: top level only"));
-    otv name = form_arg(state, form, 1, "defmacro");
-    otv params = form_arg(state, form, 2, "defmacro");
-    if (!is_type(name, OBJ_SYMBOL) || params == OT_UNWIND)
-      return step_value(ot_raise(state, "defmacro: invalid definition"));
-    otv function = ot_nil;
-    OT_FRAME_SCOPED(state, &name, &params, &function);
-    function =
-        make_function(state, params, list_tail(form, 3), ot_nil, state->current_namespace, name);
-    ot_macro_obj* macro = must_alloc(state, sizeof(*macro), OBJ_MACRO);
-    macro->function = function;
-    otv value = ot_from_obj(macro);
-    define_var(state, state->current_namespace, name, value, ot_nil, false);
-    return step_value(value);
-  }
-  if (symbol_is(head, "try")) return eval_try(state, args, env);
-  if (symbol_is(head, "handler-bind")) return eval_handler_bind(state, args, env);
-  if (symbol_is(head, "restart-case")) return eval_restart_case(state, args, env);
-  if (symbol_is(head, "unwind-protect") || symbol_is(head, "defer"))
-    return eval_unwind_protect(state, args, env);
-  if (symbol_is(head, "with-params")) return eval_with_params(state, args, env);
-  if (symbol_is(head, "defparam")) {
-    if (is_type(env, OBJ_ENV)) return step_value(ot_raise(state, "defparam: top level only"));
-    otv name = form_arg(state, form, 1, "defparam");
-    otv values = list_tail(form, 2);
-    otv doc = ot_nil;
-    OT_FRAME_SCOPED(state, &name, &values, &doc);
-    if (is_type(values, OBJ_PAIR) && is_type(as_pair(values)->car, OBJ_STRING) &&
-        is_type(as_pair(values)->cdr, OBJ_PAIR)) {
-      doc = as_pair(values)->car;
-      values = as_pair(values)->cdr;
+    continuation->phase = RESTART_CLAUSE;
+    if (!vm_schedule_code(state, continuation->restart_clauses[i].body, continuation->env,
+                          continuation->namespace_value, values, argc)) {
+      process->restarts = continuation->restart_frame.prev;
+      return vm_continuation_propagated();
     }
-    if (!is_type(name, OBJ_SYMBOL) || !is_type(values, OBJ_PAIR) || as_pair(values)->cdr != ot_null)
-      return step_value(ot_raise(state, "defparam: invalid definition"));
-    otv value = eval_value(state, as_pair(values)->car, env);
-    if (value == OT_UNWIND) return step_value(value);
-    OT_FRAME_SCOPED(state, &value);
-    ot_param_obj* param = must_alloc(state, sizeof(*param), OBJ_PARAM);
-    param->name = name;
-    param->value = value;
-    otv made = ot_from_obj(param);
-    OT_FRAME_SCOPED(state, &made);
-    define_var(state, state->current_namespace, name, made, doc, false);
-    return step_value(made);
+    return vm_continuation_scheduled();
   }
-  if (symbol_is(head, "in-ns") || symbol_is(head, "ns")) {
-    otv name = form_arg(state, form, 1, symbol_is(head, "ns") ? "ns" : "in-ns");
-    if (name == OT_UNWIND) return step_value(name);
-    while (is_type(name, OBJ_PAIR) && symbol_is(as_pair(name)->car, "quote"))
-      name = form_arg(state, name, 1, "quote");
-    if (is_type(name, OBJ_KEYWORD))
-      name = ot_intern(state, as_name(name)->bytes, as_name(name)->length, false);
-    else if (is_type(name, OBJ_STRING)) {
-      const char* bytes;
-      size_t length;
-      ot_string_bytes(name, &bytes, &length);
-      name = ot_intern(state, bytes, length, false);
-    }
-    if (!is_type(name, OBJ_SYMBOL)) return step_value(ot_raise(state, "in-ns: invalid name"));
-    state->current_namespace = namespace_find(state, name, true);
-    if (symbol_is(head, "ns")) {
-      otv clauses = list_tail(form, 2);
-      while (is_type(clauses, OBJ_PAIR)) {
-        otv clause = as_pair(clauses)->car;
-        if (is_type(clause, OBJ_PAIR) && is_type(as_pair(clause)->car, OBJ_KEYWORD) &&
-            as_name(as_pair(clause)->car)->length == 7 &&
-            memcmp(as_name(as_pair(clause)->car)->bytes, "require", 7) == 0) {
-          otv result = require_forms(state, as_pair(clause)->cdr);
-          if (result == OT_UNWIND) return step_value(result);
-        }
-        clauses = as_pair(clauses)->cdr;
-      }
-    }
-    return step_value(ot_nil);
+
+  process->restarts = continuation->restart_frame.prev;
+  return vm_continuation_propagated();
+}
+
+static vm_continuation_result vm_resume_unwind_protect(ots* state, ot_vm_continuation* continuation,
+                                                       otv input) {
+  ot_process* process = state->current_process;
+  if (continuation->phase == UNWIND_EXPRESSION) {
+    continuation->value = input;
+    continuation->saved_condition = process->condition;
+    continuation->saved_args = process->unwind_args;
+    continuation->saved_unwind_kind = process->unwind_kind;
+    continuation->saved_restart_id = process->unwind_restart_id;
+    process->condition = ot_nil;
+    process->unwind_args = ot_nil;
+    process->unwind_kind = UNWIND_NONE;
+    process->unwind_restart_id = 0;
+    continuation->phase = UNWIND_CLEANUP;
+    if (!vm_schedule_code(state, descriptor_value(continuation->descriptor, 1), continuation->env,
+                          continuation->namespace_value, NULL, 0))
+      return vm_continuation_propagated();
+    return vm_continuation_scheduled();
   }
-  if (symbol_is(head, "require")) return step_value(require_forms(state, args));
-  return step_no();
+  if (input == OT_UNWIND) return vm_continuation_propagated();
+  process->condition = continuation->saved_condition;
+  process->unwind_args = continuation->saved_args;
+  process->unwind_kind = continuation->saved_unwind_kind;
+  process->unwind_restart_id = continuation->saved_restart_id;
+  return continuation->value == OT_UNWIND ? vm_continuation_propagated()
+                                          : vm_continuation_completed(continuation->value);
+}
+
+static vm_continuation_result vm_resume_with_params(ots* state, ot_vm_continuation* continuation,
+                                                    otv input) {
+  ot_process* process = state->current_process;
+  if (continuation->phase == PARAM_BODY) {
+    process->params = continuation->old_params;
+    return input == OT_UNWIND ? vm_continuation_propagated() : vm_continuation_completed(input);
+  }
+  if (input == OT_UNWIND) {
+    process->params = continuation->old_params;
+    return vm_continuation_propagated();
+  }
+
+  otv bindings = descriptor_value(continuation->descriptor, 0);
+  otv binding = descriptor_value(bindings, continuation->index);
+  if (continuation->phase == PARAM_PARAMETER) {
+    if (!is_type(input, OBJ_PARAM)) {
+      (void)ot_raise(state, "with-params: expected param");
+      process->params = continuation->old_params;
+      return vm_continuation_propagated();
+    }
+    continuation->value = input;
+    continuation->phase = PARAM_VALUE;
+    if (!vm_schedule_code(state, descriptor_value(binding, 1), continuation->env,
+                          continuation->namespace_value, NULL, 0)) {
+      process->params = continuation->old_params;
+      return vm_continuation_propagated();
+    }
+    return vm_continuation_scheduled();
+  }
+
+  continuation->param_frames[continuation->index] = (ot_param_frame){
+      .prev = process->params,
+      .param = continuation->value,
+      .value = input,
+  };
+  process->params = &continuation->param_frames[continuation->index];
+  continuation->index++;
+  otv code;
+  if (continuation->index < continuation->count) {
+    binding = descriptor_value(bindings, continuation->index);
+    continuation->phase = PARAM_PARAMETER;
+    code = descriptor_value(binding, 0);
+  } else {
+    continuation->phase = PARAM_BODY;
+    code = descriptor_value(continuation->descriptor, 1);
+  }
+  if (!vm_schedule_code(state, code, continuation->env, continuation->namespace_value, NULL, 0)) {
+    process->params = continuation->old_params;
+    return vm_continuation_propagated();
+  }
+  return vm_continuation_scheduled();
+}
+
+static vm_continuation_result vm_resume_dynamic(ots* state, ot_vm_continuation* continuation,
+                                                otv input) {
+  if (continuation->instruction == BC_TRY) return vm_resume_try(state, continuation, input);
+  if (continuation->instruction == BC_HANDLER_BIND)
+    return vm_resume_handler_bind(state, continuation, input);
+  if (continuation->instruction == BC_RESTART_CASE)
+    return vm_resume_restart_case(state, continuation, input);
+  if (continuation->instruction == BC_UNWIND_PROTECT)
+    return vm_resume_unwind_protect(state, continuation, input);
+  if (continuation->instruction == BC_WITH_PARAMS)
+    return vm_resume_with_params(state, continuation, input);
+  (void)ot_raise(state, "vm: invalid dynamic continuation");
+  return vm_continuation_propagated();
 }
 
 /* =========================================================================
@@ -3477,7 +4770,8 @@ static otv nat_find_restart(ots* state, otv* args, int argc) {
     name = coerce_name(state, name, false, "find-restart");
     if (name == OT_UNWIND) return name;
   }
-  for (ot_restart_frame* frame = state->restarts; frame != NULL; frame = frame->prev)
+  for (ot_restart_frame* frame = state->current_process->restarts; frame != NULL;
+       frame = frame->prev)
     for (size_t i = frame->count; i-- > 0;) {
       otv restart = frame->clauses[i].restart;
       if ((is_type(name, OBJ_RESTART) && restart == name) ||
@@ -3492,7 +4786,8 @@ static otv nat_compute_restarts(ots* state, otv* args, int argc) {
   if (need_arity(state, "compute-restarts", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
   otv output = ot_array_new(state, 4);
   OT_FRAME_SCOPED(state, &output);
-  for (ot_restart_frame* frame = state->restarts; frame != NULL; frame = frame->prev)
+  for (ot_restart_frame* frame = state->current_process->restarts; frame != NULL;
+       frame = frame->prev)
     for (size_t i = frame->count; i-- > 0;) array_push(state, &output, frame->clauses[i].restart);
   return output;
 }
@@ -3503,9 +4798,9 @@ static otv nat_invoke_restart(ots* state, otv* args, int argc) {
   otv restart = nat_find_restart(state, restart_args, 1);
   if (restart == OT_UNWIND) return restart;
   if (restart == ot_nil) return ot_raise(state, "invoke-restart: no active restart");
-  state->unwind_kind = UNWIND_RESTART;
-  state->unwind_restart_id = ((ot_restart_obj*)ot_as_obj(restart))->id;
-  state->unwind_args = list_from_array(state, args + 1, (size_t)argc - 1);
+  state->current_process->unwind_kind = UNWIND_RESTART;
+  state->current_process->unwind_restart_id = ((ot_restart_obj*)ot_as_obj(restart))->id;
+  state->current_process->unwind_args = list_from_array(state, args + 1, (size_t)argc - 1);
   return OT_UNWIND;
 }
 
@@ -3540,7 +4835,7 @@ static otv nat_gensym(ots* state, otv* args, int argc) {
 static otv nat_macro_oracle(ots* state, otv* args, int argc) {
   if (need_arity(state, "expander-macro-var", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   if (!is_type(args[0], OBJ_SYMBOL)) return ot_nil;
-  otv var = resolve_var(state, state->current_namespace, args[0], false);
+  otv var = resolve_var(state, state->current_process->current_namespace, args[0], false);
   if (!is_type(var, OBJ_VAR)) return ot_nil;
   otv value = ((ot_var_obj*)ot_as_obj(var))->value;
   return is_type(value, OBJ_MACRO) ? value : ot_nil;
@@ -3587,7 +4882,7 @@ static otv nat_eval(ots* state, otv* args, int argc) {
     form = apply_value(state, state->expander, values, 1, false);
     if (form == OT_UNWIND) return form;
   }
-  return eval_value(state, form, ot_nil);
+  return compile_and_run_form(state, form, ot_nil);
 }
 
 static otv nat_read_string(ots* state, otv* args, int argc) {
@@ -3635,7 +4930,7 @@ static otv nat_current_second(ots* state, otv* args, int argc) {
 static otv nat_quit(ots* state, otv* args, int argc) {
   (void)args;
   if (need_arity(state, "quit", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
-  state->unwind_kind = UNWIND_QUIT;
+  state->current_process->unwind_kind = UNWIND_QUIT;
   state->quit_requested = true;
   return OT_UNWIND;
 }
@@ -3957,7 +5252,8 @@ void ot_def_nat(ots* state, const char* name, ot_nat function) {
   ot_nat_obj* nat = must_alloc(state, sizeof(*nat), OBJ_NAT);
   nat->function = function;
   nat->name = symbol;
-  define_var(state, state->current_namespace, symbol, ot_from_obj(nat), ot_nil, false);
+  define_var(state, state->current_process->current_namespace, symbol, ot_from_obj(nat), ot_nil,
+             false);
 }
 
 static void register_core(ots* state) {
@@ -3981,7 +5277,7 @@ static bool eval_source(ots* state, const char* source, size_t length, const cha
       form = apply_value(state, state->expander, args, 1, false);
       if (form == OT_UNWIND) return false;
     }
-    result = eval_value(state, form, ot_nil);
+    result = compile_and_run_form(state, form, ot_nil);
     if (result == OT_UNWIND) return false;
   }
   if (out != NULL) *out = result;
@@ -4019,7 +5315,7 @@ bool ot_eval_partial(ots* state, const char* source, size_t length, const char* 
         return false;
       }
     }
-    result = eval_value(state, form, ot_nil);
+    result = compile_and_run_form(state, form, ot_nil);
     if (result == OT_UNWIND) {
       *consumed = input.offset;
       return false;
@@ -4043,6 +5339,9 @@ ots* ot_create(const ot_config* configuration) {
   ots* state = ot_host_alloc(sizeof(*state));
   if (state == NULL) return NULL;
   memset(state, 0, sizeof(*state));
+  state->current_process = &state->root_process;
+  state->root_process.state = state;
+  state->root_process.frame_limit = config.max_depth;
   state->config = config;
   state->config.gc_stress = false;
   state->reservation = ot_host_alloc(config.heap_max * 2);
@@ -4058,25 +5357,24 @@ ots* ot_create(const ot_config* configuration) {
   state->symbols = ot_nil;
   state->namespaces = ot_nil;
   state->core_namespace = ot_nil;
-  state->current_namespace = ot_nil;
+  state->current_process->current_namespace = ot_nil;
   state->expander = ot_nil;
   state->type_parents = ot_nil;
-  state->condition = ot_nil;
-  state->unwind_args = ot_nil;
+  state->current_process->condition = ot_nil;
+  state->current_process->unwind_args = ot_nil;
   state->exts = ot_nil;
   state->writer = ot_default_write;
   state->next_stable_id = 1;
-  atomic_init(&state->interrupted, false);
+  atomic_init(&state->current_process->interrupted, false);
 
   otv core_name = ot_intern(state, "otium.core", 10, false);
   state->core_namespace = namespace_find(state, core_name, true);
-  state->current_namespace = state->core_namespace;
+  state->current_process->current_namespace = state->core_namespace;
   state->type_parents = ot_table_new(state, 8);
   register_core(state);
   ot_table_put(state, state->type_parents, ot_intern(state, "error", 5, false), OT_UNDEFINED);
 
   otv ignored;
-  state->bootstrapping = true;
   if (!eval_source(state, ot_expander_src, ot_expander_src_len, "<expander>", false, &ignored)) {
     ot_destroy(state);
     return NULL;
@@ -4088,13 +5386,12 @@ ots* ot_create(const ot_config* configuration) {
     return NULL;
   }
   state->expander = ((ot_var_obj*)ot_as_obj(expander_var))->value;
-  state->bootstrapping = false;
   if (!eval_source(state, ot_prelude_src, ot_prelude_src_len, "<prelude>", true, &ignored)) {
     ot_destroy(state);
     return NULL;
   }
   otv user_name = ot_intern(state, "user", 4, false);
-  state->current_namespace = namespace_find(state, user_name, true);
+  state->current_process->current_namespace = namespace_find(state, user_name, true);
   state->config.gc_stress = config.gc_stress;
   return state;
 }
@@ -4124,6 +5421,13 @@ void ot_destroy(ots* state) {
   }
   for (size_t i = 0; i < state->ext_type_count; i++) ot_host_free(state->ext_types[i].name);
   ot_host_free(state->ext_types);
+  while (state->root_process.continuations != NULL) {
+    ot_vm_continuation* continuation = state->root_process.continuations;
+    state->root_process.continuations = continuation->prev;
+    vm_free_continuation(continuation);
+  }
+  ot_host_free(state->root_process.vm_frames);
+  ot_host_free(state->root_process.vm_stack);
   ot_host_free(state->reservation);
   ot_host_free(state);
 }
@@ -4143,19 +5447,68 @@ void ot_set_interrupt_hook(ots* state, ot_interrupt_hook hook, void* userdata) {
   state->interrupt_userdata = userdata;
 }
 
-void ot_interrupt(ots* state) { atomic_store(&state->interrupted, true); }
+void ot_interrupt(ots* state) { atomic_store(&state->current_process->interrupted, true); }
+
+bool ot_start_call(ots* state, otv function, otv* args, size_t argc) {
+  ot_process* process = &state->root_process;
+  if (state->current_process != process || process->run_active || process->vm_frame_count != 0 ||
+      process->vm_stack_count != 0) {
+    (void)ot_raise(state, "root process is already running");
+    return false;
+  }
+  if (!is_type(function, OBJ_FUNCTION)) {
+    (void)ot_raise(state, "root process entry must be an interpreted function");
+    return false;
+  }
+
+  OT_FRAME_SCOPED(state, &function);
+  size_t root_count = argc == 0 ? 1 : argc;
+  otv dummy = ot_nil;
+  otv* roots[root_count];
+  for (size_t i = 0; i < root_count; i++) roots[i] = argc == 0 ? &dummy : &args[i];
+  ot_frame args_frame;
+  ot_frame_push(state, &args_frame, roots, root_count);
+  otv env = bind_parameters(state, function, args, argc);
+  ot_frame_pop(state, &args_frame);
+  if (env == OT_UNWIND) return false;
+  OT_FRAME_SCOPED(state, &env);
+
+  process->reductions = 0;
+  process->reduction_budget = 0;
+  process->yield_pending = false;
+  vm_push_frame(state, function, env, 0);
+  process->run_active = true;
+  return true;
+}
+
+ot_run_result ot_run(ots* state, uint64_t reduction_budget) {
+  ot_process* process = &state->root_process;
+  if (state->current_process != process || !process->run_active || process->vm_run_depth != 0)
+    return (ot_run_result){.status = OT_RUN_FAILED, .value = process->condition};
+
+  process->reductions = 0;
+  process->reduction_budget = reduction_budget;
+  process->yield_pending = false;
+  ot_run_result result = vm_execute_run(state, 0, NULL);
+  if (result.status != OT_RUN_YIELDED) {
+    process->run_active = false;
+    process->reduction_budget = 0;
+    process->yield_pending = false;
+  }
+  return result;
+}
 
 bool ot_eval_src(ots* state, const char* source, size_t length, const char* name, otv* out) {
   return eval_source(state, source, length, name == NULL ? "<input>" : name, true, out);
 }
 
-otv ot_condition(const ots* state) { return state->condition; }
+otv ot_condition(const ots* state) { return state->current_process->condition; }
 
 void ot_clear_condition(ots* state) {
-  state->condition = ot_nil;
-  state->unwind_args = ot_nil;
-  state->unwind_kind = UNWIND_NONE;
-  state->unwind_restart_id = 0;
+  state->current_process->condition = ot_nil;
+  state->current_process->unwind_args = ot_nil;
+  state->current_process->unwind_kind = UNWIND_NONE;
+  state->current_process->unwind_restart_id = 0;
 }
 
 void ot_register_module(ots* state, const char* name, ot_module_init init) {

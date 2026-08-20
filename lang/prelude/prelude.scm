@@ -35,9 +35,6 @@
 (defmacro unless (test . body)
   `(if ,test nil (begin ,@body)))
 
-(defmacro defn (name params . body)
-  `(define ,(cons name params) ,@body))
-
 (defmacro -> (x . forms)
   (let ((acc x) (s forms))
     (while (pair? s)

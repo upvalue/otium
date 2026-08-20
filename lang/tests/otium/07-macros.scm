@@ -11,8 +11,6 @@
 (println "thread-last:" (->> 5 (- 1)))
 (println "thread-last-list:" (->> [1 2 3] (map inc) (reduce + 0)))
 (dotimes (i 3) (println "dotimes:" i))
-(defn add3 (a b c) (+ a b c))
-(println "defn:" (add3 1 2 3))
 
 ; defmacro with quasiquote and gensym; defined here, used after
 (defmacro twice (e)

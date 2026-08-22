@@ -1,0 +1,20 @@
+;; https://leetcode.com/problems/check-divisibility-by-digit-sum-and-product/description/
+
+(define (digit-reduce n reducer init)
+  (let ((nstr (number->string n))
+        (accum init))
+    (dotimes (i (length nstr))
+      (let ((c (get nstr i)))
+        (set! accum (reducer accum (string->number c)))))
+    accum))
+
+(define (test n)
+  (let ((sum (digit-reduce n (lambda (a b) (+ a b)) 0))
+        (prod (digit-reduce n (lambda (a b) (* a b)) 1))
+        (sum+prod (+ sum prod))
+        (ok (and (= (modulo n sum+prod) 0))))
+    (println "input" n " => " ok)))
+
+(test 99)
+(test 23)
+

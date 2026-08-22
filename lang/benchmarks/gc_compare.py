@@ -18,7 +18,7 @@ from pathlib import Path
 MIB = 1024 * 1024
 NURSERY_BYTES = 2 * MIB
 MARK_STACK_ENTRIES = 16384
-COLLECTORS = ("semi", "gen", "gsgc")
+COLLECTORS = ("semi", "gen")
 WORKLOADS = {
     "churn": 1_000_000,
     "mixed": 30_000,
@@ -81,15 +81,9 @@ def heap_limits(budget_bytes):
     old = int(available_old / (1 + metadata_per_card / card_bytes))
     old -= old % card_bytes
     generational = old + NURSERY_BYTES
-    # GSGC reserves two new spaces and two old spaces initially; each old
-    # space is twice the new-space size. Leave room for its remembered table
-    # and heap structure. Its old spaces may grow if the live set requires it.
-    gsgc_new = (budget_bytes - 64 * 1024) // 6
-    gsgc_new -= gsgc_new % word_bytes
     return {
         "semi": {"heap_init": 1024 * 1024, "heap_max": semi},
         "gen": {"heap_init": 1024 * 1024, "heap_max": generational},
-        "gsgc": {"heap_init": gsgc_new, "heap_max": budget_bytes},
     }
 
 

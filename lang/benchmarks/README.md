@@ -32,7 +32,7 @@ counters as JSON. Build and run the selected collector directly with:
 make bench-gc GC=gen
 ```
 
-`gc_compare.py` builds semispace, `gen`, and `gsgc` binaries in separate build
+`gc_compare.py` builds semispace and `gen` binaries in separate build
 directories. It chooses build geometry that puts their initial
 `reserved_bytes + metadata_bytes` under the same target, runs each sample in a
 fresh process, and prints a Markdown table:
@@ -44,15 +44,10 @@ python3 benchmarks/gc_compare.py --budget-mib 128 --runs 5
 Use `--csv benchmarks/gc-results.csv` to retain every raw sample. The reported
 collection tuple is full-copy/minor/major-sweep/major-compact.
 
-Use `--collector gen --collector gsgc` for the generational comparison. Add
-`--append-csv` to accumulate samples over time. Each CSV row records its UTC
+Use `--collector gen` to run only the generational collector. Add `--append-csv`
+to accumulate samples over time. Each CSV row records its UTC
 timestamp, Otium revision and dirty-worktree flag, host, OS, architecture,
 memory budget, build heap geometry, warmup count, and measured-run count.
-
-GSGC can grow its old semispaces when the live set does not fit. Its budget is
-therefore an initial reservation target, not a hard ceiling. The table and CSV
-report the actual reservation after each workload; compare that field before
-treating results as equal-memory pairs.
 
 GC percentage and maximum pause use the nesting-aware mutator-pause counter.
 The phase tuple remains useful for identifying where each stop spent its time.

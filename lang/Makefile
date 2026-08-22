@@ -7,9 +7,7 @@ CPPFLAGS += -DOT_HEAP_INIT=$(HEAP_INIT) -DOT_HEAP_MAX=$(HEAP_MAX) \
 	-DOT_MAX_DEPTH=$(MAX_DEPTH) -DOT_GC_NURSERY_BYTES=$(GC_NURSERY_BYTES) \
 	-DOT_GC_OLD_CHUNK_BYTES=$(GC_OLD_CHUNK_BYTES) \
 	-DOT_GC_LARGE_OBJECT_BYTES=$(GC_LARGE_OBJECT_BYTES) \
-	-DOT_GC_MARK_STACK_ENTRIES=$(GC_MARK_STACK_ENTRIES) -DOT_GC_TIMING=$(GC_TIMING) \
-	-DOT_GSGC_MAX_AGE=$(GSGC_MAX_AGE) -DOT_GSGC_MAX_REMEMBERED=$(GSGC_MAX_REMEMBERED) \
-	-DOT_GSGC_MIN_NEW_SPACE=$(GSGC_MIN_NEW_SPACE)
+	-DOT_GC_MARK_STACK_ENTRIES=$(GC_MARK_STACK_ENTRIES) -DOT_GC_TIMING=$(GC_TIMING)
 CPPFLAGS += $(EXTRA_CPPFLAGS)
 
 BUILD ?= $(BUILD_ROOT)/$(PLATFORM)
@@ -24,11 +22,8 @@ CPPFLAGS += -DOT_GC_SEMI
 else ifeq ($(GC),gen)
 GC_OBJ := $(OBJ)/ot-gc-gen.o
 CPPFLAGS += -DOT_GC_GEN
-else ifeq ($(GC),gsgc)
-GC_OBJ := $(OBJ)/ot-gc-gsgc.o
-CPPFLAGS += -DOT_GC_GSGC
 else
-$(error GC must be "semi", "gen", or "gsgc")
+$(error GC must be "semi" or "gen")
 endif
 
 RUNTIME_OBJ := $(OBJ)/otium.o $(OBJ)/ot-gc-common.o $(GC_OBJ) $(OBJ)/ot-posix.o
@@ -74,9 +69,6 @@ $(OBJ)/ot-gc-semi.o: src/ot-gc-semi.c src/otium.h src/ot-gc-internal.inc src/ot-
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -c $< -o $@
 
 $(OBJ)/ot-gc-gen.o: src/ot-gc-gen.c src/otium.h src/ot-gc-internal.inc src/ot-gc-trace.inc | $(OBJ)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -c $< -o $@
-
-$(OBJ)/ot-gc-gsgc.o: src/ot-gc-gsgc.c src/otium.h src/ot-gc-internal.inc src/ot-gc-trace.inc | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -c $< -o $@
 
 $(OBJ)/ot-posix.o: src/ot-posix.c src/otium.h | $(OBJ)

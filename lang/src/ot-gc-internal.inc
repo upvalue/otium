@@ -15,7 +15,7 @@ void ot_gc_record_phase(ot_gc_phase_stats* phase, uint64_t elapsed_ns);
 bool ot_gc_heap_init(ots* state);
 void ot_gc_heap_destroy(ots* state);
 
-#ifdef OT_GC_GEN
+#if defined(OT_GC_GEN) || defined(OT_GC_GSGC)
 void ot_gc_write_barrier(ots* state, const ot_obj* owner, otv value);
 #else
 static inline void ot_gc_write_barrier(ots* state, const ot_obj* owner, otv value) {

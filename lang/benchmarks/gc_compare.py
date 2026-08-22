@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
-"""Build both collectors under one reservation-plus-metadata budget."""
+"""Build Otium collectors under one reservation-plus-metadata budget."""
 
 import argparse
 import csv
+import datetime
 import json
+import platform
 import statistics
 import struct
 import subprocess
@@ -16,6 +18,7 @@ from pathlib import Path
 MIB = 1024 * 1024
 NURSERY_BYTES = 2 * MIB
 MARK_STACK_ENTRIES = 16384
+COLLECTORS = ("semi", "gen", "gsgc")
 WORKLOADS = {
     "churn": 1_000_000,
     "mixed": 30_000,
@@ -38,6 +41,13 @@ def arguments():
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument(
+        "--collector",
+        action="append",
+        choices=COLLECTORS,
+        dest="collectors",
+        help="collector to run; repeat the option to select more than one",
+    )
+    parser.add_argument(
         "--workload",
         action="append",
         choices=sorted(WORKLOADS),
@@ -45,11 +55,18 @@ def arguments():
         help="workload to run; repeat the option to select more than one",
     )
     parser.add_argument("--csv", type=Path, help="also write raw samples as CSV")
+    parser.add_argument(
+        "--append-csv",
+        action="store_true",
+        help="append to --csv for longitudinal results instead of replacing it",
+    )
     result = parser.parse_args()
     if result.budget_mib < 16:
         parser.error("--budget-mib must be at least 16")
     if result.warmups < 0 or result.runs < 1:
         parser.error("--warmups must be non-negative and --runs must be positive")
+    if result.append_csv and result.csv is None:
+        parser.error("--append-csv requires --csv")
     return result
 
 
@@ -64,10 +81,19 @@ def heap_limits(budget_bytes):
     old = int(available_old / (1 + metadata_per_card / card_bytes))
     old -= old % card_bytes
     generational = old + NURSERY_BYTES
-    return {"semi": semi, "gen": generational}
+    # GSGC reserves two new spaces and two old spaces initially; each old
+    # space is twice the new-space size. Leave room for its remembered table
+    # and heap structure. Its old spaces may grow if the live set requires it.
+    gsgc_new = (budget_bytes - 64 * 1024) // 6
+    gsgc_new -= gsgc_new % word_bytes
+    return {
+        "semi": {"heap_init": 1024 * 1024, "heap_max": semi},
+        "gen": {"heap_init": 1024 * 1024, "heap_max": generational},
+        "gsgc": {"heap_init": gsgc_new, "heap_max": budget_bytes},
+    }
 
 
-def build(root, collector, heap_max):
+def build(root, collector, geometry):
     build_dir = Path("build") / "gc-compare" / collector
     binary = root / build_dir / "gc-bench"
     command = [
@@ -76,7 +102,8 @@ def build(root, collector, heap_max):
         f"BUILD={build_dir}",
         f"GC={collector}",
         "WITH_RAY=0",
-        f"HEAP_MAX={heap_max}",
+        f"HEAP_INIT={geometry['heap_init']}",
+        f"HEAP_MAX={geometry['heap_max']}",
         str(build_dir / "gc-bench"),
     ]
     result = subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
@@ -161,15 +188,45 @@ def print_table(rows):
         )
 
 
-def write_samples(path, samples):
+def revision(root):
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, text=True, capture_output=True, check=False
+    )
+    return result.stdout.strip() if result.returncode == 0 else "unknown"
+
+
+def dirty_worktree(root):
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode != 0 or bool(result.stdout.strip())
+
+
+def write_samples(path, samples, metadata, append):
     rows = []
     for (collector, workload), values in samples.items():
         for run, sample in enumerate(values, 1):
-            rows.append({"collector": collector, "run": run, **sample})
+            rows.append({**metadata, "collector": collector, "run": run, **sample})
     keys = sorted({key for row in rows for key in row})
-    with path.open("w", newline="") as output:
+    write_header = True
+    mode = "w"
+    if append and path.exists() and path.stat().st_size != 0:
+        with path.open(newline="") as existing:
+            existing_keys = next(csv.reader(existing), [])
+        if existing_keys != keys:
+            raise RuntimeError(
+                f"cannot append {path}: columns differ from the existing CSV"
+            )
+        mode = "a"
+        write_header = False
+    with path.open(mode, newline="") as output:
         writer = csv.DictWriter(output, fieldnames=keys)
-        writer.writeheader()
+        if write_header:
+            writer.writeheader()
         writer.writerows(rows)
 
 
@@ -179,10 +236,11 @@ def main():
     budget_bytes = args.budget_mib * MIB
     limits = heap_limits(budget_bytes)
     workloads = args.workloads or list(WORKLOADS)
+    collectors = args.collectors or list(COLLECTORS)
+    collected_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
     try:
         binaries = {
-            collector: build(root, collector, limits[collector])
-            for collector in ("semi", "gen")
+            collector: build(root, collector, limits[collector]) for collector in collectors
         }
         all_samples = {}
         for collector, binary in binaries.items():
@@ -191,22 +249,49 @@ def main():
                 for _ in range(args.warmups):
                     run_once(binary, workload, iterations)
                 all_samples[(collector, workload)] = [
-                    run_once(binary, workload, iterations) for _ in range(args.runs)
+                    {
+                        **run_once(binary, workload, iterations),
+                        "heap_init": limits[collector]["heap_init"],
+                        "heap_max": limits[collector]["heap_max"],
+                    }
+                    for _ in range(args.runs)
                 ]
     except RuntimeError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 
     print(f"Collector memory budget: {args.budget_mib} MiB")
-    print(f"Logical heap maxima: semi={limits['semi']} bytes, gen={limits['gen']} bytes")
+    print(
+        "Build geometry: "
+        + ", ".join(
+            f"{collector} heap_init={limits[collector]['heap_init']} "
+            f"heap_max={limits[collector]['heap_max']}"
+            for collector in collectors
+        )
+    )
     rows = [
         summarize(collector, workload, all_samples[(collector, workload)])
         for workload in workloads
-        for collector in ("semi", "gen")
+        for collector in collectors
     ]
     print_table(rows)
     if args.csv is not None:
-        write_samples(args.csv, all_samples)
+        metadata = {
+            "budget_bytes": budget_bytes,
+            "collected_at_utc": collected_at,
+            "host": platform.node(),
+            "machine": platform.machine(),
+            "os": platform.platform(),
+            "otium_dirty": dirty_worktree(root),
+            "otium_revision": revision(root),
+            "warmups": args.warmups,
+            "measured_runs": args.runs,
+        }
+        try:
+            write_samples(args.csv, all_samples, metadata, args.append_csv)
+        except RuntimeError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
     return 0
 
 

@@ -22,14 +22,17 @@ untracked `site.mk`.
 ## Garbage collectors
 
 The default `GC=semi` build uses the original whole-heap copying collector.
-`GC=gen` selects the copying-nursery and mark-sweep old-space collector:
+`GC=gen` selects the copying-nursery and mark-sweep old-space collector.
+`GC=gsgc` selects the generation-scavenging collector transplanted from GSGC
+1.0:
 
 ```sh
 make GC=gen
 make test GC=gen
+make test GC=gsgc
 ```
 
-The new collector's architecture is adapted from the BSD-licensed Dartino
+The `gen` collector's architecture is adapted from the BSD-licensed Dartino
 collector maintained in the [Toit repository](https://github.com/toitlang/toit/tree/d0396578ff5b7cf9d1ea1509421ec82fa6afeef1/src/third_party/dartino).
 The source checkout is pinned at `d0396578ff5b7cf9d1ea1509421ec82fa6afeef1`.
 It was checked on 2026-08-21; the last change to that subtree was
@@ -41,6 +44,12 @@ Otium calls the implementation `gen`. Arrays and byte objects remain
 contiguous, including objects that span old-space cards. Host tuning defaults
 for the nursery, old-space growth chunks, large-object cutoff, mark stack, and
 pause timing live in `config.mk`.
+
+The `gsgc` build keeps GSGC's two copying generations, age-based promotion,
+and remembered-object set. It uses Otium's exact root and object walker instead
+of GSGC's public API and pointer maps. See [`LICENSES/GSGC.txt`](LICENSES/GSGC.txt)
+for the upstream license and [`gsgc-algo.md`](gsgc-algo.md) for the transplant
+notes and memory geometry.
 
 ## Project files
 

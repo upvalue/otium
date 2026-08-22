@@ -2,7 +2,7 @@
 id: lan-qojh
 status: open
 deps: []
-links: [lan-s095, lan-7l89, lan-7wkw]
+links: [lan-s095, lan-7l89, lan-7wkw, lan-6824]
 created: 2026-08-22T04:39:30Z
 type: task
 priority: 1

@@ -118,3 +118,12 @@ disable it.
 The repository includes a dependency-free demo and a Raylib binding. See
 [examples/README.md](examples/README.md) for build commands, the extension API, and the
 Raylib example.
+
+## Credits
+
+Otium currently adapts two different GC algorithms for use, both under BSD license.
+
+- [toit](https://github.com/toitlang/toit)'s garbage collector, originally from Dartino.
+- gsgc by Ian Piumarta.
+
+

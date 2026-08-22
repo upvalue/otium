@@ -8,6 +8,16 @@
 typedef struct ot_state ots;
 typedef uintptr_t otv;
 
+/* Optional contracts for tools/gc-lint. They do not change generated code. */
+#if defined(__clang__)
+#define OT_GC_MAY_ALLOCATE __attribute__((annotate("otium.gc.may_allocate")))
+#define OT_GC_ALLOW_STALE_BORROW(REASON)                                                           \
+  __attribute__((annotate("otium.gc.allow_stale_borrow:" REASON)))
+#else
+#define OT_GC_MAY_ALLOCATE
+#define OT_GC_ALLOW_STALE_BORROW(REASON)
+#endif
+
 #define ot_nil ((otv)2u)
 #define ot_true ((otv)6u)
 #define ot_false ((otv)10u)
@@ -111,24 +121,25 @@ void ot_set_interrupt_hook(ots* state, ot_interrupt_hook hook, void* userdata);
 void ot_interrupt(ots* state);
 
 /* Evaluate all forms in source. On failure, inspect ot_condition(state). */
-bool ot_eval_src(ots* state, const char* source, size_t length, const char* name, otv* out);
+OT_GC_MAY_ALLOCATE bool ot_eval_src(ots* state, const char* source, size_t length, const char* name,
+                                    otv* out);
 otv ot_condition(const ots* state);
 void ot_clear_condition(ots* state);
 
 /* Inspect and construct values. Constructors may move every unrooted value. */
 ot_type ot_value_type(otv value);
-otv ot_make_float(ots* state, double value);
-otv ot_make_string(ots* state, const char* bytes, size_t length);
-otv ot_make_symbol(ots* state, const char* bytes, size_t length);
-otv ot_make_keyword(ots* state, const char* bytes, size_t length);
-otv ot_cons(ots* state, otv car, otv cdr);
-otv ot_array_new(ots* state, size_t capacity);
-otv ot_array_append(ots* state, otv array, otv value);
+OT_GC_MAY_ALLOCATE otv ot_make_float(ots* state, double value);
+OT_GC_MAY_ALLOCATE otv ot_make_string(ots* state, const char* bytes, size_t length);
+OT_GC_MAY_ALLOCATE otv ot_make_symbol(ots* state, const char* bytes, size_t length);
+OT_GC_MAY_ALLOCATE otv ot_make_keyword(ots* state, const char* bytes, size_t length);
+OT_GC_MAY_ALLOCATE otv ot_cons(ots* state, otv car, otv cdr);
+OT_GC_MAY_ALLOCATE otv ot_array_new(ots* state, size_t capacity);
+OT_GC_MAY_ALLOCATE otv ot_array_append(ots* state, otv array, otv value);
 otv ot_array_get(otv array, size_t index, otv fallback);
 size_t ot_array_length(otv array);
-otv ot_table_new(ots* state, size_t capacity);
+OT_GC_MAY_ALLOCATE otv ot_table_new(ots* state, size_t capacity);
 otv ot_table_get(ots* state, otv table, otv key, otv fallback);
-otv ot_table_put(ots* state, otv table, otv key, otv value);
+OT_GC_MAY_ALLOCATE otv ot_table_put(ots* state, otv table, otv key, otv value);
 size_t ot_table_length(otv table);
 bool ot_pair_values(otv pair, otv* car, otv* cdr);
 bool ot_equal(ots* state, otv left, otv right, bool structural);
@@ -162,20 +173,21 @@ void ot_global_add(ots* state, otv* slot);
 #define OT_GLOBAL(S, SLOT) ot_global_add((S), (SLOT))
 
 /* Install C callables in the current namespace or as a require-able module. */
-void ot_def_nat(ots* state, const char* name, ot_nat function);
+OT_GC_MAY_ALLOCATE void ot_def_nat(ots* state, const char* name, ot_nat function);
 void ot_register_module(ots* state, const char* name, ot_module_init init);
 
 /* Extension values hold inline bytes or an owned host pointer. */
 unsigned ot_ext_type(ots* state, const char* name, ot_ext_finalizer finalizer);
-otv ot_ext_inline(ots* state, unsigned type, const void* payload, size_t size);
-otv ot_ext_pointer(ots* state, unsigned type, void* payload);
-bool ot_ext_check(ots* state, const char* who, otv value, unsigned type, void** payload);
-otv ot_ext_release(ots* state, const char* who, otv value, unsigned type);
+OT_GC_MAY_ALLOCATE otv ot_ext_inline(ots* state, unsigned type, const void* payload, size_t size);
+OT_GC_MAY_ALLOCATE otv ot_ext_pointer(ots* state, unsigned type, void* payload);
+OT_GC_MAY_ALLOCATE bool ot_ext_check(ots* state, const char* who, otv value, unsigned type,
+                                     void** payload);
+OT_GC_MAY_ALLOCATE otv ot_ext_release(ots* state, const char* who, otv value, unsigned type);
 
 /* Read collector counters or request a collection at a safe embedding point. */
 ot_gc_stats ot_get_gc_stats(const ots* state);
 void ot_reset_gc_stats(ots* state);
-void ot_collect(ots* state);
+OT_GC_MAY_ALLOCATE void ot_collect(ots* state);
 
 #ifdef OT_INTERNAL
 
@@ -510,7 +522,7 @@ static inline bool ot_has_type(otv value, ot_obj_type type) {
 }
 static inline size_t ot_object_size(otv value) { return (size_t)(ot_as_obj(value)->header >> 8u); }
 
-void* ot_alloc(ots* state, size_t size, ot_obj_type type);
+OT_GC_MAY_ALLOCATE void* ot_alloc(ots* state, size_t size, ot_obj_type type);
 
 void* ot_host_alloc(size_t size);
 void* ot_host_realloc(void* memory, size_t size);
@@ -520,14 +532,15 @@ double ot_platform_current_second(void);
 bool ot_platform_read_file(const char* path, char** source, size_t* length);
 
 void ot_default_write(void* userdata, const char* bytes, size_t length);
-otv ot_raise(ots* state, const char* format, ...);
-otv ot_raise_value(ots* state, otv condition);
-otv ot_intern(ots* state, const char* bytes, size_t length, bool keyword);
+OT_GC_MAY_ALLOCATE otv ot_raise(ots* state, const char* format, ...);
+OT_GC_MAY_ALLOCATE otv ot_raise_value(ots* state, otv condition);
+OT_GC_MAY_ALLOCATE otv ot_intern(ots* state, const char* bytes, size_t length, bool keyword);
 void ot_repr_to(ots* state, otv value, bool display, void (*write)(void*, const char*, size_t),
                 void* userdata);
 void ot_register_demo_extension(ots* state);
-bool ot_eval_partial(ots* state, const char* source, size_t length, const char* name,
-                     size_t* consumed, bool* incomplete, otv* out);
+OT_GC_MAY_ALLOCATE bool ot_eval_partial(ots* state, const char* source, size_t length,
+                                        const char* name, size_t* consumed, bool* incomplete,
+                                        otv* out);
 #ifdef OT_WITH_RAY
 void ot_register_ray_extension(ots* state);
 #endif

@@ -37,7 +37,7 @@ CPPFLAGS += -DOT_WITH_RAY $(RAYLIB_CFLAGS)
 LDLIBS += $(RAYLIB_LIBS)
 endif
 
-.PHONY: all lib test bench bench-gc format clean hygiene FORCE
+.PHONY: all lib test bench bench-gc format clean hygiene gc-lint FORCE
 
 # The public output path is shared by collector selections. Relink it so
 # switching GC cannot leave a binary from the previous build.
@@ -104,6 +104,9 @@ $(OBJ) $(GEN) $(BIN):
 hygiene:
 	$(PYTHON) tests/check_hygiene.py .
 	! rg -n '^\s*#\s*define\s+OT_INTERNAL\b' --glob '!src/**' .
+
+gc-lint:
+	tools/gc-lint/run
 
 test: all $(BUILD)/test-runtime hygiene
 	$(BUILD)/test-runtime

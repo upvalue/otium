@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(cd "$(dirname "$0")" && pwd)
+repo_dir=$(cd "$script_dir/../.." && pwd)
+build_dir=${OT_GC_LINT_BUILD_DIR:-"$repo_dir/build/gc-lint"}
+
+if [[ -n ${LLVM_CONFIG:-} ]]; then
+  llvm_config=$LLVM_CONFIG
+elif command -v llvm-config >/dev/null 2>&1; then
+  llvm_config=$(command -v llvm-config)
+elif command -v brew >/dev/null 2>&1 && brew --prefix llvm >/dev/null 2>&1; then
+  llvm_config=$(brew --prefix llvm)/bin/llvm-config
+else
+  printf '%s\n' \
+    'otium-gc-lint needs LLVM and Clang development headers.' \
+    'On macOS: brew install llvm' \
+    'Elsewhere: set LLVM_CONFIG to the matching llvm-config executable.' >&2
+  exit 2
+fi
+
+if [[ ! -x $llvm_config ]]; then
+  printf 'LLVM_CONFIG is not executable: %s\n' "$llvm_config" >&2
+  exit 2
+fi
+
+llvm_prefix=$($llvm_config --prefix)
+clang_bin="$llvm_prefix/bin/clang"
+clangxx_bin="$llvm_prefix/bin/clang++"
+if [[ ! -x $clang_bin || ! -x $clangxx_bin ]] ||
+  ! compgen -G "$llvm_prefix/lib/libclang-cpp.*" >/dev/null; then
+  printf 'The LLVM installation at %s lacks clang, clang++, or libclang-cpp.\n' "$llvm_prefix" >&2
+  printf '%s\n' 'Install matching LLVM and Clang development packages.' >&2
+  exit 2
+fi
+resource_dir=$($clang_bin --print-resource-dir)
+system_args=()
+if [[ $(uname -s) == Darwin ]] && command -v xcrun >/dev/null 2>&1; then
+  system_args=(-isysroot "$(xcrun --show-sdk-path)")
+fi
+
+mkdir -p "$build_dir"
+tool="$build_dir/otium-gc-lint"
+source="$script_dir/otium-gc-lint.cpp"
+if [[ ! -x $tool || $source -nt $tool ]]; then
+  # llvm-config emits compiler arguments as shell words. Homebrew LLVM paths do
+  # not contain spaces; installations that do can provide a wrapper via LLVM_CONFIG.
+  # shellcheck disable=SC2206
+  cxxflags=($($llvm_config --cxxflags))
+  # shellcheck disable=SC2206
+  ldflags=($($llvm_config --ldflags --system-libs --libs))
+  "$clangxx_bin" "${cxxflags[@]}" "$source" -o "$tool" \
+    -Wl,-rpath,"$llvm_prefix/lib" -lclang-cpp "${ldflags[@]}"
+fi
+
+python3 "$script_dir/tests/test_lint.py" "$tool" "$script_dir/tests/stale-borrow.c"
+
+make -C "$repo_dir" build/gen/expander.h build/gen/prelude.h
+
+"$tool" "$@" \
+  "$repo_dir/src/otium.c" \
+  "$repo_dir/src/ot-gc.c" \
+  "$repo_dir/src/ot-posix.c" \
+  "$repo_dir/src/main.c" \
+  "$repo_dir/src/ot-ext-demo.c" \
+  "$repo_dir/tests/test_runtime.c" \
+  -- \
+  -std=c23 \
+  -DOT_HEAP_INIT=1048576 \
+  -DOT_HEAP_MAX=67108864 \
+  -DOT_MAX_DEPTH=200000 \
+  -resource-dir "$resource_dir" \
+  "${system_args[@]}" \
+  -I"$repo_dir/build/gen" \
+  -I"$repo_dir/src" \
+  -I"$repo_dir/vendor/bestline"

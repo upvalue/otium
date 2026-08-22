@@ -29,3 +29,7 @@ A State configured with a fixed heap performs no host allocation from the collec
 **2026-08-16T21:40:23Z**
 
 Unblocked on the myh9 half: heapMaxBytes is a real bound now. Still needs lan-iuyk plus the raise-instead-of-abort path at heap.c:101.
+
+**2026-08-22T04:39:58Z**
+
+The selectable gen collector landed in commit 19f6265. Its collection paths use preallocated mark and card structures and do not call the host allocator, but heap exhaustion still reaches the existing must-allocate abort path. Rebase this ticket on the ot_gc_heap boundary, keep the catchable OOM requirement, and test both GC selections. Host sizing and lazy old-space metadata are tracked separately in lan-7l89.

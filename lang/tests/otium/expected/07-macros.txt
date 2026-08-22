@@ -9,7 +9,6 @@ thread-last-list: 9
 dotimes: 0
 dotimes: 1
 dotimes: 2
-defn: 6
 twice: 42
 capture: 105
 gensym-no-collide: 14

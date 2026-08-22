@@ -2,7 +2,7 @@
 id: lan-7wkw
 status: open
 deps: []
-links: [lan-s095, lan-7l89, lan-qojh]
+links: [lan-s095, lan-7l89, lan-qojh, lan-j8tj]
 created: 2026-08-22T04:39:40Z
 type: task
 priority: 1
@@ -24,3 +24,9 @@ Add diagnostic timing for mark, pointer repair, movement, metadata rebuild, and 
 3. Mixed and churn throughput do not regress beyond benchmark noise.
 4. Inclusive maximum pause is reported under at least two memory budgets.
 5. The exact-pointer, multi-chunk object, overflow-stack, sanitizer, and extension-finalization tests remain green.
+
+## Notes
+
+**2026-08-22T16:53:37Z**
+
+popcount32 in src/ot-gc-gen.c:611 is a bit-clearing loop on the compaction address-calculation path; switch to __builtin_popcount when measuring the major phases.

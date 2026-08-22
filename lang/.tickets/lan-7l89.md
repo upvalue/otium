@@ -2,7 +2,7 @@
 id: lan-7l89
 status: open
 deps: []
-links: [lan-s095, lan-qojh, lan-7wkw]
+links: [lan-s095, lan-qojh, lan-7wkw, lan-j8tj]
 created: 2026-08-22T04:39:20Z
 type: feature
 priority: 1

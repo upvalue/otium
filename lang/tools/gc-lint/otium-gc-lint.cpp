@@ -288,8 +288,7 @@ public:
   const RecordDecl* pointed_record(QualType type) const {
     if (const auto* pointer = type->getAs<PointerType>()) type = pointer->getPointeeType();
     const auto* record = type->getAs<RecordType>();
-    return record == nullptr ? nullptr
-                             : cast<RecordDecl>(record->getDecl()->getCanonicalDecl());
+    return record == nullptr ? nullptr : cast<RecordDecl>(record->getDecl()->getCanonicalDecl());
   }
 
   bool is_otv_pointer(QualType type) const {
@@ -309,28 +308,32 @@ private:
     return array == nullptr ? QualType() : array->getElementType();
   }
 
-  void collect_record(const RecordDecl* record, const RecordDecl* owner,
+  bool collect_record(const RecordDecl* record, const RecordDecl* owner,
                       std::set<const RecordDecl*>& visiting) {
     record = record->getDefinition();
-    if (record == nullptr) return;
+    if (record == nullptr) return false;
     record = cast<RecordDecl>(record->getCanonicalDecl());
     owner = cast<RecordDecl>(owner->getCanonicalDecl());
-    record_owners_[record].insert(owner);
-    if (!visiting.insert(record).second) return;
+    if (!visiting.insert(record).second) return false;
+    bool has_edges = false;
     for (const FieldDecl* field : record->fields()) {
       QualType type = field->getType();
       QualType element = array_element(type);
       if (is_otv(type) || (!element.isNull() && is_otv(element))) {
         edge_owners_[field->getCanonicalDecl()].insert(owner);
+        has_edges = true;
         continue;
       }
       if (!element.isNull()) type = element;
       const auto* nested_type = type->getAs<RecordType>();
-      if (nested_type != nullptr)
-        collect_record(cast<RecordDecl>(nested_type->getDecl()->getCanonicalDecl()), owner,
-                       visiting);
+      if (nested_type != nullptr &&
+          collect_record(cast<RecordDecl>(nested_type->getDecl()->getCanonicalDecl()), owner,
+                         visiting))
+        has_edges = true;
     }
     visiting.erase(record);
+    if (has_edges) record_owners_[record].insert(owner);
+    return has_edges;
   }
 
   ASTContext& context_;
@@ -364,7 +367,7 @@ public:
   bool VisitBinaryOperator(BinaryOperator* operation) {
     if (!operation->isAssignmentOp() || !in_main_file(operation->getOperatorLoc())) return true;
     const Expr* left = operation->getLHS();
-    if (owners_for_edge_expr(left) != nullptr || owners_for_record_value_expr(left) != nullptr)
+    if (owners_for_written_edge(left) != nullptr || owners_for_record_value_expr(left) != nullptr)
       report_direct_store(operation->getOperatorLoc());
 
     const Expr* stripped = strip_expr(left);
@@ -433,6 +436,21 @@ private:
     return nullptr;
   }
 
+  const OwnerSet* owners_for_written_edge(const Expr* expression) const {
+    expression = strip_expr(expression);
+    if (expression == nullptr) return nullptr;
+    if (const auto* member = dyn_cast<MemberExpr>(expression)) {
+      const auto* field = dyn_cast<FieldDecl>(member->getMemberDecl());
+      return field == nullptr ? nullptr : layout_.edge_owners(field);
+    }
+    if (const auto* subscript = dyn_cast<ArraySubscriptExpr>(expression))
+      return owners_for_edge_expr(subscript->getBase());
+    if (const auto* unary = dyn_cast<UnaryOperator>(expression)) {
+      if (unary->getOpcode() == UO_Deref) return owners_for_edge_expr(unary->getSubExpr());
+    }
+    return nullptr;
+  }
+
   const OwnerSet* owners_for_record_expr(const Expr* expression) const {
     expression = strip_expr(expression);
     if (expression == nullptr) return nullptr;
@@ -465,8 +483,7 @@ private:
       return;
     }
     const RecordDecl* owner = owner_record(call->getArg(1));
-    if (owner == nullptr ||
-        owners->count(cast<RecordDecl>(owner->getCanonicalDecl())) == 0)
+    if (owner == nullptr || owners->count(cast<RecordDecl>(owner->getCanonicalDecl())) == 0)
       report_bad_owner(call->getArg(1)->getExprLoc(), owner);
   }
 

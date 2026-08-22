@@ -26,6 +26,12 @@ typedef struct ot_entries_obj {
   ot_entry values[];
 } ot_entries_obj;
 
+typedef struct ot_bytes_obj {
+  unsigned long header;
+  unsigned long length;
+  unsigned char bytes[];
+} ot_bytes_obj;
+
 struct ot_state {
   otv root;
 };
@@ -50,9 +56,16 @@ void safe(ots* state, ot_pair_obj* pair, ot_slots_obj* slots, ot_entries_obj* en
   ot_store(state, pair, &pair->car, value);
   ot_store(state, slots, &slots->values[0], value);
   ot_store(state, entries, &entries->values[0].key, value);
+  otv* slot = &pair->cdr;
+  slot = &pair->car;
+  ot_store(state, pair, slot, value);
   pair->stable_id = 1;
   state->root = value;
   frame->value = value;
+}
+
+void safe_bulk(ot_bytes_obj* bytes, const ot_bytes_obj* source) {
+  memcpy(bytes, source, sizeof(*bytes));
 }
 
 void unsafe_pair(ot_pair_obj* pair, otv value) { pair->car = value; }
@@ -86,11 +99,7 @@ void unsafe_bulk(ot_pair_obj* pair, const ot_pair_obj* source) {
 }
 
 OT_GC_ALLOW_DIRECT_STORE("object is outside the managed heap")
-void escaped(ot_pair_obj* pair, otv value) {
-  pair->car = value;
-}
+void escaped(ot_pair_obj* pair, otv value) { pair->car = value; }
 
 OT_GC_ALLOW_DIRECT_STORE("")
-void empty_escape(ot_pair_obj* pair, otv value) {
-  pair->car = value;
-}
+void empty_escape(ot_pair_obj* pair, otv value) { pair->car = value; }

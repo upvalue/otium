@@ -6,9 +6,8 @@ space when doing so releases another whole growth chunk. Objects stay
 contiguous in both generations; there are no arraylets or separate large-object
 representations.
 
-This document describes the implementation in `src/ot-gc-gen.c`. The earlier
-design and attribution notes are in [gc-algo.md](../gc-algo.md) and the
-[project README](../README.md).
+This document describes the implementation in `src/ot-gc-gen.c`. Attribution
+notes are in the [project README](../README.md).
 
 ## Source layout
 

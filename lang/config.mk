@@ -2,6 +2,13 @@ CC ?= cc
 AR ?= ar
 PYTHON ?= python3
 
+# Keep compiler output outside the checkout by default. PLATFORM also names the
+# one CLI binary kept in the checkout, so synced copies for different hosts do
+# not overwrite each other.
+PLATFORM ?= $(shell uname -m)-$(shell uname -s | tr '[:upper:]' '[:lower:]')
+BUILD_ROOT ?= /tmp/otium
+BIN_ROOT ?= bin
+
 # Collector implementation. "semi" is the whole-heap copying collector,
 # "gen" is the copying-nursery/mark-sweep collector, and "gsgc" is the
 # transplanted generation-scavenging collector.

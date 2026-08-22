@@ -12,12 +12,22 @@ not a supported build mode.
 ```sh
 make
 make test
+./otium
 ```
 
-`make lib` builds the embeddable runtime as `build/libotium.a`; `make bench`
-runs the benchmark suite. Defaults and feature switches live in `config.mk`.
-Put machine-local overrides such as sanitizer flags or Raylib paths in an
-untracked `site.mk`.
+Build objects, generated headers, the embeddable library, and test programs go
+under `/tmp/otium/<architecture>-<os>/`. The CLI is the exception: it goes in
+`bin/<architecture>-<os>/otium`, and the `./otium` symlink runs the binary for
+the current platform. This keeps the large intermediate files out of synced
+checkouts without making the usual command platform-specific.
+
+`make lib` builds the embeddable runtime as
+`/tmp/otium/<architecture>-<os>/libotium.a`; `make bench` runs the benchmark
+suite. Defaults and feature switches live in `config.mk`. Put machine-local
+overrides such as sanitizer flags, Raylib paths, `BUILD_ROOT`, or `BIN_ROOT` in
+an untracked `site.mk`. If `BIN_ROOT` changes, set the launcher's corresponding
+`OTIUM_BIN_ROOT` environment variable too. `OTIUM_PLATFORM` can select a
+non-native CLI build at runtime.
 
 ## Garbage collectors
 
@@ -37,8 +47,8 @@ collector maintained in the [Toit repository](https://github.com/toitlang/toit/t
 The source checkout is pinned at `d0396578ff5b7cf9d1ea1509421ec82fa6afeef1`.
 It was checked on 2026-08-21; the last change to that subtree was
 `b21477806e6b8ba9e18c570e803fbe529f258054` on 2024-05-01. See [Credits](#credits)
-for provenance and [`gc-algo.md`](gc-algo.md) for Otium's layout and departures
-from upstream.
+for provenance and [`agent-docs/gc-gen.md`](agent-docs/gc-gen.md) for Otium's
+layout and departures from upstream.
 
 Otium calls the implementation `gen`. Arrays and byte objects remain
 contiguous, including objects that span old-space cards. Host tuning defaults

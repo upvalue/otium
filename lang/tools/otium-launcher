@@ -1,0 +1,20 @@
+#!/bin/sh
+
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+platform=${OTIUM_PLATFORM:-$(uname -m)-$(uname -s | tr '[:upper:]' '[:lower:]')}
+bin_root=${OTIUM_BIN_ROOT:-"$repo_dir/bin"}
+
+case $bin_root in
+/*) ;;
+*) bin_root=$repo_dir/$bin_root ;;
+esac
+
+binary=$bin_root/$platform/otium
+if [ ! -x "$binary" ]; then
+    printf 'otium: no build for %s; run make\n' "$platform" >&2
+    exit 127
+fi
+
+exec "$binary" "$@"

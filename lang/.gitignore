@@ -1,6 +1,7 @@
 # Build and compiler output
 /build/
 /builddir/
+/bin/
 /compile_commands.json
 /site.mk
 *.o

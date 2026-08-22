@@ -1,6 +1,8 @@
 include config.mk
 -include site.mk
 
+.DEFAULT_GOAL := all
+
 CPPFLAGS += -DOT_HEAP_INIT=$(HEAP_INIT) -DOT_HEAP_MAX=$(HEAP_MAX) \
 	-DOT_MAX_DEPTH=$(MAX_DEPTH) -DOT_GC_NURSERY_BYTES=$(GC_NURSERY_BYTES) \
 	-DOT_GC_OLD_CHUNK_BYTES=$(GC_OLD_CHUNK_BYTES) \
@@ -10,7 +12,9 @@ CPPFLAGS += -DOT_HEAP_INIT=$(HEAP_INIT) -DOT_HEAP_MAX=$(HEAP_MAX) \
 	-DOT_GSGC_MIN_NEW_SPACE=$(GSGC_MIN_NEW_SPACE)
 CPPFLAGS += $(EXTRA_CPPFLAGS)
 
-BUILD ?= build
+BUILD ?= $(BUILD_ROOT)/$(PLATFORM)
+BIN := $(BIN_ROOT)/$(PLATFORM)
+OTIUM := $(BIN)/otium
 OBJ := $(BUILD)/obj/$(GC)
 GEN := $(BUILD)/gen
 
@@ -44,11 +48,11 @@ endif
 # switching GC cannot leave a binary from the previous build.
 FORCE:
 
-all: $(BUILD)/otium
+all: $(OTIUM)
 
 lib: $(BUILD)/libotium.a
 
-$(BUILD)/otium: $(RUNTIME_OBJ) $(CLI_OBJ) FORCE
+$(OTIUM): $(RUNTIME_OBJ) $(CLI_OBJ) FORCE | $(BIN)
 	$(CC) $(LDFLAGS) -o $@ $(filter %.o,$^) $(LDLIBS)
 
 $(BUILD)/libotium.a: $(RUNTIME_OBJ) FORCE
@@ -102,7 +106,7 @@ $(GEN)/expander.h: prelude/expander.scm tools/embed.py | $(GEN)
 $(GEN)/prelude.h: prelude/prelude.scm tools/embed.py | $(GEN)
 	$(PYTHON) tools/embed.py $< ot_prelude_src $@
 
-$(OBJ) $(GEN):
+$(OBJ) $(GEN) $(BIN):
 	mkdir -p $@
 
 hygiene:
@@ -111,16 +115,16 @@ hygiene:
 
 test: all $(BUILD)/test-runtime hygiene
 	$(BUILD)/test-runtime
-	$(PYTHON) tests/otium/run-tests.py $(BUILD)/otium
-	$(PYTHON) tests/test_cli.py $(BUILD)/otium tests/cli-load.scm tests/cli-load-second.scm
-	$(BUILD)/otium --no-project --path examples/demo tests/ext-demo.scm
-	$(BUILD)/otium --no-project --path examples/otcl tests/otcl.scm
+	$(PYTHON) tests/otium/run-tests.py $(OTIUM)
+	$(PYTHON) tests/test_cli.py $(OTIUM) tests/cli-load.scm tests/cli-load-second.scm
+	$(OTIUM) --no-project --path examples/demo tests/ext-demo.scm
+	$(OTIUM) --no-project --path examples/otcl tests/otcl.scm
 ifeq ($(WITH_RAY),1)
-	$(BUILD)/otium --no-project --path examples/ray tests/ext-ray.scm
+	$(OTIUM) --no-project --path examples/ray tests/ext-ray.scm
 endif
 
 bench: all
-	$(PYTHON) benchmarks/run.py $(BUILD)/otium
+	$(PYTHON) benchmarks/run.py $(OTIUM)
 
 bench-gc: $(BUILD)/gc-bench
 	$(BUILD)/gc-bench churn
@@ -132,3 +136,4 @@ format:
 
 clean:
 	rm -r $(BUILD)
+	rm -f $(OTIUM)

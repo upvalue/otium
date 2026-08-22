@@ -44,7 +44,7 @@ It owns no collector layout.
 
 The implementation is split as follows:
 
-- `src/ot-gc.c`: semispace implementation.
+- `src/ot-gc-semi.c`: semispace implementation.
 - `src/ot-gc-gen.c`: nursery, old space, side metadata, sweep, and compaction.
 - `src/ot-gc-common.c`: root-frame bookkeeping, finalizer dispatch, shared
   counters, and benchmark counter reset.

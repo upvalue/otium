@@ -66,7 +66,7 @@ $(OBJ)/otium.o: src/otium.c src/otium.h $(GEN)/expander.h $(GEN)/prelude.h | $(O
 $(OBJ)/ot-gc-common.o: src/ot-gc-common.c src/otium.h src/ot-gc-internal.inc | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -c $< -o $@
 
-$(OBJ)/ot-gc-semi.o: src/ot-gc.c src/otium.h src/ot-gc-internal.inc src/ot-gc-trace.inc | $(OBJ)
+$(OBJ)/ot-gc-semi.o: src/ot-gc-semi.c src/otium.h src/ot-gc-internal.inc src/ot-gc-trace.inc | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -c $< -o $@
 
 $(OBJ)/ot-gc-gen.o: src/ot-gc-gen.c src/otium.h src/ot-gc-internal.inc src/ot-gc-trace.inc | $(OBJ)

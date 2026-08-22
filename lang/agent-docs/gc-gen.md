@@ -14,7 +14,7 @@ design and attribution notes are in [gc-algo.md](../gc-algo.md) and the
 
 - `src/ot-gc-gen.c` implements allocation, minor collection, major collection,
   side metadata, sweep, and compaction.
-- `src/ot-gc.c` implements the selectable semispace collector.
+- `src/ot-gc-semi.c` implements the selectable semispace collector.
 - `src/ot-gc-common.c` owns root-frame bookkeeping, extension finalizer
   dispatch, phase counters, and statistics reset.
 - `src/ot-gc-trace.inc` is the shared object and root layout description.

@@ -56,7 +56,8 @@ static void semi_trace_slot(ots* state, otv* slot) {
 #define OT_GC_TRACE_SLOT(state, slot) semi_trace_slot((state), (slot))
 #include "ot-gc-trace.inc"
 
-static void finish_exts(ots* state, otv old_exts) {
+static OT_GC_ALLOW_DIRECT_STORE("collector rebuilds the weak extension list") void finish_exts(
+    ots* state, otv old_exts) {
   otv live = ot_nil;
   while (ot_is_ptr(old_exts)) {
     ot_ext_obj* ext = (ot_ext_obj*)ot_as_obj(old_exts);

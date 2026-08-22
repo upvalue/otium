@@ -421,7 +421,8 @@ static void minor_scan_remembered(ots* state) {
   }
 }
 
-static void minor_finish_exts(ots* state, otv old_exts) {
+static OT_GC_ALLOW_DIRECT_STORE("collector rebuilds the weak extension list") void
+minor_finish_exts(ots* state, otv old_exts) {
   struct ot_gc_heap* heap = state->gc;
   otv live = ot_nil;
   while (ot_is_ptr(old_exts)) {
@@ -672,7 +673,8 @@ static void major_fix_slot(ots* state, otv* slot) {
 #define OT_GC_TRACE_SLOT(state, slot) major_fix_slot((state), (slot))
 #include "ot-gc-trace.inc"
 
-static void relink_major_exts(ots* state, bool compact) {
+static OT_GC_ALLOW_DIRECT_STORE("collector rebuilds the weak extension list") void
+relink_major_exts(ots* state, bool compact) {
   struct ot_gc_heap* heap = state->gc;
   otv cursor = state->exts;
   otv live = ot_nil;

@@ -13,9 +13,12 @@ typedef uintptr_t otv;
 #define OT_GC_MAY_ALLOCATE __attribute__((annotate("otium.gc.may_allocate")))
 #define OT_GC_ALLOW_STALE_BORROW(REASON)                                                           \
   __attribute__((annotate("otium.gc.allow_stale_borrow:" REASON)))
+#define OT_GC_ALLOW_DIRECT_STORE(REASON)                                                           \
+  __attribute__((annotate("otium.gc.allow_direct_store:" REASON)))
 #else
 #define OT_GC_MAY_ALLOCATE
 #define OT_GC_ALLOW_STALE_BORROW(REASON)
+#define OT_GC_ALLOW_DIRECT_STORE(REASON)
 #endif
 
 #define ot_nil ((otv)2u)

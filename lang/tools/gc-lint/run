@@ -4,6 +4,7 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "$0")" && pwd)
 repo_dir=$(cd "$script_dir/../.." && pwd)
 build_dir=${OT_GC_LINT_BUILD_DIR:-"$repo_dir/build/gc-lint"}
+runtime_build="$build_dir/runtime"
 
 if [[ -n ${LLVM_CONFIG:-} ]]; then
   llvm_config=$LLVM_CONFIG
@@ -53,24 +54,33 @@ if [[ ! -x $tool || $source -nt $tool ]]; then
     -Wl,-rpath,"$llvm_prefix/lib" -lclang-cpp "${ldflags[@]}"
 fi
 
-python3 "$script_dir/tests/test_lint.py" "$tool" "$script_dir/tests/stale-borrow.c"
+python3 "$script_dir/tests/test_lint.py" "$tool" \
+  "$script_dir/tests/stale-borrow.c" "$script_dir/tests/write-barrier.c"
 
-make -C "$repo_dir" build/gen/expander.h build/gen/prelude.h
+make -C "$repo_dir" BUILD="$runtime_build" \
+  "$runtime_build/gen/expander.h" "$runtime_build/gen/prelude.h"
 
-"$tool" "$@" \
-  "$repo_dir/src/otium.c" \
-  "$repo_dir/src/ot-gc.c" \
-  "$repo_dir/src/ot-posix.c" \
-  "$repo_dir/src/main.c" \
-  "$repo_dir/src/ot-ext-demo.c" \
-  "$repo_dir/tests/test_runtime.c" \
-  -- \
+compile_args=(
   -std=c23 \
   -DOT_HEAP_INIT=1048576 \
   -DOT_HEAP_MAX=67108864 \
   -DOT_MAX_DEPTH=200000 \
   -resource-dir "$resource_dir" \
   "${system_args[@]}" \
-  -I"$repo_dir/build/gen" \
+  -I"$runtime_build/gen" \
   -I"$repo_dir/src" \
   -I"$repo_dir/vendor/bestline"
+)
+
+"$tool" "$@" \
+  "$repo_dir/src/otium.c" \
+  "$repo_dir/src/ot-gc-common.c" \
+  "$repo_dir/src/ot-posix.c" \
+  "$repo_dir/src/main.c" \
+  "$repo_dir/src/ot-ext-demo.c" \
+  "$repo_dir/tests/test_runtime.c" \
+  "$repo_dir/benchmarks/gc_bench.c" \
+  -- "${compile_args[@]}" -DOT_GC_GEN
+
+"$tool" "$@" "$repo_dir/src/ot-gc-semi.c" -- "${compile_args[@]}" -DOT_GC_SEMI
+"$tool" "$@" "$repo_dir/src/ot-gc-gen.c" -- "${compile_args[@]}" -DOT_GC_GEN

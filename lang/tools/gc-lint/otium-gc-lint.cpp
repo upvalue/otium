@@ -40,6 +40,7 @@ llvm::cl::opt<bool> report_suppressions("report-suppressions",
 
 constexpr llvm::StringLiteral may_allocate_annotation = "otium.gc.may_allocate";
 constexpr llvm::StringLiteral stale_borrow_annotation = "otium.gc.allow_stale_borrow:";
+constexpr llvm::StringLiteral direct_store_annotation = "otium.gc.allow_direct_store:";
 
 struct FunctionInfo {
   const FunctionDecl* definition = nullptr;
@@ -64,6 +65,18 @@ std::optional<std::string> stale_borrow_reason(const VarDecl* variable) {
     if (annotated == nullptr) continue;
     llvm::StringRef annotation = annotated->getAnnotation();
     if (annotation.consume_front(stale_borrow_annotation)) return annotation.str();
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> direct_store_reason(const FunctionDecl* function) {
+  for (const FunctionDecl* redeclaration : function->redecls()) {
+    for (const Attr* attribute : redeclaration->attrs()) {
+      const auto* annotated = dyn_cast<AnnotateAttr>(attribute);
+      if (annotated == nullptr) continue;
+      llvm::StringRef annotation = annotated->getAnnotation();
+      if (annotation.consume_front(direct_store_annotation)) return annotation.str();
+    }
   }
   return std::nullopt;
 }
@@ -241,6 +254,304 @@ private:
   std::vector<Event> events_;
 };
 
+using OwnerSet = std::set<const RecordDecl*>;
+
+class ManagedLayout {
+public:
+  explicit ManagedLayout(ASTContext& context) : context_(context) {}
+
+  void build(TranslationUnitDecl* unit) {
+    std::vector<const RecordDecl*> roots;
+    for (Decl* declaration : unit->decls()) {
+      const auto* record = dyn_cast<RecordDecl>(declaration);
+      if (record == nullptr || !record->isCompleteDefinition()) continue;
+      llvm::StringRef name = record->getName();
+      if (name == "ot_obj" || (name.starts_with("ot_") && name.ends_with("_obj")))
+        roots.push_back(cast<RecordDecl>(record->getCanonicalDecl()));
+    }
+    for (const RecordDecl* root : roots) {
+      std::set<const RecordDecl*> visiting;
+      collect_record(root, root, visiting);
+    }
+  }
+
+  const OwnerSet* edge_owners(const FieldDecl* field) const {
+    auto found = edge_owners_.find(field->getCanonicalDecl());
+    return found == edge_owners_.end() ? nullptr : &found->second;
+  }
+
+  const OwnerSet* record_owners(const RecordDecl* record) const {
+    auto found = record_owners_.find(cast<RecordDecl>(record->getCanonicalDecl()));
+    return found == record_owners_.end() ? nullptr : &found->second;
+  }
+
+  const RecordDecl* pointed_record(QualType type) const {
+    if (const auto* pointer = type->getAs<PointerType>()) type = pointer->getPointeeType();
+    const auto* record = type->getAs<RecordType>();
+    return record == nullptr ? nullptr
+                             : cast<RecordDecl>(record->getDecl()->getCanonicalDecl());
+  }
+
+  bool is_otv_pointer(QualType type) const {
+    const auto* pointer = type->getAs<PointerType>();
+    return pointer != nullptr && is_otv(pointer->getPointeeType());
+  }
+
+private:
+  bool is_otv(QualType type) const {
+    type = type.getUnqualifiedType();
+    const auto* alias = dyn_cast<TypedefType>(type.getTypePtrOrNull());
+    return alias != nullptr && alias->getDecl()->getName() == "otv";
+  }
+
+  QualType array_element(QualType type) const {
+    const ArrayType* array = context_.getAsArrayType(type);
+    return array == nullptr ? QualType() : array->getElementType();
+  }
+
+  void collect_record(const RecordDecl* record, const RecordDecl* owner,
+                      std::set<const RecordDecl*>& visiting) {
+    record = record->getDefinition();
+    if (record == nullptr) return;
+    record = cast<RecordDecl>(record->getCanonicalDecl());
+    owner = cast<RecordDecl>(owner->getCanonicalDecl());
+    record_owners_[record].insert(owner);
+    if (!visiting.insert(record).second) return;
+    for (const FieldDecl* field : record->fields()) {
+      QualType type = field->getType();
+      QualType element = array_element(type);
+      if (is_otv(type) || (!element.isNull() && is_otv(element))) {
+        edge_owners_[field->getCanonicalDecl()].insert(owner);
+        continue;
+      }
+      if (!element.isNull()) type = element;
+      const auto* nested_type = type->getAs<RecordType>();
+      if (nested_type != nullptr)
+        collect_record(cast<RecordDecl>(nested_type->getDecl()->getCanonicalDecl()), owner,
+                       visiting);
+    }
+    visiting.erase(record);
+  }
+
+  ASTContext& context_;
+  std::unordered_map<const FieldDecl*, OwnerSet> edge_owners_;
+  std::unordered_map<const RecordDecl*, OwnerSet> record_owners_;
+};
+
+class WriteBarrierChecker : public RecursiveASTVisitor<WriteBarrierChecker> {
+public:
+  WriteBarrierChecker(ASTContext& context, const ManagedLayout& layout, unsigned& warning_count)
+      : context_(context), sources_(context.getSourceManager()),
+        diagnostics_(context.getDiagnostics()), layout_(layout), warning_count_(warning_count) {}
+
+  void check(const FunctionDecl* function) {
+    current_function_ = function;
+    aliases_.clear();
+    suppression_reported_ = false;
+    TraverseStmt(const_cast<Stmt*>(function->getBody()));
+    current_function_ = nullptr;
+  }
+
+  bool VisitVarDecl(VarDecl* variable) {
+    if (!variable->isLocalVarDecl() || variable->getInit() == nullptr ||
+        !layout_.is_otv_pointer(variable->getType()))
+      return true;
+    if (const OwnerSet* owners = owners_for_edge_expr(variable->getInit()))
+      aliases_[variable->getCanonicalDecl()] = *owners;
+    return true;
+  }
+
+  bool VisitBinaryOperator(BinaryOperator* operation) {
+    if (!operation->isAssignmentOp() || !in_main_file(operation->getOperatorLoc())) return true;
+    const Expr* left = operation->getLHS();
+    if (owners_for_edge_expr(left) != nullptr || owners_for_record_value_expr(left) != nullptr)
+      report_direct_store(operation->getOperatorLoc());
+
+    const Expr* stripped = strip_expr(left);
+    if (const auto* reference = dyn_cast<DeclRefExpr>(stripped)) {
+      const auto* variable = dyn_cast<VarDecl>(reference->getDecl());
+      if (variable != nullptr && layout_.is_otv_pointer(variable->getType())) {
+        if (const OwnerSet* owners = owners_for_edge_expr(operation->getRHS()))
+          aliases_[variable->getCanonicalDecl()] = *owners;
+        else aliases_.erase(variable->getCanonicalDecl());
+      }
+    }
+    return true;
+  }
+
+  bool VisitUnaryOperator(UnaryOperator* operation) {
+    if (!operation->isIncrementDecrementOp() || !in_main_file(operation->getOperatorLoc()))
+      return true;
+    if (owners_for_edge_expr(operation->getSubExpr()) != nullptr)
+      report_direct_store(operation->getOperatorLoc());
+    return true;
+  }
+
+  bool VisitCallExpr(CallExpr* call) {
+    if (!in_main_file(call->getExprLoc())) return true;
+    const FunctionDecl* callee = call->getDirectCallee();
+    if (callee == nullptr) return true;
+    llvm::StringRef name = callee->getName();
+    if (name == "ot_store") {
+      check_ot_store(call);
+      return true;
+    }
+    if ((name == "memcpy" || name == "memmove" || name == "memset") && call->getNumArgs() > 0 &&
+        destination_is_managed(call->getArg(0)))
+      report_bulk_store(call->getExprLoc(), name);
+    return true;
+  }
+
+private:
+  const Expr* strip_expr(const Expr* expression) const {
+    while (expression != nullptr) {
+      expression = expression->IgnoreParens();
+      const auto* cast = dyn_cast<CastExpr>(expression);
+      if (cast == nullptr) break;
+      expression = cast->getSubExpr();
+    }
+    return expression;
+  }
+
+  const OwnerSet* owners_for_edge_expr(const Expr* expression) const {
+    expression = strip_expr(expression);
+    if (expression == nullptr) return nullptr;
+    if (const auto* member = dyn_cast<MemberExpr>(expression)) {
+      const auto* field = dyn_cast<FieldDecl>(member->getMemberDecl());
+      return field == nullptr ? nullptr : layout_.edge_owners(field);
+    }
+    if (const auto* subscript = dyn_cast<ArraySubscriptExpr>(expression))
+      return owners_for_edge_expr(subscript->getBase());
+    if (const auto* unary = dyn_cast<UnaryOperator>(expression))
+      return owners_for_edge_expr(unary->getSubExpr());
+    if (const auto* reference = dyn_cast<DeclRefExpr>(expression)) {
+      const auto* variable = dyn_cast<VarDecl>(reference->getDecl());
+      if (variable == nullptr) return nullptr;
+      auto found = aliases_.find(variable->getCanonicalDecl());
+      return found == aliases_.end() ? nullptr : &found->second;
+    }
+    return nullptr;
+  }
+
+  const OwnerSet* owners_for_record_expr(const Expr* expression) const {
+    expression = strip_expr(expression);
+    if (expression == nullptr) return nullptr;
+    const RecordDecl* record = layout_.pointed_record(expression->getType());
+    return record == nullptr ? nullptr : layout_.record_owners(record);
+  }
+
+  const OwnerSet* owners_for_record_value_expr(const Expr* expression) const {
+    expression = strip_expr(expression);
+    if (expression == nullptr) return nullptr;
+    const auto* record = expression->getType()->getAs<RecordType>();
+    return record == nullptr ? nullptr : layout_.record_owners(record->getDecl());
+  }
+
+  bool destination_is_managed(const Expr* destination) const {
+    return owners_for_edge_expr(destination) != nullptr ||
+           owners_for_record_expr(destination) != nullptr;
+  }
+
+  const RecordDecl* owner_record(const Expr* expression) const {
+    expression = expression == nullptr ? nullptr : expression->IgnoreParenImpCasts();
+    return expression == nullptr ? nullptr : layout_.pointed_record(expression->getType());
+  }
+
+  void check_ot_store(const CallExpr* call) {
+    if (call->getNumArgs() != 4) return;
+    const OwnerSet* owners = owners_for_edge_expr(call->getArg(2));
+    if (owners == nullptr) {
+      report_bad_target(call->getArg(2)->getExprLoc());
+      return;
+    }
+    const RecordDecl* owner = owner_record(call->getArg(1));
+    if (owner == nullptr ||
+        owners->count(cast<RecordDecl>(owner->getCanonicalDecl())) == 0)
+      report_bad_owner(call->getArg(1)->getExprLoc(), owner);
+  }
+
+  bool in_main_file(SourceLocation location) const {
+    location = sources_.getExpansionLoc(location);
+    return location.isValid() && sources_.isWrittenInMainFile(location);
+  }
+
+  bool suppress(SourceLocation location) {
+    std::optional<std::string> reason = direct_store_reason(current_function_);
+    if (!reason || reason->empty()) return false;
+    if (report_suppressions && !suppression_reported_) {
+      unsigned remark = diagnostics_.getCustomDiagID(
+          DiagnosticsEngine::Remark,
+          "accepted direct-store escape hatch for '%0': %1 [otium-gc-write-barrier]");
+      diagnostics_.Report(sources_.getExpansionLoc(location), remark)
+          << current_function_->getName() << *reason;
+      suppression_reported_ = true;
+    }
+    return true;
+  }
+
+  void note_empty_suppression() {
+    std::optional<std::string> reason = direct_store_reason(current_function_);
+    if (!reason || !reason->empty()) return;
+    unsigned note = diagnostics_.getCustomDiagID(
+        DiagnosticsEngine::Note, "OT_GC_ALLOW_DIRECT_STORE requires a nonempty reason");
+    diagnostics_.Report(sources_.getExpansionLoc(current_function_->getLocation()), note);
+  }
+
+  void report_direct_store(SourceLocation location) {
+    if (suppress(location)) return;
+    unsigned warning = diagnostics_.getCustomDiagID(
+        DiagnosticsEngine::Warning,
+        "managed heap edge is written without ot_store [otium-gc-write-barrier]");
+    diagnostics_.Report(sources_.getExpansionLoc(location), warning);
+    unsigned note = diagnostics_.getCustomDiagID(
+        DiagnosticsEngine::Note, "write the edge with ot_store(state, owner, slot, value)");
+    diagnostics_.Report(sources_.getExpansionLoc(location), note);
+    note_empty_suppression();
+    warning_count_++;
+  }
+
+  void report_bulk_store(SourceLocation location, llvm::StringRef name) {
+    if (suppress(location)) return;
+    unsigned warning = diagnostics_.getCustomDiagID(
+        DiagnosticsEngine::Warning,
+        "bulk write with '%0' may replace managed heap edges without write barriers "
+        "[otium-gc-write-barrier]");
+    diagnostics_.Report(sources_.getExpansionLoc(location), warning) << name;
+    note_empty_suppression();
+    warning_count_++;
+  }
+
+  void report_bad_target(SourceLocation location) {
+    if (suppress(location)) return;
+    unsigned warning = diagnostics_.getCustomDiagID(
+        DiagnosticsEngine::Warning,
+        "ot_store target is not a managed heap edge [otium-gc-write-barrier]");
+    diagnostics_.Report(sources_.getExpansionLoc(location), warning);
+    note_empty_suppression();
+    warning_count_++;
+  }
+
+  void report_bad_owner(SourceLocation location, const RecordDecl* owner) {
+    if (suppress(location)) return;
+    unsigned warning = diagnostics_.getCustomDiagID(
+        DiagnosticsEngine::Warning,
+        "ot_store owner type '%0' does not contain the target edge [otium-gc-write-barrier]");
+    llvm::StringRef name = owner == nullptr ? "unknown" : owner->getName();
+    diagnostics_.Report(sources_.getExpansionLoc(location), warning) << name;
+    note_empty_suppression();
+    warning_count_++;
+  }
+
+  ASTContext& context_;
+  const SourceManager& sources_;
+  DiagnosticsEngine& diagnostics_;
+  const ManagedLayout& layout_;
+  unsigned& warning_count_;
+  const FunctionDecl* current_function_ = nullptr;
+  std::unordered_map<const VarDecl*, OwnerSet> aliases_;
+  bool suppression_reported_ = false;
+};
+
 class TranslationUnitChecker {
 public:
   TranslationUnitChecker(ASTContext& context, unsigned& warning_count)
@@ -251,11 +562,15 @@ public:
     FunctionCollector collector(functions_);
     collector.TraverseDecl(context_.getTranslationUnitDecl());
     finish_function_summaries(functions_);
+    ManagedLayout layout(context_);
+    layout.build(context_.getTranslationUnitDecl());
+    WriteBarrierChecker barrier(context_, layout, warning_count_);
     for (const auto& [function, info] : functions_) {
       if (info.definition == nullptr) continue;
       SourceLocation location = sources_.getExpansionLoc(info.definition->getLocation());
       if (!sources_.isWrittenInMainFile(location)) continue;
       check_function(info.definition);
+      barrier.check(info.definition);
     }
   }
 

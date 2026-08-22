@@ -1233,8 +1233,11 @@ static otv resolve_var(ots* state, otv namespace_value, otv symbol, bool report_
   if (slash != NULL && slash != name->bytes && slash != name->bytes + name->length - 1) {
     size_t prefix_length = (size_t)(slash - name->bytes);
     otv prefix = ot_intern(state, name->bytes, prefix_length, false);
-    otv member = ot_intern(state, slash + 1, name->length - prefix_length - 1, false);
-    OT_FRAME_SCOPED(state, &prefix, &member);
+    OT_FRAME_SCOPED(state, &prefix);
+    name = as_name(symbol);
+    otv member =
+        ot_intern(state, name->bytes + prefix_length + 1, name->length - prefix_length - 1, false);
+    OT_FRAME_SCOPED(state, &member);
     otv target_name = namespace_alias(namespace_value, prefix);
     if (target_name == ot_nil) target_name = prefix;
     otv target = namespace_find(state, target_name, false);
@@ -1253,7 +1256,10 @@ static otv resolve_var(ots* state, otv namespace_value, otv symbol, bool report_
       return var;
     }
   }
-  if (report_error) return ot_raise(state, "unbound symbol: %.*s", (int)name->length, name->bytes);
+  if (report_error) {
+    name = as_name(symbol);
+    return ot_raise(state, "unbound symbol: %.*s", (int)name->length, name->bytes);
+  }
   return ot_nil;
 }
 
@@ -3028,6 +3034,7 @@ static otv require_one(ots* state, otv spec, otv caller) {
                             as_name(as_pair(cursor)->car)->length, false),
                   "reload"))
       reload = true;
+  space = (ot_namespace_obj*)ot_as_obj(target);
   if (!space->loaded || reload) {
     if (space->loading) return ot_raise(state, "require: circular load");
     space->loading = true;
@@ -4346,6 +4353,7 @@ static otv nat_buffer(ots* state, otv* args, int argc) {
   string = as_string(seed);
   memcpy(as_bytes(bytes)->data, as_bytes(string->bytes)->data, string->length);
   ot_buffer_obj* buffer = must_alloc(state, sizeof(*buffer), OBJ_BUFFER);
+  string = as_string(seed);
   ot_store(state, buffer, &buffer->bytes, bytes);
   buffer->length = string->length;
   return ot_from_obj(buffer);
@@ -4363,6 +4371,7 @@ static otv nat_buffer_push(ots* state, otv* args, int argc) {
     ot_buffer_obj* buffer = (ot_buffer_obj*)ot_as_obj(buf_value);
     buf_object_reserve(state, &buf_value, buffer->length + string->length);
     buffer = (ot_buffer_obj*)ot_as_obj(buf_value);
+    string = as_string(text);
     memcpy(as_bytes(buffer->bytes)->data + buffer->length, as_bytes(string->bytes)->data,
            string->length);
     buffer->length += string->length;
@@ -5245,11 +5254,13 @@ bool ot_ext_check(ots* state, const char* who, otv value, unsigned type, void** 
 }
 
 otv ot_ext_release(ots* state, const char* who, otv value, unsigned type) {
+  OT_FRAME_SCOPED(state, &value);
   void* payload;
   if (!ot_ext_check(state, who, value, type, &payload)) return OT_UNWIND;
   ot_ext_obj* ext = (ot_ext_obj*)ot_as_obj(value);
   if (ext->pointer_payload && state->ext_types[type - 1].finalizer != NULL)
     state->ext_types[type - 1].finalizer(state, payload);
+  ext = (ot_ext_obj*)ot_as_obj(value);
   ext->released = true;
   ext->payload.pointer = NULL;
   return value;

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import os
 import re
 import select
@@ -192,11 +193,30 @@ for field in (
         gc_stats.stderr,
         re.MULTILINE,
     ), gc_stats
-assert re.search(
-    r"^  heap capacity bytes: 1048576 \(1\.00 MiB\)$",
-    gc_stats.stderr,
-    re.MULTILINE,
-), gc_stats
+capacity_match = re.search(
+    r"^  heap capacity bytes: (\d+) ", gc_stats.stderr, re.MULTILINE
+)
+assert capacity_match and int(capacity_match.group(1)) > 0, gc_stats
+
+gc_stats_json = run("--gc-stats-json", "--gc-force-compact", fixture)
+expect(gc_stats_json, 0, stdout="loaded-from-file\n", stderr="OTIUM_GC_STATS ")
+json_line = next(
+    line.removeprefix("OTIUM_GC_STATS ")
+    for line in gc_stats_json.stderr.splitlines()
+    if line.startswith("OTIUM_GC_STATS ")
+)
+json_stats = json.loads(json_line)
+for field in (
+    "allocations",
+    "collections",
+    "used_bytes",
+    "reserved_bytes",
+    "metadata_bytes",
+    "minor_max_pause_ns",
+    "major_compact_max_pause_ns",
+    "mutator_pause_max_ns",
+):
+    assert isinstance(json_stats[field], int) and json_stats[field] >= 0, json_stats
 
 multiline = run(input_text="(+ 1\n 2)\nnil\n(quit)\n(println \"after-quit\")\n")
 expect(multiline, 0, stdout="3\n")

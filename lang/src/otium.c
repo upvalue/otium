@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "expander.h"
+#include "ot-gc-internal.inc"
 #include "prelude.h"
 
 #ifndef OT_HEAP_INIT
@@ -189,7 +190,7 @@ static otv make_string_slice(ots* state, otv owner, size_t offset, size_t length
   else source = as_bytes(((ot_buffer_obj*)ot_as_obj(owner))->bytes)->data;
   if (length != 0) memcpy(as_bytes(bytes_value)->data, source + offset, length);
   ot_string_obj* string = must_alloc(state, sizeof(*string), OBJ_STRING);
-  string->bytes = bytes_value;
+  ot_store(state, string, &string->bytes, bytes_value);
   string->length = length;
   return ot_from_obj(string);
 }
@@ -201,7 +202,7 @@ static otv make_string_from_name(ots* state, otv owner) {
   OT_FRAME_SCOPED(state, &bytes_value);
   memcpy(as_bytes(bytes_value)->data, as_name(owner)->bytes, length);
   ot_string_obj* string = must_alloc(state, sizeof(*string), OBJ_STRING);
-  string->bytes = bytes_value;
+  ot_store(state, string, &string->bytes, bytes_value);
   string->length = length;
   return ot_from_obj(string);
 }
@@ -223,7 +224,7 @@ otv ot_make_string(ots* state, const char* input, size_t length) {
   OT_FRAME_SCOPED(state, &bytes_value);
   if (length != 0) memcpy(as_bytes(bytes_value)->data, input, length);
   ot_string_obj* string = must_alloc(state, sizeof(*string), OBJ_STRING);
-  string->bytes = bytes_value;
+  ot_store(state, string, &string->bytes, bytes_value);
   string->length = length;
   return ot_from_obj(string);
 }
@@ -259,9 +260,9 @@ otv ot_intern(ots* state, const char* bytes, size_t length, bool keyword) {
   for (otv cursor = state->symbols; ot_is_ptr(cursor); cursor = as_name(cursor)->next)
     if (name_equal(cursor, bytes, length, type, hash)) return cursor;
   ot_name_obj* name = must_alloc(state, sizeof(*name) + length + 1, type);
-  name->next = state->symbols;
-  name->cache_namespace = ot_nil;
-  name->cache_var = ot_nil;
+  ot_store(state, name, &name->next, state->symbols);
+  ot_store(state, name, &name->cache_namespace, ot_nil);
+  ot_store(state, name, &name->cache_var, ot_nil);
   name->hash = hash;
   name->length = (uint32_t)length;
   name->special_form = !keyword && special_name(bytes, length);
@@ -312,8 +313,8 @@ ot_type ot_value_type(otv value) {
 otv ot_cons(ots* state, otv car, otv cdr) {
   OT_FRAME_SCOPED(state, &car, &cdr);
   ot_pair_obj* pair = must_alloc(state, sizeof(*pair), OBJ_PAIR);
-  pair->car = car;
-  pair->cdr = cdr;
+  ot_store(state, pair, &pair->car, car);
+  ot_store(state, pair, &pair->cdr, cdr);
   pair->stable_id = 0;
   pair->frozen = false;
   return ot_from_obj(pair);
@@ -329,7 +330,7 @@ bool ot_pair_values(otv pair, otv* car, otv* cdr) {
 static otv make_slots(ots* state, size_t capacity) {
   ot_slots_obj* slots = must_alloc(state, sizeof(*slots) + capacity * sizeof(otv), OBJ_SLOTS);
   slots->capacity = capacity;
-  for (size_t i = 0; i < capacity; i++) slots->values[i] = ot_nil;
+  for (size_t i = 0; i < capacity; i++) ot_store(state, slots, &slots->values[i], ot_nil);
   return ot_from_obj(slots);
 }
 
@@ -338,7 +339,7 @@ otv ot_array_new(ots* state, size_t capacity) {
   otv slots = make_slots(state, capacity);
   OT_FRAME_SCOPED(state, &slots);
   ot_array_obj* array = must_alloc(state, sizeof(*array), OBJ_ARRAY);
-  array->slots = slots;
+  ot_store(state, array, &array->slots, slots);
   array->length = 0;
   array->stable_id = 0;
   return ot_from_obj(array);
@@ -354,8 +355,10 @@ static void array_reserve(ots* state, otv* array_value, size_t capacity) {
   OT_FRAME_SCOPED(state, array_value, &new_slots);
   array = as_array(*array_value);
   old = as_slots(array->slots);
-  memcpy(as_slots(new_slots)->values, old->values, array->length * sizeof(otv));
-  array->slots = new_slots;
+  ot_slots_obj* replacement = as_slots(new_slots);
+  for (size_t i = 0; i < array->length; i++)
+    ot_store(state, replacement, &replacement->values[i], old->values[i]);
+  ot_store(state, array, &array->slots, new_slots);
 }
 
 static void array_push(ots* state, otv* array_value, otv value) {
@@ -363,7 +366,8 @@ static void array_push(ots* state, otv* array_value, otv value) {
   ot_array_obj* array = as_array(*array_value);
   array_reserve(state, array_value, array->length + 1);
   array = as_array(*array_value);
-  as_slots(array->slots)->values[array->length++] = value;
+  ot_slots_obj* slots = as_slots(array->slots);
+  ot_store(state, slots, &slots->values[array->length++], value);
 }
 
 otv ot_array_append(ots* state, otv array, otv value) {
@@ -387,8 +391,8 @@ static otv make_entries(ots* state, size_t capacity) {
       must_alloc(state, sizeof(*entries) + capacity * sizeof(ot_entry), OBJ_ENTRIES);
   entries->capacity = capacity;
   for (size_t i = 0; i < capacity; i++) {
-    entries->values[i].key = ot_nil;
-    entries->values[i].value = ot_nil;
+    ot_store(state, entries, &entries->values[i].key, ot_nil);
+    ot_store(state, entries, &entries->values[i].value, ot_nil);
     entries->values[i].hash = 0;
     entries->values[i].live = false;
   }
@@ -406,8 +410,8 @@ otv ot_table_new(ots* state, size_t capacity) {
   index = make_bytes(state, capacity * 2 * sizeof(uint32_t));
   memset(as_bytes(index)->data, 0, capacity * 2 * sizeof(uint32_t));
   ot_table_obj* table = must_alloc(state, sizeof(*table), OBJ_TABLE);
-  table->entries = entries;
-  table->index = index;
+  ot_store(state, table, &table->entries, entries);
+  ot_store(state, table, &table->index, index);
   table->length = 0;
   table->used = 0;
   table->stable_id = 0;
@@ -568,9 +572,15 @@ static void table_compact_or_grow(ots* state, otv* table_value) {
   ot_entries_obj* entries = as_entries(fresh);
   size_t next = 0;
   for (size_t i = 0; i < table->used; i++)
-    if (old->values[i].live) entries->values[next++] = old->values[i];
-  table->entries = fresh;
-  table->index = fresh_index;
+    if (old->values[i].live) {
+      ot_entry* destination = &entries->values[next++];
+      ot_store(state, entries, &destination->key, old->values[i].key);
+      ot_store(state, entries, &destination->value, old->values[i].value);
+      destination->hash = old->values[i].hash;
+      destination->live = true;
+    }
+  ot_store(state, table, &table->entries, fresh);
+  ot_store(state, table, &table->index, fresh_index);
   table->used = next;
   table_rebuild_index(*table_value);
 }
@@ -585,12 +595,13 @@ otv ot_table_put(ots* state, otv table, otv key, otv value) {
     ot_entry* entry = &as_entries(object->entries)->values[found];
     if (value == ot_nil) {
       entry->live = false;
-      entry->key = ot_nil;
-      entry->value = ot_nil;
+      ot_entries_obj* entries = as_entries(object->entries);
+      ot_store(state, entries, &entry->key, ot_nil);
+      ot_store(state, entries, &entry->value, ot_nil);
       object->length--;
       ((uint32_t*)as_bytes(object->index)->data)[slot] = UINT32_MAX;
     } else {
-      entry->value = value;
+      ot_store(state, as_entries(object->entries), &entry->value, value);
     }
     return table;
   }
@@ -600,9 +611,10 @@ otv ot_table_put(ots* state, otv table, otv key, otv value) {
   found = table_lookup(state, table, key, &slot);
   (void)found;
   size_t entry_index = object->used++;
-  ot_entry* entry = &as_entries(object->entries)->values[entry_index];
-  entry->key = key;
-  entry->value = value;
+  ot_entries_obj* entries = as_entries(object->entries);
+  ot_entry* entry = &entries->values[entry_index];
+  ot_store(state, entries, &entry->key, key);
+  ot_store(state, entries, &entry->value, value);
   entry->hash = value_hash(state, key);
   entry->live = true;
   ((uint32_t*)as_bytes(object->index)->data)[slot] = (uint32_t)(entry_index + 1);
@@ -991,7 +1003,8 @@ static otv read_sequence(reader* input, char closing, otv prefix) {
       reader_space(input);
       item = read_form(input);
       if (item == OT_UNWIND) return item;
-      as_pair(tail)->cdr = item;
+      ot_pair_obj* pair = as_pair(tail);
+      ot_store(input->state, pair, &pair->cdr, item);
       reader_space(input);
       if (input->offset == input->length) {
         input->incomplete = true;
@@ -1009,7 +1022,8 @@ static otv read_sequence(reader* input, char closing, otv prefix) {
       head = cell;
       tail = cell;
     } else {
-      as_pair(tail)->cdr = cell;
+      ot_pair_obj* pair = as_pair(tail);
+      ot_store(input->state, pair, &pair->cdr, cell);
       tail = cell;
     }
   }
@@ -1067,9 +1081,9 @@ static bool symbol_is(otv value, const char* name) {
 static otv make_alias(ots* state, otv name, otv value, otv next) {
   OT_FRAME_SCOPED(state, &name, &value, &next);
   ot_alias_obj* alias = must_alloc(state, sizeof(*alias), OBJ_ALIAS);
-  alias->name = name;
-  alias->value = value;
-  alias->next = next;
+  ot_store(state, alias, &alias->name, name);
+  ot_store(state, alias, &alias->value, value);
+  ot_store(state, alias, &alias->next, next);
   return ot_from_obj(alias);
 }
 
@@ -1087,13 +1101,13 @@ static otv namespace_find(ots* state, otv name, bool create) {
   var_index = ot_table_new(state, 16);
   refer_index = ot_table_new(state, 16);
   ot_namespace_obj* space = must_alloc(state, sizeof(*space), OBJ_NAMESPACE);
-  space->name = name;
-  space->vars = ot_nil;
-  space->var_index = var_index;
-  space->refers = ot_nil;
-  space->refer_index = refer_index;
-  space->aliases = ot_nil;
-  space->next = state->namespaces;
+  ot_store(state, space, &space->name, name);
+  ot_store(state, space, &space->vars, ot_nil);
+  ot_store(state, space, &space->var_index, var_index);
+  ot_store(state, space, &space->refers, ot_nil);
+  ot_store(state, space, &space->refer_index, refer_index);
+  ot_store(state, space, &space->aliases, ot_nil);
+  ot_store(state, space, &space->next, state->namespaces);
   space->loaded = false;
   space->loading = false;
   otv made = ot_from_obj(space);
@@ -1114,7 +1128,8 @@ static otv namespace_find(ots* state, otv name, bool create) {
       }
       cursor = ((ot_var_obj*)ot_as_obj(cursor))->next;
     }
-    ((ot_namespace_obj*)ot_as_obj(made))->refers = refers;
+    ot_namespace_obj* made_space = (ot_namespace_obj*)ot_as_obj(made);
+    ot_store(state, made_space, &made_space->refers, refers);
   }
   return made;
 }
@@ -1134,36 +1149,39 @@ static otv define_var(ots* state, otv namespace_value, otv name, otv value, otv 
   otv existing = namespace_var(state, namespace_value, name, false);
   if (is_type(existing, OBJ_VAR)) {
     ot_var_obj* var = (ot_var_obj*)ot_as_obj(existing);
-    var->value = value;
-    var->doc = doc;
+    ot_store(state, var, &var->value, value);
+    ot_store(state, var, &var->doc, doc);
     var->private_value = private_value;
-    as_name(name)->cache_namespace = namespace_value;
-    as_name(name)->cache_var = existing;
+    ot_name_obj* name_object = as_name(name);
+    ot_store(state, name_object, &name_object->cache_namespace, namespace_value);
+    ot_store(state, name_object, &name_object->cache_var, existing);
     return existing;
   }
   ot_namespace_obj* space = (ot_namespace_obj*)ot_as_obj(namespace_value);
   otv next = space->vars;
   OT_FRAME_SCOPED(state, &next);
   ot_var_obj* var = must_alloc(state, sizeof(*var), OBJ_VAR);
-  var->name = name;
-  var->value = value;
-  var->doc = doc;
-  var->next = next;
+  ot_store(state, var, &var->name, name);
+  ot_store(state, var, &var->value, value);
+  ot_store(state, var, &var->doc, doc);
+  ot_store(state, var, &var->next, next);
   var->private_value = private_value;
   made = ot_from_obj(var);
-  ((ot_namespace_obj*)ot_as_obj(namespace_value))->vars = made;
-  ot_table_put(state, ((ot_namespace_obj*)ot_as_obj(namespace_value))->var_index, name, made);
-  as_name(name)->cache_namespace = namespace_value;
-  as_name(name)->cache_var = made;
+  ot_namespace_obj* namespace_object = (ot_namespace_obj*)ot_as_obj(namespace_value);
+  ot_store(state, namespace_object, &namespace_object->vars, made);
+  ot_table_put(state, namespace_object->var_index, name, made);
+  ot_name_obj* name_object = as_name(name);
+  ot_store(state, name_object, &name_object->cache_namespace, namespace_value);
+  ot_store(state, name_object, &name_object->cache_var, made);
   return made;
 }
 
 static otv make_env(ots* state, otv parent, otv namespace_value) {
   OT_FRAME_SCOPED(state, &parent, &namespace_value);
   ot_env_obj* env = must_alloc(state, sizeof(*env), OBJ_ENV);
-  env->parent = parent;
-  env->bindings = ot_nil;
-  env->namespace_value = namespace_value;
+  ot_store(state, env, &env->parent, parent);
+  ot_store(state, env, &env->bindings, ot_nil);
+  ot_store(state, env, &env->namespace_value, namespace_value);
   return ot_from_obj(env);
 }
 
@@ -1173,10 +1191,11 @@ static void env_bind(ots* state, otv* env_value, otv name, otv value) {
   otv next = env->bindings;
   OT_FRAME_SCOPED(state, &next);
   ot_binding_obj* binding = must_alloc(state, sizeof(*binding), OBJ_BINDING);
-  binding->name = name;
-  binding->value = value;
-  binding->next = next;
-  ((ot_env_obj*)ot_as_obj(*env_value))->bindings = ot_from_obj(binding);
+  ot_store(state, binding, &binding->name, name);
+  ot_store(state, binding, &binding->value, value);
+  ot_store(state, binding, &binding->next, next);
+  env = (ot_env_obj*)ot_as_obj(*env_value);
+  ot_store(state, env, &env->bindings, ot_from_obj(binding));
 }
 
 static otv env_binding(otv env_value, otv name) {
@@ -1229,8 +1248,8 @@ static otv resolve_var(ots* state, otv namespace_value, otv symbol, bool report_
       return name->cache_var;
     otv var = namespace_var(state, namespace_value, symbol, true);
     if (is_type(var, OBJ_VAR)) {
-      name->cache_namespace = namespace_value;
-      name->cache_var = var;
+      ot_store(state, name, &name->cache_namespace, namespace_value);
+      ot_store(state, name, &name->cache_var, var);
       return var;
     }
   }
@@ -1383,8 +1402,8 @@ static otv make_restart(ots* state, const char* name_text, const char* descripti
   OT_FRAME_SCOPED(state, &name, &description);
   description = ot_make_string(state, description_text, strlen(description_text));
   ot_restart_obj* restart = must_alloc(state, sizeof(*restart), OBJ_RESTART);
-  restart->name = name;
-  restart->description = description;
+  ot_store(state, restart, &restart->name, name);
+  ot_store(state, restart, &restart->description, description);
   restart->id = ++state->vm.next_restart_id;
   return ot_from_obj(restart);
 }
@@ -1640,7 +1659,10 @@ static otv copy_forms_until(ots* state, otv forms, otv stop) {
     if (!is_type(forms, OBJ_PAIR)) return ot_raise(state, "body must be a proper list");
     otv cell = ot_cons(state, as_pair(forms)->car, ot_null);
     if (result == ot_null) result = cell;
-    else as_pair(tail)->cdr = cell;
+    else {
+      ot_pair_obj* pair = as_pair(tail);
+      ot_store(state, pair, &pair->cdr, cell);
+    }
     tail = cell;
     forms = as_pair(forms)->cdr;
   }
@@ -1972,7 +1994,10 @@ static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form
         if (!compile_expression(state, compiler, expression, env, false)) return false;
         otv cell = ot_cons(state, binding_name, ot_null);
         if (params == ot_null) params = cell;
-        else as_pair(params_tail)->cdr = cell;
+        else {
+          ot_pair_obj* pair = as_pair(params_tail);
+          ot_store(state, pair, &pair->cdr, cell);
+        }
         params_tail = cell;
         count++;
         cursor = as_pair(cursor)->cdr;
@@ -2354,10 +2379,10 @@ static otv make_code(ots* state, const buf* bytes, otv constants, otv params, ot
   OT_FRAME_SCOPED(state, &byte_values);
   if (bytes->length != 0) memcpy(as_bytes(byte_values)->data, bytes->data, bytes->length);
   ot_code_obj* code = must_alloc(state, sizeof(*code), OBJ_CODE);
-  code->bytes = byte_values;
-  code->constants = constants;
-  code->params = params;
-  code->name = name;
+  ot_store(state, code, &code->bytes, byte_values);
+  ot_store(state, code, &code->constants, constants);
+  ot_store(state, code, &code->params, params);
+  ot_store(state, code, &code->name, name);
   code->length = bytes->length;
   code->constant_count = as_array(constants)->length;
   return ot_from_obj(code);
@@ -2427,10 +2452,10 @@ static void vm_push_frame(ots* state, otv function, otv env, size_t base) {
 static otv make_bytecode_function(ots* state, otv code, otv env, otv namespace_value, otv name) {
   OT_FRAME_SCOPED(state, &code, &env, &namespace_value, &name);
   ot_function_obj* function = must_alloc(state, sizeof(*function), OBJ_FUNCTION);
-  function->code = code;
-  function->env = env;
-  function->namespace_value = namespace_value;
-  function->name = name;
+  ot_store(state, function, &function->code, code);
+  ot_store(state, function, &function->env, env);
+  ot_store(state, function, &function->namespace_value, namespace_value);
+  ot_store(state, function, &function->name, name);
   return ot_from_obj(function);
 }
 
@@ -2486,11 +2511,15 @@ static otv append_values(ots* state, otv left, otv right) {
   while (is_type(left, OBJ_PAIR)) {
     otv cell = ot_cons(state, as_pair(left)->car, ot_null);
     if (result == ot_null) result = cell;
-    else as_pair(tail)->cdr = cell;
+    else {
+      ot_pair_obj* pair = as_pair(tail);
+      ot_store(state, pair, &pair->cdr, cell);
+    }
     tail = cell;
     left = as_pair(left)->cdr;
   }
-  as_pair(tail)->cdr = right;
+  ot_pair_obj* pair = as_pair(tail);
+  ot_store(state, pair, &pair->cdr, right);
   return result;
 }
 
@@ -2693,7 +2722,10 @@ static otv vm_execute_loop(ots* state, size_t floor) {
         (void)ot_raise(state, "vm: invalid definition descriptor");
         return vm_unwind_to(state, floor);
       }
-      if (is_type(value, OBJ_FUNCTION)) ((ot_function_obj*)ot_as_obj(value))->name = name;
+      if (is_type(value, OBJ_FUNCTION)) {
+        ot_function_obj* named = (ot_function_obj*)ot_as_obj(value);
+        ot_store(state, named, &named->name, name);
+      }
       if (instruction == BC_DEFINE_LEXICAL) env_bind(state, &frame->env, name, value);
       else
         define_var(state, state->vm.current_namespace, name, value, doc,
@@ -2709,7 +2741,7 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       otv function_value = state->vm.vm_stack[state->vm.vm_stack_count - 1];
       OT_FRAME_SCOPED(state, &function_value);
       ot_macro_obj* macro = must_alloc(state, sizeof(*macro), OBJ_MACRO);
-      macro->function = function_value;
+      ot_store(state, macro, &macro->function, function_value);
       state->vm.vm_stack[state->vm.vm_stack_count - 1] = ot_from_obj(macro);
       continue;
     }
@@ -2728,8 +2760,8 @@ static otv vm_execute_loop(ots* state, size_t floor) {
         return vm_unwind_to(state, floor);
       }
       ot_param_obj* param = must_alloc(state, sizeof(*param), OBJ_PARAM);
-      param->name = name;
-      param->value = value;
+      ot_store(state, param, &param->name, name);
+      ot_store(state, param, &param->value, value);
       otv made = ot_from_obj(param);
       state->vm.vm_stack[state->vm.vm_stack_count - 1] = made;
       define_var(state, state->vm.current_namespace, name, made, doc, false);
@@ -2850,11 +2882,13 @@ static otv vm_execute_loop(ots* state, size_t floor) {
           (void)ot_raise(state, "vm: missing lexical binding");
           return vm_unwind_to(state, floor);
         }
-        ((ot_binding_obj*)ot_as_obj(binding))->value = assigned;
+        ot_binding_obj* binding_object = (ot_binding_obj*)ot_as_obj(binding);
+        ot_store(state, binding_object, &binding_object->value, assigned);
       } else {
         otv var = resolve_var(state, function->namespace_value, name, true);
         if (var == OT_UNWIND) return vm_unwind_to(state, floor);
-        ((ot_var_obj*)ot_as_obj(var))->value = assigned;
+        ot_var_obj* var_object = (ot_var_obj*)ot_as_obj(var);
+        ot_store(state, var_object, &var_object->value, assigned);
       }
       continue;
     }
@@ -3037,7 +3071,9 @@ static otv require_one(ots* state, otv spec, otv caller) {
       options = as_pair(options)->cdr;
       if (!is_type(alias_name, OBJ_SYMBOL)) return ot_raise(state, "require: invalid alias");
       ot_namespace_obj* caller_space = (ot_namespace_obj*)ot_as_obj(caller);
-      caller_space->aliases = make_alias(state, alias_name, name, caller_space->aliases);
+      otv aliases = make_alias(state, alias_name, name, caller_space->aliases);
+      caller_space = (ot_namespace_obj*)ot_as_obj(caller);
+      ot_store(state, caller_space, &caller_space->aliases, aliases);
     } else if (as_name(option)->length == 5 && memcmp(as_name(option)->bytes, "refer", 5) == 0) {
       if (!is_type(options, OBJ_PAIR)) return ot_raise(state, "require: :refer needs names");
       otv names = unwrap_quote(as_pair(options)->car);
@@ -3053,14 +3089,17 @@ static otv require_one(ots* state, otv spec, otv caller) {
         if (!is_type(var, OBJ_VAR) || ((ot_var_obj*)ot_as_obj(var))->private_value)
           return ot_raise(state, "require: missing or private var");
         ot_namespace_obj* caller_space = (ot_namespace_obj*)ot_as_obj(caller);
-        caller_space->refers = make_alias(state, member, var, caller_space->refers);
+        otv refers = make_alias(state, member, var, caller_space->refers);
+        caller_space = (ot_namespace_obj*)ot_as_obj(caller);
+        ot_store(state, caller_space, &caller_space->refers, refers);
         ot_alias_obj* added =
             (ot_alias_obj*)ot_as_obj(((ot_namespace_obj*)ot_as_obj(caller))->refers);
         ot_table_put(state, ((ot_namespace_obj*)ot_as_obj(caller))->refer_index, added->name,
                      added->value);
         if (as_name(member)->cache_namespace == caller) {
-          as_name(member)->cache_namespace = ot_nil;
-          as_name(member)->cache_var = ot_nil;
+          ot_name_obj* member_name = as_name(member);
+          ot_store(state, member_name, &member_name->cache_namespace, ot_nil);
+          ot_store(state, member_name, &member_name->cache_var, ot_nil);
         }
         names = as_pair(names)->cdr;
       }
@@ -3233,8 +3272,8 @@ static otv vm_execute_restart_case(ots* state, otv descriptor, otv env, otv name
       return ot_raise(state, "vm: invalid restart clause");
     }
     ot_restart_obj* restart = must_alloc(state, sizeof(*restart), OBJ_RESTART);
-    restart->name = name;
-    restart->description = description;
+    ot_store(state, restart, &restart->name, name);
+    ot_store(state, restart, &restart->description, description);
     restart->id = ++state->vm.next_restart_id;
     restart_clauses[i] = (ot_restart_clause){
         .restart = ot_from_obj(restart),
@@ -3703,7 +3742,8 @@ static otv nat_set_car(ots* state, otv* args, int argc) {
   if (need_arity(state, "set-car!", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
   if (!is_type(args[0], OBJ_PAIR)) return ot_raise(state, "set-car!: expected pair");
   if (as_pair(args[0])->frozen) return ot_raise(state, "set-car!: frozen table key");
-  as_pair(args[0])->car = args[1];
+  ot_pair_obj* pair = as_pair(args[0]);
+  ot_store(state, pair, &pair->car, args[1]);
   return args[0];
 }
 
@@ -3711,7 +3751,8 @@ static otv nat_set_cdr(ots* state, otv* args, int argc) {
   if (need_arity(state, "set-cdr!", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
   if (!is_type(args[0], OBJ_PAIR)) return ot_raise(state, "set-cdr!: expected pair");
   if (as_pair(args[0])->frozen) return ot_raise(state, "set-cdr!: frozen table key");
-  as_pair(args[0])->cdr = args[1];
+  ot_pair_obj* pair = as_pair(args[0]);
+  ot_store(state, pair, &pair->cdr, args[1]);
   return args[0];
 }
 
@@ -3862,12 +3903,13 @@ static otv nat_put(ots* state, otv* args, int argc) {
   }
   if (is_type(args[0], OBJ_ARRAY)) {
     ot_array_obj* array = as_array(args[0]);
+    ot_slots_obj* slots = as_slots(array->slots);
     for (int i = 1; i < argc; i += 2) {
       if (!ot_is_int(args[i])) return ot_raise(state, "put!: expected integer index");
       intptr_t index = ot_get_int(args[i]);
       if (index < 0 || (size_t)index >= array->length)
         return ot_raise(state, "put!: index out of range");
-      as_slots(array->slots)->values[index] = args[i + 1];
+      ot_store(state, slots, &slots->values[index], args[i + 1]);
     }
     return args[0];
   }
@@ -3886,8 +3928,9 @@ static otv nat_pop(ots* state, otv* args, int argc) {
   if (!is_type(args[0], OBJ_ARRAY)) return ot_raise(state, "pop!: expected array");
   ot_array_obj* array = as_array(args[0]);
   if (array->length == 0) return ot_nil;
-  otv value = as_slots(array->slots)->values[--array->length];
-  as_slots(array->slots)->values[array->length] = ot_nil;
+  ot_slots_obj* slots = as_slots(array->slots);
+  otv value = slots->values[--array->length];
+  ot_store(state, slots, &slots->values[array->length], ot_nil);
   return value;
 }
 
@@ -4290,7 +4333,7 @@ static void buf_object_reserve(ots* state, otv* value, size_t needed) {
   buffer = (ot_buffer_obj*)ot_as_obj(*value);
   old = as_bytes(buffer->bytes);
   memcpy(as_bytes(bytes)->data, old->data, buffer->length);
-  buffer->bytes = bytes;
+  ot_store(state, buffer, &buffer->bytes, bytes);
 }
 
 static otv nat_buffer(ots* state, otv* args, int argc) {
@@ -4303,7 +4346,7 @@ static otv nat_buffer(ots* state, otv* args, int argc) {
   string = as_string(seed);
   memcpy(as_bytes(bytes)->data, as_bytes(string->bytes)->data, string->length);
   ot_buffer_obj* buffer = must_alloc(state, sizeof(*buffer), OBJ_BUFFER);
-  buffer->bytes = bytes;
+  ot_store(state, buffer, &buffer->bytes, bytes);
   buffer->length = string->length;
   return ot_from_obj(buffer);
 }
@@ -4933,7 +4976,7 @@ void ot_def_nat(ots* state, const char* name, ot_nat function) {
   OT_FRAME_SCOPED(state, &symbol);
   ot_nat_obj* nat = must_alloc(state, sizeof(*nat), OBJ_NAT);
   nat->function = function;
-  nat->name = symbol;
+  ot_store(state, nat, &nat->name, symbol);
   define_var(state, state->vm.current_namespace, symbol, ot_from_obj(nat), ot_nil, false);
 }
 
@@ -5009,13 +5052,14 @@ ot_config ot_config_default(void) {
   return (ot_config){.heap_init = OT_HEAP_INIT,
                      .heap_max = OT_HEAP_MAX,
                      .max_depth = OT_MAX_DEPTH,
-                     .gc_stress = false};
+                     .gc_stress = false,
+                     .gc_force_compact = false};
 }
 
 ots* ot_create(const ot_config* configuration) {
   ot_config config = configuration == NULL ? ot_config_default() : *configuration;
   if (config.heap_init < 1024 || config.heap_max < config.heap_init ||
-      config.heap_max > SIZE_MAX / 2 || config.max_depth == 0)
+      config.heap_max > (SIZE_MAX - 7) / 2 || config.max_depth == 0)
     return NULL;
   ots* state = ot_host_alloc(sizeof(*state));
   if (state == NULL) return NULL;
@@ -5023,16 +5067,10 @@ ots* ot_create(const ot_config* configuration) {
   state->vm.frame_limit = config.max_depth;
   state->config = config;
   state->config.gc_stress = false;
-  state->reservation = ot_host_alloc(config.heap_max * 2);
-  if (state->reservation == NULL) {
+  if (!ot_gc_heap_init(state)) {
     ot_host_free(state);
     return NULL;
   }
-  state->from_space = state->reservation;
-  state->to_space = state->reservation + config.heap_max;
-  state->alloc = state->from_space;
-  state->capacity = config.heap_init;
-  state->limit = state->from_space + state->capacity;
   state->symbols = ot_nil;
   state->namespaces = ot_nil;
   state->core_namespace = ot_nil;
@@ -5102,7 +5140,7 @@ void ot_destroy(ots* state) {
   ot_host_free(state->ext_types);
   ot_host_free(state->vm.vm_frames);
   ot_host_free(state->vm.vm_stack);
-  ot_host_free(state->reservation);
+  ot_gc_heap_destroy(state);
   ot_host_free(state);
 }
 
@@ -5169,7 +5207,7 @@ otv ot_ext_inline(ots* state, unsigned type, const void* payload, size_t size) {
   if (type == 0 || type > state->ext_type_count) return ot_nil;
   size_t object_size = offsetof(ot_ext_obj, payload.bytes) + (size == 0 ? 1 : size);
   ot_ext_obj* ext = must_alloc(state, object_size, OBJ_EXT);
-  ext->next = state->exts;
+  ot_store(state, ext, &ext->next, state->exts);
   ext->type = type;
   ext->pointer_payload = false;
   ext->released = false;
@@ -5182,7 +5220,7 @@ otv ot_ext_inline(ots* state, unsigned type, const void* payload, size_t size) {
 otv ot_ext_pointer(ots* state, unsigned type, void* payload) {
   if (type == 0 || type > state->ext_type_count) return ot_nil;
   ot_ext_obj* ext = must_alloc(state, sizeof(*ext), OBJ_EXT);
-  ext->next = state->exts;
+  ot_store(state, ext, &ext->next, state->exts);
   ext->type = type;
   ext->pointer_payload = true;
   ext->released = false;

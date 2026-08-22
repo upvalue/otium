@@ -322,10 +322,12 @@ static void usage(FILE* stream) {
         "  --path DIR         add a module search directory\n"
         "  --project FILE     read load paths from FILE\n"
         "  --no-project       skip project.ot discovery\n"
-        "  --heap-init BYTES  initial semispace size\n"
-        "  --heap-max BYTES   maximum semispace size\n"
+        "  --heap-init BYTES  initial usable heap target\n"
+        "  --heap-max BYTES   maximum usable heap size\n"
         "  --max-depth N      VM frame depth limit\n"
         "  --gc-stats         print collector statistics at exit\n"
+        "  --gc-stats-json    print machine-readable GC statistics\n"
+        "  --gc-force-compact force compaction at every major GC\n"
         "  -h, --help         show this help\n",
         stream);
 }
@@ -349,10 +351,61 @@ static void print_gc_stats(ots* state) {
   print_byte_stat("allocated bytes", stats.allocated_bytes);
   fprintf(stderr, "  collections: %" PRIu64 "\n", stats.collections);
   print_byte_stat("copied bytes", stats.copied_bytes);
+  print_byte_stat("promoted bytes", stats.promoted_bytes);
+  print_byte_stat("moved bytes", stats.moved_bytes);
   print_byte_stat("reclaimed bytes", stats.reclaimed_bytes);
   print_byte_stat("heap used bytes", stats.used_bytes);
   print_byte_stat("peak heap used bytes", stats.peak_used_bytes);
   print_byte_stat("heap capacity bytes", stats.capacity_bytes);
+  print_byte_stat("reserved bytes", stats.reserved_bytes);
+  print_byte_stat("metadata bytes", stats.metadata_bytes);
+  print_byte_stat("fragmentation bytes", stats.fragmentation_bytes);
+  print_byte_stat("largest free region bytes", stats.largest_free_region_bytes);
+  fprintf(stderr,
+          "  full-copy collections: %" PRIu64 " (total %" PRIu64 " ns, max %" PRIu64 " ns)\n"
+          "  minor collections: %" PRIu64 " (total %" PRIu64 " ns, max %" PRIu64 " ns)\n"
+          "  major-sweep collections: %" PRIu64 " (total %" PRIu64 " ns, max %" PRIu64 " ns)\n"
+          "  major-compact collections: %" PRIu64 " (total %" PRIu64 " ns, max %" PRIu64 " ns)\n"
+          "  mutator pauses: %" PRIu64 " (total %" PRIu64 " ns, max %" PRIu64 " ns)\n"
+          "  mark-stack overflows: %" PRIu64 "\n",
+          stats.full_copy.collections, stats.full_copy.total_pause_ns, stats.full_copy.max_pause_ns,
+          stats.minor.collections, stats.minor.total_pause_ns, stats.minor.max_pause_ns,
+          stats.major_sweep.collections, stats.major_sweep.total_pause_ns,
+          stats.major_sweep.max_pause_ns, stats.major_compact.collections,
+          stats.major_compact.total_pause_ns, stats.major_compact.max_pause_ns,
+          stats.mutator_pause.collections, stats.mutator_pause.total_pause_ns,
+          stats.mutator_pause.max_pause_ns, stats.mark_stack_overflows);
+}
+
+static void print_gc_stats_json(ots* state) {
+  ot_gc_stats stats = ot_get_gc_stats(state);
+  fprintf(stderr,
+          "OTIUM_GC_STATS {\"allocations\":%" PRIu64 ",\"collections\":%" PRIu64
+          ",\"allocated_bytes\":%" PRIu64 ",\"copied_bytes\":%" PRIu64
+          ",\"promoted_bytes\":%" PRIu64 ",\"moved_bytes\":%" PRIu64 ",\"reclaimed_bytes\":%" PRIu64
+          ",\"mark_stack_overflows\":%" PRIu64
+          ",\"used_bytes\":%zu,\"peak_used_bytes\":%zu,\"capacity_bytes\":%zu"
+          ",\"reserved_bytes\":%zu,\"metadata_bytes\":%zu,\"fragmentation_bytes\":%zu"
+          ",\"largest_free_region_bytes\":%zu"
+          ",\"full_copy_collections\":%" PRIu64 ",\"full_copy_total_pause_ns\":%" PRIu64
+          ",\"full_copy_max_pause_ns\":%" PRIu64 ",\"minor_collections\":%" PRIu64
+          ",\"minor_total_pause_ns\":%" PRIu64 ",\"minor_max_pause_ns\":%" PRIu64
+          ",\"major_sweep_collections\":%" PRIu64 ",\"major_sweep_total_pause_ns\":%" PRIu64
+          ",\"major_sweep_max_pause_ns\":%" PRIu64 ",\"major_compact_collections\":%" PRIu64
+          ",\"major_compact_total_pause_ns\":%" PRIu64 ",\"major_compact_max_pause_ns\":%" PRIu64
+          ",\"mutator_pause_collections\":%" PRIu64 ",\"mutator_pause_total_ns\":%" PRIu64
+          ",\"mutator_pause_max_ns\":%" PRIu64 "}\n",
+          stats.allocations, stats.collections, stats.allocated_bytes, stats.copied_bytes,
+          stats.promoted_bytes, stats.moved_bytes, stats.reclaimed_bytes,
+          stats.mark_stack_overflows, stats.used_bytes, stats.peak_used_bytes, stats.capacity_bytes,
+          stats.reserved_bytes, stats.metadata_bytes, stats.fragmentation_bytes,
+          stats.largest_free_region_bytes, stats.full_copy.collections,
+          stats.full_copy.total_pause_ns, stats.full_copy.max_pause_ns, stats.minor.collections,
+          stats.minor.total_pause_ns, stats.minor.max_pause_ns, stats.major_sweep.collections,
+          stats.major_sweep.total_pause_ns, stats.major_sweep.max_pause_ns,
+          stats.major_compact.collections, stats.major_compact.total_pause_ns,
+          stats.major_compact.max_pause_ns, stats.mutator_pause.collections,
+          stats.mutator_pause.total_pause_ns, stats.mutator_pause.max_pause_ns);
 }
 
 static void add_environment_paths(void) {
@@ -415,6 +468,7 @@ int main(int argc, char** argv) {
   bool repl = false;
   bool server = false;
   bool stats = false;
+  bool stats_json = false;
   bool no_project = false;
   const char* project = NULL;
   bool positional = false;
@@ -424,6 +478,9 @@ int main(int argc, char** argv) {
     else if (!positional && strcmp(argument, "--repl") == 0) repl = true;
     else if (!positional && strcmp(argument, "--server") == 0) server = true;
     else if (!positional && strcmp(argument, "--gc-stats") == 0) stats = true;
+    else if (!positional && strcmp(argument, "--gc-stats-json") == 0) stats_json = true;
+    else if (!positional && strcmp(argument, "--gc-force-compact") == 0)
+      config.gc_force_compact = true;
     else if (!positional && strcmp(argument, "--no-project") == 0) no_project = true;
     else if (!positional && strcmp(argument, "--help") == 0) {
       usage(stdout);
@@ -508,6 +565,7 @@ int main(int argc, char** argv) {
     else if (repl || files.length == 0) run_repl(state);
   }
   if (stats) print_gc_stats(state);
+  if (stats_json) print_gc_stats_json(state);
   ot_destroy(state);
   signal_state = NULL;
   for (size_t i = 0; i < files.length; i++) ot_host_free(files.values[i]);

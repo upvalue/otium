@@ -5,6 +5,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef OT_HEAP_INIT
+#define OT_HEAP_INIT (1024u * 1024u)
+#endif
+#ifndef OT_HEAP_MAX
+#define OT_HEAP_MAX (64u * 1024u * 1024u)
+#endif
+#ifndef OT_MAX_DEPTH
+#define OT_MAX_DEPTH 200000u
+#endif
+
 typedef void (*test_fn)(void);
 
 typedef struct test_case {
@@ -108,10 +118,11 @@ static void record_finalizer(ots* state, void* payload) {
 
 static void test_config_validation(void) {
   ot_config config = ot_config_default();
-  check(config.heap_init == 1024u * 1024u, "default initial heap is one MiB");
-  check(config.heap_max == 64u * 1024u * 1024u, "default maximum heap is 64 MiB");
-  check(config.max_depth == 200000, "default VM frame depth");
+  check(config.heap_init == (size_t)OT_HEAP_INIT, "configured initial heap default");
+  check(config.heap_max == (size_t)OT_HEAP_MAX, "configured maximum heap default");
+  check(config.max_depth == (unsigned)OT_MAX_DEPTH, "configured VM frame depth default");
   check(!config.gc_stress, "stress collection is off by default");
+  check(!config.gc_force_compact, "forced compaction is off by default");
 
   config.heap_init = 512;
   check(ot_create(&config) == NULL, "reject an initial heap below the minimum");
@@ -487,7 +498,9 @@ static void test_roots_and_stats(void) {
   ot_gc_stats before = ot_get_gc_stats(state);
   ot_collect(state);
   ot_gc_stats after = ot_get_gc_stats(state);
-  check(after.collections == before.collections + 1, "explicit collection updates stats");
+  check(after.collections > before.collections, "explicit collection updates stats");
+  check(after.mutator_pause.collections == before.mutator_pause.collections + 1,
+        "explicit collection records one inclusive mutator pause");
   check(after.allocations >= before.allocations, "allocation counter is monotonic");
 
   ot_destroy(state);
@@ -532,6 +545,66 @@ static void test_extension_values(void) {
   check(finalized_count == 3, "state destruction does not repeat finalizers");
 }
 
+static void test_gc_layout(void) {
+  ot_config config = ot_config_default();
+  config.gc_stress = true;
+  config.gc_force_compact = true;
+  ots* state = ot_create(&config);
+  check(state != NULL, "create forced-compaction state");
+  if (state == NULL) return;
+
+  otv keep = ot_nil;
+  otv discard = ot_nil;
+  otv value = ot_nil;
+  otv wide = ot_nil;
+  OT_FRAME(state, &keep, &discard, &value, &wide);
+  keep = ot_array_new(state, 40000);
+  discard = ot_array_new(state, 40000);
+
+  size_t wide_length = 1280u * 1024u;
+  char* wide_source = malloc(wide_length);
+  check(wide_source != NULL, "allocate multi-chunk string source");
+  if (wide_source != NULL) {
+    memset(wide_source, 'x', wide_length);
+    wide_source[wide_length / 2] = 'y';
+    wide = ot_make_string(state, wide_source, wide_length);
+    free(wide_source);
+  }
+  for (int i = 0; i < 256; i++) {
+    value = ot_make_string(state, "kept", 4);
+    keep = ot_array_append(state, keep, value);
+    value = ot_make_string(state, "discarded", 9);
+    discard = ot_array_append(state, discard, value);
+  }
+
+  ot_collect(state);
+  discard = ot_nil;
+  ot_gc_stats before = ot_get_gc_stats(state);
+  ot_collect(state);
+  ot_gc_stats after = ot_get_gc_stats(state);
+
+  check(ot_array_length(keep) == 256, "large multi-card slots object survives compaction");
+  const char* bytes = NULL;
+  size_t length = 0;
+  value = ot_array_get(keep, 173, ot_nil);
+  check(ot_string_bytes(value, &bytes, &length) && length == 4 && memcmp(bytes, "kept", 4) == 0,
+        "old-to-young slots retain values across forced compaction");
+  check(ot_string_bytes(wide, &bytes, &length) && length == wide_length && bytes[0] == 'x' &&
+            bytes[wide_length / 2] == 'y' && bytes[wide_length - 1] == 'x',
+        "contiguous byte object survives cards, chunks, and compaction");
+  check(after.collections > before.collections, "layout test performs an explicit collection");
+#ifdef OT_GC_GEN
+  check(after.major_compact.collections > before.major_compact.collections,
+        "forced major collection records a compaction");
+#if OT_GC_MARK_STACK_ENTRIES <= 8
+  check(after.mark_stack_overflows > 0, "bounded mark stack uses its overflow path");
+#endif
+#endif
+
+  OT_FRAME_POP(state);
+  ot_destroy(state);
+}
+
 static void test_interrupt(void) {
   ots* state = test_state(true);
   if (state == NULL) return;
@@ -574,6 +647,7 @@ static const test_case tests[] = {
     {"modules-loader", test_modules_and_loader},
     {"roots-stats", test_roots_and_stats},
     {"extensions", test_extension_values},
+    {"gc-layout", test_gc_layout},
     {"interrupt", test_interrupt},
 };
 

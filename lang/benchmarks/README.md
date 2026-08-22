@@ -22,6 +22,58 @@ The runner also accepts one or more benchmark paths directly:
 benchmarks/run.py path/to/otium --runs 10 benchmarks/fib.scm
 ```
 
+## GC comparison
+
+`gc_bench.c` is the in-process collector benchmark. It has short-lived list,
+mixed-lifetime, and fragmentation workloads, and reports allocation and pause
+counters as JSON. Build and run the selected collector directly with:
+
+```sh
+make bench-gc GC=gen
+```
+
+`gc_compare.py` builds semispace and generational binaries in separate build
+directories. It chooses logical heap maxima that put both under the same
+`reserved_bytes + metadata_bytes` target, runs each sample in a fresh process,
+and prints a Markdown table:
+
+```sh
+python3 benchmarks/gc_compare.py --budget-mib 128 --runs 5
+```
+
+Use `--csv benchmarks/gc-results.csv` to retain every raw sample. The reported
+collection tuple is full-copy/minor/major-sweep/major-compact.
+
+GC percentage and maximum pause use the nesting-aware mutator-pause counter.
+The phase tuple remains useful for identifying where each stop spent its time.
+
+### Initial arm64 result
+
+The first result was recorded on 2026-08-21 on an Apple arm64 laptop running
+macOS 15.6.1 and Clang 17. Both collectors had a 128 MiB
+reservation-plus-metadata budget. Each row is the median of five fresh
+processes after one warmup; maximum pause is the largest observed pause across
+those five samples.
+
+| collector | workload | wall ms | workload ms | MiB/s | GC % | max pause ms | collections F/M/S/C |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| semi | churn | 12.29 | 8.03 | 4749.4 | 21.6 | 0.051 | 49/0/0/0 |
+| gen | churn | 12.49 | 8.04 | 4745.2 | 5.7 | 0.083 | 0/20/0/0 |
+| semi | mixed | 15.04 | 10.88 | 803.3 | 84.2 | 0.277 | 70/0/0/0 |
+| gen | mixed | 8.25 | 3.62 | 2413.7 | 43.1 | 0.537 | 0/6/1/0 |
+| semi | fragmentation | 4.72 | 0.71 | 1200.3 | 63.7 | 0.195 | 3/0/0/0 |
+| gen | fragmentation | 6.18 | 1.64 | 519.8 | 82.0 | 0.675 | 0/2/0/3 |
+
+The generational collector matches churn throughput and cuts the mixed-case
+workload time substantially. Its longest pauses are higher in all three cases,
+and forced compaction loses on both throughput and pause time. These synthetic
+results support keeping `semi` as the default while the R7RS layer, additional
+heap budgets, and an x86-64 host are added.
+
+The R7RS ports in `benchmarks/r7rs/ports` already include `gcbench`, `destruc`,
+`mperm`, and `takl`. They are useful as the next layer after the direct cases;
+they are not folded into the collector comparison yet.
+
 ## Tree evaluator to bytecode VM
 
 The VM migration baseline was recorded on 2026-08-15 on an Apple arm64 machine

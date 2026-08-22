@@ -22,17 +22,36 @@ typedef struct ot_config {
   size_t heap_max;
   unsigned max_depth;
   bool gc_stress;
+  bool gc_force_compact;
 } ot_config;
+
+typedef struct ot_gc_phase_stats {
+  uint64_t collections;
+  uint64_t total_pause_ns;
+  uint64_t max_pause_ns;
+} ot_gc_phase_stats;
 
 typedef struct ot_gc_stats {
   uint64_t allocations;
   uint64_t collections;
   uint64_t allocated_bytes;
   uint64_t copied_bytes;
+  uint64_t promoted_bytes;
+  uint64_t moved_bytes;
   uint64_t reclaimed_bytes;
+  uint64_t mark_stack_overflows;
   size_t used_bytes;
   size_t peak_used_bytes;
   size_t capacity_bytes;
+  size_t reserved_bytes;
+  size_t metadata_bytes;
+  size_t fragmentation_bytes;
+  size_t largest_free_region_bytes;
+  ot_gc_phase_stats full_copy;
+  ot_gc_phase_stats minor;
+  ot_gc_phase_stats major_sweep;
+  ot_gc_phase_stats major_compact;
+  ot_gc_phase_stats mutator_pause;
 } ot_gc_stats;
 
 typedef enum ot_type {
@@ -155,6 +174,7 @@ otv ot_ext_release(ots* state, const char* who, otv value, unsigned type);
 
 /* Read collector counters or request a collection at a safe embedding point. */
 ot_gc_stats ot_get_gc_stats(const ots* state);
+void ot_reset_gc_stats(ots* state);
 void ot_collect(ots* state);
 
 #ifdef OT_INTERNAL
@@ -191,6 +211,7 @@ typedef enum ot_obj_type {
   OBJ_PARAM,
   OBJ_RESTART,
   OBJ_EXT,
+  OBJ_FREE,
 } ot_obj_type;
 
 typedef struct ot_obj {
@@ -452,12 +473,7 @@ typedef struct ot_vm {
 
 struct ot_state {
   ot_config config;
-  unsigned char* reservation;
-  unsigned char* from_space;
-  unsigned char* to_space;
-  unsigned char* alloc;
-  unsigned char* limit;
-  size_t capacity;
+  struct ot_gc_heap* gc;
   ot_frame* frames;
   ot_global_root* globals;
   ot_module* modules;
@@ -495,7 +511,6 @@ static inline bool ot_has_type(otv value, ot_obj_type type) {
 static inline size_t ot_object_size(otv value) { return (size_t)(ot_as_obj(value)->header >> 8u); }
 
 void* ot_alloc(ots* state, size_t size, ot_obj_type type);
-void ot_gc_trace_value(ots* state, otv* slot);
 
 void* ot_host_alloc(size_t size);
 void* ot_host_realloc(void* memory, size_t size);

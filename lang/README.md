@@ -19,6 +19,29 @@ runs the benchmark suite. Defaults and feature switches live in `config.mk`.
 Put machine-local overrides such as sanitizer flags or Raylib paths in an
 untracked `site.mk`.
 
+## Garbage collectors
+
+The default `GC=semi` build uses the original whole-heap copying collector.
+`GC=gen` selects the copying-nursery and mark-sweep old-space collector:
+
+```sh
+make GC=gen
+make test GC=gen
+```
+
+The new collector's architecture is adapted from the BSD-licensed Dartino
+collector maintained in the [Toit repository](https://github.com/toitlang/toit/tree/d0396578ff5b7cf9d1ea1509421ec82fa6afeef1/src/third_party/dartino).
+The source checkout is pinned at `d0396578ff5b7cf9d1ea1509421ec82fa6afeef1`.
+It was checked on 2026-08-21; the last change to that subtree was
+`b21477806e6b8ba9e18c570e803fbe529f258054` on 2024-05-01. See
+[`LICENSES/TOIT-GC.txt`](LICENSES/TOIT-GC.txt) for the required notice and
+[`gc-algo.md`](gc-algo.md) for Otium's layout and departures from upstream.
+
+Otium calls the implementation `gen`. Arrays and byte objects remain
+contiguous, including objects that span old-space cards. Host tuning defaults
+for the nursery, old-space growth chunks, large-object cutoff, mark stack, and
+pause timing live in `config.mk`.
+
 ## Project files
 
 A checkout can record the load-path directories it needs in a `project.ot` at
@@ -69,6 +92,12 @@ benchmarks/run.py path/to/otium --warmups 2 --runs 10 benchmarks/fib.scm
 
 See [benchmarks/README.md](benchmarks/README.md) for how to add cases and what
 the measurements include.
+
+For a collector comparison with the same reservation-plus-metadata budget:
+
+```sh
+python3 benchmarks/gc_compare.py --budget-mib 128 --runs 5
+```
 
 ## Native extensions
 

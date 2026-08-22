@@ -25,8 +25,8 @@ design and attribution notes are in [gc-algo.md](../gc-algo.md) and the
 - `src/otium.h` exposes configuration and statistics. The collector state is
   otherwise opaque to the runtime.
 
-The build selects exactly one collector with `GC=semi` or `GC=gen`. The
-implementation name in source and build flags is `gen`.
+The build selects exactly one collector with `GC=semi`, `GC=gen`, or
+`GC=gsgc`. The implementation described here is `gen`.
 
 ## Object representation
 

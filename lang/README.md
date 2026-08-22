@@ -36,9 +36,9 @@ The `gen` collector's architecture is adapted from the BSD-licensed Dartino
 collector maintained in the [Toit repository](https://github.com/toitlang/toit/tree/d0396578ff5b7cf9d1ea1509421ec82fa6afeef1/src/third_party/dartino).
 The source checkout is pinned at `d0396578ff5b7cf9d1ea1509421ec82fa6afeef1`.
 It was checked on 2026-08-21; the last change to that subtree was
-`b21477806e6b8ba9e18c570e803fbe529f258054` on 2024-05-01. See
-[`LICENSES/TOIT-GC.txt`](LICENSES/TOIT-GC.txt) for the required notice and
-[`gc-algo.md`](gc-algo.md) for Otium's layout and departures from upstream.
+`b21477806e6b8ba9e18c570e803fbe529f258054` on 2024-05-01. See [Credits](#credits)
+for provenance and [`gc-algo.md`](gc-algo.md) for Otium's layout and departures
+from upstream.
 
 Otium calls the implementation `gen`. Arrays and byte objects remain
 contiguous, including objects that span old-space cards. Host tuning defaults
@@ -47,9 +47,9 @@ pause timing live in `config.mk`.
 
 The `gsgc` build keeps GSGC's two copying generations, age-based promotion,
 and remembered-object set. It uses Otium's exact root and object walker instead
-of GSGC's public API and pointer maps. See [`LICENSES/GSGC.txt`](LICENSES/GSGC.txt)
-for the upstream license and [`gsgc-algo.md`](gsgc-algo.md) for the transplant
-notes and memory geometry.
+of GSGC's public API and pointer maps. See [Credits](#credits) for provenance
+and [`agent-docs/gc-gsgc.md`](agent-docs/gc-gsgc.md) for the implementation and
+memory geometry.
 
 ## Project files
 
@@ -125,5 +125,3 @@ Otium currently adapts two different GC algorithms for use, both under BSD licen
 
 - [toit](https://github.com/toitlang/toit)'s garbage collector, originally from Dartino.
 - gsgc by Ian Piumarta.
-
-

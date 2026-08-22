@@ -26,17 +26,17 @@
 static_assert(OT_GSGC_MAX_AGE >= 0 && OT_GSGC_MAX_AGE <= UINT8_MAX);
 static_assert(OT_GSGC_MAX_REMEMBERED > 0);
 
-typedef union gsgc_header {
-  struct {
-    size_t block_bytes;
-    size_t object_bytes;
-    otv forwarding;
-    uint8_t age;
-    bool remembered;
-    bool old;
-  } fields;
-  max_align_t alignment;
+/* Young objects use state as their age. The two states after the maximum age
+ * represent old objects without and with young referents. */
+typedef struct gsgc_header {
+  uintptr_t state;
 } gsgc_header;
+
+static_assert(sizeof(gsgc_header) == sizeof(uintptr_t));
+static_assert(OT_GSGC_MAX_AGE <= UINTPTR_MAX - 2);
+
+#define GSGC_STATE_OLD ((uintptr_t)OT_GSGC_MAX_AGE + 1u)
+#define GSGC_STATE_REMEMBERED (GSGC_STATE_OLD + 1u)
 
 typedef struct gsgc_space {
   const char* name;
@@ -123,8 +123,20 @@ static gsgc_header* object_header(const ot_obj* object) {
 
 static ot_obj* header_object(gsgc_header* header) { return (ot_obj*)(void*)(header + 1); }
 
+static size_t object_size(const ot_obj* object) { return (size_t)(object->header >> 8u); }
+
+static bool object_is_forwarded(const ot_obj* object) { return (object->header & 1u) != 0; }
+
+static otv object_forwarding(const ot_obj* object) {
+  return object_is_forwarded(object) ? object->header & ~(uintptr_t)1u : 0;
+}
+
+static bool header_is_old(const gsgc_header* header) {
+  return header->state > OT_GSGC_MAX_AGE;
+}
+
 static gsgc_header* next_header(gsgc_header* header) {
-  return (gsgc_header*)((unsigned char*)header + header->fields.block_bytes);
+  return (gsgc_header*)((unsigned char*)(header + 1) + object_size(header_object(header)));
 }
 
 static void refresh_memory_stats(ots* state) {
@@ -153,9 +165,9 @@ static void remembered_grow(ots* state) {
 static void remember_object(ots* state, ot_obj* object) {
   struct ot_gc_heap* heap = state->gc;
   gsgc_header* header = object_header(object);
-  if (header->fields.remembered) return;
+  if (header->state == GSGC_STATE_REMEMBERED) return;
   if (heap->remembered.count == heap->remembered.capacity) remembered_grow(state);
-  header->fields.remembered = true;
+  header->state = GSGC_STATE_REMEMBERED;
   heap->remembered.values[heap->remembered.count++] = object;
 }
 
@@ -169,8 +181,10 @@ static void copy_event(ots* state, size_t bytes, bool promoted) {
   }
 }
 
-static gsgc_header* copy_to_space(gsgc_header* source, gsgc_space* destination, bool old) {
-  size_t block_bytes = source->fields.block_bytes;
+static gsgc_header* copy_to_space(gsgc_header* source, gsgc_space* destination) {
+  ot_obj* source_object = header_object(source);
+  size_t object_bytes = object_size(source_object);
+  size_t block_bytes = sizeof(*source) + object_bytes;
   if (block_bytes > space_free(destination)) {
     fprintf(stderr, "otium: GSGC %s is full while copying %zu bytes\n", destination->name,
             block_bytes);
@@ -179,28 +193,31 @@ static gsgc_header* copy_to_space(gsgc_header* source, gsgc_space* destination, 
   gsgc_header* copy = (gsgc_header*)(void*)destination->next;
   memcpy(copy, source, block_bytes);
   destination->next += block_bytes;
-  copy->fields.forwarding = 0;
-  copy->fields.remembered = false;
-  copy->fields.old = old;
-  source->fields.forwarding = ot_from_obj(header_object(copy));
+  copy->state = 0;
+  source_object->header = (uintptr_t)header_object(copy) | 1u;
   return copy;
 }
 
 static void full_copy_object(ots* state, gsgc_header* source) {
   struct ot_gc_heap* heap = state->gc;
-  bool promoted = !source->fields.old;
-  (void)copy_to_space(source, &heap->old_survivor_space, true);
-  copy_event(state, source->fields.object_bytes, promoted);
+  ot_obj* object = header_object(source);
+  size_t size = object_size(object);
+  bool promoted = !header_is_old(source);
+  gsgc_header* copy = copy_to_space(source, &heap->old_survivor_space);
+  copy->state = GSGC_STATE_OLD;
+  copy_event(state, size, promoted);
 }
 
 static void minor_copy_object(ots* state, gsgc_header* source) {
   struct ot_gc_heap* heap = state->gc;
-  bool promote = source->fields.age >= OT_GSGC_MAX_AGE;
-  gsgc_header* copy =
-      copy_to_space(source, promote ? &heap->old_space : &heap->survivor_space, promote);
+  ot_obj* object = header_object(source);
+  size_t size = object_size(object);
+  uintptr_t age = source->state;
+  bool promote = age >= OT_GSGC_MAX_AGE;
+  gsgc_header* copy = copy_to_space(source, promote ? &heap->old_space : &heap->survivor_space);
   if (promote) remember_object(state, header_object(copy));
-  else copy->fields.age++;
-  copy_event(state, source->fields.object_bytes, promote);
+  else copy->state = age + 1;
+  copy_event(state, size, promote);
 }
 
 static void gsgc_trace_slot(ots* state, otv* slot) {
@@ -214,14 +231,14 @@ static void gsgc_trace_slot(ots* state, otv* slot) {
   }
   gsgc_header* source = object_header(object);
   if (heap->collecting_full) {
-    if (source->fields.forwarding == 0) full_copy_object(state, source);
-    *slot = source->fields.forwarding;
+    if (!object_is_forwarded(object)) full_copy_object(state, source);
+    *slot = object_forwarding(object);
     return;
   }
-  if (source->fields.old) return;
+  if (header_is_old(source)) return;
   heap->found_young_referent = true;
-  if (source->fields.forwarding == 0) minor_copy_object(state, source);
-  *slot = source->fields.forwarding;
+  if (!object_is_forwarded(object)) minor_copy_object(state, source);
+  *slot = object_forwarding(object);
 }
 
 #define OT_GC_TRACE_OBJECT gsgc_trace_object
@@ -237,10 +254,9 @@ static void process_extension_weaks(ots* state) {
   while (ot_is_ptr(old_exts)) {
     ot_ext_obj* ext = (ot_ext_obj*)ot_as_obj(old_exts);
     otv next = ext->next;
-    gsgc_header* header = object_header((ot_obj*)ext);
     otv resolved;
-    if (!heap->collecting_full && header->fields.old) resolved = old_exts;
-    else resolved = header->fields.forwarding;
+    if (!heap->collecting_full && header_is_old(object_header((ot_obj*)ext))) resolved = old_exts;
+    else resolved = object_forwarding((ot_obj*)ext);
     if (resolved == 0) {
       ot_gc_finalize_ext(state, ext);
     } else {
@@ -283,9 +299,10 @@ static void finish_collection(ots* state, size_t before, size_t after, ot_gc_pha
 static bool exact_object_in(const gsgc_space* space, const ot_obj* sought) {
   for (gsgc_header* scan = (gsgc_header*)(void*)space->base; (unsigned char*)scan < space->next;
        scan = next_header(scan)) {
-    if (header_object(scan) == sought) return true;
-    if ((uintptr_t)sought > (uintptr_t)header_object(scan) &&
-        (uintptr_t)sought < (uintptr_t)scan + scan->fields.block_bytes)
+    ot_obj* object = header_object(scan);
+    if (object == sought) return true;
+    if ((uintptr_t)sought > (uintptr_t)object &&
+        (uintptr_t)sought < (uintptr_t)object + object_size(object))
       return false;
   }
   return false;
@@ -307,9 +324,8 @@ static void validate_slot(ots* state, otv* slot) {
             "discarded-new [%p, %p))\n",
             (uintptr_t)*slot, (int)ot_object_type(ot_from_obj(heap->validating_object)),
             (size_t)((unsigned char*)slot - (unsigned char*)heap->validating_object),
-            state->stats.collections + 1,
-            (unsigned)object_header(heap->validating_object)->fields.age,
-            object_header(heap->validating_object)->fields.old, (void*)heap->new_space.base,
+            state->stats.collections + 1, (unsigned)object_header(heap->validating_object)->state,
+            header_is_old(object_header(heap->validating_object)), (void*)heap->new_space.base,
             (void*)heap->new_space.next, (void*)heap->old_space.base, (void*)heap->old_space.next,
             (void*)heap->survivor_space.base, (void*)heap->survivor_space.next);
   }
@@ -332,13 +348,17 @@ static void validate_heap(ots* state) {
   for (size_t i = 0; i < sizeof spaces / sizeof spaces[0]; i++)
     for (gsgc_header* scan = (gsgc_header*)(void*)spaces[i]->base;
          (unsigned char*)scan < spaces[i]->next; scan = next_header(scan)) {
-      if (scan->fields.block_bytes < sizeof(*scan) + sizeof(ot_obj) ||
-          scan->fields.object_bytes < sizeof(ot_obj) ||
-          (unsigned char*)scan + scan->fields.block_bytes > spaces[i]->next) {
+      ot_obj* object = header_object(scan);
+      size_t size = object_size(object);
+      bool old = spaces[i] == &heap->old_space;
+      if (size < sizeof(ot_obj) || (size & 7u) != 0 ||
+          (unsigned char*)object + size > spaces[i]->next ||
+          (!old && scan->state > OT_GSGC_MAX_AGE) ||
+          (old && scan->state != GSGC_STATE_OLD && scan->state != GSGC_STATE_REMEMBERED)) {
         fputs("otium: malformed GSGC block after collection\n", stderr);
         abort();
       }
-      heap->validating_object = header_object(scan);
+      heap->validating_object = object;
       validate_object(state, heap->validating_object);
     }
   heap->validating_object = NULL;
@@ -366,7 +386,7 @@ static void full_collect(ots* state) {
   heap->collection_promoted_bytes = 0;
   space_reset(&heap->old_survivor_space);
   for (size_t i = 0; i < heap->remembered.count; i++)
-    object_header(heap->remembered.values[i])->fields.remembered = false;
+    object_header(heap->remembered.values[i])->state = GSGC_STATE_OLD;
   heap->remembered.count = 0;
 
   gsgc_trace_roots(state);
@@ -419,7 +439,7 @@ static void minor_collect(ots* state) {
       heap->found_young_referent = false;
       gsgc_trace_object(state, object);
       if (heap->found_young_referent) heap->remembered.values[retained++] = object;
-      else object_header(object)->fields.remembered = false;
+      else object_header(object)->state = GSGC_STATE_OLD;
     }
     heap->remembered.count = retained;
     if ((unsigned char*)scan == heap->survivor_space.next) break;
@@ -448,7 +468,8 @@ static bool old_headroom_insufficient(const struct ot_gc_heap* heap) {
 
 static bool allocation_block_size(size_t object_bytes, size_t* block_bytes) {
   if (object_bytes > SIZE_MAX - sizeof(gsgc_header)) return false;
-  return align_up(sizeof(gsgc_header) + object_bytes, _Alignof(max_align_t), block_bytes);
+  *block_bytes = sizeof(gsgc_header) + object_bytes;
+  return true;
 }
 
 bool ot_gc_heap_init(ots* state) {
@@ -461,7 +482,7 @@ bool ot_gc_heap_init(ots* state) {
   size_t new_size = align_down(state->config.heap_init, alignment);
   size_t minimum = align_down((size_t)OT_GSGC_MIN_NEW_SPACE, alignment);
   if (new_size < minimum) new_size = minimum;
-  if (new_size < sizeof(gsgc_header) * 2) goto fail;
+  if (new_size < (sizeof(gsgc_header) + sizeof(ot_obj)) * 2) goto fail;
   if (new_size > SIZE_MAX / 2) goto fail;
   size_t old_size = new_size * 2;
 
@@ -499,9 +520,7 @@ void ot_gc_heap_destroy(ots* state) {
 
 void ot_gc_write_barrier(ots* state, const ot_obj* owner, otv value) {
   if (!ot_is_ptr(value)) return;
-  gsgc_header* owner_header = object_header(owner);
-  gsgc_header* value_header = object_header(ot_as_obj(value));
-  if (owner_header->fields.old && !value_header->fields.old)
+  if (header_is_old(object_header(owner)) && !header_is_old(object_header(ot_as_obj(value))))
     remember_object(state, (ot_obj*)(void*)owner);
 }
 
@@ -546,8 +565,6 @@ void* ot_alloc(ots* state, size_t size, ot_obj_type type) {
   gsgc_header* header = (gsgc_header*)(void*)heap->new_space.next;
   heap->new_space.next += block_bytes;
   memset(header, 0, block_bytes);
-  header->fields.block_bytes = block_bytes;
-  header->fields.object_bytes = size;
   ot_obj* object = header_object(header);
   object->header = ot_gc_make_header(type, size);
 

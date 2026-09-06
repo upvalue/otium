@@ -2,12 +2,12 @@
 id: lan-5je1
 status: open
 deps: []
-links: [lan-q4lf, lan-515h]
+links: [lan-q4lf, lan-515h, lan-xh00]
 created: 2026-08-16T02:22:20Z
 type: epic
 priority: 1
 assignee: Phil
-tags: [errors, diagnostics, developer-experience]
+tags: [errors, diagnostics, developer-experience, code-quality-2026-09-06]
 ---
 # Rust-inspired error diagnostics: TCO-aware backtraces, stable codes, and development desire paths
 
@@ -97,4 +97,3 @@ Start with a small evidence-based catalog of common Scheme or LLM mistakes. Keep
 - Development mode can load desire-path rules from one data file. A fixture for an unsupported Scheme-style name/form adds targeted help while preserving the original code and failure.
 - With development mode off, the same input produces the normal diagnostic and no desire-path file is loaded or embedded. Desire-path rules never rewrite or execute input.
 - The full test suite, GC-stress build, and sanitizer build pass within the existing configured heap and stack limits.
-

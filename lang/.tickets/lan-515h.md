@@ -2,13 +2,13 @@
 id: lan-515h
 status: open
 deps: []
-links: [lan-5je1]
+links: [lan-5je1, lan-xh00]
 created: 2026-08-16T04:20:09Z
 type: feature
 priority: 2
 assignee: Phil
 parent: lan-qwff
-tags: [tooling, editor, debug-info]
+tags: [tooling, editor, debug-info, code-quality-2026-09-06]
 ---
 # Track definition locations for editor navigation
 
@@ -21,4 +21,3 @@ Use the same compact source-location representation planned for diagnostics rath
 ## Acceptance Criteria
 
 From an Otium buffer, the Conjure definition mapping opens local project definitions and loaded dependency definitions at the correct line and column. Unqualified, referred, and alias-qualified symbols resolve in the buffer namespace. Symbols without source metadata report that no definition is available. Runtime tests cover stored locations and namespace resolution, and a client test covers the Conjure response shape.
-

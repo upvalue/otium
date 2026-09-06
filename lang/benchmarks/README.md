@@ -24,30 +24,38 @@ benchmarks/run.py path/to/otium --runs 10 benchmarks/fib.scm
 
 ## GC comparison
 
-`gc_bench.c` is the in-process collector benchmark. It has short-lived list,
-mixed-lifetime, and fragmentation workloads, and reports allocation and pause
-counters as JSON. Build and run the selected collector directly with:
+`gc_bench.c` is the in-process collector harness. It has short-lived list,
+mixed-lifetime, and fragmentation workloads. It can also evaluate a standalone
+Otium benchmark after bootstrapping the runtime. Both paths reset the GC
+counters before the measured work and report the same JSON record.
+
+Build and run the direct workloads for one collector with:
 
 ```sh
 make bench-gc GC=gen
 ```
 
-`gc_compare.py` builds semispace and `gen` binaries in separate build
+`gc_compare.py` builds semispace and `gen` harnesses in separate build
 directories. It chooses build geometry that puts their initial
 `reserved_bytes + metadata_bytes` under the same target, runs each sample in a
-fresh process, and prints a Markdown table:
+fresh process, and prints a Markdown table. By default it runs the three direct
+workloads plus `gcbench.scm`, `destruc.scm`, `mperm.scm`, and `takl.scm`:
 
 ```sh
 python3 benchmarks/gc_compare.py --budget-mib 128 --runs 5
 ```
 
-Use `--csv benchmarks/gc-results.csv` to retain every raw sample. The reported
+Use `--workload gcbench` to select one workload. Use
+`--csv benchmarks/gc-results.csv` to retain every raw sample. The reported
 collection tuple is full-copy/minor/major-sweep/major-compact.
 
 Use `--collector gen` to run only the generational collector. Add `--append-csv`
 to accumulate samples over time. Each CSV row records its UTC
 timestamp, Otium revision and dirty-worktree flag, host, OS, architecture,
 memory budget, build heap geometry, warmup count, and measured-run count.
+Language workload rows also record a hash of the source file. Timeouts,
+incorrect results, process failures, and malformed output stay in the raw CSV
+with a status and reason. They are not included in timing summaries.
 
 GC percentage and maximum pause use the nesting-aware mutator-pause counter.
 The phase tuple remains useful for identifying where each stop spent its time.
@@ -72,12 +80,14 @@ those five samples.
 The generational collector matches churn throughput and cuts the mixed-case
 workload time substantially. Its longest pauses are higher in all three cases,
 and forced compaction loses on both throughput and pause time. These synthetic
-results support keeping `semi` as the default while the R7RS layer, additional
-heap budgets, and an x86-64 host are added.
+results supported keeping `semi` as the default at the time of that run.
 
-The R7RS ports in `benchmarks/r7rs/ports` already include `gcbench`, `destruc`,
-`mperm`, and `takl`. They are useful as the next layer after the direct cases;
-they are not folded into the collector comparison yet.
+The four language GC workloads are adapted from the ports under
+`benchmarks/r7rs/` and the pinned ecraven/r7rs-benchmarks source at commit
+`85f6acdc4cc4e2b857f307ba56bd0ba931dcccd1`. They use shorter Otium-oriented
+inputs so a normal five-sample comparison finishes locally: gcbench depth 15,
+30 destruc repetitions at 600/50, mperm at 8/8/2/1, and seven takl repetitions
+at 18/12/6. These are collector workloads, not canonical R7RS timing results.
 
 ## Tree evaluator to bytecode VM
 

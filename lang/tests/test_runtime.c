@@ -506,6 +506,60 @@ static void test_roots_and_stats(void) {
   ot_destroy(state);
 }
 
+#ifdef OT_GC_GEN
+static void test_nursery_retry_mode(bool stress) {
+  ots* state = test_state(stress);
+  if (state == NULL) return;
+
+  size_t small_limit = OT_GC_NURSERY_BYTES < OT_GC_LARGE_OBJECT_BYTES
+                           ? (size_t)OT_GC_NURSERY_BYTES
+                           : (size_t)OT_GC_LARGE_OBJECT_BYTES;
+  check(small_limit > 128, "nursery retry test has usable small-object geometry");
+  if (small_limit <= 128) {
+    ot_destroy(state);
+    return;
+  }
+
+  size_t payload_length = small_limit / 2 - 64;
+  size_t count = (size_t)OT_GC_NURSERY_BYTES / payload_length + 4;
+  char* payload = malloc(payload_length);
+  check(payload != NULL, "allocate nursery retry string source");
+  if (payload == NULL) {
+    ot_destroy(state);
+    return;
+  }
+  memset(payload, 'n', payload_length);
+
+  ot_collect(state);
+  ot_collect(state);
+  otv values = ot_array_new(state, count);
+  OT_FRAME(state, &values);
+  ot_reset_gc_stats(state);
+  for (size_t i = 0; i < count; i++)
+    values = ot_array_append(state, values, ot_make_string(state, payload, payload_length));
+
+  const char* bytes = NULL;
+  size_t length = 0;
+  otv last = ot_array_get(values, count - 1, ot_nil);
+  check(ot_array_length(values) == count && ot_string_bytes(last, &bytes, &length) &&
+            length == payload_length && bytes[0] == 'n' && bytes[length - 1] == 'n',
+        stress ? "stress allocations retain a nursery-sized live set"
+               : "small allocations retry after first-cycle survivors fill the nursery");
+  ot_gc_stats stats = ot_get_gc_stats(state);
+  check(stats.minor.collections >= 2, "nursery-sized live set performs multiple minor collections");
+  check(stats.promoted_bytes != 0, "nursery retry promotes surviving objects");
+
+  OT_FRAME_POP(state);
+  free(payload);
+  ot_destroy(state);
+}
+
+static void test_nursery_retry(void) {
+  test_nursery_retry_mode(false);
+  test_nursery_retry_mode(true);
+}
+#endif
+
 static void test_extension_values(void) {
   finalized_count = 0;
   ots* state = test_state(false);
@@ -646,6 +700,9 @@ static const test_case tests[] = {
     {"writer", test_writer_callback},
     {"modules-loader", test_modules_and_loader},
     {"roots-stats", test_roots_and_stats},
+#ifdef OT_GC_GEN
+    {"nursery-retry", test_nursery_retry},
+#endif
     {"extensions", test_extension_values},
     {"gc-layout", test_gc_layout},
     {"interrupt", test_interrupt},

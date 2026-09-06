@@ -65,6 +65,8 @@ compile_args=(
   -DOT_HEAP_INIT=1048576 \
   -DOT_HEAP_MAX=67108864 \
   -DOT_MAX_DEPTH=200000 \
+  -DOT_GC_NURSERY_BYTES=2097152 \
+  -DOT_GC_LARGE_OBJECT_BYTES=262144 \
   -resource-dir "$resource_dir" \
   "${system_args[@]}" \
   -I"$runtime_build/gen" \
@@ -81,6 +83,15 @@ compile_args=(
   "$repo_dir/tests/test_runtime.c" \
   "$repo_dir/benchmarks/gc_bench.c" \
   -- "${compile_args[@]}" -DOT_GC_GEN
+
+if [[ ${WITH_RAY:-0} == 1 ]]; then
+  # RAYLIB_CFLAGS is a compiler argument string, with the same no-spaces-in-paths
+  # limitation as llvm-config's output above.
+  # shellcheck disable=SC2206
+  raylib_args=(${RAYLIB_CFLAGS:-})
+  "$tool" "$@" "$repo_dir/src/ot-ext-ray.c" -- \
+    "${compile_args[@]}" "${raylib_args[@]}" -DOT_GC_GEN -DOT_WITH_RAY
+fi
 
 "$tool" "$@" "$repo_dir/src/ot-gc-semi.c" -- "${compile_args[@]}" -DOT_GC_SEMI
 "$tool" "$@" "$repo_dir/src/ot-gc-gen.c" -- "${compile_args[@]}" -DOT_GC_GEN

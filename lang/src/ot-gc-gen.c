@@ -575,6 +575,10 @@ static bool recover_mark_overflow(ots* state) {
     if (heap->overflow[card] == 0) continue;
     heap->overflow[card] = 0;
     found = true;
+    if (heap->starts[card] == GC_START_NONE) {
+      fputs("otium: mark overflow card has no block start\n", stderr);
+      abort();
+    }
     unsigned char* scan = heap->old_base + (size_t)heap->starts[card] * sizeof(uintptr_t);
     unsigned char* card_end = heap->old_base + (card + 1) * GC_CARD_BYTES;
     if (card_end > heap->old_base + heap->old_capacity)
@@ -1106,8 +1110,16 @@ void* ot_alloc(ots* state, size_t size, ot_obj_type type) {
     object = allocate_old_with_collection(state, size);
     if (object == NULL) return NULL;
   } else {
-    if (state->config.gc_stress && heap->nursery_alloc != heap->nursery_from) minor_collect(state);
-    if (heap->nursery_alloc + size > heap->nursery_limit) minor_collect(state);
+    bool minor_already_run = false;
+    if (state->config.gc_stress && heap->nursery_alloc != heap->nursery_from) {
+      minor_collect(state);
+      minor_already_run = true;
+    }
+    if (heap->nursery_alloc + size > heap->nursery_limit) {
+      minor_collect(state);
+      if (!minor_already_run && heap->nursery_alloc + size > heap->nursery_limit)
+        minor_collect(state);
+    }
     if (heap->nursery_alloc + size > heap->nursery_limit) return NULL;
     object = (ot_obj*)heap->nursery_alloc;
     heap->nursery_alloc += size;

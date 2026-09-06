@@ -1,0 +1,23 @@
+;; TAKeuchi function using lists as counters, adapted from
+;; ecraven/r7rs-benchmarks.
+
+(define (takl-mas x y z)
+  (if (not (takl-shorter? y x))
+      z
+      (takl-mas (takl-mas (cdr x) y z)
+                (takl-mas (cdr y) z x)
+                (takl-mas (cdr z) x y))))
+
+(define (takl-shorter? x y)
+  (and (not (null? y))
+       (or (null? x) (takl-shorter? (cdr x) (cdr y)))))
+
+(let ((x '(18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1))
+      (y '(12 11 10 9 8 7 6 5 4 3 2 1))
+      (z '(6 5 4 3 2 1))
+      (i 0)
+      (result #f))
+  (while (< i 7)
+    (set! result (takl-mas x y z))
+    (set! i (+ i 1)))
+  (if (= (length result) 7) nil (error "takl result was incorrect")))

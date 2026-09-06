@@ -400,22 +400,17 @@ Changes outside the collector must preserve these rules:
 7. Keep object sizes eight-byte aligned and represent every active old-space
    byte as either a live object or an `OBJ_FREE` block before collection.
 
-## Current limits and follow-ups
+## Current limits
 
 The current collector has a fixed 64 MiB logical default and allocates its
-maximum old-space range and side metadata at startup. Host sizing and lazy
-metadata are tracked in [lan-7l89](../.tickets/lan-7l89.md).
+maximum old-space range and side metadata at startup.
 
 Most runtime constructors turn an `ot_alloc` failure into an abort through
-`must_alloc`; catchable heap exhaustion and fixed-heap behavior remain in
-[lan-emjw](../.tickets/lan-emjw.md).
+`must_alloc`; heap exhaustion is not a catchable language condition.
 
 Major collection is fully stop-the-world. It scans the whole allocated nursery,
 and sweep or compaction conservatively remembers every surviving old object.
-Major and compaction pause work is tracked in
-[lan-7wkw](../.tickets/lan-7wkw.md).
 
-The direct C comparison is in `benchmarks/gc_compare.py`. R7RS collector
-comparisons are tracked in [lan-qojh](../.tickets/lan-qojh.md), and an automated
-collector validation matrix is tracked in
-[lan-s095](../.tickets/lan-s095.md).
+The direct C and language-level collector comparison is in
+`benchmarks/gc_compare.py`. There is no automated multi-configuration collector
+matrix beyond the normal build, tests, and optional GC linter.

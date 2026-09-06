@@ -7,6 +7,8 @@ takes some ideas from Clojure (namespaces) and Janet (practicality, tables).
 
 Use `ticket --help` to interact with the ticketing system.
 
+Never edit README.md, it's for humans only.
+
 When changing C code around allocation, roots, or managed object pointers, run
 `make gc-lint` if the optional LLVM development tools are installed. This is
 not part of the default build or test targets. See `agent-docs/gc-lint.md` for

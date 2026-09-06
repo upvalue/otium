@@ -299,7 +299,7 @@ public:
 private:
   bool is_otv(QualType type) const {
     type = type.getUnqualifiedType();
-    const auto* alias = dyn_cast<TypedefType>(type.getTypePtrOrNull());
+    const auto* alias = type->getAs<TypedefType>();
     return alias != nullptr && alias->getDecl()->getName() == "otv";
   }
 

@@ -106,7 +106,7 @@ hygiene:
 	! rg -n '^\s*#\s*define\s+OT_INTERNAL\b' --glob '!src/**' .
 
 gc-lint:
-	tools/gc-lint/run
+	WITH_RAY="$(WITH_RAY)" RAYLIB_CFLAGS="$(RAYLIB_CFLAGS)" tools/gc-lint/run
 
 test: all $(BUILD)/test-runtime hygiene
 	$(BUILD)/test-runtime
@@ -130,5 +130,5 @@ format:
 	tools/format-c
 
 clean:
-	rm -r $(BUILD)
-	rm -f $(OTIUM)
+	rm -rf $(BUILD)
+	rm -rf $(OTIUM)

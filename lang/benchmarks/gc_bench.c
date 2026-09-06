@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "otium.h"
 
 #include <inttypes.h>
@@ -77,6 +79,41 @@ static bool fragmentation(ots* state, size_t count) {
   return ok;
 }
 
+static char* read_source(const char* path, size_t* length) {
+  FILE* input = fopen(path, "rb");
+  if (input == NULL) return NULL;
+  if (fseek(input, 0, SEEK_END) != 0) {
+    fclose(input);
+    return NULL;
+  }
+  long end = ftell(input);
+  if (end < 0 || (unsigned long)end > SIZE_MAX - 1) {
+    fclose(input);
+    return NULL;
+  }
+  rewind(input);
+  char* source = malloc((size_t)end + 1);
+  if (source == NULL) {
+    fclose(input);
+    return NULL;
+  }
+  size_t read = fread(source, 1, (size_t)end, input);
+  bool failed = read != (size_t)end || ferror(input);
+  fclose(input);
+  if (failed) {
+    free(source);
+    return NULL;
+  }
+  source[read] = '\0';
+  *length = read;
+  return source;
+}
+
+static bool language_workload(ots* state, const char* path, const char* source, size_t length) {
+  otv result = ot_nil;
+  return ot_eval_src(state, source, length, path, &result);
+}
+
 static void print_result(const char* workload, uint64_t elapsed_ns, ot_gc_stats stats) {
   printf("{\"workload\":\"%s\",\"elapsed_ns\":%" PRIu64 ",\"allocations\":%" PRIu64
          ",\"allocated_bytes\":%" PRIu64 ",\"copied_bytes\":%" PRIu64 ",\"promoted_bytes\":%" PRIu64
@@ -105,14 +142,33 @@ static void print_result(const char* workload, uint64_t elapsed_ns, ot_gc_stats 
 
 int main(int argc, char** argv) {
   if (argc < 2 || argc > 3) {
-    fprintf(stderr, "usage: gc-bench churn|mixed|fragmentation [iterations]\n");
+    fprintf(stderr, "usage: gc-bench churn|mixed|fragmentation [iterations]\n"
+                    "       gc-bench BENCHMARK.scm\n");
     return 2;
   }
-  size_t iterations = argc == 3 ? (size_t)strtoull(argv[2], NULL, 10) : 0;
-  if (iterations == 0) {
-    if (strcmp(argv[1], "churn") == 0) iterations = 1000000;
-    else if (strcmp(argv[1], "mixed") == 0) iterations = 30000;
-    else iterations = 8000;
+  bool direct = strcmp(argv[1], "churn") == 0 || strcmp(argv[1], "mixed") == 0 ||
+                strcmp(argv[1], "fragmentation") == 0;
+  if (!direct && argc != 2) {
+    fputs("gc-bench: a language benchmark does not take an iteration count\n", stderr);
+    return 2;
+  }
+  size_t iterations = 0;
+  if (direct) {
+    iterations = argc == 3 ? (size_t)strtoull(argv[2], NULL, 10) : 0;
+    if (iterations == 0) {
+      if (strcmp(argv[1], "churn") == 0) iterations = 1000000;
+      else if (strcmp(argv[1], "mixed") == 0) iterations = 30000;
+      else iterations = 8000;
+    }
+  }
+  size_t source_length = 0;
+  char* source = NULL;
+  if (!direct) {
+    source = read_source(argv[1], &source_length);
+    if (source == NULL) {
+      fprintf(stderr, "gc-bench: could not read %s\n", argv[1]);
+      return 2;
+    }
   }
 
   ot_config config = ot_config_default();
@@ -120,6 +176,7 @@ int main(int argc, char** argv) {
   ots* state = ot_create(&config);
   if (state == NULL) {
     fputs("gc-bench: could not create runtime\n", stderr);
+    free(source);
     return 1;
   }
 
@@ -129,18 +186,17 @@ int main(int argc, char** argv) {
   if (strcmp(argv[1], "churn") == 0) ok = churn(state, iterations);
   else if (strcmp(argv[1], "mixed") == 0) ok = mixed(state, iterations);
   else if (strcmp(argv[1], "fragmentation") == 0) ok = fragmentation(state, iterations);
-  else {
-    fprintf(stderr, "gc-bench: unknown workload: %s\n", argv[1]);
-    ot_destroy(state);
-    return 2;
-  }
+  else ok = language_workload(state, argv[1], source, source_length);
   uint64_t elapsed = monotonic_ns() - started;
+  free(source);
   if (!ok) {
     fprintf(stderr, "gc-bench: %s result check failed\n", argv[1]);
     ot_destroy(state);
-    return 1;
+    return 3;
   }
-  print_result(argv[1], elapsed, ot_get_gc_stats(state));
+  const char* workload = strrchr(argv[1], '/');
+  workload = workload == NULL ? argv[1] : workload + 1;
+  print_result(workload, elapsed, ot_get_gc_stats(state));
   ot_destroy(state);
   return 0;
 }

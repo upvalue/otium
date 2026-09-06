@@ -5,6 +5,7 @@
 import argparse
 import csv
 import datetime
+import hashlib
 import json
 import platform
 import statistics
@@ -23,6 +24,10 @@ WORKLOADS = {
     "churn": 1_000_000,
     "mixed": 30_000,
     "fragmentation": 8_000,
+    "gcbench": "benchmarks/gcbench.scm",
+    "destruc": "benchmarks/destruc.scm",
+    "mperm": "benchmarks/mperm.scm",
+    "takl": "benchmarks/takl.scm",
 }
 
 
@@ -40,6 +45,12 @@ def arguments():
     )
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--runs", type=int, default=5)
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=120.0,
+        help="timeout for each sample in seconds (default: 120)",
+    )
     parser.add_argument(
         "--collector",
         action="append",
@@ -65,6 +76,8 @@ def arguments():
         parser.error("--budget-mib must be at least 16")
     if result.warmups < 0 or result.runs < 1:
         parser.error("--warmups must be non-negative and --runs must be positive")
+    if result.timeout <= 0:
+        parser.error("--timeout must be positive")
     if result.append_csv and result.csv is None:
         parser.error("--append-csv requires --csv")
     return result
@@ -106,22 +119,60 @@ def build(root, collector, geometry):
     return binary
 
 
-def run_once(binary, workload, iterations):
+def workload_command(root, binary, workload):
+    specification = WORKLOADS[workload]
+    if isinstance(specification, int):
+        return [binary, workload, str(specification)]
+    return [binary, root / specification]
+
+
+def workload_input_id(root, workload):
+    specification = WORKLOADS[workload]
+    if isinstance(specification, int):
+        contents = f"{workload}:{specification}".encode()
+    else:
+        contents = (root / specification).read_bytes()
+    return hashlib.sha256(contents).hexdigest()[:12]
+
+
+def run_once(root, binary, workload, timeout):
     started = time.perf_counter_ns()
-    result = subprocess.run(
-        [binary, workload, str(iterations)],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            workload_command(root, binary, workload),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "workload": workload,
+            "status": "timeout",
+            "reason": f"timed out after {timeout:g}s",
+            "wall_ns": time.perf_counter_ns() - started,
+        }
     wall_ns = time.perf_counter_ns() - started
     if result.returncode != 0:
         details = result.stderr.strip() or result.stdout.strip() or "no output"
-        raise RuntimeError(f"{binary.name} {workload}: {details}")
+        return {
+            "workload": workload,
+            "status": "incorrect" if result.returncode == 3 else "crashed",
+            "reason": details,
+            "wall_ns": wall_ns,
+        }
     try:
         sample = json.loads(result.stdout)
-    except json.JSONDecodeError as error:
-        raise RuntimeError(f"invalid benchmark output: {result.stdout!r}") from error
+    except json.JSONDecodeError:
+        return {
+            "workload": workload,
+            "status": "crashed",
+            "reason": f"invalid benchmark output: {result.stdout!r}",
+            "wall_ns": wall_ns,
+        }
+    sample["workload"] = workload
+    sample["status"] = "ok"
+    sample["reason"] = ""
     sample["wall_ns"] = wall_ns
     return sample
 
@@ -139,27 +190,32 @@ def phase_max(sample):
 
 
 def summarize(collector, workload, samples):
-    workload_ns = median(samples, "elapsed_ns")
-    allocated = median(samples, "allocated_bytes")
+    successful = [sample for sample in samples if sample["status"] == "ok"]
+    status = f"{len(successful)}/{len(samples)} ok"
+    if not successful:
+        return {"collector": collector, "workload": workload, "status": status}
+    workload_ns = median(successful, "elapsed_ns")
+    allocated = median(successful, "allocated_bytes")
     return {
         "collector": collector,
         "workload": workload,
-        "wall_ms": median(samples, "wall_ns") / 1e6,
+        "status": status,
+        "wall_ms": median(successful, "wall_ns") / 1e6,
         "workload_ms": workload_ns / 1e6,
         "mib_per_second": allocated / MIB / (workload_ns / 1e9),
         "pause_percent": statistics.median(
-            phase_total(sample) / sample["elapsed_ns"] * 100 for sample in samples
+            phase_total(sample) / sample["elapsed_ns"] * 100 for sample in successful
         ),
-        "max_pause_ms": max(phase_max(sample) for sample in samples) / 1e6,
+        "max_pause_ms": max(phase_max(sample) for sample in successful) / 1e6,
         "collections": "/".join(
-            str(round(median(samples, f"{phase}_collections")))
+            str(round(median(successful, f"{phase}_collections")))
             for phase in ("full_copy", "minor", "major_sweep", "major_compact")
         ),
-        "peak_mib": median(samples, "peak_used_bytes") / MIB,
+        "peak_mib": median(successful, "peak_used_bytes") / MIB,
         "reserved_mib": statistics.median(
             [
                 sample["reserved_bytes"] + sample["metadata_bytes"]
-                for sample in samples
+                for sample in successful
             ]
         )
         / MIB,
@@ -168,13 +224,24 @@ def summarize(collector, workload, samples):
 
 def print_table(rows):
     print(
-        "| collector | workload | wall ms | workload ms | MiB/s | GC % | "
-        "max pause ms | collections F/M/S/C | peak MiB | reserved+metadata MiB |"
+        "| collector | workload | status | wall ms | workload ms | MiB/s | "
+        "GC % | max pause ms | collections F/M/S/C | peak MiB | "
+        "reserved+metadata MiB |"
     )
-    print("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+    print(
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | "
+        "---: | ---: |"
+    )
     for row in rows:
+        if "wall_ms" not in row:
+            print(
+                f"| {row['collector']} | {row['workload']} | {row['status']} | "
+                "- | - | - | - | - | - | - | - |"
+            )
+            continue
         print(
-            f"| {row['collector']} | {row['workload']} | {row['wall_ms']:.2f} | "
+            f"| {row['collector']} | {row['workload']} | {row['status']} | "
+            f"{row['wall_ms']:.2f} | "
             f"{row['workload_ms']:.2f} | {row['mib_per_second']:.1f} | "
             f"{row['pause_percent']:.1f} | {row['max_pause_ms']:.3f} | "
             f"{row['collections']} | {row['peak_mib']:.2f} | "
@@ -239,14 +306,14 @@ def main():
         all_samples = {}
         for collector, binary in binaries.items():
             for workload in workloads:
-                iterations = WORKLOADS[workload]
                 for _ in range(args.warmups):
-                    run_once(binary, workload, iterations)
+                    run_once(root, binary, workload, args.timeout)
                 all_samples[(collector, workload)] = [
                     {
-                        **run_once(binary, workload, iterations),
+                        **run_once(root, binary, workload, args.timeout),
                         "heap_init": limits[collector]["heap_init"],
                         "heap_max": limits[collector]["heap_max"],
+                        "input_id": workload_input_id(root, workload),
                     }
                     for _ in range(args.runs)
                 ]
@@ -286,7 +353,11 @@ def main():
         except RuntimeError as error:
             print(f"error: {error}", file=sys.stderr)
             return 1
-    return 0
+    return 1 if any(
+        sample["status"] != "ok"
+        for samples in all_samples.values()
+        for sample in samples
+    ) else 0
 
 
 if __name__ == "__main__":

@@ -356,65 +356,37 @@ static void print_byte_stat(const char* name, uint64_t bytes_value) {
 
 static void print_gc_stats(ots* state) {
   ot_gc_stats stats = ot_get_gc_stats(state);
-  fprintf(stderr, "GC stats:\n  allocations: %" PRIu64 "\n", stats.allocations);
-  print_byte_stat("allocated bytes", stats.allocated_bytes);
-  fprintf(stderr, "  collections: %" PRIu64 "\n", stats.collections);
-  print_byte_stat("copied bytes", stats.copied_bytes);
-  print_byte_stat("promoted bytes", stats.promoted_bytes);
-  print_byte_stat("moved bytes", stats.moved_bytes);
-  print_byte_stat("reclaimed bytes", stats.reclaimed_bytes);
-  print_byte_stat("heap used bytes", stats.used_bytes);
-  print_byte_stat("peak heap used bytes", stats.peak_used_bytes);
-  print_byte_stat("heap capacity bytes", stats.capacity_bytes);
-  print_byte_stat("reserved bytes", stats.reserved_bytes);
-  print_byte_stat("metadata bytes", stats.metadata_bytes);
-  print_byte_stat("fragmentation bytes", stats.fragmentation_bytes);
-  print_byte_stat("largest free region bytes", stats.largest_free_region_bytes);
-  fprintf(stderr,
-          "  full-copy collections: %" PRIu64 " (total %" PRIu64 " ns, max %" PRIu64 " ns)\n"
-          "  minor collections: %" PRIu64 " (total %" PRIu64 " ns, max %" PRIu64 " ns)\n"
-          "  major-sweep collections: %" PRIu64 " (total %" PRIu64 " ns, max %" PRIu64 " ns)\n"
-          "  major-compact collections: %" PRIu64 " (total %" PRIu64 " ns, max %" PRIu64 " ns)\n"
-          "  mutator pauses: %" PRIu64 " (total %" PRIu64 " ns, max %" PRIu64 " ns)\n"
-          "  mark-stack overflows: %" PRIu64 "\n",
-          stats.full_copy.collections, stats.full_copy.total_pause_ns, stats.full_copy.max_pause_ns,
-          stats.minor.collections, stats.minor.total_pause_ns, stats.minor.max_pause_ns,
-          stats.major_sweep.collections, stats.major_sweep.total_pause_ns,
-          stats.major_sweep.max_pause_ns, stats.major_compact.collections,
-          stats.major_compact.total_pause_ns, stats.major_compact.max_pause_ns,
-          stats.mutator_pause.collections, stats.mutator_pause.total_pause_ns,
-          stats.mutator_pause.max_pause_ns, stats.mark_stack_overflows);
+  fputs("GC stats:\n", stderr);
+#define OT_GC_PRINT_COUNT(NAME, VALUE) fprintf(stderr, "  %s: %" PRIu64 "\n", NAME, (uint64_t)(VALUE))
+#define OT_GC_PRINT_BYTES(NAME, VALUE) print_byte_stat(NAME, (uint64_t)(VALUE))
+#define OT_GC_STAT(TYPE, MEMBER, JSON, HUMAN, UNIT) OT_GC_PRINT_##UNIT(HUMAN, stats.MEMBER);
+#define OT_GC_PHASE(MEMBER, HUMAN, COLLECTIONS_JSON, TOTAL_JSON, MAX_JSON)                         \
+  fprintf(stderr, "  %s: %" PRIu64 " (total %" PRIu64 " ns, max %" PRIu64 " ns)\n", HUMAN, \
+          stats.MEMBER.collections, stats.MEMBER.total_pause_ns, stats.MEMBER.max_pause_ns);
+  OT_GC_STATS_FIELDS(OT_GC_STAT, OT_GC_PHASE)
+#undef OT_GC_PHASE
+#undef OT_GC_STAT
+#undef OT_GC_PRINT_BYTES
+#undef OT_GC_PRINT_COUNT
 }
 
 static void print_gc_stats_json(ots* state) {
   ot_gc_stats stats = ot_get_gc_stats(state);
-  fprintf(stderr,
-          "OTIUM_GC_STATS {\"allocations\":%" PRIu64 ",\"collections\":%" PRIu64
-          ",\"allocated_bytes\":%" PRIu64 ",\"copied_bytes\":%" PRIu64
-          ",\"promoted_bytes\":%" PRIu64 ",\"moved_bytes\":%" PRIu64 ",\"reclaimed_bytes\":%" PRIu64
-          ",\"mark_stack_overflows\":%" PRIu64
-          ",\"used_bytes\":%zu,\"peak_used_bytes\":%zu,\"capacity_bytes\":%zu"
-          ",\"reserved_bytes\":%zu,\"metadata_bytes\":%zu,\"fragmentation_bytes\":%zu"
-          ",\"largest_free_region_bytes\":%zu"
-          ",\"full_copy_collections\":%" PRIu64 ",\"full_copy_total_pause_ns\":%" PRIu64
-          ",\"full_copy_max_pause_ns\":%" PRIu64 ",\"minor_collections\":%" PRIu64
-          ",\"minor_total_pause_ns\":%" PRIu64 ",\"minor_max_pause_ns\":%" PRIu64
-          ",\"major_sweep_collections\":%" PRIu64 ",\"major_sweep_total_pause_ns\":%" PRIu64
-          ",\"major_sweep_max_pause_ns\":%" PRIu64 ",\"major_compact_collections\":%" PRIu64
-          ",\"major_compact_total_pause_ns\":%" PRIu64 ",\"major_compact_max_pause_ns\":%" PRIu64
-          ",\"mutator_pause_collections\":%" PRIu64 ",\"mutator_pause_total_ns\":%" PRIu64
-          ",\"mutator_pause_max_ns\":%" PRIu64 "}\n",
-          stats.allocations, stats.collections, stats.allocated_bytes, stats.copied_bytes,
-          stats.promoted_bytes, stats.moved_bytes, stats.reclaimed_bytes,
-          stats.mark_stack_overflows, stats.used_bytes, stats.peak_used_bytes, stats.capacity_bytes,
-          stats.reserved_bytes, stats.metadata_bytes, stats.fragmentation_bytes,
-          stats.largest_free_region_bytes, stats.full_copy.collections,
-          stats.full_copy.total_pause_ns, stats.full_copy.max_pause_ns, stats.minor.collections,
-          stats.minor.total_pause_ns, stats.minor.max_pause_ns, stats.major_sweep.collections,
-          stats.major_sweep.total_pause_ns, stats.major_sweep.max_pause_ns,
-          stats.major_compact.collections, stats.major_compact.total_pause_ns,
-          stats.major_compact.max_pause_ns, stats.mutator_pause.collections,
-          stats.mutator_pause.total_pause_ns, stats.mutator_pause.max_pause_ns);
+  bool first = true;
+  fputs("OTIUM_GC_STATS {", stderr);
+#define OT_GC_JSON(NAME, VALUE)                                                                    \
+  fprintf(stderr, "%s\"%s\":%" PRIu64, first ? "" : ",", NAME, (uint64_t)(VALUE));           \
+  first = false
+#define OT_GC_STAT(TYPE, MEMBER, JSON, HUMAN, UNIT) OT_GC_JSON(JSON, stats.MEMBER);
+#define OT_GC_PHASE(MEMBER, HUMAN, COLLECTIONS_JSON, TOTAL_JSON, MAX_JSON) \
+  OT_GC_JSON(COLLECTIONS_JSON, stats.MEMBER.collections);                   \
+  OT_GC_JSON(TOTAL_JSON, stats.MEMBER.total_pause_ns);                      \
+  OT_GC_JSON(MAX_JSON, stats.MEMBER.max_pause_ns);
+  OT_GC_STATS_FIELDS(OT_GC_STAT, OT_GC_PHASE)
+#undef OT_GC_PHASE
+#undef OT_GC_STAT
+#undef OT_GC_JSON
+  fputs("}\n", stderr);
 }
 
 static void add_environment_paths(void) {

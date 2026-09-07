@@ -52,27 +52,39 @@ typedef struct ot_gc_phase_stats {
   uint64_t max_pause_ns;
 } ot_gc_phase_stats;
 
+#define OT_GC_STATS_FIELDS(STAT, PHASE)                                                            \
+  STAT(uint64_t, allocations, "allocations", "allocations", COUNT)                               \
+  STAT(uint64_t, collections, "collections", "collections", COUNT)                               \
+  STAT(uint64_t, allocated_bytes, "allocated_bytes", "allocated bytes", BYTES)                   \
+  STAT(uint64_t, copied_bytes, "copied_bytes", "copied bytes", BYTES)                             \
+  STAT(uint64_t, promoted_bytes, "promoted_bytes", "promoted bytes", BYTES)                       \
+  STAT(uint64_t, moved_bytes, "moved_bytes", "moved bytes", BYTES)                                \
+  STAT(uint64_t, reclaimed_bytes, "reclaimed_bytes", "reclaimed bytes", BYTES)                   \
+  STAT(uint64_t, mark_stack_overflows, "mark_stack_overflows", "mark-stack overflows", COUNT)    \
+  STAT(size_t, used_bytes, "used_bytes", "heap used bytes", BYTES)                                \
+  STAT(size_t, peak_used_bytes, "peak_used_bytes", "peak heap used bytes", BYTES)                 \
+  STAT(size_t, capacity_bytes, "capacity_bytes", "heap capacity bytes", BYTES)                    \
+  STAT(size_t, reserved_bytes, "reserved_bytes", "reserved bytes", BYTES)                         \
+  STAT(size_t, metadata_bytes, "metadata_bytes", "metadata bytes", BYTES)                         \
+  STAT(size_t, fragmentation_bytes, "fragmentation_bytes", "fragmentation bytes", BYTES)         \
+  STAT(size_t, largest_free_region_bytes, "largest_free_region_bytes",                            \
+       "largest free region bytes", BYTES)                                                        \
+  PHASE(full_copy, "full-copy", "full_copy_collections", "full_copy_total_pause_ns",             \
+        "full_copy_max_pause_ns")                                                                 \
+  PHASE(minor, "minor", "minor_collections", "minor_total_pause_ns", "minor_max_pause_ns")       \
+  PHASE(major_sweep, "major-sweep", "major_sweep_collections", "major_sweep_total_pause_ns",     \
+        "major_sweep_max_pause_ns")                                                               \
+  PHASE(major_compact, "major-compact", "major_compact_collections",                             \
+        "major_compact_total_pause_ns", "major_compact_max_pause_ns")                            \
+  PHASE(mutator_pause, "mutator pauses", "mutator_pause_collections", "mutator_pause_total_ns", \
+        "mutator_pause_max_ns")
+
 typedef struct ot_gc_stats {
-  uint64_t allocations;
-  uint64_t collections;
-  uint64_t allocated_bytes;
-  uint64_t copied_bytes;
-  uint64_t promoted_bytes;
-  uint64_t moved_bytes;
-  uint64_t reclaimed_bytes;
-  uint64_t mark_stack_overflows;
-  size_t used_bytes;
-  size_t peak_used_bytes;
-  size_t capacity_bytes;
-  size_t reserved_bytes;
-  size_t metadata_bytes;
-  size_t fragmentation_bytes;
-  size_t largest_free_region_bytes;
-  ot_gc_phase_stats full_copy;
-  ot_gc_phase_stats minor;
-  ot_gc_phase_stats major_sweep;
-  ot_gc_phase_stats major_compact;
-  ot_gc_phase_stats mutator_pause;
+#define OT_GC_STAT(TYPE, MEMBER, JSON, HUMAN, UNIT) TYPE MEMBER;
+#define OT_GC_PHASE(MEMBER, HUMAN, COLLECTIONS_JSON, TOTAL_JSON, MAX_JSON) ot_gc_phase_stats MEMBER;
+  OT_GC_STATS_FIELDS(OT_GC_STAT, OT_GC_PHASE)
+#undef OT_GC_PHASE
+#undef OT_GC_STAT
 } ot_gc_stats;
 
 typedef enum ot_type {

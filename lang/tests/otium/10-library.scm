@@ -34,6 +34,9 @@
 (println "drop-fractional:"
   (try (drop 0.5 [1 2])
     (catch (error? e) (condition-message e))))
+(println "take-improper:"
+  (try (take 1 '(1 . 2))
+    (catch (error? e) (condition-message e))))
 
 ; sort: one class per sort, stable, kind-preserving
 (println "sort-ints:" (sort [3 1 2]))

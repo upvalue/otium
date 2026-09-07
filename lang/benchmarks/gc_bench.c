@@ -115,29 +115,18 @@ static bool language_workload(ots* state, const char* path, const char* source, 
 }
 
 static void print_result(const char* workload, uint64_t elapsed_ns, ot_gc_stats stats) {
-  printf("{\"workload\":\"%s\",\"elapsed_ns\":%" PRIu64 ",\"allocations\":%" PRIu64
-         ",\"allocated_bytes\":%" PRIu64 ",\"copied_bytes\":%" PRIu64 ",\"promoted_bytes\":%" PRIu64
-         ",\"moved_bytes\":%" PRIu64 ",\"reclaimed_bytes\":%" PRIu64
-         ",\"used_bytes\":%zu,\"peak_used_bytes\":%zu,\"capacity_bytes\":%zu"
-         ",\"reserved_bytes\":%zu,\"metadata_bytes\":%zu,\"fragmentation_bytes\":%zu"
-         ",\"minor_collections\":%" PRIu64 ",\"minor_total_pause_ns\":%" PRIu64
-         ",\"minor_max_pause_ns\":%" PRIu64 ",\"major_sweep_collections\":%" PRIu64
-         ",\"major_sweep_total_pause_ns\":%" PRIu64 ",\"major_sweep_max_pause_ns\":%" PRIu64
-         ",\"major_compact_collections\":%" PRIu64 ",\"major_compact_total_pause_ns\":%" PRIu64
-         ",\"major_compact_max_pause_ns\":%" PRIu64 ",\"full_copy_collections\":%" PRIu64
-         ",\"full_copy_total_pause_ns\":%" PRIu64 ",\"full_copy_max_pause_ns\":%" PRIu64
-         ",\"mutator_pause_collections\":%" PRIu64 ",\"mutator_pause_total_ns\":%" PRIu64
-         ",\"mutator_pause_max_ns\":%" PRIu64 "}\n",
-         workload, elapsed_ns, stats.allocations, stats.allocated_bytes, stats.copied_bytes,
-         stats.promoted_bytes, stats.moved_bytes, stats.reclaimed_bytes, stats.used_bytes,
-         stats.peak_used_bytes, stats.capacity_bytes, stats.reserved_bytes, stats.metadata_bytes,
-         stats.fragmentation_bytes, stats.minor.collections, stats.minor.total_pause_ns,
-         stats.minor.max_pause_ns, stats.major_sweep.collections, stats.major_sweep.total_pause_ns,
-         stats.major_sweep.max_pause_ns, stats.major_compact.collections,
-         stats.major_compact.total_pause_ns, stats.major_compact.max_pause_ns,
-         stats.full_copy.collections, stats.full_copy.total_pause_ns, stats.full_copy.max_pause_ns,
-         stats.mutator_pause.collections, stats.mutator_pause.total_pause_ns,
-         stats.mutator_pause.max_pause_ns);
+  printf("{\"workload\":\"%s\",\"elapsed_ns\":%" PRIu64, workload, elapsed_ns);
+#define OT_GC_JSON(NAME, VALUE) printf(",\"%s\":%" PRIu64, NAME, (uint64_t)(VALUE))
+#define OT_GC_STAT(TYPE, MEMBER, JSON, HUMAN, UNIT) OT_GC_JSON(JSON, stats.MEMBER);
+#define OT_GC_PHASE(MEMBER, HUMAN, COLLECTIONS_JSON, TOTAL_JSON, MAX_JSON) \
+  OT_GC_JSON(COLLECTIONS_JSON, stats.MEMBER.collections);                   \
+  OT_GC_JSON(TOTAL_JSON, stats.MEMBER.total_pause_ns);                      \
+  OT_GC_JSON(MAX_JSON, stats.MEMBER.max_pause_ns);
+  OT_GC_STATS_FIELDS(OT_GC_STAT, OT_GC_PHASE)
+#undef OT_GC_PHASE
+#undef OT_GC_STAT
+#undef OT_GC_JSON
+  puts("}");
 }
 
 int main(int argc, char** argv) {

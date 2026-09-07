@@ -20,6 +20,7 @@ negative-index-counts: nil () [1 2]
 nth-fractional: nth: expected integer
 take-nonnumeric: take: expected integer
 drop-fractional: drop: expected integer
+take-improper: to-list: expected sequence
 sort-ints: [1 2 3]
 sort-list: (1 2 3)
 sort-mixed-num: [1 2.5 3]

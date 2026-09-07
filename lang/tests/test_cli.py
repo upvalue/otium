@@ -218,17 +218,18 @@ json_line = next(
     if line.startswith("OTIUM_GC_STATS ")
 )
 json_stats = json.loads(json_line)
-for field in (
-    "allocations",
-    "collections",
-    "used_bytes",
-    "reserved_bytes",
-    "metadata_bytes",
-    "minor_max_pause_ns",
-    "major_compact_max_pause_ns",
-    "mutator_pause_max_ns",
-):
-    assert isinstance(json_stats[field], int) and json_stats[field] >= 0, json_stats
+expected_gc_fields = set(
+    """allocations collections allocated_bytes copied_bytes promoted_bytes moved_bytes
+    reclaimed_bytes mark_stack_overflows used_bytes peak_used_bytes capacity_bytes reserved_bytes
+    metadata_bytes fragmentation_bytes largest_free_region_bytes full_copy_collections
+    full_copy_total_pause_ns full_copy_max_pause_ns minor_collections minor_total_pause_ns
+    minor_max_pause_ns major_sweep_collections major_sweep_total_pause_ns
+    major_sweep_max_pause_ns major_compact_collections major_compact_total_pause_ns
+    major_compact_max_pause_ns mutator_pause_collections mutator_pause_total_ns
+    mutator_pause_max_ns""".split()
+)
+assert set(json_stats) == expected_gc_fields, json_stats
+assert all(isinstance(value, int) and value >= 0 for value in json_stats.values()), json_stats
 
 multiline = run(input_text="(+ 1\n 2)\nnil\n(quit)\n(println \"after-quit\")\n")
 expect(multiline, 0, stdout="3\n")

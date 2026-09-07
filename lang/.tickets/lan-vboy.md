@@ -1,6 +1,6 @@
 ---
 id: lan-vboy
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-08-20T02:06:35Z
@@ -20,3 +20,9 @@ Keep the opcode inventory in one place so computed-goto labels and the fallback 
 ## Acceptance Criteria
 
 make test passes with computed goto enabled. A forced portable-fallback build also passes the runtime and conformance tests. make bench is run before and after on the same machine and the result is recorded. Bytecode returned by ot_function_bytecode remains printable ASCII and unchanged in meaning.
+
+## Notes
+
+**2026-09-07T03:01:53Z**
+
+Implemented as part of the broader VM rewrite. Dispatch is generated from OT_BYTECODE_OPS, GCC/Clang use computed goto with direct handler chaining, and OT_COMPUTED_GOTO=0 is the tested fallback. The earlier printable-execution-byte requirement was superseded by the femtolisp-style decision to use compact binary execution operands; ot_function_bytecode now explicitly exposes compact bytecode. Same-host before/after results are recorded in vm-performance-report.md.

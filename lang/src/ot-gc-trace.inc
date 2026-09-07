@@ -72,7 +72,7 @@ static void OT_GC_TRACE_OBJECT(ots* state, ot_obj* object) {
     case OBJ_ENV: {
       ot_env_obj* env = (ot_env_obj*)object;
       OT_GC_TRACE_SLOT(state, &env->parent);
-      OT_GC_TRACE_SLOT(state, &env->bindings);
+      OT_GC_TRACE_SLOT(state, &env->data);
       OT_GC_TRACE_SLOT(state, &env->namespace_value);
       break;
     }

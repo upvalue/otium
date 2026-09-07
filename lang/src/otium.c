@@ -1230,39 +1230,84 @@ static otv define_var(ots* state, otv namespace_value, otv name, otv value, otv 
   return made;
 }
 
-static otv make_env(ots* state, otv parent, otv namespace_value) {
+static otv make_env(ots* state, otv parent, otv namespace_value, bool compile_time,
+                    size_t capacity) {
   OT_FRAME_SCOPED(state, &parent, &namespace_value);
+  otv data = compile_time ? ot_nil : make_slots(state, capacity == 0 ? 1 : capacity);
+  OT_FRAME_SCOPED(state, &data);
   ot_env_obj* env = must_alloc(state, sizeof(*env), OBJ_ENV);
   ot_store(state, env, &env->parent, parent);
-  ot_store(state, env, &env->bindings, ot_nil);
+  ot_store(state, env, &env->data, data);
   ot_store(state, env, &env->namespace_value, namespace_value);
+  env->slot_count = 0;
+  env->compile_time = compile_time;
   return ot_from_obj(env);
 }
 
 static void env_bind(ots* state, otv* env_value, otv name, otv value) {
   OT_FRAME_SCOPED(state, env_value, &name, &value);
   ot_env_obj* env = (ot_env_obj*)ot_as_obj(*env_value);
-  otv next = env->bindings;
-  OT_FRAME_SCOPED(state, &next);
-  ot_binding_obj* binding = must_alloc(state, sizeof(*binding), OBJ_BINDING);
-  ot_store(state, binding, &binding->name, name);
-  ot_store(state, binding, &binding->value, value);
-  ot_store(state, binding, &binding->next, next);
+  size_t slot = env->slot_count;
+  if (env->compile_time) {
+    otv next = env->data;
+    OT_FRAME_SCOPED(state, &next);
+    ot_binding_obj* binding = must_alloc(state, sizeof(*binding), OBJ_BINDING);
+    binding->slot = slot;
+    ot_store(state, binding, &binding->name, name);
+    ot_store(state, binding, &binding->value, value);
+    ot_store(state, binding, &binding->next, next);
+    env = (ot_env_obj*)ot_as_obj(*env_value);
+    ot_store(state, env, &env->data, ot_from_obj(binding));
+    env->slot_count++;
+    return;
+  }
+  otv slots = env->data;
+  OT_FRAME_SCOPED(state, &slots);
+  ot_slots_obj* slot_values = as_slots(slots);
+  if (slot == slot_values->capacity) {
+    otv grown = make_slots(state, slot_values->capacity * 2);
+    OT_FRAME_SCOPED(state, &grown);
+    slot_values = as_slots(slots);
+    ot_slots_obj* replacement = as_slots(grown);
+    for (size_t i = 0; i < slot; i++)
+      ot_store(state, replacement, &replacement->values[i], slot_values->values[i]);
+    slots = grown;
+  }
+  slot_values = as_slots(slots);
+  ot_store(state, slot_values, &slot_values->values[slot], value);
   env = (ot_env_obj*)ot_as_obj(*env_value);
-  ot_store(state, env, &env->bindings, ot_from_obj(binding));
+  ot_store(state, env, &env->data, slots);
+  env->slot_count++;
 }
 
 static otv env_binding(otv env_value, otv name) {
   for (otv env_cursor = env_value; is_type(env_cursor, OBJ_ENV);
        env_cursor = ((ot_env_obj*)ot_as_obj(env_cursor))->parent) {
     ot_env_obj* env = (ot_env_obj*)ot_as_obj(env_cursor);
-    for (otv cursor = env->bindings; is_type(cursor, OBJ_BINDING);
+    for (otv cursor = env->compile_time ? env->data : ot_nil; is_type(cursor, OBJ_BINDING);
          cursor = ((ot_binding_obj*)ot_as_obj(cursor))->next) {
       ot_binding_obj* binding = (ot_binding_obj*)ot_as_obj(cursor);
       if (binding->name == name) return cursor;
     }
   }
   return ot_nil;
+}
+
+static bool env_location(otv env_value, otv name, size_t* depth, size_t* slot) {
+  *depth = 0;
+  for (otv env_cursor = env_value; is_type(env_cursor, OBJ_ENV);
+       env_cursor = ((ot_env_obj*)ot_as_obj(env_cursor))->parent, (*depth)++) {
+    ot_env_obj* env = (ot_env_obj*)ot_as_obj(env_cursor);
+    for (otv cursor = env->compile_time ? env->data : ot_nil; is_type(cursor, OBJ_BINDING);
+         cursor = ((ot_binding_obj*)ot_as_obj(cursor))->next) {
+      ot_binding_obj* binding = (ot_binding_obj*)ot_as_obj(cursor);
+      if (binding->name == name) {
+        *slot = binding->slot;
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 static otv env_namespace(ots* state, otv env) {
@@ -1408,7 +1453,7 @@ otv ot_raise(ots* state, const char* format, ...) {
 static otv compile_function_code(ots* state, otv params, otv body, otv env, otv namespace_value,
                                  otv name) {
   OT_FRAME_SCOPED(state, &params, &body, &env, &namespace_value, &name);
-  otv compile_env = make_env(state, env, namespace_value);
+  otv compile_env = make_env(state, env, namespace_value, true, 0);
   OT_FRAME_SCOPED(state, &compile_env);
   otv cursor = params;
   OT_FRAME_SCOPED(state, &cursor);
@@ -1436,8 +1481,9 @@ static otv compile_function_code(ots* state, otv params, otv body, otv env, otv 
     if (is_type(cursor, OBJ_SYMBOL)) env_bind(state, &compile_env, cursor, ot_nil);
     else if (cursor != ot_null) return ot_raise(state, "invalid parameter list");
   }
-  if (is_type(env, OBJ_ENV) && is_type(name, OBJ_SYMBOL))
-    env_bind(state, &compile_env, name, ot_nil);
+  /* Recursive local names are installed in the enclosing environment before
+   * this body is compiled. Keeping a second compile-only binding here made
+   * lexical coordinates disagree with the runtime environment shape. */
   for (cursor = body; is_type(cursor, OBJ_PAIR); cursor = as_pair(cursor)->cdr) {
     otv definition = as_pair(cursor)->car;
     if (!is_type(definition, OBJ_PAIR)) continue;
@@ -1536,7 +1582,7 @@ static otv bind_parameters(ots* state, otv function_value, otv* args, size_t arg
   if (!is_type(function->code, OBJ_CODE)) return ot_raise(state, "function has no bytecode");
   otv params = as_code(function->code)->params;
   OT_FRAME_SCOPED(state, &parent, &namespace_value, &params);
-  otv env = make_env(state, parent, namespace_value);
+  otv env = make_env(state, parent, namespace_value, false, argc + 1);
   OT_FRAME_SCOPED(state, &env);
   if (is_type(params, OBJ_PAIR) && symbol_is(as_pair(params)->car, "array"))
     params = as_pair(params)->cdr;
@@ -1578,62 +1624,61 @@ static otv bind_parameters(ots* state, otv function_value, otv* args, size_t arg
  * 7. BYTECODE COMPILER, VM, AND SPECIAL FORMS
  * ========================================================================= */
 
-/* Bytecode is deliberately an ASCII string. Opcodes are printable bytes and
- * every operand is four hexadecimal digits, so code has no byte order and can
- * be embedded in a readable function representation without a binary escape
- * layer. Constants, including nested code and opcode descriptors, live in a
+/* Bytecode uses one-byte opcodes and compact, byte-order-independent binary
+ * operands. Constants, including nested code and opcode descriptors, live in a
  * separate pool. */
-typedef enum bytecode_op {
-  BC_CONST = 'A',
-  BC_GET_LEXICAL = 'B',
-  BC_GET_GLOBAL = 'C',
-  BC_CALL = 'E',
-  BC_TAIL_CALL = 'F',
-  BC_POP = 'G',
-  BC_RETURN = 'H',
-  BC_JUMP = 'J',
-  BC_JUMP_IF_FALSE = 'K',
-  BC_DUP = 'L',
-  BC_JUMP_IF_TRUE = 'M',
-  BC_SCOPE = 'N',
-  BC_BIND = 'O',
-  BC_UNSCOPE = 'P',
-  BC_SET_LEXICAL = 'Q',
-  BC_SET_GLOBAL = 'R',
-  BC_CLOSURE = 'S',
-  BC_DEFINE_LEXICAL = 'T',
-  BC_DEFINE_GLOBAL = 'U',
-  BC_DEFINE_PRIVATE = 'V',
-  BC_MACRO = 'W',
-  BC_DEF_PARAM = 'X',
-  BC_NAMED_LET = 'Y',
-  BC_TAIL_NAMED_LET = 'Z',
-  BC_TRY = '!',
-  BC_HANDLER_BIND = '"',
-  BC_RESTART_CASE = '#',
-  BC_UNWIND_PROTECT = '$',
-  BC_WITH_PARAMS = '%',
-  BC_IN_NS = '&',
-  BC_REQUIRE = '\'',
-  BC_CONS = '(',
-  BC_APPEND = ')',
-} bytecode_op;
+#define OT_BYTECODE_OPS(X)                                                                        \
+  X(BC_CONST, 'A', vm_load, true)                                                                \
+  X(BC_GET_LEXICAL, 'B', vm_load, true)                                                          \
+  X(BC_GET_GLOBAL, 'C', vm_load, true)                                                           \
+  X(BC_CALL, 'E', vm_call, true)                                                                 \
+  X(BC_TAIL_CALL, 'F', vm_call, true)                                                            \
+  X(BC_POP, 'G', vm_pop, false)                                                                  \
+  X(BC_RETURN, 'H', vm_return, false)                                                            \
+  X(BC_JUMP, 'J', vm_jump, true)                                                                 \
+  X(BC_JUMP_IF_FALSE, 'K', vm_conditional_jump, true)                                            \
+  X(BC_DUP, 'L', vm_dup, false)                                                                  \
+  X(BC_JUMP_IF_TRUE, 'M', vm_conditional_jump, true)                                             \
+  X(BC_SCOPE, 'N', vm_scope, false)                                                              \
+  X(BC_BIND, 'O', vm_bind, true)                                                                 \
+  X(BC_UNSCOPE, 'P', vm_unscope, false)                                                          \
+  X(BC_SET_LEXICAL, 'Q', vm_set, true)                                                           \
+  X(BC_SET_GLOBAL, 'R', vm_set, true)                                                            \
+  X(BC_CLOSURE, 'S', vm_closure, true)                                                           \
+  X(BC_DEFINE_LEXICAL, 'T', vm_define, true)                                                     \
+  X(BC_DEFINE_GLOBAL, 'U', vm_define, true)                                                      \
+  X(BC_DEFINE_PRIVATE, 'V', vm_define, true)                                                     \
+  X(BC_MACRO, 'W', vm_macro, false)                                                              \
+  X(BC_DEF_PARAM, 'X', vm_def_param, true)                                                       \
+  X(BC_NAMED_LET, 'Y', vm_named_let, true)                                                       \
+  X(BC_TAIL_NAMED_LET, 'Z', vm_named_let, true)                                                  \
+  X(BC_TRY, '!', vm_dynamic, true)                                                               \
+  X(BC_HANDLER_BIND, '"', vm_dynamic, true)                                                     \
+  X(BC_RESTART_CASE, '#', vm_dynamic, true)                                                      \
+  X(BC_UNWIND_PROTECT, '$', vm_dynamic, true)                                                    \
+  X(BC_WITH_PARAMS, '%', vm_dynamic, true)                                                       \
+  X(BC_IN_NS, '&', vm_namespace, true)                                                           \
+  X(BC_REQUIRE, '\'', vm_namespace, true)                                                       \
+  X(BC_CONS, '(', vm_constructor, false)                                                         \
+  X(BC_APPEND, ')', vm_constructor, false)                                                       \
+  X(BC_INTRINSIC, 0x80, vm_intrinsic, true)
+
+#define OT_DECLARE_OPCODE(NAME, VALUE, LABEL, OPERAND) NAME = VALUE,
+typedef enum bytecode_op { OT_BYTECODE_OPS(OT_DECLARE_OPCODE) } bytecode_op;
+#undef OT_DECLARE_OPCODE
+
+#ifndef OT_COMPUTED_GOTO
+#if defined(__GNUC__) || defined(__clang__)
+#define OT_COMPUTED_GOTO 1
+#else
+#define OT_COMPUTED_GOTO 0
+#endif
+#endif
 
 typedef struct bytecode_compiler {
   buf bytes;
   otv constants;
 } bytecode_compiler;
-
-static char hex_digit(unsigned value) {
-  return (char)(value < 10 ? '0' + value : 'a' + (value - 10));
-}
-
-static int hex_value(unsigned char byte) {
-  if (byte >= '0' && byte <= '9') return byte - '0';
-  if (byte >= 'a' && byte <= 'f') return byte - 'a' + 10;
-  if (byte >= 'A' && byte <= 'F') return byte - 'A' + 10;
-  return -1;
-}
 
 static void bytecode_emit(bytecode_compiler* compiler, bytecode_op op) {
   buf_byte(&compiler->bytes, (char)op);
@@ -1644,10 +1689,8 @@ static void bytecode_emit_u16(bytecode_compiler* compiler, size_t value) {
     compiler->bytes.failed = true;
     return;
   }
-  for (unsigned shift = 12;; shift -= 4) {
-    buf_byte(&compiler->bytes, hex_digit((unsigned)(value >> shift) & 15u));
-    if (shift == 0) break;
-  }
+  buf_byte(&compiler->bytes, (char)((value >> 8) & 0xff));
+  buf_byte(&compiler->bytes, (char)(value & 0xff));
 }
 
 static size_t bytecode_emit_jump(bytecode_compiler* compiler, bytecode_op op) {
@@ -1659,14 +1702,12 @@ static size_t bytecode_emit_jump(bytecode_compiler* compiler, bytecode_op op) {
 
 static void bytecode_patch_u16(bytecode_compiler* compiler, size_t operand, size_t value) {
   if (value > UINT16_MAX || operand > compiler->bytes.length ||
-      compiler->bytes.length - operand < 4) {
+      compiler->bytes.length - operand < 2) {
     compiler->bytes.failed = true;
     return;
   }
-  for (unsigned shift = 12;; shift -= 4) {
-    compiler->bytes.data[operand++] = hex_digit((unsigned)(value >> shift) & 15u);
-    if (shift == 0) break;
-  }
+  compiler->bytes.data[operand] = (char)((value >> 8) & 0xff);
+  compiler->bytes.data[operand + 1] = (char)(value & 0xff);
 }
 
 static size_t bytecode_constant(ots* state, bytecode_compiler* compiler, otv value) {
@@ -1689,6 +1730,10 @@ static void bytecode_emit_constant(ots* state, bytecode_compiler* compiler, byte
 
 static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form, otv env,
                                bool tail);
+static otv nat_add(ots* state, otv* args, int argc);
+static otv nat_subtract(ots* state, otv* args, int argc);
+static otv nat_num_equal(ots* state, otv* args, int argc);
+static otv nat_less(ots* state, otv* args, int argc);
 
 static otv make_descriptor(ots* state, otv* values, size_t count) {
   size_t root_count = count + 1;
@@ -1702,6 +1747,52 @@ static otv make_descriptor(ots* state, otv* values, size_t count) {
   for (size_t i = 0; i < count; i++) array_push(state, &descriptor, values[i]);
   ot_frame_pop(state, &values_frame);
   return descriptor;
+}
+
+static int lexical_location(ots* state, otv env, otv name, size_t* location) {
+  size_t depth;
+  size_t slot;
+  if (!env_location(env, name, &depth, &slot)) return 0;
+  if (depth > UINT8_MAX || slot > UINT8_MAX) {
+    (void)ot_raise(state, "compiler: lexical location exceeds 8-bit depth or slot limit");
+    return -1;
+  }
+  *location = (depth << 8) | slot;
+  return 1;
+}
+
+static ot_nat intrinsic_function(otv name) {
+  if (symbol_is(name, "+")) return nat_add;
+  if (symbol_is(name, "-")) return nat_subtract;
+  if (symbol_is(name, "=")) return nat_num_equal;
+  if (symbol_is(name, "<")) return nat_less;
+  return NULL;
+}
+
+static int compile_intrinsic(ots* state, bytecode_compiler* compiler, otv form, otv env,
+                             bool tail) {
+  otv head = as_pair(form)->car;
+  if (!is_type(head, OBJ_SYMBOL) || is_type(env_binding(env, head), OBJ_BINDING)) return 0;
+  ot_nat implementation = intrinsic_function(head);
+  if (implementation == NULL) return 0;
+  otv args = as_pair(form)->cdr;
+  if (!proper_list(args) || list_length(args) != 2) return 0;
+  otv var = resolve_var(state, env_namespace(state, env), head, false);
+  if (!is_type(var, OBJ_VAR)) return 0;
+  otv expected = ((ot_var_obj*)ot_as_obj(var))->value;
+  if (!is_type(expected, OBJ_NAT) || ((ot_nat_obj*)ot_as_obj(expected))->function != implementation)
+    return 0;
+  otv left = as_pair(args)->car;
+  otv right = as_pair(as_pair(args)->cdr)->car;
+  OT_FRAME_SCOPED(state, &compiler->constants, &form, &env, &head, &args, &var, &expected, &left,
+                  &right);
+  if (!compile_expression(state, compiler, left, env, false) ||
+      !compile_expression(state, compiler, right, env, false))
+    return -1;
+  otv fields[] = {head, expected, tail ? ot_true : ot_false};
+  otv descriptor = make_descriptor(state, fields, 3);
+  bytecode_emit_constant(state, compiler, BC_INTRINSIC, descriptor);
+  return compiler->bytes.failed ? -1 : 1;
 }
 
 static otv compile_expression_code(ots* state, otv form, otv env) {
@@ -1828,14 +1919,24 @@ static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form
                                bool tail) {
   OT_FRAME_SCOPED(state, &compiler->constants, &form, &env);
   if (is_type(form, OBJ_SYMBOL)) {
-    bytecode_op op = is_type(env_binding(env, form), OBJ_BINDING) ? BC_GET_LEXICAL : BC_GET_GLOBAL;
-    bytecode_emit_constant(state, compiler, op, form);
+    size_t location;
+    int lexical = lexical_location(state, env, form, &location);
+    if (lexical < 0) return false;
+    if (lexical) {
+      bytecode_emit(compiler, BC_GET_LEXICAL);
+      bytecode_emit_u16(compiler, location);
+    } else {
+      bytecode_emit_constant(state, compiler, BC_GET_GLOBAL, form);
+    }
     return !compiler->bytes.failed;
   }
   if (!is_type(form, OBJ_PAIR)) {
     bytecode_emit_constant(state, compiler, BC_CONST, form);
     return !compiler->bytes.failed;
   }
+
+  int intrinsic = compile_intrinsic(state, compiler, form, env, tail);
+  if (intrinsic != 0) return intrinsic > 0;
 
   otv head = as_pair(form)->car;
   OT_FRAME_SCOPED(state, &head);
@@ -2066,7 +2167,7 @@ static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form
         count++;
         cursor = as_pair(cursor)->cdr;
       }
-      otv named_compile_env = make_env(state, env, env_namespace(state, env));
+      otv named_compile_env = make_env(state, env, env_namespace(state, env), true, 0);
       OT_FRAME_SCOPED(state, &named_compile_env);
       env_bind(state, &named_compile_env, name, ot_nil);
       otv code = compile_function_code(state, params, body, named_compile_env,
@@ -2086,7 +2187,7 @@ static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form
         return false;
       }
       OT_FRAME_SCOPED(state, &bindings, &body);
-      otv let_env = make_env(state, env, env_namespace(state, env));
+      otv let_env = make_env(state, env, env_namespace(state, env), true, 0);
       OT_FRAME_SCOPED(state, &let_env);
       bytecode_emit(compiler, BC_SCOPE);
       while (is_type(bindings, OBJ_PAIR)) {
@@ -2118,9 +2219,15 @@ static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form
       }
       OT_FRAME_SCOPED(state, &name, &expression);
       if (!compile_expression(state, compiler, expression, env, false)) return false;
-      bytecode_emit_constant(
-          state, compiler,
-          is_type(env_binding(env, name), OBJ_BINDING) ? BC_SET_LEXICAL : BC_SET_GLOBAL, name);
+      size_t location;
+      int lexical = lexical_location(state, env, name, &location);
+      if (lexical < 0) return false;
+      if (lexical) {
+        bytecode_emit(compiler, BC_SET_LEXICAL);
+        bytecode_emit_u16(compiler, location);
+      } else {
+        bytecode_emit_constant(state, compiler, BC_SET_GLOBAL, name);
+      }
       return !compiler->bytes.failed;
     }
     if (symbol_is(head, "while")) {
@@ -2538,15 +2645,10 @@ static otv make_bytecode_function(ots* state, otv code, otv env, otv namespace_v
 }
 
 static bool bytecode_read_u16(ot_code_obj* code, size_t* ip, size_t* out) {
-  if (*ip > code->length || code->length - *ip < 4) return false;
-  unsigned value = 0;
+  if (*ip > code->length || code->length - *ip < 2) return false;
   unsigned char* bytes = as_bytes(code->bytes)->data;
-  for (size_t i = 0; i < 4; i++) {
-    int digit = hex_value(bytes[(*ip)++]);
-    if (digit < 0) return false;
-    value = (value << 4) | (unsigned)digit;
-  }
-  *out = value;
+  *out = ((size_t)bytes[*ip] << 8) | bytes[*ip + 1];
+  *ip += 2;
   return true;
 }
 
@@ -2562,7 +2664,6 @@ static otv vm_execute(ots* state, size_t floor);
 static otv require_forms(ots* state, otv specs);
 static otv vm_execute_dynamic(ots* state, unsigned char instruction, otv descriptor, otv env,
                               otv namespace_value);
-
 static otv vm_call_function(ots* state, otv callable, otv* args, size_t argc) {
   OT_FRAME_SCOPED(state, &callable);
   otv env = bind_parameters(state, callable, args, argc);
@@ -2577,6 +2678,20 @@ static otv vm_call_function(ots* state, otv callable, otv* args, size_t argc) {
 static otv descriptor_value(otv descriptor, size_t index) {
   if (!is_type(descriptor, OBJ_ARRAY) || index >= as_array(descriptor)->length) return ot_nil;
   return as_slots(as_array(descriptor)->slots)->values[index];
+}
+
+static bool vm_lexical_slot(otv env_value, size_t location, ot_env_obj** env_out,
+                            size_t* slot_out) {
+  size_t depth = location >> 8;
+  size_t slot = location & UINT8_MAX;
+  while (depth-- != 0 && is_type(env_value, OBJ_ENV))
+    env_value = ((ot_env_obj*)ot_as_obj(env_value))->parent;
+  if (!is_type(env_value, OBJ_ENV)) return false;
+  ot_env_obj* env = (ot_env_obj*)ot_as_obj(env_value);
+  if (!is_type(env->data, OBJ_SLOTS) || slot >= env->slot_count) return false;
+  *env_out = env;
+  *slot_out = slot;
+  return true;
 }
 
 static otv append_values(ots* state, otv left, otv right) {
@@ -2676,6 +2791,24 @@ static bool vm_enter_call(ots* state, size_t argc, bool tail) {
     return true;
   }
 
+  if (is_type(callable, OBJ_NAT)) {
+    ot_nat_obj* native = (ot_nat_obj*)ot_as_obj(callable);
+    if (native->vm_direct) {
+      ot_nat function = native->function;
+      otv result = function(state, state->vm.vm_stack + call_base + 1, (int)argc);
+      if (result == OT_UNWIND) return false;
+      if (!tail) {
+        state->vm.vm_stack_count = call_base;
+        vm_push(state, result);
+        return true;
+      }
+      ot_vm_frame leaving = state->vm.vm_frames[--state->vm.vm_frame_count];
+      state->vm.vm_stack_count = leaving.base;
+      vm_push(state, result);
+      return true;
+    }
+  }
+
   size_t values_count = argc == 0 ? 1 : argc;
   otv values[values_count];
   otv* roots[values_count];
@@ -2700,20 +2833,30 @@ static bool vm_enter_call(ots* state, size_t argc, bool tail) {
   return true;
 }
 
+#if OT_COMPUTED_GOTO
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#define VM_LABEL(NAME) NAME:
+#define VM_NEXT() goto vm_fast_dispatch
+#else
+#define VM_LABEL(NAME)
+#define VM_NEXT() continue
+#endif
+
 static otv vm_execute_loop(ots* state, size_t floor) {
+#define OT_OPERAND_ENTRY(NAME, VALUE, LABEL, OPERAND) [NAME] = OPERAND,
+  static const bool has_operand[256] = {OT_BYTECODE_OPS(OT_OPERAND_ENTRY)};
+#undef OT_OPERAND_ENTRY
+#if OT_COMPUTED_GOTO
+#define OT_LABEL_ENTRY(NAME, VALUE, LABEL, OPERAND) [NAME] = &&LABEL,
+  static void* const labels[256] = {OT_BYTECODE_OPS(OT_LABEL_ENTRY)};
+#undef OT_LABEL_ENTRY
+#endif
   while (state->vm.vm_frame_count > floor) {
     if (state->vm.vm_frame_count > state->vm.frame_limit) {
       (void)vm_unwind_to(state, floor);
       return ot_raise(state, "maximum VM frame depth exceeded");
     }
-    if (++state->vm.poll_count >= 1024) {
-      state->vm.poll_count = 0;
-      if (atomic_exchange(&state->vm.interrupted, false)) {
-        otv interrupted = run_interrupt_hook(state);
-        if (interrupted == OT_UNWIND) return vm_unwind_to(state, floor);
-      }
-    }
-
     ot_vm_frame* frame = &state->vm.vm_frames[state->vm.vm_frame_count - 1];
     ot_function_obj* function = (ot_function_obj*)ot_as_obj(frame->function);
     if (!is_type(function->code, OBJ_CODE)) {
@@ -2721,56 +2864,67 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       return vm_unwind_to(state, floor);
     }
     ot_code_obj* code = as_code(function->code);
+  VM_LABEL(vm_fast_dispatch)
+    if (++state->vm.poll_count >= 1024) {
+      state->vm.poll_count = 0;
+      if (atomic_exchange(&state->vm.interrupted, false)) {
+        otv interrupted = run_interrupt_hook(state);
+        if (interrupted == OT_UNWIND) return vm_unwind_to(state, floor);
+        continue;
+      }
+    }
     if (frame->ip >= code->length) {
       (void)ot_raise(state, "vm: instruction pointer outside bytecode");
       return vm_unwind_to(state, floor);
     }
     unsigned char instruction = as_bytes(code->bytes)->data[frame->ip++];
     size_t operand = 0;
-    if (instruction == BC_CONST || instruction == BC_GET_LEXICAL || instruction == BC_GET_GLOBAL ||
-        instruction == BC_CALL || instruction == BC_TAIL_CALL || instruction == BC_JUMP ||
-        instruction == BC_JUMP_IF_FALSE || instruction == BC_JUMP_IF_TRUE ||
-        instruction == BC_BIND || instruction == BC_SET_LEXICAL || instruction == BC_SET_GLOBAL ||
-        instruction == BC_CLOSURE || instruction == BC_DEFINE_LEXICAL ||
-        instruction == BC_DEFINE_GLOBAL || instruction == BC_DEFINE_PRIVATE ||
-        instruction == BC_DEF_PARAM || instruction == BC_NAMED_LET ||
-        instruction == BC_TAIL_NAMED_LET || instruction == BC_TRY ||
-        instruction == BC_HANDLER_BIND || instruction == BC_RESTART_CASE ||
-        instruction == BC_UNWIND_PROTECT || instruction == BC_WITH_PARAMS ||
-        instruction == BC_IN_NS || instruction == BC_REQUIRE) {
+    if (has_operand[instruction]) {
       if (!bytecode_read_u16(code, &frame->ip, &operand)) {
-        (void)ot_raise(state, "vm: malformed ASCII operand");
+        (void)ot_raise(state, "vm: truncated operand");
         return vm_unwind_to(state, floor);
       }
     }
 
+#if OT_COMPUTED_GOTO
+    if (labels[instruction] == NULL) goto vm_invalid;
+    goto *labels[instruction];
+#endif
+
+    VM_LABEL(vm_load)
     if (instruction == BC_CONST || instruction == BC_GET_LEXICAL || instruction == BC_GET_GLOBAL) {
-      if (operand >= code->constant_count) {
+      if (instruction != BC_GET_LEXICAL && operand >= code->constant_count) {
         (void)ot_raise(state, "vm: constant index out of range");
         return vm_unwind_to(state, floor);
       }
-      otv value = as_slots(as_array(code->constants)->slots)->values[operand];
+      otv value = instruction == BC_GET_LEXICAL
+                      ? ot_nil
+                      : as_slots(as_array(code->constants)->slots)->values[operand];
       if (instruction == BC_CONST) {
         vm_push(state, value);
-        continue;
+        VM_NEXT();
       }
       if (instruction == BC_GET_LEXICAL) {
-        otv binding = env_binding(frame->env, value);
-        if (!is_type(binding, OBJ_BINDING)) {
-          (void)ot_raise(state, "vm: missing lexical binding");
+        ot_env_obj* lexical_env;
+        size_t slot;
+        if (!vm_lexical_slot(frame->env, operand, &lexical_env, &slot)) {
+          (void)ot_raise(state, "vm: missing lexical binding at depth %zu slot %zu", operand >> 8,
+                         operand & UINT8_MAX);
           return vm_unwind_to(state, floor);
         }
-        vm_push(state, ((ot_binding_obj*)ot_as_obj(binding))->value);
-        continue;
+        vm_push(state, as_slots(lexical_env->data)->values[slot]);
+        VM_NEXT();
       }
       if (instruction == BC_GET_GLOBAL) {
         otv var = resolve_var(state, function->namespace_value, value, true);
         if (var == OT_UNWIND) return vm_unwind_to(state, floor);
         vm_push(state, ((ot_var_obj*)ot_as_obj(var))->value);
+        if (memchr(as_name(value)->bytes, '/', as_name(value)->length) == NULL) VM_NEXT();
         continue;
       }
     }
 
+    VM_LABEL(vm_closure)
     if (instruction == BC_CLOSURE) {
       if (operand >= code->constant_count) {
         (void)ot_raise(state, "vm: closure constant out of range");
@@ -2786,6 +2940,7 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       vm_push(state, closure);
       continue;
     }
+    VM_LABEL(vm_define)
     if (instruction == BC_DEFINE_LEXICAL || instruction == BC_DEFINE_GLOBAL ||
         instruction == BC_DEFINE_PRIVATE) {
       if (operand >= code->constant_count || state->vm.vm_stack_count <= frame->base) {
@@ -2810,6 +2965,7 @@ static otv vm_execute_loop(ots* state, size_t floor) {
                    instruction == BC_DEFINE_PRIVATE);
       continue;
     }
+    VM_LABEL(vm_macro)
     if (instruction == BC_MACRO) {
       if (state->vm.vm_stack_count <= frame->base ||
           !is_type(state->vm.vm_stack[state->vm.vm_stack_count - 1], OBJ_FUNCTION)) {
@@ -2823,6 +2979,7 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       state->vm.vm_stack[state->vm.vm_stack_count - 1] = ot_from_obj(macro);
       continue;
     }
+    VM_LABEL(vm_def_param)
     if (instruction == BC_DEF_PARAM) {
       if (operand >= code->constant_count || state->vm.vm_stack_count <= frame->base) {
         (void)ot_raise(state, "vm: invalid parameter definition");
@@ -2845,6 +3002,7 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       define_var(state, state->vm.current_namespace, name, made, doc, false);
       continue;
     }
+    VM_LABEL(vm_named_let)
     if (instruction == BC_NAMED_LET || instruction == BC_TAIL_NAMED_LET) {
       if (operand >= code->constant_count) {
         (void)ot_raise(state, "vm: named let constant out of range");
@@ -2868,7 +3026,7 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       otv named_env = ot_nil;
       otv named_namespace = function->namespace_value;
       OT_FRAME_SCOPED(state, &descriptor, &name, &nested_code, &named_env, &named_namespace);
-      named_env = make_env(state, frame->env, named_namespace);
+      named_env = make_env(state, frame->env, named_namespace, false, 1);
       otv callable = make_bytecode_function(state, nested_code, named_env, named_namespace, name);
       OT_FRAME_SCOPED(state, &callable);
       env_bind(state, &named_env, name, callable);
@@ -2887,6 +3045,7 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       }
       continue;
     }
+    VM_LABEL(vm_dynamic)
     if (instruction == BC_TRY || instruction == BC_HANDLER_BIND || instruction == BC_RESTART_CASE ||
         instruction == BC_UNWIND_PROTECT || instruction == BC_WITH_PARAMS) {
       if (operand >= code->constant_count) {
@@ -2903,6 +3062,7 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       vm_push(state, result);
       continue;
     }
+    VM_LABEL(vm_namespace)
     if (instruction == BC_IN_NS || instruction == BC_REQUIRE) {
       if (operand >= code->constant_count) {
         (void)ot_raise(state, "vm: namespace constant out of range");
@@ -2920,6 +3080,7 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       vm_push(state, result);
       continue;
     }
+    VM_LABEL(vm_constructor)
     if (instruction == BC_CONS || instruction == BC_APPEND) {
       if (state->vm.vm_stack_count < frame->base + 2) {
         (void)ot_raise(state, "vm: constructor operand stack underflow");
@@ -2935,6 +3096,55 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       continue;
     }
 
+    VM_LABEL(vm_intrinsic)
+    if (instruction == BC_INTRINSIC) {
+      if (operand >= code->constant_count || state->vm.vm_stack_count < frame->base + 2) {
+        (void)ot_raise(state, "vm: invalid intrinsic application");
+        return vm_unwind_to(state, floor);
+      }
+      otv descriptor = as_slots(as_array(code->constants)->slots)->values[operand];
+      otv name = descriptor_value(descriptor, 0);
+      otv expected = descriptor_value(descriptor, 1);
+      bool tail = descriptor_value(descriptor, 2) == ot_true;
+      if (!is_type(name, OBJ_SYMBOL) || !is_type(expected, OBJ_NAT)) {
+        (void)ot_raise(state, "vm: invalid intrinsic descriptor");
+        return vm_unwind_to(state, floor);
+      }
+      size_t call_base = state->vm.vm_stack_count - 2;
+      otv var = resolve_var(state, function->namespace_value, name, true);
+      if (var == OT_UNWIND) return vm_unwind_to(state, floor);
+      otv callable = ((ot_var_obj*)ot_as_obj(var))->value;
+      if (callable == expected) {
+        ot_nat implementation = ((ot_nat_obj*)ot_as_obj(expected))->function;
+        otv result = implementation(state, state->vm.vm_stack + call_base, 2);
+        if (result == OT_UNWIND) return vm_unwind_to(state, floor);
+        if (!tail) {
+          state->vm.vm_stack_count = call_base;
+          vm_push(state, result);
+          continue;
+        }
+        ot_vm_frame leaving = state->vm.vm_frames[--state->vm.vm_frame_count];
+        state->vm.vm_stack_count = leaving.base;
+        if (state->vm.vm_frame_count == floor) return result;
+        vm_push(state, result);
+        continue;
+      }
+
+      vm_push(state, ot_nil);
+      memmove(state->vm.vm_stack + call_base + 1, state->vm.vm_stack + call_base,
+              2 * sizeof(*state->vm.vm_stack));
+      state->vm.vm_stack[call_base] = callable;
+      size_t before = state->vm.vm_frame_count;
+      if (!vm_enter_call(state, 2, tail)) return vm_unwind_to(state, floor);
+      if (tail && state->vm.vm_frame_count < before && state->vm.vm_frame_count == floor) {
+        otv result = state->vm.vm_stack[state->vm.vm_stack_count - 1];
+        state->vm.vm_stack_count--;
+        return result;
+      }
+      continue;
+    }
+
+    VM_LABEL(vm_call)
     if (instruction == BC_CALL || instruction == BC_TAIL_CALL) {
       size_t before = state->vm.vm_frame_count;
       if (!vm_enter_call(state, operand, instruction == BC_TAIL_CALL))
@@ -2947,21 +3157,27 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       }
       continue;
     }
+    VM_LABEL(vm_set)
     if (instruction == BC_SET_LEXICAL || instruction == BC_SET_GLOBAL) {
-      if (operand >= code->constant_count || state->vm.vm_stack_count <= frame->base) {
+      if ((instruction == BC_SET_GLOBAL && operand >= code->constant_count) ||
+          state->vm.vm_stack_count <= frame->base) {
         (void)ot_raise(state, "vm: invalid assignment");
         return vm_unwind_to(state, floor);
       }
-      otv name = as_slots(as_array(code->constants)->slots)->values[operand];
+      otv name = instruction == BC_SET_GLOBAL
+                     ? as_slots(as_array(code->constants)->slots)->values[operand]
+                     : ot_nil;
       otv assigned = state->vm.vm_stack[state->vm.vm_stack_count - 1];
       if (instruction == BC_SET_LEXICAL) {
-        otv binding = env_binding(frame->env, name);
-        if (!is_type(binding, OBJ_BINDING)) {
+        ot_env_obj* lexical_env;
+        size_t slot;
+        if (!vm_lexical_slot(frame->env, operand, &lexical_env, &slot)) {
           (void)ot_raise(state, "vm: missing lexical binding");
           return vm_unwind_to(state, floor);
         }
-        ot_binding_obj* binding_object = (ot_binding_obj*)ot_as_obj(binding);
-        ot_store(state, binding_object, &binding_object->value, assigned);
+        ot_slots_obj* slots = as_slots(lexical_env->data);
+        ot_store(state, slots, &slots->values[slot], assigned);
+        VM_NEXT();
       } else {
         otv var = resolve_var(state, function->namespace_value, name, true);
         if (var == OT_UNWIND) return vm_unwind_to(state, floor);
@@ -2970,18 +3186,21 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       }
       continue;
     }
+    VM_LABEL(vm_dup)
     if (instruction == BC_DUP) {
       if (state->vm.vm_stack_count <= frame->base) {
         (void)ot_raise(state, "vm: operand stack underflow");
         return vm_unwind_to(state, floor);
       }
       vm_push(state, state->vm.vm_stack[state->vm.vm_stack_count - 1]);
-      continue;
+      VM_NEXT();
     }
+    VM_LABEL(vm_scope)
     if (instruction == BC_SCOPE) {
-      frame->env = make_env(state, frame->env, env_namespace(state, frame->env));
+      frame->env = make_env(state, frame->env, env_namespace(state, frame->env), false, 1);
       continue;
     }
+    VM_LABEL(vm_bind)
     if (instruction == BC_BIND) {
       if (operand >= code->constant_count || state->vm.vm_stack_count <= frame->base) {
         (void)ot_raise(state, "vm: invalid lexical bind");
@@ -2993,6 +3212,7 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       env_bind(state, &frame->env, name, bound);
       continue;
     }
+    VM_LABEL(vm_unscope)
     if (instruction == BC_UNSCOPE) {
       if (!is_type(frame->env, OBJ_ENV)) {
         (void)ot_raise(state, "vm: lexical scope underflow");
@@ -3001,14 +3221,16 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       frame->env = ((ot_env_obj*)ot_as_obj(frame->env))->parent;
       continue;
     }
+    VM_LABEL(vm_jump)
     if (instruction == BC_JUMP) {
       if (operand >= code->length) {
         (void)ot_raise(state, "vm: jump target outside bytecode");
         return vm_unwind_to(state, floor);
       }
       frame->ip = operand;
-      continue;
+      VM_NEXT();
     }
+    VM_LABEL(vm_conditional_jump)
     if (instruction == BC_JUMP_IF_FALSE || instruction == BC_JUMP_IF_TRUE) {
       if (state->vm.vm_stack_count <= frame->base) {
         (void)ot_raise(state, "vm: operand stack underflow");
@@ -3023,16 +3245,18 @@ static otv vm_execute_loop(ots* state, size_t floor) {
         }
         frame->ip = operand;
       }
-      continue;
+      VM_NEXT();
     }
+    VM_LABEL(vm_pop)
     if (instruction == BC_POP) {
       if (state->vm.vm_stack_count <= frame->base) {
         (void)ot_raise(state, "vm: operand stack underflow");
         return vm_unwind_to(state, floor);
       }
       state->vm.vm_stack_count--;
-      continue;
+      VM_NEXT();
     }
+    VM_LABEL(vm_return)
     if (instruction == BC_RETURN) {
       otv result = state->vm.vm_stack_count > frame->base
                        ? state->vm.vm_stack[state->vm.vm_stack_count - 1]
@@ -3043,11 +3267,18 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       vm_push(state, result);
       continue;
     }
+  VM_LABEL(vm_invalid)
     (void)ot_raise(state, "vm: unknown opcode 0x%02x", instruction);
     return vm_unwind_to(state, floor);
   }
   return ot_nil;
 }
+
+#undef VM_LABEL
+#undef VM_NEXT
+#if OT_COMPUTED_GOTO
+#pragma GCC diagnostic pop
+#endif
 
 static otv vm_execute(ots* state, size_t floor) { return vm_execute_loop(state, floor); }
 
@@ -5332,18 +5563,28 @@ static const nat_def core_nats[] = {
  * 9. BOOTSTRAP, EMBEDDING, AND EXTENSION API
  * ========================================================================= */
 
-void ot_def_nat(ots* state, const char* name, ot_nat function) {
+static void define_native(ots* state, const char* name, ot_nat function, bool vm_direct) {
   otv symbol = ot_intern(state, name, strlen(name), false);
   OT_FRAME_SCOPED(state, &symbol);
   ot_nat_obj* nat = must_alloc(state, sizeof(*nat), OBJ_NAT);
   nat->function = function;
+  nat->vm_direct = vm_direct;
   ot_store(state, nat, &nat->name, symbol);
   define_var(state, state->vm.current_namespace, symbol, ot_from_obj(nat), ot_nil, false);
 }
 
+void ot_def_nat(ots* state, const char* name, ot_nat function) {
+  define_native(state, name, function, false);
+}
+
 static void register_core(ots* state) {
-  for (size_t i = 0; i < sizeof core_nats / sizeof core_nats[0]; i++)
-    ot_def_nat(state, core_nats[i].name, core_nats[i].function);
+  for (size_t i = 0; i < sizeof core_nats / sizeof core_nats[0]; i++) {
+    const char* name = core_nats[i].name;
+    bool reentrant = strcmp(name, "apply") == 0 || strcmp(name, "for-each") == 0 ||
+                     strcmp(name, "update!") == 0 || strcmp(name, "macroexpand-1") == 0 ||
+                     strcmp(name, "macroexpand") == 0 || strcmp(name, "eval") == 0;
+    define_native(state, name, core_nats[i].function, !reentrant);
+  }
 }
 
 static bool eval_source(ots* state, const char* source, size_t length, const char* name,

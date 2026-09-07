@@ -172,7 +172,7 @@ bool ot_equal(ots* state, otv left, otv right, bool structural);
 bool ot_float_value(otv value, double* out);
 /* The returned byte span stays valid only until the next heap allocation. */
 bool ot_string_bytes(otv value, const char** out, size_t* length);
-/* Inspect an interpreted function's printable ASCII bytecode. The span stays
+/* Inspect an interpreted function's compact bytecode. The span stays
  * valid only until the next heap allocation. */
 bool ot_function_bytecode(otv function, const char** out, size_t* length);
 
@@ -338,13 +338,16 @@ typedef struct ot_binding_obj {
   otv name;
   otv value;
   otv next;
+  size_t slot;
 } ot_binding_obj;
 
 typedef struct ot_env_obj {
   uintptr_t header;
   otv parent;
-  otv bindings;
+  otv data;
   otv namespace_value;
+  size_t slot_count;
+  bool compile_time;
 } ot_env_obj;
 
 typedef struct ot_var_obj {
@@ -398,6 +401,7 @@ typedef struct ot_nat_obj {
   uintptr_t header;
   ot_nat function;
   otv name;
+  bool vm_direct;
 } ot_nat_obj;
 
 typedef struct ot_macro_obj {

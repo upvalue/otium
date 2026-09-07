@@ -320,15 +320,13 @@ static void test_eval_integration(void) {
   check(evaluate(state, program, &value) && ot_is_int(value) &&
             ot_get_int(value) == INT64_C(1250025000),
         "deep tail call reuses its VM frame");
-  check(evaluate(state, "(fn (x) (if x (+ x 1) 0))", &value), "compile a function");
+  check(evaluate(state, "(fn (x) (if x global-value 0))", &value), "compile a function");
   const char* bytecode = NULL;
   size_t bytecode_length = 0;
   check(ot_function_bytecode(value, &bytecode, &bytecode_length) && bytecode_length != 0,
         "interpreted functions expose bytecode");
-  bool printable = bytecode_length != 0;
-  for (size_t i = 0; i < bytecode_length; i++)
-    if ((unsigned char)bytecode[i] < 0x20 || (unsigned char)bytecode[i] > 0x7e) printable = false;
-  check(printable, "bytecode uses only printable ASCII bytes");
+  check(memchr(bytecode, '\0', bytecode_length) != NULL,
+        "bytecode operands use compact binary encoding");
   check(memchr(bytecode, 'B', bytecode_length) != NULL &&
             memchr(bytecode, 'C', bytecode_length) != NULL,
         "compiler separates lexical and published loads");
@@ -337,6 +335,31 @@ static void test_eval_integration(void) {
             memchr(bytecode, 'Q', bytecode_length) != NULL &&
             memchr(bytecode, 'R', bytecode_length) != NULL,
         "compiler separates lexical and published assignment");
+  check(evaluate(state, "(fn (x) (+ x 1))", &value) &&
+            ot_function_bytecode(value, &bytecode, &bytecode_length) &&
+            memchr(bytecode, 0x80, bytecode_length) != NULL,
+        "compiler emits guarded core intrinsics");
+  check(evaluate(state,
+                 "(let ((result (let ((x 1)) "
+                 "                (let ((f (fn () (set! x (+ x 1)) x))) "
+                 "                  (let ((x 100)) (array (f) x (f))))))) "
+                 "  (and (= (get result 0) 2) (= (get result 1) 100) "
+                 "       (= (get result 2) 3)))",
+                 &value) &&
+            value == ot_true,
+        "lexical coordinates preserve closure mutation and shadowing");
+  check(evaluate(state,
+                 "(begin (def saved-plus +) "
+                 "       (def + (fn (left right) 99)) "
+                 "       (def rebound-result (+ 1 2)) "
+                 "       (def + saved-plus) "
+                 "       rebound-result)",
+                 &value) &&
+            ot_is_int(value) && ot_get_int(value) == 99,
+        "native VM fast path preserves global rebinding");
+  check(evaluate(state, "(try (+ 1 'bad) (catch (error? condition) 42))", &value) &&
+            ot_is_int(value) && ot_get_int(value) == 42,
+        "native VM fast path permits reentrant condition handling");
   check(evaluate(state,
                  "(fn (message) "
                  "  (try (error message) (catch (error? e) (condition-message e))))",

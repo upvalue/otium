@@ -54,8 +54,6 @@ def main():
                     binary,
                     "--max-depth",
                     "2000",
-                    "--stack-slots",
-                    "32768",
                     source,
                 ],
                 text=True,

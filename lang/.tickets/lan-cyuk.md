@@ -1,6 +1,6 @@
 ---
 id: lan-cyuk
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-09-06T22:39:00Z
@@ -18,3 +18,9 @@ The specification says equal? compares arrays structurally, while the implementa
 
 One semantic choice is documented consistently in the specification, implementation, and tests; nested arrays and mutable arrays used as table keys have explicit coverage.
 
+
+## Notes
+
+**2026-09-06T23:05:10Z**
+
+Semantic decision: arrays use stable identity for equal?, sequence membership, and table keys because arrays are mutable; the specification and regression coverage now agree.

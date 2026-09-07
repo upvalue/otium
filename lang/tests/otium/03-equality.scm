@@ -22,6 +22,7 @@
 
 ; equal? : identity for mutable objects
 (println "equal-arrays-distinct:" (equal? [1 2] [1 2]))
+(println "equal-nested-arrays-distinct:" (equal? [[1]] [[1]]))
 (println "equal-tables-distinct:" (equal? {:a 1} {:a 1}))
 (let ((a [1 2]))
   (println "equal-array-self:" (equal? a a)))
@@ -46,4 +47,5 @@
   (println "eq-array-self:" (eq? a a)))
 (println "eq-arrays-distinct:" (eq? [1] [1]))
 (let ((s "same"))
-  (println "eq-string-self:" (eq? s s)))
+(println "eq-string-self:" (eq? s s)))
+(println "contains-array-identity:" (contains? [[1]] [1]))

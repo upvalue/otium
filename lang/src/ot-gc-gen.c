@@ -189,7 +189,8 @@ static void rebuild_layout(struct ot_gc_heap* heap) {
   while (scan < end) {
     ot_obj* object = (ot_obj*)scan;
     size_t size = object_size(object);
-    if (size < sizeof(ot_obj) || (size & 7u) != 0 || size > (size_t)(end - scan)) {
+    if (size < sizeof(ot_obj) || (size & (OT_GC_ALIGNMENT - 1u)) != 0 ||
+        size > (size_t)(end - scan)) {
       fprintf(stderr, "otium: malformed old-space block at offset %zu\n",
               (size_t)(scan - heap->old_base));
       abort();
@@ -410,7 +411,7 @@ static void minor_scan_remembered(ots* state) {
       }
       ot_obj* object = (ot_obj*)scan;
       size_t size = object_size(object);
-      if (size < sizeof(ot_obj) || (size & 7u) != 0 ||
+      if (size < sizeof(ot_obj) || (size & (OT_GC_ALIGNMENT - 1u)) != 0 ||
           size > (size_t)(heap->old_base + heap->old_capacity - scan)) {
         fputs("otium: malformed block while scanning remembered set\n", stderr);
         abort();
@@ -940,7 +941,8 @@ static void validate_heap(ots* state) {
   while (scan < heap->nursery_alloc) {
     ot_obj* object = (ot_obj*)scan;
     size_t size = object_size(object);
-    if (size < sizeof(ot_obj) || (size & 7u) != 0 || size > (size_t)(heap->nursery_alloc - scan)) {
+    if (size < sizeof(ot_obj) || (size & (OT_GC_ALIGNMENT - 1u)) != 0 ||
+        size > (size_t)(heap->nursery_alloc - scan)) {
       fputs("otium: malformed nursery object after collection\n", stderr);
       abort();
     }
@@ -953,7 +955,8 @@ static void validate_heap(ots* state) {
   while (scan < old_end) {
     ot_obj* object = (ot_obj*)scan;
     size_t size = object_size(object);
-    if (size < sizeof(ot_obj) || (size & 7u) != 0 || size > (size_t)(old_end - scan)) {
+    if (size < sizeof(ot_obj) || (size & (OT_GC_ALIGNMENT - 1u)) != 0 ||
+        size > (size_t)(old_end - scan)) {
       fputs("otium: malformed old-space object after collection\n", stderr);
       abort();
     }
@@ -1028,10 +1031,10 @@ bool ot_gc_heap_init(ots* state) {
   if (large < sizeof(ot_free_obj)) large = sizeof(ot_free_obj);
   heap->large_object_bytes = large;
 
-  size_t nursery_reservation_bytes = nursery * 2 + 7;
+  size_t nursery_reservation_bytes = nursery * 2 + OT_GC_ALIGNMENT - 1u;
   heap->nursery_reservation = ot_host_alloc(nursery_reservation_bytes);
   if (heap->nursery_reservation == NULL) goto fail;
-  uintptr_t nursery_aligned = ((uintptr_t)heap->nursery_reservation + 7u) & ~(uintptr_t)7u;
+  uintptr_t nursery_aligned = ot_gc_align_address((uintptr_t)heap->nursery_reservation);
   heap->nursery_from = (unsigned char*)nursery_aligned;
   heap->nursery_to = heap->nursery_from + nursery;
   heap->nursery_alloc = heap->nursery_from;
@@ -1101,7 +1104,7 @@ void ot_gc_write_barrier(ots* state, const ot_obj* owner, otv value) {
 
 void* ot_alloc(ots* state, size_t size, ot_obj_type type) {
   struct ot_gc_heap* heap = state->gc;
-  if (size > SIZE_MAX - 7u) return NULL;
+  if (size > SIZE_MAX - (OT_GC_ALIGNMENT - 1u)) return NULL;
   size = ot_gc_align_object(size);
   if (size > heap->old_max) return NULL;
 

@@ -43,9 +43,9 @@ Benchmark timing uses `current-jiffy` backed by a monotonic nanosecond clock,
 `jiffies-per-second` returning 1,000,000,000, and `current-second` backed by the
 system clock.
 
-The CLI now accepts `--max-depth`, `--stack-slots`, `--heap-init`, and
-`--heap-max`. Existing defaults remain in place unless overridden. The runner
-records its runtime flags with each sample.
+The CLI accepts `--max-depth`, `--heap-init`, and `--heap-max`. Existing
+defaults remain in place unless overridden. The runner records its runtime
+flags with each sample.
 
 `destruc` required `set-car!` and `set-cdr!`. Pair mutation rejects cycles, and
 pairs used as structural table keys are frozen so their hashes cannot change.

@@ -135,13 +135,21 @@ static int run_file(ots* state, const char* path) {
     fprintf(stderr, "otium: cannot open %s\n", path);
     return 1;
   }
+  const char* program = source;
+  size_t program_length = length;
+  if (program_length >= 2 && program[0] == '#' && program[1] == '!') {
+    const char* newline = memchr(program, '\n', program_length);
+    size_t skipped = newline == NULL ? program_length : (size_t)(newline - program) + 1u;
+    program += skipped;
+    program_length -= skipped;
+  }
   otv result;
-  bool ok = ot_eval_src(state, source, length, path, &result);
+  bool ok = ot_eval_src(state, program, program_length, path, &result);
   ot_host_free(source);
   if (ok) return 0;
   if (state->vm.unwind_kind == UNWIND_QUIT) {
     ot_clear_condition(state);
-    return state->quit_requested ? 0 : 130;
+    return state->quit_requested ? state->quit_status : 130;
   }
   fputs("otium: ", stderr);
   print_value(state, ot_condition(state), stderr);
@@ -492,7 +500,7 @@ int main(int argc, char** argv) {
     } else if (!positional &&
                (strcmp(argument, "--path") == 0 || strcmp(argument, "--project") == 0 ||
                 strcmp(argument, "--heap-init") == 0 || strcmp(argument, "--heap-max") == 0 ||
-                strcmp(argument, "--max-depth") == 0 || strcmp(argument, "--stack-slots") == 0)) {
+                strcmp(argument, "--max-depth") == 0)) {
       if (++i == argc) {
         fprintf(stderr, "otium: %s requires %s\n", argument,
                 strcmp(argument, "--path") == 0      ? "a directory"
@@ -567,6 +575,7 @@ int main(int argc, char** argv) {
   }
   if (stats) print_gc_stats(state);
   if (stats_json) print_gc_stats_json(state);
+  if (state->quit_requested) status = state->quit_status;
   ot_destroy(state);
   signal_state = NULL;
   for (size_t i = 0; i < files.length; i++) ot_host_free(files.values[i]);

@@ -3,7 +3,15 @@
 
 #include "otium.h"
 
-static inline size_t ot_gc_align_object(size_t size) { return (size + 7u) & ~(size_t)7u; }
+#define OT_GC_ALIGNMENT alignof(max_align_t)
+
+static inline size_t ot_gc_align_object(size_t size) {
+  return (size + OT_GC_ALIGNMENT - 1u) & ~(size_t)(OT_GC_ALIGNMENT - 1u);
+}
+
+static inline uintptr_t ot_gc_align_address(uintptr_t address) {
+  return (address + OT_GC_ALIGNMENT - 1u) & ~(uintptr_t)(OT_GC_ALIGNMENT - 1u);
+}
 
 static inline uintptr_t ot_gc_make_header(ot_obj_type type, size_t size) {
   return ((uintptr_t)size << 8u) | ((uintptr_t)type << 1u);

@@ -17,6 +17,9 @@
 (println "get-on-nil:" (get nil :k))
 (println "get-in-nil-chain:" (get-in {:a {:b 1}} [:a :missing :deeper]))
 (println "get-in-hit:" (get-in {:a {:b 1}} [:a :b]))
+(println "get-unsupported:"
+  (try (get 42 :k 99)
+    (catch (error? e) (condition-message e))))
 
 ; storing nil deletes
 (let ((t {:a 1 :b 2}))
@@ -54,3 +57,27 @@
 (println "null?-nil:" (null? nil))
 (println "number?-both:" (number? 1) (number? 1.5) (number? "1"))
 (println "list?-proper:" (list? '(1 2)) (list? '()))
+
+; Pair mutation may share structure but may not make a pair reachable
+; from itself, including through mutable collections.
+(let ((p (cons 1 2)))
+  (println "set-cdr-cycle:"
+    (try (set-cdr! p p)
+      (catch (error? e) (condition-message e))))
+  (println "set-cdr-cycle-value:" p))
+(let ((p (cons 1 2)))
+  (println "set-car-nested-cycle:"
+    (try (set-car! p (list 0 p))
+      (catch (error? e) (condition-message e)))))
+(let ((p (cons 1 2)))
+  (println "set-car-array-cycle:"
+    (try (set-car! p [p])
+      (catch (error? e) (condition-message e)))))
+(let ((p (cons 1 2)))
+  (println "set-cdr-table-cycle:"
+    (try (set-cdr! p {:p p})
+      (catch (error? e) (condition-message e)))))
+(let ((a [nil]) (p (cons 1 2)))
+  (put! a 0 a)
+  (set-car! p a)
+  (println "set-car-existing-array-cycle:" (type (car p))))

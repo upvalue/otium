@@ -27,7 +27,15 @@
       (set! s (cdr s)))
     out))
 
+(define- (require-int who value)
+  (if (int? value)
+      value
+      (error (str who ": expected integer"))))
+
 ;; --- macros (10.11) ---------------------------------------------------------
+
+(defmacro defn (name params . body)
+  (cons 'define (cons (cons name params) body)))
 
 (defmacro when (test . body)
   `(if ,test (begin ,@body) nil))
@@ -66,6 +74,18 @@
 
 ;; --- sequences (10.4) -------------------------------------------------------
 
+(define (caar p) (car (car p)))
+(define (cadr p) (car (cdr p)))
+(define (cddr p) (cdr (cdr p)))
+
+(define (list-to-array value)
+  (unless (list? value) (error "list-to-array: expected proper list"))
+  (list->arr value))
+
+(define (array-to-list value)
+  (unless (array? value) (error "array-to-list: expected array"))
+  (to-list value))
+
 (define (first seq)
   (cond ((nil? seq) nil)
         ((null? seq) nil)
@@ -83,6 +103,7 @@
         (else (error "rest: not a sequence"))))
 
 (define (nth seq i)
+  (require-int "nth" i)
   (cond ((nil? seq) nil)
         ((null? seq) nil)
         ((array? seq) (if (and (>= i 0) (< i (length seq))) (get seq i) nil))
@@ -152,6 +173,9 @@
           ((= n 3) (begin (set! a (nth args 0)) (set! b (nth args 1))
                           (set! step (nth args 2))))
           (else (error "range: expected 1 to 3 arguments")))
+    (require-int "range" a)
+    (require-int "range" b)
+    (require-int "range" step)
     (when (= step 0) (error "range: step must be nonzero"))
     (let ((out (array)) (i a))
       (if (> step 0)
@@ -168,6 +192,7 @@
         (to-list out))))
 
 (define (take n seq)
+  (require-int "take" n)
   (if (array? seq)
       (let ((out (array)) (i 0) (m (min (max n 0) (length seq))))
         (while (< i m)
@@ -182,6 +207,7 @@
         (reverse acc))))
 
 (define (drop n seq)
+  (require-int "drop" n)
   (if (array? seq)
       (let ((out (array)) (i (max n 0)) (m (length seq)))
         (while (< i m)
@@ -296,6 +322,7 @@
 
 (define (get-in coll path . more)
   "get folded over a sequence of keys."
+  (when (> (length more) 1) (error "get-in: expected 2 or 3 arguments"))
   (let ((default (if (pair? more) (car more) nil))
         (c coll))
     (for-each (fn (k) (set! c (get c k))) path)

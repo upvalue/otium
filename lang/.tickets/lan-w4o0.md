@@ -1,6 +1,6 @@
 ---
 id: lan-w4o0
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-09-06T22:39:42Z

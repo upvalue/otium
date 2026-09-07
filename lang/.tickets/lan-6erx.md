@@ -1,6 +1,6 @@
 ---
 id: lan-6erx
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-09-06T22:38:41Z
@@ -18,3 +18,9 @@ Managed objects are aligned to 8 bytes, but ot_ext_obj contains max_align_t and 
 
 Both collectors return ot_ext_obj and inline payload storage aligned for max_align_t; extension tests pass under address and undefined-behavior sanitizers.
 
+
+## Notes
+
+**2026-09-06T23:05:10Z**
+
+Both semi and gen passed the full ASan/UBSan test matrix. gc-lint was attempted but the optional LLVM/Clang development headers are not installed.

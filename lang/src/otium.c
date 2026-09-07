@@ -722,6 +722,58 @@ static void render_pair(ots* state, buf* out, otv value, bool display, unsigned 
   buf_byte(out, ')');
 }
 
+static void format_float(char* output, size_t capacity, double number) {
+  if (isnan(number)) {
+    snprintf(output, capacity, "nan");
+    return;
+  }
+  if (isinf(number)) {
+    snprintf(output, capacity, signbit(number) ? "-inf" : "+inf");
+    return;
+  }
+  char conventional[64];
+  snprintf(conventional, sizeof conventional, "%.17g", number);
+  bool use_exponent = strchr(conventional, 'e') != NULL || strchr(conventional, 'E') != NULL;
+  char scientific[64];
+  snprintf(scientific, sizeof scientific, "%.16e", number);
+  char* exponent_start = strchr(scientific, 'e');
+  int exponent = exponent_start == NULL ? 0 : (int)strtol(exponent_start + 1, NULL, 10);
+  for (int precision = 1; precision <= 17; precision++) {
+    char candidate[64];
+    if (use_exponent) {
+      snprintf(candidate, sizeof candidate, "%.*e", precision - 1, number);
+      char* marker = strchr(candidate, 'e');
+      char* digits = marker + 1;
+      char sign = *digits;
+      if (sign == '+' || sign == '-') digits++;
+      while (digits[0] == '0' && digits[1] != '\0') digits++;
+      char normalized[64];
+      size_t mantissa_length = (size_t)(marker - candidate);
+      memcpy(normalized, candidate, mantissa_length);
+      size_t offset = mantissa_length;
+      normalized[offset++] = 'e';
+      if (sign == '-') normalized[offset++] = '-';
+      snprintf(normalized + offset, sizeof normalized - offset, "%s", digits);
+      snprintf(candidate, sizeof candidate, "%s", normalized);
+    } else {
+      int decimal_places = precision - 1 - exponent;
+      if (decimal_places < 0) decimal_places = 0;
+      snprintf(candidate, sizeof candidate, "%.*f", decimal_places, number);
+    }
+    char* end = NULL;
+    double parsed = strtod(candidate, &end);
+    uint64_t number_bits;
+    uint64_t parsed_bits;
+    memcpy(&number_bits, &number, sizeof number_bits);
+    memcpy(&parsed_bits, &parsed, sizeof parsed_bits);
+    if (end != NULL && *end == '\0' && number_bits == parsed_bits) {
+      snprintf(output, capacity, "%s", candidate);
+      return;
+    }
+  }
+  snprintf(output, capacity, "%.17g", number);
+}
+
 static void render_value(ots* state, buf* out, otv value, bool display, unsigned depth) {
   if (depth > 1000) {
     buf_cstr(out, "#<depth>");
@@ -751,7 +803,7 @@ static void render_value(ots* state, buf* out, otv value, bool display, unsigned
     case OBJ_FLOAT: {
       double number = ((ot_float_obj*)ot_as_obj(value))->value;
       char text[64];
-      snprintf(text, sizeof text, "%.17g", number);
+      format_float(text, sizeof text, number);
       buf_cstr(out, text);
       if (isfinite(number) && strchr(text, '.') == NULL && strchr(text, 'e') == NULL &&
           strchr(text, 'E') == NULL)
@@ -951,7 +1003,8 @@ static otv read_atom(reader* input) {
       if (errno == 0 && end == text.data + length) {
         buf_free(&text);
         intptr_t narrowed = (intptr_t)integer;
-        if ((intmax_t)narrowed != integer) return reader_error(input, "integer out of range");
+        if ((intmax_t)narrowed != integer || !ot_int_fits(narrowed))
+          return reader_error(input, "integer out of range");
         return ot_make_int(narrowed);
       }
     } else {
@@ -960,7 +1013,8 @@ static otv read_atom(reader* input) {
           strchr(text.data, 'e') == NULL && strchr(text.data, 'E') == NULL) {
         buf_free(&text);
         intptr_t narrowed = (intptr_t)integer;
-        if ((intmax_t)narrowed != integer) return reader_error(input, "integer out of range");
+        if ((intmax_t)narrowed != integer || !ot_int_fits(narrowed))
+          return reader_error(input, "integer out of range");
         return ot_make_int(narrowed);
       }
       errno = 0;
@@ -1921,31 +1975,39 @@ static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form
     if (symbol_is(head, "cond")) {
       otv clauses = args;
       OT_FRAME_SCOPED(state, &clauses);
+      for (otv cursor = clauses; cursor != ot_null; cursor = as_pair(cursor)->cdr) {
+        if (!is_type(cursor, OBJ_PAIR)) {
+          (void)ot_raise(state, "cond: improper clauses");
+          return false;
+        }
+        otv clause = as_pair(cursor)->car;
+        if (!is_type(clause, OBJ_PAIR) || !proper_list(clause)) {
+          (void)ot_raise(state, "cond: bad clause");
+          return false;
+        }
+        otv test = as_pair(clause)->car;
+        if (is_type(test, OBJ_SYMBOL) && symbol_is(test, "else") &&
+            as_pair(clause)->cdr == ot_null) {
+          (void)ot_raise(state, "cond: else requires a body");
+          return false;
+        }
+      }
       size_t clause_count = list_length(clauses);
       size_t end_jumps[clause_count == 0 ? 1 : clause_count];
       size_t end_count = 0;
       while (is_type(clauses, OBJ_PAIR)) {
         otv clause = as_pair(clauses)->car;
-        if (!is_type(clause, OBJ_PAIR)) {
-          (void)ot_raise(state, "cond: bad clause");
-          return false;
-        }
         otv test = as_pair(clause)->car;
         otv body = as_pair(clause)->cdr;
         OT_FRAME_SCOPED(state, &clause, &test, &body);
         bool is_else = is_type(test, OBJ_SYMBOL) && symbol_is(test, "else");
         if (body == ot_null) {
-          if (is_else) {
-            bytecode_emit_constant(state, compiler, BC_CONST, ot_true);
-            end_jumps[end_count++] = bytecode_emit_jump(compiler, BC_JUMP);
-          } else {
-            if (!compile_expression(state, compiler, test, env, false)) return false;
-            bytecode_emit(compiler, BC_DUP);
-            size_t false_jump = bytecode_emit_jump(compiler, BC_JUMP_IF_FALSE);
-            end_jumps[end_count++] = bytecode_emit_jump(compiler, BC_JUMP);
-            bytecode_patch_u16(compiler, false_jump, compiler->bytes.length);
-            bytecode_emit(compiler, BC_POP);
-          }
+          if (!compile_expression(state, compiler, test, env, false)) return false;
+          bytecode_emit(compiler, BC_DUP);
+          size_t false_jump = bytecode_emit_jump(compiler, BC_JUMP_IF_FALSE);
+          end_jumps[end_count++] = bytecode_emit_jump(compiler, BC_JUMP);
+          bytecode_patch_u16(compiler, false_jump, compiler->bytes.length);
+          bytecode_emit(compiler, BC_POP);
           clauses = as_pair(clauses)->cdr;
           continue;
         }
@@ -1958,10 +2020,6 @@ static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form
         end_jumps[end_count++] = bytecode_emit_jump(compiler, BC_JUMP);
         if (next_jump != SIZE_MAX) bytecode_patch_u16(compiler, next_jump, compiler->bytes.length);
         clauses = as_pair(clauses)->cdr;
-      }
-      if (clauses != ot_null) {
-        (void)ot_raise(state, "cond: improper clauses");
-        return false;
       }
       bytecode_emit_constant(state, compiler, BC_CONST, ot_nil);
       for (size_t i = 0; i < end_count; i++)
@@ -2331,22 +2389,36 @@ static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form
         (void)ot_raise(state, "in-ns: invalid name");
         return false;
       }
-      bytecode_emit_constant(state, compiler, BC_IN_NS, name);
       if (symbol_is(head, "ns")) {
         otv clauses = list_tail(args, 1);
         while (is_type(clauses, OBJ_PAIR)) {
           otv clause = as_pair(clauses)->car;
-          if (is_type(clause, OBJ_PAIR) && is_type(as_pair(clause)->car, OBJ_KEYWORD) &&
-              as_name(as_pair(clause)->car)->length == 7 &&
-              memcmp(as_name(as_pair(clause)->car)->bytes, "require", 7) == 0) {
-            bytecode_emit(compiler, BC_POP);
-            bytecode_emit_constant(state, compiler, BC_REQUIRE, as_pair(clause)->cdr);
+          if (!is_type(clause, OBJ_PAIR) || !proper_list(clause) ||
+              !is_type(as_pair(clause)->car, OBJ_KEYWORD)) {
+            (void)ot_raise(state, "ns: bad clause");
+            return false;
+          }
+          ot_name_obj* clause_name = as_name(as_pair(clause)->car);
+          if (clause_name->length != 7 || memcmp(clause_name->bytes, "require", 7) != 0) {
+            (void)ot_raise(state, "ns: unknown clause");
+            return false;
           }
           clauses = as_pair(clauses)->cdr;
         }
         if (clauses != ot_null) {
           (void)ot_raise(state, "ns: improper clauses");
           return false;
+        }
+      }
+      bytecode_emit_constant(state, compiler, BC_IN_NS, name);
+      if (symbol_is(head, "ns")) {
+        otv clauses = list_tail(args, 1);
+        OT_FRAME_SCOPED(state, &clauses);
+        while (is_type(clauses, OBJ_PAIR)) {
+          otv clause = as_pair(clauses)->car;
+          bytecode_emit(compiler, BC_POP);
+          bytecode_emit_constant(state, compiler, BC_REQUIRE, as_pair(clause)->cdr);
+          clauses = as_pair(clauses)->cdr;
         }
       }
       return !compiler->bytes.failed;
@@ -3014,6 +3086,46 @@ static ot_module* find_module(ots* state, otv name) {
   return NULL;
 }
 
+static bool keyword_is(otv value, const char* name) {
+  return is_type(value, OBJ_KEYWORD) && as_name(value)->length == strlen(name) &&
+         memcmp(as_name(value)->bytes, name, as_name(value)->length) == 0;
+}
+
+static otv validate_require_options(ots* state, otv options, bool* reload) {
+  otv cursor = options;
+  while (cursor != ot_null) {
+    if (!is_type(cursor, OBJ_PAIR)) return ot_raise(state, "require: improper options");
+    otv option = as_pair(cursor)->car;
+    cursor = as_pair(cursor)->cdr;
+    if (!is_type(option, OBJ_KEYWORD)) return ot_raise(state, "require: expected option keyword");
+    if (keyword_is(option, "reload")) {
+      *reload = true;
+      continue;
+    }
+    if (keyword_is(option, "as")) {
+      if (!is_type(cursor, OBJ_PAIR)) return ot_raise(state, "require: :as needs a name");
+      otv alias_name = unwrap_quote(as_pair(cursor)->car);
+      if (!is_type(alias_name, OBJ_SYMBOL)) return ot_raise(state, "require: invalid alias");
+      cursor = as_pair(cursor)->cdr;
+      continue;
+    }
+    if (keyword_is(option, "refer")) {
+      if (!is_type(cursor, OBJ_PAIR)) return ot_raise(state, "require: :refer needs names");
+      otv names = unwrap_quote(as_pair(cursor)->car);
+      if (is_type(names, OBJ_PAIR) && symbol_is(as_pair(names)->car, "array"))
+        names = as_pair(names)->cdr;
+      if (!proper_list(names)) return ot_raise(state, "require: invalid :refer list");
+      for (otv rest = names; is_type(rest, OBJ_PAIR); rest = as_pair(rest)->cdr)
+        if (!is_type(as_pair(rest)->car, OBJ_SYMBOL))
+          return ot_raise(state, "require: invalid :refer name");
+      cursor = as_pair(cursor)->cdr;
+      continue;
+    }
+    return ot_raise(state, "require: unknown option");
+  }
+  return ot_nil;
+}
+
 static otv require_one(ots* state, otv spec, otv caller) {
   spec = unwrap_quote(spec);
   otv name = spec;
@@ -3024,16 +3136,11 @@ static otv require_one(ots* state, otv spec, otv caller) {
   }
   if (!is_type(name, OBJ_SYMBOL)) return ot_raise(state, "require: expected namespace name");
   OT_FRAME_SCOPED(state, &spec, &name, &options, &caller);
+  bool reload = false;
+  if (validate_require_options(state, options, &reload) == OT_UNWIND) return OT_UNWIND;
   otv target = namespace_find(state, name, true);
   OT_FRAME_SCOPED(state, &target);
   ot_namespace_obj* space = (ot_namespace_obj*)ot_as_obj(target);
-  bool reload = false;
-  for (otv cursor = options; is_type(cursor, OBJ_PAIR); cursor = as_pair(cursor)->cdr)
-    if (is_type(as_pair(cursor)->car, OBJ_KEYWORD) &&
-        symbol_is(ot_intern(state, as_name(as_pair(cursor)->car)->bytes,
-                            as_name(as_pair(cursor)->car)->length, false),
-                  "reload"))
-      reload = true;
   space = (ot_namespace_obj*)ot_as_obj(target);
   if (!space->loaded || reload) {
     if (space->loading) return ot_raise(state, "require: circular load");
@@ -3071,8 +3178,8 @@ static otv require_one(ots* state, otv spec, otv caller) {
   while (is_type(options, OBJ_PAIR)) {
     otv option = as_pair(options)->car;
     options = as_pair(options)->cdr;
-    if (!is_type(option, OBJ_KEYWORD)) continue;
-    if (as_name(option)->length == 2 && memcmp(as_name(option)->bytes, "as", 2) == 0) {
+    if (keyword_is(option, "reload")) continue;
+    if (keyword_is(option, "as")) {
       if (!is_type(options, OBJ_PAIR)) return ot_raise(state, "require: :as needs a name");
       otv alias_name = unwrap_quote(as_pair(options)->car);
       options = as_pair(options)->cdr;
@@ -3081,7 +3188,7 @@ static otv require_one(ots* state, otv spec, otv caller) {
       otv aliases = make_alias(state, alias_name, name, caller_space->aliases);
       caller_space = (ot_namespace_obj*)ot_as_obj(caller);
       ot_store(state, caller_space, &caller_space->aliases, aliases);
-    } else if (as_name(option)->length == 5 && memcmp(as_name(option)->bytes, "refer", 5) == 0) {
+    } else if (keyword_is(option, "refer")) {
       if (!is_type(options, OBJ_PAIR)) return ot_raise(state, "require: :refer needs names");
       otv names = unwrap_quote(as_pair(options)->car);
       OT_FRAME_SCOPED(state, &names);
@@ -3443,8 +3550,12 @@ static bool number_value(otv value, double* number, bool* integer) {
   return false;
 }
 
+static otv make_wrapped_int(uintptr_t value) { return (value << 1u) | 1u; }
+
+static intptr_t wrapped_int_value(uintptr_t value) { return ot_get_int(make_wrapped_int(value)); }
+
 static otv number_result(ots* state, bool integer, uintptr_t wrapped, double value) {
-  return integer ? ot_make_int((intptr_t)wrapped) : ot_make_float(state, value);
+  return integer ? make_wrapped_int(wrapped) : ot_make_float(state, value);
 }
 
 static otv nat_add(ots* state, otv* args, int argc) {
@@ -3457,7 +3568,7 @@ static otv nat_add(ots* state, otv* args, int argc) {
     if (!number_value(args[i], &part, &exact)) return ot_raise(state, "+: expected number");
     if (all_int && exact) integer += (uintptr_t)ot_get_int(args[i]);
     else {
-      if (all_int) number = (double)(intptr_t)integer;
+      if (all_int) number = (double)wrapped_int_value(integer);
       all_int = false;
       number += part;
     }
@@ -3475,7 +3586,7 @@ static otv nat_multiply(ots* state, otv* args, int argc) {
     if (!number_value(args[i], &part, &exact)) return ot_raise(state, "*: expected number");
     if (all_int && exact) integer *= (uintptr_t)ot_get_int(args[i]);
     else {
-      if (all_int) number = (double)(intptr_t)integer;
+      if (all_int) number = (double)wrapped_int_value(integer);
       all_int = false;
       number *= part;
     }
@@ -3501,7 +3612,7 @@ static otv nat_subtract(ots* state, otv* args, int argc) {
     if (!number_value(args[i], &part, &part_exact)) return ot_raise(state, "-: expected number");
     if (all_int && part_exact) integer -= (uintptr_t)ot_get_int(args[i]);
     else {
-      if (all_int) number = (double)(intptr_t)integer;
+      if (all_int) number = (double)wrapped_int_value(integer);
       all_int = false;
       number -= part;
     }
@@ -3528,6 +3639,7 @@ static otv nat_divide(ots* state, otv* args, int argc) {
     if (divisor == 0) return ot_raise(state, "/: division by zero");
     if (keep_int && divisor_exact && integer % ot_get_int(args[i]) == 0) {
       integer /= ot_get_int(args[i]);
+      integer = wrapped_int_value((uintptr_t)integer);
       result = (double)integer;
     } else {
       if (keep_int) result = (double)integer;
@@ -3549,8 +3661,8 @@ static otv nat_integer_division(ots* state, otv* args, int argc, int mode) {
   intptr_t left = ot_get_int(args[0]);
   intptr_t right = ot_get_int(args[1]);
   if (right == 0) return ot_raise(state, "division by zero");
-  if (left == INTPTR_MIN && right == -1)
-    return mode == 0 ? ot_make_int(INTPTR_MIN) : ot_make_int(0);
+  if (left == OT_INT_MIN && right == -1)
+    return mode == 0 ? ot_make_int(OT_INT_MIN) : ot_make_int(0);
   intptr_t quotient = left / right;
   intptr_t remainder = left % right;
   if (mode == 0) return ot_make_int(quotient);
@@ -3568,20 +3680,72 @@ static otv nat_modulo(ots* state, otv* args, int argc) {
   return nat_integer_division(state, args, argc, 2);
 }
 
+static bool compare_int_float(intptr_t integer, double number, int* order) {
+  if (isnan(number)) return false;
+  double lower = (double)OT_INT_MIN;
+  double upper_exclusive = -lower;
+  if (number < lower) {
+    *order = 1;
+    return true;
+  }
+  if (number >= upper_exclusive) {
+    *order = -1;
+    return true;
+  }
+
+  intptr_t truncated = (intptr_t)number;
+  if (integer < truncated)
+    *order = -1;
+  else if (integer > truncated)
+    *order = 1;
+  else if ((double)truncated < number)
+    *order = -1;
+  else if ((double)truncated > number)
+    *order = 1;
+  else
+    *order = 0;
+  return true;
+}
+
+static bool numeric_order(otv left, otv right, int* order) {
+  if (ot_is_int(left) && ot_is_int(right)) {
+    intptr_t a = ot_get_int(left);
+    intptr_t b = ot_get_int(right);
+    *order = a < b ? -1 : a > b ? 1 : 0;
+    return true;
+  }
+  if (ot_is_int(left) && is_type(right, OBJ_FLOAT))
+    return compare_int_float(ot_get_int(left), ((ot_float_obj*)ot_as_obj(right))->value, order);
+  if (is_type(left, OBJ_FLOAT) && ot_is_int(right)) {
+    if (!compare_int_float(ot_get_int(right), ((ot_float_obj*)ot_as_obj(left))->value, order))
+      return false;
+    *order = -*order;
+    return true;
+  }
+  if (is_type(left, OBJ_FLOAT) && is_type(right, OBJ_FLOAT)) {
+    double a = ((ot_float_obj*)ot_as_obj(left))->value;
+    double b = ((ot_float_obj*)ot_as_obj(right))->value;
+    if (isnan(a) || isnan(b)) return false;
+    *order = a < b ? -1 : a > b ? 1 : 0;
+    return true;
+  }
+  return false;
+}
+
 static otv nat_numeric_compare(ots* state, otv* args, int argc, int mode) {
   if (argc < (mode == 0 ? 0 : 2)) return ot_raise(state, "comparison: too few arguments");
   for (int i = 1; i < argc; i++) {
-    double left;
-    double right;
-    bool a;
-    bool b;
-    if (!number_value(args[i - 1], &left, &a) || !number_value(args[i], &right, &b))
+    bool left_number = ot_is_int(args[i - 1]) || is_type(args[i - 1], OBJ_FLOAT);
+    bool right_number = ot_is_int(args[i]) || is_type(args[i], OBJ_FLOAT);
+    if (!left_number || !right_number)
       return ot_raise(state, "comparison: expected numbers");
-    bool ok = mode == 0   ? left == right
-              : mode == 1 ? left < right
-              : mode == 2 ? left > right
-              : mode == 3 ? left <= right
-                          : left >= right;
+    int order = 0;
+    bool ordered = numeric_order(args[i - 1], args[i], &order);
+    bool ok = ordered && (mode == 0   ? order == 0
+                          : mode == 1 ? order < 0
+                          : mode == 2 ? order > 0
+                          : mode == 3 ? order <= 0
+                                      : order >= 0);
     if (!ok) return ot_false;
   }
   return ot_true;
@@ -3607,15 +3771,15 @@ static otv nat_minmax(ots* state, otv* args, int argc, bool maximum) {
   if (argc == 0)
     return ot_raise(state, "%s: expected at least one argument", maximum ? "max" : "min");
   int best = 0;
-  double best_value;
-  bool exact;
-  if (!number_value(args[0], &best_value, &exact)) return ot_raise(state, "expected number");
+  if (!ot_is_int(args[0]) && !is_type(args[0], OBJ_FLOAT))
+    return ot_raise(state, "expected number");
   for (int i = 1; i < argc; i++) {
-    double value;
-    if (!number_value(args[i], &value, &exact)) return ot_raise(state, "expected number");
-    if ((maximum && value > best_value) || (!maximum && value < best_value)) {
+    if (!ot_is_int(args[i]) && !is_type(args[i], OBJ_FLOAT))
+      return ot_raise(state, "expected number");
+    int order = 0;
+    if (numeric_order(args[i], args[best], &order) &&
+        ((maximum && order > 0) || (!maximum && order < 0))) {
       best = i;
-      best_value = value;
     }
   }
   return args[best];
@@ -3745,10 +3909,128 @@ static otv nat_cdr(ots* state, otv* args, int argc) {
   return as_pair(args[0])->cdr;
 }
 
+typedef struct value_set {
+  otv* slots;
+  size_t capacity;
+  size_t count;
+} value_set;
+
+static bool value_set_grow(value_set* set) {
+  size_t capacity = set->capacity == 0 ? 32 : set->capacity * 2;
+  if (capacity < set->capacity || capacity > SIZE_MAX / sizeof(*set->slots)) return false;
+  otv* slots = ot_host_alloc(capacity * sizeof(*slots));
+  if (slots == NULL) return false;
+  memset(slots, 0, capacity * sizeof(*slots));
+  for (size_t i = 0; i < set->capacity; i++) {
+    otv value = set->slots[i];
+    if (value == 0) continue;
+    size_t slot = ((size_t)value >> 4u) & (capacity - 1u);
+    while (slots[slot] != 0) slot = (slot + 1u) & (capacity - 1u);
+    slots[slot] = value;
+  }
+  ot_host_free(set->slots);
+  set->slots = slots;
+  set->capacity = capacity;
+  return true;
+}
+
+static int value_set_insert(value_set* set, otv value) {
+  if (set->count + 1u > set->capacity / 2u && !value_set_grow(set)) return -1;
+  size_t slot = ((size_t)value >> 4u) & (set->capacity - 1u);
+  while (set->slots[slot] != 0) {
+    if (set->slots[slot] == value) return 0;
+    slot = (slot + 1u) & (set->capacity - 1u);
+  }
+  set->slots[slot] = value;
+  set->count++;
+  return 1;
+}
+
+static bool value_stack_push(otv** values, size_t* count, size_t* capacity, otv value) {
+  if (*count == *capacity) {
+    size_t grown_capacity = *capacity == 0 ? 32 : *capacity * 2;
+    if (grown_capacity < *capacity || grown_capacity > SIZE_MAX / sizeof(**values)) return false;
+    void* grown = ot_host_realloc(*values, grown_capacity * sizeof(**values));
+    if (grown == NULL) return false;
+    *values = grown;
+    *capacity = grown_capacity;
+  }
+  (*values)[(*count)++] = value;
+  return true;
+}
+
+static bool value_reaches(otv target, otv value, bool* failed) {
+  value_set seen = {0};
+  otv* pending = NULL;
+  size_t pending_count = 0;
+  size_t pending_capacity = 0;
+  bool found = false;
+  if (!value_stack_push(&pending, &pending_count, &pending_capacity, value)) *failed = true;
+
+  while (!*failed && pending_count != 0) {
+    otv current = pending[--pending_count];
+    if (current == target) {
+      found = true;
+      break;
+    }
+    if (!ot_is_ptr(current)) continue;
+    ot_obj_type type = ot_object_type(current);
+    if (type != OBJ_PAIR && type != OBJ_ARRAY && type != OBJ_TABLE) continue;
+    int inserted = value_set_insert(&seen, current);
+    if (inserted < 0) {
+      *failed = true;
+      break;
+    }
+    if (inserted == 0) continue;
+
+    if (type == OBJ_PAIR) {
+      ot_pair_obj* pair = as_pair(current);
+      if (!value_stack_push(&pending, &pending_count, &pending_capacity, pair->car) ||
+          !value_stack_push(&pending, &pending_count, &pending_capacity, pair->cdr))
+        *failed = true;
+    } else if (type == OBJ_ARRAY) {
+      ot_array_obj* array = as_array(current);
+      ot_slots_obj* slots = as_slots(array->slots);
+      for (size_t i = 0; i < array->length; i++) {
+        if (!value_stack_push(&pending, &pending_count, &pending_capacity, slots->values[i])) {
+          *failed = true;
+          break;
+        }
+      }
+    } else {
+      ot_table_obj* table = as_table(current);
+      ot_entries_obj* entries = as_entries(table->entries);
+      for (size_t i = 0; i < table->used; i++) {
+        if (!entries->values[i].live) continue;
+        if (!value_stack_push(&pending, &pending_count, &pending_capacity,
+                              entries->values[i].key) ||
+            !value_stack_push(&pending, &pending_count, &pending_capacity,
+                              entries->values[i].value)) {
+          *failed = true;
+          break;
+        }
+      }
+    }
+  }
+
+  ot_host_free(pending);
+  ot_host_free(seen.slots);
+  return found;
+}
+
+static otv reject_pair_cycle(ots* state, const char* name, otv pair, otv value) {
+  bool failed = false;
+  bool cycle = value_reaches(pair, value, &failed);
+  if (failed) return ot_raise(state, "%s: unable to check for cycle", name);
+  if (cycle) return ot_raise(state, "%s: cycle", name);
+  return ot_nil;
+}
+
 static otv nat_set_car(ots* state, otv* args, int argc) {
   if (need_arity(state, "set-car!", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
   if (!is_type(args[0], OBJ_PAIR)) return ot_raise(state, "set-car!: expected pair");
   if (as_pair(args[0])->frozen) return ot_raise(state, "set-car!: frozen table key");
+  if (reject_pair_cycle(state, "set-car!", args[0], args[1]) == OT_UNWIND) return OT_UNWIND;
   ot_pair_obj* pair = as_pair(args[0]);
   ot_store(state, pair, &pair->car, args[1]);
   return args[0];
@@ -3758,6 +4040,7 @@ static otv nat_set_cdr(ots* state, otv* args, int argc) {
   if (need_arity(state, "set-cdr!", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
   if (!is_type(args[0], OBJ_PAIR)) return ot_raise(state, "set-cdr!: expected pair");
   if (as_pair(args[0])->frozen) return ot_raise(state, "set-cdr!: frozen table key");
+  if (reject_pair_cycle(state, "set-cdr!", args[0], args[1]) == OT_UNWIND) return OT_UNWIND;
   ot_pair_obj* pair = as_pair(args[0]);
   ot_store(state, pair, &pair->cdr, args[1]);
   return args[0];
@@ -3766,6 +4049,8 @@ static otv nat_set_cdr(ots* state, otv* args, int argc) {
 static otv nat_list(ots* state, otv* args, int argc) {
   return list_from_array(state, args, (size_t)argc);
 }
+
+static size_t utf8_count(const unsigned char* bytes, size_t length);
 
 static otv nat_length(ots* state, otv* args, int argc) {
   if (need_arity(state, "length", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
@@ -3777,9 +4062,14 @@ static otv nat_length(ots* state, otv* args, int argc) {
   }
   if (is_type(value, OBJ_ARRAY)) return ot_make_int((intptr_t)as_array(value)->length);
   if (is_type(value, OBJ_TABLE)) return ot_make_int((intptr_t)as_table(value)->length);
-  if (is_type(value, OBJ_STRING)) return ot_make_int((intptr_t)as_string(value)->length);
-  if (is_type(value, OBJ_BUFFER))
-    return ot_make_int((intptr_t)((ot_buffer_obj*)ot_as_obj(value))->length);
+  if (is_type(value, OBJ_STRING)) {
+    ot_string_obj* string = as_string(value);
+    return ot_make_int((intptr_t)utf8_count(as_bytes(string->bytes)->data, string->length));
+  }
+  if (is_type(value, OBJ_BUFFER)) {
+    ot_buffer_obj* buffer = (ot_buffer_obj*)ot_as_obj(value);
+    return ot_make_int((intptr_t)utf8_count(as_bytes(buffer->bytes)->data, buffer->length));
+  }
   return ot_raise(state, "length: unsupported type");
 }
 
@@ -3810,10 +4100,11 @@ static otv nat_reverse(ots* state, otv* args, int argc) {
 
 static otv nat_append(ots* state, otv* args, int argc) {
   if (argc == 0) return ot_null;
+  for (int i = 0; i < argc; i++)
+    if (!proper_list(args[i])) return ot_raise(state, "append: expected proper list");
   otv output = args[argc - 1];
   OT_FRAME_SCOPED(state, &output);
   for (int i = argc - 2; i >= 0; i--) {
-    if (!proper_list(args[i])) return ot_raise(state, "append: expected proper list");
     size_t count = list_length(args[i]);
     otv values[count == 0 ? 1 : count];
     otv* roots[count == 0 ? 1 : count];
@@ -3895,7 +4186,7 @@ static otv nat_get(ots* state, otv* args, int argc) {
     size_t end = utf8_advance(bytes, string->length, start);
     return make_string_slice(state, args[0], start, end - start);
   }
-  return fallback;
+  return ot_raise(state, "get: expected nil, table, array, or string");
 }
 
 static otv nat_put(ots* state, otv* args, int argc) {
@@ -4575,6 +4866,54 @@ static otv nat_macro_oracle(ots* state, otv* args, int argc) {
   return is_type(value, OBJ_MACRO) ? value : ot_nil;
 }
 
+static otv nat_current_ns(ots* state, otv* args, int argc) {
+  (void)args;
+  if (need_arity(state, "current-ns", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
+  return ((ot_namespace_obj*)ot_as_obj(state->vm.current_namespace))->name;
+}
+
+static otv nat_describe(ots* state, otv* args, int argc) {
+  if (need_arity(state, "describe", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_SYMBOL)) return ot_raise(state, "describe: expected symbol");
+  otv var_value = resolve_var(state, state->vm.current_namespace, args[0], true);
+  if (!is_type(var_value, OBJ_VAR)) return ot_nil;
+  ot_var_obj* var = (ot_var_obj*)ot_as_obj(var_value);
+  ot_namespace_obj* owner = NULL;
+  for (otv cursor = state->namespaces; is_type(cursor, OBJ_NAMESPACE);
+       cursor = ((ot_namespace_obj*)ot_as_obj(cursor))->next) {
+    ot_namespace_obj* candidate = (ot_namespace_obj*)ot_as_obj(cursor);
+    for (otv vars = candidate->vars; is_type(vars, OBJ_VAR);
+         vars = ((ot_var_obj*)ot_as_obj(vars))->next)
+      if (vars == var_value) {
+        owner = candidate;
+        break;
+      }
+    if (owner != NULL) break;
+  }
+  if (owner == NULL) return ot_nil;
+
+  ot_name_obj* namespace_name = as_name(owner->name);
+  ot_name_obj* var_name = as_name(var->name);
+  buf description = {0};
+  buf_write(&description, namespace_name->bytes, namespace_name->length);
+  buf_byte(&description, '/');
+  buf_write(&description, var_name->bytes, var_name->length);
+  buf_cstr(&description, ": ");
+  if (is_type(var->doc, OBJ_STRING)) {
+    ot_string_obj* doc = as_string(var->doc);
+    buf_write(&description, (const char*)as_bytes(doc->bytes)->data, doc->length);
+  } else {
+    buf_cstr(&description, "no documentation");
+  }
+  if (description.failed) {
+    buf_free(&description);
+    return ot_raise(state, "describe: host allocation failed");
+  }
+  otv result = ot_make_string(state, description.data, description.length);
+  buf_free(&description);
+  return result;
+}
+
 static otv macroexpand_once(ots* state, otv form) {
   if (!is_type(form, OBJ_PAIR) || !is_type(as_pair(form)->car, OBJ_SYMBOL)) return form;
   otv oracle_args[1] = {as_pair(form)->car};
@@ -4661,12 +5000,23 @@ static otv nat_current_second(ots* state, otv* args, int argc) {
   return ot_make_float(state, ot_platform_current_second());
 }
 
-static otv nat_quit(ots* state, otv* args, int argc) {
-  (void)args;
-  if (need_arity(state, "quit", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
+static otv nat_request_exit(ots* state, otv* args, int argc, const char* name) {
+  if (need_arity(state, name, argc, 0, 1) == OT_UNWIND) return OT_UNWIND;
+  if (argc == 1 &&
+      (!ot_is_int(args[0]) || ot_get_int(args[0]) < 0 || ot_get_int(args[0]) > 255))
+    return ot_raise(state, "%s: expected status from 0 to 255", name);
   state->vm.unwind_kind = UNWIND_QUIT;
   state->quit_requested = true;
+  state->quit_status = argc == 0 ? 0 : (int)ot_get_int(args[0]);
   return OT_UNWIND;
+}
+
+static otv nat_quit(ots* state, otv* args, int argc) {
+  return nat_request_exit(state, args, argc, "quit");
+}
+
+static otv nat_exit(ots* state, otv* args, int argc) {
+  return nat_request_exit(state, args, argc, "exit");
 }
 
 static otv nat_update_mutable(ots* state, otv* args, int argc) {
@@ -4687,7 +5037,7 @@ static otv nat_abs(ots* state, otv* args, int argc) {
   if (need_arity(state, "abs", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   if (ot_is_int(args[0])) {
     intptr_t value = ot_get_int(args[0]);
-    return value < 0 ? ot_make_int((intptr_t)((uintptr_t)0 - (uintptr_t)value)) : args[0];
+    return value < 0 ? make_wrapped_int((uintptr_t)0 - (uintptr_t)value) : args[0];
   }
   if (is_type(args[0], OBJ_FLOAT))
     return ot_make_float(state, fabs(((ot_float_obj*)ot_as_obj(args[0]))->value));
@@ -4703,9 +5053,9 @@ static otv nat_rounding(ots* state, otv* args, int argc, int mode) {
                    : mode == 1 ? ceil(value)
                    : mode == 2 ? (value < 0 ? ceil(value - 0.5) : floor(value + 0.5))
                                : trunc(value);
-  double minimum = -(double)(UINTPTR_MAX >> 1u) - 1.0;
-  double maximum = (double)(UINTPTR_MAX >> 1u);
-  if (!isfinite(rounded) || rounded < minimum || rounded > maximum)
+  double minimum = (double)OT_INT_MIN;
+  double maximum_exclusive = -minimum;
+  if (!isfinite(rounded) || rounded < minimum || rounded >= maximum_exclusive)
     return ot_raise(state, "integer conversion out of range");
   return ot_make_int((intptr_t)rounded);
 }
@@ -4762,7 +5112,7 @@ static otv nat_expt(ots* state, otv* args, int argc) {
       base *= base;
       exponent >>= 1u;
     }
-    return ot_make_int((intptr_t)result);
+    return make_wrapped_int(result);
   }
   double base;
   double exponent;
@@ -4958,6 +5308,8 @@ static const nat_def core_nats[] = {
     {"macroexpand-1", nat_macroexpand_one},
     {"macroexpand", nat_macroexpand},
     {"gensym", nat_gensym},
+    {"current-ns", nat_current_ns},
+    {"describe", nat_describe},
     {"expander-macro-var", nat_macro_oracle},
     {"string<?", nat_string_less},
     {"error", nat_error},
@@ -4973,7 +5325,7 @@ static const nat_def core_nats[] = {
     {"jiffies-per-second", nat_jiffies},
     {"current-second", nat_current_second},
     {"quit", nat_quit},
-    {"exit", nat_quit},
+    {"exit", nat_exit},
 };
 
 /* =========================================================================
@@ -5181,6 +5533,12 @@ void ot_clear_condition(ots* state) {
   state->vm.unwind_args = ot_nil;
   state->vm.unwind_kind = UNWIND_NONE;
   state->vm.unwind_restart_id = 0;
+}
+
+bool ot_exit_status(const ots* state, int* status) {
+  if (!state->quit_requested) return false;
+  if (status != NULL) *status = state->quit_status;
+  return true;
 }
 
 void ot_register_module(ots* state, const char* name, ot_module_init init) {

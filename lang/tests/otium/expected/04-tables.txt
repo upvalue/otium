@@ -13,3 +13,5 @@ merge-nil-values: [1 2 3]
 merge-fresh: 1
 keys-nil: []
 values-nil: []
+array-key-after-mutation: :value
+array-key-distinct-shape: nil

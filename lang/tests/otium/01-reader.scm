@@ -33,6 +33,11 @@
 (println "float-exp:" 1e3)
 (println "float-neg:" -.5)
 (println "float-plain:" 3.5)
+(println "float-shortest:" 0.1)
+(println "float-negative-zero:" -0.0)
+(println "float-nan:" (sqrt -1))
+(println "float-positive-infinity:" (exp 10000))
+(println "float-negative-infinity:" (- (exp 10000)))
 (println "float-type:" (type 3.0))
 (println "int-type:" (type 3))
 

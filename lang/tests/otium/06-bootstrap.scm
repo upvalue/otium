@@ -18,3 +18,31 @@
 (println "get-in-improper:"
   (try (get-in {:a 1} '(:a . :tail))
     (catch (error? e) (condition-message e))))
+
+; Public core inventory called out by the specification.
+(let ((ok #t))
+  (for-each
+    (fn (name)
+      (let ((value (eval name)))
+        (unless (or (procedure? value) (macro? value)) (set! ok #f))))
+    '(defn caar cadr cddr list-to-array array-to-list current-ns describe))
+  (println "documented-core-inventory:" ok))
+
+(defn documented-add
+  (a b)
+  "add two values"
+  (+ a b))
+(println "defn:" (documented-add 20 22))
+(println "pair-compositions:"
+  (caar '((1 2) 3)) (cadr '(1 2 3)) (cddr '(1 2 3)))
+(println "list-to-array:" (list-to-array '(1 2 3)))
+(println "array-to-list:" (array-to-list [1 2 3]))
+(println "list-to-array-strict:"
+  (try (list-to-array [1 2])
+    (catch (error? e) (condition-message e))))
+(println "array-to-list-strict:"
+  (try (array-to-list '(1 2))
+    (catch (error? e) (condition-message e))))
+(println "current-ns:" (current-ns))
+(println "describe:" (describe 'documented-add))
+(println "describe-missing:" (describe 'missing-binding))

@@ -19,6 +19,11 @@ float-int: 3.0
 float-exp: 1000.0
 float-neg: -0.5
 float-plain: 3.5
+float-shortest: 0.1
+float-negative-zero: -0.0
+float-nan: nan
+float-positive-infinity: +inf
+float-negative-infinity: -inf
 float-type: :float
 int-type: :int
 esc-len: 7

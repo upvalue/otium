@@ -24,6 +24,16 @@
 (println "drop-basic:" (drop 1 '(1 2 3)))
 (println "drop-clamp:" (drop 10 [1 2]))
 (println "drop-zero:" (drop 0 [1 2]))
+(println "negative-index-counts:" (nth [1 2] -1) (take -1 '(1 2)) (drop -1 [1 2]))
+(println "nth-fractional:"
+  (try (nth [1 2] 0.5)
+    (catch (error? e) (condition-message e))))
+(println "take-nonnumeric:"
+  (try (take "1" '(1 2))
+    (catch (error? e) (condition-message e))))
+(println "drop-fractional:"
+  (try (drop 0.5 [1 2])
+    (catch (error? e) (condition-message e))))
 
 ; sort: one class per sort, stable, kind-preserving
 (println "sort-ints:" (sort [3 1 2]))
@@ -94,6 +104,9 @@
 (println "str-concat:" (str 1 "x" :k 'sym 2.5))
 (println "str-empty:" (str "<" (str) ">"))
 (println "string-len:" (string-length "héllo"))
+(println "length-unicode:" (length "héllo"))
+(println "count-unicode:" (count "héllo"))
+(println "length-buffer-unicode:" (length (buffer "héllo")))
 (println "upcase:" (string-upcase "abC"))
 (println "trim:" (str "<" (string-trim "  hi  ") ">"))
 (println "replace:" (string-replace "banana" "an" "AN"))
@@ -114,6 +127,13 @@
 (println "apply-not-sequence:"
   (try (apply list 1)
     (catch (error? e) (condition-message e))))
+(println "append-proper:" (append '(1 2) '(3 4)))
+(println "append-last-improper:"
+  (try (append '(1 2) 3)
+    (catch (error? e) (condition-message e))))
+(println "append-only-improper:"
+  (try (append '(1 . 2))
+    (catch (error? e) (condition-message e))))
 (println "partial:" ((partial + 1 2) 3))
 (println "comp:" ((comp inc inc) 1))
 (println "comp-order:" ((comp str inc) 4))
@@ -122,6 +142,12 @@
 (println "range-a-b:" (range 2 5))
 (println "range-step:" (range 5 0 -2))
 (println "range-empty:" (range 3 3))
+(println "range-fractional:"
+  (try (range 0 3 0.5)
+    (catch (error? e) (condition-message e))))
+(println "get-in-extra-default:"
+  (try (get-in {} [] 1 2)
+    (catch (error? e) (condition-message e))))
 
 ; concat: kind follows the first argument
 (println "concat-list-first:" (concat '(1) [2 3]))

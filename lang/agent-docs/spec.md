@@ -181,10 +181,10 @@ Three notions, coarsest to finest:
 
 - **`=`** -- numeric equality across int/float: `(= 1 1.0)` is `#t`.
   Arguments must be numbers.
-- **`equal?`** -- deep structural equality for pairs, arrays, and immutable data
-  (pairs and arrays recursively, strings, symbols, keywords, numbers *of the
-  same type*), identity for tables, buffers, and functions. Distinct cyclic
-  arrays are unsupported; `equal?` is not required to terminate for them.
+- **`equal?`** -- deep structural equality for pairs and immutable data
+  (pairs recursively, strings, symbols, keywords, numbers *of the same
+  type*), identity for arrays, tables, buffers, and functions. Array identity
+  is stable across GC and is unchanged by mutation.
   Type-strict: `(equal? 1 1.0)` is `#f`, and `nil`, `()`, `#f` are all
   distinct. For the benefit of table keys, `NaN` equals `NaN` and `0.0`
   equals `-0.0`.
@@ -197,9 +197,9 @@ Three notions, coarsest to finest:
   `equal?`.
 
 Table keys compare immutable values and pairs structurally. Mutable keys,
-including arrays, compare by an identity that is stable across GC -- a stored
-id, never an address. This deliberately differs from user-facing structural
-array equality so mutating an array cannot invalidate a stored key's hash.
+including arrays, compare by the same identity used by `equal?`, stable across
+GC through a stored id rather than an address. Mutating an array therefore
+cannot invalidate a stored key's hash.
 Pairs used as table keys, including pairs reachable through them, become
 frozen while still retaining structural equality. Attempting to mutate one
 is an error. This keeps a stored key's structural hash stable.
@@ -218,7 +218,9 @@ Every value has two renderings:
 
 - **repr** (used by `write`, the REPL, and error messages): reads back
   where possible. Strings are quoted and escaped; floats always carry a
-  decimal point or exponent (`3.0`, not `3`).
+  decimal point or exponent (`3.0`, not `3`). Finite floats use the
+  shortest decimal that reads back to the same IEEE 754 value. Non-finite
+  floats have the canonical representations `nan`, `+inf`, and `-inf`.
 - **display** (used by `display`/`print`/`println`/`str`): identical
   except strings and buffers render as their raw characters, recursively
   inside collections.
@@ -647,7 +649,10 @@ outward until caught by `try` or it reaches the host.
 The **interrupt** control transfer (3.6) never passes through handlers and is
 not catchable by `try`; only `unwind-protect` cleanups observe its passage.
 `quit` and `exit` use the same uncatchable path but additionally tell the host
-to end the current session.
+to end the current session. They accept an optional integer status from 0 to
+255 (default 0). The CLI returns that status after running `unwind-protect`
+cleanups. Embedders observe a false evaluation result and retrieve the request
+with `ot_exit_status`; they decide how, or whether, to terminate their process.
 
 ### 8.3 `handler-bind`
 
@@ -842,7 +847,7 @@ table, string, buffer; other types error.
 | `(append list…)` → list | Concatenation; arguments must be proper lists. |
 | `(length coll)` → int | Elements of a list, array, table (entries), string or buffer (characters). Improper lists and other types error. |
 | `(reverse seq)` → seq | Kind-preserving. |
-| `(list->array list)` → array, `(array->list array)` → list | Conversions, strict about input type. |
+| `(list-to-array list)` → array, `(array-to-list array)` → list | Conversions, strict about input type. |
 
 ### 10.4 Sequences
 

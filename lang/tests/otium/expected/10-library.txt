@@ -16,6 +16,10 @@ take-zero: ()
 drop-basic: (2 3)
 drop-clamp: []
 drop-zero: [1 2]
+negative-index-counts: nil () [1 2]
+nth-fractional: nth: expected integer
+take-nonnumeric: take: expected integer
+drop-fractional: drop: expected integer
 sort-ints: [1 2 3]
 sort-list: (1 2 3)
 sort-mixed-num: [1 2.5 3]
@@ -53,6 +57,9 @@ join-not-sequence: string-join: expected sequence
 str-concat: 1x:ksym2.5
 str-empty: <>
 string-len: 5
+length-unicode: 5
+count-unicode: 5
+length-buffer-unicode: 5
 upcase: ABC
 trim: <hi>
 replace: bANANa
@@ -67,6 +74,9 @@ apply-array: 9
 apply-empty: () ()
 apply-improper: apply: improper list
 apply-not-sequence: apply: expected sequence
+append-proper: (1 2 3 4)
+append-last-improper: append: expected proper list
+append-only-improper: append: expected proper list
 partial: 6
 comp: 3
 comp-order: 5
@@ -75,6 +85,8 @@ range-n: [0 1 2 3 4]
 range-a-b: [2 3 4]
 range-step: [5 3 1]
 range-empty: []
+range-fractional: range: expected integer
+get-in-extra-default: get-in: expected 2 or 3 arguments
 concat-list-first: (1 2 3)
 concat-array-first: [1 2 3]
 second-third: 2 3

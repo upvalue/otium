@@ -43,3 +43,11 @@
 ; keys/values of nil
 (println "keys-nil:" (keys nil))
 (println "values-nil:" (values nil))
+
+; Mutable array keys retain identity and their lookup remains stable after
+; mutation. A structurally equal array is still a distinct key.
+(let ((k [1]) (same-shape [1]) (t {}))
+  (put! t k :value)
+  (put! k 0 2)
+  (println "array-key-after-mutation:" (get t k))
+  (println "array-key-distinct-shape:" (get t same-shape)))

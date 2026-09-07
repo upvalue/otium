@@ -1,6 +1,6 @@
 ---
 id: lan-sdgp
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-09-06T22:39:01Z

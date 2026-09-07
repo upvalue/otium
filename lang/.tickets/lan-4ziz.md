@@ -1,6 +1,6 @@
 ---
 id: lan-4ziz
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-09-06T22:39:00Z

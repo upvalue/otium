@@ -29,7 +29,7 @@ implementation described here is `gen`.
 
 ## Object representation
 
-Every heap object is eight-byte aligned. A normal header is:
+Every heap object is aligned to `max_align_t`. A normal header is:
 
 ```text
 bits 8 and above  object size in bytes
@@ -137,7 +137,7 @@ pointerless.
 
 ## Allocation
 
-`ot_alloc` rounds each request to eight bytes and rejects objects larger than
+`ot_alloc` rounds each request to `max_align_t` and rejects objects larger than
 old space. Small objects use the nursery bump pointer. If the request does not
 fit, a minor collection runs and allocation retries once.
 
@@ -397,7 +397,7 @@ Changes outside the collector must preserve these rules:
    cannot survive collection.
 6. Do not retain raw pointers returned by `ot_string_bytes` or
    `ot_function_bytecode` across an allocation.
-7. Keep object sizes eight-byte aligned and represent every active old-space
+7. Keep object sizes aligned to `max_align_t` and represent every active old-space
    byte as either a live object or an `OBJ_FREE` block before collection.
 
 ## Current limits

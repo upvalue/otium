@@ -1,5 +1,6 @@
 #include "otium.h"
 
+#include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,6 +47,8 @@ static void check(bool condition, const char* message) {
 static bool evaluate(ots* state, const char* source, otv* out) {
   return ot_eval_src(state, source, strlen(source), "<runtime-test>", out);
 }
+
+static bool condition_message_is(ots* state, const char* expected);
 
 static ot_interrupt_action invoke_interrupt_restart(ots* state, void* userdata) {
   interrupt_probe* probe = userdata;
@@ -146,6 +149,56 @@ static void test_immediate_values(void) {
       break;
     }
   }
+  check(ot_get_int(ot_make_int(OT_INT_MIN)) == OT_INT_MIN, "minimum tagged integer round trip");
+  check(ot_get_int(ot_make_int(OT_INT_MAX)) == OT_INT_MAX, "maximum tagged integer round trip");
+  check(ot_make_int(OT_INT_MIN - 1) == ot_nil, "embedding API rejects below tagged range");
+  check(ot_make_int(OT_INT_MAX + 1) == ot_nil, "embedding API rejects above tagged range");
+}
+
+static void test_integer_boundaries(void) {
+  ots* state = test_state(false);
+  if (state == NULL) return;
+  char source[256];
+  otv value = ot_nil;
+
+  snprintf(source, sizeof source, "%" PRIdPTR, OT_INT_MIN);
+  check(evaluate(state, source, &value) && ot_is_int(value) && ot_get_int(value) == OT_INT_MIN,
+        "reader accepts minimum tagged integer");
+  snprintf(source, sizeof source, "%" PRIdPTR, OT_INT_MAX);
+  check(evaluate(state, source, &value) && ot_is_int(value) && ot_get_int(value) == OT_INT_MAX,
+        "reader accepts maximum tagged integer");
+
+  snprintf(source, sizeof source, "%" PRIdPTR, OT_INT_MIN - 1);
+  check(!evaluate(state, source, &value), "reader rejects decimal below tagged range");
+  ot_clear_condition(state);
+  snprintf(source, sizeof source, "%" PRIdPTR, OT_INT_MAX + 1);
+  check(!evaluate(state, source, &value), "reader rejects decimal above tagged range");
+  ot_clear_condition(state);
+  snprintf(source, sizeof source, "-0x%" PRIxMAX, (uintmax_t)(-(OT_INT_MIN + 1)) + 2u);
+  check(!evaluate(state, source, &value), "reader rejects hexadecimal below tagged range");
+  ot_clear_condition(state);
+  snprintf(source, sizeof source, "0x%" PRIxMAX, (uintmax_t)OT_INT_MAX + 1u);
+  check(!evaluate(state, source, &value), "reader rejects hexadecimal above tagged range");
+  ot_clear_condition(state);
+
+  snprintf(source, sizeof source, "(= (+ %" PRIdPTR " 1) %" PRIdPTR ")", OT_INT_MAX,
+           OT_INT_MIN);
+  check(evaluate(state, source, &value) && value == ot_true, "integer arithmetic wraps at tag width");
+
+  if (OT_INT_MAX > INT64_C(9007199254740993)) {
+    check(evaluate(state, "(< 9007199254740992 9007199254740993)", &value) && value == ot_true,
+          "large adjacent integers order exactly");
+    check(evaluate(state, "(= 9007199254740993 9007199254740992.0)", &value) &&
+              value == ot_false,
+          "mixed comparison does not round a large integer");
+    check(evaluate(state, "(> 9007199254740993 9007199254740992.0)", &value) &&
+              value == ot_true,
+          "mixed comparison orders a large integer and float");
+    check(evaluate(state, "(max 9007199254740992 9007199254740993)", &value) &&
+              ot_is_int(value) && ot_get_int(value) == INT64_C(9007199254740993),
+          "max selects the exact large integer");
+  }
+  ot_destroy(state);
 }
 
 static void test_heap_values(void) {
@@ -302,6 +355,14 @@ static void test_eval_integration(void) {
   ot_clear_condition(state);
   check(evaluate(state, "(+ 20 22)", &value) && ot_get_int(value) == 42,
         "state evaluates again after clearing a condition");
+  check(!evaluate(state, "(cond (else))", &value) &&
+            condition_message_is(state, "cond: else requires a body"),
+        "cond rejects an empty else clause");
+  ot_clear_condition(state);
+  check(!evaluate(state, "(cond (true 1 . 2))", &value) &&
+            condition_message_is(state, "cond: bad clause"),
+        "cond rejects an improper clause");
+  ot_clear_condition(state);
   ot_destroy(state);
 }
 
@@ -472,6 +533,26 @@ static void test_modules_and_loader(void) {
             ot_get_int(value) == 77,
         "loader source defines a namespace value");
   check(loads == 1, "source loader runs once");
+  check(!evaluate(state, "(require '(cmod :unknown))", &value) &&
+            condition_message_is(state, "require: unknown option"),
+        "require rejects an unknown option");
+  ot_clear_condition(state);
+  check(!evaluate(state, "(require '(cmod answer))", &value) &&
+            condition_message_is(state, "require: expected option keyword"),
+        "require rejects a stray option value");
+  ot_clear_condition(state);
+  check(!evaluate(state, "(require '(cmod :as))", &value) &&
+            condition_message_is(state, "require: :as needs a name"),
+        "require rejects a missing alias name");
+  ot_clear_condition(state);
+  check(!evaluate(state, "(ns bad (:requrie cmod))", &value) &&
+            condition_message_is(state, "ns: unknown clause"),
+        "ns rejects an unknown clause");
+  ot_clear_condition(state);
+  check(!evaluate(state, "(ns bad :require)", &value) &&
+            condition_message_is(state, "ns: bad clause"),
+        "ns rejects a malformed clause");
+  ot_clear_condition(state);
   ot_destroy(state);
 }
 
@@ -535,8 +616,10 @@ static void test_nursery_retry_mode(bool stress) {
   otv values = ot_array_new(state, count);
   OT_FRAME(state, &values);
   ot_reset_gc_stats(state);
-  for (size_t i = 0; i < count; i++)
-    values = ot_array_append(state, values, ot_make_string(state, payload, payload_length));
+  for (size_t i = 0; i < count; i++) {
+    otv string = ot_make_string(state, payload, payload_length);
+    values = ot_array_append(state, values, string);
+  }
 
   const char* bytes = NULL;
   size_t length = 0;
@@ -573,6 +656,10 @@ static void test_extension_values(void) {
   void* payload = NULL;
   check(ot_ext_check(state, "test", inline_ext, inline_type, &payload) && *(int*)payload == 41,
         "inline extension payload");
+  check((uintptr_t)inline_ext % alignof(max_align_t) == 0,
+        "extension object has maximum fundamental alignment");
+  check((uintptr_t)payload % alignof(max_align_t) == 0,
+        "inline extension payload has maximum fundamental alignment");
   check(!ot_ext_check(state, "test", inline_ext, owned_type, &payload),
         "extension type mismatch raises a condition");
   check(ot_condition(state) != ot_nil, "extension type error stores a condition");
@@ -687,9 +774,22 @@ static void test_interrupt(void) {
   ot_destroy(state);
 }
 
+static void test_exit_status(void) {
+  ots* state = test_state(false);
+  if (state == NULL) return;
+  otv value = ot_nil;
+  int status = -1;
+  check(!ot_exit_status(state, &status), "fresh state has no requested exit status");
+  check(!evaluate(state, "(unwind-protect (exit 23) (define cleaned #t))", &value),
+        "exit unwinds evaluation");
+  check(ot_exit_status(state, &status) && status == 23, "embedding API exposes requested status");
+  ot_destroy(state);
+}
+
 static const test_case tests[] = {
     {"config", test_config_validation},
     {"immediates", test_immediate_values},
+    {"integer-boundaries", test_integer_boundaries},
     {"heap-values", test_heap_values},
     {"float-equality", test_float_and_equality},
     {"reentrant", test_reentrant_states},
@@ -706,6 +806,7 @@ static const test_case tests[] = {
     {"extensions", test_extension_values},
     {"gc-layout", test_gc_layout},
     {"interrupt", test_interrupt},
+    {"exit-status", test_exit_status},
 };
 
 int main(int argc, char** argv) {

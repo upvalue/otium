@@ -101,7 +101,8 @@ static void validate_heap(ots* state) {
   while (scan < heap->alloc) {
     ot_obj* object = (ot_obj*)scan;
     size_t size = (size_t)(object->header >> 8u);
-    if (size < sizeof(*object) || (size & 7u) != 0 || scan + size > heap->alloc) {
+    if (size < sizeof(*object) || (size & (OT_GC_ALIGNMENT - 1u)) != 0 ||
+        scan + size > heap->alloc) {
       fputs("otium: malformed object after collection\n", stderr);
       abort();
     }
@@ -179,18 +180,22 @@ bool ot_gc_heap_init(ots* state) {
   if (heap == NULL) return false;
   memset(heap, 0, sizeof(*heap));
 
-  heap->semispace_bytes = state->config.heap_max & ~(size_t)7u;
-  size_t reservation_bytes = heap->semispace_bytes * 2 + 7;
+  heap->semispace_bytes = state->config.heap_max & ~(size_t)(OT_GC_ALIGNMENT - 1u);
+  if (heap->semispace_bytes > (SIZE_MAX - (OT_GC_ALIGNMENT - 1u)) / 2u) {
+    ot_host_free(heap);
+    return false;
+  }
+  size_t reservation_bytes = heap->semispace_bytes * 2 + OT_GC_ALIGNMENT - 1u;
   heap->reservation = ot_host_alloc(reservation_bytes);
   if (heap->reservation == NULL) {
     ot_host_free(heap);
     return false;
   }
-  uintptr_t aligned = ((uintptr_t)heap->reservation + 7u) & ~(uintptr_t)7u;
+  uintptr_t aligned = ot_gc_align_address((uintptr_t)heap->reservation);
   heap->from_space = (unsigned char*)aligned;
   heap->to_space = heap->from_space + heap->semispace_bytes;
   heap->alloc = heap->from_space;
-  heap->capacity = state->config.heap_init & ~(size_t)7u;
+  heap->capacity = state->config.heap_init & ~(size_t)(OT_GC_ALIGNMENT - 1u);
   heap->limit = heap->from_space + heap->capacity;
   state->gc = heap;
   state->stats.reserved_bytes = reservation_bytes;

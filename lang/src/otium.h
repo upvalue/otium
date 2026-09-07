@@ -26,8 +26,16 @@ typedef uintptr_t otv;
 #define ot_false ((otv)10u)
 #define ot_null ((otv)14u)
 
+#define OT_INT_MAX ((intptr_t)(INTPTR_MAX >> 1u))
+#define OT_INT_MIN (-OT_INT_MAX - (intptr_t)1)
+
 static inline bool ot_is_int(otv value) { return (value & 1u) != 0; }
-static inline otv ot_make_int(intptr_t value) { return ((otv)(uintptr_t)value << 1u) | 1u; }
+static inline bool ot_int_fits(intptr_t value) { return value >= OT_INT_MIN && value <= OT_INT_MAX; }
+/* Return nil rather than producing a different integer when value does not fit
+ * in the tagged representation. */
+static inline otv ot_make_int(intptr_t value) {
+  return ot_int_fits(value) ? ((otv)(uintptr_t)value << 1u) | 1u : ot_nil;
+}
 static inline intptr_t ot_get_int(otv value) { return ((intptr_t)value) >> 1u; }
 
 typedef struct ot_config {
@@ -128,6 +136,9 @@ OT_GC_MAY_ALLOCATE bool ot_eval_src(ots* state, const char* source, size_t lengt
                                     otv* out);
 otv ot_condition(const ots* state);
 void ot_clear_condition(ots* state);
+/* A quit/exit form makes evaluation return false. If one was requested,
+ * write its 0..255 process-style status and return true. */
+bool ot_exit_status(const ots* state, int* status);
 
 /* Inspect and construct values. Constructors may move every unrooted value. */
 ot_type ot_value_type(otv value);
@@ -505,6 +516,7 @@ struct ot_state {
   uint64_t next_stable_id;
   uint64_t gensym_id;
   bool quit_requested;
+  int quit_status;
   ot_writer writer;
   void* writer_userdata;
   ot_loader loader;

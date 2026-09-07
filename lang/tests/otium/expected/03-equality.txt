@@ -12,6 +12,7 @@ equal-symbols: #t
 equal-keywords: #t
 equal-nested-mixed: #t
 equal-arrays-distinct: #f
+equal-nested-arrays-distinct: #f
 equal-tables-distinct: #f
 equal-array-self: #t
 equal-table-self: #t
@@ -29,3 +30,4 @@ eq-bools: #t
 eq-array-self: #t
 eq-arrays-distinct: #f
 eq-string-self: #t
+contains-array-identity: #f

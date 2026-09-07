@@ -1,6 +1,6 @@
 ---
 id: lan-bd6c
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-09-06T22:39:00Z

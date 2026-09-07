@@ -7,6 +7,7 @@ import select
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 
@@ -46,6 +47,20 @@ expect(multiple_files, 0, stdout="loaded-from-file\nloaded-from-second-file\n")
 assert "otium repl" not in multiple_files.stdout, multiple_files
 expect(run("--repl", fixture, second_fixture), 0,
        stdout="loaded-from-file\nloaded-from-second-file\notium repl")
+
+with tempfile.TemporaryDirectory(prefix="otium-shebang-") as directory:
+    executable = os.path.join(directory, "script")
+    with open(executable, "w", encoding="utf-8") as script:
+        script.write(f"#!{os.path.abspath(otium)} --no-project\n(println \"shebang-ok\")\n")
+    os.chmod(executable, 0o755)
+    direct = subprocess.run([executable], text=True, capture_output=True, check=False)
+    expect(direct, 0, stdout="shebang-ok\n")
+
+    misplaced = os.path.join(directory, "misplaced.scm")
+    with open(misplaced, "w", encoding="utf-8") as script:
+        script.write('(println "before")\n#!/usr/bin/env otium\n')
+    expect(run(misplaced), 1, stderr="reserved # token")
+
 expect(run("--unknown"), 2, stderr="unknown option --unknown")
 expect(run("--path"), 2, stderr="--path requires a directory")
 expect(run("--repl", "--server"), 2, stderr="cannot be used together")
@@ -159,15 +174,12 @@ finally:
 
 expect(run("--max-depth"), 2, stderr="--max-depth requires a value")
 expect(run("--max-depth", "nope"), 2, stderr="requires an integer")
-expect(run("--stack-slots", "0"), 2, stderr="requires an integer")
 expect(run("--heap-init", "512"), 2, stderr="must be at least 1024")
 expect(run("--heap-max", "1024"), 2, stderr="must be at least --heap-init")
 
 limited = run(
     "--max-depth",
     "1024",
-    "--stack-slots",
-    "8192",
     "--heap-init",
     str(1 << 20),
     "--heap-max",
@@ -228,6 +240,13 @@ exit_alias = run(input_text="(exit)\n(println \"after-exit\")\n")
 expect(exit_alias, 0)
 assert "after-exit" not in exit_alias.stdout, exit_alias
 assert exit_alias.stderr == "", exit_alias
+
+requested_exit = run(input_text='(unwind-protect (exit 7) (println "exit-cleanup"))\n')
+expect(requested_exit, 7, stdout="exit-cleanup\n")
+invalid_exit = run(
+    input_text='(println (try (exit 256) (catch (error? e) (condition-message e))))\n(quit)\n'
+)
+expect(invalid_exit, 0, stdout="exit: expected status from 0 to 255\n")
 
 single_eval = run(
     input_text=(

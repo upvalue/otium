@@ -29,6 +29,12 @@ natively or in Otium itself, and the difference is not observable.
 Words like *error* below mean: a condition is raised as if by the `error`
 function (see section 8), with an implementation-chosen message.
 
+The [desktop UI extension proposal](ui-plan.md) records planned first-party
+UI modules and related language-design questions: generic dispatch for
+table-backed widgets, resumable tasks, VM time slicing, and their relationship
+to continuations. Those APIs and semantics are proposals, not additions to
+the language specified below.
+
 ---
 
 ## 1. Lexical syntax

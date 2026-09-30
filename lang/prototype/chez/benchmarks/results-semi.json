@@ -1,0 +1,565 @@
+{
+  "date": "2026-09-30T02:18:33.719686+00:00",
+  "platform": "macOS-15.6.1-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "chez_version": "10.4.1",
+  "c_runtime": "/private/tmp/otium-chez-bench-bin/arm64-darwin/otium",
+  "build_label": "cc -O2; GC=semi; WITH_RAY=0",
+  "runs": 5,
+  "warmups": 1,
+  "method": "Fresh processes, alternating engine order; wall includes startup and compilation; work excludes setup, includes GC. No explicit collection. All results checked.",
+  "benchmarks": {
+    "startup": {
+      "c-runtime": {
+        "samples": [
+          {
+            "wall_ms": 4.736125,
+            "work_ms": null
+          },
+          {
+            "wall_ms": 4.452458,
+            "work_ms": null
+          },
+          {
+            "wall_ms": 7.291459,
+            "work_ms": null
+          },
+          {
+            "wall_ms": 5.854584,
+            "work_ms": null
+          },
+          {
+            "wall_ms": 6.196625,
+            "work_ms": null
+          }
+        ],
+        "wall_ms": {
+          "median": 5.854584,
+          "min": 4.452458,
+          "max": 7.291459
+        },
+        "work_ms": null
+      },
+      "chez-prototype": {
+        "samples": [
+          {
+            "wall_ms": 43.144583,
+            "work_ms": null
+          },
+          {
+            "wall_ms": 42.690333,
+            "work_ms": null
+          },
+          {
+            "wall_ms": 42.816833,
+            "work_ms": null
+          },
+          {
+            "wall_ms": 40.242542,
+            "work_ms": null
+          },
+          {
+            "wall_ms": 42.02925,
+            "work_ms": null
+          }
+        ],
+        "wall_ms": {
+          "median": 42.690333,
+          "min": 40.242542,
+          "max": 43.144583
+        },
+        "work_ms": null
+      }
+    },
+    "tail-loop": {
+      "c-runtime": {
+        "samples": [
+          {
+            "wall_ms": 274.899166,
+            "work_ms": 270.45
+          },
+          {
+            "wall_ms": 264.048291,
+            "work_ms": 259.453
+          },
+          {
+            "wall_ms": 261.740542,
+            "work_ms": 257.172
+          },
+          {
+            "wall_ms": 271.979709,
+            "work_ms": 267.402
+          },
+          {
+            "wall_ms": 268.280334,
+            "work_ms": 263.795
+          }
+        ],
+        "wall_ms": {
+          "median": 268.280334,
+          "min": 261.740542,
+          "max": 274.899166
+        },
+        "work_ms": {
+          "median": 263.795,
+          "min": 257.172,
+          "max": 270.45
+        }
+      },
+      "chez-prototype": {
+        "samples": [
+          {
+            "wall_ms": 36.01575,
+            "work_ms": 2.4
+          },
+          {
+            "wall_ms": 35.214542,
+            "work_ms": 2.417
+          },
+          {
+            "wall_ms": 36.645958,
+            "work_ms": 2.393
+          },
+          {
+            "wall_ms": 36.751834,
+            "work_ms": 2.394
+          },
+          {
+            "wall_ms": 35.402083,
+            "work_ms": 2.414
+          }
+        ],
+        "wall_ms": {
+          "median": 36.01575,
+          "min": 35.214542,
+          "max": 36.751834
+        },
+        "work_ms": {
+          "median": 2.4,
+          "min": 2.393,
+          "max": 2.417
+        }
+      }
+    },
+    "fib-28": {
+      "c-runtime": {
+        "samples": [
+          {
+            "wall_ms": 91.955542,
+            "work_ms": 87.385
+          },
+          {
+            "wall_ms": 91.588542,
+            "work_ms": 87.599
+          },
+          {
+            "wall_ms": 91.0785,
+            "work_ms": 86.807
+          },
+          {
+            "wall_ms": 92.088375,
+            "work_ms": 87.901
+          },
+          {
+            "wall_ms": 90.075917,
+            "work_ms": 85.6
+          }
+        ],
+        "wall_ms": {
+          "median": 91.588542,
+          "min": 90.075917,
+          "max": 92.088375
+        },
+        "work_ms": {
+          "median": 87.385,
+          "min": 85.6,
+          "max": 87.901
+        }
+      },
+      "chez-prototype": {
+        "samples": [
+          {
+            "wall_ms": 34.386167,
+            "work_ms": 1.3
+          },
+          {
+            "wall_ms": 33.863375,
+            "work_ms": 1.303
+          },
+          {
+            "wall_ms": 34.454625,
+            "work_ms": 1.296
+          },
+          {
+            "wall_ms": 34.098542,
+            "work_ms": 1.291
+          },
+          {
+            "wall_ms": 34.280875,
+            "work_ms": 1.301
+          }
+        ],
+        "wall_ms": {
+          "median": 34.280875,
+          "min": 33.863375,
+          "max": 34.454625
+        },
+        "work_ms": {
+          "median": 1.3,
+          "min": 1.291,
+          "max": 1.303
+        }
+      }
+    },
+    "list-allocation": {
+      "c-runtime": {
+        "samples": [
+          {
+            "wall_ms": 237.300375,
+            "work_ms": 232.769
+          },
+          {
+            "wall_ms": 233.091875,
+            "work_ms": 228.438
+          },
+          {
+            "wall_ms": 236.482666,
+            "work_ms": 232.017
+          },
+          {
+            "wall_ms": 236.092,
+            "work_ms": 231.543
+          },
+          {
+            "wall_ms": 234.740708,
+            "work_ms": 230.083
+          }
+        ],
+        "wall_ms": {
+          "median": 236.092,
+          "min": 233.091875,
+          "max": 237.300375
+        },
+        "work_ms": {
+          "median": 231.543,
+          "min": 228.438,
+          "max": 232.769
+        }
+      },
+      "chez-prototype": {
+        "samples": [
+          {
+            "wall_ms": 35.385,
+            "work_ms": 2.307
+          },
+          {
+            "wall_ms": 35.542,
+            "work_ms": 2.301
+          },
+          {
+            "wall_ms": 35.128666,
+            "work_ms": 2.309
+          },
+          {
+            "wall_ms": 35.178792,
+            "work_ms": 2.217
+          },
+          {
+            "wall_ms": 36.496709,
+            "work_ms": 2.36
+          }
+        ],
+        "wall_ms": {
+          "median": 35.385,
+          "min": 35.128666,
+          "max": 36.496709
+        },
+        "work_ms": {
+          "median": 2.307,
+          "min": 2.217,
+          "max": 2.36
+        }
+      }
+    },
+    "tables": {
+      "c-runtime": {
+        "samples": [
+          {
+            "wall_ms": 29.714833,
+            "work_ms": 25.115
+          },
+          {
+            "wall_ms": 29.356708,
+            "work_ms": 25.127
+          },
+          {
+            "wall_ms": 29.693667,
+            "work_ms": 25.161
+          },
+          {
+            "wall_ms": 29.453,
+            "work_ms": 25.189
+          },
+          {
+            "wall_ms": 28.892167,
+            "work_ms": 24.341
+          }
+        ],
+        "wall_ms": {
+          "median": 29.453,
+          "min": 28.892167,
+          "max": 29.714833
+        },
+        "work_ms": {
+          "median": 25.127,
+          "min": 24.341,
+          "max": 25.189
+        }
+      },
+      "chez-prototype": {
+        "samples": [
+          {
+            "wall_ms": 35.85,
+            "work_ms": 2.114
+          },
+          {
+            "wall_ms": 35.712125,
+            "work_ms": 2.23
+          },
+          {
+            "wall_ms": 35.878166,
+            "work_ms": 2.202
+          },
+          {
+            "wall_ms": 35.286083,
+            "work_ms": 2.178
+          },
+          {
+            "wall_ms": 35.626125,
+            "work_ms": 2.189
+          }
+        ],
+        "wall_ms": {
+          "median": 35.712125,
+          "min": 35.286083,
+          "max": 35.878166
+        },
+        "work_ms": {
+          "median": 2.189,
+          "min": 2.114,
+          "max": 2.23
+        }
+      }
+    },
+    "namespace-calls": {
+      "c-runtime": {
+        "samples": [
+          {
+            "wall_ms": 545.991042,
+            "work_ms": 541.468
+          },
+          {
+            "wall_ms": 538.368666,
+            "work_ms": 533.763
+          },
+          {
+            "wall_ms": 561.12725,
+            "work_ms": 556.511
+          },
+          {
+            "wall_ms": 551.795833,
+            "work_ms": 547.064
+          },
+          {
+            "wall_ms": 544.324,
+            "work_ms": 539.655
+          }
+        ],
+        "wall_ms": {
+          "median": 545.991042,
+          "min": 538.368666,
+          "max": 561.12725
+        },
+        "work_ms": {
+          "median": 541.468,
+          "min": 533.763,
+          "max": 556.511
+        }
+      },
+      "chez-prototype": {
+        "samples": [
+          {
+            "wall_ms": 48.363875,
+            "work_ms": 14.369
+          },
+          {
+            "wall_ms": 49.975334,
+            "work_ms": 14.592
+          },
+          {
+            "wall_ms": 48.209958,
+            "work_ms": 14.716
+          },
+          {
+            "wall_ms": 48.575125,
+            "work_ms": 14.424
+          },
+          {
+            "wall_ms": 48.988458,
+            "work_ms": 14.919
+          }
+        ],
+        "wall_ms": {
+          "median": 48.575125,
+          "min": 48.209958,
+          "max": 49.975334
+        },
+        "work_ms": {
+          "median": 14.592,
+          "min": 14.369,
+          "max": 14.919
+        }
+      }
+    },
+    "live-callback": {
+      "c-runtime": {
+        "samples": [
+          {
+            "wall_ms": 588.735959,
+            "work_ms": 583.991
+          },
+          {
+            "wall_ms": 590.103167,
+            "work_ms": 584.607
+          },
+          {
+            "wall_ms": 591.811084,
+            "work_ms": 587.32
+          },
+          {
+            "wall_ms": 593.506666,
+            "work_ms": 588.986
+          },
+          {
+            "wall_ms": 586.889791,
+            "work_ms": 582.388
+          }
+        ],
+        "wall_ms": {
+          "median": 590.103167,
+          "min": 586.889791,
+          "max": 593.506666
+        },
+        "work_ms": {
+          "median": 584.607,
+          "min": 582.388,
+          "max": 588.986
+        }
+      },
+      "chez-prototype": {
+        "samples": [
+          {
+            "wall_ms": 54.947083,
+            "work_ms": 20.284
+          },
+          {
+            "wall_ms": 55.482,
+            "work_ms": 20.395
+          },
+          {
+            "wall_ms": 54.811292,
+            "work_ms": 20.724
+          },
+          {
+            "wall_ms": 54.858042,
+            "work_ms": 20.166
+          },
+          {
+            "wall_ms": 54.575541,
+            "work_ms": 20.083
+          }
+        ],
+        "wall_ms": {
+          "median": 54.858042,
+          "min": 54.575541,
+          "max": 55.482
+        },
+        "work_ms": {
+          "median": 20.284,
+          "min": 20.083,
+          "max": 20.724
+        }
+      }
+    },
+    "reload-20": {
+      "c-runtime": {
+        "samples": [
+          {
+            "wall_ms": 4.900584,
+            "work_ms": 0.343
+          },
+          {
+            "wall_ms": 4.321667,
+            "work_ms": 0.34
+          },
+          {
+            "wall_ms": 4.652791,
+            "work_ms": 0.338
+          },
+          {
+            "wall_ms": 4.411333,
+            "work_ms": 0.344
+          },
+          {
+            "wall_ms": 4.846083,
+            "work_ms": 0.346
+          }
+        ],
+        "wall_ms": {
+          "median": 4.652791,
+          "min": 4.321667,
+          "max": 4.900584
+        },
+        "work_ms": {
+          "median": 0.343,
+          "min": 0.338,
+          "max": 0.346
+        }
+      },
+      "chez-prototype": {
+        "samples": [
+          {
+            "wall_ms": 35.932625,
+            "work_ms": 1.696
+          },
+          {
+            "wall_ms": 35.875583,
+            "work_ms": 1.784
+          },
+          {
+            "wall_ms": 36.309042,
+            "work_ms": 1.775
+          },
+          {
+            "wall_ms": 35.856125,
+            "work_ms": 1.73
+          },
+          {
+            "wall_ms": 37.662917,
+            "work_ms": 1.787
+          }
+        ],
+        "wall_ms": {
+          "median": 35.932625,
+          "min": 35.856125,
+          "max": 37.662917
+        },
+        "work_ms": {
+          "median": 1.775,
+          "min": 1.696,
+          "max": 1.787
+        }
+      }
+    }
+  }
+}

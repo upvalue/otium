@@ -7,16 +7,16 @@ it does not use SDL_GPU shaders or a software renderer.
 
 From the repository root:
 
-  python3 prototype/chez/sdl/setup.py
-  prototype/chez/sdl-demo shapes
-  prototype/chez/sdl-demo particles
+  python3 chez/sdl/setup.py
+  chez/sdl-demo shapes
+  chez/sdl-demo particles
 
 Setup fetches checksum-verified, pinned chez-sdl3 bindings. See DEPENDENCY.txt.
 No dependency download or compilation of C code occurs when opening a demo.
 Set CHEZ if your executable is named scheme or chezscheme. Set SDL3_LIBRARY to
 an explicit shared library path to override pkg-config discovery.
 
-Edit prototype/chez/examples/scenes/shapes.scm or particles.scm and save.
+Edit chez/examples/scenes/shapes.scm or particles.scm and save.
 The host checks file contents every 200 ms and reloads between frames on the
 main thread. R forces a reload. Escape or the window close button exits.
 The window is resizable; the 960x640 scene is letterboxed to fit it.
@@ -45,7 +45,7 @@ prevents busy looping when VSync is unavailable or the window is occluded.
 
 For a bounded run and GPU readback:
 
-  prototype/chez/sdl-demo shapes --frames 120 --capture /tmp/shapes.bmp
+  chez/sdl-demo shapes --frames 120 --capture /tmp/shapes.bmp
 
 --capture saves the last frame before presentation and requires --frames.
 --scene-root DIR overrides the directory containing scenes/*.scm. --status FILE
@@ -54,7 +54,7 @@ optional file I/O is used by the test and is off during normal interactive use.
 
 Graphics integration test (opens temporary windows):
 
-  python3 prototype/chez/sdl/test_live.py --artifacts /tmp/otium-sdl-results
+  python3 chez/sdl/test_live.py --artifacts /tmp/otium-sdl-results
 
 It verifies the event ABI and R/Escape/close controls, then edits a temporary
 scene while it runs. It checks window/renderer identity, increasing persistent
@@ -62,6 +62,6 @@ state, recovery from syntax and render errors, and actual framebuffer pixels
 after reload. Both real demos also render and capture 30 frames. A missing
 display or accelerated backend is a test failure, not a software fallback.
 
-The existing prototype tests remain independent of SDL:
+The Chez runtime tests remain independent of SDL:
 
-  prototype/chez/test
+  chez/test

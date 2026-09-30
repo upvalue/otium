@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare the C runtime with the Chez prototype using checked workloads."""
+"""Compare the C runtime with the Chez runtime using checked workloads."""
 
 import argparse
 import datetime
@@ -14,8 +14,8 @@ import time
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[3]
-PROTOTYPE = ROOT / "prototype/chez"
+ROOT = Path(__file__).resolve().parents[1]
+CHEZ_ROOT = ROOT / "chez"
 WORKLOADS = {
     "startup": ("", "0", 0),
     "tail-loop": (
@@ -92,7 +92,7 @@ def program(name, engine):
           (define (bench-get t k) (hashtable-ref t k #f))"""
         imports = "(require callee :as c)"
         callback = "(define callback (live 'c/inc))"
-        # Loader directives are not accepted in function bodies in the prototype.
+        # Loader directives are not accepted in Chez function bodies.
         reload = """(import (only (otium runtime) evaluate))
           (define (bench-reload) (evaluate '(require callee :as c :reload)))"""
     parts = [clock, setup]
@@ -159,15 +159,15 @@ def main():
         directory = Path(temp)
         (directory / "callee.scm").write_text("(ns callee)\n(define (inc x) (+ x 1))\n")
         for name in args.only or WORKLOADS:
-            samples = {engine: [] for engine in ("c-runtime", "chez-prototype")}
+            samples = {engine: [] for engine in ("c-runtime", "chez")}
             commands = {}
             for engine in samples:
                 path = directory / f"{name}-{engine}.scm"
                 path.write_text(program(name, engine))
                 commands[engine] = ([str(args.otium.resolve()), "--path", temp, str(path)]
                     if engine == "c-runtime" else
-                    [chez, "--libdirs", str(PROTOTYPE), "--script",
-                     str(PROTOTYPE / "main.ss"), "-L", temp, str(path)])
+                    [chez, "--libdirs", str(CHEZ_ROOT), "--script",
+                     str(CHEZ_ROOT / "main.ss"), "-L", temp, str(path)])
             for iteration in range(args.warmups + args.runs):
                 order = list(samples)
                 if iteration % 2:

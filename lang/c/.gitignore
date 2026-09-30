@@ -1,0 +1,26 @@
+# Build and compiler output
+/build/
+/builddir/
+/bin/
+/compile_commands.json
+/site.mk
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Test and tooling caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.cache/
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

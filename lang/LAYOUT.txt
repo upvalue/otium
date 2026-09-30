@@ -1,0 +1,56 @@
+Otium runtime layout
+
+lang/
+  c/               C runtime and its dialect
+    src/           Runtime, collectors, CLI, and C extensions
+    prelude/       Bootstrap library and macroexpander
+    tests/         Runtime, CLI, and dialect conformance tests
+    examples/      C-runtime examples
+    benchmarks/    C workloads and upstream R7RS benchmark submodule
+    tools/         Build helpers, formatting, and GC lint
+    vendor/        C dependencies
+    agent-docs/    C dialect specification and implementation notes
+    Makefile       C build and test rules
+    config.mk      C build defaults; local overrides go in c/site.mk
+  chez/            Otium on Chez Scheme
+    otium/         Namespace runtime and canvas library
+    examples/      Scheme examples and reloadable SDL scenes
+    sdl/           SDL host, dependency setup, tests, and usage notes
+    .deps/         Ignored, locally installed Scheme dependencies
+    run            REPL/script launcher
+    test           Headless tests
+    sdl-demo       SDL demo launcher
+    NOTES.txt      Chez runtime semantics and usage
+  benchmarks/      Cross-runtime comparison runner and recorded results
+  vim/             Editor integration
+  .tickets/        Project tickets
+
+The runtimes coexist. Each owns its language semantics and dependencies.
+The C conformance suite describes the C dialect; Chez inherits Scheme values
+and semantics and has a separate suite. Shared benchmarks use equivalent
+workloads with explicit differences documented by the runner.
+
+Commands from lang/:
+
+  make                         Build C (equivalent to make -C c)
+  ./otium file.scm             Run the C runtime
+  ./otium-chez file.scm        Run the Chez runtime
+  ./otium-chez                 Open the Chez REPL
+  make test                   Test both runtimes, without SDL
+  make test-c                 C runtime, CLI, and conformance checks
+  make test-chez              Chez runtime and CLI checks
+  make sdl-setup              Fetch pinned Chez SDL3 bindings
+  chez/sdl-demo shapes        Open the live orbit demo
+  chez/sdl-demo particles     Open the particle demo
+  make test-sdl               Graphics tests; requires a desktop session
+  python3 benchmarks/compare.py --otium ./otium
+
+The C launcher preserves the caller's working directory. Root project.ot
+points at c/examples; c/project.ot handles commands run from c/. The C binary
+now lives in c/bin/<platform>/otium. Existing make flags such as GC=gen and
+WITH_RAY=0 pass through the root Makefile. Relative build-path overrides are
+resolved inside c/; use absolute paths to avoid ambiguity.
+
+Recorded benchmark JSON files retain their original paths and engine labels
+as historical metadata. New comparisons use the current layout. README files
+were left unchanged; this file records the runtime layout and current commands.

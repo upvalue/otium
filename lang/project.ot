@@ -1,5 +1,2 @@
-; Load-path directories this checkout needs. Read, never evaluated.
-; vim: set filetype=otium :
-
-; The prelude and expander are embedded at build time and deliberately absent.
-(paths "examples/ray" "examples/demo")
+; Default C-runtime example paths when working from lang/.
+(paths "c/examples/ray" "c/examples/demo")

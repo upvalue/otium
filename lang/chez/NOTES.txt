@@ -1,10 +1,10 @@
-Otium on Chez prototype
+Otium on Chez
 
 Run from the repository root with Chez Scheme installed:
 
-  prototype/chez/run --help
-  prototype/chez/run -L prototype/chez/examples
-  prototype/chez/test
+  chez/run --help
+  chez/run -L chez/examples
+  chez/test
 
 Set CHEZ to the Scheme executable if it is named scheme or chezscheme.
 The launcher finds its library relative to itself; -L paths are relative to
@@ -27,7 +27,7 @@ The existing callback uses the new function. The vector holding the count
 survives because defonce skips initialization of an existing definition.
 For a scripted demonstration:
 
-  prototype/chez/run -L prototype/chez/examples prototype/chez/examples/demo.scm
+  chez/run -L chez/examples chez/examples/demo.scm
 
 Forms and semantics
 
@@ -68,7 +68,7 @@ require to see newly added definitions. Retargeting an alias does not rewrite
 already compiled functions; use a stable alias for a namespace. Each created
 namespace retains its Chez environment for the life of the process.
 
-This is a single-threaded development prototype. It has no atomic reload,
+This is a single-threaded development runtime. It has no atomic reload,
 dependency tracking, file watcher, state migration, custom reader, or memory
 limits. Foreign libraries use Chez's load-shared-object and foreign-procedure
 directly. There is no Otium C embedding API. Tests include a Unix libc FFI
@@ -78,7 +78,7 @@ Benchmarks against the C runtime
 
 Build the desired C runtime first, then run:
 
-  python3 prototype/chez/benchmarks/compare.py --otium ./otium
+  python3 benchmarks/compare.py --otium ./otium
 
 The runner executes both implementations in fresh processes, checks every
 answer, alternates engine order, and reports medians from five runs after
@@ -88,14 +88,14 @@ workloads; --runs, --warmups, --timeout, and --chez customize the run.
 
 Work time excludes process startup, loading, initial compilation, and output.
 It includes allocations and collections during the workload. Wall time includes
-the whole process, including the Chez prototype's source compilation. Reload
+the whole process, including the Chez Chez runtime's source compilation. Reload
 time includes reading and compiling a tiny namespace and reinstalling imports.
 Warmups use separate processes, so they warm filesystem caches, not a persistent
 application. These are desktop microbenchmarks, not memory or UI latency tests.
 
 The table workload uses Otium tables versus Chez eqv hash tables with integer
 keys. It measures insertion and lookup, without exercising insertion ordering.
-The live callback workload uses Otium's forwarding lambda versus the prototype's
+The live callback workload uses Otium's forwarding lambda versus the Chez runtime's
 live handle. Both follow function redefinition but have different dispatch paths.
 Other computational workloads share their source between implementations.
 
@@ -103,4 +103,4 @@ SDL3 demos
 
 See sdl/USAGE.txt for hardware-accelerated orbit and particle demos using
 chez-sdl3. The separate sdl-demo host watches scene files and reloads drawing
-code between frames. The core prototype's ordinary REPL still has no watcher.
+code between frames. The Chez runtime's ordinary REPL still has no watcher.

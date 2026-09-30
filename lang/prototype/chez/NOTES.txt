@@ -98,3 +98,9 @@ keys. It measures insertion and lookup, without exercising insertion ordering.
 The live callback workload uses Otium's forwarding lambda versus the prototype's
 live handle. Both follow function redefinition but have different dispatch paths.
 Other computational workloads share their source between implementations.
+
+SDL3 demos
+
+See sdl/USAGE.txt for hardware-accelerated orbit and particle demos using
+chez-sdl3. The separate sdl-demo host watches scene files and reloads drawing
+code between frames. The core prototype's ordinary REPL still has no watcher.

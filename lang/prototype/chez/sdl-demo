@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ ! -f "$root/.deps/sdl3.sls" ]; then
+  printf 'Run python3 %s/sdl/setup.py first.\n' "$root" >&2
+  exit 1
+fi
+if [ -z "${SDL3_LIBRARY:-}" ]; then
+  libdir=$(pkg-config --variable=libdir sdl3)
+  case $(uname -s) in
+    Darwin) SDL3_LIBRARY="$libdir/libSDL3.dylib" ;;
+    *) SDL3_LIBRARY="$libdir/libSDL3.so" ;;
+  esac
+  export SDL3_LIBRARY
+fi
+exec "${CHEZ:-chez}" --libdirs "$root:$root/.deps" --script "$root/sdl/main.ss" \
+  --scene-root "$root/examples" "$@"

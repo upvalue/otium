@@ -1,0 +1,67 @@
+SDL3 live demos
+
+Prerequisites: Chez Scheme, SDL3 3.4.12 or later, Python 3, pkg-config, and a
+desktop session with an accelerated SDL renderer. Tested on macOS arm64 with
+Chez 10.4.1, SDL 3.4.16, and Metal. The demo uses SDL's accelerated 2D renderer;
+it does not use SDL_GPU shaders or a software renderer.
+
+From the repository root:
+
+  python3 prototype/chez/sdl/setup.py
+  prototype/chez/sdl-demo shapes
+  prototype/chez/sdl-demo particles
+
+Setup fetches checksum-verified, pinned chez-sdl3 bindings. See DEPENDENCY.txt.
+No dependency download or compilation of C code occurs when opening a demo.
+Set CHEZ if your executable is named scheme or chezscheme. Set SDL3_LIBRARY to
+an explicit shared library path to override pkg-config discovery.
+
+Edit prototype/chez/examples/scenes/shapes.scm or particles.scm and save.
+The host checks file contents every 200 ms and reloads between frames on the
+main thread. R forces a reload. Escape or the window close button exits.
+The window is resizable; the 960x640 scene is letterboxed to fit it.
+
+Each scene exports render!, revision, and a defonce state vector. The host
+creates its live render callback once. Changing render! replaces subsequent
+frames while the SDL window, renderer, scene state, and elapsed time persist.
+Changing colors, geometry, speed, or the revision label gives visible feedback.
+Frame count and animation phase live in the scene's state vector.
+
+Only the selected scene file is watched. Changes to canvas.sls or main.ss
+require restarting. Preserve the state vector and render!'s three arguments
+(canvas, elapsed-seconds, delta-seconds) while editing. No state migration is
+attempted. The delta is capped at 100 ms after pauses.
+
+Load errors are printed once per changed file; the existing render function
+continues if it remains usable. Reload is not transactional: definitions and
+side effects evaluated before an error remain. A render exception pauses scene
+drawing but keeps event handling and watching alive. Fix the file and save to
+resume. The overlay reports errors and successful reloads.
+
+The default renderer is Metal on macOS. Other platforms request an accelerated
+backend list. --renderer NAME overrides the choice, but software is rejected.
+Renderer identity is printed at startup. VSync is requested; a frame cap also
+prevents busy looping when VSync is unavailable or the window is occluded.
+
+For a bounded run and GPU readback:
+
+  prototype/chez/sdl-demo shapes --frames 120 --capture /tmp/shapes.bmp
+
+--capture saves the last frame before presentation and requires --frames.
+--scene-root DIR overrides the directory containing scenes/*.scm. --status FILE
+writes diagnostic Scheme data after each frame using an atomic rename. This
+optional file I/O is used by the test and is off during normal interactive use.
+
+Graphics integration test (opens temporary windows):
+
+  python3 prototype/chez/sdl/test_live.py --artifacts /tmp/otium-sdl-results
+
+It verifies the event ABI and R/Escape/close controls, then edits a temporary
+scene while it runs. It checks window/renderer identity, increasing persistent
+state, recovery from syntax and render errors, and actual framebuffer pixels
+after reload. Both real demos also render and capture 30 frames. A missing
+display or accelerated backend is a test failure, not a software fallback.
+
+The existing prototype tests remain independent of SDL:
+
+  prototype/chez/test

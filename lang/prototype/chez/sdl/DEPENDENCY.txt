@@ -1,0 +1,19 @@
+SDL bindings: https://github.com/melted/chez-sdl3
+Revision: d7374ede2c8485e673e106bf054531cf5cc1e6df
+Archive SHA-256: f28f233f8b93d681ec507fda2ae7d430f162520c8048acc23164628f2ae50fa9
+Copyright 2026 Niklas Larsson; ISC license (retained in .deps/chez-sdl3/LICENSE).
+SDL header comments retain their upstream license notices.
+
+setup.py downloads this pinned archive, verifies its digest, and extracts
+Scheme source and the license into .deps. No dependency download happens at
+demo startup. --archive can use a previously downloaded copy.
+
+The generated (sdl3) library selects upstream definitions used by these demos
+and their dependencies, preserving their source order. Unrelated unfinished
+bindings and duplicate procedure names are excluded. Its changes are an explicit
+SDL3_LIBRARY path and the missing SDL_KeyboardEvent.scancode field. The path and
+keyboard fixes follow the existing manse integration. SDL_SetMainReady is absent
+from upstream and is bound directly in canvas.sls. No custom C shim is used.
+
+The upstream binding targets SDL 3.4.12. Tested here with SDL 3.4.16 and
+Chez 10.4.1 on macOS arm64. Treat other platforms as untested.

@@ -1,0 +1,313 @@
+Otium macros on Chez
+
+Status: partly implemented. defmacro, Otium expansion, generated top-level
+forms, macro imports and reload, and Otium eval are implemented. cond-expand,
+the explicit native syntax boundary, and the restricted default environment
+remain proposed. See NOTES.txt for the current native syntax limitations.
+
+Otium macros should be the normal way to define syntax in Otium libraries
+and applications. On Chez, an Otium expansion pass should run before Chez
+expansion and compilation. Chez syntax remains available through explicit
+platform adapters and a bounded native expression escape.
+
+The starting contract is c/agent-docs/spec.md, section 6, and the implementation
+in c/prelude/expander.scm. Port the protocol and the relevant traversal rules;
+do not load that file unchanged. It assumes C dialect forms, sequential let,
+nil, and C runtime helpers. Chez continues to use Chez values and the existing
+Chez binding semantics unless a separate language decision changes them.
+
+Macro values and invocation
+
+    (defmacro twice (expression)
+      (let ((temporary (gensym "twice")))
+        `(let ((,temporary ,expression))
+           (+ ,temporary ,temporary))))
+
+defmacro installs an ordinary namespace value containing a transformer
+closure, its defining namespace, and diagnostic information. Use a distinct
+record type rather than treating every procedure as a possible macro.
+macro? recognizes this record. Referring to twice as a value returns the
+record; applying it as a procedure is an error. Only the expander invokes
+the transformer field.
+
+A macro call supplies unevaluated argument datums and returns one replacement
+datum. Expand that replacement again. Bare rest parameters and dotted parameter
+lists work as they do for Chez lambda. The C reader's array parameter spelling
+and its & convention are outside this first implementation.
+
+Macro lookup resolves the current value of a namespace binding, including
+qualified and referred imports. Core form names cannot be redefined as macros.
+A lexical binding of the head suppresses macro lookup and syntax traversal,
+including when it shadows a core syntax name under Chez's binding rules.
+An unbound head remains an ordinary application for Chez to diagnose or resolve.
+
+Compile the transformer body when defmacro is processed, expanding any Otium
+macros it uses then. It can call ordinary functions that are available when
+the transformer runs. There is no separate user-visible phase import system.
+defmacro is a top-level form, including in a top-level generated begin.
+
+The transformer closure resolves its own helper references in its defining
+namespace. During invocation, parameterize the current namespace to that
+namespace and restore it afterward, including on failure. Expand the returned
+datum in the caller's namespace and lexical scope. These are different steps:
+
+    (defmacro add-base (x) `(+ base ,x))
+
+base in this output resolves at the expansion site. A helper called by the
+transformer resolves where the transformer was defined. Qualified names in
+the output also resolve using the caller's installed aliases; macro libraries
+must document those dependencies. There is no automatic capture of private
+bindings in emitted code.
+
+Macros are intentionally unhygienic. gensym supplies fresh symbols for
+introduced temporaries. Keep those symbol objects intact through expansion
+and compilation; never print and reread the expansion as an implementation
+step. A macro can deliberately capture a caller's binding.
+
+Expansion and top-level evaluation
+
+Replace evaluate's raw-form dispatch with a coordinator that alternates
+expansion and processing. Do not fully expand a file or an entire top-level
+begin before running its first definition.
+
+For each top-level form:
+
+1. Expand macros in head position until the head is a core form or an ordinary
+   application. This operation does not descend into arguments.
+2. Classify the resulting form. A top-level begin feeds each child back into
+   this coordinator, in order. cond-expand feeds only its selected body back.
+3. Process ns and require immediately. Process defmacro by compiling and
+   installing its transformer. For defonce, check whether the local definition
+   already exists before expanding its initializer.
+4. For a definition or expression, expand its expression positions with the
+   appropriate lexical scope. Validate definition/import collisions using the
+   expanded definition. Lower the result to Chez and evaluate it once.
+5. Register a successful public definition under the name actually defined.
+   Preserve multiple values when returning an expression's result.
+
+Every operation uses the namespace current at that step. An enclosing begin
+must not retain an environment captured before a generated ns changed it.
+Existing required-file namespace checks and load restoration still apply.
+
+This supports generated directives as well as generated definitions:
+
+    (defmacro defconstant (name value)
+      `(defonce ,name ,value))
+
+    (defconstant answer 42)
+
+answer is registered exactly as it would be for a literal defonce. A second
+evaluation preserves it, even if the initializer contains a macro with side
+effects. Likewise, a generated begin can require a macro library and use it
+in a later child. That later child is expanded after require completes.
+
+Generated ns, require, defmacro, and defonce are allowed only in top-level
+context. Emitting them inside a function produces an Otium context error.
+This replaces the current literal-only restriction for Otium macro output.
+Native Chez macros do not acquire permission to emit Otium loader directives.
+
+An expression is expanded once before Chez compilation. Function bodies keep
+their expansion until the enclosing definition is evaluated again. Failed
+expansion prevents that definition from being installed. Earlier top-level
+effects and side effects performed by transformers are not rolled back.
+
+Top-level begin sequencing is an explicit Chez coordinator rule. The C
+expander currently walks a begin eagerly. Share selected behavioral tests;
+do not claim identical scheduling for grouped definitions on both runtimes.
+
+Scope and traversal
+
+The expander needs a grammar of forms it owns. An arbitrary recursive walk
+would expand quoted data, binding lists, and host macro patterns incorrectly.
+
+Start with quote, quasiquote, if, begin, lambda, define, set!, let, named let,
+let*, letrec, letrec*, and, or, and cond, plus the top-level forms above.
+Validate malformed forms before walking them. Core syntax introduced later
+must specify expression positions, data positions, and binding scope.
+
+quote is opaque. Quasiquote tracks nesting depth and expands only active
+unquote and unquote-splicing expressions, including those in vector templates.
+Binding names, parameter lists, cond auxiliary keywords, namespace names,
+and require specifications are data. Generic procedure calls expand their
+operator and operands, without imposing a new runtime evaluation order.
+
+Track lambda parameters, including rest parameters. Parallel Chez let expands
+all initializers in the outer scope and its body with all names bound. let*
+adds each binding after its initializer. letrec and letrec* bind all names
+throughout their initializers and body. Named-let initializers use the outer
+scope; the name and parameters bind within the body.
+
+This differs from C's sequential let. The macro invocation model is shared;
+a macro's transformer code and output still depend on the dialect features
+they use. Cross-runtime macros should initially use the tested common subset,
+such as lambda and single-binding let. This change does not promise full C
+dialect compatibility or silently alter existing Chez programs.
+
+For Chez bodies, collect literal leading internal definitions, including
+literal begins containing definitions, before expanding their initializers
+and body. Their names bind throughout the body. This preserves Chez internal
+definition scope and prevents a same-named global macro from firing there.
+
+In the first implementation, reject Otium macros that generate internal
+definitions. Supporting them requires discovering bindings without executing
+transformers twice or expanding earlier expressions under the wrong scope.
+Top-level generated definitions are supported. Macro authors can generate a
+let or lambda for local bindings. This limitation must have a targeted error
+and a test; it must not silently fall through to Chez.
+
+Imports and reload
+
+An Otium macro record is a value, so require uses the existing live namespace
+binding path. The Otium expander resolves that binding before Chez sees a
+call. This avoids needing Chez syntax exports for ordinary Otium macros.
+macro? and non-head references use the same value path.
+
+Reloading a macro changes subsequent expansions through qualified and referred
+names. Previously compiled functions keep their old expansion. A saved macro
+record remains the saved object; a saved ordinary function remains compiled
+code. Changing a binding between a macro and a procedure affects subsequent
+expansion decisions, and does not recompile existing callers.
+
+Retain the current import collision rules and the requirement to repeat
+require to acquire newly added names. Do not introduce automatic dependent
+recompilation. Re-evaluating a caller is how it picks up a new macro expansion.
+
+Platform syntax boundary
+
+Keep the runtime's .sls implementation and native adapters free to use Chez
+syntax internally. Application-facing syntax extensions use defmacro.
+Expose native procedures through explicit prefixes, including chez/.
+Track native imported bindings as values or syntax, so aliases cannot hide
+syntax from the Otium expander's boundary checks.
+
+Arbitrary Chez syntax needs an opaque expression boundary. Proposed spelling:
+
+    (define c-strlen
+      (chez/expr
+        (chez/foreign-procedure "strlen" (string) size_t)))
+
+chez/expr takes one native expression. The Otium walker leaves it untouched.
+Lower it inside a fresh zero-argument lambda application so native expansion
+cannot install top-level definitions. The lowering uses the compiler's trusted
+lambda binding. Keep it inside the enclosing expression, rather than using a
+separate eval, so surrounding lexical bindings stay in scope and multiple
+return values pass through. Native definitions generated inside the boundary
+are local to that lambda and still obey Chez body rules.
+
+Inside this expression, Chez owns expansion, auxiliary keywords, and local
+binding forms. Otium macros are not expanded there. Ordinary Otium values,
+imported procedures, and lexical variables remain usable. A macro record
+used as a procedure still fails. There is no implicit switch back to Otium
+expansion inside native macro output.
+
+The boundary is expression-only. A public definition stays outside it, where
+Otium can register it. Adapter authors needing native helper macros should
+put them in a Chez library or use local native syntax within the expression.
+This is a language boundary, not a sandbox against host code that calls eval
+or mutates an environment.
+
+chez/import is a separately recognized top-level platform directive. Delegate
+library loading and syntax binding identity to Chez. Initially require a
+prefixed library import, register imported names for collision checks, and
+preserve the distinction between imported procedures and imported syntax.
+Imports run before later forms are expanded. Prefixing auxiliary syntax such
+as else follows Chez's binding rules; tokens interpreted as data by a form,
+such as foreign-procedure's string and size_t, are left alone.
+
+A native syntax binding used outside chez/expr receives a boundary error,
+unless it is an explicitly supported form such as chez/import. Calling a
+native procedure needs no wrapper. The expander checks binding metadata,
+not just whether the printed name starts with chez/.
+
+Do not implement a Chez transformer for each Otium macro. That would leave
+Otium definition discovery dependent on opaque host expansion and complicate
+macro values, reload, and generated loader forms. Chez's native syntax
+machinery remains useful for the existing live value aliases and lowering.
+
+Conditional expansion
+
+cond-expand is an Otium core form because it controls which code is expanded.
+Start with top-level use, including generated top-level use. Support feature
+identifiers, and, or, not, and a final else clause. Select the first match;
+unknown identifiers are false. No match without else is an expansion error.
+An empty selected body is allowed. Keep features fixed for a runtime session.
+
+Validate clause structure and feature expressions without expanding any
+branch body. Unselected branches do not load libraries, invoke transformers,
+register definitions, or undergo expression validation. All branches still
+have to be readable by the active reader. Select separate files when a
+platform needs incompatible reader notation.
+
+Initially advertise chez and an Otium macro capability only after its stated
+tests pass. Do not infer capabilities from arbitrary bound names or advertise
+SRFI support based on a partial resemblance. Maintain feature definitions
+alongside the implementation.
+
+Evaluation and diagnostics
+
+Unqualified eval should enter the Otium coordinator in the namespace captured
+by its installed namespace wrapper, like the existing live helper. It receives
+a datum and does not capture the caller's lexical variables. load-source, the
+REPL, and script loading use that same path. Explicit chez/eval retains native
+behavior and does not update Otium's definition registry.
+
+macroexpand-1 performs one head expansion. macroexpand repeats head expansion
+without descending, matching the C API. They invoke transformers and can have
+side effects, but do not execute returned definitions or loader directives.
+Internal recursive expansion uses a separate function and explicit scope.
+
+Report the source path, namespace, macro name, and expansion chain on errors.
+The current reader supplies no location annotations; line and column reporting
+requires additional reader work. Bound expansion work and report exhaustion
+with the expansion chain. Do not try to detect every cycle by datum equality.
+
+Implementation sequence and acceptance
+
+First, add a Chez macro record and an expander module with explicit lookup and
+transformer-invocation callbacks. Keep source namespace state in runtime.sls.
+Test datum preservation, capture, gensym, arity, macro values, lexical shadowing,
+quote, nested quasiquote, and the supported binding forms.
+
+Second, replace evaluate with the coordinator. Test generated define, defonce,
+begin, ns, and require; a macro defined and used in successive begin children;
+failed initializers; import collisions; multiple values; and namespace
+restoration after transformer failure. Test rejection of generated internal
+definitions and directives in expression context.
+
+Third, exercise macros across two namespaces. Cover qualified and referred
+imports, defining-namespace helper lookup, use-site capture, macro replacement,
+old compiled callers, fresh expansions, and a macro-generated definition that
+can itself be required by another namespace.
+
+Fourth, add cond-expand and the native syntax boundary together. Test an
+inactive branch containing an unavailable import, malformed host syntax, and
+a transformer that would raise if called. Test generated conditional forms,
+unknown features, invalid feature expressions, and the no-match error. Verify
+that native expressions retain lexical bindings and multiple values, that
+native syntax aliases remain classified as syntax, and that native definitions
+cannot accidentally become unregistered Otium public definitions.
+
+Finally, replace the full default Chez environment with an enumerated core
+environment and explicit native imports. Migrate examples, FFI tests, and
+local native macro tests to the new boundaries. List every retained core
+binding and its semantics in NOTES.txt. Keep the existing Chez tests passing
+and add focused macro tests; use make test-chez and make test-sdl as appropriate.
+Run selected common macro fixtures on C as a comparison, without requiring
+Chez to pass the C dialect suite.
+
+Source references and feasibility checks
+
+The current behavior is documented in chez/NOTES.txt and implemented in
+chez/otium/runtime.sls. C's macro contract and implementation are in
+c/agent-docs/spec.md, c/prelude/expander.scm, and c/tests/otium/07-macros.scm.
+
+Chez native syntax and binding facilities are documented at:
+https://www.scheme.com/csug8/syntax.html
+
+Nine temporary probes on the installed Chez 10.4.1 verified defining-environment
+helper lookup, use-site lookup of emitted symbols, gensym preservation through
+direct eval, helper replacement, parallel let behavior, internal definition
+scope, lexical access from a native syntax expression, multiple values through
+the native boundary, and confinement of native definitions to that boundary.
+These establish feasibility of individual mechanisms, not correctness of the
+proposed expander.

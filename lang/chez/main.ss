@@ -9,7 +9,8 @@
     [(equal? (car args) "--help")
      (display "Usage: otium-chez [-L directory] [script.scm | --repl]\n")
      (display "Forms: (ns name), (require name :as alias :refer (names) :reload),\n")
-     (display "       (defonce name value), (live 'binding). Other forms are Chez Scheme.\n")]
+     (display "       (defonce name value), (defmacro name parameters body ...), (live 'binding).\n")
+     (display "Otium macros expand before Chez compilation; see chez/NOTES.txt for supported forms.\n")]
     [(and (equal? (car args) "--repl") (null? (cdr args))) (repl)]
     [(and (null? (cdr args)) (not (char=? (string-ref (car args) 0) #\-)))
      (load-source (car args))]

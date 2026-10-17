@@ -6,6 +6,8 @@
           call-with-otium-control call-with-native-conditions
           control-condition? control-kind control-status)
   (import (except (chezscheme) error error? condition-message exit)
+          (prefix (only (otium truth) if) ot:)
+          (prefix (otium values) val:)
           (rename (only (chezscheme) condition-message) (condition-message native-message)))
 
   (define handlers (make-parameter '()))
@@ -19,11 +21,15 @@
   (define-record-type restart (fields name description transfer))
 
   (define (field c key)
-    (and (hashtable? c) (hashtable-ref c key #f)))
+    (let ([keyword (val:keyword (substring (symbol->string key) 1 (string-length (symbol->string key))))])
+      (cond [(val:table? c) (val:get c keyword #f)]
+            [(hashtable? c) (hashtable-ref c key (hashtable-ref c keyword #f))]
+            [else #f])))
   (define (condition-type c) (field c ':type))
   (define (condition-message c) (field c ':message))
   (define (name-symbol value who)
     (cond
+      [(val:keyword? value) (string->symbol (val:keyword->string value))]
       [(string? value) (string->symbol value)]
       [(symbol? value)
        (let ([name (symbol->string value)])
@@ -45,7 +51,11 @@
         (and (symbol? actual)
              (or (eq? actual type) (loop (hashtable-ref parents actual #f)))))))
   (define (type-pred type) (lambda (c) (condition-of-type? c type)))
-  (define (error? c) (and (hashtable? c) (hashtable-contains? c ':type)))
+  (define (error? c)
+    (cond [(val:table? c) (not (val:nil? (val:get c (val:keyword "type"))))]
+          [(hashtable? c) (or (hashtable-contains? c ':type)
+                             (hashtable-contains? c (val:keyword "type")))]
+          [else #f]))
 
   (define (build-condition args)
     (when (null? args) (error "error: expected a condition or message"))
@@ -62,7 +72,7 @@
     (let loop ([frames (handlers)])
       (unless (null? frames)
         (parameterize ([handlers (cdr frames)])
-          (when ((caar frames) c) ((cdar frames) c)))
+          (ot:if ((caar frames) c) ((cdar frames) c)))
         (loop (cdr frames)))))
   ;; Mark conditions that have already visited signal-site handlers. Native
   ;; exception boundaries must not dispatch them a second time.
@@ -133,7 +143,7 @@
         [(_ (body ...) ((pred var forms ...) ...))
          #'(call-try (lambda () body ...)
              (lambda (c)
-               (cond [(pred c) (let ([var c]) forms ...)] ...
+               (cond [(ot:if (pred c) #t #f) (let ([var c]) forms ...)] ...
                      [else (propagate c)])))])))
 
   (define (call-restarts body names descriptions clauses)

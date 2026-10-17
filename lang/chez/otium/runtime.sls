@@ -3,7 +3,8 @@
           load-path namespace-ref namespace-set! repl)
   (import (chezscheme) (prefix (otium generic-core) gm:)
           (prefix (otium conditions) ot:) (otium expander) (otium line-edit)
-          (otium runtime-documentation))
+          (otium runtime-documentation) (otium reader)
+          (only (otium values) keyword otium-write))
 
   (define-record-type otium-macro
     (fields transformer namespace name))
@@ -191,7 +192,7 @@
       (call-with-input-file path
         (lambda (port)
           (let loop ()
-            (let ([form (read port)])
+            (let ([form (read-otium port path)])
               (unless (eof-object? form)
                 (evaluate form)
                 (loop))))))))
@@ -239,10 +240,10 @@
                      target member)))
                (vector->list (hashtable-keys (namespace-definitions target))))
              (for-each (lambda (member) (import-value! space member target member)) refers))]
-          [(eq? (car rest) ':reload) (parse (cdr rest) alias refers #t)]
-          [(and (eq? (car rest) ':as) (pair? (cdr rest)) (symbol? (cadr rest)))
+          [(or (eq? (car rest) ':reload) (eq? (car rest) (keyword "reload"))) (parse (cdr rest) alias refers #t)]
+          [(and (or (eq? (car rest) ':as) (eq? (car rest) (keyword "as"))) (pair? (cdr rest)) (symbol? (cadr rest)))
            (parse (cddr rest) (cadr rest) refers reload?)]
-          [(and (eq? (car rest) ':refer) (pair? (cdr rest))
+          [(and (or (eq? (car rest) ':refer) (eq? (car rest) (keyword "refer"))) (pair? (cdr rest))
                 (list? (cadr rest)) (for-all symbol? (cadr rest)))
            (parse (cddr rest) alias (cadr rest) reload?)]
           [else (error 'require "invalid options" rest)]))))
@@ -452,13 +453,13 @@
                                 (close-port input)
                                 (set! input (make-line-input-port prompt repl-bindings)))
                               #t])
-                     (let ([form (read input)])
+                     (let ([form (read-otium input "<repl>")])
                        (if (eof-object? form) #f
                            (begin
                              (call-with-values (lambda () (evaluate form))
                                (lambda values
                                  (for-each
-                                   (lambda (v) (unless (eq? v (void)) (pretty-print v)))
+                                   (lambda (v) (otium-write v) (newline))
                                    values)))
                              #t))))])
               (when continue? (loop)))))

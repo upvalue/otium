@@ -3,7 +3,7 @@
           generic? generic-owner generic-arity fresh-generic add-method!
           dispatch-type make field-ref field-set! field-delete! field-has?
           field-keys typed-map? generic-methods remove-method!)
-  (import (chezscheme))
+  (import (chezscheme) (prefix (otium values) val:))
 
   (define (fail who code message . details)
     (apply error who message code details))
@@ -29,6 +29,8 @@
   (define Procedure (builtin 'Procedure))
   (define TypeDescriptor (builtin 'TypeDescriptor))
   (define Other (builtin 'Other))
+  (define Nil (builtin 'Nil))
+  (define Keyword (builtin 'Keyword))
 
   (define-record-type (typed-map new-map typed-map?)
     (opaque #t)
@@ -38,7 +40,9 @@
       (fail 'type-name 'invalid-specializer "expected type descriptor" type))
     (descriptor-name type))
   (define (dispatch-type value)
-    (cond [(typed-map? value) (typed-map-descriptor value)]
+    (cond [(val:nil? value) Nil] [(val:keyword? value) Keyword]
+          [(val:array? value) Vector] [(val:table? value) Hashtable]
+          [(typed-map? value) (typed-map-descriptor value)]
           [(number? value) Number] [(boolean? value) Boolean]
           [(char? value) Character] [(string? value) String]
           [(symbol? value) Symbol] [(null? value) Null]
@@ -175,4 +179,4 @@
       (cons 'String String) (cons 'Symbol Symbol) (cons 'Null Null)
       (cons 'Pair Pair) (cons 'Vector Vector) (cons 'Bytevector Bytevector)
       (cons 'Hashtable Hashtable) (cons 'Procedure Procedure)
-      (cons 'TypeDescriptor TypeDescriptor) (cons 'Other Other))))
+      (cons 'Nil Nil) (cons 'Keyword Keyword) (cons 'TypeDescriptor TypeDescriptor) (cons 'Other Other))))

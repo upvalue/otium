@@ -14,12 +14,13 @@ examples/c/otcl/otcl.ot and demo.ot implement a Tcl interpreter without FFI.
 Keep one implementation when the common language surface can support it.
 Current blockers:
 
-- Reader and values: {...} tables, [...] arrays, self-evaluating :keywords,
-  and a distinct falsy nil. Chez reads square brackets as lists and has no
-  Otium table/array reader or nil value.
-- Collections: table, array, get, put!, push!, table?, generic length, and
-  drop on arrays. A missing get returns nil; the parser uses that as control
-  flow. Replacing nil with a truthy symbol would silently change behavior.
+- The common reader and supporting values now cover {...} tables, [...]
+  growable arrays, self-evaluating keywords, and distinct falsy nil. Both
+  runtimes provide table, array, get, put!, push!, table?, generic length,
+  and drop on arrays. Missing get returns nil. See docs/reader-implementation.md
+  for tested scope; this does not establish that OTCL runs on Chez.
+- Callable collections and the rest of C's collection prelude still need
+  shared implementations. Chez arrays and tables are records, not procedures.
 - Strings: get on a string returns a one-character string, not a Scheme
   character. substring clamps out-of-range endpoints; expr-match? relies on
   this when checking a two-character operator near end of input. Chez's
@@ -45,7 +46,8 @@ APIs. c/tests/otcl.scm itself uses the C collection and require conventions.
 Other C examples with non-FFI dependencies
 
 examples/hand/lc-1-two-sum.ot uses table/array literals, callable collections,
-get/put!, generic length, dotimes, and println. These are language/library
+get/put!, generic length, dotimes, and println. The reader and basic
+collection operations are shared now; callable collections and dotimes remain
 gaps. Its documentation string does not make it a native extension.
 
 examples/hand/lc-3622-check-divis.ot uses generic string get returning a
@@ -60,9 +62,9 @@ as a portability test; the placeholder is not an implementation feature.
 The former Raylib examples were retired with the C Raylib extension. The
 shared SDL acceptance program covers their basic window/drawing/input/capture
 path. The roguelike's font atlas, render-target scaling, fullscreen controls,
-and game logic have not been ported. Its C-specific arrays, nil, collection
-operations, and hexadecimal syntax would still need language-level changes
-for a shared port; those are separate from the native FFI.
+and game logic have not been ported. Its arrays, nil and hexadecimal syntax
+are now readable on Chez. Its remaining collection and loop operations still
+need a source audit for a shared port.
 
 examples/c/demo/demo.scm is source sugar over make-inline-counter and
 make-owned-counter. The companion C files demonstrate the native extension
@@ -83,8 +85,9 @@ The orbit and particle scenes now live in examples/shared/scenes/ and run
 through the same SDL binding on C and Chez. Their mutable phase and tick
 state stays in the shared host across source reloads. Parentheses, ordinary
 procedures, and shared arithmetic replace the former Chez-only scene syntax.
-The portable host uses libc FFI for source reads and small reader adapters;
-this does not establish a common filesystem or module-loader API.
+The portable host uses libc FFI for source reads and the common read-string
+operation for scene forms. This does not establish a common filesystem or
+module-loader API.
 
 Benchmarks and reference material
 
@@ -115,3 +118,23 @@ catalog, with explicit runtime availability and differences. Otium definitions c
 source. Prefixed Chez-native bindings remain completable but have no bundled
 reference. Chez records parameters in help; C's describe keeps its namespace/name prefix.
 See docs/repl.md for the interface and its limits.
+
+Common reader implementation
+
+Both runtimes read the fixtures in shared/tests/reader/datums.json and run
+shared/tests/reader/values.scm. Otium files, required modules, REPL input and
+read-string use the Otium reader. Chez implementation libraries and explicitly
+native Scheme keep the host reader. Existing Chez examples needed no binding
+bracket migration; native .ss tests and .sls implementation brackets remain.
+Host-hashtable adapters now construct symbol keys explicitly where needed.
+
+Large-number representation, arithmetic overflow, exact arithmetic and the
+numeric tower remain runtime-specific. Accepted literal notation is shared;
+C's existing range checks remain. Bare true/false are symbols. The C token
+baseline treats ... as a malformed number; it is not a syntax-rules ellipsis
+in Otium source. Neither reader accepts shebangs or Chez reader extensions.
+
+C and Chez generic string get and length count Unicode code points. Native
+Chez string-ref returns a character, while common get returns a string.
+C's raw byte APIs and Chez's character APIs remain distinct. Substring range
+clamping, buffers, and the broader string prelude still need unification.

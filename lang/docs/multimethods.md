@@ -19,8 +19,8 @@ unspecialized arguments as fallbacks. Incomparable best matches are errors.
 
 This draft also proposes concrete names, fixed arity, symbol-only field keys,
 a built-in type inventory, and reload behavior. Those details are reviewable
-choices, not previously settled requirements. Examples use Chez reader syntax;
-they do not assume the C dialect's table literals, keywords, or nil semantics.
+choices, not previously settled requirements. Otium source now uses the common
+reader and nil truth rules described in reader-spec.md. Native implementation examples still use Chez syntax.
 
 There is no inheritance, predicate dispatch, value specialization, method
 combination, next-method call, optional argument, or rest argument support in
@@ -102,9 +102,11 @@ categories are disjoint:
 | `Symbol` | Symbols |
 | `Null` | The empty list |
 | `Pair` | Pairs, including nonempty lists |
-| `Vector` | Ordinary vectors |
+| `Vector` | Otium arrays and ordinary vectors |
 | `Bytevector` | Bytevectors |
-| `Hashtable` | Native Chez hash tables |
+| `Hashtable` | Otium tables and native Chez hash tables |
+| `Nil` | Otium nil (Chez void) |
+| `Keyword` | Interned Otium keywords |
 | `Procedure` | Procedures, including generic functions |
 | `TypeDescriptor` | User-defined and built-in descriptors |
 | `Other` | All remaining values |
@@ -382,8 +384,9 @@ still work. The field API validates symbol keys, while raw table operations
 retain their existing arbitrary-key behavior. `copy` preserves the descriptor
 and makes a fresh field table. Ordinary table construction and `merge` produce
 untyped tables. Writing `nil` removes a field, as it does elsewhere in C Otium;
-`#f` and the empty list remain storable. This differs from Chez, which has no
-separate nil value.
+`#f` and the empty list remain storable. Chez typed-map fields still use native
+hashtables and can store void/nil; ordinary Otium tables on Chez delete nil
+entries. Typed-map deletion semantics remain a separate portability gap.
 
 Descriptors and generics are managed heap objects, traced by both collectors.
 They have stable identity hashes for use as table keys. Generic functions

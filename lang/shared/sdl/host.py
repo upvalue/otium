@@ -27,9 +27,9 @@ def bootstrap(runtime, manifest=DEFAULT_MANIFEST):
     else:
         prefix += '''(define (sdl-abi-error message)
  (let ((c (make-eq-hashtable)))
-  (hashtable-set! c ':type 'ffi-error) (hashtable-set! c ':reason 'abi)
-  (hashtable-set! c ':operation 'sdl-layout) (hashtable-set! c ':message message) (error c)))
-(define (host-read text) (chez/read (chez/open-input-string text)))
+  (hashtable-set! c (string->symbol ":type") 'ffi-error) (hashtable-set! c (string->symbol ":reason") 'abi)
+  (hashtable-set! c (string->symbol ":operation") 'sdl-layout) (hashtable-set! c (string->symbol ":message") message) (error c)))
+(define host-read read-string)
 '''
     prefix += "(define sdl-library-names '(" + ' '.join(map(literal,candidates)) + '))\n'
     prefix += '\n'.join(f'(define {name} {value})' for name,value in data['constant'].items()) + '\n'

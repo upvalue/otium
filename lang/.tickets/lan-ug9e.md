@@ -2,7 +2,7 @@
 id: lan-ug9e
 status: open
 deps: []
-links: []
+links: [lan-lx92, lan-ngkx]
 created: 2026-10-17T05:16:06Z
 type: task
 priority: 3

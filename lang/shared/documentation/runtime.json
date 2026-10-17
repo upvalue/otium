@@ -68,7 +68,8 @@
   "and": {
     "text": "(and expression ...)\nEvaluate left to right until a falsy result; return the last result, or #t with no arguments.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "append": {
@@ -86,13 +87,15 @@
   "array": {
     "text": "(array value ...)\nConstruct a mutable array. [a b c] is array literal syntax.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "array?": {
     "text": "(array? value)\nReturn #t when value is an array, otherwise #f.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "asin": {
@@ -191,7 +194,8 @@
   "copy": {
     "text": "(copy collection)\nReturn a shallow copy of an array or table. (copy nil) returns nil.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "cos": {
@@ -422,7 +426,8 @@
   "get": {
     "text": "(get collection key [default])\nLook up a table key or an array/string index. Missing entries and nil collections return default (nil if omitted). String indexing returns a one-character string.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "handler-bind": {
@@ -441,7 +446,8 @@
   "if": {
     "text": "(if test consequent [alternative])\nEvaluate one branch. Only nil and #f are falsy; omitted alternative returns nil.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "in-ns": {
@@ -502,19 +508,22 @@
   "keys": {
     "text": "(keys table)\nReturn the table's keys in insertion order as an array. nil gives an empty array. This is a collection operation, not Scheme multiple values.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "keyword": {
     "text": "(keyword name)\nIntern a keyword from a string, symbol, or keyword name.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "keyword?": {
     "text": "(keyword? value)\nReturn #t when value is a keyword, otherwise #f.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "lambda": {
@@ -526,8 +535,10 @@
   "length": {
     "text": "(length collection)\nCount list/array elements, table entries, or string/buffer Unicode code points. Improper lists and unsupported types raise an error.",
     "runtimes": [
-      "c"
-    ]
+      "c",
+      "chez"
+    ],
+    "chez": "(length collection)\\nCount list/array elements, table entries, or string Unicode code points. nil has length zero. Improper lists and unsupported types raise an error."
   },
   "let": {
     "text": "(let ((name expression) ...) body ...) / (let loop ((name expression) ...) body ...)\nBind names sequentially: later initializers see earlier bindings. Named let creates a recursive loop.",
@@ -624,13 +635,15 @@
   "nil?": {
     "text": "(nil? value)\nReturn #t when value is nil, otherwise #f.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "not": {
     "text": "(not value)\nReturn #t for nil or #f; every other value, including (), is truthy.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "ns": {
@@ -668,7 +681,8 @@
   "or": {
     "text": "(or expression ...)\nEvaluate left to right until a truthy result; return the last result, or #f with no arguments.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "pair?": {
@@ -680,7 +694,8 @@
   "pop!": {
     "text": "(pop! array)\nRemove and return the last array element, or nil when empty.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "pos?": {
@@ -714,13 +729,15 @@
   "push!": {
     "text": "(push! array value ...)\nAppend values to the array and return it.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "put!": {
     "text": "(put! collection key value ...)\nMutate a table or array and return it. Table values of nil delete keys. Array indices must already exist; use push! to grow an array.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "quasiquote": {
@@ -751,7 +768,8 @@
   "read-string": {
     "text": "(read-string string)\nRead exactly one form without evaluating it. Empty input or trailing forms raise an error.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "remainder": {
@@ -962,13 +980,15 @@
   "table": {
     "text": "(table key value ...)\nConstruct an insertion-ordered table. Requires key/value pairs; a nil value removes its key. {key value ...} is table literal syntax.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "table?": {
     "text": "(table? value)\nReturn #t when value is a table, otherwise #f.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "tan": {
@@ -999,7 +1019,8 @@
   "type": {
     "text": "(type value)\nReturn the value's type as a keyword, such as :int, :string, :array, or :table.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "unquote": {
@@ -1024,14 +1045,17 @@
   "update!": {
     "text": "(update! collection key procedure argument ...)\nReplace the entry with (procedure (get collection key) argument ...). Mutates and returns the collection.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "values": {
     "text": "(values table)\nReturn the table's values in insertion order as an array. nil gives an empty array. This is a collection operation, not Scheme multiple values.",
     "runtimes": [
-      "c"
-    ]
+      "c",
+      "chez"
+    ],
+    "chez": "(values value ...)\\nOne Otium table or nil returns an array of table values. Other calls retain Chez multiple values; use chez/values explicitly at the native boundary."
   },
   "while": {
     "text": "(while test body ...)\nRepeat body while test is truthy, then return nil.",
@@ -1125,6 +1149,42 @@
     "text": "(reset-type! Name)\nReplace this declaration with a fresh descriptor. Existing objects retain their old descriptor.",
     "runtimes": [
       "c",
+      "chez"
+    ]
+  },
+  "keyword->string": {
+    "text": "Return the interned keyword name without its leading colon.",
+    "runtimes": [
+      "chez"
+    ]
+  },
+  "filter": {
+    "text": "Retain elements whose predicate result is neither nil nor #f. Preserve list/array kind.",
+    "runtimes": [
+      "chez"
+    ]
+  },
+  "exists": {
+    "text": "Return the first truthy predicate result, or #f. nil predicate results are false.",
+    "runtimes": [
+      "chez"
+    ]
+  },
+  "for-all": {
+    "text": "Stop at the first nil or #f predicate result; otherwise return the final result. Empty lists return #t.",
+    "runtimes": [
+      "chez"
+    ]
+  },
+  "take": {
+    "text": "Return the first count elements, clamping to the list/array length.",
+    "runtimes": [
+      "chez"
+    ]
+  },
+  "drop": {
+    "text": "Return the elements after count, clamping to the list/array length.",
+    "runtimes": [
       "chez"
     ]
   }

@@ -943,7 +943,8 @@ static void reader_space(reader* input) {
       continue;
     }
     if (byte == ';') {
-      while (input->offset < input->length && input->source[input->offset] != '\n') input->offset++;
+      while (input->offset < input->length && input->source[input->offset] != '\n' &&
+             input->source[input->offset] != '\r') input->offset++;
       continue;
     }
     break;
@@ -968,12 +969,56 @@ static otv read_string(reader* input) {
       return value;
     }
     if (byte != '\\') {
+      if (byte == '\r') {
+        if (input->offset < input->length && input->source[input->offset] == '\n') input->offset++;
+        byte = '\n';
+      }
       buf_byte(&bytes, (char)byte);
       continue;
     }
     if (input->offset == input->length) break;
     byte = (unsigned char)input->source[input->offset++];
     switch (byte) {
+      case 'x': {
+        uint32_t scalar = 0;
+        size_t digits = 0;
+        while (input->offset < input->length && input->source[input->offset] != ';') {
+          unsigned char c = (unsigned char)input->source[input->offset++];
+          unsigned digit = c >= '0' && c <= '9' ? c - '0'
+                           : c >= 'a' && c <= 'f' ? c - 'a' + 10
+                           : c >= 'A' && c <= 'F' ? c - 'A' + 10 : 16;
+          if (digit == 16 || scalar > 0x10ffffu) {
+            buf_free(&bytes);
+            return reader_error(input, "invalid hex escape");
+          }
+          scalar = scalar * 16u + digit;
+          digits++;
+        }
+        if (input->offset == input->length) {
+          input->incomplete = true;
+          buf_free(&bytes);
+          return reader_error(input, "unterminated hex escape");
+        }
+        input->offset++;
+        if (digits == 0 || scalar > 0x10ffffu || (scalar >= 0xd800u && scalar <= 0xdfffu)) {
+          buf_free(&bytes);
+          return reader_error(input, "invalid Unicode scalar");
+        }
+        if (scalar < 0x80u) buf_byte(&bytes, (char)scalar);
+        else {
+          if (scalar < 0x800u) buf_byte(&bytes, (char)(0xc0u | (scalar >> 6)));
+          else {
+            if (scalar < 0x10000u) buf_byte(&bytes, (char)(0xe0u | (scalar >> 12)));
+            else {
+              buf_byte(&bytes, (char)(0xf0u | (scalar >> 18)));
+              buf_byte(&bytes, (char)(0x80u | ((scalar >> 12) & 0x3fu)));
+            }
+            buf_byte(&bytes, (char)(0x80u | ((scalar >> 6) & 0x3fu)));
+          }
+          buf_byte(&bytes, (char)(0x80u | (scalar & 0x3fu)));
+        }
+        break;
+      }
       case 'n': buf_byte(&bytes, '\n'); break;
       case 't': buf_byte(&bytes, '\t'); break;
       case 'r': buf_byte(&bytes, '\r'); break;
@@ -995,6 +1040,25 @@ static bool token_starts_number(const char* token, size_t length) {
   return i < length && (isdigit((unsigned char)token[i]) || (token[i] == '.' && i + 1 < length));
 }
 
+static bool decimal_token(const char* token, size_t length) {
+  size_t i = token[0] == '+' || token[0] == '-' ? 1 : 0;
+  size_t digits = 0;
+  while (i < length && isdigit((unsigned char)token[i])) { i++; digits++; }
+  if (i < length && token[i] == '.') {
+    i++;
+    while (i < length && isdigit((unsigned char)token[i])) { i++; digits++; }
+  }
+  if (digits == 0) return false;
+  if (i < length && (token[i] == 'e' || token[i] == 'E')) {
+    i++;
+    if (i < length && (token[i] == '+' || token[i] == '-')) i++;
+    size_t start = i;
+    while (i < length && isdigit((unsigned char)token[i])) i++;
+    if (i == start) return false;
+  }
+  return i == length;
+}
+
 static otv read_atom(reader* input) {
   size_t start = input->offset;
   while (input->offset < input->length && !delimiter((unsigned char)input->source[input->offset]))
@@ -1004,12 +1068,10 @@ static otv read_atom(reader* input) {
   if (length == 0) return reader_error(input, "expected a value");
   if (length == 3 && memcmp(token, "nil", 3) == 0) return ot_nil;
   if ((length == 2 && memcmp(token, "#t", 2) == 0) ||
-      (length == 5 && memcmp(token, "#true", 5) == 0) ||
-      (length == 4 && memcmp(token, "true", 4) == 0))
+      (length == 5 && memcmp(token, "#true", 5) == 0))
     return ot_true;
   if ((length == 2 && memcmp(token, "#f", 2) == 0) ||
-      (length == 6 && memcmp(token, "#false", 6) == 0) ||
-      (length == 5 && memcmp(token, "false", 5) == 0))
+      (length == 6 && memcmp(token, "#false", 6) == 0))
     return ot_false;
   if (token[0] == '#') return reader_error(input, "reserved # token");
   if (token[0] == ':') {
@@ -1036,6 +1098,10 @@ static otv read_atom(reader* input) {
         return ot_make_int(narrowed);
       }
     } else {
+      if (!decimal_token(token, length)) {
+        buf_free(&text);
+        return reader_error(input, "invalid number");
+      }
       intmax_t integer = strtoimax(text.data, &end, 10);
       if (errno == 0 && end == text.data + length && strchr(text.data, '.') == NULL &&
           strchr(text.data, 'e') == NULL && strchr(text.data, 'E') == NULL) {
@@ -1083,6 +1149,10 @@ static otv read_sequence(reader* input, char closing, otv prefix) {
       if (tail == ot_nil) return reader_error(input, "dot without a preceding value");
       input->offset++;
       reader_space(input);
+      if (input->offset == input->length) {
+        input->incomplete = true;
+        return reader_error(input, "unclosed dotted pair");
+      }
       item = read_form(input);
       if (item == OT_UNWIND) return item;
       ot_pair_obj* pair = as_pair(tail);
@@ -5332,12 +5402,19 @@ static otv nat_read_string(ots* state, otv* args, int argc) {
   const char* bytes;
   size_t length;
   ot_string_bytes(args[0], &bytes, &length);
-  reader input = {.state = state, .source = bytes, .length = length, .name = "<string>"};
+  /* Reading allocates. Keep source bytes outside the moving heap. */
+  buf source = {0};
+  buf_write(&source, bytes, length);
+  reader input = {.state = state, .source = source.data, .length = length, .name = "<string>"};
   otv value = read_form(&input);
-  if (value == OT_UNDEFINED) return ot_raise(state, "read-string: empty input");
-  if (value == OT_UNWIND) return value;
-  reader_space(&input);
-  if (input.offset != input.length) return ot_raise(state, "read-string: trailing input");
+  if (value != OT_UNWIND) {
+    if (value == OT_UNDEFINED) value = reader_error(&input, "read-string: empty input");
+    else {
+      reader_space(&input);
+      if (input.offset != input.length) value = reader_error(&input, "read-string: trailing input");
+    }
+  }
+  buf_free(&source);
   return value;
 }
 

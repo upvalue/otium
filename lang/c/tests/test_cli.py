@@ -54,7 +54,7 @@ with tempfile.TemporaryDirectory(prefix="otium-shebang-") as directory:
         script.write(f"#!{os.path.abspath(otium)} --no-project\n(println \"shebang-ok\")\n")
     os.chmod(executable, 0o755)
     direct = subprocess.run([executable], text=True, capture_output=True, check=False)
-    expect(direct, 0, stdout="shebang-ok\n")
+    expect(direct, 1, stderr="reserved # token")
 
     misplaced = os.path.join(directory, "misplaced.scm")
     with open(misplaced, "w", encoding="utf-8") as script:

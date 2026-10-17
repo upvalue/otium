@@ -35,9 +35,13 @@ Forms and semantics
 Chez environment initialized with the explicit exports of (otium core),
 plus Otium runtime forms and conditions. The binding list lives in
 chez/otium/core.sls; adding an API to Chez does not add an unqualified Otium
-binding. Definitions and lexical scope use Chez semantics. Collections,
-numbers, equality, truthiness, reader, evaluation order, and FFI are Chez's.
-Otium macros expand before Chez compiles each form. There is no distinct nil value.
+binding. Definitions, lexical scope, numbers, evaluation order, and native
+FFI use Chez semantics. Otium source uses (otium reader), with constructor
+sugar for growable arrays and insertion-ordered tables. Keywords are interned
+records; nil is Chez void. Otium branches and predicate operations treat both
+nil and #f as false. Native Chez code retains its reader and truth rules.
+Otium macros expand before Chez compiles each form. See
+../docs/reader-implementation.md for the source boundary and validation.
 Use vectors and hash tables directly. Square brackets delimit ordinary lists.
 
 The default core includes Scheme control forms, arithmetic, lists, strings,
@@ -152,10 +156,12 @@ Chez exceptions become error conditions before Otium handlers run. Their
 message and irritants become :message and :data; diagnostic wording remains
 native. Explicitly raised non-string values retain their identity.
 
-The existing value/reader differences still apply: there is no distinct nil;
-missing values and an unhandled signal return #f, and compute-restarts returns
-a vector. The shared condition tests use small collection adapters, not an
-alternate exception API. Table/array literals remain a portability gap.
+The condition representation still uses native hash tables and vectors.
+Missing condition fields and an unhandled signal return #f; compute-restarts
+returns a vector. These native representation differences remain even though
+Otium now has distinct nil, table and array values. Condition accessors also
+accept Otium tables with keyword keys. Predicates returning nil decline both
+handlers and catch clauses. The shared condition tests retain native adapters.
 
 Otium macros expand inside handlers, catches, restart clauses, and cleanup.
 Multiple values are preserved. Chez continuation reentry restores dynamic
@@ -186,7 +192,7 @@ already compiled functions; use a stable alias for a namespace. Each created
 namespace retains its Chez environment for the life of the process.
 
 This is a single-threaded development runtime. It has no atomic reload,
-dependency tracking, file watcher, state migration, custom reader, or memory
+dependency tracking, file watcher, state migration, or memory
 limits. Foreign libraries use chez/load-shared-object and chez/foreign-procedure
 directly. There is no Otium C embedding API. Tests include a Unix libc FFI
 check and repeated reloads, but do not establish a memory-retention bound.

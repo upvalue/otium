@@ -1,0 +1,175 @@
+{
+  "date": "2026-10-17T15:16:09.078450+00:00",
+  "platform": "macOS-15.6.1-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "chez_version": "10.4.1",
+  "c_runtime": "/Users/me/code/otium/lang/c/bin/arm64-darwin/otium",
+  "build_label": "unspecified",
+  "runs": 3,
+  "warmups": 1,
+  "method": "Fresh processes, alternating engine order; wall includes startup and compilation; work excludes setup, includes GC. No explicit collection. All results checked.",
+  "benchmarks": {
+    "tail-loop": {
+      "c-runtime": {
+        "samples": [
+          {
+            "wall_ms": 267.738167,
+            "work_ms": 263.098
+          },
+          {
+            "wall_ms": 279.784,
+            "work_ms": 275.275
+          },
+          {
+            "wall_ms": 263.845958,
+            "work_ms": 259.135
+          }
+        ],
+        "wall_ms": {
+          "median": 267.738167,
+          "min": 263.845958,
+          "max": 279.784
+        },
+        "work_ms": {
+          "median": 263.098,
+          "min": 259.135,
+          "max": 275.275
+        }
+      },
+      "chez": {
+        "samples": [
+          {
+            "wall_ms": 78.872125,
+            "work_ms": 2.397
+          },
+          {
+            "wall_ms": 84.689959,
+            "work_ms": 2.411
+          },
+          {
+            "wall_ms": 80.983917,
+            "work_ms": 2.424
+          }
+        ],
+        "wall_ms": {
+          "median": 80.983917,
+          "min": 78.872125,
+          "max": 84.689959
+        },
+        "work_ms": {
+          "median": 2.411,
+          "min": 2.397,
+          "max": 2.424
+        }
+      }
+    },
+    "fib-28": {
+      "c-runtime": {
+        "samples": [
+          {
+            "wall_ms": 89.504916,
+            "work_ms": 84.95
+          },
+          {
+            "wall_ms": 90.183792,
+            "work_ms": 85.895
+          },
+          {
+            "wall_ms": 90.024292,
+            "work_ms": 85.486
+          }
+        ],
+        "wall_ms": {
+          "median": 90.024292,
+          "min": 89.504916,
+          "max": 90.183792
+        },
+        "work_ms": {
+          "median": 85.486,
+          "min": 84.95,
+          "max": 85.895
+        }
+      },
+      "chez": {
+        "samples": [
+          {
+            "wall_ms": 79.956834,
+            "work_ms": 1.274
+          },
+          {
+            "wall_ms": 80.576584,
+            "work_ms": 1.298
+          },
+          {
+            "wall_ms": 80.430166,
+            "work_ms": 1.283
+          }
+        ],
+        "wall_ms": {
+          "median": 80.430166,
+          "min": 79.956834,
+          "max": 80.576584
+        },
+        "work_ms": {
+          "median": 1.283,
+          "min": 1.274,
+          "max": 1.298
+        }
+      }
+    },
+    "list-allocation": {
+      "c-runtime": {
+        "samples": [
+          {
+            "wall_ms": 240.550875,
+            "work_ms": 235.634
+          },
+          {
+            "wall_ms": 243.83475,
+            "work_ms": 239.088
+          },
+          {
+            "wall_ms": 264.48325,
+            "work_ms": 254.108
+          }
+        ],
+        "wall_ms": {
+          "median": 243.83475,
+          "min": 240.550875,
+          "max": 264.48325
+        },
+        "work_ms": {
+          "median": 239.088,
+          "min": 235.634,
+          "max": 254.108
+        }
+      },
+      "chez": {
+        "samples": [
+          {
+            "wall_ms": 79.699792,
+            "work_ms": 1.79
+          },
+          {
+            "wall_ms": 84.768167,
+            "work_ms": 1.909
+          },
+          {
+            "wall_ms": 82.454458,
+            "work_ms": 1.856
+          }
+        ],
+        "wall_ms": {
+          "median": 82.454458,
+          "min": 79.699792,
+          "max": 84.768167
+        },
+        "work_ms": {
+          "median": 1.856,
+          "min": 1.79,
+          "max": 1.909
+        }
+      }
+    }
+  }
+}

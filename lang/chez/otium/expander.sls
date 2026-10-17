@@ -1,7 +1,7 @@
 (library (otium expander)
   (export make-expander expander-head expander-expression expander-definition
           expander-core-form?)
-  (import (chezscheme))
+  (import (chezscheme) (only (otium values) keyword?))
 
   (define-record-type (expander make-expander-record expander?)
     (fields head expression definition))
@@ -190,7 +190,7 @@
 
     (define (expression input scope)
       (let ([form (head input scope #f)])
-        (if (not (pair? form)) form
+        (if (not (pair? form)) (if (or (keyword? form) (eq? form (void))) (list 'quote form) form)
             (let ([operator (car form)])
               (shape! form 1 #f)
               (if (and (symbol? operator) (memq operator scope))
@@ -213,6 +213,46 @@
                 [(if)
                  (shape! form 3 4)
                  (cons operator (expressions (cdr form) scope))]
+                [(case)
+                 (shape! form 3 #f)
+                 (cons 'case (cons (expression (cadr form) scope)
+                   (map (lambda (clause)
+                          (shape! clause 2 #f)
+                          (cons (car clause) (expressions (cdr clause) scope))) (cddr form))))]
+                [(case-lambda)
+                 (cons 'case-lambda
+                   (map (lambda (clause)
+                          (shape! clause 2 #f)
+                          (cons (car clause)
+                            (body (cdr clause) (append (parameters (car clause)) scope)))) (cdr form)))]
+                [(let-values let*-values)
+                 (shape! form 3 #f)
+                 (let loop ([bs (cadr form)] [initial scope] [inner scope] [out '()])
+                   (if (null? bs)
+                       (cons operator (cons (reverse out) (body (cddr form) inner)))
+                       (begin
+                         (shape! (car bs) 2 2)
+                         (let ([names (parameters (caar bs))])
+                           (loop (cdr bs)
+                             (if (eq? operator 'let*-values) (append names initial) initial)
+                             (append names inner)
+                             (cons (list (caar bs) (expression (cadar bs) initial)) out))))))]
+                [(parameterize)
+                 (shape! form 3 #f)
+                 (cons operator (cons (map (lambda (b) (shape! b 2 2) (expressions b scope)) (cadr form))
+                                      (body (cddr form) scope)))]
+                [(when unless)
+                 (shape! form 3 #f)
+                 (cons operator (expressions (cdr form) scope))]
+                [(do)
+                 (shape! form 3 #f)
+                 (let* ([bs (cadr form)] [names (map car bs)] [inner (append names scope)])
+                   (cons 'do
+                     (cons (map (lambda (b)
+                                  (shape! b 2 3)
+                                  (append (list (car b) (expression (cadr b) scope))
+                                          (expressions (cddr b) inner))) bs)
+                           (cons (expressions (caddr form) inner) (expressions (cdddr form) inner)))))]
                 [(begin and or)
                  (cons operator (expressions (cdr form) scope))]
                 [(set!)

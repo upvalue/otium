@@ -31,17 +31,29 @@
     hashtable-keys hashtable-entries equal-hash string-hash symbol-hash
     values call-with-values call/cc call-with-current-continuation dynamic-wind
     make-parameter parameterize void
-    display print println newline)
-  (import (except (chezscheme) display newline)
+    display print println newline
+    read-string keyword keyword? keyword->string nil? array array? table table?
+    get put! push! pop! keys copy take drop update! type)
+  (import (except (chezscheme) display newline if and or cond when unless do not filter exists for-all
+                          length reverse for-each map apply set-car! set-cdr! values)
+          (otium truth) (otium reader)
+          (rename (otium values) (collection-length length) (collection-reverse reverse)
+                  (collection-for-each for-each) (collection-map map) (collection-apply apply)
+                  (frozen-set-car! set-car!) (frozen-set-cdr! set-cdr!))
+          (prefix (only (chezscheme) values) host:)
           (prefix (only (chezscheme) display newline) host:))
 
   (define (display . objects)
     (let loop ([objects objects] [first? #t])
       (unless (null? objects)
         (unless first? (host:display " "))
-        (host:display (car objects))
+        (otium-display (car objects))
         (loop (cdr objects) #f)))
     #f)
+
+  (define (values . xs)
+    (if (and (= (length xs) 1) (or (table? (car xs)) (nil? (car xs))))
+        (table-values (car xs)) (apply host:values xs)))
 
   (define print display)
 

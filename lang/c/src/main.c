@@ -138,12 +138,6 @@ static int run_file(ots* state, const char* path) {
   }
   const char* program = source;
   size_t program_length = length;
-  if (program_length >= 2 && program[0] == '#' && program[1] == '!') {
-    const char* newline = memchr(program, '\n', program_length);
-    size_t skipped = newline == NULL ? program_length : (size_t)(newline - program) + 1u;
-    program += skipped;
-    program_length -= skipped;
-  }
   otv result;
   bool ok = ot_eval_src(state, program, program_length, path, &result);
   ot_host_free(source);

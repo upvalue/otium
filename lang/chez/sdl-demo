@@ -14,4 +14,4 @@ if [ -z "${SDL3_LIBRARY:-}" ]; then
   export SDL3_LIBRARY
 fi
 exec "${CHEZ:-chez}" --libdirs "$root:$root/.deps" --script "$root/sdl/main.ss" \
-  --scene-root "$root/examples" "$@"
+  --scene-root "$root/../examples/chez" "$@"

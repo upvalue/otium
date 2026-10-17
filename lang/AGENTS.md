@@ -16,9 +16,15 @@ setup, current coverage, and escape hatches.
 
 ## Runtime layout
 
-`c/` owns the C runtime, build, tests, examples, and implementation notes.
-`chez/` owns Otium on Chez Scheme, including SDL3 demos and its tests.
-`benchmarks/` holds comparisons between runtimes. Keep runtime-specific work
-inside its directory; Chez uses Chez values and semantics and is not required
-to pass the C dialect conformance suite. Root `make test` tests both runtimes.
-Use `make test-c`, `make test-chez`, or `make test-sdl` for focused checks.
+`c/` owns the C runtime, build, tests, and implementation notes.
+`chez/` owns Otium on Chez Scheme, including its SDL host and tests.
+`shared/` owns runtime-independent native components and their dependencies.
+`examples/c/` and `examples/chez/` hold examples for each dialect.
+`benchmarks/` owns workloads, runners, and results; `benchmarks/c/` targets C,
+and `benchmarks/r7rs/` holds C-dialect ports plus the upstream Scheme suite.
+The native collector harness stays in `c/benchmarks/`. Track non-FFI
+portability blockers in `GAPS.txt`; runtime-specific placement is not a goal.
+`docs/` holds language-level documentation. Chez uses Chez values and semantics
+and is not required to pass the C dialect conformance suite. Root `make test`
+tests both runtimes and their shared REPL. Use `make test-c`, `make test-chez`,
+`make test-repl`, or `make test-sdl` for focused checks.

@@ -1,4 +1,22 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec "${CHEZ:-chez}" --libdirs "$root" --script "$root/main.ss" "$@"
+interactive=yes
+skip=no
+for argument do
+  if [ "$skip" = yes ]; then skip=no; continue; fi
+  case "$argument" in
+    -L) skip=yes ;;
+    --repl) interactive=yes ;;
+    *) interactive=no ;;
+  esac
+done
+if [ "$interactive" = yes ] && [ -t 0 ] && [ -t 1 ]; then
+  platform=$(uname -m)-$(uname -s | tr '[:upper:]' '[:lower:]')
+  case $(uname -s) in Darwin) extension=dylib ;; *) extension=so ;; esac
+  make -s -C "$root/../shared" "build/$platform/libotium-line.$extension"
+  OTIUM_LINE_LIBRARY="$root/../shared/build/$platform/libotium-line.$extension"
+  export OTIUM_LINE_LIBRARY
+fi
+exec "${CHEZ:-chez}" --compile-imported-libraries \
+  --libdirs "$root" --script "$root/main.ss" "$@"

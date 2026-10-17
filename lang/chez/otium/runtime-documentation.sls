@@ -1,0 +1,18 @@
+;; Generated from shared/documentation/runtime.json.
+(library (otium runtime-documentation)
+  (export runtime-documentation)
+  (import (chezscheme))
+  (define (runtime-documentation name)
+    (let ([entry (assq name entries)]) (if entry (cdr entry) "")))
+  (define entries '(
+    (defmacro . "(defmacro name parameters [\"docstring\"] body ...)\nDefine an unhygienic Otium macro. It receives unevaluated argument datums and returns replacement code; use gensym for fresh names.")
+    (describe . "(describe 'name)\nReturn documentation for a binding or runtime form. Definition docstrings take precedence over the shared runtime reference.")
+    (eval . "(eval form)\nOtium override: expand Otium macros and evaluate form in the namespace where this eval binding was installed. Loader directives and definitions participate in Otium namespace tracking. The caller's lexical bindings are not captured.")
+    (macro? . "(macro? value)\nReturn #t for an Otium macro value, otherwise #f. Macros receive unevaluated argument datums during expansion and are not ordinary procedures.")
+    (macroexpand . "(macroexpand form)\nRepeatedly expand Otium macros at the head of form until its head is no longer a macro. This may run transformer side effects, but does not evaluate the resulting code or traverse subforms.")
+    (macroexpand-1 . "(macroexpand-1 form)\nExpand a head Otium macro once in the defining namespace of this binding, or return form unchanged. Do not recursively traverse subforms or evaluate the result.")
+    (ns . "(ns name)\nSelect a namespace.")
+    (require . "(require name :as alias :refer (names) :reload)\nLoad a namespace and optionally import its definitions.")
+    (live . "(live 'name)\nReturn a procedure that looks up name on every call in its defining namespace. Saved callbacks then follow redefinition and module reload.")
+    (defonce . "(defonce name [\"docstring\"] expression)\nInitialize a binding once, preserving its value and documentation on reload.")
+  )))

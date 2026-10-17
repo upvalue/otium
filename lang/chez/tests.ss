@@ -61,10 +61,10 @@
 (run '(define (local) 2))
 (check "local callback follows redefinition" 2 (run '(local-callback)))
 (run '(defonce initialized #f))
-(run '(defonce initialized (error 'test "must not run")))
+(run '(defonce initialized (error "must not run")))
 (check "defonce preserves false" #f (run 'initialized))
 (check "failed defonce initializer" #t
-  (fails? (lambda () (run '(defonce retry (error 'test "failed"))))))
+  (fails? (lambda () (run '(defonce retry (error "failed"))))))
 (run '(defonce retry 42))
 (check "failed initializer can be retried" 42 (run 'retry))
 
@@ -89,14 +89,14 @@
     (run '(require tail))
     (run '(tail/loop 100000 0))))
 
-(source "broken" '((ns broken) (define installed 1) (error 'broken "failure")))
+(source "broken" '((ns broken) (define installed 1) (error "failure")))
 (check "load reports failure" #t (fails? (lambda () (run '(require broken)))))
 (check "failed load restores namespace" 'user (namespace-name (current-namespace)))
 (check "successful forms before failure remain" 1 (namespace-ref 'broken 'installed))
 (source "broken" '((ns broken) (define installed 2)))
 (run '(require broken))
 (check "failed load can be retried" 2 (run 'broken/installed))
-(source "broken" '((ns broken) (define installed 3) (error 'broken "reload failure")))
+(source "broken" '((ns broken) (define installed 3) (error "reload failure")))
 (check "reload reports failure" #t
   (fails? (lambda () (run '(require broken :reload)))))
 (check "failed reload leaves earlier updates visible" 3 (run 'broken/installed))

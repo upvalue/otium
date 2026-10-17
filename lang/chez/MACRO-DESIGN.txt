@@ -10,7 +10,7 @@ and applications. On Chez, an Otium expansion pass should run before Chez
 expansion and compilation. Chez syntax remains available through explicit
 platform adapters and a bounded native expression escape.
 
-The starting contract is c/agent-docs/spec.md, section 6, and the implementation
+The starting contract is docs/language.md, section 6, and the implementation
 in c/prelude/expander.scm. Port the protocol and the relevant traversal rules;
 do not load that file unchanged. It assumes C dialect forms, sequential let,
 nil, and C runtime helpers. Chez continues to use Chez values and the existing
@@ -299,7 +299,7 @@ Source references and feasibility checks
 
 The current behavior is documented in chez/NOTES.txt and implemented in
 chez/otium/runtime.sls. C's macro contract and implementation are in
-c/agent-docs/spec.md, c/prelude/expander.scm, and c/tests/otium/07-macros.scm.
+docs/language.md, c/prelude/expander.scm, and c/tests/otium/07-macros.scm.
 
 Chez native syntax and binding facilities are documented at:
 https://www.scheme.com/csug8/syntax.html

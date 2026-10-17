@@ -3,7 +3,7 @@ Otium on Chez
 Run from the repository root with Chez Scheme installed:
 
   chez/run --help
-  chez/run -L chez/examples
+  chez/run -L examples/chez
   chez/test
 
 Set CHEZ to the Scheme executable if it is named scheme or chezscheme.
@@ -18,7 +18,7 @@ At the prompt:
   (define callback (live 'counter/tick!))
   (callback)
 
-Edit the increment in examples/demo/counter.scm, then evaluate:
+Edit the increment in examples/chez/demo/counter.scm, then evaluate:
 
   (require demo.counter :as counter :reload)
   (callback)
@@ -27,7 +27,7 @@ The existing callback uses the new function. The vector holding the count
 survives because defonce skips initialization of an existing definition.
 For a scripted demonstration:
 
-  chez/run -L chez/examples chez/examples/demo.scm
+  chez/run -L examples/chez examples/chez/demo.scm
 
 Forms and semantics
 
@@ -157,3 +157,9 @@ SDL3 demos
 See sdl/USAGE.txt for hardware-accelerated orbit and particle demos using
 chez-sdl3. The separate sdl-demo host watches scene files and reloads drawing
 code between frames. The Chez runtime's ordinary REPL still has no watcher.
+
+REPL editing
+
+The terminal REPL shares Bestline with the C runtime. Ctrl-X Ctrl-E opens
+$VISUAL or $EDITOR and returns the edited input to the prompt. See
+docs/repl.md for shortcuts, history, and build details.

@@ -8,7 +8,8 @@
 
   (define core-forms
     '(quote quasiquote unquote unquote-splicing if begin lambda define set!
-      let let* letrec letrec* and or cond defmacro ns require defonce))
+      let let* letrec letrec* and or cond defmacro ns require defonce
+      handler-bind try restart-case unwind-protect defer))
 
   (define (expander-core-form? name) (and (memq name core-forms) #t))
 
@@ -33,7 +34,7 @@
   (define (definition-name form)
     (shape! form 3 #f)
     (let ([target (cadr form)])
-      (cond [(symbol? target) (shape! form 3 3) target]
+      (cond [(symbol? target) (shape! form 3 4) target]
             [(and (pair? target) (symbol? (car target))) (car target)]
             [else (error 'define "invalid definition" form)])))
 
@@ -59,9 +60,16 @@
         (if (pair? (cadr form))
             (cons 'define
               (cons (cadr form)
-                (body (cddr form)
+                (body (let ([forms (cddr form)])
+                        (if (and (pair? forms) (string? (car forms)) (pair? (cdr forms)))
+                            (cdr forms) forms))
                   (append (parameters (cdadr form)) (cons name scope)))))
-            `(define ,name ,(expression (caddr form) (cons name scope))))))
+            (let ([values (cddr form)])
+              (when (and (pair? values) (string? (car values)) (pair? (cdr values)))
+                (set! values (cdr values)))
+              (unless (and (pair? values) (null? (cdr values)))
+                (error 'define "expected one value expression after optional docstring" form))
+              `(define ,name ,(expression (car values) (cons name scope)))))))
 
     (define (body forms scope)
       ;; Chez internal definitions bind throughout the body, including earlier
@@ -140,6 +148,45 @@
             [else (expressions clause scope)]))
         clauses))
 
+    (define (handler-form form scope)
+      (shape! form 3 #f)
+      (unless (list? (cadr form)) (error 'handler-bind "invalid bindings" form))
+      (cons 'handler-bind
+        (cons (map (lambda (binding)
+                     (shape! binding 2 2)
+                     (expressions binding scope)) (cadr form))
+              (body (cddr form) scope))))
+
+    (define (try-form form scope)
+      (let split ([rest (reverse (cdr form))] [clauses '()])
+        (if (and (pair? rest) (pair? (car rest)) (eq? (caar rest) 'catch))
+            (let ([clause (car rest)])
+              (shape! clause 3 #f)
+              (shape! (cadr clause) 2 2)
+              (unless (symbol? (cadadr clause)) (error 'try "invalid catch variable" clause))
+              (split (cdr rest)
+                (cons `(catch (,(expression (caadr clause) scope) ,(cadadr clause))
+                         ,@(body (cddr clause) (cons (cadadr clause) scope))) clauses)))
+            (begin
+              (when (exists (lambda (x) (and (pair? x) (eq? (car x) 'catch))) rest)
+                (error 'try "catch clauses must follow the body" form))
+              (cons 'try (append (body (reverse rest) scope) clauses))))))
+
+    (define (restart-form form scope)
+      (shape! form 2 #f)
+      (cons 'restart-case
+        (cons (expression (cadr form) scope)
+          (map (lambda (clause)
+                 (shape! clause 3 #f)
+                 (unless (symbol? (car clause)) (error 'restart-case "invalid name" clause))
+                 (let* ([description? (string? (cadr clause))]
+                        [rest (if description? (cddr clause) (cdr clause))])
+                   (when description? (shape! clause 4 #f))
+                   (append (if description? (list (car clause) (cadr clause)) (list (car clause)))
+                     (list (car rest))
+                     (body (cdr rest) (append (parameters (car rest)) scope)))))
+               (cddr form)))))
+
     (define (expression input scope)
       (let ([form (head input scope #f)])
         (if (not (pair? form)) form
@@ -171,6 +218,12 @@
                  (shape! form 3 3)
                  (unless (symbol? (cadr form)) (error 'set! "expected name" form))
                  (list 'set! (cadr form) (expression (caddr form) scope))]
+                [(handler-bind) (handler-form form scope)]
+                [(try) (try-form form scope)]
+                [(restart-case) (restart-form form scope)]
+                [(unwind-protect defer)
+                 (shape! form 2 #f)
+                 (cons operator (expressions (cdr form) scope))]
                 [(cond) (cons 'cond (conditional (cdr form) scope))]
                 [(define)
                  (error 'macroexpand

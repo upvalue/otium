@@ -1,7 +1,7 @@
 (library (otium runtime)
   (export evaluate load-source require-namespace current-namespace namespace-name
           load-path namespace-ref namespace-set! repl)
-  (import (chezscheme) (otium expander))
+  (import (chezscheme) (prefix (otium conditions) ot:) (otium expander) (otium line-edit) (otium runtime-documentation))
 
   (define-record-type otium-macro
     (fields transformer namespace name))
@@ -76,10 +76,22 @@
   (define (find-namespace name)
     (unless (symbol? name) (error 'ns "expected a symbol" name))
     (or (hashtable-ref namespaces name #f)
-        (let* ([env (copy-environment (scheme-environment))]
+        (let* ([env (copy-environment
+                      (environment '(except (chezscheme) error error? condition-message exit)
+                        '(only (otium conditions)
+                           error signal condition-type condition-message error? type-pred
+                           define-condition condition-of-type? handler-bind try restart-case
+                           invoke-restart compute-restarts find-restart restart-name
+                           restart-description unwind-protect defer quit exit)))]
                [space (make-namespace name env (make-eq-hashtable)
                         (make-eq-hashtable) #f #f #f)])
           (hashtable-set! namespaces name space)
+          (define-top-level-value 'chez/error error env)
+          (define-top-level-value 'chez/condition-message condition-message env)
+          (define-top-level-value 'describe
+            (lambda (name)
+              (unless (symbol? name) (error 'describe "expected a symbol" name))
+              (binding-documentation space name)) env)
           (define-top-level-value 'macro? otium-macro? env)
           (for-each
             (lambda (entry)
@@ -201,7 +213,10 @@
           [else (error 'require "invalid options" rest)]))))
 
   (define (evaluate form)
-    (with-expansion (lambda () (evaluate-top form))))
+    (ot:call-with-otium-control
+      (lambda ()
+        (ot:call-with-native-conditions
+          (lambda () (with-expansion (lambda () (evaluate-top form))))))))
 
   (define (evaluate-top input)
     (let* ([space (current-namespace)] [env (namespace-environment space)]
@@ -222,10 +237,11 @@
                  [(null? (cdr forms)) (evaluate (car forms))]
                  [else (evaluate (car forms)) (loop (cdr forms))]))]
         [(and (pair? form) (eq? (car form) 'defonce))
-         (unless (and (list? form) (= (length form) 3) (symbol? (cadr form)))
-           (error 'defonce "expected (defonce name expression)" form))
+         (unless (and (list? form) (<= 3 (length form) 4) (symbol? (cadr form))
+                      (or (= (length form) 3) (string? (caddr form))))
+           (error 'defonce "expected (defonce name [docstring] expression)" form))
          (unless (hashtable-contains? (namespace-definitions space) (cadr form))
-           (evaluate `(define ,(cadr form) ,(caddr form))))]
+           (evaluate `(define ,@(cdr form))))]
         [(and (pair? form) (eq? (car form) 'defmacro))
          (unless (and (list? form) (>= (length form) 4) (symbol? (cadr form)))
            (error 'defmacro "expected (defmacro name parameters body ...)" form))
@@ -235,10 +251,13 @@
            (error 'defmacro "definition would replace an import" (cadr form)))
          (let ([transformer
                 (eval ((expander-expression expander)
-                        `(lambda ,(caddr form) ,@(cdddr form)) '()) env)])
+                        `(lambda ,(caddr form)
+                           ,@(let ([body (cdddr form)])
+                               (if (and (string? (car body)) (pair? (cdr body)))
+                                   (cdr body) body))) '()) env)])
            (define-top-level-value (cadr form)
              (make-otium-macro transformer space (cadr form)) env)
-           (hashtable-set! (namespace-definitions space) (cadr form) #t))]
+           (hashtable-set! (namespace-definitions space) (cadr form) (definition-help form)))]
         [else
          (let ([definition
                 (and (pair? form) (memq (car form) '(define define-syntax))
@@ -255,25 +274,81 @@
                    [else ((expander-expression expander) form '())]) env))
              (lambda results
                (when definition
-                 (hashtable-set! (namespace-definitions space) definition #t))
+                 (hashtable-set! (namespace-definitions space) definition (definition-help form)))
                (apply values results))))])))
 
+  (define (definition-help form)
+    (let* ([macro? (eq? (car form) 'defmacro)]
+           [head (cadr form)]
+           [parameters (cond [macro? (caddr form)] [(pair? head) (cdr head)] [else #f])]
+           [body (if macro? (cdddr form) (cddr form))]
+           [doc (if (and (pair? body) (string? (car body)) (pair? (cdr body)))
+                    (car body) "")])
+      (string-append
+        (if parameters
+            (format "~a parameters: ~s. " (if macro? "Macro" "Procedure") parameters)
+            "")
+        doc)))
+
+  (define (binding-documentation space name)
+    (let* ([import (hashtable-ref (namespace-imports space) name #f)]
+           [owner (if import (find-namespace (car import)) space)]
+           [member (if import (cdr import) name)]
+           [definitions (namespace-definitions owner)])
+      (if (hashtable-contains? definitions member)
+          (hashtable-ref definitions member "")
+          (runtime-documentation member))))
+
+  (define (repl-bindings)
+    (let ([space (current-namespace)])
+      (map (lambda (name)
+             (cons (symbol->string name) (binding-documentation space name)))
+           (append '(ns require defonce defmacro)
+                   (environment-symbols (namespace-environment space))))))
+
   (define (repl)
-    (let loop ()
-      (display (namespace-name (current-namespace)))
-      (display "> ")
-      (flush-output-port (current-output-port))
-      (let ([continue?
-             (guard (c [else (display-condition c (current-error-port))
-                            (newline (current-error-port)) #t])
-               (let ([form (read)])
-                 (if (eof-object? form) #f
-                     (begin
-                       (call-with-values (lambda () (evaluate form))
-                         (lambda values
-                           (for-each (lambda (v) (unless (eq? v (void)) (pretty-print v)))
-                             values)))
-                       #t))))])
-        (when continue? (loop)))))
+    (let* ([editing? (line-editor-available?)]
+           [continuation? #f]
+           [prompt (lambda ()
+                     (let ([text (if continuation? "..> "
+                                     (string-append
+                                       (symbol->string (namespace-name (current-namespace)))
+                                       "> "))])
+                       (set! continuation? #t)
+                       text))]
+           [input (if editing? (make-line-input-port prompt repl-bindings) (current-input-port))])
+      (when editing?
+        (display "otium repl - ^C interrupts, ^D exits, ^X ^E opens $EDITOR, Tab completes, ,help for help\n"))
+      (dynamic-wind
+        (lambda () (void))
+        (lambda ()
+          (let loop ()
+            (set! continuation? #f)
+            (unless editing?
+              (display (namespace-name (current-namespace)))
+              (display "> ")
+              (flush-output-port (current-output-port)))
+            (let ([continue?
+                   (guard (c [(and (ot:control-condition? c) (eq? (ot:control-kind c) 'exit))
+                              (raise c)]
+                             [else
+                              (display-condition c (current-error-port))
+                              (newline (current-error-port))
+                              (when editing?
+                                (close-port input)
+                                (set! input (make-line-input-port prompt repl-bindings)))
+                              #t])
+                     (let ([form (read input)])
+                       (if (eof-object? form) #f
+                           (begin
+                             (call-with-values (lambda () (evaluate form))
+                               (lambda values
+                                 (for-each
+                                   (lambda (v) (unless (eq? v (void)) (pretty-print v)))
+                                   values)))
+                             #t))))])
+              (when continue? (loop)))))
+        (lambda ()
+          (when editing? (close-port input) (line-editor-close))))))
 
   (current-namespace (find-namespace 'user)))

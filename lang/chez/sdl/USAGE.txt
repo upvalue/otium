@@ -16,7 +16,7 @@ No dependency download or compilation of C code occurs when opening a demo.
 Set CHEZ if your executable is named scheme or chezscheme. Set SDL3_LIBRARY to
 an explicit shared library path to override pkg-config discovery.
 
-Edit chez/examples/scenes/shapes.scm or particles.scm and save.
+Edit examples/chez/scenes/shapes.scm or particles.scm and save.
 The host checks file contents every 200 ms and reloads between frames on the
 main thread. R forces a reload. Escape or the window close button exits.
 The window is resizable; the 960x640 scene is letterboxed to fit it.

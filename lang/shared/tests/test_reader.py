@@ -45,7 +45,6 @@ with tempfile.TemporaryDirectory(prefix='otium-reader-') as directory:
 (check 7 (exists (fn (x) (if (= x 2) 7 nil)) '(1 2 3)))
 (check 8 (for-all (fn (x) 8) '(1 2)))
 (check 3 (let ((n 0)) (while (if (= n 3) nil #t) (set! n (+ n 1))) n))
-(check 5 (cond (nil 99) (5 => (fn (x) x))))
 (require chez)
 (check 8 (chez/if (chez/void) 8 9))
 (check '(:a nil) (chez/case 1 ((1) '(:a nil)) (else #f)))

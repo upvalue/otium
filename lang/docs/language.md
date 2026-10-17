@@ -559,6 +559,43 @@ Macros live in vars like any definition. A macro var referenced in
 non-head position evaluates to the macro object itself (`macro?` tests
 for it), which cannot be applied as a function.
 
+### 6.1 Local symbol macros
+
+```
+(symbol-macrolet ((name expansion) …) body…)
+(symbol-macrolet ((name expansion (param write-form)) …) body…)
+```
+
+Within `body`, a reference to `name` is replaced by `expansion`, which is
+then expanded in the scope where the `symbol-macrolet` appears. With a
+writer, `(set! name expr)` becomes `(let ((param expr)) write-form)`;
+without one it is an error. A `name` in operator position is replaced the
+same way. Inner bindings of `name` (`fn` parameters, `let`, body `def`)
+shadow the symbol macro, and quoted occurrences are data. Bindings are
+installed in order, so a later expansion may use an earlier name. `body`
+is a body (4.1).
+
+These exist for macros that give names to places, for example binding a
+table's fields:
+
+```
+(defmacro with-keys (object names . body)
+  (let ((o (gensym "object")))
+    `(let ((,o ,object))
+       (symbol-macrolet
+           ,(map (fn (n)
+                   (let ((k (keyword (symbol->string n))))
+                     (list n (list 'get o k) (list 'v (list 'put! o k 'v)))))
+                 names)
+         ,@body))))
+
+(with-keys point (x y)
+  (set! x (+ x 1))
+  (list x y))
+```
+
+There are no global symbol macros.
+
 ---
 
 ## 7. Namespaces

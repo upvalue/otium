@@ -33,15 +33,16 @@
 (check "metadata separate" #t
   (run '(begin (g/field-set! button 'type OtherWidget) (eq? Button (g/dispatch-type button)))))
 (check "distinct objects" #f (run '(eq? (g/make Button) (g/make Button))))
+(run '(require chez))
 (for-each
  (lambda (pair)
    (check "builtin identity" #t
      (run `(eq? (g/dispatch-type ,(car pair)) ,(cadr pair)))))
  '((1 g/Number) (1.2 g/Number) (1+2i g/Number) (#f g/Boolean)
    (#\a g/Character) ("x" g/String) ('a g/Symbol) ('() g/Null)
-   ('(a) g/Pair) ((vector 1) g/Vector) ((make-bytevector 2) g/Bytevector)
-   ((make-eq-hashtable) g/Hashtable) (+ g/Procedure) (Button g/TypeDescriptor)
-   ((void) g/Nil) ((keyword "test") g/Keyword)
+   ('(a) g/Pair) ((chez/vector 1) g/Vector) ((chez/make-bytevector 2) g/Bytevector)
+   ((chez/make-eq-hashtable) g/Hashtable) (+ g/Procedure) (Button g/TypeDescriptor)
+   ((chez/void) g/Nil) ((keyword "test") g/Keyword)
    ((array) g/Vector) ((table) g/Hashtable)))
 (run '(define-generic (event! widget event)))
 (run '(def saved event!))
@@ -118,7 +119,6 @@
 (run '(define-generic (identity x)))
 (run '(define-method (identity x) x))
 (check "original object" #t (run '(eq? button (identity button))))
-(run '(require chez))
 (run '(def marker (chez/make-message-condition "marker")))
 (run '(define-method (identity x) (chez/raise marker)))
 (check "condition identity" #t (run '(chez/guard (c [else (eq? c marker)]) (identity button))))

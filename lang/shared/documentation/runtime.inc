@@ -174,6 +174,7 @@ const char* ot_runtime_documentation(const char* name) {
     {"define-type", "(define-type Name)\nDeclare a stable typed-map descriptor in this namespace. Reload preserves the descriptor; conflicting bindings are errors."},
     {"reset-generic!", "(reset-generic! (name argument ...))\nReplace this declaration with a fresh generic of the given arity and no methods."},
     {"reset-type!", "(reset-type! Name)\nReplace this declaration with a fresh descriptor. Existing objects retain their old descriptor."},
+    {"symbol-macrolet", "(symbol-macrolet ((name expansion [(parameter write-form)]) ...) body ...)\nReplace references to name with expansion in body. With a writer, (set! name value) becomes (let ((parameter value)) write-form)."},
   };
   for (size_t i = 0; i < sizeof(entries) / sizeof(*entries); ++i)
     if (!strcmp(name, entries[i].name)) return entries[i].text;

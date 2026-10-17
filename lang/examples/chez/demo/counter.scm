@@ -1,8 +1,8 @@
 (ns demo.counter)
 
-(defonce state (vector 0))
+(defonce state [0])
 
 ;; Change the increment, then require this namespace with :reload.
 (def (tick!)
-  (vector-set! state 0 (+ (vector-ref state 0) 1))
-  (vector-ref state 0))
+  (put! state 0 (+ (get state 0) 1))
+  (get state 0))

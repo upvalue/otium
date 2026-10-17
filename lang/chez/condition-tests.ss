@@ -42,8 +42,9 @@
 (check "condition registry shared between namespaces" #t
   (begin (run '(define-condition 'shared 'error))
          (run '(ns other-conditions))
-         (run '(let ((c (make-eq-hashtable)))
-                 (hashtable-set! c ':type 'shared)
+         (run '(require chez))
+         (run '(let ((c (chez/make-eq-hashtable)))
+                 (chez/hashtable-set! c ':type 'shared)
                  (condition-of-type? c 'error)))))
 (run '(ns user))
 (run '(def cleaned #f))
@@ -61,7 +62,7 @@
           (restart-case
             (begin
               (set! saved (find-restart 'again))
-              (call/cc (fn (k) (set! resume k)))
+              (chez/call/cc (fn (k) (set! resume k)))
               (set! events (cons (eq? saved (find-restart 'again)) events)))
             (again () #f))
           (set! events (cons (and (find-restart saved) #t) events))

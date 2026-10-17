@@ -76,8 +76,8 @@ and c/tests/ext-demo.scm. Relocation does not repair that stale example.
 Chez examples with non-FFI dependencies
 
 examples/chez/demo.scm and demo/counter.scm are a live-reload example, with no
-FFI dependency. Gaps include require syntax, the explicit live
-binding handle, Scheme vectors/vector-ref/vector-set!, and printf. C has
+FFI dependency. Its state is now an array. Gaps include require syntax, the
+explicit live binding handle, and chez/printf (via (require chez)). C has
 live namespace vars but not this exact saved-callback API. These differences
 should be expressible through a common reload and collection interface.
 

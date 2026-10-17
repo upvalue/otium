@@ -25,10 +25,11 @@ def bootstrap(runtime, manifest=DEFAULT_MANIFEST):
     if runtime == 'c':
         prefix += '(def (sdl-abi-error message) (error (table :type \'ffi-error :reason \'abi :operation \'sdl-layout :message message)))\n(def host-read read-string)\n'
     else:
-        prefix += '''(def (sdl-abi-error message)
- (let ((c (make-eq-hashtable)))
-  (hashtable-set! c (string->symbol ":type") 'ffi-error) (hashtable-set! c (string->symbol ":reason") 'abi)
-  (hashtable-set! c (string->symbol ":operation") 'sdl-layout) (hashtable-set! c (string->symbol ":message") message) (error c)))
+        prefix += '''(require chez)
+(def (sdl-abi-error message)
+ (let ((c (chez/make-eq-hashtable)))
+  (chez/hashtable-set! c (string->symbol ":type") 'ffi-error) (chez/hashtable-set! c (string->symbol ":reason") 'abi)
+  (chez/hashtable-set! c (string->symbol ":operation") 'sdl-layout) (chez/hashtable-set! c (string->symbol ":message") message) (error c)))
 (def host-read read-string)
 '''
     prefix += "(def sdl-library-names '(" + ' '.join(map(literal,candidates)) + '))\n'

@@ -88,9 +88,8 @@ def program(name, engine):
           (def (bench-clock)
           (let ((t (chez/current-time 'time-monotonic)))
             (+ (* (chez/time-second t) 1000000000) (chez/time-nanosecond t))))"""
-        collections = """(def bench-table make-eqv-hashtable)
-          (def bench-put! hashtable-set!)
-          (def (bench-get t k) (hashtable-ref t k #f))"""
+        collections = """(def bench-table table)
+          (def bench-put! put!) (def bench-get get)"""
         imports = "(require callee :as c)"
         callback = "(def callback (live 'c/inc))"
         # Loader directives are not accepted in Chez function bodies.

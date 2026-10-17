@@ -19,10 +19,10 @@
 (define (counter-source increment)
   (source "counter"
     `((ns counter)
-      (defonce state (vector 0))
+      (defonce state (array 0))
       (def (tick!)
-        (vector-set! state 0 (+ (vector-ref state 0) ,increment))
-        (vector-ref state 0))
+        (put! state 0 (+ (get state 0) ,increment))
+        (get state 0))
       (def (amount) ,increment))))
 
 (counter-source 1)
@@ -43,7 +43,7 @@
 (check "saved procedure stays old" 1 (run '(saved)))
 (check "existing callback updates and state survives" 11 (run '(callback)))
 (check "state keeps its identity" #t (run '(eq? original-state c/state)))
-(run '(set! c/state (vector 40)))
+(run '(set! c/state (array 40)))
 (check "assignment through import" 50 (run '(callback)))
 (run '(def tick! 0))
 (check "import cannot overwrite definition" #t
@@ -80,9 +80,9 @@
   (call-with-values (lambda () (run '(values 1 2))) list))
 (check "top-level begin preserves multiple values" '(3 4)
   (call-with-values (lambda () (run '(begin (values 1 2) (values 3 4)))) list))
-(check "Chez vectors" #t (run '(vector? c/state)))
+(check "state is an array" #t (run '(array? c/state)))
 (check "Chez hash tables" 3
-  (run '(let ([t (make-eq-hashtable)]) (hashtable-set! t 'x 3) (hashtable-ref t 'x #f))))
+  (run '(let ([t (chez/make-eq-hashtable)]) (chez/hashtable-set! t 'x 3) (chez/hashtable-ref t 'x #f))))
 (check "tail recursion through imported binding" 100000
   (begin
     (source "tail" '((ns tail) (def (loop n acc)
@@ -123,7 +123,7 @@
   (counter-source (+ n 1))
   (run '(require counter :as c :reload)))
 (check "caller survives repeated reloads" 100 (run '(caller)))
-(check "state survives repeated reloads" 60 (run '(vector-ref c/state 0)))
+(check "state survives repeated reloads" 60 (run '(get c/state 0)))
 
 ;; Unix process symbols expose libc through Chez directly.
 (run '(chez/load-shared-object #f))

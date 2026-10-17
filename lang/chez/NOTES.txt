@@ -46,14 +46,19 @@ Otium macros expand before Chez compiles each form. See
 Use vectors and hash tables directly. Square brackets delimit ordinary lists.
 
 The default core includes the Otium core forms, arithmetic, lists, strings,
-vectors, bytevectors, hash tables, continuations, and gensym. Scheme syntax
-that is not Otium syntax (lambda, define, let*, letrec, do, case,
-case-lambda, let-values, parameterize, define-syntax, syntax-rules) is only
-available with the chez/ prefix. This is an explicit vocabulary, not full C
-standard-library compatibility.
+arrays, tables, and gensym, aiming to match names C also provides. Chez
+representations C lacks (vectors, hash tables, bytevectors, chars,
+continuations, multiple-value receivers) and Scheme syntax that is not Otium
+syntax (lambda, define, let*, letrec, do, case, case-lambda, let-values,
+parameterize, define-syntax, syntax-rules) are not in the core. Some Scheme
+list and comparison helpers C lacks (memq, assq, list-ref, fold-left,
+exists, string=?, gcd, ...) remain pending a naming decision.
 
-Host procedures and syntax are available with the chez/ prefix:
+Host procedures and syntax are available with the chez/ prefix after
+(require chez) in the namespace. The prefixed names are unbound until then,
+and (require chez) fails on C, which marks a file as Chez-specific:
 
+  (require chez)
   (println "answer:" 42)
   (chez/printf "answer: ~a\n" 42)
   (chez/import (otium canvas))

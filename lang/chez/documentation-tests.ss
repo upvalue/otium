@@ -18,7 +18,7 @@
 (evaluate '(defonce saved "Replacement documentation." 8))
 (check (evaluate 'saved) 7)
 (check (evaluate '(describe 'saved)) "Original documentation.")
-(check (evaluate '(describe 'hashtable-ref)) "")
+(check (evaluate (quote (describe (quote fold-left)))) "")
 (check (evaluate '(describe 'eval)) (runtime-documentation 'eval))
 (evaluate '(def eval "My evaluator." 123))
 (check (evaluate '(describe 'eval)) "My evaluator.")

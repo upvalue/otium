@@ -1184,5 +1184,12 @@
     "runtimes": [
       "chez"
     ]
+  },
+  "symbol-macrolet": {
+    "text": "(symbol-macrolet ((name expansion [(parameter write-form)]) ...) body ...)\nReplace references to name with expansion in body. With a writer, (set! name value) becomes (let ((parameter value)) write-form).",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
   }
 }

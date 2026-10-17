@@ -78,8 +78,6 @@
   (run '(let () (def a 1) (def seen (list a)) (set! a 2) (def b a) (cons b seen))))
 (check "body ending in a definition yields nil" #t
   (run '(nil? ((fn () (def x 1))))))
-(check "cond receiver expands" 8
-  (run '(cond [(twice 2) => (fn (x) (twice x))] [else 0])))
 (check "operator expression expands" 6
   (run '((if #t (fn (x) (twice x)) +) 3)))
 (check "set value expands" 6

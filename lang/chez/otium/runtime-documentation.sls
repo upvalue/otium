@@ -80,4 +80,5 @@
     (for-all . "Stop at the first nil or #f predicate result; otherwise return the final result. Empty lists return #t.")
     (take . "Return the first count elements, clamping to the list/array length.")
     (drop . "Return the elements after count, clamping to the list/array length.")
+    (symbol-macrolet . "(symbol-macrolet ((name expansion [(parameter write-form)]) ...) body ...)\nReplace references to name with expansion in body. With a writer, (set! name value) becomes (let ((parameter value)) write-form).")
   )))

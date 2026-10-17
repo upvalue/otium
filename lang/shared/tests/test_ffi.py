@@ -22,7 +22,7 @@ math_names = '("/usr/lib/libSystem.B.dylib")' if mac else '("libm.so.6" "libm.so
 def run(runtime, source, directory, expected):
     script = directory / (runtime + '.scm')
     prefix = "(require '(otium.ffi :as ffi))\n" if runtime == 'c' else '(require otium.ffi :as ffi)\n'
-    collect = '(define (churn n) (if (> n 0) (begin (list n n n) (churn (- n 1))) #f))\n(define (test-collect) (churn 2000))\n' if runtime == 'c' else '(define (test-collect) (collect))\n'
+    collect = '(define (churn n) (if (> n 0) (begin (list n n n) (churn (- n 1))) #f))\n(define (test-collect) (churn 2000))\n' if runtime == 'c' else '(define (test-collect) (chez/collect))\n'
     script.write_text(prefix + collect + '(define wide-integers? ' + ('#f' if runtime == 'c' else '#t') + ')\n' + source)
     command = [str(ROOT / 'c/otium'), '--no-project'] if runtime == 'c' else [os.environ.get('CHEZ', 'chez'), '--libdirs', str(ROOT / 'chez'), '--script', str(ROOT / 'chez/main.ss')]
     if runtime == 'c' and args.stress:

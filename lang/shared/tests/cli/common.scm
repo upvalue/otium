@@ -1,6 +1,6 @@
 (require otium.cli)
 (define (check expected actual)
-  (if (equal? expected actual) #t (begin (write (list 'expected expected 'actual actual)) (newline) (exit 1))))
+  (if (equal? expected actual) #t (begin (display (list 'expected expected 'actual actual)) (newline) (exit 1))))
 (define command
   (otium.cli/compile
     '(command greet (summary "Greet someone") (version "1.0")
@@ -72,4 +72,16 @@
     (command x (option a (names "--a") (type unknown)))
     (command x (argument a (repeat append)) (argument b))
     (command x (argument a (default "x")) (argument b))))
+(define floating (otium.cli/compile '(command number (argument n (type number)))))
+(check 125.0 (otium.cli/ref (otium.cli/outcome-values (otium.cli/parse floating '("1.25e2"))) 'n))
+(for-each (lambda (text) (check 'error (otium.cli/outcome-kind (otium.cli/parse floating (list text)))))
+  '("1/2" "1+2i" "#x10" "1e999" "1.2.3" "e2"))
+(define parent-required (otium.cli/compile '(command root
+  (option config (names "--config") (required #t) (global #t))
+  (option mode (names "--mode") (default "normal"))
+  (command child))))
+(check 'help (otium.cli/outcome-kind (otium.cli/parse parent-required '("child" "--help"))))
+(check 'ok (otium.cli/outcome-kind (otium.cli/parse parent-required '("child" "--config=x"))))
+(check "normal" (otium.cli/ref (otium.cli/outcome-values (otium.cli/parse parent-required '("child" "--config=x"))) 'mode))
+(check 'error (otium.cli/outcome-kind (otium.cli/parse parent-required '("child"))))
 (display "cli checks passed\n")

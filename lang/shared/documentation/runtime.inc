@@ -170,6 +170,11 @@ const char* ot_runtime_documentation(const char* name) {
     {"with-params", "(with-params ((parameter value) ...) body ...)\nInstall dynamic parameter values sequentially for body, restoring them on every exit path."},
     {"write", "(write value ...)\nWrite readable representations to the host output sink, separated by spaces, without a newline. Return nil."},
     {"zero?", "(zero? number)\nReturn #t when the argument is zero, otherwise #f."},
+    {"define-generic", "(define-generic (name argument ...))\nDeclare a fixed-arity generic function. Reevaluation preserves its identity and methods."},
+    {"define-method", "(define-method (generic parameter ...) body ...)\nInstall or replace a method. A parameter may be a name or (name Type); dispatch selects the unique most specific matching method."},
+    {"define-type", "(define-type Name)\nDeclare a stable typed-map descriptor in this namespace. Reload preserves the descriptor; conflicting bindings are errors."},
+    {"reset-generic!", "(reset-generic! (name argument ...))\nReplace this declaration with a fresh generic of the given arity and no methods."},
+    {"reset-type!", "(reset-type! Name)\nReplace this declaration with a fresh descriptor. Existing objects retain their old descriptor."},
   };
   for (size_t i = 0; i < sizeof(entries) / sizeof(*entries); ++i)
     if (!strcmp(name, entries[i].name)) return entries[i].text;

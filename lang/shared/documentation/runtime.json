@@ -1092,5 +1092,40 @@
     "runtimes": [
       "chez"
     ]
+  },
+  "define-generic": {
+    "text": "(define-generic (name argument ...))\nDeclare a fixed-arity generic function. Reevaluation preserves its identity and methods.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "define-method": {
+    "text": "(define-method (generic parameter ...) body ...)\nInstall or replace a method. A parameter may be a name or (name Type); dispatch selects the unique most specific matching method.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "define-type": {
+    "text": "(define-type Name)\nDeclare a stable typed-map descriptor in this namespace. Reload preserves the descriptor; conflicting bindings are errors.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "reset-generic!": {
+    "text": "(reset-generic! (name argument ...))\nReplace this declaration with a fresh generic of the given arity and no methods.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "reset-type!": {
+    "text": "(reset-type! Name)\nReplace this declaration with a fresh descriptor. Existing objects retain their old descriptor.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
   }
 }

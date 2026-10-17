@@ -103,7 +103,8 @@ Attributes include:
 
 - `(type string)`, `path`, `integer`, `number`, or a converter procedure.
   Paths remain strings. Integers use signed decimal syntax and the shared signed
-  63-bit range. Conversion failures become parse errors; exceptions from custom
+  63-bit range. Numbers use finite decimal floating-point syntax, including
+  exponents; Scheme fractions, complex numbers, and reader prefixes are rejected. Conversion failures become parse errors; exceptions from custom
   converters propagate to the caller.
 - `(default value)`, `(required #t)`, `(range low high)`, and `(choices value ...)`.
   Defaults are already converted application values.

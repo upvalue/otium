@@ -33,23 +33,23 @@ for cmd in COMMANDS:
         tmp = Path(tmp)
         script = tmp / 'arguments.scm'
         script.write_text('''(require otium.process)
-(write (otium.process/arguments)) (newline)
+(for-each (lambda (arg) (display (string-length arg)) (display ":") (display arg) (newline)) (otium.process/arguments))
 (display (otium.process/script-name)) (newline)
 ''')
         tokens = ['--help', '', 'two words', 'λ', '--', '-file', '--c.heap-max=1']
-        expected = '("--help" "" "two words" "λ" "--" "-file" "--c.heap-max=1")\n' + str(script) + '\n'
+        expected = ''.join(f'{len(arg)}:{arg}\n' for arg in tokens) + str(script) + '\n'
         result = run(cmd, '--no-project', '--c.heap-init=1048576', '--c.heap-max=67108864', script, '--', *tokens)
         assert result.stdout == expected, result
-        assert run(cmd, '--no-project', script).stdout == '()\n' + str(script) + '\n'
+        assert run(cmd, '--no-project', script).stdout == str(script) + '\n'
         assert run(cmd, script, '--help').stdout == help_outputs[0]
         pre = tmp / 'pre.scm'
         pre.write_text('(display "pre\\n")')
-        assert run(cmd, '--no-project', '--load', pre, script).stdout.startswith('pre\n()\n')
+        assert run(cmd, '--no-project', '--load', pre, script).stdout.startswith('pre\n')
         assert run(cmd, '--no-project', '--load', pre).stdout == 'pre\n'
         library = tmp / 'lib'
         library.mkdir()
         (library / 'sample.scm').write_text('(ns sample) (define answer 42)')
-        script.write_text('(require sample) (write sample/answer) (newline)')
+        script.write_text('(require sample) (display sample/answer) (newline)')
         assert run(cmd, '--no-project', '--path', library, script).stdout == '42\n'
         assert run(cmd, '--no-project', '-L', library, script).stdout == '42\n'
         env = dict(os.environ, OTIUM_PATH=str(library))

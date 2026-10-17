@@ -8,6 +8,8 @@ import signal
 import subprocess
 import tempfile
 
+from otium_tools import command as runtime_command
+
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parent / "conditions"
 parser = argparse.ArgumentParser(description=__doc__)
@@ -17,10 +19,7 @@ runtimes = ("c", "chez") if args.runtime == "both" else (args.runtime,)
 
 
 def command(runtime, path):
-    if runtime == "c":
-        return [str(ROOT / "c/otium"), "--no-project", str(path)]
-    return [os.environ.get("CHEZ", "chez"), "--libdirs", str(ROOT / "chez"),
-            "--script", str(ROOT / "chez/main.ss"), str(path)]
+    return runtime_command(runtime, path)
 
 
 def execute(runtime, path, status, output):
@@ -33,9 +32,9 @@ def execute(runtime, path, status, output):
 with tempfile.TemporaryDirectory(prefix="otium-condition-tests-") as directory:
     directory = Path(directory)
     for runtime in runtimes:
-        bootstrap = (FIXTURES / "support.scm").read_text()
-        path = directory / f"{runtime}.scm"
-        path.write_text(bootstrap + "\n" + (FIXTURES / "common.scm").read_text())
+        bootstrap = (FIXTURES / "support.ot").read_text()
+        path = directory / f"{runtime}.ot"
+        path.write_text(bootstrap + "\n" + (FIXTURES / "common.ot").read_text())
         execute(runtime, path, 0, "condition checks: 64\n")
         for operation in ("exit", "quit"):
             path.write_text(bootstrap + f'''

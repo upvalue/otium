@@ -177,6 +177,6 @@ Parameters provide scoped settings. Call a parameter to read it, and use `with-p
 
 ## Running locally
 
-From the language checkout, build the C runtime with `make`, then run `./otium`. Use `./otium program.scm` for a file. `./otium-chez` selects Chez and requires Chez Scheme. See [REPL editing](repl.md) for history and editing keys.
+From the language checkout, build the C runtime with `make`, then run `./otium`. Use `./otium program.ot` for a file. `./otium-chez` selects Chez and requires Chez Scheme. See [REPL editing](repl.md) for history and editing keys.
 
 C and Chez are distinct runtimes. This guide does not promise identical numeric ranges or underlying value representations. The browser's 32-bit integers are especially relevant when porting code from a 64-bit native C build. Native FFI examples require a native runtime and its optional dependencies.

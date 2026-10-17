@@ -2,7 +2,7 @@ Otium macros on Chez
 
 Status: partly implemented. defmacro, Otium expansion, generated top-level
 forms, macro imports and reload, and Otium eval are implemented. Expansion now
-uses the shared expander in ../shared/prelude/expander.scm, so the traversal
+uses the shared expander in ../shared/prelude/expander.ot, so the traversal
 rules below that differ from it are superseded: let is sequential, macros may
 generate body definitions, and core form names cannot be rebound. Native
 syntax is reached only through the chez/ prefix. cond-expand remains proposed.
@@ -300,7 +300,7 @@ Source references and feasibility checks
 
 The current behavior is documented in chez/NOTES.txt and implemented in
 chez/otium/runtime.sls. C's macro contract and implementation are in
-specs/language.md, c/prelude/expander.scm, and c/tests/otium/07-macros.scm.
+specs/language.md, c/prelude/expander.ot, and c/tests/otium/07-macros.ot.
 
 Chez native syntax and binding facilities are documented at:
 https://www.scheme.com/csug8/syntax.html

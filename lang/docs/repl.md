@@ -73,7 +73,7 @@ a bundled Chez manual or fallback descriptions.
 
 After editing the runtime reference, run:
 
-    python3 shared/documentation/generate.py
+    tools/python shared/documentation/generate.py
 
 The generated C and Scheme tables are checked in; normal builds require no
 generation step or network access. `make test-repl` verifies they match the

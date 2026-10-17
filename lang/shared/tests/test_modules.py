@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 """Check module search, failures, retries, and reload with identical Otium source."""
+import argparse
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 
+from otium_tools import runtime_argument, runtimes, command as runtime_command
+
 ROOT = Path(__file__).resolve().parents[2]
+parser = argparse.ArgumentParser(description=__doc__)
+runtime_argument(parser)
+args = parser.parse_args()
+
 
 with tempfile.TemporaryDirectory(prefix='otium-modules-') as scratch:
     directory = Path(scratch)
@@ -56,12 +63,12 @@ with tempfile.TemporaryDirectory(prefix='otium-modules-') as scratch:
 (ns consumer (:require (retry :as r)))
 (println (r/value))
 ''')
-    for runtime, executable in [('c', 'c/otium'), ('chez', 'chez/run')]:
+    for runtime in runtimes(args.runtime):
         env = dict(os.environ)
         if runtime == 'c':
             env['OTIUM_GC_STRESS'] = '1'
         result = subprocess.run(
-            [str(ROOT/executable), '--no-project', '--path', str(first), '--path', str(second), str(source)],
+            runtime_command(runtime, '--path', first, '--path', second, source),
             cwd=ROOT, env=env, capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, (runtime, result.stdout, result.stderr)
         assert result.stdout == '3\n', (runtime, result.stdout, result.stderr)

@@ -1,4 +1,4 @@
-;; prelude.scm -- the derived core (spec 10.x), loaded through the real
+;; prelude.ot -- the derived core (spec 10.x), loaded through the real
 ;; expander, so defmacro and everything native is available.
 ;;
 ;; Runtime dependencies: cons car cdr list append length reverse for-each

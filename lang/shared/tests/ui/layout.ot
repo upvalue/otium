@@ -2,7 +2,7 @@
 (require (otium.ui.gpu :as gpu))
 (require (otium.ui.native :as native))
 (require (otium.ffi :as ffi))
-(native/load-config! "shared/build/ui-config.scm")
+(native/load-config! "shared/build/ui-config.ot")
 (def checks 0)
 (def (check label expected actual)
   (unless (equal? expected actual) (error "layout check failed" label expected actual))

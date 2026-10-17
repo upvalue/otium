@@ -12,7 +12,7 @@ trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 "${CHEZ:-chez}" --libdirs "$root" --script "$root/environment-tests.ss"
 "${CHEZ:-chez}" --libdirs "$root" --script "$root/reader-tests.ss"
 "$root/run" --help > /dev/null
-demo=$("$root/run" -L "$root/../examples" "$root/../examples/reload.scm")
+demo=$("$root/run" -L "$root/../examples" "$root/../examples/reload.ot")
 expected='First callback: 1
 Callback after reload, with preserved state: 2'
 if [ "$demo" != "$expected" ]; then

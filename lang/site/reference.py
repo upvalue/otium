@@ -11,8 +11,8 @@ def entries():
     result = {name: {'text': entry.get('c', entry['text']), 'source': 'shared/documentation/runtime.json'}
               for name, entry in catalog.items() if 'c' in entry['runtimes']}
     pattern = r'^\((?:def\s+\(([^\s()]+)([^)]*)\)|defmacro\s+([^\s()]+)\s+\(([^)]*)\))\s*\n?\s*("(?:[^"\\]|\\.)*")'
-    for path, prefix in [('shared/prelude/core.scm', ''),
-                         ('shared/lib/otium/extra.scm', 'otium.extra/')]:
+    for path, prefix in [('shared/prelude/core.ot', ''),
+                         ('shared/lib/otium/extra.ot', 'otium.extra/')]:
         source = (ROOT / path).read_text()
         for match in re.finditer(pattern, source, re.MULTILINE):
             name = match[1] or match[3]

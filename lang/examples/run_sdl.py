@@ -8,8 +8,7 @@ import subprocess
 import sys
 import tempfile
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT/'shared/sdl'))
-from host import bootstrap, command, environment, literal, DEFAULT_MANIFEST
+from shared.sdl.host import bootstrap, command, environment, literal, DEFAULT_MANIFEST
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -36,20 +35,20 @@ def main():
 (def inject-error? {'#t' if args.inject_error else '#f'})
 '''
     if args.acceptance:
-        source += (ROOT/'examples/sdl-acceptance.scm').read_text()
+        source += (ROOT/'examples/sdl-acceptance.ot').read_text()
     else:
         names = '("/usr/lib/libSystem.B.dylib")' if platform.system() == 'Darwin' else '("libc.so.6")'
         source += "(def host-libc-names '"+names+")\n"
-        scene = args.scene_path or ROOT/'examples/scenes'/(args.scene+'.scm')
+        scene = args.scene_path or ROOT/'examples/scenes'/(args.scene+'.ot')
         source += '(def scene-path '+literal(scene.resolve())+')\n'
-        source += (ROOT/'shared/sdl/reload.scm').read_text()
-        source += (ROOT/'examples/sdl-host.scm').read_text()
+        source += (ROOT/'shared/sdl/reload.ot').read_text()
+        source += (ROOT/'examples/sdl-host.ot').read_text()
     env = environment()
     if args.audio == 'dummy': env['SDL_AUDIO_DRIVER'] = 'dummy'
     if args.audio == 'real' and env.get('SDL_AUDIO_DRIVER') == 'dummy':
         parser.error('--audio real cannot use SDL_AUDIO_DRIVER=dummy')
     with tempfile.TemporaryDirectory(prefix='otium-sdl-') as directory:
-        script = Path(directory)/'host.scm'; script.write_text(source)
+        script = Path(directory)/'host.ot'; script.write_text(source)
         return subprocess.run(command(args.runtime, script), cwd=ROOT, env=env).returncode
 
 if __name__ == '__main__':

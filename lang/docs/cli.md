@@ -1,17 +1,21 @@
 # Command-line programs
 
-C and Chez accept the same launcher syntax:
+Use `./otium` for either runtime. C is the default; `--runtime=chez` selects
+Chez. The selector is consumed before `--`; after it, the same token is an
+application argument. Existing runtime-specific launchers remain compatible.
+
+Both runtimes accept the same launcher syntax:
 
 ```sh
-c/otium --path lib --c.heap-max=67108864 program.scm -- --count 3 Alice
-chez/run --path lib --c.heap-max=67108864 program.scm -- --count 3 Alice
+./otium --runtime=c --path lib --c.heap-max=67108864 program.ot -- --count 3 Alice
+./otium --runtime=chez --path lib --c.heap-max=67108864 program.ot -- --count 3 Alice
 ```
 
 The first `--` separates launcher arguments from application arguments. The
 launcher consumes it. Everything following it reaches the application unchanged,
 including empty strings, dash-prefixed strings, and further `--` tokens. Without
 the separator the script gets an empty argument list. Exactly one positional
-script is allowed before the separator. Use `./-name.scm` for a dash-prefixed
+script is allowed before the separator. Use `./-name.ot` for a dash-prefixed
 script filename. A separator without a script is an error.
 
 `--help` before the separator prints launcher help without executing the script.
@@ -37,7 +41,7 @@ only in C. Numeric backend options require `=VALUE`. Unprefixed C-specific
 spellings have been removed. There are no Chez-specific options yet.
 
 The option catalog is `shared/cli/options.json`. Run
-`python3 shared/cli/generate.py` after editing it; generated C and Chez catalogs
+`tools/python shared/cli/generate.py` after editing it; generated C and Chez catalogs
 are checked by `make test-cli`. Launcher usage errors exit with status 2;
 script failures exit with status 1.
 
@@ -57,7 +61,7 @@ copies the strings. `otium.process/write-error` writes a string to stderr.
 
 `otium.cli` is a shared Otium implementation with small runtime adapters. Load
 it with `(require otium.cli)`. This unaliased require form works in both dialects.
-See `examples/greet.scm` for a complete program:
+See `examples/greet.ot` for a complete program:
 
 ```scheme
 (def command

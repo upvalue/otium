@@ -1,4 +1,4 @@
-;; leetcode-1-two-sum.scm - https://leetcode.com/problems/two-sum/
+;; leetcode-1-two-sum.ot - https://leetcode.com/problems/two-sum/
 
 (def (two-sum nums target)
   "Find the indices of two numbers in the array which add up to the target"

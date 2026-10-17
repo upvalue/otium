@@ -6,21 +6,21 @@ import os
 from pathlib import Path
 import subprocess
 import platform
-import ui_capture as runner
+from shared.tests import ui_capture as runner
+
+from otium_tools import runtime_argument, runtimes, command as runtime_command, environment
 
 ROOT = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--require-gpu', action='store_true')
+runtime_argument(parser)
 args = parser.parse_args()
 
 
 def launch(runtime, *options, headless=True):
-    target = platform.machine() + '-' + platform.system().lower()
-    extension = 'dylib' if platform.system() == 'Darwin' else 'so'
-    env = dict(os.environ, OTIUM_FFI_LIBRARY=str(ROOT/'shared/build'/target/('libotium-ffi.'+extension)))
-    command = [str(ROOT/('c/otium' if runtime == 'c' else 'chez/run')),
-               '--no-project', '-L', str(ROOT/'shared/lib'), '-L', str(ROOT/'examples'),
-               '-L', str(ROOT/'shared/tests'), str(ROOT/'examples/ui.scm'), '--',
+    env = environment()
+    command = runtime_command(runtime) + [ '-L', str(ROOT/'shared/lib'), '-L', str(ROOT/'examples'),
+               '-L', str(ROOT/'shared/tests'), str(ROOT/'examples/ui.ot'), '--',
                *(['--headless'] if headless else []), *map(str, options)]
     return subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, timeout=90)
 
@@ -38,7 +38,7 @@ def pixel(rows, x, y):
 artifacts = ROOT/'shared/build/ui-test-artifacts'
 artifacts.mkdir(parents=True, exist_ok=True)
 reference = None
-for runtime in ('c', 'chez'):
+for runtime in runtimes(args.runtime):
     capture, state = artifacts/(runtime+'.bmp'), artifacts/(runtime+'.json')
     result = launch(runtime, '--frames', 3, '--capture', capture, '--dump-state', state)
     unavailable = any(message in result.stderr for message in (

@@ -22,5 +22,5 @@ set_target_properties(otium-ui PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURR
 
 # Installation data only; the Otium application is checked-in source.
 list(GET SDL_LINK_LIBRARIES 0 SDL_LIBRARY)
-file(GENERATE OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/../build/ui-config.scm"
+file(GENERATE OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/../build/ui-config.ot"
   CONTENT "((library \"$<TARGET_FILE:otium-ui>\") (sdl \"${SDL_LIBRARY}\"))\n")

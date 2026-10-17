@@ -9,7 +9,7 @@ import platform
 import shlex
 import subprocess
 import tempfile
-from schema import STRUCTS, SCALARS, TYPEDEFS, CONSTANTS, MEMBERS
+from shared.sdl.schema import STRUCTS, SCALARS, TYPEDEFS, CONSTANTS, MEMBERS
 
 HERE = Path(__file__).resolve().parent
 TARGET = platform.machine() + '-' + platform.system().lower()

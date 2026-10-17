@@ -2,6 +2,7 @@
 """Compare the C runtime with the Chez runtime using checked workloads."""
 
 import argparse
+from otium_tools import metadata, run_directory
 import datetime
 import json
 import os
@@ -142,19 +143,21 @@ def main():
     print(f"C runtime ({args.build_label}) vs Otium on Chez {report['chez_version']}")
     print(f"{args.runs} measured runs, {args.warmups} warmups; medians in milliseconds")
     print(f"{'workload':<19} {'C work':>10} {'Chez work':>10} {'speedup':>9} {'C wall':>10} {'Chez wall':>10}", flush=True)
+    measured_commands = {}
     with tempfile.TemporaryDirectory(prefix="otium-compare-") as temp:
         directory = Path(temp)
-        (directory / "callee.scm").write_text("(ns callee)\n(def (inc x) (+ x 1))\n")
+        (directory / "callee.ot").write_text("(ns callee)\n(def (inc x) (+ x 1))\n")
         for name in args.only or WORKLOADS:
             samples = {engine: [] for engine in ("c-runtime", "chez")}
             commands = {}
             for engine in samples:
-                path = directory / f"{name}-{engine}.scm"
+                path = directory / f"{name}-{engine}.ot"
                 path.write_text(program(name))
                 commands[engine] = ([str(args.otium.absolute()), "--path", temp, str(path)]
                     if engine == "c-runtime" else
                     [chez, "--libdirs", str(CHEZ_ROOT), "--script",
                      str(CHEZ_ROOT / "main.ss"), "-L", temp, str(path)])
+            measured_commands[name] = commands
             for iteration in range(args.warmups + args.runs):
                 order = list(samples)
                 if iteration % 2:
@@ -178,8 +181,12 @@ def main():
                     if c["work_ms"] and s["work_ms"]["median"] else
                     f"{'-':>10} {'-':>10} {'-':>9}")
             print(f"{name:<19} {work} {c['wall_ms']['median']:10.3f} {s['wall_ms']['median']:10.3f}", flush=True)
-    if args.output:
-        args.output.write_text(json.dumps(report, indent=2) + "\n")
+    report['provenance'] = metadata(measured_commands, build_label=args.build_label,
+        compilation='Direct Chez without --compile-imported-libraries; existing cache state uncontrolled')
+    output = args.output or run_directory('compare') / 'results.json'
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(report, indent=2) + "\n")
+    print(f'Results: {output}')
 
 
 if __name__ == "__main__":

@@ -53,7 +53,7 @@
 (define directory (cadr (command-line)))
 (load-path (list directory))
 (define (source body)
-  (call-with-output-file (string-append directory "/unary-target.scm")
+  (call-with-output-file (string-append directory "/unary-target.ot")
     (lambda (port) (display "(ns unary-target)\n" port) (display body port)) 'replace))
 (source "(def (target x) (+ x 1))")
 (run "(require unary-target :as u :refer (target))")

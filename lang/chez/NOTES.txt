@@ -1,7 +1,7 @@
 Otium on Chez
 
 Run a file with chez/run --no-project path/to/file.ot. For repository examples,
-use chez/run --path examples examples/reload.scm, or the launchers in examples/
+use chez/run --path examples examples/reload.ot, or the launchers in examples/
 with --runtime chez. chez/test runs the native integration tests; make
 test-library runs common library, module, reload, OTCL, and example contracts
 against both runtimes.

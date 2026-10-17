@@ -167,7 +167,7 @@
             (namespace-loaded?-set! space #t))
           (if (eq? name 'otium.core)
               (parameterize ([current-namespace space])
-                (read-source (shared-source "prelude/core.scm")))
+                (read-source (shared-source "prelude/core.ot")))
               (let ([core (find-namespace 'otium.core)])
                 (for-each
                   (lambda (member)
@@ -246,7 +246,7 @@
       (when (and (not (memq name '(otium.generic otium.ffi otium.process otium.cli)))
                  (or reload? (not (namespace-loaded? space))))
         (load-namespace! space (or (namespace-source space)
-          (if (eq? name 'otium.extra) (shared-source "lib/otium/extra.scm") (source-for name)))))
+          (if (eq? name 'otium.extra) (shared-source "lib/otium/extra.ot") (source-for name)))))
       space))
 
   (define (load-source path)

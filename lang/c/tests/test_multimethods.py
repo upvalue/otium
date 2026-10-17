@@ -23,7 +23,7 @@ for subset in range(256):
 
 with tempfile.TemporaryDirectory(prefix="otium-multimethods-") as directory:
     root = Path(directory)
-    (root / "provider.scm").write_text("""
+    (root / "provider.ot").write_text("""
 (ns provider)
 (require (otium.generic :as g))
 (defclass Animal value)
@@ -60,7 +60,7 @@ with tempfile.TemporaryDirectory(prefix="otium-multimethods-") as directory:
     expected.extend(["#f", "ambiguous-method", "exact", "#t", "#t", "exact",
                      "binding-conflict", "binding-conflict", "#t", "ambiguous-method",
                      "#t", "number", "#f", "wrong-arity", "number"])
-    path = root / "checks.scm"
+    path = root / "checks.ot"
     path.write_text("\n".join(forms))
     result = subprocess.run([binary, "--no-project", "--path", directory, str(path)],
                             text=True, capture_output=True, timeout=180, env=os.environ.copy())

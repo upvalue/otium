@@ -34,3 +34,6 @@ __pycache__/
 /site/public/reference.md
 /site/public/assets/otium.mjs
 /site/public/assets/otium.wasm
+
+# Local benchmark runs; curated reports live in benchmarks/results.
+/benchmarks/runs/

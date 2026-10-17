@@ -21,10 +21,10 @@ commit `85f6acdc4cc4e2b857f307ba56bd0ba931dcccd1`. The Otium layer stays in the
 parent repository:
 
 - `benchmarks/r7rs/ports/` contains native Otium ports.
-- `benchmarks/r7rs/lib/benchmark.scm` contains the shared benchmark driver.
+- `benchmarks/r7rs/lib/benchmark.ot` contains the shared benchmark driver.
 - `benchmarks/r7rs/manifest.json` records parity grades and deviations.
 - `benchmarks/r7rs/run.py` runs Otium and an optional same-host Guile reference.
-- `benchmarks/r7rs/results.csv` and `STATUS.md` record raw and readable results.
+- `benchmarks/results/r7rs/results.csv` and `STATUS.md` record raw and readable results.
 - `benchmarks/r7rs/test_ports.py` checks all ports with reduced inputs.
 
 These are Otium ports, not an R7RS compatibility layer. The comparison keeps the

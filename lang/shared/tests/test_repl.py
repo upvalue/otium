@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the shared line editor through both runtime launchers."""
 
+import argparse
 import fcntl
 import os
 from pathlib import Path
@@ -15,7 +16,13 @@ import tempfile
 import termios
 import time
 
+from otium_tools import runtime_argument, runtimes, command as runtime_command
+
 ROOT = Path(__file__).resolve().parents[2]
+parser = argparse.ArgumentParser(description=__doc__)
+runtime_argument(parser)
+args = parser.parse_args()
+
 
 
 class Repl:
@@ -24,10 +31,11 @@ class Repl:
         if self.pid == 0:
             os.environ.update(environment)
             os.chdir(ROOT)
-            os.execv(str(ROOT / runtime), [str(ROOT / runtime), *args])
+            command = runtime_command(runtime, *args, isolated=False)
+            os.execv(command[0], command)
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 100, 0, 0))
         self.pending = b""
-        self.prompt = b"ot> " if runtime == "otium" else b"user> "
+        self.prompt = b"ot> " if runtime == "c" else b"user> "
         self.expect(self.prompt + b"\x1b[J")
 
     def send(self, text):
@@ -93,12 +101,12 @@ path.write_text((root / "replacement").read_text())
                        EDITOR=f"{shlex.quote(sys.executable)} {shlex.quote(str(editor))} --test")
     mode.write_text("ok")
     edited.write_text("(+ 20 22)\n")
-    (temp / "replmod.scm").write_text(
+    (temp / "replmod.ot").write_text(
         '(def (qualified-fn x) "Qualified documentation." (+ x 10))\n')
-    args = ("-L", str(temp)) if runtime == "otium-chez" else ("--path", str(temp))
+    args = ("-L", str(temp)) if runtime == "chez" else ("--path", str(temp))
     repl = Repl(runtime, environment, *args)
     try:
-        require = (b"(require replmod :as r)\r" if runtime == "otium-chez"
+        require = (b"(require replmod :as r)\r" if runtime == "chez"
                    else b"(require '(replmod :as r))\r")
         repl.send(require)
         repl.expect(repl.prompt + b"\x1b[J")
@@ -108,10 +116,10 @@ path.write_text((root / "replacement").read_text())
         repl.expect(b"Qualified documentation.")
         repl.expect(repl.prompt + b"\x1b[J")
         repl.send(b",help +\r")
-        repl.expect(b"No documentation recorded." if runtime == "otium-chez" else b"adds numbers.")
+        repl.expect(b"No documentation recorded." if runtime == "chez" else b"adds numbers.")
         repl.expect(repl.prompt + b"\x1b[J")
         topics = ((b"eval", b"expand Otium macros"),
-                  (b"fold-left", b"Combine from the left")) if runtime == "otium-chez" else (
+                  (b"fold-left", b"Combine from the left")) if runtime == "chez" else (
                   (b"length", b"Unicode code points"),
                   (b"get", b"Missing entries"),
                   (b"map", b"Kind-preserving"),
@@ -209,7 +217,7 @@ path.write_text((root / "replacement").read_text())
     finally:
         repl.cleanup()
     # Redirected input must never contain terminal control sequences.
-    result = subprocess.run([str(ROOT / runtime)], input="(+ 8\n9)\n", text=True,
+    result = subprocess.run(runtime_command(runtime, isolated=False), input="(+ 8\n9)\n", text=True,
                             capture_output=True, env={**os.environ, **environment}, timeout=15)
     assert result.returncode == 0 and "17" in result.stdout, result
     assert "\x1b" not in result.stdout, result
@@ -217,5 +225,5 @@ path.write_text((root / "replacement").read_text())
 
 
 with tempfile.TemporaryDirectory(prefix="otium-repl-test-") as directory:
-    for runtime in ("otium", "otium-chez"):
+    for runtime in runtimes(args.runtime):
         exercise(runtime, Path(directory))

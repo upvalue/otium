@@ -1,7 +1,7 @@
 The condition prototype has been integrated into chez/otium/conditions.sls.
 Run the maintained cross-runtime suite with:
 
-  python3 shared/tests/test_conditions.py
+  tools/python shared/tests/test_conditions.py
 
 The experiment established that explicit handler dispatch, dynamic parameters,
 escape continuations, and dynamic-wind can implement the Otium protocol on

@@ -20,14 +20,14 @@ $(OUT)/otium.mjs: $(SOURCES) ../src/otium.h ../src/ot-gc-internal.inc ../src/ot-
 
 $(BUILD):
 	mkdir -p $@
-$(BUILD)/expander.h: ../../shared/prelude/expander.scm ../tools/embed.py | $(BUILD)
+$(BUILD)/expander.h: ../../shared/prelude/expander.ot ../tools/embed.py | $(BUILD)
 	$(PYTHON) ../tools/embed.py $< ot_expander_src $@
-$(BUILD)/prelude.h: ../../shared/prelude/core.scm ../tools/embed.py | $(BUILD)
+$(BUILD)/prelude.h: ../../shared/prelude/core.ot ../tools/embed.py | $(BUILD)
 	$(PYTHON) ../tools/embed.py $< ot_prelude_src $@
-$(BUILD)/ot-ffi-source.h: ../../shared/ffi/core.scm ../tools/embed.py | $(BUILD)
+$(BUILD)/ot-ffi-source.h: ../../shared/ffi/core.ot ../tools/embed.py | $(BUILD)
 	$(PYTHON) ../tools/embed.py $< ot_ffi_src $@
-$(BUILD)/ot-cli-source.h: ../../shared/cli/core.scm ../tools/embed.py | $(BUILD)
+$(BUILD)/ot-cli-source.h: ../../shared/cli/core.ot ../tools/embed.py | $(BUILD)
 	$(PYTHON) ../tools/embed.py $< ot_cli_src $@
 
-$(BUILD)/extra.h: ../../shared/lib/otium/extra.scm ../tools/embed.py | $(BUILD)
+$(BUILD)/extra.h: ../../shared/lib/otium/extra.ot ../tools/embed.py | $(BUILD)
 	$(PYTHON) ../tools/embed.py $< ot_extra_src $@

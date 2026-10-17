@@ -183,7 +183,7 @@ claiming a performance result; microbenchmarks establish feasibility only.
 ## References
 
 The C reader is in `c/src/otium.c`; collection reading is covered by
-`c/tests/otium/01-reader.scm`. Chez source loading is in
+`c/tests/otium/01-reader.ot`. Chez source loading is in
 `chez/otium/runtime.sls`, with expansion in `chez/otium/expander.sls`.
 
 [SRFI 214](https://srfi.schemers.org/srfi-214/srfi-214.html) describes growable

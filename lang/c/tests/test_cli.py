@@ -56,7 +56,7 @@ with tempfile.TemporaryDirectory(prefix="otium-shebang-") as directory:
     direct = subprocess.run([executable], text=True, capture_output=True, check=False)
     expect(direct, 1, stderr="reserved # token")
 
-    misplaced = os.path.join(directory, "misplaced.scm")
+    misplaced = os.path.join(directory, "misplaced.ot")
     with open(misplaced, "w", encoding="utf-8") as script:
         script.write('(println "before")\n#!/usr/bin/env otium\n')
     expect(run(misplaced), 1, stderr="reserved # token")

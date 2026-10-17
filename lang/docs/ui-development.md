@@ -16,14 +16,14 @@ make ui
 ```
 
 For an offline Yoga install, use
-`python3 shared/ui/setup.py --archive /path/to/yoga.tar.gz` instead of
+`tools/python shared/ui/setup.py --archive /path/to/yoga.tar.gz` instead of
 `make ui-setup`. See `shared/ui/DEPENDENCIES.md` for the version and checksum.
 
 Run either command from the repository root:
 
 ```sh
-c/otium --no-project -L shared/lib -L examples examples/ui.scm
-chez/run --no-project -L shared/lib -L examples examples/ui.scm
+c/otium --no-project -L shared/lib -L examples examples/ui.ot
+chez/run --no-project -L shared/lib -L examples examples/ui.ot
 ```
 
 The window stays open until it is closed. Click any of the three colored cards
@@ -31,15 +31,15 @@ to toggle its color. They are composed widgets whose state survives rebuilding
 the descriptions. The loop handles the left mouse button and window close;
 it does not yet provide keyboard navigation or text input.
 
-`examples/ui.scm` uses `otium.cli`. `--help` lists its options. Native library
-paths come from `shared/build/ui-config.scm`, written by CMake and read as data.
+`examples/ui.ot` uses `otium.cli`. `--help` lists its options. Native library
+paths come from `shared/build/ui-config.ot`, written by CMake and read as data.
 `--config` selects another installation file. The application and scene modules
 are checked-in Otium source.
 
 ## Bounded execution and captures
 
 ```sh
-chez/run --no-project -L shared/lib -L examples examples/ui.scm -- \
+chez/run --no-project -L shared/lib -L examples examples/ui.ot -- \
   --headless --frames 3 --capture /tmp/ui.png --dump-state /tmp/ui.json
 ```
 
@@ -120,8 +120,8 @@ method and reconcile again. The future event loop must report such failures
 and let the caller retry. `(ui/dispose! tree)` releases mounted Yoga nodes;
 the CLI releases its renderer and window even when a frame raises an error.
 
-The implementation is `shared/lib/otium/ui.scm`; shared acceptance checks live
-in `shared/tests/ui/checks.scm`. Runtime primitives in `otium.generic` provide
+The implementation is `shared/lib/otium/ui.ot`; shared acceptance checks live
+in `shared/tests/ui/checks.ot`. Runtime primitives in `otium.generic` provide
 property construction, mounting and migration while preserving fixed slot
 access. See `specs/classes.md` for their contracts.
 

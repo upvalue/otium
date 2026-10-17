@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Embed a .scm file as a C header fragment: embed.py input.scm varname output.h"""
+"""Embed a .ot file as a C header fragment: embed.py input.ot varname output.h"""
 import os
 import sys
 
 
 def main():
     if len(sys.argv) != 4:
-        sys.stderr.write("usage: embed.py input.scm varname output.h\n")
+        sys.stderr.write("usage: embed.py input.ot varname output.h\n")
         return 1
     inp, var, out = sys.argv[1:4]
     with open(inp, "rb") as f:

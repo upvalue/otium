@@ -11,13 +11,13 @@ algorithm, input, timing boundary, and result check where possible.
 - `vendor/` is the pinned upstream git submodule. `PROVENANCE.md` records its
   repository and commit.
 - `ports/` contains the Otium translations.
-- `lib/benchmark.scm` supplies the Otium benchmark driver.
+- `lib/benchmark.ot` supplies the Otium benchmark driver.
 - `manifest.json` lists the supported ports, parity grades, deviations, and
   exceptional heap limits.
 - `run.py` runs Otium and, optionally, an upstream Scheme implementation on the
   same machine.
-- `results.csv` contains raw samples. `STATUS.md` is the corresponding readable
-  summary.
+- `../results/r7rs/` holds the curated historical CSV and status summary.
+  New runs go to ignored `../runs/r7rs/` directories, or `--output DIR`.
 - `test_ports.py` runs reduced-input correctness checks for every port.
 
 Do not edit or commit changes inside `vendor/`. Put an Otium-specific change in
@@ -38,14 +38,14 @@ step automatically.
 Run one or more canonical inputs:
 
 ```sh
-python3 benchmarks/r7rs/run.py c/otium fib ack
+tools/python benchmarks/r7rs/run.py --runtime c --only fib ack
 ```
 
 Use the same sources on Chez:
 
 ```sh
-python3 benchmarks/r7rs/run.py chez/run fib ack --runtime chez
-python3 benchmarks/r7rs/test_ports.py chez/run --runtime chez
+tools/python benchmarks/r7rs/run.py --runtime chez --only fib ack
+tools/python benchmarks/r7rs/test_ports.py --runtime chez
 ```
 
 Omitting benchmark names runs every port. `--runs N` collects multiple samples,
@@ -56,7 +56,7 @@ If Guile is installed, the same command can also run the unmodified upstream
 program on the same host:
 
 ```sh
-python3 benchmarks/r7rs/run.py c/otium fib --reference guile
+tools/python benchmarks/r7rs/run.py --runtime c --only fib --reference guile
 ```
 
 Otium receives the canonical input datums in its generated source. Guile
@@ -73,7 +73,7 @@ recorded in each result row.
 Run the normal suite:
 
 ```sh
-python3 benchmarks/r7rs/test_ports.py c/otium
+tools/python benchmarks/r7rs/test_ports.py c/otium
 ```
 
 The `r7rs-ports` test exercises all ports with reduced inputs and checks their

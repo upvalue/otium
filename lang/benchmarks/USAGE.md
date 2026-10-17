@@ -1,15 +1,15 @@
 # Benchmarks
 
-Workloads are organized by what they measure. Pass either `c/otium` or
-`chez/run` to the shared runners.
+Workloads are organized by what they measure. Select a runtime with `--runtime c|chez`. An optional positional executable
+keeps support for custom runtime builds.
 
 From the repository root:
 
 ```sh
 make
-python3 benchmarks/run.py c/otium
-python3 benchmarks/run.py chez/run
-python3 benchmarks/compare.py --otium c/otium
+tools/python benchmarks/run.py --runtime c
+tools/python benchmarks/run.py --runtime chez
+tools/python benchmarks/compare.py --otium c/otium
 ```
 
 `run.py` runs every file in `workloads/` by default. Supply paths after the
@@ -30,8 +30,21 @@ inputs, runtime flags, upstream references, and reduced-input checks.
 It uses `c/benchmarks/gc_bench.c` and the shared allocation workloads:
 
 ```sh
-python3 benchmarks/gc/compare.py --runs 1 --warmups 0
+tools/python benchmarks/gc/compare.py --runs 1 --warmups 0
 ```
 
 `c/README.md` is retained as historical documentation. Current commands and
 paths are listed here.
+
+## Results and provenance
+
+Runs write to ignored `benchmarks/runs/<family>/<timestamp>/` directories by
+default. Use `--output FILE` for the workload and paired runners, or `--output DIR`
+for R7RS. Curated historical results live under `benchmarks/results/`; promote
+new results there deliberately. GC comparison retains its explicit `--csv` output.
+
+Reports record commands, commit, dirty state, platform, and a `--build-label`.
+The paired runner deliberately uses direct Chez without imported-library
+compilation, preserving its existing measurement boundary. Other runners use the
+normal launcher. Cache state is not normalized; record it when comparing startup
+performance. Do not combine results from different compilation policies.

@@ -13,7 +13,7 @@ on both runtimes. The library checks also run under C GC stress. Root make
 test includes this target alongside the shared reader, expander, CLI,
 conditions, help, and REPL suites. FFI and SDL retain their focused targets.
 
-Both runtimes load shared/prelude/core.scm. Collection helpers, dotimes,
+Both runtimes load shared/prelude/core.ot. Collection helpers, dotimes,
 strings/buffers, callable collections and keywords, copying put, common
 condition values, clocks, and read-file now have a common API. The optional
 otium.extra module contains threading macros, partial, comp, group-by, and
@@ -25,7 +25,7 @@ defonce and uses a forwarding function, which follows redefinition on both.
 Saved function values still keep their old implementation on both runtimes.
 
 OTCL is now one implementation in examples/otcl/. Its acceptance tests live
-in shared/tests/otcl.scm. Tcl-facing division explicitly chooses quotient for
+in shared/tests/otcl.ot. Tcl-facing division explicitly chooses quotient for
 exact integer results and inexact division for fractions. There is no second
 interpreter maintained for Chez.
 

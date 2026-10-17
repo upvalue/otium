@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Portable Otium conformance suite runner.
 
-Usage: run-tests.py [options] /path/to/otium-binary [test-name ...]
+Usage: run_tests.py [options] /path/to/otium-binary [test-name ...]
 
-For each NN-name.scm in this directory (or only the named tests), runs
-`binary NN-name.scm` and diffs its stdout against expected/NN-name.txt.
+For each NN-name.ot in this directory (or only the named tests), runs
+`binary NN-name.ot` and diffs its stdout against expected/NN-name.txt.
 Tests run in parallel (they are independent processes); output is printed
 in test order as results arrive. Exit code is the number of failing tests.
 
@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 def run_one(binary, here, expected_dir, test, timeout):
     """Returns (name, passed, lines-to-print)."""
-    name = test[: -len(".scm")]
+    name = test[: -len(".ot")]
     expected_path = os.path.join(expected_dir, name + ".txt")
     try:
         with open(expected_path, encoding="utf-8") as f:
@@ -86,12 +86,12 @@ def main():
 
     tests = sorted(
         f for f in os.listdir(here)
-        if f.endswith(".scm") and f[:2].isdigit()
+        if f.endswith(".ot") and f[:2].isdigit()
     )
     if args.names:
         only = set(args.names)
         tests = [t for t in tests
-                 if t in only or t[: -len(".scm")] in only]
+                 if t in only or t[: -len(".ot")] in only]
     if args.filter:
         tests = [t for t in tests if args.filter in t]
     for pat in args.skip:

@@ -132,7 +132,7 @@ static void print_result(const char* workload, uint64_t elapsed_ns, ot_gc_stats 
 int main(int argc, char** argv) {
   if (argc < 2 || argc > 3) {
     fprintf(stderr, "usage: gc-bench churn|mixed|fragmentation [iterations]\n"
-                    "       gc-bench BENCHMARK.scm\n");
+                    "       gc-bench BENCHMARK.ot\n");
     return 2;
   }
   bool direct = strcmp(argv[1], "churn") == 0 || strcmp(argv[1], "mixed") == 0 ||

@@ -23,4 +23,4 @@ Decision recorded; shared code has a form with the same meaning on both runtimes
 
 **2026-10-17T21:45:12Z**
 
-Both runtimes use sequential let bindings through the shared expander. Documented in docs/portability.md and covered by shared/tests/expander/checks.scm.
+Both runtimes use sequential let bindings through the shared expander. Documented in docs/portability.md and covered by shared/tests/expander/checks.ot.

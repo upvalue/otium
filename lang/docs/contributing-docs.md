@@ -28,9 +28,9 @@ Do not edit README files as part of this workflow.
 
 ## Regenerate the reference
 
-The build reads `shared/documentation/runtime.json` and public docstrings in `shared/prelude/core.scm`. Prelude docstrings override catalog entries, matching runtime help precedence. Native C bindings and forms use the shared catalog. The site generator records each entry's source and emits `site/dist/reference.md` along with its HTML.
+The build reads `shared/documentation/runtime.json` and public docstrings in `shared/prelude/core.ot`. Prelude docstrings override catalog entries, matching runtime help precedence. Native C bindings and forms use the shared catalog. The site generator records each entry's source and emits `site/dist/reference.md` along with its HTML.
 
-Update the catalog or definition docstring, then rebuild. Do not edit the generated reference. If the catalog changes, also run `python3 shared/documentation/generate.py` to refresh the runtime's generated files.
+Update the catalog or definition docstring, then rebuild. Do not edit the generated reference. If the catalog changes, also run `tools/python shared/documentation/generate.py` to refresh the runtime's generated files.
 
 ## Verify changes
 

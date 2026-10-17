@@ -11,7 +11,7 @@
 (define directory (cadr (command-line)))
 (load-path (list directory))
 (define (source name forms)
-  (let ([path (string-append directory "/" name ".scm")])
+  (let ([path (string-append directory "/" name ".ot")])
     (when (file-exists? path) (delete-file path))
     (call-with-output-file path
       (lambda (port)

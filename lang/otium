@@ -1,4 +1,42 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec "$root/c/otium" "$@"
+runtime=c
+remaining=$#
+application=no
+# Rotate the original arguments once, removing only runtime selectors. Values
+# of launcher options and everything after -- pass through unchanged.
+while [ "$remaining" -gt 0 ]; do
+    argument=$1
+    shift
+    remaining=$((remaining - 1))
+    if [ "$application" = yes ]; then
+        set -- "$@" "$argument"
+        continue
+    fi
+    case "$argument" in
+        --) application=yes; set -- "$@" "$argument" ;;
+        --runtime=*) runtime=${argument#--runtime=} ;;
+        --runtime)
+            if [ "$remaining" -eq 0 ]; then
+                printf '%s\n' 'otium: --runtime requires c or chez' >&2
+                exit 2
+            fi
+            runtime=$1; shift; remaining=$((remaining - 1)) ;;
+        --path|-L|--project|--load)
+            set -- "$@" "$argument"
+            if [ "$remaining" -gt 0 ]; then
+                value=$1; shift; remaining=$((remaining - 1))
+                set -- "$@" "$value"
+            fi ;;
+        *) set -- "$@" "$argument" ;;
+    esac
+    case "$runtime" in
+        c|chez) ;;
+        *) printf 'otium: unknown runtime: %s (expected c or chez)\n' "$runtime" >&2; exit 2 ;;
+    esac
+done
+case "$runtime" in
+    c) exec "$root/c/otium" "$@" ;;
+    chez) exec "$root/chez/run" "$@" ;;
+esac

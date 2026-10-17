@@ -1,4 +1,4 @@
-;; expander.scm -- the Otium macro expander, shared by the C and Chez runtimes.
+;; expander.ot -- the Otium macro expander, shared by the C and Chez runtimes.
 ;;
 ;; Loaded before any macro exists, so this file may use only core forms
 ;; (quote if begin fn def def- set! let while and or cond quasiquote) and

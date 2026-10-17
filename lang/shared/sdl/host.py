@@ -3,7 +3,9 @@ import json
 import os
 from pathlib import Path
 import platform
-from schema import STRUCTS, MEMBERS, TYPEDEFS
+from shared.sdl.schema import STRUCTS, MEMBERS, TYPEDEFS
+from otium_tools import command as runtime_command, environment
+
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 TARGET = platform.machine() + '-' + platform.system().lower()
@@ -38,11 +40,7 @@ def bootstrap(runtime, manifest=DEFAULT_MANIFEST):
     math_names = '("/usr/lib/libSystem.B.dylib")' if platform.system() == 'Darwin' else '("libm.so.6" "libm.so")'
     prefix += "(def sdl-math (ffi/open-library '" + math_names + "))\n"
     prefix += "(def sin (ffi/bind sdl-math \"sin\" '(double) 'double))\n(def cos (ffi/bind sdl-math \"cos\" '(double) 'double))\n"
-    return prefix + (HERE/'bindings.scm').read_text() + (HERE/'canvas.scm').read_text()
+    return prefix + (HERE/'bindings.ot').read_text() + (HERE/'canvas.ot').read_text()
 
 def command(runtime, script):
-    return ([str(ROOT/'c/otium'),'--no-project'] if runtime == 'c' else [os.environ.get('CHEZ','chez'),'--libdirs',str(ROOT/'chez'),'--script',str(ROOT/'chez/main.ss')]) + [str(script)]
-
-def environment():
-    extension = 'dylib' if platform.system() == 'Darwin' else 'so'
-    return dict(os.environ, OTIUM_FFI_LIBRARY=str(ROOT/'shared/build'/TARGET/('libotium-ffi.'+extension)))
+    return runtime_command(runtime, script)

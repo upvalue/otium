@@ -510,7 +510,7 @@ A macro is a closure that runs at **expansion time**: it is called with a
 call's argument forms unevaluated, and the form it returns replaces the
 call.
 
-Both runtimes use the same expander, `shared/prelude/expander.scm`, written
+Both runtimes use the same expander, `shared/prelude/expander.ot`, written
 in Otium itself. Expansion is eager and happens once. Immediately before
 a top-level form is evaluated, it is fully expanded:
 
@@ -645,7 +645,7 @@ finishes, so a switch cannot leak out of nested code.
 
 Quoting of specs and names is tolerated and ignored. If the namespace is
 not yet loaded, it is located on the **load path**: the name with `.`
-replaced by `/` plus the extension `.scm`, searched across the host's
+replaced by `/` plus the extension `.ot`, searched across the host's
 configured load-path directories; the file is evaluated with the current
 namespace set to the target. A file that is already mid-load (circular
 require) is an error, as is a name not found on the path.

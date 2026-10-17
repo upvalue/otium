@@ -3,7 +3,8 @@
 """Fast correctness checks for the Otium benchmark ports."""
 
 import argparse
-import importlib.util
+from benchmarks.r7rs import run as RUNNER
+from otium_tools import command
 import os
 import shutil
 import subprocess
@@ -14,10 +15,6 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parent
-SPEC = importlib.util.spec_from_file_location("r7rs_runner", ROOT / "run.py")
-RUNNER = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(RUNNER)
-
 INPUTS = {
     "fib": "1\n10\n55\n",
     "ack": "1\n2\n4\n11\n",
@@ -40,10 +37,10 @@ INPUTS = {
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("binary", type=Path)
+    parser.add_argument("binary", type=Path, nargs="?")
     parser.add_argument("--runtime", choices=["c", "chez"], default="c")
     args = parser.parse_args()
-    binary = args.binary.absolute()
+    binary = command(args.runtime, isolated=False, executable=args.binary)
     flags = ["--no-project"]
     if args.runtime == "c":
         flags.append("--c.max-depth=2000")
@@ -56,11 +53,11 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="otium-r7rs-test-") as temp_dir:
         for name, input_text in INPUTS.items():
-            source = Path(temp_dir) / f"{name}.scm"
+            source = Path(temp_dir) / f"{name}.ot"
             source.write_text(RUNNER.otium_program(ROOT, name, "otium-test", input_text))
             result = subprocess.run(
                 [
-                    binary,
+                    *binary,
                     *flags,
                     source,
                 ],

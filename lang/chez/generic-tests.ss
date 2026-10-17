@@ -115,7 +115,7 @@
 (define directory (cadr (command-line)))
 (load-path (list directory))
 (define (source forms)
-  (let ([path (string-append directory "/generic-provider.scm")])
+  (let ([path (string-append directory "/generic-provider.ot")])
     (when (file-exists? path) (delete-file path))
     (call-with-output-file path
       (lambda (p) (for-each (lambda (f) (write f p) (newline p)) forms)))))

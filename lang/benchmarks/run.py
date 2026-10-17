@@ -3,6 +3,8 @@
 """Run standalone Otium programs and summarize their wall-clock times."""
 
 import argparse
+import json
+from otium_tools import command, metadata, run_directory
 import statistics
 import subprocess
 import sys
@@ -28,12 +30,16 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="benchmark standalone Otium programs"
     )
-    parser.add_argument("binary", type=Path, help="path to the otium executable")
+    parser.add_argument("binary", type=Path, nargs="?", help="optional runtime-specific executable")
+    parser.add_argument("--only", nargs="+", type=Path, help="select workloads without a positional executable")
+    parser.add_argument("--runtime", choices=("c", "chez"), default="c")
+    parser.add_argument("--output", type=Path, help="JSON report path")
+    parser.add_argument("--build-label", default="unspecified")
     parser.add_argument(
         "benchmarks",
         nargs="*",
         type=Path,
-        help=".scm files to run (default: every benchmark)",
+        help=".ot files to run (default: every benchmark)",
     )
     parser.add_argument(
         "--warmups",
@@ -63,7 +69,7 @@ def run_once(binary, benchmark, timeout):
     started = time.perf_counter()
     try:
         result = subprocess.run(
-            [binary, "--no-project", benchmark],
+            [*binary, str(benchmark)],
             text=True,
             capture_output=True,
             check=False,
@@ -87,12 +93,12 @@ def format_duration(seconds):
 
 def main():
     args = parse_args()
-    binary = args.binary.absolute()
+    binary = command(args.runtime, executable=args.binary)
     benchmark_dir = Path(__file__).resolve().parent / "workloads"
-    requested = args.benchmarks or sorted(benchmark_dir.glob("*.scm"))
+    requested = args.only or args.benchmarks or sorted(benchmark_dir.glob("*.ot"))
     benchmarks = [benchmark.resolve() for benchmark in requested]
 
-    if not binary.is_file():
+    if not Path(binary[0]).is_file():
         print(f"error: executable not found: {binary}", file=sys.stderr)
         return 2
     if not benchmarks:
@@ -109,6 +115,8 @@ def main():
         f"{'max':>10}  {'runs':>4}"
     )
 
+    report = {"provenance": metadata([binary + [str(p)] for p in benchmarks], build_label=args.build_label),
+              "runs": args.runs, "warmups": args.warmups, "benchmarks": {}}
     for benchmark in benchmarks:
         try:
             for _ in range(args.warmups):
@@ -120,6 +128,7 @@ def main():
             print(f"error: {benchmark.name}: {error}", file=sys.stderr)
             return 1
 
+        report["benchmarks"][benchmark.stem] = {"wall_seconds": samples}
         print(
             f"{benchmark.stem:<{name_width}}  "
             f"{format_duration(statistics.median(samples)):>10}  "
@@ -128,6 +137,10 @@ def main():
             f"{len(samples):>4}"
         )
 
+    output = args.output or run_directory("workloads") / "results.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(report, indent=2) + "\n")
+    print(f"Results: {output}")
     return 0
 
 

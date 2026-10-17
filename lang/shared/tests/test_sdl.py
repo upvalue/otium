@@ -12,11 +12,10 @@ import sys
 import tempfile
 import time
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT/'shared/sdl'))
-from host import bootstrap, command, environment, literal, DEFAULT_MANIFEST
+from shared.sdl.host import bootstrap, command, environment, literal, DEFAULT_MANIFEST
 
 def run_source(runtime, source, directory, env=None):
-    script = directory/(runtime+'.scm'); script.write_text(source)
+    script = directory/(runtime+'.ot'); script.write_text(source)
     return subprocess.run(command(runtime, script), cwd=ROOT, env=env or environment(), capture_output=True, text=True, timeout=45)
 
 def passed(result, marker):
@@ -76,7 +75,7 @@ def main():
         for runtime in runtimes:
             prefix = bootstrap(runtime)
             env = environment(); env['SDL_AUDIO_DRIVER'] = 'dummy'
-            result = run_source(runtime,prefix+'\n(def fixture-path '+literal(fixture)+')\n'+(ROOT/'shared/tests/sdl/common.scm').read_text(),directory,env)
+            result = run_source(runtime,prefix+'\n(def fixture-path '+literal(fixture)+')\n'+(ROOT/'shared/tests/sdl/common.ot').read_text(),directory,env)
             passed(result,'SDL fixture checks: 15')
             print(runtime+': manifest, copied event lifetime, input conversion, dummy audio passed',flush=True)
             # Alter the manifest itself, so startup must reject a layout before SDL_Init.
@@ -92,7 +91,7 @@ def main():
                 else: os.environ['SDL3_LIBRARY'] = old
             result = run_source(runtime,override,directory,env)
             assert result.returncode != 0 and '/no/such/SDL3-library' in result.stderr, (result.stdout,result.stderr)
-            launch = [sys.executable,str(ROOT/'examples/run-sdl.py'),'--runtime',runtime]
+            launch = [sys.executable,str(ROOT/'examples/run_sdl.py'),'--runtime',runtime]
             result = subprocess.run(launch+['--acceptance','--audio','dummy','--inject-error','--capture',str(directory/(runtime+'.bmp'))],env=env,capture_output=True,text=True,timeout=45)
             unavailable = any(text in result.stderr for text in ('The video driver did not add any displays','No available video device','Unable to open a console terminal','Could not initialize EGL','Could not find a valid EGL device','No available renderers','Couldn\'t find matching render driver'))
             if result.returncode and unavailable and not args.require_accelerated:
@@ -115,7 +114,7 @@ def main():
                 result = subprocess.run(launch+['--scene',scene,'--frames','3'],env=env,capture_output=True,text=True,timeout=45)
                 passed(result,'render errors 0; ticks 3')
             # Synchronize edits with observed frames, not interpreter startup time.
-            scene = directory/'scene.scm'
+            scene = directory/'scene.ot'
             status = directory/(runtime+'-status')
             capture = directory/(runtime+'-reload.bmp')
             replace(scene, '(def (render! t dt) (set! scene-ticks (+ scene-ticks 1)) (clear! 10 20 30))\n')

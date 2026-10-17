@@ -33,7 +33,7 @@ for (const stress of [false, true]) {
 }
 for (const stress of [false, true]) {
   fresh(stress);
-  expect(readFileSync(root + 'shared/tests/classes/checks.scm', 'utf8'), 'class checks passed 96\nnil');
+  expect(readFileSync(root + 'shared/tests/classes/checks.ot', 'utf8'), 'class checks passed 96\nnil');
 }
 for (const example of JSON.parse(readFileSync(root + 'site/public/assets/examples.json'))) {
   fresh();
@@ -44,12 +44,12 @@ for (const page of ['index', 'guide']) {
   const source = readFileSync(root + `docs/${page}.md`, 'utf8');
   for (const match of source.matchAll(/```scheme\n([\s\S]*?)```/g)) expect(match[1]);
 }
-for (const name of readdirSync(root + 'c/tests/otium').filter(name => /^\d.*\.scm$/.test(name))) {
+for (const name of readdirSync(root + 'c/tests/otium').filter(name => /^\d.*\.ot$/.test(name))) {
   fresh();
   const result = evaluate(readFileSync(root + 'c/tests/otium/' + name, 'utf8'));
-  let expected = readFileSync(root + 'c/tests/otium/expected/' + name.replace('.scm', '.txt'), 'utf8').trimEnd();
+  let expected = readFileSync(root + 'c/tests/otium/expected/' + name.replace('.ot', '.txt'), 'utf8').trimEnd();
   // ✨ This fixture deliberately exceeds the WASM target's signed 31-bit range.
-  if (name === '05-control.scm') expected = expected.replace('1250025000', String(Number(BigInt.asIntN(31, 1250025000n))));
+  if (name === '05-control.ot') expected = expected.replace('1250025000', String(Number(BigInt.asIntN(31, 1250025000n))));
   assert.equal(result.status, 1, `${name}: ${result.text}`);
   assert.equal(result.text, expected + '\nnil', name);
 }

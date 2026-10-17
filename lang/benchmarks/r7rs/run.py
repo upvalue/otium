@@ -3,6 +3,7 @@
 """Run Otium benchmark ports and optional upstream Guile references."""
 
 import argparse
+from otium_tools import command, metadata, run_directory
 import csv
 import hashlib
 import json
@@ -34,10 +35,13 @@ def print_vendor_error():
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("binary", type=Path, help="path to the Otium executable")
+    parser.add_argument("binary", type=Path, nargs="?", help="optional runtime-specific executable")
+    parser.add_argument("--output", type=Path, help="directory for CSV, status, and provenance")
+    parser.add_argument("--build-label", default="unspecified")
     parser.add_argument("benchmarks", nargs="*", help="ports to run; default: all")
     parser.add_argument("--runtime", choices=["c", "chez"], default="c",
                         help="runtime for flags and result labels (default: c)")
+    parser.add_argument("--only", nargs="+", help="select ports without a positional executable")
     parser.add_argument("--runs", type=int, default=1, help="samples per benchmark")
     parser.add_argument("--timeout", type=float, default=300.0, help="seconds per sample")
     parser.add_argument(
@@ -92,8 +96,8 @@ def execute(command, timeout, stdin=None, env=None):
 
 
 def otium_program(root, name, implementation, input_text):
-    library = (root / "lib" / "benchmark.scm").read_text()
-    port = (root / "ports" / f"{name}.scm").read_text()
+    library = (root / "lib" / "benchmark.ot").read_text()
+    port = (root / "ports" / f"{name}.ot").read_text()
     return (
         f'(def *benchmark-implementation* "{implementation}")\n'
         f"(def *benchmark-inputs* '(\n{input_text}\n))\n"
@@ -132,14 +136,17 @@ def main():
         print_vendor_error()
         return 2
     repo = root.parents[1]
-    binary = args.binary.absolute()
+    binary = command(args.runtime, isolated=False, executable=args.binary)
+    output_dir = args.output or run_directory("r7rs")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    commands = []
     manifest = json.loads((root / "manifest.json").read_text())
-    selected = args.benchmarks or list(manifest["benchmarks"])
+    selected = args.only or args.benchmarks or list(manifest["benchmarks"])
     unknown = [name for name in selected if name not in manifest["benchmarks"]]
     if unknown:
         print(f"error: unknown benchmark: {unknown[0]}", file=sys.stderr)
         return 2
-    if not binary.is_file():
+    if not Path(binary[0]).is_file():
         print(f"error: executable not found: {binary}", file=sys.stderr)
         return 2
 
@@ -162,12 +169,13 @@ def main():
             flags = ["--no-project"]
             if args.runtime == "c":
                 flags.append(f"--c.heap-max={heap_max}")
-            program_path = temp / f"{name}-otium.scm"
+            program_path = temp / f"{name}-otium.ot"
             program_path.write_text(otium_program(root, name, implementation, input_text))
 
+            commands.append([*binary, *flags, str(program_path)])
             for sample in range(1, args.runs + 1):
                 code, wall, stdout, stderr = execute(
-                    [str(binary), *flags, str(program_path)], args.timeout
+                    [*binary, *flags, str(program_path)], args.timeout
                 )
                 if code == "timeout":
                     status, impl, bench_name, reported, reason = (
@@ -261,7 +269,7 @@ def main():
         "upstream_commit",
         "otium_commit",
     ]
-    with (root / "results.csv").open("w", newline="") as output:
+    with (output_dir / "results.csv").open("w", newline="") as output:
         writer = csv.DictWriter(output, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
@@ -278,7 +286,9 @@ def main():
             f"{row['sample']} | {row['status']} | {row['reported_seconds']} | "
             f"{row['wall_seconds']} |"
         )
-    (root / "STATUS.md").write_text("\n".join(status_lines) + "\n")
+    (output_dir / "STATUS.md").write_text("\n".join(status_lines) + "\n")
+    (output_dir / "metadata.json").write_text(json.dumps(metadata(commands, build_label=args.build_label), indent=2) + "\n")
+    print(f"Results: {output_dir}")
     return 1 if had_failure else 0
 
 

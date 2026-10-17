@@ -1,4 +1,14 @@
 .DEFAULT_GOAL := all
+PYTHON ?= python3
+export PYTHON
+RUN_PYTHON := tools/python
+# One invocation uses one C configuration, including optional native targets.
+ifneq ($(filter ffi ui test-ffi test-sdl test-sdl-integration test-ui-layout test-ui-gpu test-native test-gpu,$(MAKECMDGOALS)),)
+WITH_FFI := 1
+endif
+WITH_FFI ?= 0
+export WITH_FFI
+
 
 .PHONY: clean all lib test test-c test-chez test-expander test-sdl test-sdl-integration test-repl sdl-setup bench bench-gc format hygiene gc-lint
 
@@ -6,59 +16,58 @@
 all lib bench bench-gc format hygiene gc-lint:
 	$(MAKE) -C c $@
 
-test: test-c test-chez test-expander test-classes test-match test-ui test-cli test-reader test-library
+test: test-tools check-generated test-c test-chez test-expander test-classes test-match test-ui test-cli test-reader test-library
 	$(MAKE) test-repl
 
-test-c:
+test-c: all
 	$(MAKE) -C c test
-	python3 shared/tests/test_conditions.py --runtime c
+	$(RUN_PYTHON) shared/tests/test_conditions.py --runtime c
 
 test-chez:
 	chez/test
-	python3 shared/tests/test_conditions.py --runtime chez
+	$(RUN_PYTHON) shared/tests/test_conditions.py --runtime chez
 
 # One set of expander checks, run unchanged on both runtimes.
 test-expander: all
-	c/otium --no-project shared/tests/expander/checks.scm
-	OTIUM_GC_STRESS=1 c/otium --no-project shared/tests/expander/checks.scm
-	chez/run --no-project shared/tests/expander/checks.scm
+	./otium --runtime=c --no-project shared/tests/expander/checks.ot
+	OTIUM_GC_STRESS=1 ./otium --runtime=c --no-project shared/tests/expander/checks.ot
+	./otium --runtime=chez --no-project shared/tests/expander/checks.ot
 
 sdl-setup:
-	python3 shared/sdl/setup.py
+	$(RUN_PYTHON) shared/sdl/setup.py
 
-test-sdl: ffi ui
-	python3 shared/tests/test_sdl.py --runtime both
-	python3 shared/tests/test_ui_gpu.py
+test-sdl: ui
+	$(RUN_PYTHON) shared/tests/test_sdl.py --runtime both
+	$(RUN_PYTHON) shared/tests/test_ui_gpu.py
 
 test-sdl-integration: ffi
-	python3 shared/tests/test_sdl.py --runtime both --require-accelerated
+	$(RUN_PYTHON) shared/tests/test_sdl.py --runtime both --require-accelerated
 
 test-repl: all
 	$(MAKE) -C shared
-	python3 shared/tests/test_help.py
-	python3 shared/tests/test_repl.py
+	$(RUN_PYTHON) shared/tests/test_help.py
+	$(RUN_PYTHON) shared/tests/test_repl.py
 
 clean:
 	$(MAKE) -C c clean
 	$(MAKE) -C shared clean
 
 .PHONY: test-ffi ffi
-ffi:
-	$(MAKE) -C c WITH_FFI=1 all
+ffi: all
 	$(MAKE) -C shared ffi
 
 test-ffi: ffi
-	python3 shared/tests/test_ffi.py --stress
+	$(RUN_PYTHON) shared/tests/test_ffi.py --stress
 
 .PHONY: test-cli
 test-cli: all
-	python3 shared/cli/generate.py --check
-	python3 shared/tests/test_cli.py
+	$(RUN_PYTHON) shared/cli/generate.py --check
+	$(RUN_PYTHON) shared/tests/test_cli.py
 
 .PHONY: test-reader
 test-reader: all
-	python3 shared/tests/test_reader.py
-	python3 shared/tests/test_reader.py --stress
+	$(RUN_PYTHON) shared/tests/test_reader.py
+	$(RUN_PYTHON) shared/tests/test_reader.py --stress
 
 # ✨ Markdown documentation and the browser C runtime.
 .PHONY: site test-site
@@ -67,42 +76,77 @@ site:
 
 test-site: site
 	node site/tests/runtime.mjs
-	$(or $(PYTHON),python3) site/tests/check_site.py
+	$(RUN_PYTHON) site/tests/check_site.py
 
 .PHONY: test-classes
 test-classes: all
-	c/otium --no-project shared/tests/classes/checks.scm
-	OTIUM_GC_STRESS=1 c/otium --no-project shared/tests/classes/checks.scm
-	chez/run --no-project shared/tests/classes/checks.scm
+	./otium --runtime=c --no-project shared/tests/classes/checks.ot
+	OTIUM_GC_STRESS=1 ./otium --runtime=c --no-project shared/tests/classes/checks.ot
+	./otium --runtime=chez --no-project shared/tests/classes/checks.ot
 
 .PHONY: test-match
 test-match: all
-	c/otium --no-project shared/tests/match/checks.scm
-	OTIUM_GC_STRESS=1 c/otium --no-project shared/tests/match/checks.scm
-	chez/run --no-project shared/tests/match/checks.scm
+	./otium --runtime=c --no-project shared/tests/match/checks.ot
+	OTIUM_GC_STRESS=1 ./otium --runtime=c --no-project shared/tests/match/checks.ot
+	./otium --runtime=chez --no-project shared/tests/match/checks.ot
 
 .PHONY: test-library
 test-library: all
-	python3 shared/tests/test_library.py
-	python3 shared/tests/test_modules.py
+	$(RUN_PYTHON) shared/tests/test_library.py
+	$(RUN_PYTHON) shared/tests/test_modules.py
 
 .PHONY: test-ui
 test-ui: all
-	c/otium --no-project --path shared/lib shared/tests/ui/checks.scm
-	OTIUM_GC_STRESS=1 c/otium --no-project --path shared/lib shared/tests/ui/checks.scm
-	chez/run --no-project --path shared/lib shared/tests/ui/checks.scm
+	./otium --runtime=c --no-project --path shared/lib shared/tests/ui/checks.ot
+	OTIUM_GC_STRESS=1 ./otium --runtime=c --no-project --path shared/lib shared/tests/ui/checks.ot
+	./otium --runtime=chez --no-project --path shared/lib shared/tests/ui/checks.ot
 
 .PHONY: ui-setup ui test-ui-layout test-ui-gpu
 ui-setup:
-	python3 shared/ui/setup.py --download
+	$(RUN_PYTHON) shared/ui/setup.py --download
 
 ui: ffi
-	python3 shared/ui/setup.py
+	$(RUN_PYTHON) shared/ui/setup.py
 	cmake -S shared/ui -B shared/build/$(shell uname -m)-$(shell uname -s | tr '[:upper:]' '[:lower:]')/ui -DCMAKE_BUILD_TYPE=Release
 	cmake --build shared/build/$(shell uname -m)-$(shell uname -s | tr '[:upper:]' '[:lower:]')/ui -j 4
 
 test-ui-layout: ui
-	python3 shared/tests/test_ui_layout.py
+	$(RUN_PYTHON) shared/tests/test_ui_layout.py
 
 test-ui-gpu: ui
-	python3 shared/tests/test_ui_gpu.py --require-gpu
+	$(RUN_PYTHON) shared/tests/test_ui_gpu.py --require-gpu
+
+.PHONY: help test-tools test-native test-gpu test-benchmarks generate check-generated
+help:
+	@printf '%s\n' \
+	  'make                         Build C (Chez runs from source)' \
+	  './otium --runtime=c|chez FILE.ot -- ARGS' \
+	  'make test                    Default portable + runtime + REPL tests' \
+	  'make test-c / test-chez       Runtime tests and shared conditions' \
+	  'make test-native             FFI, SDL, and native UI layout checks' \
+	  'make test-gpu                Require GPU and accelerated SDL checks' \
+	  'make test-benchmarks          Reduced R7RS correctness checks' \
+	  'make test-site               Build and check browser runtime/site' \
+	  'make generate / check-generated  Checked-in CLI and reference catalogs' \
+	  'make ui-setup / sdl-setup     Prepare optional native dependencies' \
+	  'make gc-lint                 Optional LLVM managed-pointer analysis' \
+	  'See docs/development.md for dependencies and conventions.'
+
+test-tools:
+	$(RUN_PYTHON) -m unittest discover -s tools/tests -v
+
+test-native: test-ffi test-sdl test-ui-layout
+
+test-gpu: test-ui-gpu test-sdl-integration
+
+test-benchmarks: all
+	$(RUN_PYTHON) benchmarks/r7rs/test_ports.py --runtime c
+	$(RUN_PYTHON) benchmarks/r7rs/test_ports.py --runtime chez
+
+generate:
+	$(RUN_PYTHON) shared/cli/generate.py
+	$(RUN_PYTHON) shared/documentation/generate.py
+
+check-generated:
+	$(RUN_PYTHON) shared/cli/generate.py --check
+	$(RUN_PYTHON) shared/documentation/generate.py --check

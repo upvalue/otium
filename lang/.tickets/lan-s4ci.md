@@ -12,7 +12,7 @@ tags: [portability]
 ---
 # Common require form and file suffix for shared modules
 
-C uses (require '(x :as y)) and .ot; Chez uses (require x :as y) and .scm. Pick one form both accept, or a per-runtime loader adapter as docs/ffi.md allows.
+C uses (require '(x :as y)) and .ot; Chez uses (require x :as y) and .ot. Pick one form both accept, or a per-runtime loader adapter as docs/ffi.md allows.
 
 ## Acceptance Criteria
 

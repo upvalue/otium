@@ -8,15 +8,15 @@ From `lang/`:
 
 ```sh
 make ffi
-python3 examples/run-math.py --runtime c
-python3 examples/run-math.py --runtime chez
+tools/python examples/run_math.py --runtime c
+tools/python examples/run_math.py --runtime chez
 make test-ffi
 ```
 
 Both examples print `1.0`, `5.0`, `0.75`, and `12.0`. On macOS the launcher
 loads libSystem; on Linux it tries `libm.so.6`, then `libm.so`. The launcher only
 establishes the namespace alias and library candidates. The binding declarations
-and program are in `examples/math.scm`.
+and program are in `examples/math.ot`.
 
 C needs libffi and pkg-config for `WITH_FFI=1`. The default build has no libffi
 link dependency and reports FFI unavailable when imported. Chez uses its native
@@ -29,7 +29,7 @@ integer/float conversions, UTF-8 copying, allocations, byte views, scalar and
 field memory access, immutable struct/union layouts, embedded arrays, and
 struct/union-by-value arguments and results. Aggregate results are owning allocations
 and need `free!`. Bindings retain their address and prepared signature. Shared
-layout and API code lives in `shared/ffi/core.scm`.
+layout and API code lives in `shared/ffi/core.ot`.
 
 The native fixture checks exact expected values, library-scoped symbol lookup,
 failed-write preservation, integer range differences, copied string lifetime,
@@ -66,9 +66,9 @@ changes. Launching from an existing manifest needs no compiler or headers.
 ```sh
 make ffi
 make sdl-setup
-python3 shared/sdl/setup.py --check
-python3 examples/run-sdl.py --runtime c --scene shapes
-python3 examples/run-sdl.py --runtime chez --scene particles
+tools/python shared/sdl/setup.py --check
+tools/python examples/run_sdl.py --runtime c --scene shapes
+tools/python examples/run_sdl.py --runtime chez --scene particles
 make test-sdl
 make test-sdl-integration
 ```

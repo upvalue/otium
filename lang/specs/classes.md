@@ -415,7 +415,7 @@ and Chez. Runtime-specific suites cover namespace ownership, imported method
 extensions, file reloads, explicit resets, and dispatch against an independent
 oracle. `make test` runs these with the other runtime and shared tests.
 
-`benchmarks/workloads/classes.scm` exercises slot reads and writes, ancestor
+`benchmarks/workloads/classes.ot` exercises slot reads and writes, ancestor
 dispatch, and an around method using the same source on both runtimes.
 
 ## Decisions

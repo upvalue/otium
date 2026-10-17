@@ -24,7 +24,7 @@ needed. Grouped specs such as `(require (a :as x) (b :as y))` and the older
 quoted specs remain accepted. `ns` accepts `(:require ...)` clauses.
 
 Names map dots to directories. Within each load-path directory, `.ot` is
-preferred to `.scm`; an earlier directory takes priority over a later one.
+preferred to `.ot`; an earlier directory takes priority over a later one.
 A module's `ns` declaration must match its requested name. Circular loads
 fail and clear their loading guard so the source can be fixed and retried.
 
@@ -41,7 +41,7 @@ for portable callbacks.
 
 ## Library contracts
 
-`shared/prelude/core.scm` supplies the derived core on both runtimes.
+`shared/prelude/core.ot` supplies the derived core on both runtimes.
 `map`, `filter`, `take`, `drop`, and sorting preserve list/array kind. `map`
 accepts one sequence. `fold-left`, `fold-right`, `exists`, and `for-all`
 accept multiple proper lists and stop at the shortest one. Native Scheme's
@@ -115,7 +115,7 @@ subforms; do not depend on Otium macro expansion inside that boundary.
 
 C embedding, collector controls, and extension internals stay C-specific.
 The maintained extension example is `c/src/ot-ext-demo.c`, exercised by
-`c/tests/ext-demo.scm` and its source fixture. The obsolete extension API
+`c/tests/ext-demo.ot` and its source fixture. The obsolete extension API
 example has been removed.
 
 This shared contract does not require Chez to pass C's entire dialect suite.

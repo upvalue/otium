@@ -2,11 +2,10 @@ CC ?= cc
 AR ?= ar
 PYTHON ?= python3
 
-# Keep compiler output outside the checkout by default. PLATFORM also names the
-# one CLI binary kept in the checkout, so synced copies for different hosts do
-# not overwrite each other.
+# Build outputs belong to this checkout and platform. Override BUILD_ROOT or
+# BIN_ROOT for external build storage.
 PLATFORM ?= $(shell uname -m)-$(shell uname -s | tr '[:upper:]' '[:lower:]')
-BUILD_ROOT ?= /tmp/otium
+BUILD_ROOT ?= build
 BIN_ROOT ?= bin
 
 # Collector implementation. "semi" is the whole-heap copying collector and

@@ -1,4 +1,6 @@
-;; The launcher establishes ffi and math-library-names.
+;; Run with ./otium --runtime=c|chez examples/math.ot after make ffi.
+(require otium.ffi :as ffi)
+(def math-library-names '("/usr/lib/libSystem.B.dylib" "libm.so.6" "libm.so"))
 (def math-library (ffi/open-library math-library-names))
 (def native-cos (ffi/bind math-library "cos" '(double) 'double))
 (def native-hypot (ffi/bind math-library "hypot" '(double double) 'double))

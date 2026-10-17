@@ -7,6 +7,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 
+from otium_tools import runtime_argument, runtimes, command as runtime_command
+
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).with_name('reader')
 
@@ -23,6 +25,7 @@ def run(command, source, expected=0):
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--stress', action='store_true', help='Collect at every C allocation')
+runtime_argument(parser)
 args = parser.parse_args()
 if args.stress:
     os.environ['OTIUM_GC_STRESS'] = '1'
@@ -30,10 +33,10 @@ if args.stress:
 fixtures = json.loads((FIXTURES / 'datums.json').read_text())
 with tempfile.TemporaryDirectory(prefix='otium-reader-') as directory:
     directory = Path(directory)
-    for runtime, executable in [('c', ROOT / 'c/otium'), ('chez', ROOT / 'chez/run')]:
-        command = [str(executable), '--no-project']
-        path = directory / 'checks.scm'
-        source = (FIXTURES / 'values.scm').read_text()
+    for runtime in runtimes(args.runtime):
+        command = runtime_command(runtime)
+        path = directory / 'checks.ot'
+        source = (FIXTURES / 'values.ot').read_text()
         for text, expected in fixtures['positive']:
             source += f'\n(check {expected} (read-string {literal(text)}))'
         for text in fixtures['negative']:
@@ -57,7 +60,7 @@ with tempfile.TemporaryDirectory(prefix='otium-reader-') as directory:
         path.write_text(source)
         result = run(command + [str(path)], '')
         assert result.stdout == 'reader values passed\nreader fixtures passed\n', result
-        module = directory / 'readerfixture.scm'
+        module = directory / 'readerfixture.ot'
         module.write_text('(ns readerfixture)\n(def value [nil :module 0xff])\n')
         require = "(require '(readerfixture :as r))" if runtime == 'c' else '(require readerfixture :as r)'
         path.write_text(require + '\n(println (get r/value 1) (if (get r/value 0) 99 7))\n')

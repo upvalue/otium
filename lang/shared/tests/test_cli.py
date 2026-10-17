@@ -5,10 +5,12 @@ from pathlib import Path
 import subprocess
 import tempfile
 
+from otium_tools import command as runtime_command
+
 ROOT = Path(__file__).resolve().parents[2]
 COMMANDS = [
-    [str(ROOT / 'c/otium')],
-    [str(ROOT / 'chez/run')],
+    runtime_command('c', isolated=False),
+    runtime_command('chez', isolated=False),
 ]
 
 
@@ -22,16 +24,16 @@ def run(command, *args, cwd=ROOT, env=None, status=0):
 help_outputs = [run(cmd, '--help').stdout for cmd in COMMANDS]
 assert help_outputs[0] == help_outputs[1], help_outputs
 for cmd in COMMANDS:
-    run(cmd, '--no-project', ROOT / 'shared/tests/cli/common.scm')
+    run(cmd, '--no-project', ROOT / 'shared/tests/cli/common.ot')
     for bad in [('--unknown',), ('--c.heap-mxa=1024',), ('--c.heap-max', '1024'),
                 ('--c.heap-max=-1',), ('--c.heap-max=0',), ('--c.heap-max= 12',),
                 ('--c.heap-max=18446744073709551616',), ('--c.max-depth=4294967296',),
                 ('--help=yes',), ('--path',), ('--',),
-                ('a.scm', 'b.scm'), ('--project', 'x', '--no-project')]:
+                ('a.ot', 'b.ot'), ('--project', 'x', '--no-project')]:
         run(cmd, *bad, status=2)
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        script = tmp / 'arguments.scm'
+        script = tmp / 'arguments.ot'
         script.write_text('''(require otium.process)
 (for-each (fn (arg) (display (string-length arg)) (display ":") (display arg) (newline)) (otium.process/arguments))
 (display (otium.process/script-name)) (newline)
@@ -42,13 +44,13 @@ for cmd in COMMANDS:
         assert result.stdout == expected, result
         assert run(cmd, '--no-project', script).stdout == str(script) + '\n'
         assert run(cmd, script, '--help').stdout == help_outputs[0]
-        pre = tmp / 'pre.scm'
+        pre = tmp / 'pre.ot'
         pre.write_text('(display "pre\\n")')
         assert run(cmd, '--no-project', '--load', pre, script).stdout.startswith('pre\n')
         assert run(cmd, '--no-project', '--load', pre).stdout == 'pre\n'
         library = tmp / 'lib'
         library.mkdir()
-        (library / 'sample.scm').write_text('(ns sample) (def answer 42)')
+        (library / 'sample.ot').write_text('(ns sample) (def answer 42)')
         script.write_text('(require sample) (display sample/answer) (newline)')
         assert run(cmd, '--no-project', '--path', library, script).stdout == '42\n'
         assert run(cmd, '--no-project', '-L', library, script).stdout == '42\n'
@@ -59,7 +61,7 @@ for cmd in COMMANDS:
         child.mkdir()
         assert run(cmd, script, cwd=child).stdout == '42\n'
         assert run(cmd, '--project', tmp / 'project.ot', script, cwd='/tmp').stdout == '42\n'
-    example = ROOT / 'examples/greet.scm'
+    example = ROOT / 'examples/greet.ot'
     assert run(cmd, '--no-project', example, '--', '-n2', 'Alice').stdout == 'Hello, Alice!\n' * 2
     help_result = run(cmd, '--no-project', example, '--', '--help')
     assert 'Number of greetings' in help_result.stdout and 'default: 1' in help_result.stdout
@@ -70,9 +72,9 @@ for cmd in COMMANDS:
 
 # Inactive backend settings are accepted, validated, and silent.
 result = run(COMMANDS[1], '--c.gc-stats', '--c.gc-force-compact', '--c.heap-max=1024',
-             '--no-project', ROOT / 'examples/greet.scm', '--', 'Alice')
+             '--no-project', ROOT / 'examples/greet.ot', '--', 'Alice')
 assert result.stdout == 'Hello, Alice!\n' and result.stderr == '', result
 # Check moving-GC roots used to install process arguments and parse a schema.
 env = dict(os.environ, OTIUM_GC_STRESS='1')
-run(COMMANDS[0], '--no-project', ROOT / 'shared/tests/cli/common.scm', env=env)
+run(COMMANDS[0], '--no-project', ROOT / 'shared/tests/cli/common.ot', env=env)
 print('CLI parity and GC stress passed')

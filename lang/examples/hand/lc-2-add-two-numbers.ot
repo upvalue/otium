@@ -1,4 +1,4 @@
-;; leetcode-2-add-two-numbers.scm - https://leetcode.com/problems/add-two-numbers/description/
+;; leetcode-2-add-two-numbers.ot - https://leetcode.com/problems/add-two-numbers/description/
 
 (def (add-two-numbers-impl a b accum)
   (println a b accum)

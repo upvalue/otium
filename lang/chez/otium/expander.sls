@@ -9,8 +9,11 @@
   (define-record-type (expander make-expander expander?)
     (fields lookup native-syntax? invoke))
 
+  (define unary-application-name (gensym "otium-unary-call"))
   (define application-name (gensym "otium-call"))
   (define (install-application! env)
+    (define-top-level-syntax unary-application-name
+      (top-level-syntax 'otium-unary-call (environment '(otium core))) env)
     (define-top-level-syntax application-name
       (top-level-syntax 'otium-call (environment '(otium core))) env))
 
@@ -29,7 +32,9 @@
       (define-top-level-value 'expander-application
         (lambda (form)
           (cond [(= (length form) 2)
-                 (cons (list 'quote cached-call) (cons (list 'quote (make-slot-cache)) form))]
+                 (cons unary-application-name
+                   (cons (list 'quote cached-call)
+                     (cons (list 'quote (make-slot-cache)) form)))]
                 [(and (eq? (car form) 'set-applied!) (= (length form) 4))
                  (cons (list 'quote cached-set-call) (cons (list 'quote (make-slot-cache)) form))]
                 [else (cons application-name form)])) env)

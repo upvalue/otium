@@ -22,7 +22,7 @@
     string? string-length string=? string<? string>? string<=? string>=? string-append
     values
     display print println newline write
-    (rename (ot-append append) (ot-call otium-call) (ot-substring substring) (ot-string->number string->number))
+    (rename (ot-append append) (ot-call otium-call) (ot-unary-call otium-unary-call) (ot-substring substring) (ot-string->number string->number))
     str buffer buffer? buffer-push! buffer->string
     string-split string-join string-contains? string-starts-with? string-ends-with?
     string-replace string-trim string-upcase string-downcase
@@ -81,6 +81,13 @@
       [(_ callee arg ...)
        (let ([f callee])
          (if (procedure? f) (f arg ...) (collection-call f arg ...)))]))
+  ;; Keep procedure calls visible to Chez without going through the variadic
+  ;; collection dispatcher. Preserve unary calls' argument-before-callee order.
+  (define-syntax ot-unary-call
+    (syntax-rules ()
+      [(_ fallback cache callee arg)
+       (let* ([a arg] [f callee])
+         (if (procedure? f) (f a) (fallback cache f a)))]))
   (define (ot-append . lists)
     (for-each (lambda (xs)
                 (unless (list? xs) (error 'append "expected proper list" xs)))

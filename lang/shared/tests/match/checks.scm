@@ -1,0 +1,166 @@
+;; Pattern matching exercised unchanged on both runtimes.
+(def checks 0)
+(def (check label expected actual)
+  (if (equal? expected actual)
+      (set! checks (+ checks 1))
+      (begin (println "FAIL" label "expected" expected "got" actual) (exit 1))))
+(def (fails? form)
+  (try (begin (eval form) #f) (catch (error? e) #t)))
+
+;; Literals and names
+(def (lit v)
+  (match v
+    (nil 'nil) (() 'empty) (#t 'true) (#f 'false) (42 'int) (1.5 'float)
+    ("s" 'string) (:k 'keyword) ('sym 'symbol) ('(1 2) 'quoted-list)
+    (_ 'other)))
+(check "nil literal" 'nil (lit nil))
+(check "empty list literal" 'empty (lit '()))
+(check "true literal" 'true (lit #t))
+(check "false literal" 'false (lit #f))
+(check "int literal" 'int (lit 42))
+(check "literals are type strict" 'other (lit 42.0))
+(check "float literal" 'float (lit 1.5))
+(check "string literal" 'string (lit "s"))
+(check "keyword literal" 'keyword (lit :k))
+(check "quoted symbol" 'symbol (lit 'sym))
+(check "quoted list" 'quoted-list (lit (list 1 2)))
+(check "fallthrough" 'other (lit "t"))
+(check "name binds" 7 (match 7 (x x)))
+(check "wildcard binds nothing" 'ok (let ((_ 'ok)) (match 1 (_ _))))
+(def outer 5)
+(check "== compares with a variable" 'same (match 5 ((== outer) 'same) (_ 'different)))
+(check "bare name shadows instead of comparing" 6 (match 6 (outer outer)))
+
+;; Lists
+(check "exact list" '(1 2) (match '(1 2) ((list a b) (list a b))))
+(check "list too long" 'no (match '(1 2 3) ((list a b) 'yes) (_ 'no)))
+(check "list too short" 'no (match '(1) ((list a b) 'yes) (_ 'no)))
+(check "list rest" '(1 (2 3)) (match '(1 2 3) ((list a & r) (list a r))))
+(check "list empty rest" '(1 ()) (match '(1) ((list a & r) (list a r))))
+(check "dotted rest" '(1 (2)) (match '(1 2) ((list a . r) (list a r))))
+(check "list rest shares the tail" #t
+  (let ((l (list 1 2 3))) (match l ((list _ & r) (eq? r (cdr l))))))
+(check "list rejects arrays" 'no (match [1 2] ((list a b) 'yes) (_ 'no)))
+(check "nested lists" 4 (match '((1 2) (3 4)) ((list (list _ _) (list _ d)) d)))
+
+;; Quasiquote
+(def (msg m)
+  (match m
+    (`(move ,dx ,dy) (+ dx dy))
+    (`(say ,text) text)
+    (`(log . ,items) items)
+    (_ 'unknown)))
+(check "quasiquote tagged list" 3 (msg '(move 1 2)))
+(check "quasiquote second tag" "hi" (msg '(say "hi")))
+(check "quasiquote dotted tail" '(1 2) (msg '(log 1 2)))
+(check "quasiquote exact length" 'unknown (msg '(say "hi" "there")))
+(check "quasiquote literal head" 'unknown (msg '(jump 1 2)))
+(check "quasiquote splice is an error" #t (fails? '(match '(1) (`(,@x) x))))
+
+;; Arrays
+(check "exact array" 3 (match [1 2] ([a b] (+ a b))))
+(check "array length" 'no (match [1 2 3] ([a b] 'yes) (_ 'no)))
+(check "array at least" 3 (match [1 2 3] ([a b & _] (+ a b))))
+(check "array rejects lists" 'no (match '(1 2) ([a b] 'yes) (_ 'no)))
+(check "array rest binding is an error" #t (fails? '(match [1] ([a & r] r))))
+
+;; Tables
+(def (event e)
+  (match e
+    ({:type :click :pos [x y]} (list 'click x y))
+    ({:type :key :key k} :when (string? k) (list 'key k))
+    ({:type t} (list 'other t))
+    (_ 'not-an-event)))
+(check "table pattern" '(click 1 2) (event {:type :click :pos [1 2]}))
+(check "extra keys ignored" '(key "a") (event {:type :key :key "a" :mods [:shift]}))
+(check "guard falls through" '(other :key) (event {:type :key :key 5}))
+(check "missing key fails" 'not-an-event (event {:pos [1 2]}))
+(check "table pattern needs a table" 'no (match nil ({} 'yes) (_ 'no)))
+(check "empty table pattern" 'yes (match {:a 1} ({} 'yes)))
+(check "string keys" 2 (match {"a" 2} ({"a" v} v)))
+(check "quoted symbol keys" 3 (match {'s 3} ({'s v} v)))
+(check "optional key present" 1 (match {:a 1} ({:a (opt a)} a)))
+(check "optional key missing" nil (match {} ({:a (opt a)} a)))
+(check "optional key pattern must match when present" 'no
+  (match {:a "x"} ({:a (opt (? int? a))} a) (_ 'no)))
+(check "optional key default" 9 (match {} ({:a (opt a 9)} a)))
+(check "optional key default unused" 1 (match {:a 1} ({:a (opt a 9)} a)))
+(def default-evaluations 0)
+(match {:a 1} ({:a (opt a (begin (set! default-evaluations (+ default-evaluations 1)) 0))} a))
+(check "default evaluated only when missing" 0 default-evaluations)
+(check "non-literal key is an error" #t (fails? '(match {} ({k v} v))))
+(check "opt outside a table is an error" #t (fails? '(match 1 ((opt x) x))))
+
+;; Classes and abstract types
+(defabstract Shape)
+(defabstract Polygon :is Shape)
+(defclass Square :is Polygon side)
+(defclass Circle :is Shape (radius :init 1))
+(def (shape s)
+  (match s
+    ((Square :side 0) 'degenerate)
+    ((Square :side n) (list 'square n))
+    ((Polygon) 'polygon)
+    ((Circle :radius r) (list 'circle r))
+    (_ 'other)))
+(check "class slot pattern" '(square 2) (shape (make Square :side 2)))
+(check "class slot literal" 'degenerate (shape (make Square :side 0)))
+(check "class pattern" '(circle 1) (shape (make Circle)))
+(check "class pattern rejects tables" 'other (shape {:side 2}))
+(check "abstract pattern" 'shape (match (make Circle) ((Polygon) 'polygon) ((Shape) 'shape)))
+(check "built-in class pattern" 'string (match "x" ((Number) 'number) ((String) 'string)))
+(check "Object matches anything" 'object (match 1 ((Object) 'object)))
+(check "unknown slot is an error" #t (fails? '(match (make Circle) ((Circle :typo x) x))))
+(check "non-type head is an error" #t (fails? '(match 1 ((outer) 1))))
+(defclass Circle :is Shape (radius :init 1) (color :init :red))
+(check "class pattern after reload" '(circle 1) (shape (make Circle)))
+(check "reloaded slot" :red (match (make Circle) ((Circle :color c) c)))
+
+;; Combinators
+(check "? predicate" 'int (match 1 ((? string?) 'string) ((? int?) 'int)))
+(check "? with patterns" 3 (match 3 ((? int? (and n (? (fn (x) (> x 2))))) n)))
+(check "? with literal fn" 'big (match 10 ((? (fn (x) (> x 5))) 'big) (_ 'small)))
+(check "app" 6 (match 3 ((app (fn (x) (* x 2)) d) d)))
+(check "app with named function" 1 (match '(1 2) ((app car a) a)))
+(check "and binds both" '(1 (1 2)) (match '(1 2) ((and (list a _) whole) (list a whole))))
+(check "or alternatives" '(small small other)
+  (map (fn (v) (match v ((or 1 2) 'small) (_ 'other))) '(1 2 3)))
+(check "or with bindings" '(1 2 3 4)
+  (map (fn (v) (match v ((or [x _] (list _ x) {:x x}) x)))
+       (list [1 0] '(0 2) {:x 3} '(9 4))))
+(check "empty or fails" 'no (match 1 ((or) 'yes) (_ 'no)))
+(check "or alternatives must bind the same names" #t
+  (fails? '(match 1 ((or (list a) b) 1))))
+(check "repeated name is an error" #t (fails? '(match '(1 1) ((list a a) a))))
+
+;; Clauses
+(def evaluations 0)
+(match (begin (set! evaluations (+ evaluations 1)) '(1 2))
+  ((list a) a)
+  ((list a b c) a)
+  ((list a b) b))
+(check "value evaluated once" 1 evaluations)
+(check "guard sees bindings" 'pos (match 5 (n :when (> n 0) 'pos) (_ 'neg)))
+(def a 'outer)
+(check "later clauses do not see failed bindings" 'outer
+  (match '(1 2) ((list a 99) 'first) (_ a)))
+(check "empty body" nil (match 1 (_)))
+(check "body is a body" 3 (match 1 (x (def y 2) (+ x y))))
+(check "body in tail position" 'done
+  (let loop ((n 100000))
+    (match n (0 'done) (k (loop (- k 1))))))
+
+;; Failure
+(check "no match is a match-error" #t
+  (try (match 1 (2 'two)) (catch ((type-pred 'match-error) c) #t)))
+(check "match-error is an error" #t
+  (try (match 1 (2 'two)) (catch (error? c) (condition-of-type? c 'error))))
+(check "match-error holds the value" '(1 2)
+  (try (match '(1 2) ((list) 'none)) (catch ((type-pred 'match-error) c) (c :value))))
+(check "use-value restart" 'recovered
+  (handler-bind (((type-pred 'match-error) (fn (c) (invoke-restart 'use-value 'recovered))))
+    (match 1 (2 'two))))
+(check "invalid clause" #t (fails? '(match 1 x)))
+(check "guard without expression" #t (fails? '(match 1 (x :when))))
+
+(println "match checks passed" checks)

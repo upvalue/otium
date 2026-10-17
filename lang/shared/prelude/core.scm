@@ -331,6 +331,230 @@
   "(type-pred type)\nBuild a predicate for conditions of type or its registered subtypes."
   (fn (c) (condition-of-type? c t)))
 
+;; --- pattern matching (specs/match.md) -------------------------------------
+
+;; A clause compiles to one `and` of tests, so a failing test falls through to
+;; the next clause without a closure. Patterns are compiled against access
+;; expressions like (car v) or (get v :k); a value used more than once is first
+;; stored in a gensym temp with set!. Pattern names are bound only once the
+;; clause has matched, so later clauses never see a failed clause's names.
+
+(define-condition 'match-error 'error)
+
+(def (match-error value)
+  "(match-error value)\nSignal a match-error condition holding value under :value. A use-value restart returns its argument as the result of the failed match."
+  (restart-case (error {:type 'match-error :message "match: no clause matched" :value value})
+    (use-value "Use a value as the result of the match." (x) x)))
+
+(def- (pat-error message pattern) (error (str "match: " message) pattern))
+
+(def- (pat-temp st)
+  (let ((t (gensym "m")))
+    (put! st :temps (cons t (get st :temps)))
+    t))
+
+(def- (pat-set t form) `(begin (set! ,t ,form) #t))
+
+;; Run k on a symbol holding e's value, storing e in a temp first if needed.
+(def- (pat-hold st e k)
+  (if (symbol? e)
+      (k e)
+      (let ((t (pat-temp st)))
+        (cons (pat-set t e) (k t)))))
+
+(def- (pat-bind st name source)
+  (when (assq name (get st :binds)) (pat-error "name bound twice in one pattern" name))
+  (put! st :binds (cons (cons name source) (get st :binds))))
+
+(def- (pat-literal? p)
+  (or (nil? p) (null? p) (number? p) (string? p) (keyword? p) (boolean? p)))
+
+(def- (pat-literal-test e p)
+  (cond ((nil? p) `(nil? ,e))
+        ((null? p) `(null? ,e))
+        ((or (symbol? p) (keyword? p) (boolean? p)) `(eq? ,e (quote ,p)))
+        (else `(equal? ,e (quote ,p)))))
+
+;; (f e), with a literal one-parameter fn inlined as a let.
+(def- (pat-call f e)
+  (if (and (pair? f) (eq? (car f) 'fn) (pair? (cdr f))
+           (pair? (cadr f)) (symbol? (car (cadr f))) (null? (cdr (cadr f))))
+      `(let ((,(car (cadr f)) ,e)) ,@(cddr f))
+      `(,f ,e)))
+
+;; Compile p against a fresh binding list, returning (tests . binds).
+(def- (pat-isolated st p e)
+  (let ((saved (get st :binds)))
+    (put! st :binds '())
+    (let ((tests (pat-compile st p e))
+          (binds (get st :binds)))
+      (put! st :binds saved)
+      (cons tests binds))))
+
+;; Give names one temp each, so alternatives can bind them from different places.
+(def- (pat-share st names)
+  (map (fn (n) (let ((t (pat-temp st))) (pat-bind st n t) (cons n t))) names))
+
+(def- (pat-copy-out shared binds)
+  (map (fn (s) (pat-set (cdr s) (cdr (assq (car s) binds)))) shared))
+
+(def- (pat-or st alts v)
+  (if (null? alts)
+      (list #f)
+      (let ((compiled (map (fn (a) (pat-isolated st a v)) alts))
+            (names (map car (cdr (car compiled)))))
+        (for-each (fn (c)
+                    (unless (and (= (length (cdr c)) (length names))
+                                 (for-all (fn (n) (assq n (cdr c))) names))
+                      (pat-error "or alternatives must bind the same names" (cons 'or alts))))
+                  compiled)
+        (let ((shared (pat-share st names)))
+          (list `(or ,@(map (fn (c) `(and ,@(car c) ,@(pat-copy-out shared (cdr c))))
+                            compiled)))))))
+
+(def- (pat-opt st p e)
+  (cond ((and (pair? (cdr p)) (pair? (cddr p)) (null? (cdr (cddr p))))
+         (let ((name (cadr p)) (g (pat-temp st)))
+           (unless (symbol? name) (pat-error "opt with a default needs a name" p))
+           (pat-bind st name g)
+           (pat-hold st e (fn (t) (list (pat-set g `(if (nil? ,t) ,(caddr p) ,t)))))))
+        ((and (pair? (cdr p)) (null? (cddr p)))
+         (pat-hold st e
+           (fn (t)
+             (let ((c (pat-isolated st (cadr p) t)))
+               (let ((shared (pat-share st (map car (cdr c)))))
+                 (list `(or (nil? ,t) (and ,@(car c) ,@(pat-copy-out shared (cdr c))))))))))
+        (else (pat-error "invalid opt" p))))
+
+;; A table value pattern against e, the looked-up value.
+(def- (pat-table-value st p e)
+  (cond ((and (pair? p) (eq? (car p) 'opt)) (pat-opt st p e))
+        ((or (and (pat-literal? p) (not (nil? p))) (and (pair? p) (eq? (car p) 'quote)))
+         (pat-compile st p e))
+        (else (pat-hold st e (fn (t) (cons `(not (nil? ,t)) (pat-compile st p t)))))))
+
+(def- (pat-table st args v)
+  (let loop ((rest args) (tests (list `(table? ,v))))
+    (cond ((null? rest) tests)
+          ((null? (cdr rest)) (pat-error "table pattern needs key/pattern pairs" (cons 'table args)))
+          (else
+           (let ((k (car rest)))
+             (unless (or (pat-literal? k) (and (pair? k) (eq? (car k) 'quote)))
+               (pat-error "table pattern keys must be literals" k))
+             (loop (cddr rest)
+                   (append tests (pat-table-value st (cadr rest) `(get ,v ,k)))))))))
+
+(def- (pat-list st args v)
+  (let loop ((rest args) (cur v))
+    (cond ((null? rest) (list `(null? ,cur)))
+          ((not (pair? rest)) (pat-compile st rest cur))
+          ((eq? (car rest) '&)
+           (unless (and (pair? (cdr rest)) (null? (cddr rest)))
+             (pat-error "& needs exactly one pattern after it" (cons 'list args)))
+           (pat-compile st (cadr rest) cur))
+          (else
+           (pat-hold st cur
+             (fn (c)
+               (cons `(pair? ,c)
+                     (append (pat-compile st (car rest) `(car ,c))
+                             (loop (cdr rest) `(cdr ,c))))))))))
+
+(def- (pat-quasi st tmpl e)
+  (cond ((and (pair? tmpl) (eq? (car tmpl) 'unquote)) (pat-compile st (cadr tmpl) e))
+        ((and (pair? tmpl) (or (eq? (car tmpl) 'unquote-splicing) (eq? (car tmpl) 'quasiquote)))
+         (pat-error "unsupported inside a quasiquote pattern" tmpl))
+        ((pair? tmpl)
+         (pat-hold st e
+           (fn (v)
+             (cons `(pair? ,v)
+                   (append (pat-quasi st (car tmpl) `(car ,v))
+                           (pat-quasi st (cdr tmpl) `(cdr ,v)))))))
+        (else (list (pat-literal-test e tmpl)))))
+
+(def- (pat-array st args v)
+  (let loop ((rest args) (i 0) (tests '()))
+    (cond ((null? rest)
+           (append (list `(array? ,v) `(= (length ,v) ,i)) tests))
+          ((eq? (car rest) '&)
+           (unless (and (pair? (cdr rest)) (eq? (cadr rest) '_) (null? (cddr rest)))
+             (pat-error "array rest patterns only accept _" (cons 'array args)))
+           (append (list `(array? ,v) `(>= (length ,v) ,i)) tests))
+          (else
+           (loop (cdr rest) (+ i 1)
+                 (append tests (pat-compile st (car rest) `(get ,v ,i))))))))
+
+(def- (pat-class st type args v)
+  (let loop ((rest args) (tests (list `(class-subtype? (dispatch-type ,v) ,type))))
+    (cond ((null? rest) tests)
+          ((not (and (keyword? (car rest)) (pair? (cdr rest))))
+           (pat-error "class patterns take keyword/pattern pairs" (cons type args)))
+          (else
+           (loop (cddr rest)
+                 (append tests (pat-compile st (cadr rest) `(,v ,(car rest)))))))))
+
+(def- (pat-all st ps v)
+  (if (pair? ps) (append (pat-compile st (car ps) v) (pat-all st (cdr ps) v)) '()))
+
+;; Patterns that need their value more than once, given a symbol v holding it.
+(def- (pat-compound st p v)
+  (let ((head (car p)) (args (cdr p)))
+    (cond ((eq? head 'list) (pat-list st args v))
+          ((eq? head 'quasiquote) (pat-quasi st (car args) v))
+          ((eq? head 'array) (pat-array st args v))
+          ((eq? head 'table) (pat-table st args v))
+          ((eq? head '?) (cons (pat-call (car args) v) (pat-all st (cdr args) v)))
+          ((eq? head 'and) (pat-all st args v))
+          ((eq? head 'or) (pat-or st args v))
+          ((eq? head 'opt) (pat-error "opt is only allowed as a table value" p))
+          ((or (eq? head 'unquote) (eq? head 'unquote-splicing))
+           (pat-error "unquote outside a quasiquote pattern" p))
+          ((symbol? head) (pat-class st head args v))
+          (else (pat-error "unsupported pattern" p)))))
+
+(def- (pat-compile st p e)
+  (cond ((eq? p '_) '())
+        ((symbol? p) (pat-bind st p e) '())
+        ((pat-literal? p) (list (pat-literal-test e p)))
+        ((not (pair? p)) (pat-error "unsupported pattern" p))
+        ((eq? (car p) 'quote) (list (pat-literal-test e (cadr p))))
+        ((eq? (car p) '==) (list `(equal? ,e ,(cadr p))))
+        ((eq? (car p) '?)
+         (unless (pair? (cdr p)) (pat-error "? needs a predicate" p))
+         (if (null? (cddr p))
+             (list (pat-call (cadr p) e))
+             (pat-hold st e (fn (v) (pat-compound st p v)))))
+        ((eq? (car p) 'app)
+         (unless (and (pair? (cdr p)) (pair? (cddr p)) (null? (cdr (cddr p))))
+           (pat-error "app needs a function and one pattern" p))
+         (let ((t (pat-temp st)))
+           (cons (pat-set t (pat-call (cadr p) e)) (pat-compile st (caddr p) t))))
+        (else (pat-hold st e (fn (v) (pat-compound st p v))))))
+
+(def- (match-clauses v clauses)
+  (if (null? clauses)
+      `(match-error ,v)
+      (let ((clause (car clauses)))
+        (unless (pair? clause) (pat-error "invalid clause" clause))
+        (let ((guarded (and (pair? (cdr clause)) (eq? (cadr clause) :when)))
+              (st {:temps '() :binds '()})
+              (tests (pat-compile st (car clause) v))
+              (names (map (fn (b) (list (car b) (cdr b))) (reverse (get st :binds))))
+              (body `(let ,names ,@(if guarded (cdr (cddr clause)) (cdr clause))))
+              (temps (map (fn (t) (list t nil)) (get st :temps))))
+          (when (and guarded (not (pair? (cddr clause))))
+            (pat-error ":when needs a guard" clause))
+          (let ((form (if (or (pair? tests) guarded)
+                          `(if (and ,@tests ,@(if guarded (list `(let ,names ,(caddr clause))) '()))
+                               ,body
+                               ,(match-clauses v (cdr clauses)))
+                          body)))
+            (if (pair? temps) `(let ,temps ,form) form))))))
+
+(defmacro match (expr . clauses)
+  "(match value (pattern body ...) (pattern :when guard body ...) ...)\nEvaluate value once and run the body of the first clause whose pattern matches and whose guard is truthy, with the pattern's names bound. No match signals match-error. See specs/match.md for patterns."
+  (let ((v (gensym "value")))
+    `(let ((,v ,expr)) ,(match-clauses v clauses))))
+
 ;; --- functional (10.8) ------------------------------------------------------
 
 ;; Scheme list helpers, matching the Chez runtime's names.

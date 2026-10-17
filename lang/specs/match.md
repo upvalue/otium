@@ -1,6 +1,7 @@
 # Pattern matching
 
-Not implemented. This is a design to come back to, not a commitment.
+Implemented on the C and Chez runtimes, in `shared/prelude/core.scm`. Checks
+are in `shared/tests/match/checks.scm`.
 
 `match` takes a value apart by shape and binds the pieces. It's a macro in the
 shared prelude, written in Otium, so both runtimes get the same behaviour from
@@ -105,8 +106,10 @@ those calls and treats `array` and `table` as pattern heads. Patterns read the
 way the values are built.
 
 Class patterns read the class var when the match runs, not when it's expanded,
-so redefining a class keeps working. A slot the class doesn't have is the same
-runtime error as `(instance :slot)`.
+so redefining a class keeps working. They test
+`(class-subtype? (dispatch-type value) Type)`, which also works for built-in
+classes, so `(String)` matches strings. A slot the class doesn't have is the
+same runtime error as `(instance :slot)`.
 
 ## Pattern heads
 
@@ -114,17 +117,28 @@ A list pattern's head resolves in this order:
 
 1. A core form: `?`, `app`, `and`, `or`, `==`, `opt`, `quote`,
    `quasiquote`, `list`, `array`, `table`.
-2. A var holding a class or abstract type.
-3. Otherwise it's an error at expansion time.
+2. Anything else is taken as a class or abstract type.
+
+The expander can't read a var's value, so a head that isn't a type is caught
+when the match runs: `class-subtype?` raises an error for a non-type.
 
 ## Compilation
 
-A `match` expands to straight-line tests and `let`s. It doesn't allocate a
-closure per clause, and `(list a & rest)` binds the tail without copying.
+A `match` expands to one `and` of tests per clause, nested in `if`s. It doesn't
+allocate a closure per clause, and `(list a & rest)` binds the tail without
+copying.
 
-`app` and `?` with a symbol or literal `fn` are inlined: `(app car a)` becomes
-`(let ((t (car v))) …)`. Without that, user patterns would cost more than
-built-in ones and people would avoid them.
+Tests work on access expressions like `(car v)` or `(get v :k)`. A value that's
+used more than once, such as a list cell or a table lookup bound to a name, is
+stored in a temp first. Names bound to cheap accesses like `(car v)` are read
+again in the guard and the body, so a guard that mutates the matched value can
+be seen by the body.
+
+A literal one-parameter `fn` given to `?` or `app` is inlined as a `let`
+instead of being called.
+
+On a small dispatch benchmark (tagged lists, a table and an array), `match`
+runs at the same speed as the equivalent hand-written `cond` on both runtimes.
 
 Neighbouring clauses that test the same shape may share the test. Whether a
 `?` or `app` function runs again for a later clause is unspecified, so they

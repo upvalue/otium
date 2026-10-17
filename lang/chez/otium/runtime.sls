@@ -104,7 +104,8 @@
           (define-top-level-value 'describe
             (lambda (name)
               (unless (symbol? name) (error 'describe "expected a symbol" name))
-              (binding-documentation space name)) env)
+              (describe-binding (current-namespace) name)) env)
+          (define-top-level-value 'current-ns (lambda () (namespace-name (current-namespace))) env)
           (define-top-level-value 'macro? otium-macro? env)
           ;; Native syntax may preserve nested forms past the Otium traversal.
           ;; Reject declarations there too; lexical value bindings still shadow them.
@@ -431,17 +432,27 @@
                (apply values results))))])))
 
   (define (definition-help form)
-    (let* ([macro? (eq? (car form) 'defmacro)]
-           [head (cadr form)]
-           [parameters (cond [macro? (caddr form)] [(pair? head) (cdr head)] [else #f])]
-           [body (if macro? (cdddr form) (cddr form))]
-           [doc (if (and (pair? body) (string? (car body)) (pair? (cdr body)))
-                    (car body) "")])
-      (string-append
-        (if parameters
-            (format "~a parameters: ~s. " (if macro? "Macro" "Procedure") parameters)
-            "")
-        doc)))
+    (let ([body (if (eq? (car form) 'defmacro) (cdddr form) (cddr form))])
+      (if (and (pair? body) (string? (car body)) (pair? (cdr body)))
+          (car body) "")))
+
+  (define (describe-binding space name)
+    (let* ([import (hashtable-ref (namespace-imports space) name #f)]
+           [owner (if import (find-namespace (car import)) space)]
+           [member (if import (cdr import) name)]
+           [local? (hashtable-contains? (namespace-definitions owner) member)]
+           [env (namespace-environment owner)]
+           [core (find-namespace 'otium.core)]
+           [known? (or local? (top-level-bound? member env))]
+           [text (binding-documentation owner member)])
+      (cond
+        [known?
+         (string-append
+           (symbol->string (namespace-name (if (or local? import) owner core)))
+           "/" (symbol->string member) ": "
+           (if (string=? text "") "no documentation" text))]
+        [(not (string=? text "")) text]
+        [else (void)])))
 
   (define (binding-documentation space name)
     (let* ([import (hashtable-ref (namespace-imports space) name #f)]

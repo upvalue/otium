@@ -180,6 +180,16 @@
           [(null? x) "null"] [(pair? x) "pair"] [(boolean? x) "boolean"] [(symbol? x) "symbol"]
           [(string? x) "string"] [(and (integer? x) (exact? x)) "int"]
           [(number? x) "float"] [(procedure? x) "function"] [else "native"])))
+  (define (write-string x port)
+    (display "\"" port)
+    (string-for-each
+      (lambda (c)
+        (let ([escape (assv (char->integer c)
+                        '((10 . "\\n") (9 . "\\t") (13 . "\\r")
+                          (0 . "\\0") (27 . "\\e") (34 . "\\\"") (92 . "\\\\")))])
+          (if escape (display (cdr escape) port) (display c port))))
+      x)
+    (display "\"" port))
   (define (render x port display? depth)
     (define (items xs)
       (unless (null? xs)
@@ -188,7 +198,8 @@
     (cond [(> depth 100) (display "..." port)]
           [(buffer? x)
            (if display? (display (buffer->string x) port)
-               (begin (display "#<buffer " port) (write (buffer->string x) port) (display ">" port)))]
+               (begin (display "#<buffer " port) (write-string (buffer->string x) port) (display ">" port)))]
+          [(string? x) (if display? (display x port) (write-string x port))]
           [(nil? x) (display "nil" port)]
           [(keyword? x) (display ":" port) (display (keyword->string x) port)]
           [(array? x) (display "[" port) (items (array-list x)) (display "]" port)]

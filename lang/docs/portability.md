@@ -78,6 +78,19 @@ cannot be read. Portable input is UTF-8 without invalid byte sequences.
 `jiffies-per-second` returns 1000000000. `current-second` returns inexact Unix
 seconds. These operations depend on the host platform and its filesystem.
 
+`current-ns` returns a namespace symbol. `describe` returns
+`"namespace/name: docstring"` for a binding, uses `no documentation` for a
+binding without documentation, and returns `nil` for an unknown name.
+Imports report the defining namespace. Runtime forms use the shared reference.
+
+`append` accepts only proper lists, including its final argument. Sequence
+helpers reject improper lists. Native error wording may differ; portable tests
+check that an error is raised.
+
+Display leaves a top-level string unquoted. Strings nested in lists, arrays,
+and tables are quoted and escaped on both runtimes, including when using
+`str` and buffers.
+
 ## Runtime boundaries
 
 Chez keeps its numeric tower. `(/ 3 2)` is `3/2` there and `1.5` on C.

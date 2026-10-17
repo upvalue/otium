@@ -1,0 +1,8 @@
+plain a b symbol
+["a b" symbol ["quote\"slash\\" "line\nbreak"]]
+{"key" "value" :nested ["x"]}
+("a" "b" . "tail")
+["x" x]
+["x"]
+"a b" ["x"] ("x")
+["\0\e\t\r\n" "é🙂"]

@@ -714,18 +714,18 @@ static void render_string(buf* out, otv value, bool display) {
   buf_byte(out, '"');
 }
 
-static void render_pair(ots* state, buf* out, otv value, bool display, unsigned depth) {
+static void render_pair(ots* state, buf* out, otv value, unsigned depth) {
   buf_byte(out, '(');
   bool first = true;
   while (is_type(value, OBJ_PAIR)) {
     if (!first) buf_byte(out, ' ');
-    render_value(state, out, as_pair(value)->car, display, depth + 1);
+    render_value(state, out, as_pair(value)->car, false, depth + 1);
     value = as_pair(value)->cdr;
     first = false;
   }
   if (value != ot_null) {
     buf_cstr(out, " . ");
-    render_value(state, out, value, display, depth + 1);
+    render_value(state, out, value, false, depth + 1);
   }
   buf_byte(out, ')');
 }
@@ -821,13 +821,13 @@ static void render_value(ots* state, buf* out, otv value, bool display, unsigned
     case OBJ_SYMBOL: render_name(out, value, false); break;
     case OBJ_KEYWORD: render_name(out, value, true); break;
     case OBJ_STRING: render_string(out, value, display); break;
-    case OBJ_PAIR: render_pair(state, out, value, display, depth); break;
+    case OBJ_PAIR: render_pair(state, out, value, depth); break;
     case OBJ_ARRAY: {
       ot_array_obj* array = as_array(value);
       buf_byte(out, '[');
       for (size_t i = 0; i < array->length; i++) {
         if (i != 0) buf_byte(out, ' ');
-        render_value(state, out, as_slots(array->slots)->values[i], display, depth + 1);
+        render_value(state, out, as_slots(array->slots)->values[i], false, depth + 1);
       }
       buf_byte(out, ']');
       break;
@@ -840,9 +840,9 @@ static void render_value(ots* state, buf* out, otv value, bool display, unsigned
       for (size_t i = 0; i < table->used; i++) {
         if (!entries->values[i].live) continue;
         if (!first) buf_byte(out, ' ');
-        render_value(state, out, entries->values[i].key, display, depth + 1);
+        render_value(state, out, entries->values[i].key, false, depth + 1);
         buf_byte(out, ' ');
-        render_value(state, out, entries->values[i].value, display, depth + 1);
+        render_value(state, out, entries->values[i].value, false, depth + 1);
         first = false;
       }
       buf_byte(out, '}');

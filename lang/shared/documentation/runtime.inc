@@ -44,7 +44,7 @@ const char* ot_runtime_documentation(const char* name) {
     {"define-condition", "(define-condition name parent)\nRegister a condition type and parent for condition-of-type? checks; use nil for no parent."},
     {"defmacro", "(defmacro name parameters [\"docstring\"] body ...)\nDefine an unhygienic Otium macro. It receives unevaluated argument datums and returns replacement code; use gensym for fresh names."},
     {"defparam", "(defparam name [\"docstring\"] default)\nDefine a named dynamically scoped parameter. Call (name) to read it; use with-params to override it temporarily."},
-    {"describe", "(describe 'name)\nReturn documentation for a binding or runtime form. Definition docstrings take precedence over the shared runtime reference. C prefixes binding results with namespace/name."},
+    {"describe", "(describe 'name)\nReturn namespace/name: docstring for a binding, a no-documentation placeholder for an undocumented binding, or nil for an unknown name. Runtime forms return their shared reference text."},
     {"display", "(display value ...)\nWrite display representations to the host output sink, separated by spaces, without a newline. Return nil."},
     {"eq?", "(eq? a b)\nCompare immediate values by value and heap objects by identity. Use equal? for structural comparison."},
     {"equal?", "(equal? a b)\nCompare values structurally, including pairs, arrays, tables, and string contents."},

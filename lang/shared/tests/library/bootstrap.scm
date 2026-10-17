@@ -1,5 +1,4 @@
-; The supported VM startup loads derived core operations from the embedded
-; prelude before user code runs.
+; Both runtimes load the shared core before user code runs.
 
 (println "empty-empty:"
          (empty? nil) (empty? '()) (empty? "") (empty? (buffer))
@@ -17,7 +16,7 @@
 (println "get-in-allocating-path:" (get-in {:s "ab"} [:s 0 0]))
 (println "get-in-improper:"
   (try (get-in {:a 1} '(:a . :tail))
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 
 ; Public core inventory called out by the specification.
 (let ((ok #t))
@@ -38,10 +37,10 @@
 (println "array-to-list:" (array-to-list [1 2 3]))
 (println "list-to-array-strict:"
   (try (list-to-array [1 2])
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 (println "array-to-list-strict:"
   (try (array-to-list '(1 2))
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 (println "current-ns:" (current-ns))
 (println "describe:" (describe 'documented-add))
 (println "describe-missing:" (describe 'missing-binding))

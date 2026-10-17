@@ -219,7 +219,8 @@
   "current-ns": {
     "text": "(current-ns)\nReturn the current namespace name as a symbol.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "current-second": {
@@ -279,12 +280,11 @@
     ]
   },
   "describe": {
-    "text": "(describe 'name)\nReturn documentation for a binding or runtime form. Definition docstrings take precedence over the shared runtime reference.",
+    "text": "(describe 'name)\nReturn namespace/name: docstring for a binding, a no-documentation placeholder for an undocumented binding, or nil for an unknown name. Runtime forms return their shared reference text.",
     "runtimes": [
       "c",
       "chez"
-    ],
-    "c": "(describe 'name)\nReturn documentation for a binding or runtime form. Definition docstrings take precedence over the shared runtime reference. C prefixes binding results with namespace/name."
+    ]
   },
   "display": {
     "text": "(display value ...)\nWrite display representations to the host output sink, separated by spaces, without a newline. Return nil.",

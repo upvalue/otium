@@ -8,7 +8,10 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 
 def run(runtime, path, *options, expected=None, stress=False):
-    command = [str(ROOT / ('c/otium' if runtime == 'c' else 'chez/run')), '--no-project']
+    command = ([str(ROOT/'c/otium')] if runtime == 'c' else
+               [os.environ.get('CHEZ', 'chez'), '--libdirs', str(ROOT/'chez'),
+                '--script', str(ROOT/'chez/main.ss')])
+    command.append('--no-project')
     env = dict(os.environ)
     if runtime == 'c' and stress:
         env['OTIUM_GC_STRESS'] = '1'
@@ -22,7 +25,7 @@ def run(runtime, path, *options, expected=None, stress=False):
 with tempfile.TemporaryDirectory(prefix='otium-library-') as tmp:
     directory = Path(tmp)
     module = directory / 'portable.ot'
-    module.write_text('(ns portable)\n(defonce state #f)\n(def (value) 7)\n')
+    module.write_text('(ns portable)\n(defonce state #f)\n(def (value) "module value" 7)\n(def (where) (current-ns))\n(def (help) (describe (quote value)))\n')
     (directory / 'portable.scm').write_text('(error "wrong suffix")\n')
     payload = directory / 'payload.txt'
     payload.write_text('é🙂\n', encoding='utf-8')
@@ -39,11 +42,17 @@ with tempfile.TemporaryDirectory(prefix='otium-library-') as tmp:
 (println (q/value) (value))
 (ns consumer (:require (portable :as p)))
 (println (p/value))
+(println (current-ns))
+(println (describe 'p/value) (describe 'missing))
+(println (p/where) (p/help))
 ''')
     for runtime in ('c', 'chez'):
+        for fixture in ('bootstrap', 'sequences', 'reflection', 'printing'):
+            path = ROOT/'shared/tests/library'/(fixture+'.scm')
+            run(runtime, path, stress=True, expected=path.with_suffix('.txt').read_text())
         output = run(runtime, ROOT/'shared/tests/library/common.scm', stress=True)
         assert output.startswith('library checks:'), output
-        run(runtime, script, '--path', str(directory), expected='9 7 #f\n7 #f\n7 7\n7\n')
+        run(runtime, script, '--path', str(directory), expected='9 7 #f\n7 #f\n7 7\n7\nconsumer\nportable/value: module value nil\nconsumer nil\n')
         read = directory/'read.scm'
         import json
         read.write_text('(print (read-file '+json.dumps(str(payload))+'))\n')

@@ -1013,6 +1013,10 @@ Output goes to the host-defined output sink.
 | `(println x…)` → nil | `display` plus a newline. |
 | `(newline)` → nil | |
 
+Display leaves top-level strings unquoted. Inside lists, arrays, and tables,
+strings are quoted and escaped, including table keys and dotted tails. This
+also applies when collections are converted with `str` or appended to buffers.
+
 ### 10.8 Time
 
 Time procedures use a monotonic clock for elapsed-time measurement and the

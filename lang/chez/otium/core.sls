@@ -15,14 +15,14 @@
     exact inexact number->string
     not boolean? eq? equal? procedure?
     cons car cdr caar cadr cdar cddr caaar caadr cadar caddr
-    cdaar cdadr cddar cdddr cadddr pair? null? list? list length append reverse
+    cdaar cdadr cddar cdddr cadddr pair? null? list? list length reverse
     list-tail list-ref memq member assq assoc set-car! set-cdr!
     for-each apply
     symbol? symbol->string string->symbol gensym
     string? string-length string=? string<? string>? string<=? string>=? string-append
     values
     display print println newline write
-    (rename (ot-call otium-call) (ot-substring substring) (ot-string->number string->number))
+    (rename (ot-append append) (ot-call otium-call) (ot-substring substring) (ot-string->number string->number))
     str buffer buffer? buffer-push! buffer->string
     string-split string-join string-contains? string-starts-with? string-ends-with?
     string-replace string-trim string-upcase string-downcase
@@ -81,6 +81,11 @@
       [(_ callee arg ...)
        (let ([f callee])
          (if (procedure? f) (f arg ...) (collection-call f arg ...)))]))
+  (define (ot-append . lists)
+    (for-each (lambda (xs)
+                (unless (list? xs) (error 'append "expected proper list" xs)))
+              lists)
+    (apply append lists))
   (define (int? x) (and (integer? x) (exact? x)))
   (define (float? x) (and (real? x) (inexact? x)))
   (define (inc x) (+ x 1))

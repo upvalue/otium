@@ -17,14 +17,14 @@ drop-basic: (2 3)
 drop-clamp: []
 drop-zero: [1 2]
 negative-index-counts: nil () [1 2]
-nth-fractional: nth: expected integer
-take-nonnumeric: take: expected integer
-drop-fractional: drop: expected integer
-take-improper: to-list: expected sequence
+nth-fractional: caught-error
+take-nonnumeric: caught-error
+drop-fractional: caught-error
+take-improper: caught-error
 sort-ints: [1 2 3]
 sort-list: (1 2 3)
 sort-mixed-num: [1 2.5 3]
-sort-strings: [a b c]
+sort-strings: ["a" "b" "c"]
 sort-keywords: [:a :b :c]
 sort-by-key: [[1 :y] [2 :x]]
 sort-stable: [[0 :a] [1 :b] [1 :a]]
@@ -34,7 +34,7 @@ freq-keys: [:a :b :c]
 freq-values: [3 1 1]
 put-copy: 1 2 2
 put-nil: 1
-assoc: (b . 2) #f
+assoc: ("b" . 2) #f
 dissoc-copy: 2 1 nil
 update-copy: 1 2
 put-mutates: 2 2
@@ -49,13 +49,13 @@ substring-mid: el
 substring-clamp-end: hi
 substring-clamp-start: <>
 substring-inverted: <>
-split-sep: [a b c]
-split-ws: [a b c]
+split-sep: ["a" "b" "c"]
+split-ws: ["a" "b" "c"]
 join: 1-2-3
 join-list: 1:2:3
 join-empty: <> <>
-join-improper: string-join: improper list
-join-not-sequence: string-join: expected sequence
+join-improper: caught-error
+join-not-sequence: caught-error
 str-concat: 1x:ksym2.5
 str-empty: <>
 string-len: 5
@@ -74,11 +74,11 @@ first-string: a
 apply: 10
 apply-array: 9
 apply-empty: () ()
-apply-improper: apply: improper list
-apply-not-sequence: apply: expected sequence
+apply-improper: caught-error
+apply-not-sequence: caught-error
 append-proper: (1 2 3 4)
-append-last-improper: append: expected proper list
-append-only-improper: append: expected proper list
+append-last-improper: caught-error
+append-only-improper: caught-error
 partial: 6
 comp: 3
 comp-order: 5
@@ -87,8 +87,8 @@ range-n: [0 1 2 3 4]
 range-a-b: [2 3 4]
 range-step: [5 3 1]
 range-empty: []
-range-fractional: range: expected integer
-get-in-extra-default: get-in: expected 2 or 3 arguments
+range-fractional: caught-error
+get-in-extra-default: caught-error
 concat-list-first: (1 2 3)
 concat-array-first: [1 2 3]
 second-third: 2 3

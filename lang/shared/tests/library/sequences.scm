@@ -29,16 +29,16 @@
 (println "negative-index-counts:" (nth [1 2] -1) (take -1 '(1 2)) (drop -1 [1 2]))
 (println "nth-fractional:"
   (try (nth [1 2] 0.5)
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 (println "take-nonnumeric:"
   (try (take "1" '(1 2))
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 (println "drop-fractional:"
   (try (drop 0.5 [1 2])
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 (println "take-improper:"
   (try (take 1 '(1 . 2))
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 
 ; sort: one class per sort, stable, kind-preserving
 (println "sort-ints:" (sort [3 1 2]))
@@ -103,10 +103,10 @@
   (str "<" (string-join ":" nil) ">"))
 (println "join-improper:"
   (try (string-join ":" '(1 . 2))
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 (println "join-not-sequence:"
   (try (string-join ":" 1)
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 (println "str-concat:" (str 1 "x" :k 'sym 2.5))
 (println "str-empty:" (str "<" (str) ">"))
 (println "string-len:" (string-length "héllo"))
@@ -129,17 +129,17 @@
 (println "apply-empty:" (apply list '()) (apply list nil))
 (println "apply-improper:"
   (try (apply list '(1 . 2))
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 (println "apply-not-sequence:"
   (try (apply list 1)
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 (println "append-proper:" (append '(1 2) '(3 4)))
 (println "append-last-improper:"
   (try (append '(1 2) 3)
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 (println "append-only-improper:"
   (try (append '(1 . 2))
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 (println "partial:" ((partial + 1 2) 3))
 (println "comp:" ((comp inc inc) 1))
 (println "comp-order:" ((comp str inc) 4))
@@ -150,10 +150,10 @@
 (println "range-empty:" (range 3 3))
 (println "range-fractional:"
   (try (range 0 3 0.5)
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 (println "get-in-extra-default:"
   (try (get-in {} [] 1 2)
-    (catch (error? e) (condition-message e))))
+    (catch (error? e) 'caught-error)))
 
 ; concat: kind follows the first argument
 (println "concat-list-first:" (concat '(1) [2 3]))

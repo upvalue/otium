@@ -42,7 +42,7 @@
         (do ([b 0 (+ b 1)]) ((= b ny))
           (let* ([offset (+ (* a ny) b)]
                  [body `(+ (gm:field-ref x 'payload) (gm:field-ref y 'payload) ,offset)]
-                 [impl (eval `(lambda (x y) ,body) env)])
+                 [impl (eval `(fn (x y) ,body) env)])
             (vector-set! methods offset impl)
             (gm:add-method! generic
               (list (vector-ref xt a) (and binary? (vector-ref yt b))) impl)
@@ -53,12 +53,12 @@
       (set! clauses (reverse clauses))))
   ;; Compile each cond with its descriptor vectors captured as lexical arguments.
   (define (cond-procedure read-x read-y prefix?)
-    ((eval `(lambda (xt yt)
-              (lambda (x y)
+    ((eval `(fn (xt yt)
+              (fn (x y)
                 (let ([tx ,read-x] [ty ,read-y])
                   (cond
                     ,@(if prefix?
-                          (map (lambda (clause)
+                          (map (fn (clause)
                                  (list (car clause)
                                    `(+ (vector-ref x 1) (vector-ref y 1)
                                        ,(cadddr (cadr clause))))) clauses)

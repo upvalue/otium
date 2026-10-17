@@ -25,7 +25,7 @@ WORKLOADS = {
         4500001500000,
     ),
     "fib-28": (
-        "(define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))",
+        "(def (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))",
         "(fib 28)",
         317811,
     ),
@@ -77,24 +77,25 @@ def program(name, engine):
     if name == "startup":
         return "(println 0)\n"
     if engine == "c-runtime":
-        clock = "(define (bench-clock) (current-jiffy))"
-        collections = """(define bench-table table)
-          (define bench-put! put!) (define bench-get get)"""
+        clock = "(def (bench-clock) (current-jiffy))"
+        collections = """(def bench-table table)
+          (def bench-put! put!) (def bench-get get)"""
         imports = "(require (callee :as c))"
-        callback = "(define callback (lambda (x) (c/inc x)))"
-        reload = "(define (bench-reload) (require (callee :as c :reload)))"
+        callback = "(def callback (fn (x) (c/inc x)))"
+        reload = "(def (bench-reload) (require (callee :as c :reload)))"
     else:
-        clock = """(define (bench-clock)
+        clock = """(require chez)
+          (def (bench-clock)
           (let ((t (chez/current-time 'time-monotonic)))
             (+ (* (chez/time-second t) 1000000000) (chez/time-nanosecond t))))"""
-        collections = """(define bench-table make-eqv-hashtable)
-          (define bench-put! hashtable-set!)
-          (define (bench-get t k) (hashtable-ref t k #f))"""
+        collections = """(def bench-table make-eqv-hashtable)
+          (def bench-put! hashtable-set!)
+          (def (bench-get t k) (hashtable-ref t k #f))"""
         imports = "(require callee :as c)"
-        callback = "(define callback (live 'c/inc))"
+        callback = "(def callback (live 'c/inc))"
         # Loader directives are not accepted in Chez function bodies.
         reload = """(chez/import (only (otium runtime) evaluate))
-          (define (bench-reload) (evaluate '(require callee :as c :reload)))"""
+          (def (bench-reload) (evaluate '(require callee :as c :reload)))"""
     parts = [clock, setup]
     if name == "tables":
         parts.append(collections)
@@ -157,7 +158,7 @@ def main():
     print(f"{'workload':<19} {'C work':>10} {'Chez work':>10} {'speedup':>9} {'C wall':>10} {'Chez wall':>10}", flush=True)
     with tempfile.TemporaryDirectory(prefix="otium-compare-") as temp:
         directory = Path(temp)
-        (directory / "callee.scm").write_text("(ns callee)\n(define (inc x) (+ x 1))\n")
+        (directory / "callee.scm").write_text("(ns callee)\n(def (inc x) (+ x 1))\n")
         for name in args.only or WORKLOADS:
             samples = {engine: [] for engine in ("c-runtime", "chez")}
             commands = {}

@@ -129,12 +129,10 @@ static bool special_name(const char* bytes, size_t length) {
       "quote",
       "if",
       "begin",
-      "do",
-      "lambda",
       "fn",
-      "define",
       "def",
-      "define-",
+      "def-",
+      "defonce",
       "set!",
       "let",
       "while",
@@ -152,7 +150,6 @@ static bool special_name(const char* bytes, size_t length) {
       "defer",
       "with-params",
       "defparam",
-      "in-ns",
       "ns",
       "require",
       "define-type",
@@ -1587,8 +1584,7 @@ static otv compile_function_code(ots* state, otv params, otv body, otv env, otv 
     if (!is_type(definition, OBJ_PAIR)) continue;
     otv definition_head = as_pair(definition)->car;
     if (!is_type(definition_head, OBJ_SYMBOL) ||
-        (!symbol_is(definition_head, "define") && !symbol_is(definition_head, "def") &&
-         !symbol_is(definition_head, "define-")))
+        (!symbol_is(definition_head, "def") && !symbol_is(definition_head, "def-")))
       continue;
     otv definition_args = as_pair(definition)->cdr;
     if (!is_type(definition_args, OBJ_PAIR)) continue;
@@ -1984,13 +1980,14 @@ static bool compile_sequence(ots* state, bytecode_compiler* compiler, otv forms,
                              bool tail) {
   OT_FRAME_SCOPED(state, &compiler->constants, &forms, &env);
   if (is_type(env, OBJ_ENV)) {
-    for (otv scan = forms; is_type(scan, OBJ_PAIR); scan = as_pair(scan)->cdr) {
+    otv scan = forms;
+    OT_FRAME_SCOPED(state, &scan);
+    for (; is_type(scan, OBJ_PAIR); scan = as_pair(scan)->cdr) {
       otv definition = as_pair(scan)->car;
       if (!is_type(definition, OBJ_PAIR)) continue;
       otv definition_head = as_pair(definition)->car;
       if (!is_type(definition_head, OBJ_SYMBOL) ||
-          (!symbol_is(definition_head, "define") && !symbol_is(definition_head, "def") &&
-           !symbol_is(definition_head, "define-")))
+          (!symbol_is(definition_head, "def") && !symbol_is(definition_head, "def-")))
         continue;
       otv definition_args = as_pair(definition)->cdr;
       if (!is_type(definition_args, OBJ_PAIR)) continue;
@@ -2082,10 +2079,10 @@ static bool compile_expression_inner(ots* state, bytecode_compiler* compiler, ot
       bytecode_emit_constant(state, compiler, BC_CONST, value);
       return !compiler->bytes.failed;
     }
-    if (symbol_is(head, "lambda") || symbol_is(head, "fn")) {
+    if (symbol_is(head, "fn")) {
       otv params;
       if (!list_nth(args, 0, &params)) {
-        (void)ot_raise(state, "lambda: missing parameter list");
+        (void)ot_raise(state, "fn: missing parameter list");
         return false;
       }
       otv body = list_tail(args, 1);
@@ -2095,10 +2092,18 @@ static bool compile_expression_inner(ots* state, bytecode_compiler* compiler, ot
       bytecode_emit_constant(state, compiler, BC_CLOSURE, code);
       return !compiler->bytes.failed;
     }
-    if (symbol_is(head, "define") || symbol_is(head, "def") || symbol_is(head, "define-")) {
+    if (symbol_is(head, "defonce") && !is_type(env, OBJ_ENV)) {
+      otv name;
+      if (list_nth(args, 0, &name) && is_type(name, OBJ_SYMBOL) &&
+          is_type(namespace_var(state, env_namespace(state, env), name, false), OBJ_VAR)) {
+        bytecode_emit_constant(state, compiler, BC_CONST, ot_nil);
+        return !compiler->bytes.failed;
+      }
+    }
+    if (symbol_is(head, "def") || symbol_is(head, "def-") || symbol_is(head, "defonce")) {
       otv target;
       if (!list_nth(args, 0, &target)) {
-        (void)ot_raise(state, "define: missing name");
+        (void)ot_raise(state, "def: missing name");
         return false;
       }
       otv name = target;
@@ -2108,7 +2113,7 @@ static bool compile_expression_inner(ots* state, bytecode_compiler* compiler, ot
       if (is_type(target, OBJ_PAIR)) {
         name = as_pair(target)->car;
         if (!is_type(name, OBJ_SYMBOL)) {
-          (void)ot_raise(state, "define: bad name");
+          (void)ot_raise(state, "def: bad name");
           return false;
         }
         otv body = list_tail(args, 1);
@@ -2124,7 +2129,7 @@ static bool compile_expression_inner(ots* state, bytecode_compiler* compiler, ot
         bytecode_emit_constant(state, compiler, BC_CLOSURE, code);
       } else {
         if (!is_type(name, OBJ_SYMBOL)) {
-          (void)ot_raise(state, "define: bad name");
+          (void)ot_raise(state, "def: bad name");
           return false;
         }
         otv values = list_tail(args, 1);
@@ -2134,7 +2139,7 @@ static bool compile_expression_inner(ots* state, bytecode_compiler* compiler, ot
           values = as_pair(values)->cdr;
         }
         if (!is_type(values, OBJ_PAIR) || as_pair(values)->cdr != ot_null) {
-          (void)ot_raise(state, "define: expected one value");
+          (void)ot_raise(state, "def: expected one value");
           return false;
         }
         value_form = as_pair(values)->car;
@@ -2146,11 +2151,11 @@ static bool compile_expression_inner(ots* state, bytecode_compiler* compiler, ot
           state, compiler,
           is_type(env, OBJ_ENV)
               ? BC_DEFINE_LEXICAL
-              : (symbol_is(head, "define-") ? BC_DEFINE_PRIVATE : BC_DEFINE_GLOBAL),
+              : (symbol_is(head, "def-") ? BC_DEFINE_PRIVATE : BC_DEFINE_GLOBAL),
           descriptor);
       return !compiler->bytes.failed;
     }
-    if (symbol_is(head, "begin") || symbol_is(head, "do")) {
+    if (symbol_is(head, "begin")) {
       compiler->declarations_allowed = declarations_allowed;
       return compile_sequence(state, compiler, args, env, tail);
     }
@@ -2615,10 +2620,10 @@ static bool compile_expression_inner(ots* state, bytecode_compiler* compiler, ot
       bytecode_emit_constant(state, compiler, BC_UNWIND_PROTECT, descriptor);
       return !compiler->bytes.failed;
     }
-    if (symbol_is(head, "in-ns") || symbol_is(head, "ns")) {
+    if (symbol_is(head, "ns")) {
       otv name;
       if (!list_nth(args, 0, &name)) {
-        (void)ot_raise(state, "%s: missing name", symbol_is(head, "ns") ? "ns" : "in-ns");
+        (void)ot_raise(state, "ns: missing name");
         return false;
       }
       name = unwrap_quote(name);
@@ -2631,40 +2636,36 @@ static bool compile_expression_inner(ots* state, bytecode_compiler* compiler, ot
         name = ot_intern(state, bytes, length, false);
       }
       if (!is_type(name, OBJ_SYMBOL)) {
-        (void)ot_raise(state, "in-ns: invalid name");
+        (void)ot_raise(state, "ns: invalid name");
         return false;
       }
-      if (symbol_is(head, "ns")) {
-        otv clauses = list_tail(args, 1);
-        while (is_type(clauses, OBJ_PAIR)) {
-          otv clause = as_pair(clauses)->car;
-          if (!is_type(clause, OBJ_PAIR) || !proper_list(clause) ||
-              !is_type(as_pair(clause)->car, OBJ_KEYWORD)) {
-            (void)ot_raise(state, "ns: bad clause");
-            return false;
-          }
-          ot_name_obj* clause_name = as_name(as_pair(clause)->car);
-          if (clause_name->length != 7 || memcmp(clause_name->bytes, "require", 7) != 0) {
-            (void)ot_raise(state, "ns: unknown clause");
-            return false;
-          }
-          clauses = as_pair(clauses)->cdr;
-        }
-        if (clauses != ot_null) {
-          (void)ot_raise(state, "ns: improper clauses");
+      otv clauses = list_tail(args, 1);
+      while (is_type(clauses, OBJ_PAIR)) {
+        otv clause = as_pair(clauses)->car;
+        if (!is_type(clause, OBJ_PAIR) || !proper_list(clause) ||
+            !is_type(as_pair(clause)->car, OBJ_KEYWORD)) {
+          (void)ot_raise(state, "ns: bad clause");
           return false;
         }
+        ot_name_obj* clause_name = as_name(as_pair(clause)->car);
+        if (clause_name->length != 7 || memcmp(clause_name->bytes, "require", 7) != 0) {
+          (void)ot_raise(state, "ns: unknown clause");
+          return false;
+        }
+        clauses = as_pair(clauses)->cdr;
+      }
+      if (clauses != ot_null) {
+        (void)ot_raise(state, "ns: improper clauses");
+        return false;
       }
       bytecode_emit_constant(state, compiler, BC_IN_NS, name);
-      if (symbol_is(head, "ns")) {
-        otv clauses = list_tail(args, 1);
-        OT_FRAME_SCOPED(state, &clauses);
-        while (is_type(clauses, OBJ_PAIR)) {
-          otv clause = as_pair(clauses)->car;
-          bytecode_emit(compiler, BC_POP);
-          bytecode_emit_constant(state, compiler, BC_REQUIRE, as_pair(clause)->cdr);
-          clauses = as_pair(clauses)->cdr;
-        }
+      clauses = list_tail(args, 1);
+      OT_FRAME_SCOPED(state, &clauses);
+      while (is_type(clauses, OBJ_PAIR)) {
+        otv clause = as_pair(clauses)->car;
+        bytecode_emit(compiler, BC_POP);
+        bytecode_emit_constant(state, compiler, BC_REQUIRE, as_pair(clause)->cdr);
+        clauses = as_pair(clauses)->cdr;
       }
       return !compiler->bytes.failed;
     }
@@ -5137,7 +5138,7 @@ static otv nat_apply(ots* state, otv* args, int argc) {
                                        : as_pair(cursor)->car;
     if (!is_type(sequence, OBJ_ARRAY)) cursor = as_pair(cursor)->cdr;
   }
-  return apply_value(state, args[0], values, count, true);
+  return apply_value(state, args[0], values, count, false);
 }
 
 static otv nat_identity(ots* state, otv* args, int argc) {
@@ -5288,6 +5289,27 @@ static otv nat_macro_oracle(ots* state, otv* args, int argc) {
   return is_type(value, OBJ_MACRO) ? value : ot_nil;
 }
 
+static otv nat_expander_invoke_macro(ots* state, otv* args, int argc) {
+  if (need_arity(state, "expander-invoke-macro", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_MACRO)) return ot_raise(state, "expander-invoke-macro: expected macro");
+  otv cursor = args[1];
+  if (!proper_list(cursor)) return ot_raise(state, "expander-invoke-macro: expected argument list");
+  size_t count = list_length(cursor);
+  otv values[count == 0 ? 1 : count];
+  for (size_t i = 0; i < count; i++) {
+    values[i] = as_pair(cursor)->car;
+    cursor = as_pair(cursor)->cdr;
+  }
+  return apply_value(state, args[0], values, count, true);
+}
+
+// C has no host syntax that the expander must leave unwalked.
+static otv nat_expander_native_syntax(ots* state, otv* args, int argc) {
+  (void)args;
+  if (need_arity(state, "expander-native-syntax?", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  return ot_false;
+}
+
 static otv nat_current_ns(ots* state, otv* args, int argc) {
   (void)args;
   if (need_arity(state, "current-ns", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
@@ -5352,48 +5374,55 @@ static otv nat_describe(ots* state, otv* args, int argc) {
   return result;
 }
 
-static otv macroexpand_once(ots* state, otv form) {
-  if (!is_type(form, OBJ_PAIR) || !is_type(as_pair(form)->car, OBJ_SYMBOL)) return form;
-  otv oracle_args[1] = {as_pair(form)->car};
-  otv macro = nat_macro_oracle(state, oracle_args, 1);
-  if (!is_type(macro, OBJ_MACRO)) return form;
-  otv tail = as_pair(form)->cdr;
-  if (!proper_list(tail)) return ot_raise(state, "macro call: improper list");
-  size_t argc = list_length(tail);
-  otv values[argc == 0 ? 1 : argc];
-  for (size_t i = 0; i < argc; i++) {
-    values[i] = as_pair(tail)->car;
-    tail = as_pair(tail)->cdr;
-  }
-  return apply_value(state, macro, values, argc, true);
+// macroexpand-1 and macroexpand use the shared expander's head expansion.
+static otv expand_head(ots* state, otv form, bool once) {
+  if (state->expand_head == ot_nil) return form;
+  otv values[2] = {form, once ? ot_true : ot_false};
+  return apply_value(state, state->expand_head, values, 2, false);
 }
 
 static otv nat_macroexpand_one(ots* state, otv* args, int argc) {
   if (need_arity(state, "macroexpand-1", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
-  return macroexpand_once(state, args[0]);
+  return expand_head(state, args[0], true);
 }
 
 static otv nat_macroexpand(ots* state, otv* args, int argc) {
   if (need_arity(state, "macroexpand", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
-  otv form = args[0];
-  OT_FRAME_SCOPED(state, &form);
-  for (;;) {
-    otv expanded = macroexpand_once(state, form);
-    if (expanded == OT_UNWIND || expanded == form) return expanded;
-    form = expanded;
-  }
+  return expand_head(state, args[0], false);
 }
 
-static otv nat_eval(ots* state, otv* args, int argc) {
-  if (need_arity(state, "eval", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
-  otv form = args[0];
+// Top-level begin is split before expansion, so a macro defined by one
+// child is available to the next.
+static otv run_top_form(ots* state, otv form) {
   OT_FRAME_SCOPED(state, &form);
+  if (state->expand_head != ot_nil) {
+    form = expand_head(state, form, false);
+    if (form == OT_UNWIND) return form;
+    if (is_type(form, OBJ_PAIR) && is_type(as_pair(form)->car, OBJ_SYMBOL) &&
+        symbol_is(as_pair(form)->car, "begin")) {
+      otv rest = as_pair(form)->cdr;
+      otv result = ot_nil;
+      OT_FRAME_SCOPED(state, &rest, &result);
+      if (!proper_list(rest)) return ot_raise(state, "begin: body must be a proper list");
+      while (is_type(rest, OBJ_PAIR)) {
+        result = run_top_form(state, as_pair(rest)->car);
+        if (result == OT_UNWIND) return result;
+        rest = as_pair(rest)->cdr;
+      }
+      return result;
+    }
+  }
   if (state->expander != ot_nil) {
     otv values[1] = {form};
     form = apply_value(state, state->expander, values, 1, false);
     if (form == OT_UNWIND) return form;
   }
   return compile_and_run_form(state, form, ot_nil);
+}
+
+static otv nat_eval(ots* state, otv* args, int argc) {
+  if (need_arity(state, "eval", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  return run_top_form(state, args[0]);
 }
 
 static otv nat_read_string(ots* state, otv* args, int argc) {
@@ -6210,6 +6239,8 @@ static const nat_def core_nats[] = {
     {"current-ns", nat_current_ns},
     {"describe", nat_describe},
     {"expander-macro-var", nat_macro_oracle},
+    {"expander-invoke-macro", nat_expander_invoke_macro},
+    {"expander-native-syntax?", nat_expander_native_syntax},
     {"string<?", nat_string_less},
     {"error", nat_error},
     {"signal", nat_signal},
@@ -6265,7 +6296,8 @@ static void register_core(ots* state) {
     const char* name = core_nats[i].name;
     bool reentrant = strcmp(name, "apply") == 0 || strcmp(name, "for-each") == 0 ||
                      strcmp(name, "update!") == 0 || strcmp(name, "macroexpand-1") == 0 ||
-                     strcmp(name, "macroexpand") == 0 || strcmp(name, "eval") == 0;
+                     strcmp(name, "macroexpand") == 0 || strcmp(name, "eval") == 0 ||
+                     strcmp(name, "expander-invoke-macro") == 0;
     define_native(state, name, core_nats[i].function, !reentrant);
   }
 }
@@ -6281,12 +6313,7 @@ static bool eval_source(ots* state, const char* source, size_t length, const cha
     form = read_form(&input);
     if (form == OT_UNDEFINED) break;
     if (form == OT_UNWIND) return false;
-    if (expand && state->expander != ot_nil) {
-      otv args[1] = {form};
-      form = apply_value(state, state->expander, args, 1, false);
-      if (form == OT_UNWIND) return false;
-    }
-    result = compile_and_run_form(state, form, ot_nil);
+    result = expand ? run_top_form(state, form) : compile_and_run_form(state, form, ot_nil);
     if (result == OT_UNWIND) return false;
   }
   if (out != NULL) *out = result;
@@ -6316,15 +6343,7 @@ bool ot_eval_partial(ots* state, const char* source, size_t length, const char* 
       *incomplete = input.incomplete;
       return false;
     }
-    if (state->expander != ot_nil) {
-      otv args[1] = {form};
-      form = apply_value(state, state->expander, args, 1, false);
-      if (form == OT_UNWIND) {
-        *consumed = input.offset;
-        return false;
-      }
-    }
-    result = compile_and_run_form(state, form, ot_nil);
+    result = run_top_form(state, form);
     if (result == OT_UNWIND) {
       *consumed = input.offset;
       return false;
@@ -6361,6 +6380,7 @@ ots* ot_create(const ot_config* configuration) {
   state->core_namespace = ot_nil;
   state->vm.current_namespace = ot_nil;
   state->expander = ot_nil;
+  state->expand_head = ot_nil;
   state->type_parents = ot_nil;
   state->dispatch_types = ot_nil;
   state->vm.condition = ot_nil;
@@ -6389,6 +6409,13 @@ ots* ot_create(const ot_config* configuration) {
     return NULL;
   }
   state->expander = ((ot_var_obj*)ot_as_obj(expander_var))->value;
+  otv head_name = ot_intern(state, "expander-expand-head", 20, false);
+  otv head_var = namespace_var(state, state->core_namespace, head_name, false);
+  if (!is_type(head_var, OBJ_VAR)) {
+    ot_destroy(state);
+    return NULL;
+  }
+  state->expand_head = ((ot_var_obj*)ot_as_obj(head_var))->value;
   if (!eval_source(state, ot_prelude_src, ot_prelude_src_len, "<prelude>", true, &ignored)) {
     ot_destroy(state);
     return NULL;

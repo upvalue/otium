@@ -1,0 +1,508 @@
+;; expander.scm -- the Otium macro expander, shared by the C and Chez runtimes.
+;;
+;; Loaded before any macro exists, so this file may use only core forms
+;; (quote if begin fn def def- set! let while and or cond quasiquote) and
+;; natives. It must also avoid bare nil and keyword literals in expression
+;; position: Chez evaluates this file without expanding it first.
+;;
+;; Scope is tracked in Otium data: a list whose entries are symbols (lexical
+;; variables) or (name expansion writer) lists (local symbol macros). Each runtime
+;; supplies three natives:
+;;   (expander-macro-var sym)        the macro sym names as a var in the
+;;                                   current namespace, else a false value
+;;   (expander-invoke-macro m args)  run macro m on unevaluated argument forms
+;;   (expander-native-syntax? sym)   true when sym is host syntax whose
+;;                                   operands must not be walked (never on C)
+;;
+;; Output is the input with macros replaced, parameter lists normalized to
+;; dotted form, keywords and other non-literal atoms quoted, and body
+;; definitions moved ahead of plain expressions. Each runtime then compiles
+;; it with its own core forms.
+
+(def- expander-core-forms
+  '(quote quasiquote unquote unquote-splicing if begin fn def def- defonce
+    set! let while and or cond defmacro ns require handler-bind restart-case
+    try unwind-protect defer defparam with-params symbol-macrolet
+    define-type define-generic define-method reset-type! reset-generic!))
+
+(def- expander-declarations
+  '(define-type define-generic define-method reset-type! reset-generic!))
+
+(def- (exp-memq sym lst)
+  (if (pair? lst)
+      (if (eq? sym (car lst)) #t (exp-memq sym (cdr lst)))
+      #f))
+
+(def- (exp-core? sym) (exp-memq sym expander-core-forms))
+
+;; #t for a lexical variable, the scope tail starting at the entry for a
+;; symbol macro, #f when unbound. The tail after the entry is the scope the
+;; symbol macro was defined in.
+(def- (exp-lookup sym scope)
+  (cond ((not (pair? scope)) #f)
+        ((eq? (car scope) sym) #t)
+        ((and (pair? (car scope)) (eq? (car (car scope)) sym)) scope)
+        (else (exp-lookup sym (cdr scope)))))
+
+(def- (exp-bound? sym scope) (exp-lookup sym scope))
+
+(def- (exp-head-is? form sym) (and (pair? form) (eq? (car form) sym)))
+
+(def- (exp-map f xs)
+  (if (pair? xs) (cons (f (car xs)) (exp-map f (cdr xs))) '()))
+
+(def- (exp-append a b)
+  (if (pair? a) (cons (car a) (exp-append (cdr a) b)) b))
+
+;; Expression evaluating to nil. ''nil keeps nil inside quoted data.
+(def- exp-nil-form ''nil)
+
+(def- (exp-fail message form) (error message form))
+
+(def- (exp-proper! forms form)
+  (if (list? forms) forms (exp-fail "macroexpand: expected a proper list" form)))
+
+(def- (exp-length-between? form low high)
+  (if (list? form)
+      (let ((n (length form)))
+        (and (>= n low) (or (not high) (<= n high))))
+      #f))
+
+(def- (exp-shape! form low high)
+  (if (exp-length-between? form low high)
+      form
+      (exp-fail "macroexpand: malformed form" form)))
+
+;; A name being bound: symbols only, and core form names stay reserved.
+(def- (exp-name! name form)
+  (cond ((not (symbol? name)) (exp-fail "macroexpand: expected a name" form))
+        ((exp-core? name) (exp-fail "macroexpand: cannot rebind a core form name" name))
+        (else name)))
+
+;; Literals that every runtime compiles as constants. Other atoms (keywords,
+;; nil, collections a macro embedded) are emitted quoted.
+(def- (exp-literal? x) (or (number? x) (string? x) (boolean? x)))
+
+;; A string followed by more forms is a docstring.
+(def- (exp-doc? forms)
+  (and (pair? forms) (string? (car forms)) (pair? (cdr forms))))
+
+;; --- parameter lists ---------------------------------------------------------
+
+;; Accepts (a b), (a . rest), rest, (a & rest), and the [a b] spelling.
+;; Returns (dotted-parameters . bound-names).
+(def- (exp-params params form)
+  (exp-param-list (if (exp-head-is? params 'array) (cdr params) params) '() form))
+
+(def- (exp-param! p seen form)
+  (exp-name! p form)
+  (if (exp-memq p seen) (exp-fail "macroexpand: duplicate parameter" p) p))
+
+(def- (exp-param-list ps seen form)
+  (cond ((null? ps) (cons '() seen))
+        ((symbol? ps) (exp-param! ps seen form) (cons ps (cons ps seen)))
+        ((pair? ps)
+         (if (eq? (car ps) '&)
+             (if (and (pair? (cdr ps)) (symbol? (car (cdr ps))) (null? (cdr (cdr ps))))
+                 (exp-param-list (car (cdr ps)) seen form)
+                 (exp-fail "macroexpand: & must be followed by one rest parameter" form))
+             (let ((p (exp-param! (car ps) seen form))
+                   (r (exp-param-list (cdr ps) (cons p seen) form)))
+               (cons (cons p (car r)) (cdr r)))))
+        (else (exp-fail "macroexpand: invalid parameter list" form))))
+
+;; --- macro calls ---------------------------------------------------------------
+
+;; Expand macros in head position until the head is a core form, a lexical
+;; binding, or an ordinary application. Does not descend into arguments.
+(def- (exp-head form scope once)
+  (if (and (pair? form) (symbol? (car form))
+           (not (exp-core? (car form)))
+           (not (exp-bound? (car form) scope)))
+      (let ((m (expander-macro-var (car form))))
+        (if m
+            (let ((out (expander-invoke-macro m (exp-proper! (cdr form) form))))
+              (if once out (exp-head out scope #f)))
+            form))
+      form))
+
+;; --- expressions ---------------------------------------------------------------
+
+(def- (exp-expr form scope)
+  (let ((form (exp-head form scope #f)))
+    (cond ((symbol? form) (exp-symbol form scope))
+          ((pair? form) (exp-compound form scope))
+          ((exp-literal? form) form)
+          (else (list 'quote form)))))
+
+(def- (exp-exprs forms scope form)
+  (exp-map (fn (f) (exp-expr f scope)) (exp-proper! forms form)))
+
+;; An expression sequence evaluated for its last value. Empty yields nil.
+(def- (exp-sequence head forms scope form)
+  (if (null? forms)
+      exp-nil-form
+      (cons head (exp-exprs forms scope form))))
+
+(def- (exp-compound form scope)
+  (let ((head (car form)))
+    (cond ((not (symbol? head)) (exp-exprs form scope form))
+          ((exp-bound? head scope)
+           (cons (exp-symbol head scope) (exp-exprs (cdr form) scope form)))
+          ((exp-core? head) (exp-core form scope))
+          ((expander-native-syntax? head) form)
+          (else (exp-exprs form scope form)))))
+
+(def- (exp-core form scope)
+  (let ((head (car form)))
+    (cond ((eq? head 'quote) (exp-shape! form 2 2))
+          ((eq? head 'quasiquote)
+           (exp-shape! form 2 2)
+           (list 'quasiquote (exp-qq (car (cdr form)) 1 scope)))
+          ((or (eq? head 'unquote) (eq? head 'unquote-splicing))
+           (exp-fail "macroexpand: unquote outside quasiquote" form))
+          ((eq? head 'fn) (exp-fn form scope))
+          ((eq? head 'let) (exp-let form scope))
+          ((eq? head 'if)
+           (exp-shape! form 3 4)
+           (cons 'if (exp-exprs (cdr form) scope form)))
+          ((eq? head 'begin) (exp-sequence 'begin (exp-proper! (cdr form) form) scope form))
+          ((or (eq? head 'and) (eq? head 'or))
+           (cons head (exp-exprs (cdr form) scope form)))
+          ((or (eq? head 'unwind-protect) (eq? head 'defer))
+           (exp-shape! form 2 #f)
+           (cons head (exp-exprs (cdr form) scope form)))
+          ((eq? head 'while)
+           (exp-shape! form 2 #f)
+           (cons 'while (exp-exprs (cdr form) scope form)))
+          ((eq? head 'set!) (exp-set! form scope))
+          ((eq? head 'cond) (cons 'cond (exp-cond-clauses (exp-proper! (cdr form) form) scope)))
+          ((or (eq? head 'handler-bind) (eq? head 'with-params))
+           (exp-shape! form 2 #f)
+           (cons head (cons (exp-pairs (car (cdr form)) scope form)
+                            (exp-exprs (cdr (cdr form)) scope form))))
+          ((eq? head 'restart-case) (exp-restart-case form scope))
+          ((eq? head 'try) (exp-try form scope))
+          ((eq? head 'symbol-macrolet) (exp-symbol-macrolet form scope))
+          ;; The runtime reports misplaced declarations with its own code.
+          ((exp-memq head expander-declarations) form)
+          ((or (eq? head 'def) (eq? head 'def-))
+           (exp-fail "macroexpand: definition is only allowed at top level or in a body" form))
+          (else (exp-fail "macroexpand: form requires top-level context" form)))))
+
+(def- (exp-set! form scope)
+  (exp-shape! form 3 3)
+  (let ((name (car (cdr form)))
+        (found (if (symbol? name) (exp-lookup name scope) #f)))
+    (cond ((pair? found) (exp-symbol-set! (car found) (cdr found) (car (cdr (cdr form))) scope))
+          ((and (symbol? name) (not (exp-core? name)))
+           (list 'set! name (exp-expr (car (cdr (cdr form))) scope)))
+          (else (exp-fail "set!: expected a variable name" form)))))
+
+;; --- local symbol macros --------------------------------------------------------
+
+;; A symbol macro's expansion is expanded in the scope it was defined in.
+(def- (exp-symbol sym scope)
+  (let ((found (exp-lookup sym scope)))
+    (if (pair? found)
+        (exp-expr (car (cdr (car found))) (cdr found))
+        sym)))
+
+;; (set! name value) on a symbol macro with writer (param form) becomes
+;; (let ((param value)) form).
+(def- (exp-symbol-set! entry defined value scope)
+  (let ((writer (car (cdr (cdr entry)))))
+    (if writer
+        (list 'let (list (list (car writer) (exp-expr value scope)))
+              (exp-expr (car (cdr writer)) (cons (car writer) defined)))
+        (exp-fail "set!: symbol macro has no writer" (car entry)))))
+
+;; (symbol-macrolet ((name expansion) | (name expansion (param write-form)) ...) body...)
+(def- (exp-symbol-macrolet form scope)
+  (exp-shape! form 2 #f)
+  (let ((bs (car (cdr form))))
+    (if (not (and (list? bs) (exp-every? exp-symbol-binding? bs)))
+        (exp-fail "symbol-macrolet: expected ((name expansion [(parameter write-form)]) ...)" form))
+    (let ((forms (exp-body (cdr (cdr form)) (exp-symbol-scope bs scope form))))
+      (cond ((exp-any? exp-definition? forms) (cons 'let (cons '() forms)))
+            ((null? (cdr forms)) (car forms))
+            (else (cons 'begin forms))))))
+
+(def- (exp-symbol-binding? b)
+  (and (exp-length-between? b 2 3)
+       (symbol? (car b))
+       (or (null? (cdr (cdr b)))
+           (let ((w (car (cdr (cdr b)))))
+             (and (exp-length-between? w 2 2) (symbol? (car w)))))))
+
+(def- (exp-symbol-scope bs scope form)
+  (if (pair? bs)
+      (let ((b (car bs)))
+        (exp-name! (car b) form)
+        (exp-symbol-scope (cdr bs)
+                          (cons (list (car b) (car (cdr b))
+                                      (if (pair? (cdr (cdr b))) (car (cdr (cdr b))) #f))
+                                scope)
+                          form))
+      scope))
+
+(def- (exp-fn form scope)
+  (exp-shape! form 2 #f)
+  (let ((r (exp-params (car (cdr form)) form)))
+    (cons 'fn (cons (car r) (exp-body (cdr (cdr form)) (exp-append (cdr r) scope))))))
+
+;; (let ((name expr) ...) body...) binds sequentially. Named let initializers
+;; see only the enclosing scope.
+(def- (exp-let form scope)
+  (exp-shape! form 2 #f)
+  (if (symbol? (car (cdr form)))
+      (begin
+        (exp-shape! form 3 #f)
+        (let ((name (exp-name! (car (cdr form)) form))
+              (bindings (exp-bindings (car (cdr (cdr form))) form))
+              (r (exp-params (exp-map car bindings) form)))
+          (cons 'let
+                (cons name
+                      (cons (exp-map (fn (b) (list (car b) (exp-expr (car (cdr b)) scope)))
+                                     bindings)
+                            (exp-body (cdr (cdr (cdr form)))
+                                      (cons name (exp-append (cdr r) scope))))))))
+      (let ((r (exp-let-bindings (exp-bindings (car (cdr form)) form) scope form)))
+        (cons 'let (cons (car r) (exp-body (cdr (cdr form)) (cdr r)))))))
+
+(def- (exp-bindings bs form)
+  (cond ((not (list? bs)) (exp-fail "let: bad bindings" form))
+        ((exp-every? (fn (b) (and (exp-length-between? b 2 2) (symbol? (car b)))) bs)
+         (exp-map (fn (b) (exp-name! (car b) form)) bs)
+         bs)
+        (else (exp-fail "let: invalid binding" form))))
+
+(def- (exp-every? f xs)
+  (if (pair? xs) (if (f (car xs)) (exp-every? f (cdr xs)) #f) #t))
+
+;; Returns (expanded-bindings . body-scope).
+(def- (exp-let-bindings bs scope form)
+  (if (pair? bs)
+      (let ((name (car (car bs)))
+            (value (exp-expr (car (cdr (car bs))) scope))
+            (r (exp-let-bindings (cdr bs) (cons name scope) form)))
+        (cons (cons (list name value) (car r)) (cdr r)))
+      (cons '() scope)))
+
+;; ((a b) ...) with both positions expanded (handler-bind, with-params).
+(def- (exp-pairs bs scope form)
+  (if (and (list? bs) (exp-every? (fn (b) (exp-length-between? b 2 2)) bs))
+      (exp-map (fn (b) (exp-exprs b scope form)) bs)
+      (exp-fail "macroexpand: expected ((expression expression) ...)" form)))
+
+;; cond: (test body...) or (else body...).
+(def- (exp-cond-clauses cs scope)
+  (exp-map
+   (fn (c)
+     (cond ((not (exp-length-between? c 1 #f)) (exp-fail "cond: bad clause" c))
+           ((eq? (car c) 'else)
+            (if (pair? (cdr c))
+                (cons 'else (exp-exprs (cdr c) scope c))
+                (exp-fail "cond: else requires a body" c)))
+           (else (exp-exprs c scope c))))
+   cs))
+
+;; try: body forms, then (catch (pred var) body...) clauses.
+(def- (exp-try form scope)
+  (exp-shape! form 1 #f)
+  (cons 'try (exp-try-forms (cdr form) scope form #f)))
+
+(def- (exp-try-forms forms scope form in-catches)
+  (if (pair? forms)
+      (let ((f (car forms)))
+        (if (exp-head-is? f 'catch)
+            (begin
+              (if (not (and (exp-length-between? f 2 #f)
+                            (exp-length-between? (car (cdr f)) 2 2)
+                            (symbol? (car (cdr (car (cdr f)))))))
+                  (exp-fail "try: expected (catch (predicate name) body...)" f))
+              (let ((pred (car (car (cdr f))))
+                    (var (exp-name! (car (cdr (car (cdr f)))) f)))
+                (cons (cons 'catch
+                            (cons (list (exp-expr pred scope) var)
+                                  (exp-body (cdr (cdr f)) (cons var scope))))
+                      (exp-try-forms (cdr forms) scope form #t))))
+            (if in-catches
+                (exp-fail "try: catch clauses must follow the body" form)
+                (cons (exp-expr f scope) (exp-try-forms (cdr forms) scope form #f)))))
+      '()))
+
+;; restart-case: (restart-case expr (name ["description"] params body...) ...)
+(def- (exp-restart-case form scope)
+  (exp-shape! form 2 #f)
+  (cons 'restart-case
+        (cons (exp-expr (car (cdr form)) scope)
+              (exp-map (fn (c) (exp-restart-clause c scope)) (cdr (cdr form))))))
+
+(def- (exp-restart-clause c scope)
+  (if (not (and (exp-length-between? c 2 #f) (symbol? (car c))))
+      (exp-fail "restart-case: expected (name [description] parameters body...)" c))
+  (let ((described (exp-doc? (cdr c)))
+        (rest (if described (cdr (cdr c)) (cdr c)))
+        (r (exp-params (car rest) c)))
+    (exp-append (if described (list (car c) (car (cdr c))) (list (car c)))
+                (cons (car r) (exp-body (cdr rest) (exp-append (cdr r) scope))))))
+
+;; quasiquote with depth accounting: only depth-1 unquotes are expanded.
+(def- (exp-qq x depth scope)
+  (if (pair? x)
+      (let ((h (car x)))
+        (cond ((eq? h 'quasiquote)
+               (list 'quasiquote (exp-qq (car (cdr x)) (+ depth 1) scope)))
+              ((or (eq? h 'unquote) (eq? h 'unquote-splicing))
+               (if (= depth 1)
+                   (list h (exp-expr (car (cdr x)) scope))
+                   (list h (exp-qq (car (cdr x)) (- depth 1) scope))))
+              (else (exp-qq-list x depth scope))))
+      x))
+
+(def- (exp-qq-list x depth scope)
+  (cond ((pair? x)
+         (if (or (eq? (car x) 'unquote) (eq? (car x) 'unquote-splicing))
+             (exp-qq x depth scope)                 ; dotted (a . ,b) tail
+             (cons (exp-qq (car x) depth scope)
+                   (exp-qq-list (cdr x) depth scope))))
+        (else x)))
+
+;; --- definitions and bodies ------------------------------------------------------
+
+(def- (exp-definition? form)
+  (or (exp-head-is? form 'def) (exp-head-is? form 'def-)))
+
+;; A top-level definition may reuse a core form name (ffi/set!); it is then
+;; only reachable qualified, and does not shadow the form in its own body.
+(def- (exp-definition-name form top)
+  (exp-shape! form 2 #f)
+  (let ((target (car (cdr form)))
+        (name (if (pair? target) (car target) target)))
+    (if (and top (symbol? name)) name (exp-name! name form))))
+
+(def- (exp-scope-with name scope) (if (exp-core? name) scope (cons name scope)))
+
+;; (def name ["doc"] expr) or (def (name . params) ["doc"] body...).
+(def- (exp-def form scope top)
+  (let ((name (exp-definition-name form top))
+        (target (car (cdr form)))
+        (rest (cdr (cdr form))))
+    (if (pair? target)
+        (let ((r (exp-params (cdr target) form)))
+          (cons (car form)
+                (cons (cons name (car r))
+                      (if (exp-doc? rest)
+                          (cons (car rest) (exp-body (cdr rest) (exp-append (cdr r) (exp-scope-with name scope))))
+                          (exp-body rest (exp-append (cdr r) (exp-scope-with name scope)))))))
+        (exp-value-definition form name rest (exp-scope-with name scope)))))
+
+(def- (exp-value-definition form name rest scope)
+  (let ((doc (exp-doc? rest))
+        (values (if doc (cdr rest) rest)))
+    (if (not (exp-length-between? values 1 1))
+        (exp-fail "macroexpand: expected one value after an optional docstring" form))
+    (let ((value (exp-expr (car values) scope)))
+      (if doc
+          (list (car form) name (car rest) value)
+          (list (car form) name value)))))
+
+;; Body: definitions may be produced by macros and may follow expressions.
+;; Every definition is visible throughout the body. Body-level begin is
+;; spliced. Expressions that precede a later definition are wrapped in
+;; throwaway definitions so all definitions come first, and a body that ends
+;; in a definition (or is empty) yields nil.
+(def- (exp-body forms scope)
+  (let ((scan (exp-body-scan (exp-proper! forms forms) scope))
+        (full (cdr scan))
+        (expanded (exp-map (fn (f) (if (exp-definition? f) (exp-def f full #f) (exp-expr f full)))
+                           (car scan))))
+    (exp-body-finish (exp-body-order expanded))))
+
+;; Head-expand each form and splice begin. Returns (forms . scope).
+(def- (exp-body-scan forms scope)
+  (if (pair? forms)
+      (let ((f (exp-head (car forms) scope #f)))
+        (cond ((exp-head-is? f 'begin)
+               (exp-body-scan (exp-append (exp-proper! (cdr f) f) (cdr forms)) scope))
+              ((exp-head-is? f 'def-)
+               (exp-fail "def-: private definitions are only allowed at top level" f))
+              ((exp-definition? f)
+               (let ((r (exp-body-scan (cdr forms) (cons (exp-definition-name f #f) scope))))
+                 (cons (cons f (car r)) (cdr r))))
+              (else
+               (let ((r (exp-body-scan (cdr forms) scope)))
+                 (cons (cons f (car r)) (cdr r))))))
+      (cons '() scope)))
+
+(def- (exp-body-order forms)
+  (if (pair? forms)
+      (let ((f (car forms))
+            (rest (exp-body-order (cdr forms))))
+        (if (or (exp-definition? f) (not (exp-any? exp-definition? rest)))
+            (cons f rest)
+            (cons (list 'def (gensym "body") (list 'begin f exp-nil-form)) rest)))
+      '()))
+
+(def- (exp-any? f xs)
+  (if (pair? xs) (if (f (car xs)) #t (exp-any? f (cdr xs))) #f))
+
+(def- (exp-body-finish forms)
+  (if (or (null? forms) (exp-definition? (exp-last forms)))
+      (exp-append forms (list exp-nil-form))
+      forms))
+
+(def- (exp-last xs) (if (pair? (cdr xs)) (exp-last (cdr xs)) (car xs)))
+
+;; --- top level ---------------------------------------------------------------------
+
+(def- (exp-top form)
+  (let ((form (exp-head form '() #f)))
+    (if (and (pair? form) (symbol? (car form)))
+        (let ((head (car form)))
+          (cond ((eq? head 'begin)
+                 (cons 'begin (exp-map exp-top (exp-proper! (cdr form) form))))
+                ((exp-definition? form) (exp-def form '() #t))
+                ((eq? head 'defonce)
+                 (exp-shape! form 3 4)
+                 (let ((name (exp-name! (car (cdr form)) form)))
+                   (exp-value-definition form name (cdr (cdr form)) (list name))))
+                ((eq? head 'defmacro) (exp-defmacro form))
+                ((eq? head 'defparam)
+                 (exp-shape! form 3 4)
+                 (let ((name (exp-name! (car (cdr form)) form)))
+                   (exp-value-definition form name (cdr (cdr form)) '())))
+                ((or (eq? head 'ns) (eq? head 'require)) form)
+                ((eq? head 'define-method) (exp-method form))
+                ((exp-memq head expander-declarations) form)
+                (else (exp-expr form '()))))
+        (exp-expr form '()))))
+
+;; (defmacro name params ["doc"] body...)
+(def- (exp-defmacro form)
+  (exp-shape! form 3 #f)
+  (let ((name (exp-name! (car (cdr form)) form))
+        (r (exp-params (car (cdr (cdr form))) form))
+        (rest (cdr (cdr (cdr form)))))
+    (cons 'defmacro
+          (cons name
+                (cons (car r)
+                      (if (exp-doc? rest)
+                          (cons (car rest) (exp-body (cdr rest) (cdr r)))
+                          (exp-body rest (cdr r))))))))
+
+;; (define-method (generic param-or-(param Type) ...) body...)
+(def- (exp-method form)
+  (let ((head (if (pair? (cdr form)) (car (cdr form)) #f)))
+    (if (and (pair? head) (list? head))
+        (cons 'define-method
+              (cons head
+                    (exp-body (cdr (cdr form))
+                              (exp-map (fn (p) (if (pair? p) (car p) p)) (cdr head)))))
+        form)))
+
+;; The runtimes call (*expander* form) for each top-level form, after
+;; splitting top-level begin with (expander-expand-head form #f).
+(def *expander* exp-top)
+(def (expander-expand-head form once) (exp-head form '() once))

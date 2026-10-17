@@ -1,10 +1,10 @@
-(define checks 0)
-(define (check expected actual)
+(def checks 0)
+(def (check expected actual)
   (if (equal? expected actual) (set! checks (+ checks 1))
       (error "SDL fixture assertion failed" expected actual)))
-(define fixture (ffi/open-library (list fixture-path)))
-(define fixture-poll (ffi/bind fixture "fixture_poll" '(pointer) 'bool))
-(define event (ffi/alloc SDL_Event 1))
+(def fixture (ffi/open-library (list fixture-path)))
+(def fixture-poll (ffi/bind fixture "fixture_poll" '(pointer) 'bool))
+(def event (ffi/alloc SDL_Event 1))
 (unwind-protect
   (begin
     (fixture-poll event)

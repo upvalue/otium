@@ -87,14 +87,14 @@ containing layout values are built with ordinary list operations. A declaration
 macro may later provide sugar, but is not required for this release.
 
 ```scheme
-(define sdl (ffi/open-library '("libSDL3.dylib")))
-(define init
+(def sdl (ffi/open-library '("libSDL3.dylib")))
+(def init
   (ffi/bind sdl "SDL_Init" '(u32) 'bool))
-(define create-window
+(def create-window
   (ffi/bind sdl "SDL_CreateWindow" '(utf8 int int u64) 'pointer))
-(define poll-event
+(def poll-event
   (ffi/bind sdl "SDL_PollEvent" '(pointer) 'bool))
-(define last-error
+(def last-error
   (ffi/bind sdl "SDL_GetError" '() 'utf8))
 ```
 
@@ -185,12 +185,12 @@ the Otium value carrying its bytes is still a foreign pointer. There is no
 implicit choice between by-value and pointer passing based on the argument.
 
 ```scheme
-(define Point
+(def Point
   (ffi/define-struct! 'Point '((x double) (y double))))
 ;; C: struct Point translate(struct Point point, double dx, double dy);
-(define translate
+(def translate
   (ffi/bind geometry "translate" (list Point 'double 'double) Point))
-(define point (ffi/alloc Point 1))
+(def point (ffi/alloc Point 1))
 (unwind-protect
   (begin
     (ffi/field-set! point Point '(x) 10.0)
@@ -373,13 +373,13 @@ trusted program behavior, not a sandbox boundary.
 ## Layout declarations and header information
 
 ```scheme
-(define SDL_FRect
+(def SDL_FRect
   (ffi/define-struct! 'SDL_FRect
     '((x float) (y float) (w float) (h float))))
-(define rectangle (ffi/alloc SDL_FRect 1))
+(def rectangle (ffi/alloc SDL_FRect 1))
 (ffi/field-set! rectangle SDL_FRect '(w) 100.0)
 
-(define TwoRects
+(def TwoRects
   (ffi/define-struct! 'TwoRects
     (list (list 'rects (list 'array SDL_FRect 2)))))
 ```
@@ -387,7 +387,7 @@ trusted program behavior, not a sandbox boundary.
 `define-struct!` and `define-union!` accept a name and ordered list of
 `(field-name type)` entries and return a fresh immutable layout value. Despite
 their names, these procedures do not install bindings or mutate a type registry.
-The name is a diagnostic symbol only. `define` binds the returned value; normal
+The name is a diagnostic symbol only. `def` binds the returned value; normal
 lexical and namespace scoping handles local names and imports. Procedures such
 as `alloc`, `sizeof`, and `field-ref` consume the layout value directly and never
 look up a caller namespace. Quoting an aggregate variable instead of passing

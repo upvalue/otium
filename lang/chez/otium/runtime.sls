@@ -10,7 +10,7 @@
     (fields transformer namespace name))
 
   (define-record-type namespace
-    (fields name environment imports definitions
+    (fields name environment imports definitions privates
             (mutable loaded?) (mutable loading?) (mutable source)))
   (define namespaces (make-eq-hashtable))
   (define current-namespace (make-parameter #f))
@@ -29,6 +29,13 @@
           (let ([env (namespace-environment space)])
             (and (top-level-bound? name env) (top-level-value name env))))))
 
+  ;; Syntax that Otium provides walks like any other form. Other Chez syntax,
+  ;; reached through the chez/ prefix, is left for Chez to expand.
+  (define otium-syntax
+    (let ([env (environment '(otium core)
+                 '(only (otium conditions) handler-bind try restart-case unwind-protect defer))])
+      (filter (lambda (name) (not (top-level-bound? name env))) (environment-symbols env))))
+
   (define (namespace-expander space)
     (make-expander
       (lambda (name)
@@ -37,7 +44,8 @@
       (lambda (name)
         (and (not (hashtable-contains? (namespace-imports space) name))
              (not (top-level-bound? name (namespace-environment space)))
-             (top-level-syntax? name (namespace-environment space))))
+             (top-level-syntax? name (namespace-environment space))
+             (not (memq name otium-syntax))))
       (lambda (macro args)
         (let ([budget (expansion-budget)])
           (when (= (vector-ref budget 0) 0)
@@ -81,14 +89,13 @@
     (or (hashtable-ref namespaces name #f)
         (let* ([env (copy-environment
                       (environment '(otium core)
-                        '(prefix (chezscheme) chez/)
                         '(only (otium conditions)
                            error signal condition-type condition-message error? type-pred
                            define-condition condition-of-type? handler-bind try restart-case
                            invoke-restart compute-restarts find-restart restart-name
                            restart-description unwind-protect defer quit exit)))]
                [space (make-namespace name env (make-eq-hashtable)
-                        (make-eq-hashtable) #f #f #f)])
+                        (make-eq-hashtable) (make-eq-hashtable) #f #f #f)])
           (hashtable-set! namespaces name space)
           (define-top-level-value 'describe
             (lambda (name)
@@ -111,8 +118,7 @@
                   (parameterize ([current-namespace space])
                     (with-expansion
                       (lambda ()
-                        ((expander-head (namespace-expander space))
-                          form '() (cdr entry)))))) env))
+                        (expander-head (namespace-expander space) form (cdr entry)))))) env))
             '((macroexpand-1 . #t) (macroexpand . #f)))
           (define-top-level-value 'eval
             (lambda (form)
@@ -158,6 +164,8 @@
     (unless (hashtable-contains? (namespace-definitions target) member)
       (error 'require "namespace does not define this name"
         (namespace-name target) member))
+    (when (hashtable-contains? (namespace-privates target) member)
+      (error 'require "name is private" (namespace-name target) member))
     (unless (top-level-bound? member (namespace-environment target))
       (error 'require "syntax imports are not supported yet" member))
     (when (hashtable-contains? (namespace-definitions space) local)
@@ -223,9 +231,20 @@
     (parameterize ([current-namespace (current-namespace)])
       (read-source path)))
 
+  ;; (require chez) makes every Chez binding available as chez/name in the
+  ;; current namespace. The import keyword is installed under a fresh name.
+  (define (require-chez! space)
+    (let ([env (namespace-environment space)] [keyword (gensym "import")])
+      (define-top-level-syntax keyword (top-level-syntax 'import (scheme-environment)) env)
+      (eval `(,keyword (prefix (chezscheme) chez/)) env)))
+
   (define (require-form args)
+    (when (and (pair? args) (eq? (car args) 'chez))
+      (unless (null? (cdr args)) (error 'require "chez takes no options" args)))
     (unless (and (list? args) (pair? args) (symbol? (car args)))
       (error 'require "expected (require namespace [:as alias] [:refer (names)] [:reload])"))
+    (if (eq? (car args) 'chez)
+        (require-chez! (current-namespace))
     (let ([name (car args)] [space (current-namespace)])
       (let parse ([rest (cdr args)] [alias (car args)] [refers '()] [reload? #f])
         (cond
@@ -233,7 +252,8 @@
            (let ([target (require-namespace name reload?)])
              (for-each
                (lambda (member)
-                 (when (top-level-bound? member (namespace-environment target))
+                 (when (and (top-level-bound? member (namespace-environment target))
+                            (not (hashtable-contains? (namespace-privates target) member)))
                    (import-value! space
                      (string->symbol (string-append (symbol->string alias) "/"
                                        (symbol->string member)))
@@ -246,7 +266,7 @@
           [(and (or (eq? (car rest) ':refer) (eq? (car rest) (keyword "refer"))) (pair? (cdr rest))
                 (list? (cadr rest)) (for-all symbol? (cadr rest)))
            (parse (cddr rest) alias (cadr rest) reload?)]
-          [else (error 'require "invalid options" rest)]))))
+          [else (error 'require "invalid options" rest)])))))
 
   (define (generic-declaration! space form)
     (define (invalid message)
@@ -289,8 +309,8 @@
                                       "expected type descriptor" (cadr p)))
                                   type))) (cdr head))]
                    [implementation
-                    (eval ((expander-expression (namespace-expander space))
-                           `(lambda ,names ,@(cddr form)) '()) env)])
+                    (eval (expander-top (namespace-expander space) `(fn ,names ,@(cddr form)))
+                          env)])
               (gm:add-method! generic signature implementation))))
         (let* ([type? (memq kind '(define-type reset-type!))]
                [reset? (memq kind '(reset-type! reset-generic!))]
@@ -333,7 +353,7 @@
   (define (evaluate-top input)
     (let* ([space (current-namespace)] [env (namespace-environment space)]
            [expander (namespace-expander space)]
-           [form ((expander-head expander) input '() #f)])
+           [form (expander-head expander input #f)])
       (cond
         [(and (pair? form)
               (memq (car form) '(define-type define-generic define-method reset-type! reset-generic!)))
@@ -352,43 +372,37 @@
                  [(null? (cdr forms)) (evaluate (car forms))]
                  [else (evaluate (car forms)) (loop (cdr forms))]))]
         [(and (pair? form) (eq? (car form) 'defonce))
-         (unless (and (list? form) (<= 3 (length form) 4) (symbol? (cadr form))
-                      (or (= (length form) 3) (string? (caddr form))))
+         (unless (and (list? form) (<= 3 (length form) 4) (symbol? (cadr form)))
            (error 'defonce "expected (defonce name [docstring] expression)" form))
          (unless (hashtable-contains? (namespace-definitions space) (cadr form))
-           (evaluate `(define ,@(cdr form))))]
+           (evaluate `(def ,@(cdr form))))]
         [(and (pair? form) (eq? (car form) 'defmacro))
-         (unless (and (list? form) (>= (length form) 4) (symbol? (cadr form)))
-           (error 'defmacro "expected (defmacro name parameters body ...)" form))
-         (when (expander-core-form? (cadr form))
-           (error 'defmacro "cannot replace a core form" (cadr form)))
-         (when (hashtable-contains? (namespace-imports space) (cadr form))
-           (error 'defmacro "definition would replace an import" (cadr form)))
-         (let ([transformer
-                (eval ((expander-expression expander)
-                        `(lambda ,(caddr form)
+         (let ([form (expander-top expander form)])
+           (when (hashtable-contains? (namespace-imports space) (cadr form))
+             (error 'defmacro "definition would replace an import" (cadr form)))
+           (let ([transformer
+                  (eval `(fn ,(caddr form)
                            ,@(let ([body (cdddr form)])
                                (if (and (string? (car body)) (pair? (cdr body)))
-                                   (cdr body) body))) '()) env)])
-           (define-top-level-value (cadr form)
-             (make-otium-macro transformer space (cadr form)) env)
-           (hashtable-set! (namespace-definitions space) (cadr form) (definition-help form)))]
+                                   (cdr body) body)))
+                        env)])
+             (define-top-level-value (cadr form)
+               (make-otium-macro transformer space (cadr form)) env)
+             (hashtable-delete! (namespace-privates space) (cadr form))
+             (hashtable-set! (namespace-definitions space) (cadr form) (definition-help form))))]
         [else
-         (let ([definition
-                (and (pair? form) (memq (car form) '(define define-syntax))
-                     (pair? (cdr form))
-                     (if (pair? (cadr form)) (caadr form) (cadr form)))])
+         (let* ([form (expander-top expander form)]
+                [kind (and (pair? form) (memq (car form) '(def def-)) (car form))]
+                [definition (and kind (if (pair? (cadr form)) (caadr form) (cadr form)))])
            (when (and definition (hashtable-contains? (namespace-imports space) definition))
-             (error 'define "definition would replace an import" definition))
+             (error 'def "definition would replace an import" definition))
            (call-with-values
-             (lambda ()
-               (eval
-                 (cond
-                   [(and (pair? form) (eq? (car form) 'define))
-                    ((expander-definition expander) form '())]
-                   [else ((expander-expression expander) form '())]) env))
+             (lambda () (eval form env))
              (lambda results
                (when definition
+                 (if (eq? kind 'def-)
+                     (hashtable-set! (namespace-privates space) definition #t)
+                     (hashtable-delete! (namespace-privates space) definition))
                  (hashtable-set! (namespace-definitions space) definition (definition-help form)))
                (apply values results))))])))
 

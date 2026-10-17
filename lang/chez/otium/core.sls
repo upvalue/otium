@@ -1,10 +1,10 @@
 (library (otium core)
   ;; This export list is the default vocabulary, independent of Chez additions.
   (export
-    quote quasiquote unquote unquote-splicing if begin lambda define set!
-    let let* letrec letrec* and or cond else => case do when unless
-    define-syntax syntax-rules let-syntax letrec-syntax
-    let-values let*-values case-lambda
+    quote quasiquote unquote unquote-splicing if begin set! and or cond else =>
+    when unless
+    (rename (ot-fn fn) (ot-def def) (ot-def def-) (ot-let let) (ot-while while)
+            (ot-defparam defparam) (ot-with-params with-params))
     + - * / = < > <= >= zero? positive? negative? odd? even?
     min max abs quotient remainder modulo gcd lcm numerator denominator
     floor ceiling truncate round exp log sin cos tan asin acos atan sqrt expt
@@ -30,7 +30,7 @@
     hashtable-contains? hashtable-update! hashtable-copy hashtable-clear!
     hashtable-keys hashtable-entries equal-hash string-hash symbol-hash
     values call-with-values call/cc call-with-current-continuation dynamic-wind
-    make-parameter parameterize void
+    void
     display print println newline
     read-string keyword keyword? keyword->string nil? array array? table table?
     get put! push! pop! keys copy take drop update! type)
@@ -42,6 +42,44 @@
                   (frozen-set-car! set-car!) (frozen-set-cdr! set-cdr!))
           (prefix (only (chezscheme) values) host:)
           (prefix (only (chezscheme) display newline) host:))
+
+  ;; Otium core forms over Chez. The shared expander has already normalized
+  ;; parameter lists and moved body definitions ahead of plain expressions.
+  (define-syntax ot-fn
+    (syntax-rules () [(_ params body ...) (lambda params body ...)]))
+
+  (define-syntax ot-def
+    (lambda (x)
+      (syntax-case x ()
+        [(_ (name . params) doc first body ...) (string? (syntax->datum #'doc))
+         #'(define (name . params) first body ...)]
+        [(_ (name . params) body ...) #'(define (name . params) body ...)]
+        [(_ name doc value) (string? (syntax->datum #'doc)) #'(define name value)]
+        [(_ name value) #'(define name value)])))
+
+  ;; Otium let binds sequentially; named let initializers see the outer scope.
+  (define-syntax ot-let
+    (syntax-rules ()
+      [(_ (bindings ...) body ...) (let* (bindings ...) body ...)]
+      [(_ name (bindings ...) body ...) (let name (bindings ...) body ...)]))
+
+  (define-syntax ot-while
+    (syntax-rules ()
+      [(_ test body ...) (let loop () (if test (begin body ... (loop)) (void)))]))
+
+  (define-syntax ot-defparam
+    (lambda (x)
+      (syntax-case x ()
+        [(_ name doc value) (string? (syntax->datum #'doc))
+         #'(define name (make-parameter value))]
+        [(_ name value) #'(define name (make-parameter value))])))
+
+  ;; Bindings are installed one at a time, as on C.
+  (define-syntax ot-with-params
+    (syntax-rules ()
+      [(_ () body ...) (begin (void) body ...)]
+      [(_ ((param value) more ...) body ...)
+       (parameterize ([param value]) (ot-with-params (more ...) body ...))]))
 
   (define (display . objects)
     (let loop ([objects objects] [first? #t])

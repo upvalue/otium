@@ -19,7 +19,7 @@ writer.writerow(['positions', 'exact_methods', 'strategy', 'calls', 'median_ns_p
 for nx, ny, binary_dispatch in [(4, 1, False), (16, 1, False), (64, 1, False),
                                (2, 2, True), (4, 4, True), (8, 8, True)]:
     forms = ['(require (otium.generic :as g))', '(define-generic (operation x y))',
-             '(define-method (operation x y) -1)', '(define methods [])']
+             '(define-method (operation x y) -1)', '(def methods [])']
     for a in range(nx):
         forms.append(f'(define-type W{a})')
         if binary_dispatch:
@@ -32,7 +32,7 @@ for nx, ny, binary_dispatch in [(4, 1, False), (16, 1, False), (64, 1, False),
             body = f"(+ (g/field-ref x 'payload) (g/field-ref y 'payload) {offset})"
             event = f'(y E{b})' if binary_dispatch else 'y'
             forms.append(f'(define-method (operation (x W{a}) {event}) {body})')
-            forms.append(f'(push! methods (lambda (x y) {body}))')
+            forms.append(f'(push! methods (fn (x y) {body}))')
     for name, reader in [('cond-descriptor', 'g/dispatch-type'), ('cond-map-field', 'g/field-ref')]:
         def read(x):
             return f'({reader} {x})' if reader == 'g/dispatch-type' else f"({reader} {x} 'kind)"
@@ -41,8 +41,8 @@ for nx, ny, binary_dispatch in [(4, 1, False), (16, 1, False), (64, 1, False),
             for b in range(ny):
                 predicate = f'(and (eq? tx W{a}) (eq? ty E{b}))' if binary_dispatch else f'(eq? tx W{a})'
                 clauses.append(f"({predicate} (+ (g/field-ref x 'payload) (g/field-ref y 'payload) {a * ny + b}))")
-        forms.append(f'(define ({name} index x y) (let ((tx {read("x")}) (ty {read("y")})) (cond {" ".join(clauses)} (else -1))))')
-    forms.extend(['(define lefts [])', '(define rights [])', '(define selected [])'])
+        forms.append(f'(def ({name} index x y) (let ((tx {read("x")}) (ty {read("y")})) (cond {" ".join(clauses)} (else -1))))')
+    forms.extend(['(def lefts [])', '(def rights [])', '(def selected [])'])
     # A deterministic permutation distributes types while payloads vary by sample.
     for i in range(128):
         a, b = (i * 17 + 3) % nx, (i * 11 + i // nx + 1) % ny
@@ -50,17 +50,17 @@ for nx, ny, binary_dispatch in [(4, 1, False), (16, 1, False), (64, 1, False),
                       f"(push! rights (g/make E{b} 'kind E{b} 'payload {i * 13 + 2}))",
                       f'(push! selected (get methods {a * ny + b}))'])
     forms.append(f'''
-(define (run op calls)
+(def (run op calls)
   (let ((n 0) (checksum 0))
     (while (< n calls)
       (let ((i (modulo n 128)))
         (set! checksum (+ checksum (op i (get lefts i) (get rights i)))))
       (set! n (+ n 1)))
     checksum))
-(define (preselected i x y) ((get selected i) x y))
-(define (generic i x y) (operation x y))
-(define expected (run preselected {args.calls}))
-(define (measure label op)
+(def (preselected i x y) ((get selected i) x y))
+(def (generic i x y) (operation x y))
+(def expected (run preselected {args.calls}))
+(def (measure label op)
   (run op 2000)
   (dotimes (r 5)
     (let ((start (current-jiffy)) (checksum (run op {args.calls})))

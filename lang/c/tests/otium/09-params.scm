@@ -21,7 +21,7 @@
   (println "sequential:" (label)))
 
 ; the binding is visible through function calls (dynamic, not lexical)
-(define (report) (depth))
+(def (report) (depth))
 (println "dyn-out:" (report))
 (with-params ((depth 5))
   (println "dyn-in:" (report)))
@@ -36,7 +36,7 @@
 
 ; restored when a restart unwinds out of the body
 (println "restart-exit:"
-  (handler-bind (((type-pred 'error) (lambda (c) (invoke-restart 'out 'ok))))
+  (handler-bind (((type-pred 'error) (fn (c) (invoke-restart 'out 'ok))))
     (restart-case
         (with-params ((depth 77))
           (error "leave"))

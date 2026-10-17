@@ -1,6 +1,6 @@
-(define revision "ORBIT / 01")
+(def revision "ORBIT / 01")
 ;; Save this function while either runtime is running. Phase lives in the host.
-(define (render! elapsed dt)
+(def (render! elapsed dt)
   (set! scene-ticks (+ scene-ticks 1))
   (set! scene-phase (+ scene-phase dt))
   (clear! 13 19 32)

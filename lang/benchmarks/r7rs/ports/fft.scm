@@ -1,6 +1,6 @@
 ;; FFT -- Fast Fourier Transform, translated from Numerical Recipes in C.
 
-(define (four1 data)
+(def (four1 data)
   (let ((n (length data))
         (two-pi 6.28318530717959)
         (i 0)
@@ -51,15 +51,15 @@
             (set! m (+ m 2))))
         (set! mmax (* mmax 2))))))
 
-(define (benchmark-main)
+(def (benchmark-main)
   (let ((count (bench-read))
         (size (bench-read))
         (fill (bench-read))
         (output (bench-read))
         (name (str "fft:" size ":" count)))
     (run-ported-benchmark name count
-      (lambda ()
+      (fn ()
         (let ((data (bench-make-array size fill)))
           (four1 data)
           (get data 0)))
-      (lambda (result) (= result output)))))
+      (fn (result) (= result output)))))

@@ -911,7 +911,7 @@ static void module(ots* s) {
     if (functions[i].name[0] == '%') {
       char source[128];
       int len =
-          snprintf(source, sizeof(source), "(define- %s %s)", functions[i].name, functions[i].name);
+          snprintf(source, sizeof(source), "(def- %s %s)", functions[i].name, functions[i].name);
       if (!ot_eval_src(s, source, (size_t)len, "<ffi-private>", &ignored)) return;
     }
   }

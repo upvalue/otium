@@ -1,18 +1,18 @@
 ;; Hansen's quick-1 benchmark and its original random-number generator.
 
-(define (partition! values left right less?)
+(def (partition! values left right less?)
   (let ((mid (get values right)))
-    (define (up-loop i)
+    (def (up-loop i)
       (set! i (+ i 1))
       (if (and (< i right) (less? (get values i) mid))
           (up-loop i)
           i))
-    (define (down-loop j)
+    (def (down-loop j)
       (set! j (- j 1))
       (if (and (> j left) (less? mid (get values j)))
           (down-loop j)
           j))
-    (define (partition-loop i j)
+    (def (partition-loop i j)
       (set! i (up-loop i))
       (set! j (down-loop j))
       (let ((temporary (get values i)))
@@ -27,8 +27,8 @@
               i))))
     (partition-loop (- left 1) right)))
 
-(define (quick-1 values less?)
-  (define (sort-range left right)
+(def (quick-1 values less?)
+  (def (sort-range left right)
     (when (< left right)
       (let ((median (partition! values left right less?)))
         (if (< (- median left) (- right median))
@@ -41,7 +41,7 @@
   (sort-range 0 (- (length values) 1))
   values)
 
-(define random-flonum #f)
+(def random-flonum #f)
 
 (let ((norm 2.328306549295728e-10)
       (m1 4294967087.0)
@@ -52,7 +52,7 @@
       (a23n 1370589.0)
       (seed [1.0 0.0 0.0 1.0 0.0 0.0]))
   (set! random-flonum
-    (lambda ()
+    (fn ()
       (let ((p1 (- (* a12 (get seed 1)) (* a13n (get seed 0))))
             (p2 (- (* a21 (get seed 5)) (* a23n (get seed 3))))
             (k1 (truncate (/ p1 m1)))
@@ -71,17 +71,17 @@
             (* norm (+ (- p1 p2) m1))
             (* norm (- p1 p2)))))))
 
-(define (random-int n)
+(def (random-int n)
   (exact (truncate (* (inexact n) (random-flonum)))))
 
-(define (sorted? values)
+(def (sorted? values)
   (let ((i 1) (ok #t))
     (while (and ok (< i (length values)))
       (when (> (get values (- i 1)) (get values i)) (set! ok #f))
       (set! i (+ i 1)))
     ok))
 
-(define (benchmark-main)
+(def (benchmark-main)
   (let ((count (bench-read))
         (size (bench-read))
         (random-range (bench-read))
@@ -93,5 +93,5 @@
       (put! values i (random-int random-range))
       (set! i (+ i 1)))
     (run-ported-benchmark name count
-      (lambda () (quick-1 (copy values) <))
+      (fn () (quick-1 (copy values) <))
       sorted?)))

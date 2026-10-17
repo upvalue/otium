@@ -33,7 +33,7 @@ for cmd in COMMANDS:
         tmp = Path(tmp)
         script = tmp / 'arguments.scm'
         script.write_text('''(require otium.process)
-(for-each (lambda (arg) (display (string-length arg)) (display ":") (display arg) (newline)) (otium.process/arguments))
+(for-each (fn (arg) (display (string-length arg)) (display ":") (display arg) (newline)) (otium.process/arguments))
 (display (otium.process/script-name)) (newline)
 ''')
         tokens = ['--help', '', 'two words', 'λ', '--', '-file', '--c.heap-max=1']
@@ -48,7 +48,7 @@ for cmd in COMMANDS:
         assert run(cmd, '--no-project', '--load', pre).stdout == 'pre\n'
         library = tmp / 'lib'
         library.mkdir()
-        (library / 'sample.scm').write_text('(ns sample) (define answer 42)')
+        (library / 'sample.scm').write_text('(ns sample) (def answer 42)')
         script.write_text('(require sample) (display sample/answer) (newline)')
         assert run(cmd, '--no-project', '--path', library, script).stdout == '42\n'
         assert run(cmd, '--no-project', '-L', library, script).stdout == '42\n'

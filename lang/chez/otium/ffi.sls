@@ -251,8 +251,12 @@
                 (for-each free! temporaries)
                 (when (and returned (not published?)) (free! returned))))))))))
 
-  (define-syntax define-
+  (define-syntax def
     (syntax-rules () ((_ . form) (define . form))))
+  (define-syntax def-
+    (syntax-rules () ((_ . form) (define . form))))
+  (define-syntax fn
+    (syntax-rules () ((_ . form) (lambda . form))))
   (define-syntax include-core
     (lambda (form)
       (syntax-case form ()

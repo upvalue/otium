@@ -1,8 +1,8 @@
 ;; The launcher establishes ffi and math-library-names.
-(define math-library (ffi/open-library math-library-names))
-(define native-cos (ffi/bind math-library "cos" '(double) 'double))
-(define native-hypot (ffi/bind math-library "hypot" '(double double) 'double))
-(define native-modf (ffi/bind math-library "modf" '(double pointer) 'double))
+(def math-library (ffi/open-library math-library-names))
+(def native-cos (ffi/bind math-library "cos" '(double) 'double))
+(def native-hypot (ffi/bind math-library "hypot" '(double double) 'double))
+(def native-modf (ffi/bind math-library "modf" '(double pointer) 'double))
 
 (display (native-cos 0.0)) (newline)
 (display (native-hypot 3.0 4.0)) (newline)

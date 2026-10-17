@@ -111,9 +111,10 @@
     ]
   },
   "begin": {
-    "text": "(begin expression ...)\nEvaluate expressions in order and return the last result, or nil for no expressions. do is a sequencing alias here, not Scheme's loop form.",
+    "text": "(begin expression ...)\nEvaluate expressions in order and return the last result, or nil for no expressions.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "boolean?": {
@@ -229,9 +230,17 @@
     ]
   },
   "def": {
-    "text": "(def name [\"docstring\"] value) / (def (name argument ...) [\"docstring\"] body ...)\nDefine or replace a binding. Namespace bindings are live across redefinition.",
+    "text": "(def name [\"docstring\"] value) / (def (name parameter ...) [\"docstring\"] body ...)\nDefine or replace a binding. Namespace bindings are live across redefinition. Allowed at top level and in bodies.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
+    ]
+  },
+  "def-": {
+    "text": "(def- name [\"docstring\"] value) / (def- (name parameter ...) [\"docstring\"] body ...)\nDefine or replace a top-level binding that is private to its namespace.",
+    "runtimes": [
+      "c",
+      "chez"
     ]
   },
   "defer": {
@@ -239,18 +248,6 @@
     "runtimes": [
       "c",
       "chez"
-    ]
-  },
-  "define": {
-    "text": "(define name [\"docstring\"] value) / (define (name argument ...) [\"docstring\"] body ...)\nDefine or replace a binding. Namespace bindings are live across redefinition.",
-    "runtimes": [
-      "c"
-    ]
-  },
-  "define-": {
-    "text": "(define- name [\"docstring\"] value) / (define- (name argument ...) [\"docstring\"] body ...)\nDefine or replace a binding. The binding is private to its namespace.",
-    "runtimes": [
-      "c"
     ]
   },
   "define-condition": {
@@ -271,7 +268,8 @@
   "defparam": {
     "text": "(defparam name [\"docstring\"] default)\nDefine a named dynamically scoped parameter. Call (name) to read it; use with-params to override it temporarily.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "describe": {
@@ -289,12 +287,6 @@
       "chez"
     ],
     "chez": "(display value ...)\nWrite display representations to the current output port, separated by spaces, without a newline. Return #f. Values use Chez display representations."
-  },
-  "do": {
-    "text": "(do expression ...)\nEvaluate expressions in order and return the last result, or nil for no expressions. do is a sequencing alias here, not Scheme's loop form.",
-    "runtimes": [
-      "c"
-    ]
   },
   "eq?": {
     "text": "(eq? a b)\nCompare immediate values by value and heap objects by identity. Use equal? for structural comparison.",
@@ -361,6 +353,18 @@
       "c"
     ]
   },
+  "expander-invoke-macro": {
+    "text": "(expander-invoke-macro macro arguments)\nInternal expander hook: run a macro's transformer on unevaluated argument forms.",
+    "runtimes": [
+      "c"
+    ]
+  },
+  "expander-native-syntax?": {
+    "text": "(expander-native-syntax? symbol)\nInternal expander hook: true when symbol names host syntax the expander must not walk. Always false on C.",
+    "runtimes": [
+      "c"
+    ]
+  },
   "expt": {
     "text": "(expt base exponent)\nRaise base to exponent. Nonnegative integer powers of integers use integer arithmetic with wrapping overflow; other inputs use floating point.",
     "runtimes": [
@@ -400,9 +404,10 @@
     ]
   },
   "fn": {
-    "text": "(fn parameters body ...)\nCreate a lexical procedure. Parameters may be a proper list, dotted rest list, or a rest symbol.",
+    "text": "(fn parameters body ...)\nCreate a lexical procedure. Parameters may be a proper list, dotted rest list, (a & rest), or a rest symbol.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "for-each": {
@@ -448,12 +453,6 @@
     "runtimes": [
       "c",
       "chez"
-    ]
-  },
-  "in-ns": {
-    "text": "(in-ns namespace-name)\nSelect a namespace using an evaluated symbol name.",
-    "runtimes": [
-      "c"
     ]
   },
   "inc": {
@@ -526,12 +525,6 @@
       "chez"
     ]
   },
-  "lambda": {
-    "text": "(lambda parameters body ...)\nCreate a lexical procedure. Parameters may be a proper list, dotted rest list, or a rest symbol.",
-    "runtimes": [
-      "c"
-    ]
-  },
   "length": {
     "text": "(length collection)\nCount list/array elements, table entries, or string/buffer Unicode code points. Improper lists and unsupported types raise an error.",
     "runtimes": [
@@ -543,7 +536,8 @@
   "let": {
     "text": "(let ((name expression) ...) body ...) / (let loop ((name expression) ...) body ...)\nBind names sequentially: later initializers see earlier bindings. Named let creates a recursive loop.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "list": {
@@ -1060,13 +1054,15 @@
   "while": {
     "text": "(while test body ...)\nRepeat body while test is truthy, then return nil.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "with-params": {
     "text": "(with-params ((parameter value) ...) body ...)\nInstall dynamic parameter values sequentially for body, restoring them on every exit path.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "write": {
@@ -1090,6 +1086,7 @@
   "defonce": {
     "text": "(defonce name [\"docstring\"] expression)\nInitialize a binding once, preserving its value and documentation on reload.",
     "runtimes": [
+      "c",
       "chez"
     ]
   },

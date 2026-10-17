@@ -19,7 +19,7 @@
 ; handler-bind: handler runs AT THE SIGNAL SITE and may decline by
 ; returning; the condition then keeps going and try catches it.
 (handler-bind (((type-pred 'error)
-                (lambda (c) (println "handler-saw:" (condition-message c)))))
+                (fn (c) (println "handler-saw:" (condition-message c)))))
   (try (error "oops")
     (catch (error? e) (println "then-caught:" (condition-message e)))))
 
@@ -30,7 +30,7 @@
 ; value: the whole restart-case yields 42 even though (error) was inside.
 (println "restart-resume:"
   (handler-bind (((type-pred 'error)
-                  (lambda (c) (invoke-restart 'use-value 42))))
+                  (fn (c) (invoke-restart 'use-value 42))))
     (restart-case (+ 1000 (error "unusable"))
       (use-value (v) v))))
 
@@ -42,7 +42,7 @@
 ; innermost restart of a name wins
 (println "restart-innermost:"
   (handler-bind (((type-pred 'error)
-                  (lambda (c) (invoke-restart 'pick "inner"))))
+                  (fn (c) (invoke-restart 'pick "inner"))))
     (restart-case
         (restart-case (error "x")
           (pick (v) (str "inner-got-" v)))
@@ -70,7 +70,7 @@
 ; cleanups also run when a restart unwinds past them
 (println "restart-thru-cleanup:"
   (handler-bind (((type-pred 'error)
-                  (lambda (c) (invoke-restart 'give 5))))
+                  (fn (c) (invoke-restart 'give 5))))
     (restart-case
         (unwind-protect (error "x") (println "cleanup-restart"))
       (give (v) v))))

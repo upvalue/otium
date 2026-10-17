@@ -1,9 +1,9 @@
 ;; https://leetcode.com/problems/sum-of-squares-of-special-elements/
 
-(define (square x) (* x x))
+(def (square x) (* x x))
 
-(define (sum-of-squares-of-special-elements nums)
-  (define n (length nums))
+(def (sum-of-squares-of-special-elements nums)
+  (def n (length nums))
   (let loop ((totes 0)
              (i 0))
     (if (= i n)

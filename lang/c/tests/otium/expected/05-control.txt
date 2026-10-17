@@ -31,4 +31,3 @@ while-i: 5
 while-value: nil
 begin-last: 3
 begin-empty: nil
-do-alias: 2

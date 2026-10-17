@@ -60,4 +60,3 @@
 ; begin
 (println "begin-last:" (begin 1 2 3))
 (println "begin-empty:" (begin))
-(println "do-alias:" (do 1 2))

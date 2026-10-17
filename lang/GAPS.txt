@@ -27,8 +27,9 @@ Current blockers:
   substring rejects such an endpoint. buffer, buffer-push!, buffer->string,
   str, string-contains?, string-split, string-join, and println need a common
   API. string->number reports failure as nil in C and #f in Chez.
-- Language/library forms: define- marks private definitions; Chez currently
-  has no private definition form. while and dotimes need shared expansions.
+- Language/library forms: def-, while, and the other core forms are shared,
+  and both runtimes use one expander. dotimes and the rest of C's prelude
+  macros are C-only.
 - Loading: demo.ot uses (require '(otcl :as otcl)); Chez uses
   (require otcl :as otcl), searches .scm files, and does not interpret the
   quoted C-style require specification. A loader/suffix convention is needed.
@@ -51,9 +52,8 @@ collection operations are shared now; callable collections and dotimes remain
 gaps. Its documentation string does not make it a native extension.
 
 examples/hand/lc-3622-check-divis.ot uses generic string get returning a
-string, dotimes, and println. Its test function also depends on sequential
-let bindings: prod uses digit-reduce, sum+prod uses sum and prod, and ok uses
-sum+prod in the same let. Chez let is parallel; use let* or agree on semantics.
+string, dotimes, and println. Its sequential let bindings now mean the same
+on both runtimes.
 
 examples/hand/lc-2-add-two-numbers.ot is unfinished (including the 555t
 placeholder). It also uses println. Finish the algorithm before treating it
@@ -76,7 +76,7 @@ and c/tests/ext-demo.scm. Relocation does not repair that stale example.
 Chez examples with non-FFI dependencies
 
 examples/chez/demo.scm and demo/counter.scm are a live-reload example, with no
-FFI dependency. Gaps include require syntax, defonce, the explicit live
+FFI dependency. Gaps include require syntax, the explicit live
 binding handle, Scheme vectors/vector-ref/vector-set!, and printf. C has
 live namespace vars but not this exact saved-callback API. These differences
 should be expressible through a common reload and collection interface.

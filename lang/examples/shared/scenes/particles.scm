@@ -1,5 +1,5 @@
-(define revision "FLOW / 01")
-(define (render! elapsed dt)
+(def revision "FLOW / 01")
+(def (render! elapsed dt)
   (set! scene-ticks (+ scene-ticks 1))
   (set! scene-phase (+ scene-phase dt))
   (clear! 12 16 29)

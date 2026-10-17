@@ -14,6 +14,8 @@
 (for-each
   (lambda (space)
     (evaluate `(ns ,space))
+    (check "chez/ names need (require chez)" #t (fails? '(chez/format "~a" 1)))
+    (evaluate '(require chez))
     (for-each
       (lambda (name) (check "host procedure requires prefix" #t (fails? name)))
       '(printf format load load-shared-object environment interaction-environment
@@ -48,7 +50,7 @@
 (check "explicit native import" "42" (output '(printf "~a" 42)))
 (evaluate '(ns user))
 (check "native import stays in its namespace" #t (fails? 'printf))
-(evaluate '(define display (lambda args 'local)))
+(evaluate '(def display (fn args 'local)))
 (check "core binding can be redefined" 'local (evaluate '(display 1)))
 (evaluate '(ns isolated))
 (check "core redefinition stays in its namespace" "1" (output '(display 1)))

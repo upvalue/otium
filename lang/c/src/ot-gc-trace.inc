@@ -195,6 +195,7 @@ static void OT_GC_TRACE_ROOTS(ots* state) {
   OT_GC_TRACE_SLOT(state, &state->namespaces);
   OT_GC_TRACE_SLOT(state, &state->core_namespace);
   OT_GC_TRACE_SLOT(state, &state->expander);
+  OT_GC_TRACE_SLOT(state, &state->expand_head);
   OT_GC_TRACE_SLOT(state, &state->type_parents);
   OT_GC_TRACE_SLOT(state, &state->dispatch_types);
   OT_GC_TRACE_VM(state, &state->vm);

@@ -45,7 +45,7 @@ and the remainder of C's prelude are still portability gaps.
 
 Nil is Chez void. The expander quotes keyword and nil constants for Chez's
 compiler. Hygienic private syntax emits false-or-void checks in `if`, `and`,
-`or`, `cond`, `when`, `unless` and `do`; it does not call a public reloadable
+`or`, `cond`, `when`, `unless` and `while`; it does not call a public reloadable
 truth function. `not`, filter, exists, for-all and condition-handler/catch
 predicates use the same rule. Short-circuit expressions evaluate operands
 once and retain their return values. Native Chez forms retain native truth

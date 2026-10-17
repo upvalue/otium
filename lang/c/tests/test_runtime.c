@@ -321,7 +321,7 @@ static void test_eval_integration(void) {
                  "             \"user/documented-macro: Macro documentation.\"))",
                  &value) && value == ot_true,
         "macro docstrings survive collection during compilation");
-  const char* program = "(define (tail n total) "
+  const char* program = "(def (tail n total) "
                         "  (if (= n 0) total (tail (- n 1) (+ total n)))) "
                         "(tail 50000 0)";
   check(evaluate(state, program, &value) && ot_is_int(value) &&
@@ -525,7 +525,7 @@ static void test_named_let(void) {
         "named let propagates initializer errors");
   ot_clear_condition(state);
   check(evaluate(state,
-                 "(define (deep n) (if (= n 0) 0 (+ 1 (deep (- n 1))))) "
+                 "(def (deep n) (if (= n 0) 0 (+ 1 (deep (- n 1))))) "
                  "(deep 100)",
                  &value) == false &&
             condition_message_is(state, "maximum VM frame depth exceeded"),
@@ -541,7 +541,7 @@ static void test_try_ast_reuse(void) {
   ots* state = test_state(true);
   if (state == NULL) return;
   otv value = ot_nil;
-  const char* program = "(define (recover message) "
+  const char* program = "(def (recover message) "
                         "  (try (+ 1 2) (error message) "
                         "    (catch (error? e) (condition-message e)))) "
                         "(recover \"first\") "
@@ -801,7 +801,7 @@ static void test_interrupt(void) {
   ots* state = test_state(true);
   if (state == NULL) return;
   otv value = ot_nil;
-  check(evaluate(state, "(define (spin n) (if (= n 0) n (spin (- n 1))))", &value),
+  check(evaluate(state, "(def (spin n) (if (= n 0) n (spin (- n 1))))", &value),
         "define interrupt test loop");
   ot_interrupt(state);
   check(!evaluate(state, "(spin 5000)", &value),
@@ -831,7 +831,7 @@ static void test_exit_status(void) {
   otv value = ot_nil;
   int status = -1;
   check(!ot_exit_status(state, &status), "fresh state has no requested exit status");
-  check(!evaluate(state, "(unwind-protect (exit 23) (define cleaned #t))", &value),
+  check(!evaluate(state, "(unwind-protect (exit 23) (quote cleaned))", &value),
         "exit unwinds evaluation");
   check(ot_exit_status(state, &status) && status == 23, "embedding API exposes requested status");
   ot_destroy(state);

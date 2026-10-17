@@ -1,6 +1,6 @@
 ;; DESTRUC -- Destructive operation benchmark.
 
-(define (append-to-tail! x y)
+(def (append-to-tail! x y)
   (if (null? x)
       y
       (let ((a x) (b (cdr x)))
@@ -10,14 +10,14 @@
         (set-cdr! a y)
         x)))
 
-(define (empty-list-copies n)
+(def (empty-list-copies n)
   (let ((i n) (result '()))
     (while (> i 0)
       (set! result (cons '() result))
       (set! i (- i 1)))
     result))
 
-(define (middle-node! list i)
+(def (middle-node! list i)
   (let ((j (quotient (length list) 2)) (node list))
     (while (> j 0)
       (set-car! node i)
@@ -25,7 +25,7 @@
       (set! j (- j 1)))
     node))
 
-(define (split-half! outer-cell i)
+(def (split-half! outer-cell i)
   (let ((list (car outer-cell))
         (n (quotient (length (car outer-cell)) 2)))
     (if (= n 0)
@@ -41,7 +41,7 @@
             (set-cdr! node '())
             tail)))))
 
-(define (destructive n m)
+(def (destructive n m)
   (let ((lists (empty-list-copies 10)) (i n))
     (while (> i 0)
       (if (null? (car lists))
@@ -60,12 +60,12 @@
       (set! i (- i 1)))
     lists))
 
-(define (benchmark-main)
+(def (benchmark-main)
   (let ((count (bench-read))
         (input1 (bench-read))
         (input2 (bench-read))
         (output (bench-read))
         (name (str "destruc:" input1 ":" input2 ":" count)))
     (run-ported-benchmark name count
-      (lambda () (destructive (bench-hide count input1) (bench-hide count input2)))
-      (lambda (result) (equal? result output)))))
+      (fn () (destructive (bench-hide count input1) (bench-hide count input2)))
+      (fn (result) (equal? result output)))))

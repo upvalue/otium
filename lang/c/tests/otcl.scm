@@ -1,10 +1,10 @@
 (require '(otcl :as otcl))
 
-(define (check expected actual message)
+(def (check expected actual message)
   (unless (equal? expected actual)
     (error message expected actual)))
 
-(define tcl (otcl/make-interpreter))
+(def tcl (otcl/make-interpreter))
 
 (check "hello" (otcl/eval-script tcl "set value hello; set value")
        "otcl set/get")
@@ -54,7 +54,7 @@
           set Total")
        "otcl uppercase globals")
 
-(define (join-command interp frame args)
+(def (join-command interp frame args)
   {:code :ok :value (string-join ":" args)})
 (otcl/register-command! tcl "join" join-command)
 (check "a:b:c" (otcl/eval-script tcl "join a b c")
@@ -66,7 +66,7 @@
        (otcl/eval-script tcl "set nested \"before-[expr 3+4]-after\"; set nested")
        "otcl command substitution in quoted words")
 
-(define unknown (otcl/eval-result tcl "does-not-exist"))
+(def unknown (otcl/eval-result tcl "does-not-exist"))
 (check :error (otcl/result-code unknown) "otcl unknown command status")
 (check "No such command 'does-not-exist'" (otcl/result-value unknown)
        "otcl unknown command message")

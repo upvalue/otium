@@ -9,8 +9,8 @@
 (define-method (speak (animal Dog)) "Bark!")
 (define-method (speak (animal Cat)) "Meow.")
 
-(define dog1 (g/make Dog))
-(define cat1 (g/make Cat))
+(def dog1 (g/make Dog))
+(def cat1 (g/make Cat))
 
 (display (speak dog1))
 (newline)

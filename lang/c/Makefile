@@ -96,7 +96,7 @@ $(OBJ)/line-edit.o: ../shared/line-edit.c ../shared/line-edit.h ../shared/vendor
 $(OBJ)/bestline.o: ../shared/vendor/bestline/bestline.c ../shared/vendor/bestline/bestline.h | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CSTD) $(OPT) -g -w -I../shared/vendor/bestline -c $< -o $@
 
-$(GEN)/expander.h: prelude/expander.scm tools/embed.py | $(GEN)
+$(GEN)/expander.h: ../shared/prelude/expander.scm tools/embed.py | $(GEN)
 	$(PYTHON) tools/embed.py $< ot_expander_src $@
 
 $(GEN)/prelude.h: prelude/prelude.scm tools/embed.py | $(GEN)

@@ -15,7 +15,7 @@
   (g/field-set! widget 'presses (+ 1 (g/field-ref widget 'presses 0)))
   (g/field-ref widget 'label))
 
-(define button (g/make Button 'label "7"))
+(def button (g/make Button 'label "7"))
 (display (handle-event! button (g/make PointerDown)))
 (newline)
 (display (g/field-ref button 'presses))

@@ -1,25 +1,25 @@
 ;; Shared driver for the Otium ports. The generated program defines
 ;; *benchmark-inputs* and *benchmark-implementation* before loading this file.
 
-(define (bench-read)
+(def (bench-read)
   (if (pair? *benchmark-inputs*)
       (let ((value (car *benchmark-inputs*)))
         (set! *benchmark-inputs* (cdr *benchmark-inputs*))
         value)
       (error "benchmark input exhausted")))
 
-(define (bench-make-array n fill)
+(def (bench-make-array n fill)
   (let ((out (array)) (i 0))
     (while (< i n)
       (push! out fill)
       (set! i (+ i 1)))
     out))
 
-(define (bench-hide r x)
-  (let ((choices [(lambda (x) x) (lambda (x) x)]))
+(def (bench-hide r x)
+  (let ((choices [(fn (x) x) (fn (x) x)]))
     ((get choices (if (< r 100) 0 1)) x)))
 
-(define (run-ported-benchmark name count thunk ok?)
+(def (run-ported-benchmark name count thunk ok?)
   (let ((jps (jiffies-per-second))
         (j0 (current-jiffy))
         (i 0)

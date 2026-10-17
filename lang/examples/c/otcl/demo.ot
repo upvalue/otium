@@ -1,6 +1,6 @@
 (require '(otcl :as otcl))
 
-(define interpreter (otcl/make-interpreter))
+(def interpreter (otcl/make-interpreter))
 
 (otcl/eval-script interpreter
   "proc fib {x} {

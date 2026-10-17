@@ -28,20 +28,20 @@ def main():
     if args.frames < 0: parser.error('--frames must be nonnegative')
     if args.capture and not args.frames and not args.acceptance: parser.error('--capture requires --frames')
     source = bootstrap(args.runtime, args.manifest)
-    source += f'''\n(define renderer-name {literal(args.renderer)})
-(define frame-limit {args.frames})
-(define capture-path {literal(args.capture.resolve()) if args.capture else '#f'})
-(define status-path {literal(args.status.resolve()) if args.status else '#f'})
-(define audio-enabled? {'#f' if args.audio == 'off' else '#t'})
-(define inject-error? {'#t' if args.inject_error else '#f'})
+    source += f'''\n(def renderer-name {literal(args.renderer)})
+(def frame-limit {args.frames})
+(def capture-path {literal(args.capture.resolve()) if args.capture else '#f'})
+(def status-path {literal(args.status.resolve()) if args.status else '#f'})
+(def audio-enabled? {'#f' if args.audio == 'off' else '#t'})
+(def inject-error? {'#t' if args.inject_error else '#f'})
 '''
     if args.acceptance:
         source += (ROOT/'examples/shared/sdl-acceptance.scm').read_text()
     else:
         names = '("/usr/lib/libSystem.B.dylib")' if platform.system() == 'Darwin' else '("libc.so.6")'
-        source += "(define host-libc-names '"+names+")\n"
+        source += "(def host-libc-names '"+names+")\n"
         scene = args.scene_path or ROOT/'examples/shared/scenes'/(args.scene+'.scm')
-        source += '(define scene-path '+literal(scene.resolve())+')\n'
+        source += '(def scene-path '+literal(scene.resolve())+')\n'
         source += (ROOT/'shared/sdl/reload.scm').read_text()
         source += (ROOT/'examples/shared/sdl-host.scm').read_text()
     env = environment()

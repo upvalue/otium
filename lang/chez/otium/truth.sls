@@ -1,6 +1,6 @@
 (library (otium truth)
   (export (rename (ot-if if) (ot-and and) (ot-or or) (ot-cond cond)
-                  (ot-when when) (ot-unless unless) (ot-do do)
+                  (ot-when when) (ot-unless unless)
                   (ot-not not) (ot-filter filter) (ot-exists exists) (ot-for-all for-all)))
   (import (chezscheme) (prefix (otium values) val:))
   (define-syntax truth
@@ -22,9 +22,6 @@
       [(_ (test body ...) clauses ...) (if (truth test) (begin body ...) (ot-cond clauses ...))]))
   (define-syntax ot-when (syntax-rules () [(_ test body ...) (ot-if test (begin body ...))]))
   (define-syntax ot-unless (syntax-rules () [(_ test body ...) (ot-if test (void) (begin body ...))]))
-  (define-syntax ot-do
-    (syntax-rules () [(_ bindings (test result ...) body ...)
-                     (do bindings ((truth test) result ...) body ...)]))
   (define (ot-not x) (not (truth x)))
   (define (ot-filter f xs)
     (if (val:array? xs)

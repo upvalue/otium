@@ -32,7 +32,7 @@
   (println "gensym-no-collide:" (double-shadowing x)))
 
 ; macro body may call functions defined before it
-(define (expander-helper x) (list '+ x 1))
+(def (expander-helper x) (list '+ x 1))
 (defmacro inc-form (x) (expander-helper x))
 (println "macro-calls-fn:" (inc-form 41))
 

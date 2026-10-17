@@ -13,8 +13,8 @@
 (define-method (collide (left Cat) (right Dog)) "Hiss!")
 (define-method (collide (left Dog) (right Cat)) "Hiss!")
 
-(define dog (g/make Dog 'name "Fido"))
-(define cat (g/make Cat 'name "Mog"))
+(def dog (g/make Dog 'name "Fido"))
+(def cat (g/make Cat 'name "Mog"))
 (println (speak dog))
 (println (speak cat))
 (println (collide dog cat))

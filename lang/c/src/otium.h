@@ -560,6 +560,7 @@ struct ot_state {
   otv namespaces;
   otv core_namespace;
   otv expander;
+  otv expand_head;
   otv type_parents;
   otv dispatch_types;
   void* ffi_state;

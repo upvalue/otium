@@ -45,59 +45,56 @@
 (check "quote is data" '(twice 21) (run ''(twice 21)))
 (check "quasiquote active unquotes" '(a 42 4 6)
   (run '`(a ,(twice 21) ,@(list (twice 2) (twice 3)))))
-(check "quasiquote vector" '#(a 42) (run '`#(a ,(twice 21))))
 (check "quasiquote dotted tail" '(a . 42) (run '`(a . ,(twice 21))))
 (check "nested quasiquote stays data" '(quasiquote ((unquote (twice 3))))
   (run '`(quasiquote ((unquote (twice 3))))))
 (check "nested active unquote" '(quasiquote ((unquote 6)))
   (run '`(quasiquote ((unquote (unquote (twice 3)))))))
 
-(check "lambda shadows macro" 8 (run '((lambda (twice) (twice 8)) (lambda (x) x))))
-(check "lexical variable can shadow core syntax" 42
-  (run '(let ([if +]) (if (twice 20) 2))))
-(check "shadowed quote has expression arguments" '(42)
-  (run '(let ([quote list]) (quote (twice 21)))))
-(check "shadowed begin keeps procedure arguments" 42
-  (run '(let ([begin +]) (begin (twice 20) 2))))
-(check "shadowed define keeps procedure arguments" 42
-  (run '(let ([define +]) (define (twice 20) 2))))
-(check "function definition can bind a syntax name" 42
-  (run '(let () (define (lambda x) (twice x)) (lambda 21))))
+(check "lambda shadows macro" 8 (run '((fn (twice) (twice 8)) (fn (x) x))))
+(for-each
+  (lambda (form)
+    (check "core form names cannot be rebound" #t
+      (fails-with? "macroexpand: cannot rebind a core form name" (lambda () (run form)))))
+  '((let ([if +]) (if 1 2))
+    ((fn (quote) quote) 1)
+    (let () (def (fn x) x) (fn 21))
+    (defmacro begin () 1)))
 (check "rest parameter shadows macro" 8
-  (run '((lambda twice ((car twice) 8)) (lambda (x) x))))
-(check "parallel let initializer uses outer macro" 6
-  (run '(let ([twice (lambda (x) x)] [result (twice 3)]) result)))
-(check "parallel let body shadows macro" 3
-  (run '(let ([twice (lambda (x) x)]) (twice 3))))
+  (run '((fn twice ((car twice) 8)) (fn (x) x))))
 (check "sequential let initializer shadows macro" 3
-  (run '(let* ([twice (lambda (x) x)] [result (twice 3)]) result)))
-(check "recursive let initializer shadows macro" 3
-  (run '(letrec ([twice (lambda (x) x)] [f (lambda () (twice 3))]) (f))))
-(check "sequential recursive let shadows macro" 3
-  (run '(letrec* ([twice (lambda (x) x)] [result (twice 3)]) result)))
+  (run '(let ([twice (fn (x) x)] [result (twice 3)]) result)))
+(check "let body shadows macro" 3
+  (run '(let ([twice (fn (x) x)]) (twice 3))))
+(check "let binds sequentially" 3
+  (run '(let ([a 1] [b (+ a 1)] [a (+ b 1)]) a)))
 (check "named let initializers use outer macro" 6
   (run '(let twice ([n (twice 3)]) (if (= n 0) 6 (twice (- n 1))))))
 (check "all internal names bind before expansion" 3
-  (run '(let () (define (f) (twice 3)) (define (twice x) x) (f))))
+  (run '(let () (def (f) (twice 3)) (def (twice x) x) (f))))
 (check "internal begin definitions" 3
-  (run '(let () (begin (define (f) (twice 3)) (define (twice x) x)) (f))))
+  (run '(let () (begin (def (f) (twice 3)) (def (twice x) x)) (f))))
+(check "definitions may follow expressions" '(2 1)
+  (run '(let () (def a 1) (def seen (list a)) (set! a 2) (def b a) (cons b seen))))
+(check "body ending in a definition yields nil" #t
+  (run '(nil? ((fn () (def x 1))))))
 (check "cond receiver expands" 8
-  (run '(cond [(twice 2) => (lambda (x) (twice x))] [else 0])))
+  (run '(cond [(twice 2) => (fn (x) (twice x))] [else 0])))
 (check "operator expression expands" 6
-  (run '((if #t (lambda (x) (twice x)) +) 3)))
+  (run '((if #t (fn (x) (twice x)) +) 3)))
 (check "set value expands" 6
   (run '(let ([x 0]) (set! x (twice 3)) x)))
 
-(run '(define expansions 0))
+(run '(def expansions 0))
 (run '(defmacro counted (x) (set! expansions (+ expansions 1)) `(+ ,x 1)))
-(run '(define (expanded-once x) (counted x)))
+(run '(def (expanded-once x) (counted x)))
 (run '(expanded-once 1))
 (run '(expanded-once 2))
 (check "function body expands once" 1 (run 'expansions))
 (run '(defmacro counted (x) `(+ ,x 10)))
 (check "old compiled expansion" 2 (run '(expanded-once 1)))
 (check "new expansion" 11 (run '(counted 1)))
-(run '(defmacro install (name value) `(define ,name ,value)))
+(run '(defmacro install (name value) `(def ,name ,value)))
 (run '(install installed 42))
 (run '(defonce installed 99))
 (check "generated definition registered" 42 (run 'installed))
@@ -108,27 +105,27 @@
 (check "generated definition import collision" #t
   (begin
     (source "generated" '((ns generated)
-                          (defmacro install (name value) `(define ,name ,value))
+                          (defmacro install (name value) `(def ,name ,value))
                           (install answer 42)))
     (run '(require generated :as g))
     (fails-with? "definition would replace an import"
       (lambda () (run '(install g/answer 99))))))
 (check "generated definition is exported" 42 (run 'g/answer))
-(check "generated body definitions rejected" #t
-  (fails-with?
-    "generated internal definitions and definitions in expression context are unsupported"
-    (lambda () (run '(let () (install x 1) x)))))
+(check "generated body definitions" 1 (run '(let () (install x 1) x)))
+(check "definitions reject expression context" #t
+  (fails-with? "macroexpand: definition is only allowed at top level or in a body"
+    (lambda () (run '(if #t (install x 1) 2)))))
 (check "generated directives reject expression context" #t
-  (fails-with? "directive requires top-level context"
-    (lambda () (run '(lambda () (install-once x 1))))))
+  (fails-with? "macroexpand: form requires top-level context"
+    (lambda () (run '(fn () (install-once x 1))))))
 (run '(defmacro install-sequence ()
-        '(begin (defmacro later (x) `(+ ,x 1)) (define sequence-result (later 41)))))
+        '(begin (defmacro later (x) `(+ ,x 1)) (def sequence-result (later 41)))))
 (run '(install-sequence))
 (check "generated begin processes in order" 42 (run 'sequence-result))
 (run '(defmacro with-values () '(begin (values 1) (values 2 3))))
 (check "generated begin preserves values" '(2 3)
   (call-with-values (lambda () (run '(with-values))) list))
-(run '(defmacro change-space () '(begin (ns switched) (define marker 42))))
+(run '(defmacro change-space () '(begin (ns switched) (def marker 42))))
 (run '(change-space))
 (check "generated ns changes following environment" 42 (namespace-ref 'switched 'marker))
 (run '(ns user))
@@ -140,33 +137,33 @@
 (define (macro-source increment)
   (source "macro-lib"
     `((ns macro-lib)
-      (define (helper x) (list '+ 'base x))
+      (def (helper x) (list '+ 'base x))
       (defmacro add-base (x) (helper x))
       (defmacro increment (x) (list '+ x ,increment))
-      (define (identity x) x)
+      (def (identity x) x)
       (defmacro explode () (error "failure")))))
 (macro-source 1)
 (run '(require macro-lib :as m :refer (increment)))
-(run '(define (helper x) (error "wrong namespace")))
+(run '(def (helper x) (error "wrong namespace")))
 (check "imported transformer helper and use-site binding" 42
   (run '(let ([base 40]) (m/add-base 2))))
 (check "qualified macro value" #t (run '(macro? m/increment)))
 (check "referred macro value" #t (run '(macro? increment)))
 (check "imported procedure operands expand" 42 (run '(m/identity (twice 21))))
-(run '(define (old-caller x) (m/increment x)))
+(run '(def (old-caller x) (m/increment x)))
 (macro-source 10)
 (run '(require macro-lib :as m :refer (increment) :reload))
 (check "old imported expansion retained" 2 (run '(old-caller 1)))
 (check "new qualified expansion sees reload" 11 (run '(m/increment 1)))
 (check "new referred expansion sees reload" 11 (run '(increment 1)))
 (check "imported macro can be lexically shadowed" 4
-  (run '(let ([m/increment (lambda (x) x)]) (m/increment 4))))
+  (run '(let ([m/increment (fn (x) x)]) (m/increment 4))))
 (check "transformer failure" #t
   (fails-with? "macro transformer failed" (lambda () (run '(m/explode)))))
 (check "transformer failure restores namespace" 'user (namespace-name (current-namespace)))
 (source "macro-consumer"
   '((ns macro-consumer)
-    (defmacro setup () '(begin (require macro-lib :as m) (define result (m/increment 2))))
+    (defmacro setup () '(begin (require macro-lib :as m) (def result (m/increment 2))))
     (setup)))
 (run '(require macro-consumer :as consumer))
 (check "generated require precedes expansion" 12 (run 'consumer/result))
@@ -182,24 +179,24 @@
 (check "malformed macro parameters rejected" #t
   (fails? (lambda () (run '(defmacro bad (x x) x)))))
 (check "reserved macro name rejected" #t
-  (fails-with? "cannot replace a core form"
+  (fails-with? "macroexpand: cannot rebind a core form name"
     (lambda () (run '(defmacro if args 1)))))
 (run '(defmacro several-values () (values 1 2)))
 (check "transformer must return one datum" #t
   (fails-with? "macro transformer failed" (lambda () (run '(several-values)))))
 (run '(defmacro malformed () '(if)))
 (check "invalid expansion cannot install definition" #t
-  (fails? (lambda () (run '(define invalid (malformed))))))
+  (fails? (lambda () (run '(def invalid (malformed))))))
 (run '(defonce invalid 42))
 (check "failed definition can be retried" 42 (run 'invalid))
 (run '(defmacro outer (x) `(inner ,x)))
 (run '(defmacro inner (x) `(+ ,x 1)))
 (check "macroexpand repeats at head" '(+ 2 1) (run '(macroexpand '(outer 2))))
-(run '(define saved-macro inner))
+(run '(def saved-macro inner))
 (run '(defmacro inner (x) `(+ ,x 10)))
 (check "saved macro retains transformer" 3 (run '(saved-macro 2)))
 (check "redefined macro changes future expansion" 12 (run '(inner 2)))
-(run '(define inner (lambda (x) x)))
+(run '(def inner (fn (x) x)))
 (check "macro can become procedure" 2 (run '(inner 2)))
 (run '(defmacro inner (x) `(+ ,x 100)))
 (check "procedure can become macro" 102 (run '(inner 2)))
@@ -212,7 +209,7 @@
   (fails-with? "definition would replace an import"
     (lambda () (run '(defmacro increment (x) x)))))
 (run '(ns macro-lib))
-(run '(define (helper x) (list '+ 'base (* 2 x))))
+(run '(def (helper x) (list '+ 'base (* 2 x))))
 (run '(ns user))
 (check "macro sees updated defining helper" 44
   (run '(let ([base 40]) (m/add-base 2))))
@@ -224,13 +221,13 @@
 (check "failed generated ns restores caller" 'user (namespace-name (current-namespace)))
 (source "own-eval"
   '((ns own-eval)
-    (define base 40)
+    (def base 40)
     (defmacro add-own (x) (eval `(list '+ base ',x)))))
 (run '(require own-eval :as own))
 (check "eval in transformer uses defining namespace" 42 (run '(own/add-own 2)))
 (check "Otium eval does not capture lexical bindings" #t
   (fails? (lambda () (run '(let ([only-local 1]) (eval 'only-local))))))
-(run '(define (count-down n) (if (= n 0) 42 (count-down (- n 1)))))
+(run '(def (count-down n) (if (= n 0) 42 (count-down (- n 1)))))
 (run '(defmacro tail-call (n) `(count-down ,n)))
 (check "expanded tail call" 42 (run '(tail-call 100000)))
 (printf "~a macro checks passed\n" checks)

@@ -39,24 +39,24 @@ with tempfile.TemporaryDirectory(prefix="otium-condition-tests-") as directory:
         execute(runtime, path, 0, "condition checks: 64\n")
         for operation in ("exit", "quit"):
             path.write_text(bootstrap + f'''
-(handler-bind (((lambda (c) #t) (lambda (c) (test-print 999))))
+(handler-bind (((fn (c) #t) (fn (c) (test-print 999))))
   (try (unwind-protect ({operation} 7) (test-print 7))
-    (catch ((lambda (c) #t) c) (test-print 998))))
+    (catch ((fn (c) #t) c) (test-print 998))))
 ''')
             execute(runtime, path, 7, "condition checks: 7\n")
         path.write_text(bootstrap + '''
 (try (unwind-protect (exit 7) (error 'cleanup))
-  (catch ((lambda (c) #t) c) (test-print 8)))
+  (catch ((fn (c) #t) c) (test-print 8)))
 ''')
         execute(runtime, path, 0, "condition checks: 8\n")
 
         marker = "x" * 32768
         mark = f'(display "{marker}")'
         path.write_text(bootstrap + f'''
-(define (spin) (spin))
-(handler-bind (((lambda (c) #t) (lambda (c) (test-print 999))))
+(def (spin) (spin))
+(handler-bind (((fn (c) #t) (fn (c) (test-print 999))))
   (try (unwind-protect (begin {mark} (spin)) (test-print 9))
-    (catch ((lambda (c) #t) c) (test-print 998))))
+    (catch ((fn (c) #t) c) (test-print 998))))
 ''')
         process = subprocess.Popen(command(runtime, path), cwd=ROOT, text=True,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)

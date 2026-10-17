@@ -76,7 +76,7 @@ def main():
         for runtime in runtimes:
             prefix = bootstrap(runtime)
             env = environment(); env['SDL_AUDIO_DRIVER'] = 'dummy'
-            result = run_source(runtime,prefix+'\n(define fixture-path '+literal(fixture)+')\n'+(ROOT/'shared/tests/sdl/common.scm').read_text(),directory,env)
+            result = run_source(runtime,prefix+'\n(def fixture-path '+literal(fixture)+')\n'+(ROOT/'shared/tests/sdl/common.scm').read_text(),directory,env)
             passed(result,'SDL fixture checks: 15')
             print(runtime+': manifest, copied event lifetime, input conversion, dummy audio passed',flush=True)
             # Alter the manifest itself, so startup must reject a layout before SDL_Init.
@@ -103,9 +103,9 @@ def main():
             assert (directory/(runtime+'.bmp')).stat().st_size > 100
             print(runtime+': accelerated pixels, texture, injected input, reload identity and error teardown passed',flush=True)
             partial = prefix + """
-(define failed? #f)
+(def failed? #f)
 (try (unwind-protect (sdl-open! "otium-invalid-renderer" #f) (sdl-close!))
-  (catch ((lambda (c) #t) c) (set! failed? #t)))
+  (catch ((fn (c) #t) c) (set! failed? #t)))
 (if (and failed? (equal? sdl-resources '()) (= 0 (SDL_WasInit 0))
          (= 0 (ffi/allocation-count)))
     (display "Partial startup cleanup passed") (error "Partial startup leaked"))
@@ -118,20 +118,20 @@ def main():
             scene = directory/'scene.scm'
             status = directory/(runtime+'-status')
             capture = directory/(runtime+'-reload.bmp')
-            replace(scene, '(define (render! t dt) (set! scene-ticks (+ scene-ticks 1)) (clear! 10 20 30))\n')
+            replace(scene, '(def (render! t dt) (set! scene-ticks (+ scene-ticks 1)) (clear! 10 20 30))\n')
             process = subprocess.Popen(launch+['--scene-path',str(scene),'--frames','180',
                                                '--status',str(status),'--capture',str(capture)],
                                        env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
             try:
                 initial = wait_status(process, status, lambda s: s['ticks'] >= 3)
-                replace(scene, '(define (render!\n')
+                replace(scene, '(def (render!\n')
                 failed = wait_status(process, status, lambda s: s['reload_errors'] == 1)
                 continued = wait_status(process, status, lambda s: s['ticks'] > failed['ticks'] + 3)
                 assert continued['ticks'] > initial['ticks']
-                replace(scene, '(define (render! t dt) (error "test render"))\n')
+                replace(scene, '(def (render! t dt) (error "test render"))\n')
                 broken = wait_status(process, status, lambda s: s['render_errors'] == 1)
                 wait_status(process, status, lambda s: s['frames'] > broken['frames'] + 3)
-                replace(scene, '(define (render! t dt) (set! scene-ticks (+ scene-ticks 1)) (clear! 30 40 50))\n')
+                replace(scene, '(def (render! t dt) (set! scene-ticks (+ scene-ticks 1)) (clear! 30 40 50))\n')
                 wait_status(process, status, lambda s: s['reloads'] == 3 and s['ticks'] > broken['ticks'])
                 stdout,stderr = process.communicate(timeout=30)
             except Exception:

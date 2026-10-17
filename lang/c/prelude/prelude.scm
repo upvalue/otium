@@ -9,25 +9,25 @@
 
 ;; --- internal helpers -------------------------------------------------------
 
-(define- (to-list seq)
+(def- (to-list seq)
   "Coerce any sequence to a proper list."
   (cond ((nil? seq) '())
         ((array? seq) (array-to-list seq))
         ((list? seq) seq)
         (else (error "to-list: expected sequence"))))
 
-(define- (finish-like source values)
+(def- (finish-like source values)
   (if (array? source) (list-to-array values) values))
 
-(define- (builder-like source) (if (array? source) (array) '()))
+(def- (builder-like source) (if (array? source) (array) '()))
 
-(define- (builder-add builder value)
+(def- (builder-add builder value)
   (if (array? builder) (begin (push! builder value) builder) (cons value builder)))
 
-(define- (builder-finish builder)
+(def- (builder-finish builder)
   (if (array? builder) builder (reverse builder)))
 
-(define- (slice seq start count)
+(def- (slice seq start count)
   (if (array? seq)
       (let ((out (array)) (i start)
             (end (if (nil? count) (length seq) (min (+ start count) (length seq)))))
@@ -48,7 +48,7 @@
                 (set! left (- left 1)))
               (reverse acc))))))
 
-(define- (require-int who value)
+(def- (require-int who value)
   (if (int? value)
       value
       (error (str who ": expected integer"))))
@@ -57,7 +57,7 @@
 
 (defmacro defn (name params . body)
   "(defn name parameters body ...)\nDefine a named procedure; shorthand for define with a procedure head."
-  (cons 'define (cons (cons name params) body)))
+  (cons 'def (cons (cons name params) body)))
 
 (defmacro when (test . body)
   "(when test body ...)\nEvaluate body when test is truthy; otherwise return nil."
@@ -101,24 +101,24 @@
 
 ;; --- sequences (10.4) -------------------------------------------------------
 
-(define (caar p)
+(def (caar p)
   "(caar pair)\nEquivalent to (car (car pair))."
   (car (car p)))
-(define (cadr p)
+(def (cadr p)
   "(cadr pair)\nEquivalent to (car (cdr pair))."
   (car (cdr p)))
-(define (cddr p)
+(def (cddr p)
   "(cddr pair)\nEquivalent to (cdr (cdr pair))."
   (cdr (cdr p)))
 
-(define (list-to-array value)
+(def (list-to-array value)
   "(list-to-array sequence)\nConvert a proper list to a new array; other input types raise an error."
   (unless (list? value) (error "list-to-array: expected proper list"))
   (let ((out (array)))
     (for-each (fn (x) (push! out x)) value)
     out))
 
-(define (array-to-list value)
+(def (array-to-list value)
   "(array-to-list sequence)\nConvert an array to a new list; other input types raise an error."
   (unless (array? value) (error "array-to-list: expected array"))
   (let ((acc '()) (i (- (length value) 1)))
@@ -127,7 +127,7 @@
       (set! i (- i 1)))
     acc))
 
-(define (first seq)
+(def (first seq)
   "(first sequence)\nReturn the first element, or nil. Also accepts strings, returning a one-character string."
   (cond ((nil? seq) nil)
         ((null? seq) nil)
@@ -136,7 +136,7 @@
         ((string? seq) (if (> (string-length seq) 0) (substring seq 0 1) nil))
         (else (error "first: not a sequence"))))
 
-(define (rest seq)
+(def (rest seq)
   "All but the first element; kind-preserving; empty is ()."
   (cond ((nil? seq) '())
         ((null? seq) '())
@@ -144,7 +144,7 @@
         ((array? seq) (drop 1 seq))
         (else (error "rest: not a sequence"))))
 
-(define (nth seq i)
+(def (nth seq i)
   "(nth sequence index)\nReturn the element at a zero-based integer index, or nil out of range. Accepts lists, arrays, and nil."
   (require-int "nth" i)
   (cond ((nil? seq) nil)
@@ -160,14 +160,14 @@
                (if (pair? s) (car s) nil))))
         (else (error "nth: not a sequence"))))
 
-(define (second seq)
+(def (second seq)
   "(second sequence)\nReturn element at index 1, or nil."
   (nth seq 1))
-(define (third seq)
+(def (third seq)
   "(third sequence)\nReturn element at index 2, or nil."
   (nth seq 2))
 
-(define (last seq)
+(def (last seq)
   "(last sequence)\nReturn the last element, or nil."
   (cond ((nil? seq) nil)
         ((null? seq) nil)
@@ -178,11 +178,11 @@
            (car s)))
         (else (error "last: not a sequence"))))
 
-(define (count coll)
+(def (count coll)
   "(count collection)\nLike length, but nil counts as zero."
   (if (nil? coll) 0 (length coll)))
 
-(define (empty? coll)
+(def (empty? coll)
   "(empty? collection)\nTest whether a sequence, table, string, or buffer has no elements. nil is empty."
   (cond ((nil? coll) #t)
         ((null? coll) #t)
@@ -192,25 +192,25 @@
         ((or (array? coll) (table? coll)) (= (length coll) 0))
         (else (error "empty?: unsupported type"))))
 
-(define (map f seq)
+(def (map f seq)
   "Kind-preserving: list in, list out; array in, array out; nil -> ()."
   (let ((out (builder-like seq)))
     (for-each (fn (x) (set! out (builder-add out (f x)))) seq)
     (builder-finish out)))
 
-(define (filter pred seq)
+(def (filter pred seq)
   "(filter predicate sequence)\nKeep elements for which predicate returns a truthy value; preserve list/array kind."
   (let ((out (builder-like seq)))
     (for-each (fn (x) (when (pred x) (set! out (builder-add out x)))) seq)
     (builder-finish out)))
 
-(define (reduce f init seq)
+(def (reduce f init seq)
   "(reduce procedure initial sequence)\nFold left, calling (procedure accumulator element) for each element. Empty sequences return initial."
   (let ((acc init))
     (for-each (fn (x) (set! acc (f acc x))) seq)
     acc))
 
-(define (range . args)
+(def (range . args)
   "(range end) / (range start end [step])\nReturn an array of integers toward the exclusive end. Defaults: start 0, step 1. Step must be nonzero and may be negative."
   (let ((n (length args)) (a 0) (b 0) (step 1))
     (cond ((= n 1) (set! b (nth args 0)))
@@ -228,23 +228,23 @@
           (while (> i b) (push! out i) (set! i (+ i step))))
       out)))
 
-(define (concat . seqs)
+(def (concat . seqs)
   "Concatenation; kind follows the first argument (nil -> list)."
   (let ((out (builder-like (if (pair? seqs) (car seqs) nil))))
     (for-each (fn (s) (for-each (fn (x) (set! out (builder-add out x))) s)) seqs)
     (builder-finish out)))
 
-(define (take n seq)
+(def (take n seq)
   "(take count sequence)\nReturn the first count elements. Count clamps to the available range; preserve list/array kind."
   (require-int "take" n)
   (slice seq 0 (max n 0)))
 
-(define (drop n seq)
+(def (drop n seq)
   "(drop count sequence)\nReturn the elements after the first count. Count clamps to the available range; preserve list/array kind."
   (require-int "drop" n)
   (slice seq (max n 0) nil))
 
-(define (contains? coll x)
+(def (contains? coll x)
   "(contains? collection value)\nTest table key presence, equal? membership in a sequence, or substring presence in a string. nil returns #f."
   (cond ((nil? coll) #f)
         ((table? coll) (not (nil? (get coll x))))
@@ -257,34 +257,34 @@
 
 ;; --- sorting ----------------------------------------------------------------
 
-(define- (sort-class k)
+(def- (sort-class k)
   (cond ((number? k) :number)
         ((string? k) :string)
         ((symbol? k) :symbol)
         ((keyword? k) :keyword)
         (else (error "sort: keys must be numbers, strings, symbols, or keywords"))))
 
-(define- (key-less? a b)
+(def- (key-less? a b)
   (if (number? a)
       (< a b)
       (string<? (name a) (name b))))   ; strings/symbols/keywords, lexicographic
 
 ;; stable merge of two lists of (key . elem) pairs
-(define- (merge-runs a b)
+(def- (merge-runs a b)
   (cond ((null? a) b)
         ((null? b) a)
         ((key-less? (car (car b)) (car (car a)))
          (cons (car b) (merge-runs a (cdr b))))
         (else (cons (car a) (merge-runs (cdr a) b)))))
 
-(define- (msort lst n)
+(def- (msort lst n)
   (if (< n 2)
       lst
       (let ((half (quotient n 2)))
         (merge-runs (msort (take half lst) half)
                     (msort (drop half lst) (- n half))))))
 
-(define (sort-by keyfn seq)
+(def (sort-by keyfn seq)
   "Stable sort by derived keys; keys must all be one orderable class."
   (let ((lst (map (fn (x) (cons (keyfn x) x)) (to-list seq))))
     (when (pair? lst)
@@ -296,11 +296,11 @@
     (let ((res (map cdr (msort lst (length lst)))))
       (finish-like seq res))))
 
-(define (sort seq)
+(def (sort seq)
   "(sort sequence)\nReturn an ascending sorted copy, preserving list/array kind. Keys must belong to a supported, consistent orderable class."
   (sort-by identity seq))
 
-(define (group-by keyfn seq)
+(def (group-by keyfn seq)
   "Table of key -> array of elements, in first-seen key order."
   (let ((t (table)))
     (for-each (fn (x)
@@ -313,7 +313,7 @@
               seq)
     t))
 
-(define (frequencies seq)
+(def (frequencies seq)
   "(frequencies sequence)\nReturn a table mapping each distinct element to its occurrence count."
   (let ((t (table)))
     (for-each (fn (x) (put! t x (+ 1 (get t x 0)))) seq)
@@ -321,7 +321,7 @@
 
 ;; --- tables (10.5) ----------------------------------------------------------
 
-(define (assoc coll . kvs)
+(def (assoc coll . kvs)
   "put! on a shallow copy; (assoc nil ...) builds a fresh table."
   (let ((c (if (nil? coll) (table) (copy coll))))
     (let ((s kvs))
@@ -331,17 +331,17 @@
         (set! s (cdr (cdr s)))))
     c))
 
-(define (dissoc coll . ks)
+(def (dissoc coll . ks)
   "(dissoc collection key ...)\nReturn a shallow copy without the specified keys."
   (let ((c (if (nil? coll) (table) (copy coll))))
     (for-each (fn (k) (put! c k nil)) ks)
     c))
 
-(define (update coll k f . args)
+(def (update coll k f . args)
   "(update collection key procedure argument ...)\nCopy the collection and replace the entry with (procedure (get collection key) argument ...)."
   (assoc coll k (apply f (get coll k) args)))
 
-(define (merge . ts)
+(def (merge . ts)
   "New table, left to right; nil arguments skipped."
   (let ((out (table)))
     (for-each (fn (t)
@@ -350,7 +350,7 @@
               ts)
     out))
 
-(define (get-in coll path . more)
+(def (get-in coll path . more)
   "get folded over a sequence of keys."
   (when (> (length more) 1) (error "get-in: expected 2 or 3 arguments"))
   (let ((default (if (pair? more) (car more) nil))
@@ -360,32 +360,32 @@
 
 ;; --- conditions (10.9) ------------------------------------------------------
 
-(define (condition-type c)
+(def (condition-type c)
   "(condition-type condition)\nReturn a condition table's :type, or nil."
   (if (table? c) (get c :type) nil))
 
-(define (condition-message c)
+(def (condition-message c)
   "(condition-message condition)\nReturn a condition table's :message, or nil."
   (if (table? c) (get c :message) nil))
 
-(define (error? c)
+(def (error? c)
   "(error? value)\nTest whether value is a table with a :type entry."
   (if (and (table? c) (not (nil? (get c :type)))) #t #f))
 
-(define (type-pred t)
+(def (type-pred t)
   "(type-pred type)\nBuild a predicate for conditions of type or its registered subtypes."
-  (lambda (c) (condition-of-type? c t)))
+  (fn (c) (condition-of-type? c t)))
 
 ;; --- functional (10.8) ------------------------------------------------------
 
-(define (partial f . pre)
+(def (partial f . pre)
   "(partial procedure argument ...)\nReturn a procedure that prepends the supplied arguments to its later arguments."
-  (lambda args (apply f (append pre args))))
+  (fn args (apply f (append pre args))))
 
-(define (comp . fs)
+(def (comp . fs)
   "Right-to-left composition; (comp) is identity."
   (cond ((null? fs) identity)
         ((null? (cdr fs)) (car fs))
         (else
          (let ((inner (apply comp (cdr fs))))
-           (lambda args ((car fs) (apply inner args)))))))
+           (fn args ((car fs) (apply inner args)))))))

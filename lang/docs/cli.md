@@ -60,7 +60,7 @@ it with `(require otium.cli)`. This unaliased require form works in both dialect
 See `examples/shared/greet.scm` for a complete program:
 
 ```scheme
-(define command
+(def command
   (otium.cli/compile
     '(command greet
        (summary "Greet someone.")
@@ -70,7 +70,7 @@ See `examples/shared/greet.scm` for a complete program:
          (type integer) (range 1 100) (default 1)
          (metavar "N") (help "Number of greetings")))))
 
-(define (main values)
+(def (main values)
   (display (otium.cli/ref values 'name))
   (newline)
   0)

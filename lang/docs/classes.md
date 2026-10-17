@@ -45,42 +45,52 @@ linearization algorithm.
 - gpui and egui, Rust UI libraries with no inheritance at all. Shared behaviour
   like focus is an object a widget holds, not something it inherits.
 
+## Naming
+
+Declaration forms use the short `def` prefix: `defclass`, `defabstract`,
+`defgeneric`, `defmethod`. The last two replace today's `define-generic` and
+`define-method`.
+
+`defabstract` follows Julia's `abstract type`, the closest precedent: no
+fields, no instances, one parent. In Java, C# and Dylan an abstract class can
+hold fields its subclasses inherit; here it can't.
+
 ## At a glance
 
 ```scheme
-(define-abstract Widget)
+(defabstract Widget)
 
-(define-class Button :is Widget
+(defclass Button :is Widget
   (key :init nil)
   (label :init "")
   (on-press :init nil))
 
-(define-class Label :is Widget
+(defclass Label :is Widget
   (key :init nil)
   (text :init ""))
 
-(define b (make Button :label "7" :on-press (fn () (press! "7"))))
+(def b (make Button :label "7" :on-press (fn () (press! "7"))))
 (b :label)                  ; => "7"
 (slot-set! b :label "8")
 
-(define-generic (paint widget g bounds))
+(defgeneric (paint widget g bounds))
 
 ;; Default for every widget: draw nothing.
-(define-method (paint (w Widget) g bounds) nil)
+(defmethod (paint (w Widget) g bounds) nil)
 
-(define-method (paint (w Button) g bounds)
+(defmethod (paint (w Button) g bounds)
   (draw-box g bounds)
   (draw-text g bounds (w :label)))
 
 ;; Debug outlines around one kind of widget, without touching its paint method.
-(define-method :around (paint (w Button) g bounds)
+(defmethod :around (paint (w Button) g bounds)
   (call-next-method)
   (when debug? (draw-outline g bounds)))
 ```
 
 ## Classes
 
-`(define-class Name slot ...)` or `(define-class Name :is Abstract slot ...)`
+`(defclass Name slot ...)` or `(defclass Name :is Abstract slot ...)`
 declares a class in the current namespace. Each slot is a symbol or
 `(symbol option ...)`.
 
@@ -175,7 +185,7 @@ them, `with-slots` can only bind current values read-only.
 
 ## Abstract types
 
-`(define-abstract Name)` or `(define-abstract Name :is Parent)` declares an
+`(defabstract Name)` or `(defabstract Name :is Parent)` declares an
 abstract type. It has no slots and no instances; `make` rejects it. Its only
 use is as a method specializer and as a parent for classes and other abstract
 types.
@@ -192,15 +202,15 @@ another object's state and behaviour holds it in a slot and forwards calls to
 it explicitly:
 
 ```scheme
-(define-class Scrollbar
+(defclass Scrollbar
   (offset :init 0)
   (extent :init 0))
 
-(define-class ListView :is Widget
+(defclass ListView :is Widget
   (items :init [])
   (scroll :init (make Scrollbar)))
 
-(define-method (handle-event (v ListView) (e Wheel))
+(defmethod (handle-event (v ListView) (e Wheel))
   (handle-event (v :scroll) e))
 ```
 
@@ -221,7 +231,8 @@ unspecialized mean the same thing.
 
 ## Generic functions and method selection
 
-`define-generic` and `define-method` keep their syntax and fixed arity.
+`defgeneric` and `defmethod` keep the syntax and fixed arity of today's
+`define-generic` and `define-method`, renamed to follow the `def` prefix.
 
 A method is applicable when, for each specialized argument, the specializer is
 the argument's class or one of its ancestors.
@@ -267,7 +278,7 @@ the remaining cases.
 
 ## Redefinition and reload
 
-Re-evaluating `define-class` or `define-abstract` keeps the type's identity,
+Re-evaluating `defclass` or `defabstract` keeps the type's identity,
 as `define-type` does now. Methods specialized on it keep working, and so do
 existing instances.
 
@@ -325,13 +336,15 @@ so calls can be resolved ahead of time, is a possible later step.
 - Value specializers (CLOS `eql` specializers).
 - `change-class`, class-allocated (shared) slots, and slot type declarations.
 - Optional and rest arguments in generics.
+- Serialization of instances.
 
 ## Relation to the multimethods work
 
 This keeps:
 
-- `define-generic` and `define-method`, fixed arity, and replacement by
-  signature.
+- Generic functions and methods, fixed arity, and replacement by signature.
+  `define-generic` and `define-method` are renamed `defgeneric` and
+  `defmethod`.
 - Declaration identity across reload, namespace ownership, imports and aliases.
 - The built-in dispatch identities, now classes.
 - Ambiguity errors.
@@ -339,7 +352,7 @@ This keeps:
 
 This replaces:
 
-- `define-type`, typed maps, and the `field-*` operations, with `define-class`,
+- `define-type`, typed maps, and the `field-*` operations, with `defclass`,
   instances and slots.
 - Exact-match selection, with selection along each argument's chain.
 
@@ -357,6 +370,7 @@ would move to classes. Nothing outside those uses them yet.
   chains, as in Julia.
 - Ambiguity across arguments stays an error.
 - `call-next-method` and `:around` methods; no `:before` or `:after`.
+- `def`-prefixed declaration names, including renaming the generic forms.
 - Slots without `:init` are required.
 - `set!` on a one-argument call target, through `set-applied!`.
 - Composition uses explicit forwarding.

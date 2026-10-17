@@ -1,5 +1,5 @@
 (require otium.cli)
-(define command
+(def command
   (otium.cli/compile
     '(command greet
        (summary "Greet someone.")
@@ -8,7 +8,7 @@
        (option count (names "-n" "--count") (type integer)
          (range 1 100) (default 1) (metavar "N") (help "Number of greetings"))
        (examples ("greet --count 3 Alice" "Three greetings")))))
-(define (main args)
+(def (main args)
   (let loop ((left (otium.cli/ref args 'count)))
     (if (= left 0) 0
         (begin (display (string-append "Hello, " (otium.cli/ref args 'name) "!\n"))

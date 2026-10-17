@@ -33,8 +33,8 @@ with tempfile.TemporaryDirectory(prefix="otium-multimethods-") as directory:
     forms.extend(["""
 (require (provider :as p :refer (act)))
 (define-type Animal)
-(define animal (g/make p/Animal 'value 1))
-(define saved act)
+(def animal (g/make p/Animal 'value 1))
+(def saved act)
 (println (eq? Animal p/Animal))
 (define-method (p/act a (b Number)) 'number)
 (println (try (act animal 1) (catch (error? e) (get e :code))))

@@ -147,17 +147,17 @@ Proposed `examples/ui/counter.ot`:
   (:require (ui :as ui)
             (ui.reactive :as rx)))
 
-(define (counter)
+(def (counter)
   (let ((count (rx/signal 0)))
     (ui/column {:padding 24 :gap 12}
       (ui/text
         (ui/bind
-          (lambda ()
+          (fn ()
             (str "Count: " (rx/read count)))))
       (ui/button
         {:on-click
-         (lambda (event)
-           (rx/update! count (lambda (n) (+ n 1))))}
+         (fn (event)
+           (rx/update! count (fn (n) (+ n 1))))}
         "Increment"))))
 
 (ui/run {:title "Otium counter" :width 400 :height 180}
@@ -364,10 +364,10 @@ and macros. Illustrative syntax:
 
 ```scheme
 (define-multi measure
-  (lambda (node constraints) (:kind node)))
+  (fn (node constraints) (:kind node)))
 
 (define-method measure :button
-  (lambda (node constraints)
+  (fn (node constraints)
     ...))
 ```
 

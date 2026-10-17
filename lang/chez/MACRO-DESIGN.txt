@@ -1,20 +1,21 @@
 Otium macros on Chez
 
 Status: partly implemented. defmacro, Otium expansion, generated top-level
-forms, macro imports and reload, and Otium eval are implemented. cond-expand,
-the explicit native syntax boundary, and the restricted default environment
-remain proposed. See NOTES.txt for the current native syntax limitations.
+forms, macro imports and reload, and Otium eval are implemented. Expansion now
+uses the shared expander in ../shared/prelude/expander.scm, so the traversal
+rules below that differ from it are superseded: let is sequential, macros may
+generate body definitions, and core form names cannot be rebound. Native
+syntax is reached only through the chez/ prefix. cond-expand remains proposed.
+See NOTES.txt for the current native syntax limitations.
 
 Otium macros should be the normal way to define syntax in Otium libraries
 and applications. On Chez, an Otium expansion pass should run before Chez
 expansion and compilation. Chez syntax remains available through explicit
 platform adapters and a bounded native expression escape.
 
-The starting contract is docs/language.md, section 6, and the implementation
-in c/prelude/expander.scm. Port the protocol and the relevant traversal rules;
-do not load that file unchanged. It assumes C dialect forms, sequential let,
-nil, and C runtime helpers. Chez continues to use Chez values and the existing
-Chez binding semantics unless a separate language decision changes them.
+The contract is docs/language.md, section 6. Both runtimes load the same
+expander source; each supplies its macro lookup, macro invocation, and native
+syntax test.
 
 Macro values and invocation
 

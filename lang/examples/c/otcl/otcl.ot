@@ -1,55 +1,55 @@
 ; otcl is a small Tcl interpreter in Otium, inspired by Picol:
 ; https://github.com/antirez/picol
 
-(define- (ok value) {:code :ok :value value})
-(define- (control code value) {:code code :value value})
-(define- (failed message) (control :error message))
-(define- (ok? result) (eq? (get result :code) :ok))
+(def- (ok value) {:code :ok :value value})
+(def- (control code value) {:code code :value value})
+(def- (failed message) (control :error message))
+(def- (ok? result) (eq? (get result :code) :ok))
 
-(define (result-code result) (get result :code))
-(define (result-value result) (get result :value))
+(def (result-code result) (get result :code))
+(def (result-value result) (get result :value))
 
-(define- (state source) {:source source :index 0})
-(define- (state-source parser) (get parser :source))
-(define- (state-index parser) (get parser :index))
-(define- (state-length parser) (string-length (state-source parser)))
-(define- (state-end? parser) (>= (state-index parser) (state-length parser)))
-(define- (state-char parser)
+(def- (state source) {:source source :index 0})
+(def- (state-source parser) (get parser :source))
+(def- (state-index parser) (get parser :index))
+(def- (state-length parser) (string-length (state-source parser)))
+(def- (state-end? parser) (>= (state-index parser) (state-length parser)))
+(def- (state-char parser)
   (if (state-end? parser) nil (get (state-source parser) (state-index parser))))
-(define- (advance! parser)
+(def- (advance! parser)
   (put! parser :index (+ (state-index parser) 1))
   parser)
 
-(define- (char-in? chars char)
+(def- (char-in? chars char)
   (and (string? char) (string-contains? chars char)))
-(define- (horizontal-space? char) (char-in? " \t" char))
-(define- (command-separator? char) (char-in? "\n\r;" char))
-(define- (variable-char? char)
+(def- (horizontal-space? char) (char-in? " \t" char))
+(def- (command-separator? char) (char-in? "\n\r;" char))
+(def- (variable-char? char)
   (char-in? "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" char))
-(define- (uppercase? char) (char-in? "ABCDEFGHIJKLMNOPQRSTUVWXYZ" char))
-(define- (digit? char) (char-in? "0123456789" char))
-(define- (expression-space? char) (char-in? " \t\n\r" char))
+(def- (uppercase? char) (char-in? "ABCDEFGHIJKLMNOPQRSTUVWXYZ" char))
+(def- (digit? char) (char-in? "0123456789" char))
+(def- (expression-space? char) (char-in? " \t\n\r" char))
 
-(define- (variable-table interp frame name)
+(def- (variable-table interp frame name)
   (if (uppercase? (get name 0)) (get interp :globals) frame))
 
-(define- (get-variable interp frame name)
+(def- (get-variable interp frame name)
   (let ((value (get (variable-table interp frame name) name)))
     (if (nil? value)
         (failed (str "No such variable '" name "'"))
         (ok value))))
 
-(define- (set-variable! interp frame name value)
+(def- (set-variable! interp frame name value)
   (put! (variable-table interp frame name) name value)
   value)
 
-(define- (escape-character char)
+(def- (escape-character char)
   (cond ((equal? char "n") "\n")
         ((equal? char "t") "\t")
         ((equal? char "r") "\r")
         (else char)))
 
-(define- (parse-braced parser)
+(def- (parse-braced parser)
   (let ((out (buffer)) (depth 1) (closed #f))
     (advance! parser)
     (while (and (not (state-end? parser)) (not closed))
@@ -77,14 +77,14 @@
         (ok (buffer->string out))
         (failed "Unterminated brace group"))))
 
-(define- (parse-variable-name parser)
+(def- (parse-variable-name parser)
   (let ((start (state-index parser)))
     (while (and (not (state-end? parser)) (variable-char? (state-char parser)))
       (advance! parser))
     (substring (state-source parser) start (state-index parser))))
 
 ; eval-state is defined later. Otium vars are live, so parse-word can call it.
-(define- (parse-word interp frame parser stop)
+(def- (parse-word interp frame parser stop)
   (if (equal? (state-char parser) "{")
       (parse-braced parser)
       (let ((out (buffer)) (quoted #f) (done #f) (result (ok "")))
@@ -130,13 +130,13 @@
               (quoted (failed "Unterminated quoted word"))
               (else (ok (buffer->string out)))))))
 
-(define- (command-end? parser stop)
+(def- (command-end? parser stop)
   (let ((char (state-char parser)))
     (or (nil? char)
         (command-separator? char)
         (and (string? stop) (equal? char stop)))))
 
-(define- (skip-command-start! parser stop)
+(def- (skip-command-start! parser stop)
   (let ((again #t))
     (while again
       (set! again #f)
@@ -152,18 +152,18 @@
           (advance! parser))
         (set! again #t)))))
 
-(define- (arity-error name) (failed (str "Wrong number of args for " name)))
+(def- (arity-error name) (failed (str "Wrong number of args for " name)))
 
-(define- (expr-char parser) (state-char parser))
-(define- (expr-skip! parser)
+(def- (expr-char parser) (state-char parser))
+(def- (expr-skip! parser)
   (while (and (not (state-end? parser)) (expression-space? (expr-char parser)))
     (advance! parser)))
 
-(define- (expr-error! parser)
+(def- (expr-error! parser)
   (put! parser :error #t)
   0)
 
-(define- (expr-read-number parser)
+(def- (expr-read-number parser)
   (expr-skip! parser)
   (let ((start (state-index parser)) (exponent #f) (scanning #t))
     (while scanning
@@ -181,13 +181,13 @@
                    (substring (state-source parser) start (state-index parser)))))
       (if (nil? number) (expr-error! parser) number))))
 
-(define- (expr-match? parser text)
+(def- (expr-match? parser text)
   (equal? (substring (state-source parser)
                      (state-index parser)
                      (+ (state-index parser) (string-length text)))
           text))
 
-(define- (expr-operator parser)
+(def- (expr-operator parser)
   (cond ((expr-match? parser "||") ["||" 0 2])
         ((expr-match? parser "&&") ["&&" 1 2])
         ((expr-match? parser "<=") ["<=" 2 2])
@@ -202,10 +202,10 @@
         ((expr-match? parser "/") ["/" 4 1])
         (else nil)))
 
-(define- (numeric-truth? number) (not (= number 0)))
-(define- (boolean-number value) (if value 1 0))
+(def- (numeric-truth? number) (not (= number 0)))
+(def- (boolean-number value) (if value 1 0))
 
-(define- (apply-expression-operator operator left right)
+(def- (apply-expression-operator operator left right)
   (cond ((equal? operator "+") (+ left right))
         ((equal? operator "-") (- left right))
         ((equal? operator "*") (* left right))
@@ -222,7 +222,7 @@
          (boolean-number (and (numeric-truth? left) (numeric-truth? right))))
         (else 0)))
 
-(define- (parse-expression-primary parser)
+(def- (parse-expression-primary parser)
   (expr-skip! parser)
   (cond ((state-end? parser) (expr-error! parser))
         ((equal? (expr-char parser) "(")
@@ -240,7 +240,7 @@
          (parse-expression parser 5))
         (else (expr-read-number parser))))
 
-(define- (parse-expression parser minimum-precedence)
+(def- (parse-expression parser minimum-precedence)
   (let ((left (parse-expression-primary parser)) (done #f))
     (expr-skip! parser)
     (while (and (not done) (not (get parser :error)))
@@ -255,7 +255,7 @@
               (expr-skip! parser)))))
     left))
 
-(define- (command-expr interp frame args)
+(def- (command-expr interp frame args)
   (if (= (length args) 0)
       (arity-error "expr")
       (let ((parser (state (string-join " " args))))
@@ -266,14 +266,14 @@
               (failed "Error in expression")
               (ok (number->string value)))))))
 
-(define- (command-set interp frame args)
+(def- (command-set interp frame args)
   (cond ((= (length args) 2)
          (ok (set-variable! interp frame (get args 0) (get args 1))))
         ((= (length args) 1)
          (get-variable interp frame (get args 0)))
         (else (arity-error "set"))))
 
-(define- (command-puts interp frame args)
+(def- (command-puts interp frame args)
   (cond ((= (length args) 1)
          (println (get args 0))
          (ok ""))
@@ -282,10 +282,10 @@
          (ok ""))
         (else (arity-error "puts"))))
 
-(define- (expanded-expression interp frame source)
+(def- (expanded-expression interp frame source)
   (eval-state interp frame (state (str "expr " source)) nil))
 
-(define- (command-if interp frame args)
+(def- (command-if interp frame args)
   (let ((index 0) (done #f) (result (ok "")))
     (while (and (not done) (ok? result))
       (if (>= index (length args))
@@ -322,7 +322,7 @@
                                      (set! done #t)))))))))))
     result))
 
-(define- (command-while interp frame args)
+(def- (command-while interp frame args)
   (if (not (= (length args) 2))
       (arity-error "while")
       (let ((running #t) (result (ok "")))
@@ -343,16 +343,16 @@
                             (set! running #f))))))))
         result)))
 
-(define- (command-break interp frame args)
+(def- (command-break interp frame args)
   (if (= (length args) 0) (control :break "") (arity-error "break")))
-(define- (command-continue interp frame args)
+(def- (command-continue interp frame args)
   (if (= (length args) 0) (control :continue "") (arity-error "continue")))
-(define- (command-return interp frame args)
+(def- (command-return interp frame args)
   (if (or (= (length args) 0) (= (length args) 1))
       (control :return (if (= (length args) 0) "" (get args 0)))
       (arity-error "return")))
 
-(define- (command-proc interp frame args)
+(def- (command-proc interp frame args)
   (if (not (= (length args) 3))
       (arity-error "proc")
       (let ((params (string-split (get args 1))))
@@ -360,7 +360,7 @@
               {:kind :procedure :params params :body (get args 2)})
         (ok ""))))
 
-(define- (call-procedure interp command name args)
+(def- (call-procedure interp command name args)
   (let ((params (get command :params)))
     (if (not (= (length params) (length args)))
         (failed (str "Proc '" name "' called with wrong arg num"))
@@ -378,12 +378,12 @@
                     (ok (result-value result))
                     result)))))))
 
-(define (register-command! interp name function)
+(def (register-command! interp name function)
   "Register an Otium function taking interpreter, frame, and argument array."
   (put! (get interp :commands) name function)
   interp)
 
-(define- (dispatch interp frame words)
+(def- (dispatch interp frame words)
   (let ((name (get words 0)) (args (drop 1 words)))
     (let ((command (get (get interp :commands) name)))
       (cond ((nil? command) (failed (str "No such command '" name "'")))
@@ -392,7 +392,7 @@
              (call-procedure interp command name args))
             (else (failed (str "Invalid command '" name "'")))))))
 
-(define- (eval-state interp frame parser stop)
+(def- (eval-state interp frame parser stop)
   (let ((last (ok "")) (done #f))
     (while (not done)
       (skip-command-start! parser stop)
@@ -421,7 +421,7 @@
                      (unless (ok? last) (set! done #t))))))))
     last))
 
-(define (make-interpreter)
+(def (make-interpreter)
   "Create an otcl interpreter with a fresh global frame."
   (let ((interp {:commands (table) :globals (table)}))
     (register-command! interp "expr" command-expr)
@@ -435,11 +435,11 @@
     (register-command! interp "return" command-return)
     interp))
 
-(define (eval-result interp source)
+(def (eval-result interp source)
   "Evaluate otcl source and return {:code keyword :value string}."
   (eval-state interp (get interp :globals) (state source) nil))
 
-(define (eval-script interp source)
+(def (eval-script interp source)
   "Evaluate otcl source, returning its string result or raising on errors."
   (let ((result (eval-result interp source)))
     (if (ok? result)

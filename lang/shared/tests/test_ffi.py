@@ -22,8 +22,8 @@ math_names = '("/usr/lib/libSystem.B.dylib")' if mac else '("libm.so.6" "libm.so
 def run(runtime, source, directory, expected):
     script = directory / (runtime + '.scm')
     prefix = "(require '(otium.ffi :as ffi))\n" if runtime == 'c' else '(require otium.ffi :as ffi)\n'
-    collect = '(define (churn n) (if (> n 0) (begin (list n n n) (churn (- n 1))) #f))\n(define (test-collect) (churn 2000))\n' if runtime == 'c' else '(define (test-collect) (chez/collect))\n'
-    script.write_text(prefix + collect + '(define wide-integers? ' + ('#f' if runtime == 'c' else '#t') + ')\n' + source)
+    collect = '(def (churn n) (if (> n 0) (begin (list n n n) (churn (- n 1))) #f))\n(def (test-collect) (churn 2000))\n' if runtime == 'c' else '(require chez)\n(def (test-collect) (chez/collect))\n'
+    script.write_text(prefix + collect + '(def wide-integers? ' + ('#f' if runtime == 'c' else '#t') + ')\n' + source)
     command = [str(ROOT / 'c/otium'), '--no-project'] if runtime == 'c' else [os.environ.get('CHEZ', 'chez'), '--libdirs', str(ROOT / 'chez'), '--script', str(ROOT / 'chez/main.ss')]
     if runtime == 'c' and args.stress:
         command.append('--c.gc-force-compact')
@@ -41,9 +41,9 @@ with tempfile.TemporaryDirectory(prefix='otium-ffi-tests-') as temp:
     other = directory / ('other.' + extension)
     for path, identity in ((fixture, 17), (other, 29)):
         subprocess.run([os.environ.get('CC', 'cc'), '-std=c11', '-Wall', '-Wextra', '-Werror', '-fPIC', '-dynamiclib' if mac else '-shared', '-DFIXTURE_ID=' + str(identity), str(ROOT / 'shared/tests/ffi/fixture.c'), '-o', str(path)], check=True)
-    definitions = f'(define fixture-path "{fixture}")\n(define other-path "{other}")\n'
+    definitions = f'(def fixture-path "{fixture}")\n(def other-path "{other}")\n'
     common = (ROOT / 'shared/tests/ffi/common.scm').read_text()
     for runtime in runtimes:
-        run(runtime, '(define math-library-names ' + "'" + math_names + ')\n' + (ROOT / 'examples/shared/math.scm').read_text(), directory, '1.0\n5.0\n0.75\n12.0\n')
+        run(runtime, '(def math-library-names ' + "'" + math_names + ')\n' + (ROOT / 'examples/shared/math.scm').read_text(), directory, '1.0\n5.0\n0.75\n12.0\n')
         run(runtime, definitions + common, directory, 'FFI checks: 197\n')
         print(runtime + ': libm and fixture checks passed' + (' under GC stress' if runtime == 'c' and args.stress else ''))

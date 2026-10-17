@@ -1,6 +1,6 @@
 ;; Destructive list benchmark adapted from ecraven/r7rs-benchmarks.
 
-(define (destruc-append-to-tail! x y)
+(def (destruc-append-to-tail! x y)
   (if (null? x)
       y
       (let ((a x) (b (cdr x)))
@@ -10,14 +10,14 @@
         (set-cdr! a y)
         x)))
 
-(define (destruc-empty-lists n)
+(def (destruc-empty-lists n)
   (let ((i n) (result '()))
     (while (> i 0)
       (set! result (cons '() result))
       (set! i (- i 1)))
     result))
 
-(define (destruc-middle! list i)
+(def (destruc-middle! list i)
   (let ((j (quotient (length list) 2)) (node list))
     (while (> j 0)
       (set-car! node i)
@@ -25,7 +25,7 @@
       (set! j (- j 1)))
     node))
 
-(define (destruc-split-half! outer-cell i)
+(def (destruc-split-half! outer-cell i)
   (let ((list (car outer-cell))
         (n (quotient (length (car outer-cell)) 2)))
     (if (= n 0)
@@ -41,7 +41,7 @@
             (set-cdr! node '())
             tail)))))
 
-(define (destruc n m)
+(def (destruc n m)
   (let ((lists (destruc-empty-lists 10)) (i n))
     (while (> i 0)
       (if (null? (car lists))

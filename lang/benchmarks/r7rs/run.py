@@ -93,8 +93,8 @@ def otium_program(root, name, implementation, input_text):
     library = (root / "lib" / "benchmark.scm").read_text()
     port = (root / "ports" / f"{name}.scm").read_text()
     return (
-        f'(define *benchmark-implementation* "{implementation}")\n'
-        f"(define *benchmark-inputs* '(\n{input_text}\n))\n"
+        f'(def *benchmark-implementation* "{implementation}")\n'
+        f"(def *benchmark-inputs* '(\n{input_text}\n))\n"
         f"{library}\n{port}\n(benchmark-main)\n"
     )
 

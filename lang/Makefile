@@ -1,12 +1,12 @@
 .DEFAULT_GOAL := all
 
-.PHONY: clean all lib test test-c test-chez test-sdl test-sdl-integration test-repl sdl-setup bench bench-gc format hygiene gc-lint
+.PHONY: clean all lib test test-c test-chez test-expander test-sdl test-sdl-integration test-repl sdl-setup bench bench-gc format hygiene gc-lint
 
 # Keep the existing C entry points; implementation rules live with the runtime.
 all lib bench bench-gc format hygiene gc-lint:
 	$(MAKE) -C c $@
 
-test: test-c test-chez test-cli test-reader
+test: test-c test-chez test-expander test-cli test-reader
 	$(MAKE) test-repl
 
 test-c:
@@ -16,6 +16,12 @@ test-c:
 test-chez:
 	chez/test
 	python3 shared/tests/test_conditions.py --runtime chez
+
+# One set of expander checks, run unchanged on both runtimes.
+test-expander: all
+	c/otium --no-project shared/tests/expander/checks.scm
+	OTIUM_GC_STRESS=1 c/otium --no-project shared/tests/expander/checks.scm
+	chez/run --no-project shared/tests/expander/checks.scm
 
 sdl-setup:
 	python3 shared/sdl/setup.py

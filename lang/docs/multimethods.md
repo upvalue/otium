@@ -50,7 +50,7 @@ Deleting or renaming a declaration does not migrate existing objects.
 
 ```scheme
 (define-type Button)
-(define button (make Button 'label "7" 'enabled? #t))
+(def button (make Button 'label "7" 'enabled? #t))
 (field-ref button 'label)                 ; => "7"
 (field-set! button 'label "8")
 (dispatch-type button)                   ; => Button descriptor

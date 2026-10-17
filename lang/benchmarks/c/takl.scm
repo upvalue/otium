@@ -1,14 +1,14 @@
 ;; TAKeuchi function using lists as counters, adapted from
 ;; ecraven/r7rs-benchmarks.
 
-(define (takl-mas x y z)
+(def (takl-mas x y z)
   (if (not (takl-shorter? y x))
       z
       (takl-mas (takl-mas (cdr x) y z)
                 (takl-mas (cdr y) z x)
                 (takl-mas (cdr z) x y))))
 
-(define (takl-shorter? x y)
+(def (takl-shorter? x y)
   (and (not (null? y))
        (or (null? x) (takl-shorter? (cdr x) (cdr y)))))
 

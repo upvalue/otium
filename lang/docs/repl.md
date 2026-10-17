@@ -47,12 +47,12 @@ metadata; it does not evaluate an expression or call the selected function.
 Documentation comes first from Otium definition docstrings. Functions, macros,
 and values accept an optional leading string:
 
-    (define (square x) "Square the input." (* x x))
-    (define limit "Maximum number of items." 100)
+    (def (square x) "Square the input." (* x x))
+    (def limit "Maximum number of items." 100)
     (defmacro twice (x) "Evaluate x twice and add the results." `(+ ,x ,x))
 
 A string is documentation only when another expression follows it. Thus
-`(define greeting "hello")` still defines a string value. Docstrings are
+`(def greeting "hello")` still defines a string value. Docstrings are
 metadata and are removed before evaluating the definition body. Redefining a
 binding replaces its documentation; defining it without a docstring clears
 its old documentation. Chez's `defonce` preserves both value and docs on reload.
@@ -80,7 +80,7 @@ shared source and that public C prelude definitions carry docstrings.
 
 For example, in either REPL:
 
-    (define (square x) "Square the input." (* x x))
+    (def (square x) "Square the input." (* x x))
     ,help square
 
 Then type `(squ` and press Tab. Keep typing the argument and closing

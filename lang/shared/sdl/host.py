@@ -23,16 +23,16 @@ def bootstrap(runtime, manifest=DEFAULT_MANIFEST):
     candidates = [override] if override is not None else ([data['library']] if data.get('library') else (['libSDL3.dylib'] if platform.system() == 'Darwin' else ['libSDL3.so.0','libSDL3.so']))
     prefix = "(require '(otium.ffi :as ffi))\n" if runtime == 'c' else '(require otium.ffi :as ffi)\n'
     if runtime == 'c':
-        prefix += '(define (sdl-abi-error message) (error (table :type \'ffi-error :reason \'abi :operation \'sdl-layout :message message)))\n(define host-read read-string)\n'
+        prefix += '(def (sdl-abi-error message) (error (table :type \'ffi-error :reason \'abi :operation \'sdl-layout :message message)))\n(def host-read read-string)\n'
     else:
-        prefix += '''(define (sdl-abi-error message)
+        prefix += '''(def (sdl-abi-error message)
  (let ((c (make-eq-hashtable)))
   (hashtable-set! c (string->symbol ":type") 'ffi-error) (hashtable-set! c (string->symbol ":reason") 'abi)
   (hashtable-set! c (string->symbol ":operation") 'sdl-layout) (hashtable-set! c (string->symbol ":message") message) (error c)))
-(define host-read read-string)
+(def host-read read-string)
 '''
-    prefix += "(define sdl-library-names '(" + ' '.join(map(literal,candidates)) + '))\n'
-    prefix += '\n'.join(f'(define {name} {value})' for name,value in data['constant'].items()) + '\n'
+    prefix += "(def sdl-library-names '(" + ' '.join(map(literal,candidates)) + '))\n'
+    prefix += '\n'.join(f'(def {name} {value})' for name,value in data['constant'].items()) + '\n'
     checks = []
     for name,item in data['scalar'].items():
         checks += [f"(sdl-layout-check {item['size']} (ffi/sizeof '{name}))", f"(sdl-layout-check {item['align']} (ffi/alignof '{name}))"]
@@ -41,11 +41,11 @@ def bootstrap(runtime, manifest=DEFAULT_MANIFEST):
     for name,item in data['layout'].items():
         checks += [f"(sdl-layout-check {item['size']} (ffi/sizeof {name}))", f"(sdl-layout-check {item['align']} (ffi/alignof {name}))"]
         checks += [f"(sdl-layout-check {offset} (ffi/offset-of {name} '({field})))" for field,offset in item['fields'].items()]
-    prefix += '(define (sdl-layout-check expected actual) (if (= expected actual) #t (sdl-abi-error "SDL header layout mismatch")))\n'
-    prefix += '(define (sdl-verify-layouts!)\n' + '\n'.join(checks) + ')\n'
+    prefix += '(def (sdl-layout-check expected actual) (if (= expected actual) #t (sdl-abi-error "SDL header layout mismatch")))\n'
+    prefix += '(def (sdl-verify-layouts!)\n' + '\n'.join(checks) + ')\n'
     math_names = '("/usr/lib/libSystem.B.dylib")' if platform.system() == 'Darwin' else '("libm.so.6" "libm.so")'
-    prefix += "(define sdl-math (ffi/open-library '" + math_names + "))\n"
-    prefix += "(define sin (ffi/bind sdl-math \"sin\" '(double) 'double))\n(define cos (ffi/bind sdl-math \"cos\" '(double) 'double))\n"
+    prefix += "(def sdl-math (ffi/open-library '" + math_names + "))\n"
+    prefix += "(def sin (ffi/bind sdl-math \"sin\" '(double) 'double))\n(def cos (ffi/bind sdl-math \"cos\" '(double) 'double))\n"
     return prefix + (HERE/'bindings.scm').read_text() + (HERE/'canvas.scm').read_text()
 
 def command(runtime, script):

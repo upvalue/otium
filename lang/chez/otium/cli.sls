@@ -4,6 +4,8 @@
           (only (otium conditions) error exit try)
           (only (otium process) application-arguments))
   (define-syntax %let* (syntax-rules () ((_ bindings body ...) (let* bindings body ...))))
+  (define-syntax def (syntax-rules () ((_ . rest) (define . rest))))
+  (define-syntax fn (syntax-rules () ((_ . rest) (lambda . rest))))
   (define (%arguments) (application-arguments))
   (define (%stderr text) (display text (current-error-port)))
   (define-syntax include-core

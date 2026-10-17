@@ -9,22 +9,22 @@
   (run '(restart-case (invoke-restart 'give (twice 10)) (give (x) (+ x (twice 11))))))
 (check "macros in handlers, catches, and cleanup" 42
   (run '(let ((result 0))
-          (handler-bind ((error? (lambda (c) (set! result (twice 10)))))
+          (handler-bind ((error? (fn (c) (set! result (twice 10)))))
             (try (unwind-protect (error "x") (set! result (+ result (twice 1))))
               (catch (error? c) (+ result (twice 10))))))))
 (check "catch variable shadows macro" 8
-  (run '(try (error (lambda (x) x)) (catch ((lambda (c) #t) twice) (twice 8)))))
+  (run '(try (error (fn (x) x)) (catch ((fn (c) #t) twice) (twice 8)))))
 (check "restart parameter shadows macro" 9
-  (run '(restart-case (invoke-restart 'give (lambda (x) x))
+  (run '(restart-case (invoke-restart 'give (fn (x) x))
           (give (twice) (twice 9)))))
-(check "lexical operator shadows condition form" 7
-  (run '(let ((try (lambda (x) x))) (try 7))))
+(check "condition form names cannot be rebound" #t
+  (guard (c [else #t]) (run '(let ((try (fn (x) x))) (try 7))) #f))
 (check "handler initializers evaluate left to right" '(4 3 2 1)
   (run '(let ((events '()))
-          (handler-bind (((begin (set! events (cons 1 events)) (lambda (c) #t))
-                          (begin (set! events (cons 2 events)) (lambda (c) #f)))
-                         ((begin (set! events (cons 3 events)) (lambda (c) #t))
-                          (begin (set! events (cons 4 events)) (lambda (c) #f))))
+          (handler-bind (((begin (set! events (cons 1 events)) (fn (c) #t))
+                          (begin (set! events (cons 2 events)) (fn (c) #f)))
+                         ((begin (set! events (cons 3 events)) (fn (c) #t))
+                          (begin (set! events (cons 4 events)) (fn (c) #f))))
             events))))
 (check "multiple values in try" '(1 2)
   (call-with-values (lambda () (run '(try (values 1 2)))) list))
@@ -38,7 +38,7 @@
 (check "dotted parameters" '(2 3)
   (run '(restart-case (invoke-restart 'give 1 2 3) (give (first . rest) rest))))
 (check "native error interface" "original"
-  (run '(try (chez/error 'who "original") (catch (error? c) (condition-message c)))))
+  (run '(begin (require chez) (try (chez/error 'who "original") (catch (error? c) (condition-message c))))))
 (check "condition registry shared between namespaces" #t
   (begin (run '(define-condition 'shared 'error))
          (run '(ns other-conditions))
@@ -46,7 +46,7 @@
                  (hashtable-set! c ':type 'shared)
                  (condition-of-type? c 'error)))))
 (run '(ns user))
-(run '(define cleaned #f))
+(run '(def cleaned #f))
 (check "exit escapes native guard and runs cleanup" '(exit 3 cleaned)
   (guard (c [(ot:control-condition? c)
              (list (ot:control-kind c) (ot:control-status c) (run 'cleaned))])
@@ -61,7 +61,7 @@
           (restart-case
             (begin
               (set! saved (find-restart 'again))
-              (call/cc (lambda (k) (set! resume k)))
+              (call/cc (fn (k) (set! resume k)))
               (set! events (cons (eq? saved (find-restart 'again)) events)))
             (again () #f))
           (set! events (cons (and (find-restart saved) #t) events))

@@ -37,19 +37,20 @@ with tempfile.TemporaryDirectory(prefix='otium-reader-') as directory:
         for text, expected in fixtures['positive']:
             source += f'\n(check {expected} (read-string {literal(text)}))'
         for text in fixtures['negative']:
-            source += f'\n(check #t (fails? (lambda () (read-string {literal(text)}))))'
+            source += f'\n(check #t (fails? (fn () (read-string {literal(text)}))))'
         if runtime == 'chez':
             source += '''
-(check #f (exists (lambda (x) nil) '(1 2)))
-(check nil (for-all (lambda (x) nil) '(1 2)))
-(check 7 (exists (lambda (x) (if (= x 2) 7 nil)) '(1 2 3)))
-(check 8 (for-all (lambda (x) 8) '(1 2)))
-(check 3 (do ((n 0 (+ n 1))) ((if (= n 3) #t nil) n)))
-(check 5 (cond (nil 99) (5 => (lambda (x) x))))
+(check #f (exists (fn (x) nil) '(1 2)))
+(check nil (for-all (fn (x) nil) '(1 2)))
+(check 7 (exists (fn (x) (if (= x 2) 7 nil)) '(1 2 3)))
+(check 8 (for-all (fn (x) 8) '(1 2)))
+(check 3 (let ((n 0)) (while (if (= n 3) nil #t) (set! n (+ n 1))) n))
+(check 5 (cond (nil 99) (5 => (fn (x) x))))
+(require chez)
 (check 8 (chez/if (chez/void) 8 9))
-(check '(:a nil) (case 1 ((1) (list :a nil)) (else #f)))
-(check '(:a nil) (let-values (((x y) (chez/values :a nil))) (list x y)))
-(check nil ((case-lambda (() nil))))
+(check '(:a nil) (chez/case 1 ((1) '(:a nil)) (else #f)))
+(check '(:a nil) (chez/let-values (((x y) (chez/values ':a 'nil))) (list x y)))
+(check nil ((chez/case-lambda (() 'nil))))
 (check '(nil :a nil) `(nil :a ,nil))
 
 '''
@@ -58,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix='otium-reader-') as directory:
         result = run(command + [str(path)], '')
         assert result.stdout == 'reader values passed\nreader fixtures passed\n', result
         module = directory / 'readerfixture.scm'
-        module.write_text('(ns readerfixture)\n(define value [nil :module 0xff])\n')
+        module.write_text('(ns readerfixture)\n(def value [nil :module 0xff])\n')
         require = "(require '(readerfixture :as r))" if runtime == 'c' else '(require readerfixture :as r)'
         path.write_text(require + '\n(println (get r/value 1) (if (get r/value 0) 99 7))\n')
         result = run(command + ['--path', str(directory), str(path)], '')

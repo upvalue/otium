@@ -302,7 +302,7 @@ A program is a sequence of top-level forms evaluated in order.
 For an unqualified symbol (no interior `/`):
 
 1. the innermost lexical binding (function parameters, `let`, body-level
-   `define`), searching outward through enclosing scopes;
+   `def`), searching outward through enclosing scopes;
 2. the current namespace's own vars;
 3. the current namespace's referred vars (section 7).
 
@@ -367,7 +367,7 @@ parameters.
 
 Implementations must run iterative recursion in constant stack: a call in
 tail position reuses the current activation. Tail positions are: the last
-body form of a function, `let`, `begin`/`do`; both branches of `if`; the
+body form of a function, `let`, `begin`; both branches of `if`; the
 last form of `and`/`or`; the body of a chosen `cond` clause. Non-tail
 recursion depth may be bounded (Appendix A); exceeding the bound is an
 error.
@@ -387,24 +387,39 @@ run through. This is the only preemption in the language; there are no threads.
 
 ## 4. Definitions and assignment
 
-### 4.1 `define`
+### 4.1 `def`
 
 ```
-(define name expr)
-(define name "docstring" expr)
-(define (name . params) ["docstring"] body…)
+(def name expr)
+(def name "docstring" expr)
+(def (name . params) ["docstring"] body…)
 ```
 
-At top level (outside any function body), `define` creates or updates a
+At top level (outside any function body), `def` creates or updates a
 **var** in the current namespace (7.2) and returns the value. The
-function form is sugar for `(define name (lambda params body…))` and
+function form is sugar for `(def name (fn params body…))` and
 names the closure; the value form also names a previously anonymous
-closure bound to it. `def` is an alias. `define-` is identical but marks
-the var **private** (7.4).
+closure bound to it. `def-` is identical but marks the var **private**
+(7.4); it is only allowed at top level.
 
-Inside a function or `let` body, `define` instead creates a *local*
-binding in the current scope. Docstrings are accepted there but have no
-observable effect.
+`(defonce name ["docstring"] expr)` is a top-level `def` that does
+nothing if the current namespace already defines `name`, so reloading a
+file keeps the existing value. `expr` is not evaluated in that case.
+
+Inside a body -- of `fn`, a function `def`, `let`, named `let`,
+`defmacro`, `define-method`, a `catch` clause, or a restart clause --
+`def` instead creates a *local* binding. Docstrings are accepted there
+but have no observable effect. Body definitions follow these rules:
+
+- They may appear anywhere in the body, including after expressions, and
+  may be produced by macros. A body-level `begin` is spliced into the body.
+- Every name defined in a body is in scope throughout that body, so local
+  functions can call each other regardless of order. Initializers run in
+  order, and using a local before its `def` has run is an error.
+- A body whose last form is a definition, or an empty body, yields `nil`.
+
+`def` anywhere else -- as an argument, in an `if` branch, inside an
+expression `begin` -- is an error.
 
 A docstring is recognized when the body's first form is a string literal
 followed by at least one more form. It is stored in var metadata and
@@ -428,17 +443,20 @@ cannot be rebound or shadowed.
 **`(if test then)` / `(if test then else)`** -- evaluates `test`; truthy
 takes `then`, otherwise `else` or `nil`. Branches are tail positions.
 
-**`(define …)` / `(def …)` / `(define- …)` / `(set! …)`** -- section 4.
+**`(def …)` / `(def- …)` / `(defonce …)` / `(set! …)`** -- section 4.
 
-**`(lambda params body…)`** -- a closure capturing the enclosing lexical
-scope and the current namespace. `fn` is an alias. The body may begin
-with a docstring (4.1).
+**`(fn params body…)`** -- a closure capturing the enclosing lexical
+scope and the current namespace. The body is a body in the sense of 4.1
+and may begin with a docstring.
 
 **`(defmacro name params body…)`** -- defines `name` in the current
 namespace as a macro (section 6).
 
 **`(begin body…)`** -- evaluates in order, yields the last value; `nil`
-when empty. `do` is an alias.
+when empty. Inside a body it is spliced (4.1); elsewhere its forms are
+expressions. At top level each form is expanded and evaluated before the
+next is expanded, so a macro defined by one form is available to the
+following forms.
 
 **`(let bindings body…)`** -- `bindings` is a list of `(name expr)`
 pairs. Binding is **sequential**: each `expr` sees the bindings before it
@@ -477,8 +495,7 @@ Nested quasiquotes increment depth, unquotes decrement it, and only
 depth-1 unquotes evaluate. `unquote` / `unquote-splicing` outside
 quasiquote is an error, as is splicing a non-list.
 
-**`(ns name clauses…)`**, **`(require spec…)`**, **`(in-ns name)`** --
-section 7.
+**`(ns name clauses…)`**, **`(require spec…)`** -- section 7.
 
 **`(handler-bind …)`, `(restart-case …)`, `(try …)`,
 `(unwind-protect …)`/`(defer …)`** -- section 8.
@@ -493,18 +510,20 @@ A macro is a closure that runs at **expansion time**: it is called with a
 call's argument forms unevaluated, and the form it returns replaces the
 call.
 
-Expansion is eager and happens once. Immediately before a top-level form
-is evaluated, it is fully expanded:
+Both runtimes use the same expander, `shared/prelude/expander.scm`, written
+in Otium itself. Expansion is eager and happens once. Immediately before
+a top-level form is evaluated, it is fully expanded:
 
 - A list whose head is a symbol that is not a special-form name, is not
   lexically bound at that point, and resolves *as a var* to a macro is
   replaced by the result of calling the macro on the unevaluated argument
   forms; the replacement is then expanded in turn (its head may be
   another macro call). Lexical bindings shadow macros in head position:
-  the expander tracks the bindings introduced by `lambda`, `let`, and
-  body-level `define`, and a head symbol bound by one of them is a plain
-  application, never a macro call. A named-let name and its parameters
-  are tracked in its body, but not in its initializer expressions.
+  the expander tracks the bindings introduced by `fn`, `let`, catch
+  variables, restart parameters, and body-level `def`, and a head symbol
+  bound by one of them is a plain application, never a macro call. A
+  named-let name and its parameters are tracked in its body, but not in
+  its initializer expressions. Binding a special-form name is an error.
 - Any other form has its subforms expanded recursively, except positions
   the special forms treat as data: `quote`d forms, parameter lists,
   binding and clause names, `ns`/`require` specs. Inside `quasiquote`,
@@ -520,6 +539,12 @@ Expansion is per top-level form, in program order. The consequences:
   that were already expanded keep their old expansion until re-evaluated.
 - Function bodies are expanded once, when the enclosing definition is
   evaluated -- not on each call.
+
+The expander also normalizes what it emits: parameter lists become dotted
+lists (`(a & rest)` and `[a b]` are accepted spellings), keywords and other
+non-literal atoms in expression position are quoted, and body definitions
+are moved ahead of the body's plain expressions (4.1). `macroexpand-1` and
+`macroexpand` expand only the head of a form and stop at special forms.
 
 Code constructed at runtime is expanded when it reaches `eval` (10.8).
 The expander runs ordinary code: a macro body may call any function
@@ -554,7 +579,7 @@ There is always a **current namespace**; programs start in `user`. The
 core library lives in `otium.core`, and every newly created namespace
 automatically refers all public vars `otium.core` has *at creation time*.
 
-### 7.2 `ns`, `in-ns`, and top-level switching
+### 7.2 `ns` and top-level switching
 
 ```
 (ns my.name
@@ -563,8 +588,7 @@ automatically refers all public vars `otium.core` has *at creation time*.
 ```
 
 `ns` switches the current namespace to `my.name` (creating it if needed)
-and processes clauses; only `:require` clauses exist. `(in-ns name)` just
-switches (name may be a symbol, keyword, or string). Returns `nil`.
+and processes clauses; only `:require` clauses exist. Returns `nil`.
 
 A namespace switch performed by a top-level form persists for subsequent
 top-level forms. Anywhere else -- inside nested evaluation or a function
@@ -591,7 +615,7 @@ require) is an error, as is a name not found on the path.
 
 ### 7.4 Privacy
 
-`define-` marks a var private. Private vars resolve normally from their
+`def-` marks a var private. Private vars resolve normally from their
 own namespace but are an error to reach via qualified reference or
 `:refer` from any other namespace, and are skipped by the automatic core
 refer.
@@ -634,7 +658,7 @@ parent; a registration that would create a cycle is an error. The type
 `error` is predefined as a root; new roots may be made by
 `(define-condition type nil)`. `(condition-of-type? c type)` is `#t`
 iff `(condition-type c)` is `type` or reaches it by walking parents.
-`(type-pred t)` returns `(lambda (c) (condition-of-type? c t))`, so a
+`(type-pred t)` returns `(fn (c) (condition-of-type? c t))`, so a
 handler predicate for `error` catches a `file-error` defined under it.
 Types never mentioned in a registration simply have no parent; they
 still match themselves.
@@ -985,7 +1009,7 @@ of it (8.1).
 
 ### 10.11 Namespaces and reflection
 
-`in-ns` (7.2); `(current-ns)` is the current namespace's name as a
+`ns` (7.2); `(current-ns)` is the current namespace's name as a
 symbol; `(describe sym)` is `"ns/name: docstring"` for the var `sym`
 resolves to (or a no-documentation placeholder), `nil` if unresolvable.
 Params are made and bound by the special forms `defparam` and
@@ -997,7 +1021,7 @@ Params are made and bound by the special forms `defparam` and
 |---|---|
 | `(when test body…)` | `body` as `begin` when truthy, else `nil`. |
 | `(unless test body…)` | Inverse. |
-| `(defn name params body…)` | `(define (name . params) body…)`. |
+| `(defn name params body…)` | `(def (name . params) body…)`. |
 | `(-> x forms…)` | Thread-first: insert `x` as the first argument of each form (bare symbols call as `(form x)`). |
 | `(->> x forms…)` | Thread-last. |
 | `(dotimes (i n) body…)` | `i` from 0 below `n`. |

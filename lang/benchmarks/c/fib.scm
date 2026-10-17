@@ -1,6 +1,6 @@
 ;; Naive recursive Fibonacci exercises function calls and arithmetic.
 
-(define (fib n)
+(def (fib n)
   (if (< n 2)
       n
       (+ (fib (- n 1)) (fib (- n 2)))))

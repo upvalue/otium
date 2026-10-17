@@ -114,7 +114,7 @@ try:
 
     interactive.stdin.write(
         frame(
-            "(begin (define counter 0) (define cleaned #f) "
+            "(begin (def counter 0) (def cleaned #f) "
             "(unwind-protect "
             "  (while #t (set! counter (+ counter 1))) "
             "  (set! cleaned #t)))"
@@ -248,7 +248,7 @@ expect(invalid_exit, 0, stdout="exit: expected status from 0 to 255\n")
 
 single_eval = run(
     input_text=(
-        "(define hits (array)) (push! hits 1) (+ 1\n"
+        "(def hits (array)) (push! hits 1) (+ 1\n"
         " 2) (println \"hits:\" (length hits))\n"
         "(quit)\n"
     )

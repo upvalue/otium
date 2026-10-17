@@ -1,9 +1,9 @@
 ;; leetcode-1-two-sum.scm - https://leetcode.com/problems/two-sum/
 
-(define (two-sum nums target)
+(def (two-sum nums target)
   "Find the indices of two numbers in the array which add up to the target"
-  (define seent {})
-  (define result #f)
+  (def seent {})
+  (def result #f)
   (dotimes (i (length nums))
     ;(println seent)
     ;(println i)

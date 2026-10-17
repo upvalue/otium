@@ -18,5 +18,5 @@ if [ "$interactive" = yes ] && [ -t 0 ] && [ -t 1 ]; then
   OTIUM_LINE_LIBRARY="$root/../shared/build/$platform/libotium-line.$extension"
   export OTIUM_LINE_LIBRARY
 fi
-exec "${CHEZ:-chez}" --compile-imported-libraries \
+exec "${CHEZ:-chez}" \
   --libdirs "$root" --script "$root/main.ss" "$@"

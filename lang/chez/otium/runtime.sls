@@ -143,6 +143,15 @@
                   "Portable foreign calls and native memory."))
               (eval 'public-bindings (environment '(otium ffi))))
             (namespace-loaded?-set! space #t))
+          (when (memq name '(otium.process otium.cli))
+            (for-each
+              (lambda (entry)
+                (define-top-level-value (car entry) (cdr entry) env)
+                (hashtable-set! (namespace-definitions space) (car entry)
+                  "Portable command-line programs."))
+              (eval 'public-bindings
+                (environment (if (eq? name 'otium.cli) '(otium cli) '(otium process)))))
+            (namespace-loaded?-set! space #t))
           space)))
 
   (define (import-value! space local target member)
@@ -204,7 +213,7 @@
     (let ([space (find-namespace name)])
       (when (namespace-loading? space)
         (error 'require "circular namespace load" name))
-      (when (and (not (memq name '(otium.generic otium.ffi)))
+      (when (and (not (memq name '(otium.generic otium.ffi otium.process otium.cli)))
                  (or reload? (not (namespace-loaded? space))))
         (load-namespace! space (or (namespace-source space) (source-for name))))
       space))

@@ -1,0 +1,15 @@
+[
+ ["help", "common", "flag", "Show launcher help"],
+ ["repl", "common", "flag", "Enter the REPL after loading"],
+ ["path", "common", "directory", "Add a module search directory"],
+ ["project", "common", "file", "Read load paths from a project file"],
+ ["no-project", "common", "flag", "Skip project.ot discovery"],
+ ["load", "common", "file", "Load a file before the script; repeatable"],
+ ["c.server", "c", "flag", "Run the framed stdio server"],
+ ["c.heap-init", "c", "integer", "Initial usable heap target in bytes"],
+ ["c.heap-max", "c", "integer", "Maximum usable heap size in bytes"],
+ ["c.max-depth", "c", "integer", "VM frame depth limit"],
+ ["c.gc-stats", "c", "flag", "Print collector statistics at exit"],
+ ["c.gc-stats-json", "c", "flag", "Print machine-readable GC statistics"],
+ ["c.gc-force-compact", "c", "flag", "Force compaction at every major GC"]
+]

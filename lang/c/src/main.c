@@ -375,6 +375,12 @@ static void run_repl(ots* state) {
 }
 
 static bool parse_number(const char* option, const char* text, size_t* out) {
+  for (const char* p = text; *p; p++) {
+    if (*p < '0' || *p > '9') {
+      fprintf(stderr, "otium: %s requires an integer\n", option);
+      return false;
+    }
+  }
   errno = 0;
   char* end;
   unsigned long long value = strtoull(text, &end, 10);
@@ -386,22 +392,9 @@ static bool parse_number(const char* option, const char* text, size_t* out) {
   return true;
 }
 
-static void usage(FILE* stream) {
-  fputs("Usage: otium [OPTIONS] [FILE ...]\n"
-        "  --repl             start a REPL after FILEs (^X ^E opens $VISUAL/$EDITOR)\n"
-        "  --server           run the framed stdio server\n"
-        "  --path DIR         add a module search directory\n"
-        "  --project FILE     read load paths from FILE\n"
-        "  --no-project       skip project.ot discovery\n"
-        "  --heap-init BYTES  initial usable heap target\n"
-        "  --heap-max BYTES   maximum usable heap size\n"
-        "  --max-depth N      VM frame depth limit\n"
-        "  --gc-stats         print collector statistics at exit\n"
-        "  --gc-stats-json    print machine-readable GC statistics\n"
-        "  --gc-force-compact force compaction at every major GC\n"
-        "  -h, --help         show this help\n",
-        stream);
-}
+#include "../../shared/cli/options.inc"
+
+static void usage(FILE* stream) { fputs(launcher_help, stream); }
 
 static void print_byte_stat(const char* name, uint64_t bytes_value) {
   static const char* units[] = {"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"};
@@ -514,52 +507,76 @@ int main(int argc, char** argv) {
   bool stats_json = false;
   bool no_project = false;
   const char* project = NULL;
-  bool positional = false;
+  const char* script = NULL;
+  int application_start = argc;
   for (int i = 1; i < argc; i++) {
     const char* argument = argv[i];
-    if (!positional && strcmp(argument, "--") == 0) positional = true;
-    else if (!positional && strcmp(argument, "--repl") == 0) repl = true;
-    else if (!positional && strcmp(argument, "--server") == 0) server = true;
-    else if (!positional && strcmp(argument, "--gc-stats") == 0) stats = true;
-    else if (!positional && strcmp(argument, "--gc-stats-json") == 0) stats_json = true;
-    else if (!positional && strcmp(argument, "--gc-force-compact") == 0)
-      config.gc_force_compact = true;
-    else if (!positional && strcmp(argument, "--no-project") == 0) no_project = true;
-    else if (!positional && strcmp(argument, "--help") == 0) {
-      usage(stdout);
-      return 0;
-    } else if (!positional && strcmp(argument, "-h") == 0) {
-      usage(stdout);
-      return 0;
-    } else if (!positional &&
-               (strcmp(argument, "--path") == 0 || strcmp(argument, "--project") == 0 ||
-                strcmp(argument, "--heap-init") == 0 || strcmp(argument, "--heap-max") == 0 ||
-                strcmp(argument, "--max-depth") == 0)) {
-      if (++i == argc) {
-        fprintf(stderr, "otium: %s requires %s\n", argument,
-                strcmp(argument, "--path") == 0      ? "a directory"
-                : strcmp(argument, "--project") == 0 ? "a file"
-                                                     : "a value");
+    if (strcmp(argument, "--") == 0) {
+      application_start = i + 1;
+      if (script == NULL) {
+        fputs("otium: -- requires a script\n", stderr);
         return 2;
       }
-      if (strcmp(argument, "--path") == 0) strings_push(&load_path, argv[i], strlen(argv[i]));
-      else if (strcmp(argument, "--project") == 0) project = argv[i];
-      else {
-        size_t value;
-        if (!parse_number(argument, argv[i], &value)) return 2;
-        if (strcmp(argument, "--heap-init") == 0) config.heap_init = value;
-        else if (strcmp(argument, "--heap-max") == 0) config.heap_max = value;
-        else if (strcmp(argument, "--max-depth") == 0) config.max_depth = (unsigned)value;
+      break;
+    }
+    if (argument[0] != '-') {
+      if (script != NULL) {
+        fputs("otium: extra script; use --load or put application arguments after --\n", stderr);
+        return 2;
       }
-    } else if (!positional && argument[0] == '-' && argument[1] != '\0') {
+      script = argument;
+      continue;
+    }
+    if (strcmp(argument, "-h") == 0) argument = "--help";
+    if (strcmp(argument, "-L") == 0) argument = "--path";
+    const char* equal = strchr(argument, '=');
+    size_t name_length = equal ? (size_t)(equal - argument) : strlen(argument);
+    size_t option;
+    for (option = 0; option < sizeof launcher_options / sizeof *launcher_options; option++) {
+      const char* name = launcher_options[option].name;
+      if (name_length == strlen(name) + 2 && strncmp(argument, "--", 2) == 0 &&
+          strncmp(argument + 2, name, name_length - 2) == 0) break;
+    }
+    if (option == sizeof launcher_options / sizeof *launcher_options) {
       fprintf(stderr, "otium: unknown option %s\n", argument);
       return 2;
-    } else {
-      strings_push(&files, argument, strlen(argument));
     }
+    const char* name = launcher_options[option].name;
+    const char* kind = launcher_options[option].kind;
+    const char* value = equal ? equal + 1 : NULL;
+    if (strcmp(kind, "flag") == 0) {
+      if (value) { fprintf(stderr, "otium: --%s takes no value\n", name); return 2; }
+    } else if (strcmp(kind, "integer") == 0) {
+      if (!value) { fprintf(stderr, "otium: --%s requires =INTEGER\n", name); return 2; }
+    } else if (!value) {
+      if (++i == argc) { fprintf(stderr, "otium: --%s requires a %s\n", name, kind); return 2; }
+      value = argv[i];
+    }
+    size_t number = 0;
+    if (strcmp(kind, "integer") == 0) {
+      if (!parse_number(name, value, &number)) return 2;
+      if ((strcmp(name, "c.heap-init") == 0 && number < 1024) ||
+          (strcmp(name, "c.max-depth") == 0 && number > UINT_MAX)) {
+        fprintf(stderr, "otium: --%s out of range\n", name); return 2;
+      }
+    }
+    if (strcmp(name, "help") == 0) { usage(stdout); return 0; }
+    else if (strcmp(name, "repl") == 0) repl = true;
+    else if (strcmp(name, "c.server") == 0) server = true;
+    else if (strcmp(name, "c.gc-stats") == 0) stats = true;
+    else if (strcmp(name, "c.gc-stats-json") == 0) stats_json = true;
+    else if (strcmp(name, "c.gc-force-compact") == 0) config.gc_force_compact = true;
+    else if (strcmp(name, "no-project") == 0) no_project = true;
+    else if (strcmp(name, "project") == 0) project = value;
+    else if (strcmp(name, "path") == 0) strings_push(&load_path, value, strlen(value));
+    else if (strcmp(name, "load") == 0) strings_push(&files, value, strlen(value));
+    else if (strcmp(name, "c.heap-init") == 0) config.heap_init = number;
+    else if (strcmp(name, "c.heap-max") == 0) config.heap_max = number;
+    else if (strcmp(name, "c.max-depth") == 0) config.max_depth = (unsigned)number;
   }
+  if (script) strings_push(&files, script, strlen(script));
   if (repl && server) {
-    fputs("otium: --repl and --server cannot be used together\n", stderr);
+    fputs("otium: --repl and --c.server cannot be used together\n", stderr);
     return 2;
   }
   if (no_project && project != NULL) {
@@ -567,11 +584,11 @@ int main(int argc, char** argv) {
     return 2;
   }
   if (config.heap_init < 1024) {
-    fputs("otium: --heap-init must be at least 1024 bytes\n", stderr);
+    fputs("otium: --c.heap-init must be at least 1024 bytes\n", stderr);
     return 2;
   }
   if (config.heap_max < config.heap_init) {
-    fputs("otium: --heap-max must be at least --heap-init\n", stderr);
+    fputs("otium: --c.heap-max must be at least --c.heap-init\n", stderr);
     return 2;
   }
   add_environment_paths();
@@ -593,6 +610,7 @@ int main(int argc, char** argv) {
   ot_set_writer(state, stdout_writer, NULL);
   ot_set_loader(state, module_loader, NULL);
   ot_register_demo_extension(state);
+  ot_set_arguments(state, script, argc - application_start, argv + application_start);
   struct sigaction action = {0};
   action.sa_handler = handle_interrupt;
   sigaction(SIGINT, &action, NULL);

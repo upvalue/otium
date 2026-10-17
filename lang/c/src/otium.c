@@ -5782,6 +5782,7 @@ ots* ot_create(const ot_config* configuration) {
   otv user_name = ot_intern(state, "user", 4, false);
   state->vm.current_namespace = namespace_find(state, user_name, true);
   ot_register_ffi(state);
+  ot_register_cli(state);
   state->config.gc_stress = config.gc_stress;
   return state;
 }

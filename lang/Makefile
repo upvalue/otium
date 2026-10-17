@@ -6,7 +6,7 @@
 all lib bench bench-gc format hygiene gc-lint:
 	$(MAKE) -C c $@
 
-test: test-c test-chez
+test: test-c test-chez test-cli
 	$(MAKE) test-repl
 
 test-c:
@@ -42,3 +42,8 @@ ffi:
 
 test-ffi: ffi
 	python3 shared/tests/test_ffi.py --stress
+
+.PHONY: test-cli
+test-cli: all
+	python3 shared/cli/generate.py --check
+	python3 shared/tests/test_cli.py

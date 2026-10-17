@@ -158,8 +158,7 @@ def main():
             input_id = hashlib.sha256(input_path.read_bytes()).hexdigest()[:12]
             heap_max = entry.get("heap_max", 64 * 1024 * 1024)
             flags = [
-                "--heap-max",
-                str(heap_max),
+                f"--c.heap-max={heap_max}",
             ]
             program_path = temp / f"{name}-otium.scm"
             program_path.write_text(otium_program(root, name, implementation, input_text))

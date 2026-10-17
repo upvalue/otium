@@ -26,7 +26,7 @@ def run(runtime, source, directory, expected):
     script.write_text(prefix + collect + '(define wide-integers? ' + ('#f' if runtime == 'c' else '#t') + ')\n' + source)
     command = [str(ROOT / 'c/otium'), '--no-project'] if runtime == 'c' else [os.environ.get('CHEZ', 'chez'), '--libdirs', str(ROOT / 'chez'), '--script', str(ROOT / 'chez/main.ss')]
     if runtime == 'c' and args.stress:
-        command.append('--gc-force-compact')
+        command.append('--c.gc-force-compact')
     env = dict(os.environ, OTIUM_FFI_LIBRARY=str(helper))
     if runtime == 'c' and args.stress:
         env['OTIUM_GC_STRESS'] = '1'

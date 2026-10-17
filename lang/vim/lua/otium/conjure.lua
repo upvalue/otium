@@ -17,7 +17,7 @@ config.merge({
   client = {
     otium = {
       stdio = {
-        command = { "otium", "--server" },
+        command = { "otium", "--c.server" },
         prompt_pattern = response_end,
         mapping = {
           start = "cs",

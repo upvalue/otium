@@ -27,7 +27,7 @@ else
 $(error GC must be "semi" or "gen")
 endif
 
-RUNTIME_OBJ := $(OBJ)/otium.o $(OBJ)/ot-gc-common.o $(GC_OBJ) $(OBJ)/ot-posix.o $(OBJ)/ot-ffi.o
+RUNTIME_OBJ := $(OBJ)/otium.o $(OBJ)/ot-gc-common.o $(GC_OBJ) $(OBJ)/ot-posix.o $(OBJ)/ot-ffi.o $(OBJ)/ot-cli.o
 CLI_OBJ := $(OBJ)/main.o $(OBJ)/ot-ext-demo.o $(OBJ)/line-edit.o $(OBJ)/bestline.o
 TEST_OBJ := $(OBJ)/test-runtime.o
 GC_BENCH_OBJ := $(OBJ)/gc-bench.o
@@ -78,7 +78,7 @@ $(OBJ)/ot-gc-gen.o: src/ot-gc-gen.c src/otium.h src/ot-gc-internal.inc src/ot-gc
 $(OBJ)/ot-posix.o: src/ot-posix.c src/otium.h | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -c $< -o $@
 
-$(OBJ)/main.o: src/main.c src/otium.h ../shared/line-edit.h | $(OBJ)
+$(OBJ)/main.o: src/main.c src/otium.h ../shared/line-edit.h ../shared/cli/options.inc | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -I../shared -c $< -o $@
 
 $(OBJ)/ot-ext-demo.o: src/ot-ext-demo.c src/otium.h | $(OBJ)
@@ -142,3 +142,9 @@ $(OBJ)/ffi-native.o: ../shared/ffi/native.c ../shared/ffi/native.h | $(OBJ)
 
 $(GEN)/ot-ffi-source.h: ../shared/ffi/core.scm tools/embed.py | $(GEN)
 	$(PYTHON) tools/embed.py $< ot_ffi_src $@
+
+$(GEN)/ot-cli-source.h: ../shared/cli/core.scm tools/embed.py | $(GEN)
+	$(PYTHON) tools/embed.py $< ot_cli_src $@
+
+$(OBJ)/ot-cli.o: src/ot-cli.c src/otium.h $(GEN)/ot-cli-source.h | $(OBJ)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(GEN) -Isrc -c $< -o $@

@@ -31,9 +31,9 @@ def expect(result, status, stdout=None, stderr=None):
 
 
 expect(run("--help"), 0, stdout="--repl")
-expect(run("--help"), 0, stdout="--server")
-expect(run("--help"), 0, stdout="--heap-max")
-expect(run("--help"), 0, stdout="--gc-stats")
+expect(run("--help"), 0, stdout="--c.server")
+expect(run("--help"), 0, stdout="--c.heap-max")
+expect(run("--help"), 0, stdout="--c.gc-stats")
 expect(run(), 0, stdout="otium repl")
 
 file_only = run(fixture)
@@ -42,10 +42,10 @@ assert "otium repl" not in file_only.stdout, file_only
 
 expect(run(fixture, "--repl"), 0, stdout="loaded-from-file\notium repl")
 expect(run("--repl", fixture), 0, stdout="loaded-from-file\notium repl")
-multiple_files = run(fixture, second_fixture)
+multiple_files = run("--load", fixture, second_fixture)
 expect(multiple_files, 0, stdout="loaded-from-file\nloaded-from-second-file\n")
 assert "otium repl" not in multiple_files.stdout, multiple_files
-expect(run("--repl", fixture, second_fixture), 0,
+expect(run("--repl", "--load", fixture, second_fixture), 0,
        stdout="loaded-from-file\nloaded-from-second-file\notium repl")
 
 with tempfile.TemporaryDirectory(prefix="otium-shebang-") as directory:
@@ -63,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix="otium-shebang-") as directory:
 
 expect(run("--unknown"), 2, stderr="unknown option --unknown")
 expect(run("--path"), 2, stderr="--path requires a directory")
-expect(run("--repl", "--server"), 2, stderr="cannot be used together")
+expect(run("--repl", "--c.server"), 2, stderr="cannot be used together")
 
 
 def frame(source):
@@ -71,7 +71,7 @@ def frame(source):
 
 
 server = run(
-    "--server",
+    "--c.server",
     input_text=(
         frame("(+ 1 2)")
         + frame('(restart-case (error "server") (use-value (v) v))')
@@ -102,7 +102,7 @@ def read_server_response(process):
 
 
 interactive = subprocess.Popen(
-    [otium, "--no-project", "--server"],
+    [otium, "--no-project", "--c.server"],
     stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
     stderr=subprocess.PIPE,
@@ -172,23 +172,20 @@ finally:
         interactive.kill()
         interactive.communicate()
 
-expect(run("--max-depth"), 2, stderr="--max-depth requires a value")
-expect(run("--max-depth", "nope"), 2, stderr="requires an integer")
-expect(run("--heap-init", "512"), 2, stderr="must be at least 1024")
-expect(run("--heap-max", "1024"), 2, stderr="must be at least --heap-init")
+expect(run("--c.max-depth"), 2, stderr="--c.max-depth requires =INTEGER")
+expect(run("--c.max-depth=nope"), 2, stderr="requires an integer")
+expect(run("--c.heap-init=512"), 2, stderr="out of range")
+expect(run("--c.heap-max=1024"), 2, stderr="must be at least --c.heap-init")
 
 limited = run(
-    "--max-depth",
-    "1024",
-    "--heap-init",
-    str(1 << 20),
-    "--heap-max",
-    str(8 << 20),
+    "--c.max-depth=1024",
+    f"--c.heap-init={1 << 20}",
+    f"--c.heap-max={8 << 20}",
     fixture,
 )
 expect(limited, 0, stdout="loaded-from-file\n")
 
-gc_stats = run("--gc-stats", fixture)
+gc_stats = run("--c.gc-stats", fixture)
 expect(gc_stats, 0, stdout="loaded-from-file\n", stderr="GC stats:\n")
 for field in ("allocations", "collections"):
     assert re.search(rf"^  {field}: \d+$", gc_stats.stderr, re.MULTILINE), gc_stats
@@ -210,7 +207,7 @@ capacity_match = re.search(
 )
 assert capacity_match and int(capacity_match.group(1)) > 0, gc_stats
 
-gc_stats_json = run("--gc-stats-json", "--gc-force-compact", fixture)
+gc_stats_json = run("--c.gc-stats-json", "--c.gc-force-compact", fixture)
 expect(gc_stats_json, 0, stdout="loaded-from-file\n", stderr="OTIUM_GC_STATS ")
 json_line = next(
     line.removeprefix("OTIUM_GC_STATS ")

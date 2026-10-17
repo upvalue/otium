@@ -265,7 +265,7 @@ compact chunks = chunks required by all live bytes when packed
 ```
 
 The collector compacts only when packing releases at least one additional
-whole chunk. `gc_force_compact` and `--gc-force-compact` override the policy.
+whole chunk. `gc_force_compact` and `--c.gc-force-compact` override the policy.
 Promotion preflight also requests forced compaction when it cannot find a large
 enough contiguous region.
 
@@ -356,7 +356,7 @@ metadata size, old-space fragmentation, and the largest free region.
 
 `ot_reset_gc_stats` clears workload counters while preserving reservation and
 metadata values. It sets the new peak to the current used bytes. The CLI prints
-the counters with `--gc-stats` or as one JSON record with `--gc-stats-json`.
+the counters with `--c.gc-stats` or as one JSON record with `--c.gc-stats-json`.
 Setting `GC_TIMING=0` keeps counts but records zero elapsed time.
 
 ## Validation

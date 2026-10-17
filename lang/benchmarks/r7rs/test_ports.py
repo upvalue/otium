@@ -52,8 +52,7 @@ def main():
             result = subprocess.run(
                 [
                     binary,
-                    "--max-depth",
-                    "2000",
+                    "--c.max-depth=2000",
                     source,
                 ],
                 text=True,

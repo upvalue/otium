@@ -58,7 +58,7 @@ python3 "$script_dir/tests/test_lint.py" "$tool" \
   "$script_dir/tests/stale-borrow.c" "$script_dir/tests/write-barrier.c"
 
 make -C "$repo_dir" BUILD="$runtime_build" \
-  "$runtime_build/gen/expander.h" "$runtime_build/gen/prelude.h" "$runtime_build/gen/ot-ffi-source.h"
+  "$runtime_build/gen/expander.h" "$runtime_build/gen/prelude.h" "$runtime_build/gen/ot-ffi-source.h" "$runtime_build/gen/ot-cli-source.h"
 
 compile_args=(
   -std=c23 \
@@ -78,6 +78,7 @@ compile_args=(
   "$repo_dir/src/otium.c" \
   "$repo_dir/src/ot-gc-common.c" \
   "$repo_dir/src/ot-posix.c" \
+  "$repo_dir/src/ot-cli.c" \
   "$repo_dir/src/main.c" \
   "$repo_dir/src/ot-ext-demo.c" \
   "$repo_dir/tests/test_runtime.c" \

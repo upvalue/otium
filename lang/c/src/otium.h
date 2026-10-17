@@ -153,6 +153,9 @@ void ot_clear_condition(ots* state);
  * write its 0..255 process-style status and return true. */
 bool ot_exit_status(const ots* state, int* status);
 
+/* Copy application arguments into this state. A NULL script denotes no script. */
+OT_GC_MAY_ALLOCATE void ot_set_arguments(ots* state, const char* script, int argc, char* const* argv);
+
 /* Inspect and construct values. Constructors may move every unrooted value. */
 ot_type ot_value_type(otv value);
 OT_GC_MAY_ALLOCATE otv ot_make_float(ots* state, double value);
@@ -541,6 +544,8 @@ struct ot_state {
   otv exts;
   uint64_t next_stable_id;
   uint64_t gensym_id;
+  otv process_arguments;
+  otv process_script;
   bool quit_requested;
   int quit_status;
   ot_writer writer;
@@ -578,6 +583,7 @@ OT_GC_MAY_ALLOCATE otv ot_raise_value(ots* state, otv condition);
 OT_GC_MAY_ALLOCATE otv ot_intern(ots* state, const char* bytes, size_t length, bool keyword);
 void ot_repr_to(ots* state, otv value, bool display, void (*write)(void*, const char*, size_t),
                 void* userdata);
+void ot_register_cli(ots* state);
 void ot_register_ffi(ots* state);
 void ot_destroy_ffi(ots* state);
 void ot_register_demo_extension(ots* state);

@@ -9,25 +9,25 @@
   (ui/new Swatch {:key key :color color :width width :height height}))
 (defclass Toggle :is ui/Widget color (selected :init #f :state #t))
 (defmethod (ui/build (w Toggle))
-  (ui/button {:on-press (fn () (set! (w :selected) (not (w :selected))))}
+  (ui/button {:style :bare :padding 0 :on-press (fn () (set! (w :selected) (not (w :selected))))}
     (swatch :fill (if (w :selected) 0x67d9c0ff (w :color)) 96 88)))
 (def (view)
   (ui/column {:grow 1 :padding 24 :gap 16 :background 0x101827ff}
-    (ui/row {:height 72 :padding 12 :gap 12 :background 0x202d43ff :radius 16}
+    (ui/row {:height 80 :padding 12 :gap 12 :background 0x202d43ff :radius 16}
       (swatch :logo 0x67d9c0ff 48 48)
-      (ui/column {:grow 1 :gap 8}
-        (swatch :title 0xdce5f2ff 180 16)
-        (swatch :subtitle 0x71849fff 120 10)))
+      (ui/column {:grow 1 :gap 4}
+        (ui/label {:size 20 :wrap #f} "Otium UI")
+        (ui/label {:size 12 :color 0x9cabc2ff} "Shared widgets on C and Chez")))
     (ui/row {:grow 1 :gap 16}
       (ui/column {:width 144 :padding 12 :gap 12 :background 0x202d43ff :radius 16}
-        (swatch :nav1 0x67d9c0ff 120 32)
-        (swatch :nav2 0x34465fff 120 32)
-        (swatch :nav3 0x34465fff 120 32))
+        (ui/label {:color 0x67d9c0ff} "Overview")
+        (ui/label {} "Text layout")
+        (ui/label {:font :mono :size 13} "(ui/label)"))
       (ui/column {:grow 1 :padding 16 :gap 16 :background 0x202d43ff :radius 16}
         (ui/row {:gap 12}
           (ui/new Toggle {:key :card1 :color 0x709cffff})
           (ui/new Toggle {:key :card2 :color 0xecac74ff})
           (ui/new Toggle {:key :card3 :color 0xcc91e6ff}))
-        (swatch :bar 0x67d9c0ff 160 24)
-        (swatch :detail 0x34465fff 220 56)))
-    (swatch :footer 0x34465fff 240 12)))
+        (ui/label {:size 20 :color 0x67d9c0ff} "Click a card")
+        (ui/label {} "Text is shaped by SDL_ttf and wraps to the width Yoga provides. Resize the demo with --width to explore the layout. Café, naïve, office, λ.")))
+    (ui/label {:font :mono :size 12 :color 0x9cabc2ff} "Noto Sans + JetBrains Mono / SDL_GPU")))

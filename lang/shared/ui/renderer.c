@@ -4,13 +4,23 @@
 #include <stdlib.h>
 #include <string.h>
 #include "shaders.h"
+#include "text.h"
+#define ATLAS_SIZE 2048
+typedef struct { TTF_Font* font; Uint32 index; int x, y; } Glyph;
 
-typedef struct { float rect[4], color[4], shape[4], clip[4]; } Rect;
+typedef struct { float rect[4], color[4], shape[4], clip[4], uv[4]; } Rect;
 typedef struct {
   SDL_Window* window;
   SDL_GPUDevice* device;
   SDL_GPUGraphicsPipeline* pipeline;
   SDL_GPUTexture* target;
+  SDL_GPUTexture* atlas;
+  SDL_GPUSampler* sampler;
+  SDL_GPUTransferBuffer* atlas_upload;
+  Uint8* atlas_pixels;
+  Glyph glyphs[8192];
+  int glyph_count, atlas_x, atlas_y, atlas_row;
+  bool atlas_dirty;
   SDL_GPUBuffer* buffer;
   SDL_GPUTransferBuffer *upload, *download;
   Rect* rects;
@@ -53,13 +63,19 @@ void otui_gpu_free(Renderer* r) {
     if (r->upload) SDL_ReleaseGPUTransferBuffer(r->device, r->upload);
     if (r->download) SDL_ReleaseGPUTransferBuffer(r->device, r->download);
     if (r->pipeline) SDL_ReleaseGPUGraphicsPipeline(r->device, r->pipeline);
+    if (r->atlas) SDL_ReleaseGPUTexture(r->device, r->atlas);
+    if (r->sampler) SDL_ReleaseGPUSampler(r->device, r->sampler);
+    if (r->atlas_upload) SDL_ReleaseGPUTransferBuffer(r->device, r->atlas_upload);
     if (r->target) SDL_ReleaseGPUTexture(r->device, r->target);
     if (r->claimed) SDL_ReleaseWindowFromGPUDevice(r->device, r->window);
     SDL_DestroyGPUDevice(r->device);
   }
+  free(r->atlas_pixels);
   free(r->rects);
   free(r);
   --live_renderers;
+  extern int otui_live_nodes(void);
+  if (!live_renderers && !otui_live_nodes()) otui_text_clear();
 }
 static SDL_GPUShader* shader(SDL_GPUDevice* device, bool vertex) {
   bool metal = (SDL_GetGPUShaderFormats(device) & SDL_GPU_SHADERFORMAT_MSL) != 0;
@@ -69,12 +85,14 @@ static SDL_GPUShader* shader(SDL_GPUDevice* device, bool vertex) {
     .entrypoint = metal ? (vertex ? "vertex_main" : "fragment_main") : "main",
     .format = metal ? SDL_GPU_SHADERFORMAT_MSL : SDL_GPU_SHADERFORMAT_SPIRV,
     .stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT,
+    .num_samplers = vertex ? 0 : 1,
     .num_uniform_buffers = vertex ? 1 : 0,
   };
   return SDL_CreateGPUShader(device, &info);
 }
-void* otui_gpu_new(SDL_Window* window, int width, int height, int scale, const char* driver) {
-  if (!window || width <= 0 || height <= 0 || scale < 1 || scale > 4 ||
+void* otui_gpu_new(SDL_Window* window, int width, int height, float scale, const char* driver) {
+  if (window && scale == 0) scale = fmaxf(1, SDL_GetWindowPixelDensity(window));
+  if (!window || !isfinite(scale) || width <= 0 || height <= 0 || scale < 1 || scale > 4 ||
       width > 4096 / scale || height > 4096 / scale) {
     SDL_SetError("UI target must be positive and at most 4096 physical pixels per axis");
     return NULL;
@@ -82,7 +100,7 @@ void* otui_gpu_new(SDL_Window* window, int width, int height, int scale, const c
   Renderer* r = calloc(1, sizeof(*r));
   if (!r) { SDL_OutOfMemory(); return NULL; }
   ++live_renderers;
-  r->window = window; r->width = width * scale; r->height = height * scale;
+  r->window = window; r->width = (Uint32)ceilf(width * scale); r->height = (Uint32)ceilf(height * scale);
   r->logical_width = (float)width; r->logical_height = (float)height;
   r->device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_SPIRV,
                                   true, driver[0] ? driver : NULL);
@@ -111,8 +129,8 @@ void* otui_gpu_new(SDL_Window* window, int width, int height, int scale, const c
   SDL_GPUVertexBufferDescription vb = {
     .slot = 0, .pitch = sizeof(Rect), .input_rate = SDL_GPU_VERTEXINPUTRATE_INSTANCE,
   };
-  SDL_GPUVertexAttribute attrs[4];
-  for (Uint32 i = 0; i < 4; ++i)
+  SDL_GPUVertexAttribute attrs[5];
+  for (Uint32 i = 0; i < 5; ++i)
     attrs[i] = (SDL_GPUVertexAttribute){.location=i, .buffer_slot=0,
                                        .format=SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, .offset=i*16};
   SDL_GPUColorTargetDescription color = {
@@ -126,19 +144,33 @@ void* otui_gpu_new(SDL_Window* window, int width, int height, int scale, const c
   SDL_GPUGraphicsPipelineCreateInfo pipeline = {
     .vertex_shader = vs, .fragment_shader = fs,
     .vertex_input_state = {.vertex_buffer_descriptions=&vb, .num_vertex_buffers=1,
-                          .vertex_attributes=attrs, .num_vertex_attributes=4},
+                          .vertex_attributes=attrs, .num_vertex_attributes=5},
     .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
     .target_info = {.color_target_descriptions=&color, .num_color_targets=1},
   };
   r->pipeline = SDL_CreateGPUGraphicsPipeline(r->device, &pipeline);
   SDL_ReleaseGPUShader(r->device, vs); SDL_ReleaseGPUShader(r->device, fs);
   if (!r->pipeline) goto failed;
+  texture.width = texture.height = ATLAS_SIZE;
+  texture.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+  r->atlas = SDL_CreateGPUTexture(r->device, &texture);
+  SDL_GPUSamplerCreateInfo sampler = {.min_filter=SDL_GPU_FILTER_LINEAR,
+    .mag_filter=SDL_GPU_FILTER_LINEAR, .address_mode_u=SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+    .address_mode_v=SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE};
+  r->sampler = SDL_CreateGPUSampler(r->device, &sampler);
+  SDL_GPUTransferBufferCreateInfo atlas_upload = {.usage=SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+    .size=ATLAS_SIZE*ATLAS_SIZE*4};
+  r->atlas_upload = SDL_CreateGPUTransferBuffer(r->device, &atlas_upload);
+  r->atlas_pixels = calloc(ATLAS_SIZE*ATLAS_SIZE, 4);
+  if (!r->atlas || !r->sampler || !r->atlas_upload || !r->atlas_pixels) goto failed;
+  r->atlas_dirty = true;
   return r;
 failed: {
     char message[1024]; SDL_strlcpy(message, SDL_GetError(), sizeof(message));
     otui_gpu_free(r); SDL_SetError("%s", message); return NULL;
   }
 }
+float otui_gpu_scale(Renderer* r) { return r->width / r->logical_width; }
 const char* otui_gpu_driver(Renderer* r) { return SDL_GetGPUDeviceDriver(r->device); }
 static SDL_FColor rgba(Uint32 c) {
   return (SDL_FColor){(c >> 24)/255.0f, ((c >> 16)&255)/255.0f,
@@ -171,8 +203,67 @@ bool otui_gpu_rect(Renderer* r, float x, float y, float w, float h, float radius
     r->buffer = buffer; r->upload = upload; r->capacity = capacity;
   }
   SDL_FColor c = rgba(color);
-  r->rects[r->count++] = (Rect){{x,y,w,h},{c.r,c.g,c.b,c.a},{w,h,radius,0},{cx,cy,cx+cw,cy+ch}};
+  r->rects[r->count++] = (Rect){{x,y,w,h},{c.r,c.g,c.b,c.a},{w,h,radius,0},{cx,cy,cx+cw,cy+ch},{0,0,0,0}};
   return true;
+}
+static Glyph* glyph(Renderer* r, TTF_CopyOperation* op) {
+  for (int i = 0; i < r->glyph_count; ++i)
+    if (r->glyphs[i].font == op->glyph_font && r->glyphs[i].index == op->glyph_index)
+      return &r->glyphs[i];
+  SDL_Surface* image = TTF_GetGlyphImageForIndex(op->glyph_font, op->glyph_index, NULL);
+  if (!image) return NULL;
+  SDL_Surface* pixels = SDL_ConvertSurface(image, SDL_PIXELFORMAT_RGBA32);
+  SDL_DestroySurface(image);
+  if (!pixels) return NULL;
+  if (r->atlas_x + pixels->w + 2 > ATLAS_SIZE) {
+    r->atlas_y += r->atlas_row; r->atlas_x = 0; r->atlas_row = 0;
+  }
+  if (r->glyph_count == 8192 || pixels->w + 2 > ATLAS_SIZE ||
+      r->atlas_y + pixels->h + 2 > ATLAS_SIZE) {
+    SDL_DestroySurface(pixels); SDL_SetError("UI glyph atlas is full"); return NULL;
+  }
+  Glyph* g = &r->glyphs[r->glyph_count++];
+  *g = (Glyph){op->glyph_font, op->glyph_index, r->atlas_x+1, r->atlas_y+1};
+  for (int y = 0; y < pixels->h; ++y)
+    memcpy(r->atlas_pixels + ((g->y+y)*ATLAS_SIZE+g->x)*4,
+           (Uint8*)pixels->pixels + y*pixels->pitch, pixels->w*4);
+  r->atlas_x += pixels->w+2;
+  if (pixels->h+2 > r->atlas_row) r->atlas_row = pixels->h+2;
+  r->atlas_dirty = true;
+  SDL_DestroySurface(pixels);
+  return g;
+}
+bool otui_gpu_text(Renderer* r, const char* string, int face, float size, float width,
+                    float x, float y, Uint32 color, float cx, float cy, float cw, float ch) {
+  float scale = otui_gpu_scale(r);
+  TTF_Text* text = otui_text_get(string, face, size, width, scale);
+  x = roundf(x * scale) / scale; y = roundf(y * scale) / scale;
+  if (!text) return false;
+  Uint32 start = r->count;
+  for (int i = 0; i < text->internal->num_ops; ++i) {
+    TTF_DrawOperation* op = &text->internal->ops[i];
+    SDL_Rect dst;
+    Glyph* g = NULL;
+    if (op->cmd == TTF_DRAW_COMMAND_COPY) {
+      g = glyph(r, &op->copy);
+      if (!g) goto failed;
+      dst = op->copy.dst;
+    } else if (op->cmd == TTF_DRAW_COMMAND_FILL) dst = op->fill.rect;
+    else continue;
+    if (!otui_gpu_rect(r, x+dst.x/scale, y+dst.y/scale, dst.w/scale, dst.h/scale, 0, color, cx, cy, cw, ch)) goto failed;
+    if (g) {
+      Rect* rect = &r->rects[r->count-1];
+      rect->shape[3] = 1;
+      rect->uv[0] = (float)(g->x+op->copy.src.x)/ATLAS_SIZE;
+      rect->uv[1] = (float)(g->y+op->copy.src.y)/ATLAS_SIZE;
+      rect->uv[2] = (float)op->copy.src.w/ATLAS_SIZE;
+      rect->uv[3] = (float)op->copy.src.h/ATLAS_SIZE;
+    }
+  }
+  return true;
+failed:
+  r->count = start;
+  return false;
 }
 int otui_gpu_count(Renderer* r) { return (int)r->count; }
 bool otui_gpu_frame(Renderer* r, const char* capture) {
@@ -184,6 +275,18 @@ bool otui_gpu_frame(Renderer* r, const char* capture) {
   }
   SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(r->device);
   if (!cmd) return false;
+  if (r->atlas_dirty) {
+    void* data = SDL_MapGPUTransferBuffer(r->device, r->atlas_upload, true);
+    if (!data) { SDL_CancelGPUCommandBuffer(cmd); return false; }
+    memcpy(data, r->atlas_pixels, ATLAS_SIZE*ATLAS_SIZE*4);
+    SDL_UnmapGPUTransferBuffer(r->device, r->atlas_upload);
+    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
+    SDL_GPUTextureTransferInfo src = {.transfer_buffer=r->atlas_upload};
+    SDL_GPUTextureRegion dst = {.texture=r->atlas, .w=ATLAS_SIZE, .h=ATLAS_SIZE, .d=1};
+    SDL_UploadToGPUTexture(copy, &src, &dst, false);
+    SDL_EndGPUCopyPass(copy);
+    r->atlas_dirty = false;
+  }
   if (r->count) {
     SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
     SDL_GPUTransferBufferLocation src = {.transfer_buffer=r->upload};
@@ -195,6 +298,8 @@ bool otui_gpu_frame(Renderer* r, const char* capture) {
   SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &target, 1, NULL);
   if (r->count) {
     SDL_BindGPUGraphicsPipeline(pass, r->pipeline);
+    SDL_GPUTextureSamplerBinding atlas = {.texture=r->atlas, .sampler=r->sampler};
+    SDL_BindGPUFragmentSamplers(pass, 0, &atlas, 1);
     SDL_GPUBufferBinding binding = {.buffer=r->buffer};
     SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
     float viewport[4] = {r->logical_width, r->logical_height, 0, 0};

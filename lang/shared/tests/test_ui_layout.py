@@ -16,7 +16,7 @@ args = parser.parse_args()
 for runtime, stress in [(r, stress) for r in runtimes(args.runtime)
                         for stress in ((False, True) if r == 'c' else (False,))]:
     env = environment(runtime=runtime, stress=stress)
-    result = subprocess.run(runtime_command(runtime) + [ '--path', str(ROOT/'shared/lib'),
+    result = subprocess.run(runtime_command(runtime) + [ '--path', str(ROOT/'shared/lib'), '--path', str(ROOT/'examples'),
                              str(ROOT/'shared/tests/ui/layout.ot')],
                             env=env, cwd=ROOT, capture_output=True, text=True, timeout=90)
     assert result.returncode == 0, (runtime, stress, result.stdout, result.stderr)

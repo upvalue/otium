@@ -1,9 +1,8 @@
 # UI library
 
-Status: draft, October 17, 2026. Widget lifecycle, intrinsic-size Yoga layout,
-rounded rectangle rendering and pointer button activation run on C and Chez.
-Text, keyboard focus, constraint-dependent measurement and the general window
-reload service remain planned. See `docs/ui-development.md` for the implemented
+Status: draft, October 17, 2026. Widget lifecycle, constraint-aware Yoga layout,
+wrapped text, rounded rectangles and pointer button activation run on C and Chez.
+Keyboard focus and the general window/reload service remain planned. See `docs/ui-development.md` for the implemented
 subset and runnable demo. Replaces the September plan
 in `c/agent-docs/ui-plan.md`, which predates the FFI, the common reader and
 the class system. Decisions made so far are listed at the end.
@@ -282,12 +281,12 @@ SDL_ttf 3 does shaping (it bundles HarfBuzz), measuring, fallback fonts
 (`TTF_AddFallbackFont`) and turning glyphs into bitmaps (it bundles FreeType).
 It is the same family as the SDL3 dependency and builds for the web.
 
-Only those parts are used. SDL_ttf's own text engines draw for you, which would
-keep glyphs out of the renderer's batches. Instead, glyph bitmaps go into an
-atlas texture the renderer owns, and glyphs are one of its primitive types.
+Only those parts are used. A custom `TTF_TextEngine` reads SDL_ttf's shaped glyph
+operations without drawing through its built-in renderers. Glyph bitmaps go into
+an atlas texture the renderer owns, and glyphs are one of its primitive types.
 
 A default UI font and a monospace font are bundled, both under the SIL Open
-Font License (for example Inter and JetBrains Mono). Text looks the same on
+Font License (Noto Sans and JetBrains Mono in the current implementation). Text looks the same on
 every machine, pixel tests are deterministic, and the terminal doesn't depend
 on installed fonts.
 
@@ -312,9 +311,10 @@ Otium and reloads as usual.
 - Yoga is C++20. It's compiled only in `shared/`, which keeps the runtimes
   themselves C-only. The WASM build compiles it with emscripten.
 - Yoga asks leaf nodes for their size through a measure callback. FFI v1 has
-  no callbacks, so `shared/` provides one fixed-signature C function that
-  forwards to `ui/measure`. On C the node's context holds a handle to the
-  widget, not a raw pointer, since the collector moves objects.
+  no interpreter callbacks. The native callback records constraint queries;
+  Otium answers them through `ui/measure` between Yoga passes. Replay continues
+  until all requests have answers. Node contexts contain only native data,
+  so no managed pointers cross the bridge on either runtime.
 - The library keeps one Yoga node per matched widget, creating and freeing
   nodes as matching adds and removes widgets, and sets styles on the nodes it
   keeps.
@@ -397,9 +397,9 @@ the terminal well under a millisecond of Otium work; boids with 600 birds at
 
 All four use the class syntax from `specs/classes.md`. These are target API
 examples, not yet runnable applications. The implemented subset has widget
-construction, matching, state, rows and columns, intrinsic-size layout, rounded
-rectangles and pointer-driven buttons. Text, focus, the window service and the
-remaining drawing primitives below are still proposed. See
+construction, matching, state, rows and columns, constraint-aware layout, wrapped
+labels, rounded rectangles and pointer-driven buttons. Focus, the window service
+and the remaining drawing primitives below are still proposed. See
 `docs/ui-development.md` for runnable code.
 
 ### Boids

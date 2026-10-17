@@ -5,8 +5,14 @@ layout(location=2) in vec4 color;
 layout(location=3) in vec4 shape;
 layout(location=4) in vec4 clip;
 layout(location=0) out vec4 result;
+layout(location=5) in vec2 texcoord;
+layout(set=2,binding=0) uniform sampler2D atlas;
 void main() {
   if (any(lessThan(pixel, clip.xy)) || any(greaterThanEqual(pixel, clip.zw))) discard;
+  if (shape.w > 0.0) {
+    float a = color.a * texture(atlas, texcoord).a;
+    result = vec4(color.rgb * a, a); return;
+  }
   vec2 halfsize = shape.xy * 0.5;
   float radius = min(shape.z, min(halfsize.x, halfsize.y));
   vec2 q = abs(local - halfsize) - halfsize + radius;

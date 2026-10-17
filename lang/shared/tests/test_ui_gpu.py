@@ -38,6 +38,7 @@ def pixel(rows, x, y):
 artifacts = ROOT/'shared/build/ui-test-artifacts'
 artifacts.mkdir(parents=True, exist_ok=True)
 reference = None
+text_reference = None
 for runtime in runtimes(args.runtime):
     capture, state = artifacts/(runtime+'.bmp'), artifacts/(runtime+'.json')
     result = launch(runtime, '--frames', 3, '--capture', capture, '--dump-state', state)
@@ -49,7 +50,7 @@ for runtime in runtimes(args.runtime):
         continue
     passed(result)
     data = json.loads(state.read_text())
-    assert data['frames'] == 3 and data['primitives'] == 16, data
+    assert data['frames'] == 3 and data['primitives'] > 150, data
     assert data['remaining_resources'] == [0, 0, 0, 0], data
     width, height, rows = runner.bmp_pixels(capture)
     assert (width, height) == (640, 480)
@@ -77,6 +78,35 @@ for runtime in runtimes(args.runtime):
     assert pixel(rows, 20, 20) == (255, 0, 0), 'Rounded green corner should reveal red'
     assert any(0 < pixel(rows, x, y)[0] < 255 and 0 < pixel(rows, x, y)[1] < 255
                for y in range(20, 32) for x in range(20, 32)), 'Rounded edge should be antialiased'
+    text_capture = artifacts/(runtime+'-text.bmp')
+    passed(launch(runtime, '--scene', 'ui.text', '--width', 160, '--height', 120,
+                  '--frames', 3, '--capture', text_capture))
+    _, _, text_rows = runner.bmp_pixels(text_capture)
+    assert any(pixel(text_rows, x, y)[0] > 180
+               for y in range(10, 60) for x in range(10, 130)), 'Text is missing'
+    assert any(0 < pixel(text_rows, x, y)[0] < 180
+               for y in range(10, 60) for x in range(10, 130)), 'Glyphs lack grayscale AA'
+    assert all(pixel(text_rows, x, y) == (16, 24, 39)
+               for y in range(10, 90) for x in range(150, 160)), 'Text escaped its clip'
+    assert any(0 < pixel(text_rows, x, y)[0] <= 128 and pixel(text_rows, x, y)[1] == 0
+               for y in range(65, 88) for x in range(90, 140)), 'Text alpha/color missing'
+    if text_reference is not None:
+        assert text_rows == text_reference, 'C/Chez shaped glyph captures differ'
+    text_reference = text_rows
+    target = platform.machine() + '-' + platform.system().lower()
+    oracle = ROOT/'shared/build'/target/'ui/otium-ui-text-reference'
+    for density in (1, 2):
+        expected = artifacts/f'text-reference-{density}.bmp'
+        subprocess.run([str(oracle), str(density), str(expected)], check=True, cwd=ROOT)
+        actual = artifacts/f'{runtime}-text-{density}x.bmp'
+        passed(launch(runtime, '--scene', 'ui.text', '--width', 160, '--height', 120,
+                      '--scale', density, '--capture', actual))
+        expected_rows = runner.bmp_pixels(expected)[2]
+        actual_rows = runner.bmp_pixels(actual)[2]
+        # Exclude the colored overlay at the bottom of the probe.
+        for y in range(10*density, 60*density):
+            assert actual_rows[y][30*density:450*density] == expected_rows[y][30*density:450*density], (
+                runtime, density, y, 'Atlas text differs from SDL_ttf surface rendering')
     interaction = artifacts/(runtime+'-interaction.bmp')
     scripted = launch(runtime, '--scene', 'ui.interaction',
                       '--script', 'ui.interaction-script',

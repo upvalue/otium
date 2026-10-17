@@ -24,3 +24,13 @@ __pycache__/
 *.swp
 *.swo
 *~
+
+# ✨ Generated language site and local Python environment
+/site/dist/
+/site/.venv/
+/site/node_modules/
+/site/.astro/
+/site/.generated/
+/site/public/reference.md
+/site/public/assets/otium.mjs
+/site/public/assets/otium.wasm

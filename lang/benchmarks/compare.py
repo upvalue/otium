@@ -76,25 +76,19 @@ def program(name, engine):
     setup, expression, _ = WORKLOADS[name]
     if name == "startup":
         return "(println 0)\n"
+    clock = "(def (bench-clock) (current-jiffy))"
+    collections = """(def bench-table table)
+      (def bench-put! put!) (def bench-get get)"""
+    imports = "(require (callee :as c))"
+    callback = "(def callback (fn (x) (c/inc x)))"
     if engine == "c-runtime":
-        clock = "(def (bench-clock) (current-jiffy))"
-        collections = """(def bench-table table)
-          (def bench-put! put!) (def bench-get get)"""
-        imports = "(require (callee :as c))"
-        callback = "(def callback (fn (x) (c/inc x)))"
-        reload = "(def (bench-reload) (require (callee :as c :reload)))"
+        reload = "(def (bench-reload) (eval '(require (callee :as c :reload))))"
     else:
-        clock = """(require chez)
-          (def (bench-clock)
-          (let ((t (chez/current-time 'time-monotonic)))
-            (+ (* (chez/time-second t) 1000000000) (chez/time-nanosecond t))))"""
-        collections = """(def bench-table table)
-          (def bench-put! put!) (def bench-get get)"""
-        imports = "(require callee :as c)"
         callback = "(def callback (live 'c/inc))"
-        # Loader directives are not accepted in Chez function bodies.
-        reload = """(chez/import (only (otium runtime) evaluate))
-          (def (bench-reload) (evaluate '(require callee :as c :reload)))"""
+        # Chez loader directives must be evaluated at top level.
+        reload = """(require chez)
+          (chez/import (only (otium runtime) evaluate))
+          (def (bench-reload) (evaluate '(require (callee :as c :reload))))"""
     parts = [clock, setup]
     if name == "tables":
         parts.append(collections)
@@ -140,14 +134,14 @@ def main():
     if args.runs < 1 or args.warmups < 0 or args.timeout <= 0:
         parser.error("runs and timeout must be positive; warmups must be nonnegative")
     chez = shutil.which(args.chez)
-    if not chez or not args.otium.resolve().is_file():
+    if not chez or not args.otium.absolute().is_file():
         parser.error("both runtime executables must exist")
     version = subprocess.run([chez, "--version"], capture_output=True, text=True, check=True)
     report = {
         "date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "platform": platform.platform(), "machine": platform.machine(),
         "chez_version": (version.stdout + version.stderr).strip(),
-        "c_runtime": str(args.otium.resolve()), "build_label": args.build_label,
+        "c_runtime": str(args.otium.absolute()), "build_label": args.build_label,
         "runs": args.runs, "warmups": args.warmups,
         "method": "Fresh processes, alternating engine order; wall includes startup and compilation; work excludes setup, includes GC. No explicit collection. All results checked.",
         "benchmarks": {},
@@ -164,7 +158,7 @@ def main():
             for engine in samples:
                 path = directory / f"{name}-{engine}.scm"
                 path.write_text(program(name, engine))
-                commands[engine] = ([str(args.otium.resolve()), "--path", temp, str(path)]
+                commands[engine] = ([str(args.otium.absolute()), "--path", temp, str(path)]
                     if engine == "c-runtime" else
                     [chez, "--libdirs", str(CHEZ_ROOT), "--script",
                      str(CHEZ_ROOT / "main.ss"), "-L", temp, str(path)])

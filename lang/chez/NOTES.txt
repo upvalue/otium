@@ -1,266 +1,47 @@
 Otium on Chez
 
-Run from the repository root with Chez Scheme installed:
+Run a file with chez/run --no-project path/to/file.ot. For repository examples,
+use chez/run --path examples examples/reload.scm, or the launchers in examples/
+with --runtime chez. chez/test runs the native integration tests; make
+test-library runs common library, module, reload, OTCL, and example contracts
+against both runtimes.
 
-  chez/run --help
-  chez/run -L examples/chez
-  chez/test
+Otium source uses the common reader, expander, and derived prelude. See
+docs/portability.md for the common vocabulary, module forms, reload behavior,
+condition representations, and intentional numeric differences. GAPS.txt
+tracks what remains outside that contract.
 
-Set CHEZ to the Scheme executable if it is named scheme or chezscheme.
-The launcher finds its library relative to itself; -L paths are relative to
-your working directory. Dotted namespaces map to directories and .scm files.
+Native Chez bindings need (require chez), then the chez/ prefix. This is an
+explicit host boundary, not a security sandbox. chez/import can introduce
+native bindings into one namespace; implementation libraries choose their
+own imports. Otium keywords and nil inside native syntax need quotation,
+and Otium macros nested inside native syntax are not expanded.
 
-Live editing example
+Macros receive unevaluated datums and return one datum. They are unhygienic;
+use gensym for introduced bindings. Transformer helpers resolve in their
+defining namespace. Imported macros follow redefinition for subsequent
+expansions; already compiled callers retain their expansion. Each outer
+evaluation has a 10,000-invocation expansion budget, including nested loads
+and eval. eval runs in the namespace where its binding was installed, without
+capturing lexical variables. chez/load bypasses Otium processing.
 
-At the prompt:
+The loader keeps namespaces for the lifetime of the process. Reload does not
+restart frames, migrate state, watch files, or promise bounded memory
+retention. Namespace calls follow redefinition; saved procedures do not.
+(live 'binding) is a Chez convenience for a saved forwarding callback. A
+portable forwarding fn provides the same behavior.
 
-  (require demo.counter :as counter)
-  (def callback (live 'counter/tick!))
-  (callback)
+Conditions use Otium tables and arrays. Native exceptions are converted at
+the Otium boundary; diagnostic wording remains native. Native continuations
+restore dynamic restart bindings on reentry. Saved restart objects are
+rejected outside their active extent. Use chez/values for native multiple
+values; ordinary values enumerates a table.
 
-Edit the increment in examples/chez/demo/counter.scm, then evaluate:
+quit, exit, and keyboard interrupts unwind cleanup and bypass ordinary
+handlers/catches. Embedders receive an (otium conditions) control-condition;
+control-kind distinguishes exit and interrupt, and control-status carries
+the status. The runtime library does not terminate its embedding process.
 
-  (require demo.counter :as counter :reload)
-  (callback)
-
-The existing callback uses the new function. The vector holding the count
-survives because defonce skips initialization of an existing definition.
-For a scripted demonstration:
-
-  chez/run -L examples/chez examples/chez/demo.scm
-
-Forms and semantics
-
-(ns name) selects a persistent namespace. Each namespace has one mutable
-Chez environment initialized with the explicit exports of (otium core),
-plus Otium runtime forms and conditions. The binding list lives in
-chez/otium/core.sls; adding an API to Chez does not add an unqualified Otium
-binding. Otium core forms (fn, def, def-, let, while, defparam, with-params)
-are Chez syntax in that library; they follow the Otium language rules, while
-numbers, evaluation order, and native FFI use Chez semantics. Otium source uses (otium reader), with constructor
-sugar for growable arrays and insertion-ordered tables. Keywords are interned
-records; nil is Chez void. Otium branches and predicate operations treat both
-nil and #f as false. Native Chez code retains its reader and truth rules.
-Otium macros expand before Chez compiles each form. See
-../docs/reader-implementation.md for the source boundary and validation.
-Use vectors and hash tables directly. Square brackets delimit ordinary lists.
-
-The default core includes the Otium core forms, arithmetic, lists, strings,
-arrays, tables, and gensym, aiming to match names C also provides. Chez
-representations C lacks (vectors, hash tables, bytevectors, chars,
-continuations, multiple-value receivers) and Scheme syntax that is not Otium
-syntax (lambda, define, let*, letrec, do, case, case-lambda, let-values,
-parameterize, define-syntax, syntax-rules) are not in the core. The Scheme
-list and comparison helpers (memq, member, assq, list-ref, list-tail,
-fold-left, fold-right, exists, for-all, string=? and friends, gcd, lcm) are
-shared with C. eqv?, memv and assv are deliberately left out.
-
-Host procedures and syntax are available with the chez/ prefix after
-(require chez) in the namespace. The prefixed names are unbound until then,
-and (require chez) fails on C, which marks a file as Chez-specific:
-
-  (require chez)
-  (println "answer:" 42)
-  (chez/printf "answer: ~a\n" 42)
-  (chez/import (otium canvas))
-  (chez/load-shared-object #f)
-  (def c-strlen (chez/foreign-procedure "strlen" (string) size_t))
-
-Unqualified printf, import, load, foreign-procedure, environment, and other
-host APIs are no longer defaults. chez/import can explicitly introduce native
-bindings into the current namespace. The prefix makes host dependencies
-visible; it is not a security sandbox. Native library code still chooses its
-own imports independently.
-
-display and print accept any number of values, separated by spaces. println
-adds a newline; newline takes no arguments. All four write to the current
-output port and return #f. Values retain Chez display representations. Use
-chez/display or chez/newline for native optional-port arguments. For example,
-(display "a" "b") now writes "a b"; the second argument is not a port.
-
-(require name :as alias :refer (a b) :reload) loads a namespace if needed.
-All options are optional. Public value definitions get qualified aliases
-such as alias/a; the default alias is the full namespace name. :refer also
-creates unqualified aliases. Otium macro values can be imported the same way
-as other values. Imports read the source binding on every use,
-including in functions compiled before redefinition. set! through an import
-updates the source binding. Imports and local definitions cannot replace one
-another. def- definitions are private: require skips them for qualified
-aliases and rejects them in :refer. Native Chez syntax imports through
-require are not implemented.
-
-(defonce name expression) initializes a definition only once, even if its
-value is #f. A failed initializer can be retried. (live 'binding) makes a
-procedure that looks up the binding on each call in its defining namespace.
-Ordinary saved procedure values keep their old code. Running frames also
-keep their old code; reload does not restart computations.
-
-ns, require, defonce, and defmacro are accepted at top level and inside a
-top-level begin. An Otium macro can generate these directives and definitions.
-The loader processes begin children in order, so a generated require or
-defmacro is available before the next child expands. These directives cannot
-be used inside a function. Generated definitions participate in import
-collision checks and defonce tracking.
-
-Otium macros
-
-  (defmacro twice (expression)
-    (let ((temporary (gensym "twice")))
-      `(let ((,temporary ,expression)) (+ ,temporary ,temporary))))
-
-  (twice 21)
-
-defmacro receives unevaluated argument datums and returns one replacement
-datum. Its parameters use fn syntax, including a bare rest parameter, a
-dotted list, or (a & rest). A macro is a distinct value recognized by macro?; it cannot
-be applied as a procedure. Macro calls expand recursively before compilation.
-Function bodies and transformer bodies expand when their definitions are
-processed, so replacing a macro affects only subsequently expanded code.
-
-Macros are unhygienic. Emitted names resolve at the use site; gensym avoids
-accidental capture. A transformer's own helpers resolve in its defining
-namespace. Qualified and referred macro names follow reload for subsequent
-expansions. Already compiled callers retain their previous expansion.
-
-Expansion uses the shared expander in ../shared/prelude/expander.scm, the
-same one the C runtime uses; see docs/language.md section 6. It is read with
-the Otium reader and evaluated with the core forms, without expansion of its
-own. The runtime supplies its macro lookup, macro invocation (with the
-expansion budget below), and the native syntax test. let binds
-sequentially, macros may generate body definitions, and binding a core form
-name is an error.
-
-macroexpand-1 expands a head macro once. macroexpand repeats at the head
-without descending into subforms. Both can run transformer side effects;
-neither evaluates the returned definition or directive. Expansion is limited
-to 10,000 macro invocations per outer evaluation, including nested loads and
-eval calls. Diagnostics include recent macro names, the caller namespace,
-and the source path when loading a file.
-
-eval enters the Otium loader in the namespace where that eval binding was
-installed. It expands Otium macros and tracks generated definitions, without
-capturing local variables. chez/load still bypasses Otium processing. Use
-the REPL, script launcher, or load-source for Otium files.
-
-Native Chez syntax is available through chez/ names, for example
-chez/define-syntax with chez/syntax-rules. Syntax the core does not provide is
-passed intact to Chez; Otium macros nested inside it are not expanded, and
-keyword and nil literals inside it must be quoted. Keep native binding syntax
-contained within these native forms. Native macro output does not participate
-in Otium's definition tracking. A portable native-syntax boundary and
-cond-expand in MACRO-DESIGN.txt remain planned follow-up work.
-
-Conditions and restarts
-
-error, signal, handler-bind, try, restart-case, invoke-restart, and
-unwind-protect use Otium's condition protocol. Error takes a message and
-optional data, or one arbitrary condition value. Returning from a signal
-handler declines the condition; try catches only after unwinding. Handler
-initializers run left to right before any of the new bindings are installed.
-Restart clauses stay active while running and may invoke themselves or their
-siblings. Cleanup runs on normal return, errors, restart transfers, and exit.
-
-Condition tables are Chez hash tables with symbol keys :type, :message, and
-optional :data (a vector). condition-type, condition-message, error?, type-pred,
-define-condition, and condition-of-type? expose the common protocol. Native
-Chez exceptions become error conditions before Otium handlers run. Their
-message and irritants become :message and :data; diagnostic wording remains
-native. Explicitly raised non-string values retain their identity.
-
-The condition representation still uses native hash tables and vectors.
-Missing condition fields and an unhandled signal return #f; compute-restarts
-returns a vector. These native representation differences remain even though
-Otium now has distinct nil, table and array values. Condition accessors also
-accept Otium tables with keyword keys. Predicates returning nil decline both
-handlers and catch clauses. The shared condition tests retain native adapters.
-
-Otium macros expand inside handlers, catches, restart clauses, and cleanup.
-Multiple values are preserved. Chez continuation reentry restores dynamic
-restart bindings; saved restart objects are rejected outside their active
-extent. Native chez/guard can intercept exceptions before Otium handlers. Use try for the portable semantics. chez/error and
-chez/condition-message retain the original native procedures.
-
-quit and exit accept an optional exact integer status from 0 through 255.
-They escape handlers and catches, run cleanup, and terminate the CLI with that
-status. Keyboard interrupts also bypass handlers and catches and run cleanup;
-the REPL returns to its prompt. Cleanup may replace a pending exit with an
-error or another transfer. Embedders calling evaluate receive an
-(otium conditions) control-condition after unwinding; control-kind distinguishes
-exit from interrupt and control-status carries the status. The library does
-not terminate an embedding process itself.
-
-Reload behavior
-
-Reload reevaluates the file in the same namespace. It preserves definitions
-removed from the file. If a form fails, earlier effects remain and later
-forms do not run. Fix the file and reload it. Loads restore their caller's
-namespace and clear circular-load guards even after failure. A required
-file's ns declaration must match the namespace requested by require.
-
-Qualified aliases are installed for names present when require runs. Repeat
-require to see newly added definitions. Retargeting an alias does not rewrite
-already compiled functions; use a stable alias for a namespace. Each created
-namespace retains its Chez environment for the life of the process.
-
-This is a single-threaded development runtime. It has no atomic reload,
-dependency tracking, file watcher, state migration, or memory
-limits. Foreign libraries use chez/load-shared-object and chez/foreign-procedure
-directly. There is no Otium C embedding API. Tests include a Unix libc FFI
-check and repeated reloads, but do not establish a memory-retention bound.
-
-Benchmarks against the C runtime
-
-Build the desired C runtime first, then run:
-
-  python3 benchmarks/compare.py --otium ./otium
-
-The runner executes both implementations in fresh processes, checks every
-answer, alternates engine order, and reports medians from five runs after
-one warmup. --output saves raw samples and metadata as JSON. --only selects
-workloads; --runs, --warmups, --timeout, and --chez customize the run.
---build-label records the C compiler/collector configuration you used.
-
-Work time excludes process startup, loading, initial compilation, and output.
-It includes allocations and collections during the workload. Wall time includes
-the whole process, including the Chez Chez runtime's source compilation. Reload
-time includes reading and compiling a tiny namespace and reinstalling imports.
-Warmups use separate processes, so they warm filesystem caches, not a persistent
-application. These are desktop microbenchmarks, not memory or UI latency tests.
-
-The table workload uses Otium tables versus Chez eqv hash tables with integer
-keys. It measures insertion and lookup, without exercising insertion ordering.
-The live callback workload uses Otium's forwarding lambda versus the Chez runtime's
-live handle. Both follow function redefinition but have different dispatch paths.
-Other computational workloads share their source between implementations.
-
-SDL3 demos
-
-SDL now uses the shared portable FFI binding. Run make ffi and make sdl-setup,
-then python3 examples/shared/run-sdl.py --runtime chez --scene shapes from
-lang/. The same launcher supports --runtime c. The bespoke canvas library,
-chez-sdl3 dependency, and Chez-only SDL host have been removed. See
-../shared/sdl/USAGE.txt for the portable host and validation commands.
-
-REPL editing
-
-The terminal REPL shares Bestline with the C runtime. Ctrl-X Ctrl-E opens
-$VISUAL or $EDITOR and returns the edited input to the prompt. See
-docs/repl.md for shortcuts, history, and build details.
-
-Typed-map and multimethod experiment
-
-The worktree prototype adds loader declarations define-type, define-generic,
-define-method, reset-type!, and reset-generic!. Ordinary field and registry
-operations are in the built-in otium.generic namespace. For example:
-
-  (require otium.generic :as g)
-  (define-type Button)
-  (define-generic (label object))
-  (define-method (label (object Button)) (g/field-ref object 'label))
-  (label (g/make Button 'label "7"))
-
-See docs/multimethods.md for matching and reload semantics. Run chez/test for
-semantic checks, examples/chez/multimethods/events.scm for a headless example,
-and benchmarks/chez/run-multimethods for the scan-versus-cond benchmark.
-The native namespace preserves descriptors on require :reload; it has no
-filesystem source to reevaluate.
+The FFI and SDL bindings are shared. Run make test-ffi or make test-sdl for
+their acceptance suites. REPL editing and history use the common Bestline
+adapter; docs/repl.md describes the interface.

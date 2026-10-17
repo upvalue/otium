@@ -25,14 +25,13 @@
     (fn (name)
       (let ((value (eval name)))
         (unless (or (procedure? value) (macro? value)) (set! ok #f))))
-    '(defn caar cadr cddr list-to-array array-to-list current-ns describe))
+    '(dotimes caar cadr cddr list-to-array array-to-list current-ns describe))
   (println "documented-core-inventory:" ok))
 
-(defn documented-add
-  (a b)
+(def (documented-add a b)
   "add two values"
   (+ a b))
-(println "defn:" (documented-add 20 22))
+(println "def:" (documented-add 20 22))
 (println "pair-compositions:"
   (caar '((1 2) 3)) (cadr '(1 2 3)) (cddr '(1 2 3)))
 (println "list-to-array:" (list-to-array '(1 2 3)))

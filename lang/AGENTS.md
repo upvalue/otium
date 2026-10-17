@@ -27,9 +27,11 @@ setup, current coverage, and escape hatches.
 `c/` owns the C runtime, build, tests, and implementation notes.
 `chez/` owns Otium on Chez Scheme, including its FFI adapter and tests.
 `shared/` owns runtime-independent native components and their dependencies.
-`examples/c/` and `examples/chez/` hold examples for each dialect.
-`benchmarks/` owns workloads, runners, and results; `benchmarks/c/` targets C,
-and `benchmarks/r7rs/` holds C-dialect ports plus the upstream Scheme suite.
+`examples/` holds runnable examples for both runtimes, organized by subject.
+Native extension fixtures stay with their runtime tests.
+`benchmarks/` owns workloads, runners, and results; `benchmarks/workloads/`
+runs on both runtimes, and `benchmarks/r7rs/` holds Otium ports plus the upstream
+Scheme suite. Runtime-specific diagnostics live beside their benchmark family.
 The native collector harness stays in `c/benchmarks/`. Track non-FFI
 portability blockers in `GAPS.txt`; runtime-specific placement is not a goal.
 `docs/` holds language-level documentation. Chez uses Chez values and semantics

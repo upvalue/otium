@@ -1,3 +1,5 @@
+(require (otium.extra :refer (-> ->> partial comp group-by frequencies)))
+
 ; Macros: prelude macros, defmacro + gensym + quasiquote, expansion
 ; order (defined mid-file, usable after), macroexpand-1.
 

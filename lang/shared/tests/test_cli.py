@@ -59,7 +59,7 @@ for cmd in COMMANDS:
         child.mkdir()
         assert run(cmd, script, cwd=child).stdout == '42\n'
         assert run(cmd, '--project', tmp / 'project.ot', script, cwd='/tmp').stdout == '42\n'
-    example = ROOT / 'examples/shared/greet.scm'
+    example = ROOT / 'examples/greet.scm'
     assert run(cmd, '--no-project', example, '--', '-n2', 'Alice').stdout == 'Hello, Alice!\n' * 2
     help_result = run(cmd, '--no-project', example, '--', '--help')
     assert 'Number of greetings' in help_result.stdout and 'default: 1' in help_result.stdout
@@ -70,7 +70,7 @@ for cmd in COMMANDS:
 
 # Inactive backend settings are accepted, validated, and silent.
 result = run(COMMANDS[1], '--c.gc-stats', '--c.gc-force-compact', '--c.heap-max=1024',
-             '--no-project', ROOT / 'examples/shared/greet.scm', '--', 'Alice')
+             '--no-project', ROOT / 'examples/greet.scm', '--', 'Alice')
 assert result.stdout == 'Hello, Alice!\n' and result.stderr == '', result
 # Check moving-GC roots used to install process arguments and parse a schema.
 env = dict(os.environ, OTIUM_GC_STRESS='1')

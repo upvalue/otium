@@ -1,20 +1,8 @@
-;; Source reading uses ordinary libc calls. No native helper or SDL wrapper is
-;; needed; host-read is the only reader adapter.
+;; Status publishing uses libc; source reads use the common file API.
 (def host-libc (ffi/open-library host-libc-names))
 (def host-fopen (ffi/bind host-libc "fopen" '(utf8 utf8) 'pointer))
-(def host-fread (ffi/bind host-libc "fread" '(pointer size-t size-t pointer) 'size-t))
 (def host-fclose (ffi/bind host-libc "fclose" '(pointer) 'int))
-(def (source-text path)
-  (let ((file (host-fopen path "rb")))
-    (if (ffi/null? file) (error "Cannot open scene" path) #f)
-    (unwind-protect
-      (let ((bytes (ffi/alloc 'u8 1048577)))
-        (unwind-protect
-          (let ((count (host-fread bytes 1 1048576 file)))
-            (if (= count 1048576) (error "Scene exceeds 1 MiB") #f)
-            (ffi/read-utf8 bytes (+ count 1)))
-          (ffi/free! bytes)))
-      (host-fclose file))))
+(def source-text read-file)
 (def scene-observed #f)
 (def scene-reloads 0)
 (def scene-reload-errors 0)

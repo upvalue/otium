@@ -1,7 +1,8 @@
 (library (otium values)
   (export keyword keyword? keyword->string nil? array array? table table?
+          collection-call buffer buffer? buffer-push! buffer->string str
           get put! push! pop! keys table-values copy collection-length collection-reverse
-          collection-for-each collection-map collection-apply take drop update!
+          collection-for-each collection-apply update!
           otium-write otium-display type frozen-set-car! frozen-set-cdr!)
   (import (chezscheme))
 
@@ -39,6 +40,41 @@
           (let ([x (vector-ref (array-value-storage a) (- n 1))])
             (vector-set! (array-value-storage a) (- n 1) (void))
             (array-value-size-set! a (- n 1)) x))))
+
+  (define-record-type (buffer-value make-buffer buffer?)
+    (fields port (mutable size) (mutable snapshot)))
+  (define (buffer . seed)
+    (unless (<= (length seed) 1) (error 'buffer "expected optional seed"))
+    (let ([b (make-buffer (open-output-string) 0 "")])
+      (apply buffer-push! b seed) b))
+  (define (str . xs)
+    (let ([port (open-output-string)])
+      (for-each (lambda (x) (otium-display x port)) xs)
+      (get-output-string port)))
+  (define (buffer-push! b . xs)
+    (unless (buffer? b) (error 'buffer-push! "expected buffer"))
+    (for-each (lambda (x)
+                (let ([s (str x)])
+                  (display s (buffer-value-port b))
+                  (buffer-value-size-set! b (+ (buffer-value-size b) (string-length s))))) xs)
+    b)
+  (define (buffer->string b)
+    (unless (buffer? b) (error 'buffer->string "expected buffer"))
+    (let ([s (string-append (buffer-value-snapshot b) (get-output-string (buffer-value-port b)))])
+      (buffer-value-snapshot-set! b s) s))
+  (define (collection-call f . args)
+    (cond [(procedure? f) (apply f args)]
+          [(or (table? f) (array? f))
+           (unless (<= 1 (length args) 2) (error 'call "expected key and optional default"))
+           (when (and (array? f) (not (and (integer? (car args)) (exact? (car args)))))
+             (error 'call "expected integer index"))
+           (apply get f args)]
+          [(keyword? f)
+           (unless (<= 1 (length args) 2)
+             (error 'call "expected table or nil and optional default"))
+           (if (table? (car args)) (apply get (car args) f (cdr args))
+               (if (null? (cdr args)) (void) (cadr args)))]
+          [else (error 'call "expected callable value" f)]))
 
   (define frozen (make-weak-eq-hashtable))
   (define (key=? a b)
@@ -104,6 +140,7 @@
   (define (collection-length x)
     (cond [(nil? x) 0] [(array? x) (array-value-size x)]
           [(table? x) (hashtable-size (table-value-data x))]
+          [(buffer? x) (buffer-value-size x)]
           [(string? x) (string-length x)] [else (length x)]))
   (define (copy x)
     (cond [(nil? x) x] [(array? x) (apply array (array-list x))]
@@ -115,25 +152,12 @@
   (define (collection-for-each f x . xs)
     (if (and (array? x) (null? xs))
         (let ([n (array-value-size x)])
-          (do ([i 0 (+ i 1)]) ((= i n)) (f (get x i))))
-        (apply for-each f (map sequence-list (cons x xs)))))
-  (define (collection-map f x . xs)
-    (let ([out (apply map f (map sequence-list (cons x xs)))])
-      (if (array? x) (apply array out) out)))
+          (do ([i 0 (+ i 1)]) ((= i n)) (collection-call f (get x i))))
+        (apply for-each (lambda args (apply collection-call f args)) (map sequence-list (cons x xs)))))
   (define (collection-apply f . args)
     (when (null? args) (error 'apply "expected argument sequence"))
     (let ([rev (reverse args)])
-      (apply apply f (reverse (cons (sequence-list (car rev)) (cdr rev))))))
-  (define (take n x)
-    (unless (and (integer? n) (exact? n)) (error 'take "expected integer count" n))
-    (let loop ([n n] [xs (sequence-list x)] [out '()])
-      (if (or (<= n 0) (null? xs)) (if (array? x) (apply array (reverse out)) (reverse out))
-          (loop (- n 1) (cdr xs) (cons (car xs) out)))))
-  (define (drop n x)
-    (unless (and (integer? n) (exact? n)) (error 'drop "expected integer count" n))
-    (let loop ([n n] [xs (sequence-list x)])
-      (if (or (<= n 0) (null? xs)) (if (array? x) (apply array xs) xs)
-          (loop (- n 1) (cdr xs)))))
+      (apply apply collection-call f (reverse (cons (sequence-list (car rev)) (cdr rev))))))
   (define (update! x key f . args) (put! x key (apply f (get x key) args)))
   (define (reaches? target value)
     (let ([seen (make-eq-hashtable)])
@@ -152,7 +176,7 @@
   (define (frozen-set-car! x v) (mutate-pair! set-car! x v))
   (define (frozen-set-cdr! x v) (mutate-pair! set-cdr! x v))
   (define (type x)
-    (keyword (cond [(nil? x) "nil"] [(keyword? x) "keyword"] [(array? x) "array"] [(table? x) "table"]
+    (keyword (cond [(buffer? x) "buffer"] [(nil? x) "nil"] [(keyword? x) "keyword"] [(array? x) "array"] [(table? x) "table"]
           [(null? x) "null"] [(pair? x) "pair"] [(boolean? x) "boolean"] [(symbol? x) "symbol"]
           [(string? x) "string"] [(and (integer? x) (exact? x)) "int"]
           [(number? x) "float"] [(procedure? x) "function"] [else "native"])))
@@ -162,6 +186,9 @@
         (render (car xs) port #f (+ depth 1))
         (unless (null? (cdr xs)) (display " " port) (items (cdr xs)))))
     (cond [(> depth 100) (display "..." port)]
+          [(buffer? x)
+           (if display? (display (buffer->string x) port)
+               (begin (display "#<buffer " port) (write (buffer->string x) port) (display ">" port)))]
           [(nil? x) (display "nil" port)]
           [(keyword? x) (display ":" port) (display (keyword->string x) port)]
           [(array? x) (display "[" port) (items (array-list x)) (display "]" port)]

@@ -1,3 +1,5 @@
+(require (otium.extra :refer (-> ->> partial comp group-by frequencies)))
+
 ; Core library (spec section 10): kind preservation, copy vs mutate,
 ; string ops, higher-order helpers.
 

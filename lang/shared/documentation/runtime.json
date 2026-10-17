@@ -81,7 +81,8 @@
   "apply": {
     "text": "(apply procedure argument ... sequence)\nCall procedure with the leading arguments followed by the elements of a proper list or array; nil contributes no arguments.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "array": {
@@ -126,25 +127,29 @@
   "buffer": {
     "text": "(buffer [value])\nCreate a mutable string builder, optionally initialized from the value's display representation.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "buffer->string": {
     "text": "(buffer->string buffer)\nReturn a string snapshot; the buffer remains available for further appends.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "buffer-push!": {
     "text": "(buffer-push! buffer value ...)\nAppend display representations to the buffer and return it.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "buffer?": {
     "text": "(buffer? value)\nReturn #t when value is a mutable string buffer, otherwise #f.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "car": {
@@ -170,8 +175,7 @@
     "runtimes": [
       "c",
       "chez"
-    ],
-    "chez": "(compute-restarts)\nReturn a vector of active restarts, innermost first and last clause first within a restart-case."
+    ]
   },
   "cond": {
     "text": "(cond (test expression ...) ... (else expression ...))\nEvaluate the first matching clause. else is the final fallback clause.",
@@ -208,7 +212,8 @@
   "current-jiffy": {
     "text": "(current-jiffy)\nReturn a monotonic nanosecond counter with an unspecified epoch; subtract readings to measure elapsed time.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "current-ns": {
@@ -220,13 +225,15 @@
   "current-second": {
     "text": "(current-second)\nReturn wall-clock seconds since the Unix epoch as a float.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "dec": {
     "text": "(dec number)\nSubtract one.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "def": {
@@ -255,8 +262,7 @@
     "runtimes": [
       "c",
       "chez"
-    ],
-    "chez": "(define-condition name parent)\nRegister a condition type and parent; use #f for no parent. Cycles are rejected before changing the hierarchy."
+    ]
   },
   "defmacro": {
     "text": "(defmacro name parameters [\"docstring\"] body ...)\nDefine an unhygienic Otium macro. It receives unevaluated argument datums and returns replacement code; use gensym for fresh names.",
@@ -285,8 +291,7 @@
     "runtimes": [
       "c",
       "chez"
-    ],
-    "chez": "(display value ...)\nWrite display representations to the current output port, separated by spaces, without a newline. Return #f. Values use Chez display representations."
+    ]
   },
   "eq?": {
     "text": "(eq? a b)\nCompare immediate values by value and heap objects by identity. Use equal? for structural comparison.",
@@ -305,8 +310,7 @@
     "runtimes": [
       "c",
       "chez"
-    ],
-    "chez": "(error condition-or-message argument ...)\nRaise an Otium condition. A string creates a hash table with :type error, :message, and optional :data vector. A non-string is raised unchanged and accepts no extra arguments. Use chez/error for the native who/message interface."
+    ]
   },
   "eval": {
     "text": "(eval form)\nMacroexpand and evaluate a datum in the current namespace, without the caller's lexical bindings.",
@@ -374,7 +378,8 @@
   "false?": {
     "text": "(false? value)\nReturn #t when value is exactly #f, otherwise #f.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "find-restart": {
@@ -382,8 +387,7 @@
     "runtimes": [
       "c",
       "chez"
-    ],
-    "chez": "(find-restart name-or-restart)\nReturn the matching active restart, or #f. Accept a symbol, keyword spelling, string, or restart object."
+    ]
   },
   "finite?": {
     "text": "(finite? number)\nReturn #t when the argument is finite, otherwise #f.",
@@ -394,7 +398,8 @@
   "float?": {
     "text": "(float? value)\nReturn #t when value is a floating-point representation, otherwise #f.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "floor": {
@@ -413,7 +418,8 @@
   "for-each": {
     "text": "(for-each procedure sequence)\nCall procedure on each element for side effects, then return nil. Traverses a snapshot; accepts a proper list, array, or nil.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "foreign?": {
@@ -445,7 +451,8 @@
   "identity": {
     "text": "(identity value)\nReturn value unchanged.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "if": {
@@ -458,7 +465,8 @@
   "inc": {
     "text": "(inc number)\nAdd one.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "inexact": {
@@ -482,7 +490,8 @@
   "int?": {
     "text": "(int? value)\nReturn #t when value is an integer representation, otherwise #f.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "integer?": {
@@ -501,7 +510,8 @@
   "jiffies-per-second": {
     "text": "(jiffies-per-second)\nReturn 1000000000, the number of clock jiffies per second.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "keys": {
@@ -530,8 +540,7 @@
     "runtimes": [
       "c",
       "chez"
-    ],
-    "chez": "(length collection)\\nCount list/array elements, table entries, or string Unicode code points. nil has length zero. Improper lists and unsupported types raise an error."
+    ]
   },
   "let": {
     "text": "(let ((name expression) ...) body ...) / (let loop ((name expression) ...) body ...)\nBind names sequentially: later initializers see earlier bindings. Named let creates a recursive loop.",
@@ -603,7 +612,8 @@
   "name": {
     "text": "(name value)\nReturn the name of a symbol or keyword as a string; a string is returned unchanged.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "nan?": {
@@ -615,7 +625,8 @@
   "neg?": {
     "text": "(neg? number)\nReturn #t when the argument is negative, otherwise #f.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "newline": {
@@ -623,8 +634,7 @@
     "runtimes": [
       "c",
       "chez"
-    ],
-    "chez": "(newline)\nWrite a newline to the current output port and return #f."
+    ]
   },
   "nil?": {
     "text": "(nil? value)\nReturn #t when value is nil, otherwise #f.",
@@ -641,12 +651,11 @@
     ]
   },
   "ns": {
-    "text": "(ns name [(:require specification ...) ...])\nSelect or create the named namespace, optionally requiring modules. The name is not evaluated.",
+    "text": "(ns name [:require clauses])\nSelect a namespace. Optional (:require ...) clauses import modules; a loaded module must declare its requested name.",
     "runtimes": [
       "c",
       "chez"
-    ],
-    "chez": "(ns name)\nSelect a namespace."
+    ]
   },
   "null?": {
     "text": "(null? value)\nReturn #t when value is the empty list (), otherwise #f.",
@@ -695,7 +704,8 @@
   "pos?": {
     "text": "(pos? number)\nReturn #t when the argument is positive, otherwise #f.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "print": {
@@ -703,16 +713,14 @@
     "runtimes": [
       "c",
       "chez"
-    ],
-    "chez": "(print value ...)\nWrite display representations to the current output port, separated by spaces, without a newline. Return #f. Values use Chez display representations."
+    ]
   },
   "println": {
     "text": "(println value ...)\nWrite display representations to the host output sink, separated by spaces, followed by a newline. Return nil.",
     "runtimes": [
       "c",
       "chez"
-    ],
-    "chez": "(println value ...)\nWrite display representations to the current output port, separated by spaces, followed by a newline. Return #f. Values use Chez display representations."
+    ]
   },
   "procedure?": {
     "text": "(procedure? value)\nReturn #t when value is a function or native procedure, otherwise #f.",
@@ -773,12 +781,11 @@
     ]
   },
   "require": {
-    "text": "(require '(name :as alias :refer (names) :reload))\nLoad a module, optionally giving an alias, referring names, or reloading it. Imported vars remain live across redefinition.",
+    "text": "(require module [:as alias] [:refer (names)] [:reload])\nLoad a namespace. Grouped and quoted specs are also accepted. Search each path directory for .ot then .scm. Reload reevaluates the namespace, preserving defonce values and effects before an error.",
     "runtimes": [
       "c",
       "chez"
-    ],
-    "chez": "(require name :as alias :refer (names) :reload)\nLoad a namespace and optionally import its definitions."
+    ]
   },
   "restart-case": {
     "text": "(restart-case expression (name [\"description\"] parameters body ...) ...)\nMake named recovery clauses available during expression and clause evaluation. invoke-restart unwinds to the selected clause; a clause may invoke itself or a sibling restart.",
@@ -792,8 +799,7 @@
     "runtimes": [
       "c",
       "chez"
-    ],
-    "chez": "(restart-description restart)\nReturn the description string, or #f when absent."
+    ]
   },
   "restart-name": {
     "text": "(restart-name restart)\nReturn a restart's name as a symbol.",
@@ -805,7 +811,8 @@
   "reverse": {
     "text": "(reverse sequence)\nReverse a list or array, preserving its kind. nil is treated as an empty list.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "round": {
@@ -854,14 +861,17 @@
   "str": {
     "text": "(str value ...)\nConcatenate display representations into a string, with no separators. No arguments gives an empty string.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "string->number": {
     "text": "(string->number string)\nParse an integer or float, allowing surrounding whitespace. Invalid numeric text returns nil.",
     "runtimes": [
-      "c"
-    ]
+      "c",
+      "chez"
+    ],
+    "chez": "(string->number string)\nParse a number, returning nil on failure. Chez retains its native numeric tower."
   },
   "string->symbol": {
     "text": "(string->symbol name)\nIntern a symbol from a string, symbol, or keyword name.",
@@ -878,7 +888,8 @@
   "string-contains?": {
     "text": "(string-contains? string text)\nReturn #t if string contains the literal text, otherwise #f.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "string-downcase": {
@@ -890,43 +901,50 @@
   "string-ends-with?": {
     "text": "(string-ends-with? string text)\nReturn #t if string ends with the literal text, otherwise #f.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "string-join": {
     "text": "(string-join separator sequence)\nJoin the display representations of sequence elements with separator.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "string-length": {
     "text": "(string-length string)\nCount Unicode code points, not encoded bytes.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "string-replace": {
     "text": "(string-replace string from to)\nReplace every literal occurrence of from with to.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "string-split": {
     "text": "(string-split string [separator])\nSplit into an array on a literal nonempty separator, or on runs of whitespace when omitted.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "string-starts-with?": {
     "text": "(string-starts-with? string text)\nReturn #t if string starts with the literal text, otherwise #f.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "string-trim": {
     "text": "(string-trim string)\nRemove surrounding ASCII whitespace.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "string-upcase": {
@@ -950,13 +968,15 @@
   "substring": {
     "text": "(substring string start [end])\nCopy code points from start (inclusive) to end (exclusive, default length). Indices clamp to the string bounds; end below start gives an empty string.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "symbol": {
     "text": "(symbol name)\nIntern a symbol from a string, symbol, or keyword name.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "symbol->string": {
@@ -994,7 +1014,8 @@
   "true?": {
     "text": "(true? value)\nReturn #t when value is exactly #t, otherwise #f.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "truncate": {
@@ -1048,8 +1069,7 @@
     "runtimes": [
       "c",
       "chez"
-    ],
-    "chez": "(values value ...)\\nOne Otium table or nil returns an array of table values. Other calls retain Chez multiple values; use chez/values explicitly at the native boundary."
+    ]
   },
   "while": {
     "text": "(while test body ...)\nRepeat body while test is truthy, then return nil.",
@@ -1068,7 +1088,8 @@
   "write": {
     "text": "(write value ...)\nWrite readable representations to the host output sink, separated by spaces, without a newline. Return nil.",
     "runtimes": [
-      "c"
+      "c",
+      "chez"
     ]
   },
   "zero?": {
@@ -1087,30 +1108,6 @@
     "text": "(defonce name [\"docstring\"] expression)\nInitialize a binding once, preserving its value and documentation on reload.",
     "runtimes": [
       "c",
-      "chez"
-    ]
-  },
-  "condition-type": {
-    "text": "(condition-type condition)\nReturn the condition table's :type, or nil (Chez: #f).",
-    "runtimes": [
-      "chez"
-    ]
-  },
-  "condition-message": {
-    "text": "(condition-message condition)\nReturn the condition table's :message, or nil (Chez: #f).",
-    "runtimes": [
-      "chez"
-    ]
-  },
-  "error?": {
-    "text": "(error? value)\nTest whether value is a condition table with a :type entry.",
-    "runtimes": [
-      "chez"
-    ]
-  },
-  "type-pred": {
-    "text": "(type-pred type)\nBuild a predicate for conditions of the named type or its registered subtypes.",
-    "runtimes": [
       "chez"
     ]
   },
@@ -1155,33 +1152,16 @@
       "chez"
     ]
   },
-  "filter": {
-    "text": "Retain elements whose predicate result is neither nil nor #f. Preserve list/array kind.",
+  "expander-application": {
+    "text": "(expander-application form)\nInternal compiler hook for runtime application lowering.",
     "runtimes": [
-      "chez"
+      "c"
     ]
   },
-  "exists": {
-    "text": "Return the first truthy predicate result, or #f. nil predicate results are false.",
+  "read-file": {
+    "text": "(read-file path)\nRead a whole UTF-8 text file into a string; raise an error if it cannot be read.",
     "runtimes": [
-      "chez"
-    ]
-  },
-  "for-all": {
-    "text": "Stop at the first nil or #f predicate result; otherwise return the final result. Empty lists return #t.",
-    "runtimes": [
-      "chez"
-    ]
-  },
-  "take": {
-    "text": "Return the first count elements, clamping to the list/array length.",
-    "runtimes": [
-      "chez"
-    ]
-  },
-  "drop": {
-    "text": "Return the elements after count, clamping to the list/array length.",
-    "runtimes": [
+      "c",
       "chez"
     ]
   },

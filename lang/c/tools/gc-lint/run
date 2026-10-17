@@ -58,7 +58,7 @@ python3 "$script_dir/tests/test_lint.py" "$tool" \
   "$script_dir/tests/stale-borrow.c" "$script_dir/tests/write-barrier.c"
 
 make -C "$repo_dir" BUILD="$runtime_build" \
-  "$runtime_build/gen/expander.h" "$runtime_build/gen/prelude.h" "$runtime_build/gen/ot-ffi-source.h" "$runtime_build/gen/ot-cli-source.h"
+  "$runtime_build/gen/expander.h" "$runtime_build/gen/prelude.h" "$runtime_build/gen/extra.h" "$runtime_build/gen/ot-ffi-source.h" "$runtime_build/gen/ot-cli-source.h"
 
 compile_args=(
   -std=c23 \

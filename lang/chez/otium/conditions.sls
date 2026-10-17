@@ -22,9 +22,7 @@
 
   (define (field c key)
     (let ([keyword (val:keyword (substring (symbol->string key) 1 (string-length (symbol->string key))))])
-      (cond [(val:table? c) (val:get c keyword #f)]
-            [(hashtable? c) (hashtable-ref c key (hashtable-ref c keyword #f))]
-            [else #f])))
+      (if (val:table? c) (val:get c keyword) (void))))
   (define (condition-type c) (field c ':type))
   (define (condition-message c) (field c ':message))
   (define (name-symbol value who)
@@ -38,7 +36,7 @@
       [else (error (string-append who ": expected symbol, keyword, or string"))]))
   (define (define-condition type parent)
     (let ([type (name-symbol type "define-condition")]
-          [parent (and parent (name-symbol parent "define-condition"))])
+          [parent (and parent (not (val:nil? parent)) (name-symbol parent "define-condition"))])
       (let loop ([ancestor parent])
         (when ancestor
           (when (eq? ancestor type) (error "define-condition: cyclic hierarchy"))
@@ -52,19 +50,14 @@
              (or (eq? actual type) (loop (hashtable-ref parents actual #f)))))))
   (define (type-pred type) (lambda (c) (condition-of-type? c type)))
   (define (error? c)
-    (cond [(val:table? c) (not (val:nil? (val:get c (val:keyword "type"))))]
-          [(hashtable? c) (or (hashtable-contains? c ':type)
-                             (hashtable-contains? c (val:keyword "type")))]
-          [else #f]))
+    (and (val:table? c) (not (val:nil? (val:get c (val:keyword "type"))))))
 
   (define (build-condition args)
     (when (null? args) (error "error: expected a condition or message"))
     (let ([value (car args)] [args (cdr args)])
       (if (string? value)
-          (let ([c (make-eq-hashtable)])
-            (hashtable-set! c ':type 'error)
-            (hashtable-set! c ':message value)
-            (unless (null? args) (hashtable-set! c ':data (list->vector args)))
+          (let ([c (val:table (val:keyword "type") 'error (val:keyword "message") value)])
+            (unless (null? args) (val:put! c (val:keyword "data") (apply val:array args)))
             c)
           (if (null? args) value
               (error "error: extra arguments require a string message")))))
@@ -83,8 +76,8 @@
           (let ([message (condition-message c)])
             (if (string? message) message (format "~s" c))))
         (make-irritants-condition
-          (let ([data (field c ':data)]) (if (vector? data) (vector->list data) '()))))))
-  (define (signal . args) (dispatch (build-condition args)) #f)
+          (let ([data (field c ':data)]) (if (val:array? data) (val:collection-apply list data) '()))))))
+  (define (signal . args) (dispatch (build-condition args)) (void))
   (define (error . args)
     (let ([c (build-condition args)]) (dispatch c) (propagate c)))
 
@@ -175,17 +168,17 @@
              (clauses ... (lambda params body ...)) more ...)]
         [(_ expr (names ...) (descriptions ...) (clauses ...)
             (name params body ...) more ...)
-         #'(restart-collect expr (names ... name) (descriptions ... #f)
+         #'(restart-collect expr (names ... name) (descriptions ... (void))
              (clauses ... (lambda params body ...)) more ...)])))
-  (define (compute-restarts) (list->vector (restarts)))
+  (define (compute-restarts) (apply val:array (restarts)))
   (define (find-restart name)
     (if (restart? name)
-        (and (memq name (restarts)) name)
+        (if (memq name (restarts)) name (void))
         (let ([name (name-symbol name "find-restart")])
-          (find (lambda (r) (eq? name (restart-name r))) (restarts)))))
+          (or (find (lambda (r) (eq? name (restart-name r))) (restarts)) (void)))))
   (define (invoke-restart name . args)
     (let ([r (find-restart name)])
-      (if r (apply (restart-transfer r) args) (error "invoke-restart: no active restart"))))
+      (if (not (val:nil? r)) (apply (restart-transfer r) args) (error "invoke-restart: no active restart"))))
   (define-syntax unwind-protect
     (syntax-rules ()
       [(_ expr cleanup ...)

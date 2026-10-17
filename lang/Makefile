@@ -6,7 +6,7 @@
 all lib bench bench-gc format hygiene gc-lint:
 	$(MAKE) -C c $@
 
-test: test-c test-chez test-expander test-cli test-reader
+test: test-c test-chez test-expander test-cli test-reader test-library
 	$(MAKE) test-repl
 
 test-c:
@@ -58,3 +58,16 @@ test-cli: all
 test-reader: all
 	python3 shared/tests/test_reader.py
 	python3 shared/tests/test_reader.py --stress
+
+# ✨ Markdown documentation and the browser C runtime.
+.PHONY: site test-site
+site:
+	npm --prefix site run build
+
+test-site: site
+	node site/tests/runtime.mjs
+	$(or $(PYTHON),python3) site/tests/check_site.py
+
+.PHONY: test-library
+test-library: all
+	python3 shared/tests/test_library.py

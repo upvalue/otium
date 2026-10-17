@@ -33,7 +33,7 @@ def execute(runtime, path, status, output):
 with tempfile.TemporaryDirectory(prefix="otium-condition-tests-") as directory:
     directory = Path(directory)
     for runtime in runtimes:
-        bootstrap = (FIXTURES / f"{runtime}.scm").read_text()
+        bootstrap = (FIXTURES / "support.scm").read_text()
         path = directory / f"{runtime}.scm"
         path.write_text(bootstrap + "\n" + (FIXTURES / "common.scm").read_text())
         execute(runtime, path, 0, "condition checks: 64\n")

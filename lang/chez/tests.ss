@@ -1,4 +1,4 @@
-(import (chezscheme) (otium runtime))
+(import (chezscheme) (prefix (chezscheme) chez/) (otium runtime))
 
 (define checks 0)
 (define (check label expected actual)
@@ -7,7 +7,7 @@
   (set! checks (+ checks 1)))
 (define (fails? thunk)
   (guard (c [else #t]) (thunk) #f))
-(define (run form) (evaluate form))
+(define (run form) (evaluate '(require chez)) (evaluate form))
 (define directory (cadr (command-line)))
 (load-path (list directory))
 (define (source name forms)
@@ -77,10 +77,10 @@
 (check "lexical scope" 8 (run '(let ([amount (fn () 8)]) (amount))))
 (check "Chez numeric tower" 1/3 (run '(/ 1 3)))
 (check "Chez multiple values" '(1 2)
-  (call-with-values (lambda () (run '(values 1 2))) list))
+  (call-with-values (lambda () (run '(chez/values 1 2))) list))
 (check "top-level begin preserves multiple values" '(3 4)
-  (call-with-values (lambda () (run '(begin (values 1 2) (values 3 4)))) list))
-(check "state is an array" #t (run '(array? c/state)))
+  (call-with-values (lambda () (run '(begin (chez/values 1 2) (chez/values 3 4)))) list))
+(check "Chez vectors" #t (run '(chez/vector? (chez/vector 1))))
 (check "Chez hash tables" 3
   (run '(let ([t (chez/make-eq-hashtable)]) (chez/hashtable-set! t 'x 3) (chez/hashtable-ref t 'x #f))))
 (check "tail recursion through imported binding" 100000

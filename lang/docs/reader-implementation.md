@@ -1,6 +1,6 @@
 # Common reader implementation
 
-The contract is in [reader-spec.md](reader-spec.md). C implements it in
+The contract is in [reader-spec.md](../specs/reader-spec.md). C implements it in
 `c/src/otium.c`; Chez uses ordinary Scheme libraries `reader.sls`, `values.sls`
 and `truth.sls`. There is no bootstrap step. Both readers return ordinary
 lists for array/table constructor sugar, including under quotation. Keywords
@@ -9,7 +9,7 @@ and nil are values, not syntax nodes.
 Chez routes Otium files, required modules, REPL input and `read-string` through
 `read-otium`. Implementation libraries, the launcher, native `.ss` tests and
 explicit `chez/read` retain Chez's reader. The shared SDL scene loader now uses
-`read-string`. Existing `examples/chez/*.scm` sources already used parentheses;
+`read-string`. Existing the former Chez examples sources already used parentheses;
 no binding-bracket rewrite was needed there. Native hashtable adapters in the
 condition tests and SDL host construct symbol keys explicitly rather than
 reading `:type` as a symbol. Module grammar and suffix rules are unchanged.

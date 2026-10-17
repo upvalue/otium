@@ -108,6 +108,44 @@ in Otium's definition tracking. The explicit platform namespace, native syntax
 boundary, restricted default vocabulary, and cond-expand in MACRO-DESIGN.txt
 are planned follow-up work.
 
+Conditions and restarts
+
+error, signal, handler-bind, try, restart-case, invoke-restart, and
+unwind-protect use Otium's condition protocol. Error takes a message and
+optional data, or one arbitrary condition value. Returning from a signal
+handler declines the condition; try catches only after unwinding. Handler
+initializers run left to right before any of the new bindings are installed.
+Restart clauses stay active while running and may invoke themselves or their
+siblings. Cleanup runs on normal return, errors, restart transfers, and exit.
+
+Condition tables are Chez hash tables with symbol keys :type, :message, and
+optional :data (a vector). condition-type, condition-message, error?, type-pred,
+define-condition, and condition-of-type? expose the common protocol. Native
+Chez exceptions become error conditions before Otium handlers run. Their
+message and irritants become :message and :data; diagnostic wording remains
+native. Explicitly raised non-string values retain their identity.
+
+The existing value/reader differences still apply: there is no distinct nil;
+missing values and an unhandled signal return #f, and compute-restarts returns
+a vector. The shared condition tests use small collection adapters, not an
+alternate exception API. Table/array literals remain a portability gap.
+
+Otium macros expand inside handlers, catches, restart clauses, and cleanup.
+Multiple values are preserved. Chez continuation reentry restores dynamic
+restart bindings; saved restart objects are rejected outside their active
+extent. Native guard remains available but can intercept exceptions before
+Otium handlers. Use try for the portable semantics. chez/error and
+chez/condition-message retain the original native procedures.
+
+quit and exit accept an optional exact integer status from 0 through 255.
+They escape handlers and catches, run cleanup, and terminate the CLI with that
+status. Keyboard interrupts also bypass handlers and catches and run cleanup;
+the REPL returns to its prompt. Cleanup may replace a pending exit with an
+error or another transfer. Embedders calling evaluate receive an
+(otium conditions) control-condition after unwinding; control-kind distinguishes
+exit from interrupt and control-status carries the status. The library does
+not terminate an embedding process itself.
+
 Reload behavior
 
 Reload reevaluates the file in the same namespace. It preserves definitions

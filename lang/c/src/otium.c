@@ -3558,25 +3558,35 @@ static otv vm_execute_handler_bind(ots* state, otv descriptor, otv env, otv name
 
   size_t count = as_array(bindings)->length;
   ot_handler_frame frames[count == 0 ? 1 : count];
+  otv* binding_roots[count == 0 ? 1 : count * 2];
   ot_handler_frame* old_handlers = state->vm.handlers;
+  for (size_t i = 0; i < count; i++) {
+    frames[i] = (ot_handler_frame){
+        .prev = i == 0 ? old_handlers : &frames[i - 1], .pred = ot_nil, .handler = ot_nil};
+    binding_roots[i * 2] = &frames[i].pred;
+    binding_roots[i * 2 + 1] = &frames[i].handler;
+  }
+  ot_frame bindings_frame;
+  ot_frame_push(state, &bindings_frame, binding_roots, count * 2);
   for (size_t i = 0; i < count; i++) {
     binding = descriptor_value(bindings, i);
     predicate_code = descriptor_value(binding, 0);
     handler_code = descriptor_value(binding, 1);
     predicate = vm_run_code(state, predicate_code, env, namespace_value, NULL, 0);
     if (predicate == OT_UNWIND) {
-      state->vm.handlers = old_handlers;
+      ot_frame_pop(state, &bindings_frame);
       return predicate;
     }
     handler = vm_run_code(state, handler_code, env, namespace_value, NULL, 0);
     if (handler == OT_UNWIND) {
-      state->vm.handlers = old_handlers;
+      ot_frame_pop(state, &bindings_frame);
       return handler;
     }
-    frames[i] =
-        (ot_handler_frame){.prev = state->vm.handlers, .pred = predicate, .handler = handler};
-    state->vm.handlers = &frames[i];
+    frames[i].pred = predicate;
+    frames[i].handler = handler;
   }
+  ot_frame_pop(state, &bindings_frame);
+  if (count != 0) state->vm.handlers = &frames[count - 1];
 
   result = vm_run_code(state, body_code, env, namespace_value, NULL, 0);
   state->vm.handlers = old_handlers;
@@ -3629,11 +3639,13 @@ static otv vm_execute_restart_case(ots* state, otv descriptor, otv env, otv name
   }
 
   result = vm_run_code(state, expression_code, env, namespace_value, NULL, 0);
-  if (result == OT_UNWIND && state->vm.unwind_kind == UNWIND_RESTART) {
+  while (result == OT_UNWIND && state->vm.unwind_kind == UNWIND_RESTART) {
+    bool matched = false;
     for (size_t i = 0; i < count; i++) {
       ot_restart_obj* restart = (ot_restart_obj*)ot_as_obj(restart_clauses[i].restart);
       if (restart->id != state->vm.unwind_restart_id) continue;
 
+      matched = true;
       invoke_args = state->vm.unwind_args;
       state->vm.unwind_kind = UNWIND_NONE;
       state->vm.unwind_restart_id = 0;
@@ -3659,6 +3671,7 @@ static otv vm_execute_restart_case(ots* state, otv descriptor, otv env, otv name
       ot_frame_pop(state, &arguments_frame);
       break;
     }
+    if (!matched) break;
   }
 
   state->vm.restarts = frame.prev;
@@ -3682,6 +3695,10 @@ static otv vm_execute_unwind_protect(ots* state, otv descriptor, otv env, otv na
   saved_args = state->vm.unwind_args;
   ot_unwind_kind saved_kind = state->vm.unwind_kind;
   uint64_t saved_restart_id = state->vm.unwind_restart_id;
+  bool saved_quit_requested = state->quit_requested;
+  int saved_quit_status = state->quit_status;
+  state->quit_requested = false;
+  state->quit_status = 0;
   state->vm.condition = ot_nil;
   state->vm.unwind_args = ot_nil;
   state->vm.unwind_kind = UNWIND_NONE;
@@ -3694,6 +3711,8 @@ static otv vm_execute_unwind_protect(ots* state, otv descriptor, otv env, otv na
   state->vm.unwind_args = saved_args;
   state->vm.unwind_kind = saved_kind;
   state->vm.unwind_restart_id = saved_restart_id;
+  state->quit_requested = saved_quit_requested;
+  state->quit_status = saved_quit_status;
   return result;
 }
 
@@ -4996,8 +5015,14 @@ static otv nat_define_condition(ots* state, otv* args, int argc) {
   if (need_arity(state, "define-condition", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
   otv type = coerce_name(state, args[0], false, "define-condition");
   if (type == OT_UNWIND) return type;
-  otv parent = args[1] == ot_nil ? ot_nil : coerce_name(state, args[1], false, "define-condition");
+  otv parent = ot_nil;
+  OT_FRAME_SCOPED(state, &type, &parent);
+  parent = args[1] == ot_nil ? ot_nil : coerce_name(state, args[1], false, "define-condition");
   if (parent == OT_UNWIND) return parent;
+  for (otv ancestor = parent; is_type(ancestor, OBJ_SYMBOL);) {
+    if (ancestor == type) return ot_raise(state, "define-condition: cyclic hierarchy");
+    ancestor = ot_table_get(state, state->type_parents, ancestor, ot_nil);
+  }
   ot_table_put(state, state->type_parents, type, parent == ot_nil ? OT_UNDEFINED : parent);
   return type;
 }

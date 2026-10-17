@@ -64,6 +64,8 @@
         (parameterize ([handlers (cdr frames)])
           (when ((caar frames) c) ((cdar frames) c)))
         (loop (cdr frames)))))
+  ;; Mark conditions that have already visited signal-site handlers. Native
+  ;; exception boundaries must not dispatch them a second time.
   (define (propagate c)
     (raise
       (condition (make-otium-condition c)
@@ -108,6 +110,7 @@
        (let* ([p pred] [h handler])
          (handler-initializers (bindings ... (cons p h)) (more ...) forms))]))
 
+  ;; The escape returns a thunk so catch predicates run after body cleanup.
   (define (call-try body catcher)
     ((call/cc
        (lambda (escape)
@@ -192,6 +195,8 @@
          (error "exit: expected integer status from 0 to 255"))
        (transfer-control 'exit status)]))
   (define quit exit)
+  ;; Escape before raising the host notification, bypassing even native guards
+  ;; inside Otium code while still running dynamic-wind cleanup.
   (define (call-with-otium-control thunk)
     (if (control-target) (thunk)
         ((call/cc
@@ -208,5 +213,4 @@
                    (lambda ()
                      (call-with-values thunk
                        (lambda results (lambda () (apply values results)))))
-                   (lambda () (keyboard-interrupt-handler previous))))))))))
-)
+                   (lambda () (keyboard-interrupt-handler previous)))))))))))

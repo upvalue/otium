@@ -431,6 +431,27 @@ static void test_dynamic_vm(void) {
             ot_is_int(value) && ot_get_int(value) == 42,
         "handlers, restarts, and cleanup preserve their dynamic order");
 
+  check(evaluate(state,
+                 "(let ((seen 0)) "
+                 "  (handler-bind "
+                 "    (((fn (c) #t) "
+                 "      (let ((data (list 40))) "
+                 "        (fn (c) (set! seen (+ seen (car data)))))) "
+                 "     ((let ((data (list #t))) (fn (c) (car data))) "
+                 "      (let ((data (list 2))) "
+                 "        (fn (c) (set! seen (+ seen (car data))))))) "
+                 "    (signal 'test)) seen)",
+                 &value) &&
+            ot_is_int(value) && ot_get_int(value) == 42,
+        "pending handler bindings survive collection before installation");
+
+  check(evaluate(state,
+                 "(restart-case (invoke-restart 'again 0) "
+                 "  (again (n) (if (= n 50) n (invoke-restart 'again (+ n 1)))))",
+                 &value) &&
+            ot_is_int(value) && ot_get_int(value) == 50,
+        "restart clauses can invoke themselves under GC stress");
+
   check(evaluate(state, "(def interrupt-cleaned 0)", &value), "define interrupt cleanup marker");
   check(!evaluate(state,
                   "(unwind-protect "

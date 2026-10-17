@@ -1,0 +1,6 @@
+(define test-nil nil)
+(define (test-table type message) (table :type type :message message))
+(define (test-data c) (get c :data))
+(define test-length length)
+(define test-ref get)
+(define (test-print n) (println "condition checks:" n))

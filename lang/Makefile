@@ -10,9 +10,11 @@ test: test-c test-chez
 
 test-c:
 	$(MAKE) -C c test
+	python3 shared/tests/test_conditions.py --runtime c
 
 test-chez:
 	chez/test
+	python3 shared/tests/test_conditions.py --runtime chez
 
 sdl-setup:
 	python3 chez/sdl/setup.py

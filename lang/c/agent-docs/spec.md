@@ -666,8 +666,10 @@ with `ot_exit_status`; they decide how, or whether, to terminate their process.
 (handler-bind ((pred handler) …) body…)
 ```
 
-Evaluates the predicate and handler expressions (each to a callable),
-then runs the body with those bindings active, innermost-last. Returns
+Evaluates every predicate and handler expression left to right (predicate
+then handler for each binding), under the surrounding handlers. Only after
+all expressions succeed are the new bindings installed, innermost-last.
+It then runs the body with those bindings active. Returns
 the body's value. The bindings are active for signals raised anywhere in
 the body's dynamic extent, including inside functions it calls.
 
@@ -691,7 +693,10 @@ the innermost active restart with that name -- dynamically, not
 lexically -- and unwinds the stack to its `restart-case`, running any
 intervening `unwind-protect` cleanups. It then evaluates the chosen
 clause's body with `params` bound to `args`, and the clause body's value
-becomes the value of the whole `restart-case`. Invoking a name with no
+becomes the value of the whole `restart-case`. The restarts remain active
+during clause evaluation: a clause may invoke itself or another clause,
+unwinding intervening cleanup before the next clause runs. Repeated
+invocation does not accumulate recovery frames. Invoking a name with no
 active restart is an error. Because handlers run before unwinding, a
 handler can inspect the condition and choose a restart established
 *below* it, resuming computation there. This is the retry / use-value /
@@ -747,7 +752,7 @@ the symbol `catch`; body forms must precede them.
 Evaluates `expr`, then evaluates the cleanup forms in order regardless of
 whether `expr` returned, raised, invoked a restart, or was quit. Returns
 `expr`'s value; a cleanup form that itself raises replaces the in-flight
-result. `defer` is an alias.
+result, including a pending exit request and its status. `defer` is an alias.
 
 ---
 

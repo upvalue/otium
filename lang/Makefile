@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := all
 
-.PHONY: clean all lib test test-c test-chez test-sdl test-repl sdl-setup bench bench-gc format hygiene gc-lint
+.PHONY: clean all lib test test-c test-chez test-sdl test-sdl-integration test-repl sdl-setup bench bench-gc format hygiene gc-lint
 
 # Keep the existing C entry points; implementation rules live with the runtime.
 all lib bench bench-gc format hygiene gc-lint:
@@ -18,10 +18,13 @@ test-chez:
 	python3 shared/tests/test_conditions.py --runtime chez
 
 sdl-setup:
-	python3 chez/sdl/setup.py
+	python3 shared/sdl/setup.py
 
-test-sdl:
-	python3 chez/sdl/test_live.py
+test-sdl: ffi
+	python3 shared/tests/test_sdl.py --runtime both
+
+test-sdl-integration: ffi
+	python3 shared/tests/test_sdl.py --runtime both --require-accelerated
 
 test-repl: all
 	$(MAKE) -C shared

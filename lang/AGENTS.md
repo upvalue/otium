@@ -25,7 +25,7 @@ setup, current coverage, and escape hatches.
 ## Runtime layout
 
 `c/` owns the C runtime, build, tests, and implementation notes.
-`chez/` owns Otium on Chez Scheme, including its SDL host and tests.
+`chez/` owns Otium on Chez Scheme, including its FFI adapter and tests.
 `shared/` owns runtime-independent native components and their dependencies.
 `examples/c/` and `examples/chez/` hold examples for each dialect.
 `benchmarks/` owns workloads, runners, and results; `benchmarks/c/` targets C,

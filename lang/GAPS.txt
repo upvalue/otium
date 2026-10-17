@@ -57,15 +57,12 @@ examples/hand/lc-2-add-two-numbers.ot is unfinished (including the 555t
 placeholder). It also uses println. Finish the algorithm before treating it
 as a portability test; the placeholder is not an implementation feature.
 
-examples/c/ray/example.scm and roguelike.ot need the Raylib integration.
-Beyond that expected FFI dependency, they use C-style require, nil, while,
-arrays, get/put!/push!, dotimes, and C hexadecimal literals (0x... rather
-than Scheme #x...). The pure color, map, movement, and visibility code could
-be shared after those surface differences are resolved.
-
-examples/c/ray/ray.ot combines pure numeric color helpers/constants with a
-run harness. Its harness uses env, nil, arrays, get, and string-split. Only
-its screenshot/window calls fundamentally require a graphics backend.
+The former Raylib examples were retired with the C Raylib extension. The
+shared SDL acceptance program covers their basic window/drawing/input/capture
+path. The roguelike's font atlas, render-target scaling, fullscreen controls,
+and game logic have not been ported. Its C-specific arrays, nil, collection
+operations, and hexadecimal syntax would still need language-level changes
+for a shared port; those are separate from the native FFI.
 
 examples/c/demo/demo.scm is source sugar over make-inline-counter and
 make-owned-counter. The companion C files demonstrate the native extension
@@ -82,11 +79,12 @@ binding handle, Scheme vectors/vector-ref/vector-set!, and printf. C has
 live namespace vars but not this exact saved-callback API. These differences
 should be expressible through a common reload and collection interface.
 
-examples/chez/scenes/shapes.scm and particles.scm depend on the SDL canvas
-library, which is an expected backend dependency. Their scene logic also
-uses Scheme vectors, do, let*, Scheme square-bracket grouping, defonce, and
-Chez's module import. The host's watcher/reload lifecycle is currently Chez
-specific. The animation math and geometry need not be backend-specific.
+The orbit and particle scenes now live in examples/shared/scenes/ and run
+through the same SDL binding on C and Chez. Their mutable phase and tick
+state stays in the shared host across source reloads. Parentheses, ordinary
+procedures, and shared arithmetic replace the former Chez-only scene syntax.
+The portable host uses libc FFI for source reads and small reader adapters;
+this does not establish a common filesystem or module-loader API.
 
 Benchmarks and reference material
 

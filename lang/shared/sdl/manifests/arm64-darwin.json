@@ -1,0 +1,700 @@
+{
+  "baseline": 3004012,
+  "compiler": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+  "compiler_abi_options": [
+    "-std=c11",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-I/opt/homebrew/include"
+  ],
+  "compiler_command": [
+    "cc"
+  ],
+  "constant": {
+    "SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK": 4294967295,
+    "SDL_AUDIO_F32": 33056,
+    "SDL_EVENT_KEY_DOWN": 768,
+    "SDL_EVENT_KEY_UP": 769,
+    "SDL_EVENT_MOUSE_BUTTON_DOWN": 1025,
+    "SDL_EVENT_MOUSE_BUTTON_UP": 1026,
+    "SDL_EVENT_MOUSE_MOTION": 1024,
+    "SDL_EVENT_MOUSE_WHEEL": 1027,
+    "SDL_EVENT_QUIT": 256,
+    "SDL_EVENT_TEXT_INPUT": 771,
+    "SDL_EVENT_WINDOW_CLOSE_REQUESTED": 528,
+    "SDL_EVENT_WINDOW_RESIZED": 518,
+    "SDL_INIT_AUDIO": 16,
+    "SDL_INIT_VIDEO": 32,
+    "SDL_LOGICAL_PRESENTATION_LETTERBOX": 2,
+    "SDL_MOUSEWHEEL_NORMAL": 0,
+    "SDL_PIXELFORMAT_RGBA32": 376840196,
+    "SDL_SCANCODE_ESCAPE": 41,
+    "SDL_SCANCODE_R": 21,
+    "SDL_TEXTUREACCESS_STATIC": 0,
+    "SDL_WINDOW_RESIZABLE": 32
+  },
+  "header_sha256": "e749b1b6c03dafef40b53374f553fc6b2ae6c39b6a447e8b1e63e0bac8ea1bb8",
+  "header_version": 3004016,
+  "layout": {
+    "SDL_AudioSpec": {
+      "align": 4,
+      "field_types": {
+        "channels": {
+          "align": 4,
+          "representation": "i32",
+          "size": 4
+        },
+        "format": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "freq": {
+          "align": 4,
+          "representation": "i32",
+          "size": 4
+        }
+      },
+      "fields": {
+        "channels": 4,
+        "format": 0,
+        "freq": 8
+      },
+      "size": 12
+    },
+    "SDL_CommonEvent": {
+      "align": 8,
+      "field_types": {
+        "reserved": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "timestamp": {
+          "align": 8,
+          "representation": "u64",
+          "size": 8
+        },
+        "type": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        }
+      },
+      "fields": {
+        "reserved": 4,
+        "timestamp": 8,
+        "type": 0
+      },
+      "size": 16
+    },
+    "SDL_Event": {
+      "align": 8,
+      "field_types": {},
+      "fields": {
+        "button": 0,
+        "common": 0,
+        "key": 0,
+        "motion": 0,
+        "padding": 0,
+        "text": 0,
+        "type": 0,
+        "wheel": 0,
+        "window": 0
+      },
+      "size": 128
+    },
+    "SDL_FRect": {
+      "align": 4,
+      "field_types": {
+        "h": {
+          "align": 4,
+          "representation": "float",
+          "size": 4
+        },
+        "w": {
+          "align": 4,
+          "representation": "float",
+          "size": 4
+        },
+        "x": {
+          "align": 4,
+          "representation": "float",
+          "size": 4
+        },
+        "y": {
+          "align": 4,
+          "representation": "float",
+          "size": 4
+        }
+      },
+      "fields": {
+        "h": 12,
+        "w": 8,
+        "x": 0,
+        "y": 4
+      },
+      "size": 16
+    },
+    "SDL_KeyboardEvent": {
+      "align": 8,
+      "field_types": {
+        "down": {
+          "align": 1,
+          "representation": "bool",
+          "size": 1
+        },
+        "key": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "mod": {
+          "align": 2,
+          "representation": "u16",
+          "size": 2
+        },
+        "raw": {
+          "align": 2,
+          "representation": "u16",
+          "size": 2
+        },
+        "repeat": {
+          "align": 1,
+          "representation": "bool",
+          "size": 1
+        },
+        "reserved": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "scancode": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "timestamp": {
+          "align": 8,
+          "representation": "u64",
+          "size": 8
+        },
+        "type": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "which": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "windowID": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        }
+      },
+      "fields": {
+        "down": 36,
+        "key": 28,
+        "mod": 32,
+        "raw": 34,
+        "repeat": 37,
+        "reserved": 4,
+        "scancode": 24,
+        "timestamp": 8,
+        "type": 0,
+        "which": 20,
+        "windowID": 16
+      },
+      "size": 40
+    },
+    "SDL_MouseButtonEvent": {
+      "align": 8,
+      "field_types": {
+        "button": {
+          "align": 1,
+          "representation": "u8",
+          "size": 1
+        },
+        "clicks": {
+          "align": 1,
+          "representation": "u8",
+          "size": 1
+        },
+        "down": {
+          "align": 1,
+          "representation": "bool",
+          "size": 1
+        },
+        "padding": {
+          "align": 1,
+          "representation": "u8",
+          "size": 1
+        },
+        "reserved": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "timestamp": {
+          "align": 8,
+          "representation": "u64",
+          "size": 8
+        },
+        "type": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "which": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "windowID": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "x": {
+          "align": 4,
+          "representation": "float",
+          "size": 4
+        },
+        "y": {
+          "align": 4,
+          "representation": "float",
+          "size": 4
+        }
+      },
+      "fields": {
+        "button": 24,
+        "clicks": 26,
+        "down": 25,
+        "padding": 27,
+        "reserved": 4,
+        "timestamp": 8,
+        "type": 0,
+        "which": 20,
+        "windowID": 16,
+        "x": 28,
+        "y": 32
+      },
+      "size": 40
+    },
+    "SDL_MouseMotionEvent": {
+      "align": 8,
+      "field_types": {
+        "reserved": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "state": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "timestamp": {
+          "align": 8,
+          "representation": "u64",
+          "size": 8
+        },
+        "type": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "which": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "windowID": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "x": {
+          "align": 4,
+          "representation": "float",
+          "size": 4
+        },
+        "xrel": {
+          "align": 4,
+          "representation": "float",
+          "size": 4
+        },
+        "y": {
+          "align": 4,
+          "representation": "float",
+          "size": 4
+        },
+        "yrel": {
+          "align": 4,
+          "representation": "float",
+          "size": 4
+        }
+      },
+      "fields": {
+        "reserved": 4,
+        "state": 24,
+        "timestamp": 8,
+        "type": 0,
+        "which": 20,
+        "windowID": 16,
+        "x": 28,
+        "xrel": 36,
+        "y": 32,
+        "yrel": 40
+      },
+      "size": 48
+    },
+    "SDL_MouseWheelEvent": {
+      "align": 8,
+      "field_types": {
+        "direction": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "integer_x": {
+          "align": 4,
+          "representation": "i32",
+          "size": 4
+        },
+        "integer_y": {
+          "align": 4,
+          "representation": "i32",
+          "size": 4
+        },
+        "mouse_x": {
+          "align": 4,
+          "representation": "float",
+          "size": 4
+        },
+        "mouse_y": {
+          "align": 4,
+          "representation": "float",
+          "size": 4
+        },
+        "reserved": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "timestamp": {
+          "align": 8,
+          "representation": "u64",
+          "size": 8
+        },
+        "type": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "which": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "windowID": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "x": {
+          "align": 4,
+          "representation": "float",
+          "size": 4
+        },
+        "y": {
+          "align": 4,
+          "representation": "float",
+          "size": 4
+        }
+      },
+      "fields": {
+        "direction": 32,
+        "integer_x": 44,
+        "integer_y": 48,
+        "mouse_x": 36,
+        "mouse_y": 40,
+        "reserved": 4,
+        "timestamp": 8,
+        "type": 0,
+        "which": 20,
+        "windowID": 16,
+        "x": 24,
+        "y": 28
+      },
+      "size": 56
+    },
+    "SDL_Rect": {
+      "align": 4,
+      "field_types": {
+        "h": {
+          "align": 4,
+          "representation": "i32",
+          "size": 4
+        },
+        "w": {
+          "align": 4,
+          "representation": "i32",
+          "size": 4
+        },
+        "x": {
+          "align": 4,
+          "representation": "i32",
+          "size": 4
+        },
+        "y": {
+          "align": 4,
+          "representation": "i32",
+          "size": 4
+        }
+      },
+      "fields": {
+        "h": 12,
+        "w": 8,
+        "x": 0,
+        "y": 4
+      },
+      "size": 16
+    },
+    "SDL_TextInputEvent": {
+      "align": 8,
+      "field_types": {
+        "reserved": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "text": {
+          "align": 8,
+          "representation": "pointer",
+          "size": 8
+        },
+        "timestamp": {
+          "align": 8,
+          "representation": "u64",
+          "size": 8
+        },
+        "type": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "windowID": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        }
+      },
+      "fields": {
+        "reserved": 4,
+        "text": 24,
+        "timestamp": 8,
+        "type": 0,
+        "windowID": 16
+      },
+      "size": 32
+    },
+    "SDL_WindowEvent": {
+      "align": 8,
+      "field_types": {
+        "data1": {
+          "align": 4,
+          "representation": "i32",
+          "size": 4
+        },
+        "data2": {
+          "align": 4,
+          "representation": "i32",
+          "size": 4
+        },
+        "reserved": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "timestamp": {
+          "align": 8,
+          "representation": "u64",
+          "size": 8
+        },
+        "type": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        },
+        "windowID": {
+          "align": 4,
+          "representation": "u32",
+          "size": 4
+        }
+      },
+      "fields": {
+        "data1": 20,
+        "data2": 24,
+        "reserved": 4,
+        "timestamp": 8,
+        "type": 0,
+        "windowID": 16
+      },
+      "size": 32
+    }
+  },
+  "library": "/opt/homebrew/lib/libSDL3.dylib",
+  "pkg_config_version": "3.4.16",
+  "scalar": {
+    "bool": {
+      "align": 1,
+      "size": 1
+    },
+    "double": {
+      "align": 8,
+      "size": 8
+    },
+    "float": {
+      "align": 4,
+      "size": 4
+    },
+    "i32": {
+      "align": 4,
+      "size": 4
+    },
+    "int": {
+      "align": 4,
+      "size": 4
+    },
+    "pointer": {
+      "align": 8,
+      "size": 8
+    },
+    "size-t": {
+      "align": 8,
+      "size": 8
+    },
+    "u16": {
+      "align": 2,
+      "size": 2
+    },
+    "u32": {
+      "align": 4,
+      "size": 4
+    },
+    "u64": {
+      "align": 8,
+      "size": 8
+    },
+    "u8": {
+      "align": 1,
+      "size": 1
+    }
+  },
+  "schema": 1,
+  "target": "arm64-darwin",
+  "target_triple": "arm64-apple-darwin24.6.0",
+  "typedef": {
+    "SDL_AudioDeviceID": {
+      "align": 4,
+      "representation": "u32",
+      "signed": false,
+      "size": 4
+    },
+    "SDL_AudioFormat": {
+      "align": 4,
+      "representation": "u32",
+      "signed": false,
+      "size": 4
+    },
+    "SDL_EventType": {
+      "align": 4,
+      "representation": "u32",
+      "signed": false,
+      "size": 4
+    },
+    "SDL_InitFlags": {
+      "align": 4,
+      "representation": "u32",
+      "signed": false,
+      "size": 4
+    },
+    "SDL_KeyboardID": {
+      "align": 4,
+      "representation": "u32",
+      "signed": false,
+      "size": 4
+    },
+    "SDL_Keycode": {
+      "align": 4,
+      "representation": "u32",
+      "signed": false,
+      "size": 4
+    },
+    "SDL_Keymod": {
+      "align": 2,
+      "representation": "u16",
+      "signed": false,
+      "size": 2
+    },
+    "SDL_MouseButtonFlags": {
+      "align": 4,
+      "representation": "u32",
+      "signed": false,
+      "size": 4
+    },
+    "SDL_MouseID": {
+      "align": 4,
+      "representation": "u32",
+      "signed": false,
+      "size": 4
+    },
+    "SDL_MouseWheelDirection": {
+      "align": 4,
+      "representation": "u32",
+      "signed": false,
+      "size": 4
+    },
+    "SDL_PixelFormat": {
+      "align": 4,
+      "representation": "u32",
+      "signed": false,
+      "size": 4
+    },
+    "SDL_RendererLogicalPresentation": {
+      "align": 4,
+      "representation": "u32",
+      "signed": false,
+      "size": 4
+    },
+    "SDL_Scancode": {
+      "align": 4,
+      "representation": "u32",
+      "signed": false,
+      "size": 4
+    },
+    "SDL_TextureAccess": {
+      "align": 4,
+      "representation": "u32",
+      "signed": false,
+      "size": 4
+    },
+    "SDL_WindowFlags": {
+      "align": 8,
+      "representation": "u64",
+      "signed": false,
+      "size": 8
+    },
+    "SDL_WindowID": {
+      "align": 4,
+      "representation": "u32",
+      "signed": false,
+      "size": 4
+    }
+  }
+}

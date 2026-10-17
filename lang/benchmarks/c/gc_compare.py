@@ -108,7 +108,6 @@ def build(root, collector, geometry):
         "-B",
         f"BUILD={build_dir}",
         f"GC={collector}",
-        "WITH_RAY=0",
         f"HEAP_INIT={geometry['heap_init']}",
         f"HEAP_MAX={geometry['heap_max']}",
         str(build_dir / "gc-bench"),

@@ -593,9 +593,6 @@ int main(int argc, char** argv) {
   ot_set_writer(state, stdout_writer, NULL);
   ot_set_loader(state, module_loader, NULL);
   ot_register_demo_extension(state);
-#ifdef OT_WITH_RAY
-  ot_register_ray_extension(state);
-#endif
   struct sigaction action = {0};
   action.sa_handler = handle_interrupt;
   sigaction(SIGINT, &action, NULL);

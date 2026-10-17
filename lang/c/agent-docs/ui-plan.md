@@ -85,8 +85,8 @@ Scope UI flags and libraries to the extension and CLI link. Do not add SDL
 headers or link dependencies to `libotium.a` or the runtime test executable.
 Track CLI feature flags in a generated configuration dependency so switching
 `WITH_UI=1` to `0` and back rebuilds `main.o`; the current unconditional relink
-alone does not rebuild objects when preprocessor flags change. Cover the
-existing raylib feature switch in that same mechanism.
+alone does not rebuild objects when preprocessor flags change. The former
+Raylib feature switch has been removed; graphics use portable SDL FFI.
 
 ## Files
 

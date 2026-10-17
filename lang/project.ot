@@ -1,2 +1,2 @@
 ; Default C-runtime example paths when working from lang/.
-(paths "examples/c/ray" "examples/c/demo")
+(paths "examples/c/demo")

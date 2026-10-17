@@ -34,7 +34,3 @@ GC_OLD_CHUNK_BYTES ?= 1048576
 GC_LARGE_OBJECT_BYTES ?= 262144
 GC_MARK_STACK_ENTRIES ?= 16384
 GC_TIMING ?= 1
-
-RAYLIB_CFLAGS ?= $(shell pkg-config --cflags raylib 2>/dev/null)
-RAYLIB_LIBS ?= $(shell pkg-config --libs raylib 2>/dev/null)
-WITH_RAY ?= $(if $(strip $(RAYLIB_LIBS)),1,0)

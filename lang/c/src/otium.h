@@ -584,9 +584,6 @@ void ot_register_demo_extension(ots* state);
 OT_GC_MAY_ALLOCATE bool ot_eval_partial(ots* state, const char* source, size_t length,
                                         const char* name, size_t* consumed, bool* incomplete,
                                         otv* out);
-#ifdef OT_WITH_RAY
-void ot_register_ray_extension(ots* state);
-#endif
 
 #endif
 #endif

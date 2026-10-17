@@ -444,8 +444,8 @@ and padding even when only some event variants have public accessors. Copying
 only the known fields is insufficient for `SDL_PollEvent` or `SDL_PushEvent`.
 [SDL event definition](https://wiki.libsdl.org/SDL3/SDL_Event)
 
-The initial header baseline is SDL 3.4.12, matching the existing pinned Chez
-binding in `chez/sdl/DEPENDENCY.txt`. The package checks `SDL_GetVersion` before
+The initial runtime baseline is SDL 3.4.12. The SDL setup records the installed
+header version and hash in its generated manifest. The package checks `SDL_GetVersion` before
 initialization and requires SDL major 3 and version >= 3.4.12. It relies on SDL's
 compatible runtime ABI within that major version; the header probe does not
 prove the internals of an arbitrary installed binary. A required missing symbol

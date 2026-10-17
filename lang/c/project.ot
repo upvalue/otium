@@ -2,4 +2,4 @@
 ; vim: set filetype=otium :
 
 ; The prelude and expander are embedded at build time and deliberately absent.
-(paths "../examples/c/ray" "../examples/c/demo")
+(paths "../examples/c/demo")

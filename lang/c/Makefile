@@ -41,12 +41,6 @@ LDLIBS += -ldl
 endif
 endif
 
-ifeq ($(WITH_RAY),1)
-CLI_OBJ += $(OBJ)/ot-ext-ray.o
-CPPFLAGS += -DOT_WITH_RAY $(RAYLIB_CFLAGS)
-LDLIBS += $(RAYLIB_LIBS)
-endif
-
 .PHONY: all lib test bench bench-gc format clean hygiene gc-lint FORCE
 
 # The public output path is shared by collector selections. Relink it so
@@ -90,9 +84,6 @@ $(OBJ)/main.o: src/main.c src/otium.h ../shared/line-edit.h | $(OBJ)
 $(OBJ)/ot-ext-demo.o: src/ot-ext-demo.c src/otium.h | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -c $< -o $@
 
-$(OBJ)/ot-ext-ray.o: src/ot-ext-ray.c src/otium.h | $(OBJ)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -c $< -o $@
-
 $(OBJ)/test-runtime.o: tests/test_runtime.c src/otium.h | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -c $< -o $@
 
@@ -119,7 +110,7 @@ hygiene:
 	! rg -n '^\s*#\s*define\s+OT_INTERNAL\b' --glob '!src/**' .
 
 gc-lint:
-	WITH_FFI="$(WITH_FFI)" WITH_RAY="$(WITH_RAY)" RAYLIB_CFLAGS="$(RAYLIB_CFLAGS)" tools/gc-lint/run
+	WITH_FFI="$(WITH_FFI)" tools/gc-lint/run
 
 test: all $(BUILD)/test-runtime hygiene
 	$(BUILD)/test-runtime
@@ -127,9 +118,6 @@ test: all $(BUILD)/test-runtime hygiene
 	$(PYTHON) tests/test_cli.py $(OTIUM) tests/cli-load.scm tests/cli-load-second.scm
 	$(OTIUM) --no-project --path ../examples/c/demo tests/ext-demo.scm
 	$(OTIUM) --no-project --path ../examples/c/otcl tests/otcl.scm
-ifeq ($(WITH_RAY),1)
-	$(OTIUM) --no-project --path ../examples/c/ray tests/ext-ray.scm
-endif
 
 bench: all
 	$(PYTHON) ../benchmarks/run.py $(OTIUM)

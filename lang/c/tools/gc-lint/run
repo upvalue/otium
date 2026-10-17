@@ -92,14 +92,6 @@ if [[ ${WITH_FFI:-0} == 1 ]]; then
     "${compile_args[@]}" "${ffi_args[@]}" -DOT_GC_GEN -DOT_WITH_FFI
 fi
 
-if [[ ${WITH_RAY:-0} == 1 ]]; then
-  # RAYLIB_CFLAGS is a compiler argument string, with the same no-spaces-in-paths
-  # limitation as llvm-config's output above.
-  # shellcheck disable=SC2206
-  raylib_args=(${RAYLIB_CFLAGS:-})
-  "$tool" "$@" "$repo_dir/src/ot-ext-ray.c" -- \
-    "${compile_args[@]}" "${raylib_args[@]}" -DOT_GC_GEN -DOT_WITH_RAY
-fi
 
 "$tool" "$@" "$repo_dir/src/ot-gc-semi.c" -- "${compile_args[@]}" -DOT_GC_SEMI
 "$tool" "$@" "$repo_dir/src/ot-gc-gen.c" -- "${compile_args[@]}" -DOT_GC_GEN

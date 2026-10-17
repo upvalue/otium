@@ -192,9 +192,11 @@ Other computational workloads share their source between implementations.
 
 SDL3 demos
 
-See sdl/USAGE.txt for hardware-accelerated orbit and particle demos using
-chez-sdl3. The separate sdl-demo host watches scene files and reloads drawing
-code between frames. The Chez runtime's ordinary REPL still has no watcher.
+SDL now uses the shared portable FFI binding. Run make ffi and make sdl-setup,
+then python3 examples/shared/run-sdl.py --runtime chez --scene shapes from
+lang/. The same launcher supports --runtime c. The bespoke canvas library,
+chez-sdl3 dependency, and Chez-only SDL host have been removed. See
+../shared/sdl/USAGE.txt for the portable host and validation commands.
 
 REPL editing
 

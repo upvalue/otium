@@ -11,18 +11,18 @@ lang/
     Makefile       C build and test rules
     config.mk      C build defaults; local overrides go in c/site.mk
   chez/            Otium on Chez Scheme
-    otium/         Namespace runtime and canvas library
-    sdl/           SDL host, dependency setup, tests, and usage notes
-    .deps/         Ignored, locally installed Scheme dependencies
+    otium/         Namespace runtime and portable FFI adapter
     run            REPL/script launcher
     test           Headless tests
-    sdl-demo       SDL demo launcher
     NOTES.txt      Chez runtime semantics and usage
-  shared/          Native line editor used by both REPLs; Bestline dependency
+  shared/          Shared native components, bindings, and tests
+    ffi/           Portable FFI layouts and native loader helper
+    sdl/           SDL header probe, manifest setup, and shared bindings
   examples/
     c/             C-dialect programs and extension examples
     hand/          Handwritten exercises (current dialect gaps in GAPS.txt)
-    chez/          Chez programs and reloadable SDL scenes
+    chez/          Chez programs
+    shared/        Portable FFI examples and reloadable SDL scenes
   benchmarks/
     c/             C-dialect workloads and collector comparison runner
     r7rs/          C-dialect ports, upstream submodule, and suite tooling
@@ -48,16 +48,18 @@ Commands from lang/:
   make test-repl              Pseudo-terminal checks for both REPLs
   make test-c                 C runtime, CLI, and conformance checks
   make test-chez              Chez runtime and CLI checks
-  make sdl-setup              Fetch pinned Chez SDL3 bindings
-  chez/sdl-demo shapes        Open the live orbit demo
-  chez/sdl-demo particles     Open the particle demo
-  make test-sdl               Graphics tests; requires a desktop session
+  make ffi                    Build optional FFI support
+  make sdl-setup              Generate the local SDL3 ABI manifest
+  python3 examples/shared/run-sdl.py --runtime c --scene shapes
+  python3 examples/shared/run-sdl.py --runtime chez --scene particles
+  make test-sdl               Shared SDL checks on both runtimes
+  make test-sdl-integration   Require accelerated graphics on both runtimes
   python3 benchmarks/compare.py --otium ./otium
 
 The C launcher preserves the caller's working directory. Root project.ot
 points at examples/c; c/project.ot handles commands run from c/. The C binary
-now lives in c/bin/<platform>/otium. Existing make flags such as GC=gen and
-WITH_RAY=0 pass through the root Makefile. Relative build-path overrides are
+now lives in c/bin/<platform>/otium. Make flags such as GC=gen and
+WITH_FFI=1 pass through the root Makefile. Relative build-path overrides are
 resolved inside c/; use absolute paths to avoid ambiguity.
 
 Recorded benchmark JSON files retain their original paths and engine labels

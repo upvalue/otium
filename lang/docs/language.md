@@ -151,7 +151,7 @@ including `()`, `0`, `0.0`, and `""`.
 
 `nil` means *absence* and is not a storable table value. Looking up a
 missing key yields `nil`, and storing `nil` under a key **deletes** the
-key (in `table`/`{...}`, `put!`, and `assoc`). "Present with nil" is
+key (in `table`/`{...}`, `put!`, and `put`). "Present with nil" is
 unrepresentable. `merge` reads live entries from its table arguments, so a
 missing key in a later table does not delete an earlier value. Sequence
 functions treat `nil` as an empty sequence, and lookups on `nil` yield `nil`,
@@ -161,7 +161,7 @@ The rule behind the library's treatment of `nil`, and the razor for
 extending it: **read operations are total over absence** -- `count`,
 `first`, `map`, `get`, and their kind see `nil` as empty and never error
 on it. A function whose contract implies a particular kind builds that
-kind from `nil` (`assoc` builds a table, `rest` returns a list); that is
+kind from `nil` (`put` builds a table, `rest` returns a list); that is
 the function knowing what it makes, not `nil` being a collection. A
 kind-*preserving* function given `nil` has no kind to preserve and
 returns `nil` (`copy`). And where absence cannot mean anything --
@@ -278,7 +278,7 @@ through pairs and arrays and stopping at other mutable values.
 `group-by`, `frequencies`, …) are O(n) in elements visited, times the
 cost of their callbacks; `group-by` and `frequencies` add expected-O(1)
 table operations per element. `sort` and `sort-by` are O(n log n) and
-stable. `assoc`, `dissoc`, and `update` copy: O(n) plus the operation.
+stable. `put`, `dissoc`, and `update` copy: O(n) plus the operation.
 `contains?` on a sequence is O(n); on a string, naive substring search
 (O(n·m)) is permitted.
 
@@ -917,7 +917,12 @@ table, string, buffer; other types error.
 | `(cons a d)` → pair | |
 | `(car p)` / `(cdr p)` | Head/tail of a **pair**; strict, `(car '())` is an error. |
 | `(set-car! p v)` / `(set-cdr! p v)` → p | Mutate a pair. Cycles and mutation of pairs frozen as table keys are errors. |
-| `(caar p)` `(cadr p)` `(cddr p)` | Compositions. |
+| `(caar p)` `(cadr p)` `(cddr p)` … `(cadddr p)` | Compositions, up to three levels plus `cadddr`. |
+| `(list-ref l k)` / `(list-tail l k)` | Element at, or tail after, index `k`; out of range is an error. |
+| `(memq x l)` / `(member x l)` | First tail whose car is `eq?` / `equal?` to `x`, or `#f`. |
+| `(assq k al)` / `(assoc k al)` | First pair in an alist whose car is `eq?` / `equal?` to `k`, or `#f`. |
+| `(fold-left f init l…)` / `(fold-right f init l…)` | Combine across one or more lists, from the left or the right. |
+| `(exists f l…)` / `(for-all f l…)` | First truthy result, or `#f`; last result if all are truthy, else the first falsy one. |
 | `(list x…)` → list | |
 | `(append list…)` → list | Concatenation; arguments must be proper lists. |
 | `(length coll)` → int | Elements of a list, array, table (entries), string or buffer (characters). Improper lists and other types error. |
@@ -965,9 +970,9 @@ Whole-sequence traversal requires proper lists. `for-each`, `apply`,
 | `(push! arr x…)` → arr | Append to an array. |
 | `(pop! arr)` | Remove and return the last element, or `nil` when empty. |
 | `(update! coll k f args…)` → coll | `(put! coll k (f (get coll k) args…))`. |
-| `(assoc coll kvs…)` → copy | `put!` on a shallow copy; `(assoc nil …)` builds a fresh table. |
+| `(put coll kvs…)` → copy | `put!` on a shallow copy; `(put nil …)` builds a fresh table. |
 | `(dissoc coll k…)` → copy | Copy without the keys. |
-| `(update coll k f args…)` → copy | `assoc` of `(f (get coll k) args…)`. |
+| `(update coll k f args…)` → copy | `put` of `(f (get coll k) args…)`. |
 | `(keys t)` / `(values t)` → array | Insertion order; `nil` gives `[]`. |
 | `(merge t…)` → table | New table, left to right; `nil` arguments skipped; live entries in later tables update matching keys. |
 | `(copy coll)` | Shallow copy of an array or table; `(copy nil)` is `nil`. |

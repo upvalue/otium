@@ -55,11 +55,12 @@
   (println "freq-keys:" (keys f))
   (println "freq-values:" (values f)))
 
-; assoc/dissoc/update copy; put!/update! mutate
+; put/dissoc/update copy; put!/update! mutate
 (let ((t {:a 1}))
-  (let ((t2 (assoc t :b 2)))
-    (println "assoc-copy:" (count t) (count t2) (get t2 :b))))
-(println "assoc-nil:" (get (assoc nil :a 1) :a))
+  (let ((t2 (put t :b 2)))
+    (println "put-copy:" (count t) (count t2) (get t2 :b))))
+(println "put-nil:" (get (put nil :a 1) :a))
+(println "assoc:" (assoc "b" '(("a" . 1) ("b" . 2))) (assoc 'z '((a . 1))))
 (let ((t {:a 1 :b 2}))
   (let ((t2 (dissoc t :a)))
     (println "dissoc-copy:" (count t) (count t2) (get t2 :a))))

@@ -173,6 +173,12 @@
         ((eq? key (car (car alist))) (car alist))
         (else (assq key (cdr alist)))))
 
+(def (assoc key alist)
+  "(assoc key alist)\nThe first pair in alist whose car is equal? to key, or #f."
+  (cond ((not (pair? alist)) #f)
+        ((equal? key (car (car alist))) (car alist))
+        (else (assoc key (cdr alist)))))
+
 (def- (heads lists) (if (pair? lists) (cons (car (car lists)) (heads (cdr lists))) '()))
 (def- (tails lists) (if (pair? lists) (cons (cdr (car lists)) (tails (cdr lists))) '()))
 (def- (any-empty? lists)
@@ -460,12 +466,12 @@
 
 ;; --- tables (10.5) ----------------------------------------------------------
 
-(def (assoc coll . kvs)
-  "put! on a shallow copy; (assoc nil ...) builds a fresh table."
+(def (put coll . kvs)
+  "(put collection key value ...)\nput! on a shallow copy; (put nil ...) builds a fresh table."
   (let ((c (if (nil? coll) (table) (copy coll))))
     (let ((s kvs))
       (while (pair? s)
-        (when (null? (cdr s)) (error "assoc: odd number of key/value arguments"))
+        (when (null? (cdr s)) (error "put: odd number of key/value arguments"))
         (put! c (car s) (car (cdr s)))
         (set! s (cdr (cdr s)))))
     c))
@@ -478,7 +484,7 @@
 
 (def (update coll k f . args)
   "(update collection key procedure argument ...)\nCopy the collection and replace the entry with (procedure (get collection key) argument ...)."
-  (assoc coll k (apply f (get coll k) args)))
+  (put coll k (apply f (get coll k) args)))
 
 (def (merge . ts)
   "New table, left to right; nil arguments skipped."

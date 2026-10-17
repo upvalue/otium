@@ -12,7 +12,8 @@
 (define expander-special-forms
   '(quote if define def define- set! lambda fn defmacro begin do let while
     and or cond quasiquote unquote unquote-splicing ns in-ns require
-    handler-bind restart-case try unwind-protect defer defparam with-params))
+    handler-bind restart-case try unwind-protect defer defparam with-params
+    define-type define-generic define-method reset-type! reset-generic!))
 
 (define (exp-memq sym lst)
   (if (pair? lst)
@@ -231,6 +232,20 @@
 ;; The expander invokes macro objects through apply's privileged macro path.
 (define (exp-call-macro m args) (apply m args))
 
+(define (exp-method-names params)
+  (if (pair? params)
+      (cons (if (pair? (car params)) (car (car params)) (car params))
+            (exp-method-names (cdr params)))
+      '()))
+
+(define (exp-method form scope)
+  (let ((head (if (pair? (cdr form)) (car (cdr form)) nil)))
+    (if (and (pair? head) (list? head))
+        (cons 'define-method
+          (cons head (exp-body (cdr (cdr form))
+                              (append (exp-method-names (cdr head)) scope))))
+        form)))
+
 ;; --- the expander proper ----------------------------------------------------
 
 (define (exp-form form scope)
@@ -242,6 +257,11 @@
                    (list 'quasiquote (exp-qq (car (cdr form)) 1 scope)))
                   ((or (eq? head 'lambda) (eq? head 'fn)) (exp-lambda form scope))
                   ((exp-define-head? head) (exp-define form scope))
+                  ((or (eq? head 'define-type) (eq? head 'define-generic)
+                       (eq? head 'reset-type!) (eq? head 'reset-generic!))
+                   (if (exp-memq head scope) (exp-list form scope) form))
+                  ((eq? head 'define-method)
+                   (if (exp-memq head scope) (exp-list form scope) (exp-method form scope)))
                   ((eq? head 'defmacro) (exp-defmacro form scope))
                   ((eq? head 'set!) (exp-set! form scope))
                   ((eq? head 'let) (exp-let form scope))

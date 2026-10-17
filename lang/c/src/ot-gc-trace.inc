@@ -53,8 +53,22 @@ static void OT_GC_TRACE_OBJECT(ots* state, ot_obj* object) {
     }
     case OBJ_TABLE: {
       ot_table_obj* table = (ot_table_obj*)object;
+      OT_GC_TRACE_SLOT(state, &table->descriptor);
       OT_GC_TRACE_SLOT(state, &table->entries);
       OT_GC_TRACE_SLOT(state, &table->index);
+      break;
+    }
+    case OBJ_DISPATCH_TYPE: {
+      ot_dispatch_type_obj* type = (ot_dispatch_type_obj*)object;
+      OT_GC_TRACE_SLOT(state, &type->name);
+      OT_GC_TRACE_SLOT(state, &type->owner);
+      break;
+    }
+    case OBJ_GENERIC: {
+      ot_generic_obj* generic = (ot_generic_obj*)object;
+      OT_GC_TRACE_SLOT(state, &generic->name);
+      OT_GC_TRACE_SLOT(state, &generic->owner);
+      OT_GC_TRACE_SLOT(state, &generic->methods);
       break;
     }
     case OBJ_BUFFER: {
@@ -182,6 +196,7 @@ static void OT_GC_TRACE_ROOTS(ots* state) {
   OT_GC_TRACE_SLOT(state, &state->core_namespace);
   OT_GC_TRACE_SLOT(state, &state->expander);
   OT_GC_TRACE_SLOT(state, &state->type_parents);
+  OT_GC_TRACE_SLOT(state, &state->dispatch_types);
   OT_GC_TRACE_VM(state, &state->vm);
 }
 

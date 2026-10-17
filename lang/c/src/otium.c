@@ -155,6 +155,11 @@ static bool special_name(const char* bytes, size_t length) {
       "in-ns",
       "ns",
       "require",
+      "define-type",
+      "define-generic",
+      "define-method",
+      "reset-type!",
+      "reset-generic!",
   };
   for (size_t i = 0; i < sizeof names / sizeof names[0]; i++)
     if (strlen(names[i]) == length && memcmp(names[i], bytes, length) == 0) return true;
@@ -300,12 +305,14 @@ ot_type ot_value_type(otv value) {
     case OBJ_ARRAY: return OT_TYPE_ARRAY;
     case OBJ_TABLE: return OT_TYPE_TABLE;
     case OBJ_BUFFER: return OT_TYPE_BUFFER;
+    case OBJ_GENERIC:
     case OBJ_FUNCTION:
     case OBJ_NAT: return OT_TYPE_FUNCTION;
     case OBJ_MACRO: return OT_TYPE_MACRO;
     case OBJ_PARAM: return OT_TYPE_PARAM;
     case OBJ_RESTART: return OT_TYPE_RESTART;
     case OBJ_EXT: return OT_TYPE_EXT;
+    case OBJ_DISPATCH_TYPE: return OT_TYPE_DESCRIPTOR;
     default: return OT_TYPE_INTERNAL;
   }
 }
@@ -410,6 +417,7 @@ otv ot_table_new(ots* state, size_t capacity) {
   index = make_bytes(state, capacity * 2 * sizeof(uint32_t));
   memset(as_bytes(index)->data, 0, capacity * 2 * sizeof(uint32_t));
   ot_table_obj* table = must_alloc(state, sizeof(*table), OBJ_TABLE);
+  ot_store(state, table, &table->descriptor, ot_nil);
   ot_store(state, table, &table->entries, entries);
   ot_store(state, table, &table->index, index);
   table->length = 0;
@@ -491,6 +499,8 @@ static uint32_t value_hash(ots* state, otv value) {
       if (table->stable_id == 0) table->stable_id = ++state->next_stable_id;
       return (uint32_t)table->stable_id;
     }
+    case OBJ_DISPATCH_TYPE: return (uint32_t)((ot_dispatch_type_obj*)ot_as_obj(value))->stable_id;
+    case OBJ_GENERIC: return (uint32_t)((ot_generic_obj*)ot_as_obj(value))->stable_id;
     default: return (uint32_t)((uintptr_t)value >> 3u);
   }
 }
@@ -861,6 +871,24 @@ static void render_value(ots* state, buf* out, otv value, bool display, unsigned
       buf_cstr(out, "#<fn ");
       render_name(out, ((ot_nat_obj*)ot_as_obj(value))->name, false);
       buf_byte(out, '>');
+      break;
+    }
+    case OBJ_DISPATCH_TYPE: {
+      ot_dispatch_type_obj* type = (ot_dispatch_type_obj*)ot_as_obj(value);
+      buf_cstr(out, "#<type ");
+      render_name(out, type->owner, false);
+      buf_cstr(out, "/");
+      render_name(out, type->name, false);
+      buf_cstr(out, ">");
+      break;
+    }
+    case OBJ_GENERIC: {
+      ot_generic_obj* generic = (ot_generic_obj*)ot_as_obj(value);
+      buf_cstr(out, "#<generic ");
+      render_name(out, generic->owner, false);
+      buf_cstr(out, "/");
+      render_name(out, generic->name, false);
+      buf_cstr(out, ">");
       break;
     }
     case OBJ_MACRO: buf_cstr(out, "#<macro>"); break;
@@ -1661,6 +1689,7 @@ static otv bind_parameters(ots* state, otv function_value, otv* args, size_t arg
   X(BC_REQUIRE, '\'', vm_namespace, true)                                                       \
   X(BC_CONS, '(', vm_constructor, false)                                                         \
   X(BC_APPEND, ')', vm_constructor, false)                                                       \
+  X(BC_GENERIC_DECL, '*', vm_namespace, true)                                                    \
   X(BC_INTRINSIC, 0x80, vm_intrinsic, true)
 
 #define OT_DECLARE_OPCODE(NAME, VALUE, LABEL, OPERAND) NAME = VALUE,
@@ -1678,6 +1707,7 @@ typedef enum bytecode_op { OT_BYTECODE_OPS(OT_DECLARE_OPCODE) } bytecode_op;
 typedef struct bytecode_compiler {
   buf bytes;
   otv constants;
+  bool declarations_allowed;
 } bytecode_compiler;
 
 static void bytecode_emit(bytecode_compiler* compiler, bytecode_op op) {
@@ -1730,6 +1760,10 @@ static void bytecode_emit_constant(ots* state, bytecode_compiler* compiler, byte
 
 static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form, otv env,
                                bool tail);
+static otv generic_error(ots* state, const char* code, const char* message);
+static bool compile_generic_declaration(ots* state, bytecode_compiler* compiler, otv form, otv env);
+static otv generic_select(ots* state, otv generic, otv* args, size_t argc);
+static otv execute_generic_declaration(ots* state, otv descriptor);
 static otv nat_add(ots* state, otv* args, int argc);
 static otv nat_subtract(ots* state, otv* args, int argc);
 static otv nat_num_equal(ots* state, otv* args, int argc);
@@ -1915,8 +1949,20 @@ static bool compile_sequence(ots* state, bytecode_compiler* compiler, otv forms,
   return !compiler->bytes.failed;
 }
 
+static bool compile_expression_inner(ots* state, bytecode_compiler* compiler, otv form, otv env,
+                                     bool tail, bool declarations_allowed);
+
 static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form, otv env,
                                bool tail) {
+  bool allowed = compiler->declarations_allowed;
+  compiler->declarations_allowed = false;
+  bool result = compile_expression_inner(state, compiler, form, env, tail, allowed);
+  compiler->declarations_allowed = allowed;
+  return result;
+}
+
+static bool compile_expression_inner(ots* state, bytecode_compiler* compiler, otv form, otv env,
+                                     bool tail, bool declarations_allowed) {
   OT_FRAME_SCOPED(state, &compiler->constants, &form, &env);
   if (is_type(form, OBJ_SYMBOL)) {
     size_t location;
@@ -1940,9 +1986,23 @@ static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form
 
   otv head = as_pair(form)->car;
   OT_FRAME_SCOPED(state, &head);
-  if (is_type(head, OBJ_SYMBOL) && as_name(head)->special_form) {
+  bool generic_form = is_type(head, OBJ_SYMBOL) &&
+                      (symbol_is(head, "define-type") || symbol_is(head, "define-generic") ||
+                       symbol_is(head, "define-method") || symbol_is(head, "reset-type!") ||
+                       symbol_is(head, "reset-generic!"));
+  if (is_type(head, OBJ_SYMBOL) && as_name(head)->special_form &&
+      !(generic_form && is_type(env_binding(env, head), OBJ_BINDING))) {
     otv args = as_pair(form)->cdr;
     OT_FRAME_SCOPED(state, &args);
+    if (symbol_is(head, "define-type") || symbol_is(head, "define-generic") ||
+        symbol_is(head, "define-method") || symbol_is(head, "reset-type!") ||
+        symbol_is(head, "reset-generic!")) {
+      if (!declarations_allowed) {
+        generic_error(state, "invalid-declaration", "declarations require top-level context");
+        return false;
+      }
+      return compile_generic_declaration(state, compiler, form, env);
+    }
     if (symbol_is(head, "quote")) {
       otv value;
       if (!list_nth(args, 0, &value) || list_tail(args, 1) != ot_null) {
@@ -2020,8 +2080,10 @@ static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form
           descriptor);
       return !compiler->bytes.failed;
     }
-    if (symbol_is(head, "begin") || symbol_is(head, "do"))
+    if (symbol_is(head, "begin") || symbol_is(head, "do")) {
+      compiler->declarations_allowed = declarations_allowed;
       return compile_sequence(state, compiler, args, env, tail);
+    }
     if (symbol_is(head, "if")) {
       size_t count = proper_list(args) ? list_length(args) : 0;
       if (count < 2 || count > 3) {
@@ -2581,7 +2643,7 @@ static otv make_code(ots* state, const buf* bytes, otv constants, otv params, ot
 
 static otv compile_forms(ots* state, otv forms, otv env, otv params, otv name) {
   OT_FRAME_SCOPED(state, &forms, &env, &params, &name);
-  bytecode_compiler compiler = {.constants = ot_nil};
+  bytecode_compiler compiler = {.constants = ot_nil, .declarations_allowed = env == ot_nil};
   compiler.constants = ot_array_new(state, 8);
   OT_FRAME_SCOPED(state, &compiler.constants);
   if (!compile_sequence(state, &compiler, forms, env, true)) {
@@ -2731,6 +2793,13 @@ static otv apply_value(ots* state, otv callable, otv* args, size_t argc, bool al
   ot_frame args_frame;
   ot_frame_push(state, &args_frame, roots, root_count);
   otv result;
+  if (is_type(callable, OBJ_GENERIC)) {
+    callable = generic_select(state, callable, args, argc);
+    if (callable == OT_UNWIND) {
+      ot_frame_pop(state, &args_frame);
+      return OT_UNWIND;
+    }
+  }
   if (is_type(callable, OBJ_NAT)) {
     ot_nat_obj* native = (ot_nat_obj*)ot_as_obj(callable);
     if (native->context_function != NULL)
@@ -2782,6 +2851,10 @@ static bool vm_enter_call(ots* state, size_t argc, bool tail) {
   size_t call_base = state->vm.vm_stack_count - argc - 1;
   otv callable = state->vm.vm_stack[call_base];
   OT_FRAME_SCOPED(state, &callable);
+  if (is_type(callable, OBJ_GENERIC)) {
+    callable = generic_select(state, callable, state->vm.vm_stack + call_base + 1, argc);
+    if (callable == OT_UNWIND) return false;
+  }
   if (is_type(callable, OBJ_FUNCTION)) {
     otv env = bind_parameters(state, callable, state->vm.vm_stack + call_base + 1, argc);
     if (env == OT_UNWIND) return false;
@@ -2845,7 +2918,8 @@ static bool vm_enter_call(ots* state, size_t argc, bool tail) {
 #if OT_COMPUTED_GOTO
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
-#define VM_LABEL(NAME) NAME:
+#define VM_LABEL(NAME)                                                                             \
+  NAME:
 #define VM_NEXT() goto vm_fast_dispatch
 #else
 #define VM_LABEL(NAME)
@@ -3072,14 +3146,16 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       continue;
     }
     VM_LABEL(vm_namespace)
-    if (instruction == BC_IN_NS || instruction == BC_REQUIRE) {
+    if (instruction == BC_IN_NS || instruction == BC_REQUIRE || instruction == BC_GENERIC_DECL) {
       if (operand >= code->constant_count) {
         (void)ot_raise(state, "vm: namespace constant out of range");
         return vm_unwind_to(state, floor);
       }
       otv value = as_slots(as_array(code->constants)->slots)->values[operand];
       otv result = ot_nil;
-      if (instruction == BC_IN_NS) {
+      if (instruction == BC_GENERIC_DECL) {
+        result = execute_generic_declaration(state, value);
+      } else if (instruction == BC_IN_NS) {
         if (!is_type(value, OBJ_SYMBOL)) result = ot_raise(state, "vm: invalid namespace name");
         else state->vm.current_namespace = namespace_find(state, value, true);
       } else {
@@ -3382,7 +3458,7 @@ static otv require_one(ots* state, otv spec, otv caller) {
   OT_FRAME_SCOPED(state, &target);
   ot_namespace_obj* space = (ot_namespace_obj*)ot_as_obj(target);
   space = (ot_namespace_obj*)ot_as_obj(target);
-  if (!space->loaded || reload) {
+  if (!space->loaded || (reload && !symbol_is(name, "otium.generic"))) {
     if (space->loading) return ot_raise(state, "require: circular load");
     space->loading = true;
     state->vm.current_namespace = target;
@@ -4109,7 +4185,10 @@ static otv nat_number_p(ots* state, otv* args, int argc) {
 
 static otv nat_procedure_p(ots* state, otv* args, int argc) {
   if (need_arity(state, "procedure?", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
-  return is_type(args[0], OBJ_FUNCTION) || is_type(args[0], OBJ_NAT) ? ot_true : ot_false;
+  return is_type(args[0], OBJ_FUNCTION) || is_type(args[0], OBJ_NAT) ||
+                 is_type(args[0], OBJ_GENERIC)
+             ? ot_true
+             : ot_false;
 }
 
 static otv nat_list_p(ots* state, otv* args, int argc) {
@@ -4144,9 +4223,10 @@ static otv nat_equal(ots* state, otv* args, int argc) {
 
 static otv nat_type(ots* state, otv* args, int argc) {
   if (need_arity(state, "type", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
-  static const char* names[] = {"nil",      "null",   "boolean", "int",     "float",   "symbol",
-                                "keyword",  "string", "pair",    "array",   "table",   "buffer",
-                                "function", "macro",  "param",   "restart", "foreign", "internal"};
+  static const char* names[] = {"nil",     "null",    "boolean",         "int",     "float",
+                                "symbol",  "keyword", "string",          "pair",    "array",
+                                "table",   "buffer",  "function",        "macro",   "param",
+                                "restart", "foreign", "type-descriptor", "internal"};
   ot_type type = ot_value_type(args[0]);
   return ot_intern(state, names[type], strlen(names[type]), true);
 }
@@ -4536,6 +4616,8 @@ static otv nat_copy(ots* state, otv* args, int argc) {
     size_t used = as_table(args[0])->used;
     otv output = ot_table_new(state, length);
     OT_FRAME_SCOPED(state, &output);
+    ot_table_obj* copied = as_table(output);
+    ot_store(state, copied, &copied->descriptor, as_table(args[0])->descriptor);
     for (size_t i = 0; i < used; i++) {
       ot_table_obj* source = as_table(args[0]);
       ot_entries_obj* entries = as_entries(source->entries);
@@ -5466,6 +5548,460 @@ typedef struct nat_def {
   ot_nat function;
 } nat_def;
 
+/* Typed tables and multimethods. */
+/* Matching uses exact descriptor identity and unspecialized arguments. */
+#define as_dispatch_type(V) ((ot_dispatch_type_obj*)ot_as_obj(V))
+#define as_generic(V) ((ot_generic_obj*)ot_as_obj(V))
+
+static otv generic_error(ots* state, const char* code, const char* message) {
+  otv condition = ot_table_new(state, 4);
+  otv key = ot_nil, value = ot_nil;
+  OT_FRAME_SCOPED(state, &condition, &key, &value);
+  key = ot_intern(state, "type", 4, true);
+  value = ot_intern(state, "error", 5, false);
+  ot_table_put(state, condition, key, value);
+  key = ot_intern(state, "code", 4, true);
+  value = ot_intern(state, code, strlen(code), false);
+  ot_table_put(state, condition, key, value);
+  key = ot_intern(state, "message", 7, true);
+  value = ot_make_string(state, message, strlen(message));
+  ot_table_put(state, condition, key, value);
+  return ot_raise_value(state, condition);
+}
+
+static otv new_dispatch_type(ots* state, otv owner, otv name, bool builtin) {
+  OT_FRAME_SCOPED(state, &owner, &name);
+  ot_dispatch_type_obj* type = must_alloc(state, sizeof(*type), OBJ_DISPATCH_TYPE);
+  ot_store(state, type, &type->owner, owner);
+  ot_store(state, type, &type->name, name);
+  type->builtin = builtin;
+  type->stable_id = ++state->next_stable_id;
+  return ot_from_obj(type);
+}
+
+static otv dispatch_type(ots* state, otv value) {
+  if (is_type(value, OBJ_TABLE) && as_table(value)->descriptor != ot_nil)
+    return as_table(value)->descriptor;
+  return as_slots(state->dispatch_types)->values[ot_value_type(value)];
+}
+
+static bool same_signature(otv a, otv b) {
+  size_t n = as_array(a)->length;
+  if (n != as_array(b)->length) return false;
+  for (size_t i = 0; i < n; i++)
+    if (as_slots(as_array(a)->slots)->values[i] != as_slots(as_array(b)->slots)->values[i])
+      return false;
+  return true;
+}
+
+static bool signature_applies(ots* state, otv signature, otv* args, size_t argc) {
+  for (size_t i = 0; i < argc; i++) {
+    otv type = as_slots(as_array(signature)->slots)->values[i];
+    if (type != ot_false && type != dispatch_type(state, args[i])) return false;
+  }
+  return true;
+}
+
+static bool signature_dominates(otv a, otv b) {
+  bool strict = false;
+  for (size_t i = 0; i < as_array(a)->length; i++) {
+    otv x = as_slots(as_array(a)->slots)->values[i];
+    otv y = as_slots(as_array(b)->slots)->values[i];
+    if (x == y) continue;
+    if (y != ot_false || x == ot_false) return false;
+    strict = true;
+  }
+  return strict;
+}
+
+/* Selection allocates only on errors. The VM enters the selected function itself. */
+static otv generic_select(ots* state, otv generic, otv* args, size_t argc) {
+  if (argc != as_generic(generic)->arity)
+    return generic_error(state, "wrong-arity", "generic called with incorrect arity");
+  otv best = ot_nil;
+  size_t count = 0;
+  for (otv cursor = as_generic(generic)->methods; cursor != ot_null;
+       cursor = as_pair(cursor)->cdr) {
+    otv method = as_pair(cursor)->car;
+    otv signature = as_pair(method)->car;
+    if (!signature_applies(state, signature, args, argc)) continue;
+    bool dominated = false;
+    for (otv other = as_generic(generic)->methods; other != ot_null; other = as_pair(other)->cdr) {
+      otv candidate = as_pair(as_pair(other)->car)->car;
+      if (signature_applies(state, candidate, args, argc) &&
+          signature_dominates(candidate, signature)) {
+        dominated = true;
+        break;
+      }
+    }
+    if (!dominated) {
+      best = as_pair(method)->cdr;
+      count++;
+    }
+  }
+  if (count == 1) return best;
+  buf message = {0};
+  buf_cstr(&message, count == 0 ? "missing method for " : "ambiguous methods for ");
+  render_value(state, &message, generic, false, 0);
+  buf_cstr(&message, " with types (");
+  for (size_t i = 0; i < argc; i++) {
+    if (i) buf_cstr(&message, " ");
+    render_value(state, &message, dispatch_type(state, args[i]), false, 0);
+  }
+  buf_cstr(&message, ")");
+  if (count > 1) {
+    buf_cstr(&message, "; applicable signatures: ");
+    for (otv cursor = as_generic(generic)->methods; cursor != ot_null;
+         cursor = as_pair(cursor)->cdr) {
+      otv signature = as_pair(as_pair(cursor)->car)->car;
+      if (signature_applies(state, signature, args, argc)) {
+        render_value(state, &message, signature, false, 0);
+        buf_cstr(&message, " ");
+      }
+    }
+    buf_cstr(&message, "; inspect generic-methods and remove stale signatures with remove-method!");
+  }
+  buf_byte(&message, '\0');
+  otv result = generic_error(state, count == 0 ? "missing-method" : "ambiguous-method",
+                             message.failed ? "method selection failed" : message.data);
+  buf_free(&message);
+  return result;
+}
+
+static otv signature_from_list(ots* state, otv generic, otv list) {
+  OT_FRAME_SCOPED(state, &generic, &list);
+  if (!is_type(generic, OBJ_GENERIC))
+    return generic_error(state, "not-generic", "expected generic");
+  size_t length;
+  if (!proper_list_length(list, &length) || length != as_generic(generic)->arity)
+    return generic_error(state, "invalid-signature", "signature has incorrect arity");
+  for (otv p = list; p != ot_null; p = as_pair(p)->cdr)
+    if (as_pair(p)->car != ot_false && !is_type(as_pair(p)->car, OBJ_DISPATCH_TYPE))
+      return generic_error(state, "invalid-signature", "expected descriptor or #f");
+  otv signature = ot_array_new(state, length);
+  OT_FRAME_SCOPED(state, &signature);
+  while (list != ot_null) {
+    array_push(state, &signature, as_pair(list)->car);
+    list = as_pair(list)->cdr;
+  }
+  return signature;
+}
+
+static otv register_method(ots* state, otv generic, otv signature, otv function) {
+  OT_FRAME_SCOPED(state, &generic, &signature, &function);
+  for (otv p = as_generic(generic)->methods; p != ot_null; p = as_pair(p)->cdr) {
+    otv method = as_pair(p)->car;
+    if (same_signature(as_pair(method)->car, signature)) {
+      ot_pair_obj* pair = as_pair(method);
+      ot_store(state, pair, &pair->cdr, function);
+      return ot_nil;
+    }
+  }
+  otv method = ot_cons(state, signature, function);
+  OT_FRAME_SCOPED(state, &method);
+  otv methods = ot_cons(state, method, as_generic(generic)->methods);
+  ot_generic_obj* object = as_generic(generic);
+  ot_store(state, object, &object->methods, methods);
+  return ot_nil;
+}
+
+static bool compile_generic_declaration(ots* state, bytecode_compiler* compiler, otv form,
+                                        otv env) {
+  OT_FRAME_SCOPED(state, &compiler->constants, &form, &env);
+  if (env != ot_nil) {
+    generic_error(state, "invalid-declaration", "generic declarations require top-level context");
+    return false;
+  }
+  if (!proper_list(form) || list_length(form) < 2) {
+    generic_error(state, "invalid-declaration", "malformed generic declaration");
+    return false;
+  }
+  otv kind = as_pair(form)->car, head = as_pair(as_pair(form)->cdr)->car;
+  otv name = head, params = ot_null, signature = ot_null, code = ot_nil;
+  OT_FRAME_SCOPED(state, &kind, &head, &name, &params, &signature, &code);
+  bool method = symbol_is(kind, "define-method");
+  bool type = symbol_is(kind, "define-type") || symbol_is(kind, "reset-type!");
+  if (!type) {
+    if (!is_type(head, OBJ_PAIR) || !proper_list(head)) {
+      generic_error(state, "invalid-declaration", "expected fixed parameter list");
+      return false;
+    }
+    name = as_pair(head)->car;
+  }
+  if (!is_type(name, OBJ_SYMBOL) ||
+      (!method && memchr(as_name(name)->bytes, '/', as_name(name)->length)) ||
+      (!method && list_length(form) != 2) || (method && list_length(form) < 3)) {
+    generic_error(state, "invalid-declaration", "invalid declaration name or body");
+    return false;
+  }
+  if (!type) {
+    otv rest = as_pair(head)->cdr;
+    OT_FRAME_SCOPED(state, &rest);
+    while (rest != ot_null) {
+      otv parameter = as_pair(rest)->car, specializer = ot_false;
+      OT_FRAME_SCOPED(state, &parameter, &specializer);
+      if (method && is_type(parameter, OBJ_PAIR) && list_length(parameter) == 2 &&
+          proper_list(parameter)) {
+        specializer = as_pair(as_pair(parameter)->cdr)->car;
+        parameter = as_pair(parameter)->car;
+        if (!is_type(specializer, OBJ_SYMBOL)) parameter = ot_nil;
+      }
+      if (!is_type(parameter, OBJ_SYMBOL) || symbol_is(parameter, "&")) {
+        generic_error(state, "invalid-declaration", "expected parameter or (parameter Type)");
+        return false;
+      }
+      for (otv p = params; p != ot_null; p = as_pair(p)->cdr)
+        if (as_pair(p)->car == parameter) {
+          generic_error(state, "invalid-declaration", "duplicate parameter");
+          return false;
+        }
+      params = ot_cons(state, parameter, params);
+      signature = ot_cons(state, specializer, signature);
+      rest = as_pair(rest)->cdr;
+    }
+    params = nat_reverse(state, &params, 1);
+    signature = nat_reverse(state, &signature, 1);
+  }
+  if (method) {
+    code = compile_function_code(state, params, list_tail(form, 2), ot_nil,
+                                 state->vm.current_namespace, name);
+    if (code == OT_UNWIND) return false;
+  }
+  otv fields[] = {kind, name, signature, code};
+  otv descriptor = make_descriptor(state, fields, 4);
+  bytecode_emit_constant(state, compiler, BC_GENERIC_DECL, descriptor);
+  return !compiler->bytes.failed;
+}
+
+static otv execute_generic_declaration(ots* state, otv descriptor) {
+  otv kind = as_slots(as_array(descriptor)->slots)->values[0];
+  otv name = as_slots(as_array(descriptor)->slots)->values[1];
+  otv signature = as_slots(as_array(descriptor)->slots)->values[2];
+  otv code = as_slots(as_array(descriptor)->slots)->values[3];
+  otv space = state->vm.current_namespace;
+  otv owner = ((ot_namespace_obj*)ot_as_obj(space))->name;
+  OT_FRAME_SCOPED(state, &descriptor, &kind, &name, &signature, &code, &space, &owner);
+  if (symbol_is(kind, "define-method")) {
+    otv var = resolve_var(state, space, name, false);
+    if (!is_type(var, OBJ_VAR))
+      return generic_error(state, "not-generic", "method target is not defined");
+    otv generic = ((ot_var_obj*)ot_as_obj(var))->value;
+    OT_FRAME_SCOPED(state, &generic);
+    if (!is_type(generic, OBJ_GENERIC))
+      return generic_error(state, "not-generic", "method target is not generic");
+    if (list_length(signature) != as_generic(generic)->arity)
+      return generic_error(state, "wrong-arity", "method arity differs from generic");
+    otv resolved = ot_array_new(state, as_generic(generic)->arity);
+    OT_FRAME_SCOPED(state, &resolved);
+    while (signature != ot_null) {
+      otv type = as_pair(signature)->car;
+      if (type != ot_false) {
+        otv type_var = resolve_var(state, space, type, false);
+        if (!is_type(type_var, OBJ_VAR) ||
+            !is_type(((ot_var_obj*)ot_as_obj(type_var))->value, OBJ_DISPATCH_TYPE))
+          return generic_error(state, "invalid-specializer", "expected type descriptor");
+        type = ((ot_var_obj*)ot_as_obj(type_var))->value;
+      }
+      array_push(state, &resolved, type);
+      signature = as_pair(signature)->cdr;
+    }
+    otv function = make_bytecode_function(state, code, ot_nil, space, name);
+    return register_method(state, generic, resolved, function);
+  }
+  bool type = symbol_is(kind, "define-type") || symbol_is(kind, "reset-type!");
+  bool reset = symbol_is(kind, "reset-type!") || symbol_is(kind, "reset-generic!");
+  otv existing = namespace_var(state, space, name, false);
+  otv referred = namespace_var(state, space, name, true);
+  if (symbol_is(owner, "otium.generic") || (existing == ot_nil && referred != ot_nil) ||
+      (reset && existing == ot_nil) || as_name(name)->special_form)
+    return generic_error(state, "binding-conflict", "declaration conflicts with existing binding");
+  size_t arity = list_length(signature);
+  if (existing != ot_nil && !reset) {
+    otv old = ((ot_var_obj*)ot_as_obj(existing))->value;
+    bool valid = type ? is_type(old, OBJ_DISPATCH_TYPE) && as_dispatch_type(old)->owner == owner &&
+                            as_dispatch_type(old)->name == name
+                      : is_type(old, OBJ_GENERIC) && as_generic(old)->owner == owner &&
+                            as_generic(old)->name == name && as_generic(old)->arity == arity;
+    if (!valid)
+      return generic_error(state, "binding-conflict",
+                           "incompatible declaration; use explicit reset");
+    return ot_nil;
+  }
+  otv made = ot_nil;
+  OT_FRAME_SCOPED(state, &made);
+  if (type) made = new_dispatch_type(state, owner, name, false);
+  else {
+    ot_generic_obj* generic = must_alloc(state, sizeof(*generic), OBJ_GENERIC);
+    ot_store(state, generic, &generic->owner, owner);
+    ot_store(state, generic, &generic->name, name);
+    ot_store(state, generic, &generic->methods, ot_null);
+    generic->arity = arity;
+    generic->stable_id = ++state->next_stable_id;
+    made = ot_from_obj(generic);
+  }
+  define_var(state, space, name, made, ot_nil, false);
+  return ot_nil;
+}
+
+static otv nat_dispatch_type(ots* state, otv* args, int argc) {
+  if (need_arity(state, "dispatch-type", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  return dispatch_type(state, args[0]);
+}
+static otv nat_type_descriptor_p(ots* state, otv* args, int argc) {
+  if (need_arity(state, "type-descriptor?", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  return is_type(args[0], OBJ_DISPATCH_TYPE) ? ot_true : ot_false;
+}
+static otv nat_typed_map_p(ots* state, otv* args, int argc) {
+  if (need_arity(state, "typed-map?", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  return is_type(args[0], OBJ_TABLE) && as_table(args[0])->descriptor != ot_nil ? ot_true
+                                                                                : ot_false;
+}
+static otv nat_generic_p(ots* state, otv* args, int argc) {
+  if (need_arity(state, "generic?", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  return is_type(args[0], OBJ_GENERIC) ? ot_true : ot_false;
+}
+static otv nat_type_name(ots* state, otv* args, int argc) {
+  if (need_arity(state, "type-name", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_DISPATCH_TYPE))
+    return generic_error(state, "invalid-specializer", "expected descriptor");
+  buf name = {0};
+  render_name(&name, as_dispatch_type(args[0])->owner, false);
+  buf_cstr(&name, "/");
+  render_name(&name, as_dispatch_type(args[0])->name, false);
+  otv result = ot_intern(state, name.data, name.length, false);
+  buf_free(&name);
+  return result;
+}
+static otv nat_make_typed_map(ots* state, otv* args, int argc) {
+  if (argc < 1 || !is_type(args[0], OBJ_DISPATCH_TYPE) || as_dispatch_type(args[0])->builtin)
+    return generic_error(state, "invalid-specializer", "make expects a user-defined descriptor");
+  if (argc % 2 != 1)
+    return generic_error(state, "invalid-field-operation", "make expects symbol/value pairs");
+  for (int i = 1; i < argc; i += 2)
+    if (!is_type(args[i], OBJ_SYMBOL))
+      return generic_error(state, "invalid-field-operation", "field key must be a symbol");
+  otv table = ot_table_new(state, (size_t)argc / 2);
+  OT_FRAME_SCOPED(state, &table);
+  ot_table_obj* object = as_table(table);
+  ot_store(state, object, &object->descriptor, args[0]);
+  for (int i = 1; i < argc; i += 2) ot_table_put(state, table, args[i], args[i + 1]);
+  return table;
+}
+static bool field_arguments(otv* args) {
+  return is_type(args[0], OBJ_TABLE) && as_table(args[0])->descriptor != ot_nil &&
+         is_type(args[1], OBJ_SYMBOL);
+}
+static otv nat_field_ref(ots* state, otv* args, int argc) {
+  if (need_arity(state, "field-ref", argc, 2, 3) == OT_UNWIND) return OT_UNWIND;
+  if (!field_arguments(args))
+    return generic_error(state, "invalid-field-operation", "expected typed map and symbol key");
+  otv found = ot_table_get(state, args[0], args[1], OT_UNDEFINED);
+  if (found != OT_UNDEFINED) return found;
+  return argc == 3 ? args[2] : generic_error(state, "missing-field", "field is absent");
+}
+static otv nat_field_set(ots* state, otv* args, int argc) {
+  if (need_arity(state, "field-set!", argc, 3, 3) == OT_UNWIND) return OT_UNWIND;
+  if (!field_arguments(args))
+    return generic_error(state, "invalid-field-operation", "expected typed map and symbol key");
+  ot_table_put(state, args[0], args[1], args[2]);
+  return args[2];
+}
+static otv nat_field_has(ots* state, otv* args, int argc) {
+  if (need_arity(state, "field-has?", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!field_arguments(args))
+    return generic_error(state, "invalid-field-operation", "expected typed map and symbol key");
+  return ot_table_get(state, args[0], args[1], OT_UNDEFINED) != OT_UNDEFINED ? ot_true : ot_false;
+}
+static otv nat_field_delete(ots* state, otv* args, int argc) {
+  otv found = nat_field_has(state, args, argc);
+  if (found == OT_UNWIND) return found;
+  ot_table_put(state, args[0], args[1], ot_nil);
+  return found;
+}
+static otv nat_field_keys(ots* state, otv* args, int argc) {
+  if (need_arity(state, "field-keys", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_TABLE) || as_table(args[0])->descriptor == ot_nil)
+    return generic_error(state, "invalid-field-operation", "expected typed map");
+  otv result = ot_null;
+  OT_FRAME_SCOPED(state, &result);
+  size_t used = as_table(args[0])->used;
+  for (size_t i = used; i > 0; i--) {
+    ot_entries_obj* entries = as_entries(as_table(args[0])->entries);
+    if (entries->values[i - 1].live) result = ot_cons(state, entries->values[i - 1].key, result);
+  }
+  return result;
+}
+static otv nat_generic_methods(ots* state, otv* args, int argc) {
+  if (need_arity(state, "generic-methods", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_GENERIC))
+    return generic_error(state, "not-generic", "expected generic");
+  otv result = ot_null, cursor = as_generic(args[0])->methods, signature = ot_nil, copy = ot_null;
+  OT_FRAME_SCOPED(state, &result, &cursor, &signature, &copy);
+  while (cursor != ot_null) {
+    signature = as_pair(as_pair(cursor)->car)->car;
+    copy = ot_null;
+    for (size_t i = as_array(signature)->length; i > 0; i--)
+      copy = ot_cons(state, as_slots(as_array(signature)->slots)->values[i - 1], copy);
+    result = ot_cons(state, copy, result);
+    cursor = as_pair(cursor)->cdr;
+  }
+  return result;
+}
+static otv nat_remove_method(ots* state, otv* args, int argc) {
+  if (need_arity(state, "remove-method!", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  otv signature = signature_from_list(state, args[0], args[1]);
+  if (signature == OT_UNWIND) return signature;
+  otv cursor = as_generic(args[0])->methods, previous = ot_nil;
+  while (cursor != ot_null) {
+    if (same_signature(as_pair(as_pair(cursor)->car)->car, signature)) {
+      if (previous == ot_nil) {
+        ot_generic_obj* generic = as_generic(args[0]);
+        ot_store(state, generic, &generic->methods, as_pair(cursor)->cdr);
+      } else {
+        ot_pair_obj* pair = as_pair(previous);
+        ot_store(state, pair, &pair->cdr, as_pair(cursor)->cdr);
+      }
+      return ot_true;
+    }
+    previous = cursor;
+    cursor = as_pair(cursor)->cdr;
+  }
+  return ot_false;
+}
+
+static void generic_module_init(ots* state) {
+  if (state->dispatch_types != ot_nil) return;
+  state->dispatch_types = make_slots(state, OT_TYPE_INTERNAL + 1);
+  static const char* names[] = {"Nil",       "Null",    "Boolean",        "Number", "Number",
+                               "Symbol",    "Keyword", "String",         "Pair",   "Vector",
+                               "Hashtable", "Buffer",  "Procedure",      "Macro",  "Parameter",
+                               "Restart",   "Foreign", "TypeDescriptor", "Other"};
+  otv owner = ((ot_namespace_obj*)ot_as_obj(state->vm.current_namespace))->name;
+  otv name = ot_nil, type = ot_nil;
+  OT_FRAME_SCOPED(state, &owner, &name, &type);
+  for (size_t i = 0; i <= OT_TYPE_INTERNAL; i++) {
+    name = ot_intern(state, names[i], strlen(names[i]), false);
+    if (i == OT_TYPE_FLOAT) type = as_slots(state->dispatch_types)->values[OT_TYPE_INT];
+    else type = new_dispatch_type(state, owner, name, true);
+    ot_slots_obj* slots = as_slots(state->dispatch_types);
+    ot_store(state, slots, &slots->values[i], type);
+    define_var(state, state->vm.current_namespace, name, type, ot_nil, false);
+  }
+  ot_def_nat(state, "make", nat_make_typed_map);
+  ot_def_nat(state, "dispatch-type", nat_dispatch_type);
+  ot_def_nat(state, "type-descriptor?", nat_type_descriptor_p);
+  ot_def_nat(state, "type-name", nat_type_name);
+  ot_def_nat(state, "typed-map?", nat_typed_map_p);
+  ot_def_nat(state, "generic?", nat_generic_p);
+  ot_def_nat(state, "generic-methods", nat_generic_methods);
+  ot_def_nat(state, "remove-method!", nat_remove_method);
+  ot_def_nat(state, "field-ref", nat_field_ref);
+  ot_def_nat(state, "field-set!", nat_field_set);
+  ot_def_nat(state, "field-has?", nat_field_has);
+  ot_def_nat(state, "field-delete!", nat_field_delete);
+  ot_def_nat(state, "field-keys", nat_field_keys);
+}
+
 static const nat_def core_nats[] = {
     {"+", nat_add},
     {"*", nat_multiply},
@@ -5744,6 +6280,7 @@ ots* ot_create(const ot_config* configuration) {
   state->vm.current_namespace = ot_nil;
   state->expander = ot_nil;
   state->type_parents = ot_nil;
+  state->dispatch_types = ot_nil;
   state->vm.condition = ot_nil;
   state->vm.unwind_args = ot_nil;
   state->exts = ot_nil;
@@ -5774,9 +6311,16 @@ ots* ot_create(const ot_config* configuration) {
     ot_destroy(state);
     return NULL;
   }
+  ot_register_module(state, "otium.generic", generic_module_init);
+  otv generic_name = ot_intern(state, "otium.generic", 13, false);
+  state->vm.current_namespace = namespace_find(state, generic_name, true);
+  generic_module_init(state);
+  ((ot_namespace_obj*)ot_as_obj(state->vm.current_namespace))->loaded = true;
   otv user_name = ot_intern(state, "user", 4, false);
   state->vm.current_namespace = namespace_find(state, user_name, true);
+#ifdef OT_WITH_FFI
   ot_register_ffi(state);
+#endif
   state->config.gc_stress = config.gc_stress;
   return state;
 }
@@ -5793,7 +6337,9 @@ void ot_destroy(ots* state) {
     }
     cursor = next;
   }
+#ifdef OT_WITH_FFI
   ot_destroy_ffi(state);
+#endif
   for (ot_global_root* root = state->globals; root != NULL;) {
     ot_global_root* next = root->next;
     ot_host_free(root);

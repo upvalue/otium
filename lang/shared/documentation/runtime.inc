@@ -100,7 +100,7 @@ const char* ot_runtime_documentation(const char* name) {
     {"newline", "(newline)\nWrite a newline to the host output sink and return nil."},
     {"nil?", "(nil? value)\nReturn #t when value is nil, otherwise #f."},
     {"not", "(not value)\nReturn #t for nil or #f; every other value, including (), is truthy."},
-    {"ns", "(ns name [(:require specification ...) ...])\nSelect or create the named namespace, optionally requiring modules. The name is not evaluated."},
+    {"ns", "(ns name [:require clauses])\nSelect a namespace. Optional (:require ...) clauses import modules; a loaded module must declare its requested name."},
     {"null?", "(null? value)\nReturn #t when value is the empty list (), otherwise #f."},
     {"number->string", "(number->string number)\nReturn the number's display representation as a string."},
     {"number?", "(number? value)\nReturn #t when value is an integer or float, otherwise #f."},
@@ -120,7 +120,7 @@ const char* ot_runtime_documentation(const char* name) {
     {"quotient", "(quotient dividend divisor)\nInteger division truncated toward zero. Both arguments must be integers; the divisor must be nonzero."},
     {"read-string", "(read-string string)\nRead exactly one form without evaluating it. Empty input or trailing forms raise an error."},
     {"remainder", "(remainder dividend divisor)\nInteger remainder with the dividend's sign. Both arguments must be integers; the divisor must be nonzero."},
-    {"require", "(require '(name :as alias :refer (names) :reload))\nLoad a module, optionally giving an alias, referring names, or reloading it. Imported vars remain live across redefinition."},
+    {"require", "(require module [:as alias] [:refer (names)] [:reload])\nLoad a namespace. Grouped and quoted specs are also accepted. Search each path directory for .ot then .scm. Reload reevaluates the namespace, preserving defonce values and effects before an error."},
     {"restart-case", "(restart-case expression (name [\"description\"] parameters body ...) ...)\nMake named recovery clauses available during expression and clause evaluation. invoke-restart unwinds to the selected clause; a clause may invoke itself or a sibling restart."},
     {"restart-description", "(restart-description restart)\nReturn a restart's description string, or nil if it has none."},
     {"restart-name", "(restart-name restart)\nReturn a restart's name as a symbol."},
@@ -174,6 +174,8 @@ const char* ot_runtime_documentation(const char* name) {
     {"define-type", "(define-type Name)\nDeclare a stable typed-map descriptor in this namespace. Reload preserves the descriptor; conflicting bindings are errors."},
     {"reset-generic!", "(reset-generic! (name argument ...))\nReplace this declaration with a fresh generic of the given arity and no methods."},
     {"reset-type!", "(reset-type! Name)\nReplace this declaration with a fresh descriptor. Existing objects retain their old descriptor."},
+    {"expander-application", "(expander-application form)\nInternal compiler hook for runtime application lowering."},
+    {"read-file", "(read-file path)\nRead a whole UTF-8 text file into a string; raise an error if it cannot be read."},
   };
   for (size_t i = 0; i < sizeof(entries) / sizeof(*entries); ++i)
     if (!strcmp(name, entries[i].name)) return entries[i].text;

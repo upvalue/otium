@@ -1,0 +1,5 @@
+(require demo.counter :as counter)
+(def callback (fn () (counter/tick!)))
+(println "First callback:" (callback))
+(require demo.counter :as counter :reload)
+(println "Callback after reload, with preserved state:" (callback))

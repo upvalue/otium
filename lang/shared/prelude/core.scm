@@ -55,10 +55,6 @@
 
 ;; --- macros (10.11) ---------------------------------------------------------
 
-(defmacro defn (name params . body)
-  "(defn name parameters body ...)\nDefine a named procedure; shorthand for define with a procedure head."
-  (cons 'def (cons (cons name params) body)))
-
 (defmacro when (test . body)
   "(when test body ...)\nEvaluate body when test is truthy; otherwise return nil."
   `(if ,test (begin ,@body) nil))
@@ -66,28 +62,6 @@
 (defmacro unless (test . body)
   "(unless test body ...)\nEvaluate body when test is falsy; otherwise return nil."
   `(if ,test nil (begin ,@body)))
-
-(defmacro -> (x . forms)
-  "(-> value form ...)\nThread value into the first argument position of each form in turn; a bare name is called with the value."
-  (let ((acc x) (s forms))
-    (while (pair? s)
-      (let ((f (car s)))
-        (set! acc (if (pair? f)
-                      (cons (car f) (cons acc (cdr f)))
-                      (list f acc))))
-      (set! s (cdr s)))
-    acc))
-
-(defmacro ->> (x . forms)
-  "(->> value form ...)\nThread value into the last argument position of each form in turn."
-  (let ((acc x) (s forms))
-    (while (pair? s)
-      (let ((f (car s)))
-        (set! acc (if (pair? f)
-                      (append f (list acc))
-                      (list f acc))))
-      (set! s (cdr s)))
-    acc))
 
 (defmacro dotimes (spec . body)
   "(dotimes (index count) body ...)\nEvaluate count once, then run body with index from 0 below count. Return nil."
@@ -300,33 +274,14 @@
   "(sort sequence)\nReturn an ascending sorted copy, preserving list/array kind. Keys must belong to a supported, consistent orderable class."
   (sort-by identity seq))
 
-(def (group-by keyfn seq)
-  "Table of key -> array of elements, in first-seen key order."
-  (let ((t (table)))
-    (for-each (fn (x)
-                (let ((k (keyfn x)))
-                  (let ((a (get t k)))
-                    (when (nil? a)
-                      (set! a (array))
-                      (put! t k a))
-                    (push! a x))))
-              seq)
-    t))
-
-(def (frequencies seq)
-  "(frequencies sequence)\nReturn a table mapping each distinct element to its occurrence count."
-  (let ((t (table)))
-    (for-each (fn (x) (put! t x (+ 1 (get t x 0)))) seq)
-    t))
-
 ;; --- tables (10.5) ----------------------------------------------------------
 
-(def (assoc coll . kvs)
+(def (put coll . kvs)
   "put! on a shallow copy; (assoc nil ...) builds a fresh table."
   (let ((c (if (nil? coll) (table) (copy coll))))
     (let ((s kvs))
       (while (pair? s)
-        (when (null? (cdr s)) (error "assoc: odd number of key/value arguments"))
+        (when (null? (cdr s)) (error "put: odd number of key/value arguments"))
         (put! c (car s) (car (cdr s)))
         (set! s (cdr (cdr s)))))
     c))
@@ -339,7 +294,7 @@
 
 (def (update coll k f . args)
   "(update collection key procedure argument ...)\nCopy the collection and replace the entry with (procedure (get collection key) argument ...)."
-  (assoc coll k (apply f (get coll k) args)))
+  (put coll k (apply f (get coll k) args)))
 
 (def (merge . ts)
   "New table, left to right; nil arguments skipped."
@@ -378,14 +333,103 @@
 
 ;; --- functional (10.8) ------------------------------------------------------
 
-(def (partial f . pre)
-  "(partial procedure argument ...)\nReturn a procedure that prepends the supplied arguments to its later arguments."
-  (fn args (apply f (append pre args))))
+(def (memq x xs)
+  "Return the list tail starting with an eq? match, or #f."
+  (cond ((null? xs) #f) ((eq? x (car xs)) xs) (else (memq x (cdr xs)))))
+(def (member x xs)
+  "Return the list tail starting with an equal? match, or #f."
+  (cond ((null? xs) #f) ((equal? x (car xs)) xs) (else (member x (cdr xs)))))
+(def (assq x xs)
+  "Find an association-list entry by eq?, or return #f."
+  (cond ((null? xs) #f) ((eq? x (car (car xs))) (car xs)) (else (assq x (cdr xs)))))
+(def (assoc x xs)
+  "Find an association-list entry by equal?, or return #f."
+  (cond ((null? xs) #f) ((equal? x (car (car xs))) (car xs)) (else (assoc x (cdr xs)))))
+(def- (heads xs) (if (null? xs) '() (cons (car (car xs)) (heads (cdr xs)))))
+(def- (tails xs) (if (null? xs) '() (cons (cdr (car xs)) (tails (cdr xs)))))
+(def- (any-empty? xs)
+  (and (pair? xs) (or (null? (car xs)) (any-empty? (cdr xs)))))
+(def (fold-left f init xs & more)
+  "Fold proper lists left, stopping at the shortest list."
+  (let loop ((lists (cons xs more)) (acc init))
+    (if (any-empty? lists) acc (loop (tails lists) (apply f acc (heads lists))))))
+(def (fold-right f init xs & more)
+  "Fold proper lists right, stopping at the shortest list."
+  (let loop ((lists (cons xs more)))
+    (if (any-empty? lists) init (apply f (append (heads lists) (list (loop (tails lists))))))))
+(def (exists f xs & more)
+  "Return the first truthy predicate result, stopping at the shortest list."
+  (let loop ((lists (cons xs more)))
+    (if (any-empty? lists) #f (or (apply f (heads lists)) (loop (tails lists))))))
+(def (for-all f xs & more)
+  "Return the last predicate result, or the first falsy result; stop at the shortest list."
+  (let loop ((lists (cons xs more)) (last #t))
+    (if (any-empty? lists) last
+        (let ((value (apply f (heads lists)))) (if value (loop (tails lists) value) value)))))
 
-(def (comp . fs)
-  "Right-to-left composition; (comp) is identity."
-  (cond ((null? fs) identity)
-        ((null? (cdr fs)) (car fs))
-        (else
-         (let ((inner (apply comp (cdr fs))))
-           (fn args ((car fs) (apply inner args)))))))
+(def (cdar p)
+  "(cdar pair)\nCompose car and cdr."
+  (cdr (car p)))
+(def (caaar p)
+  "(caaar pair)\nCompose car and cdr."
+  (car (car (car p))))
+(def (caadr p)
+  "(caadr pair)\nCompose car and cdr."
+  (car (car (cdr p))))
+(def (cadar p)
+  "(cadar pair)\nCompose car and cdr."
+  (car (cdr (car p))))
+(def (caddr p)
+  "(caddr pair)\nCompose car and cdr."
+  (car (cdr (cdr p))))
+(def (cdaar p)
+  "(cdaar pair)\nCompose car and cdr."
+  (cdr (car (car p))))
+(def (cdadr p)
+  "(cdadr pair)\nCompose car and cdr."
+  (cdr (car (cdr p))))
+(def (cddar p)
+  "(cddar pair)\nCompose car and cdr."
+  (cdr (cdr (car p))))
+(def (cdddr p)
+  "(cdddr pair)\nCompose car and cdr."
+  (cdr (cdr (cdr p))))
+(def (cadddr p)
+  "(cadddr pair)\nCompose car and cdr."
+  (car (cdr (cdr (cdr p)))))
+
+(def (list-tail xs n)
+  "Return the tail at a nonnegative integer index; an index beyond the list is an error."
+  (require-int "list-tail" n)
+  (when (< n 0) (error "list-tail: negative index"))
+  (if (= n 0) xs (list-tail (cdr xs) (- n 1))))
+(def (list-ref xs n)
+  "Return the list element at a nonnegative integer index; an absent index is an error."
+  (car (list-tail xs n)))
+(def positive? pos?)
+(def negative? neg?)
+(def (gcd & xs)
+  "Return the nonnegative greatest common divisor of integer arguments."
+  (fold-left (fn (a b)
+    (require-int "gcd" b)
+    (let loop ((a a) (b (abs b))) (if (= b 0) a (loop b (remainder a b))))) 0 xs))
+(def (lcm & xs)
+  "Return the nonnegative least common multiple of integer arguments."
+  (fold-left (fn (a b)
+    (require-int "lcm" b)
+    (if (or (= a 0) (= b 0)) 0 (abs (* (quotient a (gcd a b)) b)))) 1 xs))
+(def- (string-chain pred a b more)
+  (unless (and (string? a) (string? b)) (error "expected strings"))
+  (and (pred a b) (if (pair? more) (string-chain pred b (car more) (cdr more)) #t)))
+(def (string=? a b & more)
+  "Test equality of successive strings."
+  (string-chain equal? a b more))
+(def (string>? a b & more)
+  "Test descending lexicographic order of successive strings."
+  (string-chain (fn (a b) (string<? b a)) a b more))
+(def (string<=? a b & more)
+  "Test nondecreasing lexicographic order of successive strings."
+  (string-chain (fn (a b) (not (string<? b a))) a b more))
+(def (string>=? a b & more)
+  "Test nonincreasing lexicographic order of successive strings."
+  (string-chain (fn (a b) (not (string<? a b))) a b more))

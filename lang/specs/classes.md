@@ -359,9 +359,8 @@ This replaces:
 It adds abstract types, `call-next-method`, `:around` methods, and instance
 migration.
 
-Typed maps exist on both runtimes, on C as of a recent commit. The test suites,
-`examples/hand/animals-multimethods.ot`, and the Chez multimethod benchmarks
-would move to classes. Nothing outside those uses them yet.
+Typed maps exist on both runtimes, on C as of a recent commit. The test suites and
+`examples/hand/animals-multimethods.ot` would move to classes. Nothing outside those uses them yet.
 
 ## Decisions so far
 

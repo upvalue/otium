@@ -92,7 +92,7 @@ def main():
                 else: os.environ['SDL3_LIBRARY'] = old
             result = run_source(runtime,override,directory,env)
             assert result.returncode != 0 and '/no/such/SDL3-library' in result.stderr, (result.stdout,result.stderr)
-            launch = [sys.executable,str(ROOT/'examples/shared/run-sdl.py'),'--runtime',runtime]
+            launch = [sys.executable,str(ROOT/'examples/run-sdl.py'),'--runtime',runtime]
             result = subprocess.run(launch+['--acceptance','--audio','dummy','--inject-error','--capture',str(directory/(runtime+'.bmp'))],env=env,capture_output=True,text=True,timeout=45)
             unavailable = any(text in result.stderr for text in ('The video driver did not add any displays','No available video device','Unable to open a console terminal','Could not initialize EGL','Could not find a valid EGL device','No available renderers','Couldn\'t find matching render driver'))
             if result.returncode and unavailable and not args.require_accelerated:

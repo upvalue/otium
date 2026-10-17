@@ -63,7 +63,7 @@ def run_once(binary, benchmark, timeout):
     started = time.perf_counter()
     try:
         result = subprocess.run(
-            [binary, benchmark],
+            [binary, "--no-project", benchmark],
             text=True,
             capture_output=True,
             check=False,
@@ -87,8 +87,8 @@ def format_duration(seconds):
 
 def main():
     args = parse_args()
-    binary = args.binary.resolve()
-    benchmark_dir = Path(__file__).resolve().parent / "c"
+    binary = args.binary.absolute()
+    benchmark_dir = Path(__file__).resolve().parent / "workloads"
     requested = args.benchmarks or sorted(benchmark_dir.glob("*.scm"))
     benchmarks = [benchmark.resolve() for benchmark in requested]
 

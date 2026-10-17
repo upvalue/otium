@@ -1,4 +1,4 @@
-(import (chezscheme) (otium runtime))
+(import (chezscheme) (prefix (chezscheme) chez/) (otium runtime))
 
 (define checks 0)
 (define (check label expected actual)
@@ -10,7 +10,7 @@
   (guard (c [else (and (message-condition? c)
                       (equal? message (condition-message c)))])
     (thunk) #f))
-(define (run form) (evaluate form))
+(define (run form) (evaluate '(require chez)) (evaluate form))
 (define directory (cadr (command-line)))
 (load-path (list directory))
 (define (source name forms)
@@ -122,7 +122,7 @@
         '(begin (defmacro later (x) `(+ ,x 1)) (def sequence-result (later 41)))))
 (run '(install-sequence))
 (check "generated begin processes in order" 42 (run 'sequence-result))
-(run '(defmacro with-values () '(begin (values 1) (values 2 3))))
+(run '(defmacro with-values () '(begin (chez/values 1) (chez/values 2 3))))
 (check "generated begin preserves values" '(2 3)
   (call-with-values (lambda () (run '(with-values))) list))
 (run '(defmacro change-space () '(begin (ns switched) (def marker 42))))
@@ -181,7 +181,7 @@
 (check "reserved macro name rejected" #t
   (fails-with? "macroexpand: cannot rebind a core form name"
     (lambda () (run '(defmacro if args 1)))))
-(run '(defmacro several-values () (values 1 2)))
+(run '(defmacro several-values () (chez/values 1 2)))
 (check "transformer must return one datum" #t
   (fails-with? "macro transformer failed" (lambda () (run '(several-values)))))
 (run '(defmacro malformed () '(if)))

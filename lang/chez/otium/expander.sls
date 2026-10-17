@@ -1,5 +1,5 @@
 (library (otium expander)
-  (export make-expander expander-top expander-head)
+  (export make-expander expander-top expander-head install-application!)
   (import (chezscheme) (only (otium reader) read-otium))
 
   ;; The expander itself is shared/prelude/expander.scm, read with the Otium
@@ -7,6 +7,11 @@
   ;; needs no expansion. The runtime supplies the three natives it calls.
   (define-record-type (expander make-expander expander?)
     (fields lookup native-syntax? invoke))
+
+  (define application-name (gensym "otium-call"))
+  (define (install-application! env)
+    (define-top-level-syntax application-name
+      (top-level-syntax 'otium-call (environment '(otium core))) env))
 
   (define current-expander (make-parameter #f))
 
@@ -20,6 +25,8 @@
   (define shared-environment
     (let ([env (copy-environment
                  (environment '(otium core) '(only (otium conditions) error)))])
+      (define-top-level-value 'expander-application
+        (lambda (form) (cons application-name form)) env)
       (define-top-level-value 'expander-macro-var
         (lambda (name) ((expander-lookup (current-expander)) name)) env)
       (define-top-level-value 'expander-invoke-macro

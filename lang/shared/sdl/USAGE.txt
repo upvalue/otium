@@ -37,8 +37,8 @@ The same rule applies on both runtimes.
 
 Run either animated scene:
 
-  python3 examples/shared/run-sdl.py --runtime c --scene shapes
-  python3 examples/shared/run-sdl.py --runtime chez --scene particles
+  python3 examples/run-sdl.py --runtime c --scene shapes
+  python3 examples/run-sdl.py --runtime chez --scene particles
 
 The host watches the shared scene file between frames. Saving it reloads the
 drawing code; R retries immediately. Escape or closing the window exits. Window,
@@ -96,8 +96,8 @@ sandbox without display-server access cannot run the graphics checks.
 
 Real-device audio is a separate smoke test:
 
-  python3 examples/shared/run-sdl.py --runtime c --acceptance --audio real --inject-error
-  python3 examples/shared/run-sdl.py --runtime chez --acceptance --audio real --inject-error
+  python3 examples/run-sdl.py --runtime c --acceptance --audio real --inject-error
+  python3 examples/run-sdl.py --runtime chez --acceptance --audio real --inject-error
 
 The acceptance test verifies that the device consumes queued PCM after resume,
 then refills only below a fixed queue threshold. This is separate from dummy

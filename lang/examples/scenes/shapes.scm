@@ -21,4 +21,4 @@
   (text! 40 42 "OTIUM / LIVE CANVAS" 230 239 249)
   (text! 40 68 "SDL3 HARDWARE RENDERING / PORTABLE FFI" 121 147 175)
   (text! 40 564 revision 75 224 190)
-  (text! 40 588 "EDIT examples/shared/scenes/shapes.scm | R RELOAD | ESC CLOSE" 151 169 192))
+  (text! 40 588 "EDIT examples/scenes/shapes.scm | R RELOAD | ESC CLOSE" 151 169 192))

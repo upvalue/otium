@@ -21,16 +21,8 @@ def bootstrap(runtime, manifest=DEFAULT_MANIFEST):
             raise ValueError('Unsupported SDL typedef representation: ' + name)
     override = os.environ.get('SDL3_LIBRARY')
     candidates = [override] if override is not None else ([data['library']] if data.get('library') else (['libSDL3.dylib'] if platform.system() == 'Darwin' else ['libSDL3.so.0','libSDL3.so']))
-    prefix = "(require '(otium.ffi :as ffi))\n" if runtime == 'c' else '(require otium.ffi :as ffi)\n'
-    if runtime == 'c':
-        prefix += '(def (sdl-abi-error message) (error (table :type \'ffi-error :reason \'abi :operation \'sdl-layout :message message)))\n(def host-read read-string)\n'
-    else:
-        prefix += '''(def (sdl-abi-error message)
- (let ((c (make-eq-hashtable)))
-  (hashtable-set! c (string->symbol ":type") 'ffi-error) (hashtable-set! c (string->symbol ":reason") 'abi)
-  (hashtable-set! c (string->symbol ":operation") 'sdl-layout) (hashtable-set! c (string->symbol ":message") message) (error c)))
-(def host-read read-string)
-'''
+    prefix = "(require otium.ffi :as ffi)\n"
+    prefix += "(def (sdl-abi-error message) (error (table :type 'ffi-error :reason 'abi :operation 'sdl-layout :message message)))\n(def host-read read-string)\n"
     prefix += "(def sdl-library-names '(" + ' '.join(map(literal,candidates)) + '))\n'
     prefix += '\n'.join(f'(def {name} {value})' for name,value in data['constant'].items()) + '\n'
     checks = []

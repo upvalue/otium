@@ -11,6 +11,7 @@
 #include "expander.h"
 #include "ot-gc-internal.inc"
 #include "prelude.h"
+#include "extra.h"
 
 #ifndef OT_HEAP_INIT
 #define OT_HEAP_INIT (1024u * 1024u)
@@ -3228,7 +3229,12 @@ static otv vm_execute_loop(ots* state, size_t floor) {
         result = execute_generic_declaration(state, value);
       } else if (instruction == BC_IN_NS) {
         if (!is_type(value, OBJ_SYMBOL)) result = ot_raise(state, "vm: invalid namespace name");
-        else state->vm.current_namespace = namespace_find(state, value, true);
+        else {
+          ot_namespace_obj* current = (ot_namespace_obj*)ot_as_obj(state->vm.current_namespace);
+          if (current->loading && current->name != value)
+            result = ot_raise(state, "ns: source declares a different namespace");
+          else state->vm.current_namespace = namespace_find(state, value, true);
+        }
       } else {
         result = require_forms(state, value);
       }
@@ -4764,6 +4770,26 @@ static otv nat_string_append(ots* state, otv* args, int argc) {
   return string;
 }
 
+static otv nat_read_file(ots* state, otv* args, int argc) {
+  if (need_arity(state, "read-file", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  const char* bytes;
+  size_t length;
+  if (!ot_string_bytes(args[0], &bytes, &length) || memchr(bytes, 0, length) != NULL)
+    return ot_raise(state, "read-file: expected path without NUL");
+  char* path = ot_host_alloc(length + 1);
+  if (path == NULL) return ot_raise(state, "read-file: out of memory");
+  memcpy(path, bytes, length);
+  path[length] = 0;
+  char* source = NULL;
+  size_t size = 0;
+  bool ok = ot_platform_read_file(path, &source, &size);
+  ot_host_free(path);
+  if (!ok) return ot_raise(state, "read-file: cannot read file");
+  otv result = ot_make_string(state, source, size);
+  ot_host_free(source);
+  return result;
+}
+
 static otv nat_string_length(ots* state, otv* args, int argc) {
   if (need_arity(state, "string-length", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   if (!is_type(args[0], OBJ_STRING)) return ot_raise(state, "string-length: expected string");
@@ -6233,11 +6259,13 @@ static const nat_def core_nats[] = {
     {"identity", nat_identity},
     {"eval", nat_eval},
     {"read-string", nat_read_string},
+    {"read-file", nat_read_file},
     {"macroexpand-1", nat_macroexpand_one},
     {"macroexpand", nat_macroexpand},
     {"gensym", nat_gensym},
     {"current-ns", nat_current_ns},
     {"describe", nat_describe},
+    {"expander-application", nat_identity},
     {"expander-macro-var", nat_macro_oracle},
     {"expander-invoke-macro", nat_expander_invoke_macro},
     {"expander-native-syntax?", nat_expander_native_syntax},
@@ -6360,6 +6388,11 @@ ot_config ot_config_default(void) {
                      .gc_force_compact = false};
 }
 
+static void extra_module_init(ots* state) {
+  otv ignored;
+  (void)eval_source(state, ot_extra_src, ot_extra_src_len, "<otium.extra>", true, &ignored);
+}
+
 ots* ot_create(const ot_config* configuration) {
   ot_config config = configuration == NULL ? ot_config_default() : *configuration;
   if (config.heap_init < 1024 || config.heap_max < config.heap_init ||
@@ -6420,6 +6453,7 @@ ots* ot_create(const ot_config* configuration) {
     ot_destroy(state);
     return NULL;
   }
+  ot_register_module(state, "otium.extra", extra_module_init);
   ot_register_module(state, "otium.generic", generic_module_init);
   otv generic_name = ot_intern(state, "otium.generic", 13, false);
   state->vm.current_namespace = namespace_find(state, generic_name, true);

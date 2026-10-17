@@ -6,42 +6,34 @@
     (rename (ot-fn fn) (ot-def def) (ot-def def-) (ot-let let) (ot-while while)
             (ot-defparam defparam) (ot-with-params with-params))
     + - * / = < > <= >= zero? positive? negative? odd? even?
-    min max abs quotient remainder modulo gcd lcm numerator denominator
+    min max abs quotient remainder modulo gcd lcm
     floor ceiling truncate round exp log sin cos tan asin acos atan sqrt expt
-    number? complex? real? rational? integer? exact? inexact?
-    exact inexact exact->inexact inexact->exact number->string string->number
-    not boolean? eq? eqv? equal? procedure?
+    number? integer? exact? inexact?
+    exact inexact number->string
+    not boolean? eq? equal? procedure?
     cons car cdr caar cadr cdar cddr caaar caadr cadar caddr
     cdaar cdadr cddar cdddr cadddr pair? null? list? list length append reverse
-    list-tail list-ref memq memv member assq assv assoc set-car! set-cdr!
-    map for-each apply filter fold-left fold-right for-all exists
+    list-tail list-ref memq member assq assoc set-car! set-cdr!
+    for-each apply
     symbol? symbol->string string->symbol gensym
-    char? char=? char<? char>? char<=? char>=? char->integer integer->char
-    char-alphabetic? char-numeric? char-whitespace? char-upper-case?
-    char-lower-case? char-upcase char-downcase
-    string? string make-string string-length string-ref string-set!
-    string=? string<? string>? string<=? string>=? substring string-append
-    string->list list->string string-copy string-fill!
-    vector? vector make-vector vector-length vector-ref vector-set!
-    vector->list list->vector vector-fill!
-    bytevector? make-bytevector bytevector-length bytevector-u8-ref bytevector-u8-set!
-    make-eq-hashtable make-eqv-hashtable make-hashtable hashtable?
-    hashtable-size hashtable-ref hashtable-set! hashtable-delete!
-    hashtable-contains? hashtable-update! hashtable-copy hashtable-clear!
-    hashtable-keys hashtable-entries equal-hash string-hash symbol-hash
-    values call-with-values call/cc call-with-current-continuation dynamic-wind
-    void
-    display print println newline
+    string? string-length string=? string<? string>? string<=? string>=? string-append
+    values
+    display print println newline write
+    (rename (ot-call otium-call) (ot-substring substring) (ot-string->number string->number))
+    str buffer buffer? buffer-push! buffer->string
+    string-split string-join string-contains? string-starts-with? string-ends-with?
+    string-replace string-trim string-upcase string-downcase
+    name symbol int? float? inc dec identity pos? neg? true? false?
+    current-jiffy jiffies-per-second current-second read-file
     read-string keyword keyword? keyword->string nil? array array? table table?
-    get put! push! pop! keys copy take drop update! type)
-  (import (except (chezscheme) display newline if and or cond when unless do not filter exists for-all
+    get put! push! pop! keys copy update! type)
+  (import (except (chezscheme) display newline write if and or cond when unless do not filter exists for-all
                           length reverse for-each map apply set-car! set-cdr! values)
           (otium truth) (otium reader)
           (rename (otium values) (collection-length length) (collection-reverse reverse)
-                  (collection-for-each for-each) (collection-map map) (collection-apply apply)
+                  (collection-for-each for-each) (collection-apply apply)
                   (frozen-set-car! set-car!) (frozen-set-cdr! set-cdr!))
-          (prefix (only (chezscheme) values) host:)
-          (prefix (only (chezscheme) display newline) host:))
+          (prefix (only (chezscheme) display newline write) host:))
 
   ;; Otium core forms over Chez. The shared expander has already normalized
   ;; parameter lists and moved body definitions ahead of plain expressions.
@@ -81,23 +73,112 @@
       [(_ ((param value) more ...) body ...)
        (parameterize ([param value]) (ot-with-params (more ...) body ...))]))
 
+  (define-syntax ot-call
+    (syntax-rules ()
+      [(_ callee arg ...)
+       (let ([f callee])
+         (if (procedure? f) (f arg ...) (collection-call f arg ...)))]))
+  (define (int? x) (and (integer? x) (exact? x)))
+  (define (float? x) (and (real? x) (inexact? x)))
+  (define (inc x) (+ x 1))
+  (define (dec x) (- x 1))
+  (define (identity x) x)
+  (define pos? positive?)
+  (define neg? negative?)
+  (define (true? x) (eq? x #t))
+  (define (false? x) (eq? x #f))
+  (define (name x)
+    (cond [(string? x) x] [(symbol? x) (symbol->string x)]
+          [(keyword? x) (keyword->string x)] [else (error 'name "expected string, symbol, or keyword")]))
+  (define (symbol x) (string->symbol (name x)))
+  (define (ot-substring s start . end)
+    (unless (and (string? s) (int? start) (<= (length end) 1)
+                 (or (null? end) (int? (car end))))
+      (error 'substring "expected string, integer start and optional end"))
+    (let* ([n (string-length s)] [a (max 0 (min n start))]
+           [b (max a (min n (if (null? end) n (car end))))])
+      (substring s a b)))
+  (define (ascii-space? c) (memv c '(#\space #\tab #\return #\newline #\page #\vtab)))
+  (define (string-trim s)
+    (let ([n (string-length s)])
+      (let left ([a 0])
+        (if (and (< a n) (ascii-space? (string-ref s a))) (left (+ a 1))
+            (let right ([b n])
+              (if (and (> b a) (ascii-space? (string-ref s (- b 1)))) (right (- b 1))
+                  (substring s a b)))))))
+  (define (ot-string->number s) (or (string->number (string-trim s)) (void)))
+  (define (find-text s part start)
+    (let ([n (string-length s)] [m (string-length part)])
+      (let loop ([i start])
+        (cond [(> (+ i m) n) #f]
+              [(string=? (substring s i (+ i m)) part) i]
+              [else (loop (+ i 1))]))))
+  (define (string-contains? s part) (if (find-text s part 0) #t #f))
+  (define (string-starts-with? s part)
+    (and (<= (string-length part) (string-length s))
+         (string=? part (substring s 0 (string-length part)))))
+  (define (string-ends-with? s part)
+    (and (<= (string-length part) (string-length s))
+         (string=? part (substring s (- (string-length s) (string-length part)) (string-length s)))))
+  (define (string-split s . separator)
+    (unless (<= (length separator) 1) (error 'string-split "expected optional separator"))
+    (let ([out (array)] [n (string-length s)])
+      (if (null? separator)
+          (let loop ([i 0])
+            (when (< i n)
+              (if (ascii-space? (string-ref s i)) (loop (+ i 1))
+                  (let end ([j i])
+                    (if (and (< j n) (not (ascii-space? (string-ref s j)))) (end (+ j 1))
+                        (begin (push! out (substring s i j)) (loop j)))))))
+          (let ([sep (car separator)])
+            (when (= 0 (string-length sep)) (error 'string-split "empty separator"))
+            (let loop ([i 0])
+              (let ([j (find-text s sep i)])
+                (push! out (substring s i (or j n)))
+                (when j (loop (+ j (string-length sep))))))))
+      out))
+  (define (string-join separator xs)
+    (let ([out (buffer)] [first? #t])
+      (for-each (lambda (x)
+                  (unless first? (buffer-push! out separator))
+                  (set! first? #f) (buffer-push! out x)) xs)
+      (buffer->string out)))
+  (define (string-replace s from to)
+    (if (= 0 (string-length from)) s (string-join to (string-split s from))))
+  (define (current-jiffy)
+    (let ([t (current-time 'time-monotonic)])
+      (+ (* (time-second t) 1000000000) (time-nanosecond t))))
+  (define (jiffies-per-second) 1000000000)
+  (define (current-second)
+    (let ([t (current-time 'time-utc)])
+      (+ (inexact (time-second t)) (/ (time-nanosecond t) 1000000000.0))))
+  (define (read-file path)
+    (call-with-port (open-file-input-port path (file-options) 'block
+                     (make-transcoder (utf-8-codec) 'none 'raise))
+      (lambda (port) (let ([s (get-string-all port)]) (if (eof-object? s) "" s)))))
+  (define (write . objects)
+    (let loop ([xs objects])
+      (unless (null? xs)
+        (otium-write (car xs))
+        (unless (null? (cdr xs)) (host:display " "))
+        (loop (cdr xs))))
+    (void))
+
   (define (display . objects)
     (let loop ([objects objects] [first? #t])
       (unless (null? objects)
         (unless first? (host:display " "))
         (otium-display (car objects))
         (loop (cdr objects) #f)))
-    #f)
+    (void))
 
-  (define (values . xs)
-    (if (and (= (length xs) 1) (or (table? (car xs)) (nil? (car xs))))
-        (table-values (car xs)) (apply host:values xs)))
+  (define values table-values)
 
   (define print display)
 
   (define (newline)
     (host:newline)
-    #f)
+    (void))
 
   (define (println . objects)
     (apply display objects)

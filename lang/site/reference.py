@@ -10,19 +10,19 @@ def entries():
     catalog = json.loads((ROOT / 'shared/documentation/runtime.json').read_text())
     result = {name: {'text': entry.get('c', entry['text']), 'source': 'shared/documentation/runtime.json'}
               for name, entry in catalog.items() if 'c' in entry['runtimes']}
-    source = (ROOT / 'c/prelude/prelude.scm').read_text()
+    source = (ROOT / 'shared/prelude/core.scm').read_text()
     pattern = r'^\((?:def\s+\(([^\s()]+)([^)]*)\)|defmacro\s+([^\s()]+)\s+\(([^)]*)\))\s*\n?\s*("(?:[^"\\]|\\.)*")'
     for match in re.finditer(pattern, source, re.MULTILINE):
         name = match[1] or match[3]
         text = json.loads(match[5])
         if not text.startswith('('):
             text = '(' + name + (match[2] or match[4] or '') + ')\n' + text
-        result[name] = {'text': text, 'source': 'c/prelude/prelude.scm'}
+        result[name] = {'text': text, 'source': 'shared/prelude/core.scm'}
     return dict(sorted(result.items()))
 
 
 def markdown():
-    lines = ['# Language reference', '', '> ✨ Generated from runtime reference text and C prelude docstrings. Review before relying on it.', '',
+    lines = ['# Language reference', '', '> ✨ Generated from runtime reference text and shared prelude docstrings. Review before relying on it.', '',
              'This reference describes the C dialect used in the [playground](playground.md). '
              'Definition docstrings take precedence over the shared runtime catalog, as they do in `describe`. '
              'Native-only facilities may be documented here but are unavailable in the browser.', '',

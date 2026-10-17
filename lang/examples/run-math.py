@@ -7,13 +7,13 @@ import platform
 import subprocess
 import tempfile
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--runtime', choices=('c', 'chez'), default='c')
 args = parser.parse_args()
 mac = platform.system() == 'Darwin'
 names = '("/usr/lib/libSystem.B.dylib")' if mac else '("libm.so.6" "libm.so")'
-prefix = "(require '(otium.ffi :as ffi))\n" if args.runtime == 'c' else '(require otium.ffi :as ffi)\n'
+prefix = "(require otium.ffi :as ffi)\n"
 source = prefix + "(def math-library-names '" + names + ')\n' + (Path(__file__).parent / 'math.scm').read_text()
 helper = ROOT / 'shared/build' / (platform.machine() + '-' + platform.system().lower()) / ('libotium-ffi.' + ('dylib' if mac else 'so'))
 command = [str(ROOT / 'c/otium'), '--no-project'] if args.runtime == 'c' else [os.environ.get('CHEZ', 'chez'), '--libdirs', str(ROOT / 'chez'), '--script', str(ROOT / 'chez/main.ss')]

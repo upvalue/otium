@@ -7,7 +7,7 @@ import platform
 import subprocess
 import sys
 import tempfile
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'shared/sdl'))
 from host import bootstrap, command, environment, literal, DEFAULT_MANIFEST
 
@@ -36,14 +36,14 @@ def main():
 (def inject-error? {'#t' if args.inject_error else '#f'})
 '''
     if args.acceptance:
-        source += (ROOT/'examples/shared/sdl-acceptance.scm').read_text()
+        source += (ROOT/'examples/sdl-acceptance.scm').read_text()
     else:
         names = '("/usr/lib/libSystem.B.dylib")' if platform.system() == 'Darwin' else '("libc.so.6")'
         source += "(def host-libc-names '"+names+")\n"
-        scene = args.scene_path or ROOT/'examples/shared/scenes'/(args.scene+'.scm')
+        scene = args.scene_path or ROOT/'examples/scenes'/(args.scene+'.scm')
         source += '(def scene-path '+literal(scene.resolve())+')\n'
         source += (ROOT/'shared/sdl/reload.scm').read_text()
-        source += (ROOT/'examples/shared/sdl-host.scm').read_text()
+        source += (ROOT/'examples/sdl-host.scm').read_text()
     env = environment()
     if args.audio == 'dummy': env['SDL_AUDIO_DRIVER'] = 'dummy'
     if args.audio == 'real' and env.get('SDL_AUDIO_DRIVER') == 'dummy':

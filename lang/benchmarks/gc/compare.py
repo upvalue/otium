@@ -24,10 +24,10 @@ WORKLOADS = {
     "churn": 1_000_000,
     "mixed": 30_000,
     "fragmentation": 8_000,
-    "gcbench": "../benchmarks/c/gcbench.scm",
-    "destruc": "../benchmarks/c/destruc.scm",
-    "mperm": "../benchmarks/c/mperm.scm",
-    "takl": "../benchmarks/c/takl.scm",
+    "gcbench": "../benchmarks/workloads/gcbench.scm",
+    "destruc": "../benchmarks/workloads/destruc.scm",
+    "mperm": "../benchmarks/workloads/mperm.scm",
+    "takl": "../benchmarks/workloads/takl.scm",
 }
 
 

@@ -6,7 +6,7 @@
 all lib bench bench-gc format hygiene gc-lint:
 	$(MAKE) -C c $@
 
-test: test-c test-chez test-expander test-cli test-reader
+test: test-c test-chez test-expander test-cli test-reader test-library
 	$(MAKE) test-repl
 
 test-c:
@@ -67,3 +67,7 @@ site:
 test-site: site
 	node site/tests/runtime.mjs
 	$(or $(PYTHON),python3) site/tests/check_site.py
+
+.PHONY: test-library
+test-library: all
+	python3 shared/tests/test_library.py

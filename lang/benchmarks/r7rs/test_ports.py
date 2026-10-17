@@ -2,6 +2,7 @@
 
 """Fast correctness checks for the Otium benchmark ports."""
 
+import argparse
 import importlib.util
 import os
 import shutil
@@ -38,7 +39,15 @@ INPUTS = {
 
 
 def main():
-    binary = Path(sys.argv[1]).resolve()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("binary", type=Path)
+    parser.add_argument("--runtime", choices=["c", "chez"], default="c")
+    args = parser.parse_args()
+    binary = args.binary.absolute()
+    flags = ["--no-project"]
+    if args.runtime == "c":
+        flags.append("--c.max-depth=2000")
+    failures = 0
     if not RUNNER.vendor_available(ROOT):
         RUNNER.print_vendor_error()
         return 2
@@ -52,7 +61,7 @@ def main():
             result = subprocess.run(
                 [
                     binary,
-                    "--c.max-depth=2000",
+                    *flags,
                     source,
                 ],
                 text=True,
@@ -65,8 +74,9 @@ def main():
                 print(f"FAIL {name}", file=sys.stderr)
                 print(result.stdout, file=sys.stderr)
                 print(result.stderr, file=sys.stderr)
-                return 1
-            print(f"ok {name}")
+                failures += 1
+            else:
+                print(f"ok {name}")
 
         guile = shutil.which("guile")
         if guile:
@@ -89,7 +99,7 @@ def main():
                 print(result.stderr, file=sys.stderr)
                 return 1
             print("ok upstream-guile")
-    return 0
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

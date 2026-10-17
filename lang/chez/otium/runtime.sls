@@ -45,6 +45,9 @@
         (and (not (hashtable-contains? (namespace-imports space) name))
              (not (top-level-bound? name (namespace-environment space)))
              (top-level-syntax? name (namespace-environment space))
+             (or (let ([s (symbol->string name)])
+                   (and (>= (string-length s) 5) (string=? (substring s 0 5) "chez/")))
+                 (procedure? (top-level-syntax name (namespace-environment space))))
              (not (memq name otium-syntax))))
       (lambda (macro args)
         (let ([budget (expansion-budget)])
@@ -97,6 +100,7 @@
                [space (make-namespace name env (make-eq-hashtable)
                         (make-eq-hashtable) (make-eq-hashtable) #f #f #f)])
           (hashtable-set! namespaces name space)
+          (install-application! env)
           (define-top-level-value 'describe
             (lambda (name)
               (unless (symbol? name) (error 'describe "expected a symbol" name))
@@ -158,7 +162,23 @@
               (eval 'public-bindings
                 (environment (if (eq? name 'otium.cli) '(otium cli) '(otium process)))))
             (namespace-loaded?-set! space #t))
+          (if (eq? name 'otium.core)
+              (parameterize ([current-namespace space])
+                (read-source (shared-source "prelude/core.scm")))
+              (let ([core (find-namespace 'otium.core)])
+                (for-each
+                  (lambda (member)
+                    (unless (hashtable-contains? (namespace-privates core) member)
+                      (define-top-level-value member
+                        (top-level-value member (namespace-environment core)) env)))
+                  (vector->list (hashtable-keys (namespace-definitions core))))))
           space)))
+
+  (define (shared-source relative)
+    (let loop ([directories (library-directories)])
+      (if (null? directories) (error 'prelude "shared prelude not found")
+          (let ([path (string-append (caar directories) "/../shared/" relative)])
+            (if (file-exists? path) path (loop (cdr directories)))))))
 
   (define (import-value! space local target member)
     (unless (hashtable-contains? (namespace-definitions target) member)
@@ -184,16 +204,15 @@
       (hashtable-set! (namespace-imports space) local (cons target-name member))))
 
   (define (source-for name)
-    (let ([relative (string-append
-                      (list->string
-                        (map (lambda (c) (if (char=? c #\.) #\/ c))
-                          (string->list (symbol->string name))))
-                      ".scm")])
-      (let loop ([paths (load-path)])
-        (if (null? paths)
-            (error 'require "namespace source not found" name (load-path))
-            (let ([path (string-append (car paths) "/" relative)])
-              (if (file-exists? path) path (loop (cdr paths))))))))
+    (let ([relative (list->string
+                      (map (lambda (c) (if (char=? c #\.) #\/ c))
+                           (string->list (symbol->string name))))])
+      (let search ([paths (load-path)])
+        (if (null? paths) (error 'require "namespace source not found" name (load-path))
+            (let next-suffix ([suffixes '(".ot" ".scm")])
+              (if (null? suffixes) (search (cdr paths))
+                  (let ([path (string-append (car paths) "/" relative (car suffixes))])
+                    (if (file-exists? path) path (next-suffix (cdr suffixes))))))))))
 
   (define (read-source path)
     (parameterize ([source-path path])
@@ -223,7 +242,8 @@
         (error 'require "circular namespace load" name))
       (when (and (not (memq name '(otium.generic otium.ffi otium.process otium.cli)))
                  (or reload? (not (namespace-loaded? space))))
-        (load-namespace! space (or (namespace-source space) (source-for name))))
+        (load-namespace! space (or (namespace-source space)
+          (if (eq? name 'otium.extra) (shared-source "lib/otium/extra.scm") (source-for name)))))
       space))
 
   (define (load-source path)
@@ -238,7 +258,10 @@
       (define-top-level-syntax keyword (top-level-syntax 'import (scheme-environment)) env)
       (eval `(,keyword (prefix (chezscheme) chez/)) env)))
 
-  (define (require-form args)
+  (define (require-form specs)
+    (for-each (lambda (spec) (require-spec (if (symbol? spec) (list spec) spec))) specs))
+
+  (define (require-spec args)
     (when (and (pair? args) (eq? (car args) 'chez))
       (unless (null? (cdr args)) (error 'require "chez takes no options" args)))
     (unless (and (list? args) (pair? args) (symbol? (car args)))
@@ -359,11 +382,12 @@
               (memq (car form) '(define-type define-generic define-method reset-type! reset-generic!)))
          (generic-declaration! space form)]
         [(and (pair? form) (eq? (car form) 'ns))
-         (unless (and (list? form) (= (length form) 2) (symbol? (cadr form)))
+         (unless (and (list? form) (>= (length form) 2) (symbol? (cadr form)))
            (error 'ns "expected (ns name)" form))
          (when (and (namespace-loading? space) (not (eq? (cadr form) (namespace-name space))))
            (error 'ns "source declares a different namespace" (cadr form)))
-         (current-namespace (find-namespace (cadr form)))]
+         (current-namespace (find-namespace (cadr form)))
+         (for-each (lambda (clause) (require-form (cdr clause))) (cddr form))]
         [(and (pair? form) (eq? (car form) 'require)) (require-form (cdr form))]
         [(and (pair? form) (eq? (car form) 'begin))
          (unless (list? form) (error 'begin "expected a proper list" form))
@@ -426,7 +450,10 @@
            [definitions (namespace-definitions owner)])
       (if (hashtable-contains? definitions member)
           (hashtable-ref definitions member "")
-          (runtime-documentation member))))
+          (let ([core (find-namespace 'otium.core)])
+            (if (hashtable-contains? (namespace-definitions core) member)
+                (hashtable-ref (namespace-definitions core) member "")
+                (runtime-documentation member))))))
 
   (define (repl-bindings)
     (let ([space (current-namespace)])

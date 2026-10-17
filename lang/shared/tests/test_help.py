@@ -14,7 +14,7 @@ required = set(re.findall(r'\{"([^"]+)"', natives))
 required.update(re.findall(r'^\s*"([^"]+)"', specials, re.M))
 entries = json.loads((ROOT / 'shared/documentation/runtime.json').read_text())
 assert not required - entries.keys(), sorted(required - entries.keys())
-prelude = (ROOT / 'c/prelude/prelude.scm').read_text()
+prelude = (ROOT / 'shared/prelude/core.scm').read_text()
 for match in re.finditer(r'^\((?:define\s+\(([^\s()]+)[^\n]*?\)|defmacro\s+([^\s()]+)\s+\([^\n]*?\))', prelude, re.M):
     name = match[1] or match[2]
     assert prelude[match.end():].lstrip().startswith('"'), f'Missing source docstring: {name}'

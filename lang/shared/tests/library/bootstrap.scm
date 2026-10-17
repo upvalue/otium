@@ -1,0 +1,46 @@
+; Both runtimes load the shared core before user code runs.
+
+(println "empty-empty:"
+         (empty? nil) (empty? '()) (empty? "") (empty? (buffer))
+         (empty? []) (empty? {}))
+(println "empty-nonempty:"
+         (empty? '(1)) (empty? "x") (empty? (buffer "x"))
+         (empty? [1]) (empty? {:a 1}))
+
+(println "get-in-array-path:" (get-in {:a [{:b 7}]} [:a 0 :b]))
+(println "get-in-list-path:" (get-in {:a {:b 8}} '(:a :b)))
+(println "get-in-default:" (get-in {:a {}} [:a :missing :deeper] 9))
+(println "get-in-empty-path:" (get-in 42 []))
+(println "get-in-nil-path:" (get-in 42 nil))
+; String indexing allocates before the iterator advances to the final key.
+(println "get-in-allocating-path:" (get-in {:s "ab"} [:s 0 0]))
+(println "get-in-improper:"
+  (try (get-in {:a 1} '(:a . :tail))
+    (catch (error? e) 'caught-error)))
+
+; Public core inventory called out by the specification.
+(let ((ok #t))
+  (for-each
+    (fn (name)
+      (let ((value (eval name)))
+        (unless (or (procedure? value) (macro? value)) (set! ok #f))))
+    '(dotimes caar cadr cddr list-to-array array-to-list current-ns describe))
+  (println "documented-core-inventory:" ok))
+
+(def (documented-add a b)
+  "add two values"
+  (+ a b))
+(println "def:" (documented-add 20 22))
+(println "pair-compositions:"
+  (caar '((1 2) 3)) (cadr '(1 2 3)) (cddr '(1 2 3)))
+(println "list-to-array:" (list-to-array '(1 2 3)))
+(println "array-to-list:" (array-to-list [1 2 3]))
+(println "list-to-array-strict:"
+  (try (list-to-array [1 2])
+    (catch (error? e) 'caught-error)))
+(println "array-to-list-strict:"
+  (try (array-to-list '(1 2))
+    (catch (error? e) 'caught-error)))
+(println "current-ns:" (current-ns))
+(println "describe:" (describe 'documented-add))
+(println "describe-missing:" (describe 'missing-binding))

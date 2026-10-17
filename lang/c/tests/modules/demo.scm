@@ -1,0 +1,2 @@
+(def (counter value) (make-inline-counter value))
+(def (owned-counter value) (make-owned-counter value))

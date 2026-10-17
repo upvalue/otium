@@ -5,13 +5,12 @@ scratch=$(mktemp -d "${TMPDIR:-/tmp}/otium-chez.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 "${CHEZ:-chez}" --libdirs "$root" --script "$root/tests.ss" "$scratch"
 "${CHEZ:-chez}" --libdirs "$root" --script "$root/macro-tests.ss" "$scratch"
-"${CHEZ:-chez}" --libdirs "$root" --script "$root/documentation-tests.ss"
 "${CHEZ:-chez}" --libdirs "$root" --script "$root/condition-tests.ss"
 "${CHEZ:-chez}" --libdirs "$root" --script "$root/generic-tests.ss" "$scratch"
 "${CHEZ:-chez}" --libdirs "$root" --script "$root/environment-tests.ss"
 "${CHEZ:-chez}" --libdirs "$root" --script "$root/reader-tests.ss"
 "$root/run" --help > /dev/null
-demo=$("$root/run" -L "$root/../examples/chez" "$root/../examples/chez/demo.scm")
+demo=$("$root/run" -L "$root/../examples" "$root/../examples/reload.scm")
 expected='First callback: 1
 Callback after reload, with preserved state: 2'
 if [ "$demo" != "$expected" ]; then

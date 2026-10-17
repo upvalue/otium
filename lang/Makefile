@@ -6,7 +6,7 @@
 all lib bench bench-gc format hygiene gc-lint:
 	$(MAKE) -C c $@
 
-test: test-c test-chez test-expander test-classes test-cli test-reader
+test: test-c test-chez test-expander test-classes test-cli test-reader test-library
 	$(MAKE) test-repl
 
 test-c:
@@ -73,3 +73,8 @@ test-classes: all
 	c/otium --no-project shared/tests/classes/checks.scm
 	OTIUM_GC_STRESS=1 c/otium --no-project shared/tests/classes/checks.scm
 	chez/run --no-project shared/tests/classes/checks.scm
+
+.PHONY: test-library
+test-library: all
+	python3 shared/tests/test_library.py
+	python3 shared/tests/test_modules.py

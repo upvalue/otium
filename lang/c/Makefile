@@ -63,7 +63,7 @@ $(BUILD)/test-runtime: $(RUNTIME_OBJ) $(TEST_OBJ) FORCE
 $(BUILD)/gc-bench: $(RUNTIME_OBJ) $(GC_BENCH_OBJ) FORCE
 	$(CC) $(LDFLAGS) -o $@ $(filter %.o,$^) $(LDLIBS)
 
-$(OBJ)/otium.o: src/otium.c src/otium.h src/ot-classes.inc src/ot-methods.inc ../shared/documentation/runtime.inc $(GEN)/expander.h $(GEN)/prelude.h | $(OBJ)
+$(OBJ)/otium.o: src/otium.c src/otium.h src/ot-classes.inc src/ot-methods.inc ../shared/documentation/runtime.inc $(GEN)/expander.h $(GEN)/prelude.h $(GEN)/extra.h | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(GEN) -Isrc -c $< -o $@
 
 $(OBJ)/ot-gc-common.o: src/ot-gc-common.c src/otium.h src/ot-gc-internal.inc | $(OBJ)
@@ -99,7 +99,7 @@ $(OBJ)/bestline.o: ../shared/vendor/bestline/bestline.c ../shared/vendor/bestlin
 $(GEN)/expander.h: ../shared/prelude/expander.scm tools/embed.py | $(GEN)
 	$(PYTHON) tools/embed.py $< ot_expander_src $@
 
-$(GEN)/prelude.h: prelude/prelude.scm tools/embed.py | $(GEN)
+$(GEN)/prelude.h: ../shared/prelude/core.scm tools/embed.py | $(GEN)
 	$(PYTHON) tools/embed.py $< ot_prelude_src $@
 
 $(OBJ) $(GEN) $(BIN):
@@ -117,8 +117,8 @@ test: all $(BUILD)/test-runtime hygiene
 	$(PYTHON) tests/otium/run-tests.py $(OTIUM)
 	$(PYTHON) tests/test_multimethods.py $(OTIUM)
 	$(PYTHON) tests/test_cli.py $(OTIUM) tests/cli-load.scm tests/cli-load-second.scm
-	$(OTIUM) --no-project --path ../examples/c/demo tests/ext-demo.scm
-	$(OTIUM) --no-project --path ../examples/c/otcl tests/otcl.scm
+	$(OTIUM) --no-project --path tests/modules tests/ext-demo.scm
+	$(OTIUM) --no-project --path ../examples/otcl ../shared/tests/otcl.scm
 
 bench: all
 	$(PYTHON) ../benchmarks/run.py $(OTIUM)
@@ -149,3 +149,6 @@ $(GEN)/ot-cli-source.h: ../shared/cli/core.scm tools/embed.py | $(GEN)
 
 $(OBJ)/ot-cli.o: src/ot-cli.c src/otium.h $(GEN)/ot-cli-source.h | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(GEN) -Isrc -c $< -o $@
+
+$(GEN)/extra.h: ../shared/lib/otium/extra.scm tools/embed.py | $(GEN)
+	$(PYTHON) tools/embed.py $< ot_extra_src $@

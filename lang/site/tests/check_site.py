@@ -44,7 +44,7 @@ for path, page in pages.items():
             assert unquote(parsed.fragment) in pages[target].ids, (path, link)
 reference = entries()
 assert len(reference) > 150
-assert reference['map']['source'] == 'c/prelude/prelude.scm'
+assert reference['map']['source'] == 'shared/prelude/core.scm'
 assert 'Kind-preserving' in reference['map']['text']
 assert 'to-list' not in reference
 assert reference['+']['source'] == 'shared/documentation/runtime.json'

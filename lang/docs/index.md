@@ -41,6 +41,6 @@ Use the [language reference](reference.md) to look up collection operations, con
 
 ## Two runtimes
 
-The C runtime is designed for embedding. The Chez runtime builds on Chez Scheme. They share namespace and macro ideas, but their underlying values and semantics differ. The examples in this guide target C; the browser runs that C runtime compiled to WebAssembly.
+The C runtime is designed for embedding. The Chez runtime builds on Chez Scheme. They share the reader, expander, derived library, and runnable examples. [The portability guide](portability.md) describes their common contract and remaining differences. The browser runs the C runtime compiled to WebAssembly.
 
 The project is experimental. The [specification archive](../specs/language.md) records language design, and may lag behind implementation. The guide and runnable examples are maintained separately.

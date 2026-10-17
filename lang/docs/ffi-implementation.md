@@ -8,15 +8,15 @@ From `lang/`:
 
 ```sh
 make ffi
-python3 examples/shared/run-math.py --runtime c
-python3 examples/shared/run-math.py --runtime chez
+python3 examples/run-math.py --runtime c
+python3 examples/run-math.py --runtime chez
 make test-ffi
 ```
 
 Both examples print `1.0`, `5.0`, `0.75`, and `12.0`. On macOS the launcher
 loads libSystem; on Linux it tries `libm.so.6`, then `libm.so`. The launcher only
 establishes the namespace alias and library candidates. The binding declarations
-and program are in `examples/shared/math.scm`.
+and program are in `examples/math.scm`.
 
 C needs libffi and pkg-config for `WITH_FFI=1`. The default build has no libffi
 link dependency and reports FFI unavailable when imported. Chez uses its native
@@ -67,8 +67,8 @@ changes. Launching from an existing manifest needs no compiler or headers.
 make ffi
 make sdl-setup
 python3 shared/sdl/setup.py --check
-python3 examples/shared/run-sdl.py --runtime c --scene shapes
-python3 examples/shared/run-sdl.py --runtime chez --scene particles
+python3 examples/run-sdl.py --runtime c --scene shapes
+python3 examples/run-sdl.py --runtime chez --scene particles
 make test-sdl
 make test-sdl-integration
 ```

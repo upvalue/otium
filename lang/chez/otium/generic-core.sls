@@ -133,7 +133,7 @@
           (lambda () (val:instance-migrating?-set! object #f))))))
   (define (cached-call cache target key)
     (if (instance? target) (cached-slot-ref cache target key)
-        (val:callable-apply target key)))
+        (val:collection-call target key)))
   (define (cached-set-call cache setter target key value)
     (if (and (eq? setter val:set-applied!) (instance? target))
         (cached-slot-set! cache target key value)

@@ -1,0 +1,13 @@
+;; Slot caches, single-argument dispatch and an around method in a hot loop.
+(defabstract Moving)
+(defclass Particle :is Moving (x :init 0) (speed :init 2))
+(defgeneric (advance object))
+(defmethod (advance (object Moving)) nil)
+(defmethod (advance (object Particle))
+  (with-slots object (x speed) (set! x (+ x speed))))
+(defmethod :around (advance (object Particle)) (call-next-method))
+(let ((particle (make Particle)) (i 0))
+  (while (< i 100000)
+    (advance particle)
+    (set! i (+ i 1)))
+  (if (= (particle :x) 200000) nil (error "particle position was wrong")))

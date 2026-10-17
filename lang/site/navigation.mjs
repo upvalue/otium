@@ -3,6 +3,7 @@ export const navigation = [
   ['index', 'Overview'],
   ['playground', 'Playground'],
   ['guide', 'User guide'],
+  ['portability', 'Both runtimes'],
   ['reference', 'Language reference'],
   ['cli', 'Command-line programs'],
   ['repl', 'REPL editing'],

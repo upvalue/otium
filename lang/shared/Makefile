@@ -19,10 +19,10 @@ all: $(BUILD)/libotium-line.$(EXT) $(BUILD)/libotium-line.a
 $(BUILD):
 	mkdir -p $@
 
-$(BUILD)/line-edit.o: line-edit.c line-edit.h vendor/bestline/bestline.h | $(BUILD)
+$(BUILD)/line-edit.o: line-edit.c line-edit.h vendor/bestline/bestline.h Makefile | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 -fPIC -Ivendor/bestline -c $< -o $@
 
-$(BUILD)/bestline.o: vendor/bestline/bestline.c vendor/bestline/bestline.h | $(BUILD)
+$(BUILD)/bestline.o: vendor/bestline/bestline.c vendor/bestline/bestline.h Makefile | $(BUILD)
 	$(CC) $(CPPFLAGS) -O2 -g -std=c11 -fPIC -w -c $< -o $@
 
 $(BUILD)/libotium-line.a: $(BUILD)/line-edit.o $(BUILD)/bestline.o

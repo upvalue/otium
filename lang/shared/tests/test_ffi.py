@@ -44,6 +44,6 @@ with tempfile.TemporaryDirectory(prefix='otium-ffi-tests-') as temp:
     definitions = f'(def fixture-path "{fixture}")\n(def other-path "{other}")\n'
     common = (ROOT / 'shared/tests/ffi/common.scm').read_text()
     for runtime in runtimes:
-        run(runtime, '(def math-library-names ' + "'" + math_names + ')\n' + (ROOT / 'examples/shared/math.scm').read_text(), directory, '1.0\n5.0\n0.75\n12.0\n')
+        run(runtime, '(def math-library-names ' + "'" + math_names + ')\n' + (ROOT / 'examples/math.scm').read_text(), directory, '1.0\n5.0\n0.75\n12.0\n')
         run(runtime, definitions + common, directory, 'FFI checks: 197\n')
         print(runtime + ': libm and fixture checks passed' + (' under GC stress' if runtime == 'c' and args.stress else ''))

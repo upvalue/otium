@@ -20,9 +20,14 @@ if [ "$explicit_repl" = yes ]; then interactive=yes; fi
 if [ "$interactive" = yes ] && [ -t 0 ] && [ -t 1 ]; then
   platform=$(uname -m)-$(uname -s | tr '[:upper:]' '[:lower:]')
   case $(uname -s) in Darwin) extension=dylib ;; *) extension=so ;; esac
-  make -s -C "$root/../shared" "build/$platform/libotium-line.$extension"
   OTIUM_LINE_LIBRARY="$root/../shared/build/$platform/libotium-line.$extension"
+  for source in Makefile line-edit.c line-edit.h vendor/bestline/bestline.c vendor/bestline/bestline.h; do
+    if [ ! -f "$OTIUM_LINE_LIBRARY" ] || [ "$root/../shared/$source" -nt "$OTIUM_LINE_LIBRARY" ]; then
+      make -s -C "$root/../shared" "build/$platform/libotium-line.$extension"
+      break
+    fi
+  done
   export OTIUM_LINE_LIBRARY
 fi
 exec "${CHEZ:-chez}" \
-  --libdirs "$root" --script "$root/main.ss" "$@"
+  --compile-imported-libraries --libdirs "$root" --script "$root/main.ss" "$@"

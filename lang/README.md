@@ -8,8 +8,8 @@ and Janet in terms of practicality.
 
 Its goal is being a fairly dynamic language with a runtime suitable for
 multi-MB embedded systems (eg ESP32, RP2350) or as an extension language for C
-programs. However, it's also grown a Chez Scheme implementation because it
-turns out making a good runtime is non-trivial.
+programs. It also includes a Chez Scheme implementation which is preferred for 
+normal computing use as it's much higher performance.
 
 There are some examples in ./examples, including handwritten code, to show how
 it feels to use.

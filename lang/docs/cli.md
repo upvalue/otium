@@ -57,7 +57,7 @@ copies the strings. `otium.process/write-error` writes a string to stderr.
 
 `otium.cli` is a shared Otium implementation with small runtime adapters. Load
 it with `(require otium.cli)`. This unaliased require form works in both dialects.
-See `examples/shared/greet.scm` for a complete program:
+See `examples/greet.scm` for a complete program:
 
 ```scheme
 (def command

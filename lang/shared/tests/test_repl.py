@@ -110,7 +110,7 @@ path.write_text((root / "replacement").read_text())
         repl.expect(b"No documentation recorded." if runtime == "otium-chez" else b"adds numbers.")
         repl.expect(repl.prompt + b"\x1b[J")
         topics = ((b"eval", b"expand Otium macros"),
-                  (b"hashtable-ref", b"No documentation recorded.")) if runtime == "otium-chez" else (
+                  (b"fold-left", b"Combine from the left")) if runtime == "otium-chez" else (
                   (b"length", b"Unicode code points"),
                   (b"get", b"Missing entries"),
                   (b"map", b"Kind-preserving"),

@@ -1,0 +1,19 @@
+empty-empty: #t #t #t #t #t #t
+empty-nonempty: #f #f #f #f #f
+get-in-array-path: 7
+get-in-list-path: 8
+get-in-default: 9
+get-in-empty-path: 42
+get-in-nil-path: 42
+get-in-allocating-path: a
+get-in-improper: caught-error
+documented-core-inventory: #t
+def: 42
+pair-compositions: 1 2 (3)
+list-to-array: [1 2 3]
+array-to-list: (1 2 3)
+list-to-array-strict: caught-error
+array-to-list-strict: caught-error
+current-ns: user
+describe: user/documented-add: add two values
+describe-missing: nil

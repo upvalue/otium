@@ -1,10 +1,8 @@
 # Classes and generic functions
 
-Status: draft, October 17, 2026. Not implemented. The decisions made so far
-are listed at the end. It proposes replacing typed maps with classes that have declared
-slots, plus a single chain of slotless abstract types for dispatch, following
-Julia. It keeps the generic function work in `specs/multimethods.md` and adds
-`call-next-method` and `:around` methods.
+Implemented on the C and Chez runtimes. Classes replace typed maps with fixed
+slots and a single chain of slotless abstract types. Generic functions support
+ancestor dispatch, `call-next-method`, and `:around` methods.
 
 ## Why
 
@@ -48,7 +46,7 @@ linearization algorithm.
 ## Naming
 
 Declaration forms use the short `def` prefix: `defclass`, `defabstract`,
-`defgeneric`, `defmethod`. The last two replace today's `define-generic` and
+`defgeneric`, `defmethod`. The last two replace `define-generic` and
 `define-method`.
 
 `defabstract` follows Julia's `abstract type`, the closest precedent: no
@@ -164,10 +162,9 @@ This is not Common Lisp's `setf`. There is no registry of setters, so
 `(set! (car p) v)` or `(set! (my-accessor obj) v)` are errors. That can grow
 later if needed.
 
-The change is one rule in each expander's `set!` handling (or one, if the
-expanders are shared) plus `set-applied!` on both runtimes. It is separate
-from `with-slots`, where `set!` on a plain name goes through local symbol
-macros.
+The shared expander lowers applied assignment to `set-applied!` on both
+runtimes. In `with-slots`, assignment to a plain name goes through a local
+symbol macro.
 
 ### `with-slots`
 
@@ -179,9 +176,9 @@ macros.
 ```
 
 Inside the body each name reads the slot when used, and `set!` on the name
-writes it. This needs local symbol macros in the expander, which is part of a
-separate discussion about sharing one expander between the runtimes. Without
-them, `with-slots` can only bind current values read-only.
+writes it. The shared expander implements these names as local symbol macros.
+The object expression is evaluated once. Inner lexical bindings shadow the
+slot names normally.
 
 ## Abstract types
 
@@ -219,7 +216,7 @@ methods is deferred until real code shows it is repetitive.
 
 ## Built-in classes
 
-The built-in dispatch identities from `specs/multimethods.md` (`Number`,
+The built-in dispatch identities (`Number`,
 `String`, `Keyword`, `Hashtable`, `Procedure`, ...) become built-in classes
 with `Object` as their parent. They are final like any other class. Abstract
 parents for them, such as `Sequence` over lists and arrays or `Real` over
@@ -231,7 +228,7 @@ unspecialized mean the same thing.
 
 ## Generic functions and method selection
 
-`defgeneric` and `defmethod` keep the syntax and fixed arity of today's
+`defgeneric` and `defmethod` use fixed arity and the syntax of the former
 `define-generic` and `define-method`, renamed to follow the `def` prefix.
 
 A method is applicable when, for each specialized argument, the specializer is
@@ -261,6 +258,13 @@ Two kinds of method:
 
 The result is the outermost method's result.
 
+Replacement arguments reselect from the remaining methods that were applicable
+to the original call. They must have the generic's fixed arity. They do not
+restart dispatch or introduce methods excluded by the original arguments.
+`next-method?` reports whether a remaining step exists, including an ambiguous
+step that will fail if called. Outside a method it returns false; calling
+`call-next-method` there raises an error.
+
 "Next most specific" is well defined only when the remaining methods have a
 single most specific one. With two arguments that can fail below the top: a
 `(Button, PointerDown)` method's next candidates might be both
@@ -279,7 +283,7 @@ the remaining cases.
 ## Redefinition and reload
 
 Re-evaluating `defclass` or `defabstract` keeps the type's identity,
-as `define-type` does now. Methods specialized on it keep working, and so do
+including the identity of imported aliases. Methods specialized on it keep working, and so do
 existing instances.
 
 When a class's slots change:
@@ -297,24 +301,41 @@ When a class's slots change:
 A new slot with no `:init` can't be filled in for existing instances.
 Migrating such an instance is an error unless `update-instance` sets the slot.
 
+`old-slots` is a table keyed by slot keywords. The hook sees the new layout and
+can write required slots. If initialization or the hook fails, the instance's
+layout and slot values are restored; a later access retries migration. Side
+effects outside the instance, including mutations of shared slot contents, are
+not rolled back.
+
 Changing a type's parent clears dispatch caches. Instances need no migration,
 because parents carry no slots.
 
 The check that triggers migration is the same layout comparison inline caches
 already perform, so reload support costs nothing extra on normal access.
 
-`reset-type!` becomes `reset-class!`, with the same explicit recovery meaning.
-`remove-method!` gains an optional qualifier.
+`(reset-class! Name slot ...)` explicitly creates a new class identity, accepting
+the same parent and slot syntax as `defclass`. Existing instances and methods
+retain the old identity. `(reset-generic! (name arguments ...))` replaces a
+generic with a fresh one and no methods.
+
+`(remove-method! generic signature)` removes a primary method. An optional third
+argument, `:around` or `'primary`, selects the qualifier. The result says whether
+a method was removed. Signatures are lists of class descriptors; `Object` and
+`#f` both mean an unspecialized argument.
+
+`(generic-methods generic)` returns detached `(qualifier signature)` lists in
+unspecified order. Qualifiers are the symbol `primary` or the keyword `:around`.
+Signatures use `Object` for unspecialized arguments.
 
 ## Performance
 
 - **Instances are a slot vector** plus a layout pointer. A four-slot `Boid` is
-  one object of about six words. Typed maps today are three objects on C and
-  hash every access.
+  one object of seven words on C: the header, layout pointer, stable identity
+  hash, and four values. Chez uses an opaque record with a slot vector.
 - **Inline caches at slot reads.** `(b :x)` with a literal keyword remembers the
   last layout seen and its slot index. A hit is a pointer comparison and an
   index. A miss looks the slot up in the layout and updates the cache.
-- **`with-slots`** gets one cache per name in the block.
+- **`with-slots`** expands to cached slot accesses at each use.
 - **A dispatch cache per generic.** It maps a tuple of argument classes to the
   effective method, built once as a chain of closures. It's cleared when a
   method is added or removed or a type is redefined. The first call with a new
@@ -359,11 +380,20 @@ This replaces:
 It adds abstract types, `call-next-method`, `:around` methods, and instance
 migration.
 
-Typed maps exist on both runtimes, on C as of a recent commit. The test suites,
-`examples/hand/animals-multimethods.ot`, and the Chez multimethod benchmarks
-would move to classes. Nothing outside those uses them yet.
+The typed-map constructors and `field-*` operations have been removed from
+both runtimes. The multimethod examples and tests use classes.
 
-## Decisions so far
+## Validation
+
+`make test-classes` runs the same class checks on C, C with collection stress,
+and Chez. Runtime-specific suites cover namespace ownership, imported method
+extensions, file reloads, explicit resets, and dispatch against an independent
+oracle. `make test` runs these with the other runtime and shared tests.
+
+`benchmarks/workloads/classes.scm` exercises slot reads and writes, ancestor
+dispatch, and an around method using the same source on both runtimes.
+
+## Decisions
 
 - Classes replace typed maps entirely. Plain tables remain for open data.
 - No slot inheritance and no multiple parents. Abstract types form single

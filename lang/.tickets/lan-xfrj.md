@@ -1,6 +1,6 @@
 ---
 id: lan-xfrj
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-10-17T05:16:05Z
@@ -17,3 +17,9 @@ Libraries meant to run on both runtimes (a future UI library, FFI bindings) need
 
 A doc lists the subset; each child gap is fixed or has a stated workaround; shared library tests run on both runtimes.
 
+
+## Notes
+
+**2026-10-17T21:45:13Z**
+
+Shared prelude, library and module tests now run on both runtimes. Examples are organized by subject. All child gaps are addressed and the portable contract is documented.

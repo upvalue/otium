@@ -36,6 +36,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path, help="path to the Otium executable")
     parser.add_argument("benchmarks", nargs="*", help="ports to run; default: all")
+    parser.add_argument("--runtime", choices=["c", "chez"], default="c",
+                        help="runtime for flags and result labels (default: c)")
     parser.add_argument("--runs", type=int, default=1, help="samples per benchmark")
     parser.add_argument("--timeout", type=float, default=300.0, help="seconds per sample")
     parser.add_argument(
@@ -130,7 +132,7 @@ def main():
         print_vendor_error()
         return 2
     repo = root.parents[1]
-    binary = args.binary.resolve()
+    binary = args.binary.absolute()
     manifest = json.loads((root / "manifest.json").read_text())
     selected = args.benchmarks or list(manifest["benchmarks"])
     unknown = [name for name in selected if name not in manifest["benchmarks"]]
@@ -143,7 +145,7 @@ def main():
 
     otium_commit = git_value(repo, "rev-parse", "--short", "HEAD")
     dirty = bool(git_value(repo, "status", "--porcelain"))
-    implementation = f"otium-{otium_commit}{'-dirty' if dirty else ''}"
+    implementation = f"otium-{args.runtime}-{otium_commit}{'-dirty' if dirty else ''}"
     host = f"{platform.system()} {platform.release()} {platform.machine()}"
     rows = []
     had_failure = False
@@ -157,9 +159,9 @@ def main():
             input_text = input_path.read_text()
             input_id = hashlib.sha256(input_path.read_bytes()).hexdigest()[:12]
             heap_max = entry.get("heap_max", 64 * 1024 * 1024)
-            flags = [
-                f"--c.heap-max={heap_max}",
-            ]
+            flags = ["--no-project"]
+            if args.runtime == "c":
+                flags.append(f"--c.heap-max={heap_max}")
             program_path = temp / f"{name}-otium.scm"
             program_path.write_text(otium_program(root, name, implementation, input_text))
 

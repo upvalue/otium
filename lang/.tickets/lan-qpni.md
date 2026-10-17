@@ -1,6 +1,6 @@
 ---
 id: lan-qpni
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-10-17T05:16:05Z
@@ -18,3 +18,9 @@ Document what shared libraries use: parens, quoted symbols, lists, #f, typed map
 
 Doc in docs/ listing the subset.
 
+
+## Notes
+
+**2026-10-17T21:45:13Z**
+
+docs/portability.md records the shared API, module rules, reload behavior, and intentional differences. GAPS.txt records remaining limitations.

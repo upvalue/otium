@@ -4,7 +4,7 @@ PYTHON ?= python3
 OUT ?= ../../site/public/assets
 BUILD ?= ../../build/wasm
 SOURCES := ../src/otium.c ../src/ot-gc-common.c ../src/ot-gc-semi.c ../src/ot-posix.c ../src/ot-ffi.c ../src/ot-cli.c ../src/ot-wasm.c
-HEADERS := $(BUILD)/expander.h $(BUILD)/prelude.h $(BUILD)/ot-ffi-source.h $(BUILD)/ot-cli-source.h
+HEADERS := $(BUILD)/expander.h $(BUILD)/prelude.h $(BUILD)/extra.h $(BUILD)/ot-ffi-source.h $(BUILD)/ot-cli-source.h
 FLAGS := -std=c23 -O2 -DOT_GC_SEMI -DOT_HEAP_INIT=1048576 -DOT_HEAP_MAX=33554432 -DOT_MAX_DEPTH=20000
 
 .PHONY: all
@@ -22,9 +22,12 @@ $(BUILD):
 	mkdir -p $@
 $(BUILD)/expander.h: ../../shared/prelude/expander.scm ../tools/embed.py | $(BUILD)
 	$(PYTHON) ../tools/embed.py $< ot_expander_src $@
-$(BUILD)/prelude.h: ../prelude/prelude.scm ../tools/embed.py | $(BUILD)
+$(BUILD)/prelude.h: ../../shared/prelude/core.scm ../tools/embed.py | $(BUILD)
 	$(PYTHON) ../tools/embed.py $< ot_prelude_src $@
 $(BUILD)/ot-ffi-source.h: ../../shared/ffi/core.scm ../tools/embed.py | $(BUILD)
 	$(PYTHON) ../tools/embed.py $< ot_ffi_src $@
 $(BUILD)/ot-cli-source.h: ../../shared/cli/core.scm ../tools/embed.py | $(BUILD)
 	$(PYTHON) ../tools/embed.py $< ot_cli_src $@
+
+$(BUILD)/extra.h: ../../shared/lib/otium/extra.scm ../tools/embed.py | $(BUILD)
+	$(PYTHON) ../tools/embed.py $< ot_extra_src $@

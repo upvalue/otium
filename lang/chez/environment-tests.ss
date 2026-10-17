@@ -32,7 +32,7 @@
       (output '(begin (print "a" 1) (display "b" 2))))
     (check "empty output calls" "\n\n"
       (output '(begin (print) (display) (println) (newline))))
-    (check "output returns false" '(#f #f #f #f)
+    (check "output returns nil" (list (void) (void) (void) (void))
       (let ([port (open-output-string)])
         (parameterize ([current-output-port port])
           (evaluate '(list (print) (display) (println) (newline))))))

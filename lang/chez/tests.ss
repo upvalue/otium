@@ -75,7 +75,12 @@
 (check "compiled macro use retains expansion" 2 (run '(expanded 1)))
 (check "new macro use sees replacement" 11 (run '(bump 1)))
 (check "lexical scope" 8 (run '(let ([amount (fn () 8)]) (amount))))
-(check "Chez numeric tower" 1/3 (run '(/ 1 3)))
+(check "Otium division" (/ 1.0 3.0) (run '(/ 1 3)))
+(check "Chez numeric tower" 1/3 (run '(chez// 1 3)))
+(check "Chez native rounding" 2.0 (run '(chez/round 2.5)))
+(check "Chez native sqrt" 0+1i (run '(chez/sqrt -1)))
+(check "Chez unbounded integer arithmetic" 9999999999800000000001
+  (run '(* 99999999999 99999999999)))
 (check "Chez multiple values" '(1 2)
   (call-with-values (lambda () (run '(chez/values 1 2))) list))
 (check "top-level begin preserves multiple values" '(3 4)

@@ -8,9 +8,11 @@
     when unless
     (rename (ot-fn fn) (ot-def def) (ot-def def-) (ot-let let) (ot-while while)
             (ot-defparam defparam) (ot-with-params with-params))
-    + - * / = < > <= >= zero? positive? negative? odd? even?
+    + - * (rename (ot-divide /)) = < > <= >= zero? positive? negative? odd? even?
     min max abs quotient remainder modulo gcd lcm
-    floor ceiling truncate round exp log sin cos tan asin acos atan sqrt expt
+    (rename (ot-floor floor) (ot-ceiling ceiling) (ot-truncate truncate)
+            (ot-round round) (ot-sqrt sqrt))
+    exp log sin cos tan asin acos atan expt
     number? integer? exact? inexact?
     exact inexact number->string
     not boolean? eq? equal? procedure?
@@ -105,6 +107,43 @@
        (host:apply append lists)]))
   (define (int? x) (and (integer? x) (exact? x)))
   (define (float? x) (and (real? x) (inexact? x)))
+  (define (ot-number who x)
+    (unless (or (int? x) (flonum? x)) (error who "expected int or float" x)))
+
+  (define (ot-divide first . rest)
+    (define (divide a b)
+      (ot-number '/ b)
+      (when (zero? b) (error '/ "division by zero"))
+      (if (and (int? a) (int? b) (zero? (remainder a b)))
+          (quotient a b)
+          (fl/ (inexact a) (inexact b))))
+    (ot-number '/ first)
+    (if (null? rest)
+        (divide 1.0 first)
+        (let loop ([result first] [rest rest])
+          (if (null? rest) result
+              (loop (divide result (car rest)) (cdr rest))))))
+
+  ;; Match the C tagged integer range for float conversions. Exact integers
+  ;; retain Chez's unbounded representation.
+  (define int-limit (expt 2 (- (* 8 (foreign-sizeof 'void*)) 2)))
+  (define (ot-rounding who operation x)
+    (ot-number who x)
+    (if (int? x) x
+        (let ([result (operation x)])
+          (unless (and (finite? result) (<= (- int-limit) result) (< result int-limit))
+            (error who "integer conversion out of range" x))
+          (exact result))))
+  (define (ot-floor x) (ot-rounding 'floor floor x))
+  (define (ot-ceiling x) (ot-rounding 'ceiling ceiling x))
+  (define (ot-truncate x) (ot-rounding 'truncate truncate x))
+  (define (ot-round x)
+    (ot-rounding 'round
+      (lambda (x) (if (< x 0) (ceiling (- x 0.5)) (floor (+ x 0.5)))) x))
+  (define (ot-sqrt x)
+    (ot-number 'sqrt x)
+    (if (< x 0) +nan.0 (flsqrt (inexact x))))
+
   (define (inc x) (+ x 1))
   (define (dec x) (- x 1))
   (define (identity x) x)

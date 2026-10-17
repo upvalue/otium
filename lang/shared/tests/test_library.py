@@ -52,6 +52,8 @@ with tempfile.TemporaryDirectory(prefix='otium-library-') as tmp:
             run(runtime, path, stress=True, expected=path.with_suffix('.txt').read_text())
         output = run(runtime, ROOT/'shared/tests/library/common.scm', stress=True)
         assert output.startswith('library checks:'), output
+        arithmetic = run(runtime, ROOT/'shared/tests/library/arithmetic.scm', stress=True)
+        assert arithmetic.startswith('arithmetic checks:'), arithmetic
         run(runtime, script, '--path', str(directory), expected='9 7 #f\n7 #f\n7 7\n7\nconsumer\nportable/value: module value nil\nconsumer nil\n')
         read = directory/'read.scm'
         import json

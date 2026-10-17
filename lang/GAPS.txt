@@ -29,11 +29,16 @@ in shared/tests/otcl.scm. Tcl-facing division explicitly chooses quotient for
 exact integer results and inexact division for fractions. There is no second
 interpreter maintained for Chez.
 
+Otium division, floor, ceiling, truncate, round, and sqrt now share number
+types and rounding behavior. Shared library tests cover these operations.
+Native Chez arithmetic remains available through chez/ names.
+
 Remaining intentional differences
 
-- Chez retains its numeric tower, arbitrary-size exact integers, ratios,
-  complex numbers, and native continuations. C retains its bounded numeric
-  representations, embedding API, and collector controls.
+- Integer overflow still wraps on C and produces bignums on Chez. Other
+  Chez numeric tower behavior (including ratios and complex numbers from
+  native operations) and native continuations remain available. C retains
+  its bounded numeric representations, embedding API, and collector controls.
 - Host Scheme facilities are available through (require chez) and chez/
   names. They are not portable Otium library dependencies.
 - Native exception wording, runtime debugging, and implementation-specific

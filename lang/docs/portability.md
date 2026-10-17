@@ -93,10 +93,18 @@ and tables are quoted and escaped on both runtimes, including when using
 
 ## Runtime boundaries
 
-Chez keeps its numeric tower. `(/ 3 2)` is `3/2` there and `1.5` on C.
-Use `quotient` for integer division and inexact operands when fractional
-output must agree. Keep portable exact integers within C's range. Overflow,
-large numbers, complex numbers, and exactness outside that range differ.
+Otium `/` keeps exact integer divisions as integers and converts fractional
+results to floats on both runtimes. Division proceeds left to right; once a
+result is a float it stays a float. Unary division returns a float.
+`floor`, `ceiling`, `truncate`, and `round` return integers; `round` rounds
+half away from zero. Float conversions outside C's tagged integer range
+raise an error. `sqrt` returns a float, including NaN for negative inputs.
+
+Keep portable exact integers within C's range. Integer overflow still wraps
+on C and produces bignums on Chez. Chez's native numeric tower and arithmetic
+remain available through `chez/` names, including `chez//`, `chez/round`,
+`chez/sqrt`, and the `fl`/`fx` operations. Other host numeric behavior,
+including complex results from functions such as `log`, is not unified.
 OTCL explicitly chooses integer or inexact division for its string results.
 
 Chez characters, vectors, bytevectors, hashtables, continuations, multiple

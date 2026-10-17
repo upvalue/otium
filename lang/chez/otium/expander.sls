@@ -9,7 +9,8 @@
   (define core-forms
     '(quote quasiquote unquote unquote-splicing if begin lambda define set!
       let let* letrec letrec* and or cond defmacro ns require defonce
-      handler-bind try restart-case unwind-protect defer))
+      handler-bind try restart-case unwind-protect defer
+      define-type define-generic define-method reset-type! reset-generic!))
 
   (define (expander-core-form? name) (and (memq name core-forms) #t))
 
@@ -229,6 +230,9 @@
                  (error 'macroexpand
                    "generated internal definitions and definitions in expression context are unsupported"
                    form)]
+                [(define-type define-generic define-method reset-type! reset-generic!)
+                 (error 'macroexpand "declaration requires top-level context"
+                   'invalid-declaration form)]
                 [(ns require defonce defmacro)
                  (error 'macroexpand "directive requires top-level context" form)]
                 [else

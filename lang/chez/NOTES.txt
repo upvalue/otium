@@ -163,3 +163,21 @@ REPL editing
 The terminal REPL shares Bestline with the C runtime. Ctrl-X Ctrl-E opens
 $VISUAL or $EDITOR and returns the edited input to the prompt. See
 docs/repl.md for shortcuts, history, and build details.
+
+Typed-map and multimethod experiment
+
+The worktree prototype adds loader declarations define-type, define-generic,
+define-method, reset-type!, and reset-generic!. Ordinary field and registry
+operations are in the built-in otium.generic namespace. For example:
+
+  (require otium.generic :as g)
+  (define-type Button)
+  (define-generic (label object))
+  (define-method (label (object Button)) (g/field-ref object 'label))
+  (label (g/make Button 'label "7"))
+
+See docs/multimethods.md for matching and reload semantics. Run chez/test for
+semantic checks, examples/chez/multimethods/events.scm for a headless example,
+and benchmarks/chez/run-multimethods for the scan-versus-cond benchmark.
+The native namespace preserves descriptors on require :reload; it has no
+filesystem source to reevaluate.

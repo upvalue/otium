@@ -1,7 +1,9 @@
 # Typed maps and multimethods
 
-Status: prototype specification for review, October 16, 2026. These APIs do
-not exist yet. The first implementation targets Otium on Chez.
+Status: trial implementation in the `experiment/chez-multimethods` worktree,
+October 16, 2026. Implemented for Otium on Chez only. The public API remains
+experimental. See `benchmarks/chez/MULTIMETHODS.md` for benchmark methodology
+and initial results.
 
 The prototype should establish predictable method selection and interactive
 redefinition. A future GUI library will use it for operations such as rendering,

@@ -1,7 +1,9 @@
 (library (otium runtime)
   (export evaluate load-source require-namespace current-namespace namespace-name
           load-path namespace-ref namespace-set! repl)
-  (import (chezscheme) (prefix (otium conditions) ot:) (otium expander) (otium line-edit) (otium runtime-documentation))
+  (import (chezscheme) (prefix (otium generic-core) gm:)
+          (prefix (otium conditions) ot:) (otium expander) (otium line-edit)
+          (otium runtime-documentation))
 
   (define-record-type otium-macro
     (fields transformer namespace name))
@@ -93,6 +95,15 @@
               (unless (symbol? name) (error 'describe "expected a symbol" name))
               (binding-documentation space name)) env)
           (define-top-level-value 'macro? otium-macro? env)
+          ;; Native syntax may preserve nested forms past the Otium traversal.
+          ;; Reject declarations there too; lexical value bindings still shadow them.
+          (for-each
+            (lambda (name)
+              (define-top-level-syntax name
+                (lambda (form)
+                  (gm:fail 'macroexpand 'invalid-declaration
+                    "declaration requires top-level context" (syntax->datum form))) env))
+            '(define-type define-generic define-method reset-type! reset-generic!))
           (for-each
             (lambda (entry)
               (define-top-level-value (car entry)
@@ -117,6 +128,13 @@
                              (top-level-value name env))
                     args))))
             env)
+          (when (eq? name 'otium.generic)
+            (for-each
+              (lambda (entry)
+                (define-top-level-value (car entry) (cdr entry) env)
+                (hashtable-set! (namespace-definitions space) (car entry)
+                  "Typed maps and generic dispatch.")) gm:public-bindings)
+            (namespace-loaded?-set! space #t))
           space)))
 
   (define (import-value! space local target member)
@@ -178,7 +196,8 @@
     (let ([space (find-namespace name)])
       (when (namespace-loading? space)
         (error 'require "circular namespace load" name))
-      (when (or reload? (not (namespace-loaded? space)))
+      (when (and (not (eq? name 'otium.generic))
+                 (or reload? (not (namespace-loaded? space))))
         (load-namespace! space (or (namespace-source space) (source-for name))))
       space))
 
@@ -212,6 +231,82 @@
            (parse (cddr rest) alias (cadr rest) reload?)]
           [else (error 'require "invalid options" rest)]))))
 
+  (define (generic-declaration! space form)
+    (define (invalid message)
+      (gm:fail (car form) 'invalid-declaration message form))
+    (define (identifier? x)
+      (and (symbol? x) (not (memv #\/ (string->list (symbol->string x))))))
+    (define (parameters! parameters specialized?)
+      (unless (list? parameters) (invalid "expected fixed parameter list"))
+      (let ([names (map (lambda (p)
+                         (cond [(symbol? p) p]
+                               [(and specialized? (list? p) (= (length p) 2)
+                                     (symbol? (car p)) (symbol? (cadr p))) (car p)]
+                               [else (invalid "invalid parameter")])) parameters)])
+        (let loop ([rest names])
+          (unless (null? rest)
+            (when (memq (car rest) (cdr rest)) (invalid "duplicate parameter"))
+            (loop (cdr rest))))
+        names))
+    (define env (namespace-environment space))
+    (define kind (car form))
+    (unless (and (list? form) (>= (length form) 2))
+      (invalid "malformed declaration"))
+    (if (eq? kind 'define-method)
+        (let ([head (cadr form)])
+          (unless (and (pair? head) (list? head) (symbol? (car head))
+                       (>= (length form) 3))
+            (invalid "expected (define-method (generic parameters ...) body ...)"))
+          (let* ([names (parameters! (cdr head) #t)]
+                 [generic (eval (car head) env)])
+            (unless (gm:generic? generic)
+              (gm:fail kind 'not-generic "expected generic procedure" (car head)))
+            (unless (= (length names) (gm:generic-arity generic))
+              (gm:fail kind 'wrong-arity "method arity differs from generic" (car head)))
+            (let* ([signature
+                    (map (lambda (p)
+                           (and (pair? p)
+                                (let ([type (eval (cadr p) env)])
+                                  (unless (gm:descriptor? type)
+                                    (gm:fail kind 'invalid-specializer
+                                      "expected type descriptor" (cadr p)))
+                                  type))) (cdr head))]
+                   [implementation
+                    (eval ((expander-expression (namespace-expander space))
+                           `(lambda ,names ,@(cddr form)) '()) env)])
+              (gm:add-method! generic signature implementation))))
+        (let* ([type? (memq kind '(define-type reset-type!))]
+               [reset? (memq kind '(reset-type! reset-generic!))]
+               [head (cadr form)]
+               [name (if type? head (and (pair? head) (car head)))])
+          (unless (and (= (length form) 2) (identifier? name))
+            (invalid "expected local declaration name"))
+          (let* ([arity (and (not type?) (length (parameters! (cdr head) #f)))]
+                 [owner (cons (namespace-name space) name)]
+                 [defined? (hashtable-contains? (namespace-definitions space) name)]
+                 [bound? (top-level-bound? name env)])
+            (when (or (eq? (namespace-name space) 'otium.generic)
+                      (hashtable-contains? (namespace-imports space) name)
+                      (and reset? (not defined?))
+                      (and (not reset?) (not defined?)
+                           (or bound? (memq name (environment-symbols env)))))
+              (gm:fail kind 'binding-conflict "declaration would replace another binding" name))
+            (cond
+              [(and defined? (not reset?))
+               (let ([old (and bound? (top-level-value name env))])
+                 (unless (if type?
+                             (and (gm:descriptor? old) (equal? owner (gm:descriptor-owner old)))
+                             (and (gm:generic? old) (equal? owner (gm:generic-owner old))
+                                  (= arity (gm:generic-arity old))))
+                   (gm:fail kind 'binding-conflict
+                     "incompatible declaration; use explicit reset to replace it" name)))]
+              [else
+               (define-top-level-value name
+                 (if type? (gm:fresh-type (namespace-name space) name)
+                     (gm:fresh-generic (namespace-name space) name arity)) env)
+               (hashtable-set! (namespace-definitions space) name
+                 (if type? "User-defined dispatch type." "Generic procedure."))])))))
+
   (define (evaluate form)
     (ot:call-with-otium-control
       (lambda ()
@@ -223,6 +318,9 @@
            [expander (namespace-expander space)]
            [form ((expander-head expander) input '() #f)])
       (cond
+        [(and (pair? form)
+              (memq (car form) '(define-type define-generic define-method reset-type! reset-generic!)))
+         (generic-declaration! space form)]
         [(and (pair? form) (eq? (car form) 'ns))
          (unless (and (list? form) (= (length form) 2) (symbol? (cadr form)))
            (error 'ns "expected (ns name)" form))

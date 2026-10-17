@@ -6,6 +6,7 @@ trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 "${CHEZ:-chez}" --libdirs "$root" --script "$root/tests.ss" "$scratch"
 "${CHEZ:-chez}" --libdirs "$root" --script "$root/macro-tests.ss" "$scratch"
 "${CHEZ:-chez}" --libdirs "$root" --script "$root/unary-call-tests.ss" "$scratch"
+"${CHEZ:-chez}" --libdirs "$root" --script "$root/append-tests.ss"
 "${CHEZ:-chez}" --libdirs "$root" --script "$root/condition-tests.ss"
 "${CHEZ:-chez}" --libdirs "$root" --script "$root/generic-tests.ss" "$scratch"
 "${CHEZ:-chez}" --libdirs "$root" --script "$root/environment-tests.ss"

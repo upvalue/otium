@@ -36,7 +36,7 @@
           (rename (otium values) (collection-length length) (collection-reverse reverse)
                   (collection-for-each for-each) (collection-apply apply)
                   (frozen-set-car! set-car!) (frozen-set-cdr! set-cdr!))
-          (prefix (only (chezscheme) display newline write) host:))
+          (prefix (only (chezscheme) display newline write for-each apply) host:))
 
   ;; Otium core forms over Chez. The shared expander has already normalized
   ;; parameter lists and moved body definitions ahead of plain expressions.
@@ -88,11 +88,21 @@
       [(_ fallback cache callee arg)
        (let* ([a arg] [f callee])
          (if (procedure? f) (f a) (fallback cache f a)))]))
-  (define (ot-append . lists)
-    (for-each (lambda (xs)
-                (unless (list? xs) (error 'append "expected proper list" xs)))
-              lists)
-    (apply append lists))
+  ;; All arguments must be proper lists, including the final one. Common
+  ;; arities avoid packing arguments; the fallback uses native list helpers.
+  (define ot-append
+    (case-lambda
+      [() '()]
+      [(xs) (unless (list? xs) (error 'append "expected proper list" xs)) xs]
+      [(xs ys)
+       (unless (list? xs) (error 'append "expected proper list" xs))
+       (unless (list? ys) (error 'append "expected proper list" ys))
+       (append xs ys)]
+      [lists
+       (host:for-each (lambda (xs)
+                       (unless (list? xs) (error 'append "expected proper list" xs)))
+                     lists)
+       (host:apply append lists)]))
   (define (int? x) (and (integer? x) (exact? x)))
   (define (float? x) (and (real? x) (inexact? x)))
   (define (inc x) (+ x 1))

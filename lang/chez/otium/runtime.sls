@@ -135,6 +135,14 @@
                 (hashtable-set! (namespace-definitions space) (car entry)
                   "Typed maps and generic dispatch.")) gm:public-bindings)
             (namespace-loaded?-set! space #t))
+          (when (eq? name 'otium.ffi)
+            (for-each
+              (lambda (entry)
+                (define-top-level-value (car entry) (cdr entry) env)
+                (hashtable-set! (namespace-definitions space) (car entry)
+                  "Portable foreign calls and native memory."))
+              (eval 'public-bindings (environment '(otium ffi))))
+            (namespace-loaded?-set! space #t))
           space)))
 
   (define (import-value! space local target member)
@@ -196,7 +204,7 @@
     (let ([space (find-namespace name)])
       (when (namespace-loading? space)
         (error 'require "circular namespace load" name))
-      (when (and (not (eq? name 'otium.generic))
+      (when (and (not (memq name '(otium.generic otium.ffi)))
                  (or reload? (not (namespace-loaded? space))))
         (load-namespace! space (or (namespace-source space) (source-for name))))
       space))

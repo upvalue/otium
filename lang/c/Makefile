@@ -13,7 +13,8 @@ CPPFLAGS += $(EXTRA_CPPFLAGS)
 BUILD ?= $(BUILD_ROOT)/$(PLATFORM)
 BIN := $(BIN_ROOT)/$(PLATFORM)
 OTIUM := $(BIN)/otium
-OBJ := $(BUILD)/obj/$(GC)
+WITH_FFI ?= 0
+OBJ := $(BUILD)/obj/$(GC)-ffi$(WITH_FFI)
 GEN := $(BUILD)/gen
 
 ifeq ($(GC),semi)
@@ -26,10 +27,19 @@ else
 $(error GC must be "semi" or "gen")
 endif
 
-RUNTIME_OBJ := $(OBJ)/otium.o $(OBJ)/ot-gc-common.o $(GC_OBJ) $(OBJ)/ot-posix.o
+RUNTIME_OBJ := $(OBJ)/otium.o $(OBJ)/ot-gc-common.o $(GC_OBJ) $(OBJ)/ot-posix.o $(OBJ)/ot-ffi.o
 CLI_OBJ := $(OBJ)/main.o $(OBJ)/ot-ext-demo.o $(OBJ)/line-edit.o $(OBJ)/bestline.o
 TEST_OBJ := $(OBJ)/test-runtime.o
 GC_BENCH_OBJ := $(OBJ)/gc-bench.o
+
+ifeq ($(WITH_FFI),1)
+CPPFLAGS += -DOT_WITH_FFI $(shell pkg-config --cflags libffi)
+LDLIBS += $(shell pkg-config --libs libffi)
+RUNTIME_OBJ += $(OBJ)/ffi-native.o
+ifeq ($(shell uname -s),Linux)
+LDLIBS += -ldl
+endif
+endif
 
 ifeq ($(WITH_RAY),1)
 CLI_OBJ += $(OBJ)/ot-ext-ray.o
@@ -109,7 +119,7 @@ hygiene:
 	! rg -n '^\s*#\s*define\s+OT_INTERNAL\b' --glob '!src/**' .
 
 gc-lint:
-	WITH_RAY="$(WITH_RAY)" RAYLIB_CFLAGS="$(RAYLIB_CFLAGS)" tools/gc-lint/run
+	WITH_FFI="$(WITH_FFI)" WITH_RAY="$(WITH_RAY)" RAYLIB_CFLAGS="$(RAYLIB_CFLAGS)" tools/gc-lint/run
 
 test: all $(BUILD)/test-runtime hygiene
 	$(BUILD)/test-runtime
@@ -135,3 +145,12 @@ format:
 clean:
 	rm -rf $(BUILD)
 	rm -rf $(OTIUM)
+
+$(OBJ)/ot-ffi.o: src/ot-ffi.c src/otium.h ../shared/ffi/native.h $(GEN)/ot-ffi-source.h | $(OBJ)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(GEN) -Isrc -c $< -o $@
+
+$(OBJ)/ffi-native.o: ../shared/ffi/native.c ../shared/ffi/native.h | $(OBJ)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(GEN)/ot-ffi-source.h: ../shared/ffi/core.scm tools/embed.py | $(GEN)
+	$(PYTHON) tools/embed.py $< ot_ffi_src $@

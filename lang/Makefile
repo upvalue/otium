@@ -31,3 +31,11 @@ test-repl: all
 clean:
 	$(MAKE) -C c clean
 	$(MAKE) -C shared clean
+
+.PHONY: test-ffi ffi
+ffi:
+	$(MAKE) -C c WITH_FFI=1 all
+	$(MAKE) -C shared ffi
+
+test-ffi: ffi
+	python3 shared/tests/test_ffi.py --stress

@@ -3389,6 +3389,11 @@ static otv require_one(ots* state, otv spec, otv caller) {
     ot_module* module = find_module(state, name);
     if (module != NULL && (!module->initialized || reload)) {
       module->init(state);
+      if (state->vm.unwind_kind != UNWIND_NONE) {
+        state->vm.current_namespace = caller;
+        ((ot_namespace_obj*)ot_as_obj(target))->loading = false;
+        return OT_UNWIND;
+      }
       module->initialized = true;
     }
     char* source = NULL;

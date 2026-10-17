@@ -1,11 +1,16 @@
 # Portable foreign function interface
 
-Status: draft for review, October 16, 2026. These APIs are proposed, not
-implemented. Names and release boundaries below are concrete design choices.
+Status: draft for review, October 16, 2026. Implementation is in progress;
+see [implementation status](ffi-implementation.md) for the working subset,
+commands, and outstanding work. This document describes the full release
+contract.
 
 Otium should load a native shared library and call its C ABI from the same
 binding source on Chez and C. Binding an ordinary exported function must not
-require writing or compiling a C wrapper. SDL3 is the first acceptance target:
+require writing or compiling a C wrapper. The system math library is the first
+implementation target, exercising scalar calls and pointer output parameters
+without an installed dependency. Independent native fixtures cover ABI cases
+such as aggregate-by-value calls. SDL3 is the full release acceptance target:
 windows, accelerated 2D rendering, textures, input events, and queued PCM audio.
 
 The design starts with Otium's two runtimes and the operations needed to call
@@ -44,8 +49,9 @@ is prior art establishing feasibility, not an API or compatibility target.
 ## Release boundary
 
 Version 1 supports fixed-arity C calls, scalar arguments and results, opaque
-pointers, foreign allocations, pointers to structs and unions, fixed arrays,
-UTF-8 strings, and output parameters. Native 64-bit types are supported with
+pointers, foreign allocations, structs and unions passed and returned by value,
+pointers to aggregates, fixed arrays in memory and aggregate fields, UTF-8
+strings, and output parameters. Native 64-bit types are supported with
 checked conversion to each runtime's integer range. Declarations and memory
 operations share a common contract, with the numeric range difference described
 below; Chez's other native conversion extensions are not exposed.
@@ -55,10 +61,11 @@ C calling convention, 64-bit pointers, and the normal platform ABI. A target
 is supported only after passing the ABI fixture suite. Windows, 32-bit targets,
 mobile startup, and cross-compilation are later work.
 
-Callbacks into Otium, varargs, structs/unions passed or returned by value,
-packed structs, bitfields, flexible array members, long double, and C++ ABI
-calls are excluded. Declarations requesting these features fail at binding
-time. Function-pointer slots may contain null; there is no callable callback
+Callbacks into Otium, varargs, packed structs, bitfields, flexible array
+members, empty aggregates, zero-length array fields in by-value aggregates,
+long double, and C++ ABI calls are excluded. Top-level arrays are not C
+by-value parameters or results; declare pointer parameters explicitly.
+Declarations requesting excluded features fail at binding time. Function-pointer slots may contain null; there is no callable callback
 constructor in version 1. SDL APIs requiring callbacks are outside this release.
 
 Queued audio is within scope: `SDL_OpenAudioDeviceStream` accepts a null
@@ -132,7 +139,7 @@ Reload does not destroy SDL resources or rerun SDL initialization implicitly.
 | `callback-pointer` | Native function pointer; accepts only `ffi/null` in version 1. |
 | `utf8` | Call argument string or null pointer; result is a copied string or null pointer. |
 | `(array T count)` | Fixed-size foreign memory array; not a call argument/result by value. |
-| Layout value | Immutable struct/union description for memory access; calls pass its address as `pointer`. |
+| Layout value | Immutable struct/union description; in a call signature, passes or returns the aggregate by value. Use `pointer` for an address parameter/result. |
 
 Integer conversion checks signedness and bounds; no truncation, wrapping,
 boolean coercion, or conversion from a float is permitted. Float inputs are
@@ -169,6 +176,80 @@ managed integer object. Full-width or arbitrary-precision language integers
 can later widen the accepted range without changing binding signatures. They
 are not a prerequisite for this release. Tests must still exercise values
 outside C's range, even when ordinary SDL workloads do not reach them.
+
+## Aggregates at the call boundary
+
+A struct or union layout used directly in an argument or result position means
+that C aggregate type by value. The signature determines the calling convention;
+the Otium value carrying its bytes is still a foreign pointer. There is no
+implicit choice between by-value and pointer passing based on the argument.
+
+```scheme
+(define Point
+  (ffi/define-struct! 'Point '((x double) (y double))))
+;; C: struct Point translate(struct Point point, double dx, double dy);
+(define translate
+  (ffi/bind geometry "translate" (list Point 'double 'double) Point))
+(define point (ffi/alloc Point 1))
+(unwind-protect
+  (begin
+    (ffi/field-set! point Point '(x) 10.0)
+    (ffi/field-set! point Point '(y) 20.0)
+    (let ((moved (translate point 2.0 3.0)))
+      (unwind-protect
+        (ffi/field-ref moved Point '(x))
+        (ffi/free! moved))))
+  (ffi/free! point))
+```
+
+An aggregate argument accepts a non-null foreign pointer or view containing
+at least `sizeof(T)` bytes, aligned for T. Before native execution, the adapter
+checks pointer kind, live state, alignment, and known bounds, then copies one
+aggregate into separate aligned call storage. Unknown-extent external pointers
+retain the same caller responsibility as typed memory reads. All arguments
+are validated and copied before the call. Null, released, short, or misaligned
+storage fails before native code runs. The source need not have been allocated
+using T; it must contain a valid native representation of T.
+
+The callee receives a C value copy. Changes to its local aggregate do not change
+the source bytes. Pointer members are shallow copies: the callee can still
+modify their pointees, and copying does not retain owners or extend pointee
+lifetimes. The caller must retain those owners through native use. The adapter
+does not infer a union's active member or recursively convert fields. Embedded
+arrays and nested aggregates travel as part of the containing value. Standalone
+arrays remain memory types and fail in argument/result positions.
+
+An aggregate result returns a fresh owning pointer with extent `sizeof(T)` and
+alignment `alignof(T)`, readable with the existing field operations. It is
+independent of argument storage and subsequent calls. It has the same explicit
+`free!`, derived-view invalidation, leak accounting, and teardown behavior as
+`alloc`. It owns only the result storage, never resources referenced by pointer
+fields. A struct result and a pointer-to-struct result therefore have different
+ownership contracts even though both are represented by Otium pointers.
+
+Prepare result storage and its ownership wrapper before native execution; an
+allocation failure must not run the callee. Release unpublished result storage
+and all argument temporaries on failure. Backend-private result buffers and
+hidden result-pointer arguments are implementation details. No extra argument
+appears in the Otium signature. A successful aggregate return preserves native
+field bits without converting them to Otium integers. For example, an embedded
+high-bit `u64` can be returned and passed onward on C; reading that field raises
+`range` if it exceeds `OT_INT_MAX`. Padding bytes have no portable value and
+must not be used for semantic equality or deterministic serialization.
+
+By-value support requires correct ABI classification as well as memory layout.
+The backend must handle integer and floating register classes, homogeneous
+floating aggregates where applicable, stack arguments, and indirect results.
+Unions and structs containing unions require classification of the complete
+type. Substituting the largest member or an equal-size byte array is not a
+general calling convention implementation. Invalid signatures raise
+`signature`; a valid layout that the backend cannot lower correctly on the
+selected target raises `abi` at bind time. A target cannot claim complete
+version 1 support while rejecting aggregate shapes in this release boundary.
+
+Bindings retain their original layouts and prepared ABI descriptions across
+reload. Cache keys must account for the complete immutable type structure and
+target ABI, not diagnostic layout names or size/alignment alone.
 
 ## Strings at the call boundary
 
@@ -232,7 +313,7 @@ null to `#f`. The adapter normalizes these to and from Otium's dedicated null.
 | --- | --- |
 | `(ffi/alloc T count)` | Zeroed native storage for `count` elements, correctly aligned; returns an owning pointer. |
 | `(ffi/alloc-utf8 string)` | Owning NUL-terminated UTF-8 allocation; rejects embedded NUL; released with `free!`. |
-| `(ffi/free! p)` | Releases an allocation from `alloc`; invalidates it and all derived views. Repeated release of that allocation is a no-op. |
+| `(ffi/free! p)` | Releases an allocation from `alloc`, `alloc-utf8`, or an aggregate result; invalidates it and all derived views. Repeated release of that allocation is a no-op. |
 | `(ffi/sizeof T)` / `(ffi/alignof T)` | Size/alignment in bytes. |
 | `(ffi/ref p T index)` | Reads one scalar or pointer at `index * sizeof(T)`. |
 | `(ffi/set! p T index value)` | Writes one scalar or pointer; returns `#f`. |
@@ -275,7 +356,8 @@ allocation counts/bytes before teardown so teardown cleanup cannot hide leaks.
 The pointer wrapper and ownership metadata may move during collection; their
 native allocation does not. Views retain shared ownership metadata so an
 explicit release invalidates every view without depending on wrapper addresses.
-`free!` also accepts allocations from `alloc-utf8`; freeing `ffi/null` is a no-op.
+`free!` also accepts allocations from `alloc-utf8` and aggregate results;
+freeing `ffi/null` is a no-op.
 
 Pointers returned by foreign functions have unknown extent and no inferred
 owner. Access through them is an unsafe operation governed by the foreign API.
@@ -313,8 +395,9 @@ its value is an invalid type specification.
 
 A type specification T is a built-in scalar symbol, a layout value, or an
 `(array T count)` list containing another type specification and a nonnegative
-exact count. Array/aggregate types are for memory only. Nested layouts are
-passed as values when constructing the field list, as in `TwoRects` above.
+exact count. Arrays are memory types and may be embedded in aggregates;
+struct/union layouts also describe by-value calls. Nested layouts are passed
+as values when constructing the field list, as in `TwoRects` above.
 Constructors validate and copy the specification, including array descriptions;
 later mutation of the supplied lists does not change the layout. Duplicate
 fields, invalid types, and recursive by-value layouts are errors. Opaque handles
@@ -378,8 +461,8 @@ the REPL responsive.
 Each backend keeps call inputs, callable metadata, and allocation owners live
 through conversion and the native call. The C backend roots managed values
 across every allocation and reacquires managed payload addresses after any
-operation that may collect. Its native argument storage, copied strings, and
-result storage are outside the moving heap; it passes no managed object address
+operation that may collect. Its native argument storage, copied strings,
+aggregate copies, and result storage are outside the moving heap; it passes no managed object address
 to C in version 1. This is the C backend strategy, not a restriction on Chez's
 internal implementation of the same lifetime contract.
 
@@ -494,9 +577,28 @@ generate a fixed pool of global C trampolines. Cache immutable prepared
 signatures and keep all per-call storage separate.
 [libffi call interface](https://github.com/libffi/libffi/blob/master/doc/libffi.texi)
 
+The C backend constructs libffi aggregate type descriptions at bind time and
+checks computed sizes, alignments, and field offsets against the layout values.
+Embedded fixed arrays can be described as repeated elements. libffi does not
+provide a direct union type; union classification on both target ABIs is a
+required implementation investigation, including unions nested in structs.
+A generic target-specific lowering path or calling-engine extension is allowed;
+per-function compiled wrappers remain outside the design. The memory-layout
+emulation described in libffi's union documentation is not sufficient evidence
+that a by-value signature is correct.
+[libffi aggregate types](https://github.com/libffi/libffi/blob/master/doc/libffi.texi)
+
 Chez constructs and caches native procedures for the same signatures, with
-the common validation/conversion layer around them. Its native integer coercion
-rules must not leak through the portable API. Any dynamic compilation happens
+the common validation/conversion layer around them. Aggregate bindings create
+private native ftype descriptions and use Chez's aggregate-by-value facility
+where supported by the selected Chez version and target. The adapter supplies
+any result destination required by Chez internally. Pin and verify the minimum
+Chez version supporting this path on both targets; an older runtime must report
+`abi` at bind time rather than silently pass an address. Native ftype layout and
+call behavior must pass the same fixture suite as C.
+[Chez aggregate calling implementation](https://github.com/cisco/ChezScheme/blob/main/IMPLEMENTATION.md)
+
+Chez's native integer coercion rules must not leak through the portable API. Any dynamic compilation happens
 at bind time, not on every call.
 [Chez foreign interface](https://www.scheme.com/csug8/foreign.html)
 
@@ -522,9 +624,19 @@ gaps discovered while porting scene code belong in `GAPS.txt`.
    UTF-8, invalid encoding, embedded NUL rejection, empty versus null strings,
    and result-copy lifetime. Verify dedicated null round trips through calls
    and pointer fields; zero and `#f` must not be accepted as pointer arguments.
+   Implement by-value arguments and results before SDL integration. Test small
+   integer structs, mixed integer/float structs, homogeneous float aggregates,
+   nested structs/arrays, unions with different member register classes, and
+   structs containing unions. Include large indirect returns and enough mixed
+   arguments to exhaust registers. Compare with direct C calls and explicit
+   expected fields, never padding bytes. Verify argument-copy isolation, shallow
+   pointer-member behavior, independent result allocations, invalid-buffer
+   rejection before side effects, and allocation-failure cleanup. Return high-bit
+   integer fields and verify that only a subsequent scalar read raises `range`
+   on C. Rebind layouts and confirm saved callables keep their original ABI.
 3. Run the same fixture cases under C GC stress and forced compaction, with
-   allocations during conversions and live derived views. On Chez, test the
-   automatic string path with collections between calls and verify that bound
+   allocations during conversions, aggregate arguments/results, and live derived
+   views. On Chez, test the automatic string path with collections between calls and verify that bound
    calls omit `__collect_safe`. Use an explicitly retained native string across calls
    and collections on both runtimes. Exercise failure cleanup and resource counts.
    Run `make gc-lint` when LLVM tooling is installed
@@ -553,7 +665,9 @@ in ordinary CI and a failure in the dedicated integration job. Each supported
 target must run the ABI and native-call fixtures on both runtimes. Report
 foreign allocation leaks separately from managed heap use.
 
-The release is complete when one shared SDL binding body and one portable
+The release requires the aggregate-by-value fixture suite on both runtimes and
+both supported targets, independently of SDL coverage. It is complete when
+one shared SDL binding body and one portable
 render/input/audio acceptance program run on both runtimes, with only loader
 and host setup adapters. No per-function C glue is needed for the listed surface.
 

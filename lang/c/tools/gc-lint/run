@@ -58,7 +58,7 @@ python3 "$script_dir/tests/test_lint.py" "$tool" \
   "$script_dir/tests/stale-borrow.c" "$script_dir/tests/write-barrier.c"
 
 make -C "$repo_dir" BUILD="$runtime_build" \
-  "$runtime_build/gen/expander.h" "$runtime_build/gen/prelude.h"
+  "$runtime_build/gen/expander.h" "$runtime_build/gen/prelude.h" "$runtime_build/gen/ot-ffi-source.h"
 
 compile_args=(
   -std=c23 \
@@ -83,6 +83,14 @@ compile_args=(
   "$repo_dir/tests/test_runtime.c" \
   "$repo_dir/benchmarks/gc_bench.c" \
   -- "${compile_args[@]}" -DOT_GC_GEN
+
+if [[ ${WITH_FFI:-0} == 1 ]]; then
+  # pkg-config emits compiler arguments as shell words.
+  # shellcheck disable=SC2206
+  ffi_args=($(pkg-config --cflags libffi))
+  "$tool" "$@" "$repo_dir/src/ot-ffi.c" -- \
+    "${compile_args[@]}" "${ffi_args[@]}" -DOT_GC_GEN -DOT_WITH_FFI
+fi
 
 if [[ ${WITH_RAY:-0} == 1 ]]; then
   # RAYLIB_CFLAGS is a compiler argument string, with the same no-spaces-in-paths

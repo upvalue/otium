@@ -14,6 +14,18 @@
 (run '(defclass PointerDown))
 (run '(def button (g/make Button)))
 (run '(def down (g/make PointerDown)))
+(check "qualified diagnostic name" 'user/Button (run '(g/type-name Button)))
+(run '(require chez))
+(for-each
+ (lambda (pair)
+   (check "builtin identity" #t
+     (run `(eq? (g/dispatch-type ,(car pair)) ,(cadr pair)))))
+ '((1 g/Number) (1.2 g/Number) (1+2i g/Number) (#f g/Boolean)
+   (#\a g/Character) ("x" g/String) ('a g/Symbol) ('() g/Null)
+   ('(a) g/Pair) ((chez/vector 1) g/Vector) ((chez/make-bytevector 2) g/Bytevector)
+   ((chez/make-eq-hashtable) g/Hashtable) (+ g/Procedure) (Button g/TypeDescriptor)
+   ((chez/void) g/Nil) ((keyword "test") g/Keyword)
+   ((array) g/Vector) ((table) g/Hashtable)))
 (run '(defgeneric (event! widget event)))
 (run '(def saved event!))
 (run '(defmethod (event! widget event) 'fallback))

@@ -1,8 +1,7 @@
 (library (otium expander)
   (export make-expander expander-top expander-head install-application!)
   (import (chezscheme) (only (otium reader) read-otium)
-          (only (otium generic-core) make-slot-cache cached-call cached-set-call)
-          (only (otium values) collection-call))
+          (only (otium generic-core) make-slot-cache cached-call cached-set-call))
 
   ;; The expander itself is shared/prelude/expander.scm, read with the Otium
   ;; reader and evaluated with the Otium core forms. It uses no macros, so it

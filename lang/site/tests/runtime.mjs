@@ -31,6 +31,10 @@ for (const stress of [false, true]) {
   expect('(get {1 "one" -2 "negative"} 1)', '"one"');
   expect('(length (map (fn (x) (list x x)) (range 200)))', '200');
 }
+for (const stress of [false, true]) {
+  fresh(stress);
+  expect(readFileSync(root + 'shared/tests/classes/checks.scm', 'utf8'), 'class checks passed 96\nnil');
+}
 for (const example of JSON.parse(readFileSync(root + 'site/public/assets/examples.json'))) {
   fresh();
   expect(example.source, example.expected ?? undefined);
@@ -54,4 +58,4 @@ expect('(println "hello")', 'hello\nnil');
 assert.equal(evaluate('(exit 0)').status, 2);
 fresh();
 expect('42', '42');
-console.log('WASM: conformance fixtures, guide examples, state, GC stress, errors, integer keys, and reset passed.');
+console.log('WASM: classes, conformance fixtures, guide examples, state, GC stress, errors, integer keys, and reset passed.');

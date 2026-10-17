@@ -10,7 +10,7 @@ FLAGS := -std=c23 -O2 -DOT_GC_SEMI -DOT_HEAP_INIT=1048576 -DOT_HEAP_MAX=33554432
 .PHONY: all
 all: $(OUT)/otium.mjs
 
-$(OUT)/otium.mjs: $(SOURCES) ../src/otium.h ../src/ot-gc-internal.inc ../src/ot-gc-trace.inc ../../shared/documentation/runtime.inc $(HEADERS)
+$(OUT)/otium.mjs: $(SOURCES) ../src/otium.h ../src/ot-gc-internal.inc ../src/ot-gc-trace.inc ../src/ot-classes.inc ../src/ot-methods.inc ../../shared/documentation/runtime.inc $(HEADERS)
 	mkdir -p $(OUT)
 	$(EMCC) $(FLAGS) -I../src -I$(BUILD) $(SOURCES) -lm --no-entry \
 	  -sMODULARIZE=1 -sEXPORT_ES6=1 -sENVIRONMENT=web,worker,node \

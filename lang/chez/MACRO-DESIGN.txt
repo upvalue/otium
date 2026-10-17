@@ -13,7 +13,7 @@ and applications. On Chez, an Otium expansion pass should run before Chez
 expansion and compilation. Chez syntax remains available through explicit
 platform adapters and a bounded native expression escape.
 
-The contract is docs/language.md, section 6. Both runtimes load the same
+The contract is specs/language.md, section 6. Both runtimes load the same
 expander source; each supplies its macro lookup, macro invocation, and native
 syntax test.
 
@@ -300,7 +300,7 @@ Source references and feasibility checks
 
 The current behavior is documented in chez/NOTES.txt and implemented in
 chez/otium/runtime.sls. C's macro contract and implementation are in
-docs/language.md, c/prelude/expander.scm, and c/tests/otium/07-macros.scm.
+specs/language.md, c/prelude/expander.scm, and c/tests/otium/07-macros.scm.
 
 Chez native syntax and binding facilities are documented at:
 https://www.scheme.com/csug8/syntax.html

@@ -41,7 +41,7 @@ indirect returns, and saved bindings after layout rebinding. The fixture suite
 has 197 checks on each runtime. C stress runs force collections and,
 with the generational collector, compaction.
 
-This is an implementation milestone, not completion of `docs/ffi.md`. Remaining
+This is an implementation milestone, not completion of `specs/ffi.md`. Remaining
 work includes complete structured error metadata for every failure path,
 allocation-failure injection and signature-cache sharing in C. There is no callback or varargs
 support. [Aggregate ABI notes](../shared/ffi/ABI.md) describe the union lowering

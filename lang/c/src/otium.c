@@ -464,7 +464,7 @@ static bool key_equal(ots* state, otv left, otv right) {
 
 static uint32_t value_hash(ots* state, otv value) {
   (void)state;
-  if (ot_is_int(value)) return (uint32_t)((uintptr_t)value ^ ((uintptr_t)value >> 32u));
+  if (ot_is_int(value)) return (uint32_t)((uint64_t)value ^ ((uint64_t)value >> 32u));
   if (!ot_is_ptr(value)) return (uint32_t)value * UINT32_C(2654435761);
   switch (ot_object_type(value)) {
     case OBJ_SYMBOL:

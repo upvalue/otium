@@ -117,7 +117,7 @@ namespace. Qualified and referred macro names follow reload for subsequent
 expansions. Already compiled callers retain their previous expansion.
 
 Expansion uses the shared expander in ../shared/prelude/expander.scm, the
-same one the C runtime uses; see docs/language.md section 6. It is read with
+same one the C runtime uses; see specs/language.md section 6. It is read with
 the Otium reader and evaluated with the core forms, without expansion of its
 own. The runtime supplies its macro lookup, macro invocation (with the
 expansion budget below), and the native syntax test. let binds
@@ -253,7 +253,7 @@ operations are in the built-in otium.generic namespace. For example:
   (define-method (label (object Button)) (g/field-ref object 'label))
   (label (g/make Button 'label "7"))
 
-See docs/multimethods.md for matching and reload semantics. Run chez/test for
+See specs/multimethods.md for matching and reload semantics. Run chez/test for
 semantic checks, examples/chez/multimethods/events.scm for a headless example,
 and benchmarks/chez/run-multimethods for the scan-versus-cond benchmark.
 The native namespace preserves descriptors on require :reload; it has no

@@ -1,6 +1,6 @@
 # Common reader implementation
 
-The contract is in [reader-spec.md](reader-spec.md). C implements it in
+The contract is in [reader-spec.md](../specs/reader-spec.md). C implements it in
 `c/src/otium.c`; Chez uses ordinary Scheme libraries `reader.sls`, `values.sls`
 and `truth.sls`. There is no bootstrap step. Both readers return ordinary
 lists for array/table constructor sugar, including under quotation. Keywords

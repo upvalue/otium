@@ -3,7 +3,7 @@
 Status: draft, October 17, 2026. Not implemented. The decisions made so far
 are listed at the end. It proposes replacing typed maps with classes that have declared
 slots, plus a single chain of slotless abstract types for dispatch, following
-Julia. It keeps the generic function work in `docs/multimethods.md` and adds
+Julia. It keeps the generic function work in `specs/multimethods.md` and adds
 `call-next-method` and `:around` methods.
 
 ## Why
@@ -219,7 +219,7 @@ methods is deferred until real code shows it is repetitive.
 
 ## Built-in classes
 
-The built-in dispatch identities from `docs/multimethods.md` (`Number`,
+The built-in dispatch identities from `specs/multimethods.md` (`Number`,
 `String`, `Keyword`, `Hashtable`, `Procedure`, ...) become built-in classes
 with `Object` as their parent. They are final like any other class. Abstract
 parents for them, such as `Sequence` over lists and arrays or `Real` over

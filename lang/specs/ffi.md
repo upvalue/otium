@@ -1,7 +1,7 @@
 # Portable foreign function interface
 
 Status: draft for review, October 16, 2026. Implementation is in progress;
-see [implementation status](ffi-implementation.md) for the working subset,
+see [implementation status](../docs/ffi-implementation.md) for the working subset,
 commands, and outstanding work. This document describes the full release
 contract.
 

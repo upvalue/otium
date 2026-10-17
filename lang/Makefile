@@ -58,3 +58,12 @@ test-cli: all
 test-reader: all
 	python3 shared/tests/test_reader.py
 	python3 shared/tests/test_reader.py --stress
+
+# ✨ Markdown documentation and the browser C runtime.
+.PHONY: site test-site
+site:
+	npm --prefix site run build
+
+test-site: site
+	node site/tests/runtime.mjs
+	$(or $(PYTHON),python3) site/tests/check_site.py

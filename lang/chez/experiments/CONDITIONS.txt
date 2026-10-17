@@ -14,5 +14,5 @@ active and may invoke themselves or sibling clauses. C previously exposed
 those restarts but failed to handle a second invocation.
 
 The original prototype and its narrow fixture translator were removed in
-favor of the shared semantic tests. See chez/NOTES.txt and docs/language.md
+favor of the shared semantic tests. See chez/NOTES.txt and specs/language.md
 for the current contract and the remaining collection/reader differences.

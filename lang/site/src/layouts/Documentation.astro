@@ -1,0 +1,42 @@
+---
+// ✨ Shared user-facing documentation shell, matching otium.sh's dark theme.
+import { navigation } from '../../navigation.mjs';
+const { title, slug, headings, source } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title} · Otium</title>
+    <meta name="description" content="Otium language guide, reference, and live C runtime playground." />
+    <link rel="icon" href="./assets/otium-favicon.png" />
+    <link rel="stylesheet" href="./assets/style.css" />
+    <script is:inline src="./assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header>
+      <a class="brand" href="./index.html"><img src="./assets/otium-favicon.png" alt="" width="32" height="32" />otium</a>
+      <span class="header-label">THE LANGUAGE</span>
+      <a class="repo" href="https://github.com/upvalue/otium">GitHub ↗</a>
+    </header>
+    <div class="layout">
+      <nav aria-label="Documentation">
+        <span class="nav-label">EXPLORE OTIUM</span>
+        {navigation.map(([page, label]) => <a href={`./${page}.html`} aria-current={slug === page ? 'page' : undefined}>{label}</a>)}
+        <div class="nav-note">A small Lisp.<br />Room to experiment.</div>
+      </nav>
+      <main id="main">
+        <div class="draft">✨ LLM-generated draft site and documentation. Source reference text is reused as written.</div>
+        <article><slot /></article>
+        <footer>Otium is experimental. This guide follows the C dialect.<a href={source}>Markdown source ↗</a></footer>
+      </main>
+      <aside aria-label="On this page">
+        <span class="nav-label">ON THIS PAGE</span>
+        <ul>{headings.filter((heading) => heading.depth === 2).map((heading) => <li><a href={`#${heading.slug}`}>{heading.text}</a></li>)}</ul>
+      </aside>
+    </div>
+  </body>
+</html>

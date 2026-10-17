@@ -106,7 +106,7 @@ Raylib feature switch has been removed; graphics use portable SDL FFI.
 | `tests/test_ui.py` | Separate display-backed smoke/integration tests, bounded in time, with input injection and screenshot checks. |
 | `tests/test_cli.py` | Bundled imports outside the checkout, disabled build, and CLI lifecycle checks. |
 | `tools/gc-lint/run` | Generate embedded inputs and lint the extension with its dependency flags when enabled. |
-| `docs/language.md` | Document first-party modules, APIs, lifecycle, and blocking `ui/run` behavior after implementation. |
+| `specs/language.md` | Document first-party modules, APIs, lifecycle, and blocking `ui/run` behavior after implementation. |
 
 Keep the one-header invariant enforced by `tests/check_hygiene.py`; do not add
 a second source header. Reuse `tools/embed.py`, which already reads bytes,

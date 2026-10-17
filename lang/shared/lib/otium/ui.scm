@@ -2,18 +2,24 @@
 
 ;; Shared widget lifecycle. Optional layout and drawing live in otium.ui.gpu.
 (defabstract Widget)
-(defclass Description properties key children)
+(defclass Description properties key children options)
 (defclass Mounted instance key children (active? :init #t)
-  (layout :init nil) (bounds :init nil) (release-layout :init nil))
-(defclass Root (children :init []))
-(defclass Label :is Widget text)
+  (layout :init nil) (bounds :init nil) (release-layout :init nil)
+  (parent :init nil) (options :init {}) (focused? :init #f) (pressed? :init #f))
+(defclass Focus (node :init nil) (armed :init nil) (key :init nil))
+(defclass Root (children :init []) (focus :init (make Focus)))
+(defclass Label :is Widget text
+  (font :init :ui) (size :init 16) (color :init 0xdce5f2ff) (wrap :init #t)
+  (width :init -1) (height :init -1) (grow :init 0) (align :init :left))
 (defclass Column :is Widget
   (width :init -1) (height :init -1) (grow :init 0)
   (padding :init 0) (gap :init 0) (background :init nil) (radius :init 0))
 (defclass Row :is Widget
   (width :init -1) (height :init -1) (grow :init 0)
   (padding :init 0) (gap :init 0) (background :init nil) (radius :init 0))
-(defclass Button :is Widget (on-press :init nil))
+(defclass Button :is Widget (on-press :init nil)
+  (width :init -1) (height :init -1) (grow :init 0) (padding :init 12)
+  (radius :init 10) (style :init :plain) (size :init 18) (font :init :ui))
 
 (defclass Size width height)
 (defclass Bounds x y width height)
@@ -49,13 +55,15 @@
   "Construct a widget description without initializing mounted state."
   (unless (class-subtype? class Widget) (error "ui/new: expected widget class"))
   (unless (table? opts) (error "ui/new: expected options table"))
-  (let ((args '()))
+  (let ((args '()) (options {}))
     (for-each (fn (k)
-                (unless (eq? k :key)
-                  (set! args (cons k (cons (get opts k) args)))))
+                (cond ((eq? k :key) nil)
+                      ((memq k '(:disabled :focusable :keymap :on-action))
+                       (put! options k (get opts k)))
+                      (else (set! args (cons k (cons (get opts k) args))))))
               (keys opts))
     (make Description :properties (apply class-properties class args)
-          :key (get opts :key) :children children)))
+          :key (get opts :key) :children children :options options)))
 
 (def (label opts text) (new Label (put opts :text text)))
 (def (row opts . children) (apply new Row opts children))
@@ -81,6 +89,8 @@
     out))
 
 (def- (retire! node)
+  (set! (node :focused?) #f)
+  (set! (node :pressed?) #f)
   (for-each retire! (node :children))
   (when (node :release-layout) ((node :release-layout)))
   (set! (node :release-layout) nil)
@@ -89,7 +99,7 @@
   (set! (node :children) [])
   (set! (node :active?) #f))
 
-(def- (reconcile-children old input)
+(def- (reconcile-children old input parent)
   (let ((descriptions (flatten input)) (keyed {}) (seen {}) (kept {}) (out []))
     ;; Validate keys before changing any sibling instances.
     (for-each
@@ -113,12 +123,13 @@
                                     (dispatch-type (d :properties))))))
             (let ((node (if matched? candidate
                             (make Mounted :instance (class-mount (d :properties))
-                                  :key (d :key) :children []))))
+                                  :key (d :key) :children [] :parent parent))))
+              (set! (node :options) (d :options))
               (when matched?
                 (class-update-properties! (node :instance) (d :properties)))
               (let ((built (with-params ((building-children (d :children)))
                              (build (node :instance)))))
-                (set! (node :children) (reconcile-children (node :children) built)))
+                (set! (node :children) (reconcile-children (node :children) built node)))
               (put! kept node #t)
               (push! out node))))))
     (for-each (fn (n) (unless (get kept n #f) (retire! n))) old)
@@ -126,7 +137,8 @@
 
 (def (reconcile! tree descriptions)
   "Update a headless root from fresh descriptions and return it."
-  (set! (tree :children) (reconcile-children (tree :children) descriptions))
+  (set! (tree :children) (reconcile-children (tree :children) descriptions tree))
+  (validate-focus! tree)
   tree)
 
 (def (dispose! tree) (reconcile! tree nil))
@@ -134,8 +146,49 @@
 (def (send! node event)
   "Deliver a synthetic event to an active mounted widget."
   (unless (node :active?) (error "ui/send!: widget was removed"))
-  (handle-event (node :instance) event))
+  (if (enabled? node) (handle-event (node :instance) event) nil))
 
 (def (inspect node)
   {:instance (node :instance) :key (node :key)
-   :active? (node :active?) :bounds (node :bounds) :children (node :children)})
+   :active? (node :active?) :focused? (node :focused?) :pressed? (node :pressed?) :bounds (node :bounds) :children (node :children)})
+
+(def (mounted? value) (and (instance? value) (eq? (dispatch-type value) Mounted)))
+(def (enabled? node)
+  (and (active? node) (not (get (node :options) :disabled #f))
+       (or (not (mounted? (node :parent))) (enabled? (node :parent)))))
+(def (focusable? node)
+  (and (enabled? node)
+       (let ((w (instance node)))
+         (get (node :options) :focusable (class-subtype? (dispatch-type w) Button)))))
+(def (cancel-key! tree)
+  (let ((focus (tree :focus)))
+    (when (focus :armed) (set! ((focus :armed) :pressed?) #f))
+    (set! (focus :armed) nil)
+    (set! (focus :key) nil)))
+(def (focus! tree node)
+  "Move keyboard focus within this tree, or clear it with nil."
+  (when node
+    (unless (and (focusable? node)
+      (let belongs ((parent (node :parent)))
+        (or (eq? parent tree) (and (mounted? parent) (belongs (parent :parent))))))
+      (error "Cannot focus an unavailable widget or a widget from another tree")))
+  (let ((focus (tree :focus)))
+    (unless (eq? node (focus :node))
+      (cancel-key! tree)
+      (when (focus :node) (set! ((focus :node) :focused?) #f))
+      (set! (focus :node) node)
+      (when node (set! (node :focused?) #t))))
+  node)
+(def (validate-focus! tree)
+  (let ((node ((tree :focus) :node)))
+    (when (and node (not (focusable? node))) (focus! tree nil))))
+(def (focused tree) (validate-focus! tree) ((tree :focus) :node))
+(defmethod (layout-style (w Button))
+  {:width (w :width) :height (w :height) :grow (w :grow) :padding (w :padding) :center #t})
+(defmethod (build (w Button))
+  (def (convert value)
+    (cond ((string? value) (label {:size (w :size) :font (w :font) :align :center :wrap #f
+                                  :color (if (eq? (w :style) :accent) 0x101827ff 0xdce5f2ff)} value))
+          ((or (list? value) (array? value)) (map convert value))
+          (else value)))
+  (convert (building-children)))

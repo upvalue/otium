@@ -13,7 +13,7 @@ for runtime, stress in [('c', False), ('c', True), ('chez', False)]:
     if stress:
         env['OTIUM_GC_STRESS'] = '1'
     result = subprocess.run([str(ROOT/('c/otium' if runtime == 'c' else 'chez/run')),
-                             '--no-project', '--path', str(ROOT/'shared/lib'),
+                             '--no-project', '--path', str(ROOT/'shared/lib'), '--path', str(ROOT/'examples'),
                              str(ROOT/'shared/tests/ui/layout.scm')],
                             env=env, cwd=ROOT, capture_output=True, text=True, timeout=90)
     assert result.returncode == 0, (runtime, stress, result.stdout, result.stderr)

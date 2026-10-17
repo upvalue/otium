@@ -43,7 +43,7 @@ def scene(revision, color, broken=False):
         "(vector-set! state 0 (+ 1 (vector-ref state 0)))\n"
         f"  (clear! canvas 16 20 30) (rect! canvas 200 200 200 200 {color})")
     return f"""(ns scenes.shapes)
-(import (otium canvas))
+(chez/import (otium canvas))
 (defonce state (vector 0))
 (define revision "{revision}")
 (define (render! canvas elapsed dt) {draw})

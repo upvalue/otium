@@ -67,8 +67,8 @@ Runtime-provided Otium functions and forms use the shared reference in
 them, with runtime notes where behavior differs. Otium prelude functions and
 macros keep their docs beside their definitions, rather than duplicating them
 in the reference. User definitions take precedence over runtime entries.
-Chez-native names remain available for completion, without a bundled Chez
-manual or fallback descriptions.
+Chez-native names are available with a `chez/` prefix for completion, without
+a bundled Chez manual or fallback descriptions.
 
 After editing the runtime reference, run:
 

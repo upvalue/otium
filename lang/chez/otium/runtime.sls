@@ -79,7 +79,8 @@
     (unless (symbol? name) (error 'ns "expected a symbol" name))
     (or (hashtable-ref namespaces name #f)
         (let* ([env (copy-environment
-                      (environment '(except (chezscheme) error error? condition-message exit)
+                      (environment '(otium core)
+                        '(prefix (chezscheme) chez/)
                         '(only (otium conditions)
                            error signal condition-type condition-message error? type-pred
                            define-condition condition-of-type? handler-bind try restart-case
@@ -88,8 +89,6 @@
                [space (make-namespace name env (make-eq-hashtable)
                         (make-eq-hashtable) #f #f #f)])
           (hashtable-set! namespaces name space)
-          (define-top-level-value 'chez/error error env)
-          (define-top-level-value 'chez/condition-message condition-message env)
           (define-top-level-value 'describe
             (lambda (name)
               (unless (symbol? name) (error 'describe "expected a symbol" name))

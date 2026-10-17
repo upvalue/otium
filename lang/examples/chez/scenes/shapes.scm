@@ -1,5 +1,5 @@
 (ns scenes.shapes)
-(import (otium canvas))
+(chez/import (otium canvas))
 
 (defonce state (vector 0 0.0))
 (define revision "ORBIT / 01")

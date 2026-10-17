@@ -281,8 +281,10 @@
   "display": {
     "text": "(display value ...)\nWrite display representations to the host output sink, separated by spaces, without a newline. Return nil.",
     "runtimes": [
-      "c"
-    ]
+      "c",
+      "chez"
+    ],
+    "chez": "(display value ...)\nWrite display representations to the current output port, separated by spaces, without a newline. Return #f. Values use Chez display representations."
   },
   "do": {
     "text": "(do expression ...)\nEvaluate expressions in order and return the last result, or nil for no expressions. do is a sequencing alias here, not Scheme's loop form.",
@@ -614,8 +616,10 @@
   "newline": {
     "text": "(newline)\nWrite a newline to the host output sink and return nil.",
     "runtimes": [
-      "c"
-    ]
+      "c",
+      "chez"
+    ],
+    "chez": "(newline)\nWrite a newline to the current output port and return #f."
   },
   "nil?": {
     "text": "(nil? value)\nReturn #t when value is nil, otherwise #f.",
@@ -688,14 +692,18 @@
   "print": {
     "text": "(print value ...)\nWrite display representations to the host output sink, separated by spaces, without a newline. Return nil.",
     "runtimes": [
-      "c"
-    ]
+      "c",
+      "chez"
+    ],
+    "chez": "(print value ...)\nWrite display representations to the current output port, separated by spaces, without a newline. Return #f. Values use Chez display representations."
   },
   "println": {
     "text": "(println value ...)\nWrite display representations to the host output sink, separated by spaces, followed by a newline. Return nil.",
     "runtimes": [
-      "c"
-    ]
+      "c",
+      "chez"
+    ],
+    "chez": "(println value ...)\nWrite display representations to the current output port, separated by spaces, followed by a newline. Return #f. Values use Chez display representations."
   },
   "procedure?": {
     "text": "(procedure? value)\nReturn #t when value is a function or native procedure, otherwise #f.",

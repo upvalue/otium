@@ -1,5 +1,5 @@
 (require demo.counter :as counter)
 (define callback (live 'counter/tick!))
-(printf "First callback: ~s\n" (callback))
+(chez/printf "First callback: ~s\n" (callback))
 (require demo.counter :as counter :reload)
-(printf "Callback after reload, with preserved state: ~s\n" (callback))
+(chez/printf "Callback after reload, with preserved state: ~s\n" (callback))

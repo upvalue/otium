@@ -32,11 +32,38 @@ For a scripted demonstration:
 Forms and semantics
 
 (ns name) selects a persistent namespace. Each namespace has one mutable
-Chez environment initialized with the Chez bindings. Definitions and lexical
-scope use Chez semantics. Collections, numbers, equality, truthiness, reader,
-evaluation order, and FFI are Chez's. Otium macros expand before Chez compiles
-each form. There is no distinct nil value.
+Chez environment initialized with the explicit exports of (otium core),
+plus Otium runtime forms and conditions. The binding list lives in
+chez/otium/core.sls; adding an API to Chez does not add an unqualified Otium
+binding. Definitions and lexical scope use Chez semantics. Collections,
+numbers, equality, truthiness, reader, evaluation order, and FFI are Chez's.
+Otium macros expand before Chez compiles each form. There is no distinct nil value.
 Use vectors and hash tables directly. Square brackets delimit ordinary lists.
+
+The default core includes Scheme control forms, arithmetic, lists, strings,
+vectors, bytevectors, hash tables, continuations, parameters, and gensym.
+These retain Chez semantics. This is an explicit vocabulary, not full C
+standard-library compatibility.
+
+Host procedures and syntax are available with the chez/ prefix:
+
+  (println "answer:" 42)
+  (chez/printf "answer: ~a\n" 42)
+  (chez/import (otium canvas))
+  (chez/load-shared-object #f)
+  (define c-strlen (chez/foreign-procedure "strlen" (string) size_t))
+
+Unqualified printf, import, load, foreign-procedure, environment, and other
+host APIs are no longer defaults. chez/import can explicitly introduce native
+bindings into the current namespace. The prefix makes host dependencies
+visible; it is not a security sandbox. Native library code still chooses its
+own imports independently.
+
+display and print accept any number of values, separated by spaces. println
+adds a newline; newline takes no arguments. All four write to the current
+output port and return #f. Values retain Chez display representations. Use
+chez/display or chez/newline for native optional-port arguments. For example,
+(display "a" "b") now writes "a b"; the second argument is not a port.
 
 (require name :as alias :refer (a b) :reload) loads a namespace if needed.
 All options are optional. Public value definitions get qualified aliases
@@ -97,16 +124,16 @@ and the source path when loading a file.
 
 eval enters the Otium loader in the namespace where that eval binding was
 installed. It expands Otium macros and tracks generated definitions, without
-capturing local variables. Native load still bypasses Otium processing. Use
+capturing local variables. chez/load still bypasses Otium processing. Use
 the REPL, script launcher, or load-source for Otium files.
 
-Native Chez syntax remains available during this migration. define-syntax and
-forms outside the supported traversal grammar are passed intact to Chez;
+Native Chez syntax is available through chez/ names. The core also retains
+define-syntax and syntax-rules. Native forms outside the supported traversal
+grammar are passed intact to Chez;
 Otium macros nested inside them are not expanded. Keep native binding syntax
 contained within these native forms. Native macro output does not participate
-in Otium's definition tracking. The explicit platform namespace, native syntax
-boundary, restricted default vocabulary, and cond-expand in MACRO-DESIGN.txt
-are planned follow-up work.
+in Otium's definition tracking. A portable native-syntax boundary and
+cond-expand in MACRO-DESIGN.txt remain planned follow-up work.
 
 Conditions and restarts
 
@@ -133,8 +160,7 @@ alternate exception API. Table/array literals remain a portability gap.
 Otium macros expand inside handlers, catches, restart clauses, and cleanup.
 Multiple values are preserved. Chez continuation reentry restores dynamic
 restart bindings; saved restart objects are rejected outside their active
-extent. Native guard remains available but can intercept exceptions before
-Otium handlers. Use try for the portable semantics. chez/error and
+extent. Native chez/guard can intercept exceptions before Otium handlers. Use try for the portable semantics. chez/error and
 chez/condition-message retain the original native procedures.
 
 quit and exit accept an optional exact integer status from 0 through 255.
@@ -161,7 +187,7 @@ namespace retains its Chez environment for the life of the process.
 
 This is a single-threaded development runtime. It has no atomic reload,
 dependency tracking, file watcher, state migration, custom reader, or memory
-limits. Foreign libraries use Chez's load-shared-object and foreign-procedure
+limits. Foreign libraries use chez/load-shared-object and chez/foreign-procedure
 directly. There is no Otium C embedding API. Tests include a Unix libc FFI
 check and repeated reloads, but do not establish a memory-retention bound.
 

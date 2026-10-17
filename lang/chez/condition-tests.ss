@@ -50,7 +50,7 @@
 (check "exit escapes native guard and runs cleanup" '(exit 3 cleaned)
   (guard (c [(ot:control-condition? c)
              (list (ot:control-kind c) (ot:control-status c) (run 'cleaned))])
-    (run '(unwind-protect (guard (c [else 'wrong]) (exit 3)) (set! cleaned 'cleaned)))
+    (run '(unwind-protect (chez/guard (c [else 'wrong]) (exit 3)) (set! cleaned 'cleaned)))
     'wrong))
 (check "interrupt handler restored" #t
   (let ((before (keyboard-interrupt-handler)))

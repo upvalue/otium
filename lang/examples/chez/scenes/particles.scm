@@ -1,5 +1,5 @@
 (ns scenes.particles)
-(import (otium canvas))
+(chez/import (otium canvas))
 
 (defonce state (vector 0 0.0))
 (define revision "FLOW / 01")

@@ -110,10 +110,10 @@ Shared tooling
 
 The REPL now shares native editing, history, editor handoff, completion, and
 help command handling. Name/doc extraction stays with each runtime. Chez
-exposes its full native environment; C exposes its own core and namespace
-bindings. This does not establish a common standard library. Runtime-provided
-Otium documentation lives in one shared catalog, with explicit
-runtime availability and differences. Otium definitions carry docstrings in
-source. Chez-native bindings remain completable but have no bundled reference.
-Chez records parameters in help; C's describe keeps its namespace/name prefix.
+exposes an explicit core vocabulary and prefixes host APIs with chez/; C
+exposes its own core and namespace bindings. This does not establish a common
+standard library. Runtime-provided Otium documentation lives in one shared
+catalog, with explicit runtime availability and differences. Otium definitions carry docstrings in
+source. Prefixed Chez-native bindings remain completable but have no bundled
+reference. Chez records parameters in help; C's describe keeps its namespace/name prefix.
 See docs/repl.md for the interface and its limits.

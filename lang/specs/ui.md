@@ -1,6 +1,10 @@
 # UI library
 
-Status: draft, October 17, 2026. Not implemented. Replaces the September plan
+Status: draft, October 17, 2026. Widget lifecycle, intrinsic-size Yoga layout,
+rounded rectangle rendering and pointer button activation run on C and Chez.
+Text, keyboard focus, constraint-dependent measurement and the general window
+reload service remain planned. See `docs/ui-development.md` for the implemented
+subset and runnable demo. Replaces the September plan
 in `c/agent-docs/ui-plan.md`, which predates the FFI, the common reader and
 the class system. Decisions made so far are listed at the end.
 
@@ -24,7 +28,7 @@ Full versions of all three, plus a custom widget, are at the end.
 | Text | SDL_ttf 3 for shaping, measuring and turning glyphs into bitmaps; our own glyph atlas (see Text). |
 | Layout | [Yoga](https://www.yogalayout.dev/) (flexbox), built in `shared/` and bound through its C API (see Layout). |
 | `otium.gfx` | Drawing calls for canvases and widget `paint` methods. |
-| `otium.ui` | Windows, the event loop, components, widgets, focus, key bindings. |
+| `otium.ui` | Windows, the event loop, widgets, focus, key bindings. |
 
 Native code is only used where Otium can't do the job (GPU calls, font
 rasterising) or where per-call cost matters (recording primitives).
@@ -36,90 +40,145 @@ After every event the library calls `view` again, from the root, and matches
 the result against what's on screen. Events arriving within one frame are
 handled first and `view` runs once.
 
-Matching pairs each new widget with an existing one by widget type, then
-`:key` if given, then position among its siblings. A matched widget keeps
-everything the library holds for it:
+Matching happens among children of the same mounted widget. A keyed child
+matches by widget class identity and `:key`; an unkeyed child matches by class
+identity and sibling position. Keys must be unique among siblings. Reordering
+keyed children preserves their instances; moving a child to another parent
+creates a new instance.
 
-- its layout and paint caches,
-- focus, text cursor and selection, scroll position,
-- local state declared with `let-state`.
+Each constructor produces a fresh description. The library keeps a separate,
+persistent mounted instance of the same class. On a match it copies the
+caller-supplied properties into that instance and preserves its state slots,
+focus, text cursor and selection, scroll position, and valid layout and paint
+caches. Properties omitted from the new description take their defaults; they
+don't retain an old caller-supplied value.
 
-Unmatched widgets are created, and widgets with no match in the new result
-are removed along with their state.
+After updating an instance, the library calls its `build` method and matches
+the returned children recursively. Unmatched descriptions get new mounted
+instances. Instances with no match are removed along with their state and
+native resources. Methods and event handlers operate on mounted instances.
 
 Reload goes through the same path. Re-evaluating a file defines new functions
-and methods, then the library re-runs `view` and matches as usual. Changing a
-colour repaints one widget. Adding a button inserts one widget. State resets
-only where the structure changed. There is no separate rebuild on reload.
+and methods, then the library re-runs `view` and matches as usual. Class
+redefinition preserves class identity as in `specs/classes.md`. State slots
+with the same names keep their values; added state slots get their initial
+values and removed slots are dropped. Renaming a state slot resets it.
+Changing a slot between property and state also resets that slot. There is no
+separate UI rebuild on reload. Initially, reload invalidates layout and paint
+caches conservatively, including when only a method changed.
 
 The model (application data) lives in `defonce` and is changed by ordinary
 code in event handlers, mutating in place if that's convenient. Nothing tracks
-changes: re-running from the root after every event means nothing needs to.
+model reads: re-running from the root after every event observes the current
+values. Paint and layout caches must still account for mutable inputs.
 
-When nothing happens, nothing runs. A canvas that animates is the exception:
-it repaints every frame while animating.
+When nothing happens, no view, layout or paint work runs. A canvas that
+animates is the exception: its tick runs before view evaluation each frame,
+so changes it makes to the model can also update other widgets.
 
 Re-running everything on every event costs time proportional to the size of
-the UI. That is acceptable given the performance work below. Tracking which
-components read what, so only those re-run, is deferred. It can be added later
-without changing application code.
+the UI. Tracking which widgets read what, so only those re-run, is deferred.
+It can be added later without changing application code.
 
 ### Reusing work
 
-Each run allocates a fresh description. Persistent data for a widget lives in
-a table the library keeps, keyed by the widget's path (types, keys and
-positions from the root), not in the description.
+Descriptions and mounted instances use fixed class layouts, with cached slot
+access and generic dispatch. Persistent widget state lives in slots on the
+mounted instance. The library holds layout nodes, focus handles and native
+recordings alongside it.
 
-If a widget's description has the same slot values as last time (compared
-with `eq?`) and so do all its descendants, its cached layout and paint are
-reused. A subtree whose paint is reused costs one call to replay its recorded
-primitives.
+Reusing layout or paint requires unchanged relevant properties, state,
+children and rendering context, including bounds, inherited styles and display
+scale. `eq?` alone is insufficient: a mutable array can change without changing
+identity. Initially, widgets with mutable inputs are conservatively invalidated
+after view evaluation. Specialized widgets can keep snapshots or revisions to
+avoid unnecessary work. A changed event handler must be installed even when
+layout and paint can be reused. Custom widgets default to conservative
+invalidation until their dependencies can be established.
 
-## Components and local state
+A subtree whose paint is reused costs one call to replay its recorded
+primitives. Recordings must retain valid image and glyph references or be
+invalidated when those resources change.
 
-A component is a function returning a description. A `defcomponent` is one
-that can have local state:
-
-```scheme
-(defcomponent (dropdown items on-pick)
-  (let-state ((open? #f))
-    (ui/column {}
-      (ui/button {:on-press (fn () (set! open? (not open?)))} "▾")
-      (when open? (ui/list {} items on-pick)))))
-```
-
-- Local state belongs to the component instance and is identified by the
-  variable name. Conditionals and reordering are fine; there is no ordering
-  rule as with React hooks. Renaming a variable resets it.
-- `set!` on the name stores the new value, including from handlers that run
-  later. Reading the name always gives the current value, so handlers never
-  see a stale copy. This needs local symbol macros in the shared expander.
-- A helper that needs its own state must itself be a `defcomponent`.
-- State inside a loop needs one instance per item, so it has to be in a child
-  component with a `:key`.
-- `(ui/inspect widget)` shows a widget's local and library-held state from
-  the REPL.
-
-Use local state for things that only matter to one piece of UI (open menus,
-an unsubmitted draft). Application data belongs in the model.
-
-## Widgets
+## Widgets and state
 
 Widgets are class instances. Every widget class has `ui/Widget` as an
-ancestor. The library calls three generics:
+ancestor. A widget can return children, draw into its bounds, or do both.
+The library calls five generics:
 
 ```scheme
+(defgeneric (ui/build widget))                ; return child descriptions
+(defgeneric (ui/layout-style widget))         ; layout properties table
 (defgeneric (ui/measure widget limits))       ; preferred size within limits
 (defgeneric (ui/paint widget g bounds))       ; draw into bounds
 (defgeneric (ui/handle-event widget event))   ; return :handled to stop it
 ```
 
-A new widget is a class plus methods. Nothing central needs editing.
+These operations dispatch on the widget class only. Limits, drawing contexts,
+bounds and events are ordinary arguments; UI methods do not specialize on
+those arguments. This uses the existing generic machinery without requiring
+multiple dispatch in the UI API. The language's multimethod support is
+unchanged.
 
-The library does the wrapping that would otherwise be repeated in every
-method: it clips `paint` to the widget's bounds, skips `handle-event` for
-disabled widgets, and draws debug outlines. Widgets share behaviour by
-composition, holding helper objects in slots and forwarding to them, as in
+A new widget is a class plus methods. Nothing central needs editing. The
+default `build` returns constructor-supplied children, or no children. The
+default `paint` draws nothing. A widget using both paints before its children;
+the library lays out, paints and dispatches events to those children normally.
+A widget that only builds children uses the default child-based measurement
+and layout; a directly drawn leaf supplies its own measurement.
+
+Slots are caller-supplied properties unless marked `:state #t`:
+
+```scheme
+(defclass Dropdown :is ui/Widget
+  items
+  on-pick
+  (open? :init #f :state #t))
+
+(defmethod (ui/build (d Dropdown))
+  (ui/column {}
+    (ui/button
+      {:on-press (fn () (set! (d :open?) (not (d :open?))))}
+      "▾")
+    (when (d :open?)
+      (map
+        (fn (item)
+          (ui/button
+            {:key item
+             :on-press (fn () ((d :on-pick) item)
+                             (set! (d :open?) #f))}
+            item))
+        (d :items)))))
+
+(defn dropdown (opts) (ui/new Dropdown opts))
+```
+
+Here the item strings must be unique because they are used as sibling keys.
+`items` and `on-pick` are replaced from each new description. `open?` is
+initialized when the widget mounts and survives matching and reload. The
+handler captures the mounted instance `d`; ordinary slot reads see its current
+properties and state when the handler runs.
+
+`:state` is slot metadata described in `specs/classes.md`. State slots require an initializer. UI description construction
+validates and initializes properties without evaluating state initializers;
+mounting evaluates those initializers once per instance. State slots cannot
+be supplied through widget constructor options. This requires a class-aware
+description construction path, rather than calling ordinary `make` unchanged.
+Methods still use ordinary cached slot reads and writes.
+
+Use state slots for things that only matter to one widget (open menus, an
+unsubmitted draft). Application data belongs in the model. Helpers that just
+return widgets are ordinary functions; a helper needing its own persistent
+state becomes a widget class. Repeated stateful widgets need a `:key` per item.
+`(ui/inspect widget)` shows the properties, state slots and library-held state
+of a mounted instance.
+
+There is no separate component abstraction, `defcomponent`, `let-state` or
+`defwidget` syntax.
+
+The library clips `paint` to the widget's bounds, skips `handle-event` for
+disabled widgets, and draws debug outlines. Widgets can also share behaviour
+by holding helper objects in slots and forwarding to them, as in
 `specs/classes.md`.
 
 ### Options and children
@@ -133,8 +192,10 @@ Every widget constructor takes an options table first, then children:
   (map row-widget rows))
 ```
 
-- Options become slot values through `make`, so a misspelled option is an
-  error. `(ui/build Class opts children)` does this for custom widgets.
+- Options populate declared property slots, so a misspelled option or a state
+  slot supplied as an option is an error. `(ui/new Class opts child ...)`
+  constructs a description for a custom widget; `ui/build` is the method the
+  library calls on its mounted instance.
 - `:key` is taken out before that and kept by the library, so widget classes
   don't declare it.
 - A child is a widget, a list or array of children (flattened at any depth),
@@ -151,6 +212,12 @@ drawing, and optionally `:tick`, called once per frame with the elapsed time.
 Having a `:tick` means it animates.
 
 ## Input, actions and focus
+
+Events have a `:kind` slot, such as `:pointer-drag`, and payload slots for that
+kind. A widget's `handle-event` method checks the kind and returns `:handled`
+when it consumes the event, or `nil` otherwise. For example, pointer drag
+events provide `:dx` and `:dy` in logical pixels. Widgets do not need a separate
+method specialization for each event kind.
 
 - **Key bindings map to named actions.** A `:keymap` option maps keys to
   actions, and `:on-action` handles them. Handlers respond to `:older`, not to
@@ -280,15 +347,23 @@ the terminal well under a millisecond of Otium work; boids with 600 birds at
 
 ## Testing
 
-- Headless tests for matching, keys, local state, children flattening, action
-  lookup and focus movement, with a fake measure and paint.
+- Headless tests for matching, keys, property replacement, state initialization
+  and preservation, state-slot migration on reload, children flattening, action
+  lookup and focus movement, with fake measurement and paint. Run unchanged on
+  C and Chez, including handlers retained across property updates.
 - Display tests behind `make test-sdl`: scripted input, frame capture, and
   pixel checks, as the current SDL tests do.
+- Every example supports bounded runs, scripted input, a fixed timestep and
+  random seed, and screenshots written before clean exit. Capture waits for
+  GPU readback. State dumps include widget identities, bounds, focus and state
+  slots so a program can be inspected without interactive use. Tests synchronize
+  reloads through status acknowledgements rather than sleeps. Failed runs keep
+  screenshots and diagnostics and return a nonzero exit status.
 - The four example programs below, run on both runtimes.
 
 ## Deferred
 
-- Change tracking so only affected components re-run, and persistent
+- Change tracking so only affected widgets re-run, and persistent
   collections to make changes cheap to detect.
 - IME composition, accessibility, drag and drop.
 - Async work and a task system.
@@ -304,9 +379,12 @@ the terminal well under a millisecond of Otium work; boids with 600 birds at
 
 - Re-run from the root after every event and on reload, with matching by type,
   key and position. No change tracking for now.
-- `defcomponent` and `let-state`, with state identified by variable name.
-- Widgets are class instances with `measure`, `paint` and `handle-event`
-  methods; composition, not inheritance.
+- One class-based widget model, with `build`, `measure`, `paint` and
+  `handle-event` methods.
+- Fresh descriptions update properties on persistent mounted instances;
+  declared `:state` slots survive matching and reload.
+- Fixed slot layouts and cached access and dispatch for properties and state.
+- UI methods dispatch on the widget class only; event kinds are data.
 - Options table first, then children; one flattening rule for children.
 - `ui/open`, `ui/set-view!` and `ui/run` are separate.
 - A few GPU primitive types with shader smoothing, on SDL_GPU.
@@ -317,9 +395,12 @@ the terminal well under a millisecond of Otium work; boids with 600 birds at
 
 ## Examples
 
-All four use the class syntax from `specs/classes.md`. Everything under
-`ui/` and `gfx/`, `defcomponent`, `let-state` and `random` is proposed, not
-existing.
+All four use the class syntax from `specs/classes.md`. These are target API
+examples, not yet runnable applications. The implemented subset has widget
+construction, matching, state, rows and columns, intrinsic-size layout, rounded
+rectangles and pointer-driven buttons. Text, focus, the window service and the
+remaining drawing primitives below are still proposed. See
+`docs/ui-development.md` for runnable code.
 
 ### Boids
 
@@ -570,26 +651,29 @@ existing.
                    (catch (error? e) [(str "error: " (condition-message e))]))))
           (else (emit! (str (first words) ": command not found"))))))
 
-;; The input line. Its draft text and history position are local state:
-;; they belong to this widget, not the model.
-;;   draft  the text being typed
-;;   back   steps back through history; 0 means showing the user's own text
-(defcomponent (prompt)
-  (let-state ((draft "") (back 0))
-    (ui/text-field
-      {:key :prompt :grow 1 :autofocus #t
-       :value draft
-       :on-change (fn (s) (set! draft s))
-       :on-submit (fn (s) (run! s) (set! draft "") (set! back 0))
-       :keymap {"up" :older "down" :newer}
-       :on-action
-       (fn (a)
-         (let ((h (term :history)))
-           (set! back (if (eq? a :older)
-                          (min (length h) (inc back))
-                          (max 0 (dec back))))
-           ;; back = 1 is the newest entry.
-           (set! draft (if (zero? back) "" (get h (- (length h) back))))))})))
+;; The input line owns its draft and history position.
+;; back = 1 is the newest history entry; 0 returns to an empty draft.
+(defclass Prompt :is ui/Widget
+  (draft :init "" :state #t)
+  (back :init 0 :state #t))
+
+(defmethod (ui/build (p Prompt))
+  (ui/text-field
+    {:grow 1 :autofocus #t
+     :value (p :draft)
+     :on-change (fn (s) (set! (p :draft) s))
+     :on-submit (fn (s) (run! s)
+                       (set! (p :draft) "") (set! (p :back) 0))
+     :keymap {"up" :older "down" :newer}
+     :on-action
+     (fn (a)
+       (let ((h (term :history)))
+         (set! (p :back) (if (eq? a :older)
+                            (min (length h) (inc (p :back)))
+                            (max 0 (dec (p :back)))))
+         (set! (p :draft)
+           (if (zero? (p :back)) ""
+               (get h (- (length h) (p :back)))))))}))
 
 ;; :stick-to-bottom keeps the scrollback at the end as lines arrive, unless
 ;; the user has scrolled up.
@@ -599,7 +683,7 @@ existing.
       (ui/lines {:color 0xc8d3e0ff} (term :lines)))
     (ui/row {:padding 8 :gap 8}
       (ui/label {:color 0x7fb2ffff} "$")
-      (prompt))))
+      (ui/new Prompt {:key :prompt}))))
 
 (defonce window (ui/open {:title "Terminal" :width 720 :height 480}))
 (ui/set-view! window view)
@@ -623,7 +707,7 @@ existing.
   on-change)
 
 ;; Options become slots; :key is kept by the library.
-(defn knob (opts) (ui/build Knob opts))
+(defn knob (opts) (ui/new Knob opts))
 
 (defmethod (ui/measure (k Knob) limits) (ui/size 48 48))
 
@@ -639,8 +723,10 @@ existing.
 
 ;; Dragging up turns it up; 200 px covers the full range. The knob reports
 ;; the new value and the application decides what to do with it.
-(defmethod (ui/handle-event (k Knob) (e ui/PointerDrag))
-  (let ((v (- (k :value) (* (e :dy) (/ (- (k :max) (k :min)) 200)))))
-    ((k :on-change) (max (k :min) (min (k :max) v)))
-    :handled))
+(defmethod (ui/handle-event (k Knob) e)
+  (if (eq? (e :kind) :pointer-drag)
+      (let ((v (- (k :value) (* (e :dy) (/ (- (k :max) (k :min)) 200)))))
+        ((k :on-change) (max (k :min) (min (k :max) v)))
+        :handled)
+      nil))
 ```

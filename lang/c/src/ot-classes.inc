@@ -43,7 +43,7 @@ static otv check_instance_slots(ots* state, otv object) {
   return object;
 }
 
-static otv instance_current(ots* state, otv original) {
+static otv instance_current_properties(ots* state, otv original, otv properties) {
   if (!is_type(original, OBJ_INSTANCE))
     return generic_error(state, "invalid-slot-operation", "expected instance");
   otv object = instance_payload(original);
@@ -52,7 +52,8 @@ static otv instance_current(ots* state, otv original) {
   otv layout = as_dispatch_type(type)->layout;
   if (old_layout == layout) return object;
   otv fresh = ot_nil, old_slots = ot_nil, result = ot_nil;
-  OT_FRAME_SCOPED(state, &original, &object, &old_layout, &type, &layout, &fresh, &old_slots, &result);
+  OT_FRAME_SCOPED(state, &original, &object, &old_layout, &type, &layout, &fresh, &old_slots,
+                  &result, &properties);
   old_slots = ot_table_new(state, as_array(as_layout(old_layout)->keys)->length);
   for (size_t i = 0; i < as_array(as_layout(old_layout)->keys)->length; i++) {
     result = ot_table_put(state, old_slots, array_item(as_layout(old_layout)->keys, i),
@@ -66,7 +67,12 @@ static otv instance_current(ots* state, otv original) {
   for (size_t i = 0; i < as_array(as_layout(layout)->keys)->length; i++) {
     otv index = ot_table_get(state, as_layout(old_layout)->indices,
                              array_item(as_layout(layout)->keys, i), OT_UNDEFINED);
-    if (index != OT_UNDEFINED) result = as_instance(object)->values[ot_get_int(index)];
+    if (properties != ot_nil && array_item(as_layout(layout)->states, i) == ot_false)
+      result = as_instance(properties)->values[i];
+    else if (index != OT_UNDEFINED &&
+             array_item(as_layout(old_layout)->states, ot_get_int(index)) ==
+                 array_item(as_layout(layout)->states, i))
+      result = as_instance(object)->values[ot_get_int(index)];
     else {
       otv initializer = array_item(as_layout(layout)->defaults, i);
       result = initializer == ot_false ? OT_UNDEFINED : apply_value(state, initializer, NULL, 0, false);
@@ -91,6 +97,10 @@ failed:;
   ot_instance_obj* rollback = as_instance(object);
   ot_store(state, rollback, &rollback->layout, old_layout);
   return OT_UNWIND;
+}
+
+static otv instance_current(ots* state, otv original) {
+  return instance_current_properties(state, original, ot_nil);
 }
 
 static otv instance_index(ots* state, otv object, otv key) {
@@ -138,7 +148,7 @@ static otv instance_copy(ots* state, otv object) {
   return copy;
 }
 
-static otv nat_make_instance(ots* state, otv* args, int argc) {
+static otv make_instance_properties(ots* state, otv* args, int argc, bool properties_only) {
   if (argc < 1 || !is_type(args[0], OBJ_DISPATCH_TYPE) ||
       as_dispatch_type(args[0])->builtin || as_dispatch_type(args[0])->abstract)
     return generic_error(state, "invalid-class", "make expects a concrete user class");
@@ -151,10 +161,17 @@ static otv nat_make_instance(ots* state, otv* args, int argc) {
   for (int i = 1; i < argc; i += 2) {
     otv index = instance_index(state, object, args[i]);
     if (index == OT_UNWIND) return index;
+    if (properties_only && array_item(as_layout(layout)->states, ot_get_int(index)) == ot_true)
+      return generic_error(state, "invalid-slot-operation", "state slot cannot be supplied as a property");
     ot_instance_obj* target = as_instance(object);
     ot_store(state, target, &target->values[ot_get_int(index)], args[i + 1]);
   }
   for (size_t i = 0; i < as_array(as_layout(layout)->keys)->length; i++) {
+    if (properties_only && array_item(as_layout(layout)->states, i) == ot_true) {
+      ot_instance_obj* target = as_instance(object);
+      ot_store(state, target, &target->values[i], ot_nil);
+      continue;
+    }
     if (as_instance(object)->values[i] != OT_UNDEFINED) continue;
     otv initializer = array_item(as_layout(layout)->defaults, i);
     if (initializer == ot_false) continue;
@@ -164,6 +181,71 @@ static otv nat_make_instance(ots* state, otv* args, int argc) {
     ot_store(state, target, &target->values[i], result);
   }
   return check_instance_slots(state, object);
+}
+
+static otv nat_make_instance(ots* state, otv* args, int argc) {
+  return make_instance_properties(state, args, argc, false);
+}
+
+static otv nat_class_properties(ots* state, otv* args, int argc) {
+  return make_instance_properties(state, args, argc, true);
+}
+
+/* Descriptions must be rebuilt after class redefinition, never lazily migrated. */
+static otv current_properties(ots* state, otv object) {
+  if (!is_type(object, OBJ_INSTANCE))
+    return generic_error(state, "invalid-slot-operation", "expected property instance");
+  object = instance_payload(object);
+  otv layout = as_instance(object)->layout;
+  if (layout != as_dispatch_type(as_layout(layout)->type)->layout)
+    return generic_error(state, "stale-properties", "rebuild description after class redefinition");
+  return object;
+}
+
+static otv nat_class_mount(ots* state, otv* args, int argc) {
+  if (need_arity(state, "class-mount", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  otv source = current_properties(state, args[0]);
+  if (source == OT_UNWIND) return source;
+  otv object = ot_nil, layout = as_instance(source)->layout, result = ot_nil;
+  OT_FRAME_SCOPED(state, &source, &object, &layout, &result);
+  object = allocate_instance(state, layout);
+  for (size_t i = 0; i < as_array(as_layout(layout)->keys)->length; i++) {
+    result = as_instance(source)->values[i];
+    if (array_item(as_layout(layout)->states, i) == ot_true)
+      result = apply_value(state, array_item(as_layout(layout)->defaults, i), NULL, 0, false);
+    if (result == OT_UNWIND) return result;
+    ot_instance_obj* target = as_instance(object);
+    ot_store(state, target, &target->values[i], result);
+  }
+  return check_instance_slots(state, object);
+}
+
+static otv nat_class_update_properties(ots* state, otv* args, int argc) {
+  if (need_arity(state, "class-update-properties!", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  otv source = current_properties(state, args[1]), object = args[0];
+  if (source == OT_UNWIND) return source;
+  if (!is_type(object, OBJ_INSTANCE) ||
+      as_layout(as_instance(instance_payload(object))->layout)->type !=
+          as_layout(as_instance(source)->layout)->type)
+    return generic_error(state, "invalid-class", "properties must have the same class as the instance");
+  OT_FRAME_SCOPED(state, &source, &object);
+  object = instance_current_properties(state, object, source);
+  if (object == OT_UNWIND) return object;
+  otv layout = as_instance(object)->layout;
+  for (size_t i = 0; i < as_array(as_layout(layout)->keys)->length; i++) {
+    if (array_item(as_layout(layout)->states, i) == ot_false) {
+      ot_instance_obj* target = as_instance(object);
+      ot_store(state, target, &target->values[i], as_instance(source)->values[i]);
+    }
+  }
+  return args[0];
+}
+
+static otv nat_class_subtype_p(ots* state, otv* args, int argc) {
+  if (need_arity(state, "class-subtype?", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_DISPATCH_TYPE) || !is_type(args[1], OBJ_DISPATCH_TYPE))
+    return generic_error(state, "invalid-class", "class-subtype? expects classes");
+  return class_subtype(args[0], args[1]) ? ot_true : ot_false;
 }
 
 static otv nat_instance_p(ots* state, otv* args, int argc) {
@@ -199,8 +281,8 @@ static bool compile_class_declaration(ots* state, bytecode_compiler* compiler, o
   specs = ot_array_new(state, list_length(rest));
   while (rest != ot_null) {
     otv slot = as_pair(rest)->car, options = ot_null, key = ot_nil;
-    otv init = ot_false, accessor = ot_false;
-    OT_FRAME_SCOPED(state, &slot, &options, &key, &init, &accessor);
+    otv init = ot_false, accessor = ot_false, state_slot = ot_false;
+    OT_FRAME_SCOPED(state, &slot, &options, &key, &init, &accessor, &state_slot);
     if (is_type(slot, OBJ_PAIR)) {
       options = as_pair(slot)->cdr;
       slot = as_pair(slot)->car;
@@ -210,7 +292,7 @@ static bool compile_class_declaration(ots* state, bytecode_compiler* compiler, o
     key = coerce_name(state, slot, true, "defclass");
     for (size_t i = 0; i < as_array(specs)->length; i++)
       if (array_item(array_item(specs, i), 0) == key) goto invalid;
-    bool seen_init = false, seen_accessor = false;
+    bool seen_init = false, seen_accessor = false, seen_state = false;
     while (options != ot_null) {
       otv option = as_pair(options)->car;
       otv value = as_pair(as_pair(options)->cdr)->car;
@@ -231,11 +313,16 @@ static bool compile_class_declaration(ots* state, bytecode_compiler* compiler, o
       } else if (class_option(option, "accessor") && !seen_accessor && local_class_name(value)) {
         seen_accessor = true;
         accessor = value;
+      } else if (class_option(option, "state") && !seen_state &&
+                 (value == ot_true || value == ot_false)) {
+        seen_state = true;
+        state_slot = value;
       } else goto invalid;
       options = list_tail(options, 2);
     }
-    otv fields[] = {key, init, accessor};
-    otv spec = make_descriptor(state, fields, 3);
+    if (state_slot == ot_true && !seen_init) goto invalid;
+    otv fields[] = {key, init, accessor, state_slot};
+    otv spec = make_descriptor(state, fields, 4);
     array_push(state, &specs, spec);
     rest = as_pair(rest)->cdr;
   }
@@ -273,9 +360,9 @@ static otv execute_class_declaration(ots* state, otv declaration) {
   otv space = state->vm.current_namespace;
   otv owner = ((ot_namespace_obj*)ot_as_obj(space))->name;
   otv type = ot_nil, existing = ot_nil, layout = ot_nil;
-  otv keys = ot_nil, defaults = ot_nil, indices = ot_nil;
+  otv keys = ot_nil, defaults = ot_nil, states = ot_nil, indices = ot_nil;
   OT_FRAME_SCOPED(state, &declaration, &kind, &name, &parent, &specs, &space, &owner,
-                  &type, &existing, &layout, &keys, &defaults, &indices);
+                  &type, &existing, &layout, &keys, &defaults, &states, &indices);
   bool abstract = symbol_is(kind, "defabstract");
   bool reset = symbol_is(kind, "reset-class!");
   existing = namespace_var(state, space, name, false);
@@ -315,6 +402,7 @@ static otv execute_class_declaration(ots* state, otv declaration) {
   size_t count = as_array(specs)->length;
   keys = ot_array_new(state, count);
   defaults = ot_array_new(state, count);
+  states = ot_array_new(state, count);
   indices = ot_table_new(state, count);
   for (size_t i = 0; i < count; i++) {
     otv spec = array_item(specs, i), init = array_item(spec, 1);
@@ -322,6 +410,7 @@ static otv execute_class_declaration(ots* state, otv declaration) {
     array_push(state, &keys, array_item(spec, 0));
     if (init != ot_false) init = make_bytecode_function(state, init, ot_nil, space, name);
     array_push(state, &defaults, init);
+    array_push(state, &states, array_item(spec, 3));
     otv result = ot_table_put(state, indices, array_item(spec, 0), ot_make_int((intptr_t)i));
     if (result == OT_UNWIND) return result;
   }
@@ -329,6 +418,7 @@ static otv execute_class_declaration(ots* state, otv declaration) {
   ot_store(state, made, &made->type, type);
   ot_store(state, made, &made->keys, keys);
   ot_store(state, made, &made->defaults, defaults);
+  ot_store(state, made, &made->states, states);
   ot_store(state, made, &made->indices, indices);
   layout = ot_from_obj(made);
   ot_dispatch_type_obj* descriptor = as_dispatch_type(type);

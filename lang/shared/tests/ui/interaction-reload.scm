@@ -1,0 +1,6 @@
+(ns ui.interaction-reload)
+(require (otium.ui :as ui))
+(require (otium.gfx :as gfx))
+(require (ui.interaction :as scene))
+(defmethod (ui/paint (w scene/Tile) g bounds)
+  (gfx/rect g bounds (if (w :selected) 0x00ff00ff 0xff0000ff)))

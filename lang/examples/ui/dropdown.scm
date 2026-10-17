@@ -1,0 +1,41 @@
+;; A bounded headless run. No display or native UI dependencies are needed.
+;; c/otium --no-project --path shared/lib examples/ui/dropdown.scm
+;; chez/run --no-project --path shared/lib examples/ui/dropdown.scm
+(require (otium.ui :as ui))
+
+(defclass Dropdown :is ui/Widget
+  items
+  on-pick
+  (open? :init #f :state #t))
+
+(defmethod (ui/build (d Dropdown))
+  (ui/column {}
+    (ui/button {:on-press (fn () (set! (d :open?) (not (d :open?))))} "Choose")
+    (when (d :open?)
+      (map (fn (item)
+             (ui/button {:key item
+                         :on-press (fn () ((d :on-pick) item)
+                                         (set! (d :open?) #f))}
+               item))
+           (d :items)))))
+
+(defonce tree (ui/root))
+(defonce items ["Apple" "Pear"])
+(defonce selected nil)
+(def (view)
+  (ui/new Dropdown {:key :fruit :items items
+                    :on-pick (fn (item) (set! selected item))}))
+(def (refresh!) (ui/reconcile! tree (view)))
+(def (child node index) (get (ui/children node) index))
+
+(refresh!)
+(def dropdown (child tree 0))
+(ui/send! (child (child dropdown 0) 0) {:kind :press})
+(refresh!)
+(println "Open:" ((ui/instance dropdown) :open?))
+(set! items ["Plum" "Peach"])
+(refresh!)
+(ui/send! (child (child dropdown 0) 1) {:kind :press})
+(refresh!)
+(println "Selected:" selected)
+(println "Open:" ((ui/instance dropdown) :open?))

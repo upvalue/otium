@@ -318,7 +318,7 @@
              (map (lambda (slot)
                     (let* ([slot-name (if (symbol? slot) slot (and (pair? slot) (car slot)))]
                            [options (if (symbol? slot) '() (and (pair? slot) (cdr slot)))]
-                           [init #f] [accessor #f] [seen '()])
+                           [init #f] [accessor #f] [state? #f] [seen '()])
                       (unless (and (symbol? slot-name) (list? options) (even? (length options)))
                         (invalid "expected slot symbol and option/value pairs" slot))
                       (let loop ([options options])
@@ -333,11 +333,15 @@
                                                 (not (memv #\/ (string->list (symbol->string value)))))
                                      (invalid "expected local accessor name" value))
                                    (set! accessor value)]
+                                  [(declaration-option? key "state")
+                                   (unless (boolean? value) (invalid "expected boolean state flag" value))
+                                   (set! state? value)]
                                   [else (invalid "unknown slot option" key)]))
                           (loop (cddr options))))
+                      (when (and state? (not init)) (invalid "state slot requires initializer" slot-name))
                       (let ([key (keyword (symbol->string slot-name))])
                         (when accessor (set! accessors (cons (cons accessor key) accessors)))
-                        (list key init)))) rest)]
+                        (list key init state?)))) rest)]
            [defined? (hashtable-contains? (namespace-definitions space) name)]
            [bound? (top-level-bound? name env)]
            [owner (cons (namespace-name space) name)]

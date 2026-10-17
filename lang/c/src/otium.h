@@ -358,6 +358,7 @@ typedef struct ot_layout_obj {
   otv type;
   otv keys;
   otv defaults;
+  otv states;
   otv indices;
 } ot_layout_obj;
 

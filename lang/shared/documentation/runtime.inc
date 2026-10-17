@@ -185,10 +185,14 @@ const char* ot_runtime_documentation(const char* name) {
     {"call-next-method", "(call-next-method [argument ...])\nCall the next applicable method, using the current arguments unless replacements are supplied. Raises an error if no next method exists or the next candidates are ambiguous."},
     {"with-slots", "(with-slots object (slot ...) body ...)\nEvaluate object once and bind local symbol macros that read and write its slots. Each read sees the current value; set! on a slot name writes through to the object."},
     {"dispatch-type", "(dispatch-type value)\nReturn the class used for generic dispatch, including the declared class of an instance."},
-    {"defclass", "(defclass Name [:is Abstract] slot ...)\nDeclare a final class with fixed slots. A slot is a symbol or (name :init expression :accessor generic). Slots without :init are required. Reload preserves class identity and lazily migrates existing instances."},
+    {"defclass", "(defclass Name [:is Abstract] slot ...)\nDeclare a final class with fixed slots. Slot options are :init expression, :accessor generic, and :state boolean. State slots require :init; ordinary make treats them like other slots. Reload preserves class identity and lazily migrates instances; changing a slot between property and state resets it."},
     {"defgeneric", "(defgeneric (name argument ...))\nDeclare a fixed-arity generic. Reload preserves its identity and methods."},
     {"defmethod", "(defmethod [:around] (generic parameter ...) body ...)\nAdd or replace a method by qualifier and signature. Parameters are names or (name Class). Dispatch follows abstract parents; incomparable applicable methods are ambiguous. Around methods wrap primary methods."},
     {"next-method?", "(next-method?)\nReturn whether the current method has remaining applicable methods. False outside a method; an ambiguous next step still counts as remaining."},
+    {"class-properties", "(class-properties Class keyword value ...)\nConstruct properties for a fresh description. Reject state initargs, evaluate property defaults, and fill state slots with nil without evaluating their initializers. Used by otium.ui."},
+    {"class-mount", "(class-mount properties)\nCopy current-layout properties to a new instance and initialize its state slots. Does not repeat property initializers. Rejects stale descriptions after class redefinition."},
+    {"class-update-properties!", "(class-update-properties! instance properties)\nUpdate an instance from current-layout properties of the same class, preserving state slots. During migration, supplies new required properties before update-instance runs. Returns the original instance; a failed migration restores its old layout and slots."},
+    {"class-subtype?", "(class-subtype? child parent)\nTest whether child is parent or descends from it through abstract parents. Both arguments must be class descriptors."},
   };
   for (size_t i = 0; i < sizeof(entries) / sizeof(*entries); ++i)
     if (!strcmp(name, entries[i].name)) return entries[i].text;

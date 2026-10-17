@@ -6609,6 +6609,10 @@ static void generic_module_init(ots* state) {
     define_var(state, state->vm.current_namespace, name, type, ot_nil, false);
   }
   ot_def_nat(state, "make", nat_make_instance);
+  ot_def_nat(state, "class-properties", nat_class_properties);
+  ot_def_nat(state, "class-mount", nat_class_mount);
+  ot_def_nat(state, "class-update-properties!", nat_class_update_properties);
+  ot_def_nat(state, "class-subtype?", nat_class_subtype_p);
   ot_def_nat(state, "dispatch-type", nat_dispatch_type);
   ot_def_nat(state, "type-descriptor?", nat_type_descriptor_p);
   ot_def_nat(state, "type-name", nat_type_name);

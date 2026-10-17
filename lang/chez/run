@@ -1,6 +1,14 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+platform=$(uname -m)-$(uname -s | tr '[:upper:]' '[:lower:]')
+case $(uname -s) in Darwin) extension=dylib ;; *) extension=so ;; esac
+# Resolve the optional FFI helper just as the REPL resolves line editing.
+# Loading it remains lazy, and an explicit environment override wins.
+if [ "${OTIUM_FFI_LIBRARY+x}" != x ]; then
+  OTIUM_FFI_LIBRARY="$root/../shared/build/$platform/libotium-ffi.$extension"
+  export OTIUM_FFI_LIBRARY
+fi
 interactive=yes
 explicit_repl=no
 skip=no
@@ -18,8 +26,6 @@ for argument do
 done
 if [ "$explicit_repl" = yes ]; then interactive=yes; fi
 if [ "$interactive" = yes ] && [ -t 0 ] && [ -t 1 ]; then
-  platform=$(uname -m)-$(uname -s | tr '[:upper:]' '[:lower:]')
-  case $(uname -s) in Darwin) extension=dylib ;; *) extension=so ;; esac
   OTIUM_LINE_LIBRARY="$root/../shared/build/$platform/libotium-line.$extension"
   for source in Makefile line-edit.c line-edit.h vendor/bestline/bestline.c vendor/bestline/bestline.h; do
     if [ ! -f "$OTIUM_LINE_LIBRARY" ] || [ "$root/../shared/$source" -nt "$OTIUM_LINE_LIBRARY" ]; then

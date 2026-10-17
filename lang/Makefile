@@ -6,7 +6,7 @@
 all lib bench bench-gc format hygiene gc-lint:
 	$(MAKE) -C c $@
 
-test: test-c test-chez test-expander test-classes test-cli test-reader test-library
+test: test-c test-chez test-expander test-classes test-ui test-cli test-reader test-library
 	$(MAKE) test-repl
 
 test-c:
@@ -26,8 +26,9 @@ test-expander: all
 sdl-setup:
 	python3 shared/sdl/setup.py
 
-test-sdl: ffi
+test-sdl: ffi ui
 	python3 shared/tests/test_sdl.py --runtime both
+	python3 shared/tests/test_ui_gpu.py
 
 test-sdl-integration: ffi
 	python3 shared/tests/test_sdl.py --runtime both --require-accelerated
@@ -78,3 +79,24 @@ test-classes: all
 test-library: all
 	python3 shared/tests/test_library.py
 	python3 shared/tests/test_modules.py
+
+.PHONY: test-ui
+test-ui: all
+	c/otium --no-project --path shared/lib shared/tests/ui/checks.scm
+	OTIUM_GC_STRESS=1 c/otium --no-project --path shared/lib shared/tests/ui/checks.scm
+	chez/run --no-project --path shared/lib shared/tests/ui/checks.scm
+
+.PHONY: ui-setup ui test-ui-layout test-ui-gpu
+ui-setup:
+	python3 shared/ui/setup.py --download
+
+ui: ffi
+	python3 shared/ui/setup.py
+	cmake -S shared/ui -B shared/build/$(shell uname -m)-$(shell uname -s | tr '[:upper:]' '[:lower:]')/ui -DCMAKE_BUILD_TYPE=Release
+	cmake --build shared/build/$(shell uname -m)-$(shell uname -s | tr '[:upper:]' '[:lower:]')/ui -j 4
+
+test-ui-layout: ui
+	python3 shared/tests/test_ui_layout.py
+
+test-ui-gpu: ui
+	python3 shared/tests/test_ui_gpu.py --require-gpu

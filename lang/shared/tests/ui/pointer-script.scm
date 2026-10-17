@@ -1,0 +1,8 @@
+(ns ui.pointer-script)
+(require (otium.ui.input :as input))
+(def pointer (input/pointer))
+(def (step! tree frame)
+  (when (= frame 1)
+    (input/dispatch! pointer tree {:kind :pointer-down :x 220 :y 150}))
+  (when (= frame 2)
+    (input/dispatch! pointer tree {:kind :pointer-up :x 220 :y 150})))

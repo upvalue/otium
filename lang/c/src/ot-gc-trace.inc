@@ -72,6 +72,7 @@ static void OT_GC_TRACE_OBJECT(ots* state, ot_obj* object) {
       OT_GC_TRACE_SLOT(state, &layout->type);
       OT_GC_TRACE_SLOT(state, &layout->keys);
       OT_GC_TRACE_SLOT(state, &layout->defaults);
+      OT_GC_TRACE_SLOT(state, &layout->states);
       OT_GC_TRACE_SLOT(state, &layout->indices);
       break;
     }

@@ -1229,7 +1229,7 @@
     ]
   },
   "defclass": {
-    "text": "(defclass Name [:is Abstract] slot ...)\nDeclare a final class with fixed slots. A slot is a symbol or (name :init expression :accessor generic). Slots without :init are required. Reload preserves class identity and lazily migrates existing instances.",
+    "text": "(defclass Name [:is Abstract] slot ...)\nDeclare a final class with fixed slots. Slot options are :init expression, :accessor generic, and :state boolean. State slots require :init; ordinary make treats them like other slots. Reload preserves class identity and lazily migrates instances; changing a slot between property and state resets it.",
     "runtimes": [
       "c",
       "chez"
@@ -1251,6 +1251,34 @@
   },
   "next-method?": {
     "text": "(next-method?)\nReturn whether the current method has remaining applicable methods. False outside a method; an ambiguous next step still counts as remaining.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "class-properties": {
+    "text": "(class-properties Class keyword value ...)\nConstruct properties for a fresh description. Reject state initargs, evaluate property defaults, and fill state slots with nil without evaluating their initializers. Used by otium.ui.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "class-mount": {
+    "text": "(class-mount properties)\nCopy current-layout properties to a new instance and initialize its state slots. Does not repeat property initializers. Rejects stale descriptions after class redefinition.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "class-update-properties!": {
+    "text": "(class-update-properties! instance properties)\nUpdate an instance from current-layout properties of the same class, preserving state slots. During migration, supplies new required properties before update-instance runs. Returns the original instance; a failed migration restores its old layout and slots.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "class-subtype?": {
+    "text": "(class-subtype? child parent)\nTest whether child is parent or descends from it through abstract parents. Both arguments must be class descriptors.",
     "runtimes": [
       "c",
       "chez"

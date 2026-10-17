@@ -101,6 +101,7 @@ Slot options:
 | --- | --- |
 | `:init expr` | Default value. `expr` is evaluated for each `make` that doesn't supply the slot, so `(items :init [])` gives each instance its own array. |
 | `:accessor name` | Also define `name` as a generic function reading the slot. Optional; see below. |
+| `:state boolean` | Mark library-owned state, default `#f`. A state slot requires `:init`; property construction skips it and mounting initializes it. |
 
 A slot with no `:init` must be supplied to `make`. This catches forgetting a
 field. Optional slots say so with `:init nil`.
@@ -280,6 +281,28 @@ the wrapping a UI needs (clipping, skipping disabled widgets) belongs to the
 framework's own code that calls `paint` and `handle-event`. `:around` covers
 the remaining cases.
 
+## Property descriptions and state
+
+A slot can carry `:state #t` metadata and must then have an `:init` expression.
+`:state #f` is the default. Ordinary `make`, reads, writes and accessors treat
+state slots like any other slot. The metadata supports the widget lifecycle
+in `specs/ui.md`; state still uses fixed slots and cached access.
+
+- `(class-properties Class keyword value ...)` constructs a property instance,
+  rejecting state arguments and leaving state slots as `nil` without running
+  their initializers. Property defaults run normally.
+- `(class-mount properties)` copies properties to a new instance and evaluates
+  its state initializers once, in declaration order.
+- `(class-update-properties! instance properties)` copies properties into an
+  existing instance of the same class, retaining state. When the class layout
+  changed, it supplies new properties during migration, before `update-instance`
+  runs, so newly required properties can come from the caller.
+- `(class-subtype? child parent)` tests identity or ancestry between classes.
+
+Mounting and updating reject property instances with an outdated layout. Build
+a fresh description after class redefinition. These are construction primitives
+for libraries; application widget methods operate on fully mounted instances.
+
 ## Redefinition and reload
 
 Re-evaluating `defclass` or `defabstract` keeps the type's identity,
@@ -292,7 +315,9 @@ When a class's slots change:
 - Redefinition creates a new layout. Existing instances keep the old one until
   something reads or writes them.
 - On that access, the instance is migrated: added slots get their `:init`
-  value, removed slots are dropped, kept slots keep their values.
+  value, removed slots are dropped, kept slots keep their values unless their `:state` flag changed. A changed
+  flag resets the slot to its initializer, or to the supplied property during
+  `class-update-properties!`.
 - The generic `(update-instance obj old-slots)` runs after migration. Its
   default does nothing. Specialize it to convert data, such as splitting a
   `name` slot into `first` and `last`. This is a reduced version of CLOS's

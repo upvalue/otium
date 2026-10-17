@@ -27,6 +27,9 @@ typedef struct {
   Uint32 count, capacity, width, height;
   float logical_width, logical_height;
   float event_x, event_y;
+  char event_key[128];
+  int event_code;
+  bool event_repeat;
   SDL_FColor clear;
   bool claimed;
 } Renderer;
@@ -42,6 +45,18 @@ int otui_poll_event(Renderer* r) {
         event.window.windowID == window_id) return 1;
     if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
         event.window.windowID == window_id) return 4;
+    if ((event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) &&
+        event.key.windowID == window_id) {
+      SDL_snprintf(r->event_key, sizeof(r->event_key), "%s%s%s%s%s",
+        event.key.mod & SDL_KMOD_CTRL ? "Ctrl+" : "",
+        event.key.mod & SDL_KMOD_ALT ? "Alt+" : "",
+        event.key.mod & SDL_KMOD_GUI ? "Meta+" : "",
+        event.key.mod & SDL_KMOD_SHIFT ? "Shift+" : "",
+        SDL_GetKeyName(event.key.key));
+      r->event_repeat = event.key.repeat;
+      r->event_code = event.key.scancode;
+      return event.type == SDL_EVENT_KEY_DOWN ? 5 : 6;
+    }
     if ((event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
          event.type == SDL_EVENT_MOUSE_BUTTON_UP) &&
         event.button.windowID == window_id && event.button.button == SDL_BUTTON_LEFT) {
@@ -54,6 +69,9 @@ int otui_poll_event(Renderer* r) {
 }
 float otui_event_x(Renderer* r) { return r->event_x; }
 float otui_event_y(Renderer* r) { return r->event_y; }
+const char* otui_event_key(Renderer* r) { return r->event_key; }
+int otui_event_code(Renderer* r) { return r->event_code; }
+int otui_event_repeat(Renderer* r) { return r->event_repeat; }
 
 void otui_gpu_free(Renderer* r) {
   if (!r) return;

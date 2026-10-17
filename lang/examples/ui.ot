@@ -1,5 +1,5 @@
 ;; Run from the repository root. The same entry point runs on C and Chez:
-;; c/otium --no-project -L shared/lib -L examples -L shared/tests examples/ui.ot -- --headless --capture /tmp/ui.png
+;; ./otium --runtime=c --no-project -L shared/lib -L examples -L shared/tests examples/ui.ot -- --headless --capture /tmp/ui.png
 (require (otium.cli :as cli))
 (require (otium.ui :as ui))
 (require (otium.ui.native :as native))
@@ -46,7 +46,10 @@
 (def (bounds-json node path)
   (let ((b (node :bounds)))
     (let ((items (list (str "{\"path\":\"" path "\",\"x\":" (b :x) ",\"y\":" (b :y)
-                          ",\"width\":" (b :width) ",\"height\":" (b :height) "}"))))
+                          ",\"width\":" (b :width) ",\"height\":" (b :height)
+                          ",\"focused\":" (if (node :focused?) "true" "false")
+                          ",\"pressed\":" (if (node :pressed?) "true" "false")
+                          ",\"disabled\":" (if (ui/enabled? node) "false" "true") "}"))))
       (dotimes (i (length (ui/children node)))
         (set! items (append items (bounds-json (get (ui/children node) i) (str path "." i)))))
       items)))
@@ -88,7 +91,13 @@
             (let poll ((event (native/poll-event renderer)))
               (unless (= event 0)
                 (cond ((= event 1) (set! running #f))
-                      ((= event 4) (input/cancel! pointer))
+                      ((= event 4) (input/cancel! pointer)
+                       (input/keyboard! tree {:kind :focus-lost}))
+                      ((or (= event 5) (= event 6))
+                       (input/keyboard! tree {:kind (if (= event 5) :key-down :key-up)
+                         :key (native/event-key renderer)
+                         :code (native/event-code renderer)
+                         :repeat (not (= 0 (native/event-repeat renderer)))}))
                       (else (input/dispatch! pointer tree
                         {:kind (if (= event 2) :pointer-down :pointer-up)
                          :x (native/event-x renderer) :y (native/event-y renderer)})))

@@ -125,6 +125,7 @@
                             (make Mounted :instance (class-mount (d :properties))
                                   :key (d :key) :children [] :parent parent))))
               (set! (node :options) (d :options))
+              (unless (enabled? node) (set! (node :pressed?) #f))
               (when matched?
                 (class-update-properties! (node :instance) (d :properties)))
               (let ((built (with-params ((building-children (d :children)))

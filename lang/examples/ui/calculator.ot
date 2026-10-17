@@ -1,0 +1,63 @@
+(ns ui.calculator)
+(require (otium.ui :as ui))
+
+(defonce model {:value 0 :stored 0 :operator nil :fresh #t :fraction 0 :error #f})
+(def (reset!)
+  (for-each (fn (key) (put! model key (get {:value 0 :stored 0 :operator nil
+    :fresh #t :fraction 0 :error #f} key))) (keys model)))
+(def (calculate!)
+  (let ((a (get model :stored)) (b (get model :value)) (op (get model :operator)))
+    (when op
+      (if (and (equal? op "/") (= b 0))
+          (begin (put! model :error #t) (put! model :value 0))
+          (put! model :value
+            (cond ((equal? op "+") (+ a b)) ((equal? op "-") (- a b))
+                  ((equal? op "*") (* a b)) (else (/ (* a 1.0) b))))))))
+(def (act! action)
+  (cond
+    ((int? action)
+     (when (or (get model :fresh) (get model :error))
+       (put! model :value 0) (put! model :fraction 0) (put! model :error #f))
+     (let ((fraction (get model :fraction)))
+       (put! model :value (if (= fraction 0) (+ (* (get model :value) 10) action)
+                             (+ (get model :value) (/ action fraction))))
+       (when (> fraction 0) (put! model :fraction (* fraction 10))))
+     (put! model :fresh #f))
+    ((equal? action "C") (reset!))
+    ((equal? action ".")
+     (when (or (get model :fresh) (get model :error))
+       (put! model :value 0) (put! model :fraction 0) (put! model :error #f))
+     (when (= (get model :fraction) 0) (put! model :fraction 10.0))
+     (put! model :fresh #f))
+    ((equal? action "=")
+     (calculate!) (put! model :operator nil) (put! model :fresh #t))
+    (else
+     (unless (get model :fresh) (calculate!))
+     (put! model :stored (get model :value)) (put! model :operator action)
+     (put! model :fresh #t)))
+  :handled)
+(def bindings {"0" 0 "1" 1 "2" 2 "3" 3 "4" 4 "5" 5 "6" 6 "7" 7 "8" 8 "9" 9
+  "+" "+" "Shift++" "+" "Shift+=" "+" "-" "-" "*" "*" "Shift+*" "*" "Shift+8" "*"
+  "/" "/" "." "." "=" "=" "Return" "=" "Escape" "C" "C" "C"})
+(def (key-button action)
+  (ui/button {:key action :grow 1 :height 54 :padding 8
+    :style (if (member action '("+" "-" "*" "/" "=")) :accent :plain)
+    :on-press (fn () (act! action))} (str action)))
+(def (key-row actions) (ui/row {:gap 8} (map key-button actions)))
+(def (view)
+  (ui/column {:grow 1 :padding 24 :gap 12 :keymap bindings :on-action act!}
+    (ui/label {:size 24} "Calculator")
+    (ui/column {:padding 16 :background 0x202d43ff :radius 12 :gap 4}
+      (ui/label {:size 13 :color 0x9cabc2ff}
+        (if (get model :operator) (str (get model :stored) " " (get model :operator)) "Ready"))
+      (ui/label {:size 32 :font :mono :wrap #f}
+        (if (get model :error) "Cannot divide by zero" (str (get model :value)))))
+    (key-row '(7 8 9 "/"))
+    (key-row '(4 5 6 "*"))
+    (key-row '(1 2 3 "-"))
+    (key-row '(0 "." "=" "+"))
+    (ui/row {:gap 8}
+      (key-button "C")
+      (ui/button {:grow 1 :disabled #t :height 54} "Memory"))
+    (ui/label {:size 13 :color 0x9cabc2ff}
+      "Type numbers and operators. Tab selects a button; Space or Enter presses it. Escape clears.")))

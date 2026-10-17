@@ -1,8 +1,9 @@
 # UI library
 
 Status: draft, October 17, 2026. Widget lifecycle, constraint-aware Yoga layout,
-wrapped text, rounded rectangles and pointer button activation run on C and Chez.
-Keyboard focus and the general window/reload service remain planned. See `docs/ui-development.md` for the implemented
+wrapped text, rounded rectangles, pointer/keyboard button activation, focus
+traversal and keymap actions run on C and Chez, including a widget calculator.
+The general window/reload service remains planned. See `docs/ui-development.md` for the implemented
 subset and runnable demo. Replaces the September plan
 in `c/agent-docs/ui-plan.md`, which predates the FFI, the common reader and
 the class system. Decisions made so far are listed at the end.

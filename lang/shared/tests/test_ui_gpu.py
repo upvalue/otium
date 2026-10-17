@@ -39,6 +39,7 @@ artifacts = ROOT/'shared/build/ui-test-artifacts'
 artifacts.mkdir(parents=True, exist_ok=True)
 reference = None
 text_reference = None
+calculator_reference = None
 for runtime in runtimes(args.runtime):
     capture, state = artifacts/(runtime+'.bmp'), artifacts/(runtime+'.json')
     result = launch(runtime, '--frames', 3, '--capture', capture, '--dump-state', state)
@@ -117,6 +118,25 @@ for runtime in runtimes(args.runtime):
     clicked = artifacts/(runtime+'-clicked.bmp')
     passed(launch(runtime, '--script', 'ui.pointer-script', '--frames', 3, '--capture', clicked))
     assert pixel(runner.bmp_pixels(clicked)[2], 220, 150) == (103, 217, 192)
+    calculator = artifacts/(runtime+'-calculator.bmp')
+    calculator_state = artifacts/(runtime+'-calculator.json')
+    result = launch(runtime, '--scene', 'ui.calculator', '--script', 'ui.calculator-script',
+                    '--frames', 4, '--height', 600, '--capture', calculator,
+                    '--dump-state', calculator_state)
+    passed(result)
+    assert 'UI-CALCULATOR native keys and widgets passed' in result.stdout
+    calculator_rows = runner.bmp_pixels(calculator)[2]
+    if calculator_reference is not None:
+        assert calculator_rows == calculator_reference, 'C/Chez calculator captures differ'
+    calculator_reference = calculator_rows
+    nodes = json.loads(calculator_state.read_text())['nodes']
+    focused = [n for n in nodes if n['focused']]
+    assert len(focused) == 1 and focused[0]['pressed'], focused
+    assert any(n['disabled'] for n in nodes), 'Disabled composed widget missing'
+    button = focused[0]
+    x, y = round(button['x']), round(button['y'] + button['height']/2)
+    assert pixel(calculator_rows, x+1, y) == (168, 213, 255), 'Focus outline missing'
+    assert pixel(calculator_rows, x+5, y) == (66, 89, 118), 'Pressed fill missing'
     quit_state = artifacts/(runtime+'-quit.json')
     quit_capture = artifacts/(runtime+'-quit.png')
     quitting = launch(runtime, '--script', 'ui.quit-script', '--frames', 10,

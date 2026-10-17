@@ -2,7 +2,7 @@
 
 The shared UI runs on C and Chez. It supports class-backed descriptions and
 mounted state, constraint-aware Yoga layout, rounded rectangles and shaped text
-on SDL_GPU, and pointer activation of composed buttons. Keyboard focus, scrolling
+on SDL_GPU, composed buttons, keyboard focus and action routing. Scrolling
 and automatic file watching are still pending.
 
 ## Build and run
@@ -23,8 +23,8 @@ For an offline Yoga install, use
 Run either command from the repository root:
 
 ```sh
-c/otium --no-project -L shared/lib -L examples examples/ui.ot
-chez/run --no-project -L shared/lib -L examples examples/ui.ot
+./otium --runtime=c --no-project -L shared/lib -L examples examples/ui.ot
+./otium --runtime=chez --no-project -L shared/lib -L examples examples/ui.ot
 ```
 
 The window stays open until it is closed. Click any of the three colored cards
@@ -32,7 +32,8 @@ to toggle its color. Labels use bundled Noto Sans and JetBrains Mono; the body
 paragraph wraps at the available width. Try `--width 480` to see it reflow.
 The cards are composed widgets whose state survives rebuilding
 the descriptions. The loop handles the left mouse button and window close;
-it does not yet provide keyboard navigation or text input.
+Tab and Shift+Tab move focus; Enter or Space activate the focused button on
+release. Text input is still pending.
 
 `examples/ui.ot` uses `otium.cli`. `--help` lists its options. Native library
 paths come from `shared/build/ui-config.ot`, written by CMake and read as data.
@@ -42,13 +43,13 @@ are checked-in Otium source.
 ## Bounded execution and captures
 
 ```sh
-chez/run --no-project -L shared/lib -L examples examples/ui.ot -- \
+./otium --runtime=chez --no-project -L shared/lib -L examples examples/ui.ot -- \
   --headless --frames 3 --capture /tmp/ui.png --dump-state /tmp/ui.json
 ```
 
 `--headless` hides the window and exits after `--frames` frames (default 1).
 It still needs a working SDL video/GPU backend. Captures use PNG or BMP; the
-JSON output contains logical bounds, actual frame count, backend, and remaining
+JSON output contains logical bounds, focus/pressed/disabled flags, actual frame count, backend, and remaining
 resource counts. `--scale 2` doubles capture resolution without changing logical
 layout. Interactive mode saves a requested capture when the window closes.
 
@@ -141,15 +142,14 @@ each child's rectangular clip with its ancestors.
 `otium.ui.input` handles routing without depending on SDL. Create an
 `input/pointer`, then call `input/dispatch!` with the tree and an event containing
 `:kind`, `:x` and `:y`. Pointer kinds are `:pointer-down` and `:pointer-up`.
-`input/cancel!` handles lost window focus. Coordinates are logical pixels.
+`input/cancel!` cancels pointer capture. Coordinates are logical pixels.
 
 Hit testing starts with the last painted sibling, clips to ancestor bounds,
 and bubbles from the deepest child until a handler returns `:handled`. The
 handler captures the press. Release activates it through `:press` only when
 it is still mounted and the release hits that node or one of its descendants.
 Release outside, removal, or cancellation prevents activation. Rounded corners
-currently use the widget's rectangular hit region. Drag, hover and keyboard
-focus are pending.
+currently use the widget's rectangular hit region. Drag and hover are pending.
 
 The native SDL adapter copies button coordinates into scalar values for Otium;
 managed widgets never receive an SDL event pointer. The demo polls these events,
@@ -188,7 +188,8 @@ integer floor of the available width, with a minimum of one pixel; Yoga retains
 fractional bounds and handles zero-width clipping. With `wrap` false, only
 explicit newlines break lines. Glyphs use grayscale alpha and the supplied color.
 Current fonts cover their own character sets; fallback chains, color emoji,
-font inheritance and text alignment are pending. Glyphs are measured and rasterized at the same physical pixel scale, and glyph
+font inheritance are pending. Labels support `:align :left`, `:center`, or `:right`.
+Glyphs are measured and rasterized at the same physical pixel scale, and glyph
 origins are snapped to physical pixels. Interactive windows use their initial
 display density; headless runs default to scale 1. `--scale` overrides this.
 Moving a window between displays with different densities is not handled yet.
@@ -219,11 +220,40 @@ not generate Otium source. This supplies development process identity; it is not
 a standalone distributable application. Direct interpreter launches still work,
 but their app-switcher name may remain the interpreter's name.
 
-## Button and focus checkpoint
+## Buttons, keyboard input and calculator
 
 Buttons now have padding, centered labels, plain/accent/bare styles, and paint
 support for pressed and focused states. Mounted trees hold focus independently
 of widget properties. `ui/focus!` and `ui/focused` expose that state. Common
 `:disabled`, `:focusable`, `:keymap`, and `:on-action` options are library-owned.
-Keyboard routing and the application demo are the next step; this checkpoint
-does not yet wire Tab or Enter/Space to the native event loop.
+Disabled ancestors disable their descendants. Tab traverses enabled focusable
+nodes in tree order and wraps; Shift+Tab reverses direction. Pointer presses
+focus the capturing button. Enter and Space show its pressed state and activate
+once on matching keyup. Repeat keydowns are ignored. Focus change, window focus
+loss, disable and unmount cancel pending keyboard activation.
+
+`input/keyboard!` accepts `:key-down`, `:key-up`, and `:focus-lost` events.
+Key events contain `:key` strings and optional `:repeat`. Native events also
+carry a physical `:code` used to match keyup even if modifiers changed while
+the key was held. Synthetic events can omit it to match by `:key`. Native keys use SDL's
+names (`"Return"`, `"Space"`, `"Escape"`, uppercase letters), prefixed in order
+with `Ctrl+`, `Alt+`, `Meta+`, and `Shift+` when held. Tab and focused-button
+activation take precedence over keymaps. Other keydowns search from the focused
+node through its ancestors; without focus they search root children. A keymap
+maps strings to action values. Its `:on-action` receives the action and returns
+`:handled` to stop routing. Unhandled keys bubble through `ui/handle-event`.
+These options live on mounted nodes, so custom widgets need no common slots.
+
+Run the calculator with either runtime:
+
+```sh
+./otium --runtime=chez --no-project -L shared/lib -L examples examples/ui.ot -- \
+  --scene ui.calculator --title Calculator --height 600
+```
+
+It uses rows, columns, labels and composed buttons, with a `defonce` model.
+Digits, decimal point and operators work through a container keymap; Escape
+clears. Arithmetic is immediate, left to right, with division-by-zero recovery.
+The disabled Memory button demonstrates disabled styling. The calculator tests
+cover arithmetic, native SDL key routing, keyboard activation, focus/pressed
+pixels and identical C/Chez captures.

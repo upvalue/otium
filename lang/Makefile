@@ -71,3 +71,4 @@ test-site: site
 .PHONY: test-library
 test-library: all
 	python3 shared/tests/test_library.py
+	python3 shared/tests/test_modules.py

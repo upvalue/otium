@@ -4,7 +4,7 @@
 
   ;; The expander itself is shared/prelude/expander.scm, read with the Otium
   ;; reader and evaluated with the Otium core forms. It uses no macros, so it
-  ;; needs no expansion. The runtime supplies the three natives it calls.
+  ;; needs no expansion. The runtime supplies the four natives it calls.
   (define-record-type (expander make-expander expander?)
     (fields lookup native-syntax? invoke))
 

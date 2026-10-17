@@ -55,12 +55,13 @@ A string is documentation only when another expression follows it. Thus
 `(def greeting "hello")` still defines a string value. Docstrings are
 metadata and are removed before evaluating the definition body. Redefining a
 binding replaces its documentation; defining it without a docstring clears
-its old documentation. Chez's `defonce` preserves both value and docs on reload.
+its old documentation. `defonce` preserves both value and docs on reload.
 
 `(describe 'square)` retrieves documentation in scripts as well as the REPL.
 `describe` and `,help` use the same binding lookup. Imports read documentation
-from their defining namespace. Chez also includes the recorded function or
-macro parameters. C retains its namespace/name prefix in `describe` results.
+from their defining namespace. `describe` returns the namespace/name followed by the docstring, or
+`No documentation recorded.` when the binding has no documentation. Unknown
+bindings return `nil` on both runtimes.
 
 Runtime-provided Otium functions and forms use the shared reference in
 `shared/documentation/runtime.json`. Entries declare which runtime implements
@@ -76,7 +77,7 @@ After editing the runtime reference, run:
 
 The generated C and Scheme tables are checked in; normal builds require no
 generation step or network access. `make test-repl` verifies they match the
-shared source and that public C prelude definitions carry docstrings.
+shared source and that public shared prelude definitions carry docstrings.
 
 For example, in either REPL:
 

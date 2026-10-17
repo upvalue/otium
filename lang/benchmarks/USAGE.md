@@ -18,8 +18,8 @@ sampling. These are fresh-process wall times, including startup and compilation.
 The sources and result checks are identical on both runtimes.
 
 `compare.py` checks paired workloads and reports both wall time and time inside
-the workload. Tables, clocks, and imports use shared APIs. Live callbacks and
-reload retain runtime adapters because their loader behavior differs.
+the workload. Both runtimes execute the same source, including forwarding callbacks and
+module reloads.
 
 The R7RS ports also share source. See [R7RS usage](r7rs/USAGE.md) for canonical
 inputs, runtime flags, upstream references, and reduced-input checks.

@@ -1,6 +1,6 @@
 ---
 id: lan-s4ci
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-10-17T05:16:06Z
@@ -18,3 +18,9 @@ C uses (require '(x :as y)) and .ot; Chez uses (require x :as y) and .scm. Pick 
 
 One shared module is required with identical source on both runtimes.
 
+
+## Notes
+
+**2026-10-17T21:45:12Z**
+
+Both runtimes accept shared require forms and search .ot then .scm per directory. shared/tests/test_modules.py verifies search precedence, failures, cycles, reloads, and forwarding callbacks on both runtimes.

@@ -11,8 +11,9 @@ Never edit README.md, it's for humans only.
 
 When changing C code around allocation, roots, or managed object pointers, run
 `make gc-lint` if the optional LLVM development tools are installed. This is
-not part of the default build or test targets. See `c/agent-docs/gc-lint.md` for
-setup, current coverage, and escape hatches.
+not part of the default build or test targets. The runner is
+`c/tools/gc-lint/run`; it discovers Homebrew LLVM or uses `LLVM_CONFIG` when
+supplied.
 
 # Principles
 

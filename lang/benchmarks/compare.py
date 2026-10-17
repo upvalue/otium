@@ -72,7 +72,7 @@ WORKLOADS = {
 }
 
 
-def program(name, engine):
+def program(name):
     setup, expression, _ = WORKLOADS[name]
     if name == "startup":
         return "(println 0)\n"
@@ -81,14 +81,7 @@ def program(name, engine):
       (def bench-put! put!) (def bench-get get)"""
     imports = "(require (callee :as c))"
     callback = "(def callback (fn (x) (c/inc x)))"
-    if engine == "c-runtime":
-        reload = "(def (bench-reload) (eval '(require (callee :as c :reload))))"
-    else:
-        callback = "(def callback (live 'c/inc))"
-        # Chez loader directives must be evaluated at top level.
-        reload = """(require chez)
-          (chez/import (only (otium runtime) evaluate))
-          (def (bench-reload) (evaluate '(require (callee :as c :reload))))"""
+    reload = "(def (bench-reload) (eval '(require (callee :as c :reload))))"
     parts = [clock, setup]
     if name == "tables":
         parts.append(collections)
@@ -157,7 +150,7 @@ def main():
             commands = {}
             for engine in samples:
                 path = directory / f"{name}-{engine}.scm"
-                path.write_text(program(name, engine))
+                path.write_text(program(name))
                 commands[engine] = ([str(args.otium.absolute()), "--path", temp, str(path)]
                     if engine == "c-runtime" else
                     [chez, "--libdirs", str(CHEZ_ROOT), "--script",

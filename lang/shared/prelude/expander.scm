@@ -7,7 +7,8 @@
 ;;
 ;; Scope is tracked in Otium data: a list whose entries are symbols (lexical
 ;; variables) or (name expansion writer) lists (local symbol macros). Each runtime
-;; supplies three natives:
+;; supplies four natives:
+;;   (expander-application form)     lower an ordinary call for this runtime
 ;;   (expander-macro-var sym)        the macro sym names as a var in the
 ;;                                   current namespace, else a false value
 ;;   (expander-invoke-macro m args)  run macro m on unevaluated argument forms

@@ -19,6 +19,8 @@ static void OT_GC_TRACE_OBJECT(ots* state, ot_obj* object) {
       OT_GC_TRACE_SLOT(state, &name->next);
       OT_GC_TRACE_SLOT(state, &name->cache_namespace);
       OT_GC_TRACE_SLOT(state, &name->cache_var);
+      OT_GC_TRACE_SLOT(state, &name->qualified_prefix);
+      OT_GC_TRACE_SLOT(state, &name->qualified_member);
       break;
     }
     case OBJ_STRING: {
@@ -101,11 +103,17 @@ static void OT_GC_TRACE_OBJECT(ots* state, ot_obj* object) {
       OT_GC_TRACE_SLOT(state, &binding->next);
       break;
     }
+    case OBJ_CELL: {
+      OT_GC_TRACE_SLOT(state, &((ot_cell_obj*)object)->value);
+      break;
+    }
     case OBJ_ENV: {
       ot_env_obj* env = (ot_env_obj*)object;
       OT_GC_TRACE_SLOT(state, &env->parent);
       OT_GC_TRACE_SLOT(state, &env->data);
       OT_GC_TRACE_SLOT(state, &env->namespace_value);
+      OT_GC_TRACE_SLOT(state, &env->compile_owner);
+      OT_GC_TRACE_SLOT(state, &env->layout);
       break;
     }
     case OBJ_VAR: {
@@ -140,14 +148,17 @@ static void OT_GC_TRACE_OBJECT(ots* state, ot_obj* object) {
       OT_GC_TRACE_SLOT(state, &code->constants);
       OT_GC_TRACE_SLOT(state, &code->params);
       OT_GC_TRACE_SLOT(state, &code->name);
+      OT_GC_TRACE_SLOT(state, &code->locals);
+      OT_GC_TRACE_SLOT(state, &code->captures);
+      OT_GC_TRACE_SLOT(state, &code->children);
       break;
     }
     case OBJ_FUNCTION: {
       ot_function_obj* function = (ot_function_obj*)object;
       OT_GC_TRACE_SLOT(state, &function->code);
-      OT_GC_TRACE_SLOT(state, &function->env);
       OT_GC_TRACE_SLOT(state, &function->namespace_value);
       OT_GC_TRACE_SLOT(state, &function->name);
+      OT_GC_TRACE_SLOT(state, &function->captures);
       break;
     }
     case OBJ_NAT: {

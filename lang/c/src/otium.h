@@ -261,6 +261,7 @@ typedef enum ot_obj_type {
   OBJ_GENERIC,
   OBJ_LAYOUT,
   OBJ_INSTANCE,
+  OBJ_CELL,
   OBJ_FREE,
 } ot_obj_type;
 
@@ -278,6 +279,8 @@ typedef struct ot_name_obj {
   otv next;
   otv cache_namespace;
   otv cache_var;
+  otv qualified_prefix;
+  otv qualified_member;
   uint32_t hash;
   uint32_t length;
   bool special_form;
@@ -390,7 +393,15 @@ typedef struct ot_binding_obj {
   otv value;
   otv next;
   size_t slot;
+  bool assigned;
+  bool captured;
+  bool recursive;
 } ot_binding_obj;
+
+typedef struct ot_cell_obj {
+  uintptr_t header;
+  otv value;
+} ot_cell_obj;
 
 typedef struct ot_env_obj {
   uintptr_t header;
@@ -399,6 +410,8 @@ typedef struct ot_env_obj {
   otv namespace_value;
   size_t slot_count;
   bool compile_time;
+  otv compile_owner;
+  otv layout;
 } ot_env_obj;
 
 typedef struct ot_var_obj {
@@ -442,14 +455,24 @@ typedef struct ot_code_obj {
   otv name;
   size_t length;
   size_t constant_count;
+  size_t fixed_arity;
+  size_t local_count;
+  /* Compilation keeps binding identities until all nested writes are known.
+   * Final locals contain cell flags; captures contain [cell?, source] recipes.
+   * Children are discarded after finalization. */
+  otv locals;
+  otv captures;
+  otv children;
+  bool boxed_parameters;
 } ot_code_obj;
 
 typedef struct ot_function_obj {
   uintptr_t header;
   otv code;
-  otv env;
   otv namespace_value;
   otv name;
+  /* Flat values or shared cells. No enclosing environment is retained. */
+  otv captures;
 } ot_function_obj;
 
 typedef struct ot_nat_obj {
@@ -540,6 +563,8 @@ typedef struct ot_vm_frame {
   otv next_method;
   size_t ip;
   size_t base;
+  size_t local_count;
+  bool stack_locals;
 } ot_vm_frame;
 
 typedef enum ot_unwind_kind {
@@ -574,6 +599,7 @@ typedef struct ot_vm {
 struct ot_state {
   ot_config config;
   struct ot_gc_heap* gc;
+  void* compiler;
   ot_frame* frames;
   ot_global_root* globals;
   ot_module* modules;

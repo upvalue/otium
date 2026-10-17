@@ -1,0 +1,15 @@
+immutable: 17
+write-after-capture: 2
+sibling-mutation: 2
+parameter-mutation: 10
+forwarded-capture: 23
+forwarded-write: 6
+shadowed-write: 7
+mutual-recursion: #t
+separate-iterations: 12 11 22
+immutable-iterations: 2 1
+rest-capture: (1 2 3)
+dynamic-capture: 31
+dynamic-mutation: 5
+global-reload: 8
+eval-namespace: 8

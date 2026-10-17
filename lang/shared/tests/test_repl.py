@@ -68,8 +68,9 @@ class Repl:
     def cleanup(self):
         if self.pid:
             os.kill(self.pid, signal.SIGKILL)
-            os.waitpid(self.pid, 0)
+            # Close first: on macOS a dying child can block until its pty output drains.
             os.close(self.fd)
+            os.waitpid(self.pid, 0)
 
 
 def exercise(runtime, temp):

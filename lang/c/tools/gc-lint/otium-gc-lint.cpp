@@ -160,7 +160,9 @@ struct Event {
 struct FlowState {
   bool reachable = false;
   std::set<const VarDecl*> active;
-  std::map<const VarDecl*, const CallExpr*> invalidated_by;
+  // Keep every possible origin. Choosing a predecessor's origin can oscillate
+  // around CFG cycles even after pointer validity has stopped changing.
+  std::map<const VarDecl*, std::set<const CallExpr*>> invalidated_by;
 
   bool operator==(const FlowState& other) const {
     return reachable == other.reachable && active == other.active &&
@@ -656,8 +658,8 @@ private:
           if (!predecessor_state.reachable) continue;
           merged.reachable = true;
           merged.active.insert(predecessor_state.active.begin(), predecessor_state.active.end());
-          for (const auto& [variable, call] : predecessor_state.invalidated_by)
-            merged.invalidated_by.emplace(variable, call);
+          for (const auto& [variable, calls] : predecessor_state.invalidated_by)
+            merged.invalidated_by[variable].insert(calls.begin(), calls.end());
         }
         FlowState next = merged;
         transfer(block_events[block->getBlockID()], next, nullptr, nullptr);
@@ -690,26 +692,31 @@ private:
         continue;
       }
       if (event.kind == Event::Safepoint) {
-        for (const VarDecl* variable : state.active) state.invalidated_by[variable] = event.call;
+        // A variable can be valid on one incoming path and stale on another.
+        // Preserve the stale path's origins when invalidating the valid path.
+        for (const VarDecl* variable : state.active)
+          state.invalidated_by[variable].insert(event.call);
         state.active.clear();
         continue;
       }
       auto invalidation = state.invalidated_by.find(event.variable);
       if (invalidation == state.invalidated_by.end() || reported == nullptr) continue;
-      std::pair<const VarDecl*, const CallExpr*> diagnostic(event.variable, invalidation->second);
-      if (!reported->insert(diagnostic).second) continue;
-      if (std::optional<std::string> reason = stale_borrow_reason(event.variable)) {
-        if (!reason->empty()) {
-          if (report_suppressions && reported_suppressions->insert(event.variable).second)
-            report_suppression(event, *reason);
-          continue;
+      for (const CallExpr* call : invalidation->second) {
+        std::pair<const VarDecl*, const CallExpr*> diagnostic(event.variable, call);
+        if (!reported->insert(diagnostic).second) continue;
+        if (std::optional<std::string> reason = stale_borrow_reason(event.variable)) {
+          if (!reason->empty()) {
+            if (report_suppressions && reported_suppressions->insert(event.variable).second)
+              report_suppression(event, *reason);
+            continue;
+          }
         }
-      }
-      report_stale_borrow(event, invalidation->second);
-      if (stale_borrow_reason(event.variable)) {
-        unsigned note = diagnostics_.getCustomDiagID(
-            DiagnosticsEngine::Note, "OT_GC_ALLOW_STALE_BORROW requires a nonempty reason");
-        diagnostics_.Report(sources_.getExpansionLoc(event.variable->getLocation()), note);
+        report_stale_borrow(event, call);
+        if (stale_borrow_reason(event.variable)) {
+          unsigned note = diagnostics_.getCustomDiagID(
+              DiagnosticsEngine::Note, "OT_GC_ALLOW_STALE_BORROW requires a nonempty reason");
+          diagnostics_.Report(sources_.getExpansionLoc(event.variable->getLocation()), note);
+        }
       }
     }
   }

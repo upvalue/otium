@@ -78,6 +78,41 @@
 (check "cond" 2 (cond (#f 1) ((twice 1) 2) (else 3)))
 (check "set! value expands" 6 (let ((x 0)) (set! x (twice 3)) x))
 
+;; Assignment through a one-argument call.
+(def assigned-table {:x 1})
+(def assigned-array [1 2])
+(check "table assignment returns value" 7 (set! (assigned-table :x) 7))
+(check "table assignment stored" 7 (get assigned-table :x))
+(check "array assignment returns value" 8 (set! (assigned-array 1) 8))
+(check "array assignment stored" 8 (get assigned-array 1))
+(check "assignment preserves heap value identity" #t
+  (let ((payload [3 4]))
+    (and (eq? payload (set! (assigned-table :payload) payload))
+         (eq? payload (get assigned-table :payload)))))
+(check "computed key" 9 (let ((key :x)) (set! (assigned-table key) 9)))
+(check "setter as function" 10 (apply set-applied! (list assigned-table :x 10)))
+(check "nil assignment returns nil" #t (nil? (set! (assigned-table :x) nil)))
+(check "nil assignment deletes key" :absent (get assigned-table :x :absent))
+(def assignment-order [])
+(check "assignment evaluation order" 12
+  (set! ((begin (push! assignment-order :object) assigned-table)
+         (begin (push! assignment-order :key) :x))
+        (begin (push! assignment-order :value) (twice 6))))
+(check "assignment evaluates each part once" '(:object :key :value) (apply list assignment-order))
+(check "assignment expands symbol macros" 13
+  (symbol-macrolet ((object assigned-table) (key :x)) (set! (object key) 13)))
+(check "assignment through procedure rejected" #t (fails? '(set! (car '(1)) 2)))
+(check "assignment through string rejected" #t (fails? '(set! ("abc" 0) "d")))
+(check "assignment through number rejected" #t (fails? '(set! (1 :x) 2)))
+(check "assignment missing key rejected" #t (fails? '(set! (assigned-table) 2)))
+(check "assignment extra key rejected" #t (fails? '(set! (assigned-table :x :y) 2)))
+(check "assignment improper target rejected" #t (fails? '(set! (assigned-table . :x) 2)))
+(check "assignment negative index rejected" #t (fails? '(set! (assigned-array -1) 2)))
+(check "assignment out of bounds rejected" #t (fails? '(set! (assigned-array 2) 2)))
+(check "assignment noninteger index rejected" #t (fails? '(set! (assigned-array :x) 2)))
+(check "setter arity checked" #t (fails? '(set-applied! assigned-table :x)))
+(check "setter extra argument rejected" #t (fails? '(set-applied! assigned-table :x 1 2)))
+
 ;; Local symbol macros.
 (def cell {:x 1 :y 2})
 (check "symbol macro reads" 3

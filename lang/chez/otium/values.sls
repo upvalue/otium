@@ -1,9 +1,29 @@
 (library (otium values)
   (export keyword keyword? keyword->string nil? array array? table table?
-          get put! push! pop! keys table-values copy collection-length collection-reverse
+          get put! set-applied! push! pop! keys table-values copy collection-length collection-reverse
           collection-for-each collection-map collection-apply take drop update!
-          otium-write otium-display type frozen-set-car! frozen-set-cdr!)
+          otium-write otium-display type frozen-set-car! frozen-set-cdr!
+          make-instance instance? instance-type instance-name instance-layout instance-layout-set!
+          instance-slots instance-slots-set! instance-migrating? instance-migrating?-set!
+          install-instance-operations! callable-apply)
   (import (chezscheme))
+
+  (define-record-type (instance make-instance instance?)
+    (opaque #t)
+    (fields type name (mutable layout) (mutable slots) (mutable migrating?)))
+  (define instance-read #f)
+  (define instance-write #f)
+  (define instance-copy #f)
+  (define (install-instance-operations! read write copy)
+    (set! instance-read read) (set! instance-write write) (set! instance-copy copy))
+  (define (callable-apply target . args)
+    (cond [(instance? target)
+           (unless (= (length args) 1) (error 'slot-ref "expected one keyword"))
+           (instance-read target (car args))]
+          [(or (array? target) (table? target))
+           (unless (= (length args) 1) (error 'collection-call "expected one key"))
+           (get target (car args))]
+          [else (apply target args)]))
 
   (define-record-type (keyword-value make-keyword keyword?) (fields name))
   (define keywords (make-hashtable string-hash string=?))
@@ -91,6 +111,10 @@
                          (table-value-order-set! x (cons key (table-value-order x))))
                        (hashtable-set! data key value)])))
           (loop (cddr xs))))) x)
+  (define (set-applied! object key value)
+    (cond [(instance? object) (instance-write object key value)]
+          [(or (table? object) (array? object)) (put! object key value) value]
+          [else (error 'set-applied! "cannot assign through type" (type object))]))
   (define (keys x)
     (cond [(nil? x) (array)] [(table? x) (apply array (reverse (table-value-order x)))]
           [else (error 'keys "expected table" x)]))
@@ -106,7 +130,7 @@
           [(table? x) (hashtable-size (table-value-data x))]
           [(string? x) (string-length x)] [else (length x)]))
   (define (copy x)
-    (cond [(nil? x) x] [(array? x) (apply array (array-list x))]
+    (cond [(instance? x) (instance-copy x)] [(nil? x) x] [(array? x) (apply array (array-list x))]
           [(table? x) (let ([t (table)]) (for-each (lambda (k) (put! t k (get x k))) (reverse (table-value-order x))) t)]
           [else (error 'copy "expected array, table, or nil" x)]))
   (define (collection-reverse x)
@@ -123,7 +147,7 @@
   (define (collection-apply f . args)
     (when (null? args) (error 'apply "expected argument sequence"))
     (let ([rev (reverse args)])
-      (apply apply f (reverse (cons (sequence-list (car rev)) (cdr rev))))))
+      (apply apply callable-apply f (reverse (cons (sequence-list (car rev)) (cdr rev))))))
   (define (take n x)
     (unless (and (integer? n) (exact? n)) (error 'take "expected integer count" n))
     (let loop ([n n] [xs (sequence-list x)] [out '()])
@@ -152,7 +176,7 @@
   (define (frozen-set-car! x v) (mutate-pair! set-car! x v))
   (define (frozen-set-cdr! x v) (mutate-pair! set-cdr! x v))
   (define (type x)
-    (keyword (cond [(nil? x) "nil"] [(keyword? x) "keyword"] [(array? x) "array"] [(table? x) "table"]
+    (keyword (cond [(instance? x) "instance"] [(nil? x) "nil"] [(keyword? x) "keyword"] [(array? x) "array"] [(table? x) "table"]
           [(null? x) "null"] [(pair? x) "pair"] [(boolean? x) "boolean"] [(symbol? x) "symbol"]
           [(string? x) "string"] [(and (integer? x) (exact? x)) "int"]
           [(number? x) "float"] [(procedure? x) "function"] [else "native"])))
@@ -161,7 +185,9 @@
       (unless (null? xs)
         (render (car xs) port #f (+ depth 1))
         (unless (null? (cdr xs)) (display " " port) (items (cdr xs)))))
-    (cond [(> depth 100) (display "..." port)]
+    (cond [(instance? x)
+           (display "#<" port) (display (instance-name x) port) (display ">" port)]
+          [(> depth 100) (display "..." port)]
           [(nil? x) (display "nil" port)]
           [(keyword? x) (display ":" port) (display (keyword->string x) port)]
           [(array? x) (display "[" port) (items (array-list x)) (display "]" port)]

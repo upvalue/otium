@@ -63,7 +63,7 @@ $(BUILD)/test-runtime: $(RUNTIME_OBJ) $(TEST_OBJ) FORCE
 $(BUILD)/gc-bench: $(RUNTIME_OBJ) $(GC_BENCH_OBJ) FORCE
 	$(CC) $(LDFLAGS) -o $@ $(filter %.o,$^) $(LDLIBS)
 
-$(OBJ)/otium.o: src/otium.c src/otium.h ../shared/documentation/runtime.inc $(GEN)/expander.h $(GEN)/prelude.h | $(OBJ)
+$(OBJ)/otium.o: src/otium.c src/otium.h src/ot-classes.inc src/ot-methods.inc ../shared/documentation/runtime.inc $(GEN)/expander.h $(GEN)/prelude.h | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(GEN) -Isrc -c $< -o $@
 
 $(OBJ)/ot-gc-common.o: src/ot-gc-common.c src/otium.h src/ot-gc-internal.inc | $(OBJ)

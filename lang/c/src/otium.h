@@ -106,6 +106,7 @@ typedef enum ot_type {
   OT_TYPE_RESTART,
   OT_TYPE_EXT,
   OT_TYPE_DESCRIPTOR,
+  OT_TYPE_INSTANCE,
   OT_TYPE_INTERNAL,
 } ot_type;
 
@@ -258,6 +259,8 @@ typedef enum ot_obj_type {
   OBJ_EXT,
   OBJ_DISPATCH_TYPE,
   OBJ_GENERIC,
+  OBJ_LAYOUT,
+  OBJ_INSTANCE,
   OBJ_FREE,
 } ot_obj_type;
 
@@ -329,7 +332,6 @@ typedef struct ot_entries_obj {
 
 typedef struct ot_table_obj {
   uintptr_t header;
-  otv descriptor;
   otv entries;
   otv index;
   size_t length;
@@ -341,15 +343,37 @@ typedef struct ot_dispatch_type_obj {
   uintptr_t header;
   otv name;
   otv owner;
+  otv parent;
+  otv layout;
   uint64_t stable_id;
   bool builtin;
+  bool abstract;
 } ot_dispatch_type_obj;
+
+typedef struct ot_layout_obj {
+  uintptr_t header;
+  otv type;
+  otv keys;
+  otv defaults;
+  otv indices;
+} ot_layout_obj;
+
+/* A migrated instance forwards through layout; otherwise slots are inline. */
+typedef struct ot_instance_obj {
+  uintptr_t header;
+  otv layout;
+  uint64_t stable_id;
+  otv values[];
+} ot_instance_obj;
 
 typedef struct ot_generic_obj {
   uintptr_t header;
   otv name;
   otv owner;
   otv methods;
+  otv cache;
+  otv positions;
+  uint64_t epoch;
   size_t arity;
   uint64_t stable_id;
 } ot_generic_obj;
@@ -513,6 +537,7 @@ typedef struct ot_ext_type_info {
 typedef struct ot_vm_frame {
   otv function;
   otv env;
+  otv next_method;
   size_t ip;
   size_t base;
 } ot_vm_frame;
@@ -563,6 +588,10 @@ struct ot_state {
   otv expand_head;
   otv type_parents;
   otv dispatch_types;
+  otv object_class;
+  otv update_instance;
+  otv next_method;
+  uint64_t class_epoch;
   void* ffi_state;
   otv exts;
   uint64_t next_stable_id;

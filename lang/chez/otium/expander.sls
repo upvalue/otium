@@ -1,10 +1,12 @@
 (library (otium expander)
   (export make-expander expander-top expander-head)
-  (import (chezscheme) (only (otium reader) read-otium))
+  (import (chezscheme) (only (otium reader) read-otium)
+          (only (otium generic-core) make-slot-cache cached-call cached-set-call)
+          (only (otium values) callable-apply))
 
   ;; The expander itself is shared/prelude/expander.scm, read with the Otium
   ;; reader and evaluated with the Otium core forms. It uses no macros, so it
-  ;; needs no expansion. The runtime supplies the three natives it calls.
+  ;; needs no expansion. The runtime supplies the four natives it calls.
   (define-record-type (expander make-expander expander?)
     (fields lookup native-syntax? invoke))
 
@@ -20,6 +22,13 @@
   (define shared-environment
     (let ([env (copy-environment
                  (environment '(otium core) '(only (otium conditions) error)))])
+      (define-top-level-value 'expander-application
+        (lambda (form)
+          (cond [(= (length form) 2)
+                 (cons (list 'quote cached-call) (cons (list 'quote (make-slot-cache)) form))]
+                [(and (eq? (car form) 'set-applied!) (= (length form) 4))
+                 (cons (list 'quote cached-set-call) (cons (list 'quote (make-slot-cache)) form))]
+                [else (cons (list 'quote callable-apply) form)])) env)
       (define-top-level-value 'expander-macro-var
         (lambda (name) ((expander-lookup (current-expander)) name)) env)
       (define-top-level-value 'expander-invoke-macro

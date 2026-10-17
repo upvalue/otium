@@ -1,4 +1,4 @@
-(import (chezscheme) (otium runtime) (prefix (otium generic-core) gm:))
+(import (chezscheme) (otium runtime) (prefix (otium generic-core) gm:) (only (otium values) keyword))
 
 ;; All strategies consume the same changing inputs and return the same checksum.
 ;; Construction, compilation, registration, and collection precede each timing.
@@ -9,7 +9,7 @@
 (unless (and (integer? calls) (> calls 0)) (error 'benchmark "positive call count required"))
 (define (run form) (evaluate form))
 (run '(require otium.generic :as g))
-(define env (environment '(chezscheme) '(prefix (otium generic-core) gm:)))
+(define env (environment '(chezscheme) '(prefix (otium generic-core) gm:) '(only (otium values) keyword)))
 (define (now)
   (let ([t (current-time 'time-monotonic)])
     (+ (* (time-second t) 1000000000) (time-nanosecond t))))
@@ -25,12 +25,12 @@
   (define ys (map (lambda (i) (name "Event" i)) (iota ny)))
   (define declarations
     (begin
-      (for-each (lambda (n) (run `(define-type ,n))) (append xs ys))
-      (run '(define-generic (operation x y)))
+      (for-each (lambda (n) (run `(defclass ,n kind payload))) (append xs ys))
+      (run '(defgeneric (operation x y)))
       (run '(reset-generic! (operation x y)))
-      (run '(define-method (operation x y) -1))
+      (run '(defmethod (operation x y) -1))
       (when binary?
-        (for-each (lambda (n) (run `(define-method (operation (x ,n) y) -2))) xs))))
+        (for-each (lambda (n) (run `(defmethod (operation (x ,n) y) -2))) xs))))
   (define generic (run 'operation))
   (define xt (list->vector (map run xs)))
   (define yt (list->vector (map run ys)))
@@ -41,8 +41,8 @@
       (do ([a 0 (+ a 1)]) ((= a nx))
         (do ([b 0 (+ b 1)]) ((= b ny))
           (let* ([offset (+ (* a ny) b)]
-                 [body `(+ (gm:field-ref x 'payload) (gm:field-ref y 'payload) ,offset)]
-                 [impl (eval `(fn (x y) ,body) env)])
+                 [body `(+ (gm:slot-ref x (keyword "payload")) (gm:slot-ref y (keyword "payload")) ,offset)]
+                 [impl (eval `(lambda (x y) ,body) env)])
             (vector-set! methods offset impl)
             (gm:add-method! generic
               (list (vector-ref xt a) (and binary? (vector-ref yt b))) impl)
@@ -53,19 +53,19 @@
       (set! clauses (reverse clauses))))
   ;; Compile each cond with its descriptor vectors captured as lexical arguments.
   (define (cond-procedure read-x read-y prefix?)
-    ((eval `(fn (xt yt)
-              (fn (x y)
+    ((eval `(lambda (xt yt)
+              (lambda (x y)
                 (let ([tx ,read-x] [ty ,read-y])
                   (cond
                     ,@(if prefix?
-                          (map (fn (clause)
+                          (map (lambda (clause)
                                  (list (car clause)
                                    `(+ (vector-ref x 1) (vector-ref y 1)
                                        ,(cadddr (cadr clause))))) clauses)
                           clauses)
                     [else -1])))) env) xt yt))
   (define by-type (cond-procedure '(gm:dispatch-type x) '(gm:dispatch-type y) #f))
-  (define by-field (cond-procedure '(gm:field-ref x 'kind) '(gm:field-ref y 'kind) #f))
+  (define by-field (cond-procedure '(gm:slot-ref x (keyword "kind")) '(gm:slot-ref y (keyword "kind")) #f))
   (define by-prefix (cond-procedure '(vector-ref x 0) '(vector-ref y 0) #t))
   (define lefts (make-vector samples))
   (define rights (make-vector samples))
@@ -76,8 +76,8 @@
     (do ([i 0 (+ i 1)]) ((= i samples))
       (let* ([a (next nx)] [b (next ny)] [v (next 10000)] [w (next 10000)]
              [tx (vector-ref xt a)] [ty (vector-ref yt b)])
-        (vector-set! lefts i (gm:make tx 'kind tx 'payload v))
-        (vector-set! rights i (gm:make ty 'kind ty 'payload w))
+        (vector-set! lefts i (gm:make tx (keyword "kind") tx (keyword "payload") v))
+        (vector-set! rights i (gm:make ty (keyword "kind") ty (keyword "payload") w))
         (vector-set! prefix-lefts i (vector tx v))
         (vector-set! prefix-rights i (vector ty w))
         (vector-set! selected i (vector-ref methods (+ (* a ny) b))))))
@@ -90,9 +90,9 @@
   (define strategies
     (list
       (list 'preselected-method (lambda (i x y) ((vector-ref selected i) x y)) lefts rights)
-      (list 'multimethod-scan (lambda (i x y) (generic x y)) lefts rights)
+      (list 'generic-cache (lambda (i x y) (generic x y)) lefts rights)
       (list 'cond-descriptor (lambda (i x y) (by-type x y)) lefts rights)
-      (list 'cond-map-field (lambda (i x y) (by-field x y)) lefts rights)
+      (list 'cond-slot (lambda (i x y) (by-field x y)) lefts rights)
       (list 'cond-vector-prefix (lambda (i x y) (by-prefix x y)) prefix-lefts prefix-rights)))
   (define expected (loop (cadar strategies) lefts rights calls))
   (for-each

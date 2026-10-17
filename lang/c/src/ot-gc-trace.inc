@@ -53,7 +53,6 @@ static void OT_GC_TRACE_OBJECT(ots* state, ot_obj* object) {
     }
     case OBJ_TABLE: {
       ot_table_obj* table = (ot_table_obj*)object;
-      OT_GC_TRACE_SLOT(state, &table->descriptor);
       OT_GC_TRACE_SLOT(state, &table->entries);
       OT_GC_TRACE_SLOT(state, &table->index);
       break;
@@ -62,6 +61,23 @@ static void OT_GC_TRACE_OBJECT(ots* state, ot_obj* object) {
       ot_dispatch_type_obj* type = (ot_dispatch_type_obj*)object;
       OT_GC_TRACE_SLOT(state, &type->name);
       OT_GC_TRACE_SLOT(state, &type->owner);
+      OT_GC_TRACE_SLOT(state, &type->parent);
+      OT_GC_TRACE_SLOT(state, &type->layout);
+      break;
+    }
+    case OBJ_LAYOUT: {
+      ot_layout_obj* layout = (ot_layout_obj*)object;
+      OT_GC_TRACE_SLOT(state, &layout->type);
+      OT_GC_TRACE_SLOT(state, &layout->keys);
+      OT_GC_TRACE_SLOT(state, &layout->defaults);
+      OT_GC_TRACE_SLOT(state, &layout->indices);
+      break;
+    }
+    case OBJ_INSTANCE: {
+      ot_instance_obj* instance = (ot_instance_obj*)object;
+      OT_GC_TRACE_SLOT(state, &instance->layout);
+      size_t count = (ot_object_size(ot_from_obj(object)) - sizeof(*instance)) / sizeof(otv);
+      for (size_t i = 0; i < count; i++) OT_GC_TRACE_SLOT(state, &instance->values[i]);
       break;
     }
     case OBJ_GENERIC: {
@@ -69,6 +85,8 @@ static void OT_GC_TRACE_OBJECT(ots* state, ot_obj* object) {
       OT_GC_TRACE_SLOT(state, &generic->name);
       OT_GC_TRACE_SLOT(state, &generic->owner);
       OT_GC_TRACE_SLOT(state, &generic->methods);
+      OT_GC_TRACE_SLOT(state, &generic->cache);
+      OT_GC_TRACE_SLOT(state, &generic->positions);
       break;
     }
     case OBJ_BUFFER: {
@@ -167,6 +185,7 @@ static void OT_GC_TRACE_VM(ots* state, ot_vm* vm) {
   for (size_t i = 0; i < vm->vm_frame_count; i++) {
     OT_GC_TRACE_SLOT(state, &vm->vm_frames[i].function);
     OT_GC_TRACE_SLOT(state, &vm->vm_frames[i].env);
+    OT_GC_TRACE_SLOT(state, &vm->vm_frames[i].next_method);
   }
 
   for (ot_handler_frame* handler = vm->handlers; handler != NULL; handler = handler->prev) {
@@ -198,6 +217,9 @@ static void OT_GC_TRACE_ROOTS(ots* state) {
   OT_GC_TRACE_SLOT(state, &state->expand_head);
   OT_GC_TRACE_SLOT(state, &state->type_parents);
   OT_GC_TRACE_SLOT(state, &state->dispatch_types);
+  OT_GC_TRACE_SLOT(state, &state->object_class);
+  OT_GC_TRACE_SLOT(state, &state->update_instance);
+  OT_GC_TRACE_SLOT(state, &state->next_method);
   OT_GC_TRACE_VM(state, &state->vm);
 }
 

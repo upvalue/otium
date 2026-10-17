@@ -407,7 +407,7 @@ nothing if the current namespace already defines `name`, so reloading a
 file keeps the existing value. `expr` is not evaluated in that case.
 
 Inside a body -- of `fn`, a function `def`, `let`, named `let`,
-`defmacro`, `define-method`, a `catch` clause, or a restart clause --
+`defmacro`, `defmethod`, a `catch` clause, or a restart clause --
 `def` instead creates a *local* binding. Docstrings are accepted there
 but have no observable effect. Body definitions follow these rules:
 

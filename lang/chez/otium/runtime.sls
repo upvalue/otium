@@ -97,6 +97,8 @@
                [space (make-namespace name env (make-eq-hashtable)
                         (make-eq-hashtable) (make-eq-hashtable) #f #f #f)])
           (hashtable-set! namespaces name space)
+          (for-each (lambda (entry) (define-top-level-value (car entry) (cdr entry) env))
+            gm:public-bindings)
           (define-top-level-value 'describe
             (lambda (name)
               (unless (symbol? name) (error 'describe "expected a symbol" name))
@@ -110,7 +112,7 @@
                 (lambda (form)
                   (gm:fail 'macroexpand 'invalid-declaration
                     "declaration requires top-level context" (syntax->datum form))) env))
-            '(define-type define-generic define-method reset-type! reset-generic!))
+            '(defclass defabstract defgeneric defmethod reset-class! reset-generic!))
           (for-each
             (lambda (entry)
               (define-top-level-value (car entry)
@@ -268,6 +270,87 @@
            (parse (cddr rest) alias (cadr rest) reload?)]
           [else (error 'require "invalid options" rest)])))))
 
+  (define (declaration-option? value name)
+    (or (eq? value (keyword name))
+        (eq? value (string->symbol (string-append ":" name)))))
+
+  (define (class-declaration! space form)
+    (define (invalid message . details)
+      (apply gm:fail (car form) 'invalid-class-definition message details))
+    (define env (namespace-environment space))
+    (define name (and (pair? (cdr form)) (cadr form)))
+    (define abstract? (eq? (car form) 'defabstract))
+    (define reset? (eq? (car form) 'reset-class!))
+    (unless (and (symbol? name) (not (memv #\/ (string->list (symbol->string name)))))
+      (invalid "expected local class name"))
+    (let* ([rest (cddr form)]
+           [parent (if (and (pair? rest) (declaration-option? (car rest) "is"))
+                       (begin (unless (and (pair? (cdr rest)) (symbol? (cadr rest)))
+                                (invalid "expected abstract parent"))
+                              (eval (cadr rest) env)) gm:Object)]
+           [rest (if (and (pair? rest) (declaration-option? (car rest) "is")) (cddr rest) rest)]
+           [accessors '()]
+           [slots
+             (map (lambda (slot)
+                    (let* ([slot-name (if (symbol? slot) slot (and (pair? slot) (car slot)))]
+                           [options (if (symbol? slot) '() (and (pair? slot) (cdr slot)))]
+                           [init #f] [accessor #f] [seen '()])
+                      (unless (and (symbol? slot-name) (list? options) (even? (length options)))
+                        (invalid "expected slot symbol and option/value pairs" slot))
+                      (let loop ([options options])
+                        (unless (null? options)
+                          (let ([key (car options)] [value (cadr options)])
+                            (when (memq key seen) (invalid "duplicate slot option" key))
+                            (set! seen (cons key seen))
+                            (cond [(declaration-option? key "init")
+                                   (set! init (eval (expander-top (namespace-expander space) `(fn () ,value)) env))]
+                                  [(declaration-option? key "accessor")
+                                   (unless (and (symbol? value)
+                                                (not (memv #\/ (string->list (symbol->string value)))))
+                                     (invalid "expected local accessor name" value))
+                                   (set! accessor value)]
+                                  [else (invalid "unknown slot option" key)]))
+                          (loop (cddr options))))
+                      (let ([key (keyword (symbol->string slot-name))])
+                        (when accessor (set! accessors (cons (cons accessor key) accessors)))
+                        (list key init)))) rest)]
+           [defined? (hashtable-contains? (namespace-definitions space) name)]
+           [bound? (top-level-bound? name env)]
+           [owner (cons (namespace-name space) name)]
+           [old (and bound? (top-level-value name env))])
+      (when (or (eq? (namespace-name space) 'otium.generic)
+                (hashtable-contains? (namespace-imports space) name)
+                (and reset? (not defined?))
+                (and (not defined?) (or bound? (memq name (environment-symbols env))))
+                (and defined? (not reset?)
+                     (not (and (gm:descriptor? old) (equal? owner (gm:descriptor-owner old))
+                               (eq? abstract? (gm:descriptor-abstract? old))))))
+        (gm:fail (car form) 'binding-conflict "class declaration conflicts with binding" name))
+      (when (and abstract? (pair? slots)) (invalid "abstract types cannot have slots"))
+      (for-each (lambda (entry)
+                  (let ([accessor (car entry)])
+                    (when (or (eq? accessor name)
+                              (hashtable-contains? (namespace-imports space) accessor)
+                              (and (top-level-bound? accessor env)
+                                   (let ([g (top-level-value accessor env)])
+                                     (not (and (gm:generic? g) (= 1 (gm:generic-arity g))
+                                               (equal? (cons (namespace-name space) accessor)
+                                                       (gm:generic-owner g)))))))
+                      (gm:fail 'defclass 'binding-conflict "accessor conflicts with binding" accessor))))
+        accessors)
+      (let ([type (if (and defined? (not reset?)) old (gm:fresh-type (namespace-name space) name))])
+        (gm:redefine-class! type abstract? parent slots)
+        (define-top-level-value name type env)
+        (hashtable-set! (namespace-definitions space) name "Class or abstract dispatch type.")
+        (for-each (lambda (entry)
+                    (let* ([name (car entry)] [key (cdr entry)]
+                           [g (if (top-level-bound? name env) (top-level-value name env)
+                                  (gm:fresh-generic (namespace-name space) name 1))])
+                      (define-top-level-value name g env)
+                      (hashtable-set! (namespace-definitions space) name "Slot accessor generic.")
+                      (gm:add-method! g (list type) (lambda (object) (gm:slot-ref object key)))))
+          accessors))))
+
   (define (generic-declaration! space form)
     (define (invalid message)
       (gm:fail (car form) 'invalid-declaration message form))
@@ -282,6 +365,7 @@
                                [else (invalid "invalid parameter")])) parameters)])
         (let loop ([rest names])
           (unless (null? rest)
+            (when (eq? (car rest) '&) (invalid "generic parameters have fixed arity"))
             (when (memq (car rest) (cdr rest)) (invalid "duplicate parameter"))
             (loop (cdr rest))))
         names))
@@ -289,8 +373,10 @@
     (define kind (car form))
     (unless (and (list? form) (>= (length form) 2))
       (invalid "malformed declaration"))
-    (if (eq? kind 'define-method)
-        (let ([head (cadr form)])
+    (if (eq? kind 'defmethod)
+        (let* ([qualifier (if (declaration-option? (cadr form) "around") (keyword "around") 'primary)]
+               [form (if (eq? qualifier 'primary) form (cons 'defmethod (cddr form)))]
+               [head (cadr form)])
           (unless (and (pair? head) (list? head) (symbol? (car head))
                        (>= (length form) 3))
             (invalid "expected (define-method (generic parameters ...) body ...)"))
@@ -311,8 +397,10 @@
                    [implementation
                     (eval (expander-top (namespace-expander space) `(fn ,names ,@(cddr form)))
                           env)])
-              (gm:add-method! generic signature implementation))))
-        (let* ([type? (memq kind '(define-type reset-type!))]
+              (gm:add-method! generic signature implementation qualifier))))
+        (if (memq kind '(defclass defabstract reset-class!))
+            (class-declaration! space form)
+        (let* ([type? #f]
                [reset? (memq kind '(reset-type! reset-generic!))]
                [head (cadr form)]
                [name (if type? head (and (pair? head) (car head)))])
@@ -342,7 +430,7 @@
                  (if type? (gm:fresh-type (namespace-name space) name)
                      (gm:fresh-generic (namespace-name space) name arity)) env)
                (hashtable-set! (namespace-definitions space) name
-                 (if type? "User-defined dispatch type." "Generic procedure."))])))))
+                 (if type? "User-defined dispatch type." "Generic procedure."))]))))))
 
   (define (evaluate form)
     (ot:call-with-otium-control
@@ -356,7 +444,7 @@
            [form (expander-head expander input #f)])
       (cond
         [(and (pair? form)
-              (memq (car form) '(define-type define-generic define-method reset-type! reset-generic!)))
+              (memq (car form) '(defclass defabstract defgeneric defmethod reset-class! reset-generic!)))
          (generic-declaration! space form)]
         [(and (pair? form) (eq? (car form) 'ns))
          (unless (and (list? form) (= (length form) 2) (symbol? (cadr form)))

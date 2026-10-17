@@ -1,21 +1,28 @@
 (library (otium generic-core)
-  (export public-bindings fail descriptor? descriptor-owner fresh-type
-          generic? generic-owner generic-arity fresh-generic add-method!
-          dispatch-type make field-ref field-set! field-delete! field-has?
-          field-keys typed-map? generic-methods remove-method!)
+  (export public-bindings fail descriptor? descriptor-owner fresh-type redefine-class!
+          descriptor-abstract? descriptor-parent Object generic? generic-owner generic-arity
+          fresh-generic add-method! dispatch-type make slot-ref slot-set! instance?
+          generic-methods remove-method! call-next-method next-method? update-instance
+          make-slot-cache cached-slot-ref cached-slot-set! cached-call cached-set-call)
   (import (chezscheme) (prefix (otium values) val:))
 
   (define (fail who code message . details)
     (apply error who message code details))
-
+  (define epoch 0)
   (define-record-type (descriptor new-descriptor descriptor?)
     (opaque #t)
-    (fields name owner))
+    (fields name owner builtin? (mutable abstract?) (mutable parent) (mutable layout)))
+  (define-record-type layout (fields keys defaults indices))
+  (define (empty-layout) (make-layout '#() '#() (make-eq-hashtable)))
+  (define Object (new-descriptor 'otium.generic/Object '(otium.generic . Object) #t #t #f (empty-layout)))
   (define (fresh-type owner name)
     (new-descriptor
       (string->symbol (string-append (symbol->string owner) "/" (symbol->string name)))
-      (cons owner name)))
-  (define (builtin name) (fresh-type 'otium.generic name))
+      (cons owner name) #f #f Object (empty-layout)))
+  (define (builtin name)
+    (new-descriptor
+      (string->symbol (string-append "otium.generic/" (symbol->string name)))
+      (cons 'otium.generic name) #t #f Object (empty-layout)))
   (define Number (builtin 'Number))
   (define Boolean (builtin 'Boolean))
   (define Character (builtin 'Character))
@@ -31,18 +38,37 @@
   (define Other (builtin 'Other))
   (define Nil (builtin 'Nil))
   (define Keyword (builtin 'Keyword))
-
-  (define-record-type (typed-map new-map typed-map?)
-    (opaque #t)
-    (fields descriptor entries))
+  (define instance? val:instance?)
   (define (type-name type)
-    (unless (descriptor? type)
-      (fail 'type-name 'invalid-specializer "expected type descriptor" type))
+    (unless (descriptor? type) (fail 'type-name 'invalid-specializer "expected class" type))
     (descriptor-name type))
+  (define (subtype? child parent)
+    (or (eq? child parent)
+        (and child (descriptor-parent child) (subtype? (descriptor-parent child) parent))))
+  ;; Slot specifications are (keyword default-thunk-or-#f).
+  (define (redefine-class! type abstract? parent slots)
+    (unless (and (descriptor? type) (not (descriptor-builtin? type))
+                 (descriptor? parent) (descriptor-abstract? parent)
+                 (not (subtype? parent type)) (or (not abstract?) (null? slots)))
+      (fail 'defclass 'invalid-class-definition "invalid class parent or abstract slots"))
+    (let* ([keys (list->vector (map car slots))]
+           [defaults (list->vector (map cadr slots))]
+           [indices (make-eq-hashtable)])
+      (do ([i 0 (+ i 1)]) ((= i (vector-length keys)))
+        (let ([key (vector-ref keys i)])
+          (unless (val:keyword? key) (fail 'defclass 'invalid-class-definition "expected keyword" key))
+          (when (hashtable-contains? indices key)
+            (fail 'defclass 'invalid-class-definition "duplicate slot" key))
+          (hashtable-set! indices key i)))
+      (descriptor-abstract?-set! type abstract?)
+      (descriptor-parent-set! type parent)
+      (descriptor-layout-set! type (make-layout keys defaults indices))
+      (set! epoch (+ epoch 1)))
+    type)
   (define (dispatch-type value)
     (cond [(val:nil? value) Nil] [(val:keyword? value) Keyword]
+          [(instance? value) (val:instance-type value)]
           [(val:array? value) Vector] [(val:table? value) Hashtable]
-          [(typed-map? value) (typed-map-descriptor value)]
           [(number? value) Number] [(boolean? value) Boolean]
           [(char? value) Character] [(string? value) String]
           [(symbol? value) Symbol] [(null? value) Null]
@@ -50,132 +76,226 @@
           [(bytevector? value) Bytevector] [(hashtable? value) Hashtable]
           [(procedure? value) Procedure] [(descriptor? value) TypeDescriptor]
           [else Other]))
-  (define (make type . fields)
-    (unless (and (descriptor? type)
-                 (not (eq? (car (descriptor-owner type)) 'otium.generic)))
-      (fail 'make 'invalid-specializer "expected user-defined type" type))
-    (unless (and (even? (length fields))
-                 (let loop ([xs fields])
-                   (or (null? xs) (and (symbol? (car xs)) (loop (cddr xs))))))
-      (fail 'make 'invalid-field-operation "expected symbol/value pairs"))
-    (let ([entries (make-eq-hashtable)])
-      (let loop ([xs fields])
+  (define absent (list 'uninitialized-slot))
+  (define (slot-index layout key who type)
+    (let ([index (and (val:keyword? key) (hashtable-ref (layout-indices layout) key #f))])
+      (unless index (fail who 'missing-slot "class has no such slot" (type-name type) key))
+      index))
+  (define (check-initialized object)
+    (let ([slots (val:instance-slots object)] [keys (layout-keys (val:instance-layout object))])
+      (do ([i 0 (+ i 1)]) ((= i (vector-length slots)))
+        (when (eq? (vector-ref slots i) absent)
+          (fail 'make 'uninitialized-slot "required slot has no value"
+            (type-name (val:instance-type object)) (vector-ref keys i))))))
+  (define (make type . arguments)
+    (unless (and (descriptor? type) (not (descriptor-builtin? type))
+                 (not (descriptor-abstract? type)))
+      (fail 'make 'invalid-class "expected concrete user class" type))
+    (unless (even? (length arguments)) (fail 'make 'invalid-slot-operation "expected keyword/value pairs"))
+    (let* ([layout (descriptor-layout type)]
+           [slots (make-vector (vector-length (layout-keys layout)) absent)]
+           [object (val:make-instance type (cdr (descriptor-owner type)) layout slots #f)])
+      (let loop ([xs arguments])
         (unless (null? xs)
-          (hashtable-set! entries (car xs) (cadr xs))
+          (vector-set! slots (slot-index layout (car xs) 'make type) (cadr xs))
           (loop (cddr xs))))
-      (new-map type entries)))
-  (define (entries who object key)
-    (unless (and (typed-map? object) (symbol? key))
-      (fail who 'invalid-field-operation "expected typed map and symbol key"))
-    (typed-map-entries object))
-  (define absent (list 'absent))
-  (define field-ref
-    (case-lambda
-      [(object key)
-       (let ([value (hashtable-ref (entries 'field-ref object key) key absent)])
-         (if (eq? value absent)
-             (fail 'field-ref 'missing-field "field is absent" key)
-             value))]
-      [(object key default)
-       (hashtable-ref (entries 'field-ref object key) key default)]))
-  (define (field-set! object key value)
-    (hashtable-set! (entries 'field-set! object key) key value)
+      (do ([i 0 (+ i 1)]) ((= i (vector-length slots)))
+        (when (eq? (vector-ref slots i) absent)
+          (let ([init (vector-ref (layout-defaults layout) i)])
+            (when init (vector-set! slots i (init))))))
+      (check-initialized object)
+      object))
+  (define (ensure-current! object)
+    (unless (instance? object) (fail 'slot-ref 'invalid-slot-operation "expected instance"))
+    (unless (or (val:instance-migrating? object)
+                (eq? (val:instance-layout object) (descriptor-layout (val:instance-type object))))
+      (let* ([old-layout (val:instance-layout object)] [old-values (val:instance-slots object)]
+             [new-layout (descriptor-layout (val:instance-type object))]
+             [values (make-vector (vector-length (layout-keys new-layout)) absent)]
+             [old-slots (val:table)])
+        (do ([i 0 (+ i 1)]) ((= i (vector-length old-values)))
+          (val:put! old-slots (vector-ref (layout-keys old-layout) i) (vector-ref old-values i)))
+        (dynamic-wind
+          (lambda () (val:instance-migrating?-set! object #t))
+          (lambda ()
+            (guard (c [else (val:instance-layout-set! object old-layout)
+                           (val:instance-slots-set! object old-values) (raise c)])
+              (val:instance-layout-set! object new-layout)
+              (val:instance-slots-set! object values)
+              (do ([i 0 (+ i 1)]) ((= i (vector-length values)))
+                (let* ([key (vector-ref (layout-keys new-layout) i)]
+                       [old-index (hashtable-ref (layout-indices old-layout) key #f)]
+                       [init (vector-ref (layout-defaults new-layout) i)])
+                  (cond [old-index (vector-set! values i (vector-ref old-values old-index))]
+                        [init (vector-set! values i (init))])))
+              (update-instance object old-slots)
+              (check-initialized object)))
+          (lambda () (val:instance-migrating?-set! object #f))))))
+  (define (cached-call cache target key)
+    (if (instance? target) (cached-slot-ref cache target key)
+        (val:callable-apply target key)))
+  (define (cached-set-call cache setter target key value)
+    (if (and (eq? setter val:set-applied!) (instance? target))
+        (cached-slot-set! cache target key value)
+        (setter target key value)))
+  (define (make-slot-cache) (vector #f #f #f))
+  (define (cached-index cache object key)
+    (ensure-current! object)
+    (let ([layout (val:instance-layout object)])
+      (if (and (eq? layout (vector-ref cache 0)) (eq? key (vector-ref cache 1)))
+          (vector-ref cache 2)
+          (let ([index (slot-index layout key 'slot-ref (val:instance-type object))])
+            (vector-set! cache 0 layout) (vector-set! cache 1 key) (vector-set! cache 2 index)
+            index))))
+  (define (read-slot object index key)
+    (let ([value (vector-ref (val:instance-slots object) index)])
+      (if (eq? value absent)
+          (fail 'slot-ref 'uninitialized-slot "required slot has no value"
+            (type-name (val:instance-type object)) key)
+          value)))
+  (define (cached-slot-ref cache object key)
+    (read-slot object (cached-index cache object key) key))
+  (define (cached-slot-set! cache object key value)
+    (let ([index (cached-index cache object key)])
+      (vector-set! (val:instance-slots object) index value))
     value)
-  (define (field-has? object key)
-    (hashtable-contains? (entries 'field-has? object key) key))
-  (define (field-delete! object key)
-    (let* ([table (entries 'field-delete! object key)]
-           [present? (hashtable-contains? table key)])
-      (hashtable-delete! table key)
-      present?))
-  (define (field-keys object)
-    (unless (typed-map? object)
-      (fail 'field-keys 'invalid-field-operation "expected typed map"))
-    (vector->list (hashtable-keys (typed-map-entries object))))
+  (define (slot-ref object key)
+    (ensure-current! object)
+    (read-slot object (slot-index (val:instance-layout object) key 'slot-ref (val:instance-type object)) key))
+  (define (slot-set! object key value)
+    (ensure-current! object)
+    (vector-set! (val:instance-slots object)
+      (slot-index (val:instance-layout object) key 'slot-set! (val:instance-type object)) value)
+    value)
+  (define (copy-instance object)
+    (ensure-current! object)
+    (val:make-instance (val:instance-type object) (val:instance-name object)
+      (val:instance-layout object) (vector-copy (val:instance-slots object)) #f))
 
+  (define-record-type method (fields signature qualifier implementation))
   (define-record-type generic-state
-    (fields owner arity (mutable methods)))
-  ;; Methods may capture their own generic; ephemerons allow those cycles to die.
+    (fields owner arity (mutable methods) (mutable cache) (mutable epoch) (mutable positions)))
   (define generics (make-ephemeron-eq-hashtable))
   (define (generic? value) (hashtable-contains? generics value))
   (define (state who generic)
-    (or (hashtable-ref generics generic #f)
-        (fail who 'not-generic "expected generic procedure")))
+    (or (hashtable-ref generics generic #f) (fail who 'not-generic "expected generic procedure")))
   (define (generic-owner g) (generic-state-owner (state 'generic-owner g)))
   (define (generic-arity g) (generic-state-arity (state 'generic-arity g)))
-  (define (same-signature? a b)
-    (and (= (length a) (length b)) (for-all eq? a b)))
+  (define (normalize signature) (map (lambda (x) (if (or (not x) (eq? x Object)) Object x)) signature))
+  (define (same-signature? a b) (and (= (length a) (length b)) (for-all eq? a b)))
   (define (signature! who s signature)
-    (unless (and (list? signature)
-                 (= (length signature) (generic-state-arity s))
+    (unless (and (list? signature) (= (length signature) (generic-state-arity s))
                  (for-all (lambda (x) (or (not x) (descriptor? x))) signature))
-      (fail who 'invalid-signature "expected descriptor/wildcard signature" signature)))
-  (define (applicable? signature types)
-    (for-all (lambda (specializer type) (or (not specializer) (eq? specializer type)))
-      signature types))
+      (fail who 'invalid-signature "expected class/wildcard signature" signature)))
+  (define (applicable? signature types) (for-all subtype? types signature))
   (define (more-specific? a b)
-    (and (for-all (lambda (x y) (or (eq? x y) (and x (not y)))) a b)
-         (exists (lambda (x y) (and x (not y))) a b)))
-  (define (signature-names signature)
-    (map (lambda (x) (and x (descriptor-name x))) signature))
-  (define (select-method s types)
-    (let* ([applicable
-            (filter (lambda (method) (applicable? (car method) types))
-              (generic-state-methods s))]
-           [best
-            (filter (lambda (method)
-                      (not (exists (lambda (other)
-                                     (more-specific? (car other) (car method)))
-                             applicable))) applicable)])
+    (and (for-all subtype? a b) (exists (lambda (x y) (not (eq? x y))) a b)))
+  (define (signature-names signature) (map descriptor-name signature))
+  (define current-next (make-parameter #f))
+  (define (call-next-method . args)
+    (let ([next (current-next)])
+      (unless next (fail 'call-next-method 'no-next-method "outside a method"))
+      ((car next) args)))
+  (define (next-method?) (and (current-next) (cdr (current-next))))
+  (define (qualifier! qualifier)
+    (unless (or (eq? qualifier 'primary) (eq? qualifier (val:keyword "around")))
+      (fail 'defmethod 'invalid-qualifier "expected :around or primary" qualifier)))
+  (define (invalidate! s)
+    (generic-state-cache-set! s (make-eq-hashtable))
+    (generic-state-epoch-set! s epoch)
+    (generic-state-positions-set! s
+      (let loop ([i 0])
+        (if (= i (generic-state-arity s)) '()
+            (let ([rest (loop (+ i 1))])
+              (if (exists (lambda (m) (not (eq? Object (list-ref (method-signature m) i))))
+                    (generic-state-methods s)) (cons i rest) rest))))))
+  ;; Each cached closure is one step. An ambiguous lower step fails only when entered.
+  (define (effective-method s methods types)
+    (let* ([applicable (filter (lambda (m) (applicable? (method-signature m) types)) methods)]
+           [around (filter (lambda (m) (not (eq? 'primary (method-qualifier m)))) applicable)]
+           [candidates (if (null? around) applicable around)]
+           [best (filter (lambda (m)
+                           (not (exists (lambda (other)
+                             (more-specific? (method-signature other) (method-signature m))) candidates)))
+                   candidates)])
       (cond [(null? best)
-             (fail 'generic-call 'missing-method "no applicable method"
-               (generic-state-owner s) (signature-names types))]
+             (lambda (args) (fail 'generic-call 'missing-method "no applicable method"
+                              (generic-state-owner s) (signature-names types)))]
             [(pair? (cdr best))
-             (fail 'generic-call 'ambiguous-method
-               "ambiguous methods; inspect generic-methods and use remove-method! to remove stale signatures"
-               (generic-state-owner s) (signature-names types)
-               (map (lambda (m) (signature-names (car m))) best))]
-            [else (cdar best)])))
+             (lambda (args) (fail 'generic-call 'ambiguous-method "ambiguous methods"
+                              (generic-state-owner s) (map (lambda (m) (signature-names (method-signature m))) best)))]
+            [else
+             (let* ([method (car best)] [remaining (remq method applicable)]
+                    [next (and (pair? remaining) (effective-method s remaining types))])
+               (lambda (args)
+                 (parameterize ([current-next
+                   (cons (lambda (replacements)
+                           (let ([args (if (null? replacements) args replacements)])
+                             (unless (= (length args) (generic-state-arity s))
+                               (fail 'call-next-method 'wrong-arity "incorrect next method arity"))
+                             (unless next (fail 'call-next-method 'no-next-method "no next method"))
+                             (if (null? replacements) (next args)
+                                 ((effective-method s remaining (map dispatch-type args)) args))))
+                         (and next #t))])
+                   (apply (method-implementation method) args))))])))
+  (define (cached-method s args)
+    (unless (= (generic-state-epoch s) epoch) (invalidate! s))
+    (let loop ([cache (generic-state-cache s)] [positions (generic-state-positions s)])
+      (let* ([key (if (null? positions) Object (dispatch-type (list-ref args (car positions))))]
+             [last? (or (null? positions) (null? (cdr positions)))]
+             [found (hashtable-ref cache key #f)])
+        (if last?
+            (or found (let ([method (effective-method s (generic-state-methods s) (map dispatch-type args))])
+                        (hashtable-set! cache key method) method))
+            (let ([child (or found (make-eq-hashtable))])
+              (unless found (hashtable-set! cache key child))
+              (loop child (cdr positions)))))))
   (define (fresh-generic owner name arity)
-    (let* ([s (make-generic-state (cons owner name) arity '())]
+    (let* ([s (make-generic-state (cons owner name) arity '() (make-eq-hashtable) epoch '())]
            [g (lambda args
                 (unless (= (length args) arity)
-                  (fail 'generic-call 'wrong-arity "incorrect generic arity"
-                    (generic-state-owner s) arity (length args)))
-                (let ([method (select-method s (map dispatch-type args))])
-                  (apply method args)))])
-      (hashtable-set! generics g s)
-      g))
-  (define (add-method! generic signature implementation)
-    (let ([s (state 'define-method generic)])
-      (signature! 'define-method s signature)
-      (unless (procedure? implementation)
-        (fail 'define-method 'invalid-declaration "expected implementation procedure"))
-      (generic-state-methods-set! s
-        (cons (cons (list-copy signature) implementation)
-          (filter (lambda (m) (not (same-signature? (car m) signature)))
-            (generic-state-methods s)))))
-    (void))
+                  (fail 'generic-call 'wrong-arity "incorrect generic arity" (generic-state-owner s)))
+                ((cached-method s args) args))])
+      (hashtable-set! generics g s) g))
+  (define add-method!
+    (case-lambda
+      [(generic signature implementation) (add-method! generic signature implementation 'primary)]
+      [(generic signature implementation qualifier)
+       (let ([s (state 'defmethod generic)])
+         (signature! 'defmethod s signature) (qualifier! qualifier)
+         (unless (procedure? implementation) (fail 'defmethod 'invalid-declaration "expected procedure"))
+         (let ([signature (normalize signature)])
+           (generic-state-methods-set! s
+             (cons (make-method signature qualifier implementation)
+               (filter (lambda (m) (not (and (eq? qualifier (method-qualifier m))
+                                            (same-signature? (method-signature m) signature))))
+                 (generic-state-methods s)))))
+         (invalidate! s)) (void)]))
   (define (generic-methods generic)
-    (map (lambda (method) (list-copy (car method)))
+    (map (lambda (m) (list (method-qualifier m) (list-copy (method-signature m))))
       (generic-state-methods (state 'generic-methods generic))))
-  (define (remove-method! generic signature)
-    (let ([s (state 'remove-method! generic)])
-      (signature! 'remove-method! s signature)
-      (let* ([old (generic-state-methods s)]
-             [new (filter (lambda (m) (not (same-signature? (car m) signature))) old)])
-        (generic-state-methods-set! s new)
-        (< (length new) (length old)))))
+  (define remove-method!
+    (case-lambda
+      [(generic signature) (remove-method! generic signature 'primary)]
+      [(generic signature qualifier)
+       (let ([s (state 'remove-method! generic)])
+         (signature! 'remove-method! s signature) (qualifier! qualifier)
+         (let* ([signature (normalize signature)] [old (generic-state-methods s)]
+                [new (filter (lambda (m) (not (and (eq? qualifier (method-qualifier m))
+                                                 (same-signature? (method-signature m) signature)))) old)])
+           (generic-state-methods-set! s new) (invalidate! s) (< (length new) (length old))))]))
+  (define update-instance (fresh-generic 'otium.generic 'update-instance 2))
+  (define initialize-update-instance
+    (begin (add-method! update-instance (list Object Object) (lambda (object old-slots) (void)))
+           (val:install-instance-operations! slot-ref slot-set! copy-instance)))
   (define public-bindings
-    (list
-      (cons 'make make) (cons 'typed-map? typed-map?)
+    (list (cons 'make make) (cons 'instance? instance?)
       (cons 'type-descriptor? descriptor?) (cons 'type-name type-name)
-      (cons 'dispatch-type dispatch-type) (cons 'field-ref field-ref)
-      (cons 'field-set! field-set!) (cons 'field-has? field-has?)
-      (cons 'field-delete! field-delete!) (cons 'field-keys field-keys)
+      (cons 'dispatch-type dispatch-type) (cons 'slot-set! slot-set!)
       (cons 'generic? generic?) (cons 'generic-methods generic-methods)
-      (cons 'remove-method! remove-method!)
-      (cons 'Number Number) (cons 'Boolean Boolean) (cons 'Character Character)
+      (cons 'remove-method! remove-method!) (cons 'call-next-method call-next-method)
+      (cons 'next-method? next-method?) (cons 'update-instance update-instance)
+      (cons 'Object Object) (cons 'Number Number) (cons 'Boolean Boolean) (cons 'Character Character)
       (cons 'String String) (cons 'Symbol Symbol) (cons 'Null Null)
       (cons 'Pair Pair) (cons 'Vector Vector) (cons 'Bytevector Bytevector)
       (cons 'Hashtable Hashtable) (cons 'Procedure Procedure)

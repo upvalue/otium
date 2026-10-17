@@ -7,7 +7,7 @@ import sys
 import tempfile
 
 binary = str(Path(sys.argv[1]).resolve())
-forms = ["(require (otium.generic :as g :refer (Number)))", "(define-generic (f a b c))"]
+forms = ["(require (otium.generic :as g :refer (Number)))", "(defgeneric (f a b c))"]
 expected = []
 for subset in range(256):
     masks = [m for m in range(8) if subset & (1 << m)]
@@ -17,7 +17,7 @@ for subset in range(256):
         forms.append("(reset-generic! (f a b c))")
         for mask in order:
             parameters = " ".join(f"({p} Number)" if mask & (1 << i) else p for i, p in enumerate("abc"))
-            forms.append(f"(define-method (f {parameters}) {mask})")
+            forms.append(f"(defmethod (f {parameters}) {mask})")
         forms.append("(println (try (f 1 2 3) (catch (error? e) (get e :code))))")
         expected.append(answer)
 
@@ -26,25 +26,25 @@ with tempfile.TemporaryDirectory(prefix="otium-multimethods-") as directory:
     (root / "provider.scm").write_text("""
 (ns provider)
 (require (otium.generic :as g))
-(define-type Animal)
-(define-generic (act a b))
-(define-method (act (a Animal) b) 'animal)
+(defclass Animal value)
+(defgeneric (act a b))
+(defmethod (act (a Animal) b) 'animal)
 """)
     forms.extend(["""
 (require (provider :as p :refer (act)))
-(define-type Animal)
-(def animal (g/make p/Animal 'value 1))
+(defclass Animal value)
+(def animal (g/make p/Animal :value 1))
 (def saved act)
 (println (eq? Animal p/Animal))
-(define-method (p/act a (b Number)) 'number)
+(defmethod (p/act a (b Number)) 'number)
 (println (try (act animal 1) (catch (error? e) (get e :code))))
-(define-method (p/act (a p/Animal) (b Number)) 'exact)
+(defmethod (p/act (a p/Animal) (b Number)) 'exact)
 (println (saved animal 1))
 (require (provider :as p :reload))
 (println (eq? saved p/act))
 (println (eq? (g/dispatch-type animal) p/Animal))
 (println (act animal 1))
-(println (try (eval '(define-type act)) (catch (error? e) (get e :code))))
+(println (try (eval '(defclass act)) (catch (error? e) (get e :code))))
 (println (try (eval '(reset-generic! (act a b))) (catch (error? e) (get e :code))))
 (println (g/remove-method! act (list p/Animal Number)))
 (println (try (act animal 1) (catch (error? e) (get e :code))))

@@ -193,7 +193,7 @@
     ]
   },
   "copy": {
-    "text": "(copy collection)\nReturn a shallow copy of an array or table. (copy nil) returns nil.",
+    "text": "(copy collection)\nMake a shallow copy of an array, table, or instance; nil returns nil. Instances keep their class, migrate if needed, and share the objects held in their slots.",
     "runtimes": [
       "c",
       "chez"
@@ -1114,36 +1114,8 @@
       "chez"
     ]
   },
-  "define-generic": {
-    "text": "(define-generic (name argument ...))\nDeclare a fixed-arity generic function. Reevaluation preserves its identity and methods.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
-  },
-  "define-method": {
-    "text": "(define-method (generic parameter ...) body ...)\nInstall or replace a method. A parameter may be a name or (name Type); dispatch selects the unique most specific matching method.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
-  },
-  "define-type": {
-    "text": "(define-type Name)\nDeclare a stable typed-map descriptor in this namespace. Reload preserves the descriptor; conflicting bindings are errors.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
-  },
   "reset-generic!": {
     "text": "(reset-generic! (name argument ...))\nReplace this declaration with a fresh generic of the given arity and no methods.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
-  },
-  "reset-type!": {
-    "text": "(reset-type! Name)\nReplace this declaration with a fresh descriptor. Existing objects retain their old descriptor.",
     "runtimes": [
       "c",
       "chez"
@@ -1183,6 +1155,124 @@
     "text": "Return the elements after count, clamping to the list/array length.",
     "runtimes": [
       "chez"
+    ]
+  },
+  "set-applied!": {
+    "text": "(set-applied! object key value)\nAssign an instance slot, table key, or existing array index and return value. (set! (object key) value) evaluates object, key, and value once, in that order. Table values of nil delete keys.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "defclass": {
+    "text": "(defclass Name [:is Abstract] slot ...)\nDeclare a final class with fixed slots. A slot is a symbol or (name :init expression :accessor generic). Slots without :init are required. Reload preserves class identity and lazily migrates existing instances.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "defabstract": {
+    "text": "(defabstract Name [:is Parent])\nDeclare a slotless abstract type for dispatch. Parents must be abstract and acyclic; the default parent is Object. Abstract types cannot be instantiated.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "defgeneric": {
+    "text": "(defgeneric (name argument ...))\nDeclare a fixed-arity generic. Reload preserves its identity and methods.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "defmethod": {
+    "text": "(defmethod [:around] (generic parameter ...) body ...)\nAdd or replace a method by qualifier and signature. Parameters are names or (name Class). Dispatch follows abstract parents; incomparable applicable methods are ambiguous. Around methods wrap primary methods.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "reset-class!": {
+    "text": "(reset-class! Name [:is Abstract] slot ...)\nExplicitly replace an existing local binding with a fresh concrete class. Old instances and signatures retain the old class identity.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "make": {
+    "text": "(make Class keyword value ...)\nConstruct a concrete class instance. Supplied keywords must name declared slots; repeated keywords keep the last value. Missing slots evaluate their defaults in declaration order or raise an error when required.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "instance?": {
+    "text": "(instance? value)\nTest whether value is a class instance. Instances have identity equality and are not tables.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "slot-set!": {
+    "text": "(slot-set! instance keyword value)\nWrite a declared slot and return value. Migrates an outdated instance before writing. Read slots by calling the instance: (instance keyword).",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "with-slots": {
+    "text": "(with-slots object (slot ...) body ...)\nEvaluate object once and bind local symbol macros that read and write its slots. Each read sees the current value; set! on a slot name writes through to the object.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "call-next-method": {
+    "text": "(call-next-method [argument ...])\nCall the next applicable method, using the current arguments unless replacements are supplied. Raises an error if no next method exists or the next candidates are ambiguous.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "next-method?": {
+    "text": "(next-method?)\nReturn whether the current method has remaining applicable methods. False outside a method; an ambiguous next step still counts as remaining.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "update-instance": {
+    "text": "(update-instance object old-slots)\nGeneric called after lazy migration. old-slots is a table of the previous keyword slot values. The default does nothing. Methods may initialize newly required slots; a failed migration is retried on the next access.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "generic-methods": {
+    "text": "(generic-methods generic)\nReturn detached (qualifier signature) lists. Qualifiers are primary or :around. Signatures contain class descriptors; Object represents an unspecialized argument.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "remove-method!": {
+    "text": "(remove-method! generic signature [qualifier])\nRemove a method with the given class/#f signature and return whether one existed. Object and #f both mean unspecialized. The qualifier defaults to primary; :around removes a wrapper.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "dispatch-type": {
+    "text": "(dispatch-type value)\nReturn the class used for generic dispatch, including the declared class of an instance.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "expander-application": {
+    "text": "(expander-application form)\nInternal shared-expander adapter for calls and slot inline caches.",
+    "runtimes": [
+      "c"
     ]
   }
 }

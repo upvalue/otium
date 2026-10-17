@@ -33,7 +33,7 @@
     void
     display print println newline
     read-string keyword keyword? keyword->string nil? array array? table table?
-    get put! push! pop! keys copy take drop update! type)
+    get put! set-applied! push! pop! keys copy take drop update! type)
   (import (except (chezscheme) display newline if and or cond when unless do not filter exists for-all
                           length reverse for-each map apply set-car! set-cdr! values)
           (otium truth) (otium reader)

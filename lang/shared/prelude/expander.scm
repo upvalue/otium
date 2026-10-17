@@ -7,7 +7,8 @@
 ;;
 ;; Scope is tracked in Otium data: a list whose entries are symbols (lexical
 ;; variables) or (name expansion writer) lists (local symbol macros). Each runtime
-;; supplies three natives:
+;; supplies four natives:
+;;   (expander-application form)     lower an expanded application for the runtime
 ;;   (expander-macro-var sym)        the macro sym names as a var in the
 ;;                                   current namespace, else a false value
 ;;   (expander-invoke-macro m args)  run macro m on unevaluated argument forms
@@ -22,11 +23,11 @@
 (def- expander-core-forms
   '(quote quasiquote unquote unquote-splicing if begin fn def def- defonce
     set! let while and or cond defmacro ns require handler-bind restart-case
-    try unwind-protect defer defparam with-params symbol-macrolet
-    define-type define-generic define-method reset-type! reset-generic!))
+    try unwind-protect defer defparam with-params symbol-macrolet with-slots
+    reset-generic! defclass defabstract defgeneric defmethod reset-class!))
 
 (def- expander-declarations
-  '(define-type define-generic define-method reset-type! reset-generic!))
+  '(reset-generic! defclass defabstract defgeneric defmethod reset-class!))
 
 (def- (exp-memq sym lst)
   (if (pair? lst)
@@ -146,12 +147,18 @@
 
 (def- (exp-compound form scope)
   (let ((head (car form)))
-    (cond ((not (symbol? head)) (exp-exprs form scope form))
+    (cond ((not (symbol? head)) (expander-application (exp-exprs form scope form)))
           ((exp-bound? head scope)
-           (cons (exp-symbol head scope) (exp-exprs (cdr form) scope form)))
+           (expander-application (cons (exp-symbol head scope) (exp-exprs (cdr form) scope form))))
+          ((or (eq? head 'when) (eq? head 'unless))
+           (exp-shape! form 2 #f)
+           (let ((test (exp-expr (car (cdr form)) scope))
+                 (body (exp-sequence 'begin (cdr (cdr form)) scope form)))
+             (if (eq? head 'when) (list 'if test body exp-nil-form)
+                 (list 'if test exp-nil-form body))))
           ((exp-core? head) (exp-core form scope))
           ((expander-native-syntax? head) form)
-          (else (exp-exprs form scope form)))))
+          (else (expander-application (exp-exprs form scope form))))))
 
 (def- (exp-core form scope)
   (let ((head (car form)))
@@ -183,6 +190,7 @@
                             (exp-exprs (cdr (cdr form)) scope form))))
           ((eq? head 'restart-case) (exp-restart-case form scope))
           ((eq? head 'try) (exp-try form scope))
+          ((eq? head 'with-slots) (exp-with-slots form scope))
           ((eq? head 'symbol-macrolet) (exp-symbol-macrolet form scope))
           ;; The runtime reports misplaced declarations with its own code.
           ((exp-memq head expander-declarations) form)
@@ -197,7 +205,31 @@
     (cond ((pair? found) (exp-symbol-set! (car found) (cdr found) (car (cdr (cdr form))) scope))
           ((and (symbol? name) (not (exp-core? name)))
            (list 'set! name (exp-expr (car (cdr (cdr form))) scope)))
-          (else (exp-fail "set!: expected a variable name" form)))))
+          ((pair? name)
+           (exp-shape! name 2 2)
+           (let ((object (gensym "object")) (key (gensym "key")) (value (gensym "value")))
+             (list 'let
+                   (list (list object (exp-expr (car name) scope))
+                         (list key (exp-expr (car (cdr name)) scope))
+                         (list value (exp-expr (car (cdr (cdr form))) scope)))
+                   (expander-application (list 'set-applied! object key value)))))
+          (else (exp-fail "set!: expected a variable name or one-argument call" form)))))
+
+(def- (exp-with-slots form scope)
+  (exp-shape! form 3 #f)
+  (let ((object (gensym "object")) (names (car (cdr (cdr form))))
+        (value (gensym "value")))
+    (if (not (and (list? names) (exp-every? symbol? names)))
+        (exp-fail "with-slots: expected slot names" form))
+    (exp-expr
+      (list 'let (list (list object (car (cdr form))))
+        (cons 'symbol-macrolet
+          (cons (exp-map
+                  (fn (name)
+                    (let ((key (keyword (symbol->string name))))
+                      (list name (list object key)
+                            (list value (list 'set! (list object key) value))))) names)
+                (cdr (cdr (cdr form)))))) scope)))
 
 ;; --- local symbol macros --------------------------------------------------------
 
@@ -474,7 +506,7 @@
                  (let ((name (exp-name! (car (cdr form)) form)))
                    (exp-value-definition form name (cdr (cdr form)) '())))
                 ((or (eq? head 'ns) (eq? head 'require)) form)
-                ((eq? head 'define-method) (exp-method form))
+                ((eq? head 'defmethod) (exp-method form))
                 ((exp-memq head expander-declarations) form)
                 (else (exp-expr form '()))))
         (exp-expr form '()))))
@@ -492,15 +524,19 @@
                           (cons (car rest) (exp-body (cdr rest) (cdr r)))
                           (exp-body rest (cdr r))))))))
 
-;; (define-method (generic param-or-(param Type) ...) body...)
+;; (defmethod (generic param-or-(param Type) ...) body...)
 (def- (exp-method form)
-  (let ((head (if (pair? (cdr form)) (car (cdr form)) #f)))
-    (if (and (pair? head) (list? head))
-        (cons 'define-method
-              (cons head
-                    (exp-body (cdr (cdr form))
-                              (exp-map (fn (p) (if (pair? p) (car p) p)) (cdr head)))))
-        form)))
+  (let ((rest (cdr form)))
+    (if (and (pair? rest) (eq? (car rest) (keyword "around")))
+        (let ((expanded (exp-method (cons 'defmethod (cdr rest)))))
+          (cons 'defmethod (cons (keyword "around") (cdr expanded))))
+        (let ((head (if (pair? rest) (car rest) #f)))
+          (if (and (pair? head) (list? head))
+              (cons 'defmethod
+                    (cons head
+                          (exp-body (cdr rest)
+                                    (exp-map (fn (p) (if (pair? p) (car p) p)) (cdr head)))))
+              form)))))
 
 ;; The runtimes call (*expander* form) for each top-level form, after
 ;; splitting top-level begin with (expander-expand-head form #f).

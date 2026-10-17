@@ -50,9 +50,10 @@ arrays, tables, and gensym, aiming to match names C also provides. Chez
 representations C lacks (vectors, hash tables, bytevectors, chars,
 continuations, multiple-value receivers) and Scheme syntax that is not Otium
 syntax (lambda, define, let*, letrec, do, case, case-lambda, let-values,
-parameterize, define-syntax, syntax-rules) are not in the core. Some Scheme
-list and comparison helpers C lacks (memq, assq, list-ref, fold-left,
-exists, string=?, gcd, ...) remain pending a naming decision.
+parameterize, define-syntax, syntax-rules) are not in the core. The Scheme
+list and comparison helpers (memq, member, assq, list-ref, list-tail,
+fold-left, fold-right, exists, for-all, string=? and friends, gcd, lcm) are
+shared with C. eqv?, memv and assv are deliberately left out.
 
 Host procedures and syntax are available with the chez/ prefix after
 (require chez) in the namespace. The prefixed names are unbound until then,

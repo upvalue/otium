@@ -111,6 +111,145 @@
   "(cddr pair)\nEquivalent to (cdr (cdr pair))."
   (cdr (cdr p)))
 
+;; Scheme list helpers, matching the Chez runtime's names.
+(def (cdar p)
+  "(cdar pair)\nEquivalent to (cdr (car pair))."
+  (cdr (car p)))
+(def (caaar p)
+  "(caaar pair)\nEquivalent to (car (car (car pair)))."
+  (car (car (car p))))
+(def (caadr p)
+  "(caadr pair)\nEquivalent to (car (car (cdr pair)))."
+  (car (car (cdr p))))
+(def (cadar p)
+  "(cadar pair)\nEquivalent to (car (cdr (car pair)))."
+  (car (cdr (car p))))
+(def (caddr p)
+  "(caddr pair)\nEquivalent to (car (cdr (cdr pair)))."
+  (car (cdr (cdr p))))
+(def (cdaar p)
+  "(cdaar pair)\nEquivalent to (cdr (car (car pair)))."
+  (cdr (car (car p))))
+(def (cdadr p)
+  "(cdadr pair)\nEquivalent to (cdr (car (cdr pair)))."
+  (cdr (car (cdr p))))
+(def (cddar p)
+  "(cddar pair)\nEquivalent to (cdr (cdr (car pair)))."
+  (cdr (cdr (car p))))
+(def (cdddr p)
+  "(cdddr pair)\nEquivalent to (cdr (cdr (cdr pair)))."
+  (cdr (cdr (cdr p))))
+(def (cadddr p)
+  "(cadddr pair)\nEquivalent to (car (cdr (cdr (cdr pair))))."
+  (car (cdr (cdr (cdr p)))))
+
+(def (list-tail lst k)
+  "(list-tail list k)\nThe list after dropping its first k pairs."
+  (let loop ((l lst) (n (require-int "list-tail" k)))
+    (cond ((= n 0) l)
+          ((pair? l) (loop (cdr l) (- n 1)))
+          (else (error "list-tail: index out of range")))))
+
+(def (list-ref lst k)
+  "(list-ref list k)\nThe element at index k of a list."
+  (let ((tail (list-tail lst k)))
+    (if (pair? tail) (car tail) (error "list-ref: index out of range"))))
+
+(def (memq x lst)
+  "(memq value list)\nThe first tail of list whose car is eq? to value, or #f."
+  (cond ((not (pair? lst)) #f)
+        ((eq? x (car lst)) lst)
+        (else (memq x (cdr lst)))))
+
+(def (member x lst)
+  "(member value list)\nThe first tail of list whose car is equal? to value, or #f."
+  (cond ((not (pair? lst)) #f)
+        ((equal? x (car lst)) lst)
+        (else (member x (cdr lst)))))
+
+(def (assq key alist)
+  "(assq key alist)\nThe first pair in alist whose car is eq? to key, or #f."
+  (cond ((not (pair? alist)) #f)
+        ((eq? key (car (car alist))) (car alist))
+        (else (assq key (cdr alist)))))
+
+(def- (heads lists) (if (pair? lists) (cons (car (car lists)) (heads (cdr lists))) '()))
+(def- (tails lists) (if (pair? lists) (cons (cdr (car lists)) (tails (cdr lists))) '()))
+(def- (any-empty? lists)
+  (and (pair? lists) (or (not (pair? (car lists))) (any-empty? (cdr lists)))))
+
+(def (fold-left f init lst & more)
+  "(fold-left procedure initial list ...)\nCombine from the left: (procedure accumulator element ...) for each position."
+  (let loop ((acc init) (lists (cons lst more)))
+    (if (any-empty? lists) acc (loop (apply f acc (heads lists)) (tails lists)))))
+
+(def (fold-right f init lst & more)
+  "(fold-right procedure initial list ...)\nCombine from the right: (procedure element ... accumulator) for each position."
+  (let loop ((lists (cons lst more)))
+    (if (any-empty? lists)
+        init
+        (apply f (append (heads lists) (list (loop (tails lists))))))))
+
+(def (exists f lst & more)
+  "(exists predicate list ...)\nThe first truthy result of predicate across the lists, or #f."
+  (let loop ((lists (cons lst more)))
+    (if (any-empty? lists)
+        #f
+        (or (apply f (heads lists)) (loop (tails lists))))))
+
+(def (for-all f lst & more)
+  "(for-all predicate list ...)\nThe last result if predicate is truthy for every position, else the first falsy result."
+  (let loop ((lists (cons lst more)) (last #t))
+    (if (any-empty? lists)
+        last
+        (let ((v (apply f (heads lists))))
+          (if v (loop (tails lists) v) v)))))
+
+(def (positive? x)
+  "(positive? number)\nTest whether number is greater than zero."
+  (> x 0))
+(def (negative? x)
+  "(negative? number)\nTest whether number is less than zero."
+  (< x 0))
+
+(def (gcd & xs)
+  "(gcd integer ...)\nGreatest common divisor; no arguments gives 0."
+  (let loop ((acc 0) (rest xs))
+    (if (pair? rest)
+        (loop (let euclid ((a (abs acc)) (b (abs (car rest))))
+                (if (= b 0) a (euclid b (remainder a b))))
+              (cdr rest))
+        acc)))
+(def (lcm & xs)
+  "(lcm integer ...)\nLeast common multiple; no arguments gives 1."
+  (let loop ((acc 1) (rest xs))
+    (if (pair? rest)
+        (loop (if (or (= acc 0) (= (car rest) 0))
+                  0
+                  (quotient (abs (* acc (car rest))) (gcd acc (car rest))))
+              (cdr rest))
+        acc)))
+
+(def (keyword->string k)
+  "(keyword->string keyword)\nThe name of a keyword, without its colon."
+  (if (keyword? k) (name k) (error "keyword->string: expected keyword")))
+
+(def- (string-chain who ok? a b more)
+  (if (not (and (string? a) (string? b))) (error (str who ": expected strings")))
+  (and (ok? a b) (or (null? more) (string-chain who ok? b (car more) (cdr more)))))
+(def (string=? a b & more)
+  "(string=? string string ...)\nTest whether all strings are equal."
+  (string-chain "string=?" equal? a b more))
+(def (string>? a b & more)
+  "(string>? string string ...)\nTest whether strings are in strictly decreasing order."
+  (string-chain "string>?" (fn (x y) (string<? y x)) a b more))
+(def (string<=? a b & more)
+  "(string<=? string string ...)\nTest whether strings are in nondecreasing order."
+  (string-chain "string<=?" (fn (x y) (not (string<? y x))) a b more))
+(def (string>=? a b & more)
+  "(string>=? string string ...)\nTest whether strings are in nonincreasing order."
+  (string-chain "string>=?" (fn (x y) (not (string<? x y))) a b more))
+
 (def (list-to-array value)
   "(list-to-array sequence)\nConvert a proper list to a new array; other input types raise an error."
   (unless (list? value) (error "list-to-array: expected proper list"))

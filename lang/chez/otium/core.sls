@@ -2,8 +2,7 @@
 ;; This export list is the default vocabulary, independent of Chez additions.
   ;; Names here should exist on C too; Chez representations (vectors,
   ;; hashtables, bytevectors, chars, continuations) are reached through
-  ;; (require chez). The Scheme list and comparison helpers below that C
-  ;; lacks are pending a naming decision.
+  ;; (require chez).
   (export
     quote quasiquote unquote unquote-splicing if begin set! and or cond else
     when unless
@@ -13,10 +12,10 @@
     min max abs quotient remainder modulo gcd lcm
     floor ceiling truncate round exp log sin cos tan asin acos atan sqrt expt
     number? integer? exact? inexact? exact inexact number->string string->number
-    not boolean? eq? eqv? equal? procedure?
+    not boolean? eq? equal? procedure?
     cons car cdr caar cadr cdar cddr caaar caadr cadar caddr
     cdaar cdadr cddar cdddr cadddr pair? null? list? list length append reverse
-    list-tail list-ref memq memv member assq assv assoc set-car! set-cdr!
+    list-tail list-ref memq member assq assoc set-car! set-cdr!
     map for-each apply filter fold-left fold-right for-all exists
     symbol? symbol->string string->symbol gensym
     string? string-length string=? string<? string>? string<=? string>=?

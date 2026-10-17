@@ -251,6 +251,7 @@ static bestlineXlatCallback *xlatCallback;
 static bestlineHintsCallback *hintsCallback;
 static bestlineFreeHintsCallback *freeHintsCallback;
 static bestlineCompletionCallback *completionCallback;
+static bestlineEditorCallback *editorCallback;
 
 static void bestlineAtExit(void);
 static void bestlineRefreshLine(struct bestlineState *);
@@ -3417,7 +3418,39 @@ static ssize_t bestlineEdit(int stdin_fd, int stdout_fd, const char *prompt, con
         }
         switch (seq[0]) {
             Case(Ctrl('P'), bestlineEditUp(&l));
-            Case(Ctrl('E'), bestlineEditEnd(&l));
+        case Ctrl('E'):
+            if (editorCallback && l.seq[1][0] == Ctrl('X')) {
+                struct abuf input;
+                char *edited;
+                abInit(&input);
+                abAppend(&input, l.full.b, l.full.len);
+                abAppend(&input, l.buf, l.len);
+                bestlineWriteStr(l.ofd, "\033[?2004l\r\n");
+                bestlineDisableRawMode();
+                edited = editorCallback(input.b ? input.b : "");
+                abFree(&input);
+                if (enableRawMode(l.ifd) == -1) {
+                    free(edited);
+                    free(l.buf);
+                    abFree(&l.full);
+                    return -1;
+                }
+                bestlineWriteStr(l.ofd, "\033[?2004h");
+                if (edited) {
+                    abFree(&l.full);
+                    abInit(&l.full);
+                    l.len = l.pos = 0;
+                    l.buf[0] = 0;
+                    l.prompt = promptlastnl ? promptlastnl + 1 : promptnotnull;
+                    bestlineEditInsert(&l, edited, strlen(edited));
+                    free(edited);
+                }
+                l.ws = GetTerminalSize(l.ws, l.ifd, l.ofd);
+                bestlineRefreshLineForce(&l);
+            } else {
+                bestlineEditEnd(&l);
+            }
+            break;
             Case(Ctrl('N'), bestlineEditDown(&l));
             Case(Ctrl('A'), bestlineEditHome(&l));
             Case(Ctrl('B'), bestlineEditLeft(&l));
@@ -3699,7 +3732,13 @@ int bestlineHistorySave(const char *filename) {
         return -1;
     chmod(filename, S_IRUSR | S_IWUSR);
     for (j = 0; j < historylen; j++) {
-        fputs(history[j], fp);
+        if (strchr(history[j], '\n') || history[j][0] == '\036') {
+            const unsigned char *p = (const unsigned char *)history[j];
+            fputc('\036', fp);
+            while (*p) fprintf(fp, "%02x", *p++);
+        } else {
+            fputs(history[j], fp);
+        }
         fputc('\n', fp);
     }
     fclose(fp);
@@ -3746,6 +3785,24 @@ int bestlineHistoryLoad(const char *filename) {
                     if (h[(k = (i + j) % BESTLINE_MAX_HISTORY) * 2]) {
                         if ((s = (char *)malloc((t = h[k * 2 + 1] - h[k * 2]) + 1))) {
                             memcpy(s, h[k * 2], t), s[t] = 0;
+                            if (s[0] == '\036' && (t % 2) == 1) {
+                                size_t a, b;
+                                for (a = 1, b = 0; a < t; a += 2, ++b) {
+                                    unsigned value;
+                                    if (!isxdigit((unsigned char)s[a]) ||
+                                        !isxdigit((unsigned char)s[a + 1]) ||
+                                        sscanf(s + a, "%2x", &value) != 1 || !value)
+                                        break;
+                                }
+                                if (a == t) {
+                                    for (a = 1, b = 0; a < t; a += 2, ++b) {
+                                        unsigned value;
+                                        sscanf(s + a, "%2x", &value);
+                                        s[b] = value;
+                                    }
+                                    s[b] = 0;
+                                }
+                            }
                             history[historylen++] = s;
                         }
                     }
@@ -4098,4 +4155,8 @@ void bestlineUserIO(int (*userReadFn)(int, void *, int), int (*userWriteFn)(int,
         _MyPoll = userPollFn;
     else
         _MyPoll = MyPoll;
+}
+
+void bestlineSetEditorCallback(bestlineEditorCallback *fn) {
+    editorCallback = fn;
 }

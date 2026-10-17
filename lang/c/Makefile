@@ -27,7 +27,7 @@ $(error GC must be "semi" or "gen")
 endif
 
 RUNTIME_OBJ := $(OBJ)/otium.o $(OBJ)/ot-gc-common.o $(GC_OBJ) $(OBJ)/ot-posix.o
-CLI_OBJ := $(OBJ)/main.o $(OBJ)/ot-ext-demo.o $(OBJ)/bestline.o
+CLI_OBJ := $(OBJ)/main.o $(OBJ)/ot-ext-demo.o $(OBJ)/line-edit.o $(OBJ)/bestline.o
 TEST_OBJ := $(OBJ)/test-runtime.o
 GC_BENCH_OBJ := $(OBJ)/gc-bench.o
 
@@ -59,7 +59,7 @@ $(BUILD)/test-runtime: $(RUNTIME_OBJ) $(TEST_OBJ) FORCE
 $(BUILD)/gc-bench: $(RUNTIME_OBJ) $(GC_BENCH_OBJ) FORCE
 	$(CC) $(LDFLAGS) -o $@ $(filter %.o,$^) $(LDLIBS)
 
-$(OBJ)/otium.o: src/otium.c src/otium.h $(GEN)/expander.h $(GEN)/prelude.h | $(OBJ)
+$(OBJ)/otium.o: src/otium.c src/otium.h ../shared/documentation/runtime.inc $(GEN)/expander.h $(GEN)/prelude.h | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(GEN) -Isrc -c $< -o $@
 
 $(OBJ)/ot-gc-common.o: src/ot-gc-common.c src/otium.h src/ot-gc-internal.inc | $(OBJ)
@@ -74,8 +74,8 @@ $(OBJ)/ot-gc-gen.o: src/ot-gc-gen.c src/otium.h src/ot-gc-internal.inc src/ot-gc
 $(OBJ)/ot-posix.o: src/ot-posix.c src/otium.h | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -c $< -o $@
 
-$(OBJ)/main.o: src/main.c src/otium.h vendor/bestline/bestline.h | $(OBJ)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -Ivendor/bestline -c $< -o $@
+$(OBJ)/main.o: src/main.c src/otium.h ../shared/line-edit.h | $(OBJ)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -I../shared -c $< -o $@
 
 $(OBJ)/ot-ext-demo.o: src/ot-ext-demo.c src/otium.h | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -c $< -o $@
@@ -89,8 +89,11 @@ $(OBJ)/test-runtime.o: tests/test_runtime.c src/otium.h | $(OBJ)
 $(OBJ)/gc-bench.o: benchmarks/gc_bench.c src/otium.h | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -c $< -o $@
 
-$(OBJ)/bestline.o: vendor/bestline/bestline.c vendor/bestline/bestline.h | $(OBJ)
-	$(CC) $(CPPFLAGS) $(CSTD) $(OPT) -g -w -Ivendor/bestline -c $< -o $@
+$(OBJ)/line-edit.o: ../shared/line-edit.c ../shared/line-edit.h ../shared/vendor/bestline/bestline.h | $(OBJ)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I../shared/vendor/bestline -c $< -o $@
+
+$(OBJ)/bestline.o: ../shared/vendor/bestline/bestline.c ../shared/vendor/bestline/bestline.h | $(OBJ)
+	$(CC) $(CPPFLAGS) $(CSTD) $(OPT) -g -w -I../shared/vendor/bestline -c $< -o $@
 
 $(GEN)/expander.h: prelude/expander.scm tools/embed.py | $(GEN)
 	$(PYTHON) tools/embed.py $< ot_expander_src $@
@@ -112,14 +115,14 @@ test: all $(BUILD)/test-runtime hygiene
 	$(BUILD)/test-runtime
 	$(PYTHON) tests/otium/run-tests.py $(OTIUM)
 	$(PYTHON) tests/test_cli.py $(OTIUM) tests/cli-load.scm tests/cli-load-second.scm
-	$(OTIUM) --no-project --path examples/demo tests/ext-demo.scm
-	$(OTIUM) --no-project --path examples/otcl tests/otcl.scm
+	$(OTIUM) --no-project --path ../examples/c/demo tests/ext-demo.scm
+	$(OTIUM) --no-project --path ../examples/c/otcl tests/otcl.scm
 ifeq ($(WITH_RAY),1)
-	$(OTIUM) --no-project --path examples/ray tests/ext-ray.scm
+	$(OTIUM) --no-project --path ../examples/c/ray tests/ext-ray.scm
 endif
 
 bench: all
-	$(PYTHON) benchmarks/run.py $(OTIUM)
+	$(PYTHON) ../benchmarks/run.py $(OTIUM)
 
 bench-gc: $(BUILD)/gc-bench
 	$(BUILD)/gc-bench churn

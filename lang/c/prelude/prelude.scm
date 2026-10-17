@@ -56,15 +56,19 @@
 ;; --- macros (10.11) ---------------------------------------------------------
 
 (defmacro defn (name params . body)
+  "(defn name parameters body ...)\nDefine a named procedure; shorthand for define with a procedure head."
   (cons 'define (cons (cons name params) body)))
 
 (defmacro when (test . body)
+  "(when test body ...)\nEvaluate body when test is truthy; otherwise return nil."
   `(if ,test (begin ,@body) nil))
 
 (defmacro unless (test . body)
+  "(unless test body ...)\nEvaluate body when test is falsy; otherwise return nil."
   `(if ,test nil (begin ,@body)))
 
 (defmacro -> (x . forms)
+  "(-> value form ...)\nThread value into the first argument position of each form in turn; a bare name is called with the value."
   (let ((acc x) (s forms))
     (while (pair? s)
       (let ((f (car s)))
@@ -75,6 +79,7 @@
     acc))
 
 (defmacro ->> (x . forms)
+  "(->> value form ...)\nThread value into the last argument position of each form in turn."
   (let ((acc x) (s forms))
     (while (pair? s)
       (let ((f (car s)))
@@ -85,6 +90,7 @@
     acc))
 
 (defmacro dotimes (spec . body)
+  "(dotimes (index count) body ...)\nEvaluate count once, then run body with index from 0 below count. Return nil."
   (let ((sp (if (eq? (car spec) 'array) (cdr spec) spec)))
     (let ((i (car sp)) (n (car (cdr sp))) (lim (gensym "lim")))
       `(let ((,lim ,n) (,i 0))
@@ -95,17 +101,25 @@
 
 ;; --- sequences (10.4) -------------------------------------------------------
 
-(define (caar p) (car (car p)))
-(define (cadr p) (car (cdr p)))
-(define (cddr p) (cdr (cdr p)))
+(define (caar p)
+  "(caar pair)\nEquivalent to (car (car pair))."
+  (car (car p)))
+(define (cadr p)
+  "(cadr pair)\nEquivalent to (car (cdr pair))."
+  (car (cdr p)))
+(define (cddr p)
+  "(cddr pair)\nEquivalent to (cdr (cdr pair))."
+  (cdr (cdr p)))
 
 (define (list-to-array value)
+  "(list-to-array sequence)\nConvert a proper list to a new array; other input types raise an error."
   (unless (list? value) (error "list-to-array: expected proper list"))
   (let ((out (array)))
     (for-each (fn (x) (push! out x)) value)
     out))
 
 (define (array-to-list value)
+  "(array-to-list sequence)\nConvert an array to a new list; other input types raise an error."
   (unless (array? value) (error "array-to-list: expected array"))
   (let ((acc '()) (i (- (length value) 1)))
     (while (>= i 0)
@@ -114,6 +128,7 @@
     acc))
 
 (define (first seq)
+  "(first sequence)\nReturn the first element, or nil. Also accepts strings, returning a one-character string."
   (cond ((nil? seq) nil)
         ((null? seq) nil)
         ((pair? seq) (car seq))
@@ -130,6 +145,7 @@
         (else (error "rest: not a sequence"))))
 
 (define (nth seq i)
+  "(nth sequence index)\nReturn the element at a zero-based integer index, or nil out of range. Accepts lists, arrays, and nil."
   (require-int "nth" i)
   (cond ((nil? seq) nil)
         ((null? seq) nil)
@@ -144,10 +160,15 @@
                (if (pair? s) (car s) nil))))
         (else (error "nth: not a sequence"))))
 
-(define (second seq) (nth seq 1))
-(define (third seq) (nth seq 2))
+(define (second seq)
+  "(second sequence)\nReturn element at index 1, or nil."
+  (nth seq 1))
+(define (third seq)
+  "(third sequence)\nReturn element at index 2, or nil."
+  (nth seq 2))
 
 (define (last seq)
+  "(last sequence)\nReturn the last element, or nil."
   (cond ((nil? seq) nil)
         ((null? seq) nil)
         ((array? seq) (if (> (length seq) 0) (get seq (- (length seq) 1)) nil))
@@ -158,9 +179,11 @@
         (else (error "last: not a sequence"))))
 
 (define (count coll)
+  "(count collection)\nLike length, but nil counts as zero."
   (if (nil? coll) 0 (length coll)))
 
 (define (empty? coll)
+  "(empty? collection)\nTest whether a sequence, table, string, or buffer has no elements. nil is empty."
   (cond ((nil? coll) #t)
         ((null? coll) #t)
         ((pair? coll) #f)
@@ -176,16 +199,19 @@
     (builder-finish out)))
 
 (define (filter pred seq)
+  "(filter predicate sequence)\nKeep elements for which predicate returns a truthy value; preserve list/array kind."
   (let ((out (builder-like seq)))
     (for-each (fn (x) (when (pred x) (set! out (builder-add out x)))) seq)
     (builder-finish out)))
 
 (define (reduce f init seq)
+  "(reduce procedure initial sequence)\nFold left, calling (procedure accumulator element) for each element. Empty sequences return initial."
   (let ((acc init))
     (for-each (fn (x) (set! acc (f acc x))) seq)
     acc))
 
 (define (range . args)
+  "(range end) / (range start end [step])\nReturn an array of integers toward the exclusive end. Defaults: start 0, step 1. Step must be nonzero and may be negative."
   (let ((n (length args)) (a 0) (b 0) (step 1))
     (cond ((= n 1) (set! b (nth args 0)))
           ((= n 2) (begin (set! a (nth args 0)) (set! b (nth args 1))))
@@ -209,14 +235,17 @@
     (builder-finish out)))
 
 (define (take n seq)
+  "(take count sequence)\nReturn the first count elements. Count clamps to the available range; preserve list/array kind."
   (require-int "take" n)
   (slice seq 0 (max n 0)))
 
 (define (drop n seq)
+  "(drop count sequence)\nReturn the elements after the first count. Count clamps to the available range; preserve list/array kind."
   (require-int "drop" n)
   (slice seq (max n 0) nil))
 
 (define (contains? coll x)
+  "(contains? collection value)\nTest table key presence, equal? membership in a sequence, or substring presence in a string. nil returns #f."
   (cond ((nil? coll) #f)
         ((table? coll) (not (nil? (get coll x))))
         ((string? coll) (string-contains? coll x))
@@ -267,7 +296,9 @@
     (let ((res (map cdr (msort lst (length lst)))))
       (finish-like seq res))))
 
-(define (sort seq) (sort-by identity seq))
+(define (sort seq)
+  "(sort sequence)\nReturn an ascending sorted copy, preserving list/array kind. Keys must belong to a supported, consistent orderable class."
+  (sort-by identity seq))
 
 (define (group-by keyfn seq)
   "Table of key -> array of elements, in first-seen key order."
@@ -283,6 +314,7 @@
     t))
 
 (define (frequencies seq)
+  "(frequencies sequence)\nReturn a table mapping each distinct element to its occurrence count."
   (let ((t (table)))
     (for-each (fn (x) (put! t x (+ 1 (get t x 0)))) seq)
     t))
@@ -300,11 +332,13 @@
     c))
 
 (define (dissoc coll . ks)
+  "(dissoc collection key ...)\nReturn a shallow copy without the specified keys."
   (let ((c (if (nil? coll) (table) (copy coll))))
     (for-each (fn (k) (put! c k nil)) ks)
     c))
 
 (define (update coll k f . args)
+  "(update collection key procedure argument ...)\nCopy the collection and replace the entry with (procedure (get collection key) argument ...)."
   (assoc coll k (apply f (get coll k) args)))
 
 (define (merge . ts)
@@ -327,20 +361,25 @@
 ;; --- conditions (10.9) ------------------------------------------------------
 
 (define (condition-type c)
+  "(condition-type condition)\nReturn a condition table's :type, or nil."
   (if (table? c) (get c :type) nil))
 
 (define (condition-message c)
+  "(condition-message condition)\nReturn a condition table's :message, or nil."
   (if (table? c) (get c :message) nil))
 
 (define (error? c)
+  "(error? value)\nTest whether value is a table with a :type entry."
   (if (and (table? c) (not (nil? (get c :type)))) #t #f))
 
 (define (type-pred t)
+  "(type-pred type)\nBuild a predicate for conditions of type or its registered subtypes."
   (lambda (c) (condition-of-type? c t)))
 
 ;; --- functional (10.8) ------------------------------------------------------
 
 (define (partial f . pre)
+  "(partial procedure argument ...)\nReturn a procedure that prepends the supplied arguments to its later arguments."
   (lambda args (apply f (append pre args))))
 
 (define (comp . fs)

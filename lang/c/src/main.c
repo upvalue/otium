@@ -2,7 +2,7 @@
 #define OT_INTERNAL
 #include "otium.h"
 
-#include "bestline.h"
+#include "line-edit.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
 
 typedef struct strings {
   char** values;
@@ -274,28 +275,89 @@ static bool repl_evaluate(ots* state, bytes* pending) {
   return true;
 }
 
+/* Snapshot names and docs into host storage. None of these calls allocate in
+ * the managed heap or run Otium code. Local definitions precede referred names. */
+static void repl_binding( otv name_value, otv var_value, const char* prefix) {
+  ot_name_obj* name = (ot_name_obj*)ot_as_obj(name_value);
+  bytes qualified = {0};
+  if (prefix != NULL) {
+    bytes_append(&qualified, prefix, strlen(prefix));
+    bytes_append(&qualified, "/", 1);
+  }
+  bytes_append(&qualified, name->bytes, name->length);
+  bytes_append(&qualified, "\0", 1);
+  const char* text = "";
+  size_t length = 0;
+  ot_binding_documentation(var_value, &text, &length);
+  char* documentation = copy_string(text, length);
+  ot_line_binding(qualified.data, documentation);
+  ot_host_free(documentation);
+  ot_host_free(qualified.data);
+}
+
+static void repl_namespace_bindings( otv namespace_value, const char* prefix, bool private_ok) {
+  ot_namespace_obj* space = (ot_namespace_obj*)ot_as_obj(namespace_value);
+  for (otv cursor = space->vars; ot_has_type(cursor, OBJ_VAR);) {
+    ot_var_obj* var = (ot_var_obj*)ot_as_obj(cursor);
+    if (private_ok || !var->private_value) repl_binding(var->name, cursor, prefix);
+    cursor = var->next;
+  }
+}
+
+static void repl_bindings(ots* state) {
+  ot_line_bindings_clear();
+  otv current = state->vm.current_namespace;
+  ot_namespace_obj* space = (ot_namespace_obj*)ot_as_obj(current);
+  repl_namespace_bindings(current, NULL, true);
+  for (otv cursor = space->refers; ot_has_type(cursor, OBJ_ALIAS);) {
+    ot_alias_obj* alias = (ot_alias_obj*)ot_as_obj(cursor);
+    repl_binding(alias->name, alias->value, NULL);
+    cursor = alias->next;
+  }
+  for (otv cursor = space->aliases; ot_has_type(cursor, OBJ_ALIAS);) {
+    ot_alias_obj* alias = (ot_alias_obj*)ot_as_obj(cursor);
+    for (otv target = state->namespaces; ot_has_type(target, OBJ_NAMESPACE);) {
+      ot_namespace_obj* namespace_object = (ot_namespace_obj*)ot_as_obj(target);
+      if (namespace_object->name == alias->value)
+        repl_namespace_bindings(target, ((ot_name_obj*)ot_as_obj(alias->name))->bytes,
+                                target == current);
+      target = namespace_object->next;
+    }
+    cursor = alias->next;
+  }
+  for (otv target = state->namespaces; ot_has_type(target, OBJ_NAMESPACE);) {
+    ot_namespace_obj* namespace_object = (ot_namespace_obj*)ot_as_obj(target);
+    repl_namespace_bindings(target, ((ot_name_obj*)ot_as_obj(namespace_object->name))->bytes,
+                            target == current);
+    target = namespace_object->next;
+  }
+  for (otv cursor = state->symbols;
+       ot_has_type(cursor, OBJ_SYMBOL) || ot_has_type(cursor, OBJ_KEYWORD);) {
+    ot_name_obj* name = (ot_name_obj*)ot_as_obj(cursor);
+    if (name->special_form) ot_line_binding(name->bytes, ot_runtime_documentation(name->bytes));
+    cursor = name->next;
+  }
+}
+
 static void run_repl(ots* state) {
-  fputs("otium repl - ^C interrupts, ^D exits\n", stdout);
+  fputs(
+      "otium repl - ^C interrupts, ^D exits, ^X ^E opens $EDITOR, Tab completes, ,help for help\n",
+      stdout);
   bytes pending = {0};
   bool interactive = isatty(STDIN_FILENO);
   for (;;) {
-    char fixed[4096];
-    char* line;
-    if (interactive) {
-      line = bestlineWithHistory(pending.length == 0 ? "ot> " : "..> ", "otium");
-      if (line == NULL) break;
-    } else {
-      if (fgets(fixed, sizeof fixed, stdin) == NULL) break;
-      line = fixed;
-    }
-    if (pending.length == 0 && blank_line(line)) {
-      if (interactive) bestlineFree(line);
+    repl_bindings(state);
+    const char* line = ot_line_read(pending.length == 0 ? "ot> " : "..> ");
+    if (line == NULL) break;
+    if (ot_line_interrupted()) {
+      pending.length = 0;
+      saw_interrupt = 0;
       continue;
     }
+    if (pending.length == 0 && blank_line(line)) continue;
     if (pending.length != 0 && pending.data[pending.length - 1] != '\n')
       bytes_append(&pending, "\n", 1);
     bytes_append(&pending, line, strlen(line));
-    if (interactive) bestlineFree(line);
     if (!repl_evaluate(state, &pending)) break;
   }
   if (pending.length != 0) {
@@ -306,8 +368,8 @@ static void run_repl(ots* state) {
     ot_clear_condition(state);
   }
   ot_host_free(pending.data);
+  ot_line_close();
   if (interactive) {
-    bestlineHistoryFree();
     fputc('\n', stdout);
   }
 }
@@ -326,7 +388,7 @@ static bool parse_number(const char* option, const char* text, size_t* out) {
 
 static void usage(FILE* stream) {
   fputs("Usage: otium [OPTIONS] [FILE ...]\n"
-        "  --repl             start a REPL after FILEs\n"
+        "  --repl             start a REPL after FILEs (^X ^E opens $VISUAL/$EDITOR)\n"
         "  --server           run the framed stdio server\n"
         "  --path DIR         add a module search directory\n"
         "  --project FILE     read load paths from FILE\n"

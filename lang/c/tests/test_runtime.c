@@ -314,6 +314,13 @@ static void test_eval_integration(void) {
   ots* state = test_state(true);
   if (state == NULL) return;
   otv value = ot_nil;
+  check(evaluate(state,
+                 "(defmacro documented-macro (x) \"Macro documentation.\" x) "
+                 "(and (= (documented-macro 42) 42) "
+                 "     (equal? (describe 'documented-macro) "
+                 "             \"user/documented-macro: Macro documentation.\"))",
+                 &value) && value == ot_true,
+        "macro docstrings survive collection during compilation");
   const char* program = "(define (tail n total) "
                         "  (if (= n 0) total (tail (- n 1) (+ total n)))) "
                         "(tail 50000 0)";

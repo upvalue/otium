@@ -2274,12 +2274,18 @@ static bool compile_expression(ots* state, bytecode_compiler* compiler, otv form
         return false;
       }
       otv body = list_tail(args, 2);
-      OT_FRAME_SCOPED(state, &name, &params, &body);
+      otv doc = ot_nil;
+      OT_FRAME_SCOPED(state, &name, &params, &body, &doc);
+      if (is_type(body, OBJ_PAIR) && is_type(as_pair(body)->car, OBJ_STRING) &&
+          is_type(as_pair(body)->cdr, OBJ_PAIR)) {
+        doc = as_pair(body)->car;
+        body = as_pair(body)->cdr;
+      }
       otv code = compile_function_code(state, params, body, env, env_namespace(state, env), name);
       if (code == OT_UNWIND) return false;
       bytecode_emit_constant(state, compiler, BC_CLOSURE, code);
       bytecode_emit(compiler, BC_MACRO);
-      otv fields[] = {name, ot_nil};
+      otv fields[] = {name, doc};
       otv descriptor = make_descriptor(state, fields, 2);
       bytecode_emit_constant(state, compiler, BC_DEFINE_GLOBAL, descriptor);
       return !compiler->bytes.failed;
@@ -2726,7 +2732,10 @@ static otv apply_value(ots* state, otv callable, otv* args, size_t argc, bool al
   ot_frame_push(state, &args_frame, roots, root_count);
   otv result;
   if (is_type(callable, OBJ_NAT)) {
-    result = ((ot_nat_obj*)ot_as_obj(callable))->function(state, args, (int)argc);
+    ot_nat_obj* native = (ot_nat_obj*)ot_as_obj(callable);
+    if (native->context_function != NULL)
+      result = native->context_function(state, native->context, args, (int)argc);
+    else result = native->function(state, args, (int)argc);
   } else if (is_type(callable, OBJ_FUNCTION)) {
     result = vm_call_function(state, callable, args, argc);
   } else if (is_type(callable, OBJ_MACRO) && allow_macro) {
@@ -5128,11 +5137,28 @@ static otv nat_current_ns(ots* state, otv* args, int argc) {
   return ((ot_namespace_obj*)ot_as_obj(state->vm.current_namespace))->name;
 }
 
+#include "../../shared/documentation/runtime.inc"
+
+void ot_binding_documentation(otv var_value, const char** text, size_t* length) {
+  ot_var_obj* var = (ot_var_obj*)ot_as_obj(var_value);
+  *text = "";
+  *length = 0;
+  if (ot_string_bytes(var->doc, text, length)) return;
+  if (is_type(var->value, OBJ_NAT)) {
+    otv name = ((ot_nat_obj*)ot_as_obj(var->value))->name;
+    *text = ot_runtime_documentation(as_name(name)->bytes);
+    *length = strlen(*text);
+  }
+}
+
 static otv nat_describe(ots* state, otv* args, int argc) {
   if (need_arity(state, "describe", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   if (!is_type(args[0], OBJ_SYMBOL)) return ot_raise(state, "describe: expected symbol");
   otv var_value = resolve_var(state, state->vm.current_namespace, args[0], true);
-  if (!is_type(var_value, OBJ_VAR)) return ot_nil;
+  if (!is_type(var_value, OBJ_VAR)) {
+    const char* text = ot_runtime_documentation(as_name(args[0])->bytes);
+    return *text ? ot_make_string(state, text, strlen(text)) : ot_nil;
+  }
   ot_var_obj* var = (ot_var_obj*)ot_as_obj(var_value);
   ot_namespace_obj* owner = NULL;
   for (otv cursor = state->namespaces; is_type(cursor, OBJ_NAMESPACE);
@@ -5155,12 +5181,11 @@ static otv nat_describe(ots* state, otv* args, int argc) {
   buf_byte(&description, '/');
   buf_write(&description, var_name->bytes, var_name->length);
   buf_cstr(&description, ": ");
-  if (is_type(var->doc, OBJ_STRING)) {
-    ot_string_obj* doc = as_string(var->doc);
-    buf_write(&description, (const char*)as_bytes(doc->bytes)->data, doc->length);
-  } else {
-    buf_cstr(&description, "no documentation");
-  }
+  const char* text;
+  size_t length;
+  ot_binding_documentation(var_value, &text, &length);
+  if (length) buf_write(&description, text, length);
+  else buf_cstr(&description, "no documentation");
   if (description.failed) {
     buf_free(&description);
     return ot_raise(state, "describe: host allocation failed");
@@ -5593,6 +5618,8 @@ static void define_native(ots* state, const char* name, ot_nat function, bool vm
   OT_FRAME_SCOPED(state, &symbol);
   ot_nat_obj* nat = must_alloc(state, sizeof(*nat), OBJ_NAT);
   nat->function = function;
+  nat->context_function = NULL;
+  ot_store(state, nat, &nat->context, ot_false);
   nat->vm_direct = vm_direct;
   ot_store(state, nat, &nat->name, symbol);
   define_var(state, state->vm.current_namespace, symbol, ot_from_obj(nat), ot_nil, false);
@@ -5600,6 +5627,19 @@ static void define_native(ots* state, const char* name, ot_nat function, bool vm
 
 void ot_def_nat(ots* state, const char* name, ot_nat function) {
   define_native(state, name, function, false);
+}
+
+otv ot_make_native(ots* state, const char* name, ot_context_nat function, otv context) {
+  otv symbol = ot_false;
+  OT_FRAME_SCOPED(state, &symbol, &context);
+  symbol = ot_intern(state, name, strlen(name), false);
+  ot_nat_obj* nat = must_alloc(state, sizeof(*nat), OBJ_NAT);
+  nat->function = NULL;
+  nat->context_function = function;
+  nat->vm_direct = false;
+  ot_store(state, nat, &nat->name, symbol);
+  ot_store(state, nat, &nat->context, context);
+  return ot_from_obj(nat);
 }
 
 static void register_core(ots* state) {
@@ -5736,6 +5776,7 @@ ots* ot_create(const ot_config* configuration) {
   }
   otv user_name = ot_intern(state, "user", 4, false);
   state->vm.current_namespace = namespace_find(state, user_name, true);
+  ot_register_ffi(state);
   state->config.gc_stress = config.gc_stress;
   return state;
 }
@@ -5752,6 +5793,7 @@ void ot_destroy(ots* state) {
     }
     cursor = next;
   }
+  ot_destroy_ffi(state);
   for (ot_global_root* root = state->globals; root != NULL;) {
     ot_global_root* next = root->next;
     ot_host_free(root);

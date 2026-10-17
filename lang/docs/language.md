@@ -2,6 +2,9 @@
 
 **Specification -- draft 0.3**
 
+This draft describes the C dialect. Chez shares the namespace and macro
+design but uses Chez values and semantics; see [Chez notes](../chez/NOTES.txt).
+
 Otium is a small Lisp: a Scheme kernel made pragmatic for embedding and
 data munging. The choices that make it itself:
 
@@ -29,7 +32,7 @@ natively or in Otium itself, and the difference is not observable.
 Words like *error* below mean: a condition is raised as if by the `error`
 function (see section 8), with an implementation-chosen message.
 
-The [desktop UI extension proposal](ui-plan.md) records planned first-party
+The [desktop UI extension proposal](../c/agent-docs/ui-plan.md) records planned first-party
 UI modules and related language-design questions: generic dispatch for
 table-backed widgets, resumable tasks, VM time slicing, and their relationship
 to continuations. Those APIs and semantics are proposals, not additions to

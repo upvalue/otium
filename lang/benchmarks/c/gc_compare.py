@@ -24,10 +24,10 @@ WORKLOADS = {
     "churn": 1_000_000,
     "mixed": 30_000,
     "fragmentation": 8_000,
-    "gcbench": "benchmarks/gcbench.scm",
-    "destruc": "benchmarks/destruc.scm",
-    "mperm": "benchmarks/mperm.scm",
-    "takl": "benchmarks/takl.scm",
+    "gcbench": "../benchmarks/c/gcbench.scm",
+    "destruc": "../benchmarks/c/destruc.scm",
+    "mperm": "../benchmarks/c/mperm.scm",
+    "takl": "../benchmarks/c/takl.scm",
 }
 
 
@@ -293,7 +293,7 @@ def write_samples(path, samples, metadata, append):
 
 def main():
     args = arguments()
-    root = Path(__file__).resolve().parent.parent
+    root = Path(__file__).resolve().parents[2] / "c"
     budget_bytes = args.budget_mib * MIB
     limits = heap_limits(budget_bytes)
     workloads = args.workloads or list(WORKLOADS)

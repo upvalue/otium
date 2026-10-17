@@ -14,6 +14,9 @@ typedef char *(bestlineHintsCallback)(const char *, const char **, const char **
 typedef void(bestlineFreeHintsCallback)(void *);
 typedef unsigned(bestlineXlatCallback)(unsigned);
 
+typedef char *(bestlineEditorCallback)(const char *);
+void bestlineSetEditorCallback(bestlineEditorCallback *);
+
 void bestlineSetCompletionCallback(bestlineCompletionCallback *);
 void bestlineSetHintsCallback(bestlineHintsCallback *);
 void bestlineSetFreeHintsCallback(bestlineFreeHintsCallback *);

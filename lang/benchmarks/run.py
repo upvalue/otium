@@ -88,7 +88,7 @@ def format_duration(seconds):
 def main():
     args = parse_args()
     binary = args.binary.resolve()
-    benchmark_dir = Path(__file__).resolve().parent
+    benchmark_dir = Path(__file__).resolve().parent / "c"
     requested = args.benchmarks or sorted(benchmark_dir.glob("*.scm"))
     benchmarks = [benchmark.resolve() for benchmark in requested]
 

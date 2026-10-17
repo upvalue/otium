@@ -5,23 +5,31 @@ lang/
     src/           Runtime, collectors, CLI, and C extensions
     prelude/       Bootstrap library and macroexpander
     tests/         Runtime, CLI, and dialect conformance tests
-    examples/      C-runtime examples
-    benchmarks/    C workloads and upstream R7RS benchmark submodule
+    benchmarks/    Native collector harness
     tools/         Build helpers, formatting, and GC lint
-    vendor/        C dependencies
-    agent-docs/    C dialect specification and implementation notes
+    agent-docs/    C implementation notes
     Makefile       C build and test rules
     config.mk      C build defaults; local overrides go in c/site.mk
   chez/            Otium on Chez Scheme
     otium/         Namespace runtime and canvas library
-    examples/      Scheme examples and reloadable SDL scenes
     sdl/           SDL host, dependency setup, tests, and usage notes
     .deps/         Ignored, locally installed Scheme dependencies
     run            REPL/script launcher
     test           Headless tests
     sdl-demo       SDL demo launcher
     NOTES.txt      Chez runtime semantics and usage
-  benchmarks/      Cross-runtime comparison runner and recorded results
+  shared/          Native line editor used by both REPLs; Bestline dependency
+  examples/
+    c/             C-dialect programs and extension examples
+    hand/          Handwritten exercises (current dialect gaps in GAPS.txt)
+    chez/          Chez programs and reloadable SDL scenes
+  benchmarks/
+    c/             C-dialect workloads and collector comparison runner
+    r7rs/          C-dialect ports, upstream submodule, and suite tooling
+    compare.py     Cross-runtime comparison runner
+    run.py         Generic runner (defaults to c/ workloads)
+  docs/            Language specification and shared REPL usage
+  GAPS.txt         Non-FFI portability gaps in examples and benchmarks
   vim/             Editor integration
   .tickets/        Project tickets
 
@@ -36,7 +44,8 @@ Commands from lang/:
   ./otium file.scm             Run the C runtime
   ./otium-chez file.scm        Run the Chez runtime
   ./otium-chez                 Open the Chez REPL
-  make test                   Test both runtimes, without SDL
+  make test                   Test both runtimes and shared REPL, without SDL
+  make test-repl              Pseudo-terminal checks for both REPLs
   make test-c                 C runtime, CLI, and conformance checks
   make test-chez              Chez runtime and CLI checks
   make sdl-setup              Fetch pinned Chez SDL3 bindings
@@ -46,7 +55,7 @@ Commands from lang/:
   python3 benchmarks/compare.py --otium ./otium
 
 The C launcher preserves the caller's working directory. Root project.ot
-points at c/examples; c/project.ot handles commands run from c/. The C binary
+points at examples/c; c/project.ot handles commands run from c/. The C binary
 now lives in c/bin/<platform>/otium. Existing make flags such as GC=gen and
 WITH_RAY=0 pass through the root Makefile. Relative build-path overrides are
 resolved inside c/; use absolute paths to avoid ambiguity.

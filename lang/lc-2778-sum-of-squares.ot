@@ -1,0 +1,18 @@
+;; https://leetcode.com/problems/sum-of-squares-of-special-elements/
+
+(define (square x) (* x x))
+
+(define (sum-of-squares-of-special-elements nums)
+  (define n (length nums))
+  (let loop ((totes 0)
+             (i 0))
+    (if (= i n)
+      totes
+      (loop
+        (if (= (remainder n (+ i 1)) 0)
+          (+ totes (square (get nums i)))
+          totes)
+        (+ i 1)))))
+
+(println (sum-of-squares-of-special-elements [1 2 3 4]))
+

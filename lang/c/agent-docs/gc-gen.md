@@ -412,5 +412,5 @@ Major collection is fully stop-the-world. It scans the whole allocated nursery,
 and sweep or compaction conservatively remembers every surviving old object.
 
 The direct C and language-level collector comparison is in
-`benchmarks/gc_compare.py`. There is no automated multi-configuration collector
+`benchmarks/c/gc_compare.py`. There is no automated multi-configuration collector
 matrix beyond the normal build, tests, and optional GC linter.

@@ -14,6 +14,14 @@ When changing C code around allocation, roots, or managed object pointers, run
 not part of the default build or test targets. See `c/agent-docs/gc-lint.md` for
 setup, current coverage, and escape hatches.
 
+# Principles
+
+- Live reloading is important
+- Performance is important
+- Supporting both the C and Chez runtimes is important; a design should try to
+  minimize unexpected behavioral differences and introduce abstractions that
+  smooth them where possible
+
 ## Runtime layout
 
 `c/` owns the C runtime, build, tests, and implementation notes.

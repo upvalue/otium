@@ -1,0 +1,119 @@
+Otium portability gaps
+
+Examples are centralized under examples/, with c/ and chez/ subfolders.
+The hand/ exercises currently use the C dialect as detailed below. Location
+records where they run today, not a requirement that they stay specific to
+that implementation. This inventory separates language/library gaps from
+native integration. It is a source audit, not a claim that cross-runtime
+execution has been tested. The C example and Chez reload test suites run
+against their respective runtimes.
+
+OTCL: should become a shared example
+
+examples/c/otcl/otcl.ot and demo.ot implement a Tcl interpreter without FFI.
+Keep one implementation when the common language surface can support it.
+Current blockers:
+
+- Reader and values: {...} tables, [...] arrays, self-evaluating :keywords,
+  and a distinct falsy nil. Chez reads square brackets as lists and has no
+  Otium table/array reader or nil value.
+- Collections: table, array, get, put!, push!, table?, generic length, and
+  drop on arrays. A missing get returns nil; the parser uses that as control
+  flow. Replacing nil with a truthy symbol would silently change behavior.
+- Strings: get on a string returns a one-character string, not a Scheme
+  character. substring clamps out-of-range endpoints; expr-match? relies on
+  this when checking a two-character operator near end of input. Chez's
+  substring rejects such an endpoint. buffer, buffer-push!, buffer->string,
+  str, string-contains?, string-split, string-join, and println need a common
+  API. string->number reports failure as nil in C and #f in Chez.
+- Language/library forms: define- marks private definitions; Chez currently
+  has no private definition form. while and dotimes need shared expansions.
+- Loading: demo.ot uses (require '(otcl :as otcl)); Chez uses
+  (require otcl :as otcl), searches .scm files, and does not interpret the
+  quoted C-style require specification. A loader/suffix convention is needed.
+- Numeric and error behavior: expression division and number->string must
+  produce the same Tcl-facing result across C numbers and Chez exact numbers.
+  The condition API now shares Otium's error/message convention and recovery
+  semantics. Condition tables and restart arrays still use each runtime's
+  collection representation; Chez uses #f where C uses nil.
+
+First portability target: run the existing c/tests/otcl.scm cases on both
+runtimes through a small common library/reader surface, then move OTCL out of
+examples/c/. Avoid maintaining a second Tcl interpreter just to bridge these
+APIs. c/tests/otcl.scm itself uses the C collection and require conventions.
+
+Other C examples with non-FFI dependencies
+
+examples/hand/lc-1-two-sum.ot uses table/array literals, callable collections,
+get/put!, generic length, dotimes, and println. These are language/library
+gaps. Its documentation string does not make it a native extension.
+
+examples/hand/lc-3622-check-divis.ot uses generic string get returning a
+string, dotimes, and println. Its test function also depends on sequential
+let bindings: prod uses digit-reduce, sum+prod uses sum and prod, and ok uses
+sum+prod in the same let. Chez let is parallel; use let* or agree on semantics.
+
+examples/hand/lc-2-add-two-numbers.ot is unfinished (including the 555t
+placeholder). It also uses println. Finish the algorithm before treating it
+as a portability test; the placeholder is not an implementation feature.
+
+examples/c/ray/example.scm and roguelike.ot need the Raylib integration.
+Beyond that expected FFI dependency, they use C-style require, nil, while,
+arrays, get/put!/push!, dotimes, and C hexadecimal literals (0x... rather
+than Scheme #x...). The pure color, map, movement, and visibility code could
+be shared after those surface differences are resolved.
+
+examples/c/ray/ray.ot combines pure numeric color helpers/constants with a
+run harness. Its harness uses env, nil, arrays, get, and string-split. Only
+its screenshot/window calls fundamentally require a graphics backend.
+
+examples/c/demo/demo.scm is source sugar over make-inline-counter and
+make-owned-counter. The companion C files demonstrate the native extension
+ABI; this is an expected runtime-specific example. The C source is an older
+embedding example that includes builtins.h, which is no longer present in
+c/src; current executable extension coverage lives in c/src/ot-ext-demo.c
+and c/tests/ext-demo.scm. Relocation does not repair that stale example.
+
+Chez examples with non-FFI dependencies
+
+examples/chez/demo.scm and demo/counter.scm are a live-reload example, with no
+FFI dependency. Gaps include require syntax, defonce, the explicit live
+binding handle, Scheme vectors/vector-ref/vector-set!, and printf. C has
+live namespace vars but not this exact saved-callback API. These differences
+should be expressible through a common reload and collection interface.
+
+examples/chez/scenes/shapes.scm and particles.scm depend on the SDL canvas
+library, which is an expected backend dependency. Their scene logic also
+uses Scheme vectors, do, let*, Scheme square-bracket grouping, defonce, and
+Chez's module import. The host's watcher/reload lifecycle is currently Chez
+specific. The animation math and geometry need not be backend-specific.
+
+Benchmarks and reference material
+
+benchmarks/c/ contains C-dialect workloads, even when their algorithms are
+portable. fib.scm's body is ordinary Scheme apart from println; loop.scm and
+tables.scm exercise while, nil, and C collections. The allocation workloads
+also depend on those collection and loop APIs. gc_compare.py compares the C
+collectors; c/benchmarks/gc_bench.c remains a native runtime harness.
+
+benchmarks/r7rs/ports/ and lib/benchmark.scm target the C dialect. The manifest
+records replacements for Scheme vectors/records and other deviations. The
+upstream vendor/ suite is runtime-independent reference material. The
+cross-runtime runner benchmarks/compare.py already isolates differences in
+tables, clocks, require/reload syntax, and live callbacks.
+
+The R7RS reduced-input equal check reports INCORRECT with both the current
+binary and a clean HEAD build made during this change. That pre-existing
+benchmark failure is separate from the directory move.
+
+Shared tooling
+
+The REPL now shares native editing, history, editor handoff, completion, and
+help command handling. Name/doc extraction stays with each runtime. Chez
+exposes its full native environment; C exposes its own core and namespace
+bindings. This does not establish a common standard library. Runtime-provided
+Otium documentation lives in one shared catalog, with explicit
+runtime availability and differences. Otium definitions carry docstrings in
+source. Chez-native bindings remain completable but have no bundled reference.
+Chez records parameters in help; C's describe keeps its namespace/name prefix.
+See docs/repl.md for the interface and its limits.

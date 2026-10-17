@@ -121,6 +121,7 @@ static void OT_GC_TRACE_OBJECT(ots* state, ot_obj* object) {
     case OBJ_NAT: {
       ot_nat_obj* nat = (ot_nat_obj*)object;
       OT_GC_TRACE_SLOT(state, &nat->name);
+      OT_GC_TRACE_SLOT(state, &nat->context);
       break;
     }
     case OBJ_MACRO: {

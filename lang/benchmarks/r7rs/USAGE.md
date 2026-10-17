@@ -3,7 +3,7 @@
 Otium keeps native ports of selected programs from
 [ecraven/r7rs-benchmarks](https://github.com/ecraven/r7rs-benchmarks) under
 `benchmarks/r7rs/`. This is a performance suite, not an R7RS compatibility
-layer. The ports use Otium syntax and APIs while retaining the upstream
+layer. The ports target the C dialect and use Otium syntax and APIs while retaining the upstream
 algorithm, input, timing boundary, and result check where possible.
 
 ## Layout
@@ -38,7 +38,7 @@ step automatically.
 Run one or more canonical inputs:
 
 ```sh
-python3 benchmarks/r7rs/run.py build/otium fib ack
+python3 benchmarks/r7rs/run.py ./otium fib ack
 ```
 
 Omitting benchmark names runs every port. `--runs N` collects multiple samples,
@@ -49,7 +49,7 @@ If Guile is installed, the same command can also run the unmodified upstream
 program on the same host:
 
 ```sh
-python3 benchmarks/r7rs/run.py build/otium fib --reference guile
+python3 benchmarks/r7rs/run.py ./otium fib --reference guile
 ```
 
 Otium receives the canonical input datums in its generated source. Guile
@@ -66,7 +66,7 @@ live sets. These limits are recorded in each result row.
 Run the normal suite:
 
 ```sh
-python3 benchmarks/r7rs/test_ports.py build/otium
+python3 benchmarks/r7rs/test_ports.py ./otium
 ```
 
 The `r7rs-ports` test exercises all ports with reduced inputs and checks their

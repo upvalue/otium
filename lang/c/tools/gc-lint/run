@@ -71,7 +71,7 @@ compile_args=(
   "${system_args[@]}" \
   -I"$runtime_build/gen" \
   -I"$repo_dir/src" \
-  -I"$repo_dir/vendor/bestline"
+  -I"$repo_dir/../shared"
 )
 
 "$tool" "$@" \

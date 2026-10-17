@@ -109,6 +109,7 @@ typedef enum ot_type {
 } ot_type;
 
 typedef otv (*ot_nat)(ots* state, otv* args, int argc);
+typedef otv (*ot_context_nat)(ots* state, otv context, otv* args, int argc);
 typedef void (*ot_writer)(void* userdata, const char* bytes, size_t length);
 typedef bool (*ot_loader)(void* userdata, const char* namespace_name, char** source,
                           size_t* length);
@@ -201,6 +202,8 @@ void ot_global_add(ots* state, otv* slot);
 /* Install C callables in the current namespace or as a require-able module. */
 OT_GC_MAY_ALLOCATE void ot_def_nat(ots* state, const char* name, ot_nat function);
 void ot_register_module(ots* state, const char* name, ot_module_init init);
+OT_GC_MAY_ALLOCATE otv ot_make_native(ots* state, const char* name,
+                                     ot_context_nat function, otv context);
 
 /* Extension values hold inline bytes or an owned host pointer. */
 unsigned ot_ext_type(ots* state, const char* name, ot_ext_finalizer finalizer);
@@ -359,6 +362,10 @@ typedef struct ot_var_obj {
   bool private_value;
 } ot_var_obj;
 
+/* Borrowed documentation bytes; these helpers do not allocate managed objects. */
+const char* ot_runtime_documentation(const char* name);
+void ot_binding_documentation(otv var_value, const char** text, size_t* length);
+
 typedef struct ot_alias_obj {
   uintptr_t header;
   otv name;
@@ -400,6 +407,8 @@ typedef struct ot_function_obj {
 typedef struct ot_nat_obj {
   uintptr_t header;
   ot_nat function;
+  ot_context_nat context_function;
+  otv context;
   otv name;
   bool vm_direct;
 } ot_nat_obj;
@@ -528,6 +537,7 @@ struct ot_state {
   otv core_namespace;
   otv expander;
   otv type_parents;
+  void* ffi_state;
   otv exts;
   uint64_t next_stable_id;
   uint64_t gensym_id;
@@ -568,6 +578,8 @@ OT_GC_MAY_ALLOCATE otv ot_raise_value(ots* state, otv condition);
 OT_GC_MAY_ALLOCATE otv ot_intern(ots* state, const char* bytes, size_t length, bool keyword);
 void ot_repr_to(ots* state, otv value, bool display, void (*write)(void*, const char*, size_t),
                 void* userdata);
+void ot_register_ffi(ots* state);
+void ot_destroy_ffi(ots* state);
 void ot_register_demo_extension(ots* state);
 OT_GC_MAY_ALLOCATE bool ot_eval_partial(ots* state, const char* source, size_t length,
                                         const char* name, size_t* consumed, bool* incomplete,

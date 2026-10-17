@@ -21,8 +21,8 @@ Full versions of all three, plus a custom widget, are at the end.
 | --- | --- |
 | `otium.sdl` | Plain FFI bindings: windows, GPU device, events, text input, clipboard. Events are polled, so FFI v1's lack of callbacks doesn't matter. |
 | Renderer | A small native library in `shared/` that draws a few primitive types on the GPU (see Rendering). Bound through the FFI. |
-| Text | Font loading, shaping, measuring, and a glyph atlas texture. |
-| Layout | [Yoga](https://www.yogalayout.dev/) (flexbox), bound through its C API. |
+| Text | SDL_ttf 3 for shaping, measuring and turning glyphs into bitmaps; our own glyph atlas (see Text). |
+| Layout | [Yoga](https://www.yogalayout.dev/) (flexbox), built in `shared/` and bound through its C API (see Layout). |
 | `otium.gfx` | Drawing calls for canvases and widget `paint` methods. |
 | `otium.ui` | Windows, the event loop, components, widgets, focus, key bindings. |
 
@@ -209,9 +209,58 @@ its recording with one call.
 `gfx/path`, `gfx/text`, `gfx/image`, plus clipping and transforms. Colours are
 `0xRRGGBBAA` integers.
 
+## Text
+
+SDL_ttf 3 does shaping (it bundles HarfBuzz), measuring, fallback fonts
+(`TTF_AddFallbackFont`) and turning glyphs into bitmaps (it bundles FreeType).
+It is the same family as the SDL3 dependency and builds for the web.
+
+Only those parts are used. SDL_ttf's own text engines draw for you, which would
+keep glyphs out of the renderer's batches. Instead, glyph bitmaps go into an
+atlas texture the renderer owns, and glyphs are one of its primitive types.
+
+A default UI font and a monospace font are bundled, both under the SIL Open
+Font License (for example Inter and JetBrains Mono). Text looks the same on
+every machine, pixel tests are deterministic, and the terminal doesn't depend
+on installed fonts.
+
+Smoothing is grayscale anti-aliasing, not subpixel (LCD).
+
+Not now, and none of them would change the atlas or renderer:
+
+- Platform text systems (Core Text, DirectWrite). They mean an implementation
+  per platform and rendering that differs by machine. Linux has no single
+  equivalent; its desktop stack is fontconfig, FreeType and HarfBuzz.
+- fontconfig, to fall back to fonts the user has installed.
+- stb_truetype for very constrained targets, accepting no shaping.
+- Signed-distance-field glyphs, if zooming text smoothly becomes important.
+
+## Layout
+
+Layout is Yoga, bound rather than ported. Yoga is well tested against Chrome,
+and the layout logic itself doesn't need to be live-reloadable: everything an
+application edits (widgets, options, `measure` and `paint` methods) is still
+Otium and reloads as usual.
+
+- Yoga is C++20. It's compiled only in `shared/`, which keeps the runtimes
+  themselves C-only. The WASM build compiles it with emscripten.
+- Yoga asks leaf nodes for their size through a measure callback. FFI v1 has
+  no callbacks, so `shared/` provides one fixed-signature C function that
+  forwards to `ui/measure`. On C the node's context holds a handle to the
+  widget, not a raw pointer, since the collector moves objects.
+- The library keeps one Yoga node per matched widget, creating and freeing
+  nodes as matching adds and removes widgets, and sets styles on the nodes it
+  keeps.
+- Yoga has no grid layout, so `grid` is our own container.
+
 Layout uses floats in logical pixels. Rectangle edges are snapped to physical
 pixels when painting, so neighbouring widgets meet exactly. Canvases and
-animated transforms aren't snapped.
+animated transforms aren't snapped. Yoga can do the snapping itself if given
+the display scale.
+
+A port of a flexbox subset to Otium was estimated at 700-1,000 lines, with
+about 185 of Yoga's generated tests applying to it. That stays an option if the
+C++ dependency becomes a problem, with the bound Yoga as a test oracle.
 
 ## Performance
 
@@ -247,11 +296,8 @@ the terminal well under a millisecond of Otium work; boids with 600 birds at
 
 ## Open questions
 
-1. Text: SDL_ttf for rasterising and measuring, FreeType plus HarfBuzz
-   directly, or each platform's text system as gpui does?
-2. Is Yoga an acceptable dependency, or should layout be written in Otium?
-3. Does `canvas` `:tick` pass a time delta, a frame count, or both?
-4. How does reload find the files to re-evaluate: a watcher in the loop,
+1. Does `canvas` `:tick` pass a time delta, a frame count, or both?
+2. How does reload find the files to re-evaluate: a watcher in the loop,
    editor-driven only, or both?
 
 ## Decisions so far
@@ -266,6 +312,8 @@ the terminal well under a millisecond of Otium work; boids with 600 birds at
 - A few GPU primitive types with shader smoothing, on SDL_GPU.
 - Key bindings map to named actions; focus is an object.
 - Layout uses floats, snapped to pixels at paint.
+- Layout is Yoga bound through the FFI, with one native measure callback.
+- Text through SDL_ttf 3, with our own glyph atlas and bundled fonts.
 
 ## Examples
 

@@ -125,7 +125,7 @@
 (check "state survives repeated reloads" 60 (run '(vector-ref c/state 0)))
 
 ;; Unix process symbols expose libc through Chez directly.
-(run '(load-shared-object #f))
-(run '(define c-strlen (foreign-procedure "strlen" (string) size_t)))
+(run '(chez/load-shared-object #f))
+(run '(define c-strlen (chez/foreign-procedure "strlen" (string) size_t)))
 (check "direct Chez FFI" 5 (run '(c-strlen "otium")))
 (printf "~a checks passed\n" checks)

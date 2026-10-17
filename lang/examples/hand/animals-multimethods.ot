@@ -1,0 +1,31 @@
+;; animals-multimethods.ot -- a simple multimethod demo
+(require otium.generic :as g)
+
+(define-type Dog)
+(define-type Cat)
+
+(define-generic (speak animal))
+
+(define-method (speak (animal Dog)) "Bark!")
+(define-method (speak (animal Cat)) "Meow.")
+
+(define dog1 (g/make Dog))
+(define cat1 (g/make Cat))
+
+(display (speak dog1))
+(newline)
+
+(display (speak cat1))
+(newline)
+
+(define-generic (collide a-one a-two))
+
+(define-method (collide (a1 Dog) (a2 Dog)) "Woof.")
+(define-method (collide (a1 Cat) (a2 Cat)) "Meow.")
+(define-method (collide (a1 Cat) (a2 Dog)) "Hiss!")
+(define-method (collide (a1 Dog) (a2 Cat)) "Hiss!")
+
+
+(print (collide dog1 cat1)) (newline)
+(print (collide dog1 dog1)) (newline)
+(print (collide cat1 cat1)) (newline)

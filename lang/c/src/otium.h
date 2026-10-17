@@ -105,6 +105,7 @@ typedef enum ot_type {
   OT_TYPE_PARAM,
   OT_TYPE_RESTART,
   OT_TYPE_EXT,
+  OT_TYPE_DESCRIPTOR,
   OT_TYPE_INTERNAL,
 } ot_type;
 
@@ -255,6 +256,8 @@ typedef enum ot_obj_type {
   OBJ_PARAM,
   OBJ_RESTART,
   OBJ_EXT,
+  OBJ_DISPATCH_TYPE,
+  OBJ_GENERIC,
   OBJ_FREE,
 } ot_obj_type;
 
@@ -326,12 +329,30 @@ typedef struct ot_entries_obj {
 
 typedef struct ot_table_obj {
   uintptr_t header;
+  otv descriptor;
   otv entries;
   otv index;
   size_t length;
   size_t used;
   uint64_t stable_id;
 } ot_table_obj;
+
+typedef struct ot_dispatch_type_obj {
+  uintptr_t header;
+  otv name;
+  otv owner;
+  uint64_t stable_id;
+  bool builtin;
+} ot_dispatch_type_obj;
+
+typedef struct ot_generic_obj {
+  uintptr_t header;
+  otv name;
+  otv owner;
+  otv methods;
+  size_t arity;
+  uint64_t stable_id;
+} ot_generic_obj;
 
 typedef struct ot_buffer_obj {
   uintptr_t header;
@@ -540,6 +561,7 @@ struct ot_state {
   otv core_namespace;
   otv expander;
   otv type_parents;
+  otv dispatch_types;
   void* ffi_state;
   otv exts;
   uint64_t next_stable_id;

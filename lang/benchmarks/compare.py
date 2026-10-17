@@ -75,7 +75,7 @@ WORKLOADS = {
 def program(name, engine):
     setup, expression, _ = WORKLOADS[name]
     if name == "startup":
-        return "(write 0) (newline)\n"
+        return "(println 0)\n"
     if engine == "c-runtime":
         clock = "(define (bench-clock) (current-jiffy))"
         collections = """(define bench-table table)
@@ -85,15 +85,15 @@ def program(name, engine):
         reload = "(define (bench-reload) (require (callee :as c :reload)))"
     else:
         clock = """(define (bench-clock)
-          (let ((t (current-time 'time-monotonic)))
-            (+ (* (time-second t) 1000000000) (time-nanosecond t))))"""
+          (let ((t (chez/current-time 'time-monotonic)))
+            (+ (* (chez/time-second t) 1000000000) (chez/time-nanosecond t))))"""
         collections = """(define bench-table make-eqv-hashtable)
           (define bench-put! hashtable-set!)
           (define (bench-get t k) (hashtable-ref t k #f))"""
         imports = "(require callee :as c)"
         callback = "(define callback (live 'c/inc))"
         # Loader directives are not accepted in Chez function bodies.
-        reload = """(import (only (otium runtime) evaluate))
+        reload = """(chez/import (only (otium runtime) evaluate))
           (define (bench-reload) (evaluate '(require callee :as c :reload)))"""
     parts = [clock, setup]
     if name == "tables":
@@ -107,7 +107,7 @@ def program(name, engine):
     parts.append(f"""(let ((started (bench-clock)))
       (let ((answer {expression}))
         (let ((elapsed (- (bench-clock) started)))
-          (write answer) (newline) (write elapsed) (newline))))""")
+          (println answer) (println elapsed))))""")
     return "\n".join(parts) + "\n"
 
 

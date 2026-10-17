@@ -115,6 +115,7 @@ gc-lint:
 test: all $(BUILD)/test-runtime hygiene
 	$(BUILD)/test-runtime
 	$(PYTHON) tests/otium/run-tests.py $(OTIUM)
+	$(PYTHON) tests/test_multimethods.py $(OTIUM)
 	$(PYTHON) tests/test_cli.py $(OTIUM) tests/cli-load.scm tests/cli-load-second.scm
 	$(OTIUM) --no-project --path ../examples/c/demo tests/ext-demo.scm
 	$(OTIUM) --no-project --path ../examples/c/otcl tests/otcl.scm

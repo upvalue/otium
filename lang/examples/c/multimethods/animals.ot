@@ -1,0 +1,22 @@
+(require (otium.generic :as g))
+
+(define-type Dog)
+(define-type Cat)
+(define-generic (speak animal))
+(define-method (speak (animal Dog)) "Bark!")
+(define-method (speak (animal Cat)) "Meow.")
+
+(define-generic (collide left right))
+(define-method (collide left right) "Nothing happens.")
+(define-method (collide (left Dog) (right Dog)) "Woof.")
+(define-method (collide (left Cat) (right Cat)) "Meow.")
+(define-method (collide (left Cat) (right Dog)) "Hiss!")
+(define-method (collide (left Dog) (right Cat)) "Hiss!")
+
+(define dog (g/make Dog 'name "Fido"))
+(define cat (g/make Cat 'name "Mog"))
+(println (speak dog))
+(println (speak cat))
+(println (collide dog cat))
+(println (collide dog dog))
+(println (collide cat cat))

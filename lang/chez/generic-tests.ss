@@ -117,9 +117,9 @@
 (run '(define-generic (identity x)))
 (run '(define-method (identity x) x))
 (check "original object" #t (run '(eq? button (identity button))))
-(run '(define marker (make-message-condition "marker")))
-(run '(define-method (identity x) (raise marker)))
-(check "condition identity" #t (run '(guard (c [else (eq? c marker)]) (identity button))))
+(run '(define marker (chez/make-message-condition "marker")))
+(run '(define-method (identity x) (chez/raise marker)))
+(check "condition identity" #t (run '(chez/guard (c [else (eq? c marker)]) (identity button))))
 (run '(define-generic (recur x)))
 ;; Updating the registry in a body affects a recursive call, not the selected body.
 (run '(define-method (recur x)

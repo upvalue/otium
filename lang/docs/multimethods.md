@@ -1,7 +1,7 @@
 # Typed maps and multimethods
 
 Status: trial implementation in the `experiment/chez-multimethods` worktree,
-October 16, 2026. Implemented for Otium on Chez only. The public API remains
+October 16, 2026. Implemented for Otium on Chez; the C trial is described below. The public API remains
 experimental. See `benchmarks/chez/MULTIMETHODS.md` for benchmark methodology
 and initial results.
 
@@ -305,7 +305,8 @@ handling to reject them in expression or local-definition positions, including
 procedure calls. Rejection must occur even in an unexecuted function body.
 Read `chez/MACRO-DESIGN.txt` and the loader when implementing these changes.
 
-Do not change the C runtime or implement a GUI as part of this prototype.
+The initial prototype targets Chez. The subsequent C trial is described below.
+A GUI remains outside this implementation milestone.
 
 ## Acceptance examples and checks
 
@@ -358,3 +359,59 @@ The arbitrary-dispatch-function model in
 [Clojure multimethods](https://clojure.org/reference/multimethods) is background
 for this discussion. This proposal instead fixes dispatch to argument type
 identities and exact matches with wildcards.
+
+
+## C runtime trial
+
+The `experiment/c-multimethods` worktree implements the same exact/wildcard
+selection, fixed arity, descriptor identity, method replacement, reset, and
+namespace-extension rules. Declarations are compiler forms, including after
+macro expansion. Method bodies pass through the existing Otium expander.
+
+```scheme
+(require (otium.generic :as g))
+(define-type Dog)
+(define-generic (speak animal))
+(define-method (speak (animal Dog)) "Bark!")
+(speak (g/make Dog 'name "Fido"))
+```
+
+A typed map is an ordinary C Otium table with a separate immutable descriptor
+slot. `type` still returns `:table`; ordinary table calls, `get`, and `put!`
+still work. The field API validates symbol keys, while raw table operations
+retain their existing arbitrary-key behavior. `copy` preserves the descriptor
+and makes a fresh field table. Ordinary table construction and `merge` produce
+untyped tables. Writing `nil` removes a field, as it does elsewhere in C Otium;
+`#f` and the empty list remain storable. This differs from Chez, which has no
+separate nil value.
+
+Descriptors and generics are managed heap objects, traced by both collectors.
+They have stable identity hashes for use as table keys. Generic functions
+report `:function` and satisfy `procedure?`. Descriptors report
+`:type-descriptor`. Methods belong to the generic object; there is no global
+registry retaining otherwise unreachable generics.
+
+C exports `Nil`, `Null`, `Boolean`, `Number`, `Symbol`, `Keyword`, `String`,
+`Pair`, `Vector`, `Hashtable`, `Buffer`, `Procedure`, `Macro`, `Parameter`,
+`Restart`, `Foreign`, `TypeDescriptor`, and `Other`. `Vector` names C arrays;
+`Number` includes integers and floats. Chez-only value categories are not
+invented for C. The built-in namespace ignores reload and keeps its descriptors.
+
+Errors remain C Otium error conditions, with a symbol in the `:code` field for
+the prototype-specific error categories. Method-body errors propagate unchanged.
+The C dialect does not gain Chez multiple return values. Ambiguity messages show
+the actual types and applicable signatures and suggest explicit method removal.
+
+The resolver scans signatures in native C, with no dispatch cache. Successful
+selection allocates no managed objects; entering and executing the selected
+method still uses ordinary VM allocation. The VM enters the selected method
+through its normal call path, preserving tail calls. In the worst case,
+checking dominance costs O(M squared times A), where M is method count and A
+is arity. For the benchmark's few applicable methods, growth is roughly linear
+in registry size. See `benchmarks/c/MULTIMETHODS.md` for measurements.
+
+Run `make -C c test WITH_RAY=0` with each collector (`GC=semi` and `GC=gen`).
+The conformance suite includes typed maps and generic calls, and
+`c/tests/test_multimethods.py` checks all 512 wildcard-oracle cases plus namespace
+extension and reload behavior. `OTIUM_GC_STRESS=1` enables collection stress for
+CLI tests. Run `make -C c gc-lint WITH_RAY=0` when LLVM development tools exist.

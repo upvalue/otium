@@ -31,3 +31,9 @@ target_compile_definitions(otium-ui PRIVATE OTUI_FONT_DIR="${CMAKE_CURRENT_SOURC
 add_executable(otium-ui-text-reference ../tests/ui/text-reference.c)
 target_link_libraries(otium-ui-text-reference PRIVATE PkgConfig::SDL PkgConfig::TTF)
 target_compile_definitions(otium-ui-text-reference PRIVATE OTUI_FONT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fonts")
+
+add_library(otium-ui-test-events SHARED ../tests/ui/events.c)
+target_link_libraries(otium-ui-test-events PRIVATE PkgConfig::SDL)
+target_compile_options(otium-ui-test-events PRIVATE -Wall -Wextra -Werror)
+file(GENERATE OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/../build/ui-test-config.ot"
+  CONTENT "((library \"$<TARGET_FILE:otium-ui-test-events>\"))\n")

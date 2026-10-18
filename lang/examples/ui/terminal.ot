@@ -1,0 +1,48 @@
+(ns ui.terminal)
+(require (otium.ui :as ui))
+
+(defonce model {:lines ["Otium terminal. Type help to list commands."] :history []})
+(def (emit! line) (push! (get model :lines) line))
+(def (run! text)
+  (let ((words (filter (fn (s) (not (equal? s ""))) (string-split text " "))))
+    (emit! (str "> " text))
+    (unless (empty? words)
+      (push! (get model :history) text)
+      (let ((command (first words)) (args (string-join " " (rest words))))
+        (cond ((equal? command "help")
+               (emit! "help                 List commands")
+               (emit! "echo <text>          Print text")
+               (emit! "history              Show previous commands")
+               (emit! "clear                Clear scrollback"))
+              ((equal? command "echo") (emit! args))
+              ((equal? command "history") (for-each emit! (get model :history)))
+              ((equal? command "clear") (put! model :lines []))
+              (else (emit! (str command ": command not found"))))))))
+(defclass Prompt :is ui/Widget
+  (draft :init "" :state #t) (saved :init "" :state #t) (back :init 0 :state #t))
+(defmethod (ui/layout-style (p Prompt)) {:grow 1})
+(def (history! p action)
+  (when (= (p :back) 0) (set! (p :saved) (p :draft)))
+  (set! (p :back) (max 0 (min (length (get model :history))
+    (+ (p :back) (if (eq? action :older) 1 -1)))))
+  (set! (p :draft) (if (= (p :back) 0) (p :saved)
+    (get (get model :history) (- (length (get model :history)) (p :back)))))
+  :handled)
+(defmethod (ui/build (p Prompt))
+  (ui/text-field {:key :input :grow 1 :autofocus #t :value (p :draft)
+    :placeholder "Type a command…" :keymap {"Up" :older "Down" :newer}
+    :on-action (fn (action) (history! p action))
+    :on-change (fn (text) (set! (p :draft) text) (set! (p :back) 0))
+    :on-submit (fn (text) (run! text) (set! (p :draft) "")
+                            (set! (p :saved) "") (set! (p :back) 0))}))
+(def (view)
+  (ui/column {:grow 1 :padding 20 :gap 12}
+    (ui/label {:size 24} "Otium terminal")
+    (ui/scroll {:key :scrollback :grow 1 :padding 12 :gap 4
+                :background 0x182336ff :stick-to-bottom #t}
+      (map (fn (line) (ui/label {:font :mono :size 15} line)) (get model :lines)))
+    (ui/row {:gap 10 :height 44}
+      (ui/label {:font :mono :size 20} ">")
+      (ui/new Prompt {:key :prompt}))
+    (ui/label {:size 12 :color 0x9cabc2ff}
+      "Enter runs a command · Up/Down recall history · Scroll to browse output")))

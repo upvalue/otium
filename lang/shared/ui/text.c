@@ -63,7 +63,7 @@ TTF_Text* otui_text_get(const char* string, int face, float size, float width, f
   for (const unsigned char* p = (const unsigned char*)string; *p; ++p) hash = (hash ^ *p) * 16777619u;
   unsigned slot = (hash ^ (Uint32)wrap ^ (Uint32)(size * 64) ^ (Uint32)face) % 128;
   if (runs[slot].text && runs[slot].font == font && runs[slot].width == wrap &&
-      strcmp(runs[slot].text->text, string) == 0) return runs[slot].text;
+      strcmp(runs[slot].text->text ? runs[slot].text->text : "", string) == 0) return runs[slot].text;
   TTF_Text* text = TTF_CreateText(&engine, font, string, 0);
   if (!text) return NULL;
   if (!TTF_SetTextWrapWidth(text, wrap) || !TTF_UpdateText(text)) {

@@ -3,6 +3,9 @@
 Status: draft, October 17, 2026. Widget lifecycle, constraint-aware Yoga layout,
 wrapped text, rounded rectangles, pointer/keyboard button activation, focus
 traversal and keymap actions run on C and Chez, including a widget calculator.
+Single-line text editing, vertical scrolling and a command-history terminal
+also run on both runtimes. Text editing currently uses codepoint boundaries
+and left-to-right caret placement; IME composition remains deferred.
 The general window/reload service remains planned. See `docs/ui-development.md` for the implemented
 subset and runnable demo. Replaces the September plan
 in `c/agent-docs/ui-plan.md`, which predates the FFI, the common reader and
@@ -39,6 +42,11 @@ An application is a `view` function that returns a description of the UI.
 After every event the library calls `view` again, from the root, and matches
 the result against what's on screen. Events arriving within one frame are
 handled first and `view` runs once.
+
+The current CLI host reconciles between input events so a submit followed by
+new text in the same frame observes the cleared application value. Layout and
+painting still run once per frame. Batching view evaluation needs to preserve
+this behavior before it replaces that implementation.
 
 Matching happens among children of the same mounted widget. A keyed child
 matches by widget class identity and `:key`; an unkeyed child matches by class

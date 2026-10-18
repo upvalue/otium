@@ -6,7 +6,7 @@
 (def saved-node nil)
 (def saved-layout nil)
 (def (tile-node tree) (first (ui/children (first (ui/children tree)))))
-(def (step! tree frame)
+(def (step! tree frame context)
   (when (= frame 1)
     (set! saved-node (tile-node tree))
     (set! saved-layout (saved-node :layout))

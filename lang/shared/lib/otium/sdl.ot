@@ -2,6 +2,9 @@
 (require (otium.ffi :as ffi))
 ;; Opaque window handles and scalar signatures need no aggregate ABI manifest.
 (defonce library nil)
+(def INIT_VIDEO 0x20)
+(def WINDOW_HIDDEN 0x8)
+(def WINDOW_HIGH_PIXEL_DENSITY 0x2000)
 (def init nil)
 (def quit nil)
 (def was-init nil)

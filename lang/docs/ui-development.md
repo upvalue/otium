@@ -2,8 +2,8 @@
 
 The shared UI runs on C and Chez. It supports class-backed descriptions and
 mounted state, constraint-aware Yoga layout, rounded rectangles and shaped text
-on SDL_GPU, composed buttons, keyboard focus and action routing. Scrolling
-and automatic file watching are still pending.
+on SDL_GPU, composed buttons, editable text fields, vertical scrolling,
+keyboard focus and action routing. Automatic file watching is still pending.
 
 ## Build and run
 
@@ -33,7 +33,7 @@ paragraph wraps at the available width. Try `--width 480` to see it reflow.
 The cards are composed widgets whose state survives rebuilding
 the descriptions. The loop handles the left mouse button and window close;
 Tab and Shift+Tab move focus; Enter or Space activate the focused button on
-release. Text input is still pending.
+release. The terminal scene exercises text input and scrolling.
 
 `examples/ui.ot` uses `otium.cli`. `--help` lists its options. Native library
 paths come from `shared/build/ui-config.ot`, written by CMake and read as data.
@@ -54,7 +54,9 @@ resource counts. `--scale 2` doubles capture resolution without changing logical
 layout. Interactive mode saves a requested capture when the window closes.
 
 `--scene ui.layout` chooses a module exporting `(view)`. `--script MODULE` loads
-a module exporting `(step! tree frame)`, called before each reconciliation.
+a module exporting `(step! tree frame context)`, called before frame reconciliation.
+The context supplies the actual `:window` and `:renderer` handles and an
+`:on-cleanup` function for registering cleanup callbacks after SDL shutdown.
 Add its directory with the interpreter's `-L` option. Test scripts can change
 state, route pointer events, or reload a checked-in module at a known frame.
 They need no source generation or interactive REPL session.
@@ -149,13 +151,24 @@ and bubbles from the deepest child until a handler returns `:handled`. The
 handler captures the press. Release activates it through `:press` only when
 it is still mounted and the release hits that node or one of its descendants.
 Release outside, removal, or cancellation prevents activation. Rounded corners
-currently use the widget's rectangular hit region. Drag and hover are pending.
+currently use the widget's rectangular hit region. Captured pointer motion is
+delivered as `:pointer-drag`; text fields use it for selection. Hover is pending.
 
 The native SDL adapter copies button coordinates into scalar values for Otium;
-managed widgets never receive an SDL event pointer. The demo polls these events,
+managed widgets never receive an SDL event pointer. `native/poll-event` returns
+an event table with a keyword `:kind`, or `nil` when the queue is empty. Payloads
+are copied before the next poll and only contain fields for that event kind.
+Unknown native kinds are errors. Motion is `:pointer-move`; the input router
+delivers `:pointer-drag` only to a valid captured widget. The demo polls these events,
 reconciles and paints, and delays between interactive frames. It supports one
 fixed-size window; the general window/reload service described in the spec is
 still planned.
+
+Named constants use `UPPER_SNAKE_CASE`, including `sdl/INIT_VIDEO`,
+`sdl/WINDOW_HIDDEN`, and the native layout field selectors. Event kinds remain
+keywords such as `:key-down`. Test event injection lives in `ui.events` and a
+small C fixture compiled against SDL headers. Tests use key names and the actual
+window handle, without numeric keycodes, guessed struct offsets, or title lookup.
 
 ## Text and measurement
 
@@ -229,7 +242,7 @@ of widget properties. `ui/focus!` and `ui/focused` expose that state. Common
 Disabled ancestors disable their descendants. Tab traverses enabled focusable
 nodes in tree order and wraps; Shift+Tab reverses direction. Pointer presses
 focus the capturing button. Enter and Space show its pressed state and activate
-once on matching keyup. Repeat keydowns are ignored. Focus change, window focus
+once on matching keyup. Button repeat keydowns are ignored. Focus change, window focus
 loss, disable and unmount cancel pending keyboard activation.
 
 `input/keyboard!` accepts `:key-down`, `:key-up`, and `:focus-lost` events.
@@ -257,3 +270,61 @@ clears. Arithmetic is immediate, left to right, with division-by-zero recovery.
 The disabled Memory button demonstrates disabled styling. The calculator tests
 cover arithmetic, native SDL key routing, keyboard activation, focus/pressed
 pixels and identical C/Chez captures.
+
+## Text fields and terminal
+
+```sh
+./otium --runtime=chez --no-project -L shared/lib -L examples examples/ui.ot -- \
+  --scene ui.terminal --title Terminal
+```
+
+The terminal runs `help`, `echo`, `history`, and `clear`. It does not launch
+processes. Up/Down traverse command history and restore the draft when returning
+to the newest position. Scrollback follows new output until the user scrolls up;
+scrolling back to the bottom resumes following. Its model uses `defonce`, and
+the prompt's draft and history position are mounted widget state.
+
+`ui/text-field` accepts `:value`, `:on-change`, `:on-submit`, `:placeholder`,
+`:font`, `:size`, `:width`, `:height`, and `:grow`. Keep the value in application
+or parent-widget state and update it in `:on-change`. The field updates its
+mounted value immediately as it edits, then calls `:on-change` with the new
+string. `:on-submit` receives the value on Enter. A changed external value
+moves the cursor to its end; unchanged values preserve cursor and selection.
+Common `:autofocus #t` requests focus once when a widget mounts, if the tree
+has no focused widget. Disabled fields neither focus nor accept input.
+
+Left/Right and Home/End move the cursor; Shift extends selection. Backspace and
+Delete remove a selection or one Unicode codepoint. Ctrl/Meta+A selects all;
+Ctrl/Meta+C, X and V copy, cut and paste. Paste normalizes line breaks and tabs
+to spaces. Editing keys repeat; Enter submits once. Pointer press places the
+cursor and dragging selects. Long input scrolls horizontally to keep the cursor
+visible. Cursor and selection positions are codepoint indices on both runtimes.
+Grapheme-cluster navigation, bidirectional caret placement, word navigation,
+undo/redo, multiline fields and IME composition are not implemented yet. The
+caret is steady rather than blinking, including in deterministic captures.
+
+Committed text arrives through SDL text events, separately from key events.
+The host starts/stops SDL text input as focus changes. Headless tests send
+`{:kind :text-input :text "café"}` to `input/keyboard!`. Clipboard key events
+can supply `:clipboard-read` and `:clipboard-write` functions; the CLI supplies
+SDL adapters, while tests use an in-memory clipboard.
+
+The CLI reconciles after each input event so Enter followed immediately by
+text starts a fresh prompt. It still lays out and paints once per frame.
+No watcher or editor connection is involved.
+
+`ui/scroll` takes children and `:width`, `:height`, `:grow`, `:padding`, `:gap`,
+`:background`, and `:stick-to-bottom`. Give it a height or `:grow 1` in a bounded
+column. Children retain their content height. The container clips painting and
+hit testing, translates child bounds by its vertical offset, and shows a scroll
+indicator. `:wheel` events carry logical pointer coordinates and `:dy`; native
+wheel direction is normalized. `ui/scroll-to!` takes a mounted Scroll instance
+and a logical pixel offset, clamping to its current range. Nested scroll views
+pass wheel events outward when the inner view cannot move. Scrollbar dragging,
+horizontal container scrolling and virtualized line storage are deferred.
+
+The checked-in editor and terminal scripts cover native Unicode input,
+submit-then-type in one frame, history, wheel scrolling, draft restoration,
+selection, horizontal input clipping, C/Chez pixel parity and resource teardown.
+The layout suite also checks that long scrollback does not shrink the heading
+or input field. Empty shaped-text cache hits have a regression check.

@@ -34,6 +34,11 @@
   (let ((kind (get event :kind)))
     (cond
       ((eq? kind :pointer-cancel) (cancel! pointer))
+      ((eq? kind :wheel) (bubble! (hit-path tree (get event :x) (get event :y)) event))
+      ((memq kind '(:pointer-move :pointer-drag))
+       (let ((node (pointer :captured)))
+         (when (and node (ui/enabled? node) (node :pressed?))
+           (ui/send! node (put event :kind :pointer-drag)))))
       ((eq? kind :pointer-down)
        (cancel! pointer)
        (ui/cancel-key! tree)
@@ -83,6 +88,10 @@
         (kind (get event :kind)) (key (get event :key)))
     (cond
       ((eq? kind :focus-lost) (ui/focus! tree nil) (ui/cancel-key! tree))
+      ((eq? kind :text-input) (when node (ui/send! node event)))
+      ((and (eq? kind :key-down) (get event :repeat #f))
+       (when (and node (eq? (dispatch-type (ui/instance node)) ui/TextField))
+         (ui/send! node event)))
       ((eq? kind :key-up)
        (when (equal? (get event :code key) (focus :key))
          (let ((armed (focus :armed)))

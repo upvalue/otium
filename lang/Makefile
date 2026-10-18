@@ -103,6 +103,9 @@ test-ui: all
 	./otium --runtime=c --no-project -L shared/lib -L examples shared/tests/ui/calculator-checks.ot
 	OTIUM_GC_STRESS=1 ./otium --runtime=c --no-project -L shared/lib -L examples shared/tests/ui/calculator-checks.ot
 	./otium --runtime=chez --no-project -L shared/lib -L examples shared/tests/ui/calculator-checks.ot
+	./otium --runtime=c --no-project -L shared/lib -L examples shared/tests/ui/editing-checks.ot
+	OTIUM_GC_STRESS=1 ./otium --runtime=c --no-project -L shared/lib -L examples shared/tests/ui/editing-checks.ot
+	./otium --runtime=chez --no-project -L shared/lib -L examples shared/tests/ui/editing-checks.ot
 
 .PHONY: ui-setup ui test-ui-layout test-ui-gpu
 ui-setup:

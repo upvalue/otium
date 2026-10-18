@@ -29,6 +29,10 @@ typedef struct {
   float event_x, event_y;
   char event_key[128];
   int event_code;
+  char* event_text;
+  char* clipboard;
+  float event_dy;
+  bool text_input;
   bool event_repeat;
   SDL_FColor clear;
   bool claimed;
@@ -36,15 +40,29 @@ typedef struct {
 static int live_renderers;
 int otui_live_renderers(void) { return live_renderers; }
 
-int otui_poll_event(Renderer* r) {
+const char* otui_poll_event(Renderer* r) {
   SDL_Event event;
   Uint32 window_id = SDL_GetWindowID(r->window);
   while (SDL_PollEvent(&event)) {
-    if (event.type == SDL_EVENT_QUIT) return 1;
+    if (event.type == SDL_EVENT_TEXT_INPUT && event.text.windowID == window_id) {
+      SDL_free(r->event_text);
+      r->event_text = SDL_strdup(event.text.text);
+      return "text-input";
+    }
+    if (event.type == SDL_EVENT_MOUSE_WHEEL && event.wheel.windowID == window_id) {
+      r->event_x = event.wheel.mouse_x; r->event_y = event.wheel.mouse_y;
+      r->event_dy = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
+      return "wheel";
+    }
+    if (event.type == SDL_EVENT_MOUSE_MOTION && event.motion.windowID == window_id) {
+      r->event_x = event.motion.x; r->event_y = event.motion.y;
+      return "pointer-move";
+    }
+    if (event.type == SDL_EVENT_QUIT) return "quit";
     if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
-        event.window.windowID == window_id) return 1;
+        event.window.windowID == window_id) return "quit";
     if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
-        event.window.windowID == window_id) return 4;
+        event.window.windowID == window_id) return "focus-lost";
     if ((event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) &&
         event.key.windowID == window_id) {
       SDL_snprintf(r->event_key, sizeof(r->event_key), "%s%s%s%s%s",
@@ -55,26 +73,43 @@ int otui_poll_event(Renderer* r) {
         SDL_GetKeyName(event.key.key));
       r->event_repeat = event.key.repeat;
       r->event_code = event.key.scancode;
-      return event.type == SDL_EVENT_KEY_DOWN ? 5 : 6;
+      return event.type == SDL_EVENT_KEY_DOWN ? "key-down" : "key-up";
     }
     if ((event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
          event.type == SDL_EVENT_MOUSE_BUTTON_UP) &&
         event.button.windowID == window_id && event.button.button == SDL_BUTTON_LEFT) {
       r->event_x = event.button.x;
       r->event_y = event.button.y;
-      return event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ? 2 : 3;
+      return event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ? "pointer-down" : "pointer-up";
     }
   }
-  return 0;
+  return "";
 }
 float otui_event_x(Renderer* r) { return r->event_x; }
 float otui_event_y(Renderer* r) { return r->event_y; }
 const char* otui_event_key(Renderer* r) { return r->event_key; }
 int otui_event_code(Renderer* r) { return r->event_code; }
 int otui_event_repeat(Renderer* r) { return r->event_repeat; }
+const char* otui_event_text(Renderer* r) { return r->event_text ? r->event_text : ""; }
+float otui_event_dy(Renderer* r) { return r->event_dy; }
+bool otui_text_input(Renderer* r, bool enabled) {
+  if (r->text_input == enabled) return true;
+  bool ok = enabled ? SDL_StartTextInput(r->window) : SDL_StopTextInput(r->window);
+  if (ok) r->text_input = enabled;
+  return ok;
+}
+const char* otui_clipboard_get(Renderer* r) {
+  SDL_free(r->clipboard);
+  r->clipboard = SDL_GetClipboardText();
+  return r->clipboard ? r->clipboard : "";
+}
+bool otui_clipboard_set(const char* text) { return SDL_SetClipboardText(text); }
 
 void otui_gpu_free(Renderer* r) {
   if (!r) return;
+  if (r->text_input) SDL_StopTextInput(r->window);
+  SDL_free(r->event_text);
+  SDL_free(r->clipboard);
   if (r->device) {
     SDL_WaitForGPUIdle(r->device);
     if (r->buffer) SDL_ReleaseGPUBuffer(r->device, r->buffer);

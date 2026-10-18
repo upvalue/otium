@@ -77,6 +77,14 @@ bool otui_node_style(Node* n, float width, float height, float grow,
 void otui_node_center(Node* n, bool center) {
   YGNodeStyleSetJustifyContent(n->yoga, center ? YGJustifyCenter : YGJustifyFlexStart);
 }
+void otui_node_scroll(Node* n, bool scroll) {
+  YGNodeStyleSetOverflow(n->yoga, scroll ? YGOverflowScroll : YGOverflowVisible);
+  if (scroll && YGNodeStyleGetFlexGrow(n->yoga) > 0) YGNodeStyleSetFlexBasis(n->yoga, 0);
+  else YGNodeStyleSetFlexBasisAuto(n->yoga);
+}
+void otui_node_shrink(Node* n, bool shrink) {
+  YGNodeStyleSetFlexShrink(n->yoga, shrink ? 1 : 0);
+}
 bool otui_node_intrinsic(Node* n, float width, float height, bool enabled) {
   if (!std::isfinite(width) || !std::isfinite(height) || width < 0 || height < 0) return false;
   n->queries.clear(); n->overflow = false;

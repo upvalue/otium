@@ -40,6 +40,8 @@ artifacts.mkdir(parents=True, exist_ok=True)
 reference = None
 text_reference = None
 calculator_reference = None
+terminal_reference = None
+editor_reference = None
 for runtime in runtimes(args.runtime):
     capture, state = artifacts/(runtime+'.bmp'), artifacts/(runtime+'.json')
     result = launch(runtime, '--frames', 3, '--capture', capture, '--dump-state', state)
@@ -137,6 +139,39 @@ for runtime in runtimes(args.runtime):
     x, y = round(button['x']), round(button['y'] + button['height']/2)
     assert pixel(calculator_rows, x+1, y) == (168, 213, 255), 'Focus outline missing'
     assert pixel(calculator_rows, x+5, y) == (66, 89, 118), 'Pressed fill missing'
+    terminal = artifacts/(runtime+'-terminal.bmp')
+    terminal_state = artifacts/(runtime+'-terminal.json')
+    result = launch(runtime, '--scene', 'ui.terminal', '--script', 'ui.terminal-script',
+                    '--frames', 5, '--capture', terminal, '--dump-state', terminal_state)
+    passed(result)
+    assert 'UI-TERMINAL native text, history, wheel and selection passed' in result.stdout
+    terminal_rows = runner.bmp_pixels(terminal)[2]
+    if terminal_reference is not None:
+        assert terminal_rows == terminal_reference, 'C/Chez terminal captures differ'
+    terminal_reference = terminal_rows
+    field = next(n for n in json.loads(terminal_state.read_text())['nodes'] if n['focused'])
+    x, y = round(field['x']), round(field['y'])
+    assert pixel(terminal_rows, x+11, y+9) == (66, 89, 118), 'Selection background missing'
+    assert any(pixel(terminal_rows, cx, y+9) == (103, 217, 192)
+               for cx in range(x+10, x+100)), 'Text caret missing'
+    assert all(pixel(terminal_rows, 10, cy) == (16, 24, 39)
+               for cy in range(60, 360)), 'Scrollback escaped viewport'
+    contract = launch(runtime, '--script', 'ui.event-contract', '--title', 'Custom test title')
+    passed(contract)
+    assert 'UI-EVENT copied named events passed' in contract.stdout
+    passed(launch(runtime, '--scene', 'ui.terminal', '--script', 'ui.terminal-script',
+                  '--frames', 1, '--title', 'Short terminal test'))
+    editor = artifacts/(runtime+'-editor.bmp')
+    result = launch(runtime, '--scene', 'ui.editor', '--script', 'ui.editor', '--frames', 4,
+                    '--width', 300, '--height', 160, '--capture', editor)
+    passed(result)
+    assert 'UI-EDITOR horizontal scrolling and pointer selection passed' in result.stdout
+    editor_rows = runner.bmp_pixels(editor)[2]
+    if editor_reference is not None:
+        assert editor_rows == editor_reference, 'C/Chez editor captures differ'
+    editor_reference = editor_rows
+    assert all(pixel(editor_rows, 250, cy) == (16, 24, 39)
+               for cy in range(50, 110)), 'Long input escaped its clip'
     quit_state = artifacts/(runtime+'-quit.json')
     quit_capture = artifacts/(runtime+'-quit.png')
     quitting = launch(runtime, '--script', 'ui.quit-script', '--frames', 10,

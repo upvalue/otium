@@ -21,6 +21,7 @@ parameter list, :always to always break any body, or :never."
   (let ((rules {}))
     (for-each (fn (name) (put! rules name (rule 1 :signature))) '("def" "def-" "defmethod" "defgeneric"))
     (put! rules "defmacro" (rule 2 :always))
+    (put! rules "dotimes" (rule 1 :always))
     (for-each (fn (name) (put! rules name (rule 1 :never)))
               '("defonce"
                 "defparam"
@@ -35,7 +36,6 @@ parameter list, :always to always break any body, or :never."
                 "with-params"
                 "handler-bind"
                 "restart-case"
-                "dotimes"
                 "match"
                 "case"
                 "catch"))
@@ -59,7 +59,8 @@ parameter list, :always to always break any body, or :never."
 
 (def- (spaces n)
   (let ((out (buffer)))
-    (dotimes (i n) (buffer-push! out " "))
+    (dotimes (i n)
+      (buffer-push! out " "))
     (buffer->string out)))
 
 (def- (end-column text column)

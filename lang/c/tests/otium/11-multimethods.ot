@@ -219,7 +219,8 @@
 ;; Descriptor and generic identity hashes must survive table growth and moving GC.
 (def identities (table Button 'type saved 'generic))
 
-(dotimes (i 1000) (put! identities i (array i)))
+(dotimes (i 1000)
+  (put! identities i (array i)))
 (check 'type (get identities Button))
 (check 'generic (get identities saved))
 

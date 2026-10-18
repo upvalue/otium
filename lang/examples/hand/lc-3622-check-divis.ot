@@ -3,7 +3,8 @@
 (def (digit-reduce n reducer init)
   (let ((nstr (number->string n))
         (accum init))
-    (dotimes (i (length nstr)) (let ((c (get nstr i))) (set! accum (reducer accum (string->number c)))))
+    (dotimes (i (length nstr))
+      (let ((c (get nstr i))) (set! accum (reducer accum (string->number c)))))
     accum))
 
 (def (test n)

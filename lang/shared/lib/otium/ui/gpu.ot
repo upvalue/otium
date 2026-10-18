@@ -253,7 +253,8 @@
                         (when (ffi/null? run) (error "Text field measurement failed" (native/text-error)))
                         (unless (native/text-carets run buffer count)
                           (error "Text caret measurement failed" (native/text-error)))
-                        (dotimes (i count) (push! positions (/ (ffi/ref buffer 'float i) scale)))
+                        (dotimes (i count)
+                          (push! positions (/ (ffi/ref buffer 'float i) scale)))
                         positions)
                       (ffi/free! buffer)))))
 

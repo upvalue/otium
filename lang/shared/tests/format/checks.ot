@@ -33,6 +33,9 @@
 (formats "(if a b c)" "(if a\n    b\n    c)\n")
 (formats "(if a b)" "(if a b)\n")
 
+;; A dotimes body always starts on its own line.
+(formats "(dotimes (i n) (f i))" "(dotimes (i n)\n  (f i))\n")
+
 ;; Two or more let bindings go on separate lines; one stays beside the head.
 (formats "(let ((a 1) (b 2)) a)" "(let ((a 1)\n      (b 2))\n  a)\n")
 (formats "(let loop ((a 1) (b 2)) a)" "(let loop ((a 1)\n           (b 2))\n  a)\n")

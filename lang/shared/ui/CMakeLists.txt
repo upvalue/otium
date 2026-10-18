@@ -29,6 +29,9 @@ file(GENERATE OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/../build/ui-config.ot"
 target_compile_definitions(otium-ui PRIVATE OTUI_FONT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fonts")
 
 add_executable(otium-ui-text-reference ../tests/ui/text-reference.c)
+add_executable(otium-ui-caret-checks ../tests/ui/caret-checks.c)
+target_link_libraries(otium-ui-caret-checks PRIVATE otium-ui PkgConfig::TTF)
+target_compile_options(otium-ui-caret-checks PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(otium-ui-text-reference PRIVATE PkgConfig::SDL PkgConfig::TTF)
 target_compile_definitions(otium-ui-text-reference PRIVATE OTUI_FONT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fonts")
 

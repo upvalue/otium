@@ -35,6 +35,7 @@
 (def text-resources nil)
 (def text-error nil)
 (def text-size nil)
+(def text-carets nil)
 (def gpu-text nil)
 (def node-bounds nil)
 (def live-nodes nil)
@@ -79,6 +80,7 @@
   (set! text-error (ffi/bind library "otui_text_error" '() 'utf8))
   (set! text-get (ffi/bind library "otui_text_get" '(utf8 int float float float) 'pointer))
   (set! text-size (ffi/bind library "otui_text_size" '(pointer int) 'float))
+  (set! text-carets (ffi/bind library "otui_text_carets" '(pointer pointer int) 'bool))
   (set! gpu-text (ffi/bind library "otui_gpu_text"
     '(pointer utf8 int float float float float u32 float float float float) 'bool))
   (set! node-layout (ffi/bind library "otui_node_layout" '(pointer float float) 'void))

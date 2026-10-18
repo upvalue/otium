@@ -63,7 +63,7 @@
   (ui/reconcile! tree (view))
   (let ((focused (ui/focused tree)))
     (sdl/check (native/text-input renderer
-      (if focused (eq? (dispatch-type (ui/instance focused)) ui/TextField) #f)))))
+      (if focused (ui/accepts-text? (ui/instance focused)) #f)))))
 (def (main args)
   (let ((width (cli/ref args 'width)) (height (cli/ref args 'height))
         (scale (cli/ref args 'scale)) (frames (cli/ref args 'frames))

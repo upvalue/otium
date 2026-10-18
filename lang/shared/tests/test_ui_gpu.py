@@ -151,7 +151,7 @@ for runtime in runtimes(args.runtime):
     terminal_reference = terminal_rows
     field = next(n for n in json.loads(terminal_state.read_text())['nodes'] if n['focused'])
     x, y = round(field['x']), round(field['y'])
-    assert pixel(terminal_rows, x+11, y+9) == (66, 89, 118), 'Selection background missing'
+    assert pixel(terminal_rows, x+15, y+9) == (66, 89, 118), 'Selection background missing'
     assert any(pixel(terminal_rows, cx, y+9) == (103, 217, 192)
                for cx in range(x+10, x+100)), 'Text caret missing'
     assert all(pixel(terminal_rows, 10, cy) == (16, 24, 39)
@@ -161,6 +161,9 @@ for runtime in runtimes(args.runtime):
     assert 'UI-EVENT copied named events passed' in contract.stdout
     passed(launch(runtime, '--scene', 'ui.terminal', '--script', 'ui.terminal-script',
                   '--frames', 1, '--title', 'Short terminal test'))
+    policy = launch(runtime, '--scene', 'ui.policy-scene', '--script', 'ui.policy-scene', '--frames', 4)
+    passed(policy)
+    assert 'UI-POLICY custom native text policy passed' in policy.stdout, policy.stdout
     editor = artifacts/(runtime+'-editor.bmp')
     result = launch(runtime, '--scene', 'ui.editor', '--script', 'ui.editor', '--frames', 4,
                     '--width', 300, '--height', 160, '--capture', editor)

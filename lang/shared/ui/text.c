@@ -1,5 +1,6 @@
 #include "text.h"
 #include <math.h>
+#include <limits.h>
 #include <string.h>
 
 // Fonts stay alive while any renderer can reference their glyphs. Shaped runs
@@ -75,4 +76,56 @@ TTF_Text* otui_text_get(const char* string, int face, float size, float width, f
 }
 float otui_text_size(TTF_Text* text, int field) {
   return field ? text->internal->h : text->internal->w;
+}
+
+bool otui_text_carets(TTF_Text* text, float* positions, int capacity) {
+  if (!text || !positions || capacity < 1 || text->num_lines > 1)
+    return SDL_SetError("Caret positions require a single line and an output buffer");
+  const char* string = text->text ? text->text : "";
+  size_t bytes = strlen(string);
+  if (bytes > INT_MAX) return SDL_SetError("Text exceeds caret index range");
+  if (!bytes) { positions[0] = 0; return true; }
+
+  // SDL_ttf offsets are UTF-8 bytes; Otium indexes strings by codepoint.
+  int* indices = SDL_calloc(bytes + 1, sizeof(*indices));
+  if (!indices) return false;
+  int codepoints = 0;
+  for (size_t i = 0; i < bytes; ++i) {
+    indices[i] = codepoints;
+    if (((unsigned char)string[i] & 0xc0) != 0x80) ++codepoints;
+  }
+  indices[bytes] = codepoints;
+  if (capacity <= codepoints) {
+    SDL_free(indices);
+    return SDL_SetError("Caret output buffer is too small");
+  }
+  TTF_SubString current;
+  bool ok = TTF_GetTextSubString(text, 0, &current);
+  for (int i = 0; i <= codepoints; ++i) positions[i] = 0;
+  while (ok && !(current.flags & TTF_SUBSTRING_TEXT_END)) {
+    TTF_SubString* cluster = &current;
+    if (cluster->offset < 0 || cluster->length < 0 ||
+        cluster->offset > (int)bytes || cluster->length > (int)bytes - cluster->offset) {
+      ok = SDL_SetError("Invalid shaped text cluster range"); break;
+    }
+    int first = indices[cluster->offset];
+    int last = indices[cluster->offset + cluster->length];
+    bool rtl = (cluster->flags & TTF_SUBSTRING_DIRECTION_MASK) == TTF_DIRECTION_RTL;
+    // Preserve codepoint editing inside ligatures using the shaped cluster's span.
+    // This is interpolation, not font-provided ligature caret data.
+    for (int j = first; j < last; ++j) {
+      float fraction = (float)(j - first) / (last - first);
+      positions[j] = cluster->rect.x + cluster->rect.w * (rtl ? 1 - fraction : fraction);
+    }
+    TTF_SubString next;
+    ok = TTF_GetNextTextSubString(text, &current, &next);
+    if (ok) current = next;
+  }
+  TTF_SubString end;
+  if (ok) {
+    ok = TTF_GetTextSubString(text, (int)bytes, &end);
+    if (ok) positions[codepoints] = end.rect.x;
+  }
+  SDL_free(indices);
+  return ok;
 }

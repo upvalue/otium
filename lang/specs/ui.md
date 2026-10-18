@@ -5,7 +5,9 @@ wrapped text, rounded rectangles, pointer/keyboard button activation, focus
 traversal and keymap actions run on C and Chez, including a widget calculator.
 Single-line text editing, vertical scrolling and a command-history terminal
 also run on both runtimes. Text editing currently uses codepoint boundaries
-and left-to-right caret placement; IME composition remains deferred.
+and shaped left-to-right caret placement, with interpolated positions inside
+ligatures; IME composition remains deferred. Custom widget methods control
+default focusability, committed text, key repeat and keyup activation.
 The general window/reload service remains planned. See `docs/ui-development.md` for the implemented
 subset and runnable demo. Replaces the September plan
 in `c/agent-docs/ui-plan.md`, which predates the FFI, the common reader and

@@ -257,6 +257,17 @@ maps strings to action values. Its `:on-action` receives the action and returns
 `:handled` to stop routing. Unhandled keys bubble through `ui/handle-event`.
 These options live on mounted nodes, so custom widgets need no common slots.
 
+Custom widgets control input through four methods: `ui/default-focusable?`
+and `ui/accepts-text?` take the widget; `ui/repeat-key?` and
+`ui/activation-key?` also take the key event. The base `Widget` returns false
+for all four. Buttons opt into focus and Return/Space activation. Text fields
+opt into focus, committed text, and repeating navigation/deletion keys.
+The common `:focusable` option overrides the default. Accepted repeats follow
+the normal keymap and event routing path. Activation arms the pressed state
+on keydown and sends `:press` once on matching keyup. A changed activation
+policy cancels an armed key. Methods can be redefined without replacing the
+mounted widget. The host follows `accepts-text?` when enabling SDL text input.
+
 Run the calculator with either runtime:
 
 ```sh
@@ -299,6 +310,10 @@ Ctrl/Meta+C, X and V copy, cut and paste. Paste normalizes line breaks and tabs
 to spaces. Editing keys repeat; Enter submits once. Pointer press places the
 cursor and dragging selects. Long input scrolls horizontally to keep the cursor
 visible. Cursor and selection positions are codepoint indices on both runtimes.
+Caret coordinates come from the complete shaped line, including kerning.
+Positions inside a ligature are interpolated across its shaped cluster; they
+do not use font-provided ligature caret data. Measurement uses one shaped run
+and copies all positions through one native call.
 Grapheme-cluster navigation, bidirectional caret placement, word navigation,
 undo/redo, multiline fields and IME composition are not implemented yet. The
 caret is steady rather than blinking, including in deterministic captures.

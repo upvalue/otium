@@ -13,6 +13,9 @@ parser = argparse.ArgumentParser(description=__doc__)
 runtime_argument(parser)
 args = parser.parse_args()
 
+build = ROOT/'shared/build'/f'{platform.machine()}-{platform.system().lower()}'/'ui'
+subprocess.run([str(build/'otium-ui-caret-checks')], cwd=ROOT, check=True)
+
 for runtime, stress in [(r, stress) for r in runtimes(args.runtime)
                         for stress in ((False, True) if r == 'c' else (False,))]:
     env = environment(runtime=runtime, stress=stress)

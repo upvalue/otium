@@ -4,7 +4,8 @@
 ;; Source formatting. A form stays on one line when it fits within the width;
 ;; otherwise its layout comes from the rule for its head. Rules say how many
 ;; arguments stay beside the head, and when the remaining body must always
-;; start on a new line. A body of two or more forms is never on one line.
+;; start on a new line. A body of two or more forms is never on one line, and
+;; neither is an if with an else branch or a let with two or more bindings.
 ;; Forms without a rule are laid out as calls, with arguments aligned under
 ;; the first one. Comments and single blank lines are kept; line breaks in the
 ;; input are otherwise ignored.
@@ -21,24 +22,39 @@ parameter list, :always to always break any body, or :never."
     (for-each (fn (name) (put! rules name (rule 1 :signature))) '("def" "def-" "defmethod" "defgeneric"))
     (put! rules "defmacro" (rule 2 :always))
     (for-each (fn (name) (put! rules name (rule 1 :never)))
-              '("defonce" "defparam" "defclass" "defabstract" "fn" "let" "when" "unless" "while" "ns"
-                "with-params" "handler-bind" "restart-case" "dotimes" "match" "case" "catch"))
+              '("defonce"
+                "defparam"
+                "defclass"
+                "defabstract"
+                "fn"
+                "let"
+                "when"
+                "unless"
+                "while"
+                "ns"
+                "with-params"
+                "handler-bind"
+                "restart-case"
+                "dotimes"
+                "match"
+                "case"
+                "catch"))
     (for-each (fn (name) (put! rules name (rule 0 :never))) '("cond" "begin" "try" "defer"))
     rules))
 
 (def (project-rules text)
   "Extend the built-in rules with a project file's (format (like known name ...) ...) entries."
   (let ((rules (copy builtin-rules)))
-    (for-each
-      (fn (form)
-        (when (equal? (syntax/head-name form) "format")
-          (for-each
-            (fn (entry)
-              (let ((names (map (fn (n) (n :text)) (syntax/forms entry))))
-                (when (and (>= (length names) 3) (equal? (first names) "like") (get rules (second names)))
-                  (for-each (fn (name) (put! rules name (get rules (second names)))) (drop 2 names)))))
-            (rest (syntax/forms form)))))
-      (syntax/parse text))
+    (for-each (fn (form)
+                (when (equal? (syntax/head-name form) "format")
+                  (for-each (fn (entry)
+                              (let ((names (map (fn (n) (n :text)) (syntax/forms entry))))
+                                (when (and (>= (length names) 3)
+                                           (equal? (first names) "like")
+                                           (get rules (second names)))
+                                  (for-each (fn (name) (put! rules name (get rules (second names)))) (drop 2 names)))))
+                            (rest (syntax/forms form)))))
+              (syntax/parse text))
     rules))
 
 (def- (spaces n)
@@ -54,25 +70,26 @@ parameter list, :always to always break any body, or :never."
         (string-length (get lines (- (length lines) 1))))))
 
 (def- (closing node)
-  (cond ((eq? (node :kind) :list) ")")
-        ((eq? (node :kind) :array) "]")
-        (else "}")))
+  (cond
+    ((eq? (node :kind) :list) ")")
+    ((eq? (node :kind) :array) "]")
+    (else "}")))
 
 (def- (keyword-node? node)
   (and (eq? (node :kind) :atom) (> (string-length (node :text)) 1) (string-starts-with? (node :text) ":")))
 
 (def- (units nodes pair-all?)
   "Group nodes into lists laid out together: table entries, and keyword arguments with their values."
-  (cond ((null? nodes) '())
-        ((or (syntax/comment? (car nodes)) (null? (cdr nodes)) (syntax/comment? (cadr nodes)))
-         (cons (list (car nodes)) (units (cdr nodes) pair-all?)))
-        ((or pair-all? (and (keyword-node? (car nodes)) (not (keyword-node? (cadr nodes)))))
-         (cons (list (car nodes) (cadr nodes)) (units (cddr nodes) pair-all?)))
-        (else (cons (list (car nodes)) (units (cdr nodes) pair-all?)))))
+  (cond
+    ((null? nodes) '())
+    ((or (syntax/comment? (car nodes)) (null? (cdr nodes)) (syntax/comment? (cadr nodes)))
+     (cons (list (car nodes)) (units (cdr nodes) pair-all?)))
+    ((or pair-all? (and (keyword-node? (car nodes)) (not (keyword-node? (cadr nodes)))))
+     (cons (list (car nodes) (cadr nodes)) (units (cddr nodes) pair-all?)))
+    (else (cons (list (car nodes)) (units (cdr nodes) pair-all?)))))
 
 (def- (rule-for node rules)
-  (let ((name (syntax/head-name node)))
-    (and name (get rules name))))
+  (let ((name (syntax/head-name node))) (and name (get rules name))))
 
 (def- (header-count node rule)
   ;; A named let keeps its name and bindings beside the head.
@@ -92,6 +109,14 @@ parameter list, :always to always break any body, or :never."
                     (or (eq? (rule :break) :always)
                         (and (eq? (rule :break) :signature) (eq? ((car args) :kind) :list)))))))))
 
+(def- (mark-bindings! node rules)
+  ;; Two or more let bindings go on separate lines. Forms laid out like let count too.
+  (let ((rule (rule-for node rules)))
+    (when (and rule (eq? rule (get rules "let")))
+      (let ((bindings (nth (cdr (syntax/forms node)) (- (header-count node rule) 1))))
+        (when (and bindings (eq? (bindings :kind) :list) (>= (length (syntax/forms bindings)) 2))
+          (put! bindings :break #t))))))
+
 (def- (flat node rules)
   "The one-line form of node, or #f when it must span lines."
   (let ((cached (get node :flat :unset)))
@@ -102,27 +127,30 @@ parameter list, :always to always break any body, or :never."
         cached)))
 
 (def- (flat-uncached node rules)
+  (when (eq? (node :kind) :list) (mark-bindings! node rules))
   (let ((kind (node :kind)))
-    (cond ((eq? kind :comment) #f)
-          ((memq kind '(:atom :string)) (if (string-contains? (node :text) "\n") #f (node :text)))
-          ((eq? kind :prefix)
-           (let ((child (flat (node :child) rules)))
-             (and child (string-append (node :text) child))))
-          ((forced? node rules) #f)
-          (else
-           (let ((parts (map (fn (child) (flat child rules)) (array-to-list (node :children)))))
-             (and (for-all identity parts)
-                  (string-append (node :text) (string-join " " parts) (closing node))))))))
+    (cond
+      ((eq? kind :comment) #f)
+      ((memq kind '(:atom :string))
+       (if (string-contains? (node :text) "\n")
+           #f
+           (node :text)))
+      ((eq? kind :prefix) (let ((child (flat (node :child) rules))) (and child (string-append (node :text) child))))
+      ((get node :break) #f)
+      ((and (equal? (syntax/head-name node) "if") (= (length (syntax/forms node)) 4)) #f)
+      ((forced? node rules) #f)
+      (else (let ((parts (map (fn (child) (flat child rules)) (array-to-list (node :children)))))
+              (and (for-all identity parts) (string-append (node :text) (string-join " " parts) (closing node))))))))
 
 (def (render node column rules after)
   "Lay out node starting at column, with after characters of closing delimiters to follow it on its last line."
   (let ((one-line (flat node rules)))
-    (cond ((and one-line (<= (+ column (string-length one-line) after) width)) one-line)
-          ((memq (node :kind) '(:atom :string :comment)) (node :text))
-          ((eq? (node :kind) :prefix)
-           (string-append (node :text)
-                          (render (node :child) (+ column (string-length (node :text))) rules after)))
-          (else (render-container node column rules after)))))
+    (cond
+      ((and one-line (<= (+ column (string-length one-line) after) width)) one-line)
+      ((memq (node :kind) '(:atom :string :comment)) (node :text))
+      ((eq? (node :kind) :prefix)
+       (string-append (node :text) (render (node :child) (+ column (string-length (node :text))) rules after)))
+      (else (render-container node column rules after)))))
 
 (def- (render-unit unit column rules after)
   (if (null? (cdr unit))
@@ -141,8 +169,13 @@ except that a comment on the same source line as the previous unit stays there."
             (node (car (car remaining))))
         (if (and (syntax/comment? node) (= (node :newlines) 0))
             (set! out (string-append out " " (node :text)))
-            (set! out (string-append out (if (>= (node :newlines) 2) "\n\n" "\n") (spaces indent)
-                                     (render-unit unit indent rules (trailing (cdr remaining) close after)))))
+            (set! out
+                  (string-append out
+                                 (if (>= (node :newlines) 2)
+                                     "\n\n"
+                                     "\n")
+                                 (spaces indent)
+                                 (render-unit unit indent rules (trailing (cdr remaining) close after)))))
         (set! after-comment? (syntax/comment? node))
         (set! remaining (cdr remaining))))
     (if after-comment?
@@ -151,26 +184,36 @@ except that a comment on the same source line as the previous unit stays there."
 
 (def- (trailing following close after)
   "The characters that follow a unit on its line: closing delimiters when it is the last one."
-  (if (null? following) (+ (string-length close) after) 0))
+  (if (null? following)
+      (+ (string-length close) after)
+      0))
 
 (def- (render-container node column rules after)
   (let ((children (array-to-list (node :children)))
         (open (node :text))
         (close (closing node))
         (rule (rule-for node rules)))
-    (cond ((null? children) (string-append open close))
-          ((or (not (eq? (node :kind) :list)) (not (syntax/head-name node)) (syntax/comment? (car children)))
-           (render-data children column (eq? (node :kind) :table) open close rules after))
-          (rule
-           (render-body node (car children) (units (cdr children) #f) column (header-count node rule) close rules after))
-          (else (render-call (car children) (units (cdr children) #f) column close rules after)))))
+    (cond
+      ((null? children) (string-append open close))
+      ((or (not (eq? (node :kind) :list)) (not (syntax/head-name node)) (syntax/comment? (car children)))
+       (render-data children column (eq? (node :kind) :table) open close rules after))
+      (rule (render-body node
+                         (car children)
+                         (units (cdr children) #f)
+                         column
+                         (header-count node rule)
+                         close
+                         rules
+                         after))
+      (else (render-call (car children) (units (cdr children) #f) column close rules after)))))
 
 (def- (render-data children column table? open close rules after)
   ;; Every element on its own line, aligned after the opening delimiter.
   (let ((all (units children table?)))
     (if (syntax/comment? (car (car all)))
         (lines open (+ column 1) all (+ column 1) close rules after)
-        (let ((first-text (string-append open (render-unit (car all) (+ column 1) rules (trailing (cdr all) close after)))))
+        (let ((first-text (string-append open
+                                         (render-unit (car all) (+ column 1) rules (trailing (cdr all) close after)))))
           (lines first-text (end-column first-text column) (cdr all) (+ column 1) close rules after)))))
 
 (def- (render-body node head args column header close rules after)
@@ -179,8 +222,13 @@ except that a comment on the same source line as the previous unit stays there."
         (remaining args)
         (count 0))
     (while (and (pair? remaining) (< count header) (not (syntax/comment? (car (car remaining)))))
-      (set! out (string-append out " " (render-unit (car remaining) (+ (end-column out column) 1) rules
-                                                    (trailing (cdr remaining) close after))))
+      (set! out
+            (string-append out
+                           " "
+                           (render-unit (car remaining)
+                                        (+ (end-column out column) 1)
+                                        rules
+                                        (trailing (cdr remaining) close after))))
       (set! remaining (cdr remaining))
       (set! count (+ count 1)))
     (lines out (end-column out column) remaining (+ column 2) close rules after)))
@@ -188,24 +236,22 @@ except that a comment on the same source line as the previous unit stays there."
 (def- (render-call head args column close rules after)
   ;; Arguments align under the first one, which stays beside the head.
   (let ((start (string-append "(" (render head (+ column 1) rules (trailing args close after)))))
-    (cond ((null? args) (string-append start close))
-          ((syntax/comment? (car (car args)))
-           (lines start (end-column start column) args (+ column 2) close rules after))
-          (else
-           (let ((indent (+ (end-column start column) 1))
-                 (first-text (string-append start " " (render-unit (car args) indent rules
-                                                                   (trailing (cdr args) close after)))))
-             (lines first-text (end-column first-text column) (cdr args) indent close rules after))))))
+    (cond
+      ((null? args) (string-append start close))
+      ((syntax/comment? (car (car args))) (lines start (end-column start column) args (+ column 2) close rules after))
+      (else (let ((indent (+ (end-column start column) 1))
+                  (first-text (string-append start
+                                             " "
+                                             (render-unit (car args) indent rules (trailing (cdr args) close after)))))
+              (lines first-text (end-column first-text column) (cdr args) indent close rules after))))))
 
 (def- (definition? node)
-  (let ((name (syntax/head-name node)))
-    (and name (string-starts-with? name "def"))))
+  (let ((name (syntax/head-name node))) (and name (string-starts-with? name "def"))))
 
 (def- (separator previous node)
   "Line breaks between top-level forms: one blank line around definitions or where the source had one."
   (if (or (>= (node :newlines) 2)
-          (and (not (syntax/comment? previous))
-               (or (definition? previous) (definition? node) (syntax/comment? node))))
+          (and (not (syntax/comment? previous)) (or (definition? previous) (definition? node) (syntax/comment? node))))
       "\n\n"
       "\n"))
 
@@ -213,12 +259,14 @@ except that a comment on the same source line as the previous unit stays there."
   "Format a whole source file."
   (let ((out "")
         (previous nil))
-    (for-each
-      (fn (node)
-        (set! out
-              (cond ((not previous) (render node 0 rules 0))
-                    ((and (syntax/comment? node) (= (node :newlines) 0)) (string-append out " " (node :text)))
-                    (else (string-append out (separator previous node) (render node 0 rules 0)))))
-        (set! previous node))
-      (syntax/parse text))
-    (if (equal? out "") "" (string-append out "\n"))))
+    (for-each (fn (node)
+                (set! out
+                      (cond
+                        ((not previous) (render node 0 rules 0))
+                        ((and (syntax/comment? node) (= (node :newlines) 0)) (string-append out " " (node :text)))
+                        (else (string-append out (separator previous node) (render node 0 rules 0)))))
+                (set! previous node))
+              (syntax/parse text))
+    (if (equal? out "")
+        ""
+        (string-append out "\n"))))

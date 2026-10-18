@@ -35,8 +35,9 @@ The linter only warns; its one rule so far, `if-chain`, flags an `if` in the
 else branch of another `if`.
 
 The formatter uses a width of 120. A form stays on one line if it fits, except
-that function definitions and bodies of two or more forms always break. Line
-breaks in the input are otherwise ignored. Comments and single blank lines are
+that these always break: function definitions, bodies of two or more forms, an
+`if` with an else branch, and a `let` with two or more bindings, which go one
+per line. Line breaks in the input are otherwise ignored. Comments and single blank lines are
 kept, and top-level definitions get a blank line between them. Forms without a
 built-in rule are laid out as calls, with arguments aligned under the first.
 A project can lay out its own macros like a built-in form:

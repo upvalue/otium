@@ -2,14 +2,19 @@
 (require otium.generic :as g)
 
 (defclass Dog)
+
 (defclass Cat)
 
 (defgeneric (speak animal))
 
-(defmethod (speak (animal Dog)) "Bark!")
-(defmethod (speak (animal Cat)) "Meow.")
+(defmethod (speak (animal Dog))
+  "Bark!")
+
+(defmethod (speak (animal Cat))
+  "Meow.")
 
 (def dog1 (g/make Dog))
+
 (def cat1 (g/make Cat))
 
 (display (speak dog1))
@@ -20,12 +25,21 @@
 
 (defgeneric (collide a-one a-two))
 
-(defmethod (collide (a1 Dog) (a2 Dog)) "Woof.")
-(defmethod (collide (a1 Cat) (a2 Cat)) "Meow.")
-(defmethod (collide (a1 Cat) (a2 Dog)) "Hiss!")
-(defmethod (collide (a1 Dog) (a2 Cat)) "Hiss!")
+(defmethod (collide (a1 Dog) (a2 Dog))
+  "Woof.")
 
+(defmethod (collide (a1 Cat) (a2 Cat))
+  "Meow.")
 
-(print (collide dog1 cat1)) (newline)
-(print (collide dog1 dog1)) (newline)
-(print (collide cat1 cat1)) (newline)
+(defmethod (collide (a1 Cat) (a2 Dog))
+  "Hiss!")
+
+(defmethod (collide (a1 Dog) (a2 Cat))
+  "Hiss!")
+
+(print (collide dog1 cat1))
+(newline)
+(print (collide dog1 dog1))
+(newline)
+(print (collide cat1 cat1))
+(newline)

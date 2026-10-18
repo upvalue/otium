@@ -22,6 +22,37 @@ Scheme keeps `.scm`. Module lookup still checks `.ot` then `.scm` in each search
 directory; the compatibility and precedence tests intentionally create both.
 `project.ot` contains module path configuration, not executable application code.
 
+## Formatting and linting
+
+```sh
+./otium fmt shared/lib/otium/ui.ot   # rewrite in place
+./otium fmt --check shared examples  # list files that would change
+./otium lint shared examples
+```
+
+Both take files or directories, and always run on Chez. They are experimental.
+The linter only warns; its one rule so far, `if-chain`, flags an `if` in the
+else branch of another `if`.
+
+The formatter uses a width of 120. A form stays on one line if it fits, except
+that function definitions and bodies of two or more forms always break. Line
+breaks in the input are otherwise ignored. Comments and single blank lines are
+kept, and top-level definitions get a blank line between them. Forms without a
+built-in rule are laid out as calls, with arguments aligned under the first.
+A project can lay out its own macros like a built-in form:
+
+```scheme
+(paths "examples")
+(format (like when with-slots) (like let match-let))
+```
+
+Don't use strings in the `format` entry. Launchers read every string in
+`project.ot` as a load path.
+
+Both tools read source with the Chez reader in token mode
+(`otium.reader/tokens`), which records each token's text and position. The
+tree, formatter and linter are Otium libraries in `shared/lib/otium/`.
+
 ## Tests and dependencies
 
 | Command | Coverage | Additional dependencies |

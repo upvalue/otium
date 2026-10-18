@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# The formatter and linter run on Chez, whatever the selected runtime.
+case "${1-}" in
+    fmt|lint)
+        tool=$1
+        shift
+        exec "$root/chez/run" --no-project --path "$root/shared/lib" "$root/shared/tools/$tool.ot" -- "$@" ;;
+esac
 runtime=c
 remaining=$#
 application=no

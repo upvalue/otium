@@ -38,6 +38,12 @@ class LauncherTests(unittest.TestCase):
         args = ['--path', 'with spaces', 'program.ot', '--', '', 'λ', '--runtime=c', '--', '--help']
         self.assertEqual(self.run_launcher('--runtime=chez', *args), ['chez', args])
 
+    def test_formatter_and_linter_run_on_chez(self):
+        lib, tools = str(self.root / 'shared/lib'), str(self.root / 'shared/tools')
+        for tool in ('fmt', 'lint'):
+            self.assertEqual(self.run_launcher(tool, 'a.ot', '--check'),
+                             ['chez', ['--no-project', '--path', lib, f'{tools}/{tool}.ot', '--', 'a.ot', '--check']])
+
     def test_option_values_are_not_selectors(self):
         for option in ('--path', '-L', '--project', '--load'):
             args = [option, '--runtime=chez', 'x.ot']

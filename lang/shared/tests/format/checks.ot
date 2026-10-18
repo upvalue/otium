@@ -1,0 +1,53 @@
+;; Formatter and linter checks. Run on Chez with shared/lib on the path.
+(require otium.reader (otium.format :as format) (otium.lint :as lint))
+
+(def checks 0)
+
+(def (check expected actual)
+  (unless (equal? expected actual)
+    (error "format check failed" expected actual))
+  (set! checks (+ checks 1)))
+
+(def (formats input expected)
+  (check expected (format/format-text input format/builtin-rules)))
+
+;; Tokens carry kind, text, zero-based line and column, and preceding line breaks.
+(check '((:open "(" 0 0 0) (:atom "a" 0 1 0) (:close ")" 0 2 0) (:comment "; c" 1 1 1) (:prefix "'" 3 0 2)
+         (:string "\"s\"" 3 1 0))
+       (otium.reader/tokens "(a)\n ; c\n\n'\"s\""))
+
+;; Forms that fit stay on one line; input line breaks are ignored.
+(formats "(foo  a\n   b)" "(foo a b)\n")
+(formats "(def x\n  1)" "(def x 1)\n")
+;; Function definitions and bodies of two or more forms always break.
+(formats "(def (f x) x)" "(def (f x)\n  x)\n")
+(formats "(when a (b) (c))" "(when a\n  (b)\n  (c))\n")
+(formats "(cond (a 1) (else 2))" "(cond\n  (a 1)\n  (else 2))\n")
+(formats "(let loop ((i 0)) (a) (loop i))" "(let loop ((i 0))\n  (a)\n  (loop i))\n")
+;; Calls that do not fit align arguments under the first, keeping keyword arguments with their values.
+(def long (string-append "(make Thing :name " "\"" (string-join "" (map (fn (i) "nnnnnnnnnn") (range 10))) "\""
+                         " :value (compute-the-value with several arguments))"))
+(formats long
+         (string-append "(make Thing\n      :name " "\"" (string-join "" (map (fn (i) "nnnnnnnnnn") (range 10))) "\""
+                        "\n      :value (compute-the-value with several arguments))\n"))
+;; Comments are kept, at the end of a line or on their own.
+(formats "(def (f x) ; note\n  ;; body\n  x)" "(def (f x) ; note\n  ;; body\n  x)\n")
+(formats "[a ; end\n b]" "[a ; end\n b]\n")
+(formats "(f a ; last\n)" "(f a ; last\n   )\n")
+;; Definitions are separated by a blank line; other top-level forms keep single blank lines.
+(formats "(ns a)\n(require b)\n(def x 1)\n(def y 2)\n\n\n\n(run)" "(ns a)\n(require b)\n\n(def x 1)\n\n(def y 2)\n\n(run)\n")
+(formats ";; About y.\n(def y 2)\n(def z 3) ; z" ";; About y.\n(def y 2)\n\n(def z 3) ; z\n")
+(formats "'(a ,@b `[c])" "'(a ,@b `[c])\n")
+(formats "" "")
+
+;; Project files can lay out macros like built-in forms.
+(def rules (format/project-rules "(paths \"x\")\n(format (like when with-thing))"))
+(check "(with-thing a\n  (b)\n  (c))\n" (format/format-text "(with-thing a (b) (c))" rules))
+
+(def (warnings text)
+  (map (fn (w) (list (w :line) (w :column) (w :rule) (w :message))) (lint/lint-text text)))
+(check '((2 3 "if-chain" "if in the else branch of an if; use cond"))
+       (warnings "(def (f x)\n  (if a b (if c d e)))\n(if a b c)"))
+(check '() (warnings "(if a (if b c d) e)"))
+
+(println (string-append "format checks passed: " (number->string checks)))

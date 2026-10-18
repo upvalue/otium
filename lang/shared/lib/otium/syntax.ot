@@ -1,0 +1,74 @@
+(ns otium.syntax)
+(require otium.reader)
+
+;; Source trees for the formatter and linter. Each node is a table with a
+;; :kind of :list, :array, :table, :prefix, :atom, :string or :comment.
+;; Containers hold :children, which include comments; a :prefix node holds
+;; its quoted form as :child. Every node records the :line and :column of its
+;; first token, counted from zero, and :newlines, the number of line breaks
+;; between it and the previous token.
+
+(def- (container-kind text)
+  (cond ((equal? text "(") :list)
+        ((equal? text "[") :array)
+        (else :table)))
+
+(def- (node kind token)
+  {:kind kind :text (second token) :line (nth token 2) :column (nth token 3)
+   :newlines (nth token 4)})
+
+(def (parse text)
+  "Read text into an array of top-level nodes. Invalid source raises a reader error."
+  (let ((top {:kind :top :children []})
+        (stack '()))
+    (def (push-open! container)
+      (set! stack (cons container stack)))
+    (def (pop-open!)
+      (let ((container (car stack)))
+        (set! stack (cdr stack))
+        container))
+    (def (emit! child)
+      ;; A finished form completes any quote prefixes waiting for it.
+      (if (eq? ((car stack) :kind) :prefix)
+          (let ((prefix (pop-open!)))
+            (put! prefix :child child)
+            (emit! prefix))
+          (push! ((car stack) :children) child)))
+    (def (comment! token)
+      ;; A comment between a quote and its form joins the enclosing container.
+      (let ((target (exists (fn (c) (if (eq? (c :kind) :prefix) nil c)) stack)))
+        (push! (target :children) (node :comment token))))
+    (def (token! token)
+      (let ((kind (first token)))
+        (cond ((eq? kind :open)
+               (push-open! (put (node (container-kind (second token)) token) :children [])))
+              ((eq? kind :close) (emit! (pop-open!)))
+              ((eq? kind :prefix) (push-open! (node :prefix token)))
+              ((eq? kind :comment) (comment! token))
+              (else (emit! (node kind token))))))
+    (push-open! top)
+    (for-each token! (otium.reader/tokens text))
+    (top :children)))
+
+(def (comment? node) (eq? (node :kind) :comment))
+
+(def (head node)
+  "The first non-comment child of a list, or nil."
+  (and (eq? (node :kind) :list)
+       (exists (fn (child) (if (comment? child) nil child)) (array-to-list (node :children)))))
+
+(def (head-name node)
+  "The text of a list's head when it is an atom, or nil."
+  (let ((first-child (head node)))
+    (and first-child (eq? (first-child :kind) :atom) (first-child :text))))
+
+(def (forms node)
+  "The non-comment children of a container, as a list."
+  (filter (fn (child) (not (comment? child))) (array-to-list (node :children))))
+
+(def (walk node visit)
+  "Call visit on node and every node beneath it, parents first."
+  (visit node)
+  (cond ((eq? (node :kind) :prefix) (walk (node :child) visit))
+        ((get node :children) (for-each (fn (child) (walk child visit)) (node :children)))
+        (else nil)))

@@ -1,0 +1,214 @@
+(ns otium.format)
+(require (otium.syntax :as syntax))
+
+;; Source formatting. A form stays on one line when it fits within the width;
+;; otherwise its layout comes from the rule for its head. Rules say how many
+;; arguments stay beside the head, and when the remaining body must always
+;; start on a new line. A body of two or more forms is never on one line. Forms without a rule are laid out as calls, with
+;; arguments aligned under the first one. Comments and single blank lines are
+;; kept; line breaks in the input are otherwise ignored.
+
+(def width 120)
+
+(def- (rule header break)
+  {:header header :break break})
+
+(def builtin-rules
+  "Layout rules by head name. :break is :signature to always break a body after a
+parameter list, :always to always break any body, or :never."
+  (let ((rules {}))
+    (for-each (fn (name) (put! rules name (rule 1 :signature))) '("def" "def-" "defmethod" "defgeneric"))
+    (put! rules "defmacro" (rule 2 :always))
+    (for-each (fn (name) (put! rules name (rule 1 :never)))
+              '("defonce" "defparam" "defclass" "defabstract" "fn" "let" "when" "unless" "while" "ns"
+                "with-params" "handler-bind" "restart-case" "dotimes" "match" "case" "catch"))
+    (for-each (fn (name) (put! rules name (rule 0 :never))) '("cond" "begin" "try" "defer"))
+    rules))
+
+(def (project-rules text)
+  "Extend the built-in rules with a project file's (format (like known name ...) ...) entries."
+  (let ((rules (copy builtin-rules)))
+    (for-each
+      (fn (form)
+        (when (equal? (syntax/head-name form) "format")
+          (for-each
+            (fn (entry)
+              (let ((names (map (fn (n) (n :text)) (syntax/forms entry))))
+                (when (and (>= (length names) 3) (equal? (first names) "like") (get rules (second names)))
+                  (for-each (fn (name) (put! rules name (get rules (second names)))) (drop 2 names)))))
+            (rest (syntax/forms form)))))
+      (syntax/parse text))
+    rules))
+
+(def- (spaces n)
+  (let ((out (buffer)))
+    (dotimes (i n) (buffer-push! out " "))
+    (buffer->string out)))
+
+(def- (end-column text column)
+  "The column after text when it starts at column."
+  (let ((lines (string-split text "\n")))
+    (if (= (length lines) 1)
+        (+ column (string-length text))
+        (string-length (get lines (- (length lines) 1))))))
+
+(def- (closing node)
+  (cond ((eq? (node :kind) :list) ")")
+        ((eq? (node :kind) :array) "]")
+        (else "}")))
+
+(def- (keyword-node? node)
+  (and (eq? (node :kind) :atom) (> (string-length (node :text)) 1) (string-starts-with? (node :text) ":")))
+
+(def- (units nodes pair-all?)
+  "Group nodes into lists laid out together: table entries, and keyword arguments with their values."
+  (cond ((null? nodes) '())
+        ((or (syntax/comment? (car nodes)) (null? (cdr nodes)) (syntax/comment? (cadr nodes)))
+         (cons (list (car nodes)) (units (cdr nodes) pair-all?)))
+        ((or pair-all? (and (keyword-node? (car nodes)) (not (keyword-node? (cadr nodes)))))
+         (cons (list (car nodes) (cadr nodes)) (units (cddr nodes) pair-all?)))
+        (else (cons (list (car nodes)) (units (cdr nodes) pair-all?)))))
+
+(def- (rule-for node rules)
+  (let ((name (syntax/head-name node)))
+    (and name (get rules name))))
+
+(def- (header-count node rule)
+  ;; A named let keeps its name and bindings beside the head.
+  (let ((args (cdr (syntax/forms node))))
+    (if (and (equal? (syntax/head-name node) "let") (pair? args) (eq? ((car args) :kind) :atom))
+        2
+        (rule :header))))
+
+(def- (forced? node rules)
+  "Whether a list's rule requires its body on separate lines. A body of two or more forms always breaks."
+  (let ((rule (rule-for node rules)))
+    (and rule
+         (let ((args (cdr (syntax/forms node)))
+               (body (- (length (cdr (syntax/forms node))) (header-count node rule))))
+           (or (>= body 2)
+               (and (= body 1)
+                    (or (eq? (rule :break) :always)
+                        (and (eq? (rule :break) :signature) (eq? ((car args) :kind) :list)))))))))
+
+(def- (flat node rules)
+  "The one-line form of node, or #f when it must span lines."
+  (let ((cached (get node :flat :unset)))
+    (if (eq? cached :unset)
+        (let ((text (flat-uncached node rules)))
+          (put! node :flat text)
+          text)
+        cached)))
+
+(def- (flat-uncached node rules)
+  (let ((kind (node :kind)))
+    (cond ((eq? kind :comment) #f)
+          ((memq kind '(:atom :string)) (if (string-contains? (node :text) "\n") #f (node :text)))
+          ((eq? kind :prefix)
+           (let ((child (flat (node :child) rules)))
+             (and child (string-append (node :text) child))))
+          ((forced? node rules) #f)
+          (else
+           (let ((parts (map (fn (child) (flat child rules)) (array-to-list (node :children)))))
+             (and (for-all identity parts)
+                  (string-append (node :text) (string-join " " parts) (closing node))))))))
+
+(def (render node column rules)
+  "Lay out node starting at column."
+  (let ((one-line (flat node rules)))
+    (cond ((and one-line (<= (+ column (string-length one-line)) width)) one-line)
+          ((memq (node :kind) '(:atom :string :comment)) (node :text))
+          ((eq? (node :kind) :prefix)
+           (string-append (node :text)
+                          (render (node :child) (+ column (string-length (node :text))) rules)))
+          (else (render-container node column rules)))))
+
+(def- (render-unit unit column rules)
+  (let ((text (render (car unit) column rules)))
+    (if (null? (cdr unit))
+        text
+        (string-append text " " (render (cadr unit) (+ (end-column text column) 1) rules)))))
+
+(def- (lines start column units indent close rules)
+  "Append units to start, which ends at column. Each unit begins its own line at indent,
+except that a comment on the same source line as the previous unit stays there."
+  (let ((out start)
+        (after-comment? #f))
+    (for-each
+      (fn (unit)
+        (let ((node (car unit)))
+          (if (and (syntax/comment? node) (= (node :newlines) 0))
+              (set! out (string-append out " " (node :text)))
+              (set! out (string-append out (if (>= (node :newlines) 2) "\n\n" "\n") (spaces indent)
+                                       (render-unit unit indent rules))))
+          (set! after-comment? (syntax/comment? node))))
+      units)
+    (if after-comment?
+        (string-append out "\n" (spaces indent) close)
+        (string-append out close))))
+
+(def- (render-container node column rules)
+  (let ((children (array-to-list (node :children)))
+        (open (node :text))
+        (close (closing node))
+        (rule (rule-for node rules)))
+    (cond ((null? children) (string-append open close))
+          ((or (not (eq? (node :kind) :list)) (not (syntax/head-name node)) (syntax/comment? (car children)))
+           (render-data children column (eq? (node :kind) :table) open close rules))
+          (rule (render-body node (car children) (units (cdr children) #f) column (header-count node rule) close rules))
+          (else (render-call (car children) (units (cdr children) #f) column close rules)))))
+
+(def- (render-data children column table? open close rules)
+  ;; Every element on its own line, aligned after the opening delimiter.
+  (let ((all (units children table?))
+         (first-text (string-append open (render-unit (car all) (+ column 1) rules))))
+    (if (syntax/comment? (car (car all)))
+        (lines open (+ column 1) all (+ column 1) close rules)
+        (lines first-text (end-column first-text column) (cdr all) (+ column 1) close rules))))
+
+(def- (render-body node head args column header close rules)
+  ;; Header arguments stay beside the head; the body is indented by two.
+  (let ((out (string-append "(" (head :text)))
+        (remaining args)
+        (count 0))
+    (while (and (pair? remaining) (< count header) (not (syntax/comment? (car (car remaining)))))
+      (set! out (string-append out " " (render-unit (car remaining) (+ (end-column out column) 1) rules)))
+      (set! remaining (cdr remaining))
+      (set! count (+ count 1)))
+    (lines out (end-column out column) remaining (+ column 2) close rules)))
+
+(def- (render-call head args column close rules)
+  ;; Arguments align under the first one, which stays beside the head.
+  (let ((start (string-append "(" (render head (+ column 1) rules))))
+    (cond ((null? args) (string-append start close))
+          ((syntax/comment? (car (car args))) (lines start (end-column start column) args (+ column 2) close rules))
+          (else
+           (let ((indent (+ (end-column start column) 1))
+                  (first-text (string-append start " " (render-unit (car args) indent rules))))
+             (lines first-text (end-column first-text column) (cdr args) indent close rules))))))
+
+(def- (definition? node)
+  (let ((name (syntax/head-name node)))
+    (and name (string-starts-with? name "def"))))
+
+(def- (separator previous node)
+  "Line breaks between top-level forms: one blank line around definitions or where the source had one."
+  (if (or (>= (node :newlines) 2)
+          (and (not (syntax/comment? previous))
+               (or (definition? previous) (definition? node) (syntax/comment? node))))
+      "\n\n"
+      "\n"))
+
+(def (format-text text rules)
+  "Format a whole source file."
+  (let ((out "")
+        (previous nil))
+    (for-each
+      (fn (node)
+        (set! out
+              (cond ((not previous) (render node 0 rules))
+                    ((and (syntax/comment? node) (= (node :newlines) 0)) (string-append out " " (node :text)))
+                    (else (string-append out (separator previous node) (render node 0 rules)))))
+        (set! previous node))
+      (syntax/parse text))
+    (if (equal? out "") "" (string-append out "\n"))))

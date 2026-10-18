@@ -1,0 +1,22 @@
+;; otium lint PATH...
+;; Print warnings for Otium source files as PATH:LINE:COLUMN: RULE: MESSAGE.
+;; Warnings do not affect the exit status; unreadable files do.
+(require otium.process (otium.lint :as lint) (otium.tools.files :as files))
+
+(def (main arguments)
+  (let ((status 0))
+    (for-each
+      (fn (path)
+        (try
+          (for-each
+            (fn (warning)
+              (println (string-append path ":" (number->string (warning :line)) ":" (number->string (warning :column))
+                                      ": " (warning :rule) ": " (warning :message))))
+            (lint/lint-text (read-file path)))
+          (catch (error? problem)
+            (otium.process/write-error (string-append path ": " (condition-message problem) "\n"))
+            (set! status 1))))
+      (files/source-files arguments))
+    status))
+
+(exit (main (otium.process/arguments)))

@@ -85,4 +85,10 @@ on ARM64 macOS with Chez 10.4.1. The existing tail-loop, fib-28 and list-allocat
 workloads all returned their expected results. Chez median work times were
 2.411 ms, 1.283 ms and 1.856 ms respectively. This run includes the emitted nil
 checks, but has no before/after baseline and establishes no speedup or overhead
-claim. Formatter and linter work remain deferred.
+claim.
+
+The Chez reader also has a token mode for the formatter and linter, exposed as
+`otium.reader/tokens`. It reads with the same code, so it accepts and rejects
+the same text, and only records tokens when a token log is installed. Ordinary
+reads check one flag per token. The C reader has no token mode. See
+[development](development.md#formatting-and-linting).

@@ -42,6 +42,14 @@ with tempfile.TemporaryDirectory(prefix='otium-reader-') as directory:
         for text in fixtures['negative']:
             source += f'\n(check #t (fails? (fn () (read-string {literal(text)}))))'
         if runtime == 'chez':
+            # Token mode reads with the same reader, so it accepts and rejects the
+            # same text. Empty input and trailing datums only matter to read-string.
+            source += '\n(require otium.reader)'
+            for text, expected in fixtures['positive']:
+                source += f'\n(check #t (pair? (otium.reader/tokens {literal(text)})))'
+            for text in fixtures['negative']:
+                if text not in ('', '; only', '1 2'):
+                    source += f'\n(check #t (fails? (fn () (otium.reader/tokens {literal(text)}))))'
             source += '''
 (check #f (exists (fn (x) nil) '(1 2)))
 (check nil (for-all (fn (x) nil) '(1 2)))

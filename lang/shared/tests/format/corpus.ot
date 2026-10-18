@@ -1,0 +1,32 @@
+;; Format every readable source file given on the command line and check that
+;; the result has the same tokens and is unchanged by formatting it again.
+(require otium.process otium.reader (otium.format :as format) (otium.tools.files :as files))
+
+(def (token-texts text)
+  (map (fn (token) (list (first token) (second token))) (otium.reader/tokens text)))
+
+(def (readable? text)
+  (try
+    (otium.reader/tokens text)
+    #t
+    (catch (error? problem) #f)))
+
+(def failures 0)
+
+(def (check-file path)
+  (let ((text (read-file path)))
+    (when (readable? text)
+      (let ((once (format/format-text text format/builtin-rules)))
+        (cond ((not (equal? (token-texts once) (token-texts text)))
+               (println (string-append path ": formatting changed the tokens"))
+               (set! failures (+ failures 1)))
+              ((not (equal? (format/format-text once format/builtin-rules) once))
+               (println (string-append path ": formatting is not stable"))
+               (set! failures (+ failures 1)))
+              (else nil))))))
+
+(let ((paths (files/source-files (otium.process/arguments))))
+  (for-each check-file paths)
+  (println (string-append "format corpus: " (number->string (length paths)) " files, "
+                          (number->string failures) " failures"))
+  (exit (if (= failures 0) 0 1)))

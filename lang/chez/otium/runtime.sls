@@ -165,6 +165,14 @@
               (eval 'public-bindings
                 (environment (if (eq? name 'otium.cli) '(otium cli) '(otium process)))))
             (namespace-loaded?-set! space #t))
+          (when (eq? name 'otium.reader)
+            (for-each
+              (lambda (entry)
+                (define-top-level-value (car entry) (cdr entry) env)
+                (hashtable-set! (namespace-definitions space) (car entry)
+                  "Source tokens for the formatter and linter."))
+              (eval 'public-bindings (environment '(otium reader))))
+            (namespace-loaded?-set! space #t))
           (if (eq? name 'otium.core)
               (parameterize ([current-namespace space])
                 (read-source (shared-source "prelude/core.ot")))
@@ -243,7 +251,7 @@
     (let ([space (find-namespace name)])
       (when (namespace-loading? space)
         (error 'require "circular namespace load" name))
-      (when (and (not (memq name '(otium.generic otium.ffi otium.process otium.cli)))
+      (when (and (not (memq name '(otium.generic otium.ffi otium.process otium.cli otium.reader)))
                  (or reload? (not (namespace-loaded? space))))
         (load-namespace! space (or (namespace-source space)
           (if (eq? name 'otium.extra) (shared-source "lib/otium/extra.ot") (source-for name)))))

@@ -16,7 +16,7 @@ export WITH_FFI
 all lib bench bench-gc format hygiene gc-lint:
 	$(MAKE) -C c $@
 
-test: test-tools check-generated test-c test-chez test-expander test-classes test-match test-ui test-cli test-reader test-library
+test: test-tools check-generated test-c test-chez test-expander test-classes test-match test-ui test-cli test-reader test-library test-format
 	$(MAKE) test-repl
 
 test-c: all
@@ -68,6 +68,13 @@ test-cli: all
 test-reader: all
 	$(RUN_PYTHON) shared/tests/test_reader.py
 	$(RUN_PYTHON) shared/tests/test_reader.py --stress
+
+# The Otium formatter and linter run on Chez. The corpus check formats the
+# tree in memory and leaves files untouched.
+.PHONY: test-format
+test-format:
+	./otium --runtime=chez --no-project --path shared/lib shared/tests/format/checks.ot
+	./otium --runtime=chez --no-project --path shared/lib shared/tests/format/corpus.ot -- shared examples benchmarks
 
 # ✨ Markdown documentation and the browser C runtime.
 .PHONY: site test-site

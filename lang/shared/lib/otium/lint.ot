@@ -1,0 +1,35 @@
+(ns otium.lint)
+(require (otium.syntax :as syntax))
+
+;; Source warnings. Each warning is a table with :line and :column, counted
+;; from one, a :rule name and a :message.
+
+(def- (warning node rule message)
+  {:line (+ (node :line) 1) :column (+ (node :column) 1) :rule rule :message message})
+
+(def- (if-chain node)
+  ;; (if a b (if c d e)) reads better as a cond.
+  (when (equal? (syntax/head-name node) "if")
+    (let ((parts (syntax/forms node)))
+      (when (and (= (length parts) 4) (equal? (syntax/head-name (nth parts 3)) "if"))
+        (warning node "if-chain" "if in the else branch of an if; use cond")))))
+
+(def checks
+  "Functions taking a node and returning a warning or nil."
+  (list if-chain))
+
+(def (lint-text text)
+  "Warnings for a whole source file, in source order."
+  (let ((found []))
+    (for-each
+      (fn (top)
+        (syntax/walk top
+                     (fn (node)
+                       (for-each
+                         (fn (check)
+                           (let ((result (check node)))
+                             (when result
+                               (push! found result))))
+                         checks))))
+      (syntax/parse text))
+    (array-to-list found)))

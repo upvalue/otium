@@ -1,6 +1,6 @@
 # REPL editing
 
-Run `./otium` or `./otium-chez` in a terminal. Both use the same native line
+Run `./otium` or `./otium --runtime=chez` in a terminal. Both use the same native line
 editor in `shared/`, based on Bestline. Chez builds its small shared library
 on the first interactive launch; a C compiler and make are required then.
 Script execution and redirected input do not need that library.
@@ -28,7 +28,7 @@ Multiline entries survive a restart. Existing single-line history files are
 still readable. History is reloaded at each prompt so the runtimes can pick
 up each other's entries; simultaneous writes are not locked.
 
-`make test-repl` exercises both launchers through pseudo-terminals. It uses a
+`make test-repl` exercises both runtimes through pseudo-terminals. It uses a
 fake editor and temporary history files, without changing your history.
 
 Tab completion and help

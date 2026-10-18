@@ -14,7 +14,7 @@ C is the default. `--runtime c` and `--runtime=c` are equivalent. The selector
 can appear anywhere before `--`, except as the value of another option.
 Everything after `--` is passed to the program unchanged. Repeated selectors
 use the last value; each value must be valid. `CHEZ` selects the Chez executable.
-`otium-chez`, `c/otium`, and `chez/run` remain compatibility entry points.
+`c/otium` and `chez/run` remain runtime-specific entry points.
 
 Otium sources use `.ot`, including shared libraries, examples, and test fixtures.
 Chez implementation programs use `.ss`, and Chez libraries use `.sls`. Vendored

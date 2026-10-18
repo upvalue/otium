@@ -30,6 +30,13 @@
 (formats long
          (string-append "(make Thing\n      :name " "\"" (string-join "" (map (fn (i) "nnnnnnnnnn") (range 10))) "\""
                         "\n      :value (compute-the-value with several arguments))\n"))
+;; Closing delimiters count toward the width. Inside two lists, this 117-column call would start at
+;; column 2 and fit, but the closing delimiters after it would not.
+(def atom "aaaaaaaaaaaaaaaaaa")
+(def wide (string-append "(f " (string-join " " (map (fn (i) atom) (range 6))) ")"))
+(check 117 (string-length wide))
+(formats (string-append "((" wide "))")
+         (string-append "(((f " atom "\n" (string-join "\n" (map (fn (i) (string-append "     " atom)) (range 5))) ")))\n"))
 ;; Comments are kept, at the end of a line or on their own.
 (formats "(def (f x) ; note\n  ;; body\n  x)" "(def (f x) ; note\n  ;; body\n  x)\n")
 (formats "[a ; end\n b]" "[a ; end\n b]\n")

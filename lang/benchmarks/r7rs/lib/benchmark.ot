@@ -9,7 +9,8 @@
       (error "benchmark input exhausted")))
 
 (def (bench-make-array n fill)
-  (let ((out (array)) (i 0))
+  (let ((out (array))
+        (i 0))
     (while (< i n)
       (push! out fill)
       (set! i (+ i 1)))
@@ -17,7 +18,11 @@
 
 (def (bench-hide r x)
   (let ((choices [(fn (x) x) (fn (x) x)]))
-    ((get choices (if (< r 100) 0 1)) x)))
+    ((get choices
+          (if (< r 100)
+              0
+              1))
+     x)))
 
 (def (run-ported-benchmark name count thunk ok?)
   (let ((jps (jiffies-per-second))

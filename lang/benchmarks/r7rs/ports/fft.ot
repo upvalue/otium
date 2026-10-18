@@ -35,10 +35,8 @@
             (set! i m)
             (while (< i n)
               (set! j (+ i mmax))
-              (let ((temporary-real
-                      (- (* wr (get data j)) (* wi (get data (+ j 1)))))
-                    (temporary-imaginary
-                      (+ (* wr (get data (+ j 1))) (* wi (get data j)))))
+              (let ((temporary-real (- (* wr (get data j)) (* wi (get data (+ j 1)))))
+                    (temporary-imaginary (+ (* wr (get data (+ j 1))) (* wi (get data j)))))
                 (put! data j (- (get data i) temporary-real))
                 (put! data (+ j 1) (- (get data (+ i 1)) temporary-imaginary))
                 (put! data i (+ (get data i) temporary-real))
@@ -57,9 +55,10 @@
         (fill (bench-read))
         (output (bench-read))
         (name (str "fft:" size ":" count)))
-    (run-ported-benchmark name count
-      (fn ()
-        (let ((data (bench-make-array size fill)))
-          (four1 data)
-          (get data 0)))
-      (fn (result) (= result output)))))
+    (run-ported-benchmark name
+                          count
+                          (fn ()
+                            (let ((data (bench-make-array size fill)))
+                              (four1 data)
+                              (get data 0)))
+                          (fn (result) (= result output)))))

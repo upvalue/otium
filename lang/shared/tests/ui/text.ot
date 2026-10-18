@@ -1,11 +1,17 @@
 (ns ui.text)
 (require (otium.ui :as ui))
 (require (otium.gfx :as gfx))
-(defclass TextProbe :is ui/Widget)
-(defmethod (ui/measure (w TextProbe) limits) (ui/size 120 80))
+
+(defclass TextProbe
+  :is ui/Widget)
+
+(defmethod (ui/measure (w TextProbe) limits)
+  (ui/size 120 80))
+
 (defmethod (ui/paint (w TextProbe) g bounds)
   (gfx/rect g bounds 0x000000ff 0)
   (gfx/text g bounds "office café λ\nwrapped words" :ui 20 0xffffffff #t)
-  (gfx/text g (make ui/Bounds :x 90 :y 60 :width 200 :height 30)
-    "CLIPPED" :mono 20 0xff000080 #f))
-(def (view) (ui/column {:padding 10} (ui/new TextProbe {})))
+  (gfx/text g (make ui/Bounds :x 90 :y 60 :width 200 :height 30) "CLIPPED" :mono 20 0xff000080 #f))
+
+(def (view)
+  (ui/column {:padding 10} (ui/new TextProbe {})))

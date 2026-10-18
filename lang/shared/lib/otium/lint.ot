@@ -21,15 +21,10 @@
 (def (lint-text text)
   "Warnings for a whole source file, in source order."
   (let ((found []))
-    (for-each
-      (fn (top)
-        (syntax/walk top
-                     (fn (node)
-                       (for-each
-                         (fn (check)
-                           (let ((result (check node)))
-                             (when result
-                               (push! found result))))
-                         checks))))
-      (syntax/parse text))
+    (for-each (fn (top)
+                (syntax/walk top
+                             (fn (node)
+                               (for-each (fn (check) (let ((result (check node))) (when result (push! found result))))
+                                         checks))))
+              (syntax/parse text))
     (array-to-list found)))

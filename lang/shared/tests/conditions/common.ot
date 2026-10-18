@@ -1,145 +1,232 @@
 (def checks 0)
+
 (def (check name expected actual)
   (if (equal? expected actual)
       (set! checks (+ checks 1))
       (error "condition test failed" name expected actual)))
-(def (any? c) #t)
-(def (fails? thunk)
-  (try (begin (thunk) #f) (catch (error? c) #t)))
-(def events '())
-(def (record x) (set! events (cons x events)))
 
-(check 'normal 7 (try 7 (catch (any? c) 'wrong)))
-(check 'message "boom" (try (error "boom") (catch (error? c) (condition-message c))))
-(check 'type 'error (try (error "boom") (catch (error? c) (condition-type c))))
-(check 'data 2 (try (error "boom" 1 2) (catch (error? c) (test-ref (test-data c) 1))))
-(check 'arbitrary 'value (try (error 'value) (catch (any? c) c)))
-(check 'false-condition #f (try (error #f) (catch (any? c) c)))
+(def (any? c)
+  #t)
+
+(def (fails? thunk)
+  (try
+    (begin
+      (thunk)
+      #f)
+    (catch (error? c) #t)))
+
+(def events '())
+
+(def (record x)
+  (set! events (cons x events)))
+
+(check 'normal
+       7
+       (try
+         7
+         (catch (any? c) 'wrong)))
+(check 'message
+       "boom"
+       (try
+         (error "boom")
+         (catch (error? c) (condition-message c))))
+(check 'type
+       'error
+       (try
+         (error "boom")
+         (catch (error? c) (condition-type c))))
+(check 'data
+       2
+       (try
+         (error "boom" 1 2)
+         (catch (error? c) (test-ref (test-data c) 1))))
+(check 'arbitrary
+       'value
+       (try
+         (error 'value)
+         (catch (any? c) c)))
+(check 'false-condition
+       #f
+       (try
+         (error #f)
+         (catch (any? c) c)))
 (check 'signal-unhandled test-nil (signal 'unhandled))
 (check 'error-extra #t (fails? (fn () (error 'value 1))))
 (check 'signal-extra #t (fails? (fn () (signal 'value 1))))
 (check 'error-missing #t (fails? (fn () (error))))
-(check 'catch-order 'second
-  (try (error 'x)
-    (catch ((fn (c) #f) c) 'first)
-    (catch (any? c) 'second)))
-(check 'unmatched 'x
-  (try (try (error 'x) (catch ((fn (c) #f) c) 'wrong))
-    (catch (any? c) c)))
-(check 'catch-raises 'second
-  (try (try (error 'first) (catch (any? c) (error 'second)))
-    (catch (any? c) c)))
+(check 'catch-order
+       'second
+       (try
+         (error 'x)
+         (catch ((fn (c) #f) c) 'first)
+         (catch (any? c) 'second)))
+(check 'unmatched
+       'x
+       (try
+         (try
+           (error 'x)
+           (catch ((fn (c) #f) c) 'wrong))
+         (catch (any? c) c)))
+(check 'catch-raises
+       'second
+       (try
+         (try
+           (error 'first)
+           (catch (any? c) (error 'second)))
+         (catch (any? c) c)))
 
 (set! events '())
 (handler-bind ((any? (fn (c) (record 'outer))))
-  (handler-bind ((any? (fn (c) (record 'inner) (signal 'nested))))
-    (try (error 'original) (catch (any? c) (record 'catch)))))
-(check 'mask-and-decline '(catch outer outer inner) events)
+  (handler-bind ((any? (fn (c)
+                         (record 'inner)
+                         (signal 'nested))))
+    (try
+      (error 'original)
+      (catch (any? c) (record 'catch)))))
+(check 'mask-and-decline
+       '(catch outer
+          outer
+          inner)
+       events)
 (set! events '())
 (handler-bind ((any? (fn (c) (record 'surrounding))))
-  (handler-bind (((begin (record 'predicate-one) any?)
-                  (begin (record 'handler-one) (fn (c) (record 'one))))
-                 ((begin (record 'predicate-two) (signal 'initializer) any?)
-                  (begin (record 'handler-two) (fn (c) (record 'two)))))
+  (handler-bind (((begin
+                    (record 'predicate-one)
+                    any?)
+                  (begin
+                    (record 'handler-one)
+                    (fn (c) (record 'one))))
+                 ((begin
+                    (record 'predicate-two)
+                    (signal 'initializer)
+                    any?)
+                  (begin
+                    (record 'handler-two)
+                    (fn (c) (record 'two)))))
     (signal 'body)))
 (check 'initializers-before-install
-  '(surrounding one two handler-two surrounding predicate-two handler-one predicate-one)
-  events)
+       '(surrounding one two handler-two surrounding predicate-two handler-one predicate-one)
+       events)
 
 (set! events '())
 (handler-bind ((any? (fn (c) (record c))))
-  (try (handler-bind ((any? (fn (c) #f)))
-         (try (error 'once) (catch ((fn (c) #f) c) 'wrong)))
+  (try
+    (handler-bind ((any? (fn (c) #f)))
+      (try
+        (error 'once)
+        (catch ((fn (c) #f) c) 'wrong)))
     (catch (any? c) #f)))
 (check 'signal-once '(once) events)
 
 (check 'restart-normal 3 (restart-case (+ 1 2) (use-value (v) v)))
-(check 'restart-recovery 42
-  (handler-bind ((error? (fn (c) (invoke-restart 'use-value 42))))
-    (restart-case (+ 1000 (error "missing")) (use-value (v) v))))
-(check 'restart-shadow 'inner
-  (restart-case (restart-case (invoke-restart 'pick) (pick () 'inner))
-    (pick () 'outer)))
-(check 'restart-same-frame-order 'last
-  (restart-case (invoke-restart 'pick) (pick () 'first) (pick () 'last)))
-(check 'restart-exact-object 'outer
-  (restart-case
-    (let ((outer (find-restart 'pick)))
-      (restart-case (invoke-restart outer) (pick () 'inner)))
-    (pick () 'outer)))
-(check 'restart-string 10
-  (restart-case (invoke-restart "give" 10) (give (v) v)))
-(check 'restart-keyword 11
-  (restart-case (invoke-restart ':give 11) (give (v) v)))
-(check 'restart-description "use a value"
-  (restart-case (restart-description (find-restart 'give))
-    (give "use a value" (v) v)))
-(check 'restart-no-description test-nil
-  (restart-case (restart-description (find-restart 'give)) (give (v) v)))
-(check 'restart-name 'give
-  (restart-case (restart-name (find-restart 'give)) (give (v) v)))
-(check 'restart-introspection '(b a)
-  (restart-case
-    (let ((rs (compute-restarts)))
-      (list (restart-name (test-ref rs 0)) (restart-name (test-ref rs 1))))
-    (a () 0) (b () 0)))
+(check 'restart-recovery
+       42
+       (handler-bind ((error? (fn (c) (invoke-restart 'use-value 42))))
+         (restart-case (+ 1000 (error "missing")) (use-value (v) v))))
+(check 'restart-shadow 'inner (restart-case (restart-case (invoke-restart 'pick) (pick () 'inner)) (pick () 'outer)))
+(check 'restart-same-frame-order
+       'last
+       (restart-case (invoke-restart 'pick)
+         (pick () 'first)
+         (pick () 'last)))
+(check 'restart-exact-object
+       'outer
+       (restart-case (let ((outer (find-restart 'pick))) (restart-case (invoke-restart outer) (pick () 'inner)))
+         (pick () 'outer)))
+(check 'restart-string 10 (restart-case (invoke-restart "give" 10) (give (v) v)))
+(check 'restart-keyword 11 (restart-case (invoke-restart ':give 11) (give (v) v)))
+(check 'restart-description
+       "use a value"
+       (restart-case (restart-description (find-restart 'give)) (give "use a value" (v) v)))
+(check 'restart-no-description test-nil (restart-case (restart-description (find-restart 'give)) (give (v) v)))
+(check 'restart-name 'give (restart-case (restart-name (find-restart 'give)) (give (v) v)))
+(check 'restart-introspection
+       '(b a)
+       (restart-case (let ((rs (compute-restarts)))
+                       (list (restart-name (test-ref rs 0)) (restart-name (test-ref rs 1))))
+         (a () 0)
+         (b () 0)))
 (check 'restart-missing test-nil (find-restart 'absent))
 (check 'restart-missing-error #t (fails? (fn () (invoke-restart 'absent))))
 (check 'restart-name-validation #t (fails? (fn () (find-restart 42))))
 (check 'restart-value-validation #t (fails? (fn () (restart-name 42))))
 (check 'restart-description-validation #t (fails? (fn () (restart-description 42))))
+
 (def saved #f)
+
 (restart-case (set! saved (find-restart 'save)) (save () 0))
 (check 'restart-expired test-nil (find-restart saved))
 (check 'restart-expired-error #t (fails? (fn () (invoke-restart saved))))
-(check 'restart-clause-visible #t
-  (restart-case (invoke-restart 'again)
-    (again () (eq? (find-restart 'again) (test-ref (compute-restarts) 0)))))
-(check 'restart-clause-reinvoke 10000
-  (restart-case (invoke-restart 'again 0)
-    (again (n) (if (= n 10000) n (invoke-restart 'again (+ n 1))))))
-(check 'restart-sibling 'done
-  (restart-case (invoke-restart 'first)
-    (first () (invoke-restart 'second)) (second () 'done)))
+(check 'restart-clause-visible
+       #t
+       (restart-case (invoke-restart 'again) (again () (eq? (find-restart 'again) (test-ref (compute-restarts) 0)))))
+(check 'restart-clause-reinvoke
+       10000
+       (restart-case (invoke-restart 'again 0)
+         (again (n)
+                (if (= n 10000)
+                    n
+                    (invoke-restart 'again (+ n 1))))))
+(check 'restart-sibling
+       'done
+       (restart-case (invoke-restart 'first)
+         (first () (invoke-restart 'second))
+         (second () 'done)))
 (set! events '())
-(check 'restart-arity #t
-  (fails? (fn ()
-    (restart-case (unwind-protect (invoke-restart 'give) (record 'cleaned))
-      (give (v) v)))))
+(check 'restart-arity
+       #t
+       (fails? (fn () (restart-case (unwind-protect (invoke-restart 'give) (record 'cleaned)) (give (v) v)))))
 (check 'restart-arity-after-cleanup '(cleaned) events)
 
 (set! events '())
-(try (unwind-protect (unwind-protect (error 'x) (record 'inner)) (record 'outer))
+(try
+  (unwind-protect (unwind-protect (error 'x) (record 'inner)) (record 'outer))
   (catch (any? c) (record 'caught)))
 (check 'cleanup-order '(caught outer inner) events)
 (check 'cleanup-value 7 (unwind-protect 7 (record 'normal)))
 (check 'cleanup-empty 8 (unwind-protect 8))
-(check 'defer-value 9 (defer 9 (record 'deferred)))
-(check 'cleanup-replaces-error 'cleanup
-  (try (unwind-protect (error 'original) (error 'cleanup)) (catch (any? c) c)))
-(check 'cleanup-replaces-restart 'cleanup
-  (try (restart-case (unwind-protect (invoke-restart 'give) (error 'cleanup))
-         (give () 'wrong))
-    (catch (any? c) c)))
+(check 'defer-value
+       9
+       (defer
+         9
+         (record 'deferred)))
+(check 'cleanup-replaces-error
+       'cleanup
+       (try
+         (unwind-protect (error 'original) (error 'cleanup))
+         (catch (any? c) c)))
+(check 'cleanup-replaces-restart
+       'cleanup
+       (try
+         (restart-case (unwind-protect (invoke-restart 'give) (error 'cleanup)) (give () 'wrong))
+         (catch (any? c) c)))
 (set! events '())
-(check 'restart-cleanup 5
-  (restart-case (unwind-protect (invoke-restart 'give 5) (record 'cleaned))
-    (give (v) (record 'clause) v)))
+(check 'restart-cleanup
+       5
+       (restart-case (unwind-protect (invoke-restart 'give 5) (record 'cleaned)) (give (v) (record 'clause) v)))
 (check 'restart-cleanup-order '(clause cleaned) events)
 
 (define-condition 'file-error 'error)
+
 (define-condition "not-found" ':file-error)
+
 (def custom (test-table 'not-found "missing"))
+
 (check 'custom-table #t (error? custom))
 (check 'subtype #t (condition-of-type? custom 'error))
 (check 'subtype-self #t (condition-of-type? custom "not-found"))
 (check 'subtype-reverse #f (condition-of-type? (test-table 'error "x") 'not-found))
-(check 'subtype-catch "missing"
-  (try (error custom) (catch ((type-pred 'error) c) (condition-message c))))
+(check 'subtype-catch
+       "missing"
+       (try
+         (error custom)
+         (catch ((type-pred 'error) c) (condition-message c))))
 (check 'cycle-rejected #t (fails? (fn () (define-condition 'error 'not-found))))
 (check 'cycle-unchanged #t (condition-of-type? custom 'error))
 (check 'self-cycle #t (fails? (fn () (define-condition 'self 'self))))
+
 (define-condition 'not-found test-nil)
+
 (check 'new-root #f (condition-of-type? custom 'error))
 (check 'root-self #t (condition-of-type? custom 'not-found))
 (check 'error-table-convention #t (error? custom))
@@ -148,11 +235,13 @@
 
 (set! events '())
 (handler-bind ((error? (fn (c) (record 'handler))))
-  (try (car 42) (catch (error? c) (record 'caught))))
+  (try
+    (car 42)
+    (catch (error? c) (record 'caught))))
 (check 'native-before-catch '(caught handler) events)
-(check 'native-restart 23
-  (handler-bind ((error? (fn (c) (invoke-restart 'use-value 23))))
-    (restart-case (car 42) (use-value (v) v))))
+(check 'native-restart
+       23
+       (handler-bind ((error? (fn (c) (invoke-restart 'use-value 23)))) (restart-case (car 42) (use-value (v) v))))
 (check 'exit-validation #t (fails? (fn () (exit 256))))
 (check 'exit-integer #t (fails? (fn () (exit "1"))))
 (test-print checks)

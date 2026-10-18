@@ -73,11 +73,12 @@
         (n5 (bench-read))
         (output (bench-read)))
     (let ((name (str "equal:" n0 ":" n1 ":" n2 ":" n3 ":" n4 ":" n5)))
-      (run-ported-benchmark name 1
-        (fn ()
-          (equality-benchmarks (bench-hide n0 n1)
-                               (bench-hide n0 n2)
-                               (bench-hide n0 n3)
-                               (bench-hide n0 n4)
-                               (bench-hide n0 n5)))
-        (fn (result) (eq? result output))))))
+      (run-ported-benchmark name
+                            1
+                            (fn ()
+                              (equality-benchmarks (bench-hide n0 n1)
+                                                   (bench-hide n0 n2)
+                                                   (bench-hide n0 n3)
+                                                   (bench-hide n0 n4)
+                                                   (bench-hide n0 n5)))
+                            (fn (result) (eq? result output))))))

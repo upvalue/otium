@@ -1,17 +1,30 @@
 (require otium.cli)
+
 (def (check expected actual)
-  (if (equal? expected actual) #t (begin (display (list 'expected expected 'actual actual)) (newline) (exit 1))))
+  (if (equal? expected actual)
+      #t
+      (begin
+        (display (list 'expected expected 'actual actual))
+        (newline)
+        (exit 1))))
+
 (def command
-  (otium.cli/compile
-    '(command greet (summary "Greet someone") (version "1.0")
-       (argument name)
-       (option count (names "-n" "--count") (type integer) (range 1 100) (default 1))
-       (flag loud (names "-l" "--loud") (negative "--no-loud"))
-       (counter verbose (names "-v" "--verbose"))
-       (option tag (names "-t" "--tag") (repeat append))
-       (option color (names "--color") (choices "auto" "never")))))
-(def (parse args) (otium.cli/parse command args))
-(def (value args key) (otium.cli/ref (otium.cli/outcome-values (parse args)) key))
+  (otium.cli/compile '(command greet
+                               (summary "Greet someone")
+                               (version "1.0")
+                               (argument name)
+                               (option count (names "-n" "--count") (type integer) (range 1 100) (default 1))
+                               (flag loud (names "-l" "--loud") (negative "--no-loud"))
+                               (counter verbose (names "-v" "--verbose"))
+                               (option tag (names "-t" "--tag") (repeat append))
+                               (option color (names "--color") (choices "auto" "never")))))
+
+(def (parse args)
+  (otium.cli/parse command args))
+
+(def (value args key)
+  (otium.cli/ref (otium.cli/outcome-values (parse args)) key))
+
 (check 'ok (otium.cli/outcome-kind (parse '("Alice"))))
 (check 1 (value '("Alice") 'count))
 (check #f (value '("Alice") 'loud))
@@ -27,61 +40,97 @@
 (check "-file" (value '("--" "-file") 'name))
 (check "" (value '("") 'name))
 (for-each (fn (args) (check 'error (otium.cli/outcome-kind (parse args))))
-  '(() ("--wat") ("Alice" "Bob") ("-n") ("--count=many" "Alice")
-    ("--count=0" "Alice") ("--count=101" "Alice") ("--count=1.0" "Alice")
-    ("--count=0x10" "Alice") ("--count=4611686018427387904" "Alice")
-    ("--count=2" "-n3" "Alice") ("--loud=yes" "Alice")
-    ("--color=always" "Alice")))
+          '(()
+            ("--wat")
+            ("Alice" "Bob")
+            ("-n")
+            ("--count=many" "Alice")
+            ("--count=0" "Alice")
+            ("--count=101" "Alice")
+            ("--count=1.0" "Alice")
+            ("--count=0x10" "Alice")
+            ("--count=4611686018427387904" "Alice")
+            ("--count=2" "-n3" "Alice")
+            ("--loud=yes" "Alice")
+            ("--color=always" "Alice")))
 (check 'help (otium.cli/outcome-kind (parse '("--help"))))
 (check 'version (otium.cli/outcome-kind (parse '("--version"))))
 (check "1.0" (otium.cli/outcome-values (parse '("--version"))))
 (check 'count (otium.cli/ref (otium.cli/outcome-diagnostic (parse '("--count=x"))) 'argument))
+
 (def numeric (otium.cli/compile '(command num (argument n (type integer)))))
+
 (check -12 (otium.cli/ref (otium.cli/outcome-values (otium.cli/parse numeric '("-12"))) 'n))
+
 (def optional (otium.cli/compile '(command optional (argument file (default "stdin")))))
+
 (check "stdin" (otium.cli/ref (otium.cli/outcome-values (otium.cli/parse optional '())) 'file))
+
 (def variadic (otium.cli/compile '(command files (argument file (repeat append)))))
+
 (check '("a" "b") (otium.cli/ref (otium.cli/outcome-values (otium.cli/parse variadic '("a" "b"))) 'file))
-(def tree (otium.cli/compile
-  '(command notes (counter verbose (names "-v") (global #t))
-     (command add (argument text))
-     (command list (option limit (names "-n") (type integer) (default 20))))))
+
+(def tree
+  (otium.cli/compile '(command notes
+                               (counter verbose (names "-v") (global #t))
+                               (command add (argument text))
+                               (command list (option limit (names "-n") (type integer) (default 20))))))
+
 (def tree-result (otium.cli/parse tree '("-v" "add" "-v" "hello")))
+
 (check 'ok (otium.cli/outcome-kind tree-result))
 (check 2 (otium.cli/ref (otium.cli/outcome-values tree-result) 'verbose))
 (check '("notes" "add") (otium.cli/ref (otium.cli/outcome-values tree-result) 'command-path))
 (check 'error (otium.cli/outcome-kind (otium.cli/parse tree '())))
 (check 'error (otium.cli/outcome-kind (otium.cli/parse tree '("missing"))))
 (check 'help (otium.cli/outcome-kind (otium.cli/parse tree '("add" "--help"))))
-(def constraints (otium.cli/compile '(command constraints
-  (flag a (names "-a") (conflicts b)) (flag b (names "-b"))
-  (flag c (names "-c") (requires b))
-  (option last (names "-l") (repeat last)))))
+
+(def constraints
+  (otium.cli/compile '(command constraints
+                               (flag a (names "-a") (conflicts b))
+                               (flag b (names "-b"))
+                               (flag c (names "-c") (requires b))
+                               (option last (names "-l") (repeat last)))))
+
 (check 'error (otium.cli/outcome-kind (otium.cli/parse constraints '("-ab"))))
 (check 'error (otium.cli/outcome-kind (otium.cli/parse constraints '("-c"))))
 (check 'ok (otium.cli/outcome-kind (otium.cli/parse constraints '("-bc"))))
 (check "b" (otium.cli/ref (otium.cli/outcome-values (otium.cli/parse constraints '("-la" "-lb"))) 'last))
-(def custom (otium.cli/compile (list 'command 'custom
-  (list 'option 'value '(names "-x") (list 'type (fn (text) (string-append text "!")))))))
+
+(def custom
+  (otium.cli/compile (list 'command
+                           'custom
+                           (list 'option 'value '(names "-x") (list 'type (fn (text) (string-append text "!")))))))
+
 (check "yes!" (otium.cli/ref (otium.cli/outcome-values (otium.cli/parse custom '("-xyes"))) 'value))
-(for-each
-  (fn (spec)
-    (check #t (try (begin (otium.cli/compile spec) #f) (catch ((fn (c) #t) c) #t))))
-  '((command x (flag a (names "-h")))
-    (command x (flag a (names "-x")) (flag b (names "-x")))
-    (command x (option a (names "--a") (type unknown)))
-    (command x (argument a (repeat append)) (argument b))
-    (command x (argument a (default "x")) (argument b))))
+(for-each (fn (spec)
+            (check #t
+                   (try
+                     (begin
+                       (otium.cli/compile spec)
+                       #f)
+                     (catch ((fn (c) #t) c) #t))))
+          '((command x (flag a (names "-h")))
+            (command x (flag a (names "-x")) (flag b (names "-x")))
+            (command x (option a (names "--a") (type unknown)))
+            (command x (argument a (repeat append)) (argument b))
+            (command x (argument a (default "x")) (argument b))))
+
 (def floating (otium.cli/compile '(command number (argument n (type number)))))
+
 (check 125.0 (otium.cli/ref (otium.cli/outcome-values (otium.cli/parse floating '("1.25e2"))) 'n))
 (for-each (fn (text) (check 'error (otium.cli/outcome-kind (otium.cli/parse floating (list text)))))
-  '("1/2" "1+2i" "#x10" "1e999" "1.2.3" "e2"))
-(def parent-required (otium.cli/compile '(command root
-  (option config (names "--config") (required #t) (global #t))
-  (option mode (names "--mode") (default "normal"))
-  (command child))))
+          '("1/2" "1+2i" "#x10" "1e999" "1.2.3" "e2"))
+
+(def parent-required
+  (otium.cli/compile '(command root
+                               (option config (names "--config") (required #t) (global #t))
+                               (option mode (names "--mode") (default "normal"))
+                               (command child))))
+
 (check 'help (otium.cli/outcome-kind (otium.cli/parse parent-required '("child" "--help"))))
 (check 'ok (otium.cli/outcome-kind (otium.cli/parse parent-required '("child" "--config=x"))))
-(check "normal" (otium.cli/ref (otium.cli/outcome-values (otium.cli/parse parent-required '("child" "--config=x"))) 'mode))
+(check "normal"
+       (otium.cli/ref (otium.cli/outcome-values (otium.cli/parse parent-required '("child" "--config=x"))) 'mode))
 (check 'error (otium.cli/outcome-kind (otium.cli/parse parent-required '("child"))))
 (display "cli checks passed\n")

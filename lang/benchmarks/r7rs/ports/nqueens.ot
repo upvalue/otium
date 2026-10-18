@@ -3,7 +3,9 @@
 (def (nqueens n)
   (def (iota1 n)
     (def (loop i result)
-      (if (= i 0) result (loop (- i 1) (cons i result))))
+      (if (= i 0)
+          result
+          (loop (- i 1) (cons i result))))
     (loop n '()))
 
   (def (ok? row distance placed)
@@ -15,7 +17,9 @@
 
   (def (search x y placed)
     (if (null? x)
-        (if (null? y) 1 0)
+        (if (null? y)
+            1
+            0)
         (+ (if (ok? (car x) 1 placed)
                (search (append (cdr x) y) '() (cons (car x) placed))
                0)
@@ -28,6 +32,4 @@
         (input (bench-read))
         (output (bench-read))
         (name (str "nqueens:" input ":" count)))
-    (run-ported-benchmark name count
-      (fn () (nqueens (bench-hide count input)))
-      (fn (result) (= result output)))))
+    (run-ported-benchmark name count (fn () (nqueens (bench-hide count input))) (fn (result) (= result output)))))

@@ -1,16 +1,24 @@
 ;; Run with ./otium --runtime=c|chez examples/math.ot after make ffi.
 (require otium.ffi :as ffi)
+
 (def math-library-names '("/usr/lib/libSystem.B.dylib" "libm.so.6" "libm.so"))
+
 (def math-library (ffi/open-library math-library-names))
+
 (def native-cos (ffi/bind math-library "cos" '(double) 'double))
+
 (def native-hypot (ffi/bind math-library "hypot" '(double double) 'double))
+
 (def native-modf (ffi/bind math-library "modf" '(double pointer) 'double))
 
-(display (native-cos 0.0)) (newline)
-(display (native-hypot 3.0 4.0)) (newline)
+(display (native-cos 0.0))
+(newline)
+(display (native-hypot 3.0 4.0))
+(newline)
 (let ((integral (ffi/alloc 'double 1)))
-  (unwind-protect
-    (begin
-      (display (native-modf 12.75 integral)) (newline)
-      (display (ffi/ref integral 'double 0)) (newline))
-    (ffi/free! integral)))
+  (unwind-protect (begin
+                    (display (native-modf 12.75 integral))
+                    (newline)
+                    (display (ffi/ref integral 'double 0))
+                    (newline))
+                  (ffi/free! integral)))

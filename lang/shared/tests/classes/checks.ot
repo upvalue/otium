@@ -1,18 +1,36 @@
 ;; Class semantics exercised unchanged on both runtimes.
 (def checks 0)
+
 (def (check label expected actual)
   (if (equal? expected actual)
       (set! checks (+ checks 1))
-      (begin (println "FAIL" label "expected" expected "got" actual) (exit 1))))
+      (begin
+        (println "FAIL" label "expected" expected "got" actual)
+        (exit 1))))
+
 (def (fails? form)
-  (try (begin (eval form) #f) (catch (error? e) #t)))
+  (try
+    (begin
+      (eval form)
+      #f)
+    (catch (error? e) #t)))
 
 (defabstract Widget)
-(defabstract Control :is Widget)
-(defclass Button :is Control
-  label (x :init 0 :accessor x-of) (items :init []) (optional :init nil))
+
+(defabstract Control
+  :is Widget)
+
+(defclass Button
+  :is Control
+  label
+  (x :init 0 :accessor x-of)
+  (items :init [])
+  (optional :init nil))
+
 (def b (make Button :label "first"))
+
 (def b2 (make Button :label "second"))
+
 (check "instance" #t (instance? b))
 (check "not a table" #f (table? b))
 (check "instance type" :instance (type b))
@@ -28,7 +46,9 @@
 (check "assignment returns value" 4 (set! (b :x) 4))
 (check "accessor sees writes" 4 (x-of b))
 (check "instances compare by identity" #f (equal? b b2))
+
 (def shallow (copy b))
+
 (check "copy distinct" #f (eq? shallow b))
 (check "copy same class" #t (eq? Button (dispatch-type shallow)))
 (check "copy shares slot contents" #t (eq? (b :items) (shallow :items)))
@@ -45,80 +65,174 @@
 (check "slot read arity" #t (fails? '(b :x :label)))
 (check "abstract construction" #t (fails? '(make Widget)))
 (check "builtin construction" #t (fails? '(make Number)))
-(check "final parent" #t (fails? '(defclass Bad :is Button)))
-(check "final abstract parent" #t (fails? '(defabstract Bad :is Button)))
-(check "duplicate slots" #t (fails? '(defclass Bad x x)))
+(check "final parent"
+       #t
+       (fails? '(defclass Bad
+                  :is Button)))
+(check "final abstract parent"
+       #t
+       (fails? '(defabstract Bad
+                  :is Button)))
+(check "duplicate slots"
+       #t
+       (fails? '(defclass Bad
+                  x
+                  x)))
 (check "invalid slot option" #t (fails? '(defclass Bad (x :oops 0))))
 (check "duplicate slot option" #t (fails? '(defclass Bad (x :init 0 :init 1))))
 (check "abstract slots" #t (fails? '(defabstract Bad x)))
-(check "cyclic parents" #t (fails? '(defabstract Widget :is Control)))
+(check "cyclic parents"
+       #t
+       (fails? '(defabstract Widget
+                  :is Control)))
 
 (def slot-object-evaluations 0)
-(check "with-slots writes live slots" '(5 6)
-  (with-slots (begin (set! slot-object-evaluations (+ slot-object-evaluations 1)) b) (x)
-    (set! x (+ x 1))
-    (let ((before x)) (set! (b :x) 6) (list before x))))
+
+(check "with-slots writes live slots"
+       '(5 6)
+       (with-slots (begin
+                     (set! slot-object-evaluations (+ slot-object-evaluations 1))
+                     b)
+                   (x)
+                   (set! x (+ x 1))
+                   (let ((before x))
+                     (set! (b :x) 6)
+                     (list before x))))
 (check "with-slots object once" 1 slot-object-evaluations)
-(check "with-slots lexical shadowing" 20
-  (with-slots b (x) (let ((x 19)) (set! x 20) x)))
+(check "with-slots lexical shadowing"
+       20
+       (with-slots b
+                   (x)
+                   (let ((x 19))
+                     (set! x 20)
+                     x)))
 (check "with-slots leaves outer slot" 6 (b :x))
 
 (defgeneric (paint widget))
+
 (def saved-paint paint)
-(defmethod (paint w) '(object))
-(defmethod (paint (w Widget)) (cons 'widget (call-next-method)))
-(defmethod (paint (w Control)) (cons 'control (call-next-method)))
-(defmethod (paint (w Button)) (cons 'button (call-next-method)))
+
+(defmethod (paint w)
+  '(object))
+
+(defmethod (paint (w Widget))
+  (cons 'widget (call-next-method)))
+
+(defmethod (paint (w Control))
+  (cons 'control (call-next-method)))
+
+(defmethod (paint (w Button))
+  (cons 'button (call-next-method)))
+
 (check "ancestor method order" '(button control widget object) (paint b))
-(defmethod :around (paint (w Widget)) (cons 'outer-widget (call-next-method)))
-(defmethod :around (paint (w Button)) (cons 'outer-button (call-next-method)))
+
+(defmethod :around (paint (w Widget))
+  (cons 'outer-widget (call-next-method)))
+
+(defmethod :around (paint (w Button))
+  (cons 'outer-button (call-next-method)))
+
 (check "around outside primaries" '(outer-button outer-widget button control widget object) (paint b))
-(defmethod :around (paint (w Button)) 'short-circuit)
+
+(defmethod :around (paint (w Button))
+  'short-circuit)
+
 (check "around replacement" 'short-circuit (saved-paint b))
 (check "remove qualified method" #t (remove-method! paint (list Button) :around))
 (check "remove absent method" #f (remove-method! paint (list Button) :around))
 (check "cache invalidated on remove" '(outer-widget button control widget object) (paint b))
-(defmethod (paint (w Button)) (cons 'replacement (call-next-method)))
+
+(defmethod (paint (w Button))
+  (cons 'replacement (call-next-method)))
+
 (check "cache invalidated on replacement" '(outer-widget replacement control widget object) (paint b))
+
 (defgeneric (paint widget))
+
 (check "generic reload identity" #t (eq? paint saved-paint))
-(defmethod (paint (w Object)) '(root))
+
+(defmethod (paint (w Object))
+  '(root))
+
 (check "Object replaces unspecialized method" '(root) (paint 3))
 (check "next outside method" #f (next-method?))
 (check "call-next outside method" #t (fails? '(call-next-method)))
+
 (defgeneric (last-method x))
-(defmethod (last-method x) (next-method?))
+
+(defmethod (last-method x)
+  (next-method?))
+
 (check "no next in last method" #f (last-method b))
-(defmethod (last-method x) (call-next-method))
+
+(defmethod (last-method x)
+  (call-next-method))
+
 (check "call-next without next fails" #t (fails? '(last-method b)))
 (check "next context restored after error" #f (next-method?))
+
 (defgeneric (replacement-args x))
-(defmethod (replacement-args x) (+ x 1))
-(defmethod (replacement-args (x Number)) (call-next-method 10))
+
+(defmethod (replacement-args x)
+  (+ x 1))
+
+(defmethod (replacement-args (x Number))
+  (call-next-method 10))
+
 (check "call-next replacement args" 11 (replacement-args 1))
+
 (defgeneric (around-only x))
-(defmethod :around (around-only x) 42)
+
+(defmethod :around (around-only x)
+  42)
+
 (check "around may supply result without primary" 42 (around-only b))
 
 (defabstract Event)
-(defclass Pointer :is Event)
+
+(defclass Pointer
+  :is Event)
+
 (def p (make Pointer))
+
 (defgeneric (handle w e))
-(defmethod (handle (w Widget) (e Pointer)) 'widget-pointer)
-(defmethod (handle (w Button) (e Event)) 'button-event)
+
+(defmethod (handle (w Widget) (e Pointer))
+  'widget-pointer)
+
+(defmethod (handle (w Button) (e Event))
+  'button-event)
+
 (check "cross-argument ambiguity" #t (fails? '(handle b p)))
-(defmethod (handle (w Button) (e Pointer)) 'exact)
+
+(defmethod (handle (w Button) (e Pointer))
+  'exact)
+
 (check "most specific resolves ambiguity" 'exact (handle b p))
-(defmethod (handle (w Button) (e Pointer)) (call-next-method))
+
+(defmethod (handle (w Button) (e Pointer))
+  (call-next-method))
+
 (check "ambiguity below best" #t (fails? '(handle b p)))
 
 (def saved-button Button)
-(def (read-x obj) (obj :x))
-(def (write-x obj value) (set! (obj :x) value))
+
+(def (read-x obj)
+  (obj :x))
+
+(def (write-x obj value)
+  (set! (obj :x) value))
+
 (check "warm read cache" 6 (read-x b))
 (check "warm write cache" 7 (write-x b 7))
-(defclass Button :is Widget
-  (items :init []) (added :init []) (x :init 100) label)
+
+(defclass Button
+  :is Widget
+  (items :init [])
+  (added :init [])
+  (x :init 100)
+  label)
+
 (check "class reload identity" #t (eq? Button saved-button))
 (check "cached read migrates changed layout" 7 (read-x b))
 (check "cached write migrates changed layout" 8 (write-x b2 8))
@@ -126,37 +240,67 @@
 (check "added defaults per instance" #f (eq? (b :added) (b2 :added)))
 (check "removed slot inaccessible" #t (fails? '(b :optional)))
 (check "parent reload clears dispatch cache" '(outer-widget replacement widget root) (paint b))
-(defclass Button :is Widget (x :init 10) label required)
+
+(defclass Button
+  :is Widget
+  (x :init 10)
+  label
+  required)
+
 (check "new required slot blocks migration" #t (fails? '(b :x)))
+
 (defmethod (update-instance (object Button) old-slots)
   (slot-set! object :required (get old-slots :label)))
+
 (check "migration retries after installing updater" 7 (b :x))
 (check "updater supplies required slot" "first" (b :required))
 (check "copy migrates old instance" "second" ((copy b2) :required))
+
 (defabstract OtherFamily)
-(defabstract Widget :is OtherFamily)
+
+(defabstract Widget
+  :is OtherFamily)
+
 (defgeneric (family x))
-(defmethod (family (x OtherFamily)) 'family)
+
+(defmethod (family (x OtherFamily))
+  'family)
+
 (check "abstract parent reload" 'family (family b))
 (check "class cannot become abstract" #t (fails? '(defabstract Button)))
 (check "abstract cannot become class" #t (fails? '(defclass Widget)))
 (check "nested declaration rejected" #t (fails? '((fn () (defclass Nested)))))
 
 (defgeneric (nested-leaf x))
-(defmethod (nested-leaf x) (next-method?))
+
+(defmethod (nested-leaf x)
+  (next-method?))
+
 (defgeneric (nested-chain x))
-(defmethod (nested-chain x) 'base)
+
+(defmethod (nested-chain x)
+  'base)
+
 (defmethod (nested-chain (x Number))
   (list (next-method?) (nested-leaf x) (next-method?) (call-next-method)))
+
 (check "nested method restores outer next" '(#t #f #t base) (nested-chain 1))
 (check "nested method leaves no next" #f (next-method?))
-(check "replacement arity checked" #t (fails? '(begin
-  (defmethod (replacement-args (x Number)) (call-next-method 1 2))
-  (replacement-args 1))))
+(check "replacement arity checked"
+       #t
+       (fails? '(begin
+                  (defmethod (replacement-args (x Number))
+                    (call-next-method 1 2))
+                  (replacement-args 1))))
 (check "next restored after replacement error" #f (next-method?))
 
 (def default-count 0)
-(defclass Counted (value :init (begin (set! default-count (+ default-count 1)) [])))
+
+(defclass Counted
+  (value :init (begin
+                 (set! default-count (+ default-count 1))
+                 [])))
+
 (make Counted :value 99)
 (check "supplied initarg skips default" 0 default-count)
 (make Counted)
@@ -164,34 +308,64 @@
 (check "accessor binding conflict" #t (fails? '(defclass Conflict (value :accessor default-count))))
 
 (defclass Stable (value :init 1))
+
 (def stable (make Stable))
+
 (def stable-alias stable)
+
 (def keyed (table))
+
 (put! keyed stable 'found)
-(defclass Stable (added :init []) (value :init 2))
+
+(defclass Stable
+  (added :init [])
+  (value :init 2))
+
 (check "migration retains value" 1 (stable :value))
 (check "migration retains identity" #t (eq? stable stable-alias))
 (check "migration retains table key" 'found (get keyed stable))
-(defclass Stable value (last :init 3))
+
+(defclass Stable
+  value
+  (last :init 3))
+
 (check "second migration retains identity" 3 (stable-alias :last))
 (check "second migration retains table key" 'found (get keyed stable-alias))
+
 (defmethod (update-instance (object Stable) old)
   (set! (object :value) 999)
   (error "retry migration"))
-(defclass Stable value (after :init 4))
+
+(defclass Stable
+  value
+  (after :init 4))
+
 (check "updater failure propagates" #t (fails? '(stable :after)))
-(defmethod (update-instance (object Stable) old) nil)
+
+(defmethod (update-instance (object Stable) old)
+  nil)
+
 (check "failed updater writes rolled back" 1 (stable :value))
 (check "failed migration retries defaults" 4 (stable :after))
 
 (defgeneric (inspect-method x))
-(defmethod (inspect-method (x Number)) 'primary)
-(defmethod :around (inspect-method (x Number)) (call-next-method))
+
+(defmethod (inspect-method (x Number))
+  'primary)
+
+(defmethod :around (inspect-method (x Number))
+  (call-next-method))
+
 (check "method introspection count" 2 (length (generic-methods inspect-method)))
-(check "method introspection includes qualifiers" #t
-  (let ((methods (generic-methods inspect-method)))
-    (and (if (member (list :around (list Number)) methods) #t #f)
-         (if (member (list 'primary (list Number)) methods) #t #f))))
+(check "method introspection includes qualifiers"
+       #t
+       (let ((methods (generic-methods inspect-method)))
+         (and (if (member (list :around (list Number)) methods)
+                  #t
+                  #f)
+              (if (member (list 'primary (list Number)) methods)
+                  #t
+                  #f))))
 (check "remove primary preserves around" #t (remove-method! inspect-method (list Number)))
 (check "around without remaining primary" #t (fails? '(inspect-method 1)))
 

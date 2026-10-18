@@ -1,10 +1,24 @@
 (ns ui.interaction)
 (require (otium.ui :as ui))
 (require (otium.gfx :as gfx))
-(defclass Tile :is ui/Widget (selected :init #f :state #t))
-(defmethod (ui/measure (w Tile) limits) (ui/size 100 100))
+
+(defclass Tile
+  :is ui/Widget
+  (selected :init #f :state #t))
+
+(defmethod (ui/measure (w Tile) limits)
+  (ui/size 100 100))
+
 (defmethod (ui/paint (w Tile) g bounds)
-  (gfx/rect g bounds (if (w :selected) 0x0000ffff 0xff0000ff)))
+  (gfx/rect g
+            bounds
+            (if (w :selected)
+                0x0000ffff
+                0xff0000ff)))
+
 (defmethod (ui/handle-event (w Tile) event)
-  (set! (w :selected) #t) :handled)
-(def (view) (ui/column {:grow 1 :padding 20} (ui/new Tile {:key :tile})))
+  (set! (w :selected) #t)
+  :handled)
+
+(def (view)
+  (ui/column {:grow 1 :padding 20} (ui/new Tile {:key :tile})))

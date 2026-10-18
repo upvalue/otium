@@ -1,44 +1,74 @@
 (require (otium.ui :as ui))
+
 (def checks 0)
+
 (def (check label expected actual)
   (if (equal? expected actual)
       (set! checks (+ checks 1))
       (error "UI check failed" label expected actual)))
+
 (def (fails? form)
-  (try (begin (eval form) #f) (catch (error? e) #t)))
-(def (child parent index) (get (ui/children parent) index))
-(def (widget parent index) (ui/instance (child parent index)))
+  (try
+    (begin
+      (eval form)
+      #f)
+    (catch (error? e) #t)))
+
+(def (child parent index)
+  (get (ui/children parent) index))
+
+(def (widget parent index)
+  (ui/instance (child parent index)))
+
 (def initializations 0)
+
 (def picked nil)
-(defclass Dropdown :is ui/Widget
+
+(defclass Dropdown
+  :is ui/Widget
   items
   (caption :init "Choose")
   (on-pick :init (fn (item) (set! picked item)))
-  (open? :init (begin (set! initializations (+ initializations 1)) #f) :state #t)
+  (open? :init (begin
+                 (set! initializations (+ initializations 1))
+                 #f)
+         :state #t)
   (draft :init [] :state #t))
+
 (defmethod (ui/build (d Dropdown))
   (ui/column {}
-    (ui/button {:key :toggle
-                :on-press (fn () (set! (d :open?) (not (d :open?))))}
-      (d :caption))
-    (when (d :open?)
-      (map (fn (item)
-             (ui/button {:key item :on-press (fn () ((d :on-pick) item)
-                                                   (set! (d :open?) #f))}
-               item))
-           (d :items)))))
-(def (description key items) (ui/new Dropdown {:key key :items items}))
+             (ui/button {:key :toggle :on-press (fn () (set! (d :open?) (not (d :open?))))} (d :caption))
+             (when (d :open?)
+               (map (fn (item)
+                      (ui/button {:key item
+                                  :on-press (fn ()
+                                              ((d :on-pick) item)
+                                              (set! (d :open?) #f))}
+                                 item))
+                    (d :items)))))
+
+(def (description key items)
+  (ui/new Dropdown {:key key :items items}))
+
 (def r (ui/root))
+
 (def d (description :a ["Apple" "Pear"]))
+
 (check "description skips state initializer" 0 initializations)
 (ui/reconcile! r d)
+
 (def a (child r 0))
+
 (def a-instance (ui/instance a))
+
 (check "mount initializes state once" 1 initializations)
 (check "mounted class" Dropdown (dispatch-type a-instance))
 (check "starts closed" #f (a-instance :open?))
+
 (def toggle (child (child a 0) 0))
+
 (def retained-toggle ((ui/instance toggle) :on-press))
+
 (check "synthetic event handled" :handled (ui/send! toggle {:kind :press}))
 (ui/reconcile! r (description :a ["Apple" "Pear"]))
 (check "matching preserves mounted node" #t (eq? a (child r 0)))
@@ -46,9 +76,15 @@
 (check "rebuild keeps open state" #t (a-instance :open?))
 (check "open menu has toggle and two items" 3 (length (ui/children (child a 0))))
 (check "rebuild does not initialize state" 1 initializations)
+
 (def retained-pick ((widget (child a 0) 1) :on-press))
-(ui/reconcile! r (ui/new Dropdown {:key :a :items ["Plum"] :caption "Updated"
-                                 :on-pick (fn (item) (set! picked (str "new:" item)))}))
+
+(ui/reconcile! r
+               (ui/new Dropdown
+                       {:key :a
+                        :items ["Plum"]
+                        :caption "Updated"
+                        :on-pick (fn (item) (set! picked (str "new:" item)))}))
 (retained-pick)
 (check "retained handler reads updated property" "new:Apple" picked)
 (check "retained handler writes mounted state" #f (a-instance :open?))
@@ -59,7 +95,9 @@
 (check "replacement children" "Plum" ((widget (child (child a 0) 1) 0) :text))
 
 (ui/reconcile! r [(description :a ["Plum"]) (description :b ["Berry"])])
+
 (def b (child r 1))
+
 (push! (a-instance :draft) "saved")
 (check "state defaults fresh per mount" 0 (length ((ui/instance b) :draft)))
 (ui/reconcile! r [(description :b ["Berry"]) (description :a ["Peach"])])
@@ -67,8 +105,7 @@
 (check "keyed reorder preserves b" #t (eq? b (child r 0)))
 (check "keyed reorder preserves state" '("saved") (array-to-list (a-instance :draft)))
 (check "only two mounts" 2 initializations)
-(check "duplicate key rejected" #t
-  (fails? '(ui/reconcile! r [(description :a []) (description :a [])])))
+(check "duplicate key rejected" #t (fails? '(ui/reconcile! r [(description :a []) (description :a [])])))
 (check "duplicate key leaves siblings intact" #t (eq? b (child r 0)))
 (check "state option rejected" #t (fails? '(ui/new Dropdown {:items [] :open? #t})))
 (check "unknown option rejected" #t (fails? '(ui/new Dropdown {:items [] :typo 1})))
@@ -81,16 +118,23 @@
 
 ;; Class reload preserves identity and migrates slots before build sees them.
 (def saved-class Dropdown)
-(defclass Dropdown :is ui/Widget
-  items caption on-pick required
+
+(defclass Dropdown
+  :is ui/Widget
+  items
+  caption
+  on-pick
+  required
   (open? :init #f :state #t)
   (draft :init [] :state #t)
   (added :init 42 :state #t))
-(defmethod (ui/build (d Dropdown)) (ui/label {} (d :required)))
+
+(defmethod (ui/build (d Dropdown))
+  (ui/label {} (d :required)))
+
 (check "class reload preserves identity" #t (eq? saved-class Dropdown))
 (check "stale descriptions rejected" #t (fails? '(class-mount (d :properties))))
-(ui/reconcile! r (ui/new Dropdown {:key :a :items [] :caption "Reload"
-                                 :on-pick (fn (x) x) :required "New property"}))
+(ui/reconcile! r (ui/new Dropdown {:key :a :items [] :caption "Reload" :on-pick (fn (x) x) :required "New property"}))
 (check "reload preserves instance" #t (eq? a-instance (widget r 0)))
 (check "reload preserves state" '("saved") (array-to-list (a-instance :draft)))
 (check "reload adds state initializer" 42 (a-instance :added))
@@ -100,11 +144,15 @@
 (check "removed descendant is inactive" #f (ui/active? toggle))
 (check "dispatch to removed widget rejected" #t (fails? '(ui/send! toggle {:kind :press})))
 
-(defclass Dropdown :is ui/Widget
+(defclass Dropdown
+  :is ui/Widget
   (draft :init "property")
   (caption :init "state" :state #t)
   (renamed :init 17 :state #t))
-(defmethod (ui/build (d Dropdown)) (ui/label {} (d :draft)))
+
+(defmethod (ui/build (d Dropdown))
+  (ui/label {} (d :draft)))
+
 (ui/reconcile! r (ui/new Dropdown {:key :a :draft "fresh property"}))
 (check "state to property uses caller value" "fresh property" (a-instance :draft))
 (check "property to state initializes" "state" (a-instance :caption))
@@ -118,24 +166,38 @@
 (check "remount resets state" 17 ((widget r 0) :renamed))
 
 ;; Unkeyed matching is positional, and a type change replaces the instance.
-(defclass Counter :is ui/Widget name (count :init 0 :state #t))
+(defclass Counter
+  :is ui/Widget
+  name
+  (count :init 0 :state #t))
+
 (def positions (ui/root))
+
 (ui/reconcile! positions [(ui/new Counter {:name "A"}) (ui/new Counter {:name "B"})])
+
 (def first-counter (widget positions 0))
+
 (set! (first-counter :count) 7)
 (ui/reconcile! positions [(ui/new Counter {:name "B"}) (ui/new Counter {:name "A"})])
 (check "unkeyed state follows position" 7 ((widget positions 0) :count))
 (check "unkeyed property follows caller" "B" ((widget positions 0) :name))
+
 (def replaced (child positions 0))
+
 (ui/reconcile! positions (ui/label {} "different class"))
 (check "type change retires old node" #f (ui/active? replaced))
+
 (def keyed-type (ui/root))
+
 (ui/reconcile! keyed-type (ui/new Counter {:key :same :name "A"}))
+
 (def old-type (child keyed-type 0))
+
 (ui/reconcile! keyed-type (ui/new ui/Label {:key :same :text "label"}))
 (check "same key different class remounts" #f (ui/active? old-type))
 
 (def flat (ui/root))
+
 (ui/reconcile! flat (ui/column {} [nil ["one"]] (list "two" nil) '()))
 (check "recursive child flattening" 2 (length (ui/children (child flat 0))))
 (check "string becomes label" "one" ((widget (child flat 0) 0) :text))
@@ -144,16 +206,26 @@
 
 ;; Ordinary make still initializes state and permits explicit slot values.
 (defclass Plain (value :init 10 :state #t))
+
 (check "ordinary make initializes state" 10 ((make Plain) :value))
 (check "ordinary make permits override" 20 ((make Plain :value 20) :value))
 (check "subtype query" #t (class-subtype? Counter ui/Widget))
-(check "update rejects unrelated class" #t
-  (fails? '(class-update-properties! (make Plain) (class-properties Counter :name "x"))))
+(check "update rejects unrelated class"
+       #t
+       (fails? '(class-update-properties! (make Plain) (class-properties Counter :name "x"))))
+
 ;; Reusing a mutable property still rebuilds its children.
-(defclass Items :is ui/Widget values)
-(defmethod (ui/build (w Items)) (w :values))
+(defclass Items
+  :is ui/Widget
+  values)
+
+(defmethod (ui/build (w Items))
+  (w :values))
+
 (def mutable-items ["first"])
+
 (def mutable-root (ui/root))
+
 (ui/reconcile! mutable-root (ui/new Items {:values mutable-items}))
 (push! mutable-items "second")
 (ui/reconcile! mutable-root (ui/new Items {:values mutable-items}))
@@ -161,27 +233,45 @@
 
 ;; Failed mount and migration can be retried after fixing the initializer.
 (def broken? #t)
+
 (def defaults-run 0)
-(defclass Retry :is ui/Widget
-  (property :init (begin (set! defaults-run (+ defaults-run 1)) "default"))
-  (state :init (if broken? (error "injected initializer failure") 1) :state #t))
+
+(defclass Retry
+  :is ui/Widget
+  (property :init (begin
+                    (set! defaults-run (+ defaults-run 1))
+                    "default"))
+  (state :init (if broken?
+                   (error "injected initializer failure")
+                   1)
+         :state #t))
+
 (def retry-root (ui/root))
+
 (def retry-description (ui/new Retry {}))
+
 (check "property default runs during description construction" 1 defaults-run)
 (check "mount failure escapes" #t (fails? '(ui/reconcile! retry-root retry-description)))
 (check "failed mount not published" 0 (length (ui/children retry-root)))
 (set! broken? #f)
 (ui/reconcile! retry-root retry-description)
 (check "mount does not repeat property defaults" 1 defaults-run)
+
 (def retry-instance (widget retry-root 0))
+
 (set! (retry-instance :state) 9)
-(defclass Retry :is ui/Widget
+
+(defclass Retry
+  :is ui/Widget
   (property :init "new default")
   (state :init 0 :state #t)
-  (added :init (if broken? (error "injected migration failure") 2) :state #t))
+  (added :init (if broken?
+                   (error "injected migration failure")
+                   2)
+         :state #t))
+
 (set! broken? #t)
-(check "migration failure escapes" #t
-  (fails? '(ui/reconcile! retry-root (ui/new Retry {:property "after"}))))
+(check "migration failure escapes" #t (fails? '(ui/reconcile! retry-root (ui/new Retry {:property "after"}))))
 (check "failed migration keeps instance identity" #t (eq? retry-instance (widget retry-root 0)))
 (set! broken? #f)
 (ui/reconcile! retry-root (ui/new Retry {:property "after"}))
@@ -191,20 +281,27 @@
 
 ;; Reloading the UI module preserves its classes and existing mounted trees.
 (def saved-widget ui/Widget)
+
 (require (otium.ui :as ui :reload))
 (check "UI module reload preserves base class" #t (eq? saved-widget ui/Widget))
 (ui/reconcile! retry-root (ui/new Retry {:property "module reload"}))
 (check "UI module reload preserves user instance" #t (eq? retry-instance (widget retry-root 0)))
 (check "UI module reload preserves state" 9 (retry-instance :state))
 (require (otium.ui.input :as input))
+
 (def pointer (input/pointer))
+
 (def pointer-tree (ui/root))
+
 (def presses 0)
+
 (ui/reconcile! pointer-tree
-  (ui/button {:key :button :on-press (fn () (set! presses (+ presses 1)))}
-    (ui/label {} "child")))
+               (ui/button {:key :button :on-press (fn () (set! presses (+ presses 1)))} (ui/label {} "child")))
+
 (def target (child pointer-tree 0))
+
 (def leaf (child target 0))
+
 (set! (target :bounds) (make ui/Bounds :x 10 :y 10 :width 50 :height 50))
 (set! (leaf :bounds) (make ui/Bounds :x 20 :y 20 :width 100 :height 100))
 (check "hit starts at child" leaf (car (input/hit-path pointer-tree 25 25)))
@@ -231,26 +328,39 @@
 (check "removed capture cannot activate" 1 presses)
 (check "removed capture released" nil (pointer :captured))
 (ui/reconcile! pointer-tree (list (ui/button {}) (ui/button {})))
-(for-each (fn (node)
-  (set! (node :bounds) (make ui/Bounds :x 0 :y 0 :width 30 :height 30)))
-  (ui/children pointer-tree))
-(check "last painted sibling wins" (child pointer-tree 1)
-  (car (input/hit-path pointer-tree 5 5)))
+(for-each (fn (node) (set! (node :bounds) (make ui/Bounds :x 0 :y 0 :width 30 :height 30))) (ui/children pointer-tree))
+(check "last painted sibling wins" (child pointer-tree 1) (car (input/hit-path pointer-tree 5 5)))
 (ui/dispose! pointer-tree)
 
 (def keyboard-tree (ui/root))
+
 (def activations 0)
+
 (def actions '())
+
 (def (keyboard-view disabled?)
-  (ui/column {:keymap {"X" :outer} :on-action (fn (a) (set! actions (cons a actions)) :handled)}
-    (ui/button {:key :a :disabled disabled? :on-press (fn () (set! activations (+ activations 1)))} "A")
-    (ui/button {:key :skip :disabled #t} "Skip")
-    (ui/button {:key :b :keymap {"X" :inner}
-      :on-action (fn (a) (set! actions (cons a actions)) :handled)} "B")))
-(def (key! kind key) (input/keyboard! keyboard-tree {:kind kind :key key}))
+  (ui/column {:keymap {"X" :outer}
+              :on-action (fn (a)
+                           (set! actions (cons a actions))
+                           :handled)}
+             (ui/button {:key :a :disabled disabled? :on-press (fn () (set! activations (+ activations 1)))} "A")
+             (ui/button {:key :skip :disabled #t} "Skip")
+             (ui/button {:key :b
+                         :keymap {"X" :inner}
+                         :on-action (fn (a)
+                                      (set! actions (cons a actions))
+                                      :handled)}
+                        "B")))
+
+(def (key! kind key)
+  (input/keyboard! keyboard-tree {:kind kind :key key}))
+
 (ui/reconcile! keyboard-tree (keyboard-view #f))
+
 (def ka (child (child keyboard-tree 0) 0))
+
 (def kb (child (child keyboard-tree 0) 2))
+
 (key! :key-down "Tab")
 (check "tab starts at first button" ka (ui/focused keyboard-tree))
 (key! :key-down "Space")
@@ -299,19 +409,21 @@
 (key! :key-up "Return")
 (check "unmount cancels key" 1 activations)
 (check "unmount clears focus" nil (ui/focused keyboard-tree))
-(ui/reconcile! keyboard-tree
-  [(ui/button {:key :a}) (ui/button {:key :b})])
+(ui/reconcile! keyboard-tree [(ui/button {:key :a}) (ui/button {:key :b})])
+
 (def reorder-focus (child keyboard-tree 0))
+
 (ui/focus! keyboard-tree reorder-focus)
-(ui/reconcile! keyboard-tree
-  [(ui/button {:key :b}) (ui/button {:key :a})])
+(ui/reconcile! keyboard-tree [(ui/button {:key :b}) (ui/button {:key :a})])
 (check "keyed reorder preserves focus" reorder-focus (ui/focused keyboard-tree))
 (ui/reconcile! keyboard-tree (ui/column {:disabled #t} (ui/button {})))
 (key! :key-down "Tab")
 (check "disabled ancestor excludes descendants" nil (ui/focused keyboard-tree))
 (ui/dispose! keyboard-tree)
 (ui/reconcile! pointer-tree (ui/button {:on-press (fn () (set! presses (+ presses 1)))} "Press"))
+
 (def disabled-target (child pointer-tree 0))
+
 (set! (disabled-target :bounds) (make ui/Bounds :x 0 :y 0 :width 40 :height 40))
 (input/dispatch! pointer pointer-tree {:kind :pointer-down :x 5 :y 5})
 (check "pointer press focuses button" disabled-target (ui/focused pointer-tree))

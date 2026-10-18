@@ -17,16 +17,22 @@
   (let ((text (read-file path)))
     (when (readable? text)
       (let ((once (format/format-text text format/builtin-rules)))
-        (cond ((not (equal? (token-texts once) (token-texts text)))
-               (println (string-append path ": formatting changed the tokens"))
-               (set! failures (+ failures 1)))
-              ((not (equal? (format/format-text once format/builtin-rules) once))
-               (println (string-append path ": formatting is not stable"))
-               (set! failures (+ failures 1)))
-              (else nil))))))
+        (cond
+          ((not (equal? (token-texts once) (token-texts text)))
+           (println (string-append path ": formatting changed the tokens"))
+           (set! failures (+ failures 1)))
+          ((not (equal? (format/format-text once format/builtin-rules) once))
+           (println (string-append path ": formatting is not stable"))
+           (set! failures (+ failures 1)))
+          (else nil))))))
 
 (let ((paths (files/source-files (otium.process/arguments))))
   (for-each check-file paths)
-  (println (string-append "format corpus: " (number->string (length paths)) " files, "
-                          (number->string failures) " failures"))
-  (exit (if (= failures 0) 0 1)))
+  (println (string-append "format corpus: "
+                          (number->string (length paths))
+                          " files, "
+                          (number->string failures)
+                          " failures"))
+  (exit (if (= failures 0)
+            0
+            1)))

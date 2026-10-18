@@ -1,54 +1,87 @@
 (require (otium.ui :as ui))
 (require (otium.ui.input :as input))
 (require (ui.terminal :as terminal))
+
 (def checks 0)
+
 (def (check name expected actual)
   (unless (equal? expected actual) (error name expected actual))
   (set! checks (+ checks 1)))
+
 (def tree (ui/root))
+
 (def value "aé🙂z")
+
 (def submitted [])
+
 (def clipboard "")
-(def (view) (ui/text-field {:key :field :autofocus #t :value value
-  :on-change (fn (text) (set! value text)) :on-submit (fn (text) (push! submitted text))}))
+
+(def (view)
+  (ui/text-field {:key :field
+                  :autofocus #t
+                  :value value
+                  :on-change (fn (text) (set! value text))
+                  :on-submit (fn (text) (push! submitted text))}))
+
 (ui/reconcile! tree (view))
+
 (def node (first (ui/children tree)))
+
 (def field (ui/instance node))
+
 (def (key! key . repeat)
-  (input/keyboard! tree {:kind :key-down :key key :repeat (not (null? repeat))
-    :clipboard-read (fn () clipboard) :clipboard-write (fn (text) (set! clipboard text))}))
-(def (text! text) (input/keyboard! tree {:kind :text-input :text text}))
+  (input/keyboard! tree
+                   {:kind :key-down
+                    :key key
+                    :repeat (not (null? repeat))
+                    :clipboard-read (fn () clipboard)
+                    :clipboard-write (fn (text) (set! clipboard text))}))
+
+(def (text! text)
+  (input/keyboard! tree {:kind :text-input :text text}))
+
 (check "autofocus" node (ui/focused tree))
 (check "unicode cursor uses codepoints" 4 (field :cursor))
-(key! "Left") (key! "Backspace")
+(key! "Left")
+(key! "Backspace")
 (check "backspace removes whole unicode character" "aéz" value)
-(key! "Home") (key! "Delete")
+(key! "Home")
+(key! "Delete")
 (check "forward delete" "éz" value)
 (key! "Shift+End")
 (check "selection" "éz" (ui/selection field))
 (text! "λ")
 (check "text replaces selection" "λ" value)
-(key! "Ctrl+A") (key! "Ctrl+C")
+(key! "Ctrl+A")
+(key! "Ctrl+C")
 (check "copy selection" "λ" clipboard)
 (key! "Meta+X")
 (check "cut selection" "" value)
-(set! clipboard "one\ntwo\r\nthree\tfour") (key! "Meta+V")
+(set! clipboard "one\ntwo\r\nthree\tfour")
+(key! "Meta+V")
 (check "paste is single line" "one two  three four" value)
 (key! "Backspace" #t)
 (check "editing key repeats" "one two  three fou" value)
-(key! "Return") (key! "Return" #t)
+(key! "Return")
+(key! "Return" #t)
 (check "submit repeat suppressed" 1 (length submitted))
 (ui/reconcile! tree (view))
 (check "reconcile preserves field" field (ui/instance (first (ui/children tree))))
-(key! "Home") (key! "Shift+Right")
+(key! "Home")
+(key! "Shift+Right")
 (ui/reconcile! tree (view))
 (check "reconcile preserves selection" "o" (ui/selection field))
-(set! value "history") (ui/reconcile! tree (view))
+(set! value "history")
+(ui/reconcile! tree (view))
 (check "external value moves caret to end" 7 (field :cursor))
 (check "external value clears selection" "" (ui/selection field))
-(key! "Home") (key! "Left") (key! "Backspace")
+(key! "Home")
+(key! "Left")
+(key! "Backspace")
 (check "left edge clamps" "history" value)
-(key! "End") (key! "Right") (key! "Delete")
+(key! "End")
+(key! "Right")
+(key! "Delete")
 (check "right edge clamps" "history" value)
 (ui/reconcile! tree (ui/text-field {:disabled #t :value value}))
 (text! "ignored")
@@ -56,23 +89,33 @@
 (check "disabled text ignored" "history" value)
 (ui/dispose! tree)
 (ui/reconcile! tree (terminal/view))
+
 (def prompt (ui/instance (get (ui/children (get (ui/children (first (ui/children tree))) 2)) 1)))
-(terminal/run! "echo first") (terminal/run! "echo second")
+
+(terminal/run! "echo first")
+(terminal/run! "echo second")
 (set! (prompt :draft) "unfinished")
 (terminal/history! prompt :older)
 (check "newest history" "echo second" (prompt :draft))
 (terminal/history! prompt :older)
 (check "older history" "echo first" (prompt :draft))
-(terminal/history! prompt :newer) (terminal/history! prompt :newer)
+(terminal/history! prompt :newer)
+(terminal/history! prompt :newer)
 (check "history restores draft" "unfinished" (prompt :draft))
 (terminal/run! "clear")
 (check "clear scrollback" 0 (length (get terminal/model :lines)))
 (ui/dispose! tree)
+
 (def drag-tree (ui/root))
+
 (def pointer (input/pointer))
+
 (ui/reconcile! drag-tree (ui/text-field {:value "abcd"}))
+
 (def drag-node (first (ui/children drag-tree)))
+
 (def drag-field (ui/instance drag-node))
+
 (set! (drag-node :bounds) (make ui/Bounds :x 0 :y 0 :width 100 :height 44))
 (set! (drag-field :positions) [0 10 20 30 40])
 (input/dispatch! pointer drag-tree {:kind :pointer-down :x 10 :y 10})

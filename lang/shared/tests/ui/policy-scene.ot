@@ -3,14 +3,31 @@
 (require (otium.sdl :as sdl))
 (require (otium.ffi :as ffi))
 (require (ui.events :as events))
+
 (def editing #t)
-(defclass CustomEntry :is ui/Widget editing (value :init "Waiting" :state #t))
-(defmethod (ui/default-focusable? (w CustomEntry)) #t)
-(defmethod (ui/accepts-text? (w CustomEntry)) (w :editing))
-(defmethod (ui/build (w CustomEntry)) (ui/label {} (w :value)))
+
+(defclass CustomEntry
+  :is ui/Widget
+  editing
+  (value :init "Waiting" :state #t))
+
+(defmethod (ui/default-focusable? (w CustomEntry))
+  #t)
+
+(defmethod (ui/accepts-text? (w CustomEntry))
+  (w :editing))
+
+(defmethod (ui/build (w CustomEntry))
+  (ui/label {} (w :value)))
+
 (defmethod (ui/handle-event (w CustomEntry) event)
-  (when (eq? (get event :kind) :text-input) (set! (w :value) (get event :text)) :handled))
-(def (view) (ui/new CustomEntry {:key :custom :autofocus #t :editing editing}))
+  (when (eq? (get event :kind) :text-input)
+    (set! (w :value) (get event :text))
+    :handled))
+
+(def (view)
+  (ui/new CustomEntry {:key :custom :autofocus #t :editing editing}))
+
 (def (step! tree frame context)
   (let ((active? (ffi/bind sdl/library "SDL_TextInputActive" '(pointer) 'bool)))
     (when (= frame 0)

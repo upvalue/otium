@@ -1,4 +1,5 @@
 (ns ui.quit-script)
 (require (ui.events :as events))
+
 (def (step! tree frame context)
   (when (= frame 2) (events/quit!)))

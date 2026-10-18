@@ -13,8 +13,12 @@
 (println "reduce-sum:" (reduce + 0 [1 2 3 4]))
 (println "reduce-list:" (reduce + 100 '(1 2)))
 (println "reduce-nil:" (reduce + 5 nil))
-(let ((a [1 2 3]) (seen []))
-  (for-each (fn (x) (push! seen x) (pop! a)) a)
+(let ((a [1 2 3])
+      (seen []))
+  (for-each (fn (x)
+              (push! seen x)
+              (pop! a))
+            a)
   (println "for-each-snapshot:" seen))
 (println "reverse-list:" (reverse '(1 2 3)))
 (println "reverse-array:" (reverse [1 2 3]))
@@ -28,17 +32,21 @@
 (println "drop-zero:" (drop 0 [1 2]))
 (println "negative-index-counts:" (nth [1 2] -1) (take -1 '(1 2)) (drop -1 [1 2]))
 (println "nth-fractional:"
-  (try (nth [1 2] 0.5)
-    (catch (error? e) 'caught-error)))
+         (try
+           (nth [1 2] 0.5)
+           (catch (error? e) 'caught-error)))
 (println "take-nonnumeric:"
-  (try (take "1" '(1 2))
-    (catch (error? e) 'caught-error)))
+         (try
+           (take "1" '(1 2))
+           (catch (error? e) 'caught-error)))
 (println "drop-fractional:"
-  (try (drop 0.5 [1 2])
-    (catch (error? e) 'caught-error)))
+         (try
+           (drop 0.5 [1 2])
+           (catch (error? e) 'caught-error)))
 (println "take-improper:"
-  (try (take 1 '(1 . 2))
-    (catch (error? e) 'caught-error)))
+         (try
+           (take 1 '(1 . 2))
+           (catch (error? e) 'caught-error)))
 
 ; sort: one class per sort, stable, kind-preserving
 (println "sort-ints:" (sort [3 1 2]))
@@ -58,17 +66,11 @@
   (println "freq-values:" (values f)))
 
 ; put/dissoc/update copy; put!/update! mutate
-(let ((t {:a 1}))
-  (let ((t2 (put t :b 2)))
-    (println "put-copy:" (count t) (count t2) (get t2 :b))))
+(let ((t {:a 1})) (let ((t2 (put t :b 2))) (println "put-copy:" (count t) (count t2) (get t2 :b))))
 (println "put-nil:" (get (put nil :a 1) :a))
 (println "assoc:" (assoc "b" '(("a" . 1) ("b" . 2))) (assoc 'z '((a . 1))))
-(let ((t {:a 1 :b 2}))
-  (let ((t2 (dissoc t :a)))
-    (println "dissoc-copy:" (count t) (count t2) (get t2 :a))))
-(let ((t {:a 1}))
-  (let ((t2 (update t :a inc)))
-    (println "update-copy:" (get t :a) (get t2 :a))))
+(let ((t {:a 1 :b 2})) (let ((t2 (dissoc t :a))) (println "dissoc-copy:" (count t) (count t2) (get t2 :a))))
+(let ((t {:a 1})) (let ((t2 (update t :a inc))) (println "update-copy:" (get t :a) (get t2 :a))))
 (let ((t {:a 1}))
   (put! t :b 2)
   (println "put-mutates:" (count t) (get t :b)))
@@ -98,15 +100,15 @@
 (println "split-ws:" (string-split "  a b   c "))
 (println "join:" (string-join "-" [1 2 3]))
 (println "join-list:" (string-join ":" '(1 2 3)))
-(println "join-empty:"
-  (str "<" (string-join ":" '()) ">")
-  (str "<" (string-join ":" nil) ">"))
+(println "join-empty:" (str "<" (string-join ":" '()) ">") (str "<" (string-join ":" nil) ">"))
 (println "join-improper:"
-  (try (string-join ":" '(1 . 2))
-    (catch (error? e) 'caught-error)))
+         (try
+           (string-join ":" '(1 . 2))
+           (catch (error? e) 'caught-error)))
 (println "join-not-sequence:"
-  (try (string-join ":" 1)
-    (catch (error? e) 'caught-error)))
+         (try
+           (string-join ":" 1)
+           (catch (error? e) 'caught-error)))
 (println "str-concat:" (str 1 "x" :k 'sym 2.5))
 (println "str-empty:" (str "<" (str) ">"))
 (println "string-len:" (string-length "héllo"))
@@ -128,18 +130,22 @@
 (println "apply-array:" (apply max [3 9 2]))
 (println "apply-empty:" (apply list '()) (apply list nil))
 (println "apply-improper:"
-  (try (apply list '(1 . 2))
-    (catch (error? e) 'caught-error)))
+         (try
+           (apply list '(1 . 2))
+           (catch (error? e) 'caught-error)))
 (println "apply-not-sequence:"
-  (try (apply list 1)
-    (catch (error? e) 'caught-error)))
+         (try
+           (apply list 1)
+           (catch (error? e) 'caught-error)))
 (println "append-proper:" (append '(1 2) '(3 4)))
 (println "append-last-improper:"
-  (try (append '(1 2) 3)
-    (catch (error? e) 'caught-error)))
+         (try
+           (append '(1 2) 3)
+           (catch (error? e) 'caught-error)))
 (println "append-only-improper:"
-  (try (append '(1 . 2))
-    (catch (error? e) 'caught-error)))
+         (try
+           (append '(1 . 2))
+           (catch (error? e) 'caught-error)))
 (println "partial:" ((partial + 1 2) 3))
 (println "comp:" ((comp inc inc) 1))
 (println "comp-order:" ((comp str inc) 4))
@@ -149,11 +155,13 @@
 (println "range-step:" (range 5 0 -2))
 (println "range-empty:" (range 3 3))
 (println "range-fractional:"
-  (try (range 0 3 0.5)
-    (catch (error? e) 'caught-error)))
+         (try
+           (range 0 3 0.5)
+           (catch (error? e) 'caught-error)))
 (println "get-in-extra-default:"
-  (try (get-in {} [] 1 2)
-    (catch (error? e) 'caught-error)))
+         (try
+           (get-in {} [] 1 2)
+           (catch (error? e) 'caught-error)))
 
 ; concat: kind follows the first argument
 (println "concat-list-first:" (concat '(1) [2 3]))

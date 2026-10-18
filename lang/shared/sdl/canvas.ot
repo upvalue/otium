@@ -1,110 +1,221 @@
 ;; One desktop session, on the interpreter's main thread. Scene reload never
 ;; reevaluates this file. Every resource is registered immediately after creation.
 (def sdl-resources '())
+
 (def sdl-window ffi/null)
+
 (def sdl-renderer ffi/null)
+
 (def sdl-rectangle ffi/null)
+
 (def sdl-event ffi/null)
+
 (def sdl-audio ffi/null)
+
 (def sdl-pcm ffi/null)
+
 (def sdl-backend #f)
-(def (sdl-check value) (if value value (error (SDL_GetError))))
-(def (sdl-pointer value) (if (ffi/null? value) (error (SDL_GetError)) value))
+
+(def (sdl-check value)
+  (if value
+      value
+      (error (SDL_GetError))))
+
+(def (sdl-pointer value)
+  (if (ffi/null? value)
+      (error (SDL_GetError))
+      value))
+
 (def (sdl-own value destroy)
-  (set! sdl-resources (cons (list value destroy) sdl-resources)) value)
-(def (sdl-memory type count) (sdl-own (ffi/alloc type count) ffi/free!))
+  (set! sdl-resources (cons (list value destroy) sdl-resources))
+  value)
+
+(def (sdl-memory type count)
+  (sdl-own (ffi/alloc type count) ffi/free!))
+
 (def (sdl-close!)
-  (if (ffi/null? sdl-window) #f (SDL_StopTextInput sdl-window))
+  (if (ffi/null? sdl-window)
+      #f
+      (SDL_StopTextInput sdl-window))
   (let loop ()
     (if (pair? sdl-resources)
         (let ((resource (car sdl-resources)))
           (set! sdl-resources (cdr sdl-resources))
-          ((car (cdr resource)) (car resource)) (loop)) #f))
-  (set! sdl-window ffi/null) (set! sdl-renderer ffi/null)
-  (set! sdl-audio ffi/null) (SDL_Quit))
+          ((car (cdr resource)) (car resource))
+          (loop))
+        #f))
+  (set! sdl-window ffi/null)
+  (set! sdl-renderer ffi/null)
+  (set! sdl-audio ffi/null)
+  (SDL_Quit))
+
 (def (sdl-open! renderer-name audio?)
   (SDL_SetMainReady)
-  (sdl-check (SDL_Init (+ SDL_INIT_VIDEO (if audio? SDL_INIT_AUDIO 0))))
-  (set! sdl-window (sdl-own (sdl-pointer (SDL_CreateWindow "Otium / shared SDL FFI" 960 640 SDL_WINDOW_RESIZABLE)) SDL_DestroyWindow))
+  (sdl-check (SDL_Init (+ SDL_INIT_VIDEO
+                          (if audio?
+                              SDL_INIT_AUDIO
+                              0))))
+  (set! sdl-window
+        (sdl-own (sdl-pointer (SDL_CreateWindow "Otium / shared SDL FFI" 960 640 SDL_WINDOW_RESIZABLE))
+                 SDL_DestroyWindow))
   (set! sdl-renderer (sdl-own (sdl-pointer (SDL_CreateRenderer sdl-window renderer-name)) SDL_DestroyRenderer))
   (set! sdl-backend (SDL_GetRendererName sdl-renderer))
-  (if (equal? sdl-backend "software") (error "Accelerated renderer required") #f)
+  (if (equal? sdl-backend "software")
+      (error "Accelerated renderer required")
+      #f)
   (sdl-check (SDL_SetRenderLogicalPresentation sdl-renderer 960 640 SDL_LOGICAL_PRESENTATION_LETTERBOX))
   (SDL_SetRenderVSync sdl-renderer 1)
   (set! sdl-rectangle (sdl-memory SDL_FRect 1))
   (set! sdl-event (sdl-memory SDL_Event 1))
   (sdl-check (SDL_StartTextInput sdl-window)))
-(def (color! r g b) (sdl-check (SDL_SetRenderDrawColor sdl-renderer r g b 255)))
-(def (clear! r g b) (color! r g b) (sdl-check (SDL_RenderClear sdl-renderer)))
+
+(def (color! r g b)
+  (sdl-check (SDL_SetRenderDrawColor sdl-renderer r g b 255)))
+
+(def (clear! r g b)
+  (color! r g b)
+  (sdl-check (SDL_RenderClear sdl-renderer)))
+
 (def (rect! x y w h r g b)
   (ffi/field-set! sdl-rectangle SDL_FRect '(x) x)
   (ffi/field-set! sdl-rectangle SDL_FRect '(y) y)
   (ffi/field-set! sdl-rectangle SDL_FRect '(w) w)
   (ffi/field-set! sdl-rectangle SDL_FRect '(h) h)
-  (color! r g b) (sdl-check (SDL_RenderFillRect sdl-renderer sdl-rectangle)))
+  (color! r g b)
+  (sdl-check (SDL_RenderFillRect sdl-renderer sdl-rectangle)))
+
 (def (line! x1 y1 x2 y2 r g b)
-  (color! r g b) (sdl-check (SDL_RenderLine sdl-renderer x1 y1 x2 y2)))
+  (color! r g b)
+  (sdl-check (SDL_RenderLine sdl-renderer x1 y1 x2 y2)))
+
 (def (text! x y text r g b)
-  (color! r g b) (sdl-check (SDL_RenderDebugText sdl-renderer x y text)))
-(def (present!) (sdl-check (SDL_RenderPresent sdl-renderer)))
+  (color! r g b)
+  (sdl-check (SDL_RenderDebugText sdl-renderer x y text)))
+
+(def (present!)
+  (sdl-check (SDL_RenderPresent sdl-renderer)))
+
 (def (capture! path)
   (let ((surface (sdl-pointer (SDL_RenderReadPixels sdl-renderer ffi/null))))
     (unwind-protect (sdl-check (SDL_SaveBMP surface path)) (SDL_DestroySurface surface))))
-(def (seconds) (/ (SDL_GetTicksNS) 1000000000.0))
+
+(def (seconds)
+  (/ (SDL_GetTicksNS) 1000000000.0))
+
 (def (event-copy event)
   (let ((type (ffi/field-ref event SDL_Event '(type)))
         (stamp (ffi/field-ref event SDL_Event '(common timestamp))))
     (cond
       ((or (= type SDL_EVENT_KEY_DOWN) (= type SDL_EVENT_KEY_UP))
-       (list 'key stamp type (ffi/field-ref event SDL_Event '(key scancode)) (ffi/field-ref event SDL_Event '(key repeat))))
+       (list 'key
+             stamp
+             type
+             (ffi/field-ref event SDL_Event '(key scancode))
+             (ffi/field-ref event SDL_Event '(key repeat))))
       ((= type SDL_EVENT_MOUSE_MOTION)
-       (list 'motion stamp type (ffi/field-ref event SDL_Event '(motion x)) (ffi/field-ref event SDL_Event '(motion y))))
+       (list 'motion
+             stamp
+             type
+             (ffi/field-ref event SDL_Event '(motion x))
+             (ffi/field-ref event SDL_Event '(motion y))))
       ((or (= type SDL_EVENT_MOUSE_BUTTON_DOWN) (= type SDL_EVENT_MOUSE_BUTTON_UP))
-       (list 'button stamp type (ffi/field-ref event SDL_Event '(button button)) (ffi/field-ref event SDL_Event '(button x)) (ffi/field-ref event SDL_Event '(button y))))
+       (list 'button
+             stamp
+             type
+             (ffi/field-ref event SDL_Event '(button button))
+             (ffi/field-ref event SDL_Event '(button x))
+             (ffi/field-ref event SDL_Event '(button y))))
       ((= type SDL_EVENT_MOUSE_WHEEL)
        (list 'wheel stamp type (ffi/field-ref event SDL_Event '(wheel x)) (ffi/field-ref event SDL_Event '(wheel y))))
       ((= type SDL_EVENT_WINDOW_RESIZED)
-       (list 'resize stamp type (ffi/field-ref event SDL_Event '(window data1)) (ffi/field-ref event SDL_Event '(window data2))))
+       (list 'resize
+             stamp
+             type
+             (ffi/field-ref event SDL_Event '(window data1))
+             (ffi/field-ref event SDL_Event '(window data2))))
       ((= type SDL_EVENT_TEXT_INPUT)
        (list 'text stamp type (ffi/read-utf8 (ffi/field-ref event SDL_Event '(text text)) 1048576)))
       (else (list 'event stamp type)))))
-(def (poll-event) (if (SDL_PollEvent sdl-event) (event-copy sdl-event) #f))
+
+(def (poll-event)
+  (if (SDL_PollEvent sdl-event)
+      (event-copy sdl-event)
+      #f))
+
 (def (event-action event)
   (let ((type (car (cdr (cdr event)))))
-    (cond ((or (= type SDL_EVENT_QUIT) (= type SDL_EVENT_WINDOW_CLOSE_REQUESTED)) 'quit)
-          ((= type SDL_EVENT_KEY_DOWN)
-           (let ((key (car (cdr (cdr (cdr event))))))
-             (cond ((= key SDL_SCANCODE_ESCAPE) 'quit) ((= key SDL_SCANCODE_R) 'reload) (else #f))))
-          (else #f))))
+    (cond
+      ((or (= type SDL_EVENT_QUIT) (= type SDL_EVENT_WINDOW_CLOSE_REQUESTED)) 'quit)
+      ((= type SDL_EVENT_KEY_DOWN)
+       (let ((key (car (cdr (cdr (cdr event))))))
+         (cond
+           ((= key SDL_SCANCODE_ESCAPE) 'quit)
+           ((= key SDL_SCANCODE_R) 'reload)
+           (else #f))))
+      (else #f))))
+
 (def (events!)
   (let loop ((action #f))
     (let ((event (poll-event)))
-      (if event (let ((next (event-action event)))
-                  (loop (if (eq? action 'quit) action (if next next action)))) action))))
+      (if event
+          (let ((next (event-action event)))
+            (loop (if (eq? action 'quit)
+                      action
+                      (if next
+                          next
+                          action))))
+          action))))
+
 (def (make-test-texture!)
-  (let ((texture (sdl-own (sdl-pointer (SDL_CreateTexture sdl-renderer SDL_PIXELFORMAT_RGBA32 SDL_TEXTUREACCESS_STATIC 2 2)) SDL_DestroyTexture))
+  (let ((texture (sdl-own (sdl-pointer (SDL_CreateTexture sdl-renderer
+                                                          SDL_PIXELFORMAT_RGBA32
+                                                          SDL_TEXTUREACCESS_STATIC
+                                                          2
+                                                          2))
+                          SDL_DestroyTexture))
         (pixels (sdl-memory 'u8 16)))
     (let loop ((i 0))
       (if (< i 16)
-          (begin (ffi/set! pixels 'u8 i (if (= (modulo i 4) 1) 0 255)) (loop (+ i 1))) #f))
-    (sdl-check (SDL_UpdateTexture texture ffi/null pixels 8)) texture))
+          (begin
+            (ffi/set! pixels
+                      'u8
+                      i
+                      (if (= (modulo i 4) 1)
+                          0
+                          255))
+            (loop (+ i 1)))
+          #f))
+    (sdl-check (SDL_UpdateTexture texture ffi/null pixels 8))
+    texture))
+
 (def (draw-test-texture! texture)
   (ffi/field-set! sdl-rectangle SDL_FRect '(x) 100.0)
   (ffi/field-set! sdl-rectangle SDL_FRect '(y) 100.0)
   (ffi/field-set! sdl-rectangle SDL_FRect '(w) 32.0)
   (ffi/field-set! sdl-rectangle SDL_FRect '(h) 32.0)
   (sdl-check (SDL_RenderTexture sdl-renderer texture ffi/null sdl-rectangle)))
+
 (def (audio-open!)
   (let ((spec (sdl-memory SDL_AudioSpec 1)))
     (ffi/field-set! spec SDL_AudioSpec '(format) SDL_AUDIO_F32)
     (ffi/field-set! spec SDL_AudioSpec '(channels) 1)
     (ffi/field-set! spec SDL_AudioSpec '(freq) 48000)
-    (set! sdl-audio (sdl-own (sdl-pointer (SDL_OpenAudioDeviceStream SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK spec ffi/null ffi/null)) SDL_DestroyAudioStream)))
+    (set! sdl-audio
+          (sdl-own (sdl-pointer (SDL_OpenAudioDeviceStream SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK spec ffi/null ffi/null))
+                   SDL_DestroyAudioStream)))
   (set! sdl-pcm (sdl-memory 'float 2400))
   (let loop ((i 0))
     (if (< i 2400)
-        (begin (ffi/set! sdl-pcm 'float i (* 0.08 (sin (* i (/ (* 2.0 3.141592653589793 440.0) 48000.0))))) (loop (+ i 1))) #f)))
+        (begin
+          (ffi/set! sdl-pcm 'float i (* 0.08 (sin (* i (/ (* 2.0 3.141592653589793 440.0) 48000.0)))))
+          (loop (+ i 1)))
+        #f)))
+
 (def (audio-refill!)
   (let ((queued (SDL_GetAudioStreamQueued sdl-audio)))
-    (if (< queued 0) (error (SDL_GetError)) #f)
-    (if (< queued 19200) (sdl-check (SDL_PutAudioStreamData sdl-audio sdl-pcm 9600)) #f)))
+    (if (< queued 0)
+        (error (SDL_GetError))
+        #f)
+    (if (< queued 19200)
+        (sdl-check (SDL_PutAudioStreamData sdl-audio sdl-pcm 9600))
+        #f)))

@@ -1,8 +1,17 @@
 (def checks 0)
+
 (def (check expected actual)
-  (if (equal? expected actual) (set! checks (+ checks 1))
+  (if (equal? expected actual)
+      (set! checks (+ checks 1))
       (error "reader check failed" expected actual)))
-(def (fails? thunk) (try (begin (thunk) #f) (catch (error? c) #t)))
+
+(def (fails? thunk)
+  (try
+    (begin
+      (thunk)
+      #f)
+    (catch (error? c) #t)))
+
 (check #t (array? [1 2]))
 (check #t (table? {:a 1}))
 (check #t (keyword? :a))
@@ -13,28 +22,69 @@
 (check #f (eq? nil '()))
 (check :nil (type nil))
 (check :keyword (type :a))
-(check 2 (if nil 1 2))
+(check 2
+       (if nil
+           1
+           2))
 (check #t (not nil))
-(check 1 (if '() 1 2))
-(check 1 (if 0 1 2))
-(check 1 (if [] 1 2))
-(check 1 (if {} 1 2))
+(check 1
+       (if '()
+           1
+           2))
+(check 1
+       (if 0
+           1
+           2))
+(check 1
+       (if []
+           1
+           2))
+(check 1
+       (if {}
+           1
+           2))
+
 (def count 0)
-(check nil (and (begin (set! count (+ count 1)) nil) (set! count 99)))
+
+(check nil
+       (and (begin
+              (set! count (+ count 1))
+              nil)
+            (set! count 99)))
 (check 1 count)
-(check 4 (or nil (begin (set! count (+ count 1)) 4) (set! count 99)))
+(check 4
+       (or nil
+           (begin
+             (set! count (+ count 1))
+             4)
+           (set! count 99)))
 (check 2 count)
 (check nil (or #f nil))
 (check #f (and #f nil))
-(check 5 (cond (nil 99) ((begin (set! count (+ count 1)) 5) 5)))
+(check 5
+       (cond
+         (nil 99)
+         ((begin
+            (set! count (+ count 1))
+            5)
+          5)))
 (check 3 count)
 (when nil (set! count 99))
 (unless nil (set! count (+ count 1)))
 (check 4 count)
 (check '() (filter (fn (x) nil) '(1 2 3)))
+
 (def a [])
+
 (def alias a)
-(def (grow n) (if (= n 100) nil (begin (push! a n) (grow (+ n 1)))))
+
+(def (grow n)
+  (if (= n 100)
+      nil
+      (begin
+        (push! a n)
+        (grow (+ n 1)))))
+
 (grow 0)
 (check #t (eq? a alias))
 (check 100 (length a))
@@ -49,32 +99,44 @@
 (check 97 (length (drop 2 a)))
 (check #t (fails? (fn () (put! a 999 1))))
 (check #t (fails? (fn () (table :odd))))
+
 (def t {:first 1 :second 2})
+
 (put! t :first nil)
 (check nil (get t :first))
 (put! t :first 3)
 (check :second (get (keys t) 0))
 (check :first (get (keys t) 1))
 (check 2 (get (values t) 0))
+
 (def identity-key [])
+
 (put! t identity-key 4)
 (check 4 (get t identity-key))
 (check nil (get t []))
 (put! t 1 :int 1.0 :float)
 (check :int (get t 1))
 (check :float (get t 1.0))
+
 (def pair-key (list :x 2))
+
 (put! t pair-key 9)
 (check 9 (get t (list :x 2)))
 (check #t (fails? (fn () (set-car! pair-key :y))))
 (check #t (fails? (fn () (set-cdr! (cdr pair-key) '()))))
 (check "λ" (get "aλb" 1))
 (check 3 (length "aλb"))
-(defmacro reader-values (x y) (list 'quote (list x y)))
+
+(defmacro reader-values (x y)
+  (list 'quote (list x y)))
+
 (check '(:a nil) (reader-values :a nil))
-(defmacro literal-array (x) x)
+
+(defmacro literal-array (x)
+  x)
+
 (check 3 (get (literal-array [3]) 0))
-(check '(array :a nil) '[ :a nil ])
+(check '(array :a nil) '[:a nil])
 (check '(table :a 1 :b 2) '{:a 1 :b 2})
 (check 0 (length (filter (fn (x) nil) [1 2])))
 (check 2 (get (filter (fn (x) (= x 2)) [1 2 3]) 0))
@@ -82,11 +144,14 @@
 (check 10 (apply + 4 [1 2 3]))
 (check :first (get (keys (copy t)) 1))
 (check #t (fails? (fn () (drop 1.5 a))))
-(check 7 (try (error 'test)
-           (catch ((fn (c) nil) c) 99)
-           (catch ((fn (c) #t) c) 7)))
+(check 7
+       (try
+         (error 'test)
+         (catch ((fn (c) nil) c) 99)
+         (catch ((fn (c) #t) c) 7)))
+
 (def handled 0)
-(handler-bind (((fn (c) nil) (fn (c) (set! handled 99))))
-  (signal 'test))
+
+(handler-bind (((fn (c) nil) (fn (c) (set! handled 99)))) (signal 'test))
 (check 0 handled)
 (println "reader values passed")

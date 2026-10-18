@@ -11,37 +11,54 @@
 
 (def- (to-list seq)
   "Coerce any sequence to a proper list."
-  (cond ((nil? seq) '())
-        ((array? seq) (array-to-list seq))
-        ((list? seq) seq)
-        (else (error "to-list: expected sequence"))))
+  (cond
+    ((nil? seq) '())
+    ((array? seq) (array-to-list seq))
+    ((list? seq) seq)
+    (else (error "to-list: expected sequence"))))
 
 (def- (finish-like source values)
-  (if (array? source) (list-to-array values) values))
+  (if (array? source)
+      (list-to-array values)
+      values))
 
-(def- (builder-like source) (if (array? source) (array) '()))
+(def- (builder-like source)
+  (if (array? source)
+      (array)
+      '()))
 
 (def- (builder-add builder value)
-  (if (array? builder) (begin (push! builder value) builder) (cons value builder)))
+  (if (array? builder)
+      (begin
+        (push! builder value)
+        builder)
+      (cons value builder)))
 
 (def- (builder-finish builder)
-  (if (array? builder) builder (reverse builder)))
+  (if (array? builder)
+      builder
+      (reverse builder)))
 
 (def- (slice seq start count)
   (if (array? seq)
-      (let ((out (array)) (i start)
-            (end (if (nil? count) (length seq) (min (+ start count) (length seq)))))
+      (let ((out (array))
+            (i start)
+            (end (if (nil? count)
+                     (length seq)
+                     (min (+ start count) (length seq)))))
         (while (< i end)
           (push! out (get seq i))
           (set! i (+ i 1)))
         out)
-      (let ((s (to-list seq)) (skip start))
+      (let ((s (to-list seq))
+            (skip start))
         (while (and (pair? s) (> skip 0))
           (set! s (cdr s))
           (set! skip (- skip 1)))
         (if (nil? count)
             s
-            (let ((acc '()) (left count))
+            (let ((acc '())
+                  (left count))
               (while (and (pair? s) (> left 0))
                 (set! acc (cons (car s) acc))
                 (set! s (cdr s))
@@ -57,17 +74,26 @@
 
 (defmacro when (test . body)
   "(when test body ...)\nEvaluate body when test is truthy; otherwise return nil."
-  `(if ,test (begin ,@body) nil))
+  `(if ,test
+       (begin ,@body)
+       nil))
 
 (defmacro unless (test . body)
   "(unless test body ...)\nEvaluate body when test is falsy; otherwise return nil."
-  `(if ,test nil (begin ,@body)))
+  `(if ,test
+       nil
+       (begin ,@body)))
 
 (defmacro dotimes (spec . body)
   "(dotimes (index count) body ...)\nEvaluate count once, then run body with index from 0 below count. Return nil."
-  (let ((sp (if (eq? (car spec) 'array) (cdr spec) spec)))
-    (let ((i (car sp)) (n (car (cdr sp))) (lim (gensym "lim")))
-      `(let ((,lim ,n) (,i 0))
+  (let ((sp (if (eq? (car spec) 'array)
+                (cdr spec)
+                spec)))
+    (let ((i (car sp))
+          (n (car (cdr sp)))
+          (lim (gensym "lim")))
+      `(let ((,lim ,n)
+             (,i 0))
          (while (< ,i ,lim)
            ,@body
            (set! ,i (+ ,i 1)))
@@ -78,9 +104,11 @@
 (def (caar p)
   "(caar pair)\nEquivalent to (car (car pair))."
   (car (car p)))
+
 (def (cadr p)
   "(cadr pair)\nEquivalent to (car (cdr pair))."
   (car (cdr p)))
+
 (def (cddr p)
   "(cddr pair)\nEquivalent to (cdr (cdr pair))."
   (cdr (cdr p)))
@@ -95,7 +123,8 @@
 (def (array-to-list value)
   "(array-to-list sequence)\nConvert an array to a new list; other input types raise an error."
   (unless (array? value) (error "array-to-list: expected array"))
-  (let ((acc '()) (i (- (length value) 1)))
+  (let ((acc '())
+        (i (- (length value) 1)))
     (while (>= i 0)
       (set! acc (cons (get value i) acc))
       (set! i (- i 1)))
@@ -103,68 +132,91 @@
 
 (def (first seq)
   "(first sequence)\nReturn the first element, or nil. Also accepts strings, returning a one-character string."
-  (cond ((nil? seq) nil)
-        ((null? seq) nil)
-        ((pair? seq) (car seq))
-        ((array? seq) (if (> (length seq) 0) (get seq 0) nil))
-        ((string? seq) (if (> (string-length seq) 0) (substring seq 0 1) nil))
-        (else (error "first: not a sequence"))))
+  (cond
+    ((nil? seq) nil)
+    ((null? seq) nil)
+    ((pair? seq) (car seq))
+    ((array? seq)
+     (if (> (length seq) 0)
+         (get seq 0)
+         nil))
+    ((string? seq)
+     (if (> (string-length seq) 0)
+         (substring seq 0 1)
+         nil))
+    (else (error "first: not a sequence"))))
 
 (def (rest seq)
   "All but the first element; kind-preserving; empty is ()."
-  (cond ((nil? seq) '())
-        ((null? seq) '())
-        ((pair? seq) (cdr seq))
-        ((array? seq) (drop 1 seq))
-        (else (error "rest: not a sequence"))))
+  (cond
+    ((nil? seq) '())
+    ((null? seq) '())
+    ((pair? seq) (cdr seq))
+    ((array? seq) (drop 1 seq))
+    (else (error "rest: not a sequence"))))
 
 (def (nth seq i)
   "(nth sequence index)\nReturn the element at a zero-based integer index, or nil out of range. Accepts lists, arrays, and nil."
   (require-int "nth" i)
-  (cond ((nil? seq) nil)
-        ((null? seq) nil)
-        ((array? seq) (if (and (>= i 0) (< i (length seq))) (get seq i) nil))
-        ((pair? seq)
-         (if (< i 0)
-             nil
-             (let ((s seq) (k i))
-               (while (and (pair? s) (> k 0))
-                 (set! s (cdr s))
-                 (set! k (- k 1)))
-               (if (pair? s) (car s) nil))))
-        (else (error "nth: not a sequence"))))
+  (cond
+    ((nil? seq) nil)
+    ((null? seq) nil)
+    ((array? seq)
+     (if (and (>= i 0) (< i (length seq)))
+         (get seq i)
+         nil))
+    ((pair? seq)
+     (if (< i 0)
+         nil
+         (let ((s seq)
+               (k i))
+           (while (and (pair? s) (> k 0))
+             (set! s (cdr s))
+             (set! k (- k 1)))
+           (if (pair? s)
+               (car s)
+               nil))))
+    (else (error "nth: not a sequence"))))
 
 (def (second seq)
   "(second sequence)\nReturn element at index 1, or nil."
   (nth seq 1))
+
 (def (third seq)
   "(third sequence)\nReturn element at index 2, or nil."
   (nth seq 2))
 
 (def (last seq)
   "(last sequence)\nReturn the last element, or nil."
-  (cond ((nil? seq) nil)
-        ((null? seq) nil)
-        ((array? seq) (if (> (length seq) 0) (get seq (- (length seq) 1)) nil))
-        ((pair? seq)
-         (let ((s seq))
-           (while (pair? (cdr s)) (set! s (cdr s)))
-           (car s)))
-        (else (error "last: not a sequence"))))
+  (cond
+    ((nil? seq) nil)
+    ((null? seq) nil)
+    ((array? seq)
+     (if (> (length seq) 0)
+         (get seq (- (length seq) 1))
+         nil))
+    ((pair? seq)
+     (let ((s seq))
+       (while (pair? (cdr s)) (set! s (cdr s)))
+       (car s)))
+    (else (error "last: not a sequence"))))
 
 (def (count coll)
   "(count collection)\nLike length, but nil counts as zero."
-  (if (nil? coll) 0 (length coll)))
+  (if (nil? coll)
+      0
+      (length coll)))
 
 (def (empty? coll)
   "(empty? collection)\nTest whether a sequence, table, string, or buffer has no elements. nil is empty."
-  (cond ((nil? coll) #t)
-        ((null? coll) #t)
-        ((pair? coll) #f)
-        ((string? coll) (= (string-length coll) 0))
-        ((buffer? coll) (= (length coll) 0))
-        ((or (array? coll) (table? coll)) (= (length coll) 0))
-        (else (error "empty?: unsupported type"))))
+  (cond
+    ((nil? coll) #t)
+    ((null? coll) #t)
+    ((pair? coll) #f)
+    ((string? coll) (= (string-length coll) 0))
+    ((buffer? coll) (= (length coll) 0))
+    ((or (array? coll) (table? coll)) (= (length coll) 0))
+    (else (error "empty?: unsupported type"))))
 
 (def (map f seq)
   "Kind-preserving: list in, list out; array in, array out; nil -> ()."
@@ -186,25 +238,42 @@
 
 (def (range . args)
   "(range end) / (range start end [step])\nReturn an array of integers toward the exclusive end. Defaults: start 0, step 1. Step must be nonzero and may be negative."
-  (let ((n (length args)) (a 0) (b 0) (step 1))
-    (cond ((= n 1) (set! b (nth args 0)))
-          ((= n 2) (begin (set! a (nth args 0)) (set! b (nth args 1))))
-          ((= n 3) (begin (set! a (nth args 0)) (set! b (nth args 1))
-                          (set! step (nth args 2))))
-          (else (error "range: expected 1 to 3 arguments")))
+  (let ((n (length args))
+        (a 0)
+        (b 0)
+        (step 1))
+    (cond
+      ((= n 1) (set! b (nth args 0)))
+      ((= n 2)
+       (begin
+         (set! a (nth args 0))
+         (set! b (nth args 1))))
+      ((= n 3)
+       (begin
+         (set! a (nth args 0))
+         (set! b (nth args 1))
+         (set! step (nth args 2))))
+      (else (error "range: expected 1 to 3 arguments")))
     (require-int "range" a)
     (require-int "range" b)
     (require-int "range" step)
     (when (= step 0) (error "range: step must be nonzero"))
-    (let ((out (array)) (i a))
+    (let ((out (array))
+          (i a))
       (if (> step 0)
-          (while (< i b) (push! out i) (set! i (+ i step)))
-          (while (> i b) (push! out i) (set! i (+ i step))))
+          (while (< i b)
+            (push! out i)
+            (set! i (+ i step)))
+          (while (> i b)
+            (push! out i)
+            (set! i (+ i step))))
       out)))
 
 (def (concat . seqs)
   "Concatenation; kind follows the first argument (nil -> list)."
-  (let ((out (builder-like (if (pair? seqs) (car seqs) nil))))
+  (let ((out (builder-like (if (pair? seqs)
+                               (car seqs)
+                               nil))))
     (for-each (fn (s) (for-each (fn (x) (set! out (builder-add out x))) s)) seqs)
     (builder-finish out)))
 
@@ -220,55 +289,51 @@
 
 (def (contains? coll x)
   "(contains? collection value)\nTest table key presence, equal? membership in a sequence, or substring presence in a string. nil returns #f."
-  (cond ((nil? coll) #f)
-        ((table? coll) (not (nil? (get coll x))))
-        ((string? coll) (string-contains? coll x))
-        ((or (null? coll) (pair? coll) (array? coll))
-         (let ((found #f))
-           (for-each (fn (e) (when (equal? e x) (set! found #t))) coll)
-           found))
-        (else (error "contains?: unsupported collection"))))
+  (cond
+    ((nil? coll) #f)
+    ((table? coll) (not (nil? (get coll x))))
+    ((string? coll) (string-contains? coll x))
+    ((or (null? coll) (pair? coll) (array? coll))
+     (let ((found #f))
+       (for-each (fn (e) (when (equal? e x) (set! found #t))) coll)
+       found))
+    (else (error "contains?: unsupported collection"))))
 
 ;; --- sorting ----------------------------------------------------------------
 
 (def- (sort-class k)
-  (cond ((number? k) :number)
-        ((string? k) :string)
-        ((symbol? k) :symbol)
-        ((keyword? k) :keyword)
-        (else (error "sort: keys must be numbers, strings, symbols, or keywords"))))
+  (cond
+    ((number? k) :number)
+    ((string? k) :string)
+    ((symbol? k) :symbol)
+    ((keyword? k) :keyword)
+    (else (error "sort: keys must be numbers, strings, symbols, or keywords"))))
 
 (def- (key-less? a b)
   (if (number? a)
       (< a b)
-      (string<? (name a) (name b))))   ; strings/symbols/keywords, lexicographic
+      (string<? (name a) (name b)))) ; strings/symbols/keywords, lexicographic
 
 ;; stable merge of two lists of (key . elem) pairs
 (def- (merge-runs a b)
-  (cond ((null? a) b)
-        ((null? b) a)
-        ((key-less? (car (car b)) (car (car a)))
-         (cons (car b) (merge-runs a (cdr b))))
-        (else (cons (car a) (merge-runs (cdr a) b)))))
+  (cond
+    ((null? a) b)
+    ((null? b) a)
+    ((key-less? (car (car b)) (car (car a))) (cons (car b) (merge-runs a (cdr b))))
+    (else (cons (car a) (merge-runs (cdr a) b)))))
 
 (def- (msort lst n)
   (if (< n 2)
       lst
-      (let ((half (quotient n 2)))
-        (merge-runs (msort (take half lst) half)
-                    (msort (drop half lst) (- n half))))))
+      (let ((half (quotient n 2))) (merge-runs (msort (take half lst) half) (msort (drop half lst) (- n half))))))
 
 (def (sort-by keyfn seq)
   "Stable sort by derived keys; keys must all be one orderable class."
   (let ((lst (map (fn (x) (cons (keyfn x) x)) (to-list seq))))
     (when (pair? lst)
       (let ((cls (sort-class (car (car lst)))))
-        (for-each (fn (p)
-                    (unless (eq? (sort-class (car p)) cls)
-                      (error "sort: mixed key classes")))
-                  lst)))
-    (let ((res (map cdr (msort lst (length lst)))))
-      (finish-like seq res))))
+        (for-each (fn (p) (unless (eq? (sort-class (car p)) cls) (error "sort: mixed key classes"))) lst)))
+    (let ((res (map cdr (msort lst (length lst))))) (finish-like seq res))))
 
 (def (sort seq)
   "(sort sequence)\nReturn an ascending sorted copy, preserving list/array kind. Keys must belong to a supported, consistent orderable class."
@@ -278,7 +343,9 @@
 
 (def (put coll . kvs)
   "(put collection key value ...)\nput! on a shallow copy; (put nil ...) builds a fresh table."
-  (let ((c (if (nil? coll) (table) (copy coll))))
+  (let ((c (if (nil? coll)
+               (table)
+               (copy coll))))
     (let ((s kvs))
       (while (pair? s)
         (when (null? (cdr s)) (error "put: odd number of key/value arguments"))
@@ -288,7 +355,9 @@
 
 (def (dissoc coll . ks)
   "(dissoc collection key ...)\nReturn a shallow copy without the specified keys."
-  (let ((c (if (nil? coll) (table) (copy coll))))
+  (let ((c (if (nil? coll)
+               (table)
+               (copy coll))))
     (for-each (fn (k) (put! c k nil)) ks)
     c))
 
@@ -299,33 +368,40 @@
 (def (merge . ts)
   "New table, left to right; nil arguments skipped."
   (let ((out (table)))
-    (for-each (fn (t)
-                (unless (nil? t)
-                  (for-each (fn (k) (put! out k (get t k))) (keys t))))
-              ts)
+    (for-each (fn (t) (unless (nil? t) (for-each (fn (k) (put! out k (get t k))) (keys t)))) ts)
     out))
 
 (def (get-in coll path . more)
   "get folded over a sequence of keys."
   (when (> (length more) 1) (error "get-in: expected 2 or 3 arguments"))
-  (let ((default (if (pair? more) (car more) nil))
+  (let ((default (if (pair? more)
+                     (car more)
+                     nil))
         (c coll))
     (for-each (fn (k) (set! c (get c k))) path)
-    (if (nil? c) default c)))
+    (if (nil? c)
+        default
+        c)))
 
 ;; --- conditions (10.9) ------------------------------------------------------
 
 (def (condition-type c)
   "(condition-type condition)\nReturn a condition table's :type, or nil."
-  (if (table? c) (get c :type) nil))
+  (if (table? c)
+      (get c :type)
+      nil))
 
 (def (condition-message c)
   "(condition-message condition)\nReturn a condition table's :message, or nil."
-  (if (table? c) (get c :message) nil))
+  (if (table? c)
+      (get c :message)
+      nil))
 
 (def (error? c)
   "(error? value)\nTest whether value is a table with a :type entry."
-  (if (and (table? c) (not (nil? (get c :type)))) #t #f))
+  (if (and (table? c) (not (nil? (get c :type))))
+      #t
+      #f))
 
 (def (type-pred t)
   "(type-pred type)\nBuild a predicate for conditions of type or its registered subtypes."
@@ -346,21 +422,24 @@
   (restart-case (error {:type 'match-error :message "match: no clause matched" :value value})
     (use-value "Use a value as the result of the match." (x) x)))
 
-(def- (pat-error message pattern) (error (str "match: " message) pattern))
+(def- (pat-error message pattern)
+  (error (str "match: " message) pattern))
 
 (def- (pat-temp st)
   (let ((t (gensym "m")))
     (put! st :temps (cons t (get st :temps)))
     t))
 
-(def- (pat-set t form) `(begin (set! ,t ,form) #t))
+(def- (pat-set t form)
+  `(begin
+     (set! ,t ,form)
+     #t))
 
 ;; Run k on a symbol holding e's value, storing e in a temp first if needed.
 (def- (pat-hold st e k)
   (if (symbol? e)
       (k e)
-      (let ((t (pat-temp st)))
-        (cons (pat-set t e) (k t)))))
+      (let ((t (pat-temp st))) (cons (pat-set t e) (k t)))))
 
 (def- (pat-bind st name source)
   (when (assq name (get st :binds)) (pat-error "name bound twice in one pattern" name))
@@ -370,15 +449,15 @@
   (or (nil? p) (null? p) (number? p) (string? p) (keyword? p) (boolean? p)))
 
 (def- (pat-literal-test e p)
-  (cond ((nil? p) `(nil? ,e))
-        ((null? p) `(null? ,e))
-        ((or (symbol? p) (keyword? p) (boolean? p)) `(eq? ,e (quote ,p)))
-        (else `(equal? ,e (quote ,p)))))
+  (cond
+    ((nil? p) `(nil? ,e))
+    ((null? p) `(null? ,e))
+    ((or (symbol? p) (keyword? p) (boolean? p)) `(eq? ,e (quote ,p)))
+    (else `(equal? ,e (quote ,p)))))
 
 ;; (f e), with a literal one-parameter fn inlined as a let.
 (def- (pat-call f e)
-  (if (and (pair? f) (eq? (car f) 'fn) (pair? (cdr f))
-           (pair? (cadr f)) (symbol? (car (cadr f))) (null? (cdr (cadr f))))
+  (if (and (pair? f) (eq? (car f) 'fn) (pair? (cdr f)) (pair? (cadr f)) (symbol? (car (cadr f))) (null? (cdr (cadr f))))
       `(let ((,(car (cadr f)) ,e)) ,@(cddr f))
       `(,f ,e)))
 
@@ -393,7 +472,11 @@
 
 ;; Give names one temp each, so alternatives can bind them from different places.
 (def- (pat-share st names)
-  (map (fn (n) (let ((t (pat-temp st))) (pat-bind st n t) (cons n t))) names))
+  (map (fn (n)
+         (let ((t (pat-temp st)))
+           (pat-bind st n t)
+           (cons n t)))
+       names))
 
 (def- (pat-copy-out shared binds)
   (map (fn (s) (pat-set (cdr s) (cdr (assq (car s) binds)))) shared))
@@ -404,131 +487,142 @@
       (let ((compiled (map (fn (a) (pat-isolated st a v)) alts))
             (names (map car (cdr (car compiled)))))
         (for-each (fn (c)
-                    (unless (and (= (length (cdr c)) (length names))
-                                 (for-all (fn (n) (assq n (cdr c))) names))
+                    (unless (and (= (length (cdr c)) (length names)) (for-all (fn (n) (assq n (cdr c))) names))
                       (pat-error "or alternatives must bind the same names" (cons 'or alts))))
                   compiled)
         (let ((shared (pat-share st names)))
-          (list `(or ,@(map (fn (c) `(and ,@(car c) ,@(pat-copy-out shared (cdr c))))
-                            compiled)))))))
+          (list `(or ,@(map (fn (c) `(and ,@(car c) ,@(pat-copy-out shared (cdr c)))) compiled)))))))
 
 (def- (pat-opt st p e)
-  (cond ((and (pair? (cdr p)) (pair? (cddr p)) (null? (cdr (cddr p))))
-         (let ((name (cadr p)) (g (pat-temp st)))
-           (unless (symbol? name) (pat-error "opt with a default needs a name" p))
-           (pat-bind st name g)
-           (pat-hold st e (fn (t) (list (pat-set g `(if (nil? ,t) ,(caddr p) ,t)))))))
-        ((and (pair? (cdr p)) (null? (cddr p)))
-         (pat-hold st e
-           (fn (t)
-             (let ((c (pat-isolated st (cadr p) t)))
-               (let ((shared (pat-share st (map car (cdr c)))))
-                 (list `(or (nil? ,t) (and ,@(car c) ,@(pat-copy-out shared (cdr c))))))))))
-        (else (pat-error "invalid opt" p))))
+  (cond
+    ((and (pair? (cdr p)) (pair? (cddr p)) (null? (cdr (cddr p))))
+     (let ((name (cadr p))
+           (g (pat-temp st)))
+       (unless (symbol? name) (pat-error "opt with a default needs a name" p))
+       (pat-bind st name g)
+       (pat-hold st
+                 e
+                 (fn (t)
+                   (list (pat-set g
+                                  `(if (nil? ,t)
+                                       ,(caddr p)
+                                       ,t)))))))
+    ((and (pair? (cdr p)) (null? (cddr p)))
+     (pat-hold st
+               e
+               (fn (t)
+                 (let ((c (pat-isolated st (cadr p) t)))
+                   (let ((shared (pat-share st (map car (cdr c)))))
+                     (list `(or (nil? ,t) (and ,@(car c) ,@(pat-copy-out shared (cdr c))))))))))
+    (else (pat-error "invalid opt" p))))
 
 ;; A table value pattern against e, the looked-up value.
 (def- (pat-table-value st p e)
-  (cond ((and (pair? p) (eq? (car p) 'opt)) (pat-opt st p e))
-        ((or (and (pat-literal? p) (not (nil? p))) (and (pair? p) (eq? (car p) 'quote)))
-         (pat-compile st p e))
-        (else (pat-hold st e (fn (t) (cons `(not (nil? ,t)) (pat-compile st p t)))))))
+  (cond
+    ((and (pair? p) (eq? (car p) 'opt)) (pat-opt st p e))
+    ((or (and (pat-literal? p) (not (nil? p))) (and (pair? p) (eq? (car p) 'quote))) (pat-compile st p e))
+    (else (pat-hold st e (fn (t) (cons `(not (nil? ,t)) (pat-compile st p t)))))))
 
 (def- (pat-table st args v)
-  (let loop ((rest args) (tests (list `(table? ,v))))
-    (cond ((null? rest) tests)
-          ((null? (cdr rest)) (pat-error "table pattern needs key/pattern pairs" (cons 'table args)))
-          (else
-           (let ((k (car rest)))
-             (unless (or (pat-literal? k) (and (pair? k) (eq? (car k) 'quote)))
-               (pat-error "table pattern keys must be literals" k))
-             (loop (cddr rest)
-                   (append tests (pat-table-value st (cadr rest) `(get ,v ,k)))))))))
+  (let loop ((rest args)
+             (tests (list `(table? ,v))))
+    (cond
+      ((null? rest) tests)
+      ((null? (cdr rest)) (pat-error "table pattern needs key/pattern pairs" (cons 'table args)))
+      (else (let ((k (car rest)))
+              (unless (or (pat-literal? k) (and (pair? k) (eq? (car k) 'quote)))
+                (pat-error "table pattern keys must be literals" k))
+              (loop (cddr rest) (append tests (pat-table-value st (cadr rest) `(get ,v ,k)))))))))
 
 (def- (pat-list st args v)
-  (let loop ((rest args) (cur v))
-    (cond ((null? rest) (list `(null? ,cur)))
-          ((not (pair? rest)) (pat-compile st rest cur))
-          ((eq? (car rest) '&)
-           (unless (and (pair? (cdr rest)) (null? (cddr rest)))
-             (pat-error "& needs exactly one pattern after it" (cons 'list args)))
-           (pat-compile st (cadr rest) cur))
-          (else
-           (pat-hold st cur
-             (fn (c)
-               (cons `(pair? ,c)
-                     (append (pat-compile st (car rest) `(car ,c))
-                             (loop (cdr rest) `(cdr ,c))))))))))
+  (let loop ((rest args)
+             (cur v))
+    (cond
+      ((null? rest) (list `(null? ,cur)))
+      ((not (pair? rest)) (pat-compile st rest cur))
+      ((eq? (car rest) '&)
+       (unless (and (pair? (cdr rest)) (null? (cddr rest)))
+         (pat-error "& needs exactly one pattern after it" (cons 'list args)))
+       (pat-compile st (cadr rest) cur))
+      (else (pat-hold st
+                      cur
+                      (fn (c)
+                        (cons `(pair? ,c)
+                              (append (pat-compile st (car rest) `(car ,c)) (loop (cdr rest) `(cdr ,c))))))))))
 
 (def- (pat-quasi st tmpl e)
-  (cond ((and (pair? tmpl) (eq? (car tmpl) 'unquote)) (pat-compile st (cadr tmpl) e))
-        ((and (pair? tmpl) (or (eq? (car tmpl) 'unquote-splicing) (eq? (car tmpl) 'quasiquote)))
-         (pat-error "unsupported inside a quasiquote pattern" tmpl))
-        ((pair? tmpl)
-         (pat-hold st e
-           (fn (v)
-             (cons `(pair? ,v)
-                   (append (pat-quasi st (car tmpl) `(car ,v))
-                           (pat-quasi st (cdr tmpl) `(cdr ,v)))))))
-        (else (list (pat-literal-test e tmpl)))))
+  (cond
+    ((and (pair? tmpl) (eq? (car tmpl) 'unquote)) (pat-compile st (cadr tmpl) e))
+    ((and (pair? tmpl) (or (eq? (car tmpl) 'unquote-splicing) (eq? (car tmpl) 'quasiquote)))
+     (pat-error "unsupported inside a quasiquote pattern" tmpl))
+    ((pair? tmpl)
+     (pat-hold st
+               e
+               (fn (v)
+                 (cons `(pair? ,v) (append (pat-quasi st (car tmpl) `(car ,v)) (pat-quasi st (cdr tmpl) `(cdr ,v)))))))
+    (else (list (pat-literal-test e tmpl)))))
 
 (def- (pat-array st args v)
-  (let loop ((rest args) (i 0) (tests '()))
-    (cond ((null? rest)
-           (append (list `(array? ,v) `(= (length ,v) ,i)) tests))
-          ((eq? (car rest) '&)
-           (unless (and (pair? (cdr rest)) (eq? (cadr rest) '_) (null? (cddr rest)))
-             (pat-error "array rest patterns only accept _" (cons 'array args)))
-           (append (list `(array? ,v) `(>= (length ,v) ,i)) tests))
-          (else
-           (loop (cdr rest) (+ i 1)
-                 (append tests (pat-compile st (car rest) `(get ,v ,i))))))))
+  (let loop ((rest args)
+             (i 0)
+             (tests '()))
+    (cond
+      ((null? rest) (append (list `(array? ,v) `(= (length ,v) ,i)) tests))
+      ((eq? (car rest) '&)
+       (unless (and (pair? (cdr rest)) (eq? (cadr rest) '_) (null? (cddr rest)))
+         (pat-error "array rest patterns only accept _" (cons 'array args)))
+       (append (list `(array? ,v) `(>= (length ,v) ,i)) tests))
+      (else (loop (cdr rest) (+ i 1) (append tests (pat-compile st (car rest) `(get ,v ,i))))))))
 
 (def- (pat-class st type args v)
-  (let loop ((rest args) (tests (list `(class-subtype? (dispatch-type ,v) ,type))))
-    (cond ((null? rest) tests)
-          ((not (and (keyword? (car rest)) (pair? (cdr rest))))
-           (pat-error "class patterns take keyword/pattern pairs" (cons type args)))
-          (else
-           (loop (cddr rest)
-                 (append tests (pat-compile st (cadr rest) `(,v ,(car rest)))))))))
+  (let loop ((rest args)
+             (tests (list `(class-subtype? (dispatch-type ,v) ,type))))
+    (cond
+      ((null? rest) tests)
+      ((not (and (keyword? (car rest)) (pair? (cdr rest))))
+       (pat-error "class patterns take keyword/pattern pairs" (cons type args)))
+      (else (loop (cddr rest) (append tests (pat-compile st (cadr rest) `(,v ,(car rest)))))))))
 
 (def- (pat-all st ps v)
-  (if (pair? ps) (append (pat-compile st (car ps) v) (pat-all st (cdr ps) v)) '()))
+  (if (pair? ps)
+      (append (pat-compile st (car ps) v) (pat-all st (cdr ps) v))
+      '()))
 
 ;; Patterns that need their value more than once, given a symbol v holding it.
 (def- (pat-compound st p v)
-  (let ((head (car p)) (args (cdr p)))
-    (cond ((eq? head 'list) (pat-list st args v))
-          ((eq? head 'quasiquote) (pat-quasi st (car args) v))
-          ((eq? head 'array) (pat-array st args v))
-          ((eq? head 'table) (pat-table st args v))
-          ((eq? head '?) (cons (pat-call (car args) v) (pat-all st (cdr args) v)))
-          ((eq? head 'and) (pat-all st args v))
-          ((eq? head 'or) (pat-or st args v))
-          ((eq? head 'opt) (pat-error "opt is only allowed as a table value" p))
-          ((or (eq? head 'unquote) (eq? head 'unquote-splicing))
-           (pat-error "unquote outside a quasiquote pattern" p))
-          ((symbol? head) (pat-class st head args v))
-          (else (pat-error "unsupported pattern" p)))))
+  (let ((head (car p))
+        (args (cdr p)))
+    (cond
+      ((eq? head 'list) (pat-list st args v))
+      ((eq? head 'quasiquote) (pat-quasi st (car args) v))
+      ((eq? head 'array) (pat-array st args v))
+      ((eq? head 'table) (pat-table st args v))
+      ((eq? head '?) (cons (pat-call (car args) v) (pat-all st (cdr args) v)))
+      ((eq? head 'and) (pat-all st args v))
+      ((eq? head 'or) (pat-or st args v))
+      ((eq? head 'opt) (pat-error "opt is only allowed as a table value" p))
+      ((or (eq? head 'unquote) (eq? head 'unquote-splicing)) (pat-error "unquote outside a quasiquote pattern" p))
+      ((symbol? head) (pat-class st head args v))
+      (else (pat-error "unsupported pattern" p)))))
 
 (def- (pat-compile st p e)
-  (cond ((eq? p '_) '())
-        ((symbol? p) (pat-bind st p e) '())
-        ((pat-literal? p) (list (pat-literal-test e p)))
-        ((not (pair? p)) (pat-error "unsupported pattern" p))
-        ((eq? (car p) 'quote) (list (pat-literal-test e (cadr p))))
-        ((eq? (car p) '==) (list `(equal? ,e ,(cadr p))))
-        ((eq? (car p) '?)
-         (unless (pair? (cdr p)) (pat-error "? needs a predicate" p))
-         (if (null? (cddr p))
-             (list (pat-call (cadr p) e))
-             (pat-hold st e (fn (v) (pat-compound st p v)))))
-        ((eq? (car p) 'app)
-         (unless (and (pair? (cdr p)) (pair? (cddr p)) (null? (cdr (cddr p))))
-           (pat-error "app needs a function and one pattern" p))
-         (let ((t (pat-temp st)))
-           (cons (pat-set t (pat-call (cadr p) e)) (pat-compile st (caddr p) t))))
-        (else (pat-hold st e (fn (v) (pat-compound st p v))))))
+  (cond
+    ((eq? p '_) '())
+    ((symbol? p) (pat-bind st p e) '())
+    ((pat-literal? p) (list (pat-literal-test e p)))
+    ((not (pair? p)) (pat-error "unsupported pattern" p))
+    ((eq? (car p) 'quote) (list (pat-literal-test e (cadr p))))
+    ((eq? (car p) '==) (list `(equal? ,e ,(cadr p))))
+    ((eq? (car p) '?)
+     (unless (pair? (cdr p)) (pat-error "? needs a predicate" p))
+     (if (null? (cddr p))
+         (list (pat-call (cadr p) e))
+         (pat-hold st e (fn (v) (pat-compound st p v)))))
+    ((eq? (car p) 'app)
+     (unless (and (pair? (cdr p)) (pair? (cddr p)) (null? (cdr (cddr p))))
+       (pat-error "app needs a function and one pattern" p))
+     (let ((t (pat-temp st))) (cons (pat-set t (pat-call (cadr p) e)) (pat-compile st (caddr p) t))))
+    (else (pat-hold st e (fn (v) (pat-compound st p v))))))
 
 (def- (match-clauses v clauses)
   (if (null? clauses)
@@ -539,21 +633,27 @@
               (st {:temps '() :binds '()})
               (tests (pat-compile st (car clause) v))
               (names (map (fn (b) (list (car b) (cdr b))) (reverse (get st :binds))))
-              (body `(let ,names ,@(if guarded (cdr (cddr clause)) (cdr clause))))
+              (body `(let ,names
+                       ,@(if guarded
+                             (cdr (cddr clause))
+                             (cdr clause))))
               (temps (map (fn (t) (list t nil)) (get st :temps))))
-          (when (and guarded (not (pair? (cddr clause))))
-            (pat-error ":when needs a guard" clause))
+          (when (and guarded (not (pair? (cddr clause)))) (pat-error ":when needs a guard" clause))
           (let ((form (if (or (pair? tests) guarded)
-                          `(if (and ,@tests ,@(if guarded (list `(let ,names ,(caddr clause))) '()))
+                          `(if (and ,@tests
+                                    ,@(if guarded
+                                          (list `(let ,names ,(caddr clause)))
+                                          '()))
                                ,body
                                ,(match-clauses v (cdr clauses)))
                           body)))
-            (if (pair? temps) `(let ,temps ,form) form))))))
+            (if (pair? temps)
+                `(let ,temps ,form)
+                form))))))
 
 (defmacro match (expr . clauses)
   "(match value (pattern body ...) (pattern :when guard body ...) ...)\nEvaluate value once and run the body of the first clause whose pattern matches and whose guard is truthy, with the pattern's names bound. No match signals match-error. See specs/match.md for patterns."
-  (let ((v (gensym "value")))
-    `(let ((,v ,expr)) ,(match-clauses v clauses))))
+  (let ((v (gensym "value"))) `(let ((,v ,expr)) ,(match-clauses v clauses))))
 
 ;; --- functional (10.8) ------------------------------------------------------
 
@@ -561,79 +661,107 @@
 (def (cdar p)
   "(cdar pair)\nEquivalent to (cdr (car pair))."
   (cdr (car p)))
+
 (def (caaar p)
   "(caaar pair)\nEquivalent to (car (car (car pair)))."
   (car (car (car p))))
+
 (def (caadr p)
   "(caadr pair)\nEquivalent to (car (car (cdr pair)))."
   (car (car (cdr p))))
+
 (def (cadar p)
   "(cadar pair)\nEquivalent to (car (cdr (car pair)))."
   (car (cdr (car p))))
+
 (def (caddr p)
   "(caddr pair)\nEquivalent to (car (cdr (cdr pair)))."
   (car (cdr (cdr p))))
+
 (def (cdaar p)
   "(cdaar pair)\nEquivalent to (cdr (car (car pair)))."
   (cdr (car (car p))))
+
 (def (cdadr p)
   "(cdadr pair)\nEquivalent to (cdr (car (cdr pair)))."
   (cdr (car (cdr p))))
+
 (def (cddar p)
   "(cddar pair)\nEquivalent to (cdr (cdr (car pair)))."
   (cdr (cdr (car p))))
+
 (def (cdddr p)
   "(cdddr pair)\nEquivalent to (cdr (cdr (cdr pair)))."
   (cdr (cdr (cdr p))))
+
 (def (cadddr p)
   "(cadddr pair)\nEquivalent to (car (cdr (cdr (cdr pair))))."
   (car (cdr (cdr (cdr p)))))
 
 (def (list-tail lst k)
   "(list-tail list k)\nThe list after dropping its first k pairs."
-  (let loop ((l lst) (n (require-int "list-tail" k)))
-    (cond ((= n 0) l)
-          ((pair? l) (loop (cdr l) (- n 1)))
-          (else (error "list-tail: index out of range")))))
+  (let loop ((l lst)
+             (n (require-int "list-tail" k)))
+    (cond
+      ((= n 0) l)
+      ((pair? l) (loop (cdr l) (- n 1)))
+      (else (error "list-tail: index out of range")))))
 
 (def (list-ref lst k)
   "(list-ref list k)\nThe element at index k of a list."
   (let ((tail (list-tail lst k)))
-    (if (pair? tail) (car tail) (error "list-ref: index out of range"))))
+    (if (pair? tail)
+        (car tail)
+        (error "list-ref: index out of range"))))
 
 (def (memq x lst)
   "(memq value list)\nThe first tail of list whose car is eq? to value, or #f."
-  (cond ((not (pair? lst)) #f)
-        ((eq? x (car lst)) lst)
-        (else (memq x (cdr lst)))))
+  (cond
+    ((not (pair? lst)) #f)
+    ((eq? x (car lst)) lst)
+    (else (memq x (cdr lst)))))
 
 (def (member x lst)
   "(member value list)\nThe first tail of list whose car is equal? to value, or #f."
-  (cond ((not (pair? lst)) #f)
-        ((equal? x (car lst)) lst)
-        (else (member x (cdr lst)))))
+  (cond
+    ((not (pair? lst)) #f)
+    ((equal? x (car lst)) lst)
+    (else (member x (cdr lst)))))
 
 (def (assq key alist)
   "(assq key alist)\nThe first pair in alist whose car is eq? to key, or #f."
-  (cond ((not (pair? alist)) #f)
-        ((eq? key (car (car alist))) (car alist))
-        (else (assq key (cdr alist)))))
+  (cond
+    ((not (pair? alist)) #f)
+    ((eq? key (car (car alist))) (car alist))
+    (else (assq key (cdr alist)))))
 
 (def (assoc key alist)
   "(assoc key alist)\nThe first pair in alist whose car is equal? to key, or #f."
-  (cond ((not (pair? alist)) #f)
-        ((equal? key (car (car alist))) (car alist))
-        (else (assoc key (cdr alist)))))
+  (cond
+    ((not (pair? alist)) #f)
+    ((equal? key (car (car alist))) (car alist))
+    (else (assoc key (cdr alist)))))
 
-(def- (heads lists) (if (pair? lists) (cons (car (car lists)) (heads (cdr lists))) '()))
-(def- (tails lists) (if (pair? lists) (cons (cdr (car lists)) (tails (cdr lists))) '()))
+(def- (heads lists)
+  (if (pair? lists)
+      (cons (car (car lists)) (heads (cdr lists)))
+      '()))
+
+(def- (tails lists)
+  (if (pair? lists)
+      (cons (cdr (car lists)) (tails (cdr lists)))
+      '()))
+
 (def- (any-empty? lists)
   (and (pair? lists) (or (not (pair? (car lists))) (any-empty? (cdr lists)))))
 
 (def (fold-left f init lst & more)
   "(fold-left procedure initial list ...)\nCombine from the left: (procedure accumulator element ...) for each position."
-  (let loop ((acc init) (lists (cons lst more)))
-    (if (any-empty? lists) acc (loop (apply f acc (heads lists)) (tails lists)))))
+  (let loop ((acc init)
+             (lists (cons lst more)))
+    (if (any-empty? lists)
+        acc
+        (loop (apply f acc (heads lists)) (tails lists)))))
 
 (def (fold-right f init lst & more)
   "(fold-right procedure initial list ...)\nCombine from the right: (procedure element ... accumulator) for each position."
@@ -651,30 +779,40 @@
 
 (def (for-all f lst & more)
   "(for-all predicate list ...)\nThe last result if predicate is truthy for every position, else the first falsy result."
-  (let loop ((lists (cons lst more)) (last #t))
+  (let loop ((lists (cons lst more))
+             (last #t))
     (if (any-empty? lists)
         last
         (let ((v (apply f (heads lists))))
-          (if v (loop (tails lists) v) v)))))
+          (if v
+              (loop (tails lists) v)
+              v)))))
 
 (def (positive? x)
   "(positive? number)\nTest whether number is greater than zero."
   (> x 0))
+
 (def (negative? x)
   "(negative? number)\nTest whether number is less than zero."
   (< x 0))
 
 (def (gcd & xs)
   "(gcd integer ...)\nGreatest common divisor; no arguments gives 0."
-  (let loop ((acc 0) (rest xs))
+  (let loop ((acc 0)
+             (rest xs))
     (if (pair? rest)
-        (loop (let euclid ((a (abs acc)) (b (abs (car rest))))
-                (if (= b 0) a (euclid b (remainder a b))))
+        (loop (let euclid ((a (abs acc))
+                           (b (abs (car rest))))
+                (if (= b 0)
+                    a
+                    (euclid b (remainder a b))))
               (cdr rest))
         acc)))
+
 (def (lcm & xs)
   "(lcm integer ...)\nLeast common multiple; no arguments gives 1."
-  (let loop ((acc 1) (rest xs))
+  (let loop ((acc 1)
+             (rest xs))
     (if (pair? rest)
         (loop (if (or (= acc 0) (= (car rest) 0))
                   0
@@ -684,20 +822,26 @@
 
 (def (keyword->string k)
   "(keyword->string keyword)\nThe name of a keyword, without its colon."
-  (if (keyword? k) (name k) (error "keyword->string: expected keyword")))
+  (if (keyword? k)
+      (name k)
+      (error "keyword->string: expected keyword")))
 
 (def- (string-chain who ok? a b more)
   (if (not (and (string? a) (string? b))) (error (str who ": expected strings")))
   (and (ok? a b) (or (null? more) (string-chain who ok? b (car more) (cdr more)))))
+
 (def (string=? a b & more)
   "(string=? string string ...)\nTest whether all strings are equal."
   (string-chain "string=?" equal? a b more))
+
 (def (string>? a b & more)
   "(string>? string string ...)\nTest whether strings are in strictly decreasing order."
   (string-chain "string>?" (fn (x y) (string<? y x)) a b more))
+
 (def (string<=? a b & more)
   "(string<=? string string ...)\nTest whether strings are in nondecreasing order."
   (string-chain "string<=?" (fn (x y) (not (string<? y x))) a b more))
+
 (def (string>=? a b & more)
   "(string>=? string string ...)\nTest whether strings are in nonincreasing order."
   (string-chain "string>=?" (fn (x y) (not (string<? x y))) a b more))

@@ -1,13 +1,21 @@
 (def checks 0)
+
 (def (check expected actual)
   (unless (equal? expected actual) (error "arithmetic mismatch" expected actual))
   (set! checks (+ checks 1)))
+
 (def (number-check expected actual integer)
   (check expected actual)
   (check integer (int? actual))
   (check integer (exact? actual))
   (check (not integer) (float? actual)))
-(def (fails? thunk) (try (thunk) #f (catch ((fn (c) #t) c) #t)))
+
+(def (fails? thunk)
+  (try
+    (thunk)
+    #f
+    (catch ((fn (c) #t) c) #t)))
+
 (number-check 3.5 (/ 7 2) #f)
 (number-check 3 (/ 6 2) #t)
 (number-check -3 (/ 6 -2) #t)
@@ -38,19 +46,21 @@
 (number-check 1 (round 0.5) #t)
 (number-check -1 (round -0.5) #t)
 (for-each (fn (op)
-  (number-check 2 (op 2) #t)
-  (number-check 2 (op 2.0) #t)
-  (number-check 0 (op -0.0) #t)
-  (check #t (fails? (fn () (op 1e30))))
-  (check #t (fails? (fn () (op -1e30))))
-  (check #t (fails? (fn () (op (sqrt -1)))))
-  (check #t (fails? (fn () (op "2")))))
-  (list floor ceiling truncate round))
+            (number-check 2 (op 2) #t)
+            (number-check 2 (op 2.0) #t)
+            (number-check 0 (op -0.0) #t)
+            (check #t (fails? (fn () (op 1e30))))
+            (check #t (fails? (fn () (op -1e30))))
+            (check #t (fails? (fn () (op (sqrt -1)))))
+            (check #t (fails? (fn () (op "2")))))
+          (list floor ceiling truncate round))
 (number-check 2.0 (sqrt 4) #f)
 (number-check 2.0 (sqrt 4.0) #f)
 (number-check 0.0 (sqrt 0) #f)
 (number-check 1.4142135623730951 (sqrt 2) #f)
+
 (def negative-root (sqrt -1))
+
 (check #t (float? negative-root))
 (check #f (= negative-root negative-root))
 (check #t (fails? (fn () (sqrt "4"))))

@@ -1,20 +1,38 @@
 (require (otium.generic :as g))
 
 (defclass Dog name)
+
 (defclass Cat name)
+
 (defgeneric (speak animal))
-(defmethod (speak (animal Dog)) "Bark!")
-(defmethod (speak (animal Cat)) "Meow.")
+
+(defmethod (speak (animal Dog))
+  "Bark!")
+
+(defmethod (speak (animal Cat))
+  "Meow.")
 
 (defgeneric (collide left right))
-(defmethod (collide left right) "Nothing happens.")
-(defmethod (collide (left Dog) (right Dog)) "Woof.")
-(defmethod (collide (left Cat) (right Cat)) "Meow.")
-(defmethod (collide (left Cat) (right Dog)) "Hiss!")
-(defmethod (collide (left Dog) (right Cat)) "Hiss!")
+
+(defmethod (collide left right)
+  "Nothing happens.")
+
+(defmethod (collide (left Dog) (right Dog))
+  "Woof.")
+
+(defmethod (collide (left Cat) (right Cat))
+  "Meow.")
+
+(defmethod (collide (left Cat) (right Dog))
+  "Hiss!")
+
+(defmethod (collide (left Dog) (right Cat))
+  "Hiss!")
 
 (def dog (g/make Dog :name "Fido"))
+
 (def cat (g/make Cat :name "Mog"))
+
 (println (speak dog))
 (println (speak cat))
 (println (collide dog cat))

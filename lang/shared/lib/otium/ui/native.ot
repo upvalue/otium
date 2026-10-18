@@ -1,66 +1,127 @@
 (ns otium.ui.native)
 (require (otium.ffi :as ffi))
+
 (defonce library nil)
+
 ;; Scalar selectors used by the native layout and text bridge.
 (def BOUNDS_X 0)
+
 (def BOUNDS_Y 1)
+
 (def BOUNDS_WIDTH 2)
+
 (def BOUNDS_HEIGHT 3)
+
 (def QUERY_WIDTH 0)
+
 (def QUERY_HEIGHT 1)
+
 (def QUERY_WIDTH_MODE 2)
+
 (def QUERY_HEIGHT_MODE 3)
+
 (def MEASURE_UNDEFINED 0)
+
 (def MEASURE_EXACTLY 1)
+
 (def MEASURE_AT_MOST 2)
+
 (def MEASURE_DONE -1)
+
 (def MEASURE_OVERFLOW -2)
+
 (def TEXT_WIDTH 0)
+
 (def TEXT_HEIGHT 1)
+
 (def node-new nil)
+
 (def node-free nil)
+
 (def node-clear nil)
+
 (def node-append nil)
+
 (def node-style nil)
+
 (def node-center nil)
+
 (def node-scroll nil)
+
 (def node-shrink nil)
+
 (def node-intrinsic nil)
+
 (def node-layout nil)
+
 (def node-pending nil)
+
 (def node-query nil)
+
 (def node-answer nil)
+
 (def node-retry nil)
+
 (def text-get nil)
+
 (def text-resources nil)
+
 (def text-error nil)
+
 (def text-size nil)
+
 (def text-carets nil)
+
 (def gpu-text nil)
+
 (def node-bounds nil)
+
 (def live-nodes nil)
+
 (def- poll-event-kind nil)
+
 (def- event-x nil)
+
 (def- event-y nil)
+
 (def- event-key nil)
+
 (def- event-code nil)
+
 (def- event-text nil)
+
 (def- event-dy nil)
+
 (def text-input nil)
+
 (def clipboard-get nil)
+
 (def clipboard-set nil)
+
 (def- event-repeat nil)
+
 (def gpu-new nil)
+
 (def gpu-scale nil)
+
 (def app-configure nil)
+
 (def window-present nil)
+
 (def gpu-free nil)
+
 (def gpu-clear nil)
+
 (def gpu-rect nil)
+
 (def gpu-frame nil)
+
 (def gpu-driver nil)
+
 (def gpu-count nil)
+
 (def live-renderers nil)
+
 (def (load! path)
   (set! library (ffi/open-library (list path)))
   (set! node-new (ffi/bind library "otui_node_new" '() 'pointer))
@@ -81,8 +142,11 @@
   (set! text-get (ffi/bind library "otui_text_get" '(utf8 int float float float) 'pointer))
   (set! text-size (ffi/bind library "otui_text_size" '(pointer int) 'float))
   (set! text-carets (ffi/bind library "otui_text_carets" '(pointer pointer int) 'bool))
-  (set! gpu-text (ffi/bind library "otui_gpu_text"
-    '(pointer utf8 int float float float float u32 float float float float) 'bool))
+  (set! gpu-text
+        (ffi/bind library
+                  "otui_gpu_text"
+                  '(pointer utf8 int float float float float u32 float float float float)
+                  'bool))
   (set! node-layout (ffi/bind library "otui_node_layout" '(pointer float float) 'void))
   (set! node-bounds (ffi/bind library "otui_node_bounds" '(pointer int) 'float))
   (set! live-nodes (ffi/bind library "otui_live_nodes" '() 'int))
@@ -103,8 +167,8 @@
   (set! gpu-new (ffi/bind library "otui_gpu_new" '(pointer int int float utf8) 'pointer))
   (set! gpu-free (ffi/bind library "otui_gpu_free" '(pointer) 'void))
   (set! gpu-clear (ffi/bind library "otui_gpu_clear" '(pointer u32) 'void))
-  (set! gpu-rect (ffi/bind library "otui_gpu_rect"
-    '(pointer float float float float float u32 float float float float) 'bool))
+  (set! gpu-rect
+        (ffi/bind library "otui_gpu_rect" '(pointer float float float float float u32 float float float float) 'bool))
   (set! gpu-frame (ffi/bind library "otui_gpu_frame" '(pointer utf8) 'bool))
   (set! gpu-driver (ffi/bind library "otui_gpu_driver" '(pointer) 'utf8))
   (set! gpu-count (ffi/bind library "otui_gpu_count" '(pointer) 'int))
@@ -112,9 +176,11 @@
 
 (def (config-ref settings key)
   (let loop ((entries settings))
-    (cond ((null? entries) (error "Missing UI installation setting" key))
-          ((eq? (car (car entries)) key) (car (cdr (car entries))))
-          (else (loop (cdr entries))))))
+    (cond
+      ((null? entries) (error "Missing UI installation setting" key))
+      ((eq? (car (car entries)) key) (car (cdr (car entries))))
+      (else (loop (cdr entries))))))
+
 (def (load-config! path)
   "Load installation paths as data, then open the native UI library."
   (let ((settings (read-string (read-file path))))
@@ -129,11 +195,12 @@
         (cond
           ((memq kind '(:quit :focus-lost)) {:kind kind})
           ((memq kind '(:key-down :key-up))
-           {:kind kind :key (event-key renderer) :code (event-code renderer)
+           {:kind kind
+            :key (event-key renderer)
+            :code (event-code renderer)
             :repeat (not (= 0 (event-repeat renderer)))})
           ((eq? kind :text-input) {:kind kind :text (event-text renderer)})
           ((memq kind '(:pointer-down :pointer-up :pointer-move))
            {:kind kind :x (event-x renderer) :y (event-y renderer)})
-          ((eq? kind :wheel)
-           {:kind kind :x (event-x renderer) :y (event-y renderer) :dy (event-dy renderer)})
+          ((eq? kind :wheel) {:kind kind :x (event-x renderer) :y (event-y renderer) :dy (event-dy renderer)})
           (else (error "Unknown native UI event" kind)))))))

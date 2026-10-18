@@ -2,105 +2,258 @@
 
 ;; Shared widget lifecycle. Optional layout and drawing live in otium.ui.gpu.
 (defabstract Widget)
-(defclass Description properties key children options)
-(defclass Mounted instance key children (active? :init #t)
-  (layout :init nil) (bounds :init nil) (release-layout :init nil)
-  (parent :init nil) (options :init {}) (focused? :init #f) (pressed? :init #f))
-(defclass Focus (node :init nil) (armed :init nil) (key :init nil) (event :init nil))
-(defclass Root (children :init []) (focus :init (make Focus)))
-(defclass Label :is Widget text
-  (font :init :ui) (size :init 16) (color :init 0xdce5f2ff) (wrap :init #t)
-  (width :init -1) (height :init -1) (grow :init 0) (align :init :left))
-(defclass Column :is Widget
-  (width :init -1) (height :init -1) (grow :init 0)
-  (padding :init 0) (gap :init 0) (background :init nil) (radius :init 0))
-(defclass Row :is Widget
-  (width :init -1) (height :init -1) (grow :init 0)
-  (padding :init 0) (gap :init 0) (background :init nil) (radius :init 0))
-(defclass Button :is Widget (on-press :init nil)
-  (width :init -1) (height :init -1) (grow :init 0) (padding :init 12)
-  (radius :init 10) (style :init :plain) (size :init 18) (font :init :ui))
-(defclass TextField :is Widget
-  (value :init "") (placeholder :init "") (on-change :init nil) (on-submit :init nil)
-  (width :init -1) (height :init 44) (grow :init 0) (size :init 18) (font :init :mono)
-  (cursor :init 0 :state #t) (anchor :init 0 :state #t)
-  (seen :init nil :state #t) (offset :init 0 :state #t) (positions :init [] :state #t))
-(defclass Scroll :is Widget
-  (width :init -1) (height :init -1) (grow :init 0) (padding :init 0) (gap :init 0)
-  (background :init nil) (stick-to-bottom :init #f)
-  (offset :init 0 :state #t) (limit :init 0 :state #t) (following? :init #t :state #t))
 
-(defclass Size width height)
-(defclass Bounds x y width height)
-(def (size width height) (make Size :width width :height height))
-(def (width bounds) (bounds :width))
-(def (height bounds) (bounds :height))
+(defclass Description
+  properties
+  key
+  children
+  options)
+
+(defclass Mounted
+  instance
+  key
+  children
+  (active? :init #t)
+  (layout :init nil)
+  (bounds :init nil)
+  (release-layout :init nil)
+  (parent :init nil)
+  (options :init {})
+  (focused? :init #f)
+  (pressed? :init #f))
+
+(defclass Focus
+  (node :init nil)
+  (armed :init nil)
+  (key :init nil)
+  (event :init nil))
+
+(defclass Root
+  (children :init [])
+  (focus :init (make Focus)))
+
+(defclass Label
+  :is Widget
+  text
+  (font :init :ui)
+  (size :init 16)
+  (color :init 0xdce5f2ff)
+  (wrap :init #t)
+  (width :init -1)
+  (height :init -1)
+  (grow :init 0)
+  (align :init :left))
+
+(defclass Column
+  :is Widget
+  (width :init -1)
+  (height :init -1)
+  (grow :init 0)
+  (padding :init 0)
+  (gap :init 0)
+  (background :init nil)
+  (radius :init 0))
+
+(defclass Row
+  :is Widget
+  (width :init -1)
+  (height :init -1)
+  (grow :init 0)
+  (padding :init 0)
+  (gap :init 0)
+  (background :init nil)
+  (radius :init 0))
+
+(defclass Button
+  :is Widget
+  (on-press :init nil)
+  (width :init -1)
+  (height :init -1)
+  (grow :init 0)
+  (padding :init 12)
+  (radius :init 10)
+  (style :init :plain)
+  (size :init 18)
+  (font :init :ui))
+
+(defclass TextField
+  :is Widget
+  (value :init "")
+  (placeholder :init "")
+  (on-change :init nil)
+  (on-submit :init nil)
+  (width :init -1)
+  (height :init 44)
+  (grow :init 0)
+  (size :init 18)
+  (font :init :mono)
+  (cursor :init 0 :state #t)
+  (anchor :init 0 :state #t)
+  (seen :init nil :state #t)
+  (offset :init 0 :state #t)
+  (positions :init [] :state #t))
+
+(defclass Scroll
+  :is Widget
+  (width :init -1)
+  (height :init -1)
+  (grow :init 0)
+  (padding :init 0)
+  (gap :init 0)
+  (background :init nil)
+  (stick-to-bottom :init #f)
+  (offset :init 0 :state #t)
+  (limit :init 0 :state #t)
+  (following? :init #t :state #t))
+
+(defclass Size
+  width
+  height)
+
+(defclass Bounds
+  x
+  y
+  width
+  height)
+
+(def (size width height)
+  (make Size :width width :height height))
+
+(def (width bounds)
+  (bounds :width))
+
+(def (height bounds)
+  (bounds :height))
+
 (defgeneric (layout-style widget))
-(defmethod (layout-style (w Widget)) {})
+
+(defmethod (layout-style (w Widget))
+  {})
+
 (defmethod (layout-style (w Column))
-  {:width (w :width) :height (w :height) :grow (w :grow)
-   :padding (w :padding) :gap (w :gap) :row #f})
+  {:width (w :width) :height (w :height) :grow (w :grow) :padding (w :padding) :gap (w :gap) :row #f})
+
 (defmethod (layout-style (w Row))
-  {:width (w :width) :height (w :height) :grow (w :grow)
-   :padding (w :padding) :gap (w :gap) :row #t})
+  {:width (w :width) :height (w :height) :grow (w :grow) :padding (w :padding) :gap (w :gap) :row #t})
 
 (defgeneric (build widget))
+
 (defgeneric (measure widget limits))
+
 (defgeneric (paint widget g bounds))
+
 (defgeneric (handle-event widget event))
+
 (defgeneric (default-focusable? widget))
+
 (defgeneric (accepts-text? widget))
+
 (defgeneric (repeat-key? widget event))
+
 (defgeneric (activation-key? widget event))
-(defmethod (default-focusable? (w Widget)) #f)
-(defmethod (default-focusable? (w Button)) #t)
-(defmethod (default-focusable? (w TextField)) #t)
-(defmethod (accepts-text? (w Widget)) #f)
-(defmethod (accepts-text? (w TextField)) #t)
-(defmethod (repeat-key? (w Widget) event) #f)
+
+(defmethod (default-focusable? (w Widget))
+  #f)
+
+(defmethod (default-focusable? (w Button))
+  #t)
+
+(defmethod (default-focusable? (w TextField))
+  #t)
+
+(defmethod (accepts-text? (w Widget))
+  #f)
+
+(defmethod (accepts-text? (w TextField))
+  #t)
+
+(defmethod (repeat-key? (w Widget) event)
+  #f)
+
 (defmethod (repeat-key? (w TextField) event)
   (if (member (get event :key)
-        '("Left" "Right" "Home" "End" "Shift+Left" "Shift+Right" "Shift+Home" "Shift+End"
-          "Backspace" "Delete")) #t #f))
-(defmethod (activation-key? (w Widget) event) #f)
+              '("Left" "Right" "Home" "End" "Shift+Left" "Shift+Right" "Shift+Home" "Shift+End" "Backspace" "Delete"))
+      #t
+      #f))
+
+(defmethod (activation-key? (w Widget) event)
+  #f)
+
 (defmethod (activation-key? (w Button) event)
-  (if (member (get event :key) '("Return" "Space")) #t #f))
+  (if (member (get event :key) '("Return" "Space"))
+      #t
+      #f))
+
 (defparam building-children '())
-(defmethod (build (w Widget)) (building-children))
-(defmethod (measure (w Widget) limits) nil)
-(defmethod (paint (w Widget) g bounds) nil)
-(defmethod (handle-event (w Widget) event) nil)
+
+(defmethod (build (w Widget))
+  (building-children))
+
+(defmethod (measure (w Widget) limits)
+  nil)
+
+(defmethod (paint (w Widget) g bounds)
+  nil)
+
+(defmethod (handle-event (w Widget) event)
+  nil)
+
 (defmethod (handle-event (w Button) event)
-  (cond ((eq? (get event :kind) :press)
-         (when (w :on-press) ((w :on-press)) :handled))
-        ((or (eq? (get event :kind) :pointer-down)
-             (eq? (get event :kind) :pointer-up)) :handled)
-        (else nil)))
+  (cond
+    ((eq? (get event :kind) :press)
+     (when (w :on-press)
+       ((w :on-press))
+       :handled))
+    ((or (eq? (get event :kind) :pointer-down) (eq? (get event :kind) :pointer-up)) :handled)
+    (else nil)))
 
 (def (new class opts . children)
   "Construct a widget description without initializing mounted state."
   (unless (class-subtype? class Widget) (error "ui/new: expected widget class"))
   (unless (table? opts) (error "ui/new: expected options table"))
-  (let ((args '()) (options {}))
+  (let ((args '())
+        (options {}))
     (for-each (fn (k)
-                (cond ((eq? k :key) nil)
-                      ((memq k '(:disabled :focusable :autofocus :keymap :on-action))
-                       (put! options k (get opts k)))
-                      (else (set! args (cons k (cons (get opts k) args))))))
+                (cond
+                  ((eq? k :key) nil)
+                  ((memq k '(:disabled :focusable :autofocus :keymap :on-action)) (put! options k (get opts k)))
+                  (else (set! args (cons k (cons (get opts k) args))))))
               (keys opts))
-    (make Description :properties (apply class-properties class args)
-          :key (get opts :key) :children children :options options)))
+    (make Description
+          :properties (apply class-properties class args)
+          :key (get opts :key)
+          :children children
+          :options options)))
 
-(def (label opts text) (new Label (put opts :text text)))
-(def (row opts . children) (apply new Row opts children))
-(def (column opts . children) (apply new Column opts children))
-(def (button opts . children) (apply new Button opts children))
-(def (text-field opts) (new TextField opts))
-(def (scroll opts . children) (apply new Scroll opts children))
-(def (root) (make Root))
-(def (instance node) (node :instance))
-(def (children node) (node :children))
-(def (active? node) (node :active?))
+(def (label opts text)
+  (new Label (put opts :text text)))
+
+(def (row opts . children)
+  (apply new Row opts children))
+
+(def (column opts . children)
+  (apply new Column opts children))
+
+(def (button opts . children)
+  (apply new Button opts children))
+
+(def (text-field opts)
+  (new TextField opts))
+
+(def (scroll opts . children)
+  (apply new Scroll opts children))
+
+(def (root)
+  (make Root))
+
+(def (instance node)
+  (node :instance))
+
+(def (children node)
+  (node :children))
+
+(def (active? node)
+  (node :active?))
 
 (def- (description? value)
   (and (instance? value) (eq? (dispatch-type value) Description)))
@@ -108,11 +261,12 @@
 (def- (flatten input)
   (let ((out []))
     (def (visit value)
-      (cond ((or (nil? value) (null? value)) nil)
-            ((description? value) (push! out value))
-            ((string? value) (push! out (label {} value)))
-            ((or (array? value) (list? value)) (for-each visit value))
-            (else (error "ui: child must be a description, string, sequence or nil"))))
+      (cond
+        ((or (nil? value) (null? value)) nil)
+        ((description? value) (push! out value))
+        ((string? value) (push! out (label {} value)))
+        ((or (array? value) (list? value)) (for-each visit value))
+        (else (error "ui: child must be a description, string, sequence or nil"))))
     (visit input)
     out))
 
@@ -128,41 +282,48 @@
   (set! (node :active?) #f))
 
 (def- (reconcile-children old input parent)
-  (let ((descriptions (flatten input)) (keyed {}) (seen {}) (kept {}) (out []))
+  (let ((descriptions (flatten input))
+        (keyed {})
+        (seen {})
+        (kept {})
+        (out []))
     ;; Validate keys before changing any sibling instances.
-    (for-each
-      (fn (d)
-        (let ((key (d :key)))
-          (unless (nil? key)
-            (unless (or (keyword? key) (symbol? key) (string? key) (int? key))
-              (error "ui: key must be a keyword, symbol, string or integer"))
-            (when (get seen key #f) (error "ui: duplicate sibling key" key))
-            (put! seen key #t))))
-      descriptions)
+    (for-each (fn (d)
+                (let ((key (d :key)))
+                  (unless (nil? key)
+                    (unless (or (keyword? key) (symbol? key) (string? key) (int? key))
+                      (error "ui: key must be a keyword, symbol, string or integer"))
+                    (when (get seen key #f) (error "ui: duplicate sibling key" key))
+                    (put! seen key #t))))
+              descriptions)
     (for-each (fn (n) (unless (nil? (n :key)) (put! keyed (n :key) n))) old)
     (dotimes (i (length descriptions))
       (let ((d (get descriptions i)))
         (let ((candidate (if (nil? (d :key))
-                             (if (< i (length old)) (get old i) nil)
+                             (if (< i (length old))
+                                 (get old i)
+                                 nil)
                              (get keyed (d :key)))))
           (let ((matched? (and (not (nil? candidate))
                                (equal? (candidate :key) (d :key))
-                               (eq? (dispatch-type (candidate :instance))
-                                    (dispatch-type (d :properties))))))
-            (let ((node (if matched? candidate
-                            (make Mounted :instance (class-mount (d :properties))
-                                  :key (d :key) :children [] :parent parent))))
+                               (eq? (dispatch-type (candidate :instance)) (dispatch-type (d :properties))))))
+            (let ((node (if matched?
+                            candidate
+                            (make Mounted
+                                  :instance (class-mount (d :properties))
+                                  :key (d :key)
+                                  :children []
+                                  :parent parent))))
               (set! (node :options) (d :options))
               (unless (enabled? node) (set! (node :pressed?) #f))
-              (when matched?
-                (class-update-properties! (node :instance) (d :properties)))
-              (let ((built (with-params ((building-children (d :children)))
-                             (build (node :instance)))))
+              (when matched? (class-update-properties! (node :instance) (d :properties)))
+              (let ((built (with-params ((building-children (d :children))) (build (node :instance)))))
                 (set! (node :children) (reconcile-children (node :children) built node)))
               (put! kept node #t)
               (when (and (not matched?) (get (node :options) :autofocus #f))
                 (let find-root ((parent (node :parent)))
-                  (if (mounted? parent) (find-root (parent :parent))
+                  (if (mounted? parent)
+                      (find-root (parent :parent))
                       (when (and (not (focused parent)) (focusable? node)) (focus! parent node)))))
               (push! out node))))))
     (for-each (fn (n) (unless (get kept n #f) (retire! n))) old)
@@ -174,41 +335,52 @@
   (validate-focus! tree)
   tree)
 
-(def (dispose! tree) (reconcile! tree nil))
+(def (dispose! tree)
+  (reconcile! tree nil))
 
 (def (send! node event)
   "Deliver a synthetic event to an active mounted widget."
   (unless (node :active?) (error "ui/send!: widget was removed"))
   (if (enabled? node)
       (handle-event (node :instance)
-        (if (and (node :bounds) (get event :x))
-            (put event :local-x (- (get event :x) ((node :bounds) :x))) event)) nil))
+                    (if (and (node :bounds) (get event :x))
+                        (put event :local-x (- (get event :x) ((node :bounds) :x)))
+                        event))
+      nil))
 
 (def (inspect node)
-  {:instance (node :instance) :key (node :key)
-   :active? (node :active?) :focused? (node :focused?) :pressed? (node :pressed?) :bounds (node :bounds) :children (node :children)})
+  {:instance (node :instance)
+   :key (node :key)
+   :active? (node :active?)
+   :focused? (node :focused?)
+   :pressed? (node :pressed?)
+   :bounds (node :bounds)
+   :children (node :children)})
 
-(def (mounted? value) (and (instance? value) (eq? (dispatch-type value) Mounted)))
+(def (mounted? value)
+  (and (instance? value) (eq? (dispatch-type value) Mounted)))
+
 (def (enabled? node)
-  (and (active? node) (not (get (node :options) :disabled #f))
+  (and (active? node)
+       (not (get (node :options) :disabled #f))
        (or (not (mounted? (node :parent))) (enabled? (node :parent)))))
+
 (def (focusable? node)
-  (and (enabled? node)
-       (let ((w (instance node)))
-         (get (node :options) :focusable
-           (default-focusable? w)))))
+  (and (enabled? node) (let ((w (instance node))) (get (node :options) :focusable (default-focusable? w)))))
+
 (def (cancel-key! tree)
   (let ((focus (tree :focus)))
     (when (focus :armed) (set! ((focus :armed) :pressed?) #f))
     (set! (focus :armed) nil)
     (set! (focus :key) nil)
     (set! (focus :event) nil)))
+
 (def (focus! tree node)
   "Move keyboard focus within this tree, or clear it with nil."
   (when node
     (unless (and (focusable? node)
-      (let belongs ((parent (node :parent)))
-        (or (eq? parent tree) (and (mounted? parent) (belongs (parent :parent))))))
+                 (let belongs ((parent (node :parent)))
+                   (or (eq? parent tree) (and (mounted? parent) (belongs (parent :parent))))))
       (error "Cannot focus an unavailable widget or a widget from another tree")))
   (let ((focus (tree :focus)))
     (unless (eq? node (focus :node))
@@ -217,93 +389,136 @@
       (set! (focus :node) node)
       (when node (set! (node :focused?) #t))))
   node)
+
 (def (validate-focus! tree)
-  (let ((node ((tree :focus) :node)) (focus (tree :focus)))
+  (let ((node ((tree :focus) :node))
+        (focus (tree :focus)))
     (when (and node (not (focusable? node))) (focus! tree nil))
-    (when (and (focus :armed)
-               (not (activation-key? (instance (focus :armed)) (focus :event))))
-      (cancel-key! tree))))
-(def (focused tree) (validate-focus! tree) ((tree :focus) :node))
+    (when (and (focus :armed) (not (activation-key? (instance (focus :armed)) (focus :event)))) (cancel-key! tree))))
+
+(def (focused tree)
+  (validate-focus! tree)
+  ((tree :focus) :node))
+
 (defmethod (layout-style (w Button))
   {:width (w :width) :height (w :height) :grow (w :grow) :padding (w :padding) :center #t})
+
 (defmethod (build (w Button))
   (def (convert value)
-    (cond ((string? value) (label {:size (w :size) :font (w :font) :align :center :wrap #f
-                                  :color (if (eq? (w :style) :accent) 0x101827ff 0xdce5f2ff)} value))
-          ((or (list? value) (array? value)) (map convert value))
-          (else value)))
+    (cond
+      ((string? value)
+       (label {:size (w :size)
+               :font (w :font)
+               :align :center
+               :wrap #f
+               :color (if (eq? (w :style) :accent)
+                          0x101827ff
+                          0xdce5f2ff)}
+              value))
+      ((or (list? value) (array? value)) (map convert value))
+      (else value)))
   (convert (building-children)))
 
 (defmethod (layout-style (w TextField))
   {:width (w :width) :height (w :height) :grow (w :grow)})
+
 (defmethod (build (w TextField))
   (unless (equal? (w :seen) (w :value))
     (set! (w :cursor) (string-length (w :value)))
     (set! (w :anchor) (w :cursor))
     (set! (w :seen) (w :value)))
   nil)
+
 (def (selection w)
   (substring (w :value) (min (w :cursor) (w :anchor)) (max (w :cursor) (w :anchor))))
+
 (def (move-cursor! w position extend?)
   (set! (w :cursor) (max 0 (min (string-length (w :value)) position)))
   (unless extend? (set! (w :anchor) (w :cursor))))
+
 (def (replace-selection! w text)
-  (let ((start (min (w :cursor) (w :anchor))) (end (max (w :cursor) (w :anchor))))
+  (let ((start (min (w :cursor) (w :anchor)))
+        (end (max (w :cursor) (w :anchor))))
     (let ((value (str (substring (w :value) 0 start) text (substring (w :value) end))))
-      (set! (w :value) value) (set! (w :seen) value)
+      (set! (w :value) value)
+      (set! (w :seen) value)
       (move-cursor! w (+ start (string-length text)) #f)
       (when (w :on-change) ((w :on-change) value)))))
+
 (def (single-line text)
-  (string-join " " (string-split (string-join " " (string-split
-    (string-join " " (string-split text "\r")) "\n")) "\t")))
+  (string-join " "
+               (string-split (string-join " " (string-split (string-join " " (string-split text "\r")) "\n")) "\t")))
+
 (defmethod (handle-event (w TextField) event)
-  (let ((kind (get event :kind)) (key (get event :key)))
+  (let ((kind (get event :kind))
+        (key (get event :key)))
     (cond
       ((eq? kind :text-input) (replace-selection! w (single-line (get event :text))) :handled)
       ((or (eq? kind :pointer-down) (eq? kind :pointer-drag))
-       (let ((x (+ (- (get event :local-x 10) 10) (w :offset))) (best 0) (distance 1e20))
+       (let ((x (+ (- (get event :local-x 10) 10) (w :offset)))
+             (best 0)
+             (distance 1e20))
          (dotimes (i (length (w :positions)))
            (let ((d (abs (- x (get (w :positions) i)))))
-             (when (< d distance) (set! best i) (set! distance d))))
-         (move-cursor! w best (eq? kind :pointer-drag))) :handled)
+             (when (< d distance)
+               (set! best i)
+               (set! distance d))))
+         (move-cursor! w best (eq? kind :pointer-drag)))
+       :handled)
       ((eq? kind :key-down)
        (cond
          ((member key '("Left" "Right" "Home" "End" "Shift+Left" "Shift+Right" "Shift+Home" "Shift+End"))
           (let ((extend? (member key '("Shift+Left" "Shift+Right" "Shift+Home" "Shift+End"))))
             (move-cursor! w
-              (cond ((member key '("Home" "Shift+Home")) 0)
-                    ((member key '("End" "Shift+End")) (string-length (w :value)))
-                    ((member key '("Left" "Shift+Left"))
-                     (if (and (not extend?) (not (= (w :cursor) (w :anchor))))
-                         (min (w :cursor) (w :anchor)) (- (w :cursor) 1)))
-                    (else (if (and (not extend?) (not (= (w :cursor) (w :anchor))))
-                              (max (w :cursor) (w :anchor)) (+ (w :cursor) 1)))) extend?)) :handled)
+                          (cond
+                            ((member key '("Home" "Shift+Home")) 0)
+                            ((member key '("End" "Shift+End")) (string-length (w :value)))
+                            ((member key '("Left" "Shift+Left"))
+                             (if (and (not extend?) (not (= (w :cursor) (w :anchor))))
+                                 (min (w :cursor) (w :anchor))
+                                 (- (w :cursor) 1)))
+                            (else (if (and (not extend?) (not (= (w :cursor) (w :anchor))))
+                                      (max (w :cursor) (w :anchor))
+                                      (+ (w :cursor) 1))))
+                          extend?))
+          :handled)
          ((member key '("Backspace" "Delete"))
           (when (= (w :cursor) (w :anchor))
-            (set! (w :anchor) (max 0 (min (string-length (w :value))
-              (+ (w :cursor) (if (equal? key "Backspace") -1 1))))))
-          (replace-selection! w "") :handled)
-         ((member key '("Ctrl+A" "Meta+A"))
-          (set! (w :anchor) 0) (set! (w :cursor) (string-length (w :value))) :handled)
+            (set! (w :anchor)
+                  (max 0
+                       (min (string-length (w :value))
+                            (+ (w :cursor)
+                               (if (equal? key "Backspace")
+                                   -1
+                                   1))))))
+          (replace-selection! w "")
+          :handled)
+         ((member key '("Ctrl+A" "Meta+A")) (set! (w :anchor) 0) (set! (w :cursor) (string-length (w :value))) :handled)
          ((member key '("Ctrl+C" "Meta+C" "Ctrl+X" "Meta+X"))
           (when (and (get event :clipboard-write) (not (equal? (selection w) "")))
             ((get event :clipboard-write) (selection w))
-            (when (member key '("Ctrl+X" "Meta+X")) (replace-selection! w ""))) :handled)
+            (when (member key '("Ctrl+X" "Meta+X")) (replace-selection! w "")))
+          :handled)
          ((member key '("Ctrl+V" "Meta+V"))
-          (when (get event :clipboard-read)
-            (replace-selection! w (single-line ((get event :clipboard-read))))) :handled)
+          (when (get event :clipboard-read) (replace-selection! w (single-line ((get event :clipboard-read)))))
+          :handled)
          ((equal? key "Return")
-          (unless (get event :repeat #f) (when (w :on-submit) ((w :on-submit) (w :value)))) :handled)
+          (unless (get event :repeat #f) (when (w :on-submit) ((w :on-submit) (w :value))))
+          :handled)
          (else nil)))
       (else nil))))
+
 (defmethod (layout-style (w Scroll))
-  {:width (w :width) :height (w :height) :grow (w :grow)
-   :padding (w :padding) :gap (w :gap) :scroll #t})
+  {:width (w :width) :height (w :height) :grow (w :grow) :padding (w :padding) :gap (w :gap) :scroll #t})
+
 (def (scroll-to! w position)
   (set! (w :offset) (max 0 (min (w :limit) position)))
   (set! (w :following?) (>= (w :offset) (w :limit))))
+
 (defmethod (handle-event (w Scroll) event)
   (when (eq? (get event :kind) :wheel)
     (let ((before (w :offset)))
       (scroll-to! w (- before (* 36 (get event :dy))))
-      (if (= before (w :offset)) nil :handled))))
+      (if (= before (w :offset))
+          nil
+          :handled))))

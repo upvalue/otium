@@ -1,19 +1,33 @@
 (ns otium.sdl)
 (require (otium.ffi :as ffi))
+
 ;; Opaque window handles and scalar signatures need no aggregate ABI manifest.
 (defonce library nil)
+
 (def INIT_VIDEO 0x20)
+
 (def WINDOW_HIDDEN 0x8)
+
 (def WINDOW_HIGH_PIXEL_DENSITY 0x2000)
+
 (def init nil)
+
 (def quit nil)
+
 (def was-init nil)
+
 (def set-main-ready nil)
+
 (def create-window nil)
+
 (def destroy-window nil)
+
 (def pump-events nil)
+
 (def delay nil)
+
 (def get-error nil)
+
 (def (load! path)
   (set! library (ffi/open-library (list path)))
   (set! init (ffi/bind library "SDL_Init" '(u32) 'bool))
@@ -25,5 +39,11 @@
   (set! delay (ffi/bind library "SDL_Delay" '(u32) 'void))
   (set! pump-events (ffi/bind library "SDL_PumpEvents" '() 'void))
   (set! get-error (ffi/bind library "SDL_GetError" '() 'utf8)))
-(def (check value) (unless value (error (get-error))) value)
-(def (pointer value) (when (ffi/null? value) (error (get-error))) value)
+
+(def (check value)
+  (unless value (error (get-error)))
+  value)
+
+(def (pointer value)
+  (when (ffi/null? value) (error (get-error)))
+  value)

@@ -8,194 +8,317 @@
 (def (configure-app! options)
   "Set process-wide application metadata before initializing SDL video."
   (sdl/check (native/app-configure (get options :name "Otium")
-    (get options :version "") (get options :id "org.otium.application")
-    (get options :background #f))))
+                                   (get options :version "")
+                                   (get options :id "org.otium.application")
+                                   (get options :background #f))))
+
 (def (present-window! window options)
   "Install a PNG/BMP icon and optionally request foreground focus."
-  (sdl/check (native/window-present window (get options :icon "")
-    (get options :foreground #t))))
+  (sdl/check (native/window-present window (get options :icon "") (get options :foreground #t))))
 
 (def- (allocate-node)
   (let ((p (native/node-new)))
-    (when (ffi/null? p) (error "Cannot allocate Yoga node")) p))
+    (when (ffi/null? p) (error "Cannot allocate Yoga node"))
+    p))
+
 (def- (sync-node! node)
   (unless (node :layout)
     (let ((p (allocate-node)))
       (set! (node :layout) p)
       (set! (node :release-layout) (fn () (native/node-free p)))))
-  (let ((p (node :layout)) (w (ui/instance node)))
+  (let ((p (node :layout))
+        (w (ui/instance node)))
     (native/node-clear p)
     ;; Remove the old leaf callback before adding children.
     (native/node-intrinsic p 0 0 #f)
     (let ((s (ui/layout-style w)))
-      (unless (native/node-style p (get s :width -1) (get s :height -1)
-                (get s :grow 0) (get s :padding 0) (get s :gap 0)
-                (if (get s :row #f) 1 0))
+      (unless (native/node-style p
+                                 (get s :width -1)
+                                 (get s :height -1)
+                                 (get s :grow 0)
+                                 (get s :padding 0)
+                                 (get s :gap 0)
+                                 (if (get s :row #f)
+                                     1
+                                     0))
         (error "Invalid widget layout style"))
       (native/node-center p (get s :center #f))
       (native/node-scroll p (get s :scroll #f)))
     (if (empty? (ui/children node))
         (native/node-intrinsic p 0 0 #t)
-        (for-each (fn (child) (sync-node! child)
-                              (native/node-shrink (child :layout)
-                                (not (eq? (dispatch-type w) ui/Scroll)))
-                              (native/node-append p (child :layout))) (ui/children node)))))
+        (for-each (fn (child)
+                    (sync-node! child)
+                    (native/node-shrink (child :layout) (not (eq? (dispatch-type w) ui/Scroll)))
+                    (native/node-append p (child :layout)))
+                  (ui/children node)))))
+
 (def- (measure-mode value)
-  (cond ((= value native/MEASURE_UNDEFINED) :undefined)
-        ((= value native/MEASURE_EXACTLY) :exactly)
-        ((= value native/MEASURE_AT_MOST) :at-most)
-        (else (error "Unknown native measurement mode" value))))
+  (cond
+    ((= value native/MEASURE_UNDEFINED) :undefined)
+    ((= value native/MEASURE_EXACTLY) :exactly)
+    ((= value native/MEASURE_AT_MOST) :at-most)
+    (else (error "Unknown native measurement mode" value))))
+
 (def- (answer-queries! node scale)
-  (let ((p (node :layout)) (changed #f))
+  (let ((p (node :layout))
+        (changed #f))
     (let loop ((i (native/node-pending p)))
       (when (= i native/MEASURE_OVERFLOW) (error "Too many Yoga measurement queries"))
-      (unless (or (= i native/MEASURE_DONE) (>= i 0))
-        (error "Invalid native measurement query index" i))
+      (unless (or (= i native/MEASURE_DONE) (>= i 0)) (error "Invalid native measurement query index" i))
       (when (>= i 0)
         (let ((wm (native/node-query p i native/QUERY_WIDTH_MODE))
               (hm (native/node-query p i native/QUERY_HEIGHT_MODE)))
-          (let ((limits {:scale scale :width-mode (measure-mode wm)
-                         :height-mode (measure-mode hm)}))
+          (let ((limits {:scale scale :width-mode (measure-mode wm) :height-mode (measure-mode hm)}))
             (unless (= wm native/MEASURE_UNDEFINED) (put! limits :width (native/node-query p i native/QUERY_WIDTH)))
             (unless (= hm native/MEASURE_UNDEFINED) (put! limits :height (native/node-query p i native/QUERY_HEIGHT)))
             (let ((size (or (ui/measure (ui/instance node) limits) (ui/size 0 0))))
-              (unless (native/node-answer p i (size :width) (size :height))
-                (error "Invalid widget measurement")))))
+              (unless (native/node-answer p i (size :width) (size :height)) (error "Invalid widget measurement")))))
         (set! changed #t)
         (loop (native/node-pending p))))
     (for-each (fn (child) (when (answer-queries! child scale) (set! changed #t))) (ui/children node))
     changed))
+
 (def- (retry! node)
   (native/node-retry (node :layout))
   (for-each retry! (ui/children node)))
+
 (def- (save-bounds! node x y)
   (let ((p (node :layout)))
-    (let ((left (+ x (native/node-bounds p native/BOUNDS_X))) (top (+ y (native/node-bounds p native/BOUNDS_Y))))
-      (set! (node :bounds) (make ui/Bounds :x left :y top
-        :width (native/node-bounds p native/BOUNDS_WIDTH) :height (native/node-bounds p native/BOUNDS_HEIGHT)))
-      (let ((w (ui/instance node)) (offset 0))
+    (let ((left (+ x (native/node-bounds p native/BOUNDS_X)))
+          (top (+ y (native/node-bounds p native/BOUNDS_Y))))
+      (set! (node :bounds)
+            (make ui/Bounds
+                  :x left
+                  :y top
+                  :width (native/node-bounds p native/BOUNDS_WIDTH)
+                  :height (native/node-bounds p native/BOUNDS_HEIGHT)))
+      (let ((w (ui/instance node))
+            (offset 0))
         (when (eq? (dispatch-type w) ui/Scroll)
           (let ((bottom 0))
             (for-each (fn (child)
-              (set! bottom (max bottom (+ (native/node-bounds (child :layout) native/BOUNDS_Y)
-                                          (native/node-bounds (child :layout) native/BOUNDS_HEIGHT))))) (ui/children node))
+                        (set! bottom
+                              (max bottom
+                                   (+ (native/node-bounds (child :layout) native/BOUNDS_Y)
+                                      (native/node-bounds (child :layout) native/BOUNDS_HEIGHT)))))
+                      (ui/children node))
             (set! (w :limit) (max 0 (- (+ bottom (w :padding)) (native/node-bounds p native/BOUNDS_HEIGHT))))
-            (set! (w :offset) (if (and (w :stick-to-bottom) (w :following?)) (w :limit)
-                                  (min (w :offset) (w :limit))))
+            (set! (w :offset)
+                  (if (and (w :stick-to-bottom) (w :following?))
+                      (w :limit)
+                      (min (w :offset) (w :limit))))
             (set! offset (w :offset))))
         (for-each (fn (child) (save-bounds! child left (- top offset))) (ui/children node))))))
+
 (def (layout! tree width height . pixel-scale)
   "Measure leaves using Yoga constraints, replaying until every query is answered."
   (unless (and (> width 0) (> height 0)) (error "Layout dimensions must be positive"))
-  (let ((root (allocate-node)) (scale (if (null? pixel-scale) 1 (car pixel-scale))))
-    (unwind-protect
-      (begin
-        (unless (native/node-style root width height 0 0 0 0) (error "Invalid root size"))
-        (for-each (fn (node) (sync-node! node) (native/node-append root (node :layout)))
-                  (ui/children tree))
-        (let loop ((pass 0))
-          (when (> pass 256) (error "Yoga measurement did not converge"))
-          (native/node-layout root width height)
-          (let ((changed #f))
-            (for-each (fn (node) (when (answer-queries! node scale) (set! changed #t))) (ui/children tree))
-            (when changed
-              (for-each retry! (ui/children tree))
-              (loop (+ pass 1)))))
-        (for-each (fn (node) (save-bounds! node 0 0)) (ui/children tree)))
-      (native/node-free root)))
+  (let ((root (allocate-node))
+        (scale (if (null? pixel-scale)
+                   1
+                   (car pixel-scale))))
+    (unwind-protect (begin
+                      (unless (native/node-style root width height 0 0 0 0) (error "Invalid root size"))
+                      (for-each (fn (node)
+                                  (sync-node! node)
+                                  (native/node-append root (node :layout)))
+                                (ui/children tree))
+                      (let loop ((pass 0))
+                        (when (> pass 256) (error "Yoga measurement did not converge"))
+                        (native/node-layout root width height)
+                        (let ((changed #f))
+                          (for-each (fn (node) (when (answer-queries! node scale) (set! changed #t)))
+                                    (ui/children tree))
+                          (when changed
+                            (for-each retry! (ui/children tree))
+                            (loop (+ pass 1)))))
+                      (for-each (fn (node) (save-bounds! node 0 0)) (ui/children tree)))
+                    (native/node-free root)))
   tree)
+
 (def- (intersect a b)
-  (let ((x (max (a :x) (b :x))) (y (max (a :y) (b :y))))
-    (make ui/Bounds :x x :y y
-      :width (max 0 (- (min (+ (a :x) (a :width)) (+ (b :x) (b :width))) x))
-      :height (max 0 (- (min (+ (a :y) (a :height)) (+ (b :y) (b :height))) y)))))
+  (let ((x (max (a :x) (b :x)))
+        (y (max (a :y) (b :y))))
+    (make ui/Bounds
+          :x x
+          :y y
+          :width (max 0 (- (min (+ (a :x) (a :width)) (+ (b :x) (b :width))) x))
+          :height (max 0 (- (min (+ (a :y) (a :height)) (+ (b :y) (b :height))) y)))))
+
 (def- (paint-node! node renderer clip)
   (unless (node :bounds) (error "Run layout before painting"))
   (let ((clip (intersect clip (node :bounds))))
     (when (and (> (clip :width) 0) (> (clip :height) 0))
-      (ui/paint (ui/instance node) (make gfx/Context :renderer renderer :clip clip
-                 :focused? (node :focused?) :pressed? (node :pressed?) :disabled? (not (ui/enabled? node))) (node :bounds))
+      (ui/paint (ui/instance node)
+                (make gfx/Context
+                      :renderer renderer
+                      :clip clip
+                      :focused? (node :focused?)
+                      :pressed? (node :pressed?)
+                      :disabled? (not (ui/enabled? node)))
+                (node :bounds))
       (for-each (fn (child) (paint-node! child renderer clip)) (ui/children node)))))
+
 (def (paint! tree renderer width height background)
   (native/gpu-clear renderer background)
   (let ((clip (make ui/Bounds :x 0 :y 0 :width width :height height)))
     (for-each (fn (node) (paint-node! node renderer clip)) (ui/children tree))))
+
 (defmethod (ui/paint (w ui/Column) g bounds)
   (when (w :background) (gfx/rect g bounds (w :background) (w :radius))))
+
 (defmethod (ui/paint (w ui/Row) g bounds)
   (when (w :background) (gfx/rect g bounds (w :background) (w :radius))))
 
 (defmethod (ui/layout-style (w ui/Label))
   {:width (w :width) :height (w :height) :grow (w :grow)})
+
 (defmethod (ui/measure (w ui/Label) limits)
-  (let ((text (native/text-get (w :text) (gfx/font-index (w :font))
-                (w :size) (if (w :wrap) (get limits :width -1) -1) (get limits :scale 1))))
+  (let ((text (native/text-get (w :text)
+                               (gfx/font-index (w :font))
+                               (w :size)
+                               (if (w :wrap)
+                                   (get limits :width -1)
+                                   -1)
+                               (get limits :scale 1))))
     (when (ffi/null? text) (error "Text measurement failed" (native/text-error)))
     (ui/size (/ (native/text-size text native/TEXT_WIDTH) (get limits :scale 1))
              (/ (native/text-size text native/TEXT_HEIGHT) (get limits :scale 1)))))
+
 (defmethod (ui/paint (w ui/Label) g bounds)
   (let ((preferred (ui/measure w {:width (bounds :width) :scale (native/gpu-scale (g :renderer))})))
-    (let ((offset (cond ((eq? (w :align) :center) (/ (- (bounds :width) (preferred :width)) 2))
-                        ((eq? (w :align) :right) (- (bounds :width) (preferred :width)))
-                        (else 0))))
-      (gfx/text g (make ui/Bounds :x (+ (bounds :x) offset) :y (bounds :y)
-                         :width (bounds :width) :height (bounds :height))
-        (w :text) (w :font) (w :size) (if (g :disabled?) 0x71849fff (w :color)) (w :wrap)))))
+    (let ((offset (cond
+                    ((eq? (w :align) :center) (/ (- (bounds :width) (preferred :width)) 2))
+                    ((eq? (w :align) :right) (- (bounds :width) (preferred :width)))
+                    (else 0))))
+      (gfx/text g
+                (make ui/Bounds
+                      :x (+ (bounds :x) offset)
+                      :y (bounds :y)
+                      :width (bounds :width)
+                      :height (bounds :height))
+                (w :text)
+                (w :font)
+                (w :size)
+                (if (g :disabled?)
+                    0x71849fff
+                    (w :color))
+                (w :wrap)))))
+
 (defmethod (ui/paint (w ui/Button) g bounds)
   (unless (eq? (w :style) :bare)
-    (let ((color (cond ((g :disabled?) 0x253044ff)
-                       ((g :pressed?) (if (eq? (w :style) :accent) 0x42ae98ff 0x425976ff))
-                       ((eq? (w :style) :accent) 0x67d9c0ff)
-                       (else 0x2c3c54ff))))
-      (gfx/rect g bounds (if (g :focused?) 0xa8d5ffff color) (w :radius))
+    (let ((color (cond
+                   ((g :disabled?) 0x253044ff)
+                   ((g :pressed?)
+                    (if (eq? (w :style) :accent)
+                        0x42ae98ff
+                        0x425976ff))
+                   ((eq? (w :style) :accent) 0x67d9c0ff)
+                   (else 0x2c3c54ff))))
+      (gfx/rect g
+                bounds
+                (if (g :focused?)
+                    0xa8d5ffff
+                    color)
+                (w :radius))
       (when (g :focused?)
-        (gfx/rect g (make ui/Bounds :x (+ (bounds :x) 2) :y (+ (bounds :y) 2)
-                     :width (max 0 (- (bounds :width) 4)) :height (max 0 (- (bounds :height) 4)))
-          color (max 0 (- (w :radius) 2)))))))
+        (gfx/rect g
+                  (make ui/Bounds
+                        :x (+ (bounds :x) 2)
+                        :y (+ (bounds :y) 2)
+                        :width (max 0 (- (bounds :width) 4))
+                        :height (max 0 (- (bounds :height) 4)))
+                  color
+                  (max 0 (- (w :radius) 2)))))))
 
 (defmethod (ui/paint (w ui/Scroll) g bounds)
   (when (w :background) (gfx/rect g bounds (w :background) 0))
   (when (> (w :limit) 0)
     (let ((height (max 16 (/ (* (bounds :height) (bounds :height)) (+ (bounds :height) (w :limit))))))
-      (gfx/rect g (make ui/Bounds :x (- (+ (bounds :x) (bounds :width)) 5)
-        :y (+ (bounds :y) (* (/ (w :offset) (w :limit)) (- (bounds :height) height)))
-        :width 3 :height height) 0x71849fff 1))))
+      (gfx/rect g
+                (make ui/Bounds
+                      :x (- (+ (bounds :x) (bounds :width)) 5)
+                      :y (+ (bounds :y) (* (/ (w :offset) (w :limit)) (- (bounds :height) height)))
+                      :width 3
+                      :height height)
+                0x71849fff
+                1))))
+
 (def (caret-positions text font size scale)
   "Return codepoint caret coordinates from one shaped, unwrapped line."
-  (let ((count (+ (string-length text) 1)) (positions []))
+  (let ((count (+ (string-length text) 1))
+        (positions []))
     (let ((buffer (ffi/alloc 'float count)))
-      (unwind-protect
-        (let ((run (native/text-get text (gfx/font-index font) size -1 scale)))
-          (when (ffi/null? run) (error "Text field measurement failed" (native/text-error)))
-          (unless (native/text-carets run buffer count) (error "Text caret measurement failed" (native/text-error)))
-          (dotimes (i count) (push! positions (/ (ffi/ref buffer 'float i) scale)))
-          positions)
-        (ffi/free! buffer)))))
-(defmethod (ui/measure (w ui/TextField) limits) (ui/size 160 (+ (w :size) 26)))
+      (unwind-protect (let ((run (native/text-get text (gfx/font-index font) size -1 scale)))
+                        (when (ffi/null? run) (error "Text field measurement failed" (native/text-error)))
+                        (unless (native/text-carets run buffer count)
+                          (error "Text caret measurement failed" (native/text-error)))
+                        (dotimes (i count) (push! positions (/ (ffi/ref buffer 'float i) scale)))
+                        positions)
+                      (ffi/free! buffer)))))
+
+(defmethod (ui/measure (w ui/TextField) limits)
+  (ui/size 160 (+ (w :size) 26)))
+
 (defmethod (ui/paint (w ui/TextField) g bounds)
   (let ((positions (caret-positions (w :value) (w :font) (w :size) (native/gpu-scale (g :renderer))))
         (available (max 0 (- (bounds :width) 20))))
     (set! (w :positions) positions)
-    (let ((caret (get positions (w :cursor))) (end (get positions (- (length positions) 1))))
+    (let ((caret (get positions (w :cursor)))
+          (end (get positions (- (length positions) 1))))
       (set! (w :offset) (max 0 (min (w :offset) (max 0 (- end available)))))
       (when (< caret (w :offset)) (set! (w :offset) caret))
       (when (= (w :cursor) 0) (set! (w :offset) 0))
-      (when (> caret (+ (w :offset) (- available 2)))
-        (set! (w :offset) (max 0 (- caret (- available 2))))))
-    (gfx/rect g bounds (if (g :focused?) 0xa8d5ffff 0x425976ff) 8)
-    (gfx/rect g (make ui/Bounds :x (+ (bounds :x) 2) :y (+ (bounds :y) 2)
-      :width (max 0 (- (bounds :width) 4)) :height (max 0 (- (bounds :height) 4))) 0x202d43ff 6)
-    (let ((inner (make ui/Bounds :x (+ (bounds :x) 10) :y (+ (bounds :y) 8)
-                    :width available :height (max 0 (- (bounds :height) 16)))))
+      (when (> caret (+ (w :offset) (- available 2))) (set! (w :offset) (max 0 (- caret (- available 2))))))
+    (gfx/rect g
+              bounds
+              (if (g :focused?)
+                  0xa8d5ffff
+                  0x425976ff)
+              8)
+    (gfx/rect g
+              (make ui/Bounds
+                    :x (+ (bounds :x) 2)
+                    :y (+ (bounds :y) 2)
+                    :width (max 0 (- (bounds :width) 4))
+                    :height (max 0 (- (bounds :height) 4)))
+              0x202d43ff
+              6)
+    (let ((inner (make ui/Bounds
+                       :x (+ (bounds :x) 10)
+                       :y (+ (bounds :y) 8)
+                       :width available
+                       :height (max 0 (- (bounds :height) 16)))))
       (let ((context (make gfx/Context :renderer (g :renderer) :clip (intersect (g :clip) inner)))
             (origin (- (inner :x) (w :offset))))
         (when (and (g :focused?) (not (= (w :cursor) (w :anchor))))
-          (let ((a (get positions (w :cursor))) (b (get positions (w :anchor))))
-            (gfx/rect context (make ui/Bounds :x (+ origin (min a b)) :y (inner :y)
-              :width (abs (- b a)) :height (inner :height)) 0x425976ff 0)))
-        (gfx/text context (make ui/Bounds :x origin :y (inner :y) :width available :height (inner :height))
-          (if (equal? (w :value) "") (w :placeholder) (w :value)) (w :font) (w :size)
-          (if (or (g :disabled?) (equal? (w :value) "")) 0x71849fff 0xdce5f2ff) #f)
+          (let ((a (get positions (w :cursor)))
+                (b (get positions (w :anchor))))
+            (gfx/rect context
+                      (make ui/Bounds
+                            :x (+ origin (min a b))
+                            :y (inner :y)
+                            :width (abs (- b a))
+                            :height (inner :height))
+                      0x425976ff
+                      0)))
+        (gfx/text context
+                  (make ui/Bounds :x origin :y (inner :y) :width available :height (inner :height))
+                  (if (equal? (w :value) "")
+                      (w :placeholder)
+                      (w :value))
+                  (w :font)
+                  (w :size)
+                  (if (or (g :disabled?) (equal? (w :value) ""))
+                      0x71849fff
+                      0xdce5f2ff)
+                  #f)
         (when (g :focused?)
-          (gfx/rect context (make ui/Bounds :x (+ origin (get positions (w :cursor)))
-            :y (inner :y) :width 1 :height (inner :height)) 0x67d9c0ff 0))))))
+          (gfx/rect context
+                    (make ui/Bounds
+                          :x (+ origin (get positions (w :cursor)))
+                          :y (inner :y)
+                          :width 1
+                          :height (inner :height))
+                    0x67d9c0ff
+                    0))))))

@@ -2,14 +2,16 @@
 ;; ecraven/r7rs-benchmarks.
 
 (def (mperm-make-array n fill)
-  (let ((out (array)) (i 0))
+  (let ((out (array))
+        (i 0))
     (while (< i n)
       (push! out fill)
       (set! i (+ i 1)))
     out))
 
 (def (mperm-permutations initial)
-  (let ((current initial) (perms (list initial)))
+  (let ((current initial)
+        (perms (list initial)))
     (def (reverse-prefix x n tail)
       (if (= n 0)
           tail
@@ -29,7 +31,8 @@
     perms))
 
 (def (mperm-sum-lists lists)
-  (let ((outer lists) (sum 0))
+  (let ((outer lists)
+        (sum 0))
     (while (pair? outer)
       (let ((inner (car outer)))
         (while (pair? inner)
@@ -46,10 +49,13 @@
     result))
 
 (def (mperm-factorial n)
-  (if (= n 0) 1 (* n (mperm-factorial (- n 1)))))
+  (if (= n 0)
+      1
+      (* n (mperm-factorial (- n 1)))))
 
 (def (mperm m n k ell)
-  (let ((queue (mperm-make-array k '())) (iteration 0))
+  (let ((queue (mperm-make-array k '()))
+        (iteration 0))
     (def (fill-queue i end)
       (while (< i end)
         (put! queue i (mperm-permutations (mperm-one-to-n n)))
@@ -58,7 +64,11 @@
       (let ((i 0))
         (while (< i k)
           (let ((source (+ i ell)))
-            (put! queue i (if (< source k) (get queue source) '())))
+            (put! queue
+                  i
+                  (if (< source k)
+                      (get queue source)
+                      '())))
           (set! i (+ i 1)))))
     (fill-queue 0 (- k ell))
     (while (< iteration m)

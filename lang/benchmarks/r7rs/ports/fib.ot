@@ -10,6 +10,4 @@
         (input (bench-read))
         (output (bench-read))
         (name (str "fib:" input ":" count)))
-    (run-ported-benchmark name count
-      (fn () (fib (bench-hide count input)))
-      (fn (result) (= result output)))))
+    (run-ported-benchmark name count (fn () (fib (bench-hide count input))) (fn (result) (= result output)))))

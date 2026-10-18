@@ -1,60 +1,89 @@
 (def checks 0)
+
 (def (check expected actual)
-  (if (equal? expected actual) (set! checks (+ checks 1))
+  (if (equal? expected actual)
+      (set! checks (+ checks 1))
       (error "FFI assertion failed" expected actual)))
+
 (def (reason thunk)
-  (try (begin (thunk) 'no-error)
+  (try
+    (begin
+      (thunk)
+      'no-error)
     (catch (ffi/error? c) (ffi/error-reason c))))
+
 (def lib (ffi/open-library (list fixture-path)))
+
 (def other (ffi/open-library (list other-path)))
+
 (check 17 ((ffi/bind lib "fixture_id" '() 'int)))
 (check 29 ((ffi/bind other "fixture_id" '() 'int)))
 (check #t (ffi/has-symbol? lib "echo_bool"))
 (check #f (ffi/has-symbol? lib "missing_symbol"))
 (check 'symbol (reason (fn () (ffi/bind lib "missing_symbol" '() 'int))))
 (check 'load (reason (fn () (ffi/open-library '("/otium/no-such-library")))))
+
 (def bool-call (ffi/bind lib "echo_bool" '(bool) 'bool))
+
 (check #t (bool-call #t))
 (check #f (bool-call #f))
 (check 'type (reason (fn () (bool-call 1))))
 (check 'arity (reason (fn () (bool-call))))
 (check 'arity (reason (fn () (bool-call #t #f))))
+
 (def byte-call (ffi/bind lib "echo_u8" '(u8) 'u8))
+
 (check 255 (byte-call 255))
 (check 'range (reason (fn () (byte-call 256))))
 (check 'range (reason (fn () (byte-call -1))))
 (check 'type (reason (fn () (byte-call 1.0))))
 (check 'type (reason (fn () (byte-call #t))))
+
 (def signed-call (ffi/bind lib "echo_i8" '(i8) 'i8))
+
 (check -128 (signed-call -128))
 (check 127 (signed-call 127))
 (check 'range (reason (fn () (signed-call -129))))
 (check 'range (reason (fn () (signed-call 128))))
+
 (def float-call (ffi/bind lib "echo_float" '(float) 'float))
+
 (check 16777216.0 (float-call 16777217))
 (check 'range (reason (fn () (float-call 1e100))))
+
 (def pointer-call (ffi/bind lib "echo_pointer" '(pointer) 'pointer))
+
 (check #t (ffi/null? ffi/null))
 (check #f (ffi/null? #f))
 (check #f (ffi/null? 0))
-(check #t (if ffi/null #t #f))
+(check #t
+       (if ffi/null
+           #t
+           #f))
 (check #t (ffi/null? (pointer-call ffi/null)))
 (check 'type (reason (fn () (pointer-call 0))))
 (check 'type (reason (fn () (pointer-call #f))))
 (check #t ((ffi/bind lib "null_callback" '(callback-pointer) 'bool) ffi/null))
+
 (def utf8-call (ffi/bind lib "echo_utf8" '(utf8) 'utf8))
+
 (check "héllo 🌍" (utf8-call "héllo 🌍"))
 (check "" (utf8-call ""))
 (check #t (ffi/null? (utf8-call ffi/null)))
 (check 'type (reason (fn () (utf8-call #f))))
 (check 'encoding (reason (fn () ((ffi/bind lib "bad_utf8" '() 'utf8)))))
+
 (def first ((ffi/bind lib "changing_text" '() 'utf8)))
+
 (check #f ((ffi/bind lib "change_text" '() 'void)))
 (check "first" first)
 (check "second" ((ffi/bind lib "changing_text" '() 'utf8)))
 (check 0 (ffi/allocation-count))
+
 (def p (ffi/alloc 'u64 2))
+
 (def v (ffi/view p 8 8))
+
 (check 1 (ffi/allocation-count))
 (check 16 (ffi/allocation-bytes))
 (check 0 (ffi/ref p 'u64 0))
@@ -76,28 +105,42 @@
 (check 'released (reason (fn () (ffi/ref v 'u64 0))))
 (check 'released (reason (fn () (pointer-call v))))
 (check 0 (ffi/allocation-count))
+
 (def z (ffi/alloc 'u8 0))
+
 (check 'bounds (reason (fn () (ffi/ref z 'u8 0))))
 (ffi/free! z)
+
 (def text (ffi/alloc-utf8 "retained λ"))
+
 ((ffi/bind lib "retain" '(pointer) 'void) text)
 (test-collect)
 (check "retained λ" ((ffi/bind lib "retained_text" '() 'utf8)))
 (check "retained λ" (ffi/read-utf8 text 12))
 (check 'bounds (reason (fn () (ffi/read-utf8 text 2))))
 (ffi/free! text)
+
 (def Pair (ffi/define-struct! 'Pair '((tag u8) (value double))))
+
 (check 16 (ffi/sizeof Pair))
 (check 8 (ffi/alignof Pair))
 (check 8 (ffi/offset-of Pair '(value)))
+
 (def Array (ffi/define-struct! 'Array (list (list 'pairs (list 'array Pair 2)))))
+
 (check 24 (ffi/offset-of Array '(pairs 1 value)))
+
 (def storage (ffi/alloc Array 1))
+
 (ffi/field-set! storage Array '(pairs 1 value) 3.5)
 (check 3.5 (ffi/field-ref storage Array '(pairs 1 value)))
+
 (def field (ffi/field-view storage Array '(pairs 1)))
+
 (check 3.5 (ffi/field-ref field Pair '(value)))
+
 (def saved Pair)
+
 (set! Pair (ffi/define-struct! 'Pair '((value u8))))
 (check 1 (ffi/sizeof Pair))
 (check 16 (ffi/sizeof saved))
@@ -105,23 +148,33 @@
 (ffi/free! storage)
 (check 'released (reason (fn () (ffi/field-ref field saved '(value)))))
 (check 0 (ffi/allocation-count))
+
 (def slots (ffi/alloc 'pointer 1))
+
 (check #t (ffi/null? (ffi/ref slots 'pointer 0)))
 ((ffi/bind lib "pointer_out" '(pointer pointer) 'void) slots slots)
 (check #t (ffi/pointer=? slots (ffi/ref slots 'pointer 0)))
 (ffi/free! slots)
 (check 0 (ffi/allocation-count))
+
 (def Point (ffi/define-struct! 'Point '((x double) (y double))))
+
 (def translate (ffi/bind lib "translate" (list Point 'double 'double) Point))
+
 (def point (ffi/alloc Point 1))
+
 (ffi/field-set! point Point '(x) 10.0)
 (ffi/field-set! point Point '(y) 20.0)
+
 (def moved (translate point 2.0 3.0))
+
 (check 12.0 (ffi/field-ref moved Point '(x)))
 (check 23.0 (ffi/field-ref moved Point '(y)))
 (check 10.0 (ffi/field-ref point Point '(x)))
 (check 2 (ffi/allocation-count))
+
 (def moved-again (translate moved 1.0 1.0))
+
 (check 12.0 (ffi/field-ref moved Point '(x)))
 (check 13.0 (ffi/field-ref moved-again Point '(x)))
 (ffi/free! moved-again)
@@ -131,21 +184,33 @@
 (check 2 (ffi/allocation-count))
 (ffi/free! moved)
 (ffi/free! point)
+
 (def Mixed (ffi/define-struct! 'Mixed '((tag u8) (value double))))
+
 (def mixed-call (ffi/bind lib "mixed" (list Mixed) Mixed))
+
 (def mixed-input (ffi/alloc Mixed 1))
+
 (ffi/field-set! mixed-input Mixed '(tag) 4)
 (ffi/field-set! mixed-input Mixed '(value) 3.5)
+
 (def mixed-result (mixed-call mixed-input))
+
 (check 5 (ffi/field-ref mixed-result Mixed '(tag)))
 (check 7.0 (ffi/field-ref mixed-result Mixed '(value)))
 (ffi/free! mixed-input)
 (ffi/free! mixed-result)
+
 (def Large (ffi/define-struct! 'Large (list (list 'points (list 'array Point 3)) '(tag u64))))
+
 (def large-call (ffi/bind lib "large" (list Large) Large))
+
 (def large-input (ffi/alloc Large 1))
+
 (ffi/field-set! large-input Large '(points 2 y) 7.0)
+
 (def large-result (large-call large-input))
+
 (check 17.0 (ffi/field-ref large-result Large '(points 2 y)))
 (check 1 (ffi/field-ref large-result Large '(tag)))
 (check 7.0 (ffi/field-ref large-input Large '(points 2 y)))
@@ -154,30 +219,45 @@
 (check 17.0 (ffi/field-ref large-result Large '(points 2 y)))
 (ffi/free! large-result)
 (check 0 (ffi/allocation-count))
-(for-each
-  (fn (entry)
-    (let ((t (car entry)) (name (car (cdr entry))) (value (car (cdr (cdr entry)))))
-      (let ((f (ffi/bind lib name (list t) t)) (p (ffi/alloc t 1)))
-        (check value (f value))
-        (ffi/set! p t 0 value)
-        (check value (ffi/ref p t 0))
-        (ffi/free! p))))
-  '((i8 "echo_i8" -128) (u8 "echo_u8" 255)
-    (i16 "echo_i16" -32768) (u16 "echo_u16" 65535)
-    (i32 "echo_i32" -2147483648) (u32 "echo_u32" 4294967295)
-    (i64 "echo_i64" -4611686018427387904) (u64 "echo_u64" 4611686018427387903)
-    (short "echo_short" -32768) (ushort "echo_ushort" 65535)
-    (int "echo_int" -2147483648) (uint "echo_uint" 4294967295)
-    (long "echo_long" -4611686018427387904) (ulong "echo_ulong" 4611686018427387903)
-    (size-t "echo_size_t" 4611686018427387903) (ptrdiff-t "echo_ptrdiff_t" -4611686018427387904)))
+(for-each (fn (entry)
+            (let ((t (car entry))
+                  (name (car (cdr entry)))
+                  (value (car (cdr (cdr entry)))))
+              (let ((f (ffi/bind lib name (list t) t))
+                    (p (ffi/alloc t 1)))
+                (check value (f value))
+                (ffi/set! p t 0 value)
+                (check value (ffi/ref p t 0))
+                (ffi/free! p))))
+          '((i8 "echo_i8" -128)
+            (u8 "echo_u8" 255)
+            (i16 "echo_i16" -32768)
+            (u16 "echo_u16" 65535)
+            (i32 "echo_i32" -2147483648)
+            (u32 "echo_u32" 4294967295)
+            (i64 "echo_i64" -4611686018427387904)
+            (u64 "echo_u64" 4611686018427387903)
+            (short "echo_short" -32768)
+            (ushort "echo_ushort" 65535)
+            (int "echo_int" -2147483648)
+            (uint "echo_uint" 4294967295)
+            (long "echo_long" -4611686018427387904)
+            (ulong "echo_ulong" 4611686018427387903)
+            (size-t "echo_size_t" 4611686018427387903)
+            (ptrdiff-t "echo_ptrdiff_t" -4611686018427387904)))
+
 (def high-call (ffi/bind lib "high_u64" '() 'u64))
+
 (def calls (ffi/bind lib "calls" '() 'int))
+
 (check 0 (calls))
 (if wide-integers?
     (check (- (expt 2 64) 1) (high-call))
     (check 'range (reason (fn () (high-call)))))
 (check 1 (calls))
+
 (def high-memory (ffi/alloc 'u64 1))
+
 ((ffi/bind lib "write_high" '(pointer) 'void) high-memory)
 (if wide-integers?
     (check (- (expt 2 64) 1) (ffi/ref high-memory 'u64 0))
@@ -187,11 +267,15 @@
 (check 'null (reason (fn () (ffi/ref ffi/null 'u8 0))))
 (check 'type (reason (fn () (ffi/error-reason #f))))
 (check #f (ffi/error? #f))
+
 (def Choice (ffi/define-union! 'Choice '((x double) (i u32))))
+
 (check 8 (ffi/sizeof Choice))
 (check 0 (ffi/offset-of Choice '(i)))
 (check 'signature (reason (fn () (ffi/bind lib "fixture_id" '((array int 2)) 'int))))
+
 (def interior (ffi/alloc 'u8 3))
+
 (ffi/set! interior 'u8 0 65)
 (ffi/set! interior 'u8 1 0)
 (ffi/set! interior 'u8 2 66)
@@ -200,8 +284,12 @@
 (check 'encoding (reason (fn () (ffi/read-utf8 interior 3))))
 (ffi/free! interior)
 (check 0 (ffi/allocation-count))
+
 (def conversion-condition
-  (try (byte-call -1) (catch (ffi/error? c) c)))
+  (try
+    (byte-call -1)
+    (catch (ffi/error? c) c)))
+
 (check 'call (ffi/error-operation conversion-condition))
 (check fixture-path (ffi/error-library conversion-condition))
 (check "echo_u8" (ffi/error-symbol conversion-condition))
@@ -212,16 +300,27 @@
 (check 'type (reason (fn () (ffi/alloc 'u8 1.0))))
 (check 'range (reason (fn () (ffi/alloc 'u8 -1))))
 (check 'range (reason (fn () (ffi/alloc 'u64 4611686018427387903))))
+
 (def Number (ffi/define-union! 'Number '((number double) (integer u64))))
+
 (def Floats (ffi/define-union! 'Floats '((one float) (many (array float 3)))))
+
 (def Doubles (ffi/define-union! 'Doubles '((one double) (many (array double 4)))))
+
 (def BigUnion (ffi/define-union! 'BigUnion '((one double) (many (array double 5)))))
+
 (def MixedFloat (ffi/define-union! 'MixedFloat '((single float) (number double))))
+
 (def HalfPair (ffi/define-struct! 'HalfPair '((tag u32) (value float))))
+
 (def Half (ffi/define-union! 'Half (list (list 'pair HalfPair) '(tag u32))))
+
 (def OffsetUnion (ffi/define-struct! 'OffsetUnion (list '(prefix u32) (list 'middle Half) '(suffix float))))
+
 (def NestedUnion (ffi/define-struct! 'NestedUnion (list (list 'value Number) '(suffix double))))
+
 (def TinyUnion (ffi/define-union! 'TinyUnion '((byte u8) (word u16))))
+
 (def (check-union layout function-name field scalar before delta after)
   (let ((f (ffi/bind lib function-name (list layout scalar) layout))
         (input (ffi/alloc layout 1)))
@@ -233,6 +332,7 @@
       (test-collect)
       (check after (ffi/field-ref output layout field))
       (ffi/free! output))))
+
 (check-union Number "number_add" '(number) 'double 3.5 2.0 5.5)
 (check-union Floats "floats_add" '(many 2) 'float 3.5 2.0 5.5)
 (check-union Doubles "doubles_add" '(many 3) 'double 3.5 2.0 5.5)
@@ -242,51 +342,84 @@
 (check-union NestedUnion "nested_union_add" '(value number) 'double 3.5 2.0 5.5)
 (check-union TinyUnion "tiny_union_add" '(word) 'u16 60000 7 60007)
 (check 0 (ffi/allocation-count))
+
 (def UnionArray (ffi/define-struct! 'UnionArray (list (list 'values (list 'array Number 2)) '(tag u64))))
+
 (check-union UnionArray "union_array_add" '(values 1 number) 'double 3.5 2.0 5.5)
-(def fp-pressure (ffi/bind lib "union_fp_pressure"
-  (list 'double 'double 'double 'double 'double 'double 'double Doubles 'double) Doubles))
+
+(def fp-pressure
+  (ffi/bind lib
+            "union_fp_pressure"
+            (list 'double 'double 'double 'double 'double 'double 'double Doubles 'double)
+            Doubles))
+
 (def fp-input (ffi/alloc Doubles 1))
+
 (def fp-output (fp-pressure 1.0 2.0 3.0 4.0 5.0 6.0 7.0 fp-input 8.0))
+
 (check 36.0 (ffi/field-ref fp-output Doubles '(many 0)))
 (check 1.0 (ffi/field-ref fp-output Doubles '(many 3)))
 (ffi/free! fp-input)
 (ffi/free! fp-output)
-(def int-pressure (ffi/bind lib "union_int_pressure"
-  (list 'u64 'u64 'u64 'u64 'u64 'u64 'u64 'u64 Number 'u64) Number))
+
+(def int-pressure (ffi/bind lib "union_int_pressure" (list 'u64 'u64 'u64 'u64 'u64 'u64 'u64 'u64 Number 'u64) Number))
+
 (def int-input (ffi/alloc Number 1))
+
 (ffi/field-set! int-input Number '(integer) 100)
+
 (def int-output (int-pressure 1 2 3 4 5 6 7 8 int-input 9))
+
 (check 145 (ffi/field-ref int-output Number '(integer)))
 (ffi/free! int-input)
 (ffi/free! int-output)
+
 (def high-union ((ffi/bind lib "high_union" '() Number)))
+
 (check 255 ((ffi/bind lib "union_high_byte" (list Number) 'u8) high-union))
 (if wide-integers?
     (check (- (expt 2 64) 1) (ffi/field-ref high-union Number '(integer)))
     (check 'range (reason (fn () (ffi/field-ref high-union Number '(integer))))))
 (ffi/free! high-union)
+
 (def union-layout (ffi/bind lib "union_layout" '(int) 'size-t))
+
 (for-each (fn (entry) (check (car (cdr entry)) (union-layout (car entry))))
-  (list (list 0 (ffi/sizeof Number)) (list 1 (ffi/alignof Number))
-        (list 2 (ffi/sizeof Floats)) (list 3 (ffi/alignof Floats))
-        (list 4 (ffi/sizeof Doubles)) (list 5 (ffi/alignof Doubles))
-        (list 6 (ffi/sizeof OffsetUnion)) (list 7 (ffi/offset-of OffsetUnion '(middle)))
-        (list 8 (ffi/offset-of OffsetUnion '(suffix)))
-        (list 9 (ffi/sizeof UnionArray)) (list 10 (ffi/offset-of UnionArray '(tag)))))
+          (list (list 0 (ffi/sizeof Number))
+                (list 1 (ffi/alignof Number))
+                (list 2 (ffi/sizeof Floats))
+                (list 3 (ffi/alignof Floats))
+                (list 4 (ffi/sizeof Doubles))
+                (list 5 (ffi/alignof Doubles))
+                (list 6 (ffi/sizeof OffsetUnion))
+                (list 7 (ffi/offset-of OffsetUnion '(middle)))
+                (list 8 (ffi/offset-of OffsetUnion '(suffix)))
+                (list 9 (ffi/sizeof UnionArray))
+                (list 10 (ffi/offset-of UnionArray '(tag)))))
 (check 0 (ffi/allocation-count))
+
 (def saved-number Number)
+
 (def saved-number-add (ffi/bind lib "number_add" (list Number 'double) Number))
+
 (set! Number (ffi/define-union! 'Number '((byte u8) (word u16))))
 (check 2 (ffi/sizeof Number))
 (check 8 (ffi/sizeof saved-number))
+
 (def saved-input (ffi/alloc saved-number 1))
+
 (ffi/field-set! saved-input saved-number '(number) 10.0)
+
 (def saved-output (saved-number-add saved-input 2.0))
+
 (check 12.0 (ffi/field-ref saved-output saved-number '(number)))
 (ffi/free! saved-input)
 (ffi/free! saved-output)
+
 (def ZeroUnion (ffi/define-union! 'ZeroUnion '((byte u8) (empty (array float 0)))))
+
 (check 'signature (reason (fn () (ffi/bind lib "fixture_id" (list ZeroUnion) 'int))))
 (check 0 (ffi/allocation-count))
-(display "FFI checks: ") (display checks) (newline)
+(display "FFI checks: ")
+(display checks)
+(newline)

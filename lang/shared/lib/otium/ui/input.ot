@@ -2,33 +2,45 @@
 (require (otium.ui :as ui))
 
 (defclass Pointer (captured :init nil))
-(def (pointer) (make Pointer))
+
+(def (pointer)
+  (make Pointer))
+
 (def- (contains? bounds x y)
-  (and bounds (>= x (bounds :x)) (>= y (bounds :y))
+  (and bounds
+       (>= x (bounds :x))
+       (>= y (bounds :y))
        (< x (+ (bounds :x) (bounds :width)))
        (< y (+ (bounds :y) (bounds :height)))))
+
 (def- (hit-children children x y)
   ;; Last painted sibling wins. Each ancestor bounds the visible hit region.
   (let loop ((i (- (length children) 1)))
-    (if (< i 0) '()
+    (if (< i 0)
+        '()
         (let ((node (get children i)))
           (if (and (ui/active? node) (contains? (node :bounds) x y))
               (append (hit-children (ui/children node) x y) (list node))
               (loop (- i 1)))))))
-(def (hit-path tree x y) (hit-children (ui/children tree) x y))
+
+(def (hit-path tree x y)
+  (hit-children (ui/children tree) x y))
+
 (def- (bubble! path event)
-  (cond ((null? path) nil)
-        ((eq? (ui/send! (car path) event) :handled) (car path))
-        (else (bubble! (cdr path) event))))
+  (cond
+    ((null? path) nil)
+    ((eq? (ui/send! (car path) event) :handled) (car path))
+    (else (bubble! (cdr path) event))))
+
 (def- (includes? path node)
-  (and (not (null? path))
-       (or (eq? (car path) node) (includes? (cdr path) node))))
+  (and (not (null? path)) (or (eq? (car path) node) (includes? (cdr path) node))))
+
 (def (cancel! pointer)
   (let ((node (pointer :captured)))
     (set! (pointer :captured) nil)
     (when node (set! (node :pressed?) #f))
-    (when (and node (ui/active? node))
-      (ui/send! node {:kind :pointer-cancel}))))
+    (when (and node (ui/active? node)) (ui/send! node {:kind :pointer-cancel}))))
+
 (def (dispatch! pointer tree event)
   "Route logical-coordinate pointer events through the current laid-out tree."
   (let ((kind (get event :kind)))
@@ -37,77 +49,90 @@
       ((eq? kind :wheel) (bubble! (hit-path tree (get event :x) (get event :y)) event))
       ((memq kind '(:pointer-move :pointer-drag))
        (let ((node (pointer :captured)))
-         (when (and node (ui/enabled? node) (node :pressed?))
-           (ui/send! node (put event :kind :pointer-drag)))))
+         (when (and node (ui/enabled? node) (node :pressed?)) (ui/send! node (put event :kind :pointer-drag)))))
       ((eq? kind :pointer-down)
        (cancel! pointer)
        (ui/cancel-key! tree)
-       (set! (pointer :captured)
-         (bubble! (hit-path tree (get event :x) (get event :y)) event))
+       (set! (pointer :captured) (bubble! (hit-path tree (get event :x) (get event :y)) event))
        (let ((node (pointer :captured)))
          (when node
            (set! (node :pressed?) #t)
            (when (ui/focusable? node) (ui/focus! tree node)))))
       ((eq? kind :pointer-up)
        (let ((node (pointer :captured)))
-        (let ((armed? (and node (node :pressed?))))
-         (set! (pointer :captured) nil)
-         (when node (set! (node :pressed?) #f))
-         (when (and node (ui/active? node))
-           (ui/send! node event)
-           (when (and armed? (ui/enabled? node)
-                      (includes? (hit-path tree (get event :x) (get event :y)) node))
-             (ui/send! node {:kind :press :x (get event :x) :y (get event :y)}))))))
+         (let ((armed? (and node (node :pressed?))))
+           (set! (pointer :captured) nil)
+           (when node (set! (node :pressed?) #f))
+           (when (and node (ui/active? node))
+             (ui/send! node event)
+             (when (and armed? (ui/enabled? node) (includes? (hit-path tree (get event :x) (get event :y)) node))
+               (ui/send! node {:kind :press :x (get event :x) :y (get event :y)}))))))
       (else nil))))
 
 (def (focus-next! tree backwards?)
-  (let ((nodes []) (current (ui/focused tree)) (index -1))
+  (let ((nodes [])
+        (current (ui/focused tree))
+        (index -1))
     (def (visit node)
       (when (ui/focusable? node)
         (when (eq? node current) (set! index (length nodes)))
         (push! nodes node))
       (for-each visit (ui/children node)))
     (for-each visit (ui/children tree))
-    (if (= (length nodes) 0) (ui/focus! tree nil)
-        (ui/focus! tree (get nodes
-          (modulo (if (< index 0) (if backwards? (- (length nodes) 1) 0)
-                      (+ index (if backwards? -1 1))) (length nodes)))))))
+    (if (= (length nodes) 0)
+        (ui/focus! tree nil)
+        (ui/focus! tree
+                   (get nodes
+                        (modulo (if (< index 0)
+                                    (if backwards?
+                                        (- (length nodes) 1)
+                                        0)
+                                    (+ index
+                                       (if backwards?
+                                           -1
+                                           1)))
+                                (length nodes)))))))
+
 (def- (node-path node)
-  (if (ui/mounted? node) (cons node (node-path (node :parent))) '()))
+  (if (ui/mounted? node)
+      (cons node (node-path (node :parent)))
+      '()))
+
 (def- (action! path event)
-  (if (null? path) nil
+  (if (null? path)
+      nil
       (let ((node (car path)))
         (let ((action (get (get (node :options) :keymap {}) (get event :key)))
               (handler (get (node :options) :on-action)))
-          (if (and (ui/enabled? node) action handler
-                   (eq? (handler action) :handled)) :handled
-              (action! (cdr path) event))))))
+          (if (and (ui/enabled? node) action handler (eq? (handler action) :handled))
+              :handled (action! (cdr path) event))))))
+
 (def (keyboard! tree event)
   "Route normalized key strings; actions run on keydown, button activation on keyup."
-  (let ((node (ui/focused tree)) (focus (tree :focus))
-        (kind (get event :kind)) (key (get event :key)))
+  (let ((node (ui/focused tree))
+        (focus (tree :focus))
+        (kind (get event :kind))
+        (key (get event :key)))
     (cond
       ((eq? kind :focus-lost) (ui/focus! tree nil) (ui/cancel-key! tree))
-      ((eq? kind :text-input)
-       (when (and node (ui/accepts-text? (ui/instance node))) (ui/send! node event)))
+      ((eq? kind :text-input) (when (and node (ui/accepts-text? (ui/instance node))) (ui/send! node event)))
       ((eq? kind :key-up)
        (when (equal? (get event :code key) (focus :key))
          (let ((armed (focus :armed)))
            (ui/cancel-key! tree)
-           (when (and armed (eq? armed node) (ui/focusable? armed))
-             (ui/send! armed {:kind :press})))))
-      ((and (eq? kind :key-down)
-            (or (not (get event :repeat #f))
-                (and node (ui/repeat-key? (ui/instance node) event))))
+           (when (and armed (eq? armed node) (ui/focusable? armed)) (ui/send! armed {:kind :press})))))
+      ((and (eq? kind :key-down) (or (not (get event :repeat #f)) (and node (ui/repeat-key? (ui/instance node) event))))
        (cond
          ((or (equal? key "Tab") (equal? key "Shift+Tab"))
           (unless (get event :repeat #f) (focus-next! tree (equal? key "Shift+Tab"))))
          ((and node (ui/activation-key? (ui/instance node) event))
           (unless (or (get event :repeat #f) (focus :armed))
-            (set! (focus :armed) node) (set! (focus :key) (get event :code key))
+            (set! (focus :armed) node)
+            (set! (focus :key) (get event :code key))
             (set! (focus :event) event)
             (set! (node :pressed?) #t)))
-         (else
-           (let ((path (if node (node-path node) (array-to-list (ui/children tree)))))
-             (unless (eq? (action! path event) :handled) (bubble! path event))))))
+         (else (let ((path (if node
+                               (node-path node)
+                               (array-to-list (ui/children tree)))))
+                 (unless (eq? (action! path event) :handled) (bubble! path event))))))
       (else nil))))

@@ -1,6 +1,14 @@
 (def test-nil nil)
-(def (test-table type message) (table :type type :message message))
-(def (test-data c) (get c :data))
+
+(def (test-table type message)
+  (table :type type :message message))
+
+(def (test-data c)
+  (get c :data))
+
 (def test-length length)
+
 (def test-ref get)
-(def (test-print n) (println "condition checks:" n))
+
+(def (test-print n)
+  (println "condition checks:" n))

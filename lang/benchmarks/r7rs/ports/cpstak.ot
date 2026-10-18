@@ -4,12 +4,7 @@
   (def (tak-k x y z k)
     (if (not (< y x))
         (k z)
-        (tak-k (- x 1) y z
-          (fn (v1)
-            (tak-k (- y 1) z x
-              (fn (v2)
-                (tak-k (- z 1) x y
-                  (fn (v3) (tak-k v1 v2 v3 k)))))))))
+        (tak-k (- x 1) y z (fn (v1) (tak-k (- y 1) z x (fn (v2) (tak-k (- z 1) x y (fn (v3) (tak-k v1 v2 v3 k)))))))))
   (tak-k x y z (fn (a) a)))
 
 (def (benchmark-main)
@@ -19,9 +14,7 @@
         (input3 (bench-read))
         (output (bench-read))
         (name (str "cpstak:" input1 ":" input2 ":" input3 ":" count)))
-    (run-ported-benchmark name count
-      (fn ()
-        (cpstak (bench-hide count input1)
-                (bench-hide count input2)
-                (bench-hide count input3)))
-      (fn (result) (= result output)))))
+    (run-ported-benchmark name
+                          count
+                          (fn () (cpstak (bench-hide count input1) (bench-hide count input2) (bench-hide count input3)))
+                          (fn (result) (= result output)))))

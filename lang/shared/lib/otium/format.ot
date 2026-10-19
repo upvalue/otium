@@ -22,6 +22,7 @@ parameter list, :always to always break any body, or :never."
     (for-each (fn (name) (put! rules name (rule 1 :signature))) '("def" "def-" "defmethod" "defgeneric"))
     (put! rules "defmacro" (rule 2 :always))
     (put! rules "dotimes" (rule 1 :always))
+    (put! rules "unwind-protect" (rule 0 :always))
     (for-each (fn (name) (put! rules name (rule 1 :never)))
               '("defonce"
                 "defparam"

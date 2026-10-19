@@ -1,47 +1,96 @@
 .DEFAULT_GOAL := all
+.DELETE_ON_ERROR:
 CC ?= cc
-CMAKE ?= cmake
+CXX ?= c++
+AR ?= ar
+PYTHON ?= python3
 PLATFORM ?= $(shell uname -m)-$(shell uname -s | tr '[:upper:]' '[:lower:]')
 BUILD ?= build/$(PLATFORM)
 CFLAGS ?= -O2 -g
 CXXFLAGS ?= -O2 -g
 CPPFLAGS ?=
 LDFLAGS ?=
-WITH_UI ?= OFF
-CMAKE_BUILD := $(BUILD)/cmake
-EXT := $(if $(filter Darwin,$(shell uname -s)),dylib,so)
+LDLIBS ?=
+WARN := -Wall -Wextra -Werror
+UNAME := $(shell uname -s)
+ifeq ($(UNAME),Darwin)
+EXT := dylib
+SHARED_FLAGS := -dynamiclib
+LIB_ID = -Wl,-install_name,$(abspath $@)
+else
+EXT := so
+SHARED_FLAGS := -shared
+LIB_ID = -Wl,-soname,$(notdir $@)
+endif
+DL_LIBS := $(if $(filter Linux,$(UNAME)),-ldl,)
 quote = '$(subst ','"'"',$(1))'
+OBJECTS := $(addprefix $(BUILD)/objects/,utf8.o ffi-native.o dev-transport.o line-edit.o bestline.o)
+LINE_OBJECTS := $(BUILD)/objects/line-edit.o $(BUILD)/objects/bestline.o
+DEV_OBJECTS := $(BUILD)/objects/dev-transport.o $(BUILD)/objects/utf8.o
+FFI_OBJECTS := $(BUILD)/objects/ffi-native.o $(BUILD)/objects/utf8.o
 
-.PHONY: all configure ffi ui native-objects test clean line dev
-configure:
-	+@$(CMAKE) -S . -B $(CMAKE_BUILD) \
-	  -DOTIUM_OUTPUT_DIR=$(abspath $(BUILD)) -DOTIUM_WITH_UI=$(WITH_UI) \
-	  -DCMAKE_C_COMPILER=$(CC) -DCMAKE_C_FLAGS=$(call quote,$(CPPFLAGS) $(CFLAGS)) \
-	  -DCMAKE_CXX_FLAGS=$(call quote,$(CPPFLAGS) $(CXXFLAGS)) \
-	  -DCMAKE_SHARED_LINKER_FLAGS=$(call quote,$(LDFLAGS)) \
-	  -DCMAKE_EXE_LINKER_FLAGS=$(call quote,$(LDFLAGS)) > /dev/null
+.PHONY: all ffi line dev native-objects test clean FORCE
+all: line dev $(BUILD)/libotium-line.a $(BUILD)/otium-utf8-checks
+line: $(BUILD)/libotium-line.$(EXT)
+dev: $(BUILD)/libotium-dev.$(EXT)
+ffi: $(BUILD)/libotium-ffi.$(EXT)
+native-objects: $(OBJECTS)
+FORCE:
 
-all: configure
-	+@$(CMAKE) --build $(CMAKE_BUILD) > /dev/null
+# Update the stamp only when the toolchain/flags change, including a switch back
+# to an earlier configuration. Headers are tracked by compiler-generated .d files.
+$(BUILD)/.native-config: FORCE
+	@mkdir -p $(dir $@)
+	@temp=$@.$$$$; printf '%s\n' $(call quote,$(CC)|$(AR)|$(CPPFLAGS)|$(CFLAGS)|$(LDFLAGS)|$(LDLIBS)|$(SHARED_FLAGS)) > "$$temp"; \
+	  cmp -s "$$temp" $@ || mv "$$temp" $@; rm -f "$$temp"
 
-ffi line dev native-objects: configure
-	+@$(CMAKE) --build $(CMAKE_BUILD) --target $(if $(filter native-objects,$@),native-objects,otium-$@) > /dev/null
+$(OBJECTS) $(BUILD)/objects/utf8-checks.o: Makefile $(BUILD)/.native-config
 
-ui: WITH_UI=ON
-ui: CMAKE_BUILD=$(BUILD)/cmake-ui
-ui: configure
-	+@$(CMAKE) --build $(CMAKE_BUILD) --target otium-ui otium-ui-caret-checks otium-ui-text-reference otium-ui-test-events > /dev/null
+$(BUILD)/objects/utf8.o: support/utf8.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c11 $(CPPFLAGS) $(CFLAGS) $(WARN) -fPIC -MMD -MP -c $< -o $@
+$(BUILD)/objects/ffi-native.o: ffi/native.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c11 $(CPPFLAGS) $(CFLAGS) $(WARN) -fPIC -MMD -MP -c $< -o $@
+$(BUILD)/objects/dev-transport.o: dev/transport.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c11 $(CPPFLAGS) $(CFLAGS) $(WARN) -fPIC -MMD -MP -c $< -o $@
+$(BUILD)/objects/line-edit.o: line-edit.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c11 $(CPPFLAGS) $(CFLAGS) $(WARN) -fPIC -MMD -MP -Ivendor/bestline -c $< -o $@
+$(BUILD)/objects/bestline.o: vendor/bestline/bestline.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 -w -fPIC -MMD -MP -c $< -o $@
+$(BUILD)/objects/utf8-checks.o: tests/native/utf8.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c11 $(CPPFLAGS) $(CFLAGS) $(WARN) -MMD -MP -Isupport -c $< -o $@
 
-test: all
-	ctest --test-dir $(CMAKE_BUILD) --output-on-failure
+$(BUILD)/libotium-line.$(EXT): $(LINE_OBJECTS) Makefile $(BUILD)/.native-config
+	$(CC) $(LDFLAGS) $(SHARED_FLAGS) $(LIB_ID) -o $@.tmp $(LINE_OBJECTS) $(LDLIBS)
+	mv $@.tmp $@
+$(BUILD)/libotium-dev.$(EXT): $(DEV_OBJECTS) Makefile $(BUILD)/.native-config
+	$(CC) $(LDFLAGS) $(SHARED_FLAGS) $(LIB_ID) -o $@.tmp $(DEV_OBJECTS) $(LDLIBS)
+	mv $@.tmp $@
+$(BUILD)/libotium-ffi.$(EXT): $(FFI_OBJECTS) Makefile $(BUILD)/.native-config
+	$(CC) $(LDFLAGS) $(SHARED_FLAGS) $(LIB_ID) -o $@.tmp $(FFI_OBJECTS) $(DL_LIBS) $(LDLIBS)
+	mv $@.tmp $@
+$(BUILD)/libotium-line.a: $(LINE_OBJECTS) Makefile $(BUILD)/.native-config
+	rm -f $@.tmp
+	$(AR) rcs $@.tmp $(LINE_OBJECTS)
+	mv $@.tmp $@
+$(BUILD)/otium-utf8-checks: $(BUILD)/objects/utf8-checks.o $(BUILD)/objects/utf8.o Makefile $(BUILD)/.native-config
+	$(CC) $(LDFLAGS) -o $@.tmp $(filter %.o,$^) $(LDLIBS)
+	mv $@.tmp $@
 
-# Preserve the artifact entry points used by launchers and external callers.
-.PHONY: $(BUILD)/libotium-line.$(EXT) $(BUILD)/libotium-dev.$(EXT) $(BUILD)/libotium-ffi.$(EXT) $(BUILD)/libotium-line.a
-$(BUILD)/libotium-line.$(EXT): line
-$(BUILD)/libotium-dev.$(EXT): dev
-$(BUILD)/libotium-ffi.$(EXT): ffi
-$(BUILD)/libotium-line.a: configure
-	+@$(CMAKE) --build $(CMAKE_BUILD) --target otium-line-static > /dev/null
+test: $(BUILD)/otium-utf8-checks
+	$(BUILD)/otium-utf8-checks
 
 clean:
 	rm -rf $(BUILD)
+
+-include $(OBJECTS:.o=.d) $(BUILD)/objects/utf8-checks.d
+
+# Optional dependencies are discovered only for an explicit UI target.
+ifneq ($(filter ui $(BUILD)/libotium-ui.$(EXT) $(BUILD)/libotium-ui-test-events.$(EXT) $(BUILD)/ui/%,$(MAKECMDGOALS)),)
+include ui/build.mk
+endif

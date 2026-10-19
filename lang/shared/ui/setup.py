@@ -38,8 +38,7 @@ def main():
         # Only the native library and its license are needed.
         stage = temp / 'install'
         stage.mkdir()
-        for name in ('yoga', 'cmake'):
-            shutil.copytree(extracted / name, stage / name)
+        shutil.copytree(extracted / 'yoga', stage / 'yoga')
         shutil.copy2(extracted / 'LICENSE', stage / 'LICENSE')
         (stage / '.otium-sha256').write_text(SHA256)
         if DEST.exists():

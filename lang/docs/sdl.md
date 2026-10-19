@@ -1,9 +1,9 @@
-Portable SDL3 on C and Chez
+# Portable SDL3 on C and Chez
 
 From lang/, build the optional FFI and generate an installation manifest:
 
-  make ffi
-  tools/python shared/sdl/setup.py
+    make ffi
+    tools/python shared/sdl/setup.py
 
 SDL3 and pkg-config must be installed for setup. The checked-in macOS arm64
 manifest was generated from SDL 3.4.16 headers. It records that version and a
@@ -22,8 +22,8 @@ against the manifest before calling SDL.
 
 Regenerate after changing SDL headers or compiler ABI options:
 
-  tools/python shared/sdl/setup.py
-  tools/python shared/sdl/setup.py --check
+    tools/python shared/sdl/setup.py
+    tools/python shared/sdl/setup.py --check
 
 --check recompiles the probe and compares all metadata with the manifest.
 --manifest PATH selects a different output/check file. CC and CFLAGS configure
@@ -37,8 +37,8 @@ The same rule applies on both runtimes.
 
 Run either animated scene:
 
-  tools/python examples/run_sdl.py --runtime c --scene shapes
-  tools/python examples/run_sdl.py --runtime chez --scene particles
+    tools/python examples/run_sdl.py --runtime c --scene shapes
+    tools/python examples/run_sdl.py --runtime chez --scene particles
 
 The host watches the shared scene file between frames. Saving it reloads the
 drawing code; R retries immediately. Escape or closing the window exits. Window,
@@ -50,28 +50,28 @@ changed. Keep persistent state in the host, outside the scene source.
 
 Launcher options:
 
-  --runtime c|chez        Select runtime; default c.
-  --scene shapes|particles
-                         Select shared animation; default shapes.
-  --scene-path FILE       Watch this source instead of the selected scene.
-  --frames N             Stop after N frames; 0 means run until quit.
-  --capture FILE         Save the final frame as BMP before presenting it.
-                         Requires --frames, except in acceptance mode.
-  --status FILE          Atomically publish numeric status after each frame.
-                         Fields, separated by spaces: completed frames, scene
-                         ticks, reloads, reload errors, render errors, saved
-                         window identity (1/0), saved renderer identity (1/0).
-                         Used by the scene host, not acceptance mode.
-  --renderer NAME        SDL renderer name/list. Default metal on macOS;
-                         opengl,opengles2,vulkan on Linux. Software is rejected.
-  --audio off|dummy|real  Queued 48 kHz mono float PCM, with a null callback.
-                         Default off. Dummy sets SDL_AUDIO_DRIVER=dummy.
-                         Real rejects that environment setting.
-  --manifest FILE        Select installation manifest.
-  --acceptance           Run the shared render/input/texture/audio checks.
-  --inject-error         Raise an Otium error after resources exist. Acceptance
-                         mode catches it and checks teardown; scene mode exits
-                         with an error after unwinding the session.
+    --runtime c|chez        Select runtime; default c.
+    --scene shapes|particles
+                           Select shared animation; default shapes.
+    --scene-path FILE       Watch this source instead of the selected scene.
+    --frames N             Stop after N frames; 0 means run until quit.
+    --capture FILE         Save the final frame as BMP before presenting it.
+                           Requires --frames, except in acceptance mode.
+    --status FILE          Atomically publish numeric status after each frame.
+                           Fields, separated by spaces: completed frames, scene
+                           ticks, reloads, reload errors, render errors, saved
+                           window identity (1/0), saved renderer identity (1/0).
+                           Used by the scene host, not acceptance mode.
+    --renderer NAME        SDL renderer name/list. Default metal on macOS;
+                           opengl,opengles2,vulkan on Linux. Software is rejected.
+    --audio off|dummy|real  Queued 48 kHz mono float PCM, with a null callback.
+                           Default off. Dummy sets SDL_AUDIO_DRIVER=dummy.
+                           Real rejects that environment setting.
+    --manifest FILE        Select installation manifest.
+    --acceptance           Run the shared render/input/texture/audio checks.
+    --inject-error         Raise an Otium error after resources exist. Acceptance
+                           mode catches it and checks teardown; scene mode exits
+                           with an error after unwinding the session.
 
 The host owns one SDL session on the interpreter's main thread and calls
 SDL_SetMainReady before initialization. Cleanup stops text input, releases
@@ -80,8 +80,8 @@ Textures precede renderer destruction; the renderer precedes its window.
 
 Tests:
 
-  tools/python shared/tests/test_sdl.py --runtime both
-  tools/python shared/tests/test_sdl.py --runtime both --require-accelerated
+    tools/python shared/tests/test_sdl.py --runtime both
+    tools/python shared/tests/test_sdl.py --runtime both --require-accelerated
 
 Both modes check the manifest, invalid manifest/override rejection, copied text
 whose native bytes change on the next fixture poll, input conversion, and dummy
@@ -96,8 +96,8 @@ sandbox without display-server access cannot run the graphics checks.
 
 Real-device audio is a separate smoke test:
 
-  tools/python examples/run_sdl.py --runtime c --acceptance --audio real --inject-error
-  tools/python examples/run_sdl.py --runtime chez --acceptance --audio real --inject-error
+    tools/python examples/run_sdl.py --runtime c --acceptance --audio real --inject-error
+    tools/python examples/run_sdl.py --runtime chez --acceptance --audio real --inject-error
 
 The acceptance test verifies that the device consumes queued PCM after resume,
 then refills only below a fixed queue threshold. This is separate from dummy

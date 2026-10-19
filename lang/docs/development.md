@@ -67,9 +67,9 @@ tree, formatter and linter are Otium libraries in `shared/lib/otium/`.
 
 | Command | Coverage | Additional dependencies |
 | --- | --- | --- |
-| `make test` | C, Chez, portable library/reader/CLI/UI contracts, tooling, interactive REPL | C23 compiler, CMake 3.20+, Python 3, Chez, POSIX PTYs |
+| `make test` | C, Chez, portable library/reader/CLI/UI contracts, tooling, interactive REPL | C23 compiler, Make, Python 3, Chez, POSIX PTYs |
 | `make test-c`, `make test-chez` | Runtime-specific suites and shared conditions | Selected runtime |
-| `make test-native` | FFI, SDL events/audio, UI layout; GPU checks when available | libffi, SDL3, CMake, C++20, glslc, pinned Yoga |
+| `make test-native` | FFI, SDL events/audio, UI layout; GPU checks when available | libffi, SDL3, SDL3_ttf, C++20, glslc, pinned Yoga |
 | `make test-gpu` | Required GPU and accelerated SDL acceptance | Native dependencies and working display/backend |
 | `make test-benchmarks` | Reduced-input R7RS port correctness on both runtimes | Initialized benchmark submodule; optional Guile reference |
 | `make test-site` | WebAssembly runtime and generated site checks | Emscripten, Node/npm, site dependencies |
@@ -104,9 +104,9 @@ Different checkouts and compiler configurations do not share objects. `BUILD_ROO
 `BIN_ROOT`, `PLATFORM`, `GC`, and `WITH_FFI` remain configurable. The C launcher
 selects `c/bin/<platform>/otium`; `OTIUM_BIN_ROOT` and `OTIUM_PLATFORM` override
 its location. Shared native outputs live in `shared/build/<platform>/`. Their compilation is
-owned by `shared/CMakeLists.txt`; both runtimes use that build through
-`shared/Makefile`. UI dependencies are required only with `OTIUM_WITH_UI=ON`
-(`make ui` sets it). See [native components](../shared/NATIVE.txt) for build
+owned by `shared/Makefile`; both runtimes use its libraries or compiled objects.
+UI rules are in `shared/ui/build.mk` and discover dependencies only for explicit
+UI targets such as `make ui`. See [native components](native-components.md) for build
 commands, ownership contracts and the remaining policy-migration audit.
 
 Shared C/C++ is reserved for bridges that would be impractically difficult in
@@ -127,7 +127,7 @@ binary path; use separate worktrees or `BIN_ROOT` values for that case.
 | `shared/documentation/runtime.json` | C/Chez runtime reference tables | Same aggregate targets |
 | Shared `.ot` libraries | Embedded C headers | Native/WASM Make dependencies; build-only |
 | Language docs and source docstrings | Site reference and pages | `make site`; ignored outputs |
-| UI shader sources | Embedded shader header and SPIR-V | CMake dependencies; build-only |
+| UI shader sources | Embedded shader header and SPIR-V | Make dependencies; build-only |
 | Installed SDL headers and schema | Target ABI manifest | `make sdl-setup`; validate with `tools/python shared/sdl/setup.py --check` |
 
 ## Ownership

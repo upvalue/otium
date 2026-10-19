@@ -44,7 +44,7 @@ with the generational collector, compaction.
 This is an implementation milestone, not completion of `specs/ffi.md`. Remaining
 work includes complete structured error metadata for every failure path,
 allocation-failure injection and signature-cache sharing in C. There is no callback or varargs
-support. [Aggregate ABI notes](../shared/ffi/ABI.md) describe the union lowering
+support. [Aggregate ABI notes](ffi-abi.md) describe the union lowering
 and its target-specific validation limits.
 
 Validation so far is on macOS arm64 with Chez 10.4.1. Linux x86-64 remains
@@ -76,7 +76,7 @@ make test-sdl-integration
 `test-sdl-integration` requires an accelerated renderer. Ordinary SDL testing
 reports an explicit skip when accelerated graphics are unavailable. Dummy audio
 checks queue mechanics; `--audio real` is a separate device smoke test. See
-[SDL usage](../shared/sdl/USAGE.txt) for the acceptance and capture options.
+[SDL usage](sdl.md) for the acceptance and capture options.
 
 The orbit and particle scenes now share source between runtimes. The host
 watches scene files and reloads drawing code between frames, retaining the

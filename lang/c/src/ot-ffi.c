@@ -239,7 +239,7 @@ static int call_kind(otv value) {
 }
 /* A union's overlapping members contribute to its calling classification.
  * Preserve byte classes as well as size: a 4-aligned union can straddle two
- * SysV eightbytes when nested in a struct. See shared/ffi/ABI.md. */
+ * SysV eightbytes when nested in a struct. See docs/ffi-abi.md. */
 static bool classify_union_member(ots* s, otv d, size_t offset, unsigned char classes[32],
                                   int* floating, unsigned depth) {
   if (depth > 64) {

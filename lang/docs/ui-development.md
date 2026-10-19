@@ -7,7 +7,7 @@ keyboard focus and action routing. Automatic file watching is still pending.
 
 ## Build and run
 
-The native build needs a C/C++ toolchain, CMake, pkg-config, Python 3.12 or later,
+The native build needs a C/C++ toolchain, Make, pkg-config, Python 3.12 or later,
 SDL3 3.4.12 or later, SDL3_ttf 3.2.2 or later (`sdl3-ttf` in pkg-config),
 and `glslc`. Yoga sources are pinned and checksum-verified:
 
@@ -18,7 +18,7 @@ make ui
 
 For an offline Yoga install, use
 `tools/python shared/ui/setup.py --archive /path/to/yoga.tar.gz` instead of
-`make ui-setup`. See `shared/ui/DEPENDENCIES.md` for the version and checksum.
+`make ui-setup`. See [native dependencies](native-dependencies.md) for the version and checksum.
 
 Run either command from the repository root:
 
@@ -36,7 +36,7 @@ Tab and Shift+Tab move focus; Enter or Space activate the focused button on
 release. The terminal scene exercises text input and scrolling.
 
 `examples/ui.ot` uses `otium.cli`. `--help` lists its options. Native library
-paths come from `shared/build/ui-config.ot`, written by CMake and read as data.
+paths come from `shared/build/ui-config.ot`, written by Make and read as data.
 `--config` selects another installation file. The application and scene modules
 are checked-in Otium source.
 

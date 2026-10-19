@@ -10,15 +10,18 @@ import socket
 import struct
 import sys
 
+from otium_tools import dev
+
 LIMIT = 4 * 1024 * 1024
 
 
 def default_socket():
-    directory = Path.cwd()
-    for parent in (directory, *directory.parents):
-        if (parent / 'project.ot').is_file():
-            return parent / '.otium/dev.sock'
-    return directory / '.otium/dev.sock'
+    found = dev.servers()
+    chosen = dev.choose(found)
+    if chosen is None:
+        raise ValueError('no running development server' if not found else
+                         'several development servers are running; pass a socket path')
+    return chosen[0]
 
 
 class Connection:

@@ -1,3 +1,5 @@
+(require (otium.process :as process))
+
 (defonce pending '())
 
 (defonce paused? #f)
@@ -10,11 +12,25 @@
 
 (defonce revision 0)
 
+(defonce events '())
+
+(defonce event-count 0)
+
+(def event-limit 100)
+
+(defonce launched (%clock))
+
+(defonce reloaded {})
+
 (def (enabled?)
   (%enabled?))
 
 (def (event! event)
-  (when (enabled?) (%send 0 (%repr event))))
+  (when (enabled?)
+    (set! event-count (+ event-count 1))
+    (put! event :seq event-count)
+    (set! events (cons event (take (- event-limit 1) events)))
+    (%send 0 (%repr event))))
 
 (def- (reply! client value)
   (if (= client -1)
@@ -23,7 +39,37 @@
         (if (get value :ok)
             (println (get value :value))
             (println "error:" (get value :condition))))
-      (%send client (%repr value))))
+      (%send client (%repr (put value :event event-count)))))
+
+(def- (clip text limit)
+  (if (and (> limit 0) (> (string-length text) limit))
+      (substring text 0 limit)
+      text))
+
+(def- (limit-response response limit)
+  (let ((long? (fn (text) (and (> limit 0) (> (string-length text) limit))))
+        (values (get response :values '()))
+        (cut? #f))
+    (for-each (fn (v) (when (long? v) (set! cut? #t))) values)
+    (if (or cut? (long? (get response :value "")) (long? (get response :output "")))
+        (put response
+             :value (clip (get response :value "") limit)
+             :output (clip (get response :output "") limit)
+             :values (map (fn (v) (clip v limit)) values)
+             :truncated #t)
+        response)))
+
+(def- (status)
+  {:pid (%pid)
+   :cwd (%cwd)
+   :runtime (%runtime)
+   :script (process/script-name)
+   :arguments (process/arguments)
+   :uptime-ms (- (%clock) launched)
+   :state (if paused?
+              :paused
+              :running)
+   :event event-count})
 
 (def- (any? c)
   #t)
@@ -65,6 +111,19 @@
 (def (end!)
   (%deadline 0))
 
+(def- (file-namespace code)
+  (let ((found #f))
+    (for-each (fn (line)
+                (when (and (not found) (string-starts-with? line "(ns "))
+                  (let ((rest (substring line 4 (string-length line))))
+                    (set! found (string->symbol (string-trim (get (string-split rest ")") 0)))))))
+              (string-split code "\n"))
+    found))
+
+(def- (note-reload! path code)
+  (let ((space (file-namespace code)))
+    (when space (put! reloaded space {:file (%realpath path) :loaded (%now)}))))
+
 (def- (handle! client request)
   (let ((id (get request :id #f))
         (op (get request :op)))
@@ -76,36 +135,38 @@
                (code (if (eq? op :load)
                          (read-file (get request :path))
                          (get request :code)))
-               (space (get request :ns "user")))
+               (space (get request :ns "user"))
+               (limit (get request :max-chars 10000)))
            (begin!)
            (unwind-protect
              (let ((result (%evaluate code
                                       space
-                                      (if (eq? op :load)
-                                          (get request :path)
-                                          "<dev>"))))
+                                      (get request :path "<dev>"))))
                (set! revision (+ revision 1))
+               (when (eq? op :load) (note-reload! (get request :path) code))
                (reply! client
-                       (if (get result :ok)
-                           {:id id
-                            :ok #t
-                            :value (get result :value)
-                            :values (get result :values)
-                            :output (get result :output)}
-                           {:id id
-                            :ok #f
-                            :condition (condition-data (get result :condition))
-                            :output (get result :output)})))
+                       (limit-response
+                         (if (get result :ok)
+                             {:id id
+                              :ok #t
+                              :value (get result :value)
+                              :values (get result :values)
+                              :output (get result :output)}
+                             {:id id
+                              :ok #f
+                              :condition (condition-data (get result :condition))
+                              :output (get result :output)})
+                         limit)))
              (set! started old-start)
              (%deadline deadline))))
-        ((eq? op :status)
-         (reply! client
-                 {:id id
-                  :ok #t
-                  :value (if paused?
-                             "paused"
-                             "running")
-                  :output ""}))
+        ((eq? op :status) (reply! client {:id id :ok #t :value (status) :output ""}))
+        ((eq? op :events)
+         (let ((since (get request :since 0)))
+           (reply! client
+                   {:id id
+                    :ok #t
+                    :value (reverse (filter (fn (e) (> (get e :seq) since)) events))
+                    :output ""})))
         ((eq? op :interrupt) (reply! client {:id id :ok #t :value "nil" :output ""}))
         ((or (eq? op :continue) (eq? op :abort))
          (unless paused? (error "program is not paused"))
@@ -172,3 +233,83 @@
 
 (def (stdio! code)
   (handle! -1 {:id 0 :op :eval :code code :ns "user"}))
+
+(def- (namespace-entries)
+  (map (fn (entry)
+         (let ((again (get reloaded (get entry :name) #f)))
+           (if (and again (> (get again :loaded) (get entry :loaded 0)))
+               (put entry :file (get again :file) :loaded (get again :loaded))
+               entry)))
+       (%namespaces)))
+
+(def- (by-name entries)
+  (sort-by (fn (entry) (symbol->string (get entry :name))) entries))
+
+(def (namespaces)
+  "Return the loaded namespaces, sorted by name, each a table with :name and, when it was read from a file, :file."
+  (by-name (map (fn (entry)
+                  (if (get entry :file #f)
+                      {:name (get entry :name) :file (get entry :file)}
+                      {:name (get entry :name)}))
+                (namespace-entries))))
+
+(def (bindings space)
+  "Return the bindings defined in a namespace, sorted by name. Each is a table with :name, :kind (:function, :macro or :value), :public and :doc, plus :arity and :variadic for Otium functions."
+  (by-name (%bindings (if (string? space)
+                          (string->symbol space)
+                          space))))
+
+(def (apropos text)
+  "Return qualified names of bindings, in any loaded namespace, whose name contains text."
+  (let ((found '()))
+    (for-each (fn (entry)
+                (for-each (fn (binding)
+                            (when (string-contains? (symbol->string (get binding :name)) text)
+                              (set! found (cons (string->symbol (str (get entry :name) "/" (get binding :name))) found))))
+                          (%bindings (get entry :name))))
+              (%namespaces))
+    (sort-by symbol->string found)))
+
+(def- (split-name name)
+  (let ((text (symbol->string name))
+        (slash #f))
+    (dotimes (i (string-length text))
+      (when (equal? (substring text i (+ i 1)) "/") (set! slash i)))
+    (unless slash (error "source: expected a qualified name such as app.view/render" name))
+    (list (string->symbol (substring text 0 slash)) (substring text (+ slash 1) (string-length text)))))
+
+(def- (defines? line name)
+  (exists (fn (prefix)
+            (and (string-starts-with? line prefix)
+                 (let ((rest (substring line (string-length prefix) (string-length line))))
+                   (or (equal? rest "")
+                       (string-starts-with? rest " ")
+                       (string-starts-with? rest ")")))))
+          (map (fn (form) (str form name))
+               '("(def " "(def (" "(def- " "(def- (" "(defonce " "(defmacro " "(defclass "))))
+
+(def (source name)
+  "Return {:file :line} for the top-level definition of a qualified name, or #f. Lines count from 1 and are read from the file as it is now."
+  (let ((parts (split-name name))
+        (entry (find (fn (e) (eq? (get e :name) (car parts))) (namespace-entries)))
+        (file (and entry (get entry :file #f))))
+    (if file
+        (let ((lines (string-split (read-file file) "\n"))
+              (found #f))
+          (dotimes (i (length lines))
+            (when (and (not found) (defines? (get lines i) (cadr parts)))
+              (set! found {:file file :line (+ i 1)})))
+          found)
+        #f)))
+
+(def (stale-files)
+  "Return the files of loaded namespaces that have changed since they were loaded."
+  (let ((stale '()))
+    (for-each (fn (entry)
+                (let ((file (get entry :file #f)))
+                  (when file
+                    (let ((mtime (%mtime file)))
+                      (when (and mtime (> mtime (get entry :loaded 0)) (not (member file stale)))
+                        (set! stale (cons file stale)))))))
+              (namespace-entries))
+    (sort stale)))

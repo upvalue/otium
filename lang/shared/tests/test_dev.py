@@ -11,6 +11,8 @@ import tempfile
 import time
 import unittest
 
+from otium_tools import dev
+
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIMES = os.environ.get('OTIUM_TEST_RUNTIMES', 'chez c').split()
 
@@ -27,7 +29,7 @@ class Client:
 
     def send(self, ident, op, **fields):
         text = '{:id %d :op :%s%s}' % (ident, op, ''.join(
-            ' :%s %s' % (key, json.dumps(value, ensure_ascii=False)) for key, value in fields.items()))
+            ' :%s %s' % (key.replace('_', '-'), json.dumps(value, ensure_ascii=False)) for key, value in fields.items()))
         data = text.encode('utf-8')
         self.socket.sendall(struct.pack('!I', len(data)) + data)
 
@@ -46,7 +48,7 @@ class Client:
     def response(self, ident):
         while True:
             data = self.read()
-            if ':event ' in data:
+            if data.startswith('{:event '):
                 self.events.append(data)
             else:
                 assert re.search(r':id %d(?:\s|})' % ident, data), data
@@ -55,6 +57,7 @@ class Client:
 
 class Server:
     def __init__(self, runtime, watchdog=2000, repl=False, stress=False):
+        self.runtime = runtime
         self.directory = tempfile.TemporaryDirectory(prefix='otdev-', dir='/tmp')
         self.path = Path(self.directory.name) / 'dev.sock'
         self.clients = []
@@ -162,7 +165,7 @@ class DevelopmentServerTests(unittest.TestCase):
             replacement = server.connect()
             c.close()
             replacement.send(8, 'status')
-            self.assertIn(':value "paused"', replacement.response(8))
+            self.assertIn(':state :paused', replacement.response(8))
             replacement.send(9, 'abort')
             replacement.response(9)
             replacement.send(10, 'eval', code='cleaned')
@@ -216,7 +219,7 @@ class DevelopmentServerTests(unittest.TestCase):
             c.response(3)
             self.assertIn(':ok #f', c.response(2))
             c.send(4, 'status')
-            self.assertIn(':value "paused"', c.response(4))
+            self.assertIn(':state :paused', c.response(4))
             c.send(5, 'abort')
             c.response(5)
             self.assertIn(':ok #f', c.response(1))
@@ -266,6 +269,68 @@ class DevelopmentServerTests(unittest.TestCase):
                     process.terminate()
                     process.communicate(timeout=3)
 
+    def test_events_truncation_and_eval_path(self):
+        for server in self.servers(watchdog=150):
+            c = server.client
+            c.send(1, 'eval', code='(let loop () (loop))')
+            self.assertIn(':event :paused', c.read())
+            c.send(2, 'abort')
+            self.assertIn(':ok #t', c.response(2))
+            c.response(1)
+            c.send(3, 'events', since=0)
+            result = c.response(3)
+            self.assertRegex(result, r':event :paused .*:seq 1')
+            self.assertRegex(result, r':event :resumed .*:seq 2')
+            self.assertIn(':event 2}', result)
+            c.send(4, 'events', since=1)
+            self.assertNotIn(':paused', c.response(4))
+            c.send(5, 'eval', code='"abcdefghij"', max_chars=4)
+            result = c.response(5)
+            self.assertIn(':value "\\"abc"', result)
+            self.assertIn(':truncated #t', result)
+            c.send(6, 'eval', code='(+ 1 2)')
+            self.assertNotIn(':truncated', c.response(6))
+            c.send(7, 'eval', code='\n(error "here")', path='/tmp/scratch.ot')
+            self.assertIn(':source {:path "/tmp/scratch.ot" :line 2}', c.response(7))
+            c.send(8, 'status')
+            result = c.response(8)
+            self.assertIn(':pid ', result)
+            self.assertIn(':runtime :' + server.runtime, result)
+
+    def test_introspection(self):
+        for stress in (False, True):
+            for server in self.servers(stress=stress):
+                c = server.client
+                path = Path(server.directory.name) / 'demo.ot'
+                path.write_text('(ns app.demo)\n\n(defonce model {:count 0})\n\n'
+                                '(def (greet name)\n  "Say hi."\n  (str "hi " name))\n\n'
+                                '(def- (helper & xs) xs)\n\n(defmacro twice (x) (list (quote begin) x x))\n')
+                c.send(1, 'load', path=str(path))
+                self.assertIn(':ok #t', c.response(1))
+                c.send(2, 'eval', code='(require otium.dev) (otium.dev/bindings (quote app.demo))')
+                result = c.response(2)
+                self.assertIn('{:name greet :kind :function', result)
+                self.assertIn(':arity 1 :variadic #f', result.replace('\\', ''))
+                self.assertIn('{:name helper :kind :function', result)
+                self.assertIn(':public #f', result)
+                self.assertIn('{:name twice :kind :macro', result)
+                self.assertIn('{:name model :kind :value', result)
+                self.assertIn('Say hi.', result)
+                c.send(3, 'eval', code='(otium.dev/namespaces)')
+                self.assertIn('{:name app.demo :file \\"%s\\"}' % path.resolve(), c.response(3))
+                c.send(4, 'eval', code='(otium.dev/apropos "gree")')
+                self.assertIn(':value "(app.demo/greet)"', c.response(4))
+                c.send(5, 'eval', code='(otium.dev/source (quote app.demo/greet))')
+                self.assertIn(':line 5}', c.response(5))
+                c.send(6, 'eval', code='(otium.dev/source (quote app.demo/missing))')
+                self.assertIn(':value "#f"', c.response(6))
+                c.send(7, 'eval', code='(otium.dev/stale-files)')
+                self.assertIn(':value "()"', c.response(7))
+                future = time.time() + 60
+                os.utime(path, (future, future))
+                c.send(8, 'eval', code='(otium.dev/stale-files)')
+                self.assertIn(str(path.resolve()), c.response(8))
+
     def test_live_socket_collision(self):
         for server in self.servers():
             result = subprocess.run([str(ROOT / 'otium'), '--runtime=chez', '--dev=' + str(server.path), 'serve'],
@@ -273,6 +338,91 @@ class DevelopmentServerTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             server.client.send(1, 'status')
             self.assertIn(':ok #t', server.client.response(1))
+
+
+class ClientTests(unittest.TestCase):
+    """otium-dev against a server on the default socket path."""
+
+    def start(self, runtime, directory):
+        before = set(dev.DIRECTORY.glob('*.sock')) if dev.DIRECTORY.is_dir() else set()
+        process = subprocess.Popen(
+            [str(ROOT / 'otium'), '--runtime=' + runtime, '--no-project', '--dev-watchdog=200', 'serve'],
+            cwd=directory, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        for _ in range(400):
+            new = set(dev.DIRECTORY.glob('*.sock')) - before if dev.DIRECTORY.is_dir() else set()
+            if new:
+                return process, new.pop()
+            if process.poll() is not None:
+                raise AssertionError(process.stderr.read())
+            time.sleep(.025)
+        raise AssertionError('server did not start')
+
+    def client(self, directory, *args, stdin=None):
+        return subprocess.run([str(ROOT / 'tools/otium-dev'), *args], cwd=directory, input=stdin,
+                              capture_output=True, text=True, timeout=20)
+
+    def test_client(self):
+        for runtime in RUNTIMES:
+            with self.subTest(runtime=runtime), tempfile.TemporaryDirectory(prefix='otdev-') as name:
+                directory = Path(name)
+                process, path = self.start(runtime, directory)
+                try:
+                    self.check_client(runtime, directory, process, path)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
+                    process.stderr.close()
+
+    def check_client(self, runtime, directory, process, path):
+        self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+
+        result = self.client(directory, 'ls')
+        self.assertIn(str(directory.resolve()), result.stdout)
+        result = self.client(directory, 'status')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('runtime: ' + runtime, result.stdout)
+
+        result = self.client(directory, 'eval', '(println "out") (+ 1 2)')
+        self.assertEqual((result.returncode, result.stdout), (0, 'out\n3\n'), result.stderr)
+        result = self.client(directory, 'eval', '-', stdin='(* 6 7)')
+        self.assertEqual(result.stdout, '42\n')
+
+        (directory / 'scratch.ot').write_text('(+ 1\n  (error "broken"))\n')
+        result = self.client(directory, 'eval', '--file', 'scratch.ot')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('error: broken', result.stderr)
+        self.assertIn('scratch.ot:1', result.stderr)
+
+        (directory / 'demo.ot').write_text('(ns app.demo)\n(def (greet name) (str "hi " name))\n')
+        result = self.client(directory, 'load', 'demo.ot')
+        self.assertEqual((result.returncode, result.stdout), (0, 'loaded 2 forms\n'), result.stderr)
+        result = self.client(directory, 'eval', '--ns', 'app.demo', '(greet "you")')
+        self.assertEqual(result.stdout, '"hi you"\n')
+
+        result = self.client(directory, 'eval', '--max-chars', '3', '"abcdef"')
+        self.assertEqual(result.stdout, '"ab\n')
+        self.assertIn('truncated', result.stderr)
+
+        result = self.client(directory, 'eval', '(let loop () (loop))')
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertIn('paused (watchdog', result.stderr)
+        result = self.client(directory, 'eval', '(+ 2 2)')
+        self.assertEqual(result.stdout, '4\n')
+        result = self.client(directory, 'abort')
+        self.assertEqual((result.returncode, result.stdout), (0, 'aborted\n'), result.stderr)
+        result = self.client(directory, 'events')
+        self.assertIn('#1 paused reason=:watchdog', result.stdout)
+        self.assertIn('#2 resumed', result.stdout)
+
+        result = self.client(directory, 'eval', '--timeout', '0.5', '(require otium.dev) (otium.dev/%poll 2000)')
+        self.assertEqual(result.returncode, 3, result.stderr)
+
+        process.kill()
+        process.wait()
+        self.assertTrue(path.exists())
+        self.assertNotIn(path, [found for found, _ in dev.servers()])
+        self.assertFalse(path.exists())
 
 
 if __name__ == '__main__':

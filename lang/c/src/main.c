@@ -91,6 +91,45 @@ static bool path_read(const char* directory, const char* relative, char** source
   return found;
 }
 
+/* The file and load time of each namespace the loader found, for the development server. */
+typedef struct loaded_namespace {
+  char* name;
+  char* path;
+  int64_t loaded;
+} loaded_namespace;
+static loaded_namespace* loaded_namespaces;
+static size_t loaded_namespace_count;
+
+static void record_loaded(const char* name, const char* directory, const char* relative) {
+  bytes path = {0};
+  bytes_append(&path, directory, strlen(directory));
+  if (path.length != 0 && path.data[path.length - 1] != '/') bytes_append(&path, "/", 1);
+  bytes_append(&path, relative, strlen(relative));
+  bytes_append(&path, "\0", 1);
+  const char* resolved = ot_dev_realpath(path.data);
+  char* absolute = copy_string(resolved, strlen(resolved));
+  ot_host_free(path.data);
+  loaded_namespace* entry = NULL;
+  for (size_t i = 0; i < loaded_namespace_count; i++)
+    if (strcmp(loaded_namespaces[i].name, name) == 0) entry = &loaded_namespaces[i];
+  if (!entry) {
+    loaded_namespaces = ot_host_realloc(loaded_namespaces,
+                                        (loaded_namespace_count + 1) * sizeof *loaded_namespaces);
+    entry = &loaded_namespaces[loaded_namespace_count++];
+    entry->name = copy_string(name, strlen(name));
+    entry->path = NULL;
+  }
+  ot_host_free(entry->path);
+  entry->path = absolute;
+  entry->loaded = ot_dev_now();
+}
+
+static const loaded_namespace* find_loaded(const char* name) {
+  for (size_t i = 0; i < loaded_namespace_count; i++)
+    if (strcmp(loaded_namespaces[i].name, name) == 0) return &loaded_namespaces[i];
+  return NULL;
+}
+
 static bool module_loader(void* userdata, const char* namespace_name, char** source,
                           size_t* length) {
   (void)userdata;
@@ -107,6 +146,7 @@ static bool module_loader(void* userdata, const char* namespace_name, char** sou
       bytes_append(&relative, extensions[j], strlen(extensions[j]));
       bytes_append(&relative, "\0", 1);
       if (path_read(load_path.values[i], relative.data, source, length)) {
+        record_loaded(namespace_name, load_path.values[i], relative.data);
         ot_host_free(relative.data);
         return true;
       }
@@ -190,6 +230,23 @@ static otv dev_clock(ots* s, otv* args, int argc) {
   (void)argc;
   return ot_make_int(ot_dev_clock());
 }
+static otv dev_pid(ots* s, otv* args, int argc) {
+  (void)s;
+  (void)args;
+  (void)argc;
+  return ot_make_int(ot_dev_pid());
+}
+static otv dev_cwd(ots* s, otv* args, int argc) {
+  (void)args;
+  (void)argc;
+  const char* path = ot_dev_cwd();
+  return ot_make_string(s, path, strlen(path));
+}
+static otv dev_runtime(ots* s, otv* args, int argc) {
+  (void)args;
+  (void)argc;
+  return ot_intern(s, "c", 1, true);
+}
 static otv dev_poll(ots* s, otv* args, int argc) {
   if (argc != 1 || !ot_is_int(args[0])) return ot_raise(s, "poll: expected milliseconds");
   return ot_make_int(ot_dev_poll((int)ot_get_int(args[0])));
@@ -230,6 +287,124 @@ static void dev_field(ots* s, otv table, const char* name, otv value) {
   OT_FRAME_SCOPED(s, &table, &value);
   otv key = ot_intern(s, name, strlen(name), true);
   ot_table_put(s, table, key, value);
+}
+static otv dev_now(ots* s, otv* args, int argc) {
+  (void)s;
+  (void)args;
+  (void)argc;
+  return ot_make_int(ot_dev_now());
+}
+static otv dev_mtime(ots* s, otv* args, int argc) {
+  const char* text;
+  size_t length;
+  if (argc != 1 || !ot_string_bytes(args[0], &text, &length))
+    return ot_raise(s, "mtime: expected path");
+  char* path = copy_string(text, length);
+  int64_t mtime = ot_dev_mtime(path);
+  ot_host_free(path);
+  return mtime < 0 ? ot_false : ot_make_int(mtime);
+}
+static otv dev_realpath(ots* s, otv* args, int argc) {
+  const char* text;
+  size_t length;
+  if (argc != 1 || !ot_string_bytes(args[0], &text, &length))
+    return ot_raise(s, "realpath: expected path");
+  char* path = copy_string(text, length);
+  const char* resolved = ot_dev_realpath(path);
+  otv result = ot_make_string(s, resolved, strlen(resolved));
+  ot_host_free(path);
+  return result;
+}
+static void dev_keyword_field(ots* s, otv table, const char* name, const char* keyword) {
+  otv value = ot_nil;
+  OT_FRAME_SCOPED(s, &table, &value);
+  value = ot_intern(s, keyword, strlen(keyword), true);
+  dev_field(s, table, name, value);
+}
+static void dev_string_field(ots* s, otv table, const char* name, const char* text) {
+  otv value = ot_nil;
+  OT_FRAME_SCOPED(s, &table, &value);
+  value = ot_make_string(s, text, strlen(text));
+  dev_field(s, table, name, value);
+}
+/* (%namespaces): a table per namespace with :name, and :file and :loaded when the loader read
+ * it from a file. */
+static otv dev_namespaces(ots* s, otv* args, int argc) {
+  (void)args;
+  (void)argc;
+  otv result = ot_null, cursor = s->namespaces, entry = ot_nil;
+  OT_FRAME_SCOPED(s, &result, &cursor, &entry);
+  while (ot_has_type(cursor, OBJ_NAMESPACE)) {
+    entry = ot_table_new(s, 3);
+    dev_field(s, entry, "name", ((ot_namespace_obj*)ot_as_obj(cursor))->name);
+    otv name = ((ot_namespace_obj*)ot_as_obj(cursor))->name;
+    const loaded_namespace* loaded = find_loaded(((ot_name_obj*)ot_as_obj(name))->bytes);
+    if (loaded) {
+      dev_string_field(s, entry, "file", loaded->path);
+      dev_field(s, entry, "loaded", ot_make_int(loaded->loaded));
+    }
+    result = ot_cons(s, entry, result);
+    cursor = ((ot_namespace_obj*)ot_as_obj(cursor))->next;
+  }
+  return result;
+}
+/* Count the parameters before a rest or pattern parameter, as compilation does. */
+static size_t dev_required(otv params) {
+  size_t count = 0;
+  if (ot_has_type(params, OBJ_PAIR)) {
+    otv first = ((ot_pair_obj*)ot_as_obj(params))->car;
+    if (ot_has_type(first, OBJ_SYMBOL) &&
+        strcmp(((ot_name_obj*)ot_as_obj(first))->bytes, "array") == 0)
+      params = ((ot_pair_obj*)ot_as_obj(params))->cdr;
+  }
+  while (ot_has_type(params, OBJ_PAIR)) {
+    otv parameter = ((ot_pair_obj*)ot_as_obj(params))->car;
+    if (!ot_has_type(parameter, OBJ_SYMBOL) ||
+        strcmp(((ot_name_obj*)ot_as_obj(parameter))->bytes, "&") == 0)
+      break;
+    count++;
+    params = ((ot_pair_obj*)ot_as_obj(params))->cdr;
+  }
+  return count;
+}
+/* (%bindings name): a table per binding defined in that namespace, with :name, :kind, :public,
+ * :doc, and :arity and :variadic for Otium functions. */
+static otv dev_bindings(ots* s, otv* args, int argc) {
+  if (argc != 1 || !ot_has_type(args[0], OBJ_SYMBOL))
+    return ot_raise(s, "bindings: expected namespace symbol");
+  otv space = s->namespaces;
+  while (ot_has_type(space, OBJ_NAMESPACE) && ((ot_namespace_obj*)ot_as_obj(space))->name != args[0])
+    space = ((ot_namespace_obj*)ot_as_obj(space))->next;
+  if (!ot_has_type(space, OBJ_NAMESPACE)) return ot_raise(s, "bindings: unknown namespace");
+  otv result = ot_null, cursor = ((ot_namespace_obj*)ot_as_obj(space))->vars, entry = ot_nil;
+  OT_FRAME_SCOPED(s, &result, &cursor, &entry);
+  while (ot_has_type(cursor, OBJ_VAR)) {
+    entry = ot_table_new(s, 6);
+    dev_field(s, entry, "name", ((ot_var_obj*)ot_as_obj(cursor))->name);
+    otv value = ((ot_var_obj*)ot_as_obj(cursor))->value;
+    if (ot_has_type(value, OBJ_MACRO)) dev_keyword_field(s, entry, "kind", "macro");
+    else if (ot_has_type(value, OBJ_FUNCTION) || ot_has_type(value, OBJ_NAT))
+      dev_keyword_field(s, entry, "kind", "function");
+    else dev_keyword_field(s, entry, "kind", "value");
+    value = ((ot_var_obj*)ot_as_obj(cursor))->value;
+    if (ot_has_type(value, OBJ_FUNCTION)) {
+      ot_code_obj* code = (ot_code_obj*)ot_as_obj(((ot_function_obj*)ot_as_obj(value))->code);
+      bool variadic = code->fixed_arity == SIZE_MAX;
+      size_t required = variadic ? dev_required(code->params) : code->fixed_arity;
+      dev_field(s, entry, "arity", ot_make_int((intptr_t)required));
+      dev_field(s, entry, "variadic", variadic ? ot_true : ot_false);
+    }
+    dev_field(s, entry, "public", ((ot_var_obj*)ot_as_obj(cursor))->private_value ? ot_false : ot_true);
+    const char* text;
+    size_t length;
+    ot_binding_documentation(cursor, &text, &length);
+    char* doc = copy_string(text, length);
+    dev_string_field(s, entry, "doc", doc);
+    ot_host_free(doc);
+    result = ot_cons(s, entry, result);
+    cursor = ((ot_var_obj*)ot_as_obj(cursor))->next;
+  }
+  return result;
 }
 static otv dev_evaluate(ots* s, otv* args, int argc) {
   const char *source, *space, *path;
@@ -292,6 +467,14 @@ static otv dev_evaluate(ots* s, otv* args, int argc) {
 static void dev_module(ots* s) {
   ot_def_nat(s, "%enabled?", dev_enabled_p);
   ot_def_nat(s, "%clock", dev_clock);
+  ot_def_nat(s, "%pid", dev_pid);
+  ot_def_nat(s, "%cwd", dev_cwd);
+  ot_def_nat(s, "%runtime", dev_runtime);
+  ot_def_nat(s, "%now", dev_now);
+  ot_def_nat(s, "%mtime", dev_mtime);
+  ot_def_nat(s, "%realpath", dev_realpath);
+  ot_def_nat(s, "%namespaces", dev_namespaces);
+  ot_def_nat(s, "%bindings", dev_bindings);
   ot_def_nat(s, "%poll", dev_poll);
   ot_def_nat(s, "%next", dev_next);
   ot_def_nat(s, "%client", dev_client);
@@ -352,7 +535,7 @@ static bool dev_start(ots* s, const char* path, size_t watchdog) {
   atexit(ot_dev_close);
   otv ignored;
   char code[160];
-  snprintf(code, sizeof code, "(require otium.dev) (set! otium.dev/watchdog %zu)", watchdog);
+  snprintf(code, sizeof code, "(require (otium.dev :as dev)) (set! otium.dev/watchdog %zu)", watchdog);
   if (!ot_eval_src(s, code, strlen(code), "<dev-start>", &ignored)) {
     print_value(s, ot_condition(s), stderr);
     return false;
@@ -853,17 +1036,9 @@ int main(int argc, char** argv) {
     found_project = project == NULL ? find_project() : NULL;
     add_project_paths(project == NULL ? found_project : project);
   }
-  char default_dev_path[PATH_MAX];
-  if (dev_path && !*dev_path) {
-    const char *location = project ? project : found_project;
-    const char *slash = location ? strrchr(location, '/') : NULL;
-    size_t prefix = slash ? (size_t)(slash - location) : 1;
-    if (prefix + 18 >= sizeof default_dev_path) return 2;
-    memcpy(default_dev_path, slash ? location : ".", prefix);
-    strcpy(default_dev_path + prefix, "/.otium");
-    if (mkdir(default_dev_path, 0700) != 0 && errno != EEXIST) return 2;
-    strcat(default_dev_path, "/dev.sock");
-    dev_path = default_dev_path;
+  if (dev_path && !*dev_path && !(dev_path = ot_dev_default_path())) {
+    fputs("otium: cannot use /tmp/otium-UID for the development socket\n", stderr);
+    return 2;
   }
   ot_host_free(found_project);
   if (load_path.length == 0) strings_push(&load_path, ".", 1);

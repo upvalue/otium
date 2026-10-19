@@ -16,15 +16,59 @@ running UI or an interactive REPL, use `--dev` instead:
 ./otium attach
 ```
 
-The default socket is `.otium/dev.sock` beside the discovered `project.ot`, or
-in the working directory when there is no project. `--dev=PATH` selects another
-socket. The socket has user-only permissions. A live socket cannot be replaced;
-a stale socket is removed on startup. Normal shutdown removes the socket.
+The default socket is `/tmp/otium-UID/PID.sock`, so several programs can run
+with `--dev` at once and clients can find them by listing that directory. The
+directory is created with user-only permissions, and startup fails if it is
+owned by someone else or writable by others. `--dev=PATH` selects another
+socket. A live socket cannot be replaced; a stale socket is removed on startup.
+Normal shutdown removes the socket. A killed process leaves it behind, and
+clients remove it when they find nothing listening.
 
 `--dev-watchdog=MS` sets the deadline for requests and UI frames. The default
 is 2000 milliseconds; 0 disables the watchdog. A timeout pauses execution until
 a client sends `:continue` or `:abort`. Foreign calls and primitives must return
 before either runtime can pause.
+
+## otium-dev
+
+`tools/otium-dev` sends one request per call, prints the result as text and
+exits, which suits scripts and LLM agents working in a shell.
+
+```sh
+tools/otium-dev ls
+tools/otium-dev status
+tools/otium-dev eval '(+ 20 22)'
+tools/otium-dev eval --ns app.state --file scratch.ot
+echo '(count (otium.ui/windows))' | tools/otium-dev eval -
+tools/otium-dev load examples/ui/calculator.ot
+tools/otium-dev events --since 4
+tools/otium-dev capture /tmp/frame.png
+tools/otium-dev interrupt   # also continue, abort
+```
+
+With one server running, commands use it. With several, they use the one whose
+working directory contains the current directory, or take `--pid N` or
+`--socket PATH`. Values and output are cut at 10000 characters unless
+`--max-chars` says otherwise. `--timeout` (default 10 seconds) bounds the wait
+for a response. Exit status is 0 for success, 1 for an Otium error, 2 when no
+server is reachable, 3 on timeout and 4 when the request paused the program.
+
+## Looking around
+
+`otium.dev` has functions for finding your way around a running program.
+Starting a server aliases it as `dev` in the `user` namespace.
+
+```scheme
+(dev/namespaces)                    ; loaded namespaces and their files
+(dev/bindings 'ui.calculator)       ; name, kind, arity, public?, docstring
+(dev/source 'ui.calculator/view)    ; {:file "..." :line 94}
+(dev/apropos "caret")               ; qualified names containing "caret"
+(dev/stale-files)                   ; files changed since they were loaded
+```
+
+`dev/source` looks for the definition in the file as it is now, at the start
+of a line, so it finds definitions in formatted code but not ones nested
+inside other forms.
 
 ## Attach and MCP
 
@@ -80,14 +124,28 @@ The transport bounds its request queue; decoded requests are serviced serially.
 
 ```scheme
 {:id 1 :op :eval :ns "user" :code "(println \"hello\") (+ 1 2)"}
-{:id 1 :ok #t :value "3" :values ("nil" "3") :output "hello\n"}
+{:id 1 :ok #t :value "3" :values ("nil" "3") :output "hello\n" :event 0}
 ```
 
 `:value` is the last result printed with `write`. `:values` contains each form's
 printed result, as a list on Chez or an array on C. Loads are not atomic: forms
 before an error stay defined. Error responses include `:condition` and captured
 `:output`; evaluation errors include the source path and the top-level form's
-line. Background output also goes to stdout and is sent as `:output` events.
+line. `:eval` takes an optional `:path`, used in place of `<dev>` in error
+locations when the code came from a file. Background output also goes to stdout
+and is sent as `:output` events.
+
+`:eval` and `:load` take `:max-chars`, default 10000. Longer values, outputs
+and entries in `:values` are cut to that length and the response gets
+`:truncated #t`. 0 disables the limit.
+
+`:status` returns a table: `:pid`, `:cwd`, `:runtime`, `:script`,
+`:arguments`, `:uptime-ms`, `:state` (`:running` or `:paused`) and `:event`.
+
+Events other than `:output` carry a sequence number in `:seq`, and the server
+keeps the last 100. `{:op :events :since N}` returns those after `N`, oldest
+first. Every response carries the latest sequence number in `:event`, so a
+client that connects for a single request can tell whether it missed anything.
 
 The shared handler and break loop are in `shared/dev/core.ot`. The native
 transport is in `shared/dev/transport.c`. C links it into the launcher; Chez

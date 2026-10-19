@@ -3,7 +3,7 @@ PYTHON ?= python3
 export PYTHON
 RUN_PYTHON := tools/python
 # One invocation uses one C configuration, including optional native targets.
-ifneq ($(filter ffi ui test-ffi test-sdl test-sdl-integration test-ui-layout test-ui-gpu test-native test-gpu,$(MAKECMDGOALS)),)
+ifneq ($(filter ffi ui test-ffi test-sdl test-sdl-integration test-ui-layout test-ui-gpu test-dev-ui test-native test-gpu,$(MAKECMDGOALS)),)
 WITH_FFI := 1
 endif
 WITH_FFI ?= 0

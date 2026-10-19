@@ -104,14 +104,7 @@
            [all-paths (append paths environment-paths
                        (if no-project '() (project-paths (or project (find-project)))))])
       (load-path (if (null? all-paths) '(".") all-paths)))
-    (when dev-path
-      (when (equal? dev-path "")
-        (let* ([location (and (not no-project) (or project (find-project)))]
-               [directory (if location (path-parent location) (current-directory))]
-               [folder (string-append directory "/.otium")])
-          (unless (file-exists? folder) (mkdir folder #o700))
-          (set! dev-path (string-append folder "/dev.sock"))))
-      (dev-start! dev-path watchdog))
+    (when dev-path (dev-start! dev-path watchdog))
     (application-script script)
     (for-each load-source files)
     (when script (load-source script))

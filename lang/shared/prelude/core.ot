@@ -230,6 +230,17 @@
     (for-each (fn (x) (when (pred x) (set! out (builder-add out x)))) seq)
     (builder-finish out)))
 
+(def (find pred seq)
+  "(find predicate sequence)\nReturn the first element for which predicate returns a truthy value, or #f."
+  (let ((found #f)
+        (done #f))
+    (for-each (fn (x)
+                (when (and (not done) (pred x))
+                  (set! found x)
+                  (set! done #t)))
+              seq)
+    found))
+
 (def (reduce f init seq)
   "(reduce procedure initial sequence)\nFold left, calling (procedure accumulator element) for each element. Empty sequences return initial."
   (let ((acc init))

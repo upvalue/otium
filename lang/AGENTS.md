@@ -15,13 +15,15 @@ not part of the default build or test targets. The runner is
 `c/tools/gc-lint/run`; it discovers Homebrew LLVM or uses `LLVM_CONFIG` when
 supplied.
 
-# Principles
+# Guide
 
 - Live reloading is important
 - Performance is important
-- Supporting both the C and Chez runtimes is important; a design should try to
-  minimize unexpected behavioral differences and introduce abstractions that
-  smooth them where possible
+- The Chez Scheme implementation is the primary implementation; the C
+  implementation is experimental and can lag behind.
+- However it is ideal to extend the higher-level language to meet challenges e.g. 
+  when something can be done in Otium over using escape hatches to the runtime,
+  it should be .
 
 ## Runtime layout
 

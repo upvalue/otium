@@ -8,7 +8,7 @@ case "${1-}" in
         shift
         exec "$root/chez/run" --no-project --path "$root/shared/lib" "$root/shared/tools/$tool.ot" -- "$@" ;;
 esac
-runtime=c
+runtime=chez
 remaining=$#
 application=no
 # Rotate the original arguments once, removing only runtime selectors. Values

@@ -314,6 +314,7 @@ null to `#f`. The adapter normalizes these to and from Otium's dedicated null.
 | `(ffi/alloc T count)` | Zeroed native storage for `count` elements, correctly aligned; returns an owning pointer. |
 | `(ffi/alloc-utf8 string)` | Owning NUL-terminated UTF-8 allocation; rejects embedded NUL; released with `free!`. |
 | `(ffi/free! p)` | Releases an allocation from `alloc`, `alloc-utf8`, or an aggregate result; invalidates it and all derived views. Repeated release of that allocation is a no-op. |
+| `(ffi/own p release)` | Proposed in `specs/io.md`. Wraps an external pointer, such as one returned by `SDL_CreateWindow`, in an owning pointer. `free!` and `close` call `(release p)` once and invalidate it like an allocation. |
 | `(ffi/sizeof T)` / `(ffi/alignof T)` | Size/alignment in bytes. |
 | `(ffi/ref p T index)` | Reads one scalar or pointer at `index * sizeof(T)`. |
 | `(ffi/set! p T index value)` | Writes one scalar or pointer; returns `#f`. |

@@ -3,44 +3,25 @@
 
 (def null (%null))
 
-(def- (%second x)
-  (car (cdr x)))
-
-(def- (%third x)
-  (car (cdr (cdr x))))
-
-(def- (%fourth x)
-  (car (cdr (cdr (cdr x)))))
-
-(def- (%die op reason message)
-  (%fail op reason message))
-
 (def- (%count op n)
   (if (not (and (integer? n) (exact? n)))
-      (%die op "type" "expected exact integer")
+      (%fail op "type" "expected exact integer")
       (if (< n 0)
-          (%die op "range" "expected nonnegative integer")
+          (%fail op "range" "expected nonnegative integer")
           n)))
 
 (def- (%mul op a b)
   (if (and (> b 0) (> a (quotient 4611686018427387903 b)))
-      (%die op "range" "size overflow")
+      (%fail op "range" "size overflow")
       (* a b)))
 
 (def- (%add op a b)
   (if (> a (- 4611686018427387903 b))
-      (%die op "range" "size overflow")
+      (%fail op "range" "size overflow")
       (+ a b)))
 
 (def- (%round n a)
   (%add "layout" n (modulo (- a (modulo n a)) a)))
-
-(def- (%lookup key entries)
-  (if (%empty? entries)
-      #f
-      (if (eq? key (car (car entries)))
-          (car entries)
-          (%lookup key (cdr entries)))))
 
 (def- %scalars
   '(void bool
@@ -86,70 +67,70 @@
                      1
                      (%alignof k))
                  '())
-           (%die op
+           (%fail op
+                  (if (equal? op "bind")
+                      "signature"
+                      "type")
+                  "unknown scalar type"))))
+    ((%layout-data t) (%layout-data t))
+    ((and (list? t) (= (length t) 3) (eq? (car t) 'array))
+     (let ((element (%memory (cadr t) op))
+           (count (%count op (caddr t))))
+       (list 25 (%mul op (cadr element) count) (caddr element) (list element count))))
+    (else (%fail op
                  (if (equal? op "bind")
                      "signature"
                      "type")
-                 "unknown scalar type"))))
-    ((%layout-data t) (%layout-data t))
-    ((and (list? t) (= (length t) 3) (eq? (car t) 'array))
-     (let ((element (%memory (%second t) op))
-           (count (%count op (%third t))))
-       (list 25 (%mul op (%second element) count) (%third element) (list element count))))
-    (else (%die op
-                (if (equal? op "bind")
-                    "signature"
-                    "type")
-                "invalid foreign type"))))
+                 "invalid foreign type"))))
 
 (def- (%memory t op)
   (let ((d (%describe t op)))
     (if (or (= (car d) 0) (= (car d) 22))
-        (%die op "type" "not a memory type")
+        (%fail op "type" "not a memory type")
         d)))
 
 (def (sizeof t)
-  (%second (%memory t "sizeof")))
+  (cadr (%memory t "sizeof")))
 
 (def (alignof t)
-  (%third (%memory t "alignof")))
+  (caddr (%memory t "alignof")))
 
 (def (alloc t count)
-  (let ((d (%memory t "alloc"))) (%alloc (%mul "alloc" (%second d) (%count "alloc" count)) (%third d))))
+  (let ((d (%memory t "alloc"))) (%alloc (%mul "alloc" (cadr d) (%count "alloc" count)) (caddr d))))
 
 (def- (%scalar-memory t op)
   (let ((d (%memory t op)))
     (if (>= (car d) 23)
-        (%die op "type" "use fields or views for aggregate memory")
+        (%fail op "type" "use fields or views for aggregate memory")
         d)))
 
 (def (ref p t index)
-  (let ((d (%scalar-memory t "ref"))) (%ref p (car d) (%mul "ref" (%second d) (%count "ref" index)))))
+  (let ((d (%scalar-memory t "ref"))) (%ref p (car d) (%mul "ref" (cadr d) (%count "ref" index)))))
 
 (def (set! p t index value)
-  (let ((d (%scalar-memory t "set!"))) (%set! p (car d) (%mul "set!" (%second d) (%count "set!" index)) value)))
+  (let ((d (%scalar-memory t "set!"))) (%set! p (car d) (%mul "set!" (cadr d) (%count "set!" index)) value)))
 
 (def- (%fields entries kind fields size alignment)
   (if (%empty? entries)
       (list kind (%round size alignment) alignment (reverse fields))
       (let ((f (car entries)))
         (if (not (and (list? f) (= (length f) 2) (symbol? (car f))))
-            (%die "layout" "type" "expected (field-name type)")
-            (if (%lookup (car f) fields)
-                (%die "layout" "type" "duplicate field")
-                (let ((d (%memory (%second f) "layout")))
+            (%fail "layout" "type" "expected (field-name type)")
+            (if (assq (car f) fields)
+                (%fail "layout" "type" "duplicate field")
+                (let ((d (%memory (cadr f) "layout")))
                   (let ((offset (if (= kind 24)
                                     0
-                                    (%round size (%third d)))))
+                                    (%round size (caddr d)))))
                     (%fields (cdr entries)
                              kind
                              (cons (list (car f) d offset) fields)
-                             (max size (%add "layout" offset (%second d)))
-                             (max alignment (%third d))))))))))
+                             (max size (%add "layout" offset (cadr d)))
+                             (max alignment (caddr d))))))))))
 
 (def- (%aggregate name fields kind)
   (if (not (and (symbol? name) (list? fields) (pair? fields)))
-      (%die "layout" "type" "expected name and nonempty field list")
+      (%fail "layout" "type" "expected name and nonempty field list")
       (%layout (%fields fields kind '() 0 1))))
 
 (def (define-struct! name fields)
@@ -163,45 +144,45 @@
       (list d offset)
       (if (= (car d) 25)
           (let ((index (%count "field" (car path)))
-                (element (car (%fourth d)))
-                (count (%second (%fourth d))))
+                (element (car (cadddr d)))
+                (count (cadr (cadddr d))))
             (if (>= index count)
-                (%die "field" "bounds" "array field index out of bounds")
-                (%path element (cdr path) (%add "field" offset (%mul "field" index (%second element))))))
+                (%fail "field" "bounds" "array field index out of bounds")
+                (%path element (cdr path) (%add "field" offset (%mul "field" index (cadr element))))))
           (if (or (= (car d) 23) (= (car d) 24))
-              (let ((f (%lookup (car path) (%fourth d))))
+              (let ((f (assq (car path) (cadddr d))))
                 (if f
-                    (%path (%second f) (cdr path) (%add "field" offset (%third f)))
-                    (%die "field" "type" "unknown field")))
-              (%die "field" "type" "field path descends into scalar")))))
+                    (%path (cadr f) (cdr path) (%add "field" offset (caddr f)))
+                    (%fail "field" "type" "unknown field")))
+              (%fail "field" "type" "field path descends into scalar")))))
 
 (def- (%resolve t path)
   (if (list? path)
       (%path (%memory t "field") path 0)
-      (%die "field" "type" "expected field path list")))
+      (%fail "field" "type" "expected field path list")))
 
 (def (offset-of t path)
-  (%second (%resolve t path)))
+  (cadr (%resolve t path)))
 
 (def (field-view p t path)
-  (let ((f (%resolve t path))) (view p (%second f) (%second (car f)))))
+  (let ((f (%resolve t path))) (view p (cadr f) (cadr (car f)))))
 
 (def (field-ref p t path)
   (let ((f (%resolve t path)))
     (if (>= (car (car f)) 23)
-        (%die "field-ref" "type" "field is aggregate")
-        (%ref p (car (car f)) (%second f)))))
+        (%fail "field-ref" "type" "field is aggregate")
+        (%ref p (car (car f)) (cadr f)))))
 
 (def (field-set! p t path value)
   (let ((f (%resolve t path)))
     (if (>= (car (car f)) 23)
-        (%die "field-set!" "type" "field is aggregate")
-        (%set! p (car (car f)) (%second f) value))))
+        (%fail "field-set!" "type" "field is aggregate")
+        (%set! p (car (car f)) (cadr f) value))))
 
 (def- (%call-type t result?)
   (let ((d (%describe t "bind")))
     (if (or (= (car d) 25) (and (not result?) (= (car d) 0)))
-        (%die "bind" "signature" "invalid call type")
+        (%fail "bind" "signature" "invalid call type")
         (if (< (car d) 23)
             (car d)
             d))))
@@ -209,11 +190,11 @@
 (def (bind library name arguments result)
   (if (list? arguments)
       (%bind library name (map (fn (t) (%call-type t #f)) arguments) (%call-type result #t))
-      (%die "bind" "signature" "expected argument type list")))
+      (%fail "bind" "signature" "expected argument type list")))
 
 (def- (%try-open names diagnostics)
   (if (%empty? names)
-      (%die "open-library" "load" diagnostics)
+      (%fail "open-library" "load" diagnostics)
       (let ((lib (%open (car names))))
         (if lib
             lib
@@ -222,7 +203,7 @@
 (def (open-library names)
   (if (and (list? names) (pair? names))
       (%try-open names "could not load library:\n")
-      (%die "open-library" "type" "expected nonempty list of library names")))
+      (%fail "open-library" "type" "expected nonempty list of library names")))
 
 (def (error? c)
   (eq? (%error-field c "type") 'ffi-error))
@@ -230,7 +211,7 @@
 (def- (%error-access c field)
   (if (error? c)
       (%error-field c field)
-      (%die "error-accessor" "type" "expected FFI condition")))
+      (%fail "error-accessor" "type" "expected FFI condition")))
 
 (def (error-reason c)
   (%error-access c "reason"))

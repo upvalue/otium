@@ -87,6 +87,7 @@
   (grow :init 0)
   (size :init 18)
   (font :init :mono)
+  (caret-style :init :bar)
   (cursor :init 0 :state #t)
   (anchor :init 0 :state #t)
   (seen :init nil :state #t)

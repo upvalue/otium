@@ -1,178 +1,121 @@
-(def (%second x)
-  (car (cdr x)))
+(require otium.process)
 
-(def (%third x)
-  (car (cdr (cdr x))))
-
-(def (%lookup key entries)
-  (if (null? entries)
-      #f
-      (if (equal? key (car (car entries)))
-          (car entries)
-          (%lookup key (cdr entries)))))
-
-(def (%member value items)
-  (and (pair? items) (or (equal? value (car items)) (%member value (cdr items)))))
-
-(def (%filter pred items)
-  (if (null? items)
-      '()
-      (if (pred (car items))
-          (cons (car items) (%filter pred (cdr items)))
-          (%filter pred (cdr items)))))
-
-(def (%property spec key fallback)
-  (let ((entry (%lookup key (cdr (cdr spec)))))
+(def- (%property spec key fallback)
+  (let ((entry (assoc key (cddr spec))))
     (if entry
-        (%second entry)
+        (cadr entry)
         fallback)))
 
-(def (%properties spec key)
-  (let ((entry (%lookup key (cdr (cdr spec)))))
+(def- (%properties spec key)
+  (let ((entry (assoc key (cddr spec))))
     (if entry
         (cdr entry)
         '())))
 
-(def (%fields spec)
-  (%filter (fn (x) (%member (car x) '(argument option flag counter))) (cdr (cdr spec))))
+(def- (%fields spec)
+  (filter (fn (x) (member (car x) '(argument option flag counter))) (cddr spec)))
 
-(def (%commands spec)
-  (%filter (fn (x) (eq? (car x) 'command)) (cdr (cdr spec))))
+(def- (%positionals fields)
+  (filter (fn (field) (eq? (car field) 'argument)) fields))
 
-(def (%join strings separator)
-  (if (null? strings)
-      ""
-      (if (null? (cdr strings))
-          (car strings)
-          (string-append (car strings) separator (%join (cdr strings) separator)))))
+(def- (%commands spec)
+  (filter (fn (x) (eq? (car x) 'command)) (cddr spec)))
 
-(def (%prefix? prefix text)
-  (and (<= (string-length prefix) (string-length text)) (equal? prefix (substring text 0 (string-length prefix)))))
-
-(def (%index text target start)
+(def- (%index text target start)
   (cond
     ((= start (string-length text)) #f)
     ((equal? (substring text start (+ start 1)) target) start)
     (else (%index text target (+ start 1)))))
 
-(def (%spec-error message)
+(def- (%spec-error message)
   (error (string-append "cli/compile: " message)))
 
-(def (%check-spec spec inherited)
-  (if (not (and (list? spec) (>= (length spec) 2) (eq? (car spec) 'command) (symbol? (%second spec))))
-      (%spec-error "expected (command name ...)")
-      #f)
-  (let ((ids (map %second inherited))
+(def- (%check-spec spec inherited)
+  (unless (and (list? spec) (>= (length spec) 2) (eq? (car spec) 'command) (symbol? (cadr spec)))
+    (%spec-error "expected (command name ...)"))
+  (let ((ids (map cadr inherited))
         (names (append '("-h" "--help" "--version") (apply append (map (fn (f) (%properties f 'names)) inherited))))
         (optional? #f)
         (variadic? #f)
         (children '()))
     (for-each (fn (entry)
-                (if (not (and (list? entry) (pair? entry)))
-                    (%spec-error "invalid declaration")
-                    #f)
+                (unless (and (list? entry) (pair? entry)) (%spec-error "invalid declaration"))
                 (let ((kind (car entry)))
                   (cond
-                    ((%member kind '(argument option flag counter))
-                     (if (not (and (>= (length entry) 2) (symbol? (%second entry))))
-                         (%spec-error "expected argument name")
-                         #f)
-                     (if (or (eq? (%second entry) 'command-path) (%member (%second entry) ids))
-                         (%spec-error "duplicate argument name")
-                         #f)
-                     (set! ids (cons (%second entry) ids))
+                    ((member kind '(argument option flag counter))
+                     (unless (and (>= (length entry) 2) (symbol? (cadr entry))) (%spec-error "expected argument name"))
+                     (when (or (eq? (cadr entry) 'command-path) (member (cadr entry) ids))
+                       (%spec-error "duplicate argument name"))
+                     (set! ids (cons (cadr entry) ids))
                      (let ((seen '()))
                        (for-each (fn (attribute)
-                                   (if (not (and (list? attribute)
-                                                 (>= (length attribute) 2)
-                                                 (%member (car attribute)
-                                                          '(names type
-                                                                  default
-                                                                  range
-                                                                  metavar
-                                                                  help
-                                                                  repeat
-                                                                  required
-                                                                  global
-                                                                  negative
-                                                                  choices
-                                                                  conflicts
-                                                                  requires))))
-                                       (%spec-error "invalid argument attribute")
-                                       #f)
-                                   (if (%member (car attribute) seen)
-                                       (%spec-error "duplicate attribute")
-                                       #f)
+                                   (unless (and (list? attribute)
+                                                (>= (length attribute) 2)
+                                                (member (car attribute)
+                                                        '(names type
+                                                                default
+                                                                range
+                                                                metavar
+                                                                help
+                                                                repeat
+                                                                required
+                                                                global
+                                                                negative
+                                                                choices
+                                                                conflicts
+                                                                requires)))
+                                     (%spec-error "invalid argument attribute"))
+                                   (when (member (car attribute) seen) (%spec-error "duplicate attribute"))
                                    (set! seen (cons (car attribute) seen))
-                                   (if (and (not (%member (car attribute) '(names range choices conflicts requires)))
-                                            (not (= (length attribute) 2)))
-                                       (%spec-error "attribute takes one value")
-                                       #f))
-                                 (cdr (cdr entry))))
+                                   (when (and (not (member (car attribute) '(names range choices conflicts requires)))
+                                              (not (= (length attribute) 2)))
+                                     (%spec-error "attribute takes one value")))
+                                 (cddr entry)))
                      (let ((type (%property entry 'type 'string))
                            (repeat (%property entry 'repeat #f)))
-                       (if (not (or (procedure? type) (%member type '(string integer number path))))
-                           (%spec-error "unknown type")
-                           #f)
-                       (if (not (%member repeat '(#f append last)))
-                           (%spec-error "invalid repeat policy")
-                           #f))
+                       (unless (or (procedure? type) (member type '(string integer number path)))
+                         (%spec-error "unknown type"))
+                       (unless (member repeat '(#f append last)) (%spec-error "invalid repeat policy")))
                      (if (eq? kind 'argument)
                          (begin
-                           (if variadic?
-                               (%spec-error "variadic argument must be last")
-                               #f)
-                           (if (and optional? (%property entry 'required (not (%lookup 'default (cdr (cdr entry))))))
-                               (%spec-error "required argument after optional argument")
-                               #f)
-                           (set! optional? (not (%property entry 'required (not (%lookup 'default (cdr (cdr entry)))))))
+                           (when variadic? (%spec-error "variadic argument must be last"))
+                           (when (and optional? (%property entry 'required (not (assoc 'default (cddr entry)))))
+                             (%spec-error "required argument after optional argument"))
+                           (set! optional? (not (%property entry 'required (not (assoc 'default (cddr entry))))))
                            (set! variadic? (eq? (%property entry 'repeat #f) 'append)))
                          (begin
-                           (if (null? (%properties entry 'names))
-                               (%spec-error "option needs names")
-                               #f)
+                           (when (null? (%properties entry 'names)) (%spec-error "option needs names"))
                            (for-each (fn (name)
-                                       (if (not (and (string? name)
-                                                     (> (string-length name) 1)
-                                                     (%prefix? "-" name)
-                                                     (not (equal? name "--"))
-                                                     (not (%index name "=" 0))
-                                                     (or (%prefix? "--" name) (= (string-length name) 2))))
-                                           (%spec-error "invalid option spelling")
-                                           #f)
-                                       (if (%member name names)
-                                           (%spec-error "duplicate option spelling")
-                                           #f)
+                                       (unless (and (string? name)
+                                                    (> (string-length name) 1)
+                                                    (string-starts-with? name "-")
+                                                    (not (equal? name "--"))
+                                                    (not (%index name "=" 0))
+                                                    (or (string-starts-with? name "--") (= (string-length name) 2)))
+                                         (%spec-error "invalid option spelling"))
+                                       (when (member name names) (%spec-error "duplicate option spelling"))
                                        (set! names (cons name names)))
                                      (append (%properties entry 'names)
                                              (if (%property entry 'negative #f)
                                                  (list (%property entry 'negative #f))
                                                  '())))))
                      (let ((range (%properties entry 'range)))
-                       (if (and (pair? range)
-                                (not (and (= (length range) 2)
-                                          (number? (car range))
-                                          (number? (%second range))
-                                          (<= (car range) (%second range)))))
-                           (%spec-error "invalid range")
-                           #f)))
+                       (when (and (pair? range)
+                                  (not (and (= (length range) 2)
+                                            (number? (car range))
+                                            (number? (cadr range))
+                                            (<= (car range) (cadr range)))))
+                         (%spec-error "invalid range"))))
                     ((eq? kind 'command)
-                     (if (< (length entry) 2)
-                         (%spec-error "command needs a name")
-                         #f)
-                     (if (%member (%second entry) children)
-                         (%spec-error "duplicate subcommand")
-                         #f)
-                     (set! children (cons (%second entry) children)))
-                    ((%member kind '(summary version examples))
-                     (if (< (length entry) 2)
-                         (%spec-error "missing command attribute value")
-                         #f))
+                     (when (< (length entry) 2) (%spec-error "command needs a name"))
+                     (when (member (cadr entry) children) (%spec-error "duplicate subcommand"))
+                     (set! children (cons (cadr entry) children)))
+                    ((member kind '(summary version examples))
+                     (when (< (length entry) 2) (%spec-error "missing command attribute value")))
                     (else (%spec-error "unknown declaration")))))
-              (cdr (cdr spec)))
-    (if (and (pair? children) (pair? (%filter (fn (f) (eq? (car f) 'argument)) (%fields spec))))
-        (%spec-error "put positional arguments on leaf commands")
-        #f)
+              (cddr spec))
+    (when (and (pair? children) (pair? (%positionals (%fields spec))))
+      (%spec-error "put positional arguments on leaf commands"))
     (for-each (fn (child) (%check-spec child (append inherited (%fields spec)))) (%commands spec))))
 
 (def (compile spec)
@@ -180,15 +123,15 @@
   spec)
 
 (def (ref values name . fallback)
-  (let ((entry (%lookup name values)))
+  (let ((entry (assoc name values)))
     (if entry
-        (%second entry)
+        (cadr entry)
         (if (null? fallback)
             #f
             (car fallback)))))
 
 (def (present? values name)
-  (if (%lookup name values)
+  (if (assoc name values)
       #t
       #f))
 
@@ -196,31 +139,31 @@
   (car outcome))
 
 (def (outcome-values outcome)
-  (%second outcome))
+  (cadr outcome))
 
 (def (outcome-command outcome)
-  (%third outcome))
+  (caddr outcome))
 
 (def (outcome-diagnostic outcome)
-  (car (cdr (cdr (cdr outcome)))))
+  (cadddr outcome))
 
-(def (%input-error? c)
+(def- (%input-error? c)
   (and (pair? c) (eq? (car c) '%cli-input-error)))
 
-(def (%fail name token message)
+(def- (%fail name token message)
   (error (list '%cli-input-error name token message)))
 
-(def (%decimal? text)
-  (let ((start (if (or (%prefix? "-" text) (%prefix? "+" text))
+(def- (%decimal? text)
+  (let ((start (if (or (string-starts-with? text "-") (string-starts-with? text "+"))
                    1
                    0)))
     (let loop ((i start))
       (and (> (string-length text) start)
            (or (= i (string-length text)) (and (%index "0123456789" (substring text i (+ i 1)) 0) (loop (+ i 1))))))))
 
-(def (%number-text? text)
+(def- (%number-text? text)
   (let ((length (string-length text)))
-    (let loop ((i (if (or (%prefix? "-" text) (%prefix? "+" text))
+    (let loop ((i (if (or (string-starts-with? text "-") (string-starts-with? text "+"))
                       1
                       0))
                (digits 0)
@@ -229,187 +172,167 @@
         ((= i length) (> digits 0))
         ((%index "0123456789" (substring text i (+ i 1)) 0) (loop (+ i 1) (+ digits 1) dot?))
         ((and (not dot?) (equal? (substring text i (+ i 1)) ".")) (loop (+ i 1) digits #t))
-        ((and (> digits 0) (%member (substring text i (+ i 1)) '("e" "E"))) (%decimal? (substring text (+ i 1) length)))
+        ((and (> digits 0) (member (substring text i (+ i 1)) '("e" "E"))) (%decimal? (substring text (+ i 1) length)))
         (else #f)))))
 
-(def (%convert field text)
-  (%let* ((type (%property field 'type 'string))
-          (value (cond
-                   ((procedure? type) (type text))
-                   ((eq? type 'integer)
-                    (if (%decimal? text)
-                        (string->number text)
-                        #f))
-                   ((eq? type 'number)
-                    (if (%number-text? text)
-                        (string->number (if (%decimal? text)
-                                            (string-append text ".0")
-                                            text))
-                        #f))
-                   (else text)))
-          (range (%properties field 'range))
-          (choices (%properties field 'choices)))
-         (if (and (%member type '(integer number))
-                  (not (and (number? value)
-                            (finite? value)
-                            (if (eq? type 'integer)
-                                (and (integer? value)
-                                     (exact? value)
-                                     (<= -4611686018427387904 value 4611686018427387903))
-                                #t))))
-             (%fail (%second field) text "invalid numeric value")
-             #f)
-         (if (and (pair? range) (not (and (number? value) (<= (car range) value (%second range)))))
-             (%fail (%second field) text "value outside allowed range")
-             #f)
-         (if (and (pair? choices) (not (%member value choices)))
-             (%fail (%second field) text "value is not an allowed choice")
-             #f)
-         value))
+(def- (%convert field text)
+  (let ((type (%property field 'type 'string))
+        (value (cond
+                 ((procedure? type) (type text))
+                 ((eq? type 'integer)
+                  (if (%decimal? text)
+                      (string->number text)
+                      #f))
+                 ((eq? type 'number)
+                  (if (%number-text? text)
+                      (string->number (if (%decimal? text)
+                                          (string-append text ".0")
+                                          text))
+                      #f))
+                 (else text)))
+        (range (%properties field 'range))
+        (choices (%properties field 'choices)))
+    (when (and (member type '(integer number))
+               (not (and (number? value)
+                         (finite? value)
+                         (if (eq? type 'integer)
+                             (and (integer? value) (exact? value) (<= -4611686018427387904 value 4611686018427387903))
+                             #t))))
+      (%fail (cadr field) text "invalid numeric value"))
+    (when (and (pair? range) (not (and (number? value) (<= (car range) value (cadr range)))))
+      (%fail (cadr field) text "value outside allowed range"))
+    (when (and (pair? choices) (not (member value choices))) (%fail (cadr field) text "value is not an allowed choice"))
+    value))
 
-(def (%put values name value)
-  (cons (list name value) (%filter (fn (entry) (not (eq? name (car entry)))) values)))
+(def- (%put values name value)
+  (cons (list name value) (filter (fn (entry) (not (eq? name (car entry)))) values)))
 
-(def (%store values field value)
-  (%let* ((name (%second field)) (old (%lookup name values)) (repeat (%property field 'repeat #f)))
-         (cond
-           ((eq? (car field) 'counter)
-            (%put values
-                  name
-                  (+ (if old
-                         (%second old)
-                         0)
-                     1)))
-           ((eq? repeat 'append)
-            (%put values
-                  name
-                  (append (if old
-                              (%second old)
-                              '())
-                          (list value))))
-           ((and old (not (eq? repeat 'last))) (%fail name #f "argument supplied more than once"))
-           (else (%put values name value)))))
+(def- (%store values field value)
+  (let ((name (cadr field))
+        (old (assoc name values))
+        (repeat (%property field 'repeat #f)))
+    (cond
+      ((eq? (car field) 'counter)
+       (%put values
+             name
+             (+ (if old
+                    (cadr old)
+                    0)
+                1)))
+      ((eq? repeat 'append)
+       (%put values
+             name
+             (append (if old
+                         (cadr old)
+                         '())
+                     (list value))))
+      ((and old (not (eq? repeat 'last))) (%fail name #f "argument supplied more than once"))
+      (else (%put values name value)))))
 
-(def (%option name fields)
+(def- (%option name fields)
   (if (null? fields)
       #f
-      (if (or (%member name (%properties (car fields) 'names)) (equal? name (%property (car fields) 'negative #f)))
+      (if (or (member name (%properties (car fields) 'names)) (equal? name (%property (car fields) 'negative #f)))
           (car fields)
           (%option name (cdr fields)))))
 
-(def (%finish fields values)
+(def- (%finish fields values)
   (for-each (fn (field)
-              (let ((name (%second field)))
+              (let ((name (cadr field)))
                 (if (present? values name)
                     (begin
-                      (for-each (fn (other)
-                                  (if (present? values other)
-                                      (%fail name #f "conflicting arguments")
-                                      #f))
+                      (for-each (fn (other) (when (present? values other) (%fail name #f "conflicting arguments")))
                                 (%properties field 'conflicts))
-                      (for-each (fn (other)
-                                  (if (not (present? values other))
-                                      (%fail name #f "missing dependency")
-                                      #f))
+                      (for-each (fn (other) (unless (present? values other) (%fail name #f "missing dependency")))
                                 (%properties field 'requires)))
-                    (if (%property field
-                                   'required
-                                   (and (eq? (car field) 'argument) (not (%lookup 'default (cdr (cdr field))))))
-                        (%fail name #f "required argument is missing")
-                        #f))))
+                    (when (%property field
+                                     'required
+                                     (and (eq? (car field) 'argument) (not (assoc 'default (cddr field)))))
+                      (%fail name #f "required argument is missing")))))
             fields)
   (let loop ((fields fields)
              (out values))
     (if (null? fields)
         out
-        (%let* ((field (car fields)) (name (%second field)))
-               (loop (cdr fields)
-                     (if (present? out name)
-                         out
-                         (%put out
-                               name
-                               (%property field
-                                          'default
-                                          (cond
-                                            ((eq? (car field) 'counter) 0)
-                                            ((eq? (%property field 'repeat #f) 'append) '())
-                                            (else #f))))))))))
+        (let ((field (car fields))
+              (name (cadr field)))
+          (loop (cdr fields)
+                (if (present? out name)
+                    out
+                    (%put out
+                          name
+                          (%property field
+                                     'default
+                                     (cond
+                                       ((eq? (car field) 'counter) 0)
+                                       ((eq? (%property field 'repeat #f) 'append) '())
+                                       (else #f))))))))))
 
 (def (parse command argv)
   (let ((current command)
-        (path (list (symbol->string (%second command))))
+        (path (list (symbol->string (cadr command))))
         (globals '())
         (ancestors '()))
     (try
       (let loop ((tokens argv)
                  (values '())
-                 (positionals (%filter (fn (f) (eq? (car f) 'argument)) (%fields command)))
+                 (positionals (%positionals (%fields command)))
                  (literal? #f))
         (let ((fields (append globals (%fields current))))
           (cond
             ((null? tokens)
-             (if (pair? (%commands current))
-                 (%fail 'command #f "a subcommand is required")
-                 #f)
+             (when (pair? (%commands current)) (%fail 'command #f "a subcommand is required"))
              (list 'ok (%put (%finish (append ancestors (%fields current)) values) 'command-path path) current #f))
             ((and (not literal?) (equal? (car tokens) "--")) (loop (cdr tokens) values positionals #t))
-            ((and (not literal?) (%member (car tokens) '("--help" "-h")))
+            ((and (not literal?) (member (car tokens) '("--help" "-h")))
              (list 'help (list (list 'command-path path) (list 'globals globals)) current #f))
             ((and (not literal?) (equal? (car tokens) "--version") (%property command 'version #f))
              (list 'version (%property command 'version #f) current #f))
             ((and (not literal?)
-                  (%prefix? "-" (car tokens))
+                  (string-starts-with? (car tokens) "-")
                   (not (equal? (car tokens) "-"))
                   (not (and (pair? positionals)
-                            (%member (%property (car positionals) 'type 'string) '(integer number))
+                            (member (%property (car positionals) 'type 'string) '(integer number))
                             (%number-text? (car tokens)))))
-             (%let* ((token (car tokens))
-                     (equal (%index token "=" 0))
-                     (long? (%prefix? "--" token))
-                     (name (if long?
-                               (if equal
-                                   (substring token 0 equal)
-                                   token)
-                               (substring token 0 2)))
-                     (field (%option name fields)))
-                    (if (not field)
-                        (%fail name token "unknown option")
-                        #f)
-                    (if (eq? (car field) 'option)
-                        (%let* ((attached (if long?
-                                              (and equal (substring token (+ equal 1) (string-length token)))
-                                              (and (> (string-length token) 2)
-                                                   (substring token 2 (string-length token)))))
-                                (text (if attached
-                                          attached
-                                          (if (pair? (cdr tokens))
-                                              (%second tokens)
-                                              (%fail (%second field) token "option needs a value"))))
-                                (rest (if attached
-                                          (cdr tokens)
-                                          (cdr (cdr tokens)))))
-                               (loop rest (%store values field (%convert field text)) positionals literal?))
-                        (begin
-                          (if (and long? equal)
-                              (%fail (%second field) token "flag takes no value")
-                              #f)
-                          (loop (if (and (not long?) (> (string-length token) 2))
-                                    (cons (string-append "-" (substring token 2 (string-length token))) (cdr tokens))
-                                    (cdr tokens))
-                                (%store values field (not (equal? name (%property field 'negative #f))))
-                                positionals
-                                literal?)))))
+             (let ((token (car tokens))
+                   (equal (%index token "=" 0))
+                   (long? (string-starts-with? token "--"))
+                   (name (if long?
+                             (if equal
+                                 (substring token 0 equal)
+                                 token)
+                             (substring token 0 2)))
+                   (field (%option name fields)))
+               (unless field (%fail name token "unknown option"))
+               (if (eq? (car field) 'option)
+                   (let ((attached (if long?
+                                       (and equal (substring token (+ equal 1) (string-length token)))
+                                       (and (> (string-length token) 2) (substring token 2 (string-length token)))))
+                         (text (if attached
+                                   attached
+                                   (if (pair? (cdr tokens))
+                                       (cadr tokens)
+                                       (%fail (cadr field) token "option needs a value"))))
+                         (rest (if attached
+                                   (cdr tokens)
+                                   (cddr tokens))))
+                     (loop rest (%store values field (%convert field text)) positionals literal?))
+                   (begin
+                     (when (and long? equal) (%fail (cadr field) token "flag takes no value"))
+                     (loop (if (and (not long?) (> (string-length token) 2))
+                               (cons (string-append "-" (substring token 2 (string-length token))) (cdr tokens))
+                               (cdr tokens))
+                           (%store values field (not (equal? name (%property field 'negative #f))))
+                           positionals
+                           literal?)))))
             ((and (not literal?) (pair? (%commands current)))
-             (let ((child (%lookup (string->symbol (car tokens))
-                                   (map (fn (c) (list (%second c) c)) (%commands current)))))
-               (if (not child)
-                   (%fail 'command (car tokens) "unknown subcommand")
-                   #f)
+             (let ((child (assoc (string->symbol (car tokens)) (map (fn (c) (list (cadr c) c)) (%commands current)))))
+               (unless child (%fail 'command (car tokens) "unknown subcommand"))
                (set! ancestors (append ancestors (%fields current)))
-               (set! globals (append globals (%filter (fn (f) (%property f 'global #f)) (%fields current))))
-               (set! current (%second child))
+               (set! globals (append globals (filter (fn (f) (%property f 'global #f)) (%fields current))))
+               (set! current (cadr child))
                (set! path (append path (list (car tokens))))
-               (loop (cdr tokens) values (%filter (fn (f) (eq? (car f) 'argument)) (%fields current)) literal?)))
+               (loop (cdr tokens) values (%positionals (%fields current)) literal?)))
             ((null? positionals) (%fail 'argument (car tokens) "unexpected argument"))
             (else (let ((field (car positionals)))
                     (loop (cdr tokens)
@@ -422,45 +345,43 @@
         (list 'error
               (list (list 'command-path path))
               current
-              (list (list 'argument (%second c))
-                    (list 'token (%third c))
-                    (list 'message (car (cdr (cdr (cdr c)))))))))))
+              (list (list 'argument (cadr c)) (list 'token (caddr c)) (list 'message (cadddr c))))))))
 
-(def (%label field)
+(def- (%label field)
   (if (eq? (car field) 'argument)
-      (symbol->string (%second field))
-      (string-append (%join (append (%properties field 'names)
-                                    (if (%property field 'negative #f)
-                                        (list (%property field 'negative #f))
-                                        '()))
-                            ", ")
+      (symbol->string (cadr field))
+      (string-append (string-join ", "
+                                  (append (%properties field 'names)
+                                          (if (%property field 'negative #f)
+                                              (list (%property field 'negative #f))
+                                              '())))
                      (if (eq? (car field) 'option)
                          (string-append " " (%property field 'metavar "VALUE"))
                          ""))))
 
-(def (%value-text value)
+(def- (%value-text value)
   (cond
     ((string? value) value)
     ((number? value) (number->string value))
     ((eq? value #f) "false")
     ((eq? value #t) "true")
     ((symbol? value) (symbol->string value))
-    ((list? value) (%join (map %value-text value) ", "))
+    ((list? value) (string-join ", " (map %value-text value)))
     (else "value")))
 
-(def (%field-help field)
+(def- (%field-help field)
   (string-append "  "
                  (%label field)
                  "\n      "
                  (%property field 'help "")
-                 (if (%lookup 'default (cdr (cdr field)))
+                 (if (assoc 'default (cddr field))
                      (string-append " [default: " (%value-text (%property field 'default #f)) "]")
                      "")
                  (if (pair? (%properties field 'range))
-                     (string-append " [range: " (%join (map %value-text (%properties field 'range)) "..") "]")
+                     (string-append " [range: " (string-join ".." (map %value-text (%properties field 'range))) "]")
                      "")
                  (if (pair? (%properties field 'choices))
-                     (string-append " [choices: " (%join (map %value-text (%properties field 'choices)) ", ") "]")
+                     (string-append " [choices: " (string-join ", " (map %value-text (%properties field 'choices))) "]")
                      "")
                  (if (eq? (%property field 'repeat #f) 'append)
                      " [repeatable]"
@@ -468,55 +389,55 @@
                  "\n"))
 
 (def (format-help command . context)
-  (%let* ((values (if (null? context)
-                      '()
-                      (car context)))
-          (path (ref values 'command-path (list (symbol->string (%second command)))))
-          (fields (append (ref values 'globals '()) (%fields command))))
-         (string-append (%property command 'summary "")
-                        "\n\nUsage: "
-                        (%join path " ")
-                        " [OPTIONS]"
-                        (if (pair? (%commands command))
-                            " COMMAND"
-                            "")
-                        (apply string-append
-                               (map (fn (f)
-                                      (string-append " "
-                                                     (if (%property f 'required (not (%lookup 'default (cdr (cdr f)))))
-                                                         ""
-                                                         "[")
-                                                     (symbol->string (%second f))
-                                                     (if (eq? (%property f 'repeat #f) 'append)
-                                                         "..."
-                                                         "")
-                                                     (if (%property f 'required (not (%lookup 'default (cdr (cdr f)))))
-                                                         ""
-                                                         "]")))
-                                    (%filter (fn (f) (eq? (car f) 'argument)) fields)))
-                        "\n\nArguments and options:\n"
-                        (apply string-append (map %field-help fields))
-                        "  -h, --help\n      Show help\n"
-                        (if (%property command 'version #f)
-                            "  --version\n      Show version\n"
-                            "")
-                        (if (null? (%commands command))
-                            ""
-                            (string-append "\nCommands:\n"
-                                           (apply string-append
-                                                  (map (fn (c)
-                                                         (string-append "  "
-                                                                        (symbol->string (%second c))
-                                                                        "  "
-                                                                        (%property c 'summary "")
-                                                                        "\n"))
-                                                       (%commands command)))))
-                        (if (null? (%properties command 'examples))
-                            ""
-                            (string-append "\nExamples:\n"
-                                           (apply string-append
-                                                  (map (fn (e) (string-append "  " (car e) "\n      " (%second e) "\n"))
-                                                       (%properties command 'examples))))))))
+  (let ((values (if (null? context)
+                    '()
+                    (car context)))
+        (path (ref values 'command-path (list (symbol->string (cadr command)))))
+        (fields (append (ref values 'globals '()) (%fields command))))
+    (string-append (%property command 'summary "")
+                   "\n\nUsage: "
+                   (string-join " " path)
+                   " [OPTIONS]"
+                   (if (pair? (%commands command))
+                       " COMMAND"
+                       "")
+                   (apply string-append
+                          (map (fn (f)
+                                 (string-append " "
+                                                (if (%property f 'required (not (assoc 'default (cddr f))))
+                                                    ""
+                                                    "[")
+                                                (symbol->string (cadr f))
+                                                (if (eq? (%property f 'repeat #f) 'append)
+                                                    "..."
+                                                    "")
+                                                (if (%property f 'required (not (assoc 'default (cddr f))))
+                                                    ""
+                                                    "]")))
+                               (%positionals fields)))
+                   "\n\nArguments and options:\n"
+                   (apply string-append (map %field-help fields))
+                   "  -h, --help\n      Show help\n"
+                   (if (%property command 'version #f)
+                       "  --version\n      Show version\n"
+                       "")
+                   (if (null? (%commands command))
+                       ""
+                       (string-append "\nCommands:\n"
+                                      (apply string-append
+                                             (map (fn (c)
+                                                    (string-append "  "
+                                                                   (symbol->string (cadr c))
+                                                                   "  "
+                                                                   (%property c 'summary "")
+                                                                   "\n"))
+                                                  (%commands command)))))
+                   (if (null? (%properties command 'examples))
+                       ""
+                       (string-append "\nExamples:\n"
+                                      (apply string-append
+                                             (map (fn (e) (string-append "  " (car e) "\n      " (cadr e) "\n"))
+                                                  (%properties command 'examples))))))))
 
 (def (format-error outcome)
   (let ((diagnostic (outcome-diagnostic outcome)))
@@ -528,13 +449,13 @@
                        (string-append "; got \"" (ref diagnostic 'token) "\"")
                        "")
                    "\nTry '"
-                   (%join (ref (outcome-values outcome) 'command-path) " ")
+                   (string-join " " (ref (outcome-values outcome) 'command-path))
                    " --help' for more information.\n")))
 
 (def (run command main . supplied)
   (let ((outcome (parse command
                         (if (null? supplied)
-                            (%arguments)
+                            (otium.process/arguments)
                             (car supplied)))))
     (cond
       ((eq? (outcome-kind outcome) 'ok) (exit (main (outcome-values outcome))))
@@ -542,4 +463,4 @@
        (display (format-help (outcome-command outcome) (outcome-values outcome)))
        (exit 0))
       ((eq? (outcome-kind outcome) 'version) (display (outcome-values outcome)) (newline) (exit 0))
-      (else (%stderr (format-error outcome)) (exit 2)))))
+      (else (otium.process/write-error (format-error outcome)) (exit 2)))))

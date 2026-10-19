@@ -67,7 +67,10 @@ TTF_Text* otui_text_get(const char* string, int face, float size, float width, f
       strcmp(runs[slot].text->text ? runs[slot].text->text : "", string) == 0) return runs[slot].text;
   TTF_Text* text = TTF_CreateText(&engine, font, string, 0);
   if (!text) return NULL;
-  if (!TTF_SetTextWrapWidth(text, wrap) || !TTF_UpdateText(text)) {
+  // Editable, unwrapped lines need trailing spaces to retain their advances.
+  // Otherwise SDL_ttf collapses them into a zero-width end-of-line cluster.
+  if (!TTF_SetTextWrapWidth(text, wrap) ||
+      !TTF_SetTextWrapWhitespaceVisible(text, width < 0) || !TTF_UpdateText(text)) {
     TTF_DestroyText(text); return NULL;
   }
   if (runs[slot].text) TTF_DestroyText(runs[slot].text);

@@ -34,6 +34,16 @@ int main(void) {
     check(TTF_GetTextSubString(text, 4, &second), "UTF-8 byte offset");
     check(positions[2] == second.rect.x, "byte offsets become codepoint indices");
     check(!otui_text_carets(text, positions, 3), "undersized buffer rejected");
+    // Spaces must keep their advances even at the end of an unwrapped line.
+    const char* spaced[] = {"   ", "a  ", " a b ", "é  λ "};
+    for (int sample = 0; sample < 4; ++sample) {
+      text = otui_text_get(spaced[sample], 1, 18, -1, scale);
+      int count = (int)SDL_utf8strlen(spaced[sample]);
+      check(otui_text_carets(text, positions, count + 1), "whitespace carets");
+      for (int j = 1; j <= count; ++j)
+        check(positions[j] > positions[j - 1], "spaces advance the caret");
+      check(positions[count] == otui_text_size(text, 0), "trailing caret includes spaces");
+    }
     text = otui_text_get("", 0, 32, -1, scale);
     check(otui_text_carets(text, positions, 1) && positions[0] == 0, "empty caret");
   }

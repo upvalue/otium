@@ -270,14 +270,22 @@
 
 (defmethod (ui/paint (w ui/TextField) g bounds)
   (let ((positions (caret-positions (w :value) (w :font) (w :size) (native/gpu-scale (g :renderer))))
-        (available (max 0 (- (bounds :width) 20))))
+        (available (max 0 (- (bounds :width) 20)))
+        (block? (eq? (w :caret-style) :block))
+        (caret-width 1))
+    (when block?
+      (set! caret-width
+            (if (< (w :cursor) (string-length (w :value)))
+                (max 1 (abs (- (get positions (+ (w :cursor) 1)) (get positions (w :cursor)))))
+                (max 1 (get (caret-positions " " (w :font) (w :size) (native/gpu-scale (g :renderer))) 1)))))
     (set! (w :positions) positions)
     (let ((caret (get positions (w :cursor)))
           (end (get positions (- (length positions) 1))))
       (set! (w :offset) (max 0 (min (w :offset) (max 0 (- end available)))))
       (when (< caret (w :offset)) (set! (w :offset) caret))
       (when (= (w :cursor) 0) (set! (w :offset) 0))
-      (when (> caret (+ (w :offset) (- available 2))) (set! (w :offset) (max 0 (- caret (- available 2))))))
+      (when (> caret (+ (w :offset) (- available (+ caret-width 1))))
+        (set! (w :offset) (max 0 (- caret (- available (+ caret-width 1)))))))
     (gfx/rect g
               bounds
               (if (g :focused?)
@@ -322,11 +330,13 @@
                       0xdce5f2ff)
                   #f)
         (when (g :focused?)
-          (gfx/rect context
-                    (make ui/Bounds
-                          :x (+ origin (get positions (w :cursor)))
-                          :y (inner :y)
-                          :width 1
-                          :height (inner :height))
-                    0x67d9c0ff
-                    0))))))
+          (let ((caret-bounds (make ui/Bounds
+                                    :x (+ origin (get positions (w :cursor)))
+                                    :y (inner :y)
+                                    :width caret-width
+                                    :height (inner :height))))
+            (gfx/rect context caret-bounds 0x67d9c0ff 0)
+            (when (and block? (< (w :cursor) (string-length (w :value))))
+              (gfx/text (make gfx/Context :renderer (g :renderer) :clip (intersect (context :clip) caret-bounds))
+                        (make ui/Bounds :x origin :y (inner :y) :width available :height (inner :height))
+                        (w :value) (w :font) (w :size) 0x202d43ff #f))))))))

@@ -291,17 +291,19 @@
               (lambda (entry)
                 (define-top-level-value (car entry) (cdr entry) env)
                 (hashtable-set! (namespace-definitions space) (car entry)
-                  "Portable foreign calls and native memory."))
-              (eval 'public-bindings (environment '(otium ffi))))
-            (namespace-loaded?-set! space #t))
-          (when (memq name '(otium.process otium.cli))
+                  "Portable foreign calls and native memory.")
+                (when (char=? (string-ref (symbol->string (car entry)) 0) #\%)
+                  (hashtable-set! (namespace-privates space) (car entry) #t)))
+              ((eval 'make-native-bindings (environment '(otium ffi)))
+               (lambda (member) (top-level-value member env)))))
+          (when (eq? name 'otium.process)
             (for-each
               (lambda (entry)
                 (define-top-level-value (car entry) (cdr entry) env)
                 (hashtable-set! (namespace-definitions space) (car entry)
                   "Portable command-line programs."))
               (eval 'public-bindings
-                (environment (if (eq? name 'otium.cli) '(otium cli) '(otium process)))))
+                (environment '(otium process))))
             (namespace-loaded?-set! space #t))
           (when (eq? name 'otium.reader)
             (for-each
@@ -389,12 +391,15 @@
     (let ([space (find-namespace name)])
       (when (namespace-loading? space)
         (error 'require "circular namespace load" name))
-      (when (and (not (memq name '(otium.generic otium.ffi otium.process otium.cli otium.reader)))
+      (when (and (not (memq name '(otium.generic otium.process otium.reader)))
                  (or reload? (not (namespace-loaded? space))))
         (load-namespace! space (or (namespace-source space)
-          (cond [(eq? name 'otium.extra) (shared-source "lib/otium/extra.ot")]
-                [(eq? name 'otium.dev) (shared-source "dev/core.ot")]
-                [else (source-for name)]))))
+          (cond
+            [(eq? name 'otium.extra) (shared-source "lib/otium/extra.ot")]
+            [(eq? name 'otium.dev) (shared-source "dev/core.ot")]
+            [(eq? name 'otium.cli) (shared-source "cli/core.ot")]
+            [(eq? name 'otium.ffi) (shared-source "ffi/core.ot")]
+            [else (source-for name)]))))
       space))
 
   (define (load-source path)

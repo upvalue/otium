@@ -186,6 +186,22 @@ for runtime in runtimes(args.runtime):
                for cx in range(x+10, x+100)), 'Text caret missing'
     assert all(pixel(terminal_rows, 10, cy) == (16, 24, 39)
                for cy in range(60, 360)), 'Scrollback escaped viewport'
+    for cursor_frames in (3, 5):
+        cursor_capture = artifacts/f'{runtime}-terminal-cursor-{cursor_frames}.bmp'
+        cursor_state = artifacts/f'{runtime}-terminal-cursor-{cursor_frames}.json'
+        result = launch(runtime, '--scene', 'ui.terminal', '--script', 'ui.terminal-cursor',
+                        '--frames', cursor_frames, '--capture', cursor_capture, '--dump-state', cursor_state)
+        passed(result)
+        field = next(n for n in json.loads(cursor_state.read_text())['nodes'] if n['focused'])
+        rows = runner.bmp_pixels(cursor_capture)[2]
+        y = round(field['y']) + 9
+        green = [x for x in range(round(field['x']) + 10, round(field['x'] + field['width']) - 10)
+                 if pixel(rows, x, y) == (103, 217, 192)]
+        assert len(green) >= 8 and green[-1] - green[0] + 1 == len(green), 'Block cursor is missing or clipped'
+        if cursor_frames == 3:
+            assert green[0] >= round(field['x']) + 40, 'Cursor did not advance over trailing spaces'
+        else:
+            assert 'UI-TERMINAL block cursor and spaces passed' in result.stdout
     contract = launch(runtime, '--script', 'ui.event-contract', '--title', 'Custom test title')
     passed(contract)
     assert 'UI-EVENT copied named events passed' in contract.stdout

@@ -56,4 +56,24 @@
 (check "core redefinition stays in its namespace" "1" (output '(display 1)))
 (check "host binding unaffected by core redefinition" "2"
   (output '(chez/display 2)))
+(evaluate '(ns bundled-modules))
+(check "finite? is part of the Otium vocabulary" '(#t #f #f)
+  (evaluate '(list (finite? 1.0) (finite? +inf.0) (finite? +nan.0))))
+(evaluate '(require otium.cli otium.ffi))
+(check "CLI helpers are private" #t (fails? 'otium.cli/%property))
+(check "FFI primitives are private" #t (fails? 'otium.ffi/%alloc))
+(evaluate '(def saved-null otium.ffi/null))
+(namespace-set! 'otium.cli 'compile (lambda (spec) 'replaced))
+(namespace-set! 'otium.ffi 'sizeof (lambda (type) 'replaced))
+(check "CLI import sees redefinition" 'replaced
+  (evaluate '(otium.cli/compile '(command test))))
+(check "FFI import sees redefinition" 'replaced (evaluate '(otium.ffi/sizeof 'int)))
+(evaluate '(require (otium.cli :reload) (otium.ffi :reload)))
+(check "CLI reload restores source definition" '(command test)
+  (evaluate '(otium.cli/compile '(command test))))
+(check "FFI reload restores source validation" #t
+  (fails? '(otium.ffi/sizeof 'void)))
+(check "FFI reload preserves native pointer types" #t
+  (evaluate '(otium.ffi/pointer=? saved-null otium.ffi/null)))
+(check "FFI primitives remain private after reload" #t (fails? 'otium.ffi/%alloc))
 (printf "~a environment checks passed\n" checks)

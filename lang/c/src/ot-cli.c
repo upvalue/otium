@@ -37,11 +37,7 @@ static void process_module(ots* s) {
   ot_def_nat(s, "write-error", stderr_write);
 }
 static void cli_module(ots* s) {
-  ot_def_nat(s, "%arguments", arguments);
-  ot_def_nat(s, "%stderr", stderr_write);
   otv ignored;
-  const char* adapter = "(defmacro %let* (bindings . body) (cons 'let (cons bindings body)))";
-  if (!ot_eval_src(s, adapter, strlen(adapter), "<cli-adapter>", &ignored)) return;
   ot_eval_src(s, ot_cli_src, ot_cli_src_len, "<otium.cli>", &ignored);
 }
 void ot_register_cli(ots* s) {

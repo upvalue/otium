@@ -317,7 +317,11 @@ and copies all positions through one native call.
 Grapheme-cluster navigation, bidirectional caret placement, word navigation,
 undo/redo, multiline fields and IME composition are not implemented yet. The
 caret is steady rather than blinking, including in deterministic captures.
-
+`TextField` accepts `:caret-style :block` for a filled cursor; the default is
+`:bar`. The terminal uses the block style, with contrasting text beneath the
+cursor and enough horizontal scroll space to keep the full block visible.
+Unwrapped text preserves trailing whitespace advances for caret movement,
+selection, and pointer positioning.
 
 Committed text arrives through SDL text events, separately from key events.
 The host starts/stops SDL text input as focus changes. Headless tests send

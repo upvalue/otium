@@ -52,6 +52,7 @@
   (ui/text-field {:key :input
                   :grow 1
                   :autofocus #t
+                  :caret-style :block
                   :value (p :draft)
                   :placeholder "Type a command…"
                   :keymap {"Up" :older "Down" :newer}

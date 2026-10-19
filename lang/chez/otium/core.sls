@@ -13,7 +13,7 @@
     (rename (ot-floor floor) (ot-ceiling ceiling) (ot-truncate truncate)
             (ot-round round) (ot-sqrt sqrt))
     exp log sin cos tan asin acos atan expt
-    number? integer? exact? inexact?
+    number? integer? exact? inexact? finite?
     exact inexact number->string
     not boolean? eq? equal? procedure?
     cons car cdr caar cadr cdar cddr caaar caadr cadar caddr

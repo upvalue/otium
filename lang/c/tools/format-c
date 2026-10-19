@@ -2,7 +2,7 @@
 set -eu
 
 script_dir=$(dirname "$0")
-project_dir=$(CDPATH= cd "$script_dir/.." && pwd)
+project_dir=$(CDPATH= cd "$script_dir/../.." && pwd)
 
 if [ -n "${CLANG_FORMAT:-}" ]; then
   formatter_bin=$CLANG_FORMAT
@@ -23,11 +23,13 @@ cd "$project_dir"
 
 case "${1:-}" in
   "")
-    git ls-files -z -- '*.c' '*.h' ':!vendor/*' ':!tests/ctest.h' |
+    git ls-files -z -- 'c/*.c' 'c/*.h' 'shared/*.c' 'shared/*.h' \
+      ':!c/vendor/*' ':!c/tests/ctest.h' ':!shared/vendor/*' |
       xargs -0 "$formatter_bin" --style=file -i
     ;;
   --check)
-    git ls-files -z -- '*.c' '*.h' ':!vendor/*' ':!tests/ctest.h' |
+    git ls-files -z -- 'c/*.c' 'c/*.h' 'shared/*.c' 'shared/*.h' \
+      ':!c/vendor/*' ':!c/tests/ctest.h' ':!shared/vendor/*' |
       xargs -0 "$formatter_bin" --style=file --dry-run --Werror
     ;;
   *)

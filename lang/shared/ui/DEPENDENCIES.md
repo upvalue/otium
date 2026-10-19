@@ -1,5 +1,9 @@
 # Native UI dependencies
 
+The UI is an optional component of `shared/CMakeLists.txt`. `make ui` enables
+`OTIUM_WITH_UI`; base native builds do not discover these dependencies. See
+[the native build contract](../NATIVE.txt) for configuration and output paths.
+
 Yoga 3.2.1 is downloaded from
 https://github.com/facebook/yoga/archive/refs/tags/v3.2.1.tar.gz.
 The archive SHA-256 is

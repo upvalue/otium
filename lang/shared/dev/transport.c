@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "transport.h"
+#include "../support/utf8.h"
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -75,34 +76,6 @@ uint64_t ot_dev_clock(void) {
   struct timespec now;
   clock_gettime(CLOCK_MONOTONIC, &now);
   return (uint64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
-}
-static int valid_utf8(const unsigned char* text, size_t length) {
-  for (size_t i = 0; i < length;) {
-    unsigned byte = text[i++], code;
-    size_t extra;
-    if (byte == 0) return 0;
-    if (byte < 128) continue;
-    if (byte >= 0xc2 && byte <= 0xdf) {
-      code = byte & 31;
-      extra = 1;
-    } else if (byte >= 0xe0 && byte <= 0xef) {
-      code = byte & 15;
-      extra = 2;
-    } else if (byte >= 0xf0 && byte <= 0xf4) {
-      code = byte & 7;
-      extra = 3;
-    } else return 0;
-    if (extra > length - i) return 0;
-    for (size_t j = 0; j < extra; j++) {
-      unsigned next = text[i++];
-      if ((next & 0xc0) != 0x80) return 0;
-      code = (code << 6) | (next & 63);
-    }
-    if ((extra == 1 && code < 0x80) || (extra == 2 && code < 0x800) ||
-        (extra == 3 && code < 0x10000) || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff))
-      return 0;
-  }
-  return 1;
 }
 static int nonblock(int fd) {
   return fcntl(fd, F_SETFL, O_NONBLOCK) == 0 && fcntl(fd, F_SETFD, FD_CLOEXEC) == 0;
@@ -260,7 +233,7 @@ int ot_dev_poll(int timeout) {
         break;
       }
       if (c->used < len + 4) break;
-      if (!valid_utf8(p + 4, len) || request_bytes + len > 4 * LIMIT) {
+      if (memchr(p + 4, 0, len) || !ot_utf8_valid(p + 4, len) || request_bytes + len > 4 * LIMIT) {
         close(c->fd);
         c->fd = -1;
         break;
@@ -275,13 +248,6 @@ int ot_dev_poll(int timeout) {
       memcpy(r->text, p + 4, len);
       r->text[len] = 0;
       r->client = c->id;
-      if (memchr(r->text, 0, len)) {
-        free(r->text);
-        free(r);
-        close(c->fd);
-        c->fd = -1;
-        break;
-      }
       if (tail) tail->next = r;
       else head = r;
       tail = r;

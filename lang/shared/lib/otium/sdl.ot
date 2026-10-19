@@ -38,8 +38,26 @@
 
 (def get-error nil)
 
+(def set-hint nil)
+
+(def set-app-metadata nil)
+
+(def load-surface nil)
+
+(def set-window-icon nil)
+
+(def destroy-surface nil)
+
+(def raise-window nil)
+
 (def (load! path)
   (set! library (ffi/open-library (list path)))
+  (set! set-hint (ffi/bind library "SDL_SetHint" '(utf8 utf8) 'bool))
+  (set! set-app-metadata (ffi/bind library "SDL_SetAppMetadata" '(utf8 utf8 utf8) 'bool))
+  (set! load-surface (ffi/bind library "SDL_LoadSurface" '(utf8) 'pointer))
+  (set! set-window-icon (ffi/bind library "SDL_SetWindowIcon" '(pointer pointer) 'bool))
+  (set! destroy-surface (ffi/bind library "SDL_DestroySurface" '(pointer) 'void))
+  (set! raise-window (ffi/bind library "SDL_RaiseWindow" '(pointer) 'bool))
   (set! init (ffi/bind library "SDL_Init" '(u32) 'bool))
   (set! quit (ffi/bind library "SDL_Quit" '() 'void))
   (set! was-init (ffi/bind library "SDL_WasInit" '(u32) 'u32))

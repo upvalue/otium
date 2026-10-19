@@ -1,0 +1,63 @@
+(require (otium.ui.gpu :as gpu))
+(require (otium.sdl :as sdl))
+(require (otium.ffi :as ffi))
+
+(def calls [])
+
+(def failed? #f)
+
+(def icon-ok? #t)
+
+(def checks 0)
+
+(def (check expected actual)
+  (unless (equal? expected actual) (error "application policy" expected actual))
+  (set! checks (+ checks 1)))
+
+(set! sdl/set-hint
+      (fn (key value)
+        (push! calls (list 'hint key value))
+        #t))
+(set! sdl/set-app-metadata
+      (fn (name version id)
+        (push! calls (list 'metadata name version id))
+        #t))
+(set! sdl/load-surface
+      (fn (path)
+        (push! calls (list 'load path))
+        surface))
+(set! sdl/set-window-icon
+      (fn (window image)
+        (push! calls (list 'icon window (eq? image surface)))
+        icon-ok?))
+(set! sdl/destroy-surface (fn (image) (push! calls (list 'destroy (eq? image surface)))))
+(set! sdl/raise-window
+      (fn (window)
+        (push! calls (list 'raise window))
+        #t))
+(set! sdl/get-error (fn () "icon failed"))
+
+(def surface (ffi/alloc 'u8 1))
+
+(unwind-protect
+  (begin
+    (gpu/configure-app! {})
+    (check '((hint "SDL_MAC_BACKGROUND_APP" "0") (metadata "Otium" "" "org.otium.application")) (array-to-list calls))
+    (set! calls [])
+    (gpu/configure-app! {:name "Example" :version "1" :id "org.example" :background #t})
+    (check '((hint "SDL_MAC_BACKGROUND_APP" "1") (metadata "Example" "1" "org.example")) (array-to-list calls))
+    (set! calls [])
+    (gpu/present-window! 'window {})
+    (check '((raise window)) (array-to-list calls))
+    (set! calls [])
+    (gpu/present-window! 'window {:icon "icon.png" :foreground #f})
+    (check '((load "icon.png") (icon window #t) (destroy #t)) (array-to-list calls))
+    (set! calls [])
+    (set! icon-ok? #f)
+    (try
+      (gpu/present-window! 'window {:icon "icon.png"})
+      (catch ((fn (c) #t) c) (set! failed? #t)))
+    (check #t failed?)
+    (check '((load "icon.png") (icon window #t) (destroy #t)) (array-to-list calls)))
+  (ffi/free! surface))
+(println "Application policy checks: " checks)

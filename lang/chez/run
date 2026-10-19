@@ -37,12 +37,7 @@ done
 if [ "$explicit_repl" = yes ]; then interactive=yes; fi
 if [ "$interactive" = yes ] && { { [ -t 0 ] && [ -t 1 ]; } || [ "${OTIUM_DEV_LIBRARY+x}" = x ]; }; then
   OTIUM_LINE_LIBRARY="$root/../shared/build/$platform/libotium-line.$extension"
-  for source in Makefile line-edit.c line-edit.h vendor/bestline/bestline.c vendor/bestline/bestline.h; do
-    if [ ! -f "$OTIUM_LINE_LIBRARY" ] || [ "$root/../shared/$source" -nt "$OTIUM_LINE_LIBRARY" ]; then
-      make -s -C "$root/../shared" "build/$platform/libotium-line.$extension"
-      break
-    fi
-  done
+  make -s -C "$root/../shared" "build/$platform/libotium-line.$extension"
   export OTIUM_LINE_LIBRARY
 fi
 exec "${CHEZ:-chez}" \

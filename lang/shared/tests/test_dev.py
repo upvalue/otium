@@ -232,7 +232,7 @@ class DevelopmentServerTests(unittest.TestCase):
             for byte in frame:
                 c.socket.sendall(bytes([byte]))
             self.assertIn(':ok #t', c.response(1))
-            for invalid in (b'\xff', b'\xc0\x80', b'\xed\xa0\x80'):
+            for invalid in (b'\xff', b'\xc0\x80', b'\xed\xa0\x80', b'a\0b', b'\xf0\x9f\x98'):
                 other = server.connect()
                 other.socket.sendall(struct.pack('!I', len(invalid)) + invalid)
                 self.assertEqual(other.socket.recv(1), b'')

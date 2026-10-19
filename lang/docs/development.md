@@ -67,7 +67,7 @@ tree, formatter and linter are Otium libraries in `shared/lib/otium/`.
 
 | Command | Coverage | Additional dependencies |
 | --- | --- | --- |
-| `make test` | C, Chez, portable library/reader/CLI/UI contracts, tooling, interactive REPL | C23 compiler, Python 3, Chez, POSIX PTYs |
+| `make test` | C, Chez, portable library/reader/CLI/UI contracts, tooling, interactive REPL | C23 compiler, CMake 3.20+, Python 3, Chez, POSIX PTYs |
 | `make test-c`, `make test-chez` | Runtime-specific suites and shared conditions | Selected runtime |
 | `make test-native` | FFI, SDL events/audio, UI layout; GPU checks when available | libffi, SDL3, CMake, C++20, glslc, pinned Yoga |
 | `make test-gpu` | Required GPU and accelerated SDL acceptance | Native dependencies and working display/backend |
@@ -103,7 +103,16 @@ C objects live under `c/build/<platform>/obj/<collector>-ffi<mode>-<flags-hash>/
 Different checkouts and compiler configurations do not share objects. `BUILD_ROOT`,
 `BIN_ROOT`, `PLATFORM`, `GC`, and `WITH_FFI` remain configurable. The C launcher
 selects `c/bin/<platform>/otium`; `OTIUM_BIN_ROOT` and `OTIUM_PLATFORM` override
-its location. Shared native outputs live in `shared/build/<platform>/`.
+its location. Shared native outputs live in `shared/build/<platform>/`. Their compilation is
+owned by `shared/CMakeLists.txt`; both runtimes use that build through
+`shared/Makefile`. UI dependencies are required only with `OTIUM_WITH_UI=ON`
+(`make ui` sets it). See [native components](../shared/NATIVE.txt) for build
+commands, ownership contracts and the remaining policy-migration audit.
+
+Shared C/C++ is reserved for bridges that would be impractically difficult in
+Otium. Performance is not an exception: improve the Otium code or runtime/compiler
+instead. Optional components may depend on libraries such as SDL. Ordinary
+library orchestration and application policy belong in Otium.
 
 A root Make invocation uses one FFI configuration. Native targets select FFI
 for the whole invocation, including `make -j test test-native`. Do not run two

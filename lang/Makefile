@@ -3,7 +3,7 @@ PYTHON ?= python3
 export PYTHON
 RUN_PYTHON := tools/python
 # One invocation uses one C configuration, including optional native targets.
-ifneq ($(filter ffi ui test-ffi test-sdl test-sdl-integration test-ui-layout test-ui-gpu test-dev-ui test-native test-gpu,$(MAKECMDGOALS)),)
+ifneq ($(filter ffi ui test-ffi test-sdl test-sdl-integration test-ui-layout test-ui-gpu test-dev-ui test-native test-native-policy test-gpu,$(MAKECMDGOALS)),)
 WITH_FFI := 1
 endif
 WITH_FFI ?= 0
@@ -117,8 +117,7 @@ ui-setup:
 
 ui: ffi
 	$(RUN_PYTHON) shared/ui/setup.py
-	cmake -S shared/ui -B shared/build/$(shell uname -m)-$(shell uname -s | tr '[:upper:]' '[:lower:]')/ui -DCMAKE_BUILD_TYPE=Release
-	cmake --build shared/build/$(shell uname -m)-$(shell uname -s | tr '[:upper:]' '[:lower:]')/ui -j 4
+	$(MAKE) -C shared ui
 
 test-ui-layout: ui
 	$(RUN_PYTHON) shared/tests/test_ui_layout.py
@@ -145,7 +144,12 @@ help:
 test-tools:
 	$(RUN_PYTHON) -m unittest discover -s tools/tests -v
 
-test-native: test-ffi test-sdl test-ui-layout
+test-native: test-ffi test-sdl test-ui-layout test-native-policy
+
+.PHONY: test-native-policy
+test-native-policy: ffi
+	./otium --runtime=chez --no-project -L shared/lib shared/tests/ui/application.ot
+	./otium --runtime=c --no-project -L shared/lib shared/tests/ui/application.ot
 
 test-gpu: test-ui-gpu test-sdl-integration
 

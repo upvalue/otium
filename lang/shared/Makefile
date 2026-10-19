@@ -1,45 +1,47 @@
 .DEFAULT_GOAL := all
 CC ?= cc
-AR ?= ar
+CMAKE ?= cmake
 PLATFORM ?= $(shell uname -m)-$(shell uname -s | tr '[:upper:]' '[:lower:]')
 BUILD ?= build/$(PLATFORM)
-CFLAGS ?= -O2 -g -Wall -Wextra -Werror
-UNAME := $(shell uname -s)
-ifeq ($(UNAME),Darwin)
-SHARED_FLAGS := -dynamiclib
-EXT := dylib
-else
-SHARED_FLAGS := -shared
-EXT := so
-endif
+CFLAGS ?= -O2 -g
+CXXFLAGS ?= -O2 -g
+CPPFLAGS ?=
+LDFLAGS ?=
+WITH_UI ?= OFF
+CMAKE_BUILD := $(BUILD)/cmake
+EXT := $(if $(filter Darwin,$(shell uname -s)),dylib,so)
+quote = '$(subst ','"'"',$(1))'
 
-.PHONY: all clean
-all: $(BUILD)/libotium-line.$(EXT) $(BUILD)/libotium-line.a
+.PHONY: all configure ffi ui native-objects test clean line dev
+configure:
+	+@$(CMAKE) -S . -B $(CMAKE_BUILD) \
+	  -DOTIUM_OUTPUT_DIR=$(abspath $(BUILD)) -DOTIUM_WITH_UI=$(WITH_UI) \
+	  -DCMAKE_C_COMPILER=$(CC) -DCMAKE_C_FLAGS=$(call quote,$(CPPFLAGS) $(CFLAGS)) \
+	  -DCMAKE_CXX_FLAGS=$(call quote,$(CPPFLAGS) $(CXXFLAGS)) \
+	  -DCMAKE_SHARED_LINKER_FLAGS=$(call quote,$(LDFLAGS)) \
+	  -DCMAKE_EXE_LINKER_FLAGS=$(call quote,$(LDFLAGS)) > /dev/null
 
-$(BUILD):
-	mkdir -p $@
+all: configure
+	+@$(CMAKE) --build $(CMAKE_BUILD) > /dev/null
 
-$(BUILD)/line-edit.o: line-edit.c line-edit.h vendor/bestline/bestline.h Makefile | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 -fPIC -Ivendor/bestline -c $< -o $@
+ffi line dev native-objects: configure
+	+@$(CMAKE) --build $(CMAKE_BUILD) --target $(if $(filter native-objects,$@),native-objects,otium-$@) > /dev/null
 
-$(BUILD)/bestline.o: vendor/bestline/bestline.c vendor/bestline/bestline.h Makefile | $(BUILD)
-	$(CC) $(CPPFLAGS) -O2 -g -std=c11 -fPIC -w -c $< -o $@
+ui: WITH_UI=ON
+ui: CMAKE_BUILD=$(BUILD)/cmake-ui
+ui: configure
+	+@$(CMAKE) --build $(CMAKE_BUILD) --target otium-ui otium-ui-caret-checks otium-ui-text-reference otium-ui-test-events > /dev/null
 
-$(BUILD)/libotium-line.a: $(BUILD)/line-edit.o $(BUILD)/bestline.o
-	$(AR) rcs $@ $^
+test: all
+	ctest --test-dir $(CMAKE_BUILD) --output-on-failure
 
-$(BUILD)/libotium-line.$(EXT): $(BUILD)/line-edit.o $(BUILD)/bestline.o
-	$(CC) $(LDFLAGS) $(SHARED_FLAGS) -o $@ $^
+# Preserve the artifact entry points used by launchers and external callers.
+.PHONY: $(BUILD)/libotium-line.$(EXT) $(BUILD)/libotium-dev.$(EXT) $(BUILD)/libotium-ffi.$(EXT) $(BUILD)/libotium-line.a
+$(BUILD)/libotium-line.$(EXT): line
+$(BUILD)/libotium-dev.$(EXT): dev
+$(BUILD)/libotium-ffi.$(EXT): ffi
+$(BUILD)/libotium-line.a: configure
+	+@$(CMAKE) --build $(CMAKE_BUILD) --target otium-line-static > /dev/null
 
 clean:
 	rm -rf $(BUILD)
-
-.PHONY: ffi
-ffi: $(BUILD)/libotium-ffi.$(EXT)
-
-$(BUILD)/libotium-ffi.$(EXT): ffi/native.c ffi/native.h | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 -fPIC $(SHARED_FLAGS) -o $@ ffi/native.c $(if $(filter Linux,$(UNAME)),-ldl,)
-
-all: $(BUILD)/libotium-dev.$(EXT)
-$(BUILD)/libotium-dev.$(EXT): dev/transport.c dev/transport.h | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 -fPIC $(SHARED_FLAGS) -o $@ dev/transport.c

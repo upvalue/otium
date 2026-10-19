@@ -28,14 +28,15 @@ $(error GC must be "semi" or "gen")
 endif
 
 RUNTIME_OBJ = $(OBJ)/otium.o $(OBJ)/ot-gc-common.o $(GC_OBJ) $(OBJ)/ot-posix.o $(OBJ)/ot-ffi.o $(OBJ)/ot-cli.o
-CLI_OBJ = $(OBJ)/dev-transport.o $(OBJ)/main.o $(OBJ)/ot-ext-demo.o $(OBJ)/line-edit.o $(OBJ)/bestline.o
+CLI_OBJ = $(NATIVE)/objects/dev-transport.o $(NATIVE)/objects/utf8.o $(OBJ)/main.o $(OBJ)/ot-ext-demo.o $(NATIVE)/objects/line-edit.o $(NATIVE)/objects/bestline.o
 TEST_OBJ = $(OBJ)/test-runtime.o
 GC_BENCH_OBJ = $(OBJ)/gc-bench.o
 
 ifeq ($(WITH_FFI),1)
 CPPFLAGS += -DOT_WITH_FFI $(shell pkg-config --cflags libffi)
 LDLIBS += $(shell pkg-config --libs libffi)
-RUNTIME_OBJ += $(OBJ)/ffi-native.o
+RUNTIME_OBJ += $(NATIVE)/objects/ffi-native.o $(NATIVE)/objects/utf8.o
+CLI_OBJ = $(NATIVE)/objects/dev-transport.o $(OBJ)/main.o $(OBJ)/ot-ext-demo.o $(NATIVE)/objects/line-edit.o $(NATIVE)/objects/bestline.o
 ifeq ($(shell uname -s),Linux)
 LDLIBS += -ldl
 endif
@@ -44,6 +45,14 @@ endif
 # Keep objects from different compiler configurations separate.
 shell_quote = '$(subst ','"'"',$(1))'
 CONFIG_ID := $(shell printf '%s' $(call shell_quote,$(CC)|$(CPPFLAGS)|$(CFLAGS)|$(LDFLAGS)|$(LDLIBS)) | cksum | cut -d ' ' -f 1)
+
+NATIVE = $(abspath $(BUILD))/native/$(CONFIG_ID)
+.PHONY: native-objects
+native-objects:
+	$(MAKE) -C ../shared BUILD=$(NATIVE) CC=$(call shell_quote,$(CC)) \
+	  CFLAGS=$(call shell_quote,$(CFLAGS)) CPPFLAGS=$(call shell_quote,$(CPPFLAGS)) native-objects
+
+$(addprefix $(NATIVE)/objects/,dev-transport.o utf8.o line-edit.o bestline.o ffi-native.o): native-objects
 
 .PHONY: all lib test bench bench-gc format clean hygiene gc-lint FORCE
 
@@ -60,7 +69,9 @@ $(OTIUM): $(RUNTIME_OBJ) $(CLI_OBJ) FORCE | $(BIN)
 	mv $@.tmp $@
 
 $(BUILD)/libotium.a: $(RUNTIME_OBJ) FORCE
-	$(AR) rcs $@ $(filter %.o,$^)
+	rm -f $@.tmp
+	$(AR) rcs $@.tmp $(filter %.o,$^)
+	mv $@.tmp $@
 
 $(BUILD)/test-runtime: $(RUNTIME_OBJ) $(TEST_OBJ) FORCE
 	$(CC) $(LDFLAGS) -o $@.tmp $(filter %.o,$^) $(LDLIBS)
@@ -96,12 +107,6 @@ $(OBJ)/test-runtime.o: tests/test_runtime.c src/otium.h | $(OBJ)
 
 $(OBJ)/gc-bench.o: benchmarks/gc_bench.c src/otium.h | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -c $< -o $@
-
-$(OBJ)/line-edit.o: ../shared/line-edit.c ../shared/line-edit.h ../shared/vendor/bestline/bestline.h | $(OBJ)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -I../shared/vendor/bestline -c $< -o $@
-
-$(OBJ)/bestline.o: ../shared/vendor/bestline/bestline.c ../shared/vendor/bestline/bestline.h | $(OBJ)
-	$(CC) $(CPPFLAGS) $(CSTD) $(OPT) -g -w -I../shared/vendor/bestline -c $< -o $@
 
 $(GEN)/expander.h: ../shared/prelude/expander.ot tools/embed.py | $(GEN)
 	$(PYTHON) tools/embed.py $< ot_expander_src $@
@@ -145,9 +150,6 @@ clean:
 $(OBJ)/ot-ffi.o: src/ot-ffi.c src/otium.h ../shared/ffi/native.h $(GEN)/ot-ffi-source.h | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I$(GEN) -Isrc -c $< -o $@
 
-$(OBJ)/ffi-native.o: ../shared/ffi/native.c ../shared/ffi/native.h | $(OBJ)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
-
 $(GEN)/ot-ffi-source.h: ../shared/ffi/core.ot tools/embed.py | $(GEN)
 	$(PYTHON) tools/embed.py $< ot_ffi_src $@
 
@@ -159,9 +161,6 @@ $(OBJ)/ot-cli.o: src/ot-cli.c src/otium.h $(GEN)/ot-cli-source.h | $(OBJ)
 
 $(GEN)/extra.h: ../shared/lib/otium/extra.ot tools/embed.py | $(GEN)
 	$(PYTHON) tools/embed.py $< ot_extra_src $@
-
-$(OBJ)/dev-transport.o: ../shared/dev/transport.c ../shared/dev/transport.h | $(OBJ)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 $(GEN)/dev.h: ../shared/dev/core.ot tools/embed.py | $(GEN)
 	$(PYTHON) tools/embed.py $< ot_dev_src $@

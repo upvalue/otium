@@ -112,10 +112,6 @@
 
 (def gpu-resize nil)
 
-(def app-configure nil)
-
-(def window-present nil)
-
 (def gpu-free nil)
 
 (def gpu-clear nil)
@@ -173,8 +169,6 @@
   (set! event-repeat (ffi/bind library "otui_event_repeat" '(pointer) 'int))
   (set! gpu-resize (ffi/bind library "otui_gpu_resize" '(pointer int int float) 'bool))
   (set! gpu-scale (ffi/bind library "otui_gpu_scale" '(pointer) 'float))
-  (set! app-configure (ffi/bind library "otui_app_configure" '(utf8 utf8 utf8 bool) 'bool))
-  (set! window-present (ffi/bind library "otui_window_present" '(pointer utf8 bool) 'bool))
   (set! gpu-create (ffi/bind library "otui_gpu_new" '(pointer int int float utf8 bool) 'pointer))
   (set! gpu-offscreen? (ffi/bind library "otui_gpu_offscreen" '(pointer) 'bool))
   (set! gpu-free (ffi/bind library "otui_gpu_free" '(pointer) 'void))

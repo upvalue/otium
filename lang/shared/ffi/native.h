@@ -29,12 +29,20 @@ enum {
   F_UTF8,
   F_COUNT
 };
+/* ABI metadata comes from the compiler that builds this bridge. Unknown type
+ * codes have size/alignment zero; names and metadata have static lifetime. */
 extern const char* const offi_names[F_COUNT];
 size_t offi_size(int type);
 size_t offi_align(int type);
 int offi_signed(int type);
+/* Paths and names are borrowed for the call. Handles/symbols are opaque;
+ * NULL signals failure. Libraries stay loaded for the process lifetime so
+ * reloaded Otium definitions cannot invalidate existing foreign procedures.
+ * Copy loader_error immediately: its borrowed storage belongs to dlerror. */
 void* offi_open(const char* path);
 void* offi_symbol(void* library, const char* name);
 const char* offi_loader_error(void);
+/* Compatibility entry point for the shared boundary validator; see
+ * support/utf8.h. Does not reject U+0000: C-string callers check that separately. */
 int offi_utf8(const unsigned char* bytes, size_t size);
 #endif

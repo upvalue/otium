@@ -175,16 +175,31 @@
 (set! events '())
 (check 'restart-arity
        #t
-       (fails? (fn () (restart-case (unwind-protect (invoke-restart 'give) (record 'cleaned)) (give (v) v)))))
+       (fails? (fn ()
+                 (restart-case (unwind-protect
+                                 (invoke-restart 'give)
+                                 (record 'cleaned))
+                   (give (v) v)))))
 (check 'restart-arity-after-cleanup '(cleaned) events)
 
 (set! events '())
 (try
-  (unwind-protect (unwind-protect (error 'x) (record 'inner)) (record 'outer))
+  (unwind-protect
+    (unwind-protect
+      (error 'x)
+      (record 'inner))
+    (record 'outer))
   (catch (any? c) (record 'caught)))
 (check 'cleanup-order '(caught outer inner) events)
-(check 'cleanup-value 7 (unwind-protect 7 (record 'normal)))
-(check 'cleanup-empty 8 (unwind-protect 8))
+(check 'cleanup-value
+       7
+       (unwind-protect
+         7
+         (record 'normal)))
+(check 'cleanup-empty
+       8
+       (unwind-protect
+         8))
 (check 'defer-value
        9
        (defer
@@ -193,17 +208,25 @@
 (check 'cleanup-replaces-error
        'cleanup
        (try
-         (unwind-protect (error 'original) (error 'cleanup))
+         (unwind-protect
+           (error 'original)
+           (error 'cleanup))
          (catch (any? c) c)))
 (check 'cleanup-replaces-restart
        'cleanup
        (try
-         (restart-case (unwind-protect (invoke-restart 'give) (error 'cleanup)) (give () 'wrong))
+         (restart-case (unwind-protect
+                         (invoke-restart 'give)
+                         (error 'cleanup))
+           (give () 'wrong))
          (catch (any? c) c)))
 (set! events '())
 (check 'restart-cleanup
        5
-       (restart-case (unwind-protect (invoke-restart 'give 5) (record 'cleaned)) (give (v) (record 'clause) v)))
+       (restart-case (unwind-protect
+                       (invoke-restart 'give 5)
+                       (record 'cleaned))
+         (give (v) (record 'clause) v)))
 (check 'restart-cleanup-order '(clause cleaned) events)
 
 (define-condition 'file-error 'error)

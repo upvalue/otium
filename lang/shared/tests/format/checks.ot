@@ -87,6 +87,27 @@
 
 (check "(with-thing a\n  (b)\n  (c))\n" (format/format-text "(with-thing a (b) (c))" rules))
 
+(formats "(otium.cli/compile '(command app))" "(otium.cli/compile\n  '(command app))\n")
+(for-each (fn (import)
+            (formats (string-append import "\n(cli/compile '(command app))")
+                     (string-append import "\n(cli/compile\n  '(command app))\n")))
+          '("(require (otium.cli :as cli))"
+            "(require otium.cli :as cli)"
+            "(require '(otium.cli :as cli))"
+            "(require (quote (otium.cli :as cli)))"
+            "(ns app (:require (otium.cli :as cli)))"))
+(formats "(cli/compile x)\n(require (otium.cli :as cli))\n(cli/compile x)\n(ns other)\n(cli/compile x)\n(ns user)\n(cli/compile x)"
+         "(cli/compile x)\n(require (otium.cli :as cli))\n(cli/compile\n  x)\n(ns other)\n(cli/compile x)\n(ns user)\n(cli/compile\n  x)\n")
+(formats "(require (otium.cli :as cli))\n(require (other :as cli))\n(cli/compile x)"
+         "(require (otium.cli :as cli))\n(require (other :as cli))\n(cli/compile x)\n")
+(formats "'(require (otium.cli :as cli))\n(cli/compile x)" "'(require (otium.cli :as cli))\n(cli/compile x)\n")
+(check "(require (custom :as c))\n(c/body\n  x)\n"
+       (format/format-text "(require (custom :as c))\n(c/body x)"
+                           (format/project-rules "(format (like unwind-protect custom/body))")))
+(check "(require (otium.cli :as cli))\n(cli/compile x)\n"
+       (format/format-text "(require (otium.cli :as cli))\n(cli/compile x)"
+                           (format/project-rules "(format (like begin cli/compile))")))
+
 (def (warnings text)
   (map (fn (w) (list (w :line) (w :column) (w :rule) (w :message))) (lint/lint-text text)))
 

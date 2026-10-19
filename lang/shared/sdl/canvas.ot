@@ -97,7 +97,9 @@
 
 (def (capture! path)
   (let ((surface (sdl-pointer (SDL_RenderReadPixels sdl-renderer ffi/null))))
-    (unwind-protect (sdl-check (SDL_SaveBMP surface path)) (SDL_DestroySurface surface))))
+    (unwind-protect
+      (sdl-check (SDL_SaveBMP surface path))
+      (SDL_DestroySurface surface))))
 
 (def (seconds)
   (/ (SDL_GetTicksNS) 1000000000.0))

@@ -56,16 +56,26 @@
 
 ; unwind-protect: cleanups run inner-first while unwinding to a catch
 (try
-  (unwind-protect (unwind-protect (error "unwinding") (println "cleanup-inner")) (println "cleanup-outer"))
+  (unwind-protect
+    (unwind-protect
+      (error "unwinding")
+      (println "cleanup-inner"))
+    (println "cleanup-outer"))
   (catch (error? e) (println "after-cleanups:" (condition-message e))))
 
 ; unwind-protect returns the protected value on the normal path
-(println "unwind-value:" (unwind-protect 7 (println "cleanup-normal")))
+(println "unwind-value:"
+         (unwind-protect
+           7
+           (println "cleanup-normal")))
 
 ; cleanups also run when a restart unwinds past them
 (println "restart-thru-cleanup:"
          (handler-bind (((type-pred 'error) (fn (c) (invoke-restart 'give 5))))
-           (restart-case (unwind-protect (error "x") (println "cleanup-restart")) (give (v) v))))
+           (restart-case (unwind-protect
+                           (error "x")
+                           (println "cleanup-restart"))
+             (give (v) v))))
 
 ; define-condition hierarchy + condition-of-type? + type-pred
 (define-condition 'file-error 'error)

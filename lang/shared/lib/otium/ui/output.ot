@@ -13,5 +13,6 @@
 (def (write-text! path text)
   (let ((file (fopen path "wb")))
     (when (ffi/null? file) (error "Cannot open output file" path))
-    (unwind-protect (when (< (fputs text file) 0) (error "Cannot write output file" path))
-                    (when (not (= (fclose file) 0)) (error "Cannot close output file" path)))))
+    (unwind-protect
+      (when (< (fputs text file) 0) (error "Cannot write output file" path))
+      (when (not (= (fclose file) 0)) (error "Cannot close output file" path)))))

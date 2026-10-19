@@ -23,6 +23,7 @@ parameter list, :always to always break any body, or :never."
     (put! rules "defmacro" (rule 2 :always))
     (put! rules "dotimes" (rule 1 :always))
     (put! rules "unwind-protect" (rule 0 :always))
+    (put! rules "otium.cli/compile" (rule 0 :always))
     (for-each (fn (name) (put! rules name (rule 1 :never)))
               '("defonce"
                 "defparam"
@@ -91,7 +92,7 @@ parameter list, :always to always break any body, or :never."
     (else (cons (list (car nodes)) (units (cdr nodes) pair-all?)))))
 
 (def- (rule-for node rules)
-  (let ((name (syntax/head-name node))) (and name (get rules name))))
+  (let ((name (syntax/head-name node))) (and name (or (get rules name) (get rules (get node :resolved-head name))))))
 
 (def- (header-count node rule)
   ;; A named let keeps its name and bindings beside the head.
@@ -257,10 +258,64 @@ except that a comment on the same source line as the previous unit stays there."
       "\n\n"
       "\n"))
 
+(def- (unquote-node node)
+  (cond
+    ((and (eq? (node :kind) :prefix) (equal? (node :text) "'")) (node :child))
+    ((and (equal? (syntax/head-name node) "quote") (= (length (syntax/forms node)) 2)) (second (syntax/forms node)))
+    (else node)))
+
+(def- (require-aliases! args aliases)
+  (def (spec! parts)
+    (when (and (pair? parts) (eq? ((car parts) :kind) :atom))
+      (let ((target ((car parts) :text))
+            (options (cdr parts)))
+        (while (pair? options)
+          (when (and (equal? ((car options) :text) ":as") (pair? (cdr options)) (eq? ((cadr options) :kind) :atom))
+            (put! aliases ((cadr options) :text) target))
+          (set! options (cdr options))))))
+  (if (and (pair? args) (eq? ((car args) :kind) :atom) (pair? (cdr args)) (keyword-node? (cadr args)))
+      (spec! args)
+      (for-each (fn (arg) (let ((spec (unquote-node arg))) (when (eq? (spec :kind) :list) (spec! (syntax/forms spec)))))
+                args)))
+
+(def- (resolve-heads! nodes)
+  ;; Imports are read as syntax, without loading the namespaces they name.
+  (let ((spaces {})
+        (aliases {}))
+    (put! spaces "user" aliases)
+    (def (visit! node)
+      (let ((head (syntax/head-name node)))
+        (cond
+          ((equal? head "begin") (for-each visit! (cdr (syntax/forms node))))
+          ((equal? head "ns")
+           (let ((args (cdr (syntax/forms node))))
+             (when (pair? args)
+               (let ((name ((car args) :text)))
+                 (set! aliases (get spaces name {}))
+                 (put! spaces name aliases))
+               (for-each (fn (clause)
+                           (when (equal? (syntax/head-name clause) ":require")
+                             (require-aliases! (cdr (syntax/forms clause)) aliases)))
+                         (cdr args)))))
+          ((equal? head "require") (require-aliases! (cdr (syntax/forms node)) aliases))
+          (else (syntax/walk node
+                             (fn (child)
+                               (let ((name (syntax/head-name child)))
+                                 (when name
+                                   (let ((parts (string-split name "/")))
+                                     (when (and (= (length parts) 2) (get aliases (first parts)))
+                                       (put! child
+                                             :resolved-head (string-append (get aliases (first parts))
+                                                                           "/"
+                                                                           (second parts)))))))))))))
+    (for-each visit! nodes)))
+
 (def (format-text text rules)
   "Format a whole source file."
   (let ((out "")
-        (previous nil))
+        (previous nil)
+        (nodes (syntax/parse text)))
+    (resolve-heads! nodes)
     (for-each (fn (node)
                 (set! out
                       (cond
@@ -268,7 +323,7 @@ except that a comment on the same source line as the previous unit stays there."
                         ((and (syntax/comment? node) (= (node :newlines) 0)) (string-append out " " (node :text)))
                         (else (string-append out (separator previous node) (render node 0 rules 0)))))
                 (set! previous node))
-              (syntax/parse text))
+              nodes)
     (if (equal? out "")
         ""
         (string-append out "\n"))))

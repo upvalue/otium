@@ -67,29 +67,30 @@
           (if (ffi/null? file)
               (error "Cannot write SDL status")
               #f)
-          (unwind-protect (let ((result (host-fputs (string-append (number->string frames)
-                                                                   " "
-                                                                   (number->string scene-ticks)
-                                                                   " "
-                                                                   (number->string scene-reloads)
-                                                                   " "
-                                                                   (number->string scene-reload-errors)
-                                                                   " "
-                                                                   (number->string scene-render-errors)
-                                                                   " "
-                                                                   (if (ffi/pointer=? window sdl-window)
-                                                                       "1"
-                                                                       "0")
-                                                                   " "
-                                                                   (if (ffi/pointer=? renderer sdl-renderer)
-                                                                       "1"
-                                                                       "0")
-                                                                   "\n")
-                                                    file)))
-                            (if (< result 0)
-                                (error "Cannot write SDL status")
-                                #f))
-                          (host-fclose file)))
+          (unwind-protect
+            (let ((result (host-fputs (string-append (number->string frames)
+                                                     " "
+                                                     (number->string scene-ticks)
+                                                     " "
+                                                     (number->string scene-reloads)
+                                                     " "
+                                                     (number->string scene-reload-errors)
+                                                     " "
+                                                     (number->string scene-render-errors)
+                                                     " "
+                                                     (if (ffi/pointer=? window sdl-window)
+                                                         "1"
+                                                         "0")
+                                                     " "
+                                                     (if (ffi/pointer=? renderer sdl-renderer)
+                                                         "1"
+                                                         "0")
+                                                     "\n")
+                                      file)))
+              (if (< result 0)
+                  (error "Cannot write SDL status")
+                  #f))
+            (host-fclose file)))
         (if (= 0 (host-rename temporary status-path))
             #t
             (error "Cannot publish SDL status")))

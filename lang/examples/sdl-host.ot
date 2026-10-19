@@ -1,51 +1,52 @@
-(unwind-protect (begin
-                  (sdl-open! renderer-name audio-enabled?)
-                  (display "SDL renderer: ")
-                  (display sdl-backend)
-                  (newline)
-                  (if audio-enabled?
-                      (begin
-                        (audio-open!)
-                        (audio-refill!)
-                        (sdl-check (SDL_ResumeAudioStreamDevice sdl-audio)))
-                      #f)
-                  (reload-scene! #t)
-                  (let ((started (seconds))
-                        (window sdl-window)
-                        (renderer sdl-renderer))
-                    (let loop ((frames 0)
-                               (previous started)
-                               (last-poll 0.0))
-                      (let ((now (seconds))
-                            (action (events!)))
-                        (if (eq? action 'quit)
-                            #f
-                            (begin
-                              (if (or (eq? action 'reload) (> (- now last-poll) 0.2))
-                                  (reload-scene! (eq? action 'reload))
-                                  #f)
-                              (render-scene! (- now started) (min 0.1 (- now previous)))
-                              (if audio-enabled?
-                                  (audio-refill!)
-                                  #f)
-                              (if (and capture-path (= (+ frames 1) frame-limit))
-                                  (capture! capture-path)
-                                  #f)
-                              (present!)
-                              (frame-status! (+ frames 1) window renderer)
-                              (if (and inject-error? (= frames 1))
-                                  (error "injected host failure")
-                                  #f)
-                              (if (and (> frame-limit 0) (>= (+ frames 1) frame-limit))
-                                  #f
-                                  (begin
-                                    (SDL_Delay 16)
-                                    (loop (+ frames 1)
-                                          now
-                                          (if (> (- now last-poll) 0.2)
-                                              now
-                                              last-poll))))))))))
-                (sdl-close!))
+(unwind-protect
+  (begin
+    (sdl-open! renderer-name audio-enabled?)
+    (display "SDL renderer: ")
+    (display sdl-backend)
+    (newline)
+    (if audio-enabled?
+        (begin
+          (audio-open!)
+          (audio-refill!)
+          (sdl-check (SDL_ResumeAudioStreamDevice sdl-audio)))
+        #f)
+    (reload-scene! #t)
+    (let ((started (seconds))
+          (window sdl-window)
+          (renderer sdl-renderer))
+      (let loop ((frames 0)
+                 (previous started)
+                 (last-poll 0.0))
+        (let ((now (seconds))
+              (action (events!)))
+          (if (eq? action 'quit)
+              #f
+              (begin
+                (if (or (eq? action 'reload) (> (- now last-poll) 0.2))
+                    (reload-scene! (eq? action 'reload))
+                    #f)
+                (render-scene! (- now started) (min 0.1 (- now previous)))
+                (if audio-enabled?
+                    (audio-refill!)
+                    #f)
+                (if (and capture-path (= (+ frames 1) frame-limit))
+                    (capture! capture-path)
+                    #f)
+                (present!)
+                (frame-status! (+ frames 1) window renderer)
+                (if (and inject-error? (= frames 1))
+                    (error "injected host failure")
+                    #f)
+                (if (and (> frame-limit 0) (>= (+ frames 1) frame-limit))
+                    #f
+                    (begin
+                      (SDL_Delay 16)
+                      (loop (+ frames 1)
+                            now
+                            (if (> (- now last-poll) 0.2)
+                                now
+                                last-poll))))))))))
+  (sdl-close!))
 (display "Closed SDL; reloads ")
 (display scene-reloads)
 (display "; reload errors ")

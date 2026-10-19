@@ -47,6 +47,15 @@ A project can lay out its own macros like a built-in form:
 (format (like when with-slots) (like let match-let))
 ```
 
+Rules can use fully qualified names, for example
+`(format (like unwind-protect my.library/body))`. The formatter resolves explicit
+`:as` aliases in top-level `require` forms and `ns` require clauses, in source
+order and separately for each namespace. It also follows top-level `begin`
+forms. It does not load libraries, expand macros, or resolve `:refer` imports.
+A rule for the literal name in the source takes precedence over an alias rule.
+`otium.cli/compile` has a built-in rule that always starts its arguments on the
+next line, indented by two spaces.
+
 Don't use strings in the `format` entry. Launchers read every string in
 `project.ot` as a load path.
 

@@ -65,7 +65,9 @@
                  (catch (error? e) x))))
            31)))
 (let ((x 0))
-  (unwind-protect (set! x 2) (set! x (+ x 3)))
+  (unwind-protect
+    (set! x 2)
+    (set! x (+ x 3)))
   (println "dynamic-mutation:" x))
 
 (def closure-global 3)

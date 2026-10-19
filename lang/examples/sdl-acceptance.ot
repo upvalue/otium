@@ -8,25 +8,26 @@
 
 (def (check-pixel surface x y expected)
   (let ((channels (ffi/alloc 'u8 4)))
-    (unwind-protect (begin
-                      (sdl-check (SDL_ReadSurfacePixel surface
-                                                       x
-                                                       y
-                                                       channels
-                                                       (ffi/view channels 1 1)
-                                                       (ffi/view channels 2 1)
-                                                       (ffi/view channels 3 1)))
-                      (check expected
-                             (list (ffi/ref channels 'u8 0) (ffi/ref channels 'u8 1) (ffi/ref channels 'u8 2))))
-                    (ffi/free! channels))))
+    (unwind-protect
+      (begin
+        (sdl-check (SDL_ReadSurfacePixel surface
+                                         x
+                                         y
+                                         channels
+                                         (ffi/view channels 1 1)
+                                         (ffi/view channels 2 1)
+                                         (ffi/view channels 3 1)))
+        (check expected (list (ffi/ref channels 'u8 0) (ffi/ref channels 'u8 1) (ffi/ref channels 'u8 2))))
+      (ffi/free! channels))))
 
 (def (check-frame texture background)
   (draw-test-texture! texture)
   (let ((surface (sdl-pointer (SDL_RenderReadPixels sdl-renderer ffi/null))))
-    (unwind-protect (begin
-                      (check-pixel surface 10 10 background)
-                      (check-pixel surface 110 110 '(255 0 255)))
-                    (SDL_DestroySurface surface)))
+    (unwind-protect
+      (begin
+        (check-pixel surface 10 10 background)
+        (check-pixel surface 110 110 '(255 0 255)))
+      (SDL_DestroySurface surface)))
   (if capture-path
       (capture! capture-path)
       #f)
@@ -39,13 +40,14 @@
 
 (def (inject type key)
   (let ((event (ffi/alloc SDL_Event 1)))
-    (unwind-protect (begin
-                      (ffi/field-set! event SDL_Event '(type) type)
-                      (if (= type SDL_EVENT_KEY_DOWN)
-                          (ffi/field-set! event SDL_Event '(key scancode) key)
-                          #f)
-                      (sdl-check (SDL_PushEvent event)))
-                    (ffi/free! event))))
+    (unwind-protect
+      (begin
+        (ffi/field-set! event SDL_Event '(type) type)
+        (if (= type SDL_EVENT_KEY_DOWN)
+            (ffi/field-set! event SDL_Event '(key scancode) key)
+            #f)
+        (sdl-check (SDL_PushEvent event)))
+      (ffi/free! event))))
 
 (def saved-window ffi/null)
 
@@ -60,68 +62,70 @@
 (def injected-caught? #f)
 
 (try
-  (unwind-protect (begin
-                    (sdl-open! renderer-name audio-enabled?)
-                    (display "SDL renderer: ")
-                    (display sdl-backend)
-                    (newline)
-                    (set! saved-window sdl-window)
-                    (set! saved-renderer sdl-renderer)
-                    (set! saved-texture (make-test-texture!))
-                    (if audio-enabled?
-                        (begin
-                          (audio-open!)
-                          (set! saved-audio sdl-audio)
-                          (audio-refill!)
-                          (check 9600 (SDL_GetAudioStreamQueued sdl-audio))
-                          (sdl-check (SDL_ResumeAudioStreamDevice sdl-audio))
-                          (SDL_Delay 200)
-                          (check #t (< (SDL_GetAudioStreamQueued sdl-audio) 9600))
-                          (let refill ((n 0))
-                            (if (= n 20)
-                                #f
-                                (begin
-                                  (audio-refill!)
-                                  (refill (+ n 1)))))
-                          (check #t (<= (SDL_GetAudioStreamQueued sdl-audio) 28800)))
-                        #f)
-                    (eval '(def (acceptance-draw)
-                             (clear! 20 40 60)))
-                    (acceptance-draw)
-                    (check-frame saved-texture '(20 40 60))
-                    ;; A new drawing definition is evaluated between frames in the same
-                    ;; namespace; the session and all saved foreign resources remain live.
-                    (eval '(def (acceptance-draw)
-                             (clear! 70 90 110)))
-                    (check #t (ffi/pointer=? saved-window sdl-window))
-                    (check #t (ffi/pointer=? saved-renderer sdl-renderer))
-                    (check #t (ffi/pointer=? saved-audio sdl-audio))
-                    (check (SDL_GetVersion) (saved-version))
-                    (acceptance-draw)
-                    (check-frame saved-texture '(70 90 110))
-                    (drain-events!)
-                    (inject SDL_EVENT_KEY_DOWN SDL_SCANCODE_R)
-                    (check 'reload (events!))
-                    (inject SDL_EVENT_KEY_DOWN SDL_SCANCODE_ESCAPE)
-                    (check 'quit (events!))
-                    (inject SDL_EVENT_WINDOW_CLOSE_REQUESTED 0)
-                    (check 'quit (events!))
-                    (inject SDL_EVENT_QUIT 0)
-                    (check 'quit (events!))
-                    (let ((event (ffi/alloc SDL_Event 1)))
-                      (unwind-protect (begin
-                                        (ffi/field-set! event SDL_Event '(type) SDL_EVENT_MOUSE_MOTION)
-                                        (ffi/field-set! event SDL_Event '(motion x) 12.5)
-                                        (ffi/field-set! event SDL_Event '(motion y) 42.25)
-                                        (sdl-check (SDL_PushEvent event))
-                                        (let ((result (poll-event)))
-                                          (check 'motion (car result))
-                                          (check '(12.5 42.25) (cdr (cdr (cdr result))))))
-                                      (ffi/free! event)))
-                    (if inject-error?
-                        (error 'injected-sdl-error)
-                        #f))
-                  (sdl-close!))
+  (unwind-protect
+    (begin
+      (sdl-open! renderer-name audio-enabled?)
+      (display "SDL renderer: ")
+      (display sdl-backend)
+      (newline)
+      (set! saved-window sdl-window)
+      (set! saved-renderer sdl-renderer)
+      (set! saved-texture (make-test-texture!))
+      (if audio-enabled?
+          (begin
+            (audio-open!)
+            (set! saved-audio sdl-audio)
+            (audio-refill!)
+            (check 9600 (SDL_GetAudioStreamQueued sdl-audio))
+            (sdl-check (SDL_ResumeAudioStreamDevice sdl-audio))
+            (SDL_Delay 200)
+            (check #t (< (SDL_GetAudioStreamQueued sdl-audio) 9600))
+            (let refill ((n 0))
+              (if (= n 20)
+                  #f
+                  (begin
+                    (audio-refill!)
+                    (refill (+ n 1)))))
+            (check #t (<= (SDL_GetAudioStreamQueued sdl-audio) 28800)))
+          #f)
+      (eval '(def (acceptance-draw)
+               (clear! 20 40 60)))
+      (acceptance-draw)
+      (check-frame saved-texture '(20 40 60))
+      ;; A new drawing definition is evaluated between frames in the same
+      ;; namespace; the session and all saved foreign resources remain live.
+      (eval '(def (acceptance-draw)
+               (clear! 70 90 110)))
+      (check #t (ffi/pointer=? saved-window sdl-window))
+      (check #t (ffi/pointer=? saved-renderer sdl-renderer))
+      (check #t (ffi/pointer=? saved-audio sdl-audio))
+      (check (SDL_GetVersion) (saved-version))
+      (acceptance-draw)
+      (check-frame saved-texture '(70 90 110))
+      (drain-events!)
+      (inject SDL_EVENT_KEY_DOWN SDL_SCANCODE_R)
+      (check 'reload (events!))
+      (inject SDL_EVENT_KEY_DOWN SDL_SCANCODE_ESCAPE)
+      (check 'quit (events!))
+      (inject SDL_EVENT_WINDOW_CLOSE_REQUESTED 0)
+      (check 'quit (events!))
+      (inject SDL_EVENT_QUIT 0)
+      (check 'quit (events!))
+      (let ((event (ffi/alloc SDL_Event 1)))
+        (unwind-protect
+          (begin
+            (ffi/field-set! event SDL_Event '(type) SDL_EVENT_MOUSE_MOTION)
+            (ffi/field-set! event SDL_Event '(motion x) 12.5)
+            (ffi/field-set! event SDL_Event '(motion y) 42.25)
+            (sdl-check (SDL_PushEvent event))
+            (let ((result (poll-event)))
+              (check 'motion (car result))
+              (check '(12.5 42.25) (cdr (cdr (cdr result))))))
+          (ffi/free! event)))
+      (if inject-error?
+          (error 'injected-sdl-error)
+          #f))
+    (sdl-close!))
   (catch ((fn (c) (eq? c 'injected-sdl-error)) c) (set! injected-caught? #t)))
 (check inject-error? injected-caught?)
 (check 0 (SDL_WasInit 0))

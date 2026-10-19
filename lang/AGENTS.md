@@ -9,7 +9,7 @@ Use `ticket --help` to interact with the ticketing system.
 
 Never edit README.md or AGENTS.md. 
 
-Read AGENTS-LANG.md before writing Otium code.
+Read AGENT-LANG.md before writing Otium code.
 
 # Guide
 

@@ -1,9 +1,0 @@
-<!-- ✨ Playground controls; surrounding documentation lives in docs/playground.md. -->
-<section aria-label="Live Otium editor">
-<div class="toolbar"><label for="example">Example</label><select id="example"></select></div>
-<label for="source">Otium source</label><textarea id="source" spellcheck="false" autocapitalize="off" autocomplete="off" aria-describedby="shortcut"></textarea>
-<div class="toolbar"><button id="run" disabled>Run code</button><button class="secondary" id="stop" disabled>Stop</button><button class="secondary" id="reset">Reset session</button><span class="status" id="status" role="status">Loading runtime…</span></div>
-<p id="shortcut"><small>⌘ / Ctrl + Enter to run. Definitions persist between runs. Stop and Reset discard the session.</small></p>
-<h2>Output</h2><pre class="output" id="output" role="log" aria-live="polite">Starting the C runtime…</pre>
-</section>
-<script is:inline type="module" src="./assets/playground.js"></script>

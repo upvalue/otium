@@ -92,14 +92,14 @@
   (ui/row {:gap 8} (map key-button actions)))
 
 (def (view)
-  (ui/column {:grow 1 :padding 24 :gap 12 :keymap bindings :on-action act!}
-             (ui/label {:size 24} "Calculator")
-             (ui/column {:padding 16 :background 0x202d43ff :radius 12 :gap 4}
-                        (ui/label {:size 13 :color 0x9cabc2ff}
+  (ui/column {:grow 1 :padding 24 :gap 12 :background 0x111418ff :keymap bindings :on-action act!}
+             (ui/label {:size 24 :color 0xe8edf2ff} "Calculator")
+             (ui/column {:padding 16 :background 0x1d252dff :radius 12 :gap 4}
+                        (ui/label {:size 13 :color 0xa1afbaff}
                                   (if (get model :operator)
                                       (str (get model :stored) " " (get model :operator))
                                       "Ready"))
-                        (ui/label {:size 32 :font :mono :wrap #f}
+                        (ui/label {:size 32 :font :mono :wrap #f :color 0xe8edf2ff}
                                   (if (get model :error)
                                       "Cannot divide by zero"
                                       (str (get model :value)))))
@@ -108,5 +108,5 @@
              (key-row '(1 2 3 "-"))
              (key-row '(0 "." "=" "+"))
              (ui/row {:gap 8} (key-button "C") (ui/button {:grow 1 :disabled #t :height 54} "Memory"))
-             (ui/label {:size 13 :color 0x9cabc2ff}
+             (ui/label {:size 13 :color 0xa1afbaff}
                        "Type numbers and operators. Tab selects a button; Space or Enter presses it. Escape clears.")))

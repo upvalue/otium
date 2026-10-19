@@ -1,8 +1,0 @@
-[
-  {"name":"A first expression","source":"(def (square x) (* x x))\n(map square [1 2 3 4 5])","expected":"[1 4 9 16 25]"},
-  {"name":"Live redefinition","source":"(def (greeting) \"hello\")\n(def (welcome) (greeting))\n(def (greeting) \"hello again\")\n(welcome)","expected":"\"hello again\""},
-  {"name":"Tables and keywords","source":"(def person {:name \"Ada\" :language \"Otium\"})\n(put! person :language \"Lisp\")\n(person :language)","expected":"\"Lisp\""},
-  {"name":"A sequence pipeline","source":"(reduce + 0\n  (map (fn (x) (* x x))\n    (filter even? (range 10))))","expected":"120"},
-  {"name":"Recover with a restart","source":"(handler-bind ((error? (fn (problem) (invoke-restart 'use-value 42))))\n  (restart-case (error \"Need a value\")\n    (use-value (value) value)))","expected":"42"},
-  {"name":"Built-in documentation","source":"(describe 'map)","expected":null}
-]

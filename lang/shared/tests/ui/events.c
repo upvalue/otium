@@ -33,3 +33,27 @@ bool otui_test_quit(void) {
   event.type = SDL_EVENT_QUIT;
   return SDL_PushEvent(&event);
 }
+bool otui_test_resize(SDL_Window* window, int width, int height) {
+  if (!SDL_SetWindowSize(window, width, height) || !SDL_SyncWindow(window)) return false;
+  SDL_Event event = {0};
+  event.type = SDL_EVENT_WINDOW_RESIZED;
+  event.window.windowID = SDL_GetWindowID(window);
+  event.window.data1 = width;
+  event.window.data2 = height;
+  return SDL_PushEvent(&event);
+}
+bool otui_test_pointer(SDL_Window* window, float x, float y, bool down) {
+  SDL_Event event = {0};
+  event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+  event.button.windowID = SDL_GetWindowID(window);
+  event.button.button = SDL_BUTTON_LEFT;
+  event.button.x = x;
+  event.button.y = y;
+  return SDL_PushEvent(&event);
+}
+
+// Exercise the no-swapchain path without depending on a window manager's
+// minimize animation or whether it allows background windows to minimize.
+bool otui_test_visible(SDL_Window* window, bool visible) {
+  return (visible ? SDL_ShowWindow(window) : SDL_HideWindow(window)) && SDL_SyncWindow(window);
+}

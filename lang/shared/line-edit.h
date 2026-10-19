@@ -5,6 +5,7 @@
  * NULL means EOF; an interrupted read returns an empty string. */
 const char* ot_line_read(const char* prompt);
 int ot_line_interactive(void);
+void ot_line_set_service(void (*service)(void *), void *userdata);
 int ot_line_interrupted(void);
 void ot_line_close(void);
 

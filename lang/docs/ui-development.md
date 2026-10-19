@@ -161,7 +161,7 @@ are copied before the next poll and only contain fields for that event kind.
 Unknown native kinds are errors. Motion is `:pointer-move`; the input router
 delivers `:pointer-drag` only to a valid captured widget. The demo polls these events,
 reconciles and paints, and delays between interactive frames. It supports one
-fixed-size window; the general window/reload service described in the spec is
+resizable window; the general window/reload service described in the spec is
 still planned.
 
 Named constants use `UPPER_SNAKE_CASE`, including `sdl/INIT_VIDEO`,
@@ -318,6 +318,7 @@ Grapheme-cluster navigation, bidirectional caret placement, word navigation,
 undo/redo, multiline fields and IME composition are not implemented yet. The
 caret is steady rather than blinking, including in deterministic captures.
 
+
 Committed text arrives through SDL text events, separately from key events.
 The host starts/stops SDL text input as focus changes. Headless tests send
 `{:kind :text-input :text "café"}` to `input/keyboard!`. Clipboard key events
@@ -343,3 +344,65 @@ submit-then-type in one frame, history, wheel scrolling, draft restoration,
 selection, horizontal input clipping, C/Chez pixel parity and resource teardown.
 The layout suite also checks that long scrollback does not shrink the heading
 or input field. Empty shaped-text cache hits have a regression check.
+
+### Window resizing
+
+The demo window is resizable. `otium.sdl` exposes `WINDOW_RESIZABLE`,
+`set-window-size`, `get-window-size`, `get-window-size-in-pixels`, and
+`get-window-pixel-density`. The size queries take native integer output pointers.
+
+`native/poll-event` returns `{:kind :resize :width w :height h}` for window
+size or pixel-size changes. Dimensions are in logical window coordinates;
+nonpositive sizes are ignored. SDL distinguishes these from drawable pixels
+([SDL high-DPI guide](https://wiki.libsdl.org/SDL3/README-highdpi)).
+Call `(gpu/resize! tree renderer w h scale)` before routing further pointer
+input. It updates renderer dimensions, lays out the retained tree, and returns
+the effective scale. Widget state and focus survive resizing.
+Scale 0 follows the window's current pixel density. Direct rendering requires
+scale 0; offscreen rendering also accepts an explicit scale. The demo uses
+scale 1 by default in headless mode.
+
+### Direct and offscreen rendering
+
+`(native/gpu-new window width height scale driver)` draws directly into SDL's
+swapchain. SDL owns and resizes these images. Each frame acquires the current
+image and renders into it, with no intermediate target or full-window copy.
+If SDL returns no image while the window is hidden or minimized, drawing is
+skipped until a surface becomes available again.
+
+Pass `#t` as the optional sixth argument to select offscreen rendering at
+initialization. `native/gpu-offscreen?` reports that choice. This mode uses an
+RGBA texture for rendering and blits it to the window when a surface is
+available. It supports captures and explicit render scaling. The demo selects
+it for `--headless`, `--capture`, `--scale` greater than zero, or `--offscreen`.
+The pipeline's pixel format is chosen for the selected mode at initialization.
+
+Direct captures render one frame into a temporary texture with the swapchain's
+pixel format, then blit it to the window. Both rendering modes allocate a
+temporary readback buffer for captures, wait for that frame to finish, save
+the image, and release the temporary storage. Ordinary frames allocate no
+readback storage and submit asynchronously after acquiring the swapchain image.
+See [SDL's swapchain contract](https://wiki.libsdl.org/SDL3/SDL_WaitAndAcquireGPUSwapchainTexture).
+
+There is no application-specific limit on target dimensions. SDL and the GPU
+determine whether an offscreen texture can be allocated; integer representation
+checks prevent overflow before calling SDL. Captures additionally must fit SDL's
+32-bit transfer-buffer size and signed surface dimensions and pitch.
+
+`native/gpu-resize` returns false on invalid dimensions or allocation failure,
+leaving the old dimensions and target usable. `gpu/resize!` raises that error;
+applications that want to recover from allocation failure can use the native
+result before changing their layout. Successful offscreen resizes release the
+old target through SDL, which defers destruction until pending frames finish.
+The pipeline and glyph atlas survive resizing in both modes.
+
+## Live windows and development requests
+
+`ui/open`, `ui/set-view!`, and `ui/run` now own the window lifecycle and event
+loop used by the demo. `ui/windows` exposes handles and retained trees for
+inspection; `ui/tree-data` reports layout and interaction state. `ui/capture!`
+saves the next successful frame without requiring an offscreen window.
+
+Run the demo with `--dev` and connect with `./otium attach`. Frame failures keep
+the window open so a view can be fixed through evaluation or reload. See
+[Development server](dev-server.md) for commands, watchdog behavior, and MCP use.

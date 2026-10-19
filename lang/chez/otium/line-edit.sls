@@ -1,5 +1,5 @@
 (library (otium line-edit)
-  (export line-editor-available? make-line-input-port line-editor-close)
+  (export line-editor-available? make-line-input-port line-editor-close line-editor-service!)
   (import (chezscheme))
 
   (define loaded? #f)
@@ -8,6 +8,14 @@
     (unless loaded?
       (load-shared-object (getenv "OTIUM_LINE_LIBRARY"))
       (set! loaded? #t)))
+  (define service-callback #f)
+  (define (line-editor-service! thunk)
+    (initialize)
+    (when service-callback (unlock-object service-callback))
+    (set! service-callback (foreign-callable (lambda (ignored) (thunk)) (void*) void))
+    (lock-object service-callback)
+    ((foreign-procedure "ot_line_set_service" (void* void*) void)
+      (foreign-callable-entry-point service-callback) 0))
   (define (line-editor-close)
     (when loaded? ((foreign-procedure "ot_line_close" () void))))
 

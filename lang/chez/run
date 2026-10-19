@@ -9,6 +9,16 @@ if [ "${OTIUM_FFI_LIBRARY+x}" != x ]; then
   OTIUM_FFI_LIBRARY="$root/../shared/build/$platform/libotium-ffi.$extension"
   export OTIUM_FFI_LIBRARY
 fi
+for argument do
+  case "$argument" in
+    --) break ;;
+    serve|--dev|--dev=*)
+      OTIUM_DEV_LIBRARY="$root/../shared/build/$platform/libotium-dev.$extension"
+      make -s -C "$root/../shared" "build/$platform/libotium-dev.$extension"
+      export OTIUM_DEV_LIBRARY
+      break ;;
+  esac
+done
 interactive=yes
 explicit_repl=no
 skip=no
@@ -25,7 +35,7 @@ for argument do
   esac
 done
 if [ "$explicit_repl" = yes ]; then interactive=yes; fi
-if [ "$interactive" = yes ] && [ -t 0 ] && [ -t 1 ]; then
+if [ "$interactive" = yes ] && { { [ -t 0 ] && [ -t 1 ]; } || [ "${OTIUM_DEV_LIBRARY+x}" = x ]; }; then
   OTIUM_LINE_LIBRARY="$root/../shared/build/$platform/libotium-line.$extension"
   for source in Makefile line-edit.c line-edit.h vendor/bestline/bestline.c vendor/bestline/bestline.h; do
     if [ ! -f "$OTIUM_LINE_LIBRARY" ] || [ "$root/../shared/$source" -nt "$OTIUM_LINE_LIBRARY" ]; then

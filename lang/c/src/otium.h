@@ -118,6 +118,7 @@ typedef bool (*ot_loader)(void* userdata, const char* namespace_name, char** sou
 typedef enum ot_interrupt_action {
   OT_INTERRUPT_CONTINUE,
   OT_INTERRUPT_ABORT,
+  OT_INTERRUPT_ERROR,
 } ot_interrupt_action;
 typedef ot_interrupt_action (*ot_interrupt_hook)(ots* state, void* userdata);
 typedef void (*ot_ext_finalizer)(ots* state, void* payload);
@@ -631,6 +632,8 @@ struct ot_state {
   void* writer_userdata;
   ot_loader loader;
   void* loader_userdata;
+  bool (*poll_hook)(void*);
+  unsigned dev_poll_count;
   ot_interrupt_hook interrupt_hook;
   void* interrupt_userdata;
   ot_gc_stats stats;
@@ -666,6 +669,9 @@ void ot_register_cli(ots* state);
 void ot_register_ffi(ots* state);
 void ot_destroy_ffi(ots* state);
 void ot_register_demo_extension(ots* state);
+OT_GC_MAY_ALLOCATE void ot_select_namespace(ots* state, const char* name, size_t length);
+OT_GC_MAY_ALLOCATE bool ot_eval_results(ots* state, const char* source, size_t length,
+                                      const char* name, otv* results, size_t* line);
 OT_GC_MAY_ALLOCATE bool ot_eval_partial(ots* state, const char* source, size_t length,
                                         const char* name, size_t* consumed, bool* incomplete,
                                         otv* out);

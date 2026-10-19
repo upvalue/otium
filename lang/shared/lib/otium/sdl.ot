@@ -6,6 +6,8 @@
 
 (def INIT_VIDEO 0x20)
 
+(def WINDOW_RESIZABLE 0x20)
+
 (def WINDOW_HIDDEN 0x8)
 
 (def WINDOW_HIGH_PIXEL_DENSITY 0x2000)
@@ -22,6 +24,14 @@
 
 (def destroy-window nil)
 
+(def set-window-size nil)
+
+(def get-window-size nil)
+
+(def get-window-size-in-pixels nil)
+
+(def get-window-pixel-density nil)
+
 (def pump-events nil)
 
 (def delay nil)
@@ -35,6 +45,10 @@
   (set! was-init (ffi/bind library "SDL_WasInit" '(u32) 'u32))
   (set! set-main-ready (ffi/bind library "SDL_SetMainReady" '() 'void))
   (set! create-window (ffi/bind library "SDL_CreateWindow" '(utf8 int int u64) 'pointer))
+  (set! set-window-size (ffi/bind library "SDL_SetWindowSize" '(pointer int int) 'bool))
+  (set! get-window-size (ffi/bind library "SDL_GetWindowSize" '(pointer pointer pointer) 'bool))
+  (set! get-window-size-in-pixels (ffi/bind library "SDL_GetWindowSizeInPixels" '(pointer pointer pointer) 'bool))
+  (set! get-window-pixel-density (ffi/bind library "SDL_GetWindowPixelDensity" '(pointer) 'float))
   (set! destroy-window (ffi/bind library "SDL_DestroyWindow" '(pointer) 'void))
   (set! delay (ffi/bind library "SDL_Delay" '(u32) 'void))
   (set! pump-events (ffi/bind library "SDL_PumpEvents" '() 'void))

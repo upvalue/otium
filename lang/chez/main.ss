@@ -36,15 +36,17 @@
                     [else (loop (+ i 1) out)])))))
       '()))
 
-(guard (c [(ot:control-condition? c) (exit (ot:control-status c))]
-          [else (display-condition c (current-error-port))
+(guard (c [(ot:control-condition? c) (dev-stop!) (exit (ot:control-status c))]
+          [else (dev-stop!) (display-condition c (current-error-port))
                 (newline (current-error-port)) (exit 1)])
   (let ([script #f] [files '()] [paths '()] [project #f]
-        [no-project #f] [repl? #f])
+        [no-project #f] [repl? #f] [dev-path #f] [watchdog 2000] [serve? #f])
     (let loop ([args (cdr (command-line))])
       (unless (null? args)
         (let ([token (car args)])
           (cond
+            [(and (equal? token "serve") (not script) (not serve?))
+             (set! serve? #t) (unless dev-path (set! dev-path "")) (loop (cdr args))]
             [(equal? token "--")
              (unless script (fail "-- requires a script"))
              (application-arguments (cdr args))]
@@ -65,7 +67,14 @@
                       [attached? (pair? (cdr pieces))]
                       [value (and attached? (substring token (+ 1 (string-length spelling)) (string-length token)))]
                       [rest (cdr args)])
-                 (cond [(eq? kind 'flag)
+                 (cond [(eq? kind 'optional-path) (unless attached? (set! value ""))]
+                       [(eq? kind 'milliseconds)
+                        (unless (and attached? (string->number value)
+                                     (integer? (string->number value))
+                                     (exact? (string->number value))
+                                     (<= 0 (string->number value) 2147483647))
+                          (fail "--dev-watchdog requires =MS (nonnegative integer)"))]
+                       [(eq? kind 'flag)
                         (when attached? (fail (string-append spelling " takes no value")))]
                        [(eq? kind 'integer)
                         (unless attached? (fail (string-append spelling " requires =INTEGER")))
@@ -81,7 +90,9 @@
                           (fail (string-append spelling " requires a " (symbol->string kind))))
                         (set! value (car rest)) (set! rest (cdr rest))])
                  (when (eq? owner 'common)
-                   (cond [(equal? name "help") (display launcher-help) (exit 0)]
+                   (cond [(equal? name "dev") (set! dev-path value)]
+                         [(equal? name "dev-watchdog") (set! watchdog (string->number value))]
+                         [(equal? name "help") (display launcher-help) (exit 0)]
                          [(equal? name "repl") (set! repl? #t)]
                          [(equal? name "path") (set! paths (append paths (list value)))]
                          [(equal? name "project") (set! project value)]
@@ -93,7 +104,17 @@
            [all-paths (append paths environment-paths
                        (if no-project '() (project-paths (or project (find-project)))))])
       (load-path (if (null? all-paths) '(".") all-paths)))
+    (when dev-path
+      (when (equal? dev-path "")
+        (let* ([location (and (not no-project) (or project (find-project)))]
+               [directory (if location (path-parent location) (current-directory))]
+               [folder (string-append directory "/.otium")])
+          (unless (file-exists? folder) (mkdir folder #o700))
+          (set! dev-path (string-append folder "/dev.sock"))))
+      (dev-start! dev-path watchdog))
     (application-script script)
     (for-each load-source files)
     (when script (load-source script))
-    (when (or repl? (and (not script) (null? files))) (repl))))
+    (when serve? (dev-run))
+    (when (or repl? (and (not script) (null? files))) (repl))
+    (dev-stop!)))

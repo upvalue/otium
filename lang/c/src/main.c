@@ -151,6 +151,8 @@ static int run_file(ots* state, const char* path) {
   return 1;
 }
 
+#include "ot-dev.inc"
+
 static void finish_server_response(void) {
   fputs("\x1e"
         "ot> ",
@@ -203,14 +205,17 @@ static ot_interrupt_action run_server_break(ots* state, void* userdata) {
 }
 
 static void run_server(ots* state) {
+  ot_set_writer(state, dev_writer, NULL);
+  otv initialized;
+  const char *initialize = "(require otium.dev)";
+  if (!ot_eval_src(state, initialize, strlen(initialize), "<server>", &initialized)) return;
   bytes request = {0};
   ot_set_interrupt_hook(state, run_server_break, NULL);
   while (read_server_request(&request)) {
     bool stop = false;
     if (request.length != 0) {
       otv result;
-      if (ot_eval_src(state, request.data, request.length, "<server>", &result)) {
-        print_value(state, result, stdout);
+      if (dev_stdio_evaluate(state, request.data, request.length, &result)) {
       } else if (state->vm.unwind_kind == UNWIND_QUIT) {
         stop = state->quit_requested;
         if (!stop) fputs("interrupted\n", stdout);
@@ -338,6 +343,7 @@ static void run_repl(ots* state) {
       "otium repl - ^C interrupts, ^D exits, ^X ^E opens $EDITOR, Tab completes, ,help for help\n",
       stdout);
   bytes pending = {0};
+  if (dev_enabled) ot_line_set_service(dev_idle, state);
   bool interactive = isatty(STDIN_FILENO);
   for (;;) {
     repl_bindings(state);
@@ -497,6 +503,9 @@ int main(int argc, char** argv) {
   strings files = {0};
   bool repl = false;
   bool server = false;
+  bool serve = false;
+  const char *dev_path = NULL;
+  size_t watchdog = 2000;
   bool stats = false;
   bool stats_json = false;
   bool no_project = false;
@@ -512,6 +521,20 @@ int main(int argc, char** argv) {
         return 2;
       }
       break;
+    }
+    if (strcmp(argument, "serve") == 0 && script == NULL && !serve) {
+      serve = true; if (!dev_path) dev_path = ""; continue;
+    }
+    if (strcmp(argument, "--dev") == 0) { dev_path = ""; continue; }
+    if (strncmp(argument, "--dev=", 6) == 0) { dev_path = argument + 6; continue; }
+    if (strcmp(argument, "--dev-watchdog") == 0) {
+      fputs("otium: --dev-watchdog requires =MS\n", stderr); return 2;
+    }
+    if (strncmp(argument, "--dev-watchdog=", 15) == 0) {
+      if (strcmp(argument + 15, "0") == 0) watchdog = 0;
+      else if (!parse_number("dev-watchdog", argument + 15, &watchdog)) return 2;
+      if (watchdog > 2147483647) { fputs("otium: watchdog out of range\n", stderr); return 2; }
+      continue;
     }
     if (argument[0] != '-') {
       if (script != NULL) {
@@ -569,6 +592,9 @@ int main(int argc, char** argv) {
     else if (strcmp(name, "c.max-depth") == 0) config.max_depth = (unsigned)number;
   }
   if (script) strings_push(&files, script, strlen(script));
+  if (dev_path && server) {
+    fputs("otium: --dev and --c.server cannot be used together\n", stderr); return 2;
+  }
   if (repl && server) {
     fputs("otium: --repl and --c.server cannot be used together\n", stderr);
     return 2;
@@ -591,6 +617,18 @@ int main(int argc, char** argv) {
     found_project = project == NULL ? find_project() : NULL;
     add_project_paths(project == NULL ? found_project : project);
   }
+  char default_dev_path[PATH_MAX];
+  if (dev_path && !*dev_path) {
+    const char *location = project ? project : found_project;
+    const char *slash = location ? strrchr(location, '/') : NULL;
+    size_t prefix = slash ? (size_t)(slash - location) : 1;
+    if (prefix + 18 >= sizeof default_dev_path) return 2;
+    memcpy(default_dev_path, slash ? location : ".", prefix);
+    strcpy(default_dev_path + prefix, "/.otium");
+    if (mkdir(default_dev_path, 0700) != 0 && errno != EEXIST) return 2;
+    strcat(default_dev_path, "/dev.sock");
+    dev_path = default_dev_path;
+  }
   ot_host_free(found_project);
   if (load_path.length == 0) strings_push(&load_path, ".", 1);
 
@@ -604,21 +642,27 @@ int main(int argc, char** argv) {
   ot_set_writer(state, stdout_writer, NULL);
   ot_set_loader(state, module_loader, NULL);
   ot_register_demo_extension(state);
+  ot_register_module(state, "otium.dev", dev_module);
   ot_set_arguments(state, script, argc - application_start, argv + application_start);
   struct sigaction action = {0};
   action.sa_handler = handle_interrupt;
   sigaction(SIGINT, &action, NULL);
 
-  int status = 0;
+  int status = dev_path && !dev_start(state, dev_path, watchdog) ? 1 : 0;
   for (size_t i = 0; i < files.length && status == 0 && !state->quit_requested; i++)
     status = run_file(state, files.values[i]);
   if (status == 0 && !state->quit_requested) {
-    if (server) run_server(state);
+    if (serve) {
+      while (!state->quit_requested) { ot_dev_poll(50); dev_service(state); }
+    }
+    else if (server) run_server(state);
     else if (repl || files.length == 0) run_repl(state);
   }
   if (stats) print_gc_stats(state);
   if (stats_json) print_gc_stats_json(state);
   if (state->quit_requested) status = state->quit_status;
+  ot_dev_close();
+  ot_host_free(dev_output.data);
   ot_destroy(state);
   signal_state = NULL;
   for (size_t i = 0; i < files.length; i++) ot_host_free(files.values[i]);

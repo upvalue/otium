@@ -25,14 +25,17 @@
               (flag headless
                     (names "--headless")
                     (help "Render without showing a window, then exit; requires an SDL GPU backend."))
+              (flag offscreen
+                    (names "--offscreen")
+                    (help "Use a separate render target; implied by headless, capture, or explicit scale."))
               (option frames
                       (names "--frames")
                       (type integer)
                       (range 1 10000)
                       (default 1)
                       (help "Frame count in headless mode."))
-              (option width (names "--width") (type integer) (range 1 4096) (default 640))
-              (option height (names "--height") (type integer) (range 1 4096) (default 480))
+              (option width (names "--width") (type integer) (range 1 2147483647) (default 640))
+              (option height (names "--height") (type integer) (range 1 2147483647) (default 480))
               (option scale
                       (names "--scale")
                       (type integer)
@@ -114,118 +117,88 @@
         (frames (cli/ref args 'frames))
         (headless (cli/ref args 'headless))
         (capture (cli/ref args 'capture))
-        (dump (cli/ref args 'dump-state)))
-    (when (> (* (max width height) scale) 4096) (error "Physical dimensions must not exceed 4096"))
+        (dump (cli/ref args 'dump-state))
+        (nodes "[]")
+        (primitives 0)
+        (frame 0)
+        (backend "")
+        (context {})
+        (step! (if (equal? (cli/ref args 'script) "")
+                   (fn (tree frame context) nil)
+                   (module-function (cli/ref args 'script) "step!"))))
     (unless (or (equal? capture "") (ends-with? capture ".png") (ends-with? capture ".bmp"))
       (error "Capture must end in .png or .bmp"))
-    (let ((settings (native/load-config! (cli/ref args 'config)))) (sdl/load! (native/config-ref settings 'sdl)))
-    (let ((view (module-function (cli/ref args 'scene) "view"))
-          (step! (if (equal? (cli/ref args 'script) "")
-                     (fn (tree frame context) nil)
-                     (module-function (cli/ref args 'script) "step!")))
-          (tree (ui/root))
-          (pointer (input/pointer))
-          (window ffi/null)
-          (renderer ffi/null)
-          (nodes "[]")
-          (backend "")
-          (primitives 0)
-          (frame 0)
-          (running #t)
-          (cleanups [])
-          (context {}))
-      (unwind-protect
-        (begin
-          (sdl/set-main-ready)
-          (gpu/configure-app! {:name (cli/ref args 'app-name)
-                               :version (cli/ref args 'app-version)
-                               :id (cli/ref args 'app-id)
-                               :background (or headless (cli/ref args 'background))})
-          (sdl/check (sdl/init sdl/INIT_VIDEO))
-          (set! window
-                (sdl/pointer (sdl/create-window (cli/ref args 'title)
-                                                width
-                                                height
-                                                (+ sdl/WINDOW_HIGH_PIXEL_DENSITY
-                                                   (if headless
-                                                       sdl/WINDOW_HIDDEN
-                                                       0)))))
-          (set! renderer
-                (sdl/pointer (native/gpu-new window
-                                             width
-                                             height
-                                             (if (and headless (= scale 0))
-                                                 1
-                                                 scale)
-                                             (cli/ref args 'driver))))
-          (set! context {:window window :renderer renderer :on-cleanup (fn (cleanup) (push! cleanups cleanup))})
-          (set! scale (native/gpu-scale renderer))
-          (gpu/present-window! window
-                               {:icon (cli/ref args 'icon) :foreground (not (or headless (cli/ref args 'background)))})
-          (set! backend (native/gpu-driver renderer))
-          (println "UI-BACKEND" backend)
-          (sync-view! tree view renderer)
-          (while (and running (or (not headless) (< frame frames)))
-            (let poll ((event (native/poll-event renderer)))
-              (when event
-                (let ((kind (get event :kind)))
-                  (cond
-                    ((eq? kind :quit) (set! running #f))
-                    ((eq? kind :focus-lost) (input/cancel! pointer) (input/keyboard! tree event))
-                    ((memq kind '(:key-down :key-up :text-input))
-                     (input/keyboard! tree
-                                      (put (put event :clipboard-read (fn () (native/clipboard-get renderer)))
-                                           :clipboard-write (fn (text) (sdl/check (native/clipboard-set text))))))
-                    ((memq kind '(:pointer-down :pointer-up :pointer-move :wheel)) (input/dispatch! pointer tree event))
-                    (else (error "Unhandled UI event" kind))))
-                (when running
-                  (sync-view! tree view renderer)
-                  (poll (native/poll-event renderer)))))
-            (when running
-              (step! tree frame context)
-              (sync-view! tree view renderer)
-              (gpu/layout! tree width height scale)
-              (gpu/paint! tree renderer width height 0x101827ff)
-              (when (cli/ref args 'inject-error) (error "injected UI failure"))
-              (sdl/check (native/gpu-frame renderer
-                                           (if (and headless (= frame (- frames 1)))
-                                               capture
-                                               "")))
-              (set! frame (+ frame 1))
-              (unless headless (sdl/delay 16))))
-          (when (and (or (not headless) (< frame frames)) (> frame 0) (not (equal? capture "")))
-            (sdl/check (native/gpu-frame renderer capture)))
-          (set! nodes (tree-json tree))
-          (set! primitives (native/gpu-count renderer))
-          (println "UI-FRAMES" frame)
-          (println "UI-PRIMITIVES" primitives))
-        (begin
-          (ui/dispose! tree)
-          (unless (ffi/null? renderer) (native/gpu-free renderer))
-          (unless (ffi/null? window) (sdl/destroy-window window))
-          (sdl/quit)
-          (for-each (fn (cleanup) (cleanup)) cleanups)
-          (println "UI-CLEANUP" (native/live-nodes) (native/live-renderers) (ffi/allocation-count) (sdl/was-init 0))))
-      (unless (= 0 (native/text-resources)) (error "UI text resources remain after cleanup"))
-      (unless (= 0 (+ (native/live-nodes) (native/live-renderers) (ffi/allocation-count) (sdl/was-init 0)))
-        (error "UI resources remain after cleanup"))
-      (unless (equal? dump "")
-        (output/write-text! dump
-                            (str "{\"width\":"
-                                 width
-                                 ",\"height\":"
-                                 height
-                                 ",\"scale\":"
-                                 scale
-                                 ",\"backend\":\""
-                                 backend
-                                 "\",\"frames\":"
-                                 frame
-                                 ",\"primitives\":"
-                                 primitives
-                                 ",\"nodes\":"
-                                 nodes
-                                 ",\"remaining_resources\":[0,0,0,0]}\n")))
-      0)))
+    (unwind-protect
+      (let ((window (ui/open {:title (cli/ref args 'title)
+                              :width width
+                              :height height
+                              :scale scale
+                              :config (cli/ref args 'config)
+                              :headless headless
+                              :driver (cli/ref args 'driver)
+                              :offscreen (or headless (cli/ref args 'offscreen) (not (equal? capture "")))
+                              :app-name (cli/ref args 'app-name)
+                              :app-id (cli/ref args 'app-id)
+                              :app-version (cli/ref args 'app-version)
+                              :icon (cli/ref args 'icon)
+                              :background (cli/ref args 'background)
+                              :fail-fast? (or headless (cli/ref args 'inject-error))
+                              :step! (fn (window)
+                                       (step! (get window :tree) (get window :frame) context)
+                                       (when (cli/ref args 'inject-error) (error "injected UI failure"))
+                                       (when (and headless (= (get window :frame) (- frames 1)))
+                                         (ui/capture! window capture)))
+                              :after-frame! (fn (window)
+                                              (when (and headless (>= (get window :frame) frames)) (ui/close! window)))
+                              :before-close! (fn (window)
+                                               (set! width (get window :width))
+                                               (set! height (get window :height))
+                                               (set! scale (get window :scale))
+                                               (set! frame (get window :frame))
+                                               (set! nodes (tree-json (get window :tree)))
+                                               (set! primitives (native/gpu-count (get window :renderer)))
+                                               (when (and (or (not headless) (< frame frames))
+                                                          (> frame 0)
+                                                          (not (equal? capture "")))
+                                                 (sdl/check (native/gpu-frame (get window :renderer) capture))))})))
+        (set! context
+              {:window (get window :window)
+               :renderer (get window :renderer)
+               :on-cleanup (fn (cleanup) (push! (get window :cleanups) cleanup))})
+        (set! backend (native/gpu-driver (get window :renderer)))
+        (println "UI-BACKEND" backend)
+        (println "UI-RENDER-MODE"
+                 (if (native/gpu-offscreen? (get window :renderer))
+                     "offscreen"
+                     "direct"))
+        (ui/set-view! window (fn () ((module-function (cli/ref args 'scene) "view"))))
+        (unwind-protect
+          (begin
+            (ui/run)
+            (println "UI-FRAMES" frame)
+            (println "UI-PRIMITIVES" primitives))
+          (ui/close! window)))
+      (println "UI-CLEANUP" (native/live-nodes) (native/live-renderers) (ffi/allocation-count) (sdl/was-init 0)))
+    (unless (= 0 (native/text-resources)) (error "UI text resources remain after cleanup"))
+    (unless (= 0 (+ (native/live-nodes) (native/live-renderers) (ffi/allocation-count) (sdl/was-init 0)))
+      (error "UI resources remain after cleanup"))
+    (unless (equal? dump "")
+      (output/write-text! dump
+                          (str "{\"width\":"
+                               width
+                               ",\"height\":"
+                               height
+                               ",\"scale\":"
+                               scale
+                               ",\"backend\":\""
+                               backend
+                               "\",\"frames\":"
+                               frame
+                               ",\"primitives\":"
+                               primitives
+                               ",\"nodes\":"
+                               nodes
+                               ",\"remaining_resources\":[0,0,0,0]}\n")))
+    0))
 
 (cli/run command main)

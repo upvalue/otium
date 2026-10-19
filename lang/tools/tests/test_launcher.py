@@ -30,7 +30,8 @@ class LauncherTests(unittest.TestCase):
         return json.loads(result.stdout) if status == 0 else result.stderr
 
     def test_default_and_both_selector_forms(self):
-        self.assertEqual(self.run_launcher(), ['c', []])
+        self.assertEqual(self.run_launcher(), ['chez', []])
+        self.assertEqual(self.run_launcher('--runtime=c', 'x.ot'), ['c', ['x.ot']])
         self.assertEqual(self.run_launcher('--runtime=chez', 'x.ot'), ['chez', ['x.ot']])
         self.assertEqual(self.run_launcher('x.ot', '--runtime', 'chez'), ['chez', ['x.ot']])
 
@@ -47,7 +48,7 @@ class LauncherTests(unittest.TestCase):
     def test_option_values_are_not_selectors(self):
         for option in ('--path', '-L', '--project', '--load'):
             args = [option, '--runtime=chez', 'x.ot']
-            self.assertEqual(self.run_launcher(*args), ['c', args])
+            self.assertEqual(self.run_launcher(*args), ['chez', args])
 
     def test_invalid_selector(self):
         for args in [('--runtime',), ('--runtime=',), ('--runtime=bad',), ('--runtime', 'bad')]:

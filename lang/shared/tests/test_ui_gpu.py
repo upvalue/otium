@@ -69,6 +69,36 @@ for runtime in runtimes(args.runtime):
     sw, sh, scaled_rows = runner.bmp_pixels(scaled)
     assert (sw, sh) == (960, 640)
     assert pixel(scaled_rows, 100, 100) == (103, 217, 192), 'Logical-to-physical scale differs'
+    for density in (1, 2):
+        resized = artifacts/f'{runtime}-resize-{density}.bmp'
+        resized_state = artifacts/f'{runtime}-resize-{density}.json'
+        result = launch(runtime, '--scene', 'ui.resize', '--script', 'ui.resize',
+                        '--frames', 4, '--scale', density, '--capture', resized,
+                        '--dump-state', resized_state)
+        passed(result)
+        assert 'UI-RESIZE layout, input and identity passed' in result.stdout
+        assert runner.bmp_pixels(resized)[:2] == (480*density, 300*density)
+        resize_data = json.loads(resized_state.read_text())
+        assert (resize_data['width'], resize_data['height']) == (480, 300)
+        assert resize_data['remaining_resources'] == [0, 0, 0, 0]
+    direct_state = artifacts/(runtime+'-direct.json')
+    direct = launch(runtime, '--scene', 'ui.resize', '--script', 'ui.resize',
+                    '--background', '--dump-state', direct_state, headless=False)
+    passed(direct)
+    assert 'UI-RENDER-MODE direct' in direct.stdout, direct.stdout
+    assert 'UI-RESIZE layout, input and identity passed' in direct.stdout
+    assert json.loads(direct_state.read_text())['width'] == 480
+    for headless in (True, False):
+        contract = launch(runtime, '--script', 'ui.renderer-contract', '--background', headless=headless)
+        passed(contract)
+        assert 'UI-RENDERER target contract passed' in contract.stdout
+        mode = 'offscreen' if headless else 'direct'
+        assert 'UI-RENDER-MODE ' + mode in contract.stdout
+    _, _, direct_rows = runner.bmp_pixels(artifacts/'direct-capture.bmp')
+    assert pixel(direct_rows, 0, 0) == (103, 217, 192)
+    lw, lh, large_rows = runner.bmp_pixels(artifacts/'large-target.bmp')
+    assert (lw, lh) == (5000, 32)
+    assert pixel(large_rows, 4999, 31) == (103, 217, 192)
     probe = artifacts/(runtime+'-probe.bmp')
     passed(launch(runtime, '--scene', 'ui.paint', '--width', 160,
                   '--height', 160, '--capture', probe))

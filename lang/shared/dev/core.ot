@@ -1,0 +1,174 @@
+(defonce pending '())
+
+(defonce paused? #f)
+
+(defonce action #f)
+
+(defonce started 0)
+
+(defonce watchdog 2000)
+
+(defonce revision 0)
+
+(def (enabled?)
+  (%enabled?))
+
+(def (event! event)
+  (when (enabled?) (%send 0 (%repr event))))
+
+(def- (reply! client value)
+  (if (= client -1)
+      (begin
+        (display (get value :output ""))
+        (if (get value :ok)
+            (println (get value :value))
+            (println "error:" (get value :condition))))
+      (%send client (%repr value))))
+
+(def- (any? c)
+  #t)
+
+(def- (condition-data c)
+  (if (table? c)
+      {:type (get c :type 'error)
+       :message (get c :message "error")
+       :irritants (get c :irritants (get c :data '()))
+       :source (get c :source #f)}
+      {:type 'error :message (%repr c) :irritants '()}))
+
+(def- (decode-data form)
+  (cond
+    ((and (pair? form) (eq? (car form) 'table)) (apply table (map decode-data (cdr form))))
+    ((and (pair? form) (eq? (car form) 'array)) (apply array (map decode-data (cdr form))))
+    ((pair? form) (cons (decode-data (car form)) (decode-data (cdr form))))
+    (else form)))
+
+(def- (receive!)
+  (%poll 0)
+  (let loop ((text (%next)))
+    (when text
+      (let ((client (%client)))
+        (try
+          (let ((request (decode-data (read-string text))))
+            (unless (and (table? request) (get request :op) (not (eq? (get request :id '%missing) '%missing)))
+              (error "expected a request table with :id and :op"))
+            (set! pending (append pending (list (list client request)))))
+          (catch (any? c) (reply! client {:id #f :ok #f :condition (condition-data c) :output ""}))))
+      (loop (%next)))))
+
+(def (begin!)
+  (set! started (%clock))
+  (%deadline (if (= watchdog 0)
+                 0
+                 (+ started watchdog))))
+
+(def (end!)
+  (%deadline 0))
+
+(def- (handle! client request)
+  (let ((id (get request :id #f))
+        (op (get request :op)))
+    (try
+      (cond
+        ((or (eq? op :eval) (eq? op :load))
+         (let ((old-start started)
+               (deadline (%deadline -1))
+               (code (if (eq? op :load)
+                         (read-file (get request :path))
+                         (get request :code)))
+               (space (get request :ns "user")))
+           (begin!)
+           (unwind-protect
+             (let ((result (%evaluate code
+                                      space
+                                      (if (eq? op :load)
+                                          (get request :path)
+                                          "<dev>"))))
+               (set! revision (+ revision 1))
+               (reply! client
+                       (if (get result :ok)
+                           {:id id
+                            :ok #t
+                            :value (get result :value)
+                            :values (get result :values)
+                            :output (get result :output)}
+                           {:id id
+                            :ok #f
+                            :condition (condition-data (get result :condition))
+                            :output (get result :output)})))
+             (set! started old-start)
+             (%deadline deadline))))
+        ((eq? op :status)
+         (reply! client
+                 {:id id
+                  :ok #t
+                  :value (if paused?
+                             "paused"
+                             "running")
+                  :output ""}))
+        ((eq? op :interrupt) (reply! client {:id id :ok #t :value "nil" :output ""}))
+        ((or (eq? op :continue) (eq? op :abort))
+         (unless paused? (error "program is not paused"))
+         (set! action op)
+         (reply! client {:id id :ok #t :value "nil" :output ""}))
+        (else (error "unknown dev operation" op)))
+      (catch (any? c) (reply! client {:id id :ok #f :condition (condition-data c) :output ""})))))
+
+(def- (serve-one!)
+  (let ((entry (car pending)))
+    (set! pending (cdr pending))
+    (handle! (car entry) (cadr entry))))
+
+(def (service!)
+  (when (and (enabled?) (not paused?))
+    (receive!)
+    (let loop ()
+      (unless (null? pending)
+        (serve-one!)
+        (loop)))))
+
+(def (break! force? space)
+  (receive!)
+  (let ((previous-paused paused?)
+        (previous-action action)
+        (interrupt? (exists (fn (entry) (eq? (get (cadr entry) :op) :interrupt)) pending))
+        (expired? (and (> (%deadline -1) 0) (>= (%clock) (%deadline -1)))))
+    (if (or force? interrupt? expired?)
+        (begin
+          (set! paused? #t)
+          (set! action #f)
+          (end!)
+          (event! {:event :paused
+                   :reason (if (or force? interrupt?)
+                               :interrupt
+                               :watchdog)
+                   :elapsed-ms (- (%clock) started)
+                   :ns space})
+          (let loop ()
+            (unless action
+              (if (null? pending)
+                  (begin
+                    (%poll 50)
+                    (receive!))
+                  (serve-one!))
+              (loop)))
+          (set! paused? previous-paused)
+          (event! {:event :resumed})
+          (begin!)
+          (let ((abort? (eq? action :abort)))
+            (set! action previous-action)
+            abort?))
+        #f)))
+
+(def (run)
+  (let loop ()
+    (%poll 50)
+    (service!)
+    (loop)))
+
+(def (frame-error! c)
+  (event! {:event :frame-error :condition (condition-data c)})
+  (println c))
+
+(def (stdio! code)
+  (handle! -1 {:id 0 :op :eval :code code :ns "user"}))

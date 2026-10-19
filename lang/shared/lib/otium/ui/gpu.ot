@@ -16,6 +16,13 @@
   "Install a PNG/BMP icon and optionally request foreground focus."
   (sdl/check (native/window-present window (get options :icon "") (get options :foreground #t))))
 
+(def (resize! tree renderer width height scale)
+  "Update renderer dimensions and relayout retained widgets; direct rendering requires scale 0."
+  (sdl/check (native/gpu-resize renderer width height scale))
+  (let ((scale (native/gpu-scale renderer)))
+    (layout! tree width height scale)
+    scale))
+
 (def- (allocate-node)
   (let ((p (native/node-new)))
     (when (ffi/null? p) (error "Cannot allocate Yoga node"))

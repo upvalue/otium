@@ -3,6 +3,8 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # The formatter and linter run on Chez, whatever the selected runtime.
 case "${1-}" in
+    attach|mcp)
+        exec "$root/tools/python" "$root/shared/dev/client.py" "$@" ;;
     fmt|lint)
         tool=$1
         shift

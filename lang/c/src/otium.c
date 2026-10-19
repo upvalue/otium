@@ -1678,6 +1678,7 @@ static otv run_interrupt_hook(ots* state) {
   }
 
   if (interrupted_again) action = OT_INTERRUPT_ABORT;
+  if (action == OT_INTERRUPT_ERROR) return ot_raise(state, "evaluation aborted");
   return action == OT_INTERRUPT_CONTINUE ? ot_nil : interrupt_unwind(state);
 }
 
@@ -3489,11 +3490,22 @@ static otv vm_execute_loop(ots* state, size_t floor) {
     }
     if (++state->vm.poll_count >= 1024) {
       state->vm.poll_count = 0;
-      if (atomic_exchange(&state->vm.interrupted, false)) {
+      bool dev_interrupt = state->poll_hook && !state->vm.in_interrupt_hook &&
+          ++state->dev_poll_count >= 16;
+      bool dev_polled = dev_interrupt;
+      if (dev_interrupt) {
+        state->dev_poll_count = 0;
+        dev_interrupt = state->poll_hook(state->interrupt_userdata);
+        frame = &state->vm.vm_frames[state->vm.vm_frame_count - 1];
+        function = (ot_function_obj*)ot_as_obj(frame->function);
+        code = as_code(function->code);
+      }
+      if (atomic_exchange(&state->vm.interrupted, false) || dev_interrupt) {
         otv interrupted = run_interrupt_hook(state);
         if (interrupted == OT_UNWIND) return vm_unwind_to(state, floor);
         continue;
       }
+      if (dev_polled) continue;
     }
     if (frame->ip >= code->length) {
       (void)ot_raise(state, "vm: instruction pointer outside bytecode");
@@ -6859,6 +6871,34 @@ static bool eval_source(ots* state, const char* source, size_t length, const cha
   }
   if (out != NULL) *out = result;
   return true;
+}
+
+void ot_select_namespace(ots* state, const char* name, size_t length) {
+  otv symbol = ot_intern(state, name, length, false);
+  state->vm.current_namespace = namespace_find(state, symbol, true);
+}
+
+bool ot_eval_results(ots* state, const char* source, size_t length, const char* name,
+                     otv* results, size_t* line) {
+  size_t counted = 0;
+  *line = 1;
+  reader input = {.state = state, .source = source, .length = length, .name = name};
+  otv form = ot_nil, result = ot_nil;
+  OT_FRAME_SCOPED(state, &form, &result);
+  for (;;) {
+    reader_space(&input);
+    while (counted < input.offset) if (source[counted++] == '\n') (*line)++;
+    form = read_form(&input);
+    if (form == OT_UNDEFINED) return true;
+    if (form == OT_UNWIND) return false;
+    result = run_top_form(state, form);
+    if (result == OT_UNWIND) return false;
+    buf rendered = {0};
+    render_value(state, &rendered, result, false, 0);
+    result = ot_make_string(state, rendered.data, rendered.length);
+    buf_free(&rendered);
+    *results = ot_array_append(state, *results, result);
+  }
 }
 
 bool ot_eval_partial(ots* state, const char* source, size_t length, const char* name,

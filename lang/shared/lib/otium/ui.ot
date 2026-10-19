@@ -522,3 +522,48 @@
       (if (= before (w :offset))
           nil
           :handled))))
+
+(defonce open-windows '())
+
+(def (windows)
+  "Return the open window handles, including their retained trees."
+  open-windows)
+
+(def- (window-call name arguments)
+  (eval '(require otium.ui.window))
+  (apply (eval (string->symbol (str "otium.ui.window/" name))) arguments))
+
+(def (open options)
+  "Open a window. Call set-view! to install its view, then run."
+  (window-call "open" (list options)))
+
+(def (close! window)
+  (window-call "close!" (list window)))
+
+(def (set-view! window view)
+  (set! (window :view) view)
+  window)
+
+(def (run)
+  "Service events and development requests until the last window closes."
+  (window-call "run" '()))
+
+(def (capture! window path)
+  "Save the next successfully rendered frame as PNG or BMP."
+  (set! (window :capture) path)
+  window)
+
+(def (tree-data window)
+  "Return layout bounds and interaction state for the retained tree."
+  (let walk ((nodes (children (get window :tree))) (prefix ""))
+    (let ((result '()))
+      (dotimes (i (length nodes))
+        (let ((node (get nodes i))
+              (path (str prefix i)))
+          (set! result
+                (append result
+                        (list {:path path :bounds (node :bounds)
+                               :focused (node :focused?) :pressed (node :pressed?)
+                               :disabled (not (enabled? node))})
+                        (walk (children node) (str path "."))))))
+      result)))

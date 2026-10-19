@@ -31,3 +31,18 @@
 
 (def (quit!)
   (sdl/check (push-quit)))
+
+(def- push-resize (ffi/bind library "otui_test_resize" '(pointer int int) 'bool))
+
+(def- push-pointer (ffi/bind library "otui_test_pointer" '(pointer float float bool) 'bool))
+
+(def (resize! context width height)
+  (sdl/check (push-resize (get context :window) width height)))
+
+(def (pointer! context x y down?)
+  (sdl/check (push-pointer (get context :window) x y down?)))
+
+(def- set-visible (ffi/bind library "otui_test_visible" '(pointer bool) 'bool))
+
+(def (visible! context visible?)
+  (sdl/check (set-visible (get context :window) visible?)))

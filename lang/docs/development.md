@@ -10,7 +10,7 @@ make
 ./otium --runtime=chez examples/greet.ot -- Alice
 ```
 
-C is the default. `--runtime c` and `--runtime=c` are equivalent. The selector
+Chez is the default. `--runtime c` and `--runtime=c` are equivalent. The selector
 can appear anywhere before `--`, except as the value of another option.
 Everything after `--` is passed to the program unchanged. Repeated selectors
 use the last value; each value must be valid. `CHEZ` selects the Chez executable.

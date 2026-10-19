@@ -8,8 +8,9 @@ also run on both runtimes. Text editing currently uses codepoint boundaries
 and shaped left-to-right caret placement, with interpolated positions inside
 ligatures; IME composition remains deferred. Custom widget methods control
 default focusability, committed text, key repeat and keyup activation.
-The general window/reload service remains planned. See `docs/ui-development.md` for the implemented
-subset and runnable demo. Replaces the September plan
+The window/reload service now runs on both runtimes, including development
+sockets and recovery from frame errors. See `docs/ui-development.md` and
+`docs/dev-server.md` for the implemented subset and runnable demo. Replaces the September plan
 in `c/agent-docs/ui-plan.md`, which predates the FFI, the common reader and
 the class system. Decisions made so far are listed at the end.
 
@@ -409,8 +410,8 @@ the terminal well under a millisecond of Otium work; boids with 600 birds at
 All four use the class syntax from `specs/classes.md`. These are target API
 examples, not yet runnable applications. The implemented subset has widget
 construction, matching, state, rows and columns, constraint-aware layout, wrapped
-labels, rounded rectangles and pointer-driven buttons. Focus, the window service
-and the remaining drawing primitives below are still proposed. See
+labels, rounded rectangles, pointer-driven buttons, focus, and the window
+service. The remaining drawing primitives below are still proposed. See
 `docs/ui-development.md` for runnable code.
 
 ### Boids

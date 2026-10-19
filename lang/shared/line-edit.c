@@ -5,11 +5,35 @@
 #include <ctype.h>
 #include <errno.h>
 #include <signal.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+static void (*idle_service)(void *);
+static void *idle_userdata;
+static int service_poll(int fd, int events, int timeout) {
+  struct pollfd item = {fd, (short)events, 0};
+  int remaining = timeout;
+  for (;;) {
+    if (idle_service) idle_service(idle_userdata);
+    int slice = idle_service && (remaining < 0 || remaining > 25) ? 25 : remaining;
+    int result = poll(&item, 1, slice);
+    if (result || remaining == 0) return result;
+    if (remaining > 0) { remaining -= slice; if (remaining <= 0) return 0; }
+  }
+}
+static int service_read(int fd, void *buffer, int length) {
+  if (idle_service && service_poll(fd, POLLIN, -1) < 0) return -1;
+  return (int)read(fd, buffer, (size_t)length);
+}
+void ot_line_set_service(void (*service)(void *), void *userdata) {
+  idle_service = service;
+  idle_userdata = userdata;
+  bestlineUserIO(service_read, NULL, service_poll);
+}
 
 typedef struct binding {
   char* name;
@@ -231,6 +255,7 @@ const char* ot_line_read(const char* prompt) {
   if (!history) history = "otium";
   do {
     free(line);
+    if (idle_service && !ot_line_interactive()) service_poll(STDIN_FILENO, POLLIN, -1);
     line = ot_line_interactive() ? bestlineWithHistory(prompt, history) : bestline(NULL);
   } while (line && strcmp(prompt ? prompt : "", "..> ") && help_command(line));
   interrupted = !line && errno == EINTR;

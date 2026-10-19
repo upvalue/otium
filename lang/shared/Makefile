@@ -39,3 +39,7 @@ ffi: $(BUILD)/libotium-ffi.$(EXT)
 
 $(BUILD)/libotium-ffi.$(EXT): ffi/native.c ffi/native.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 -fPIC $(SHARED_FLAGS) -o $@ ffi/native.c $(if $(filter Linux,$(UNAME)),-ldl,)
+
+all: $(BUILD)/libotium-dev.$(EXT)
+$(BUILD)/libotium-dev.$(EXT): dev/transport.c dev/transport.h | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 -fPIC $(SHARED_FLAGS) -o $@ dev/transport.c

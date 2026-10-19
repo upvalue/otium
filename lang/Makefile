@@ -16,7 +16,7 @@ export WITH_FFI
 all lib bench bench-gc format hygiene gc-lint:
 	$(MAKE) -C c $@
 
-test: test-tools check-generated test-c test-chez test-expander test-classes test-match test-ui test-cli test-reader test-library test-format
+test: test-tools check-generated test-dev test-c test-chez test-expander test-classes test-match test-ui test-cli test-reader test-library test-format
 	$(MAKE) test-repl
 
 test-c: all
@@ -166,3 +166,11 @@ generate:
 check-generated:
 	$(RUN_PYTHON) shared/cli/generate.py --check
 	$(RUN_PYTHON) shared/documentation/generate.py --check
+
+.PHONY: test-dev
+test-dev: all
+	$(RUN_PYTHON) shared/tests/test_dev.py
+
+.PHONY: test-dev-ui
+test-dev-ui: ui
+	$(RUN_PYTHON) shared/tests/test_dev_ui.py

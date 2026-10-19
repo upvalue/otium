@@ -5,6 +5,8 @@
  ["project", "common", "file", "Read load paths from a project file"],
  ["no-project", "common", "flag", "Skip project.ot discovery"],
  ["load", "common", "file", "Load a file before the script; repeatable"],
+ ["dev", "common", "optional-path", "Listen on a local development socket"],
+ ["dev-watchdog", "common", "milliseconds", "Pause slow evaluations; 0 disables (default: 2000)"],
  ["c.server", "c", "flag", "Run the framed stdio server"],
  ["c.heap-init", "c", "integer", "Initial usable heap target in bytes"],
  ["c.heap-max", "c", "integer", "Maximum usable heap size in bytes"],

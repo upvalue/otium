@@ -80,6 +80,10 @@
 
 (def- poll-event-kind nil)
 
+(def- event-width nil)
+
+(def- event-height nil)
+
 (def- event-x nil)
 
 (def- event-y nil)
@@ -100,9 +104,13 @@
 
 (def- event-repeat nil)
 
-(def gpu-new nil)
+(def- gpu-create nil)
+
+(def gpu-offscreen? nil)
 
 (def gpu-scale nil)
+
+(def gpu-resize nil)
 
 (def app-configure nil)
 
@@ -151,6 +159,8 @@
   (set! node-bounds (ffi/bind library "otui_node_bounds" '(pointer int) 'float))
   (set! live-nodes (ffi/bind library "otui_live_nodes" '() 'int))
   (set! poll-event-kind (ffi/bind library "otui_poll_event" '(pointer) 'utf8))
+  (set! event-width (ffi/bind library "otui_event_width" '(pointer) 'int))
+  (set! event-height (ffi/bind library "otui_event_height" '(pointer) 'int))
   (set! event-x (ffi/bind library "otui_event_x" '(pointer) 'float))
   (set! event-y (ffi/bind library "otui_event_y" '(pointer) 'float))
   (set! event-key (ffi/bind library "otui_event_key" '(pointer) 'utf8))
@@ -161,10 +171,12 @@
   (set! clipboard-get (ffi/bind library "otui_clipboard_get" '(pointer) 'utf8))
   (set! clipboard-set (ffi/bind library "otui_clipboard_set" '(utf8) 'bool))
   (set! event-repeat (ffi/bind library "otui_event_repeat" '(pointer) 'int))
+  (set! gpu-resize (ffi/bind library "otui_gpu_resize" '(pointer int int float) 'bool))
   (set! gpu-scale (ffi/bind library "otui_gpu_scale" '(pointer) 'float))
   (set! app-configure (ffi/bind library "otui_app_configure" '(utf8 utf8 utf8 bool) 'bool))
   (set! window-present (ffi/bind library "otui_window_present" '(pointer utf8 bool) 'bool))
-  (set! gpu-new (ffi/bind library "otui_gpu_new" '(pointer int int float utf8) 'pointer))
+  (set! gpu-create (ffi/bind library "otui_gpu_new" '(pointer int int float utf8 bool) 'pointer))
+  (set! gpu-offscreen? (ffi/bind library "otui_gpu_offscreen" '(pointer) 'bool))
   (set! gpu-free (ffi/bind library "otui_gpu_free" '(pointer) 'void))
   (set! gpu-clear (ffi/bind library "otui_gpu_clear" '(pointer u32) 'void))
   (set! gpu-rect
@@ -173,6 +185,10 @@
   (set! gpu-driver (ffi/bind library "otui_gpu_driver" '(pointer) 'utf8))
   (set! gpu-count (ffi/bind library "otui_gpu_count" '(pointer) 'int))
   (set! live-renderers (ffi/bind library "otui_live_renderers" '() 'int)))
+
+(def (gpu-new window width height scale driver . offscreen)
+  "Create a direct renderer, or pass #t as the last argument for offscreen rendering and capture."
+  (gpu-create window width height scale driver (if (null? offscreen) #f (car offscreen))))
 
 (def (config-ref settings key)
   (let loop ((entries settings))
@@ -199,6 +215,7 @@
             :key (event-key renderer)
             :code (event-code renderer)
             :repeat (not (= 0 (event-repeat renderer)))})
+          ((eq? kind :resize) {:kind kind :width (event-width renderer) :height (event-height renderer)})
           ((eq? kind :text-input) {:kind kind :text (event-text renderer)})
           ((memq kind '(:pointer-down :pointer-up :pointer-move))
            {:kind kind :x (event-x renderer) :y (event-y renderer)})

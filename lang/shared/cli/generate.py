@@ -7,10 +7,14 @@ root = Path(__file__).resolve().parent
 options = json.loads((root / 'options.json').read_text())
 help_text = 'Usage: otium [OPTIONS] [SCRIPT] [-- ARGUMENTS...]\n'
 help_text += 'Options before -- belong to the launcher. Known inactive runtime options are ignored.\n'
-help_text += '  --runtime=c|chez             Select runtime via ./otium (default: c)\n'
+help_text += '  --runtime=c|chez             Select runtime via ./otium (default: chez)\n'
 for name, owner, kind, description in options:
     spelling = '--' + name
-    if kind != 'flag':
+    if kind == 'optional-path':
+        spelling += '[=PATH]'
+    elif kind == 'milliseconds':
+        spelling += '=MS'
+    elif kind != 'flag':
         spelling += ('=' if owner != 'common' else ' ') + kind.upper()
     help_text += f'  {spelling:<28} {description} [{owner}]\n'
 help_text += '  -h aliases --help; -L aliases --path.\n'

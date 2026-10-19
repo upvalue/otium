@@ -85,7 +85,7 @@ $(OBJ)/ot-gc-gen.o: src/ot-gc-gen.c src/otium.h src/ot-gc-internal.inc src/ot-gc
 $(OBJ)/ot-posix.o: src/ot-posix.c src/otium.h | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -c $< -o $@
 
-$(OBJ)/main.o: src/main.c src/ot-dev.inc $(GEN)/dev.h src/otium.h ../shared/line-edit.h ../shared/cli/options.inc | $(OBJ)
+$(OBJ)/main.o: src/main.c $(GEN)/dev.h src/otium.h ../shared/line-edit.h ../shared/cli/options.inc | $(OBJ)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Isrc -I$(GEN) -I../shared -c $< -o $@
 
 $(OBJ)/ot-ext-demo.o: src/ot-ext-demo.c src/otium.h | $(OBJ)

@@ -28,9 +28,6 @@ Multiline entries survive a restart. Existing single-line history files are
 still readable. History is reloaded at each prompt so the runtimes can pick
 up each other's entries; simultaneous writes are not locked.
 
-`make test-repl` exercises both runtimes through pseudo-terminals. It uses a
-fake editor and temporary history files, without changing your history.
-
 Tab completion and help
 
 Tab completes the name ending at the cursor. Repeated Tab cycles through
@@ -76,7 +73,7 @@ After editing the runtime reference, run:
     tools/python shared/documentation/generate.py
 
 The generated C and Scheme tables are checked in; normal builds require no
-generation step or network access. `make test-repl` verifies they match the
+generation step or network access. `make check-generated` verifies they match the
 shared source and that public shared prelude definitions carry docstrings.
 
 For example, in either REPL:

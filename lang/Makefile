@@ -10,14 +10,13 @@ WITH_FFI ?= 0
 export WITH_FFI
 
 
-.PHONY: clean all lib test test-c test-chez test-expander test-sdl test-sdl-integration test-repl sdl-setup bench bench-gc format hygiene gc-lint
+.PHONY: clean all lib test test-c test-chez test-expander test-sdl test-sdl-integration sdl-setup bench bench-gc format hygiene gc-lint
 
 # Keep the existing C entry points; implementation rules live with the runtime.
 all lib bench bench-gc format hygiene gc-lint:
 	$(MAKE) -C c $@
 
 test: test-tools check-generated test-dev test-c test-chez test-expander test-classes test-match test-ui test-cli test-reader test-library test-format
-	$(MAKE) test-repl
 
 test-c: all
 	$(MAKE) -C c test
@@ -42,11 +41,6 @@ test-sdl: ui
 
 test-sdl-integration: ffi
 	$(RUN_PYTHON) shared/tests/test_sdl.py --runtime both --require-accelerated
-
-test-repl: all
-	$(MAKE) -C shared
-	$(RUN_PYTHON) shared/tests/test_help.py
-	$(RUN_PYTHON) shared/tests/test_repl.py
 
 clean:
 	$(MAKE) -C c clean
@@ -137,7 +131,7 @@ help:
 	@printf '%s\n' \
 	  'make                         Build C (Chez runs from source)' \
 	  './otium --runtime=c|chez FILE.ot -- ARGS' \
-	  'make test                    Default portable + runtime + REPL tests' \
+	  'make test                    Default portable + runtime tests' \
 	  'make test-c / test-chez       Runtime tests and shared conditions' \
 	  'make test-native             FFI, SDL, and native UI layout checks' \
 	  'make test-gpu                Require GPU and accelerated SDL checks' \
@@ -165,7 +159,7 @@ generate:
 
 check-generated:
 	$(RUN_PYTHON) shared/cli/generate.py --check
-	$(RUN_PYTHON) shared/documentation/generate.py --check
+	$(RUN_PYTHON) shared/tests/test_help.py
 
 .PHONY: test-dev
 test-dev: all

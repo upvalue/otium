@@ -7,13 +7,7 @@ takes some ideas from Clojure (namespaces) and Janet (practicality, tables).
 
 Use `ticket --help` to interact with the ticketing system.
 
-Never edit README.md, it's for humans only.
-
-When changing C code around allocation, roots, or managed object pointers, run
-`make gc-lint` if the optional LLVM development tools are installed. This is
-not part of the default build or test targets. The runner is
-`c/tools/gc-lint/run`; it discovers Homebrew LLVM or uses `LLVM_CONFIG` when
-supplied.
+Never edit README.md or AGENTS.md.
 
 # Guide
 
@@ -23,7 +17,17 @@ supplied.
   implementation is experimental and can lag behind.
 - However it is ideal to extend the higher-level language to meet challenges e.g. 
   when something can be done in Otium over using escape hatches to the runtime,
-  it should be .
+  it should be.
+
+# GC Development
+
+When changing C code around allocation, roots, or managed object pointers, run
+`make gc-lint` if the optional LLVM development tools are installed. This is
+not part of the default build or test targets. The runner is
+`c/tools/gc-lint/run`; it discovers Homebrew LLVM or uses `LLVM_CONFIG` when
+supplied.
+
+Avoid running GC tests unless directly working on the C garbage collector!
 
 ## Runtime layout
 

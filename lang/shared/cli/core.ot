@@ -230,11 +230,9 @@
       (else (%put values name value)))))
 
 (def- (%option name fields)
-  (if (null? fields)
-      #f
-      (if (or (member name (%properties (car fields) 'names)) (equal? name (%property (car fields) 'negative #f)))
-          (car fields)
-          (%option name (cdr fields)))))
+  (exists (fn (field)
+            (and (or (member name (%properties field 'names)) (equal? name (%property field 'negative #f))) field))
+          fields))
 
 (def- (%finish fields values)
   (for-each (fn (field)

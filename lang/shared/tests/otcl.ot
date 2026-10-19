@@ -68,3 +68,8 @@
 (check :error (otcl/result-code (otcl/eval-result tcl "set x {unterminated")) "otcl unterminated brace status")
 (check :error (otcl/result-code (otcl/eval-result tcl "set x [set value"))
        "otcl unterminated command substitution status")
+
+(check "1.5" (otcl/eval-script tcl "expr 3 / 2") "otcl fractional division")
+(check "3" (otcl/eval-script tcl "expr 6 / 2") "otcl exact division")
+(for-each (fn (code) (check :error (otcl/result-code (otcl/eval-result tcl code)) "otcl malformed if"))
+          '("if" "if {1}" "if {0} {} elseif" "if {0} {} else" "if {0} {} wat {}"))

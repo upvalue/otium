@@ -4,11 +4,9 @@
 (def null (%null))
 
 (def- (%count op n)
-  (if (not (and (integer? n) (exact? n)))
-      (%fail op "type" "expected exact integer")
-      (if (< n 0)
-          (%fail op "range" "expected nonnegative integer")
-          n)))
+  (unless (and (integer? n) (exact? n)) (%fail op "type" "expected exact integer"))
+  (when (< n 0) (%fail op "range" "expected nonnegative integer"))
+  n)
 
 (def- (%mul op a b)
   (if (and (> b 0) (> a (quotient 4611686018427387903 b)))
@@ -114,19 +112,17 @@
   (if (%empty? entries)
       (list kind (%round size alignment) alignment (reverse fields))
       (let ((f (car entries)))
-        (if (not (and (list? f) (= (length f) 2) (symbol? (car f))))
-            (%fail "layout" "type" "expected (field-name type)")
-            (if (assq (car f) fields)
-                (%fail "layout" "type" "duplicate field")
-                (let ((d (%memory (cadr f) "layout")))
-                  (let ((offset (if (= kind 24)
-                                    0
-                                    (%round size (caddr d)))))
-                    (%fields (cdr entries)
-                             kind
-                             (cons (list (car f) d offset) fields)
-                             (max size (%add "layout" offset (cadr d)))
-                             (max alignment (caddr d))))))))))
+        (unless (and (list? f) (= (length f) 2) (symbol? (car f))) (%fail "layout" "type" "expected (field-name type)"))
+        (when (assq (car f) fields) (%fail "layout" "type" "duplicate field"))
+        (let ((d (%memory (cadr f) "layout"))
+              (offset (if (= kind 24)
+                          0
+                          (%round size (caddr d)))))
+          (%fields (cdr entries)
+                   kind
+                   (cons (list (car f) d offset) fields)
+                   (max size (%add "layout" offset (cadr d)))
+                   (max alignment (caddr d)))))))
 
 (def- (%aggregate name fields kind)
   (if (not (and (symbol? name) (list? fields) (pair? fields)))
@@ -230,3 +226,31 @@
 
 (def (error-expected-type c)
   (%error-access c "expected-type"))
+
+(defmacro defbindings (library loader . declarations)
+  "Declare (name symbol arguments result) bindings; use (private name) for private vars. loader opens a path or candidate list."
+  (let ((source (gensym "source")))
+    (def (name d)
+      (if (pair? (car d))
+          (cadr (car d))
+          (car d)))
+    (def (binding d)
+      `(otium.ffi/bind ,library ,(cadr d) ',(caddr d) ',(cadddr d)))
+    `(begin
+       (require otium.ffi)
+       (defonce ,library nil)
+       ,@(map (fn (d)
+                `(,(if (pair? (car d))
+                       'def-
+                       'def)
+                  ,(name d)
+                  (if ,library
+                      ,(binding d)
+                      nil)))
+              declarations)
+       (def (,loader ,source)
+         (set! ,library
+               (otium.ffi/open-library (if (string? ,source)
+                                           (list ,source)
+                                           ,source)))
+         ,@(map (fn (d) `(set! ,(name d) ,(binding d))) declarations)))))

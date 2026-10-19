@@ -21,5 +21,7 @@
                  (ffi/pointer=? saved-layout ((tile-node tree) :layout))
                  ((ui/instance (tile-node tree)) :selected))
       (error "Scripted input lost widget or native layout state"))
+    (eval '(require otium.ui.native :reload))
+    (eval '(require otium.sdl :reload))
     (eval '(require ui.interaction-reload :reload))
     (println "UI-RELOAD retained")))

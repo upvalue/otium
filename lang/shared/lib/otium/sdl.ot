@@ -2,8 +2,6 @@
 (require (otium.ffi :as ffi))
 
 ;; Opaque window handles and scalar signatures need no aggregate ABI manifest.
-(defonce library nil)
-
 (def INIT_VIDEO 0x20)
 
 (def WINDOW_RESIZABLE 0x20)
@@ -12,65 +10,27 @@
 
 (def WINDOW_HIGH_PIXEL_DENSITY 0x2000)
 
-(def init nil)
-
-(def quit nil)
-
-(def was-init nil)
-
-(def set-main-ready nil)
-
-(def create-window nil)
-
-(def destroy-window nil)
-
-(def set-window-size nil)
-
-(def get-window-size nil)
-
-(def get-window-size-in-pixels nil)
-
-(def get-window-pixel-density nil)
-
-(def pump-events nil)
-
-(def delay nil)
-
-(def get-error nil)
-
-(def set-hint nil)
-
-(def set-app-metadata nil)
-
-(def load-surface nil)
-
-(def set-window-icon nil)
-
-(def destroy-surface nil)
-
-(def raise-window nil)
-
-(def (load! path)
-  (set! library (ffi/open-library (list path)))
-  (set! set-hint (ffi/bind library "SDL_SetHint" '(utf8 utf8) 'bool))
-  (set! set-app-metadata (ffi/bind library "SDL_SetAppMetadata" '(utf8 utf8 utf8) 'bool))
-  (set! load-surface (ffi/bind library "SDL_LoadSurface" '(utf8) 'pointer))
-  (set! set-window-icon (ffi/bind library "SDL_SetWindowIcon" '(pointer pointer) 'bool))
-  (set! destroy-surface (ffi/bind library "SDL_DestroySurface" '(pointer) 'void))
-  (set! raise-window (ffi/bind library "SDL_RaiseWindow" '(pointer) 'bool))
-  (set! init (ffi/bind library "SDL_Init" '(u32) 'bool))
-  (set! quit (ffi/bind library "SDL_Quit" '() 'void))
-  (set! was-init (ffi/bind library "SDL_WasInit" '(u32) 'u32))
-  (set! set-main-ready (ffi/bind library "SDL_SetMainReady" '() 'void))
-  (set! create-window (ffi/bind library "SDL_CreateWindow" '(utf8 int int u64) 'pointer))
-  (set! set-window-size (ffi/bind library "SDL_SetWindowSize" '(pointer int int) 'bool))
-  (set! get-window-size (ffi/bind library "SDL_GetWindowSize" '(pointer pointer pointer) 'bool))
-  (set! get-window-size-in-pixels (ffi/bind library "SDL_GetWindowSizeInPixels" '(pointer pointer pointer) 'bool))
-  (set! get-window-pixel-density (ffi/bind library "SDL_GetWindowPixelDensity" '(pointer) 'float))
-  (set! destroy-window (ffi/bind library "SDL_DestroyWindow" '(pointer) 'void))
-  (set! delay (ffi/bind library "SDL_Delay" '(u32) 'void))
-  (set! pump-events (ffi/bind library "SDL_PumpEvents" '() 'void))
-  (set! get-error (ffi/bind library "SDL_GetError" '() 'utf8)))
+(ffi/defbindings library
+                 load!
+                 (set-hint "SDL_SetHint" (utf8 utf8) bool)
+                 (set-app-metadata "SDL_SetAppMetadata" (utf8 utf8 utf8) bool)
+                 (load-surface "SDL_LoadSurface" (utf8) pointer)
+                 (set-window-icon "SDL_SetWindowIcon" (pointer pointer) bool)
+                 (destroy-surface "SDL_DestroySurface" (pointer) void)
+                 (raise-window "SDL_RaiseWindow" (pointer) bool)
+                 (init "SDL_Init" (u32) bool)
+                 (quit "SDL_Quit" () void)
+                 (was-init "SDL_WasInit" (u32) u32)
+                 (set-main-ready "SDL_SetMainReady" () void)
+                 (create-window "SDL_CreateWindow" (utf8 int int u64) pointer)
+                 (set-window-size "SDL_SetWindowSize" (pointer int int) bool)
+                 (get-window-size "SDL_GetWindowSize" (pointer pointer pointer) bool)
+                 (get-window-size-in-pixels "SDL_GetWindowSizeInPixels" (pointer pointer pointer) bool)
+                 (get-window-pixel-density "SDL_GetWindowPixelDensity" (pointer) float)
+                 (destroy-window "SDL_DestroyWindow" (pointer) void)
+                 (delay "SDL_Delay" (u32) void)
+                 (pump-events "SDL_PumpEvents" () void)
+                 (get-error "SDL_GetError" () utf8))
 
 (def (check value)
   (unless value (error (get-error)))

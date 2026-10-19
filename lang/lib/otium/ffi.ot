@@ -21,6 +21,11 @@
 (def- (%round n a)
   (%add "layout" n (modulo (- a (modulo n a)) a)))
 
+(def- (%signature-error op)
+  (if (or (equal? op "bind") (equal? op "callback"))
+      "signature"
+      "type"))
+
 (def- %scalars
   '(void bool
          i8
@@ -65,21 +70,13 @@
                      1
                      (%alignof k))
                  '())
-           (%fail op
-                  (if (equal? op "bind")
-                      "signature"
-                      "type")
-                  "unknown scalar type"))))
+           (%fail op (%signature-error op) "unknown scalar type"))))
     ((%layout-data t) (%layout-data t))
     ((and (list? t) (= (length t) 3) (eq? (car t) 'array))
      (let ((element (%memory (cadr t) op))
            (count (%count op (caddr t))))
        (list 25 (%mul op (cadr element) count) (caddr element) (list element count))))
-    (else (%fail op
-                 (if (equal? op "bind")
-                     "signature"
-                     "type")
-                 "invalid foreign type"))))
+    (else (%fail op (%signature-error op) "invalid foreign type"))))
 
 (def- (%memory t op)
   (let ((d (%describe t op)))
@@ -187,6 +184,17 @@
   (if (list? arguments)
       (%bind library name (map (fn (t) (%call-type t #f)) arguments) (%call-type result #t))
       (%fail "bind" "signature" "expected argument type list")))
+
+(def- (%callback-type t result?)
+  (let ((k (car (%describe t "callback"))))
+    (if (or (>= k 22) (and (not result?) (= k 0)))
+        (%fail "callback" "signature" "callback types are scalars, pointer, or callback-pointer")
+        k)))
+
+(def (callback arguments result proc)
+  (if (list? arguments)
+      (%callback (map (fn (t) (%callback-type t #f)) arguments) (%callback-type result #t) proc)
+      (%fail "callback" "signature" "expected argument type list")))
 
 (def- (%try-open names diagnostics)
   (if (%empty? names)

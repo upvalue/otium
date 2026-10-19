@@ -658,6 +658,23 @@ static otv n_stats(ots* s, otv* a, int n) {
   ARITY(0, "allocation-count");
   return ot_make_int((intptr_t)ctx(s)->allocations);
 }
+/* Callbacks are Chez-only so far; ffi/callback validates its signature in
+ * Otium and then fails here. */
+static otv n_callback(ots* s, otv* a, int n) {
+  (void)a;
+  ARITY(3, "callback");
+  return fail(s, "callback", "unsupported", "FFI callbacks are not supported on the C runtime");
+}
+static otv n_free_callback(ots* s, otv* a, int n) {
+  (void)a;
+  ARITY(1, "free-callback!");
+  return fail(s, "free-callback!", "type", "expected callback");
+}
+static otv n_callback_count(ots* s, otv* a, int n) {
+  (void)a;
+  ARITY(0, "callback-count");
+  return ot_make_int(0);
+}
 static otv n_bytes(ots* s, otv* a, int n) {
   (void)a;
   ARITY(0, "allocation-bytes");
@@ -906,6 +923,9 @@ static void module(ots* s) {
                    {"%loader-error", n_loader_error},
                    {"has-symbol?", n_symbol},
                    {"%bind", n_bind},
+                   {"%callback", n_callback},
+                   {"free-callback!", n_free_callback},
+                   {"callback-count", n_callback_count},
                    {"%fail", n_fail},
                    {"%error-field", n_error_field}};
   for (size_t i = 0; i < sizeof(functions) / sizeof(*functions); i++)

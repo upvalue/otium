@@ -1,0 +1,200 @@
+(def checks 0)
+
+(def (check expected actual)
+  (if (equal? expected actual)
+      (set! checks (+ checks 1))
+      (error "FFI callback assertion failed" expected actual)))
+
+(def (reason thunk)
+  (try
+    (begin
+      (thunk)
+      'no-error)
+    (catch (ffi/error? c) (ffi/error-reason c))))
+
+(def lib (ffi/open-library (list fixture-path)))
+
+(def call-n (ffi/bind lib "call_n" '(callback-pointer int) 'int))
+
+(def call-stored (ffi/bind lib "call_stored" '(int) 'int))
+
+(def store-callback (ffi/bind lib "store_callback" '(callback-pointer) 'void))
+
+(def echo-int (ffi/bind lib "echo_int" '(int) 'int))
+
+(def double-it (ffi/callback '(int) 'int (fn (x) (* 2 x))))
+
+(check 1 (ffi/callback-count))
+(check 12 (call-n double-it 4))
+(check #f ((ffi/bind lib "null_callback" '(callback-pointer) 'bool) double-it))
+(check #t (ffi/pointer=? double-it ((ffi/bind lib "echo_pointer" '(pointer) 'pointer) double-it)))
+
+;; A stored callback runs during a later, unrelated foreign call.
+(store-callback double-it)
+(check 14 (call-stored 7))
+
+;; Mixed scalar and pointer arguments.
+(def p (ffi/alloc 'u8 1))
+
+(def mixed
+  (ffi/callback '(double i64 pointer bool)
+                'double
+                (fn (x n q flag)
+                  (if (and flag (ffi/pointer=? p q))
+                      (+ x n)
+                      -1.0))))
+
+(check -1.5 ((ffi/bind lib "call_mixed" '(callback-pointer pointer) 'double) mixed p))
+
+(def call-predicate (ffi/bind lib "call_predicate" '(callback-pointer u8) 'bool))
+
+(def odd (ffi/callback '(u8) 'bool (fn (x) (odd? x))))
+
+(check #t (call-predicate odd 3))
+(check #f (call-predicate odd 4))
+
+(def identity (ffi/callback '(pointer) 'pointer (fn (q) q)))
+
+(check #t (ffi/pointer=? p ((ffi/bind lib "call_pointer" '(callback-pointer pointer) 'pointer) identity p)))
+
+;; Callbacks stored in memory come back as callback pointers.
+(def slot (ffi/alloc 'callback-pointer 1))
+
+(ffi/set! slot 'callback-pointer 0 double-it)
+(check 6 (call-n (ffi/ref slot 'callback-pointer 0) 3))
+(check 'type (reason (fn () (call-n p 1))))
+(ffi/free! slot)
+(ffi/free! p)
+
+;; A callback can make nested foreign calls, including ones with callbacks.
+(def nested (ffi/callback '(int) 'int (fn (x) (+ (echo-int x) (call-n double-it x)))))
+
+(check (+ 0 (+ 1 0) (+ 2 2)) (call-n nested 3))
+
+;; Collection during a callback leaves a string argument intact.
+(def text-after (ffi/bind lib "text_after" '(utf8 callback-pointer) 'utf8))
+
+(def (garbage n)
+  (dotimes (i n)
+    (list i i i i)))
+
+(def collect
+  (ffi/callback '()
+                'void
+                (fn ()
+                  (garbage 10000)
+                  (test-collect)
+                  (garbage 10000)
+                  (test-collect))))
+
+(check "héllo, collected 🌍" (text-after (string-append "héllo, " "collected 🌍") collect))
+(check 0 (ffi/allocation-count))
+
+;; Errors are contained at the boundary, the callback returns zero, and the
+;; first error is raised once the outermost foreign call returns.
+(def seen '())
+
+(def failing
+  (ffi/callback '(int)
+                'int
+                (fn (x)
+                  (set! seen (cons x seen))
+                  (if (> x 0)
+                      (error (string-append "bad " (number->string x)))
+                      10))))
+
+(def signalled 0)
+
+(check "bad 1"
+       (handler-bind ((error? (fn (c) (set! signalled (+ signalled 1)))))
+         (try
+           (call-n failing 3)
+           (catch (error? c) (condition-message c)))))
+(check '(2 1 0) seen)
+(check 2 signalled)
+
+;; The contained error is raised in place of the result, not with it.
+(def outcome 'unset)
+
+(try
+  (set! outcome (call-n failing 2))
+  (catch (error? c) nil))
+(check 'unset outcome)
+
+;; Errors in nested calls wait for the outermost call.
+(def inner-returned #f)
+
+(def outer
+  (ffi/callback '(int)
+                'int
+                (fn (x)
+                  (call-n failing 2)
+                  (set! inner-returned #t)
+                  x)))
+
+(check "bad 1"
+       (try
+         (call-n outer 1)
+         (catch (error? c) (condition-message c))))
+(check #t inner-returned)
+
+;; A conversion error on the callback result is contained the same way.
+(def wrong-result (ffi/callback '(int) 'int (fn (x) "not an integer")))
+
+(check 'type (reason (fn () (call-n wrong-result 1))))
+
+;; A non-local exit is stopped at the boundary and reported afterwards.
+(def escaping (ffi/callback '(int) 'int (fn (x) (invoke-restart 'skip))))
+
+(check 'escape (reason (fn () (restart-case (call-n escaping 1) (skip () 'skipped)))))
+
+;; A callback keeps the procedure it was given; forwarding follows reloads.
+(def (write-handler factor)
+  (let ((path (string-append module-directory "/ffi-callback-handler.ot")))
+    (if (chez/file-exists? path) (chez/delete-file path))
+    (chez/call-with-output-file path
+                                (fn (port)
+                                  (chez/display (string-append "(ns ffi-callback-handler)\n(def (scale x) (* "
+                                                               (number->string factor)
+                                                               " x))\n")
+                                                port)))))
+
+(write-handler 2)
+(require ffi-callback-handler :as handler)
+
+(def direct (ffi/callback '(int) 'int handler/scale))
+
+(def forwarding (ffi/callback '(int) 'int (fn args (apply handler/scale args))))
+
+(check 20 (call-n forwarding 5))
+(write-handler 3)
+(require ffi-callback-handler :as handler :reload)
+(check 30 (call-n forwarding 5))
+(check 20 (call-n direct 5))
+
+;; Unsupported callback signatures fail when the callback is made.
+(def Point (ffi/define-struct! 'Point '((x double) (y double))))
+
+(check 'signature (reason (fn () (ffi/callback '(utf8) 'void (fn (s) nil)))))
+(check 'signature (reason (fn () (ffi/callback '() 'utf8 (fn () "")))))
+(check 'signature (reason (fn () (ffi/callback (list Point) 'void (fn (q) nil)))))
+(check 'signature (reason (fn () (ffi/callback '() Point (fn () nil)))))
+(check 'signature (reason (fn () (ffi/callback '(void) 'void (fn () nil)))))
+(check 'signature (reason (fn () (ffi/callback '(nonsense) 'void (fn () nil)))))
+(check 'type (reason (fn () (ffi/callback '() 'void 3))))
+
+;; Freeing releases each callback once.
+(check 12 (ffi/callback-count))
+(for-each ffi/free-callback! (list double-it mixed odd identity nested collect failing outer wrong-result escaping))
+(check 2 (ffi/callback-count))
+(check #f (ffi/free-callback! double-it))
+(check 2 (ffi/callback-count))
+(check 'released (reason (fn () (call-n double-it 1))))
+(check 'type (reason (fn () (ffi/free-callback! ffi/null))))
+(ffi/free-callback! direct)
+(ffi/free-callback! forwarding)
+(check 0 (ffi/callback-count))
+(check 0 (ffi/allocation-count))
+(display "FFI callback checks: ")
+(display checks)
+(newline)

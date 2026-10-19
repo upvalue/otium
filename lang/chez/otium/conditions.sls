@@ -3,7 +3,7 @@
           define-condition condition-of-type? handler-bind try restart-case
           invoke-restart compute-restarts find-restart restart-name restart-description
           unwind-protect defer quit exit
-          call-with-otium-control call-with-native-conditions
+          call-with-otium-control call-with-native-conditions call-contained
           control-condition? control-kind control-status)
   (import (except (chezscheme) error error? condition-message exit)
           (prefix (only (otium truth) if) ot:)
@@ -198,6 +198,35 @@
          (error "exit: expected integer status from 0 to 255"))
        (transfer-control 'exit status)]))
   (define quit exit)
+  ;; Run thunk so that nothing leaves it except a normal return, as needed where
+  ;; native frames lie outside. Errors, exits, and other escapes are stopped
+  ;; and become (contained replay), where calling replay later re-raises the
+  ;; error or repeats the exit; replay is #f for an escape it cannot repeat.
+  ;; Signal-site handlers have already run for a contained error.
+  (define (call-contained thunk contained)
+    ((call/cc
+       (lambda (k)
+         (let ([leaving #f])
+           (define (contain replay)
+             (set! leaving #t)
+             (k (lambda () (contained replay))))
+           (dynamic-wind
+             (lambda () #f)
+             (lambda ()
+               (parameterize
+                 ([control-target
+                    (lambda (kind status) (contain (lambda () (transfer-control kind status))))])
+                 (with-exception-handler
+                   (lambda (e)
+                     (if (control-condition? e)
+                         (contain (lambda () (raise e)))
+                         (let ([c (exception-value e)]) (contain (lambda () (propagate c))))))
+                   (lambda ()
+                     (call-with-values thunk
+                       (lambda results
+                         (set! leaving #t)
+                         (lambda () (apply values results))))))))
+             (lambda () (unless leaving (contain #f)))))))))
   ;; Escape before raising the host notification, bypassing even native guards
   ;; inside Otium code while still running dynamic-wind cleanup.
   (define (call-with-otium-control thunk)

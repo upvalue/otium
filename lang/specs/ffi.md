@@ -61,12 +61,14 @@ C calling convention, 64-bit pointers, and the normal platform ABI. A target
 is supported only after passing the ABI fixture suite. Windows, 32-bit targets,
 mobile startup, and cross-compilation are later work.
 
-Callbacks into Otium, varargs, packed structs, bitfields, flexible array
+Varargs, packed structs, bitfields, flexible array
 members, empty aggregates, zero-length array fields in by-value aggregates,
 long double, and C++ ABI calls are excluded. Top-level arrays are not C
 by-value parameters or results; declare pointer parameters explicitly.
-Declarations requesting excluded features fail at binding time. Function-pointer slots may contain null; there is no callable callback
-constructor in version 1. SDL APIs requiring callbacks are outside this release.
+Declarations requesting excluded features fail at binding time. Function-pointer
+slots accept null or a [callback](#callbacks). Callbacks are synchronous and run
+only on the Otium thread, so SDL APIs that call back from other threads, such as
+audio callbacks, are outside this release.
 
 Queued audio is within scope: `SDL_OpenAudioDeviceStream` accepts a null
 callback, after which the application supplies or retrieves samples explicitly.
@@ -136,7 +138,7 @@ Reload does not destroy SDL resources or rerun SDL initialization implicitly.
 | `short ushort int uint long ulong size-t ptrdiff-t` | Target C types; sizes, alignment, and signedness come from the runtime's target ABI. |
 | `float double` | C floating types; accept Otium integers or inexact real numbers. |
 | `pointer` | Opaque data pointer, including the explicit null pointer. |
-| `callback-pointer` | Native function pointer; accepts only `ffi/null` in version 1. |
+| `callback-pointer` | Native function pointer; accepts `ffi/null`, a callback, or a function pointer read from memory or returned by a call. |
 | `utf8` | Call argument string or null pointer; result is a copied string or null pointer. |
 | `(array T count)` | Fixed-size foreign memory array; not a call argument/result by value. |
 | Layout value | Immutable struct/union description; in a call signature, passes or returns the aggregate by value. Use `pointer` for an address parameter/result. |
@@ -261,12 +263,10 @@ error before the call. The bytes are read-only to the callee; use explicit
 foreign memory for writable strings. The callee must not retain the address.
 
 This is a lifetime guarantee, not a requirement to use a particular allocator.
-The C backend initially copies into native storage outside the moving heap.
-Chez uses its native `utf-8` conversion where it satisfies the validation rules
-below. That conversion creates a managed temporary bytevector; Chez's `string`
-foreign type is an alias for `utf-8`. Chez bindings do not use `__collect_safe`
-in version 1. There are no Otium threads or callbacks in this release, and
-pinning is not part of the public API.
+Both backends copy the bytes into native storage outside the managed heap and
+release it when the call returns. A callback may collect during the call, so
+Chez does not use its native `utf-8` conversion, whose temporary bytevector
+could move. Pinning is not part of the public API.
 [Chez string conversion and collection rules](https://cisco.github.io/ChezScheme/csug10.0/foreign.html)
 
 A `utf8` result is copied and decoded into an independent Otium string before
@@ -467,11 +467,11 @@ aggregate copies, and result storage are outside the moving heap; it passes no m
 to C in version 1. This is the C backend strategy, not a restriction on Chez's
 internal implementation of the same lifetime contract.
 
-Chez bindings do not use `__collect_safe` in version 1. Native code must not
-reenter Otium during a call. Blocking calls therefore block the Otium execution
-thread, and the version 1 contract does not support an embedding host enabling
-concurrent collection during those calls. Threads or callbacks would require
-revisiting this contract and the lifetime of automatic string temporaries.
+Chez bindings use `__collect_safe`: the Otium thread is deactivated during the
+native call, so a callback arriving on another thread can activate and abort
+instead of waiting for it. No call argument points into Chez's managed heap.
+Native code reenters Otium only through [callbacks](#callbacks), on the Otium
+thread. Blocking calls still block the Otium execution thread.
 
 Allocation failure or conversion failure releases all call temporaries. Once
 native code has run, a result-conversion error does not undo its side effects.
@@ -637,8 +637,8 @@ gaps discovered while porting scene code belong in `docs/portability.md`.
    on C. Rebind layouts and confirm saved callables keep their original ABI.
 3. Run the same fixture cases under C GC stress and forced compaction, with
    allocations during conversions, aggregate arguments/results, and live derived
-   views. On Chez, test the automatic string path with collections between calls and verify that bound
-   calls omit `__collect_safe`. Use an explicitly retained native string across calls
+   views. Test string arguments with collections between calls and inside a
+   callback during the call. Use an explicitly retained native string across calls
    and collections on both runtimes. Exercise failure cleanup and resource counts.
    Run `just gc-lint` when LLVM tooling is installed
    for changes involving allocation, roots, or managed pointers.
@@ -672,11 +672,61 @@ one shared SDL binding body and one portable
 render/input/audio acceptance program run on both runtimes, with only loader
 and host setup adapters. No per-function C glue is needed for the listed surface.
 
-## Later callback work
+## Callbacks
 
-Callbacks require a separate extension specifying registration lifetime,
-procedure roots, reentry, thread attachment, exception containment, and shutdown
-ordering. No Otium exception may unwind through an arbitrary native frame.
-SDL audio callbacks may run away from the Otium thread; adding a native queue
-bridge is a different contract from directly invoking Lisp. Do not register an
-ordinary Otium procedure as a callback until those rules and tests exist.
+`(ffi/callback argument-types result-type procedure)` returns a callback: a
+pointer value that passes as a `pointer` or `callback-pointer` argument and can
+be stored in memory with `ffi/set!` or `ffi/field-set!`. Calling it from native
+code calls `procedure` with the converted arguments and converts its result.
+
+```lisp
+(def on-bell (ffi/callback '(pointer) 'void (fn (terminal) (ring terminal))))
+(set-bell-callback terminal on-bell)
+(ffi/free-callback! on-bell)
+```
+
+Callbacks are synchronous and same-thread. Native code may invoke one only on
+the Otium thread, while Otium is inside a foreign call it made; that includes a
+callback stored earlier and invoked during a later, unrelated call. Invocation
+on any other thread aborts the process with a message, as does invocation on the
+Otium thread outside any foreign call from Otium. A callback may itself make
+foreign calls, which may invoke callbacks.
+
+Argument and result types are scalars, `pointer`, and `callback-pointer`;
+`void` is allowed as a result. `utf8` and by-value aggregates are rejected when
+the callback is made, with reason `signature`. Pass strings as pointers and read
+them with `ffi/read-utf8`. Arguments convert as call results do, and the result
+converts as a call argument does.
+
+A callback lives until `(ffi/free-callback! callback)`; unfreed callbacks live
+for the process. Freeing twice is allowed. Native code invoking a freed callback,
+including one it still holds, has undefined behaviour. Passing a freed callback
+to a foreign call raises `released`. `(ffi/callback-count)` returns the number
+of unfreed callbacks, for leak checks.
+
+The procedure is captured by value: redefining or reloading its definition does
+not change an existing callback. A callback that should follow reloads forwards
+through the namespace:
+
+```lisp
+(def on-bell (ffi/callback '(pointer) 'void (fn args (apply terminal/bell args))))
+```
+
+No Otium error or non-local exit unwinds through native frames. A condition or
+exit inside the callback, including a result conversion error or a restart
+invoked outside the callback, stops at the callback boundary. The callback then
+returns zero, `#f`, or null for its result type. The first contained condition
+is raised again when the outermost foreign call returns to Otium, in place of
+its result; later ones are dropped. An exit is repeated. A non-local exit that
+cannot be repeated, such as invoking an outer restart, raises an FFI error with
+reason `escape`. `handler-bind` handlers still run at the signal site inside the
+callback, and are not run again when the condition is raised after the call.
+
+Garbage collection can occur during a foreign call while a callback runs. Call
+temporaries, including copied strings and aggregates, stay outside the moving
+heap; allocations from `ffi/alloc` never move.
+
+The C runtime does not yet implement callbacks: `ffi/callback` fails with reason
+`unsupported` after checking the signature. A queue bridge for callbacks from
+other threads, such as SDL audio, is a separate contract from directly invoking
+Otium.

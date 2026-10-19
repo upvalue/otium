@@ -1,3 +1,4 @@
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -191,4 +192,36 @@ size_t union_layout(int which) {
     case 10: return offsetof(UnionArray, tag);
     default: return 0;
   }
+}
+
+/* Callbacks: repeated calls, a stored callback called by a later foreign call,
+ * a callback run while a string argument must stay valid, and a wrong thread. */
+int call_n(int (*f)(int), int n) {
+  int sum = 0;
+  for (int i = 0; i < n; i++) sum += f(i);
+  return sum;
+}
+static int (*stored)(int);
+void store_callback(int (*f)(int)) { stored = f; }
+int call_stored(int x) { return stored ? stored(x) : -1; }
+double call_mixed(double (*f)(double, int64_t, void*, bool), void* p) {
+  return f(1.5, -3, p, true);
+}
+bool call_predicate(bool (*f)(uint8_t), uint8_t x) { return f(x); }
+void* call_pointer(void* (*f)(void*), void* p) { return f(p); }
+const char* text_after(const char* text, void (*f)(void)) {
+  f();
+  return text;
+}
+static void (*threaded)(void);
+static void* thread_main(void* ignored) {
+  (void)ignored;
+  threaded();
+  return NULL;
+}
+void call_on_thread(void (*f)(void)) {
+  pthread_t thread;
+  threaded = f;
+  pthread_create(&thread, NULL, thread_main, NULL);
+  pthread_join(thread, NULL);
 }

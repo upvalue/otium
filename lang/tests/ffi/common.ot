@@ -419,6 +419,27 @@
 (def ZeroUnion (ffi/define-union! 'ZeroUnion '((byte u8) (empty (array float 0)))))
 
 (check 'signature (reason (fn () (ffi/bind lib "fixture_id" (list ZeroUnion) 'int))))
+(ffi/defbindings bindings-library
+                 load-bindings!
+                 (identity-call "fixture_id" () int)
+                 ((private echo-call) "echo_bool" (bool) bool))
+(check nil identity-call)
+(load-bindings! fixture-path)
+
+(def (live-identity)
+  (identity-call))
+
+(check 17 (live-identity))
+(check #t (echo-call #t))
+(eval '(ffi/defbindings bindings-library
+                        load-bindings!
+                        (identity-call "fixture_id" () int)
+                        ((private echo-call) "echo_u8" (u8) u8)))
+(check 17 (live-identity))
+(check 255 (echo-call 255))
+(load-bindings! (list other-path))
+(check 29 (live-identity))
+
 (check 0 (ffi/allocation-count))
 (display "FFI checks: ")
 (display checks)

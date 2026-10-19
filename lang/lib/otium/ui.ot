@@ -299,34 +299,34 @@
               descriptions)
     (for-each (fn (n) (unless (nil? (n :key)) (put! keyed (n :key) n))) old)
     (dotimes (i (length descriptions))
-      (let ((d (get descriptions i)))
-        (let ((candidate (if (nil? (d :key))
-                             (if (< i (length old))
-                                 (get old i)
-                                 nil)
-                             (get keyed (d :key)))))
-          (let ((matched? (and (not (nil? candidate))
-                               (equal? (candidate :key) (d :key))
-                               (eq? (dispatch-type (candidate :instance)) (dispatch-type (d :properties))))))
-            (let ((node (if matched?
-                            candidate
-                            (make Mounted
-                                  :instance (class-mount (d :properties))
-                                  :key (d :key)
-                                  :children []
-                                  :parent parent))))
-              (set! (node :options) (d :options))
-              (unless (enabled? node) (set! (node :pressed?) #f))
-              (when matched? (class-update-properties! (node :instance) (d :properties)))
-              (let ((built (with-params ((building-children (d :children))) (build (node :instance)))))
-                (set! (node :children) (reconcile-children (node :children) built node)))
-              (put! kept node #t)
-              (when (and (not matched?) (get (node :options) :autofocus #f))
-                (let find-root ((parent (node :parent)))
-                  (if (mounted? parent)
-                      (find-root (parent :parent))
-                      (when (and (not (focused parent)) (focusable? node)) (focus! parent node)))))
-              (push! out node))))))
+      (let ((d (get descriptions i))
+            (candidate (if (nil? (d :key))
+                           (if (< i (length old))
+                               (get old i)
+                               nil)
+                           (get keyed (d :key))))
+            (matched? (and (not (nil? candidate))
+                           (equal? (candidate :key) (d :key))
+                           (eq? (dispatch-type (candidate :instance)) (dispatch-type (d :properties)))))
+            (node (if matched?
+                      candidate
+                      (make Mounted
+                            :instance (class-mount (d :properties))
+                            :key (d :key)
+                            :children []
+                            :parent parent))))
+        (set! (node :options) (d :options))
+        (unless (enabled? node) (set! (node :pressed?) #f))
+        (when matched? (class-update-properties! (node :instance) (d :properties)))
+        (let ((built (with-params ((building-children (d :children))) (build (node :instance)))))
+          (set! (node :children) (reconcile-children (node :children) built node)))
+        (put! kept node #t)
+        (when (and (not matched?) (get (node :options) :autofocus #f))
+          (let find-root ((parent (node :parent)))
+            (if (mounted? parent)
+                (find-root (parent :parent))
+                (when (and (not (focused parent)) (focusable? node)) (focus! parent node)))))
+        (push! out node)))
     (for-each (fn (n) (unless (get kept n #f) (retire! n))) old)
     out))
 
@@ -439,16 +439,15 @@
 
 (def (replace-selection! w text)
   (let ((start (min (w :cursor) (w :anchor)))
-        (end (max (w :cursor) (w :anchor))))
-    (let ((value (str (substring (w :value) 0 start) text (substring (w :value) end))))
-      (set! (w :value) value)
-      (set! (w :seen) value)
-      (move-cursor! w (+ start (string-length text)) #f)
-      (when (w :on-change) ((w :on-change) value)))))
+        (end (max (w :cursor) (w :anchor)))
+        (value (str (substring (w :value) 0 start) text (substring (w :value) end))))
+    (set! (w :value) value)
+    (set! (w :seen) value)
+    (move-cursor! w (+ start (string-length text)) #f)
+    (when (w :on-change) ((w :on-change) value))))
 
 (def (single-line text)
-  (string-join " "
-               (string-split (string-join " " (string-split (string-join " " (string-split text "\r")) "\n")) "\t")))
+  (reduce (fn (text separator) (string-replace text separator " ")) text '("\r" "\n" "\t")))
 
 (defmethod (handle-event (w TextField) event)
   (let ((kind (get event :kind))
@@ -556,15 +555,17 @@
 
 (def (tree-data window)
   "Return layout bounds and interaction state for the retained tree."
-  (let walk ((nodes (children (get window :tree))) (prefix ""))
-    (let ((result '()))
+  (let ((result []))
+    (def (walk nodes prefix)
       (dotimes (i (length nodes))
         (let ((node (get nodes i))
               (path (str prefix i)))
-          (set! result
-                (append result
-                        (list {:path path :bounds (node :bounds)
-                               :focused (node :focused?) :pressed (node :pressed?)
-                               :disabled (not (enabled? node))})
-                        (walk (children node) (str path "."))))))
-      result)))
+          (push! result
+                 {:path path
+                  :bounds (node :bounds)
+                  :focused (node :focused?)
+                  :pressed (node :pressed?)
+                  :disabled (not (enabled? node))})
+          (walk (children node) (str path ".")))))
+    (walk (children (get window :tree)) "")
+    (array-to-list result)))

@@ -100,6 +100,7 @@
     (near "flex grow" 230 ((b :bounds) :width))
     (near "column gap" 75 ((c :bounds) :y))
     (check "persistent node count" 5 (native/live-nodes))
+    (eval '(require otium.ui.native :reload))
     (gpu/layout! tree 400 240)
     (near "resize" 330 ((b :bounds) :width))
     (check "native node reused" #t (ffi/pointer=? saved (b :layout)))

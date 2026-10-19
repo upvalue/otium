@@ -67,10 +67,8 @@
 
 (def- (limit-response response limit)
   (let ((long? (fn (text) (and (> limit 0) (> (string-length text) limit))))
-        (values (get response :values '()))
-        (cut? #f))
-    (for-each (fn (v) (when (long? v) (set! cut? #t))) values)
-    (if (or cut? (long? (get response :value "")) (long? (get response :output "")))
+        (values (get response :values '())))
+    (if (or (exists long? values) (long? (get response :value "")) (long? (get response :output "")))
         (put response
              :value (clip (get response :value "") limit)
              :output (clip (get response :output "") limit)
@@ -157,34 +155,27 @@
                (limit (get request :max-chars 10000)))
            (begin!)
            (unwind-protect
-             (let ((result (%evaluate code
-                                      space
-                                      (get request :path "<dev>"))))
+             (let ((result (%evaluate code space (get request :path "<dev>"))))
                (set! revision (+ revision 1))
                (when (eq? op :load) (note-reload! (get request :path) code))
                (reply! client
-                       (limit-response
-                         (if (get result :ok)
-                             {:id id
-                              :ok #t
-                              :value (get result :value)
-                              :values (get result :values)
-                              :output (get result :output)}
-                             {:id id
-                              :ok #f
-                              :condition (condition-data (get result :condition))
-                              :output (get result :output)})
-                         limit)))
+                       (limit-response (if (get result :ok)
+                                           {:id id
+                                            :ok #t
+                                            :value (get result :value)
+                                            :values (get result :values)
+                                            :output (get result :output)}
+                                           {:id id
+                                            :ok #f
+                                            :condition (condition-data (get result :condition))
+                                            :output (get result :output)})
+                                       limit)))
              (set! started old-start)
              (%deadline deadline))))
         ((eq? op :status) (reply! client {:id id :ok #t :value (status) :output ""}))
         ((eq? op :events)
          (let ((since (get request :since 0)))
-           (reply! client
-                   {:id id
-                    :ok #t
-                    :value (reverse (filter (fn (e) (> (get e :seq) since)) events))
-                    :output ""})))
+           (reply! client {:id id :ok #t :value (reverse (filter (fn (e) (> (get e :seq) since)) events)) :output ""})))
         ((eq? op :interrupt) (reply! client {:id id :ok #t :value "nil" :output ""}))
         ((or (eq? op :continue) (eq? op :abort))
          (unless paused? (error "program is not paused"))
@@ -305,7 +296,8 @@
     (for-each (fn (entry)
                 (for-each (fn (binding)
                             (when (string-contains? (symbol->string (get binding :name)) text)
-                              (set! found (cons (string->symbol (str (get entry :name) "/" (get binding :name))) found))))
+                              (set! found
+                                    (cons (string->symbol (str (get entry :name) "/" (get binding :name))) found))))
                           (%bindings (get entry :name))))
               (%namespaces))
     (sort-by symbol->string found)))
@@ -322,9 +314,7 @@
   (exists (fn (prefix)
             (and (string-starts-with? line prefix)
                  (let ((rest (substring line (string-length prefix) (string-length line))))
-                   (or (equal? rest "")
-                       (string-starts-with? rest " ")
-                       (string-starts-with? rest ")")))))
+                   (or (equal? rest "") (string-starts-with? rest " ") (string-starts-with? rest ")")))))
           (map (fn (form) (str form name))
                '("(def " "(def (" "(def- " "(def- (" "(defonce " "(defmacro " "(defclass "))))
 
@@ -337,8 +327,7 @@
         (let ((lines (string-split (read-file file) "\n"))
               (found #f))
           (dotimes (i (length lines))
-            (when (and (not found) (defines? (get lines i) (cadr parts)))
-              (set! found {:file file :line (+ i 1)})))
+            (when (and (not found) (defines? (get lines i) (cadr parts))) (set! found {:file file :line (+ i 1)})))
           found)
         #f)))
 

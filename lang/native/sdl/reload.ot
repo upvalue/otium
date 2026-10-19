@@ -61,37 +61,25 @@
 (def host-rename (ffi/bind host-libc "rename" '(utf8 utf8) 'int))
 
 (def (frame-status! frames window renderer)
-  (if status-path
-      (let ((temporary (string-append status-path ".tmp")))
-        (let ((file (host-fopen temporary "wb")))
-          (if (ffi/null? file)
-              (error "Cannot write SDL status")
-              #f)
-          (unwind-protect
-            (let ((result (host-fputs (string-append (number->string frames)
-                                                     " "
-                                                     (number->string scene-ticks)
-                                                     " "
-                                                     (number->string scene-reloads)
-                                                     " "
-                                                     (number->string scene-reload-errors)
-                                                     " "
-                                                     (number->string scene-render-errors)
-                                                     " "
-                                                     (if (ffi/pointer=? window sdl-window)
-                                                         "1"
-                                                         "0")
-                                                     " "
-                                                     (if (ffi/pointer=? renderer sdl-renderer)
-                                                         "1"
-                                                         "0")
-                                                     "\n")
-                                      file)))
-              (if (< result 0)
-                  (error "Cannot write SDL status")
-                  #f))
-            (host-fclose file)))
-        (if (= 0 (host-rename temporary status-path))
-            #t
-            (error "Cannot publish SDL status")))
-      #f))
+  (and status-path
+       (let ((temporary (str status-path ".tmp"))
+             (file (host-fopen temporary "wb")))
+         (when (ffi/null? file) (error "Cannot write SDL status"))
+         (defer
+           (let ((text (str (string-join " "
+                                         (list frames
+                                               scene-ticks
+                                               scene-reloads
+                                               scene-reload-errors
+                                               scene-render-errors
+                                               (if (ffi/pointer=? window sdl-window)
+                                                   1
+                                                   0)
+                                               (if (ffi/pointer=? renderer sdl-renderer)
+                                                   1
+                                                   0)))
+                            "\n")))
+             (when (< (host-fputs text file) 0) (error "Cannot write SDL status")))
+           (host-fclose file))
+         (unless (= 0 (host-rename temporary status-path)) (error "Cannot publish SDL status"))
+         #t)))

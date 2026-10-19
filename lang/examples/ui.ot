@@ -3,8 +3,6 @@
 (require (otium.cli :as cli))
 (require (otium.ui :as ui))
 (require (otium.ui.native :as native))
-(require (otium.ui.gpu :as gpu))
-(require (otium.ui.input :as input))
 (require (otium.ui.output :as output))
 (require (otium.sdl :as sdl))
 (require (otium.ffi :as ffi))
@@ -63,52 +61,34 @@
   (eval (list 'require (string->symbol module)))
   (eval (string->symbol (str module "/" name))))
 
-(def (ends-with? text suffix)
-  (and (>= (string-length text) (string-length suffix))
-       (equal? suffix (substring text (- (string-length text) (string-length suffix)) (string-length text)))))
+(def (bounds-json entry)
+  (let ((b (entry :bounds)))
+    (str "{\"path\":\""
+         (entry :path)
+         "\",\"x\":"
+         (b :x)
+         ",\"y\":"
+         (b :y)
+         ",\"width\":"
+         (b :width)
+         ",\"height\":"
+         (b :height)
+         ",\"focused\":"
+         (if (entry :focused)
+             "true"
+             "false")
+         ",\"pressed\":"
+         (if (entry :pressed)
+             "true"
+             "false")
+         ",\"disabled\":"
+         (if (entry :disabled)
+             "true"
+             "false")
+         "}")))
 
-(def (bounds-json node path)
-  (let ((b (node :bounds)))
-    (let ((items (list (str "{\"path\":\""
-                            path
-                            "\",\"x\":"
-                            (b :x)
-                            ",\"y\":"
-                            (b :y)
-                            ",\"width\":"
-                            (b :width)
-                            ",\"height\":"
-                            (b :height)
-                            ",\"focused\":"
-                            (if (node :focused?)
-                                "true"
-                                "false")
-                            ",\"pressed\":"
-                            (if (node :pressed?)
-                                "true"
-                                "false")
-                            ",\"disabled\":"
-                            (if (ui/enabled? node)
-                                "false"
-                                "true")
-                            "}"))))
-      (dotimes (i (length (ui/children node)))
-        (set! items (append items (bounds-json (get (ui/children node) i) (str path "." i)))))
-      items)))
-
-(def (tree-json tree)
-  (let ((items '()))
-    (dotimes (i (length (ui/children tree)))
-      (set! items (append items (bounds-json (get (ui/children tree) i) (str i)))))
-    (str "[" (string-join "," items) "]")))
-
-(def (sync-view! tree view renderer)
-  (ui/reconcile! tree (view))
-  (let ((focused (ui/focused tree)))
-    (sdl/check (native/text-input renderer
-                                  (if focused
-                                      (ui/accepts-text? (ui/instance focused))
-                                      #f)))))
+(def (tree-json window)
+  (str "[" (string-join "," (map bounds-json (ui/tree-data window))) "]"))
 
 (def (main args)
   (let ((width (cli/ref args 'width))
@@ -126,7 +106,7 @@
         (step! (if (equal? (cli/ref args 'script) "")
                    (fn (tree frame context) nil)
                    (module-function (cli/ref args 'script) "step!"))))
-    (unless (or (equal? capture "") (ends-with? capture ".png") (ends-with? capture ".bmp"))
+    (unless (or (equal? capture "") (string-ends-with? capture ".png") (string-ends-with? capture ".bmp"))
       (error "Capture must end in .png or .bmp"))
     (unwind-protect
       (let ((window (ui/open {:title (cli/ref args 'title)
@@ -155,7 +135,7 @@
                                                (set! height (get window :height))
                                                (set! scale (get window :scale))
                                                (set! frame (get window :frame))
-                                               (set! nodes (tree-json (get window :tree)))
+                                               (set! nodes (tree-json window))
                                                (set! primitives (native/gpu-count (get window :renderer)))
                                                (when (and (or (not headless) (< frame frames))
                                                           (> frame 0)

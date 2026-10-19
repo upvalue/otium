@@ -1,8 +1,6 @@
 (ns otium.ui.native)
 (require (otium.ffi :as ffi))
 
-(defonce library nil)
-
 ;; Scalar selectors used by the native layout and text bridge.
 (def BOUNDS_X 0)
 
@@ -34,155 +32,65 @@
 
 (def TEXT_HEIGHT 1)
 
-(def node-new nil)
-
-(def node-free nil)
-
-(def node-clear nil)
-
-(def node-append nil)
-
-(def node-style nil)
-
-(def node-center nil)
-
-(def node-scroll nil)
-
-(def node-shrink nil)
-
-(def node-intrinsic nil)
-
-(def node-layout nil)
-
-(def node-pending nil)
-
-(def node-query nil)
-
-(def node-answer nil)
-
-(def node-retry nil)
-
-(def text-get nil)
-
-(def text-resources nil)
-
-(def text-error nil)
-
-(def text-size nil)
-
-(def text-carets nil)
-
-(def gpu-text nil)
-
-(def node-bounds nil)
-
-(def live-nodes nil)
-
-(def- poll-event-kind nil)
-
-(def- event-width nil)
-
-(def- event-height nil)
-
-(def- event-x nil)
-
-(def- event-y nil)
-
-(def- event-key nil)
-
-(def- event-code nil)
-
-(def- event-text nil)
-
-(def- event-dy nil)
-
-(def text-input nil)
-
-(def clipboard-get nil)
-
-(def clipboard-set nil)
-
-(def- event-repeat nil)
-
-(def- gpu-create nil)
-
-(def gpu-offscreen? nil)
-
-(def gpu-scale nil)
-
-(def gpu-resize nil)
-
-(def gpu-free nil)
-
-(def gpu-clear nil)
-
-(def gpu-rect nil)
-
-(def gpu-frame nil)
-
-(def gpu-driver nil)
-
-(def gpu-count nil)
-
-(def live-renderers nil)
-
-(def (load! path)
-  (set! library (ffi/open-library (list path)))
-  (set! node-new (ffi/bind library "otui_node_new" '() 'pointer))
-  (set! node-free (ffi/bind library "otui_node_free" '(pointer) 'void))
-  (set! node-clear (ffi/bind library "otui_node_clear" '(pointer) 'void))
-  (set! node-append (ffi/bind library "otui_node_append" '(pointer pointer) 'void))
-  (set! node-center (ffi/bind library "otui_node_center" '(pointer bool) 'void))
-  (set! node-scroll (ffi/bind library "otui_node_scroll" '(pointer bool) 'void))
-  (set! node-shrink (ffi/bind library "otui_node_shrink" '(pointer bool) 'void))
-  (set! node-style (ffi/bind library "otui_node_style" '(pointer float float float float float int) 'bool))
-  (set! node-intrinsic (ffi/bind library "otui_node_intrinsic" '(pointer float float bool) 'bool))
-  (set! node-pending (ffi/bind library "otui_node_pending" '(pointer) 'int))
-  (set! node-query (ffi/bind library "otui_node_query" '(pointer int int) 'float))
-  (set! node-answer (ffi/bind library "otui_node_answer" '(pointer int float float) 'bool))
-  (set! node-retry (ffi/bind library "otui_node_retry" '(pointer) 'void))
-  (set! text-resources (ffi/bind library "otui_text_resources" '() 'int))
-  (set! text-error (ffi/bind library "otui_text_error" '() 'utf8))
-  (set! text-get (ffi/bind library "otui_text_get" '(utf8 int float float float) 'pointer))
-  (set! text-size (ffi/bind library "otui_text_size" '(pointer int) 'float))
-  (set! text-carets (ffi/bind library "otui_text_carets" '(pointer pointer int) 'bool))
-  (set! gpu-text
-        (ffi/bind library
-                  "otui_gpu_text"
-                  '(pointer utf8 int float float float float u32 float float float float)
-                  'bool))
-  (set! node-layout (ffi/bind library "otui_node_layout" '(pointer float float) 'void))
-  (set! node-bounds (ffi/bind library "otui_node_bounds" '(pointer int) 'float))
-  (set! live-nodes (ffi/bind library "otui_live_nodes" '() 'int))
-  (set! poll-event-kind (ffi/bind library "otui_poll_event" '(pointer) 'utf8))
-  (set! event-width (ffi/bind library "otui_event_width" '(pointer) 'int))
-  (set! event-height (ffi/bind library "otui_event_height" '(pointer) 'int))
-  (set! event-x (ffi/bind library "otui_event_x" '(pointer) 'float))
-  (set! event-y (ffi/bind library "otui_event_y" '(pointer) 'float))
-  (set! event-key (ffi/bind library "otui_event_key" '(pointer) 'utf8))
-  (set! event-code (ffi/bind library "otui_event_code" '(pointer) 'int))
-  (set! event-text (ffi/bind library "otui_event_text" '(pointer) 'utf8))
-  (set! event-dy (ffi/bind library "otui_event_dy" '(pointer) 'float))
-  (set! text-input (ffi/bind library "otui_text_input" '(pointer bool) 'bool))
-  (set! clipboard-get (ffi/bind library "otui_clipboard_get" '(pointer) 'utf8))
-  (set! clipboard-set (ffi/bind library "otui_clipboard_set" '(utf8) 'bool))
-  (set! event-repeat (ffi/bind library "otui_event_repeat" '(pointer) 'int))
-  (set! gpu-resize (ffi/bind library "otui_gpu_resize" '(pointer int int float) 'bool))
-  (set! gpu-scale (ffi/bind library "otui_gpu_scale" '(pointer) 'float))
-  (set! gpu-create (ffi/bind library "otui_gpu_new" '(pointer int int float utf8 bool) 'pointer))
-  (set! gpu-offscreen? (ffi/bind library "otui_gpu_offscreen" '(pointer) 'bool))
-  (set! gpu-free (ffi/bind library "otui_gpu_free" '(pointer) 'void))
-  (set! gpu-clear (ffi/bind library "otui_gpu_clear" '(pointer u32) 'void))
-  (set! gpu-rect
-        (ffi/bind library "otui_gpu_rect" '(pointer float float float float float u32 float float float float) 'bool))
-  (set! gpu-frame (ffi/bind library "otui_gpu_frame" '(pointer utf8) 'bool))
-  (set! gpu-driver (ffi/bind library "otui_gpu_driver" '(pointer) 'utf8))
-  (set! gpu-count (ffi/bind library "otui_gpu_count" '(pointer) 'int))
-  (set! live-renderers (ffi/bind library "otui_live_renderers" '() 'int)))
+(ffi/defbindings library
+                 load!
+                 (node-new "otui_node_new" () pointer)
+                 (node-free "otui_node_free" (pointer) void)
+                 (node-clear "otui_node_clear" (pointer) void)
+                 (node-append "otui_node_append" (pointer pointer) void)
+                 (node-center "otui_node_center" (pointer bool) void)
+                 (node-scroll "otui_node_scroll" (pointer bool) void)
+                 (node-shrink "otui_node_shrink" (pointer bool) void)
+                 (node-style "otui_node_style" (pointer float float float float float int) bool)
+                 (node-intrinsic "otui_node_intrinsic" (pointer float float bool) bool)
+                 (node-pending "otui_node_pending" (pointer) int)
+                 (node-query "otui_node_query" (pointer int int) float)
+                 (node-answer "otui_node_answer" (pointer int float float) bool)
+                 (node-retry "otui_node_retry" (pointer) void)
+                 (text-resources "otui_text_resources" () int)
+                 (text-error "otui_text_error" () utf8)
+                 (text-get "otui_text_get" (utf8 int float float float) pointer)
+                 (text-size "otui_text_size" (pointer int) float)
+                 (text-carets "otui_text_carets" (pointer pointer int) bool)
+                 (gpu-text "otui_gpu_text" (pointer utf8 int float float float float u32 float float float float) bool)
+                 (node-layout "otui_node_layout" (pointer float float) void)
+                 (node-bounds "otui_node_bounds" (pointer int) float)
+                 (live-nodes "otui_live_nodes" () int)
+                 ((private poll-event-kind) "otui_poll_event" (pointer) utf8)
+                 ((private event-width) "otui_event_width" (pointer) int)
+                 ((private event-height) "otui_event_height" (pointer) int)
+                 ((private event-x) "otui_event_x" (pointer) float)
+                 ((private event-y) "otui_event_y" (pointer) float)
+                 ((private event-key) "otui_event_key" (pointer) utf8)
+                 ((private event-code) "otui_event_code" (pointer) int)
+                 ((private event-text) "otui_event_text" (pointer) utf8)
+                 ((private event-dy) "otui_event_dy" (pointer) float)
+                 (text-input "otui_text_input" (pointer bool) bool)
+                 (clipboard-get "otui_clipboard_get" (pointer) utf8)
+                 (clipboard-set "otui_clipboard_set" (utf8) bool)
+                 ((private event-repeat) "otui_event_repeat" (pointer) int)
+                 (gpu-resize "otui_gpu_resize" (pointer int int float) bool)
+                 (gpu-scale "otui_gpu_scale" (pointer) float)
+                 ((private gpu-create) "otui_gpu_new" (pointer int int float utf8 bool) pointer)
+                 (gpu-offscreen? "otui_gpu_offscreen" (pointer) bool)
+                 (gpu-free "otui_gpu_free" (pointer) void)
+                 (gpu-clear "otui_gpu_clear" (pointer u32) void)
+                 (gpu-rect "otui_gpu_rect" (pointer float float float float float u32 float float float float) bool)
+                 (gpu-frame "otui_gpu_frame" (pointer utf8) bool)
+                 (gpu-driver "otui_gpu_driver" (pointer) utf8)
+                 (gpu-count "otui_gpu_count" (pointer) int)
+                 (live-renderers "otui_live_renderers" () int))
 
 (def (gpu-new window width height scale driver . offscreen)
   "Create a direct renderer, or pass #t as the last argument for offscreen rendering and capture."
-  (gpu-create window width height scale driver (if (null? offscreen) #f (car offscreen))))
+  (gpu-create window
+              width
+              height
+              scale
+              driver
+              (if (null? offscreen)
+                  #f
+                  (car offscreen))))
 
 (def (config-ref settings key)
   (let loop ((entries settings))

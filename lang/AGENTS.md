@@ -7,7 +7,9 @@ takes some ideas from Clojure (namespaces) and Janet (practicality, tables).
 
 Use `ticket --help` to interact with the ticketing system.
 
-Never edit README.md or AGENTS.md.
+Never edit README.md or AGENTS.md. 
+
+Read AGENTS-LANG.md before writing Otium code.
 
 # Guide
 

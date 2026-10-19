@@ -80,7 +80,11 @@ dev/transport.c / dev/transport.h
   POSIX socket/poll adapter with bounded framing queues. One server per process,
   on the interpreter thread. Invalid UTF-8 and embedded NUL disconnect a client
   before a payload crosses the native-string boundary. Evaluation, response
-  construction, interruption and reload behavior live in dev/core.ot.
+  construction, interruption, socket naming and reload behavior live in
+  dev/core.ot. Its record-load! hook owns file/load-time records for both runtimes;
+  runtime adapters expose raw binding facts and Otium derives public arity.
+  The native private-directory helper only creates/checks a supplied POSIX path;
+  it does not choose directory names or socket names.
 
 support/utf8.c / support/utf8.h
   One byte-span validator for foreign-string ingress, shared by FFI and transport.

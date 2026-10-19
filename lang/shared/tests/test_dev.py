@@ -56,7 +56,7 @@ class Client:
 
 
 class Server:
-    def __init__(self, runtime, watchdog=2000, repl=False, stress=False):
+    def __init__(self, runtime, watchdog=2000, repl=False, stress=False, paths=()):
         self.runtime = runtime
         self.directory = tempfile.TemporaryDirectory(prefix='otdev-', dir='/tmp')
         self.path = Path(self.directory.name) / 'dev.sock'
@@ -66,7 +66,8 @@ class Server:
             env['OTIUM_GC_STRESS'] = '1'
         self.process = subprocess.Popen(
             [str(ROOT / 'otium'), '--runtime=' + runtime, '--no-project',
-             '--dev=' + str(self.path), '--dev-watchdog=' + str(watchdog)] + ([] if repl else ['serve']),
+             '--dev=' + str(self.path), '--dev-watchdog=' + str(watchdog)] +
+            [part for path in paths for part in ('--path', str(path))] + ([] if repl else ['serve']),
             cwd=ROOT, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for _ in range(400):
             if self.path.exists():
@@ -330,6 +331,48 @@ class DevelopmentServerTests(unittest.TestCase):
                 os.utime(path, (future, future))
                 c.send(8, 'eval', code='(otium.dev/stale-files)')
                 self.assertIn(str(path.resolve()), c.response(8))
+
+    def test_shared_introspection_policy(self):
+        with tempfile.TemporaryDirectory(prefix="otdev-'policy-") as directory:
+            root = Path(directory)
+            (root / 'app').mkdir()
+            path = root / 'app/demo.ot'
+            path.write_text('(ns app.demo)\n'
+                            '(def (zero) 0)\n'
+                            '(def (fixed a b) a)\n'
+                            '(def (dotted a . rest) rest)\n'
+                            '(def (amp a b & rest) rest)\n'
+                            '(def all (fn args args))\n')
+            (root / 'app/bad.ot').write_text('(ns app.bad) (def ok 1)\n')
+            for server in self.servers(paths=[root]):
+                c = server.client
+                c.send(1, 'eval', code='(require app.demo)')
+                self.assertIn(':ok #t', c.response(1))
+                c.send(2, 'eval', code="(map (fn (b) (list (get b :name) (get b :arity) (get b :variadic))) (dev/bindings 'app.demo))")
+                result = c.response(2)
+                self.assertIn('((all 0 #t) (amp 2 #t) (dotted 1 #t) (fixed 2 #f) (zero 0 #f))', result)
+                self.assertNotIn(':parameters', result)
+                c.send(3, 'eval', code="(dev/source 'app.demo/fixed)")
+                result = c.response(3)
+                self.assertIn(str(path.resolve()), result)
+                self.assertIn(':line 3}', result)
+                c.send(4, 'eval', code='(dev/stale-files)')
+                self.assertIn(':value "()"', c.response(4))
+                future = time.time() + 60
+                os.utime(path, (future, future))
+                c.send(5, 'eval', code='(dev/stale-files)')
+                self.assertIn(str(path.resolve()), c.response(5))
+                os.utime(path, (time.time() - 60, time.time() - 60))
+                c.send(6, 'eval', code='(require app.demo :reload) (require otium.dev :reload) (dev/stale-files)')
+                self.assertIn(':value "()"', c.response(6))
+                c.send(7, 'eval', code="(dev/source 'app.demo/fixed)")
+                self.assertIn(str(path.resolve()), c.response(7))
+                c.send(8, 'eval', code='(def saved dev/record-load!) (set! dev/record-load! (fn (name path) (error "load hook failed"))) (require app.bad)')
+                result = c.response(8)
+                self.assertIn(':ok #f', result)
+                self.assertIn('load hook failed', result)
+                c.send(9, 'eval', code='(set! dev/record-load! saved) (require app.bad) app.bad/ok')
+                self.assertIn(':value "1"', c.response(9))
 
     def test_live_socket_collision(self):
         for server in self.servers():

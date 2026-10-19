@@ -22,6 +22,25 @@
 
 (defonce reloaded {})
 
+(def (default-path)
+  "Choose a per-process socket in a private, per-user directory."
+  ;; /tmp keeps paths short enough for macOS Unix sockets and is shared with clients.
+  (let ((directory (str "/tmp/otium-" (%uid))))
+    (unless (%private-directory! directory) (error "cannot use development socket directory" directory))
+    (str directory "/" (%pid) ".sock")))
+
+(def (listen! path timeout)
+  "Launcher entry point: select a socket, open it, and set the watchdog."
+  (let ((path (if (equal? path "")
+                  (default-path)
+                  path)))
+    (unless (%open path) (error "cannot listen on socket" path))
+    (set! watchdog timeout)))
+
+(def (record-load! space path)
+  "Record a loader notification; this table survives namespace reloads."
+  (put! reloaded space {:file (%realpath path) :loaded (%now)}))
+
 (def (enabled?)
   (%enabled?))
 
@@ -121,8 +140,7 @@
     found))
 
 (def- (note-reload! path code)
-  (let ((space (file-namespace code)))
-    (when space (put! reloaded space {:file (%realpath path) :loaded (%now)}))))
+  (let ((space (file-namespace code))) (when space (record-load! space path))))
 
 (def- (handle! client request)
   (let ((id (get request :id #f))
@@ -253,11 +271,33 @@
                       {:name (get entry :name)}))
                 (namespace-entries))))
 
+(def- (binding-info entry)
+  (let ((parameters (get entry :parameters #f))
+        (mask (get entry :arity-mask #f))
+        (result (dissoc entry :parameters :arity-mask)))
+    (cond
+      (parameters (let ((parameters (if (and (pair? parameters) (eq? (car parameters) 'array))
+                                        (cdr parameters)
+                                        parameters)))
+                    (let loop ((rest parameters)
+                               (required 0))
+                      (if (and (pair? rest) (symbol? (car rest)) (not (eq? (car rest) '&)))
+                          (loop (cdr rest) (+ required 1))
+                          (put result :arity required :variadic (not (null? rest)))))))
+      ((and mask (not (= mask 0)))
+       (let loop ((bits mask)
+                  (required 0))
+         (if (= (modulo bits 2) 0)
+             (loop (quotient bits 2) (+ required 1))
+             (put result :arity required :variadic (< mask 0)))))
+      (else result))))
+
 (def (bindings space)
   "Return the bindings defined in a namespace, sorted by name. Each is a table with :name, :kind (:function, :macro or :value), :public and :doc, plus :arity and :variadic for Otium functions."
-  (by-name (%bindings (if (string? space)
-                          (string->symbol space)
-                          space))))
+  (by-name (map binding-info
+                (%bindings (if (string? space)
+                               (string->symbol space)
+                               space)))))
 
 (def (apropos text)
   "Return qualified names of bindings, in any loaded namespace, whose name contains text."

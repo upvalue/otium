@@ -80,59 +80,27 @@ static void stdout_writer(void* userdata, const char* data, size_t length) {
   fwrite(data, 1, length, stdout);
 }
 
-static bool path_read(const char* directory, const char* relative, char** source, size_t* length) {
+static bool record_loaded(ots* state, const char* name, const char* path);
+
+static bool path_read(ots* state, const char* name, const char* directory,
+                      const char* relative, char** source, size_t* length) {
   bytes path = {0};
   bytes_append(&path, directory, strlen(directory));
   if (path.length != 0 && path.data[path.length - 1] != '/') bytes_append(&path, "/", 1);
   bytes_append(&path, relative, strlen(relative));
   bytes_append(&path, "\0", 1);
   bool found = ot_platform_read_file(path.data, source, length);
+  if (found && !record_loaded(state, name, path.data)) {
+    ot_host_free(*source);
+    *source = NULL;
+    found = false;
+  }
   ot_host_free(path.data);
   return found;
 }
 
-/* The file and load time of each namespace the loader found, for the development server. */
-typedef struct loaded_namespace {
-  char* name;
-  char* path;
-  int64_t loaded;
-} loaded_namespace;
-static loaded_namespace* loaded_namespaces;
-static size_t loaded_namespace_count;
-
-static void record_loaded(const char* name, const char* directory, const char* relative) {
-  bytes path = {0};
-  bytes_append(&path, directory, strlen(directory));
-  if (path.length != 0 && path.data[path.length - 1] != '/') bytes_append(&path, "/", 1);
-  bytes_append(&path, relative, strlen(relative));
-  bytes_append(&path, "\0", 1);
-  const char* resolved = ot_dev_realpath(path.data);
-  char* absolute = copy_string(resolved, strlen(resolved));
-  ot_host_free(path.data);
-  loaded_namespace* entry = NULL;
-  for (size_t i = 0; i < loaded_namespace_count; i++)
-    if (strcmp(loaded_namespaces[i].name, name) == 0) entry = &loaded_namespaces[i];
-  if (!entry) {
-    loaded_namespaces = ot_host_realloc(loaded_namespaces,
-                                        (loaded_namespace_count + 1) * sizeof *loaded_namespaces);
-    entry = &loaded_namespaces[loaded_namespace_count++];
-    entry->name = copy_string(name, strlen(name));
-    entry->path = NULL;
-  }
-  ot_host_free(entry->path);
-  entry->path = absolute;
-  entry->loaded = ot_dev_now();
-}
-
-static const loaded_namespace* find_loaded(const char* name) {
-  for (size_t i = 0; i < loaded_namespace_count; i++)
-    if (strcmp(loaded_namespaces[i].name, name) == 0) return &loaded_namespaces[i];
-  return NULL;
-}
-
 static bool module_loader(void* userdata, const char* namespace_name, char** source,
                           size_t* length) {
-  (void)userdata;
   bytes relative = {0};
   for (const char* cursor = namespace_name; *cursor != '\0'; cursor++) {
     char byte = *cursor == '.' ? '/' : *cursor;
@@ -145,10 +113,13 @@ static bool module_loader(void* userdata, const char* namespace_name, char** sou
       relative.length = stem;
       bytes_append(&relative, extensions[j], strlen(extensions[j]));
       bytes_append(&relative, "\0", 1);
-      if (path_read(load_path.values[i], relative.data, source, length)) {
-        record_loaded(namespace_name, load_path.values[i], relative.data);
+      if (path_read(userdata, namespace_name, load_path.values[i], relative.data, source, length)) {
         ot_host_free(relative.data);
         return true;
+      }
+      if (((ots*)userdata)->vm.unwind_kind != UNWIND_NONE) {
+        ot_host_free(relative.data);
+        return false;
       }
       relative.length = stem;
     }
@@ -203,6 +174,26 @@ static bytes dev_output;
 static void dev_bytes_writer(void* userdata, const char* text, size_t length) {
   bytes_append(userdata, text, length);
 }
+/* Marshal the loader's borrowed strings into an Otium notification. The dev
+ * module owns the registry and timestamp; no managed values are retained here. */
+static bool record_loaded(ots* state, const char* name, const char* path) {
+  if (!dev_enabled) return true;
+  char* copied_name = copy_string(name, strlen(name));
+  bytes code = {0};
+  const char* prefix = "(otium.dev/record-load! (string->symbol ";
+  bytes_append(&code, prefix, strlen(prefix));
+  otv text = ot_make_string(state, copied_name, strlen(copied_name));
+  ot_host_free(copied_name);
+  ot_repr_to(state, text, false, dev_bytes_writer, &code);
+  bytes_append(&code, ") ", 2);
+  text = ot_make_string(state, path, strlen(path));
+  ot_repr_to(state, text, false, dev_bytes_writer, &code);
+  bytes_append(&code, ")", 1);
+  otv ignored;
+  bool ok = ot_eval_src(state, code.data, code.length, "<dev-load>", &ignored);
+  ot_host_free(code.data);
+  return ok;
+}
 static otv dev_repr(ots* s, otv value) {
   bytes text = {0};
   ot_repr_to(s, value, false, dev_bytes_writer, &text);
@@ -235,6 +226,28 @@ static otv dev_pid(ots* s, otv* args, int argc) {
   (void)args;
   (void)argc;
   return ot_make_int(ot_dev_pid());
+}
+static otv dev_uid(ots* s, otv* args, int argc) {
+  (void)s;
+  (void)args;
+  (void)argc;
+  return ot_make_int(ot_dev_uid());
+}
+static otv dev_path_call(ots* s, otv* args, int argc, int (*operation)(const char*), int success) {
+  const char* text;
+  size_t length;
+  if (argc != 1 || !ot_string_bytes(args[0], &text, &length) || memchr(text, 0, length))
+    return ot_raise(s, "dev: expected a path without NUL");
+  char* path = copy_string(text, length);
+  int result = operation(path);
+  ot_host_free(path);
+  return result == success ? ot_true : ot_false;
+}
+static otv dev_private_directory(ots* s, otv* args, int argc) {
+  return dev_path_call(s, args, argc, ot_dev_private_directory, 1);
+}
+static otv dev_open(ots* s, otv* args, int argc) {
+  return dev_path_call(s, args, argc, ot_dev_open, 0);
 }
 static otv dev_cwd(ots* s, otv* args, int argc) {
   (void)args;
@@ -327,8 +340,7 @@ static void dev_string_field(ots* s, otv table, const char* name, const char* te
   value = ot_make_string(s, text, strlen(text));
   dev_field(s, table, name, value);
 }
-/* (%namespaces): a table per namespace with :name, and :file and :loaded when the loader read
- * it from a file. */
+/* Copy the runtime's namespace names; Otium owns file/load-time metadata. */
 static otv dev_namespaces(ots* s, otv* args, int argc) {
   (void)args;
   (void)argc;
@@ -337,38 +349,13 @@ static otv dev_namespaces(ots* s, otv* args, int argc) {
   while (ot_has_type(cursor, OBJ_NAMESPACE)) {
     entry = ot_table_new(s, 3);
     dev_field(s, entry, "name", ((ot_namespace_obj*)ot_as_obj(cursor))->name);
-    otv name = ((ot_namespace_obj*)ot_as_obj(cursor))->name;
-    const loaded_namespace* loaded = find_loaded(((ot_name_obj*)ot_as_obj(name))->bytes);
-    if (loaded) {
-      dev_string_field(s, entry, "file", loaded->path);
-      dev_field(s, entry, "loaded", ot_make_int(loaded->loaded));
-    }
     result = ot_cons(s, entry, result);
     cursor = ((ot_namespace_obj*)ot_as_obj(cursor))->next;
   }
   return result;
 }
-/* Count the parameters before a rest or pattern parameter, as compilation does. */
-static size_t dev_required(otv params) {
-  size_t count = 0;
-  if (ot_has_type(params, OBJ_PAIR)) {
-    otv first = ((ot_pair_obj*)ot_as_obj(params))->car;
-    if (ot_has_type(first, OBJ_SYMBOL) &&
-        strcmp(((ot_name_obj*)ot_as_obj(first))->bytes, "array") == 0)
-      params = ((ot_pair_obj*)ot_as_obj(params))->cdr;
-  }
-  while (ot_has_type(params, OBJ_PAIR)) {
-    otv parameter = ((ot_pair_obj*)ot_as_obj(params))->car;
-    if (!ot_has_type(parameter, OBJ_SYMBOL) ||
-        strcmp(((ot_name_obj*)ot_as_obj(parameter))->bytes, "&") == 0)
-      break;
-    count++;
-    params = ((ot_pair_obj*)ot_as_obj(params))->cdr;
-  }
-  return count;
-}
-/* (%bindings name): a table per binding defined in that namespace, with :name, :kind, :public,
- * :doc, and :arity and :variadic for Otium functions. */
+/* Copy binding facts from opaque runtime objects. Otium derives public arity
+ * metadata from the parameter list. */
 static otv dev_bindings(ots* s, otv* args, int argc) {
   if (argc != 1 || !ot_has_type(args[0], OBJ_SYMBOL))
     return ot_raise(s, "bindings: expected namespace symbol");
@@ -389,10 +376,7 @@ static otv dev_bindings(ots* s, otv* args, int argc) {
     value = ((ot_var_obj*)ot_as_obj(cursor))->value;
     if (ot_has_type(value, OBJ_FUNCTION)) {
       ot_code_obj* code = (ot_code_obj*)ot_as_obj(((ot_function_obj*)ot_as_obj(value))->code);
-      bool variadic = code->fixed_arity == SIZE_MAX;
-      size_t required = variadic ? dev_required(code->params) : code->fixed_arity;
-      dev_field(s, entry, "arity", ot_make_int((intptr_t)required));
-      dev_field(s, entry, "variadic", variadic ? ot_true : ot_false);
+      dev_field(s, entry, "parameters", code->params);
     }
     dev_field(s, entry, "public", ((ot_var_obj*)ot_as_obj(cursor))->private_value ? ot_false : ot_true);
     const char* text;
@@ -468,6 +452,9 @@ static void dev_module(ots* s) {
   ot_def_nat(s, "%enabled?", dev_enabled_p);
   ot_def_nat(s, "%clock", dev_clock);
   ot_def_nat(s, "%pid", dev_pid);
+  ot_def_nat(s, "%uid", dev_uid);
+  ot_def_nat(s, "%private-directory!", dev_private_directory);
+  ot_def_nat(s, "%open", dev_open);
   ot_def_nat(s, "%cwd", dev_cwd);
   ot_def_nat(s, "%runtime", dev_runtime);
   ot_def_nat(s, "%now", dev_now);
@@ -527,19 +514,23 @@ static ot_interrupt_action dev_break(ots* s, void* userdata) {
   return !ok || result == ot_true ? OT_INTERRUPT_ERROR : OT_INTERRUPT_CONTINUE;
 }
 static bool dev_start(ots* s, const char* path, size_t watchdog) {
-  if (ot_dev_open(path) != 0) {
-    fprintf(stderr, "otium: cannot listen on %s\n", path);
-    return false;
-  }
-  dev_enabled = true;
   atexit(ot_dev_close);
+  bytes code = {0};
+  const char* prefix = "(require (otium.dev :as dev)) (otium.dev/listen! ";
+  bytes_append(&code, prefix, strlen(prefix));
+  otv text = ot_make_string(s, path, strlen(path));
+  ot_repr_to(s, text, false, dev_bytes_writer, &code);
+  char timeout[32];
+  int count = snprintf(timeout, sizeof timeout, " %zu)", watchdog);
+  bytes_append(&code, timeout, (size_t)count);
   otv ignored;
-  char code[160];
-  snprintf(code, sizeof code, "(require (otium.dev :as dev)) (set! otium.dev/watchdog %zu)", watchdog);
-  if (!ot_eval_src(s, code, strlen(code), "<dev-start>", &ignored)) {
+  bool ok = ot_eval_src(s, code.data, code.length, "<dev-start>", &ignored);
+  ot_host_free(code.data);
+  if (!ok) {
     print_value(s, ot_condition(s), stderr);
     return false;
   }
+  dev_enabled = true;
   ot_set_writer(s, dev_writer, NULL);
   ot_set_interrupt_hook(s, dev_break, NULL);
   s->poll_hook = dev_due;
@@ -1036,10 +1027,6 @@ int main(int argc, char** argv) {
     found_project = project == NULL ? find_project() : NULL;
     add_project_paths(project == NULL ? found_project : project);
   }
-  if (dev_path && !*dev_path && !(dev_path = ot_dev_default_path())) {
-    fputs("otium: cannot use /tmp/otium-UID for the development socket\n", stderr);
-    return 2;
-  }
   ot_host_free(found_project);
   if (load_path.length == 0) strings_push(&load_path, ".", 1);
 
@@ -1051,7 +1038,7 @@ int main(int argc, char** argv) {
   signal_state = state;
   if (getenv("OTIUM_GC_STRESS") != NULL) state->config.gc_stress = true;
   ot_set_writer(state, stdout_writer, NULL);
-  ot_set_loader(state, module_loader, NULL);
+  ot_set_loader(state, module_loader, state);
   ot_register_demo_extension(state);
   ot_register_module(state, "otium.dev", dev_module);
   ot_set_arguments(state, script, argc - application_start, argv + application_start);

@@ -9,7 +9,6 @@
 #include <unistd.h>
 #include <errno.h>
 #include <limits.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -35,19 +34,12 @@ static dev_t socket_device;
 static ino_t socket_inode;
 static char* last;
 
-/* /tmp rather than $TMPDIR: macOS's $TMPDIR is long enough to crowd the 104-byte socket
- * path limit, and agents' shells often see a different $TMPDIR from the user's. */
-const char* ot_dev_default_path(void) {
-  static char path[64];
-  char directory[32];
-  snprintf(directory, sizeof directory, "/tmp/otium-%u", (unsigned)geteuid());
-  if (mkdir(directory, 0700) != 0 && errno != EEXIST) return NULL;
+int ot_dev_uid(void) { return (int)geteuid(); }
+int ot_dev_private_directory(const char* path) {
+  if (mkdir(path, 0700) != 0 && errno != EEXIST) return 0;
   struct stat st;
-  if (lstat(directory, &st) != 0 || !S_ISDIR(st.st_mode) || st.st_uid != geteuid() ||
-      (st.st_mode & 077))
-    return NULL;
-  snprintf(path, sizeof path, "%s/%d.sock", directory, (int)getpid());
-  return path;
+  return lstat(path, &st) == 0 && S_ISDIR(st.st_mode) && st.st_uid == geteuid() &&
+         !(st.st_mode & 077);
 }
 int ot_dev_pid(void) { return (int)getpid(); }
 const char* ot_dev_cwd(void) {

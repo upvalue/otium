@@ -149,8 +149,15 @@ client that connects for a single request can tell whether it missed anything.
 
 The shared handler and break loop are in `shared/dev/core.ot`. The native
 transport is in `shared/dev/transport.c`. C links it into the launcher; Chez
-loads the shared library built by `chez/run`. The legacy `--c.server` framing
-remains available for Conjure and uses the shared evaluation handler.
+loads the shared library built by `chez/run`. Socket naming, namespace file/load-time
+records, and public binding metadata are Otium policy in `core.ot`. Both loaders
+notify `record-load!` before evaluating a selected namespace file. Its `defonce`
+registry survives reloads, including reloads of the dev module itself. Native
+adapters expose namespace/binding facts, procedure parameter data, and POSIX
+operations; they do not maintain a second file registry or compute public arity.
+
+The legacy `--c.server` framing remains available for Conjure and uses the
+shared evaluation handler.
 
 Run `make test-dev` for protocol, interrupt, client, and GC stress checks.
 `make test-dev-ui` also requires the native UI dependencies and a working GPU.

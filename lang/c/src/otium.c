@@ -4087,6 +4087,12 @@ static otv require_one(ots* state, otv spec, otv caller) {
     size_t length = 0;
     bool found = state->loader != NULL &&
                  state->loader(state->loader_userdata, as_name(name)->bytes, &source, &length);
+    if (state->vm.unwind_kind != UNWIND_NONE) {
+      ot_host_free(source);
+      state->vm.current_namespace = caller;
+      ((ot_namespace_obj*)ot_as_obj(target))->loading = false;
+      return OT_UNWIND;
+    }
     if (found) {
       otv ignored;
       bool ok = eval_source(state, source, length, as_name(name)->bytes, true, &ignored);

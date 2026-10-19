@@ -21,10 +21,18 @@ int ot_dev_client(void);
 void ot_dev_send(int client, const char* text);
 /* Monotonic milliseconds, for elapsed-time comparisons only. */
 uint64_t ot_dev_clock(void);
-const char* ot_dev_default_path(void);
+/* Effective UID and a POSIX private-directory check, with no path policy.
+ * The latter creates with mode 0700 if missing, then rejects symlinks, foreign
+ * owners and group/other permissions. Returns 1 on success, 0 on failure. */
+int ot_dev_uid(void);
+int ot_dev_private_directory(const char* path);
 int ot_dev_pid(void);
+/* cwd uses static storage; realpath uses static storage on success and returns
+ * the supplied path on failure. Copy either result before another call. */
 const char* ot_dev_cwd(void);
+/* Wall-clock milliseconds since the Unix epoch. */
 int64_t ot_dev_now(void);
 const char* ot_dev_realpath(const char* path);
+/* File modification time in epoch milliseconds, or -1 when stat fails. */
 int64_t ot_dev_mtime(const char* path);
 #endif

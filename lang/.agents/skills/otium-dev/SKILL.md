@@ -15,12 +15,21 @@ tools/otium-dev ls
 ```
 
 If nothing is listed and you need one, start it in the background, for
-example `./otium --dev -L shared/lib -L examples examples/ui.ot -- --scene
-ui.calculator`, or `./otium serve FILE` without a UI. With one server running,
-commands use it. With several, pass `--pid N`.
+example (run `make ui` first if the UI dependencies are missing):
 
-If connecting fails with a permission error, the sandbox is blocking sockets
-under `/tmp/otium-UID/`. Ask the user to allow that directory.
+```sh
+./otium --runtime=chez --dev -L shared/lib -L examples examples/ui.ot -- --scene ui.calculator
+```
+
+Use `./otium --runtime=chez serve FILE` for a headless development server.
+Prefer an existing process when working on a live session. With one server,
+commands use it; with several, selection uses the working directory. Pin the
+intended process with `tools/otium-dev status --pid N`, then pass `--pid N`
+to subsequent commands. `--socket PATH` selects a custom socket.
+
+Default sockets live under `/tmp/otium-UID/`. If access is denied, inspect the
+error and use the environment's permission mechanism if needed; a permission
+error alone does not prove the server is absent.
 
 ## Look around
 
@@ -37,8 +46,11 @@ tools/otium-dev eval --ns ui.calculator 'model'
 
 `dev/` is available in the `user` namespace, which is the default. With
 `--ns`, write `otium.dev/` instead. `dev/source` returns the file and line, so
-open the file there. `dev/stale-files` lists files changed since they were
-loaded, by you or anyone else.
+open the file there. It scans the current file on disk, not the source of an
+already compiled function. `dev/stale-files` compares modification times with
+recorded load times for known namespace files; it does not watch files, compare
+contents, or track dependency changes. Missing files are skipped. Check the
+load response itself: an empty stale list is not proof that a reload succeeded.
 
 For anything longer than one form, write it to a scratch file and run
 `tools/otium-dev eval --file scratch.ot`, or pipe it to `tools/otium-dev eval -`.
@@ -59,7 +71,11 @@ tools/otium-dev load path/to/file.ot
 
 Change code by editing files and loading them, so the files stay the source of
 truth. Use `eval` for questions and small experiments, not for new definitions
-you mean to keep. State in `defonce` survives a reload.
+you mean to keep. State in `defonce` survives a reload. Loads are not atomic:
+forms before an error may have taken effect, and removed definitions remain.
+Namespace callers see redefinitions; saved function values keep their old code.
+Use forwarding callbacks such as `(fn args (apply app/handler args))` when they
+need to follow reloads. Reload callers after changing macros.
 
 A load only evaluates the file's forms. A UI keeps running and draws its next
 frame afterwards, and errors in that frame (in `view` or painting) don't come
@@ -73,7 +89,15 @@ past it pauses: `eval` and `load` exit with status 4 and print how to proceed.
 While paused you can still `eval` to inspect state. Then run
 `tools/otium-dev continue` to keep going, or `tools/otium-dev abort` to unwind
 the paused code. `tools/otium-dev interrupt` pauses a running program on
-purpose.
+purpose. Ordinary eval/load requests do not themselves request a pause; if a
+busy loop prevents servicing them, send `interrupt` first. Chez uses timer
+interrupts and C uses VM hooks, but blocking native/FFI calls must return before
+the runtime can pause. Inspection accesses namespace state, not lexical locals
+in suspended frames. Continuing resumes the existing code in that frame.
+
+A client timeout does not cancel the server computation. Check status before
+retrying a request that mutates state. A paused UI cannot produce its next frame
+until it resumes; do not repeatedly request captures while paused.
 
 ## The user's program
 
@@ -82,3 +106,5 @@ see, so tell them when you changed state, for example by driving the UI to
 reproduce a bug. Don't abort, quit or send input without a reason.
 
 Exit status: 0 ok, 1 Otium error, 2 no server, 3 timed out, 4 paused.
+
+For protocol, launcher, and UI details, read [docs/dev-server.md](../../../docs/dev-server.md) from this skill directory. Commands above run from the repository root.

@@ -1,7 +1,7 @@
 # Pattern matching
 
-Implemented on the C and Chez runtimes, in `shared/prelude/core.ot`. Checks
-are in `shared/tests/match/checks.ot`.
+Implemented on the C and Chez runtimes, in `lib/otium/core.ot`. Checks
+are in `tests/match/checks.ot`.
 
 `match` takes a value apart by shape and binds the pieces. It's a macro in the
 shared prelude, written in Otium, so both runtimes get the same behaviour from

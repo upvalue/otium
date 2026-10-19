@@ -11,7 +11,7 @@ and `get` on strings return characters instead of one-character strings.
 Today Otium can print to the host's output and read a whole file into a string
 (`read-file`). There is no way to read standard input, stream a file that
 doesn't fit in memory, read or write binary data, or send output anywhere other
-than the host sink. `GAPS.txt` lists the missing streaming and directory APIs,
+than the host sink. [Portability](../docs/portability.md) lists the missing streaming and directory APIs,
 and notes that invalid UTF-8 and filesystem errors behave differently on C and
 Chez.
 
@@ -437,7 +437,7 @@ void ot_set_io_host(ots* state, const ot_io_host* host, void* userdata);
 - A port is a heap object with a finalizer. Its byte buffer is allocated with
   `ot_host_alloc` outside the heap, so moving the port during GC doesn't move
   the buffer the OS is reading into. This touches allocation and roots, so run
-  `make gc-lint`.
+  `just gc-lint`.
 - Blocking reads must be interruptible. When `read` returns `EINTR`, the port
   checks the interrupt hook before retrying, so `^C` at a prompt waiting on
   input still works.
@@ -459,7 +459,7 @@ both runtimes. Chez's I/O conditions are mapped to `:reason`.
 3. `with` and the `close` generic, with methods for owning FFI pointers and
    `ffi/own`. This doesn't depend on ports and can go first.
 4. File, string and bytevector ports with input, output and errors, tested in
-   `shared/tests/library` on both runtimes.
+   `tests/library` on both runtimes.
 5. Moving `display` and friends onto `current-output-port`, with
    `ot_set_writer` as the default output port's sink.
 6. Custom ports, `open-ports`, and the filesystem functions.

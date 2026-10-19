@@ -31,19 +31,3 @@ supplied.
 
 Avoid running GC tests unless directly working on the C garbage collector!
 
-## Runtime layout
-
-`c/` owns the C runtime, build, tests, and implementation notes.
-`chez/` owns Otium on Chez Scheme, including its FFI adapter and tests.
-`shared/` owns runtime-independent native components and their dependencies.
-`examples/` holds runnable examples for both runtimes, organized by subject.
-Native extension fixtures stay with their runtime tests.
-`benchmarks/` owns workloads, runners, and results; `benchmarks/workloads/`
-runs on both runtimes, and `benchmarks/r7rs/` holds Otium ports plus the upstream
-Scheme suite. Runtime-specific diagnostics live beside their benchmark family.
-The native collector harness stays in `c/benchmarks/`. Track non-FFI
-portability blockers in `GAPS.txt`; runtime-specific placement is not a goal.
-`docs/` holds language-level documentation. Chez uses Chez values and semantics
-and is not required to pass the C dialect conformance suite. Root `make test`
-tests both runtimes and their shared REPL. Use `make test-c`, `make test-chez`,
-`make test-repl`, or `make test-sdl` for focused checks.

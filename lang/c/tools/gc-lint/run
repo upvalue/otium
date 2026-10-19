@@ -3,8 +3,7 @@ set -euo pipefail
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
 repo_dir=$(cd "$script_dir/../.." && pwd)
-build_dir=${OT_GC_LINT_BUILD_DIR:-"$repo_dir/build/gc-lint"}
-runtime_build="$build_dir/runtime"
+build_dir=${OT_GC_LINT_BUILD_DIR:-"$repo_dir/../build/gc-lint"}
 
 if [[ -n ${LLVM_CONFIG:-} ]]; then
   llvm_config=$LLVM_CONFIG
@@ -57,9 +56,6 @@ fi
 python3 "$script_dir/tests/test_lint.py" "$tool" \
   "$script_dir/tests/stale-borrow.c" "$script_dir/tests/write-barrier.c"
 
-make -C "$repo_dir" BUILD="$runtime_build" \
-  "$runtime_build/gen/expander.h" "$runtime_build/gen/prelude.h" "$runtime_build/gen/extra.h" "$runtime_build/gen/ot-ffi-source.h" "$runtime_build/gen/ot-cli-source.h" "$runtime_build/gen/dev.h"
-
 compile_args=(
   -std=c23 \
   -DOT_HEAP_INIT=1048576 \
@@ -69,9 +65,8 @@ compile_args=(
   -DOT_GC_LARGE_OBJECT_BYTES=262144 \
   -resource-dir "$resource_dir" \
   "${system_args[@]}" \
-  -I"$runtime_build/gen" \
   -I"$repo_dir/src" \
-  -I"$repo_dir/../shared"
+  -I"$repo_dir/../native"
 )
 
 "$tool" "$@" \
@@ -82,10 +77,10 @@ compile_args=(
   "$repo_dir/src/main.c" \
   "$repo_dir/src/ot-ext-demo.c" \
   "$repo_dir/tests/test_runtime.c" \
-  "$repo_dir/benchmarks/gc_bench.c" \
+  "$repo_dir/bench/gc_bench.c" \
   -- "${compile_args[@]}" -DOT_GC_GEN
 
-if [[ ${WITH_FFI:-0} == 1 ]]; then
+if pkg-config --exists libffi; then
   # pkg-config emits compiler arguments as shell words.
   # shellcheck disable=SC2206
   ffi_args=($(pkg-config --cflags libffi))

@@ -10,6 +10,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 TARGET = platform.machine() + '-' + platform.system().lower()
 LIBRARY_EXTENSION = 'dylib' if platform.system() == 'Darwin' else 'so'
+BUILD = Path(os.environ.get('OTIUM_BUILD', ROOT / 'build'))
 
 
 def command(runtime='c', *arguments, isolated=True, executable=None):
@@ -23,8 +24,7 @@ def command(runtime='c', *arguments, isolated=True, executable=None):
 
 def environment(*, runtime='c', stress=False, overrides=None):
     env = dict(os.environ)
-    env.setdefault('OTIUM_FFI_LIBRARY', str(ROOT / 'shared/build' / TARGET /
-                   ('libotium-ffi.' + LIBRARY_EXTENSION)))
+    env.setdefault('OTIUM_FFI_LIBRARY', str(BUILD / ('libotium-ffi.' + LIBRARY_EXTENSION)))
     if stress and runtime == 'c':
         env['OTIUM_GC_STRESS'] = '1'
     if overrides:
@@ -51,7 +51,7 @@ def metadata(commands, *, build_label='unspecified', compilation='launcher defau
             'platform': platform.platform(), 'build_label': build_label,
             'compilation': compilation, 'commands': commands,
             'environment': {key: os.environ[key] for key in
-                ('CHEZ', 'OTIUM_PLATFORM', 'OTIUM_BIN_ROOT', 'OTIUM_GC_STRESS') if key in os.environ}}
+                ('CHEZ', 'OTIUM_BUILD', 'OTIUM_GC_STRESS') if key in os.environ}}
 
 
 def run_directory(family):

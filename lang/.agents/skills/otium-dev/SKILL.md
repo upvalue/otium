@@ -15,10 +15,10 @@ tools/otium-dev ls
 ```
 
 If nothing is listed and you need one, start it in the background, for
-example (run `make ui` first if the UI dependencies are missing):
+example (run `just build` first if the UI isn't built):
 
 ```sh
-./otium --runtime=chez --dev -L shared/lib -L examples examples/ui.ot -- --scene ui.calculator
+./otium --runtime=chez --dev examples/ui.ot -- --scene ui.calculator
 ```
 
 Use `./otium --runtime=chez serve FILE` for a headless development server.

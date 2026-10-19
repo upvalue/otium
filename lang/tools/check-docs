@@ -1,0 +1,43 @@
+#!/bin/sh
+# Docs live only in agreed places, and repository paths they name must exist.
+# With no arguments, check every tracked file.
+set -eu
+cd "$(dirname "$0")/.."
+[ $# -gt 0 ] || set -- $(git ls-files)
+status=0
+for file do
+    case $file in
+        *.md|*.txt|*.org|*.rst) ;;
+        *) continue ;;
+    esac
+    [ -f "$file" ] || continue
+    case $file in
+        README.md|AGENTS.md|AGENT-LANG.md|docs/*.md|specs/*.md|benchmarks/README.md) ;;
+        examples/*/README.md|vim/README.md|.agents/skills/*/SKILL.md) ;;
+        .tickets/*|*/vendor/*|*-OFL.txt|tests/*|c/tests/*) continue ;;
+        *) echo "$file: docs belong in docs/ or specs/" >&2; status=1; continue ;;
+    esac
+    if grep -q 'LLM-generated' "$file"; then
+        echo "$file: draft banner; finish the doc or delete it" >&2
+        status=1
+    fi
+    # Agents can't edit these two, so a stale path there would block them.
+    case $file in README.md|AGENTS.md) continue ;; esac
+    # Backticked paths under a source directory must exist. Only names ending
+    # in / or with an extension count, since chez/values and native/poll-event
+    # are Otium bindings. Globs and placeholders don't match the pattern.
+    for path in $(grep -o '`[a-z][A-Za-z0-9_./-]*/[A-Za-z0-9_./-]*`' "$file" | tr -d '`' | sort -u); do
+        case $path in
+            */|*/*.*) ;;
+            *) continue ;;
+        esac
+        case $path in
+            c/*|chez/*|lib/*|native/*|tests/*|examples/*|benchmarks/*|docs/*|specs/*|tools/*|vim/*)
+                if [ ! -e "$path" ]; then
+                    echo "$file: names missing path $path" >&2
+                    status=1
+                fi ;;
+        esac
+    done
+done
+exit $status

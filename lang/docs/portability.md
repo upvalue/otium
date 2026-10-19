@@ -1,10 +1,8 @@
 # Writing code for both runtimes
 
-Runnable examples live under `examples/`. Select `c/otium` or `chez/run` at
-launch time. Both read the same Otium source. `make test-library` runs the
-common library contract, OTCL acceptance cases, reload demo, and completed
-headless examples on both runtimes. The C library contract also runs with
-collection at every allocation.
+Both runtimes read the same Otium source; `./otium --runtime=c|chez` picks one
+at launch. The `shared` test suite runs the common library contract, OTCL
+acceptance cases, the reload demo and the finished headless examples on both.
 
 Use `def`, `fn`, sequential `let`, named `let`, `defonce`, `dotimes`, and the
 shared macro and condition forms. Arrays (`[...]`), insertion-ordered tables
@@ -24,7 +22,7 @@ needed. Grouped specs such as `(require (a :as x) (b :as y))` and the older
 quoted specs remain accepted. `ns` accepts `(:require ...)` clauses.
 
 Names map dots to directories. Within each load-path directory, `.ot` is
-preferred to `.ot`; an earlier directory takes priority over a later one.
+preferred to `.scm`; an earlier directory takes priority over a later one.
 A module's `ns` declaration must match its requested name. Circular loads
 fail and clear their loading guard so the source can be fixed and retried.
 
@@ -41,15 +39,14 @@ for portable callbacks.
 
 ## Library contracts
 
-`shared/prelude/core.ot` supplies the derived core on both runtimes.
+`lib/otium/core.ot` supplies the derived core on both runtimes.
 `map`, `filter`, `take`, `drop`, and sorting preserve list/array kind. `map`
 accepts one sequence. `fold-left`, `fold-right`, `exists`, and `for-all`
 accept multiple proper lists and stop at the shortest one. Native Scheme's
 other traversal contracts are available through `chez/`.
 
 `put` copies a table or array before updating it. `put!` mutates it. `assoc`
-is association-list lookup; it no longer means a copying table update.
-`defn` was removed; write `(def (name args...) ...)`.
+is association-list lookup. Define functions with `(def (name args...) ...)`.
 
 Less-used conveniences live in an optional module:
 
@@ -114,9 +111,26 @@ values, and native syntax are available after `(require chez)` through
 subforms; do not depend on Otium macro expansion inside that boundary.
 
 C embedding, collector controls, and extension internals stay C-specific.
-The maintained extension example is `c/src/ot-ext-demo.c`, exercised by
-`c/tests/ext-demo.ot` and its source fixture. The obsolete extension API
-example has been removed.
+The extension example is `c/src/ot-ext-demo.c`, exercised by
+`c/tests/ext-demo.ot`.
 
-This shared contract does not require Chez to pass C's entire dialect suite.
-See `GAPS.txt` for remaining differences and work that is not yet covered.
+This shared contract doesn't require Chez to pass C's entire dialect suite.
+
+## Known differences
+
+- Integer overflow wraps on C and produces bignums on Chez. Ratios and complex
+  numbers from native Chez operations stay available. C keeps its bounded
+  numeric representations, embedding API and collector controls.
+- Native exception wording, runtime debugging and implementation-specific
+  printing differ. Numeric formatting is only guaranteed identical for the
+  tested cases.
+- C case conversion is ASCII; native Chez case conversion follows Unicode.
+  Avoid non-ASCII case conversion in shared code.
+- Invalid UTF-8 decoding and filesystem error diagnostics in `read-file` aren't
+  unified. There's no common streaming file, port or directory API yet.
+- Reload isn't atomic and keeps definitions removed from source. Alias
+  retargeting and namespace reflection are outside the common contract.
+- Chez's generic dispatch sees host values that don't exist on C. Don't assume
+  native vectors, hashtables or characters dispatch like Otium collections.
+- `examples/hand/lc-2-add-two-numbers.ot` is unfinished. The R7RS ports can
+  still depend on C numeric behavior.

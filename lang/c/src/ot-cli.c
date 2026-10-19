@@ -1,6 +1,9 @@
 #define OT_INTERNAL
 #include "otium.h"
-#include "ot-cli-source.h"
+static const char ot_cli_src[] = {
+#embed "../../lib/otium/cli.ot"
+};
+static const unsigned ot_cli_src_len = sizeof ot_cli_src;
 #include <stdio.h>
 #include <string.h>
 

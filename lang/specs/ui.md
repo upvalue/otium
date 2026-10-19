@@ -10,9 +10,8 @@ ligatures; IME composition remains deferred. Custom widget methods control
 default focusability, committed text, key repeat and keyup activation.
 The window/reload service now runs on both runtimes, including development
 sockets and recovery from frame errors. See `docs/ui-development.md` and
-`docs/dev-server.md` for the implemented subset and runnable demo. Replaces the September plan
-in `c/agent-docs/ui-plan.md`, which predates the FFI, the common reader and
-the class system. Decisions made so far are listed at the end.
+`docs/dev-server.md` for the implemented subset and runnable demo. Decisions
+made so far are listed at the end.
 
 `otium.ui` is a hardware-accelerated UI library written in Otium on top of the
 portable FFI (`specs/ffi.md`) and classes (`specs/classes.md`). It is shared
@@ -30,9 +29,9 @@ Full versions of all three, plus a custom widget, are at the end.
 | Layer | What it is |
 | --- | --- |
 | `otium.sdl` | Plain FFI bindings: windows, GPU device, events, text input, clipboard. Events are polled, so FFI v1's lack of callbacks doesn't matter. |
-| Renderer | A small native library in `shared/` that draws a few primitive types on the GPU (see Rendering). Bound through the FFI. |
+| Renderer | A small native library in `native/ui/` that draws a few primitive types on the GPU (see Rendering). Bound through the FFI. |
 | Text | SDL_ttf 3 for shaping, measuring and turning glyphs into bitmaps; our own glyph atlas (see Text). |
-| Layout | [Yoga](https://www.yogalayout.dev/) (flexbox), built in `shared/` and bound through its C API (see Layout). |
+| Layout | [Yoga](https://www.yogalayout.dev/) (flexbox), built in `native/` and bound through its C API (see Layout). |
 | `otium.gfx` | Drawing calls for canvases and widget `paint` methods. |
 | `otium.ui` | Windows, the event loop, widgets, focus, key bindings. |
 
@@ -320,8 +319,8 @@ and the layout logic itself doesn't need to be live-reloadable: everything an
 application edits (widgets, options, `measure` and `paint` methods) is still
 Otium and reloads as usual.
 
-- Yoga is C++20. It's compiled only in `shared/`, which keeps the runtimes
-  themselves C-only. The WASM build compiles it with emscripten.
+- Yoga is C++20. It's compiled only in `native/`, which keeps the runtimes
+  themselves C-only.
 - Yoga asks leaf nodes for their size through a measure callback. FFI v1 has
   no interpreter callbacks. The native callback records constraint queries;
   Otium answers them through `ui/measure` between Yoga passes. Replay continues
@@ -363,7 +362,7 @@ the terminal well under a millisecond of Otium work; boids with 600 birds at
   and preservation, state-slot migration on reload, children flattening, action
   lookup and focus movement, with fake measurement and paint. Run unchanged on
   C and Chez, including handlers retained across property updates.
-- Display tests behind `make test-sdl`: scripted input, frame capture, and
+- Display tests in the native suite: scripted input, frame capture, and
   pixel checks, as the current SDL tests do.
 - Every example supports bounded runs, scripted input, a fixed timestep and
   random seed, and screenshots written before clean exit. Capture waits for

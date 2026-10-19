@@ -1,14 +1,14 @@
 # Command-line programs
 
-Use `./otium` for either runtime. C is the default; `--runtime=chez` selects
-Chez. The selector is consumed before `--`; after it, the same token is an
-application argument. Existing runtime-specific launchers remain compatible.
+Use `./otium` for either runtime. Chez is the default; `--runtime=c` selects
+C. The selector is consumed before `--`; after it, the same token is an
+application argument.
 
 Both runtimes accept the same launcher syntax:
 
 ```sh
-./otium --runtime=c --path lib --c.heap-max=67108864 program.ot -- --count 3 Alice
-./otium --runtime=chez --path lib --c.heap-max=67108864 program.ot -- --count 3 Alice
+./otium --runtime=c --c.heap-max=67108864 program.ot -- --count 3 Alice
+./otium --runtime=chez --c.heap-max=67108864 program.ot -- --count 3 Alice
 ```
 
 The first `--` separates launcher arguments from application arguments. The
@@ -40,9 +40,9 @@ is an error even on the inactive runtime. Cross-option heap constraints apply
 only in C. Numeric backend options require `=VALUE`. Unprefixed C-specific
 spellings have been removed. There are no Chez-specific options yet.
 
-The option catalog is `shared/cli/options.json`. Run
-`tools/python shared/cli/generate.py` after editing it; generated C and Chez catalogs
-are checked by `make test-cli`. Launcher usage errors exit with status 2;
+The option catalog is `lib/catalog/options.json`. Run
+`just generate` after editing it; the `generated` test checks the C and Chez
+catalogs. Launcher usage errors exit with status 2;
 script failures exit with status 1.
 
 ## Process arguments

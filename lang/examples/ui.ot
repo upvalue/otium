@@ -1,5 +1,5 @@
 ;; Run from the repository root. The same entry point runs on C and Chez:
-;; ./otium --runtime=c --no-project -L shared/lib -L examples -L shared/tests examples/ui.ot -- --headless --capture /tmp/ui.png
+;; ./otium --runtime=c -L tests examples/ui.ot -- --headless --capture /tmp/ui.png
 (require (otium.cli :as cli))
 (require (otium.ui :as ui))
 (require (otium.ui.native :as native))
@@ -15,8 +15,8 @@
               (summary "Run a Yoga/SDL_GPU widget scene.")
               (option config
                       (names "--config")
-                      (default "shared/build/ui-config.ot")
-                      (help "Native library installation data written by make ui."))
+                      (default "build/ui-config.ot")
+                      (help "Native library installation data written by the UI build."))
               (option scene (names "--scene") (default "ui.layout") (help "Module exporting a view function."))
               (option script
                       (names "--script")
@@ -48,7 +48,7 @@
               (option title (names "--title") (default "Otium UI"))
               (option icon
                       (names "--icon")
-                      (default "shared/ui/assets/otium.png")
+                      (default "native/ui/assets/otium.png")
                       (help "Application icon as PNG or BMP; empty disables the icon."))
               (flag background (names "--background") (help "Do not request foreground focus."))
               (option capture (names "--capture") (default "") (help "Final frame as .png or .bmp."))

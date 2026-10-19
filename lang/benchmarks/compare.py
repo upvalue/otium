@@ -2,7 +2,6 @@
 """Compare the C runtime with the Chez runtime using checked workloads."""
 
 import argparse
-from otium_tools import metadata, run_directory
 import datetime
 import json
 import os
@@ -13,6 +12,11 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+import sys
+
+# Repository modules, for running this file directly.
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / part) for part in ('', 'tools')]
+from otium_tools import metadata, run_directory
 
 
 ROOT = Path(__file__).resolve().parents[1]

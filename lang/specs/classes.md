@@ -410,10 +410,9 @@ both runtimes. The multimethod examples and tests use classes.
 
 ## Validation
 
-`make test-classes` runs the same class checks on C, C with collection stress,
-and Chez. Runtime-specific suites cover namespace ownership, imported method
-extensions, file reloads, explicit resets, and dispatch against an independent
-oracle. `make test` runs these with the other runtime and shared tests.
+`tests/classes/checks.ot` runs unchanged on C and Chez (`just test classes`).
+Runtime-specific suites cover namespace ownership, imported method extensions,
+file reloads, explicit resets, and dispatch against an independent oracle.
 
 `benchmarks/workloads/classes.ot` exercises slot reads and writes, ancestor
 dispatch, and an around method using the same source on both runtimes.

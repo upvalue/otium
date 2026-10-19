@@ -4,12 +4,15 @@
 
 import argparse
 import json
-from otium_tools import command, metadata, run_directory
 import statistics
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+# Repository modules, for running this file directly.
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / part) for part in ('', 'tools')]
+from otium_tools import command, metadata, run_directory
 
 
 def nonnegative_int(value):

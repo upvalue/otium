@@ -91,6 +91,6 @@ behind. Prefer expressing features in Otium over adding runtime escape hatches.
   macros. Otium `values` enumerates table values; `chez/values` produces Scheme
   multiple values. Prefer the shared Otium API for ordinary application code.
 - Run a file with `./otium --runtime=chez path/to/program.ot`; add `-L directory`
-  for module paths. Check `(describe 'name)`, the [shared prelude](shared/prelude/core.ot),
+  for module paths. Check `(describe 'name)`, the [shared prelude](lib/otium/core.ot),
   and [portability notes](docs/portability.md) before assuming a familiar Scheme
   or Clojure API exists or has the same contract.

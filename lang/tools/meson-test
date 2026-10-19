@@ -1,0 +1,15 @@
+#!/bin/sh
+# meson-test SETUP [SUITE|TEST]...: suite names select a suite, anything else a test.
+set -eu
+setup=$1
+shift
+count=$#
+while [ "$count" -gt 0 ]; do
+    case $1 in
+        c|chez|shared|native|gpu|bench) set -- "$@" --suite "$1" ;;
+        *) set -- "$@" "$1" ;;
+    esac
+    shift
+    count=$((count - 1))
+done
+exec meson test -C "$(dirname "$0")/../build" --setup "$setup" --print-errorlogs "$@"

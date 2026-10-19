@@ -2,4 +2,4 @@
 # Talk to a running Otium development server. See otium-dev --help.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec "$root/python" -m otium_tools.dev_cli "$@"
+PYTHONPATH="$root" exec "${PYTHON:-python3}" -m otium_tools.dev_cli "$@"

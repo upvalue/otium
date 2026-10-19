@@ -30,7 +30,9 @@ typedef uintptr_t otv;
 #define OT_INT_MIN (-OT_INT_MAX - (intptr_t)1)
 
 static inline bool ot_is_int(otv value) { return (value & 1u) != 0; }
-static inline bool ot_int_fits(intptr_t value) { return value >= OT_INT_MIN && value <= OT_INT_MAX; }
+static inline bool ot_int_fits(intptr_t value) {
+  return value >= OT_INT_MIN && value <= OT_INT_MAX;
+}
 /* Return nil rather than producing a different integer when value does not fit
  * in the tagged representation. */
 static inline otv ot_make_int(intptr_t value) {
@@ -53,30 +55,30 @@ typedef struct ot_gc_phase_stats {
 } ot_gc_phase_stats;
 
 #define OT_GC_STATS_FIELDS(STAT, PHASE)                                                            \
-  STAT(uint64_t, allocations, "allocations", "allocations", COUNT)                               \
-  STAT(uint64_t, collections, "collections", "collections", COUNT)                               \
-  STAT(uint64_t, allocated_bytes, "allocated_bytes", "allocated bytes", BYTES)                   \
-  STAT(uint64_t, copied_bytes, "copied_bytes", "copied bytes", BYTES)                             \
-  STAT(uint64_t, promoted_bytes, "promoted_bytes", "promoted bytes", BYTES)                       \
-  STAT(uint64_t, moved_bytes, "moved_bytes", "moved bytes", BYTES)                                \
-  STAT(uint64_t, reclaimed_bytes, "reclaimed_bytes", "reclaimed bytes", BYTES)                   \
-  STAT(uint64_t, mark_stack_overflows, "mark_stack_overflows", "mark-stack overflows", COUNT)    \
-  STAT(size_t, used_bytes, "used_bytes", "heap used bytes", BYTES)                                \
-  STAT(size_t, peak_used_bytes, "peak_used_bytes", "peak heap used bytes", BYTES)                 \
-  STAT(size_t, capacity_bytes, "capacity_bytes", "heap capacity bytes", BYTES)                    \
-  STAT(size_t, reserved_bytes, "reserved_bytes", "reserved bytes", BYTES)                         \
-  STAT(size_t, metadata_bytes, "metadata_bytes", "metadata bytes", BYTES)                         \
-  STAT(size_t, fragmentation_bytes, "fragmentation_bytes", "fragmentation bytes", BYTES)         \
-  STAT(size_t, largest_free_region_bytes, "largest_free_region_bytes",                            \
-       "largest free region bytes", BYTES)                                                        \
-  PHASE(full_copy, "full-copy", "full_copy_collections", "full_copy_total_pause_ns",             \
-        "full_copy_max_pause_ns")                                                                 \
-  PHASE(minor, "minor", "minor_collections", "minor_total_pause_ns", "minor_max_pause_ns")       \
-  PHASE(major_sweep, "major-sweep", "major_sweep_collections", "major_sweep_total_pause_ns",     \
-        "major_sweep_max_pause_ns")                                                               \
-  PHASE(major_compact, "major-compact", "major_compact_collections",                             \
-        "major_compact_total_pause_ns", "major_compact_max_pause_ns")                            \
-  PHASE(mutator_pause, "mutator pauses", "mutator_pause_collections", "mutator_pause_total_ns", \
+  STAT(uint64_t, allocations, "allocations", "allocations", COUNT)                                 \
+  STAT(uint64_t, collections, "collections", "collections", COUNT)                                 \
+  STAT(uint64_t, allocated_bytes, "allocated_bytes", "allocated bytes", BYTES)                     \
+  STAT(uint64_t, copied_bytes, "copied_bytes", "copied bytes", BYTES)                              \
+  STAT(uint64_t, promoted_bytes, "promoted_bytes", "promoted bytes", BYTES)                        \
+  STAT(uint64_t, moved_bytes, "moved_bytes", "moved bytes", BYTES)                                 \
+  STAT(uint64_t, reclaimed_bytes, "reclaimed_bytes", "reclaimed bytes", BYTES)                     \
+  STAT(uint64_t, mark_stack_overflows, "mark_stack_overflows", "mark-stack overflows", COUNT)      \
+  STAT(size_t, used_bytes, "used_bytes", "heap used bytes", BYTES)                                 \
+  STAT(size_t, peak_used_bytes, "peak_used_bytes", "peak heap used bytes", BYTES)                  \
+  STAT(size_t, capacity_bytes, "capacity_bytes", "heap capacity bytes", BYTES)                     \
+  STAT(size_t, reserved_bytes, "reserved_bytes", "reserved bytes", BYTES)                          \
+  STAT(size_t, metadata_bytes, "metadata_bytes", "metadata bytes", BYTES)                          \
+  STAT(size_t, fragmentation_bytes, "fragmentation_bytes", "fragmentation bytes", BYTES)           \
+  STAT(size_t, largest_free_region_bytes, "largest_free_region_bytes",                             \
+       "largest free region bytes", BYTES)                                                         \
+  PHASE(full_copy, "full-copy", "full_copy_collections", "full_copy_total_pause_ns",               \
+        "full_copy_max_pause_ns")                                                                  \
+  PHASE(minor, "minor", "minor_collections", "minor_total_pause_ns", "minor_max_pause_ns")         \
+  PHASE(major_sweep, "major-sweep", "major_sweep_collections", "major_sweep_total_pause_ns",       \
+        "major_sweep_max_pause_ns")                                                                \
+  PHASE(major_compact, "major-compact", "major_compact_collections",                               \
+        "major_compact_total_pause_ns", "major_compact_max_pause_ns")                              \
+  PHASE(mutator_pause, "mutator pauses", "mutator_pause_collections", "mutator_pause_total_ns",    \
         "mutator_pause_max_ns")
 
 typedef struct ot_gc_stats {
@@ -157,7 +159,8 @@ void ot_clear_condition(ots* state);
 bool ot_exit_status(const ots* state, int* status);
 
 /* Copy application arguments into this state. A NULL script denotes no script. */
-OT_GC_MAY_ALLOCATE void ot_set_arguments(ots* state, const char* script, int argc, char* const* argv);
+OT_GC_MAY_ALLOCATE void ot_set_arguments(ots* state, const char* script, int argc,
+                                         char* const* argv);
 
 /* Inspect and construct values. Constructors may move every unrooted value. */
 ot_type ot_value_type(otv value);
@@ -208,8 +211,8 @@ void ot_global_add(ots* state, otv* slot);
 /* Install C callables in the current namespace or as a require-able module. */
 OT_GC_MAY_ALLOCATE void ot_def_nat(ots* state, const char* name, ot_nat function);
 void ot_register_module(ots* state, const char* name, ot_module_init init);
-OT_GC_MAY_ALLOCATE otv ot_make_native(ots* state, const char* name,
-                                     ot_context_nat function, otv context);
+OT_GC_MAY_ALLOCATE otv ot_make_native(ots* state, const char* name, ot_context_nat function,
+                                      otv context);
 
 /* Extension values hold inline bytes or an owned host pointer. */
 unsigned ot_ext_type(ots* state, const char* name, ot_ext_finalizer finalizer);
@@ -671,7 +674,7 @@ void ot_destroy_ffi(ots* state);
 void ot_register_demo_extension(ots* state);
 OT_GC_MAY_ALLOCATE void ot_select_namespace(ots* state, const char* name, size_t length);
 OT_GC_MAY_ALLOCATE bool ot_eval_results(ots* state, const char* source, size_t length,
-                                      const char* name, otv* results, size_t* line);
+                                        const char* name, otv* results, size_t* line);
 OT_GC_MAY_ALLOCATE bool ot_eval_partial(ots* state, const char* source, size_t length,
                                         const char* name, size_t* consumed, bool* incomplete,
                                         otv* out);

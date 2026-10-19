@@ -59,33 +59,19 @@ arithmetic. The C token baseline rejects `...` as a malformed numeric token;
 this also prevents using it as native syntax-rules ellipsis in Otium source.
 Vertical bars and backslashes within atoms have no Chez quoting semantics.
 Native syntax beyond the explicitly traversed Otium forms still has the
-expansion limitations documented in `chez/NOTES.txt`.
+expansion limitations documented in [Chez notes](chez.md).
 
 Both runtimes count Unicode code points for common string length/get. This
 change does not unify native byte/character APIs or substring range behavior.
 
-## Validation
+## Tests
 
-`make test` includes the shared reader suite. Its 36 positive and 48 negative
-fixtures cover datums, constructor lists, numbers, strings, comments, delimiters
-and rejected host syntax. Separate shared evaluation tests cover growth,
-identity, ordered tables, pair-key freezing, nil callbacks, macro arguments,
-source files, required modules and streamed REPL input. Chez tests additionally
-check incomplete-input classification, positions, cleared capacity, multiple
-values, generic categories and the native reader boundary.
-
-`make test-ffi` passes on both runtimes, including C GC stress. `make test-sdl`
-passes manifest, event-lifetime, input and dummy-audio checks on both. Accelerated
-graphics checks skip in the sandbox because no display backend is available.
-`make gc-lint` completes with two stale-borrow warnings in unchanged VM code
-(`code` and `function` across `resolve_var`); none are in the reader changes.
-
-`benchmarks/results-reader.json` records three measured runs after one warmup
-on ARM64 macOS with Chez 10.4.1. The existing tail-loop, fib-28 and list-allocation
-workloads all returned their expected results. Chez median work times were
-2.411 ms, 1.283 ms and 1.856 ms respectively. This run includes the emitted nil
-checks, but has no before/after baseline and establishes no speedup or overhead
-claim.
+The `reader` test runs 36 positive and 48 negative fixtures from
+`tests/reader/datums.json`, covering datums, constructor lists, numbers,
+strings, comments, delimiters and rejected host syntax, plus evaluation,
+source files, required modules and streamed REPL input. The Chez reader tests
+also check incomplete-input classification, positions, multiple values and the
+native reader boundary.
 
 The Chez reader also has a token mode for the formatter and linter, exposed as
 `otium.reader/tokens`. It reads with the same code, so it accepts and rejects

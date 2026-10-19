@@ -1,20 +1,17 @@
-# Build and compiler output
+# Build output. Use build-<name>/ for extra Meson configurations.
 /build/
-/builddir/
-/bin/
-/compile_commands.json
-/site.mk
+/build-*/
+/subprojects/*
+!/subprojects/*.wrap
+!/subprojects/packagefiles/
 *.o
 *.a
 *.so
 *.dylib
-*.dll
-*.exe
 
-# Test and tooling caches
+# Tooling caches
 __pycache__/
 *.py[cod]
-.pytest_cache/
 .cache/
 
 # Editor and OS files
@@ -25,15 +22,5 @@ __pycache__/
 *.swo
 *~
 
-# ✨ Generated language site and local Python environment
-/site/dist/
-/site/.venv/
-/site/node_modules/
-/site/.astro/
-/site/.generated/
-/site/public/reference.md
-/site/public/assets/otium.mjs
-/site/public/assets/otium.wasm
-
-# Local benchmark runs; curated reports live in benchmarks/results.
+# Local benchmark runs; curated results live in benchmarks/results.
 /benchmarks/runs/

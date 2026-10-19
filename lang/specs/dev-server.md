@@ -73,7 +73,7 @@ next to `project.ot`, or in the working directory without a project.
 `--dev` turns it on, and `--dev=PATH` picks another path. Starting fails if a
 live server already holds the path; a stale socket file is removed.
 
-The listener and connection handling are native code in `shared/dev/`, built
+The listener and connection handling are native code in `native/dev/`, built
 the same way as the line editor: C links it directly, and Chez loads it as a
 shared library. It does three things:
 

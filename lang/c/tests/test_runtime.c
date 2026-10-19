@@ -181,21 +181,19 @@ static void test_integer_boundaries(void) {
   check(!evaluate(state, source, &value), "reader rejects hexadecimal above tagged range");
   ot_clear_condition(state);
 
-  snprintf(source, sizeof source, "(= (+ %" PRIdPTR " 1) %" PRIdPTR ")", OT_INT_MAX,
-           OT_INT_MIN);
-  check(evaluate(state, source, &value) && value == ot_true, "integer arithmetic wraps at tag width");
+  snprintf(source, sizeof source, "(= (+ %" PRIdPTR " 1) %" PRIdPTR ")", OT_INT_MAX, OT_INT_MIN);
+  check(evaluate(state, source, &value) && value == ot_true,
+        "integer arithmetic wraps at tag width");
 
   if (OT_INT_MAX > INT64_C(9007199254740993)) {
     check(evaluate(state, "(< 9007199254740992 9007199254740993)", &value) && value == ot_true,
           "large adjacent integers order exactly");
-    check(evaluate(state, "(= 9007199254740993 9007199254740992.0)", &value) &&
-              value == ot_false,
+    check(evaluate(state, "(= 9007199254740993 9007199254740992.0)", &value) && value == ot_false,
           "mixed comparison does not round a large integer");
-    check(evaluate(state, "(> 9007199254740993 9007199254740992.0)", &value) &&
-              value == ot_true,
+    check(evaluate(state, "(> 9007199254740993 9007199254740992.0)", &value) && value == ot_true,
           "mixed comparison orders a large integer and float");
-    check(evaluate(state, "(max 9007199254740992 9007199254740993)", &value) &&
-              ot_is_int(value) && ot_get_int(value) == INT64_C(9007199254740993),
+    check(evaluate(state, "(max 9007199254740992 9007199254740993)", &value) && ot_is_int(value) &&
+              ot_get_int(value) == INT64_C(9007199254740993),
           "max selects the exact large integer");
   }
   ot_destroy(state);
@@ -319,7 +317,8 @@ static void test_eval_integration(void) {
                  "(and (= (documented-macro 42) 42) "
                  "     (equal? (describe 'documented-macro) "
                  "             \"user/documented-macro: Macro documentation.\"))",
-                 &value) && value == ot_true,
+                 &value) &&
+            value == ot_true,
         "macro docstrings survive collection during compilation");
   const char* program = "(def (tail n total) "
                         "  (if (= n 0) total (tail (- n 1) (+ total n)))) "

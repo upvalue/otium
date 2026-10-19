@@ -1,9 +1,11 @@
 # Portable SDL3 on C and Chez
 
-From lang/, build the optional FFI and generate an installation manifest:
+SDL goes through the FFI, with one shared binding and canvas implementation in
+`native/sdl/` and no SDL-specific C wrappers. Build with libffi and SDL3
+installed, then generate an installation manifest:
 
-    make ffi
-    tools/python shared/sdl/setup.py
+    just build
+    just sdl-manifest
 
 SDL3 and pkg-config must be installed for setup. The checked-in macOS arm64
 manifest was generated from SDL 3.4.16 headers. It records that version and a
@@ -22,13 +24,13 @@ against the manifest before calling SDL.
 
 Regenerate after changing SDL headers or compiler ABI options:
 
-    tools/python shared/sdl/setup.py
-    tools/python shared/sdl/setup.py --check
+    just sdl-manifest
+    just sdl-manifest --check
 
 --check recompiles the probe and compares all metadata with the manifest.
 --manifest PATH selects a different output/check file. CC and CFLAGS configure
 the native compiler; cross-compilation is not supported. The default path is
-shared/sdl/manifests/<machine>-<system>.json.
+native/sdl/manifests/<machine>-<system>.json.
 
 The library search order is SDL3_LIBRARY, then the manifest's library path,
 then platform loader names when the manifest has no library path. An explicit
@@ -37,8 +39,8 @@ The same rule applies on both runtimes.
 
 Run either animated scene:
 
-    tools/python examples/run_sdl.py --runtime c --scene shapes
-    tools/python examples/run_sdl.py --runtime chez --scene particles
+    python3 examples/run_sdl.py --runtime c --scene shapes
+    python3 examples/run_sdl.py --runtime chez --scene particles
 
 The host watches the shared scene file between frames. Saving it reloads the
 drawing code; R retries immediately. Escape or closing the window exits. Window,
@@ -80,8 +82,8 @@ Textures precede renderer destruction; the renderer precedes its window.
 
 Tests:
 
-    tools/python shared/tests/test_sdl.py --runtime both
-    tools/python shared/tests/test_sdl.py --runtime both --require-accelerated
+    just test sdl
+    just test 'sdl accelerated'
 
 Both modes check the manifest, invalid manifest/override rejection, copied text
 whose native bytes change on the next fixture poll, input conversion, and dummy
@@ -90,14 +92,15 @@ renderer, verify captured background and texture pixels, inject R/Escape/close/
 mouse events, reload drawing code while resources persist, and check teardown
 after an Otium error. The watched-scene test recovers from syntax and render
 errors using frame-status handshakes. Both shared animations run on both hosts.
-The ordinary test reports an explicit graphics skip if no display/backend is
-available. --require-accelerated makes that absence a failure. On macOS, a
+The `sdl` test, in the native suite, reports an explicit graphics skip if no
+display or backend is available. `sdl accelerated`, in the gpu suite, makes that
+absence a failure. On macOS, a
 sandbox without display-server access cannot run the graphics checks.
 
 Real-device audio is a separate smoke test:
 
-    tools/python examples/run_sdl.py --runtime c --acceptance --audio real --inject-error
-    tools/python examples/run_sdl.py --runtime chez --acceptance --audio real --inject-error
+    python3 examples/run_sdl.py --runtime c --acceptance --audio real --inject-error
+    python3 examples/run_sdl.py --runtime chez --acceptance --audio real --inject-error
 
 The acceptance test verifies that the device consumes queued PCM after resume,
 then refills only below a fixed queue threshold. This is separate from dummy

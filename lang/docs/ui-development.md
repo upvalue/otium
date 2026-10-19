@@ -7,24 +7,17 @@ keyboard focus and action routing. Automatic file watching is still pending.
 
 ## Build and run
 
-The native build needs a C/C++ toolchain, Make, pkg-config, Python 3.12 or later,
-SDL3 3.4.12 or later, SDL3_ttf 3.2.2 or later (`sdl3-ttf` in pkg-config),
-and `glslc`. Yoga sources are pinned and checksum-verified:
-
-```sh
-make ui-setup
-make ui
-```
-
-For an offline Yoga install, use
-`tools/python shared/ui/setup.py --archive /path/to/yoga.tar.gz` instead of
-`make ui-setup`. See [native dependencies](native-dependencies.md) for the version and checksum.
+The UI needs a C/C++ toolchain, Meson, pkg-config, Python 3.12 or later for
+its tests, SDL3 3.4.12 or later, SDL3_ttf 3.2.2 or later (`sdl3-ttf` in
+pkg-config), libffi and `glslc`. `just build` builds it when they're installed;
+Meson downloads the pinned Yoga sources on first configure. See
+[native components](native.md#dependencies) for versions and checksums.
 
 Run either command from the repository root:
 
 ```sh
-./otium --runtime=c --no-project -L shared/lib -L examples examples/ui.ot
-./otium --runtime=chez --no-project -L shared/lib -L examples examples/ui.ot
+./otium --runtime=c examples/ui.ot
+./otium --runtime=chez examples/ui.ot
 ```
 
 The window stays open until it is closed. Click any of the three colored cards
@@ -36,14 +29,14 @@ Tab and Shift+Tab move focus; Enter or Space activate the focused button on
 release. The terminal scene exercises text input and scrolling.
 
 `examples/ui.ot` uses `otium.cli`. `--help` lists its options. Native library
-paths come from `shared/build/ui-config.ot`, written by Make and read as data.
+paths come from `build/ui-config.ot`, written by Meson and read as data.
 `--config` selects another installation file. The application and scene modules
 are checked-in Otium source.
 
 ## Bounded execution and captures
 
 ```sh
-./otium --runtime=chez --no-project -L shared/lib -L examples examples/ui.ot -- \
+./otium --runtime=chez examples/ui.ot -- \
   --headless --frames 3 --capture /tmp/ui.png --dump-state /tmp/ui.json
 ```
 
@@ -62,16 +55,16 @@ state, route pointer events, or reload a checked-in module at a known frame.
 They need no source generation or interactive REPL session.
 
 ```sh
-make test-ui
-make test-ui-layout
-make test-ui-gpu
+just test ui
+just test 'ui layout'
+just test 'ui gpu'
 ```
 
-The first two run without a display, including C GC stress checks. GPU checks
+The first two run without a display. GPU checks
 capture scenes on both runtimes and compare bounds and pixels, including scale,
 clipping, alpha blending, rounded edges, button activation and method reload.
 They also check teardown after errors. Captures remain in
-`shared/build/ui-test-artifacts/`. Python invokes the checked-in applications
+`build/ui-test-artifacts/`. Python invokes the checked-in applications
 and checks their output; it does not generate Otium programs.
 
 Metal on macOS has been exercised. Vulkan shaders compile, but the renderer has
@@ -127,8 +120,8 @@ method and reconcile again. The future event loop must report such failures
 and let the caller retry. `(ui/dispose! tree)` releases mounted Yoga nodes;
 the CLI releases its renderer and window even when a frame raises an error.
 
-The implementation is `shared/lib/otium/ui.ot`; shared acceptance checks live
-in `shared/tests/ui/checks.ot`. Runtime primitives in `otium.generic` provide
+The implementation is `lib/otium/ui.ot`; shared acceptance checks live
+in `tests/ui/checks.ot`. Runtime primitives in `otium.generic` provide
 property construction, mounting and migration while preserving fixed slot
 access. See `specs/classes.md` for their contracts.
 
@@ -223,12 +216,12 @@ macOS takes the app-switcher name from the executable's bundle. For development,
 run either runtime through the bundle launcher:
 
 ```sh
-tools/python shared/ui/run_app.py --runtime chez --app-name "Otium UI"
-tools/python shared/ui/run_app.py --runtime c --app-name "Calculator" -- --scene ui.layout
+python3 tools/ui-app.py --runtime chez --app-name "Otium UI"
+python3 tools/ui-app.py --runtime c --app-name "Calculator" -- --scene ui.layout
 ```
 
 The launcher copies the host executable (and Chez boot files) into an ignored
-bundle under `shared/build/apps/`, then runs the checked-in application. It does
+bundle under `build/apps/`, then runs the checked-in application. It does
 not generate Otium source. This supplies development process identity; it is not
 a standalone distributable application. Direct interpreter launches still work,
 but their app-switcher name may remain the interpreter's name.
@@ -271,7 +264,7 @@ mounted widget. The host follows `accepts-text?` when enabling SDL text input.
 Run the calculator with either runtime:
 
 ```sh
-./otium --runtime=chez --no-project -L shared/lib -L examples examples/ui.ot -- \
+./otium --runtime=chez examples/ui.ot -- \
   --scene ui.calculator --title Calculator --height 600
 ```
 
@@ -285,7 +278,7 @@ pixels and identical C/Chez captures.
 ## Text fields and terminal
 
 ```sh
-./otium --runtime=chez --no-project -L shared/lib -L examples examples/ui.ot -- \
+./otium --runtime=chez examples/ui.ot -- \
   --scene ui.terminal --title Terminal
 ```
 

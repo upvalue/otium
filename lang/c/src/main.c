@@ -2,9 +2,12 @@
 #define OT_INTERNAL
 #include "otium.h"
 
-#include "line-edit.h"
+#include "line/line-edit.h"
 #include "dev/transport.h"
-#include "dev.h"
+static const char ot_dev_src[] = {
+#embed "../../lib/otium/dev.ot"
+};
+static const unsigned ot_dev_src_len = sizeof ot_dev_src;
 
 #include <ctype.h>
 #include <errno.h>
@@ -16,7 +19,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
 
 typedef struct strings {
   char** values;
@@ -82,8 +84,8 @@ static void stdout_writer(void* userdata, const char* data, size_t length) {
 
 static bool record_loaded(ots* state, const char* name, const char* path);
 
-static bool path_read(ots* state, const char* name, const char* directory,
-                      const char* relative, char** source, size_t* length) {
+static bool path_read(ots* state, const char* name, const char* directory, const char* relative,
+                      char** source, size_t* length) {
   bytes path = {0};
   bytes_append(&path, directory, strlen(directory));
   if (path.length != 0 && path.data[path.length - 1] != '/') bytes_append(&path, "/", 1);
@@ -360,7 +362,8 @@ static otv dev_bindings(ots* s, otv* args, int argc) {
   if (argc != 1 || !ot_has_type(args[0], OBJ_SYMBOL))
     return ot_raise(s, "bindings: expected namespace symbol");
   otv space = s->namespaces;
-  while (ot_has_type(space, OBJ_NAMESPACE) && ((ot_namespace_obj*)ot_as_obj(space))->name != args[0])
+  while (ot_has_type(space, OBJ_NAMESPACE) &&
+         ((ot_namespace_obj*)ot_as_obj(space))->name != args[0])
     space = ((ot_namespace_obj*)ot_as_obj(space))->next;
   if (!ot_has_type(space, OBJ_NAMESPACE)) return ot_raise(s, "bindings: unknown namespace");
   otv result = ot_null, cursor = ((ot_namespace_obj*)ot_as_obj(space))->vars, entry = ot_nil;
@@ -378,7 +381,8 @@ static otv dev_bindings(ots* s, otv* args, int argc) {
       ot_code_obj* code = (ot_code_obj*)ot_as_obj(((ot_function_obj*)ot_as_obj(value))->code);
       dev_field(s, entry, "parameters", code->params);
     }
-    dev_field(s, entry, "public", ((ot_var_obj*)ot_as_obj(cursor))->private_value ? ot_false : ot_true);
+    dev_field(s, entry, "public",
+              ((ot_var_obj*)ot_as_obj(cursor))->private_value ? ot_false : ot_true);
     const char* text;
     size_t length;
     ot_binding_documentation(cursor, &text, &length);
@@ -617,7 +621,7 @@ static ot_interrupt_action run_server_break(ots* state, void* userdata) {
 static void run_server(ots* state) {
   ot_set_writer(state, dev_writer, NULL);
   otv initialized;
-  const char *initialize = "(require otium.dev)";
+  const char* initialize = "(require otium.dev)";
   if (!ot_eval_src(state, initialize, strlen(initialize), "<server>", &initialized)) return;
   bytes request = {0};
   ot_set_interrupt_hook(state, run_server_break, NULL);
@@ -686,7 +690,7 @@ static bool repl_evaluate(ots* state, bytes* pending) {
 
 /* Snapshot names and docs into host storage. None of these calls allocate in
  * the managed heap or run Otium code. Local definitions precede referred names. */
-static void repl_binding( otv name_value, otv var_value, const char* prefix) {
+static void repl_binding(otv name_value, otv var_value, const char* prefix) {
   ot_name_obj* name = (ot_name_obj*)ot_as_obj(name_value);
   bytes qualified = {0};
   if (prefix != NULL) {
@@ -704,7 +708,7 @@ static void repl_binding( otv name_value, otv var_value, const char* prefix) {
   ot_host_free(qualified.data);
 }
 
-static void repl_namespace_bindings( otv namespace_value, const char* prefix, bool private_ok) {
+static void repl_namespace_bindings(otv namespace_value, const char* prefix, bool private_ok) {
   ot_namespace_obj* space = (ot_namespace_obj*)ot_as_obj(namespace_value);
   for (otv cursor = space->vars; ot_has_type(cursor, OBJ_VAR);) {
     ot_var_obj* var = (ot_var_obj*)ot_as_obj(cursor);
@@ -749,9 +753,9 @@ static void repl_bindings(ots* state) {
 }
 
 static void run_repl(ots* state) {
-  fputs(
-      "otium repl - ^C interrupts, ^D exits, ^X ^E opens $EDITOR, Tab completes, ,help for help\n",
-      stdout);
+  fputs("otium repl (c) - ^C interrupts, ^D exits, ^X ^E opens $EDITOR, Tab completes, ,help for "
+        "help\n",
+        stdout);
   bytes pending = {0};
   if (dev_enabled) ot_line_set_service(dev_idle, state);
   bool interactive = isatty(STDIN_FILENO);
@@ -802,7 +806,7 @@ static bool parse_number(const char* option, const char* text, size_t* out) {
   return true;
 }
 
-#include "../../shared/cli/options.inc"
+#include "options.inc"
 
 static void usage(FILE* stream) { fputs(launcher_help, stream); }
 
@@ -822,11 +826,12 @@ static void print_byte_stat(const char* name, uint64_t bytes_value) {
 static void print_gc_stats(ots* state) {
   ot_gc_stats stats = ot_get_gc_stats(state);
   fputs("GC stats:\n", stderr);
-#define OT_GC_PRINT_COUNT(NAME, VALUE) fprintf(stderr, "  %s: %" PRIu64 "\n", NAME, (uint64_t)(VALUE))
+#define OT_GC_PRINT_COUNT(NAME, VALUE)                                                             \
+  fprintf(stderr, "  %s: %" PRIu64 "\n", NAME, (uint64_t)(VALUE))
 #define OT_GC_PRINT_BYTES(NAME, VALUE) print_byte_stat(NAME, (uint64_t)(VALUE))
 #define OT_GC_STAT(TYPE, MEMBER, JSON, HUMAN, UNIT) OT_GC_PRINT_##UNIT(HUMAN, stats.MEMBER);
 #define OT_GC_PHASE(MEMBER, HUMAN, COLLECTIONS_JSON, TOTAL_JSON, MAX_JSON)                         \
-  fprintf(stderr, "  %s: %" PRIu64 " (total %" PRIu64 " ns, max %" PRIu64 " ns)\n", HUMAN, \
+  fprintf(stderr, "  %s: %" PRIu64 " (total %" PRIu64 " ns, max %" PRIu64 " ns)\n", HUMAN,         \
           stats.MEMBER.collections, stats.MEMBER.total_pause_ns, stats.MEMBER.max_pause_ns);
   OT_GC_STATS_FIELDS(OT_GC_STAT, OT_GC_PHASE)
 #undef OT_GC_PHASE
@@ -840,12 +845,12 @@ static void print_gc_stats_json(ots* state) {
   bool first = true;
   fputs("OTIUM_GC_STATS {", stderr);
 #define OT_GC_JSON(NAME, VALUE)                                                                    \
-  fprintf(stderr, "%s\"%s\":%" PRIu64, first ? "" : ",", NAME, (uint64_t)(VALUE));           \
+  fprintf(stderr, "%s\"%s\":%" PRIu64, first ? "" : ",", NAME, (uint64_t)(VALUE));                 \
   first = false
 #define OT_GC_STAT(TYPE, MEMBER, JSON, HUMAN, UNIT) OT_GC_JSON(JSON, stats.MEMBER);
-#define OT_GC_PHASE(MEMBER, HUMAN, COLLECTIONS_JSON, TOTAL_JSON, MAX_JSON) \
-  OT_GC_JSON(COLLECTIONS_JSON, stats.MEMBER.collections);                   \
-  OT_GC_JSON(TOTAL_JSON, stats.MEMBER.total_pause_ns);                      \
+#define OT_GC_PHASE(MEMBER, HUMAN, COLLECTIONS_JSON, TOTAL_JSON, MAX_JSON)                         \
+  OT_GC_JSON(COLLECTIONS_JSON, stats.MEMBER.collections);                                          \
+  OT_GC_JSON(TOTAL_JSON, stats.MEMBER.total_pause_ns);                                             \
   OT_GC_JSON(MAX_JSON, stats.MEMBER.max_pause_ns);
   OT_GC_STATS_FIELDS(OT_GC_STAT, OT_GC_PHASE)
 #undef OT_GC_PHASE
@@ -914,7 +919,7 @@ int main(int argc, char** argv) {
   bool repl = false;
   bool server = false;
   bool serve = false;
-  const char *dev_path = NULL;
+  const char* dev_path = NULL;
   size_t watchdog = 2000;
   bool stats = false;
   bool stats_json = false;
@@ -933,17 +938,29 @@ int main(int argc, char** argv) {
       break;
     }
     if (strcmp(argument, "serve") == 0 && script == NULL && !serve) {
-      serve = true; if (!dev_path) dev_path = ""; continue;
+      serve = true;
+      if (!dev_path) dev_path = "";
+      continue;
     }
-    if (strcmp(argument, "--dev") == 0) { dev_path = ""; continue; }
-    if (strncmp(argument, "--dev=", 6) == 0) { dev_path = argument + 6; continue; }
+    if (strcmp(argument, "--dev") == 0) {
+      dev_path = "";
+      continue;
+    }
+    if (strncmp(argument, "--dev=", 6) == 0) {
+      dev_path = argument + 6;
+      continue;
+    }
     if (strcmp(argument, "--dev-watchdog") == 0) {
-      fputs("otium: --dev-watchdog requires =MS\n", stderr); return 2;
+      fputs("otium: --dev-watchdog requires =MS\n", stderr);
+      return 2;
     }
     if (strncmp(argument, "--dev-watchdog=", 15) == 0) {
       if (strcmp(argument + 15, "0") == 0) watchdog = 0;
       else if (!parse_number("dev-watchdog", argument + 15, &watchdog)) return 2;
-      if (watchdog > 2147483647) { fputs("otium: watchdog out of range\n", stderr); return 2; }
+      if (watchdog > 2147483647) {
+        fputs("otium: watchdog out of range\n", stderr);
+        return 2;
+      }
       continue;
     }
     if (argument[0] != '-') {
@@ -962,7 +979,8 @@ int main(int argc, char** argv) {
     for (option = 0; option < sizeof launcher_options / sizeof *launcher_options; option++) {
       const char* name = launcher_options[option].name;
       if (name_length == strlen(name) + 2 && strncmp(argument, "--", 2) == 0 &&
-          strncmp(argument + 2, name, name_length - 2) == 0) break;
+          strncmp(argument + 2, name, name_length - 2) == 0)
+        break;
     }
     if (option == sizeof launcher_options / sizeof *launcher_options) {
       fprintf(stderr, "otium: unknown option %s\n", argument);
@@ -972,11 +990,20 @@ int main(int argc, char** argv) {
     const char* kind = launcher_options[option].kind;
     const char* value = equal ? equal + 1 : NULL;
     if (strcmp(kind, "flag") == 0) {
-      if (value) { fprintf(stderr, "otium: --%s takes no value\n", name); return 2; }
+      if (value) {
+        fprintf(stderr, "otium: --%s takes no value\n", name);
+        return 2;
+      }
     } else if (strcmp(kind, "integer") == 0) {
-      if (!value) { fprintf(stderr, "otium: --%s requires =INTEGER\n", name); return 2; }
+      if (!value) {
+        fprintf(stderr, "otium: --%s requires =INTEGER\n", name);
+        return 2;
+      }
     } else if (!value) {
-      if (++i == argc) { fprintf(stderr, "otium: --%s requires a %s\n", name, kind); return 2; }
+      if (++i == argc) {
+        fprintf(stderr, "otium: --%s requires a %s\n", name, kind);
+        return 2;
+      }
       value = argv[i];
     }
     size_t number = 0;
@@ -984,11 +1011,14 @@ int main(int argc, char** argv) {
       if (!parse_number(name, value, &number)) return 2;
       if ((strcmp(name, "c.heap-init") == 0 && number < 1024) ||
           (strcmp(name, "c.max-depth") == 0 && number > UINT_MAX)) {
-        fprintf(stderr, "otium: --%s out of range\n", name); return 2;
+        fprintf(stderr, "otium: --%s out of range\n", name);
+        return 2;
       }
     }
-    if (strcmp(name, "help") == 0) { usage(stdout); return 0; }
-    else if (strcmp(name, "repl") == 0) repl = true;
+    if (strcmp(name, "help") == 0) {
+      usage(stdout);
+      return 0;
+    } else if (strcmp(name, "repl") == 0) repl = true;
     else if (strcmp(name, "c.server") == 0) server = true;
     else if (strcmp(name, "c.gc-stats") == 0) stats = true;
     else if (strcmp(name, "c.gc-stats-json") == 0) stats_json = true;
@@ -1003,7 +1033,8 @@ int main(int argc, char** argv) {
   }
   if (script) strings_push(&files, script, strlen(script));
   if (dev_path && server) {
-    fputs("otium: --dev and --c.server cannot be used together\n", stderr); return 2;
+    fputs("otium: --dev and --c.server cannot be used together\n", stderr);
+    return 2;
   }
   if (repl && server) {
     fputs("otium: --repl and --c.server cannot be used together\n", stderr);
@@ -1029,6 +1060,10 @@ int main(int argc, char** argv) {
   }
   ot_host_free(found_project);
   if (load_path.length == 0) strings_push(&load_path, ".", 1);
+#ifdef OT_LIB_DIR
+  // The standard library is searched after every user directory.
+  strings_push(&load_path, OT_LIB_DIR, strlen(OT_LIB_DIR));
+#endif
 
   ots* state = ot_create(&config);
   if (state == NULL) {
@@ -1051,9 +1086,11 @@ int main(int argc, char** argv) {
     status = run_file(state, files.values[i]);
   if (status == 0 && !state->quit_requested) {
     if (serve) {
-      while (!state->quit_requested) { ot_dev_poll(50); dev_service(state); }
-    }
-    else if (server) run_server(state);
+      while (!state->quit_requested) {
+        ot_dev_poll(50);
+        dev_service(state);
+      }
+    } else if (server) run_server(state);
     else if (repl || files.length == 0) run_repl(state);
   }
   if (stats) print_gc_stats(state);

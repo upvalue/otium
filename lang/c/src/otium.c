@@ -8,10 +8,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "expander.h"
+static const char ot_expander_src[] = {
+#embed "../../lib/otium/expander.ot"
+};
+static const unsigned ot_expander_src_len = sizeof ot_expander_src;
 #include "ot-gc-internal.inc"
-#include "prelude.h"
-#include "extra.h"
+static const char ot_prelude_src[] = {
+#embed "../../lib/otium/core.ot"
+};
+static const unsigned ot_prelude_src_len = sizeof ot_prelude_src;
+static const char ot_extra_src[] = {
+#embed "../../lib/otium/extra.ot"
+};
+static const unsigned ot_extra_src_len = sizeof ot_extra_src;
 
 #ifndef OT_HEAP_INIT
 #define OT_HEAP_INIT (1024u * 1024u)
@@ -961,7 +970,8 @@ static void reader_space(reader* input) {
     }
     if (byte == ';') {
       while (input->offset < input->length && input->source[input->offset] != '\n' &&
-             input->source[input->offset] != '\r') input->offset++;
+             input->source[input->offset] != '\r')
+        input->offset++;
       continue;
     }
     break;
@@ -1001,9 +1011,10 @@ static otv read_string(reader* input) {
         size_t digits = 0;
         while (input->offset < input->length && input->source[input->offset] != ';') {
           unsigned char c = (unsigned char)input->source[input->offset++];
-          unsigned digit = c >= '0' && c <= '9' ? c - '0'
+          unsigned digit = c >= '0' && c <= '9'   ? c - '0'
                            : c >= 'a' && c <= 'f' ? c - 'a' + 10
-                           : c >= 'A' && c <= 'F' ? c - 'A' + 10 : 16;
+                           : c >= 'A' && c <= 'F' ? c - 'A' + 10
+                                                  : 16;
           if (digit == 16 || scalar > 0x10ffffu) {
             buf_free(&bytes);
             return reader_error(input, "invalid hex escape");
@@ -1060,10 +1071,16 @@ static bool token_starts_number(const char* token, size_t length) {
 static bool decimal_token(const char* token, size_t length) {
   size_t i = token[0] == '+' || token[0] == '-' ? 1 : 0;
   size_t digits = 0;
-  while (i < length && isdigit((unsigned char)token[i])) { i++; digits++; }
+  while (i < length && isdigit((unsigned char)token[i])) {
+    i++;
+    digits++;
+  }
   if (i < length && token[i] == '.') {
     i++;
-    while (i < length && isdigit((unsigned char)token[i])) { i++; digits++; }
+    while (i < length && isdigit((unsigned char)token[i])) {
+      i++;
+      digits++;
+    }
   }
   if (digits == 0) return false;
   if (i < length && (token[i] == 'e' || token[i] == 'E')) {
@@ -2154,16 +2171,16 @@ static bool compile_expression_inner(ots* state, bytecode_compiler* compiler, ot
   otv head = as_pair(form)->car;
   OT_FRAME_SCOPED(state, &head);
   bool generic_form = is_type(head, OBJ_SYMBOL) &&
-                      (symbol_is(head, "defclass") || symbol_is(head, "defabstract") || symbol_is(head, "defgeneric") ||
-                       symbol_is(head, "defmethod") || symbol_is(head, "reset-class!") ||
-                       symbol_is(head, "reset-generic!"));
+                      (symbol_is(head, "defclass") || symbol_is(head, "defabstract") ||
+                       symbol_is(head, "defgeneric") || symbol_is(head, "defmethod") ||
+                       symbol_is(head, "reset-class!") || symbol_is(head, "reset-generic!"));
   if (is_type(head, OBJ_SYMBOL) && as_name(head)->special_form &&
       !(generic_form && is_type(env_binding(env, head), OBJ_BINDING))) {
     otv args = as_pair(form)->cdr;
     OT_FRAME_SCOPED(state, &args);
-    if (symbol_is(head, "defclass") || symbol_is(head, "defabstract") || symbol_is(head, "defgeneric") ||
-        symbol_is(head, "defmethod") || symbol_is(head, "reset-class!") ||
-        symbol_is(head, "reset-generic!")) {
+    if (symbol_is(head, "defclass") || symbol_is(head, "defabstract") ||
+        symbol_is(head, "defgeneric") || symbol_is(head, "defmethod") ||
+        symbol_is(head, "reset-class!") || symbol_is(head, "reset-generic!")) {
       if (!declarations_allowed) {
         generic_error(state, "invalid-declaration", "declarations require top-level context");
         return false;
@@ -3490,8 +3507,8 @@ static otv vm_execute_loop(ots* state, size_t floor) {
     }
     if (++state->vm.poll_count >= 1024) {
       state->vm.poll_count = 0;
-      bool dev_interrupt = state->poll_hook && !state->vm.in_interrupt_hook &&
-          ++state->dev_poll_count >= 16;
+      bool dev_interrupt =
+          state->poll_hook && !state->vm.in_interrupt_hook && ++state->dev_poll_count >= 16;
       bool dev_polled = dev_interrupt;
       if (dev_interrupt) {
         state->dev_poll_count = 0;
@@ -3532,7 +3549,7 @@ static otv vm_execute_loop(ots* state, size_t floor) {
 
 #if OT_COMPUTED_GOTO
     if (labels[instruction] == NULL) goto vm_invalid;
-    goto *labels[instruction];
+    goto* labels[instruction];
 #endif
 
     VM_LABEL(vm_load)
@@ -3960,7 +3977,7 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       vm_push(state, result);
       continue;
     }
-  VM_LABEL(vm_invalid)
+    VM_LABEL(vm_invalid)
     (void)ot_raise(state, "vm: unknown opcode 0x%02x", instruction);
     return vm_unwind_to(state, floor);
   }
@@ -4651,16 +4668,11 @@ static bool compare_int_float(intptr_t integer, double number, int* order) {
   }
 
   intptr_t truncated = (intptr_t)number;
-  if (integer < truncated)
-    *order = -1;
-  else if (integer > truncated)
-    *order = 1;
-  else if ((double)truncated < number)
-    *order = -1;
-  else if ((double)truncated > number)
-    *order = 1;
-  else
-    *order = 0;
+  if (integer < truncated) *order = -1;
+  else if (integer > truncated) *order = 1;
+  else if ((double)truncated < number) *order = -1;
+  else if ((double)truncated > number) *order = 1;
+  else *order = 0;
   return true;
 }
 
@@ -4694,8 +4706,7 @@ static otv nat_numeric_compare(ots* state, otv* args, int argc, int mode) {
   for (int i = 1; i < argc; i++) {
     bool left_number = ot_is_int(args[i - 1]) || is_type(args[i - 1], OBJ_FLOAT);
     bool right_number = ot_is_int(args[i]) || is_type(args[i], OBJ_FLOAT);
-    if (!left_number || !right_number)
-      return ot_raise(state, "comparison: expected numbers");
+    if (!left_number || !right_number) return ot_raise(state, "comparison: expected numbers");
     int order = 0;
     bool ordered = numeric_order(args[i - 1], args[i], &order);
     bool ok = ordered && (mode == 0   ? order == 0
@@ -4844,9 +4855,9 @@ static otv nat_equal(ots* state, otv* args, int argc) {
 }
 
 static const char* value_type_name(otv value) {
-  static const char* names[] = {"nil",     "null",    "boolean",         "int",     "float",
-                                "symbol",  "keyword", "string",          "pair",    "array",
-                                "table",   "buffer",  "function",        "macro",   "param",
+  static const char* names[] = {"nil",     "null",    "boolean",         "int",      "float",
+                                "symbol",  "keyword", "string",          "pair",     "array",
+                                "table",   "buffer",  "function",        "macro",    "param",
                                 "restart", "foreign", "type-descriptor", "instance", "internal"};
   return names[ot_value_type(value)];
 }
@@ -5913,7 +5924,7 @@ static otv nat_current_ns(ots* state, otv* args, int argc) {
   return ((ot_namespace_obj*)ot_as_obj(state->vm.current_namespace))->name;
 }
 
-#include "../../shared/documentation/runtime.inc"
+#include "runtime-reference.inc"
 
 void ot_binding_documentation(otv var_value, const char** text, size_t* length) {
   ot_var_obj* var = (ot_var_obj*)ot_as_obj(var_value);
@@ -6073,8 +6084,7 @@ static otv nat_current_second(ots* state, otv* args, int argc) {
 
 static otv nat_request_exit(ots* state, otv* args, int argc, const char* name) {
   if (need_arity(state, name, argc, 0, 1) == OT_UNWIND) return OT_UNWIND;
-  if (argc == 1 &&
-      (!ot_is_int(args[0]) || ot_get_int(args[0]) < 0 || ot_get_int(args[0]) > 255))
+  if (argc == 1 && (!ot_is_int(args[0]) || ot_get_int(args[0]) < 0 || ot_get_int(args[0]) > 255))
     return ot_raise(state, "%s: expected status from 0 to 255", name);
   state->vm.unwind_kind = UNWIND_QUIT;
   state->quit_requested = true;
@@ -6339,7 +6349,8 @@ static otv signature_from_list(ots* state, otv generic, otv list) {
   otv signature = ot_array_new(state, length);
   OT_FRAME_SCOPED(state, &signature);
   while (list != ot_null) {
-    array_push(state, &signature, as_pair(list)->car == state->object_class ? ot_false : as_pair(list)->car);
+    array_push(state, &signature,
+               as_pair(list)->car == state->object_class ? ot_false : as_pair(list)->car);
     list = as_pair(list)->cdr;
   }
   return signature;
@@ -6561,10 +6572,14 @@ static otv nat_generic_methods(ots* state, otv* args, int argc) {
     signature = as_pair(as_pair(cursor)->car)->car;
     copy = ot_null;
     for (size_t i = as_array(signature)->length; i > 0; i--)
-      copy = ot_cons(state, as_slots(as_array(signature)->slots)->values[i - 1] == ot_false
-                              ? state->object_class : as_slots(as_array(signature)->slots)->values[i - 1], copy);
+      copy = ot_cons(state,
+                     as_slots(as_array(signature)->slots)->values[i - 1] == ot_false
+                         ? state->object_class
+                         : as_slots(as_array(signature)->slots)->values[i - 1],
+                     copy);
     otv qualifier = method_qualifier(as_pair(cursor)->car) == ot_true
-                        ? ot_intern(state, "around", 6, true) : ot_intern(state, "primary", 7, false);
+                        ? ot_intern(state, "around", 6, true)
+                        : ot_intern(state, "primary", 7, false);
     otv entry = ot_nil;
     OT_FRAME_SCOPED(state, &qualifier, &entry);
     entry = ot_cons(state, copy, ot_null);
@@ -6607,10 +6622,10 @@ static otv nat_remove_method(ots* state, otv* args, int argc) {
 static void generic_module_init(ots* state) {
   if (state->dispatch_types != ot_nil) return;
   state->dispatch_types = make_slots(state, OT_TYPE_INTERNAL + 1);
-  static const char* names[] = {"Nil",       "Null",    "Boolean",        "Number", "Number",
-                               "Symbol",    "Keyword", "String",         "Pair",   "Vector",
-                               "Hashtable", "Buffer",  "Procedure",      "Macro",  "Parameter",
-                               "Restart",   "Foreign", "TypeDescriptor", "Instance", "Other"};
+  static const char* names[] = {"Nil",       "Null",    "Boolean",        "Number",   "Number",
+                                "Symbol",    "Keyword", "String",         "Pair",     "Vector",
+                                "Hashtable", "Buffer",  "Procedure",      "Macro",    "Parameter",
+                                "Restart",   "Foreign", "TypeDescriptor", "Instance", "Other"};
   otv owner = ((ot_namespace_obj*)ot_as_obj(state->vm.current_namespace))->name;
   otv name = ot_nil, type = ot_nil;
   OT_FRAME_SCOPED(state, &owner, &name, &type);
@@ -6884,8 +6899,8 @@ void ot_select_namespace(ots* state, const char* name, size_t length) {
   state->vm.current_namespace = namespace_find(state, symbol, true);
 }
 
-bool ot_eval_results(ots* state, const char* source, size_t length, const char* name,
-                     otv* results, size_t* line) {
+bool ot_eval_results(ots* state, const char* source, size_t length, const char* name, otv* results,
+                     size_t* line) {
   size_t counted = 0;
   *line = 1;
   reader input = {.state = state, .source = source, .length = length, .name = name};
@@ -6893,7 +6908,8 @@ bool ot_eval_results(ots* state, const char* source, size_t length, const char* 
   OT_FRAME_SCOPED(state, &form, &result);
   for (;;) {
     reader_space(&input);
-    while (counted < input.offset) if (source[counted++] == '\n') (*line)++;
+    while (counted < input.offset)
+      if (source[counted++] == '\n') (*line)++;
     form = read_form(&input);
     if (form == OT_UNDEFINED) return true;
     if (form == OT_UNWIND) return false;

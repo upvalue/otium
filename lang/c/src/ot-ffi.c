@@ -1,12 +1,17 @@
 #define OT_INTERNAL
 #include "otium.h"
 #ifndef OT_WITH_FFI
-static void unavailable(ots* s) { ot_raise(s, "otium.ffi unavailable: rebuild with WITH_FFI=1"); }
+static void unavailable(ots* s) {
+  ot_raise(s, "otium.ffi unavailable: rebuild with libffi installed (-Dffi=enabled)");
+}
 void ot_register_ffi(ots* s) { ot_register_module(s, "otium.ffi", unavailable); }
 void ot_destroy_ffi(ots* s) { (void)s; }
 #else
-#include "../../shared/ffi/native.h"
-#include "ot-ffi-source.h"
+#include "../../native/ffi/native.h"
+static const char ot_ffi_src[] = {
+#embed "../../lib/otium/ffi.ot"
+};
+static const unsigned ot_ffi_src_len = sizeof ot_ffi_src;
 #include <ffi.h>
 #include <float.h>
 #include <stdlib.h>
@@ -239,7 +244,7 @@ static int call_kind(otv value) {
 }
 /* A union's overlapping members contribute to its calling classification.
  * Preserve byte classes as well as size: a 4-aligned union can straddle two
- * SysV eightbytes when nested in a struct. See docs/ffi-abi.md. */
+ * SysV eightbytes when nested in a struct. See docs/native.md. */
 static bool classify_union_member(ots* s, otv d, size_t offset, unsigned char classes[32],
                                   int* floating, unsigned depth) {
   if (depth > 64) {

@@ -1,8 +1,8 @@
 # REPL editing
 
 Run `./otium` or `./otium --runtime=chez` in a terminal. Both use the same native line
-editor in `shared/`, based on Bestline. Chez builds its small shared library
-on the first interactive launch; a C compiler and make are required then.
+editor in `native/line/`, based on Bestline. Chez builds its small shared library
+on the first interactive launch; a C compiler and Meson are required then.
 Script execution and redirected input do not need that library.
 
 Use arrows to move or recall history, Ctrl-A / Ctrl-E for the start / end of
@@ -61,7 +61,7 @@ from their defining namespace. `describe` returns the namespace/name followed by
 bindings return `nil` on both runtimes.
 
 Runtime-provided Otium functions and forms use the shared reference in
-`shared/documentation/runtime.json`. Entries declare which runtime implements
+`lib/catalog/runtime.json`. Entries declare which runtime implements
 them, with runtime notes where behavior differs. Otium prelude functions and
 macros keep their docs beside their definitions, rather than duplicating them
 in the reference. User definitions take precedence over runtime entries.
@@ -70,10 +70,10 @@ a bundled Chez manual or fallback descriptions.
 
 After editing the runtime reference, run:
 
-    tools/python shared/documentation/generate.py
+    just generate
 
 The generated C and Scheme tables are checked in; normal builds require no
-generation step or network access. `make check-generated` verifies they match the
+generation step or network access. `the `help` test` verifies they match the
 shared source and that public shared prelude definitions carry docstrings.
 
 For example, in either REPL:

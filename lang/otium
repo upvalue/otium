@@ -4,11 +4,11 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # The formatter and linter run on Chez, whatever the selected runtime.
 case "${1-}" in
     attach|mcp)
-        exec "$root/tools/python" "$root/shared/dev/client.py" "$@" ;;
+        PYTHONPATH="$root/tools" exec "${PYTHON:-python3}" -m otium_tools.client "$@" ;;
     fmt|lint)
         tool=$1
         shift
-        exec "$root/chez/run" --no-project --path "$root/shared/lib" "$root/shared/tools/$tool.ot" -- "$@" ;;
+        exec "$root/chez/run" --no-project "$root/lib/otium/tools/$tool.ot" -- "$@" ;;
 esac
 runtime=chez
 remaining=$#
@@ -46,6 +46,12 @@ while [ "$remaining" -gt 0 ]; do
     esac
 done
 case "$runtime" in
-    c) exec "$root/c/otium" "$@" ;;
+    c)
+        binary=${OTIUM_BUILD:-$root/build}/otium
+        if [ ! -x "$binary" ]; then
+            printf 'otium: %s is missing; run just build\n' "$binary" >&2
+            exit 127
+        fi
+        exec "$binary" "$@" ;;
     chez) exec "$root/chez/run" "$@" ;;
 esac

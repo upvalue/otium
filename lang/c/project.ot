@@ -1,2 +1,0 @@
-; Runnable examples; the prelude and expander are embedded.
-(paths "../examples")

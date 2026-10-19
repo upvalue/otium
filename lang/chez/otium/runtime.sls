@@ -351,7 +351,7 @@
             (namespace-loaded?-set! space #t))
           (if (eq? name 'otium.core)
               (parameterize ([current-namespace space])
-                (read-source (shared-source "prelude/core.ot")))
+                (read-source (shared-source "core.ot")))
               (let ([core (find-namespace 'otium.core)])
                 (for-each
                   (lambda (member)
@@ -361,11 +361,15 @@
                   (vector->list (hashtable-keys (namespace-definitions core))))))
           space)))
 
-  (define (shared-source relative)
+  ;; The standard library, lib/ beside the Chez library directory.
+  (define (library-root)
     (let loop ([directories (library-directories)])
-      (if (null? directories) (error 'prelude "shared prelude not found")
-          (let ([path (string-append (caar directories) "/../shared/" relative)])
-            (if (file-exists? path) path (loop (cdr directories)))))))
+      (if (null? directories) (error 'prelude "lib directory not found")
+          (let ([path (string-append (caar directories) "/../lib")])
+            (if (file-directory? path) path (loop (cdr directories)))))))
+
+  (define (shared-source relative)
+    (string-append (library-root) "/otium/" relative))
 
   (define (import-value! space local target member)
     (unless (hashtable-contains? (namespace-definitions target) member)
@@ -394,7 +398,8 @@
     (let ([relative (list->string
                       (map (lambda (c) (if (char=? c #\.) #\/ c))
                            (string->list (symbol->string name))))])
-      (let search ([paths (load-path)])
+      ;; The standard library is searched after every user directory.
+      (let search ([paths (append (load-path) (list (library-root)))])
         (if (null? paths) (error 'require "namespace source not found" name (load-path))
             (let next-suffix ([suffixes '(".ot" ".scm")])
               (if (null? suffixes) (search (cdr paths))
@@ -430,13 +435,7 @@
         (error 'require "circular namespace load" name))
       (when (and (not (memq name '(otium.generic otium.process otium.reader)))
                  (or reload? (not (namespace-loaded? space))))
-        (load-namespace! space (or (namespace-source space)
-          (cond
-            [(eq? name 'otium.extra) (shared-source "lib/otium/extra.ot")]
-            [(eq? name 'otium.dev) (shared-source "dev/core.ot")]
-            [(eq? name 'otium.cli) (shared-source "cli/core.ot")]
-            [(eq? name 'otium.ffi) (shared-source "ffi/core.ot")]
-            [else (source-for name)]))))
+        (load-namespace! space (or (namespace-source space) (source-for name))))
       space))
 
   (define (load-source path)
@@ -764,7 +763,7 @@
                        text))]
            [input (if editing? (make-line-input-port prompt repl-bindings) (current-input-port))])
       (when editing?
-        (display "otium repl - ^C interrupts, ^D exits, ^X ^E opens $EDITOR, Tab completes, ,help for help\n"))
+        (display "otium repl (chez) - ^C interrupts, ^D exits, ^X ^E opens $EDITOR, Tab completes, ,help for help\n"))
       (dynamic-wind
         (lambda () (void))
         (lambda ()

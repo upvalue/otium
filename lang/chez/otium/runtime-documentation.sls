@@ -1,4 +1,4 @@
-;; Generated from shared/documentation/runtime.json.
+;; Generated from lib/catalog/runtime.json.
 (library (otium runtime-documentation)
   (export runtime-documentation)
   (import (chezscheme))

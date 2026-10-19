@@ -1,6 +1,0 @@
-#!/bin/sh
-# Run repository Python modules without installing a package into the host.
-set -eu
-root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-export PYTHONPATH="$root/tools:$root${PYTHONPATH:+:$PYTHONPATH}"
-exec "${PYTHON:-python3}" "$@"

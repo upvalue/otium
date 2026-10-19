@@ -171,11 +171,11 @@ macro arguments and expansion with the new keyword/nil values. Verify the Chez
 runtime still starts from ordinary Scheme without bootstrapping.
 
 Run focused C, Chez, and REPL checks, then the repository's applicable full
-tests. Run `make gc-lint` if LLVM development tools are installed when touching
+tests. Run `just gc-lint` if LLVM development tools are installed when touching
 C allocation, roots, or managed pointers, as required by AGENTS.md. Record any
 unrelated build blockers rather than silently fixing another task's work.
 
-Update GAPS.txt and relevant implementation notes to describe the resulting
+Update docs/portability.md and relevant implementation notes to describe the resulting
 behavior. Keep large-number and unrelated language differences explicit.
 Benchmark the emitted nil checks on representative existing workloads before
 claiming a performance result; microbenchmarks establish feasibility only.

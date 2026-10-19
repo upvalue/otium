@@ -3,7 +3,7 @@
 **Specification -- draft 0.3**
 
 This draft describes the C dialect. Chez shares the namespace and macro
-design but uses Chez values and semantics; see [Chez notes](../chez/NOTES.txt).
+design but uses Chez values and semantics; see [Chez notes](../docs/chez.md).
 
 Otium is a small Lisp: a Scheme kernel made pragmatic for embedding and
 data munging. The choices that make it itself:
@@ -510,7 +510,7 @@ A macro is a closure that runs at **expansion time**: it is called with a
 call's argument forms unevaluated, and the form it returns replaces the
 call.
 
-Both runtimes use the same expander, `shared/prelude/expander.ot`, written
+Both runtimes use the same expander, `lib/otium/expander.ot`, written
 in Otium itself. Expansion is eager and happens once. Immediately before
 a top-level form is evaluated, it is fully expanded:
 

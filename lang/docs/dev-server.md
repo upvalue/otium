@@ -11,7 +11,7 @@ Start a headless server on either runtime:
 running UI or an interactive REPL, use `--dev` instead:
 
 ```sh
-./otium --dev -L shared/lib -L examples examples/ui.ot
+./otium --dev examples/ui.ot
 ./otium --dev --repl
 ./otium attach
 ```
@@ -147,8 +147,8 @@ keeps the last 100. `{:op :events :since N}` returns those after `N`, oldest
 first. Every response carries the latest sequence number in `:event`, so a
 client that connects for a single request can tell whether it missed anything.
 
-The shared handler and break loop are in `shared/dev/core.ot`. The native
-transport is in `shared/dev/transport.c`. C links it into the launcher; Chez
+The shared handler and break loop are in `lib/otium/dev.ot`. The native
+transport is in `native/dev/transport.c`. C links it into the launcher; Chez
 loads the shared library built by `chez/run`. Socket naming, namespace file/load-time
 records, and public binding metadata are Otium policy in `core.ot`. Both loaders
 notify `record-load!` before evaluating a selected namespace file. Its `defonce`
@@ -159,5 +159,5 @@ operations; they do not maintain a second file registry or compute public arity.
 The legacy `--c.server` framing remains available for Conjure and uses the
 shared evaluation handler.
 
-Run `make test-dev` for protocol, interrupt, client, and GC stress checks.
-`make test-dev-ui` also requires the native UI dependencies and a working GPU.
+`just test dev` runs the protocol, interrupt and client checks. `just test 'dev ui'`
+also needs the UI build and a working GPU.

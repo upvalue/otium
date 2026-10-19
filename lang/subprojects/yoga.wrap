@@ -1,0 +1,6 @@
+[wrap-file]
+directory = yoga-3.2.1
+source_url = https://github.com/facebook/yoga/archive/refs/tags/v3.2.1.tar.gz
+source_filename = yoga-3.2.1.tar.gz
+source_hash = 86b399ac31fd820d8ffa823c3fae31bb690b6fc45301b2a8a966c09b5a088b55
+patch_directory = yoga

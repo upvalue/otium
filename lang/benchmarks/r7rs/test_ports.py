@@ -3,14 +3,17 @@
 """Fast correctness checks for the Otium benchmark ports."""
 
 import argparse
-from benchmarks.r7rs import run as RUNNER
-from otium_tools import command
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+# Repository modules, for running this file directly.
+sys.path[:0] = [str(Path(__file__).resolve().parents[2] / part) for part in ('', 'tools')]
+from benchmarks.r7rs import run as RUNNER
+from otium_tools import command
 
 
 sys.dont_write_bytecode = True

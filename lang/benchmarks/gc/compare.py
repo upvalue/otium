@@ -24,10 +24,10 @@ WORKLOADS = {
     "churn": 1_000_000,
     "mixed": 30_000,
     "fragmentation": 8_000,
-    "gcbench": "../benchmarks/workloads/gcbench.ot",
-    "destruc": "../benchmarks/workloads/destruc.ot",
-    "mperm": "../benchmarks/workloads/mperm.ot",
-    "takl": "../benchmarks/workloads/takl.ot",
+    "gcbench": "benchmarks/workloads/gcbench.ot",
+    "destruc": "benchmarks/workloads/destruc.ot",
+    "mperm": "benchmarks/workloads/mperm.ot",
+    "takl": "benchmarks/workloads/takl.ot",
 }
 
 
@@ -101,21 +101,17 @@ def heap_limits(budget_bytes):
 
 
 def build(root, collector, geometry):
-    build_dir = Path("build") / "gc-compare" / collector
-    binary = root / build_dir / "gc-bench"
-    command = [
-        "make",
-        "-B",
-        f"BUILD={build_dir}",
-        f"GC={collector}",
-        f"HEAP_INIT={geometry['heap_init']}",
-        f"HEAP_MAX={geometry['heap_max']}",
-        str(build_dir / "gc-bench"),
-    ]
-    result = subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "build failed")
-    return binary
+    build_dir = root / f"build-gc-{collector}"
+    options = [f"-Dgc={collector}", f"-Dheap_init={geometry['heap_init']}",
+               f"-Dheap_max={geometry['heap_max']}", "-Dffi=disabled", "-Dui=disabled"]
+    setup = ["meson", "setup", str(build_dir), *options]
+    if (build_dir / "meson-info").is_dir():
+        setup.append("--reconfigure")
+    for command in (setup, ["meson", "compile", "-C", str(build_dir), "gc-bench"]):
+        result = subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "build failed")
+    return build_dir / "gc-bench"
 
 
 def workload_command(root, binary, workload):
@@ -292,7 +288,7 @@ def write_samples(path, samples, metadata, append):
 
 def main():
     args = arguments()
-    root = Path(__file__).resolve().parents[2] / "c"
+    root = Path(__file__).resolve().parents[2]
     budget_bytes = args.budget_mib * MIB
     limits = heap_limits(budget_bytes)
     workloads = args.workloads or list(WORKLOADS)

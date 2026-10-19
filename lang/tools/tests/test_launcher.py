@@ -16,7 +16,7 @@ class LauncherTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         shutil.copy2(ROOT / 'otium', self.root / 'otium')
-        for runtime, path in [('c', 'c/otium'), ('chez', 'chez/run')]:
+        for runtime, path in [('c', 'build/otium'), ('chez', 'chez/run')]:
             stub = self.root / path
             stub.parent.mkdir()
             stub.write_text('#!/usr/bin/env python3\nimport json,sys\n'
@@ -24,7 +24,8 @@ class LauncherTests(unittest.TestCase):
             stub.chmod(0o755)
 
     def run_launcher(self, *args, status=0):
-        result = subprocess.run([str(self.root / 'otium'), *args], text=True,
+        env = {key: value for key, value in os.environ.items() if key != 'OTIUM_BUILD'}
+        result = subprocess.run([str(self.root / 'otium'), *args], text=True, env=env,
                                 capture_output=True, cwd='/', timeout=10)
         self.assertEqual(result.returncode, status, result.stderr)
         return json.loads(result.stdout) if status == 0 else result.stderr
@@ -40,10 +41,10 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(self.run_launcher('--runtime=chez', *args), ['chez', args])
 
     def test_formatter_and_linter_run_on_chez(self):
-        lib, tools = str(self.root / 'shared/lib'), str(self.root / 'shared/tools')
+        tools = str(self.root / 'lib/otium/tools')
         for tool in ('fmt', 'lint'):
             self.assertEqual(self.run_launcher(tool, 'a.ot', '--check'),
-                             ['chez', ['--no-project', '--path', lib, f'{tools}/{tool}.ot', '--', 'a.ot', '--check']])
+                             ['chez', ['--no-project', f'{tools}/{tool}.ot', '--', 'a.ot', '--check']])
 
     def test_option_values_are_not_selectors(self):
         for option in ('--path', '-L', '--project', '--load'):

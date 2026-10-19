@@ -89,7 +89,8 @@ assert server.stderr == "", server
 def read_server_response(process):
     marker = b"\x1eot> "
     output = b""
-    deadline = time.monotonic() + 2
+    # Collecting at every allocation slows the server well past normal latency.
+    deadline = time.monotonic() + (20 if os.environ.get("OTIUM_GC_STRESS") else 2)
     while marker not in output:
         timeout = deadline - time.monotonic()
         assert timeout > 0, ("server response timed out", output, process.poll())

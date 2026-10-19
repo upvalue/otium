@@ -1,7 +1,7 @@
 # Portable foreign function interface
 
 Status: draft for review, October 16, 2026. Implementation is in progress;
-see [implementation status](../docs/ffi-implementation.md) for the working subset,
+see [implementation status](../docs/ffi.md) for the working subset,
 commands, and outstanding work. This document describes the full release
 contract.
 
@@ -565,7 +565,7 @@ new session abstraction required of the FFI.
 
 ## Backend work and repository placement
 
-The C runtime gets an optional `WITH_FFI=1` build using libffi. A build without
+The C runtime gets an optional FFI build using libffi. A build without
 it has no libffi link dependency and reports FFI unavailable on import. Core
 startup does not load SDL. SDL remains an optional installed dependency on both
 runtimes.
@@ -604,11 +604,11 @@ at bind time, not on every call.
 [Chez foreign interface](https://www.scheme.com/csug8/foreign.html)
 
 Proposed placement: `c/src/ot-ffi.c` for the C backend,
-`chez/otium/ffi.sls` for Chez, `shared/ffi/` for declarations, generic native
-helpers, probes and fixtures, and `shared/sdl/` for binding data and wrappers.
+`chez/otium/ffi.sls` for Chez, `lib/otium/ffi.ot` for declarations, generic native
+helpers, probes and fixtures, and `native/sdl/` for binding data and wrappers.
 Each runtime's loader may adapt the shared source without duplicating function
-signatures. Integration tests belong under `shared/tests/`. Language/library
-gaps discovered while porting scene code belong in `GAPS.txt`.
+signatures. Integration tests belong under `tests/`. Language/library
+gaps discovered while porting scene code belong in `docs/portability.md`.
 
 ## Verification and implementation order
 
@@ -640,7 +640,7 @@ gaps discovered while porting scene code belong in `GAPS.txt`.
    views. On Chez, test the automatic string path with collections between calls and verify that bound
    calls omit `__collect_safe`. Use an explicitly retained native string across calls
    and collections on both runtimes. Exercise failure cleanup and resource counts.
-   Run `make gc-lint` when LLVM tooling is installed
+   Run `just gc-lint` when LLVM tooling is installed
    for changes involving allocation, roots, or managed pointers.
    Check leak counts before teardown, including an intentionally abandoned
    allocation to verify that collection does not silently release it. Exercise

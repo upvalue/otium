@@ -3,7 +3,7 @@
   (import (chezscheme) (only (otium reader) read-otium)
           (only (otium generic-core) make-slot-cache cached-call cached-set-call))
 
-  ;; The expander itself is shared/prelude/expander.ot, read with the Otium
+  ;; The expander itself is lib/otium/expander.ot, read with the Otium
   ;; reader and evaluated with the Otium core forms. It uses no macros, so it
   ;; needs no expansion. The runtime supplies the four natives it calls.
   (define-record-type (expander make-expander expander?)
@@ -23,7 +23,7 @@
     (let loop ([directories (library-directories)])
       (if (null? directories)
           (error 'macroexpand "shared expander source not found" (library-directories))
-          (let ([path (string-append (caar directories) "/../shared/prelude/expander.ot")])
+          (let ([path (string-append (caar directories) "/../lib/otium/expander.ot")])
             (if (file-exists? path) path (loop (cdr directories)))))))
 
   (define shared-environment

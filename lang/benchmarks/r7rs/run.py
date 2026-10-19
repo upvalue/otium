@@ -3,7 +3,6 @@
 """Run Otium benchmark ports and optional upstream Guile references."""
 
 import argparse
-from otium_tools import command, metadata, run_directory
 import csv
 import hashlib
 import json
@@ -16,6 +15,10 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+
+# Repository modules, for running this file directly.
+sys.path[:0] = [str(Path(__file__).resolve().parents[2] / part) for part in ('', 'tools')]
+from otium_tools import command, metadata, run_directory
 
 
 CSV_LINE = re.compile(r"^\+!CSVLINE!\+([^,]+),([^,]+),(.+)$", re.MULTILINE)

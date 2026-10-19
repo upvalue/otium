@@ -1,20 +1,28 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-platform=$(uname -m)-$(uname -s | tr '[:upper:]' '[:lower:]')
+build=${OTIUM_BUILD:-$root/../build}
 case $(uname -s) in Darwin) extension=dylib ;; *) extension=so ;; esac
+# Native helpers are built on first use, so a fresh checkout only needs Chez,
+# Meson and a C compiler for the REPL and development server.
+native() {
+  if [ ! -f "$build/libotium-$1.$extension" ]; then
+    [ -d "$build/meson-info" ] || meson setup "$build" "$root/.." > /dev/null
+    meson compile -C "$build" "otium-$1:shared_library" > /dev/null
+  fi
+}
 # Resolve the optional FFI helper just as the REPL resolves line editing.
 # Loading it remains lazy, and an explicit environment override wins.
 if [ "${OTIUM_FFI_LIBRARY+x}" != x ]; then
-  OTIUM_FFI_LIBRARY="$root/../shared/build/$platform/libotium-ffi.$extension"
+  OTIUM_FFI_LIBRARY="$build/libotium-ffi.$extension"
   export OTIUM_FFI_LIBRARY
 fi
 for argument do
   case "$argument" in
     --) break ;;
     serve|--dev|--dev=*)
-      OTIUM_DEV_LIBRARY="$root/../shared/build/$platform/libotium-dev.$extension"
-      make -s -C "$root/../shared" "build/$platform/libotium-dev.$extension"
+      OTIUM_DEV_LIBRARY="$build/libotium-dev.$extension"
+      native dev
       export OTIUM_DEV_LIBRARY
       break ;;
   esac
@@ -36,8 +44,8 @@ for argument do
 done
 if [ "$explicit_repl" = yes ]; then interactive=yes; fi
 if [ "$interactive" = yes ] && { { [ -t 0 ] && [ -t 1 ]; } || [ "${OTIUM_DEV_LIBRARY+x}" = x ]; }; then
-  OTIUM_LINE_LIBRARY="$root/../shared/build/$platform/libotium-line.$extension"
-  make -s -C "$root/../shared" "build/$platform/libotium-line.$extension"
+  OTIUM_LINE_LIBRARY="$build/libotium-line.$extension"
+  native line
   export OTIUM_LINE_LIBRARY
 fi
 exec "${CHEZ:-chez}" \

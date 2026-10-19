@@ -15,7 +15,7 @@ over the same client code.
 
 ## Client
 
-`tools/otium-dev` is a separate Python program, run through `tools/python`.
+`tools/otium-dev` is a separate Python program.
 It isn't part of the `otium` launcher. Each call connects, sends one request,
 prints the result and exits. Agents work one shell command at a time, so a
 one-shot client suits them better than a session.
@@ -46,7 +46,7 @@ the same as `require ... :reload`. `eval --file` evaluates the file's forms
 in `--ns`, as if they had been passed as an argument. The client reads the
 file and sends its path along with the code, so errors point at lines in
 that file. This adds an optional `:path` to `:eval` requests, which
-`shared/dev/core.ot` passes to `%evaluate` in place of `"<dev>"`.
+`lib/otium/dev.ot` passes to `%evaluate` in place of `"<dev>"`.
 
 The client resolves paths to absolute paths before sending them. The server
 may have been started from a different directory.
@@ -146,7 +146,7 @@ neither runtime has them yet.
 
 ## Introspection
 
-These are Otium functions in `otium.dev` (`shared/dev/core.ot`), called with
+These are Otium functions in `otium.dev` (`lib/otium/dev.ot`), called with
 `eval`. They aren't protocol ops, matching the server spec's choice to keep
 the protocol small. Starting a server runs `(require (otium.dev :as dev))` in
 `user`, so `dev/` works there without setup.

@@ -1,45 +1,102 @@
 # Repository development
 
-Run commands from `lang/`. `make help` lists the supported entry points.
-
-## Running Otium
+Run commands from `lang/`. `just --list` shows them all.
 
 ```sh
-make
+just build
 ./otium examples/greet.ot -- Alice
-./otium --runtime=chez examples/greet.ot -- Alice
+./otium --runtime=c examples/greet.ot -- Alice
+just test
 ```
 
-Chez is the default. `--runtime c` and `--runtime=c` are equivalent. The selector
-can appear anywhere before `--`, except as the value of another option.
-Everything after `--` is passed to the program unchanged. Repeated selectors
-use the last value; each value must be valid. `CHEZ` selects the Chez executable.
-`c/otium` and `chez/run` remain runtime-specific entry points.
+Chez is the default runtime. `--runtime c` and `--runtime=c` are equivalent; the
+selector can appear anywhere before `--`, except as another option's value.
+Everything after `--` goes to the program unchanged. `CHEZ` selects the Chez
+executable. Both runtimes search `lib/` after any user paths, so the standard
+library needs no `--path`.
 
-Otium sources use `.ot`, including shared libraries, examples, and test fixtures.
-Chez implementation programs use `.ss`, and Chez libraries use `.sls`. Vendored
-Scheme keeps `.scm`. Module lookup still checks `.ot` then `.scm` in each search
-directory; the compatibility and precedence tests intentionally create both.
-`project.ot` contains module path configuration, not executable application code.
+Otium sources use `.ot`. Chez implementation programs use `.ss` and Chez
+libraries `.sls`; vendored Scheme keeps `.scm`. Module lookup checks `.ot` then
+`.scm` in each search directory. `project.ot` holds load paths, not code.
+
+## Layout
+
+| Directory | Contents |
+| --- | --- |
+| `c/` | C runtime (`src/`), its tests, the GC benchmark and gc-lint |
+| `chez/` | Chez runtime, its launcher `chez/run`, and its tests |
+| `lib/` | Otium source for both runtimes: prelude, expander, `otium.*` libraries and tools |
+| `lib/catalog/` | Launcher options and runtime reference data, compiled into both runtimes |
+| `native/` | C and C++ bridges both runtimes load; see [native components](native.md) |
+| `tests/` | Cross-runtime tests and the Python drivers that need process control |
+| `examples/`, `benchmarks/`, `docs/`, `specs/` | What they say |
+| `tools/` | Development scripts, the dev-server client, the commit hook |
+
+## Building
+
+`just build` runs `meson setup build` once, then `meson compile -C build`. The C
+binary is `build/otium`. FFI and UI are built when their dependencies are
+installed; see [native components](native.md). Collector and heap settings are
+Meson options:
+
+```sh
+meson configure build -Dgc=gen
+meson setup build-small -Dheap_max=8388608 -Dffi=disabled
+OTIUM_BUILD=$PWD/build-small ./otium --runtime=c examples/greet.ot -- Alice
+```
+
+`OTIUM_BUILD` tells `./otium` and `chez/run` which build directory to use; the
+default is `build/`.
+
+## Tests
+
+`just test` runs the default tests. Name suites or tests to narrow it.
+
+| Suite | Coverage | Default |
+| --- | --- | --- |
+| `c` | Runtime unit tests, conformance files, CLI, multimethods, extension | yes |
+| `chez` | Chez runtime tests | yes |
+| `shared` | Library, reader, conditions, modules, CLI and UI checks on both runtimes; formatter; dev server; docs | yes |
+| `native` | FFI, SDL events and audio, UI layout and GPU capture (skips without a display) | no |
+| `gpu` | Required accelerated SDL and GPU checks, live UI repair | no |
+| `bench` | Reduced-input R7RS port checks | no |
+
+```sh
+just test chez
+just test match
+just test native
+just test-stress            # default tests with OTIUM_GC_STRESS=1
+just test-all
+meson test -C build --list
+```
+
+GC stress collects at every C allocation and is slow. Use it when changing the
+collector or code that holds managed pointers, along with `just gc-lint`, which
+needs LLVM development tools.
+
+Most cross-runtime checks are `.ot` files under `tests/` that exit nonzero on
+failure; `meson.build` runs each on both runtimes. Python drivers remain where a
+test needs temporary module trees, sockets, PTYs, signals or frame timing.
 
 ## Formatting and linting
 
 ```sh
-./otium fmt shared/lib/otium/ui.ot   # rewrite in place
-./otium fmt --check shared examples  # list files that would change
-./otium lint shared examples
+./otium fmt lib/otium/ui.ot   # rewrite in place
+./otium fmt --check lib examples
+./otium lint lib examples
+just format-c --check
 ```
 
-Both take files or directories, and always run on Chez. They are experimental.
-The linter only warns; its one rule so far, `if-chain`, flags an `if` in the
-else branch of another `if`.
+Both Otium tools take files or directories, run on Chez, and are experimental.
+The linter only warns; its one rule, `if-chain`, flags an `if` in the else
+branch of another `if`.
 
 The formatter uses a width of 120. A form stays on one line if it fits, except
 that these always break: function definitions, bodies of two or more forms, an
 `if` with an else branch, and a `let` with two or more bindings, which go one
-per line. Line breaks in the input are otherwise ignored. Comments and single blank lines are
-kept, and top-level definitions get a blank line between them. Forms without a
-built-in rule are laid out as calls, with arguments aligned under the first.
+per line. Other line breaks in the input are ignored. Comments and single blank
+lines are kept, and top-level definitions get a blank line between them. Forms
+without a rule are laid out as calls, with arguments aligned under the first.
 A project can lay out its own macros like a built-in form:
 
 ```scheme
@@ -47,97 +104,49 @@ A project can lay out its own macros like a built-in form:
 (format (like when with-slots) (like let match-let))
 ```
 
-Rules can use fully qualified names, for example
-`(format (like unwind-protect my.library/body))`. The formatter resolves explicit
-`:as` aliases in top-level `require` forms and `ns` require clauses, in source
-order and separately for each namespace. It also follows top-level `begin`
-forms. It does not load libraries, expand macros, or resolve `:refer` imports.
-A rule for the literal name in the source takes precedence over an alias rule.
-`otium.cli/compile` has a built-in rule that always starts its arguments on the
-next line, indented by two spaces.
-
-Don't use strings in the `format` entry. Launchers read every string in
+Rules can use qualified names, such as `(format (like unwind-protect my.library/body))`.
+The formatter resolves explicit `:as` aliases in top-level `require` forms and
+`ns` require clauses, in source order and per namespace, and follows top-level
+`begin` forms. It doesn't load libraries, expand macros or resolve `:refer`. A
+rule for the literal name in the source wins over an alias rule.
+`otium.cli/compile` always starts its arguments on the next line, indented two
+spaces. Don't put strings in the `format` entry: launchers read every string in
 `project.ot` as a load path.
 
 Both tools read source with the Chez reader in token mode
-(`otium.reader/tokens`), which records each token's text and position. The
-tree, formatter and linter are Otium libraries in `shared/lib/otium/`.
+(`otium.reader/tokens`), which records each token's text and position. The tree,
+formatter and linter are in `lib/otium/`.
 
-## Tests and dependencies
+## Commit hook
 
-| Command | Coverage | Additional dependencies |
-| --- | --- | --- |
-| `make test` | C, Chez, portable library/reader/CLI/UI contracts, tooling, interactive REPL | C23 compiler, Make, Python 3, Chez, POSIX PTYs |
-| `make test-c`, `make test-chez` | Runtime-specific suites and shared conditions | Selected runtime |
-| `make test-native` | FFI, SDL events/audio, UI layout; GPU checks when available | libffi, SDL3, SDL3_ttf, C++20, glslc, pinned Yoga |
-| `make test-gpu` | Required GPU and accelerated SDL acceptance | Native dependencies and working display/backend |
-| `make test-benchmarks` | Reduced-input R7RS port correctness on both runtimes | Initialized benchmark submodule; optional Guile reference |
-| `make test-site` | WebAssembly runtime and generated site checks | Emscripten, Node/npm, site dependencies |
-| `make gc-lint` | C managed-pointer analysis | LLVM/Clang development tools |
+`just setup` sets `core.hooksPath` for the repository. The hook checks staged
+`lang/` files only: doc locations and named paths (`tools/check-docs`), Otium
+formatting of added or edited files under `lib/`, `examples/` and `benchmarks/`,
+and `just format-c --check` when C under `c/`, `native/` or `tests/` changes.
+The gc-lint fixtures in `c/tools/gc-lint/tests/` are left unformatted.
 
-`make ui-setup` downloads the pinned Yoga dependency; `make sdl-setup` generates
-and validates the local SDL ABI manifest. `npm --prefix site ci` installs site
-dependencies. Use `git submodule update --init benchmarks/r7rs/vendor` for the
-upstream benchmark inputs. Default tests do not download optional dependencies.
-A skipped graphics check is reported explicitly; `make test-gpu` requires it.
-
-Use `tools/python` for repository Python programs. It honors `PYTHON` and sets
-the module path without a global package install. Most shared suites accept
-`--runtime c|chez|both`; parity-specific CLI checks always exercise both.
-
-```sh
-tools/python shared/tests/test_library.py --runtime chez
-tools/python shared/tests/test_reader.py --runtime c --stress
-```
-
-Execution helpers live in `tools/otium_tools/`. They construct launcher commands,
-resolve native helper defaults, and record benchmark provenance. Suite-specific
-assertions, PTY control, GPU capture, and native probes stay beside their suites.
-Helpers isolate project discovery by default; CLI and REPL discovery tests opt
-out. Explicit `OTIUM_FFI_LIBRARY` overrides are preserved. Run tests with a clean
-environment when checking the repository's default dependencies.
-
-## Build outputs
-
-C objects live under `c/build/<platform>/obj/<collector>-ffi<mode>-<flags-hash>/`.
-Different checkouts and compiler configurations do not share objects. `BUILD_ROOT`,
-`BIN_ROOT`, `PLATFORM`, `GC`, and `WITH_FFI` remain configurable. The C launcher
-selects `c/bin/<platform>/otium`; `OTIUM_BIN_ROOT` and `OTIUM_PLATFORM` override
-its location. Shared native outputs live in `shared/build/<platform>/`. Their compilation is
-owned by `shared/Makefile`; both runtimes use its libraries or compiled objects.
-UI rules are in `shared/ui/build.mk` and discover dependencies only for explicit
-UI targets such as `make ui`. See [native components](native-components.md) for build
-commands, ownership contracts and the remaining policy-migration audit.
-
-Shared C/C++ is reserved for bridges that would be impractically difficult in
-Otium. Performance is not an exception: improve the Otium code or runtime/compiler
-instead. Optional components may depend on libraries such as SDL. Ordinary
-library orchestration and application policy belong in Otium.
-
-A root Make invocation uses one FFI configuration. Native targets select FFI
-for the whole invocation, including `make -j test test-native`. Do not run two
-independent builds that select different configurations into the same public
-binary path; use separate worktrees or `BIN_ROOT` values for that case.
+Docs belong in `docs/` (current behavior) or `specs/` (designs and proposals),
+plus the READMEs `tools/check-docs` allows. When a doc goes out of date, delete
+the stale part rather than recording what used to be true.
 
 ## Generated files
 
-| Source | Outputs | Regeneration/check |
+| Source | Outputs | Command |
 | --- | --- | --- |
-| `shared/cli/options.json` and generator | C/Chez launcher catalogs | `make generate` / `make check-generated` |
-| `shared/documentation/runtime.json` | C/Chez runtime reference tables | Same aggregate targets |
-| Shared `.ot` libraries | Embedded C headers | Native/WASM Make dependencies; build-only |
-| Language docs and source docstrings | Site reference and pages | `make site`; ignored outputs |
-| UI shader sources | Embedded shader header and SPIR-V | Make dependencies; build-only |
-| Installed SDL headers and schema | Target ABI manifest | `make sdl-setup`; validate with `tools/python shared/sdl/setup.py --check` |
+| `lib/catalog/options.json` | `c/src/options.inc`, `chez/otium/launcher-options.sls` | `just generate` |
+| `lib/catalog/runtime.json` | `c/src/runtime-reference.inc`, `chez/otium/runtime-documentation.sls` | `just generate` |
+| Installed SDL headers | `native/sdl/manifests/<target>.json` | `just sdl-manifest` |
 
-## Ownership
+The generated files are checked in. The `generated` and `help` tests fail when
+they're stale. The C runtime embeds its Otium libraries from `lib/otium/` with
+`#embed` at build time.
 
-`docs/` explains current language behavior and development workflows. `specs/`
-records design contracts and proposals; check implementation and executable tests
-when a proposal differs from current behavior. `GAPS.txt` tracks portability
-limits. Runtime implementation notes belong under `c/` or `chez/`; benchmark
-methodology belongs under `benchmarks/`. Shared native dependencies and portable
-Otium libraries belong under `shared/`.
+## Where things go
 
-See [the example catalog](examples.md) for runnable programs and
-[benchmark usage](../benchmarks/USAGE.md) for measurements and saved results.
+`docs/` explains current behavior and workflows; `specs/` records design
+contracts and proposals, so check the code and tests when a proposal differs.
+Portability limits are in [portability](portability.md). C and C++ in `native/`
+are only for bridges that would be impractical in Otium; library orchestration
+and application policy belong in Otium.
+
+See the [example catalog](examples.md) and [benchmarks](../benchmarks/README.md).

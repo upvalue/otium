@@ -23,13 +23,13 @@ cd "$project_dir"
 
 case "${1:-}" in
   "")
-    git ls-files -z -- 'c/*.c' 'c/*.h' 'shared/*.c' 'shared/*.h' \
-      ':!c/vendor/*' ':!c/tests/ctest.h' ':!shared/vendor/*' |
+    git ls-files -z -- 'c/*.c' 'c/*.h' 'native/*.c' 'native/*.h' 'tests/*.c' 'tests/*.h' \
+      ':!c/tests/ctest.h' ':!c/tools/gc-lint/tests/*' ':!native/vendor/*' |
       xargs -0 "$formatter_bin" --style=file -i
     ;;
   --check)
-    git ls-files -z -- 'c/*.c' 'c/*.h' 'shared/*.c' 'shared/*.h' \
-      ':!c/vendor/*' ':!c/tests/ctest.h' ':!shared/vendor/*' |
+    git ls-files -z -- 'c/*.c' 'c/*.h' 'native/*.c' 'native/*.h' 'tests/*.c' 'tests/*.h' \
+      ':!c/tests/ctest.h' ':!c/tools/gc-lint/tests/*' ':!native/vendor/*' |
       xargs -0 "$formatter_bin" --style=file --dry-run --Werror
     ;;
   *)

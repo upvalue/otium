@@ -7,8 +7,11 @@ import platform
 import subprocess
 import sys
 import tempfile
+
+# Repository modules, for running this file directly.
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / part) for part in ('', 'tools')]
+from native.sdl.host import bootstrap, command, environment, literal, DEFAULT_MANIFEST
 ROOT = Path(__file__).resolve().parents[1]
-from shared.sdl.host import bootstrap, command, environment, literal, DEFAULT_MANIFEST
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -41,7 +44,7 @@ def main():
         source += "(def host-libc-names '"+names+")\n"
         scene = args.scene_path or ROOT/'examples/scenes'/(args.scene+'.ot')
         source += '(def scene-path '+literal(scene.resolve())+')\n'
-        source += (ROOT/'shared/sdl/reload.ot').read_text()
+        source += (ROOT/'native/sdl/reload.ot').read_text()
         source += (ROOT/'examples/sdl-host.ot').read_text()
     env = environment()
     if args.audio == 'dummy': env['SDL_AUDIO_DRIVER'] = 'dummy'

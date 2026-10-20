@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 #define ECHO(NAME, TYPE)                                                                           \
   TYPE echo_##NAME(TYPE x) { return x; }
@@ -218,6 +219,13 @@ static void* thread_main(void* ignored) {
   (void)ignored;
   threaded();
   return NULL;
+}
+/* Lets the reload check write a module without runtime-specific file APIs. */
+int write_file(const char* path, const char* text) {
+  FILE* file = fopen(path, "w");
+  if (!file) return -1;
+  int status = fputs(text, file) < 0 ? -1 : 0;
+  return fclose(file) ? -1 : status;
 }
 void call_on_thread(void (*f)(void)) {
   pthread_t thread;

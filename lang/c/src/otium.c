@@ -3135,6 +3135,10 @@ static otv apply_value(ots* state, otv callable, otv* args, size_t argc, bool al
   return result;
 }
 
+otv ot_apply(ots* state, otv callable, otv* args, size_t argc) {
+  return apply_value(state, callable, args, argc, false);
+}
+
 static bool vm_enter_call(ots* state, size_t argc, bool tail) {
   if (state->vm.vm_stack_count < argc + 1) {
     (void)ot_raise(state, "vm: operand stack underflow");

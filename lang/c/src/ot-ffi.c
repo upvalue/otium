@@ -18,6 +18,7 @@ static const unsigned ot_ffi_src_len = sizeof ot_ffi_src;
 #include <string.h>
 #include <math.h>
 #include <limits.h>
+#include <pthread.h>
 
 static void* zero_alloc(size_t count, size_t size) {
   if (size && count > SIZE_MAX / size) return NULL;
@@ -36,11 +37,15 @@ typedef struct owner {
   size_t size;
   bool released;
 } owner;
+typedef struct callback callback;
+/* code marks a native function address: a callback or a decoded
+ * callback-pointer value. */
 typedef struct pointer {
   void* address;
   owner* owner;
+  callback* callback;
   size_t size;
-  bool bounded, owning;
+  bool bounded, owning, code;
 } pointer;
 typedef struct library {
   item item;
@@ -59,6 +64,28 @@ typedef struct binding {
   ffi_type* result_type;
   size_t count;
 } binding;
+/* The procedure is a global root until the callback is freed. The record
+ * itself lives until the state is destroyed, so pointer values can still see
+ * that it was released. */
+struct callback {
+  item item;
+  ots* state;
+  ffi_closure* closure;
+  void* code;
+  ffi_cif cif;
+  ffi_type** types;
+  int* kinds;
+  int result;
+  size_t count;
+  otv procedure;
+  bool released;
+};
+typedef enum pending_kind {
+  PENDING_NONE,
+  PENDING_CONDITION,
+  PENDING_QUIT,
+  PENDING_ESCAPE
+} pending_kind;
 typedef struct error_scope {
   ots* state;
   struct error_scope* previous;
@@ -72,6 +99,15 @@ typedef struct context {
   item* items;
   unsigned pointer_type, library_type, binding_type;
   size_t allocations, bytes;
+  /* Callbacks run only on thread while depth foreign calls are active. The
+   * first error or exit contained in a callback waits in pending until the
+   * outermost call returns. */
+  pthread_t thread;
+  size_t depth, callbacks;
+  pending_kind pending;
+  otv pending_condition;
+  bool pending_quit_requested;
+  int pending_quit_status;
 } context;
 static context* ctx(ots* s) { return s->ffi_state; }
 static void pop_error(error_scope* e) { ctx(e->state)->error = e->previous; }
@@ -88,6 +124,33 @@ static void owner_destroy(void* p) {
   owner* o = p;
   ot_host_free(o->data);
   ot_host_free(o);
+}
+static void release_owner(context* c, owner* o) {
+  if (o->released) return;
+  ot_host_free(o->data);
+  o->data = NULL;
+  o->released = true;
+  c->allocations--;
+  c->bytes -= o->size;
+}
+static void callback_release(callback* cb) {
+  if (cb->released) return;
+  ffi_closure_free(cb->closure);
+  cb->closure = NULL;
+  ot_global_remove(cb->state, &cb->procedure);
+  cb->released = true;
+  ctx(cb->state)->callbacks--;
+}
+/* Free a callback that was never registered, or one already released. */
+static void callback_free(callback* cb) {
+  if (cb->closure) ffi_closure_free(cb->closure);
+  ot_host_free(cb->types);
+  ot_host_free(cb->kinds);
+  ot_host_free(cb);
+}
+static void callback_destroy(void* p) {
+  callback_release(p);
+  callback_free(p);
 }
 static void library_destroy(void* p) {
   library* l = p;
@@ -166,6 +229,10 @@ static bool ptr(ots* s, otv v, pointer* out, const char* op) {
 static bool live(ots* s, pointer p, const char* op) {
   if (p.owner && p.owner->released) {
     fail(s, op, "released", "allocation released");
+    return false;
+  }
+  if (p.callback && p.callback->released) {
+    fail(s, op, "released", "callback released");
     return false;
   }
   return true;
@@ -475,7 +542,11 @@ static bool encode(ots* s, int k, otv v, cell* out, char** temporary, const char
   if (k == F_POINTER || k == F_CALLBACK || k == F_UTF8) {
     pointer p;
     if (!ptr(s, v, &p, op) || !live(s, p, op)) return false;
-    if (k != F_POINTER && p.address) {
+    if (k == F_CALLBACK && p.address && !p.code) {
+      fail(s, op, "type", "expected null or callback pointer");
+      return false;
+    }
+    if (k == F_UTF8 && p.address) {
       fail(s, op, "type", "expected null pointer");
       return false;
     }
@@ -510,7 +581,7 @@ static otv decode(ots* s, int k, cell v, const char* op) {
     if (!offi_utf8(v.p, len)) return fail(s, op, "encoding", "invalid UTF-8 result");
     return ot_make_string(s, v.p, len);
   }
-  return wrap(s, (pointer){.address = v.p});
+  return wrap(s, (pointer){.address = v.p, .code = k == F_CALLBACK && v.p});
 }
 static otv n_null(ots* s, otv* a, int n) {
   (void)a;
@@ -557,7 +628,8 @@ static otv n_alloc(ots* s, otv* a, int n) {
   track(s, &o->item, owner_destroy);
   ctx(s)->allocations++;
   ctx(s)->bytes += bytes;
-  return wrap(s, (pointer){o->data, o, bytes, true, true});
+  return wrap(
+      s, (pointer){.address = o->data, .owner = o, .size = bytes, .bounded = true, .owning = true});
 }
 static otv n_free(ots* s, otv* a, int n) {
   ARITY(1, "free!");
@@ -565,13 +637,7 @@ static otv n_free(ots* s, otv* a, int n) {
   if (!ptr(s, a[0], &p, "free!")) return OT_UNWIND;
   if (!p.address) return ot_false;
   if (!p.owning) return fail(s, "free!", "type", "only owning allocations can be freed");
-  if (!p.owner->released) {
-    ot_host_free(p.owner->data);
-    p.owner->data = NULL;
-    p.owner->released = true;
-    ctx(s)->allocations--;
-    ctx(s)->bytes -= p.owner->size;
-  }
+  release_owner(ctx(s), p.owner);
   return ot_false;
 }
 static otv n_view(ots* s, otv* a, int n) {
@@ -585,6 +651,7 @@ static otv n_view(ots* s, otv* a, int n) {
   p.size = bytes;
   p.bounded = true;
   p.owning = false;
+  p.code = false;
   return wrap(s, p);
 }
 static otv n_ref(ots* s, otv* a, int n) {
@@ -658,22 +725,155 @@ static otv n_stats(ots* s, otv* a, int n) {
   ARITY(0, "allocation-count");
   return ot_make_int((intptr_t)ctx(s)->allocations);
 }
-/* Callbacks are Chez-only so far; ffi/callback validates its signature in
- * Otium and then fails here. */
+/* Nothing unwinds through the native frames between a callback and the call
+ * that led to it. The unwind in progress is stopped and recorded instead, and
+ * signal-site handlers have already run for a condition. */
+static void contain(ots* s) {
+  context* c = ctx(s);
+  if (!c->pending) {
+    ot_unwind_kind kind = s->vm.unwind_kind;
+    c->pending = kind == UNWIND_CONDITION ? PENDING_CONDITION
+                 : kind == UNWIND_QUIT    ? PENDING_QUIT
+                                          : PENDING_ESCAPE;
+    c->pending_condition = c->pending == PENDING_ESCAPE ? ot_false : s->vm.condition;
+    c->pending_quit_requested = s->quit_requested;
+    c->pending_quit_status = s->quit_status;
+  }
+  ot_clear_condition(s);
+  s->quit_requested = false;
+}
+/* Raise the contained condition or repeat the exit, without running handlers
+ * again. A restart outside the callback cannot be repeated. */
+static otv replay(ots* s) {
+  context* c = ctx(s);
+  pending_kind kind = c->pending;
+  otv condition = c->pending_condition;
+  c->pending = PENDING_NONE;
+  c->pending_condition = ot_false;
+  if (kind == PENDING_ESCAPE)
+    return fail(s, "callback", "escape", "non-local exit from foreign callback");
+  s->vm.condition = condition;
+  s->vm.unwind_kind = kind == PENDING_CONDITION ? UNWIND_CONDITION : UNWIND_QUIT;
+  if (kind == PENDING_QUIT) {
+    s->quit_requested = c->pending_quit_requested;
+    s->quit_status = c->pending_quit_status;
+  }
+  return OT_UNWIND;
+}
+[[noreturn]] static void callback_abort(const char* message) {
+  fprintf(stderr, "otium: %s\n", message);
+  fflush(stderr);
+  abort();
+}
+/* libffi widens integer results to a full register. */
+static void store_result(int k, const cell* v, void* ret) {
+  if (k == F_VOID) return;
+  if (k == F_FLOAT) *(float*)ret = v->f;
+  else if (k == F_DOUBLE) *(double*)ret = v->d;
+  else if (k == F_POINTER || k == F_CALLBACK) *(void**)ret = v->p;
+  else if (k == F_BOOL) *(ffi_arg*)ret = v->u != 0;
+  else if (offi_signed(k)) *(ffi_sarg*)ret = (ffi_sarg)v->i;
+  else *(ffi_arg*)ret = (ffi_arg)v->u;
+}
+static void trampoline(ffi_cif* cif, void* ret, void** args, void* data) {
+  (void)cif;
+  callback* cb = data;
+  ots* s = cb->state;
+  context* c = ctx(s);
+  if (!pthread_equal(pthread_self(), c->thread))
+    callback_abort("foreign callback invoked on a thread other than the Otium thread");
+  if (!c->depth) callback_abort("foreign callback invoked outside a foreign call from Otium");
+  error_scope* outer = c->error;
+  c->error = NULL;
+  size_t argc = cb->count, slots = argc ? argc : 1;
+  otv values[slots];
+  otv* roots[slots];
+  for (size_t i = 0; i < slots; i++) {
+    values[i] = ot_false;
+    roots[i] = &values[i];
+  }
+  ot_frame frame;
+  ot_frame_push(s, &frame, roots, slots);
+  otv result = ot_nil;
+  for (size_t i = 0; i < argc && result != OT_UNWIND; i++) {
+    cell v = {0};
+    memcpy(&v, args[i], offi_size(cb->kinds[i]));
+    result = values[i] = decode(s, cb->kinds[i], v, "callback");
+  }
+  if (result != OT_UNWIND) result = ot_apply(s, cb->procedure, values, argc);
+  ot_frame_pop(s, &frame);
+  cell out = {0};
+  char* unused = NULL;
+  if (result != OT_UNWIND && cb->result != F_VOID &&
+      !encode(s, cb->result, result, &out, &unused, "callback"))
+    result = OT_UNWIND;
+  if (result == OT_UNWIND) {
+    contain(s);
+    memset(&out, 0, sizeof(out));
+  }
+  c->error = outer;
+  store_result(cb->result, &out, ret);
+}
 static otv n_callback(ots* s, otv* a, int n) {
-  (void)a;
   ARITY(3, "callback");
-  return fail(s, "callback", "unsupported", "FFI callbacks are not supported on the C runtime");
+  if (ot_value_type(a[2]) != OT_TYPE_FUNCTION)
+    return fail(s, "callback", "type", "expected procedure");
+  int result = kind(a[1]);
+  size_t len = 0;
+  otv tail = a[0], head;
+  while (ot_pair_values(tail, &head, &tail)) {
+    int k = kind(head);
+    if (k <= F_VOID || k >= F_UTF8 || ++len > UINT_MAX)
+      return fail(s, "callback", "signature", "invalid callback argument type");
+  }
+  if (tail != ot_null || result < 0 || result >= F_UTF8)
+    return fail(s, "callback", "signature", "invalid callback signature");
+  callback* cb = zero_alloc(1, sizeof(*cb));
+  if (cb) {
+    cb->types = zero_alloc(len ? len : 1, sizeof(*cb->types));
+    cb->kinds = zero_alloc(len ? len : 1, sizeof(*cb->kinds));
+  }
+  if (!cb || !cb->types || !cb->kinds) {
+    if (cb) callback_free(cb);
+    return fail(s, "callback", "allocation", "callback allocation failed");
+  }
+  tail = a[0];
+  for (size_t i = 0; i < len; i++) {
+    ot_pair_values(tail, &head, &tail);
+    cb->kinds[i] = kind(head);
+    cb->types[i] = native_type(cb->kinds[i]);
+  }
+  cb->state = s;
+  cb->count = len;
+  cb->result = result;
+  if (ffi_prep_cif(&cb->cif, FFI_DEFAULT_ABI, (unsigned)len, native_type(result), cb->types) !=
+      FFI_OK) {
+    callback_free(cb);
+    return fail(s, "callback", "abi", "unsupported ABI");
+  }
+  cb->closure = ffi_closure_alloc(sizeof(ffi_closure), &cb->code);
+  if (!cb->closure ||
+      ffi_prep_closure_loc(cb->closure, &cb->cif, trampoline, cb, cb->code) != FFI_OK) {
+    callback_free(cb);
+    return fail(s, "callback", "abi", "callback closure preparation failed");
+  }
+  cb->procedure = a[2];
+  ot_global_add(s, &cb->procedure);
+  track(s, &cb->item, callback_destroy);
+  ctx(s)->callbacks++;
+  return wrap(s, (pointer){.address = cb->code, .callback = cb, .code = true});
 }
 static otv n_free_callback(ots* s, otv* a, int n) {
-  (void)a;
   ARITY(1, "free-callback!");
-  return fail(s, "free-callback!", "type", "expected callback");
+  pointer* p = ext(a[0], ctx(s)->pointer_type);
+  if (!p || !p->callback || !p->code) return fail(s, "free-callback!", "type", "expected callback");
+  callback_release(p->callback);
+  return ot_false;
 }
 static otv n_callback_count(ots* s, otv* a, int n) {
   (void)a;
   ARITY(0, "callback-count");
-  return ot_make_int(0);
+  return ot_make_int((intptr_t)ctx(s)->callbacks);
 }
 static otv n_bytes(ots* s, otv* a, int n) {
   (void)a;
@@ -769,7 +969,15 @@ static otv call(ots* s, otv context_value, otv* a, int n) {
     pointer* p = ext(aggregate, ctx(s)->pointer_type);
     destination = p->address;
   }
+  context* c = ctx(s);
+  c->depth++;
   ffi_call(&b->cif, FFI_FN(b->address), destination, addresses);
+  c->depth--;
+  if (!c->depth && c->pending) {
+    if (aggregate != ot_false) release_owner(c, ((pointer*)ext(aggregate, c->pointer_type))->owner);
+    result = replay(s);
+    goto done;
+  }
   result = b->result >= F_COUNT ? aggregate : decode(s, b->result, returned, "call");
 done:
   for (int i = 0; i < n; i++) ot_host_free(temporaries[i]);
@@ -928,6 +1136,7 @@ static void module(ots* s) {
                    {"callback-count", n_callback_count},
                    {"%fail", n_fail},
                    {"%error-field", n_error_field}};
+  ctx(s)->thread = pthread_self();
   for (size_t i = 0; i < sizeof(functions) / sizeof(*functions); i++)
     ot_def_nat(s, functions[i].name, functions[i].function);
   otv ignored;
@@ -945,6 +1154,8 @@ void ot_register_ffi(ots* s) {
   context* c = zero_alloc(1, sizeof(*c));
   if (!c) abort();
   s->ffi_state = c;
+  c->pending_condition = ot_false;
+  ot_global_add(s, &c->pending_condition);
   c->pointer_type = ot_ext_type(s, "ffi.pointer", NULL);
   c->library_type = ot_ext_type(s, "ffi.library", NULL);
   c->binding_type = ot_ext_type(s, "ffi.binding", NULL);
@@ -958,6 +1169,7 @@ void ot_destroy_ffi(ots* s) {
     p->destroy(p);
     p = next;
   }
+  ot_global_remove(s, &c->pending_condition);
   ot_host_free(c);
   s->ffi_state = NULL;
 }

@@ -149,15 +149,12 @@
 (check 'escape (reason (fn () (restart-case (call-n escaping 1) (skip () 'skipped)))))
 
 ;; A callback keeps the procedure it was given; forwarding follows reloads.
+(def write-file (ffi/bind lib "write_file" '(utf8 utf8) 'int))
+
 (def (write-handler factor)
-  (let ((path (string-append module-directory "/ffi-callback-handler.ot")))
-    (if (chez/file-exists? path) (chez/delete-file path))
-    (chez/call-with-output-file path
-                                (fn (port)
-                                  (chez/display (string-append "(ns ffi-callback-handler)\n(def (scale x) (* "
-                                                               (number->string factor)
-                                                               " x))\n")
-                                                port)))))
+  (check 0
+         (write-file (string-append module-directory "/ffi-callback-handler.ot")
+                     (string-append "(ns ffi-callback-handler)\n(def (scale x) (* " (number->string factor) " x))\n"))))
 
 (write-handler 2)
 (require ffi-callback-handler :as handler)

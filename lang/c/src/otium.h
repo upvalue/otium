@@ -191,6 +191,7 @@ void ot_frame_push(ots* state, ot_frame* frame, otv** slots, size_t count);
 void ot_frame_pop(ots* state, ot_frame* frame);
 void ot_frame_cleanup(ot_frame* frame);
 void ot_global_add(ots* state, otv* slot);
+void ot_global_remove(ots* state, otv* slot);
 
 #define OT_FRAME(S, ...)                                                                           \
   otv* _ot_frame_slots[] = {__VA_ARGS__};                                                          \
@@ -665,6 +666,8 @@ bool ot_platform_read_file(const char* path, char** source, size_t* length);
 void ot_default_write(void* userdata, const char* bytes, size_t length);
 OT_GC_MAY_ALLOCATE otv ot_raise(ots* state, const char* format, ...);
 OT_GC_MAY_ALLOCATE otv ot_raise_value(ots* state, otv condition);
+/* Call any callable value; arguments are rooted for the call. */
+OT_GC_MAY_ALLOCATE otv ot_apply(ots* state, otv callable, otv* args, size_t argc);
 OT_GC_MAY_ALLOCATE otv ot_intern(ots* state, const char* bytes, size_t length, bool keyword);
 void ot_repr_to(ots* state, otv value, bool display, void (*write)(void*, const char*, size_t),
                 void* userdata);

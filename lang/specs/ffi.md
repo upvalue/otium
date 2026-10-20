@@ -726,7 +726,5 @@ Garbage collection can occur during a foreign call while a callback runs. Call
 temporaries, including copied strings and aggregates, stay outside the moving
 heap; allocations from `ffi/alloc` never move.
 
-The C runtime does not yet implement callbacks: `ffi/callback` fails with reason
-`unsupported` after checking the signature. A queue bridge for callbacks from
-other threads, such as SDL audio, is a separate contract from directly invoking
-Otium.
+A queue bridge for callbacks from other threads, such as SDL audio, is a
+separate contract from directly invoking Otium.

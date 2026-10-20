@@ -50,16 +50,12 @@ with tempfile.TemporaryDirectory(prefix='otium-ffi-tests-') as temp:
     # An exit inside a callback is repeated once the foreign call returns.
     exit_check = library + '(call-n (ffi/callback \'(int) \'int (fn (x) (display "before") (newline) (exit 3))) 1)\n(display "after")\n'
     thread_check = library + '((ffi/bind lib "call_on_thread" \'(callback-pointer) \'void) (ffi/callback \'() \'void (fn () nil)))\n'
-    unsupported_check = '(display (try (ffi/callback \'(int) \'int (fn (x) x)) (catch (ffi/error? c) (ffi/error-reason c))))\n(newline)\n'
     for runtime in runtimes:
         run(runtime, '(def math-library-names ' + "'" + math_names + ')\n' + (ROOT / 'examples/math.ot').read_text(), directory, '1.0\n5.0\n0.75\n12.0\n')
         run(runtime, definitions + common, directory, 'FFI checks: 203\n')
-        if runtime == 'chez':
-            modules = directory / 'modules'
-            modules.mkdir(exist_ok=True)
-            run(runtime, definitions + f'(def module-directory "{modules}")\n' + callbacks, directory, 'FFI callback checks: 40\n', ('-L', str(modules)))
-            run(runtime, definitions + exit_check, directory, 'before\n', status=3)
-            run(runtime, definitions + thread_check, directory, '', status=None, error='thread other than the Otium thread')
-        else:
-            run(runtime, definitions + unsupported_check, directory, 'unsupported\n')
+        modules = directory / 'modules'
+        modules.mkdir(exist_ok=True)
+        run(runtime, definitions + f'(def module-directory "{modules}")\n' + callbacks, directory, 'FFI callback checks: 42\n', ('-L', str(modules)))
+        run(runtime, definitions + exit_check, directory, 'before\n', status=3)
+        run(runtime, definitions + thread_check, directory, '', status=None, error='thread other than the Otium thread')
         print(runtime + ': libm and fixture checks passed' + (' under GC stress' if runtime == 'c' and os.environ.get('OTIUM_GC_STRESS') else ''))

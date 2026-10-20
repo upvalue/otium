@@ -31,16 +31,18 @@ differences, string lifetimes across collections, allocation counts, released
 views, and unions across register classes, nesting, register exhaustion and
 indirect returns.
 
-Callbacks are implemented on Chez only, with `foreign-callable` and
-`lock-object`; the contract is in [specs/ffi.md](../specs/ffi.md#callbacks).
-`tests/ffi/callbacks.ot` has 40 Chez checks: repeated, stored and nested
-callbacks, a collection inside a callback while a string argument is live,
-contained errors and escapes, reload through a forwarding procedure, rejected
-signatures and callback counts. Separate runs check that an exit inside a
-callback happens after the call and that a callback from another thread aborts.
-On C, `ffi/callback` fails as unsupported.
+Callbacks use `foreign-callable` and `lock-object` on Chez and libffi closures
+on C; the contract is in [specs/ffi.md](../specs/ffi.md#callbacks). On C the
+closure's trampoline checks the thread and call depth before touching the
+runtime. An unwind that reaches the trampoline is cleared and kept on the FFI
+context, and the outermost call puts it back when it returns.
+`tests/ffi/callbacks.ot` has 42 checks on each runtime: repeated, stored and
+nested callbacks, a collection inside a callback while a string argument is
+live, contained errors and escapes, reload through a forwarding procedure,
+rejected signatures and callback counts. Separate runs check that an exit inside
+a callback happens after the call and that a callback from another thread aborts.
 
 Not done yet: structured error metadata on every failure path, allocation-failure
-injection and signature-cache sharing in C, callbacks on C, and varargs. Only macOS
+injection and signature-cache sharing in C, and varargs. Only macOS
 arm64 with Chez 10.4.1 has been tested. Linux x86-64 must pass the same fixtures
 before it's claimed. The Chez aggregate path needs a Chez with `(& ftype)`.

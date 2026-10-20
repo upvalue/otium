@@ -34,6 +34,16 @@ void ot_global_add(ots* state, otv* slot) {
   state->globals = root;
 }
 
+void ot_global_remove(ots* state, otv* slot) {
+  for (ot_global_root** link = &state->globals; *link != NULL; link = &(*link)->next)
+    if ((*link)->slot == slot) {
+      ot_global_root* root = *link;
+      *link = root->next;
+      ot_host_free(root);
+      return;
+    }
+}
+
 void ot_gc_finalize_ext(ots* state, ot_ext_obj* ext) {
   if (ext->released || !ext->pointer_payload || ext->payload.pointer == NULL) return;
   if (ext->type == 0 || ext->type > state->ext_type_count) return;

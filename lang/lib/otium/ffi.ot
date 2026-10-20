@@ -8,13 +8,16 @@
   (when (< n 0) (%fail op "range" "expected nonnegative integer"))
   n)
 
+;; The largest integer on the C runtime bounds every size.
+(def- SIZE_LIMIT 4611686018427387903)
+
 (def- (%mul op a b)
-  (if (and (> b 0) (> a (quotient 4611686018427387903 b)))
+  (if (and (> b 0) (> a (quotient SIZE_LIMIT b)))
       (%fail op "range" "size overflow")
       (* a b)))
 
 (def- (%add op a b)
-  (if (> a (- 4611686018427387903 b))
+  (if (> a (- SIZE_LIMIT b))
       (%fail op "range" "size overflow")
       (+ a b)))
 
@@ -57,16 +60,28 @@
           index
           (%scalar-id name (cdr names) (+ index 1)))))
 
+;; Type codes shared with the runtimes: scalars by position in %scalars, then
+;; layout kinds. They match native/ffi/native.h and chez/otium/ffi.sls.
+(def- KIND_VOID (%scalar-id 'void %scalars 0))
+
+(def- KIND_UTF8 (%scalar-id 'utf8 %scalars 0))
+
+(def- KIND_STRUCT (length %scalars))
+
+(def- KIND_UNION (+ KIND_STRUCT 1))
+
+(def- KIND_ARRAY (+ KIND_STRUCT 2))
+
 (def- (%describe t op)
   (cond
     ((symbol? t)
      (let ((k (%scalar-id t %scalars 0)))
        (if k
            (list k
-                 (if (= k 0)
+                 (if (= k KIND_VOID)
                      0
                      (%sizeof k))
-                 (if (= k 0)
+                 (if (= k KIND_VOID)
                      1
                      (%alignof k))
                  '())
@@ -75,12 +90,12 @@
     ((and (list? t) (= (length t) 3) (eq? (car t) 'array))
      (let ((element (%memory (cadr t) op))
            (count (%count op (caddr t))))
-       (list 25 (%mul op (cadr element) count) (caddr element) (list element count))))
+       (list KIND_ARRAY (%mul op (cadr element) count) (caddr element) (list element count))))
     (else (%fail op (%signature-error op) "invalid foreign type"))))
 
 (def- (%memory t op)
   (let ((d (%describe t op)))
-    (if (or (= (car d) 0) (= (car d) 22))
+    (if (or (= (car d) KIND_VOID) (= (car d) KIND_UTF8))
         (%fail op "type" "not a memory type")
         d)))
 
@@ -95,7 +110,7 @@
 
 (def- (%scalar-memory t op)
   (let ((d (%memory t op)))
-    (if (>= (car d) 23)
+    (if (>= (car d) KIND_STRUCT)
         (%fail op "type" "use fields or views for aggregate memory")
         d)))
 
@@ -112,7 +127,7 @@
         (unless (and (list? f) (= (length f) 2) (symbol? (car f))) (%fail "layout" "type" "expected (field-name type)"))
         (when (assq (car f) fields) (%fail "layout" "type" "duplicate field"))
         (let ((d (%memory (cadr f) "layout"))
-              (offset (if (= kind 24)
+              (offset (if (= kind KIND_UNION)
                           0
                           (%round size (caddr d)))))
           (%fields (cdr entries)
@@ -127,22 +142,22 @@
       (%layout (%fields fields kind '() 0 1))))
 
 (def (define-struct! name fields)
-  (%aggregate name fields 23))
+  (%aggregate name fields KIND_STRUCT))
 
 (def (define-union! name fields)
-  (%aggregate name fields 24))
+  (%aggregate name fields KIND_UNION))
 
 (def- (%path d path offset)
   (if (%empty? path)
       (list d offset)
-      (if (= (car d) 25)
+      (if (= (car d) KIND_ARRAY)
           (let ((index (%count "field" (car path)))
                 (element (car (cadddr d)))
                 (count (cadr (cadddr d))))
             (if (>= index count)
                 (%fail "field" "bounds" "array field index out of bounds")
                 (%path element (cdr path) (%add "field" offset (%mul "field" index (cadr element))))))
-          (if (or (= (car d) 23) (= (car d) 24))
+          (if (or (= (car d) KIND_STRUCT) (= (car d) KIND_UNION))
               (let ((f (assq (car path) (cadddr d))))
                 (if f
                     (%path (cadr f) (cdr path) (%add "field" offset (caddr f)))
@@ -162,21 +177,21 @@
 
 (def (field-ref p t path)
   (let ((f (%resolve t path)))
-    (if (>= (car (car f)) 23)
+    (if (>= (car (car f)) KIND_STRUCT)
         (%fail "field-ref" "type" "field is aggregate")
         (%ref p (car (car f)) (cadr f)))))
 
 (def (field-set! p t path value)
   (let ((f (%resolve t path)))
-    (if (>= (car (car f)) 23)
+    (if (>= (car (car f)) KIND_STRUCT)
         (%fail "field-set!" "type" "field is aggregate")
         (%set! p (car (car f)) (cadr f) value))))
 
 (def- (%call-type t result?)
   (let ((d (%describe t "bind")))
-    (if (or (= (car d) 25) (and (not result?) (= (car d) 0)))
+    (if (or (= (car d) KIND_ARRAY) (and (not result?) (= (car d) KIND_VOID)))
         (%fail "bind" "signature" "invalid call type")
-        (if (< (car d) 23)
+        (if (< (car d) KIND_STRUCT)
             (car d)
             d))))
 
@@ -187,7 +202,7 @@
 
 (def- (%callback-type t result?)
   (let ((k (car (%describe t "callback"))))
-    (if (or (>= k 22) (and (not result?) (= k 0)))
+    (if (or (>= k KIND_UTF8) (and (not result?) (= k KIND_VOID)))
         (%fail "callback" "signature" "callback types are scalars, pointer, or callback-pointer")
         k)))
 

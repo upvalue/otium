@@ -14,17 +14,20 @@
 #include <time.h>
 
 #define LIMIT (4u * 1024u * 1024u)
+
 typedef struct client {
   int fd, id;
   unsigned char *input, *output;
   size_t used, queued, sent;
   struct client* next;
 } client;
+
 typedef struct request {
   int client;
   char* text;
   struct request* next;
 } request;
+
 static int listener = -1, serial, last_client;
 static client* clients;
 static request *head, *tail;
@@ -35,26 +38,32 @@ static ino_t socket_inode;
 static char* last;
 
 int ot_dev_uid(void) { return (int)geteuid(); }
+
 int ot_dev_private_directory(const char* path) {
   if (mkdir(path, 0700) != 0 && errno != EEXIST) return 0;
   struct stat st;
   return lstat(path, &st) == 0 && S_ISDIR(st.st_mode) && st.st_uid == geteuid() &&
          !(st.st_mode & 077);
 }
+
 int ot_dev_pid(void) { return (int)getpid(); }
+
 const char* ot_dev_cwd(void) {
   static char path[4096];
   return getcwd(path, sizeof path) ? path : "";
 }
+
 const char* ot_dev_realpath(const char* path) {
   static char resolved[PATH_MAX];
   return realpath(path, resolved) ? resolved : path;
 }
+
 int64_t ot_dev_now(void) {
   struct timespec now;
   clock_gettime(CLOCK_REALTIME, &now);
   return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
 }
+
 int64_t ot_dev_mtime(const char* path) {
   struct stat st;
   if (stat(path, &st) != 0) return -1;
@@ -64,14 +73,17 @@ int64_t ot_dev_mtime(const char* path) {
   return (int64_t)st.st_mtim.tv_sec * 1000 + st.st_mtim.tv_nsec / 1000000;
 #endif
 }
+
 uint64_t ot_dev_clock(void) {
   struct timespec now;
   clock_gettime(CLOCK_MONOTONIC, &now);
   return (uint64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
 }
+
 static int nonblock(int fd) {
   return fcntl(fd, F_SETFL, O_NONBLOCK) == 0 && fcntl(fd, F_SETFD, FD_CLOEXEC) == 0;
 }
+
 void ot_dev_close(void) {
   if (listener >= 0) close(listener);
   listener = -1;
@@ -99,6 +111,7 @@ void ot_dev_close(void) {
   free(last);
   last = NULL;
 }
+
 int ot_dev_open(const char* path) {
   if (listener >= 0 || !*path || strlen(path) >= sizeof socket_path) return -1;
   struct sockaddr_un address = {0};
@@ -138,6 +151,7 @@ int ot_dev_open(const char* path) {
   listener = fd;
   return 0;
 }
+
 static void flush(client* c) {
   while (c->sent < c->queued) {
 #ifdef MSG_NOSIGNAL
@@ -158,6 +172,7 @@ static void flush(client* c) {
   c->output = NULL;
   c->sent = c->queued = 0;
 }
+
 void ot_dev_send(int id, const char* text) {
   size_t n = strlen(text);
   for (client* c = clients; c; c = c->next) {
@@ -184,6 +199,7 @@ void ot_dev_send(int id, const char* text) {
     flush(c);
   }
 }
+
 int ot_dev_poll(int timeout) {
   if (listener < 0) return 0;
   size_t count = 1;
@@ -282,6 +298,7 @@ int ot_dev_poll(int timeout) {
   }
   return head != NULL;
 }
+
 const char* ot_dev_next(void) {
   free(last);
   last = NULL;
@@ -296,4 +313,5 @@ const char* ot_dev_next(void) {
   requests--;
   return last;
 }
+
 int ot_dev_client(void) { return last_client; }

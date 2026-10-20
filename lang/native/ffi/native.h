@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+
 enum {
   F_VOID,
   F_BOOL,
@@ -29,6 +30,7 @@ enum {
   F_UTF8,
   F_COUNT
 };
+
 /* ABI metadata comes from the compiler that builds this bridge. Unknown type
  * codes have size/alignment zero; names and metadata have static lifetime. */
 extern const char* const offi_names[F_COUNT];

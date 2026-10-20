@@ -3,6 +3,7 @@
 #include <string.h>
 static char text[32];
 static unsigned polls;
+
 bool fixture_poll(SDL_Event* event) {
   memset(event, 0, sizeof(*event));
   strcpy(text, polls++ ? "changed" : "first text");

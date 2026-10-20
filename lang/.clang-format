@@ -9,6 +9,7 @@ ContinuationIndentWidth: 4
 UseTab: Never
 
 BreakBeforeBraces: Attach
+SeparateDefinitionBlocks: Always
 IndentCaseLabels: true
 
 DerivePointerAlignment: false

@@ -176,6 +176,7 @@ static bytes dev_output;
 static void dev_bytes_writer(void* userdata, const char* text, size_t length) {
   bytes_append(userdata, text, length);
 }
+
 /* Marshal the loader's borrowed strings into an Otium notification. The dev
  * module owns the registry and timestamp; no managed values are retained here. */
 static bool record_loaded(ots* state, const char* name, const char* path) {
@@ -196,6 +197,7 @@ static bool record_loaded(ots* state, const char* name, const char* path) {
   ot_host_free(code.data);
   return ok;
 }
+
 static otv dev_repr(ots* s, otv value) {
   bytes text = {0};
   ot_repr_to(s, value, false, dev_bytes_writer, &text);
@@ -203,6 +205,7 @@ static otv dev_repr(ots* s, otv value) {
   ot_host_free(text.data);
   return result;
 }
+
 static void dev_writer(void* userdata, const char* text, size_t length) {
   (void)userdata;
   if (dev_capture) bytes_append(dev_capture, text, length);
@@ -211,30 +214,35 @@ static void dev_writer(void* userdata, const char* text, size_t length) {
     if (dev_enabled) bytes_append(&dev_output, text, length);
   }
 }
+
 static otv dev_enabled_p(ots* s, otv* args, int argc) {
   (void)s;
   (void)args;
   (void)argc;
   return dev_enabled ? ot_true : ot_false;
 }
+
 static otv dev_clock(ots* s, otv* args, int argc) {
   (void)s;
   (void)args;
   (void)argc;
   return ot_make_int(ot_dev_clock());
 }
+
 static otv dev_pid(ots* s, otv* args, int argc) {
   (void)s;
   (void)args;
   (void)argc;
   return ot_make_int(ot_dev_pid());
 }
+
 static otv dev_uid(ots* s, otv* args, int argc) {
   (void)s;
   (void)args;
   (void)argc;
   return ot_make_int(ot_dev_uid());
 }
+
 static otv dev_path_call(ots* s, otv* args, int argc, int (*operation)(const char*), int success) {
   const char* text;
   size_t length;
@@ -245,39 +253,47 @@ static otv dev_path_call(ots* s, otv* args, int argc, int (*operation)(const cha
   ot_host_free(path);
   return result == success ? ot_true : ot_false;
 }
+
 static otv dev_private_directory(ots* s, otv* args, int argc) {
   return dev_path_call(s, args, argc, ot_dev_private_directory, 1);
 }
+
 static otv dev_open(ots* s, otv* args, int argc) {
   return dev_path_call(s, args, argc, ot_dev_open, 0);
 }
+
 static otv dev_cwd(ots* s, otv* args, int argc) {
   (void)args;
   (void)argc;
   const char* path = ot_dev_cwd();
   return ot_make_string(s, path, strlen(path));
 }
+
 static otv dev_runtime(ots* s, otv* args, int argc) {
   (void)args;
   (void)argc;
   return ot_intern(s, "c", 1, true);
 }
+
 static otv dev_poll(ots* s, otv* args, int argc) {
   if (argc != 1 || !ot_is_int(args[0])) return ot_raise(s, "poll: expected milliseconds");
   return ot_make_int(ot_dev_poll((int)ot_get_int(args[0])));
 }
+
 static otv dev_next(ots* s, otv* args, int argc) {
   (void)args;
   (void)argc;
   const char* text = ot_dev_next();
   return text ? ot_make_string(s, text, strlen(text)) : ot_false;
 }
+
 static otv dev_client(ots* s, otv* args, int argc) {
   (void)s;
   (void)args;
   (void)argc;
   return ot_make_int(ot_dev_client());
 }
+
 static otv dev_send(ots* s, otv* args, int argc) {
   const char* text;
   size_t length;
@@ -288,27 +304,32 @@ static otv dev_send(ots* s, otv* args, int argc) {
   ot_host_free(copy);
   return ot_nil;
 }
+
 static otv dev_render(ots* s, otv* args, int argc) {
   if (argc != 1) return ot_raise(s, "repr: expected value");
   return dev_repr(s, args[0]);
 }
+
 static otv dev_set_deadline(ots* s, otv* args, int argc) {
   if (argc != 1 || !ot_is_int(args[0])) return ot_raise(s, "deadline: expected integer");
   intptr_t n = ot_get_int(args[0]);
   if (n >= 0) dev_deadline = (uint64_t)n;
   return ot_make_int(dev_deadline);
 }
+
 static void dev_field(ots* s, otv table, const char* name, otv value) {
   OT_FRAME_SCOPED(s, &table, &value);
   otv key = ot_intern(s, name, strlen(name), true);
   ot_table_put(s, table, key, value);
 }
+
 static otv dev_now(ots* s, otv* args, int argc) {
   (void)s;
   (void)args;
   (void)argc;
   return ot_make_int(ot_dev_now());
 }
+
 static otv dev_mtime(ots* s, otv* args, int argc) {
   const char* text;
   size_t length;
@@ -319,6 +340,7 @@ static otv dev_mtime(ots* s, otv* args, int argc) {
   ot_host_free(path);
   return mtime < 0 ? ot_false : ot_make_int(mtime);
 }
+
 static otv dev_realpath(ots* s, otv* args, int argc) {
   const char* text;
   size_t length;
@@ -330,18 +352,21 @@ static otv dev_realpath(ots* s, otv* args, int argc) {
   ot_host_free(path);
   return result;
 }
+
 static void dev_keyword_field(ots* s, otv table, const char* name, const char* keyword) {
   otv value = ot_nil;
   OT_FRAME_SCOPED(s, &table, &value);
   value = ot_intern(s, keyword, strlen(keyword), true);
   dev_field(s, table, name, value);
 }
+
 static void dev_string_field(ots* s, otv table, const char* name, const char* text) {
   otv value = ot_nil;
   OT_FRAME_SCOPED(s, &table, &value);
   value = ot_make_string(s, text, strlen(text));
   dev_field(s, table, name, value);
 }
+
 /* Copy the runtime's namespace names; Otium owns file/load-time metadata. */
 static otv dev_namespaces(ots* s, otv* args, int argc) {
   (void)args;
@@ -356,6 +381,7 @@ static otv dev_namespaces(ots* s, otv* args, int argc) {
   }
   return result;
 }
+
 /* Copy binding facts from opaque runtime objects. Otium derives public arity
  * metadata from the parameter list. */
 static otv dev_bindings(ots* s, otv* args, int argc) {
@@ -394,6 +420,7 @@ static otv dev_bindings(ots* s, otv* args, int argc) {
   }
   return result;
 }
+
 static otv dev_evaluate(ots* s, otv* args, int argc) {
   const char *source, *space, *path;
   size_t length, space_length, path_length;
@@ -452,6 +479,7 @@ static otv dev_evaluate(ots* s, otv* args, int argc) {
   dev_field(s, response, "value", result);
   return response;
 }
+
 static void dev_module(ots* s) {
   ot_def_nat(s, "%enabled?", dev_enabled_p);
   ot_def_nat(s, "%clock", dev_clock);
@@ -476,6 +504,7 @@ static void dev_module(ots* s) {
   otv ignored;
   ot_eval_src(s, ot_dev_src, ot_dev_src_len, "<otium.dev>", &ignored);
 }
+
 static bool dev_due(void* userdata) {
   (void)userdata;
   uint64_t now = ot_dev_clock();
@@ -483,6 +512,7 @@ static bool dev_due(void* userdata) {
   dev_last_poll = now;
   return dev_output.length || ot_dev_poll(0) || (dev_deadline && now >= dev_deadline);
 }
+
 static void dev_flush_output(ots* s) {
   if (!dev_output.length) return;
   otv text = ot_make_string(s, dev_output.data, dev_output.length);
@@ -495,6 +525,7 @@ static void dev_flush_output(ots* s) {
   ot_dev_send(0, message.data);
   ot_host_free(message.data);
 }
+
 static ot_interrupt_action dev_break(ots* s, void* userdata) {
   (void)userdata;
   otv saved = s->vm.current_namespace;
@@ -517,6 +548,7 @@ static ot_interrupt_action dev_break(ots* s, void* userdata) {
   s->vm.current_namespace = saved;
   return !ok || result == ot_true ? OT_INTERRUPT_ERROR : OT_INTERRUPT_CONTINUE;
 }
+
 static bool dev_start(ots* s, const char* path, size_t watchdog) {
   atexit(ot_dev_close);
   bytes code = {0};
@@ -540,6 +572,7 @@ static bool dev_start(ots* s, const char* path, size_t watchdog) {
   s->poll_hook = dev_due;
   return true;
 }
+
 static void dev_service(ots* s) {
   if (!dev_enabled) return;
   dev_flush_output(s);

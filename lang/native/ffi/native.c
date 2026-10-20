@@ -40,6 +40,7 @@ const char* const offi_names[F_COUNT] = {"void",    "bool",
   X(F_CALLBACK, void (*)(void))  \
   X(F_UTF8, char*)
 // clang-format on
+
 size_t offi_size(int type) {
   switch (type) {
 #define S(K, T)                                                                                    \
@@ -49,6 +50,7 @@ size_t offi_size(int type) {
     default: return 0;
   }
 }
+
 size_t offi_align(int type) {
   switch (type) {
 #define A(K, T)                                                                                    \
@@ -58,20 +60,25 @@ size_t offi_align(int type) {
     default: return 0;
   }
 }
+
 int offi_signed(int type) {
   return type == F_I8 || type == F_I16 || type == F_I32 || type == F_I64 || type == F_SHORT ||
          type == F_INT || type == F_LONG || type == F_DIFF;
 }
+
 void* offi_open(const char* path) {
   dlerror();
   return dlopen(path, RTLD_NOW | RTLD_LOCAL);
 }
+
 void* offi_symbol(void* library, const char* name) {
   dlerror();
   return dlsym(library, name);
 }
+
 const char* offi_loader_error(void) {
   const char* e = dlerror();
   return e ? e : "loader failure";
 }
+
 int offi_utf8(const unsigned char* bytes, size_t size) { return ot_utf8_valid(bytes, size); }

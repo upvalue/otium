@@ -10,30 +10,37 @@ static struct {
   float size;
   int face;
 } fonts[64];
+
 static struct {
   TTF_Text* text;
   TTF_Font* font;
   int width;
 } runs[128];
+
 static int font_count;
 static bool initialized;
 static TTF_TextEngine engine;
+
 int otui_text_resources(void) {
   int count = font_count;
   for (int i = 0; i < 128; ++i)
     if (runs[i].text) ++count;
   return count;
 }
+
 const char* otui_text_error(void) { return SDL_GetError(); }
+
 static bool create_text(void* userdata, TTF_Text* text) {
   (void)userdata;
   text->internal->engine_text = text;
   return true;
 }
+
 static void destroy_text(void* userdata, TTF_Text* text) {
   (void)userdata;
   text->internal->engine_text = NULL;
 }
+
 void otui_text_clear(void) {
   for (int i = 0; i < 128; ++i) {
     if (runs[i].text) TTF_DestroyText(runs[i].text);
@@ -44,6 +51,7 @@ void otui_text_clear(void) {
   if (initialized) TTF_Quit();
   initialized = false;
 }
+
 TTF_Text* otui_text_get(const char* string, int face, float size, float width, float scale) {
   if (!string || face < 0 || face > 1 || !isfinite(size) || size < 1 || size > 256 ||
       !isfinite(width) || width > 1048576 || !isfinite(scale) || scale < 1 || scale > 4) {
@@ -99,6 +107,7 @@ TTF_Text* otui_text_get(const char* string, int face, float size, float width, f
   runs[slot].width = wrap;
   return text;
 }
+
 float otui_text_size(TTF_Text* text, int field) {
   return field ? text->internal->h : text->internal->w;
 }

@@ -14,6 +14,7 @@
 
 static void (*idle_service)(void*);
 static void* idle_userdata;
+
 static int service_poll(int fd, int events, int timeout) {
   struct pollfd item = {fd, (short)events, 0};
   int remaining = timeout;
@@ -28,10 +29,12 @@ static int service_poll(int fd, int events, int timeout) {
     }
   }
 }
+
 static int service_read(int fd, void* buffer, int length) {
   if (idle_service && service_poll(fd, POLLIN, -1) < 0) return -1;
   return (int)read(fd, buffer, (size_t)length);
 }
+
 void ot_line_set_service(void (*service)(void*), void* userdata) {
   idle_service = service;
   idle_userdata = userdata;

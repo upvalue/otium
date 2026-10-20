@@ -99,7 +99,9 @@ void unsafe_bulk(ot_pair_obj* pair, const ot_pair_obj* source) {
 }
 
 OT_GC_ALLOW_DIRECT_STORE("object is outside the managed heap")
+
 void escaped(ot_pair_obj* pair, otv value) { pair->car = value; }
 
 OT_GC_ALLOW_DIRECT_STORE("")
+
 void empty_escape(ot_pair_obj* pair, otv value) { pair->car = value; }

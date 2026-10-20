@@ -4,7 +4,9 @@
 static void unavailable(ots* s) {
   ot_raise(s, "otium.ffi unavailable: rebuild with libffi installed (-Dffi=enabled)");
 }
+
 void ot_register_ffi(ots* s) { ot_register_module(s, "otium.ffi", unavailable); }
+
 void ot_destroy_ffi(ots* s) { (void)s; }
 #else
 #include "../../native/ffi/native.h"
@@ -27,10 +29,12 @@ static void* zero_alloc(size_t count, size_t size) {
   if (p) memset(p, 0, bytes);
   return p;
 }
+
 typedef struct item {
   struct item* next;
   void (*destroy)(void*);
 } item;
+
 typedef struct owner {
   item item;
   void* data;
@@ -38,6 +42,7 @@ typedef struct owner {
   bool released;
 } owner;
 typedef struct callback callback;
+
 /* code marks a native function address: a callback or a decoded
  * callback-pointer value. */
 typedef struct pointer {
@@ -47,11 +52,13 @@ typedef struct pointer {
   size_t size;
   bool bounded, owning, code;
 } pointer;
+
 typedef struct library {
   item item;
   void* handle;
   char* name;
 } library;
+
 typedef struct binding {
   item item;
   library* lib;
@@ -64,6 +71,7 @@ typedef struct binding {
   ffi_type* result_type;
   size_t count;
 } binding;
+
 /* The procedure is a global root until the callback is freed. The record
  * itself lives until the state is destroyed, so pointer values can still see
  * that it was released. */
@@ -80,12 +88,14 @@ struct callback {
   otv procedure;
   bool released;
 };
+
 typedef enum pending_kind {
   PENDING_NONE,
   PENDING_CONDITION,
   PENDING_QUIT,
   PENDING_ESCAPE
 } pending_kind;
+
 typedef struct error_scope {
   ots* state;
   struct error_scope* previous;
@@ -94,6 +104,7 @@ typedef struct error_scope {
   intptr_t argument;
   int expected;
 } error_scope;
+
 typedef struct context {
   error_scope* error;
   item* items;
@@ -109,8 +120,11 @@ typedef struct context {
   bool pending_quit_requested;
   int pending_quit_status;
 } context;
+
 static context* ctx(ots* s) { return s->ffi_state; }
+
 static void pop_error(error_scope* e) { ctx(e->state)->error = e->previous; }
+
 #define ERROR_SCOPE()                                                                              \
   error_scope scope [[gnu::cleanup(pop_error)]] = {s, ctx(s)->error, NULL, NULL, -1, -1};          \
   ctx(s)->error = &scope
@@ -120,11 +134,13 @@ static void track(ots* s, item* p, void (*destroy)(void*)) {
   p->destroy = destroy;
   ctx(s)->items = p;
 }
+
 static void owner_destroy(void* p) {
   owner* o = p;
   ot_host_free(o->data);
   ot_host_free(o);
 }
+
 static void release_owner(context* c, owner* o) {
   if (o->released) return;
   ot_host_free(o->data);
@@ -133,6 +149,7 @@ static void release_owner(context* c, owner* o) {
   c->allocations--;
   c->bytes -= o->size;
 }
+
 static void callback_release(callback* cb) {
   if (cb->released) return;
   ffi_closure_free(cb->closure);
@@ -141,6 +158,7 @@ static void callback_release(callback* cb) {
   cb->released = true;
   ctx(cb->state)->callbacks--;
 }
+
 /* Free a callback that was never registered, or one already released. */
 static void callback_free(callback* cb) {
   if (cb->closure) ffi_closure_free(cb->closure);
@@ -148,21 +166,25 @@ static void callback_free(callback* cb) {
   ot_host_free(cb->kinds);
   ot_host_free(cb);
 }
+
 static void callback_destroy(void* p) {
   callback_release(p);
   callback_free(p);
 }
+
 static void library_destroy(void* p) {
   library* l = p;
   ot_host_free(l->name);
   ot_host_free(l);
 }
+
 static void free_type(ffi_type* t) {
   if (!t || t->type != FFI_TYPE_STRUCT) return;
   for (size_t i = 0; t->elements[i]; i++) free_type(t->elements[i]);
   ot_host_free(t->elements);
   ot_host_free(t);
 }
+
 static void binding_destroy(void* p) {
   binding* b = p;
   if (b->types)
@@ -173,11 +195,13 @@ static void binding_destroy(void* p) {
   ot_host_free(b->kinds);
   ot_host_free(b);
 }
+
 static void put(ots* s, otv table, const char* key, otv value) {
   OT_FRAME_SCOPED(s, &table, &value);
   otv k = ot_make_keyword(s, key, strlen(key));
   ot_table_put(s, table, k, value);
 }
+
 static otv fail(ots* s, const char* op, const char* reason, const char* message) {
   otv c = ot_table_new(s, 8), v = ot_false;
   OT_FRAME_SCOPED(s, &c, &v);
@@ -208,15 +232,18 @@ static otv fail(ots* s, const char* op, const char* reason, const char* message)
   }
   return ot_raise_value(s, c);
 }
+
 #define ARITY(N, OP)                                                                               \
   ERROR_SCOPE();                                                                                   \
   if (n != (N)) return fail(s, OP, "arity", "wrong number of arguments")
+
 static void* ext(otv v, unsigned type) {
   if (ot_value_type(v) != OT_TYPE_EXT) return NULL;
   ot_ext_obj* e = (ot_ext_obj*)ot_as_obj(v);
   if (e->type != type || e->released) return NULL;
   return e->pointer_payload ? e->payload.pointer : e->payload.bytes;
 }
+
 static bool ptr(ots* s, otv v, pointer* out, const char* op) {
   pointer* p = ext(v, ctx(s)->pointer_type);
   if (!p) {
@@ -226,6 +253,7 @@ static bool ptr(ots* s, otv v, pointer* out, const char* op) {
   *out = *p;
   return true;
 }
+
 static bool live(ots* s, pointer p, const char* op) {
   if (p.owner && p.owner->released) {
     fail(s, op, "released", "allocation released");
@@ -237,6 +265,7 @@ static bool live(ots* s, pointer p, const char* op) {
   }
   return true;
 }
+
 static bool span(ots* s, pointer p, size_t offset, size_t bytes, size_t align, const char* op) {
   if (!live(s, p, op)) return false;
   if (!p.address) {
@@ -254,6 +283,7 @@ static bool span(ots* s, pointer p, size_t offset, size_t bytes, size_t align, c
   }
   return true;
 }
+
 static bool count(ots* s, otv v, size_t* out, const char* op) {
   if (!ot_is_int(v)) {
     fail(s, op, "type", "expected exact integer");
@@ -266,7 +296,9 @@ static bool count(ots* s, otv v, size_t* out, const char* op) {
   *out = (size_t)ot_get_int(v);
   return true;
 }
+
 static otv wrap(ots* s, pointer p) { return ot_ext_inline(s, ctx(s)->pointer_type, &p, sizeof(p)); }
+
 static char* string(ots* s, otv v, const char* op) {
   const char* p;
   size_t n;
@@ -287,9 +319,11 @@ static char* string(ots* s, otv v, const char* op) {
   copy[n] = 0;
   return copy;
 }
+
 static int kind(otv v) {
   return ot_is_int(v) && ot_get_int(v) >= 0 && ot_get_int(v) < F_COUNT ? (int)ot_get_int(v) : -1;
 }
+
 static ffi_type* native_type(int k) {
   static ffi_type* types[] = {
       &ffi_type_void,    &ffi_type_uint8,   &ffi_type_sint8,  &ffi_type_uint8,  &ffi_type_sint16,
@@ -299,16 +333,19 @@ static ffi_type* native_type(int k) {
       &ffi_type_pointer, &ffi_type_pointer, &ffi_type_pointer};
   return k >= 0 && k < F_COUNT ? types[k] : NULL;
 }
+
 static otv nth(otv list, size_t index) {
   otv head = ot_false;
   for (size_t i = 0; i <= index; i++)
     if (!ot_pair_values(list, &head, &list)) return ot_false;
   return head;
 }
+
 static int call_kind(otv value) {
   return ot_is_int(value) ? kind(value)
                           : (ot_is_int(nth(value, 0)) ? (int)ot_get_int(nth(value, 0)) : -1);
 }
+
 /* A union's overlapping members contribute to its calling classification.
  * Preserve byte classes as well as size: a 4-aligned union can straddle two
  * SysV eightbytes when nested in a struct. See docs/native.md. */
@@ -357,6 +394,7 @@ static bool classify_union_member(ots* s, otv d, size_t offset, unsigned char cl
   fail(s, "bind", "signature", "invalid aggregate member");
   return false;
 }
+
 static ffi_type* prepare_union(ots* s, otv description, unsigned depth) {
   size_t size = (size_t)ot_get_int(nth(description, 1));
   size_t align = (size_t)ot_get_int(nth(description, 2));
@@ -414,6 +452,7 @@ static ffi_type* prepare_union(ots* s, otv description, unsigned depth) {
   }
   return t;
 }
+
 static ffi_type* prepare_type(ots* s, otv description, unsigned depth) {
   int k = call_kind(description);
   if (k >= 0 && k < F_COUNT) return native_type(k);
@@ -483,6 +522,7 @@ static ffi_type* prepare_type(ots* s, otv description, unsigned depth) {
   }
   return t;
 }
+
 typedef union cell {
   ffi_arg word;
   int64_t i;
@@ -491,6 +531,7 @@ typedef union cell {
   double d;
   void* p;
 } cell;
+
 static bool encode(ots* s, int k, otv v, cell* out, char** temporary, const char* op) {
   memset(out, 0, sizeof(*out));
   if (k == F_BOOL) {
@@ -556,6 +597,7 @@ static bool encode(ots* s, int k, otv v, cell* out, char** temporary, const char
   fail(s, op, "signature", "invalid scalar type");
   return false;
 }
+
 static otv decode(ots* s, int k, cell v, const char* op) {
   if (k == F_VOID) return ot_false;
   if (k == F_BOOL) return (uint8_t)v.u ? ot_true : ot_false;
@@ -583,34 +625,40 @@ static otv decode(ots* s, int k, cell v, const char* op) {
   }
   return wrap(s, (pointer){.address = v.p, .code = k == F_CALLBACK && v.p});
 }
+
 static otv n_null(ots* s, otv* a, int n) {
   (void)a;
   ARITY(0, "null");
   return wrap(s, (pointer){0});
 }
+
 static otv n_nullp(ots* s, otv* a, int n) {
   ARITY(1, "null?");
   pointer* p = ext(a[0], ctx(s)->pointer_type);
   return p && !p->address ? ot_true : ot_false;
 }
+
 static otv n_equal(ots* s, otv* a, int n) {
   ARITY(2, "pointer=?");
   pointer p, q;
   if (!ptr(s, a[0], &p, "pointer=?") || !ptr(s, a[1], &q, "pointer=?")) return OT_UNWIND;
   return p.address == q.address ? ot_true : ot_false;
 }
+
 static otv n_size(ots* s, otv* a, int n) {
   ARITY(1, "sizeof");
   int k = kind(a[0]);
   if (k <= F_VOID) return fail(s, "sizeof", "type", "invalid type");
   return ot_make_int((intptr_t)offi_size(k));
 }
+
 static otv n_align(ots* s, otv* a, int n) {
   ARITY(1, "alignof");
   int k = kind(a[0]);
   if (k <= F_VOID) return fail(s, "alignof", "type", "invalid type");
   return ot_make_int((intptr_t)offi_align(k));
 }
+
 static otv n_alloc(ots* s, otv* a, int n) {
   ARITY(2, "alloc");
   size_t bytes, align;
@@ -631,6 +679,7 @@ static otv n_alloc(ots* s, otv* a, int n) {
   return wrap(
       s, (pointer){.address = o->data, .owner = o, .size = bytes, .bounded = true, .owning = true});
 }
+
 static otv n_free(ots* s, otv* a, int n) {
   ARITY(1, "free!");
   pointer p;
@@ -640,6 +689,7 @@ static otv n_free(ots* s, otv* a, int n) {
   release_owner(ctx(s), p.owner);
   return ot_false;
 }
+
 static otv n_view(ots* s, otv* a, int n) {
   ARITY(3, "view");
   pointer p;
@@ -654,6 +704,7 @@ static otv n_view(ots* s, otv* a, int n) {
   p.code = false;
   return wrap(s, p);
 }
+
 static otv n_ref(ots* s, otv* a, int n) {
   ARITY(3, "ref");
   pointer p;
@@ -667,6 +718,7 @@ static otv n_ref(ots* s, otv* a, int n) {
   memcpy(&v, (char*)p.address + offset, offi_size(k));
   return decode(s, k, v, "ref");
 }
+
 static otv n_set(ots* s, otv* a, int n) {
   ARITY(4, "set!");
   pointer p;
@@ -682,6 +734,7 @@ static otv n_set(ots* s, otv* a, int n) {
   memcpy((char*)p.address + offset, &v, offi_size(k));
   return ot_false;
 }
+
 static otv n_copy(ots* s, otv* a, int n) {
   ARITY(3, "copy!");
   pointer p, q;
@@ -693,6 +746,7 @@ static otv n_copy(ots* s, otv* a, int n) {
   memmove(p.address, q.address, bytes);
   return ot_false;
 }
+
 static otv n_read(ots* s, otv* a, int n) {
   ARITY(2, "read-utf8");
   pointer p;
@@ -706,6 +760,7 @@ static otv n_read(ots* s, otv* a, int n) {
   if (!offi_utf8(p.address, len)) return fail(s, "read-utf8", "encoding", "invalid UTF-8");
   return ot_make_string(s, p.address, len);
 }
+
 static otv n_alloc_string(ots* s, otv* a, int n) {
   ARITY(1, "alloc-utf8");
   char* p = string(s, a[0], "alloc-utf8");
@@ -720,11 +775,13 @@ static otv n_alloc_string(ots* s, otv* a, int n) {
   ot_host_free(p);
   return result;
 }
+
 static otv n_stats(ots* s, otv* a, int n) {
   (void)a;
   ARITY(0, "allocation-count");
   return ot_make_int((intptr_t)ctx(s)->allocations);
 }
+
 /* Nothing unwinds through the native frames between a callback and the call
  * that led to it. The unwind in progress is stopped and recorded instead, and
  * signal-site handlers have already run for a condition. */
@@ -742,6 +799,7 @@ static void contain(ots* s) {
   ot_clear_condition(s);
   s->quit_requested = false;
 }
+
 /* Raise the contained condition or repeat the exit, without running handlers
  * again. A restart outside the callback cannot be repeated. */
 static otv replay(ots* s) {
@@ -760,11 +818,13 @@ static otv replay(ots* s) {
   }
   return OT_UNWIND;
 }
+
 [[noreturn]] static void callback_abort(const char* message) {
   fprintf(stderr, "otium: %s\n", message);
   fflush(stderr);
   abort();
 }
+
 /* libffi widens integer results to a full register. */
 static void store_result(int k, const cell* v, void* ret) {
   if (k == F_VOID) return;
@@ -775,6 +835,7 @@ static void store_result(int k, const cell* v, void* ret) {
   else if (offi_signed(k)) *(ffi_sarg*)ret = (ffi_sarg)v->i;
   else *(ffi_arg*)ret = (ffi_arg)v->u;
 }
+
 static void trampoline(ffi_cif* cif, void* ret, void** args, void* data) {
   (void)cif;
   callback* cb = data;
@@ -814,6 +875,7 @@ static void trampoline(ffi_cif* cif, void* ret, void** args, void* data) {
   c->error = outer;
   store_result(cb->result, &out, ret);
 }
+
 static otv n_callback(ots* s, otv* a, int n) {
   ARITY(3, "callback");
   if (ot_value_type(a[2]) != OT_TYPE_FUNCTION)
@@ -863,6 +925,7 @@ static otv n_callback(ots* s, otv* a, int n) {
   ctx(s)->callbacks++;
   return wrap(s, (pointer){.address = cb->code, .callback = cb, .code = true});
 }
+
 static otv n_free_callback(ots* s, otv* a, int n) {
   ARITY(1, "free-callback!");
   pointer* p = ext(a[0], ctx(s)->pointer_type);
@@ -870,16 +933,19 @@ static otv n_free_callback(ots* s, otv* a, int n) {
   callback_release(p->callback);
   return ot_false;
 }
+
 static otv n_callback_count(ots* s, otv* a, int n) {
   (void)a;
   ARITY(0, "callback-count");
   return ot_make_int((intptr_t)ctx(s)->callbacks);
 }
+
 static otv n_bytes(ots* s, otv* a, int n) {
   (void)a;
   ARITY(0, "allocation-bytes");
   return ot_make_int((intptr_t)ctx(s)->bytes);
 }
+
 static otv n_open(ots* s, otv* a, int n) {
   ARITY(1, "open-library");
   char* name = string(s, a[0], "open-library");
@@ -904,12 +970,14 @@ static otv n_open(ots* s, otv* a, int n) {
   track(s, &l->item, library_destroy);
   return ot_ext_pointer(s, ctx(s)->library_type, l);
 }
+
 static otv n_loader_error(ots* s, otv* a, int n) {
   (void)a;
   ARITY(0, "open-library");
   const char* e = offi_loader_error();
   return ot_make_string(s, e, strlen(e));
 }
+
 static otv n_symbol(ots* s, otv* a, int n) {
   ARITY(2, "has-symbol?");
   library* l = ext(a[0], ctx(s)->library_type);
@@ -920,6 +988,7 @@ static otv n_symbol(ots* s, otv* a, int n) {
   ot_host_free(name);
   return found ? ot_true : ot_false;
 }
+
 static otv call(ots* s, otv context_value, otv* a, int n) {
   ERROR_SCOPE();
   binding* b = ext(context_value, ctx(s)->binding_type);
@@ -986,6 +1055,7 @@ done:
   ot_host_free(temporaries);
   return result;
 }
+
 static otv n_bind(ots* s, otv* a, int n) {
   ARITY(4, "bind");
   library* l = ext(a[0], ctx(s)->library_type);
@@ -1051,6 +1121,7 @@ static otv n_bind(ots* s, otv* a, int n) {
   otv context_value = ot_ext_pointer(s, ctx(s)->binding_type, b);
   return ot_make_native(s, b->name, call, context_value);
 }
+
 static otv n_fail(ots* s, otv* a, int n) {
   ARITY(3, "error");
   char* op = string(s, a[0], "error");
@@ -1072,6 +1143,7 @@ static otv n_fail(ots* s, otv* a, int n) {
   ot_host_free(message);
   return result;
 }
+
 static otv n_error_field(ots* s, otv* a, int n) {
   ARITY(2, "error-accessor");
   if (ot_value_type(a[0]) != OT_TYPE_TABLE) return ot_false;
@@ -1081,22 +1153,26 @@ static otv n_error_field(ots* s, otv* a, int n) {
   ot_host_free(key);
   return ot_table_get(s, a[0], k, ot_false);
 }
+
 static otv layout_call(ots* s, otv data, otv* a, int n) {
   (void)data;
   (void)a;
   (void)n;
   return fail(s, "layout", "type", "layout is not callable");
 }
+
 static otv n_layout(ots* s, otv* a, int n) {
   ARITY(1, "layout");
   return ot_make_native(s, "ffi-layout", layout_call, a[0]);
 }
+
 static otv n_layout_data(ots* s, otv* a, int n) {
   ARITY(1, "layout");
   if (!ot_is_ptr(a[0]) || ot_object_type(a[0]) != OBJ_NAT) return ot_false;
   ot_nat_obj* f = (ot_nat_obj*)ot_as_obj(a[0]);
   return f->context_function == layout_call ? f->context : ot_false;
 }
+
 static void module(ots* s) {
 #if !(defined(__APPLE__) && defined(__aarch64__)) && !(defined(__linux__) && defined(__x86_64__))
   fail(s, "import", "abi", "FFI target is outside the initial ABI profile");
@@ -1107,6 +1183,7 @@ static void module(ots* s) {
     fail(s, "import", "abi", "native scalar representation does not match the FFI ABI profile");
     return;
   }
+
   static const struct {
     const char* name;
     ot_nat function;
@@ -1136,6 +1213,7 @@ static void module(ots* s) {
                    {"callback-count", n_callback_count},
                    {"%fail", n_fail},
                    {"%error-field", n_error_field}};
+
   ctx(s)->thread = pthread_self();
   for (size_t i = 0; i < sizeof(functions) / sizeof(*functions); i++)
     ot_def_nat(s, functions[i].name, functions[i].function);
@@ -1150,6 +1228,7 @@ static void module(ots* s) {
     }
   }
 }
+
 void ot_register_ffi(ots* s) {
   context* c = zero_alloc(1, sizeof(*c));
   if (!c) abort();
@@ -1161,6 +1240,7 @@ void ot_register_ffi(ots* s) {
   c->binding_type = ot_ext_type(s, "ffi.binding", NULL);
   ot_register_module(s, "otium.ffi", module);
 }
+
 void ot_destroy_ffi(ots* s) {
   context* c = ctx(s);
   if (!c) return;

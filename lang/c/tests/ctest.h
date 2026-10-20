@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 typedef void (*CtestFn)(void);
+
 typedef struct CtestCase {
   const char* name;
   CtestFn fn;

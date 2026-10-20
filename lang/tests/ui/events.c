@@ -12,6 +12,7 @@ bool otui_test_key(SDL_Window* window, const char* name, bool down, bool shift) 
   event.key.down = down;
   return SDL_PushEvent(&event);
 }
+
 bool otui_test_text(SDL_Window* window, const char* text) {
   SDL_Event event = {0};
   event.type = SDL_EVENT_TEXT_INPUT;
@@ -19,6 +20,7 @@ bool otui_test_text(SDL_Window* window, const char* text) {
   event.text.text = text;
   return SDL_PushEvent(&event);
 }
+
 bool otui_test_wheel(SDL_Window* window, float x, float y, float dy) {
   SDL_Event event = {0};
   event.type = SDL_EVENT_MOUSE_WHEEL;
@@ -28,11 +30,13 @@ bool otui_test_wheel(SDL_Window* window, float x, float y, float dy) {
   event.wheel.y = dy;
   return SDL_PushEvent(&event);
 }
+
 bool otui_test_quit(void) {
   SDL_Event event = {0};
   event.type = SDL_EVENT_QUIT;
   return SDL_PushEvent(&event);
 }
+
 bool otui_test_resize(SDL_Window* window, int width, int height) {
   if (!SDL_SetWindowSize(window, width, height) || !SDL_SyncWindow(window)) return false;
   SDL_Event event = {0};
@@ -42,6 +46,7 @@ bool otui_test_resize(SDL_Window* window, int width, int height) {
   event.window.data2 = height;
   return SDL_PushEvent(&event);
 }
+
 bool otui_test_pointer(SDL_Window* window, float x, float y, bool down) {
   SDL_Event event = {0};
   event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;

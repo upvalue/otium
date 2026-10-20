@@ -16,6 +16,7 @@ static const unsigned char rect_frag[] = {
 };
 #include "text.h"
 #define ATLAS_SIZE 2048
+
 typedef struct {
   TTF_Font* font;
   Uint32 index;
@@ -25,11 +26,13 @@ typedef struct {
 typedef struct {
   float rect[4], color[4], shape[4], clip[4], uv[4];
 } Rect;
+
 typedef struct QueuedEvent {
   SDL_Event event;
   char* text;
   struct QueuedEvent* next;
 } QueuedEvent;
+
 typedef struct Renderer {
   struct Renderer* next;
   QueuedEvent *events, *events_tail;
@@ -63,8 +66,10 @@ typedef struct Renderer {
   SDL_FColor clear;
   bool claimed;
 } Renderer;
+
 static Renderer* renderers;
 static int live_renderers;
+
 int otui_live_renderers(void) { return live_renderers; }
 
 static void queue_event(Renderer* r, const SDL_Event* event) {
@@ -83,6 +88,7 @@ static void queue_event(Renderer* r, const SDL_Event* event) {
   else r->events = node;
   r->events_tail = node;
 }
+
 static bool renderer_event(Renderer* r, SDL_Event* event) {
   SDL_free(r->pending_text);
   r->pending_text = NULL;
@@ -165,15 +171,25 @@ const char* otui_poll_event(Renderer* r) {
   }
   return "";
 }
+
 int otui_event_width(Renderer* r) { return r->event_width; }
+
 int otui_event_height(Renderer* r) { return r->event_height; }
+
 float otui_event_x(Renderer* r) { return r->event_x; }
+
 float otui_event_y(Renderer* r) { return r->event_y; }
+
 const char* otui_event_key(Renderer* r) { return r->event_key; }
+
 int otui_event_code(Renderer* r) { return r->event_code; }
+
 int otui_event_repeat(Renderer* r) { return r->event_repeat; }
+
 const char* otui_event_text(Renderer* r) { return r->event_text ? r->event_text : ""; }
+
 float otui_event_dy(Renderer* r) { return r->event_dy; }
+
 // Keep SDL text input active only while a text-accepting widget has focus.
 bool otui_text_input(Renderer* r, bool enabled) {
   if (r->text_input == enabled) return true;
@@ -181,12 +197,14 @@ bool otui_text_input(Renderer* r, bool enabled) {
   if (ok) r->text_input = enabled;
   return ok;
 }
+
 // Retain SDL-owned clipboard bytes long enough for the FFI to copy the string.
 const char* otui_clipboard_get(Renderer* r) {
   SDL_free(r->clipboard);
   r->clipboard = SDL_GetClipboardText();
   return r->clipboard ? r->clipboard : "";
 }
+
 bool otui_clipboard_set(const char* text) { return SDL_SetClipboardText(text); }
 
 // Tear down a complete or partially initialized renderer. Wait once here; normal
@@ -225,6 +243,7 @@ void otui_gpu_free(Renderer* r) {
   extern int otui_live_nodes(void);
   if (!live_renderers && !otui_live_nodes()) otui_text_clear();
 }
+
 // Load the same rectangle/glyph shader from Metal source or embedded SPIR-V.
 static SDL_GPUShader* shader(SDL_GPUDevice* device, bool vertex) {
   bool metal = (SDL_GetGPUShaderFormats(device) & SDL_GPU_SHADERFORMAT_MSL) != 0;
@@ -243,6 +262,7 @@ static SDL_GPUShader* shader(SDL_GPUDevice* device, bool vertex) {
   };
   return SDL_CreateGPUShader(device, &info);
 }
+
 // Direct mode only updates logical geometry and text density: SDL resizes the
 // swapchain. Offscreen mode replaces its texture before releasing the old one,
 // so a failed allocation leaves the previous dimensions and target intact.
@@ -380,18 +400,24 @@ failed: {
   return NULL;
 }
 }
+
 float otui_gpu_scale(Renderer* r) { return r->scale; }
+
 bool otui_gpu_offscreen(Renderer* r) { return r->offscreen; }
+
 const char* otui_gpu_driver(Renderer* r) { return SDL_GetGPUDeviceDriver(r->device); }
+
 static SDL_FColor rgba(Uint32 c) {
   return (SDL_FColor){(c >> 24) / 255.0f, ((c >> 16) & 255) / 255.0f, ((c >> 8) & 255) / 255.0f,
                       (c & 255) / 255.0f};
 }
+
 // Start a new CPU draw list without discarding its allocated capacity.
 void otui_gpu_clear(Renderer* r, Uint32 color) {
   r->count = 0;
   r->clear = rgba(color);
 }
+
 // Append one clipped rectangle instance. Grow CPU/GPU storage together;
 // no drawing is submitted until otui_gpu_frame. Text uses this path too.
 bool otui_gpu_rect(Renderer* r, float x, float y, float w, float h, float radius, Uint32 color,
@@ -431,6 +457,7 @@ bool otui_gpu_rect(Renderer* r, float x, float y, float w, float h, float radius
                                 {0, 0, 0, 0}};
   return true;
 }
+
 // Cache a rasterized glyph in the atlas, with a one-pixel transparent gutter.
 // Font objects outlive atlas entries; only new glyphs mark the upload dirty.
 static Glyph* glyph(Renderer* r, TTF_CopyOperation* op) {
@@ -464,6 +491,7 @@ static Glyph* glyph(Renderer* r, TTF_CopyOperation* op) {
   SDL_DestroySurface(pixels);
   return g;
 }
+
 // Expand SDL_ttf shaping operations into atlas-backed rectangle instances.
 // On failure, roll back this text run so callers never draw a partial string.
 bool otui_gpu_text(Renderer* r, const char* string, int face, float size, float width, float x,
@@ -501,7 +529,9 @@ failed:
   r->count = start;
   return false;
 }
+
 int otui_gpu_count(Renderer* r) { return (int)r->count; }
+
 // Copy the CPU-side draw list and any new glyphs into this frame's GPU commands.
 // Do all fallible mapping before acquiring a swapchain: SDL forbids cancelling
 // a command buffer once it owns a presentable image.

@@ -18,14 +18,17 @@ void ot_set_arguments(ots* s, const char* script, int argc, char* const* argv) {
   }
   if (script) s->process_script = ot_make_string(s, script, strlen(script));
 }
+
 static otv arguments(ots* s, otv* args, int argc) {
   (void)args;
   return argc ? ot_raise(s, "arguments: expected no arguments") : s->process_arguments;
 }
+
 static otv script_name(ots* s, otv* args, int argc) {
   (void)args;
   return argc ? ot_raise(s, "script-name: expected no arguments") : s->process_script;
 }
+
 static otv stderr_write(ots* s, otv* args, int argc) {
   const char* bytes;
   size_t length;
@@ -34,15 +37,18 @@ static otv stderr_write(ots* s, otv* args, int argc) {
   fwrite(bytes, 1, length, stderr);
   return ot_nil;
 }
+
 static void process_module(ots* s) {
   ot_def_nat(s, "arguments", arguments);
   ot_def_nat(s, "script-name", script_name);
   ot_def_nat(s, "write-error", stderr_write);
 }
+
 static void cli_module(ots* s) {
   otv ignored;
   ot_eval_src(s, ot_cli_src, ot_cli_src_len, "<otium.cli>", &ignored);
 }
+
 void ot_register_cli(ots* s) {
   s->process_arguments = ot_null;
   s->process_script = ot_false;

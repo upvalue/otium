@@ -302,6 +302,7 @@ static bool is_type(otv value, ot_obj_type type) {
 
 #define as_instance(V) ((ot_instance_obj*)ot_as_obj(V))
 #define as_layout(V) ((ot_layout_obj*)ot_as_obj(V))
+
 static otv instance_payload(otv object) {
   while (is_type(as_instance(object)->layout, OBJ_INSTANCE)) object = as_instance(object)->layout;
   return object;
@@ -1822,7 +1823,9 @@ static otv bind_parameters(ots* state, otv function_value, otv* args, size_t arg
   X(BC_INTRINSIC, 0x80, vm_intrinsic, true)
 
 #define OT_DECLARE_OPCODE(NAME, VALUE, LABEL, OPERAND) NAME = VALUE,
+
 typedef enum bytecode_op { OT_BYTECODE_OPS(OT_DECLARE_OPCODE) } bytecode_op;
+
 #undef OT_DECLARE_OPCODE
 
 #ifndef OT_COMPUTED_GOTO
@@ -3025,6 +3028,7 @@ static otv vm_execute(ots* state, size_t floor);
 static otv require_forms(ots* state, otv specs);
 static otv vm_execute_dynamic(ots* state, unsigned char instruction, otv descriptor, otv env,
                               otv namespace_value);
+
 static otv vm_call_function(ots* state, otv callable, otv* args, size_t argc) {
   OT_FRAME_SCOPED(state, &callable);
   otv env = bind_parameters(state, callable, args, argc);
@@ -4651,9 +4655,11 @@ static otv nat_integer_division(ots* state, otv* args, int argc, int mode) {
 static otv nat_quotient(ots* state, otv* args, int argc) {
   return nat_integer_division(state, args, argc, 0);
 }
+
 static otv nat_remainder(ots* state, otv* args, int argc) {
   return nat_integer_division(state, args, argc, 1);
 }
+
 static otv nat_modulo(ots* state, otv* args, int argc) {
   return nat_integer_division(state, args, argc, 2);
 }
@@ -4726,15 +4732,19 @@ static otv nat_numeric_compare(ots* state, otv* args, int argc, int mode) {
 static otv nat_num_equal(ots* state, otv* args, int argc) {
   return nat_numeric_compare(state, args, argc, 0);
 }
+
 static otv nat_less(ots* state, otv* args, int argc) {
   return nat_numeric_compare(state, args, argc, 1);
 }
+
 static otv nat_greater(ots* state, otv* args, int argc) {
   return nat_numeric_compare(state, args, argc, 2);
 }
+
 static otv nat_less_equal(ots* state, otv* args, int argc) {
   return nat_numeric_compare(state, args, argc, 3);
 }
+
 static otv nat_greater_equal(ots* state, otv* args, int argc) {
   return nat_numeric_compare(state, args, argc, 4);
 }
@@ -4758,6 +4768,7 @@ static otv nat_minmax(ots* state, otv* args, int argc, bool maximum) {
 }
 
 static otv nat_min(ots* state, otv* args, int argc) { return nat_minmax(state, args, argc, false); }
+
 static otv nat_max(ots* state, otv* args, int argc) { return nat_minmax(state, args, argc, true); }
 
 static otv nat_inc(ots* state, otv* args, int argc) {
@@ -4779,9 +4790,11 @@ static otv nat_parity(ots* state, otv* args, int argc, bool odd) {
   if (!ot_is_int(args[0])) return ot_raise(state, "%s: expected int", odd ? "odd?" : "even?");
   return ((ot_get_int(args[0]) & 1) != 0) == odd ? ot_true : ot_false;
 }
+
 static otv nat_even(ots* state, otv* args, int argc) {
   return nat_parity(state, args, argc, false);
 }
+
 static otv nat_odd(ots* state, otv* args, int argc) { return nat_parity(state, args, argc, true); }
 
 static otv nat_not(ots* state, otv* args, int argc) {
@@ -4837,6 +4850,7 @@ static otv nat_true_p(ots* state, otv* args, int argc) {
   if (need_arity(state, "true?", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   return args[0] == ot_true ? ot_true : ot_false;
 }
+
 static otv nat_false_p(ots* state, otv* args, int argc) {
   if (need_arity(state, "false?", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   return args[0] == ot_false ? ot_true : ot_false;
@@ -5244,6 +5258,7 @@ static otv nat_keys_values(ots* state, otv* args, int argc, bool values) {
 static otv nat_keys(ots* state, otv* args, int argc) {
   return nat_keys_values(state, args, argc, false);
 }
+
 static otv nat_values(ots* state, otv* args, int argc) {
   return nat_keys_values(state, args, argc, true);
 }
@@ -5477,9 +5492,11 @@ static otv nat_string_case(ots* state, otv* args, int argc, bool upper) {
   buf_free(&out);
   return result;
 }
+
 static otv nat_string_upcase(ots* state, otv* args, int argc) {
   return nat_string_case(state, args, argc, true);
 }
+
 static otv nat_string_downcase(ots* state, otv* args, int argc) {
   return nat_string_case(state, args, argc, false);
 }
@@ -5536,9 +5553,11 @@ static otv nat_string_edge(ots* state, otv* args, int argc, bool starts) {
              ? ot_true
              : ot_false;
 }
+
 static otv nat_string_starts(ots* state, otv* args, int argc) {
   return nat_string_edge(state, args, argc, true);
 }
+
 static otv nat_string_ends(ots* state, otv* args, int argc) {
   return nat_string_edge(state, args, argc, false);
 }
@@ -5625,6 +5644,7 @@ static otv nat_symbol(ots* state, otv* args, int argc) {
   if (need_arity(state, "symbol", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   return coerce_name(state, args[0], false, "symbol");
 }
+
 static otv nat_keyword(ots* state, otv* args, int argc) {
   if (need_arity(state, "keyword", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   return coerce_name(state, args[0], true, "keyword");
@@ -5695,15 +5715,19 @@ static otv nat_output(ots* state, otv* args, int argc, bool display, bool newlin
   if (newline) state->writer(state->writer_userdata, "\n", 1);
   return ot_nil;
 }
+
 static otv nat_display(ots* state, otv* args, int argc) {
   return nat_output(state, args, argc, true, false);
 }
+
 static otv nat_write(ots* state, otv* args, int argc) {
   return nat_output(state, args, argc, false, false);
 }
+
 static otv nat_println(ots* state, otv* args, int argc) {
   return nat_output(state, args, argc, true, true);
 }
+
 static otv nat_newline(ots* state, otv* args, int argc) {
   (void)args;
   if (need_arity(state, "newline", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
@@ -5850,6 +5874,7 @@ static otv nat_restart_name(ots* state, otv* args, int argc) {
   if (!is_type(args[0], OBJ_RESTART)) return ot_raise(state, "restart-name: expected restart");
   return ((ot_restart_obj*)ot_as_obj(args[0]))->name;
 }
+
 static otv nat_restart_description(ots* state, otv* args, int argc) {
   if (need_arity(state, "restart-description", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   if (!is_type(args[0], OBJ_RESTART))
@@ -6075,11 +6100,13 @@ static otv nat_current_jiffy(ots* state, otv* args, int argc) {
   if (need_arity(state, "current-jiffy", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
   return ot_make_int((intptr_t)ot_platform_monotonic_ns());
 }
+
 static otv nat_jiffies(ots* state, otv* args, int argc) {
   (void)args;
   if (need_arity(state, "jiffies-per-second", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
   return ot_make_int(INT64_C(1000000000));
 }
+
 static otv nat_current_second(ots* state, otv* args, int argc) {
   (void)args;
   if (need_arity(state, "current-second", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
@@ -6144,11 +6171,15 @@ static otv nat_rounding(ots* state, otv* args, int argc, int mode) {
     return ot_raise(state, "integer conversion out of range");
   return ot_make_int((intptr_t)rounded);
 }
+
 static otv nat_floor(ots* state, otv* args, int argc) { return nat_rounding(state, args, argc, 0); }
+
 static otv nat_ceiling(ots* state, otv* args, int argc) {
   return nat_rounding(state, args, argc, 1);
 }
+
 static otv nat_round(ots* state, otv* args, int argc) { return nat_rounding(state, args, argc, 2); }
+
 static otv nat_truncate(ots* state, otv* args, int argc) {
   return nat_rounding(state, args, argc, 3);
 }
@@ -6161,6 +6192,7 @@ static otv nat_unary_math(ots* state, otv* args, int argc, double (*function)(do
   if (!number_value(args[0], &value, &exact)) return ot_raise(state, "%s: expected number", name);
   return ot_make_float(state, function(value));
 }
+
 #define UNARY_MATH(NAME, FUNCTION)                                                                 \
   static otv nat_##NAME(ots* state, otv* args, int argc) {                                         \
     return nat_unary_math(state, args, argc, FUNCTION, #NAME);                                     \
@@ -6241,6 +6273,7 @@ static otv nat_numeric_class(ots* state, otv* args, int argc, int mode) {
   bool result = mode == 3 ? isnan(value) : mode == 4 ? isinf(value) : isfinite(value);
   return result ? ot_true : ot_false;
 }
+
 #define NUM_CLASS(NAME, MODE)                                                                      \
   static otv nat_##NAME(ots* state, otv* args, int argc) {                                         \
     return nat_numeric_class(state, args, argc, MODE);                                             \
@@ -6261,8 +6294,11 @@ static otv nat_sign(ots* state, otv* args, int argc, int mode) {
   bool result = mode == 0 ? value == 0 : mode == 1 ? value > 0 : value < 0;
   return result ? ot_true : ot_false;
 }
+
 static otv nat_zero(ots* state, otv* args, int argc) { return nat_sign(state, args, argc, 0); }
+
 static otv nat_pos(ots* state, otv* args, int argc) { return nat_sign(state, args, argc, 1); }
+
 static otv nat_neg(ots* state, otv* args, int argc) { return nat_sign(state, args, argc, 2); }
 
 typedef struct nat_def {
@@ -6546,14 +6582,17 @@ static otv nat_dispatch_type(ots* state, otv* args, int argc) {
   if (need_arity(state, "dispatch-type", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   return dispatch_type(state, args[0]);
 }
+
 static otv nat_type_descriptor_p(ots* state, otv* args, int argc) {
   if (need_arity(state, "type-descriptor?", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   return is_type(args[0], OBJ_DISPATCH_TYPE) ? ot_true : ot_false;
 }
+
 static otv nat_generic_p(ots* state, otv* args, int argc) {
   if (need_arity(state, "generic?", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   return is_type(args[0], OBJ_GENERIC) ? ot_true : ot_false;
 }
+
 static otv nat_type_name(ots* state, otv* args, int argc) {
   if (need_arity(state, "type-name", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   if (!is_type(args[0], OBJ_DISPATCH_TYPE))
@@ -6566,6 +6605,7 @@ static otv nat_type_name(ots* state, otv* args, int argc) {
   buf_free(&name);
   return result;
 }
+
 static otv nat_generic_methods(ots* state, otv* args, int argc) {
   if (need_arity(state, "generic-methods", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   if (!is_type(args[0], OBJ_GENERIC))
@@ -6593,6 +6633,7 @@ static otv nat_generic_methods(ots* state, otv* args, int argc) {
   }
   return result;
 }
+
 static otv nat_remove_method(ots* state, otv* args, int argc) {
   if (need_arity(state, "remove-method!", argc, 2, 3) == OT_UNWIND) return OT_UNWIND;
   otv qualifier = ot_false;

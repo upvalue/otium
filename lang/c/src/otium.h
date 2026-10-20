@@ -30,14 +30,17 @@ typedef uintptr_t otv;
 #define OT_INT_MIN (-OT_INT_MAX - (intptr_t)1)
 
 static inline bool ot_is_int(otv value) { return (value & 1u) != 0; }
+
 static inline bool ot_int_fits(intptr_t value) {
   return value >= OT_INT_MIN && value <= OT_INT_MAX;
 }
+
 /* Return nil rather than producing a different integer when value does not fit
  * in the tagged representation. */
 static inline otv ot_make_int(intptr_t value) {
   return ot_int_fits(value) ? ((otv)(uintptr_t)value << 1u) | 1u : ot_nil;
 }
+
 static inline intptr_t ot_get_int(otv value) { return ((intptr_t)value) >> 1u; }
 
 typedef struct ot_config {
@@ -117,11 +120,13 @@ typedef otv (*ot_context_nat)(ots* state, otv context, otv* args, int argc);
 typedef void (*ot_writer)(void* userdata, const char* bytes, size_t length);
 typedef bool (*ot_loader)(void* userdata, const char* namespace_name, char** source,
                           size_t* length);
+
 typedef enum ot_interrupt_action {
   OT_INTERRUPT_CONTINUE,
   OT_INTERRUPT_ABORT,
   OT_INTERRUPT_ERROR,
 } ot_interrupt_action;
+
 typedef ot_interrupt_action (*ot_interrupt_hook)(ots* state, void* userdata);
 typedef void (*ot_ext_finalizer)(ots* state, void* payload);
 typedef void (*ot_module_init)(ots* state);
@@ -515,6 +520,7 @@ typedef struct ot_ext_obj {
   bool pointer_payload;
   bool released;
   size_t size;
+
   union {
     void* pointer;
     max_align_t align;
@@ -644,14 +650,19 @@ struct ot_state {
 };
 
 static inline bool ot_is_ptr(otv value) { return value != 0 && (value & 3u) == 0; }
+
 static inline ot_obj* ot_as_obj(otv value) { return (ot_obj*)(uintptr_t)value; }
+
 static inline otv ot_from_obj(const void* object) { return (otv)(uintptr_t)object; }
+
 static inline ot_obj_type ot_object_type(otv value) {
   return (ot_obj_type)((ot_as_obj(value)->header >> 1u) & 0x7fu);
 }
+
 static inline bool ot_has_type(otv value, ot_obj_type type) {
   return ot_is_ptr(value) && ot_object_type(value) == type;
 }
+
 static inline size_t ot_object_size(otv value) { return (size_t)(ot_as_obj(value)->header >> 8u); }
 
 OT_GC_MAY_ALLOCATE void* ot_alloc(ots* state, size_t size, ot_obj_type type);

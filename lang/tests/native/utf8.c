@@ -34,6 +34,7 @@ int main(void) {
       {"\xf0\x9f\x98\x80", 3, 0},
       {"\xc2\0", 2, 0},
   };
+
   for (size_t i = 0; i < sizeof cases / sizeof cases[0]; ++i) {
     if (ot_utf8_valid((const unsigned char*)cases[i].bytes, cases[i].size) != cases[i].valid) {
       fprintf(stderr, "UTF-8 case %zu failed\n", i);

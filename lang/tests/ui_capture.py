@@ -4,6 +4,7 @@ import struct
 
 
 def bmp_pixels(path):
+    """Return width, height and rows of RGB bytes, top row first."""
     data = Path(path).read_bytes()
     if data[:2] != b'BM':
         raise ValueError('Expected BMP capture')
@@ -24,3 +25,9 @@ def bmp_pixels(path):
             row.extend((value & m) >> ((m & -m).bit_length() - 1) for m in masks)
         rows.append(bytes(row))
     return width, abs(height), rows
+
+
+def pixel(path, x, y):
+    """The RGB value at x, y in a BMP capture."""
+    rows = bmp_pixels(path)[2]
+    return tuple(rows[y][x * 3:x * 3 + 3])

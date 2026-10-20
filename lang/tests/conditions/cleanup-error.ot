@@ -1,0 +1,5 @@
+;; An error in cleanup replaces a pending exit, and can be caught.
+;; Run with --load tests/conditions/support.ot; prints 8 and exits 0.
+(try
+  (unwind-protect (exit 7) (error 'cleanup))
+  (catch ((fn (c) #t) c) (test-print 8)))

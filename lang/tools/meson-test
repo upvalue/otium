@@ -1,5 +1,6 @@
 #!/bin/sh
-# meson-test SETUP [SUITE|TEST]...: suite names select a suite, anything else a test.
+# meson-test SETUP [SUITE|TEST]...: suite names select a suite; anything else
+# selects the tests whose names start with it, so match runs match c and match chez.
 set -eu
 setup=$1
 shift
@@ -7,7 +8,8 @@ count=$#
 while [ "$count" -gt 0 ]; do
     case $1 in
         c|chez|shared|native|gpu|bench) set -- "$@" --suite "$1" ;;
-        *) set -- "$@" "$1" ;;
+        *\**) set -- "$@" "$1" ;;
+        *) set -- "$@" "$1*" ;;
     esac
     shift
     count=$((count - 1))

@@ -1,0 +1,6 @@
+;; (quit 7) passes condition handlers and catch clauses but runs cleanup.
+;; Run with --load tests/conditions/support.ot; prints 7 and exits 7.
+(handler-bind (((fn (c) #t) (fn (c) (test-print 999))))
+  (try
+    (unwind-protect (quit 7) (test-print 7))
+    (catch ((fn (c) #t) c) (test-print 998))))

@@ -1,26 +1,105 @@
-#!/bin/sh
-# Run one test command for meson test.
-#   --scratch      append a fresh temporary directory as the last argument
-#   --expect FILE  require stdout to match FILE exactly
-set -eu
-expect=
-scratch=no
-while [ $# -gt 0 ]; do
-    case $1 in
-        --scratch) scratch=yes; shift ;;
-        --expect) expect=$2; shift 2 ;;
-        --) shift; break ;;
-        *) break ;;
-    esac
-done
-directory=$(mktemp -d "${TMPDIR:-/tmp}/otium-test.XXXXXX")
-trap 'rm -rf "$directory"' EXIT HUP INT TERM
-if [ "$scratch" = yes ]; then set -- "$@" "$directory/scratch"; mkdir "$directory/scratch"; fi
-if [ -z "$expect" ]; then
-    "$@"
-    exit
-fi
-status=0
-"$@" > "$directory/stdout" || status=$?
-if ! diff -u "$expect" "$directory/stdout"; then exit 1; fi
-exit $status
+#!/usr/bin/env python3
+"""List or run the tests defined in tests.py files.
+
+  tests/run                 run every test whose features are available
+  tests/run NAME...         run the named tests
+  tests/run --list FEATURES print one line per test for meson.build
+
+FEATURES is a comma-separated list such as chez,ffi,ui. A test passes with
+exit 0, fails with 1 and is skipped with 77, meson's skip status."""
+import argparse
+import importlib.util
+import os
+from pathlib import Path
+import shutil
+import sys
+import traceback
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT / 'tools'), str(ROOT / 'tests')]
+sys.dont_write_bytecode = True
+
+import harness
+
+DEFINITIONS = ['tests/**/tests.py', 'c/tests/tests.py', 'chez/tests/tests.py',
+               'benchmarks/r7rs/tests.py', 'tools/tests/tests.py']
+
+
+def load():
+    files = sorted({path for pattern in DEFINITIONS for path in ROOT.glob(pattern)})
+    for index, path in enumerate(files):
+        harness._defaults.clear()
+        harness._defaults['source'] = path
+        spec = importlib.util.spec_from_file_location(f'otium_tests_{index}', path)
+        spec.loader.exec_module(importlib.util.module_from_spec(spec))
+    return files
+
+
+def available():
+    """Features this checkout can run, for runs that don't come from meson."""
+    features = set()
+    if os.environ.get('CHEZ') or shutil.which('chez') or shutil.which('scheme'):
+        features.add('chez')
+    if harness.library('libotium-ffi').exists():
+        features.add('ffi')
+        if harness.library('libotium-ui').exists():
+            features.add('ui')
+    return features
+
+
+def run(test, features):
+    missing = test.needs - features
+    if missing:
+        print(f'SKIP {test.name}: needs ' + ', '.join(sorted(missing)))
+        return 77
+    context = harness.Context(test.runtime)
+    try:
+        test.function(context)
+    except harness.Skip as skip:
+        print(f'SKIP {test.name}: {skip}')
+        return 77
+    except harness.Failure as failure:
+        print(f'FAIL {test.name}\n{failure}')
+        return 1
+    except Exception:
+        print(f'FAIL {test.name}')
+        traceback.print_exc(file=sys.stdout)
+        return 1
+    finally:
+        context.close()
+    print(f'ok {test.name}')
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--list', metavar='FEATURES')
+    parser.add_argument('names', nargs='*')
+    args = parser.parse_args()
+    files = load()
+    if args.list is not None:
+        features = set(filter(None, args.list.split(',')))
+        for path in files:
+            print('file\t' + str(path))
+        for test in harness.TESTS.values():
+            if test.needs <= features:
+                print('\t'.join(['test', test.name, test.suite, str(test.timeout),
+                                 '1' if test.parallel else '0', ','.join(sorted(test.needs)) or '-']))
+        return 0
+    unknown = [name for name in args.names if name not in harness.TESTS]
+    if unknown:
+        print('unknown tests: ' + ', '.join(unknown) +
+              '; run meson setup --reconfigure build if a definition changed', file=sys.stderr)
+        return 2
+    os.chdir(ROOT)
+    selected = [harness.TESTS[name] for name in args.names] or list(harness.TESTS.values())
+    features = available()
+    statuses = [run(test, features) for test in selected]
+    if any(status == 1 for status in statuses):
+        return 1
+    return 77 if statuses and all(status == 77 for status in statuses) else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

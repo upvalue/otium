@@ -1,0 +1,5 @@
+;; Needs tests/cli/lib on the search path.
+(require sample)
+
+(display sample/answer)
+(newline)

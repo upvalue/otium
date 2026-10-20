@@ -1,9 +1,4 @@
-(def checks 0)
-
-(def (check expected actual)
-  (if (equal? expected actual)
-      (set! checks (+ checks 1))
-      (error "SDL fixture assertion failed" expected actual)))
+(require otium.test :refer (check report))
 
 (def fixture (ffi/open-library (list fixture-path)))
 
@@ -65,6 +60,4 @@
   (sdl-close!))
 (check 0 (SDL_WasInit 0))
 (check 0 (ffi/allocation-count))
-(display "SDL fixture checks: ")
-(display checks)
-(newline)
+(report "sdl fixture")

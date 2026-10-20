@@ -1,0 +1,93 @@
+;; Reader fixtures: (text expected) pairs that read-string must accept, and
+;; texts it must reject.
+(ns reader-datums)
+
+(def positive
+  (list
+    (list "nil" nil)
+    (list "#t" #t)
+    (list "#false" #f)
+    (list "#true" #t)
+    (list "#f" #f)
+    (list "true" 'true)
+    (list "false" 'false)
+    (list ":x" :x)
+    (list "::x" ::x)
+    (list "Space/name" 'Space/name)
+    (list "12" 12)
+    (list "-12" -12)
+    (list "+12" 12)
+    (list "012" 12)
+    (list "3.0" 3.0)
+    (list ".5" .5)
+    (list "-.5" -.5)
+    (list "1e3" 1000.0)
+    (list "1.E-2" 0.01)
+    (list "0xff" 255)
+    (list "-0X10" -16)
+    (list "+0x10" 16)
+    (list "()" '())
+    (list "(a . b)" '(a . b))
+    (list "[1 :x]" '(array 1 :x))
+    (list "{:x 1 :y 2}" '(table :x 1 :y 2))
+    (list "'[1]" '(quote (array 1)))
+    (list "'{:x 1}" '(quote (table :x 1)))
+    (list "`(a ,b ,@c)" '(quasiquote (a (unquote b) (unquote-splicing c))))
+    (list "[. x]" '(array . x))
+    (list "; comment\r\n12 ;tail" 12)
+    (list "; comment\r12" 12)
+    (list "\"λ😀\"" "λ😀")
+    (list "\"\\x3bb;\\x1F600;\"" "λ😀")
+    (list "\"a\r\nb\rc\nd\"" "a\nb\nc\nd")
+    (list "\"\\n\\r\\t\\0\\e\\\"\\\\\"" "\n\r\t\0\e\"\\")))
+
+(def negative
+  (list
+    ""
+    "; only"
+    "1 2"
+    ":"
+    "#T"
+    "#TRUE"
+    "#x10"
+    "#e1"
+    "#i1"
+    "#b10"
+    "#o10"
+    "#\\a"
+    "#(1)"
+    "#u8(1)"
+    "#'a"
+    "`#(a)"
+    "#;1"
+    "#|x|#"
+    "#!r6rs"
+    "#! /bin/sh"
+    "#0=(a . #0#)"
+    "#&1"
+    "#[x]"
+    "1/2"
+    "1+2i"
+    "12oops"
+    "1e"
+    "1e+"
+    "0x"
+    "0xgg"
+    "0x1p2"
+    "..."
+    "(. a)"
+    "(a . b c)"
+    "(a]"
+    "[a)"
+    "{a]"
+    "("
+    "'"
+    "(a ."
+    "\"unterminated"
+    "\"\\q\""
+    "\"\\x;\""
+    "\"\\x41\""
+    "\"\\xg;\""
+    "\"\\xd800;\""
+    "\"\\x110000;\""
+    "\"a\\\nb\""))

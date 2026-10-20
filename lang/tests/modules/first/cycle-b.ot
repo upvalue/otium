@@ -1,0 +1,2 @@
+(ns cycle-b)
+(require cycle-a)

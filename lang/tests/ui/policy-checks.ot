@@ -1,11 +1,7 @@
 (require (otium.ui :as ui))
 (require (otium.ui.input :as input))
 
-(def checks 0)
-
-(def (check label expected actual)
-  (unless (equal? expected actual) (error label expected actual))
-  (set! checks (+ checks 1)))
+(require otium.test :refer (check report))
 
 (defclass CustomControl
   :is ui/Widget
@@ -93,4 +89,4 @@
 (ui/dispose! tree)
 (check "ordinary labels reject default focus" #f (ui/default-focusable? (make ui/Label :text "label")))
 (check "buttons reject text input" #f (ui/accepts-text? (make ui/Button)))
-(println "UI input policy checks:" checks)
+(report "ui policy")

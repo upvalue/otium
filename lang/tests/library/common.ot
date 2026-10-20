@@ -1,14 +1,4 @@
-(def checks 0)
-
-(def (check expected actual)
-  (unless (equal? expected actual) (error "library mismatch" expected actual))
-  (set! checks (+ checks 1)))
-
-(def (fails? thunk)
-  (try
-    (thunk)
-    #f
-    (catch ((fn (c) #t) c) #t)))
+(require otium.test :refer (check fails? report))
 
 (check "ab" (substring "ab" -5 9))
 (check "" (substring "ab" 9))
@@ -98,4 +88,4 @@
 (check 3 ((extra/comp inc inc) 1))
 (check 2 (get (extra/frequencies [:a :a :b]) :a))
 (check '(1 3) (array-to-list (get (extra/group-by odd? [1 2 3]) #t)))
-(println "library checks:" checks)
+(report "library")

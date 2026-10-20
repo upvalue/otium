@@ -1,19 +1,5 @@
 ;; Pattern matching exercised unchanged on both runtimes.
-(def checks 0)
-
-(def (check label expected actual)
-  (if (equal? expected actual)
-      (set! checks (+ checks 1))
-      (begin
-        (println "FAIL" label "expected" expected "got" actual)
-        (exit 1))))
-
-(def (fails? form)
-  (try
-    (begin
-      (eval form)
-      #f)
-    (catch (error? e) #t)))
+(require otium.test :refer (check fails? report))
 
 ;; Literals and names
 (def (lit v)
@@ -284,4 +270,4 @@
 (check "invalid clause" #t (fails? '(match 1 x)))
 (check "guard without expression" #t (fails? '(match 1 (x :when))))
 
-(println "match checks passed" checks)
+(report "match")

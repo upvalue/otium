@@ -1,0 +1,3 @@
+(ns readerfixture)
+
+(def value [nil :module 0xff])

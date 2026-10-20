@@ -2,11 +2,7 @@
 (require (otium.ui.input :as input))
 (require (ui.terminal :as terminal))
 
-(def checks 0)
-
-(def (check name expected actual)
-  (unless (equal? expected actual) (error name expected actual))
-  (set! checks (+ checks 1)))
+(require otium.test :refer (check report))
 
 (def tree (ui/root))
 
@@ -125,4 +121,4 @@
 (check "disabled capture cannot resume dragging" 0 (drag-field :cursor))
 (input/cancel! pointer)
 (ui/dispose! drag-tree)
-(println "UI editing checks:" checks)
+(report "ui editing")

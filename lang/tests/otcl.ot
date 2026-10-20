@@ -1,24 +1,24 @@
 (require '(otcl :as otcl))
 
-(def (check expected actual message)
-  (unless (equal? expected actual) (error message expected actual)))
+(require otium.test :refer (check report))
 
 (def tcl (otcl/make-interpreter))
 
-(check "hello" (otcl/eval-script tcl "set value hello; set value") "otcl set/get")
-(check "$value" (otcl/eval-script tcl "set literal {$value}; set literal") "otcl braced words are literal")
-(check "hello-world"
-       (otcl/eval-script tcl "set suffix world; set joined \"$value-$suffix\"; set joined")
-       "otcl quoted interpolation")
-(check "14" (otcl/eval-script tcl "expr 2 + 3 * 4") "otcl expression precedence")
-(check "9" (otcl/eval-script tcl "expr (1 + 2) * 3") "otcl expression parentheses")
-(check "0.01" (otcl/eval-script tcl "expr 1e-2") "otcl expression exponents")
-(check "middle"
+(check "otcl set/get" "hello" (otcl/eval-script tcl "set value hello; set value"))
+(check "otcl braced words are literal" "$value" (otcl/eval-script tcl "set literal {$value}; set literal"))
+(check "otcl quoted interpolation"
+       "hello-world"
+       (otcl/eval-script tcl "set suffix world; set joined \"$value-$suffix\"; set joined"))
+(check "otcl expression precedence" "14" (otcl/eval-script tcl "expr 2 + 3 * 4"))
+(check "otcl expression parentheses" "9" (otcl/eval-script tcl "expr (1 + 2) * 3"))
+(check "otcl expression exponents" "0.01" (otcl/eval-script tcl "expr 1e-2"))
+(check "otcl elseif"
+       "middle"
        (otcl/eval-script tcl
-                         "if {0} {set branch first} elseif {1} {set branch middle} else {set branch last}; set branch")
-       "otcl elseif")
+                         "if {0} {set branch first} elseif {1} {set branch middle} else {set branch last}; set branch"))
 
-(check "12"
+(check "otcl while, break, and continue"
+       "12"
        (otcl/eval-script tcl
                          "set x 0; set sum 0
           while {$x < 6} {
@@ -27,49 +27,49 @@
             if {$x == 6} {break}
             set sum [expr $sum+$x]
           }
-          set sum")
-       "otcl while, break, and continue")
+          set sum"))
 
-(check "55"
+(check "otcl procedures and recursion"
+       "55"
        (otcl/eval-script tcl
                          "proc fib {x} {
             if {$x <= 1} {return $x}
             expr [fib [expr $x-1]] + [fib [expr $x-2]]
           }
-          fib 10")
-       "otcl procedures and recursion")
+          fib 10"))
 
-(check "7"
+(check "otcl uppercase globals"
+       "7"
        (otcl/eval-script tcl
                          "set Total 4
           proc add-global {amount} {set Total [expr $Total+$amount]}
           add-global 3
-          set Total")
-       "otcl uppercase globals")
+          set Total"))
 
 (def (join-command interp frame args)
   {:code :ok :value (string-join ":" args)})
 
 (otcl/register-command! tcl "join" join-command)
-(check "a:b:c" (otcl/eval-script tcl "join a b c") "otcl command registration")
-(check "a:b:c"
-       (otcl/eval-script tcl "set command jo; set tail in; $command$tail a b c")
-       "otcl interpolated command name")
-(check "before-7-after"
-       (otcl/eval-script tcl "set nested \"before-[expr 3+4]-after\"; set nested")
-       "otcl command substitution in quoted words")
+(check "otcl command registration" "a:b:c" (otcl/eval-script tcl "join a b c"))
+(check "otcl interpolated command name"
+       "a:b:c"
+       (otcl/eval-script tcl "set command jo; set tail in; $command$tail a b c"))
+(check "otcl command substitution in quoted words"
+       "before-7-after"
+       (otcl/eval-script tcl "set nested \"before-[expr 3+4]-after\"; set nested"))
 
 (def unknown (otcl/eval-result tcl "does-not-exist"))
 
-(check :error (otcl/result-code unknown) "otcl unknown command status")
-(check "No such command 'does-not-exist'" (otcl/result-value unknown) "otcl unknown command message")
+(check "otcl unknown command status" :error (otcl/result-code unknown))
+(check "otcl unknown command message" "No such command 'does-not-exist'" (otcl/result-value unknown))
 
-(check :error (otcl/result-code (otcl/eval-result tcl "set missing $unknown")) "otcl missing variable status")
-(check :error (otcl/result-code (otcl/eval-result tcl "set x {unterminated")) "otcl unterminated brace status")
-(check :error (otcl/result-code (otcl/eval-result tcl "set x [set value"))
-       "otcl unterminated command substitution status")
+(check "otcl missing variable status" :error (otcl/result-code (otcl/eval-result tcl "set missing $unknown")))
+(check "otcl unterminated brace status" :error (otcl/result-code (otcl/eval-result tcl "set x {unterminated")))
+(check "otcl unterminated command substitution status"
+       :error (otcl/result-code (otcl/eval-result tcl "set x [set value")))
 
-(check "1.5" (otcl/eval-script tcl "expr 3 / 2") "otcl fractional division")
-(check "3" (otcl/eval-script tcl "expr 6 / 2") "otcl exact division")
-(for-each (fn (code) (check :error (otcl/result-code (otcl/eval-result tcl code)) "otcl malformed if"))
+(check "otcl fractional division" "1.5" (otcl/eval-script tcl "expr 3 / 2"))
+(check "otcl exact division" "3" (otcl/eval-script tcl "expr 6 / 2"))
+(for-each (fn (code) (check "otcl malformed if" :error (otcl/result-code (otcl/eval-result tcl code))))
           '("if" "if {1}" "if {0} {} elseif" "if {0} {} else" "if {0} {} wat {}"))
+(report "otcl")

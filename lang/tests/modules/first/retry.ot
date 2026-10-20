@@ -1,0 +1,12 @@
+;; Fails on its first load, so a retry must start the namespace over.
+(ns retry)
+
+(defonce attempts 0)
+
+(set! attempts (+ attempts 1))
+
+(when (= attempts 1) (error "first load fails"))
+
+(defonce state #f)
+
+(def (value) attempts)

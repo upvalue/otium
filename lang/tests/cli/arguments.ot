@@ -1,0 +1,12 @@
+;; Print each program argument as length:text, then the script name.
+(require otium.process)
+
+(for-each
+  (fn (arg)
+    (display (string-length arg))
+    (display ":")
+    (display arg)
+    (newline))
+  (otium.process/arguments))
+(display (otium.process/script-name))
+(newline)

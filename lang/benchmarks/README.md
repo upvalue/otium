@@ -91,6 +91,6 @@ Notes on specific ports:
 To add a port, translate it into `r7rs/ports/`, expose `benchmark-main`, and use
 `bench-read` and `run-ported-benchmark` from `r7rs/lib/benchmark.ot`. Keep setup
 outside the timed thunk when upstream does. Add a manifest entry describing
-every deviation and a reduced input in `r7rs/test_ports.py`. If a missing
+every deviation and a reduced input in `r7rs/tests.py`. If a missing
 operation belongs in Otium generally, add it to the language rather than a
 compatibility shim.

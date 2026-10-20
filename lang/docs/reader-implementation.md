@@ -66,10 +66,10 @@ change does not unify native byte/character APIs or substring range behavior.
 
 ## Tests
 
-The `reader` test runs 36 positive and 48 negative fixtures from
-`tests/reader/datums.json`, covering datums, constructor lists, numbers,
-strings, comments, delimiters and rejected host syntax, plus evaluation,
-source files, required modules and streamed REPL input. The Chez reader tests
+The `reader` tests run 36 positive and 48 negative fixtures from
+`tests/reader/data/reader-datums.ot`, covering datums, constructor lists,
+numbers, strings, comments, delimiters and rejected host syntax, plus
+evaluation, source files, required modules and streamed REPL input. The Chez reader tests
 also check incomplete-input classification, positions, multiple values and the
 native reader boundary.
 

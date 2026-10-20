@@ -1,0 +1,2 @@
+(ns wrong)
+(def value 99)

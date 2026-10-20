@@ -1,0 +1,41 @@
+;; Search order, suffixes, failed and circular loads, reload and ns forms.
+;; Run with -L tests/modules/first -L tests/modules/second.
+(require otium.test :refer (check fails? report))
+
+(require choice suffix)
+
+(check "first-directory" choice/value)
+(check "ot" suffix/value)
+(check #t (fails? '(require retry)))
+
+(require retry :as r)
+
+(check 2 r/attempts)
+(check #f r/state)
+
+(def (caller) (r/value))
+
+(def saved r/value)
+
+(set! r/value (fn () 42))
+(check 42 (caller))
+(check 2 (saved))
+
+(require (retry :as r :reload))
+
+(check 3 (caller))
+(check #f r/state)
+(check #t (fails? '(require mismatch)))
+(check #t (fails? '(require mismatch)))
+(check #t (fails? '(require cycle-a)))
+(check #t (fails? '(require cycle-a)))
+
+(require '(retry :as quoted :refer (value)))
+
+(check 3 (value))
+(check 3 (quoted/value))
+
+(ns consumer (:require (retry :as r) (otium.test :refer (check report))))
+
+(check 3 (r/value))
+(report "modules")

@@ -39,6 +39,14 @@ libffi = dependency('libffi', required: get_option('ffi'))
 if libffi.found()
   ffi_native = both_libraries('otium-ffi', 'native/ffi/native.c',
     link_whole: utf8, dependencies: dl, override_options: native_options)
+  # Two copies of the FFI test fixture, told apart by fixture_id().
+  ffi_fixtures = []
+  foreach identity : ['17', '29']
+    ffi_fixtures += shared_module('ffi-fixture-' + identity, 'tests/ffi/fixture.c',
+      c_args: '-DFIXTURE_ID=' + identity, dependencies: dependency('threads'),
+      name_prefix: '', name_suffix: extension,
+      build_by_default: false, override_options: native_options + ['c_std=c11'])
+  endforeach
 endif
 
 utf8_checks = executable('otium-utf8-checks', 'tests/native/utf8.c',
@@ -116,6 +124,9 @@ if ui
   ui_caret_checks = executable('otium-ui-caret-checks', 'tests/ui/caret-checks.c',
     c_args: ui_args,
     link_with: ui_library, dependencies: [sdl3, sdl3_ttf, libm], override_options: native_options)
+  sdl_fixture = shared_module('sdl-fixture', 'tests/sdl/fixture.c',
+    dependencies: sdl3, name_prefix: '', name_suffix: extension,
+    build_by_default: false, override_options: native_options + ['c_std=c11'])
 
   # Native installation paths, read by Otium as data.
   sdl_library = sdl3.get_variable(pkgconfig: 'libdir') / 'libSDL3.' + extension
@@ -127,17 +138,19 @@ if ui
     input: 'native/ui/ui-test-config.ot.in')
 endif
 
-# Tests. Run from the source root; the launchers find this build through
+# Tests. tests/run lists the tests defined in tests.py files, and each runs as
+# tests/run NAME from the source root; the launchers find this build through
 # OTIUM_BUILD. GC stress is opt-in: meson test --setup stress.
 python = find_program('python3')
 chez = find_program('chez', 'scheme', required: false)
-sh = find_program('sh')
-run = files('tests/run')
-launcher = files('otium')
+harness = files('tests/run')
 test_env = environment({
   'OTIUM_BUILD': build_root,
   'PYTHONPATH': source_root / 'tools' + ':' + source_root,
 })
+if chez.found()
+  test_env.set('CHEZ', chez.full_path())
+endif
 add_test_setup('default', is_default: true, env: test_env,
   exclude_suites: ['native', 'gpu', 'bench'])
 stress_env = environment({
@@ -145,114 +158,52 @@ stress_env = environment({
   'PYTHONPATH': source_root / 'tools' + ':' + source_root,
   'OTIUM_GC_STRESS': '1',
 })
+if chez.found()
+  stress_env.set('CHEZ', chez.full_path())
+endif
 add_test_setup('stress', env: stress_env,
   exclude_suites: ['native', 'gpu', 'bench'], timeout_multiplier: 4)
 add_test_setup('all', env: test_env)
-
-runtimes = chez.found() ? ['c', 'chez'] : ['c']
 test_kwargs = {'workdir': source_root, 'env': test_env}
 
-# C runtime.
+# Compiled checks.
 test('runtime', test_runtime, suite: 'c', kwargs: test_kwargs)
-test('hygiene', python, args: [source_root / 'c/tests/check_hygiene.py', source_root / 'c'],
-  suite: 'c', kwargs: test_kwargs)
-foreach name : ['01-reader', '02-types', '03-equality', '04-tables', '05-control',
-                '06-closures', '07-macros', '08-conditions', '09-params', '11-multimethods']
-  test('conformance ' + name, run,
-    args: ['--expect', source_root / 'c/tests/otium/expected' / name + '.txt', '--',
-           otium, source_root / 'c/tests/otium' / name + '.ot'],
-    suite: 'c', kwargs: test_kwargs)
-endforeach
-test('multimethods', python, args: [source_root / 'c/tests/test_multimethods.py', otium],
-  suite: 'c', timeout: 180, kwargs: test_kwargs)
-test('cli c', python, args: [source_root / 'c/tests/test_cli.py', otium,
-  source_root / 'c/tests/cli-load.ot', source_root / 'c/tests/cli-load-second.ot'],
-  suite: 'c', kwargs: test_kwargs)
-test('extension', otium, args: ['--no-project', '--path', source_root / 'c/tests/modules',
-  source_root / 'c/tests/ext-demo.ot'], suite: 'c', kwargs: test_kwargs)
-
-# Chez runtime.
-if chez.found()
-  foreach name : ['tests', 'macro-tests', 'unary-call-tests', 'generic-tests']
-    test('chez ' + name, run, args: ['--scratch', '--', chez, '--libdirs', source_root / 'chez',
-      '--script', source_root / 'chez/tests' / name + '.ss'], suite: 'chez', kwargs: test_kwargs)
-  endforeach
-  foreach name : ['append-tests', 'condition-tests', 'environment-tests', 'reader-tests']
-    test('chez ' + name, chez, args: ['--libdirs', source_root / 'chez',
-      '--script', source_root / 'chez/tests' / name + '.ss'], suite: 'chez', kwargs: test_kwargs)
-  endforeach
-  test('chez help', files('chez/run'), args: ['--help'], suite: 'chez', kwargs: test_kwargs)
-  test('format', files('chez/run'), args: ['--no-project', 'tests/format/checks.ot'],
-    suite: 'shared', kwargs: test_kwargs)
-  test('format corpus', files('chez/run'),
-    args: ['--no-project', 'tests/format/corpus.ot', '--', 'lib', 'examples', 'benchmarks'],
-    suite: 'shared', timeout: 120, kwargs: test_kwargs)
+test('utf8', utf8_checks, suite: 'native', kwargs: test_kwargs)
+if libffi.found() and ui
+  test('ui caret', ui_caret_checks, suite: 'native', kwargs: test_kwargs)
 endif
 
-# Otium checks that run unchanged on both runtimes. Each exits nonzero on failure.
-checks = {
-  'expander': ['tests/expander/checks.ot'],
-  'classes': ['tests/classes/checks.ot'],
-  'match': ['tests/match/checks.ot'],
-  'ui': ['tests/ui/checks.ot'],
-  'ui calculator': ['-L', 'examples', 'tests/ui/calculator-checks.ot'],
-  'ui editing': ['-L', 'examples', 'tests/ui/editing-checks.ot'],
-  'ui policy': ['tests/ui/policy-checks.ot'],
-}
-foreach runtime : runtimes
-  foreach name, arguments : checks
-    test(name + ' ' + runtime, launcher, args: ['--runtime=' + runtime, '--no-project'] + arguments,
-      suite: 'shared', kwargs: test_kwargs)
-  endforeach
-endforeach
-
-# Drivers that control processes, sockets or temporary module trees.
-foreach name : ['conditions', 'reader', 'library', 'modules', 'cli', 'dev', 'help']
-  test(name, python, args: [source_root / 'tests/test_@0@.py'.format(name)],
-    suite: 'shared', timeout: 120, kwargs: test_kwargs)
-endforeach
-test('generated', python, args: [source_root / 'tools/generate-cli.py', '--check'],
-  suite: 'shared', kwargs: test_kwargs)
-test('launcher', python, args: ['-m', 'unittest', 'discover', '-s', source_root / 'tools/tests'],
-  suite: 'shared', kwargs: test_kwargs)
-test('docs', files('tools/check-docs'), suite: 'shared', kwargs: test_kwargs)
-
-# Native components: FFI, SDL and the UI bridge.
-test('utf8', utf8_checks, suite: 'native', kwargs: test_kwargs)
+features = []
+needed = {'': [otium]}
+if chez.found()
+  features += 'chez'
+endif
 if libffi.found()
-  test('ffi', python, args: [source_root / 'tests/test_ffi.py'], suite: 'native',
-    depends: ffi_native, kwargs: test_kwargs)
-  foreach runtime : runtimes
-    test('ui application ' + runtime, launcher,
-      args: ['--runtime=' + runtime, '--no-project', 'tests/ui/application.ot'],
-      suite: 'native', depends: ffi_native, kwargs: test_kwargs)
-  endforeach
+  features += 'ffi'
+  needed += {'ffi': [ffi_native] + ffi_fixtures}
 endif
 if libffi.found() and ui
-  # Display tests share the window server and build/ui-test-artifacts/, so they
-  # run one at a time.
-  ui_depends = [ffi_native, ui_library, ui_events, ui_text_reference]
-  test('ui caret', ui_caret_checks, suite: 'native', kwargs: test_kwargs)
-  foreach runtime : runtimes
-    test('ui layout ' + runtime, launcher,
-      args: ['--runtime=' + runtime, '--no-project', '-L', 'examples', 'tests/ui/layout.ot'],
-      suite: 'native', depends: ui_depends, timeout: 90, kwargs: test_kwargs)
-  endforeach
-  test('sdl', python, args: [source_root / 'tests/test_sdl.py'], suite: 'native',
-    depends: ui_depends, timeout: 300, is_parallel: false, kwargs: test_kwargs)
-  test('ui gpu', python, args: [source_root / 'tests/test_ui_gpu.py'], suite: 'native',
-    depends: ui_depends, timeout: 300, is_parallel: false, kwargs: test_kwargs)
-  test('dev ui', python, args: [source_root / 'tests/test_dev_ui.py'], suite: 'gpu',
-    depends: ui_depends, timeout: 300, is_parallel: false, kwargs: test_kwargs)
-  test('sdl accelerated', python, args: [source_root / 'tests/test_sdl.py', '--require-accelerated'],
-    suite: 'gpu', depends: ui_depends, timeout: 300, is_parallel: false, kwargs: test_kwargs)
-  test('ui gpu required', python, args: [source_root / 'tests/test_ui_gpu.py', '--require-gpu'],
-    suite: 'gpu', depends: ui_depends, timeout: 300, is_parallel: false, kwargs: test_kwargs)
+  # Display tests share the window server and build/ui-test-artifacts/, so
+  # they're registered as not parallel.
+  features += 'ui'
+  needed += {'ui': [ffi_native, ui_library, ui_events, ui_text_reference, sdl_fixture]}
 endif
-
-# Reduced-input correctness checks for the R7RS benchmark ports.
-foreach runtime : runtimes
-  test('r7rs ports ' + runtime, python,
-    args: [source_root / 'benchmarks/r7rs/test_ports.py', '--runtime', runtime],
-    suite: 'bench', timeout: 300, kwargs: test_kwargs)
+listing = run_command(python, harness, '--list', ','.join(features), check: true,
+  env: test_env).stdout().strip().split('\n')
+foreach line : listing
+  fields = line.split('\t')
+  if fields[0] == 'file'
+    # Reconfigure when a definition file changes.
+    fs.read(fields[1])
+    continue
+  endif
+  depends = needed['']
+  foreach need : fields[5].split(',')
+    if need in needed
+      depends += needed[need]
+    endif
+  endforeach
+  test(fields[1], python, args: [harness, fields[1]], suite: fields[2],
+    timeout: fields[3].to_int(), is_parallel: fields[4] == '1', depends: depends,
+    kwargs: test_kwargs)
 endforeach

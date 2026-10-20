@@ -1,19 +1,5 @@
 ;; Class semantics exercised unchanged on both runtimes.
-(def checks 0)
-
-(def (check label expected actual)
-  (if (equal? expected actual)
-      (set! checks (+ checks 1))
-      (begin
-        (println "FAIL" label "expected" expected "got" actual)
-        (exit 1))))
-
-(def (fails? form)
-  (try
-    (begin
-      (eval form)
-      #f)
-    (catch (error? e) #t)))
+(require otium.test :refer (check fails? report))
 
 (defabstract Widget)
 
@@ -369,4 +355,4 @@
 (check "remove primary preserves around" #t (remove-method! inspect-method (list Number)))
 (check "around without remaining primary" #t (fails? '(inspect-method 1)))
 
-(println "class checks passed" checks)
+(report "classes")

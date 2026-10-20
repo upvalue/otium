@@ -1,0 +1,9 @@
+(ns provider)
+
+(require (otium.generic :as g))
+
+(defclass Animal value)
+
+(defgeneric (act a b))
+
+(defmethod (act (a Animal) b) 'animal)

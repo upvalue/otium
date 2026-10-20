@@ -28,7 +28,7 @@ libraries `.sls`; vendored Scheme keeps `.scm`. Module lookup checks `.ot` then
 | `lib/` | Otium source for both runtimes: prelude, expander, `otium.*` libraries and tools |
 | `lib/catalog/` | Launcher options and runtime reference data, compiled into both runtimes |
 | `native/` | C and C++ bridges both runtimes load; see [native components](native.md) |
-| `tests/` | Cross-runtime tests and the Python drivers that need process control |
+| `tests/` | Cross-runtime tests, their fixtures, and the test runner and harness |
 | `examples/`, `benchmarks/`, `docs/`, `specs/` | What they say |
 | `tools/` | Development scripts, the dev-server client, the commit hook |
 
@@ -50,7 +50,8 @@ default is `build/`.
 
 ## Tests
 
-`just test` runs the default tests. Name suites or tests to narrow it.
+`just test` runs the default tests. Name suites, or the start of test names, to
+narrow it: `just test match` runs `match c` and `match chez`.
 
 | Suite | Coverage | Default |
 | --- | --- | --- |
@@ -65,18 +66,49 @@ default is `build/`.
 just test chez
 just test match
 just test native
-just test-stress            # default tests with OTIUM_GC_STRESS=1
 just test-all
 meson test -C build --list
 ```
 
-GC stress collects at every C allocation and is slow. Use it when changing the
-collector or code that holds managed pointers, along with `just gc-lint`, which
-needs LLVM development tools.
+`just test-stress` runs the default tests with `OTIUM_GC_STRESS=1`, which
+collects at every C allocation. It's very slow, so run it only when changing the
+C garbage collector itself, and never as a routine check. `just gc-lint` (needs
+LLVM development tools) is the cheaper check for code that holds managed
+pointers.
 
-Most cross-runtime checks are `.ot` files under `tests/` that exit nonzero on
-failure; `meson.build` runs each on both runtimes. Python drivers remain where a
-test needs temporary module trees, sockets, PTYs, signals or frame timing.
+Tests are defined in `tests.py` files beside their fixtures: `tests/`,
+`c/tests/`, `chez/tests/`, `tools/tests/` and `benchmarks/r7rs/`. Meson asks
+`tests/run --list` for the names when it configures, and runs each as
+`tests/run NAME`, which also works on its own. `tests/harness.py` has the
+helpers, and its docstrings are the reference.
+
+```python
+from harness import BOTH, case, test
+
+# Run a program on each runtime; expect exit 0, or the given status and output.
+case('modules', 'tests/modules/checks.ot', paths=['tests/modules/first'])
+case('conditions exit', 'tests/conditions/exit.ot', options=['--load', 'tests/conditions/support.ot'],
+     status=7, stdout='condition checks: 7\n')
+
+# Anything else is a function. With runtimes, it's registered once per runtime.
+@test('reader repl', runtimes=BOTH)
+def repl(t):
+    t.expect(t.otium('--repl', stdin='nil\n'), contains=['nil\n'])
+```
+
+Test names get the runtime appended, as in `modules c`. Keep fixtures as
+checked-in files; use `t.scratch` only for what a test must create while it
+runs. Otium check programs use `otium.test`:
+
+```scheme
+(require otium.test :refer (check fails? report))
+(check 3 (+ 1 2))
+(check "label" '(1) (list 1))
+(check #t (fails? (fn () (car 1))))   ; a thunk, or a quoted form
+(report "arithmetic")                 ; arithmetic: 3 checks passed
+```
+
+A failed `check` prints the label, expected and actual values, and exits 1.
 
 ## Formatting and linting
 

@@ -1,0 +1,11 @@
+(ns portable)
+
+(defonce state #f)
+
+(def (value)
+  "module value"
+  7)
+
+(def (where) (current-ns))
+
+(def (help) (describe (quote value)))

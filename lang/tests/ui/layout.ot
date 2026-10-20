@@ -6,21 +6,10 @@
 (require (ui.terminal :as terminal))
 (native/load-config! "build/ui-config.ot")
 
-(def checks 0)
-
-(def (check label expected actual)
-  (unless (equal? expected actual) (error "layout check failed" label expected actual))
-  (set! checks (+ checks 1)))
+(require otium.test :refer (check fails? report))
 
 (def (near label expected actual)
-  (unless (< (abs (- expected actual)) 0.01) (error "layout value differs" label expected actual))
-  (set! checks (+ checks 1)))
-
-(def (fails? thunk)
-  (try
-    (thunk)
-    #f
-    (catch (error? e) #t)))
+  (check label expected (if (< (abs (- expected actual)) 0.01) expected actual)))
 
 (def (child parent i)
   (get (ui/children parent) i))
@@ -222,4 +211,4 @@
 (check "all nodes released" 0 (native/live-nodes))
 (check "no renderers needed" 0 (native/live-renderers))
 (check "foreign memory released" 0 (ffi/allocation-count))
-(println "UI layout checks:" checks)
+(report "ui layout")

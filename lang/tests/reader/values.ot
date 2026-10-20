@@ -1,16 +1,4 @@
-(def checks 0)
-
-(def (check expected actual)
-  (if (equal? expected actual)
-      (set! checks (+ checks 1))
-      (error "reader check failed" expected actual)))
-
-(def (fails? thunk)
-  (try
-    (begin
-      (thunk)
-      #f)
-    (catch (error? c) #t)))
+(require otium.test :refer (check fails? report))
 
 (check #t (array? [1 2]))
 (check #t (table? {:a 1}))
@@ -154,4 +142,4 @@
 
 (handler-bind (((fn (c) nil) (fn (c) (set! handled 99)))) (signal 'test))
 (check 0 handled)
-(println "reader values passed")
+(report "reader values")

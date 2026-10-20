@@ -1,0 +1,28 @@
+;; Module search, live references, reload and ns forms. Run with -L tests/library/modules.
+(require portable :as p)
+
+(def (caller) (p/value))
+
+(def saved p/value)
+
+(set! p/value (fn () 9))
+
+(println (caller) (saved) p/state)
+
+(require (portable :as p :reload))
+
+(println (caller) p/state)
+
+(require '(portable :as q :refer (value)))
+
+(println (q/value) (value))
+
+(ns consumer (:require (portable :as p)))
+
+(println (p/value))
+
+(println (current-ns))
+
+(println (describe 'p/value) (describe 'missing))
+
+(println (p/where) (p/help))

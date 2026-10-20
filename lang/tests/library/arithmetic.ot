@@ -1,20 +1,10 @@
-(def checks 0)
-
-(def (check expected actual)
-  (unless (equal? expected actual) (error "arithmetic mismatch" expected actual))
-  (set! checks (+ checks 1)))
+(require otium.test :refer (check fails? report))
 
 (def (number-check expected actual integer)
   (check expected actual)
   (check integer (int? actual))
   (check integer (exact? actual))
   (check (not integer) (float? actual)))
-
-(def (fails? thunk)
-  (try
-    (thunk)
-    #f
-    (catch ((fn (c) #t) c) #t)))
 
 (number-check 3.5 (/ 7 2) #f)
 (number-check 3 (/ 6 2) #t)
@@ -64,4 +54,4 @@
 (check #t (float? negative-root))
 (check #f (= negative-root negative-root))
 (check #t (fails? (fn () (sqrt "4"))))
-(println "arithmetic checks:" checks)
+(report "arithmetic")

@@ -1,18 +1,6 @@
 (require (otium.ui :as ui))
 
-(def checks 0)
-
-(def (check label expected actual)
-  (if (equal? expected actual)
-      (set! checks (+ checks 1))
-      (error "UI check failed" label expected actual)))
-
-(def (fails? form)
-  (try
-    (begin
-      (eval form)
-      #f)
-    (catch (error? e) #t)))
+(require otium.test :refer (check fails? report))
 
 (def (child parent index)
   (get (ui/children parent) index))
@@ -445,4 +433,4 @@
 (input/keyboard! keyboard-tree {:kind :key-up :key "Space" :code 44})
 (check "duplicate physical release ignored" 2 activations)
 (ui/dispose! keyboard-tree)
-(println "UI checks:" checks)
+(report "ui")

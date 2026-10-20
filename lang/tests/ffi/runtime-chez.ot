@@ -1,0 +1,6 @@
+;; Chez runtime definitions for the FFI programs.
+(require chez)
+
+(def wide-integers? #t)
+
+(def (test-collect) (chez/collect))

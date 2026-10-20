@@ -1,0 +1,7 @@
+;; Run with -L tests/reader/data.
+(require otium.test :refer (check fails? report))
+(require reader-datums :as datums)
+
+(for-each (fn (fixture) (check (car fixture) (cadr fixture) (read-string (car fixture)))) datums/positive)
+(for-each (fn (text) (check text #t (fails? (fn () (read-string text))))) datums/negative)
+(report "reader datums")

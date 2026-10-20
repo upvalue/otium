@@ -13,7 +13,7 @@ build:
 test *args: build
     tools/meson-test default "$@"
 
-# Run the default tests with GC stress (collect at every C allocation)
+# Default tests collecting at every C allocation. Very slow: only for work on the C collector
 test-stress *args: build
     tools/meson-test stress "$@"
 

@@ -1,0 +1,32 @@
+"""Condition semantics, exit through handlers and cleanup, and SIGINT."""
+import os
+import select
+import signal
+
+from harness import BOTH, case, test
+
+SUPPORT = ['--load', 'tests/conditions/support.ot']
+
+case('conditions', 'tests/conditions/common.ot', options=SUPPORT)
+case('conditions exit', 'tests/conditions/exit.ot', options=SUPPORT, status=7,
+     stdout='condition checks: 7\n')
+case('conditions quit', 'tests/conditions/quit.ot', options=SUPPORT, status=7,
+     stdout='condition checks: 7\n')
+case('conditions cleanup error', 'tests/conditions/cleanup-error.ot', options=SUPPORT,
+     stdout='condition checks: 8\n')
+
+
+@test('conditions interrupt', runtimes=BOTH)
+def interrupt(t):
+    process = t.spawn(t.command(*SUPPORT, 'tests/conditions/interrupt.ot'), text=True)
+    ready, _, _ = select.select([process.stdout], [], [], 10)
+    t.check(ready, 'did not reach the protected body')
+    first = os.read(process.stdout.fileno(), 1).decode()
+    t.check(first == 'x', 'exited before the protected body')
+    process.send_signal(signal.SIGINT)
+    stdout, stderr = process.communicate(timeout=10)
+    output = first + stdout
+    suffix = 'condition checks: 9\n'
+    t.check(output.endswith(suffix) and set(output[:-len(suffix)]) == {'x'},
+            'cleanup did not run once after the marker', output[-200:], stderr)
+    t.check(process.returncode != 0, 'interrupted process exited 0')

@@ -1,0 +1,12 @@
+;; C runtime definitions for the FFI programs.
+(def wide-integers? #f)
+
+;; Allocate enough to force a collection.
+(def (churn n)
+  (if (> n 0)
+      (begin
+        (list n n n)
+        (churn (- n 1)))
+      #f))
+
+(def (test-collect) (churn 2000))

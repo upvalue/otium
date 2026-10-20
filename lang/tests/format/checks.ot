@@ -1,11 +1,7 @@
 ;; Formatter and linter checks. Run on Chez with lib on the path.
 (require otium.reader (otium.format :as format) (otium.lint :as lint))
 
-(def checks 0)
-
-(def (check expected actual)
-  (unless (equal? expected actual) (error "format check failed" expected actual))
-  (set! checks (+ checks 1)))
+(require otium.test :refer (check report))
 
 (def (formats input expected)
   (check expected (format/format-text input format/builtin-rules)))
@@ -115,4 +111,4 @@
        (warnings "(def (f x)\n  (if a b (if c d e)))\n(if a b c)"))
 (check '() (warnings "(if a (if b c d) e)"))
 
-(println (string-append "format checks passed: " (number->string checks)))
+(report "format")

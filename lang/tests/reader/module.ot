@@ -1,0 +1,4 @@
+;; Run with -L tests/reader/modules.
+(require readerfixture :as r)
+
+(println (get r/value 1) (if (get r/value 0) 99 7))

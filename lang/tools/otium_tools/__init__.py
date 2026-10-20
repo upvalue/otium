@@ -1,5 +1,4 @@
 """Repository execution helpers. Runtime behavior belongs in the launchers."""
-import argparse
 import datetime
 import json
 import os
@@ -30,15 +29,6 @@ def environment(*, runtime='c', stress=False, overrides=None):
     if overrides:
         env.update(overrides)
     return env
-
-
-def runtime_argument(parser, *, both=True):
-    parser.add_argument('--runtime', choices=('c', 'chez', 'both') if both else ('c', 'chez'),
-                        default='both' if both else 'c')
-
-
-def runtimes(selection):
-    return ('c', 'chez') if selection == 'both' else (selection,)
 
 
 def metadata(commands, *, build_label='unspecified', compilation='launcher default; cache state uncontrolled'):

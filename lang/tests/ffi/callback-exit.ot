@@ -1,0 +1,15 @@
+;; An exit inside a callback is repeated once the foreign call returns, so
+;; this prints "before", not "after", and exits 3.
+(def lib (ffi/open-library (list fixture-path)))
+
+(def call-n (ffi/bind lib "call_n" '(callback-pointer int) 'int))
+
+(call-n
+  (ffi/callback '(int)
+                'int
+                (fn (x)
+                  (display "before")
+                  (newline)
+                  (exit 3)))
+  1)
+(display "after")

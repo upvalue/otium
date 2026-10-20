@@ -1,9 +1,4 @@
-(def checks 0)
-
-(def (check expected actual)
-  (if (equal? expected actual)
-      (set! checks (+ checks 1))
-      (error "FFI callback assertion failed" expected actual)))
+(require otium.test :refer (check report))
 
 (def (reason thunk)
   (try
@@ -192,6 +187,4 @@
 (ffi/free-callback! forwarding)
 (check 0 (ffi/callback-count))
 (check 0 (ffi/allocation-count))
-(display "FFI callback checks: ")
-(display checks)
-(newline)
+(report "ffi callbacks")

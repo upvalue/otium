@@ -1,0 +1,4 @@
+;; Calling back from another thread must fail with an error, not run Otium code.
+(def lib (ffi/open-library (list fixture-path)))
+
+((ffi/bind lib "call_on_thread" '(callback-pointer) 'void) (ffi/callback '() 'void (fn () nil)))

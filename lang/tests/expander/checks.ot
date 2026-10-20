@@ -1,19 +1,5 @@
 ;; Expander behaviour shared by the C and Chez runtimes.
-(def checks 0)
-
-(def (check label expected actual)
-  (if (equal? expected actual)
-      (set! checks (+ checks 1))
-      (begin
-        (println "FAIL" label "expected" expected "got" actual)
-        (exit 1))))
-
-(def (fails? form)
-  (try
-    (begin
-      (eval form)
-      #f)
-    (catch (error? e) #t)))
+(require otium.test :refer (check fails? report))
 
 (defmacro twice (x)
   (let ((t (gensym "t"))) `(let ((,t ,x)) (+ ,t ,t))))
@@ -248,4 +234,4 @@
 
 (check "with-params binds sequentially" '(1 2) (with-params ((depth 1) (depth (+ (depth) 1))) (list 1 (depth))))
 
-(println "expander checks passed" checks)
+(report "expander")

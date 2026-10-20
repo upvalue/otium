@@ -1,0 +1,11 @@
+;; Loaded before each FFI program with --load. Program arguments are the
+;; fixture library, a second copy of it and, for callbacks.ot, a writable
+;; module directory. Load runtime-c.ot or runtime-chez.ot as well.
+(require otium.ffi :as ffi)
+(require otium.process)
+
+(def fixture-path (car (otium.process/arguments)))
+
+(def other-path (cadr (otium.process/arguments)))
+
+(def module-directory (if (pair? (cddr (otium.process/arguments))) (caddr (otium.process/arguments)) nil))

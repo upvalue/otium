@@ -667,6 +667,7 @@ static inline size_t ot_object_size(otv value) { return (size_t)(ot_as_obj(value
 
 OT_GC_MAY_ALLOCATE void* ot_alloc(ots* state, size_t size, ot_obj_type type);
 
+/* Host memory is zeroed. */
 void* ot_host_alloc(size_t size);
 void* ot_host_realloc(void* memory, size_t size);
 void ot_host_free(void* memory);

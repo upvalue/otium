@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-void* ot_host_alloc(size_t size) { return malloc(size); }
+void* ot_host_alloc(size_t size) { return calloc(1, size); }
 
 void* ot_host_realloc(void* memory, size_t size) { return realloc(memory, size); }
 

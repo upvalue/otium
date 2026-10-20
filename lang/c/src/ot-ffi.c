@@ -22,13 +22,15 @@ static const unsigned ot_ffi_src_len = sizeof ot_ffi_src;
 #include <limits.h>
 #include <pthread.h>
 
-static void* zero_alloc(size_t count, size_t size) {
-  if (size && count > SIZE_MAX / size) return NULL;
-  size_t bytes = count * size;
-  void* p = ot_host_alloc(bytes ? bytes : 1);
-  if (p) memset(p, 0, bytes);
-  return p;
-}
+/* The initial ABI profile: AAPCS64 on macOS arm64 and SysV on Linux x86-64.
+ * Code for either convention compiles on every target. */
+#if defined(__APPLE__) && defined(__aarch64__)
+static const bool aapcs64 = true, sysv_x86_64 = false;
+#elif defined(__linux__) && defined(__x86_64__)
+static const bool aapcs64 = false, sysv_x86_64 = true;
+#else
+static const bool aapcs64 = false, sysv_x86_64 = false;
+#endif
 
 typedef struct item {
   struct item* next;
@@ -101,6 +103,7 @@ typedef struct error_scope {
   struct error_scope* previous;
   library* library;
   const char* symbol;
+  /* -1 when there is no current argument or expected type. */
   intptr_t argument;
   int expected;
 } error_scope;
@@ -126,7 +129,8 @@ static context* ctx(ots* s) { return s->ffi_state; }
 static void pop_error(error_scope* e) { ctx(e->state)->error = e->previous; }
 
 #define ERROR_SCOPE()                                                                              \
-  error_scope scope [[gnu::cleanup(pop_error)]] = {s, ctx(s)->error, NULL, NULL, -1, -1};          \
+  error_scope scope [[gnu::cleanup(pop_error)]] = {                                                \
+      .state = s, .previous = ctx(s)->error, .argument = -1, .expected = -1};                      \
   ctx(s)->error = &scope
 
 static void track(ots* s, item* p, void (*destroy)(void*)) {
@@ -341,53 +345,93 @@ static otv nth(otv list, size_t index) {
   return head;
 }
 
+/* Layout descriptors from lib/otium/ffi.ot are (kind size alignment members).
+ * Struct and union members are (name descriptor offset); an array's members
+ * are (element count). */
+static otv layout_kind(otv d) { return nth(d, 0); }
+
+static size_t layout_size(otv d) { return (size_t)ot_get_int(nth(d, 1)); }
+
+static size_t layout_align(otv d) { return (size_t)ot_get_int(nth(d, 2)); }
+
+static otv layout_members(otv d) { return nth(d, 3); }
+
+static otv member_layout(otv m) { return nth(m, 1); }
+
+static size_t member_offset(otv m) { return (size_t)ot_get_int(nth(m, 2)); }
+
+static otv array_element(otv d) { return nth(layout_members(d), 0); }
+
+static otv array_count(otv d) { return nth(layout_members(d), 1); }
+
 static int call_kind(otv value) {
-  return ot_is_int(value) ? kind(value)
-                          : (ot_is_int(nth(value, 0)) ? (int)ot_get_int(nth(value, 0)) : -1);
+  if (ot_is_int(value)) return kind(value);
+  otv k = layout_kind(value);
+  return ot_is_int(k) ? (int)ot_get_int(k) : -1;
 }
+
+enum {
+  MAX_AGGREGATE_DEPTH = 64,
+  /* SysV passes aggregates of up to two eightbytes in registers. */
+  SYSV_REGISTER_BYTES = 16,
+  /* AAPCS64 homogeneous floating aggregates have one to four members. */
+  AAPCS64_HFA_MEMBERS = 4,
+};
+
+/* SysV byte classes; INTEGER wins when classes merge. */
+typedef enum sysv_class { CLASS_NONE, CLASS_SSE, CLASS_INTEGER } sysv_class;
+
+/* The scalar leaves of a union, for AAPCS64: none seen yet, all one float
+ * kind (F_FLOAT or F_DOUBLE), or mixed. */
+enum { LEAVES_NONE = -2, LEAVES_MIXED = -1 };
 
 /* A union's overlapping members contribute to its calling classification.
  * Preserve byte classes as well as size: a 4-aligned union can straddle two
- * SysV eightbytes when nested in a struct. See docs/native.md. */
-static bool classify_union_member(ots* s, otv d, size_t offset, unsigned char classes[32],
-                                  int* floating, unsigned depth) {
-  if (depth > 64) {
+ * SysV eightbytes when nested in a struct. Bytes past the register bytes go
+ * unrecorded. See docs/native.md. */
+static bool classify_union_member(ots* s, otv d, size_t offset,
+                                  sysv_class classes[SYSV_REGISTER_BYTES], int* leaves,
+                                  unsigned depth) {
+  if (depth > MAX_AGGREGATE_DEPTH) {
     fail(s, "bind", "abi", "aggregate nesting exceeds backend limit");
     return false;
   }
   int k = call_kind(d);
   if (k >= 0 && k < F_COUNT) {
-    int base = (k == F_FLOAT || k == F_DOUBLE) ? k : -1;
-    if (*floating == 0) *floating = base;
-    else if (*floating != base) *floating = -1;
-    unsigned char cls = base > 0 ? 1 : 2;
-    for (size_t i = 0; i < offi_size(k) && offset + i < 32; i++)
+    bool floating = k == F_FLOAT || k == F_DOUBLE;
+    int leaf = floating ? k : LEAVES_MIXED;
+    if (*leaves == LEAVES_NONE) *leaves = leaf;
+    else if (*leaves != leaf) *leaves = LEAVES_MIXED;
+    sysv_class cls = floating ? CLASS_SSE : CLASS_INTEGER;
+    for (size_t i = 0; i < offi_size(k) && offset + i < SYSV_REGISTER_BYTES; i++)
       if (classes[offset + i] < cls) classes[offset + i] = cls;
     return true;
   }
-  otv fields = nth(d, 3);
-  if (k == 25) {
-    size_t count_fields = (size_t)ot_get_int(nth(fields, 1));
-    if (!count_fields) {
+  if (k == F_ARRAY) {
+    size_t count_elements = (size_t)ot_get_int(array_count(d));
+    if (!count_elements) {
       fail(s, "bind", "signature", "empty by-value array field");
       return false;
     }
-    otv element = nth(fields, 0);
-    size_t stride = (size_t)ot_get_int(nth(element, 1));
-    /* One element establishes the homogeneous base even past our byte map. */
-    for (size_t i = 0; i < count_fields; i++) {
-      if (!classify_union_member(s, element, offset, classes, floating, depth + 1)) return false;
-      if (offset >= 32 || stride > 32 - offset) break;
+    otv element = array_element(d);
+    size_t stride = layout_size(element);
+    /* One element establishes the leaf kind even past the register bytes. */
+    for (size_t i = 0; i < count_elements; i++) {
+      if (!classify_union_member(s, element, offset, classes, leaves, depth + 1)) return false;
+      if (offset >= SYSV_REGISTER_BYTES || stride > SYSV_REGISTER_BYTES - offset) break;
       offset += stride;
     }
     return true;
   }
-  if (k == 23 || k == 24) {
-    otv field;
-    while (ot_pair_values(fields, &field, &fields)) {
-      size_t relative = (size_t)ot_get_int(nth(field, 2));
-      size_t at = offset >= 32 || relative >= 32 ? 32 : offset + relative;
-      if (!classify_union_member(s, nth(field, 1), at, classes, floating, depth + 1)) return false;
+  if (k == F_STRUCT || k == F_UNION) {
+    otv members = layout_members(d), member;
+    while (ot_pair_values(members, &member, &members)) {
+      size_t relative = member_offset(member);
+      size_t at = offset >= SYSV_REGISTER_BYTES || relative >= SYSV_REGISTER_BYTES
+                      ? SYSV_REGISTER_BYTES
+                      : offset + relative;
+      if (!classify_union_member(s, member_layout(member), at, classes, leaves, depth + 1))
+        return false;
     }
     return true;
   }
@@ -395,54 +439,56 @@ static bool classify_union_member(ots* s, otv d, size_t offset, unsigned char cl
   return false;
 }
 
+static ffi_type* carrier_type(size_t unit, bool floating) {
+  if (floating) return unit == sizeof(float) ? &ffi_type_float : &ffi_type_double;
+  switch (unit) {
+    case 1: return &ffi_type_uint8;
+    case 2: return &ffi_type_uint16;
+    case 4: return &ffi_type_uint32;
+    default: return &ffi_type_uint64;
+  }
+}
+
 static ffi_type* prepare_union(ots* s, otv description, unsigned depth) {
-  size_t size = (size_t)ot_get_int(nth(description, 1));
-  size_t align = (size_t)ot_get_int(nth(description, 2));
-  unsigned char classes[32] = {0};
-  int floating = 0;
-  if (!classify_union_member(s, description, 0, classes, &floating, depth)) return NULL;
+  size_t size = layout_size(description);
+  size_t align = layout_align(description);
+  sysv_class classes[SYSV_REGISTER_BYTES] = {CLASS_NONE};
+  int leaves = LEAVES_NONE;
+  if (!classify_union_member(s, description, 0, classes, &leaves, depth)) return NULL;
   if (!size || (align != 1 && align != 2 && align != 4 && align != 8) || size % align) {
     fail(s, "bind", "abi", "unsupported union size or alignment");
     return NULL;
   }
   size_t unit = align;
-  bool homogeneous = false;
-#if defined(__aarch64__)
-  homogeneous = floating > 0 && size / offi_size(floating) <= 4;
-  if (homogeneous) unit = offi_size(floating);
-#endif
+  bool homogeneous = aapcs64 && (leaves == F_FLOAT || leaves == F_DOUBLE) &&
+                     size / offi_size(leaves) <= AAPCS64_HFA_MEMBERS;
+  if (homogeneous) unit = offi_size(leaves);
   size_t count_fields = size / unit;
   if (count_fields > SIZE_MAX / sizeof(ffi_type*) - 1) {
     fail(s, "bind", "allocation", "union descriptor too large");
     return NULL;
   }
-  ffi_type* t = zero_alloc(1, sizeof(*t));
+  ffi_type* t = ot_host_alloc(sizeof(*t));
   if (!t) {
     fail(s, "bind", "allocation", "union type allocation failed");
     return NULL;
   }
   t->type = FFI_TYPE_STRUCT;
-  t->elements = zero_alloc(count_fields + 1, sizeof(*t->elements));
+  t->elements = ot_host_alloc((count_fields + 1) * sizeof(*t->elements));
   if (!t->elements) {
     ot_host_free(t);
     fail(s, "bind", "allocation", "union fields allocation failed");
     return NULL;
   }
   for (size_t i = 0; i < count_fields; i++) {
-    bool fp = homogeneous;
-#if defined(__x86_64__)
-    if (size <= 16 && unit >= 4) {
-      unsigned char cls = 0;
+    bool floating = homogeneous;
+    if (sysv_x86_64 && size <= SYSV_REGISTER_BYTES && unit >= sizeof(float)) {
+      sysv_class cls = CLASS_NONE;
       for (size_t j = 0; j < unit; j++)
         if (classes[i * unit + j] > cls) cls = classes[i * unit + j];
-      fp = cls == 1;
+      floating = cls == CLASS_SSE;
     }
-#endif
-    t->elements[i] = fp ? (unit == 4 ? &ffi_type_float : &ffi_type_double)
-                        : (unit == 1   ? &ffi_type_uint8
-                           : unit == 2 ? &ffi_type_uint16
-                           : unit == 4 ? &ffi_type_uint32
-                                       : &ffi_type_uint64);
+    t->elements[i] = carrier_type(unit, floating);
   }
   if (ffi_get_struct_offsets(FFI_DEFAULT_ABI, t, NULL) != FFI_OK || t->size != size ||
       t->alignment != align) {
@@ -456,23 +502,23 @@ static ffi_type* prepare_union(ots* s, otv description, unsigned depth) {
 static ffi_type* prepare_type(ots* s, otv description, unsigned depth) {
   int k = call_kind(description);
   if (k >= 0 && k < F_COUNT) return native_type(k);
-  if (k == 24) return prepare_union(s, description, depth);
-  if (depth > 64 || (k != 23 && k != 25)) {
+  if (k == F_UNION) return prepare_union(s, description, depth);
+  if (depth > MAX_AGGREGATE_DEPTH || (k != F_STRUCT && k != F_ARRAY)) {
     fail(s, "bind", "abi", "unsupported aggregate shape");
     return NULL;
   }
-  otv fields = nth(description, 3);
+  otv members = layout_members(description);
   size_t count_fields = 0;
-  if (k == 25) {
-    otv number = nth(fields, 1);
+  if (k == F_ARRAY) {
+    otv number = array_count(description);
     if (!ot_is_int(number) || ot_get_int(number) <= 0) {
       fail(s, "bind", "signature", "empty by-value array field");
       return NULL;
     }
     count_fields = (size_t)ot_get_int(number);
   } else {
-    otv cursor = fields, field;
-    while (ot_pair_values(cursor, &field, &cursor)) count_fields++;
+    otv cursor = members, member;
+    while (ot_pair_values(cursor, &member, &cursor)) count_fields++;
     if (cursor != ot_null || !count_fields) {
       fail(s, "bind", "signature", "invalid aggregate fields");
       return NULL;
@@ -482,38 +528,38 @@ static ffi_type* prepare_type(ots* s, otv description, unsigned depth) {
     fail(s, "bind", "allocation", "aggregate descriptor too large");
     return NULL;
   }
-  ffi_type* t = zero_alloc(1, sizeof(*t));
+  ffi_type* t = ot_host_alloc(sizeof(*t));
   if (!t) {
     fail(s, "bind", "allocation", "aggregate type allocation failed");
     return NULL;
   }
   t->type = FFI_TYPE_STRUCT;
-  t->elements = zero_alloc(count_fields + 1, sizeof(*t->elements));
+  t->elements = ot_host_alloc((count_fields + 1) * sizeof(*t->elements));
   if (!t->elements) {
     ot_host_free(t);
     fail(s, "bind", "allocation", "aggregate fields allocation failed");
     return NULL;
   }
   for (size_t i = 0; i < count_fields; i++) {
-    otv child = k == 25 ? nth(fields, 0) : nth(nth(fields, i), 1);
+    otv child = k == F_ARRAY ? array_element(description) : member_layout(nth(members, i));
     t->elements[i] = prepare_type(s, child, depth + 1);
     if (!t->elements[i]) {
       free_type(t);
       return NULL;
     }
   }
-  size_t* offsets = zero_alloc(count_fields, sizeof(*offsets));
+  size_t* offsets = ot_host_alloc(count_fields * sizeof(*offsets));
   if (!offsets) {
     free_type(t);
     fail(s, "bind", "allocation", "aggregate offsets allocation failed");
     return NULL;
   }
   bool matches = ffi_get_struct_offsets(FFI_DEFAULT_ABI, t, offsets) == FFI_OK;
-  matches = matches && t->size == (size_t)ot_get_int(nth(description, 1)) &&
-            t->alignment == (size_t)ot_get_int(nth(description, 2));
-  if (k == 23)
+  matches =
+      matches && t->size == layout_size(description) && t->alignment == layout_align(description);
+  if (k == F_STRUCT)
     for (size_t i = 0; i < count_fields; i++)
-      matches = matches && offsets[i] == (size_t)ot_get_int(nth(nth(fields, i), 2));
+      matches = matches && offsets[i] == member_offset(nth(members, i));
   ot_host_free(offsets);
   if (!matches) {
     free_type(t);
@@ -665,9 +711,9 @@ static otv n_alloc(ots* s, otv* a, int n) {
   if (!count(s, a[0], &bytes, "alloc") || !count(s, a[1], &align, "alloc")) return OT_UNWIND;
   if (!align || align > _Alignof(max_align_t))
     return fail(s, "alloc", "alignment", "unsupported allocation alignment");
-  owner* o = zero_alloc(1, sizeof(*o));
+  owner* o = ot_host_alloc(sizeof(*o));
   if (!o) return fail(s, "alloc", "allocation", "allocation failed");
-  o->data = zero_alloc(1, bytes ? bytes : 1);
+  o->data = ot_host_alloc(bytes ? bytes : 1);
   o->size = bytes;
   if (!o->data) {
     ot_host_free(o);
@@ -890,10 +936,10 @@ static otv n_callback(ots* s, otv* a, int n) {
   }
   if (tail != ot_null || result < 0 || result >= F_UTF8)
     return fail(s, "callback", "signature", "invalid callback signature");
-  callback* cb = zero_alloc(1, sizeof(*cb));
+  callback* cb = ot_host_alloc(sizeof(*cb));
   if (cb) {
-    cb->types = zero_alloc(len ? len : 1, sizeof(*cb->types));
-    cb->kinds = zero_alloc(len ? len : 1, sizeof(*cb->kinds));
+    cb->types = ot_host_alloc((len ? len : 1) * sizeof(*cb->types));
+    cb->kinds = ot_host_alloc((len ? len : 1) * sizeof(*cb->kinds));
   }
   if (!cb || !cb->types || !cb->kinds) {
     if (cb) callback_free(cb);
@@ -960,7 +1006,7 @@ static otv n_open(ots* s, otv* a, int n) {
       ot_host_free(name);
       return ot_ext_pointer(s, ctx(s)->library_type, it);
     }
-  library* l = zero_alloc(1, sizeof(*l));
+  library* l = ot_host_alloc(sizeof(*l));
   if (!l) {
     ot_host_free(name);
     return fail(s, "open-library", "allocation", "library metadata allocation failed");
@@ -996,9 +1042,9 @@ static otv call(ots* s, otv context_value, otv* a, int n) {
   scope.symbol = b->name;
   if ((size_t)n != b->count) return fail(s, "call", "arity", "wrong number of native arguments");
   size_t count_args = n ? (size_t)n : 1;
-  cell* values = zero_alloc(count_args, sizeof(*values));
-  void** addresses = zero_alloc(count_args, sizeof(*addresses));
-  char** temporaries = zero_alloc(count_args, sizeof(*temporaries));
+  cell* values = ot_host_alloc((count_args) * sizeof(*values));
+  void** addresses = ot_host_alloc((count_args) * sizeof(*addresses));
+  char** temporaries = ot_host_alloc((count_args) * sizeof(*temporaries));
   if (!values || !addresses || !temporaries) {
     ot_host_free(values);
     ot_host_free(addresses);
@@ -1010,7 +1056,7 @@ static otv call(ots* s, otv context_value, otv* a, int n) {
   for (int i = 0; i < n; i++) {
     scope.argument = i;
     scope.expected = b->kinds[i];
-    if (b->kinds[i] >= F_COUNT) {
+    if (b->kinds[i] >= F_STRUCT) {
       pointer p;
       ffi_type* t = b->types[i];
       if (!ptr(s, a[i], &p, "call") || !span(s, p, 0, t->size, t->alignment, "call")) goto done;
@@ -1030,7 +1076,7 @@ static otv call(ots* s, otv context_value, otv* a, int n) {
   scope.expected = b->result;
   cell returned = {0};
   void* destination = &returned;
-  if (b->result >= F_COUNT) {
+  if (b->result >= F_STRUCT) {
     otv args[] = {ot_make_int((intptr_t)b->result_type->size),
                   ot_make_int(b->result_type->alignment)};
     aggregate = n_alloc(s, args, 2);
@@ -1047,7 +1093,7 @@ static otv call(ots* s, otv context_value, otv* a, int n) {
     result = replay(s);
     goto done;
   }
-  result = b->result >= F_COUNT ? aggregate : decode(s, b->result, returned, "call");
+  result = b->result >= F_STRUCT ? aggregate : decode(s, b->result, returned, "call");
 done:
   for (int i = 0; i < n; i++) ot_host_free(temporaries[i]);
   ot_host_free(values);
@@ -1081,7 +1127,7 @@ static otv n_bind(ots* s, otv* a, int n) {
     ot_host_free(name);
     return fail(s, "bind", "signature", "invalid argument list");
   }
-  binding* b = zero_alloc(1, sizeof(*b));
+  binding* b = ot_host_alloc(sizeof(*b));
   if (!b) {
     ot_host_free(name);
     return fail(s, "bind", "allocation", "binding allocation failed");
@@ -1092,8 +1138,8 @@ static otv n_bind(ots* s, otv* a, int n) {
   b->address = offi_symbol(l->handle, name);
   b->count = len;
   b->result = result;
-  b->types = zero_alloc(len ? len : 1, sizeof(*b->types));
-  b->kinds = zero_alloc(len ? len : 1, sizeof(*b->kinds));
+  b->types = ot_host_alloc((len ? len : 1) * sizeof(*b->types));
+  b->kinds = ot_host_alloc((len ? len : 1) * sizeof(*b->kinds));
   if (!b->types || !b->kinds) {
     binding_destroy(b);
     return fail(s, "bind", "allocation", "signature allocation failed");
@@ -1174,10 +1220,10 @@ static otv n_layout_data(ots* s, otv* a, int n) {
 }
 
 static void module(ots* s) {
-#if !(defined(__APPLE__) && defined(__aarch64__)) && !(defined(__linux__) && defined(__x86_64__))
-  fail(s, "import", "abi", "FFI target is outside the initial ABI profile");
-  return;
-#endif
+  if (!aapcs64 && !sysv_x86_64) {
+    fail(s, "import", "abi", "FFI target is outside the initial ABI profile");
+    return;
+  }
   if (sizeof(void*) != 8 || sizeof(size_t) != 8 || sizeof(ptrdiff_t) != 8 || sizeof(bool) != 1 ||
       FLT_RADIX != 2 || FLT_MANT_DIG != 24 || DBL_MANT_DIG != 53) {
     fail(s, "import", "abi", "native scalar representation does not match the FFI ABI profile");
@@ -1230,7 +1276,7 @@ static void module(ots* s) {
 }
 
 void ot_register_ffi(ots* s) {
-  context* c = zero_alloc(1, sizeof(*c));
+  context* c = ot_host_alloc(sizeof(*c));
   if (!c) abort();
   s->ffi_state = c;
   c->pending_condition = ot_false;

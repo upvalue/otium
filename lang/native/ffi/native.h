@@ -28,7 +28,11 @@ enum {
   F_POINTER,
   F_CALLBACK,
   F_UTF8,
-  F_COUNT
+  F_COUNT,
+  /* Layout descriptor kinds follow the scalar codes. */
+  F_STRUCT = F_COUNT,
+  F_UNION,
+  F_ARRAY
 };
 
 /* ABI metadata comes from the compiler that builds this bridge. Unknown type

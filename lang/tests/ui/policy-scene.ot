@@ -29,7 +29,7 @@
   (ui/new CustomEntry {:key :custom :autofocus #t :editing editing}))
 
 (def (step! tree frame context)
-  (let ((active? (ffi/bind sdl/library "SDL_TextInputActive" '(pointer) 'bool)))
+  (let ((active? (ffi/bind sdl/library "SDL_TextInputActive" '(pointer) 'bool #t)))
     (when (= frame 0)
       (unless (active? (get context :window)) (error "Custom widget did not start native text input"))
       (events/text! context "custom λ"))

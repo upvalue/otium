@@ -15,22 +15,22 @@
 (def PollFd (ffi/define-struct! 'pollfd '((fd int) (events i16) (revents i16))))
 
 (ffi/defbindings libc %load!
-  ((private %openpt) "posix_openpt" (int) int)
-  ((private %grantpt) "grantpt" (int) int)
-  ((private %unlockpt) "unlockpt" (int) int)
-  ((private %ptsname) "ptsname" (int) utf8)
-  ((private %open) "open" (utf8 int) int)
-  ((private %close) "close" (int) int)
-  ((private %read) "read" (int pointer size-t) long)
-  ((private %write) "write" (int pointer size-t) long)
-  ((private %poll) "poll" (pointer uint int) int)
-  ((private %waitpid) "waitpid" (int pointer int) int)
-  ((private %kill) "kill" (int int) int)
-  ((private %environ) "_NSGetEnviron" () pointer))
+  ((private %openpt) "posix_openpt" (int) int #t)
+  ((private %grantpt) "grantpt" (int) int #t)
+  ((private %unlockpt) "unlockpt" (int) int #t)
+  ((private %ptsname) "ptsname" (int) utf8 #t)
+  ((private %open) "open" (utf8 int) int #t)
+  ((private %close) "close" (int) int #t)
+  ((private %read) "read" (int pointer size-t) long #t)
+  ((private %write) "write" (int pointer size-t) long #t)
+  ((private %poll) "poll" (pointer uint int) int #t)
+  ((private %waitpid) "waitpid" (int pointer int) int #t)
+  ((private %kill) "kill" (int int) int #t)
+  ((private %environ) "_NSGetEnviron" () pointer #f))
 
 (ffi/defbindings native %load-native!
-  ((private %spawn) "manse_pty_spawn" (utf8 pointer pointer utf8) int)
-  ((private %resize) "manse_pty_resize" (int int int int int) int))
+  ((private %spawn) "manse_pty_spawn" (utf8 pointer pointer utf8) int #t)
+  ((private %resize) "manse_pty_resize" (int int int int int) int #t))
 
 (def (native-candidates)
   "MANSE_NATIVE_LIBRARY when set; otherwise the Meson build, from lang/ or lang/manse/."

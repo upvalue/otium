@@ -9,20 +9,20 @@
 
 (def lib (ffi/open-library (list fixture-path)))
 
-(def call-n (ffi/bind lib "call_n" '(callback-pointer int) 'int))
+(def call-n (ffi/bind lib "call_n" '(callback-pointer int) 'int #t))
 
-(def call-stored (ffi/bind lib "call_stored" '(int) 'int))
+(def call-stored (ffi/bind lib "call_stored" '(int) 'int #t))
 
-(def store-callback (ffi/bind lib "store_callback" '(callback-pointer) 'void))
+(def store-callback (ffi/bind lib "store_callback" '(callback-pointer) 'void #t))
 
-(def echo-int (ffi/bind lib "echo_int" '(int) 'int))
+(def echo-int (ffi/bind lib "echo_int" '(int) 'int #t))
 
 (def double-it (ffi/callback '(int) 'int (fn (x) (* 2 x))))
 
 (check 1 (ffi/callback-count))
 (check 12 (call-n double-it 4))
-(check #f ((ffi/bind lib "null_callback" '(callback-pointer) 'bool) double-it))
-(check #t (ffi/pointer=? double-it ((ffi/bind lib "echo_pointer" '(pointer) 'pointer) double-it)))
+(check #f ((ffi/bind lib "null_callback" '(callback-pointer) 'bool #t) double-it))
+(check #t (ffi/pointer=? double-it ((ffi/bind lib "echo_pointer" '(pointer) 'pointer #t) double-it)))
 
 ;; A stored callback runs during a later, unrelated foreign call.
 (store-callback double-it)
@@ -39,9 +39,9 @@
                       (+ x n)
                       -1.0))))
 
-(check -1.5 ((ffi/bind lib "call_mixed" '(callback-pointer pointer) 'double) mixed p))
+(check -1.5 ((ffi/bind lib "call_mixed" '(callback-pointer pointer) 'double #t) mixed p))
 
-(def call-predicate (ffi/bind lib "call_predicate" '(callback-pointer u8) 'bool))
+(def call-predicate (ffi/bind lib "call_predicate" '(callback-pointer u8) 'bool #t))
 
 (def odd (ffi/callback '(u8) 'bool (fn (x) (odd? x))))
 
@@ -50,7 +50,7 @@
 
 (def identity (ffi/callback '(pointer) 'pointer (fn (q) q)))
 
-(check #t (ffi/pointer=? p ((ffi/bind lib "call_pointer" '(callback-pointer pointer) 'pointer) identity p)))
+(check #t (ffi/pointer=? p ((ffi/bind lib "call_pointer" '(callback-pointer pointer) 'pointer #t) identity p)))
 
 ;; Callbacks stored in memory come back as callback pointers.
 (def slot (ffi/alloc 'callback-pointer 1))
@@ -67,7 +67,7 @@
 (check (+ 0 (+ 1 0) (+ 2 2)) (call-n nested 3))
 
 ;; Collection during a callback leaves a string argument intact.
-(def text-after (ffi/bind lib "text_after" '(utf8 callback-pointer) 'utf8))
+(def text-after (ffi/bind lib "text_after" '(utf8 callback-pointer) 'utf8 #t))
 
 (def (garbage n)
   (dotimes (i n)
@@ -84,6 +84,27 @@
 
 (check "héllo, collected 🌍" (text-after (string-append "héllo, " "collected 🌍") collect))
 (check 0 (ffi/allocation-count))
+
+;; Stored callbacks and nested calls work across both collection modes.
+(for-each
+  (fn (outer-safe?)
+    (let ((invoke (ffi/bind lib "call_n" '(callback-pointer int) 'int outer-safe?))
+          (stored (ffi/bind lib "call_stored" '(int) 'int outer-safe?))
+          (text (ffi/bind lib "text_after" '(utf8 callback-pointer) 'utf8 outer-safe?)))
+      (check 14 (stored 7))
+      (check "collected λ" (text (string-append "collected " "λ") collect))
+      (for-each
+        (fn (inner-safe?)
+          (let ((echo (ffi/bind lib "echo_int" '(int) 'int inner-safe?))
+                (inner (ffi/bind lib "call_n" '(pointer int) 'int inner-safe?))
+                (cb (ffi/callback '(int) 'int
+                      (fn (x)
+                        (test-collect)
+                        (+ (echo x) (inner double-it x))))))
+            (check 5 (invoke cb 3))
+            (ffi/free-callback! cb)))
+        '(#f #t))))
+  '(#f #t))
 
 ;; Errors are contained at the boundary, the callback returns zero, and the
 ;; first error is raised once the outermost foreign call returns.
@@ -136,7 +157,10 @@
 ;; A conversion error on the callback result is contained the same way.
 (def wrong-result (ffi/callback '(int) 'int (fn (x) "not an integer")))
 
-(check 'type (reason (fn () (call-n wrong-result 1))))
+(for-each (fn (flag)
+            (let ((invoke (ffi/bind lib "call_n" '(pointer int) 'int flag)))
+              (check 'type (reason (fn () (invoke wrong-result 1))))))
+          '(#f #t))
 
 ;; A non-local exit is stopped at the boundary and reported afterwards.
 (def escaping (ffi/callback '(int) 'int (fn (x) (invoke-restart 'skip))))
@@ -144,7 +168,7 @@
 (check 'escape (reason (fn () (restart-case (call-n escaping 1) (skip () 'skipped)))))
 
 ;; A callback keeps the procedure it was given; forwarding follows reloads.
-(def write-file (ffi/bind lib "write_file" '(utf8 utf8) 'int))
+(def write-file (ffi/bind lib "write_file" '(utf8 utf8) 'int #t))
 
 (def (write-handler factor)
   (check 0

@@ -5,11 +5,11 @@
 
 (def math-library (ffi/open-library math-library-names))
 
-(def native-cos (ffi/bind math-library "cos" '(double) 'double))
+(def native-cos (ffi/bind math-library "cos" '(double) 'double #f))
 
-(def native-hypot (ffi/bind math-library "hypot" '(double double) 'double))
+(def native-hypot (ffi/bind math-library "hypot" '(double double) 'double #f))
 
-(def native-modf (ffi/bind math-library "modf" '(double pointer) 'double))
+(def native-modf (ffi/bind math-library "modf" '(double pointer) 'double #f))
 
 (display (native-cos 0.0))
 (newline)

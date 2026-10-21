@@ -91,13 +91,13 @@ macro may later provide sugar, but is not required for this release.
 ```scheme
 (def sdl (ffi/open-library '("libSDL3.dylib")))
 (def init
-  (ffi/bind sdl "SDL_Init" '(u32) 'bool))
+  (ffi/bind sdl "SDL_Init" '(u32) 'bool #t))
 (def create-window
-  (ffi/bind sdl "SDL_CreateWindow" '(utf8 int int u64) 'pointer))
+  (ffi/bind sdl "SDL_CreateWindow" '(utf8 int int u64) 'pointer #t))
 (def poll-event
-  (ffi/bind sdl "SDL_PollEvent" '(pointer) 'bool))
+  (ffi/bind sdl "SDL_PollEvent" '(pointer) 'bool #t))
 (def last-error
-  (ffi/bind sdl "SDL_GetError" '() 'utf8))
+  (ffi/bind sdl "SDL_GetError" '() 'utf8 #t))
 ```
 
 `open-library` takes a nonempty list of path/name strings, tries them in order,
@@ -191,7 +191,7 @@ implicit choice between by-value and pointer passing based on the argument.
   (ffi/define-struct! 'Point '((x double) (y double))))
 ;; C: struct Point translate(struct Point point, double dx, double dy);
 (def translate
-  (ffi/bind geometry "translate" (list Point 'double 'double) Point))
+  (ffi/bind geometry "translate" (list Point 'double 'double) Point #t))
 (def point (ffi/alloc Point 1))
 (unwind-protect
   (begin
@@ -467,9 +467,24 @@ aggregate copies, and result storage are outside the moving heap; it passes no m
 to C in version 1. This is the C backend strategy, not a restriction on Chez's
 internal implementation of the same lifetime contract.
 
-Chez bindings use `__collect_safe`: the Otium thread is deactivated during the
-native call, so a callback arriving on another thread can activate and abort
-instead of waiting for it. No call argument points into Chez's managed heap.
+Every binding requires a final `collect-safe?` boolean, with no default:
+`(ffi/bind library name arguments result collect-safe?)`. `defbindings` uses
+`(name symbol arguments result collect-safe?)` for each declaration. Non-booleans
+raise a `type` FFI error.
+
+With `#t`, Chez uses `__collect_safe`: the Otium thread is deactivated during
+the native call, so a callback arriving on another thread can activate and abort
+instead of waiting for it. With `#f`, Chez leaves the thread active and avoids
+that transition cost. Use `#t` for blocking or long-running calls and calls whose
+threading behavior is uncertain. Use `#f` for short operations whose behavior is
+known. A call that waits on another thread invoking an Otium callback can deadlock
+with `#f` before the wrong-thread error is reported. The choice covers indirect
+calls and callbacks registered earlier, not just the declared arguments.
+Same-thread callbacks can collect with either setting; `#f` does not disable GC
+or promise that no callback occurs. The flag does not allow
+callbacks on foreign threads. The C backend validates the flag but uses the same
+call path for both values; it has no Chez thread activation state. No call
+argument points into Chez's managed heap.
 Native code reenters Otium only through [callbacks](#callbacks), on the Otium
 thread. Blocking calls still block the Otium execution thread.
 
@@ -688,8 +703,10 @@ code calls `procedure` with the converted arguments and converts its result.
 Callbacks are synchronous and same-thread. Native code may invoke one only on
 the Otium thread, while Otium is inside a foreign call it made; that includes a
 callback stored earlier and invoked during a later, unrelated call. Invocation
-on any other thread aborts the process with a message, as does invocation on the
-Otium thread outside any foreign call from Otium. A callback may itself make
+on any other thread is unsupported and normally aborts the process with a message.
+On Chez, a foreign call bound with `#f` can prevent that diagnostic by blocking
+collection while waiting for the callback thread. Invocation on the Otium thread
+outside any foreign call from Otium aborts the process with a message. A callback may itself make
 foreign calls, which may invoke callbacks.
 
 Argument and result types are scalars, `pointer`, and `callback-pointer`;

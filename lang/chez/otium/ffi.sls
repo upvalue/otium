@@ -287,7 +287,7 @@
            `(,(if (= k KIND_STRUCT) 'struct 'union)
              ,@(map (lambda (f) (list (gensym "field") (aggregate-ftype (cadr f)))) (cadddr d))))
           (else (%fail "bind" "abi" "unsupported aggregate shape")))))
-    (define (make-factory arguments result)
+    (define (make-factory arguments result collect-safe?)
       (let* ((all (cons result arguments))
              (names (map (lambda (t) (and (pair? t) (gensym "aggregate"))) all))
              (arg-names (cdr names))
@@ -304,11 +304,11 @@
                         (and name `(unless (= (ftype-sizeof ,name) ,(cadr t))
                                      (error 'ffi "native aggregate layout mismatch")))) all names))
              (lambda (address)
-               ;; The Otium thread is inactive during the call, so a callback on
+               ;; With collect-safe?, the Otium thread is inactive, so a callback on
                ;; another thread can activate without waiting on it, then abort.
                ;; No argument may point into the managed heap.
                (let ((native
-                       (foreign-procedure __collect_safe address
+                       (foreign-procedure ,@(if collect-safe? '(__collect_safe) '()) address
                          ,(map (lambda (t name)
                                  (if name `(& ,name) (vector-ref foreign-types t))) arguments arg-names)
                          ,(if result-name `(& ,result-name) (vector-ref foreign-types result)))))
@@ -323,13 +323,13 @@
     (define (direct? arguments result)
       (and (for-all (lambda (t) (and (integer? t) (< t KIND_UTF8))) arguments)
            (and (integer? result) (< result KIND_UTF8))))
-    (define (make-direct-factory arguments result)
+    (define (make-direct-factory arguments result collect-safe?)
       (let ((xs (map (lambda (t) (gensym "x")) arguments))
             (es (map (lambda (t) (gensym "encode")) arguments)))
         (eval
           `(lambda (address encoders enter finish arity-fail)
              ;; See make-factory on __collect_safe.
-             (let ((native (foreign-procedure __collect_safe address
+             (let ((native (foreign-procedure ,@(if collect-safe? '(__collect_safe) '()) address
                              ,(map (lambda (t) (vector-ref foreign-types t)) arguments)
                              ,(vector-ref foreign-types result)))
                    ,@(map (lambda (e i) `(,e (list-ref encoders ,i))) es (iota (length es))))
@@ -359,16 +359,17 @@
             ((= k KIND_BOOL) (lambda (raw) (not (eqv? raw 0))))
             ((or (= k KIND_POINTER) (= k KIND_CALLBACK)) (lambda (raw) (decode k raw)))
             (else (lambda (raw) raw))))
-    (define (%bind lib name arguments result)
+    (define (%bind lib name arguments result collect-safe?)
+      (unless (boolean? collect-safe?) (%fail "bind" "type" "expected collection safety boolean"))
       (let* ((address (symbol-address lib name "bind"))
-             (key (cons arguments result))
+             (key (list arguments result collect-safe?))
              (direct (direct? arguments result)))
         (when (zero? address) (%fail "bind" "symbol" "native symbol missing"))
         (let ((factory
                 (or (hashtable-ref factories key #f)
                     (let ((f (if direct
-                                 (make-direct-factory arguments result)
-                                 (make-factory arguments result))))
+                                 (make-direct-factory arguments result collect-safe?)
+                                 (make-factory arguments result collect-safe?))))
                       (hashtable-set! factories key f) f)))
               (context (list (cons ':library (native-library-name lib)) (cons ':symbol name))))
           (if direct

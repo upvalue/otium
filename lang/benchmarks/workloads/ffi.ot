@@ -5,7 +5,7 @@
 
 (def libc (ffi/open-library '("/usr/lib/libSystem.B.dylib" "libc.so.6")))
 
-(def abs (ffi/bind libc "abs" '(int) 'int))
+(def abs (ffi/bind libc "abs" '(int) 'int #f))
 
 (def Cell (ffi/define-struct! 'Cell '((size size-t) (fg u32) (bg u32) (bold bool))))
 

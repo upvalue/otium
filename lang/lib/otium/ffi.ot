@@ -97,9 +97,7 @@
 
 (def- (%describe t op)
   (cond
-    ((symbol? t)
-     (or (%scalar-description t)
-         (%fail op (%signature-error op) "unknown scalar type")))
+    ((symbol? t) (or (%scalar-description t) (%fail op (%signature-error op) "unknown scalar type")))
     ((%layout-data t) (%layout-data t))
     ((and (list? t) (= (length t) 3) (eq? (car t) 'array))
      (let ((element (%memory (cadr t) op))
@@ -209,9 +207,10 @@
             (car d)
             d))))
 
-(def (bind library name arguments result)
+(def (bind library name arguments result collect-safe?)
+  (unless (or (eq? collect-safe? #t) (eq? collect-safe? #f)) (%fail "bind" "type" "expected collection safety boolean"))
   (if (list? arguments)
-      (%bind library name (map (fn (t) (%call-type t #f)) arguments) (%call-type result #t))
+      (%bind library name (map (fn (t) (%call-type t #f)) arguments) (%call-type result #t) collect-safe?)
       (%fail "bind" "signature" "expected argument type list")))
 
 (def- (%callback-type t result?)
@@ -265,14 +264,16 @@
   (%error-access c "expected-type"))
 
 (defmacro defbindings (library loader . declarations)
-  "Declare (name symbol arguments result) bindings; use (private name) for private vars. loader opens a path or candidate list."
+  "Declare (name symbol arguments result collect-safe?) bindings; use (private name) for private vars. loader opens a path or candidate list."
   (let ((source (gensym "source")))
     (def (name d)
       (if (pair? (car d))
           (cadr (car d))
           (car d)))
     (def (binding d)
-      `(otium.ffi/bind ,library ,(cadr d) ',(caddr d) ',(cadddr d)))
+      (unless (= (length d) 5)
+        (%fail "bind" "signature" "expected name, symbol, arguments, result, and collection safety boolean"))
+      `(otium.ffi/bind ,library ,(cadr d) ',(caddr d) ',(cadddr d) ,(list-ref d 4)))
     `(begin
        (require otium.ffi)
        (defonce ,library nil)

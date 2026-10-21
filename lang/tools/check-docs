@@ -12,7 +12,7 @@ for file do
     esac
     [ -f "$file" ] || continue
     case $file in
-        README.md|AGENTS.md|AGENT-LANG.md|docs/*.md|specs/*.md|benchmarks/README.md) ;;
+        README.md|AGENTS.md|AGENT-LANG.md|docs/*.md|specs/*.md|benchmarks/README.md|manse/README.md) ;;
         examples/*/README.md|vim/README.md|.agents/skills/*/SKILL.md) ;;
         .tickets/*|*/vendor/*|*-OFL.txt|tests/*|c/tests/*) continue ;;
         *) echo "$file: docs belong in docs/ or specs/" >&2; status=1; continue ;;

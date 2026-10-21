@@ -1,4 +1,4 @@
-(require (otium.ui.gpu :as gpu))
+(require (otium.ui.window :as window))
 (require (otium.sdl :as sdl))
 (require (otium.ffi :as ffi))
 
@@ -37,21 +37,21 @@
 
 (unwind-protect
   (begin
-    (gpu/configure-app! {})
+    (window/configure-app! {})
     (check '((hint "SDL_MAC_BACKGROUND_APP" "0") (metadata "Otium" "" "org.otium.application")) (array-to-list calls))
     (set! calls [])
-    (gpu/configure-app! {:name "Example" :version "1" :id "org.example" :background #t})
+    (window/configure-app! {:name "Example" :version "1" :id "org.example" :background #t})
     (check '((hint "SDL_MAC_BACKGROUND_APP" "1") (metadata "Example" "1" "org.example")) (array-to-list calls))
     (set! calls [])
-    (gpu/present-window! 'window {})
+    (window/present-window! 'window {})
     (check '((raise window)) (array-to-list calls))
     (set! calls [])
-    (gpu/present-window! 'window {:icon "icon.png" :foreground #f})
+    (window/present-window! 'window {:icon "icon.png" :foreground #f})
     (check '((load "icon.png") (icon window #t) (destroy #t)) (array-to-list calls))
     (set! calls [])
     (set! icon-ok? #f)
     (try
-      (gpu/present-window! 'window {:icon "icon.png"})
+      (window/present-window! 'window {:icon "icon.png"})
       (catch ((fn (c) #t) c) (set! failed? #t)))
     (check #t failed?)
     (check '((load "icon.png") (icon window #t) (destroy #t)) (array-to-list calls)))

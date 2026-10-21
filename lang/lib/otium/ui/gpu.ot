@@ -5,28 +5,6 @@
 (require (otium.gfx :as gfx))
 (require (otium.sdl :as sdl))
 
-(def (configure-app! options)
-  "Set process-wide application metadata before initializing SDL video."
-  ;; Cocoa builds its menu during SDL video initialization.
-  (sdl/set-hint "SDL_MAC_BACKGROUND_APP"
-                (if (get options :background #f)
-                    "1"
-                    "0"))
-  (sdl/check (sdl/set-app-metadata (get options :name "Otium")
-                                   (get options :version "")
-                                   (get options :id "org.otium.application"))))
-
-(def (present-window! window options)
-  "Install a PNG/BMP icon and optionally request foreground focus."
-  (let ((icon (get options :icon "")))
-    (unless (equal? icon "")
-      (let ((surface (sdl/pointer (sdl/load-surface icon))))
-        (unwind-protect
-          (sdl/check (sdl/set-window-icon window surface))
-          (sdl/destroy-surface surface)))))
-  (when (get options :foreground #t) (sdl/check (sdl/raise-window window)))
-  #t)
-
 (def (resize! tree renderer width height scale)
   "Update renderer dimensions and relayout retained widgets; direct rendering requires scale 0."
   (sdl/check (native/gpu-resize renderer width height scale))

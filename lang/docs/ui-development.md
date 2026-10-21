@@ -219,8 +219,8 @@ exercise repeated frames so atlas reuse is covered.
 
 The demo accepts `--app-name`, `--app-id`, `--app-version`, `--title`, and `--icon`
 (PNG or BMP). Interactive launch requests foreground focus; `--background` skips
-that request. `gpu/configure-app!` sets metadata before SDL video initialization,
-and `gpu/present-window!` installs the icon and requests focus.
+that request. In `otium.ui.window`, `configure-app!` sets metadata before SDL
+video initialization, and `present-window!` installs the icon and requests focus.
 
 macOS takes the app-switcher name from the executable's bundle. For development,
 run either runtime through the bundle launcher:

@@ -9,6 +9,28 @@
 
 (defonce running? #f)
 
+(def (configure-app! options)
+  "Set process-wide application metadata before initializing SDL video."
+  ;; Cocoa builds its menu during SDL video initialization.
+  (sdl/set-hint "SDL_MAC_BACKGROUND_APP"
+                (if (get options :background #f)
+                    "1"
+                    "0"))
+  (sdl/check (sdl/set-app-metadata (get options :name "Otium")
+                                   (get options :version "")
+                                   (get options :id "org.otium.application"))))
+
+(def (present-window! window options)
+  "Install a PNG/BMP icon and optionally request foreground focus."
+  (let ((icon (get options :icon "")))
+    (unless (equal? icon "")
+      (let ((surface (sdl/pointer (sdl/load-surface icon))))
+        (unwind-protect
+          (sdl/check (sdl/set-window-icon window surface))
+          (sdl/destroy-surface surface)))))
+  (when (get options :foreground #t) (sdl/check (sdl/raise-window window)))
+  #t)
+
 (def (open options)
   (let ((first? (null? (ui/windows)))
         (width (get options :width 640))
@@ -22,10 +44,10 @@
       (let ((settings (native/load-config! (get options :config "build/ui-config.ot"))))
         (sdl/load! (native/config-ref settings 'sdl)))
       (sdl/set-main-ready)
-      (gpu/configure-app! {:name (get options :app-name "Otium")
-                           :version (get options :app-version "")
-                           :id (get options :app-id "org.otium.application")
-                           :background (or headless (get options :background #f))})
+      (configure-app! {:name (get options :app-name "Otium")
+                       :version (get options :app-version "")
+                       :id (get options :app-id "org.otium.application")
+                       :background (or headless (get options :background #f))})
       (sdl/check (sdl/init sdl/INIT_VIDEO)))
     (unwind-protect
       (begin
@@ -47,9 +69,8 @@
                                                scale)
                                            (get options :driver "")
                                            (or headless (get options :offscreen #f) (> scale 0)))))
-        (gpu/present-window! window
-                             {:icon (get options :icon "")
-                              :foreground (not (or headless (get options :background #f)))})
+        (present-window! window
+                         {:icon (get options :icon "") :foreground (not (or headless (get options :background #f)))})
         (let ((handle {:window window
                        :renderer renderer
                        :tree (ui/root)

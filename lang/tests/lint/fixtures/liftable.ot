@@ -1,0 +1,3 @@
+(def (calculate)
+  (def (plus a b) (+ a b)) ;~ L0002
+  (plus 2 2))

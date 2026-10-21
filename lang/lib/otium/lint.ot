@@ -296,7 +296,7 @@
 ;; it can be matched to the same occurrence in the source.
 
 (def- (make-walk)
-  {:seen {} :bindings [] :free [] :host 0})
+  {:seen {} :bindings [] :free [] :host 0 :active '() :functions [] :definitions {}})
 
 (def- (note! walk name)
   (let ((count (get (walk :seen) name 0)))
@@ -318,12 +318,19 @@
     ((pair? params) (cons (car params) (parameter-names (cdr params))))
     (else '())))
 
+;; Every active candidate sees references in its nested functions too. A
+;; binding in its saved outer scope is a capture, except for its own name.
 (def- (reference! walk scope symbol)
   (let ((name (symbol->string symbol))
         (index (note! walk name))
         (binding (find (fn (b) (equal? (b :name) name)) scope)))
     (cond
-      (binding (put! binding :used #t))
+      (binding (put! binding :used #t)
+               (for-each (fn (candidate)
+                           (when (and (not (eq? binding (candidate :binding)))
+                                      (find (fn (outer) (eq? outer binding)) (candidate :outer)))
+                             (put! candidate :blocked #t)))
+                         (walk :active)))
       ((= (walk :host) 0) (push! (walk :free) {:name name :index index}))
       (else nil))))
 
@@ -356,7 +363,16 @@
 (def- (walk-definition walk scope form)
   (let ((target (second form)))
     (if (pair? target)
-        (walk-body walk (bind-all walk scope (parameter-names (cdr target)) :parameter) (cdr (cdr form)))
+        (let ((name (symbol->string (car target)))
+              (binding (find (fn (b) (equal? (b :name) name)) scope))
+              (active (walk :active))
+              (candidate {:name name :binding binding :outer scope :blocked (> (walk :host) 0)}))
+          (put! (walk :definitions) name (+ (get (walk :definitions) name 0) 1))
+          (when binding
+            (push! (walk :functions) candidate)
+            (put! walk :active (cons candidate active)))
+          (walk-body walk (bind-all walk scope (parameter-names (cdr target)) :parameter) (cdr (cdr form)))
+          (put! walk :active active))
         (walk-all walk scope (cdr (cdr form))))))
 
 (def- (walk-quasi walk scope x depth)
@@ -401,7 +417,11 @@
                (walk-definition walk scope x))
               ((eq? head 'defmacro)
                (walk-body walk (bind-all walk scope (parameter-names (nth x 2)) :parameter) (cdr (cdr (cdr x)))))
-              ((eq? head 'set!) (walk-all walk scope (cdr x)))
+              ((eq? head 'set!)
+               (when (symbol? (second x))
+                 (let ((binding (find (fn (b) (equal? (b :name) (symbol->string (second x)))) scope)))
+                   (when binding (put! binding :mutated #t))))
+               (walk-all walk scope (cdr x)))
               ((eq? head 'cond)
                (for-each (fn (clause)
                            (walk-all walk
@@ -453,6 +473,7 @@
               ((string-starts-with? name "chez/")
                ;; Chez syntax keeps its own binding forms, so names inside a chez/
                ;; form count as uses of local bindings but are never reported.
+               (for-each (fn (candidate) (put! candidate :blocked #t)) (walk :active))
                (put! walk :host (+ (walk :host) 1))
                (walk-all walk scope (cdr x))
                (put! walk :host (- (walk :host) 1)))
@@ -474,9 +495,30 @@
               names)
     out))
 
+;; Match only unambiguous, explicitly written function definitions. Expanded
+;; occurrence counts are not reliable source locations when macros add names.
+(def- (source-functions node found)
+  (when (and (not (eq? (node :kind) :prefix)) (not (member (syntax/head-name node) '("quote" "quasiquote"))))
+    (when (function-definition? node) (push! found {:name (syntax/head-name (second (syntax/forms node))) :node node}))
+    (when (get node :children) (for-each (fn (child) (source-functions child found)) (node :children)))))
+
+(def- (check-liftable! context node walk)
+  (let ((sources []))
+    (source-functions node sources)
+    (for-each (fn (candidate)
+                (let ((name (candidate :name))
+                      (matches (filter (fn (source) (equal? (source :name) name)) sources)))
+                  (when (and (not (candidate :blocked))
+                             (not (get (candidate :binding) :mutated))
+                             (= (get (walk :definitions) name) 1)
+                             (= (length matches) 1))
+                    (report! context "liftable-function" ((get matches 0) :node) {:name name}))))
+              (walk :functions))))
+
 (def- (check-names! context space node datum)
   (let ((walk (make-walk)))
     (walk-form walk '() datum)
+    (check-liftable! context node walk)
     (let ((free (filter (fn (ref) (not (get (context :defined) (ref :name)))) (walk :free)))
           (names (sort (keys (reduce (fn (seen ref) (put seen (ref :name) #t)) {} free))))
           (unbound (unresolved space names)))

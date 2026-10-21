@@ -36,6 +36,12 @@ def cli(t):
     (t.scratch / 'project.ot').write_text('(lint :oops (if-chain))\n')
     t.expect(t.run([ROOT / 'otium', 'lint', path]), status=2)
     (t.scratch / 'project.ot').unlink()
+    path.write_text('(def (f) (def (plus a b) (+ a b)) (plus 2 2))\n')
+    for options, status in [((), 0), (('--deny-warnings',), 1),
+                            (('--deny', 'liftable-function'), 1),
+                            (('--allow', 'liftable-function'), 0)]:
+        t.expect(t.run([ROOT / 'otium', 'lint', '--format=short', *options, path]), status=status)
+    t.expect(t.run([ROOT / 'otium', 'explain', 'L0002']), contains=['liftable-function', 'def-'])
     path.write_text('(def broken\n')
     result = t.expect(t.run([ROOT / 'otium', 'lint', '--format=json', path]), status=1)
     t.check(json.loads(result.stdout)['code'] == 'E0001', result)

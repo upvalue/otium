@@ -131,7 +131,7 @@
     acc))
 
 (def (first seq)
-  "(first sequence)\nReturn the first element, or nil. Also accepts strings, returning a one-character string."
+  "(first sequence)\nReturn the first element, or nil. On a string, return the first char."
   (cond
     ((nil? seq) nil)
     ((null? seq) nil)
@@ -140,10 +140,7 @@
      (if (> (length seq) 0)
          (get seq 0)
          nil))
-    ((string? seq)
-     (if (> (string-length seq) 0)
-         (substring seq 0 1)
-         nil))
+    ((string? seq) (get seq 0))
     (else (error "first: not a sequence"))))
 
 (def (rest seq)
@@ -156,7 +153,7 @@
     (else (error "rest: not a sequence"))))
 
 (def (nth seq i)
-  "(nth sequence index)\nReturn the element at a zero-based integer index, or nil out of range. Accepts lists, arrays, and nil."
+  "(nth sequence index)\nReturn the element at a zero-based integer index, or nil out of range. Accepts lists, arrays, strings, and nil."
   (require-int "nth" i)
   (cond
     ((nil? seq) nil)
@@ -176,6 +173,7 @@
            (if (pair? s)
                (car s)
                nil))))
+    ((string? seq) (get seq i))
     (else (error "nth: not a sequence"))))
 
 (def (second seq)
@@ -199,6 +197,7 @@
      (let ((s seq))
        (while (pair? (cdr s)) (set! s (cdr s)))
        (car s)))
+    ((string? seq) (get seq (- (string-length seq) 1)))
     (else (error "last: not a sequence"))))
 
 (def (count coll)
@@ -318,12 +317,14 @@
     ((string? k) :string)
     ((symbol? k) :symbol)
     ((keyword? k) :keyword)
-    (else (error "sort: keys must be numbers, strings, symbols, or keywords"))))
+    ((char? k) :char)
+    (else (error "sort: keys must be numbers, strings, symbols, keywords, or chars"))))
 
 (def- (key-less? a b)
-  (if (number? a)
-      (< a b)
-      (string<? (name a) (name b)))) ; strings/symbols/keywords, lexicographic
+  (cond
+    ((number? a) (< a b))
+    ((char? a) (< (char->integer a) (char->integer b)))
+    (else (string<? (name a) (name b))))) ; strings/symbols/keywords, lexicographic
 
 ;; stable merge of two lists of (key . elem) pairs
 (def- (merge-runs a b)
@@ -427,6 +428,13 @@
 ;; clause has matched, so later clauses never see a failed clause's names.
 
 (define-condition 'match-error 'error)
+
+;; I/O conditions (specs/io.md). decode-error carries the byte :position.
+(define-condition 'io-error 'error)
+
+(define-condition 'file-error 'io-error)
+
+(define-condition 'decode-error 'io-error)
 
 (def (match-error value)
   "(match-error value)\nSignal a match-error condition holding value under :value. A use-value restart returns its argument as the result of the failed match."
@@ -856,3 +864,35 @@
 (def (string>=? a b & more)
   "(string>=? string string ...)\nTest whether strings are in nonincreasing order."
   (string-chain "string>=?" (fn (x y) (not (string<? x y))) a b more))
+
+(def- (char-chain who ok? a b more)
+  (if (not (and (char? a) (char? b))) (error (str who ": expected chars")))
+  (and (ok? (char->integer a) (char->integer b)) (or (null? more) (char-chain who ok? b (car more) (cdr more)))))
+
+(def (char=? a b & more)
+  "(char=? char char ...)\nTest whether all chars are the same."
+  (char-chain "char=?" = a b more))
+
+(def (char<? a b & more)
+  "(char<? char char ...)\nTest whether chars are in strictly increasing code point order."
+  (char-chain "char<?" < a b more))
+
+(def (char>? a b & more)
+  "(char>? char char ...)\nTest whether chars are in strictly decreasing code point order."
+  (char-chain "char>?" > a b more))
+
+(def (char<=? a b & more)
+  "(char<=? char char ...)\nTest whether chars are in nondecreasing code point order."
+  (char-chain "char<=?" <= a b more))
+
+(def (char>=? a b & more)
+  "(char>=? char char ...)\nTest whether chars are in nonincreasing code point order."
+  (char-chain "char>=?" >= a b more))
+
+(def (digit-value c)
+  "(digit-value char)\nThe value 0 to 9 of an ASCII decimal digit, or nil for any other char."
+  (unless (char? c) (error "digit-value: expected char"))
+  (let ((n (- (char->integer c) 48)))
+    (if (and (>= n 0) (<= n 9))
+        n
+        nil)))

@@ -57,6 +57,16 @@ These accessors work the same way on C and Chez. Embedders start with no script
 and an empty list. C hosts can supply them with `ot_set_arguments`; the runtime
 copies the strings. `otium.process/write-error` writes a string to stderr.
 
+```scheme
+(otium.process/getenv "HOME")         ; string, or nil when unset
+(otium.process/setenv! "TERM" "xterm") ; set, replacing any value
+(otium.process/setenv! "TERM" nil)     ; unset, like putting nil in a table
+```
+
+Names must be nonempty and contain neither `=` nor NUL; values must not
+contain NUL. Changes apply to the process environment, so child processes
+inherit them. Values that are not valid UTF-8 are not portable.
+
 ## Parsing application arguments
 
 `otium.cli` is a shared Otium implementation with small runtime adapters. Load

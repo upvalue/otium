@@ -6,13 +6,13 @@
 (defonce library
   (ffi/open-library (list (native/config-ref (read-string (read-file "build/ui-test-config.ot")) 'library))))
 
-(def- push-key (ffi/bind library "otui_test_key" '(pointer utf8 bool bool) 'bool))
+(def- push-key (ffi/bind library "otui_test_key" '(pointer utf8 bool bool) 'bool #t))
 
-(def- push-text (ffi/bind library "otui_test_text" '(pointer pointer) 'bool))
+(def- push-text (ffi/bind library "otui_test_text" '(pointer pointer) 'bool #t))
 
-(def- push-wheel (ffi/bind library "otui_test_wheel" '(pointer float float float) 'bool))
+(def- push-wheel (ffi/bind library "otui_test_wheel" '(pointer float float float) 'bool #t))
 
-(def- push-quit (ffi/bind library "otui_test_quit" '() 'bool))
+(def- push-quit (ffi/bind library "otui_test_quit" '() 'bool #t))
 
 (def (key! context name down? . options)
   (let ((options (if (null? options)
@@ -32,9 +32,9 @@
 (def (quit!)
   (sdl/check (push-quit)))
 
-(def- push-resize (ffi/bind library "otui_test_resize" '(pointer int int) 'bool))
+(def- push-resize (ffi/bind library "otui_test_resize" '(pointer int int) 'bool #t))
 
-(def- push-pointer (ffi/bind library "otui_test_pointer" '(pointer float float bool) 'bool))
+(def- push-pointer (ffi/bind library "otui_test_pointer" '(pointer float float bool) 'bool #t))
 
 (def (resize! context width height)
   (sdl/check (push-resize (get context :window) width height)))
@@ -42,7 +42,7 @@
 (def (pointer! context x y down?)
   (sdl/check (push-pointer (get context :window) x y down?)))
 
-(def- set-visible (ffi/bind library "otui_test_visible" '(pointer bool) 'bool))
+(def- set-visible (ffi/bind library "otui_test_visible" '(pointer bool) 'bool #t))
 
 (def (visible! context visible?)
   (sdl/check (set-visible (get context :window) visible?)))

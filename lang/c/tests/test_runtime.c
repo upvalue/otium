@@ -142,6 +142,10 @@ static void test_immediate_values(void) {
   check(ot_value_type(ot_null) == OT_TYPE_NULL, "empty-list type");
   check(ot_value_type(ot_true) == OT_TYPE_BOOLEAN, "true type");
   check(ot_value_type(ot_false) == OT_TYPE_BOOLEAN, "false type");
+  check(ot_value_type(ot_make_char(0x10ffff)) == OT_TYPE_CHAR, "char type");
+  check(ot_char_value(ot_make_char(0x3bb)) == 0x3bb, "char round trip");
+  check(!ot_char_valid(0xd800) && !ot_char_valid(0x110000), "char validity");
+  check(ot_value_type(ot_eof) == OT_TYPE_EOF, "eof type");
   for (intptr_t value = -1000; value <= 1000; value++) {
     otv encoded = ot_make_int(value);
     if (!ot_is_int(encoded) || ot_get_int(encoded) != value) {

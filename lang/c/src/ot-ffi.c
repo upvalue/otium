@@ -1103,7 +1103,9 @@ done:
 }
 
 static otv n_bind(ots* s, otv* a, int n) {
-  ARITY(4, "bind");
+  ARITY(5, "bind");
+  if (a[4] != ot_true && a[4] != ot_false)
+    return fail(s, "bind", "type", "expected collection safety boolean");
   library* l = ext(a[0], ctx(s)->library_type);
   if (!l) return fail(s, "bind", "type", "expected library");
   int result = call_kind(a[3]);

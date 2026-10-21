@@ -1,0 +1,23 @@
+;; libghostty-vt bindings: layouts, text, colours, cursor and write_pty replies.
+(require manse.ghostty :as g)
+(require otium.test :refer (check report))
+
+(g/load!)
+(check 5 (g/check-layouts!))
+(check #t (string? (get (g/build-info) :version)))
+
+(def t (g/new 10 3))
+(g/write! t "Hi \x1b;[31mred\x1b;[0m λ")
+(g/update! t)
+(check '(10 3) (g/size t))
+(check '(8 0) (g/cursor t))
+(check '("Hi red λ  " "          " "          ") (apply list (g/text t)))
+(let ((r (get (get (g/grid t) 0) 3)))
+  (check '(114) (r :codepoints))
+  (check '(204 102 102) (r :fg))
+  (check nil (r :bg)))
+;; Cursor position report: ESC [ 1 ; 9 R
+(g/write! t "\x1b;[6n")
+(check '(27 91 49 59 57 82) (apply list (t :replies)))
+(g/free! t)
+(report "ghostty")

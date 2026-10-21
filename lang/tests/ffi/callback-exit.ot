@@ -2,7 +2,7 @@
 ;; this prints "before", not "after", and exits 3.
 (def lib (ffi/open-library (list fixture-path)))
 
-(def call-n (ffi/bind lib "call_n" '(callback-pointer int) 'int))
+(def call-n (ffi/bind lib "call_n" '(callback-pointer int) 'int #t))
 
 (call-n
   (ffi/callback '(int)

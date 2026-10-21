@@ -435,7 +435,7 @@
     ]
   },
   "get": {
-    "text": "(get collection key [default])\nLook up a table key or an array/string index. Missing entries and nil collections return default (nil if omitted). String indexing returns a one-character string.",
+    "text": "(get collection key [default])\nLook up a table key or an array/string index. Missing entries and nil collections return default (nil if omitted). String indexing returns a char.",
     "runtimes": [
       "c",
       "chez"
@@ -1298,6 +1298,181 @@
   },
   "class-subtype?": {
     "text": "(class-subtype? child parent)\nTest whether child is parent or descends from it through abstract parents. Both arguments must be class descriptors.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "char?": {
+    "text": "(char? value)\nTest whether value is a char.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "char->integer": {
+    "text": "(char->integer char)\nThe Unicode code point of char.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "integer->char": {
+    "text": "(integer->char n)\nThe char with code point n; raise an error for surrogates and values above #x10FFFF.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "char-upcase": {
+    "text": "(char-upcase char)\nUppercase an ASCII letter; other chars are returned unchanged on C.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "char-downcase": {
+    "text": "(char-downcase char)\nLowercase an ASCII letter; other chars are returned unchanged on C.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "char-alphabetic?": {
+    "text": "(char-alphabetic? char)\nTest for a letter. ASCII-only on C.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "char-numeric?": {
+    "text": "(char-numeric? char)\nTest for a decimal digit. ASCII-only on C.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "char-whitespace?": {
+    "text": "(char-whitespace? char)\nTest for whitespace. ASCII-only on C.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "string": {
+    "text": "(string char ...)\nBuild a string from chars.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "string->list": {
+    "text": "(string->list string)\nA list of the chars in string.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "list->string": {
+    "text": "(list->string list)\nBuild a string from a list of chars.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "string-ref": {
+    "text": "(string-ref string k)\nThe char at code point index k; raise an error when out of range. O(k) on C, which stores strings as UTF-8.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "eof-object": {
+    "text": "(eof-object)\nThe end-of-file object.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "eof-object?": {
+    "text": "(eof-object? value)\nTest whether value is the end-of-file object.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "bytevector": {
+    "text": "(bytevector byte ...)\nCreate a fresh mutable bytevector. Each byte must be an exact integer from 0 to 255.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "bytevector?": {
+    "text": "(bytevector? value)\nTest whether value is a bytevector.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "make-bytevector": {
+    "text": "(make-bytevector length [fill])\nCreate a bytevector of non-negative length, filled with fill (default 0). Fill must be a byte from 0 to 255.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "bytevector-length": {
+    "text": "(bytevector-length bytes)\nReturn the number of bytes.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "bytevector-u8-ref": {
+    "text": "(bytevector-u8-ref bytes index)\nReturn the byte at index. Raise an error for an invalid index.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "bytevector-u8-set!": {
+    "text": "(bytevector-u8-set! bytes index byte)\nSet the byte at index and return nil. Reject invalid indexes and values outside 0 to 255.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "bytevector-copy": {
+    "text": "(bytevector-copy bytes [start [end]])\nCopy the half-open byte range into a fresh bytevector. Defaults to the whole bytevector.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "bytevector-copy!": {
+    "text": "(bytevector-copy! to at from [start [end]])\nCopy a half-open range from from into to at byte index at. Overlapping ranges are supported. Return nil.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "bytevector-append": {
+    "text": "(bytevector-append bytes ...)\nConcatenate bytevectors into a fresh bytevector.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "utf8->string": {
+    "text": "(utf8->string bytes [start [end]])\nDecode a half-open byte range as UTF-8. Invalid input raises decode-error with the absolute byte offset in :position.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "string->utf8": {
+    "text": "(string->utf8 text [start [end]])\nEncode a half-open character range as UTF-8 in a fresh bytevector. Defaults to the whole string.",
     "runtimes": [
       "c",
       "chez"

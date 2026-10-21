@@ -1,9 +1,9 @@
 ;; Status publishing uses libc; source reads use the common file API.
 (def host-libc (ffi/open-library host-libc-names))
 
-(def host-fopen (ffi/bind host-libc "fopen" '(utf8 utf8) 'pointer))
+(def host-fopen (ffi/bind host-libc "fopen" '(utf8 utf8) 'pointer #t))
 
-(def host-fclose (ffi/bind host-libc "fclose" '(pointer) 'int))
+(def host-fclose (ffi/bind host-libc "fclose" '(pointer) 'int #t))
 
 (def source-text read-file)
 
@@ -56,9 +56,9 @@
           (newline)))))
 
 ;; Status is optional and published atomically, after each completed frame.
-(def host-fputs (ffi/bind host-libc "fputs" '(utf8 pointer) 'int))
+(def host-fputs (ffi/bind host-libc "fputs" '(utf8 pointer) 'int #t))
 
-(def host-rename (ffi/bind host-libc "rename" '(utf8 utf8) 'int))
+(def host-rename (ffi/bind host-libc "rename" '(utf8 utf8) 'int #t))
 
 (def (frame-status! frames window renderer)
   (and status-path

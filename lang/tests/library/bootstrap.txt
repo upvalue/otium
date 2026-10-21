@@ -5,7 +5,7 @@ get-in-list-path: 8
 get-in-default: 9
 get-in-empty-path: 42
 get-in-nil-path: 42
-get-in-allocating-path: a
+get-in-string-path: b
 get-in-improper: caught-error
 documented-core-inventory: #t
 def: 42

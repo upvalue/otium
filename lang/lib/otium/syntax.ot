@@ -2,7 +2,8 @@
 (require otium.reader)
 
 ;; Source trees for the formatter and linter. Each node is a table with a
-;; :kind of :list, :array, :table, :prefix, :atom, :string or :comment.
+;; :kind of :list, :array, :table, :bytevector, :prefix, :atom, :string or
+;; :comment.
 ;; Containers hold :children, which include comments; a :prefix node holds
 ;; its quoted form as :child. Every node records the :line and :column of its
 ;; first token, counted from zero, and :newlines, the number of line breaks
@@ -13,6 +14,7 @@
   (cond
     ((equal? text "(") :list)
     ((equal? text "[") :array)
+    ((equal? text "#u8(") :bytevector)
     (else :table)))
 
 (def- (node kind token)

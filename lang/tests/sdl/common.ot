@@ -2,7 +2,7 @@
 
 (def fixture (ffi/open-library (list fixture-path)))
 
-(def fixture-poll (ffi/bind fixture "fixture_poll" '(pointer) 'bool))
+(def fixture-poll (ffi/bind fixture "fixture_poll" '(pointer) 'bool #t))
 
 (def event (ffi/alloc SDL_Event 1))
 

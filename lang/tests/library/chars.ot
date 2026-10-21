@@ -1,0 +1,109 @@
+(require otium.test :refer (check fails? report))
+
+; Characters, the EOF object and string indexing (specs/io.md).
+
+(check :char (type #\a))
+(check #t (char? #\a))
+(check #f (char? "a"))
+(check #t (eq? #\a (integer->char 97)))
+(check #t (equal? #\λ (integer->char 955)))
+(check 128578 (char->integer #\🙂))
+(check #t (fails? (fn () (integer->char 55296))))
+(check #t (fails? (fn () (integer->char 1114112))))
+(check #t (fails? (fn () (integer->char -1))))
+(check #t (fails? (fn () (char->integer "a"))))
+
+; repr uses the named form where there is one; display is the char itself
+(def (repr value)
+  (let ((s (str [value]))) (substring s 1 (- (string-length s) 1))))
+
+(check "#\\a #\\space #\\newline #\\tab #\\return #\\nul #\\x7f #\\x1b #\\( #\\é"
+       (string-join " "
+                    (map repr
+                         (list #\a
+                               #\space
+                               #\newline
+                               #\tab
+                               #\return
+                               #\nul
+                               (integer->char 127)
+                               (integer->char 27)
+                               #\(
+                               #\é))))
+(check "#\\x" (repr #\x))
+(check "#<eof>" (repr (eof-object)))
+(check "abc" (str #\a "bc"))
+(check "a-b" (string-join "-" (list #\a #\b)))
+(check "λ" (buffer->string (buffer #\λ)))
+
+; comparisons and classes
+(check #t (char=? #\a #\a #\a))
+(check #f (char=? #\a #\b))
+(check #t (char<? #\a #\b #\c))
+(check #f (char<? #\a #\a))
+(check #t (char<=? #\a #\a #\b))
+(check #t (char>? #\c #\b))
+(check #t (char>=? #\c #\c))
+(check #t (fails? (fn () (char<? #\a "b"))))
+(check #\A (char-upcase #\a))
+(check #\a (char-downcase #\A))
+(check #\1 (char-upcase #\1))
+(check #t (char-alphabetic? #\z))
+(check #f (char-alphabetic? #\1))
+(check #t (char-numeric? #\7))
+(check #f (char-numeric? #\x))
+(check #t (char-whitespace? #\tab))
+(check #f (char-whitespace? #\a))
+(check 7 (digit-value #\7))
+(check nil (digit-value #\a))
+
+; strings index by code point and return chars
+(check #\é (get "aé🙂" 1))
+(check #\🙂 (get "aé🙂" 2))
+(check nil (get "abc" 3))
+(check nil (get "abc" -1))
+(check #\a (first "abc"))
+(check #\c (last "abc"))
+(check #\b (nth "abc" 1))
+(check nil (first ""))
+(check nil (last ""))
+(check nil (nth "abc" 9))
+(check #\c (string-ref "abc" 2))
+(check #t (fails? (fn () (string-ref "abc" 3))))
+(check "aé🙂" (string #\a #\é #\🙂))
+(check "" (string))
+(check #t (fails? (fn () (string #\a "b"))))
+(check '(#\a #\é #\🙂) (string->list "aé🙂"))
+(check '() (string->list ""))
+(check "xy" (list->string '(#\x #\y)))
+(check #t (fails? (fn () (list->string '(1)))))
+
+; chars are table keys and sort by code point
+(check 1 ({#\a 1} #\a))
+(check '(#\a #\b #\λ) (sort '(#\λ #\b #\a)))
+(check #t (fails? (fn () (sort (list #\a "b")))))
+
+; the EOF object
+(check :eof (type (eof-object)))
+(check #t (eof-object? (eof-object)))
+(check #f (eof-object? nil))
+(check #t (eq? (eof-object) (eof-object)))
+(check "#<eof>" (str (eof-object)))
+(check #t
+       (if (eof-object)
+           #t
+           #f))
+
+; chars dispatch as Character
+(defgeneric (describe-value value))
+
+(defmethod (describe-value (c Character))
+  :character)
+
+(defmethod (describe-value (s String))
+  :string)
+
+(check :character (describe-value #\a))
+(check :string (describe-value "a"))
+
+(report "library chars")

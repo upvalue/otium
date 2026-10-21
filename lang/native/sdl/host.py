@@ -39,7 +39,7 @@ def bootstrap(runtime, manifest=DEFAULT_MANIFEST):
     prefix += '(def (sdl-verify-layouts!)\n' + '\n'.join(checks) + ')\n'
     math_names = '("/usr/lib/libSystem.B.dylib")' if platform.system() == 'Darwin' else '("libm.so.6" "libm.so")'
     prefix += "(def sdl-math (ffi/open-library '" + math_names + "))\n"
-    prefix += "(def sin (ffi/bind sdl-math \"sin\" '(double) 'double))\n(def cos (ffi/bind sdl-math \"cos\" '(double) 'double))\n"
+    prefix += "(def sin (ffi/bind sdl-math \"sin\" '(double) 'double #f))\n(def cos (ffi/bind sdl-math \"cos\" '(double) 'double #f))\n"
     return prefix + (HERE/'bindings.ot').read_text() + (HERE/'canvas.ot').read_text()
 
 def command(runtime, script):

@@ -1,4 +1,7 @@
 ;; Calling back from another thread must fail with an error, not run Otium code.
 (def lib (ffi/open-library (list fixture-path)))
 
-((ffi/bind lib "call_on_thread" '(callback-pointer) 'void) (ffi/callback '() 'void (fn () nil)))
+;; A cached plain wrapper must not be reused for a collect-safe binding.
+(def plain (ffi/bind lib "call_on_thread" '(callback-pointer) 'void #f))
+
+((ffi/bind lib "call_on_thread" '(callback-pointer) 'void #t) (ffi/callback '() 'void (fn () nil)))

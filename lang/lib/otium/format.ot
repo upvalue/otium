@@ -74,7 +74,7 @@ parameter list, :always to always break any body, or :never."
 
 (def- (closing node)
   (cond
-    ((eq? (node :kind) :list) ")")
+    ((or (eq? (node :kind) :list) (eq? (node :kind) :bytevector)) ")")
     ((eq? (node :kind) :array) "]")
     (else "}")))
 

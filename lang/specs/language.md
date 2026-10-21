@@ -63,8 +63,9 @@ An atom token is classified in this order:
 1. `nil` is the nil value.
 2. `#t`, `#true`, `true` are boolean true; `#f`, `#false`, `false` are
    boolean false.
-3. Any other token starting with `#` is a read error. The `#` prefix is
-   reserved.
+3. `#\` starts a character literal (1.4). `#u8(` opens a bytevector
+   constructor, read as `(bytevector ...)`. Other tokens starting with `#`
+   are read errors. The `#` prefix is reserved.
 4. `:name` is the keyword `name` (any non-empty run of atom characters).
    A bare `:` is a read error.
 5. A token that *starts numerically* -- optionally signed (`+`/`-`), then a
@@ -86,6 +87,12 @@ reader produces an ordinary symbol.
 `"..."` with escapes `\n` `\t` `\r` `\0` `\e` (escape, U+001B) `\"` `\\`.
 Any other escape is a read error. Strings may span lines. Strings are
 immutable sequences of Unicode characters (code points).
+
+A character literal is `#\` followed by one character, which is taken even
+when it is a delimiter (`#\(`, `#\ `), or by a name: `#\space`,
+`#\newline`, `#\tab`, `#\return`, `#\nul`, or `#\x` and hex digits for a
+Unicode scalar value (`#\x41`). Names are case-sensitive. An unknown name, a
+surrogate or a value above `#x10FFFF` is a read error.
 
 ### 1.5 Quote sugar
 
@@ -126,8 +133,10 @@ symbol.
 | `float` | `3.5`, `3.0` | -- | IEEE 754 double |
 | `symbol` | `foo` | -- | |
 | `keyword` | `:foo` | -- | self-evaluating |
+| `char` | `#\a` | -- | one Unicode scalar value; named form for space, newline, tab, return, nul; `#\x7f` for other control chars |
 | `string` | `"hi"` | -- | Unicode; indexed and measured by code point |
 | `pair` | `(1 . 2)` | yes | mutable with `set-car!` / `set-cdr!`; cycles are rejected |
+| `bytevector` | `#u8(1 2)` | yes | fixed-length byte sequence; literal evaluates a constructor call |
 | `array` | `[1 2]` | yes | growable vector |
 | `table` | `{:a 1}` | yes | insertion-ordered map, arbitrary keys |
 | `buffer` | `#<buffer "…">` | yes | mutable string builder |
@@ -135,6 +144,7 @@ symbol.
 | `macro` | `#<macro name>` | -- | |
 | `param` | `#<param name>` | -- | dynamically-scoped cell (section 9) |
 | `restart` | `#<restart name>` | -- | active recovery point (8.5); identity compare |
+| `eof` | `#<eof>` | -- | the end-of-file object, `(eof-object)`; truthy |
 
 `(type v)` returns the type name above as a keyword.
 
@@ -192,14 +202,14 @@ Three notions, coarsest to finest:
   Arguments must be numbers.
 - **`equal?`** -- deep structural equality for pairs and immutable data
   (pairs recursively, strings, symbols, keywords, numbers *of the same
-  type*), identity for arrays, tables, buffers, and functions. Array identity
+  type*, chars), identity for arrays, bytevectors, tables, buffers, and functions. Array identity
   is stable across GC and is unchanged by mutation.
   Type-strict: `(equal? 1 1.0)` is `#f`, and `nil`, `()`, `#f` are all
   distinct. For the benefit of table keys, `NaN` equals `NaN` and `0.0`
   equals `-0.0`.
 - **`eq?`** -- identity: pointer identity for pairs, strings, and all
   mutable heap objects; same as `equal?` for immediates (numbers,
-  booleans, `nil`, `()`). Symbols and keywords are interned, so `eq?`
+  booleans, chars, `nil`, `()`, the EOF object). Symbols and keywords are interned, so `eq?`
   on equal ones is `#t`. Two equal strings are `eq?` only when they are
   the same object; whether an implementation ever shares string objects
   (equal literals, say) is unspecified, so compare strings with
@@ -217,9 +227,9 @@ is an error. This keeps a stored key's structural hash stable.
 
 Only numbers order under `<` `>` `<=` `>=` (mixed int/float compares
 numerically). `sort`/`sort-by` additionally order strings, symbols, and
-keywords lexicographically, but the keys in one sort must all be of one
-class (numbers / strings / symbols / keywords); mixing classes is an
-error. Sorting is stable.
+keywords lexicographically and chars by code point, but the keys in one sort
+must all be of one class (numbers / strings / symbols / keywords / chars);
+mixing classes is an error. Sorting is stable.
 
 ### 2.6 Printed representations
 
@@ -231,8 +241,8 @@ Every value has two renderings:
   shortest decimal that reads back to the same IEEE 754 value. Non-finite
   floats have the canonical representations `nan`, `+inf`, and `-inf`.
 - **display** (used by `display`/`print`/`println`/`str`): identical
-  except strings and buffers render as their raw characters, recursively
-  inside collections.
+  except strings, buffers and chars render as their raw characters at top
+  level. Inside collections they keep their repr.
 
 ### 2.7 Complexity guarantees
 
@@ -897,7 +907,8 @@ to float.
 
 Type predicates, each `(p x)` → bool: `nil?`, `null?` (empty list),
 `boolean?`, `int?`, `float?`, `number?` (int or float), `symbol?`,
-`keyword?`, `string?`, `pair?`, `array?`, `table?`, `buffer?`, `macro?`,
+`keyword?`, `char?`, `string?`, `pair?`, `array?`, `table?`, `buffer?`, `macro?`,
+`eof-object?`,
 `procedure?` (applicable function), `list?` (proper list: `()` or a
 nil-terminated pair chain).
 
@@ -939,12 +950,12 @@ Whole-sequence traversal requires proper lists. `for-each`, `apply`,
 
 | form | behavior |
 |---|---|
-| `(first seq)` | First element or `nil`. On a pair, the car; on a string, the first character as a string or `nil`. |
+| `(first seq)` | First element or `nil`. On a pair, the car; on a string, the first char or `nil`. |
 | `(rest seq)` | All but the first; kind-preserving; empty/`nil` is `()`. On a pair, the cdr. |
 | `(second seq)` / `(third seq)` | `(nth seq 1)` / `(nth seq 2)`. |
-| `(last seq)` | Last element or `nil`. |
-| `(nth seq i)` | Element at 0-based `i`, or `nil` out of range. |
-| `(count coll)` → int | Like `length` but `nil` counts as 0; accepts sequences, tables, strings. |
+| `(last seq)` | Last element or `nil`. Also accepts strings. |
+| `(nth seq i)` | Element at 0-based `i`, or `nil` out of range. Also accepts strings. |
+| `(count coll)` → int | Like `length` but `nil` counts as 0; accepts sequences, tables, strings, bytevectors. |
 | `(map f seq)` | Kind-preserving; applies `f` to each element in order. |
 | `(filter pred seq)` | Kind-preserving; keeps elements where `pred` is truthy. |
 | `(reduce f init seq)` | Left fold: `(f acc elem)`. |
@@ -964,9 +975,9 @@ Whole-sequence traversal requires proper lists. `for-each`, `apply`,
 |---|---|
 | `(array x…)` → array | The `[...]` constructor. |
 | `(table k v …)` → table | The `{...}` constructor; odd argument count errors; `nil` values delete (2.2). |
-| `(get coll k [default])` | Nil-tolerant lookup: table by key; array or string by int index (other key types miss); `nil` coll is a miss. Misses yield `default` or `nil`. Other types error. |
+| `(get coll k [default])` | Nil-tolerant lookup: table by key; array, bytevector, or string by int index (other key types miss); `nil` coll is a miss. Misses yield `default` or `nil`. Other types error. A string element is a char. |
 | `(get-in coll path [default])` | `get` folded over a sequence of keys. |
-| `(put! coll k v …)` → coll | Mutates in place. Tables: insert, or delete on `nil` value. Arrays: `k` must be an in-range int index (no growth). Multiple k/v pairs allowed. |
+| `(put! coll k v …)` → coll | Mutates in place. Tables: insert, or delete on `nil` value. Arrays: `k` must be an in-range int index (no growth). Bytevectors also require an in-range int index and an exact integer byte from 0 to 255. Multiple k/v pairs allowed. |
 | `(push! arr x…)` → arr | Append to an array. |
 | `(pop! arr)` | Remove and return the last element, or `nil` when empty. |
 | `(update! coll k f args…)` → coll | `(put! coll k (f (get coll k) args…))`. |
@@ -977,6 +988,9 @@ Whole-sequence traversal requires proper lists. `for-each`, `apply`,
 | `(merge t…)` → table | New table, left to right; `nil` arguments skipped; live entries in later tables update matching keys. |
 | `(copy coll)` | Shallow copy of an array or table; `(copy nil)` is `nil`. |
 
+Bytevector constructors, copying, and UTF-8 conversions are described in
+[the I/O spec](io.md#bytevectors). Bytevectors dispatch as `Bytevector`.
+
 ### 10.6 Strings, buffers, names
 
 All positions are in characters (code points).
@@ -986,6 +1000,9 @@ All positions are in characters (code points).
 | `(str x…)` → string | Concatenated display forms; `(str)` is `""`. |
 | `(string-append s…)` → string | Strict: strings only. |
 | `(string-length s)` → int | |
+| `(string c…)` → string | Build a string from chars. |
+| `(string-ref s k)` → char | Like `get`, but out of range is an error. O(k) where strings are UTF-8 (2.7). |
+| `(string->list s)` / `(list->string l)` | Convert to and from a list of chars. |
 | `(substring s start [end])` → string | Indices clamped to `[0, length]`; `end` < `start` yields `""`. |
 | `(string-split s [sep])` → array | On the literal separator (non-empty), or on whitespace runs with none. |
 | `(string-join sep seq)` → string | Joins display forms. |
@@ -1001,6 +1018,18 @@ All positions are in characters (code points).
 | `(buffer [x])` → buffer | Mutable string builder, optionally seeded with `x`'s display form. |
 | `(buffer-push! b x…)` → b | Append display forms. |
 | `(buffer->string b)` → string | Freeze; the buffer remains usable. |
+
+Characters:
+
+| form | behavior |
+|---|---|
+| `(char->integer c)` → int | The code point. |
+| `(integer->char n)` → char | Errors on surrogates, negative values and values above `#x10FFFF`. |
+| `(char=? c c…)` `(char<? …)` `(char<=? …)` `(char>? …)` `(char>=? …)` → bool | Compare code points. |
+| `(char-upcase c)` / `(char-downcase c)` → char | May be ASCII-only (Appendix A). |
+| `(char-alphabetic? c)` `(char-numeric? c)` `(char-whitespace? c)` → bool | May be ASCII-only (Appendix A). |
+| `(digit-value c)` | 0 to 9 for an ASCII decimal digit, else `nil`. |
+| `(eof-object)` | The EOF object. |
 
 ### 10.7 Output
 
@@ -1089,7 +1118,7 @@ Params are made and bound by the special forms `defparam` and
   bounded.
 - **Table iteration order** is insertion order everywhere (printing,
   `keys`, `values`, `merge`, `group-by`, …).
-- Unicode case mapping and whitespace classification may be
+- Unicode case mapping and character classification may be
   ASCII-conservative, but lengths, indexing, and `substring` must be
   code-point correct.
 - Float printing: shortest round-trip form, with integral floats keeping

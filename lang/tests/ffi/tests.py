@@ -20,12 +20,12 @@ def math(t):
 
 @test('ffi', runtimes=BOTH)
 def fixture(t):
-    ffi(t, 'tests/ffi/common.ot', stdout='ffi: 203 checks passed\n')
+    ffi(t, 'tests/ffi/common.ot', stdout='ffi: 217 checks passed\n')
 
 
 @test('ffi callbacks', runtimes=BOTH)
 def callbacks(t):
-    ffi(t, 'tests/ffi/callbacks.ot', t.scratch, paths=[t.scratch], stdout='ffi callbacks: 42 checks passed\n')
+    ffi(t, 'tests/ffi/callbacks.ot', t.scratch, paths=[t.scratch], stdout='ffi callbacks: 51 checks passed\n')
 
 
 @test('ffi callback exit', runtimes=BOTH)

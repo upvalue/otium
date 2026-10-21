@@ -11,14 +11,32 @@
 
 (def other (ffi/open-library (list other-path)))
 
-(check 17 ((ffi/bind lib "fixture_id" '() 'int)))
-(check 29 ((ffi/bind other "fixture_id" '() 'int)))
+(check 17 ((ffi/bind lib "fixture_id" '() 'int #t)))
+(check 29 ((ffi/bind other "fixture_id" '() 'int #t)))
 (check #t (ffi/has-symbol? lib "echo_bool"))
 (check #f (ffi/has-symbol? lib "missing_symbol"))
-(check 'symbol (reason (fn () (ffi/bind lib "missing_symbol" '() 'int))))
+(check 'symbol (reason (fn () (ffi/bind lib "missing_symbol" '() 'int #t))))
 (check 'load (reason (fn () (ffi/open-library '("/otium/no-such-library")))))
 
-(def bool-call (ffi/bind lib "echo_bool" '(bool) 'bool))
+;; Collection safety is explicit and strictly boolean.
+(for-each (fn (flag)
+            (check 'type (reason (fn () (ffi/bind lib "fixture_id" '() 'int flag)))))
+          (list nil 0 1 'true "false"))
+(check #t (try (begin (ffi/bind lib "fixture_id" '() 'int) #f)
+              (catch (error? c) #t)))
+(check #t
+       (try (begin (eval '(ffi/defbindings missing-flag load-missing!
+                            (identity "fixture_id" () int))) #f)
+            (catch (error? c) #t)))
+(check 'type
+       (reason (fn () (eval '(ffi/defbindings lib load-invalid!
+                              (identity "fixture_id" () int 1))))))
+(for-each (fn (flag)
+            (check 17 ((ffi/bind lib "fixture_id" '() 'int flag)))
+            (check -7 ((ffi/bind lib "echo_int" '(int) 'int flag) -7)))
+          '(#f #t #f))
+
+(def bool-call (ffi/bind lib "echo_bool" '(bool) 'bool #t))
 
 (check #t (bool-call #t))
 (check #f (bool-call #f))
@@ -26,7 +44,7 @@
 (check 'arity (reason (fn () (bool-call))))
 (check 'arity (reason (fn () (bool-call #t #f))))
 
-(def byte-call (ffi/bind lib "echo_u8" '(u8) 'u8))
+(def byte-call (ffi/bind lib "echo_u8" '(u8) 'u8 #t))
 
 (check 255 (byte-call 255))
 (check 'range (reason (fn () (byte-call 256))))
@@ -34,19 +52,19 @@
 (check 'type (reason (fn () (byte-call 1.0))))
 (check 'type (reason (fn () (byte-call #t))))
 
-(def signed-call (ffi/bind lib "echo_i8" '(i8) 'i8))
+(def signed-call (ffi/bind lib "echo_i8" '(i8) 'i8 #t))
 
 (check -128 (signed-call -128))
 (check 127 (signed-call 127))
 (check 'range (reason (fn () (signed-call -129))))
 (check 'range (reason (fn () (signed-call 128))))
 
-(def float-call (ffi/bind lib "echo_float" '(float) 'float))
+(def float-call (ffi/bind lib "echo_float" '(float) 'float #t))
 
 (check 16777216.0 (float-call 16777217))
 (check 'range (reason (fn () (float-call 1e100))))
 
-(def pointer-call (ffi/bind lib "echo_pointer" '(pointer) 'pointer))
+(def pointer-call (ffi/bind lib "echo_pointer" '(pointer) 'pointer #t))
 
 (check #t (ffi/null? ffi/null))
 (check #f (ffi/null? #f))
@@ -58,21 +76,21 @@
 (check #t (ffi/null? (pointer-call ffi/null)))
 (check 'type (reason (fn () (pointer-call 0))))
 (check 'type (reason (fn () (pointer-call #f))))
-(check #t ((ffi/bind lib "null_callback" '(callback-pointer) 'bool) ffi/null))
+(check #t ((ffi/bind lib "null_callback" '(callback-pointer) 'bool #t) ffi/null))
 
-(def utf8-call (ffi/bind lib "echo_utf8" '(utf8) 'utf8))
+(def utf8-call (ffi/bind lib "echo_utf8" '(utf8) 'utf8 #t))
 
 (check "héllo 🌍" (utf8-call "héllo 🌍"))
 (check "" (utf8-call ""))
 (check #t (ffi/null? (utf8-call ffi/null)))
 (check 'type (reason (fn () (utf8-call #f))))
-(check 'encoding (reason (fn () ((ffi/bind lib "bad_utf8" '() 'utf8)))))
+(check 'encoding (reason (fn () ((ffi/bind lib "bad_utf8" '() 'utf8 #t)))))
 
-(def first ((ffi/bind lib "changing_text" '() 'utf8)))
+(def first ((ffi/bind lib "changing_text" '() 'utf8 #t)))
 
-(check #f ((ffi/bind lib "change_text" '() 'void)))
+(check #f ((ffi/bind lib "change_text" '() 'void #t)))
 (check "first" first)
-(check "second" ((ffi/bind lib "changing_text" '() 'utf8)))
+(check "second" ((ffi/bind lib "changing_text" '() 'utf8 #t)))
 (check 0 (ffi/allocation-count))
 
 (def p (ffi/alloc 'u64 2))
@@ -90,7 +108,7 @@
 (check 'bounds (reason (fn () (ffi/view v 0 9))))
 (check 'type (reason (fn () (ffi/free! v))))
 (check #t (ffi/pointer=? p (pointer-call p)))
-(check 'type (reason (fn () ((ffi/bind lib "null_callback" '(callback-pointer) 'bool) p))))
+(check 'type (reason (fn () ((ffi/bind lib "null_callback" '(callback-pointer) 'bool #t) p))))
 (ffi/set! v 'u64 0 1234)
 (check 1234 (ffi/ref p 'u64 1))
 (ffi/copy! p v 8)
@@ -108,9 +126,9 @@
 
 (def text (ffi/alloc-utf8 "retained λ"))
 
-((ffi/bind lib "retain" '(pointer) 'void) text)
+((ffi/bind lib "retain" '(pointer) 'void #t) text)
 (test-collect)
-(check "retained λ" ((ffi/bind lib "retained_text" '() 'utf8)))
+(check "retained λ" ((ffi/bind lib "retained_text" '() 'utf8 #t)))
 (check "retained λ" (ffi/read-utf8 text 12))
 (check 'bounds (reason (fn () (ffi/read-utf8 text 2))))
 (ffi/free! text)
@@ -147,14 +165,14 @@
 (def slots (ffi/alloc 'pointer 1))
 
 (check #t (ffi/null? (ffi/ref slots 'pointer 0)))
-((ffi/bind lib "pointer_out" '(pointer pointer) 'void) slots slots)
+((ffi/bind lib "pointer_out" '(pointer pointer) 'void #t) slots slots)
 (check #t (ffi/pointer=? slots (ffi/ref slots 'pointer 0)))
 (ffi/free! slots)
 (check 0 (ffi/allocation-count))
 
 (def Point (ffi/define-struct! 'Point '((x double) (y double))))
 
-(def translate (ffi/bind lib "translate" (list Point 'double 'double) Point))
+(def translate (ffi/bind lib "translate" (list Point 'double 'double) Point #t))
 
 (def point (ffi/alloc Point 1))
 
@@ -182,7 +200,7 @@
 
 (def Mixed (ffi/define-struct! 'Mixed '((tag u8) (value double))))
 
-(def mixed-call (ffi/bind lib "mixed" (list Mixed) Mixed))
+(def mixed-call (ffi/bind lib "mixed" (list Mixed) Mixed #t))
 
 (def mixed-input (ffi/alloc Mixed 1))
 
@@ -198,7 +216,7 @@
 
 (def Large (ffi/define-struct! 'Large (list (list 'points (list 'array Point 3)) '(tag u64))))
 
-(def large-call (ffi/bind lib "large" (list Large) Large))
+(def large-call (ffi/bind lib "large" (list Large) Large #t))
 
 (def large-input (ffi/alloc Large 1))
 
@@ -218,7 +236,7 @@
             (let ((t (car entry))
                   (name (car (cdr entry)))
                   (value (car (cdr (cdr entry)))))
-              (let ((f (ffi/bind lib name (list t) t))
+              (let ((f (ffi/bind lib name (list t) t #t))
                     (p (ffi/alloc t 1)))
                 (check value (f value))
                 (ffi/set! p t 0 value)
@@ -241,9 +259,9 @@
             (size-t "echo_size_t" 4611686018427387903)
             (ptrdiff-t "echo_ptrdiff_t" -4611686018427387904)))
 
-(def high-call (ffi/bind lib "high_u64" '() 'u64))
+(def high-call (ffi/bind lib "high_u64" '() 'u64 #t))
 
-(def calls (ffi/bind lib "calls" '() 'int))
+(def calls (ffi/bind lib "calls" '() 'int #t))
 
 (check 0 (calls))
 (if wide-integers?
@@ -253,7 +271,7 @@
 
 (def high-memory (ffi/alloc 'u64 1))
 
-((ffi/bind lib "write_high" '(pointer) 'void) high-memory)
+((ffi/bind lib "write_high" '(pointer) 'void #t) high-memory)
 (if wide-integers?
     (check (- (expt 2 64) 1) (ffi/ref high-memory 'u64 0))
     (check 'range (reason (fn () (ffi/ref high-memory 'u64 0)))))
@@ -267,7 +285,7 @@
 
 (check 8 (ffi/sizeof Choice))
 (check 0 (ffi/offset-of Choice '(i)))
-(check 'signature (reason (fn () (ffi/bind lib "fixture_id" '((array int 2)) 'int))))
+(check 'signature (reason (fn () (ffi/bind lib "fixture_id" '((array int 2)) 'int #t))))
 
 (def interior (ffi/alloc 'u8 3))
 
@@ -290,8 +308,8 @@
 (check "echo_u8" (ffi/error-symbol conversion-condition))
 (check 0 (ffi/error-argument conversion-condition))
 (check 'u8 (ffi/error-expected-type conversion-condition))
-(check 'signature (reason (fn () (ffi/bind lib "fixture_id" '(void) 'int))))
-(check 'signature (reason (fn () (ffi/bind lib "fixture_id" '(long-double) 'int))))
+(check 'signature (reason (fn () (ffi/bind lib "fixture_id" '(void) 'int #t))))
+(check 'signature (reason (fn () (ffi/bind lib "fixture_id" '(long-double) 'int #t))))
 (check 'type (reason (fn () (ffi/alloc 'u8 1.0))))
 (check 'range (reason (fn () (ffi/alloc 'u8 -1))))
 (check 'range (reason (fn () (ffi/alloc 'u64 4611686018427387903))))
@@ -317,7 +335,7 @@
 (def TinyUnion (ffi/define-union! 'TinyUnion '((byte u8) (word u16))))
 
 (def (check-union layout function-name field scalar before delta after)
-  (let ((f (ffi/bind lib function-name (list layout scalar) layout))
+  (let ((f (ffi/bind lib function-name (list layout scalar) layout #t))
         (input (ffi/alloc layout 1)))
     (ffi/field-set! input layout field before)
     (let ((output (f input delta)))
@@ -346,7 +364,7 @@
   (ffi/bind lib
             "union_fp_pressure"
             (list 'double 'double 'double 'double 'double 'double 'double Doubles 'double)
-            Doubles))
+            Doubles #t))
 
 (def fp-input (ffi/alloc Doubles 1))
 
@@ -357,7 +375,7 @@
 (ffi/free! fp-input)
 (ffi/free! fp-output)
 
-(def int-pressure (ffi/bind lib "union_int_pressure" (list 'u64 'u64 'u64 'u64 'u64 'u64 'u64 'u64 Number 'u64) Number))
+(def int-pressure (ffi/bind lib "union_int_pressure" (list 'u64 'u64 'u64 'u64 'u64 'u64 'u64 'u64 Number 'u64) Number #t))
 
 (def int-input (ffi/alloc Number 1))
 
@@ -369,15 +387,15 @@
 (ffi/free! int-input)
 (ffi/free! int-output)
 
-(def high-union ((ffi/bind lib "high_union" '() Number)))
+(def high-union ((ffi/bind lib "high_union" '() Number #t)))
 
-(check 255 ((ffi/bind lib "union_high_byte" (list Number) 'u8) high-union))
+(check 255 ((ffi/bind lib "union_high_byte" (list Number) 'u8 #t) high-union))
 (if wide-integers?
     (check (- (expt 2 64) 1) (ffi/field-ref high-union Number '(integer)))
     (check 'range (reason (fn () (ffi/field-ref high-union Number '(integer))))))
 (ffi/free! high-union)
 
-(def union-layout (ffi/bind lib "union_layout" '(int) 'size-t))
+(def union-layout (ffi/bind lib "union_layout" '(int) 'size-t #t))
 
 (for-each (fn (entry) (check (car (cdr entry)) (union-layout (car entry))))
           (list (list 0 (ffi/sizeof Number))
@@ -395,7 +413,7 @@
 
 (def saved-number Number)
 
-(def saved-number-add (ffi/bind lib "number_add" (list Number 'double) Number))
+(def saved-number-add (ffi/bind lib "number_add" (list Number 'double) Number #t))
 
 (set! Number (ffi/define-union! 'Number '((byte u8) (word u16))))
 (check 2 (ffi/sizeof Number))
@@ -413,11 +431,11 @@
 
 (def ZeroUnion (ffi/define-union! 'ZeroUnion '((byte u8) (empty (array float 0)))))
 
-(check 'signature (reason (fn () (ffi/bind lib "fixture_id" (list ZeroUnion) 'int))))
+(check 'signature (reason (fn () (ffi/bind lib "fixture_id" (list ZeroUnion) 'int #t))))
 (ffi/defbindings bindings-library
                  load-bindings!
-                 (identity-call "fixture_id" () int)
-                 ((private echo-call) "echo_bool" (bool) bool))
+                 (identity-call "fixture_id" () int #f)
+                 ((private echo-call) "echo_bool" (bool) bool #t))
 (check nil identity-call)
 (load-bindings! fixture-path)
 
@@ -428,8 +446,8 @@
 (check #t (echo-call #t))
 (eval '(ffi/defbindings bindings-library
                         load-bindings!
-                        (identity-call "fixture_id" () int)
-                        ((private echo-call) "echo_u8" (u8) u8)))
+                        (identity-call "fixture_id" () int #t)
+                        ((private echo-call) "echo_u8" (u8) u8 #t)))
 (check 17 (live-identity))
 (check 255 (echo-call 255))
 (load-bindings! (list other-path))

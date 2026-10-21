@@ -1,7 +1,7 @@
 (library (otium core)
 ;; This export list is the default vocabulary, independent of Chez additions.
   ;; Names here should exist on C too; Chez representations (vectors,
-  ;; hashtables, bytevectors, chars, continuations) are reached through
+  ;; hashtables, continuations) are reached through
   ;; (require chez).
   (export
     quote quasiquote unquote unquote-splicing if begin set! and or cond else
@@ -15,13 +15,19 @@
     exp log sin cos tan asin acos atan expt
     number? integer? exact? inexact? finite?
     exact inexact number->string
-    not boolean? eq? equal? procedure?
+    not boolean? eq? (rename (ot-equal? equal?)) procedure?
     cons car cdr caar cadr cdar cddr caaar caadr cadar caddr
     cdaar cdadr cddar cdddr cadddr pair? null? list? list length reverse
     list-tail list-ref memq member assq assoc set-car! set-cdr!
     for-each apply
     symbol? symbol->string string->symbol gensym
     string? string-length string=? string<? string>? string<=? string>=? string-append
+    string string-ref string->list list->string
+    char? char->integer integer->char char-upcase char-downcase
+    char-alphabetic? char-numeric? char-whitespace? eof-object eof-object?
+    bytevector? bytevector make-bytevector bytevector-length bytevector-u8-ref
+    bytevector-u8-set! bytevector-copy bytevector-copy! bytevector-append
+    utf8->string string->utf8
     values
     display print println newline write
     (rename (ot-append append) (ot-call otium-call) (ot-unary-call otium-unary-call) (ot-substring substring) (ot-string->number string->number))
@@ -33,7 +39,10 @@
     read-string keyword keyword? keyword->string nil? array array? table table?
     get put! set-applied! push! pop! keys copy update! type)
   (import (except (chezscheme) display newline write if and or cond when unless do not filter exists for-all
-                          length reverse for-each map apply set-car! set-cdr! values)
+                          length reverse for-each map apply set-car! set-cdr! values
+                          bytevector make-bytevector bytevector-copy bytevector-copy!
+                          utf8->string string->utf8)
+          (otium bytevectors)
           (otium truth) (otium reader)
           (rename (otium values) (collection-length length) (collection-reverse reverse)
                   (collection-for-each for-each) (collection-apply apply)
@@ -114,6 +123,12 @@
                        (unless (list? xs) (error 'append "expected proper list" xs)))
                      lists)
        (host:apply append lists)]))
+  ;; Bytevectors compare by identity in Otium, unlike Chez's equal?.
+  (define (ot-equal? a b)
+    (cond [(eq? a b) #t]
+          [(pair? a) (and (pair? b) (ot-equal? (car a) (car b)) (ot-equal? (cdr a) (cdr b)))]
+          [(or (bytevector? a) (bytevector? b)) #f]
+          [else (equal? a b)]))
   (define (int? x) (and (integer? x) (exact? x)))
   (define (float? x) (and (real? x) (inexact? x)))
   (define (ot-number who x)

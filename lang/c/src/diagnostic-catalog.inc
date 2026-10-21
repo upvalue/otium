@@ -11,6 +11,7 @@ static const struct { const char* code; const char* type; const char* message; }
   {"E0008", "read-error", "empty keyword"},
   {"E0009", "read-error", "quote without a value"},
   {"E0010", "read-error", "expected value"},
+  {"E0011", "read-error", "invalid character literal"},
   {"E0101", "syntax-error", "{detail}"},
   {"E0102", "syntax-error", "{detail}"},
   {"E0103", "syntax-error", "{detail}"},

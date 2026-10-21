@@ -82,7 +82,7 @@ Corrected:
 
 Condition type `:read-error`.
 
-Only `#t`, `#true`, `#f` and `#false` start with `#`. Other `#` syntax from Scheme or Clojure, such as `#(...)` vectors, `#{...}` sets, `#_` datum comments and `#\a` characters, is reserved. Use `[...]` for arrays and strings of length one for characters.
+Supported # syntax includes booleans, character literals such as `#\a`, and bytevectors such as `#u8(1 2)`. Other # syntax from Scheme or Clojure, such as `#(...)` vectors, `#{...}` sets and `#_` datum comments, is reserved. Use `[...]` for arrays.
 
 Example:
 
@@ -173,6 +173,24 @@ Corrected:
 Condition type `:read-error`.
 
 The reader expected a value here and found none.
+
+## E0011: invalid character literal
+
+Condition type `:read-error`.
+
+A character literal needs a character, a supported name such as space or newline, or a hexadecimal Unicode scalar. Surrogates and values above U+10FFFF are invalid.
+
+Example:
+
+```lisp
+#\unknown
+```
+
+Corrected:
+
+```lisp
+#\space
+```
 
 ## E0101: malformed special form
 

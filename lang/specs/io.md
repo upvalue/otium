@@ -1,6 +1,7 @@
 # I/O
 
-Draft. Nothing here is implemented yet.
+Draft. Implemented so far, on both runtimes: characters, the EOF object, and bytevectors
+(steps 1–2 of [Order of work](#order-of-work)).
 
 Ports for files, standard streams, strings and bytes, on both runtimes. To
 support them, Otium gains a character type and a bytevector type, and `first`
@@ -56,7 +57,8 @@ Where Otium differs:
 
 End of file is an EOF object, as in R7RS. `(eof-object)` returns it and
 `eof-object?` tests for it. It is truthy, like every value other than `nil` and
-`#f`.
+`#f`. `(type (eof-object))` is `:eof`, it prints as `#<eof>` on both runtimes,
+and it dispatches as `Other`.
 
 ## At a glance
 
@@ -91,6 +93,7 @@ that isn't a surrogate).
 | `(type c)` | `:char` |
 | Equality | immediate, so `eq?` and `equal?` agree |
 | Ordering | `sort` gains chars as a fifth orderable class (2.5), by code point |
+| Class | `Character` |
 
 Functions:
 
@@ -100,14 +103,16 @@ Functions:
 - `(char=? c c…)`, `(char<? c c…)`, `(char<=? …)`, `(char>? …)`, `(char>=? …)`
 - `(char-upcase c)`, `(char-downcase c)`, which may be ASCII-only, like the
   string versions (Appendix A)
-- `(char-alphabetic? c)`, `(char-numeric? c)`, `(char-whitespace? c)`
+- `(char-alphabetic? c)`, `(char-numeric? c)`, `(char-whitespace? c)`, which
+  are ASCII-only on C
 - `(digit-value c)`, giving 0 to 9, or `nil`
 
 Changes to strings:
 
 - `first`, `last`, `nth` and `get` on a string return a char, or `nil` on a
   miss. Today they return a one-character string.
-- `(string-ref s k)` is like `get`, but out of range is an error.
+- `(string-ref s k)` is like `get`, but out of range is an error. It is
+  there for code ported from Scheme; its docstring notes the cost on C.
 - `(string c…)` builds a string from chars.
 - `(string->list s)` and `(list->string l)` convert to and from a list of chars.
 - `str`, `buffer-push!` and `string-join` already use display forms, so chars
@@ -116,8 +121,8 @@ Changes to strings:
   (2.7). For a left-to-right scan, use `open-input-string` and read
   characters. That is O(n) overall.
 
-Before switching `first` and `get`, check which shared code and examples
-depend on them returning strings. Nobody has checked yet.
+Switching `first` and `get` broke only the OTCL example's parser, which
+compared one-character strings, and one leetcode example. Both now use chars.
 
 ### Representation
 
@@ -155,6 +160,10 @@ Functions:
   UTF-8, and `(string->utf8 s [start [end]])`
 - The generic functions `length`, `count`, `get` and `put!` work as they do on
   arrays.
+
+`#u8(...)` reads as a constructor call, `(bytevector ...)`, like arrays and
+tables. Elements are evaluated and each evaluation creates a fresh bytevector.
+Quoted literals produce constructor forms, not bytevector values.
 
 On C, the bytes live inline in a heap object. On Chez, these are Chez
 bytevectors, printed by Otium's printer as `#u8`, not `#vu8`.
@@ -583,11 +592,5 @@ That allocates one string per unescaped run. A port-to-port
 1. Is a task system that can suspend inside a port read likely? If so, the C
    interpreter's native calls need a way to yield, and that should shape the
    C port internals now, even if nothing uses it yet.
-2. Is `close` the right name for the generic? It reads well for ports and
-   memory, less well for locks, where `release` would be clearer.
-3. Should there be `display-to` and `write-to` variants that take the port
+2. Should there be `display-to` and `write-to` variants that take the port
    first, so a printer doesn't need `with-params`?
-4. Should `string-ref` be added at all? It makes an O(n) operation look cheap
-   on C. `get` already covers it.
-5. The `#u8(…)` literal reads as a constant, unlike `[…]` and `{…}`, which
-   read as constructor calls. Is that an acceptable inconsistency?

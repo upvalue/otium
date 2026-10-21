@@ -35,7 +35,7 @@
     "title": "reserved # token",
     "type": "read-error",
     "message": "reserved # token",
-    "explanation": "Only `#t`, `#true`, `#f` and `#false` start with `#`. Other `#` syntax from Scheme or Clojure, such as `#(...)` vectors, `#{...}` sets, `#_` datum comments and `#\\a` characters, is reserved. Use `[...]` for arrays and strings of length one for characters.",
+    "explanation": "Supported # syntax includes booleans, character literals such as `#\\a`, and bytevectors such as `#u8(1 2)`. Other # syntax from Scheme or Clojure, such as `#(...)` vectors, `#{...}` sets and `#_` datum comments, is reserved. Use `[...]` for arrays.",
     "example": "(def v #(1 2 3))",
     "fixed": "(def v [1 2 3])"
   },
@@ -78,6 +78,14 @@
     "explanation": "The reader expected a value here and found none.",
     "example": "",
     "fixed": ""
+  },
+  "E0011": {
+    "title": "invalid character literal",
+    "type": "read-error",
+    "message": "invalid character literal",
+    "explanation": "A character literal needs a character, a supported name such as space or newline, or a hexadecimal Unicode scalar. Surrogates and values above U+10FFFF are invalid.",
+    "example": "#\\unknown",
+    "fixed": "#\\space"
   },
   "E0101": {
     "title": "malformed special form",

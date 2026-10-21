@@ -138,6 +138,9 @@ if ui
     input: 'native/ui/ui-test-config.ot.in')
 endif
 
+# manse, the development environment built on Otium.
+subdir('manse/native')
+
 # Tests. tests/run lists the tests defined in tests.py files, and each runs as
 # tests/run NAME from the source root; the launchers find this build through
 # OTIUM_BUILD. GC stress is opt-in: meson test --setup stress.

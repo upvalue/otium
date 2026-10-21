@@ -198,6 +198,8 @@ frames, capturing the last one to MANSE_CAPTURE. For checking the prototype with
     (put! session :quit? #f)
     (put! session :term (g/new 80 24))
     (put! session :pty (pty/spawn shell (list shell) 80 24))
+    ;; Answers to the shell's queries (device attributes, cursor position) go back to it.
+    (put! (session :term) :on-reply (fn (data len) (pty/write-pointer! (session :pty) data len)))
     (unwind-protect
       (let ((window (ui/open {:title "manse"
                               :width 900

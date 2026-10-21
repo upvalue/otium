@@ -176,8 +176,23 @@ static bool io_terminal(void* data, intptr_t handle) {
   return isatty((int)handle);
 }
 
+static int io_symbolic_link(void* data, const char* path, bool* result) {
+  (void)data;
+  struct stat st;
+  if (lstat(path, &st) < 0) return io_errno();
+  *result = S_ISLNK(st.st_mode);
+  return 0;
+}
+
+static int io_cwd(void* data, char** result) {
+  (void)data;
+  *result = getcwd(NULL, 0);
+  return *result ? 0 : io_errno();
+}
+
 const ot_io_host* ot_platform_io_host(void) {
-  static const ot_io_host host = {io_open,   io_read,   io_write, io_close, io_info,
-                                  io_remove, io_rename, io_mkdir, io_list,  io_terminal};
+  static const ot_io_host host = {io_open, io_read,     io_write,         io_close,
+                                  io_info, io_remove,   io_rename,        io_mkdir,
+                                  io_list, io_terminal, io_symbolic_link, io_cwd};
   return &host;
 }

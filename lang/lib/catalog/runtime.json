@@ -1765,6 +1765,20 @@
       "chez"
     ]
   },
+  "file-symbolic-link?": {
+    "text": "(file-symbolic-link? path)\nTest whether path itself is a symbolic link, including a dangling link.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "current-directory": {
+    "text": "(current-directory)\nReturn the current working directory as an absolute path.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
   "file-info": {
     "text": "(file-info path)\nReturn a table with :type (:file, :directory, or :other), :size in bytes, and :modified in Unix seconds.",
     "runtimes": [

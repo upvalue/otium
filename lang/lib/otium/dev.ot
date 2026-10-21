@@ -128,13 +128,38 @@
 (def (end!)
   (%deadline 0))
 
+(def- (source-forms code)
+  ;; Feed one byte at a time so the reader cannot read ahead past a form's line.
+  (let ((bytes (string->utf8 code))
+        (offset 0)
+        (line 1)
+        (forms []))
+    (with ((port (make-input-port "source"
+                                  {:read (fn (out start _end)
+                                           (if (= offset (bytevector-length bytes))
+                                               (eof-object)
+                                               (let ((byte (get bytes offset)))
+                                                 (put! out start byte)
+                                                 (set! offset (+ offset 1))
+                                                 (when (= byte 10) (set! line (+ line 1)))
+                                                 1)))})))
+          (let loop ()
+            (skip-while " \t\r\n\x0b;\x0c;" port)
+            (cond
+              ((eof-object? (peek-char port)) forms)
+              ((eq? (peek-char port) #\;) (read-line port) (loop))
+              (else (let ((start line)
+                          (form (read port)))
+                      (push! forms {:form form :line start}))
+                    (loop)))))))
+
 (def- (file-namespace code)
   (let ((found #f))
-    (for-each (fn (line)
-                (when (and (not found) (string-starts-with? line "(ns "))
-                  (let ((rest (substring line 4 (string-length line))))
-                    (set! found (string->symbol (string-trim (get (string-split rest ")") 0)))))))
-              (string-split code "\n"))
+    (for-each (fn (entry)
+                (let ((form (entry :form)))
+                  (when (and (not found) (pair? form) (eq? (car form) 'ns) (pair? (cdr form)) (symbol? (cadr form)))
+                    (set! found (cadr form)))))
+              (source-forms code))
     found))
 
 (def- (note-reload! path code)
@@ -304,30 +329,39 @@
 
 (def- (split-name name)
   (let ((text (symbol->string name))
-        (slash #f))
-    (dotimes (i (string-length text))
-      (when (equal? (substring text i (+ i 1)) "/") (set! slash i)))
+        (slash (string-index text "/")))
     (unless slash (error "source: expected a qualified name such as app.view/render" name))
-    (list (string->symbol (substring text 0 slash)) (substring text (+ slash 1) (string-length text)))))
+    (list (symbol (substring text 0 slash)) (substring text (+ slash 1)))))
 
-(def- (defines? line name)
-  (exists (fn (prefix)
-            (and (string-starts-with? line prefix)
-                 (let ((rest (substring line (string-length prefix) (string-length line))))
-                   (or (equal? rest "") (string-starts-with? rest " ") (string-starts-with? rest ")")))))
-          (map (fn (form) (str form name))
-               '("(def " "(def (" "(def- " "(def- (" "(defonce " "(defmacro " "(defclass "))))
+(def- (defines? form name)
+  (and (pair? form)
+       (member (car form)
+               '(def def-
+                  defonce
+                  defmacro
+                  defclass
+                  defparam
+                  defgeneric
+                  defabstract
+                  defmethod))
+       (pair? (cdr form))
+       (let ((target (cadr form)))
+         (equal? name
+                 (str (if (pair? target)
+                          (car target)
+                          target))))))
 
 (def (source name)
-  "Return {:file :line} for the top-level definition of a qualified name, or #f. Lines count from 1 and are read from the file as it is now."
+  "Return {:file :line} for the first top-level definition of a qualified name, or #f. Lines count from 1."
   (let ((parts (split-name name))
         (entry (find (fn (e) (eq? (get e :name) (car parts))) (namespace-entries)))
         (file (and entry (get entry :file #f))))
     (if file
-        (let ((lines (string-split (read-file file) "\n"))
-              (found #f))
-          (dotimes (i (length lines))
-            (when (and (not found) (defines? (get lines i) (cadr parts))) (set! found {:file file :line (+ i 1)})))
+        (let ((found #f))
+          (for-each (fn (node)
+                      (when (and (not found) (defines? (node :form) (cadr parts)))
+                        (set! found {:file file :line (node :line)})))
+                    (source-forms (read-file file)))
           found)
         #f)))
 

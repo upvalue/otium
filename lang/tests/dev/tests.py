@@ -465,3 +465,22 @@ def live_ui(t):
     client.response(9)
     out, err = server.process.communicate(timeout=5)
     t.check(server.process.returncode == 0, 'UI exited', server.process.returncode, out, err)
+
+
+@test('dev source forms', runtimes=BOTH)
+def source_forms(t):
+    server = serve(t)
+    path = server.directory / 'forms.ot'
+    path.write_text('(ns app.forms (:require (otium.extra :as extra)))\n'
+                    '; (def fake 1)\n'
+                    '(defparam setting 1)\n'
+                    '(defabstract Animal)\n'
+                    '(defgeneric (speak animal))\n')
+    c = server.client
+    c.send(1, 'load', path=str(path))
+    t.check_in(':ok #t', c.response(1))
+    for ident, name, line in [(2, 'setting', 3), (3, 'Animal', 4), (4, 'speak', 5)]:
+        c.send(ident, 'eval', code="(dev/source 'app.forms/%s)" % name)
+        t.check_in(':line %d}' % line, c.response(ident))
+    c.send(5, 'eval', code="(dev/source 'app.forms/fake)")
+    t.check_in(':value "#f"', c.response(5))

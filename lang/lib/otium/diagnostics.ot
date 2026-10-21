@@ -1,5 +1,6 @@
 (ns otium.diagnostics)
 (require (otium.diagnostics.catalog :as catalog))
+(require otium.json :as json)
 
 ;; Diagnostics are tables shared by runtime errors and lint warnings. Fields:
 ;; :code and :message; :severity, :error by default or :warning; :span, a
@@ -50,17 +51,6 @@
               (set! i (+ i 1))))))
     (buffer->string out)))
 
-(def- (string-index text part from)
-  ;; The index of part in text at or after from, or nil.
-  (let ((n (string-length part))
-        (limit (- (string-length text) (string-length part)))
-        (found nil)
-        (i from))
-    (while (and (not found) (<= i limit))
-      (when (equal? (substring text i (+ i n)) part) (set! found i))
-      (set! i (+ i 1)))
-    found))
-
 (def (severity-name d)
   (if (eq? (get d :severity :error) :warning)
       "warning"
@@ -90,22 +80,10 @@
       (and (<= 1 line (length lines)) (string-replace (get lines (- line 1)) "\r" "")))
     (catch ((fn (_) #t) _) nil)))
 
-(def- (spaces n)
-  (let ((out (buffer)))
-    (dotimes (_ n)
-      (buffer-push! out " "))
-    (buffer->string out)))
-
-(def- (repeat text n)
-  (let ((out (buffer)))
-    (dotimes (_ (max n 1))
-      (buffer-push! out text))
-    (buffer->string out)))
-
 (def- (snippet! out span label)
   (let ((line (span :line))
         (gutter (string-length (number->string line)))
-        (pad (spaces gutter))
+        (pad (string-repeat " " gutter))
         (text (source-line (span :path) line)))
     (buffer-push! out pad "--> " (location span) "\n")
     (when text
@@ -119,8 +97,8 @@
         (buffer-push! out
                       pad
                       " | "
-                      (spaces (- column 1))
-                      (repeat "^" width)
+                      (string-repeat " " (- column 1))
+                      (string-repeat "^" (max 1 width))
                       (if label
                           (str " " label)
                           "")
@@ -166,9 +144,10 @@
         (code (get d :code)))
     (buffer-push! out (header d) "\n")
     (when span (snippet! out span (get d :label)))
-    (let ((pad (spaces (if span
-                           (string-length (number->string (span :line)))
-                           1))))
+    (let ((pad (string-repeat " "
+                              (if span
+                                  (string-length (number->string (span :line)))
+                                  1))))
       (when (or (pair? notes) help code)
         (when span (buffer-push! out pad " |\n"))
         (for-each (fn (note) (buffer-push! out pad " = note: " note "\n")) notes)
@@ -186,53 +165,25 @@
          (header d)
          "\n")))
 
-(def- (json-string text)
-  (let ((out (buffer "\"")))
-    (for-each (fn (c)
-                (buffer-push! out
-                              (cond
-                                ((equal? c "\"") "\\\"")
-                                ((equal? c "\\") "\\\\")
-                                ((equal? c "\n") "\\n")
-                                ((equal? c "\r") "\\r")
-                                ((equal? c "\t") "\\t")
-                                (else c))))
-              (array-to-list (string-split-chars text)))
-    (buffer-push! out "\"")
-    (buffer->string out)))
-
-(def- (string-split-chars text)
-  (let ((out []))
-    (dotimes (i (string-length text))
-      (push! out (substring text i (+ i 1))))
-    out))
-
-(def- (json-field name value)
-  (str (json-string name)
-       ":"
-       (cond
-         ((string? value) (json-string value))
-         ((number? value) (number->string value))
-         ((array? value) (str "[" (string-join "," (map json-string (array-to-list value))) "]"))
-         ((keyword? value) (json-string (keyword->string value)))
-         (else (json-string (str value))))))
-
 (def (render-json d)
   "Diagnostic d as one line of JSON."
   (let ((span (get d :span))
-        (fields [])
+        (fields {"severity" (severity-name d) "message" (get d :message "error")})
         (help (suggestion-help d)))
-    (push! fields (json-field "severity" (severity-name d)))
-    (when (get d :code) (push! fields (json-field "code" (d :code))))
-    (when (get d :rule) (push! fields (json-field "rule" (d :rule))))
-    (push! fields (json-field "message" (get d :message "error")))
+    (when (get d :code) (put! fields "code" (d :code)))
+    (when (get d :rule)
+      (put! fields
+            "rule"
+            (if (keyword? (d :rule))
+                (keyword->string (d :rule))
+                (str (d :rule)))))
     (when span
-      (for-each (fn (key) (when (get span key) (push! fields (json-field (keyword->string key) (span key)))))
+      (for-each (fn (key) (when (get span key) (put! fields (keyword->string key) (span key))))
                 '(:path :line :column :start :end)))
     (let ((notes (append (frame-notes d) (array-to-list (get d :notes [])))))
-      (when (pair? notes) (push! fields (json-field "notes" (apply array notes)))))
-    (when help (push! fields (json-field "help" help)))
-    (str "{" (string-join "," (array-to-list fields)) "}\n")))
+      (when (pair? notes) (put! fields "notes" (apply array notes))))
+    (when help (put! fields "help" help))
+    (str (json/encode fields) "\n")))
 
 (def (explain code)
   "The catalog entry for code as text, or nil for an unknown code."

@@ -803,8 +803,35 @@ static otv n_list_directory(ots* s, otv* a, int n) {
   return apply_value(s, ((ot_var_obj*)ot_as_obj(variable))->value, &d.result, 1, false);
 }
 
+static otv n_file_symbolic_link(ots* s, otv* a, int n) {
+  const char* op = "file-symbolic-link?";
+  if (need_arity(s, op, n, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  char* path = port_path(s, a[0], op);
+  if (!path) return OT_UNWIND;
+  bool result = false;
+  int reason = s->io_host.symbolic_link
+                 ? s->io_host.symbolic_link(s->io_userdata, path, &result) : OT_IO_OTHER;
+  ot_host_free(path);
+  if (reason == OT_IO_NOT_FOUND || reason == OT_IO_NOT_DIRECTORY) return ot_false;
+  if (reason) return port_error(s, a[0], op, reason);
+  return result ? ot_true : ot_false;
+}
+
+static otv n_current_directory(ots* s, otv* a, int n) {
+  (void)a;
+  if (need_arity(s, "current-directory", n, 0, 0) == OT_UNWIND) return OT_UNWIND;
+  char* path = NULL;
+  int reason = s->io_host.cwd ? s->io_host.cwd(s->io_userdata, &path) : OT_IO_OTHER;
+  if (reason) return port_error(s, ot_nil, "current-directory", reason);
+  otv result = ot_make_string(s, path, strlen(path));
+  ot_host_free(path);
+  return result;
+}
+
 static const nat_def port_natives[] = {{"flush-ports!", n_flush_all},
                                        {"file-exists?", n_file_exists},
+                                       {"file-symbolic-link?", n_file_symbolic_link},
+                                       {"current-directory", n_current_directory},
                                        {"file-info", n_file_info},
                                        {"delete-file", n_delete_file},
                                        {"rename-file", n_rename_file},

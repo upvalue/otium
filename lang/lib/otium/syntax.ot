@@ -71,7 +71,7 @@
                  (if (comment? child)
                      nil
                      child))
-               (array-to-list (node :children)))))
+               (node :children))))
 
 (def (head-name node)
   "The text of a list's head when it is an atom, or nil."
@@ -97,16 +97,10 @@
     (else (let ((line (node :line))
                 (column (node :column)))
             (for-each (fn (c)
-                        (if (equal? c "\n")
+                        (if (eq? c #\newline)
                             (begin
                               (set! line (+ line 1))
                               (set! column 0))
                             (set! column (+ column 1))))
-                      (array-to-list (string-split-chars (node :text))))
+                      (string->list (node :text)))
             (list line column)))))
-
-(def- (string-split-chars text)
-  (let ((out []))
-    (dotimes (i (string-length text))
-      (push! out (substring text i (+ i 1))))
-    out))

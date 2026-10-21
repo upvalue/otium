@@ -1,7 +1,6 @@
 (ns otium.tools.files)
-(require chez)
 
-;; File handling for the formatter and linter. These run on Chez only.
+;; File handling for the formatter and linter.
 
 (def- (directory-files directory)
   (apply append
@@ -9,31 +8,28 @@
                 (let ((path (string-append directory "/" name)))
                   (cond
                     ((string-starts-with? name ".") '())
-                    ((chez/file-directory? path) (directory-files path))
+                    ((file-directory? path) (directory-files path))
                     ((string-ends-with? name ".ot") (list path))
                     (else '()))))
-              (chez/sort chez/string<? (chez/directory-list directory)))))
+              (array-to-list (list-directory directory)))))
 
 (def (source-files paths)
   "Expand paths into a list of files. Directories contribute every .ot file beneath them."
   (apply append
          (map (fn (path)
-                (if (chez/file-directory? path)
+                (if (file-directory? path)
                     (directory-files path)
                     (list path)))
               paths)))
 
 (def (project-file path)
   "The nearest project.ot in a directory containing path, or nil."
-  (let search ((directory (chez/path-parent (if (chez/path-absolute? path)
-                                                path
-                                                (string-append (chez/current-directory) "/" path)))))
+  (let search ((directory (path-parent (if (path-absolute? path)
+                                           path
+                                           (string-append (current-directory) "/" path)))))
     (let ((candidate (string-append directory "/project.ot"))
-          (parent (chez/path-parent directory)))
+          (parent (path-parent directory)))
       (cond
-        ((chez/file-exists? candidate) candidate)
+        ((file-exists? candidate) candidate)
         ((or (equal? parent directory) (equal? parent "")) nil)
         (else (search parent))))))
-
-(def (write-file path text)
-  (chez/call-with-output-file path (fn (port) (chez/display text port)) 'truncate))

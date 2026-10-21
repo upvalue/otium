@@ -27,10 +27,10 @@ setup:
 
 # Format Otium source in place, or list changes with --check
 fmt *args:
-    ./otium fmt {{args}}
+    @if [ "$#" -eq 0 ]; then set -- lib examples benchmarks manse; elif [ "$#" -eq 1 ] && [ "$1" = --check ]; then set -- --check lib examples benchmarks manse; fi; ./otium fmt "$@"
 
 lint *args:
-    @if [ "$#" -eq 0 ]; then set -- lib examples benchmarks; fi; ./otium lint "$@"
+    @if [ "$#" -eq 0 ]; then set -- lib examples benchmarks manse; fi; OTIUM_PATH="{{justfile_directory()}}${OTIUM_PATH:+:$OTIUM_PATH}" ./otium lint "$@"
 
 # Format C sources with clang-format, or check with --check
 format-c *args:

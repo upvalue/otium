@@ -1,10 +1,19 @@
 (ns manse.settings)
 (require otium.process :as process)
-(require chez)
 (require manse.fonts :as fonts)
 
-(defonce options
-  {:font-path #f :font-size 14 :padding 6 :width 900 :height 800 :terminals 2 :poll-ms 16 :background-poll-ms 100})
+(def setting-specs
+  {:font-path {:default #f}
+   :font-size {:default 14 :min 1 :max 256}
+   :padding {:default 6 :min 0 :max 16384}
+   :width {:default 900 :min 1 :max 16384}
+   :height {:default 800 :min 1 :max 16384}
+   :terminals {:default 2 :min 1 :max 16}
+   :poll-ms {:default 16 :min 1 :max 100}
+   :background-poll-ms {:default 100 :min 1 :max 100}
+   :shell {}})
+
+(defonce options (reduce (fn (out key) (put! out key ((setting-specs key) :default))) {} (keys setting-specs)))
 
 (def (configure! changes)
   "Update settings. Font path, size, and padding take effect on the next frame; other settings apply at startup."
@@ -12,38 +21,14 @@
   (set! changes (copy changes))
   (when (contains? changes :font-path) (put! changes :font-path (fonts/resolve (changes :font-path))))
   (for-each (fn (key)
-              (let ((value (changes key)))
-                (unless (memq key
-                              '(:font-path :font-size
-                                           :padding
-                                           :width
-                                           :height
-                                           :terminals
-                                           :poll-ms
-                                           :background-poll-ms
-                                           :shell))
-                  (error "Unknown Manse setting" key))
+              (let ((value (changes key))
+                    (spec (setting-specs key)))
+                (unless spec (error "Unknown Manse setting" key))
                 (cond
-                  ((eq? key :font-path)
-                   (unless (or (eq? value #f)
-                               (and (string? value)
-                                    (> (string-length value) 0)
-                                    (not (string-contains? value "\x0;"))
-                                    (chez/file-exists? value)))
-                     (error "Font path must name an existing font file, or be #f" value)))
+                  ((eq? key :font-path) nil)
                   ((eq? key :shell)
                    (unless (and (string? value) (> (string-length value) 0)) (error "Invalid shell" value)))
-                  (else (unless (and (integer? value)
-                                     (>= value
-                                         (if (eq? key :padding)
-                                             0
-                                             1))
-                                     (<= value
-                                         (cond
-                                           ((eq? key :font-size) 256)
-                                           ((eq? key :terminals) 16)
-                                           ((memq key '(:poll-ms :background-poll-ms)) 100)
-                                           (else 16384))))
+                  (else (unless (and (integer? value) (<= (spec :min) value (spec :max)))
                           (error "Invalid Manse setting" key value))))))
             (keys changes))
   (for-each (fn (key) (put! options key (changes key))) (keys changes))
@@ -57,4 +42,4 @@
   (let ((file (if (null? paths)
                   (path)
                   (car paths))))
-    (when (and file (chez/file-exists? file)) (eval (read-string (str "(begin\n" (read-file file) "\n)"))))))
+    (when (and file (file-exists? file)) (eval (read-string (str "(begin\n" (read-file file) "\n)"))))))

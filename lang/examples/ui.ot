@@ -3,7 +3,6 @@
 (require (otium.cli :as cli))
 (require (otium.ui :as ui))
 (require (otium.ui.native :as native))
-(require (otium.ui.output :as output))
 (require (otium.sdl :as sdl))
 (require (otium.ffi :as ffi))
 
@@ -163,22 +162,22 @@
     (unless (= 0 (+ (native/live-nodes) (native/live-renderers) (ffi/allocation-count) (sdl/was-init 0)))
       (error "UI resources remain after cleanup"))
     (unless (equal? dump "")
-      (output/write-text! dump
-                          (str "{\"width\":"
-                               width
-                               ",\"height\":"
-                               height
-                               ",\"scale\":"
-                               scale
-                               ",\"backend\":\""
-                               backend
-                               "\",\"frames\":"
-                               frame
-                               ",\"primitives\":"
-                               primitives
-                               ",\"nodes\":"
-                               nodes
-                               ",\"remaining_resources\":[0,0,0,0]}\n")))
+      (write-file dump
+                  (str "{\"width\":"
+                       width
+                       ",\"height\":"
+                       height
+                       ",\"scale\":"
+                       scale
+                       ",\"backend\":\""
+                       backend
+                       "\",\"frames\":"
+                       frame
+                       ",\"primitives\":"
+                       primitives
+                       ",\"nodes\":"
+                       nodes
+                       ",\"remaining_resources\":[0,0,0,0]}\n")))
     0))
 
 (cli/run command main)

@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/ioctl.h>
+#include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -16,7 +17,8 @@
 // streams, and exec path. Returns the child's pid, or -errno if fork fails.
 // A failure in the child after fork exits it with status 126, or 127 if exec
 // fails; the parent sees that through waitpid.
-int manse_pty_spawn(const char* path, char* const argv[], char* const envp[], const char* tty_path) {
+int manse_pty_spawn(const char* path, char* const argv[], char* const envp[],
+                    const char* tty_path) {
   pid_t pid = fork();
   if (pid < 0) return -errno;
   if (pid > 0) return pid;
@@ -50,10 +52,35 @@ int manse_pty_spawn(const char* path, char* const argv[], char* const envp[], co
 // Set the PTY's size in cells and pixels. Returns 0 or -errno.
 int manse_pty_resize(int fd, int cols, int rows, int width, int height) {
   struct winsize size = {
-    .ws_row = (unsigned short)rows,
-    .ws_col = (unsigned short)cols,
-    .ws_xpixel = (unsigned short)width,
-    .ws_ypixel = (unsigned short)height,
+      .ws_row = (unsigned short)rows,
+      .ws_col = (unsigned short)cols,
+      .ws_xpixel = (unsigned short)width,
+      .ws_ypixel = (unsigned short)height,
   };
   return ioctl(fd, TIOCSWINSZ, &size) < 0 ? -errno : 0;
+}
+
+// Preserve errno before returning through the FFI.
+long manse_pty_read(int fd, void* data, size_t size) {
+  ssize_t n;
+  do {
+    n = read(fd, data, size);
+  } while (n < 0 && errno == EINTR);
+  return n < 0 ? -errno : n;
+}
+
+long manse_pty_write(int fd, const void* data, size_t size) {
+  ssize_t n;
+  do {
+    n = write(fd, data, size);
+  } while (n < 0 && errno == EINTR);
+  return n < 0 ? -errno : n;
+}
+
+int manse_pty_waitpid(int pid, int* status, int flags) {
+  int result;
+  do {
+    result = waitpid(pid, status, flags);
+  } while (result < 0 && errno == EINTR);
+  return result < 0 ? -errno : result;
 }

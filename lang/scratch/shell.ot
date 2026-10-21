@@ -4,7 +4,7 @@
 
 (require (otium.ui :as ui))
 (require (otium.process :as process))
-(require (scratch.theme :as theme))
+(require (manse.theme :as theme))
 (require (scratch.model :as m))
 (require (scratch.widgets :as w))
 (require (scratch.sidebar :as sidebar))

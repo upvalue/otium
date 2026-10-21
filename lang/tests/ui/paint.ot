@@ -11,8 +11,8 @@
 
 (defmethod (ui/paint (w Probe) g b)
   (gfx/rect g b 0xff0000ff)
-  (gfx/rect g (make ui/Bounds :x 60 :y 40 :width 160 :height 60) 0x0000ff80)
-  (gfx/rect g (make ui/Bounds :x 20 :y 20 :width 32 :height 32) 0x00ff00ff 12))
+  (gfx/rect g (ui/bounds 60 40 160 60) 0x0000ff80)
+  (gfx/rect g (ui/bounds 20 20 32 32) 0x00ff00ff 12))
 
 (def (view)
   (ui/column {:grow 1 :padding 20 :background 0x101827ff} (ui/new Probe {})))

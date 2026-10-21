@@ -219,6 +219,9 @@ typedef struct ot_io_host {
   int (*mkdir)(void*, const char*);
   int (*list)(void*, const char*, void (*)(void*, const char*), void*);
   bool (*terminal)(void*, intptr_t);
+  int (*symbolic_link)(void*, const char*, bool*);
+  /* On success cwd returns a buffer released with ot_host_free. */
+  int (*cwd)(void*, char**);
 } ot_io_host;
 
 void ot_set_io_host(ots* state, const ot_io_host* host, void* userdata);

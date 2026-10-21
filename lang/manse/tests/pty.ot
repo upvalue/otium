@@ -4,10 +4,12 @@
 (require otium.test :refer (check report))
 
 (def term (g/new 80 24))
-(def p (pty/spawn "/bin/sh"
-                  '("sh" "-c" "stty size; tty; ps -o tty= -o stat= -p $$; echo READY; sleep 100; echo after")
-                  77
-                  33))
+
+(def p
+  (pty/spawn "/bin/sh"
+             '("sh" "-c" "stty size; tty; ps -o tty= -o stat= -p $$; echo READY; sleep 100; echo after")
+             77
+             33))
 
 (def (pump-until done? limit-ms)
   "Pass PTY output to the terminal until (done?) or the time limit passes."
@@ -16,11 +18,8 @@
       (cond
         ((done?) #t)
         ((> (current-jiffy) deadline) #f)
-        (else
-         (when (pty/readable? p 50)
-           (let ((n (pty/read! p)))
-             (when (> n 0) (g/write-bytes! term (p :buffer) n))))
-         (loop))))))
+        (else (when (pty/readable? p 50) (let ((n (pty/read! p))) (when (> n 0) (g/write-bytes! term (p :buffer) n))))
+              (loop))))))
 
 (def (screen)
   (g/update! term)
@@ -33,12 +32,18 @@
 (for-each (fn (row) (unless (equal? (string-trim row) "") (println "| " row))) (screen))
 (check "stty size" #t (screen-has? "33 77"))
 (check "tty name" #t (screen-has? (p :tty)))
+
 ;; ps reports ?? for a process with no controlling terminal; + marks the foreground group.
 (check "controlling terminal" #f (screen-has? "??"))
 
 (pty/write! p "\x3;")
+
 (def (wait-exit! q)
-  (pump-until (fn () (let ((s (pty/status q))) (when s (put! q :exit s)) s)) 5000))
+  (pump-until (fn ()
+                (let ((s (pty/status q)))
+                  (when s (put! q :exit s))
+                  s))
+              5000))
 
 ;; sh and zsh take a controlling terminal themselves, so check with a child
 ;; that doesn't: the spawn must have made the PTY its controlling terminal.
@@ -54,7 +59,13 @@
     (pty/close! q)
     (set! p saved)))
 
-(check "ctrl-c ends the child" #t (pump-until (fn () (let ((s (pty/status p))) (when s (put! p :exit s)) s)) 5000))
+(check "ctrl-c ends the child"
+       #t
+       (pump-until (fn ()
+                     (let ((s (pty/status p)))
+                       (when s (put! p :exit s))
+                       s))
+                   5000))
 (check "killed by SIGINT" 2 (get (p :exit) :signal))
 (check "sleep was interrupted" #f (screen-has? "after"))
 (pty/close! p)

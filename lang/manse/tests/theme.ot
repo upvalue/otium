@@ -1,0 +1,7 @@
+(require manse.workspace :as workspace)
+(require manse.theme :as theme)
+(require otium.test :refer (check report))
+(check "running color" theme/green (workspace/status-color :running))
+(set! theme/green 123)
+(check "running color follows redefinition" 123 (workspace/status-color :running))
+(report "theme reload")

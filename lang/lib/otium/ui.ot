@@ -40,12 +40,30 @@
   (size :init nil)
   (generation :init 0))
 
+(def palette
+  {:muted 0x71849fff
+   :text 0xdce5f2ff
+   :selection 0x425976ff
+   :focus 0xa8d5ffff
+   :input 0x202d43ff
+   :disabled 0x253044ff
+   :accent-pressed 0x42ae98ff
+   :accent 0x67d9c0ff
+   :surface 0x2c3c54ff
+   :on-accent 0x101827ff})
+
+(def (color value)
+  "Resolve a palette keyword or pass through a packed RGBA color."
+  (if (keyword? value)
+      (get palette value)
+      value))
+
 (defclass Label
   :is Widget
   text
   (font :init :ui)
   (size :init 16)
-  (color :init 0xdce5f2ff)
+  (color :init :text)
   (wrap :init #t)
   (width :init -1)
   (height :init -1)
@@ -57,7 +75,7 @@
   name
   (size :init 16)
   (fill :init #f)
-  (color :init 0xdce5f2ff))
+  (color :init :text))
 
 (defclass Column
   :is Widget
@@ -146,6 +164,10 @@
   y
   width
   height)
+
+(def (bounds x y width height)
+  "Construct layout bounds in logical pixels."
+  (make Bounds :x x :y y :width width :height height))
 
 (def (size width height)
   (make Size :width width :height height))
@@ -306,6 +328,14 @@
 
 (def (children node)
   (node :children))
+
+(def (find-key node key)
+  "Find the first mounted descendant with key, depth first, or nil."
+  (let search ((nodes (children node))
+               (i 0))
+    (when (< i (length nodes))
+      (let ((child (get nodes i)))
+        (or (and (equal? (child :key) key) child) (find-key child key) (search nodes (+ i 1)))))))
 
 (def (active? node)
   (node :active?))
@@ -468,8 +498,8 @@
                :align :center
                :wrap #f
                :color (if (eq? (w :style) :accent)
-                          0x101827ff
-                          0xdce5f2ff)}
+                          :on-accent
+                          :text)}
               value))
       ((or (list? value) (array? value)) (map convert value))
       (else value)))
@@ -489,7 +519,7 @@
   (substring (w :value) (min (w :cursor) (w :anchor)) (max (w :cursor) (w :anchor))))
 
 (def (move-cursor! w position extend?)
-  (set! (w :cursor) (max 0 (min (string-length (w :value)) position)))
+  (set! (w :cursor) (clamp position 0 (string-length (w :value))))
   (unless extend? (set! (w :anchor) (w :cursor))))
 
 (def (replace-selection! w text)
@@ -574,7 +604,7 @@
 
 (def (scroll-to! w position)
   "Move a mounted Scroll immediately, ending any animation."
-  (set! (w :offset) (max 0 (min (w :limit) position)))
+  (set! (w :offset) (clamp position 0 (w :limit)))
   (set! (w :target) (w :offset))
   (set! (w :stepped) nil)
   (set! (w :following?) (>= (w :offset) (w :limit))))
@@ -584,7 +614,7 @@
   (if (<= (w :smoothing) 0)
       (scroll-to! w position)
       (begin
-        (set! (w :target) (max 0 (min (w :limit) position)))
+        (set! (w :target) (clamp position 0 (w :limit)))
         (set! (w :following?) (>= (w :target) (w :limit))))))
 
 (def (scroll-animating? w)
@@ -594,7 +624,7 @@
   "Seconds since the last animation step, capped so a stalled frame slows the
 animation rather than skipping it. The first step assumes one 60 Hz frame."
   (if stepped
-      (max 0 (min 0.05 (- now stepped)))
+      (clamp (- now stepped) 0 0.05)
       (/ 1 60.0)))
 
 (def (decay value target dt smoothing)

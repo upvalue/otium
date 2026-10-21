@@ -47,3 +47,37 @@ def port_exit_flush(t):
     t.check(Path(path).read_text() == 'flushed on exit', 'end-of-script did not flush')
     t.expect(t.otium('tests/library/port-exit.ot', '--', path, 'quit'), status=7, stdout='')
     t.check(Path(path).read_text() == 'flushed on exit', 'quit did not flush')
+
+@test('library write-file', runtimes=BOTH)
+def write_file(t):
+    path = t.scratch / 'output.txt'
+    program = t.scratch / 'write.ot'
+    program.write_text('(write-file "' + str(path) + '" "long contents")\n'
+                       '(write-file "' + str(path) + '" "é\\x0;🙂")\n')
+    t.expect(t.otium(program))
+    t.check(path.read_bytes() == 'é\0🙂'.encode(), path.read_bytes())
+
+@test('library filesystem helpers', runtimes=BOTH)
+def filesystem_helpers(t):
+    directory = t.scratch / 'files'
+    directory.mkdir()
+    (directory / 'regular').write_text('data')
+    (directory / 'link').symlink_to('regular')
+    (directory / 'dangling').symlink_to('absent')
+    program = t.scratch / 'filesystem.ot'
+    program.write_text('''(require otium.test :refer (check))
+(def base "''' + str(directory) + '''")
+(check #t (file-directory? base))
+(check #t (file-regular? (str base "/regular")))
+(check #t (file-regular? (str base "/link")))
+(check #t (file-symbolic-link? (str base "/link")))
+(check #t (file-symbolic-link? (str base "/dangling")))
+(check #f (file-symbolic-link? (str base "/absent")))
+(check #f (file-regular? (str base "/absent")))
+(check #t (path-absolute? (current-directory)))
+(check "/a" (path-parent "/a/b/"))
+(check "/" (path-parent "/"))
+(check "" (path-parent "a"))
+(check "b" (path-last "/a/b/"))
+''')
+    t.expect(t.otium(program))

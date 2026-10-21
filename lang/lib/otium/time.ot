@@ -1,0 +1,5 @@
+(ns otium.time)
+
+(def (seconds)
+  "Monotonic seconds for elapsed time measurements."
+  (/ (current-jiffy) (jiffies-per-second)))

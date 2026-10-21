@@ -59,12 +59,6 @@ parameter list, :always to always break any body, or :never."
               (syntax/parse text))
     rules))
 
-(def- (spaces n)
-  (let ((out (buffer)))
-    (dotimes (i n)
-      (buffer-push! out " "))
-    (buffer->string out)))
-
 (def- (end-column text column)
   "The column after text when it starts at column."
   (let ((lines (string-split text "\n")))
@@ -164,26 +158,25 @@ parameter list, :always to always break any body, or :never."
 (def- (lines start _column units indent close rules after)
   "Append units to start, which ends at column. Each unit begins its own line at indent,
 except that a comment on the same source line as the previous unit stays there."
-  (let ((out start)
+  (let ((out (buffer start))
         (remaining units)
         (after-comment? #f))
     (while (pair? remaining)
       (let ((unit (car remaining))
             (node (car (car remaining))))
         (if (and (syntax/comment? node) (= (node :newlines) 0))
-            (set! out (string-append out " " (node :text)))
-            (set! out
-                  (string-append out
-                                 (if (>= (node :newlines) 2)
-                                     "\n\n"
-                                     "\n")
-                                 (spaces indent)
-                                 (render-unit unit indent rules (trailing (cdr remaining) close after)))))
+            (buffer-push! out " " (node :text))
+            (buffer-push! out
+                          (if (>= (node :newlines) 2)
+                              "\n\n"
+                              "\n")
+                          (string-repeat " " indent)
+                          (render-unit unit indent rules (trailing (cdr remaining) close after))))
         (set! after-comment? (syntax/comment? node))
         (set! remaining (cdr remaining))))
-    (if after-comment?
-        (string-append out "\n" (spaces indent) close)
-        (string-append out close))))
+    (when after-comment? (buffer-push! out "\n" (string-repeat " " indent)))
+    (buffer-push! out close)
+    (buffer->string out)))
 
 (def- (trailing following close after)
   "The characters that follow a unit on its line: closing delimiters when it is the last one."
@@ -312,18 +305,16 @@ except that a comment on the same source line as the previous unit stays there."
 
 (def (format-text text rules)
   "Format a whole source file."
-  (let ((out "")
+  (let ((out (buffer))
         (previous nil)
         (nodes (syntax/parse text)))
     (resolve-heads! nodes)
     (for-each (fn (node)
-                (set! out
-                      (cond
-                        ((not previous) (render node 0 rules 0))
-                        ((and (syntax/comment? node) (= (node :newlines) 0)) (string-append out " " (node :text)))
-                        (else (string-append out (separator previous node) (render node 0 rules 0)))))
+                (cond
+                  ((not previous) (buffer-push! out (render node 0 rules 0)))
+                  ((and (syntax/comment? node) (= (node :newlines) 0)) (buffer-push! out " " (node :text)))
+                  (else (buffer-push! out (separator previous node) (render node 0 rules 0))))
                 (set! previous node))
               nodes)
-    (if (equal? out "")
-        ""
-        (string-append out "\n"))))
+    (when previous (buffer-push! out "\n"))
+    (buffer->string out)))

@@ -1,0 +1,37 @@
+(require manse.ghostty)
+(ns manse.ghostty)
+(require otium.test :refer (check report))
+
+(def freed 0)
+
+(def free-memory ffi/free!)
+
+(set! ffi/free!
+      (fn (p)
+        (set! freed (+ freed 1))
+        (free-memory p)))
+(set! %build-info (fn _args (error "injected build-info failure")))
+(check "build-info failure propagates"
+       #t
+       (try
+         (build-info)
+         #f
+         (catch (error? _) #t)))
+(check "build-info frees its buffer" 1 freed)
+(set! %colors-get (fn _args (error "injected colors failure")))
+(check "colors failure propagates"
+       #t
+       (try
+         (colors {})
+         #f
+         (catch (error? _) #t)))
+(check "colors frees its buffer" 2 freed)
+(set! %vt-write (fn _args (error "injected write failure")))
+(check "write failure propagates"
+       #t
+       (try
+         (write! {} "x")
+         #f
+         (catch (error? _) #t)))
+(check "write frees its buffer" 3 freed)
+(report "ghostty cleanup")

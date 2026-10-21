@@ -8,29 +8,34 @@
 (require otium.process :as process)
 
 (def- O_RDWR 2)
+
 (def- O_NOCTTY 131072)
+
 (def- POLLIN 1)
+
 (def- WNOHANG 1)
 
 (def PollFd (ffi/define-struct! 'pollfd '((fd int) (events i16) (revents i16))))
 
-(ffi/defbindings libc %load!
-  ((private %openpt) "posix_openpt" (int) int #t)
-  ((private %grantpt) "grantpt" (int) int #t)
-  ((private %unlockpt) "unlockpt" (int) int #t)
-  ((private %ptsname) "ptsname" (int) utf8 #t)
-  ((private %open) "open" (utf8 int) int #t)
-  ((private %close) "close" (int) int #t)
-  ((private %read) "read" (int pointer size-t) long #t)
-  ((private %write) "write" (int pointer size-t) long #t)
-  ((private %poll) "poll" (pointer uint int) int #t)
-  ((private %waitpid) "waitpid" (int pointer int) int #t)
-  ((private %kill) "kill" (int int) int #t)
-  ((private %environ) "_NSGetEnviron" () pointer #f))
+(ffi/defbindings libc
+                 %load!
+                 ((private %openpt) "posix_openpt" (int) int #t)
+                 ((private %grantpt) "grantpt" (int) int #t)
+                 ((private %unlockpt) "unlockpt" (int) int #t)
+                 ((private %ptsname) "ptsname" (int) utf8 #t)
+                 ((private %open) "open" (utf8 int) int #t)
+                 ((private %close) "close" (int) int #t)
+                 ((private %poll) "poll" (pointer uint int) int #t)
+                 ((private %kill) "kill" (int int) int #t)
+                 ((private %environ) "_NSGetEnviron" () pointer #f))
 
-(ffi/defbindings native %load-native!
-  ((private %spawn) "manse_pty_spawn" (utf8 pointer pointer utf8) int #t)
-  ((private %resize) "manse_pty_resize" (int int int int int) int #t))
+(ffi/defbindings native
+                 %load-native!
+                 ((private %waitpid) "manse_pty_waitpid" (int pointer int) int #t)
+                 ((private %read) "manse_pty_read" (int pointer size-t) long #t)
+                 ((private %write) "manse_pty_write" (int pointer size-t) long #t)
+                 ((private %spawn) "manse_pty_spawn" (utf8 pointer pointer utf8) int #t)
+                 ((private %resize) "manse_pty_resize" (int int int int int) int #t))
 
 (def (native-candidates)
   "MANSE_NATIVE_LIBRARY when set; otherwise the Meson build, from lang/ or lang/manse/."
@@ -54,38 +59,46 @@
 (def- (with-strings strings f)
   "Call (f argv) with a NULL-terminated array of C strings, freed afterwards."
   (let ((argv (ffi/alloc 'pointer (+ (length strings) 1)))
-        (owned (map ffi/alloc-utf8 strings)))
-    (let loop ((i 0) (rest owned))
-      (unless (null? rest)
-        (ffi/set! argv 'pointer i (car rest))
-        (loop (+ i 1) (cdr rest))))
-    (ffi/set! argv 'pointer (length owned) ffi/null)
-    (unwind-protect
-      (f argv)
+        (owned []))
+    (defer
+      (begin
+        (for-each (fn (text) (push! owned (ffi/alloc-utf8 text))) strings)
+        (dotimes (i (length owned))
+          (ffi/set! argv 'pointer i (get owned i)))
+        (ffi/set! argv 'pointer (length owned) ffi/null)
+        (f argv))
       (for-each ffi/free! owned)
       (ffi/free! argv))))
 
 (def (spawn path args cols rows)
   "Start path (absolute) with args, argv[0] included, on a new PTY of the given size."
   (load!)
-  (let ((fd (check! "posix_openpt" (%openpt (+ O_RDWR O_NOCTTY)))))
-    (check! "grantpt" (%grantpt fd))
-    (check! "unlockpt" (%unlockpt fd))
-    (let ((pty {:fd fd :tty (%ptsname fd)}))
-      ;; macOS rejects ioctls on the controlling side until the terminal side
-      ;; has been opened, so hold it open until the child has its own copy.
-      (let ((slave (check! "open" (%open (pty :tty) (+ O_RDWR O_NOCTTY)))))
-        (unwind-protect
-          (begin
-            (resize! pty cols rows)
-            (with-strings args
-                          (fn (argv)
-                            (put! pty :pid
-                                  (check! "spawn" (%spawn path argv (ffi/ref (%environ) 'pointer 0) (pty :tty)))))))
-          (%close slave)))
-      (put! pty :buffer (ffi/alloc 'u8 65536))
-      (put! pty :pollfd (ffi/alloc PollFd 1))
-      pty)))
+  (let ((pty {:fd (check! "posix_openpt" (%openpt (+ O_RDWR O_NOCTTY)))})
+        (success? #f))
+    (unwind-protect
+      (begin
+        (check! "grantpt" (%grantpt (pty :fd)))
+        (check! "unlockpt" (%unlockpt (pty :fd)))
+        (put! pty :tty (%ptsname (pty :fd)))
+        ;; Allocate before spawning so allocation failure cannot orphan a child.
+        (put! pty :buffer (ffi/alloc 'u8 65536))
+        (put! pty :pollfd (ffi/alloc PollFd 1))
+        (let ((slave (check! "open" (%open (pty :tty) (+ O_RDWR O_NOCTTY)))))
+          (defer
+            (begin
+              (resize! pty cols rows)
+              (with-strings args
+                            (fn (argv)
+                              (put! pty
+                                    :pid (check! "spawn"
+                                                 (%spawn path argv (ffi/ref (%environ) 'pointer 0) (pty :tty)))))))
+            (%close slave)))
+        (set! success? #t)
+        pty)
+      (unless success?
+        (%close (pty :fd))
+        (when (pty :buffer) (ffi/free! (pty :buffer)))
+        (when (pty :pollfd) (ffi/free! (pty :pollfd)))))))
 
 (def (readable? pty timeout-ms)
   (let ((p (pty :pollfd)))
@@ -95,48 +108,77 @@
     (> (check! "poll" (%poll p 1 timeout-ms)) 0)))
 
 (def (read! pty)
-  "Read what is available into the PTY's buffer and return the byte count; 0 at end of file."
+  "Read available bytes; 0 at EOF, nil when a readiness notification raced with a read."
   (let ((n (%read (pty :fd) (pty :buffer) 65536)))
-    ;; EIO when the child side has closed is end of file, as on Linux.
-    (if (< n 0) 0 n)))
-
-(def (write! pty text)
-  (let ((p (ffi/alloc-utf8 text)))
-    (let loop ((n 0))
-      (if (= 0 (ffi/ref p 'u8 n))
-          (check! "write" (%write (pty :fd) p n))
-          (loop (+ n 1))))
-    (ffi/free! p)))
+    (cond
+      ((= n -35) nil)
+      ((= n -5) 0)
+      (else (check! "read" n)))))
 
 (def (write-pointer! pty data len)
-  "Write len bytes from native memory, such as a libghostty reply."
+  "Write all len bytes from native memory, such as a libghostty reply."
   (let loop ((done 0))
     (when (< done len)
       (let ((n (check! "write" (%write (pty :fd) (ffi/view data done (- len done)) (- len done)))))
+        (when (= n 0) (error "pty: write made no progress"))
         (loop (+ done n))))))
+
+(def (write! pty text)
+  (let ((p (ffi/alloc-utf8 text)))
+    (defer
+      (let loop ((n 0))
+        (if (= 0 (ffi/ref p 'u8 n))
+            (write-pointer! pty p n)
+            (loop (+ n 1))))
+      (ffi/free! p))))
 
 (def (write-bytes! pty bytes)
   "Write a list of byte values."
   (let ((p (ffi/alloc 'u8 (max 1 (length bytes)))))
-    (let loop ((i 0) (rest bytes))
-      (unless (null? rest)
-        (ffi/set! p 'u8 i (car rest))
-        (loop (+ i 1) (cdr rest))))
-    (check! "write" (%write (pty :fd) p (length bytes)))
-    (ffi/free! p)))
+    (defer
+      (begin
+        (let loop ((i 0)
+                   (rest bytes))
+          (unless (null? rest)
+            (ffi/set! p 'u8 i (car rest))
+            (loop (+ i 1) (cdr rest))))
+        (write-pointer! pty p (length bytes)))
+      (ffi/free! p))))
+
+(defonce pending-pids [])
+
+(def- (wait-status pid)
+  (let ((s (ffi/alloc 'i32 1)))
+    (defer
+      (let ((r (%waitpid pid s WNOHANG)))
+        (cond
+          ((= r 0) nil)
+          ((= r -10) :unavailable)
+          ((< r 0) (check! "waitpid" r))
+          (else (let ((raw (ffi/ref s 'i32 0)))
+                  (if (= 0 (modulo raw 128))
+                      {:exit (modulo (quotient raw 256) 256)}
+                      {:signal (modulo raw 128)})))))
+      (ffi/free! s))))
+
+(def (reap!)
+  "Poll children of closed PTYs without blocking the UI."
+  (set! pending-pids (filter (fn (pid) (not (wait-status pid))) pending-pids)))
 
 (def (status pty)
   "nil while the child runs, then {:exit code} or {:signal number}."
-  (let ((s (ffi/alloc 'i32 1)))
-    (let ((r (%waitpid (pty :pid) s WNOHANG)))
-      (let ((raw (ffi/ref s 'i32 0)))
-        (ffi/free! s)
-        (cond
-          ((<= r 0) nil)
-          ((= 0 (modulo raw 128)) {:exit (modulo (quotient raw 256) 256)})
-          (else {:signal (modulo raw 128)}))))))
+  (or (pty :status)
+      (let ((result (wait-status (pty :pid))))
+        (when result (put! pty :reaped? #t))
+        (unless (eq? result :unavailable)
+          (when result (put! pty :status result))
+          result))))
 
 (def (close! pty)
-  (%close (pty :fd))
-  (ffi/free! (pty :buffer))
-  (ffi/free! (pty :pollfd)))
+  (unless (pty :closed?)
+    (put! pty :closed? #t)
+    (%close (pty :fd))
+    (ffi/free! (pty :buffer))
+    (ffi/free! (pty :pollfd))
+    (unless (pty :reaped?) (push! pending-pids (pty :pid)))
+    (reap!)))

@@ -11,7 +11,7 @@
 (defmethod (ui/paint (w TextProbe) g bounds)
   (gfx/rect g bounds 0x000000ff 0)
   (gfx/text g bounds "office café λ\nwrapped words" :ui 20 0xffffffff #t)
-  (gfx/text g (make ui/Bounds :x 90 :y 60 :width 200 :height 30) "CLIPPED" :mono 20 0xff000080 #f))
+  (gfx/text g (ui/bounds 90 60 200 30) "CLIPPED" :mono 20 0xff000080 #f))
 
 (def (view)
   (ui/column {:padding 10} (ui/new TextProbe {})))

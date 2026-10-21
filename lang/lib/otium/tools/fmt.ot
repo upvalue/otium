@@ -3,25 +3,31 @@
 ;; change instead and exit with status 1 if there are any.
 (require otium.process (otium.format :as format) (otium.tools.files :as files))
 
-(def (rules-for path)
-  (let ((project (files/project-file path)))
-    (if project
-        (format/project-rules (read-file project))
-        format/builtin-rules)))
+(def (rules-for projects path)
+  (let ((project (files/project-file path))
+        (key (or project "")))
+    (when (nil? (get projects key))
+      (put! projects
+            key
+            (if project
+                (format/project-rules (read-file project))
+                format/builtin-rules)))
+    (projects key)))
 
 (def (main arguments)
   (let ((check? (and (pair? arguments) (equal? (car arguments) "--check")))
-        (status 0))
+        (status 0)
+        (projects {}))
     (for-each (fn (path)
                 (try
                   (let ((text (read-file path)))
-                    (let ((formatted (format/format-text text (rules-for path))))
+                    (let ((formatted (format/format-text text (rules-for projects path))))
                       (unless (equal? formatted text)
                         (if check?
                             (begin
                               (println path)
                               (set! status 1))
-                            (files/write-file path formatted)))))
+                            (write-file path formatted)))))
                   (catch (error? problem)
                     (otium.process/write-error (string-append path ": " (condition-message problem) "\n"))
                     (set! status 1))))

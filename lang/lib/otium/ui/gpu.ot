@@ -139,11 +139,7 @@
         (left (+ x (native/node-bounds p native/BOUNDS_X)))
         (top (+ y (native/node-bounds p native/BOUNDS_Y))))
     (set! (node :bounds)
-          (make ui/Bounds
-                :x left
-                :y top
-                :width (native/node-bounds p native/BOUNDS_WIDTH)
-                :height (native/node-bounds p native/BOUNDS_HEIGHT)))
+          (ui/bounds left top (native/node-bounds p native/BOUNDS_WIDTH) (native/node-bounds p native/BOUNDS_HEIGHT)))
     (let ((w (ui/instance node))
           (x? #f)
           (offset 0))
@@ -268,20 +264,18 @@ without relayout. Returns true while any animation continues."
   tree)
 
 (def- (inset bounds x y)
-  (make ui/Bounds
-        :x (+ (bounds :x) x)
-        :y (+ (bounds :y) y)
-        :width (max 0 (- (bounds :width) (* 2 x)))
-        :height (max 0 (- (bounds :height) (* 2 y)))))
+  (ui/bounds (+ (bounds :x) x)
+             (+ (bounds :y) y)
+             (max 0 (- (bounds :width) (* 2 x)))
+             (max 0 (- (bounds :height) (* 2 y)))))
 
 (def- (intersect a b)
   (let ((x (max (a :x) (b :x)))
         (y (max (a :y) (b :y))))
-    (make ui/Bounds
-          :x x
-          :y y
-          :width (max 0 (- (min (+ (a :x) (a :width)) (+ (b :x) (b :width))) x))
-          :height (max 0 (- (min (+ (a :y) (a :height)) (+ (b :y) (b :height))) y)))))
+    (ui/bounds x
+               y
+               (max 0 (- (min (+ (a :x) (a :width)) (+ (b :x) (b :width))) x))
+               (max 0 (- (min (+ (a :y) (a :height)) (+ (b :y) (b :height))) y)))))
 
 (def- (paint-node! node renderer clip generation resizing?)
   (unless (node :bounds) (error "Run layout before painting"))
@@ -321,7 +315,7 @@ and a subtree whose size changed records again anyway."
   "Record the tree's drawing. Subtrees with the :cache option replay their last
 recording until invalidate-paint! starts a new generation or their size changes."
   (native/gpu-clear renderer background)
-  (let ((clip (make ui/Bounds :x 0 :y 0 :width width :height height))
+  (let ((clip (ui/bounds 0 0 width height))
         (generation (tree :generation)))
     (for-each (fn (node) (paint-node! node renderer clip generation #f)) (ui/children tree))))
 
@@ -338,10 +332,10 @@ recording until invalidate-paint! starts a new generation or their size changes.
               (y (bounds :y))
               (width (bounds :width))
               (height (bounds :height)))
-          (gfx/rect g (make ui/Bounds :x x :y y :width width :height 1) border)
-          (gfx/rect g (make ui/Bounds :x x :y (- (+ y height) 1) :width width :height 1) border)
-          (gfx/rect g (make ui/Bounds :x x :y y :width 1 :height height) border)
-          (gfx/rect g (make ui/Bounds :x (- (+ x width) 1) :y y :width 1 :height height) border)))
+          (gfx/rect g (ui/bounds x y width 1) border)
+          (gfx/rect g (ui/bounds x (- (+ y height) 1) width 1) border)
+          (gfx/rect g (ui/bounds x y 1 height) border)
+          (gfx/rect g (ui/bounds (- (+ x width) 1) y 1 height) border)))
       ((w :background) (gfx/rect g bounds (w :background) radius))
       (else nil))))
 
@@ -373,29 +367,29 @@ recording until invalidate-paint! starts a new generation or their size changes.
                   ((eq? (w :align) :right) (- (bounds :width) (preferred :width)))
                   (else 0))))
     (gfx/text g
-              (make ui/Bounds :x (+ (bounds :x) offset) :y (bounds :y) :width (bounds :width) :height (bounds :height))
+              (ui/bounds (+ (bounds :x) offset) (bounds :y) (bounds :width) (bounds :height))
               (w :text)
               (w :font)
               (w :size)
               (if (g :disabled?)
-                  0x71849fff
-                  (w :color))
+                  (ui/color :muted)
+                  (ui/color (w :color)))
               (w :wrap))))
 
 (defmethod (ui/paint (w ui/Button) g bounds)
   (unless (eq? (w :style) :bare)
     (let ((color (cond
-                   ((g :disabled?) 0x253044ff)
+                   ((g :disabled?) (ui/color :disabled))
                    ((g :pressed?)
                     (if (eq? (w :style) :accent)
-                        0x42ae98ff
-                        0x425976ff))
-                   ((eq? (w :style) :accent) 0x67d9c0ff)
-                   (else 0x2c3c54ff))))
+                        (ui/color :accent-pressed)
+                        (ui/color :selection)))
+                   ((eq? (w :style) :accent) (ui/color :accent))
+                   (else (ui/color :surface)))))
       (gfx/rect g
                 bounds
                 (if (g :focused?)
-                    0xa8d5ffff
+                    (ui/color :focus)
                     color)
                 (w :radius))
       (when (g :focused?) (gfx/rect g (inset bounds 2 2) color (max 0 (- (w :radius) 2)))))))
@@ -406,21 +400,19 @@ recording until invalidate-paint! starts a new generation or their size changes.
     (if (eq? (w :axis) :x)
         (let ((width (max 16 (/ (* (bounds :width) (bounds :width)) (+ (bounds :width) (w :limit))))))
           (gfx/rect g
-                    (make ui/Bounds
-                          :x (+ (bounds :x) (* (/ (w :offset) (w :limit)) (- (bounds :width) width)))
-                          :y (- (+ (bounds :y) (bounds :height)) 5)
-                          :width width
-                          :height 3)
-                    0x71849fff
+                    (ui/bounds (+ (bounds :x) (* (/ (w :offset) (w :limit)) (- (bounds :width) width)))
+                               (- (+ (bounds :y) (bounds :height)) 5)
+                               width
+                               3)
+                    (ui/color :muted)
                     1))
         (let ((height (max 16 (/ (* (bounds :height) (bounds :height)) (+ (bounds :height) (w :limit))))))
           (gfx/rect g
-                    (make ui/Bounds
-                          :x (- (+ (bounds :x) (bounds :width)) 5)
-                          :y (+ (bounds :y) (* (/ (w :offset) (w :limit)) (- (bounds :height) height)))
-                          :width 3
-                          :height height)
-                    0x71849fff
+                    (ui/bounds (- (+ (bounds :x) (bounds :width)) 5)
+                               (+ (bounds :y) (* (/ (w :offset) (w :limit)) (- (bounds :height) height)))
+                               3
+                               height)
+                    (ui/color :muted)
                     1)))))
 
 (def (caret-positions text font size scale)
@@ -453,7 +445,7 @@ recording until invalidate-paint! starts a new generation or their size changes.
     (set! (w :positions) positions)
     (let ((caret (get positions (w :cursor)))
           (end (get positions (- (length positions) 1))))
-      (set! (w :offset) (max 0 (min (w :offset) (max 0 (- end available)))))
+      (set! (w :offset) (clamp (w :offset) 0 (max 0 (- end available))))
       (when (< caret (w :offset)) (set! (w :offset) caret))
       (when (= (w :cursor) 0) (set! (w :offset) 0))
       (when (> caret (+ (w :offset) (- available (+ caret-width 1))))
@@ -461,45 +453,41 @@ recording until invalidate-paint! starts a new generation or their size changes.
     (gfx/rect g
               bounds
               (if (g :focused?)
-                  0xa8d5ffff
-                  0x425976ff)
+                  (ui/color :focus)
+                  (ui/color :selection))
               8)
-    (gfx/rect g (inset bounds 2 2) 0x202d43ff 6)
+    (gfx/rect g (inset bounds 2 2) (ui/color :input) 6)
     (let ((inner (inset bounds 10 8))
-          (context (make gfx/Context :renderer (g :renderer) :clip (intersect (g :clip) inner)))
+          (context (gfx/with-clip g (intersect (g :clip) inner)))
           (origin (- (inner :x) (w :offset))))
       (when (and (g :focused?) (not (= (w :cursor) (w :anchor))))
         (let ((a (get positions (w :cursor)))
               (b (get positions (w :anchor))))
           (gfx/rect context
-                    (make ui/Bounds :x (+ origin (min a b)) :y (inner :y) :width (abs (- b a)) :height (inner :height))
-                    0x425976ff
+                    (ui/bounds (+ origin (min a b)) (inner :y) (abs (- b a)) (inner :height))
+                    (ui/color :selection)
                     0)))
       (gfx/text context
-                (make ui/Bounds :x origin :y (inner :y) :width available :height (inner :height))
+                (ui/bounds origin (inner :y) available (inner :height))
                 (if (equal? (w :value) "")
                     (w :placeholder)
                     (w :value))
                 (w :font)
                 (w :size)
                 (if (or (g :disabled?) (equal? (w :value) ""))
-                    0x71849fff
-                    0xdce5f2ff)
+                    (ui/color :muted)
+                    (ui/color :text))
                 #f)
       (when (g :focused?)
-        (let ((caret-bounds (make ui/Bounds
-                                  :x (+ origin (get positions (w :cursor)))
-                                  :y (inner :y)
-                                  :width caret-width
-                                  :height (inner :height))))
-          (gfx/rect context caret-bounds 0x67d9c0ff 0)
+        (let ((caret-bounds (ui/bounds (+ origin (get positions (w :cursor))) (inner :y) caret-width (inner :height))))
+          (gfx/rect context caret-bounds (ui/color :accent) 0)
           (when (and block? (< (w :cursor) (string-length (w :value))))
-            (gfx/text (make gfx/Context :renderer (g :renderer) :clip (intersect (context :clip) caret-bounds))
-                      (make ui/Bounds :x origin :y (inner :y) :width available :height (inner :height))
+            (gfx/text (gfx/with-clip context (intersect (context :clip) caret-bounds))
+                      (ui/bounds origin (inner :y) available (inner :height))
                       (w :value)
                       (w :font)
                       (w :size)
-                      0x202d43ff
+                      (ui/color :input)
                       #f)))))))
 
 ;; Recheck paths after module reload; ordinary frames do no file IO here.
@@ -525,7 +513,7 @@ recording until invalidate-paint! starts a new generation or their size changes.
                 (string-contains? name "\x0;"))
         (error (str "Unknown icon: " name)))
       (try
-        (read-file path)
+        (unless (file-exists? path) (error (str "Unknown icon: " name)))
         (catch (error? _) (error (str "Unknown icon: " name))))
       (put! icon-paths path #t))
     path))
@@ -543,4 +531,4 @@ recording until invalidate-paint! starts a new generation or their size changes.
   (ui/size (w :size) (w :size)))
 
 (defmethod (ui/paint (w ui/Icon) g bounds)
-  (gfx/image g bounds (icon-path w) (w :color)))
+  (gfx/image g bounds (icon-path w) (ui/color (w :color))))

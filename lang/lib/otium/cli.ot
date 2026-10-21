@@ -21,12 +21,6 @@
 (def- (%commands spec)
   (filter (fn (x) (eq? (car x) 'command)) (cddr spec)))
 
-(def- (%index text target start)
-  (cond
-    ((= start (string-length text)) #f)
-    ((equal? (substring text start (+ start 1)) target) start)
-    (else (%index text target (+ start 1)))))
-
 (def- (%spec-error message)
   (error (string-append "cli/compile: " message)))
 
@@ -90,7 +84,7 @@
                                                     (> (string-length name) 1)
                                                     (string-starts-with? name "-")
                                                     (not (equal? name "--"))
-                                                    (not (%index name "=" 0))
+                                                    (not (string-index name "=" 0))
                                                     (or (string-starts-with? name "--") (= (string-length name) 2)))
                                          (%spec-error "invalid option spelling"))
                                        (when (member name names) (%spec-error "duplicate option spelling"))
@@ -158,7 +152,8 @@
                    0)))
     (let loop ((i start))
       (and (> (string-length text) start)
-           (or (= i (string-length text)) (and (%index "0123456789" (substring text i (+ i 1)) 0) (loop (+ i 1))))))))
+           (or (= i (string-length text))
+               (and (string-index "0123456789" (substring text i (+ i 1)) 0) (loop (+ i 1))))))))
 
 (def- (%number-text? text)
   (let ((length (string-length text)))
@@ -169,7 +164,7 @@
                (dot? #f))
       (cond
         ((= i length) (> digits 0))
-        ((%index "0123456789" (substring text i (+ i 1)) 0) (loop (+ i 1) (+ digits 1) dot?))
+        ((string-index "0123456789" (substring text i (+ i 1)) 0) (loop (+ i 1) (+ digits 1) dot?))
         ((and (not dot?) (equal? (substring text i (+ i 1)) ".")) (loop (+ i 1) digits #t))
         ((and (> digits 0) (member (substring text i (+ i 1)) '("e" "E"))) (%decimal? (substring text (+ i 1) length)))
         (else #f)))))
@@ -292,7 +287,7 @@
                             (member (%property (car positionals) 'type 'string) '(integer number))
                             (%number-text? (car tokens)))))
              (let ((token (car tokens))
-                   (equal (%index token "=" 0))
+                   (equal (string-index token "=" 0))
                    (long? (string-starts-with? token "--"))
                    (name (if long?
                              (if equal

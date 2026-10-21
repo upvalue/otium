@@ -16,16 +16,24 @@
 
 ;; GhosttyBuildInfo and GhosttyOptimizeMode
 (def- BUILD-INFO-OPTIMIZE 4)
+
 (def- BUILD-INFO-VERSION-STRING 5)
+
 (def- optimize-modes [:debug :release-safe :release-small :release-fast])
 
 ;; GhosttyRenderStateData
 (def- STATE-COLS 1)
+
 (def- STATE-ROWS 2)
+
 (def- STATE-ROW-ITERATOR 4)
+
 (def- STATE-CURSOR-VISIBLE 11)
+
 (def- STATE-CURSOR-VIEWPORT-HAS-VALUE 14)
+
 (def- STATE-CURSOR-VIEWPORT-X 15)
+
 (def- STATE-CURSOR-VIEWPORT-Y 16)
 
 ;; GhosttyRenderStateRowData
@@ -33,9 +41,13 @@
 
 ;; GhosttyRenderStateRowCellsData
 (def- CELL-STYLE 2)
+
 (def- CELL-GRAPHEMES-LEN 3)
+
 (def- CELL-GRAPHEMES-BUF 4)
+
 (def- CELL-BG-COLOR 5)
+
 (def- CELL-FG-COLOR 6)
 
 ;; Layouts. check-layouts! compares them with the library's own description.
@@ -78,39 +90,40 @@
 
 (def GString (layout "GhosttyString" '((ptr pointer) (len size-t))))
 
-(ffi/defbindings library %load!
-  ((private %type-json) "ghostty_type_json" () utf8 #f)
-  ((private %build-info) "ghostty_build_info" (int pointer) int #f)
-  ((private %terminal-new) "ghostty_terminal_new" (pointer pointer u16 u16) int #t)
-  ((private %terminal-free) "ghostty_terminal_free" (pointer) void #t)
-  ((private %terminal-set) "ghostty_terminal_set" (pointer int pointer) int #t)
-  ((private %terminal-resize) "ghostty_terminal_resize" (pointer u16 u16 u32 u32) int #t)
-  ((private %vt-write) "ghostty_terminal_vt_write" (pointer pointer size-t) void #t)
-  ((private %key-encoder-new) "ghostty_key_encoder_new" (pointer pointer) int #t)
-  ((private %key-encoder-free) "ghostty_key_encoder_free" (pointer) void #t)
-  ((private %key-options) "ghostty_key_encoder_setopt_from_terminal" (pointer pointer) void #t)
-  ((private %key-option) "ghostty_key_encoder_setopt" (pointer int pointer) void #t)
-  ((private %key-encode) "ghostty_key_encoder_encode" (pointer pointer pointer size-t pointer) int #t)
-  ((private %key-event-new) "ghostty_key_event_new" (pointer pointer) int #t)
-  ((private %key-event-free) "ghostty_key_event_free" (pointer) void #t)
-  ((private %key-action) "ghostty_key_event_set_action" (pointer int) void #t)
-  ((private %key-code) "ghostty_key_event_set_key" (pointer int) void #t)
-  ((private %key-mods) "ghostty_key_event_set_mods" (pointer u16) void #t)
-  ((private %key-text) "ghostty_key_event_set_utf8" (pointer pointer size-t) void #t)
-  ((private %key-unshifted) "ghostty_key_event_set_unshifted_codepoint" (pointer u32) void #t)
-  ((private %state-new) "ghostty_render_state_new" (pointer pointer) int #t)
-  ((private %state-free) "ghostty_render_state_free" (pointer) void #t)
-  ((private %state-update) "ghostty_render_state_update" (pointer pointer) int #t)
-  ((private %state-get) "ghostty_render_state_get" (pointer int pointer) int #f)
-  ((private %colors-get) "ghostty_render_state_colors_get" (pointer pointer) int #f)
-  ((private %rows-new) "ghostty_render_state_row_iterator_new" (pointer pointer) int #t)
-  ((private %rows-free) "ghostty_render_state_row_iterator_free" (pointer) void #t)
-  ((private %rows-next) "ghostty_render_state_row_iterator_next" (pointer) bool #f)
-  ((private %row-get) "ghostty_render_state_row_get" (pointer int pointer) int #f)
-  ((private %cells-new) "ghostty_render_state_row_cells_new" (pointer pointer) int #t)
-  ((private %cells-free) "ghostty_render_state_row_cells_free" (pointer) void #t)
-  ((private %cells-next) "ghostty_render_state_row_cells_next" (pointer) bool #f)
-  ((private %cell-get) "ghostty_render_state_row_cells_get" (pointer int pointer) int #f))
+(ffi/defbindings library
+                 %load!
+                 ((private %type-json) "ghostty_type_json" () utf8 #f)
+                 ((private %build-info) "ghostty_build_info" (int pointer) int #f)
+                 ((private %terminal-new) "ghostty_terminal_new" (pointer pointer u16 u16) int #t)
+                 ((private %terminal-free) "ghostty_terminal_free" (pointer) void #t)
+                 ((private %terminal-set) "ghostty_terminal_set" (pointer int pointer) int #t)
+                 ((private %terminal-resize) "ghostty_terminal_resize" (pointer u16 u16 u32 u32) int #t)
+                 ((private %vt-write) "ghostty_terminal_vt_write" (pointer pointer size-t) void #t)
+                 ((private %key-encoder-new) "ghostty_key_encoder_new" (pointer pointer) int #t)
+                 ((private %key-encoder-free) "ghostty_key_encoder_free" (pointer) void #t)
+                 ((private %key-options) "ghostty_key_encoder_setopt_from_terminal" (pointer pointer) void #t)
+                 ((private %key-option) "ghostty_key_encoder_setopt" (pointer int pointer) void #t)
+                 ((private %key-encode) "ghostty_key_encoder_encode" (pointer pointer pointer size-t pointer) int #t)
+                 ((private %key-event-new) "ghostty_key_event_new" (pointer pointer) int #t)
+                 ((private %key-event-free) "ghostty_key_event_free" (pointer) void #t)
+                 ((private %key-action) "ghostty_key_event_set_action" (pointer int) void #t)
+                 ((private %key-code) "ghostty_key_event_set_key" (pointer int) void #t)
+                 ((private %key-mods) "ghostty_key_event_set_mods" (pointer u16) void #t)
+                 ((private %key-text) "ghostty_key_event_set_utf8" (pointer pointer size-t) void #t)
+                 ((private %key-unshifted) "ghostty_key_event_set_unshifted_codepoint" (pointer u32) void #t)
+                 ((private %state-new) "ghostty_render_state_new" (pointer pointer) int #t)
+                 ((private %state-free) "ghostty_render_state_free" (pointer) void #t)
+                 ((private %state-update) "ghostty_render_state_update" (pointer pointer) int #t)
+                 ((private %state-get) "ghostty_render_state_get" (pointer int pointer) int #f)
+                 ((private %colors-get) "ghostty_render_state_colors_get" (pointer pointer) int #f)
+                 ((private %rows-new) "ghostty_render_state_row_iterator_new" (pointer pointer) int #t)
+                 ((private %rows-free) "ghostty_render_state_row_iterator_free" (pointer) void #t)
+                 ((private %rows-next) "ghostty_render_state_row_iterator_next" (pointer) bool #f)
+                 ((private %row-get) "ghostty_render_state_row_get" (pointer int pointer) int #f)
+                 ((private %cells-new) "ghostty_render_state_row_cells_new" (pointer pointer) int #t)
+                 ((private %cells-free) "ghostty_render_state_row_cells_free" (pointer) void #t)
+                 ((private %cells-next) "ghostty_render_state_row_cells_next" (pointer) bool #f)
+                 ((private %cell-get) "ghostty_render_state_row_cells_get" (pointer int pointer) int #f))
 
 (def (library-candidates)
   "MANSE_GHOSTTY_LIBRARY when set, with no fallback; otherwise loader names and Nix profiles."
@@ -140,23 +153,25 @@
   library)
 
 (def- (read-gstring p)
-  "Copy a GhosttyString's bytes. They are not NUL-terminated, so copy to a terminated buffer first."
-  (let ((len (ffi/field-ref p GString '(len))))
-    (let ((copy (ffi/alloc 'u8 (+ len 1))))
-      (ffi/copy! copy (ffi/field-ref p GString '(ptr)) len)
-      (ffi/set! copy 'u8 len 0)
-      (let ((s (ffi/read-utf8 copy (+ len 1))))
-        (ffi/free! copy)
-        s))))
+  "Copy a GhosttyString's bytes through a terminated buffer."
+  (let ((len (ffi/field-ref p GString '(len)))
+        (copy (ffi/alloc 'u8 (+ len 1))))
+    (defer
+      (begin
+        (ffi/copy! copy (ffi/field-ref p GString '(ptr)) len)
+        (ffi/set! copy 'u8 len 0)
+        (ffi/read-utf8 copy (+ len 1)))
+      (ffi/free! copy))))
 
 (def (build-info)
   (let ((s (ffi/alloc GString 1)))
-    (check! "build_info" (%build-info BUILD-INFO-OPTIMIZE scratch))
-    (let ((optimize (get optimize-modes (ffi/ref scratch 'i32 0))))
-      (check! "build_info" (%build-info BUILD-INFO-VERSION-STRING s))
-      (let ((version (read-gstring s)))
-        (ffi/free! s)
-        {:optimize optimize :version version}))))
+    (defer
+      (begin
+        (check! "build_info" (%build-info BUILD-INFO-OPTIMIZE scratch))
+        (let ((optimize (get optimize-modes (ffi/ref scratch 'i32 0))))
+          (check! "build_info" (%build-info BUILD-INFO-VERSION-STRING s))
+          {:optimize optimize :version (read-gstring s)}))
+      (ffi/free! s))))
 
 (def- (snake name)
   (string-replace (str name) "-" "_"))
@@ -164,25 +179,22 @@
 (def (check-layouts!)
   "Compare every declared layout's size, alignment and field offsets with ghostty_type_json."
   (let ((described (json/parse (%type-json))))
-    (for-each
-      (fn (c-name)
-        (let ((d (get described c-name))
-              (t (get (get layouts c-name) :layout))
-              (fields (get (get layouts c-name) :fields)))
-          (unless d (error "ghostty: library does not describe" c-name))
-          (unless (and (= (ffi/sizeof t) (d "size")) (= (ffi/alignof t) (d "align")))
-            (error "ghostty: size or alignment differs" c-name))
-          (unless (= (length fields) (length (d "fields")))
-            (error "ghostty: field count differs" c-name))
-          (for-each
-            (fn (f)
-              (let ((jf (get (d "fields") (snake (car f)))))
-                (unless (and jf
-                             (= (ffi/offset-of t (list (car f))) (jf "offset"))
-                             (= (ffi/sizeof (cadr f)) (jf "size")))
-                  (error "ghostty: field differs" c-name (car f)))))
-            fields)))
-      (keys layouts))
+    (for-each (fn (c-name)
+                (let ((d (get described c-name))
+                      (t (get (get layouts c-name) :layout))
+                      (fields (get (get layouts c-name) :fields)))
+                  (unless d (error "ghostty: library does not describe" c-name))
+                  (unless (and (= (ffi/sizeof t) (d "size")) (= (ffi/alignof t) (d "align")))
+                    (error "ghostty: size or alignment differs" c-name))
+                  (unless (= (length fields) (length (d "fields"))) (error "ghostty: field count differs" c-name))
+                  (for-each (fn (f)
+                              (let ((jf (get (d "fields") (snake (car f)))))
+                                (unless (and jf
+                                             (= (ffi/offset-of t (list (car f))) (jf "offset"))
+                                             (= (ffi/sizeof (cadr f)) (jf "size")))
+                                  (error "ghostty: field differs" c-name (car f)))))
+                            fields)))
+              (keys layouts))
     (length (keys layouts))))
 
 ;; Terminals
@@ -194,31 +206,37 @@
 (def (new cols rows)
   "Create a terminal with its own render state and iterators."
   (load!)
-  (let ((term {:cols cols :rows rows :replies []}))
-    (check! "terminal_new" (%terminal-new ffi/null scratch cols rows))
-    (put! term :handle (ffi/ref scratch 'pointer 0))
-    (put! term :state (new-handle "render_state_new" %state-new ffi/null))
-    (put! term :row-iter (new-handle "row_iterator_new" %rows-new ffi/null))
-    (put! term :cells (new-handle "row_cells_new" %cells-new ffi/null))
-    (put! term :rgb (ffi/alloc Rgb 1))
-    (put! term :codepoints (ffi/alloc 'u32 16))
-    (put! term :style (ffi/alloc Style 1))
-    (ffi/field-set! (term :style) Style '(size) (ffi/sizeof Style))
-    ;; Forward through the namespace so a reload changes the behaviour of live terminals.
-    (put! term :write-pty
-          (ffi/callback '(pointer pointer pointer size-t) 'void
-                        (fn (handle userdata data len) (on-write-pty term data len))))
-    (check! "terminal_set" (%terminal-set (term :handle) OPT-WRITE-PTY (term :write-pty)))
-    term))
+  (let ((term {:cols cols :rows rows :replies []})
+        (success? #f))
+    (unwind-protect
+      (begin
+        (check! "terminal_new" (%terminal-new ffi/null scratch cols rows))
+        (put! term :handle (ffi/ref scratch 'pointer 0))
+        (put! term :state (new-handle "render_state_new" %state-new ffi/null))
+        (put! term :row-iter (new-handle "row_iterator_new" %rows-new ffi/null))
+        (put! term :cells (new-handle "row_cells_new" %cells-new ffi/null))
+        (put! term :rgb (ffi/alloc Rgb 1))
+        (put! term :codepoints (ffi/alloc 'u32 16) :codepoint-capacity 16)
+        (put! term :style (ffi/alloc Style 1))
+        (ffi/field-set! (term :style) Style '(size) (ffi/sizeof Style))
+        ;; Forward through the namespace so a reload changes the behaviour of live terminals.
+        (put! term
+              :write-pty (ffi/callback '(pointer pointer pointer size-t)
+                                       'void
+                                       (fn (_handle _userdata data len) (on-write-pty term data len))))
+        (check! "terminal_set" (%terminal-set (term :handle) OPT-WRITE-PTY (term :write-pty)))
+        (set! success? #t)
+        term)
+      (unless success? (free! term)))))
 
 (def (free! term)
   (free-keyboard! term)
-  (%cells-free (term :cells))
-  (%rows-free (term :row-iter))
-  (%state-free (term :state))
-  (%terminal-free (term :handle))
-  (ffi/free-callback! (term :write-pty))
-  (for-each (fn (k) (ffi/free! (term k))) '(:rgb :codepoints :style)))
+  (when (term :cells) (%cells-free (term :cells)))
+  (when (term :row-iter) (%rows-free (term :row-iter)))
+  (when (term :state) (%state-free (term :state)))
+  (when (term :handle) (%terminal-free (term :handle)))
+  (when (term :write-pty) (ffi/free-callback! (term :write-pty)))
+  (for-each (fn (k) (when (term k) (ffi/free! (term k)))) '(:rgb :codepoints :style)))
 
 (def- (free-keyboard! term)
   (when (term :key-encoder) (%key-encoder-free (term :key-encoder)))
@@ -254,7 +272,11 @@
     (%key-mods event mods)
     (%key-action event action)
     (ffi/set! (term :key-text) 'u8 0 ascii)
-    (%key-text event (term :key-text) (if (= ascii 0) 0 1))
+    (%key-text event
+               (term :key-text)
+               (if (= ascii 0)
+                   0
+                   1))
     (%key-unshifted event unshifted)
     (let ((result (%key-encode encoder event (term :key-buffer) (term :key-capacity) scratch)))
       (when (= result -3)
@@ -265,26 +287,27 @@
           (put! term :key-capacity capacity)
           (set! result (%key-encode encoder event buffer capacity scratch))))
       (check! "key_encoder_encode" result)
-      (array-to-list (map (fn (i) (ffi/ref (term :key-buffer) 'u8 i))
-                          (range (ffi/ref scratch 'size-t 0)))))))
+      (array-to-list (map (fn (i) (ffi/ref (term :key-buffer) 'u8 i)) (range (ffi/ref scratch 'size-t 0)))))))
 
 (def (on-write-pty term data len)
   "Collect the terminal's replies as byte values, or pass them to :on-reply."
   (let ((handler (get term :on-reply)))
     (if handler
         (handler data len)
-        (dotimes (i len) (push! (term :replies) (ffi/ref data 'u8 i))))))
+        (dotimes (i len)
+          (push! (term :replies) (ffi/ref data 'u8 i))))))
 
 (def (write-bytes! term data len)
   (%vt-write (term :handle) data len))
 
 (def (write! term text)
   (let ((p (ffi/alloc-utf8 text)))
-    (let loop ((n 0))
-      (if (= 0 (ffi/ref p 'u8 n))
-          (write-bytes! term p n)
-          (loop (+ n 1))))
-    (ffi/free! p)))
+    (defer
+      (let loop ((n 0))
+        (if (= 0 (ffi/ref p 'u8 n))
+            (write-bytes! term p n)
+            (loop (+ n 1))))
+      (ffi/free! p))))
 
 (def (resize! term cols rows cell-width cell-height)
   (check! "terminal_resize" (%terminal-resize (term :handle) cols rows cell-width cell-height))
@@ -303,37 +326,41 @@
 
 (def (cursor term)
   "The cursor's viewport position, or nil when it is hidden or outside the viewport."
-  (when (and (state-ref term STATE-CURSOR-VISIBLE 'bool)
-             (state-ref term STATE-CURSOR-VIEWPORT-HAS-VALUE 'bool))
+  (when (and (state-ref term STATE-CURSOR-VISIBLE 'bool) (state-ref term STATE-CURSOR-VIEWPORT-HAS-VALUE 'bool))
     (list (state-ref term STATE-CURSOR-VIEWPORT-X 'u16) (state-ref term STATE-CURSOR-VIEWPORT-Y 'u16))))
 
 (def (colors term)
   (let ((c (ffi/alloc Colors 1)))
-    (ffi/field-set! c Colors '(size) (ffi/sizeof Colors))
-    (check! "colors_get" (%colors-get (term :state) c))
-    (let ((rgb (fn (path) (map (fn (k) (ffi/field-ref c Colors (append path (list k)))) '(r g b)))))
-      (let ((result {:foreground (rgb '(foreground)) :background (rgb '(background))}))
-        (ffi/free! c)
-        result))))
+    (defer
+      (begin
+        (ffi/field-set! c Colors '(size) (ffi/sizeof Colors))
+        (check! "colors_get" (%colors-get (term :state) c))
+        (let ((rgb (fn (path) (map (fn (k) (ffi/field-ref c Colors (append path (list k)))) '(r g b)))))
+          {:foreground (rgb '(foreground)) :background (rgb '(background))}))
+      (ffi/free! c))))
 
 ;; Cells. Each cell is read on demand while the iterators are positioned on it.
 
 (def- (cell-rgb term key)
   (if (= SUCCESS (%cell-get (term :cells) key (term :rgb)))
-      (list (ffi/field-ref (term :rgb) Rgb '(r)) (ffi/field-ref (term :rgb) Rgb '(g)) (ffi/field-ref (term :rgb) Rgb '(b)))
+      (list (ffi/field-ref (term :rgb) Rgb '(r))
+            (ffi/field-ref (term :rgb) Rgb '(g))
+            (ffi/field-ref (term :rgb) Rgb '(b)))
       nil))
 
 (def (cell-codepoints term)
   (check! "row_cells_get" (%cell-get (term :cells) CELL-GRAPHEMES-LEN scratch))
   (let ((n (ffi/ref scratch 'u32 0)))
-    (when (> n 16)
-      (ffi/free! (term :codepoints))
-      (put! term :codepoints (ffi/alloc 'u32 n)))
+    (when (> n (get term :codepoint-capacity 16))
+      (let ((buffer (ffi/alloc 'u32 n)))
+        (ffi/free! (term :codepoints))
+        (put! term :codepoints buffer :codepoint-capacity n)))
     (if (= n 0)
         '()
         (begin
           (check! "row_cells_get" (%cell-get (term :cells) CELL-GRAPHEMES-BUF (term :codepoints)))
-          (let loop ((i (- n 1)) (acc '()))
+          (let loop ((i (- n 1))
+                     (acc '()))
             (if (< i 0)
                 acc
                 (loop (- i 1) (cons (ffi/ref (term :codepoints) 'u32 i) acc))))))))
@@ -350,16 +377,16 @@
      :inverse (ffi/field-ref s Style '(inverse))}))
 
 ;; The iterator getters take a pointer to an existing handle and reposition it.
-(def- (point! term key getter source handle)
+(def- (point! key getter source handle)
   (ffi/set! scratch 'pointer 0 handle)
   (check! "iterator" (getter source key scratch)))
 
 (def (each-cell term f)
   "Call (f x y) for every cell in the viewport, with the iterators positioned for cell readers."
-  (point! term STATE-ROW-ITERATOR %state-get (term :state) (term :row-iter))
+  (point! STATE-ROW-ITERATOR %state-get (term :state) (term :row-iter))
   (let rows ((y 0))
     (when (%rows-next (term :row-iter))
-      (point! term ROW-CELLS %row-get (term :row-iter) (term :cells))
+      (point! ROW-CELLS %row-get (term :row-iter) (term :cells))
       (let cols ((x 0))
         (when (%cells-next (term :cells))
           (f x y)
@@ -381,9 +408,10 @@
 (def (text term)
   "The viewport as a list of row strings, with a space for each empty cell."
   (map (fn (row)
-         (apply str (map (fn (c)
-                           (if (null? (c :codepoints))
-                               " "
-                               (codepoints->string (c :codepoints))))
-                         row)))
+         (apply str
+                (map (fn (c)
+                       (if (null? (c :codepoints))
+                           " "
+                           (codepoints->string (c :codepoints))))
+                     row)))
        (grid term)))

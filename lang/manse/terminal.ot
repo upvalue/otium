@@ -1,4 +1,5 @@
 (ns manse.terminal)
+(require otium.time :as time)
 (require otium.ui :as ui)
 (require otium.gfx :as gfx)
 (require otium.ui.gpu :as gpu)
@@ -119,7 +120,7 @@
         (resizing? (and (g :resizing?) settled)))
     (unless resizing? (set! (w :settled) (list (bounds :width) (bounds :height))))
     (let ((area (if resizing?
-                    (make ui/Bounds :x (bounds :x) :y (bounds :y) :width (car settled) :height (cadr settled))
+                    (ui/bounds (bounds :x) (bounds :y) (car settled) (cadr settled))
                     bounds)))
       (when resizing? (gfx/rect g bounds (rgba ((g/colors (session :term)) :background) 255)))
       (gfx/cached g
@@ -133,17 +134,16 @@
   (let ((cols (max 1 (floor (/ (- (bounds :width) (* 2 (padding))) (session :cell-w)))))
         (rows (max 1 (floor (/ (- (bounds :height) (* 2 (padding))) (session :cell-h))))))
     (unless (and (= cols (get session :cols 0)) (= rows (get session :rows 0)))
-      (put! session :cols cols)
-      (put! session :rows rows)
       (g/resize! (session :term) cols rows (round (session :cell-w)) (round (session :cell-h)))
       (unless (session :exit) (pty/resize! (session :pty) cols rows))
-      (g/update! (session :term)))))
+      (g/update! (session :term))
+      (put! session :cols cols :rows rows))))
 
 (def (text-run! session g x y text color)
-  (gfx/text g (make ui/Bounds :x x :y y :width 100000 :height (session :cell-h)) text (font) (font-size) color #f))
+  (gfx/text g (ui/bounds x y 100000 (session :cell-h)) text (font) (font-size) color #f))
 
 (def (paint-terminal session g bounds fit?)
-  (let ((start (current-jiffy))
+  (let ((start (time/seconds))
         (term (session :term)))
     (let ((metrics-key (list (font) (font-size) (native/gpu-scale (g :renderer)))))
       (unless (equal? metrics-key (session :metrics-key))
@@ -181,13 +181,7 @@
                              (set! bg t)))
                          (when bg
                            (let ((left (round (+ x0 (* x cw)))))
-                             (gfx/rect g
-                                       (make ui/Bounds
-                                             :x left
-                                             :y py
-                                             :width (- (round (+ x0 (* (+ x 1) cw))) left)
-                                             :height ch)
-                                       (rgba bg 255))))
+                             (gfx/rect g (ui/bounds left py (- (round (+ x0 (* (+ x 1) cw))) left) ch) (rgba bg 255))))
                          (let ((color (rgba fg 255)))
                            (unless (eq? color run-color)
                              (flush!)
@@ -202,12 +196,12 @@
       (let ((cur (g/cursor term)))
         (when (and cur (g :focused?) (not (session :exit)))
           (gfx/rect g
-                    (make ui/Bounds :x (+ x0 (* (car cur) cw)) :y (+ y0 (* (cadr cur) ch)) :width cw :height ch)
+                    (ui/bounds (+ x0 (* (car cur) cw)) (+ y0 (* (cadr cur) ch)) cw ch)
                     (rgba (colors :foreground) 128)))))
-    (record-time! session (- (current-jiffy) start))))
+    (record-time! session (- (time/seconds) start))))
 
 (def (record-time! session elapsed)
-  (put! session :paint-ns (+ elapsed (get session :paint-ns 0)))
+  (put! session :paint-seconds (+ elapsed (get session :paint-seconds 0)))
   (put! session :frames (+ 1 (get session :frames 0)))
   (when (= 0 (modulo (session :frames) 120))
     (process/write-error (str "manse "
@@ -217,6 +211,6 @@
                               "x"
                               (session :rows)
                               " paint "
-                              (/ (round (/ (session :paint-ns) 1200000.0)) 100.0)
+                              (/ (round (* (/ (session :paint-seconds) 120) 100000)) 100.0)
                               " ms/frame\n"))
-    (put! session :paint-ns 0)))
+    (put! session :paint-seconds 0)))

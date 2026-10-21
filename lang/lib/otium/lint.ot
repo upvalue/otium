@@ -27,8 +27,11 @@
 (def- (line-starts text)
   ;; Character offset of the start of each line, counted from zero.
   (let ((starts [0]))
-    (dotimes (i (string-length text))
-      (when (equal? (substring text i (+ i 1)) "\n") (push! starts (+ i 1))))
+    (let ((i 0))
+      (for-each (fn (c)
+                  (set! i (+ i 1))
+                  (when (eq? c #\newline) (push! starts i)))
+                (string->list text)))
     starts))
 
 (def- (make-context text path options)
@@ -138,21 +141,13 @@
                     (else nil))))
         (if (nil? open)
             {:file? #f :names [] :reason "" :malformed #t}
-            (let ((close (diagnostics-index rest ")" open)))
+            (let ((close (string-index rest ")" open)))
               (if (nil? close)
                   {:file? file :names [] :reason "" :malformed #t}
                   {:file? file
                    :names (filter (fn (name) (not (equal? name "")))
                                   (string-split (string-replace (substring rest open close) "," " ")))
                    :reason (string-trim (substring rest (+ close 1)))})))))))
-
-(def- (diagnostics-index text part from)
-  (let ((found nil)
-        (i from))
-    (while (and (not found) (<= (+ i (string-length part)) (string-length text)))
-      (when (equal? (substring text i (+ i (string-length part))) part) (set! found i))
-      (set! i (+ i 1)))
-    found))
 
 (def- (collect-directives! context children ancestors)
   ;; Attach each lint comment among children to the form it covers.
@@ -209,7 +204,7 @@
   (let ((hit #f))
     (for-each (fn (directive)
                 (when (and (not (get directive :malformed))
-                           (member (d :rule) (array-to-list (directive :names)))
+                           (member (d :rule) (directive :names))
                            (or (directive :file?)
                                (and (directive :span)
                                     (<= ((directive :span) :start) ((d :span) :start))
@@ -568,6 +563,7 @@
   (let ((head (syntax/head-name node))
         (datum (top-datum context node)))
     (cond
+      ((and (equal? (path-last (context :path)) "project.ot") (member head '("paths" "lint" "format"))) nil)
       ((equal? head "ns")
        (put! context :namespace (second datum))
        (requiring context (fn () (in-namespace space (cons 'ns (cons space (cdr (cdr datum)))))))

@@ -303,6 +303,9 @@
     (list
       (cons 'flush-ports! flush-all!)
       (cons 'file-info file-info)
+      (cons 'current-directory (lambda () (host-call 'current-directory #f current-directory)))
+      (cons 'file-symbolic-link? (lambda (path)
+        (filesystem 'file-symbolic-link? path (lambda () (file-symbolic-link? path)))))
       (cons 'file-exists? (lambda (path) (filesystem 'file-exists? path (lambda () (file-exists? path)))))
       (cons 'delete-file (lambda (path) (filesystem 'delete-file path (lambda () (reject-directory path 'delete-file) (delete-file path #t) (void)))))
       (cons 'rename-file (lambda (from to) (path! to 'rename-file)

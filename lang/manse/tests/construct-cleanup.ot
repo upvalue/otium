@@ -1,0 +1,23 @@
+(require manse.ghostty)
+(ns manse.ghostty)
+(require otium.test :refer (check report))
+(set! load! (fn () nil))
+(set! scratch (ffi/alloc 'pointer 1))
+(set! %terminal-new
+      (fn _args
+        (ffi/set! scratch 'pointer 0 ffi/null)
+        0))
+(set! %state-new (fn _args (error "injected constructor failure")))
+
+(def released 0)
+
+(set! %terminal-free (fn (_) (set! released (+ released 1))))
+(check "constructor error propagates"
+       #t
+       (try
+         (new 80 24)
+         #f
+         (catch (error? _) #t)))
+(check "earlier handle is released" 1 released)
+(ffi/free! scratch)
+(report "ghostty constructor cleanup")

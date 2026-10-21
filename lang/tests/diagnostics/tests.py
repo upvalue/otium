@@ -52,3 +52,15 @@ def catalog(t):
                 code, 'needs a title, message and explanation')
         if code.startswith('L'):
             t.check(entry.get('level') in ('deny', 'warn', 'allow'), code, 'has no valid level')
+
+
+@test('diagnostic json controls', runtimes=BOTH)
+def json_controls(t):
+    path = t.scratch / 'controls.ot'
+    path.write_text('(require otium.diagnostics :as d) '
+                             '(display (d/render-json {:message "a\\x1b;b\\x0;c" '
+                             ':span {:path "p\\x1;q" :line 1 :column 1}}))')
+    result = t.expect(t.otium(path))
+    data = json.loads(result.stdout)
+    t.check(data['message'] == 'a\x1bb\x00c', data)
+    t.check(data['path'] == 'p\x01q', data)

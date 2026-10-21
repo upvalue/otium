@@ -1,5 +1,6 @@
 ;; Colours after Zed's One Dark. Plain defs, so reloading restyles Manse.
 (ns manse.theme)
+(require otium.ui :as ui)
 
 (def background 0x282c33ff)
 
@@ -40,3 +41,16 @@
 (def hint-typed 0x8a7140ff)
 
 (def ui-size 13)
+
+;; Update widget defaults when this module is reloaded.
+(put! ui/palette
+      :text text
+      :muted faint
+      :selection selected
+      :focus accent
+      :input background
+      :disabled panel
+      :accent-pressed selected
+      :accent accent
+      :surface surface
+      :on-accent background)

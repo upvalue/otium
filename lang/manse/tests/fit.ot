@@ -1,0 +1,30 @@
+(require manse.terminal :as terminal)
+(require manse.ghostty :as g)
+(require manse.pty :as pty)
+(require otium.ui :as ui)
+(require otium.test :refer (check report))
+
+(def session {:cell-w 10 :cell-h 20 :cols 1 :rows 1})
+
+(def area (ui/bounds 0 0 200 200))
+
+(def calls 0)
+
+(def fail? #t)
+
+(set! g/resize! (fn _args nil))
+(set! g/update! (fn _args nil))
+(set! pty/resize!
+      (fn _args
+        (set! calls (+ calls 1))
+        (when fail? (error "resize failed"))))
+(try
+  (terminal/fit! session area)
+  (catch (error? _) nil))
+(check "failed resize keeps applied size" 1 (session :cols))
+(set! fail? #f)
+(terminal/fit! session area)
+(check "same request retries after failure" 2 calls)
+(terminal/fit! session area)
+(check "successful size is cached" 2 calls)
+(report "fit")

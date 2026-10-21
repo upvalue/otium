@@ -28,8 +28,7 @@
   "Register an app with a stable ID. The registry owns its lifetime."
   (unless (and (instance? app) (class-subtype? (dispatch-type app) App)) (error "Expected a Manse app" app))
   (unless (and (string? name) (> (string-length name) 0)) (error "App name must be a nonempty string" name))
-  (when (exists (fn (entry) (eq? (entry :app) app)) (array-to-list (registry :entries)))
-    (error "App is already registered"))
+  (when (exists (fn (entry) (eq? (entry :app) app)) (registry :entries)) (error "App is already registered"))
   (let ((entry {:id (registry :next-id) :name name :app app}))
     (put! registry :next-id (+ 1 (registry :next-id)))
     (push! (registry :entries) entry)
@@ -45,12 +44,7 @@
 
 (def (query registry . predicates)
   "Return metadata tables in registration order, optionally filtered by a predicate."
-  (let ((items (map (fn (entry)
-                      (let ((metadata (copy (info (entry :app)))))
-                        (put! metadata :id (entry :id))
-                        (put! metadata :name (entry :name))
-                        metadata))
-                    (registry :entries))))
+  (let ((items (map (fn (entry) (put (info (entry :app)) :id (entry :id) :name (entry :name))) (registry :entries))))
     (if (null? predicates)
         items
         (filter (car predicates) items))))

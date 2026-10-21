@@ -1,4 +1,5 @@
 (ns otium.ui.window)
+(require otium.time :as time)
 (require (otium.ui :as ui))
 (require (otium.ui.native :as native))
 (require (otium.ui.gpu :as gpu))
@@ -188,7 +189,7 @@
           ;; Animation frames skip the view. Size animations need Yoga; scroll
           ;; animations only move bounds.
           (when (or full? (and visible (or (gpu/resizing? tree) (gpu/animating? tree))))
-            (let ((now (seconds))
+            (let ((now (time/seconds))
                   (relayout? (or full? (gpu/resizing? tree))))
               (when full?
                 (sync! window)
@@ -209,9 +210,6 @@
             (set! (window :frame) (+ 1 (get window :frame)))
             (set! (window :last-error) #f))))
       (when (get options :after-frame!) ((get options :after-frame!) window)))))
-
-(def (seconds)
-  (/ (current-jiffy) (jiffies-per-second)))
 
 (def (wait-ms)
   "Poll interval for the loop; zero while a visible window animates, so frames

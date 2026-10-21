@@ -190,6 +190,8 @@
     (write-to . "(write-to port value ...)\nWrite readable forms separated by spaces to port and return nil.")
     (flush-ports! . "(flush-ports!)\nFlush all open file and custom output ports and the default output and error ports.")
     (file-exists? . "(file-exists? path)\nTest whether the path exists. Other filesystem failures raise file-error.")
+    (file-symbolic-link? . "(file-symbolic-link? path)\nTest whether path itself is a symbolic link, including a dangling link.")
+    (current-directory . "(current-directory)\nReturn the current working directory as an absolute path.")
     (file-info . "(file-info path)\nReturn a table with :type (:file, :directory, or :other), :size in bytes, and :modified in Unix seconds.")
     (delete-file . "(delete-file path)\nDelete a file and return nil. Filesystem failures raise file-error.")
     (rename-file . "(rename-file from to)\nRename a file and return nil. Filesystem failures raise file-error.")

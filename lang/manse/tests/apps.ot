@@ -21,23 +21,30 @@
   (set! (app :closed?) #t))
 
 (def registry (apps/registry))
+
 (def first (make Counter))
+
 (def second (make Counter))
+
 (def id (apps/add! registry "Counter" first))
+
 (check "lookup returns the live object" first (apps/find registry id))
 (check "unknown ID" nil (apps/find registry 100))
 (check "duplicate object rejected" #t (fails? (fn () (apps/add! registry "Again" first))))
 (check "non-app rejected" #t (fails? (fn () (apps/add! registry "Invalid" {}))))
 (check "invalid name rejected" #t (fails? (fn () (apps/add! registry "" second))))
 (check "names may repeat" 2 (apps/add! registry "Counter" second))
+
 (def metadata (get (apps/query registry) 0))
+
 (put! metadata :name "Changed snapshot")
 (check "query does not expose registry entries" "Counter" ((get (apps/query registry) 0) :name))
 (apps/step! first)
 (check "query sees current app state" 1 ((get (apps/query registry) 0) :count))
-(check "predicate query" '(1)
-       (array-to-list (map :id (apps/query registry (fn (info) (> (info :count) 0))))))
+(check "predicate query" '(1) (array-to-list (map :id (apps/query registry (fn (info) (> (info :count) 0))))))
+
 (def tree (ui/root))
+
 (ui/reconcile! tree (apps/view first))
 (check "nonterminal app renders its own view" "1" ((ui/instance (get (ui/children tree) 0)) :text))
 (require manse.apps :reload)

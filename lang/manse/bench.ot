@@ -1,3 +1,5 @@
+(require otium.time :as time)
+
 ;; Frame cost of the Manse strip with four busy terminals.
 ;; ./otium --runtime=chez -L . manse/bench.ot
 ;; MANSE_BENCH_UNCACHED=1 paints every terminal on every frame, as before
@@ -14,9 +16,6 @@
 (require (manse.apps :as apps))
 
 (def frames 120)
-
-(def (now)
-  (/ (current-jiffy) (/ (jiffies-per-second) 1000.0)))
 
 (def (ms total)
   (/ (round (* 100 (/ total frames))) 100.0))
@@ -61,16 +60,17 @@
             (pty/write! (session :pty)
                         "printf '\\033[3%dm%s\\033[0m %s\\n' $(for i in $(seq 1 60); do echo $((i % 7 + 1)) line$i /usr/lib/item/$i; done)\r"))
           (sessions))
-(let ((deadline (+ (now) 1500)))
-  (while (< (now) deadline) (for-each (fn (entry) (apps/step! (entry :app))) ((workspace/workspace :apps) :entries))))
+(let ((deadline (+ (* 1000 (time/seconds)) 1500)))
+  (while (< (* 1000 (time/seconds)) deadline)
+    (for-each (fn (entry) (apps/step! (entry :app))) ((workspace/workspace :apps) :entries))))
 (frame!)
 
 (def phases {:reconcile 0 :layout 0 :paint 0 :submit 0})
 
 (def (timed! table phase thunk)
-  (let ((start (now)))
+  (let ((start (* 1000 (time/seconds))))
     (thunk)
-    (put! table phase (+ (table phase) (- (now) start)))))
+    (put! table phase (+ (table phase) (- (* 1000 (time/seconds)) start)))))
 
 ;; Full frames, focusing left and right every frame.
 (dotimes (i frames)

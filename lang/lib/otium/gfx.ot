@@ -11,6 +11,12 @@
   (disabled? :init #f)
   (resizing? :init #f))
 
+(def (with-clip g clip)
+  "Copy a paint context with a different clip, preserving its flags."
+  (let ((context (copy g)))
+    (set! (context :clip) clip)
+    context))
+
 (def (rect g bounds color . radius)
   "Record a rounded rectangle, clipped to the current widget's bounds."
   (let ((clip (g :clip)))
@@ -91,14 +97,7 @@ and the bounds' size."
     (unless (and (equal? full (c :key)) (draw-cache g c bounds))
       (let ((start (native/gpu-mark (g :renderer))))
         (put! c :key nil)
-        (paint (make Context
-                     :renderer (g :renderer)
-                     :clip bounds
-                     :focused? (g :focused?)
-                     :pressed? (g :pressed?)
-                     :hovered? (g :hovered?)
-                     :disabled? (g :disabled?)
-                     :resizing? (g :resizing?)))
+        (paint (with-clip g bounds))
         (sdl/check (native/gpu-cache-store (g :renderer) (c :id) start (bounds :x) (bounds :y)))
         (put! c :key full)
         (unless (draw-cache g c bounds) (error "Paint cache was not stored"))))))

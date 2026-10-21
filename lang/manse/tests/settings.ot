@@ -49,8 +49,12 @@
       (settings/configure! {:font-path "~/manse-config-test.ot"})
       (check "home-relative font expanded" "/tmp/manse-config-test.ot" (settings/options :font-path)))
     (process/setenv! "HOME" home)))
-(check "empty font path rejected" #t
-       (try (settings/configure! {:font-path ""}) #f (catch (error? _) #t)))
+(check "empty font path rejected"
+       #t
+       (try
+         (settings/configure! {:font-path ""})
+         #f
+         (catch (error? _) #t)))
 (settings/configure! {:font-path #f})
 (check "font reset" #f (settings/options :font-path))
 (report "manse settings")

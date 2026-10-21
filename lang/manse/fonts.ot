@@ -1,6 +1,5 @@
 (ns manse.fonts)
 (require otium.process :as process)
-(require chez)
 
 (def (expand-home path)
   (if (string-starts-with? path "~/")
@@ -21,12 +20,12 @@
                 (list (str home "/Library/Fonts") (str home "/.fonts"))
                 '())
             (cond
-              ((and data-home (chez/path-absolute? data-home)) (list (str data-home "/fonts")))
+              ((and data-home (path-absolute? data-home)) (list (str data-home "/fonts")))
               (home (list (str home "/.local/share/fonts")))
               (else '()))
             (list "/Library/Fonts" "/System/Library/Fonts")
             (map (fn (directory) (str directory "/fonts"))
-                 (filter chez/path-absolute? (array-to-list (string-split data-dirs ":")))))))
+                 (filter path-absolute? (array-to-list (string-split data-dirs ":")))))))
 
 (def- (font-file? path)
   (let ((lower (string-downcase path)))
@@ -39,24 +38,24 @@
     (def (walk directory)
       (unless (get visited directory)
         (put! visited directory #t)
-        (when (chez/file-directory? directory)
+        (when (file-directory? directory)
           (let ((names (try
-                         (chez/directory-list directory)
+                         (list-directory directory)
                          (catch (error? _) '()))))
             (for-each (fn (name)
                         (let ((path (str directory "/" name)))
                           (cond
                             ((or (equal? name ".") (equal? name "..")) nil)
-                            ((chez/file-directory? path)
+                            ((file-directory? path)
                              ;; Avoid directory symlink cycles; symlinked font files are allowed.
-                             (unless (chez/file-symbolic-link? path) (walk path)))
-                            ((and (font-file? path) (chez/file-regular? path)) (set! found (cons path found))))))
+                             (unless (file-symbolic-link? path) (walk path)))
+                            ((and (font-file? path) (file-regular? path)) (set! found (cons path found))))))
                       names)))))
     (for-each (fn (root)
                 (let ((path (expand-home root)))
-                  (walk (if (chez/path-absolute? path)
+                  (walk (if (path-absolute? path)
                             path
-                            (str (chez/current-directory) "/" path)))))
+                            (str (current-directory) "/" path)))))
               (if (null? roots)
                   (search-paths)
                   (car roots)))
@@ -66,7 +65,7 @@
   "Find a filename or filename stem, case-insensitively. Returns every matching path."
   (let ((wanted (string-downcase name)))
     (filter (fn (path)
-              (let ((base (string-downcase (chez/path-last path))))
+              (let ((base (string-downcase (path-last path))))
                 (or (equal? wanted base) (equal? wanted (substring base 0 (- (string-length base) 4))))))
             (apply discover roots))))
 
@@ -78,10 +77,10 @@
      (error "Font must be a file path, installed filename, or #f" value))
     (else (let ((path (expand-home value)))
             (cond
-              ((chez/file-regular? path)
-               (if (chez/path-absolute? path)
+              ((file-regular? path)
+               (if (path-absolute? path)
                    path
-                   (str (chez/current-directory) "/" path)))
+                   (str (current-directory) "/" path)))
               ((string-contains? path "/") (error "Font file does not exist" path))
               (else (let ((matches (apply find (cons value roots))))
                       (cond

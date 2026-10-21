@@ -144,12 +144,13 @@
     (else (error "first: not a sequence"))))
 
 (def (rest seq)
-  "All but the first element; kind-preserving; empty is ()."
+  "All but the first element, preserving list, array, or string kind."
   (cond
     ((nil? seq) '())
     ((null? seq) '())
     ((pair? seq) (cdr seq))
     ((array? seq) (drop 1 seq))
+    ((string? seq) (substring seq (min 1 (string-length seq))))
     (else (error "rest: not a sequence"))))
 
 (def (nth seq i)
@@ -230,15 +231,55 @@
     (builder-finish out)))
 
 (def (find pred seq)
-  "(find predicate sequence)\nReturn the first element for which predicate returns a truthy value, or #f."
-  (let ((found #f)
-        (done #f))
-    (for-each (fn (x)
-                (when (and (not done) (pred x))
-                  (set! found x)
-                  (set! done #t)))
-              seq)
-    found))
+  "Return the first matching element, or #f. Stop at the first match."
+  (cond
+    ((array? seq)
+     (let loop ((i 0))
+       (cond
+         ((= i (length seq)) #f)
+         ((pred (get seq i)) (get seq i))
+         (else (loop (+ i 1))))))
+    ((or (nil? seq) (null? seq)) #f)
+    ((pair? seq)
+     (if (pred (car seq))
+         (car seq)
+         (find pred (cdr seq))))
+    (else (error "find: expected list or array" seq))))
+
+(def (find-index pred seq)
+  "Return the index of the first matching element in a list or array, or nil."
+  (if (array? seq)
+      (let loop ((i 0))
+        (cond
+          ((= i (length seq)) nil)
+          ((pred (get seq i)) i)
+          (else (loop (+ i 1)))))
+      (let loop ((rest seq)
+                 (i 0))
+        (cond
+          ((or (nil? rest) (null? rest)) nil)
+          ((pred (car rest)) i)
+          (else (loop (cdr rest) (+ i 1)))))))
+
+(def (clamp value low high)
+  "Clamp value to the inclusive interval from low to high."
+  (max low (min high value)))
+
+(def (insert-at seq index value)
+  "Insert before index in a list or array, returning a copy of the same kind."
+  (require-int "insert-at" index)
+  (unless (<= 0 index (length seq)) (error "insert-at: index out of range" index))
+  (concat (take index seq)
+          (if (array? seq)
+              [value]
+              (list value))
+          (drop index seq)))
+
+(def (remove-at seq index)
+  "Remove the element at index from a list or array, returning a copy of the same kind."
+  (require-int "remove-at" index)
+  (unless (<= 0 index (- (length seq) 1)) (error "remove-at: index out of range" index))
+  (concat (take index seq) (drop (+ index 1) seq)))
 
 (def (reduce f init seq)
   "(reduce procedure initial sequence)\nFold left, calling (procedure accumulator element) for each element. Empty sequences return initial."
@@ -740,12 +781,17 @@
     ((eq? x (car lst)) lst)
     (else (memq x (cdr lst)))))
 
-(def (member x lst)
-  "(member value list)\nThe first tail of list whose car is equal? to value, or #f."
-  (cond
-    ((not (pair? lst)) #f)
-    ((equal? x (car lst)) lst)
-    (else (member x (cdr lst)))))
+(def (member x seq)
+  "Return the first matching tail of a list or array, or #f."
+  (if (array? seq)
+      (let ((i (find-index (fn (value) (equal? x value)) seq)))
+        (if i
+            (drop i seq)
+            #f))
+      (cond
+        ((not (pair? seq)) #f)
+        ((equal? x (car seq)) seq)
+        (else (member x (cdr seq))))))
 
 (def (assq key alist)
   "(assq key alist)\nThe first pair in alist whose car is eq? to key, or #f."
@@ -789,31 +835,54 @@
         init
         (apply f (append (heads lists) (list (loop (tails lists))))))))
 
-(def (exists f lst & more)
-  "(exists predicate list ...)\nThe first truthy result of predicate across the lists, or #f."
-  (let loop ((lists (cons lst more)))
-    (if (any-empty? lists)
+(def- (sequence-ended? sequences i)
+  (and (pair? sequences)
+       (or (if (array? (car sequences))
+               (>= i (length (car sequences)))
+               (not (pair? (car sequences))))
+           (sequence-ended? (cdr sequences) i))))
+
+(def- (sequence-heads sequences i)
+  (map (fn (seq)
+         (if (array? seq)
+             (get seq i)
+             (car seq)))
+       sequences))
+
+(def- (sequence-tails sequences)
+  (map (fn (seq)
+         (if (array? seq)
+             seq
+             (cdr seq)))
+       sequences))
+
+(def (exists f seq & more)
+  "Return the first truthy predicate result across lists or arrays, or #f. Stop at the shortest input."
+  (let loop ((sequences (cons seq more))
+             (i 0))
+    (if (sequence-ended? sequences i)
         #f
-        (or (apply f (heads lists)) (loop (tails lists))))))
+        (or (apply f (sequence-heads sequences i)) (loop (sequence-tails sequences) (+ i 1))))))
 
-(def (for-all f lst & more)
-  "(for-all predicate list ...)\nThe last result if predicate is truthy for every position, else the first falsy result."
-  (let loop ((lists (cons lst more))
+(def (for-all f seq & more)
+  "Return the last predicate result if all positions pass, else the first falsy result. Empty inputs pass."
+  (let loop ((sequences (cons seq more))
+             (i 0)
              (last #t))
-    (if (any-empty? lists)
+    (if (sequence-ended? sequences i)
         last
-        (let ((v (apply f (heads lists))))
-          (if v
-              (loop (tails lists) v)
-              v)))))
+        (let ((value (apply f (sequence-heads sequences i))))
+          (if value
+              (loop (sequence-tails sequences) (+ i 1) value)
+              value)))))
 
-(def (positive? x)
-  "(positive? number)\nTest whether number is greater than zero."
-  (> x 0))
+(def positive?
+  "Alias for pos?."
+  pos?)
 
-(def (negative? x)
-  "(negative? number)\nTest whether number is less than zero."
-  (< x 0))
+(def negative?
+  "Alias for neg?."
+  neg?)
 
 (def (gcd & xs)
   "(gcd integer ...)\nGreatest common divisor; no arguments gives 0."
@@ -1023,3 +1092,72 @@
 (def (read-file path)
   "Read a whole UTF-8 file. Invalid UTF-8 raises decode-error."
   (with ((port (open-input-file path))) (read-all port)))
+
+(def (write-file path text)
+  "Write UTF-8 text to path, replacing its contents. Close the port on failure."
+  (with ((port (open-output-file path))) (write-string text port)))
+
+(def- (%string-prefix? chars rest)
+  (or (null? rest) (and (pair? chars) (eq? (car chars) (car rest)) (%string-prefix? (cdr chars) (cdr rest)))))
+
+(def (string-index text part . starts)
+  "Find part at or after the optional character offset, or nil. Empty part matches at start."
+  (when (> (length starts) 1) (error "string-index: expected at most one start"))
+  (let ((start (if (null? starts)
+                   0
+                   (car starts)))
+        (n (string-length text))
+        (needle (string->list part)))
+    (require-int "string-index" start)
+    (when (< start 0) (error "string-index: negative start" start))
+    (when (<= start n)
+      (let loop ((chars (drop start (string->list text)))
+                 (i start))
+        (cond
+          ((%string-prefix? chars needle) i)
+          ((null? chars) nil)
+          (else (loop (cdr chars) (+ i 1))))))))
+
+(def (string-repeat text count)
+  "Repeat text count times; zero gives an empty string."
+  (require-int "string-repeat" count)
+  (when (< count 0) (error "string-repeat: negative count" count))
+  (unless (string? text) (error "string-repeat: expected a string" text))
+  (let ((out (buffer)))
+    (dotimes (_ count)
+      (buffer-push! out text))
+    (buffer->string out)))
+
+(def (file-directory? path)
+  "Test whether path resolves to a directory. Missing paths return #f."
+  (and (file-exists? path) (eq? (get (file-info path) :type) :directory)))
+
+(def (file-regular? path)
+  "Test whether path resolves to a regular file. Missing paths return #f."
+  (and (file-exists? path) (eq? (get (file-info path) :type) :file)))
+
+(def (path-absolute? path)
+  "Test whether a POSIX path begins with /."
+  (string-starts-with? path "/"))
+
+(def- (path-end path)
+  (let loop ((end (string-length path)))
+    (if (and (> end 1) (eq? (string-ref path (- end 1)) #\/))
+        (loop (- end 1))
+        end)))
+
+(def (path-parent path)
+  "The lexical parent of a POSIX path; / stays / and a bare name has parent \"\"."
+  (let loop ((i (- (path-end path) 1)))
+    (cond
+      ((< i 0) "")
+      ((eq? (string-ref path i) #\/) (substring path 0 (max 1 i)))
+      (else (loop (- i 1))))))
+
+(def (path-last path)
+  "The final component of a POSIX path, ignoring trailing slashes. / has no component."
+  (let ((end (path-end path)))
+    (let loop ((i (- end 1)))
+      (if (or (< i 0) (eq? (string-ref path i) #\/))
+          (substring path (+ i 1) end)
+          (loop (- i 1))))))

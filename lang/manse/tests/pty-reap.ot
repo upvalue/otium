@@ -1,0 +1,30 @@
+(require manse.pty)
+(ns manse.pty)
+(require otium.test :refer (check report))
+
+(def running? #t)
+
+(def polls 0)
+
+(set! %close (fn (_) 0))
+(set! %waitpid
+      (fn (pid result _flags)
+        (set! polls (+ polls 1))
+        (if running?
+            0
+            (begin
+              (ffi/set! result 'i32 0 0)
+              pid))))
+
+(def p {:fd 1 :pid 42 :buffer (ffi/alloc 'u8 1) :pollfd (ffi/alloc PollFd 1)})
+
+(close! p)
+(check "running child stays pending" '(42) (array-to-list pending-pids))
+(close! p)
+(check "close is idempotent" 1 polls)
+(set! running? #f)
+(reap!)
+(check "exited child is removed" 0 (length pending-pids))
+(reap!)
+(check "child is reaped only once" 2 polls)
+(report "pty reap")

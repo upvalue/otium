@@ -1,0 +1,18 @@
+(require manse.pty)
+(ns manse.pty)
+(require otium.test :refer (check report))
+(set! load! (fn () nil))
+(set! %openpt (fn (_) 123))
+(set! %grantpt (fn (_) -1))
+
+(def closed nil)
+
+(set! %close (fn (fd) (set! closed fd)))
+(check "spawn error propagates"
+       #t
+       (try
+         (spawn "/bin/sh" '("sh") 80 24)
+         #f
+         (catch (error? _) #t)))
+(check "master fd is closed" 123 closed)
+(report "pty constructor cleanup")

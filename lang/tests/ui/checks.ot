@@ -290,8 +290,8 @@
 
 (def leaf (child target 0))
 
-(set! (target :bounds) (make ui/Bounds :x 10 :y 10 :width 50 :height 50))
-(set! (leaf :bounds) (make ui/Bounds :x 20 :y 20 :width 100 :height 100))
+(set! (target :bounds) (ui/bounds 10 10 50 50))
+(set! (leaf :bounds) (ui/bounds 20 20 100 100))
 (check "hit starts at child" leaf (car (input/hit-path pointer-tree 25 25)))
 (check "ancestor clips oversized child" '() (input/hit-path pointer-tree 70 25))
 (check "right edge excluded" '() (input/hit-path pointer-tree 60 25))
@@ -316,7 +316,7 @@
 (check "removed capture cannot activate" 1 presses)
 (check "removed capture released" nil (pointer :captured))
 (ui/reconcile! pointer-tree (list (ui/button {}) (ui/button {})))
-(for-each (fn (node) (set! (node :bounds) (make ui/Bounds :x 0 :y 0 :width 30 :height 30))) (ui/children pointer-tree))
+(for-each (fn (node) (set! (node :bounds) (ui/bounds 0 0 30 30))) (ui/children pointer-tree))
 (check "last painted sibling wins" (child pointer-tree 1) (car (input/hit-path pointer-tree 5 5)))
 (ui/dispose! pointer-tree)
 
@@ -412,7 +412,7 @@
 
 (def disabled-target (child pointer-tree 0))
 
-(set! (disabled-target :bounds) (make ui/Bounds :x 0 :y 0 :width 40 :height 40))
+(set! (disabled-target :bounds) (ui/bounds 0 0 40 40))
 (input/dispatch! pointer pointer-tree {:kind :pointer-down :x 5 :y 5})
 (check "pointer press focuses button" disabled-target (ui/focused pointer-tree))
 (check "pointer press paints pressed" #t (disabled-target :pressed?))
@@ -473,4 +473,16 @@
 (ui/reconcile! keyboard-tree (focus-view :b))
 (check ":focus staying on keeps other focus" fa (ui/focused keyboard-tree))
 (ui/dispose! keyboard-tree)
+
+(let ((tree (ui/root)))
+  (ui/reconcile! tree (ui/column {} (ui/row {} (ui/label {:key :target} "found"))))
+  (check "find-key crosses wrappers" :target ((ui/find-key tree :target) :key))
+  (check "find-key missing" nil (ui/find-key tree :missing)))
+
+(let ((saved ui/palette))
+  (set! ui/palette (put ui/palette :text 123))
+  (check "palette lookup" 123 (ui/color :text))
+  (check "explicit color survives palette" 456 (ui/color 456))
+  (set! ui/palette saved))
+
 (report "ui")

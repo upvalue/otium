@@ -1,0 +1,16 @@
+(require otium.resource :as resource :refer (with))
+
+(def (spin)
+  (spin))
+
+(def (doubled text times)
+  (if (= times 0)
+      text
+      (doubled (string-append text text) (- times 1))))
+
+(with ((r (resource/own 1
+                        (fn (_)
+                          (println "released")
+                          (error 'cleanup)))))
+      (display (doubled "x" 15))
+      (spin))

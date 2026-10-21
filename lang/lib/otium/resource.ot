@@ -1,0 +1,72 @@
+(ns otium.resource)
+
+(defgeneric (close resource outcome))
+
+(def (check-close resource)
+  "Check the close protocol before entering a resource scope."
+  (unless (exists (fn (method)
+                    (let ((signature (cadr method)))
+                      (and (eq? (car method) 'primary)
+                           (class-subtype? (dispatch-type resource) (car signature))
+                           (eq? (cadr signature) Object))))
+                  (generic-methods close))
+    (error "with: resource has no close method" resource))
+  resource)
+
+(def (release resource outcome release-fn)
+  (if outcome
+      (try
+        (release-fn resource outcome)
+        (catch ((fn (_) #t) _) nil))
+      (release-fn resource outcome)))
+
+(def (with-code bindings body)
+  "Acquire in order and release in reverse order, preserving an unwinding error."
+  (if (null? bindings)
+      `(let () ,@body)
+      (let ((binding (car bindings))
+            (outcome (gensym "outcome"))
+            (result (gensym "result"))
+            (releaser (gensym "release"))
+            (problem (gensym "problem")))
+        (unless (and (list? binding) (<= 2 (length binding) 3) (symbol? (car binding)))
+          (error "with: expected (name expression [release])"))
+        `(let ((,(car binding) ,(cadr binding))
+               (,outcome :quit))
+           ,@(if (= (length binding) 2)
+                 `((otium.resource/check-close ,(car binding)))
+                 '())
+           (let ((,releaser
+                  ,(if (= (length binding) 3)
+                       `(let ((f ,(caddr binding))) (fn (r _) (f r)))
+                       `(fn (r o) (otium.resource/close r o)))))
+             (unwind-protect
+               (try
+                 (let ((,result (otium.resource/with ,(cdr bindings) ,@body)))
+                   (set! ,outcome nil)
+                   ,result)
+                 (catch ((fn (_) #t) ,problem)
+                   (set! ,outcome ,problem)
+                   (error ,problem)))
+               (otium.resource/release ,(car binding) ,outcome ,releaser)))))))
+
+(defclass Owned
+  value
+  destroy
+  (closed? :init #f))
+
+(def (own value destroy)
+  "Wrap a resource with an idempotent close method."
+  (make Owned :value value :destroy destroy))
+
+(def (value resource)
+  (when (resource :closed?) (error "resource is closed"))
+  (resource :value))
+
+(defmethod (close (resource Owned) outcome)
+  (unless (resource :closed?)
+    (set! (resource :closed?) #t)
+    ((resource :destroy) (resource :value))))
+
+(defmacro with (bindings . body)
+  (with-code bindings body))

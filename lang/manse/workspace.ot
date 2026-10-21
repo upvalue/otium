@@ -1,0 +1,306 @@
+(ns manse.workspace)
+(require otium.ui :as ui)
+(require otium.process :as process)
+(require otium.sdl :as sdl)
+(require manse.apps :as apps)
+(require manse.strip :as strip)
+(require manse.terminal :as terminal)
+(require manse.pty :as pty)
+(require manse.settings :as settings)
+(require manse.theme :as theme)
+(require manse.widgets :as w)
+
+(defonce workspace {:apps (apps/registry)})
+
+;; Adopt sessions from workspaces started before the app registry existed.
+(unless (workspace :apps)
+  (put! workspace :apps (apps/registry))
+  (for-each (fn (session)
+              (apps/add! (workspace :apps)
+                         (str "Terminal " (session :id))
+                         (make terminal/TerminalApp :session session)))
+            (get workspace :sessions []))
+  (put! workspace :sessions nil))
+
+;; Adopt apps from workspaces started before the strip existed.
+(unless (workspace :strip) (put! workspace :strip (strip/strip)))
+
+(def (query-apps . predicates)
+  "Inspect app metadata, optionally filtering with a predicate."
+  (apply apps/query (workspace :apps) predicates))
+
+(def (find-app id)
+  "Get a live app for further inspection."
+  (apps/find (workspace :apps) id))
+
+(def (invalidate!)
+  (when (workspace :window) (ui/invalidate! (workspace :window))))
+
+(def (add-app! name app)
+  "Register an app and open its column to the right of the focused one."
+  (let ((id (apps/add! (workspace :apps) name app)))
+    (strip/add! (workspace :strip) id)
+    (invalidate!)
+    id))
+
+(def (close-app! id)
+  (let ((app (apps/remove! (workspace :apps) id)))
+    (strip/remove! (workspace :strip) id)
+    (invalidate!)
+    app))
+
+(def (new-terminal!)
+  (let ((id ((workspace :apps) :next-id)))
+    (add-app! (str "Terminal " id) (terminal/open! id (or (workspace :shell) (process/getenv "SHELL") "/bin/sh")))))
+
+(def (terminal-sessions)
+  (map (fn (entry) ((entry :app) :session))
+       (filter (fn (entry) (eq? (dispatch-type (entry :app)) terminal/TerminalApp)) ((workspace :apps) :entries))))
+
+;; Keys
+
+(def bindings
+  "Key, label for the help panel, action and description."
+  [["Meta+T" "Cmd+T" :new "New terminal to the right"]
+   ["Meta+W" "Cmd+W" :close "Close the focused column"]
+   ["Meta+Left" "Cmd+Left" :left "Focus the column to the left"]
+   ["Meta+Right" "Cmd+Right" :right "Focus the column to the right"]
+   ["Meta+Shift+Left" "Cmd+Shift+Left" :move-left "Move the column left"]
+   ["Meta+Shift+Right" "Cmd+Shift+Right" :move-right "Move the column right"]
+   ["Meta+R" "Cmd+R" :widen "Widen the column"]
+   ["Meta+Shift+R" "Cmd+Shift+R" :narrow "Narrow the column"]
+   ["Meta+J" "Cmd+J" :jump "Jump to a column by its letters"]
+   ["Meta+Shift+/" "Cmd+?" :help "Show or hide these keys"]])
+
+(def (keymap)
+  (let ((map {}))
+    (for-each (fn (b) (put! map (get b 0) (get b 2))) bindings)
+    (when (strip/hinting? (workspace :strip))
+      (put! map "Escape" :cancel)
+      (put! map "Meta+J" :cancel)
+      (for-each (fn (letter) (put! map letter (list :hint letter))) strip/alphabet))
+    map))
+
+(def (action! action)
+  (let ((s (workspace :strip)))
+    (cond
+      ((pair? action) (strip/hint-type! s (cadr action)))
+      ((eq? action :cancel) (strip/hints-cancel! s))
+      ((eq? action :new) (new-terminal!))
+      ((eq? action :close) (put! workspace :closed-column? #t) (when (strip/focused s) (close-app! (strip/focused s))))
+      ((eq? action :left) (strip/focus-move! s -1))
+      ((eq? action :right) (strip/focus-move! s 1))
+      ((eq? action :move-left) (strip/column-move! s -1))
+      ((eq? action :move-right) (strip/column-move! s 1))
+      ((eq? action :widen) (strip/width-step! s 1))
+      ((eq? action :narrow) (strip/width-step! s -1))
+      ((eq? action :jump) (strip/hints-start! s))
+      ((eq? action :help) (put! workspace :help? (not (workspace :help?))))
+      (else nil))
+    (invalidate!)
+    :handled))
+
+;; The frame hook: pass PTY output to the terminal, then update its render state.
+
+(def (scripted! window)
+  "MANSE_TYPE and MANSE_TYPE_2 type into separate shells at loop iteration 30.
+MANSE_KEYS runs actions by key name, separated by spaces, at iteration 40."
+  (let ((frame (get window :tick 0))
+        (frames (string->number (or (process/getenv "MANSE_FRAMES") "0"))))
+    (put! window :tick (+ frame 1))
+    (when (= frame 30)
+      (for-each (fn (session)
+                  (let ((text (process/getenv (if (= (session :id) 1)
+                                                  "MANSE_TYPE"
+                                                  "MANSE_TYPE_2"))))
+                    (when (and text (not (session :exit))) (pty/write! (session :pty) text))))
+                (terminal-sessions)))
+    (when (and (= frame 40) (process/getenv "MANSE_KEYS"))
+      (for-each (fn (name) (let ((action (get (keymap) name))) (when action (action! action))))
+                (string-split (process/getenv "MANSE_KEYS") " ")))
+    (when (and frames (> frames 0))
+      (when (= frame (- frames 1)) (ui/capture! window (or (process/getenv "MANSE_CAPTURE") "/tmp/manse.png")))
+      (when (>= frame frames) (put! workspace :quit? #t)))))
+
+(def (step! window)
+  (scripted! window)
+  (for-each (fn (entry)
+              (when (apps/step! (entry :app)) (ui/invalidate! window))
+              (when (apps/finished? (entry :app)) (close-app! (entry :id))))
+            (copy ((workspace :apps) :entries))))
+
+;; On macOS, SDL's default menu binds Cmd+W to Window > Close. SDL delivers
+;; the keydown first, then the menu asks to close the window in the same
+;; batch of events, and SDL follows that with a quit for the last window.
+(def (close-request? _)
+  "Refuse to close the window in the frame that Cmd+W closed a column."
+  (not (workspace :closed-column?)))
+
+;; Closing from :step! would leave the frame painting with a freed renderer.
+(def (after-frame! window)
+  (put! workspace :closed-column? #f)
+  (when (workspace :quit?) (ui/close! window)))
+
+;; The view
+
+(def padding 8)
+
+(def gap 8)
+
+(def width-names {0.3333 "1/3" 0.5 "1/2" 0.6667 "2/3" 1.0 "full"})
+
+(def (column-width fraction viewport)
+  "Width of a column taking fraction of the window, so that fractions summing to 1 fill it exactly."
+  (max 160 (- (* fraction (+ (- viewport (* 2 padding)) gap)) gap)))
+
+(def (focused-column tree)
+  "The ID of the column holding the focused widget, or nil."
+  (let loop ((node (ui/focused tree)))
+    (cond
+      ((not (ui/mounted? node)) nil)
+      ((and (ui/mounted? (node :parent)) (eq? (dispatch-type (ui/instance (node :parent))) ui/Scroll)) (node :key))
+      (else (loop (node :parent))))))
+
+(def (window-focused?)
+  (let ((window (workspace :window)))
+    (and window
+         (not (window :closed?))
+         (sdl/flag-set? (sdl/get-window-flags (window :window)) sdl/WINDOW_INPUT_FOCUS))))
+
+(def (restore-focus! tree)
+  "Give UI focus back to the focused column when the window becomes active again;
+losing window focus clears it."
+  (when (and (not (ui/focused tree)) (strip/focused (workspace :strip)) (window-focused?))
+    (let ((column (and (pair? (array-to-list (ui/children tree)))
+                       (find (fn (node) (equal? (node :key) (strip/focused (workspace :strip))))
+                             (ui/children (get (ui/children (get (ui/children tree) 0)) 0)))))
+          (body (and column (find (fn (node) (equal? (node :key) :body)) (ui/children column)))))
+      (when (and body (ui/focusable? body)) (ui/focus! tree body)))))
+
+(def (adopt-focus! tree)
+  "Follow UI focus that moved since the last view to a column other than the
+one the last view asked for, e.g. by a click. Record the focus this view asks for."
+  (let ((id (focused-column tree))
+        (s (workspace :strip)))
+    (when (and id (not (equal? id (workspace :ui-focus))) (not (equal? id (workspace :requested-focus))))
+      (strip/focus! s id))
+    (put! workspace :ui-focus id)
+    (put! workspace :requested-focus (strip/focused s))))
+
+(def status-colors {:running theme/green :exited theme/red :closed theme/faint})
+
+(def (header s entry focused?)
+  (let ((info (apps/info (entry :app)))
+        (label (strip/label-of s (entry :id))))
+    (ui/row {:height 30 :padding-x 10 :gap 8 :align-items :center}
+            (w/dot (get status-colors (get info :status) theme/muted) 6)
+            (w/text (if focused?
+                        theme/text
+                        theme/muted)
+                    theme/ui-size
+                    (str (entry :name)
+                         (if (eq? (get info :status) :exited)
+                             " · exited"
+                             "")))
+            (w/spacer)
+            (if label
+                (w/hint-badge label (strip/typed s))
+                (w/text theme/faint 11 (get width-names (strip/width-of s (entry :id)) ""))))))
+
+(def (column s entry viewport)
+  (let ((id (entry :id))
+        (focused? (equal? id (strip/focused s)))
+        (body (apps/view (entry :app))))
+    (set! (body :key) :body)
+    (put! (body :options) :focus focused?)
+    (w/item {:key id
+             :cache #t
+             :animate-size #t
+             :column? #t
+             :align-items :stretch
+             :width (column-width (strip/width-of s id) viewport)
+             :padding-x 1
+             :padding-y 1
+             :radius 6
+             :background theme/background
+             :border (if focused?
+                         theme/accent
+                         theme/border-variant)
+             :on-press (fn ()
+                         (strip/focus! s id)
+                         (invalidate!))}
+            (header s entry focused?)
+            (ui/column {:height 1 :background theme/border-variant})
+            body)))
+
+(def (help)
+  (ui/column {:width 360 :padding 16 :gap 10 :background theme/panel}
+             (w/text theme/text theme/ui-size "Keys")
+             (map (fn (b)
+                    (ui/row {:gap 10 :align-items :center}
+                            (ui/row {:width 130} (w/key-cap (get b 1)))
+                            (ui/label {:color theme/muted :size 12 :width 0 :grow 1} (get b 3))))
+                  bindings)))
+
+(def (view tree)
+  (let ((s (workspace :strip))
+        (entries ((workspace :apps) :entries))
+        (viewport (if (workspace :window)
+                      ((workspace :window) :width)
+                      900)))
+    (strip/sync! s (array-to-list (map (fn (entry) (entry :id)) entries)))
+    (restore-focus! tree)
+    (adopt-focus! tree)
+    (ui/row {:grow 1 :background theme/background :keymap (keymap) :on-action (fn (action) (action! action))}
+            ;; Columns size against the window, not the strip, so the help
+            ;; panel scrolls the strip rather than resizing every terminal.
+            (ui/scroll {:key :strip :axis :x :width 0 :grow 1 :padding padding :gap gap :reveal (strip/focused s)}
+                       (map (fn (id) (column s (find (fn (entry) (equal? (entry :id) id)) entries) viewport))
+                            (strip/ids s)))
+            (when (workspace :help?) (list (ui/column {:width 1 :background theme/border-variant}) (help))))))
+
+(def (config-path)
+  "build/ui-config.ot in the lang/ directory that contains this file."
+  (let ((script (process/script-name)))
+    (if (or (equal? script "manse/app.ot") (string-ends-with? script "/manse/app.ot"))
+        (str (substring script 0 (- (string-length script) (string-length "manse/app.ot"))) "build/ui-config.ot")
+        "../build/ui-config.ot")))
+
+(def (icon-path)
+  (let ((script (process/script-name)))
+    (if (or (equal? script "manse/app.ot") (string-ends-with? script "/manse/app.ot"))
+        (str (substring script 0 (- (string-length script) (string-length "app.ot"))) "assets/manse-mark.png")
+        "assets/manse-mark.png")))
+
+(def (main)
+  (unless (and (workspace :window) (not ((workspace :window) :closed?)))
+    (settings/load!)
+    (let ((shell (or (settings/options :shell) (process/getenv "SHELL") "/bin/sh")))
+      (process/setenv! "TERM" "xterm-256color")
+      (put! workspace :quit? #f)
+      (put! workspace :apps (apps/registry))
+      (put! workspace :strip (strip/strip))
+      (put! workspace :shell shell)
+      (unwind-protect
+        (begin
+          (dotimes (i (settings/options :terminals))
+            (new-terminal!))
+          (strip/focus-move! (workspace :strip) (- (settings/options :terminals)))
+          (let ((window (ui/open {:title "Manse"
+                                  :width (settings/options :width)
+                                  :height (settings/options :height)
+                                  :config (config-path)
+                                  :icon (icon-path)
+                                  :app-name "Manse"
+                                  :app-id "org.otium.manse"
+                                  :background-color theme/background
+                                  :render-on-demand? #t
+                                  :poll-ms (settings/options :poll-ms)
+                                  :background-poll-ms (settings/options :background-poll-ms)
+                                  :step! (fn (window) (step! window))
+                                  :after-frame! (fn (window) (after-frame! window))
+                                  :on-close-request (fn (window) (close-request? window))})))
+            (put! workspace :window window)
+            (ui/set-view! window (fn () (view (window :tree))))
+            (ui/run)))
+        (for-each (fn (entry) (apps/remove! (workspace :apps) (entry :id))) (copy ((workspace :apps) :entries)))))))

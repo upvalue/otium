@@ -1,0 +1,40 @@
+(require otium.json :as json)
+(require otium.test :refer (check fails? report))
+
+(def sample {"name" "λ🙂" "values" [0 -12 1.25 200.0 #t #f json/null] "empty" {}})
+
+(check (json/encode sample)
+       (json/encode (json/parse " \n{\"name\":\"λ🙂\",\"values\":[0,-12,1.25,2e2,true,false,null],\"empty\":{}}\t")))
+(check (json/encode sample) (json/encode (json/parse (json/encode sample))))
+(check 0 (length (json/parse "[]")))
+(check json/null (json/parse "null"))
+(check #f (json/parse "false"))
+(check 2 (get (json/parse "{\"x\":1,\"x\":2}") "x"))
+(check 1 (length (json/parse "{\"x\":null}")))
+(check "\"\\/\x8;\xC;\n\r\tλ🙂" (json/parse "\"\\\"\\\\\\/\\b\\f\\n\\r\\t\\u03bb\\uD83D\\uDE42\""))
+(check "\"a\\u0000\\\"\\\\z\"" (json/encode "a\x0;\"\\z"))
+(check "null" (json/encode nil))
+
+; Representative syntax failures, rather than a conformance corpus.
+(for-each (fn (text) (check text #t (fails? (fn () (json/parse text)))))
+          [""
+           "tru"
+           "true false"
+           "+1"
+           "01"
+           "1."
+           "1e"
+           "1e9999"
+           "[1,]"
+           "{\"x\":}"
+           "{x:1}"
+           "\"unterminated"
+           "\"a\nb\""
+           "\"\\q\""
+           "\"\\uZZZZ\""
+           "\"\\uD800\""
+           "\"\\uDC00\""])
+(check #t (fails? (fn () (json/encode {:keyword 1}))))
+(check #t (fails? (fn () (json/encode (fn () nil)))))
+
+(report "library json")

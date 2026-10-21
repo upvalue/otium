@@ -1,0 +1,70 @@
+;; Objective-C messaging on macOS, through the runtime's C functions.
+(ns otium.objc)
+(require (otium.ffi :as ffi))
+
+;; objc_msgSend is not variadic on arm64, so each argument and result
+;; signature gets its own binding, made on first use.
+(defonce state {:library nil :tried? #f :sends {}})
+
+(def- (library)
+  (unless (state :tried?)
+    (put! state :tried? #t)
+    (try
+      (begin
+        ;; Loading Foundation registers NSString, NSProcessInfo and friends.
+        (ffi/open-library '("/System/Library/Frameworks/Foundation.framework/Foundation"))
+        (put! state :library (ffi/open-library '("/usr/lib/libobjc.A.dylib"))))
+      (catch (ffi/error? _) nil)))
+  (state :library))
+
+(def (available?)
+  "True when the Objective-C runtime can be loaded, i.e. on macOS."
+  (if (library)
+      #t
+      #f))
+
+(def- (binding name arguments result)
+  (let ((key (str name " " arguments " " result)))
+    (or (get (state :sends) key)
+        (let ((lib (or (library) (error "Objective-C runtime is not available"))))
+          (put! (state :sends) key (ffi/bind lib name arguments result #t))
+          (get (state :sends) key)))))
+
+(def (class name)
+  "The class named name. Errors when there is none."
+  (let ((c ((binding "objc_getClass" '(utf8) 'pointer) name)))
+    (when (ffi/null? c) (error "No Objective-C class" name))
+    c))
+
+(def (selector name)
+  ((binding "sel_registerName" '(utf8) 'pointer) name))
+
+(def- (argument-type value)
+  (cond
+    ((string? value) 'utf8)
+    ((int? value) 'long)
+    ((float? value) 'double)
+    ((boolean? value) 'bool)
+    ((ffi/pointer? value) 'pointer)
+    (else (error "Cannot pass this to Objective-C" value))))
+
+(def (send-as result receiver name . arguments)
+  "Send the message name to receiver and return a result of the FFI type
+result. Strings pass as C strings, integers as long, floats as double and
+booleans as BOOL and pointers, such as objects, as pointers."
+  (apply (binding "objc_msgSend" (append '(pointer pointer) (map argument-type arguments)) result)
+         receiver
+         (selector name)
+         arguments))
+
+(def (send receiver name . arguments)
+  "Send the message name to receiver and return the object it returns."
+  (apply send-as 'pointer receiver name arguments))
+
+(def (nsstring text)
+  "An autoreleased NSString with the text."
+  (send (class "NSString") "stringWithUTF8String:" text))
+
+(def (nsstring-text object)
+  "The text of an NSString."
+  (send-as 'utf8 object "UTF8String"))

@@ -696,6 +696,13 @@
                (lambda (member)
                  (when (and (top-level-bound? member (namespace-environment target))
                             (not (hashtable-contains? (namespace-privates target) member)))
+                   ;; Macro expansions may name their defining module even when
+                   ;; the caller required it under an alias.
+                   (unless (eq? alias name)
+                     (import-value! space
+                       (string->symbol (string-append (symbol->string name) "/"
+                                         (symbol->string member)))
+                       target member))
                    (import-value! space
                      (string->symbol (string-append (symbol->string alias) "/"
                                        (symbol->string member)))

@@ -1,0 +1,45 @@
+(ns manse.keyboard)
+(require manse.ghostty :as g)
+
+;; GhosttyKey values from ghostty/vt/key/event.h, indexed by SDL key names.
+(def special-keys
+  {"Backspace" 53 "Return" 58 "Tab" 64
+   "Delete" 68 "End" 69 "Home" 71 "Insert" 72 "PageDown" 73 "PageUp" 74
+   "Down" 75 "Left" 76 "Right" 77 "Up" 78 "Escape" 120})
+(dotimes (i 24) (put! special-keys (str "F" (+ i 1)) (+ 121 i)))
+
+(def control-keys
+  {"`" 1 "\\" 2 "[" 3 "]" 4 "," 5 "=" 16
+   "-" 46 "." 47 "'" 48 ";" 49 "/" 50 "Space" 63})
+(dotimes (i 26) (put! control-keys (substring "ABCDEFGHIJKLMNOPQRSTUVWXYZ" i (+ i 1)) (+ 20 i)))
+(dotimes (i 10) (put! control-keys (str i) (+ 6 i)))
+
+;; These are application shortcuts, independent of the terminal's keyboard mode.
+(def shortcuts
+  {"Alt+Left" '(27 98) "Alt+Right" '(27 102) "Alt+Backspace" '(27 127)})
+
+(def (encode term event)
+  "Return terminal bytes, or nil when SDL's text-input event should supply the text."
+  (let ((name (event :key))
+        (shortcut (get shortcuts name)))
+    (if shortcut
+        shortcut
+        (let ((key name)
+              (mods 0)
+              (control? #f))
+          (for-each (fn (modifier)
+                      (when (string-starts-with? key (car modifier))
+                        (when (= (cadr modifier) 2) (set! control? #t))
+                        (set! mods (+ mods (cadr modifier)))
+                        (set! key (substring key (string-length (car modifier))))))
+                    '(("Ctrl+" 2) ("Alt+" 4) ("Meta+" 8) ("Shift+" 1)))
+          (let ((code (or (get special-keys key) (and control? (get control-keys key)))))
+            (when code
+              (let ((ascii (cond
+                             ((equal? key "Space") 32)
+                             ((= (string-length key) 1) (char->integer (string-ref key 0)))
+                             (else 0)))
+                    (unshifted (if (and (>= ascii 65) (<= ascii 90)) (+ ascii 32) ascii))
+                    (shift? (= 1 (modulo mods 2))))
+                (g/encode-key term code mods (if (get event :repeat #f) 2 1)
+                              (if shift? ascii unshifted) unshifted))))))))

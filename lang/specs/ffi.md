@@ -292,6 +292,8 @@ length-delimited data use a pointer and length, including embedded zero bytes.
 `ffi/null` is the dedicated null pointer value on both runtimes. It is a pointer
 value, distinct from integer zero, `#f`, C nil, and any empty string. It is
 truthy; `(ffi/null? value)` is the test, returning false for every other value.
+`(ffi/pointer? value)` is true for every pointer value, including `ffi/null`,
+callbacks and pointers whose allocation has been released, and false otherwise.
 Integers, `#f`, and C nil are not accepted in its place. No change to language
 truthiness is required.
 

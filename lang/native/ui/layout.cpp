@@ -74,6 +74,17 @@ bool otui_node_style(Node* n, float width, float height, float grow,
   YGNodeStyleSetGap(n->yoga, YGGutterAll, gap);
   return true;
 }
+bool otui_node_padding(Node* n, float x, float y) {
+  if (!std::isfinite(x) || !std::isfinite(y) || x < 0 || y < 0) return false;
+  YGNodeStyleSetPadding(n->yoga, YGEdgeHorizontal, x);
+  YGNodeStyleSetPadding(n->yoga, YGEdgeVertical, y);
+  return true;
+}
+// Cross-axis alignment of children: 0 stretch, 1 start, 2 center, 3 end.
+void otui_node_align(Node* n, int align) {
+  static const YGAlign modes[] = {YGAlignStretch, YGAlignFlexStart, YGAlignCenter, YGAlignFlexEnd};
+  YGNodeStyleSetAlignItems(n->yoga, modes[align >= 0 && align < 4 ? align : 0]);
+}
 void otui_node_center(Node* n, bool center) {
   YGNodeStyleSetJustifyContent(n->yoga, center ? YGJustifyCenter : YGJustifyFlexStart);
 }

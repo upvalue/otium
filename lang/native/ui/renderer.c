@@ -15,6 +15,7 @@ static const unsigned char rect_frag[] = {
 #embed "rect.frag.spv"
 };
 #include "text.h"
+#include <plutosvg.h>
 #define ATLAS_SIZE 2048
 
 typedef struct {
@@ -23,9 +24,25 @@ typedef struct {
   int x, y;
 } Glyph;
 
+typedef struct Image {
+  struct Image* next;
+  char* path;
+  float width, height, scale;
+  int x, y, w, h;
+} Image;
+
 typedef struct {
   float rect[4], color[4], shape[4], clip[4], uv[4];
 } Rect;
+
+// Recorded draw instances for one widget, replayed at a new position. Origin
+// is the widget's position when recorded; scale must match on replay.
+typedef struct {
+  int id;
+  Uint32 used, count;
+  float x, y, scale;
+  Rect* rects;
+} Cache;
 
 typedef struct QueuedEvent {
   SDL_Event event;
@@ -46,6 +63,8 @@ typedef struct Renderer {
   SDL_GPUSampler* sampler;
   SDL_GPUTransferBuffer* atlas_upload;
   Uint8* atlas_pixels;
+  Image* images;
+  int image_count;
   Glyph glyphs[8192];
   int glyph_count, atlas_x, atlas_y, atlas_row;
   bool atlas_dirty;
@@ -53,6 +72,9 @@ typedef struct Renderer {
   SDL_GPUTransferBuffer* upload;
   Rect* rects;
   Uint32 count, capacity, width, height;
+  Cache* caches;
+  int cache_count, cache_capacity;
+  Uint32 frames;
   float logical_width, logical_height, scale;
   float event_x, event_y;
   int event_width, event_height;
@@ -60,7 +82,7 @@ typedef struct Renderer {
   int event_code;
   char* event_text;
   char* clipboard;
-  float event_dy;
+  float event_dx, event_dy;
   bool text_input;
   bool event_repeat;
   SDL_FColor clear;
@@ -125,6 +147,8 @@ const char* otui_poll_event(Renderer* r) {
     if (event.type == SDL_EVENT_MOUSE_WHEEL && event.wheel.windowID == window_id) {
       r->event_x = event.wheel.mouse_x;
       r->event_y = event.wheel.mouse_y;
+      r->event_dx =
+          event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.x : event.wheel.x;
       r->event_dy =
           event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
       return "wheel";
@@ -146,9 +170,14 @@ const char* otui_poll_event(Renderer* r) {
       if (r->event_width > 0 && r->event_height > 0) return "resize";
       continue;
     }
+    if (event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE && event.window.windowID == window_id)
+      return "pointer-leave";
     if (event.type == SDL_EVENT_QUIT) return "quit";
     if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == window_id)
       return "quit";
+    if (event.type == SDL_EVENT_WINDOW_EXPOSED || event.type == SDL_EVENT_WINDOW_SHOWN ||
+        event.type == SDL_EVENT_WINDOW_RESTORED || event.type == SDL_EVENT_WINDOW_FOCUS_GAINED)
+      return "expose";
     if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST && event.window.windowID == window_id)
       return "focus-lost";
     if ((event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) &&
@@ -187,6 +216,8 @@ int otui_event_code(Renderer* r) { return r->event_code; }
 int otui_event_repeat(Renderer* r) { return r->event_repeat; }
 
 const char* otui_event_text(Renderer* r) { return r->event_text ? r->event_text : ""; }
+
+float otui_event_dx(Renderer* r) { return r->event_dx; }
 
 float otui_event_dy(Renderer* r) { return r->event_dy; }
 
@@ -236,8 +267,16 @@ void otui_gpu_free(Renderer* r) {
     if (r->claimed) SDL_ReleaseWindowFromGPUDevice(r->device, r->window);
     SDL_DestroyGPUDevice(r->device);
   }
+  while (r->images) {
+    Image* next = r->images->next;
+    SDL_free(r->images->path);
+    free(r->images);
+    r->images = next;
+  }
   free(r->atlas_pixels);
   free(r->rects);
+  for (int i = 0; i < r->cache_count; ++i) free(r->caches[i].rects);
+  free(r->caches);
   free(r);
   --live_renderers;
   extern int otui_live_nodes(void);
@@ -412,11 +451,126 @@ static SDL_FColor rgba(Uint32 c) {
                       (c & 255) / 255.0f};
 }
 
+// Caches not replayed for this many frames are freed, so widgets that are
+// removed or stay off screen need no explicit release.
+#define CACHE_FRAMES 120
+
 // Start a new CPU draw list without discarding its allocated capacity.
 void otui_gpu_clear(Renderer* r, Uint32 color) {
   r->count = 0;
   r->clear = rgba(color);
+  ++r->frames;
+  for (int i = 0; i < r->cache_count;) {
+    if (r->frames - r->caches[i].used > CACHE_FRAMES) {
+      free(r->caches[i].rects);
+      r->caches[i] = r->caches[--r->cache_count];
+    } else {
+      ++i;
+    }
+  }
 }
+
+// Ensure room for need instances in both the CPU list and the GPU buffers.
+static bool reserve(Renderer* r, Uint32 need) {
+  if (need <= r->capacity) return true;
+  if (need > 65536) return SDL_SetError("UI primitive limit reached");
+  Uint32 capacity = r->capacity ? r->capacity : 256;
+  while (capacity < need) capacity *= 2;
+  Rect* rects = realloc(r->rects, capacity * sizeof(Rect));
+  if (!rects) return SDL_OutOfMemory();
+  r->rects = rects;
+  SDL_GPUBufferCreateInfo b = {.usage = SDL_GPU_BUFFERUSAGE_VERTEX,
+                               .size = capacity * sizeof(Rect)};
+  SDL_GPUTransferBufferCreateInfo t = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = b.size};
+  SDL_GPUBuffer* buffer = SDL_CreateGPUBuffer(r->device, &b);
+  SDL_GPUTransferBuffer* upload = SDL_CreateGPUTransferBuffer(r->device, &t);
+  if (!buffer || !upload) {
+    if (buffer) SDL_ReleaseGPUBuffer(r->device, buffer);
+    if (upload) SDL_ReleaseGPUTransferBuffer(r->device, upload);
+    return false;
+  }
+  if (r->buffer) SDL_ReleaseGPUBuffer(r->device, r->buffer);
+  if (r->upload) SDL_ReleaseGPUTransferBuffer(r->device, r->upload);
+  r->buffer = buffer;
+  r->upload = upload;
+  r->capacity = capacity;
+  return true;
+}
+
+int otui_gpu_mark(Renderer* r) { return (int)r->count; }
+
+static Cache* find_cache(Renderer* r, int id) {
+  for (int i = 0; i < r->cache_count; ++i)
+    if (r->caches[i].id == id) return &r->caches[i];
+  return NULL;
+}
+
+// Move the instances recorded since start into cache id, replacing any older
+// recording. They leave this frame's list; draw the cache to show them.
+bool otui_gpu_cache_store(Renderer* r, int id, int start, float x, float y) {
+  if (start < 0 || (Uint32)start > r->count || !isfinite(x) || !isfinite(y))
+    return SDL_SetError("Invalid UI cache range");
+  Uint32 count = r->count - (Uint32)start;
+  Rect* rects = malloc(count ? count * sizeof(Rect) : 1);
+  if (!rects) return SDL_OutOfMemory();
+  memcpy(rects, r->rects + start, count * sizeof(Rect));
+  r->count = (Uint32)start;
+  Cache* cache = find_cache(r, id);
+  if (!cache) {
+    if (r->cache_count == r->cache_capacity) {
+      int capacity = r->cache_capacity ? r->cache_capacity * 2 : 16;
+      Cache* caches = realloc(r->caches, capacity * sizeof(Cache));
+      if (!caches) {
+        free(rects);
+        return SDL_OutOfMemory();
+      }
+      r->caches = caches;
+      r->cache_capacity = capacity;
+    }
+    cache = &r->caches[r->cache_count++];
+    cache->rects = NULL;
+  }
+  free(cache->rects);
+  *cache = (Cache){id, r->frames, count, x, y, r->scale, rects};
+  return true;
+}
+
+// Append cache id moved to (x, y), snapped to physical pixels so glyphs stay
+// sharp, and clipped to the given rectangle. Instances wholly outside the clip
+// are skipped. Returns 1 when drawn, 0 when there is no usable recording and
+// -1 on error.
+int otui_gpu_cache_draw(Renderer* r, int id, float x, float y, float cx, float cy, float cw,
+                        float ch) {
+  Cache* cache = find_cache(r, id);
+  if (!cache || cache->scale != r->scale) return 0;
+  if (!isfinite(x) || !isfinite(y) || !isfinite(cx) || !isfinite(cy) || !isfinite(cw) ||
+      !isfinite(ch) || cw < 0 || ch < 0) {
+    SDL_SetError("Invalid UI cache position");
+    return -1;
+  }
+  if (!reserve(r, r->count + cache->count)) return -1;
+  cache->used = r->frames;
+  float dx = roundf((x - cache->x) * r->scale) / r->scale;
+  float dy = roundf((y - cache->y) * r->scale) / r->scale;
+  float x1 = cx + cw, y1 = cy + ch;
+  for (Uint32 i = 0; i < cache->count; ++i) {
+    Rect rect = cache->rects[i];
+    rect.rect[0] += dx;
+    rect.rect[1] += dy;
+    rect.clip[0] = fmaxf(rect.clip[0] + dx, cx);
+    rect.clip[1] = fmaxf(rect.clip[1] + dy, cy);
+    rect.clip[2] = fminf(rect.clip[2] + dx, x1);
+    rect.clip[3] = fminf(rect.clip[3] + dy, y1);
+    if (rect.clip[0] >= rect.clip[2] || rect.clip[1] >= rect.clip[3] ||
+        rect.rect[0] >= rect.clip[2] || rect.rect[1] >= rect.clip[3] ||
+        rect.rect[0] + rect.rect[2] <= rect.clip[0] || rect.rect[1] + rect.rect[3] <= rect.clip[1])
+      continue;
+    r->rects[r->count++] = rect;
+  }
+  return 1;
+}
+
+int otui_gpu_cache_count(Renderer* r) { return r->cache_count; }
 
 // Append one clipped rectangle instance. Grow CPU/GPU storage together;
 // no drawing is submitted until otui_gpu_frame. Text uses this path too.
@@ -426,35 +580,117 @@ bool otui_gpu_rect(Renderer* r, float x, float y, float w, float h, float radius
       !isfinite(cx) || !isfinite(cy) || !isfinite(cw) || !isfinite(ch) || w < 0 || h < 0 ||
       radius < 0 || cw < 0 || ch < 0)
     return SDL_SetError("Invalid UI rectangle");
-  if (r->count == r->capacity) {
-    if (r->capacity >= 65536) return SDL_SetError("UI primitive limit reached");
-    Uint32 capacity = r->capacity ? r->capacity * 2 : 256;
-    Rect* rects = realloc(r->rects, capacity * sizeof(Rect));
-    if (!rects) return SDL_OutOfMemory();
-    r->rects = rects;
-    SDL_GPUBufferCreateInfo b = {.usage = SDL_GPU_BUFFERUSAGE_VERTEX,
-                                 .size = capacity * sizeof(Rect)};
-    SDL_GPUTransferBufferCreateInfo t = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-                                         .size = b.size};
-    SDL_GPUBuffer* buffer = SDL_CreateGPUBuffer(r->device, &b);
-    SDL_GPUTransferBuffer* upload = SDL_CreateGPUTransferBuffer(r->device, &t);
-    if (!buffer || !upload) {
-      if (buffer) SDL_ReleaseGPUBuffer(r->device, buffer);
-      if (upload) SDL_ReleaseGPUTransferBuffer(r->device, upload);
-      return false;
-    }
-    if (r->buffer) SDL_ReleaseGPUBuffer(r->device, r->buffer);
-    if (r->upload) SDL_ReleaseGPUTransferBuffer(r->device, r->upload);
-    r->buffer = buffer;
-    r->upload = upload;
-    r->capacity = capacity;
-  }
+  if (!reserve(r, r->count + 1)) return false;
   SDL_FColor c = rgba(color);
   r->rects[r->count++] = (Rect){{x, y, w, h},
                                 {c.r, c.g, c.b, c.a},
                                 {w, h, radius, 0},
                                 {cx, cy, cx + cw, cy + ch},
                                 {0, 0, 0, 0}};
+  return true;
+}
+
+// Reserve a shelf slot shared by glyphs and SVGs. Never move entries: paint
+// recordings retain their UVs until the renderer is destroyed.
+static bool atlas_slot(Renderer* r, int w, int h, int* x, int* y) {
+  int ax = r->atlas_x, ay = r->atlas_y, row = r->atlas_row;
+  if (w + 2 > ATLAS_SIZE || h + 2 > ATLAS_SIZE) return SDL_SetError("UI atlas image is too large");
+  if (ax + w + 2 > ATLAS_SIZE) {
+    ay += row;
+    ax = row = 0;
+  }
+  if (ay + h + 2 > ATLAS_SIZE) return SDL_SetError("UI glyph/image atlas is full");
+  *x = ax + 1;
+  *y = ay + 1;
+  r->atlas_x = ax + w + 2;
+  r->atlas_y = ay;
+  r->atlas_row = h + 2 > row ? h + 2 : row;
+  r->atlas_dirty = true;
+  return true;
+}
+
+// SVGs are monochrome masks, tinted by the same shader as glyphs. Colour and
+// position do not affect this cache; size and display scale do.
+static Image* svg_image(Renderer* r, const char* path, float width, float height) {
+  for (Image* image = r->images; image; image = image->next)
+    if (image->width == width && image->height == height && image->scale == r->scale &&
+        strcmp(image->path, path) == 0)
+      return image;
+  float pw = ceilf(width * r->scale), ph = ceilf(height * r->scale);
+  if (!isfinite(pw) || !isfinite(ph) || pw < 1 || ph < 1 || pw > ATLAS_SIZE - 2 ||
+      ph > ATLAS_SIZE - 2) {
+    SDL_SetError("Invalid SVG raster size: %s", path);
+    return NULL;
+  }
+  plutosvg_document_t* document = plutosvg_document_load_from_file(path, pw, ph);
+  if (!document) {
+    SDL_SetError("Cannot load SVG: %s", path);
+    return NULL;
+  }
+  plutovg_surface_t* surface =
+      plutosvg_document_render_to_surface(document, NULL, (int)pw, (int)ph, NULL, NULL, NULL);
+  plutosvg_document_destroy(document);
+  if (!surface) {
+    SDL_SetError("Cannot rasterise SVG: %s", path);
+    return NULL;
+  }
+  Image* image = calloc(1, sizeof *image);
+  if (!image || !(image->path = SDL_strdup(path))) {
+    free(image);
+    plutovg_surface_destroy(surface);
+    SDL_SetError("Out of memory caching SVG");
+    return NULL;
+  }
+  image->width = width;
+  image->height = height;
+  image->scale = r->scale;
+  image->w = (int)pw;
+  image->h = (int)ph;
+  if (!atlas_slot(r, image->w, image->h, &image->x, &image->y)) {
+    SDL_free(image->path);
+    free(image);
+    plutovg_surface_destroy(surface);
+    return NULL;
+  }
+  const Uint8* data = plutovg_surface_get_data(surface);
+  int stride = plutovg_surface_get_stride(surface);
+  for (int y = 0; y < image->h; ++y) {
+    const Uint32* src = (const Uint32*)(data + y * stride);
+    Uint8* dst = r->atlas_pixels + ((image->y + y) * ATLAS_SIZE + image->x) * 4;
+    for (int x = 0; x < image->w; ++x) {
+      dst[x * 4] = dst[x * 4 + 1] = dst[x * 4 + 2] = 255;
+      dst[x * 4 + 3] = src[x] >> 24;
+    }
+  }
+  plutovg_surface_destroy(surface);
+  image->next = r->images;
+  r->images = image;
+  ++r->image_count;
+  return image;
+}
+
+int otui_gpu_image_count(Renderer* r) { return r->image_count; }
+
+bool otui_gpu_image(Renderer* r, const char* path, float x, float y, float w, float h, Uint32 color,
+                    float cx, float cy, float cw, float ch) {
+  // Validate the whole command before touching the atlas.
+  if (!isfinite(w) || !isfinite(h) || w <= 0 || h <= 0)
+    return SDL_SetError("Invalid SVG dimensions");
+  Uint32 start = r->count;
+  if (!otui_gpu_rect(r, x, y, w, h, 0, color, cx, cy, cw, ch)) return false;
+  Image* image = svg_image(r, path, w, h);
+  if (!image) {
+    r->count = start;
+    return false;
+  }
+  Rect* rect = &r->rects[start];
+  rect->rect[0] = roundf(x * r->scale) / r->scale;
+  rect->rect[1] = roundf(y * r->scale) / r->scale;
+  rect->shape[3] = 1;
+  rect->uv[0] = (float)image->x / ATLAS_SIZE;
+  rect->uv[1] = (float)image->y / ATLAS_SIZE;
+  rect->uv[2] = (float)image->w / ATLAS_SIZE;
+  rect->uv[3] = (float)image->h / ATLAS_SIZE;
   return true;
 }
 
@@ -469,25 +705,21 @@ static Glyph* glyph(Renderer* r, TTF_CopyOperation* op) {
   SDL_Surface* pixels = SDL_ConvertSurface(image, SDL_PIXELFORMAT_RGBA32);
   SDL_DestroySurface(image);
   if (!pixels) return NULL;
-  if (r->atlas_x + pixels->w + 2 > ATLAS_SIZE) {
-    r->atlas_y += r->atlas_row;
-    r->atlas_x = 0;
-    r->atlas_row = 0;
-  }
-  if (r->glyph_count == 8192 || pixels->w + 2 > ATLAS_SIZE ||
-      r->atlas_y + pixels->h + 2 > ATLAS_SIZE) {
+  int x, y;
+  if (r->glyph_count == 8192) {
     SDL_DestroySurface(pixels);
-    SDL_SetError("UI glyph atlas is full");
+    SDL_SetError("UI glyph cache is full");
+    return NULL;
+  }
+  if (!atlas_slot(r, pixels->w, pixels->h, &x, &y)) {
+    SDL_DestroySurface(pixels);
     return NULL;
   }
   Glyph* g = &r->glyphs[r->glyph_count++];
-  *g = (Glyph){op->glyph_font, op->glyph_index, r->atlas_x + 1, r->atlas_y + 1};
+  *g = (Glyph){op->glyph_font, op->glyph_index, x, y};
   for (int y = 0; y < pixels->h; ++y)
     memcpy(r->atlas_pixels + ((g->y + y) * ATLAS_SIZE + g->x) * 4,
            (Uint8*)pixels->pixels + y * pixels->pitch, pixels->w * 4);
-  r->atlas_x += pixels->w + 2;
-  if (pixels->h + 2 > r->atlas_row) r->atlas_row = pixels->h + 2;
-  r->atlas_dirty = true;
   SDL_DestroySurface(pixels);
   return g;
 }

@@ -1,0 +1,102 @@
+(require manse.fonts :as fonts)
+(require manse.settings :as settings)
+(require otium.process :as process)
+(require otium.test :refer (check report))
+(require chez)
+
+(let ((home (process/getenv "HOME"))
+      (data-home (process/getenv "XDG_DATA_HOME"))
+      (data-dirs (process/getenv "XDG_DATA_DIRS")))
+  (unwind-protect
+    (begin
+      (process/setenv! "HOME" "/tmp/font-home")
+      (process/setenv! "XDG_DATA_HOME" "/tmp/font-data")
+      (process/setenv! "XDG_DATA_DIRS" "/tmp/font-system:relative:/tmp/font-extra")
+      (check "user macOS directory" #t (contains? (fonts/search-paths) "/tmp/font-home/Library/Fonts"))
+      (check "XDG user directory" #t (contains? (fonts/search-paths) "/tmp/font-data/fonts"))
+      (check "XDG system directory" #t (contains? (fonts/search-paths) "/tmp/font-extra/fonts"))
+      (check "relative XDG entries ignored" #f (contains? (fonts/search-paths) "relative/fonts"))
+      (process/setenv! "XDG_DATA_HOME" "")
+      (process/setenv! "XDG_DATA_DIRS" "")
+      (check "empty XDG user defaults" #t (contains? (fonts/search-paths) "/tmp/font-home/.local/share/fonts"))
+      (check "empty XDG system defaults" #t (contains? (fonts/search-paths) "/usr/share/fonts")))
+    (process/setenv! "HOME" home)
+    (process/setenv! "XDG_DATA_HOME" data-home)
+    (process/setenv! "XDG_DATA_DIRS" data-dirs)))
+
+(def root (str "/tmp/manse-font-discovery-" (chez/get-process-id)))
+
+(chez/mkdir root)
+(chez/mkdir (str root "/nested"))
+(chez/mkdir (str root "/duplicate"))
+
+(def (touch name)
+  (chez/call-with-output-file (str root "/" name) (fn (port) (chez/display "fixture" port))))
+
+(touch "nested/ExampleMono-Regular.ttf")
+(touch "Example.ttc")
+(touch "duplicate/Example.ttc")
+(touch "ignore.txt")
+(check "create directory symlink cycle" 0 (chez/system (str "ln -s .. " root "/nested/loop")))
+(check "create font symlink" 0 (chez/system (str "ln -s Example.ttc " root "/Alias.otf")))
+
+(def roots (list root (str root "/missing") root))
+
+(check "recursive discovery skips missing roots and deduplicates roots" 4 (length (fonts/discover roots)))
+(check "font symlink is discoverable" (list (str root "/Alias.otf")) (fonts/find "Alias" roots))
+(check "filename lookup ignores case"
+       (list (str root "/nested/ExampleMono-Regular.ttf"))
+       (fonts/find "EXAMPLEMONO-REGULAR.TTF" roots))
+(check "stem lookup" (str root "/nested/ExampleMono-Regular.ttf") (fonts/resolve "ExampleMono-Regular" roots))
+(check "explicit paths win over ambiguous names"
+       (str root "/Example.ttc")
+       (fonts/resolve (str root "/Example.ttc") roots))
+(check "ambiguity reports all matches" 2 (length (fonts/find "Example" roots)))
+(check "ambiguous name rejected"
+       #t
+       (try
+         (fonts/resolve "Example" roots)
+         #f
+         (catch (error? _) #t)))
+(check "missing name rejected"
+       #t
+       (try
+         (fonts/resolve "MissingFont" roots)
+         #f
+         (catch (error? _) #t)))
+(check "directory rejected"
+       #t
+       (try
+         (fonts/resolve root roots)
+         #f
+         (catch (error? _) #t)))
+(check "default font remains available" #f (fonts/resolve #f roots))
+
+(def original-search-paths fonts/search-paths)
+
+(unwind-protect
+  (begin
+    (set! fonts/search-paths (fn () roots))
+    (settings/configure! {:font-path "ExampleMono-Regular"})
+    (check "configuration stores resolved path"
+           (str root "/nested/ExampleMono-Regular.ttf")
+           (settings/options :font-path))
+    (check "failed discovery is atomic"
+           #t
+           (try
+             (settings/configure! {:font-size 30 :font-path "Example"})
+             #f
+             (catch (error? _) #t)))
+    (check "failed discovery preserves size" 14 (settings/options :font-size)))
+  (set! fonts/search-paths original-search-paths))
+(for-each (fn (name) (chez/delete-file (str root "/" name)))
+          '("Alias.otf"
+            "nested/loop"
+            "nested/ExampleMono-Regular.ttf"
+            "Example.ttc"
+            "duplicate/Example.ttc"
+            "ignore.txt"))
+(chez/delete-directory (str root "/nested"))
+(chez/delete-directory (str root "/duplicate"))
+(chez/delete-directory root)
+(report "manse fonts")

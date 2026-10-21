@@ -1,0 +1,96 @@
+;; Small widgets for the workspace: a clickable box with hover, a dot and
+;; hint badges.
+(ns manse.widgets)
+
+(require (otium.ui :as ui))
+(require (otium.gfx :as gfx))
+(require (manse.theme :as theme))
+
+(def (inset bounds d)
+  (make ui/Bounds
+        :x (+ (bounds :x) d)
+        :y (+ (bounds :y) d)
+        :width (max 0 (- (bounds :width) (* 2 d)))
+        :height (max 0 (- (bounds :height) (* 2 d)))))
+
+;; A row or column that responds to presses and paints a hover colour.
+(defclass Item
+  :is ui/Widget
+  (on-press :init nil)
+  (column? :init #f)
+  (width :init -1)
+  (height :init -1)
+  (grow :init 0)
+  (padding-x :init 0)
+  (padding-y :init 0)
+  (gap :init 0)
+  (align-items :init :center)
+  (background :init nil)
+  (hover :init nil)
+  (border :init nil)
+  (radius :init 0))
+
+(def (item opts . children)
+  (apply ui/new Item opts children))
+
+(defmethod (ui/layout-style (w Item))
+  {:width (w :width)
+   :height (w :height)
+   :grow (w :grow)
+   :padding-x (w :padding-x)
+   :padding-y (w :padding-y)
+   :gap (w :gap)
+   :align-items (w :align-items)
+   :row (not (w :column?))})
+
+(defmethod (ui/handle-event (w Item) event)
+  (let ((kind (get event :kind)))
+    (cond
+      ((eq? kind :press) (when (w :on-press) ((w :on-press))) :handled)
+      ((memq kind '(:pointer-down :pointer-up)) (when (w :on-press) :handled))
+      (else nil))))
+
+(defmethod (ui/paint (w Item) g bounds)
+  (let ((fill (if (and (g :hovered?) (w :hover))
+                  (w :hover)
+                  (w :background))))
+    (cond
+      ((w :border)
+       (gfx/rect g bounds (w :border) (w :radius))
+       (gfx/rect g (inset bounds 1) (or fill theme/background) (max 0 (- (w :radius) 1))))
+      (fill (gfx/rect g bounds fill (w :radius)))
+      (else nil))))
+
+(defclass Dot
+  :is ui/Widget
+  (color :init 0xffffffff)
+  (size :init 8))
+
+(def (dot color . size)
+  (ui/new Dot
+          {:color color
+           :size (if (null? size)
+                     8
+                     (car size))}))
+
+(defmethod (ui/layout-style (w Dot))
+  {:width (w :size) :height (w :size)})
+
+(defmethod (ui/paint (w Dot) g bounds)
+  (gfx/rect g bounds (w :color) (/ (w :size) 2)))
+
+(def (spacer)
+  (ui/row {:grow 1}))
+
+(def (text color size string)
+  (ui/label {:color color :size size :wrap #f} string))
+
+(def (hint-badge label typed)
+  "A Vimium-style label; the typed prefix is dimmed."
+  (ui/row {:background theme/hint :radius 3 :padding-x 5 :padding-y 1}
+          (unless (equal? typed "") (ui/label {:font :mono :size 11 :color theme/hint-typed :wrap #f} typed))
+          (ui/label {:font :mono :size 11 :color theme/hint-text :wrap #f} (substring label (string-length typed)))))
+
+(def (key-cap key)
+  (ui/row {:background theme/surface :radius 3 :padding-x 5 :padding-y 1}
+          (ui/label {:font :mono :size 11 :color theme/muted :wrap #f} key)))

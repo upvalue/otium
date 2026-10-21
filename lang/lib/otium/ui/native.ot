@@ -2,6 +2,8 @@
 (require (otium.ffi :as ffi))
 
 ;; Scalar selectors used by the native layout and text bridge.
+(defonce icons-directory nil)
+
 (def BOUNDS_X 0)
 
 (def BOUNDS_Y 1)
@@ -39,6 +41,8 @@
                  (node-clear "otui_node_clear" (pointer) void #t)
                  (node-append "otui_node_append" (pointer pointer) void #t)
                  (node-center "otui_node_center" (pointer bool) void #t)
+                 (node-padding "otui_node_padding" (pointer float float) bool #t)
+                 (node-align "otui_node_align" (pointer int) void #t)
                  (node-scroll "otui_node_scroll" (pointer bool) void #t)
                  (node-shrink "otui_node_shrink" (pointer bool) void #t)
                  (node-style "otui_node_style" (pointer float float float float float int) bool #t)
@@ -49,9 +53,12 @@
                  (node-retry "otui_node_retry" (pointer) void #t)
                  (text-resources "otui_text_resources" () int #t)
                  (text-error "otui_text_error" () utf8 #t)
+                 (font-register "otui_font_register" (utf8) int #t)
                  (text-get "otui_text_get" (utf8 int float float float) pointer #t)
                  (text-size "otui_text_size" (pointer int) float #t)
                  (text-carets "otui_text_carets" (pointer pointer int) bool #t)
+                 (gpu-image "otui_gpu_image" (pointer utf8 float float float float u32 float float float float) bool #t)
+                 (gpu-image-count "otui_gpu_image_count" (pointer) int #t)
                  (gpu-text "otui_gpu_text"
                            (pointer utf8 int float float float float u32 float float float float)
                            bool
@@ -67,6 +74,7 @@
                  ((private event-key) "otui_event_key" (pointer) utf8 #t)
                  ((private event-code) "otui_event_code" (pointer) int #t)
                  ((private event-text) "otui_event_text" (pointer) utf8 #t)
+                 ((private event-dx) "otui_event_dx" (pointer) float #t)
                  ((private event-dy) "otui_event_dy" (pointer) float #t)
                  (text-input "otui_text_input" (pointer bool) bool #t)
                  (clipboard-get "otui_clipboard_get" (pointer) utf8 #t)
@@ -80,6 +88,10 @@
                  (gpu-clear "otui_gpu_clear" (pointer u32) void #t)
                  (gpu-rect "otui_gpu_rect" (pointer float float float float float u32 float float float float) bool #t)
                  (gpu-frame "otui_gpu_frame" (pointer utf8) bool #t)
+                 (gpu-mark "otui_gpu_mark" (pointer) int #t)
+                 (gpu-cache-store "otui_gpu_cache_store" (pointer int int float float) bool #t)
+                 (gpu-cache-draw "otui_gpu_cache_draw" (pointer int float float float float float float) int #t)
+                 (gpu-cache-count "otui_gpu_cache_count" (pointer) int #t)
                  (gpu-driver "otui_gpu_driver" (pointer) utf8 #t)
                  (gpu-count "otui_gpu_count" (pointer) int #t)
                  (live-renderers "otui_live_renderers" () int #t))
@@ -106,6 +118,7 @@
   "Load installation paths as data, then open the native UI library."
   (let ((settings (read-string (read-file path))))
     (load! (config-ref settings 'library))
+    (set! icons-directory (config-ref settings 'icons))
     settings))
 
 (def (poll-event renderer)
@@ -114,7 +127,7 @@
     (unless (equal? name "")
       (let ((kind (keyword name)))
         (cond
-          ((memq kind '(:quit :focus-lost)) {:kind kind})
+          ((memq kind '(:quit :focus-lost :expose :pointer-leave)) {:kind kind})
           ((memq kind '(:key-down :key-up))
            {:kind kind
             :key (event-key renderer)
@@ -124,5 +137,6 @@
           ((eq? kind :text-input) {:kind kind :text (event-text renderer)})
           ((memq kind '(:pointer-down :pointer-up :pointer-move))
            {:kind kind :x (event-x renderer) :y (event-y renderer)})
-          ((eq? kind :wheel) {:kind kind :x (event-x renderer) :y (event-y renderer) :dy (event-dy renderer)})
+          ((eq? kind :wheel)
+           {:kind kind :x (event-x renderer) :y (event-y renderer) :dx (event-dx renderer) :dy (event-dy renderer)})
           (else (error "Unknown native UI event" kind)))))))

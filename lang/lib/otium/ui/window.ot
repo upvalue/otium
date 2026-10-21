@@ -5,9 +5,38 @@
 (require (otium.ui.input :as input))
 (require (otium.sdl :as sdl))
 (require (otium.ffi :as ffi))
+(require (otium.objc :as objc))
 (require (otium.dev :as dev))
 
 (defonce running? #f)
+
+(def (configure-app! options)
+  "Set process-wide application metadata before initializing SDL video."
+  ;; Cocoa builds its menu during SDL video initialization.
+  (sdl/set-hint "SDL_MAC_BACKGROUND_APP"
+                (if (get options :background #f)
+                    "1"
+                    "0"))
+  (sdl/check (sdl/set-app-metadata (get options :name "Otium")
+                                   (get options :version "")
+                                   (get options :id "org.otium.application")))
+  ;; Run from an interpreter, macOS would otherwise name the app after it.
+  (when (objc/available?)
+    (objc/send-as 'void
+                  (objc/send (objc/class "NSProcessInfo") "processInfo")
+                  "setProcessName:"
+                  (objc/nsstring (get options :name "Otium")))))
+
+(def (present-window! window options)
+  "Install a PNG/BMP icon and optionally request foreground focus."
+  (let ((icon (get options :icon "")))
+    (unless (equal? icon "")
+      (let ((surface (sdl/pointer (sdl/load-surface icon))))
+        (unwind-protect
+          (sdl/check (sdl/set-window-icon window surface))
+          (sdl/destroy-surface surface)))))
+  (when (get options :foreground #t) (sdl/check (sdl/raise-window window)))
+  #t)
 
 (def (open options)
   (let ((first? (null? (ui/windows)))
@@ -22,10 +51,10 @@
       (let ((settings (native/load-config! (get options :config "build/ui-config.ot"))))
         (sdl/load! (native/config-ref settings 'sdl)))
       (sdl/set-main-ready)
-      (gpu/configure-app! {:name (get options :app-name "Otium")
-                           :version (get options :app-version "")
-                           :id (get options :app-id "org.otium.application")
-                           :background (or headless (get options :background #f))})
+      (configure-app! {:name (get options :app-name "Otium")
+                       :version (get options :app-version "")
+                       :id (get options :app-id "org.otium.application")
+                       :background (or headless (get options :background #f))})
       (sdl/check (sdl/init sdl/INIT_VIDEO)))
     (unwind-protect
       (begin
@@ -47,9 +76,8 @@
                                                scale)
                                            (get options :driver "")
                                            (or headless (get options :offscreen #f) (> scale 0)))))
-        (gpu/present-window! window
-                             {:icon (get options :icon "")
-                              :foreground (not (or headless (get options :background #f)))})
+        (present-window! window
+                         {:icon (get options :icon "") :foreground (not (or headless (get options :background #f)))})
         (let ((handle {:window window
                        :renderer renderer
                        :tree (ui/root)
@@ -60,6 +88,7 @@
                        :scale (native/gpu-scale renderer)
                        :requested-scale scale
                        :options options
+                       :dirty? #t
                        :frame 0
                        :capture ""
                        :closed? #f
@@ -98,11 +127,14 @@
                                         #f))))))
 
 (def- (event! window event)
+  (ui/invalidate! window)
   (let ((kind (get event :kind))
         (tree (get window :tree))
         (renderer (get window :renderer)))
     (cond
-      ((eq? kind :quit) (close! window))
+      ((eq? kind :quit)
+       (let ((allow? (get (get window :options) :on-close-request)))
+         (when (or (not allow?) (allow? window)) (close! window))))
       ((eq? kind :resize)
        (set! (window :width) (get event :width))
        (set! (window :height) (get event :height))
@@ -119,8 +151,15 @@
        (input/keyboard! tree
                         (put (put event :clipboard-read (fn () (native/clipboard-get renderer)))
                              :clipboard-write (fn (text) (sdl/check (native/clipboard-set text))))))
-      ((memq kind '(:pointer-down :pointer-up :pointer-move :wheel))
+      ((memq kind '(:pointer-down :pointer-up :pointer-move :pointer-leave :wheel))
        (input/dispatch! (get window :pointer) tree event)))))
+
+(def (visible? window)
+  (or (get (window :options) :headless)
+      (let ((flags (sdl/get-window-flags (window :window))))
+        (not (or (sdl/flag-set? flags sdl/WINDOW_HIDDEN)
+                 (sdl/flag-set? flags sdl/WINDOW_MINIMIZED)
+                 (sdl/flag-set? flags sdl/WINDOW_OCCLUDED))))))
 
 (def (frame! window)
   (let ((tree (get window :tree))
@@ -137,14 +176,56 @@
           (poll (native/poll-event renderer)))))
     (unless (get window :closed?)
       (when (get options :step!) ((get options :step!) window))
-      (sync! window)
-      (gpu/layout! tree (get window :width) (get window :height) (get window :scale))
-      (gpu/paint! tree renderer (get window :width) (get window :height) (get options :background-color 0x101827ff))
-      (sdl/check (native/gpu-frame renderer (get window :capture)))
-      (set! (window :capture) "")
-      (set! (window :frame) (+ 1 (get window :frame)))
-      (set! (window :last-error) #f)
+      (let ((visible (visible? window)))
+        (when (and visible (not (get window :was-visible?))) (ui/invalidate! window))
+        (put! window :was-visible? visible)
+        (let ((full? (or (and (not (equal? (window :capture) ""))
+                              (or (not (window :last-error))
+                                  (window :dirty?)
+                                  (not (equal? (window :revision) dev/revision))))
+                         (not (get options :render-on-demand?))
+                         (and visible (or (window :dirty?) (not (equal? (window :revision) dev/revision)))))))
+          ;; Animation frames skip the view. Size animations need Yoga; scroll
+          ;; animations only move bounds.
+          (when (or full? (and visible (or (gpu/resizing? tree) (gpu/animating? tree))))
+            (let ((now (seconds))
+                  (relayout? (or full? (gpu/resizing? tree))))
+              (when full?
+                (sync! window)
+                (gpu/invalidate-paint! tree))
+              (when (gpu/resizing? tree) (gpu/step-sizes! tree now))
+              (when relayout? (gpu/layout! tree (get window :width) (get window :height) (get window :scale)))
+              (when (gpu/animating? tree) (gpu/animate! tree now (get window :scale))))
+            (when (and (input/refresh-hover! (get window :pointer) tree) (not full?)) (gpu/invalidate-paint! tree))
+            (gpu/paint! tree
+                        renderer
+                        (get window :width)
+                        (get window :height)
+                        (get options :background-color 0x101827ff))
+            (sdl/check (native/gpu-frame renderer (get window :capture)))
+            (put! window :dirty? #f)
+            (put! window :revision dev/revision)
+            (set! (window :capture) "")
+            (set! (window :frame) (+ 1 (get window :frame)))
+            (set! (window :last-error) #f))))
       (when (get options :after-frame!) ((get options :after-frame!) window)))))
+
+(def (seconds)
+  (/ (current-jiffy) (jiffies-per-second)))
+
+(def (wait-ms)
+  "Poll interval for the loop; zero while a visible window animates, so frames
+follow the swapchain's vsync rather than the poll interval."
+  (reduce (fn (ms window)
+            (min ms
+                 (cond
+                   ((and (visible? window) (or (gpu/animating? (window :tree)) (gpu/resizing? (window :tree)))) 0)
+                   ((and (visible? window)
+                         (sdl/flag-set? (sdl/get-window-flags (window :window)) sdl/WINDOW_INPUT_FOCUS))
+                    (get (window :options) :poll-ms 16))
+                   (else (get (window :options) :background-poll-ms 16)))))
+          100
+          (ui/windows)))
 
 (def (run)
   (unless running?
@@ -161,12 +242,14 @@
                           (catch ((fn (_) #t) c)
                             (when (or (get (get window :options) :fail-fast?) (eq? (condition-type c) 'ui-teardown))
                               (error c))
-                            (let ((key (list dev/revision c)))
+                            (put! window :dirty? #f)
+                            (put! window :revision dev/revision)
+                            (let ((key (list dev/revision (condition-type c) (condition-message c))))
                               (unless (equal? key (get window :last-error))
                                 (set! (window :last-error) key)
                                 (dev/frame-error! c)))))
                         (dev/end!))))
                   (ui/windows))
-        (sdl/delay 16))
+        (when (pair? (ui/windows)) (sdl/wait-event-timeout ffi/null (wait-ms))))
       (set! running? #f)
       (for-each close! (ui/windows)))))

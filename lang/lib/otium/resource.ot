@@ -1,0 +1,32 @@
+(ns otium.resource)
+(require otium.core :as core)
+
+(def close core/close)
+
+(def (check-close resource)
+  "Check the close protocol before entering a resource scope."
+  (unless (resource-closable? resource) (error "with: resource has no applicable close method" resource))
+  resource)
+
+(def (release resource outcome release-fn)
+  (release-fn resource outcome))
+
+(defclass Owned
+  value
+  destroy
+  (closed? :init #f))
+
+(def (own value destroy)
+  "Wrap a resource with an idempotent close method."
+  (make Owned :value value :destroy destroy))
+
+(def (value resource)
+  (when (resource :closed?) (error "resource is closed"))
+  (resource :value))
+
+(defmethod (close (resource Owned) outcome)
+  (unless (resource :closed?)
+    (set! (resource :closed?) #t)
+    ((resource :destroy) (resource :value))))
+
+(def with core/with)

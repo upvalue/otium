@@ -1,0 +1,27 @@
+(require (otium.ui :as ui))
+(require (otium.ui.gpu :as gpu))
+(require (otium.ui.native :as native))
+(require otium.test :refer (check fails? report))
+
+(native/load-config! "build/ui-config.ot")
+(def tree (ui/root))
+(defer
+  (begin
+    (ui/reconcile! tree
+      (ui/row {:width 8 :height 32}
+        (ui/icon {:name :house :size 16})))
+    (gpu/layout! tree 100 100)
+    (let ((node (get (ui/children (get (ui/children tree) 0)) 0)))
+      (check "icon width stays fixed in a narrow row" 16.0 ((node :bounds) :width))
+      (check "icon height matches size" 16.0 ((node :bounds) :height)))
+    (check "known fill icon resolves" #t
+      (string-contains? (gpu/icon-path (make ui/Icon :name :house :fill #t)) "/fill/house.svg"))
+    (check "unknown icon error names icon" #t
+      (try (begin (ui/reconcile! tree (ui/icon {:name :no-such-icon})) #f)
+        (catch (error? problem) (string-contains? (condition-message problem) "no-such-icon"))))
+    (check "invalid icon size rejected" #t
+      (fails? (fn () (ui/layout-style (make ui/Icon :name :house :size 0)))))
+    (check "icon path traversal rejected" #t
+      (fails? (fn () (gpu/icon-path (make ui/Icon :name (keyword "../house")))))))
+  (ui/dispose! tree))
+(report "ui icons")

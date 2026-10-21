@@ -375,8 +375,9 @@ then is an error wherever the resource tracks its own state.
 - A resource with no applicable `close` method and no `release` is an error
   when it is bound, not when it is released. Silently skipping it would hide
   mistakes.
-- `with` returns the body's value. An error from releasing replaces the
-  block's result, as with an `unwind-protect` cleanup (8.7).
+- `with` returns the body's value. An error from releasing replaces a normal
+  block result. During unwinding, preserve the primary error or control
+  transfer and discard cleanup errors.
 
 ```scheme
 (defgeneric (close resource outcome))

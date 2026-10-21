@@ -1,0 +1,440 @@
+(ns otium.sqlite)
+(require otium.ffi :as ffi)
+(require otium.sqlite.raw :as raw)
+(require otium.resource :as resource)
+
+;; Fragments own their parameter sequence. Query composition never mutates inputs.
+(defclass Fragment
+  text
+  parameters)
+
+(defclass Query
+  kind
+  head
+  clauses)
+
+(def (snapshot value)
+  (if (bytevector? value)
+      (bytevector-copy value)
+      value))
+
+(def (raw text . parameters)
+  "A SQL fragment with positional parameters. Text is trusted SQL."
+  (unless (string? text) (error "sql/raw: expected SQL string"))
+  (when (contains? text "\0") (error "sql/raw: NUL in SQL text"))
+  (make Fragment :text text :parameters (map snapshot parameters)))
+
+(def (identifier name)
+  (unless (keyword? name) (error "sql: expected keyword identifier" name))
+  (raw (string-join "."
+                    (map (fn (part)
+                           (if (equal? part "*")
+                               "*"
+                               (str "\"" (string-replace part "\"" "\"\"") "\"")))
+                         (array-to-list (string-split (keyword->string name) "."))))))
+
+(def (fragment? value)
+  (and (instance? value) (eq? (dispatch-type value) Fragment)))
+
+(def (query? value)
+  (and (instance? value) (eq? (dispatch-type value) Query)))
+
+(def (join-fragments separator fragments)
+  (make Fragment
+        :text (string-join separator (map (fn (f) (f :text)) fragments))
+        :parameters (apply append (map (fn (f) (f :parameters)) fragments))))
+
+(def (surround before fragment after)
+  (make Fragment :text (str before (fragment :text) after) :parameters (fragment :parameters)))
+
+(def (expression value)
+  (cond
+    ((fragment? value) value)
+    ((query? value) (surround "(" (compile-query value) ")"))
+    ((keyword? value) (identifier value))
+    (else (raw "?" value))))
+
+(def operators
+  {'= "="
+   '!= "<>"
+   '<> "<>"
+   '< "<"
+   '<= "<="
+   '> ">"
+   '>= ">="
+   '+ "+"
+   '- "-"
+   '* "*"
+   '/ "/"
+   'and "AND"
+   'or "OR"
+   'like "LIKE"
+   'is "IS"
+   'is-not "IS NOT"})
+
+(def functions '(count sum avg min max total coalesce lower upper length abs round))
+
+(def (operation op args)
+  (cond
+    ((get operators op)
+     (unless (>= (length args) 2) (error "sql: operator needs at least two arguments" op))
+     (surround "(" (join-fragments (str " " (get operators op) " ") args) ")"))
+    ((memq op functions) (surround (str (symbol->string op) "(") (join-fragments ", " args) ")"))
+    ((memq op '(not exists))
+     (unless (= (length args) 1) (error "sql: unary operator" op))
+     (if (eq? op 'exists)
+         (surround "EXISTS " (car args) "")
+         (surround "NOT (" (car args) ")")))
+    ((memq op '(asc desc))
+     (unless (= (length args) 1) (error "sql: ordering needs one expression"))
+     (surround "" (car args) (str " " (symbol->string op))))
+    ((eq? op 'as)
+     (unless (= (length args) 2) (error "sql: as needs expression and alias"))
+     (join-fragments " AS " args))
+    ((eq? op 'in)
+     (unless (= (length args) 2) (error "sql: in needs expression and sequence"))
+     (join-fragments " IN " args))
+    (else (error "sql: unsupported operator" op))))
+
+(def (expression-code form)
+  (cond
+    ((and (pair? form) (eq? (car form) 'array))
+     `(otium.sqlite/surround "(" (otium.sqlite/join-fragments ", " (list ,@(map expression-code (cdr form)))) ")"))
+    ((and (pair? form)
+          (or (get operators (car form)) (memq (car form) functions) (memq (car form) '(not exists asc desc as in))))
+     `(otium.sqlite/operation ',(car form) (list ,@(map expression-code (cdr form)))))
+    (else `(otium.sqlite/expression ,form))))
+
+(def (columns-code form)
+  (unless (and (pair? form) (eq? (car form) 'array) (pair? (cdr form))) (error "sql: expected nonempty column vector"))
+  `(otium.sqlite/join-fragments ", " (list ,@(map expression-code (cdr form)))))
+
+(def (clause-code form)
+  (if (and (pair? form) (memq (car form) '(from where order-by group-by having limit offset join left-join returning)))
+      (let ((name (car form))
+            (args (cdr form)))
+        (when (null? args) (error "sql: empty clause" name))
+        (when (and (memq name '(where having limit offset from)) (not (= (length args) 1)))
+          (error "sql: clause needs one argument" name))
+        (when (and (memq name '(join left-join)) (not (= (length args) 2)))
+          (error "sql: join needs source and predicate"))
+        `(list ',name
+               ,(cond
+                  ((memq name '(join left-join))
+                   `(otium.sqlite/join-fragments " ON " (list ,@(map expression-code args))))
+                  ((and (eq? name 'returning) (= (length args) 1)) (columns-code (car args)))
+                  (else `(otium.sqlite/join-fragments ", " (list ,@(map expression-code args)))))))
+      form))
+
+(def (extend-query query clauses)
+  (unless (query? query) (error "sql: expected query"))
+  (make Query :kind (query :kind) :head (query :head) :clauses (append (query :clauses) (filter identity clauses))))
+
+(def (select-code columns clauses)
+  `(otium.sqlite/extend-query (make otium.sqlite/Query :kind 'select :head ,(columns-code columns) :clauses '())
+                              (list ,@(map clause-code clauses))))
+
+(def (compose-code query clauses)
+  "Return a new query. A nil clause is ignored; repeated where clauses use AND."
+  `(otium.sqlite/extend-query ,query (list ,@(map clause-code clauses))))
+
+(defmacro clause (form)
+  (clause-code form))
+
+(defmacro expr (form)
+  (expression-code form))
+
+(def (insert-code table columns row clauses)
+  (unless (and (pair? row) (eq? (car row) 'array)) (error "sql: expected values vector"))
+  (unless (= (length columns) (length row)) (error "sql: insert column/value count mismatch"))
+  `(otium.sqlite/extend-query (make otium.sqlite/Query
+                                    :kind 'insert
+                                    :head (otium.sqlite/join-fragments " "
+                                                                       (list (otium.sqlite/identifier ,table)
+                                                                             (otium.sqlite/surround "("
+                                                                                                    ,(columns-code columns)
+                                                                                                    ")")
+                                                                             (otium.sqlite/raw "VALUES")
+                                                                             (otium.sqlite/surround "("
+                                                                                                    (otium.sqlite/join-fragments ", "
+                                                                                                                                 (list ,@(map expression-code
+                                                                                                                                              (cdr row))))
+                                                                                                    ")")))
+                                    :clauses '())
+                              (list ,@(map clause-code clauses))))
+
+(def clause-names
+  {'from "FROM"
+   'where "WHERE"
+   'join "JOIN"
+   'left-join "LEFT JOIN"
+   'group-by "GROUP BY"
+   'having "HAVING"
+   'order-by "ORDER BY"
+   'limit "LIMIT"
+   'offset "OFFSET"
+   'returning "RETURNING"})
+
+(def (compile-query query)
+  (cond
+    ((fragment? query) query)
+    ((query? query)
+     (let ((clauses (query :clauses))
+           (parts (list (surround (if (eq? (query :kind) 'select)
+                                      "SELECT "
+                                      "INSERT INTO ")
+                                  (query :head)
+                                  ""))))
+       (for-each (fn (group)
+                   (let ((matches (filter (fn (c) (memq (car c) group)) clauses)))
+                     (when (pair? matches)
+                       (let ((name (caar matches)))
+                         (when (and (memq name '(from limit offset)) (> (length matches) 1))
+                           (error "sql: duplicate clause" name))
+                         (set! parts
+                               (append parts
+                                       (if (memq name '(join left-join))
+                                           (map (fn (c) (surround (str (get clause-names (car c)) " ") (cadr c) ""))
+                                                matches)
+                                           (list (surround (str (get clause-names name) " ")
+                                                           (join-fragments (if (memq name '(where having))
+                                                                               " AND "
+                                                                               ", ")
+                                                                           (map cadr matches))
+                                                           "")))))))))
+                 (if (eq? (query :kind) 'select)
+                     '((from) (join left-join) (where) (group-by) (having) (order-by) (limit) (offset))
+                     '((returning))))
+       (for-each (fn (c)
+                   (unless (memq (car c)
+                                 (if (eq? (query :kind) 'select)
+                                     '(from join left-join where group-by having order-by limit offset)
+                                     '(returning)))
+                     (error "sql: invalid clause" (car c))))
+                 clauses)
+       (join-fragments " " parts)))
+    (else (error "sql: expected query or raw SQL fragment"))))
+
+(def (inspect query)
+  "Return generated SQL and a detached array of positional parameters."
+  (let ((fragment (compile-query query)))
+    {:sql (fragment :text) :parameters (list-to-array (map snapshot (fragment :parameters)))}))
+
+(define-condition 'sqlite-error 'error)
+
+(defclass Connection
+  handle
+  (closed? :init #f)
+  (statements :init '())
+  (transaction :init nil))
+
+(defclass Statement
+  handle
+  database
+  (closed? :init #f)
+  (bound? :init #f)
+  (done? :init #f))
+
+(defclass Transaction
+  database
+  (closed? :init #f))
+
+(def (handle resource)
+  (when (resource :closed?) (error {:type 'sqlite-error :message "SQLite resource is closed" :reason :closed}))
+  (resource :handle))
+
+(def (check-result db op rc)
+  (unless (= rc raw/OK)
+    (error {:type 'sqlite-error
+            :message (raw/errmsg (handle db))
+            :operation op
+            :code rc
+            :extended-code (raw/extended-errcode (handle db))})))
+
+(def (open path)
+  "Open a managed read/write connection, creating the database if needed."
+  (when (contains? path "\0") (error "sql/open: NUL in path"))
+  (unless raw/library (raw/load! '("libsqlite3.dylib" "libsqlite3.so.0" "libsqlite3.so")))
+  (let ((out (ffi/alloc 'pointer 1)))
+    (defer
+      (let ((rc (raw/open path out))
+            (pointer (ffi/ref out 'pointer 0)))
+        (if (= rc raw/OK)
+            (make Connection :handle pointer)
+            (let ((message (if (ffi/null? pointer)
+                               (raw/errstr rc)
+                               (raw/errmsg pointer))))
+              (unless (ffi/null? pointer) (raw/close-v2 pointer))
+              (error {:type 'sqlite-error :message message :operation 'open :code rc}))))
+      (ffi/free! out))))
+
+(defmethod (resource/close (statement Statement) outcome)
+  (unless (statement :closed?)
+    (let ((db (statement :database))
+          (rc (raw/finalize (statement :handle))))
+      (set! (statement :closed?) #t)
+      (set! (db :statements) (filter (fn (s) (not (eq? s statement))) (db :statements)))
+      (unless outcome (check-result db 'finalize rc)))))
+
+(defmethod (resource/close (db Connection) outcome)
+  (unless (db :closed?)
+    (let ((failure nil))
+      (for-each (fn (s)
+                  (try
+                    (resource/close s outcome)
+                    (catch ((fn (_) #t) c) (unless failure (set! failure c)))))
+                (db :statements))
+      (let ((rc (raw/close (db :handle))))
+        (if (= rc raw/OK)
+            (set! (db :closed?) #t)
+            (unless failure (set! failure {:type 'sqlite-error :message (raw/errmsg (db :handle)) :code rc}))))
+      (when (and failure (not outcome)) (error failure)))))
+
+(def (bind-value! db statement index value)
+  (check-result db
+                'bind
+                (cond
+                  ((nil? value) (raw/bind-null statement index))
+                  ((eq? value #t) (raw/bind-int statement index 1))
+                  ((eq? value #f) (raw/bind-int statement index 0))
+                  ((and (integer? value) (exact? value)) (raw/bind-int64 statement index value))
+                  ((number? value) (raw/bind-double statement index value))
+                  ((or (string? value) (bytevector? value))
+                   (let ((bytes (if (string? value)
+                                    (string->utf8 value)
+                                    value))
+                         (size (bytevector-length bytes))
+                         (buffer (ffi/alloc 'u8 (max 1 size))))
+                     (defer
+                       (begin
+                         (dotimes (i size)
+                           (ffi/set! buffer 'u8 i (bytevector-u8-ref bytes i)))
+                         (if (string? value)
+                             (raw/bind-text statement index buffer size raw/TRANSIENT)
+                             (raw/bind-blob statement index buffer size raw/TRANSIENT)))
+                       (ffi/free! buffer))))
+                  (else (error "sql: unsupported parameter type" value)))))
+
+(def (bind! statement parameters)
+  "Reset and replace every binding. Parameters are an array or list."
+  (let ((pointer (handle statement))
+        (db (statement :database)))
+    (handle db)
+    (unless (= (length parameters) (raw/bind-parameter-count pointer)) (error "sql: parameter count mismatch"))
+    (set! (statement :bound?) #f)
+    ;; reset may repeat the previous step error; the next execution starts clean.
+    (raw/reset pointer)
+    (set! (statement :done?) #f)
+    (check-result db 'clear-bindings (raw/clear-bindings pointer))
+    (let ((i 0))
+      (for-each (fn (v)
+                  (set! i (+ i 1))
+                  (bind-value! db pointer i v))
+                parameters))
+    (set! (statement :bound?) #t)
+    statement))
+
+(def (prepare db query)
+  (let ((pointer (handle db))
+        (compiled (compile-query query))
+        (source (ffi/alloc-utf8 (compiled :text))))
+    (defer
+      (resource/with ((out (ffi/alloc 'pointer 1) ffi/free!) (tail (ffi/alloc 'pointer 1) ffi/free!))
+                     (let ((rc (raw/prepare-v2 pointer source -1 out tail))
+                           (stmt-pointer (ffi/ref out 'pointer 0)))
+                       (unless (= rc raw/OK)
+                         (unless (ffi/null? stmt-pointer) (raw/finalize stmt-pointer))
+                         (check-result db 'prepare rc))
+                       (when (ffi/null? stmt-pointer) (error "sql: empty SQL statement"))
+                       (let ((statement (make Statement :handle stmt-pointer :database db)))
+                         (set! (db :statements) (cons statement (db :statements)))
+                         (try
+                           (begin
+                             (unless (equal? (string-trim (ffi/read-utf8 (ffi/ref tail 'pointer 0)
+                                                                         (+ 1
+                                                                            (bytevector-length (string->utf8 (compiled :text))))))
+                                             "")
+                               (error "sql: expected one SQL statement"))
+                             (bind! statement (compiled :parameters)))
+                           (catch ((fn (_) #t) c)
+                             (resource/close statement c)
+                             (error c))))))
+      (ffi/free! source))))
+
+(def (column-value pointer index)
+  (let ((kind (raw/column-type pointer index)))
+    (cond
+      ((= kind raw/NULL) nil)
+      ((= kind raw/INTEGER) (raw/column-int64 pointer index))
+      ((= kind raw/FLOAT) (raw/column-double pointer index))
+      (else (let ((data (if (= kind raw/TEXT)
+                            (raw/column-text pointer index)
+                            (raw/column-blob pointer index)))
+                  (size (raw/column-bytes pointer index))
+                  (bytes (make-bytevector size)))
+              (dotimes (i size)
+                (bytevector-u8-set! bytes i (ffi/ref data 'u8 i)))
+              (if (= kind raw/TEXT)
+                  (utf8->string bytes)
+                  bytes))))))
+
+(def (step! statement)
+  "Return an owned row array, or nil at completion."
+  (let ((pointer (handle statement))
+        (db (statement :database)))
+    (handle db)
+    (unless (statement :bound?) (error "sql: statement needs complete bindings"))
+    (if (statement :done?)
+        nil
+        (let ((rc (raw/step pointer)))
+          (cond
+            ((= rc raw/ROW) (map (fn (i) (column-value pointer i)) (range (raw/column-count pointer))))
+            ((= rc raw/DONE) (set! (statement :done?) #t) nil)
+            (else (set! (statement :done?) #t) (check-result db 'step rc)))))))
+
+(def (columns statement)
+  (let ((pointer (handle statement))) (map (fn (i) (raw/column-name pointer i)) (range (raw/column-count pointer)))))
+
+(def (execute! db query)
+  "Execute a query and return an array of row arrays, including RETURNING rows."
+  (resource/with ((statement (prepare db query)))
+                 (let ((rows []))
+                   (let loop ((row (step! statement)))
+                     (when row
+                       (push! rows row)
+                       (loop (step! statement))))
+                   rows)))
+
+(def (transaction db)
+  "Begin a transaction scope. Nested scopes are rejected."
+  (let ((pointer (handle db)))
+    (unless (and (not (db :transaction)) (= (raw/get-autocommit pointer) 1)) (error "sql: transaction already active"))
+    (execute! db (raw "BEGIN"))
+    (let ((scope (make Transaction :database db)))
+      (set! (db :transaction) scope)
+      scope)))
+
+(defmethod (resource/close (scope Transaction) outcome)
+  (unless (scope :closed?)
+    (let ((db (scope :database)))
+      (set! (scope :closed?) #t)
+      (set! (db :transaction) nil)
+      (unless (db :closed?)
+        (if outcome
+            (execute! db (raw "ROLLBACK"))
+            (try
+              (execute! db (raw "COMMIT"))
+              (catch ((fn (_) #t) c)
+                (try
+                  (execute! db (raw "ROLLBACK"))
+                  (catch ((fn (_) #t) _) nil))
+                (error c))))))))
+
+(defmacro select (columns . clauses)
+  (select-code columns clauses))
+
+(defmacro compose (query . clauses)
+  (compose-code query clauses))
+
+(defmacro insert-into (table columns row . clauses)
+  (insert-code table columns row clauses))

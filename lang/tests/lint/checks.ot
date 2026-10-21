@@ -23,4 +23,53 @@
 (check "nested next-form suppression"
        '()
        (codes "(def (f x)\n  ;; lint: allow(if-chain) mirrors the spec\n  (if x 1 (if #f 2 3)))"))
+
+(def (lift-count text)
+  (length (filter (fn (code) (equal? code "L0002")) (codes text))))
+
+(check "independent helper" 1 (lift-count "(def (f) (def (plus a b) (+ a b)) (plus 2 2))"))
+(check "parameter capture" 0 (lift-count "(def (f x) (def (plus a) (+ a x)) (plus 2))"))
+(check "let capture" 0 (lift-count "(def (f) (let ((x 2)) (def (plus a) (+ a x)) (plus 2)))"))
+(check "shadowed parameter" 1 (lift-count "(def (f x) (def (plus x) (+ x 2)) (plus x))"))
+(check "recursive helper" 1 (lift-count "(def (f) (def (loop n) (if (= n 0) 0 (loop (- n 1)))) (loop 2))"))
+(check "sibling dependency" 0 (lift-count "(def (f x) (def (a) (b)) (def (b) x) (a))"))
+(check "mutual recursion" 0 (lift-count "(def (f) (def (a n) (b n)) (def (b n) (a n)) (a 1))"))
+(check "transitive capture" 0 (lift-count "(def (f x) (def (a) (fn () x)) (a))"))
+(check "owned nested binding" 1 (lift-count "(def (f) (def (a x) (fn () x)) (a 1))"))
+(check "reassigned helper" 0 (lift-count "(def (f) (def (a) 1) (set! a (fn () 2)) (a))"))
+(check "capture through assignment" 0 (lift-count "(def (f x) (def (a) (set! x 2)) (a) x)"))
+(check "host syntax" 0 (lift-count "(require chez) (def (f) (def (a) (chez/let ((x 1)) x)) (a))"))
+(check "anonymous callback" 0 (lift-count "(def (f) (map (fn (x) (+ x 1)) (list 1)))"))
+(check "macro capture" 0 (lift-count "(defmacro use-x () (quote x)) (def (f x) (def (a) (use-x)) (a))"))
+(check "macro binding" 1 (lift-count "(defmacro local () (quote (let ((x 1)) x))) (def (f) (def (a) (local)) (a))"))
+(check "generated helper" 0 (lift-count "(defmacro helper () (quote (def (a) 1))) (def (f) (helper) (a))"))
+(check "ambiguous helper names" 0 (lift-count "(def (f) (let () (def (a) 1) (a)) (let () (def (a) 2) (a)))"))
+(check "quasiquote capture" 0 (lift-count "(def (f x) (def (a) `(value ,x)) (a))"))
+(check "quoted reference" 1 (lift-count "(def (f x) (def (a) (quote x)) (list x (a)))"))
+(check "sequential let capture" 0 (lift-count "(def (f x) (def (a) (let ((y x) (x 1)) (+ y x))) (a))"))
+(check "named let capture" 0 (lift-count "(def (f x) (def (a) (let loop ((x x)) x)) (a))"))
+(check "suppression"
+       0
+       (lift-count "(def (f)\n ;; lint: allow(liftable-function) kept near its only caller\n (def (a) 1) (a))"))
+(check "lift skipped without expansion"
+       '()
+       (map (fn (d) (d :code)) (lint/lint-text "(def (f) (def (a) 1) (a))" "example.ot" {:expand #f})))
+(let ((d (first (lint/lint-text "(def (f)\n  (def (a) 1)\n  (a))" "example.ot"))))
+  (check "helper location" 2 ((d :span) :line))
+  (check "helper severity" :warning (d :severity)))
+
+(check "definitions spliced from begin" 0 (lift-count "(def (f x) (begin (def y x)) (def (a) y) (a))"))
+(check "macro-generated enclosing binding"
+       0
+       (lift-count "(defmacro local (value) `(def y ,value)) (def (f x) (local x) (def (a) y) (a))"))
+(check "rest parameter capture" 0 (lift-count "(def (f & xs) (def (a) xs) (a))"))
+(check "match capture" 0 (lift-count "(def (f value) (match value ((x y) (def (a) (+ x y)) (a))))"))
+(check "macro-expanded references have source span"
+       '("L0002")
+       (codes "(defmacro twice (x) `(+ ,x ,x)) (def (f) (def (a x) (twice x)) (a 1))"))
+(check "helper inside macro implementation"
+       1
+       (lift-count "(defmacro literal (x) (def (identity value) value) (identity x))"))
+(check "capturing helper inside macro implementation" 0 (lift-count "(defmacro literal (x) (def (value) x) (value))"))
+(check "quoted helper in macro template" 0 (lift-count "(defmacro helper () '(def (f) (def (a) 1) (a)))"))
 (report "lint")

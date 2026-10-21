@@ -273,6 +273,16 @@
     "example": "(if a 1 (if b 2 3))",
     "fixed": "(cond (a 1) (b 2) (else 3))"
   },
+  "L0002": {
+    "name": "liftable-function",
+    "group": "style",
+    "level": "warn",
+    "title": "nested function has no captures",
+    "message": "`{name}` does not capture enclosing bindings; consider a top-level `def-`",
+    "explanation": "A named helper that does not depend on enclosing local bindings can be a private top-level definition. This reduces nesting and makes its independence explicit. Keep it local with a suppression when that makes the code easier to read. This rule checks explicit named function definitions after macro expansion; it skips ambiguous source locations, reassigned helpers and Chez host forms. It does not suggest lifting groups of mutually dependent helpers.",
+    "example": "(def (calculate)\n  (def (plus a b) (+ a b))\n  (plus 2 2))",
+    "fixed": "(def- (plus a b) (+ a b))\n\n(def (calculate)\n  (plus 2 2))"
+  },
   "L0101": {
     "name": "foreign-definition",
     "group": "foreign",

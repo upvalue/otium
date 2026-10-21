@@ -1,0 +1,5 @@
+[wrap-file]
+directory = plutosvg-0.0.7
+source_url = https://github.com/sammycage/plutosvg/archive/refs/tags/v0.0.7.tar.gz
+source_filename = plutosvg-0.0.7.tar.gz
+source_hash = 78561b571ac224030cdc450ca2986b4de915c2ba7616004a6d71a379bffd15f3

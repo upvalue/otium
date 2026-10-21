@@ -6,7 +6,7 @@
 
 (require otium.ffi :as ffi)
 (require otium.process :as process)
-(require manse.json :as json)
+(require otium.json :as json)
 
 ;; GhosttyResult
 (def SUCCESS 0)
@@ -86,6 +86,18 @@
   ((private %terminal-set) "ghostty_terminal_set" (pointer int pointer) int #t)
   ((private %terminal-resize) "ghostty_terminal_resize" (pointer u16 u16 u32 u32) int #t)
   ((private %vt-write) "ghostty_terminal_vt_write" (pointer pointer size-t) void #t)
+  ((private %key-encoder-new) "ghostty_key_encoder_new" (pointer pointer) int #t)
+  ((private %key-encoder-free) "ghostty_key_encoder_free" (pointer) void #t)
+  ((private %key-options) "ghostty_key_encoder_setopt_from_terminal" (pointer pointer) void #t)
+  ((private %key-option) "ghostty_key_encoder_setopt" (pointer int pointer) void #t)
+  ((private %key-encode) "ghostty_key_encoder_encode" (pointer pointer pointer size-t pointer) int #t)
+  ((private %key-event-new) "ghostty_key_event_new" (pointer pointer) int #t)
+  ((private %key-event-free) "ghostty_key_event_free" (pointer) void #t)
+  ((private %key-action) "ghostty_key_event_set_action" (pointer int) void #t)
+  ((private %key-code) "ghostty_key_event_set_key" (pointer int) void #t)
+  ((private %key-mods) "ghostty_key_event_set_mods" (pointer u16) void #t)
+  ((private %key-text) "ghostty_key_event_set_utf8" (pointer pointer size-t) void #t)
+  ((private %key-unshifted) "ghostty_key_event_set_unshifted_codepoint" (pointer u32) void #t)
   ((private %state-new) "ghostty_render_state_new" (pointer pointer) int #t)
   ((private %state-free) "ghostty_render_state_free" (pointer) void #t)
   ((private %state-update) "ghostty_render_state_update" (pointer pointer) int #t)
@@ -200,12 +212,61 @@
     term))
 
 (def (free! term)
+  (free-keyboard! term)
   (%cells-free (term :cells))
   (%rows-free (term :row-iter))
   (%state-free (term :state))
   (%terminal-free (term :handle))
   (ffi/free-callback! (term :write-pty))
   (for-each (fn (k) (ffi/free! (term k))) '(:rgb :codepoints :style)))
+
+(def- (free-keyboard! term)
+  (when (term :key-encoder) (%key-encoder-free (term :key-encoder)))
+  (when (term :key-event) (%key-event-free (term :key-event)))
+  (when (term :key-buffer) (ffi/free! (term :key-buffer)))
+  (when (term :key-text) (ffi/free! (term :key-text)))
+  (for-each (fn (key) (put! term key nil)) '(:key-encoder :key-event :key-buffer :key-capacity :key-text)))
+
+(def- (keyboard! term)
+  ;; Allocate lazily so terminals opened before a reload acquire an encoder too.
+  (unless (term :key-encoder)
+    (let ((success? #f))
+      (unwind-protect
+        (begin
+          (put! term :key-encoder (new-handle "key_encoder_new" %key-encoder-new ffi/null))
+          (put! term :key-event (new-handle "key_event_new" %key-event-new ffi/null))
+          (put! term :key-buffer (ffi/alloc 'u8 128))
+          (put! term :key-text (ffi/alloc 'u8 1))
+          (put! term :key-capacity 128)
+          (set! success? #t))
+        (unless success? (free-keyboard! term))))))
+
+(def (encode-key term key mods action ascii unshifted)
+  "Encode a key with optional ASCII text (0 for none) using this terminal's current modes."
+  (keyboard! term)
+  (let ((encoder (term :key-encoder))
+        (event (term :key-event)))
+    (%key-options encoder (term :handle))
+    ;; Text composition stays on SDL's text-input path. Here Option is a modifier.
+    (ffi/set! scratch 'i32 0 1)
+    (%key-option encoder 6 scratch)
+    (%key-code event key)
+    (%key-mods event mods)
+    (%key-action event action)
+    (ffi/set! (term :key-text) 'u8 0 ascii)
+    (%key-text event (term :key-text) (if (= ascii 0) 0 1))
+    (%key-unshifted event unshifted)
+    (let ((result (%key-encode encoder event (term :key-buffer) (term :key-capacity) scratch)))
+      (when (= result -3)
+        (let ((capacity (ffi/ref scratch 'size-t 0))
+              (buffer (ffi/alloc 'u8 capacity)))
+          (ffi/free! (term :key-buffer))
+          (put! term :key-buffer buffer)
+          (put! term :key-capacity capacity)
+          (set! result (%key-encode encoder event buffer capacity scratch))))
+      (check! "key_encoder_encode" result)
+      (array-to-list (map (fn (i) (ffi/ref (term :key-buffer) 'u8 i))
+                          (range (ffi/ref scratch 'size-t 0)))))))
 
 (def (on-write-pty term data len)
   "Collect the terminal's replies as byte values, or pass them to :on-reply."
@@ -314,42 +375,8 @@
                  (push! (get rows y) (cell term))))
     rows))
 
-;; Codepoints to strings. Otium has no char type yet (specs/io.md), so encode
-;; UTF-8 into native memory and read it back. Cached per codepoint sequence.
-(defonce text-cache {})
-
-(defonce utf8-scratch nil)
-
-(def- (encode! p i cp)
-  "Write cp as UTF-8 at byte i of p and return the next index."
-  (let ((byte! (fn (k v) (ffi/set! p 'u8 (+ i k) v))))
-    (cond
-      ((< cp 128) (byte! 0 cp) (+ i 1))
-      ((< cp 2048)
-       (byte! 0 (+ 192 (quotient cp 64)))
-       (byte! 1 (+ 128 (modulo cp 64)))
-       (+ i 2))
-      ((< cp 65536)
-       (byte! 0 (+ 224 (quotient cp 4096)))
-       (byte! 1 (+ 128 (modulo (quotient cp 64) 64)))
-       (byte! 2 (+ 128 (modulo cp 64)))
-       (+ i 3))
-      (else
-       (byte! 0 (+ 240 (quotient cp 262144)))
-       (byte! 1 (+ 128 (modulo (quotient cp 4096) 64)))
-       (byte! 2 (+ 128 (modulo (quotient cp 64) 64)))
-       (byte! 3 (+ 128 (modulo cp 64)))
-       (+ i 4)))))
-
 (def (codepoints->string cps)
-  (or (get text-cache cps)
-      (begin
-        (unless utf8-scratch (set! utf8-scratch (ffi/alloc 'u8 (* 4 64))))
-        (let ((end (reduce (fn (i cp) (encode! utf8-scratch i cp)) 0 (take 63 cps))))
-          (ffi/set! utf8-scratch 'u8 end 0)
-          (let ((s (ffi/read-utf8 utf8-scratch (+ end 1))))
-            (put! text-cache cps s)
-            s)))))
+  (list->string (map integer->char cps)))
 
 (def (text term)
   "The viewport as a list of row strings, with a space for each empty cell."

@@ -19,18 +19,21 @@
 (check 'load (reason (fn () (ffi/open-library '("/otium/no-such-library")))))
 
 ;; Collection safety is explicit and strictly boolean.
-(for-each (fn (flag)
-            (check 'type (reason (fn () (ffi/bind lib "fixture_id" '() 'int flag)))))
+(for-each (fn (flag) (check 'type (reason (fn () (ffi/bind lib "fixture_id" '() 'int flag)))))
           (list nil 0 1 'true "false"))
-(check #t (try (begin (ffi/bind lib "fixture_id" '() 'int) #f)
-              (catch (error? c) #t)))
 (check #t
-       (try (begin (eval '(ffi/defbindings missing-flag load-missing!
-                            (identity "fixture_id" () int))) #f)
-            (catch (error? c) #t)))
-(check 'type
-       (reason (fn () (eval '(ffi/defbindings lib load-invalid!
-                              (identity "fixture_id" () int 1))))))
+       (try
+         (begin
+           (ffi/bind lib "fixture_id" '() 'int)
+           #f)
+         (catch (error? c) #t)))
+(check #t
+       (try
+         (begin
+           (eval '(ffi/defbindings missing-flag load-missing! (identity "fixture_id" () int)))
+           #f)
+         (catch (error? c) #t)))
+(check 'type (reason (fn () (eval '(ffi/defbindings lib load-invalid! (identity "fixture_id" () int 1))))))
 (for-each (fn (flag)
             (check 17 ((ffi/bind lib "fixture_id" '() 'int flag)))
             (check -7 ((ffi/bind lib "echo_int" '(int) 'int flag) -7)))
@@ -69,6 +72,10 @@
 (check #t (ffi/null? ffi/null))
 (check #f (ffi/null? #f))
 (check #f (ffi/null? 0))
+(check #t (ffi/pointer? ffi/null))
+(check #f (ffi/pointer? 0))
+(check #f (ffi/pointer? "text"))
+(check #f (ffi/pointer? #f))
 (check #t
        (if ffi/null
            #t
@@ -108,6 +115,7 @@
 (check 'bounds (reason (fn () (ffi/view v 0 9))))
 (check 'type (reason (fn () (ffi/free! v))))
 (check #t (ffi/pointer=? p (pointer-call p)))
+(check #t (ffi/pointer? p))
 (check 'type (reason (fn () ((ffi/bind lib "null_callback" '(callback-pointer) 'bool #t) p))))
 (ffi/set! v 'u64 0 1234)
 (check 1234 (ffi/ref p 'u64 1))
@@ -364,7 +372,8 @@
   (ffi/bind lib
             "union_fp_pressure"
             (list 'double 'double 'double 'double 'double 'double 'double Doubles 'double)
-            Doubles #t))
+            Doubles
+            #t))
 
 (def fp-input (ffi/alloc Doubles 1))
 
@@ -375,7 +384,8 @@
 (ffi/free! fp-input)
 (ffi/free! fp-output)
 
-(def int-pressure (ffi/bind lib "union_int_pressure" (list 'u64 'u64 'u64 'u64 'u64 'u64 'u64 'u64 Number 'u64) Number #t))
+(def int-pressure
+  (ffi/bind lib "union_int_pressure" (list 'u64 'u64 'u64 'u64 'u64 'u64 'u64 'u64 Number 'u64) Number #t))
 
 (def int-input (ffi/alloc Number 1))
 

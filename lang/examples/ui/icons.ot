@@ -1,0 +1,10 @@
+(ns ui.icons)
+(require (otium.ui :as ui))
+
+(def (view)
+  (ui/column {:padding 16 :gap 12 :background 0x101827ff}
+             (ui/row {:gap 16}
+                     (ui/icon {:key :regular :name :house :size 16 :color 0x67d9c0ff})
+                     (ui/icon {:key :fill :name :house :size 16 :fill #t :color 0xecac74ff})
+                     (ui/label {:size 16} "Home"))
+             (ui/label {:size 12} "Phosphor / regular and fill")))

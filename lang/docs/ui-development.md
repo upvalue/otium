@@ -10,7 +10,8 @@ keyboard focus and action routing. Automatic file watching is still pending.
 The UI needs a C/C++ toolchain, Meson, pkg-config, Python 3.12 or later for
 its tests, SDL3 3.4.12 or later, SDL3_ttf 3.2.2 or later (`sdl3-ttf` in
 pkg-config), libffi and `glslc`. `just build` builds it when they're installed;
-Meson downloads the pinned Yoga sources on first configure. See
+Meson downloads pinned Yoga, plutovg and plutosvg sources on first configure.
+plutosvg is built without its FreeType font hook. See
 [native components](native.md#dependencies) for versions and checksums.
 
 Run either command from the repository root:
@@ -85,13 +86,39 @@ not automatically rebuild the tree. The caller controls when to reconcile,
 which makes a short event sequence deterministic and easy to inspect.
 
 `ui/row` and `ui/column` accept `:width`, `:height`, `:grow`, `:padding`,
-`:gap`, `:background` and `:radius`. Width and height default to automatic size.
+`:padding-x`, `:padding-y`, `:gap`, `:align-items`, `:background`, `:border`
+and `:radius`. Width and height default to automatic size. `:padding-x` and
+`:padding-y` override `:padding` on one axis. `:align-items` places children
+across the main axis: `:stretch` (default), `:start`, `:center` or `:end`.
+`:border` paints a one-pixel border in the given colour; without a background
+its corners are square.
 `ui/button` accepts children and `:on-press`. `ui/label` paints its text and
 accepts `:font` (`:ui` or `:mono`), `:size` (1–256 logical pixels), `:color`,
 `:wrap` (default `#t`), `:width`, `:height`, and `:grow`. Font and color are
 explicit label properties; they are not inherited from containers. All constructors support library-owned `:key`. Strings become labels; lists and arrays
 flatten recursively; `nil` and empty lists are skipped. `ui/build` defaults to
 returning constructor-supplied children. Custom methods return children directly.
+
+## SVG icons
+
+`(ui/icon {:name :house :size 16 :fill #f :color 0x67d9c0ff})` creates a
+square Icon description. `ui/Icon` is also available for `make` and `ui/new`.
+Size is 1–256 logical pixels; regular is the default, and `:fill #t` selects
+filled artwork. Unknown names raise an error naming the icon during build.
+The icons directory comes from the Meson-written `ui-config.ot`.
+
+Only the example/test icons and the MIT license are included. Run
+`tools/fetch-icons house arrow-left` to add named regular and fill assets from
+Phosphor 2.0.8; the script verifies the release checksum. Review and commit
+only the icons the application uses. The icon demo is `--scene ui.icons`.
+
+`(gfx/image g bounds svg-path color)` draws a monochrome SVG mask. plutosvg
+rasterises at the requested logical dimensions times display scale, rounded
+up to whole pixels. The renderer caches by path, dimensions and scale in the
+shared glyph/image atlas; position and tint changes reuse that raster. Entries
+last until renderer teardown, keeping paint recordings valid. The 2048-pixel
+atlas reports an error when full. Widget properties and methods reload normally;
+editing an SVG file itself requires reopening the window to refresh its raster.
 
 ## Identity, state and reload
 
@@ -145,7 +172,12 @@ handler captures the press. Release activates it through `:press` only when
 it is still mounted and the release hits that node or one of its descendants.
 Release outside, removal, or cancellation prevents activation. Rounded corners
 currently use the widget's rectangular hit region. Captured pointer motion is
-delivered as `:pointer-drag`; text fields use it for selection. Hover is pending.
+delivered as `:pointer-drag`; text fields use it for selection.
+
+Pointer motion marks every node on the hit path as hovered, so a container is
+hovered while the pointer is over its children. Paint methods read
+`(g :hovered?)`. The window refreshes hover after each layout, so content that
+scrolls or changes under a still pointer updates it. `:pointer-leave` clears it.
 
 The native SDL adapter copies button coordinates into scalar values for Otium;
 managed widgets never receive an SDL event pointer. `native/poll-event` returns
@@ -209,8 +241,10 @@ exercise repeated frames so atlas reuse is covered.
 
 The demo accepts `--app-name`, `--app-id`, `--app-version`, `--title`, and `--icon`
 (PNG or BMP). Interactive launch requests foreground focus; `--background` skips
-that request. `gpu/configure-app!` sets metadata before SDL video initialization,
-and `gpu/present-window!` installs the icon and requests focus.
+that request. In `otium.ui.window`, `configure-app!` sets metadata before SDL
+video initialization, and `present-window!` installs the icon and requests focus.
+On macOS `configure-app!` also sets the process name to the app name through
+`otium.objc`; SDL names its default menu items from the metadata.
 
 macOS takes the app-switcher name from the executable's bundle. For development,
 run either runtime through the bundle launcher:
@@ -295,7 +329,10 @@ mounted value immediately as it edits, then calls `:on-change` with the new
 string. `:on-submit` receives the value on Enter. A changed external value
 moves the cursor to its end; unchanged values preserve cursor and selection.
 Common `:autofocus #t` requests focus once when a widget mounts, if the tree
-has no focused widget. Disabled fields neither focus nor accept input.
+has no focused widget. Common `:focus #t` takes focus when the widget mounts
+with it or when it changes from false to true, so an application can keep its
+own idea of focus and move UI focus to match. It does not take focus back
+while it stays true. Disabled fields neither focus nor accept input.
 
 Left/Right and Home/End move the cursor; Shift extends selection. Backspace and
 Delete remove a selection or one Unicode codepoint. Ctrl/Meta+A selects all;
@@ -317,6 +354,9 @@ Unwrapped text preserves trailing whitespace advances for caret movement,
 selection, and pointer positioning.
 
 Committed text arrives through SDL text events, separately from key events.
+SDL sends a key's text after its keydown. When a keymap action handles the
+keydown, the text that follows is dropped, so a shortcut letter does not also
+reach the focused widget. The next keydown clears this.
 The host starts/stops SDL text input as focus changes. Headless tests send
 `{:kind :text-input :text "café"}` to `input/keyboard!`. Clipboard key events
 can supply `:clipboard-read` and `:clipboard-write` functions; the CLI supplies
@@ -333,8 +373,58 @@ hit testing, translates child bounds by its vertical offset, and shows a scroll
 indicator. `:wheel` events carry logical pointer coordinates and `:dy`; native
 wheel direction is normalized. `ui/scroll-to!` takes a mounted Scroll instance
 and a logical pixel offset, clamping to its current range. Nested scroll views
-pass wheel events outward when the inner view cannot move. Scrollbar dragging,
-horizontal container scrolling and virtualized line storage are deferred.
+pass wheel events outward when the inner view cannot move.
+
+`:axis :x` lays children out in a row and scrolls horizontally. Wheel events
+carry `:dx` as well as `:dy`; a horizontal view uses `:dx`, or `:dy` when `:dx`
+is zero so a plain mouse wheel works. `:reveal` names a child key: after layout
+the view scrolls just far enough to show that child. It does this again only
+when the key, the child's position or size, or the viewport changes, so wheel
+scrolling is not undone. Scrollbar dragging and virtualized line storage are
+deferred.
+
+A changed `:reveal` animates. The offset eases toward its target with an
+exponential decay whose time constant is `:smoothing` seconds (default 0.06,
+so most of the distance is covered in about 0.2 s); `:smoothing 0` jumps. The
+first reveal and viewport changes jump, and so does following a child that is
+itself resizing, since its size is already easing. A child wider than the
+viewport shows its start. Wheel input and `ui/scroll-to!` move
+immediately and end any animation; `ui/scroll-toward!` animates. Offsets are
+snapped to physical pixels so text stays sharp while moving.
+
+The common `:animate-size #t` option eases a widget's explicit `:width` and
+`:height` toward new values with the same curve. A widget's first size and
+window resizes apply at once. While a widget or one of its ancestors eases,
+its paint context reports `(g :resizing?)`; Manse's terminal uses it to put
+off resizing its grid until the size settles.
+
+Frames that only advance animations skip reconciliation. Size animations run
+`gpu/step-sizes!` and Yoga; scroll animations skip Yoga too, and
+`gpu/animate!` moves the scrolled widgets' bounds directly. While a visible
+window animates, the loop does not sleep between frames and is paced by the
+swapchain's vsync.
+
+### Paint caches
+
+Painting a large widget, such as a terminal, every frame is expensive.
+`(gfx/cached g cache bounds key paint)` records what `paint` draws and replays
+it on later frames, moved to the bounds' position and clipped by the current
+ancestors. `paint` runs again only when `key`, the bounds' size or the pixel
+scale changes. Keep one `(gfx/cache)` per widget, for example in a state slot.
+
+The common `:cache #t` option does the same for a widget and all of its
+descendants, keyed by the tree's paint generation and the widget's size.
+`gpu/invalidate-paint!` starts a new generation; the window calls it after
+each reconciliation, so these subtrees repaint on every full frame and replay
+on animation frames unless their size changed. A hover change during an
+animation also starts a new generation. Do not mark a subtree that contains an
+animating scroll view: its replay would not show the scroll moving.
+
+Recordings live in the renderer. One not drawn for 120 frames is freed, so
+removed or off-screen widgets need no cleanup. Replay skips instances wholly
+outside the clip. In the Manse mock, scrolling the strip costs about 0.3 ms
+of CPU per frame on Chez with caching, against about 4 ms without; resizing a
+column costs about 2.5 ms, mostly Yoga.
 
 The checked-in editor and terminal scripts cover native Unicode input,
 submit-then-type in one frame, history, wheel scrolling, draft restoration,
@@ -396,7 +486,10 @@ The pipeline and glyph atlas survive resizing in both modes.
 ## Live windows and development requests
 
 `ui/open`, `ui/set-view!`, and `ui/run` now own the window lifecycle and event
-loop used by the demo. `ui/windows` exposes handles and retained trees for
+loop used by the demo. A window closes when SDL asks it to, for example from
+its close button or Cmd+Q. `:on-close-request` takes the window and returns
+false to refuse. Manse uses it because SDL's default macOS menu binds Cmd+W to
+Window > Close, which Manse wants for closing a column. `ui/windows` exposes handles and retained trees for
 inspection; `ui/tree-data` reports layout and interaction state. `ui/capture!`
 saves the next successful frame without requiring an offscreen window.
 

@@ -7,6 +7,8 @@ import ui_capture as runner
 
 defaults(suite='native', needs=['ui'])
 
+case('ui icons', 'tests/ui/icons.ot')
+case('ui demand', 'tests/ui/demand.ot')
 case('ui application', 'tests/ui/application.ot', needs=['ffi'])
 case('ui layout', 'tests/ui/layout.ot', paths=['examples'], timeout=90)
 
@@ -60,6 +62,28 @@ def gpu(t, required):
         sw, sh, scaled_rows = runner.bmp_pixels(scaled)
         assert (sw, sh) == (960, 640)
         assert pixel(scaled_rows, 100, 100) == (103, 217, 192), 'Logical-to-physical scale differs'
+        for density in (1, 2):
+            icons = artifacts/f'{runtime}-icons-{density}.bmp'
+            icons_state = artifacts/f'{runtime}-icons-{density}.json'
+            result = launch(runtime, '--scene', 'ui.icons', '--script', 'ui.icons-script',
+                            '--frames', 3, '--width', 240, '--height', 90,
+                            '--scale', density, '--capture', icons, '--dump-state', icons_state)
+            passed(result)
+            assert 'UI-ICONS cache and reload passed' in result.stdout
+            iw, ih, icon_rows = runner.bmp_pixels(icons)
+            assert (iw, ih) == (240*density, 90*density)
+            nodes = json.loads(icons_state.read_text())['nodes']
+            for path, x, color in [('0.0.0', 16, (103, 217, 192)),
+                                   ('0.0.1', 48, (236, 172, 116))]:
+                node = next(n for n in nodes if n['path'] == path)
+                assert (node['width'], node['height']) == (16, 16)
+                pixels = [pixel(icon_rows, px, py)
+                          for py in range(16*density, 32*density)
+                          for px in range(x*density, (x+16)*density)]
+                assert pixels.count(color) > 10*density*density, 'Icon missing or tint lost'
+                assert pixels.count((16, 24, 39)) > 30*density*density, 'SVG transparency lost'
+            if runtime == 'chez':
+                assert icon_rows == runner.bmp_pixels(artifacts/f'c-icons-{density}.bmp')[2]
         for density in (1, 2):
             resized = artifacts/f'{runtime}-resize-{density}.bmp'
             resized_state = artifacts/f'{runtime}-resize-{density}.json'

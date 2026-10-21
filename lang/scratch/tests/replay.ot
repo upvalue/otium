@@ -1,0 +1,51 @@
+;; Replayed paint caches must match a fresh paint, pixel for pixel.
+;; ./otium --runtime=chez -L . scratch/tests/replay.ot &&
+;;   cmp build/ui-test-artifacts/replay-cached.png build/ui-test-artifacts/replay-fresh.png
+(require (otium.ui :as ui))
+(require (otium.ui.gpu :as gpu))
+(require (otium.ui.native :as native))
+(require (otium.test :refer (check report)))
+(require (otium.process :as process))
+(require (scratch.shell :as shell))
+(require (scratch.model :as m))
+
+(def dir (or (process/getenv "REPLAY_DIR") "build/ui-test-artifacts"))
+
+(shell/seed!)
+
+(def w
+  (ui/open {:title "replay"
+            :width 1280
+            :height 760
+            :headless #t
+            :scale 2
+            :config "build/ui-config.ot"
+            :background-color 0x282c33ff}))
+
+(def (frame! path)
+  (gpu/paint! (w :tree) (w :renderer) (w :width) (w :height) 0x282c33ff)
+  (check "frame submitted" #t (native/gpu-frame (w :renderer) path))
+  (native/gpu-count (w :renderer)))
+
+(ui/reconcile! (w :tree) (shell/view w))
+(gpu/invalidate-paint! (w :tree))
+(gpu/layout! (w :tree) (w :width) (w :height) (w :scale))
+(frame! "")
+(m/focus-move! 2)
+(ui/reconcile! (w :tree) (shell/view w))
+(gpu/invalidate-paint! (w :tree))
+(gpu/layout! (w :tree) (w :width) (w :height) (w :scale))
+(frame! "")
+(dotimes (i 5)
+  (gpu/animate! (w :tree) (/ i 120.0) (w :scale))
+  (frame! ""))
+(check "still animating mid-way" #t (gpu/animating? (w :tree)))
+(check "caches recorded" #t (> (native/gpu-cache-count (w :renderer)) 0))
+(def replayed (frame! (str dir "/replay-cached.png")))
+;; A fresh layout keeps the animated offset; a new generation repaints everything.
+(gpu/invalidate-paint! (w :tree))
+(gpu/layout! (w :tree) (w :width) (w :height) (w :scale))
+(def fresh (frame! (str dir "/replay-fresh.png")))
+(check "replay culls no more than clipping hides" #t (<= replayed fresh))
+(ui/close! w)
+(report "scratch replay")

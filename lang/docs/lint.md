@@ -22,6 +22,29 @@ Corrected:
 (cond (a 1) (b 2) (else 3))
 ```
 
+## L0002 liftable-function: nested function has no captures
+
+Group `style`, default level `warn`.
+
+A named helper that does not depend on enclosing local bindings can be a private top-level definition. This reduces nesting and makes its independence explicit. Keep it local with a suppression when that makes the code easier to read. This rule checks explicit named function definitions after macro expansion; it skips ambiguous source locations, reassigned helpers and Chez host forms. It does not suggest lifting groups of mutually dependent helpers.
+
+Example:
+
+```lisp
+(def (calculate)
+  (def (plus a b) (+ a b))
+  (plus 2 2))
+```
+
+Corrected:
+
+```lisp
+(def- (plus a b) (+ a b))
+
+(def (calculate)
+  (plus 2 2))
+```
+
 ## L0101 foreign-definition: Scheme or Clojure definition form
 
 Group `foreign`, default level `warn`.

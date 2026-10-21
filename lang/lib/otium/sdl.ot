@@ -8,6 +8,12 @@
 
 (def WINDOW_HIDDEN 0x8)
 
+(def WINDOW_OCCLUDED 0x4)
+
+(def WINDOW_MINIMIZED 0x40)
+
+(def WINDOW_INPUT_FOCUS 0x200)
+
 (def WINDOW_HIGH_PIXEL_DENSITY 0x2000)
 
 (ffi/defbindings library
@@ -24,6 +30,8 @@
                  (set-main-ready "SDL_SetMainReady" () void #t)
                  (create-window "SDL_CreateWindow" (utf8 int int u64) pointer #t)
                  (set-window-size "SDL_SetWindowSize" (pointer int int) bool #t)
+                 (get-window-flags "SDL_GetWindowFlags" (pointer) u64 #t)
+                 (wait-event-timeout "SDL_WaitEventTimeout" (pointer int) bool #t)
                  (get-window-size "SDL_GetWindowSize" (pointer pointer pointer) bool #t)
                  (get-window-size-in-pixels "SDL_GetWindowSizeInPixels" (pointer pointer pointer) bool #t)
                  (get-window-pixel-density "SDL_GetWindowPixelDensity" (pointer) float #t)
@@ -39,3 +47,7 @@
 (def (pointer value)
   (when (ffi/null? value) (error (get-error)))
   value)
+
+(def (flag-set? flags flag)
+  "Whether a single-bit SDL flag is present."
+  (= 1 (modulo (quotient flags flag) 2)))

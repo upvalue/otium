@@ -103,6 +103,13 @@ yoga_project = subproject('yoga',
 ui = sdl3.found() and sdl3_ttf.found() and glslc.found() and yoga_project.found()
 if ui
   yoga = yoga_project.get_variable('yoga_dep')
+  subproject('plutovg', default_options: [
+    'default_library=static', 'examples=disabled', 'tests=disabled',
+    'font-face-cache-load=disabled', 'warning_level=1', 'werror=false'])
+  svg_project = subproject('plutosvg', default_options: [
+    'default_library=static', 'freetype=disabled', 'examples=disabled',
+    'tests=disabled', 'warning_level=1', 'werror=false'])
+  svg = svg_project.get_variable('plutosvg_dep')
   shaders = []
   foreach stage : ['vert', 'frag']
     shaders += custom_target('rect.@0@.spv'.format(stage),
@@ -114,7 +121,7 @@ if ui
   ui_library = shared_library('otium-ui',
     'native/ui/renderer.c', 'native/ui/text.c', 'native/ui/layout.cpp', shaders,
     c_args: ui_args + ['--embed-dir=' + build_root], cpp_args: ui_args,
-    dependencies: [sdl3, sdl3_ttf, yoga, libm], override_options: native_options)
+    dependencies: [sdl3, sdl3_ttf, yoga, svg, libm], override_options: native_options)
   ui_events = shared_library('otium-ui-test-events', 'tests/ui/events.c',
     c_args: ui_args,
     dependencies: sdl3, override_options: native_options)
@@ -131,7 +138,8 @@ if ui
   # Native installation paths, read by Otium as data.
   sdl_library = sdl3.get_variable(pkgconfig: 'libdir') / 'libSDL3.' + extension
   configure_file(output: 'ui-config.ot', configuration: {
-    'library': build_root / 'libotium-ui.' + extension, 'sdl': sdl_library},
+    'library': build_root / 'libotium-ui.' + extension, 'sdl': sdl_library,
+    'icons': source_root / 'native/ui/icons'},
     input: 'native/ui/ui-config.ot.in')
   configure_file(output: 'ui-test-config.ot', configuration: {
     'library': build_root / 'libotium-ui-test-events.' + extension},

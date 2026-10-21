@@ -1,7 +1,11 @@
 (ns otium.ui.input)
 (require (otium.ui :as ui))
 
-(defclass PointerState (captured :init nil))
+(defclass PointerState
+  (captured :init nil)
+  (hovered :init '())
+  (x :init nil)
+  (y :init nil))
 
 (def (pointer)
   (make PointerState))
@@ -32,6 +36,24 @@
     ((eq? (ui/send! (car path) event) :handled) (car path))
     (else (bubble! (cdr path) event))))
 
+(def- (same-nodes? a b)
+  (cond
+    ((null? a) (null? b))
+    ((null? b) #f)
+    (else (and (eq? (car a) (car b)) (same-nodes? (cdr a) (cdr b))))))
+
+(def (refresh-hover! pointer tree)
+  "Mark the nodes under the last pointer position as hovered, deepest first.
+Returns true when the hovered nodes changed."
+  (let ((path (if (nil? (pointer :x))
+                  '()
+                  (hit-path tree (pointer :x) (pointer :y))))
+        (changed? (not (same-nodes? path (pointer :hovered)))))
+    (for-each (fn (node) (set! (node :hovered?) #f)) (pointer :hovered))
+    (for-each (fn (node) (set! (node :hovered?) #t)) path)
+    (set! (pointer :hovered) path)
+    changed?))
+
 (def (cancel! pointer)
   (let ((node (pointer :captured)))
     (set! (pointer :captured) nil)
@@ -44,7 +66,11 @@
     (cond
       ((eq? kind :pointer-cancel) (cancel! pointer))
       ((eq? kind :wheel) (bubble! (hit-path tree (get event :x) (get event :y)) event))
+      ((eq? kind :pointer-leave) (set! (pointer :x) nil) (set! (pointer :y) nil) (refresh-hover! pointer tree))
       ((memq kind '(:pointer-move :pointer-drag))
+       (set! (pointer :x) (get event :x))
+       (set! (pointer :y) (get event :y))
+       (refresh-hover! pointer tree)
        (let ((node (pointer :captured)))
          (when (and node (ui/enabled? node) (node :pressed?)) (ui/send! node (put event :kind :pointer-drag)))))
       ((eq? kind :pointer-down)
@@ -111,16 +137,23 @@
         (kind (get event :kind))
         (key (get event :key)))
     (cond
-      ((eq? kind :focus-lost) (ui/focus! tree nil) (ui/cancel-key! tree))
-      ((eq? kind :text-input) (when (and node (ui/accepts-text? (ui/instance node))) (ui/send! node event)))
+      ((eq? kind :focus-lost) (ui/focus! tree nil) (ui/cancel-key! tree) (set! (focus :drop-text?) #f))
+      ;; SDL sends the text for a key after its keydown. A key that ran an
+      ;; action is a shortcut, so its text is dropped.
+      ((eq? kind :text-input)
+       (if (focus :drop-text?)
+           (set! (focus :drop-text?) #f)
+           (when (and node (ui/accepts-text? (ui/instance node))) (ui/send! node event))))
       ((eq? kind :key-up)
        (when (equal? (get event :code key) (focus :key))
          (let ((armed (focus :armed)))
            (ui/cancel-key! tree)
            (when (and armed (eq? armed node) (ui/focusable? armed)) (ui/send! armed {:kind :press})))))
       ((and (eq? kind :key-down) (or (not (get event :repeat #f)) (and node (ui/repeat-key? (ui/instance node) event))))
+       (set! (focus :drop-text?) #f)
        (cond
-         ((or (equal? key "Tab") (equal? key "Shift+Tab"))
+         ((and (or (equal? key "Tab") (equal? key "Shift+Tab"))
+               (or (not node) (get (node :options) :tab-navigation #t)))
           (unless (get event :repeat #f) (focus-next! tree (equal? key "Shift+Tab"))))
          ((and node (ui/activation-key? (ui/instance node) event))
           (unless (or (get event :repeat #f) (focus :armed))
@@ -131,5 +164,7 @@
          (else (let ((path (if node
                                (node-path node)
                                (array-to-list (ui/children tree)))))
-                 (unless (eq? (action! path event) :handled) (bubble! path event))))))
+                 (if (eq? (action! path event) :handled)
+                     (set! (focus :drop-text?) #t)
+                     (bubble! path event))))))
       (else nil))))

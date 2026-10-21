@@ -526,6 +526,7 @@
       (cons '%layout-data %layout-data)
       (cons '%null %null)
       (cons 'null? null?)
+      (cons 'pointer? pointer?)
       (cons 'pointer=? pointer=?)
       (cons '%sizeof %sizeof)
       (cons '%alignof %alignof)

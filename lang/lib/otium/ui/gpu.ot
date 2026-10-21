@@ -5,28 +5,6 @@
 (require (otium.gfx :as gfx))
 (require (otium.sdl :as sdl))
 
-(def (configure-app! options)
-  "Set process-wide application metadata before initializing SDL video."
-  ;; Cocoa builds its menu during SDL video initialization.
-  (sdl/set-hint "SDL_MAC_BACKGROUND_APP"
-                (if (get options :background #f)
-                    "1"
-                    "0"))
-  (sdl/check (sdl/set-app-metadata (get options :name "Otium")
-                                   (get options :version "")
-                                   (get options :id "org.otium.application"))))
-
-(def (present-window! window options)
-  "Install a PNG/BMP icon and optionally request foreground focus."
-  (let ((icon (get options :icon "")))
-    (unless (equal? icon "")
-      (let ((surface (sdl/pointer (sdl/load-surface icon))))
-        (unwind-protect
-          (sdl/check (sdl/set-window-icon window surface))
-          (sdl/destroy-surface surface)))))
-  (when (get options :foreground #t) (sdl/check (sdl/raise-window window)))
-  #t)
-
 (def (resize! tree renderer width height scale)
   "Update renderer dimensions and relayout retained widgets; direct rendering requires scale 0."
   (sdl/check (native/gpu-resize renderer width height scale))
@@ -39,7 +17,45 @@
     (when (ffi/null? p) (error "Cannot allocate Yoga node"))
     p))
 
-(def- (sync-node! node)
+(def- (eased-size! node axis target pass)
+  ;; With :animate-size, an explicit size eases toward its new value. The
+  ;; first size and window resizes apply at once.
+  (if (or (< target 0) (not (get (node :options) :animate-size #f)))
+      (begin
+        (when (node :sizes) (put! (node :sizes) axis nil))
+        target)
+      (let ((sizes (or (node :sizes) {}))
+            (e (get sizes axis)))
+        (set! (node :sizes) sizes)
+        (cond
+          ((or (nil? e) (pass :instant)) (put! sizes axis {:value target :target target :stepped nil}))
+          ((not (= (e :target) target)) (put! e :target target))
+          (else nil))
+        (let ((e (get sizes axis))
+              (resizing (pass :resizing)))
+          (unless (or (= (e :value) (e :target))
+                      (and (not (empty? resizing)) (eq? node (get resizing (- (length resizing) 1)))))
+            (push! resizing node))
+          (e :value)))))
+
+(def (resizing? tree)
+  (let ((resizing (tree :resizing))) (and resizing (not (empty? resizing)))))
+
+(def (step-sizes! tree now)
+  "Advance :animate-size widgets to time now, in seconds. Run layout! afterwards."
+  (for-each (fn (node)
+              (when (and (ui/active? node) (node :sizes))
+                (for-each (fn (e)
+                            (unless (= (e :value) (e :target))
+                              (put! e :value (ui/decay (e :value) (e :target) (ui/elapsed (e :stepped) now) 0.06))
+                              (put! e
+                                    :stepped (if (= (e :value) (e :target))
+                                                 nil
+                                                 now))))
+                          (values (node :sizes)))))
+            (tree :resizing)))
+
+(def- (sync-node! node pass)
   (unless (node :layout)
     (let ((p (allocate-node)))
       (set! (node :layout) p)
@@ -51,8 +67,8 @@
     (native/node-intrinsic p 0 0 #f)
     (let ((s (ui/layout-style w)))
       (unless (native/node-style p
-                                 (get s :width -1)
-                                 (get s :height -1)
+                                 (eased-size! node :width (get s :width -1) pass)
+                                 (eased-size! node :height (get s :height -1) pass)
                                  (get s :grow 0)
                                  (get s :padding 0)
                                  (get s :gap 0)
@@ -60,13 +76,27 @@
                                      1
                                      0))
         (error "Invalid widget layout style"))
+      (unless (native/node-padding p
+                                   (or (get s :padding-x) (get s :padding 0))
+                                   (or (get s :padding-y) (get s :padding 0)))
+        (error "Invalid widget padding"))
+      (native/node-align p
+                         (let ((align (get s :align-items :stretch)))
+                           (cond
+                             ((eq? align :stretch) 0)
+                             ((eq? align :start) 1)
+                             ((eq? align :center) 2)
+                             ((eq? align :end) 3)
+                             (else (error "Unknown :align-items" align)))))
       (native/node-center p (get s :center #f))
       (native/node-scroll p (get s :scroll #f)))
     (if (empty? (ui/children node))
         (native/node-intrinsic p 0 0 #t)
         (for-each (fn (child)
-                    (sync-node! child)
-                    (native/node-shrink (child :layout) (not (eq? (dispatch-type w) ui/Scroll)))
+                    (sync-node! child pass)
+                    (native/node-shrink (child :layout)
+                                        (and (not (eq? (dispatch-type w) ui/Scroll))
+                                             (not (eq? (dispatch-type (ui/instance child)) ui/Icon))))
                     (native/node-append p (child :layout)))
                   (ui/children node)))))
 
@@ -100,7 +130,11 @@
   (native/node-retry (node :layout))
   (for-each retry! (ui/children node)))
 
-(def- (save-bounds! node x y)
+(def- (snap value scale)
+  (/ (round (* value scale)) scale))
+
+;; Records each Scroll node that is still animating after layout.
+(def- (save-bounds! node x y scale animations)
   (let ((p (node :layout))
         (left (+ x (native/node-bounds p native/BOUNDS_X)))
         (top (+ y (native/node-bounds p native/BOUNDS_Y))))
@@ -111,22 +145,96 @@
                 :width (native/node-bounds p native/BOUNDS_WIDTH)
                 :height (native/node-bounds p native/BOUNDS_HEIGHT)))
     (let ((w (ui/instance node))
+          (x? #f)
           (offset 0))
       (when (eq? (dispatch-type w) ui/Scroll)
-        (let ((bottom 0))
+        (set! x? (eq? (w :axis) :x))
+        (let ((start (if x?
+                         native/BOUNDS_X
+                         native/BOUNDS_Y))
+              (span (if x?
+                        native/BOUNDS_WIDTH
+                        native/BOUNDS_HEIGHT))
+              (viewport (native/node-bounds p span))
+              (extent 0))
           (for-each (fn (child)
-                      (set! bottom
-                            (max bottom
-                                 (+ (native/node-bounds (child :layout) native/BOUNDS_Y)
-                                    (native/node-bounds (child :layout) native/BOUNDS_HEIGHT)))))
+                      (set! extent
+                            (max extent
+                                 (+ (native/node-bounds (child :layout) start)
+                                    (native/node-bounds (child :layout) span)))))
                     (ui/children node))
-          (set! (w :limit) (max 0 (- (+ bottom (w :padding)) (native/node-bounds p native/BOUNDS_HEIGHT))))
-          (set! (w :offset)
-                (if (and (w :stick-to-bottom) (w :following?))
-                    (w :limit)
-                    (min (w :offset) (w :limit))))
-          (set! offset (w :offset))))
-      (for-each (fn (child) (save-bounds! child left (- top offset))) (ui/children node)))))
+          (set! (w :limit) (max 0 (- (+ extent (w :padding)) viewport)))
+          (if (and (w :stick-to-bottom) (w :following?))
+              (ui/scroll-to! w (w :limit))
+              (begin
+                (set! (w :offset) (min (w :offset) (w :limit)))
+                (set! (w :target) (min (w :target) (w :limit)))))
+          (reveal! w (ui/children node) start span viewport)
+          (set! (w :applied) (snap (w :offset) scale))
+          (when (ui/scroll-animating? w) (push! animations node))
+          (set! offset (w :applied))))
+      (for-each (fn (child)
+                  (if x?
+                      (save-bounds! child (- left offset) top scale animations)
+                      (save-bounds! child left (- top offset) scale animations)))
+                (ui/children node)))))
+
+(def- (reveal! w children start span viewport)
+  ;; Scroll just far enough to show the :reveal child, once per change of its
+  ;; key, position or the viewport, so wheel scrolling is not undone. The first
+  ;; reveal, viewport changes and resizing children jump; others animate.
+  (let ((target (and (w :reveal) (find (fn (child) (equal? (child :key) (w :reveal))) children))))
+    (when target
+      (let ((s (native/node-bounds (target :layout) start))
+            (e (+ s (native/node-bounds (target :layout) span)))
+            (seen (list (w :reveal) s e viewport))
+            (previous (w :revealed))
+            ;; A resizing child is already easing, so follow its edge exactly.
+            (move! (if (and previous (= (nth previous 3) viewport) (not (resizing-node? target)))
+                       ui/scroll-toward!
+                       ui/scroll-to!)))
+        (unless (equal? seen previous)
+          (set! (w :revealed) seen)
+          ;; Show the far edge, then the near one, so a child wider than the
+          ;; viewport shows its start.
+          (let ((goal (w :target)))
+            (when (> e (- (+ goal viewport) (w :padding))) (set! goal (+ (- e viewport) (w :padding))))
+            (when (< s (+ goal (w :padding))) (set! goal (- s (w :padding))))
+            (unless (= goal (w :target)) (move! w goal))))))))
+
+(def- (resizing-node? node)
+  (and (node :sizes) (find (fn (e) (not (= (e :value) (e :target)))) (values (node :sizes)))))
+
+(def- (shift! node dx dy)
+  (let ((b (node :bounds)))
+    (set! (b :x) (+ (b :x) dx))
+    (set! (b :y) (+ (b :y) dy)))
+  (for-each (fn (child) (shift! child dx dy)) (ui/children node)))
+
+(def (animating? tree)
+  (let ((animations (tree :animations))) (and animations (not (empty? animations)))))
+
+(def (animate! tree now scale)
+  "Advance scroll animations to time now, in seconds, and move their content
+without relayout. Returns true while any animation continues."
+  (let ((active []))
+    (for-each (fn (node)
+                (when (ui/active? node)
+                  (let ((w (ui/instance node))
+                        (before (w :applied)))
+                    (ui/scroll-step! w now)
+                    (set! (w :applied) (snap (w :offset) scale))
+                    (let ((d (- before (w :applied))))
+                      (unless (= d 0)
+                        (for-each (fn (child)
+                                    (if (eq? (w :axis) :x)
+                                        (shift! child d 0)
+                                        (shift! child 0 d)))
+                                  (ui/children node))))
+                    (when (ui/scroll-animating? w) (push! active node)))))
+              (tree :animations))
+    (set! (tree :animations) active)
+    (not (empty? active))))
 
 (def (layout! tree width height . pixel-scale)
   "Measure leaves using Yoga constraints, replaying until every query is answered."
@@ -134,14 +242,17 @@
   (let ((root (allocate-node))
         (scale (if (null? pixel-scale)
                    1
-                   (car pixel-scale))))
+                   (car pixel-scale)))
+        (pass {:resizing [] :instant (not (equal? (tree :size) (list width height)))}))
+    (set! (tree :size) (list width height))
     (unwind-protect
       (begin
         (unless (native/node-style root width height 0 0 0 0) (error "Invalid root size"))
         (for-each (fn (node)
-                    (sync-node! node)
+                    (sync-node! node pass)
                     (native/node-append root (node :layout)))
                   (ui/children tree))
+        (set! (tree :resizing) (pass :resizing))
         (let loop ((pass 0))
           (when (> pass 256) (error "Yoga measurement did not converge"))
           (native/node-layout root width height)
@@ -150,7 +261,9 @@
             (when changed
               (for-each retry! (ui/children tree))
               (loop (+ pass 1)))))
-        (for-each (fn (node) (save-bounds! node 0 0)) (ui/children tree)))
+        (let ((animations []))
+          (for-each (fn (node) (save-bounds! node 0 0 scale animations)) (ui/children tree))
+          (set! (tree :animations) animations)))
       (native/node-free root)))
   tree)
 
@@ -170,30 +283,73 @@
           :width (max 0 (- (min (+ (a :x) (a :width)) (+ (b :x) (b :width))) x))
           :height (max 0 (- (min (+ (a :y) (a :height)) (+ (b :y) (b :height))) y)))))
 
-(def- (paint-node! node renderer clip)
+(def- (paint-node! node renderer clip generation resizing?)
   (unless (node :bounds) (error "Run layout before painting"))
-  (let ((clip (intersect clip (node :bounds))))
-    (when (and (> (clip :width) 0) (> (clip :height) 0))
-      (ui/paint (ui/instance node)
-                (make gfx/Context
-                      :renderer renderer
-                      :clip clip
-                      :focused? (node :focused?)
-                      :pressed? (node :pressed?)
-                      :disabled? (not (ui/enabled? node)))
-                (node :bounds))
-      (for-each (fn (child) (paint-node! child renderer clip)) (ui/children node)))))
+  (let ((visible (intersect clip (node :bounds)))
+        (resizing? (or resizing? (resizing-node? node))))
+    (when (and (> (visible :width) 0) (> (visible :height) 0))
+      (if (get (node :options) :cache #f)
+          (begin
+            (unless (node :paint-cache) (set! (node :paint-cache) (gfx/cache)))
+            (gfx/cached (make gfx/Context :renderer renderer :clip clip)
+                        (node :paint-cache)
+                        (node :bounds)
+                        generation
+                        (fn (g) (paint-subtree! node renderer (g :clip) generation resizing?))))
+          (paint-subtree! node renderer visible generation resizing?)))))
+
+(def- (paint-subtree! node renderer clip generation resizing?)
+  (ui/paint (ui/instance node)
+            (make gfx/Context
+                  :renderer renderer
+                  :clip clip
+                  :focused? (node :focused?)
+                  :pressed? (node :pressed?)
+                  :hovered? (node :hovered?)
+                  :disabled? (not (ui/enabled? node))
+                  :resizing? (and resizing? #t))
+            (node :bounds))
+  (for-each (fn (child) (paint-node! child renderer clip generation resizing?)) (ui/children node)))
+
+(def (invalidate-paint! tree)
+  "Make widgets with the :cache option paint again on the next frame. Call it
+after reconciling: a layout alone does not change what cached subtrees draw,
+and a subtree whose size changed records again anyway."
+  (set! (tree :generation) (+ 1 (tree :generation))))
 
 (def (paint! tree renderer width height background)
+  "Record the tree's drawing. Subtrees with the :cache option replay their last
+recording until invalidate-paint! starts a new generation or their size changes."
   (native/gpu-clear renderer background)
-  (let ((clip (make ui/Bounds :x 0 :y 0 :width width :height height)))
-    (for-each (fn (node) (paint-node! node renderer clip)) (ui/children tree))))
+  (let ((clip (make ui/Bounds :x 0 :y 0 :width width :height height))
+        (generation (tree :generation)))
+    (for-each (fn (node) (paint-node! node renderer clip generation #f)) (ui/children tree))))
+
+(def- (paint-box w g bounds)
+  (let ((border (w :border))
+        (radius (w :radius)))
+    (cond
+      ((and border (w :background))
+       (gfx/rect g bounds border radius)
+       (gfx/rect g (inset bounds 1 1) (w :background) (max 0 (- radius 1))))
+      (border
+        ;; Without a fill, draw the four edges; corners stay square.
+        (let ((x (bounds :x))
+              (y (bounds :y))
+              (width (bounds :width))
+              (height (bounds :height)))
+          (gfx/rect g (make ui/Bounds :x x :y y :width width :height 1) border)
+          (gfx/rect g (make ui/Bounds :x x :y (- (+ y height) 1) :width width :height 1) border)
+          (gfx/rect g (make ui/Bounds :x x :y y :width 1 :height height) border)
+          (gfx/rect g (make ui/Bounds :x (- (+ x width) 1) :y y :width 1 :height height) border)))
+      ((w :background) (gfx/rect g bounds (w :background) radius))
+      (else nil))))
 
 (defmethod (ui/paint (w ui/Column) g bounds)
-  (when (w :background) (gfx/rect g bounds (w :background) (w :radius))))
+  (paint-box w g bounds))
 
 (defmethod (ui/paint (w ui/Row) g bounds)
-  (when (w :background) (gfx/rect g bounds (w :background) (w :radius))))
+  (paint-box w g bounds))
 
 (defmethod (ui/layout-style (w ui/Label))
   {:width (w :width) :height (w :height) :grow (w :grow)})
@@ -247,15 +403,25 @@
 (defmethod (ui/paint (w ui/Scroll) g bounds)
   (when (w :background) (gfx/rect g bounds (w :background) 0))
   (when (> (w :limit) 0)
-    (let ((height (max 16 (/ (* (bounds :height) (bounds :height)) (+ (bounds :height) (w :limit))))))
-      (gfx/rect g
-                (make ui/Bounds
-                      :x (- (+ (bounds :x) (bounds :width)) 5)
-                      :y (+ (bounds :y) (* (/ (w :offset) (w :limit)) (- (bounds :height) height)))
-                      :width 3
-                      :height height)
-                0x71849fff
-                1))))
+    (if (eq? (w :axis) :x)
+        (let ((width (max 16 (/ (* (bounds :width) (bounds :width)) (+ (bounds :width) (w :limit))))))
+          (gfx/rect g
+                    (make ui/Bounds
+                          :x (+ (bounds :x) (* (/ (w :offset) (w :limit)) (- (bounds :width) width)))
+                          :y (- (+ (bounds :y) (bounds :height)) 5)
+                          :width width
+                          :height 3)
+                    0x71849fff
+                    1))
+        (let ((height (max 16 (/ (* (bounds :height) (bounds :height)) (+ (bounds :height) (w :limit))))))
+          (gfx/rect g
+                    (make ui/Bounds
+                          :x (- (+ (bounds :x) (bounds :width)) 5)
+                          :y (+ (bounds :y) (* (/ (w :offset) (w :limit)) (- (bounds :height) height)))
+                          :width 3
+                          :height height)
+                    0x71849fff
+                    1)))))
 
 (def (caret-positions text font size scale)
   "Return codepoint caret coordinates from one shaped, unwrapped line."
@@ -335,3 +501,46 @@
                       (w :size)
                       0x202d43ff
                       #f)))))))
+
+;; Recheck paths after module reload; ordinary frames do no file IO here.
+(def- icon-paths {})
+
+(def (icon-path w)
+  (unless (keyword? (w :name)) (error "Icon name must be a keyword" (w :name)))
+  (unless native/icons-directory (error "Load UI config before using icons"))
+  (let ((name (keyword->string (w :name)))
+        (path (str native/icons-directory
+                   "/"
+                   (if (w :fill)
+                       "fill"
+                       "regular")
+                   "/"
+                   name
+                   ".svg")))
+    (unless (get icon-paths path)
+      (when (or (equal? name "")
+                (string-contains? name "/")
+                (string-contains? name "\\")
+                (string-contains? name ".")
+                (string-contains? name "\x0;"))
+        (error (str "Unknown icon: " name)))
+      (try
+        (read-file path)
+        (catch (error? _) (error (str "Unknown icon: " name))))
+      (put! icon-paths path #t))
+    path))
+
+(defmethod (ui/build (w ui/Icon))
+  (icon-path w)
+  nil)
+
+(defmethod (ui/layout-style (w ui/Icon))
+  (unless (and (number? (w :size)) (>= (w :size) 1) (<= (w :size) 256))
+    (error "Icon size must be between 1 and 256" (w :size)))
+  {:width (w :size) :height (w :size)})
+
+(defmethod (ui/measure (w ui/Icon) limits)
+  (ui/size (w :size) (w :size)))
+
+(defmethod (ui/paint (w ui/Icon) g bounds)
+  (gfx/image g bounds (icon-path w) (w :color)))

@@ -20,17 +20,25 @@
   (parent :init nil)
   (options :init {})
   (focused? :init #f)
-  (pressed? :init #f))
+  (pressed? :init #f)
+  (hovered? :init #f)
+  (paint-cache :init nil)
+  (sizes :init nil))
 
 (defclass Focus
   (node :init nil)
   (armed :init nil)
   (key :init nil)
-  (event :init nil))
+  (event :init nil)
+  (drop-text? :init #f))
 
 (defclass Root
   (children :init [])
-  (focus :init (make Focus)))
+  (focus :init (make Focus))
+  (animations :init [])
+  (resizing :init [])
+  (size :init nil)
+  (generation :init 0))
 
 (defclass Label
   :is Widget
@@ -44,14 +52,25 @@
   (grow :init 0)
   (align :init :left))
 
+(defclass Icon
+  :is Widget
+  name
+  (size :init 16)
+  (fill :init #f)
+  (color :init 0xdce5f2ff))
+
 (defclass Column
   :is Widget
   (width :init -1)
   (height :init -1)
   (grow :init 0)
   (padding :init 0)
+  (padding-x :init nil)
+  (padding-y :init nil)
+  (align-items :init :stretch)
   (gap :init 0)
   (background :init nil)
+  (border :init nil)
   (radius :init 0))
 
 (defclass Row
@@ -60,8 +79,12 @@
   (height :init -1)
   (grow :init 0)
   (padding :init 0)
+  (padding-x :init nil)
+  (padding-y :init nil)
+  (align-items :init :stretch)
   (gap :init 0)
   (background :init nil)
+  (border :init nil)
   (radius :init 0))
 
 (defclass Button
@@ -103,9 +126,16 @@
   (gap :init 0)
   (background :init nil)
   (stick-to-bottom :init #f)
+  (axis :init :y)
+  (reveal :init nil)
+  (smoothing :init 0.06)
   (offset :init 0 :state #t)
+  (target :init 0 :state #t)
+  (applied :init 0 :state #t)
+  (stepped :init nil :state #t)
   (limit :init 0 :state #t)
-  (following? :init #t :state #t))
+  (following? :init #t :state #t)
+  (revealed :init nil :state #t))
 
 (defclass Size
   width
@@ -131,11 +161,22 @@
 (defmethod (layout-style (w Widget))
   {})
 
+(def- (box-style w row?)
+  {:width (w :width)
+   :height (w :height)
+   :grow (w :grow)
+   :padding (w :padding)
+   :padding-x (w :padding-x)
+   :padding-y (w :padding-y)
+   :align-items (w :align-items)
+   :gap (w :gap)
+   :row row?})
+
 (defmethod (layout-style (w Column))
-  {:width (w :width) :height (w :height) :grow (w :grow) :padding (w :padding) :gap (w :gap) :row #f})
+  (box-style w #f))
 
 (defmethod (layout-style (w Row))
-  {:width (w :width) :height (w :height) :grow (w :grow) :padding (w :padding) :gap (w :gap) :row #t})
+  (box-style w #t))
 
 (defgeneric (build widget))
 
@@ -209,7 +250,8 @@
     (else nil)))
 
 (def (new class opts . children)
-  "Construct a widget description without initializing mounted state."
+  "Construct a widget description without initializing mounted state.
+:tab-navigation defaults to #t; #f routes Tab and Shift+Tab to the widget's key handling."
   (unless (class-subtype? class Widget) (error "ui/new: expected widget class"))
   (unless (table? opts) (error "ui/new: expected options table"))
   (let ((args '())
@@ -217,7 +259,16 @@
     (for-each (fn (k)
                 (cond
                   ((eq? k :key) nil)
-                  ((memq k '(:disabled :focusable :autofocus :keymap :on-action)) (put! options k (get opts k)))
+                  ((memq k
+                         '(:disabled :focusable
+                                     :autofocus
+                                     :focus
+                                     :tab-navigation
+                                     :keymap
+                                     :on-action
+                                     :cache
+                                     :animate-size))
+                   (put! options k (get opts k)))
                   (else (set! args (cons k (cons (get opts k) args))))))
               (keys opts))
     (make Description
@@ -225,6 +276,9 @@
           :key (get opts :key)
           :children children
           :options options)))
+
+(def (icon opts)
+  (new Icon opts))
 
 (def (label opts text)
   (new Label (put opts :text text)))
@@ -274,6 +328,7 @@
 (def- (retire! node)
   (set! (node :focused?) #f)
   (set! (node :pressed?) #f)
+  (set! (node :hovered?) #f)
   (for-each retire! (node :children))
   (when (node :release-layout) ((node :release-layout)))
   (set! (node :release-layout) nil)
@@ -310,22 +365,21 @@
                            (eq? (dispatch-type (candidate :instance)) (dispatch-type (d :properties)))))
             (node (if matched?
                       candidate
-                      (make Mounted
-                            :instance (class-mount (d :properties))
-                            :key (d :key)
-                            :children []
-                            :parent parent))))
+                      (make Mounted :instance (class-mount (d :properties)) :key (d :key) :children [] :parent parent)))
+            (focus? (and (get (d :options) :focus #f) (not (and matched? (get (node :options) :focus #f))))))
         (set! (node :options) (d :options))
         (unless (enabled? node) (set! (node :pressed?) #f))
         (when matched? (class-update-properties! (node :instance) (d :properties)))
         (let ((built (with-params ((building-children (d :children))) (build (node :instance)))))
           (set! (node :children) (reconcile-children (node :children) built node)))
         (put! kept node #t)
-        (when (and (not matched?) (get (node :options) :autofocus #f))
+        ;; :autofocus takes focus on mount when nothing has it; :focus takes
+        ;; it on mount or when the option turns on.
+        (when (or focus? (and (not matched?) (get (node :options) :autofocus #f)))
           (let find-root ((parent (node :parent)))
             (if (mounted? parent)
                 (find-root (parent :parent))
-                (when (and (not (focused parent)) (focusable? node)) (focus! parent node)))))
+                (when (and (or focus? (not (focused parent))) (focusable? node)) (focus! parent node)))))
         (push! out node)))
     (for-each (fn (n) (unless (get kept n #f) (retire! n))) old)
     out))
@@ -355,6 +409,7 @@
    :active? (node :active?)
    :focused? (node :focused?)
    :pressed? (node :pressed?)
+   :hovered? (node :hovered?)
    :bounds (node :bounds)
    :children (node :children)})
 
@@ -509,16 +564,68 @@
       (else nil))))
 
 (defmethod (layout-style (w Scroll))
-  {:width (w :width) :height (w :height) :grow (w :grow) :padding (w :padding) :gap (w :gap) :scroll #t})
+  {:width (w :width)
+   :height (w :height)
+   :grow (w :grow)
+   :padding (w :padding)
+   :gap (w :gap)
+   :row (eq? (w :axis) :x)
+   :scroll #t})
 
 (def (scroll-to! w position)
+  "Move a mounted Scroll immediately, ending any animation."
   (set! (w :offset) (max 0 (min (w :limit) position)))
+  (set! (w :target) (w :offset))
+  (set! (w :stepped) nil)
   (set! (w :following?) (>= (w :offset) (w :limit))))
+
+(def (scroll-toward! w position)
+  "Animate a mounted Scroll to position; :smoothing 0 moves immediately."
+  (if (<= (w :smoothing) 0)
+      (scroll-to! w position)
+      (begin
+        (set! (w :target) (max 0 (min (w :limit) position)))
+        (set! (w :following?) (>= (w :target) (w :limit))))))
+
+(def (scroll-animating? w)
+  (not (= (w :offset) (w :target))))
+
+(def (elapsed stepped now)
+  "Seconds since the last animation step, capped so a stalled frame slows the
+animation rather than skipping it. The first step assumes one 60 Hz frame."
+  (if stepped
+      (max 0 (min 0.05 (- now stepped)))
+      (/ 1 60.0)))
+
+(def (decay value target dt smoothing)
+  "Move value toward target by dt seconds of exponential decay with time constant
+smoothing. Within a quarter pixel, return target."
+  (let ((left (* (- target value) (exp (/ (- dt) (max 0.001 smoothing))))))
+    (if (< (abs left) 0.25)
+        target
+        (- target left))))
+
+(def (scroll-step! w now)
+  "Advance an animation to time now, in seconds. Speed is independent of frame rate."
+  (set! (w :offset) (decay (w :offset) (w :target) (elapsed (w :stepped) now) (w :smoothing)))
+  (set! (w :stepped)
+        (if (scroll-animating? w)
+            now
+            nil)))
 
 (defmethod (handle-event (w Scroll) event)
   (when (eq? (get event :kind) :wheel)
-    (let ((before (w :offset)))
-      (scroll-to! w (- before (* 36 (get event :dy))))
+    (let ((before (w :offset))
+          (dx (get event :dx 0)))
+      ;; A horizontal view falls back to vertical wheel motion for plain mice.
+      (scroll-to! w
+                  (if (eq? (w :axis) :x)
+                      (+ before
+                         (* 36
+                            (if (= dx 0)
+                                (- (get event :dy 0))
+                                dx)))
+                      (- before (* 36 (get event :dy 0)))))
       (if (= before (w :offset))
           nil
           :handled))))
@@ -540,7 +647,13 @@
 (def (close! window)
   (window-call "close!" (list window)))
 
+(def (invalidate! window)
+  "Request a frame for a window using :render-on-demand?."
+  (put! window :dirty? #t)
+  window)
+
 (def (set-view! window view)
+  (invalidate! window)
   (set! (window :view) view)
   window)
 
@@ -565,6 +678,7 @@
                   :bounds (node :bounds)
                   :focused (node :focused?)
                   :pressed (node :pressed?)
+                  :hovered (node :hovered?)
                   :disabled (not (enabled? node))})
           (walk (children node) (str path ".")))))
     (walk (children (get window :tree)) "")

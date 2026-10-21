@@ -1,0 +1,177 @@
+;; Frame cost of the Manse strip with four busy terminals.
+;; ./otium --runtime=chez -L . manse/bench.ot
+;; MANSE_BENCH_UNCACHED=1 paints every terminal on every frame, as before
+;; terminals were cached.
+(require (otium.ui :as ui))
+(require (otium.ui.gpu :as gpu))
+(require (otium.ui.native :as native))
+(require (otium.process :as process))
+(require (manse.workspace :as workspace))
+(require (manse.terminal :as terminal))
+(require (manse.strip :as strip))
+(require (manse.session :as sessions))
+(require (manse.pty :as pty))
+(require (manse.apps :as apps))
+
+(def frames 120)
+
+(def (now)
+  (/ (current-jiffy) (/ (jiffies-per-second) 1000.0)))
+
+(def (ms total)
+  (/ (round (* 100 (/ total frames))) 100.0))
+
+(def uncached? (process/getenv "MANSE_BENCH_UNCACHED"))
+
+(defmethod (ui/paint (w terminal/Terminal) g bounds)
+  (if uncached?
+      (terminal/paint-terminal (w :session) g bounds #t)
+      (terminal/paint-cached w g bounds)))
+
+(def resizes 0)
+
+(def real-resize! pty/resize!)
+
+(set! pty/resize!
+      (fn args
+        (set! resizes (+ resizes 1))
+        (apply real-resize! args)))
+
+(def w (ui/open {:title "bench" :width 1280 :height 760 :headless #t :scale 2 :config "build/ui-config.ot"}))
+
+(put! workspace/workspace :window w)
+(put! workspace/workspace :shell "/bin/sh")
+(dotimes (i 4)
+  (workspace/new-terminal!))
+(ui/set-view! w (fn () (workspace/view (w :tree))))
+
+(def (sessions)
+  (workspace/terminal-sessions))
+
+(def (frame!)
+  (ui/reconcile! (w :tree) (workspace/view (w :tree)))
+  (gpu/invalidate-paint! (w :tree))
+  (gpu/layout! (w :tree) (w :width) (w :height) (w :scale))
+  (gpu/paint! (w :tree) (w :renderer) (w :width) (w :height) 0x282c33ff)
+  (native/gpu-frame (w :renderer) ""))
+
+;; Size the PTYs, fill each terminal with coloured output and wait for it.
+(frame!)
+(for-each (fn (session)
+            (pty/write! (session :pty)
+                        "printf '\\033[3%dm%s\\033[0m %s\\n' $(for i in $(seq 1 60); do echo $((i % 7 + 1)) line$i /usr/lib/item/$i; done)\r"))
+          (sessions))
+(let ((deadline (+ (now) 1500)))
+  (while (< (now) deadline) (for-each (fn (entry) (apps/step! (entry :app))) ((workspace/workspace :apps) :entries))))
+(frame!)
+
+(def phases {:reconcile 0 :layout 0 :paint 0 :submit 0})
+
+(def (timed! table phase thunk)
+  (let ((start (now)))
+    (thunk)
+    (put! table phase (+ (table phase) (- (now) start)))))
+
+;; Full frames, focusing left and right every frame.
+(dotimes (i frames)
+  (strip/focus-move! (workspace/workspace :strip)
+                     (if (even? (quotient i 2))
+                         1
+                         -1))
+  (timed! phases
+          :reconcile (fn ()
+                       (ui/reconcile! (w :tree) (workspace/view (w :tree)))
+                       (gpu/invalidate-paint! (w :tree))))
+  (timed! phases :layout (fn () (gpu/layout! (w :tree) (w :width) (w :height) (w :scale))))
+  (timed! phases :paint (fn () (gpu/paint! (w :tree) (w :renderer) (w :width) (w :height) 0x282c33ff)))
+  (timed! phases :submit (fn () (native/gpu-frame (w :renderer) ""))))
+
+(println "full frame ms:"
+         "reconcile"
+         (ms (phases :reconcile))
+         "layout"
+         (ms (phases :layout))
+         "paint"
+         (ms (phases :paint))
+         "submit"
+         (ms (phases :submit)))
+
+;; The focused terminal's output changes every frame while the others stay
+;; idle. Finish the scroll first so the focused terminal is on screen.
+(def output {:paint 0})
+
+(def clock 0)
+
+(set! clock (+ clock 10))
+(gpu/animate! (w :tree) clock (w :scale))
+
+(dotimes (i frames)
+  (let ((session ((workspace/find-app (strip/focused (workspace/workspace :strip))) :session)))
+    (put! session :version (+ 1 (get session :version 0))))
+  (ui/reconcile! (w :tree) (workspace/view (w :tree)))
+  (gpu/invalidate-paint! (w :tree))
+  (gpu/layout! (w :tree) (w :width) (w :height) (w :scale))
+  (timed! output :paint (fn () (gpu/paint! (w :tree) (w :renderer) (w :width) (w :height) 0x282c33ff)))
+  (native/gpu-frame (w :renderer) ""))
+
+(println "one terminal updating, paint ms:" (ms (output :paint)))
+
+;; Scroll animation frames between columns.
+(def animation {:animate 0 :paint 0})
+
+(def moves 0)
+
+(def (start-move!)
+  (set! moves (+ moves 1))
+  (strip/focus-move! (workspace/workspace :strip)
+                     (if (even? moves)
+                         3
+                         -3))
+  (frame!))
+
+(start-move!)
+(dotimes (i frames)
+  (unless (gpu/animating? (w :tree)) (start-move!))
+  (set! clock (+ clock (/ 1 120.0)))
+  (timed! animation :animate (fn () (gpu/animate! (w :tree) clock (w :scale))))
+  (timed! animation :paint (fn () (gpu/paint! (w :tree) (w :renderer) (w :width) (w :height) 0x282c33ff)))
+  (native/gpu-frame (w :renderer) ""))
+
+(println "scroll animation frame ms:" "animate" (ms (animation :animate)) "paint" (ms (animation :paint)) "moves" moves)
+
+;; Width steps on the focused column, easing over several frames.
+(def resize {:layout 0 :paint 0})
+
+(def steps 0)
+
+(def (start-resize!)
+  (set! steps (+ steps 1))
+  (strip/width-step! (workspace/workspace :strip)
+                     (if (odd? (quotient steps 2))
+                         -1
+                         1))
+  (frame!))
+
+(set! resizes 0)
+(start-resize!)
+(dotimes (i frames)
+  (unless (or (gpu/resizing? (w :tree)) (gpu/animating? (w :tree))) (start-resize!))
+  (set! clock (+ clock (/ 1 120.0)))
+  (gpu/step-sizes! (w :tree) clock)
+  (timed! resize :layout (fn () (gpu/layout! (w :tree) (w :width) (w :height) (w :scale))))
+  (when (gpu/animating? (w :tree)) (gpu/animate! (w :tree) clock (w :scale)))
+  (timed! resize :paint (fn () (gpu/paint! (w :tree) (w :renderer) (w :width) (w :height) 0x282c33ff)))
+  (native/gpu-frame (w :renderer) ""))
+
+(println "resize frame ms:"
+         "layout"
+         (ms (resize :layout))
+         "paint"
+         (ms (resize :paint))
+         "width steps"
+         steps
+         "PTY resizes"
+         resizes)
+
+(for-each (fn (entry) (workspace/close-app! (entry :id))) (copy ((workspace/workspace :apps) :entries)))
+(ui/close! w)

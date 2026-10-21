@@ -262,13 +262,14 @@
 (def (error-expected-type c)
   (%error-access c "expected-type"))
 
+(def- (%binding-name declaration)
+  (if (pair? (car declaration))
+      (cadr (car declaration))
+      (car declaration)))
+
 (defmacro defbindings (library loader . declarations)
   "Declare (name symbol arguments result collect-safe?) bindings; use (private name) for private vars. loader opens a path or candidate list."
   (let ((source (gensym "source")))
-    (def (name d)
-      (if (pair? (car d))
-          (cadr (car d))
-          (car d)))
     (def (binding d)
       (unless (= (length d) 5)
         (%fail "bind" "signature" "expected name, symbol, arguments, result, and collection safety boolean"))
@@ -280,7 +281,7 @@
                 `(,(if (pair? (car d))
                        'def-
                        'def)
-                  ,(name d)
+                  ,(%binding-name d)
                   (if ,library
                       ,(binding d)
                       nil)))
@@ -290,7 +291,7 @@
                (otium.ffi/open-library (if (string? ,source)
                                            (list ,source)
                                            ,source)))
-         ,@(map (fn (d) `(set! ,(name d) ,(binding d))) declarations)))))
+         ,@(map (fn (d) `(set! ,(%binding-name d) ,(binding d))) declarations)))))
 
 (defmethod (close (pointer CPointer) outcome)
   (free! pointer))

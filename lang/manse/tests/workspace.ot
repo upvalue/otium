@@ -1,0 +1,207 @@
+(require manse.workspace :as workspace)
+(require manse.session :as sessions)
+(require manse.apps :as apps)
+(require manse.strip :as strip)
+(require manse.terminal :as terminal)
+(require manse.ghostty :as g)
+(require otium.ui :as ui)
+(require otium.ui.input :as input)
+(require otium.test :refer (check report))
+
+;; Report input bytes without shell editing or terminal echo hiding their origin.
+(def args
+  '("sh"
+    "-c"
+    "stty raw -echo; exec /usr/bin/python3 -u -c 'import os; print(\"READY\", flush=True)\nwhile True:\n b=os.read(0,1)\n if b==b\"!\": break\n print(b.hex(), flush=True)'"))
+
+(def first (sessions/open! 1 "/bin/sh" args))
+
+(def second (sessions/open! 2 "/bin/sh" args))
+
+(def tree (ui/root))
+
+(def nodes nil)
+
+(def (has? session text)
+  (exists (fn (row) (string-contains? row text)) (apply list (g/text (session :term)))))
+
+(def (wait-for predicate)
+  (let ((deadline (+ (current-jiffy) 5000000000)))
+    (let loop ()
+      (sessions/pump! first)
+      (sessions/pump! second)
+      (cond
+        ((predicate) #t)
+        ((> (current-jiffy) deadline) (println (g/text (first :term))) (println (g/text (second :term))) #f)
+        (else (loop))))))
+
+;; Like the window loop, reconcile after every event.
+(def (reconcile!)
+  (ui/reconcile! tree (workspace/view tree)))
+
+(def (key! name)
+  (input/keyboard! tree {:kind :key-down :key name})
+  (reconcile!))
+
+;; SDL sends a key's text after its keydown, so send both.
+(def (text! text)
+  (key! (string-upcase text))
+  (input/keyboard! tree {:kind :text-input :text text})
+  (reconcile!))
+
+(def (strip-node)
+  (get (ui/children (get (ui/children tree) 0)) 0))
+
+(def (column-node id)
+  (find (fn (node) (equal? (node :key) id)) (ui/children (strip-node))))
+
+(def (terminal-node id)
+  (find (fn (node) (equal? (node :key) :body)) (ui/children (column-node id))))
+
+(def (focused-id)
+  (strip/focused (workspace/workspace :strip)))
+
+;; Exercise adoption of sessions from a workspace running the previous code.
+(put! workspace/workspace :apps nil)
+(put! workspace/workspace :strip nil)
+(put! workspace/workspace :sessions [first second])
+(require manse.workspace :reload)
+(check "migration adopts live sessions" first ((workspace/find-app 1) :session))
+(check "migration removes old session collection" nil (workspace/workspace :sessions))
+(reconcile!)
+(check "migration opens a column per app" '(1 2) (array-to-list (strip/ids (workspace/workspace :strip))))
+(require manse.apps :reload)
+(require manse.terminal :reload)
+(require manse.workspace :reload)
+
+(unwind-protect
+  (begin
+    (reconcile!)
+    (check "both children ready" #t (wait-for (fn () (and (has? first "READY") (has? second "READY")))))
+    (check "first terminal focused" (terminal-node 1) (ui/focused tree))
+    (key! "Tab")
+    (check "Tab reaches first PTY" #t (wait-for (fn () (has? first "09"))))
+    (check "Tab retains focus" (terminal-node 1) (ui/focused tree))
+    (check "Tab does not reach second PTY" #f (has? second "09"))
+    (key! "Meta+Right")
+    (check "Cmd+Right focuses the model's second column" 2 (focused-id))
+    (check "Cmd+Right moves UI focus" (terminal-node 2) (ui/focused tree))
+    (text! "z")
+    (check "text reaches second PTY" #t (wait-for (fn () (has? second "7a"))))
+    (check "text does not reach first PTY" #f (has? first "7a"))
+    (key! "Meta+Left")
+    (check "Cmd+Left focuses first" (terminal-node 1) (ui/focused tree))
+    ;; Jump hints: the letter's text must not reach the shell.
+    (key! "Meta+J")
+    (check "Cmd+J starts hinting" #t (strip/hinting? (workspace/workspace :strip)))
+    (text! "s")
+    (check "hint jumps to second" (terminal-node 2) (ui/focused tree))
+    (text! "y")
+    (check "later text reaches second PTY" #t (wait-for (fn () (has? second "79"))))
+    (check "hint letter never reaches a PTY" #f (or (has? first "73") (has? second "73")))
+    ;; A click on a terminal moves the model's focus too.
+    (let ((root (get (ui/children tree) 0)))
+      (set! (root :bounds) (make ui/Bounds :x 0 :y 0 :width 800 :height 600))
+      (set! ((strip-node) :bounds) (make ui/Bounds :x 0 :y 0 :width 800 :height 600))
+      (set! ((column-node 1) :bounds) (make ui/Bounds :x 0 :y 0 :width 400 :height 600))
+      (set! ((column-node 2) :bounds) (make ui/Bounds :x 400 :y 0 :width 400 :height 600))
+      (set! ((terminal-node 1) :bounds) (make ui/Bounds :x 0 :y 30 :width 400 :height 570))
+      (set! ((terminal-node 2) :bounds) (make ui/Bounds :x 400 :y 30 :width 400 :height 570)))
+    (input/dispatch! (input/pointer) tree {:kind :pointer-down :x 20 :y 320})
+    (reconcile!)
+    (check "click focuses first terminal" (terminal-node 1) (ui/focused tree))
+    (check "click updates the model" 1 (focused-id))
+    (put! first :cell-w 8)
+    (put! first :cell-h 16)
+    (terminal/fit! first (make ui/Bounds :x 0 :y 0 :width 652 :height 332))
+    (check "first grid resized" 20 (length (g/text (first :term))))
+    (check "second grid unchanged" 24 (length (g/text (second :term))))
+    (reconcile!)
+    (check "reload keeps first session" first ((workspace/find-app 1) :session))
+    (check "reload keeps focus" (terminal-node 1) (ui/focused tree))
+    (input/keyboard! tree {:kind :focus-lost})
+    (reconcile!)
+    (check "window focus loss clears UI focus" nil (ui/focused tree))
+    (let ((real workspace/window-focused?))
+      (set! workspace/window-focused? (fn () #t))
+      (reconcile!)
+      (set! workspace/window-focused? real))
+    (check "window focus returns to the focused column" (terminal-node 1) (ui/focused tree))
+    (key! "Ctrl+A")
+    (check "control key reaches first PTY" #t (wait-for (fn () (has? first "01"))))
+    (key! "Alt+Left")
+    (check "word backward reaches first PTY" #t (wait-for (fn () (has? first "62"))))
+    (key! "Alt+Right")
+    (check "word forward reaches first PTY" #t (wait-for (fn () (has? first "66"))))
+    (key! "Alt+Backspace")
+    (check "delete word reaches first PTY" #t (wait-for (fn () (has? first "7f"))))
+    (text! "!")
+    (check "first child exits" #t (wait-for (fn () (first :exit))))
+    (check "second child remains running" nil (second :exit))
+    (check "query reports exited app"
+           '(1)
+           (array-to-list (map :id (workspace/query-apps (fn (info) (eq? (info :status) :exited))))))
+    (check "query exposes terminal kind" :terminal ((get (workspace/query-apps) 0) :kind))
+    (check "query exposes resized grid" 20 ((get (workspace/query-apps) 0) :rows))
+    (check "clean exit finishes the app" #t (apps/finished? (workspace/find-app 1)))
+    (workspace/step! {:tick 100})
+    (reconcile!)
+    (check "clean exit closes the column" '(2) (array-to-list (strip/ids (workspace/workspace :strip))))
+    (check "focus moves to the remaining column" (terminal-node 2) (ui/focused tree))
+    (key! "Tab")
+    (check "second remains interactive" #t (wait-for (fn () (has? second "09"))))
+    (key! "Meta+W")
+    (check "Cmd+W closes the focused column" '() (array-to-list (strip/ids (workspace/workspace :strip))))
+    (check "Cmd+W closes the session" #t (second :closed?))
+    (check "Cmd+W refuses the menu's close request" #f (workspace/close-request? {}))
+    (workspace/after-frame! {})
+    (check "later close requests close the window" #t (workspace/close-request? {}))
+    (check "nothing focused in an empty strip" nil (ui/focused tree)))
+  (ui/dispose! tree)
+  (sessions/close! first)
+  (sessions/close! second))
+
+(defclass Note
+  :is apps/App
+  (ticks :init 0)
+  (closed? :init #f))
+
+(defmethod (apps/info (app Note))
+  {:kind :note :ticks (app :ticks)})
+
+(defmethod (apps/view (app Note))
+  (ui/label {} "A nonterminal app"))
+
+(defmethod (apps/step! (app Note))
+  (set! (app :ticks) (+ 1 (app :ticks)))
+  #t)
+
+(defmethod (apps/close! (app Note))
+  (set! (app :closed?) #t))
+
+(def note (make Note))
+
+(def note-id (workspace/add-app! "Notes" note))
+
+(def mixed-tree (ui/root))
+
+(def window {:tick 0})
+
+(ui/reconcile! mixed-tree (workspace/view mixed-tree))
+
+(def (mixed-strip)
+  (get (ui/children (get (ui/children mixed-tree) 0)) 0))
+
+(check "workspace accepts app-owned nonterminal view"
+       "A nonterminal app"
+       ((ui/instance (get (ui/children (get (ui/children (mixed-strip)) 0)) 2)) :text))
+(workspace/step! window)
+(check "workspace polls nonterminal apps" 1 (note :ticks))
+(check "app changes invalidate window" #t (window :dirty?))
+(check "workspace does not quit without terminals" nil (workspace/workspace :quit?))
+(workspace/close-app! note-id)
+(check "workspace closes nonterminal apps" #t (note :closed?))
+(ui/reconcile! mixed-tree (workspace/view mixed-tree))
+(check "empty workspace renders" 0 (length (ui/children (mixed-strip))))
+(ui/dispose! mixed-tree)
+(report "manse workspace")

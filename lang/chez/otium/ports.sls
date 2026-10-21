@@ -301,13 +301,15 @@
     (host-call op path thunk))
   (define public-bindings
     (list
-      
-      
-      
-      
-      
-      
-      
+      (cons 'flush-ports! flush-all!)
+      (cons 'file-info file-info)
+      (cons 'file-exists? (lambda (path) (filesystem 'file-exists? path (lambda () (file-exists? path)))))
+      (cons 'delete-file (lambda (path) (filesystem 'delete-file path (lambda () (reject-directory path 'delete-file) (delete-file path #t) (void)))))
+      (cons 'rename-file (lambda (from to) (path! to 'rename-file)
+        (filesystem 'rename-file from (lambda () (rename-file from to) (void)))))
+      (cons 'make-directory (lambda (path) (filesystem 'make-directory path (lambda () (mkdir path) (void)))))
+      (cons 'list-directory (lambda (path) (filesystem 'list-directory path
+        (lambda () (apply v:array (sort string<? (filter (lambda (name) (not (member name '("." "..")))) (directory-list path))))))))
       (cons 'display (lambda objects (print-to (current-output) objects #t #f)))
       (cons 'print (lambda objects (print-to (current-output) objects #t #f)))
       (cons 'write (lambda objects (print-to (current-output) objects #f #f)))
@@ -363,6 +365,8 @@
         [(s p start) ((cdr (assq 'write-string public-bindings)) s p start (string-length s))]
         [(s p start end) (let ([b (b:string->utf8 s start end)]) (write-bytes b p 0 (bytevector-length b)))]))
       (cons 'flush-output-port (lambda rest (flush (optional-port rest current-output 'flush-output-port))))
-      
-      
-      )))
+      (cons 'make-input-port (lambda (name callbacks) (custom name callbacks #t)))
+      (cons 'make-output-port (lambda (name callbacks) (custom name callbacks #f)))
+      (cons 'open-ports (lambda () (apply v:array
+        (append (reverse registry) (filter (lambda (p) (not (v:port-value-closed? p)))
+          (list standard-input standard-output standard-error)))))))))

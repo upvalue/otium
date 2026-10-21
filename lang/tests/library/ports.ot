@@ -114,4 +114,71 @@
                        (catch (error? e) (get e :position))))))
           (list #u8(128) #u8(192 128) #u8(194) #u8(237 160 128) #u8(244 144 128 128)))
 
+(def source #u8(65 195 169 240 159 153 130 10))
+
+(def offset 0)
+
+(def closed 0)
+
+(def custom
+  (make-input-port "single bytes"
+                   {:read (fn (b start _end)
+                            (if (= offset (bytevector-length source))
+                                (eof-object)
+                                (begin
+                                  (put! b start (get source offset))
+                                  (set! offset (+ offset 1))
+                                  1)))
+                    :close (fn () (set! closed (+ closed 1)))}))
+
+(check #\A (read-char custom))
+(check #\é (peek-char custom))
+(check 195 (read-u8 custom))
+(check 169 (read-u8 custom))
+(check "🙂" (read-line custom))
+(check #t (eof-object? (read-char custom)))
+(check #t (contains? (open-ports) custom))
+(close-port custom)
+(close-port custom)
+(check 1 closed)
+(check #f (contains? (open-ports) custom))
+
+(def written [])
+
+(def flushed 0)
+
+(def sink
+  (make-output-port "partial writes"
+                    {:write (fn (b start _end)
+                              (push! written (get b start))
+                              1)
+                     :flush (fn () (set! flushed (+ flushed 1)))}))
+
+(write-bytevector #u8(1 2 3) sink)
+(check 0 (length written))
+(flush-output-port sink)
+(check "[1 2 3]" (str written))
+(check 1 flushed)
+(close-port sink)
+(check #t (fails? (fn () (read-u8 (make-input-port "bad" {:read (fn (_bytes _start _end) 0)})))))
+(check #t (fails? (fn () (make-output-port "bad" {}))))
+(check "last\r" (read-line (open-input-string "last\r")))
+
+(def sent [])
+
+(def attempt 0)
+
+(def retry-output
+  (make-output-port "retry"
+                    {:write (fn (b start _end)
+                              (set! attempt (+ attempt 1))
+                              (when (= attempt 2) (error "temporary write failure"))
+                              (push! sent (get b start))
+                              1)}))
+
+(write-bytevector #u8(7 8 9) retry-output)
+(check #t (fails? (fn () (flush-output-port retry-output))))
+(flush-output-port retry-output)
+(check "[7 8 9]" (str sent))
+(close-port retry-output)
 (report "library ports")

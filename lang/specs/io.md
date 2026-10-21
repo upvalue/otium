@@ -1,7 +1,9 @@
 # I/O
 
-Draft. Implemented so far, on both runtimes: characters, the EOF object, and bytevectors
-(steps 1–2 of [Order of work](#order-of-work)).
+Implemented on both runtimes: characters, bytevectors, resource scopes, file and
+memory ports, port-directed printing, custom ports, and filesystem operations
+(steps 1–6 below). The owning FFI pointer class is `CPointer`; the UI pointer
+capture state class is `PointerState`. Port finalizers remain deferred.
 
 Ports for files, standard streams, strings and bytes, on both runtimes. To
 support them, Otium gains a character type and a bytevector type, and `first`
@@ -9,12 +11,11 @@ and `get` on strings return characters instead of one-character strings.
 
 ## Why
 
-Today Otium can print to the host's output and read a whole file into a string
-(`read-file`). There is no way to read standard input, stream a file that
-doesn't fit in memory, read or write binary data, or send output anywhere other
-than the host sink. [Portability](../docs/portability.md) lists the missing streaming and directory APIs,
-and notes that invalid UTF-8 and filesystem errors behave differently on C and
-Chez.
+Previously, Otium could print to the host's output and read a whole file into
+a string (`read-file`). Ports add standard input, streaming file access, binary
+I/O, and output to other destinations. They also give both runtimes common
+UTF-8 validation and filesystem error behavior. See
+[Portability](../docs/portability.md) for runtime details.
 
 A streaming JSON reader and writer is the motivating example. It isn't part of
 this spec, but the port design should make it straightforward and reasonably
@@ -48,8 +49,9 @@ Where Otium differs:
   stream, and text operations decode UTF-8 from the same buffer, so they can be
   mixed freely.
 - `display`, `write` and `println` stay variadic and always write to the current
-  output port. `(display x port)` prints both values. Use `write-string`, or
-  rebind `current-output-port`.
+  output port. `(display x port)` prints both values. Use the port-first
+  `(display-to port value ...)` or `(write-to port value ...)` variants,
+  `write-string`, or rebind `current-output-port`.
 - Left out: `call-with-port`, `call-with-input-file` and the other
   `call-with-` forms. Use `with`.
 - Additions: custom ports, bulk scanning (`read-until`, `read-while`,
@@ -133,10 +135,8 @@ identifies one. That needs 26 bits, which fits on 32-bit targets. `ot_is_ptr`
 is false for chars, so the collector ignores them. The EOF object takes the
 next free constant, 34.
 
-On Chez, chars are Chez chars and the EOF object is Chez's. Chez Otium's `get` on strings currently wraps
-`string-ref` in `string` (`chez/otium/values.sls`). It will stop doing that,
-and dispatching on chars in generic functions becomes portable
-(`docs/portability.md`).
+On Chez, chars are Chez chars and the EOF object is Chez's. String access
+returns characters directly, and character dispatch is portable.
 
 ## Bytevectors
 
@@ -164,6 +164,9 @@ Functions:
 `#u8(...)` reads as a constructor call, `(bytevector ...)`, like arrays and
 tables. Elements are evaluated and each evaluation creates a fresh bytevector.
 Quoted literals produce constructor forms, not bytevector values.
+
+Input bytevector ports take a snapshot. Output extraction returns a fresh value
+without consuming the accumulated output.
 
 On C, the bytes live inline in a heap object. On Chez, these are Chez
 bytevectors, printed by Otium's printer as `#u8`, not `#vu8`.
@@ -206,7 +209,8 @@ a separate character lookahead.
 | `(with-output-to-string f)` | Calls `f` with `current-output-port` bound to a fresh string port and returns the string. |
 
 `open-input-file` also accepts `:buffer-size` as an optional table. The
-default size is implementation-defined. A low-memory host should be able to
+default size is implementation-defined. Values below four are rounded up so a
+complete UTF-8 scalar fits in the lookahead buffer. A low-memory host should be able to
 choose a few hundred bytes.
 
 Any operation on a closed port raises `io-error` with `:reason :closed`.
@@ -224,7 +228,8 @@ params (section 9). Call them to read them, as R7RS does, and rebind them with
 (with-params ((current-output-port log)) (run))
 ```
 
-The defaults wrap standard input, output and error. On C, the default output
+The defaults wrap standard input, output and error. Standard output is flushed
+after each output operation to preserve host writer capture and prompt visibility. On C, the default output
 port writes through the host writer (`ot_set_writer`), so embedders that
 capture output keep working. `display`, `write`, `print`, `println` and
 `newline` write to `(current-output-port)`. `newline` gains an optional port.
@@ -244,6 +249,9 @@ Each one takes an optional port, defaulting to `(current-input-port)`.
 | `(read-bytevector k [p])` | Up to `k` bytes, or the EOF object. |
 | `(read-bytevector! b [p [start [end]]])` | Reads into `b` and returns the count, or the EOF object. Allocates nothing. |
 | `(read [p])` | Reads one Otium datum, or returns the EOF object. |
+
+`read-string` retains its existing string-to-datum form: a string first
+argument parses a datum; an integer first argument reads that many characters.
 
 `read-file` stays, as shorthand for `with` plus `read-all`.
 
@@ -311,10 +319,8 @@ string and bytevector ports. This exists for reloading. A file that opens a
 port at top level and gets reloaded leaks the old port, and this is how to see
 that from the REPL. Ports kept across reloads belong in `defonce`.
 
-GC closes host resources for unreachable ports, through the ext finalizer on C
-and a guardian on Chez. Programs shouldn't rely on that. Finalizers run at
-different times on each collector and runtime, and an unflushed port collected
-this way loses its buffered output.
+Port finalizers and leak warnings are deferred. Close ports explicitly or
+use `with`.
 
 ### Errors
 
@@ -373,10 +379,10 @@ then is an error wherever the resource tracks its own state.
   block's result, as with an `unwind-protect` cleanup (8.7).
 
 ```scheme
-(defgeneric close (resource outcome))
+(defgeneric (close resource outcome))
 ```
 
-`outcome` is `nil` for a normal exit, the condition when an error is unwinding,
+`outcome` is `nil` for a normal exit or restart transfer, the condition when an error is unwinding,
 or `:quit` for interrupts and `quit`. Most methods ignore it. It's there so a
 transaction can commit or roll back, or a temporary file can be kept or
 deleted. Unlike Python's `__exit__`, `close` can't suppress the error. Use
@@ -385,7 +391,7 @@ deleted. Unlike Python's `__exit__`, `close` can't suppress the error. Use
 Methods are provided for:
 
 - `Port`, which calls `close-port`,
-- `Pointer`, for owning FFI pointers, which calls `ffi/free!`.
+- `CPointer`, for owning FFI pointers, which calls `ffi/free!`.
 
 User classes add their own. Anything without a class, such as a raw pointer, a
 table or an integer descriptor from a C library, uses the `release` element:
@@ -404,9 +410,10 @@ owning pointer whose `close` calls `destroy` and marks it released.
 On Chez, a continuation captured inside the block can jump back into it after
 release. Re-entering a `with` block is unsupported.
 
-`Port` and `Pointer` are new built-in classes (`specs/classes.md`). FFI
-pointers currently have no dispatch identity of their own. On Chez they fall
-into `Other`.
+`Port` and `CPointer` are built-in classes (`specs/classes.md`). Owning FFI
+pointers dispatch as `CPointer`; borrowed pointers require an explicit release
+function or `ffi/own`. A custom destructor is called at most once, even if it
+raises an error. Views of an owning pointer become invalid when it closes.
 
 ## Filesystem
 
@@ -443,10 +450,10 @@ void ot_set_io_host(ots* state, const ot_io_host* host, void* userdata);
   rather than `FILE*` means they can be polled later.
 - An embedder with no filesystem can install a host whose `open` always fails
   with `:not-found`.
-- A port is a heap object with a finalizer. Its byte buffer is allocated with
-  `ot_host_alloc` outside the heap, so moving the port during GC doesn't move
-  the buffer the OS is reading into. This touches allocation and roots, so run
-  `just gc-lint`.
+- A port holds a managed bytevector buffer. Blocking host read/write callbacks
+  must not enter Otium or trigger collection while borrowing its bytes. Custom
+  Otium callbacks receive the bytevector itself and can allocate normally.
+  Finalizers are deferred. Allocation and root changes require `just gc-lint`.
 - Blocking reads must be interruptible. When `read` returns `EINTR`, the port
   checks the interrupt hook before retrying, so `^C` at a prompt waiting on
   input still works.
@@ -488,7 +495,7 @@ next:
 ```scheme
 (def ws " \t\r\n")
 
-(defn read-value (p)
+(def (read-value p)
   (skip-while ws p)
   (let ((c (peek-char p)))
     (cond ((eof-object? c) (error "json: unexpected end of input"))
@@ -500,7 +507,7 @@ next:
           ((eq? c #\n) (expect-word p "null") :null)
           (else (read-number p)))))
 
-(defn read-json-string (p)
+(def (read-json-string p)
   (read-char p)
   (let ((out (buffer)))
     (let loop ()
@@ -510,7 +517,7 @@ next:
               ((eq? c #\\) (buffer-push! out (read-escape p)) (loop))
               (else (error "json: unterminated string")))))))
 
-(defn read-number (p)
+(def (read-number p)
   (let ((s (read-while "0123456789+-.eE" p)))
     (or (string->number s) (error "json: bad number" s))))
 ```
@@ -537,7 +544,7 @@ How much streaming this gives, by case:
   chunks (a push parser), or a future task system suspends the parser inside
   `read-u8` while it waits. The second keeps parser code like the code above,
   but the C interpreter would need to suspend a task in the middle of a native
-  call. See [Open questions](#open-questions).
+  call. Task suspension is deferred; current ports use blocking, interruptible I/O.
 
 ### Writing
 
@@ -550,7 +557,7 @@ string through a string port instead:
 (def needs-escape
   (str "\"\\" (apply string (map integer->char (range 32)))))
 
-(defn write-json-string (s p)
+(def (write-json-string s p)
   (let ((in (open-input-string s)))
     (write-char #\" p)
     (let loop ()
@@ -587,10 +594,8 @@ That allocates one string per unescaped run. A port-to-port
 - Replacing invalid UTF-8 instead of raising an error
 - File locking, permissions, symlinks, and watching
 
-## Open questions
+## Decisions
 
-1. Is a task system that can suspend inside a port read likely? If so, the C
-   interpreter's native calls need a way to yield, and that should shape the
-   C port internals now, even if nothing uses it yet.
-2. Should there be `display-to` and `write-to` variants that take the port
-   first, so a printer doesn't need `with-params`?
+- Use blocking, interruptible I/O. Task suspension is deferred.
+- Provide port-first `display-to` and `write-to`.
+- Preserve string-to-datum `read-string`; dispatch the port form by argument type.

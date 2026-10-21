@@ -76,7 +76,10 @@ restarts are arrays. Missing condition fields, missing restarts, an
 undescribed restart, and a declined signal return `nil`.
 
 `read-file` reads a whole text file into a string and raises an error if it
-cannot be read. Portable input is UTF-8 without invalid byte sequences.
+cannot be read. Invalid UTF-8 raises `decode-error` with a byte `:position`.
+Buffered ports support mixed text and binary input, custom sources and sinks,
+and dynamic current ports on both runtimes. `display-to` and `write-to` take
+the port first. `with` releases resources in reverse acquisition order.
 `current-jiffy` uses a monotonic clock in nanoseconds;
 `jiffies-per-second` returns 1000000000. `current-second` returns inexact Unix
 seconds. These operations depend on the host platform and its filesystem.
@@ -137,8 +140,8 @@ This shared contract doesn't require Chez to pass C's entire dialect suite.
 - C case conversion and char classification (`char-alphabetic?` and the
   like) are ASCII; Chez follows Unicode. Avoid non-ASCII case conversion and
   classification in shared code.
-- Invalid UTF-8 decoding and filesystem error diagnostics in `read-file` aren't
-  unified. There's no common streaming file, port or directory API yet.
+- Filesystem errors share condition types and `:reason` keywords; host
+  `:detail` strings can differ. Port finalizers remain deferred.
 - Reload isn't atomic and keeps definitions removed from source. Alias
   retargeting and namespace reflection are outside the common contract.
 - Chez's generic dispatch sees host values that don't exist on C. Don't assume

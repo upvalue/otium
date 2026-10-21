@@ -1,10 +1,10 @@
 (ns otium.ui.input)
 (require (otium.ui :as ui))
 
-(defclass Pointer (captured :init nil))
+(defclass PointerState (captured :init nil))
 
 (def (pointer)
-  (make Pointer))
+  (make PointerState))
 
 (def- (contains? bounds x y)
   (and bounds

@@ -616,6 +616,44 @@ static otv n_read_line(ots* s, otv* a, int n) {
   return text;
 }
 
+static otv port_custom(ots* s, otv* a, int n, bool input) {
+  if (need_arity(s, "make-port", n, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(a[0], OBJ_STRING) || !is_type(a[1], OBJ_TABLE))
+    return ot_raise(s, "make-port: expected name and callbacks");
+  otv name = a[0], callbacks = a[1], buffer = ot_nil;
+  OT_FRAME_SCOPED(s, &name, &callbacks, &buffer);
+  const char* keys[] = {input ? "read" : "write", "close", "flush"};
+  for (size_t i = 0; i < 3; i++) {
+    otv key = ot_intern(s, keys[i], strlen(keys[i]), true);
+    otv f = ot_table_get(s, callbacks, key, ot_nil);
+    if ((i == 0 || !is_falsy(f)) && ot_value_type(f) != OT_TYPE_FUNCTION)
+      return ot_raise(s, "make-port: expected callback procedure");
+  }
+  buffer = make_bytevector(s, 4096);
+  return port_new(s, name, input, PORT_CUSTOM, 0, buffer, callbacks);
+}
+
+static otv n_make_input(ots* s, otv* a, int n) { return port_custom(s, a, n, true); }
+
+static otv n_make_output(ots* s, otv* a, int n) { return port_custom(s, a, n, false); }
+
+static otv n_open_ports(ots* s, otv* a, int n) {
+  (void)a;
+  if (need_arity(s, "open-ports", n, 0, 0) == OT_UNWIND) return OT_UNWIND;
+  otv result = ot_array_new(s, 4), cursor = s->open_ports;
+  OT_FRAME_SCOPED(s, &result, &cursor);
+  while (is_type(cursor, OBJ_PAIR)) {
+    array_push(s, &result, as_pair(cursor)->car);
+    cursor = as_pair(cursor)->cdr;
+  }
+  for (size_t i = 0; i < 3; i++) {
+    otv param = i == 0 ? s->input_port_param : i == 1 ? s->output_port_param : s->error_port_param;
+    otv port = ((ot_param_obj*)ot_as_obj(param))->value;
+    if (!as_port(port)->closed) array_push(s, &result, port);
+  }
+  return result;
+}
+
 static otv n_flush_all(ots* s, otv* a, int n) {
   (void)a;
   if (need_arity(s, "flush-ports!", n, 0, 0) == OT_UNWIND) return OT_UNWIND;
@@ -656,47 +694,162 @@ bool ot_flush_ports(ots* s) {
   return true;
 }
 
-static const nat_def port_natives[] = {
+static char* port_path(ots* s, otv path, const char* op) {
+  if (!is_type(path, OBJ_STRING)) {
+    ot_raise(s, "%s: expected path string", op);
+    return NULL;
+  }
+  const char* text;
+  size_t size;
+  ot_string_bytes(path, &text, &size);
+  if (memchr(text, 0, size)) {
+    ot_raise(s, "%s: NUL in path", op);
+    return NULL;
+  }
+  char* copy = ot_host_alloc(size + 1);
+  if (!copy) {
+    ot_raise(s, "%s: out of memory", op);
+    return NULL;
+  }
+  memcpy(copy, text, size);
+  return copy;
+}
 
-    {"display-to", n_display_to},
-    {"write-to", n_write_to},
-    {"port?", n_port_p},
-    {"input-port?", n_input_p},
-    {"output-port?", n_output_p},
-    {"input-port-open?", n_input_open_p},
-    {"output-port-open?", n_output_open_p},
-    {"open-input-file", n_open_input},
-    {"open-output-file", n_open_output},
-    {"open-binary-input-file", n_open_input},
-    {"open-binary-output-file", n_open_output},
-    {"open-input-string", n_input_string},
-    {"open-input-bytevector", n_input_bytes},
-    {"open-output-string", n_output_string},
-    {"open-output-bytevector", n_output_bytes},
-    {"get-output-string", n_get_string},
-    {"get-output-bytevector", n_get_bytes},
-    {"close-port", n_close_port},
-    {"close-input-port", n_close_input},
-    {"close-output-port", n_close_output},
-    {"read-char", n_read_char},
-    {"peek-char", n_peek_char},
-    {"read-u8", n_read_u8},
-    {"peek-u8", n_peek_u8},
-    {"read-bytevector", n_read_bytes},
-    {"read-bytevector!", n_read_into},
-    {"%read-characters", n_read_characters},
-    {"read-all", n_read_all},
-    {"read-line", n_read_line},
-    {"read-until", n_read_until},
-    {"read-while", n_read_while},
-    {"skip-while", n_skip_while},
-    {"write-string", n_write_string},
-    {"write-char", n_write_char},
-    {"write-u8", n_write_u8},
-    {"write-bytevector", n_write_bytes},
-    {"flush-output-port", n_flush},
+static otv port_file_info(ots* s, otv* a, int n, bool exists) {
+  const char* op = exists ? "file-exists?" : "file-info";
+  if (need_arity(s, op, n, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  char* path = port_path(s, a[0], op);
+  if (!path) return OT_UNWIND;
+  ot_io_file_info info = {0};
+  int reason = s->io_host.info ? s->io_host.info(s->io_userdata, path, &info) : OT_IO_OTHER;
+  ot_host_free(path);
+  if (exists && (reason == OT_IO_NOT_FOUND || reason == OT_IO_NOT_DIRECTORY)) return ot_false;
+  if (reason) return port_error(s, a[0], op, reason);
+  if (exists) return ot_true;
+  otv result = ot_table_new(s, 3), key = ot_nil, value = ot_nil;
+  OT_FRAME_SCOPED(s, &result, &key, &value);
+  key = ot_intern(s, "type", 4, true);
+  const char* kind = info.kind == 1 ? "file" : info.kind == 2 ? "directory" : "other";
+  value = ot_intern(s, kind, strlen(kind), true);
+  ot_table_put(s, result, key, value);
+  key = ot_intern(s, "size", 4, true);
+  value = info.size <= (uint64_t)OT_INT_MAX ? ot_make_int((intptr_t)info.size)
+                                            : ot_make_float(s, (double)info.size);
+  ot_table_put(s, result, key, value);
+  key = ot_intern(s, "modified", 8, true);
+  value = ot_make_float(s, info.modified);
+  ot_table_put(s, result, key, value);
+  return result;
+}
 
-};
+static otv n_file_info(ots* s, otv* a, int n) { return port_file_info(s, a, n, false); }
+
+static otv n_file_exists(ots* s, otv* a, int n) { return port_file_info(s, a, n, true); }
+
+static otv port_file_change(ots* s, otv* a, int n, int operation) {
+  const char* op = operation == 0   ? "delete-file"
+                   : operation == 1 ? "make-directory"
+                                    : "rename-file";
+  int argc = operation == 2 ? 2 : 1;
+  if (need_arity(s, op, n, argc, argc) == OT_UNWIND) return OT_UNWIND;
+  char* path = port_path(s, a[0], op);
+  if (!path) return OT_UNWIND;
+  int reason = OT_IO_OTHER;
+  if (operation == 0 && s->io_host.remove) reason = s->io_host.remove(s->io_userdata, path);
+  if (operation == 1 && s->io_host.mkdir) reason = s->io_host.mkdir(s->io_userdata, path);
+  if (operation == 2) {
+    char* to = port_path(s, a[1], op);
+    if (!to) {
+      ot_host_free(path);
+      return OT_UNWIND;
+    }
+    if (s->io_host.rename) reason = s->io_host.rename(s->io_userdata, path, to);
+    ot_host_free(to);
+  }
+  ot_host_free(path);
+  return reason ? port_error(s, a[0], op, reason) : ot_nil;
+}
+
+static otv n_delete_file(ots* s, otv* a, int n) { return port_file_change(s, a, n, 0); }
+
+static otv n_mkdir(ots* s, otv* a, int n) { return port_file_change(s, a, n, 1); }
+
+static otv n_rename_file(ots* s, otv* a, int n) { return port_file_change(s, a, n, 2); }
+
+typedef struct port_directory {
+  ots* state;
+  otv result;
+} port_directory;
+
+static void port_directory_entry(void* user, const char* name) {
+  port_directory* d = user;
+  otv text = ot_make_string(d->state, name, strlen(name));
+  array_push(d->state, &d->result, text);
+}
+
+static otv n_list_directory(ots* s, otv* a, int n) {
+  if (need_arity(s, "list-directory", n, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  char* path = port_path(s, a[0], "list-directory");
+  if (!path) return OT_UNWIND;
+  port_directory d = {.state = s, .result = ot_array_new(s, 8)};
+  OT_FRAME_SCOPED(s, &d.result);
+  int reason = s->io_host.list ? s->io_host.list(s->io_userdata, path, port_directory_entry, &d)
+                               : OT_IO_OTHER;
+  ot_host_free(path);
+  if (reason) return port_error(s, a[0], "list-directory", reason);
+  /* The shared sort preserves array kind and Unicode string ordering. */
+  otv symbol = ot_intern(s, "sort", 4, false);
+  otv variable = namespace_var(s, s->core_namespace, symbol, false);
+  return apply_value(s, ((ot_var_obj*)ot_as_obj(variable))->value, &d.result, 1, false);
+}
+
+static const nat_def port_natives[] = {{"flush-ports!", n_flush_all},
+                                       {"file-exists?", n_file_exists},
+                                       {"file-info", n_file_info},
+                                       {"delete-file", n_delete_file},
+                                       {"rename-file", n_rename_file},
+                                       {"make-directory", n_mkdir},
+                                       {"list-directory", n_list_directory},
+                                       {"display-to", n_display_to},
+                                       {"write-to", n_write_to},
+                                       {"port?", n_port_p},
+                                       {"input-port?", n_input_p},
+                                       {"output-port?", n_output_p},
+                                       {"input-port-open?", n_input_open_p},
+                                       {"output-port-open?", n_output_open_p},
+                                       {"open-input-file", n_open_input},
+                                       {"open-output-file", n_open_output},
+                                       {"open-binary-input-file", n_open_input},
+                                       {"open-binary-output-file", n_open_output},
+                                       {"open-input-string", n_input_string},
+                                       {"open-input-bytevector", n_input_bytes},
+                                       {"open-output-string", n_output_string},
+                                       {"open-output-bytevector", n_output_bytes},
+                                       {"get-output-string", n_get_string},
+                                       {"get-output-bytevector", n_get_bytes},
+                                       {"close-port", n_close_port},
+                                       {"close-input-port", n_close_input},
+                                       {"close-output-port", n_close_output},
+                                       {"read-char", n_read_char},
+                                       {"peek-char", n_peek_char},
+                                       {"read-u8", n_read_u8},
+                                       {"peek-u8", n_peek_u8},
+                                       {"read-bytevector", n_read_bytes},
+                                       {"read-bytevector!", n_read_into},
+                                       {"%read-characters", n_read_characters},
+                                       {"read-all", n_read_all},
+                                       {"read-line", n_read_line},
+                                       {"read-until", n_read_until},
+                                       {"read-while", n_read_while},
+                                       {"skip-while", n_skip_while},
+                                       {"write-string", n_write_string},
+                                       {"write-char", n_write_char},
+                                       {"write-u8", n_write_u8},
+                                       {"write-bytevector", n_write_bytes},
+                                       {"flush-output-port", n_flush},
+                                       {"make-input-port", n_make_input},
+                                       {"make-output-port", n_make_output},
+                                       {"open-ports", n_open_ports}};
 
 static otv port_param(ots* s, const char* name, const char* label, bool input, unsigned kind,
                       intptr_t handle) {

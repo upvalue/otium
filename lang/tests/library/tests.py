@@ -26,6 +26,12 @@ def examples_agree(t):
         t.check(c.stdout == chez.stdout, f'{example}: C and Chez output differ\n{c}\n{chez}')
 
 
+@test('library port files', runtimes=BOTH)
+def port_files(t):
+    t.expect(t.otium('tests/library/port-files.ot', '--', t.scratch),
+             stdout='library port files: 32 checks passed\n')
+
+
 @test('library port datum reader', runtimes=BOTH)
 def port_reader(t):
     t.expect(t.otium('-L', 'tests/reader/data', 'tests/library/port-reader.ot'),

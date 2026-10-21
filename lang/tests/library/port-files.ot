@@ -1,0 +1,78 @@
+(require otium.test :refer (check fails? report))
+(require otium.process)
+
+(def root (car (otium.process/arguments)))
+
+(def path (str root "/data"))
+
+(check #f (file-exists? path))
+(check :not-found (try
+                    (open-input-file path)
+                    (catch (error? e) (get e :reason))))
+(check path
+       (try
+         (open-input-file path)
+         (catch (error? e) (get e :path))))
+(with ((out (open-output-file path {:buffer-size 4})))
+      (check #t (contains? (open-ports) out))
+      (write-string "aé🙂\r\nlast" out))
+(check #t (file-exists? path))
+(check :file (get (file-info path) :type))
+(check 13 (get (file-info path) :size))
+(check #t (> (get (file-info path) :modified) 0))
+(with ((in (open-input-file path {:buffer-size 1})))
+      (check #\a (read-char in))
+      (check #\é (peek-char in))
+      (check 195 (read-u8 in))
+      (check 169 (read-u8 in))
+      (check "🙂" (read-line in))
+      (check "last" (read-all in)))
+(check "aé🙂\r\nlast" (read-file path))
+(check :exists (try
+                 (open-output-file path {:if-exists :error})
+                 (catch (error? e) (get e :reason))))
+(with ((out (open-output-file path {:if-exists :append}))) (write-string "!" out))
+(check "aé🙂\r\nlast!" (read-file path))
+(with ((out (open-output-file path))) (write-string "new" out))
+(check "new" (read-file path))
+(check #t (fails? (fn () (open-input-file path {:buffer-size 0}))))
+(check #t (fails? (fn () (open-output-file path {:if-exists :bogus}))))
+
+(def directory (str root "/directory"))
+
+(make-directory directory)
+(check :directory (get (file-info directory) :type))
+(check :is-directory (try
+                       (open-input-file directory)
+                       (catch (error? e) (get e :reason))))
+(check :is-directory (try
+                       (open-output-file directory)
+                       (catch (error? e) (get e :reason))))
+(rename-file path (str directory "/b"))
+(with ((out (open-output-file (str directory "/a")))) (write-u8 0 out))
+(check "[\"a\" \"b\"]" (str (list-directory directory)))
+(delete-file (str directory "/b"))
+(check #f (file-exists? (str directory "/b")))
+(with ((out (open-output-file path))) (write-bytevector #u8(65 255) out))
+(check 'decode-error
+       (try
+         (read-file path)
+         (catch (error? e) (get e :type))))
+(delete-file path)
+(check 3 (length (open-ports)))
+(check :not-found (try
+                    (delete-file path)
+                    (catch (error? e) (get e :reason))))
+(check :is-directory (try
+                       (delete-file directory)
+                       (catch (error? e) (get e :reason))))
+(check :exists (try
+                 (make-directory directory)
+                 (catch (error? e) (get e :reason))))
+(check :not-directory (try
+                        (list-directory (str directory "/a"))
+                        (catch (error? e) (get e :reason))))
+(check :not-directory (try
+                        (open-input-file (str directory "/a/child"))
+                        (catch (error? e) (get e :reason))))
+(report "library port files")

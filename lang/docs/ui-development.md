@@ -462,7 +462,10 @@ The pipeline and glyph atlas survive resizing in both modes.
 ## Live windows and development requests
 
 `ui/open`, `ui/set-view!`, and `ui/run` now own the window lifecycle and event
-loop used by the demo. `ui/windows` exposes handles and retained trees for
+loop used by the demo. A window closes when SDL asks it to, for example from
+its close button or Cmd+Q. `:on-close-request` takes the window and returns
+false to refuse. Manse uses it because SDL's default macOS menu binds Cmd+W to
+Window > Close, which Manse wants for closing a column. `ui/windows` exposes handles and retained trees for
 inspection; `ui/tree-data` reports layout and interaction state. `ui/capture!`
 saves the next successful frame without requiring an offscreen window.
 

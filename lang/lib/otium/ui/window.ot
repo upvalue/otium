@@ -104,7 +104,9 @@
         (tree (get window :tree))
         (renderer (get window :renderer)))
     (cond
-      ((eq? kind :quit) (close! window))
+      ((eq? kind :quit)
+       (let ((allow? (get (get window :options) :on-close-request)))
+         (when (or (not allow?) (allow? window)) (close! window))))
       ((eq? kind :resize)
        (set! (window :width) (get event :width))
        (set! (window :height) (get event :height))

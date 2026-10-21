@@ -29,6 +29,9 @@ panel scrolls the strip rather than resizing terminals.
 | Cmd+J, then letters | jump to the column with that label; Escape cancels |
 | Cmd+Shift+? | show or hide the key help |
 
+SDL's default macOS menu also binds Cmd+W to Window > Close. Manse refuses
+the close request that arrives in the same frame as its own Cmd+W.
+
 Clicking a column focuses it. A terminal whose shell exits with status 0
 closes its column; other exits keep the column and its output, marked exited,
 until Cmd+W. Closing the last column leaves an empty window.

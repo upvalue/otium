@@ -78,6 +78,31 @@
 (window/frame! w)
 (check "default windows paint continuously" 8 paints)
 (put! (w :options) :render-on-demand? #t)
+
+;; :on-close-request can refuse a close; without it, a close request closes.
+(def closes 0)
+
+(def requests 0)
+
+(def real-close! window/close!)
+
+(set! window/close! (fn (_) (set! closes (+ closes 1))))
+(put! (w :options)
+      :on-close-request (fn (_)
+                          (set! requests (+ requests 1))
+                          (> requests 1)))
+(set! event {:kind :quit})
+(window/frame! w)
+(check "close request asks the window" 1 requests)
+(check "refused close request keeps the window" 0 closes)
+(set! event {:kind :quit})
+(window/frame! w)
+(check "allowed close request closes" 1 closes)
+(put! (w :options) :on-close-request nil)
+(set! event {:kind :quit})
+(window/frame! w)
+(check "close request closes by default" 2 closes)
+(set! window/close! real-close!)
 (ui/invalidate! w)
 (ui/capture! w "/tmp/retry.png")
 

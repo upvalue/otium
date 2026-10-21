@@ -6,7 +6,6 @@
 (require manse.terminal :as terminal)
 (require manse.pty :as pty)
 (require manse.settings :as settings)
-(require manse.application :as application)
 (require manse.theme :as theme)
 (require manse.widgets :as w)
 
@@ -87,7 +86,7 @@
       ((pair? action) (strip/hint-type! s (cadr action)))
       ((eq? action :cancel) (strip/hints-cancel! s))
       ((eq? action :new) (new-terminal!))
-      ((eq? action :close) (when (strip/focused s) (close-app! (strip/focused s))))
+      ((eq? action :close) (put! workspace :closed-column? #t) (when (strip/focused s) (close-app! (strip/focused s))))
       ((eq? action :left) (strip/focus-move! s -1))
       ((eq? action :right) (strip/focus-move! s 1))
       ((eq? action :move-left) (strip/column-move! s -1))
@@ -129,8 +128,16 @@ MANSE_KEYS runs actions by key name, separated by spaces, at iteration 40."
               (when (apps/finished? (entry :app)) (close-app! (entry :id))))
             (copy ((workspace :apps) :entries))))
 
+;; On macOS, SDL's default menu binds Cmd+W to Window > Close. SDL delivers
+;; the keydown first, then the menu asks to close the window in the same
+;; batch of events, and SDL follows that with a quit for the last window.
+(def (close-request? window)
+  "Refuse to close the window in the frame that Cmd+W closed a column."
+  (not (workspace :closed-column?)))
+
 ;; Closing from :step! would leave the frame painting with a freed renderer.
 (def (after-frame! window)
+  (put! workspace :closed-column? #f)
   (when (workspace :quit?) (ui/close! window)))
 
 ;; The view
@@ -249,7 +256,6 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
 
 (def (main)
   (unless (and (workspace :window) (not ((workspace :window) :closed?)))
-    (application/set-name! "Manse")
     (settings/load!)
     (let ((shell (or (settings/options :shell) (process/getenv "SHELL") "/bin/sh")))
       (process/setenv! "TERM" "xterm-256color")
@@ -274,7 +280,8 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
                                   :poll-ms (settings/options :poll-ms)
                                   :background-poll-ms (settings/options :background-poll-ms)
                                   :step! (fn (window) (step! window))
-                                  :after-frame! (fn (window) (after-frame! window))})))
+                                  :after-frame! (fn (window) (after-frame! window))
+                                  :on-close-request (fn (window) (close-request? window))})))
             (put! workspace :window window)
             (ui/set-view! window (fn () (view (window :tree))))
             (ui/run)))

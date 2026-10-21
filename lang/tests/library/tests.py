@@ -7,6 +7,7 @@ case('library', 'tests/library/common.ot')
 case('library arithmetic', 'tests/library/arithmetic.ot')
 case('library chars', 'tests/library/chars.ot')
 case('library bytevectors', 'tests/library/bytevectors.ot')
+case('library resources', 'tests/library/resources.ot')
 case('library modules', 'tests/library/modules.ot', paths=['tests/library/modules'],
      stdout='9 7 #f\n7 #f\n7 7\n7\nconsumer\nportable/value: module value nil\nconsumer nil\n')
 case('library read-file', 'tests/library/read-file.ot', stdout='é🙂\n')

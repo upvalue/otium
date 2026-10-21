@@ -1,5 +1,5 @@
 (library (otium generic-core)
-  (export public-bindings fail descriptor? descriptor-owner fresh-type redefine-class!
+  (export set-pointer-predicate! public-bindings fail descriptor? descriptor-owner fresh-type redefine-class!
           descriptor-abstract? descriptor-parent Object generic? generic-owner generic-arity
           fresh-generic add-method! dispatch-type make slot-ref slot-set! instance?
           generic-methods remove-method! call-next-method next-method? update-instance
@@ -36,6 +36,9 @@
   (define Procedure (builtin 'Procedure))
   (define TypeDescriptor (builtin 'TypeDescriptor))
   (define Other (builtin 'Other))
+  (define CPointer (builtin 'CPointer))
+  (define pointer-predicate (lambda (x) #f))
+  (define (set-pointer-predicate! predicate) (set! pointer-predicate predicate))
   (define Nil (builtin 'Nil))
   (define Keyword (builtin 'Keyword))
   (define instance? val:instance?)
@@ -76,6 +79,7 @@
           [(pair? value) Pair] [(vector? value) Vector]
           [(bytevector? value) Bytevector] [(hashtable? value) Hashtable]
           [(procedure? value) Procedure] [(descriptor? value) TypeDescriptor]
+          [(pointer-predicate value) CPointer]
           [else Other]))
   (define absent (list 'uninitialized-slot))
   (define (slot-index layout key who type)
@@ -340,7 +344,7 @@
       (cons 'generic? generic?) (cons 'generic-methods generic-methods)
       (cons 'remove-method! remove-method!) (cons 'call-next-method call-next-method)
       (cons 'next-method? next-method?) (cons 'update-instance update-instance)
-      (cons 'Object Object) (cons 'Number Number) (cons 'Boolean Boolean) (cons 'Character Character)
+      (cons 'CPointer CPointer) (cons 'Object Object) (cons 'Number Number) (cons 'Boolean Boolean) (cons 'Character Character)
       (cons 'String String) (cons 'Symbol Symbol) (cons 'Null Null)
       (cons 'Pair Pair) (cons 'Vector Vector) (cons 'Bytevector Bytevector)
       (cons 'Hashtable Hashtable) (cons 'Procedure Procedure)

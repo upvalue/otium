@@ -2,7 +2,7 @@
   (export error signal condition-type condition-message error? type-pred
           define-condition condition-of-type? handler-bind try restart-case
           invoke-restart compute-restarts find-restart restart-name restart-description
-          unwind-protect defer quit exit
+          unwind-protect defer quit exit call-with-cleanup
           call-with-otium-control call-with-native-conditions call-contained
           control-condition? control-kind control-status condition-continuation-of
           fail otium-condition? otium-value)
@@ -313,6 +313,23 @@
   (define (invoke-restart name . args)
     (let ([r (find-restart name)])
       (if (not (val:nil? r)) (apply (restart-transfer r) args) (error "invoke-restart: no active restart"))))
+  (define (call-with-cleanup body cleanup)
+    (let ([outcome (void)] [target (control-target)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (parameterize ([control-target
+                          (lambda (kind status)
+                            (set! outcome (val:keyword "quit"))
+                            (if target (target kind status)
+                                (raise (make-control-condition kind status))))])
+            (with-exception-handler
+              (lambda (e)
+                (set! outcome (if (control-condition? e) (val:keyword "quit")
+                                  (exception-value e)))
+                (raise e))
+              body)))
+        (lambda () (cleanup outcome)))))
   (define-syntax unwind-protect
     (syntax-rules ()
       [(_ expr cleanup ...)

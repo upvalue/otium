@@ -896,3 +896,40 @@
     (if (and (>= n 0) (<= n 9))
         n
         nil)))
+
+;; lint: allow(expansion-failed) The prelude loader owns this declaration in otium.core.
+(defgeneric (close resource outcome))
+
+(def (resource-closable? resource)
+  "Test whether close has an applicable method for resource on normal exit."
+  (let ((kind (dispatch-type resource)))
+    (not (not (find (fn (method)
+                      (let ((signature (cadr method)))
+                        (and (class-subtype? kind (car signature))
+                             (class-subtype? (dispatch-type nil) (cadr signature)))))
+                    (generic-methods close))))))
+
+(defmacro with (bindings . body)
+  "(with ((name expression [release]) ...) body ...)\nAcquire in order and release in reverse order on every exit. Default release is close."
+  (unless (list? bindings) (error "with: expected binding list"))
+  (if (null? bindings)
+      `(begin ,@body)
+      (let ((binding (car bindings)))
+        (unless (and (list? binding) (or (= (length binding) 2) (= (length binding) 3)) (symbol? (car binding)))
+          (error "with: expected (name expression [release])"))
+        (let ((name (car binding))
+              (release (gensym "release"))
+              (outcome (gensym "outcome")))
+          `(let ((,name ,(cadr binding))
+                 (,release
+                  ,(if (= (length binding) 3)
+                       (caddr binding)
+                       `(begin
+                          (unless (resource-closable? ,name)
+                            (error "with: resource has no applicable close method" ,name))
+                          nil))))
+             (call-with-cleanup (fn () (with ,(cdr bindings) ,@body))
+                                (fn (,outcome)
+                                  ,(if (= (length binding) 3)
+                                       `(,release ,name)
+                                       `(close ,name ,outcome)))))))))

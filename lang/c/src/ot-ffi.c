@@ -41,7 +41,9 @@ typedef struct owner {
   item item;
   void* data;
   size_t size;
-  bool released;
+  bool released, custom;
+  ots* state;
+  otv destroy, original;
 } owner;
 typedef struct callback callback;
 
@@ -141,7 +143,10 @@ static void track(ots* s, item* p, void (*destroy)(void*)) {
 
 static void owner_destroy(void* p) {
   owner* o = p;
-  ot_host_free(o->data);
+  if (o->custom) {
+    ot_global_remove(o->state, &o->destroy);
+    ot_global_remove(o->state, &o->original);
+  } else ot_host_free(o->data);
   ot_host_free(o);
 }
 
@@ -262,6 +267,10 @@ static bool live(ots* s, pointer p, const char* op) {
   if (p.owner && p.owner->released) {
     fail(s, op, "released", "allocation released");
     return false;
+  }
+  if (p.owner && p.owner->custom && !p.owner->released) {
+    pointer original;
+    if (!ptr(s, p.owner->original, &original, op) || !live(s, original, op)) return false;
   }
   if (p.callback && p.callback->released) {
     fail(s, op, "released", "callback released");
@@ -726,13 +735,48 @@ static otv n_alloc(ots* s, otv* a, int n) {
       s, (pointer){.address = o->data, .owner = o, .size = bytes, .bounded = true, .owning = true});
 }
 
+bool ot_ffi_owning_pointer(ots* s, otv value) {
+  if (!s->ffi_state) return false;
+  pointer* p = ext(value, ctx(s)->pointer_type);
+  return p && p->owning;
+}
+
+static otv n_own(ots* s, otv* a, int n) {
+  ARITY(2, "own");
+  pointer p;
+  if (!ptr(s, a[0], &p, "own") || !live(s, p, "own")) return OT_UNWIND;
+  if (ot_value_type(a[1]) != OT_TYPE_FUNCTION)
+    return fail(s, "own", "type", "expected destructor procedure");
+  owner* o = ot_host_alloc(sizeof(*o));
+  if (!o) return fail(s, "own", "allocation", "owner allocation failed");
+  o->custom = true;
+  o->state = s;
+  o->original = a[0];
+  o->destroy = a[1];
+  ot_global_add(s, &o->original);
+  ot_global_add(s, &o->destroy);
+  track(s, &o->item, owner_destroy);
+  p.owner = o;
+  p.owning = true;
+  return wrap(s, p);
+}
+
 static otv n_free(ots* s, otv* a, int n) {
   ARITY(1, "free!");
   pointer p;
   if (!ptr(s, a[0], &p, "free!")) return OT_UNWIND;
-  if (!p.address) return ot_false;
+  if (!p.address && !p.owning) return ot_false;
   if (!p.owning) return fail(s, "free!", "type", "only owning allocations can be freed");
-  release_owner(ctx(s), p.owner);
+  if (p.owner->custom) {
+    owner* o = p.owner;
+    if (o->released) return ot_false;
+    o->released = true;
+    otv original = o->original, destroy = o->destroy;
+    OT_FRAME_SCOPED(s, &original, &destroy);
+    o->original = ot_nil;
+    o->destroy = ot_nil;
+    if (ot_apply(s, destroy, &original, 1) == OT_UNWIND) return OT_UNWIND;
+  } else release_owner(ctx(s), p.owner);
   return ot_false;
 }
 
@@ -1244,6 +1288,7 @@ static void module(ots* s) {
                    {"%alignof", n_align},
                    {"%alloc", n_alloc},
                    {"free!", n_free},
+                   {"own", n_own},
                    {"view", n_view},
                    {"%ref", n_ref},
                    {"%set!", n_set},

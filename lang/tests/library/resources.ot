@@ -1,0 +1,52 @@
+(require otium.test :refer (check fails? report))
+
+(def events [])
+
+(def (record x)
+  (push! events x))
+
+(check 42 (with ((x 1 record) (y (+ x 1) record)) 42))
+(check "[2 1]" (str events))
+(set! events [])
+(check #t (fails? (fn () (with ((x 1 record) (y (error "acquire") record)) 0))))
+(check "[1]" (str events))
+(set! events [])
+(check #t (fails? (fn () (with ((x 1 record) (y 2)) (record :body)))))
+(check "[1]" (str events))
+
+(defclass Resource value)
+
+(defmethod (close (r Resource) outcome)
+  (record (list (r :value) outcome)))
+
+(check #t (resource-closable? (make Resource :value 1)))
+(check #f (resource-closable? 1))
+(set! events [])
+(check 7 (with ((r (make Resource :value 1))) 7))
+(check '((1 nil)) (list (get events 0)))
+
+(def problem {:type 'error :message "body"})
+
+(check #t
+       (eq? problem
+            (try
+              (with ((r (make Resource :value 2))) (error problem))
+              (catch (error? e) e))))
+(check #t (eq? problem (cadr (get events 1))))
+(set! events [])
+(check 9 (restart-case (with ((r (make Resource :value 3))) (invoke-restart 'done)) (done () 9)))
+(check '((3 nil)) (list (get events 0)))
+(set! events [])
+(check "release"
+       (try
+         (with ((x 1 record) (y 2 (fn (_) (error "release")))) 0)
+         (catch (error? e) (condition-message e))))
+(check "[1]" (str events))
+(set! events [])
+(check 8
+       (with ((r (make Resource :value 4)))
+             (try
+               (error "handled inside")
+               (catch (error? _) 8))))
+(check '((4 nil)) (list (get events 0)))
+(report "library resources")

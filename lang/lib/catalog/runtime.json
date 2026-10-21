@@ -1477,5 +1477,12 @@
       "c",
       "chez"
     ]
+  },
+  "call-with-cleanup": {
+    "text": "(call-with-cleanup body cleanup)\nCall body with no arguments and cleanup with its exit outcome on every exit. The outcome is nil on return or restart transfer, the condition on error, or :quit on exit or interrupt. Cleanup errors replace the pending result. Reentry through a continuation is unsupported.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
   }
 }

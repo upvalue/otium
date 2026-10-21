@@ -291,3 +291,6 @@
                                            (list ,source)
                                            ,source)))
          ,@(map (fn (d) `(set! ,(name d) ,(binding d))) declarations)))))
+
+(defmethod (close (pointer CPointer) outcome)
+  (free! pointer))

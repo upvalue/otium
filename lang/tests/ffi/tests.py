@@ -37,3 +37,8 @@ def callback_exit(t):
 def callback_thread(t):
     ffi(t, 'tests/ffi/callback-thread.ot', status=None, stdout='',
         stderr=['thread other than the Otium thread'])
+
+
+@test('ffi ownership', runtimes=BOTH)
+def ownership(t):
+    t.expect(t.otium('tests/ffi/ownership.ot'), stdout='own: 10 checks passed\n')

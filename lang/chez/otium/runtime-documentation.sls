@@ -149,4 +149,5 @@
     (bytevector-append . "(bytevector-append bytes ...)\nConcatenate bytevectors into a fresh bytevector.")
     (utf8->string . "(utf8->string bytes [start [end]])\nDecode a half-open byte range as UTF-8. Invalid input raises decode-error with the absolute byte offset in :position.")
     (string->utf8 . "(string->utf8 text [start [end]])\nEncode a half-open character range as UTF-8 in a fresh bytevector. Defaults to the whole string.")
+    (call-with-cleanup . "(call-with-cleanup body cleanup)\nCall body with no arguments and cleanup with its exit outcome on every exit. The outcome is nil on return or restart transfer, the condition on error, or :quit on exit or interrupt. Cleanup errors replace the pending result. Reentry through a continuation is unsupported.")
   )))

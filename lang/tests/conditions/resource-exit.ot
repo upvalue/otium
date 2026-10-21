@@ -1,0 +1,6 @@
+(defclass ExitResource)
+
+(defmethod (close (resource ExitResource) outcome)
+  (println outcome))
+
+(with ((resource (make ExitResource))) (quit 7))

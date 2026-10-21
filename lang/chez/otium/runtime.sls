@@ -265,7 +265,7 @@
                            error signal condition-type condition-message error? type-pred
                            define-condition condition-of-type? handler-bind try restart-case
                            invoke-restart compute-restarts find-restart restart-name
-                           restart-description unwind-protect defer quit exit)))]
+                           restart-description unwind-protect defer quit exit call-with-cleanup)))]
                [space (make-namespace name env (make-eq-hashtable)
                         (make-eq-hashtable) (make-eq-hashtable) #f #f #f)])
           (hashtable-set! namespaces name space)

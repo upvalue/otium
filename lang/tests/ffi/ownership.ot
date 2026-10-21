@@ -1,0 +1,52 @@
+(require otium.ffi :as ffi)
+(require otium.test :refer (check fails? report))
+
+(def p nil)
+
+(def v nil)
+
+(with ((mem (ffi/alloc 'u8 4)))
+      (set! p mem)
+      (set! v (ffi/view mem 1 2))
+      (ffi/set! v 'u8 0 42)
+      (check 42 (ffi/ref mem 'u8 1)))
+(check #t (fails? (fn () (ffi/ref p 'u8 0))))
+(check #t (fails? (fn () (ffi/ref v 'u8 0))))
+(close p nil)
+
+(def n 0)
+
+(def original (ffi/alloc 'u8 1))
+
+(def owned
+  (ffi/own original
+           (fn (p)
+             (set! n (+ n 1))
+             (ffi/free! p))))
+
+(with ((p owned)) (check #t (resource-closable? p)))
+(close owned nil)
+(check 1 n)
+(check #t (fails? (fn () (ffi/ref owned 'u8 0))))
+
+(def source (ffi/alloc 'u8 2))
+
+(def alias (ffi/own source (fn (p) (ffi/free! p))))
+
+(def view (ffi/view alias 0 1))
+
+(ffi/free! source)
+(check #t (fails? (fn () (ffi/ref alias 'u8 0))))
+(check #t (fails? (fn () (ffi/ref view 'u8 0))))
+(close alias nil)
+
+(def bad
+  (ffi/own ffi/null
+           (fn (_p)
+             (set! n (+ n 1))
+             (error "destroy"))))
+
+(check #t (fails? (fn () (close bad nil))))
+(close bad nil)
+(check 2 n)
+(report "own")

@@ -718,6 +718,7 @@ void ot_register_cli(ots* state);
 void ot_register_ffi(ots* state);
 void ot_destroy_ffi(ots* state);
 void ot_register_demo_extension(ots* state);
+bool ot_ffi_owning_pointer(ots* state, otv value);
 OT_GC_MAY_ALLOCATE void ot_select_namespace(ots* state, const char* name, size_t length);
 OT_GC_MAY_ALLOCATE bool ot_eval_results(ots* state, const char* source, size_t length,
                                         const char* name, otv* results, size_t* line);

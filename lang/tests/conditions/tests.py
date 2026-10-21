@@ -7,6 +7,8 @@ from harness import BOTH, case, test
 
 SUPPORT = ['--load', 'tests/conditions/support.ot']
 
+case('conditions resource exit', 'tests/conditions/resource-exit.ot', status=7, stdout=':quit\n')
+
 case('conditions', 'tests/conditions/common.ot', options=SUPPORT)
 case('conditions exit', 'tests/conditions/exit.ot', options=SUPPORT, status=7,
      stdout='condition checks: 7\n')

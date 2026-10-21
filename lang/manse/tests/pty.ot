@@ -1,0 +1,45 @@
+;; A child on a PTY: size, controlling terminal, output through libghostty, and Ctrl-C.
+(require manse.pty :as pty)
+(require manse.ghostty :as g)
+(require otium.test :refer (check report))
+
+(def term (g/new 80 24))
+(def p (pty/spawn "/bin/sh"
+                  '("sh" "-c" "stty size; tty; ps -o tty= -o stat= -p $$; echo READY; sleep 100; echo after")
+                  77
+                  33))
+
+(def (pump-until done? limit-ms)
+  "Pass PTY output to the terminal until (done?) or the time limit passes."
+  (let ((deadline (+ (current-jiffy) (* limit-ms 1000000))))
+    (let loop ()
+      (cond
+        ((done?) #t)
+        ((> (current-jiffy) deadline) #f)
+        (else
+         (when (pty/readable? p 50)
+           (let ((n (pty/read! p)))
+             (when (> n 0) (g/write-bytes! term (p :buffer) n))))
+         (loop))))))
+
+(def (screen)
+  (g/update! term)
+  (apply list (g/text term)))
+
+(def (screen-has? s)
+  (exists (fn (row) (string-contains? row s)) (screen)))
+
+(check "child output" #t (pump-until (fn () (screen-has? "READY")) 5000))
+(for-each (fn (row) (unless (equal? (string-trim row) "") (println "| " row))) (screen))
+(check "stty size" #t (screen-has? "33 77"))
+(check "tty name" #t (screen-has? (p :tty)))
+;; ps reports ?? for a process with no controlling terminal; + marks the foreground group.
+(check "controlling terminal" #f (screen-has? "??"))
+
+(pty/write! p "\x3;")
+(check "ctrl-c ends the child" #t (pump-until (fn () (let ((s (pty/status p))) (when s (put! p :exit s)) s)) 5000))
+(check "killed by SIGINT" 2 (get (p :exit) :signal))
+(check "sleep was interrupted" #f (screen-has? "after"))
+(pty/close! p)
+(g/free! term)
+(report "pty")

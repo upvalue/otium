@@ -1,0 +1,153 @@
+(ns manse.pty)
+
+;; Prototype pseudo-terminals: open a PTY, spawn a child on it with
+;; posix_spawn, read and write the controlling side, resize, and reap.
+;; macOS constants only, and Chez only: ioctl is variadic and Otium's FFI has
+;; no variadic calls yet, so resize goes through Chez's foreign-procedure.
+
+(require otium.ffi :as ffi)
+(require chez)
+
+(def- O_RDWR 2)
+(def- O_NOCTTY 131072)
+(def- POSIX_SPAWN_SETSID 1024)
+(def- POSIX_SPAWN_CLOEXEC_DEFAULT 16384)
+(def- TIOCSWINSZ 2148037735)
+(def- POLLIN 1)
+(def- WNOHANG 1)
+
+(def PollFd (ffi/define-struct! 'pollfd '((fd int) (events i16) (revents i16))))
+
+(ffi/defbindings libc %load!
+  ((private %openpt) "posix_openpt" (int) int)
+  ((private %grantpt) "grantpt" (int) int)
+  ((private %unlockpt) "unlockpt" (int) int)
+  ((private %ptsname) "ptsname" (int) utf8)
+  ((private %open) "open" (utf8 int) int)
+  ((private %close) "close" (int) int)
+  ((private %read) "read" (int pointer size-t) long)
+  ((private %write) "write" (int pointer size-t) long)
+  ((private %poll) "poll" (pointer uint int) int)
+  ((private %waitpid) "waitpid" (int pointer int) int)
+  ((private %kill) "kill" (int int) int)
+  ((private %environ) "_NSGetEnviron" () pointer)
+  ((private %attr-init) "posix_spawnattr_init" (pointer) int)
+  ((private %attr-destroy) "posix_spawnattr_destroy" (pointer) int)
+  ((private %attr-setflags) "posix_spawnattr_setflags" (pointer i16) int)
+  ((private %actions-init) "posix_spawn_file_actions_init" (pointer) int)
+  ((private %actions-destroy) "posix_spawn_file_actions_destroy" (pointer) int)
+  ((private %actions-open) "posix_spawn_file_actions_addopen" (pointer int utf8 int u16) int)
+  ((private %actions-dup2) "posix_spawn_file_actions_adddup2" (pointer int int) int)
+  ((private %spawn) "posix_spawn" (pointer utf8 pointer pointer pointer pointer) int))
+
+(def- %ioctl-winsize
+  (chez/foreign-procedure (__varargs_after 2) "ioctl" (int unsigned-long uptr) int))
+
+(def (load!)
+  (unless libc (%load! '("/usr/lib/libSystem.B.dylib"))))
+
+(def- (check! op result)
+  (when (< result 0) (error (str "pty: " op " failed") result))
+  result)
+
+(def (resize! pty cols rows)
+  "Set the terminal size the child sees; the kernel sends it SIGWINCH."
+  (let ((ws (chez/foreign-alloc 8)))
+    (chez/foreign-set! 'unsigned-16 ws 0 rows)
+    (chez/foreign-set! 'unsigned-16 ws 2 cols)
+    (chez/foreign-set! 'unsigned-16 ws 4 0)
+    (chez/foreign-set! 'unsigned-16 ws 6 0)
+    (let ((result (%ioctl-winsize (pty :fd) TIOCSWINSZ ws)))
+      (chez/foreign-free ws)
+      (check! "ioctl(TIOCSWINSZ)" result))))
+
+(def- (with-strings strings f)
+  "Call (f argv) with a NULL-terminated array of C strings, freed afterwards."
+  (let ((argv (ffi/alloc 'pointer (+ (length strings) 1)))
+        (owned (map ffi/alloc-utf8 strings)))
+    (let loop ((i 0) (rest owned))
+      (unless (null? rest)
+        (ffi/set! argv 'pointer i (car rest))
+        (loop (+ i 1) (cdr rest))))
+    (ffi/set! argv 'pointer (length owned) ffi/null)
+    (unwind-protect
+      (f argv)
+      (for-each ffi/free! owned)
+      (ffi/free! argv))))
+
+(def (spawn path args cols rows)
+  "Start path with args (argv[0] included) on a new PTY of the given size."
+  (load!)
+  (let ((fd (check! "posix_openpt" (%openpt (+ O_RDWR O_NOCTTY)))))
+    (check! "grantpt" (%grantpt fd))
+    (check! "unlockpt" (%unlockpt fd))
+    (let ((pty {:fd fd :tty (%ptsname fd)})
+          ;; posix_spawnattr_t and posix_spawn_file_actions_t are opaque; 256 bytes covers both platforms.
+          (attr (ffi/alloc 'u64 32))
+          (actions (ffi/alloc 'u64 32))
+          (pid (ffi/alloc 'i32 1)))
+      ;; macOS rejects ioctls on the controlling side until the terminal side
+      ;; has been opened, so hold it open until the child has its own copy.
+      (put! pty :slave (check! "open" (%open (pty :tty) (+ O_RDWR O_NOCTTY))))
+      (resize! pty cols rows)
+      (unwind-protect
+        (begin
+          (%attr-init attr)
+          (%actions-init actions)
+          ;; A new session, so opening the tty makes it the controlling terminal.
+          ;; CLOEXEC_DEFAULT keeps our descriptors, including this PTY's, out of the child.
+          (check! "setflags" (- (%attr-setflags attr (+ POSIX_SPAWN_SETSID POSIX_SPAWN_CLOEXEC_DEFAULT))))
+          (check! "addopen" (- (%actions-open actions 0 (pty :tty) O_RDWR 0)))
+          (check! "adddup2" (- (%actions-dup2 actions 0 1)))
+          (check! "adddup2" (- (%actions-dup2 actions 0 2)))
+          (with-strings args
+                        (fn (argv)
+                          (check! "posix_spawn"
+                                  (- (%spawn pid path actions attr argv (ffi/ref (%environ) 'pointer 0))))))
+          (put! pty :pid (ffi/ref pid 'i32 0))
+          (put! pty :buffer (ffi/alloc 'u8 65536))
+          (put! pty :pollfd (ffi/alloc PollFd 1))
+          pty)
+        (%close (pty :slave))
+        (%actions-destroy actions)
+        (%attr-destroy attr)
+        (ffi/free! actions)
+        (ffi/free! attr)
+        (ffi/free! pid)))))
+
+(def (readable? pty timeout-ms)
+  (let ((p (pty :pollfd)))
+    (ffi/field-set! p PollFd '(fd) (pty :fd))
+    (ffi/field-set! p PollFd '(events) POLLIN)
+    (ffi/field-set! p PollFd '(revents) 0)
+    (> (check! "poll" (%poll p 1 timeout-ms)) 0)))
+
+(def (read! pty)
+  "Read what is available into the PTY's buffer and return the byte count; 0 at end of file."
+  (let ((n (%read (pty :fd) (pty :buffer) 65536)))
+    ;; EIO when the child side has closed is end of file, as on Linux.
+    (if (< n 0) 0 n)))
+
+(def (write! pty text)
+  (let ((p (ffi/alloc-utf8 text)))
+    (let loop ((n 0))
+      (if (= 0 (ffi/ref p 'u8 n))
+          (check! "write" (%write (pty :fd) p n))
+          (loop (+ n 1))))
+    (ffi/free! p)))
+
+(def (status pty)
+  "nil while the child runs, then {:exit code} or {:signal number}."
+  (let ((s (ffi/alloc 'i32 1)))
+    (let ((r (%waitpid (pty :pid) s WNOHANG)))
+      (let ((raw (ffi/ref s 'i32 0)))
+        (ffi/free! s)
+        (cond
+          ((<= r 0) nil)
+          ((= 0 (modulo raw 128)) {:exit (modulo (quotient raw 256) 256)})
+          (else {:signal (modulo raw 128)}))))))
+
+(def (close! pty)
+  (%close (pty :fd))
+  (ffi/free! (pty :buffer))
+  (ffi/free! (pty :pollfd)))

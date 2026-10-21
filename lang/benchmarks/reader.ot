@@ -1,0 +1,19 @@
+;; Normal-reader throughput. Run with ./otium --runtime=c benchmarks/reader.ot.
+;; Seven batches of ten reads after three warmup reads; seconds exclude input construction.
+(def source (buffer))
+
+(buffer-push! source "(")
+(dotimes (_ 12000)
+  (buffer-push! source "(def (work x) [123 4.5 :key \"hello\\nworld\" #\\space #u8(1 2) {a b}]) ; comment\n"))
+(buffer-push! source ")")
+
+(def text (buffer->string source))
+
+(println "bytes: " (string-length text))
+(dotimes (_ 3)
+  (read-string text))
+(dotimes (_ 7)
+  (let ((start (current-jiffy)))
+    (dotimes (_ 10)
+      (read-string text))
+    (println (/ (- (current-jiffy) start) (inexact (jiffies-per-second))))))

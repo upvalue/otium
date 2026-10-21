@@ -29,7 +29,8 @@
   (node :init nil)
   (armed :init nil)
   (key :init nil)
-  (event :init nil))
+  (event :init nil)
+  (drop-text? :init #f))
 
 (defclass Root
   (children :init [])
@@ -251,7 +252,15 @@
     (for-each (fn (k)
                 (cond
                   ((eq? k :key) nil)
-                  ((memq k '(:disabled :focusable :autofocus :tab-navigation :keymap :on-action :cache :animate-size))
+                  ((memq k
+                         '(:disabled :focusable
+                                     :autofocus
+                                     :focus
+                                     :tab-navigation
+                                     :keymap
+                                     :on-action
+                                     :cache
+                                     :animate-size))
                    (put! options k (get opts k)))
                   (else (set! args (cons k (cons (get opts k) args))))))
               (keys opts))
@@ -346,22 +355,21 @@
                            (eq? (dispatch-type (candidate :instance)) (dispatch-type (d :properties)))))
             (node (if matched?
                       candidate
-                      (make Mounted
-                            :instance (class-mount (d :properties))
-                            :key (d :key)
-                            :children []
-                            :parent parent))))
+                      (make Mounted :instance (class-mount (d :properties)) :key (d :key) :children [] :parent parent)))
+            (focus? (and (get (d :options) :focus #f) (not (and matched? (get (node :options) :focus #f))))))
         (set! (node :options) (d :options))
         (unless (enabled? node) (set! (node :pressed?) #f))
         (when matched? (class-update-properties! (node :instance) (d :properties)))
         (let ((built (with-params ((building-children (d :children))) (build (node :instance)))))
           (set! (node :children) (reconcile-children (node :children) built node)))
         (put! kept node #t)
-        (when (and (not matched?) (get (node :options) :autofocus #f))
+        ;; :autofocus takes focus on mount when nothing has it; :focus takes
+        ;; it on mount or when the option turns on.
+        (when (or focus? (and (not matched?) (get (node :options) :autofocus #f)))
           (let find-root ((parent (node :parent)))
             (if (mounted? parent)
                 (find-root (parent :parent))
-                (when (and (not (focused parent)) (focusable? node)) (focus! parent node)))))
+                (when (and (or focus? (not (focused parent))) (focusable? node)) (focus! parent node)))))
         (push! out node)))
     (for-each (fn (n) (unless (get kept n #f) (retire! n))) old)
     out))

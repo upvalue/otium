@@ -1,0 +1,145 @@
+;; The order, widths and focus of the workspace's columns, and jump hints.
+;; Columns are app IDs from the registry. No UI dependencies.
+(ns manse.strip)
+
+(def widths
+  "Column widths as fractions of the window, stepped through by width-step!."
+  [0.3333 0.5 0.6667 1.0])
+
+(def alphabet
+  "Hint letters, home row first, as SDL key names."
+  ["A" "S" "D" "F" "J" "K" "L" "G" "H" "Q" "W" "E" "R" "U" "I" "O" "P"])
+
+(def (strip)
+  {:columns [] :focused nil :hinting #f :typed "" :labels {}})
+
+(def- (insert seq i x)
+  (concat (take i seq) [x] (drop i seq)))
+
+(def- (remove-at seq i)
+  (concat (take i seq) (drop (+ i 1) seq)))
+
+(def- (clamp i seq)
+  (max 0 (min (- (length seq) 1) i)))
+
+(def (ids s)
+  (map (fn (c) (c :id)) (s :columns)))
+
+(def (index-of s id)
+  (let loop ((i 0))
+    (cond
+      ((>= i (length (s :columns))) nil)
+      ((equal? ((get (s :columns) i) :id) id) i)
+      (else (loop (+ i 1))))))
+
+(def (focused s)
+  (s :focused))
+
+(def (focused-index s)
+  (and (s :focused) (index-of s (s :focused))))
+
+(def (width-of s id)
+  (let ((i (index-of s id)))
+    (get widths
+         (if i
+             ((get (s :columns) i) :width)
+             1))))
+
+(def (add! s id)
+  "Open a column to the right of the focused one and focus it."
+  (let ((i (focused-index s)))
+    (put! s
+          :columns (insert (s :columns)
+                           (if i
+                               (+ i 1)
+                               (length (s :columns)))
+                           {:id id :width 1}))
+    (put! s :focused id)
+    id))
+
+(def (remove! s id)
+  "Remove a column. Focus moves to the right neighbour, or the left at the end."
+  (let ((i (index-of s id)))
+    (when i
+      (put! s :columns (remove-at (s :columns) i))
+      (when (equal? (s :focused) id)
+        (put! s
+              :focused (if (empty? (s :columns))
+                           nil
+                           ((get (s :columns) (clamp i (s :columns))) :id))))
+      (when (s :hinting) (hints-cancel! s)))))
+
+(def (sync! s present)
+  "Match the columns to the app IDs in present: drop missing ones, append new ones."
+  (for-each (fn (id) (unless (member id present) (remove! s id))) (ids s))
+  (for-each (fn (id) (unless (index-of s id) (put! s :columns (concat (s :columns) [{:id id :width 1}])))) present)
+  (unless (or (s :focused) (empty? (s :columns))) (put! s :focused ((get (s :columns) 0) :id))))
+
+(def (focus! s id)
+  (when (index-of s id) (put! s :focused id)))
+
+(def (focus-move! s delta)
+  (let ((i (focused-index s))) (when i (put! s :focused ((get (s :columns) (clamp (+ i delta) (s :columns))) :id)))))
+
+(def (column-move! s delta)
+  (let ((i (focused-index s)))
+    (when i
+      (let ((j (clamp (+ i delta) (s :columns)))
+            (columns (copy (s :columns)))
+            (moving (get columns i)))
+        (put! columns i (get columns j))
+        (put! columns j moving)
+        (put! s :columns columns)))))
+
+(def (width-step! s delta)
+  "Widen (1) or narrow (-1) the focused column, stopping at the ends."
+  (let ((i (focused-index s)))
+    (when i
+      (let ((column (get (s :columns) i)))
+        (put! column :width (max 0 (min (- (length widths) 1) (+ (column :width) delta))))))))
+
+;; Vimium-style hints: every column gets a label while hinting. Labels have
+;; equal length, so none is a prefix of another.
+
+(def (hint-labels n)
+  (if (<= n (length alphabet))
+      (take n alphabet)
+      (let ((out []))
+        (for-each (fn (a) (for-each (fn (b) (push! out (str a b))) alphabet)) alphabet)
+        (take n out))))
+
+(def (hints-start! s)
+  (let ((ids (ids s))
+        (labels {})
+        (names (hint-labels (length ids))))
+    (dotimes (i (length ids))
+      (put! labels (get ids i) (get names i)))
+    (put! s :labels labels)
+    (put! s :typed "")
+    (put! s :hinting (not (empty? ids)))))
+
+(def (hints-cancel! s)
+  (put! s :hinting #f)
+  (put! s :typed "")
+  (put! s :labels {}))
+
+(def (hinting? s)
+  (s :hinting))
+
+(def (typed s)
+  (s :typed))
+
+(def (label-of s id)
+  "The hint label for column id while hinting and still matching the typed prefix, else nil."
+  (let ((label (get (s :labels) id))) (when (and (s :hinting) label (string-starts-with? label (s :typed))) label)))
+
+(def (hint-type! s letter)
+  "Narrow the hints by one letter. Jumps on an exact match and cancels when nothing matches."
+  (let ((typed (str (s :typed) letter))
+        (matches (filter (fn (id) (string-starts-with? ((s :labels) id) typed)) (keys (s :labels)))))
+    (cond
+      ((empty? matches) (hints-cancel! s))
+      ((and (= (length matches) 1) (equal? ((s :labels) (get matches 0)) typed))
+       (hints-cancel! s)
+       (focus! s (get matches 0)))
+      (else (put! s :typed typed)))))

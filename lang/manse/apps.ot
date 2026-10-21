@@ -1,25 +1,34 @@
 (ns manse.apps)
 
 (defabstract App)
+
 (defgeneric (info app))
+
 (defgeneric (step! app))
+
 (defgeneric (close! app))
+
 (defgeneric (view app))
 
-(defmethod (step! (app App)) #f)
-(defmethod (close! (app App)) nil)
+(defgeneric (finished? app))
+
+(defmethod (step! (app App))
+  #f)
+
+(defmethod (close! (app App))
+  nil)
+
+(defmethod (finished? (app App))
+  #f)
 
 (def (registry)
   {:next-id 1 :entries []})
 
 (def (add! registry name app)
   "Register an app with a stable ID. The registry owns its lifetime."
-  (unless (and (instance? app) (class-subtype? (dispatch-type app) App))
-    (error "Expected a Manse app" app))
-  (unless (and (string? name) (> (string-length name) 0))
-    (error "App name must be a nonempty string" name))
-  (when (exists (fn (entry) (eq? (entry :app) app))
-                (array-to-list (registry :entries)))
+  (unless (and (instance? app) (class-subtype? (dispatch-type app) App)) (error "Expected a Manse app" app))
+  (unless (and (string? name) (> (string-length name) 0)) (error "App name must be a nonempty string" name))
+  (when (exists (fn (entry) (eq? (entry :app) app)) (array-to-list (registry :entries)))
     (error "App is already registered"))
   (let ((entry {:id (registry :next-id) :name name :app app}))
     (put! registry :next-id (+ 1 (registry :next-id)))
@@ -29,9 +38,10 @@
 (def (find registry id)
   "Return the live app with this ID, or nil."
   (let loop ((entries (array-to-list (registry :entries))))
-    (cond ((null? entries) nil)
-          ((equal? ((car entries) :id) id) ((car entries) :app))
-          (else (loop (cdr entries))))))
+    (cond
+      ((null? entries) nil)
+      ((equal? ((car entries) :id) id) ((car entries) :app))
+      (else (loop (cdr entries))))))
 
 (def (query registry . predicates)
   "Return metadata tables in registration order, optionally filtered by a predicate."
@@ -41,13 +51,14 @@
                         (put! metadata :name (entry :name))
                         metadata))
                     (registry :entries))))
-    (if (null? predicates) items (filter (car predicates) items))))
+    (if (null? predicates)
+        items
+        (filter (car predicates) items))))
 
 (def (remove! registry id)
   "Close an app before unregistering it. Missing IDs are harmless."
   (let ((app (find registry id)))
     (when app
       (close! app)
-      (put! registry :entries
-            (filter (fn (entry) (not (equal? (entry :id) id))) (registry :entries))))
+      (put! registry :entries (filter (fn (entry) (not (equal? (entry :id) id))) (registry :entries))))
     app))

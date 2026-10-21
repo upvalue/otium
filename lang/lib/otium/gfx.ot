@@ -8,7 +8,8 @@
   (focused? :init #f)
   (pressed? :init #f)
   (hovered? :init #f)
-  (disabled? :init #f))
+  (disabled? :init #f)
+  (resizing? :init #f))
 
 (def (rect g bounds color . radius)
   "Record a rounded rectangle, clipped to the current widget's bounds."
@@ -96,7 +97,8 @@ and the bounds' size."
                      :focused? (g :focused?)
                      :pressed? (g :pressed?)
                      :hovered? (g :hovered?)
-                     :disabled? (g :disabled?)))
+                     :disabled? (g :disabled?)
+                     :resizing? (g :resizing?)))
         (sdl/check (native/gpu-cache-store (g :renderer) (c :id) start (bounds :x) (bounds :y)))
         (put! c :key full)
         (unless (draw-cache g c bounds) (error "Paint cache was not stored"))))))

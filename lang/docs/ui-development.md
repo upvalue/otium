@@ -305,7 +305,10 @@ mounted value immediately as it edits, then calls `:on-change` with the new
 string. `:on-submit` receives the value on Enter. A changed external value
 moves the cursor to its end; unchanged values preserve cursor and selection.
 Common `:autofocus #t` requests focus once when a widget mounts, if the tree
-has no focused widget. Disabled fields neither focus nor accept input.
+has no focused widget. Common `:focus #t` takes focus when the widget mounts
+with it or when it changes from false to true, so an application can keep its
+own idea of focus and move UI focus to match. It does not take focus back
+while it stays true. Disabled fields neither focus nor accept input.
 
 Left/Right and Home/End move the cursor; Shift extends selection. Backspace and
 Delete remove a selection or one Unicode codepoint. Ctrl/Meta+A selects all;
@@ -327,6 +330,9 @@ Unwrapped text preserves trailing whitespace advances for caret movement,
 selection, and pointer positioning.
 
 Committed text arrives through SDL text events, separately from key events.
+SDL sends a key's text after its keydown. When a keymap action handles the
+keydown, the text that follows is dropped, so a shortcut letter does not also
+reach the focused widget. The next keydown clears this.
 The host starts/stops SDL text input as focus changes. Headless tests send
 `{:kind :text-input :text "café"}` to `input/keyboard!`. Clipboard key events
 can supply `:clipboard-read` and `:clipboard-write` functions; the CLI supplies
@@ -364,7 +370,9 @@ snapped to physical pixels so text stays sharp while moving.
 
 The common `:animate-size #t` option eases a widget's explicit `:width` and
 `:height` toward new values with the same curve. A widget's first size and
-window resizes apply at once.
+window resizes apply at once. While a widget or one of its ancestors eases,
+its paint context reports `(g :resizing?)`; Manse's terminal uses it to put
+off resizing its grid until the size settles.
 
 Frames that only advance animations skip reconciliation. Size animations run
 `gpu/step-sizes!` and Yoga; scroll animations skip Yoga too, and

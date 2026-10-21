@@ -21,18 +21,28 @@
 (defmethod (apps/info (app TerminalApp))
   (let ((session (app :session)))
     {:kind :terminal
-     :status (cond ((session :closed?) :closed)
-                   ((session :exit) :exited)
-                   (else :running))
+     :status (cond
+               ((session :closed?) :closed)
+               ((session :exit) :exited)
+               (else :running))
      :pid ((session :pty) :pid)
      :tty ((session :pty) :tty)
      :cols (get session :cols 80)
      :rows (get session :rows 24)
-     :exit (if (session :exit) (copy (session :exit)) #f)
+     :exit (if (session :exit)
+               (copy (session :exit))
+               #f)
      :eof? (get session :eof? #f)}))
 
 (defmethod (apps/step! (app TerminalApp))
-  (sessions/pump! (app :session)))
+  (let ((session (app :session)))
+    (when (sessions/pump! session)
+      ;; Paint caches key on this, so idle terminals replay.
+      (put! session :version (+ 1 (get session :version 0)))
+      #t)))
+
+(defmethod (apps/finished? (app TerminalApp))
+  (let ((exit ((app :session) :exit))) (and exit (equal? (get exit :exit) 0))))
 
 (defmethod (apps/close! (app TerminalApp))
   (sessions/close! (app :session)))
@@ -70,7 +80,9 @@
 
 (defclass Terminal
   :is ui/Widget
-  session)
+  session
+  (cache :init (gfx/cache) :state #t)
+  (settled :init nil :state #t))
 
 (defmethod (ui/layout-style (w Terminal))
   {:grow 1})
@@ -94,36 +106,24 @@
       ((eq? kind :key-down) (key! session event))
       (else nil))))
 
-(defmethod (ui/paint (w Terminal) context bounds)
+;; Walking the cells costs thousands of FFI calls, so the drawing is cached
+;; until the output, focus, font or size changes. While an enclosing column
+;; eases to a new width, the last grid is replayed at its old size; the grid
+;; and PTY resize once, when the width settles, so the shell redraws once.
+(defmethod (ui/paint (w Terminal) g bounds)
   (let ((session (w :session))
-        (color (if (context :focused?)
-                   0x73b7ffff
-                   0x8490a0ff)))
-    (gfx/rect context bounds 0x17202cff)
-    (gfx/text context
-              (make ui/Bounds
-                    :x (+ (bounds :x) (padding))
-                    :y (bounds :y)
-                    :width (- (bounds :width) (* 2 (padding)))
-                    :height 24)
-              (str "Terminal "
-                   (session :id)
-                   (if (session :exit)
-                       " · exited"
-                       "")
-                   (if (context :focused?)
-                       " · focused"
-                       ""))
-              (font) (font-size)
-              color
-              #f)
-    (paint-terminal session
-                    context
-                    (make ui/Bounds
-                          :x (bounds :x)
-                          :y (+ (bounds :y) 24)
-                          :width (bounds :width)
-                          :height (max 0 (- (bounds :height) 24))))))
+        (settled (w :settled))
+        (resizing? (and (g :resizing?) settled)))
+    (unless resizing? (set! (w :settled) (list (bounds :width) (bounds :height))))
+    (let ((area (if resizing?
+                    (make ui/Bounds :x (bounds :x) :y (bounds :y) :width (car settled) :height (cadr settled))
+                    bounds)))
+      (when resizing? (gfx/rect g bounds (rgba ((g/colors (session :term)) :background) 255)))
+      (gfx/cached g
+                  (w :cache)
+                  area
+                  (list (get session :version 0) (g :focused?) (font) (font-size) (padding))
+                  (fn (g) (paint-terminal session g area (not resizing?)))))))
 
 (def (fit! session bounds)
   "Resize the terminal and PTY to the cells that fit in bounds."
@@ -139,7 +139,7 @@
 (def (text-run! session g x y text color)
   (gfx/text g (make ui/Bounds :x x :y y :width 100000 :height (session :cell-h)) text (font) (font-size) color #f))
 
-(def (paint-terminal session g bounds)
+(def (paint-terminal session g bounds fit?)
   (let ((start (current-jiffy))
         (term (session :term)))
     (let ((metrics-key (list (font) (font-size) (native/gpu-scale (g :renderer)))))
@@ -150,7 +150,7 @@
       (let ((m (cell-metrics (native/gpu-scale (g :renderer)))))
         (put! session :cell-w (car m))
         (put! session :cell-h (cadr m))))
-    (fit! session bounds)
+    (when fit? (fit! session bounds))
     (let ((cw (session :cell-w))
           (ch (session :cell-h))
           (x0 (+ (bounds :x) (padding)))
@@ -217,4 +217,3 @@
                               (/ (round (/ (session :paint-ns) 1200000.0)) 100.0)
                               " ms/frame\n"))
     (put! session :paint-ns 0)))
-

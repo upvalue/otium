@@ -433,4 +433,44 @@
 (input/keyboard! keyboard-tree {:kind :key-up :key "Space" :code 44})
 (check "duplicate physical release ignored" 2 activations)
 (ui/dispose! keyboard-tree)
+
+;; Text that follows a key handled by an action is not typed.
+(def typed [])
+
+(ui/reconcile! keyboard-tree
+               (ui/column {:keymap {"A" :shortcut "Meta+T" :new}
+                           :on-action (fn (a)
+                                        (set! actions (cons a actions))
+                                        :handled)}
+                          (ui/text-field {:autofocus #t :on-change (fn (value) (push! typed value))})))
+(key! :key-down "A")
+(input/keyboard! keyboard-tree {:kind :text-input :text "a"})
+(check "action key runs" :shortcut (car actions))
+(check "action key text dropped" 0 (length typed))
+(key! :key-down "B")
+(input/keyboard! keyboard-tree {:kind :text-input :text "b"})
+(check "next key types" "b" (get typed 0))
+(key! :key-down "Meta+T")
+(key! :key-down "C")
+(input/keyboard! keyboard-tree {:kind :text-input :text "c"})
+(check "textless action does not drop later text" "bc" (get typed 1))
+(ui/dispose! keyboard-tree)
+
+;; :focus moves focus on mount and when it turns on, not on every reconcile.
+(def (focus-view which)
+  (list (ui/button {:key :a :focus (eq? which :a)} "A") (ui/button {:key :b :focus (eq? which :b)} "B")))
+
+(ui/reconcile! keyboard-tree (focus-view :a))
+
+(def fa (child keyboard-tree 0))
+
+(def fb (child keyboard-tree 1))
+
+(check ":focus on mount" fa (ui/focused keyboard-tree))
+(ui/reconcile! keyboard-tree (focus-view :b))
+(check ":focus turning on moves focus" fb (ui/focused keyboard-tree))
+(ui/focus! keyboard-tree fa)
+(ui/reconcile! keyboard-tree (focus-view :b))
+(check ":focus staying on keeps other focus" fa (ui/focused keyboard-tree))
+(ui/dispose! keyboard-tree)
 (report "ui")

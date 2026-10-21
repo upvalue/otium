@@ -13,8 +13,30 @@ Manse needs libghostty-vt; `MANSE_GHOSTTY_LIBRARY` can name its shared library.
 
 Manse hosts apps. Each registered app has a stable integer ID and a name;
 several apps may share a name. IDs are not reused within a workspace registry.
-Each app supplies its own UI. The workspace currently displays all apps in a
-vertical stack, with Ctrl+Tab and Ctrl+Shift+Tab moving focus as before.
+Each app supplies its own UI. The workspace shows apps as columns in a strip
+that scrolls horizontally. A new column opens to the right of the focused one,
+half the window wide. Column widths step through a third, a half, two thirds
+and the full window; they are fractions of the window, so opening the help
+panel scrolls the strip rather than resizing terminals.
+
+| Key | Action |
+|---|---|
+| Cmd+T | new terminal to the right of the focused one |
+| Cmd+W | close the focused column |
+| Cmd+Left / Right | focus the neighbouring column |
+| Cmd+Shift+Left / Right | move the column |
+| Cmd+R / Cmd+Shift+R | widen / narrow the column |
+| Cmd+J, then letters | jump to the column with that label; Escape cancels |
+| Cmd+Shift+? | show or hide the key help |
+
+Clicking a column focuses it. A terminal whose shell exits with status 0
+closes its column; other exits keep the column and its output, marked exited,
+until Cmd+W. Closing the last column leaves an empty window.
+
+The order, widths, focus and hints live in `manse.strip`, which has no UI
+dependencies. The workspace keeps them in agreement with UI focus: actions
+change the model, the focused column's view gets the `:focus` option, and a
+click that moves UI focus moves the model's focus too.
 
 Query a running workspace through the dev server:
 
@@ -42,12 +64,14 @@ Implement an `apps/App` subtype and these generic methods:
 - `apps/step!` performs bounded background work and returns truthy when the
   app needs repainting. The default does nothing.
 - `apps/close!` releases owned resources. The default does nothing.
+- `apps/finished?` returns truthy when the app has ended and its column should
+  close. The default is false; terminals finish when their shell exits with 0.
 
 `(add-app! name app)` registers an app and returns its ID. `(close-app! id)`
 closes and unregisters it; an unknown ID is harmless. These workspace functions
-invalidate the display. Closing an app also closes the resources it owns,
-including a terminal's shell. Exited terminals stay available for inspection;
-Manse remains open when the last shell exits or the last app is removed.
+invalidate the display and open or remove the app's column. Closing an app
+also closes the resources it owns, including a terminal's shell. Manse remains
+open when the last app is removed.
 
 Registry state and app objects survive code reloads. Reloading the new
 workspace code adopts existing terminal sessions. Terminal drawing and input
@@ -127,6 +151,18 @@ or `app.ot` preserves the window, shells, terminal contents, and focus.
 Settings also survive module reloads. A render error is reported through the
 dev server and leaves the window alive so the code can be repaired and loaded.
 
+A terminal's drawing walks every cell over FFI, so it is recorded with
+`gfx/cached` and replayed until its output, focus, font, padding or size
+changes. Idle terminals replay while the strip scrolls or another terminal
+updates. While a column eases to a new width, the terminal replays its last
+grid at the old size and resizes the grid and PTY once the width settles, so
+the shell redraws once rather than on every animation frame.
+
+`MANSE_FRAMES=N` quits after N loop iterations, saving a frame to
+`MANSE_CAPTURE` (default `/tmp/manse.png`) just before. `MANSE_TYPE` and
+`MANSE_TYPE_2` type into the first two shells at iteration 30, and
+`MANSE_KEYS="Meta+T Meta+J"` runs key bindings by name at iteration 40.
+
 Manse repaints on terminal output, input, exposure, resize, explicit
 invalidation, or a dev-server evaluation or load. It skips painting while
 hidden, minimized, or occluded, while continuing to drain PTY output. Captures
@@ -147,6 +183,7 @@ From `lang/`:
 ./otium --runtime=chez -L . manse/tests/ghostty.ot
 ./otium --runtime=chez -L . manse/tests/pty.ot
 ./otium --runtime=chez -L . manse/tests/apps.ot
+./otium --runtime=chez -L . manse/tests/strip.ot
 ./otium --runtime=chez -L . manse/tests/workspace.ot
 meson test -C build --setup all 'ui demand chez' 'ui demand c'
 ```

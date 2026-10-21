@@ -78,21 +78,22 @@
 
 (def- (%scalar-description t)
   (unless %scalar-descriptions
-    (set! %scalar-descriptions
-          (map (fn (name)
-                 (let ((k (%scalar-id name %scalars 0)))
-                   (list name
-                         k
-                         (if (= k KIND_VOID)
-                             0
-                             (%sizeof k))
-                         (if (= k KIND_VOID)
-                             1
-                             (%alignof k))
-                         '())))
-               %scalars)))
-  (let ((entry (assq t %scalar-descriptions)))
-    (and entry (cdr entry))))
+    (let ((descriptions {}))
+      (for-each (fn (name)
+                  (let ((k (%scalar-id name %scalars 0)))
+                    (put! descriptions
+                          name
+                          (list k
+                                (if (= k KIND_VOID)
+                                    0
+                                    (%sizeof k))
+                                (if (= k KIND_VOID)
+                                    1
+                                    (%alignof k))
+                                '()))))
+                %scalars)
+      (set! %scalar-descriptions descriptions)))
+  (get %scalar-descriptions t))
 
 (def- (%describe t op)
   (cond

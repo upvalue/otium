@@ -85,7 +85,12 @@ not automatically rebuild the tree. The caller controls when to reconcile,
 which makes a short event sequence deterministic and easy to inspect.
 
 `ui/row` and `ui/column` accept `:width`, `:height`, `:grow`, `:padding`,
-`:gap`, `:background` and `:radius`. Width and height default to automatic size.
+`:padding-x`, `:padding-y`, `:gap`, `:align-items`, `:background`, `:border`
+and `:radius`. Width and height default to automatic size. `:padding-x` and
+`:padding-y` override `:padding` on one axis. `:align-items` places children
+across the main axis: `:stretch` (default), `:start`, `:center` or `:end`.
+`:border` paints a one-pixel border in the given colour; without a background
+its corners are square.
 `ui/button` accepts children and `:on-press`. `ui/label` paints its text and
 accepts `:font` (`:ui` or `:mono`), `:size` (1–256 logical pixels), `:color`,
 `:wrap` (default `#t`), `:width`, `:height`, and `:grow`. Font and color are
@@ -145,7 +150,12 @@ handler captures the press. Release activates it through `:press` only when
 it is still mounted and the release hits that node or one of its descendants.
 Release outside, removal, or cancellation prevents activation. Rounded corners
 currently use the widget's rectangular hit region. Captured pointer motion is
-delivered as `:pointer-drag`; text fields use it for selection. Hover is pending.
+delivered as `:pointer-drag`; text fields use it for selection.
+
+Pointer motion marks every node on the hit path as hovered, so a container is
+hovered while the pointer is over its children. Paint methods read
+`(g :hovered?)`. The window refreshes hover after each layout, so content that
+scrolls or changes under a still pointer updates it. `:pointer-leave` clears it.
 
 The native SDL adapter copies button coordinates into scalar values for Otium;
 managed widgets never receive an SDL event pointer. `native/poll-event` returns
@@ -333,8 +343,15 @@ hit testing, translates child bounds by its vertical offset, and shows a scroll
 indicator. `:wheel` events carry logical pointer coordinates and `:dy`; native
 wheel direction is normalized. `ui/scroll-to!` takes a mounted Scroll instance
 and a logical pixel offset, clamping to its current range. Nested scroll views
-pass wheel events outward when the inner view cannot move. Scrollbar dragging,
-horizontal container scrolling and virtualized line storage are deferred.
+pass wheel events outward when the inner view cannot move.
+
+`:axis :x` lays children out in a row and scrolls horizontally. Wheel events
+carry `:dx` as well as `:dy`; a horizontal view uses `:dx`, or `:dy` when `:dx`
+is zero so a plain mouse wheel works. `:reveal` names a child key: after layout
+the view scrolls just far enough to show that child. It does this again only
+when the key, the child's position or size, or the viewport changes, so wheel
+scrolling is not undone. Scrollbar dragging and virtualized line storage are
+deferred.
 
 The checked-in editor and terminal scripts cover native Unicode input,
 submit-then-type in one frame, history, wheel scrolling, draft restoration,

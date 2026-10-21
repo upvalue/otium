@@ -1,0 +1,3 @@
+;; Run from lang/: ./otium --runtime=chez --dev -L . scratch/mock.ot
+(require scratch.shell :as shell)
+(shell/main)

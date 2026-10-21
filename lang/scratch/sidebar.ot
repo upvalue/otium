@@ -1,0 +1,65 @@
+;; Workspaces and their terminals, with jump hints while hinting.
+(ns scratch.sidebar)
+
+(require (otium.ui :as ui))
+(require (scratch.theme :as theme))
+(require (scratch.model :as m))
+(require (scratch.widgets :as w))
+
+(def kind-colors
+  {:shell theme/green :tests theme/yellow :server theme/cyan :notes theme/purple})
+
+(def (terminal-row ws active? terminal)
+  (let ((focused? (and active? (= (terminal :id) (ws :focused))))
+        (label (m/label-of (terminal :id))))
+    (w/item {:key (terminal :id)
+             :height 26
+             :padding-x 10
+             :gap 8
+             :radius 4
+             :background (when focused? theme/selected)
+             :hover theme/hover
+             :on-press (fn () (m/focus-terminal! (terminal :id)))}
+            (ui/row {:width 12})
+            (w/dot (get kind-colors (terminal :kind) theme/muted) 6)
+            (w/text (if focused?
+                        theme/text
+                        theme/muted)
+                    theme/ui-size
+                    (terminal :title))
+            (w/spacer)
+            (when label (w/hint-badge label (m/typed))))))
+
+(def (workspace-section i ws)
+  (let ((active? (= i (m/state :active))))
+    (ui/column {:key (ws :id) :gap 1}
+               (w/item {:height 28
+                        :padding-x 10
+                        :gap 8
+                        :radius 4
+                        :hover theme/hover
+                        :on-press (fn () (m/workspace-select! i))}
+                       (w/dot (if active?
+                                  theme/accent
+                                  theme/faint)
+                              8)
+                       (w/text (if active?
+                                   theme/text
+                                   theme/muted)
+                               theme/ui-size
+                               (ws :name))
+                       (w/spacer)
+                       (w/text theme/faint 11 (str (length (ws :terminals)))))
+               (map (fn (terminal) (terminal-row ws active? terminal)) (ws :terminals)))))
+
+(def (view)
+  (let ((sections [])
+        (all (m/workspaces)))
+    (dotimes (i (length all))
+      (push! sections (workspace-section i (get all i))))
+    (ui/column {:width theme/sidebar-width :background theme/panel :padding-x 6 :padding-y 8 :gap 8}
+               (ui/row {:height 24 :padding-x 8 :align-items :center}
+                       (w/text theme/faint 11 "WORKSPACES")
+                       (w/spacer)
+                       (w/text theme/faint 11 "Cmd+N"))
+               sections)))

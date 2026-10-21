@@ -6,6 +6,9 @@
 (def (step! tree frame context)
   (let ((renderer (get context :renderer)))
     (native/gpu-clear renderer 0x67d9c0ff)
+    (let ((face (native/font-register "native/ui/fonts/JetBrainsMono.ttf")))
+      (when (< face 2) (error (native/text-error)))
+      (sdl/check (native/gpu-text renderer "Custom font λ" face 18 -1 24 24 0xffffffff 0 0 640 480)))
     (if (native/gpu-offscreen? renderer)
         (begin
           (sdl/check (native/gpu-resize renderer 5000 32 1))

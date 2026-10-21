@@ -60,7 +60,7 @@ typedef struct Renderer {
   int event_code;
   char* event_text;
   char* clipboard;
-  float event_dy;
+  float event_dx, event_dy;
   bool text_input;
   bool event_repeat;
   SDL_FColor clear;
@@ -125,6 +125,8 @@ const char* otui_poll_event(Renderer* r) {
     if (event.type == SDL_EVENT_MOUSE_WHEEL && event.wheel.windowID == window_id) {
       r->event_x = event.wheel.mouse_x;
       r->event_y = event.wheel.mouse_y;
+      r->event_dx =
+          event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.x : event.wheel.x;
       r->event_dy =
           event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
       return "wheel";
@@ -146,9 +148,14 @@ const char* otui_poll_event(Renderer* r) {
       if (r->event_width > 0 && r->event_height > 0) return "resize";
       continue;
     }
+    if (event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE && event.window.windowID == window_id)
+      return "pointer-leave";
     if (event.type == SDL_EVENT_QUIT) return "quit";
     if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == window_id)
       return "quit";
+    if (event.type == SDL_EVENT_WINDOW_EXPOSED || event.type == SDL_EVENT_WINDOW_SHOWN ||
+        event.type == SDL_EVENT_WINDOW_RESTORED || event.type == SDL_EVENT_WINDOW_FOCUS_GAINED)
+      return "expose";
     if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST && event.window.windowID == window_id)
       return "focus-lost";
     if ((event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) &&
@@ -187,6 +194,8 @@ int otui_event_code(Renderer* r) { return r->event_code; }
 int otui_event_repeat(Renderer* r) { return r->event_repeat; }
 
 const char* otui_event_text(Renderer* r) { return r->event_text ? r->event_text : ""; }
+
+float otui_event_dx(Renderer* r) { return r->event_dx; }
 
 float otui_event_dy(Renderer* r) { return r->event_dy; }
 

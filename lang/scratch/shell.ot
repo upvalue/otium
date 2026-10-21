@@ -1,0 +1,127 @@
+;; Mock of a Manse window: sidebar, title bar and the terminal strip.
+;; Run from lang/: ./otium --runtime=chez --dev -L . scratch/mock.ot
+(ns scratch.shell)
+
+(require (otium.ui :as ui))
+(require (otium.process :as process))
+(require (scratch.theme :as theme))
+(require (scratch.model :as m))
+(require (scratch.widgets :as w))
+(require (scratch.sidebar :as sidebar))
+(require (scratch.strip :as strip))
+
+(def keys-normal
+  {"Meta+T" :new
+   "Meta+W" :close
+   "Meta+Left" :left
+   "Meta+Right" :right
+   "Meta+Shift+Left" :move-left
+   "Meta+Shift+Right" :move-right
+   "Meta+R" :width
+   "Meta+N" :workspace
+   "Meta+Up" :workspace-up
+   "Meta+Down" :workspace-down
+   "Meta+J" :jump})
+
+(def (keymap)
+  (if (m/hinting?)
+      (let ((map {"Escape" :cancel "Meta+J" :cancel}))
+        (for-each (fn (letter) (put! map letter (list :hint letter))) m/alphabet)
+        map)
+      keys-normal))
+
+(def (action! action)
+  (cond
+    ((pair? action) (m/hint-type! (cadr action)))
+    ((eq? action :cancel) (m/hints-cancel!))
+    ((eq? action :new) (m/terminal-new!))
+    ((eq? action :close) (m/terminal-close!))
+    ((eq? action :left) (m/focus-move! -1))
+    ((eq? action :right) (m/focus-move! 1))
+    ((eq? action :move-left) (m/column-move! -1))
+    ((eq? action :move-right) (m/column-move! 1))
+    ((eq? action :width) (m/width-cycle!))
+    ((eq? action :workspace)
+     (m/workspace-new! (str "workspace " (+ 1 (length (m/workspaces)))) '("zsh" :shell)))
+    ((eq? action :workspace-up) (m/workspace-move! -1))
+    ((eq? action :workspace-down) (m/workspace-move! 1))
+    ((eq? action :jump) (m/hints-start!))
+    (else nil))
+  :handled)
+
+(def (key-hint key what)
+  (ui/row {:gap 5 :align-items :center}
+          (ui/row {:background theme/surface :radius 3 :padding-x 5 :padding-y 1}
+                  (ui/label {:font :mono :size 11 :color theme/muted :wrap #f} key))
+          (w/text theme/faint 11 what)))
+
+(def (titlebar)
+  (let ((ws (m/active)))
+    (ui/row {:height 36 :padding-x 14 :gap 14 :align-items :center :background theme/panel}
+            (w/text theme/text theme/ui-size (if ws (ws :name) "No workspace"))
+            (when ws (w/text theme/faint 12 (str (length (ws :terminals)) " terminals")))
+            (w/spacer)
+            (if (m/hinting?)
+                (ui/row {:gap 14 :align-items :center}
+                        (w/text theme/hint 12 "Type a label to jump")
+                        (key-hint "Esc" "cancel"))
+                (ui/row {:gap 14 :align-items :center}
+                        (key-hint "Cmd+T" "new")
+                        (key-hint "Cmd+Arrows" "focus")
+                        (key-hint "Cmd+R" "width")
+                        (key-hint "Cmd+J" "jump"))))))
+
+(def (view window)
+  (ui/row {:grow 1 :background theme/background :keymap (keymap) :on-action (fn (action) (action! action))}
+          (sidebar/view)
+          (ui/column {:width 1 :background theme/border-variant})
+          ;; A zero base width stops the strip's content from squeezing the sidebar.
+          (ui/column {:width 0 :grow 1}
+                     (titlebar)
+                     (ui/column {:height 1 :background theme/border-variant})
+                     (strip/view (- (window :width) theme/sidebar-width 1)))))
+
+(def (seed!)
+  (m/clear!)
+  (m/workspace-new! "otium" '("lang" :shell) '("tests" :tests) '("notes" :notes))
+  (m/workspace-new! "site" '("server" :server) '("zsh" :shell))
+  (m/workspace-new! "dotfiles" '("zsh" :shell))
+  (m/workspace-select! 0))
+
+(defonce window nil)
+
+;; MOCK_CAPTURE=path renders headless, saves one frame and exits.
+;; MOCK_KEYS="Meta+J A" sends actions first, by key name, separated by spaces.
+(def (scripted! window)
+  (let ((frame (get window :tick 0)))
+    (put! window :tick (+ frame 1))
+    (when (= frame 1)
+      (let ((names (process/getenv "MOCK_KEYS")))
+        (when names
+          (for-each (fn (name)
+                      (let ((action (get (keymap) name)))
+                        (when action (action! action))))
+                    (string-split names " "))))
+      (ui/invalidate! window))
+    (when (= frame 3) (ui/capture! window (process/getenv "MOCK_CAPTURE")))
+    (when (> frame 4) (put! window :quit? #t))))
+
+(def (main)
+  (unless (and window (not (window :closed?)))
+    (when (empty? (m/workspaces)) (seed!))
+    (let ((capture (process/getenv "MOCK_CAPTURE")))
+      (set! window
+            (ui/open {:title "Manse mock"
+                      :width 1280
+                      :height 760
+                      :config "build/ui-config.ot"
+                      :app-name "Manse mock"
+                      :app-id "org.otium.manse-mock"
+                      :background-color theme/background
+                      :render-on-demand? (not capture)
+                      :headless (if capture #t #f)
+                      :scale (if capture 2 0)
+                      :step! (fn (window) (when capture (scripted! window)))
+                      :after-frame! (fn (window) (when (get window :quit?) (ui/close! window)))}))
+      (ui/set-view! window (fn () (view window)))
+      (ui/run))))

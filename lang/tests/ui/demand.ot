@@ -1,0 +1,105 @@
+(require otium.ui :as ui)
+(require otium.ui.window :as window)
+(require otium.ui.native :as native)
+(require otium.ui.gpu :as gpu)
+(require otium.ui.input :as input)
+(require otium.sdl :as sdl)
+(require otium.dev :as dev)
+(require otium.test :refer (check report))
+
+(def flags sdl/WINDOW_INPUT_FOCUS)
+
+(def paints 0)
+
+(def steps 0)
+
+(def afters 0)
+
+(def event nil)
+
+(set! sdl/get-window-flags (fn (_) flags))
+(set! native/poll-event
+      (fn (_)
+        (let ((e event))
+          (set! event nil)
+          e)))
+(set! gpu/layout! (fn _ nil))
+(set! gpu/paint! (fn _ (set! paints (+ paints 1))))
+(set! native/gpu-frame (fn _ #t))
+
+(def w
+  {:tree {}
+   :pointer (input/pointer)
+   :renderer nil
+   :window nil
+   :initialized? #t
+   :view #f
+   :frame 0
+   :capture ""
+   :dirty? #t
+   :options {:render-on-demand? #t
+             :poll-ms 16
+             :background-poll-ms 100
+             :step! (fn (_) (set! steps (+ steps 1)))
+             :after-frame! (fn (_) (set! afters (+ afters 1)))}})
+
+(set! ui/open-windows (list w))
+(window/frame! w)
+(check "first frame paints" 1 paints)
+(dotimes (i 10)
+  (window/frame! w))
+(check "idle skips painting" 1 paints)
+(check "idle still services step" 11 steps)
+(check "idle still services shutdown hook" 11 afters)
+(check "foreground poll interval" 16 (window/wait-ms))
+(ui/invalidate! w)
+(window/frame! w)
+(check "invalidation paints" 2 paints)
+(set! dev/revision (+ dev/revision 1))
+(window/frame! w)
+(check "dev change paints" 3 paints)
+(set! flags sdl/WINDOW_OCCLUDED)
+(ui/invalidate! w)
+(window/frame! w)
+(check "occluded skips painting" 3 paints)
+(check "hidden retains invalidation" #t (w :dirty?))
+(check "background poll interval" 100 (window/wait-ms))
+(ui/capture! w "/tmp/demand.png")
+(window/frame! w)
+(check "capture overrides visibility" 4 paints)
+(set! flags sdl/WINDOW_INPUT_FOCUS)
+(window/frame! w)
+(check "becoming visible paints" 5 paints)
+(set! event {:kind :expose})
+(window/frame! w)
+(check "exposure paints" 6 paints)
+(put! (w :options) :render-on-demand? #f)
+(window/frame! w)
+(window/frame! w)
+(check "default windows paint continuously" 8 paints)
+(put! (w :options) :render-on-demand? #t)
+(ui/invalidate! w)
+(ui/capture! w "/tmp/retry.png")
+
+(def attempts 0)
+
+(def ticks 0)
+
+(def broken? #t)
+
+(set! gpu/paint!
+      (fn _
+        (set! attempts (+ attempts 1))
+        (when broken? (error "broken view"))))
+(set! sdl/wait-event-timeout
+      (fn _
+        (set! ticks (+ ticks 1))
+        (cond
+          ((= ticks 2) (check "failed capture does not spin" 1 attempts) (set! dev/revision (+ dev/revision 1)))
+          ((= ticks 3) (check "dev revision retries failed view" 2 attempts) (set! broken? #f) (ui/invalidate! w))
+          ((= ticks 4) (set! ui/open-windows '())))))
+(window/run)
+(check "repaired view succeeds" 3 attempts)
+(check "successful retry clears error" #f (w :last-error))
+(check "pending capture completes after repair" "" (w :capture))
+(report "ui demand")

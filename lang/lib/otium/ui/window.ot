@@ -60,6 +60,7 @@
                        :scale (native/gpu-scale renderer)
                        :requested-scale scale
                        :options options
+                       :dirty? #t
                        :frame 0
                        :capture ""
                        :closed? #f
@@ -98,6 +99,7 @@
                                         #f))))))
 
 (def- (event! window event)
+  (ui/invalidate! window)
   (let ((kind (get event :kind))
         (tree (get window :tree))
         (renderer (get window :renderer)))
@@ -119,8 +121,15 @@
        (input/keyboard! tree
                         (put (put event :clipboard-read (fn () (native/clipboard-get renderer)))
                              :clipboard-write (fn (text) (sdl/check (native/clipboard-set text))))))
-      ((memq kind '(:pointer-down :pointer-up :pointer-move :wheel))
+      ((memq kind '(:pointer-down :pointer-up :pointer-move :pointer-leave :wheel))
        (input/dispatch! (get window :pointer) tree event)))))
+
+(def (visible? window)
+  (or (get (window :options) :headless)
+      (let ((flags (sdl/get-window-flags (window :window))))
+        (not (or (sdl/flag-set? flags sdl/WINDOW_HIDDEN)
+                 (sdl/flag-set? flags sdl/WINDOW_MINIMIZED)
+                 (sdl/flag-set? flags sdl/WINDOW_OCCLUDED))))))
 
 (def (frame! window)
   (let ((tree (get window :tree))
@@ -137,14 +146,36 @@
           (poll (native/poll-event renderer)))))
     (unless (get window :closed?)
       (when (get options :step!) ((get options :step!) window))
-      (sync! window)
-      (gpu/layout! tree (get window :width) (get window :height) (get window :scale))
-      (gpu/paint! tree renderer (get window :width) (get window :height) (get options :background-color 0x101827ff))
-      (sdl/check (native/gpu-frame renderer (get window :capture)))
-      (set! (window :capture) "")
-      (set! (window :frame) (+ 1 (get window :frame)))
-      (set! (window :last-error) #f)
+      (let ((visible (visible? window)))
+        (when (and visible (not (get window :was-visible?))) (ui/invalidate! window))
+        (put! window :was-visible? visible)
+        (when (or (and (not (equal? (window :capture) ""))
+                       (or (not (window :last-error)) (window :dirty?) (not (equal? (window :revision) dev/revision))))
+                  (not (get options :render-on-demand?))
+                  (and visible (or (window :dirty?) (not (equal? (window :revision) dev/revision)))))
+          (sync! window)
+          (gpu/layout! tree (get window :width) (get window :height) (get window :scale))
+          (input/refresh-hover! (get window :pointer) tree)
+          (gpu/paint! tree renderer (get window :width) (get window :height) (get options :background-color 0x101827ff))
+          (sdl/check (native/gpu-frame renderer (get window :capture)))
+          (put! window :dirty? #f)
+          (put! window :revision dev/revision)
+          (set! (window :capture) "")
+          (set! (window :frame) (+ 1 (get window :frame)))
+          (set! (window :last-error) #f)))
       (when (get options :after-frame!) ((get options :after-frame!) window)))))
+
+(def (wait-ms)
+  (reduce (fn (ms window)
+            (min ms
+                 (get (window :options)
+                      (if (and (visible? window)
+                               (sdl/flag-set? (sdl/get-window-flags (window :window)) sdl/WINDOW_INPUT_FOCUS))
+                          :poll-ms
+                          :background-poll-ms)
+                      16)))
+          100
+          (ui/windows)))
 
 (def (run)
   (unless running?
@@ -161,12 +192,14 @@
                           (catch ((fn (_) #t) c)
                             (when (or (get (get window :options) :fail-fast?) (eq? (condition-type c) 'ui-teardown))
                               (error c))
-                            (let ((key (list dev/revision c)))
+                            (put! window :dirty? #f)
+                            (put! window :revision dev/revision)
+                            (let ((key (list dev/revision (condition-type c) (condition-message c))))
                               (unless (equal? key (get window :last-error))
                                 (set! (window :last-error) key)
                                 (dev/frame-error! c)))))
                         (dev/end!))))
                   (ui/windows))
-        (sdl/delay 16))
+        (when (pair? (ui/windows)) (sdl/wait-event-timeout ffi/null (wait-ms))))
       (set! running? #f)
       (for-each close! (ui/windows)))))

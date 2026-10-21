@@ -3,13 +3,14 @@
 (require manse.pty :as pty)
 
 (def (open! id path args)
-  (let ((term (g/new 80 24)) (success? #f))
+  (let ((term (g/new 80 24))
+        (success? #f))
     (unwind-protect
       (let ((session {:id id :term term :pty (pty/spawn path args 80 24)}))
-        (put! term :on-reply
-              (fn (data len)
-                (unless (or (session :closed?) (session :exit))
-                  (pty/write-pointer! (session :pty) data len))))
+        (put! term
+              :on-reply (fn (data len)
+                          (unless (or (session :closed?) (session :exit))
+                            (pty/write-pointer! (session :pty) data len))))
         (set! success? #t)
         session)
       (unless success? (g/free! term)))))
@@ -17,17 +18,26 @@
 (def (pump! session)
   "Read at most one 64 KiB chunk per turn, including output left after child exit."
   (unless (session :closed?)
-    (let ((p (session :pty)) (term (session :term)))
+    (let ((p (session :pty))
+          (term (session :term))
+          (changed? #f))
       (when (and (not (session :eof?)) (pty/readable? p 0))
         (let ((n (pty/read! p)))
-          (if (> n 0) (g/write-bytes! term (p :buffer) n)
+          (set! changed? #t)
+          (if (> n 0)
+              (g/write-bytes! term (p :buffer) n)
               (put! session :eof? #t))))
-      (g/update! term)
+      (when changed? (g/update! term))
       (unless (session :exit)
         (let ((status (pty/status p)))
-          (when status (put! session :exit status)))))))
+          (when status
+            (put! session :exit status)
+            (set! changed? #t))))
+      changed?)))
 
 (def (close! session)
   (unless (session :closed?)
     (put! session :closed? #t)
-    (unwind-protect (pty/close! (session :pty)) (g/free! (session :term)))))
+    (unwind-protect
+      (pty/close! (session :pty))
+      (g/free! (session :term)))))

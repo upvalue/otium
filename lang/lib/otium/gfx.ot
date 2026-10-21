@@ -7,6 +7,7 @@
   clip
   (focused? :init #f)
   (pressed? :init #f)
+  (hovered? :init #f)
   (disabled? :init #f))
 
 (def (rect g bounds color . radius)
@@ -27,9 +28,15 @@
                                 (clip :height)))))
 
 (def (font-index font)
+  "Resolve :ui, :mono, or a font file path. File registrations last until UI teardown."
   (cond
     ((eq? font :ui) 0)
     ((eq? font :mono) 1)
+    ((string? font)
+     (when (string-contains? font "\x0;") (error "Font path contains NUL"))
+     (let ((face (native/font-register font)))
+       (when (< face 0) (error (native/text-error)))
+       face))
     (else (error "Unknown UI font" font))))
 
 (def (text g bounds string font size color wrap)

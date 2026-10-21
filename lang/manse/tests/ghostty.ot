@@ -7,6 +7,7 @@
 (check #t (string? (get (g/build-info) :version)))
 
 (def t (g/new 10 3))
+
 (g/write! t "Hi \x1b;[31mred\x1b;[0m λ")
 (g/update! t)
 (check '(10 3) (g/size t))
@@ -16,8 +17,14 @@
   (check '(114) (r :codepoints))
   (check '(204 102 102) (r :fg))
   (check nil (r :bg)))
+
 ;; Cursor position report: ESC [ 1 ; 9 R
 (g/write! t "\x1b;[6n")
 (check '(27 91 49 59 57 82) (apply list (t :replies)))
 (g/free! t)
+(check "combining sequence" "é" (g/codepoints->string '(101 769)))
+(check "non-BMP text" "🙂" (g/codepoints->string '(128578)))
+(check "long sequences are not truncated"
+       100
+       (string-length (g/codepoints->string (array-to-list (map (fn (_) 97) (range 100))))))
 (report "ghostty")

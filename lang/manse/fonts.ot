@@ -1,0 +1,90 @@
+(ns manse.fonts)
+(require otium.process :as process)
+(require chez)
+
+(def (expand-home path)
+  (if (string-starts-with? path "~/")
+      (let ((home (process/getenv "HOME")))
+        (unless home (error "HOME is not set; use an absolute font path"))
+        (str home (substring path 1)))
+      path))
+
+(def (search-paths)
+  "Standard macOS and Linux font directories. Missing directories are ignored during discovery."
+  (let ((home (process/getenv "HOME"))
+        (data-home (process/getenv "XDG_DATA_HOME"))
+        (configured-dirs (process/getenv "XDG_DATA_DIRS"))
+        (data-dirs (if (and configured-dirs (> (string-length configured-dirs) 0))
+                       configured-dirs
+                       "/usr/local/share:/usr/share")))
+    (append (if home
+                (list (str home "/Library/Fonts") (str home "/.fonts"))
+                '())
+            (cond
+              ((and data-home (chez/path-absolute? data-home)) (list (str data-home "/fonts")))
+              (home (list (str home "/.local/share/fonts")))
+              (else '()))
+            (list "/Library/Fonts" "/System/Library/Fonts")
+            (map (fn (directory) (str directory "/fonts"))
+                 (filter chez/path-absolute? (array-to-list (string-split data-dirs ":")))))))
+
+(def- (font-file? path)
+  (let ((lower (string-downcase path)))
+    (exists (fn (ext) (string-ends-with? lower ext)) '(".ttf" ".otf" ".ttc" ".otc"))))
+
+(def (discover . roots)
+  "List font files recursively in standard directories, or an explicit list of directories."
+  (let ((found '())
+        (visited {}))
+    (def (walk directory)
+      (unless (get visited directory)
+        (put! visited directory #t)
+        (when (chez/file-directory? directory)
+          (let ((names (try
+                         (chez/directory-list directory)
+                         (catch (error? _) '()))))
+            (for-each (fn (name)
+                        (let ((path (str directory "/" name)))
+                          (cond
+                            ((or (equal? name ".") (equal? name "..")) nil)
+                            ((chez/file-directory? path)
+                             ;; Avoid directory symlink cycles; symlinked font files are allowed.
+                             (unless (chez/file-symbolic-link? path) (walk path)))
+                            ((and (font-file? path) (chez/file-regular? path)) (set! found (cons path found))))))
+                      names)))))
+    (for-each (fn (root)
+                (let ((path (expand-home root)))
+                  (walk (if (chez/path-absolute? path)
+                            path
+                            (str (chez/current-directory) "/" path)))))
+              (if (null? roots)
+                  (search-paths)
+                  (car roots)))
+    (sort found)))
+
+(def (find name . roots)
+  "Find a filename or filename stem, case-insensitively. Returns every matching path."
+  (let ((wanted (string-downcase name)))
+    (filter (fn (path)
+              (let ((base (string-downcase (chez/path-last path))))
+                (or (equal? wanted base) (equal? wanted (substring base 0 (- (string-length base) 4))))))
+            (apply discover roots))))
+
+(def (resolve value . roots)
+  "Resolve #f, an existing path, or an unambiguous installed font filename/stem."
+  (cond
+    ((eq? value #f) #f)
+    ((or (not (string? value)) (= (string-length value) 0) (string-contains? value "\x0;"))
+     (error "Font must be a file path, installed filename, or #f" value))
+    (else (let ((path (expand-home value)))
+            (cond
+              ((chez/file-regular? path)
+               (if (chez/path-absolute? path)
+                   path
+                   (str (chez/current-directory) "/" path)))
+              ((string-contains? path "/") (error "Font file does not exist" path))
+              (else (let ((matches (apply find (cons value roots))))
+                      (cond
+                        ((null? matches) (error "No installed font matches" value))
+                        ((null? (cdr matches)) (car matches))
+                        (else (error "Ambiguous font name; use one of these paths" value matches))))))))))

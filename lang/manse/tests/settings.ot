@@ -1,0 +1,56 @@
+(require manse.settings :as settings)
+(require otium.test :refer (check report))
+
+(check "default font" 14 (settings/options :font-size))
+(settings/load! "/tmp/manse-config-does-not-exist.ot")
+(check "missing config leaves defaults" 14 (settings/options :font-size))
+(settings/configure! {:font-size 18 :padding 0 :terminals 1})
+(check "custom font" 18 (settings/options :font-size))
+(check "zero padding" 0 (settings/options :padding))
+(check "validation rejects before mutation"
+       #t
+       (try
+         (settings/configure! {:font-size 20 :terminals 0})
+         #f
+         (catch (error? _) #t)))
+(check "invalid batch leaves prior values" 18 (settings/options :font-size))
+(check "unknown setting rejected"
+       #t
+       (try
+         (settings/configure! {:unknown 1})
+         #f
+         (catch (error? _) #t)))
+(require manse.settings :reload)
+(check "settings survive reload" 18 (settings/options :font-size))
+(require chez)
+(chez/call-with-output-file "/tmp/manse-config-test.ot"
+                            (fn (port)
+                              (chez/display "(require manse.settings :as settings)\n(settings/configure! {:font-size 16 :width 800})\n"
+                                            port))
+                            'replace)
+(settings/load! "/tmp/manse-config-test.ot")
+(check "config evaluated" 16 (settings/options :font-size))
+(check "config updates width" 800 (settings/options :width))
+(check "default font path" #f (settings/options :font-path))
+(settings/configure! {:font-path "/tmp/manse-config-test.ot"})
+(check "path setting retained" "/tmp/manse-config-test.ot" (settings/options :font-path))
+(check "missing font rejected"
+       #t
+       (try
+         (settings/configure! {:font-size 22 :font-path "/missing/font.ttf"})
+         #f
+         (catch (error? _) #t)))
+(check "bad path leaves size unchanged" 16 (settings/options :font-size))
+(require otium.process :as process)
+(let ((home (process/getenv "HOME")))
+  (unwind-protect
+    (begin
+      (process/setenv! "HOME" "/tmp")
+      (settings/configure! {:font-path "~/manse-config-test.ot"})
+      (check "home-relative font expanded" "/tmp/manse-config-test.ot" (settings/options :font-path)))
+    (process/setenv! "HOME" home)))
+(check "empty font path rejected" #t
+       (try (settings/configure! {:font-path ""}) #f (catch (error? _) #t)))
+(settings/configure! {:font-path #f})
+(check "font reset" #f (settings/options :font-path))
+(report "manse settings")

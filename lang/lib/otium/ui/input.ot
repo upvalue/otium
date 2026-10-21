@@ -1,7 +1,11 @@
 (ns otium.ui.input)
 (require (otium.ui :as ui))
 
-(defclass Pointer (captured :init nil))
+(defclass Pointer
+  (captured :init nil)
+  (hovered :init '())
+  (x :init nil)
+  (y :init nil))
 
 (def (pointer)
   (make Pointer))
@@ -32,6 +36,15 @@
     ((eq? (ui/send! (car path) event) :handled) (car path))
     (else (bubble! (cdr path) event))))
 
+(def (refresh-hover! pointer tree)
+  "Mark the nodes under the last pointer position as hovered, deepest first."
+  (let ((path (if (nil? (pointer :x))
+                  '()
+                  (hit-path tree (pointer :x) (pointer :y)))))
+    (for-each (fn (node) (set! (node :hovered?) #f)) (pointer :hovered))
+    (for-each (fn (node) (set! (node :hovered?) #t)) path)
+    (set! (pointer :hovered) path)))
+
 (def (cancel! pointer)
   (let ((node (pointer :captured)))
     (set! (pointer :captured) nil)
@@ -44,7 +57,11 @@
     (cond
       ((eq? kind :pointer-cancel) (cancel! pointer))
       ((eq? kind :wheel) (bubble! (hit-path tree (get event :x) (get event :y)) event))
+      ((eq? kind :pointer-leave) (set! (pointer :x) nil) (set! (pointer :y) nil) (refresh-hover! pointer tree))
       ((memq kind '(:pointer-move :pointer-drag))
+       (set! (pointer :x) (get event :x))
+       (set! (pointer :y) (get event :y))
+       (refresh-hover! pointer tree)
        (let ((node (pointer :captured)))
          (when (and node (ui/enabled? node) (node :pressed?)) (ui/send! node (put event :kind :pointer-drag)))))
       ((eq? kind :pointer-down)

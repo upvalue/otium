@@ -21,6 +21,10 @@ Read AGENT-LANG.md before writing Otium code.
   when something can be done in Otium over using escape hatches to the runtime,
   it should be.
 
+# Manse
+
+Manse is a development environment written in Otium and powered by Ghostty.
+
 # GC Development
 
 When changing C code around allocation, roots, or managed object pointers, run

@@ -375,42 +375,8 @@
                  (push! (get rows y) (cell term))))
     rows))
 
-;; Codepoints to strings. Otium has no char type yet (specs/io.md), so encode
-;; UTF-8 into native memory and read it back. Cached per codepoint sequence.
-(defonce text-cache {})
-
-(defonce utf8-scratch nil)
-
-(def- (encode! p i cp)
-  "Write cp as UTF-8 at byte i of p and return the next index."
-  (let ((byte! (fn (k v) (ffi/set! p 'u8 (+ i k) v))))
-    (cond
-      ((< cp 128) (byte! 0 cp) (+ i 1))
-      ((< cp 2048)
-       (byte! 0 (+ 192 (quotient cp 64)))
-       (byte! 1 (+ 128 (modulo cp 64)))
-       (+ i 2))
-      ((< cp 65536)
-       (byte! 0 (+ 224 (quotient cp 4096)))
-       (byte! 1 (+ 128 (modulo (quotient cp 64) 64)))
-       (byte! 2 (+ 128 (modulo cp 64)))
-       (+ i 3))
-      (else
-       (byte! 0 (+ 240 (quotient cp 262144)))
-       (byte! 1 (+ 128 (modulo (quotient cp 4096) 64)))
-       (byte! 2 (+ 128 (modulo (quotient cp 64) 64)))
-       (byte! 3 (+ 128 (modulo cp 64)))
-       (+ i 4)))))
-
 (def (codepoints->string cps)
-  (or (get text-cache cps)
-      (begin
-        (unless utf8-scratch (set! utf8-scratch (ffi/alloc 'u8 (* 4 64))))
-        (let ((end (reduce (fn (i cp) (encode! utf8-scratch i cp)) 0 (take 63 cps))))
-          (ffi/set! utf8-scratch 'u8 end 0)
-          (let ((s (ffi/read-utf8 utf8-scratch (+ end 1))))
-            (put! text-cache cps s)
-            s)))))
+  (list->string (map integer->char cps)))
 
 (def (text term)
   "The viewport as a list of row strings, with a space for each empty cell."

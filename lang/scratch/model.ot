@@ -1,0 +1,180 @@
+;; Workspaces, their terminals, focus and jump hints. No UI dependencies.
+(ns scratch.model)
+
+(def widths
+  "Column widths as fractions of the strip, cycled by width-cycle!."
+  [0.3333 0.5 0.6667 1.0])
+
+(def alphabet
+  "Hint letters, home row first, as SDL key names."
+  ["A" "S" "D" "F" "J" "K" "L" "G" "H" "Q" "W" "E" "R" "U" "I" "O" "P"])
+
+(defonce state {:workspaces [] :active 0 :next-id 1 :hinting #f :typed "" :labels {}})
+
+(def (clear!)
+  (put! state :workspaces [])
+  (put! state :active 0)
+  (put! state :next-id 1)
+  (hints-cancel!))
+
+(def- (insert seq i x)
+  (concat (take i seq) [x] (drop i seq)))
+
+(def- (remove-at seq i)
+  (concat (take i seq) (drop (+ i 1) seq)))
+
+(def- (index-where pred seq)
+  (let loop ((i 0))
+    (cond
+      ((>= i (length seq)) nil)
+      ((pred (get seq i)) i)
+      (else (loop (+ i 1))))))
+
+(def (workspaces)
+  (state :workspaces))
+
+(def (active)
+  (get (state :workspaces) (state :active)))
+
+(def (terminal-index ws id)
+  (index-where (fn (t) (= (t :id) id)) (ws :terminals)))
+
+(def (focused-index)
+  (let ((ws (active)))
+    (and ws (ws :focused) (terminal-index ws (ws :focused)))))
+
+(def (focused)
+  (let ((i (focused-index)))
+    (and i (get ((active) :terminals) i))))
+
+(def (width-of terminal)
+  (get widths (terminal :width)))
+
+(def- (next-id!)
+  (let ((id (state :next-id)))
+    (put! state :next-id (+ id 1))
+    id))
+
+(def (new-terminal title kind)
+  {:id (next-id!) :title title :kind kind :width 1})
+
+(def (workspace-new! name . terminals)
+  "Add a workspace after the active one with the given (title kind) pairs, and switch to it."
+  (let ((ws {:id (next-id!)
+             :name name
+             :terminals (list-to-array (map (fn (spec) (new-terminal (car spec) (cadr spec))) terminals))
+             :focused nil})
+        (at (if (empty? (state :workspaces))
+                0
+                (+ (state :active) 1))))
+    (unless (empty? (ws :terminals)) (put! ws :focused ((get (ws :terminals) 0) :id)))
+    (put! state :workspaces (insert (state :workspaces) at ws))
+    (put! state :active at)
+    ws))
+
+(def (terminal-new! . spec)
+  "Open a terminal to the right of the focused one and focus it."
+  (let ((ws (active)))
+    (when ws
+      (let ((terminal (new-terminal (if (null? spec)
+                                        "zsh"
+                                        (car spec))
+                                    :shell))
+            (i (focused-index)))
+        (put! ws :terminals (insert (ws :terminals) (if i (+ i 1) (length (ws :terminals))) terminal))
+        (put! ws :focused (terminal :id))
+        terminal))))
+
+(def (terminal-close!)
+  (let ((ws (active))
+        (i (focused-index)))
+    (when i
+      (put! ws :terminals (remove-at (ws :terminals) i))
+      (put! ws
+            :focused
+            (if (empty? (ws :terminals))
+                nil
+                ((get (ws :terminals) (min i (- (length (ws :terminals)) 1))) :id))))))
+
+(def (focus-move! delta)
+  (let ((ws (active))
+        (i (focused-index)))
+    (when i
+      (put! ws :focused ((get (ws :terminals) (max 0 (min (- (length (ws :terminals)) 1) (+ i delta)))) :id)))))
+
+(def (column-move! delta)
+  (let ((ws (active))
+        (i (focused-index)))
+    (when i
+      (let ((j (max 0 (min (- (length (ws :terminals)) 1) (+ i delta))))
+            (terminals (copy (ws :terminals)))
+            (moving (get terminals i)))
+        (put! terminals i (get terminals j))
+        (put! terminals j moving)
+        (put! ws :terminals terminals)))))
+
+(def (width-cycle!)
+  (let ((terminal (focused)))
+    (when terminal (put! terminal :width (modulo (+ (terminal :width) 1) (length widths))))))
+
+(def (workspace-move! delta)
+  (unless (empty? (state :workspaces))
+    (put! state :active (max 0 (min (- (length (state :workspaces)) 1) (+ (state :active) delta))))))
+
+(def (workspace-select! i)
+  (when (< -1 i (length (state :workspaces))) (put! state :active i)))
+
+(def (focus-terminal! id)
+  "Switch to the workspace holding terminal id and focus it."
+  (let ((w (index-where (fn (ws) (terminal-index ws id)) (state :workspaces))))
+    (when w
+      (put! state :active w)
+      (put! (active) :focused id))))
+
+;; Vimium-style hints: every terminal gets a label while hinting. Labels have
+;; equal length, so none is a prefix of another.
+
+(def (hint-labels n)
+  (if (<= n (length alphabet))
+      (take n alphabet)
+      (let ((out []))
+        (for-each (fn (a) (for-each (fn (b) (push! out (str a b))) alphabet)) alphabet)
+        (take n out))))
+
+(def (hints-start!)
+  (let ((ids []))
+    (for-each (fn (ws) (for-each (fn (t) (push! ids (t :id))) (ws :terminals))) (state :workspaces))
+    (let ((labels {})
+          (names (hint-labels (length ids))))
+      (dotimes (i (length ids))
+        (put! labels (get ids i) (get names i)))
+      (put! state :labels labels)
+      (put! state :typed "")
+      (put! state :hinting (not (empty? ids))))))
+
+(def (hints-cancel!)
+  (put! state :hinting #f)
+  (put! state :typed "")
+  (put! state :labels {}))
+
+(def (hinting?)
+  (state :hinting))
+
+(def (typed)
+  (state :typed))
+
+(def (label-of id)
+  "The hint label for terminal id while hinting and still matching the typed prefix, else nil."
+  (let ((label (get (state :labels) id)))
+    (when (and (state :hinting) label (string-starts-with? label (state :typed))) label)))
+
+(def (hint-type! letter)
+  "Narrow the hints by one letter. Jumps on an exact match and cancels when nothing matches."
+  (let ((typed (str (state :typed) letter))
+        (matches (filter (fn (id) (string-starts-with? ((state :labels) id) typed)) (keys (state :labels)))))
+    (cond
+      ((empty? matches) (hints-cancel!))
+      ((and (= (length matches) 1) (equal? ((state :labels) (get matches 0)) typed))
+       (hints-cancel!)
+       (focus-terminal! (get matches 0)))
+      (else (put! state :typed typed)))))

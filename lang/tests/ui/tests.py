@@ -7,6 +7,7 @@ import ui_capture as runner
 
 defaults(suite='native', needs=['ui'])
 
+case('ui demand', 'tests/ui/demand.ot')
 case('ui application', 'tests/ui/application.ot', needs=['ffi'])
 case('ui layout', 'tests/ui/layout.ot', paths=['examples'], timeout=90)
 

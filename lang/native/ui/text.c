@@ -17,12 +17,14 @@ static struct {
   int width;
 } runs[128];
 
+static char* font_paths[32];
+static int path_count;
 static int font_count;
 static bool initialized;
 static TTF_TextEngine engine;
 
 int otui_text_resources(void) {
-  int count = font_count;
+  int count = font_count + path_count;
   for (int i = 0; i < 128; ++i)
     if (runs[i].text) ++count;
   return count;
@@ -41,6 +43,38 @@ static void destroy_text(void* userdata, TTF_Text* text) {
   text->internal->engine_text = NULL;
 }
 
+static bool init_text(void) {
+  if (initialized) return true;
+  if (!TTF_Init()) return false;
+  initialized = true;
+  SDL_INIT_INTERFACE(&engine);
+  engine.CreateText = create_text;
+  engine.DestroyText = destroy_text;
+  return true;
+}
+
+int otui_font_register(const char* path) {
+  if (!path || !*path) {
+    SDL_SetError("Font path must not be empty");
+    return -1;
+  }
+  for (int i = 0; i < path_count; ++i)
+    if (strcmp(font_paths[i], path) == 0) return i + 2;
+  if (path_count == 32) {
+    SDL_SetError("UI font file limit reached (32)");
+    return -1;
+  }
+  if (!init_text()) return -1;
+  // Validate before publishing an ID. Failed loads consume no registry slots.
+  TTF_Font* probe = TTF_OpenFont(path, 14);
+  if (!probe) return -1;
+  TTF_CloseFont(probe);
+  char* copy = SDL_strdup(path);
+  if (!copy) return -1;
+  font_paths[path_count++] = copy;
+  return path_count + 1;
+}
+
 void otui_text_clear(void) {
   for (int i = 0; i < 128; ++i) {
     if (runs[i].text) TTF_DestroyText(runs[i].text);
@@ -48,25 +82,22 @@ void otui_text_clear(void) {
   }
   for (int i = 0; i < font_count; ++i) TTF_CloseFont(fonts[i].font);
   font_count = 0;
+  for (int i = 0; i < path_count; ++i) SDL_free(font_paths[i]);
+  memset(font_paths, 0, sizeof(font_paths));
+  path_count = 0;
   if (initialized) TTF_Quit();
   initialized = false;
 }
 
 TTF_Text* otui_text_get(const char* string, int face, float size, float width, float scale) {
-  if (!string || face < 0 || face > 1 || !isfinite(size) || size < 1 || size > 256 ||
+  if (!string || face < 0 || face >= path_count + 2 || !isfinite(size) || size < 1 || size > 256 ||
       !isfinite(width) || width > 1048576 || !isfinite(scale) || scale < 1 || scale > 4) {
     SDL_SetError("Invalid UI text options");
     return NULL;
   }
   size *= scale;
   if (width >= 0) width *= scale;
-  if (!initialized) {
-    if (!TTF_Init()) return NULL;
-    initialized = true;
-    SDL_INIT_INTERFACE(&engine);
-    engine.CreateText = create_text;
-    engine.DestroyText = destroy_text;
-  }
+  if (!init_text()) return NULL;
   TTF_Font* font = NULL;
   for (int i = 0; i < font_count; ++i)
     if (fonts[i].face == face && fonts[i].size == size) font = fonts[i].font;
@@ -75,8 +106,10 @@ TTF_Text* otui_text_get(const char* string, int face, float size, float width, f
       SDL_SetError("UI font size limit reached (64)");
       return NULL;
     }
-    font = TTF_OpenFont(face ? OTUI_FONT_DIR "/JetBrainsMono.ttf" : OTUI_FONT_DIR "/NotoSans.ttf",
-                        size);
+    const char* path = face >= 2 ? font_paths[face - 2]
+                       : face    ? OTUI_FONT_DIR "/JetBrainsMono.ttf"
+                                 : OTUI_FONT_DIR "/NotoSans.ttf";
+    font = TTF_OpenFont(path, size);
     if (!font) return NULL;
     fonts[font_count].font = font;
     fonts[font_count].face = face;

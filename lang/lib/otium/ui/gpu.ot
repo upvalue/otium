@@ -60,6 +60,18 @@
                                      1
                                      0))
         (error "Invalid widget layout style"))
+      (unless (native/node-padding p
+                                   (or (get s :padding-x) (get s :padding 0))
+                                   (or (get s :padding-y) (get s :padding 0)))
+        (error "Invalid widget padding"))
+      (native/node-align p
+                         (let ((align (get s :align-items :stretch)))
+                           (cond
+                             ((eq? align :stretch) 0)
+                             ((eq? align :start) 1)
+                             ((eq? align :center) 2)
+                             ((eq? align :end) 3)
+                             (else (error "Unknown :align-items" align)))))
       (native/node-center p (get s :center #f))
       (native/node-scroll p (get s :scroll #f)))
     (if (empty? (ui/children node))
@@ -111,22 +123,51 @@
                 :width (native/node-bounds p native/BOUNDS_WIDTH)
                 :height (native/node-bounds p native/BOUNDS_HEIGHT)))
     (let ((w (ui/instance node))
+          (x? #f)
           (offset 0))
       (when (eq? (dispatch-type w) ui/Scroll)
-        (let ((bottom 0))
+        (set! x? (eq? (w :axis) :x))
+        (let ((start (if x?
+                         native/BOUNDS_X
+                         native/BOUNDS_Y))
+              (span (if x?
+                        native/BOUNDS_WIDTH
+                        native/BOUNDS_HEIGHT))
+              (viewport (native/node-bounds p span))
+              (extent 0))
           (for-each (fn (child)
-                      (set! bottom
-                            (max bottom
-                                 (+ (native/node-bounds (child :layout) native/BOUNDS_Y)
-                                    (native/node-bounds (child :layout) native/BOUNDS_HEIGHT)))))
+                      (set! extent
+                            (max extent
+                                 (+ (native/node-bounds (child :layout) start)
+                                    (native/node-bounds (child :layout) span)))))
                     (ui/children node))
-          (set! (w :limit) (max 0 (- (+ bottom (w :padding)) (native/node-bounds p native/BOUNDS_HEIGHT))))
+          (set! (w :limit) (max 0 (- (+ extent (w :padding)) viewport)))
           (set! (w :offset)
                 (if (and (w :stick-to-bottom) (w :following?))
                     (w :limit)
                     (min (w :offset) (w :limit))))
+          (reveal! w (ui/children node) start span viewport)
           (set! offset (w :offset))))
-      (for-each (fn (child) (save-bounds! child left (- top offset))) (ui/children node)))))
+      (for-each (fn (child)
+                  (if x?
+                      (save-bounds! child (- left offset) top)
+                      (save-bounds! child left (- top offset))))
+                (ui/children node)))))
+
+(def- (reveal! w children start span viewport)
+  ;; Scroll just far enough to show the :reveal child, once per change of its
+  ;; key, position or the viewport, so wheel scrolling is not undone.
+  (let ((target (and (w :reveal) (find (fn (child) (equal? (child :key) (w :reveal))) children))))
+    (when target
+      (let ((s (native/node-bounds (target :layout) start))
+            (e (+ s (native/node-bounds (target :layout) span)))
+            (seen (list (w :reveal) s e viewport)))
+        (unless (equal? seen (w :revealed))
+          (set! (w :revealed) seen)
+          (cond
+            ((< s (+ (w :offset) (w :padding))) (ui/scroll-to! w (- s (w :padding))))
+            ((> e (- (+ (w :offset) viewport) (w :padding))) (ui/scroll-to! w (+ (- e viewport) (w :padding))))
+            (else nil)))))))
 
 (def (layout! tree width height . pixel-scale)
   "Measure leaves using Yoga constraints, replaying until every query is answered."
@@ -180,6 +221,7 @@
                       :clip clip
                       :focused? (node :focused?)
                       :pressed? (node :pressed?)
+                      :hovered? (node :hovered?)
                       :disabled? (not (ui/enabled? node)))
                 (node :bounds))
       (for-each (fn (child) (paint-node! child renderer clip)) (ui/children node)))))
@@ -189,11 +231,31 @@
   (let ((clip (make ui/Bounds :x 0 :y 0 :width width :height height)))
     (for-each (fn (node) (paint-node! node renderer clip)) (ui/children tree))))
 
+(def- (paint-box w g bounds)
+  (let ((border (w :border))
+        (radius (w :radius)))
+    (cond
+      ((and border (w :background))
+       (gfx/rect g bounds border radius)
+       (gfx/rect g (inset bounds 1 1) (w :background) (max 0 (- radius 1))))
+      (border
+        ;; Without a fill, draw the four edges; corners stay square.
+        (let ((x (bounds :x))
+              (y (bounds :y))
+              (width (bounds :width))
+              (height (bounds :height)))
+          (gfx/rect g (make ui/Bounds :x x :y y :width width :height 1) border)
+          (gfx/rect g (make ui/Bounds :x x :y (- (+ y height) 1) :width width :height 1) border)
+          (gfx/rect g (make ui/Bounds :x x :y y :width 1 :height height) border)
+          (gfx/rect g (make ui/Bounds :x (- (+ x width) 1) :y y :width 1 :height height) border)))
+      ((w :background) (gfx/rect g bounds (w :background) radius))
+      (else nil))))
+
 (defmethod (ui/paint (w ui/Column) g bounds)
-  (when (w :background) (gfx/rect g bounds (w :background) (w :radius))))
+  (paint-box w g bounds))
 
 (defmethod (ui/paint (w ui/Row) g bounds)
-  (when (w :background) (gfx/rect g bounds (w :background) (w :radius))))
+  (paint-box w g bounds))
 
 (defmethod (ui/layout-style (w ui/Label))
   {:width (w :width) :height (w :height) :grow (w :grow)})
@@ -247,15 +309,25 @@
 (defmethod (ui/paint (w ui/Scroll) g bounds)
   (when (w :background) (gfx/rect g bounds (w :background) 0))
   (when (> (w :limit) 0)
-    (let ((height (max 16 (/ (* (bounds :height) (bounds :height)) (+ (bounds :height) (w :limit))))))
-      (gfx/rect g
-                (make ui/Bounds
-                      :x (- (+ (bounds :x) (bounds :width)) 5)
-                      :y (+ (bounds :y) (* (/ (w :offset) (w :limit)) (- (bounds :height) height)))
-                      :width 3
-                      :height height)
-                0x71849fff
-                1))))
+    (if (eq? (w :axis) :x)
+        (let ((width (max 16 (/ (* (bounds :width) (bounds :width)) (+ (bounds :width) (w :limit))))))
+          (gfx/rect g
+                    (make ui/Bounds
+                          :x (+ (bounds :x) (* (/ (w :offset) (w :limit)) (- (bounds :width) width)))
+                          :y (- (+ (bounds :y) (bounds :height)) 5)
+                          :width width
+                          :height 3)
+                    0x71849fff
+                    1))
+        (let ((height (max 16 (/ (* (bounds :height) (bounds :height)) (+ (bounds :height) (w :limit))))))
+          (gfx/rect g
+                    (make ui/Bounds
+                          :x (- (+ (bounds :x) (bounds :width)) 5)
+                          :y (+ (bounds :y) (* (/ (w :offset) (w :limit)) (- (bounds :height) height)))
+                          :width 3
+                          :height height)
+                    0x71849fff
+                    1)))))
 
 (def (caret-positions text font size scale)
   "Return codepoint caret coordinates from one shaped, unwrapped line."

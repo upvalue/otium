@@ -136,6 +136,16 @@
           (loop (+ n 1))))
     (ffi/free! p)))
 
+(def (write-bytes! pty bytes)
+  "Write a list of byte values."
+  (let ((p (ffi/alloc 'u8 (max 1 (length bytes)))))
+    (let loop ((i 0) (rest bytes))
+      (unless (null? rest)
+        (ffi/set! p 'u8 i (car rest))
+        (loop (+ i 1) (cdr rest))))
+    (check! "write" (%write (pty :fd) p (length bytes)))
+    (ffi/free! p)))
+
 (def (status pty)
   "nil while the child runs, then {:exit code} or {:signal number}."
   (let ((s (ffi/alloc 'i32 1)))

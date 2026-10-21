@@ -949,6 +949,13 @@
 (defmethod (close (port Port) outcome)
   (close-port port))
 
+(def (with-output-to-string f)
+  "Call f with a fresh current output port and return the captured string."
+  (with ((port (open-output-string)))
+        (with-params ((current-output-port port))
+          (f)
+          (get-output-string port))))
+
 (def- (%port-space port)
   (skip-while " \t\r\n\x0b;\x0c;" port)
   (when (eq? (peek-char port) #\;)

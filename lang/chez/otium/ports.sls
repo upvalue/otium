@@ -308,13 +308,13 @@
       
       
       
-      
-      
-      
-      
-      
-      
-      
+      (cons 'display (lambda objects (print-to (current-output) objects #t #f)))
+      (cons 'print (lambda objects (print-to (current-output) objects #t #f)))
+      (cons 'write (lambda objects (print-to (current-output) objects #f #f)))
+      (cons 'println (lambda objects (print-to (current-output) objects #t #t)))
+      (cons 'newline (lambda rest (print-to (optional-port rest current-output 'newline) '() #t #t)))
+      (cons 'display-to (lambda (p . objects) (print-to p objects #t #f)))
+      (cons 'write-to (lambda (p . objects) (print-to p objects #f #f)))
       (cons 'port? v:port-value?)
       (cons 'input-port? (lambda (p) (and (v:port-value? p) (v:port-value-input? p))))
       (cons 'output-port? (lambda (p) (and (v:port-value? p) (not (v:port-value-input? p)))))

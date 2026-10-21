@@ -6454,13 +6454,11 @@ static otv nat_buffer_string(ots* state, otv* args, int argc) {
   return make_string_slice(state, args[0], 0, buffer->length);
 }
 
+static otv port_output(ots*, otv, otv*, int, bool, bool);
+static otv port_current(ots*, bool);
+
 static otv nat_output(ots* state, otv* args, int argc, bool display, bool newline) {
-  for (int i = 0; i < argc; i++) {
-    if (i != 0) state->writer(state->writer_userdata, " ", 1);
-    ot_repr_to(state, args[i], display, state->writer, state->writer_userdata);
-  }
-  if (newline) state->writer(state->writer_userdata, "\n", 1);
-  return ot_nil;
+  return port_output(state, port_current(state, false), args, argc, display, newline);
 }
 
 static otv nat_display(ots* state, otv* args, int argc) {
@@ -6476,10 +6474,8 @@ static otv nat_println(ots* state, otv* args, int argc) {
 }
 
 static otv nat_newline(ots* state, otv* args, int argc) {
-  (void)args;
-  if (need_arity(state, "newline", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
-  state->writer(state->writer_userdata, "\n", 1);
-  return ot_nil;
+  if (need_arity(state, "newline", argc, 0, 1) == OT_UNWIND) return OT_UNWIND;
+  return port_output(state, argc ? args[0] : port_current(state, false), NULL, 0, true, true);
 }
 
 static otv nat_apply(ots* state, otv* args, int argc) {

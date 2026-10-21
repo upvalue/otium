@@ -287,7 +287,7 @@
     ]
   },
   "display": {
-    "text": "(display value ...)\nWrite display representations to the host output sink, separated by spaces, without a newline. Return nil.",
+    "text": "(display value ...)\nWrite display representations to the current output port sink, separated by spaces, without a newline. Return nil. Writes to current-output-port.",
     "runtimes": [
       "c",
       "chez"
@@ -637,7 +637,7 @@
     ]
   },
   "newline": {
-    "text": "(newline)\nWrite a newline to the host output sink and return nil.",
+    "text": "(newline [port])\nWrite a newline to port, defaulting to current-output-port, and return nil.",
     "runtimes": [
       "c",
       "chez"
@@ -716,14 +716,14 @@
     ]
   },
   "print": {
-    "text": "(print value ...)\nWrite display representations to the host output sink, separated by spaces, without a newline. Return nil.",
+    "text": "(print value ...)\nWrite display representations to the current output port sink, separated by spaces, without a newline. Return nil. Writes to current-output-port.",
     "runtimes": [
       "c",
       "chez"
     ]
   },
   "println": {
-    "text": "(println value ...)\nWrite display representations to the host output sink, separated by spaces, followed by a newline. Return nil.",
+    "text": "(println value ...)\nWrite display representations to the current output port sink, separated by spaces, followed by a newline. Return nil. Writes to current-output-port.",
     "runtimes": [
       "c",
       "chez"
@@ -1093,7 +1093,7 @@
     ]
   },
   "write": {
-    "text": "(write value ...)\nWrite readable representations to the host output sink, separated by spaces, without a newline. Return nil.",
+    "text": "(write value ...)\nWrite readable representations to the current output port sink, separated by spaces, without a newline. Return nil. Writes to current-output-port.",
     "runtimes": [
       "c",
       "chez"
@@ -1711,6 +1711,20 @@
   },
   "flush-output-port": {
     "text": "(flush-output-port [port])\nWrite buffered bytes to the sink and invoke its flush callback.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "display-to": {
+    "text": "(display-to port value ...)\nWrite display forms separated by spaces to port and return nil.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "write-to": {
+    "text": "(write-to port value ...)\nWrite readable forms separated by spaces to port and return nil.",
     "runtimes": [
       "c",
       "chez"

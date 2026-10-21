@@ -236,6 +236,34 @@ static otv port_write_bytes(ots* s, otv value, otv bytes, size_t start, size_t e
   return ot_nil;
 }
 
+static otv port_output(ots* s, otv p, otv* args, int argc, bool display, bool newline) {
+  OT_FRAME_SCOPED(s, &p);
+  buf text = {0};
+  for (int i = 0; i < argc; i++) {
+    if (i) buf_byte(&text, ' ');
+    render_value(s, &text, args[i], display, 0);
+  }
+  if (newline) buf_byte(&text, '\n');
+  if (text.failed) {
+    buf_free(&text);
+    return ot_raise(s, "output: out of memory");
+  }
+  otv bytes = make_bytevector(s, text.length);
+  memcpy(as_bytevector(bytes)->data, text.data, text.length);
+  buf_free(&text);
+  return port_write_bytes(s, p, bytes, 0, as_bytevector(bytes)->length);
+}
+
+static otv n_display_to(ots* s, otv* a, int n) {
+  if (n < 1) return ot_raise(s, "display-to: expected port");
+  return port_output(s, a[0], a + 1, n - 1, true, false);
+}
+
+static otv n_write_to(ots* s, otv* a, int n) {
+  if (n < 1) return ot_raise(s, "write-to: expected port");
+  return port_output(s, a[0], a + 1, n - 1, false, false);
+}
+
 static otv n_port_p(ots* s, otv* a, int n) {
   if (need_arity(s, "port?", n, 1, 1) == OT_UNWIND) return OT_UNWIND;
   return (is_type(a[0], OBJ_PORT) ? ot_true : ot_false);
@@ -630,6 +658,8 @@ bool ot_flush_ports(ots* s) {
 
 static const nat_def port_natives[] = {
 
+    {"display-to", n_display_to},
+    {"write-to", n_write_to},
     {"port?", n_port_p},
     {"input-port?", n_input_p},
     {"output-port?", n_output_p},

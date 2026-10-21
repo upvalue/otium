@@ -28,7 +28,7 @@
 (set! native/gpu-frame (fn _ #t))
 
 (def w
-  {:tree {}
+  {:tree (ui/root)
    :pointer (input/pointer)
    :renderer nil
    :window nil

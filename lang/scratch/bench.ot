@@ -38,7 +38,10 @@
 ;; Full frames, one phase at a time, focusing left and right every frame.
 (dotimes (i frames)
   (m/focus-move! (if (even? (quotient i 2)) 1 -1))
-  (timed! :reconcile (fn () (ui/reconcile! (w :tree) (shell/view w))))
+  (timed! :reconcile
+          (fn ()
+            (ui/reconcile! (w :tree) (shell/view w))
+            (gpu/invalidate-paint! (w :tree))))
   (timed! :layout (fn () (gpu/layout! (w :tree) (w :width) (w :height) (w :scale))))
   (timed! :paint (fn () (gpu/paint! (w :tree) (w :renderer) (w :width) (w :height) 0x282c33ff)))
   (timed! :submit (fn () (native/gpu-frame (w :renderer) ""))))
@@ -59,6 +62,7 @@
 (def (start-move! i)
   (m/focus-move! (if (even? i) 2 -2))
   (ui/reconcile! (w :tree) (shell/view w))
+  (gpu/invalidate-paint! (w :tree))
   (gpu/layout! (w :tree) (w :width) (w :height) (w :scale)))
 
 (def moves 0)
@@ -86,5 +90,48 @@
          "paint" (ms (animation :paint))
          "submit" (ms (animation :submit))
          "moves" moves)
+
+;; Resize frames: widen or narrow the focused column (one untimed full frame),
+;; then time size steps, Yoga, the scroll that follows, and paint.
+(def resize {:step 0 :layout 0 :animate 0 :paint 0})
+
+(def resizes 0)
+
+(def (start-resize!)
+  (set! resizes (+ resizes 1))
+  (m/width-step! (if (odd? (quotient resizes 2)) -1 1))
+  (ui/reconcile! (w :tree) (shell/view w))
+  (gpu/invalidate-paint! (w :tree))
+  (gpu/layout! (w :tree) (w :width) (w :height) (w :scale)))
+
+(start-resize!)
+
+(dotimes (i frames)
+  (unless (or (gpu/resizing? (w :tree)) (gpu/animating? (w :tree))) (start-resize!))
+  (set! clock (+ clock (/ 1 120.0)))
+  (let ((t0 (now)))
+    (gpu/step-sizes! (w :tree) clock)
+    (let ((t1 (now)))
+      (gpu/layout! (w :tree) (w :width) (w :height) (w :scale))
+      (let ((t2 (now)))
+        (when (gpu/animating? (w :tree)) (gpu/animate! (w :tree) clock (w :scale)))
+        (let ((t3 (now)))
+          (gpu/paint! (w :tree) (w :renderer) (w :width) (w :height) 0x282c33ff)
+          (let ((t4 (now)))
+            (native/gpu-frame (w :renderer)
+                              (if (= i 6)
+                                  "build/ui-test-artifacts/resize-mid.png"
+                                  ""))
+            (put! resize :step (+ (resize :step) (- t1 t0)))
+            (put! resize :layout (+ (resize :layout) (- t2 t1)))
+            (put! resize :animate (+ (resize :animate) (- t3 t2)))
+            (put! resize :paint (+ (resize :paint) (- t4 t3)))))))))
+
+(println "resize frame ms:"
+         "step" (ms (resize :step))
+         "layout" (ms (resize :layout))
+         "animate" (ms (resize :animate))
+         "paint" (ms (resize :paint))
+         "resizes" resizes)
 
 (ui/close! w)

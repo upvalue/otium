@@ -39,7 +39,45 @@
     (when (ffi/null? p) (error "Cannot allocate Yoga node"))
     p))
 
-(def- (sync-node! node)
+(def- (eased-size! node axis target pass)
+  ;; With :animate-size, an explicit size eases toward its new value. The
+  ;; first size and window resizes apply at once.
+  (if (or (< target 0) (not (get (node :options) :animate-size #f)))
+      (begin
+        (when (node :sizes) (put! (node :sizes) axis nil))
+        target)
+      (let ((sizes (or (node :sizes) {}))
+            (e (get sizes axis)))
+        (set! (node :sizes) sizes)
+        (cond
+          ((or (nil? e) (pass :instant)) (put! sizes axis {:value target :target target :stepped nil}))
+          ((not (= (e :target) target)) (put! e :target target))
+          (else nil))
+        (let ((e (get sizes axis))
+              (resizing (pass :resizing)))
+          (unless (or (= (e :value) (e :target))
+                      (and (not (empty? resizing)) (eq? node (get resizing (- (length resizing) 1)))))
+            (push! resizing node))
+          (e :value)))))
+
+(def (resizing? tree)
+  (let ((resizing (tree :resizing))) (and resizing (not (empty? resizing)))))
+
+(def (step-sizes! tree now)
+  "Advance :animate-size widgets to time now, in seconds. Run layout! afterwards."
+  (for-each (fn (node)
+              (when (and (ui/active? node) (node :sizes))
+                (for-each (fn (e)
+                            (unless (= (e :value) (e :target))
+                              (put! e :value (ui/decay (e :value) (e :target) (ui/elapsed (e :stepped) now) 0.06))
+                              (put! e
+                                    :stepped (if (= (e :value) (e :target))
+                                                 nil
+                                                 now))))
+                          (values (node :sizes)))))
+            (tree :resizing)))
+
+(def- (sync-node! node pass)
   (unless (node :layout)
     (let ((p (allocate-node)))
       (set! (node :layout) p)
@@ -51,8 +89,8 @@
     (native/node-intrinsic p 0 0 #f)
     (let ((s (ui/layout-style w)))
       (unless (native/node-style p
-                                 (get s :width -1)
-                                 (get s :height -1)
+                                 (eased-size! node :width (get s :width -1) pass)
+                                 (eased-size! node :height (get s :height -1) pass)
                                  (get s :grow 0)
                                  (get s :padding 0)
                                  (get s :gap 0)
@@ -77,7 +115,7 @@
     (if (empty? (ui/children node))
         (native/node-intrinsic p 0 0 #t)
         (for-each (fn (child)
-                    (sync-node! child)
+                    (sync-node! child pass)
                     (native/node-shrink (child :layout) (not (eq? (dispatch-type w) ui/Scroll)))
                     (native/node-append p (child :layout)))
                   (ui/children node)))))
@@ -164,22 +202,28 @@
 (def- (reveal! w children start span viewport)
   ;; Scroll just far enough to show the :reveal child, once per change of its
   ;; key, position or the viewport, so wheel scrolling is not undone. The first
-  ;; reveal and viewport changes jump; others animate.
+  ;; reveal, viewport changes and resizing children jump; others animate.
   (let ((target (and (w :reveal) (find (fn (child) (equal? (child :key) (w :reveal))) children))))
     (when target
       (let ((s (native/node-bounds (target :layout) start))
             (e (+ s (native/node-bounds (target :layout) span)))
             (seen (list (w :reveal) s e viewport))
             (previous (w :revealed))
-            (move! (if (and previous (= (nth previous 3) viewport))
+            ;; A resizing child is already easing, so follow its edge exactly.
+            (move! (if (and previous (= (nth previous 3) viewport) (not (resizing-node? target)))
                        ui/scroll-toward!
                        ui/scroll-to!)))
         (unless (equal? seen previous)
           (set! (w :revealed) seen)
-          (cond
-            ((< s (+ (w :target) (w :padding))) (move! w (- s (w :padding))))
-            ((> e (- (+ (w :target) viewport) (w :padding))) (move! w (+ (- e viewport) (w :padding))))
-            (else nil)))))))
+          ;; Show the far edge, then the near one, so a child wider than the
+          ;; viewport shows its start.
+          (let ((goal (w :target)))
+            (when (> e (- (+ goal viewport) (w :padding))) (set! goal (+ (- e viewport) (w :padding))))
+            (when (< s (+ goal (w :padding))) (set! goal (- s (w :padding))))
+            (unless (= goal (w :target)) (move! w goal))))))))
+
+(def- (resizing-node? node)
+  (and (node :sizes) (find (fn (e) (not (= (e :value) (e :target)))) (values (node :sizes)))))
 
 (def- (shift! node dx dy)
   (let ((b (node :bounds)))
@@ -218,14 +262,17 @@ without relayout. Returns true while any animation continues."
   (let ((root (allocate-node))
         (scale (if (null? pixel-scale)
                    1
-                   (car pixel-scale))))
+                   (car pixel-scale)))
+        (pass {:resizing [] :instant (not (equal? (tree :size) (list width height)))}))
+    (set! (tree :size) (list width height))
     (unwind-protect
       (begin
         (unless (native/node-style root width height 0 0 0 0) (error "Invalid root size"))
         (for-each (fn (node)
-                    (sync-node! node)
+                    (sync-node! node pass)
                     (native/node-append root (node :layout)))
                   (ui/children tree))
+        (set! (tree :resizing) (pass :resizing))
         (let loop ((pass 0))
           (when (> pass 256) (error "Yoga measurement did not converge"))
           (native/node-layout root width height)
@@ -236,8 +283,7 @@ without relayout. Returns true while any animation continues."
               (loop (+ pass 1)))))
         (let ((animations []))
           (for-each (fn (node) (save-bounds! node 0 0 scale animations)) (ui/children tree))
-          (set! (tree :animations) animations)
-          (invalidate-paint! tree)))
+          (set! (tree :animations) animations)))
       (native/node-free root)))
   tree)
 
@@ -284,12 +330,14 @@ without relayout. Returns true while any animation continues."
   (for-each (fn (child) (paint-node! child renderer clip generation)) (ui/children node)))
 
 (def (invalidate-paint! tree)
-  "Make widgets with the :cache option paint again on the next frame."
+  "Make widgets with the :cache option paint again on the next frame. Call it
+after reconciling: a layout alone does not change what cached subtrees draw,
+and a subtree whose size changed records again anyway."
   (set! (tree :generation) (+ 1 (tree :generation))))
 
 (def (paint! tree renderer width height background)
   "Record the tree's drawing. Subtrees with the :cache option replay their last
-recording until layout or invalidate-paint! starts a new generation."
+recording until invalidate-paint! starts a new generation or their size changes."
   (native/gpu-clear renderer background)
   (let ((clip (make ui/Bounds :x 0 :y 0 :width width :height height))
         (generation (tree :generation)))

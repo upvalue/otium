@@ -22,7 +22,8 @@
   (focused? :init #f)
   (pressed? :init #f)
   (hovered? :init #f)
-  (paint-cache :init nil))
+  (paint-cache :init nil)
+  (sizes :init nil))
 
 (defclass Focus
   (node :init nil)
@@ -34,6 +35,8 @@
   (children :init [])
   (focus :init (make Focus))
   (animations :init [])
+  (resizing :init [])
+  (size :init nil)
   (generation :init 0))
 
 (defclass Label
@@ -248,7 +251,7 @@
     (for-each (fn (k)
                 (cond
                   ((eq? k :key) nil)
-                  ((memq k '(:disabled :focusable :autofocus :tab-navigation :keymap :on-action :cache))
+                  ((memq k '(:disabled :focusable :autofocus :tab-navigation :keymap :on-action :cache :animate-size))
                    (put! options k (get opts k)))
                   (else (set! args (cons k (cons (get opts k) args))))))
               (keys opts))
@@ -569,20 +572,28 @@
 (def (scroll-animating? w)
   (not (= (w :offset) (w :target))))
 
-(def (scroll-step! w now)
-  "Advance an animation to time now, in seconds. The remaining distance decays
-exponentially with time constant :smoothing, so speed is independent of frame rate."
-  (let ((dt (if (w :stepped)
-                (max 0 (min 0.05 (- now (w :stepped))))
-                (/ 1 60.0)))
-        (left (* (- (w :target) (w :offset)) (exp (/ (- dt) (max 0.001 (w :smoothing)))))))
+(def (elapsed stepped now)
+  "Seconds since the last animation step, capped so a stalled frame slows the
+animation rather than skipping it. The first step assumes one 60 Hz frame."
+  (if stepped
+      (max 0 (min 0.05 (- now stepped)))
+      (/ 1 60.0)))
+
+(def (decay value target dt smoothing)
+  "Move value toward target by dt seconds of exponential decay with time constant
+smoothing. Within a quarter pixel, return target."
+  (let ((left (* (- target value) (exp (/ (- dt) (max 0.001 smoothing))))))
     (if (< (abs left) 0.25)
-        (begin
-          (set! (w :offset) (w :target))
-          (set! (w :stepped) nil))
-        (begin
-          (set! (w :offset) (- (w :target) left))
-          (set! (w :stepped) now)))))
+        target
+        (- target left))))
+
+(def (scroll-step! w now)
+  "Advance an animation to time now, in seconds. Speed is independent of frame rate."
+  (set! (w :offset) (decay (w :offset) (w :target) (elapsed (w :stepped) now) (w :smoothing)))
+  (set! (w :stepped)
+        (if (scroll-animating? w)
+            now
+            nil)))
 
 (defmethod (handle-event (w Scroll) event)
   (when (eq? (get event :kind) :wheel)

@@ -28,10 +28,12 @@
   (native/gpu-count (w :renderer)))
 
 (ui/reconcile! (w :tree) (shell/view w))
+(gpu/invalidate-paint! (w :tree))
 (gpu/layout! (w :tree) (w :width) (w :height) (w :scale))
 (frame! "")
 (m/focus-move! 2)
 (ui/reconcile! (w :tree) (shell/view w))
+(gpu/invalidate-paint! (w :tree))
 (gpu/layout! (w :tree) (w :width) (w :height) (w :scale))
 (frame! "")
 (dotimes (i 5)
@@ -40,7 +42,8 @@
 (check "still animating mid-way" #t (gpu/animating? (w :tree)))
 (check "caches recorded" #t (> (native/gpu-cache-count (w :renderer)) 0))
 (def replayed (frame! (str dir "/replay-cached.png")))
-;; Fresh layout keeps the animated offset and starts a new paint generation.
+;; A fresh layout keeps the animated offset; a new generation repaints everything.
+(gpu/invalidate-paint! (w :tree))
 (gpu/layout! (w :tree) (w :width) (w :height) (w :scale))
 (def fresh (frame! (str dir "/replay-fresh.png")))
 (check "replay culls no more than clipping hides" #t (<= replayed fresh))

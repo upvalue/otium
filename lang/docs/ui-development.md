@@ -356,11 +356,18 @@ deferred.
 A changed `:reveal` animates. The offset eases toward its target with an
 exponential decay whose time constant is `:smoothing` seconds (default 0.06,
 so most of the distance is covered in about 0.2 s); `:smoothing 0` jumps. The
-first reveal and viewport changes jump. Wheel input and `ui/scroll-to!` move
+first reveal and viewport changes jump, and so does following a child that is
+itself resizing, since its size is already easing. A child wider than the
+viewport shows its start. Wheel input and `ui/scroll-to!` move
 immediately and end any animation; `ui/scroll-toward!` animates. Offsets are
 snapped to physical pixels so text stays sharp while moving.
 
-Frames that only advance animations skip reconciliation and Yoga:
+The common `:animate-size #t` option eases a widget's explicit `:width` and
+`:height` toward new values with the same curve. A widget's first size and
+window resizes apply at once.
+
+Frames that only advance animations skip reconciliation. Size animations run
+`gpu/step-sizes!` and Yoga; scroll animations skip Yoga too, and
 `gpu/animate!` moves the scrolled widgets' bounds directly. While a visible
 window animates, the loop does not sleep between frames and is paced by the
 swapchain's vsync.
@@ -374,15 +381,18 @@ ancestors. `paint` runs again only when `key`, the bounds' size or the pixel
 scale changes. Keep one `(gfx/cache)` per widget, for example in a state slot.
 
 The common `:cache #t` option does the same for a widget and all of its
-descendants, keyed by the tree's paint generation. Layout and
-`gpu/invalidate-paint!` start a new generation, so these subtrees repaint on
-every full frame and replay on animation-only frames. A hover change during an
-animation also starts a new generation.
+descendants, keyed by the tree's paint generation and the widget's size.
+`gpu/invalidate-paint!` starts a new generation; the window calls it after
+each reconciliation, so these subtrees repaint on every full frame and replay
+on animation frames unless their size changed. A hover change during an
+animation also starts a new generation. Do not mark a subtree that contains an
+animating scroll view: its replay would not show the scroll moving.
 
 Recordings live in the renderer. One not drawn for 120 frames is freed, so
 removed or off-screen widgets need no cleanup. Replay skips instances wholly
 outside the clip. In the Manse mock, scrolling the strip costs about 0.3 ms
-of CPU per frame on Chez with caching, against about 4 ms without.
+of CPU per frame on Chez with caching, against about 4 ms without; resizing a
+column costs about 2.5 ms, mostly Yoga.
 
 The checked-in editor and terminal scripts cover native Unicode input,
 submit-then-type in one frame, history, wheel scrolling, draft restoration,

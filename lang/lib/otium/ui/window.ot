@@ -155,12 +155,17 @@
                                   (not (equal? (window :revision) dev/revision))))
                          (not (get options :render-on-demand?))
                          (and visible (or (window :dirty?) (not (equal? (window :revision) dev/revision)))))))
-          ;; A frame that only advances scroll animations skips the view and Yoga.
-          (when (or full? (and visible (gpu/animating? tree)))
-            (when full?
-              (sync! window)
-              (gpu/layout! tree (get window :width) (get window :height) (get window :scale)))
-            (when (gpu/animating? tree) (gpu/animate! tree (seconds) (get window :scale)))
+          ;; Animation frames skip the view. Size animations need Yoga; scroll
+          ;; animations only move bounds.
+          (when (or full? (and visible (or (gpu/resizing? tree) (gpu/animating? tree))))
+            (let ((now (seconds))
+                  (relayout? (or full? (gpu/resizing? tree))))
+              (when full?
+                (sync! window)
+                (gpu/invalidate-paint! tree))
+              (when (gpu/resizing? tree) (gpu/step-sizes! tree now))
+              (when relayout? (gpu/layout! tree (get window :width) (get window :height) (get window :scale)))
+              (when (gpu/animating? tree) (gpu/animate! tree now (get window :scale))))
             (when (and (input/refresh-hover! (get window :pointer) tree) (not full?)) (gpu/invalidate-paint! tree))
             (gpu/paint! tree
                         renderer
@@ -184,7 +189,7 @@ follow the swapchain's vsync rather than the poll interval."
   (reduce (fn (ms window)
             (min ms
                  (cond
-                   ((and (visible? window) (gpu/animating? (window :tree))) 0)
+                   ((and (visible? window) (or (gpu/animating? (window :tree)) (gpu/resizing? (window :tree)))) 0)
                    ((and (visible? window)
                          (sdl/flag-set? (sdl/get-window-flags (window :window)) sdl/WINDOW_INPUT_FOCUS))
                     (get (window :options) :poll-ms 16))

@@ -1,0 +1,7 @@
+(require otium.resource :as resource :refer (with))
+
+(with ((r (resource/own 1
+                        (fn (_)
+                          (println "released")
+                          (error 'cleanup)))))
+      (quit 7))

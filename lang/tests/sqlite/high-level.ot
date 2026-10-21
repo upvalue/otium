@@ -1,0 +1,194 @@
+(require otium.sqlite :as sql)
+(require otium.sqlite.raw :as raw)
+(require otium.resource :as resource :refer (with close))
+(require otium.ffi :as ffi)
+(require otium.test :as test :refer (fails? report))
+
+(def (check . args)
+  (apply test/check (map str args)))
+
+(def minimum-age 18)
+
+(def base (sql/select [:id :name] (from :users)))
+
+(def adults (sql/compose base (where (>= :age minimum-age)) (order-by :name)))
+
+(check "SQL"
+       "SELECT \"id\", \"name\" FROM \"users\" WHERE (\"age\" >= ?) ORDER BY \"name\""
+       (get (sql/inspect adults) :sql))
+(check [18] (get (sql/inspect adults) :parameters))
+(check [] (get (sql/inspect base) :parameters))
+(check (sql/inspect base) (sql/inspect (sql/compose base nil)))
+
+(def optional (sql/clause (where (= :name "Ada"))))
+
+(check [18 "Ada"] (get (sql/inspect (sql/compose adults optional)) :parameters))
+(check "SELECT \"strange\"\"name\" FROM \"main\".\"users\""
+       (get (sql/inspect (sql/select [(sql/identifier (keyword "strange\"name"))] (from :main.users))) :sql))
+
+(def events [])
+
+(def (recording name)
+  (resource/own name (fn (v) (push! events v))))
+
+(check 42 (with ((a (recording :a)) (b (recording :b))) 42))
+(check [:b :a] events)
+(set! events [])
+(check #t (fails? (fn () (with ((a (recording :a)) (b (error "acquire"))) nil))))
+(check [:a] events)
+(check #t (fails? (fn () (with ((a 42)) (push! events :body)))))
+(check [:a] events)
+(check 'primary
+       (try
+         (with ((a (resource/own 1 (fn (_) (error 'cleanup))))) (error 'primary))
+         (catch ((fn (_) #t) c) c)))
+(check 'cleanup
+       (try
+         (with ((a (resource/own 1 (fn (_) (error 'cleanup))))) 42)
+         (catch ((fn (_) #t) c) c)))
+(set! events [])
+(check :restarted (restart-case (with ((a (recording :restart))) (invoke-restart 'leave)) (leave () :restarted)))
+(check [:restart] events)
+
+(def owned (recording :once))
+
+(close owned nil)
+(close owned nil)
+(check #t (fails? (fn () (resource/value owned))))
+(check [:restart :once] events)
+
+(def baseline (ffi/allocation-count))
+
+(def db (sql/open ":memory:"))
+
+(sql/execute! db (sql/raw "create table users(id integer primary key, name text unique, age integer, payload blob)"))
+
+(def insert (sql/insert-into :users [:name :age :payload] ["Ada" 37 #u8(0 255)] (returning [:id :name])))
+
+(check [[1 "Ada"]] (sql/execute! db insert))
+(check [[2 "Bob"]] (sql/execute! db (sql/insert-into :users [:name :age] ["Bob" 12] (returning [:id :name]))))
+(check [[1 "Ada"]] (sql/execute! db adults))
+(check [[1 "Ada"]] (sql/execute! db adults))
+(check [[2]] (sql/execute! db (sql/select [(count :*)] (from :users))))
+(check [[1]] (sql/execute! db (sql/select [:id] (from :users) (where (in :id [1 3])))))
+
+(def subquery (sql/select [:id] (from :users) (where (> :age 18))))
+
+(check [["Ada"]] (sql/execute! db (sql/select [:name] (from :users) (where (in :id subquery)))))
+(check [["Ada" "Ada"]]
+       (sql/execute! db
+                     (sql/select [:a.name :b.name]
+                                 (from (as :users :a))
+                                 (join (as :users :b) (= :a.id :b.id))
+                                 (where (= :a.id 1)))))
+(check [[37 1] [12 1]]
+       (sql/execute! db
+                     (sql/select [:age (count :*)]
+                                 (from :users)
+                                 (group-by :age)
+                                 (having (> (count :*) 0))
+                                 (order-by (desc :age)))))
+
+(with ((statement (sql/prepare db (sql/raw "select ?, ?, ?, ?, ?, ?" nil #f #t "é\0x" #u8(0 255) #u8()))))
+      (def row (sql/step! statement))
+      (check ["?" "?" "?" "?" "?" "?"] (sql/columns statement))
+      (check [nil 0 1 "é\0x" #u8(0 255) #u8()] row)
+      (check nil (sql/step! statement))
+      (check nil (sql/step! statement))
+      (sql/bind! statement [1 2 3 "" #u8() 1.25])
+      (check [1 2 3 "" #u8() 1.25] (sql/step! statement))
+      (check [nil 0 1 "é\0x" #u8(0 255) #u8()] row))
+
+(check #t (fails? (fn () (sql/execute! db insert))))
+(check #t (fails? (fn () (sql/prepare db (sql/raw "select ?")))))
+(check #t (fails? (fn () (sql/prepare db (sql/raw "select 1; select 2")))))
+(check #t (fails? (fn () (sql/prepare db (sql/raw "-- empty")))))
+(check #t (fails? (fn () (sql/prepare db (sql/raw "invalid syntax")))))
+(check 'step
+       (try
+         (sql/execute! db insert)
+         (catch ((fn (_) #t) c) (get c :operation))))
+
+(with ((transaction (sql/transaction db))) (sql/execute! db (sql/insert-into :users [:name :age] ["Carol" 28])))
+(check [[3]] (sql/execute! db (sql/select [(count :*)] (from :users))))
+(check 'rollback
+       (try
+         (with ((transaction (sql/transaction db)))
+               (sql/execute! db (sql/insert-into :users [:name] ["Dan"]))
+               (error 'rollback))
+         (catch ((fn (_) #t) c) c)))
+(check [[3]] (sql/execute! db (sql/select [(count :*)] (from :users))))
+(check :left (restart-case (with ((transaction (sql/transaction db)))
+                                 (sql/execute! db (sql/insert-into :users [:name] ["Eve"]))
+                                 (invoke-restart 'leave))
+               (leave () :left)))
+(check [[3]] (sql/execute! db (sql/select [(count :*)] (from :users))))
+(with ((transaction (sql/transaction db))) (check #t (fails? (fn () (sql/transaction db)))))
+
+(check [[1]] (sql/execute! db (sql/select [1] (where (exists subquery)))))
+(check [["Ada"]]
+       (sql/execute! db
+                     (sql/select [:u.name]
+                                 (from (as subquery :ids))
+                                 (left-join (as :users :u) (= :ids.id :u.id))
+                                 (limit 1)
+                                 (offset 0))))
+(check [] (sql/execute! db (sql/select [:name] (from :users) (where (is :payload nil)) (where (= :name "Ada")))))
+
+(check #t (fails? (fn () (sql/raw "select 1\0; select 2"))))
+(check #t (fails? (fn () (sql/open "bad\0path"))))
+(check #t (fails? (fn () (sql/open "/no-such-otium-directory/database.sqlite"))))
+(with ((statement (sql/prepare db (sql/raw "select ?, ?" 1 2))))
+      (check #t (fails? (fn () (sql/bind! statement [3 {}]))))
+      (check #t (fails? (fn () (sql/step! statement))))
+      (sql/bind! statement [4 5])
+      (check [4 5] (sql/step! statement)))
+
+(def bytes #u8(7 8))
+
+(def frozen (sql/raw "select ?" bytes))
+
+(bytevector-u8-set! bytes 0 9)
+
+(def inspection (sql/inspect frozen))
+
+(bytevector-u8-set! (get (get inspection :parameters) 0) 0 10)
+(check [[#u8(7 8)]] (sql/execute! db frozen))
+(check 'step
+       (try
+         (with ((statement (sql/prepare db insert))) (sql/step! statement))
+         (catch ((fn (_) #t) c) (get c :operation))))
+
+(sql/execute! db (sql/raw "PRAGMA foreign_keys = ON"))
+(sql/execute! db (sql/raw "create table parent(id primary key)"))
+(sql/execute! db (sql/raw "create table child(id references parent(id) deferrable initially deferred)"))
+(check #t
+       (fails? (fn ()
+                 (with ((transaction (sql/transaction db)))
+                       (sql/execute! db (sql/raw "insert into child values (1)"))))))
+(check [[0]] (sql/execute! db (sql/raw "select count(*) from child")))
+(with ((transaction (sql/transaction db))) (sql/execute! db (sql/raw "insert into parent values (1)")))
+(check [[1]] (sql/execute! db (sql/raw "select count(*) from parent")))
+
+(set! events [])
+(check 'inner-cleanup
+       (try
+         (with ((a (recording :outer)) (b (resource/own :inner (fn (_) (error 'inner-cleanup))))) nil)
+         (catch ((fn (_) #t) c) c)))
+(check [:outer] events)
+
+(def live (sql/prepare db (sql/raw "select name from users order by id")))
+
+(check ["Ada"] (sql/step! live))
+(require otium.sqlite :reload)
+(require otium.resource :reload)
+(require otium.sqlite.raw :reload)
+(check ["Bob"] (sql/step! live))
+(close db nil)
+(check #t (live :closed?))
+(close live nil)
+(close db nil)
+(check #t (fails? (fn () (sql/step! live))))
+(check #t (fails? (fn () (sql/prepare db base))))
+(check baseline (ffi/allocation-count))
+(report "sqlite high-level")

@@ -1,7 +1,9 @@
 # I/O
 
 Draft. Implemented so far, on both runtimes: characters, the EOF object, and bytevectors
-(steps 1–2 of [Order of work](#order-of-work)).
+(steps 1–2 of [Order of work](#order-of-work)). The general resource scope is now
+available in `otium.resource`; see [resource scopes](../docs/resources.md). Native
+owning-pointer dispatch and ports remain future work.
 
 Ports for files, standard streams, strings and bytes, on both runtimes. To
 support them, Otium gains a character type and a bytevector type, and `first`
@@ -369,20 +371,21 @@ then is an error wherever the resource tracks its own state.
 - A resource with no applicable `close` method and no `release` is an error
   when it is bound, not when it is released. Silently skipping it would hide
   mistakes.
-- `with` returns the body's value. An error from releasing replaces the
-  block's result, as with an `unwind-protect` cleanup (8.7).
+- `with` returns the body's value. An error from releasing replaces a normal
+  block result. During unwinding, preserve the primary error or control
+  transfer and discard cleanup errors.
 
 ```scheme
-(defgeneric close (resource outcome))
+(defgeneric (close resource outcome))
 ```
 
 `outcome` is `nil` for a normal exit, the condition when an error is unwinding,
-or `:quit` for interrupts and `quit`. Most methods ignore it. It's there so a
+or `:quit` for restarts, interrupts and `quit`. Most methods ignore it. It's there so a
 transaction can commit or roll back, or a temporary file can be kept or
 deleted. Unlike Python's `__exit__`, `close` can't suppress the error. Use
 `try` or a handler for that.
 
-Methods are provided for:
+Planned built-in methods are:
 
 - `Port`, which calls `close-port`,
 - `Pointer`, for owning FFI pointers, which calls `ffi/free!`.

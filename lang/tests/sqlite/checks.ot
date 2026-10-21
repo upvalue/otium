@@ -1,0 +1,198 @@
+(require otium.ffi :as ffi)
+(require otium.sqlite.raw :as sql)
+
+(sql/load! '("libsqlite3.dylib" "libsqlite3.so.0" "libsqlite3.so"))
+
+(def checks 0)
+
+(def (check label expected actual)
+  (unless (equal? expected actual) (error "sqlite check failed" label expected actual))
+  (set! checks (+ checks 1)))
+
+(def (ok label code)
+  (check label sql/OK code))
+
+(def (exec db text)
+  (sql/exec db text ffi/null ffi/null ffi/null))
+
+(def (prepare db text)
+  (let ((source (ffi/alloc-utf8 text))
+        (out (ffi/alloc 'pointer 1)))
+    (defer
+      (begin
+        (ok "prepare" (sql/prepare-v2 db source -1 out ffi/null))
+        (ffi/ref out 'pointer 0))
+      (ffi/free! source)
+      (ffi/free! out))))
+
+(def (database)
+  (let ((out (ffi/alloc 'pointer 1)))
+    (defer
+      (begin
+        (ok "open" (sql/open-v2 ":memory:" out (+ sql/OPEN_READWRITE sql/OPEN_CREATE) ffi/null))
+        (ffi/ref out 'pointer 0))
+      (ffi/free! out))))
+
+(def baseline (ffi/allocation-count))
+
+(def db (database))
+
+(check "version" #t (> (sql/libversion-number) 3007014))
+(check "version string" #t (string? (sql/libversion)))
+(ok "busy timeout" (sql/busy-timeout db 100))
+(check "autocommit" 1 (sql/get-autocommit db))
+(ok "create" (exec db "create table t(i integer primary key, f real, s text, b blob, n)"))
+
+(def insert (prepare db "insert into t values(:i, :f, :s, :b, :n)"))
+
+(check "parameter count" 5 (sql/bind-parameter-count insert))
+(check "parameter index" 3 (sql/bind-parameter-index insert ":s"))
+(check "parameter name" ":s" (sql/bind-parameter-name insert 3))
+(check "missing parameter" 0 (sql/bind-parameter-index insert ":missing"))
+(check "range" sql/RANGE (sql/bind-null insert 6))
+(ok "int64" (sql/bind-int64 insert 1 1099511627776))
+(ok "double" (sql/bind-double insert 2 1.25))
+(let ((text (ffi/alloc 'u8 5))
+      (blob (ffi/alloc 'u8 3)))
+  (defer
+    (begin
+      ;; UTF-8 é, NUL, x. The explicit byte count includes the embedded NUL.
+      (for-each (fn (pair) (ffi/set! text 'u8 (car pair) (cadr pair))) '((0 195) (1 169) (2 0) (3 120)))
+      (ffi/set! blob 'u8 0 255)
+      (ffi/set! blob 'u8 2 128)
+      (ok "text transient" (sql/bind-text insert 3 text 4 sql/TRANSIENT))
+      (ok "blob transient" (sql/bind-blob insert 4 blob 3 sql/TRANSIENT))
+      (ffi/set! text 'u8 0 65)
+      (ffi/set! blob 'u8 0 0))
+    (ffi/free! text)
+    (ffi/free! blob)))
+(ok "null" (sql/bind-null insert 5))
+(check "insert" sql/DONE (sql/step insert))
+(check "changes" 1 (sql/changes db))
+(check "rowid" 1099511627776 (sql/last-insert-rowid db))
+(ok "reset" (sql/reset insert))
+(check "reset retains bindings" sql/CONSTRAINT (sql/step insert))
+(check "reset reports prior failure" sql/CONSTRAINT (sql/reset insert))
+(ok "clear" (sql/clear-bindings insert))
+(ok "second id" (sql/bind-int insert 1 2))
+(let ((empty (ffi/alloc 'u8 1)))
+  (defer
+    (ok "empty text" (sql/bind-text insert 3 empty 0 sql/TRANSIENT))
+    (ffi/free! empty)))
+(ok "zeroblob" (sql/bind-zeroblob insert 4 0))
+(check "second insert" sql/DONE (sql/step insert))
+(ok "finalize insert" (sql/finalize insert))
+
+(def query (prepare db "select i, f, s, b, n from t order by i desc"))
+
+(check "readonly" 1 (sql/stmt-readonly query))
+(check "column count" 5 (sql/column-count query))
+(check "column name" "s" (sql/column-name query 2))
+(check "declared type" "TEXT" (sql/column-decltype query 2))
+(check "row" sql/ROW (sql/step query))
+(check "busy" 1 (sql/stmt-busy query))
+(check "type" sql/TEXT (sql/column-type query 2))
+(check "int64 roundtrip" 1099511627776 (sql/column-int64 query 0))
+(check "double roundtrip" 1.25 (sql/column-double query 1))
+(let ((text (sql/column-text query 2))
+      (blob (sql/column-blob query 3)))
+  (check "text bytes" 4 (sql/column-bytes query 2))
+  (check "unicode" 195 (ffi/ref text 'u8 0))
+  (check "embedded nul" 0 (ffi/ref text 'u8 2))
+  (check "after nul" 120 (ffi/ref text 'u8 3))
+  (check "blob bytes" 3 (sql/column-bytes query 3))
+  (check "blob copied" 255 (ffi/ref blob 'u8 0))
+  (check "blob trailing byte" 128 (ffi/ref blob 'u8 2)))
+(check "null type" sql/NULL (sql/column-type query 4))
+(check "null pointer" #t (ffi/null? (sql/column-text query 4)))
+(check "close with statement" sql/BUSY (sql/close db))
+(require otium.sqlite.raw :as sql :reload)
+(check "handle survives reload" sql/ROW (sql/step query))
+(check "cleared double" sql/NULL (sql/column-type query 1))
+(check "empty text type" sql/TEXT (sql/column-type query 2))
+(check "empty text length" 0 (sql/column-bytes query 2))
+(check "empty blob type" sql/BLOB (sql/column-type query 3))
+(check "empty blob length" 0 (sql/column-bytes query 3))
+(check "done" sql/DONE (sql/step query))
+(ok "finalize query" (sql/finalize query))
+
+(let ((source (ffi/alloc-utf8 "select 1; select 2"))
+      (out (ffi/alloc 'pointer 1))
+      (tail (ffi/alloc 'pointer 1)))
+  (defer
+    (begin
+      (ok "prepare tail" (sql/prepare-v2 db source -1 out tail))
+      (check "tail" " select 2" (ffi/read-utf8 (ffi/ref tail 'pointer 0) 10))
+      (ok "finalize tail" (sql/finalize (ffi/ref out 'pointer 0)))
+      (ok "empty statement" (sql/prepare-v2 db source 0 out ffi/null))
+      (check "empty statement pointer" #t (ffi/null? (ffi/ref out 'pointer 0))))
+    (ffi/free! source)
+    (ffi/free! out)
+    (ffi/free! tail)))
+(let ((out (ffi/alloc 'pointer 1))
+      (source (ffi/alloc-utf8 "select from")))
+  (defer
+    (begin
+      (check "prepare error" sql/ERROR (sql/prepare-v2 db source -1 out ffi/null))
+      (check "failed statement" #t (ffi/null? (ffi/ref out 'pointer 0)))
+      (check "error code" sql/ERROR (sql/errcode db))
+      (check "message" #t (string? (sql/errmsg db))))
+    (ffi/free! out)
+    (ffi/free! source)))
+(let ((out (ffi/alloc 'pointer 1)))
+  (defer
+    (begin
+      (check "exec error" sql/ERROR (sql/exec db "invalid sql" ffi/null ffi/null out))
+      (check "allocated error" #f (ffi/null? (ffi/ref out 'pointer 0)))
+      (sql/free (ffi/ref out 'pointer 0)))
+    (ffi/free! out)))
+(let ((stmt (prepare db "select ?"))
+      (text (ffi/alloc-utf8 "static")))
+  (defer
+    (begin
+      (ok "static bind" (sql/bind-text stmt 1 text -1 sql/STATIC))
+      (check "static row" sql/ROW (sql/step stmt))
+      (check "static text" "static" (ffi/read-utf8 (sql/column-text stmt 0) 7)))
+    (sql/finalize stmt)
+    (ffi/free! text)))
+(let ((rows 0)
+      (callback (ffi/callback '(pointer int pointer pointer)
+                              'int
+                              (fn (context count values names)
+                                (check "callback context" #t (ffi/null? context))
+                                (check "callback columns" 1 count)
+                                (check "callback value" "42" (ffi/read-utf8 (ffi/ref values 'pointer 0) 3))
+                                (check "callback name" "answer" (ffi/read-utf8 (ffi/ref names 'pointer 0) 7))
+                                (set! rows (+ rows 1))
+                                0))))
+  (defer
+    (begin
+      (ok "exec callback" (sql/exec db "select 42 as answer" callback ffi/null ffi/null))
+      (check "callback rows" 1 rows))
+    (ffi/free-callback! callback)))
+(let ((destination (database))
+      (backup (sql/backup-init destination "main" db "main")))
+  (check "backup initialized" #f (ffi/null? backup))
+  (check "backup copied" sql/DONE (sql/backup-step backup -1))
+  (check "backup remaining" 0 (sql/backup-remaining backup))
+  (ok "backup finish" (sql/backup-finish backup))
+  (let ((stmt (prepare destination "select count(*) from t")))
+    (check "backup row" sql/ROW (sql/step stmt))
+    (check "backup count" 2 (sql/column-int stmt 0))
+    (ok "backup finalize" (sql/finalize stmt)))
+  (ok "backup close" (sql/close destination)))
+(let ((out (ffi/alloc 'pointer 1)))
+  (defer
+    (begin
+      (check "open failure"
+             sql/CANTOPEN
+             (sql/open-v2 "/no/such/otium-sqlite-directory/database" out sql/OPEN_READONLY ffi/null))
+      (check "error handle" #f (ffi/null? (ffi/ref out 'pointer 0)))
+      (ok "close error handle" (sql/close (ffi/ref out 'pointer 0))))
+    (ffi/free! out)))
+(ok "begin" (exec db "begin"))
+(check "transaction" 0 (sql/get-autocommit db))
+(ok "rollback" (exec db "rollback"))
+(ok "close" (sql/close db))
+(check "no ffi leaks" baseline (ffi/allocation-count))
+(println "sqlite: " checks " checks passed")

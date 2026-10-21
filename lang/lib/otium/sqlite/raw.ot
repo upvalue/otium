@@ -1,0 +1,194 @@
+(ns otium.sqlite.raw)
+(require otium.ffi)
+(require otium.ffi :as ffi)
+
+;; Names omit SQLITE_ and sqlite3_; arguments and result codes follow SQLite.
+(def OK 0)
+
+(def ERROR 1)
+
+(def INTERNAL 2)
+
+(def PERM 3)
+
+(def ABORT 4)
+
+(def BUSY 5)
+
+(def LOCKED 6)
+
+(def NOMEM 7)
+
+(def READONLY 8)
+
+(def INTERRUPT 9)
+
+(def IOERR 10)
+
+(def CORRUPT 11)
+
+(def NOTFOUND 12)
+
+(def FULL 13)
+
+(def CANTOPEN 14)
+
+(def PROTOCOL 15)
+
+(def EMPTY 16)
+
+(def SCHEMA 17)
+
+(def TOOBIG 18)
+
+(def CONSTRAINT 19)
+
+(def MISMATCH 20)
+
+(def MISUSE 21)
+
+(def NOLFS 22)
+
+(def AUTH 23)
+
+(def FORMAT 24)
+
+(def RANGE 25)
+
+(def NOTADB 26)
+
+(def NOTICE 27)
+
+(def WARNING 28)
+
+(def ROW 100)
+
+(def DONE 101)
+
+(def INTEGER 1)
+
+(def FLOAT 2)
+
+(def TEXT 3)
+
+(def BLOB 4)
+
+(def NULL 5)
+
+(def OPEN_READONLY 1)
+
+(def OPEN_READWRITE 2)
+
+(def OPEN_CREATE 4)
+
+(def OPEN_URI 64)
+
+(def OPEN_MEMORY 128)
+
+(def OPEN_NOMUTEX 32768)
+
+(def OPEN_FULLMUTEX 65536)
+
+(def OPEN_SHAREDCACHE 131072)
+
+(def OPEN_PRIVATECACHE 262144)
+
+(def LIMIT_LENGTH 0)
+
+(def LIMIT_SQL_LENGTH 1)
+
+(def LIMIT_COLUMN 2)
+
+(def LIMIT_EXPR_DEPTH 3)
+
+(def LIMIT_COMPOUND_SELECT 4)
+
+(def LIMIT_VDBE_OP 5)
+
+(def LIMIT_FUNCTION_ARG 6)
+
+(def LIMIT_ATTACHED 7)
+
+(def LIMIT_LIKE_PATTERN_LENGTH 8)
+
+(def LIMIT_VARIABLE_NUMBER 9)
+
+(def LIMIT_TRIGGER_DEPTH 10)
+
+(def LIMIT_WORKER_THREADS 11)
+
+(def STATIC ffi/null)
+
+;; SQLite defines SQLITE_TRANSIENT as (sqlite3_destructor_type)-1.
+;; Otium's supported FFI targets have pointer-sized ptrdiff_t.
+(defonce TRANSIENT
+  (let ((slot (ffi/alloc 'callback-pointer 1)))
+    (defer
+      (begin
+        (ffi/set! slot 'ptrdiff-t 0 -1)
+        (ffi/ref slot 'callback-pointer 0))
+      (ffi/free! slot))))
+
+(ffi/defbindings library
+                 load!
+                 (libversion "sqlite3_libversion" () utf8 #t)
+                 (libversion-number "sqlite3_libversion_number" () int #t)
+                 (sourceid "sqlite3_sourceid" () utf8 #t)
+                 (threadsafe "sqlite3_threadsafe" () int #t)
+                 (open "sqlite3_open" (utf8 pointer) int #t)
+                 (open-v2 "sqlite3_open_v2" (utf8 pointer int utf8) int #t)
+                 (close "sqlite3_close" (pointer) int #t)
+                 (close-v2 "sqlite3_close_v2" (pointer) int #t)
+                 (errcode "sqlite3_errcode" (pointer) int #t)
+                 (extended-errcode "sqlite3_extended_errcode" (pointer) int #t)
+                 (extended-result-codes "sqlite3_extended_result_codes" (pointer int) int #t)
+                 (errmsg "sqlite3_errmsg" (pointer) utf8 #t)
+                 (errstr "sqlite3_errstr" (int) utf8 #t)
+                 (busy-timeout "sqlite3_busy_timeout" (pointer int) int #t)
+                 (interrupt "sqlite3_interrupt" (pointer) void #t)
+                 (get-autocommit "sqlite3_get_autocommit" (pointer) int #t)
+                 (changes "sqlite3_changes" (pointer) int #t)
+                 (total-changes "sqlite3_total_changes" (pointer) int #t)
+                 (last-insert-rowid "sqlite3_last_insert_rowid" (pointer) i64 #t)
+                 (set-last-insert-rowid "sqlite3_set_last_insert_rowid" (pointer i64) void #t)
+                 (limit "sqlite3_limit" (pointer int int) int #t)
+                 (db-readonly "sqlite3_db_readonly" (pointer utf8) int #t)
+                 (db-filename "sqlite3_db_filename" (pointer utf8) utf8 #t)
+                 (exec "sqlite3_exec" (pointer utf8 callback-pointer pointer pointer) int #t)
+                 (free "sqlite3_free" (pointer) void #t)
+                 (prepare-v2 "sqlite3_prepare_v2" (pointer pointer int pointer pointer) int #t)
+                 (step "sqlite3_step" (pointer) int #t)
+                 (reset "sqlite3_reset" (pointer) int #t)
+                 (finalize "sqlite3_finalize" (pointer) int #t)
+                 (clear-bindings "sqlite3_clear_bindings" (pointer) int #t)
+                 (bind-parameter-count "sqlite3_bind_parameter_count" (pointer) int #t)
+                 (bind-parameter-index "sqlite3_bind_parameter_index" (pointer utf8) int #t)
+                 (bind-parameter-name "sqlite3_bind_parameter_name" (pointer int) utf8 #t)
+                 (bind-null "sqlite3_bind_null" (pointer int) int #t)
+                 (bind-int "sqlite3_bind_int" (pointer int int) int #t)
+                 (bind-int64 "sqlite3_bind_int64" (pointer int i64) int #t)
+                 (bind-double "sqlite3_bind_double" (pointer int double) int #t)
+                 (bind-text "sqlite3_bind_text" (pointer int pointer int callback-pointer) int #t)
+                 (bind-blob "sqlite3_bind_blob" (pointer int pointer int callback-pointer) int #t)
+                 (bind-zeroblob "sqlite3_bind_zeroblob" (pointer int int) int #t)
+                 (column-count "sqlite3_column_count" (pointer) int #t)
+                 (data-count "sqlite3_data_count" (pointer) int #t)
+                 (column-name "sqlite3_column_name" (pointer int) utf8 #t)
+                 (column-decltype "sqlite3_column_decltype" (pointer int) utf8 #t)
+                 (column-type "sqlite3_column_type" (pointer int) int #t)
+                 (column-int "sqlite3_column_int" (pointer int) int #t)
+                 (column-int64 "sqlite3_column_int64" (pointer int) i64 #t)
+                 (column-double "sqlite3_column_double" (pointer int) double #t)
+                 (column-text "sqlite3_column_text" (pointer int) pointer #t)
+                 (column-blob "sqlite3_column_blob" (pointer int) pointer #t)
+                 (column-bytes "sqlite3_column_bytes" (pointer int) int #t)
+                 (sql "sqlite3_sql" (pointer) utf8 #t)
+                 (stmt-readonly "sqlite3_stmt_readonly" (pointer) int #t)
+                 (stmt-busy "sqlite3_stmt_busy" (pointer) int #t)
+                 (db-handle "sqlite3_db_handle" (pointer) pointer #t)
+                 (next-stmt "sqlite3_next_stmt" (pointer pointer) pointer #t)
+                 (backup-init "sqlite3_backup_init" (pointer utf8 pointer utf8) pointer #t)
+                 (backup-step "sqlite3_backup_step" (pointer int) int #t)
+                 (backup-finish "sqlite3_backup_finish" (pointer) int #t)
+                 (backup-remaining "sqlite3_backup_remaining" (pointer) int #t)
+                 (backup-pagecount "sqlite3_backup_pagecount" (pointer) int #t))

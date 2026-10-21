@@ -1,0 +1,6 @@
+(def counter 0)
+
+(def (bump!)
+  (set! counter (+ countr 1)))
+
+(bump!)

@@ -92,6 +92,7 @@ static bool path_read(ots* state, const char* name, const char* directory, const
   bytes_append(&path, relative, strlen(relative));
   bytes_append(&path, "\0", 1);
   bool found = ot_platform_read_file(path.data, source, length);
+  if (found) ot_set_source_name(state, path.data);
   if (found && !record_loaded(state, name, path.data)) {
     ot_host_free(*source);
     *source = NULL;
@@ -145,6 +146,47 @@ static const char* condition_message(ots* state, size_t* length) {
   return text;
 }
 
+/* The condition being reported, rooted while otium.diagnostics renders it. */
+static otv reported_condition;
+
+static otv nat_reported_condition(ots* state, otv* args, int argc) {
+  (void)state;
+  (void)args;
+  (void)argc;
+  return reported_condition;
+}
+
+/* Print and clear the failed evaluation's condition. Tables go through
+ * otium.diagnostics/render; anything else, or a failure to render, prints
+ * the condition's representation. */
+static void report_condition(ots* state, FILE* stream) {
+  static bool rooted;
+  if (!rooted) {
+    ot_global_add(state, &reported_condition);
+    rooted = true;
+  }
+  reported_condition = ot_condition(state);
+  ot_clear_condition(state);
+  if (ot_value_type(reported_condition) == OT_TYPE_TABLE) {
+    ot_def_nat(state, "%reported-condition", nat_reported_condition);
+    const char* code =
+        "(begin (require otium.diagnostics) (otium.diagnostics/render (%reported-condition)))";
+    otv rendered;
+    const char* text;
+    size_t length;
+    if (ot_eval_src(state, code, strlen(code), "<report>", &rendered) &&
+        ot_string_bytes(rendered, &text, &length)) {
+      fwrite(text, 1, length, stream);
+      reported_condition = ot_nil;
+      return;
+    }
+    ot_clear_condition(state);
+  }
+  fputs("otium: ", stream);
+  print_value(state, reported_condition, stream);
+  reported_condition = ot_nil;
+}
+
 static int run_file(ots* state, const char* path) {
   char* source;
   size_t length;
@@ -162,8 +204,7 @@ static int run_file(ots* state, const char* path) {
     ot_clear_condition(state);
     return state->quit_requested ? state->quit_status : 130;
   }
-  fputs("otium: ", stderr);
-  print_value(state, ot_condition(state), stderr);
+  report_condition(state, stderr);
   return 1;
 }
 
@@ -713,8 +754,7 @@ static bool repl_evaluate(ots* state, bytes* pending) {
     saw_interrupt = 0;
     fputs("interrupted\n", stdout);
   } else {
-    fputs("error: ", stderr);
-    print_value(state, ot_condition(state), stderr);
+    report_condition(state, stderr);
   }
   ot_clear_condition(state);
   pending->length = 0;

@@ -1,0 +1,254 @@
+(ns otium.diagnostics)
+(require (otium.diagnostics.catalog :as catalog))
+
+;; Diagnostics are tables shared by runtime errors and lint warnings. Fields:
+;; :code and :message; :severity, :error by default or :warning; :span, a
+;; table of :path, :line and :column counted from one, and :start and :end
+;; character offsets into the file; :label, text under the span; :frames,
+;; innermost first, each a table of :name and :span; :notes, an array of
+;; strings; :help; :suggestions, an array of names; :rule, a lint rule name.
+
+(def foreign-names
+  "Names from other Lisps that Otium spells differently, mapped to the Otium spelling."
+  {"define" "def"
+   "defn" "def"
+   "defun" "def"
+   "defvar" "def"
+   "lambda" "fn"
+   "let*" "let"
+   "letrec" "let"
+   "letrec*" "let"
+   "setq" "set!"
+   "setf" "set!"
+   "progn" "begin"
+   "vector" "[...]"
+   "vector-ref" "get"
+   "vector-set!" "put!"
+   "hash-ref" "get"
+   "hash-set!" "put!"
+   "make-hash-table" "{}"
+   "hash-map" "{...}"})
+
+(def (message code fields)
+  "The catalog message for code with each {key} replaced by the display of (fields :key)."
+  (let ((template (get (get catalog/entries code) :message ""))
+        (out (buffer))
+        (i 0)
+        (n (string-length template)))
+    (while (< i n)
+      (let ((c (substring template i (+ i 1)))
+            (close (and (equal? c "{") (string-index template "}" i))))
+        (if close
+            (let ((key (keyword (substring template (+ i 1) close))))
+              (buffer-push! out
+                            (if (nil? (get fields key))
+                                (substring template i (+ close 1))
+                                (get fields key)))
+              (set! i (+ close 1)))
+            (begin
+              (buffer-push! out c)
+              (set! i (+ i 1))))))
+    (buffer->string out)))
+
+(def- (string-index text part from)
+  ;; The index of part in text at or after from, or nil.
+  (let ((n (string-length part))
+        (limit (- (string-length text) (string-length part)))
+        (found nil)
+        (i from))
+    (while (and (not found) (<= i limit))
+      (when (equal? (substring text i (+ i n)) part) (set! found i))
+      (set! i (+ i 1)))
+    found))
+
+(def (severity-name d)
+  (if (eq? (get d :severity :error) :warning)
+      "warning"
+      "error"))
+
+(def (header d)
+  (let ((code (get d :code))
+        (rule (get d :rule)))
+    (str (severity-name d)
+         (cond
+           ((and code rule) (str "[" code " " rule "]"))
+           (code (str "[" code "]"))
+           (else ""))
+         ": "
+         (if (and (not code) (string? (get d :who)))
+             (str (d :who) ": ")
+             "")
+         (get d :message "error"))))
+
+(def (location span)
+  (str (span :path) ":" (span :line) ":" (span :column)))
+
+(def- (source-line path line)
+  ;; The text of line, counted from one, or nil when the file cannot be read.
+  (try
+    (let ((lines (string-split (read-file path) "\n")))
+      (and (<= 1 line (length lines)) (string-replace (get lines (- line 1)) "\r" "")))
+    (catch ((fn (_) #t) _) nil)))
+
+(def- (spaces n)
+  (let ((out (buffer)))
+    (dotimes (_ n)
+      (buffer-push! out " "))
+    (buffer->string out)))
+
+(def- (repeat text n)
+  (let ((out (buffer)))
+    (dotimes (_ (max n 1))
+      (buffer-push! out text))
+    (buffer->string out)))
+
+(def- (snippet! out span label)
+  (let ((line (span :line))
+        (gutter (string-length (number->string line)))
+        (pad (spaces gutter))
+        (text (source-line (span :path) line)))
+    (buffer-push! out pad "--> " (location span) "\n")
+    (when text
+      (let ((column (span :column))
+            (available (- (string-length text) (- column 1)))
+            (width (if (and (int? (span :start)) (int? (span :end)))
+                       (min (- (span :end) (span :start)) available)
+                       1)))
+        (buffer-push! out pad " |\n")
+        (buffer-push! out (number->string line) " | " text "\n")
+        (buffer-push! out
+                      pad
+                      " | "
+                      (spaces (- column 1))
+                      (repeat "^" width)
+                      (if label
+                          (str " " label)
+                          "")
+                      "\n")))))
+
+(def- (frame-notes d)
+  ;; The innermost frame is where the span points; the rest are callers.
+  (let ((frames (get d :frames)))
+    (if (and frames (> (length frames) 0))
+        (let ((frames (array-to-list frames))
+              (inner (first frames))
+              (callers (take 8 (rest frames)))
+              (hidden (- (length frames) 1 (length callers))))
+          (append (if (inner :name)
+                      (list (str "in `" (inner :name) "`"))
+                      '())
+                  (map (fn (frame)
+                         (if (frame :name)
+                             (str "called from `" (frame :name) "` at " (location (frame :span)))
+                             (str "called from " (location (frame :span)))))
+                       callers)
+                  (if (> hidden 0)
+                      (list (str "and " hidden " more callers"))
+                      '())))
+        '())))
+
+(def- (suggestion-help d)
+  (let ((name (get d :name))
+        (suggestions (get d :suggestions)))
+    (cond
+      ((get d :help) (get d :help))
+      ((and (string? name) (get foreign-names name)) (str "Otium spells `" name "` as `" (get foreign-names name) "`"))
+      ((and suggestions (> (length suggestions) 0))
+       (str "did you mean " (string-join " or " (map (fn (s) (str "`" s "`")) (array-to-list suggestions))) "?"))
+      (else nil))))
+
+(def (render d)
+  "Diagnostic d as Rust-style text, ending with a newline."
+  (let ((out (buffer))
+        (span (get d :span))
+        (notes (append (frame-notes d) (array-to-list (get d :notes []))))
+        (help (suggestion-help d))
+        (code (get d :code)))
+    (buffer-push! out (header d) "\n")
+    (when span (snippet! out span (get d :label)))
+    (let ((pad (spaces (if span
+                           (string-length (number->string (span :line)))
+                           1))))
+      (when (or (pair? notes) help code)
+        (when span (buffer-push! out pad " |\n"))
+        (for-each (fn (note) (buffer-push! out pad " = note: " note "\n")) notes)
+        (when help (buffer-push! out pad " = help: " help "\n"))
+        (when (and code (get catalog/entries code))
+          (buffer-push! out pad " = note: run `otium explain " code "` for details\n"))))
+    (buffer->string out)))
+
+(def (render-short d)
+  "Diagnostic d on one line: PATH:LINE:COLUMN: SEVERITY[CODE]: MESSAGE."
+  (let ((span (get d :span)))
+    (str (if span
+             (str (location span) ": ")
+             "")
+         (header d)
+         "\n")))
+
+(def- (json-string text)
+  (let ((out (buffer "\"")))
+    (for-each (fn (c)
+                (buffer-push! out
+                              (cond
+                                ((equal? c "\"") "\\\"")
+                                ((equal? c "\\") "\\\\")
+                                ((equal? c "\n") "\\n")
+                                ((equal? c "\r") "\\r")
+                                ((equal? c "\t") "\\t")
+                                (else c))))
+              (array-to-list (string-split-chars text)))
+    (buffer-push! out "\"")
+    (buffer->string out)))
+
+(def- (string-split-chars text)
+  (let ((out []))
+    (dotimes (i (string-length text))
+      (push! out (substring text i (+ i 1))))
+    out))
+
+(def- (json-field name value)
+  (str (json-string name)
+       ":"
+       (cond
+         ((string? value) (json-string value))
+         ((number? value) (number->string value))
+         ((array? value) (str "[" (string-join "," (map json-string (array-to-list value))) "]"))
+         ((keyword? value) (json-string (keyword->string value)))
+         (else (json-string (str value))))))
+
+(def (render-json d)
+  "Diagnostic d as one line of JSON."
+  (let ((span (get d :span))
+        (fields [])
+        (help (suggestion-help d)))
+    (push! fields (json-field "severity" (severity-name d)))
+    (when (get d :code) (push! fields (json-field "code" (d :code))))
+    (when (get d :rule) (push! fields (json-field "rule" (d :rule))))
+    (push! fields (json-field "message" (get d :message "error")))
+    (when span
+      (for-each (fn (key) (when (get span key) (push! fields (json-field (keyword->string key) (span key)))))
+                '(:path :line :column :start :end)))
+    (let ((notes (append (frame-notes d) (array-to-list (get d :notes [])))))
+      (when (pair? notes) (push! fields (json-field "notes" (apply array notes)))))
+    (when help (push! fields (json-field "help" help)))
+    (str "{" (string-join "," (array-to-list fields)) "}\n")))
+
+(def (explain code)
+  "The catalog entry for code as text, or nil for an unknown code."
+  (let ((entry (get catalog/entries (string-upcase code))))
+    (and entry
+         (let ((out (buffer)))
+           (buffer-push! out (string-upcase code))
+           (when (get entry :name) (buffer-push! out " " (entry :name)))
+           (buffer-push! out ": " (entry :title) "\n\n" (entry :explanation) "\n")
+           (when (get entry :level)
+             (buffer-push! out
+                           "\nGroup "
+                           (keyword->string (entry :group))
+                           ", default level "
+                           (keyword->string (entry :level))
+                           ".\n"))
+           (when (not (equal? (entry :example) "")) (buffer-push! out "\nExample:\n\n" (entry :example) "\n"))
+           (when (not (equal? (entry :fixed) "")) (buffer-push! out "\nCorrected:\n\n" (entry :fixed) "\n"))
+           (buffer->string out)))))

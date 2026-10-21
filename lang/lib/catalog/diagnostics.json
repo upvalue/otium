@@ -1,0 +1,348 @@
+{
+  "E0001": {
+    "title": "unclosed form",
+    "type": "read-error",
+    "message": "unclosed form",
+    "explanation": "The file ended inside a list, array, table or dotted pair. The location points at the opening delimiter that was never closed. Count delimiters from there, or run `otium fmt` on the file: its indentation usually shows where a closing delimiter went missing.",
+    "example": "(def (area w h)\n  (* w h)",
+    "fixed": "(def (area w h)\n  (* w h))"
+  },
+  "E0002": {
+    "title": "unterminated string",
+    "type": "read-error",
+    "message": "unterminated string",
+    "explanation": "A string literal has no closing double quote before the end of the file. Strings may span lines, so the missing quote can be far above the end of the file. Write `\\\"` for a double quote inside a string.",
+    "example": "(println \"hello)",
+    "fixed": "(println \"hello\")"
+  },
+  "E0003": {
+    "title": "unexpected closing delimiter",
+    "type": "read-error",
+    "message": "unexpected closing delimiter",
+    "explanation": "A `)`, `]` or `}` appeared with nothing open to close, or closes a different kind of bracket than the one that is open. Often an earlier form has one closing delimiter too many.",
+    "example": "(def x 1))",
+    "fixed": "(def x 1)"
+  },
+  "E0004": {
+    "title": "invalid number",
+    "type": "read-error",
+    "message": "invalid number",
+    "explanation": "A token starts like a number but is not one. Otium reads decimal integers, decimal floats with an optional exponent and `0x` hexadecimal integers. A token such as `12abc` is an error, not a symbol. Rational literals such as `1/2` are not supported; write `(/ 1 2)`.",
+    "example": "(def ratio 1/2)",
+    "fixed": "(def ratio 0.5)"
+  },
+  "E0005": {
+    "title": "reserved # token",
+    "type": "read-error",
+    "message": "reserved # token",
+    "explanation": "Only `#t`, `#true`, `#f` and `#false` start with `#`. Other `#` syntax from Scheme or Clojure, such as `#(...)` vectors, `#{...}` sets, `#_` datum comments and `#\\a` characters, is reserved. Use `[...]` for arrays and strings of length one for characters.",
+    "example": "(def v #(1 2 3))",
+    "fixed": "(def v [1 2 3])"
+  },
+  "E0006": {
+    "title": "invalid string escape",
+    "type": "read-error",
+    "message": "invalid string escape",
+    "explanation": "Strings accept `\\n`, `\\r`, `\\t`, `\\0`, `\\e`, `\\\"`, `\\\\` and `\\xHEX;` escapes, where HEX names a Unicode scalar value and the semicolon ends it. Any other character after a backslash is an error.",
+    "example": "(println \"tab:\\q\")",
+    "fixed": "(println \"tab:\\t\")"
+  },
+  "E0007": {
+    "title": "malformed dotted list",
+    "type": "read-error",
+    "message": "malformed dotted list",
+    "explanation": "A `.` inside a list must have at least one value before it and exactly one value after it, followed by the closing delimiter.",
+    "example": "'(1 . 2 3)",
+    "fixed": "'(1 2 . 3)"
+  },
+  "E0008": {
+    "title": "empty keyword",
+    "type": "read-error",
+    "message": "empty keyword",
+    "explanation": "A keyword needs a name after its colon. A bare `:` is not valid.",
+    "example": "{: 1}",
+    "fixed": "{:a 1}"
+  },
+  "E0009": {
+    "title": "quote without a value",
+    "type": "read-error",
+    "message": "quote without a value",
+    "explanation": "A `'`, backquote, `,` or `,@` must be followed by the form it applies to.",
+    "example": "(list 1 ')",
+    "fixed": "(list 1 '())"
+  },
+  "E0010": {
+    "title": "expected value",
+    "type": "read-error",
+    "message": "expected value",
+    "explanation": "The reader expected a value here and found none.",
+    "example": "",
+    "fixed": ""
+  },
+  "E0101": {
+    "title": "malformed special form",
+    "type": "syntax-error",
+    "message": "{detail}",
+    "explanation": "A special form has the wrong number or arrangement of parts, or its argument list is not a proper list. Check the form against its documentation with `(describe 'name)`.",
+    "example": "(if)",
+    "fixed": "(if ready? (start) (wait))"
+  },
+  "E0102": {
+    "title": "invalid binding list",
+    "type": "syntax-error",
+    "message": "{detail}",
+    "explanation": "`let` takes a list of `(name value)` pairs: `(let ((x 1) (y 2)) body ...)`. Square brackets build arrays in Otium, so Clojure's `(let [x 1] ...)` is not a binding list. Plain `let` is sequential, so a later binding may use an earlier one.",
+    "example": "(let [x 1 y 2] (+ x y))",
+    "fixed": "(let ((x 1) (y 2)) (+ x y))"
+  },
+  "E0103": {
+    "title": "invalid parameter list",
+    "type": "syntax-error",
+    "message": "{detail}",
+    "explanation": "Parameters are symbols, each named once. A rest parameter is written `(a . rest)`, `(a & rest)` or as a single symbol. Square brackets build arrays in Otium, so Clojure's `(fn [x] ...)` is not a parameter list.",
+    "example": "(fn [x y] (+ x y))",
+    "fixed": "(fn (x y) (+ x y))"
+  },
+  "E0104": {
+    "title": "cannot rebind a core form name",
+    "type": "syntax-error",
+    "message": "{detail}",
+    "explanation": "Names of core forms such as `if`, `let`, `fn`, `def` and `quote` cannot be used as variable or parameter names. Choose another name.",
+    "example": "(fn (if) if)",
+    "fixed": "(fn (condition) condition)"
+  },
+  "E0105": {
+    "title": "definition not allowed here",
+    "type": "syntax-error",
+    "message": "{detail}",
+    "explanation": "`def` is allowed at top level and at the start of a body, such as a function or `let` body. `def-`, `defmacro`, `ns` and `require` are allowed only at top level.",
+    "example": "(+ 1 (def x 2))",
+    "fixed": "(def x 2)\n(+ 1 x)"
+  },
+  "E0106": {
+    "title": "unquote outside quasiquote",
+    "type": "syntax-error",
+    "message": "{detail}",
+    "explanation": "`,` and `,@` are only meaningful inside a backquoted template.",
+    "example": "(list ,x)",
+    "fixed": "`(list ,x)"
+  },
+  "E0107": {
+    "title": "invalid cond clause",
+    "type": "syntax-error",
+    "message": "{detail}",
+    "explanation": "Each `cond` clause is a list whose first element is the test: `(test body ...)`. An `else` clause needs a body.",
+    "example": "(cond (x) else)",
+    "fixed": "(cond (x 1) (else 2))"
+  },
+  "E0108": {
+    "title": "invalid try form",
+    "type": "syntax-error",
+    "message": "{detail}",
+    "explanation": "`try` takes body expressions followed by `(catch (predicate name) body ...)` clauses. Catch clauses must come after every body expression.",
+    "example": "(try (catch (error? e) nil) (work))",
+    "fixed": "(try (work) (catch (error? e) nil))"
+  },
+  "E0109": {
+    "title": "invalid assignment target",
+    "type": "syntax-error",
+    "message": "{detail}",
+    "explanation": "`set!` assigns a variable, `(set! name value)`, or a callable place, `(set! (object key) value)`. A symbol macro can only be assigned when it has a writer.",
+    "example": "(set! 3 4)",
+    "fixed": "(set! counter 4)"
+  },
+  "E0110": {
+    "title": "invalid ns clause",
+    "type": "syntax-error",
+    "message": "{detail}",
+    "explanation": "`ns` accepts `(:require spec ...)` clauses after the namespace name. Requires can also be written as separate `(require ...)` forms.",
+    "example": "(ns app.main (:use app.tools))",
+    "fixed": "(ns app.main (:require (app.tools :as tools)))"
+  },
+  "E0111": {
+    "title": "macro expansion limit exceeded",
+    "type": "syntax-error",
+    "message": "macro expansion limit exceeded in `{macro}`",
+    "explanation": "Expanding one top-level form ran more than 10000 macro calls. A macro probably expands into a call to itself without making progress. The notes list the most recent macros expanded.",
+    "example": "(defmacro forever (x) `(forever ,x))\n(forever 1)",
+    "fixed": ""
+  },
+  "E0112": {
+    "title": "macro transformer failed",
+    "type": "syntax-error",
+    "message": "macro `{macro}` failed while expanding",
+    "explanation": "A macro's own code raised an error while it was building its expansion. The note gives the underlying error. Macros receive unevaluated forms, so the usual cause is a macro that treats a form as a value, or a call that does not match the shape the macro expects.",
+    "example": "",
+    "fixed": ""
+  },
+  "E0201": {
+    "title": "unbound name",
+    "type": "name-error",
+    "message": "unbound name `{name}`",
+    "explanation": "No definition, parameter, local binding or import with this name is visible here. Check the spelling, `require` the namespace that defines it, or define it. Many Scheme and Clojure names differ in Otium: use `def` rather than `define` or `defn`, and `fn` rather than `lambda`. Check `(describe 'name)` and the prelude before assuming a familiar function exists.",
+    "example": "(define (twice x) (* 2 x))",
+    "fixed": "(def (twice x) (* 2 x))"
+  },
+  "E0202": {
+    "title": "namespace not found",
+    "type": "namespace-error",
+    "message": "namespace `{namespace}` not found",
+    "explanation": "`require` looks for `a/b.ot` for namespace `a.b` under each load path. Add the directory with `-L`, `OTIUM_PATH` or a `(paths ...)` entry in `project.ot`, or fix the namespace name.",
+    "example": "(require app.missing :as missing)",
+    "fixed": ""
+  },
+  "E0203": {
+    "title": "name not defined by namespace",
+    "type": "namespace-error",
+    "message": "namespace `{namespace}` does not define `{name}`",
+    "explanation": "A `:refer` list or a qualified name names something the namespace does not define.",
+    "example": "(require otium.extra :refer (thread-first))",
+    "fixed": "(require otium.extra :refer (->))"
+  },
+  "E0204": {
+    "title": "private name",
+    "type": "namespace-error",
+    "message": "`{name}` is private to `{namespace}`",
+    "explanation": "Names defined with `def-` are private to their namespace and cannot be referred to or used qualified from another namespace. Use a public definition or move the code.",
+    "example": "",
+    "fixed": ""
+  },
+  "E0205": {
+    "title": "circular namespace load",
+    "type": "namespace-error",
+    "message": "circular load of namespace `{namespace}`",
+    "explanation": "Namespace A requires B while B, directly or indirectly, requires A before A has finished loading. Move the shared definitions into a third namespace.",
+    "example": "",
+    "fixed": ""
+  },
+  "E0206": {
+    "title": "namespace does not match file",
+    "type": "namespace-error",
+    "message": "file declares namespace `{declared}` but was loaded as `{namespace}`",
+    "explanation": "The `ns` form of a file loaded by `require` must name the namespace it was found under: `app/tools.ot` must start with `(ns app.tools)`.",
+    "example": "",
+    "fixed": ""
+  },
+  "E0207": {
+    "title": "definition conflicts with import",
+    "type": "namespace-error",
+    "message": "{detail}",
+    "explanation": "A definition and an import in the same namespace may not share a name. Rename the definition, or drop the name from `:refer` and use an alias instead.",
+    "example": "(require otium.extra :refer (comp))\n(def (comp f g) ...)",
+    "fixed": "(require otium.extra :as extra)\n(def (comp f g) ...)"
+  },
+  "E0301": {
+    "title": "wrong number of arguments",
+    "type": "arity-error",
+    "message": "wrong number of arguments to `{name}`",
+    "explanation": "A function was called with more or fewer arguments than its parameter list accepts. There are no optional or keyword parameters; a rest parameter accepts any number of extra arguments. Check the signature with `(describe 'name)`.",
+    "example": "(def (f x) (+ x 1))\n(f 1 2)",
+    "fixed": "(f 1)"
+  },
+  "E0302": {
+    "title": "value is not callable",
+    "type": "type-error",
+    "message": "{value} is not callable",
+    "explanation": "The head of a call evaluated to something that cannot be applied. Functions, tables, arrays, keywords and class instances are callable; numbers, strings, `nil` and lists are not. A common cause is extra parentheses around a value, such as `((get t :f))` when `(get t :f)` returns a number.",
+    "example": "(def n 3)\n(n)",
+    "fixed": "n"
+  },
+  "E0401": {
+    "title": "wrong type of argument",
+    "type": "type-error",
+    "message": "{detail}",
+    "explanation": "A built-in operation received a value of a type it does not accept. Remember that only `nil` and `#f` are false, that `nil` is not the empty list, and that `get` returns `nil` for a missing key.",
+    "example": "(car nil)",
+    "fixed": "(if (pair? xs) (car xs) nil)"
+  },
+  "L0001": {
+    "name": "if-chain",
+    "group": "style",
+    "level": "warn",
+    "title": "if in the else branch of an if",
+    "message": "`if` in the else branch of an `if`; use `cond`",
+    "explanation": "Nested ifs in the else position read as a ladder. `cond` lists each test and result at the same depth.",
+    "example": "(if a 1 (if b 2 3))",
+    "fixed": "(cond (a 1) (b 2) (else 3))"
+  },
+  "L0101": {
+    "name": "foreign-definition",
+    "group": "foreign",
+    "level": "warn",
+    "title": "Scheme or Clojure definition form",
+    "message": "`{form}` is not an Otium form; use `{replacement}`",
+    "explanation": "Otium defines with `def`, makes functions with `fn` and has a sequential plain `let`. `define`, `defn`, `lambda`, `let*` and `letrec` from Scheme and Clojure are not defined.",
+    "example": "(define (twice x) (* 2 x))",
+    "fixed": "(def (twice x) (* 2 x))"
+  },
+  "L0102": {
+    "name": "bracket-bindings",
+    "group": "foreign",
+    "level": "deny",
+    "title": "square brackets used as a binding list",
+    "message": "square brackets build an array; `{form}` takes {expected}",
+    "explanation": "In Otium `[a b]` builds an array. Binding and parameter lists are parenthesized: `(let ((x 1)) ...)`, `(fn (x) ...)`, `(def (f x) ...)`.",
+    "example": "(let [x 1] x)",
+    "fixed": "(let ((x 1)) x)"
+  },
+  "L0201": {
+    "name": "unbound-name",
+    "group": "correctness",
+    "level": "deny",
+    "title": "name is not defined",
+    "message": "unbound name `{name}`",
+    "explanation": "After macro expansion, this name is not a local binding, a definition in this file, an import or a prelude name. At runtime it raises E0201.",
+    "example": "(def (f x) (frobnicate x))",
+    "fixed": ""
+  },
+  "L0202": {
+    "name": "unused-binding",
+    "group": "suspicious",
+    "level": "warn",
+    "title": "local binding is never used",
+    "message": "`{name}` is bound but never used",
+    "explanation": "A `let` binding, parameter or `match` variable is never referenced. Remove it, or start its name with `_` to show it is intentionally unused.",
+    "example": "(def (f x y) x)",
+    "fixed": "(def (f x _y) x)"
+  },
+  "L0900": {
+    "name": "expansion-failed",
+    "group": "correctness",
+    "level": "warn",
+    "title": "lint could not expand a form",
+    "message": "could not expand this form: {detail}",
+    "explanation": "Name checks run on macro-expanded code. The linter loads required namespaces and evaluates the file's own `defmacro` forms, but runs nothing else. A form that fails to expand, for example because a macro depends on a value computed in the same file, is skipped by the checks that need expansion.",
+    "example": "",
+    "fixed": ""
+  },
+  "L0901": {
+    "name": "unused-suppression",
+    "group": "suspicious",
+    "level": "warn",
+    "title": "suppression comment suppressed nothing",
+    "message": "`{rule}` is allowed here but never reported",
+    "explanation": "A `lint: allow` directive names a rule that reported nothing in the code it covers. Remove the directive, or the rule name, so stale suppressions do not hide future problems.",
+    "example": ";; lint: allow(if-chain) kept for symmetry\n(cond (a 1) (else 2))",
+    "fixed": "(cond (a 1) (else 2))"
+  },
+  "L0902": {
+    "name": "unexplained-suppression",
+    "group": "suspicious",
+    "level": "deny",
+    "title": "suppression comment without a reason",
+    "message": "suppression needs a reason after the rule list",
+    "explanation": "Every `lint: allow(rule ...)` and `lint: allow-file(rule ...)` directive must say why, after the closing parenthesis, so readers can judge whether it still applies.",
+    "example": ";; lint: allow(if-chain)",
+    "fixed": ";; lint: allow(if-chain) mirrors the table in specs/io.md"
+  },
+  "L0903": {
+    "name": "unknown-rule",
+    "group": "correctness",
+    "level": "deny",
+    "title": "suppression names an unknown rule",
+    "message": "no lint rule named `{rule}`",
+    "explanation": "A `lint:` directive, or the `lint` entry of `project.ot`, names a rule that does not exist. Run `otium lint --rules` for the list.",
+    "example": ";; lint: allow(if-chains) typo",
+    "fixed": ";; lint: allow(if-chain) mirrors the spec table"
+  }
+}

@@ -1,2 +1,2 @@
 ; Runnable examples for either runtime.
-(paths "examples")
+(paths "examples" "examples/otcl")

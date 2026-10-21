@@ -1,4 +1,5 @@
 ;; Memory-system benchmark using Zaks's permutation generator.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
 
 (def (permutations initial)
   (let ((current initial)
@@ -80,5 +81,5 @@
         (n (bench-read))
         (k (bench-read))
         (ell (bench-read))
-        (ignored-output (bench-read)))
+        (_ignored-output (bench-read)))
     (run-mperm (bench-hide m m) (bench-hide m n) (bench-hide m k) (bench-hide m ell))))

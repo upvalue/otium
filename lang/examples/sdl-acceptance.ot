@@ -1,4 +1,5 @@
 ;; This body runs unchanged on both runtimes. The launcher supplies options.
+;; lint: allow-file(unbound-name) examples/run_sdl.py prepends the SDL bindings and options
 (def acceptance-checks 0)
 
 (def (check expected actual)
@@ -126,7 +127,7 @@
           (error 'injected-sdl-error)
           #f))
     (sdl-close!))
-  (catch ((fn (c) (eq? c 'injected-sdl-error)) c) (set! injected-caught? #t)))
+  (catch ((fn (c) (eq? c 'injected-sdl-error)) _) (set! injected-caught? #t)))
 (check inject-error? injected-caught?)
 (check 0 (SDL_WasInit 0))
 (check 0 (ffi/allocation-count))

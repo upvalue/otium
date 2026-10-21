@@ -37,9 +37,10 @@ def launcher_dispatch(t):
     args = ['--path', 'with spaces', 'program.ot', '--', '', 'λ', '--runtime=c', '--', '--help']
     t.check(run('--runtime=chez', *args) == ['chez', args], 'arguments were not preserved')
     tools = str(root / 'lib/otium/tools')
-    for tool in ('fmt', 'lint'):
-        t.check(run(tool, 'a.ot', '--check') ==
-                ['chez', ['--no-project', f'{tools}/{tool}.ot', '--', 'a.ot', '--check']], tool)
+    t.check(run('fmt', 'a.ot', '--check') ==
+            ['chez', ['--no-project', f'{tools}/fmt.ot', '--', 'a.ot', '--check']], 'fmt')
+    for tool in ('lint', 'explain'):
+        t.check(run(tool, 'a.ot') == ['chez', [f'{tools}/{tool}.ot', '--', 'a.ot']], tool)
     for option in ('--path', '-L', '--project', '--load'):
         args = [option, '--runtime=chez', 'x.ot']
         t.check(run(*args) == ['chez', args], f'{option} value was taken as a selector')
@@ -49,7 +50,7 @@ def launcher_dispatch(t):
 
 @test('generated')
 def generated(t):
-    for tool in ('generate-cli.py', 'generate-reference.py'):
+    for tool in ('generate-cli.py', 'generate-reference.py', 'generate-diagnostics.py'):
         t.expect(t.run([sys.executable, ROOT / 'tools' / tool, '--check']))
 
 

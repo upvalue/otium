@@ -104,7 +104,7 @@
         (backend "")
         (context {})
         (step! (if (equal? (cli/ref args 'script) "")
-                   (fn (tree frame context) nil)
+                   (fn (_tree _frame _context) nil)
                    (module-function (cli/ref args 'script) "step!"))))
     (unless (or (equal? capture "") (string-ends-with? capture ".png") (string-ends-with? capture ".bmp"))
       (error "Capture must end in .png or .bmp"))

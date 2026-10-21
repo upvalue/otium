@@ -4,10 +4,12 @@
           invoke-restart compute-restarts find-restart restart-name restart-description
           unwind-protect defer quit exit
           call-with-otium-control call-with-native-conditions call-contained
-          control-condition? control-kind control-status)
+          control-condition? control-kind control-status condition-continuation-of
+          fail otium-condition? otium-value)
   (import (except (chezscheme) error error? condition-message exit)
           (prefix (only (otium truth) if) ot:)
-          (prefix (otium values) val:)
+          (prefix (otium values) val:) (otium diagnostic-catalog)
+          (only (otium reader) reader-location? reader-location-code)
           (rename (only (chezscheme) condition-message) (condition-message native-message)))
 
   (define handlers (make-parameter '()))
@@ -19,6 +21,12 @@
   (define-condition-type &otium-control &condition make-control-condition control-condition?
     (kind control-kind) (status control-status))
   (define-record-type restart (fields name description transfer))
+  ;; Where each table condition was raised, for locating it in source when it
+  ;; is reported. Other raised values are not recorded.
+  (define continuations (make-weak-eq-hashtable))
+  (define (remember-continuation! c k)
+    (when (val:table? c) (eq-hashtable-set! continuations c k)))
+  (define (condition-continuation-of c) (eq-hashtable-ref continuations c #f))
 
   (define (field c key)
     (let ([keyword (val:keyword (substring (symbol->string key) 1 (string-length (symbol->string key))))])
@@ -78,25 +86,151 @@
         (make-irritants-condition
           (let ([data (field c ':data)]) (if (val:array? data) (val:collection-apply list data) '()))))))
   (define (signal . args) (dispatch (build-condition args)) (void))
+
+  ;; A coded condition from lib/catalog/diagnostics.json. Fields is an
+  ;; association list of symbol keys and values; each also replaces {key} in
+  ;; the code's message template.
+  (define (diagnostic code fields)
+    (let* ([entry (or (diagnostic-entry code) (error (string-append "unknown diagnostic " code)))]
+           [c (val:table (val:keyword "type") (car entry) (val:keyword "code") code)])
+      (for-each (lambda (field) (val:put! c (val:keyword (symbol->string (car field))) (cdr field)))
+        fields)
+      (val:put! c (val:keyword "message") (fill-template (cdr entry) fields))
+      c))
+  (define (fill-template template fields)
+    (let ([out (open-output-string)] [n (string-length template)])
+      (let loop ([i 0])
+        (when (< i n)
+          (let ([c (string-ref template i)])
+            (if (char=? c #\{)
+                (let find ([j (+ i 1)])
+                  (cond [(= j n) (write-char c out) (loop (+ i 1))]
+                        [(char=? (string-ref template j) #\})
+                         (let ([field (assq (string->symbol (substring template (+ i 1) j)) fields)])
+                           (if field (display-field (cdr field) out) (display (substring template i (+ j 1)) out))
+                           (loop (+ j 1)))]
+                        [else (find (+ j 1))]))
+                (begin (write-char c out) (loop (+ i 1)))))))
+      (get-output-string out)))
+  (define (display-field value port)
+    (if (or (string? value) (symbol? value)) (display value port) (val:otium-write value port)))
+  (define (fail code . fields)
+    (let ([c (diagnostic code (let pairs ([fields fields])
+                                (if (null? fields) '()
+                                    (cons (cons (car fields) (cadr fields)) (pairs (cddr fields))))))])
+      (call/cc (lambda (k) (remember-continuation! c k)))
+      (dispatch c)
+      (propagate c)))
+
+  ;; Chez's own conditions, rewritten as Otium conditions. Known cases get a
+  ;; diagnostic code; the rest keep Chez's message with its irritants filled in.
+  (define (repr value) (call-with-string-output-port (lambda (port) (val:otium-write value port))))
+  (define (procedure-name p)
+    (let ([name (guard (e [#t #f]) (((inspect/object p) 'code) 'name))])
+      (if (string? name) name "procedure")))
+  (define (arity-text mask)
+    (cond [(< mask 0)
+           (let loop ([n 0]) (if (logbit? n mask) (format "at least ~a" n) (loop (+ n 1))))]
+          [else
+           (let ([counts (let loop ([n 0] [out '()])
+                           (if (> (ash 1 n) mask) (reverse out)
+                               (loop (+ n 1) (if (logbit? n mask) (cons n out) out))))])
+             (cond [(null? counts) "no arguments"]
+                   [(null? (cdr counts)) (number->string (car counts))]
+                   [else (let ([text (map number->string counts)])
+                           (string-append (apply string-append
+                                            (map (lambda (t) (string-append t ", ")) (reverse (cdr (reverse text)))))
+                             "or " (car (last-pair text))))]))]))
+  ;; The operator of a printed call such as "(f 1 2)", or "function" when it is
+  ;; not a plain name.
+  (define (call-head text)
+    (let loop ([i 1])
+      (cond [(or (= i (string-length text)) (memv (string-ref text i) '(#\space #\))))
+             (let ([head (substring text 1 i)])
+               (if (or (string=? head "") (memv (string-ref head 0) '(#\( #\#))) "function" head))]
+            [else (loop (+ i 1))])))
+  ;; "a pair" from Chez's "~s is not a pair", or #f for other messages.
+  (define (expected-type message)
+    (let ([prefix "~s is not "] [n (string-length message)])
+      (and (> n 12) (string=? (substring message 0 10) prefix)
+           (let ([rest (substring message 10 n)])
+             (and (not (memv #\~ (string->list rest)))
+                  (or (string=? (substring rest 0 2) "a ") (string=? (substring rest 0 3) "an "))
+                  rest)))))
+  (define (native-condition exception)
+    (let* ([message (if (message-condition? exception) (native-message exception) "Chez exception")]
+           [irritants (if (irritants-condition? exception) (condition-irritants exception) '())]
+           [who (and (who-condition? exception) (condition-who exception))]
+           [who (and who (if (symbol? who) (symbol->string who) (and (string? who) who)))])
+      (cond
+        [(and (reader-location? exception) (reader-location-code exception))
+         (diagnostic (reader-location-code exception) '())]
+        [(and (string=? message "incorrect number of arguments ~s to ~s") (= (length irritants) 2)
+              (procedure? (cadr irritants)))
+         (let ([expected (arity-text (procedure-arity-mask (cadr irritants)))]
+               [got (car irritants)])
+           (diagnostic "E0301"
+             (list (cons 'name (procedure-name (cadr irritants))) (cons 'got got)
+                   (cons 'expected expected)
+                   (cons 'label (format "expects ~a argument~a, called with ~a"
+                                  expected (if (equal? expected "1") "" "s") got)))))]
+        [(and (string=? message "incorrect argument count in call ~a") (= (length irritants) 1))
+         (diagnostic "E0301"
+           (list (cons 'name (call-head (format "~a" (car irritants))))
+                 (cons 'call (format "~a" (car irritants)))))]
+        [(and (string=? message "variable ~:s is not bound") (= (length irritants) 1)
+              (symbol? (car irritants)))
+         (diagnostic "E0201" (list (cons 'name (symbol->string (car irritants)))))]
+        [(and (or (string=? message "attempt to apply non-procedure ~s")
+                  (string=? message "expected callable value"))
+              (= (length irritants) 1))
+         (diagnostic "E0302" (list (cons 'value (repr (car irritants)))))]
+        [(and who (= (length irritants) 1) (> (string-length message) 9)
+              (string=? (substring message 0 9) "expected ")
+              (not (memv #\~ (string->list message))))
+         ;; Otium's own Chez libraries say (error 'who "expected ..." value).
+         (diagnostic "E0401"
+           (list (cons 'detail (string-append "`" who "` " message ", got " (repr (car irritants))))
+                 (cons 'who who) (cons 'value (car irritants))))]
+        [(and who (= (length irritants) 1) (expected-type message))
+         => (lambda (expected)
+              (diagnostic "E0401"
+                (list (cons 'detail (string-append "`" who "` expected " expected ", got "
+                                      (repr (car irritants))))
+                      (cons 'who who) (cons 'value (car irritants)))))]
+        [else
+         (let ([c (build-condition
+                    (cons (guard (e [#t message])
+                            (if (format-condition? exception)
+                                (apply format message (map repr-irritant irritants))
+                                message))
+                          (if (format-condition? exception) '() irritants)))])
+           (when who (val:put! c (val:keyword "who") who))
+           c)])))
+  (define (repr-irritant x)
+    (if (symbol? x) (string->symbol (symbol->string x)) x))
   (define (error . args)
-    (let ([c (build-condition args)]) (dispatch c) (propagate c)))
+    (let ([c (build-condition args)])
+      (when (val:table? c) (call/cc (lambda (k) (remember-continuation! c k))))
+      (dispatch c)
+      (propagate c)))
 
   (define (exception-value exception)
     (cond
       [(control-condition? exception) (raise exception)]
       [(otium-condition? exception) (otium-value exception)]
       [else
-       (let ([c (if (condition? exception)
-                    (build-condition
-                      (cons (if (message-condition? exception)
-                                (native-message exception) "Chez exception")
-                            (if (irritants-condition? exception)
-                                (condition-irritants exception) '())))
-                    exception)])
+       (let ([c (if (condition? exception) (native-condition exception) exception)])
+         (when (continuation-condition? exception)
+           (remember-continuation! c (condition-continuation exception)))
          (dispatch c)
          c)]))
+  ;; Chez compiler warnings, such as a call with the wrong argument count, are
+  ;; raised continuably; compiling continues and the code fails when it runs.
   (define (call-with-native-conditions thunk)
-    (with-exception-handler (lambda (e) (propagate (exception-value e))) thunk))
+    (with-exception-handler
+      (lambda (e) (if (warning? e) (void) (propagate (exception-value e))))
+      thunk))
 
   (define (call-handlers bindings thunk)
     (parameterize ([handlers (append (reverse bindings) (handlers))])
@@ -245,4 +379,7 @@
                    (lambda ()
                      (call-with-values thunk
                        (lambda results (lambda () (apply values results)))))
-                   (lambda () (keyboard-interrupt-handler previous)))))))))))
+                   (lambda () (keyboard-interrupt-handler previous))))))))))
+  ;; Condition types of the diagnostic catalog. All are errors.
+  (for-each (lambda (type) (hashtable-set! parents type 'error))
+    '(read-error syntax-error name-error namespace-error arity-error type-error)))

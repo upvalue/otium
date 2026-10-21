@@ -1,0 +1,7 @@
+error[E0401]: `car` expected pair
+  --> tests/diagnostics/output/nested-call.ot:12:1
+   |
+12 | (h)
+   | ^^^
+   |
+   = note: run `otium explain E0401` for details

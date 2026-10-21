@@ -54,11 +54,10 @@
          utf8))
 
 (def- (%scalar-id name names index)
-  (if (%empty? names)
-      #f
-      (if (eq? name (car names))
-          index
-          (%scalar-id name (cdr names) (+ index 1)))))
+  (cond
+    ((%empty? names) #f)
+    ((eq? name (car names)) index)
+    (else (%scalar-id name (cdr names) (+ index 1)))))
 
 ;; Type codes shared with the runtimes: scalars by position in %scalars, then
 ;; layout kinds. They match native/ffi/native.h and chez/otium/ffi.sls.
@@ -148,21 +147,21 @@
   (%aggregate name fields KIND_UNION))
 
 (def- (%path d path offset)
-  (if (%empty? path)
-      (list d offset)
-      (if (= (car d) KIND_ARRAY)
-          (let ((index (%count "field" (car path)))
-                (element (car (cadddr d)))
-                (count (cadr (cadddr d))))
-            (if (>= index count)
-                (%fail "field" "bounds" "array field index out of bounds")
-                (%path element (cdr path) (%add "field" offset (%mul "field" index (cadr element))))))
-          (if (or (= (car d) KIND_STRUCT) (= (car d) KIND_UNION))
-              (let ((f (assq (car path) (cadddr d))))
-                (if f
-                    (%path (cadr f) (cdr path) (%add "field" offset (caddr f)))
-                    (%fail "field" "type" "unknown field")))
-              (%fail "field" "type" "field path descends into scalar")))))
+  (cond
+    ((%empty? path) (list d offset))
+    ((= (car d) KIND_ARRAY)
+     (let ((index (%count "field" (car path)))
+           (element (car (cadddr d)))
+           (count (cadr (cadddr d))))
+       (if (>= index count)
+           (%fail "field" "bounds" "array field index out of bounds")
+           (%path element (cdr path) (%add "field" offset (%mul "field" index (cadr element)))))))
+    ((or (= (car d) KIND_STRUCT) (= (car d) KIND_UNION))
+     (let ((f (assq (car path) (cadddr d))))
+       (if f
+           (%path (cadr f) (cdr path) (%add "field" offset (caddr f)))
+           (%fail "field" "type" "unknown field"))))
+    (else (%fail "field" "type" "field path descends into scalar"))))
 
 (def- (%resolve t path)
   (if (list? path)
@@ -189,11 +188,11 @@
 
 (def- (%call-type t result?)
   (let ((d (%describe t "bind")))
-    (if (or (= (car d) KIND_ARRAY) (and (not result?) (= (car d) KIND_VOID)))
-        (%fail "bind" "signature" "invalid call type")
-        (if (< (car d) KIND_STRUCT)
-            (car d)
-            d))))
+    (cond
+      ((or (= (car d) KIND_ARRAY) (and (not result?) (= (car d) KIND_VOID)))
+       (%fail "bind" "signature" "invalid call type"))
+      ((< (car d) KIND_STRUCT) (car d))
+      (else d))))
 
 (def (bind library name arguments result)
   (if (list? arguments)

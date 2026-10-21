@@ -7,18 +7,24 @@
 ;;
 ;; Scope is tracked in Otium data: a list whose entries are symbols (lexical
 ;; variables) or (name expansion writer) lists (local symbol macros). Each runtime
-;; supplies four natives:
+;; supplies six natives:
 ;;   (expander-application form)     lower an expanded application for the runtime
 ;;   (expander-macro-var sym)        the macro sym names as a var in the
 ;;                                   current namespace, else a false value
 ;;   (expander-invoke-macro m args)  run macro m on unevaluated argument forms
 ;;   (expander-native-syntax? sym)   true when sym is host syntax whose
 ;;                                   operands must not be walked (never on C)
+;;   (expander-locate from to)       give the output form to the source
+;;                                   position of the input form; returns to
+;;   (expander-fail code message form)  raise syntax error code from
+;;                                   lib/catalog/diagnostics.json about form
 ;;
 ;; Output is the input with macros replaced, parameter lists normalized to
 ;; dotted form, keywords and other non-literal atoms quoted, and body
 ;; definitions moved ahead of plain expressions. Each runtime then compiles
 ;; it with its own core forms.
+
+;; lint: allow-file(unbound-name) each runtime supplies the expander-* natives
 
 (def- expander-core-forms
   '(quote quasiquote
@@ -96,13 +102,13 @@
 ;; Expression evaluating to nil. ''nil keeps nil inside quoted data.
 (def- exp-nil-form ''nil)
 
-(def- (exp-fail message form)
-  (error message form))
+(def- (exp-fail code message form)
+  (expander-fail code message form))
 
 (def- (exp-proper! forms form)
   (if (list? forms)
       forms
-      (exp-fail "macroexpand: expected a proper list" form)))
+      (exp-fail "E0101" "macroexpand: expected a proper list" form)))
 
 (def- (exp-length-between? form low high)
   (if (list? form)
@@ -112,13 +118,13 @@
 (def- (exp-shape! form low high)
   (if (exp-length-between? form low high)
       form
-      (exp-fail "macroexpand: malformed form" form)))
+      (exp-fail "E0101" "macroexpand: malformed form" form)))
 
 ;; A name being bound: symbols only, and core form names stay reserved.
 (def- (exp-name! name form)
   (cond
-    ((not (symbol? name)) (exp-fail "macroexpand: expected a name" form))
-    ((exp-core? name) (exp-fail "macroexpand: cannot rebind a core form name" name))
+    ((not (symbol? name)) (exp-fail "E0101" "macroexpand: expected a name" form))
+    ((exp-core? name) (exp-fail "E0104" "macroexpand: cannot rebind a core form name" name))
     (else name)))
 
 ;; Literals that every runtime compiles as constants. Other atoms (keywords,
@@ -144,7 +150,7 @@
 (def- (exp-param! p seen form)
   (exp-name! p form)
   (if (exp-memq p seen)
-      (exp-fail "macroexpand: duplicate parameter" p)
+      (exp-fail "E0103" "macroexpand: duplicate parameter" p)
       p))
 
 (def- (exp-param-list ps seen form)
@@ -155,11 +161,11 @@
      (if (eq? (car ps) '&)
          (if (and (pair? (cdr ps)) (symbol? (car (cdr ps))) (null? (cdr (cdr ps))))
              (exp-param-list (car (cdr ps)) seen form)
-             (exp-fail "macroexpand: & must be followed by one rest parameter" form))
+             (exp-fail "E0103" "macroexpand: & must be followed by one rest parameter" form))
          (let ((p (exp-param! (car ps) seen form))
                (r (exp-param-list (cdr ps) (cons p seen) form)))
            (cons (cons p (car r)) (cdr r)))))
-    (else (exp-fail "macroexpand: invalid parameter list" form))))
+    (else (exp-fail "E0103" "macroexpand: invalid parameter list" form))))
 
 ;; --- macro calls ---------------------------------------------------------------
 
@@ -179,7 +185,10 @@
 ;; --- expressions ---------------------------------------------------------------
 
 (def- (exp-expr form scope)
-  (let ((form (exp-head form scope #f)))
+  (expander-locate form (exp-expr-located form scope)))
+
+(def- (exp-expr-located form scope)
+  (let ((form (expander-locate form (exp-head form scope #f))))
     (cond
       ((symbol? form) (exp-symbol form scope))
       ((pair? form) (exp-compound form scope))
@@ -216,7 +225,8 @@
     (cond
       ((eq? head 'quote) (exp-shape! form 2 2))
       ((eq? head 'quasiquote) (exp-shape! form 2 2) (list 'quasiquote (exp-qq (car (cdr form)) 1 scope)))
-      ((or (eq? head 'unquote) (eq? head 'unquote-splicing)) (exp-fail "macroexpand: unquote outside quasiquote" form))
+      ((or (eq? head 'unquote) (eq? head 'unquote-splicing))
+       (exp-fail "E0106" "macroexpand: unquote outside quasiquote" form))
       ((eq? head 'fn) (exp-fn form scope))
       ((eq? head 'let) (exp-let form scope))
       ((eq? head 'if) (exp-shape! form 3 4) (cons 'if (exp-exprs (cdr form) scope form)))
@@ -238,8 +248,8 @@
       ;; The runtime reports misplaced declarations with its own code.
       ((exp-memq head expander-declarations) form)
       ((or (eq? head 'def) (eq? head 'def-))
-       (exp-fail "macroexpand: definition is only allowed at top level or in a body" form))
-      (else (exp-fail "macroexpand: form requires top-level context" form)))))
+       (exp-fail "E0105" "macroexpand: definition is only allowed at top level or in a body" form))
+      (else (exp-fail "E0105" "macroexpand: form requires top-level context" form)))))
 
 (def- (exp-set! form scope)
   (exp-shape! form 3 3)
@@ -260,14 +270,14 @@
                      (list key (exp-expr (car (cdr name)) scope))
                      (list value (exp-expr (car (cdr (cdr form))) scope)))
                (expander-application (list 'set-applied! object key value)))))
-      (else (exp-fail "set!: expected a variable name or one-argument call" form)))))
+      (else (exp-fail "E0109" "set!: expected a variable name or one-argument call" form)))))
 
 (def- (exp-with-slots form scope)
   (exp-shape! form 3 #f)
   (let ((object (gensym "object"))
         (names (car (cdr (cdr form))))
         (value (gensym "value")))
-    (if (not (and (list? names) (exp-every? symbol? names))) (exp-fail "with-slots: expected slot names" form))
+    (if (not (and (list? names) (exp-every? symbol? names))) (exp-fail "E0101" "with-slots: expected slot names" form))
     (exp-expr (list 'let
                     (list (list object (car (cdr form))))
                     (cons 'symbol-macrolet
@@ -297,14 +307,14 @@
         (list 'let
               (list (list (car writer) (exp-expr value scope)))
               (exp-expr (car (cdr writer)) (cons (car writer) defined)))
-        (exp-fail "set!: symbol macro has no writer" (car entry)))))
+        (exp-fail "E0109" "set!: symbol macro has no writer" (car entry)))))
 
 ;; (symbol-macrolet ((name expansion) | (name expansion (param write-form)) ...) body...)
 (def- (exp-symbol-macrolet form scope)
   (exp-shape! form 2 #f)
   (let ((bs (car (cdr form))))
     (if (not (and (list? bs) (exp-every? exp-symbol-binding? bs)))
-        (exp-fail "symbol-macrolet: expected ((name expansion [(parameter write-form)]) ...)" form))
+        (exp-fail "E0102" "symbol-macrolet: expected ((name expansion [(parameter write-form)]) ...)" form))
     (let ((forms (exp-body (cdr (cdr form)) (exp-symbol-scope bs scope form))))
       (cond
         ((exp-any? exp-definition? forms) (cons 'let (cons '() forms)))
@@ -354,11 +364,11 @@
 
 (def- (exp-bindings bs form)
   (cond
-    ((not (list? bs)) (exp-fail "let: bad bindings" form))
+    ((not (list? bs)) (exp-fail "E0102" "let: bad bindings" form))
     ((exp-every? (fn (b) (and (exp-length-between? b 2 2) (symbol? (car b)))) bs)
      (exp-map (fn (b) (exp-name! (car b) form)) bs)
      bs)
-    (else (exp-fail "let: invalid binding" form))))
+    (else (exp-fail "E0102" "let: invalid binding" form))))
 
 (def- (exp-every? f xs)
   (if (pair? xs)
@@ -380,17 +390,17 @@
 (def- (exp-pairs bs scope form)
   (if (and (list? bs) (exp-every? (fn (b) (exp-length-between? b 2 2)) bs))
       (exp-map (fn (b) (exp-exprs b scope form)) bs)
-      (exp-fail "macroexpand: expected ((expression expression) ...)" form)))
+      (exp-fail "E0101" "macroexpand: expected ((expression expression) ...)" form)))
 
 ;; cond: (test body...) or (else body...).
 (def- (exp-cond-clauses cs scope)
   (exp-map (fn (c)
              (cond
-               ((not (exp-length-between? c 1 #f)) (exp-fail "cond: bad clause" c))
+               ((not (exp-length-between? c 1 #f)) (exp-fail "E0107" "cond: bad clause" c))
                ((eq? (car c) 'else)
                 (if (pair? (cdr c))
                     (cons 'else (exp-exprs (cdr c) scope c))
-                    (exp-fail "cond: else requires a body" c)))
+                    (exp-fail "E0107" "cond: else requires a body" c)))
                (else (exp-exprs c scope c))))
            cs))
 
@@ -402,19 +412,18 @@
 (def- (exp-try-forms forms scope form in-catches)
   (if (pair? forms)
       (let ((f (car forms)))
-        (if (exp-head-is? f 'catch)
-            (begin
-              (if (not (and (exp-length-between? f 2 #f)
-                            (exp-length-between? (car (cdr f)) 2 2)
-                            (symbol? (car (cdr (car (cdr f)))))))
-                  (exp-fail "try: expected (catch (predicate name) body...)" f))
-              (let ((pred (car (car (cdr f))))
-                    (var (exp-name! (car (cdr (car (cdr f)))) f)))
-                (cons (cons 'catch (cons (list (exp-expr pred scope) var) (exp-body (cdr (cdr f)) (cons var scope))))
-                      (exp-try-forms (cdr forms) scope form #t))))
-            (if in-catches
-                (exp-fail "try: catch clauses must follow the body" form)
-                (cons (exp-expr f scope) (exp-try-forms (cdr forms) scope form #f)))))
+        (cond
+          ((exp-head-is? f 'catch)
+           (if (not (and (exp-length-between? f 2 #f)
+                         (exp-length-between? (car (cdr f)) 2 2)
+                         (symbol? (car (cdr (car (cdr f)))))))
+               (exp-fail "E0108" "try: expected (catch (predicate name) body...)" f))
+           (let ((pred (car (car (cdr f))))
+                 (var (exp-name! (car (cdr (car (cdr f)))) f)))
+             (cons (cons 'catch (cons (list (exp-expr pred scope) var) (exp-body (cdr (cdr f)) (cons var scope))))
+                   (exp-try-forms (cdr forms) scope form #t))))
+          (in-catches (exp-fail "E0108" "try: catch clauses must follow the body" form))
+          (else (cons (exp-expr f scope) (exp-try-forms (cdr forms) scope form #f)))))
       '()))
 
 ;; restart-case: (restart-case expr (name ["description"] params body...) ...)
@@ -425,7 +434,7 @@
 
 (def- (exp-restart-clause c scope)
   (if (not (and (exp-length-between? c 2 #f) (symbol? (car c))))
-      (exp-fail "restart-case: expected (name [description] parameters body...)" c))
+      (exp-fail "E0101" "restart-case: expected (name [description] parameters body...)" c))
   (let ((described (exp-doc? (cdr c)))
         (rest (if described
                   (cdr (cdr c))
@@ -499,7 +508,7 @@
                     (cdr rest)
                     rest)))
     (if (not (exp-length-between? values 1 1))
-        (exp-fail "macroexpand: expected one value after an optional docstring" form))
+        (exp-fail "E0101" "macroexpand: expected one value after an optional docstring" form))
     (let ((value (exp-expr (car values) scope)))
       (if doc
           (list (car form) name (car rest) value)
@@ -526,7 +535,7 @@
       (let ((f (exp-head (car forms) scope #f)))
         (cond
           ((exp-head-is? f 'begin) (exp-body-scan (exp-append (exp-proper! (cdr f) f) (cdr forms)) scope))
-          ((exp-head-is? f 'def-) (exp-fail "def-: private definitions are only allowed at top level" f))
+          ((exp-head-is? f 'def-) (exp-fail "E0105" "def-: private definitions are only allowed at top level" f))
           ((exp-definition? f)
            (let ((r (exp-body-scan (cdr forms) (cons (exp-definition-name f #f) scope))))
              (cons (cons f (car r)) (cdr r))))
@@ -617,7 +626,8 @@
 
 ;; The runtimes call (*expander* form) for each top-level form, after
 ;; splitting top-level begin with (expander-expand-head form #f).
-(def *expander* exp-top)
+(def (*expander* form)
+  (expander-locate form (exp-top form)))
 
 (def- (exp-unquote x)
   (if (and (exp-head-is? x 'quote) (exp-length-between? x 2 2))
@@ -660,10 +670,10 @@
                  (exp-map (fn (clause)
                             (cond
                               ((not (and (pair? clause) (list? clause) (keyword? (car clause))))
-                               (exp-fail "ns: bad clause" clause))
+                               (exp-fail "E0110" "ns: bad clause" clause))
                               ((eq? (car clause) (keyword "require"))
                                (cons (car clause) (exp-require-specs (cdr clause))))
-                              (else (exp-fail "ns: unknown clause" clause))))
+                              (else (exp-fail "E0110" "ns: unknown clause" clause))))
                           (cdr (cdr form))))))
     (else form)))
 

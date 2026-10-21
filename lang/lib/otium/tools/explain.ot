@@ -1,0 +1,25 @@
+;; otium explain CODE...
+;; Print the catalog entry for each error or lint code, such as E0301 or L0001.
+;; A lint rule's name, such as if-chain, also works.
+(require otium.process (otium.diagnostics :as diagnostics) (otium.lint :as lint))
+
+(def (main arguments)
+  (if (null? arguments)
+      (begin
+        (otium.process/write-error "usage: otium explain CODE...\n")
+        2)
+      (let ((status 0))
+        (for-each (fn (code)
+                    (let ((rule (lint/rule-named code))
+                          (text (diagnostics/explain (if rule
+                                                         (rule :code)
+                                                         code))))
+                      (if text
+                          (print text)
+                          (begin
+                            (otium.process/write-error (str "otium explain: unknown code " code "\n"))
+                            (set! status 1)))))
+                  arguments)
+        status)))
+
+(exit (main (otium.process/arguments)))

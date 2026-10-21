@@ -5,10 +5,14 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 case "${1-}" in
     attach|mcp)
         PYTHONPATH="$root/tools" exec "${PYTHON:-python3}" -m otium_tools.client "$@" ;;
-    fmt|lint)
+    fmt)
+        shift
+        exec "$root/chez/run" --no-project "$root/lib/otium/tools/fmt.ot" -- "$@" ;;
+    lint|explain)
+        # Lint resolves requires through the project's load paths.
         tool=$1
         shift
-        exec "$root/chez/run" --no-project "$root/lib/otium/tools/$tool.ot" -- "$@" ;;
+        exec "$root/chez/run" "$root/lib/otium/tools/$tool.ot" -- "$@" ;;
 esac
 runtime=chez
 remaining=$#

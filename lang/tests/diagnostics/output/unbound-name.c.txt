@@ -1,0 +1,7 @@
+error[E0201]: unbound name `countr`
+ --> tests/diagnostics/output/unbound-name.ot:6:1
+  |
+6 | (bump!)
+  | ^^^^^^^
+  |
+  = note: run `otium explain E0201` for details

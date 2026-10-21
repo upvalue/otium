@@ -52,6 +52,7 @@
     (let . "(let ((name expression) ...) body ...) / (let loop ((name expression) ...) body ...)\nBind names sequentially: later initializers see earlier bindings. Named let creates a recursive loop.")
     (macro? . "(macro? value)\nReturn #t for an Otium macro value, otherwise #f. Macros receive unevaluated argument datums during expansion and are not ordinary procedures.")
     (macroexpand . "(macroexpand form)\nRepeatedly expand Otium macros at the head of form until its head is no longer a macro. This may run transformer side effects, but does not evaluate the resulting code or traverse subforms.")
+    (macroexpand-all . "(macroexpand-all form)\nExpand every macro call in form, including subforms, as the evaluator would before compiling it.")
     (macroexpand-1 . "(macroexpand-1 form)\nExpand a head Otium macro once in the defining namespace of this binding, or return form unchanged. Do not recursively traverse subforms or evaluate the result.")
     (name . "(name value)\nReturn the name of a symbol or keyword as a string; a string is returned unchanged.")
     (neg? . "(neg? number)\nReturn #t when the argument is negative, otherwise #f.")

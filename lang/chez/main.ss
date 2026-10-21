@@ -37,8 +37,7 @@
       '()))
 
 (guard (c [(ot:control-condition? c) (dev-stop!) (exit (ot:control-status c))]
-          [else (dev-stop!) (display-condition c (current-error-port))
-                (newline (current-error-port)) (exit 1)])
+          [else (dev-stop!) (report-condition c (current-error-port)) (exit 1)])
   (let ([script #f] [files '()] [paths '()] [project #f]
         [no-project #f] [repl? #f] [dev-path #f] [watchdog 2000] [serve? #f])
     (let loop ([args (cdr (command-line))])

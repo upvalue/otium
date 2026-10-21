@@ -1,0 +1,26 @@
+(require otium.test :refer (check report))
+(require otium.lint :as lint)
+
+(def (codes text)
+  (map (fn (d) (d :code)) (lint/lint-text text)))
+
+(check "quoted data" '() (codes "'(if a b (if c d e))"))
+(check "quoted bindings" '() (codes "'(let [x 1] x)"))
+(check "explicit quote" '() (codes "(quote (define x 1))"))
+(check "no top-level execution" '() (codes "(error 42)"))
+(check "namespace isolation" '() (codes "(def isolated 1)"))
+(check "namespace isolation" '("L0201") (codes "isolated"))
+(check "shadowing" '("L0202") (codes "(fn (x) (let ((x 1)) x))"))
+(check "no expansion"
+       '("L0001")
+       (map (fn (d) (d :code)) (lint/lint-text "(if a b (if c d e))" "example.ot" {:expand #f})))
+(let ((d (first (lint/lint-text "(fn (x) missing)" "example.ot"))))
+  (check "path" "example.ot" ((d :span) :path))
+  (check "line" 1 ((d :span) :line)))
+(check "first-line trailing suppression"
+       '()
+       (codes "(def (f x) ; lint: allow(if-chain) mirrors the spec\n  (if x 1 (if #f 2 3)))"))
+(check "nested next-form suppression"
+       '()
+       (codes "(def (f x)\n  ;; lint: allow(if-chain) mirrors the spec\n  (if x 1 (if #f 2 3)))"))
+(report "lint")

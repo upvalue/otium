@@ -161,7 +161,7 @@ parameter list, :always to always break any body, or :never."
       (let ((text (render (car unit) column rules 0)))
         (string-append text " " (render (cadr unit) (+ (end-column text column) 1) rules after)))))
 
-(def- (lines start column units indent close rules after)
+(def- (lines start _column units indent close rules after)
   "Append units to start, which ends at column. Each unit begins its own line at indent,
 except that a comment on the same source line as the previous unit stays there."
   (let ((out start)
@@ -219,7 +219,7 @@ except that a comment on the same source line as the previous unit stays there."
                                          (render-unit (car all) (+ column 1) rules (trailing (cdr all) close after)))))
           (lines first-text (end-column first-text column) (cdr all) (+ column 1) close rules after)))))
 
-(def- (render-body node head args column header close rules after)
+(def- (render-body _node head args column header close rules after)
   ;; Header arguments stay beside the head; the body is indented by two.
   (let ((out (string-append "(" (head :text)))
         (remaining args)

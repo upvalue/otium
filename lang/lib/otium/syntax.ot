@@ -6,7 +6,8 @@
 ;; Containers hold :children, which include comments; a :prefix node holds
 ;; its quoted form as :child. Every node records the :line and :column of its
 ;; first token, counted from zero, and :newlines, the number of line breaks
-;; between it and the previous token.
+;; between it and the previous token. Containers also record :end-line and
+;; :end-column, just past their closing delimiter.
 
 (def- (container-kind text)
   (cond
@@ -46,7 +47,11 @@
       (let ((kind (first token)))
         (cond
           ((eq? kind :open) (push-open! (put (node (container-kind (second token)) token) :children [])))
-          ((eq? kind :close) (emit! (pop-open!)))
+          ((eq? kind :close)
+           (let ((container (pop-open!)))
+             (put! container :end-line (nth token 2))
+             (put! container :end-column (+ (nth token 3) 1))
+             (emit! container)))
           ((eq? kind :prefix) (push-open! (node :prefix token)))
           ((eq? kind :comment) (comment! token))
           (else (emit! (node kind token))))))
@@ -81,3 +86,25 @@
     ((eq? (node :kind) :prefix) (walk (node :child) visit))
     ((get node :children) (for-each (fn (child) (walk child visit)) (node :children)))
     (else nil)))
+
+(def (end node)
+  "The line and column just past node's last character, as a list, counted from zero."
+  (cond
+    ((eq? (node :kind) :prefix) (end (node :child)))
+    ((get node :end-line) (list (node :end-line) (node :end-column)))
+    (else (let ((line (node :line))
+                (column (node :column)))
+            (for-each (fn (c)
+                        (if (equal? c "\n")
+                            (begin
+                              (set! line (+ line 1))
+                              (set! column 0))
+                            (set! column (+ column 1))))
+                      (array-to-list (string-split-chars (node :text))))
+            (list line column)))))
+
+(def- (string-split-chars text)
+  (let ((out []))
+    (dotimes (i (string-length text))
+      (push! out (substring text i (+ i 1))))
+    out))

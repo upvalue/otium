@@ -1,0 +1,58 @@
+;; Every error code both runtimes raise, triggered once each. Run with
+;; -L tests/diagnostics/lib for the namespace fixtures.
+(require otium.test :refer (check report))
+
+(def (raised thunk)
+  ;; The condition thunk raises, or nil.
+  (try
+    (begin
+      (thunk)
+      nil)
+    (catch ((fn (_) #t) c) c)))
+
+(def (code-of source)
+  ;; The :code of the condition raised by reading and evaluating source.
+  (let ((c (raised (fn () (eval (read-string source))))))
+    (and (table? c) (get c :code))))
+
+(for-each (fn (case) (check (first case) (first case) (code-of (second case))))
+          '(("E0001" "(def (f x)")
+            ("E0002" "\"abc")
+            ("E0003" ")")
+            ("E0004" "12abc")
+            ("E0005" "#(1 2)")
+            ("E0006" "\"\\q\"")
+            ("E0007" "(1 . 2 3)")
+            ("E0008" ":")
+            ("E0009" "'")
+            ("E0010" "")
+            ("E0101" "(if)")
+            ("E0102" "(let [x 1] x)")
+            ("E0103" "(fn (x x) x)")
+            ("E0104" "(fn (if) if)")
+            ("E0105" "(+ 1 (def x 2))")
+            ("E0106" "(list ,x)")
+            ("E0107" "(cond (else))")
+            ("E0108" "(try (catch (error? e) nil) 1)")
+            ("E0109" "(set! 3 4)")
+            ("E0110" "(ns diagnostics.bad-clause (:use other))")
+            ("E0201" "(frobnicate 1)")
+            ("E0202" "(require no.such.space)")
+            ("E0203" "(require private-space :refer (missing))")
+            ("E0204" "(require private-space :refer (hidden))")
+            ("E0205" "(require cycle-a)")
+            ("E0206" "(require wrong-name)")
+            ("E0301" "((fn (x) x) 1 2)")
+            ("E0302" "(3)")
+            ("E0401" "(car 5)")))
+
+;; Coded conditions carry their catalog type, an error subtype.
+(let ((c (raised (fn () (car 5)))))
+  (check "type" 'type-error (condition-type c))
+  (check "error subtype" #t (condition-of-type? c 'error))
+  (check "message" #t (string? (condition-message c))))
+
+;; Raising a value that is not a table still works, and adds nothing to it.
+(check "plain value" 42 (raised (fn () (error 42))))
+
+(report "diagnostic codes")

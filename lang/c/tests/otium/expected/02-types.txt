@@ -12,7 +12,7 @@ get-default: 99
 get-on-nil: nil
 get-in-nil-chain: nil
 get-in-hit: 1
-get-unsupported: get: expected nil, table, array, or string
+get-unsupported: `get` expected nil, table, array, or string
 put-nil-deletes: 1
 put-nil-gone: #f
 ctor-nil-deletes: 0

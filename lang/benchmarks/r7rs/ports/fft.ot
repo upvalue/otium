@@ -1,4 +1,5 @@
 ;; FFT -- Fast Fourier Transform, translated from Numerical Recipes in C.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
 
 (def (four1 data)
   (let ((n (length data))

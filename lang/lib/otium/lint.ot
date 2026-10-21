@@ -1,30 +1,598 @@
 (ns otium.lint)
-(require (otium.syntax :as syntax))
+(require (otium.syntax :as syntax) (otium.diagnostics :as diagnostics) (otium.diagnostics.catalog :as catalog))
 
-;; Source warnings. Each warning is a table with :line and :column, counted
-;; from one, a :rule name and a :message.
+;; Findings are diagnostics, as described in otium.diagnostics, with a :rule
+;; name and a :severity of :error for deny-level rules or :warning otherwise.
+;; Spans count lines and columns from one and give character offsets.
+;;
+;; Syntax rules look at the otium.syntax tree. Name rules look at macro
+;; expanded code: each file is expanded in a scratch namespace after loading
+;; its requires and evaluating its macros, function definitions and class
+;; declarations, but nothing else in it runs.
 
-(def- (warning node rule message)
-  {:line (+ (node :line) 1) :column (+ (node :column) 1) :rule rule :message message})
+(def rules
+  "Lint rules from the diagnostic catalog: tables of :code, :name, :title, :group and :level."
+  (let ((found []))
+    (for-each (fn (code)
+                (let ((entry (get catalog/entries code)))
+                  (when (get entry :name) (push! found (put entry :code code)))))
+              (keys catalog/entries))
+    found))
 
-(def- (if-chain node)
-  ;; (if a b (if c d e)) reads better as a cond.
+(def (rule-named name)
+  (or (find (fn (rule) (equal? (rule :name) name)) rules) nil))
+
+;; --- context ---------------------------------------------------------------------
+
+(def- (line-starts text)
+  ;; Character offset of the start of each line, counted from zero.
+  (let ((starts [0]))
+    (dotimes (i (string-length text))
+      (when (equal? (substring text i (+ i 1)) "\n") (push! starts (+ i 1))))
+    starts))
+
+(def- (make-context text path options)
+  {:text text
+   :path path
+   :starts (line-starts text)
+   :levels (get options :levels {})
+   :found []
+   :directives []
+   :defined {}})
+
+(def- (offset context line column)
+  (+ (get (context :starts) line) column))
+
+(def (node-span context node)
+  "The diagnostic span of a syntax node."
+  (let ((end (syntax/end node)))
+    {:path (context :path)
+     :line (+ (node :line) 1)
+     :column (+ (node :column) 1)
+     :start (offset context (node :line) (node :column))
+     :end (offset context (first end) (second end))}))
+
+(def- (level context rule)
+  (get (context :levels) (rule :name) (rule :level)))
+
+(def- (report! context name node fields)
+  ;; Record a finding of rule name at node, a syntax node or a span table.
+  (let ((rule (rule-named name)))
+    (when (not (eq? (level context rule) :allow))
+      (let ((d {:code (rule :code)
+                :rule name
+                :severity (if (eq? (level context rule) :deny)
+                              :error
+                              :warning)
+                :message (diagnostics/message (rule :code) fields)
+                :span (if (get node :kind)
+                          (node-span context node)
+                          node)}))
+        (for-each (fn (key) (when (get fields key) (put! d key (fields key)))) '(:help :notes :label :fix :name))
+        (push! (context :found) d)))))
+
+;; --- syntax rules ----------------------------------------------------------------
+
+(def- (if-chain context node _quoted)
   (when (equal? (syntax/head-name node) "if")
     (let ((parts (syntax/forms node)))
       (when (and (= (length parts) 4) (equal? (syntax/head-name (nth parts 3)) "if"))
-        (warning node "if-chain" "if in the else branch of an if; use cond")))))
+        (report! context "if-chain" node {})))))
 
-(def checks
-  "Functions taking a node and returning a warning or nil."
-  (list if-chain))
+(def- foreign-forms
+  {"define" "def" "defn" "def" "defun" "def" "lambda" "fn" "let*" "let" "letrec" "let" "letrec*" "let"})
 
-(def (lint-text text)
-  "Warnings for a whole source file, in source order."
-  (let ((found []))
-    (for-each (fn (top)
-                (syntax/walk top
-                             (fn (node)
-                               (for-each (fn (check) (let ((result (check node))) (when result (push! found result))))
-                                         checks))))
-              (syntax/parse text))
-    (array-to-list found)))
+(def- (foreign-definition context node quoted)
+  (let ((name (syntax/head-name node)))
+    (when (and (not quoted) name (get foreign-forms name) (not (get (context :defined) name)))
+      (let ((replacement (get foreign-forms name))
+            (head (syntax/head node)))
+        (report! context
+                 "foreign-definition"
+                 head
+                 {:form name
+                  :replacement replacement
+                  :fix {:span (node-span context head) :replacement replacement}})))))
+
+(def- bracket-forms
+  ;; Form name, index of the binding list among its forms, and what it takes.
+  {"let" "a list of (name value) pairs" "fn" "a parenthesized parameter list" "dotimes" "(name count)"})
+
+(def- (bracket-bindings context node _quoted)
+  (let ((name (syntax/head-name node)))
+    (when (and name (get bracket-forms name))
+      (let ((parts (syntax/forms node))
+            (named (and (equal? name "let") (> (length parts) 2) (eq? ((nth parts 1) :kind) :atom)))
+            (index (if named
+                       2
+                       1)))
+        (when (and (> (length parts) index) (eq? ((nth parts index) :kind) :array))
+          (report! context "bracket-bindings" (nth parts index) {:form name :expected (get bracket-forms name)}))))))
+
+(def- syntax-checks (list if-chain foreign-definition bracket-bindings))
+
+(def- (check-syntax context node quoted)
+  ;; Quoted data is not code, but a quasiquote template usually is.
+  (when (not quoted) (for-each (fn (check) (check context node quoted)) syntax-checks))
+  (cond
+    ((eq? (node :kind) :prefix) (check-syntax context (node :child) (or quoted (equal? (node :text) "'"))))
+    ((get node :children)
+     (let ((quoted (or quoted (equal? (syntax/head-name node) "quote"))))
+       (for-each (fn (child) (check-syntax context child quoted)) (node :children))))
+    (else nil)))
+
+;; --- suppression -----------------------------------------------------------------
+
+;; ";; lint: allow(rule ...) reason" covers the next form, or the form before
+;; it when the comment ends that form's line. "allow-file" covers the file.
+
+(def- (parse-directive text)
+  ;; {:file? :names :reason} for a lint comment, or nil.
+  (let ((body (string-trim (string-replace text ";" ""))))
+    (when (string-starts-with? body "lint:")
+      (let ((rest (string-trim (substring body 5)))
+            (file (string-starts-with? rest "allow-file("))
+            (open (cond
+                    (file 11)
+                    ((string-starts-with? rest "allow(") 6)
+                    (else nil))))
+        (if (nil? open)
+            {:file? #f :names [] :reason "" :malformed #t}
+            (let ((close (diagnostics-index rest ")" open)))
+              (if (nil? close)
+                  {:file? file :names [] :reason "" :malformed #t}
+                  {:file? file
+                   :names (filter (fn (name) (not (equal? name "")))
+                                  (string-split (string-replace (substring rest open close) "," " ")))
+                   :reason (string-trim (substring rest (+ close 1)))})))))))
+
+(def- (diagnostics-index text part from)
+  (let ((found nil)
+        (i from))
+    (while (and (not found) (<= (+ i (string-length part)) (string-length text)))
+      (when (equal? (substring text i (+ i (string-length part))) part) (set! found i))
+      (set! i (+ i 1)))
+    found))
+
+(def- (collect-directives! context children ancestors)
+  ;; Attach each lint comment among children to the form it covers.
+  (let ((items (array-to-list children)))
+    (let loop ((before nil)
+               (rest items))
+      (when (pair? rest)
+        (let ((node (car rest)))
+          (if (syntax/comment? node)
+              (let ((directive (parse-directive (node :text))))
+                (when directive
+                  (let ((outer (find (fn (parent) (= (parent :line) (node :line))) ancestors))
+                        (trailing (and before (= (node :newlines) 0)))
+                        (target (or outer
+                                    (if trailing
+                                        before
+                                        (find (fn (n) (not (syntax/comment? n))) (cdr rest))))))
+                    (when (and (directive :file?) (or before (pair? ancestors)))
+                      (put! directive :malformed #t)
+                      (put! directive :invalid-file #t))
+                    (put! directive :node node)
+                    (put! directive :used {})
+                    (put! directive :span (and target (node-span context target)))
+                    (push! (context :directives) directive)))
+                (loop before (cdr rest)))
+              (begin
+                (cond
+                  ((eq? (node :kind) :prefix)
+                   (when (get (node :child) :children)
+                     (collect-directives! context ((node :child) :children) (append ancestors (list node)))))
+                  ((get node :children) (collect-directives! context (node :children) (append ancestors (list node))))
+                  (else nil))
+                (loop node (cdr rest)))))))))
+
+(def- (check-directives! context)
+  (for-each (fn (directive)
+              (cond
+                ((get directive :malformed)
+                 (report! context
+                          "unknown-rule"
+                          (directive :node)
+                          {:rule (if (get directive :invalid-file)
+                                     "allow-file (must precede the first form)"
+                                     "lint:")}))
+                ((equal? (directive :reason) "") (report! context "unexplained-suppression" (directive :node) {})))
+              (for-each (fn (name)
+                          (when (nil? (rule-named name))
+                            (report! context "unknown-rule" (directive :node) {:rule name})))
+                        (directive :names)))
+            (context :directives)))
+
+(def- (suppressed? context d)
+  ;; True when a directive covers d; marks the rule used in that directive.
+  (let ((hit #f))
+    (for-each (fn (directive)
+                (when (and (not (get directive :malformed))
+                           (member (d :rule) (array-to-list (directive :names)))
+                           (or (directive :file?)
+                               (and (directive :span)
+                                    (<= ((directive :span) :start) ((d :span) :start))
+                                    (< ((d :span) :start) ((directive :span) :end)))))
+                  (put! (directive :used) (d :rule) #t)
+                  (set! hit #t)))
+              (context :directives))
+    hit))
+
+(def- (unused-directives! context)
+  (for-each (fn (directive)
+              (for-each (fn (name)
+                          (when (and (not (get directive :malformed))
+                                     (rule-named name)
+                                     (not (get (directive :used) name)))
+                            (report! context "unused-suppression" (directive :node) {:rule name})))
+                        (directive :names)))
+            (context :directives)))
+
+;; --- names -----------------------------------------------------------------------
+
+(def- definition-heads '("def" "def-" "defonce" "defparam" "defmacro" "defgeneric" "defclass" "defabstract"))
+
+(def- (collect-definitions! context tops)
+  ;; Names defined at top level, so forward references resolve.
+  (for-each (fn (node)
+              (let ((head (syntax/head-name node))
+                    (parts (if head
+                               (syntax/forms node)
+                               '())))
+                (cond
+                  ((and head (member head definition-heads) (> (length parts) 1))
+                   (let ((target (nth parts 1)))
+                     (cond
+                       ((eq? (target :kind) :atom) (put! (context :defined) (target :text) #t))
+                       ((and (eq? (target :kind) :list) (syntax/head-name target))
+                        (put! (context :defined) (syntax/head-name target) #t))
+                       (else nil))))
+                  ((equal? head "begin") (collect-definitions! context (rest parts)))
+                  (else nil))))
+            tops))
+
+(def- (atoms node quoted out)
+  ;; Unquoted atom nodes beneath node, in source order.
+  (cond
+    ((eq? (node :kind) :atom) (when (not quoted) (push! out node)))
+    ((eq? (node :kind) :prefix) (atoms (node :child) (or quoted (equal? (node :text) "'")) out))
+    ((get node :children) (for-each (fn (child) (atoms child quoted out)) (node :children)))
+    (else nil))
+  out)
+
+(def- (occurrence top name index)
+  ;; The index-th unquoted atom named name in top, or the first, or nil.
+  (let ((matches (filter (fn (a) (equal? (a :text) name)) (atoms top #f []))))
+    (cond
+      ((= (length matches) 0) nil)
+      ((< index (length matches)) (get matches index))
+      (else (get matches 0)))))
+
+(def- scratch-count 0)
+
+(def- (scratch-name)
+  (set! scratch-count (+ scratch-count 1))
+  (string->symbol (str "otium.lint.scratch-" scratch-count)))
+
+(def- (in-namespace space form)
+  (eval (list 'begin (list 'ns space) form)))
+
+(def- (function-definition? node)
+  (and (member (syntax/head-name node) '("def" "def-"))
+       (> (length (syntax/forms node)) 1)
+       (eq? ((nth (syntax/forms node) 1) :kind) :list)))
+
+(def- (top-datum context node)
+  (let ((span (node-span context node))) (read-string (substring (context :text) (span :start) (span :end)))))
+
+(def- (failure-text problem)
+  (if (string? (condition-message problem))
+      (condition-message problem)
+      (str problem)))
+
+;; A walk over expanded code records, per top-level form, each binding and
+;; free reference with the number of earlier occurrences of the same name, so
+;; it can be matched to the same occurrence in the source.
+
+(def- (make-walk)
+  {:seen {} :bindings [] :free [] :host 0})
+
+(def- (note! walk name)
+  (let ((count (get (walk :seen) name 0)))
+    (put! (walk :seen) name (+ count 1))
+    count))
+
+(def- (bind walk scope symbol kind)
+  (let ((name (symbol->string symbol))
+        (binding {:name name :used #f :kind kind :index (note! walk (symbol->string symbol))}))
+    (push! (walk :bindings) binding)
+    (cons binding scope)))
+
+(def- (bind-all walk scope symbols kind)
+  (reduce (fn (scope symbol) (bind walk scope symbol kind)) scope symbols))
+
+(def- (parameter-names params)
+  (cond
+    ((symbol? params) (list params))
+    ((pair? params) (cons (car params) (parameter-names (cdr params))))
+    (else '())))
+
+(def- (reference! walk scope symbol)
+  (let ((name (symbol->string symbol))
+        (index (note! walk name))
+        (binding (find (fn (b) (equal? (b :name) name)) scope)))
+    (cond
+      (binding (put! binding :used #t))
+      ((= (walk :host) 0) (push! (walk :free) {:name name :index index}))
+      (else nil))))
+
+(def- (walk-all walk scope forms)
+  (for-each (fn (form) (walk-form walk scope form)) (proper forms)))
+
+(def- (proper xs)
+  (if (pair? xs)
+      (cons (car xs) (proper (cdr xs)))
+      '()))
+
+(def- (body-definition? form)
+  (and (pair? form) (or (eq? (car form) 'def) (eq? (car form) 'def-))))
+
+(def- (definition-symbol form)
+  (let ((target (second form)))
+    (if (pair? target)
+        (car target)
+        target)))
+
+(def- (walk-body walk scope forms)
+  ;; Body definitions are visible throughout the body.
+  (let ((scope (bind-all walk scope (map definition-symbol (filter body-definition? (proper forms))) :definition)))
+    (for-each (fn (form)
+                (if (body-definition? form)
+                    (walk-definition walk scope form)
+                    (walk-form walk scope form)))
+              (proper forms))))
+
+(def- (walk-definition walk scope form)
+  (let ((target (second form)))
+    (if (pair? target)
+        (walk-body walk (bind-all walk scope (parameter-names (cdr target)) :parameter) (cdr (cdr form)))
+        (walk-all walk scope (cdr (cdr form))))))
+
+(def- (walk-quasi walk scope x depth)
+  (when (pair? x)
+    (cond
+      ((eq? (car x) 'quasiquote) (walk-quasi walk scope (second x) (+ depth 1)))
+      ((or (eq? (car x) 'unquote) (eq? (car x) 'unquote-splicing))
+       (if (= depth 1)
+           (walk-form walk scope (second x))
+           (walk-quasi walk scope (second x) (- depth 1))))
+      (else (walk-quasi walk scope (car x) depth) (walk-quasi walk scope (cdr x) depth)))))
+
+(def- (walk-form walk scope x)
+  (cond
+    ((symbol? x) (reference! walk scope x))
+    ((not (pair? x)) nil)
+    ((not (symbol? (car x))) (walk-all walk scope x))
+    (else (let ((head (car x))
+                (name (symbol->string (car x))))
+            (cond
+              ((eq? head 'quote) nil)
+              ((eq? head 'quasiquote) (walk-quasi walk scope (second x) 1))
+              ((eq? head 'fn)
+               (walk-body walk (bind-all walk scope (parameter-names (second x)) :parameter) (cdr (cdr x))))
+              ((eq? head 'let)
+               (if (symbol? (second x))
+                   (let ((bindings (proper (nth x 2))))
+                     (for-each (fn (b) (walk-form walk scope (second b))) bindings)
+                     (walk-body walk
+                                (bind-all walk (bind walk scope (second x) :loop) (map first bindings) :let)
+                                (cdr (cdr (cdr x)))))
+                   (let ((inner scope))
+                     (for-each (fn (b)
+                                 (walk-form walk inner (second b))
+                                 (set! inner (bind walk inner (first b) :let)))
+                               (proper (second x)))
+                     (walk-body walk inner (cdr (cdr x))))))
+              ((member head
+                       '(def def-
+                          defonce
+                          defparam))
+               (walk-definition walk scope x))
+              ((eq? head 'defmacro)
+               (walk-body walk (bind-all walk scope (parameter-names (nth x 2)) :parameter) (cdr (cdr (cdr x)))))
+              ((eq? head 'set!) (walk-all walk scope (cdr x)))
+              ((eq? head 'cond)
+               (for-each (fn (clause)
+                           (walk-all walk
+                                     scope
+                                     (if (eq? (first clause) 'else)
+                                         (rest clause)
+                                         clause)))
+                         (proper (cdr x))))
+              ((eq? head 'try)
+               (for-each (fn (part)
+                           (if (and (pair? part) (eq? (car part) 'catch))
+                               (let ((guard (second part)))
+                                 (walk-form walk scope (first guard))
+                                 (walk-body walk (bind walk scope (second guard) :catch) (cdr (cdr part))))
+                               (walk-form walk scope part)))
+                         (proper (cdr x))))
+              ((eq? head 'restart-case)
+               (walk-form walk scope (second x))
+               (for-each (fn (clause)
+                           (let ((rest (if (string? (second clause))
+                                           (cdr (cdr clause))
+                                           (cdr clause))))
+                             (walk-body walk (bind-all walk scope (parameter-names (car rest)) :parameter) (cdr rest))))
+                         (proper (cdr (cdr x)))))
+              ((member head '(handler-bind with-params))
+               (for-each (fn (pair) (walk-all walk scope pair)) (proper (second x)))
+               (walk-all walk scope (cdr (cdr x))))
+              ((eq? head 'defmethod)
+               (let ((signature (if (keyword? (second x))
+                                    (nth x 2)
+                                    (second x)))
+                     (body (if (keyword? (second x))
+                               (cdr (cdr (cdr x)))
+                               (cdr (cdr x))))
+                     (names (map (fn (p)
+                                   (if (pair? p)
+                                       (car p)
+                                       p))
+                                 (proper (cdr signature)))))
+                 (walk-body walk (bind-all walk scope names :method) body)))
+              ((member head
+                       '(ns require
+                          defclass
+                          defabstract
+                          defgeneric
+                          reset-class!
+                          reset-generic!))
+               nil)
+              ((string-starts-with? name "chez/")
+               ;; Chez syntax keeps its own binding forms, so names inside a chez/
+               ;; form count as uses of local bindings but are never reported.
+               (put! walk :host (+ (walk :host) 1))
+               (walk-all walk scope (cdr x))
+               (put! walk :host (- (walk :host) 1)))
+              (else (walk-all walk scope x)))))))
+
+(def- (bound-in? space names)
+  ;; For each name, whether it resolves in namespace space.
+  (if (null? names)
+      '()
+      (in-namespace space
+                    (list 'map '(fn (name) (not (nil? (describe name)))) (list 'quote (map string->symbol names))))))
+
+(def- (unresolved space names)
+  (let ((bound (bound-in? space names))
+        (out '()))
+    (for-each (fn (name)
+                (when (not (first bound)) (set! out (append out (list name))))
+                (set! bound (rest bound)))
+              names)
+    out))
+
+(def- (check-names! context space node datum)
+  (let ((walk (make-walk)))
+    (walk-form walk '() datum)
+    (let ((free (filter (fn (ref) (not (get (context :defined) (ref :name)))) (walk :free)))
+          (names (sort (keys (reduce (fn (seen ref) (put seen (ref :name) #t)) {} free))))
+          (unbound (unresolved space names)))
+      ;; The runtime installs natives into some namespaces, such as otium.ffi,
+      ;; when it creates them; the scratch namespace lacks those.
+      (when (and (pair? unbound) (symbol? (get context :namespace)))
+        (set! unbound (unresolved (context :namespace) unbound)))
+      (for-each (fn (name)
+                  (let ((ref (find (fn (r) (equal? (r :name) name)) free))
+                        (atom (occurrence node name (ref :index))))
+                    (when (not (get context :require-failed))
+                      (report! context
+                               "unbound-name"
+                               (or atom node)
+                               {:name name
+                                :notes (if atom
+                                           nil
+                                           ["the name comes from a macro expansion"])}))))
+                unbound))
+    (for-each (fn (binding)
+                (when (and (not (binding :used))
+                           (not (member (binding :kind) '(:loop :method)))
+                           (not (string-starts-with? (binding :name) "_")))
+                  (let ((atom (occurrence node (binding :name) (binding :index))))
+                    (when atom (report! context "unused-binding" atom {:name (binding :name)})))))
+              (walk :bindings))))
+
+(def- (requiring context thunk)
+  ;; Names from a namespace that failed to load would all look unbound, so a
+  ;; failed require turns the unbound-name rule off for the file.
+  (try
+    (thunk)
+    (catch ((fn (_) #t) problem)
+      (put! context :require-failed #t)
+      (error problem))))
+
+(def- (path-namespace path)
+  ;; The namespace a file under a lib/ directory is loaded as, or nil.
+  (let ((parts (array-to-list (string-split path "/")))
+        (after (member "lib" parts)))
+    (when (and after (pair? (cdr after)) (string-ends-with? path ".ot"))
+      (let ((name (string-join "." (cdr after)))) (string->symbol (substring name 0 (- (string-length name) 3)))))))
+
+(def- (prepare context space node)
+  ;; Evaluate what later forms need in order to expand, then return the
+  ;; expanded form to check, or nil when there is nothing to check.
+  (let ((head (syntax/head-name node))
+        (datum (top-datum context node)))
+    (cond
+      ((equal? head "ns")
+       (put! context :namespace (second datum))
+       (requiring context (fn () (in-namespace space (cons 'ns (cons space (cdr (cdr datum)))))))
+       nil)
+      ((equal? head "require") (requiring context (fn () (in-namespace space datum))) nil)
+      ((member head '("defclass" "defabstract" "defgeneric")) (in-namespace space datum) nil)
+      (else (when (or (equal? head "defmacro") (function-definition? node)) (in-namespace space datum))
+            (in-namespace space (list 'macroexpand-all (list 'quote datum)))))))
+
+(def- (expanded-definitions! context form)
+  ;; Names a top-level form defines once expanded, as macros like ffi/defcfn do.
+  (when (pair? form)
+    (cond
+      ((member (car form)
+               '(def def-
+                  defonce
+                  defparam
+                  defmacro))
+       (let ((name (definition-symbol form))) (when (symbol? name) (put! (context :defined) (symbol->string name) #t))))
+      ((eq? (car form) 'begin) (for-each (fn (f) (expanded-definitions! context f)) (proper (cdr form))))
+      (else nil))))
+
+(def- (check-expanded! context tops)
+  ;; Expand every form first, so definitions made by macros anywhere in the
+  ;; file are known before names are checked.
+  (put! context :namespace (path-namespace (context :path)))
+  (let ((space (scratch-name))
+        (expanded (map (fn (node)
+                         (try
+                           (prepare context space node)
+                           (catch ((fn (_) #t) problem)
+                             (report! context
+                                      "expansion-failed"
+                                      node
+                                      {:detail (failure-text problem)
+                                       :notes (if (get context :require-failed)
+                                                  ["unbound names are not checked in a file whose requires fail"]
+                                                  nil)})
+                             nil)))
+                       tops)))
+    (for-each (fn (form) (expanded-definitions! context form)) expanded)
+    (for-each (fn (node)
+                (when (first expanded) (check-names! context space node (first expanded)))
+                (set! expanded (rest expanded)))
+              tops)))
+
+;; --- entry -----------------------------------------------------------------------
+
+(def (lint-text text & arguments)
+  "Findings for a whole source file, in source order. Optional arguments are
+the path to report and an options table of :levels, rule names mapped to
+:deny, :warn or :allow, and :expand, false to skip the name rules."
+  (let ((path (if (pair? arguments)
+                  (first arguments)
+                  "<text>"))
+        (options (if (and (pair? arguments) (pair? (cdr arguments)))
+                     (second arguments)
+                     {}))
+        (context (make-context text path options))
+        (top (syntax/parse text))
+        (tops (filter (fn (node) (not (syntax/comment? node))) (array-to-list top))))
+    (collect-definitions! context tops)
+    (collect-directives! context top '())
+    (for-each (fn (node) (check-syntax context node #f)) tops)
+    (when (get options :expand #t) (check-expanded! context tops))
+    (check-directives! context)
+    (let ((kept (filter (fn (d) (not (suppressed? context d))) (array-to-list (context :found)))))
+      (put! context :found [])
+      (unused-directives! context)
+      (sort-by (fn (d) ((d :span) :start)) (append kept (array-to-list (context :found)))))))

@@ -1,0 +1,3 @@
+(ns private-space)
+
+(def- hidden 1)

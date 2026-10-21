@@ -1,0 +1,7 @@
+error[E0001]: unclosed form
+ --> tests/diagnostics/output/unclosed-form.ot:1:1
+  |
+1 | (def (area w h)
+  | ^
+  |
+  = note: run `otium explain E0001` for details

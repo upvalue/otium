@@ -30,7 +30,7 @@ fmt *args:
     ./otium fmt {{args}}
 
 lint *args:
-    ./otium lint {{args}}
+    @if [ "$#" -eq 0 ]; then set -- lib examples benchmarks; fi; ./otium lint "$@"
 
 # Format C sources with clang-format, or check with --check
 format-c *args:
@@ -48,6 +48,7 @@ gc-lint *args:
 generate:
     python3 tools/generate-cli.py
     python3 tools/generate-reference.py
+    python3 tools/generate-diagnostics.py
 
 # Regenerate the local SDL ABI manifest from the installed headers
 sdl-manifest *args:

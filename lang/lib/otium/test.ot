@@ -34,7 +34,7 @@
     (begin
       (thunk)
       #f)
-    (catch ((fn (c) #t) c) #t)))
+    (catch ((fn (_) #t) _) #t)))
 
 (defmacro fails? (subject)
   "(fails? thunk) or (fails? 'form): whether calling the thunk, or evaluating the form in the caller's namespace, raises a condition."

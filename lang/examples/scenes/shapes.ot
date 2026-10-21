@@ -1,7 +1,8 @@
+;; lint: allow-file(unbound-name) examples/sdl-host.ot supplies scene state and drawing
 (def revision "ORBIT / 01")
 
 ;; Save this function while either runtime is running. Phase lives in the host.
-(def (render! elapsed dt)
+(def (render! _elapsed dt)
   (set! scene-ticks (+ scene-ticks 1))
   (set! scene-phase (+ scene-phase dt))
   (clear! 13 19 32)

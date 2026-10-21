@@ -1,0 +1,12 @@
+(def (f x)
+  (+ 1 (car x)))
+
+(def (g y)
+  (list (f y) 2))
+
+(def (h)
+  (let ((v (g 5)))
+    v))
+
+(println "before")
+(h)

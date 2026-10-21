@@ -1,0 +1,5 @@
+ ;; lint: allow-file(unused-binding) fixture parameters
+(def (f unused) 1)
+;; lint: allow(if-chain) mirrors the spec
+(if #t 1 (if #f 2 3))
+(if #t 1 (if #f 2 3)) ; lint: allow(if-chain) mirrors the spec

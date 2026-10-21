@@ -1,4 +1,5 @@
 ;; ACK -- One of the Kernighan and Van Wyk benchmarks.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
 
 (def (ack m n)
   (cond

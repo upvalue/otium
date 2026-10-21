@@ -124,11 +124,10 @@
 
 (def (ref values name . fallback)
   (let ((entry (assoc name values)))
-    (if entry
-        (cadr entry)
-        (if (null? fallback)
-            #f
-            (car fallback)))))
+    (cond
+      (entry (cadr entry))
+      ((null? fallback) #f)
+      (else (car fallback)))))
 
 (def (present? values name)
   (if (assoc name values)
@@ -306,11 +305,10 @@
                    (let ((attached (if long?
                                        (and equal (substring token (+ equal 1) (string-length token)))
                                        (and (> (string-length token) 2) (substring token 2 (string-length token)))))
-                         (text (if attached
-                                   attached
-                                   (if (pair? (cdr tokens))
-                                       (cadr tokens)
-                                       (%fail (cadr field) token "option needs a value"))))
+                         (text (cond
+                                 (attached attached)
+                                 ((pair? (cdr tokens)) (cadr tokens))
+                                 (else (%fail (cadr field) token "option needs a value"))))
                          (rest (if attached
                                    (cdr tokens)
                                    (cddr tokens))))

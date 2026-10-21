@@ -31,7 +31,7 @@
   (run '(let ([count 0]) (twice (begin (set! count (+ count 1)) count)))))
 (check "macro value cannot be applied" #t (fails? (lambda () (run '(apply twice '(21))))))
 (check "arity error has macro context" #t
-  (fails-with? "macro transformer failed" (lambda () (run '(twice)))))
+  (fails-with? "macro `twice` failed while expanding" (lambda () (run '(twice)))))
 (run '(defmacro capture (expression) `(+ base ,expression)))
 (check "intentional use-site capture" 42 (run '(let ([base 40]) (capture 2))))
 (run '(defmacro sum expressions `(+ ,@expressions)))
@@ -106,7 +106,7 @@
                           (defmacro install (name value) `(def ,name ,value))
                           (install answer 42)))
     (run '(require generated :as g))
-    (fails-with? "definition would replace an import"
+    (fails-with? "definition of `g/answer` would replace an import"
       (lambda () (run '(install g/answer 99))))))
 (check "generated definition is exported" 42 (run 'g/answer))
 (check "generated body definitions" 1 (run '(let () (install x 1) x)))
@@ -157,7 +157,7 @@
 (check "imported macro can be lexically shadowed" 4
   (run '(let ([m/increment (fn (x) x)]) (m/increment 4))))
 (check "transformer failure" #t
-  (fails-with? "macro transformer failed" (lambda () (run '(m/explode)))))
+  (fails-with? "macro `explode` failed while expanding" (lambda () (run '(m/explode)))))
 (check "transformer failure restores namespace" 'user (namespace-name (current-namespace)))
 (source "macro-consumer"
   '((ns macro-consumer)
@@ -170,7 +170,7 @@
 (check "failed load restores caller" 'user (namespace-name (current-namespace)))
 (run '(defmacro recurse () '(recurse)))
 (check "unbounded expansion diagnosed" #t
-  (fails-with? "expansion limit exceeded" (lambda () (run '(recurse)))))
+  (fails-with? "macro expansion limit exceeded in `recurse`" (lambda () (run '(recurse)))))
 (check "fresh expansion budget after failure" 42 (run '(twice 21)))
 (check "malformed binding list rejected" #t
   (fails? (lambda () (run '(let ([x 1 2]) x)))))
@@ -181,7 +181,7 @@
     (lambda () (run '(defmacro if args 1)))))
 (run '(defmacro several-values () (chez/values 1 2)))
 (check "transformer must return one datum" #t
-  (fails-with? "macro transformer failed" (lambda () (run '(several-values)))))
+  (fails-with? "macro `several-values` failed while expanding" (lambda () (run '(several-values)))))
 (run '(defmacro malformed () '(if)))
 (check "invalid expansion cannot install definition" #t
   (fails? (lambda () (run '(def invalid (malformed))))))
@@ -204,7 +204,7 @@
 (check "transformer body expands when defined" '(quote x)
   (run '(macroexpand-1 '(compile-transformer x))))
 (check "referred macro cannot be overwritten" #t
-  (fails-with? "definition would replace an import"
+  (fails-with? "definition of `increment` would replace an import"
     (lambda () (run '(defmacro increment (x) x)))))
 (run '(ns macro-lib))
 (run '(def (helper x) (list '+ 'base (* 2 x))))
@@ -214,7 +214,7 @@
 (source "wrong-macro-ns"
   '((defmacro wrong () '(ns incorrect)) (wrong)))
 (check "generated ns respects required file name" #t
-  (fails-with? "source declares a different namespace"
+  (fails-with? "file declares namespace `incorrect` but was loaded as `wrong-macro-ns`"
     (lambda () (run '(require wrong-macro-ns)))))
 (check "failed generated ns restores caller" 'user (namespace-name (current-namespace)))
 (source "own-eval"

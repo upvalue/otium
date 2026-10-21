@@ -1,5 +1,6 @@
 ;; Shared driver for the Otium ports. The generated program defines
 ;; *benchmark-inputs* and *benchmark-implementation* before loading this file.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py defines the inputs first
 
 (def (bench-read)
   (if (pair? *benchmark-inputs*)

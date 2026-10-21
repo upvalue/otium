@@ -1,0 +1,6 @@
+(ns broken-space)
+
+(def (half n)
+  (/ n 2))
+
+(def value (half "four"))

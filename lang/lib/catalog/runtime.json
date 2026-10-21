@@ -583,6 +583,13 @@
     ],
     "chez": "(macroexpand form)\nRepeatedly expand Otium macros at the head of form until its head is no longer a macro. This may run transformer side effects, but does not evaluate the resulting code or traverse subforms."
   },
+  "macroexpand-all": {
+    "text": "(macroexpand-all form)\nExpand every macro call in form, including subforms, as the evaluator would before compiling it.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
   "macroexpand-1": {
     "text": "(macroexpand-1 form)\nExpand a macro at the head of form once; otherwise return form unchanged. Does not descend into subforms.",
     "runtimes": [
@@ -1126,6 +1133,18 @@
   },
   "expander-application": {
     "text": "(expander-application form)\nInternal shared-expander adapter for calls and slot inline caches.",
+    "runtimes": [
+      "c"
+    ]
+  },
+  "expander-locate": {
+    "text": "(expander-locate from to)\nInternal shared-expander adapter that carries source positions through expansion.",
+    "runtimes": [
+      "c"
+    ]
+  },
+  "expander-fail": {
+    "text": "(expander-fail code message form)\nInternal shared-expander adapter that raises a coded syntax error.",
     "runtimes": [
       "c"
     ]

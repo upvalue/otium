@@ -1,0 +1,4 @@
+(def (area w h)
+  (* w h)
+
+(println (area 2 3))

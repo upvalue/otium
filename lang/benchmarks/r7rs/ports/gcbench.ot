@@ -1,4 +1,5 @@
 ;; Allocation benchmark adapted from the Ellis/Boehm collector benchmark.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
 
 (def (make-node left right)
   [left right 0 0])
@@ -65,6 +66,6 @@
 (def (benchmark-main)
   (let ((count (bench-read))
         (input (bench-read))
-        (ignored-output (bench-read))
+        (_ignored-output (bench-read))
         (name (str "gcbench:" input ":" count)))
     (run-ported-benchmark name count (fn () (gcbench (bench-hide count input))) (fn (result) result))))

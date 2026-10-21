@@ -86,7 +86,7 @@
           (sdl/destroy-window (get window :window))
           (when (null? (ui/windows)) (sdl/quit)))
         (for-each (fn (cleanup) (cleanup)) (get window :cleanups))))
-    (catch ((fn (c) #t) c) (error {:type 'ui-teardown :message (str c) :cause c}))))
+    (catch ((fn (_) #t) c) (error {:type 'ui-teardown :message (str c) :cause c}))))
 
 (def- (sync! window)
   (when (get window :view)
@@ -158,7 +158,7 @@
                       (unwind-protect
                         (try
                           (frame! window)
-                          (catch ((fn (c) #t) c)
+                          (catch ((fn (_) #t) c)
                             (when (or (get (get window :options) :fail-fast?) (eq? (condition-type c) 'ui-teardown))
                               (error c))
                             (let ((key (list dev/revision c)))

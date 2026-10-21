@@ -78,18 +78,27 @@
       [(_ ((param value) more ...) body ...)
        (parameterize ([param value]) (ot-with-params (more ...) body ...))]))
 
+  ;; The expander passes the procedure call itself as the last operand, built
+  ;; from names it chose, so that the call keeps the source position of the
+  ;; Otium application and errors raised inside it point there.
   (define-syntax ot-call
-    (syntax-rules ()
-      [(_ callee arg ...)
-       (let ([f callee])
-         (if (procedure? f) (f arg ...) (collection-call f arg ...)))]))
+    (lambda (x)
+      (syntax-case x ()
+        [(_ callee call)
+         (syntax-case #'call ()
+           [(f arg ...)
+            #'(let ([f callee])
+                (if (procedure? f) call (collection-call f arg ...)))])])))
   ;; Keep procedure calls visible to Chez without going through the variadic
   ;; collection dispatcher. Preserve unary calls' argument-before-callee order.
   (define-syntax ot-unary-call
-    (syntax-rules ()
-      [(_ fallback cache callee arg)
-       (let* ([a arg] [f callee])
-         (if (procedure? f) (f a) (fallback cache f a)))]))
+    (lambda (x)
+      (syntax-case x ()
+        [(_ fallback cache callee arg call)
+         (syntax-case #'call ()
+           [(f a)
+            #'(let* ([a arg] [f callee])
+                (if (procedure? f) call (fallback cache f a)))])])))
   ;; All arguments must be proper lists, including the final one. Common
   ;; arities avoid packing arguments; the fallback uses native list helpers.
   (define ot-append

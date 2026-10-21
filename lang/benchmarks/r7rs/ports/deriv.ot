@@ -1,4 +1,5 @@
 ;; DERIV -- Symbolic derivation.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
 
 (def (deriv expression)
   (cond

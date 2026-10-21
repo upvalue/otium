@@ -945,6 +945,144 @@ void ot_repr_to(ots* state, otv value, bool display, void (*write)(void*, const 
 }
 
 /* =========================================================================
+ * DIAGNOSTICS
+ * ========================================================================= */
+
+/* Coded conditions use the catalog in lib/catalog/diagnostics.json. A
+ * condition is built as a table, given fields, then raised; raising fills its
+ * message from the code's template, replacing {key} with the key's field. */
+
+#include "diagnostic-catalog.inc"
+
+static const char* diagnostic_template(const char* code, const char** type) {
+  for (size_t i = 0; i < sizeof ot_diagnostic_entries / sizeof *ot_diagnostic_entries; i++)
+    if (strcmp(ot_diagnostic_entries[i].code, code) == 0) {
+      if (type != NULL) *type = ot_diagnostic_entries[i].type;
+      return ot_diagnostic_entries[i].message;
+    }
+  return NULL;
+}
+
+static void diagnostic_put(ots* state, otv* condition, const char* key, otv value) {
+  OT_FRAME_SCOPED(state, &value);
+  otv keyword = ot_intern(state, key, strlen(key), true);
+  OT_FRAME_SCOPED(state, &keyword);
+  ot_table_put(state, *condition, keyword, value);
+}
+
+static void diagnostic_put_string(ots* state, otv* condition, const char* key, const char* bytes,
+                                  size_t length) {
+  diagnostic_put(state, condition, key, ot_make_string(state, bytes, length));
+}
+
+static otv diagnostic_new(ots* state, const char* code) {
+  const char* type = "error";
+  if (diagnostic_template(code, &type) == NULL) abort();
+  otv condition = ot_table_new(state, 8);
+  OT_FRAME_SCOPED(state, &condition);
+  diagnostic_put(state, &condition, "type", ot_intern(state, type, strlen(type), false));
+  diagnostic_put_string(state, &condition, "code", code, strlen(code));
+  return condition;
+}
+
+static otv diagnostic_raise(ots* state, otv condition) {
+  OT_FRAME_SCOPED(state, &condition);
+  otv code_value = ot_table_get(state, condition, ot_intern(state, "code", 4, true), ot_nil);
+  const char* code_bytes;
+  size_t code_length;
+  char code[16] = {0};
+  if (ot_string_bytes(code_value, &code_bytes, &code_length) && code_length < sizeof code)
+    memcpy(code, code_bytes, code_length);
+  const char* template = diagnostic_template(code, NULL);
+  buf message = {0};
+  for (const char* cursor = template; cursor != NULL && *cursor != '\0'; cursor++) {
+    const char* close = *cursor == '{' ? strchr(cursor, '}') : NULL;
+    if (close == NULL) {
+      buf_byte(&message, *cursor);
+      continue;
+    }
+    otv key = ot_intern(state, cursor + 1, (size_t)(close - cursor - 1), true);
+    otv field = ot_table_get(state, condition, key, OT_UNDEFINED);
+    if (field == OT_UNDEFINED)
+      buf_write(&message, cursor, (size_t)(close - cursor + 1));
+    else
+      render_value(state, &message, field, is_type(field, OBJ_STRING) || is_type(field, OBJ_SYMBOL), 0);
+    cursor = close;
+  }
+  diagnostic_put_string(state, &condition, "message", message.data == NULL ? "" : message.data,
+                        message.length);
+  buf_free(&message);
+  return ot_raise_value(state, condition);
+}
+
+/* Character position, line and column (counted from one) of byte offset in
+ * source, counting UTF-8 code points as the Chez runtime counts characters. */
+static void source_position(const char* source, size_t offset, size_t* character, size_t* line,
+                            size_t* column) {
+  *character = 0;
+  *line = 1;
+  *column = 1;
+  for (size_t i = 0; i < offset; i++) {
+    unsigned char byte = (unsigned char)source[i];
+    if ((byte & 0xc0) == 0x80) continue;
+    (*character)++;
+    if (byte == '\n') {
+      (*line)++;
+      *column = 1;
+    } else {
+      (*column)++;
+    }
+  }
+}
+
+static otv source_span(ots* state, const char* name, const char* source, size_t start,
+                       size_t end) {
+  size_t character, line, column, end_character, end_line, end_column;
+  source_position(source, start, &character, &line, &column);
+  source_position(source, end, &end_character, &end_line, &end_column);
+  otv span = ot_table_new(state, 5);
+  OT_FRAME_SCOPED(state, &span);
+  diagnostic_put_string(state, &span, "path", name, strlen(name));
+  diagnostic_put(state, &span, "line", ot_make_int((int64_t)line));
+  diagnostic_put(state, &span, "column", ot_make_int((int64_t)column));
+  diagnostic_put(state, &span, "start", ot_make_int((int64_t)character));
+  diagnostic_put(state, &span, "end", ot_make_int((int64_t)end_character));
+  return span;
+}
+
+/* "2", "2 or 3", "1, 2 or 3" or "at least 2", as the Chez runtime words it. */
+static void arity_text(buf* out, size_t minimum, size_t maximum, bool rest) {
+  if (rest) {
+    buf_printf(out, "at least %zu", minimum);
+    return;
+  }
+  for (size_t n = minimum; n <= maximum; n++) {
+    if (n > minimum) buf_cstr(out, n == maximum ? " or " : ", ");
+    buf_printf(out, "%zu", n);
+  }
+}
+
+static otv raise_arity(ots* state, otv name, size_t minimum, size_t maximum, bool rest,
+                       size_t got) {
+  OT_FRAME_SCOPED(state, &name);
+  otv condition = diagnostic_new(state, "E0301");
+  OT_FRAME_SCOPED(state, &condition);
+  if (name == ot_nil) name = ot_make_string(state, "procedure", 9);
+  diagnostic_put(state, &condition, "name", name);
+  buf expected = {0};
+  arity_text(&expected, minimum, maximum, rest);
+  diagnostic_put_string(state, &condition, "expected", expected.data, expected.length);
+  diagnostic_put(state, &condition, "got", ot_make_int((int64_t)got));
+  buf label = {0};
+  buf_printf(&label, "expects %.*s argument%s, called with %zu", (int)expected.length,
+             expected.data, !rest && minimum == 1 && maximum == 1 ? "" : "s", got);
+  diagnostic_put_string(state, &condition, "label", label.data, label.length);
+  buf_free(&expected);
+  buf_free(&label);
+  return diagnostic_raise(state, condition);
+}
+
+/* =========================================================================
  * 4. READER
  * ========================================================================= */
 
@@ -979,14 +1117,34 @@ static void reader_space(reader* input) {
   }
 }
 
-static otv reader_error(reader* input, const char* message) {
-  return ot_raise(input->state, "%s: read error at byte %zu: %s", input->name, input->offset,
-                  message);
+/* Raise read error code, pointing from start to where reading stopped, or at
+ * the start alone for an unclosed form or string. A message that differs from
+ * the code's title, such as the C runtime's integer range, becomes a note. */
+static otv reader_error_at(reader* input, const char* code, const char* message, size_t start) {
+  ots* state = input->state;
+  otv condition = diagnostic_new(state, code);
+  OT_FRAME_SCOPED(state, &condition);
+  size_t end = input->incomplete ? start + 1 : (input->offset > start ? input->offset : start + 1);
+  if (end > input->length) end = input->length;
+  diagnostic_put(state, &condition, "span", source_span(state, input->name, input->source, start, end));
+  if (strcmp(message, diagnostic_template(code, NULL)) != 0) {
+    otv notes = ot_array_new(state, 1);
+    OT_FRAME_SCOPED(state, &notes);
+    otv note = ot_make_string(state, message, strlen(message));
+    ot_array_append(state, notes, note);
+    diagnostic_put(state, &condition, "notes", notes);
+  }
+  return diagnostic_raise(state, condition);
+}
+
+static otv reader_error(reader* input, const char* code, const char* message) {
+  return reader_error_at(input, code, message, input->offset);
 }
 
 static otv read_form(reader* input);
 
 static otv read_string(reader* input) {
+  size_t start = input->offset;
   input->offset++;
   buf bytes = {0};
   while (input->offset < input->length) {
@@ -1018,7 +1176,7 @@ static otv read_string(reader* input) {
                                                   : 16;
           if (digit == 16 || scalar > 0x10ffffu) {
             buf_free(&bytes);
-            return reader_error(input, "invalid hex escape");
+            return reader_error(input, "E0006", "invalid hex escape");
           }
           scalar = scalar * 16u + digit;
           digits++;
@@ -1026,12 +1184,12 @@ static otv read_string(reader* input) {
         if (input->offset == input->length) {
           input->incomplete = true;
           buf_free(&bytes);
-          return reader_error(input, "unterminated hex escape");
+          return reader_error_at(input, "E0002", "unterminated hex escape", start);
         }
         input->offset++;
         if (digits == 0 || scalar > 0x10ffffu || (scalar >= 0xd800u && scalar <= 0xdfffu)) {
           buf_free(&bytes);
-          return reader_error(input, "invalid Unicode scalar");
+          return reader_error(input, "E0006", "invalid Unicode scalar");
         }
         if (scalar < 0x80u) buf_byte(&bytes, (char)scalar);
         else {
@@ -1055,12 +1213,12 @@ static otv read_string(reader* input) {
       case 'e': buf_byte(&bytes, 27); break;
       case '"': buf_byte(&bytes, '"'); break;
       case '\\': buf_byte(&bytes, '\\'); break;
-      default: buf_free(&bytes); return reader_error(input, "unknown string escape");
+      default: buf_free(&bytes); return reader_error(input, "E0006", "unknown string escape");
     }
   }
   input->incomplete = true;
   buf_free(&bytes);
-  return reader_error(input, "unterminated string");
+  return reader_error_at(input, "E0002", "unterminated string", start);
 }
 
 static bool token_starts_number(const char* token, size_t length) {
@@ -1100,7 +1258,7 @@ static otv read_atom(reader* input) {
     input->offset++;
   const char* token = input->source + start;
   size_t length = input->offset - start;
-  if (length == 0) return reader_error(input, "expected a value");
+  if (length == 0) return reader_error(input, "E0010", "expected a value");
   if (length == 3 && memcmp(token, "nil", 3) == 0) return ot_nil;
   if ((length == 2 && memcmp(token, "#t", 2) == 0) ||
       (length == 5 && memcmp(token, "#true", 5) == 0))
@@ -1108,9 +1266,9 @@ static otv read_atom(reader* input) {
   if ((length == 2 && memcmp(token, "#f", 2) == 0) ||
       (length == 6 && memcmp(token, "#false", 6) == 0))
     return ot_false;
-  if (token[0] == '#') return reader_error(input, "reserved # token");
+  if (token[0] == '#') return reader_error(input, "E0005", "reserved # token");
   if (token[0] == ':') {
-    if (length == 1) return reader_error(input, "empty keyword");
+    if (length == 1) return reader_error(input, "E0008", "empty keyword");
     return ot_intern(input->state, token + 1, length - 1, true);
   }
   if (token_starts_number(token, length)) {
@@ -1129,13 +1287,13 @@ static otv read_atom(reader* input) {
         buf_free(&text);
         intptr_t narrowed = (intptr_t)integer;
         if ((intmax_t)narrowed != integer || !ot_int_fits(narrowed))
-          return reader_error(input, "integer out of range");
+          return reader_error(input, "E0004", "integer out of range");
         return ot_make_int(narrowed);
       }
     } else {
       if (!decimal_token(token, length)) {
         buf_free(&text);
-        return reader_error(input, "invalid number");
+        return reader_error(input, "E0004", "invalid number");
       }
       intmax_t integer = strtoimax(text.data, &end, 10);
       if (errno == 0 && end == text.data + length && strchr(text.data, '.') == NULL &&
@@ -1143,7 +1301,7 @@ static otv read_atom(reader* input) {
         buf_free(&text);
         intptr_t narrowed = (intptr_t)integer;
         if ((intmax_t)narrowed != integer || !ot_int_fits(narrowed))
-          return reader_error(input, "integer out of range");
+          return reader_error(input, "E0004", "integer out of range");
         return ot_make_int(narrowed);
       }
       errno = 0;
@@ -1154,12 +1312,13 @@ static otv read_atom(reader* input) {
       }
     }
     buf_free(&text);
-    return reader_error(input, "invalid number");
+    return reader_error(input, "E0004", "invalid number");
   }
   return ot_intern(input->state, token, length, false);
 }
 
 static otv read_sequence(reader* input, char closing, otv prefix) {
+  size_t start = input->offset;
   input->offset++;
   otv head = ot_null;
   otv tail = ot_nil;
@@ -1172,7 +1331,7 @@ static otv read_sequence(reader* input, char closing, otv prefix) {
     reader_space(input);
     if (input->offset == input->length) {
       input->incomplete = true;
-      return reader_error(input, "unclosed form");
+      return reader_error_at(input, "E0001", "unclosed form", start);
     }
     if (input->source[input->offset] == closing) {
       input->offset++;
@@ -1181,12 +1340,12 @@ static otv read_sequence(reader* input, char closing, otv prefix) {
     if (input->source[input->offset] == '.' &&
         (input->offset + 1 == input->length ||
          delimiter((unsigned char)input->source[input->offset + 1]))) {
-      if (tail == ot_nil) return reader_error(input, "dot without a preceding value");
+      if (tail == ot_nil) return reader_error(input, "E0007", "dot without a preceding value");
       input->offset++;
       reader_space(input);
       if (input->offset == input->length) {
         input->incomplete = true;
-        return reader_error(input, "unclosed dotted pair");
+        return reader_error_at(input, "E0001", "unclosed dotted pair", start);
       }
       item = read_form(input);
       if (item == OT_UNWIND) return item;
@@ -1195,10 +1354,10 @@ static otv read_sequence(reader* input, char closing, otv prefix) {
       reader_space(input);
       if (input->offset == input->length) {
         input->incomplete = true;
-        return reader_error(input, "unclosed dotted pair");
+        return reader_error_at(input, "E0001", "unclosed dotted pair", start);
       }
       if (input->source[input->offset] != closing)
-        return reader_error(input, "content after dotted tail");
+        return reader_error(input, "E0007", "content after dotted tail");
       input->offset++;
       return head;
     }
@@ -1221,7 +1380,7 @@ static otv read_quote(reader* input, const char* name, size_t name_length, size_
   reader_space(input);
   if (input->offset == input->length) {
     input->incomplete = true;
-    return reader_error(input, "quote without a value");
+    return reader_error(input, "E0009", "quote without a value");
   }
   otv symbol = ot_intern(input->state, name, name_length, false);
   otv value = ot_nil;
@@ -1249,7 +1408,7 @@ static otv read_form(reader* input) {
       return read_quote(input, "unquote", 7, 1);
     case ')':
     case ']':
-    case '}': return reader_error(input, "unexpected closing delimiter");
+    case '}': return reader_error(input, "E0003", "unexpected closing delimiter");
     default: return read_atom(input);
   }
 }
@@ -1509,8 +1668,11 @@ static otv resolve_var(ots* state, otv namespace_value, otv symbol, bool report_
     }
   }
   if (report_error) {
+    otv condition = diagnostic_new(state, "E0201");
+    OT_FRAME_SCOPED(state, &condition, &symbol);
     name = as_name(symbol);
-    return ot_raise(state, "unbound symbol: %.*s", (int)name->length, name->bytes);
+    diagnostic_put_string(state, &condition, "name", name->bytes, name->length);
+    return diagnostic_raise(state, condition);
   }
   return ot_nil;
 }
@@ -1571,6 +1733,8 @@ otv ot_raise_value(ots* state, otv condition) {
   return OT_UNWIND;
 }
 
+static otv raise_message(ots* state, const char* message, size_t length);
+
 otv ot_raise(ots* state, const char* format, ...) {
   buf message = {0};
   va_list args;
@@ -1585,22 +1749,64 @@ otv ot_raise(ots* state, const char* format, ...) {
     if (!message.failed) message.length = (size_t)length;
   }
   va_end(args);
-  otv condition = ot_table_new(state, 4);
-  OT_FRAME_SCOPED(state, &condition);
-  otv type_key = ot_nil;
-  otv message_key = ot_nil;
-  otv error_type = ot_nil;
-  otv text = ot_nil;
-  OT_FRAME_SCOPED(state, &type_key, &message_key, &error_type, &text);
-  type_key = ot_intern(state, "type", 4, true);
-  message_key = ot_intern(state, "message", 7, true);
-  error_type = ot_intern(state, "error", 5, false);
-  text = ot_make_string(state, message.data == NULL ? "error" : message.data,
-                        message.data == NULL ? 5 : message.length);
+  otv result = message.data == NULL ? raise_message(state, "error", 5)
+                                    : raise_message(state, message.data, message.length);
   buf_free(&message);
-  ot_table_put(state, condition, type_key, error_type);
-  ot_table_put(state, condition, message_key, text);
-  return ot_raise_value(state, condition);
+  return result;
+}
+
+/* Natives report a wrong argument type as "who: expected ...". Those become
+ * E0401, worded "`who` expected ..." as on Chez; special forms are excluded. */
+static otv raise_message(ots* state, const char* message, size_t length) {
+  const char* colon = memchr(message, ':', length);
+  static const char* const forms[] = {"require", "ns", "def", "def-", "defonce", "defmacro",
+                                      "let", "fn", "set!", "cond", "try", "quote", "quasiquote",
+                                      "unquote", "unquote-splicing", "compiler", "macroexpand"};
+  bool special = false;
+  if (colon != NULL)
+    for (size_t i = 0; i < sizeof forms / sizeof *forms; i++)
+      if (strlen(forms[i]) == (size_t)(colon - message) &&
+          memcmp(forms[i], message, (size_t)(colon - message)) == 0)
+        special = true;
+  if (colon == NULL || special || colon == message || memchr(message, ' ', (size_t)(colon - message)) ||
+      (size_t)(colon - message) + 11 > length || memcmp(colon, ": expected ", 11) != 0) {
+    otv text = ot_make_string(state, message, length);
+    OT_FRAME_SCOPED(state, &text);
+    otv condition = ot_table_new(state, 4);
+    OT_FRAME_SCOPED(state, &condition);
+    diagnostic_put(state, &condition, "type", ot_intern(state, "error", 5, false));
+    diagnostic_put(state, &condition, "message", text);
+    return ot_raise_value(state, condition);
+  }
+  const char* expected = colon + 11;
+  size_t expected_length = length - (size_t)(expected - message);
+  const char* argument = NULL;
+  for (size_t i = 0; i + 9 <= expected_length; i++)
+    if (memcmp(expected + i, " argument", 9) == 0) {
+      argument = expected + i;
+      break;
+    }
+  if (argument != NULL) {
+    /* "who: expected 2 or 3 arguments" is an arity error. */
+    otv condition = diagnostic_new(state, "E0301");
+    OT_FRAME_SCOPED(state, &condition);
+    diagnostic_put_string(state, &condition, "name", message, (size_t)(colon - message));
+    diagnostic_put_string(state, &condition, "expected", expected, (size_t)(argument - expected));
+    buf label = {0};
+    buf_printf(&label, "expects %.*s", (int)(expected_length), expected);
+    diagnostic_put_string(state, &condition, "label", label.data, label.length);
+    buf_free(&label);
+    return diagnostic_raise(state, condition);
+  }
+  otv condition = diagnostic_new(state, "E0401");
+  OT_FRAME_SCOPED(state, &condition);
+  buf detail = {0};
+  buf_printf(&detail, "`%.*s` %.*s", (int)(colon - message), message,
+             (int)(length - (size_t)(colon - message) - 2), colon + 2);
+  diagnostic_put_string(state, &condition, "detail", detail.data, detail.length);
+  diagnostic_put_string(state, &condition, "who", message, (size_t)(colon - message));
+  buf_free(&detail);
+  return diagnostic_raise(state, condition);
 }
 
 static otv compile_function_code(ots* state, otv params, otv body, otv env, otv namespace_value,
@@ -1737,6 +1943,23 @@ static void initialize_local(ots* state, otv code, otv* env, size_t slot, otv va
   ot_store(state, slots, &slots->values[slot], value);
 }
 
+/* The arity error for calling the interpreted function with argc arguments. */
+static otv raise_function_arity(ots* state, otv function_value, size_t argc) {
+  OT_FRAME_SCOPED(state, &function_value);
+  otv code = ((ot_function_obj*)ot_as_obj(function_value))->code;
+  size_t fixed = as_code(code)->fixed_arity;
+  if (fixed != SIZE_MAX) return raise_arity(state, as_code(code)->name, fixed, fixed, false, argc);
+  otv params = as_code(code)->params;
+  if (is_type(params, OBJ_PAIR) && symbol_is(as_pair(params)->car, "array"))
+    params = as_pair(params)->cdr;
+  size_t minimum = 0;
+  while (is_type(params, OBJ_PAIR) && !symbol_is(as_pair(params)->car, "&")) {
+    minimum++;
+    params = as_pair(params)->cdr;
+  }
+  return raise_arity(state, as_code(code)->name, minimum, minimum, params != ot_null, argc);
+}
+
 static otv bind_parameters(ots* state, otv function_value, otv* args, size_t argc) {
   OT_FRAME_SCOPED(state, &function_value);
   ot_function_obj* function = (ot_function_obj*)ot_as_obj(function_value);
@@ -1747,7 +1970,7 @@ static otv bind_parameters(ots* state, otv function_value, otv* args, size_t arg
   OT_FRAME_SCOPED(state, &code, &namespace_value, &params, &env);
   size_t count = as_code(code)->local_count;
   size_t fixed = as_code(code)->fixed_arity;
-  if (fixed != SIZE_MAX && fixed != argc) return ot_raise(state, "wrong number of arguments");
+  if (fixed != SIZE_MAX && fixed != argc) return raise_function_arity(state, function_value, argc);
   env = make_env(state, ot_nil, namespace_value, false, count);
   ((ot_env_obj*)ot_as_obj(env))->slot_count = count;
   if (fixed != SIZE_MAX) {
@@ -1763,7 +1986,7 @@ static otv bind_parameters(ots* state, otv function_value, otv* args, size_t arg
       params = as_pair(as_pair(params)->cdr)->car;
       break;
     }
-    if (index == argc) return ot_raise(state, "wrong number of arguments");
+    if (index == argc) return raise_function_arity(state, function_value, argc);
     params = as_pair(params)->cdr;
     initialize_local(state, code, &env, index, args[index]);
     index++;
@@ -1772,7 +1995,7 @@ static otv bind_parameters(ots* state, otv function_value, otv* args, size_t arg
     otv rest = list_from_array(state, args == NULL ? NULL : args + index, argc - index);
     initialize_local(state, code, &env, index, rest);
   } else if (params != ot_null || index != argc)
-    return ot_raise(state, "wrong number of arguments");
+    return raise_function_arity(state, function_value, argc);
   return env;
 }
 
@@ -3133,7 +3356,13 @@ static otv apply_value(ots* state, otv callable, otv* args, size_t argc, bool al
         }
     }
   } else {
-    result = ot_raise(state, "value is not callable");
+    otv condition = diagnostic_new(state, "E0302");
+    OT_FRAME_SCOPED(state, &condition, &callable);
+    buf text = {0};
+    render_value(state, &text, callable, false, 0);
+    diagnostic_put_string(state, &condition, "value", text.data, text.length);
+    buf_free(&text);
+    result = diagnostic_raise(state, condition);
   }
   ot_frame_pop(state, &args_frame);
   return result;
@@ -3761,8 +3990,14 @@ static otv vm_execute_loop(ots* state, size_t floor) {
         if (!is_type(value, OBJ_SYMBOL)) result = ot_raise(state, "vm: invalid namespace name");
         else {
           ot_namespace_obj* current = (ot_namespace_obj*)ot_as_obj(state->vm.current_namespace);
-          if (current->loading && current->name != value)
-            result = ot_raise(state, "ns: source declares a different namespace");
+          if (current->loading && current->name != value) {
+            otv condition = diagnostic_new(state, "E0206");
+            OT_FRAME_SCOPED(state, &condition, &value);
+            diagnostic_put(state, &condition, "declared", value);
+            current = (ot_namespace_obj*)ot_as_obj(state->vm.current_namespace);
+            diagnostic_put(state, &condition, "namespace", current->name);
+            result = diagnostic_raise(state, condition);
+          }
           else state->vm.current_namespace = namespace_find(state, value, true);
         }
       } else {
@@ -4095,7 +4330,12 @@ static otv require_one(ots* state, otv spec, otv caller) {
   ot_namespace_obj* space = (ot_namespace_obj*)ot_as_obj(target);
   space = (ot_namespace_obj*)ot_as_obj(target);
   if (!space->loaded || (reload && !symbol_is(name, "otium.generic"))) {
-    if (space->loading) return ot_raise(state, "require: circular load");
+    if (space->loading) {
+      otv condition = diagnostic_new(state, "E0205");
+      OT_FRAME_SCOPED(state, &condition);
+      diagnostic_put(state, &condition, "namespace", name);
+      return diagnostic_raise(state, condition);
+    }
     space->loading = true;
     state->vm.current_namespace = target;
     ot_module* module = find_module(state, name);
@@ -4110,6 +4350,8 @@ static otv require_one(ots* state, otv spec, otv caller) {
     }
     char* source = NULL;
     size_t length = 0;
+    ot_host_free(state->loaded_source_name);
+    state->loaded_source_name = NULL;
     bool found = state->loader != NULL &&
                  state->loader(state->loader_userdata, as_name(name)->bytes, &source, &length);
     if (state->vm.unwind_kind != UNWIND_NONE) {
@@ -4120,7 +4362,11 @@ static otv require_one(ots* state, otv spec, otv caller) {
     }
     if (found) {
       otv ignored;
-      bool ok = eval_source(state, source, length, as_name(name)->bytes, true, &ignored);
+      char* source_name = state->loaded_source_name;
+      state->loaded_source_name = NULL;
+      bool ok = eval_source(state, source, length,
+                            source_name != NULL ? source_name : as_name(name)->bytes, true, &ignored);
+      ot_host_free(source_name);
       ot_host_free(source);
       if (!ok) {
         state->vm.current_namespace = caller;
@@ -4130,8 +4376,10 @@ static otv require_one(ots* state, otv spec, otv caller) {
     } else if (module == NULL) {
       state->vm.current_namespace = caller;
       ((ot_namespace_obj*)ot_as_obj(target))->loading = false;
-      return ot_raise(state, "require: namespace %.*s not found", (int)as_name(name)->length,
-                      as_name(name)->bytes);
+      otv condition = diagnostic_new(state, "E0202");
+      OT_FRAME_SCOPED(state, &condition);
+      diagnostic_put(state, &condition, "namespace", name);
+      return diagnostic_raise(state, condition);
     }
     state->vm.current_namespace = caller;
     space = (ot_namespace_obj*)ot_as_obj(target);
@@ -4163,8 +4411,13 @@ static otv require_one(ots* state, otv spec, otv caller) {
         otv member = as_pair(names)->car;
         otv var = namespace_var(state, target, member, false);
         OT_FRAME_SCOPED(state, &member, &var);
-        if (!is_type(var, OBJ_VAR) || ((ot_var_obj*)ot_as_obj(var))->private_value)
-          return ot_raise(state, "require: missing or private var");
+        if (!is_type(var, OBJ_VAR) || ((ot_var_obj*)ot_as_obj(var))->private_value) {
+          otv condition = diagnostic_new(state, is_type(var, OBJ_VAR) ? "E0204" : "E0203");
+          OT_FRAME_SCOPED(state, &condition);
+          diagnostic_put(state, &condition, "namespace", name);
+          diagnostic_put(state, &condition, "name", member);
+          return diagnostic_raise(state, condition);
+        }
         ot_namespace_obj* caller_space = (ot_namespace_obj*)ot_as_obj(caller);
         otv refers = make_alias(state, member, var, caller_space->refers);
         caller_space = (ot_namespace_obj*)ot_as_obj(caller);
@@ -4513,9 +4766,8 @@ static otv vm_execute_dynamic(ots* state, unsigned char instruction, otv descrip
 
 static otv need_arity(ots* state, const char* name, int argc, int minimum, int maximum) {
   if (argc >= minimum && (maximum < 0 || argc <= maximum)) return ot_nil;
-  if (minimum == maximum)
-    return ot_raise(state, "%s: expected %d argument%s", name, minimum, minimum == 1 ? "" : "s");
-  return ot_raise(state, "%s: expected %d to %d arguments", name, minimum, maximum);
+  return raise_arity(state, ot_make_string(state, name, strlen(name)), (size_t)minimum,
+                     (size_t)(maximum < 0 ? minimum : maximum), maximum < 0, (size_t)argc);
 }
 
 static bool number_value(otv value, double* number, bool* integer) {
@@ -5923,6 +6175,7 @@ static otv nat_expander_invoke_macro(ots* state, otv* args, int argc) {
 
 static otv nat_expander_application(ots* state, otv* args, int argc) {
   if (need_arity(state, "expander-application", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (state->plain_expansion) return args[0];
   otv form = args[0], cache = ot_nil, callable = ot_nil;
   OT_FRAME_SCOPED(state, &form, &cache, &callable);
   size_t count = list_length(form);
@@ -5945,6 +6198,29 @@ static otv nat_expander_native_syntax(ots* state, otv* args, int argc) {
   (void)args;
   if (need_arity(state, "expander-native-syntax?", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   return ot_false;
+}
+
+static otv nat_expander_fail(ots* state, otv* args, int argc) {
+  if (need_arity(state, "expander-fail", argc, 3, 3) == OT_UNWIND) return OT_UNWIND;
+  const char* bytes;
+  size_t length;
+  char code[16] = {0};
+  if (!ot_string_bytes(args[0], &bytes, &length) || length >= sizeof code ||
+      diagnostic_template((memcpy(code, bytes, length), code), NULL) == NULL)
+    return ot_raise(state, "expander-fail: unknown code");
+  otv detail = args[1], form = args[2];
+  OT_FRAME_SCOPED(state, &detail, &form);
+  otv condition = diagnostic_new(state, code);
+  OT_FRAME_SCOPED(state, &condition);
+  diagnostic_put(state, &condition, "detail", detail);
+  diagnostic_put(state, &condition, "form", form);
+  return diagnostic_raise(state, condition);
+}
+
+// C does not track source positions through expansion yet.
+static otv nat_expander_locate(ots* state, otv* args, int argc) {
+  if (need_arity(state, "expander-locate", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  return args[1];
 }
 
 static otv nat_current_ns(ots* state, otv* args, int argc) {
@@ -6023,6 +6299,17 @@ static otv nat_macroexpand_one(ots* state, otv* args, int argc) {
   return expand_head(state, args[0], true);
 }
 
+// macroexpand-all runs the whole expander, leaving applications unlowered.
+static otv nat_macroexpand_all(ots* state, otv* args, int argc) {
+  if (need_arity(state, "macroexpand-all", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (state->expander == ot_nil) return args[0];
+  bool saved = state->plain_expansion;
+  state->plain_expansion = true;
+  otv result = apply_value(state, state->expander, args, 1, false);
+  state->plain_expansion = saved;
+  return result;
+}
+
 static otv nat_macroexpand(ots* state, otv* args, int argc) {
   if (need_arity(state, "macroexpand", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
   return expand_head(state, args[0], false);
@@ -6074,10 +6361,10 @@ static otv nat_read_string(ots* state, otv* args, int argc) {
   reader input = {.state = state, .source = source.data, .length = length, .name = "<string>"};
   otv value = read_form(&input);
   if (value != OT_UNWIND) {
-    if (value == OT_UNDEFINED) value = reader_error(&input, "read-string: empty input");
+    if (value == OT_UNDEFINED) value = reader_error(&input, "E0010", "read-string: empty input");
     else {
       reader_space(&input);
-      if (input.offset != input.length) value = reader_error(&input, "read-string: trailing input");
+      if (input.offset != input.length) value = reader_error(&input, "E0010", "read-string: trailing input");
     }
   }
   buf_free(&source);
@@ -6837,6 +7124,7 @@ static const nat_def core_nats[] = {
     {"read-file", nat_read_file},
     {"macroexpand-1", nat_macroexpand_one},
     {"macroexpand", nat_macroexpand},
+    {"macroexpand-all", nat_macroexpand_all},
     {"gensym", nat_gensym},
     {"current-ns", nat_current_ns},
     {"describe", nat_describe},
@@ -6844,6 +7132,8 @@ static const nat_def core_nats[] = {
     {"expander-invoke-macro", nat_expander_invoke_macro},
     {"expander-native-syntax?", nat_expander_native_syntax},
     {"expander-application", nat_expander_application},
+    {"expander-locate", nat_expander_locate},
+    {"expander-fail", nat_expander_fail},
     {"string<?", nat_string_less},
     {"error", nat_error},
     {"signal", nat_signal},
@@ -6929,11 +7219,25 @@ static bool eval_source(ots* state, const char* source, size_t length, const cha
   OT_FRAME_SCOPED(state, &result, &form);
   for (;;) {
     reader_space(&input);
+    size_t start = input.offset;
     form = read_form(&input);
     if (form == OT_UNDEFINED) break;
     if (form == OT_UNWIND) return false;
     result = expand ? run_top_form(state, form) : compile_and_run_form(state, form, ot_nil);
-    if (result == OT_UNWIND) return false;
+    if (result == OT_UNWIND) {
+      /* Point an error that has no location at the top-level form. */
+      otv condition = state->vm.condition;
+      otv span_key = ot_intern(state, "span", 4, true);
+      if (state->vm.unwind_kind == UNWIND_CONDITION && is_type(condition, OBJ_TABLE) &&
+          ot_table_get(state, condition, span_key, ot_nil) == ot_nil) {
+        OT_FRAME_SCOPED(state, &condition);
+        otv span = source_span(state, name, source, start, input.offset);
+        OT_FRAME_SCOPED(state, &span);
+        ot_table_put(state, condition, ot_intern(state, "span", 4, true), span);
+        state->vm.condition = condition;
+      }
+      return false;
+    }
   }
   if (out != NULL) *out = result;
   return true;
@@ -7052,6 +7356,14 @@ ots* ot_create(const ot_config* configuration) {
   state->type_parents = ot_table_new(state, 8);
   register_core(state);
   ot_table_put(state, state->type_parents, ot_intern(state, "error", 5, false), OT_UNDEFINED);
+  /* The diagnostic catalog's condition types are all errors. */
+  for (size_t i = 0; i < sizeof ot_diagnostic_entries / sizeof *ot_diagnostic_entries; i++) {
+    otv type = ot_intern(state, ot_diagnostic_entries[i].type, strlen(ot_diagnostic_entries[i].type),
+                         false);
+    OT_FRAME_SCOPED(state, &type);
+    otv error = ot_intern(state, "error", 5, false);
+    ot_table_put(state, state->type_parents, type, error);
+  }
 
   otv ignored;
   if (!eval_source(state, ot_expander_src, ot_expander_src_len, "<expander>", false, &ignored)) {
@@ -7099,6 +7411,7 @@ ots* ot_create(const ot_config* configuration) {
 
 void ot_destroy(ots* state) {
   if (state == NULL) return;
+  ot_host_free(state->loaded_source_name);
   for (otv cursor = state->exts; is_type(cursor, OBJ_EXT);) {
     ot_ext_obj* ext = (ot_ext_obj*)ot_as_obj(cursor);
     otv next = ext->next;
@@ -7153,6 +7466,13 @@ bool ot_eval_src(ots* state, const char* source, size_t length, const char* name
 }
 
 otv ot_condition(const ots* state) { return state->vm.condition; }
+
+void ot_set_source_name(ots* state, const char* name) {
+  ot_host_free(state->loaded_source_name);
+  size_t length = strlen(name);
+  state->loaded_source_name = ot_host_alloc(length + 1);
+  if (state->loaded_source_name != NULL) memcpy(state->loaded_source_name, name, length + 1);
+}
 
 void ot_clear_condition(ots* state) {
   state->vm.condition = ot_nil;

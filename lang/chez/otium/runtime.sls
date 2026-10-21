@@ -1,6 +1,7 @@
 (library (otium runtime)
   (export evaluate load-source require-namespace current-namespace namespace-name
-          load-path namespace-ref namespace-set! repl dev-start! dev-stop! dev-service! dev-run)
+          load-path namespace-ref namespace-set! repl dev-start! dev-stop! dev-service! dev-run
+          report-condition)
   (import (chezscheme) (prefix (otium generic-core) gm:)
           (prefix (otium conditions) ot:) (otium expander) (otium line-edit)
           (otium runtime-documentation) (otium reader)
@@ -220,26 +221,26 @@
       (lambda (macro args)
         (let ([budget (expansion-budget)])
           (when (= (vector-ref budget 0) 0)
-            (error 'macroexpand "expansion limit exceeded"
-              (otium-macro-name macro) (namespace-name space) (source-path)
-              (reverse (vector-ref budget 1))))
+            (ot:fail "E0111" 'macro (otium-macro-name macro)
+              'notes (val:array
+                       (format "most recent expansions: ~{~a~^, ~}" (reverse (vector-ref budget 1))))))
           (vector-set! budget 0 (- (vector-ref budget 0) 1))
           (vector-set! budget 1
             (cons (otium-macro-name macro)
               (let take ([names (vector-ref budget 1)] [n 11])
                 (if (or (null? names) (= n 0)) '()
                     (cons (car names) (take (cdr names) (- n 1))))))))
-        (guard (c [else
-                   (raise
-                     (condition
-                       (make-who-condition 'macroexpand)
-                       (make-message-condition "macro transformer failed")
-                       (make-irritants-condition
-                         (list (otium-macro-name macro) (namespace-name space)
-                               (source-path)
-                               (reverse (vector-ref (expansion-budget) 1))
-                               (call-with-string-output-port
-                                 (lambda (port) (display-condition c port)))))))])
+        (guard (c [(ot:control-condition? c) (raise c)]
+                  [else
+                   (let ([inner (if (ot:otium-condition? c) (ot:otium-value c) c)])
+                     (ot:fail "E0112" 'macro (otium-macro-name macro) 'cause inner
+                       'notes (val:array
+                                (string-append "caused by: "
+                                  (if (and (val:table? inner)
+                                           (string? (ot:condition-message inner)))
+                                      (ot:condition-message inner)
+                                      (call-with-string-output-port
+                                        (lambda (port) (display-condition c port))))))))])
           (parameterize ([current-namespace (otium-macro-namespace macro)])
             (call-with-values
               (lambda () (apply (otium-macro-transformer macro) args))
@@ -295,6 +296,16 @@
                       (lambda ()
                         (expander-head (namespace-expander space) form (cdr entry)))))) env))
             '((macroexpand-1 . #t) (macroexpand . #f)))
+          (define-top-level-value 'macroexpand-all
+            (lambda (form)
+              (parameterize ([current-namespace space])
+                (with-expansion
+                  (lambda ()
+                    (let ([expander (namespace-expander space)])
+                      (expander-top
+                        (make-expander (expander-lookup expander) (expander-native-syntax? expander)
+                          (expander-invoke expander) #t)
+                        form)))))) env)
           (define-top-level-value 'eval
             (lambda (form)
               (parameterize ([current-namespace space]) (evaluate form))) env)
@@ -373,14 +384,14 @@
 
   (define (import-value! space local target member)
     (unless (hashtable-contains? (namespace-definitions target) member)
-      (error 'require "namespace does not define this name"
-        (namespace-name target) member))
+      (ot:fail "E0203" 'namespace (namespace-name target) 'name member))
     (when (hashtable-contains? (namespace-privates target) member)
-      (error 'require "name is private" (namespace-name target) member))
+      (ot:fail "E0204" 'namespace (namespace-name target) 'name member))
     (unless (top-level-bound? member (namespace-environment target))
       (error 'require "syntax imports are not supported yet" member))
     (when (hashtable-contains? (namespace-definitions space) local)
-      (error 'require "import would replace a local definition" local))
+      (ot:fail "E0207" 'detail (format "import of `~a` would replace a local definition" local)
+        'name local))
     (let ([target-name (namespace-name target)])
       (define-top-level-syntax local
         (make-variable-transformer
@@ -400,25 +411,239 @@
                            (string->list (symbol->string name))))])
       ;; The standard library is searched after every user directory.
       (let search ([paths (append (load-path) (list (library-root)))])
-        (if (null? paths) (error 'require "namespace source not found" name (load-path))
+        (if (null? paths) (ot:fail "E0202" 'namespace name 'paths (apply val:array (load-path)))
             (let next-suffix ([suffixes '(".ot" ".scm")])
               (if (null? suffixes) (search (cdr paths))
                   (let ([path (string-append (car paths) "/" relative (car suffixes))])
                     (if (file-exists? path) path (next-suffix (cdr suffixes))))))))))
 
   (define (read-source path)
-    (parameterize ([source-path path])
-      (call-with-input-file path
-        (lambda (port)
-          (let loop ()
-            (let ([form (read-otium port path)])
-              (unless (eof-object? form)
-                (evaluate form)
-                (loop))))))))
+    (let ([positions (make-source-positions
+                       (call-with-port (open-file-input-port path)
+                         (lambda (port) (make-source-file-descriptor path port))))])
+      (parameterize ([source-path path] [current-source-positions positions])
+        (call-with-input-file path
+          (lambda (port)
+            (let loop ()
+              (let ([form (read-located port path)])
+                (unless (eof-object? form)
+                  (evaluate-located form)
+                  (loop)))))))))
+
+  ;; Read errors become coded conditions that point into the file.
+  (define (read-located port path)
+    (guard (e [(and (reader-location? e) (reader-location-code e))
+               (let* ([code (reader-location-code e)] [start (reader-location-start e)]
+                      [end (and start (if (member code '("E0001" "E0002")) (+ start 1)
+                                          (max (+ start 1) (reader-location-end e))))])
+                 (ot:fail code 'span
+                   (if start
+                       (span-table path (reader-location-line e) (reader-location-column e) start end)
+                       (void))))])
+      (read-otium port path)))
+
+  (define current-top-form (make-parameter #f))
+  (define (evaluate-located form)
+    (let ([source (source-of form)])
+      (parameterize ([current-top-form form])
+        (with-exception-handler
+          (lambda (e)
+            (when (ot:otium-condition? e)
+              (let ([c (ot:otium-value e)])
+                (when (val:table? c)
+                  (if (val:nil? (val:get c (keyword "span")))
+                      (locate! c)
+                      (note-require! c source)))))
+            (raise-continuable e))
+          (lambda () (evaluate form))))))
+
+  (define (span-table path line column start end)
+    (val:table (keyword "path") (display-path path) (keyword "line") line (keyword "column") column
+      (keyword "start") start (keyword "end") end))
+  ;; Paths in diagnostics drop . and .. segments, and are relative to the
+  ;; current directory when they lie beneath it.
+  (define (display-path path)
+    (let* ([absolute? (and (> (string-length path) 0) (char=? (string-ref path 0) #\/))]
+           [segments (let loop ([parts (split-path path)] [out '()])
+                       (cond [(null? parts) (reverse out)]
+                             [(member (car parts) '("" ".")) (loop (cdr parts) out)]
+                             [(and (equal? (car parts) "..") (pair? out) (not (equal? (car out) "..")))
+                              (loop (cdr parts) (cdr out))]
+                             [else (loop (cdr parts) (cons (car parts) out))]))]
+           [joined (apply string-append
+                     (if absolute? "/" "")
+                     (let join ([segments segments])
+                       (cond [(null? segments) '()]
+                             [(null? (cdr segments)) (list (car segments))]
+                             [else (cons (car segments) (cons "/" (join (cdr segments))))])))]
+           [here (string-append (current-directory) "/")])
+      (if (and absolute? (> (string-length joined) (string-length here))
+               (string=? (substring joined 0 (string-length here)) here))
+          (substring joined (string-length here) (string-length joined))
+          joined)))
+  (define (split-path path)
+    (let loop ([i 0] [start 0] [out '()])
+      (cond [(= i (string-length path)) (reverse (cons (substring path start i) out))]
+            [(char=? (string-ref path i) #\/) (loop (+ i 1) (+ i 1) (cons (substring path start i) out))]
+            [else (loop (+ i 1) start out)])))
+  (define (source-table source)
+    (span-table (source-file-descriptor-path (source-object-sfd source))
+      (source-object-line source) (source-object-column source)
+      (source-object-bfp source) (source-object-efp source)))
+
+  ;; Record where condition c came from while the stack that raised it is
+  ;; still there: the innermost Otium frames with source positions, else the
+  ;; form an expander error names, else the top-level form being evaluated.
+  (define (locate! c)
+    (when (equal? (val:get c (keyword "code")) "E0201")
+      (suggest-names! c))
+    (let ([frames (condition-frames c)])
+      (cond
+        [(and (equal? (val:get c (keyword "code")) "E0201")
+              (string? (val:get c (keyword "name")))
+              (or (and (pair? frames) (token-in-source (cdar frames) (val:get c (keyword "name"))))
+                  (let ([source (mentioning (current-top-form) (val:get c (keyword "name")))])
+                    (and source (token-in-source source (val:get c (keyword "name")))))))
+         => (lambda (span) (val:put! c (keyword "span") span))]
+        [(pair? frames)
+         (val:put! c (keyword "span") (source-table (cdar frames)))
+         (val:put! c (keyword "frames")
+           (apply val:array
+             (map (lambda (frame)
+                    (val:table (keyword "name") (or (car frame) (void))
+                      (keyword "span") (source-table (cdr frame))))
+                  frames)))]
+        [(source-of (val:get c (keyword "form")))
+         => (lambda (source) (val:put! c (keyword "span") (source-table source)))]
+        [(source-of (current-top-form))
+         => (lambda (source) (val:put! c (keyword "span") (source-table source)))])))
+
+;; Close spellings of an unbound name among the names visible in the
+  ;; current namespace, for "did you mean" help.
+  (define (suggest-names! c)
+    (let ([name (val:get c (keyword "name"))])
+      (when (string? name)
+        (let* ([space (current-namespace)]
+               [candidates (append (map symbol->string (environment-symbols (namespace-environment space)))
+                             (map symbol->string (vector->list (hashtable-keys (namespace-imports space)))))]
+               [limit (if (< (string-length name) 5) 1 2)]
+               [close (filter (lambda (candidate)
+                                (and (not (string=? candidate name))
+                                     (<= (edit-distance name candidate) limit)))
+                        candidates)]
+               [close (list-head (sort string<? (remove-duplicates close)) (min 3 (length (remove-duplicates close))))])
+          (unless (null? close)
+            (val:put! c (keyword "suggestions") (apply val:array close)))))))
+  (define (remove-duplicates strings)
+    (let loop ([strings strings] [out '()])
+      (cond [(null? strings) (reverse out)]
+            [(member (car strings) out) (loop (cdr strings) out)]
+            [else (loop (cdr strings) (cons (car strings) out))])))
+  (define (edit-distance a b)
+    (let* ([n (string-length a)] [m (string-length b)])
+      (if (> (abs (- n m)) 2) 3
+          (let ([row (make-vector (+ m 1) 0)])
+            (do ([j 0 (+ j 1)]) ((> j m)) (vector-set! row j j))
+            (do ([i 1 (+ i 1)]) ((> i n) (vector-ref row m))
+              (let loop ([j 1] [diagonal (vector-ref row 0)])
+                (vector-set! row 0 i)
+                (when (<= j m)
+                  (let ([above (vector-ref row j)])
+                    (vector-set! row j
+                      (min (+ above 1) (+ (vector-ref row (- j 1)) 1)
+                        (+ diagonal (if (char=? (string-ref a (- i 1)) (string-ref b (- j 1))) 0 1))))
+                    (loop (+ j 1) above)))))))))
+
+  (define (condition-frames c)
+    (let ([k (ot:condition-continuation-of c)])
+      (if (not k) '()
+          (let loop ([i (inspect/object k)] [depth 0] [frames '()])
+            (if (or (not (eq? (i 'type) 'continuation)) (= depth 200))
+                (reverse frames)
+                (loop (i 'link) (+ depth 1)
+                  (let ([source (or (otium-source (guard (e [#t #f]) (i 'source-object)))
+                                    (otium-source (guard (e [#t #f]) ((i 'code) 'source-object))))])
+                    (if (and source (not (and (pair? frames) (eq? (cdar frames) source))))
+                        (cons (cons (let ([code (i 'code)]) (and code (code 'name))) source) frames)
+                        frames))))))))
+
+  ;; Source objects from Otium files, which carry a line; Chez's own
+  ;; libraries do not.
+  (define (otium-source source)
+    (and source (source-object? source) (source-object-line source) source))
+
+  ;; The span of the first occurrence of the token name within source, or #f.
+  (define (token-in-source source name)
+    (let* ([path (source-file-descriptor-path (source-object-sfd source))]
+           [text (guard (e [#t #f]) (call-with-input-file path get-string-all))]
+           [n (string-length name)])
+      (and text (<= (source-object-efp source) (string-length text))
+           (let search ([i (source-object-bfp source)])
+             (cond
+               [(> (+ i n) (source-object-efp source)) #f]
+               [(and (string=? (substring text i (+ i n)) name)
+                     (or (= i 0) (token-boundary? (string-ref text (- i 1))))
+                     (or (= (+ i n) (string-length text)) (token-boundary? (string-ref text (+ i n)))))
+                (let count ([j 0] [line 1] [column 1])
+                  (if (= j i)
+                      (span-table path line column i (+ i n))
+                      (if (char=? (string-ref text j) #\newline)
+                          (count (+ j 1) (+ line 1) 1)
+                          (count (+ j 1) line (+ column 1)))))]
+               [else (search (+ i 1))])))))
+  (define (token-boundary? c)
+    (or (char-whitespace? c) (memv c '(#\( #\) #\[ #\] #\{ #\} #\' #\` #\, #\" #\;))))
+
+  ;; The source of the innermost list in form that has name as an element.
+  ;; An unbound reference leaves no frame behind, so this finds it instead.
+  (define (mentioning form name)
+    (and (pair? form)
+         (or (let loop ([x form])
+               (cond [(not (pair? x)) #f]
+                     [(and (pair? (car x)) (mentioning (car x) name))]
+                     [else (loop (cdr x))]))
+             (and (let loop ([x form])
+                    (cond [(not (pair? x)) #f]
+                          [(and (symbol? (car x)) (string=? (symbol->string (car x)) name)) #t]
+                          [else (loop (cdr x))]))
+                  (source-of form)))))
+
+  ;; An error from another file gains a note naming the top-level form here,
+  ;; at source, that led to it, such as a require.
+  (define (note-require! c source)
+    (let ([span (val:get c (keyword "span"))])
+      (when (and source (val:table? span)
+                 (not (equal? (val:get span (keyword "path"))
+                              (display-path (source-file-descriptor-path (source-object-sfd source))))))
+        (let ([notes (val:get c (keyword "notes"))])
+          (val:put! c (keyword "notes")
+            (apply val:array
+              (append (if (val:array? notes) (val:collection-apply list notes) '())
+                (list (format "reached from ~a:~a:~a"
+                        (display-path (source-file-descriptor-path (source-object-sfd source)))
+                        (source-object-line source) (source-object-column source))))))))))
+
+  ;; Print a condition that reached the top level. Otium conditions go through
+  ;; otium.diagnostics; anything that fails there falls back to Chez's display.
+  (define (report-condition c port)
+    (let ([value (and (ot:otium-condition? c) (ot:otium-value c))] [failure #f])
+      (or (and value (val:table? value)
+               (guard (e [#t (set! failure e) #f])
+                 (let ([render (namespace-ref (namespace-name (require-namespace 'otium.diagnostics #f))
+                                 'render)])
+                   (display (render value) port)
+                   #t)))
+          (begin
+            (display-condition c port)
+            (newline port)
+            (when failure
+              (display "note: otium.diagnostics could not render this error: " port)
+              (display-condition failure port)
+              (newline port))))))
 
   (define (load-namespace! space path)
     (when (namespace-loading? space)
-      (error 'require "circular namespace load" (namespace-name space)))
+      (ot:fail "E0205" 'namespace (namespace-name space)))
     (dynamic-wind
       (lambda () (namespace-loading?-set! space #t))
       (lambda ()
@@ -432,7 +657,7 @@
   (define (require-namespace name reload?)
     (let ([space (find-namespace name)])
       (when (namespace-loading? space)
-        (error 'require "circular namespace load" name))
+        (ot:fail "E0205" 'namespace name))
       (when (and (not (memq name '(otium.generic otium.process otium.reader)))
                  (or reload? (not (namespace-loaded? space))))
         (load-namespace! space (or (namespace-source space) (source-for name))))
@@ -516,7 +741,7 @@
                             (when (memq key seen) (invalid "duplicate slot option" key))
                             (set! seen (cons key seen))
                             (cond [(declaration-option? key "init")
-                                   (set! init (eval (expander-top (namespace-expander space) `(fn () ,value)) env))]
+                                   (set! init (compile-form (expander-top (namespace-expander space) `(fn () ,value)) env))]
                                   [(declaration-option? key "accessor")
                                    (unless (and (symbol? value)
                                                 (not (memv #\/ (string->list (symbol->string value)))))
@@ -612,8 +837,10 @@
                                       "expected type descriptor" (cadr p)))
                                   type))) (cdr head))]
                    [implementation
-                    (eval (expander-top (namespace-expander space) `(fn ,names ,@(cddr form)))
-                          env)])
+                    (compile-form
+                      (expander-top (namespace-expander space)
+                        (copy-source! form `(fn ,names ,@(cddr form))))
+                      env)])
               (gm:add-method! generic signature implementation qualifier))))
         (if (memq kind '(defclass defabstract reset-class!))
             (class-declaration! space form)
@@ -645,6 +872,27 @@
                (hashtable-set! (namespace-definitions space) name
                  "Generic procedure.")]))))))
 
+  ;; Code read from a file carries Chez source objects, so compiled code knows
+  ;; where each expression came from. Quoted data is left as it is.
+  (define (annotate x)
+    (if (current-source-positions) (annotate-form x) x))
+  (define (annotate-form x)
+    (if (pair? x)
+        (let ([source (source-of x)])
+          (when source (locate-call! x))
+          (let ([inner (if (eq? (car x) 'quote) x (annotate-tail x))])
+            (if source (make-annotation inner source x) inner)))
+        x))
+  ;; An application lowers to a macro whose last operand is the procedure
+  ;; call; it takes the application's position.
+  (define (locate-call! x)
+    (let ([call (car (last-pair x))])
+      (when (and (pair? call) (eq? (car call) call-function-name))
+        (copy-source! x call))))
+  (define (annotate-tail x)
+    (if (pair? x) (cons (annotate-form (car x)) (annotate-tail (cdr x))) x))
+  (define (compile-form form env) (eval (annotate form) env))
+
   (define (evaluate form)
     (ot:call-with-otium-control
       (lambda ()
@@ -663,7 +911,7 @@
          (unless (and (list? form) (>= (length form) 2) (symbol? (cadr form)))
            (error 'ns "expected (ns name)" form))
          (when (and (namespace-loading? space) (not (eq? (cadr form) (namespace-name space))))
-           (error 'ns "source declares a different namespace" (cadr form)))
+           (ot:fail "E0206" 'declared (cadr form) 'namespace (namespace-name space)))
          (current-namespace (find-namespace (cadr form)))
          (for-each (lambda (clause) (require-form (cdr clause))) (cddr form))]
         [(and (pair? form) (eq? (car form) 'require)) (require-form (cdr form))]
@@ -681,12 +929,13 @@
         [(and (pair? form) (eq? (car form) 'defmacro))
          (let ([form (expander-top expander form)])
            (when (hashtable-contains? (namespace-imports space) (cadr form))
-             (error 'defmacro "definition would replace an import" (cadr form)))
+             (ot:fail "E0207" 'detail (format "definition of `~a` would replace an import" (cadr form))
+               'name (cadr form)))
            (let ([transformer
-                  (eval `(fn ,(caddr form)
+                  (compile-form (copy-source! form `(fn ,(caddr form)
                            ,@(let ([body (cdddr form)])
                                (if (and (string? (car body)) (pair? (cdr body)))
-                                   (cdr body) body)))
+                                   (cdr body) body))))
                         env)])
              (define-top-level-value (cadr form)
                (make-otium-macro transformer space (cadr form)) env)
@@ -697,9 +946,10 @@
                 [kind (and (pair? form) (memq (car form) '(def def-)) (car form))]
                 [definition (and kind (if (pair? (cadr form)) (caadr form) (cadr form)))])
            (when (and definition (hashtable-contains? (namespace-imports space) definition))
-             (error 'def "definition would replace an import" definition))
+             (ot:fail "E0207" 'detail (format "definition of `~a` would replace an import" definition)
+               'name definition))
            (call-with-values
-             (lambda () (eval form env))
+             (lambda () (compile-form form env))
              (lambda results
                (when definition
                  (if (eq? kind 'def-)
@@ -777,8 +1027,7 @@
                    (guard (c [(and (ot:control-condition? c) (eq? (ot:control-kind c) 'exit))
                               (raise c)]
                              [else
-                              (display-condition c (current-error-port))
-                              (newline (current-error-port))
+                              (report-condition c (current-error-port))
                               (when editing?
                                 (close-port input)
                                 (set! input (make-line-input-port prompt repl-bindings)))
@@ -796,4 +1045,6 @@
         (lambda ()
           (when editing? (close-port input) (line-editor-close))))))
 
+  ;; Keep frames for non-tail primitive calls, so errors locate the expression.
+  (debug-level 2)
   (current-namespace (find-namespace 'user)))

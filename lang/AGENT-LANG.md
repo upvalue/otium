@@ -94,3 +94,21 @@ behind. Prefer expressing features in Otium over adding runtime escape hatches.
   for module paths. Check `(describe 'name)`, the [shared prelude](lib/otium/core.ot),
   and [portability notes](docs/portability.md) before assuming a familiar Scheme
   or Clojure API exists or has the same contract.
+
+## Diagnostics and lint
+
+- Run `just lint` to check `lib`, `examples`, and `benchmarks`, or
+  `./otium lint path/to/file.ot` for selected files. Lint runs on Chez.
+- `./otium explain E0201` explains an error code; `./otium explain L0201`
+  explains a lint rule. `./otium lint --rules` lists the rules and defaults.
+- Deny-level findings fail the command. Add `--deny-warnings` to fail on
+  warnings too, or `--format=short` / `--format=json` for tool output.
+- Suppress a rule for the next form with `;; lint: allow(if-chain) reason`,
+  or put the comment at the end of the form's first line. For a whole file,
+  put `;; lint: allow-file(if-chain) reason` before the first form.
+  Give a concrete reason; unknown rules and missing reasons are errors.
+- Project defaults use `(lint :allow (if-chain) :deny (unused-binding))` in
+  `project.ot`. Command-line `--allow RULE`, `--warn RULE`, and `--deny RULE`
+  override those defaults.
+- Name checks load dependencies and evaluate macros during expansion. Use
+  `--no-expand` for syntax checks without loading the program's dependencies.

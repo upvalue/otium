@@ -1,3 +1,4 @@
+;; lint: allow-file(unbound-name) examples/run_sdl.py prepends the SDL bindings and options
 (unwind-protect
   (begin
     (sdl-open! renderer-name audio-enabled?)

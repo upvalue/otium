@@ -1,5 +1,6 @@
 ;; EQUAL -- Exercise structural equality on several acyclic shapes.
 ;; The upstream cyclic-list case is defined but disabled, so it is omitted here.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
 
 (def (make-test-list1 n x)
   (if (zero? n)

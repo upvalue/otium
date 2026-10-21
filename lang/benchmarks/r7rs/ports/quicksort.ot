@@ -1,4 +1,5 @@
 ;; Hansen's quick-1 benchmark and its original random-number generator.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
 
 (def (partition! values left right less?)
   (let ((mid (get values right)))
@@ -86,7 +87,7 @@
   (let ((count (bench-read))
         (size (bench-read))
         (random-range (bench-read))
-        (ignored-output (bench-read))
+        (_ignored-output (bench-read))
         (name (str "quicksort:" size ":" count))
         (values (bench-make-array size 0))
         (i 0))

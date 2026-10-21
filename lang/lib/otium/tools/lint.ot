@@ -1,27 +1,128 @@
-;; otium lint PATH...
-;; Print warnings for Otium source files as PATH:LINE:COLUMN: RULE: MESSAGE.
-;; Warnings do not affect the exit status; unreadable files do.
-(require otium.process (otium.lint :as lint) (otium.tools.files :as files))
+;; otium lint [options] PATH...
+;; Report lint findings for Otium source files. Exit status 1 when a deny-level
+;; rule fires, or any rule with --deny-warnings, or a file cannot be read.
+(require otium.process
+         (otium.lint :as lint)
+         (otium.diagnostics :as diagnostics)
+         (otium.syntax :as syntax)
+         (otium.tools.files :as files))
+
+(def usage
+  "usage: otium lint [--format=human|short|json] [--deny-warnings] [--allow RULE] [--warn RULE]
+                  [--deny RULE] [--no-expand] [--rules] [--explain CODE] PATH...
+")
+
+(def- (fail! message)
+  (otium.process/write-error (str "otium lint: " message "\n"))
+  (exit 2))
+
+(def- (project-levels path)
+  ;; Levels from a (lint :allow (rule ...) :warn (...) :deny (...)) form in
+  ;; project.ot at path, or none when path is nil.
+  (let ((levels {}))
+    (when path
+      (for-each (fn (node)
+                  (when (equal? (syntax/head-name node) "lint")
+                    (let ((parts (rest (syntax/forms node))))
+                      (while (pair? parts)
+                        (let ((key (first parts))
+                              (names (if (pair? (rest parts))
+                                         (second parts)
+                                         nil)))
+                          (when (not (member (key :text) '(":allow" ":warn" ":deny")))
+                            (fail! (str "invalid lint level in " path ": " (key :text))))
+                          (when (and names (get names :children))
+                            (for-each (fn (name)
+                                        (when (nil? (lint/rule-named (name :text)))
+                                          (fail! (str "no lint rule named " (name :text) " in " path)))
+                                        (put! levels (name :text) (keyword (substring (key :text) 1))))
+                                      (syntax/forms names)))
+                          (set! parts
+                                (if (pair? (rest parts))
+                                    (rest (rest parts))
+                                    '())))))))
+                (syntax/parse (read-file path))))
+    levels))
+
+(def- (file-levels projects path overrides)
+  ;; The project's levels for the file at path, with command-line overrides.
+  (let ((project (files/project-file path))
+        (key (or project "")))
+    (when (nil? (get projects key)) (put! projects key (project-levels project)))
+    (reduce (fn (levels name) (put levels name (overrides name))) (projects key) (keys overrides))))
+
+(def- (print-rules)
+  (for-each (fn (rule)
+              (println (str (rule :code)
+                            " "
+                            (rule :name)
+                            " ("
+                            (keyword->string (rule :group))
+                            ", "
+                            (keyword->string (rule :level))
+                            "): "
+                            (rule :title))))
+            lint/rules))
+
+(def- (render-finding format d)
+  (cond
+    ((equal? format "short") (diagnostics/render-short d))
+    ((equal? format "json") (diagnostics/render-json d))
+    (else (str (diagnostics/render d) "\n"))))
 
 (def (main arguments)
-  (let ((status 0))
+  (let ((format "human")
+        (deny-warnings #f)
+        (expand #t)
+        (levels {})
+        (projects {})
+        (paths [])
+        (status 0)
+        (counts {:error 0 :warning 0}))
+    (let loop ((rest arguments))
+      (when (pair? rest)
+        (let ((argument (first rest)))
+          (cond
+            ((string-starts-with? argument "--format=")
+             (set! format (substring argument 9))
+             (when (not (member format '("human" "short" "json"))) (fail! (str "unknown format " format)))
+             (loop (cdr rest)))
+            ((equal? argument "--deny-warnings") (set! deny-warnings #t) (loop (cdr rest)))
+            ((equal? argument "--no-expand") (set! expand #f) (loop (cdr rest)))
+            ((equal? argument "--rules") (print-rules) (exit 0))
+            ((equal? argument "--explain")
+             (when (null? (cdr rest)) (fail! "--explain requires a code"))
+             (let ((text (diagnostics/explain (second rest))))
+               (when (nil? text) (fail! (str "unknown code " (second rest))))
+               (print text)
+               (exit 0)))
+            ((member argument '("--allow" "--warn" "--deny"))
+             (when (null? (cdr rest)) (fail! (str argument " requires a rule name")))
+             (when (nil? (lint/rule-named (second rest))) (fail! (str "no lint rule named " (second rest))))
+             (put! levels (second rest) (keyword (substring argument 2)))
+             (loop (cdr (cdr rest))))
+            ((member argument '("-h" "--help")) (print usage) (exit 0))
+            ((string-starts-with? argument "--") (fail! (str "unknown option " argument "\n" usage)))
+            (else (push! paths argument) (loop (cdr rest)))))))
+    (when (= (length paths) 0) (fail! (str "no paths\n" usage)))
     (for-each (fn (path)
                 (try
-                  (for-each (fn (warning)
-                              (println (string-append path
-                                                      ":"
-                                                      (number->string (warning :line))
-                                                      ":"
-                                                      (number->string (warning :column))
-                                                      ": "
-                                                      (warning :rule)
-                                                      ": "
-                                                      (warning :message))))
-                            (lint/lint-text (read-file path)))
+                  (for-each (fn (d)
+                              (put! counts (d :severity) (+ (counts (d :severity)) 1))
+                              (print (render-finding format d)))
+                            (lint/lint-text (read-file path)
+                                            path
+                                            {:levels (file-levels projects path levels) :expand expand}))
                   (catch (error? problem)
-                    (otium.process/write-error (string-append path ": " (condition-message problem) "\n"))
+                    (if (get problem :code)
+                        (print (render-finding format problem))
+                        (otium.process/write-error (str path ": " (condition-message problem) "\n")))
                     (set! status 1))))
-              (files/source-files arguments))
-    status))
+              (files/source-files (array-to-list paths)))
+    (when (and (equal? format "human") (> (+ (counts :error) (counts :warning)) 0))
+      (otium.process/write-error (str "lint: " (counts :error) " errors, " (counts :warning) " warnings\n")))
+    (if (or (> (counts :error) 0) (and deny-warnings (> (counts :warning) 0)))
+        1
+        status)))
 
 (exit (main (otium.process/arguments)))

@@ -520,7 +520,7 @@ static void test_named_let(void) {
         "let rejects a non-symbol named-let name");
   ot_clear_condition(state);
   check(evaluate(state, "(let loop ((value missing)) value)", &value) == false &&
-            condition_message_is(state, "unbound symbol: missing"),
+            condition_message_is(state, "unbound name `missing`"),
         "named let propagates initializer errors");
   ot_clear_condition(state);
   check(evaluate(state,

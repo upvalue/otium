@@ -11,6 +11,7 @@ edited=$(staged ACM)
 otium_files=$(printf '%s\n' $edited | grep -E '^(lib|examples|benchmarks)/.*\.ot$' || true)
 if [ -n "$otium_files" ]; then
     ./otium fmt --check $otium_files
+    ./otium lint --format=short --deny-warnings $otium_files
 fi
 if printf '%s\n' $edited | grep -qE '^(c|native|tests)/.*\.[ch]$'; then
     if command -v clang-format > /dev/null 2>&1 || command -v xcrun > /dev/null 2>&1; then

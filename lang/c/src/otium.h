@@ -148,6 +148,9 @@ void ot_destroy(ots* state);
 /* Replace the state's output and namespace-loading callbacks. */
 void ot_set_writer(ots* state, ot_writer writer, void* userdata);
 void ot_set_loader(ots* state, ot_loader loader, void* userdata);
+/* Called by a loader before it returns a namespace's source: the path to show
+ * in diagnostics for that source. Without it, the namespace name is shown. */
+void ot_set_source_name(ots* state, const char* name);
 /* Run synchronously at an interrupt safepoint, never in the signal handler.
  * The hook may re-enter evaluation; continue and abort restarts are active. */
 void ot_set_interrupt_hook(ots* state, ot_interrupt_hook hook, void* userdata);
@@ -637,6 +640,10 @@ struct ot_state {
   otv process_arguments;
   otv process_script;
   bool quit_requested;
+  /* Set by macroexpand-all so expansion leaves applications unlowered. */
+  bool plain_expansion;
+  /* The path the loader named for the source it is returning, or NULL. */
+  char* loaded_source_name;
   int quit_status;
   ot_writer writer;
   void* writer_userdata;

@@ -1,16 +1,28 @@
 (library (otium expander)
-  (export make-expander expander-top expander-head install-application!)
-  (import (chezscheme) (only (otium reader) read-otium)
-          (only (otium generic-core) make-slot-cache cached-call cached-set-call))
+  (export make-expander expander-top expander-head install-application! call-function-name
+          expander-lookup expander-native-syntax? expander-invoke)
+  (import (chezscheme) (only (otium reader) read-otium copy-source!)
+          (only (otium generic-core) make-slot-cache cached-call cached-set-call)
+          (only (otium conditions) fail))
 
   ;; The expander itself is lib/otium/expander.ot, read with the Otium
   ;; reader and evaluated with the Otium core forms. It uses no macros, so it
-  ;; needs no expansion. The runtime supplies the four natives it calls.
+  ;; needs no expansion. The runtime supplies the six natives it calls.
+  ;; A plain expander leaves applications as Otium wrote them, for tools that
+  ;; read expanded code; others lower them to the runtime's call macros.
   (define-record-type (expander make-expander expander?)
-    (fields lookup native-syntax? invoke))
+    (fields lookup native-syntax? invoke plain?)
+    (protocol (lambda (new)
+                (case-lambda
+                  [(lookup native-syntax? invoke) (new lookup native-syntax? invoke #f)]
+                  [(lookup native-syntax? invoke plain?) (new lookup native-syntax? invoke plain?)]))))
 
   (define unary-application-name (gensym "otium-unary-call"))
   (define application-name (gensym "otium-call"))
+  ;; Names for the callee and argument inside the call that the application
+  ;; macros receive; uninterned, so user code cannot refer to them.
+  (define call-function-name (gensym "function"))
+  (define call-argument-name (gensym "argument"))
   (define (install-application! env)
     (define-top-level-syntax unary-application-name
       (top-level-syntax 'otium-unary-call (environment '(otium core))) env)
@@ -28,20 +40,24 @@
 
   (define shared-environment
     (let ([env (copy-environment
-                 (environment '(otium core) '(only (otium conditions) error)))])
+                 (environment '(otium core) '(only (otium conditions) error fail)))])
       (define-top-level-value 'expander-application
         (lambda (form)
-          (cond [(= (length form) 2)
-                 (cons unary-application-name
-                   (cons (list 'quote cached-call)
-                     (cons (list 'quote (make-slot-cache)) form)))]
+          (cond [(expander-plain? (current-expander)) form]
+                [(= (length form) 2)
+                 (list unary-application-name (list 'quote cached-call)
+                   (list 'quote (make-slot-cache)) (car form) (cadr form)
+                   (list call-function-name call-argument-name))]
                 [(and (eq? (car form) 'set-applied!) (= (length form) 4))
                  (cons (list 'quote cached-set-call) (cons (list 'quote (make-slot-cache)) form))]
-                [else (cons application-name form)])) env)
+                [else (list application-name (car form) (cons call-function-name (cdr form)))])) env)
       (define-top-level-value 'expander-macro-var
         (lambda (name) ((expander-lookup (current-expander)) name)) env)
       (define-top-level-value 'expander-invoke-macro
         (lambda (macro args) ((expander-invoke (current-expander)) macro args)) env)
+      (define-top-level-value 'expander-locate copy-source! env)
+      (define-top-level-value 'expander-fail
+        (lambda (code message form) (fail code 'detail message 'form form)) env)
       (define-top-level-value 'expander-native-syntax?
         (lambda (name) ((expander-native-syntax? (current-expander)) name)) env)
       (let ([path (shared-source)])

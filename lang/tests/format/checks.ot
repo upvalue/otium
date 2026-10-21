@@ -105,9 +105,10 @@
                            (format/project-rules "(format (like begin cli/compile))")))
 
 (def (warnings text)
-  (map (fn (w) (list (w :line) (w :column) (w :rule) (w :message))) (lint/lint-text text)))
+  (map (fn (w) (list ((w :span) :line) ((w :span) :column) (w :rule) (w :message)))
+       (lint/lint-text text "<text>" {:expand #f})))
 
-(check '((2 3 "if-chain" "if in the else branch of an if; use cond"))
+(check '((2 3 "if-chain" "`if` in the else branch of an `if`; use `cond`"))
        (warnings "(def (f x)\n  (if a b (if c d e)))\n(if a b c)"))
 (check '() (warnings "(if a (if b c d) e)"))
 

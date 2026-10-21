@@ -243,6 +243,8 @@ The demo accepts `--app-name`, `--app-id`, `--app-version`, `--title`, and `--ic
 (PNG or BMP). Interactive launch requests foreground focus; `--background` skips
 that request. In `otium.ui.window`, `configure-app!` sets metadata before SDL
 video initialization, and `present-window!` installs the icon and requests focus.
+On macOS `configure-app!` also sets the process name to the app name through
+`otium.objc`; SDL names its default menu items from the metadata.
 
 macOS takes the app-switcher name from the executable's bundle. For development,
 run either runtime through the bundle launcher:

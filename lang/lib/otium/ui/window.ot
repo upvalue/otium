@@ -5,6 +5,7 @@
 (require (otium.ui.input :as input))
 (require (otium.sdl :as sdl))
 (require (otium.ffi :as ffi))
+(require (otium.objc :as objc))
 (require (otium.dev :as dev))
 
 (defonce running? #f)
@@ -18,7 +19,13 @@
                     "0"))
   (sdl/check (sdl/set-app-metadata (get options :name "Otium")
                                    (get options :version "")
-                                   (get options :id "org.otium.application"))))
+                                   (get options :id "org.otium.application")))
+  ;; Run from an interpreter, macOS would otherwise name the app after it.
+  (when (objc/available?)
+    (objc/send-as 'void
+                  (objc/send (objc/class "NSProcessInfo") "processInfo")
+                  "setProcessName:"
+                  (objc/nsstring (get options :name "Otium")))))
 
 (def (present-window! window options)
   "Install a PNG/BMP icon and optionally request foreground focus."

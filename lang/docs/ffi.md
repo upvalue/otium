@@ -46,3 +46,23 @@ Not done yet: structured error metadata on every failure path, allocation-failur
 injection and signature-cache sharing in C, and varargs. Only macOS
 arm64 with Chez 10.4.1 has been tested. Linux x86-64 must pass the same fixtures
 before it's claimed. The Chez aggregate path needs a Chez with `(& ftype)`.
+
+## Objective-C
+
+`otium.objc` sends Objective-C messages on macOS through `objc_msgSend`,
+binding one signature per combination of argument and result types on first
+use. `(objc/available?)` is false where the runtime can't be loaded.
+
+```scheme
+(require otium.objc :as objc)
+(def info (objc/send (objc/class "NSProcessInfo") "processInfo"))
+(objc/nsstring-text (objc/send info "processName"))
+(objc/send-as 'void info "setProcessName:" (objc/nsstring "Manse"))
+```
+
+`send` returns an object pointer and `send-as` takes the result's FFI type.
+Argument types come from the values: strings pass as C strings, integers as
+`long`, floats as `double`, booleans as `bool` and pointers (`ffi/pointer?`)
+as pointers; anything else is an error. Selectors that take other C types
+can't be called yet. `nsstring` and `nsstring-text` convert strings.
+`tests/objc/objc.ot` runs on both runtimes.

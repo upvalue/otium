@@ -271,7 +271,10 @@
   (string->symbol (str "otium.lint.scratch-" scratch-count)))
 
 (def- (in-namespace space form)
-  (eval (list 'begin (list 'ns space) form)))
+  (let ((previous (current-ns)))
+    (defer
+      (eval (list 'begin (list 'ns space) form))
+      (eval (list 'ns previous)))))
 
 (def- (function-definition? node)
   (and (member (syntax/head-name node) '("def" "def-"))

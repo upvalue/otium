@@ -9,6 +9,6 @@ case('ui calculator', 'tests/ui/calculator-checks.ot', paths=['examples'])
 case('ui editing', 'tests/ui/editing-checks.ot', paths=['examples'])
 case('ui policy', 'tests/ui/policy-checks.ot')
 case('otcl', 'tests/otcl.ot', paths=['examples/otcl'])
-case('format', 'tests/format/checks.ot', runtimes=['chez'])
-case('format corpus', 'tests/format/corpus.ot', runtimes=['chez'],
+case('format', 'tests/format/checks.ot')
+case('format corpus', 'tests/format/corpus.ot',
      arguments=['lib', 'examples', 'benchmarks'], timeout=120)

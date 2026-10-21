@@ -1,18 +1,9 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-# The formatter and linter run on Chez, whatever the selected runtime.
 case "${1-}" in
     attach|mcp)
         PYTHONPATH="$root/tools" exec "${PYTHON:-python3}" -m otium_tools.client "$@" ;;
-    fmt)
-        shift
-        exec "$root/chez/run" --no-project "$root/lib/otium/tools/fmt.ot" -- "$@" ;;
-    lint|explain)
-        # Lint resolves requires through the project's load paths.
-        tool=$1
-        shift
-        exec "$root/chez/run" "$root/lib/otium/tools/$tool.ot" -- "$@" ;;
 esac
 runtime=chez
 remaining=$#
@@ -49,6 +40,15 @@ while [ "$remaining" -gt 0 ]; do
         *) printf 'otium: unknown runtime: %s (expected c or chez)\n' "$runtime" >&2; exit 2 ;;
     esac
 done
+case "${1-}" in
+    fmt)
+        shift
+        set -- --no-project "$root/lib/otium/tools/fmt.ot" -- "$@" ;;
+    lint|explain)
+        tool=$1
+        shift
+        set -- "$root/lib/otium/tools/$tool.ot" -- "$@" ;;
+esac
 case "$runtime" in
     c)
         binary=${OTIUM_BUILD:-$root/build}/otium

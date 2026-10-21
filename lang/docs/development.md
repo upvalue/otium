@@ -119,7 +119,9 @@ A failed `check` prints the label, expected and actual values, and exits 1.
 just format-c --check
 ```
 
-Both Otium tools take files or directories, run on Chez, and are experimental.
+Both Otium tools take files or directories and run on either runtime. Chez is
+the default; use `./otium --runtime=c fmt ...` or `./otium --runtime=c lint ...`
+to run on C.
 The linter only warns; its one rule, `if-chain`, flags an `if` in the else
 branch of another `if`.
 
@@ -145,7 +147,7 @@ rule for the literal name in the source wins over an alias rule.
 spaces. Don't put strings in the `format` entry: launchers read every string in
 `project.ot` as a load path.
 
-Both tools read source with the Chez reader in token mode
+Both tools read source with the selected runtime's reader in token mode
 (`otium.reader/tokens`), which records each token's text and position. The tree,
 formatter and linter are in `lib/otium/`.
 

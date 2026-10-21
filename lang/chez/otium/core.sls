@@ -1,7 +1,7 @@
 (library (otium core)
 ;; This export list is the default vocabulary, independent of Chez additions.
   ;; Names here should exist on C too; Chez representations (vectors,
-  ;; hashtables, bytevectors, chars, continuations) are reached through
+  ;; hashtables, bytevectors, continuations) are reached through
   ;; (require chez).
   (export
     quote quasiquote unquote unquote-splicing if begin set! and or cond else
@@ -22,6 +22,9 @@
     for-each apply
     symbol? symbol->string string->symbol gensym
     string? string-length string=? string<? string>? string<=? string>=? string-append
+    string string-ref string->list list->string
+    char? char->integer integer->char char-upcase char-downcase
+    char-alphabetic? char-numeric? char-whitespace? eof-object eof-object?
     values
     display print println newline write
     (rename (ot-append append) (ot-call otium-call) (ot-unary-call otium-unary-call) (ot-substring substring) (ot-string->number string->number))

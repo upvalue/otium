@@ -100,11 +100,30 @@
                            [else (fail "unknown string escape" (eof-object? c))])])
                    (loop (cons escaped out)))]
                 [else (loop (cons c out))]))))
+    (define (char-literal name)
+      (let ([n (string-length name)])
+        (cond [(= n 0) (fail "character literal without a character" #t)]
+              [(= n 1) (string-ref name 0)]
+              [(assoc name '(("space" . #\space) ("newline" . #\newline) ("tab" . #\tab)
+                             ("return" . #\return) ("nul" . #\nul)))
+               => cdr]
+              [(eqv? (string-ref name 0) #\x)
+               (let ([digits (substring name 1 n)])
+                 (unless (for-all hex (string->list digits)) (fail "invalid character literal" #f))
+                 (let ([scalar (string->number digits 16)])
+                   (when (or (> scalar #x10ffff) (<= #xd800 scalar #xdfff))
+                     (fail "invalid Unicode scalar" #f))
+                   (integer->char scalar)))]
+              [else (fail "unknown character name" #f)])))
     (define (atom)
       (start-token)
+      ;; The character after #\ is taken even when it is a delimiter.
       (let* ([text (list->string
                      (let loop ([out '()])
-                       (if (delimiter? (peek)) (reverse out) (loop (cons (take) out)))))]
+                       (cond [(and (equal? out '(#\\ #\#)) (not (eof-object? (peek))))
+                              (loop (cons (take) out))]
+                             [(delimiter? (peek)) (reverse out)]
+                             [else (loop (cons (take) out))])))]
              [n (string-length text)])
         (define (at i) (and (< i n) (string-ref text i)))
         (define (digit? c) (and c (char<=? #\0 c #\9)))
@@ -116,6 +135,7 @@
               [(string=? text "nil") (void)]
               [(member text '("#t" "#true")) #t]
               [(member text '("#f" "#false")) #f]
+              [(and (eqv? (at 0) #\#) (eqv? (at 1) #\\)) (char-literal (substring text 2 n))]
               [(eqv? (at 0) #\#) (fail "reserved # token" #f)]
               [(eqv? (at 0) #\:)
                (when (= n 1) (fail "empty keyword" #f))

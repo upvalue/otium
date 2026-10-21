@@ -112,7 +112,7 @@
 (check 9 (get t (list :x 2)))
 (check #t (fails? (fn () (set-car! pair-key :y))))
 (check #t (fails? (fn () (set-cdr! (cdr pair-key) '()))))
-(check "λ" (get "aλb" 1))
+(check (integer->char 955) (get "aλb" 1))
 (check 3 (length "aλb"))
 
 (defmacro reader-values (x y)

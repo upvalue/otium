@@ -435,7 +435,7 @@
     ]
   },
   "get": {
-    "text": "(get collection key [default])\nLook up a table key or an array/string index. Missing entries and nil collections return default (nil if omitted). String indexing returns a one-character string.",
+    "text": "(get collection key [default])\nLook up a table key or an array/string index. Missing entries and nil collections return default (nil if omitted). String indexing returns a char.",
     "runtimes": [
       "c",
       "chez"
@@ -1279,6 +1279,104 @@
   },
   "class-subtype?": {
     "text": "(class-subtype? child parent)\nTest whether child is parent or descends from it through abstract parents. Both arguments must be class descriptors.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "char?": {
+    "text": "(char? value)\nTest whether value is a char.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "char->integer": {
+    "text": "(char->integer char)\nThe Unicode code point of char.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "integer->char": {
+    "text": "(integer->char n)\nThe char with code point n; raise an error for surrogates and values above #x10FFFF.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "char-upcase": {
+    "text": "(char-upcase char)\nUppercase an ASCII letter; other chars are returned unchanged on C.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "char-downcase": {
+    "text": "(char-downcase char)\nLowercase an ASCII letter; other chars are returned unchanged on C.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "char-alphabetic?": {
+    "text": "(char-alphabetic? char)\nTest for a letter. ASCII-only on C.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "char-numeric?": {
+    "text": "(char-numeric? char)\nTest for a decimal digit. ASCII-only on C.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "char-whitespace?": {
+    "text": "(char-whitespace? char)\nTest for whitespace. ASCII-only on C.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "string": {
+    "text": "(string char ...)\nBuild a string from chars.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "string->list": {
+    "text": "(string->list string)\nA list of the chars in string.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "list->string": {
+    "text": "(list->string list)\nBuild a string from a list of chars.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "string-ref": {
+    "text": "(string-ref string k)\nThe char at code point index k; raise an error when out of range. O(k) on C, which stores strings as UTF-8.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "eof-object": {
+    "text": "(eof-object)\nThe end-of-file object.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "eof-object?": {
+    "text": "(eof-object? value)\nTest whether value is the end-of-file object.",
     "runtimes": [
       "c",
       "chez"

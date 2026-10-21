@@ -65,6 +65,12 @@ accepts an omitted end. `string->number` returns `nil` on failure. `str`,
 `buffer->string` preserves the buffer for further reads and appends.
 Splitting without a separator and trimming recognize ASCII whitespace.
 
+Chars are a shared type: `#\a` literals, `char->integer`, `integer->char`,
+the `char` comparisons, and `string`, `string-ref`, `string->list` and
+`list->string`. `get`, `first`, `last` and `nth` on a string return a char.
+Chars dispatch as `Character` on both runtimes. `(eof-object)` and
+`eof-object?` are shared too.
+
 Conditions are Otium tables with keyword fields; error data and active
 restarts are arrays. Missing condition fields, missing restarts, an
 undescribed restart, and a declined signal return `nil`.
@@ -104,7 +110,7 @@ remain available through `chez/` names, including `chez//`, `chez/round`,
 including complex results from functions such as `log`, is not unified.
 OTCL explicitly chooses integer or inexact division for its string results.
 
-Chez characters, vectors, bytevectors, hashtables, continuations, multiple
+Chez vectors, bytevectors, hashtables, continuations, multiple
 values, and native syntax are available after `(require chez)` through
 `chez/` names. Otium `values` returns table values as an array;
 `chez/values` produces Scheme multiple values. Native syntax owns its own
@@ -124,13 +130,14 @@ This shared contract doesn't require Chez to pass C's entire dialect suite.
 - Native exception wording, runtime debugging and implementation-specific
   printing differ. Numeric formatting is only guaranteed identical for the
   tested cases.
-- C case conversion is ASCII; native Chez case conversion follows Unicode.
-  Avoid non-ASCII case conversion in shared code.
+- C case conversion and char classification (`char-alphabetic?` and the
+  like) are ASCII; Chez follows Unicode. Avoid non-ASCII case conversion and
+  classification in shared code.
 - Invalid UTF-8 decoding and filesystem error diagnostics in `read-file` aren't
   unified. There's no common streaming file, port or directory API yet.
 - Reload isn't atomic and keeps definitions removed from source. Alias
   retargeting and namespace reflection are outside the common contract.
 - Chez's generic dispatch sees host values that don't exist on C. Don't assume
-  native vectors, hashtables or characters dispatch like Otium collections.
+  native vectors or hashtables dispatch like Otium collections.
 - `examples/hand/lc-2-add-two-numbers.ot` is unfinished. The R7RS ports can
   still depend on C numeric behavior.

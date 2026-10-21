@@ -118,7 +118,7 @@
             [(table? x) (hashtable-ref (table-value-data x) key fallback)]
             [(or (array? x) (string? x))
              (if (and (integer? key) (exact? key) (<= 0 key) (< key (collection-length x)))
-                 (if (array? x) (vector-ref (array-value-storage x) key) (string (string-ref x key)))
+                 (if (array? x) (vector-ref (array-value-storage x) key) (string-ref x key))
                  fallback)]
             [else (error 'get "expected nil, table, array, or string" x)])))
   (define (put! x . xs)
@@ -197,6 +197,7 @@
     (keyword (cond [(instance? x) "instance"] [(buffer? x) "buffer"] [(nil? x) "nil"] [(keyword? x) "keyword"] [(array? x) "array"] [(table? x) "table"]
           [(null? x) "null"] [(pair? x) "pair"] [(boolean? x) "boolean"] [(symbol? x) "symbol"]
           [(string? x) "string"] [(and (integer? x) (exact? x)) "int"]
+          [(char? x) "char"] [(eof-object? x) "eof"]
           [(number? x) "float"] [(procedure? x) "function"] [else "native"])))
   (define (write-string x port)
     (display "\"" port)
@@ -208,6 +209,16 @@
           (if escape (display (cdr escape) port) (display c port))))
       x)
     (display "\"" port))
+  ;; Chars print with the same names on both runtimes, not Chez's.
+  (define char-names
+    '((#\space . "space") (#\newline . "newline") (#\tab . "tab") (#\return . "return")
+      (#\nul . "nul")))
+  (define (write-char-literal c port)
+    (let ([named (assv c char-names)] [n (char->integer c)])
+      (display "#\\" port)
+      (cond [named (display (cdr named) port)]
+            [(or (< n 32) (= n 127)) (display "x" port) (display (string-downcase (number->string n 16)) port)]
+            [else (display c port)])))
   (define (render x port display? depth)
     (define (items xs)
       (unless (null? xs)
@@ -221,6 +232,8 @@
                (begin (display "#<buffer " port) (write-string (buffer->string x) port) (display ">" port)))]
           [(string? x) (if display? (display x port) (write-string x port))]
           [(nil? x) (display "nil" port)]
+          [(char? x) (if display? (display x port) (write-char-literal x port))]
+          [(eof-object? x) (display "#<eof>" port)]
           [(keyword? x) (display ":" port) (display (keyword->string x) port)]
           [(array? x) (display "[" port) (items (array-list x)) (display "]" port)]
           [(table? x) (display "{" port)

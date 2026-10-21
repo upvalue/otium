@@ -313,6 +313,8 @@ ot_type ot_value_type(otv value) {
   if (value == ot_nil) return OT_TYPE_NIL;
   if (value == ot_null) return OT_TYPE_NULL;
   if (value == ot_true || value == ot_false) return OT_TYPE_BOOLEAN;
+  if (ot_is_char(value)) return OT_TYPE_CHAR;
+  if (value == ot_eof) return OT_TYPE_EOF;
   if (!ot_is_ptr(value)) return OT_TYPE_INTERNAL;
   switch (ot_object_type(value)) {
     case OBJ_FLOAT: return OT_TYPE_FLOAT;
@@ -735,6 +737,61 @@ static void render_string(buf* out, otv value, bool display) {
   buf_byte(out, '"');
 }
 
+static size_t utf8_encode(uint32_t scalar, char* out) {
+  if (scalar < 0x80u) {
+    out[0] = (char)scalar;
+    return 1;
+  }
+  if (scalar < 0x800u) {
+    out[0] = (char)(0xc0u | (scalar >> 6));
+    out[1] = (char)(0x80u | (scalar & 0x3fu));
+    return 2;
+  }
+  if (scalar < 0x10000u) {
+    out[0] = (char)(0xe0u | (scalar >> 12));
+    out[1] = (char)(0x80u | ((scalar >> 6) & 0x3fu));
+    out[2] = (char)(0x80u | (scalar & 0x3fu));
+    return 3;
+  }
+  out[0] = (char)(0xf0u | (scalar >> 18));
+  out[1] = (char)(0x80u | ((scalar >> 12) & 0x3fu));
+  out[2] = (char)(0x80u | ((scalar >> 6) & 0x3fu));
+  out[3] = (char)(0x80u | (scalar & 0x3fu));
+  return 4;
+}
+
+/* Decode the scalar starting at offset, trusting the string's encoding. */
+static uint32_t utf8_decode(const unsigned char* bytes, size_t length, size_t offset) {
+  unsigned char byte = bytes[offset];
+  if (byte < 0x80u) return byte;
+  size_t width = byte < 0xe0u ? 2 : byte < 0xf0u ? 3 : 4;
+  uint32_t scalar = byte & (width == 2 ? 0x1fu : width == 3 ? 0x0fu : 0x07u);
+  for (size_t i = 1; i < width && offset + i < length; i++)
+    scalar = (scalar << 6) | (bytes[offset + i] & 0x3fu);
+  return scalar;
+}
+
+static const struct {
+  const char* name;
+  uint32_t scalar;
+} char_names[] = {{"space", ' '}, {"newline", '\n'}, {"tab", '\t'}, {"return", '\r'}, {"nul", 0}};
+
+static void render_char(buf* out, uint32_t scalar, bool display) {
+  char bytes[4];
+  if (display) {
+    buf_write(out, bytes, utf8_encode(scalar, bytes));
+    return;
+  }
+  buf_cstr(out, "#\\");
+  for (size_t i = 0; i < sizeof char_names / sizeof char_names[0]; i++)
+    if (char_names[i].scalar == scalar) {
+      buf_cstr(out, char_names[i].name);
+      return;
+    }
+  if (scalar < 0x20u || scalar == 0x7fu) buf_printf(out, "x%" PRIx32, scalar);
+  else buf_write(out, bytes, utf8_encode(scalar, bytes));
+}
+
 static void render_pair(ots* state, buf* out, otv value, unsigned depth) {
   buf_byte(out, '(');
   bool first = true;
@@ -822,6 +879,14 @@ static void render_value(ots* state, buf* out, otv value, bool display, unsigned
   }
   if (value == ot_true || value == ot_false) {
     buf_cstr(out, value == ot_true ? "#t" : "#f");
+    return;
+  }
+  if (ot_is_char(value)) {
+    render_char(out, ot_char_value(value), display);
+    return;
+  }
+  if (value == ot_eof) {
+    buf_cstr(out, "#<eof>");
     return;
   }
   if (!ot_is_ptr(value)) {
@@ -986,6 +1051,13 @@ static otv reader_error(reader* input, const char* message) {
 
 static otv read_form(reader* input);
 
+static unsigned hex_digit(unsigned char c) {
+  return c >= '0' && c <= '9'   ? c - '0'
+         : c >= 'a' && c <= 'f' ? c - 'a' + 10u
+         : c >= 'A' && c <= 'F' ? c - 'A' + 10u
+                                : 16;
+}
+
 static otv read_string(reader* input) {
   input->offset++;
   buf bytes = {0};
@@ -1012,10 +1084,7 @@ static otv read_string(reader* input) {
         size_t digits = 0;
         while (input->offset < input->length && input->source[input->offset] != ';') {
           unsigned char c = (unsigned char)input->source[input->offset++];
-          unsigned digit = c >= '0' && c <= '9'   ? c - '0'
-                           : c >= 'a' && c <= 'f' ? c - 'a' + 10
-                           : c >= 'A' && c <= 'F' ? c - 'A' + 10
-                                                  : 16;
+          unsigned digit = hex_digit(c);
           if (digit == 16 || scalar > 0x10ffffu) {
             buf_free(&bytes);
             return reader_error(input, "invalid hex escape");
@@ -1033,19 +1102,8 @@ static otv read_string(reader* input) {
           buf_free(&bytes);
           return reader_error(input, "invalid Unicode scalar");
         }
-        if (scalar < 0x80u) buf_byte(&bytes, (char)scalar);
-        else {
-          if (scalar < 0x800u) buf_byte(&bytes, (char)(0xc0u | (scalar >> 6)));
-          else {
-            if (scalar < 0x10000u) buf_byte(&bytes, (char)(0xe0u | (scalar >> 12)));
-            else {
-              buf_byte(&bytes, (char)(0xf0u | (scalar >> 18)));
-              buf_byte(&bytes, (char)(0x80u | ((scalar >> 12) & 0x3fu)));
-            }
-            buf_byte(&bytes, (char)(0x80u | ((scalar >> 6) & 0x3fu)));
-          }
-          buf_byte(&bytes, (char)(0x80u | (scalar & 0x3fu)));
-        }
+        char encoded[4];
+        buf_write(&bytes, encoded, utf8_encode(scalar, encoded));
         break;
       }
       case 'n': buf_byte(&bytes, '\n'); break;
@@ -1094,8 +1152,46 @@ static bool decimal_token(const char* token, size_t length) {
   return i == length;
 }
 
+static size_t utf8_advance(const unsigned char* bytes, size_t length, size_t offset);
+
+/* #\a, #\space or #\x41. The first character after #\ is taken even when it
+ * is a delimiter, so #\( and #\  read as those characters. */
+static otv read_char(reader* input) {
+  input->offset += 2;
+  if (input->offset == input->length) {
+    input->incomplete = true;
+    return reader_error(input, "character literal without a character");
+  }
+  const unsigned char* source = (const unsigned char*)input->source;
+  size_t start = input->offset;
+  input->offset = utf8_advance(source, input->length, start);
+  while (input->offset < input->length && !delimiter(source[input->offset])) input->offset++;
+  size_t length = input->offset - start;
+  if (utf8_advance(source, input->length, start) == input->offset)
+    return ot_make_char(utf8_decode(source, input->length, start));
+  for (size_t i = 0; i < sizeof char_names / sizeof char_names[0]; i++)
+    if (strlen(char_names[i].name) == length &&
+        memcmp(char_names[i].name, source + start, length) == 0)
+      return ot_make_char(char_names[i].scalar);
+  if (source[start] == 'x') {
+    uint32_t scalar = 0;
+    for (size_t i = start + 1; i < input->offset; i++) {
+      unsigned digit = hex_digit(source[i]);
+      if (digit == 16 || scalar > 0x10ffffu)
+        return reader_error(input, "invalid character literal");
+      scalar = scalar * 16u + digit;
+    }
+    if (!ot_char_valid((intptr_t)scalar)) return reader_error(input, "invalid Unicode scalar");
+    return ot_make_char(scalar);
+  }
+  return reader_error(input, "unknown character name");
+}
+
 static otv read_atom(reader* input) {
   size_t start = input->offset;
+  if (input->offset + 1 < input->length && input->source[input->offset] == '#' &&
+      input->source[input->offset + 1] == '\\')
+    return read_char(input);
   while (input->offset < input->length && !delimiter((unsigned char)input->source[input->offset]))
     input->offset++;
   const char* token = input->source + start;
@@ -4825,6 +4921,8 @@ TYPE_PRED(nat_table_p, OT_TYPE_TABLE)
 TYPE_PRED(nat_buffer_p, OT_TYPE_BUFFER)
 TYPE_PRED(nat_macro_p, OT_TYPE_MACRO)
 TYPE_PRED(nat_ext_p, OT_TYPE_EXT)
+TYPE_PRED(nat_char_p, OT_TYPE_CHAR)
+TYPE_PRED(nat_eof_p, OT_TYPE_EOF)
 #undef TYPE_PRED
 
 static otv nat_number_p(ots* state, otv* args, int argc) {
@@ -4876,7 +4974,8 @@ static const char* value_type_name(otv value) {
   static const char* names[] = {"nil",     "null",    "boolean",         "int",      "float",
                                 "symbol",  "keyword", "string",          "pair",     "array",
                                 "table",   "buffer",  "function",        "macro",    "param",
-                                "restart", "foreign", "type-descriptor", "instance", "internal"};
+                                "restart", "foreign", "type-descriptor", "instance", "char",
+                                "eof",     "internal"};
   return names[ot_value_type(value)];
 }
 
@@ -5177,10 +5276,133 @@ static otv nat_get(ots* state, otv* args, int argc) {
     unsigned char* bytes = as_bytes(string->bytes)->data;
     size_t start = utf8_offset(bytes, string->length, (size_t)index);
     if (start == string->length) return fallback;
-    size_t end = utf8_advance(bytes, string->length, start);
-    return make_string_slice(state, args[0], start, end - start);
+    return ot_make_char(utf8_decode(bytes, string->length, start));
   }
   return ot_raise(state, "get: expected nil, table, array, or string");
+}
+
+static otv nat_eof_object(ots* state, otv* args, int argc) {
+  (void)args;
+  if (need_arity(state, "eof-object", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
+  return ot_eof;
+}
+
+static otv nat_char_integer(ots* state, otv* args, int argc) {
+  if (need_arity(state, "char->integer", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (!ot_is_char(args[0])) return ot_raise(state, "char->integer: expected char");
+  return ot_make_int((intptr_t)ot_char_value(args[0]));
+}
+
+static otv nat_integer_char(ots* state, otv* args, int argc) {
+  if (need_arity(state, "integer->char", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (!ot_is_int(args[0]) || !ot_char_valid(ot_get_int(args[0])))
+    return ot_raise(state, "integer->char: expected a Unicode scalar value");
+  return ot_make_char((uint32_t)ot_get_int(args[0]));
+}
+
+/* Character classes and case are ASCII-only, like the string functions. */
+static otv char_argument(ots* state, const char* who, otv* args, int argc, uint32_t* scalar) {
+  if (need_arity(state, who, argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (!ot_is_char(args[0])) return ot_raise(state, "%s: expected char", who);
+  *scalar = ot_char_value(args[0]);
+  return ot_nil;
+}
+
+static otv nat_char_case(ots* state, otv* args, int argc, bool upper) {
+  uint32_t c = 0;
+  if (char_argument(state, upper ? "char-upcase" : "char-downcase", args, argc, &c) == OT_UNWIND)
+    return OT_UNWIND;
+  if (upper && c >= 'a' && c <= 'z') c -= 32u;
+  if (!upper && c >= 'A' && c <= 'Z') c += 32u;
+  return ot_make_char(c);
+}
+
+static otv nat_char_upcase(ots* state, otv* args, int argc) {
+  return nat_char_case(state, args, argc, true);
+}
+
+static otv nat_char_downcase(ots* state, otv* args, int argc) {
+  return nat_char_case(state, args, argc, false);
+}
+
+static otv nat_char_alphabetic(ots* state, otv* args, int argc) {
+  uint32_t c = 0;
+  if (char_argument(state, "char-alphabetic?", args, argc, &c) == OT_UNWIND) return OT_UNWIND;
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ? ot_true : ot_false;
+}
+
+static otv nat_char_numeric(ots* state, otv* args, int argc) {
+  uint32_t c = 0;
+  if (char_argument(state, "char-numeric?", args, argc, &c) == OT_UNWIND) return OT_UNWIND;
+  return c >= '0' && c <= '9' ? ot_true : ot_false;
+}
+
+static bool ascii_space(unsigned char byte);
+
+static otv nat_char_whitespace(ots* state, otv* args, int argc) {
+  uint32_t c = 0;
+  if (char_argument(state, "char-whitespace?", args, argc, &c) == OT_UNWIND) return OT_UNWIND;
+  return c < 0x80u && ascii_space((unsigned char)c) ? ot_true : ot_false;
+}
+
+/* Encode a run of chars as a string; who names the caller in errors. */
+static otv string_from_chars(ots* state, const char* who, otv* chars, size_t count, otv list) {
+  buf bytes = {0};
+  char encoded[4];
+  for (size_t i = 0; i < count; i++) {
+    if (!ot_is_char(chars[i])) {
+      buf_free(&bytes);
+      return ot_raise(state, "%s: expected chars", who);
+    }
+    buf_write(&bytes, encoded, utf8_encode(ot_char_value(chars[i]), encoded));
+  }
+  for (; is_type(list, OBJ_PAIR); list = as_pair(list)->cdr) {
+    if (!ot_is_char(as_pair(list)->car)) {
+      buf_free(&bytes);
+      return ot_raise(state, "%s: expected chars", who);
+    }
+    buf_write(&bytes, encoded, utf8_encode(ot_char_value(as_pair(list)->car), encoded));
+  }
+  otv result = bytes.failed ? ot_raise(state, "%s: out of memory", who)
+                            : ot_make_string(state, bytes.data, bytes.length);
+  buf_free(&bytes);
+  return result;
+}
+
+static otv nat_string(ots* state, otv* args, int argc) {
+  return string_from_chars(state, "string", args, (size_t)argc, ot_null);
+}
+
+static otv nat_list_string(ots* state, otv* args, int argc) {
+  if (need_arity(state, "list->string", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (!proper_list(args[0])) return ot_raise(state, "list->string: expected list");
+  return string_from_chars(state, "list->string", NULL, 0, args[0]);
+}
+
+static otv nat_string_list(ots* state, otv* args, int argc) {
+  if (need_arity(state, "string->list", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_STRING)) return ot_raise(state, "string->list: expected string");
+  otv string = args[0], result = ot_null;
+  OT_FRAME_SCOPED(state, &string, &result);
+  /* Decode backwards so the list is built without reversing. */
+  size_t offset = as_string(string)->length;
+  while (offset > 0) {
+    const unsigned char* bytes = as_bytes(as_string(string)->bytes)->data;
+    do offset--;
+    while (offset > 0 && (bytes[offset] & 0xc0u) == 0x80u);
+    result =
+        ot_cons(state, ot_make_char(utf8_decode(bytes, as_string(string)->length, offset)), result);
+  }
+  return result;
+}
+
+static otv nat_string_ref(ots* state, otv* args, int argc) {
+  if (need_arity(state, "string-ref", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_STRING) || !ot_is_int(args[1]))
+    return ot_raise(state, "string-ref: expected string and integer index");
+  otv result = nat_get(state, args, 2);
+  if (result == ot_nil) return ot_raise(state, "string-ref: index out of range");
+  return result;
 }
 
 static otv nat_put(ots* state, otv* args, int argc) {
@@ -6670,7 +6892,8 @@ static void generic_module_init(ots* state) {
   static const char* names[] = {"Nil",       "Null",    "Boolean",        "Number",   "Number",
                                 "Symbol",    "Keyword", "String",         "Pair",     "Vector",
                                 "Hashtable", "Buffer",  "Procedure",      "Macro",    "Parameter",
-                                "Restart",   "Foreign", "TypeDescriptor", "Instance", "Other"};
+                                "Restart",   "Foreign", "TypeDescriptor", "Instance", "Character",
+                                "Other",     "Other"};
   otv owner = ((ot_namespace_obj*)ot_as_obj(state->vm.current_namespace))->name;
   otv name = ot_nil, type = ot_nil;
   OT_FRAME_SCOPED(state, &owner, &name, &type);
@@ -6681,6 +6904,7 @@ static void generic_module_init(ots* state) {
   for (size_t i = 0; i <= OT_TYPE_INTERNAL; i++) {
     name = ot_intern(state, names[i], strlen(names[i]), false);
     if (i == OT_TYPE_FLOAT) type = as_slots(state->dispatch_types)->values[OT_TYPE_INT];
+    else if (i == OT_TYPE_INTERNAL) type = as_slots(state->dispatch_types)->values[OT_TYPE_EOF];
     else type = new_dispatch_type(state, owner, name, true);
     ot_slots_obj* slots = as_slots(state->dispatch_types);
     ot_store(state, slots, &slots->values[i], type);
@@ -6775,6 +6999,20 @@ static const nat_def core_nats[] = {
     {"macro?", nat_macro_p},
     {"procedure?", nat_procedure_p},
     {"foreign?", nat_ext_p},
+    {"char?", nat_char_p},
+    {"eof-object?", nat_eof_p},
+    {"eof-object", nat_eof_object},
+    {"char->integer", nat_char_integer},
+    {"integer->char", nat_integer_char},
+    {"char-upcase", nat_char_upcase},
+    {"char-downcase", nat_char_downcase},
+    {"char-alphabetic?", nat_char_alphabetic},
+    {"char-numeric?", nat_char_numeric},
+    {"char-whitespace?", nat_char_whitespace},
+    {"string", nat_string},
+    {"string->list", nat_string_list},
+    {"list->string", nat_list_string},
+    {"string-ref", nat_string_ref},
     {"list?", nat_list_p},
     {"true?", nat_true_p},
     {"false?", nat_false_p},

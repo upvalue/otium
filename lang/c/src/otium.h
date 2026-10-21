@@ -25,6 +25,7 @@ typedef uintptr_t otv;
 #define ot_true ((otv)6u)
 #define ot_false ((otv)10u)
 #define ot_null ((otv)14u)
+#define ot_eof ((otv)34u)
 
 #define OT_INT_MAX ((intptr_t)(INTPTR_MAX >> 1u))
 #define OT_INT_MIN (-OT_INT_MAX - (intptr_t)1)
@@ -42,6 +43,17 @@ static inline otv ot_make_int(intptr_t value) {
 }
 
 static inline intptr_t ot_get_int(otv value) { return ((intptr_t)value) >> 1u; }
+
+/* Chars are immediates holding one Unicode scalar value. */
+static inline bool ot_is_char(otv value) { return (value & 31u) == 30u; }
+
+static inline bool ot_char_valid(intptr_t codepoint) {
+  return codepoint >= 0 && codepoint <= 0x10ffff && (codepoint < 0xd800 || codepoint > 0xdfff);
+}
+
+static inline otv ot_make_char(uint32_t codepoint) { return ((otv)codepoint << 5u) | 30u; }
+
+static inline uint32_t ot_char_value(otv value) { return (uint32_t)(value >> 5u); }
 
 typedef struct ot_config {
   size_t heap_init;
@@ -112,6 +124,8 @@ typedef enum ot_type {
   OT_TYPE_EXT,
   OT_TYPE_DESCRIPTOR,
   OT_TYPE_INSTANCE,
+  OT_TYPE_CHAR,
+  OT_TYPE_EOF,
   OT_TYPE_INTERNAL,
 } ot_type;
 

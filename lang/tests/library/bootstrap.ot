@@ -10,7 +10,7 @@
 (println "get-in-nil-path:" (get-in 42 nil))
 
 ; String indexing allocates before the iterator advances to the final key.
-(println "get-in-allocating-path:" (get-in {:s "ab"} [:s 0 0]))
+(println "get-in-string-path:" (get-in {:s ["ab"]} [:s 0 1]))
 (println "get-in-improper:"
          (try
            (get-in {:a 1} '(:a . :tail))

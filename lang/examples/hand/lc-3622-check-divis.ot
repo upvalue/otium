@@ -4,7 +4,7 @@
   (let ((nstr (number->string n))
         (accum init))
     (dotimes (i (length nstr))
-      (let ((c (get nstr i))) (set! accum (reducer accum (string->number c)))))
+      (let ((c (get nstr i))) (set! accum (reducer accum (digit-value c)))))
     accum))
 
 (def (test n)

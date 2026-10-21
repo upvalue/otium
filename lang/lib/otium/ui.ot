@@ -209,7 +209,8 @@
     (else nil)))
 
 (def (new class opts . children)
-  "Construct a widget description without initializing mounted state."
+  "Construct a widget description without initializing mounted state.
+:tab-navigation defaults to #t; #f routes Tab and Shift+Tab to the widget's key handling."
   (unless (class-subtype? class Widget) (error "ui/new: expected widget class"))
   (unless (table? opts) (error "ui/new: expected options table"))
   (let ((args '())
@@ -217,7 +218,8 @@
     (for-each (fn (k)
                 (cond
                   ((eq? k :key) nil)
-                  ((memq k '(:disabled :focusable :autofocus :keymap :on-action)) (put! options k (get opts k)))
+                  ((memq k '(:disabled :focusable :autofocus :tab-navigation :keymap :on-action))
+                   (put! options k (get opts k)))
                   (else (set! args (cons k (cons (get opts k) args))))))
               (keys opts))
     (make Description

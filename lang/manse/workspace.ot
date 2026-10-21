@@ -1,0 +1,235 @@
+;; Prototype terminal window: a shell on a PTY, parsed by libghostty-vt and
+;; drawn with otium.ui. Run from lang/manse: ../otium app.ot
+(ns manse.workspace)
+
+(require (otium.ui :as ui))
+(require (otium.gfx :as gfx))
+(require (otium.ui.gpu :as gpu))
+(require (otium.ui.native :as native))
+(require (otium.process :as process))
+(require (manse.ghostty :as g))
+(require (manse.pty :as pty))
+(require (manse.session :as sessions))
+(require (otium.ui.input :as input))
+
+(def font-size 14)
+(def pad 6)
+
+;; Session state survives reloading this file; drawing and input code do not.
+(defonce workspace {:sessions []})
+
+;; Metrics
+
+(def (cell-metrics scale)
+  "Logical cell width and height for the mono font, from ten shaped Ms."
+  (let ((positions (gpu/caret-positions "MMMMMMMMMM" :mono font-size scale))
+        (run (native/text-get "M" (gfx/font-index :mono) font-size -1 scale)))
+    (list (/ (get positions 10) 10)
+          (/ (native/text-size run native/TEXT_HEIGHT) scale))))
+
+(def (rgba rgb alpha)
+  (+ (* (car rgb) 16777216) (* (cadr rgb) 65536) (* (caddr rgb) 256) alpha))
+
+;; Input. A minimal mapping until keys go through libghostty's key encoder.
+
+(def special-keys
+  {"Return" "\r" "Backspace" "\x7f;" "Tab" "\t" "Shift+Tab" "\x1b;[Z" "Escape" "\x1b;"
+   "Up" "\x1b;[A" "Down" "\x1b;[B" "Right" "\x1b;[C" "Left" "\x1b;[D"
+   "Home" "\x1b;[H" "End" "\x1b;[F" "Delete" "\x1b;[3~" "PageUp" "\x1b;[5~" "PageDown" "\x1b;[6~"})
+
+(def letters "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+(def (ctrl-byte key)
+  "The control code for Ctrl+<letter>, or nil."
+  (when (and (string-starts-with? key "Ctrl+") (= (string-length key) 6))
+    (let ((letter (substring key 5)))
+      (let loop ((i 0))
+        (cond
+          ((= i 26) nil)
+          ((equal? (substring letters i (+ i 1)) letter) (+ i 1))
+          (else (loop (+ i 1))))))))
+
+(def (key! session event)
+  (let ((p (session :pty))
+        (key (get event :key)))
+    (cond
+      ((get special-keys key) (pty/write! p (get special-keys key)) :handled)
+      ((ctrl-byte key) (pty/write-bytes! p (list (ctrl-byte key))) :handled)
+      (else nil))))
+
+;; The widget
+
+(defclass Terminal :is ui/Widget session)
+
+(defmethod (ui/layout-style (w Terminal)) {:grow 1})
+(defmethod (ui/default-focusable? (w Terminal)) #t)
+(defmethod (ui/accepts-text? (w Terminal)) #t)
+(defmethod (ui/repeat-key? (w Terminal) event) #t)
+
+(defmethod (ui/handle-event (w Terminal) event)
+  (let ((kind (get event :kind)) (session (w :session)))
+    (cond
+      ((eq? kind :pointer-down) :handled)
+      ((session :exit) :handled)
+      ((eq? kind :text-input) (pty/write! (session :pty) (get event :text)) :handled)
+      ((eq? kind :key-down) (key! session event))
+      (else nil))))
+
+(defmethod (ui/paint (w Terminal) context bounds)
+  (let ((session (w :session))
+        (color (if (context :focused?) 0x73b7ffff 0x8490a0ff)))
+    (gfx/rect context bounds 0x17202cff)
+    (gfx/text context
+              (make ui/Bounds :x (+ (bounds :x) pad) :y (bounds :y)
+                    :width (- (bounds :width) (* 2 pad)) :height 24)
+              (str "Terminal " (session :id)
+                   (if (session :exit) " · exited" "")
+                   (if (context :focused?) " · focused" ""))
+              :mono font-size color #f)
+    (paint-terminal session context
+                    (make ui/Bounds :x (bounds :x) :y (+ (bounds :y) 24)
+                          :width (bounds :width) :height (max 0 (- (bounds :height) 24))))))
+
+(def (fit! session bounds)
+  "Resize the terminal and PTY to the cells that fit in bounds."
+  (let ((cols (max 1 (floor (/ (- (bounds :width) (* 2 pad)) (session :cell-w)))))
+        (rows (max 1 (floor (/ (- (bounds :height) (* 2 pad)) (session :cell-h))))))
+    (unless (and (= cols (get session :cols 0)) (= rows (get session :rows 0)))
+      (put! session :cols cols)
+      (put! session :rows rows)
+      (g/resize! (session :term) cols rows (round (session :cell-w)) (round (session :cell-h)))
+      (unless (session :exit) (pty/resize! (session :pty) cols rows))
+      (g/update! (session :term)))))
+
+(def (text-run! session g x y text color)
+  (gfx/text g (make ui/Bounds :x x :y y :width 100000 :height (session :cell-h)) text :mono font-size color #f))
+
+(def (paint-terminal session g bounds)
+  (let ((start (current-jiffy))
+        (term (session :term)))
+    (unless (session :cell-w)
+      (let ((m (cell-metrics (native/gpu-scale (g :renderer)))))
+        (put! session :cell-w (car m))
+        (put! session :cell-h (cadr m))))
+    (fit! session bounds)
+    (let ((cw (session :cell-w))
+          (ch (session :cell-h))
+          (x0 (+ (bounds :x) pad))
+          (y0 (+ (bounds :y) pad))
+          (colors (g/colors term))
+          (run (buffer))
+          (run-col 0)
+          (run-color nil)
+          (run-y 0))
+      (gfx/rect g bounds (rgba (colors :background) 255))
+      (def (flush!)
+        (when run-color
+          (text-run! session g (+ x0 (* run-col cw)) run-y (buffer->string run) run-color))
+        (set! run (buffer))
+        (set! run-color nil))
+      (g/each-cell term
+                   (fn (x y)
+                     (when (= x 0) (flush!))
+                     (let ((c (g/cell term))
+                           (py (+ y0 (* y ch))))
+                       (let ((fg (or (c :fg) (colors :foreground)))
+                             (bg (c :bg)))
+                         (when (c :inverse)
+                           (let ((t fg)) (set! fg (or bg (colors :background))) (set! bg t)))
+                         (when bg
+                           (let ((left (round (+ x0 (* x cw)))))
+                             (gfx/rect g
+                                       (make ui/Bounds :x left :y py :width (- (round (+ x0 (* (+ x 1) cw))) left) :height ch)
+                                       (rgba bg 255))))
+                         (let ((color (rgba fg 255)))
+                           (unless (eq? color run-color)
+                             (flush!)
+                             (set! run-col x)
+                             (set! run-y py)
+                             (set! run-color color))
+                           (buffer-push! run
+                                         (if (null? (c :codepoints))
+                                             " "
+                                             (g/codepoints->string (c :codepoints)))))))))
+      (flush!)
+      (let ((cur (g/cursor term)))
+        (when (and cur (g :focused?) (not (session :exit)))
+          (gfx/rect g
+                    (make ui/Bounds :x (+ x0 (* (car cur) cw)) :y (+ y0 (* (cadr cur) ch)) :width cw :height ch)
+                    (rgba (colors :foreground) 128)))))
+    (record-time! session (- (current-jiffy) start))))
+
+(def (record-time! session elapsed)
+  (put! session :paint-ns (+ elapsed (get session :paint-ns 0)))
+  (put! session :frames (+ 1 (get session :frames 0)))
+  (when (= 0 (modulo (session :frames) 120))
+    (process/write-error
+      (str "manse " (session :id) ": " (session :cols) "x" (session :rows) " paint "
+           (/ (round (/ (session :paint-ns) 1200000.0)) 100.0) " ms/frame\n"))
+    (put! session :paint-ns 0)))
+
+;; The frame hook: pass PTY output to the terminal, then update its render state.
+
+(def (scripted! window)
+  "MANSE_TYPE and MANSE_TYPE_2 type into separate shells at frame 30."
+  (let ((frame (get window :frame))
+        (frames (string->number (or (process/getenv "MANSE_FRAMES") "0"))))
+    (when (= frame 30)
+      (for-each (fn (session)
+                  (let ((text (process/getenv (if (= (session :id) 1) "MANSE_TYPE" "MANSE_TYPE_2"))))
+                    (when (and text (not (session :exit))) (pty/write! (session :pty) text))))
+                (workspace :sessions)))
+    (when (and frames (> frames 0))
+      (when (= frame (- frames 1))
+        (ui/capture! window (or (process/getenv "MANSE_CAPTURE") "/tmp/manse.png")))
+      (when (>= frame frames) (put! workspace :quit? #t)))))
+
+(def (step! window)
+  (scripted! window)
+  (for-each sessions/pump! (workspace :sessions))
+  (when (for-all (fn (session) (and (session :exit) (session :eof?))) (array-to-list (workspace :sessions)))
+    (put! workspace :quit? #t)))
+
+;; Closing from :step! would leave the frame painting with a freed renderer.
+(def (after-frame! window)
+  (when (workspace :quit?) (ui/close! window)))
+
+(def (view tree)
+  (apply ui/column {:grow 1 :gap 2
+                    :keymap {"Ctrl+Tab" :next "Ctrl+Shift+Tab" :previous}
+                    :on-action (fn (action)
+                                 (input/focus-next! tree (eq? action :previous))
+                                 :handled)}
+         (array-to-list
+           (map (fn (session)
+                  (ui/new Terminal {:key (session :id) :session session
+                                    :tab-navigation #f :autofocus (= (session :id) 1)}))
+                (workspace :sessions)))))
+
+(def (config-path)
+  "build/ui-config.ot in the lang/ directory that contains this file."
+  (let ((script (process/script-name)))
+    (if (string-ends-with? script "/manse/app.ot")
+        (str (substring script 0 (- (string-length script) (string-length "manse/app.ot"))) "build/ui-config.ot")
+        "../build/ui-config.ot")))
+
+(def (main)
+  (let ((shell (or (process/getenv "SHELL") "/bin/sh")))
+    (process/setenv! "TERM" "xterm-256color")
+    (put! workspace :quit? #f)
+    (put! workspace :sessions [])
+    (unwind-protect
+      (begin
+        (dotimes (i 2)
+          (push! (workspace :sessions) (sessions/open! (+ i 1) shell (list shell))))
+        (let ((window (ui/open {:title "manse · click or Ctrl+Tab to switch terminals"
+                                :width 900 :height 800
+                                :config (config-path)
+                                :app-name "manse" :app-id "org.otium.manse"
+                                :background-color 0x000000ff
+                                :fail-fast? #t
+                                :step! (fn (window) (step! window))
+                                :after-frame! (fn (window) (after-frame! window))})))
+          (ui/set-view! window (fn () (view (window :tree))))
+          (ui/run)))
+      (for-each sessions/close! (workspace :sessions)))))

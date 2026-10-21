@@ -1,8 +1,8 @@
 (ns manse.json)
 
 ;; Prototype JSON reader. Objects become tables with string keys, arrays become
-;; arrays, null becomes nil. Works on one-character strings until Otium has a
-;; char type (specs/io.md); \u escapes are not supported yet.
+;; arrays, null becomes nil. Uses one-character strings; \u escapes are not
+;; supported yet.
 
 (def- digits "0123456789+-.eE")
 
@@ -11,7 +11,7 @@
 (def (parse text)
   (let ((n (string-length text))
         (i 0))
-    (def (peek) (if (< i n) (get text i) nil))
+    (def (peek) (if (< i n) (substring text i (+ i 1)) nil))
     (def (next!) (let ((c (peek))) (set! i (+ i 1)) c))
     (def (fail message) (error (str "json: " message " at " i)))
     (def (skip!)

@@ -120,7 +120,8 @@
            (when (and armed (eq? armed node) (ui/focusable? armed)) (ui/send! armed {:kind :press})))))
       ((and (eq? kind :key-down) (or (not (get event :repeat #f)) (and node (ui/repeat-key? (ui/instance node) event))))
        (cond
-         ((or (equal? key "Tab") (equal? key "Shift+Tab"))
+         ((and (or (equal? key "Tab") (equal? key "Shift+Tab"))
+               (or (not node) (get (node :options) :tab-navigation #t)))
           (unless (get event :repeat #f) (focus-next! tree (equal? key "Shift+Tab"))))
          ((and node (ui/activation-key? (ui/instance node) event))
           (unless (or (get event :repeat #f) (focus :armed))

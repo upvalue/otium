@@ -429,6 +429,13 @@
 
 (define-condition 'match-error 'error)
 
+;; I/O conditions (specs/io.md). decode-error carries the byte :position.
+(define-condition 'io-error 'error)
+
+(define-condition 'file-error 'io-error)
+
+(define-condition 'decode-error 'io-error)
+
 (def (match-error value)
   "(match-error value)\nSignal a match-error condition holding value under :value. A use-value restart returns its argument as the result of the failed match."
   (restart-case (error {:type 'match-error :message "match: no clause matched" :value value})

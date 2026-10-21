@@ -176,6 +176,7 @@ static bool special_name(const char* bytes, size_t length) {
 
 #define as_name(V) ((ot_name_obj*)ot_as_obj(V))
 #define as_bytes(V) ((ot_bytes_obj*)ot_as_obj(V))
+#define as_bytevector(V) ((ot_bytevector_obj*)ot_as_obj(V))
 #define as_string(V) ((ot_string_obj*)ot_as_obj(V))
 #define as_pair(V) ((ot_pair_obj*)ot_as_obj(V))
 #define as_slots(V) ((ot_slots_obj*)ot_as_obj(V))
@@ -187,6 +188,13 @@ static bool special_name(const char* bytes, size_t length) {
 /* =========================================================================
  * 2. CORE VALUES AND COLLECTIONS
  * ========================================================================= */
+
+static otv make_bytevector(ots* state, size_t length) {
+  ot_bytevector_obj* bytes = must_alloc(state, sizeof(*bytes) + length, OBJ_BYTEVECTOR);
+  bytes->length = length;
+  bytes->stable_id = 0;
+  return ot_from_obj(bytes);
+}
 
 static otv make_bytes(ots* state, size_t length) {
   ot_bytes_obj* bytes = must_alloc(state, sizeof(*bytes) + length, OBJ_BYTES);
@@ -325,6 +333,7 @@ ot_type ot_value_type(otv value) {
     case OBJ_ARRAY: return OT_TYPE_ARRAY;
     case OBJ_TABLE: return OT_TYPE_TABLE;
     case OBJ_BUFFER: return OT_TYPE_BUFFER;
+    case OBJ_BYTEVECTOR: return OT_TYPE_BYTEVECTOR;
     case OBJ_GENERIC:
     case OBJ_FUNCTION:
     case OBJ_NAT: return OT_TYPE_FUNCTION;
@@ -480,7 +489,8 @@ bool ot_equal(ots* state, otv left, otv right, bool structural) {
 static bool key_equal(ots* state, otv left, otv right) {
   if (left == right) return true;
   if (is_type(left, OBJ_ARRAY) || is_type(left, OBJ_TABLE) || is_type(left, OBJ_BUFFER) ||
-      is_type(left, OBJ_FUNCTION) || is_type(left, OBJ_NAT) || is_type(left, OBJ_EXT))
+      is_type(left, OBJ_FUNCTION) || is_type(left, OBJ_NAT) || is_type(left, OBJ_EXT) ||
+      is_type(left, OBJ_BYTEVECTOR))
     return false;
   return ot_equal(state, left, right, true);
 }
@@ -518,6 +528,11 @@ static uint32_t value_hash(ots* state, otv value) {
       ot_table_obj* table = as_table(value);
       if (table->stable_id == 0) table->stable_id = ++state->next_stable_id;
       return (uint32_t)table->stable_id;
+    }
+    case OBJ_BYTEVECTOR: {
+      ot_bytevector_obj* bytes = as_bytevector(value);
+      if (bytes->stable_id == 0) bytes->stable_id = ++state->next_stable_id;
+      return (uint32_t)bytes->stable_id;
     }
     case OBJ_INSTANCE: return (uint32_t)as_instance(value)->stable_id;
     case OBJ_DISPATCH_TYPE: return (uint32_t)((ot_dispatch_type_obj*)ot_as_obj(value))->stable_id;
@@ -934,6 +949,14 @@ static void render_value(ots* state, buf* out, otv value, bool display, unsigned
       buf_byte(out, '}');
       break;
     }
+    case OBJ_BYTEVECTOR: {
+      ot_bytevector_obj* bytes = as_bytevector(value);
+      buf_cstr(out, "#u8(");
+      for (size_t i = 0; i < bytes->length; i++)
+        buf_printf(out, i == 0 ? "%u" : " %u", bytes->data[i]);
+      buf_byte(out, ')');
+      break;
+    }
     case OBJ_BUFFER: {
       ot_buffer_obj* buffer = (ot_buffer_obj*)ot_as_obj(value);
       if (!display) buf_cstr(out, "#<buffer \"");
@@ -1337,6 +1360,14 @@ static otv read_form(reader* input) {
     case '[': return read_sequence(input, ']', ot_intern(input->state, "array", 5, false));
     case '{': return read_sequence(input, '}', ot_intern(input->state, "table", 5, false));
     case '"': return read_string(input);
+    case '#':
+      /* #u8(...) reads as (bytevector ...), like [...] and {...}. */
+      if (input->length - input->offset >= 4 &&
+          memcmp(input->source + input->offset, "#u8(", 4) == 0) {
+        input->offset += 3;
+        return read_sequence(input, ')', ot_intern(input->state, "bytevector", 10, false));
+      }
+      return read_atom(input);
     case '\'': return read_quote(input, "quote", 5, 1);
     case '`': return read_quote(input, "quasiquote", 10, 1);
     case ',':
@@ -4923,6 +4954,7 @@ TYPE_PRED(nat_macro_p, OT_TYPE_MACRO)
 TYPE_PRED(nat_ext_p, OT_TYPE_EXT)
 TYPE_PRED(nat_char_p, OT_TYPE_CHAR)
 TYPE_PRED(nat_eof_p, OT_TYPE_EOF)
+TYPE_PRED(nat_bytevector_p, OT_TYPE_BYTEVECTOR)
 #undef TYPE_PRED
 
 static otv nat_number_p(ots* state, otv* args, int argc) {
@@ -4971,11 +5003,11 @@ static otv nat_equal(ots* state, otv* args, int argc) {
 }
 
 static const char* value_type_name(otv value) {
-  static const char* names[] = {"nil",     "null",    "boolean",         "int",      "float",
-                                "symbol",  "keyword", "string",          "pair",     "array",
-                                "table",   "buffer",  "function",        "macro",    "param",
-                                "restart", "foreign", "type-descriptor", "instance", "char",
-                                "eof",     "internal"};
+  static const char* names[] = {"nil",     "null",       "boolean",         "int",      "float",
+                                "symbol",  "keyword",    "string",          "pair",     "array",
+                                "table",   "buffer",     "function",        "macro",    "param",
+                                "restart", "foreign",    "type-descriptor", "instance", "char",
+                                "eof",     "bytevector", "internal"};
   return names[ot_value_type(value)];
 }
 
@@ -5163,6 +5195,7 @@ static otv nat_length(ots* state, otv* args, int argc) {
     ot_buffer_obj* buffer = (ot_buffer_obj*)ot_as_obj(value);
     return ot_make_int((intptr_t)utf8_count(as_bytes(buffer->bytes)->data, buffer->length));
   }
+  if (is_type(value, OBJ_BYTEVECTOR)) return ot_make_int((intptr_t)as_bytevector(value)->length);
   return ot_raise(state, "length: unsupported type");
 }
 
@@ -5278,7 +5311,13 @@ static otv nat_get(ots* state, otv* args, int argc) {
     if (start == string->length) return fallback;
     return ot_make_char(utf8_decode(bytes, string->length, start));
   }
-  return ot_raise(state, "get: expected nil, table, array, or string");
+  if (is_type(args[0], OBJ_BYTEVECTOR)) {
+    if (!ot_is_int(args[1])) return fallback;
+    intptr_t index = ot_get_int(args[1]);
+    ot_bytevector_obj* bytes = as_bytevector(args[0]);
+    return index >= 0 && (size_t)index < bytes->length ? ot_make_int(bytes->data[index]) : fallback;
+  }
+  return ot_raise(state, "get: expected nil, table, array, string, or bytevector");
 }
 
 static otv nat_eof_object(ots* state, otv* args, int argc) {
@@ -5405,6 +5444,222 @@ static otv nat_string_ref(ots* state, otv* args, int argc) {
   return result;
 }
 
+static bool byte_value(otv value) {
+  return ot_is_int(value) && ot_get_int(value) >= 0 && ot_get_int(value) <= 255;
+}
+
+static otv bytevector_set(ots* state, const char* who, otv bytes, otv index, otv value) {
+  if (!ot_is_int(index) || ot_get_int(index) < 0 ||
+      (size_t)ot_get_int(index) >= as_bytevector(bytes)->length)
+    return ot_raise(state, "%s: index out of range", who);
+  if (!byte_value(value)) return ot_raise(state, "%s: expected a byte from 0 to 255", who);
+  as_bytevector(bytes)->data[ot_get_int(index)] = (unsigned char)ot_get_int(value);
+  return ot_nil;
+}
+
+/* Resolve optional [start [end]] arguments at args[first..] against length. */
+static otv span_arguments(ots* state, const char* who, otv* args, int argc, int first,
+                          size_t length, size_t* start, size_t* end) {
+  *start = 0;
+  *end = length;
+  if (argc > first) {
+    if (!ot_is_int(args[first]) || ot_get_int(args[first]) < 0 ||
+        (size_t)ot_get_int(args[first]) > length)
+      return ot_raise(state, "%s: start out of range", who);
+    *start = (size_t)ot_get_int(args[first]);
+  }
+  if (argc > first + 1) {
+    if (!ot_is_int(args[first + 1]) || ot_get_int(args[first + 1]) < (intptr_t)*start ||
+        (size_t)ot_get_int(args[first + 1]) > length)
+      return ot_raise(state, "%s: end out of range", who);
+    *end = (size_t)ot_get_int(args[first + 1]);
+  }
+  return ot_nil;
+}
+
+static otv nat_bytevector(ots* state, otv* args, int argc) {
+  for (int i = 0; i < argc; i++)
+    if (!byte_value(args[i])) return ot_raise(state, "bytevector: expected bytes from 0 to 255");
+  otv bytes = make_bytevector(state, (size_t)argc);
+  for (int i = 0; i < argc; i++) as_bytevector(bytes)->data[i] = (unsigned char)ot_get_int(args[i]);
+  return bytes;
+}
+
+static otv nat_make_bytevector(ots* state, otv* args, int argc) {
+  if (need_arity(state, "make-bytevector", argc, 1, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!ot_is_int(args[0]) || ot_get_int(args[0]) < 0)
+    return ot_raise(state, "make-bytevector: expected a non-negative length");
+  if (argc == 2 && !byte_value(args[1]))
+    return ot_raise(state, "make-bytevector: expected a fill byte from 0 to 255");
+  unsigned char fill = argc == 2 ? (unsigned char)ot_get_int(args[1]) : 0;
+  otv bytes = make_bytevector(state, (size_t)ot_get_int(args[0]));
+  memset(as_bytevector(bytes)->data, fill, as_bytevector(bytes)->length);
+  return bytes;
+}
+
+static otv bytevector_argument(ots* state, const char* who, otv value) {
+  return is_type(value, OBJ_BYTEVECTOR) ? ot_nil : ot_raise(state, "%s: expected bytevector", who);
+}
+
+static otv nat_bytevector_length(ots* state, otv* args, int argc) {
+  if (need_arity(state, "bytevector-length", argc, 1, 1) == OT_UNWIND ||
+      bytevector_argument(state, "bytevector-length", args[0]) == OT_UNWIND)
+    return OT_UNWIND;
+  return ot_make_int((intptr_t)as_bytevector(args[0])->length);
+}
+
+static otv nat_bytevector_ref(ots* state, otv* args, int argc) {
+  if (need_arity(state, "bytevector-u8-ref", argc, 2, 2) == OT_UNWIND ||
+      bytevector_argument(state, "bytevector-u8-ref", args[0]) == OT_UNWIND)
+    return OT_UNWIND;
+  ot_bytevector_obj* bytes = as_bytevector(args[0]);
+  if (!ot_is_int(args[1]) || ot_get_int(args[1]) < 0 ||
+      (size_t)ot_get_int(args[1]) >= bytes->length)
+    return ot_raise(state, "bytevector-u8-ref: index out of range");
+  return ot_make_int(bytes->data[ot_get_int(args[1])]);
+}
+
+static otv nat_bytevector_set(ots* state, otv* args, int argc) {
+  if (need_arity(state, "bytevector-u8-set!", argc, 3, 3) == OT_UNWIND ||
+      bytevector_argument(state, "bytevector-u8-set!", args[0]) == OT_UNWIND ||
+      bytevector_set(state, "bytevector-u8-set!", args[0], args[1], args[2]) == OT_UNWIND)
+    return OT_UNWIND;
+  return ot_nil;
+}
+
+static otv nat_bytevector_copy(ots* state, otv* args, int argc) {
+  size_t start = 0, end = 0;
+  if (need_arity(state, "bytevector-copy", argc, 1, 3) == OT_UNWIND ||
+      bytevector_argument(state, "bytevector-copy", args[0]) == OT_UNWIND ||
+      span_arguments(state, "bytevector-copy", args, argc, 1, as_bytevector(args[0])->length,
+                     &start, &end) == OT_UNWIND)
+    return OT_UNWIND;
+  otv source = args[0];
+  OT_FRAME_SCOPED(state, &source);
+  otv copy = make_bytevector(state, end - start);
+  memcpy(as_bytevector(copy)->data, as_bytevector(source)->data + start, end - start);
+  return copy;
+}
+
+static otv nat_bytevector_copy_into(ots* state, otv* args, int argc) {
+  size_t start = 0, end = 0;
+  if (need_arity(state, "bytevector-copy!", argc, 3, 5) == OT_UNWIND ||
+      bytevector_argument(state, "bytevector-copy!", args[0]) == OT_UNWIND ||
+      bytevector_argument(state, "bytevector-copy!", args[2]) == OT_UNWIND ||
+      span_arguments(state, "bytevector-copy!", args, argc, 3, as_bytevector(args[2])->length,
+                     &start, &end) == OT_UNWIND)
+    return OT_UNWIND;
+  ot_bytevector_obj* to = as_bytevector(args[0]);
+  if (!ot_is_int(args[1]) || ot_get_int(args[1]) < 0 || (size_t)ot_get_int(args[1]) > to->length ||
+      to->length - (size_t)ot_get_int(args[1]) < end - start)
+    return ot_raise(state, "bytevector-copy!: destination out of range");
+  memmove(to->data + ot_get_int(args[1]), as_bytevector(args[2])->data + start, end - start);
+  return ot_nil;
+}
+
+static otv nat_bytevector_append(ots* state, otv* args, int argc) {
+  size_t length = 0;
+  for (int i = 0; i < argc; i++) {
+    if (bytevector_argument(state, "bytevector-append", args[i]) == OT_UNWIND) return OT_UNWIND;
+    length += as_bytevector(args[i])->length;
+  }
+  /* The argument array is rooted by the caller for the duration of the call. */
+  otv result = make_bytevector(state, length);
+  size_t offset = 0;
+  for (int i = 0; i < argc; i++) {
+    ot_bytevector_obj* part = as_bytevector(args[i]);
+    memcpy(as_bytevector(result)->data + offset, part->data, part->length);
+    offset += part->length;
+  }
+  return result;
+}
+
+/* Raise a condition of an io-error type: {:type type :message ... :op op}
+ * plus one extra key and value when key is not NULL. */
+static otv io_error(ots* state, const char* type, const char* op, const char* message,
+                    const char* key, otv value) {
+  otv condition = ot_nil, field = ot_nil, item = ot_nil;
+  OT_FRAME_SCOPED(state, &condition, &field, &item, &value);
+  condition = ot_table_new(state, 4);
+  field = ot_intern(state, "type", 4, true);
+  item = ot_intern(state, type, strlen(type), false);
+  ot_table_put(state, condition, field, item);
+  field = ot_intern(state, "message", 7, true);
+  item = ot_make_string(state, message, strlen(message));
+  ot_table_put(state, condition, field, item);
+  field = ot_intern(state, "op", 2, true);
+  item = ot_intern(state, op, strlen(op), false);
+  ot_table_put(state, condition, field, item);
+  if (key != NULL) {
+    field = ot_intern(state, key, strlen(key), true);
+    ot_table_put(state, condition, field, value);
+  }
+  return ot_raise_value(state, condition);
+}
+
+/* Return the length of the valid UTF-8 sequence at bytes[0..length), or 0. */
+static size_t utf8_valid_sequence(const unsigned char* bytes, size_t length) {
+  unsigned char byte = bytes[0];
+  if (byte < 0x80u) return 1;
+  size_t width = byte >= 0xc2u && byte <= 0xdfu   ? 2
+                 : byte >= 0xe0u && byte <= 0xefu ? 3
+                 : byte >= 0xf0u && byte <= 0xf4u ? 4
+                                                  : 0;
+  if (width == 0 || width > length) return 0;
+  unsigned char second = bytes[1];
+  unsigned char low = byte == 0xe0u ? 0xa0u : byte == 0xf0u ? 0x90u : 0x80u;
+  unsigned char high = byte == 0xedu ? 0x9fu : byte == 0xf4u ? 0x8fu : 0xbfu;
+  if (second < low || second > high) return 0;
+  for (size_t i = 2; i < width; i++)
+    if ((bytes[i] & 0xc0u) != 0x80u) return 0;
+  return width;
+}
+
+static otv nat_utf8_string(ots* state, otv* args, int argc) {
+  size_t start = 0, end = 0;
+  if (need_arity(state, "utf8->string", argc, 1, 3) == OT_UNWIND ||
+      bytevector_argument(state, "utf8->string", args[0]) == OT_UNWIND ||
+      span_arguments(state, "utf8->string", args, argc, 1, as_bytevector(args[0])->length, &start,
+                     &end) == OT_UNWIND)
+    return OT_UNWIND;
+  const unsigned char* data = as_bytevector(args[0])->data;
+  for (size_t offset = start; offset < end;) {
+    size_t width = utf8_valid_sequence(data + offset, end - offset);
+    if (width == 0) {
+      char message[64];
+      snprintf(message, sizeof message, "utf8->string: invalid UTF-8 at byte %zu", offset);
+      return io_error(state, "decode-error", "utf8->string", message, "position",
+                      ot_make_int((intptr_t)offset));
+    }
+    offset += width;
+  }
+  buf bytes = {0};
+  buf_write(&bytes, (const char*)data + start, end - start);
+  otv result = bytes.failed ? ot_raise(state, "utf8->string: out of memory")
+                            : ot_make_string(state, bytes.data, bytes.length);
+  buf_free(&bytes);
+  return result;
+}
+
+static otv nat_string_utf8(ots* state, otv* args, int argc) {
+  if (need_arity(state, "string->utf8", argc, 1, 3) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_STRING)) return ot_raise(state, "string->utf8: expected string");
+  otv string = args[0];
+  const unsigned char* data = as_bytes(as_string(string)->bytes)->data;
+  size_t length = as_string(string)->length;
+  size_t start = 0, end = 0;
+  if (span_arguments(state, "string->utf8", args, argc, 1, utf8_count(data, length), &start,
+                     &end) == OT_UNWIND)
+    return OT_UNWIND;
+  size_t byte_start = utf8_offset(data, length, start);
+  size_t byte_end = utf8_offset(data, length, end);
+  OT_FRAME_SCOPED(state, &string);
+  otv result = make_bytevector(state, byte_end - byte_start);
+  memcpy(as_bytevector(result)->data, as_bytes(as_string(string)->bytes)->data + byte_start,
+         byte_end - byte_start);
+  return result;
+}
+
 static otv nat_put(ots* state, otv* args, int argc) {
   if (argc < 3 || (argc & 1) == 0)
     return ot_raise(state, "put!: expected collection and key/value pairs");
@@ -5427,7 +5682,13 @@ static otv nat_put(ots* state, otv* args, int argc) {
     }
     return args[0];
   }
-  return ot_raise(state, "put!: expected table or array");
+  if (is_type(args[0], OBJ_BYTEVECTOR)) {
+    for (int i = 1; i < argc; i += 2)
+      if (bytevector_set(state, "put!", args[0], args[i], args[i + 1]) == OT_UNWIND)
+        return OT_UNWIND;
+    return args[0];
+  }
+  return ot_raise(state, "put!: expected table, array, or bytevector");
 }
 
 static otv nat_set_applied(ots* state, otv* args, int argc) {
@@ -6889,11 +7150,11 @@ static otv nat_remove_method(ots* state, otv* args, int argc) {
 static void generic_module_init(ots* state) {
   if (state->dispatch_types != ot_nil) return;
   state->dispatch_types = make_slots(state, OT_TYPE_INTERNAL + 1);
-  static const char* names[] = {"Nil",       "Null",    "Boolean",        "Number",   "Number",
-                                "Symbol",    "Keyword", "String",         "Pair",     "Vector",
-                                "Hashtable", "Buffer",  "Procedure",      "Macro",    "Parameter",
-                                "Restart",   "Foreign", "TypeDescriptor", "Instance", "Character",
-                                "Other",     "Other"};
+  static const char* names[] = {
+      "Nil",       "Null",      "Boolean",   "Number",     "Number",    "Symbol",
+      "Keyword",   "String",    "Pair",      "Vector",     "Hashtable", "Buffer",
+      "Procedure", "Macro",     "Parameter", "Restart",    "Foreign",   "TypeDescriptor",
+      "Instance",  "Character", "Other",     "Bytevector", "Other"};
   otv owner = ((ot_namespace_obj*)ot_as_obj(state->vm.current_namespace))->name;
   otv name = ot_nil, type = ot_nil;
   OT_FRAME_SCOPED(state, &owner, &name, &type);
@@ -7013,6 +7274,17 @@ static const nat_def core_nats[] = {
     {"string->list", nat_string_list},
     {"list->string", nat_list_string},
     {"string-ref", nat_string_ref},
+    {"bytevector?", nat_bytevector_p},
+    {"bytevector", nat_bytevector},
+    {"make-bytevector", nat_make_bytevector},
+    {"bytevector-length", nat_bytevector_length},
+    {"bytevector-u8-ref", nat_bytevector_ref},
+    {"bytevector-u8-set!", nat_bytevector_set},
+    {"bytevector-copy", nat_bytevector_copy},
+    {"bytevector-copy!", nat_bytevector_copy_into},
+    {"bytevector-append", nat_bytevector_append},
+    {"utf8->string", nat_utf8_string},
+    {"string->utf8", nat_string_utf8},
     {"list?", nat_list_p},
     {"true?", nat_true_p},
     {"false?", nat_false_p},

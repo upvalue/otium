@@ -27,6 +27,8 @@
         (list "+0x10" 16)
         (list "()" '())
         (list "(a . b)" '(a . b))
+        (list "#u8()" '(bytevector))
+        (list "#u8(1 (+ 1 2))" '(bytevector 1 (+ 1 2)))
         (list "[1 :x]" '(array 1 :x))
         (list "{:x 1 :y 2}" '(table :x 1 :y 2))
         (list "'[1]" '(quote (array 1)))
@@ -76,7 +78,9 @@
         "#\\x110000"
         "#\\xg"
         "#(1)"
-        "#u8(1)"
+        "#u8"
+        "#u8 (1)"
+        "#u8(1]"
         "#'a"
         "`#(a)"
         "#;1"

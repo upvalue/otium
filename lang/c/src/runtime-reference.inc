@@ -207,6 +207,17 @@ const char* ot_runtime_documentation(const char* name) {
     {"string-ref", "(string-ref string k)\nThe char at code point index k; raise an error when out of range. O(k) on C, which stores strings as UTF-8."},
     {"eof-object", "(eof-object)\nThe end-of-file object."},
     {"eof-object?", "(eof-object? value)\nTest whether value is the end-of-file object."},
+    {"bytevector", "(bytevector byte ...)\nCreate a fresh mutable bytevector. Each byte must be an exact integer from 0 to 255."},
+    {"bytevector?", "(bytevector? value)\nTest whether value is a bytevector."},
+    {"make-bytevector", "(make-bytevector length [fill])\nCreate a bytevector of non-negative length, filled with fill (default 0). Fill must be a byte from 0 to 255."},
+    {"bytevector-length", "(bytevector-length bytes)\nReturn the number of bytes."},
+    {"bytevector-u8-ref", "(bytevector-u8-ref bytes index)\nReturn the byte at index. Raise an error for an invalid index."},
+    {"bytevector-u8-set!", "(bytevector-u8-set! bytes index byte)\nSet the byte at index and return nil. Reject invalid indexes and values outside 0 to 255."},
+    {"bytevector-copy", "(bytevector-copy bytes [start [end]])\nCopy the half-open byte range into a fresh bytevector. Defaults to the whole bytevector."},
+    {"bytevector-copy!", "(bytevector-copy! to at from [start [end]])\nCopy a half-open range from from into to at byte index at. Overlapping ranges are supported. Return nil."},
+    {"bytevector-append", "(bytevector-append bytes ...)\nConcatenate bytevectors into a fresh bytevector."},
+    {"utf8->string", "(utf8->string bytes [start [end]])\nDecode a half-open byte range as UTF-8. Invalid input raises decode-error with the absolute byte offset in :position."},
+    {"string->utf8", "(string->utf8 text [start [end]])\nEncode a half-open character range as UTF-8 in a fresh bytevector. Defaults to the whole string."},
   };
   for (size_t i = 0; i < sizeof(entries) / sizeof(*entries); ++i)
     if (!strcmp(name, entries[i].name)) return entries[i].text;

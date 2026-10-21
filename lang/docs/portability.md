@@ -110,7 +110,11 @@ remain available through `chez/` names, including `chez//`, `chez/round`,
 including complex results from functions such as `log`, is not unified.
 OTCL explicitly chooses integer or inexact division for its string results.
 
-Chez vectors, bytevectors, hashtables, continuations, multiple
+Bytevectors are portable mutable byte sequences. `#u8(...)` constructs a fresh
+value; equality and table keys use identity. UTF-8 conversion rejects invalid
+input with a `decode-error` and byte `:position` on both runtimes.
+
+Chez vectors, hashtables, continuations, multiple
 values, and native syntax are available after `(require chez)` through
 `chez/` names. Otium `values` returns table values as an array;
 `chez/values` produces Scheme multiple values. Native syntax owns its own

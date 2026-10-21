@@ -99,8 +99,16 @@
                     (or (= a b) (and (real? a) (real? b) (nan? a) (nan? b))))]
               [(and (pair? a) (pair? b)) (and (key=? (car a) (car b)) (key=? (cdr a) (cdr b)))]
               [else #f])))
+  (define bytevector-ids (make-weak-eq-hashtable))
+  (define next-bytevector-id 0)
+  (define (bytevector-id x)
+    (or (hashtable-ref bytevector-ids x #f)
+        (begin (set! next-bytevector-id (+ next-bytevector-id 1))
+               (hashtable-set! bytevector-ids x next-bytevector-id)
+               next-bytevector-id)))
   (define (key-hash x)
-    (cond [(pair? x)
+    (cond [(bytevector? x) (bitwise-and #x3fffffff (bytevector-id x))]
+          [(pair? x)
            (hashtable-set! frozen x #t)
            (bitwise-and #x3fffffff (+ (* 33 (key-hash (car x))) (key-hash (cdr x))))]
           [(string? x) (string-hash x)]
@@ -116,22 +124,32 @@
     (let ([fallback (if (null? default) (void) (car default))])
       (cond [(nil? x) fallback]
             [(table? x) (hashtable-ref (table-value-data x) key fallback)]
-            [(or (array? x) (string? x))
+            [(or (array? x) (string? x) (bytevector? x))
              (if (and (integer? key) (exact? key) (<= 0 key) (< key (collection-length x)))
-                 (if (array? x) (vector-ref (array-value-storage x) key) (string-ref x key))
+                 (cond [(array? x) (vector-ref (array-value-storage x) key)]
+                       [(string? x) (string-ref x key)]
+                       [else (bytevector-u8-ref x key)])
                  fallback)]
-            [else (error 'get "expected nil, table, array, or string" x)])))
+            [else (error 'get "expected nil, table, array, string, or bytevector" x)])))
   (define (put! x . xs)
     (unless (and (pair? xs) (even? (length xs))) (error 'put! "expected key/value pairs"))
-    (unless (or (array? x) (table? x)) (error 'put! "expected array or table" x))
+    (unless (or (array? x) (table? x) (bytevector? x))
+      (error 'put! "expected table, array, or bytevector" x))
     (let loop ([xs xs])
       (unless (null? xs)
         (let ([key (car xs)] [value (cadr xs)])
-          (if (array? x)
-              (begin
+          (cond
+            [(bytevector? x)
+             (unless (and (fixnum? key) (fx<= 0 key) (fx< key (bytevector-length x)))
+               (error 'put! "index out of range" key))
+             (unless (and (fixnum? value) (fx<= 0 value 255))
+               (error 'put! "expected a byte from 0 to 255" value))
+             (bytevector-u8-set! x key value)]
+            [(array? x)
                 (unless (and (integer? key) (exact? key) (<= 0 key) (< key (array-value-size x)))
                   (error 'put! "index out of range" key))
-                (vector-set! (array-value-storage x) key value))
+                (vector-set! (array-value-storage x) key value)]
+            [else
               (let ([data (table-value-data x)])
                 (cond [(nil? value)
                        (hashtable-delete! data key)
@@ -139,7 +157,7 @@
                       [else
                        (unless (hashtable-contains? data key)
                          (table-value-order-set! x (cons key (table-value-order x))))
-                       (hashtable-set! data key value)])))
+                       (hashtable-set! data key value)]))])
           (loop (cddr xs))))) x)
   (define (set-applied! object key value)
     (cond [(instance? object) (instance-write object key value)]
@@ -159,7 +177,8 @@
     (cond [(nil? x) 0] [(array? x) (array-value-size x)]
           [(table? x) (hashtable-size (table-value-data x))]
           [(buffer? x) (buffer-value-size x)]
-          [(string? x) (string-length x)] [else (length x)]))
+          [(string? x) (string-length x)] [(bytevector? x) (bytevector-length x)]
+          [else (length x)]))
   (define (copy x)
     (cond [(instance? x) (instance-copy x)] [(nil? x) x] [(array? x) (apply array (array-list x))]
           [(table? x) (let ([t (table)]) (for-each (lambda (k) (put! t k (get x k))) (reverse (table-value-order x))) t)]
@@ -197,7 +216,7 @@
     (keyword (cond [(instance? x) "instance"] [(buffer? x) "buffer"] [(nil? x) "nil"] [(keyword? x) "keyword"] [(array? x) "array"] [(table? x) "table"]
           [(null? x) "null"] [(pair? x) "pair"] [(boolean? x) "boolean"] [(symbol? x) "symbol"]
           [(string? x) "string"] [(and (integer? x) (exact? x)) "int"]
-          [(char? x) "char"] [(eof-object? x) "eof"]
+          [(char? x) "char"] [(eof-object? x) "eof"] [(bytevector? x) "bytevector"]
           [(number? x) "float"] [(procedure? x) "function"] [else "native"])))
   (define (write-string x port)
     (display "\"" port)
@@ -234,6 +253,13 @@
           [(nil? x) (display "nil" port)]
           [(char? x) (if display? (display x port) (write-char-literal x port))]
           [(eof-object? x) (display "#<eof>" port)]
+          [(bytevector? x)
+           (display "#u8(" port)
+           (let ([n (bytevector-length x)])
+             (do ([i 0 (+ i 1)]) ((= i n))
+               (unless (= i 0) (display " " port))
+               (display (bytevector-u8-ref x i) port)))
+           (display ")" port)]
           [(keyword? x) (display ":" port) (display (keyword->string x) port)]
           [(array? x) (display "[" port) (items (array-list x)) (display "]" port)]
           [(table? x) (display "{" port)

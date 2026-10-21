@@ -126,6 +126,7 @@ typedef enum ot_type {
   OT_TYPE_INSTANCE,
   OT_TYPE_CHAR,
   OT_TYPE_EOF,
+  OT_TYPE_BYTEVECTOR,
   OT_TYPE_INTERNAL,
 } ot_type;
 
@@ -286,6 +287,7 @@ typedef enum ot_obj_type {
   OBJ_LAYOUT,
   OBJ_INSTANCE,
   OBJ_CELL,
+  OBJ_BYTEVECTOR,
   OBJ_FREE,
 } ot_obj_type;
 
@@ -316,6 +318,14 @@ typedef struct ot_bytes_obj {
   size_t length;
   unsigned char data[];
 } ot_bytes_obj;
+
+/* Bytevectors compare by identity, so table keys hash a stable id. */
+typedef struct ot_bytevector_obj {
+  uintptr_t header;
+  size_t length;
+  uint64_t stable_id;
+  unsigned char data[];
+} ot_bytevector_obj;
 
 typedef struct ot_string_obj {
   uintptr_t header;

@@ -1,7 +1,7 @@
 # I/O
 
-Draft. Implemented so far, on both runtimes: characters and the EOF object
-(step 1 of [Order of work](#order-of-work)).
+Draft. Implemented so far, on both runtimes: characters, the EOF object, and bytevectors
+(steps 1–2 of [Order of work](#order-of-work)).
 
 Ports for files, standard streams, strings and bytes, on both runtimes. To
 support them, Otium gains a character type and a bytevector type, and `first`
@@ -160,6 +160,10 @@ Functions:
   UTF-8, and `(string->utf8 s [start [end]])`
 - The generic functions `length`, `count`, `get` and `put!` work as they do on
   arrays.
+
+`#u8(...)` reads as a constructor call, `(bytevector ...)`, like arrays and
+tables. Elements are evaluated and each evaluation creates a fresh bytevector.
+Quoted literals produce constructor forms, not bytevector values.
 
 On C, the bytes live inline in a heap object. On Chez, these are Chez
 bytevectors, printed by Otium's printer as `#u8`, not `#vu8`.
@@ -590,5 +594,3 @@ That allocates one string per unescaped run. A port-to-port
    C port internals now, even if nothing uses it yet.
 2. Should there be `display-to` and `write-to` variants that take the port
    first, so a printer doesn't need `with-params`?
-3. The `#u8(…)` literal reads as a constant, unlike `[…]` and `{…}`, which
-   read as constructor calls. Is that an acceptable inconsistency?

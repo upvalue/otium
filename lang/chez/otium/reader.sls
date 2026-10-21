@@ -130,44 +130,53 @@
         (define start (if (memv (at 0) '(#\+ #\-)) 1 0))
         (define (digits i)
           (if (digit? (at i)) (digits (+ i 1)) i))
-        (end-token 'atom)
-        (cond [(= n 0) (fail "expected value" #f)]
-              [(string=? text "nil") (void)]
-              [(member text '("#t" "#true")) #t]
-              [(member text '("#f" "#false")) #f]
-              [(and (eqv? (at 0) #\#) (eqv? (at 1) #\\)) (char-literal (substring text 2 n))]
-              [(eqv? (at 0) #\#) (fail "reserved # token" #f)]
-              [(eqv? (at 0) #\:)
-               (when (= n 1) (fail "empty keyword" #f))
-               (keyword (substring text 1 n))]
-              [(or (digit? (at start)) (and (eqv? (at start) #\.) (< (+ start 1) n)))
-               (if (and (eqv? (at start) #\0) (memv (at (+ start 1)) '(#\x #\X)))
-                   (let ([begin (+ start 2)])
-                     (unless (and (< begin n)
-                                  (for-all hex (string->list (substring text begin n))))
-                       (fail "invalid number" #f))
-                     (* (if (eqv? (at 0) #\-) -1 1)
-                        (string->number (substring text begin n) 16)))
-                   (let* ([end (digits start)]
-                          [fraction? (eqv? (at end) #\.)]
-                          [fraction-end (if fraction? (digits (+ end 1)) end)]
-                          [exponent? (memv (at fraction-end) '(#\e #\E))]
-                          [exponent-start (+ fraction-end 1)]
-                          [exponent-start (if (and exponent? (memv (at exponent-start) '(#\+ #\-)))
-                                              (+ exponent-start 1) exponent-start)]
-                          [finish (if exponent? (digits exponent-start) fraction-end)])
-                     (unless (and (= finish n)
-                                  (or (> end start) (and fraction? (> fraction-end (+ end 1))))
-                                  (or (not exponent?) (> finish exponent-start)))
-                       (fail "invalid number" #f))
-                     (or (string->number text) (fail "invalid number" #f))))]
-              [else (string->symbol text)])))
+        (cond
+          ;; #u8( is one opening token, so tools see it as a container.
+          [(and (string=? text "#u8") (eqv? (peek) #\())
+           (take)
+           (end-token 'open)
+           (sequence-items #\) 'bytevector)]
+          [else
+           (end-token 'atom)
+           (cond [(= n 0) (fail "expected value" #f)]
+                 [(string=? text "nil") (void)]
+                 [(member text '("#t" "#true")) #t]
+                 [(member text '("#f" "#false")) #f]
+                 [(and (eqv? (at 0) #\#) (eqv? (at 1) #\\)) (char-literal (substring text 2 n))]
+                 [(eqv? (at 0) #\#) (fail "reserved # token" #f)]
+                 [(eqv? (at 0) #\:)
+                  (when (= n 1) (fail "empty keyword" #f))
+                  (keyword (substring text 1 n))]
+                 [(or (digit? (at start)) (and (eqv? (at start) #\.) (< (+ start 1) n)))
+                  (if (and (eqv? (at start) #\0) (memv (at (+ start 1)) '(#\x #\X)))
+                      (let ([begin (+ start 2)])
+                        (unless (and (< begin n)
+                                     (for-all hex (string->list (substring text begin n))))
+                          (fail "invalid number" #f))
+                        (* (if (eqv? (at 0) #\-) -1 1)
+                           (string->number (substring text begin n) 16)))
+                      (let* ([end (digits start)]
+                             [fraction? (eqv? (at end) #\.)]
+                             [fraction-end (if fraction? (digits (+ end 1)) end)]
+                             [exponent? (memv (at fraction-end) '(#\e #\E))]
+                             [exponent-start (+ fraction-end 1)]
+                             [exponent-start (if (and exponent? (memv (at exponent-start) '(#\+ #\-)))
+                                                 (+ exponent-start 1) exponent-start)]
+                             [finish (if exponent? (digits exponent-start) fraction-end)])
+                        (unless (and (= finish n)
+                                     (or (> end start) (and fraction? (> fraction-end (+ end 1))))
+                                     (or (not exponent?) (> finish exponent-start)))
+                          (fail "invalid number" #f))
+                        (or (string->number text) (fail "invalid number" #f))))]
+                 [else (string->symbol text)])])))
     (define (delimiter kind)
       (start-token)
       (take)
       (end-token kind))
     (define (sequence closing prefix)
       (delimiter 'open)
+      (sequence-items closing prefix))
+    (define (sequence-items closing prefix)
       (let loop ([out (if prefix (list prefix) '())])
         (space)
         (cond [(eof-object? (peek)) (fail "unclosed form" #t)]

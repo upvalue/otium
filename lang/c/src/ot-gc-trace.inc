@@ -11,6 +11,7 @@ static void OT_GC_TRACE_OBJECT(ots* state, ot_obj* object) {
   switch (ot_object_type(value)) {
     case OBJ_FLOAT:
     case OBJ_BYTES:
+    case OBJ_BYTEVECTOR:
     case OBJ_EXT:
     case OBJ_FREE: break;
     case OBJ_SYMBOL:

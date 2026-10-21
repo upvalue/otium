@@ -63,8 +63,9 @@ An atom token is classified in this order:
 1. `nil` is the nil value.
 2. `#t`, `#true`, `true` are boolean true; `#f`, `#false`, `false` are
    boolean false.
-3. `#\` starts a character literal (1.4). Any other token starting with
-   `#` is a read error. The `#` prefix is reserved.
+3. `#\` starts a character literal (1.4). `#u8(` opens a bytevector
+   constructor, read as `(bytevector ...)`. Other tokens starting with `#`
+   are read errors. The `#` prefix is reserved.
 4. `:name` is the keyword `name` (any non-empty run of atom characters).
    A bare `:` is a read error.
 5. A token that *starts numerically* -- optionally signed (`+`/`-`), then a
@@ -135,6 +136,7 @@ symbol.
 | `char` | `#\a` | -- | one Unicode scalar value; named form for space, newline, tab, return, nul; `#\x7f` for other control chars |
 | `string` | `"hi"` | -- | Unicode; indexed and measured by code point |
 | `pair` | `(1 . 2)` | yes | mutable with `set-car!` / `set-cdr!`; cycles are rejected |
+| `bytevector` | `#u8(1 2)` | yes | fixed-length byte sequence; literal evaluates a constructor call |
 | `array` | `[1 2]` | yes | growable vector |
 | `table` | `{:a 1}` | yes | insertion-ordered map, arbitrary keys |
 | `buffer` | `#<buffer "…">` | yes | mutable string builder |
@@ -200,7 +202,7 @@ Three notions, coarsest to finest:
   Arguments must be numbers.
 - **`equal?`** -- deep structural equality for pairs and immutable data
   (pairs recursively, strings, symbols, keywords, numbers *of the same
-  type*, chars), identity for arrays, tables, buffers, and functions. Array identity
+  type*, chars), identity for arrays, bytevectors, tables, buffers, and functions. Array identity
   is stable across GC and is unchanged by mutation.
   Type-strict: `(equal? 1 1.0)` is `#f`, and `nil`, `()`, `#f` are all
   distinct. For the benefit of table keys, `NaN` equals `NaN` and `0.0`
@@ -953,7 +955,7 @@ Whole-sequence traversal requires proper lists. `for-each`, `apply`,
 | `(second seq)` / `(third seq)` | `(nth seq 1)` / `(nth seq 2)`. |
 | `(last seq)` | Last element or `nil`. Also accepts strings. |
 | `(nth seq i)` | Element at 0-based `i`, or `nil` out of range. Also accepts strings. |
-| `(count coll)` → int | Like `length` but `nil` counts as 0; accepts sequences, tables, strings. |
+| `(count coll)` → int | Like `length` but `nil` counts as 0; accepts sequences, tables, strings, bytevectors. |
 | `(map f seq)` | Kind-preserving; applies `f` to each element in order. |
 | `(filter pred seq)` | Kind-preserving; keeps elements where `pred` is truthy. |
 | `(reduce f init seq)` | Left fold: `(f acc elem)`. |
@@ -973,9 +975,9 @@ Whole-sequence traversal requires proper lists. `for-each`, `apply`,
 |---|---|
 | `(array x…)` → array | The `[...]` constructor. |
 | `(table k v …)` → table | The `{...}` constructor; odd argument count errors; `nil` values delete (2.2). |
-| `(get coll k [default])` | Nil-tolerant lookup: table by key; array or string by int index (other key types miss); `nil` coll is a miss. Misses yield `default` or `nil`. Other types error. A string element is a char. |
+| `(get coll k [default])` | Nil-tolerant lookup: table by key; array, bytevector, or string by int index (other key types miss); `nil` coll is a miss. Misses yield `default` or `nil`. Other types error. A string element is a char. |
 | `(get-in coll path [default])` | `get` folded over a sequence of keys. |
-| `(put! coll k v …)` → coll | Mutates in place. Tables: insert, or delete on `nil` value. Arrays: `k` must be an in-range int index (no growth). Multiple k/v pairs allowed. |
+| `(put! coll k v …)` → coll | Mutates in place. Tables: insert, or delete on `nil` value. Arrays: `k` must be an in-range int index (no growth). Bytevectors also require an in-range int index and an exact integer byte from 0 to 255. Multiple k/v pairs allowed. |
 | `(push! arr x…)` → arr | Append to an array. |
 | `(pop! arr)` | Remove and return the last element, or `nil` when empty. |
 | `(update! coll k f args…)` → coll | `(put! coll k (f (get coll k) args…))`. |
@@ -985,6 +987,9 @@ Whole-sequence traversal requires proper lists. `for-each`, `apply`,
 | `(keys t)` / `(values t)` → array | Insertion order; `nil` gives `[]`. |
 | `(merge t…)` → table | New table, left to right; `nil` arguments skipped; live entries in later tables update matching keys. |
 | `(copy coll)` | Shallow copy of an array or table; `(copy nil)` is `nil`. |
+
+Bytevector constructors, copying, and UTF-8 conversions are described in
+[the I/O spec](io.md#bytevectors). Bytevectors dispatch as `Bytevector`.
 
 ### 10.6 Strings, buffers, names
 

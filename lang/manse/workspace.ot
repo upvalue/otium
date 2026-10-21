@@ -11,6 +11,8 @@
 (require (manse.pty :as pty))
 (require (manse.session :as sessions))
 (require (otium.ui.input :as input))
+(require manse.application :as application)
+(require manse.keyboard :as keyboard)
 
 (def font-size 14)
 (def pad 6)
@@ -30,32 +32,11 @@
 (def (rgba rgb alpha)
   (+ (* (car rgb) 16777216) (* (cadr rgb) 65536) (* (caddr rgb) 256) alpha))
 
-;; Input. A minimal mapping until keys go through libghostty's key encoder.
-
-(def special-keys
-  {"Return" "\r" "Backspace" "\x7f;" "Tab" "\t" "Shift+Tab" "\x1b;[Z" "Escape" "\x1b;"
-   "Up" "\x1b;[A" "Down" "\x1b;[B" "Right" "\x1b;[C" "Left" "\x1b;[D"
-   "Home" "\x1b;[H" "End" "\x1b;[F" "Delete" "\x1b;[3~" "PageUp" "\x1b;[5~" "PageDown" "\x1b;[6~"})
-
-(def letters "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-(def (ctrl-byte key)
-  "The control code for Ctrl+<letter>, or nil."
-  (when (and (string-starts-with? key "Ctrl+") (= (string-length key) 6))
-    (let ((letter (substring key 5)))
-      (let loop ((i 0))
-        (cond
-          ((= i 26) nil)
-          ((equal? (substring letters i (+ i 1)) letter) (+ i 1))
-          (else (loop (+ i 1))))))))
-
 (def (key! session event)
-  (let ((p (session :pty))
-        (key (get event :key)))
-    (cond
-      ((get special-keys key) (pty/write! p (get special-keys key)) :handled)
-      ((ctrl-byte key) (pty/write-bytes! p (list (ctrl-byte key))) :handled)
-      (else nil))))
+  (let ((bytes (keyboard/encode (session :term) event)))
+    (when bytes
+      (unless (null? bytes) (pty/write-bytes! (session :pty) bytes))
+      :handled)))
 
 ;; The widget
 
@@ -220,6 +201,7 @@
         "assets/manse-mark.png")))
 
 (def (main)
+  (application/set-name! "Manse")
   (let ((shell (or (process/getenv "SHELL") "/bin/sh")))
     (process/setenv! "TERM" "xterm-256color")
     (put! workspace :quit? #f)
@@ -228,11 +210,11 @@
       (begin
         (dotimes (i 2)
           (push! (workspace :sessions) (sessions/open! (+ i 1) shell (list shell))))
-        (let ((window (ui/open {:title "manse · click or Ctrl+Tab to switch terminals"
+        (let ((window (ui/open {:title "Manse"
                                 :width 900 :height 800
                                 :config (config-path)
                                 :icon (icon-path)
-                                :app-name "manse" :app-id "org.otium.manse"
+                                :app-name "Manse" :app-id "org.otium.manse"
                                 :background-color 0x000000ff
                                 :fail-fast? #t
                                 :step! (fn (window) (step! window))

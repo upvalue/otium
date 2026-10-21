@@ -34,10 +34,10 @@
                          (array-to-list (string-split (keyword->string name) "."))))))
 
 (def (fragment? value)
-  (and (instance? value) (eq? (dispatch-type value) Fragment)))
+  (is-a? value Fragment))
 
 (def (query? value)
-  (and (instance? value) (eq? (dispatch-type value) Query)))
+  (is-a? value Query))
 
 (def (join-fragments separator fragments)
   (make Fragment

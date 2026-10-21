@@ -355,4 +355,49 @@
 (check "remove primary preserves around" #t (remove-method! inspect-method (list Number)))
 (check "around without remaining primary" #t (fails? '(inspect-method 1)))
 
+(defabstract MembershipRoot)
+
+(defabstract MembershipBranch
+  :is MembershipRoot)
+
+(defabstract MembershipOther)
+
+(defclass MembershipLeaf
+  :is MembershipBranch)
+
+(def membership-value (make MembershipLeaf))
+
+(check "is-a? concrete class" #t (is-a? membership-value MembershipLeaf))
+(check "is-a? abstract ancestor" #t (is-a? membership-value MembershipRoot))
+(check "is-a? unrelated class" #f (is-a? membership-value MembershipOther))
+(check "is-a? built-in against user class" #f (is-a? 42 MembershipRoot))
+(for-each (fn (entry)
+            (check "is-a? built-in identity" #t (is-a? (car entry) (cadr entry)))
+            (check "is-a? Object includes built-ins" #t (is-a? (car entry) Object)))
+          (list (list 42 Number)
+                (list 1.5 Number)
+                (list #f Boolean)
+                (list #\a Character)
+                (list "text" String)
+                (list 'name Symbol)
+                (list '() Null)
+                (list '(1) Pair)
+                (list [] Vector)
+                (list #u8(1) Bytevector)
+                (list {} Hashtable)
+                (list (fn () nil) Procedure)
+                (list Number TypeDescriptor)
+                (list nil Nil)
+                (list :key Keyword)))
+(check "is-a? mismatched built-in" #f (is-a? "42" Number))
+(check "is-a? false is not nil" #f (is-a? #f Nil))
+(check "is-a? instance is an Object" #t (is-a? membership-value Object))
+(check "is-a? requires a class descriptor" #t (fails? '(is-a? 42 'Number)))
+
+(defabstract MembershipBranch
+  :is MembershipOther)
+
+(check "is-a? follows changed ancestry" #t (is-a? membership-value MembershipOther))
+(check "is-a? forgets former ancestry" #f (is-a? membership-value MembershipRoot))
+
 (report "classes")

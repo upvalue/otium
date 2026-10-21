@@ -26,7 +26,7 @@
 
 (def (add! registry name app)
   "Register an app with a stable ID. The registry owns its lifetime."
-  (unless (and (instance? app) (class-subtype? (dispatch-type app) App)) (error "Expected a Manse app" app))
+  (unless (is-a? app App) (error "Expected a Manse app" app))
   (unless (and (string? name) (> (string-length name) 0)) (error "App name must be a nonempty string" name))
   (when (exists (fn (entry) (eq? (entry :app) app)) (registry :entries)) (error "App is already registered"))
   (let ((entry {:id (registry :next-id) :name name :app app}))

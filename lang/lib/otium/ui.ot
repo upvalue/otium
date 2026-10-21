@@ -341,7 +341,7 @@
   (node :active?))
 
 (def- (description? value)
-  (and (instance? value) (eq? (dispatch-type value) Description)))
+  (is-a? value Description))
 
 (def- (flatten input)
   (let ((out []))
@@ -444,7 +444,7 @@
    :children (node :children)})
 
 (def (mounted? value)
-  (and (instance? value) (eq? (dispatch-type value) Mounted)))
+  (is-a? value Mounted))
 
 (def (enabled? node)
   (and (active? node)

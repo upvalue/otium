@@ -303,6 +303,18 @@ Mounting and updating reject property instances with an outdated layout. Build
 a fresh description after class redefinition. These are construction primitives
 for libraries; application widget methods operate on fully mounted instances.
 
+## Membership
+
+`(is-a? value Class)` returns a boolean testing whether the value's dispatch
+class is `Class` or descends from it. The value comes first. It accepts ordinary
+values as well as user instances: `(is-a? 42 Number)` and `(is-a? 42 Object)`
+are true; `(is-a? "42" Number)` is false. The second argument must be a class
+descriptor, not a quoted class name.
+
+`instance?` still tests whether a value is a user class instance. For an exact
+class comparison, use `(eq? (dispatch-type value) Class)`. Membership follows
+the current ancestry after class redefinition.
+
 ## Redefinition and reload
 
 Re-evaluating `defclass` or `defabstract` keeps the type's identity,

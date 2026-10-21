@@ -7,6 +7,10 @@
 ;; eq? equal?, error, condition-of-type?, gensym.
 ;; Additionally assumed for sort: (string<? a b) lexicographic order.
 
+(def (is-a? value class)
+  "(is-a? value Class)\nTest whether value belongs to Class or a descendant, including built-in types. Class must be a class descriptor."
+  (class-subtype? (dispatch-type value) class))
+
 ;; --- internal helpers -------------------------------------------------------
 
 (def- (to-list seq)

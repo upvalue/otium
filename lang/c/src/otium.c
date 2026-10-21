@@ -1181,6 +1181,11 @@ static otv raise_arity(ots* state, otv name, size_t minimum, size_t maximum, boo
  * 4. READER
  * ========================================================================= */
 
+typedef struct reader_token {
+  size_t start, end;
+  const char* kind;
+} reader_token;
+
 typedef struct reader {
   ots* state;
   const char* source;
@@ -1188,7 +1193,21 @@ typedef struct reader {
   size_t offset;
   const char* name;
   bool incomplete;
+  buf* tokens;
 } reader;
+
+/* Tool mode keeps only byte spans here. Build managed token lists after the
+ * normal reader has validated every form. Ordinary reads allocate no log. */
+static void reader_token_end(reader* input, size_t start, const char* kind) {
+  if (input->tokens == NULL) return;
+  reader_token token = {.start = start, .end = input->offset, .kind = kind};
+  buf_write(input->tokens, (const char*)&token, sizeof token);
+}
+
+static void reader_delimiter(reader* input, const char* kind) {
+  size_t start = input->offset++;
+  reader_token_end(input, start, kind);
+}
 
 static bool delimiter(unsigned char byte) {
   return isspace(byte) || byte == '(' || byte == ')' || byte == '[' || byte == ']' || byte == '{' ||
@@ -1203,9 +1222,11 @@ static void reader_space(reader* input) {
       continue;
     }
     if (byte == ';') {
+      size_t start = input->offset;
       while (input->offset < input->length && input->source[input->offset] != '\n' &&
              input->source[input->offset] != '\r')
         input->offset++;
+      reader_token_end(input, start, "comment");
       continue;
     }
     break;
@@ -1253,6 +1274,7 @@ static otv read_string(reader* input) {
   while (input->offset < input->length) {
     unsigned char byte = (unsigned char)input->source[input->offset++];
     if (byte == '"') {
+      reader_token_end(input, start, "string");
       otv value = ot_make_string(input->state, bytes.data, bytes.length);
       buf_free(&bytes);
       return value;
@@ -1380,10 +1402,14 @@ static otv read_char(reader* input) {
 static otv read_atom(reader* input) {
   size_t start = input->offset;
   if (input->offset + 1 < input->length && input->source[input->offset] == '#' &&
-      input->source[input->offset + 1] == '\\')
-    return read_char(input);
+      input->source[input->offset + 1] == '\\') {
+    otv value = read_char(input);
+    reader_token_end(input, start, "atom");
+    return value;
+  }
   while (input->offset < input->length && !delimiter((unsigned char)input->source[input->offset]))
     input->offset++;
+  reader_token_end(input, start, "atom");
   const char* token = input->source + start;
   size_t length = input->offset - start;
   if (length == 0) return reader_error(input, "E0010", "expected a value");
@@ -1445,9 +1471,10 @@ static otv read_atom(reader* input) {
   return ot_intern(input->state, token, length, false);
 }
 
-static otv read_sequence(reader* input, char closing, otv prefix) {
+static otv read_sequence(reader* input, char closing, otv prefix, size_t opening_length) {
   size_t start = input->offset;
-  input->offset++;
+  input->offset += opening_length;
+  reader_token_end(input, start, "open");
   otv head = ot_null;
   otv tail = ot_nil;
   otv item = ot_nil;
@@ -1462,14 +1489,14 @@ static otv read_sequence(reader* input, char closing, otv prefix) {
       return reader_error_at(input, "E0001", "unclosed form", start);
     }
     if (input->source[input->offset] == closing) {
-      input->offset++;
+      reader_delimiter(input, "close");
       return head;
     }
     if (input->source[input->offset] == '.' &&
         (input->offset + 1 == input->length ||
          delimiter((unsigned char)input->source[input->offset + 1]))) {
       if (tail == ot_nil) return reader_error(input, "E0007", "dot without a preceding value");
-      input->offset++;
+      reader_delimiter(input, "atom");
       reader_space(input);
       if (input->offset == input->length) {
         input->incomplete = true;
@@ -1486,7 +1513,7 @@ static otv read_sequence(reader* input, char closing, otv prefix) {
       }
       if (input->source[input->offset] != closing)
         return reader_error(input, "E0007", "content after dotted tail");
-      input->offset++;
+      reader_delimiter(input, "close");
       return head;
     }
     item = read_form(input);
@@ -1504,7 +1531,9 @@ static otv read_sequence(reader* input, char closing, otv prefix) {
 }
 
 static otv read_quote(reader* input, const char* name, size_t name_length, size_t prefix_length) {
+  size_t start = input->offset;
   input->offset += prefix_length;
+  reader_token_end(input, start, "prefix");
   reader_space(input);
   if (input->offset == input->length) {
     input->incomplete = true;
@@ -1524,16 +1553,15 @@ static otv read_form(reader* input) {
   if (input->offset == input->length) return OT_UNDEFINED;
   char byte = input->source[input->offset];
   switch (byte) {
-    case '(': return read_sequence(input, ')', ot_nil);
-    case '[': return read_sequence(input, ']', ot_intern(input->state, "array", 5, false));
-    case '{': return read_sequence(input, '}', ot_intern(input->state, "table", 5, false));
+    case '(': return read_sequence(input, ')', ot_nil, 1);
+    case '[': return read_sequence(input, ']', ot_intern(input->state, "array", 5, false), 1);
+    case '{': return read_sequence(input, '}', ot_intern(input->state, "table", 5, false), 1);
     case '"': return read_string(input);
     case '#':
       /* #u8(...) reads as (bytevector ...), like [...] and {...}. */
       if (input->length - input->offset >= 4 &&
           memcmp(input->source + input->offset, "#u8(", 4) == 0) {
-        input->offset += 3;
-        return read_sequence(input, ')', ot_intern(input->state, "bytevector", 10, false));
+        return read_sequence(input, ')', ot_intern(input->state, "bytevector", 10, false), 4);
       }
       return read_atom(input);
     case '\'': return read_quote(input, "quote", 5, 1);
@@ -6863,6 +6891,70 @@ static otv nat_read_string(ots* state, otv* args, int argc) {
   return value;
 }
 
+/* Advance once through the source, counting characters rather than UTF-8 bytes.
+ * CRLF is one line break; a bare CR is also a line break, as on Chez. */
+static void token_position(const char* source, size_t length, size_t* offset, size_t end,
+                           size_t* line, size_t* column) {
+  while (*offset < end) {
+    unsigned char byte = (unsigned char)source[(*offset)++];
+    if ((byte & 0xc0) == 0x80) continue;
+    if (byte == '\n' || (byte == '\r' && (*offset == length || source[*offset] != '\n'))) {
+      (*line)++;
+      *column = 0;
+    } else {
+      (*column)++;
+    }
+  }
+}
+
+static otv nat_reader_tokens(ots* state, otv* args, int argc) {
+  if (need_arity(state, "tokens", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_STRING)) return ot_raise(state, "tokens: expected string");
+  const char* bytes;
+  size_t length;
+  ot_string_bytes(args[0], &bytes, &length);
+  buf source = {0}, tokens = {0};
+  buf_write(&source, bytes, length);
+  reader input = {.state = state,
+                  .source = source.data,
+                  .length = length,
+                  .name = "<string>",
+                  .tokens = &tokens};
+  otv value;
+  do {
+    value = read_form(&input);
+  } while (value != OT_UNWIND && value != OT_UNDEFINED);
+  otv result = value == OT_UNWIND ? OT_UNWIND : ot_null;
+  otv entry = ot_null, text = ot_nil, kind = ot_nil, tail = ot_nil;
+  OT_FRAME_SCOPED(state, &result, &entry, &text, &kind, &tail);
+  if (value != OT_UNWIND) {
+    size_t offset = 0, line = 0, column = 0, previous_line = 0;
+    for (size_t i = 0; i < tokens.length; i += sizeof(reader_token)) {
+      reader_token token;
+      memcpy(&token, tokens.data + i, sizeof token);
+      token_position(source.data, length, &offset, token.start, &line, &column);
+      entry = ot_cons(state, ot_make_int((intptr_t)(line - previous_line)), ot_null);
+      entry = ot_cons(state, ot_make_int((intptr_t)column), entry);
+      entry = ot_cons(state, ot_make_int((intptr_t)line), entry);
+      text = ot_make_string(state, source.data + token.start, token.end - token.start);
+      entry = ot_cons(state, text, entry);
+      kind = ot_intern(state, token.kind, strlen(token.kind), true);
+      entry = ot_cons(state, kind, entry);
+      otv cell = ot_cons(state, entry, ot_null);
+      if (result == ot_null) result = cell;
+      else ot_store(state, as_pair(tail), &as_pair(tail)->cdr, cell);
+      tail = cell;
+      token_position(source.data, length, &offset, token.end, &line, &column);
+      previous_line = line;
+    }
+  }
+  buf_free(&tokens);
+  buf_free(&source);
+  return result;
+}
+
+static void reader_module_init(ots* state) { ot_def_nat(state, "tokens", nat_reader_tokens); }
+
 static otv nat_string_less(ots* state, otv* args, int argc) {
   if (need_arity(state, "string<?", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
   if (!is_type(args[0], OBJ_STRING) || !is_type(args[1], OBJ_STRING))
@@ -7948,6 +8040,7 @@ ots* ot_create(const ot_config* configuration) {
     return NULL;
   }
   state->expand_head = ((ot_var_obj*)ot_as_obj(head_var))->value;
+  ot_register_module(state, "otium.reader", reader_module_init);
   ot_register_module(state, "otium.extra", extra_module_init);
   ot_register_module(state, "otium.generic", generic_module_init);
   otv generic_name = ot_intern(state, "otium.generic", 13, false);

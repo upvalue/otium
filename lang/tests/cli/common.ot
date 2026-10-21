@@ -1,6 +1,8 @@
 (require otium.cli)
 
-(require otium.test :refer (check report))
+(require otium.process)
+
+(require otium.test :refer (check fails? report))
 
 (def command
   (otium.cli/compile
@@ -139,4 +141,17 @@
 (check "normal"
        (otium.cli/ref (otium.cli/outcome-values (otium.cli/parse parent-required '("child" "--config=x"))) 'mode))
 (check 'error (otium.cli/outcome-kind (otium.cli/parse parent-required '("child"))))
+;; Environment variables: nil means unset, and setting nil unsets.
+(otium.process/setenv! "OTIUM_TEST_ENV" "a=b λ")
+(check "a=b λ" (otium.process/getenv "OTIUM_TEST_ENV"))
+(otium.process/setenv! "OTIUM_TEST_ENV" "")
+(check "" (otium.process/getenv "OTIUM_TEST_ENV"))
+(otium.process/setenv! "OTIUM_TEST_ENV" nil)
+(check #t (nil? (otium.process/getenv "OTIUM_TEST_ENV")))
+(otium.process/setenv! "OTIUM_TEST_ENV" nil)
+(for-each (fn (name) (check name #t (fails? (fn () (otium.process/getenv name)))))
+          (list "" "A=B" "A\x0;B" 'HOME))
+(check #t (fails? (fn () (otium.process/setenv! "A=B" "x"))))
+(check #t (fails? (fn () (otium.process/setenv! "OTIUM_TEST_ENV" "x\x0;y"))))
+(check #t (fails? (fn () (otium.process/setenv! "OTIUM_TEST_ENV" 1))))
 (report "cli")

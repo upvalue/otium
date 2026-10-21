@@ -20,7 +20,7 @@ def math(t):
 
 @test('ffi', runtimes=BOTH)
 def fixture(t):
-    ffi(t, 'tests/ffi/common.ot', stdout='ffi: 217 checks passed\n')
+    ffi(t, 'tests/ffi/common.ot', stdout='ffi: 222 checks passed\n')
 
 
 @test('ffi callbacks', runtimes=BOTH)

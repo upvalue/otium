@@ -684,6 +684,12 @@ static otv n_nullp(ots* s, otv* a, int n) {
   return p && !p->address ? ot_true : ot_false;
 }
 
+static otv n_pointerp(ots* s, otv* a, int n) {
+  ARITY(1, "pointer?");
+  if (ot_value_type(a[0]) != OT_TYPE_EXT) return ot_false;
+  return ((ot_ext_obj*)ot_as_obj(a[0]))->type == ctx(s)->pointer_type ? ot_true : ot_false;
+}
+
 static otv n_equal(ots* s, otv* a, int n) {
   ARITY(2, "pointer=?");
   pointer p, q;
@@ -1239,6 +1245,7 @@ static void module(ots* s) {
                    {"%layout-data", n_layout_data},
                    {"%null", n_null},
                    {"null?", n_nullp},
+                   {"pointer?", n_pointerp},
                    {"pointer=?", n_equal},
                    {"%sizeof", n_size},
                    {"%alignof", n_align},

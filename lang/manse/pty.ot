@@ -1,18 +1,14 @@
 (ns manse.pty)
 
-;; Prototype pseudo-terminals: open a PTY, spawn a child on it with
-;; posix_spawn, read and write the controlling side, resize, and reap.
-;; macOS constants only, and Chez only: ioctl is variadic and Otium's FFI has
-;; no variadic calls yet, so resize goes through Chez's foreign-procedure.
+;; Prototype pseudo-terminals: open a PTY, start a child on it, read and
+;; write the controlling side, resize, and reap. Spawning and resizing go
+;; through manse/native/pty.c. macOS constants only.
 
 (require otium.ffi :as ffi)
-(require chez)
+(require otium.process :as process)
 
 (def- O_RDWR 2)
 (def- O_NOCTTY 131072)
-(def- POSIX_SPAWN_SETSID 1024)
-(def- POSIX_SPAWN_CLOEXEC_DEFAULT 16384)
-(def- TIOCSWINSZ 2148037735)
 (def- POLLIN 1)
 (def- WNOHANG 1)
 
@@ -30,21 +26,22 @@
   ((private %poll) "poll" (pointer uint int) int)
   ((private %waitpid) "waitpid" (int pointer int) int)
   ((private %kill) "kill" (int int) int)
-  ((private %environ) "_NSGetEnviron" () pointer)
-  ((private %attr-init) "posix_spawnattr_init" (pointer) int)
-  ((private %attr-destroy) "posix_spawnattr_destroy" (pointer) int)
-  ((private %attr-setflags) "posix_spawnattr_setflags" (pointer i16) int)
-  ((private %actions-init) "posix_spawn_file_actions_init" (pointer) int)
-  ((private %actions-destroy) "posix_spawn_file_actions_destroy" (pointer) int)
-  ((private %actions-open) "posix_spawn_file_actions_addopen" (pointer int utf8 int u16) int)
-  ((private %actions-dup2) "posix_spawn_file_actions_adddup2" (pointer int int) int)
-  ((private %spawn) "posix_spawn" (pointer utf8 pointer pointer pointer pointer) int))
+  ((private %environ) "_NSGetEnviron" () pointer))
 
-(def- %ioctl-winsize
-  (chez/foreign-procedure (__varargs_after 2) "ioctl" (int unsigned-long uptr) int))
+(ffi/defbindings native %load-native!
+  ((private %spawn) "manse_pty_spawn" (utf8 pointer pointer utf8) int)
+  ((private %resize) "manse_pty_resize" (int int int int int) int))
+
+(def (native-candidates)
+  "MANSE_NATIVE_LIBRARY when set; otherwise the Meson build, from lang/ or lang/manse/."
+  (let ((override (process/getenv "MANSE_NATIVE_LIBRARY")))
+    (if override
+        (list override)
+        '("../build/manse/native/libmanse-native.dylib" "build/manse/native/libmanse-native.dylib"))))
 
 (def (load!)
-  (unless libc (%load! '("/usr/lib/libSystem.B.dylib"))))
+  (unless libc (%load! '("/usr/lib/libSystem.B.dylib")))
+  (unless native (%load-native! (native-candidates))))
 
 (def- (check! op result)
   (when (< result 0) (error (str "pty: " op " failed") result))
@@ -52,14 +49,7 @@
 
 (def (resize! pty cols rows)
   "Set the terminal size the child sees; the kernel sends it SIGWINCH."
-  (let ((ws (chez/foreign-alloc 8)))
-    (chez/foreign-set! 'unsigned-16 ws 0 rows)
-    (chez/foreign-set! 'unsigned-16 ws 2 cols)
-    (chez/foreign-set! 'unsigned-16 ws 4 0)
-    (chez/foreign-set! 'unsigned-16 ws 6 0)
-    (let ((result (%ioctl-winsize (pty :fd) TIOCSWINSZ ws)))
-      (chez/foreign-free ws)
-      (check! "ioctl(TIOCSWINSZ)" result))))
+  (check! "resize" (%resize (pty :fd) cols rows 0 0)))
 
 (def- (with-strings strings f)
   "Call (f argv) with a NULL-terminated array of C strings, freed afterwards."
@@ -76,44 +66,26 @@
       (ffi/free! argv))))
 
 (def (spawn path args cols rows)
-  "Start path with args (argv[0] included) on a new PTY of the given size."
+  "Start path (absolute) with args, argv[0] included, on a new PTY of the given size."
   (load!)
   (let ((fd (check! "posix_openpt" (%openpt (+ O_RDWR O_NOCTTY)))))
     (check! "grantpt" (%grantpt fd))
     (check! "unlockpt" (%unlockpt fd))
-    (let ((pty {:fd fd :tty (%ptsname fd)})
-          ;; posix_spawnattr_t and posix_spawn_file_actions_t are opaque; 256 bytes covers both platforms.
-          (attr (ffi/alloc 'u64 32))
-          (actions (ffi/alloc 'u64 32))
-          (pid (ffi/alloc 'i32 1)))
+    (let ((pty {:fd fd :tty (%ptsname fd)}))
       ;; macOS rejects ioctls on the controlling side until the terminal side
       ;; has been opened, so hold it open until the child has its own copy.
-      (put! pty :slave (check! "open" (%open (pty :tty) (+ O_RDWR O_NOCTTY))))
-      (resize! pty cols rows)
-      (unwind-protect
-        (begin
-          (%attr-init attr)
-          (%actions-init actions)
-          ;; A new session, so opening the tty makes it the controlling terminal.
-          ;; CLOEXEC_DEFAULT keeps our descriptors, including this PTY's, out of the child.
-          (check! "setflags" (- (%attr-setflags attr (+ POSIX_SPAWN_SETSID POSIX_SPAWN_CLOEXEC_DEFAULT))))
-          (check! "addopen" (- (%actions-open actions 0 (pty :tty) O_RDWR 0)))
-          (check! "adddup2" (- (%actions-dup2 actions 0 1)))
-          (check! "adddup2" (- (%actions-dup2 actions 0 2)))
-          (with-strings args
-                        (fn (argv)
-                          (check! "posix_spawn"
-                                  (- (%spawn pid path actions attr argv (ffi/ref (%environ) 'pointer 0))))))
-          (put! pty :pid (ffi/ref pid 'i32 0))
-          (put! pty :buffer (ffi/alloc 'u8 65536))
-          (put! pty :pollfd (ffi/alloc PollFd 1))
-          pty)
-        (%close (pty :slave))
-        (%actions-destroy actions)
-        (%attr-destroy attr)
-        (ffi/free! actions)
-        (ffi/free! attr)
-        (ffi/free! pid)))))
+      (let ((slave (check! "open" (%open (pty :tty) (+ O_RDWR O_NOCTTY)))))
+        (unwind-protect
+          (begin
+            (resize! pty cols rows)
+            (with-strings args
+                          (fn (argv)
+                            (put! pty :pid
+                                  (check! "spawn" (%spawn path argv (ffi/ref (%environ) 'pointer 0) (pty :tty)))))))
+          (%close slave)))
+      (put! pty :buffer (ffi/alloc 'u8 65536))
+      (put! pty :pollfd (ffi/alloc PollFd 1))
+      pty)))
 
 (def (readable? pty timeout-ms)
   (let ((p (pty :pollfd)))
@@ -134,6 +106,23 @@
       (if (= 0 (ffi/ref p 'u8 n))
           (check! "write" (%write (pty :fd) p n))
           (loop (+ n 1))))
+    (ffi/free! p)))
+
+(def (write-pointer! pty data len)
+  "Write len bytes from native memory, such as a libghostty reply."
+  (let loop ((done 0))
+    (when (< done len)
+      (let ((n (check! "write" (%write (pty :fd) (ffi/view data done (- len done)) (- len done)))))
+        (loop (+ done n))))))
+
+(def (write-bytes! pty bytes)
+  "Write a list of byte values."
+  (let ((p (ffi/alloc 'u8 (max 1 (length bytes)))))
+    (let loop ((i 0) (rest bytes))
+      (unless (null? rest)
+        (ffi/set! p 'u8 i (car rest))
+        (loop (+ i 1) (cdr rest))))
+    (check! "write" (%write (pty :fd) p (length bytes)))
     (ffi/free! p)))
 
 (def (status pty)

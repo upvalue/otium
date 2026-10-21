@@ -72,20 +72,34 @@
 
 (def- KIND_ARRAY (+ KIND_STRUCT 2))
 
+;; Scalar descriptions by name, built on first use so that requiring this
+;; module doesn't load the native helper.
+(def- %scalar-descriptions nil)
+
+(def- (%scalar-description t)
+  (unless %scalar-descriptions
+    (let ((descriptions {}))
+      (for-each (fn (name)
+                  (let ((k (%scalar-id name %scalars 0)))
+                    (put! descriptions
+                          name
+                          (list k
+                                (if (= k KIND_VOID)
+                                    0
+                                    (%sizeof k))
+                                (if (= k KIND_VOID)
+                                    1
+                                    (%alignof k))
+                                '()))))
+                %scalars)
+      (set! %scalar-descriptions descriptions)))
+  (get %scalar-descriptions t))
+
 (def- (%describe t op)
   (cond
     ((symbol? t)
-     (let ((k (%scalar-id t %scalars 0)))
-       (if k
-           (list k
-                 (if (= k KIND_VOID)
-                     0
-                     (%sizeof k))
-                 (if (= k KIND_VOID)
-                     1
-                     (%alignof k))
-                 '())
-           (%fail op (%signature-error op) "unknown scalar type"))))
+     (or (%scalar-description t)
+         (%fail op (%signature-error op) "unknown scalar type")))
     ((%layout-data t) (%layout-data t))
     ((and (list? t) (= (length t) 3) (eq? (car t) 'array))
      (let ((element (%memory (cadr t) op))

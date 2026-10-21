@@ -37,6 +37,23 @@
 (check "controlling terminal" #f (screen-has? "??"))
 
 (pty/write! p "\x3;")
+(def (wait-exit! q)
+  (pump-until (fn () (let ((s (pty/status q))) (when s (put! q :exit s)) s)) 5000))
+
+;; sh and zsh take a controlling terminal themselves, so check with a child
+;; that doesn't: the spawn must have made the PTY its controlling terminal.
+(let ((q (pty/spawn "/usr/bin/python3"
+                    '("python3" "-c" "import os; print('CTTY', os.tcgetpgrp(0) == os.getpgrp() == os.getsid(0))")
+                    80
+                    24)))
+  (let ((saved p))
+    (set! p q)
+    (wait-exit! q)
+    (pump-until (fn () (screen-has? "CTTY")) 2000)
+    (check "python sees a controlling terminal" #t (screen-has? "CTTY True"))
+    (pty/close! q)
+    (set! p saved)))
+
 (check "ctrl-c ends the child" #t (pump-until (fn () (let ((s (pty/status p))) (when s (put! p :exit s)) s)) 5000))
 (check "killed by SIGINT" 2 (get (p :exit) :signal))
 (check "sleep was interrupted" #f (screen-has? "after"))

@@ -111,6 +111,9 @@
 ;; eases to a new width, the last grid is replayed at its old size; the grid
 ;; and PTY resize once, when the width settles, so the shell redraws once.
 (defmethod (ui/paint (w Terminal) g bounds)
+  (paint-cached w g bounds))
+
+(def (paint-cached w g bounds)
   (let ((session (w :session))
         (settled (w :settled))
         (resizing? (and (g :resizing?) settled)))

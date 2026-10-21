@@ -161,6 +161,26 @@ updates. While a column eases to a new width, the terminal replays its last
 grid at the old size and resizes the grid and PTY once the width settles, so
 the shell redraws once rather than on every animation frame.
 
+`manse/bench.ot` times frames with four terminals of coloured output in a
+1280×760 window at scale 2; `MANSE_BENCH_UNCACHED=1` paints every terminal on
+every frame instead. On Chez (macOS arm64, 2026-10-21), per frame:
+
+| Frame | Cached | Uncached |
+|---|---|---|
+| Full frame, focus moving each frame (paint) | 7.4 ms | 8.4 ms |
+| One visible terminal's output changing (paint) | 4.3 ms | 12.1 ms |
+| Strip scrolling (paint) | 0.25 ms | 0.21 ms |
+| Column resizing (paint) | 0.7 ms | 4.9 ms |
+| PTY resizes over 3 width steps | 2 | 45 |
+
+Scrolling is cheap either way because each column is a `:cache #t` subtree.
+A focus change repaints both terminals involved, since the cursor depends on
+focus. Submitting a full frame costs about 1.8 ms with caching against 0.04 ms
+without; that hasn't been looked into.
+
+Losing window focus clears UI focus; when the window gets it back, the
+workspace focuses the focused column again.
+
 `MANSE_FRAMES=N` quits after N loop iterations, saving a frame to
 `MANSE_CAPTURE` (default `/tmp/manse.png`) just before. `MANSE_TYPE` and
 `MANSE_TYPE_2` type into the first two shells at iteration 30, and

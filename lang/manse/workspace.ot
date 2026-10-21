@@ -1,6 +1,7 @@
 (ns manse.workspace)
 (require otium.ui :as ui)
 (require otium.process :as process)
+(require otium.sdl :as sdl)
 (require manse.apps :as apps)
 (require manse.strip :as strip)
 (require manse.terminal :as terminal)
@@ -131,7 +132,7 @@ MANSE_KEYS runs actions by key name, separated by spaces, at iteration 40."
 ;; On macOS, SDL's default menu binds Cmd+W to Window > Close. SDL delivers
 ;; the keydown first, then the menu asks to close the window in the same
 ;; batch of events, and SDL follows that with a quit for the last window.
-(def (close-request? window)
+(def (close-request? _)
   "Refuse to close the window in the frame that Cmd+W closed a column."
   (not (workspace :closed-column?)))
 
@@ -159,6 +160,22 @@ MANSE_KEYS runs actions by key name, separated by spaces, at iteration 40."
       ((not (ui/mounted? node)) nil)
       ((and (ui/mounted? (node :parent)) (eq? (dispatch-type (ui/instance (node :parent))) ui/Scroll)) (node :key))
       (else (loop (node :parent))))))
+
+(def (window-focused?)
+  (let ((window (workspace :window)))
+    (and window
+         (not (window :closed?))
+         (sdl/flag-set? (sdl/get-window-flags (window :window)) sdl/WINDOW_INPUT_FOCUS))))
+
+(def (restore-focus! tree)
+  "Give UI focus back to the focused column when the window becomes active again;
+losing window focus clears it."
+  (when (and (not (ui/focused tree)) (strip/focused (workspace :strip)) (window-focused?))
+    (let ((column (and (pair? (array-to-list (ui/children tree)))
+                       (find (fn (node) (equal? (node :key) (strip/focused (workspace :strip))))
+                             (ui/children (get (ui/children (get (ui/children tree) 0)) 0)))))
+          (body (and column (find (fn (node) (equal? (node :key) :body)) (ui/children column)))))
+      (when (and body (ui/focusable? body)) (ui/focus! tree body)))))
 
 (def (adopt-focus! tree)
   "Follow UI focus that moved since the last view to a column other than the
@@ -232,6 +249,7 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
                       ((workspace :window) :width)
                       900)))
     (strip/sync! s (array-to-list (map (fn (entry) (entry :id)) entries)))
+    (restore-focus! tree)
     (adopt-focus! tree)
     (ui/row {:grow 1 :background theme/background :keymap (keymap) :on-action (fn (action) (action! action))}
             ;; Columns size against the window, not the strip, so the help

@@ -1,1 +1,1 @@
-((library "@library@") (sdl "@sdl@"))
+((library "@library@") (sdl "@sdl@") (icons "@icons@"))

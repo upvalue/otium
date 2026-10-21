@@ -10,7 +10,8 @@ keyboard focus and action routing. Automatic file watching is still pending.
 The UI needs a C/C++ toolchain, Meson, pkg-config, Python 3.12 or later for
 its tests, SDL3 3.4.12 or later, SDL3_ttf 3.2.2 or later (`sdl3-ttf` in
 pkg-config), libffi and `glslc`. `just build` builds it when they're installed;
-Meson downloads the pinned Yoga sources on first configure. See
+Meson downloads pinned Yoga, plutovg and plutosvg sources on first configure.
+plutosvg is built without its FreeType font hook. See
 [native components](native.md#dependencies) for versions and checksums.
 
 Run either command from the repository root:
@@ -97,6 +98,27 @@ accepts `:font` (`:ui` or `:mono`), `:size` (1–256 logical pixels), `:color`,
 explicit label properties; they are not inherited from containers. All constructors support library-owned `:key`. Strings become labels; lists and arrays
 flatten recursively; `nil` and empty lists are skipped. `ui/build` defaults to
 returning constructor-supplied children. Custom methods return children directly.
+
+## SVG icons
+
+`(ui/icon {:name :house :size 16 :fill #f :color 0x67d9c0ff})` creates a
+square Icon description. `ui/Icon` is also available for `make` and `ui/new`.
+Size is 1–256 logical pixels; regular is the default, and `:fill #t` selects
+filled artwork. Unknown names raise an error naming the icon during build.
+The icons directory comes from the Meson-written `ui-config.ot`.
+
+Only the example/test icons and the MIT license are included. Run
+`tools/fetch-icons house arrow-left` to add named regular and fill assets from
+Phosphor 2.0.8; the script verifies the release checksum. Review and commit
+only the icons the application uses. The icon demo is `--scene ui.icons`.
+
+`(gfx/image g bounds svg-path color)` draws a monochrome SVG mask. plutosvg
+rasterises at the requested logical dimensions times display scale, rounded
+up to whole pixels. The renderer caches by path, dimensions and scale in the
+shared glyph/image atlas; position and tint changes reuse that raster. Entries
+last until renderer teardown, keeping paint recordings valid. The 2048-pixel
+atlas reports an error when full. Widget properties and methods reload normally;
+editing an SVG file itself requires reopening the window to refresh its raster.
 
 ## Identity, state and reload
 

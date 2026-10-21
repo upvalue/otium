@@ -2,6 +2,8 @@
 (require (otium.ffi :as ffi))
 
 ;; Scalar selectors used by the native layout and text bridge.
+(defonce icons-directory nil)
+
 (def BOUNDS_X 0)
 
 (def BOUNDS_Y 1)
@@ -55,6 +57,8 @@
                  (text-get "otui_text_get" (utf8 int float float float) pointer #t)
                  (text-size "otui_text_size" (pointer int) float #t)
                  (text-carets "otui_text_carets" (pointer pointer int) bool #t)
+                 (gpu-image "otui_gpu_image" (pointer utf8 float float float float u32 float float float float) bool #t)
+                 (gpu-image-count "otui_gpu_image_count" (pointer) int #t)
                  (gpu-text "otui_gpu_text"
                            (pointer utf8 int float float float float u32 float float float float)
                            bool
@@ -114,6 +118,7 @@
   "Load installation paths as data, then open the native UI library."
   (let ((settings (read-string (read-file path))))
     (load! (config-ref settings 'library))
+    (set! icons-directory (config-ref settings 'icons))
     settings))
 
 (def (poll-event renderer)

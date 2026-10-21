@@ -102,3 +102,19 @@ and the bounds' size."
         (sdl/check (native/gpu-cache-store (g :renderer) (c :id) start (bounds :x) (bounds :y)))
         (put! c :key full)
         (unless (draw-cache g c bounds) (error "Paint cache was not stored"))))))
+
+(def (image g bounds path color)
+  "Draw an SVG alpha mask at the bounds' size, tinted with color."
+  (when (string-contains? path "\x0;") (error "SVG path contains NUL"))
+  (let ((clip (g :clip)))
+    (sdl/check (native/gpu-image (g :renderer)
+                                 path
+                                 (bounds :x)
+                                 (bounds :y)
+                                 (bounds :width)
+                                 (bounds :height)
+                                 color
+                                 (clip :x)
+                                 (clip :y)
+                                 (clip :width)
+                                 (clip :height)))))

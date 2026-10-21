@@ -94,7 +94,9 @@
         (native/node-intrinsic p 0 0 #t)
         (for-each (fn (child)
                     (sync-node! child pass)
-                    (native/node-shrink (child :layout) (not (eq? (dispatch-type w) ui/Scroll)))
+                    (native/node-shrink (child :layout)
+                                        (and (not (eq? (dispatch-type w) ui/Scroll))
+                                             (not (eq? (dispatch-type (ui/instance child)) ui/Icon))))
                     (native/node-append p (child :layout)))
                   (ui/children node)))))
 
@@ -499,3 +501,46 @@ recording until invalidate-paint! starts a new generation or their size changes.
                       (w :size)
                       0x202d43ff
                       #f)))))))
+
+;; Recheck paths after module reload; ordinary frames do no file IO here.
+(def- icon-paths {})
+
+(def (icon-path w)
+  (unless (keyword? (w :name)) (error "Icon name must be a keyword" (w :name)))
+  (unless native/icons-directory (error "Load UI config before using icons"))
+  (let ((name (keyword->string (w :name)))
+        (path (str native/icons-directory
+                   "/"
+                   (if (w :fill)
+                       "fill"
+                       "regular")
+                   "/"
+                   name
+                   ".svg")))
+    (unless (get icon-paths path)
+      (when (or (equal? name "")
+                (string-contains? name "/")
+                (string-contains? name "\\")
+                (string-contains? name ".")
+                (string-contains? name "\x0;"))
+        (error (str "Unknown icon: " name)))
+      (try
+        (read-file path)
+        (catch (error? _) (error (str "Unknown icon: " name))))
+      (put! icon-paths path #t))
+    path))
+
+(defmethod (ui/build (w ui/Icon))
+  (icon-path w)
+  nil)
+
+(defmethod (ui/layout-style (w ui/Icon))
+  (unless (and (number? (w :size)) (>= (w :size) 1) (<= (w :size) 256))
+    (error "Icon size must be between 1 and 256" (w :size)))
+  {:width (w :size) :height (w :size)})
+
+(defmethod (ui/measure (w ui/Icon) limits)
+  (ui/size (w :size) (w :size)))
+
+(defmethod (ui/paint (w ui/Icon) g bounds)
+  (gfx/image g bounds (icon-path w) (w :color)))

@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Copy named regular/fill icons from the pinned Phosphor release."""
+import argparse
+import hashlib
+import io
+from pathlib import Path
+import re
+import subprocess
+import tarfile
+
+VERSION = '2.0.8'
+SHA256 = '8b4dd9afb96b50c92a613f5786af6a7dcff6e416442c42c12ed831cea050a698'
+URL = f'https://codeload.github.com/phosphor-icons/core/tar.gz/refs/tags/v{VERSION}'
+DEST = Path(__file__).resolve().parents[1] / 'native/ui/icons'
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('names', nargs='+', help='Icon names, e.g. house arrow-left')
+    parser.add_argument('--archive', type=Path, help='Use an already downloaded release archive')
+    args = parser.parse_args()
+    for name in args.names:
+        if not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', name):
+            parser.error(f'invalid icon name: {name}')
+    data = (args.archive.read_bytes() if args.archive else
+            subprocess.check_output(['curl', '-fsSL', URL]))
+    if hashlib.sha256(data).hexdigest() != SHA256:
+        parser.error('Phosphor archive checksum mismatch')
+    files = {}
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as archive:
+        def read(name):
+            try:
+                return archive.extractfile(f'core-{VERSION}/{name}').read()
+            except KeyError:
+                parser.error(f'unknown Phosphor icon: {name}')
+        for name in args.names:
+            for style in ('regular', 'fill'):
+                suffix = '-fill' if style == 'fill' else ''
+                files[f'{style}/{name}.svg'] = read(f'assets/{style}/{name}{suffix}.svg')
+        files['LICENSE'] = read('LICENSE')
+    for name, data in files.items():
+        path = DEST / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        print(path.relative_to(DEST.parent))
+
+
+if __name__ == '__main__':
+    main()

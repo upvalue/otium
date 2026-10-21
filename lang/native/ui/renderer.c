@@ -15,6 +15,7 @@ static const unsigned char rect_frag[] = {
 #embed "rect.frag.spv"
 };
 #include "text.h"
+#include <plutosvg.h>
 #define ATLAS_SIZE 2048
 
 typedef struct {
@@ -22,6 +23,13 @@ typedef struct {
   Uint32 index;
   int x, y;
 } Glyph;
+
+typedef struct Image {
+  struct Image* next;
+  char* path;
+  float width, height, scale;
+  int x, y, w, h;
+} Image;
 
 typedef struct {
   float rect[4], color[4], shape[4], clip[4], uv[4];
@@ -55,6 +63,8 @@ typedef struct Renderer {
   SDL_GPUSampler* sampler;
   SDL_GPUTransferBuffer* atlas_upload;
   Uint8* atlas_pixels;
+  Image* images;
+  int image_count;
   Glyph glyphs[8192];
   int glyph_count, atlas_x, atlas_y, atlas_row;
   bool atlas_dirty;
@@ -256,6 +266,12 @@ void otui_gpu_free(Renderer* r) {
     if (r->target) SDL_ReleaseGPUTexture(r->device, r->target);
     if (r->claimed) SDL_ReleaseWindowFromGPUDevice(r->device, r->window);
     SDL_DestroyGPUDevice(r->device);
+  }
+  while (r->images) {
+    Image* next = r->images->next;
+    SDL_free(r->images->path);
+    free(r->images);
+    r->images = next;
   }
   free(r->atlas_pixels);
   free(r->rects);
@@ -574,6 +590,110 @@ bool otui_gpu_rect(Renderer* r, float x, float y, float w, float h, float radius
   return true;
 }
 
+// Reserve a shelf slot shared by glyphs and SVGs. Never move entries: paint
+// recordings retain their UVs until the renderer is destroyed.
+static bool atlas_slot(Renderer* r, int w, int h, int* x, int* y) {
+  int ax = r->atlas_x, ay = r->atlas_y, row = r->atlas_row;
+  if (w + 2 > ATLAS_SIZE || h + 2 > ATLAS_SIZE) return SDL_SetError("UI atlas image is too large");
+  if (ax + w + 2 > ATLAS_SIZE) {
+    ay += row;
+    ax = row = 0;
+  }
+  if (ay + h + 2 > ATLAS_SIZE) return SDL_SetError("UI glyph/image atlas is full");
+  *x = ax + 1;
+  *y = ay + 1;
+  r->atlas_x = ax + w + 2;
+  r->atlas_y = ay;
+  r->atlas_row = h + 2 > row ? h + 2 : row;
+  r->atlas_dirty = true;
+  return true;
+}
+
+// SVGs are monochrome masks, tinted by the same shader as glyphs. Colour and
+// position do not affect this cache; size and display scale do.
+static Image* svg_image(Renderer* r, const char* path, float width, float height) {
+  for (Image* image = r->images; image; image = image->next)
+    if (image->width == width && image->height == height && image->scale == r->scale &&
+        strcmp(image->path, path) == 0)
+      return image;
+  float pw = ceilf(width * r->scale), ph = ceilf(height * r->scale);
+  if (!isfinite(pw) || !isfinite(ph) || pw < 1 || ph < 1 || pw > ATLAS_SIZE - 2 ||
+      ph > ATLAS_SIZE - 2) {
+    SDL_SetError("Invalid SVG raster size: %s", path);
+    return NULL;
+  }
+  plutosvg_document_t* document = plutosvg_document_load_from_file(path, pw, ph);
+  if (!document) {
+    SDL_SetError("Cannot load SVG: %s", path);
+    return NULL;
+  }
+  plutovg_surface_t* surface =
+      plutosvg_document_render_to_surface(document, NULL, (int)pw, (int)ph, NULL, NULL, NULL);
+  plutosvg_document_destroy(document);
+  if (!surface) {
+    SDL_SetError("Cannot rasterise SVG: %s", path);
+    return NULL;
+  }
+  Image* image = calloc(1, sizeof *image);
+  if (!image || !(image->path = SDL_strdup(path))) {
+    free(image);
+    plutovg_surface_destroy(surface);
+    SDL_SetError("Out of memory caching SVG");
+    return NULL;
+  }
+  image->width = width;
+  image->height = height;
+  image->scale = r->scale;
+  image->w = (int)pw;
+  image->h = (int)ph;
+  if (!atlas_slot(r, image->w, image->h, &image->x, &image->y)) {
+    SDL_free(image->path);
+    free(image);
+    plutovg_surface_destroy(surface);
+    return NULL;
+  }
+  const Uint8* data = plutovg_surface_get_data(surface);
+  int stride = plutovg_surface_get_stride(surface);
+  for (int y = 0; y < image->h; ++y) {
+    const Uint32* src = (const Uint32*)(data + y * stride);
+    Uint8* dst = r->atlas_pixels + ((image->y + y) * ATLAS_SIZE + image->x) * 4;
+    for (int x = 0; x < image->w; ++x) {
+      dst[x * 4] = dst[x * 4 + 1] = dst[x * 4 + 2] = 255;
+      dst[x * 4 + 3] = src[x] >> 24;
+    }
+  }
+  plutovg_surface_destroy(surface);
+  image->next = r->images;
+  r->images = image;
+  ++r->image_count;
+  return image;
+}
+
+int otui_gpu_image_count(Renderer* r) { return r->image_count; }
+
+bool otui_gpu_image(Renderer* r, const char* path, float x, float y, float w, float h, Uint32 color,
+                    float cx, float cy, float cw, float ch) {
+  // Validate the whole command before touching the atlas.
+  if (!isfinite(w) || !isfinite(h) || w <= 0 || h <= 0)
+    return SDL_SetError("Invalid SVG dimensions");
+  Uint32 start = r->count;
+  if (!otui_gpu_rect(r, x, y, w, h, 0, color, cx, cy, cw, ch)) return false;
+  Image* image = svg_image(r, path, w, h);
+  if (!image) {
+    r->count = start;
+    return false;
+  }
+  Rect* rect = &r->rects[start];
+  rect->rect[0] = roundf(x * r->scale) / r->scale;
+  rect->rect[1] = roundf(y * r->scale) / r->scale;
+  rect->shape[3] = 1;
+  rect->uv[0] = (float)image->x / ATLAS_SIZE;
+  rect->uv[1] = (float)image->y / ATLAS_SIZE;
+  rect->uv[2] = (float)image->w / ATLAS_SIZE;
+  rect->uv[3] = (float)image->h / ATLAS_SIZE;
+  return true;
+}
+
 // Cache a rasterized glyph in the atlas, with a one-pixel transparent gutter.
 // Font objects outlive atlas entries; only new glyphs mark the upload dirty.
 static Glyph* glyph(Renderer* r, TTF_CopyOperation* op) {
@@ -585,25 +705,21 @@ static Glyph* glyph(Renderer* r, TTF_CopyOperation* op) {
   SDL_Surface* pixels = SDL_ConvertSurface(image, SDL_PIXELFORMAT_RGBA32);
   SDL_DestroySurface(image);
   if (!pixels) return NULL;
-  if (r->atlas_x + pixels->w + 2 > ATLAS_SIZE) {
-    r->atlas_y += r->atlas_row;
-    r->atlas_x = 0;
-    r->atlas_row = 0;
-  }
-  if (r->glyph_count == 8192 || pixels->w + 2 > ATLAS_SIZE ||
-      r->atlas_y + pixels->h + 2 > ATLAS_SIZE) {
+  int x, y;
+  if (r->glyph_count == 8192) {
     SDL_DestroySurface(pixels);
-    SDL_SetError("UI glyph atlas is full");
+    SDL_SetError("UI glyph cache is full");
+    return NULL;
+  }
+  if (!atlas_slot(r, pixels->w, pixels->h, &x, &y)) {
+    SDL_DestroySurface(pixels);
     return NULL;
   }
   Glyph* g = &r->glyphs[r->glyph_count++];
-  *g = (Glyph){op->glyph_font, op->glyph_index, r->atlas_x + 1, r->atlas_y + 1};
+  *g = (Glyph){op->glyph_font, op->glyph_index, x, y};
   for (int y = 0; y < pixels->h; ++y)
     memcpy(r->atlas_pixels + ((g->y + y) * ATLAS_SIZE + g->x) * 4,
            (Uint8*)pixels->pixels + y * pixels->pitch, pixels->w * 4);
-  r->atlas_x += pixels->w + 2;
-  if (pixels->h + 2 > r->atlas_row) r->atlas_row = pixels->h + 2;
-  r->atlas_dirty = true;
   SDL_DestroySurface(pixels);
   return g;
 }

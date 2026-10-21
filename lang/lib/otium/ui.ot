@@ -52,6 +52,13 @@
   (grow :init 0)
   (align :init :left))
 
+(defclass Icon
+  :is Widget
+  name
+  (size :init 16)
+  (fill :init #f)
+  (color :init 0xdce5f2ff))
+
 (defclass Column
   :is Widget
   (width :init -1)
@@ -269,6 +276,9 @@
           :key (get opts :key)
           :children children
           :options options)))
+
+(def (icon opts)
+  (new Icon opts))
 
 (def (label opts text)
   (new Label (put opts :text text)))

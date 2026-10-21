@@ -127,6 +127,7 @@ typedef enum ot_type {
   OT_TYPE_CHAR,
   OT_TYPE_EOF,
   OT_TYPE_BYTEVECTOR,
+  OT_TYPE_PORT,
   OT_TYPE_INTERNAL,
 } ot_type;
 
@@ -184,6 +185,44 @@ bool ot_exit_status(const ots* state, int* status);
 /* Copy application arguments into this state. A NULL script denotes no script. */
 OT_GC_MAY_ALLOCATE void ot_set_arguments(ots* state, const char* script, int argc,
                                          char* const* argv);
+
+/* Blocking byte I/O. Reads and writes return a count or a negative ot_io_error.
+ * Other host operations return zero or an ot_io_error. */
+typedef enum ot_io_error {
+  OT_IO_NOT_FOUND = 1,
+  OT_IO_EXISTS,
+  OT_IO_PERMISSION,
+  OT_IO_IS_DIRECTORY,
+  OT_IO_NOT_DIRECTORY,
+  OT_IO_NO_SPACE,
+  OT_IO_CLOSED,
+  OT_IO_OTHER,
+  OT_IO_INTERRUPTED
+} ot_io_error;
+
+enum { OT_IO_INPUT = 1, OT_IO_OUTPUT = 2, OT_IO_APPEND = 4, OT_IO_EXCLUSIVE = 8 };
+
+typedef struct ot_io_file_info {
+  unsigned kind; /* 0 other, 1 file, 2 directory */
+  uint64_t size;
+  double modified;
+} ot_io_file_info;
+
+typedef struct ot_io_host {
+  int (*open)(void*, const char*, unsigned, intptr_t*);
+  long (*read)(void*, intptr_t, unsigned char*, size_t);
+  long (*write)(void*, intptr_t, const unsigned char*, size_t);
+  int (*close)(void*, intptr_t);
+  int (*info)(void*, const char*, ot_io_file_info*);
+  int (*remove)(void*, const char*);
+  int (*rename)(void*, const char*, const char*);
+  int (*mkdir)(void*, const char*);
+  int (*list)(void*, const char*, void (*)(void*, const char*), void*);
+  bool (*terminal)(void*, intptr_t);
+} ot_io_host;
+
+void ot_set_io_host(ots* state, const ot_io_host* host, void* userdata);
+OT_GC_MAY_ALLOCATE bool ot_flush_ports(ots* state);
 
 /* Inspect and construct values. Constructors may move every unrooted value. */
 ot_type ot_value_type(otv value);
@@ -291,6 +330,7 @@ typedef enum ot_obj_type {
   OBJ_INSTANCE,
   OBJ_CELL,
   OBJ_BYTEVECTOR,
+  OBJ_PORT,
   OBJ_FREE,
 } ot_obj_type;
 
@@ -329,6 +369,15 @@ typedef struct ot_bytevector_obj {
   uint64_t stable_id;
   unsigned char data[];
 } ot_bytevector_obj;
+
+typedef struct ot_port_obj {
+  uintptr_t header;
+  otv name, buffer, callbacks;
+  intptr_t handle;
+  size_t at, end, position;
+  unsigned kind;
+  bool input, closed, eof;
+} ot_port_obj;
 
 typedef struct ot_string_obj {
   uintptr_t header;
@@ -637,6 +686,8 @@ typedef struct ot_vm {
 
 struct ot_state {
   ot_config config;
+  ot_io_host io_host;
+  void* io_userdata;
   struct ot_gc_heap* gc;
   void* compiler;
   ot_frame* frames;
@@ -655,6 +706,7 @@ struct ot_state {
   otv dispatch_types;
   otv object_class;
   otv update_instance;
+  otv input_port_param, output_port_param, error_port_param, open_ports;
   otv next_method;
   uint64_t class_epoch;
   void* ffi_state;
@@ -704,6 +756,7 @@ void* ot_host_realloc(void* memory, size_t size);
 void ot_host_free(void* memory);
 uint64_t ot_platform_monotonic_ns(void);
 double ot_platform_current_second(void);
+const ot_io_host* ot_platform_io_host(void);
 bool ot_platform_read_file(const char* path, char** source, size_t* length);
 
 void ot_default_write(void* userdata, const char* bytes, size_t length);

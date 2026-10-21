@@ -3,7 +3,7 @@
           load-path namespace-ref namespace-set! repl dev-start! dev-stop! dev-service! dev-run
           report-condition)
   (import (chezscheme) (prefix (otium generic-core) gm:)
-          (prefix (otium conditions) ot:) (otium expander) (otium line-edit)
+          (prefix (otium conditions) ot:) (prefix (otium ports) ports:) (otium expander) (otium line-edit)
           (otium runtime-documentation) (otium reader)
           (only (otium values) keyword otium-write) (prefix (otium values) val:))
 
@@ -271,6 +271,8 @@
           (hashtable-set! namespaces name space)
           (for-each (lambda (entry) (define-top-level-value (car entry) (cdr entry) env))
             gm:public-bindings)
+          (for-each (lambda (entry) (define-top-level-value (car entry) (cdr entry) env))
+            ports:public-bindings)
           (install-application! env)
           (define-top-level-value 'describe
             (lambda (name)

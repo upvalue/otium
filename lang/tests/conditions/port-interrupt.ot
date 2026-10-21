@@ -1,0 +1,6 @@
+(defclass WaitingResource)
+
+(defmethod (close (resource WaitingResource) outcome)
+  (println outcome))
+
+(with ((resource (make WaitingResource))) (println "waiting") (read-line))

@@ -334,6 +334,7 @@ ot_type ot_value_type(otv value) {
     case OBJ_TABLE: return OT_TYPE_TABLE;
     case OBJ_BUFFER: return OT_TYPE_BUFFER;
     case OBJ_BYTEVECTOR: return OT_TYPE_BYTEVECTOR;
+    case OBJ_PORT: return OT_TYPE_PORT;
     case OBJ_GENERIC:
     case OBJ_FUNCTION:
     case OBJ_NAT: return OT_TYPE_FUNCTION;
@@ -947,6 +948,13 @@ static void render_value(ots* state, buf* out, otv value, bool display, unsigned
         first = false;
       }
       buf_byte(out, '}');
+      break;
+    }
+    case OBJ_PORT: {
+      ot_port_obj* port = (ot_port_obj*)ot_as_obj(value);
+      buf_cstr(out, "#<port ");
+      render_value(state, out, port->name, false, depth + 1);
+      buf_cstr(out, port->input ? " input>" : " output>");
       break;
     }
     case OBJ_BYTEVECTOR: {
@@ -5259,11 +5267,11 @@ static otv nat_equal(ots* state, otv* args, int argc) {
 }
 
 static const char* value_type_name(otv value) {
-  static const char* names[] = {"nil",     "null",       "boolean",         "int",      "float",
-                                "symbol",  "keyword",    "string",          "pair",     "array",
-                                "table",   "buffer",     "function",        "macro",    "param",
-                                "restart", "foreign",    "type-descriptor", "instance", "char",
-                                "eof",     "bytevector", "internal"};
+  static const char* names[] = {
+      "nil",      "null",   "boolean", "int",        "float",   "symbol",
+      "keyword",  "string", "pair",    "array",      "table",   "buffer",
+      "function", "macro",  "param",   "restart",    "foreign", "type-descriptor",
+      "instance", "char",   "eof",     "bytevector", "port",    "internal"};
   return names[ot_value_type(value)];
 }
 
@@ -7450,7 +7458,7 @@ static void generic_module_init(ots* state) {
       "Nil",       "Null",      "Boolean",   "Number",     "Number",    "Symbol",
       "Keyword",   "String",    "Pair",      "Vector",     "Hashtable", "Buffer",
       "Procedure", "Macro",     "Parameter", "Restart",    "Foreign",   "TypeDescriptor",
-      "Instance",  "Character", "Other",     "Bytevector", "Other"};
+      "Instance",  "Character", "Other",     "Bytevector", "Port",      "Other"};
   otv owner = ((ot_namespace_obj*)ot_as_obj(state->vm.current_namespace))->name;
   otv name = ot_nil, type = ot_nil;
   OT_FRAME_SCOPED(state, &owner, &name, &type);
@@ -7529,6 +7537,8 @@ static otv nat_call_with_cleanup(ots* state, otv* args, int argc) {
   state->quit_status = status;
   return result;
 }
+
+#include "ot-ports.inc"
 
 static const nat_def core_nats[] = {
     {"call-with-cleanup", nat_call_with_cleanup},
@@ -7898,6 +7908,8 @@ ots* ot_create(const ot_config* configuration) {
   state->dispatch_types = ot_nil;
   state->object_class = ot_nil;
   state->update_instance = ot_nil;
+  state->input_port_param = state->output_port_param = state->error_port_param = state->open_ports =
+      ot_nil;
   state->next_method = ot_nil;
   state->vm.condition = ot_nil;
   state->vm.unwind_args = ot_nil;
@@ -7958,6 +7970,7 @@ ots* ot_create(const ot_config* configuration) {
     ot_destroy(state);
     return NULL;
   }
+  ports_init(state);
   otv user_name = ot_intern(state, "user", 4, false);
   state->vm.current_namespace = namespace_find(state, user_name, true);
   ot_register_ffi(state);
@@ -7968,6 +7981,7 @@ ots* ot_create(const ot_config* configuration) {
 
 void ot_destroy(ots* state) {
   if (state == NULL) return;
+  (void)ot_flush_ports(state);
   ot_host_free(state->loaded_source_name);
   for (otv cursor = state->exts; is_type(cursor, OBJ_EXT);) {
     ot_ext_obj* ext = (ot_ext_obj*)ot_as_obj(cursor);

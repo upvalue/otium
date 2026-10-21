@@ -1,0 +1,6 @@
+(require otium.process)
+
+(def out (open-output-file (car (otium.process/arguments))))
+
+(write-string "flushed on exit" out)
+(when (pair? (cdr (otium.process/arguments))) (quit 7))

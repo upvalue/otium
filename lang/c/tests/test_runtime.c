@@ -840,6 +840,78 @@ static void test_exit_status(void) {
   ot_destroy(state);
 }
 
+typedef struct io_probe {
+  size_t at;
+  int closed;
+  bool interrupted;
+  capture output;
+} io_probe;
+
+static int probe_open(void* data, const char* path, unsigned flags, intptr_t* handle) {
+  (void)data;
+  if (strcmp(path, "missing") == 0) return OT_IO_NOT_FOUND;
+  *handle = flags & OT_IO_INPUT ? 1 : 2;
+  return 0;
+}
+
+static long probe_read(void* data, intptr_t handle, unsigned char* bytes, size_t size) {
+  (void)handle;
+  io_probe* probe = data;
+  static const unsigned char text[] = "aé🙂";
+  if (!probe->interrupted) {
+    probe->interrupted = true;
+    return -OT_IO_INTERRUPTED;
+  }
+  size_t count = sizeof(text) - 1 - probe->at;
+  if (count > size) count = size;
+  if (count > 2) count = 2;
+  memcpy(bytes, text + probe->at, count);
+  probe->at += count;
+  return (long)count;
+}
+
+static long probe_write(void* data, intptr_t handle, const unsigned char* bytes, size_t size) {
+  (void)handle;
+  io_probe* probe = data;
+  if (!size) return 0;
+  capture_write(&probe->output, (const char*)bytes, 1);
+  return 1;
+}
+
+static int probe_close(void* data, intptr_t handle) {
+  (void)handle;
+  ((io_probe*)data)->closed++;
+  return 0;
+}
+
+static void test_io_host(void) {
+  ots* state = test_state(false);
+  if (!state) return;
+  io_probe probe = {0};
+  ot_io_host host = {
+      .open = probe_open, .read = probe_read, .write = probe_write, .close = probe_close};
+  ot_set_io_host(state, &host, &probe);
+  otv value = ot_nil;
+  check(evaluate(state, "(with ((p (open-input-file \"in\" {:buffer-size 4}))) (read-all p))",
+                 &value),
+        "host input supports partial reads and retries EINTR");
+  const char* bytes = NULL;
+  size_t length = 0;
+  check(ot_string_bytes(value, &bytes, &length) && length == 7 && memcmp(bytes, "aé🙂", 7) == 0,
+        "host input decodes across buffer boundaries");
+  check(probe.closed == 1, "with closes the host handle");
+  check(evaluate(state, "(def output (open-output-file \"out\")) (write-string \"xyz\" output)",
+                 &value),
+        "host output opens and buffers");
+  check(probe.output.length == 0, "host output stays buffered");
+  check(ot_flush_ports(state), "embedding API flushes all ports");
+  check(probe.output.length == 3 && memcmp(probe.output.data, "xyz", 3) == 0,
+        "partial host writes are completed");
+  check(evaluate(state, "(write-string \"!\" output)", &value), "buffer shutdown output");
+  ot_destroy(state);
+  check(probe.output.length == 4 && probe.output.data[3] == '!', "destroy flushes output");
+}
+
 static const test_case tests[] = {
     {"config", test_config_validation},
     {"immediates", test_immediate_values},
@@ -852,6 +924,7 @@ static const test_case tests[] = {
     {"named-let", test_named_let},
     {"try-ast-reuse", test_try_ast_reuse},
     {"writer", test_writer_callback},
+    {"io-host", test_io_host},
     {"modules-loader", test_modules_and_loader},
     {"roots-stats", test_roots_and_stats},
 #ifdef OT_GC_GEN

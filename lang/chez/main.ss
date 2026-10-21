@@ -1,5 +1,5 @@
 (import (chezscheme) (otium runtime) (otium launcher-options)
-        (otium process) (prefix (otium conditions) ot:))
+        (otium process) (prefix (otium conditions) ot:) (prefix (otium ports) ports:))
 
 (define (fail message)
   (display (string-append "otium: " message "\n") (current-error-port))
@@ -36,7 +36,7 @@
                     [else (loop (+ i 1) out)])))))
       '()))
 
-(guard (c [(ot:control-condition? c) (dev-stop!) (exit (ot:control-status c))]
+(guard (c [(ot:control-condition? c) (ports:flush-all!) (dev-stop!) (exit (ot:control-status c))]
           [else (dev-stop!) (report-condition c (current-error-port)) (exit 1)])
   (let ([script #f] [files '()] [paths '()] [project #f]
         [no-project #f] [repl? #f] [dev-path #f] [watchdog 2000] [serve? #f])
@@ -109,4 +109,5 @@
     (when script (load-source script))
     (when serve? (dev-run))
     (when (or repl? (and (not script) (null? files))) (repl))
+    (ports:flush-all!)
     (dev-stop!)))

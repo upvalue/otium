@@ -32,3 +32,15 @@ def interrupt(t):
     t.check(output.endswith(suffix) and set(output[:-len(suffix)]) == {'x'},
             'cleanup did not run once after the marker', output[-200:], stderr)
     t.check(process.returncode != 0, 'interrupted process exited 0')
+
+
+@test('conditions blocking port interrupt', runtimes=BOTH)
+def port_interrupt(t):
+    process = t.spawn(t.command('tests/conditions/port-interrupt.ot'), text=True)
+    ready, _, _ = select.select([process.stdout], [], [], 10)
+    t.check(ready, 'did not reach blocking read')
+    t.check(process.stdout.readline() == 'waiting\n', 'missing read marker')
+    process.send_signal(signal.SIGINT)
+    stdout, stderr = process.communicate(timeout=10)
+    t.check(':quit\n' in stdout, 'resource cleanup missed interrupt outcome', stdout, stderr)
+    t.check(process.returncode != 0, 'interrupted read exited successfully')

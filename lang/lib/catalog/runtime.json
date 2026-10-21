@@ -1484,5 +1484,271 @@
       "c",
       "chez"
     ]
+  },
+  "port?": {
+    "text": "(port? value)\nTest whether value is an Otium port.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "input-port?": {
+    "text": "(input-port? value)\nTest whether value is an input port.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "output-port?": {
+    "text": "(output-port? value)\nTest whether value is an output port.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "input-port-open?": {
+    "text": "(input-port-open? value)\nTest whether value is an open input port.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "output-port-open?": {
+    "text": "(output-port-open? value)\nTest whether value is an open output port.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "open-input-file": {
+    "text": "(open-input-file path [options])\nOpen a buffered byte input port. Options may specify a positive :buffer-size.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "open-output-file": {
+    "text": "(open-output-file path [options])\nOpen a buffered output port. :if-exists is :truncate (default), :append, or :error. :buffer-size is a positive byte count.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "open-input-string": {
+    "text": "(open-input-string text)\nOpen a byte input port over the UTF-8 encoding of text.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "open-input-bytevector": {
+    "text": "(open-input-bytevector bytes)\nOpen an input port over a snapshot of bytes.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "open-output-string": {
+    "text": "(open-output-string)\nCreate a byte output port whose contents can be decoded with get-output-string.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "open-output-bytevector": {
+    "text": "(open-output-bytevector)\nCreate an output port collecting bytes.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "get-output-string": {
+    "text": "(get-output-string port)\nReturn the string port contents without consuming them. Invalid UTF-8 raises decode-error.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "get-output-bytevector": {
+    "text": "(get-output-bytevector port)\nReturn a fresh bytevector with the output contents, without consuming them.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "close-port": {
+    "text": "(close-port port)\nFlush an output port and close the port. Closing twice does nothing.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "close-input-port": {
+    "text": "(close-input-port port)\nClose an input port. Closing twice does nothing.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "close-output-port": {
+    "text": "(close-output-port port)\nFlush and close an output port. Closing twice does nothing.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "read-char": {
+    "text": "(read-char [port])\nRead one Unicode scalar, or the EOF object. Invalid UTF-8 raises decode-error at the byte :position.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "peek-char": {
+    "text": "(peek-char [port])\nDecode the next character without consuming any bytes, or return EOF.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "read-u8": {
+    "text": "(read-u8 [port])\nRead a byte as an integer, or the EOF object.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "peek-u8": {
+    "text": "(peek-u8 [port])\nReturn the next byte without consuming it, or EOF.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "read-bytevector": {
+    "text": "(read-bytevector count [port])\nRead up to count bytes, stopping at EOF. Return EOF if none are available; count zero returns an empty bytevector.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "read-bytevector!": {
+    "text": "(read-bytevector! bytes [port [start [end]]])\nFill a half-open byte range without allocating a result buffer. Return the byte count, or EOF when no bytes are available.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "%read-characters": {
+    "text": "(%read-characters count [port])\nRuntime implementation of the count-based read-string form.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "read-all": {
+    "text": "(read-all [port])\nRead the remaining input as UTF-8 text. Return an empty string at EOF.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "read-line": {
+    "text": "(read-line [port])\nRead a line without its newline and preceding carriage return. Preserve a final unterminated line. Return EOF when no text remains.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "read-until": {
+    "text": "(read-until stops [port])\nRead characters before the next member of stops, leaving that character unread. Return a string even at EOF.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "read-while": {
+    "text": "(read-while characters [port])\nRead the longest prefix drawn from characters. Return a string even at EOF.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "skip-while": {
+    "text": "(skip-while characters [port])\nSkip the longest prefix drawn from characters and return its character count.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "write-string": {
+    "text": "(write-string text [port [start [end]]])\nWrite a half-open character range as UTF-8; indexes cost O(end) on C. Return nil.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "write-char": {
+    "text": "(write-char character [port])\nWrite one Unicode scalar as UTF-8 and return nil.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "write-u8": {
+    "text": "(write-u8 byte [port])\nWrite an exact integer byte from 0 to 255 and return nil.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "write-bytevector": {
+    "text": "(write-bytevector bytes [port [start [end]]])\nWrite a half-open byte range and return nil.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "flush-output-port": {
+    "text": "(flush-output-port [port])\nWrite buffered bytes to the sink and invoke its flush callback.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "current-input-port": {
+    "text": "(current-input-port)\nThe dynamically scoped default input port. Rebind with with-params.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "current-output-port": {
+    "text": "(current-output-port)\nThe dynamically scoped default output port. Rebind with with-params.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "current-error-port": {
+    "text": "(current-error-port)\nThe dynamically scoped error output port. Rebind with with-params.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "open-binary-input-file": {
+    "text": "(open-binary-input-file path [options])\nAlias for open-input-file; all ports support byte and text reads.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "open-binary-output-file": {
+    "text": "(open-binary-output-file path [options])\nAlias for open-output-file; all ports support byte and text writes.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
   }
 }

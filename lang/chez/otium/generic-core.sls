@@ -37,6 +37,7 @@
   (define TypeDescriptor (builtin 'TypeDescriptor))
   (define Other (builtin 'Other))
   (define CPointer (builtin 'CPointer))
+  (define Port (builtin 'Port))
   (define pointer-predicate (lambda (x) #f))
   (define (set-pointer-predicate! predicate) (set! pointer-predicate predicate))
   (define Nil (builtin 'Nil))
@@ -70,7 +71,7 @@
       (set! epoch (+ epoch 1)))
     type)
   (define (dispatch-type value)
-    (cond [(val:nil? value) Nil] [(val:keyword? value) Keyword]
+    (cond [(val:port-value? value) Port] [(val:nil? value) Nil] [(val:keyword? value) Keyword]
           [(instance? value) (val:instance-type value)]
           [(val:array? value) Vector] [(val:table? value) Hashtable]
           [(number? value) Number] [(boolean? value) Boolean]
@@ -344,7 +345,7 @@
       (cons 'generic? generic?) (cons 'generic-methods generic-methods)
       (cons 'remove-method! remove-method!) (cons 'call-next-method call-next-method)
       (cons 'next-method? next-method?) (cons 'update-instance update-instance)
-      (cons 'CPointer CPointer) (cons 'Object Object) (cons 'Number Number) (cons 'Boolean Boolean) (cons 'Character Character)
+      (cons 'Port Port) (cons 'CPointer CPointer) (cons 'Object Object) (cons 'Number Number) (cons 'Boolean Boolean) (cons 'Character Character)
       (cons 'String String) (cons 'Symbol Symbol) (cons 'Null Null)
       (cons 'Pair Pair) (cons 'Vector Vector) (cons 'Bytevector Bytevector)
       (cons 'Hashtable Hashtable) (cons 'Procedure Procedure)

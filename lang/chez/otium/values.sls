@@ -6,9 +6,17 @@
           otium-write otium-display type frozen-set-car! frozen-set-cdr!
           make-instance instance? instance-type instance-name instance-layout instance-layout-set!
           instance-slots instance-slots-set! instance-migrating? instance-migrating?-set!
-          install-instance-operations!)
+          install-instance-operations!
+          make-port-value port-value? port-value-name port-value-input? port-value-kind
+          port-value-host port-value-buffer port-value-at port-value-at-set!
+          port-value-end port-value-end-set! port-value-position port-value-position-set!
+          port-value-closed? port-value-closed?-set! port-value-eof? port-value-eof?-set!
+          port-value-callbacks port-value-extract)
   (import (chezscheme))
 
+  (define-record-type port-value
+    (fields name input? kind host buffer (mutable at) (mutable end) (mutable position)
+            (mutable closed?) (mutable eof?) callbacks extract))
   (define-record-type (instance make-instance instance?)
     (opaque #t)
     (fields type name (mutable layout) (mutable slots) (mutable migrating?)))
@@ -213,7 +221,7 @@
   (define (frozen-set-car! x v) (mutate-pair! set-car! x v))
   (define (frozen-set-cdr! x v) (mutate-pair! set-cdr! x v))
   (define (type x)
-    (keyword (cond [(instance? x) "instance"] [(buffer? x) "buffer"] [(nil? x) "nil"] [(keyword? x) "keyword"] [(array? x) "array"] [(table? x) "table"]
+    (keyword (cond [(port-value? x) "port"] [(instance? x) "instance"] [(buffer? x) "buffer"] [(nil? x) "nil"] [(keyword? x) "keyword"] [(array? x) "array"] [(table? x) "table"]
           [(null? x) "null"] [(pair? x) "pair"] [(boolean? x) "boolean"] [(symbol? x) "symbol"]
           [(string? x) "string"] [(and (integer? x) (exact? x)) "int"]
           [(char? x) "char"] [(eof-object? x) "eof"] [(bytevector? x) "bytevector"]
@@ -253,6 +261,10 @@
           [(nil? x) (display "nil" port)]
           [(char? x) (if display? (display x port) (write-char-literal x port))]
           [(eof-object? x) (display "#<eof>" port)]
+          [(port-value? x)
+           (display "#<port " port)
+           (write (port-value-name x) port)
+           (display (if (port-value-input? x) " input>" " output>") port)]
           [(bytevector? x)
            (display "#u8(" port)
            (let ([n (bytevector-length x)])

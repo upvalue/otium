@@ -14,6 +14,13 @@ static void OT_GC_TRACE_OBJECT(ots* state, ot_obj* object) {
     case OBJ_BYTEVECTOR:
     case OBJ_EXT:
     case OBJ_FREE: break;
+    case OBJ_PORT: {
+      ot_port_obj* port = (ot_port_obj*)object;
+      OT_GC_TRACE_SLOT(state, &port->name);
+      OT_GC_TRACE_SLOT(state, &port->buffer);
+      OT_GC_TRACE_SLOT(state, &port->callbacks);
+      break;
+    }
     case OBJ_SYMBOL:
     case OBJ_KEYWORD: {
       ot_name_obj* name = (ot_name_obj*)object;
@@ -231,6 +238,10 @@ static void OT_GC_TRACE_ROOTS(ots* state) {
   OT_GC_TRACE_SLOT(state, &state->type_parents);
   OT_GC_TRACE_SLOT(state, &state->dispatch_types);
   OT_GC_TRACE_SLOT(state, &state->object_class);
+  OT_GC_TRACE_SLOT(state, &state->input_port_param);
+  OT_GC_TRACE_SLOT(state, &state->output_port_param);
+  OT_GC_TRACE_SLOT(state, &state->error_port_param);
+  OT_GC_TRACE_SLOT(state, &state->open_ports);
   OT_GC_TRACE_SLOT(state, &state->update_instance);
   OT_GC_TRACE_SLOT(state, &state->next_method);
   OT_GC_TRACE_VM(state, &state->vm);

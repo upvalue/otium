@@ -80,6 +80,7 @@ static void handle_interrupt(int signal_number) {
 static void stdout_writer(void* userdata, const char* data, size_t length) {
   (void)userdata;
   fwrite(data, 1, length, stdout);
+  fflush(stdout);
 }
 
 static bool record_loaded(ots* state, const char* name, const char* path);
@@ -1169,6 +1170,10 @@ int main(int argc, char** argv) {
   if (stats) print_gc_stats(state);
   if (stats_json) print_gc_stats_json(state);
   if (state->quit_requested) status = state->quit_status;
+  if (!ot_flush_ports(state)) {
+    report_condition(state, stderr);
+    status = 1;
+  }
   ot_dev_close();
   ot_host_free(dev_output.data);
   ot_destroy(state);

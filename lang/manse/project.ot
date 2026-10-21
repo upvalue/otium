@@ -1,0 +1,2 @@
+; manse modules are manse.* under this directory, so the load path is its parent.
+(paths "..")

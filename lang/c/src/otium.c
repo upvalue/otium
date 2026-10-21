@@ -1091,10 +1091,10 @@ static otv diagnostic_raise(ots* state, otv condition) {
     }
     otv key = ot_intern(state, cursor + 1, (size_t)(close - cursor - 1), true);
     otv field = ot_table_get(state, condition, key, OT_UNDEFINED);
-    if (field == OT_UNDEFINED)
-      buf_write(&message, cursor, (size_t)(close - cursor + 1));
+    if (field == OT_UNDEFINED) buf_write(&message, cursor, (size_t)(close - cursor + 1));
     else
-      render_value(state, &message, field, is_type(field, OBJ_STRING) || is_type(field, OBJ_SYMBOL), 0);
+      render_value(state, &message, field, is_type(field, OBJ_STRING) || is_type(field, OBJ_SYMBOL),
+                   0);
     cursor = close;
   }
   diagnostic_put_string(state, &condition, "message", message.data == NULL ? "" : message.data,
@@ -1123,8 +1123,7 @@ static void source_position(const char* source, size_t offset, size_t* character
   }
 }
 
-static otv source_span(ots* state, const char* name, const char* source, size_t start,
-                       size_t end) {
+static otv source_span(ots* state, const char* name, const char* source, size_t start, size_t end) {
   size_t character, line, column, end_character, end_line, end_column;
   source_position(source, start, &character, &line, &column);
   source_position(source, end, &end_character, &end_line, &end_column);
@@ -1214,7 +1213,8 @@ static otv reader_error_at(reader* input, const char* code, const char* message,
   OT_FRAME_SCOPED(state, &condition);
   size_t end = input->incomplete ? start + 1 : (input->offset > start ? input->offset : start + 1);
   if (end > input->length) end = input->length;
-  diagnostic_put(state, &condition, "span", source_span(state, input->name, input->source, start, end));
+  diagnostic_put(state, &condition, "span",
+                 source_span(state, input->name, input->source, start, end));
   if (strcmp(message, diagnostic_template(code, NULL)) != 0) {
     otv notes = ot_array_new(state, 1);
     OT_FRAME_SCOPED(state, &notes);
@@ -1362,7 +1362,8 @@ static otv read_char(reader* input) {
         return reader_error(input, "E0011", "invalid character literal");
       scalar = scalar * 16u + digit;
     }
-    if (!ot_char_valid((intptr_t)scalar)) return reader_error(input, "E0011", "invalid Unicode scalar");
+    if (!ot_char_valid((intptr_t)scalar))
+      return reader_error(input, "E0011", "invalid Unicode scalar");
     return ot_make_char(scalar);
   }
   return reader_error(input, "E0011", "unknown character name");
@@ -1886,17 +1887,20 @@ otv ot_raise(ots* state, const char* format, ...) {
  * E0401, worded "`who` expected ..." as on Chez; special forms are excluded. */
 static otv raise_message(ots* state, const char* message, size_t length) {
   const char* colon = memchr(message, ':', length);
-  static const char* const forms[] = {"require", "ns", "def", "def-", "defonce", "defmacro",
-                                      "let", "fn", "set!", "cond", "try", "quote", "quasiquote",
-                                      "unquote", "unquote-splicing", "compiler", "macroexpand"};
+  static const char* const forms[] = {
+      "require",  "ns",         "def",        "def-",    "defonce",
+      "defmacro", "let",        "fn",         "set!",    "cond",
+      "try",      "quote",      "quasiquote", "unquote", "unquote-splicing",
+      "compiler", "macroexpand"};
   bool special = false;
   if (colon != NULL)
     for (size_t i = 0; i < sizeof forms / sizeof *forms; i++)
       if (strlen(forms[i]) == (size_t)(colon - message) &&
           memcmp(forms[i], message, (size_t)(colon - message)) == 0)
         special = true;
-  if (colon == NULL || special || colon == message || memchr(message, ' ', (size_t)(colon - message)) ||
-      (size_t)(colon - message) + 11 > length || memcmp(colon, ": expected ", 11) != 0) {
+  if (colon == NULL || special || colon == message ||
+      memchr(message, ' ', (size_t)(colon - message)) || (size_t)(colon - message) + 11 > length ||
+      memcmp(colon, ": expected ", 11) != 0) {
     otv text = ot_make_string(state, message, length);
     OT_FRAME_SCOPED(state, &text);
     otv condition = ot_table_new(state, 4);
@@ -4124,8 +4128,7 @@ static otv vm_execute_loop(ots* state, size_t floor) {
             current = (ot_namespace_obj*)ot_as_obj(state->vm.current_namespace);
             diagnostic_put(state, &condition, "namespace", current->name);
             result = diagnostic_raise(state, condition);
-          }
-          else state->vm.current_namespace = namespace_find(state, value, true);
+          } else state->vm.current_namespace = namespace_find(state, value, true);
         }
       } else {
         result = require_forms(state, value);
@@ -4491,8 +4494,9 @@ static otv require_one(ots* state, otv spec, otv caller) {
       otv ignored;
       char* source_name = state->loaded_source_name;
       state->loaded_source_name = NULL;
-      bool ok = eval_source(state, source, length,
-                            source_name != NULL ? source_name : as_name(name)->bytes, true, &ignored);
+      bool ok =
+          eval_source(state, source, length,
+                      source_name != NULL ? source_name : as_name(name)->bytes, true, &ignored);
       ot_host_free(source_name);
       ot_host_free(source);
       if (!ok) {
@@ -6847,7 +6851,8 @@ static otv nat_read_string(ots* state, otv* args, int argc) {
     if (value == OT_UNDEFINED) value = reader_error(&input, "E0010", "read-string: empty input");
     else {
       reader_space(&input);
-      if (input.offset != input.length) value = reader_error(&input, "E0010", "read-string: trailing input");
+      if (input.offset != input.length)
+        value = reader_error(&input, "E0010", "read-string: trailing input");
     }
   }
   buf_free(&source);
@@ -7868,8 +7873,8 @@ ots* ot_create(const ot_config* configuration) {
   ot_table_put(state, state->type_parents, ot_intern(state, "error", 5, false), OT_UNDEFINED);
   /* The diagnostic catalog's condition types are all errors. */
   for (size_t i = 0; i < sizeof ot_diagnostic_entries / sizeof *ot_diagnostic_entries; i++) {
-    otv type = ot_intern(state, ot_diagnostic_entries[i].type, strlen(ot_diagnostic_entries[i].type),
-                         false);
+    otv type = ot_intern(state, ot_diagnostic_entries[i].type,
+                         strlen(ot_diagnostic_entries[i].type), false);
     OT_FRAME_SCOPED(state, &type);
     otv error = ot_intern(state, "error", 5, false);
     ot_table_put(state, state->type_parents, type, error);

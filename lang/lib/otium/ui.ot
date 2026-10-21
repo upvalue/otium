@@ -21,7 +21,8 @@
   (options :init {})
   (focused? :init #f)
   (pressed? :init #f)
-  (hovered? :init #f))
+  (hovered? :init #f)
+  (paint-cache :init nil))
 
 (defclass Focus
   (node :init nil)
@@ -31,7 +32,9 @@
 
 (defclass Root
   (children :init [])
-  (focus :init (make Focus)))
+  (focus :init (make Focus))
+  (animations :init [])
+  (generation :init 0))
 
 (defclass Label
   :is Widget
@@ -114,7 +117,11 @@
   (stick-to-bottom :init #f)
   (axis :init :y)
   (reveal :init nil)
+  (smoothing :init 0.06)
   (offset :init 0 :state #t)
+  (target :init 0 :state #t)
+  (applied :init 0 :state #t)
+  (stepped :init nil :state #t)
   (limit :init 0 :state #t)
   (following? :init #t :state #t)
   (revealed :init nil :state #t))
@@ -241,7 +248,7 @@
     (for-each (fn (k)
                 (cond
                   ((eq? k :key) nil)
-                  ((memq k '(:disabled :focusable :autofocus :tab-navigation :keymap :on-action))
+                  ((memq k '(:disabled :focusable :autofocus :tab-navigation :keymap :on-action :cache))
                    (put! options k (get opts k)))
                   (else (set! args (cons k (cons (get opts k) args))))))
               (keys opts))
@@ -545,8 +552,37 @@
    :scroll #t})
 
 (def (scroll-to! w position)
+  "Move a mounted Scroll immediately, ending any animation."
   (set! (w :offset) (max 0 (min (w :limit) position)))
+  (set! (w :target) (w :offset))
+  (set! (w :stepped) nil)
   (set! (w :following?) (>= (w :offset) (w :limit))))
+
+(def (scroll-toward! w position)
+  "Animate a mounted Scroll to position; :smoothing 0 moves immediately."
+  (if (<= (w :smoothing) 0)
+      (scroll-to! w position)
+      (begin
+        (set! (w :target) (max 0 (min (w :limit) position)))
+        (set! (w :following?) (>= (w :target) (w :limit))))))
+
+(def (scroll-animating? w)
+  (not (= (w :offset) (w :target))))
+
+(def (scroll-step! w now)
+  "Advance an animation to time now, in seconds. The remaining distance decays
+exponentially with time constant :smoothing, so speed is independent of frame rate."
+  (let ((dt (if (w :stepped)
+                (max 0 (min 0.05 (- now (w :stepped))))
+                (/ 1 60.0)))
+        (left (* (- (w :target) (w :offset)) (exp (/ (- dt) (max 0.001 (w :smoothing)))))))
+    (if (< (abs left) 0.25)
+        (begin
+          (set! (w :offset) (w :target))
+          (set! (w :stepped) nil))
+        (begin
+          (set! (w :offset) (- (w :target) left))
+          (set! (w :stepped) now)))))
 
 (defmethod (handle-event (w Scroll) event)
   (when (eq? (get event :kind) :wheel)

@@ -149,31 +149,46 @@
       (let ((visible (visible? window)))
         (when (and visible (not (get window :was-visible?))) (ui/invalidate! window))
         (put! window :was-visible? visible)
-        (when (or (and (not (equal? (window :capture) ""))
-                       (or (not (window :last-error)) (window :dirty?) (not (equal? (window :revision) dev/revision))))
-                  (not (get options :render-on-demand?))
-                  (and visible (or (window :dirty?) (not (equal? (window :revision) dev/revision)))))
-          (sync! window)
-          (gpu/layout! tree (get window :width) (get window :height) (get window :scale))
-          (input/refresh-hover! (get window :pointer) tree)
-          (gpu/paint! tree renderer (get window :width) (get window :height) (get options :background-color 0x101827ff))
-          (sdl/check (native/gpu-frame renderer (get window :capture)))
-          (put! window :dirty? #f)
-          (put! window :revision dev/revision)
-          (set! (window :capture) "")
-          (set! (window :frame) (+ 1 (get window :frame)))
-          (set! (window :last-error) #f)))
+        (let ((full? (or (and (not (equal? (window :capture) ""))
+                              (or (not (window :last-error))
+                                  (window :dirty?)
+                                  (not (equal? (window :revision) dev/revision))))
+                         (not (get options :render-on-demand?))
+                         (and visible (or (window :dirty?) (not (equal? (window :revision) dev/revision)))))))
+          ;; A frame that only advances scroll animations skips the view and Yoga.
+          (when (or full? (and visible (gpu/animating? tree)))
+            (when full?
+              (sync! window)
+              (gpu/layout! tree (get window :width) (get window :height) (get window :scale)))
+            (when (gpu/animating? tree) (gpu/animate! tree (seconds) (get window :scale)))
+            (when (and (input/refresh-hover! (get window :pointer) tree) (not full?)) (gpu/invalidate-paint! tree))
+            (gpu/paint! tree
+                        renderer
+                        (get window :width)
+                        (get window :height)
+                        (get options :background-color 0x101827ff))
+            (sdl/check (native/gpu-frame renderer (get window :capture)))
+            (put! window :dirty? #f)
+            (put! window :revision dev/revision)
+            (set! (window :capture) "")
+            (set! (window :frame) (+ 1 (get window :frame)))
+            (set! (window :last-error) #f))))
       (when (get options :after-frame!) ((get options :after-frame!) window)))))
 
+(def (seconds)
+  (/ (current-jiffy) (jiffies-per-second)))
+
 (def (wait-ms)
+  "Poll interval for the loop; zero while a visible window animates, so frames
+follow the swapchain's vsync rather than the poll interval."
   (reduce (fn (ms window)
             (min ms
-                 (get (window :options)
-                      (if (and (visible? window)
-                               (sdl/flag-set? (sdl/get-window-flags (window :window)) sdl/WINDOW_INPUT_FOCUS))
-                          :poll-ms
-                          :background-poll-ms)
-                      16)))
+                 (cond
+                   ((and (visible? window) (gpu/animating? (window :tree))) 0)
+                   ((and (visible? window)
+                         (sdl/flag-set? (sdl/get-window-flags (window :window)) sdl/WINDOW_INPUT_FOCUS))
+                    (get (window :options) :poll-ms 16))
+                   (else (get (window :options) :background-poll-ms 16)))))
           100
           (ui/windows)))
 

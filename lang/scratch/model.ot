@@ -2,7 +2,7 @@
 (ns scratch.model)
 
 (def widths
-  "Column widths as fractions of the strip, cycled by width-cycle!."
+  "Column widths as fractions of the strip, stepped through by width-step!."
   [0.3333 0.5 0.6667 1.0])
 
 (def alphabet
@@ -113,9 +113,10 @@
         (put! terminals j moving)
         (put! ws :terminals terminals)))))
 
-(def (width-cycle!)
+(def (width-step! delta)
+  "Widen (1) or narrow (-1) the focused column, stopping at the ends."
   (let ((terminal (focused)))
-    (when terminal (put! terminal :width (modulo (+ (terminal :width) 1) (length widths))))))
+    (when terminal (put! terminal :width (max 0 (min (- (length widths) 1) (+ (terminal :width) delta)))))))
 
 (def (workspace-move! delta)
   (unless (empty? (state :workspaces))

@@ -17,7 +17,8 @@
    "Meta+Right" :right
    "Meta+Shift+Left" :move-left
    "Meta+Shift+Right" :move-right
-   "Meta+R" :width
+   "Meta+R" :widen
+   "Meta+Shift+R" :narrow
    "Meta+N" :workspace
    "Meta+Up" :workspace-up
    "Meta+Down" :workspace-down
@@ -40,7 +41,8 @@
     ((eq? action :right) (m/focus-move! 1))
     ((eq? action :move-left) (m/column-move! -1))
     ((eq? action :move-right) (m/column-move! 1))
-    ((eq? action :width) (m/width-cycle!))
+    ((eq? action :widen) (m/width-step! 1))
+    ((eq? action :narrow) (m/width-step! -1))
     ((eq? action :workspace)
      (m/workspace-new! (str "workspace " (+ 1 (length (m/workspaces)))) '("zsh" :shell)))
     ((eq? action :workspace-up) (m/workspace-move! -1))
@@ -57,7 +59,7 @@
 
 (def (titlebar)
   (let ((ws (m/active)))
-    (ui/row {:height 36 :padding-x 14 :gap 14 :align-items :center :background theme/panel}
+    (ui/row {:height 36 :padding-x 14 :gap 14 :align-items :center :background theme/panel :cache #t}
             (w/text theme/text theme/ui-size (if ws (ws :name) "No workspace"))
             (when ws (w/text theme/faint 12 (str (length (ws :terminals)) " terminals")))
             (w/spacer)
@@ -68,7 +70,7 @@
                 (ui/row {:gap 14 :align-items :center}
                         (key-hint "Cmd+T" "new")
                         (key-hint "Cmd+Arrows" "focus")
-                        (key-hint "Cmd+R" "width")
+                        (key-hint "Cmd+R / Shift" "width")
                         (key-hint "Cmd+J" "jump"))))))
 
 (def (view window)

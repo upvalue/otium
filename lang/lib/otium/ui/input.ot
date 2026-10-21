@@ -36,14 +36,23 @@
     ((eq? (ui/send! (car path) event) :handled) (car path))
     (else (bubble! (cdr path) event))))
 
+(def- (same-nodes? a b)
+  (cond
+    ((null? a) (null? b))
+    ((null? b) #f)
+    (else (and (eq? (car a) (car b)) (same-nodes? (cdr a) (cdr b))))))
+
 (def (refresh-hover! pointer tree)
-  "Mark the nodes under the last pointer position as hovered, deepest first."
+  "Mark the nodes under the last pointer position as hovered, deepest first.
+Returns true when the hovered nodes changed."
   (let ((path (if (nil? (pointer :x))
                   '()
-                  (hit-path tree (pointer :x) (pointer :y)))))
+                  (hit-path tree (pointer :x) (pointer :y))))
+        (changed? (not (same-nodes? path (pointer :hovered)))))
     (for-each (fn (node) (set! (node :hovered?) #f)) (pointer :hovered))
     (for-each (fn (node) (set! (node :hovered?) #t)) path)
-    (set! (pointer :hovered) path)))
+    (set! (pointer :hovered) path)
+    changed?))
 
 (def (cancel! pointer)
   (let ((node (pointer :captured)))

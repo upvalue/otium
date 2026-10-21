@@ -57,7 +57,7 @@
         (all (m/workspaces)))
     (dotimes (i (length all))
       (push! sections (workspace-section i (get all i))))
-    (ui/column {:width theme/sidebar-width :background theme/panel :padding-x 6 :padding-y 8 :gap 8}
+    (ui/column {:width theme/sidebar-width :background theme/panel :padding-x 6 :padding-y 8 :gap 8 :cache #t}
                (ui/row {:height 24 :padding-x 8 :align-items :center}
                        (w/text theme/faint 11 "WORKSPACES")
                        (w/spacer)

@@ -56,3 +56,47 @@
                                 (clip :y)
                                 (clip :width)
                                 (clip :height)))))
+
+;; Paint caches: record a widget's drawing once and replay it, moved, on later
+;; frames. Each cache has a renderer-wide id; the renderer frees recordings
+;; that go unused for a while.
+
+(defonce cache-ids 0)
+
+(def (cache)
+  "Return a new paint cache. Keep one per widget, e.g. in a state slot."
+  (set! cache-ids (+ cache-ids 1))
+  {:id cache-ids :key nil})
+
+(def- (draw-cache g c bounds)
+  (let ((clip (g :clip))
+        (drawn (native/gpu-cache-draw (g :renderer)
+                                      (c :id)
+                                      (bounds :x)
+                                      (bounds :y)
+                                      (clip :x)
+                                      (clip :y)
+                                      (clip :width)
+                                      (clip :height))))
+    (when (< drawn 0) (error (sdl/get-error)))
+    (= drawn 1)))
+
+(def (cached g c bounds key paint)
+  "Draw (paint context) through cache c. paint runs again only when key, the
+bounds' size or the pixel scale changes; otherwise the recording is replayed at
+the bounds' position. paint must draw within bounds and may only depend on key
+and the bounds' size."
+  (let ((full (list key (bounds :width) (bounds :height) (native/gpu-scale (g :renderer)))))
+    (unless (and (equal? full (c :key)) (draw-cache g c bounds))
+      (let ((start (native/gpu-mark (g :renderer))))
+        (put! c :key nil)
+        (paint (make Context
+                     :renderer (g :renderer)
+                     :clip bounds
+                     :focused? (g :focused?)
+                     :pressed? (g :pressed?)
+                     :hovered? (g :hovered?)
+                     :disabled? (g :disabled?)))
+        (sdl/check (native/gpu-cache-store (g :renderer) (c :id) start (bounds :x) (bounds :y)))
+        (put! c :key full)
+        (unless (draw-cache g c bounds) (error "Paint cache was not stored"))))))

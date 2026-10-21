@@ -112,7 +112,11 @@
   (native/node-retry (node :layout))
   (for-each retry! (ui/children node)))
 
-(def- (save-bounds! node x y)
+(def- (snap value scale)
+  (/ (round (* value scale)) scale))
+
+;; Records each Scroll node that is still animating after layout.
+(def- (save-bounds! node x y scale animations)
   (let ((p (node :layout))
         (left (+ x (native/node-bounds p native/BOUNDS_X)))
         (top (+ y (native/node-bounds p native/BOUNDS_Y))))
@@ -142,32 +146,71 @@
                                     (native/node-bounds (child :layout) span)))))
                     (ui/children node))
           (set! (w :limit) (max 0 (- (+ extent (w :padding)) viewport)))
-          (set! (w :offset)
-                (if (and (w :stick-to-bottom) (w :following?))
-                    (w :limit)
-                    (min (w :offset) (w :limit))))
+          (if (and (w :stick-to-bottom) (w :following?))
+              (ui/scroll-to! w (w :limit))
+              (begin
+                (set! (w :offset) (min (w :offset) (w :limit)))
+                (set! (w :target) (min (w :target) (w :limit)))))
           (reveal! w (ui/children node) start span viewport)
-          (set! offset (w :offset))))
+          (set! (w :applied) (snap (w :offset) scale))
+          (when (ui/scroll-animating? w) (push! animations node))
+          (set! offset (w :applied))))
       (for-each (fn (child)
                   (if x?
-                      (save-bounds! child (- left offset) top)
-                      (save-bounds! child left (- top offset))))
+                      (save-bounds! child (- left offset) top scale animations)
+                      (save-bounds! child left (- top offset) scale animations)))
                 (ui/children node)))))
 
 (def- (reveal! w children start span viewport)
   ;; Scroll just far enough to show the :reveal child, once per change of its
-  ;; key, position or the viewport, so wheel scrolling is not undone.
+  ;; key, position or the viewport, so wheel scrolling is not undone. The first
+  ;; reveal and viewport changes jump; others animate.
   (let ((target (and (w :reveal) (find (fn (child) (equal? (child :key) (w :reveal))) children))))
     (when target
       (let ((s (native/node-bounds (target :layout) start))
             (e (+ s (native/node-bounds (target :layout) span)))
-            (seen (list (w :reveal) s e viewport)))
-        (unless (equal? seen (w :revealed))
+            (seen (list (w :reveal) s e viewport))
+            (previous (w :revealed))
+            (move! (if (and previous (= (nth previous 3) viewport))
+                       ui/scroll-toward!
+                       ui/scroll-to!)))
+        (unless (equal? seen previous)
           (set! (w :revealed) seen)
           (cond
-            ((< s (+ (w :offset) (w :padding))) (ui/scroll-to! w (- s (w :padding))))
-            ((> e (- (+ (w :offset) viewport) (w :padding))) (ui/scroll-to! w (+ (- e viewport) (w :padding))))
+            ((< s (+ (w :target) (w :padding))) (move! w (- s (w :padding))))
+            ((> e (- (+ (w :target) viewport) (w :padding))) (move! w (+ (- e viewport) (w :padding))))
             (else nil)))))))
+
+(def- (shift! node dx dy)
+  (let ((b (node :bounds)))
+    (set! (b :x) (+ (b :x) dx))
+    (set! (b :y) (+ (b :y) dy)))
+  (for-each (fn (child) (shift! child dx dy)) (ui/children node)))
+
+(def (animating? tree)
+  (let ((animations (tree :animations))) (and animations (not (empty? animations)))))
+
+(def (animate! tree now scale)
+  "Advance scroll animations to time now, in seconds, and move their content
+without relayout. Returns true while any animation continues."
+  (let ((active []))
+    (for-each (fn (node)
+                (when (ui/active? node)
+                  (let ((w (ui/instance node))
+                        (before (w :applied)))
+                    (ui/scroll-step! w now)
+                    (set! (w :applied) (snap (w :offset) scale))
+                    (let ((d (- before (w :applied))))
+                      (unless (= d 0)
+                        (for-each (fn (child)
+                                    (if (eq? (w :axis) :x)
+                                        (shift! child d 0)
+                                        (shift! child 0 d)))
+                                  (ui/children node))))
+                    (when (ui/scroll-animating? w) (push! active node)))))
+              (tree :animations))
+    (set! (tree :animations) active)
+    (not (empty? active))))
 
 (def (layout! tree width height . pixel-scale)
   "Measure leaves using Yoga constraints, replaying until every query is answered."
@@ -191,7 +234,10 @@
             (when changed
               (for-each retry! (ui/children tree))
               (loop (+ pass 1)))))
-        (for-each (fn (node) (save-bounds! node 0 0)) (ui/children tree)))
+        (let ((animations []))
+          (for-each (fn (node) (save-bounds! node 0 0 scale animations)) (ui/children tree))
+          (set! (tree :animations) animations)
+          (invalidate-paint! tree)))
       (native/node-free root)))
   tree)
 
@@ -211,25 +257,43 @@
           :width (max 0 (- (min (+ (a :x) (a :width)) (+ (b :x) (b :width))) x))
           :height (max 0 (- (min (+ (a :y) (a :height)) (+ (b :y) (b :height))) y)))))
 
-(def- (paint-node! node renderer clip)
+(def- (paint-node! node renderer clip generation)
   (unless (node :bounds) (error "Run layout before painting"))
-  (let ((clip (intersect clip (node :bounds))))
-    (when (and (> (clip :width) 0) (> (clip :height) 0))
-      (ui/paint (ui/instance node)
-                (make gfx/Context
-                      :renderer renderer
-                      :clip clip
-                      :focused? (node :focused?)
-                      :pressed? (node :pressed?)
-                      :hovered? (node :hovered?)
-                      :disabled? (not (ui/enabled? node)))
-                (node :bounds))
-      (for-each (fn (child) (paint-node! child renderer clip)) (ui/children node)))))
+  (let ((visible (intersect clip (node :bounds))))
+    (when (and (> (visible :width) 0) (> (visible :height) 0))
+      (if (get (node :options) :cache #f)
+          (begin
+            (unless (node :paint-cache) (set! (node :paint-cache) (gfx/cache)))
+            (gfx/cached (make gfx/Context :renderer renderer :clip clip)
+                        (node :paint-cache)
+                        (node :bounds)
+                        generation
+                        (fn (g) (paint-subtree! node renderer (g :clip) generation))))
+          (paint-subtree! node renderer visible generation)))))
+
+(def- (paint-subtree! node renderer clip generation)
+  (ui/paint (ui/instance node)
+            (make gfx/Context
+                  :renderer renderer
+                  :clip clip
+                  :focused? (node :focused?)
+                  :pressed? (node :pressed?)
+                  :hovered? (node :hovered?)
+                  :disabled? (not (ui/enabled? node)))
+            (node :bounds))
+  (for-each (fn (child) (paint-node! child renderer clip generation)) (ui/children node)))
+
+(def (invalidate-paint! tree)
+  "Make widgets with the :cache option paint again on the next frame."
+  (set! (tree :generation) (+ 1 (tree :generation))))
 
 (def (paint! tree renderer width height background)
+  "Record the tree's drawing. Subtrees with the :cache option replay their last
+recording until layout or invalidate-paint! starts a new generation."
   (native/gpu-clear renderer background)
-  (let ((clip (make ui/Bounds :x 0 :y 0 :width width :height height)))
-    (for-each (fn (node) (paint-node! node renderer clip)) (ui/children tree))))
+  (let ((clip (make ui/Bounds :x 0 :y 0 :width width :height height))
+        (generation (tree :generation)))
+    (for-each (fn (node) (paint-node! node renderer clip generation)) (ui/children tree))))
 
 (def- (paint-box w g bounds)
   (let ((border (w :border))

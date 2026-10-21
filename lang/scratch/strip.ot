@@ -22,6 +22,7 @@
   (let ((focused? (= (terminal :id) (ws :focused)))
         (label (m/label-of (terminal :id))))
     (w/item {:key (terminal :id)
+             :cache #t
              :column? #t
              :align-items :stretch
              :width (column-width (m/width-of terminal) viewport)

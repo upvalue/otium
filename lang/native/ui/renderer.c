@@ -27,6 +27,15 @@ typedef struct {
   float rect[4], color[4], shape[4], clip[4], uv[4];
 } Rect;
 
+// Recorded draw instances for one widget, replayed at a new position. Origin
+// is the widget's position when recorded; scale must match on replay.
+typedef struct {
+  int id;
+  Uint32 used, count;
+  float x, y, scale;
+  Rect* rects;
+} Cache;
+
 typedef struct QueuedEvent {
   SDL_Event event;
   char* text;
@@ -53,6 +62,9 @@ typedef struct Renderer {
   SDL_GPUTransferBuffer* upload;
   Rect* rects;
   Uint32 count, capacity, width, height;
+  Cache* caches;
+  int cache_count, cache_capacity;
+  Uint32 frames;
   float logical_width, logical_height, scale;
   float event_x, event_y;
   int event_width, event_height;
@@ -247,6 +259,8 @@ void otui_gpu_free(Renderer* r) {
   }
   free(r->atlas_pixels);
   free(r->rects);
+  for (int i = 0; i < r->cache_count; ++i) free(r->caches[i].rects);
+  free(r->caches);
   free(r);
   --live_renderers;
   extern int otui_live_nodes(void);
@@ -421,11 +435,126 @@ static SDL_FColor rgba(Uint32 c) {
                       (c & 255) / 255.0f};
 }
 
+// Caches not replayed for this many frames are freed, so widgets that are
+// removed or stay off screen need no explicit release.
+#define CACHE_FRAMES 120
+
 // Start a new CPU draw list without discarding its allocated capacity.
 void otui_gpu_clear(Renderer* r, Uint32 color) {
   r->count = 0;
   r->clear = rgba(color);
+  ++r->frames;
+  for (int i = 0; i < r->cache_count;) {
+    if (r->frames - r->caches[i].used > CACHE_FRAMES) {
+      free(r->caches[i].rects);
+      r->caches[i] = r->caches[--r->cache_count];
+    } else {
+      ++i;
+    }
+  }
 }
+
+// Ensure room for need instances in both the CPU list and the GPU buffers.
+static bool reserve(Renderer* r, Uint32 need) {
+  if (need <= r->capacity) return true;
+  if (need > 65536) return SDL_SetError("UI primitive limit reached");
+  Uint32 capacity = r->capacity ? r->capacity : 256;
+  while (capacity < need) capacity *= 2;
+  Rect* rects = realloc(r->rects, capacity * sizeof(Rect));
+  if (!rects) return SDL_OutOfMemory();
+  r->rects = rects;
+  SDL_GPUBufferCreateInfo b = {.usage = SDL_GPU_BUFFERUSAGE_VERTEX,
+                               .size = capacity * sizeof(Rect)};
+  SDL_GPUTransferBufferCreateInfo t = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = b.size};
+  SDL_GPUBuffer* buffer = SDL_CreateGPUBuffer(r->device, &b);
+  SDL_GPUTransferBuffer* upload = SDL_CreateGPUTransferBuffer(r->device, &t);
+  if (!buffer || !upload) {
+    if (buffer) SDL_ReleaseGPUBuffer(r->device, buffer);
+    if (upload) SDL_ReleaseGPUTransferBuffer(r->device, upload);
+    return false;
+  }
+  if (r->buffer) SDL_ReleaseGPUBuffer(r->device, r->buffer);
+  if (r->upload) SDL_ReleaseGPUTransferBuffer(r->device, r->upload);
+  r->buffer = buffer;
+  r->upload = upload;
+  r->capacity = capacity;
+  return true;
+}
+
+int otui_gpu_mark(Renderer* r) { return (int)r->count; }
+
+static Cache* find_cache(Renderer* r, int id) {
+  for (int i = 0; i < r->cache_count; ++i)
+    if (r->caches[i].id == id) return &r->caches[i];
+  return NULL;
+}
+
+// Move the instances recorded since start into cache id, replacing any older
+// recording. They leave this frame's list; draw the cache to show them.
+bool otui_gpu_cache_store(Renderer* r, int id, int start, float x, float y) {
+  if (start < 0 || (Uint32)start > r->count || !isfinite(x) || !isfinite(y))
+    return SDL_SetError("Invalid UI cache range");
+  Uint32 count = r->count - (Uint32)start;
+  Rect* rects = malloc(count ? count * sizeof(Rect) : 1);
+  if (!rects) return SDL_OutOfMemory();
+  memcpy(rects, r->rects + start, count * sizeof(Rect));
+  r->count = (Uint32)start;
+  Cache* cache = find_cache(r, id);
+  if (!cache) {
+    if (r->cache_count == r->cache_capacity) {
+      int capacity = r->cache_capacity ? r->cache_capacity * 2 : 16;
+      Cache* caches = realloc(r->caches, capacity * sizeof(Cache));
+      if (!caches) {
+        free(rects);
+        return SDL_OutOfMemory();
+      }
+      r->caches = caches;
+      r->cache_capacity = capacity;
+    }
+    cache = &r->caches[r->cache_count++];
+    cache->rects = NULL;
+  }
+  free(cache->rects);
+  *cache = (Cache){id, r->frames, count, x, y, r->scale, rects};
+  return true;
+}
+
+// Append cache id moved to (x, y), snapped to physical pixels so glyphs stay
+// sharp, and clipped to the given rectangle. Instances wholly outside the clip
+// are skipped. Returns 1 when drawn, 0 when there is no usable recording and
+// -1 on error.
+int otui_gpu_cache_draw(Renderer* r, int id, float x, float y, float cx, float cy, float cw,
+                        float ch) {
+  Cache* cache = find_cache(r, id);
+  if (!cache || cache->scale != r->scale) return 0;
+  if (!isfinite(x) || !isfinite(y) || !isfinite(cx) || !isfinite(cy) || !isfinite(cw) ||
+      !isfinite(ch) || cw < 0 || ch < 0) {
+    SDL_SetError("Invalid UI cache position");
+    return -1;
+  }
+  if (!reserve(r, r->count + cache->count)) return -1;
+  cache->used = r->frames;
+  float dx = roundf((x - cache->x) * r->scale) / r->scale;
+  float dy = roundf((y - cache->y) * r->scale) / r->scale;
+  float x1 = cx + cw, y1 = cy + ch;
+  for (Uint32 i = 0; i < cache->count; ++i) {
+    Rect rect = cache->rects[i];
+    rect.rect[0] += dx;
+    rect.rect[1] += dy;
+    rect.clip[0] = fmaxf(rect.clip[0] + dx, cx);
+    rect.clip[1] = fmaxf(rect.clip[1] + dy, cy);
+    rect.clip[2] = fminf(rect.clip[2] + dx, x1);
+    rect.clip[3] = fminf(rect.clip[3] + dy, y1);
+    if (rect.clip[0] >= rect.clip[2] || rect.clip[1] >= rect.clip[3] ||
+        rect.rect[0] >= rect.clip[2] || rect.rect[1] >= rect.clip[3] ||
+        rect.rect[0] + rect.rect[2] <= rect.clip[0] || rect.rect[1] + rect.rect[3] <= rect.clip[1])
+      continue;
+    r->rects[r->count++] = rect;
+  }
+  return 1;
+}
+
+int otui_gpu_cache_count(Renderer* r) { return r->cache_count; }
 
 // Append one clipped rectangle instance. Grow CPU/GPU storage together;
 // no drawing is submitted until otui_gpu_frame. Text uses this path too.
@@ -435,29 +564,7 @@ bool otui_gpu_rect(Renderer* r, float x, float y, float w, float h, float radius
       !isfinite(cx) || !isfinite(cy) || !isfinite(cw) || !isfinite(ch) || w < 0 || h < 0 ||
       radius < 0 || cw < 0 || ch < 0)
     return SDL_SetError("Invalid UI rectangle");
-  if (r->count == r->capacity) {
-    if (r->capacity >= 65536) return SDL_SetError("UI primitive limit reached");
-    Uint32 capacity = r->capacity ? r->capacity * 2 : 256;
-    Rect* rects = realloc(r->rects, capacity * sizeof(Rect));
-    if (!rects) return SDL_OutOfMemory();
-    r->rects = rects;
-    SDL_GPUBufferCreateInfo b = {.usage = SDL_GPU_BUFFERUSAGE_VERTEX,
-                                 .size = capacity * sizeof(Rect)};
-    SDL_GPUTransferBufferCreateInfo t = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-                                         .size = b.size};
-    SDL_GPUBuffer* buffer = SDL_CreateGPUBuffer(r->device, &b);
-    SDL_GPUTransferBuffer* upload = SDL_CreateGPUTransferBuffer(r->device, &t);
-    if (!buffer || !upload) {
-      if (buffer) SDL_ReleaseGPUBuffer(r->device, buffer);
-      if (upload) SDL_ReleaseGPUTransferBuffer(r->device, upload);
-      return false;
-    }
-    if (r->buffer) SDL_ReleaseGPUBuffer(r->device, r->buffer);
-    if (r->upload) SDL_ReleaseGPUTransferBuffer(r->device, r->upload);
-    r->buffer = buffer;
-    r->upload = upload;
-    r->capacity = capacity;
-  }
+  if (!reserve(r, r->count + 1)) return false;
   SDL_FColor c = rgba(color);
   r->rects[r->count++] = (Rect){{x, y, w, h},
                                 {c.r, c.g, c.b, c.a},

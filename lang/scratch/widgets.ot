@@ -138,6 +138,14 @@
                 (list (list theme/text "- jump hints"))
                 (list (list theme/faint "~")))})
 
+(def (filler kind i)
+  (let ((stamp (str "12:" (+ 10 (modulo (quotient i 60) 50)) ":" (+ 10 (modulo i 50)) " ")))
+    (list (list theme/faint stamp)
+          (list (get {:server theme/cyan :tests theme/green :notes theme/purple} kind theme/yellow)
+                (str (get {:server "GET " :tests "ok  " :notes "-   "} kind "log ")))
+          (list theme/text (str "/scratch/item/" (* 7 i) "?page=" i))
+          (list theme/muted (str " " (+ 3 (modulo (* 13 i) 97)) "ms")))))
+
 (defonce metrics {})
 
 (def (cell-size scale)
@@ -152,7 +160,8 @@
 (defclass Pane
   :is ui/Widget
   (kind :init :shell)
-  (focused? :init #f))
+  (focused? :init #f)
+  (cache :init (gfx/cache) :state #t))
 
 (def (pane kind focused?)
   (ui/new Pane {:kind kind :focused? focused?}))
@@ -161,6 +170,9 @@
   {:grow 1})
 
 (defmethod (ui/paint (w Pane) g bounds)
+  (gfx/cached g (w :cache) bounds (list (w :kind) (w :focused?)) (fn (g) (paint-pane w g bounds))))
+
+(def (paint-pane w g bounds)
   (let ((cell (cell-size (native/gpu-scale (g :renderer))))
         (cw (car cell))
         (ch (cadr cell))
@@ -182,6 +194,22 @@
                   (set! cursor (list x y))
                   (set! y (+ y ch))))
               (get samples (w :kind) (get samples :shell)))
+    ;; Fill the rest like a busy terminal: distinct lines, a few colour runs each.
+    (let ((i 0))
+      (while (< (+ y ch) (+ (bounds :y) (bounds :height)))
+        (let ((x x0))
+          (for-each (fn (segment)
+                      (gfx/text g
+                                (make ui/Bounds :x x :y y :width 100000 :height ch)
+                                (cadr segment)
+                                :mono
+                                theme/mono-size
+                                (car segment)
+                                #f)
+                      (set! x (+ x (* cw (string-length (cadr segment))))))
+                    (filler (w :kind) i)))
+        (set! y (+ y ch))
+        (set! i (+ i 1))))
     (when (and cursor (memq (w :kind) '(:shell :tests)))
       (gfx/rect g
                 (make ui/Bounds :x (car cursor) :y (cadr cursor) :width cw :height ch)

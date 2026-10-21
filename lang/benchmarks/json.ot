@@ -1,0 +1,21 @@
+(require otium.json :as json)
+
+; Run with ./otium --runtime=chez benchmarks/json.ot.
+(def text
+  (str "["
+       (string-join ","
+                    (map (fn (_) "{\"name\":\"ordinary string with no escapes\",\"active\":true,\"values\":[1,2,3.5]}")
+                         (range 2000)))
+       "]"))
+
+(def value (json/parse text))
+
+(def (measure label work)
+  (work)
+  (let ((start (current-jiffy)))
+    (dotimes (_ 10)
+      (work))
+    (println label " (10 iterations): " (/ (- (current-jiffy) start) 1000000.0) " ms")))
+
+(measure "parse" (fn () (json/parse text)))
+(measure "encode" (fn () (json/encode value)))

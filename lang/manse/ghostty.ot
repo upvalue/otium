@@ -6,7 +6,7 @@
 
 (require otium.ffi :as ffi)
 (require otium.process :as process)
-(require manse.json :as json)
+(require otium.json :as json)
 
 ;; GhosttyResult
 (def SUCCESS 0)

@@ -5,6 +5,7 @@ for name in ('bootstrap', 'sequences', 'reflection', 'printing'):
     case('library ' + name, f'tests/library/{name}.ot', stdout_file=f'tests/library/{name}.txt')
 case('library', 'tests/library/common.ot')
 case('library arithmetic', 'tests/library/arithmetic.ot')
+case('library json', 'tests/library/json.ot')
 case('library chars', 'tests/library/chars.ot')
 case('library bytevectors', 'tests/library/bytevectors.ot')
 case('library modules', 'tests/library/modules.ot', paths=['tests/library/modules'],

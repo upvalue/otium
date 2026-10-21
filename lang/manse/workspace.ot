@@ -213,6 +213,12 @@
         (str (substring script 0 (- (string-length script) (string-length "manse/app.ot"))) "build/ui-config.ot")
         "../build/ui-config.ot")))
 
+(def (icon-path)
+  (let ((script (process/script-name)))
+    (if (or (equal? script "manse/app.ot") (string-ends-with? script "/manse/app.ot"))
+        (str (substring script 0 (- (string-length script) (string-length "app.ot"))) "assets/manse-mark.png")
+        "assets/manse-mark.png")))
+
 (def (main)
   (let ((shell (or (process/getenv "SHELL") "/bin/sh")))
     (process/setenv! "TERM" "xterm-256color")
@@ -225,6 +231,7 @@
         (let ((window (ui/open {:title "manse · click or Ctrl+Tab to switch terminals"
                                 :width 900 :height 800
                                 :config (config-path)
+                                :icon (icon-path)
                                 :app-name "manse" :app-id "org.otium.manse"
                                 :background-color 0x000000ff
                                 :fail-fast? #t

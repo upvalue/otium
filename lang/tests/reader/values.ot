@@ -136,7 +136,7 @@
        (try
          (error 'test)
          (catch ((fn (c) nil) c) 99)
-         (catch ((fn (c) #t) c) 7)))
+         (catch c 7)))
 
 (def handled 0)
 

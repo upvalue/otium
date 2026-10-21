@@ -157,7 +157,7 @@ the protocol small. Starting a server runs `(require (otium.dev :as dev))` in
   kind (`:function`, `:macro` or `:value`), whether it is public, and its
   docstring, plus `:arity` and `:variadic` for Otium functions. `defonce`
   isn't distinguished from `def`; neither runtime remembers which was used.
-- `(dev/source 'NS/NAME)`: the file and line of the definition, or `#f`.
+- `(dev/source 'NS/NAME)`: the file and line of the definition, or `nil`.
 - `(dev/apropos "TEXT")`: qualified names, across loaded namespaces, whose
   name contains the text.
 - `(dev/stale-files)`: files of loaded namespaces modified since they were

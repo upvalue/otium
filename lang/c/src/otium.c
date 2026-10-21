@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <math.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -189,7 +190,7 @@ static bool special_name(const char* bytes, size_t length) {
  * 2. CORE VALUES AND COLLECTIONS
  * ========================================================================= */
 
-static otv make_bytevector(ots* state, size_t length) {
+otv ot_make_bytevector(ots* state, size_t length) {
   ot_bytevector_obj* bytes = must_alloc(state, sizeof(*bytes) + length, OBJ_BYTEVECTOR);
   bytes->length = length;
   bytes->stable_id = 0;
@@ -5083,6 +5084,55 @@ static otv nat_modulo(ots* state, otv* args, int argc) {
   return nat_integer_division(state, args, argc, 2);
 }
 
+static otv nat_bitwise(ots* state, otv* args, int argc, int mode) {
+  intptr_t result = mode == 0 ? -1 : 0;
+  for (int i = 0; i < argc; i++) {
+    if (!ot_is_int(args[i])) return ot_raise(state, "bitwise: expected exact integers");
+    intptr_t value = ot_get_int(args[i]);
+    if (mode == 0) result &= value;
+    else if (mode == 1) result |= value;
+    else result ^= value;
+  }
+  return ot_make_int(result);
+}
+
+static otv nat_bitwise_and(ots* state, otv* args, int argc) {
+  return nat_bitwise(state, args, argc, 0);
+}
+
+static otv nat_bitwise_ior(ots* state, otv* args, int argc) {
+  return nat_bitwise(state, args, argc, 1);
+}
+
+static otv nat_bitwise_xor(ots* state, otv* args, int argc) {
+  return nat_bitwise(state, args, argc, 2);
+}
+
+static otv nat_bitwise_not(ots* state, otv* args, int argc) {
+  if (need_arity(state, "bitwise-not", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (!ot_is_int(args[0])) return ot_raise(state, "bitwise-not: expected exact integer");
+  return ot_make_int(~ot_get_int(args[0]));
+}
+
+static otv nat_bitwise_shift(ots* state, otv* args, int argc) {
+  if (need_arity(state, "bitwise-arithmetic-shift", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!ot_is_int(args[0]) || !ot_is_int(args[1]))
+    return ot_raise(state, "bitwise-arithmetic-shift: expected exact integers");
+  intptr_t value = ot_get_int(args[0]);
+  intptr_t shift = ot_get_int(args[1]);
+  if (value == 0) return ot_make_int(0);
+  if (shift < 0) {
+    if (shift <= -(intptr_t)(sizeof(intptr_t) * CHAR_BIT)) return ot_make_int(value < 0 ? -1 : 0);
+    return ot_make_int(value < 0 ? ~(~value >> -shift) : value >> -shift);
+  }
+  while (shift-- > 0) {
+    if (value > OT_INT_MAX / 2 || value < OT_INT_MIN / 2)
+      return ot_raise(state, "bitwise-arithmetic-shift: integer out of range");
+    value *= 2;
+  }
+  return ot_make_int(value);
+}
+
 static bool compare_int_float(intptr_t integer, double number, int* order) {
   if (isnan(number)) return false;
   double lower = (double)OT_INT_MIN;
@@ -5772,7 +5822,7 @@ static otv span_arguments(ots* state, const char* who, otv* args, int argc, int 
 static otv nat_bytevector(ots* state, otv* args, int argc) {
   for (int i = 0; i < argc; i++)
     if (!byte_value(args[i])) return ot_raise(state, "bytevector: expected bytes from 0 to 255");
-  otv bytes = make_bytevector(state, (size_t)argc);
+  otv bytes = ot_make_bytevector(state, (size_t)argc);
   for (int i = 0; i < argc; i++) as_bytevector(bytes)->data[i] = (unsigned char)ot_get_int(args[i]);
   return bytes;
 }
@@ -5784,7 +5834,7 @@ static otv nat_make_bytevector(ots* state, otv* args, int argc) {
   if (argc == 2 && !byte_value(args[1]))
     return ot_raise(state, "make-bytevector: expected a fill byte from 0 to 255");
   unsigned char fill = argc == 2 ? (unsigned char)ot_get_int(args[1]) : 0;
-  otv bytes = make_bytevector(state, (size_t)ot_get_int(args[0]));
+  otv bytes = ot_make_bytevector(state, (size_t)ot_get_int(args[0]));
   memset(as_bytevector(bytes)->data, fill, as_bytevector(bytes)->length);
   return bytes;
 }
@@ -5828,7 +5878,7 @@ static otv nat_bytevector_copy(ots* state, otv* args, int argc) {
     return OT_UNWIND;
   otv source = args[0];
   OT_FRAME_SCOPED(state, &source);
-  otv copy = make_bytevector(state, end - start);
+  otv copy = ot_make_bytevector(state, end - start);
   memcpy(as_bytevector(copy)->data, as_bytevector(source)->data + start, end - start);
   return copy;
 }
@@ -5856,7 +5906,7 @@ static otv nat_bytevector_append(ots* state, otv* args, int argc) {
     length += as_bytevector(args[i])->length;
   }
   /* The argument array is rooted by the caller for the duration of the call. */
-  otv result = make_bytevector(state, length);
+  otv result = ot_make_bytevector(state, length);
   size_t offset = 0;
   for (int i = 0; i < argc; i++) {
     ot_bytevector_obj* part = as_bytevector(args[i]);
@@ -5946,7 +5996,7 @@ static otv nat_string_utf8(ots* state, otv* args, int argc) {
   size_t byte_start = utf8_offset(data, length, start);
   size_t byte_end = utf8_offset(data, length, end);
   OT_FRAME_SCOPED(state, &string);
-  otv result = make_bytevector(state, byte_end - byte_start);
+  otv result = ot_make_bytevector(state, byte_end - byte_start);
   memcpy(as_bytevector(result)->data, as_bytes(as_string(string)->bytes)->data + byte_start,
          byte_end - byte_start);
   return result;
@@ -7634,6 +7684,11 @@ static const nat_def core_nats[] = {
     {"*", nat_multiply},
     {"-", nat_subtract},
     {"/", nat_divide},
+    {"bitwise-and", nat_bitwise_and},
+    {"bitwise-ior", nat_bitwise_ior},
+    {"bitwise-xor", nat_bitwise_xor},
+    {"bitwise-not", nat_bitwise_not},
+    {"bitwise-arithmetic-shift", nat_bitwise_shift},
     {"quotient", nat_quotient},
     {"remainder", nat_remainder},
     {"modulo", nat_modulo},

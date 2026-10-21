@@ -50,4 +50,4 @@
 
 (def (flag-set? flags flag)
   "Whether a single-bit SDL flag is present."
-  (= 1 (modulo (quotient flags flag) 2)))
+  (not (= 0 (bitwise-and flags flag))))

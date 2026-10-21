@@ -158,7 +158,7 @@ const char* ot_runtime_documentation(const char* name) {
     {"tan", "(tan number)\nCompute tangent in radians."},
     {"true?", "(true? value)\nReturn #t when value is exactly #t, otherwise #f."},
     {"truncate", "(truncate number)\nRound toward zero to an integer."},
-    {"try", "(try body ... (catch (predicate name) handler-body ...) ...)\nCatch an unwinding condition using the first matching predicate. quit is not caught."},
+    {"try", "(try body ... (catch (predicate name) handler-body ...) ...)\nCatch an unwinding condition using the first matching predicate. (catch name body ...) catches any condition. quit is not caught."},
     {"type", "(type value)\nReturn the value's type as a keyword, such as :int, :string, :array, or :table."},
     {"unquote", "(unquote expression) / ,expression\nInsert an evaluated value into an enclosing quasiquote."},
     {"unquote-splicing", "(unquote-splicing expression) / ,@expression\nSplice evaluated sequence elements into an enclosing quasiquote."},
@@ -274,6 +274,11 @@ const char* ot_runtime_documentation(const char* name) {
     {"current-error-port", "(current-error-port)\nThe dynamically scoped error output port. Rebind with with-params."},
     {"open-binary-input-file", "(open-binary-input-file path [options])\nAlias for open-input-file; all ports support byte and text reads."},
     {"open-binary-output-file", "(open-binary-output-file path [options])\nAlias for open-output-file; all ports support byte and text writes."},
+    {"bitwise-and", "(bitwise-and integer ...)\nBitwise AND of exact integers; no arguments gives -1."},
+    {"bitwise-ior", "(bitwise-ior integer ...)\nBitwise inclusive OR of exact integers; no arguments gives 0."},
+    {"bitwise-xor", "(bitwise-xor integer ...)\nBitwise exclusive OR of exact integers; no arguments gives 0."},
+    {"bitwise-not", "(bitwise-not integer)\nComplement the bits of one exact integer."},
+    {"bitwise-arithmetic-shift", "(bitwise-arithmetic-shift integer count)\nShift an exact integer left by count bits, or right with sign extension for a negative count. C raises an error if the result exceeds its integer range."},
   };
   for (size_t i = 0; i < sizeof(entries) / sizeof(*entries); ++i)
     if (!strcmp(name, entries[i].name)) return entries[i].text;

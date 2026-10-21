@@ -11,7 +11,11 @@
 (require otium.test :refer (check fails? report))
 
 (def (near label expected actual)
-  (check label expected (if (< (abs (- expected actual)) 0.01) expected actual)))
+  (check label
+         expected
+         (if (< (abs (- expected actual)) 0.01)
+             expected
+             actual)))
 
 (def (child parent i)
   (get (ui/children parent) i))
@@ -161,9 +165,11 @@
           (face (gfx/font-index mono)))
       (check "custom font gets a separate ID" #t (>= face 2))
       (check "font registration is deduplicated" face (gfx/font-index mono))
-      (check "custom font metrics match bundled font" (array-to-list (gpu/caret-positions "MMMM" :mono 20 1))
+      (check "custom font metrics match bundled font"
+             (array-to-list (gpu/caret-positions "MMMM" :mono 20 1))
              (array-to-list (gpu/caret-positions "MMMM" mono 20 1)))
-      (check "switching font changes metrics" #f
+      (check "switching font changes metrics"
+             #f
              (equal? (array-to-list (gpu/caret-positions "MMMM" mono 20 1))
                      (array-to-list (gpu/caret-positions "MMMM" sans 20 1))))
       (let ((before (native/text-resources)))
@@ -313,8 +319,7 @@
           (set! worst (max worst (- (+ ((column :bounds) :x) ((column :bounds) :width)) 200)))
           (loop (+ step 1))))
       (check "scroll follows a resizing child's edge to the pixel" #t (<= worst 0.5)))
-    (ui/reconcile! tree
-                   (ui/scroll {:axis :x :width 200 :height 50 :reveal 0} (ui/column {:key 0 :width 280})))
+    (ui/reconcile! tree (ui/scroll {:axis :x :width 200 :height 50 :reveal 0} (ui/column {:key 0 :width 280})))
     (gpu/layout! tree 320 200)
     (gpu/layout! tree 320 200)
     (near "a child wider than the viewport shows its start" 0 ((ui/instance (child tree 0)) :target))
@@ -323,11 +328,9 @@
     (let ((pointer (input/pointer))
           (outer (child tree 0)))
       (input/dispatch! pointer tree {:kind :pointer-move :x 10 :y 10})
-      (check "hover marks ancestors" (list #t #t)
-             (list ((child outer 0) :hovered?) (outer :hovered?)))
+      (check "hover marks ancestors" (list #t #t) (list ((child outer 0) :hovered?) (outer :hovered?)))
       (input/dispatch! pointer tree {:kind :pointer-move :x 80 :y 10})
-      (check "hover leaves a child" (list #f #t)
-             (list ((child outer 0) :hovered?) (outer :hovered?)))
+      (check "hover leaves a child" (list #f #t) (list ((child outer 0) :hovered?) (outer :hovered?)))
       (input/dispatch! pointer tree {:kind :pointer-leave})
       (check "pointer leave clears hover" #f (outer :hovered?)))
     (dotimes (i 40)
@@ -365,4 +368,14 @@
 (check "all nodes released" 0 (native/live-nodes))
 (check "no renderers needed" 0 (native/live-renderers))
 (check "foreign memory released" 0 (ffi/allocation-count))
+(let ((saved gfx/rect)
+      (fills [])
+      (box (make ui/Box :background 10 :hover 20)))
+  (defer
+    (begin
+      (set! gfx/rect (fn (_g _bounds color . _radius) (push! fills color)))
+      (ui/paint box {:hovered? #f} (ui/bounds 0 0 10 10))
+      (ui/paint box {:hovered? #t} (ui/bounds 0 0 10 10))
+      (check "Box hover chooses its fill" '(10 20) (array-to-list fills)))
+    (set! gfx/rect saved)))
 (report "ui layout")

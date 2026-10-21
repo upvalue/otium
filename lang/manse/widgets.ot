@@ -1,64 +1,9 @@
-;; Small widgets for the workspace: a clickable box with hover, a dot and
-;; hint badges.
+;; Small workspace widgets: dots and hint badges.
 (ns manse.widgets)
 
 (require (otium.ui :as ui))
 (require (otium.gfx :as gfx))
 (require (manse.theme :as theme))
-
-(def (inset bounds d)
-  (ui/bounds (+ (bounds :x) d)
-             (+ (bounds :y) d)
-             (max 0 (- (bounds :width) (* 2 d)))
-             (max 0 (- (bounds :height) (* 2 d)))))
-
-;; A row or column that responds to presses and paints a hover colour.
-(defclass Item
-  :is ui/Widget
-  (on-press :init nil)
-  (column? :init #f)
-  (width :init -1)
-  (height :init -1)
-  (grow :init 0)
-  (padding-x :init 0)
-  (padding-y :init 0)
-  (gap :init 0)
-  (align-items :init :center)
-  (background :init nil)
-  (hover :init nil)
-  (border :init nil)
-  (radius :init 0))
-
-(def (item opts . children)
-  (apply ui/new Item opts children))
-
-(defmethod (ui/layout-style (w Item))
-  {:width (w :width)
-   :height (w :height)
-   :grow (w :grow)
-   :padding-x (w :padding-x)
-   :padding-y (w :padding-y)
-   :gap (w :gap)
-   :align-items (w :align-items)
-   :row (not (w :column?))})
-
-(defmethod (ui/handle-event (w Item) event)
-  (let ((kind (get event :kind)))
-    (cond
-      ((eq? kind :press) (when (w :on-press) ((w :on-press))) :handled)
-      ((memq kind '(:pointer-down :pointer-up)) (when (w :on-press) :handled))
-      (else nil))))
-
-(defmethod (ui/paint (w Item) g bounds)
-  (let ((fill (if (and (g :hovered?) (w :hover))
-                  (w :hover)
-                  (w :background))))
-    (cond
-      ((w :border)
-       (gfx/rect g bounds (w :border) (w :radius))
-       (gfx/rect g (inset bounds 1) (or fill theme/background) (max 0 (- (w :radius) 1))))
-      (fill (gfx/rect g bounds fill (w :radius)))
-      (else nil))))
 
 (defclass Dot
   :is ui/Widget

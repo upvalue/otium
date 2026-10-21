@@ -13,8 +13,11 @@
 (write! {} "abcdef")
 (check "text survives short writes" '(97 98 99 100 101 102) (array-to-list received))
 (set! received [])
-(write-bytes! {} '(0 1 2 3 4))
+(write-bytes! {} #u8(0 1 2 3 4))
 (check "bytes survive short writes" '(0 1 2 3 4) (array-to-list received))
+(set! received [])
+(write! {} "é\x0;🙂")
+(check "counted text preserves UTF-8 and NUL" '(195 169 0 240 159 153 130) (array-to-list received))
 (set! %write (fn _args 0))
 (check "zero progress fails"
        #t

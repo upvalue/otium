@@ -42,3 +42,8 @@ def callback_thread(t):
 @test('ffi ownership', runtimes=BOTH)
 def ownership(t):
     t.expect(t.otium('tests/ffi/ownership.ot'), stdout='own: 10 checks passed\n')
+
+
+@test('ffi bulk', runtimes=BOTH)
+def bulk(t):
+    t.expect(t.otium('tests/ffi/bulk.ot'))

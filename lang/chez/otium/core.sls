@@ -10,6 +10,7 @@
             (ot-defparam defparam) (ot-with-params with-params))
     + - * (rename (ot-divide /)) = < > <= >= zero? positive? negative? odd? even?
     min max abs quotient remainder modulo gcd lcm
+    bitwise-and bitwise-ior bitwise-xor bitwise-not bitwise-arithmetic-shift
     (rename (ot-floor floor) (ot-ceiling ceiling) (ot-truncate truncate)
             (ot-round round) (ot-sqrt sqrt))
     exp log sin cos tan asin acos atan expt

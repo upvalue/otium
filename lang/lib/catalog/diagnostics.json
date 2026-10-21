@@ -147,7 +147,7 @@
     "title": "invalid try form",
     "type": "syntax-error",
     "message": "{detail}",
-    "explanation": "`try` takes body expressions followed by `(catch (predicate name) body ...)` clauses. Catch clauses must come after every body expression.",
+    "explanation": "`try` takes body expressions followed by `(catch (predicate name) body ...)` or `(catch name body ...)` clauses. Catch clauses must come after every body expression.",
     "example": "(try (catch (error? e) nil) (work))",
     "fixed": "(try (work) (catch (error? e) nil))"
   },

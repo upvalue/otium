@@ -485,4 +485,16 @@
   (check "explicit color survives palette" 456 (ui/color 456))
   (set! ui/palette saved))
 
+(let ((row (make ui/Box :direction :row))
+      (column (make ui/Box :direction :column))
+      (presses 0))
+  (check "Box row direction" #t ((ui/layout-style row) :row))
+  (check "Box column direction" #f ((ui/layout-style column) :row))
+  (check "ordinary Box ignores press" nil (ui/handle-event row {:kind :press}))
+  (check "ordinary Box ignores pointer down" nil (ui/handle-event row {:kind :pointer-down}))
+  (set! (row :on-press) (fn () (set! presses (+ presses 1))))
+  (check "interactive Box captures pointer" :handled (ui/handle-event row {:kind :pointer-down}))
+  (check "interactive Box press" :handled (ui/handle-event row {:kind :press}))
+  (check "interactive Box invokes callback" 1 presses))
+
 (report "ui")

@@ -6,8 +6,13 @@
 
 (def other (g/new 80 24))
 
+(def (as-list bytes)
+  (if bytes
+      (array-to-list (map (fn (i) (bytevector-u8-ref bytes i)) (range (bytevector-length bytes))))
+      nil))
+
 (def (encode key)
-  (keyboard/encode term {:key key}))
+  (as-list (keyboard/encode term {:key key})))
 
 (unwind-protect
   (begin
@@ -16,7 +21,7 @@
     (check "control left" '(27 91 49 59 53 68) (encode "Ctrl+Left"))
     (check "option up" '(27 91 49 59 51 65) (encode "Alt+Up"))
     (check "modifiers do not leak" '(27 91 65) (encode "Up"))
-    (check "repeat" '(27 91 68) (keyboard/encode term {:key "Left" :repeat #t}))
+    (check "repeat" '(27 91 68) (as-list (keyboard/encode term {:key "Left" :repeat #t})))
     (check "control A" '(1) (encode "Ctrl+A"))
     (check "control C" '(3) (encode "Ctrl+C"))
     (check "control space keeps NUL" '(0) (encode "Ctrl+Space"))
@@ -34,7 +39,7 @@
     (check "option composition waits for text input" nil (encode "Alt+E"))
     (g/write! term "\x1b;[?1h")
     (check "application cursor mode" '(27 79 68) (encode "Left"))
-    (check "other terminal retains normal cursor mode" '(27 91 68) (keyboard/encode other {:key "Left"}))
+    (check "other terminal retains normal cursor mode" '(27 91 68) (as-list (keyboard/encode other {:key "Left"})))
     (check "word shortcut in application mode" '(27 98) (encode "Alt+Left"))
     (eval '(require manse.ghostty :reload))
     (eval '(require manse.keyboard :reload))

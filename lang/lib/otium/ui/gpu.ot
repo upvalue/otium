@@ -321,11 +321,12 @@ recording until invalidate-paint! starts a new generation or their size changes.
 
 (def- (paint-box w g bounds)
   (let ((border (w :border))
-        (radius (w :radius)))
+        (radius (w :radius))
+        (fill (if (and (g :hovered?) (w :hover))
+                  (w :hover)
+                  (w :background))))
     (cond
-      ((and border (w :background))
-       (gfx/rect g bounds border radius)
-       (gfx/rect g (inset bounds 1 1) (w :background) (max 0 (- radius 1))))
+      ((and border fill) (gfx/rect g bounds border radius) (gfx/rect g (inset bounds 1 1) fill (max 0 (- radius 1))))
       (border
         ;; Without a fill, draw the four edges; corners stay square.
         (let ((x (bounds :x))
@@ -336,13 +337,10 @@ recording until invalidate-paint! starts a new generation or their size changes.
           (gfx/rect g (ui/bounds x (- (+ y height) 1) width 1) border)
           (gfx/rect g (ui/bounds x y 1 height) border)
           (gfx/rect g (ui/bounds (- (+ x width) 1) y 1 height) border)))
-      ((w :background) (gfx/rect g bounds (w :background) radius))
+      (fill (gfx/rect g bounds fill radius))
       (else nil))))
 
-(defmethod (ui/paint (w ui/Column) g bounds)
-  (paint-box w g bounds))
-
-(defmethod (ui/paint (w ui/Row) g bounds)
+(defmethod (ui/paint (w ui/Box) g bounds)
   (paint-box w g bounds))
 
 (defmethod (ui/layout-style (w ui/Label))

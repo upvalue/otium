@@ -29,7 +29,7 @@
   (put! control-keys (str i) (+ 6 i)))
 
 ;; These are application shortcuts, independent of the terminal's keyboard mode.
-(def shortcuts {"Alt+Left" '(27 98) "Alt+Right" '(27 102) "Alt+Backspace" '(27 127)})
+(def shortcuts {"Alt+Left" #u8(27 98) "Alt+Right" #u8(27 102) "Alt+Backspace" #u8(27 127)})
 
 (def (encode term event)
   "Return terminal bytes, or nil when SDL's text-input event should supply the text."
@@ -43,7 +43,7 @@
           (for-each (fn (modifier)
                       (when (string-starts-with? key (car modifier))
                         (when (= (cadr modifier) 2) (set! control? #t))
-                        (set! mods (+ mods (cadr modifier)))
+                        (set! mods (bitwise-ior mods (cadr modifier)))
                         (set! key (substring key (string-length (car modifier))))))
                     '(("Ctrl+" 2) ("Alt+" 4) ("Meta+" 8) ("Shift+" 1)))
           (let ((code (or (get special-keys key) (and control? (get control-keys key)))))
@@ -55,7 +55,7 @@
                     (unshifted (if (and (>= ascii 65) (<= ascii 90))
                                    (+ ascii 32)
                                    ascii))
-                    (shift? (= 1 (modulo mods 2))))
+                    (shift? (not (= 0 (bitwise-and mods 1)))))
                 (g/encode-key term
                               code
                               mods

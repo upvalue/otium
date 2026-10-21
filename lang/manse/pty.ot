@@ -124,25 +124,16 @@
         (loop (+ done n))))))
 
 (def (write! pty text)
-  (let ((p (ffi/alloc-utf8 text)))
-    (defer
-      (let loop ((n 0))
-        (if (= 0 (ffi/ref p 'u8 n))
-            (write-pointer! pty p n)
-            (loop (+ n 1))))
-      (ffi/free! p))))
+  (write-bytes! pty (string->utf8 text)))
 
 (def (write-bytes! pty bytes)
-  "Write a list of byte values."
-  (let ((p (ffi/alloc 'u8 (max 1 (length bytes)))))
+  "Write a bytevector, including embedded NULs."
+  (let ((size (bytevector-length bytes))
+        (p (ffi/alloc 'u8 (max 1 size))))
     (defer
       (begin
-        (let loop ((i 0)
-                   (rest bytes))
-          (unless (null? rest)
-            (ffi/set! p 'u8 i (car rest))
-            (loop (+ i 1) (cdr rest))))
-        (write-pointer! pty p (length bytes)))
+        (ffi/write-bytes! p bytes)
+        (write-pointer! pty p size))
       (ffi/free! p))))
 
 (defonce pending-pids [])
@@ -156,9 +147,9 @@
           ((= r -10) :unavailable)
           ((< r 0) (check! "waitpid" r))
           (else (let ((raw (ffi/ref s 'i32 0)))
-                  (if (= 0 (modulo raw 128))
-                      {:exit (modulo (quotient raw 256) 256)}
-                      {:signal (modulo raw 128)})))))
+                  (if (= 0 (bitwise-and raw 127))
+                      {:exit (bitwise-and (bitwise-arithmetic-shift raw -8) 255)}
+                      {:signal (bitwise-and raw 127)})))))
       (ffi/free! s))))
 
 (def (reap!)

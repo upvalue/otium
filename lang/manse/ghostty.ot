@@ -153,15 +153,8 @@
   library)
 
 (def- (read-gstring p)
-  "Copy a GhosttyString's bytes through a terminated buffer."
-  (let ((len (ffi/field-ref p GString '(len)))
-        (copy (ffi/alloc 'u8 (+ len 1))))
-    (defer
-      (begin
-        (ffi/copy! copy (ffi/field-ref p GString '(ptr)) len)
-        (ffi/set! copy 'u8 len 0)
-        (ffi/read-utf8 copy (+ len 1)))
-      (ffi/free! copy))))
+  "Decode the counted UTF-8 bytes of a GhosttyString."
+  (ffi/read-utf8-bytes (ffi/field-ref p GString '(ptr)) (ffi/field-ref p GString '(len))))
 
 (def (build-info)
   (let ((s (ffi/alloc GString 1)))
@@ -287,26 +280,28 @@
           (put! term :key-capacity capacity)
           (set! result (%key-encode encoder event buffer capacity scratch))))
       (check! "key_encoder_encode" result)
-      (array-to-list (map (fn (i) (ffi/ref (term :key-buffer) 'u8 i)) (range (ffi/ref scratch 'size-t 0)))))))
+      (ffi/read-bytes (term :key-buffer) (ffi/ref scratch 'size-t 0)))))
 
 (def (on-write-pty term data len)
   "Collect the terminal's replies as byte values, or pass them to :on-reply."
   (let ((handler (get term :on-reply)))
     (if handler
         (handler data len)
-        (dotimes (i len)
-          (push! (term :replies) (ffi/ref data 'u8 i))))))
+        (let ((bytes (ffi/read-bytes data len)))
+          (dotimes (i len)
+            (push! (term :replies) (bytevector-u8-ref bytes i)))))))
 
 (def (write-bytes! term data len)
   (%vt-write (term :handle) data len))
 
 (def (write! term text)
-  (let ((p (ffi/alloc-utf8 text)))
+  (let ((bytes (string->utf8 text))
+        (size (bytevector-length bytes))
+        (p (ffi/alloc 'u8 (max 1 size))))
     (defer
-      (let loop ((n 0))
-        (if (= 0 (ffi/ref p 'u8 n))
-            (write-bytes! term p n)
-            (loop (+ n 1))))
+      (begin
+        (ffi/write-bytes! p bytes)
+        (write-bytes! term p size))
       (ffi/free! p))))
 
 (def (resize! term cols rows cell-width cell-height)

@@ -815,7 +815,7 @@ condition to `var` and evaluates its forms as the result. No match means
 the condition keeps unwinding. The catch clauses are *not* active as
 signal-site handlers; `try` only intercepts conditions that are already
 unwinding. `catch` clauses are recognized as trailing forms whose head is
-the symbol `catch`; body forms must precede them.
+the symbol `catch`; body forms must precede them. `(catch var forms…)` matches any caught value and binds it to `var`, including values that are not condition tables.
 
 ### 8.7 `unwind-protect`
 
@@ -901,6 +901,14 @@ to float.
 | `(zero? n)` `(pos? n)` `(neg? n)` → bool | Sign tests (numeric). `positive?` and `negative?` alias `pos?` and `neg?`. |
 | `(even? n)` / `(odd? n)` → bool | Parity (ints). |
 
+`bitwise-and`, `bitwise-ior`, `bitwise-xor`, `bitwise-not`, and
+`bitwise-arithmetic-shift` follow the R6RS names and exact-integer semantics.
+AND, inclusive OR, and XOR accept any number of arguments; their empty results
+are -1, 0, and 0. NOT takes one argument. Arithmetic shift takes an integer and
+a signed bit count: positive shifts left, negative shifts right with sign
+extension. Chez supports arbitrary precision; C raises an error when a left
+shift exceeds its integer range.
+
 ### 10.2 Predicates
 
 `(not x)` → `#t` iff `x` is falsy.
@@ -930,10 +938,10 @@ table, string, buffer; other types error.
 | `(set-car! p v)` / `(set-cdr! p v)` → p | Mutate a pair. Cycles and mutation of pairs frozen as table keys are errors. |
 | `(caar p)` `(cadr p)` `(cddr p)` … `(cadddr p)` | Compositions, up to three levels plus `cadddr`. |
 | `(list-ref l k)` / `(list-tail l k)` | Element at, or tail after, index `k`; out of range is an error. |
-| `(memq x l)` / `(member x l)` | First tail whose car is `eq?` / `equal?` to `x`, or `#f`. |
-| `(assq k al)` / `(assoc k al)` | First pair in an alist whose car is `eq?` / `equal?` to `k`, or `#f`. |
+| `(memq x l)` / `(member x l)` | First tail whose car is `eq?` / `equal?` to `x`, or `nil`. |
+| `(assq k al)` / `(assoc k al)` | First pair in an alist whose car is `eq?` / `equal?` to `k`, or `nil`. |
 | `(fold-left f init l…)` / `(fold-right f init l…)` | Combine across one or more lists, from the left or the right. |
-| `(exists f l…)` / `(for-all f l…)` | First truthy result, or `#f`; last result if all are truthy, else the first falsy one. |
+| `(exists f l…)` / `(for-all f l…)` | First truthy result, or `nil`; last result if all are truthy, else the first falsy one. |
 | `(list x…)` → list | |
 | `(append list…)` → list | Concatenation; arguments must be proper lists. |
 | `(length coll)` → int | Elements of a list, array, table (entries), string or buffer (characters). Improper lists and other types error. |
@@ -1102,6 +1110,12 @@ Params are made and bound by the special forms `defparam` and
 | `(dotimes (i n) body…)` | `i` from 0 below `n`. |
 
 ---
+
+`(case expression ((literal ...) body ...) ... (else body ...))` evaluates
+expression once and compares it with unevaluated literal datums using `equal?`.
+The first matching clause runs and returns its last expression. Without a match,
+the result is `nil`. An optional `else` must be last. Use `match` for destructuring.
+
 
 ## Appendix A: implementation limits and latitude
 

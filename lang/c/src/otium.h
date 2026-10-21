@@ -751,6 +751,8 @@ static inline bool ot_has_type(otv value, ot_obj_type type) {
 
 static inline size_t ot_object_size(otv value) { return (size_t)(ot_as_obj(value)->header >> 8u); }
 
+OT_GC_MAY_ALLOCATE otv ot_make_bytevector(ots* state, size_t length);
+
 OT_GC_MAY_ALLOCATE void* ot_alloc(ots* state, size_t size, ot_obj_type type);
 
 /* Host memory is zeroed. */

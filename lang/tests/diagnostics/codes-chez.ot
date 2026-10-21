@@ -7,7 +7,7 @@
     (begin
       (thunk)
       nil)
-    (catch ((fn (_) #t) c) (and (table? c) (get c :code)))))
+    (catch c (and (table? c) (get c :code)))))
 
 (defmacro forever (x)
   (list 'forever x))

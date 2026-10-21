@@ -41,11 +41,11 @@
 (check 'cleanup
        (try
          (with ((a (resource/own 1 (fn (_) (error 'cleanup))))) (error 'primary))
-         (catch ((fn (_) #t) c) c)))
+         (catch c c)))
 (check 'cleanup
        (try
          (with ((a (resource/own 1 (fn (_) (error 'cleanup))))) 42)
-         (catch ((fn (_) #t) c) c)))
+         (catch c c)))
 (set! events [])
 (check :restarted (restart-case (with ((a (recording :restart))) (invoke-restart 'leave)) (leave () :restarted)))
 (check [:restart] events)
@@ -107,7 +107,7 @@
 (check 'step
        (try
          (sql/execute! db insert)
-         (catch ((fn (_) #t) c) (get c :operation))))
+         (catch c (get c :operation))))
 
 (with ((transaction (sql/transaction db))) (sql/execute! db (sql/insert-into :users [:name :age] ["Carol" 28])))
 (check [[3]] (sql/execute! db (sql/select [(count :*)] (from :users))))
@@ -116,7 +116,7 @@
          (with ((transaction (sql/transaction db)))
                (sql/execute! db (sql/insert-into :users [:name] ["Dan"]))
                (error 'rollback))
-         (catch ((fn (_) #t) c) c)))
+         (catch c c)))
 (check [[3]] (sql/execute! db (sql/select [(count :*)] (from :users))))
 (check :left (restart-case (with ((transaction (sql/transaction db)))
                                  (sql/execute! db (sql/insert-into :users [:name] ["Eve"]))
@@ -157,7 +157,7 @@
 (check 'step
        (try
          (with ((statement (sql/prepare db insert))) (sql/step! statement))
-         (catch ((fn (_) #t) c) (get c :operation))))
+         (catch c (get c :operation))))
 
 (sql/execute! db (sql/raw "PRAGMA foreign_keys = ON"))
 (sql/execute! db (sql/raw "create table parent(id primary key)"))
@@ -174,7 +174,7 @@
 (check 'inner-cleanup
        (try
          (with ((a (recording :outer)) (b (resource/own :inner (fn (_) (error 'inner-cleanup))))) nil)
-         (catch ((fn (_) #t) c) c)))
+         (catch c c)))
 (check [:outer] events)
 
 (def live (sql/prepare db (sql/raw "select name from users order by id")))

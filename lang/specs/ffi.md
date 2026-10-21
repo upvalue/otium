@@ -326,6 +326,9 @@ null to `#f`. The adapter normalizes these to and from Otium's dedicated null.
 | `(ffi/field-view p T path)` | Returns a view of an aggregate, array, or field, retaining the containing allocation. |
 | `(ffi/offset-of T path)` | Returns a field's byte offset. |
 | `(ffi/copy! dst src bytes)` | Overlap-safe native memory copy; returns `#f`. |
+| `(ffi/read-bytes p count)` | Copy exactly count bytes into a new bytevector. |
+| `(ffi/write-bytes! p bytes [start [end]])` | Copy a bytevector's half-open source range into native memory; returns `#f`. |
+| `(ffi/read-utf8-bytes p count)` | Decode exactly count bytes, including embedded NULs; reject invalid UTF-8. |
 | `(ffi/read-utf8 p max-bytes)` | Copies through the first NUL within the bound; errors if none exists. |
 
 Counts/indices are nonnegative exact integers. Arithmetic overflow is an error.

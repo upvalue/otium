@@ -218,7 +218,7 @@ static otv port_write_bytes(ots* s, otv value, otv bytes, size_t start, size_t e
     size_t capacity = as_bytevector(p->buffer)->length;
     if (p->end == capacity) {
       if (p->kind == PORT_STRING || p->kind == PORT_BYTES) {
-        otv grown = make_bytevector(s, capacity * 2);
+        otv grown = ot_make_bytevector(s, capacity * 2);
         p = as_port(value);
         memcpy(as_bytevector(grown)->data, as_bytevector(p->buffer)->data, p->end);
         ot_store(s, p, &p->buffer, grown);
@@ -248,7 +248,7 @@ static otv port_output(ots* s, otv p, otv* args, int argc, bool display, bool ne
     buf_free(&text);
     return ot_raise(s, "output: out of memory");
   }
-  otv bytes = make_bytevector(s, text.length);
+  otv bytes = ot_make_bytevector(s, text.length);
   memcpy(as_bytevector(bytes)->data, text.data, text.length);
   buf_free(&text);
   return port_write_bytes(s, p, bytes, 0, as_bytevector(bytes)->length);
@@ -363,7 +363,7 @@ static otv port_open_file(ots* s, otv* a, int n, bool input) {
         return ot_raise(s, "open-output-file: invalid :if-exists");
     }
   }
-  buffer = make_bytevector(s, capacity);
+  buffer = ot_make_bytevector(s, capacity);
   const char* bytes;
   size_t length;
   ot_string_bytes(path, &bytes, &length);
@@ -393,7 +393,7 @@ static otv port_memory(ots* s, otv* a, int n, unsigned kind) {
     if (is_type(buffer, OBJ_STRING)) buffer = nat_string_utf8(s, &buffer, 1);
     else if (is_type(buffer, OBJ_BYTEVECTOR)) buffer = nat_bytevector_copy(s, &buffer, 1);
     else return ot_raise(s, "open-input-port: expected string or bytevector");
-  } else buffer = make_bytevector(s, 256);
+  } else buffer = ot_make_bytevector(s, 256);
   if (buffer == OT_UNWIND) return buffer;
   const char* label = kind == PORT_STRING ? "string" : "bytevector";
   name = ot_make_string(s, label, strlen(label));
@@ -467,7 +467,7 @@ static otv n_write_u8(ots* s, otv* a, int n) {
   otv p = port_optional(s, a, n, 1, false);
   OT_FRAME_SCOPED(s, &p);
   unsigned char byte = (unsigned char)ot_get_int(a[0]);
-  otv bytes = make_bytevector(s, 1);
+  otv bytes = ot_make_bytevector(s, 1);
   as_bytevector(bytes)->data[0] = byte;
   return port_write_bytes(s, p, bytes, 0, 1);
 }
@@ -508,7 +508,7 @@ static otv n_read_bytes(ots* s, otv* a, int n) {
   size_t size = (size_t)ot_get_int(a[0]);
   otv p = port_optional(s, a, n, 1, true), bytes = ot_nil;
   OT_FRAME_SCOPED(s, &p, &bytes);
-  bytes = make_bytevector(s, size);
+  bytes = ot_make_bytevector(s, size);
   otv got = port_read_into(s, bytes, p, 0, size);
   if (got == OT_UNWIND || got == ot_eof) return got;
   if ((size_t)ot_get_int(got) == size) return bytes;
@@ -629,7 +629,7 @@ static otv port_custom(ots* s, otv* a, int n, bool input) {
     if ((i == 0 || !is_falsy(f)) && ot_value_type(f) != OT_TYPE_FUNCTION)
       return ot_raise(s, "make-port: expected callback procedure");
   }
-  buffer = make_bytevector(s, 4096);
+  buffer = ot_make_bytevector(s, 4096);
   return port_new(s, name, input, PORT_CUSTOM, 0, buffer, callbacks);
 }
 
@@ -882,7 +882,7 @@ static otv port_param(ots* s, const char* name, const char* label, bool input, u
                       intptr_t handle) {
   otv symbol = ot_intern(s, name, strlen(name), false), value = ot_nil, buffer = ot_nil;
   OT_FRAME_SCOPED(s, &symbol, &value, &buffer);
-  buffer = make_bytevector(s, 4096);
+  buffer = ot_make_bytevector(s, 4096);
   value = ot_make_string(s, label, strlen(label));
   value = port_new(s, value, input, kind, handle, buffer, ot_nil);
   ot_param_obj* param = must_alloc(s, sizeof(*param), OBJ_PARAM);

@@ -20,7 +20,7 @@
     found))
 
 (def (rule-named name)
-  (or (find (fn (rule) (equal? (rule :name) name)) rules) nil))
+  (find (fn (rule) (equal? (rule :name) name)) rules))
 
 ;; --- context ---------------------------------------------------------------------
 
@@ -432,8 +432,15 @@
                (for-each (fn (part)
                            (if (and (pair? part) (eq? (car part) 'catch))
                                (let ((guard (second part)))
-                                 (walk-form walk scope (first guard))
-                                 (walk-body walk (bind walk scope (second guard) :catch) (cdr (cdr part))))
+                                 (unless (symbol? guard) (walk-form walk scope (first guard)))
+                                 (walk-body walk
+                                            (bind walk
+                                                  scope
+                                                  (if (symbol? guard)
+                                                      guard
+                                                      (second guard))
+                                                  :catch)
+                                            (cdr (cdr part))))
                                (walk-form walk scope part)))
                          (proper (cdr x))))
               ((eq? head 'restart-case)
@@ -549,7 +556,7 @@
   ;; failed require turns the unbound-name rule off for the file.
   (try
     (thunk)
-    (catch ((fn (_) #t) problem)
+    (catch problem
       (put! context :require-failed #t)
       (error problem))))
 
@@ -597,7 +604,7 @@
         (expanded (map (fn (node)
                          (try
                            (prepare context space node)
-                           (catch ((fn (_) #t) problem)
+                           (catch problem
                              (report! context
                                       "expansion-failed"
                                       node

@@ -1,7 +1,8 @@
 ;; Writes a marker, then spins until interrupted. SIGINT must pass handlers
 ;; and catch clauses but run cleanup, which prints 9.
 ;; Run with --load tests/conditions/support.ot.
-(def (spin) (spin))
+(def (spin)
+  (spin))
 
 (def (doubled text times)
   (if (= times 0)
@@ -15,4 +16,4 @@
         (display (doubled "x" 15))
         (spin))
       (test-print 9))
-    (catch ((fn (c) #t) c) (test-print 998))))
+    (catch c (test-print 998))))

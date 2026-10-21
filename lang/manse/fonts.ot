@@ -29,7 +29,9 @@
 
 (def- (font-file? path)
   (let ((lower (string-downcase path)))
-    (exists (fn (ext) (string-ends-with? lower ext)) '(".ttf" ".otf" ".ttc" ".otc"))))
+    (if (exists (fn (ext) (string-ends-with? lower ext)) '(".ttf" ".otf" ".ttc" ".otc"))
+        #t
+        #f)))
 
 (def (discover . roots)
   "List font files recursively in standard directories, or an explicit list of directories."

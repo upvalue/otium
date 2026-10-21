@@ -323,7 +323,7 @@ Corrected:
 
 Condition type `:syntax-error`.
 
-`try` takes body expressions followed by `(catch (predicate name) body ...)` clauses. Catch clauses must come after every body expression.
+`try` takes body expressions followed by `(catch (predicate name) body ...)` or `(catch name body ...)` clauses. Catch clauses must come after every body expression.
 
 Example:
 

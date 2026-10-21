@@ -8,12 +8,11 @@
     (begin
       (thunk)
       nil)
-    (catch ((fn (_) #t) c) c)))
+    (catch c c)))
 
 (def (code-of source)
   ;; The :code of the condition raised by reading and evaluating source.
-  (let ((c (raised (fn () (eval (read-string source))))))
-    (and (table? c) (get c :code))))
+  (let ((c (raised (fn () (eval (read-string source)))))) (and (table? c) (get c :code))))
 
 (for-each (fn (case) (check (first case) (first case) (code-of (second case))))
           '(("E0001" "(def (f x)")

@@ -843,6 +843,47 @@ static otv n_copy(ots* s, otv* a, int n) {
   return ot_false;
 }
 
+static otv n_read_bytes(ots* s, otv* a, int n) {
+  ARITY(2, "read-bytes");
+  pointer p;
+  size_t count_bytes;
+  if (!ptr(s, a[0], &p, "read-bytes") || !count(s, a[1], &count_bytes, "read-bytes") ||
+      !span(s, p, 0, count_bytes, 1, "read-bytes"))
+    return OT_UNWIND;
+  otv result = ot_make_bytevector(s, count_bytes);
+  memcpy(((ot_bytevector_obj*)ot_as_obj(result))->data, p.address, count_bytes);
+  return result;
+}
+
+static otv n_write_bytes(ots* s, otv* a, int n) {
+  if (n < 2 || n > 4)
+    return fail(s, "write-bytes!", "arity", "expected pointer, bytes, optional start and end");
+  if (!ot_has_type(a[1], OBJ_BYTEVECTOR))
+    return fail(s, "write-bytes!", "type", "expected bytevector");
+  size_t size = ((ot_bytevector_obj*)ot_as_obj(a[1]))->length;
+  size_t start = 0, end = size;
+  pointer p;
+  if ((n > 2 && !count(s, a[2], &start, "write-bytes!")) ||
+      (n > 3 && !count(s, a[3], &end, "write-bytes!")))
+    return OT_UNWIND;
+  if (start > end || end > size) return fail(s, "write-bytes!", "bounds", "invalid byte range");
+  if (!ptr(s, a[0], &p, "write-bytes!") || !span(s, p, 0, end - start, 1, "write-bytes!"))
+    return OT_UNWIND;
+  memcpy(p.address, ((ot_bytevector_obj*)ot_as_obj(a[1]))->data + start, end - start);
+  return ot_false;
+}
+
+static otv n_read_utf8_bytes(ots* s, otv* a, int n) {
+  ARITY(2, "read-utf8-bytes");
+  pointer p;
+  size_t bytes;
+  if (!ptr(s, a[0], &p, "read-utf8-bytes") || !count(s, a[1], &bytes, "read-utf8-bytes") ||
+      !span(s, p, 0, bytes, 1, "read-utf8-bytes"))
+    return OT_UNWIND;
+  if (!offi_utf8(p.address, bytes)) return fail(s, "read-utf8-bytes", "encoding", "invalid UTF-8");
+  return ot_make_string(s, p.address, bytes);
+}
+
 static otv n_read(ots* s, otv* a, int n) {
   ARITY(2, "read-utf8");
   pointer p;
@@ -1300,6 +1341,9 @@ static void module(ots* s) {
                    {"%ref", n_ref},
                    {"%set!", n_set},
                    {"copy!", n_copy},
+                   {"read-bytes", n_read_bytes},
+                   {"write-bytes!", n_write_bytes},
+                   {"read-utf8-bytes", n_read_utf8_bytes},
                    {"read-utf8", n_read},
                    {"alloc-utf8", n_alloc_string},
                    {"allocation-count", n_stats},

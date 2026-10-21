@@ -63,17 +63,17 @@ Returns true when the hovered nodes changed."
 (def (dispatch! pointer tree event)
   "Route logical-coordinate pointer events through the current laid-out tree."
   (let ((kind (get event :kind)))
-    (cond
-      ((eq? kind :pointer-cancel) (cancel! pointer))
-      ((eq? kind :wheel) (bubble! (hit-path tree (get event :x) (get event :y)) event))
-      ((eq? kind :pointer-leave) (set! (pointer :x) nil) (set! (pointer :y) nil) (refresh-hover! pointer tree))
-      ((memq kind '(:pointer-move :pointer-drag))
+    (case kind
+      ((:pointer-cancel) (cancel! pointer))
+      ((:wheel) (bubble! (hit-path tree (get event :x) (get event :y)) event))
+      ((:pointer-leave) (set! (pointer :x) nil) (set! (pointer :y) nil) (refresh-hover! pointer tree))
+      ((:pointer-move :pointer-drag)
        (set! (pointer :x) (get event :x))
        (set! (pointer :y) (get event :y))
        (refresh-hover! pointer tree)
        (let ((node (pointer :captured)))
          (when (and node (ui/enabled? node) (node :pressed?)) (ui/send! node (put event :kind :pointer-drag)))))
-      ((eq? kind :pointer-down)
+      ((:pointer-down)
        (cancel! pointer)
        (ui/cancel-key! tree)
        (set! (pointer :captured) (bubble! (hit-path tree (get event :x) (get event :y)) event))
@@ -81,7 +81,7 @@ Returns true when the hovered nodes changed."
          (when node
            (set! (node :pressed?) #t)
            (when (ui/focusable? node) (ui/focus! tree node)))))
-      ((eq? kind :pointer-up)
+      ((:pointer-up)
        (let ((node (pointer :captured))
              (armed? (and node (node :pressed?))))
          (set! (pointer :captured) nil)

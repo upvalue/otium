@@ -88,9 +88,6 @@
               :running)
    :event event-count})
 
-(def- (any? _c)
-  #t)
-
 (def- (condition-data c)
   (if (table? c)
       {:type (get c :type 'error)
@@ -116,7 +113,7 @@
             (unless (and (table? request) (get request :op) (not (eq? (get request :id '%missing) '%missing)))
               (error "expected a request table with :id and :op"))
             (set! pending (append pending (list (list client request)))))
-          (catch (any? c) (reply! client {:id #f :ok #f :condition (condition-data c) :output ""}))))
+          (catch c (reply! client {:id #f :ok #f :condition (condition-data c) :output ""}))))
       (loop (%next)))))
 
 (def (begin!)
@@ -207,7 +204,7 @@
          (set! action op)
          (reply! client {:id id :ok #t :value "nil" :output ""}))
         (else (error "unknown dev operation" op)))
-      (catch (any? c) (reply! client {:id id :ok #f :condition (condition-data c) :output ""})))))
+      (catch c (reply! client {:id id :ok #f :condition (condition-data c) :output ""})))))
 
 (def- (serve-one!)
   (let ((entry (car pending)))
@@ -303,8 +300,8 @@
       ((and mask (not (= mask 0)))
        (let loop ((bits mask)
                   (required 0))
-         (if (= (modulo bits 2) 0)
-             (loop (quotient bits 2) (+ required 1))
+         (if (= (bitwise-and bits 1) 0)
+             (loop (bitwise-arithmetic-shift bits -1) (+ required 1))
              (put result :arity required :variadic (< mask 0)))))
       (else result))))
 
@@ -352,18 +349,18 @@
                           target))))))
 
 (def (source name)
-  "Return {:file :line} for the first top-level definition of a qualified name, or #f. Lines count from 1."
+  "Return {:file :line} for the first top-level definition of a qualified name, or nil. Lines count from 1."
   (let ((parts (split-name name))
         (entry (find (fn (e) (eq? (get e :name) (car parts))) (namespace-entries)))
-        (file (and entry (get entry :file #f))))
+        (file (and entry (get entry :file nil))))
     (if file
-        (let ((found #f))
+        (let ((found nil))
           (for-each (fn (node)
                       (when (and (not found) (defines? (node :form) (cadr parts)))
                         (set! found {:file file :line (node :line)})))
                     (source-forms (read-file file)))
           found)
-        #f)))
+        nil)))
 
 (def (stale-files)
   "Return the files of loaded namespaces that have changed since they were loaded."

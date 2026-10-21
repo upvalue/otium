@@ -26,7 +26,9 @@
   (apply list (g/text term)))
 
 (def (screen-has? s)
-  (exists (fn (row) (string-contains? row s)) (screen)))
+  (if (exists (fn (row) (string-contains? row s)) (screen))
+      #t
+      #f))
 
 (check "child output" #t (pump-until (fn () (screen-has? "READY")) 5000))
 (for-each (fn (row) (unless (equal? (string-trim row) "") (println "| " row))) (screen))

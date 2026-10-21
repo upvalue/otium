@@ -87,7 +87,11 @@ which makes a short event sequence deterministic and easy to inspect.
 
 `ui/row` and `ui/column` accept `:width`, `:height`, `:grow`, `:padding`,
 `:padding-x`, `:padding-y`, `:gap`, `:align-items`, `:background`, `:border`
-and `:radius`. Width and height default to automatic size. `:padding-x` and
+and `:radius`, plus optional `:hover` and `:on-press`. Both constructors make
+`ui/Box` instances, setting `:direction` to `:row` or `:column`. A box with
+`:on-press` handles pointer presses over itself or its children; boxes without
+a handler remain noninteractive. `:hover` supplies the hovered background color.
+Width and height default to automatic size. `:padding-x` and
 `:padding-y` override `:padding` on one axis. `:align-items` places children
 across the main axis: `:stretch` (default), `:start`, `:center` or `:end`.
 `:border` paints a one-pixel border in the given colour; without a background

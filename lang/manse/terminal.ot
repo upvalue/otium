@@ -69,12 +69,15 @@
     (list (/ (get positions 10) 10) (/ (native/text-size run native/TEXT_HEIGHT) scale))))
 
 (def (rgba rgb alpha)
-  (+ (* (car rgb) 16777216) (* (cadr rgb) 65536) (* (caddr rgb) 256) alpha))
+  (bitwise-ior (bitwise-arithmetic-shift (car rgb) 24)
+               (bitwise-arithmetic-shift (cadr rgb) 16)
+               (bitwise-arithmetic-shift (caddr rgb) 8)
+               alpha))
 
 (def (key! session event)
   (let ((bytes (keyboard/encode (session :term) event)))
     (when bytes
-      (unless (null? bytes) (pty/write-bytes! (session :pty) bytes))
+      (unless (= (bytevector-length bytes) 0) (pty/write-bytes! (session :pty) bytes))
       :handled)))
 
 ;; The widget

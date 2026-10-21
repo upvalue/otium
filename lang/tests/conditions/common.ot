@@ -1,9 +1,6 @@
 ;; Run with --load tests/conditions/support.ot.
 (require otium.test :refer (check fails? report))
 
-(def (any? c)
-  #t)
-
 (def events '())
 
 (def (record x)
@@ -13,7 +10,7 @@
        7
        (try
          7
-         (catch (any? c) 'wrong)))
+         (catch c 'wrong)))
 (check 'message
        "boom"
        (try
@@ -33,12 +30,12 @@
        'value
        (try
          (error 'value)
-         (catch (any? c) c)))
+         (catch c c)))
 (check 'false-condition
        #f
        (try
          (error #f)
-         (catch (any? c) c)))
+         (catch c c)))
 (check 'signal-unhandled test-nil (signal 'unhandled))
 (check 'error-extra #t (fails? (fn () (error 'value 1))))
 (check 'signal-extra #t (fails? (fn () (signal 'value 1))))
@@ -48,47 +45,48 @@
        (try
          (error 'x)
          (catch ((fn (c) #f) c) 'first)
-         (catch (any? c) 'second)))
+         (catch c 'second)))
 (check 'unmatched
        'x
        (try
          (try
            (error 'x)
            (catch ((fn (c) #f) c) 'wrong))
-         (catch (any? c) c)))
+         (catch c c)))
 (check 'catch-raises
        'second
        (try
          (try
            (error 'first)
-           (catch (any? c) (error 'second)))
-         (catch (any? c) c)))
+           (catch c (error 'second)))
+         (catch c c)))
 
 (set! events '())
-(handler-bind ((any? (fn (c) (record 'outer))))
-  (handler-bind ((any? (fn (c)
-                         (record 'inner)
-                         (signal 'nested))))
+(handler-bind (((fn (_) #t) (fn (c) (record 'outer))))
+  (handler-bind (((fn (_) #t)
+                  (fn (c)
+                    (record 'inner)
+                    (signal 'nested))))
     (try
       (error 'original)
-      (catch (any? c) (record 'catch)))))
+      (catch c (record 'catch)))))
 (check 'mask-and-decline
        '(catch outer
           outer
           inner)
        events)
 (set! events '())
-(handler-bind ((any? (fn (c) (record 'surrounding))))
+(handler-bind (((fn (_) #t) (fn (c) (record 'surrounding))))
   (handler-bind (((begin
                     (record 'predicate-one)
-                    any?)
+                    (fn (_) #t))
                   (begin
                     (record 'handler-one)
                     (fn (c) (record 'one))))
                  ((begin
                     (record 'predicate-two)
                     (signal 'initializer)
-                    any?)
+                    (fn (_) #t))
                   (begin
                     (record 'handler-two)
                     (fn (c) (record 'two)))))
@@ -98,13 +96,13 @@
        events)
 
 (set! events '())
-(handler-bind ((any? (fn (c) (record c))))
+(handler-bind (((fn (_) #t) (fn (c) (record c))))
   (try
-    (handler-bind ((any? (fn (c) #f)))
+    (handler-bind (((fn (_) #t) (fn (c) #f)))
       (try
         (error 'once)
         (catch ((fn (c) #f) c) 'wrong)))
-    (catch (any? c) #f)))
+    (catch c #f)))
 (check 'signal-once '(once) events)
 
 (check 'restart-normal 3 (restart-case (+ 1 2) (use-value (v) v)))
@@ -178,7 +176,7 @@
       (error 'x)
       (record 'inner))
     (record 'outer))
-  (catch (any? c) (record 'caught)))
+  (catch c (record 'caught)))
 (check 'cleanup-order '(caught outer inner) events)
 (check 'cleanup-value
        7
@@ -200,7 +198,7 @@
          (unwind-protect
            (error 'original)
            (error 'cleanup))
-         (catch (any? c) c)))
+         (catch c c)))
 (check 'cleanup-replaces-restart
        'cleanup
        (try
@@ -208,7 +206,7 @@
                          (invoke-restart 'give)
                          (error 'cleanup))
            (give () 'wrong))
-         (catch (any? c) c)))
+         (catch c c)))
 (set! events '())
 (check 'restart-cleanup
        5

@@ -7,16 +7,25 @@
 (require chez)
 
 (for-each (fn (fixture) (check (car fixture) #t (pair? (otium.reader/tokens (car fixture))))) datums/positive)
-(for-each
-  (fn (text)
-    (unless (member text '("" "; only" "1 2"))
-      (check text #t (fails? (fn () (otium.reader/tokens text))))))
-  datums/negative)
-(check #f (exists (fn (x) nil) '(1 2)))
+(for-each (fn (text)
+            (unless (member text '("" "; only" "1 2")) (check text #t (fails? (fn () (otium.reader/tokens text))))))
+          datums/negative)
+(check nil (exists (fn (x) nil) '(1 2)))
 (check nil (for-all (fn (x) nil) '(1 2)))
-(check 7 (exists (fn (x) (if (= x 2) 7 nil)) '(1 2 3)))
+(check 7
+       (exists (fn (x)
+                 (if (= x 2)
+                     7
+                     nil))
+               '(1 2 3)))
 (check 8 (for-all (fn (x) 8) '(1 2)))
-(check 3 (let ((n 0)) (while (if (= n 3) nil #t) (set! n (+ n 1))) n))
+(check 3
+       (let ((n 0))
+         (while (if (= n 3)
+                    nil
+                    #t)
+           (set! n (+ n 1)))
+         n))
 (check 8 (chez/if (chez/void) 8 9))
 (check '(:a nil) (chez/case 1 ((1) '(:a nil)) (else #f)))
 (check '(:a nil) (chez/let-values (((x y) (chez/values ':a 'nil))) (list x y)))

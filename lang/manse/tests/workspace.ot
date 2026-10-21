@@ -23,7 +23,9 @@
 (def nodes nil)
 
 (def (has? session text)
-  (exists (fn (row) (string-contains? row text)) (apply list (g/text (session :term)))))
+  (if (exists (fn (row) (string-contains? row text)) (apply list (g/text (session :term))))
+      #t
+      #f))
 
 (def (wait-for predicate)
   (let ((deadline (+ (current-jiffy) 5000000000)))

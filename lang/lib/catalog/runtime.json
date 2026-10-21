@@ -1032,7 +1032,7 @@
     ]
   },
   "try": {
-    "text": "(try body ... (catch (predicate name) handler-body ...) ...)\nCatch an unwinding condition using the first matching predicate. quit is not caught.",
+    "text": "(try body ... (catch (predicate name) handler-body ...) ...)\nCatch an unwinding condition using the first matching predicate. (catch name body ...) catches any condition. quit is not caught.",
     "runtimes": [
       "c",
       "chez"
@@ -1844,6 +1844,41 @@
   },
   "open-binary-output-file": {
     "text": "(open-binary-output-file path [options])\nAlias for open-output-file; all ports support byte and text writes.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "bitwise-and": {
+    "text": "(bitwise-and integer ...)\nBitwise AND of exact integers; no arguments gives -1.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "bitwise-ior": {
+    "text": "(bitwise-ior integer ...)\nBitwise inclusive OR of exact integers; no arguments gives 0.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "bitwise-xor": {
+    "text": "(bitwise-xor integer ...)\nBitwise exclusive OR of exact integers; no arguments gives 0.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "bitwise-not": {
+    "text": "(bitwise-not integer)\nComplement the bits of one exact integer.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "bitwise-arithmetic-shift": {
+    "text": "(bitwise-arithmetic-shift integer count)\nShift an exact integer left by count bits, or right with sign extension for a negative count. C raises an error if the result exceeds its integer range.",
     "runtimes": [
       "c",
       "chez"

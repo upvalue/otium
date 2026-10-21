@@ -77,22 +77,11 @@
   (fill :init #f)
   (color :init :text))
 
-(defclass Column
+(defclass Box
   :is Widget
-  (width :init -1)
-  (height :init -1)
-  (grow :init 0)
-  (padding :init 0)
-  (padding-x :init nil)
-  (padding-y :init nil)
-  (align-items :init :stretch)
-  (gap :init 0)
-  (background :init nil)
-  (border :init nil)
-  (radius :init 0))
-
-(defclass Row
-  :is Widget
+  (direction :init :column)
+  (hover :init nil)
+  (on-press :init nil)
   (width :init -1)
   (height :init -1)
   (grow :init 0)
@@ -194,11 +183,9 @@
    :gap (w :gap)
    :row row?})
 
-(defmethod (layout-style (w Column))
-  (box-style w #f))
-
-(defmethod (layout-style (w Row))
-  (box-style w #t))
+(defmethod (layout-style (w Box))
+  (unless (memq (w :direction) '(:row :column)) (error "Box: direction must be :row or :column"))
+  (box-style w (eq? (w :direction) :row)))
 
 (defgeneric (build widget))
 
@@ -262,6 +249,12 @@
 (defmethod (handle-event (w Widget) event)
   nil)
 
+(defmethod (handle-event (w Box) event)
+  (when (w :on-press)
+    (case (get event :kind)
+      ((:press) ((w :on-press)) :handled)
+      ((:pointer-down :pointer-up) :handled))))
+
 (defmethod (handle-event (w Button) event)
   (cond
     ((eq? (get event :kind) :press)
@@ -306,10 +299,10 @@
   (new Label (put opts :text text)))
 
 (def (row opts . children)
-  (apply new Row opts children))
+  (apply new Box (put opts :direction :row) children))
 
 (def (column opts . children)
-  (apply new Column opts children))
+  (apply new Box (put opts :direction :column) children))
 
 (def (button opts . children)
   (apply new Button opts children))

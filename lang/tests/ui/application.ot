@@ -52,7 +52,7 @@
     (set! icon-ok? #f)
     (try
       (window/present-window! 'window {:icon "icon.png"})
-      (catch ((fn (c) #t) c) (set! failed? #t)))
+      (catch c (set! failed? #t)))
     (check #t failed?)
     (check '((load "icon.png") (icon window #t) (destroy #t)) (array-to-list calls)))
   (ffi/free! surface))

@@ -88,6 +88,25 @@
        nil
        (begin ,@body)))
 
+(def- (case-clauses value clauses)
+  (if (null? clauses)
+      '()
+      (let ((clause (car clauses)))
+        (unless (and (list? clause) (pair? clause)) (error "case: expected a clause" clause))
+        (let ((alternatives (car clause)))
+          (if (eq? alternatives 'else)
+              (begin
+                (unless (null? (cdr clauses)) (error "case: else must be last"))
+                (list clause))
+              (begin
+                (unless (list? alternatives) (error "case: expected literal alternatives" alternatives))
+                (cons (cons (cons 'or (map (fn (datum) `(equal? ,value ',datum)) alternatives)) (cdr clause))
+                      (case-clauses value (cdr clauses)))))))))
+
+(defmacro case (expression . clauses)
+  "(case expression ((literal ...) body ...) ... (else body ...))\nEvaluate expression once and run the first equal? literal clause. Return nil if none matches."
+  (let ((value (gensym "case"))) `(let ((,value ,expression)) (cond ,@(case-clauses value clauses)))))
+
 (defmacro dotimes (spec . body)
   "(dotimes (index count) body ...)\nEvaluate count once, then run body with index from 0 below count. Return nil."
   (let ((sp (if (eq? (car spec) 'array)
@@ -235,15 +254,15 @@
     (builder-finish out)))
 
 (def (find pred seq)
-  "Return the first matching element, or #f. Stop at the first match."
+  "Return the first matching element, or nil. Stop at the first match."
   (cond
     ((array? seq)
      (let loop ((i 0))
        (cond
-         ((= i (length seq)) #f)
+         ((= i (length seq)) nil)
          ((pred (get seq i)) (get seq i))
          (else (loop (+ i 1))))))
-    ((or (nil? seq) (null? seq)) #f)
+    ((or (nil? seq) (null? seq)) nil)
     ((pair? seq)
      (if (pred (car seq))
          (car seq)
@@ -779,35 +798,35 @@
         (error "list-ref: index out of range"))))
 
 (def (memq x lst)
-  "(memq value list)\nThe first tail of list whose car is eq? to value, or #f."
+  "(memq value list)\nThe first tail of list whose car is eq? to value, or nil."
   (cond
-    ((not (pair? lst)) #f)
+    ((not (pair? lst)) nil)
     ((eq? x (car lst)) lst)
     (else (memq x (cdr lst)))))
 
 (def (member x seq)
-  "Return the first matching tail of a list or array, or #f."
+  "Return the first matching tail of a list or array, or nil."
   (if (array? seq)
       (let ((i (find-index (fn (value) (equal? x value)) seq)))
         (if i
             (drop i seq)
-            #f))
+            nil))
       (cond
-        ((not (pair? seq)) #f)
+        ((not (pair? seq)) nil)
         ((equal? x (car seq)) seq)
         (else (member x (cdr seq))))))
 
 (def (assq key alist)
-  "(assq key alist)\nThe first pair in alist whose car is eq? to key, or #f."
+  "(assq key alist)\nThe first pair in alist whose car is eq? to key, or nil."
   (cond
-    ((not (pair? alist)) #f)
+    ((not (pair? alist)) nil)
     ((eq? key (car (car alist))) (car alist))
     (else (assq key (cdr alist)))))
 
 (def (assoc key alist)
-  "(assoc key alist)\nThe first pair in alist whose car is equal? to key, or #f."
+  "(assoc key alist)\nThe first pair in alist whose car is equal? to key, or nil."
   (cond
-    ((not (pair? alist)) #f)
+    ((not (pair? alist)) nil)
     ((equal? key (car (car alist))) (car alist))
     (else (assoc key (cdr alist)))))
 
@@ -861,11 +880,11 @@
        sequences))
 
 (def (exists f seq & more)
-  "Return the first truthy predicate result across lists or arrays, or #f. Stop at the shortest input."
+  "Return the first truthy predicate result across lists or arrays, or nil. Stop at the shortest input."
   (let loop ((sequences (cons seq more))
              (i 0))
     (if (sequence-ended? sequences i)
-        #f
+        nil
         (or (apply f (sequence-heads sequences i)) (loop (sequence-tails sequences) (+ i 1))))))
 
 (def (for-all f seq & more)

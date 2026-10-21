@@ -282,7 +282,7 @@
       (for-each (fn (s)
                   (try
                     (resource/close s outcome)
-                    (catch ((fn (_) #t) c) (unless failure (set! failure c)))))
+                    (catch c (unless failure (set! failure c)))))
                 (db :statements))
       (let ((rc (raw/close (db :handle))))
         (if (= rc raw/OK)
@@ -307,8 +307,7 @@
                          (buffer (ffi/alloc 'u8 (max 1 size))))
                      (defer
                        (begin
-                         (dotimes (i size)
-                           (ffi/set! buffer 'u8 i (bytevector-u8-ref bytes i)))
+                         (ffi/write-bytes! buffer bytes)
                          (if (string? value)
                              (raw/bind-text statement index buffer size raw/TRANSIENT)
                              (raw/bind-blob statement index buffer size raw/TRANSIENT)))
@@ -356,7 +355,7 @@
                                              "")
                                (error "sql: expected one SQL statement"))
                              (bind! statement (compiled :parameters)))
-                           (catch ((fn (_) #t) c)
+                           (catch c
                              (resource/close statement c)
                              (error c))))))
       (ffi/free! source))))
@@ -371,9 +370,9 @@
                             (raw/column-text pointer index)
                             (raw/column-blob pointer index)))
                   (size (raw/column-bytes pointer index))
-                  (bytes (make-bytevector size)))
-              (dotimes (i size)
-                (bytevector-u8-set! bytes i (ffi/ref data 'u8 i)))
+                  (bytes (if (= size 0)
+                             (bytevector)
+                             (ffi/read-bytes data size))))
               (if (= kind raw/TEXT)
                   (utf8->string bytes)
                   bytes))))))
@@ -424,10 +423,10 @@
             (execute! db (raw "ROLLBACK"))
             (try
               (execute! db (raw "COMMIT"))
-              (catch ((fn (_) #t) c)
+              (catch c
                 (try
                   (execute! db (raw "ROLLBACK"))
-                  (catch ((fn (_) #t) _) nil))
+                  (catch _ nil))
                 (error c))))))))
 
 (defmacro select (columns . clauses)

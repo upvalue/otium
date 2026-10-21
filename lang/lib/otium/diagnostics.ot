@@ -78,7 +78,7 @@
   (try
     (let ((lines (string-split (read-file path) "\n")))
       (and (<= 1 line (length lines)) (string-replace (get lines (- line 1)) "\r" "")))
-    (catch ((fn (_) #t) _) nil)))
+    (catch _ nil)))
 
 (def- (snippet! out span label)
   (let ((line (span :line))

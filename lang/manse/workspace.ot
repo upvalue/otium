@@ -83,20 +83,21 @@
 
 (def (action! action)
   (let ((s (workspace :strip)))
-    (cond
-      ((pair? action) (strip/hint-type! s (cadr action)))
-      ((eq? action :cancel) (strip/hints-cancel! s))
-      ((eq? action :new) (new-terminal!))
-      ((eq? action :close) (put! workspace :closed-column? #t) (when (strip/focused s) (close-app! (strip/focused s))))
-      ((eq? action :left) (strip/focus-move! s -1))
-      ((eq? action :right) (strip/focus-move! s 1))
-      ((eq? action :move-left) (strip/column-move! s -1))
-      ((eq? action :move-right) (strip/column-move! s 1))
-      ((eq? action :widen) (strip/width-step! s 1))
-      ((eq? action :narrow) (strip/width-step! s -1))
-      ((eq? action :jump) (strip/hints-start! s))
-      ((eq? action :help) (put! workspace :help? (not (workspace :help?))))
-      (else nil))
+    (if (pair? action)
+        (strip/hint-type! s (cadr action))
+        (case action
+          ((:cancel) (strip/hints-cancel! s))
+          ((:new) (new-terminal!))
+          ((:close) (put! workspace :closed-column? #t) (when (strip/focused s) (close-app! (strip/focused s))))
+          ((:left) (strip/focus-move! s -1))
+          ((:right) (strip/focus-move! s 1))
+          ((:move-left) (strip/column-move! s -1))
+          ((:move-right) (strip/column-move! s 1))
+          ((:widen) (strip/width-step! s 1))
+          ((:narrow) (strip/width-step! s -1))
+          ((:jump) (strip/hints-start! s))
+          ((:help) (put! workspace :help? (not (workspace :help?))))
+          (else nil)))
     (invalidate!)
     :handled))
 
@@ -216,25 +217,24 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
         (body (apps/view (entry :app))))
     (set! (body :key) :body)
     (put! (body :options) :focus focused?)
-    (w/item {:key id
-             :cache #t
-             :animate-size #t
-             :column? #t
-             :align-items :stretch
-             :width (column-width (strip/width-of s id) viewport)
-             :padding-x 1
-             :padding-y 1
-             :radius 6
-             :background theme/background
-             :border (if focused?
-                         theme/accent
-                         theme/border-variant)
-             :on-press (fn ()
-                         (strip/focus! s id)
-                         (invalidate!))}
-            (header s entry focused?)
-            (ui/column {:height 1 :background theme/border-variant})
-            body)))
+    (ui/column {:key id
+                :cache #t
+                :animate-size #t
+                :align-items :stretch
+                :width (column-width (strip/width-of s id) viewport)
+                :padding-x 1
+                :padding-y 1
+                :radius 6
+                :background theme/background
+                :border (if focused?
+                            theme/accent
+                            theme/border-variant)
+                :on-press (fn ()
+                            (strip/focus! s id)
+                            (invalidate!))}
+               (header s entry focused?)
+               (ui/column {:height 1 :background theme/border-variant})
+               body)))
 
 (def (help)
   (ui/column {:width 360 :padding 16 :gap 10 :background theme/panel}

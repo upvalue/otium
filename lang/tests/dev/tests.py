@@ -322,7 +322,7 @@ def introspection(t):
     c.send(5, 'eval', code='(otium.dev/source (quote app.demo/greet))')
     t.check_in(':line 5}', c.response(5))
     c.send(6, 'eval', code='(otium.dev/source (quote app.demo/missing))')
-    t.check_in(':value "#f"', c.response(6))
+    t.check_in(':value "nil"', c.response(6))
     c.send(7, 'eval', code='(otium.dev/stale-files)')
     t.check_in(':value "()"', c.response(7))
     future = time.time() + 60
@@ -483,4 +483,4 @@ def source_forms(t):
         c.send(ident, 'eval', code="(dev/source 'app.forms/%s)" % name)
         t.check_in(':line %d}' % line, c.response(ident))
     c.send(5, 'eval', code="(dev/source 'app.forms/fake)")
-    t.check_in(':value "#f"', c.response(5))
+    t.check_in(':value "nil"', c.response(5))

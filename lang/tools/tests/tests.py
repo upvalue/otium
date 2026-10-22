@@ -59,7 +59,7 @@ def reference(t):
     """Every C native and special form is documented, and prelude definitions have docstrings."""
     source = (ROOT / 'c/src/otium.c').read_text()
     natives = source.split('static const nat_def core_nats[] = {')[1].split('};')[0]
-    ports = (ROOT / 'c/src/ot-ports.inc').read_text().split('static const nat_def port_natives[] = {')[1].split('};')[0]
+    ports = source.split('static const nat_def port_natives[] = {')[1].split('};')[0]
     natives += ports
     specials = source.split('static bool special_name(')[1].split('};')[0]
     required = set(re.findall(r'\{"([^"]+)"', natives))

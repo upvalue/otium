@@ -3483,7 +3483,101 @@ static otv append_values(ots* state, otv left, otv right) {
   return result;
 }
 
-#include "ot-records.inc"
+/* Fixed-layout records. Declaration identity is maintained by the Otium prelude. */
+static otv nat_make_record_type(ots* state, otv* args, int argc) {
+  if (argc != 3 || !is_type(args[0], OBJ_SYMBOL) || !proper_list(args[1]) ||
+      (args[2] != ot_true && args[2] != ot_false))
+    return ot_raise(state, "defrecord: expected name, field list and boolean immutability");
+  otv fields = args[1], keys = ot_nil, key = ot_nil;
+  OT_FRAME_SCOPED(state, &fields, &keys, &key);
+  keys = ot_array_new(state, list_length(fields));
+  while (is_type(fields, OBJ_PAIR)) {
+    otv field = as_pair(fields)->car;
+    if (!is_type(field, OBJ_SYMBOL)) return ot_raise(state, "defrecord: expected field symbol");
+    buf name = {0};
+    buf_write(&name, as_name(field)->bytes, as_name(field)->length);
+    if (name.failed) {
+      buf_free(&name);
+      return ot_raise(state, "defrecord: field name too large");
+    }
+    key = ot_intern(state, name.data, name.length, true);
+    buf_free(&name);
+    for (size_t i = 0; i < ot_array_length(keys); i++)
+      if (ot_array_get(keys, i, ot_nil) == key)
+        return ot_raise(state, "defrecord: duplicate field");
+    ot_array_append(state, keys, key);
+    fields = as_pair(fields)->cdr;
+  }
+  ot_record_type_obj* type = must_alloc(state, sizeof(*type), OBJ_RECORD_TYPE);
+  ot_store(state, type, &type->name, args[0]);
+  ot_store(state, type, &type->keys, keys);
+  type->immutable = args[2] == ot_true;
+  type->stable_id = ++state->next_stable_id;
+  return ot_from_obj(type);
+}
+
+static otv nat_record_new(ots* state, otv* args, int argc) {
+  if (argc < 1 || !is_type(args[0], OBJ_RECORD_TYPE))
+    return ot_raise(state, "record-new: expected record type");
+  size_t count = ot_array_length(as_record_type(args[0])->keys);
+  if ((size_t)(argc - 1) != count) return ot_raise(state, "record-new: wrong field count");
+  ot_record_obj* record = must_alloc(state, sizeof(*record) + count * sizeof(otv), OBJ_RECORD);
+  ot_store(state, record, &record->type, args[0]);
+  record->stable_id = ++state->next_stable_id;
+  for (size_t i = 0; i < count; i++) ot_store(state, record, &record->values[i], args[i + 1]);
+  return ot_from_obj(record);
+}
+
+static size_t record_index(otv record, otv key) {
+  otv keys = as_record_type(as_record(record)->type)->keys;
+  for (size_t i = 0; i < ot_array_length(keys); i++)
+    if (ot_array_get(keys, i, ot_nil) == key) return i;
+  return SIZE_MAX;
+}
+
+static otv record_read(ots* state, otv record, otv key) {
+  if (!is_type(record, OBJ_RECORD)) return ot_raise(state, "record-ref: expected record");
+  size_t index = record_index(record, key);
+  if (index == SIZE_MAX) return ot_raise(state, "record-ref: unknown record field");
+  return as_record(record)->values[index];
+}
+
+static otv record_write(ots* state, otv record, otv key, otv value) {
+  if (!is_type(record, OBJ_RECORD)) return ot_raise(state, "record-set!: expected record");
+  if (as_record_type(as_record(record)->type)->immutable)
+    return ot_raise(state, "record-set!: immutable record");
+  size_t index = record_index(record, key);
+  if (index == SIZE_MAX) return ot_raise(state, "record-set!: unknown record field");
+  ot_record_obj* object = as_record(record);
+  ot_store(state, object, &object->values[index], value);
+  return value;
+}
+
+static otv nat_record_ref(ots* state, otv* args, int argc) {
+  if (argc != 2) return ot_raise(state, "record-ref: expected record and key");
+  return record_read(state, args[0], args[1]);
+}
+
+static otv nat_record_set(ots* state, otv* args, int argc) {
+  if (argc != 3) return ot_raise(state, "record-set!: expected record, key and value");
+  return record_write(state, args[0], args[1], args[2]);
+}
+
+static otv nat_record_p(ots* state, otv* args, int argc) {
+  if (argc != 1) return ot_raise(state, "record?: expected one value");
+  return is_type(args[0], OBJ_RECORD) ? ot_true : ot_false;
+}
+
+static otv nat_record_type_p(ots* state, otv* args, int argc) {
+  if (argc != 1) return ot_raise(state, "record-type?: expected one value");
+  return is_type(args[0], OBJ_RECORD_TYPE) ? ot_true : ot_false;
+}
+
+static otv nat_record_type(ots* state, otv* args, int argc) {
+  if (argc != 1 || !is_type(args[0], OBJ_RECORD))
+    return ot_raise(state, "record-type: expected record");
+  return as_record(args[0])->type;
+}
 
 static otv apply_value(ots* state, otv callable, otv* args, size_t argc, bool allow_macro) {
   OT_FRAME_SCOPED(state, &callable);
@@ -7384,7 +7478,187 @@ static bool signature_dominates(otv a, otv b) {
   return strict;
 }
 
-#include "ot-methods.inc"
+/* Effective method chains and per-generic dispatch caches. */
+static otv method_qualifier(otv method) { return as_pair(as_pair(method)->cdr)->car; }
+
+static otv method_function(otv method) { return as_pair(as_pair(method)->cdr)->cdr; }
+
+static otv method_field(otv context, size_t index) {
+  return as_slots(as_array(context)->slots)->values[index];
+}
+
+static void invalidate_generic(ots* state, otv value) {
+  ot_generic_obj* generic = as_generic(value);
+  ot_store(state, generic, &generic->cache, ot_nil);
+  ot_store(state, generic, &generic->positions, ot_nil);
+  generic->epoch = state->class_epoch;
+}
+
+static otv effective_method(ots* state, otv generic, otv methods, otv* args, size_t argc);
+
+static otv prepare_method_frame(ots* state, otv context, otv* args, size_t argc) {
+  if (method_field(context, 3) == ot_nil) return ot_nil;
+  OT_FRAME_SCOPED(state, &context);
+  otv arguments = make_descriptor(state, args, argc);
+  otv fields[] = {method_field(context, 3), arguments, method_field(context, 2),
+                  method_field(context, 0)};
+  return make_descriptor(state, fields, 4);
+}
+
+static otv invoke_method_chain(ots* state, otv context, otv* args, int argc) {
+  otv generic = method_field(context, 0), function = method_field(context, 1);
+  otv remaining = method_field(context, 2), next = method_field(context, 3);
+  otv saved = state->next_method, frame = ot_nil;
+  OT_FRAME_SCOPED(state, &context, &generic, &function, &remaining, &next, &saved, &frame);
+  if (function == ot_false) {
+    buf message = {0};
+    buf_cstr(&message,
+             remaining == ot_null ? "no applicable method for " : "ambiguous methods for ");
+    render_value(state, &message, generic, false, 0);
+    for (otv p = remaining; p != ot_null; p = as_pair(p)->cdr) {
+      buf_cstr(&message, " ");
+      render_value(state, &message, as_pair(as_pair(p)->car)->car, false, 0);
+    }
+    buf_byte(&message, '\0');
+    otv result = generic_error(state, remaining == ot_null ? "missing-method" : "ambiguous-method",
+                               message.failed ? "method selection failed" : message.data);
+    buf_free(&message);
+    return result;
+  }
+  frame = prepare_method_frame(state, context, args, (size_t)argc);
+  state->next_method = frame;
+  otv result = apply_value(state, function, args, (size_t)argc, false);
+  state->next_method = saved;
+  return result;
+}
+
+static otv effective_method(ots* state, otv generic, otv methods, otv* args, size_t argc) {
+  otv applicable = ot_null, best = ot_nil, remaining = ot_null, next = ot_nil;
+  otv cursor = methods, function = ot_false;
+  OT_FRAME_SCOPED(state, &generic, &methods, &applicable, &best, &remaining, &next, &cursor,
+                  &function);
+  bool around = false;
+  while (cursor != ot_null) {
+    otv method = as_pair(cursor)->car;
+    if (signature_applies(state, as_pair(method)->car, args, argc)) {
+      if (method_qualifier(method) == ot_true) around = true;
+      applicable = ot_cons(state, method, applicable);
+    }
+    cursor = as_pair(cursor)->cdr;
+  }
+  size_t count = 0;
+  for (otv p = applicable; p != ot_null; p = as_pair(p)->cdr) {
+    otv method = as_pair(p)->car;
+    if ((method_qualifier(method) == ot_true) != around) continue;
+    bool dominated = false;
+    for (otv q = applicable; q != ot_null; q = as_pair(q)->cdr) {
+      otv other = as_pair(q)->car;
+      if (method_qualifier(other) == method_qualifier(method) &&
+          signature_dominates(as_pair(other)->car, as_pair(method)->car)) {
+        dominated = true;
+        break;
+      }
+    }
+    if (!dominated) {
+      best = method;
+      count++;
+    }
+  }
+  if (count == 1) {
+    function = method_function(best);
+    cursor = applicable;
+    while (cursor != ot_null) {
+      otv method = as_pair(cursor)->car;
+      if (method != best) remaining = ot_cons(state, method, remaining);
+      cursor = as_pair(cursor)->cdr;
+    }
+    if (remaining != ot_null) next = effective_method(state, generic, remaining, args, argc);
+  } else remaining = applicable;
+  otv fields[] = {generic, function, remaining, next};
+  otv context = make_descriptor(state, fields, 4);
+  return ot_make_native(state, "effective method", invoke_method_chain, context);
+}
+
+static otv generic_select(ots* state, otv generic, otv* args, size_t argc) {
+  if (argc != as_generic(generic)->arity)
+    return generic_error(state, "wrong-arity", "generic called with incorrect arity");
+  OT_FRAME_SCOPED(state, &generic);
+  if (as_generic(generic)->epoch != state->class_epoch) invalidate_generic(state, generic);
+  if (as_generic(generic)->cache == ot_nil) {
+    otv cache = ot_nil, positions = ot_nil;
+    OT_FRAME_SCOPED(state, &cache, &positions);
+    cache = ot_table_new(state, 8);
+    positions = ot_array_new(state, argc);
+    for (size_t i = 0; i < argc; i++) {
+      bool specialized = false;
+      for (otv p = as_generic(generic)->methods; p != ot_null; p = as_pair(p)->cdr)
+        if (method_field(as_pair(as_pair(p)->car)->car, i) != ot_false) {
+          specialized = true;
+          break;
+        }
+      if (specialized) array_push(state, &positions, ot_make_int((intptr_t)i));
+    }
+    ot_generic_obj* target = as_generic(generic);
+    ot_store(state, target, &target->cache, cache);
+    ot_store(state, target, &target->positions, positions);
+  }
+  otv cache = as_generic(generic)->cache, positions = as_generic(generic)->positions;
+  otv key = ot_false, found = ot_nil;
+  OT_FRAME_SCOPED(state, &cache, &positions, &key, &found);
+  size_t count = as_array(positions)->length;
+  for (size_t i = 0; i < (count == 0 ? 1 : count); i++) {
+    key = count == 0 ? state->object_class
+                     : dispatch_type(state, args[ot_get_int(method_field(positions, i))]);
+    found = ot_table_get(state, cache, key, ot_nil);
+    if (i + 1 >= count) {
+      if (found == ot_nil) {
+        found = effective_method(state, generic, as_generic(generic)->methods, args, argc);
+        if (found == OT_UNWIND) return found;
+        if (ot_table_put(state, cache, key, found) == OT_UNWIND) return OT_UNWIND;
+      }
+      return found;
+    }
+    if (found == ot_nil) {
+      found = ot_table_new(state, 4);
+      if (ot_table_put(state, cache, key, found) == OT_UNWIND) return OT_UNWIND;
+    }
+    cache = found;
+  }
+  return OT_UNWIND;
+}
+
+static otv nat_next_method_p(ots* state, otv* args, int argc) {
+  (void)args;
+  if (need_arity(state, "next-method?", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
+  return state->next_method != ot_nil && method_field(state->next_method, 0) != ot_nil ? ot_true
+                                                                                       : ot_false;
+}
+
+static otv nat_call_next_method(ots* state, otv* args, int argc) {
+  if (state->next_method == ot_nil || method_field(state->next_method, 0) == ot_nil)
+    return generic_error(state, "no-next-method", "no next method");
+  otv frame = state->next_method, next = method_field(frame, 0);
+  otv generic = method_field(frame, 3);
+  OT_FRAME_SCOPED(state, &frame, &next, &generic);
+  if (argc != 0) {
+    if ((size_t)argc != as_generic(generic)->arity)
+      return generic_error(state, "wrong-arity", "incorrect next method arity");
+    next = effective_method(state, generic, method_field(frame, 2), args, (size_t)argc);
+    return apply_value(state, next, args, (size_t)argc, false);
+  }
+  size_t count = as_array(method_field(frame, 1))->length;
+  otv values[count == 0 ? 1 : count];
+  for (size_t i = 0; i < count; i++) values[i] = method_field(method_field(frame, 1), i);
+  return apply_value(state, next, values, count, false);
+}
+
+static otv default_update_instance(ots* state, otv context, otv* args, int argc) {
+  (void)state;
+  (void)context;
+  (void)args;
+  (void)argc;
+  return ot_nil;
+}
 
 static otv signature_from_list(ots* state, otv generic, otv list) {
   OT_FRAME_SCOPED(state, &generic, &list);
@@ -7426,7 +7700,502 @@ static otv register_method(ots* state, otv generic, otv signature, otv function,
   return ot_nil;
 }
 
-#include "ot-classes.inc"
+/* Class storage and declarations. */
+static otv array_item(otv array, size_t index) {
+  return as_slots(as_array(array)->slots)->values[index];
+}
+
+static bool class_subtype(otv child, otv parent) {
+  while (is_type(child, OBJ_DISPATCH_TYPE)) {
+    if (child == parent) return true;
+    child = as_dispatch_type(child)->parent;
+  }
+  return false;
+}
+
+static otv class_slot_error(ots* state, const char* code, const char* text, otv type, otv key) {
+  buf message = {0};
+  buf_cstr(&message, text);
+  buf_cstr(&message, ": ");
+  render_value(state, &message, type, false, 0);
+  buf_cstr(&message, " ");
+  render_value(state, &message, key, false, 0);
+  buf_byte(&message, '\0');
+  otv result = generic_error(state, code, message.failed ? text : message.data);
+  buf_free(&message);
+  return result;
+}
+
+static otv allocate_instance(ots* state, otv layout) {
+  OT_FRAME_SCOPED(state, &layout);
+  size_t count = as_array(as_layout(layout)->keys)->length;
+  ot_instance_obj* object = must_alloc(state, sizeof(*object) + count * sizeof(otv), OBJ_INSTANCE);
+  ot_store(state, object, &object->layout, layout);
+  object->stable_id = ++state->next_stable_id;
+  for (size_t i = 0; i < count; i++) ot_store(state, object, &object->values[i], OT_UNDEFINED);
+  return ot_from_obj(object);
+}
+
+static otv check_instance_slots(ots* state, otv object) {
+  otv layout = as_instance(object)->layout;
+  for (size_t i = 0; i < as_array(as_layout(layout)->keys)->length; i++)
+    if (as_instance(object)->values[i] == OT_UNDEFINED)
+      return class_slot_error(state, "uninitialized-slot", "required slot has no value",
+                              as_layout(layout)->type, array_item(as_layout(layout)->keys, i));
+  return object;
+}
+
+static otv instance_current_properties(ots* state, otv original, otv properties) {
+  if (!is_type(original, OBJ_INSTANCE))
+    return generic_error(state, "invalid-slot-operation", "expected instance");
+  otv object = instance_payload(original);
+  otv old_layout = as_instance(object)->layout;
+  otv type = as_layout(old_layout)->type;
+  otv layout = as_dispatch_type(type)->layout;
+  if (old_layout == layout) return object;
+  otv fresh = ot_nil, old_slots = ot_nil, result = ot_nil;
+  OT_FRAME_SCOPED(state, &original, &object, &old_layout, &type, &layout, &fresh, &old_slots,
+                  &result, &properties);
+  old_slots = ot_table_new(state, as_array(as_layout(old_layout)->keys)->length);
+  for (size_t i = 0; i < as_array(as_layout(old_layout)->keys)->length; i++) {
+    result = ot_table_put(state, old_slots, array_item(as_layout(old_layout)->keys, i),
+                          as_instance(object)->values[i]);
+    if (result == OT_UNWIND) return result;
+  }
+  fresh = allocate_instance(state, layout);
+  /* Publish the new layout before defaults and update-instance can access this object. */
+  ot_instance_obj* previous = as_instance(object);
+  ot_store(state, previous, &previous->layout, fresh);
+  for (size_t i = 0; i < as_array(as_layout(layout)->keys)->length; i++) {
+    otv index = ot_table_get(state, as_layout(old_layout)->indices,
+                             array_item(as_layout(layout)->keys, i), OT_UNDEFINED);
+    if (properties != ot_nil && array_item(as_layout(layout)->states, i) == ot_false)
+      result = as_instance(properties)->values[i];
+    else if (index != OT_UNDEFINED &&
+             array_item(as_layout(old_layout)->states, ot_get_int(index)) ==
+                 array_item(as_layout(layout)->states, i))
+      result = as_instance(object)->values[ot_get_int(index)];
+    else {
+      otv initializer = array_item(as_layout(layout)->defaults, i);
+      result =
+          initializer == ot_false ? OT_UNDEFINED : apply_value(state, initializer, NULL, 0, false);
+      if (result == OT_UNWIND) goto failed;
+    }
+    ot_instance_obj* target = as_instance(fresh);
+    ot_store(state, target, &target->values[i], result);
+  }
+  if (state->update_instance != ot_nil) {
+    otv args[] = {original, old_slots};
+    result = apply_value(state, state->update_instance, args, 2, false);
+    if (result == OT_UNWIND) goto failed;
+  }
+  result = check_instance_slots(state, fresh);
+  if (result == OT_UNWIND) goto failed;
+  for (size_t i = 0; i < as_array(as_layout(old_layout)->keys)->length; i++) {
+    ot_instance_obj* stale = as_instance(object);
+    ot_store(state, stale, &stale->values[i], ot_nil);
+  }
+  return fresh;
+failed:;
+  ot_instance_obj* rollback = as_instance(object);
+  ot_store(state, rollback, &rollback->layout, old_layout);
+  return OT_UNWIND;
+}
+
+static otv instance_current(ots* state, otv original) {
+  return instance_current_properties(state, original, ot_nil);
+}
+
+static otv instance_index(ots* state, otv object, otv key) {
+  otv layout = as_instance(object)->layout;
+  otv index = is_type(key, OBJ_KEYWORD)
+                  ? ot_table_get(state, as_layout(layout)->indices, key, OT_UNDEFINED)
+                  : OT_UNDEFINED;
+  if (index == OT_UNDEFINED)
+    return class_slot_error(state, "missing-slot", "class has no such slot",
+                            as_layout(layout)->type, key);
+  return index;
+}
+
+static otv instance_read(ots* state, otv object, otv key) {
+  OT_FRAME_SCOPED(state, &object, &key);
+  object = instance_current(state, object);
+  if (object == OT_UNWIND) return object;
+  otv index = instance_index(state, object, key);
+  if (index == OT_UNWIND) return index;
+  otv value = as_instance(object)->values[ot_get_int(index)];
+  if (value == OT_UNDEFINED)
+    return class_slot_error(state, "uninitialized-slot", "slot has no value",
+                            as_layout(as_instance(object)->layout)->type, key);
+  return value;
+}
+
+static otv instance_write(ots* state, otv object, otv key, otv value) {
+  OT_FRAME_SCOPED(state, &object, &key, &value);
+  object = instance_current(state, object);
+  if (object == OT_UNWIND) return object;
+  otv index = instance_index(state, object, key);
+  if (index == OT_UNWIND) return index;
+  ot_instance_obj* target = as_instance(object);
+  ot_store(state, target, &target->values[ot_get_int(index)], value);
+  return value;
+}
+
+static otv instance_copy(ots* state, otv object) {
+  OT_FRAME_SCOPED(state, &object);
+  object = instance_current(state, object);
+  if (object == OT_UNWIND) return object;
+  otv copy = allocate_instance(state, as_instance(object)->layout);
+  size_t count = as_array(as_layout(as_instance(object)->layout)->keys)->length;
+  ot_instance_obj* target = as_instance(copy);
+  for (size_t i = 0; i < count; i++)
+    ot_store(state, target, &target->values[i], as_instance(object)->values[i]);
+  return copy;
+}
+
+static otv make_instance_properties(ots* state, otv* args, int argc, bool properties_only) {
+  if (argc < 1 || !is_type(args[0], OBJ_DISPATCH_TYPE) || as_dispatch_type(args[0])->builtin ||
+      as_dispatch_type(args[0])->abstract)
+    return generic_error(state, "invalid-class", "make expects a concrete user class");
+  if (argc % 2 != 1)
+    return generic_error(state, "invalid-slot-operation", "make expects keyword/value pairs");
+  otv layout = as_dispatch_type(args[0])->layout;
+  otv object = ot_nil, result = ot_nil;
+  OT_FRAME_SCOPED(state, &layout, &object, &result);
+  object = allocate_instance(state, layout);
+  for (int i = 1; i < argc; i += 2) {
+    otv index = instance_index(state, object, args[i]);
+    if (index == OT_UNWIND) return index;
+    if (properties_only && array_item(as_layout(layout)->states, ot_get_int(index)) == ot_true)
+      return generic_error(state, "invalid-slot-operation",
+                           "state slot cannot be supplied as a property");
+    ot_instance_obj* target = as_instance(object);
+    ot_store(state, target, &target->values[ot_get_int(index)], args[i + 1]);
+  }
+  for (size_t i = 0; i < as_array(as_layout(layout)->keys)->length; i++) {
+    if (properties_only && array_item(as_layout(layout)->states, i) == ot_true) {
+      ot_instance_obj* target = as_instance(object);
+      ot_store(state, target, &target->values[i], ot_nil);
+      continue;
+    }
+    if (as_instance(object)->values[i] != OT_UNDEFINED) continue;
+    otv initializer = array_item(as_layout(layout)->defaults, i);
+    if (initializer == ot_false) continue;
+    result = apply_value(state, initializer, NULL, 0, false);
+    if (result == OT_UNWIND) return result;
+    ot_instance_obj* target = as_instance(object);
+    ot_store(state, target, &target->values[i], result);
+  }
+  return check_instance_slots(state, object);
+}
+
+static otv nat_make_instance(ots* state, otv* args, int argc) {
+  return make_instance_properties(state, args, argc, false);
+}
+
+static otv nat_class_properties(ots* state, otv* args, int argc) {
+  return make_instance_properties(state, args, argc, true);
+}
+
+/* Descriptions must be rebuilt after class redefinition, never lazily migrated. */
+static otv current_properties(ots* state, otv object) {
+  if (!is_type(object, OBJ_INSTANCE))
+    return generic_error(state, "invalid-slot-operation", "expected property instance");
+  object = instance_payload(object);
+  otv layout = as_instance(object)->layout;
+  if (layout != as_dispatch_type(as_layout(layout)->type)->layout)
+    return generic_error(state, "stale-properties", "rebuild description after class redefinition");
+  return object;
+}
+
+static otv nat_class_mount(ots* state, otv* args, int argc) {
+  if (need_arity(state, "class-mount", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  otv source = current_properties(state, args[0]);
+  if (source == OT_UNWIND) return source;
+  otv object = ot_nil, layout = as_instance(source)->layout, result = ot_nil;
+  OT_FRAME_SCOPED(state, &source, &object, &layout, &result);
+  object = allocate_instance(state, layout);
+  for (size_t i = 0; i < as_array(as_layout(layout)->keys)->length; i++) {
+    result = as_instance(source)->values[i];
+    if (array_item(as_layout(layout)->states, i) == ot_true)
+      result = apply_value(state, array_item(as_layout(layout)->defaults, i), NULL, 0, false);
+    if (result == OT_UNWIND) return result;
+    ot_instance_obj* target = as_instance(object);
+    ot_store(state, target, &target->values[i], result);
+  }
+  return check_instance_slots(state, object);
+}
+
+static otv nat_class_update_properties(ots* state, otv* args, int argc) {
+  if (need_arity(state, "class-update-properties!", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  otv source = current_properties(state, args[1]), object = args[0];
+  if (source == OT_UNWIND) return source;
+  if (!is_type(object, OBJ_INSTANCE) ||
+      as_layout(as_instance(instance_payload(object))->layout)->type !=
+          as_layout(as_instance(source)->layout)->type)
+    return generic_error(state, "invalid-class",
+                         "properties must have the same class as the instance");
+  OT_FRAME_SCOPED(state, &source, &object);
+  object = instance_current_properties(state, object, source);
+  if (object == OT_UNWIND) return object;
+  otv layout = as_instance(object)->layout;
+  for (size_t i = 0; i < as_array(as_layout(layout)->keys)->length; i++) {
+    if (array_item(as_layout(layout)->states, i) == ot_false) {
+      ot_instance_obj* target = as_instance(object);
+      ot_store(state, target, &target->values[i], as_instance(source)->values[i]);
+    }
+  }
+  return args[0];
+}
+
+static otv nat_class_subtype_p(ots* state, otv* args, int argc) {
+  if (need_arity(state, "class-subtype?", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_DISPATCH_TYPE) || !is_type(args[1], OBJ_DISPATCH_TYPE))
+    return generic_error(state, "invalid-class", "class-subtype? expects classes");
+  return class_subtype(args[0], args[1]) ? ot_true : ot_false;
+}
+
+static otv nat_instance_p(ots* state, otv* args, int argc) {
+  if (need_arity(state, "instance?", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  return is_type(args[0], OBJ_INSTANCE) ? ot_true : ot_false;
+}
+
+static otv nat_slot_set(ots* state, otv* args, int argc) {
+  if (need_arity(state, "slot-set!", argc, 3, 3) == OT_UNWIND) return OT_UNWIND;
+  return instance_write(state, args[0], args[1], args[2]);
+}
+
+static bool class_option(otv value, const char* name) {
+  return is_type(value, OBJ_KEYWORD) && as_name(value)->length == strlen(name) &&
+         memcmp(as_name(value)->bytes, name, strlen(name)) == 0;
+}
+
+static bool local_class_name(otv name) {
+  return is_type(name, OBJ_SYMBOL) && !as_name(name)->special_form &&
+         !memchr(as_name(name)->bytes, '/', as_name(name)->length);
+}
+
+static bool compile_class_declaration(ots* state, bytecode_compiler* compiler, otv form) {
+  otv kind = as_pair(form)->car, name = as_pair(as_pair(form)->cdr)->car;
+  otv rest = list_tail(form, 2), parent = ot_false, specs = ot_nil;
+  OT_FRAME_SCOPED(state, &form, &kind, &name, &rest, &parent, &specs);
+  if (!local_class_name(name)) goto invalid;
+  if (is_type(rest, OBJ_PAIR) && class_option(as_pair(rest)->car, "is")) {
+    if (!list_nth(rest, 1, &parent) || !is_type(parent, OBJ_SYMBOL)) goto invalid;
+    rest = list_tail(rest, 2);
+  }
+  if (symbol_is(kind, "defabstract") && rest != ot_null) goto invalid;
+  specs = ot_array_new(state, list_length(rest));
+  while (rest != ot_null) {
+    otv slot = as_pair(rest)->car, options = ot_null, key = ot_nil;
+    otv init = ot_false, accessor = ot_false, state_slot = ot_false;
+    OT_FRAME_SCOPED(state, &slot, &options, &key, &init, &accessor, &state_slot);
+    if (is_type(slot, OBJ_PAIR)) {
+      options = as_pair(slot)->cdr;
+      slot = as_pair(slot)->car;
+    }
+    if (!is_type(slot, OBJ_SYMBOL) || !proper_list(options) || list_length(options) % 2 != 0)
+      goto invalid;
+    key = coerce_name(state, slot, true, "defclass");
+    for (size_t i = 0; i < as_array(specs)->length; i++)
+      if (array_item(array_item(specs, i), 0) == key) goto invalid;
+    bool seen_init = false, seen_accessor = false, seen_state = false;
+    while (options != ot_null) {
+      otv option = as_pair(options)->car;
+      otv value = as_pair(as_pair(options)->cdr)->car;
+      OT_FRAME_SCOPED(state, &option, &value);
+      if (class_option(option, "init") && !seen_init) {
+        seen_init = true;
+        otv fn = ot_nil, expanded = ot_nil;
+        OT_FRAME_SCOPED(state, &fn, &expanded);
+        fn = ot_cons(state, value, ot_null);
+        fn = ot_cons(state, ot_null, fn);
+        otv fn_name = ot_intern(state, "fn", 2, false);
+        fn = ot_cons(state, fn_name, fn);
+        expanded = apply_value(state, state->expander, &fn, 1, false);
+        if (expanded == OT_UNWIND) return false;
+        init = compile_function_code(state, ot_null, list_tail(expanded, 2), ot_nil,
+                                     state->vm.current_namespace, slot);
+        if (init == OT_UNWIND) return false;
+      } else if (class_option(option, "accessor") && !seen_accessor && local_class_name(value)) {
+        seen_accessor = true;
+        accessor = value;
+      } else if (class_option(option, "state") && !seen_state &&
+                 (value == ot_true || value == ot_false)) {
+        seen_state = true;
+        state_slot = value;
+      } else goto invalid;
+      options = list_tail(options, 2);
+    }
+    if (state_slot == ot_true && !seen_init) goto invalid;
+    otv fields[] = {key, init, accessor, state_slot};
+    otv spec = make_descriptor(state, fields, 4);
+    array_push(state, &specs, spec);
+    rest = as_pair(rest)->cdr;
+  }
+  otv fields[] = {kind, name, parent, specs};
+  otv descriptor = make_descriptor(state, fields, 4);
+  bytecode_emit_constant(state, compiler, BC_GENERIC_DECL, descriptor);
+  return !compiler->bytes.failed;
+invalid:
+  generic_error(state, "invalid-class-definition",
+                "invalid class name, parent, slot, or slot options");
+  return false;
+}
+
+static otv new_generic(ots* state, otv owner, otv name, size_t arity) {
+  OT_FRAME_SCOPED(state, &owner, &name);
+  ot_generic_obj* generic = must_alloc(state, sizeof(*generic), OBJ_GENERIC);
+  ot_store(state, generic, &generic->owner, owner);
+  ot_store(state, generic, &generic->name, name);
+  ot_store(state, generic, &generic->methods, ot_null);
+  ot_store(state, generic, &generic->cache, ot_nil);
+  ot_store(state, generic, &generic->positions, ot_nil);
+  generic->epoch = state->class_epoch;
+  generic->arity = arity;
+  generic->stable_id = ++state->next_stable_id;
+  return ot_from_obj(generic);
+}
+
+static otv slot_accessor(ots* state, otv key, otv* args, int argc) {
+  if (need_arity(state, "slot accessor", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  return instance_read(state, args[0], key);
+}
+
+static otv execute_class_declaration(ots* state, otv declaration) {
+  otv kind = array_item(declaration, 0), name = array_item(declaration, 1);
+  otv parent = array_item(declaration, 2), specs = array_item(declaration, 3);
+  otv space = state->vm.current_namespace;
+  otv owner = ((ot_namespace_obj*)ot_as_obj(space))->name;
+  otv type = ot_nil, existing = ot_nil, layout = ot_nil;
+  otv keys = ot_nil, defaults = ot_nil, states = ot_nil, indices = ot_nil;
+  OT_FRAME_SCOPED(state, &declaration, &kind, &name, &parent, &specs, &space, &owner, &type,
+                  &existing, &layout, &keys, &defaults, &states, &indices);
+  bool abstract = symbol_is(kind, "defabstract");
+  bool reset = symbol_is(kind, "reset-class!");
+  existing = namespace_var(state, space, name, false);
+  otv referred = namespace_var(state, space, name, true);
+  if (symbol_is(owner, "otium.generic") || (existing == ot_nil && referred != ot_nil) ||
+      (reset && existing == ot_nil))
+    return generic_error(state, "binding-conflict", "class declaration conflicts with binding");
+  if (existing != ot_nil && !reset) {
+    type = ((ot_var_obj*)ot_as_obj(existing))->value;
+    if (!is_type(type, OBJ_DISPATCH_TYPE) || as_dispatch_type(type)->owner != owner ||
+        as_dispatch_type(type)->name != name || as_dispatch_type(type)->abstract != abstract)
+      return generic_error(state, "binding-conflict", "incompatible class declaration");
+  }
+  if (parent == ot_false) parent = state->object_class;
+  else {
+    otv var = resolve_var(state, space, parent, false);
+    parent = is_type(var, OBJ_VAR) ? ((ot_var_obj*)ot_as_obj(var))->value : ot_nil;
+  }
+  if (!is_type(parent, OBJ_DISPATCH_TYPE) || !as_dispatch_type(parent)->abstract ||
+      (type != ot_nil && class_subtype(parent, type)))
+    return generic_error(state, "invalid-class-definition", "expected acyclic abstract parent");
+  for (size_t i = 0; i < as_array(specs)->length; i++) {
+    otv accessor = array_item(array_item(specs, i), 2);
+    if (accessor == ot_false) continue;
+    otv var = namespace_var(state, space, accessor, false);
+    otv imported = namespace_var(state, space, accessor, true);
+    if (accessor == name || (var == ot_nil && imported != ot_nil))
+      return generic_error(state, "binding-conflict", "accessor conflicts with binding");
+    if (var != ot_nil) {
+      otv value = ((ot_var_obj*)ot_as_obj(var))->value;
+      if (!is_type(value, OBJ_GENERIC) || as_generic(value)->arity != 1 ||
+          as_generic(value)->owner != owner || as_generic(value)->name != accessor)
+        return generic_error(state, "binding-conflict", "accessor conflicts with binding");
+    }
+  }
+  if (type == ot_nil) type = new_dispatch_type(state, owner, name, false);
+  size_t count = as_array(specs)->length;
+  keys = ot_array_new(state, count);
+  defaults = ot_array_new(state, count);
+  states = ot_array_new(state, count);
+  indices = ot_table_new(state, count);
+  for (size_t i = 0; i < count; i++) {
+    otv spec = array_item(specs, i), init = array_item(spec, 1);
+    OT_FRAME_SCOPED(state, &spec, &init);
+    array_push(state, &keys, array_item(spec, 0));
+    if (init != ot_false) init = make_bytecode_function(state, init, ot_nil, space, name);
+    array_push(state, &defaults, init);
+    array_push(state, &states, array_item(spec, 3));
+    otv result = ot_table_put(state, indices, array_item(spec, 0), ot_make_int((intptr_t)i));
+    if (result == OT_UNWIND) return result;
+  }
+  ot_layout_obj* made = must_alloc(state, sizeof(*made), OBJ_LAYOUT);
+  ot_store(state, made, &made->type, type);
+  ot_store(state, made, &made->keys, keys);
+  ot_store(state, made, &made->defaults, defaults);
+  ot_store(state, made, &made->states, states);
+  ot_store(state, made, &made->indices, indices);
+  layout = ot_from_obj(made);
+  ot_dispatch_type_obj* descriptor = as_dispatch_type(type);
+  descriptor->abstract = abstract;
+  ot_store(state, descriptor, &descriptor->parent, parent);
+  ot_store(state, descriptor, &descriptor->layout, layout);
+  state->class_epoch++;
+  define_var(state, space, name, type, ot_nil, false);
+  for (size_t i = 0; i < count; i++) {
+    otv accessor = array_item(array_item(specs, i), 2);
+    if (accessor == ot_false) continue;
+    otv generic = ot_nil, function = ot_nil, signature = ot_nil;
+    OT_FRAME_SCOPED(state, &accessor, &generic, &function, &signature);
+    otv var = namespace_var(state, space, accessor, false);
+    generic = var != ot_nil ? ((ot_var_obj*)ot_as_obj(var))->value
+                            : new_generic(state, owner, accessor, 1);
+    function =
+        ot_make_native(state, "slot accessor", slot_accessor, array_item(array_item(specs, i), 0));
+    signature = ot_array_new(state, 1);
+    array_push(state, &signature, type);
+    register_method(state, generic, signature, function, ot_false);
+    define_var(state, space, accessor, generic, ot_nil, false);
+  }
+  return ot_nil;
+}
+
+static otv cached_instance_index(ots* state, otv cache, otv object, otv key) {
+  otv layout = as_instance(object)->layout;
+  if (as_slots(cache)->values[0] == layout && as_slots(cache)->values[1] == key)
+    return as_slots(cache)->values[2];
+  otv index = instance_index(state, object, key);
+  if (index == OT_UNWIND) return index;
+  ot_slots_obj* slots = as_slots(cache);
+  ot_store(state, slots, &slots->values[0], layout);
+  ot_store(state, slots, &slots->values[1], key);
+  ot_store(state, slots, &slots->values[2], index);
+  return index;
+}
+
+static otv cached_read_call(ots* state, otv cache, otv* args, int argc) {
+  if (need_arity(state, "cached slot read", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_INSTANCE)) return apply_value(state, args[0], args + 1, 1, false);
+  OT_FRAME_SCOPED(state, &cache);
+  otv object = instance_current(state, args[0]);
+  if (object == OT_UNWIND) return object;
+  otv index = cached_instance_index(state, cache, object, args[1]);
+  if (index == OT_UNWIND) return index;
+  otv value = as_instance(object)->values[ot_get_int(index)];
+  if (value == OT_UNDEFINED)
+    return class_slot_error(state, "uninitialized-slot", "slot has no value",
+                            as_layout(as_instance(object)->layout)->type, args[1]);
+  return value;
+}
+
+static otv cached_write_call(ots* state, otv cache, otv* args, int argc) {
+  if (need_arity(state, "cached slot assignment", argc, 4, 4) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_NAT) ||
+      ((ot_nat_obj*)ot_as_obj(args[0]))->function != nat_set_applied ||
+      !is_type(args[1], OBJ_INSTANCE))
+    return apply_value(state, args[0], args + 1, 3, false);
+  OT_FRAME_SCOPED(state, &cache);
+  otv object = instance_current(state, args[1]);
+  if (object == OT_UNWIND) return object;
+  otv index = cached_instance_index(state, cache, object, args[2]);
+  if (index == OT_UNWIND) return index;
+  ot_instance_obj* target = as_instance(object);
+  ot_store(state, target, &target->values[ot_get_int(index)], args[3]);
+  return args[3];
+}
 
 static bool compile_generic_declaration(ots* state, bytecode_compiler* compiler, otv form,
                                         otv env) {
@@ -7769,7 +8538,915 @@ static otv nat_call_with_cleanup(ots* state, otv* args, int argc) {
   return result;
 }
 
-#include "ot-ports.inc"
+/* Buffered blocking ports. Managed bytevectors keep storage movable between
+ * calls; a host read/write cannot enter Otium or trigger its collector. */
+#define as_port(V) ((ot_port_obj*)ot_as_obj(V))
+
+enum {
+  PORT_INPUT_MEMORY = 1,
+  PORT_STRING,
+  PORT_BYTES,
+  PORT_FILE,
+  PORT_CUSTOM,
+  PORT_WRITER,
+  PORT_STANDARD
+};
+
+void ot_set_io_host(ots* state, const ot_io_host* host, void* userdata) {
+  state->io_host = host ? *host : *ot_platform_io_host();
+  state->io_userdata = userdata;
+}
+
+static otv port_error(ots* s, otv p, const char* op, int reason) {
+  static const char* reasons[] = {"other",        "not-found",     "exists",   "permission",
+                                  "is-directory", "not-directory", "no-space", "closed",
+                                  "other",        "other"};
+  if (reason < 0 || reason > OT_IO_INTERRUPTED) reason = OT_IO_OTHER;
+  OT_FRAME_SCOPED(s, &p);
+  otv condition = ot_table_new(s, 6), key = ot_nil, value = ot_nil;
+  OT_FRAME_SCOPED(s, &condition, &key, &value);
+  const char* fields[] = {"type", "op", "reason", "message", "path", "detail"};
+  for (size_t i = 0; i < 6; i++) {
+    key = ot_intern(s, fields[i], strlen(fields[i]), true);
+    if (i == 0)
+      value = ot_intern(s, reason == OT_IO_CLOSED ? "io-error" : "file-error",
+                        reason == OT_IO_CLOSED ? 8 : 10, false);
+    else if (i == 1) value = ot_intern(s, op, strlen(op), false);
+    else if (i == 2) value = ot_intern(s, reasons[reason], strlen(reasons[reason]), true);
+    else if (i == 4) value = is_type(p, OBJ_PORT) ? as_port(p)->name : p;
+    else value = ot_make_string(s, reasons[reason], strlen(reasons[reason]));
+    ot_table_put(s, condition, key, value);
+  }
+  return ot_raise_value(s, condition);
+}
+
+static otv port_check(ots* s, otv p, bool input, const char* op) {
+  if (!is_type(p, OBJ_PORT)) return ot_raise(s, "%s: expected port", op);
+  if (as_port(p)->closed) return port_error(s, p, op, OT_IO_CLOSED);
+  if (as_port(p)->input != input) return ot_raise(s, "%s: wrong port direction", op);
+  return ot_nil;
+}
+
+static otv port_callback(ots* s, otv p, const char* name) {
+  OT_FRAME_SCOPED(s, &p);
+  otv key = ot_intern(s, name, strlen(name), true);
+  return ot_table_get(s, as_port(p)->callbacks, key, ot_nil);
+}
+
+static otv port_new(ots* s, otv name, bool input, unsigned kind, intptr_t handle, otv buffer,
+                    otv callbacks) {
+  OT_FRAME_SCOPED(s, &name, &buffer, &callbacks);
+  ot_port_obj* p = must_alloc(s, sizeof(*p), OBJ_PORT);
+  ot_store(s, p, &p->name, name);
+  ot_store(s, p, &p->buffer, buffer);
+  ot_store(s, p, &p->callbacks, callbacks);
+  p->input = input;
+  p->kind = kind;
+  p->handle = handle;
+  p->at = p->position = 0;
+  p->closed = false;
+  p->eof = kind == PORT_INPUT_MEMORY;
+  p->end = p->eof ? as_bytevector(buffer)->length : 0;
+  otv value = ot_from_obj(p);
+  OT_FRAME_SCOPED(s, &value);
+  if (kind == PORT_FILE || kind == PORT_CUSTOM) s->open_ports = ot_cons(s, value, s->open_ports);
+  return value;
+}
+
+static otv port_flush(ots* s, otv value) {
+  if (port_check(s, value, false, "flush-output-port") == OT_UNWIND) return OT_UNWIND;
+  OT_FRAME_SCOPED(s, &value);
+  unsigned kind = as_port(value)->kind;
+  if (kind == PORT_STRING || kind == PORT_BYTES) return ot_nil;
+  while (as_port(value)->end) {
+    ot_port_obj* p = as_port(value);
+    size_t end = p->end;
+    long count;
+    if (kind == PORT_WRITER) {
+      s->writer(s->writer_userdata, (char*)as_bytevector(p->buffer)->data, end);
+      count = (long)end;
+    } else if (kind == PORT_CUSTOM) {
+      otv callback = port_callback(s, value, "write");
+      otv args[] = {as_port(value)->buffer, ot_make_int(0), ot_make_int((intptr_t)end)};
+      otv result = apply_value(s, callback, args, 3, false);
+      if (result == OT_UNWIND) return result;
+      if (!ot_is_int(result) || ot_get_int(result) <= 0 || (size_t)ot_get_int(result) > end)
+        return ot_raise(s, "write-bytevector: invalid custom write count");
+      count = ot_get_int(result);
+    } else {
+      count = s->io_host.write
+                  ? s->io_host.write(s->io_userdata, p->handle, as_bytevector(p->buffer)->data, end)
+                  : -OT_IO_OTHER;
+      if (count == -OT_IO_INTERRUPTED) {
+        if (atomic_exchange(&s->vm.interrupted, false) && run_interrupt_hook(s) == OT_UNWIND)
+          return OT_UNWIND;
+        continue;
+      }
+      if (count < 0) return port_error(s, value, "write-bytevector", (int)-count);
+      if (count == 0 || (size_t)count > end)
+        return ot_raise(s, "write-bytevector: invalid host write count");
+    }
+    p = as_port(value);
+    memmove(as_bytevector(p->buffer)->data, as_bytevector(p->buffer)->data + count,
+            end - (size_t)count);
+    p->end -= (size_t)count;
+  }
+  if (kind == PORT_WRITER && s->writer == ot_default_write)
+    fflush(s->writer_userdata ? (FILE*)s->writer_userdata : stdout);
+  if (kind == PORT_CUSTOM) {
+    otv callback = port_callback(s, value, "flush");
+    if (!is_falsy(callback) && apply_value(s, callback, NULL, 0, false) == OT_UNWIND)
+      return OT_UNWIND;
+  }
+  return ot_nil;
+}
+
+static otv port_ensure(ots* s, otv value, size_t needed) {
+  if (port_check(s, value, true, "read") == OT_UNWIND) return OT_UNWIND;
+  OT_FRAME_SCOPED(s, &value);
+  if (as_port(value)->kind == PORT_STANDARD && as_port(value)->handle == 0) {
+    otv output = ((ot_param_obj*)ot_as_obj(s->output_port_param))->value;
+    if (!as_port(output)->closed && port_flush(s, output) == OT_UNWIND) return OT_UNWIND;
+  }
+  for (;;) {
+    ot_port_obj* p = as_port(value);
+    if (p->end - p->at >= needed || p->eof) return ot_nil;
+    ot_bytevector_obj* buffer = as_bytevector(p->buffer);
+    memmove(buffer->data, buffer->data + p->at, p->end - p->at);
+    p->end -= p->at;
+    p->at = 0;
+    size_t end = p->end, capacity = buffer->length;
+    long count;
+    if (p->kind == PORT_CUSTOM) {
+      otv callback = port_callback(s, value, "read");
+      otv args[] = {as_port(value)->buffer, ot_make_int((intptr_t)end),
+                    ot_make_int((intptr_t)capacity)};
+      otv result = apply_value(s, callback, args, 3, false);
+      if (result == OT_UNWIND) return result;
+      if (result == ot_eof) count = 0;
+      else if (ot_is_int(result) && ot_get_int(result) > 0 &&
+               (size_t)ot_get_int(result) <= capacity - end)
+        count = ot_get_int(result);
+      else return ot_raise(s, "read-bytevector: invalid custom read count");
+    } else {
+      if (atomic_exchange(&s->vm.interrupted, false) && run_interrupt_hook(s) == OT_UNWIND)
+        return OT_UNWIND;
+      p = as_port(value);
+      buffer = as_bytevector(p->buffer);
+      count = s->io_host.read
+                  ? s->io_host.read(s->io_userdata, p->handle, buffer->data + end, capacity - end)
+                  : -OT_IO_OTHER;
+      if (count == -OT_IO_INTERRUPTED) {
+        if (atomic_exchange(&s->vm.interrupted, false) && run_interrupt_hook(s) == OT_UNWIND)
+          return OT_UNWIND;
+        continue;
+      }
+      if (count < 0) return port_error(s, value, "read-bytevector", (int)-count);
+      if ((size_t)count > capacity - end)
+        return ot_raise(s, "read-bytevector: invalid host read count");
+    }
+    p = as_port(value);
+    if (!count) p->eof = true;
+    p->end += (size_t)count;
+  }
+}
+
+static otv port_peek(ots* s, otv value, bool character, bool consume) {
+  OT_FRAME_SCOPED(s, &value);
+  if (port_ensure(s, value, 1) == OT_UNWIND) return OT_UNWIND;
+  ot_port_obj* p = as_port(value);
+  if (p->at == p->end) return ot_eof;
+  unsigned char byte = as_bytevector(p->buffer)->data[p->at];
+  size_t width = 1;
+  otv result = ot_make_int(byte);
+  if (character) {
+    width = byte < 128                     ? 1
+            : byte >= 0xc2 && byte <= 0xdf ? 2
+            : byte >= 0xe0 && byte <= 0xef ? 3
+            : byte >= 0xf0 && byte <= 0xf4 ? 4
+                                           : 1;
+    if (port_ensure(s, value, width) == OT_UNWIND) return OT_UNWIND;
+    p = as_port(value);
+    const unsigned char* data = as_bytevector(p->buffer)->data + p->at;
+    if (!utf8_valid_sequence(data, p->end - p->at))
+      return io_error(s, "decode-error", "read-char", "read-char: invalid UTF-8", "position",
+                      ot_make_int((intptr_t)p->position));
+    result = ot_make_char(utf8_decode(data, width, 0));
+  }
+  p = as_port(value);
+  if (consume) {
+    p->at += width;
+    p->position += width;
+  }
+  return result;
+}
+
+static otv port_current(ots* s, bool input) {
+  otv param = input ? s->input_port_param : s->output_port_param;
+  return apply_value(s, param, NULL, 0, false);
+}
+
+static otv port_optional(ots* s, otv* args, int argc, int index, bool input) {
+  return argc > index ? args[index] : port_current(s, input);
+}
+
+static otv port_write_bytes(ots* s, otv value, otv bytes, size_t start, size_t end) {
+  if (port_check(s, value, false, "write-bytevector") == OT_UNWIND) return OT_UNWIND;
+  OT_FRAME_SCOPED(s, &value, &bytes);
+  while (start < end) {
+    ot_port_obj* p = as_port(value);
+    size_t capacity = as_bytevector(p->buffer)->length;
+    if (p->end == capacity) {
+      if (p->kind == PORT_STRING || p->kind == PORT_BYTES) {
+        otv grown = ot_make_bytevector(s, capacity * 2);
+        p = as_port(value);
+        memcpy(as_bytevector(grown)->data, as_bytevector(p->buffer)->data, p->end);
+        ot_store(s, p, &p->buffer, grown);
+      } else if (port_flush(s, value) == OT_UNWIND) return OT_UNWIND;
+      continue;
+    }
+    size_t count = end - start;
+    if (count > capacity - p->end) count = capacity - p->end;
+    memcpy(as_bytevector(p->buffer)->data + p->end, as_bytevector(bytes)->data + start, count);
+    p->end += count;
+    start += count;
+  }
+  if (as_port(value)->kind == PORT_WRITER || as_port(value)->kind == PORT_STANDARD)
+    return port_flush(s, value);
+  return ot_nil;
+}
+
+static otv port_output(ots* s, otv p, otv* args, int argc, bool display, bool newline) {
+  OT_FRAME_SCOPED(s, &p);
+  buf text = {0};
+  for (int i = 0; i < argc; i++) {
+    if (i) buf_byte(&text, ' ');
+    render_value(s, &text, args[i], display, 0);
+  }
+  if (newline) buf_byte(&text, '\n');
+  if (text.failed) {
+    buf_free(&text);
+    return ot_raise(s, "output: out of memory");
+  }
+  otv bytes = ot_make_bytevector(s, text.length);
+  memcpy(as_bytevector(bytes)->data, text.data, text.length);
+  buf_free(&text);
+  return port_write_bytes(s, p, bytes, 0, as_bytevector(bytes)->length);
+}
+
+static otv n_display_to(ots* s, otv* a, int n) {
+  if (n < 1) return ot_raise(s, "display-to: expected port");
+  return port_output(s, a[0], a + 1, n - 1, true, false);
+}
+
+static otv n_write_to(ots* s, otv* a, int n) {
+  if (n < 1) return ot_raise(s, "write-to: expected port");
+  return port_output(s, a[0], a + 1, n - 1, false, false);
+}
+
+static otv n_port_p(ots* s, otv* a, int n) {
+  if (need_arity(s, "port?", n, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  return (is_type(a[0], OBJ_PORT) ? ot_true : ot_false);
+}
+
+#define PORT_PRED(NAME, EXPR)                                                                      \
+  static otv NAME(ots* s, otv* a, int n) {                                                         \
+    if (need_arity(s, #NAME, n, 1, 1) == OT_UNWIND) return OT_UNWIND;                              \
+    return (is_type(a[0], OBJ_PORT) && (EXPR) ? ot_true : ot_false);                               \
+  }
+PORT_PRED(n_input_p, as_port(a[0])->input)
+PORT_PRED(n_output_p, !as_port(a[0])->input)
+PORT_PRED(n_input_open_p, as_port(a[0])->input && !as_port(a[0])->closed)
+PORT_PRED(n_output_open_p, !as_port(a[0])->input && !as_port(a[0])->closed)
+#undef PORT_PRED
+#define PORT_READ(NAME, CHAR, CONSUME)                                                             \
+  static otv NAME(ots* s, otv* a, int n) {                                                         \
+    if (need_arity(s, #NAME, n, 0, 1) == OT_UNWIND) return OT_UNWIND;                              \
+    return port_peek(s, port_optional(s, a, n, 0, true), CHAR, CONSUME);                           \
+  }
+PORT_READ(n_read_char, true, true)
+PORT_READ(n_peek_char, true, false)
+PORT_READ(n_read_u8, false, true)
+PORT_READ(n_peek_u8, false, false)
+#undef PORT_READ
+
+static otv n_flush(ots* s, otv* a, int n) {
+  if (need_arity(s, "flush-output-port", n, 0, 1) == OT_UNWIND) return OT_UNWIND;
+  return port_flush(s, port_optional(s, a, n, 0, false));
+}
+
+static otv port_close(ots* s, otv value, int direction) {
+  if (!is_type(value, OBJ_PORT)) return ot_raise(s, "close-port: expected port");
+  if (direction && as_port(value)->input != (direction == 1))
+    return ot_raise(s, "close-port: wrong port direction");
+  if (as_port(value)->closed) return ot_nil;
+  OT_FRAME_SCOPED(s, &value);
+  if (!as_port(value)->input && port_flush(s, value) == OT_UNWIND) return OT_UNWIND;
+  as_port(value)->closed = true;
+  otv cursor = s->open_ports, previous = ot_nil;
+  while (is_type(cursor, OBJ_PAIR)) {
+    if (as_pair(cursor)->car == value) {
+      if (previous == ot_nil) s->open_ports = as_pair(cursor)->cdr;
+      else ot_store(s, as_pair(previous), &as_pair(previous)->cdr, as_pair(cursor)->cdr);
+      break;
+    }
+    previous = cursor;
+    cursor = as_pair(cursor)->cdr;
+  }
+  if (as_port(value)->kind == PORT_CUSTOM) {
+    otv callback = port_callback(s, value, "close");
+    if (!is_falsy(callback) && apply_value(s, callback, NULL, 0, false) == OT_UNWIND)
+      return OT_UNWIND;
+  } else if (as_port(value)->kind == PORT_FILE) {
+    int reason =
+        s->io_host.close ? s->io_host.close(s->io_userdata, as_port(value)->handle) : OT_IO_OTHER;
+    if (reason) return port_error(s, value, "close-port", reason);
+  }
+  return ot_nil;
+}
+
+#define PORT_CLOSE(NAME, DIR)                                                                      \
+  static otv NAME(ots* s, otv* a, int n) {                                                         \
+    if (need_arity(s, #NAME, n, 1, 1) == OT_UNWIND) return OT_UNWIND;                              \
+    return port_close(s, a[0], DIR);                                                               \
+  }
+PORT_CLOSE(n_close_port, 0)
+PORT_CLOSE(n_close_input, 1)
+PORT_CLOSE(n_close_output, 2)
+#undef PORT_CLOSE
+
+static otv port_open_file(ots* s, otv* a, int n, bool input) {
+  if (need_arity(s, "open-file", n, 1, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(a[0], OBJ_STRING) || (n == 2 && !is_type(a[1], OBJ_TABLE)))
+    return ot_raise(s, "open-file: expected path and optional options table");
+  otv path = a[0], opts = n == 2 ? a[1] : ot_nil, buffer = ot_nil;
+  OT_FRAME_SCOPED(s, &path, &opts, &buffer);
+  otv key = ot_intern(s, "buffer-size", 11, true);
+  otv size = ot_table_get(s, opts, key, ot_make_int(4096));
+  if (!ot_is_int(size) || ot_get_int(size) <= 0)
+    return ot_raise(s, "open-file: invalid buffer-size");
+  size_t capacity = (size_t)ot_get_int(size);
+  if (capacity < 4) capacity = 4;
+  unsigned flags = input ? OT_IO_INPUT : OT_IO_OUTPUT;
+  if (!input) {
+    key = ot_intern(s, "if-exists", 9, true);
+    otv mode = ot_table_get(s, opts, key, ot_nil);
+    if (mode != ot_nil) {
+      if ((is_type(mode, OBJ_KEYWORD) && as_name(mode)->length == 6 &&
+           memcmp(as_name(mode)->bytes, "append", 6) == 0))
+        flags |= OT_IO_APPEND;
+      else if ((is_type(mode, OBJ_KEYWORD) && as_name(mode)->length == 5 &&
+                memcmp(as_name(mode)->bytes, "error", 5) == 0))
+        flags |= OT_IO_EXCLUSIVE;
+      else if (!(is_type(mode, OBJ_KEYWORD) && as_name(mode)->length == 8 &&
+                 memcmp(as_name(mode)->bytes, "truncate", 8) == 0))
+        return ot_raise(s, "open-output-file: invalid :if-exists");
+    }
+  }
+  buffer = ot_make_bytevector(s, capacity);
+  const char* bytes;
+  size_t length;
+  ot_string_bytes(path, &bytes, &length);
+  if (memchr(bytes, 0, length)) return ot_raise(s, "open-file: NUL in path");
+  char* filename = ot_host_alloc(length + 1);
+  if (!filename) return ot_raise(s, "open-file: out of memory");
+  memcpy(filename, bytes, length);
+  intptr_t handle = 0;
+  int reason =
+      s->io_host.open ? s->io_host.open(s->io_userdata, filename, flags, &handle) : OT_IO_NOT_FOUND;
+  ot_host_free(filename);
+  if (reason) return port_error(s, path, input ? "open-input-file" : "open-output-file", reason);
+  return port_new(s, path, input, PORT_FILE, handle, buffer, ot_nil);
+}
+
+static otv n_open_input(ots* s, otv* a, int n) { return port_open_file(s, a, n, true); }
+
+static otv n_open_output(ots* s, otv* a, int n) { return port_open_file(s, a, n, false); }
+
+static otv port_memory(ots* s, otv* a, int n, unsigned kind) {
+  bool input = kind == PORT_INPUT_MEMORY;
+  if (need_arity(s, "open-memory-port", n, input ? 1 : 0, input ? 1 : 0) == OT_UNWIND)
+    return OT_UNWIND;
+  otv buffer = input ? a[0] : ot_nil, name = ot_nil;
+  OT_FRAME_SCOPED(s, &buffer, &name);
+  if (input) {
+    if (is_type(buffer, OBJ_STRING)) buffer = nat_string_utf8(s, &buffer, 1);
+    else if (is_type(buffer, OBJ_BYTEVECTOR)) buffer = nat_bytevector_copy(s, &buffer, 1);
+    else return ot_raise(s, "open-input-port: expected string or bytevector");
+  } else buffer = ot_make_bytevector(s, 256);
+  if (buffer == OT_UNWIND) return buffer;
+  const char* label = kind == PORT_STRING ? "string" : "bytevector";
+  name = ot_make_string(s, label, strlen(label));
+  return port_new(s, name, input, kind, 0, buffer, ot_nil);
+}
+
+static otv n_input_string(ots* s, otv* a, int n) {
+  if (n != 1 || !is_type(a[0], OBJ_STRING))
+    return ot_raise(s, "open-input-string: expected string");
+  return port_memory(s, a, n, PORT_INPUT_MEMORY);
+}
+
+static otv n_input_bytes(ots* s, otv* a, int n) {
+  if (n != 1 || !is_type(a[0], OBJ_BYTEVECTOR))
+    return ot_raise(s, "open-input-bytevector: expected bytevector");
+  return port_memory(s, a, n, PORT_INPUT_MEMORY);
+}
+
+static otv n_output_string(ots* s, otv* a, int n) { return port_memory(s, a, n, PORT_STRING); }
+
+static otv n_output_bytes(ots* s, otv* a, int n) { return port_memory(s, a, n, PORT_BYTES); }
+
+static otv port_extract(ots* s, otv* a, int n, unsigned kind) {
+  if (need_arity(s, "get-output", n, 1, 1) == OT_UNWIND ||
+      port_check(s, a[0], false, "get-output") == OT_UNWIND)
+    return OT_UNWIND;
+  if (as_port(a[0])->kind != kind) return ot_raise(s, "get-output: wrong port kind");
+  otv args[] = {as_port(a[0])->buffer, ot_make_int(0), ot_make_int((intptr_t)as_port(a[0])->end)};
+  return kind == PORT_STRING ? nat_utf8_string(s, args, 3) : nat_bytevector_copy(s, args, 3);
+}
+
+static otv n_get_string(ots* s, otv* a, int n) { return port_extract(s, a, n, PORT_STRING); }
+
+static otv n_get_bytes(ots* s, otv* a, int n) { return port_extract(s, a, n, PORT_BYTES); }
+
+static otv n_write_bytes(ots* s, otv* a, int n) {
+  if (need_arity(s, "write-bytevector", n, 1, 4) == OT_UNWIND ||
+      bytevector_argument(s, "write-bytevector", a[0]) == OT_UNWIND)
+    return OT_UNWIND;
+  size_t start, end;
+  if (span_arguments(s, "write-bytevector", a, n, 2, as_bytevector(a[0])->length, &start, &end) ==
+      OT_UNWIND)
+    return OT_UNWIND;
+  return port_write_bytes(s, port_optional(s, a, n, 1, false), a[0], start, end);
+}
+
+static otv n_write_string(ots* s, otv* a, int n) {
+  if (need_arity(s, "write-string", n, 1, 4) == OT_UNWIND) return OT_UNWIND;
+  otv p = port_optional(s, a, n, 1, false), bytes = ot_nil;
+  OT_FRAME_SCOPED(s, &p, &bytes);
+  otv args[] = {a[0], n > 2 ? a[2] : ot_nil, n > 3 ? a[3] : ot_nil};
+  bytes = nat_string_utf8(s, args, n > 1 ? n - 1 : 1);
+  if (bytes == OT_UNWIND) return bytes;
+  return port_write_bytes(s, p, bytes, 0, as_bytevector(bytes)->length);
+}
+
+static otv n_write_char(ots* s, otv* a, int n) {
+  if (need_arity(s, "write-char", n, 1, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!ot_is_char(a[0])) return ot_raise(s, "write-char: expected character");
+  otv p = port_optional(s, a, n, 1, false);
+  OT_FRAME_SCOPED(s, &p);
+  otv text = nat_string(s, a, 1);
+  if (text == OT_UNWIND) return text;
+  otv args[] = {text, p};
+  return n_write_string(s, args, 2);
+}
+
+static otv n_write_u8(ots* s, otv* a, int n) {
+  if (need_arity(s, "write-u8", n, 1, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!byte_value(a[0])) return ot_raise(s, "write-u8: expected byte");
+  otv p = port_optional(s, a, n, 1, false);
+  OT_FRAME_SCOPED(s, &p);
+  unsigned char byte = (unsigned char)ot_get_int(a[0]);
+  otv bytes = ot_make_bytevector(s, 1);
+  as_bytevector(bytes)->data[0] = byte;
+  return port_write_bytes(s, p, bytes, 0, 1);
+}
+
+static otv port_read_into(ots* s, otv bytes, otv value, size_t start, size_t end) {
+  if (port_check(s, value, true, "read-bytevector!") == OT_UNWIND) return OT_UNWIND;
+  OT_FRAME_SCOPED(s, &value, &bytes);
+  size_t at = start;
+  while (at < end) {
+    if (port_ensure(s, value, 1) == OT_UNWIND) return OT_UNWIND;
+    ot_port_obj* p = as_port(value);
+    size_t count = p->end - p->at;
+    if (!count) return at == start ? ot_eof : ot_make_int((intptr_t)(at - start));
+    if (count > end - at) count = end - at;
+    memcpy(as_bytevector(bytes)->data + at, as_bytevector(p->buffer)->data + p->at, count);
+    p->at += count;
+    p->position += count;
+    at += count;
+  }
+  return ot_make_int((intptr_t)(at - start));
+}
+
+static otv n_read_into(ots* s, otv* a, int n) {
+  if (need_arity(s, "read-bytevector!", n, 1, 4) == OT_UNWIND ||
+      bytevector_argument(s, "read-bytevector!", a[0]) == OT_UNWIND)
+    return OT_UNWIND;
+  size_t start, end;
+  if (span_arguments(s, "read-bytevector!", a, n, 2, as_bytevector(a[0])->length, &start, &end) ==
+      OT_UNWIND)
+    return OT_UNWIND;
+  return port_read_into(s, a[0], port_optional(s, a, n, 1, true), start, end);
+}
+
+static otv n_read_bytes(ots* s, otv* a, int n) {
+  if (need_arity(s, "read-bytevector", n, 1, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!ot_is_int(a[0]) || ot_get_int(a[0]) < 0)
+    return ot_raise(s, "read-bytevector: invalid count");
+  size_t size = (size_t)ot_get_int(a[0]);
+  otv p = port_optional(s, a, n, 1, true), bytes = ot_nil;
+  OT_FRAME_SCOPED(s, &p, &bytes);
+  bytes = ot_make_bytevector(s, size);
+  otv got = port_read_into(s, bytes, p, 0, size);
+  if (got == OT_UNWIND || got == ot_eof) return got;
+  if ((size_t)ot_get_int(got) == size) return bytes;
+  otv args[] = {bytes, ot_make_int(0), got};
+  return nat_bytevector_copy(s, args, 3);
+}
+
+static otv port_scan(ots* s, otv p, otv stops, bool until, bool skip, size_t limit,
+                     bool eof_result) {
+  OT_FRAME_SCOPED(s, &p, &stops);
+  if (port_check(s, p, true, "read-string") == OT_UNWIND) return OT_UNWIND;
+  bool ascii[128] = {false};
+  if (stops != ot_nil) {
+    const unsigned char* set = as_bytes(as_string(stops)->bytes)->data;
+    for (size_t i = 0; i < as_string(stops)->length; i++)
+      if (set[i] < 128) ascii[set[i]] = true;
+  }
+  buf out = {0};
+  size_t count = 0;
+  otv result = ot_nil;
+  while (count < limit) {
+    otv c = port_peek(s, p, true, false);
+    if (c == OT_UNWIND) {
+      result = c;
+      break;
+    }
+    if (c == ot_eof) {
+      if (!count && eof_result) result = c;
+      break;
+    }
+    bool member = false;
+    if (stops != ot_nil) {
+      const unsigned char* set = as_bytes(as_string(stops)->bytes)->data;
+      size_t length = as_string(stops)->length;
+      if (ot_char_value(c) < 128) member = ascii[ot_char_value(c)];
+      else
+        for (size_t i = 0; i < length;) {
+          if (utf8_decode(set, length, i) == ot_char_value(c)) {
+            member = true;
+            break;
+          }
+          i++;
+          while (i < length && (set[i] & 0xc0) == 0x80) i++;
+        }
+      if (member == until) break;
+    }
+    ot_port_obj* port = as_port(p);
+    size_t width =
+        utf8_valid_sequence(as_bytevector(port->buffer)->data + port->at, port->end - port->at);
+    if (!skip) buf_write(&out, (char*)as_bytevector(port->buffer)->data + port->at, width);
+    port->at += width;
+    port->position += width;
+    count++;
+  }
+  if (result == ot_nil)
+    result = skip         ? ot_make_int((intptr_t)count)
+             : out.failed ? ot_raise(s, "read: out of memory")
+                          : ot_make_string(s, out.data, out.length);
+  buf_free(&out);
+  return result;
+}
+
+static otv n_read_characters(ots* s, otv* a, int n) {
+  if (need_arity(s, "read-string", n, 1, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!ot_is_int(a[0]) || ot_get_int(a[0]) < 0) return ot_raise(s, "read-string: invalid count");
+  return port_scan(s, port_optional(s, a, n, 1, true), ot_nil, false, false,
+                   (size_t)ot_get_int(a[0]), true);
+}
+
+static otv n_read_all(ots* s, otv* a, int n) {
+  if (need_arity(s, "read-all", n, 0, 1) == OT_UNWIND) return OT_UNWIND;
+  return port_scan(s, port_optional(s, a, n, 0, true), ot_nil, false, false, SIZE_MAX, false);
+}
+
+static otv port_scan_args(ots* s, otv* a, int n, bool until, bool skip) {
+  if (need_arity(s, "scan", n, 1, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(a[0], OBJ_STRING)) return ot_raise(s, "scan: expected character set string");
+  return port_scan(s, port_optional(s, a, n, 1, true), a[0], until, skip, SIZE_MAX, false);
+}
+
+static otv n_read_until(ots* s, otv* a, int n) { return port_scan_args(s, a, n, true, false); }
+
+static otv n_read_while(ots* s, otv* a, int n) { return port_scan_args(s, a, n, false, false); }
+
+static otv n_skip_while(ots* s, otv* a, int n) { return port_scan_args(s, a, n, false, true); }
+
+static otv n_read_line(ots* s, otv* a, int n) {
+  if (need_arity(s, "read-line", n, 0, 1) == OT_UNWIND) return OT_UNWIND;
+  otv p = port_optional(s, a, n, 0, true), stops = ot_nil, text = ot_nil;
+  OT_FRAME_SCOPED(s, &p, &stops, &text);
+  otv first = port_peek(s, p, true, false);
+  if (first == ot_eof || first == OT_UNWIND) return first;
+  stops = ot_make_string(s, "\n", 1);
+  text = port_scan(s, p, stops, true, false, SIZE_MAX, false);
+  if (text == OT_UNWIND) return text;
+  otv next = port_peek(s, p, true, true);
+  if (next == OT_UNWIND) return next;
+  size_t length = as_string(text)->length;
+  if (next != ot_eof && length && as_bytes(as_string(text)->bytes)->data[length - 1] == '\r') {
+    buf copy = {0};
+    buf_write(&copy, (char*)as_bytes(as_string(text)->bytes)->data, length - 1);
+    text = ot_make_string(s, copy.data, copy.length);
+    buf_free(&copy);
+  }
+  return text;
+}
+
+static otv port_custom(ots* s, otv* a, int n, bool input) {
+  if (need_arity(s, "make-port", n, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(a[0], OBJ_STRING) || !is_type(a[1], OBJ_TABLE))
+    return ot_raise(s, "make-port: expected name and callbacks");
+  otv name = a[0], callbacks = a[1], buffer = ot_nil;
+  OT_FRAME_SCOPED(s, &name, &callbacks, &buffer);
+  const char* keys[] = {input ? "read" : "write", "close", "flush"};
+  for (size_t i = 0; i < 3; i++) {
+    otv key = ot_intern(s, keys[i], strlen(keys[i]), true);
+    otv f = ot_table_get(s, callbacks, key, ot_nil);
+    if ((i == 0 || !is_falsy(f)) && ot_value_type(f) != OT_TYPE_FUNCTION)
+      return ot_raise(s, "make-port: expected callback procedure");
+  }
+  buffer = ot_make_bytevector(s, 4096);
+  return port_new(s, name, input, PORT_CUSTOM, 0, buffer, callbacks);
+}
+
+static otv n_make_input(ots* s, otv* a, int n) { return port_custom(s, a, n, true); }
+
+static otv n_make_output(ots* s, otv* a, int n) { return port_custom(s, a, n, false); }
+
+static otv n_open_ports(ots* s, otv* a, int n) {
+  (void)a;
+  if (need_arity(s, "open-ports", n, 0, 0) == OT_UNWIND) return OT_UNWIND;
+  otv result = ot_array_new(s, 4), cursor = s->open_ports;
+  OT_FRAME_SCOPED(s, &result, &cursor);
+  while (is_type(cursor, OBJ_PAIR)) {
+    array_push(s, &result, as_pair(cursor)->car);
+    cursor = as_pair(cursor)->cdr;
+  }
+  for (size_t i = 0; i < 3; i++) {
+    otv param = i == 0 ? s->input_port_param : i == 1 ? s->output_port_param : s->error_port_param;
+    otv port = ((ot_param_obj*)ot_as_obj(param))->value;
+    if (!as_port(port)->closed) array_push(s, &result, port);
+  }
+  return result;
+}
+
+static otv n_flush_all(ots* s, otv* a, int n) {
+  (void)a;
+  if (need_arity(s, "flush-ports!", n, 0, 0) == OT_UNWIND) return OT_UNWIND;
+  otv cursor = s->open_ports, p = ot_nil;
+  OT_FRAME_SCOPED(s, &cursor, &p);
+  while (is_type(cursor, OBJ_PAIR)) {
+    p = as_pair(cursor)->car;
+    cursor = as_pair(cursor)->cdr;
+    if (!as_port(p)->input && !as_port(p)->closed && port_flush(s, p) == OT_UNWIND)
+      return OT_UNWIND;
+  }
+  p = ((ot_param_obj*)ot_as_obj(s->output_port_param))->value;
+  if (!as_port(p)->closed && port_flush(s, p) == OT_UNWIND) return OT_UNWIND;
+  p = ((ot_param_obj*)ot_as_obj(s->error_port_param))->value;
+  if (!as_port(p)->closed && port_flush(s, p) == OT_UNWIND) return OT_UNWIND;
+  return ot_nil;
+}
+
+bool ot_flush_ports(ots* s) {
+  if (!is_type(s->output_port_param, OBJ_PARAM)) return true;
+  otv condition = s->vm.condition, args = s->vm.unwind_args;
+  OT_FRAME_SCOPED(s, &condition, &args);
+  ot_unwind_kind kind = s->vm.unwind_kind;
+  uint64_t restart = s->vm.unwind_restart_id;
+  bool quit = s->quit_requested;
+  int status = s->quit_status;
+  s->vm.condition = s->vm.unwind_args = ot_nil;
+  s->vm.unwind_kind = UNWIND_NONE;
+  s->vm.unwind_restart_id = 0;
+  s->quit_requested = false;
+  if (n_flush_all(s, NULL, 0) == OT_UNWIND) return false;
+  s->vm.condition = condition;
+  s->vm.unwind_args = args;
+  s->vm.unwind_kind = kind;
+  s->vm.unwind_restart_id = restart;
+  s->quit_requested = quit;
+  s->quit_status = status;
+  return true;
+}
+
+static char* port_path(ots* s, otv path, const char* op) {
+  if (!is_type(path, OBJ_STRING)) {
+    ot_raise(s, "%s: expected path string", op);
+    return NULL;
+  }
+  const char* text;
+  size_t size;
+  ot_string_bytes(path, &text, &size);
+  if (memchr(text, 0, size)) {
+    ot_raise(s, "%s: NUL in path", op);
+    return NULL;
+  }
+  char* copy = ot_host_alloc(size + 1);
+  if (!copy) {
+    ot_raise(s, "%s: out of memory", op);
+    return NULL;
+  }
+  memcpy(copy, text, size);
+  return copy;
+}
+
+static otv port_file_info(ots* s, otv* a, int n, bool exists) {
+  const char* op = exists ? "file-exists?" : "file-info";
+  if (need_arity(s, op, n, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  char* path = port_path(s, a[0], op);
+  if (!path) return OT_UNWIND;
+  ot_io_file_info info = {0};
+  int reason = s->io_host.info ? s->io_host.info(s->io_userdata, path, &info) : OT_IO_OTHER;
+  ot_host_free(path);
+  if (exists && (reason == OT_IO_NOT_FOUND || reason == OT_IO_NOT_DIRECTORY)) return ot_false;
+  if (reason) return port_error(s, a[0], op, reason);
+  if (exists) return ot_true;
+  otv result = ot_table_new(s, 3), key = ot_nil, value = ot_nil;
+  OT_FRAME_SCOPED(s, &result, &key, &value);
+  key = ot_intern(s, "type", 4, true);
+  const char* kind = info.kind == 1 ? "file" : info.kind == 2 ? "directory" : "other";
+  value = ot_intern(s, kind, strlen(kind), true);
+  ot_table_put(s, result, key, value);
+  key = ot_intern(s, "size", 4, true);
+  value = info.size <= (uint64_t)OT_INT_MAX ? ot_make_int((intptr_t)info.size)
+                                            : ot_make_float(s, (double)info.size);
+  ot_table_put(s, result, key, value);
+  key = ot_intern(s, "modified", 8, true);
+  value = ot_make_float(s, info.modified);
+  ot_table_put(s, result, key, value);
+  return result;
+}
+
+static otv n_file_info(ots* s, otv* a, int n) { return port_file_info(s, a, n, false); }
+
+static otv n_file_exists(ots* s, otv* a, int n) { return port_file_info(s, a, n, true); }
+
+static otv port_file_change(ots* s, otv* a, int n, int operation) {
+  const char* op = operation == 0   ? "delete-file"
+                   : operation == 1 ? "make-directory"
+                                    : "rename-file";
+  int argc = operation == 2 ? 2 : 1;
+  if (need_arity(s, op, n, argc, argc) == OT_UNWIND) return OT_UNWIND;
+  char* path = port_path(s, a[0], op);
+  if (!path) return OT_UNWIND;
+  int reason = OT_IO_OTHER;
+  if (operation == 0 && s->io_host.remove) reason = s->io_host.remove(s->io_userdata, path);
+  if (operation == 1 && s->io_host.mkdir) reason = s->io_host.mkdir(s->io_userdata, path);
+  if (operation == 2) {
+    char* to = port_path(s, a[1], op);
+    if (!to) {
+      ot_host_free(path);
+      return OT_UNWIND;
+    }
+    if (s->io_host.rename) reason = s->io_host.rename(s->io_userdata, path, to);
+    ot_host_free(to);
+  }
+  ot_host_free(path);
+  return reason ? port_error(s, a[0], op, reason) : ot_nil;
+}
+
+static otv n_delete_file(ots* s, otv* a, int n) { return port_file_change(s, a, n, 0); }
+
+static otv n_mkdir(ots* s, otv* a, int n) { return port_file_change(s, a, n, 1); }
+
+static otv n_rename_file(ots* s, otv* a, int n) { return port_file_change(s, a, n, 2); }
+
+typedef struct port_directory {
+  ots* state;
+  otv result;
+} port_directory;
+
+static void port_directory_entry(void* user, const char* name) {
+  port_directory* d = user;
+  otv text = ot_make_string(d->state, name, strlen(name));
+  array_push(d->state, &d->result, text);
+}
+
+static otv n_list_directory(ots* s, otv* a, int n) {
+  if (need_arity(s, "list-directory", n, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  char* path = port_path(s, a[0], "list-directory");
+  if (!path) return OT_UNWIND;
+  port_directory d = {.state = s, .result = ot_array_new(s, 8)};
+  OT_FRAME_SCOPED(s, &d.result);
+  int reason = s->io_host.list ? s->io_host.list(s->io_userdata, path, port_directory_entry, &d)
+                               : OT_IO_OTHER;
+  ot_host_free(path);
+  if (reason) return port_error(s, a[0], "list-directory", reason);
+  /* The shared sort preserves array kind and Unicode string ordering. */
+  otv symbol = ot_intern(s, "sort", 4, false);
+  otv variable = namespace_var(s, s->core_namespace, symbol, false);
+  return apply_value(s, ((ot_var_obj*)ot_as_obj(variable))->value, &d.result, 1, false);
+}
+
+static otv n_file_symbolic_link(ots* s, otv* a, int n) {
+  const char* op = "file-symbolic-link?";
+  if (need_arity(s, op, n, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  char* path = port_path(s, a[0], op);
+  if (!path) return OT_UNWIND;
+  bool result = false;
+  int reason = s->io_host.symbolic_link ? s->io_host.symbolic_link(s->io_userdata, path, &result)
+                                        : OT_IO_OTHER;
+  ot_host_free(path);
+  if (reason == OT_IO_NOT_FOUND || reason == OT_IO_NOT_DIRECTORY) return ot_false;
+  if (reason) return port_error(s, a[0], op, reason);
+  return result ? ot_true : ot_false;
+}
+
+static otv n_current_directory(ots* s, otv* a, int n) {
+  (void)a;
+  if (need_arity(s, "current-directory", n, 0, 0) == OT_UNWIND) return OT_UNWIND;
+  char* path = NULL;
+  int reason = s->io_host.cwd ? s->io_host.cwd(s->io_userdata, &path) : OT_IO_OTHER;
+  if (reason) return port_error(s, ot_nil, "current-directory", reason);
+  otv result = ot_make_string(s, path, strlen(path));
+  ot_host_free(path);
+  return result;
+}
+
+static const nat_def port_natives[] = {{"flush-ports!", n_flush_all},
+                                       {"file-exists?", n_file_exists},
+                                       {"file-symbolic-link?", n_file_symbolic_link},
+                                       {"current-directory", n_current_directory},
+                                       {"file-info", n_file_info},
+                                       {"delete-file", n_delete_file},
+                                       {"rename-file", n_rename_file},
+                                       {"make-directory", n_mkdir},
+                                       {"list-directory", n_list_directory},
+                                       {"display-to", n_display_to},
+                                       {"write-to", n_write_to},
+                                       {"port?", n_port_p},
+                                       {"input-port?", n_input_p},
+                                       {"output-port?", n_output_p},
+                                       {"input-port-open?", n_input_open_p},
+                                       {"output-port-open?", n_output_open_p},
+                                       {"open-input-file", n_open_input},
+                                       {"open-output-file", n_open_output},
+                                       {"open-binary-input-file", n_open_input},
+                                       {"open-binary-output-file", n_open_output},
+                                       {"open-input-string", n_input_string},
+                                       {"open-input-bytevector", n_input_bytes},
+                                       {"open-output-string", n_output_string},
+                                       {"open-output-bytevector", n_output_bytes},
+                                       {"get-output-string", n_get_string},
+                                       {"get-output-bytevector", n_get_bytes},
+                                       {"close-port", n_close_port},
+                                       {"close-input-port", n_close_input},
+                                       {"close-output-port", n_close_output},
+                                       {"read-char", n_read_char},
+                                       {"peek-char", n_peek_char},
+                                       {"read-u8", n_read_u8},
+                                       {"peek-u8", n_peek_u8},
+                                       {"read-bytevector", n_read_bytes},
+                                       {"read-bytevector!", n_read_into},
+                                       {"%read-characters", n_read_characters},
+                                       {"read-all", n_read_all},
+                                       {"read-line", n_read_line},
+                                       {"read-until", n_read_until},
+                                       {"read-while", n_read_while},
+                                       {"skip-while", n_skip_while},
+                                       {"write-string", n_write_string},
+                                       {"write-char", n_write_char},
+                                       {"write-u8", n_write_u8},
+                                       {"write-bytevector", n_write_bytes},
+                                       {"flush-output-port", n_flush},
+                                       {"make-input-port", n_make_input},
+                                       {"make-output-port", n_make_output},
+                                       {"open-ports", n_open_ports}};
+
+static otv port_param(ots* s, const char* name, const char* label, bool input, unsigned kind,
+                      intptr_t handle) {
+  otv symbol = ot_intern(s, name, strlen(name), false), value = ot_nil, buffer = ot_nil;
+  OT_FRAME_SCOPED(s, &symbol, &value, &buffer);
+  buffer = ot_make_bytevector(s, 4096);
+  value = ot_make_string(s, label, strlen(label));
+  value = port_new(s, value, input, kind, handle, buffer, ot_nil);
+  ot_param_obj* param = must_alloc(s, sizeof(*param), OBJ_PARAM);
+  ot_store(s, param, &param->name, symbol);
+  ot_store(s, param, &param->value, value);
+  otv result = ot_from_obj(param);
+  OT_FRAME_SCOPED(s, &result);
+  define_var(s, s->core_namespace, symbol, result, ot_nil, false);
+  return result;
+}
+
+static void ports_init(ots* s) {
+  ot_set_io_host(s, NULL, NULL);
+  s->open_ports = ot_null;
+  s->input_port_param = port_param(s, "current-input-port", "stdin", true, PORT_STANDARD, 0);
+  s->output_port_param = port_param(s, "current-output-port", "stdout", false, PORT_WRITER, 1);
+  s->error_port_param = port_param(s, "current-error-port", "stderr", false, PORT_STANDARD, 2);
+  otv old = s->vm.current_namespace;
+  OT_FRAME_SCOPED(s, &old);
+  s->vm.current_namespace = s->core_namespace;
+  for (size_t i = 0; i < sizeof port_natives / sizeof *port_natives; i++)
+    ot_def_nat(s, port_natives[i].name, port_natives[i].function);
+  s->vm.current_namespace = old;
+}
 
 static const nat_def core_nats[] = {
     {"call-with-cleanup", nat_call_with_cleanup},

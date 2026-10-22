@@ -60,8 +60,9 @@
 (check "finite? is part of the Otium vocabulary" '(#t #f #f)
   (evaluate '(list (finite? 1.0) (finite? +inf.0) (finite? +nan.0))))
 (evaluate '(require otium.cli otium.ffi))
-(check "CLI helpers are private" #t (fails? 'otium.cli/%property))
-(check "FFI primitives are private" #t (fails? 'otium.ffi/%alloc))
+(check "CLI helpers cannot be referred" #t (fails? '(require otium.cli :refer (%property))))
+(check "qualified names reach private helpers" #t (evaluate '(procedure? otium.cli/%property)))
+(check "FFI primitives cannot be referred" #t (fails? '(require otium.ffi :refer (%alloc))))
 (evaluate '(def saved-null otium.ffi/null))
 (namespace-set! 'otium.cli 'compile (lambda (spec) 'replaced))
 (namespace-set! 'otium.ffi 'sizeof (lambda (type) 'replaced))
@@ -75,5 +76,5 @@
   (fails? '(otium.ffi/sizeof 'void)))
 (check "FFI reload preserves native pointer types" #t
   (evaluate '(otium.ffi/pointer=? saved-null otium.ffi/null)))
-(check "FFI primitives remain private after reload" #t (fails? 'otium.ffi/%alloc))
+(check "FFI primitives remain private after reload" #t (fails? '(require otium.ffi :refer (%alloc))))
 (printf "~a environment checks passed\n" checks)

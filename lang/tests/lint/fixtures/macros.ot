@@ -1,0 +1,35 @@
+(ns fixture.macros)
+
+(def- (helper x)
+  (* x 2))
+
+(def counter 0)
+
+(defmacro doubled (x)
+  `(helper ,x)) ;~ L0303
+
+(defmacro either (a b)
+  `(let ((v ,a))
+     (if v
+         v
+         ,b))) ;~ L0302
+
+(defmacro twice (x)
+  `(let ((v ,x)) (+ v v)))
+
+(defmacro qualified (x)
+  `(fixture.macros/helper ,x)) ;~ L0304
+
+(defmacro add-one (x)
+  (let ((n x)) ;~ L0202
+    #`(+ n 1))) ;~ L0301
+
+(defmacro counted (x)
+  (set! counter (+ counter 1)) ;~ L0305
+  x)
+
+(defmacro clean (x)
+  #`(let ((v# ,x)) (helper (+ v# v#))))
+
+(def (uses)
+  (clean (doubled 2)))

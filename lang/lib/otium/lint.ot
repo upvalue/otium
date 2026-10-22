@@ -112,7 +112,90 @@
         (when (and (> (length parts) index) (eq? ((nth parts index) :kind) :array))
           (report! context "bracket-bindings" (nth parts index) {:form name :expected (get bracket-forms name)}))))))
 
-(def- syntax-checks (list if-chain foreign-definition bracket-bindings))
+;; Templates: a ` or #` prefix node. Unquoted code inside a template is
+;; checked as code by the main traversal, not as template.
+
+(def- (template? node)
+  (and (eq? (node :kind) :prefix) (member (node :text) '("`" "#`"))))
+
+(def- (unquote? node)
+  (and (eq? (node :kind) :prefix) (member (node :text) '("," ",@"))))
+
+(def- (template-nodes node visit)
+  ;; Call visit on node and every node beneath it that is still template.
+  (unless (unquote? node)
+    (visit node)
+    (cond
+      ((eq? (node :kind) :prefix) (template-nodes (node :child) visit))
+      ((get node :children) (for-each (fn (child) (template-nodes child visit)) (node :children)))
+      (else nil))))
+
+(def- (inserts-code? node)
+  ;; True when an unquote appears anywhere beneath node.
+  (let ((found #f))
+    (syntax/walk node (fn (n) (when (unquote? n) (set! found #t))))
+    found))
+
+(def- (template-binding-names node)
+  ;; Literal names a let or fn in a template binds, and the forms they scope over.
+  (let ((name (syntax/head-name node))
+        (parts (if name
+                   (syntax/forms node)
+                   '()))
+        (atom? (fn (n) (eq? (n :kind) :atom))))
+    (cond
+      ((and (equal? name "fn") (> (length parts) 2))
+       (let ((params (nth parts 1)))
+         (list (if (atom? params)
+                   (list params)
+                   (filter atom?
+                           (if (get params :children)
+                               (syntax/forms params)
+                               '())))
+               (drop 2 parts))))
+      ((and (equal? name "let") (> (length parts) 2) (atom? (nth parts 1))) (list (list (nth parts 1)) (drop 3 parts)))
+      ((and (equal? name "let") (> (length parts) 2) (get (nth parts 1) :children))
+       ;; let is sequential, so later initializers are in scope too.
+       (let ((bindings (filter (fn (binding)
+                                 (and (get binding :children)
+                                      (= (length (syntax/forms binding)) 2)
+                                      (atom? (first (syntax/forms binding)))))
+                               (syntax/forms (nth parts 1)))))
+         (list (map (fn (binding) (first (syntax/forms binding))) bindings)
+               (append (map (fn (binding) (second (syntax/forms binding)))
+                            (if (pair? bindings)
+                                (cdr bindings)
+                                '()))
+                       (drop 2 parts)))))
+      (else nil))))
+
+(def- (captured-binding context node _quoted)
+  (when (and (template? node) (equal? (node :text) "`"))
+    (template-nodes (node :child)
+                    (fn (n)
+                      (let ((found (template-binding-names n)))
+                        (when (and found (exists inserts-code? (second found)))
+                          (for-each (fn (name)
+                                      (unless (or (member (name :text) '("&" "_"))
+                                                  (string-starts-with? (name :text) "_"))
+                                        (report! context "captured-binding" name {:name (name :text)})))
+                                    (first found))))))))
+
+(def- (self-qualified-template context node _quoted)
+  (let ((space (get context :ns-name)))
+    (when (and space (template? node))
+      (let ((prefix (str space "/")))
+        (template-nodes (node :child)
+                        (fn (n)
+                          (when (and (eq? (n :kind) :atom)
+                                     (string-starts-with? (n :text) prefix)
+                                     (> (string-length (n :text)) (string-length prefix)))
+                            (report! context
+                                     "self-qualified-template"
+                                     n
+                                     {:name (n :text) :member (substring (n :text) (string-length prefix))}))))))))
+
+(def- syntax-checks (list if-chain foreign-definition bracket-bindings captured-binding self-qualified-template))
 
 (def- (check-syntax context node quoted)
   ;; Quoted data is not code, but a quasiquote template usually is.
@@ -294,8 +377,30 @@
 ;; free reference with the number of earlier occurrences of the same name, so
 ;; it can be matched to the same occurrence in the source.
 
-(def- (make-walk)
-  {:seen {} :bindings [] :free [] :host 0 :active '() :functions [] :definitions {}})
+(def- (make-walk space defined)
+  {:seen {}
+   :bindings []
+   :free []
+   :host 0
+   :active '()
+   :functions []
+   :definitions {}
+   :space (str space "/")
+   :defined defined
+   :macro 0
+   :findings []})
+
+(def- (finding! walk rule name index)
+  (push! (walk :findings) {:rule rule :name name :index index}))
+
+(def- (local? scope name)
+  (find (fn (b) (equal? (b :name) name)) scope))
+
+(def- (expansion-effect! walk scope target)
+  ;; A macro body that changes state outside itself.
+  (when (and (> (walk :macro) 0) (symbol? target))
+    (let ((name (symbol->string target)))
+      (unless (local? scope name) (finding! walk "expansion-side-effect" name (get (walk :seen) name 0))))))
 
 (def- (note! walk name)
   (let ((count (get (walk :seen) name 0)))
@@ -374,15 +479,79 @@
           (put! walk :active active))
         (walk-all walk scope (cdr (cdr form))))))
 
-(def- (walk-quasi walk scope x depth)
-  (when (pair? x)
+(def- (walk-quasi walk scope x depth data)
+  (cond
+    ((symbol? x) (template-symbol! walk scope x data))
+    ((not (pair? x)) nil)
+    ((eq? (car x) 'quasiquote) (walk-quasi walk scope (second x) (+ depth 1) data))
+    ((or (eq? (car x) 'unquote) (eq? (car x) 'unquote-splicing))
+     (if (= depth 1)
+         (walk-form walk scope (second x))
+         (walk-quasi walk scope (second x) (- depth 1) data)))
+    ((and (eq? (car x) 'quote) (pair? (cdr x))) (walk-quasi walk scope (second x) depth #t))
+    (else (walk-quasi walk scope (car x) depth data) (walk-quasi walk scope (cdr x) depth data))))
+
+;; Core form names and markers, which #` leaves bare (lib/otium/expander.ot).
+(def- template-bare
+  '(quote quasiquote
+          syntax-quote
+          unquote
+          unquote-splicing
+          if
+          begin
+          fn
+          def
+          def-
+          defonce
+          set!
+          let
+          while
+          and
+          or
+          cond
+          defmacro
+          ns
+          require
+          handler-bind
+          restart-case
+          try
+          unwind-protect
+          defer
+          defparam
+          with-params
+          symbol-macrolet
+          with-slots
+          reset-generic!
+          defclass
+          defabstract
+          defgeneric
+          defmethod
+          reset-class!
+          when
+          unless
+          else
+          catch
+          &
+          _
+          array
+          table))
+
+;; A #` template qualifies its symbols with the namespace being linted, so a
+;; local name there was meant to be unquoted. A bare symbol in a plain
+;; template that names one of the file's definitions resolves wherever the
+;; expansion lands instead.
+(def- (template-symbol! walk scope symbol data)
+  (let ((name (symbol->string symbol)))
     (cond
-      ((eq? (car x) 'quasiquote) (walk-quasi walk scope (second x) (+ depth 1)))
-      ((or (eq? (car x) 'unquote) (eq? (car x) 'unquote-splicing))
-       (if (= depth 1)
-           (walk-form walk scope (second x))
-           (walk-quasi walk scope (second x) (- depth 1))))
-      (else (walk-quasi walk scope (car x) depth) (walk-quasi walk scope (cdr x) depth)))))
+      ((member symbol template-bare) nil)
+      ((string-starts-with? name (walk :space))
+       (let ((member (substring name (string-length (walk :space)))))
+         (let ((index (note! walk member)))
+           (when (local? scope member) (finding! walk "missed-unquote" member index)))))
+      (data nil)
+      (else (let ((index (note! walk name)))
+              (when (and (get (walk :defined) name) (not (local? scope name)))
+                (finding! walk "template-namespace-ref" name index)))))))
 
 (def- (walk-form walk scope x)
   (cond
@@ -393,7 +562,7 @@
                 (name (symbol->string (car x))))
             (cond
               ((eq? head 'quote) nil)
-              ((eq? head 'quasiquote) (walk-quasi walk scope (second x) 1))
+              ((eq? head 'quasiquote) (walk-quasi walk scope (second x) 1 #f))
               ((eq? head 'fn)
                (walk-body walk (bind-all walk scope (parameter-names (second x)) :parameter) (cdr (cdr x))))
               ((eq? head 'let)
@@ -415,8 +584,12 @@
                           defparam))
                (walk-definition walk scope x))
               ((eq? head 'defmacro)
-               (walk-body walk (bind-all walk scope (parameter-names (nth x 2)) :parameter) (cdr (cdr (cdr x)))))
+               (put! walk :macro (+ (walk :macro) 1))
+               (walk-body walk (bind-all walk scope (parameter-names (nth x 2)) :parameter) (cdr (cdr (cdr x))))
+               (put! walk :macro (- (walk :macro) 1)))
+              ((member head '(put! push! pop!)) (expansion-effect! walk scope (second x)) (walk-all walk scope x))
               ((eq? head 'set!)
+               (expansion-effect! walk scope (second x))
                (when (symbol? (second x))
                  (let ((binding (find (fn (b) (equal? (b :name) (symbol->string (second x)))) scope)))
                    (when binding (put! binding :mutated #t))))
@@ -523,9 +696,13 @@
               (walk :functions))))
 
 (def- (check-names! context space node datum)
-  (let ((walk (make-walk)))
+  (let ((walk (make-walk space (context :defined))))
     (walk-form walk '() datum)
     (check-liftable! context node walk)
+    (for-each (fn (finding)
+                (let ((atom (occurrence node (finding :name) (finding :index))))
+                  (report! context (finding :rule) (or atom node) {:name (finding :name)})))
+              (walk :findings))
     (let ((free (filter (fn (ref) (not (get (context :defined) (ref :name)))) (walk :free)))
           (names (sort (keys (reduce (fn (seen ref) (put seen (ref :name) #t)) {} free))))
           (unbound (unresolved space names)))
@@ -638,6 +815,9 @@ the path to report and an options table of :levels, rule names mapped to
         (top (syntax/parse text))
         (tops (filter (fn (node) (not (syntax/comment? node))) (array-to-list top))))
     (collect-definitions! context tops)
+    (let ((space (find (fn (node) (equal? (syntax/head-name node) "ns")) tops)))
+      (when (and space (> (length (syntax/forms space)) 1))
+        (put! context :ns-name ((second (syntax/forms space)) :text))))
     (collect-directives! context top '())
     (for-each (fn (node) (check-syntax context node #f)) tops)
     (when (get options :expand #t) (check-expanded! context tops))

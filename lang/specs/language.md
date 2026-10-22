@@ -19,7 +19,9 @@ data munging. The choices that make it itself:
 - **Common-Lisp-style conditions.** Handlers run at the signal site before
   the stack unwinds, and named *restarts* let a handler resume execution at
   a chosen recovery point.
-- **Unhygienic macros** with `gensym`, elisp/Janet style.
+- **Unhygienic macros** with `gensym`, elisp/Janet style, and a
+  Clojure-style syntax quote that qualifies a template's names where it is
+  written.
 - **Proper tail calls** and cooperative interruption as semantic
   requirements, so a host can run long scripts and cancel them safely.
 
@@ -64,8 +66,9 @@ An atom token is classified in this order:
 2. `#t`, `#true`, `true` are boolean true; `#f`, `#false`, `false` are
    boolean false.
 3. `#\` starts a character literal (1.4). `#u8(` opens a bytevector
-   constructor, read as `(bytevector ...)`. Other tokens starting with `#`
-   are read errors. The `#` prefix is reserved.
+   constructor, read as `(bytevector ...)`. ``#` `` is quote sugar (1.5).
+   Other tokens starting with `#` are read errors. The `#` prefix is
+   reserved.
 4. `:name` is the keyword `name` (any non-empty run of atom characters).
    A bare `:` is a read error.
 5. A token that *starts numerically* -- optionally signed (`+`/`-`), then a
@@ -100,6 +103,7 @@ surrogate or a value above `#x10FFFF` is a read error.
 |---|---|
 | `'x` | `(quote x)` |
 | `` `x `` | `(quasiquote x)` |
+| ``#`x`` | `(syntax-quote x)` |
 | `,x` | `(unquote x)` |
 | `,@x` | `(unquote-splicing x)` |
 
@@ -319,9 +323,9 @@ For an unqualified symbol (no interior `/`):
 For a qualified symbol `p/n` (interior `/`, neither side empty; `/` alone
 is unqualified): resolve `p` through the current namespace's alias table,
 falling back to `p` as a literal namespace name, then look up `n` in that
-namespace's own vars. Missing namespace, missing var, or a private var
-referenced from another namespace (7.4) is an error. Qualified symbols
-never resolve lexically.
+namespace's own vars. A missing namespace or var is an error; private vars
+can be reached this way (7.4). Qualified symbols never resolve lexically,
+and binding one as a local or parameter is an error.
 
 Free symbols in a function body resolve in the function's *defining*
 namespace at call time (7.5).
@@ -505,6 +509,9 @@ Nested quasiquotes increment depth, unquotes decrement it, and only
 depth-1 unquotes evaluate. `unquote` / `unquote-splicing` outside
 quasiquote is an error, as is splicing a non-list.
 
+**`(syntax-quote x)`** -- a quasiquote whose template names resolve where
+it is written (6.2).
+
 **`(ns name clauses…)`**, **`(require spec…)`** -- section 7.
 
 **`(handler-bind …)`, `(restart-case …)`, `(try …)`,
@@ -560,10 +567,13 @@ Code constructed at runtime is expanded when it reaches `eval` (10.8).
 The expander runs ordinary code: a macro body may call any function
 already defined at expansion time.
 
-Macros are unhygienic: introduced symbols capture whatever is in scope at
-the expansion site. `(gensym)` / `(gensym prefix)` returns a fresh symbol
-guaranteed distinct from any symbol appearing in source or from prior
-gensyms. That, plus discipline, is the hygiene story.
+Macros are unhygienic: symbols a plain quasiquote template introduces
+capture whatever is in scope at the expansion site. `(gensym)` /
+`(gensym prefix)` returns a fresh symbol guaranteed distinct from any
+symbol appearing in source or from prior gensyms. A syntax quote (6.2)
+qualifies a template's free names where it is written, so its expansion
+means the same thing in any namespace and cannot be captured by the
+caller's locals.
 
 Macros live in vars like any definition. A macro var referenced in
 non-head position evaluates to the macro object itself (`macro?` tests
@@ -605,6 +615,51 @@ table's fields:
 ```
 
 There are no global symbol macros.
+
+### 6.2 Syntax quote
+
+``#`template`` reads as `(syntax-quote template)`. It is expanded where it
+appears, in the namespace current at that point, into a `quasiquote` of
+the same template with each symbol rewritten:
+
+- A symbol that resolves as a var becomes `p/n`, where `p` is the
+  namespace that defines the var and `n` its name there: a referred or
+  core name is qualified with its defining namespace, an alias-qualified
+  name with the full namespace name.
+- Any other unqualified symbol is qualified with the current namespace,
+  so a template may name a definition that comes later in the file. A
+  qualified symbol that does not resolve is left as written.
+- `name#`, an unqualified symbol ending in `#`, stands for a fresh symbol
+  made with `gensym` each time the template is evaluated. Every `name#`
+  in one template is the same symbol. `name#` inside a nested template is
+  an error.
+- These stay as written: special-form names; `when`, `unless`, `else`,
+  `catch`, `&`, `_`, `array` and `table`; symbols inside a `quote`d form
+  in the template; the specs of an `ns` or `require` form; and, on
+  runtimes with host syntax, host syntax names.
+
+Unquoted expressions are code, expanded normally. A nested quasiquote or
+syntax quote raises the depth as in `quasiquote`, and its symbols are
+rewritten the same way.
+
+Qualified symbols reach private vars (7.4) and do not resolve lexically
+(3.1), so an expansion refers to the same vars wherever it is used, and
+local bindings at the use site cannot capture them. Because binding a
+qualified symbol is an error, a template that binds a name must use
+`name#` or an unquoted symbol.
+
+```
+(ns app.tools)
+(def- (log-call name value) (println name value) value)
+
+(defmacro traced (expression)
+  #`(let ((value# ,expression))
+      (log-call ',expression value#)))
+```
+
+`(traced (+ 1 2))` used in another namespace calls `app.tools/log-call`,
+even though it is private and even if the caller has a local named
+`log-call`.
 
 ---
 
@@ -648,7 +703,8 @@ finishes, so a switch cannot leak out of nested code.
 `(full.name option…)` with options:
 
 - `:as alias` -- register `alias → full.name` in the current namespace's
-  alias map.
+  alias map. An alias spelled like the name of another existing namespace
+  is an error.
 - `:refer (a b)` -- copy the named public vars into the current
   namespace's refer map. Referring a missing or private var is an error.
 - `:reload` -- discard any loaded copy of the namespace and re-load it.
@@ -663,9 +719,10 @@ require) is an error, as is a name not found on the path.
 ### 7.4 Privacy
 
 `def-` marks a var private. Private vars resolve normally from their
-own namespace but are an error to reach via qualified reference or
-`:refer` from any other namespace, and are skipped by the automatic core
-refer.
+own namespace, can be reached from any namespace by qualified reference,
+and are an error to `:refer`. The automatic core refer skips them.
+Qualified access is what lets a macro's expansion use its namespace's
+private helpers (6.2).
 
 ### 7.5 Namespace of execution
 

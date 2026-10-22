@@ -1,21 +1,24 @@
 (library (otium expander)
   (export make-expander expander-top expander-head install-application! call-function-name
-          expander-lookup expander-native-syntax? expander-invoke)
+          expander-lookup expander-native-syntax? expander-invoke expander-qualify
+          expander-local-name)
   (import (chezscheme) (only (otium reader) read-otium copy-source!)
           (only (otium generic-core) make-slot-cache cached-call cached-set-call)
           (only (otium conditions) fail))
 
   ;; The expander itself is lib/otium/expander.ot, read with the Otium
   ;; reader and evaluated with the Otium core forms. It uses no macros, so it
-  ;; needs no expansion. The runtime supplies the six natives it calls.
+  ;; needs no expansion. The runtime supplies the eight natives it calls.
   ;; A plain expander leaves applications as Otium wrote them, for tools that
   ;; read expanded code; others lower them to the runtime's call macros.
   (define-record-type (expander make-expander expander?)
-    (fields lookup native-syntax? invoke plain?)
+    (fields lookup native-syntax? invoke qualify local-name plain?)
     (protocol (lambda (new)
                 (case-lambda
-                  [(lookup native-syntax? invoke) (new lookup native-syntax? invoke #f)]
-                  [(lookup native-syntax? invoke plain?) (new lookup native-syntax? invoke plain?)]))))
+                  [(lookup native-syntax? invoke qualify local-name)
+                   (new lookup native-syntax? invoke qualify local-name #f)]
+                  [(lookup native-syntax? invoke qualify local-name plain?)
+                   (new lookup native-syntax? invoke qualify local-name plain?)]))))
 
   (define unary-application-name (gensym "otium-unary-call"))
   (define application-name (gensym "otium-call"))
@@ -58,6 +61,10 @@
       (define-top-level-value 'expander-locate copy-source! env)
       (define-top-level-value 'expander-fail
         (lambda (code message form) (fail code 'detail message 'form form)) env)
+      (define-top-level-value 'expander-qualify
+        (lambda (name) ((expander-qualify (current-expander)) name)) env)
+      (define-top-level-value 'expander-local-name
+        (lambda (name) ((expander-local-name (current-expander)) name)) env)
       (define-top-level-value 'expander-native-syntax?
         (lambda (name) ((expander-native-syntax? (current-expander)) name)) env)
       (let ([path (shared-source)])

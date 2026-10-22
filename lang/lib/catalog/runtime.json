@@ -369,6 +369,18 @@
       "c"
     ]
   },
+  "expander-qualify": {
+    "text": "(expander-qualify symbol)\nInternal expander hook: symbol qualified with the namespace that owns it, or with the current namespace when unbound; false to leave it bare.",
+    "runtimes": [
+      "c"
+    ]
+  },
+  "expander-local-name": {
+    "text": "(expander-local-name symbol)\nInternal expander hook: for a qualified symbol, the bare name when it means the same binding in the current namespace, else false.",
+    "runtimes": [
+      "c"
+    ]
+  },
   "expt": {
     "text": "(expt base exponent)\nRaise base to exponent. Nonnegative integer powers of integers use integer arithmetic with wrapping overflow; other inputs use floating point.",
     "runtimes": [

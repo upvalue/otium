@@ -1,0 +1,50 @@
+;; #` templates. Run with -L tests/syntax-quote/lib.
+(require otium.test :refer (check fails? report))
+(require (sq.maker :refer (tenfold with-one
+                                   bad-binding
+                                   listed
+                                   quoted
+                                   markers
+                                   later-helper
+                                   hundredfold
+                                   nested
+                                   requires-extra)))
+(require sq.middle :refer (plus-tenfold))
+
+(def (code-of thunk)
+  (try
+    (begin
+      (thunk)
+      nil)
+    (catch c (and (table? c) (get c :code)))))
+
+(check "private helper from another namespace" 40 (tenfold 4))
+(check "use-site locals do not capture" 40 (let ((helper (fn (x) x))) (tenfold 4)))
+(check "use-site locals do not capture core names" '(1 2) (let ((list (fn xs 0))) (listed 1 2)))
+(check "expansion names the defining namespace" 'sq.maker/helper (car (macroexpand-1 '(tenfold 4))))
+
+(check "name# does not capture the caller's name" 11 (let ((v 10)) (with-one v)))
+(check "name# is fresh for each expansion" 3 (with-one (with-one 1)))
+(check "name# is one symbol within a template"
+       #t
+       (let ((form (macroexpand-1 '(with-one 0)))) (eq? (car (car (second form))) (second (third form)))))
+
+(check "binding a bare name in a template is an error" "E0113" (code-of (fn () (eval '(bad-binding 1)))))
+(check "quoted data stays bare" '(helper list) (quoted))
+(check "core markers stay bare" '(1 2) (markers #t))
+(check "else stays bare" :none (markers #f))
+(check "forward reference to a later helper" 3 (later-helper 2))
+(check "templates in helper functions" 400 (hundredfold 4))
+(check "templates inside unquote" '(50) (nested 5))
+(check "expansion through another namespace's macro" 41 (plus-tenfold 4))
+
+(requires-extra)
+
+(check "require specs stay as written" #t (procedure? sq-extra/comp))
+
+(check "qualified names reach private definitions" 30 (sq.maker/helper 3))
+(check "unbound names qualify to the current namespace"
+       '(user/f user/undefined-name otium.core/car)
+       #`(f undefined-name car))
+
+(report "syntax quote")

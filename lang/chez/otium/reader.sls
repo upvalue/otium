@@ -179,6 +179,11 @@
         (define (digits i)
           (if (digit? (at i)) (digits (+ i 1)) i))
         (cond
+          ;; #` is a prefix like `, for syntax-quote.
+          [(and (string=? text "#") (eqv? (peek) #\`))
+           (take)
+           (end-token 'prefix)
+           (abbreviation 'syntax-quote)]
           ;; #u8( is one opening token, so tools see it as a container.
           [(and (string=? text "#u8") (eqv? (peek) #\())
            (take)

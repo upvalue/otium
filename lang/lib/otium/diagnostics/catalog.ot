@@ -142,6 +142,12 @@
             :explanation "A macro's own code raised an error while it was building its expansion. The note gives the underlying error. Macros receive unevaluated forms, so the usual cause is a macro that treats a form as a value, or a call that does not match the shape the macro expects."
             :example ""
             :fixed ""}
+   "E0113" {:title "cannot bind a qualified name"
+            :type :syntax-error
+            :message "{detail}"
+            :explanation "Local bindings and parameters take bare names; `ns/name` always refers to a namespace definition. Inside a ``#` `` template, symbols are qualified unless they end in `#`, so a name the expansion binds is written `name#`, which stands for a fresh symbol."
+            :example "(defmacro twice (x) #`(let ((v ,x)) (+ v v)))"
+            :fixed "(defmacro twice (x) #`(let ((v# ,x)) (+ v# v#)))"}
    "E0201" {:title "unbound name"
             :type :name-error
             :message "unbound name `{name}`"
@@ -163,7 +169,7 @@
    "E0204" {:title "private name"
             :type :namespace-error
             :message "`{name}` is private to `{namespace}`"
-            :explanation "Names defined with `def-` are private to their namespace and cannot be referred to or used qualified from another namespace. Use a public definition or move the code."
+            :explanation "Names defined with `def-` are private to their namespace and cannot be imported with `:refer` by another namespace. Qualified references such as `space/name` can reach them, so macro expansions can use private helpers. Use a public definition, or refer to the name qualified."
             :example ""
             :fixed ""}
    "E0205" {:title "circular namespace load"
@@ -184,6 +190,12 @@
             :explanation "A definition and an import in the same namespace may not share a name. Rename the definition, or drop the name from `:refer` and use an alias instead."
             :example "(require otium.extra :refer (comp))\n(def (comp f g) ...)"
             :fixed "(require otium.extra :as extra)\n(def (comp f g) ...)"}
+   "E0208" {:title "alias names a namespace"
+            :type :namespace-error
+            :message "alias `{alias}` is the name of an existing namespace"
+            :explanation "An alias spelled like another namespace's name would change what `that.namespace/name` means in this namespace, including in code that macros from that namespace produce. Pick an alias that is not a namespace name."
+            :example "(require app.tools :as app.store)"
+            :fixed "(require app.tools :as tools)"}
    "E0301" {:title "wrong number of arguments"
             :type :arity-error
             :message "wrong number of arguments to `{name}`"
@@ -250,6 +262,46 @@
             :explanation "A `let` binding, parameter or `match` variable is never referenced. Remove it, or start its name with `_` to show it is intentionally unused."
             :example "(def (f x y) x)"
             :fixed "(def (f x _y) x)"}
+   "L0301" {:title "local name inside a #` template"
+            :name "missed-unquote"
+            :group :correctness
+            :level :warn
+            :message "`{name}` is a local binding, but this #` template refers to a definition named `{name}`"
+            :explanation "A ``#` `` template qualifies its symbols with the namespace it is written in, so a local variable written without `,` becomes a reference to a top-level definition of the same name, which usually does not exist. Unquote the name to insert its value."
+            :example "(defmacro add-one (x)\n  (let ((n x))\n    #`(+ n 1)))"
+            :fixed "(defmacro add-one (x)\n  (let ((n x))\n    #`(+ ,n 1)))"}
+   "L0302" {:title "template binds a literal name around inserted code"
+            :name "captured-binding"
+            :group :suspicious
+            :level :warn
+            :message "`{name}` is bound by this template around code it inserts, which can capture the caller's `{name}`"
+            :explanation "A plain ` template that binds a literal name and splices caller code inside that binding captures any use of that name in the caller's code. Use a ``#` `` template with `name#`, which stands for a fresh symbol, or a `gensym`."
+            :example "(defmacro twice (x)\n  `(let ((v ,x)) (+ v v)))"
+            :fixed "(defmacro twice (x)\n  #`(let ((v# ,x)) (+ v# v#)))"}
+   "L0303" {:title "template refers to a definition by its bare name"
+            :name "template-namespace-ref"
+            :group :suspicious
+            :level :warn
+            :message "`{name}` in this template resolves where the expansion is used, not in this file"
+            :explanation "A plain ` template leaves its symbols bare, so an expansion used in another namespace looks the name up there, where it is usually unbound or means something else. A ``#` `` template qualifies the name with this namespace, including for private definitions."
+            :example "(def- (helper x) (* x 2))\n(defmacro doubled (x) `(helper ,x))"
+            :fixed "(def- (helper x) (* x 2))\n(defmacro doubled (x) #`(helper ,x))"}
+   "L0304" {:title "template qualifies a name with its own namespace"
+            :name "self-qualified-template"
+            :group :style
+            :level :warn
+            :message "`{name}` names this file's namespace; write `{member}` in a #` template"
+            :explanation "Writing `space/name` in a template so expansions reach this namespace from elsewhere is what ``#` `` does for every symbol. A ``#` `` template with the bare name is shorter, follows a rename of the namespace, and can reach private definitions."
+            :example "(ns app.tools)\n(defmacro run (x) `(app.tools/start ,x))"
+            :fixed "(ns app.tools)\n(defmacro run (x) #`(start ,x))"}
+   "L0305" {:title "macro changes state while expanding"
+            :name "expansion-side-effect"
+            :group :suspicious
+            :level :warn
+            :message "this macro changes `{name}` each time it expands"
+            :explanation "Expansion runs again whenever code is reloaded or evaluated, and how often a form is expanded is not part of the language. State a macro changes while expanding repeats or goes stale on reload. Generate code that performs the change when it runs, or keep the state in a `defonce` and suppress the finding with the reason."
+            :example "(def count 0)\n(defmacro counted (x)\n  (set! count (+ count 1))\n  x)"
+            :fixed "(def count 0)\n(defmacro counted (x)\n  #`(begin (set! count (+ count 1)) ,x))"}
    "L0900" {:title "lint could not expand a form"
             :name "expansion-failed"
             :group :correctness

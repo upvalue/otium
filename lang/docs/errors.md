@@ -392,6 +392,24 @@ Condition type `:syntax-error`.
 
 A macro's own code raised an error while it was building its expansion. The note gives the underlying error. Macros receive unevaluated forms, so the usual cause is a macro that treats a form as a value, or a call that does not match the shape the macro expects.
 
+## E0113: cannot bind a qualified name
+
+Condition type `:syntax-error`.
+
+Local bindings and parameters take bare names; `ns/name` always refers to a namespace definition. Inside a ``#` `` template, symbols are qualified unless they end in `#`, so a name the expansion binds is written `name#`, which stands for a fresh symbol.
+
+Example:
+
+```lisp
+(defmacro twice (x) #`(let ((v ,x)) (+ v v)))
+```
+
+Corrected:
+
+```lisp
+(defmacro twice (x) #`(let ((v# ,x)) (+ v# v#)))
+```
+
 ## E0201: unbound name
 
 Condition type `:name-error`.
@@ -444,7 +462,7 @@ Corrected:
 
 Condition type `:namespace-error`.
 
-Names defined with `def-` are private to their namespace and cannot be referred to or used qualified from another namespace. Use a public definition or move the code.
+Names defined with `def-` are private to their namespace and cannot be imported with `:refer` by another namespace. Qualified references such as `space/name` can reach them, so macro expansions can use private helpers. Use a public definition, or refer to the name qualified.
 
 ## E0205: circular namespace load
 
@@ -476,6 +494,24 @@ Corrected:
 ```lisp
 (require otium.extra :as extra)
 (def (comp f g) ...)
+```
+
+## E0208: alias names a namespace
+
+Condition type `:namespace-error`.
+
+An alias spelled like another namespace's name would change what `that.namespace/name` means in this namespace, including in code that macros from that namespace produce. Pick an alias that is not a namespace name.
+
+Example:
+
+```lisp
+(require app.tools :as app.store)
+```
+
+Corrected:
+
+```lisp
+(require app.tools :as tools)
 ```
 
 ## E0301: wrong number of arguments

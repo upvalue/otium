@@ -58,6 +58,8 @@ const char* ot_runtime_documentation(const char* name) {
     {"expander-macro-var", "(expander-macro-var symbol)\nInternal expander hook: resolve a symbol to its macro value, or nil if it does not name a macro."},
     {"expander-invoke-macro", "(expander-invoke-macro macro arguments)\nInternal expander hook: run a macro's transformer on unevaluated argument forms."},
     {"expander-native-syntax?", "(expander-native-syntax? symbol)\nInternal expander hook: true when symbol names host syntax the expander must not walk. Always false on C."},
+    {"expander-qualify", "(expander-qualify symbol)\nInternal expander hook: symbol qualified with the namespace that owns it, or with the current namespace when unbound; false to leave it bare."},
+    {"expander-local-name", "(expander-local-name symbol)\nInternal expander hook: for a qualified symbol, the bare name when it means the same binding in the current namespace, else false."},
     {"expt", "(expt base exponent)\nRaise base to exponent. Nonnegative integer powers of integers use integer arithmetic with wrapping overflow; other inputs use floating point."},
     {"false?", "(false? value)\nReturn #t when value is exactly #f, otherwise #f."},
     {"find-restart", "(find-restart name)\nFind the innermost active restart by name, or return nil."},

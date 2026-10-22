@@ -28,12 +28,12 @@ syntax match otiumBoolean /#\%(t\|f\|true\|false\)\>/
 syntax keyword otiumNil nil
 syntax match otiumKeyword /\<:\k\+\>/
 
-syntax match otiumQuote /,@\|['`,]/
+syntax match otiumQuote /,@\|#`\|['`,]/
 syntax match otiumDelimiter /[()[\]{}]/
 
 syntax keyword otiumSpecialForm
       \ quote if define def define- set! lambda fn defmacro begin do let while
-      \ and or cond else quasiquote unquote unquote-splicing ns in-ns require
+      \ and or cond else quasiquote syntax-quote unquote unquote-splicing ns in-ns require
       \ handler-bind restart-case try catch unwind-protect defer defparam with-params
 
 syntax keyword otiumMacro when unless defn -> ->> dotimes

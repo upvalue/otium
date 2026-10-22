@@ -1579,6 +1579,8 @@ static otv read_form(reader* input) {
           memcmp(input->source + input->offset, "#u8(", 4) == 0) {
         return read_sequence(input, ')', ot_intern(input->state, "bytevector", 10, false), 4);
       }
+      if (input->offset + 1 < input->length && input->source[input->offset + 1] == '`')
+        return read_quote(input, "syntax-quote", 12, 2);
       return read_atom(input);
     case '\'': return read_quote(input, "quote", 5, 1);
     case '`': return read_quote(input, "quasiquote", 10, 1);
@@ -1832,11 +1834,9 @@ static otv resolve_var(ots* state, otv namespace_value, otv symbol, bool report_
     otv target_name = namespace_alias(namespace_value, prefix);
     if (target_name == ot_nil) target_name = prefix;
     otv target = namespace_find(state, target_name, false);
+    /* Qualified names reach private definitions, so macro expansions can. */
     otv var = namespace_var(state, target, member, false);
-    if (is_type(var, OBJ_VAR)) {
-      ot_var_obj* cell = (ot_var_obj*)ot_as_obj(var);
-      if (target == namespace_value || !cell->private_value) return var;
-    }
+    if (is_type(var, OBJ_VAR)) return var;
   } else {
     if (name->cache_namespace == namespace_value && is_type(name->cache_var, OBJ_VAR))
       return name->cache_var;
@@ -4583,6 +4583,12 @@ static otv require_one(ots* state, otv spec, otv caller) {
       otv alias_name = unwrap_quote(as_pair(options)->car);
       options = as_pair(options)->cdr;
       if (!is_type(alias_name, OBJ_SYMBOL)) return ot_raise(state, "require: invalid alias");
+      if (alias_name != name && namespace_find(state, alias_name, false) != ot_nil) {
+        otv condition = diagnostic_new(state, "E0208");
+        OT_FRAME_SCOPED(state, &condition);
+        diagnostic_put(state, &condition, "alias", alias_name);
+        return diagnostic_raise(state, condition);
+      }
       ot_namespace_obj* caller_space = (ot_namespace_obj*)ot_as_obj(caller);
       otv aliases = make_alias(state, alias_name, name, caller_space->aliases);
       caller_space = (ot_namespace_obj*)ot_as_obj(caller);
@@ -6750,6 +6756,63 @@ static otv nat_macro_oracle(ots* state, otv* args, int argc) {
   return is_type(value, OBJ_MACRO) ? value : ot_nil;
 }
 
+/* The namespace whose own definitions hold var, or nil. */
+static otv var_owner(ots* state, otv var) {
+  otv name = ((ot_var_obj*)ot_as_obj(var))->name;
+  for (otv cursor = state->namespaces; is_type(cursor, OBJ_NAMESPACE);
+       cursor = ((ot_namespace_obj*)ot_as_obj(cursor))->next)
+    if (namespace_var(state, cursor, name, false) == var) return cursor;
+  return ot_nil;
+}
+
+static otv qualified_symbol(ots* state, otv namespace_value, otv member) {
+  OT_FRAME_SCOPED(state, &namespace_value, &member);
+  buf text = {0};
+  ot_name_obj* space = as_name(((ot_namespace_obj*)ot_as_obj(namespace_value))->name);
+  buf_write(&text, space->bytes, space->length);
+  buf_write(&text, "/", 1);
+  buf_write(&text, as_name(member)->bytes, as_name(member)->length);
+  otv symbol = ot_intern(state, text.data, text.length, false);
+  buf_free(&text);
+  return symbol;
+}
+
+static bool symbol_qualified(otv symbol) {
+  ot_name_obj* name = as_name(symbol);
+  const char* slash = name->length > 2 ? memchr(name->bytes + 1, '/', name->length - 2) : NULL;
+  return slash != NULL;
+}
+
+static otv nat_expander_qualify(ots* state, otv* args, int argc) {
+  if (need_arity(state, "expander-qualify", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_SYMBOL)) return ot_false;
+  otv space = state->vm.current_namespace;
+  otv symbol = args[0];
+  otv var = ot_nil;
+  OT_FRAME_SCOPED(state, &space, &symbol, &var);
+  var = resolve_var(state, space, symbol, false);
+  if (var == OT_UNWIND) return var;
+  if (!is_type(var, OBJ_VAR))
+    return symbol_qualified(symbol) ? ot_false : qualified_symbol(state, space, symbol);
+  otv owner = var_owner(state, var);
+  if (!is_type(owner, OBJ_NAMESPACE)) return ot_false;
+  return qualified_symbol(state, owner, ((ot_var_obj*)ot_as_obj(var))->name);
+}
+
+static otv nat_expander_local_name(ots* state, otv* args, int argc) {
+  if (need_arity(state, "expander-local-name", argc, 1, 1) == OT_UNWIND) return OT_UNWIND;
+  if (!is_type(args[0], OBJ_SYMBOL) || !symbol_qualified(args[0])) return ot_false;
+  otv space = state->vm.current_namespace;
+  otv symbol = args[0];
+  otv var = ot_nil;
+  OT_FRAME_SCOPED(state, &space, &symbol, &var);
+  var = resolve_var(state, space, symbol, false);
+  if (!is_type(var, OBJ_VAR)) return ot_false;
+  otv member = as_name(symbol)->qualified_member;
+  if (!is_type(member, OBJ_SYMBOL)) return ot_false;
+  return resolve_var(state, space, member, false) == var ? member : ot_false;
+}
+
 static otv nat_expander_invoke_macro(ots* state, otv* args, int argc) {
   if (need_arity(state, "expander-invoke-macro", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
   if (!is_type(args[0], OBJ_MACRO)) return ot_raise(state, "expander-invoke-macro: expected macro");
@@ -7869,6 +7932,8 @@ static const nat_def core_nats[] = {
     {"describe", nat_describe},
     {"expander-macro-var", nat_macro_oracle},
     {"expander-invoke-macro", nat_expander_invoke_macro},
+    {"expander-qualify", nat_expander_qualify},
+    {"expander-local-name", nat_expander_local_name},
     {"expander-native-syntax?", nat_expander_native_syntax},
     {"expander-application", nat_expander_application},
     {"expander-locate", nat_expander_locate},

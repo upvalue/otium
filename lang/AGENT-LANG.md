@@ -76,8 +76,13 @@ behind. Prefer expressing features in Otium over adding runtime escape hatches.
 ## Macros, recovery, and host boundaries
 
 - Macros use `(defmacro name (args ...) body ...)`. They receive unevaluated
-  datums and return code. Use backquote, comma, and comma-at for templates;
-  macros are unhygienic, so introduce temporary names with `gensym`.
+  datums and return code. Write templates with ``#` ``, comma, and comma-at:
+  ``#`(helper ,x)`` qualifies `helper` with the namespace the template is
+  written in, so the expansion works from any namespace, reaches `def-`
+  helpers, and is not captured by the caller's locals. Name bindings the
+  expansion introduces `name#`, as in ``#`(let ((v# ,x)) (+ v# v#))``; a bare name
+  there is an error. Quoted symbols stay bare; write `,'name` to refer to
+  the caller's `name` on purpose. Plain backquote is for data.
 - Catch errors with `(try expression (catch (error? problem) ...))`.
   Conditions are tables; use `condition-message` to inspect the message.
   `handler-bind` and `restart-case` support recovery at the signaling site.

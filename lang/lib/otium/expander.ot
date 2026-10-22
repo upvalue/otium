@@ -7,7 +7,7 @@
 ;;
 ;; Scope is tracked in Otium data: a list whose entries are symbols (lexical
 ;; variables) or (name expansion writer) lists (local symbol macros). Each runtime
-;; supplies six natives:
+;; supplies eight natives:
 ;;   (expander-application form)     lower an expanded application for the runtime
 ;;   (expander-macro-var sym)        the macro sym names as a var in the
 ;;                                   current namespace, else a false value
@@ -18,6 +18,14 @@
 ;;                                   position of the input form; returns to
 ;;   (expander-fail code message form)  raise syntax error code from
 ;;                                   lib/catalog/diagnostics.json about form
+;;   (expander-qualify sym)          sym qualified with the namespace that owns
+;;                                   it as seen from the current namespace, the
+;;                                   current namespace when unbound, or a false
+;;                                   value to leave it as written; an alias
+;;                                   qualified name becomes the full name
+;;   (expander-local-name sym)       for a qualified sym, the bare name when it
+;;                                   means the same binding in the current
+;;                                   namespace, else a false value
 ;;
 ;; Output is the input with macros replaced, parameter lists normalized to
 ;; dotted form, keywords and other non-literal atoms quoted, and body
@@ -28,6 +36,7 @@
 
 (def- expander-core-forms
   '(quote quasiquote
+          syntax-quote
           unquote
           unquote-splicing
           if
@@ -125,7 +134,17 @@
   (cond
     ((not (symbol? name)) (exp-fail "E0101" "macroexpand: expected a name" form))
     ((exp-core? name) (exp-fail "E0104" "macroexpand: cannot rebind a core form name" name))
+    ((exp-qualified? name) (exp-fail "E0113" "macroexpand: cannot bind a qualified name" name))
     (else name)))
+
+;; True when sym has a / with characters on both sides, as in ns/name.
+(def- (exp-qualified? sym)
+  (let ((s (symbol->string sym)))
+    (let scan ((i 1))
+      (cond
+        ((>= i (- (string-length s) 1)) #f)
+        ((equal? (string-ref s i) #\/) #t)
+        (else (scan (+ i 1)))))))
 
 ;; Literals that every runtime compiles as constants. Other atoms (keywords,
 ;; nil, collections a macro embedded) are emitted quoted.
@@ -225,6 +244,7 @@
     (cond
       ((eq? head 'quote) (exp-shape! form 2 2))
       ((eq? head 'quasiquote) (exp-shape! form 2 2) (list 'quasiquote (exp-qq (car (cdr form)) 1 scope)))
+      ((eq? head 'syntax-quote) (exp-shape! form 2 2) (exp-expr (exp-syntax-quote (car (cdr form))) scope))
       ((or (eq? head 'unquote) (eq? head 'unquote-splicing))
        (exp-fail "E0106" "macroexpand: unquote outside quasiquote" form))
       ((eq? head 'fn) (exp-fn form scope))
@@ -259,7 +279,8 @@
                    #f)))
     (cond
       ((pair? found) (exp-symbol-set! (car found) (cdr found) (car (cdr (cdr form))) scope))
-      ((and (symbol? name) (not (exp-core? name))) (list 'set! name (exp-expr (car (cdr (cdr form))) scope)))
+      ((and (symbol? name) (not (exp-core? name)))
+       (list 'set! (exp-symbol name scope) (exp-expr (car (cdr (cdr form))) scope)))
       ((pair? name)
        (exp-shape! name 2 2)
        (let ((object (gensym "object"))
@@ -292,12 +313,18 @@
 
 ;; --- local symbol macros --------------------------------------------------------
 
-;; A symbol macro's expansion is expanded in the scope it was defined in.
+;; A symbol macro's expansion is expanded in the scope it was defined in. A
+;; qualified name becomes the bare name when that means the same binding and
+;; no local shadows it.
 (def- (exp-symbol sym scope)
   (let ((found (exp-lookup sym scope)))
-    (if (pair? found)
-        (exp-expr (car (cdr (car found))) (cdr found))
-        sym)))
+    (cond
+      ((pair? found) (exp-expr (car (cdr (car found))) (cdr found)))
+      (found sym)
+      (else (let ((local (expander-local-name sym)))
+              (if (and local (not (exp-bound? local scope)))
+                  local
+                  sym))))))
 
 ;; (set! name value) on a symbol macro with writer (param form) becomes
 ;; (let ((param value)) form).
@@ -472,6 +499,103 @@
          (exp-qq x depth scope) ; dotted (a . ,b) tail
          (cons (exp-qq (car x) depth scope) (exp-qq-list (cdr x) depth scope))))
     (else x)))
+
+;; --- syntax quote -----------------------------------------------------------------
+
+;; #`template is a quasiquote whose free symbols are qualified where the
+;; template is written, so expansions refer to the same bindings in any
+;; namespace. name# stands for a fresh symbol, the same one throughout the
+;; template, made each time the template is evaluated. Quoted data, ns and
+;; require specs, core form names and the words core forms use as markers
+;; stay bare.
+(def- exp-sq-bare
+  '(when unless
+     else
+     catch
+     &
+     _
+     array
+     table))
+
+(def- (exp-syntax-quote x)
+  (let ((autos (exp-sq-autos x 1 '()))
+        (table (exp-map (fn (sym) (cons sym (gensym (exp-auto-prefix sym)))) autos))
+        (body (list 'quasiquote (exp-sq x 1 #f table))))
+    (if (null? table)
+        body
+        (list 'let
+              (exp-map (fn (entry) (list (cdr entry) (list 'otium.core/gensym (exp-auto-prefix (car entry))))) table)
+              body))))
+
+(def- (exp-auto? x)
+  (and (symbol? x)
+       (let ((s (symbol->string x)))
+         (and (> (string-length s) 1) (equal? (string-ref s (- (string-length s) 1)) #\#) (not (exp-qualified? x))))))
+
+(def- (exp-auto-name sym table)
+  (if (eq? (car (car table)) sym)
+      (cdr (car table))
+      (exp-auto-name sym (cdr table))))
+
+(def- (exp-auto-prefix sym)
+  (let ((s (symbol->string sym))) (substring s 0 (- (string-length s) 1))))
+
+;; The name# symbols in the template, outside unquoted expressions.
+(def- (exp-sq-autos x depth found)
+  (cond
+    ((exp-auto? x)
+     (if (exp-memq x found)
+         found
+         (cons x found)))
+    ((pair? x)
+     (let ((h (car x)))
+       (cond
+         ((and (or (eq? h 'quasiquote) (eq? h 'syntax-quote)) (pair? (cdr x)))
+          (exp-sq-autos (car (cdr x)) (+ depth 1) found))
+         ((and (or (eq? h 'unquote) (eq? h 'unquote-splicing)) (pair? (cdr x)))
+          (if (= depth 1)
+              found
+              (exp-sq-autos (car (cdr x)) (- depth 1) found)))
+         (else (exp-sq-autos (cdr x) depth (exp-sq-autos h depth found))))))
+    (else found)))
+
+(def- (exp-sq x depth data table)
+  (cond
+    ((exp-auto? x)
+     (if (= depth 1)
+         (list 'unquote (exp-auto-name x table))
+         (exp-fail "E0101" "syntax-quote: name# is only allowed outside nested templates" x)))
+    ((symbol? x)
+     (if data
+         x
+         (exp-sq-symbol x)))
+    ((pair? x)
+     (let ((h (car x)))
+       (cond
+         ((and (eq? h 'quote) (exp-length-between? x 2 2)) (list 'quote (exp-sq (car (cdr x)) depth #t table)))
+         ;; Namespace names in ns and require specs are data.
+         ((or (eq? h 'ns) (eq? h 'require)) (cons h (exp-sq-list (cdr x) depth #t table)))
+         ((and (or (eq? h 'quasiquote) (eq? h 'syntax-quote)) (exp-length-between? x 2 2))
+          (list 'quasiquote (exp-sq (car (cdr x)) (+ depth 1) data table)))
+         ((and (or (eq? h 'unquote) (eq? h 'unquote-splicing)) (exp-length-between? x 2 2))
+          (if (= depth 1)
+              x
+              (list h (exp-sq (car (cdr x)) (- depth 1) data table))))
+         (else (exp-sq-list x depth data table)))))
+    (else x)))
+
+(def- (exp-sq-list x depth data table)
+  (cond
+    ((pair? x)
+     (if (or (eq? (car x) 'unquote) (eq? (car x) 'unquote-splicing))
+         (exp-sq x depth data table) ; dotted (a . ,b) tail
+         (cons (exp-sq (car x) depth data table) (exp-sq-list (cdr x) depth data table))))
+    (else (exp-sq x depth data table))))
+
+(def- (exp-sq-symbol sym)
+  (if (or (exp-core? sym) (exp-memq sym exp-sq-bare) (expander-native-syntax? sym))
+      sym
+      (or (expander-qualify sym) sym)))
 
 ;; --- definitions and bodies ------------------------------------------------------
 

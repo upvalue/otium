@@ -1,0 +1,6 @@
+(ns sq.middle)
+(require (sq.maker :as maker))
+
+;; Callers require only this namespace; the expansion reaches sq.maker.
+(defmacro plus-tenfold (e)
+  #`(+ 1 (maker/tenfold ,e)))

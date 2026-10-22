@@ -39,15 +39,15 @@
 (def (query? value)
   (is-a? value Query))
 
-(def (join-fragments separator fragments)
+(def- (join-fragments separator fragments)
   (make Fragment
         :text (string-join separator (map (fn (f) (f :text)) fragments))
         :parameters (apply append (map (fn (f) (f :parameters)) fragments))))
 
-(def (surround before fragment after)
+(def- (surround before fragment after)
   (make Fragment :text (str before (fragment :text) after) :parameters (fragment :parameters)))
 
-(def (expression value)
+(def- (expression value)
   (cond
     ((fragment? value) value)
     ((query? value) (surround "(" (compile-query value) ")"))
@@ -74,7 +74,7 @@
 
 (def functions '(count sum avg min max total coalesce lower upper length abs round))
 
-(def (operation op args)
+(def- (operation op args)
   (cond
     ((get operators op)
      (unless (>= (length args) 2) (error "sql: operator needs at least two arguments" op))
@@ -96,20 +96,20 @@
      (join-fragments " IN " args))
     (else (error "sql: unsupported operator" op))))
 
-(def (expression-code form)
+(def- (expression-code form)
   (cond
     ((and (pair? form) (eq? (car form) 'array))
-     `(otium.sqlite/surround "(" (otium.sqlite/join-fragments ", " (list ,@(map expression-code (cdr form)))) ")"))
+     #`(surround "(" (join-fragments ", " (list ,@(map expression-code (cdr form)))) ")"))
     ((and (pair? form)
           (or (get operators (car form)) (memq (car form) functions) (memq (car form) '(not exists asc desc as in))))
-     `(otium.sqlite/operation ',(car form) (list ,@(map expression-code (cdr form)))))
-    (else `(otium.sqlite/expression ,form))))
+     #`(operation ',(car form) (list ,@(map expression-code (cdr form)))))
+    (else #`(expression ,form))))
 
-(def (columns-code form)
+(def- (columns-code form)
   (unless (and (pair? form) (eq? (car form) 'array) (pair? (cdr form))) (error "sql: expected nonempty column vector"))
-  `(otium.sqlite/join-fragments ", " (list ,@(map expression-code (cdr form)))))
+  #`(join-fragments ", " (list ,@(map expression-code (cdr form)))))
 
-(def (clause-code form)
+(def- (clause-code form)
   (if (and (pair? form) (memq (car form) '(from where order-by group-by having limit offset join left-join returning)))
       (let ((name (car form))
             (args (cdr form)))
@@ -118,25 +118,24 @@
           (error "sql: clause needs one argument" name))
         (when (and (memq name '(join left-join)) (not (= (length args) 2)))
           (error "sql: join needs source and predicate"))
-        `(list ',name
-               ,(cond
-                  ((memq name '(join left-join))
-                   `(otium.sqlite/join-fragments " ON " (list ,@(map expression-code args))))
-                  ((and (eq? name 'returning) (= (length args) 1)) (columns-code (car args)))
-                  (else `(otium.sqlite/join-fragments ", " (list ,@(map expression-code args)))))))
+        #`(list ',name
+                ,(cond
+                   ((memq name '(join left-join)) #`(join-fragments " ON " (list ,@(map expression-code args))))
+                   ((and (eq? name 'returning) (= (length args) 1)) (columns-code (car args)))
+                   (else #`(join-fragments ", " (list ,@(map expression-code args)))))))
       form))
 
-(def (extend-query query clauses)
+(def- (extend-query query clauses)
   (unless (query? query) (error "sql: expected query"))
   (make Query :kind (query :kind) :head (query :head) :clauses (append (query :clauses) (filter identity clauses))))
 
-(def (select-code columns clauses)
-  `(otium.sqlite/extend-query (make otium.sqlite/Query :kind 'select :head ,(columns-code columns) :clauses '())
-                              (list ,@(map clause-code clauses))))
+(def- (select-code columns clauses)
+  #`(extend-query (make Query :kind 'select :head ,(columns-code columns) :clauses '())
+                  (list ,@(map clause-code clauses))))
 
-(def (compose-code query clauses)
+(def- (compose-code query clauses)
   "Return a new query. A nil clause is ignored; repeated where clauses use AND."
-  `(otium.sqlite/extend-query ,query (list ,@(map clause-code clauses))))
+  #`(extend-query ,query (list ,@(map clause-code clauses))))
 
 (defmacro clause (form)
   (clause-code form))
@@ -144,24 +143,21 @@
 (defmacro expr (form)
   (expression-code form))
 
-(def (insert-code table columns row clauses)
+(def- (insert-code table columns row clauses)
   (unless (and (pair? row) (eq? (car row) 'array)) (error "sql: expected values vector"))
   (unless (= (length columns) (length row)) (error "sql: insert column/value count mismatch"))
-  `(otium.sqlite/extend-query (make otium.sqlite/Query
-                                    :kind 'insert
-                                    :head (otium.sqlite/join-fragments " "
-                                                                       (list (otium.sqlite/identifier ,table)
-                                                                             (otium.sqlite/surround "("
-                                                                                                    ,(columns-code columns)
-                                                                                                    ")")
-                                                                             (otium.sqlite/raw "VALUES")
-                                                                             (otium.sqlite/surround "("
-                                                                                                    (otium.sqlite/join-fragments ", "
-                                                                                                                                 (list ,@(map expression-code
-                                                                                                                                              (cdr row))))
-                                                                                                    ")")))
-                                    :clauses '())
-                              (list ,@(map clause-code clauses))))
+  #`(extend-query (make Query
+                        :kind 'insert
+                        :head (join-fragments " "
+                                              (list (identifier ,table)
+                                                    (surround "(" ,(columns-code columns) ")")
+                                                    (raw "VALUES")
+                                                    (surround "("
+                                                              (join-fragments ", "
+                                                                              (list ,@(map expression-code (cdr row))))
+                                                              ")")))
+                        :clauses '())
+                  (list ,@(map clause-code clauses))))
 
 (def clause-names
   {'from "FROM"

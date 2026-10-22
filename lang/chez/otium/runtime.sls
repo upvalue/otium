@@ -208,6 +208,7 @@
   (define (namespace-expander space)
     (make-expander
       (lambda (name)
+        (namespace-local-name space name)
         (let ([value (binding-value space name)])
           (and (otium-macro? value) value)))
       (lambda (name)
@@ -247,7 +248,9 @@
               (lambda results
                 (unless (= (length results) 1)
                   (error 'defmacro "transformer must return one datum" results))
-                (car results))))))))
+                (car results))))))
+      (lambda (name) (namespace-qualify space name))
+      (lambda (name) (namespace-local-name space name))))
 
   (define (namespace-ref name member)
     (top-level-value member (namespace-environment (find-namespace name))))
@@ -255,6 +258,55 @@
   (define (namespace-set! name member value)
     (set-top-level-value! member value
       (namespace-environment (find-namespace name))))
+
+  ;; (prefix . member) for a name with a / that has characters on both sides.
+  (define (qualified-parts name)
+    (let* ([s (symbol->string name)] [n (string-length s)])
+      (let loop ([i 1])
+        (cond [(>= i (- n 1)) #f]
+              [(char=? (string-ref s i) #\/)
+               (cons (string->symbol (substring s 0 i)) (string->symbol (substring s (+ i 1) n)))]
+              [else (loop (+ i 1))]))))
+
+  (define (qualified namespace member)
+    (string->symbol (string-append (symbol->string namespace) "/" (symbol->string member))))
+
+  ;; (namespace . member) for the binding a bare name means in space, 'unknown
+  ;; for a native binding that otium.core lacks, or #f when it is unbound.
+  (define (binding-owner space name)
+    (let ([env (namespace-environment space)])
+      (cond [(hashtable-contains? (namespace-definitions space) name) (cons (namespace-name space) name)]
+            [(hashtable-ref (namespace-imports space) name #f) => values]
+            [(not (top-level-bound? name env)) #f]
+            [(top-level-bound? name (namespace-environment (find-namespace 'otium.core)))
+             (cons 'otium.core name)]
+            [else 'unknown])))
+
+  (define (namespace-qualify space name)
+    (namespace-local-name space name)
+    (let ([owner (binding-owner space name)])
+      (cond [(pair? owner) (qualified (car owner) (cdr owner))]
+            [(or owner (qualified-parts name)) #f]
+            [else (qualified (namespace-name space) name)])))
+
+  ;; The bare name for a qualified one when both mean the same binding in
+  ;; space. A qualified name the caller did not import is imported here, so
+  ;; expansions can name any loaded namespace and its private definitions.
+  (define (namespace-local-name space name)
+    (let ([parts (qualified-parts name)])
+      (and parts
+           (let ([target (or (hashtable-ref (namespace-imports space) name #f)
+                             (and (hashtable-ref namespaces (car parts) #f) parts))]
+                 [local (cdr parts)])
+             (when (and target (not (top-level-bound? name (namespace-environment space)))
+                        (not (hashtable-contains? (namespace-imports space) name)))
+               (import-qualified! space name (car target) (cdr target)))
+             (and target
+                  (let ([owner (binding-owner space local)])
+                    (or (equal? owner target)
+                        (and (not owner) (eq? (car target) (namespace-name space))
+                             (eq? (cdr target) local))))
+                  local)))))
 
   (define (find-namespace name)
     (unless (symbol? name) (error 'ns "expected a symbol" name))
@@ -306,7 +358,8 @@
                     (let ([expander (namespace-expander space)])
                       (expander-top
                         (make-expander (expander-lookup expander) (expander-native-syntax? expander)
-                          (expander-invoke expander) #t)
+                          (expander-invoke expander) (expander-qualify expander)
+                          (expander-local-name expander) #t)
                         form)))))) env)
           (define-top-level-value 'eval
             (lambda (form)
@@ -384,28 +437,31 @@
   (define (shared-source relative)
     (string-append (library-root) "/otium/" relative))
 
+  ;; Qualified names reach private definitions; refers do not.
   (define (import-value! space local target member)
     (unless (hashtable-contains? (namespace-definitions target) member)
       (ot:fail "E0203" 'namespace (namespace-name target) 'name member))
-    (when (hashtable-contains? (namespace-privates target) member)
+    (when (and (hashtable-contains? (namespace-privates target) member) (not (qualified-parts local)))
       (ot:fail "E0204" 'namespace (namespace-name target) 'name member))
     (unless (top-level-bound? member (namespace-environment target))
       (error 'require "syntax imports are not supported yet" member))
     (when (hashtable-contains? (namespace-definitions space) local)
       (ot:fail "E0207" 'detail (format "import of `~a` would replace a local definition" local)
         'name local))
-    (let ([target-name (namespace-name target)])
-      (define-top-level-syntax local
-        (make-variable-transformer
-          (lambda (form)
-            (with-syntax ([target (datum->syntax #'anchor target-name)]
-                          [member (datum->syntax #'anchor member)])
-              (syntax-case form (set!)
-                [(set! _ value) #'(namespace-set! 'target 'member value)]
-                [(_ . args) #'((namespace-ref 'target 'member) . args)]
-                [id (identifier? #'id) #'(namespace-ref 'target 'member)]))))
-        (namespace-environment space))
-      (hashtable-set! (namespace-imports space) local (cons target-name member))))
+    (import-qualified! space local (namespace-name target) member))
+
+  (define (import-qualified! space local target-name member)
+    (define-top-level-syntax local
+      (make-variable-transformer
+        (lambda (form)
+          (with-syntax ([target (datum->syntax #'anchor target-name)]
+                        [member (datum->syntax #'anchor member)])
+            (syntax-case form (set!)
+              [(set! _ value) #'(namespace-set! 'target 'member value)]
+              [(_ . args) #'((namespace-ref 'target 'member) . args)]
+              [id (identifier? #'id) #'(namespace-ref 'target 'member)]))))
+      (namespace-environment space))
+    (hashtable-set! (namespace-imports space) local (cons target-name member)))
 
   (define (source-for name)
     (let ([relative (list->string
@@ -691,11 +747,12 @@
       (let parse ([rest (cdr args)] [alias (car args)] [refers '()] [reload? #f])
         (cond
           [(null? rest)
+           (when (and (not (eq? alias name)) (hashtable-ref namespaces alias #f))
+             (ot:fail "E0208" 'alias alias))
            (let ([target (require-namespace name reload?)])
              (for-each
                (lambda (member)
-                 (when (and (top-level-bound? member (namespace-environment target))
-                            (not (hashtable-contains? (namespace-privates target) member)))
+                 (when (top-level-bound? member (namespace-environment target))
                    ;; Macro expansions may name their defining module even when
                    ;; the caller required it under an alias.
                    (unless (eq? alias name)

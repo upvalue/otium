@@ -40,7 +40,8 @@ until evaluation. Constructor argument validation belongs to the constructor.
 Do not redesign existing dotted-tail handling in collection sugar incidentally.
 
 Support quote, quasiquote, unquote, and unquote-splicing using `'`, backquote,
-`,` and `,@`, with their existing list expansions. Omit Chez's syntax-object
+`,` and `,@`, with their existing list expansions, and read ``#` `` as
+`(syntax-quote form)`. Omit Chez's syntax-object
 abbreviations (`#'`, etc.), vector and bytevector literals, graph labels,
 record literals, boxes, and gensym reader extensions from Otium source.
 

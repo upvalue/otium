@@ -12,7 +12,9 @@ own imports. Otium keywords and nil inside native syntax need quotation,
 and Otium macros nested inside native syntax are not expanded.
 
 Macros receive unevaluated datums and return one datum. They are unhygienic;
-use gensym for introduced bindings. Transformer helpers resolve in their
+use a #` template or gensym for introduced bindings. A qualified name in an
+expansion works even when the caller has not required that namespace; the
+expander imports it on first use. Transformer helpers resolve in their
 defining namespace. Imported macros follow redefinition for subsequent
 expansions; already compiled callers retain their expansion. Each outer
 evaluation has a 10,000-invocation expansion budget, including nested loads

@@ -1,0 +1,45 @@
+(ns sq.maker)
+
+(def- (helper x)
+  (* x 10))
+
+(defmacro tenfold (e)
+  #`(helper ,e))
+
+(defmacro with-one (e)
+  #`(let ((v# 1)) (+ v# ,e)))
+
+(defmacro bad-binding (e)
+  #`(let ((v ,e)) v))
+
+(defmacro listed (& xs)
+  #`(list ,@xs))
+
+(defmacro quoted ()
+  #`'(helper list))
+
+(defmacro markers (x)
+  #`(cond
+      ((when ,x #t) (let ((f# (fn (& rest#) rest#))) (f# 1 2)))
+      (else :none)))
+
+(defmacro later-helper (e)
+  #`(defined-after ,e))
+
+(def- (defined-after x)
+  (+ x 1))
+
+;; A template built by a function rather than the macro itself.
+(def- (scaled-code e)
+  #`(helper (helper ,e)))
+
+(defmacro hundredfold (e)
+  (scaled-code e))
+
+(defmacro nested (e)
+  #`(list ,(if (number? e)
+               #`(helper ,e)
+               e)))
+
+(defmacro requires-extra ()
+  #`(require otium.extra :as sq-extra))

@@ -154,8 +154,9 @@
 (check "old imported expansion retained" 2 (run '(old-caller 1)))
 (check "new qualified expansion sees reload" 11 (run '(m/increment 1)))
 (check "new referred expansion sees reload" 11 (run '(increment 1)))
-(check "imported macro can be lexically shadowed" 4
-  (run '(let ([m/increment (fn (x) x)]) (m/increment 4))))
+(check "qualified names cannot be bound locally" #t
+  (fails-with? "macroexpand: cannot bind a qualified name"
+    (lambda () (run '(let ([m/increment (fn (x) x)]) (m/increment 4))))))
 (check "transformer failure" #t
   (fails-with? "macro `explode` failed while expanding" (lambda () (run '(m/explode)))))
 (check "transformer failure restores namespace" 'user (namespace-name (current-namespace)))

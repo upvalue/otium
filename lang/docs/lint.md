@@ -111,6 +111,111 @@ Corrected:
 (def (f x _y) x)
 ```
 
+## L0301 missed-unquote: local name inside a #` template
+
+Group `correctness`, default level `warn`.
+
+A ``#` `` template qualifies its symbols with the namespace it is written in, so a local variable written without `,` becomes a reference to a top-level definition of the same name, which usually does not exist. Unquote the name to insert its value.
+
+Example:
+
+```lisp
+(defmacro add-one (x)
+  (let ((n x))
+    #`(+ n 1)))
+```
+
+Corrected:
+
+```lisp
+(defmacro add-one (x)
+  (let ((n x))
+    #`(+ ,n 1)))
+```
+
+## L0302 captured-binding: template binds a literal name around inserted code
+
+Group `suspicious`, default level `warn`.
+
+A plain ` template that binds a literal name and splices caller code inside that binding captures any use of that name in the caller's code. Use a ``#` `` template with `name#`, which stands for a fresh symbol, or a `gensym`.
+
+Example:
+
+```lisp
+(defmacro twice (x)
+  `(let ((v ,x)) (+ v v)))
+```
+
+Corrected:
+
+```lisp
+(defmacro twice (x)
+  #`(let ((v# ,x)) (+ v# v#)))
+```
+
+## L0303 template-namespace-ref: template refers to a definition by its bare name
+
+Group `suspicious`, default level `warn`.
+
+A plain ` template leaves its symbols bare, so an expansion used in another namespace looks the name up there, where it is usually unbound or means something else. A ``#` `` template qualifies the name with this namespace, including for private definitions.
+
+Example:
+
+```lisp
+(def- (helper x) (* x 2))
+(defmacro doubled (x) `(helper ,x))
+```
+
+Corrected:
+
+```lisp
+(def- (helper x) (* x 2))
+(defmacro doubled (x) #`(helper ,x))
+```
+
+## L0304 self-qualified-template: template qualifies a name with its own namespace
+
+Group `style`, default level `warn`.
+
+Writing `space/name` in a template so expansions reach this namespace from elsewhere is what ``#` `` does for every symbol. A ``#` `` template with the bare name is shorter, follows a rename of the namespace, and can reach private definitions.
+
+Example:
+
+```lisp
+(ns app.tools)
+(defmacro run (x) `(app.tools/start ,x))
+```
+
+Corrected:
+
+```lisp
+(ns app.tools)
+(defmacro run (x) #`(start ,x))
+```
+
+## L0305 expansion-side-effect: macro changes state while expanding
+
+Group `suspicious`, default level `warn`.
+
+Expansion runs again whenever code is reloaded or evaluated, and how often a form is expanded is not part of the language. State a macro changes while expanding repeats or goes stale on reload. Generate code that performs the change when it runs, or keep the state in a `defonce` and suppress the finding with the reason.
+
+Example:
+
+```lisp
+(def count 0)
+(defmacro counted (x)
+  (set! count (+ count 1))
+  x)
+```
+
+Corrected:
+
+```lisp
+(def count 0)
+(defmacro counted (x)
+  #`(begin (set! count (+ count 1)) ,x))
+```
+
 ## L0900 expansion-failed: lint could not expand a form
 
 Group `correctness`, default level `warn`.

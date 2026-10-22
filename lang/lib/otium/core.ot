@@ -100,12 +100,12 @@
                 (list clause))
               (begin
                 (unless (list? alternatives) (error "case: expected literal alternatives" alternatives))
-                (cons (cons (cons 'or (map (fn (datum) `(equal? ,value ',datum)) alternatives)) (cdr clause))
+                (cons (cons (cons 'or (map (fn (datum) #`(equal? ,value ',datum)) alternatives)) (cdr clause))
                       (case-clauses value (cdr clauses)))))))))
 
 (defmacro case (expression . clauses)
   "(case expression ((literal ...) body ...) ... (else body ...))\nEvaluate expression once and run the first equal? literal clause. Return nil if none matches."
-  (let ((value (gensym "case"))) `(let ((,value ,expression)) (cond ,@(case-clauses value clauses)))))
+  (let ((value (gensym "case"))) #`(let ((,value ,expression)) (cond ,@(case-clauses value clauses)))))
 
 (defmacro dotimes (spec . body)
   "(dotimes (index count) body ...)\nEvaluate count once, then run body with index from 0 below count. Return nil."
@@ -113,14 +113,13 @@
                 (cdr spec)
                 spec)))
     (let ((i (car sp))
-          (n (car (cdr sp)))
-          (lim (gensym "lim")))
-      `(let ((,lim ,n)
-             (,i 0))
-         (while (< ,i ,lim)
-           ,@body
-           (set! ,i (+ ,i 1)))
-         nil))))
+          (n (car (cdr sp))))
+      #`(let ((lim# ,n)
+              (,i 0))
+          (while (< ,i lim#)
+            ,@body
+            (set! ,i (+ ,i 1)))
+          nil))))
 
 ;; --- sequences (10.4) -------------------------------------------------------
 
@@ -514,9 +513,9 @@
     t))
 
 (def- (pat-set t form)
-  `(begin
-     (set! ,t ,form)
-     #t))
+  #`(begin
+      (set! ,t ,form)
+      #t))
 
 ;; Run k on a symbol holding e's value, storing e in a temp first if needed.
 (def- (pat-hold st e k)
@@ -533,16 +532,16 @@
 
 (def- (pat-literal-test e p)
   (cond
-    ((nil? p) `(nil? ,e))
-    ((null? p) `(null? ,e))
-    ((or (symbol? p) (keyword? p) (boolean? p)) `(eq? ,e (quote ,p)))
-    (else `(equal? ,e (quote ,p)))))
+    ((nil? p) #`(nil? ,e))
+    ((null? p) #`(null? ,e))
+    ((or (symbol? p) (keyword? p) (boolean? p)) #`(eq? ,e (quote ,p)))
+    (else #`(equal? ,e (quote ,p)))))
 
 ;; (f e), with a literal one-parameter fn inlined as a let.
 (def- (pat-call f e)
   (if (and (pair? f) (eq? (car f) 'fn) (pair? (cdr f)) (pair? (cadr f)) (symbol? (car (cadr f))) (null? (cdr (cadr f))))
-      `(let ((,(car (cadr f)) ,e)) ,@(cddr f))
-      `(,f ,e)))
+      #`(let ((,(car (cadr f)) ,e)) ,@(cddr f))
+      #`(,f ,e)))
 
 ;; Compile p against a fresh binding list, returning (tests . binds).
 (def- (pat-isolated st p e)
@@ -574,7 +573,7 @@
                       (pat-error "or alternatives must bind the same names" (cons 'or alts))))
                   compiled)
         (let ((shared (pat-share st names)))
-          (list `(or ,@(map (fn (c) `(and ,@(car c) ,@(pat-copy-out shared (cdr c)))) compiled)))))))
+          (list #`(or ,@(map (fn (c) #`(and ,@(car c) ,@(pat-copy-out shared (cdr c)))) compiled)))))))
 
 (def- (pat-opt st p e)
   (cond
@@ -587,16 +586,16 @@
                  e
                  (fn (t)
                    (list (pat-set g
-                                  `(if (nil? ,t)
-                                       ,(caddr p)
-                                       ,t)))))))
+                                  #`(if (nil? ,t)
+                                        ,(caddr p)
+                                        ,t)))))))
     ((and (pair? (cdr p)) (null? (cddr p)))
      (pat-hold st
                e
                (fn (t)
                  (let ((c (pat-isolated st (cadr p) t)))
                    (let ((shared (pat-share st (map car (cdr c)))))
-                     (list `(or (nil? ,t) (and ,@(car c) ,@(pat-copy-out shared (cdr c))))))))))
+                     (list #`(or (nil? ,t) (and ,@(car c) ,@(pat-copy-out shared (cdr c))))))))))
     (else (pat-error "invalid opt" p))))
 
 ;; A table value pattern against e, the looked-up value.
@@ -604,24 +603,24 @@
   (cond
     ((and (pair? p) (eq? (car p) 'opt)) (pat-opt st p e))
     ((or (and (pat-literal? p) (not (nil? p))) (and (pair? p) (eq? (car p) 'quote))) (pat-compile st p e))
-    (else (pat-hold st e (fn (t) (cons `(not (nil? ,t)) (pat-compile st p t)))))))
+    (else (pat-hold st e (fn (t) (cons #`(not (nil? ,t)) (pat-compile st p t)))))))
 
 (def- (pat-table st args v)
   (let loop ((rest args)
-             (tests (list `(table? ,v))))
+             (tests (list #`(table? ,v))))
     (cond
       ((null? rest) tests)
       ((null? (cdr rest)) (pat-error "table pattern needs key/pattern pairs" (cons 'table args)))
       (else (let ((k (car rest)))
               (unless (or (pat-literal? k) (and (pair? k) (eq? (car k) 'quote)))
                 (pat-error "table pattern keys must be literals" k))
-              (loop (cddr rest) (append tests (pat-table-value st (cadr rest) `(get ,v ,k)))))))))
+              (loop (cddr rest) (append tests (pat-table-value st (cadr rest) #`(get ,v ,k)))))))))
 
 (def- (pat-list st args v)
   (let loop ((rest args)
              (cur v))
     (cond
-      ((null? rest) (list `(null? ,cur)))
+      ((null? rest) (list #`(null? ,cur)))
       ((not (pair? rest)) (pat-compile st rest cur))
       ((eq? (car rest) '&)
        (unless (and (pair? (cdr rest)) (null? (cddr rest)))
@@ -630,8 +629,8 @@
       (else (pat-hold st
                       cur
                       (fn (c)
-                        (cons `(pair? ,c)
-                              (append (pat-compile st (car rest) `(car ,c)) (loop (cdr rest) `(cdr ,c))))))))))
+                        (cons #`(pair? ,c)
+                              (append (pat-compile st (car rest) #`(car ,c)) (loop (cdr rest) #`(cdr ,c))))))))))
 
 (def- (pat-quasi st tmpl e)
   (cond
@@ -642,7 +641,8 @@
      (pat-hold st
                e
                (fn (v)
-                 (cons `(pair? ,v) (append (pat-quasi st (car tmpl) `(car ,v)) (pat-quasi st (cdr tmpl) `(cdr ,v)))))))
+                 (cons #`(pair? ,v)
+                       (append (pat-quasi st (car tmpl) #`(car ,v)) (pat-quasi st (cdr tmpl) #`(cdr ,v)))))))
     (else (list (pat-literal-test e tmpl)))))
 
 (def- (pat-array st args v)
@@ -650,21 +650,21 @@
              (i 0)
              (tests '()))
     (cond
-      ((null? rest) (append (list `(array? ,v) `(= (length ,v) ,i)) tests))
+      ((null? rest) (append (list #`(array? ,v) #`(= (length ,v) ,i)) tests))
       ((eq? (car rest) '&)
        (unless (and (pair? (cdr rest)) (eq? (cadr rest) '_) (null? (cddr rest)))
          (pat-error "array rest patterns only accept _" (cons 'array args)))
-       (append (list `(array? ,v) `(>= (length ,v) ,i)) tests))
-      (else (loop (cdr rest) (+ i 1) (append tests (pat-compile st (car rest) `(get ,v ,i))))))))
+       (append (list #`(array? ,v) #`(>= (length ,v) ,i)) tests))
+      (else (loop (cdr rest) (+ i 1) (append tests (pat-compile st (car rest) #`(get ,v ,i))))))))
 
 (def- (pat-class st type args v)
   (let loop ((rest args)
-             (tests (list `(class-subtype? (dispatch-type ,v) ,type))))
+             (tests (list #`(class-subtype? (dispatch-type ,v) ,type))))
     (cond
       ((null? rest) tests)
       ((not (and (keyword? (car rest)) (pair? (cdr rest))))
        (pat-error "class patterns take keyword/pattern pairs" (cons type args)))
-      (else (loop (cddr rest) (append tests (pat-compile st (cadr rest) `(,v ,(car rest)))))))))
+      (else (loop (cddr rest) (append tests (pat-compile st (cadr rest) #`(,v ,(car rest)))))))))
 
 (def- (pat-all st ps v)
   (if (pair? ps)
@@ -695,7 +695,7 @@
     ((pat-literal? p) (list (pat-literal-test e p)))
     ((not (pair? p)) (pat-error "unsupported pattern" p))
     ((eq? (car p) 'quote) (list (pat-literal-test e (cadr p))))
-    ((eq? (car p) '==) (list `(equal? ,e ,(cadr p))))
+    ((eq? (car p) '==) (list #`(equal? ,e ,(cadr p))))
     ((eq? (car p) '?)
      (unless (pair? (cdr p)) (pat-error "? needs a predicate" p))
      (if (null? (cddr p))
@@ -709,34 +709,34 @@
 
 (def- (match-clauses v clauses)
   (if (null? clauses)
-      `(match-error ,v)
+      #`(match-error ,v)
       (let ((clause (car clauses)))
         (unless (pair? clause) (pat-error "invalid clause" clause))
         (let ((guarded (and (pair? (cdr clause)) (eq? (cadr clause) :when)))
               (st {:temps '() :binds '()})
               (tests (pat-compile st (car clause) v))
               (names (map (fn (b) (list (car b) (cdr b))) (reverse (get st :binds))))
-              (body `(let ,names
-                       ,@(if guarded
-                             (cdr (cddr clause))
-                             (cdr clause))))
+              (body #`(let ,names
+                        ,@(if guarded
+                              (cdr (cddr clause))
+                              (cdr clause))))
               (temps (map (fn (t) (list t nil)) (get st :temps))))
           (when (and guarded (not (pair? (cddr clause)))) (pat-error ":when needs a guard" clause))
           (let ((form (if (or (pair? tests) guarded)
-                          `(if (and ,@tests
-                                    ,@(if guarded
-                                          (list `(let ,names ,(caddr clause)))
-                                          '()))
-                               ,body
-                               ,(match-clauses v (cdr clauses)))
+                          #`(if (and ,@tests
+                                     ,@(if guarded
+                                           (list #`(let ,names ,(caddr clause)))
+                                           '()))
+                                ,body
+                                ,(match-clauses v (cdr clauses)))
                           body)))
             (if (pair? temps)
-                `(let ,temps ,form)
+                #`(let ,temps ,form)
                 form))))))
 
 (defmacro match (expr . clauses)
   "(match value (pattern body ...) (pattern :when guard body ...) ...)\nEvaluate value once and run the body of the first clause whose pattern matches and whose guard is truthy, with the pattern's names bound. No match signals match-error. See specs/match.md for patterns."
-  (let ((v (gensym "value"))) `(let ((,v ,expr)) ,(match-clauses v clauses))))
+  (let ((v (gensym "value"))) #`(let ((,v ,expr)) ,(match-clauses v clauses))))
 
 ;; --- functional (10.8) ------------------------------------------------------
 
@@ -1005,26 +1005,26 @@
   "(with ((name expression [release]) ...) body ...)\nAcquire in order and release in reverse order on every exit. Default release is close."
   (unless (list? bindings) (error "with: expected binding list"))
   (if (null? bindings)
-      `(begin ,@body)
+      #`(begin ,@body)
       (let ((binding (car bindings)))
         (unless (and (list? binding) (or (= (length binding) 2) (= (length binding) 3)) (symbol? (car binding)))
           (error "with: expected (name expression [release])"))
         (let ((name (car binding))
               (release (gensym "release"))
               (outcome (gensym "outcome")))
-          `(let ((,name ,(cadr binding))
-                 (,release
-                  ,(if (= (length binding) 3)
-                       (caddr binding)
-                       `(begin
-                          (unless (resource-closable? ,name)
-                            (error "with: resource has no applicable close method" ,name))
-                          nil))))
-             (call-with-cleanup (fn () (with ,(cdr bindings) ,@body))
-                                (fn (,outcome)
-                                  ,(if (= (length binding) 3)
-                                       `(,release ,name)
-                                       `(close ,name ,outcome)))))))))
+          #`(let ((,name ,(cadr binding))
+                  (,release
+                   ,(if (= (length binding) 3)
+                        (caddr binding)
+                        #`(begin
+                            (unless (resource-closable? ,name)
+                              (error "with: resource has no applicable close method" ,name))
+                            nil))))
+              (call-with-cleanup (fn () (with ,(cdr bindings) ,@body))
+                                 (fn (,outcome)
+                                   ,(if (= (length binding) 3)
+                                        #`(,release ,name)
+                                        #`(close ,name ,outcome)))))))))
 
 (defonce %read-datum-string read-string)
 
@@ -1205,10 +1205,10 @@
   (unless (or (null? options)
               (and (= (length options) 2) (eq? (car options) :immutable) (boolean? (car (cdr options)))))
     (error "defrecord: expected optional :immutable boolean"))
-  `(def ,name
-     (declare-record! (current-ns)
-                      ',name
-                      ',fields
-                      ,(if (null? options)
-                           #f
-                           (car (cdr options))))))
+  #`(def ,name
+      (declare-record! (current-ns)
+                       ',name
+                       ',fields
+                       ,(if (null? options)
+                            #f
+                            (car (cdr options))))))

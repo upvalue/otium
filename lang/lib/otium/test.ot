@@ -29,7 +29,7 @@
         (set! checks (+ checks 1))
         (fail! label (car pair) (cadr pair)))))
 
-(def (%fails? thunk)
+(def- (%fails? thunk)
   (try
     (begin
       (thunk)
@@ -38,11 +38,10 @@
 
 (defmacro fails? (subject)
   "(fails? thunk) or (fails? 'form): whether calling the thunk, or evaluating the form in the caller's namespace, raises a condition."
-  (let ((value (gensym)))
-    `(otium.test/%fails? (let ((,value ,subject))
-                           (if (procedure? ,value)
-                               ,value
-                               (fn () (eval ,value)))))))
+  #`(%fails? (let ((value# ,subject))
+               (if (procedure? value#)
+                   value#
+                   (fn () (,'eval value#))))))
 
 (def (report name)
   "Print NAME: N checks passed."

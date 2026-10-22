@@ -1883,5 +1883,53 @@
       "c",
       "chez"
     ]
+  },
+  "defrecord": {
+    "text": "(defrecord Name (field ...) [:immutable boolean])\nDeclare a fixed-layout record type in the current namespace. Fields are mutable by default. An identical declaration reuses its type; changing fields or mutability is an error.",
+    "runtimes": [
+      "chez"
+    ]
+  },
+  "record-new": {
+    "text": "(record-new Type value ...)\nConstruct a record with positional values in declaration order. Every field is required.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "record-ref": {
+    "text": "(record-ref record :field)\nRead a record field. Records also support (record :field). Unknown fields are errors.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "record-set!": {
+    "text": "(record-set! record :field value)\nWrite a mutable record field and return value. Immutable records reject writes; immutability is shallow.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "record?": {
+    "text": "(record? value)\nTest whether value is a record instance.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "record-type?": {
+    "text": "(record-type? value)\nTest whether value is a record type descriptor.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "record-type": {
+    "text": "(record-type record)\nReturn the record type descriptor. Records compare by identity, including immutable records.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
   }
 }

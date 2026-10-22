@@ -3,6 +3,7 @@ from harness import case
 
 case('expander', 'tests/expander/checks.ot')
 case('classes', 'tests/classes/checks.ot')
+case('records', 'tests/records/checks.ot', paths=['tests/records/fixtures'])
 case('match', 'tests/match/checks.ot')
 case('ui', 'tests/ui/checks.ot')
 case('ui calculator', 'tests/ui/calculator-checks.ot', paths=['examples'])

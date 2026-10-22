@@ -84,6 +84,19 @@ static void OT_GC_TRACE_OBJECT(ots* state, ot_obj* object) {
       OT_GC_TRACE_SLOT(state, &layout->indices);
       break;
     }
+    case OBJ_RECORD_TYPE: {
+      ot_record_type_obj* type = (ot_record_type_obj*)object;
+      OT_GC_TRACE_SLOT(state, &type->name);
+      OT_GC_TRACE_SLOT(state, &type->keys);
+      break;
+    }
+    case OBJ_RECORD: {
+      ot_record_obj* record = (ot_record_obj*)object;
+      OT_GC_TRACE_SLOT(state, &record->type);
+      size_t count = (ot_object_size(value) - sizeof(*record)) / sizeof(otv);
+      for (size_t i = 0; i < count; i++) OT_GC_TRACE_SLOT(state, &record->values[i]);
+      break;
+    }
     case OBJ_INSTANCE: {
       ot_instance_obj* instance = (ot_instance_obj*)object;
       OT_GC_TRACE_SLOT(state, &instance->layout);

@@ -38,8 +38,9 @@
     name symbol int? float? inc dec identity pos? neg? true? false?
     current-jiffy jiffies-per-second current-second read-file
     read-string keyword keyword? keyword->string nil? array array? table table?
+    %make-record-type record-new record-ref record-set! record? record-type? record-type
     get put! set-applied! push! pop! keys copy update! type)
-  (import (except (chezscheme) display newline write if and or cond when unless do not filter exists for-all
+  (import (except (chezscheme) record? display newline write if and or cond when unless do not filter exists for-all
                           length reverse for-each map apply set-car! set-cdr! values
                           bytevector make-bytevector bytevector-copy bytevector-copy!
                           utf8->string string->utf8)

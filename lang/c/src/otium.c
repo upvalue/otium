@@ -309,6 +309,8 @@ static bool is_type(otv value, ot_obj_type type) {
   return ot_is_ptr(value) && ot_object_type(value) == type;
 }
 
+#define as_record(V) ((ot_record_obj*)ot_as_obj(V))
+#define as_record_type(V) ((ot_record_type_obj*)ot_as_obj(V))
 #define as_instance(V) ((ot_instance_obj*)ot_as_obj(V))
 #define as_layout(V) ((ot_layout_obj*)ot_as_obj(V))
 
@@ -344,6 +346,8 @@ ot_type ot_value_type(otv value) {
     case OBJ_RESTART: return OT_TYPE_RESTART;
     case OBJ_EXT: return OT_TYPE_EXT;
     case OBJ_DISPATCH_TYPE: return OT_TYPE_DESCRIPTOR;
+    case OBJ_RECORD: return OT_TYPE_RECORD;
+    case OBJ_RECORD_TYPE: return OT_TYPE_RECORD_TYPE;
     case OBJ_INSTANCE: return OT_TYPE_INSTANCE;
     default: return OT_TYPE_INTERNAL;
   }
@@ -536,6 +540,8 @@ static uint32_t value_hash(ots* state, otv value) {
       if (bytes->stable_id == 0) bytes->stable_id = ++state->next_stable_id;
       return (uint32_t)bytes->stable_id;
     }
+    case OBJ_RECORD: return (uint32_t)as_record(value)->stable_id;
+    case OBJ_RECORD_TYPE: return (uint32_t)as_record_type(value)->stable_id;
     case OBJ_INSTANCE: return (uint32_t)as_instance(value)->stable_id;
     case OBJ_DISPATCH_TYPE: return (uint32_t)((ot_dispatch_type_obj*)ot_as_obj(value))->stable_id;
     case OBJ_GENERIC: return (uint32_t)((ot_generic_obj*)ot_as_obj(value))->stable_id;
@@ -987,6 +993,15 @@ static void render_value(ots* state, buf* out, otv value, bool display, unsigned
       buf_cstr(out, "#<fn ");
       render_name(out, ((ot_nat_obj*)ot_as_obj(value))->name, false);
       buf_byte(out, '>');
+      break;
+    }
+    case OBJ_RECORD:
+    case OBJ_RECORD_TYPE: {
+      bool instance = is_type(value, OBJ_RECORD);
+      otv descriptor = instance ? as_record(value)->type : value;
+      buf_cstr(out, instance ? "#<record " : "#<record-type ");
+      render_name(out, as_record_type(descriptor)->name, false);
+      buf_cstr(out, ">");
       break;
     }
     case OBJ_INSTANCE: {
@@ -3468,6 +3483,8 @@ static otv append_values(ots* state, otv left, otv right) {
   return result;
 }
 
+#include "ot-records.inc"
+
 static otv apply_value(ots* state, otv callable, otv* args, size_t argc, bool allow_macro) {
   OT_FRAME_SCOPED(state, &callable);
   size_t root_count = argc == 0 ? 1 : argc;
@@ -3493,6 +3510,9 @@ static otv apply_value(ots* state, otv callable, otv* args, size_t argc, bool al
     result = vm_call_function(state, callable, args, argc);
   } else if (is_type(callable, OBJ_MACRO) && allow_macro) {
     result = apply_value(state, ((ot_macro_obj*)ot_as_obj(callable))->function, args, argc, false);
+  } else if (is_type(callable, OBJ_RECORD)) {
+    result = argc == 1 ? record_read(state, callable, args[0])
+                       : ot_raise(state, "record read: expected one keyword");
   } else if (is_type(callable, OBJ_INSTANCE)) {
     result = argc == 1 ? instance_read(state, callable, args[0])
                        : ot_raise(state, "slot read: expected one keyword");
@@ -5346,10 +5366,11 @@ static otv nat_equal(ots* state, otv* args, int argc) {
 
 static const char* value_type_name(otv value) {
   static const char* names[] = {
-      "nil",      "null",   "boolean", "int",        "float",   "symbol",
-      "keyword",  "string", "pair",    "array",      "table",   "buffer",
-      "function", "macro",  "param",   "restart",    "foreign", "type-descriptor",
-      "instance", "char",   "eof",     "bytevector", "port",    "internal"};
+      "nil",         "null",    "boolean", "int",        "float",   "symbol",
+      "keyword",     "string",  "pair",    "array",      "table",   "buffer",
+      "function",    "macro",   "param",   "restart",    "foreign", "type-descriptor",
+      "instance",    "char",    "eof",     "bytevector", "port",    "record",
+      "record-type", "internal"};
   return names[ot_value_type(value)];
 }
 
@@ -6035,6 +6056,7 @@ static otv nat_put(ots* state, otv* args, int argc) {
 
 static otv nat_set_applied(ots* state, otv* args, int argc) {
   if (need_arity(state, "set-applied!", argc, 3, 3) == OT_UNWIND) return OT_UNWIND;
+  if (is_type(args[0], OBJ_RECORD)) return record_write(state, args[0], args[1], args[2]);
   if (is_type(args[0], OBJ_INSTANCE)) return instance_write(state, args[0], args[1], args[2]);
   if (!is_type(args[0], OBJ_TABLE) && !is_type(args[0], OBJ_ARRAY))
     return ot_raise(state, "set-applied!: cannot assign through %s", value_type_name(args[0]));
@@ -7593,10 +7615,10 @@ static void generic_module_init(ots* state) {
   if (state->dispatch_types != ot_nil) return;
   state->dispatch_types = make_slots(state, OT_TYPE_INTERNAL + 2);
   static const char* names[] = {
-      "Nil",       "Null",      "Boolean",   "Number",     "Number",    "Symbol",
-      "Keyword",   "String",    "Pair",      "Vector",     "Hashtable", "Buffer",
-      "Procedure", "Macro",     "Parameter", "Restart",    "Foreign",   "TypeDescriptor",
-      "Instance",  "Character", "Other",     "Bytevector", "Port",      "Other"};
+      "Nil",        "Null",    "Boolean", "Number",         "Number",   "Symbol",    "Keyword",
+      "String",     "Pair",    "Vector",  "Hashtable",      "Buffer",   "Procedure", "Macro",
+      "Parameter",  "Restart", "Foreign", "TypeDescriptor", "Instance", "Character", "Other",
+      "Bytevector", "Port",    "Other",   "Other",          "Other"};
   otv owner = ((ot_namespace_obj*)ot_as_obj(state->vm.current_namespace))->name;
   otv name = ot_nil, type = ot_nil;
   OT_FRAME_SCOPED(state, &owner, &name, &type);
@@ -7607,7 +7629,8 @@ static void generic_module_init(ots* state) {
   for (size_t i = 0; i <= OT_TYPE_INTERNAL; i++) {
     name = ot_intern(state, names[i], strlen(names[i]), false);
     if (i == OT_TYPE_FLOAT) type = as_slots(state->dispatch_types)->values[OT_TYPE_INT];
-    else if (i == OT_TYPE_INTERNAL) type = as_slots(state->dispatch_types)->values[OT_TYPE_EOF];
+    else if (i == OT_TYPE_INTERNAL || i == OT_TYPE_RECORD || i == OT_TYPE_RECORD_TYPE)
+      type = as_slots(state->dispatch_types)->values[OT_TYPE_EOF];
     else type = new_dispatch_type(state, owner, name, true);
     ot_slots_obj* slots = as_slots(state->dispatch_types);
     ot_store(state, slots, &slots->values[i], type);
@@ -7618,6 +7641,13 @@ static void generic_module_init(ots* state) {
   ot_store(state, as_slots(state->dispatch_types),
            &as_slots(state->dispatch_types)->values[OT_TYPE_INTERNAL + 1], type);
   define_var(state, state->vm.current_namespace, name, type, ot_nil, false);
+  ot_def_nat(state, "%make-record-type", nat_make_record_type);
+  ot_def_nat(state, "record-new", nat_record_new);
+  ot_def_nat(state, "record-ref", nat_record_ref);
+  ot_def_nat(state, "record-set!", nat_record_set);
+  ot_def_nat(state, "record?", nat_record_p);
+  ot_def_nat(state, "record-type?", nat_record_type_p);
+  ot_def_nat(state, "record-type", nat_record_type);
   ot_def_nat(state, "make", nat_make_instance);
   ot_def_nat(state, "class-properties", nat_class_properties);
   ot_def_nat(state, "class-mount", nat_class_mount);

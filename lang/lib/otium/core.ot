@@ -1184,3 +1184,31 @@
       (if (or (< i 0) (eq? (string-ref path i) #\/))
           (substring path (+ i 1) end)
           (loop (- i 1))))))
+
+(defonce record-declarations {})
+
+(def (declare-record! owner name fields immutable?)
+  "Reuse an unchanged record declaration; reject changes to fields or mutability."
+  (let ((key (symbol (str owner "/" name)))
+        (old (get record-declarations key)))
+    (if old
+        (if (and (equal? fields (get old 0)) (eq? immutable? (get old 1)))
+            (get old 2)
+            (error "defrecord: layout change requires a new name or a fresh process" key))
+        (let ((descriptor (%make-record-type key fields immutable?)))
+          (put! record-declarations key [(map identity fields) immutable? descriptor])
+          descriptor))))
+
+(defmacro defrecord (name fields . options)
+  "(defrecord Name (field ...) [:immutable boolean])\nDeclare a fixed-layout record type in the current namespace. Fields are mutable by default. An identical declaration reuses its type; changing fields or mutability is an error."
+  (unless (and (symbol? name) (list? fields)) (error "defrecord: expected name and parenthesized fields"))
+  (unless (or (null? options)
+              (and (= (length options) 2) (eq? (car options) :immutable) (boolean? (car (cdr options)))))
+    (error "defrecord: expected optional :immutable boolean"))
+  `(def ,name
+     (declare-record! (current-ns)
+                      ',name
+                      ',fields
+                      ,(if (null? options)
+                           #f
+                           (car (cdr options))))))

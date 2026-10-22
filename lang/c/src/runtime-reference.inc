@@ -279,6 +279,12 @@ const char* ot_runtime_documentation(const char* name) {
     {"bitwise-xor", "(bitwise-xor integer ...)\nBitwise exclusive OR of exact integers; no arguments gives 0."},
     {"bitwise-not", "(bitwise-not integer)\nComplement the bits of one exact integer."},
     {"bitwise-arithmetic-shift", "(bitwise-arithmetic-shift integer count)\nShift an exact integer left by count bits, or right with sign extension for a negative count. C raises an error if the result exceeds its integer range."},
+    {"record-new", "(record-new Type value ...)\nConstruct a record with positional values in declaration order. Every field is required."},
+    {"record-ref", "(record-ref record :field)\nRead a record field. Records also support (record :field). Unknown fields are errors."},
+    {"record-set!", "(record-set! record :field value)\nWrite a mutable record field and return value. Immutable records reject writes; immutability is shallow."},
+    {"record?", "(record? value)\nTest whether value is a record instance."},
+    {"record-type?", "(record-type? value)\nTest whether value is a record type descriptor."},
+    {"record-type", "(record-type record)\nReturn the record type descriptor. Records compare by identity, including immutable records."},
   };
   for (size_t i = 0; i < sizeof(entries) / sizeof(*entries); ++i)
     if (!strcmp(name, entries[i].name)) return entries[i].text;

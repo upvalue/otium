@@ -1,0 +1,114 @@
+(require otium.test :refer (check fails? report))
+
+(defrecord Point (x y))
+
+(def p (record-new Point 1 2))
+
+(check "record predicate" #t (record? p))
+(check "descriptor predicate" #t (record-type? Point))
+(check "record type" Point (record-type p))
+(check "runtime type" :record (type p))
+(check "descriptor runtime type" :record-type (type Point))
+(check "not a table" #f (table? p))
+(check "explicit read" 1 (record-ref p :x))
+(check "callable read" 2 (p :y))
+(check "apply read" 1 (apply p '(:x)))
+(check "write returns value" 3 (record-set! p :x 3))
+(check "applied assignment" 4 (set! (p :y) 4))
+(check "read after assignment" 4 (p :y))
+(check "identity equality" #f (equal? p (record-new Point 3 4)))
+
+(def index {})
+
+(put! index p :found)
+(record-set! p :x 5)
+(check "stable identity key" :found (get index p))
+(check "wrong field" #t (fails? '(record-ref p :z)))
+(check "wrong write field" #t (fails? '(record-set! p :z 1)))
+(check "too few fields" #t (fails? '(record-new Point 1)))
+(check "too many fields" #t (fails? '(record-new Point 1 2 3)))
+(check "wrong constructor" #t (fails? '(record-new :Point 1 2)))
+(check "wrong read target" #t (fails? '(record-ref {} :x)))
+(check "wrong write target" #t (fails? '(record-set! {} :x 1)))
+(check "wrong type target" #t (fails? '(record-type {})))
+(check "duplicate fields" #t (fails? '(defrecord Bad (x x))))
+(check "invalid field" #t (fails? '(defrecord Bad (1))))
+(check "invalid option"
+       #t
+       (fails? '(defrecord Bad
+                  (x)
+                  :immutable
+                  :yes)))
+
+(defrecord Chord
+  (key modifiers)
+  :immutable #t)
+
+(def c (record-new Chord 65 4))
+
+(check "immutable read" 65 (c :key))
+(check "immutable explicit write" #t (fails? '(record-set! c :key 66)))
+(check "immutable applied write" #t (fails? '(set! (c :key) 66)))
+(check "immutable unchanged" 65 (c :key))
+
+(defrecord Empty
+  ()
+  :immutable #t)
+
+(check "empty record" #t (record? (record-new Empty)))
+
+(defrecord Holder
+  (items)
+  :immutable #t)
+
+(def items [])
+
+(def holder (record-new Holder items))
+
+(push! items 1)
+(check "immutability is shallow" 1 (get (holder :items) 0))
+
+(def old-point Point)
+
+(defrecord Point (x y))
+
+(check "reload preserves descriptor" #t (eq? old-point Point))
+(check "reload preserves existing object" Point (record-type p))
+(check "layout change rejected" #t (fails? '(defrecord Point (x y z))))
+(check "reorder rejected" #t (fails? '(defrecord Point (y x))))
+(check "mutability change rejected"
+       #t
+       (fails? '(defrecord Point
+                  (x y)
+                  :immutable #t)))
+(check "failed reload preserves binding" #t (eq? old-point Point))
+(check "failed reload preserves data" 5 (p :x))
+
+(def cache {})
+
+(def allocations 0)
+
+(def (chord key modifiers)
+  (let ((packed (+ (* key 16) modifiers)))
+    (or (get cache packed)
+        (let ((value (record-new Chord key modifiers)))
+          (set! allocations (+ allocations 1))
+          (put! cache packed value)
+          value))))
+
+(check "interned identity" #t (eq? (chord 65 4) (chord 65 4)))
+(check "cache hit skips construction" 1 allocations)
+(check "different chord" #f (eq? (chord 65 4) (chord 65 0)))
+(require records.left :as left)
+(require records.right :as right)
+(check "namespace identity" #f (eq? left/Point right/Point))
+
+(def saved-type left/Point)
+
+(def saved-record left/saved)
+
+(require records.left :as left :reload)
+(check "file reload type identity" #t (eq? saved-type left/Point))
+(check "file reload retained object" #t (eq? saved-record left/saved))
+(check "file reload retained fields" 10 (left/saved :x))
+(report "records")

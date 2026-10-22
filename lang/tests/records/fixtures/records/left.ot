@@ -1,0 +1,5 @@
+(ns records.left)
+
+(defrecord Point (x y))
+
+(defonce saved (record-new Point 10 20))

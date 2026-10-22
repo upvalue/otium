@@ -337,6 +337,7 @@
                   defonce
                   defmacro
                   defclass
+                  defrecord
                   defparam
                   defgeneric
                   defabstract

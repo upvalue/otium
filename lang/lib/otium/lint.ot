@@ -226,7 +226,8 @@
 
 ;; --- names -----------------------------------------------------------------------
 
-(def- definition-heads '("def" "def-" "defonce" "defparam" "defmacro" "defgeneric" "defclass" "defabstract"))
+(def- definition-heads
+  '("def" "def-" "defonce" "defparam" "defmacro" "defgeneric" "defclass" "defrecord" "defabstract"))
 
 (def- (collect-definitions! context tops)
   ;; Names defined at top level, so forward references resolve.
@@ -470,6 +471,7 @@
               ((member head
                        '(ns require
                           defclass
+                          defrecord
                           defabstract
                           defgeneric
                           reset-class!
@@ -579,7 +581,7 @@
        (requiring context (fn () (in-namespace space (cons 'ns (cons space (cdr (cdr datum)))))))
        nil)
       ((equal? head "require") (requiring context (fn () (in-namespace space datum))) nil)
-      ((member head '("defclass" "defabstract" "defgeneric")) (in-namespace space datum) nil)
+      ((member head '("defclass" "defrecord" "defabstract" "defgeneric")) (in-namespace space datum) nil)
       (else (when (or (equal? head "defmacro") (function-definition? node)) (in-namespace space datum))
             (in-namespace space (list 'macroexpand-all (list 'quote datum)))))))
 

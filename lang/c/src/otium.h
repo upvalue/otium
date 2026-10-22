@@ -128,6 +128,8 @@ typedef enum ot_type {
   OT_TYPE_EOF,
   OT_TYPE_BYTEVECTOR,
   OT_TYPE_PORT,
+  OT_TYPE_RECORD,
+  OT_TYPE_RECORD_TYPE,
   OT_TYPE_INTERNAL,
 } ot_type;
 
@@ -331,6 +333,8 @@ typedef enum ot_obj_type {
   OBJ_GENERIC,
   OBJ_LAYOUT,
   OBJ_INSTANCE,
+  OBJ_RECORD_TYPE,
+  OBJ_RECORD,
   OBJ_CELL,
   OBJ_BYTEVECTOR,
   OBJ_PORT,
@@ -458,6 +462,21 @@ typedef struct ot_instance_obj {
   uint64_t stable_id;
   otv values[];
 } ot_instance_obj;
+
+typedef struct ot_record_type_obj {
+  uintptr_t header;
+  otv name;
+  otv keys;
+  uint64_t stable_id;
+  bool immutable;
+} ot_record_type_obj;
+
+typedef struct ot_record_obj {
+  uintptr_t header;
+  otv type;
+  uint64_t stable_id;
+  otv values[];
+} ot_record_obj;
 
 typedef struct ot_generic_obj {
   uintptr_t header;

@@ -1,0 +1,3 @@
+(ns records.right)
+
+(defrecord Point (x y))

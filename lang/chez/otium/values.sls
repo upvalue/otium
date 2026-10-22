@@ -1,5 +1,6 @@
 (library (otium values)
-  (export keyword keyword? keyword->string nil? array array? table table?
+  (export %make-record-type record-new record-ref record-set! record? record-type? record-type
+          keyword keyword? keyword->string nil? array array? table table?
           collection-call buffer buffer? buffer-push! buffer->string str
           get put! set-applied! push! pop! keys table-values copy collection-length collection-reverse
           collection-for-each collection-apply update!
@@ -12,7 +13,51 @@
           port-value-end port-value-end-set! port-value-position port-value-position-set!
           port-value-closed? port-value-closed?-set! port-value-eof? port-value-eof?-set!
           port-value-callbacks port-value-extract)
-  (import (chezscheme))
+  (import (except (chezscheme) record?))
+
+  (define-record-type record-descriptor
+    (opaque #t)
+    (fields name keys rtd constructor readers writers))
+  (define record-type? record-descriptor?)
+  (define-record-type record-base (opaque #t) (fields descriptor))
+  (define record? record-base?)
+  (define (record-type object)
+    (unless (record? object) (error 'record-type "expected record" object))
+    (record-base-descriptor object))
+  (define (%make-record-type name fields immutable?)
+    (unless (and (symbol? name) (list? fields) (for-all symbol? fields) (boolean? immutable?))
+      (error 'defrecord "expected name, field list and boolean immutability"))
+    (let* ([keys (map keyword fields)]
+           [rtd (make-record-type-descriptor name (record-type-descriptor record-base)
+                  #f #t #t
+                  (list->vector (map (lambda (field) (list (if immutable? 'immutable 'mutable) field)) fields)))]
+           [rcd (make-record-constructor-descriptor rtd #f #f)])
+      (let loop ([rest keys])
+        (unless (null? rest)
+          (when (memq (car rest) (cdr rest)) (error 'defrecord "duplicate field"))
+          (loop (cdr rest))))
+      (make-record-descriptor name keys rtd (record-constructor rcd)
+        (list->vector (map (lambda (i) (record-accessor rtd i)) (iota (length fields))))
+        (and (not immutable?)
+             (list->vector (map (lambda (i) (record-mutator rtd i)) (iota (length fields))))))))
+  (define (record-new descriptor . values)
+    (unless (record-type? descriptor) (error 'record-new "expected record type"))
+    (unless (= (length values) (length (record-descriptor-keys descriptor)))
+      (error 'record-new "wrong field count"))
+    (apply (record-descriptor-constructor descriptor) descriptor values))
+  (define (record-index descriptor key)
+    (let loop ([keys (record-descriptor-keys descriptor)] [i 0])
+      (cond [(null? keys) (error 'record-ref "unknown record field" key)]
+            [(eq? key (car keys)) i]
+            [else (loop (cdr keys) (+ i 1))])))
+  (define (record-ref object key)
+    (let* ([descriptor (record-type object)] [i (record-index descriptor key)])
+      ((vector-ref (record-descriptor-readers descriptor) i) object)))
+  (define (record-set! object key value)
+    (let* ([descriptor (record-type object)] [i (record-index descriptor key)]
+           [writers (record-descriptor-writers descriptor)])
+      (unless writers (error 'record-set! "immutable record"))
+      ((vector-ref writers i) object value) value))
 
   (define-record-type port-value
     (fields name input? kind host buffer (mutable at) (mutable end) (mutable position)
@@ -82,7 +127,10 @@
     (let ([s (string-append (buffer-value-snapshot b) (get-output-string (buffer-value-port b)))])
       (buffer-value-snapshot-set! b s) s))
   (define (collection-call f . args)
-    (cond [(instance? f)
+    (cond [(record? f)
+           (unless (= (length args) 1) (error 'record-ref "expected one keyword"))
+           (record-ref f (car args))]
+          [(instance? f)
            (unless (= (length args) 1) (error 'slot-ref "expected one keyword"))
            (instance-read f (car args))]
           [(procedure? f) (apply f args)]
@@ -168,7 +216,8 @@
                        (hashtable-set! data key value)]))])
           (loop (cddr xs))))) x)
   (define (set-applied! object key value)
-    (cond [(instance? object) (instance-write object key value)]
+    (cond [(record? object) (record-set! object key value)]
+          [(instance? object) (instance-write object key value)]
           [(or (table? object) (array? object)) (put! object key value) value]
           [else (error 'set-applied! "cannot assign through type" (type object))]))
   (define (keys x)
@@ -221,7 +270,7 @@
   (define (frozen-set-car! x v) (mutate-pair! set-car! x v))
   (define (frozen-set-cdr! x v) (mutate-pair! set-cdr! x v))
   (define (type x)
-    (keyword (cond [(port-value? x) "port"] [(instance? x) "instance"] [(buffer? x) "buffer"] [(nil? x) "nil"] [(keyword? x) "keyword"] [(array? x) "array"] [(table? x) "table"]
+    (keyword (cond [(record? x) "record"] [(record-type? x) "record-type"] [(port-value? x) "port"] [(instance? x) "instance"] [(buffer? x) "buffer"] [(nil? x) "nil"] [(keyword? x) "keyword"] [(array? x) "array"] [(table? x) "table"]
           [(null? x) "null"] [(pair? x) "pair"] [(boolean? x) "boolean"] [(symbol? x) "symbol"]
           [(string? x) "string"] [(and (integer? x) (exact? x)) "int"]
           [(char? x) "char"] [(eof-object? x) "eof"] [(bytevector? x) "bytevector"]
@@ -251,7 +300,11 @@
       (unless (null? xs)
         (render (car xs) port #f (+ depth 1))
         (unless (null? (cdr xs)) (display " " port) (items (cdr xs)))))
-    (cond [(instance? x)
+    (cond [(or (record? x) (record-type? x))
+           (display (if (record? x) "#<record " "#<record-type ") port)
+           (display (record-descriptor-name (if (record? x) (record-type x) x)) port)
+           (display ">" port)]
+          [(instance? x)
            (display "#<" port) (display (instance-name x) port) (display ">" port)]
           [(> depth 100) (display "..." port)]
           [(buffer? x)

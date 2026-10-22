@@ -1,0 +1,81 @@
+;; CPU paint and GPU submission timing, with deterministic terminal contents.
+;; Run from lang/: W=760 H=900 ./otium --runtime=chez -L . manse/bench-paint.ot
+;; W=1700 H=1125 gives 200x60. The outer cache is invalidated every frame.
+(require manse.terminal)
+(ns manse.terminal)
+(require otium.process :as process)
+
+(def width-px (string->number (process/getenv "W")))
+
+(def height-px (string->number (process/getenv "H")))
+
+(def w (ui/open {:title "paint" :width width-px :height height-px :headless #t :scale 2 :config "build/ui-config.ot"}))
+
+(def s (sessions/open! 1 "/bin/sh" (list "sh" "-c" "sleep 100")))
+
+(def term (s :term))
+
+(defmethod (ui/layout-style (t Terminal))
+  {:width width-px :height height-px})
+
+(def (view)
+  (ui/new Terminal {:session s}))
+
+(ui/set-view! w view)
+
+(def phase {:paint 0 :submit 0})
+
+(def (frame!)
+  (put! s :version (+ 1 (get s :version 0)))
+  (ui/reconcile! (w :tree) (view))
+  (gpu/invalidate-paint! (w :tree))
+  (gpu/layout! (w :tree) (w :width) (w :height) (w :scale))
+  (let ((t (time/seconds)))
+    (gpu/paint! (w :tree) (w :renderer) (w :width) (w :height) 0x282c33ff)
+    (put! phase :paint (+ (phase :paint) (- (time/seconds) t))))
+  (let ((t (time/seconds)))
+    (native/gpu-frame (w :renderer) "")
+    (put! phase :submit (+ (phase :submit) (- (time/seconds) t)))))
+
+(frame!)
+(dotimes (y (s :rows))
+  (g/write! term (str "\x1b;[" (+ y 1) ";1H" "src/ \x1b;[32mterminal.ot\x1b;[0m  paint row " y)))
+(g/update! term)
+(frame!)
+
+(def lines (apply list (g/text term)))
+
+(def frames 60)
+
+(def (ms x)
+  (/ (round (* 100 (/ (* 1000 x) frames))) 100.0))
+
+(def (scroll! i)
+  (g/write! term
+            (str "\r\n\x1b;[3"
+                 (+ 1 (modulo i 7))
+                 "m"
+                 (string-trim (list-ref lines (modulo (* 7 i) (length lines))))
+                 "\x1b;[0m"))
+  (g/update! term))
+
+(def (run label scroll?)
+  (put! phase :paint 0)
+  (put! phase :submit 0)
+  (dotimes (i frames)
+    (cond
+      ((eq? scroll? :scroll) (scroll! i))
+      ((eq? scroll? :type) (g/write! term (str "\x1b;[2;1Htyped " i)) (g/update! term))
+      ((eq? scroll? :cursor) (g/write! term (str "\x1b;[3;" (+ 1 (modulo i 60)) "H")) (g/update! term)))
+    (frame!))
+  (println " " label "paint" (ms (phase :paint)) "submit" (ms (phase :submit))))
+
+(println "grid" (s :cols) "x" (s :rows) (* (s :cols) (s :rows)) "cells")
+(println "full paint, ms/frame:")
+(run "same screen  " #f)
+(run "typing       " :type)
+(run "cursor       " :cursor)
+(g/write! term (str "\x1b;[" (s :rows) ";1H"))
+(run "scrolling    " :scroll)
+(sessions/close! s)
+(ui/close! w)

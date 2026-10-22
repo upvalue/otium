@@ -26,6 +26,8 @@
 
 (def- STATE-ROWS 2)
 
+(def- STATE-DIRTY 3)
+
 (def- STATE-ROW-ITERATOR 4)
 
 (def- STATE-CURSOR-VISIBLE 11)
@@ -37,6 +39,8 @@
 (def- STATE-CURSOR-VIEWPORT-Y 16)
 
 ;; GhosttyRenderStateRowData
+(def- ROW-DIRTY 1)
+
 (def- ROW-CELLS 3)
 
 ;; GhosttyRenderStateRowCellsData
@@ -49,6 +53,10 @@
 (def- CELL-BG-COLOR 5)
 
 (def- CELL-FG-COLOR 6)
+
+(def- CELL-HAS-STYLING 8)
+
+(def- CELL-UTF8 9)
 
 ;; Layouts. check-layouts! compares them with the library's own description.
 (defonce layouts {})
@@ -90,6 +98,12 @@
 
 (def GString (layout "GhosttyString" '((ptr pointer) (len size-t))))
 
+(def GBuffer (layout "GhosttyBuffer" '((ptr pointer) (cap size-t) (len size-t))))
+
+(def- buffer-len-index (/ (ffi/offset-of GBuffer '(len)) (ffi/sizeof 'size-t)))
+
+(def- inverse-offset (ffi/offset-of Style '(inverse)))
+
 (ffi/defbindings library
                  %load!
                  ((private %type-json) "ghostty_type_json" () utf8 #f)
@@ -115,6 +129,8 @@
                  ((private %state-free) "ghostty_render_state_free" (pointer) void #t)
                  ((private %state-update) "ghostty_render_state_update" (pointer pointer) int #t)
                  ((private %state-get) "ghostty_render_state_get" (pointer int pointer) int #f)
+                 ((private %state-set) "ghostty_render_state_set" (pointer int pointer) int #f)
+                 ((private %row-set) "ghostty_render_state_row_set" (pointer int pointer) int #f)
                  ((private %colors-get) "ghostty_render_state_colors_get" (pointer pointer) int #f)
                  ((private %rows-new) "ghostty_render_state_row_iterator_new" (pointer pointer) int #t)
                  ((private %rows-free) "ghostty_render_state_row_iterator_free" (pointer) void #t)
@@ -229,7 +245,7 @@
   (when (term :state) (%state-free (term :state)))
   (when (term :handle) (%terminal-free (term :handle)))
   (when (term :write-pty) (ffi/free-callback! (term :write-pty)))
-  (for-each (fn (k) (when (term k) (ffi/free! (term k)))) '(:rgb :codepoints :style)))
+  (for-each (fn (k) (when (term k) (ffi/free! (term k)))) '(:rgb :codepoints :style :utf8 :utf8-buffer)))
 
 (def- (free-keyboard! term)
   (when (term :key-encoder) (%key-encoder-free (term :key-encoder)))
@@ -387,6 +403,70 @@
           (f x y)
           (cols (+ x 1))))
       (rows (+ y 1)))))
+
+(def (dirty term)
+  "Render dirtiness: 0 clean, 1 partial, 2 full."
+  (state-ref term STATE-DIRTY 'i32))
+
+(def (clear-dirty! term)
+  (ffi/set! scratch 'i32 0 0)
+  (check! "render_state_set" (%state-set (term :state) 0 scratch)))
+
+(def (clear-row-dirty! term)
+  (ffi/set! scratch 'bool 0 #f)
+  (check! "row_set" (%row-set (term :row-iter) 0 scratch)))
+
+(def (each-row term f)
+  "Call (f y dirty?) with the row iterator positioned; does not clear dirty flags."
+  (point! STATE-ROW-ITERATOR %state-get (term :state) (term :row-iter))
+  (let loop ((y 0))
+    (when (%rows-next (term :row-iter))
+      (check! "row_get" (%row-get (term :row-iter) ROW-DIRTY scratch))
+      (f y (ffi/ref scratch 'bool 0))
+      (loop (+ y 1)))))
+
+(def- (utf8-buffer! term capacity)
+  (let ((p (ffi/alloc 'u8 capacity)))
+    (unless (term :utf8-buffer) (put! term :utf8-buffer (ffi/alloc GBuffer 1)))
+    (when (term :utf8) (ffi/free! (term :utf8)))
+    (put! term :utf8 p)
+    (ffi/field-set! (term :utf8-buffer) GBuffer '(ptr) p)
+    (ffi/field-set! (term :utf8-buffer) GBuffer '(cap) capacity)))
+
+(def- (cell-rgba term key)
+  (when (= SUCCESS (%cell-get (term :cells) key (term :rgb)))
+    (let ((p (term :rgb)))
+      (bitwise-ior (bitwise-arithmetic-shift (ffi/ref p 'u8 0) 24)
+                   (bitwise-arithmetic-shift (ffi/ref p 'u8 1) 16)
+                   (bitwise-arithmetic-shift (ffi/ref p 'u8 2) 8)
+                   255))))
+
+(def (each-row-cell term f)
+  "Call (f x text fg bg inverse?) for the current row; colours are RGBA or nil."
+  ;; Lazy allocation also serves terminals that survived a reload.
+  (unless (term :utf8-buffer) (utf8-buffer! term 64))
+  (point! ROW-CELLS %row-get (term :row-iter) (term :cells))
+  (let ((buf (term :utf8-buffer)))
+    (let loop ((x 0))
+      (when (%cells-next (term :cells))
+        (check! "row_cells_get" (%cell-get (term :cells) CELL-HAS-STYLING scratch))
+        (let ((styled? (ffi/ref scratch 'bool 0))
+              (result (%cell-get (term :cells) CELL-UTF8 buf))
+              (n (ffi/ref buf 'size-t buffer-len-index)))
+          (when (= result -3)
+            (utf8-buffer! term n)
+            (set! result (%cell-get (term :cells) CELL-UTF8 buf)))
+          (check! "graphemes_utf8" result)
+          (when styled? (check! "cell_style" (%cell-get (term :cells) CELL-STYLE (term :style))))
+          (f x
+             (if (= n 0)
+                 " "
+                 (ffi/read-utf8-bytes (term :utf8) n))
+             (and styled? (cell-rgba term CELL-FG-COLOR))
+             ;; Erased cells can carry a background in the content tag without a style.
+             (and (or styled? (= n 0)) (cell-rgba term CELL-BG-COLOR))
+             (and styled? (ffi/ref (term :style) 'bool inverse-offset))))
+        (loop (+ x 1))))))
 
 (def (grid term)
   "The viewport as an array of rows of cell tables. For tests; allocates per cell."

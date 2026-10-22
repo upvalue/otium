@@ -1,0 +1,72 @@
+(require manse.ghostty :as g)
+(require otium.ffi :as ffi)
+(require otium.test :refer (check report))
+
+(def (rgba rgb)
+  (and rgb
+       (bitwise-ior (bitwise-arithmetic-shift (car rgb) 24)
+                    (bitwise-arithmetic-shift (cadr rgb) 16)
+                    (bitwise-arithmetic-shift (caddr rgb) 8)
+                    255)))
+
+(def t (g/new 40 6))
+
+(def (compare! label text)
+  (g/write! t text)
+  (g/update! t)
+  (let ((expected (g/grid t))
+        (actual [])
+        (reference []))
+    (g/each-row t
+                (fn (y _dirty?)
+                  (g/each-row-cell t
+                                   (fn (x text fg bg inverse?)
+                                     (let ((c (get (get expected y) x)))
+                                       (push! actual (list text (or fg nil) (or bg nil) inverse?))
+                                       (push! reference
+                                              (list (if (null? (c :codepoints))
+                                                        " "
+                                                        (g/codepoints->string (c :codepoints)))
+                                                    (rgba (c :fg))
+                                                    (rgba (c :bg))
+                                                    (c :inverse))))))))
+    (check label (array-to-list reference) (array-to-list actual))))
+
+(compare! "plain, palette, RGB, inverse and wide text"
+          "plain λ é 🙂\x1b;[31;44m colour \x1b;[7m inverse \x1b;[0m\r\n\x1b;[38;2;1;2;3;48;2;4;5;6mRGB\x1b;[0m")
+(compare! "palette erase without styling" "\x1b;[44m\x1b;[2J")
+(compare! "RGB erase without styling" "\x1b;[48;2;13;27;39m\x1b;[2J")
+(compare! "alternate screen and status bar"
+          "\x1b;[?1049h\x1b;[0m\x1b;[2J\x1b;[Hfile.txt\r\n\x1b;[32m  1 \x1b;[0mhello\x1b;[6;1H\x1b;[7m-- INSERT --\x1b;[K\x1b;[0m")
+(compare! "return from alternate screen" "\x1b;[?1049l")
+(compare! "long grapheme grows UTF8 buffer" (str "\x1b;[0m\x1b;[He" (apply str (map (fn (_) "́") (range 100)))))
+(check "UTF8 buffer grew" #t (> (ffi/field-ref (t :utf8-buffer) g/GBuffer '(cap)) 64))
+
+(def (clear!)
+  (g/each-row t (fn (_y _dirty?) (g/clear-row-dirty! t)))
+  (g/clear-dirty! t))
+
+(def (dirty-rows)
+  (let ((rows []))
+    (g/each-row t (fn (y dirty?) (when dirty? (push! rows y))))
+    (array-to-list rows)))
+
+(clear!)
+(check "global dirty cleared" 0 (g/dirty t))
+(check "row dirty cleared" '() (dirty-rows))
+(g/write! t "\x1b;[3;1Hx")
+(g/update! t)
+(check "write dirties text row and previous cursor row" '(0 2) (dirty-rows))
+(g/write! t "\x1b;[5;1Hy")
+(g/update! t)
+(check "dirt accumulates across updates" '(0 2 4) (dirty-rows))
+(clear!)
+(g/write! t "\x1b;[1;1H")
+(g/update! t)
+(check "cursor movement dirties its old and new rows" '(0 4) (dirty-rows))
+(g/resize! t 42 7 8 18)
+(g/update! t)
+(check "resize dirties whole screen" 2 (g/dirty t))
+(clear!)
+(g/free! t)
+(report "paint cells")

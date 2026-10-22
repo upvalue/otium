@@ -110,8 +110,8 @@
       ((eq? kind :key-down) (key! session event))
       (else nil))))
 
-;; Walking the cells costs thousands of FFI calls, so the drawing is cached
-;; until the output, focus, font or size changes. While an enclosing column
+;; The outer cache replays idle terminals; row caches reuse unchanged text
+;; after output or focus changes. While an enclosing column
 ;; eases to a new width, the last grid is replayed at its old size; the grid
 ;; and PTY resize once, when the width settles, so the shell redraws once.
 (defmethod (ui/paint (w Terminal) g bounds)
@@ -129,7 +129,15 @@
       (gfx/cached g
                   (w :cache)
                   area
-                  (list (get session :version 0) (g :focused?) (font) (font-size) (padding))
+                  (list (get session :version 0)
+                        (g :focused?)
+                        (session :exit)
+                        (font)
+                        (font-size)
+                        (padding)
+                        paint-terminal
+                        paint-row
+                        g/each-row-cell)
                   (fn (g) (paint-terminal session g area (not resizing?)))))))
 
 (def (fit! session bounds)
@@ -162,46 +170,67 @@
           (x0 (+ (bounds :x) (padding)))
           (y0 (+ (bounds :y) (padding)))
           (colors (g/colors term))
-          (run (buffer))
-          (run-col 0)
-          (run-color nil)
-          (run-y 0))
+          (row-key (list (session :metrics-key)
+                         cw
+                         ch
+                         (session :cols)
+                         (session :rows)
+                         (colors :foreground)
+                         (colors :background)
+                         (padding)
+                         (g :renderer)
+                         paint-row
+                         g/each-row-cell))
+          (full? (= (g/dirty term) 2)))
+      (unless (equal? row-key (session :row-key)) (put! session :row-caches [] :row-key row-key))
       (gfx/rect g bounds (rgba (colors :background) 255))
-      (def (flush!)
-        (when run-color (text-run! session g (+ x0 (* run-col cw)) run-y (buffer->string run) run-color))
-        (set! run (buffer))
-        (set! run-color nil))
-      (g/each-cell term
-                   (fn (x y)
-                     (when (= x 0) (flush!))
-                     (let ((c (g/cell term))
-                           (py (+ y0 (* y ch))))
-                       (let ((fg (or (c :fg) (colors :foreground)))
-                             (bg (c :bg)))
-                         (when (c :inverse)
-                           (let ((t fg))
-                             (set! fg (or bg (colors :background)))
-                             (set! bg t)))
-                         (when bg
-                           (let ((left (round (+ x0 (* x cw)))))
-                             (gfx/rect g (ui/bounds left py (- (round (+ x0 (* (+ x 1) cw))) left) ch) (rgba bg 255))))
-                         (let ((color (rgba fg 255)))
-                           (unless (eq? color run-color)
-                             (flush!)
-                             (set! run-col x)
-                             (set! run-y py)
-                             (set! run-color color))
-                           (buffer-push! run
-                                         (if (null? (c :codepoints))
-                                             " "
-                                             (g/codepoints->string (c :codepoints)))))))))
-      (flush!)
+      (g/each-row term
+                  (fn (y dirty?)
+                    (let ((caches (session :row-caches)))
+                      (when (= y (length caches)) (push! caches (gfx/cache)))
+                      (let ((cache (get caches y))
+                            (area (ui/bounds x0 (+ y0 (* y ch)) (* (session :cols) cw) ch)))
+                        (when (or full? dirty?) (put! cache :key nil))
+                        ;; Keep glyph overhang and rectangle antialiasing at row edges.
+                        (gfx/cached g cache bounds row-key (fn (g) (paint-row session g area colors)))
+                        (when dirty? (g/clear-row-dirty! term))))))
+      (g/clear-dirty! term)
       (let ((cur (g/cursor term)))
         (when (and cur (g :focused?) (not (session :exit)))
           (gfx/rect g
                     (ui/bounds (+ x0 (* (car cur) cw)) (+ y0 (* (cadr cur) ch)) cw ch)
                     (rgba (colors :foreground) 128)))))
     (record-time! session (- (time/seconds) start))))
+
+(def (paint-row session g area colors)
+  (let ((cw (session :cell-w))
+        (ch (session :cell-h))
+        (x0 (area :x))
+        (py (area :y))
+        (default-fg (rgba (colors :foreground) 255))
+        (default-bg (rgba (colors :background) 255))
+        (run (buffer))
+        (run-col 0)
+        (run-color nil))
+    (def (flush!)
+      (when run-color (text-run! session g (+ x0 (* run-col cw)) py (buffer->string run) run-color))
+      (set! run (buffer)))
+    (g/each-row-cell (session :term)
+                     (fn (x text fg bg inverse?)
+                       (set! fg (or fg default-fg))
+                       (when inverse?
+                         (let ((t fg))
+                           (set! fg (or bg default-bg))
+                           (set! bg t)))
+                       (when bg
+                         (let ((left (round (+ x0 (* x cw)))))
+                           (gfx/rect g (ui/bounds left py (- (round (+ x0 (* (+ x 1) cw))) left) ch) bg)))
+                       (unless (eq? fg run-color)
+                         (flush!)
+                         (set! run-col x)
+                         (set! run-color fg))
+                       (buffer-push! run text)))
+    (flush!)))
 
 (def (record-time! session elapsed)
   (put! session :paint-seconds (+ elapsed (get session :paint-seconds 0)))

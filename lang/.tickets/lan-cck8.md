@@ -2,7 +2,7 @@
 id: lan-cck8
 status: open
 deps: []
-links: []
+links: [lan-giys]
 created: 2026-10-21T00:47:25Z
 type: task
 priority: 1

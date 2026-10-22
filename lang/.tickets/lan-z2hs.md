@@ -2,7 +2,7 @@
 id: lan-z2hs
 status: open
 deps: []
-links: []
+links: [lan-nig8, lan-m5k9, lan-fw3w]
 created: 2026-10-19T04:47:33Z
 type: task
 priority: 1

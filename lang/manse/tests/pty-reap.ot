@@ -16,7 +16,7 @@
               (ffi/set! result 'i32 0 0)
               pid))))
 
-(def p {:fd 1 :pid 42 :buffer (ffi/alloc 'u8 1) :pollfd (ffi/alloc PollFd 1)})
+(def p {:fd 1 :pid 42 :output (ffi/alloc 'pointer 1)})
 
 (close! p)
 (check "running child stays pending" '(42) (array-to-list pending-pids))

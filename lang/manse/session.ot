@@ -1,4 +1,5 @@
 (ns manse.session)
+(require otium.time :as time)
 (require manse.ghostty :as g)
 (require manse.pty :as pty)
 
@@ -15,19 +16,30 @@
         session)
       (unless success? (g/free! term)))))
 
+(def parse-budget
+  "Seconds pump! may spend parsing before the frame paints."
+  0.008)
+
 (def (pump! session)
-  "Read at most one 64 KiB chunk per turn, including output left after child exit."
+  "Parse the output the PTY's reader thread has gathered, up to parse-budget, including output left after child exit."
   (unless (session :closed?)
     (let ((p (session :pty))
           (term (session :term))
+          (deadline (+ (time/seconds) parse-budget))
           (changed? #f))
-      (when (and (not (session :eof?)) (pty/readable? p 0))
-        (let ((n (pty/read! p)))
-          (when n
-            (set! changed? #t)
-            (if (> n 0)
-                (g/write-bytes! term (p :buffer) n)
-                (put! session :eof? #t)))))
+      (let loop ()
+        (unless (session :eof?)
+          (let ((n (pty/output p)))
+            (cond
+              ((not n) (put! session :eof? #t) (set! changed? #t))
+              ((> n 0)
+               (g/write-bytes! term (pty/output-data p) n)
+               (pty/consume! p)
+               (set! changed? #t)
+               ;; Over budget, paint now and come straight back for the rest.
+               (if (< (time/seconds) deadline)
+                   (loop)
+                   (pty/wake! p)))))))
       (when changed? (g/update! term))
       (unless (session :exit)
         (let ((status (pty/status p)))

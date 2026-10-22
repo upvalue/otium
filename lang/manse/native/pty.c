@@ -61,14 +61,6 @@ int manse_pty_resize(int fd, int cols, int rows, int width, int height) {
 }
 
 // Preserve errno before returning through the FFI.
-long manse_pty_read(int fd, void* data, size_t size) {
-  ssize_t n;
-  do {
-    n = read(fd, data, size);
-  } while (n < 0 && errno == EINTR);
-  return n < 0 ? -errno : n;
-}
-
 long manse_pty_write(int fd, const void* data, size_t size) {
   ssize_t n;
   do {

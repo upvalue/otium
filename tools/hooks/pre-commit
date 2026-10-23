@@ -1,0 +1,22 @@
+#!/bin/sh
+# Fast checks on staged files. Install with: just setup
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+staged() { git diff --cached --name-only --relative --diff-filter="$1"; }
+# Renames count for doc locations; only added or edited files are format-checked.
+docs=$(staged ACMR)
+[ -n "$docs" ] || exit 0
+tools/check-docs $docs
+edited=$(staged ACM)
+otium_files=$(printf '%s\n' $edited | grep -E '^(lib|examples|benchmarks)/.*\.ot$' || true)
+if [ -n "$otium_files" ]; then
+    ./otium fmt --check $otium_files
+    ./otium lint --format=short --deny-warnings $otium_files
+fi
+if printf '%s\n' $edited | grep -qE '^(c|native|tests)/.*\.[ch]$'; then
+    if command -v clang-format > /dev/null 2>&1 || command -v xcrun > /dev/null 2>&1; then
+        c/tools/format-c --check
+    else
+        echo 'pre-commit: clang-format not found; skipping C format check' >&2
+    fi
+fi

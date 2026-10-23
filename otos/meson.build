@@ -27,7 +27,7 @@ subdir('vendor/compiler-rt')
 
 # The Otium C runtime, compiled from the language tree with a kernel
 # platform layer in place of ot-posix.c.
-runtime_dir = '../lang/c/src'
+runtime_dir = '../c/src'
 runtime_args = [
   '-DOT_GC_SEMI',
   '-DOT_HEAP_INIT=1048576',

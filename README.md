@@ -1,33 +1,44 @@
-# otium
+# Otium
 
-# [Try the live demo](https://otium.sh/demo/) 
+Otium is an experimental little vibe-coded Lisp (but this README was written by
+a human). It has a focus on pragmatism and live reloadin.
 
-Otium is a little operating system project that I worked on from September to December of 2025.
+This repository contains two other programs written in Otium (& a
+little bit of C)
 
-It's a simple microkernel that runs on RISC-V (under QEMU) or on WebAssembly.
+# Manse
 
-Features:
-- The shell is a small implementation of [Tcl](https://en.wikipedia.org/wiki/Tcl) so normal
-  programming works
-- Graphics, filesystems and input devices support are just processes, which can crash normally
-  without impacting the overall system
-- A cooperative scheduler, which is implemented using Emscripten fibers on WebAssembly
+Manse is a terminal multiplexer based on libghostty that uses scrolling (like
+the wayland compositor Niri) as its terminal management paradigm.
 
-For more information including instructions on how to build and use the
-operating system, see the website at [otium.sh](https://otium.sh). 
+# OtOS 
 
-## Screenshots
+OtOS is a unikernel operating system for embedded devices in the multi-MB
+memory range. Its userspace is written in the Otium language.
 
-Tcl shell with taskbar showing running processes:
+# The language
 
-![Tcl Shell](assets/tcl-shell.png)
+It is most directly descended from Scheme, but takes some ideas from Clojure
+and Janet in terms of practicality, and a CLOS-lite sort of object system.
 
-Graphics demo with concentric circles:
+Its goal is being a fairly dynamic language with a runtime suitable for
+multi-MB embedded systems (eg ESP32, RP2350) or as an extension language for C
+programs. It also includes a Chez Scheme implementation which is preferred for 
+normal computing use as it's much higher performance.
 
-![Graphics Demo](assets/graphics-demo.png)
+There are some examples in ./examples, including handwritten code, to show how
+it feels to use.
 
-## Links
+The C runtime has a moving, generational garbage collector. Because getting
+this code right is difficult, it has a custom libclang-based linter that flags
+whether GC code is written correctly.
 
-- [otium.sh](https://otium.sh) - website
-- [devlog](https://upvalue.io/posts/tag/otium) - dev log
+# The older operating system
 
+<link here>
+
+## Credits
+
+Otium's `gen` collector is an adaptation of
+[toit](https://github.com/toitlang/toit)'s garbage collector, originally from
+Dartino.

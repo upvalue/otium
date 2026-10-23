@@ -1,3 +1,0 @@
-;; Run from lang/manse: ../otium app.ot
-(require manse.workspace :as workspace)
-(workspace/main)

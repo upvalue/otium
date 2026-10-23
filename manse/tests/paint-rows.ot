@@ -1,0 +1,114 @@
+;; Headless row-cache regression checks. Run from the repository root with --runtime=chez -L .
+(require manse.terminal)
+(ns manse.terminal)
+(require otium.process :as process)
+
+(require otium.test :refer (check report))
+
+(def width-px 760)
+
+(def height-px 900)
+
+(def w (ui/open {:title "paint" :width width-px :height height-px :headless #t :scale 2 :config "build/ui-config.ot"}))
+
+(def s {:id 1 :term (g/new 80 24) :exit #t})
+
+(def term (s :term))
+
+(defmethod (ui/layout-style (t Terminal))
+  {:width width-px :height height-px})
+
+(def (view)
+  (ui/new Terminal {:key :terminal :session s}))
+
+(ui/set-view! w view)
+
+(def primitives 0)
+
+(def (frame!)
+  (put! s :version (+ 1 (get s :version 0)))
+  (ui/reconcile! (w :tree) (view))
+  (gpu/invalidate-paint! (w :tree))
+  (gpu/layout! (w :tree) (w :width) (w :height) (w :scale))
+  (gpu/paint! (w :tree) (w :renderer) (w :width) (w :height) 0x282c33ff)
+  (set! primitives (native/gpu-mark (w :renderer)))
+  (native/gpu-frame (w :renderer) ""))
+
+(def row-paints 0)
+
+(def original-paint-row paint-row)
+
+(set! paint-row
+      (fn args
+        (set! row-paints (+ 1 row-paints))
+        (apply original-paint-row args)))
+
+(def (draw! text)
+  (g/write! term text)
+  (g/update! term)
+  (set! row-paints 0)
+  (frame!))
+
+(draw! "hello")
+(check "first frame paints all rows" (s :rows) row-paints)
+
+(def initial-primitives primitives)
+
+(check "text produced drawing primitives" #t (> initial-primitives 1))
+(draw! "")
+(check "unchanged screen reuses every row" 0 row-paints)
+(check "replay retains drawing primitives" initial-primitives primitives)
+(ui/focus! (w :tree) (ui/find-key (w :tree) :terminal))
+(draw! "")
+(check "focus reuses all text rows" 0 row-paints)
+(ui/focus! (w :tree) nil)
+(draw! "")
+(check "blur reuses all text rows" 0 row-paints)
+(draw! "x")
+(check "typing paints one row" 1 row-paints)
+(draw! "\x1b;[2;1H")
+(check "cursor move paints at most two rows" #t (<= row-paints 2))
+(draw! "\x1b;[44m\x1b;[2J")
+(check "background erase paints every row" (s :rows) row-paints)
+(draw! "\x1b;[0m\x1b;[2J\x1b;[Htext\x1b;[31;47m colour\x1b;[0m\r\nλ é 🙂\x1b;[7m inverse\x1b;[0m")
+(draw! "")
+(check "styled screen reuses every row" 0 row-paints)
+(put! settings/options :font-size (+ 1 (font-size)))
+(draw! "")
+(check "font change paints all rows" (s :rows) row-paints)
+(set! width-px 600)
+(set! height-px 700)
+(draw! "")
+(check "resize paints all rows" (s :rows) row-paints)
+
+;; Simulate a renderer recording evicted while the outer cache was replayed.
+(put! (get (s :row-caches) 0) :id 1000000)
+(draw! "")
+(check "missing recording is rebuilt" 1 row-paints)
+(ns manse.ghostty)
+
+;; lint: allow(unbound-name) This test enters the already loaded Ghostty namespace.
+(def saved-colors colors)
+
+;; lint: allow(unbound-name) Replace the loaded namespace binding for this test.
+(set! colors (fn (term) (put (saved-colors term) :background '(17 34 51))))
+(ns manse.terminal)
+(draw! "")
+(check "default colour change paints every row" (s :rows) row-paints)
+(draw! "")
+(check "equal colours reuse rows" 0 row-paints)
+(ns manse.ghostty)
+
+;; lint: allow(unbound-name) Restore the loaded namespace binding.
+(set! colors saved-colors)
+(ns manse.terminal)
+(set! paint-row
+      (fn args
+        (set! row-paints (+ 1 row-paints))
+        (apply original-paint-row args)))
+(draw! "")
+(check "redefined painter invalidates rows" (s :rows) row-paints)
+(set! paint-row original-paint-row)
+(g/free! term)
+(ui/close! w)
+(report "paint rows")

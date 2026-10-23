@@ -22,12 +22,12 @@ jobs:
         with:
           version: '4.0.20'
       - run: npm ci
-        working-directory: lang/site
+        working-directory: site
       - run: make test-site
-        working-directory: lang
+        working-directory: .
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: lang/site/dist
+          path: site/dist
   deploy:
     needs: build
     runs-on: ubuntu-latest

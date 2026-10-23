@@ -2,7 +2,7 @@
 
 ;; Prototype bindings to libghostty-vt: terminal state, the render state and
 ;; its row/cell iterators, and the write_pty effect. Constants and signatures
-;; follow the headers at the commit in docs/native-dependencies.md.
+;; follow the installed libghostty-vt headers.
 
 (require otium.ffi :as ffi)
 (require otium.process :as process)

@@ -1,4 +1,4 @@
-# Otium development commands. Builds live in build/; see docs/development.md.
+# Otium development commands. Builds live in build/; see docs/language-guide.md.
 
 set positional-arguments
 
@@ -43,6 +43,10 @@ check-docs:
 # Managed-pointer analysis of the C runtime; needs LLVM development tools
 gc-lint *args:
     c/tools/gc-lint/run {{args}}
+
+# Regenerate LLM-written docs from their .md.spec files; pass docs to pick some
+docs *args:
+    tools/generate-docs "$@"
 
 # Regenerate checked-in launcher catalogs and runtime reference tables
 generate:

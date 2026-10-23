@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile lib/catalog/diagnostics.json into runtime tables, an Otium module and docs."""
+"""Compile lib/catalog/diagnostics.json into runtime tables, and an Otium module."""
 import argparse
 import json
 from pathlib import Path
@@ -10,7 +10,6 @@ parser.add_argument('--check', action='store_true')
 args = parser.parse_args()
 entries = json.loads((ROOT / 'lib/catalog/diagnostics.json').read_text())
 errors = {code: entry for code, entry in entries.items() if code.startswith('E')}
-rules = {code: entry for code, entry in entries.items() if code.startswith('L')}
 SOURCE = 'Generated from lib/catalog/diagnostics.json by tools/generate-diagnostics.py.'
 
 
@@ -66,41 +65,9 @@ ot[-1] += '})'
 ot.append('')
 
 
-def markdown(title, intro, selection):
-    lines = [f'# {title}', '', f'<!-- {SOURCE} -->', '', intro, '']
-    for code, e in selection.items():
-        heading = f'{code} {e["name"]}' if 'name' in e else code
-        lines += [f'## {heading}: {e["title"]}', '']
-        if 'level' in e:
-            lines += [f'Group `{e["group"]}`, default level `{e["level"]}`.', '']
-        else:
-            lines += [f'Condition type `:{e["type"]}`.', '']
-        lines += [e['explanation'], '']
-        if e.get('example'):
-            lines += ['Example:', '', '```lisp', e['example'], '```', '']
-        if e.get('fixed'):
-            lines += ['Corrected:', '', '```lisp', e['fixed'], '```', '']
-    return '\n'.join(lines)
-
-
-errors_md = markdown(
-    'Error codes',
-    'Errors raised by the reader, the expander and the runtime carry a stable code in their '
-    '`:code` field. Codes are never reused. Run `otium explain CODE` to print an entry.',
-    errors)
-lint_md = markdown(
-    'Lint rules',
-    'Rules checked by `otium lint`. Suppress one for a form with a comment on the line before it '
-    'or at the end of its first line, `;; lint: allow(rule-name) reason`, or for a whole file '
-    'with `;; lint: allow-file(rule-name) reason` before the first form. A reason is required. '
-    'Run `otium explain CODE` to print an entry.',
-    rules)
-
 outputs = [('c/src/diagnostic-catalog.inc', '\n'.join(c)),
            ('chez/otium/diagnostic-catalog.sls', '\n'.join(scm)),
-           ('lib/otium/diagnostics/catalog.ot', '\n'.join(ot)),
-           ('docs/errors.md', errors_md),
-           ('docs/lint.md', lint_md)]
+           ('lib/otium/diagnostics/catalog.ot', '\n'.join(ot))]
 for name, text in outputs:
     path = ROOT / name
     if args.check:

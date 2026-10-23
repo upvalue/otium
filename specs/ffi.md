@@ -1,8 +1,8 @@
 # Portable foreign function interface
 
 Status: draft for review, October 16, 2026. Implementation is in progress;
-see [implementation status](../docs/ffi.md) for the working subset,
-commands, and outstanding work. This document describes the full release
+the [language guide](../docs/language-guide.md) covers the working subset.
+This document describes the full release
 contract.
 
 Otium should load a native shared library and call its C ABI from the same
@@ -628,7 +628,7 @@ Proposed placement: `c/src/ot-ffi.c` for the C backend,
 helpers, probes and fixtures, and `native/sdl/` for binding data and wrappers.
 Each runtime's loader may adapt the shared source without duplicating function
 signatures. Integration tests belong under `tests/`. Language/library
-gaps discovered while porting scene code belong in `docs/portability.md`.
+gaps discovered while porting scene code belong in tickets.
 
 ## Verification and implementation order
 

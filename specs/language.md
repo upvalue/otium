@@ -3,7 +3,8 @@
 **Specification -- draft 0.3**
 
 This draft describes the C dialect. Chez shares the namespace and macro
-design but uses Chez values and semantics; see [Chez notes](../docs/chez.md).
+design but uses Chez values and semantics; see the
+[language guide](../docs/language-guide.md).
 
 Otium is a small Lisp: a Scheme kernel made pragmatic for embedding and
 data munging. The choices that make it itself:

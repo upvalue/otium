@@ -9,8 +9,8 @@ and shaped left-to-right caret placement, with interpolated positions inside
 ligatures; IME composition remains deferred. Custom widget methods control
 default focusability, committed text, key repeat and keyup activation.
 The window/reload service now runs on both runtimes, including development
-sockets and recovery from frame errors. See `docs/ui-development.md` and
-`docs/dev-server.md` for the implemented subset and runnable demo. Decisions
+sockets and recovery from frame errors. See `examples/ui.ot` for a runnable
+demo. Decisions
 made so far are listed at the end.
 
 `otium.ui` is a hardware-accelerated UI library written in Otium on top of the
@@ -411,7 +411,7 @@ examples, not yet runnable applications. The implemented subset has widget
 construction, matching, state, rows and columns, constraint-aware layout, wrapped
 labels, rounded rectangles, pointer-driven buttons, focus, and the window
 service. The remaining drawing primitives below are still proposed. See
-`docs/ui-development.md` for runnable code.
+`examples/ui.ot` for runnable code.
 
 ### Boids
 

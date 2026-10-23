@@ -1,7 +1,7 @@
 # Development server
 
-Status: implemented, October 18, 2026. Usage and protocol details are in
-[docs/dev-server.md](../docs/dev-server.md). This is the stopgap version: single-threaded, built on the interrupt checks both VMs
+Status: implemented, October 18, 2026. Usage is covered in the
+[language guide](../docs/language-guide.md). This is the stopgap version: single-threaded, built on the interrupt checks both VMs
 already have. Green threads are the likely next step and are sketched under
 [Later](#later).
 

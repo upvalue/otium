@@ -17,6 +17,18 @@ for file do
         .tickets/*|*/vendor/*|otos/cross/*|*-OFL.txt|tests/*|c/tests/*) continue ;;
         *) echo "$file: docs belong in docs/ or specs/" >&2; status=1; continue ;;
     esac
+    # Generated docs have a .spec beside them and ✨ in the title; hand-written
+    # docs have neither. tools/generate-docs writes the generated ones.
+    case $file in
+        docs/*)
+            if [ -f "$file.spec" ]; then
+                head -n 1 "$file" | grep -q '✨' ||
+                    { echo "$file: generated from $file.spec but title lacks ✨" >&2; status=1; }
+            elif head -n 1 "$file" | grep -q '✨'; then
+                echo "$file: ✨ marks generated docs but there is no $file.spec" >&2
+                status=1
+            fi ;;
+    esac
     if grep -q 'LLM-generated' "$file"; then
         echo "$file: draft banner; finish the doc or delete it" >&2
         status=1
@@ -28,11 +40,12 @@ for file do
     # are Otium bindings. Globs and placeholders don't match the pattern.
     for path in $(grep -o '`[a-z][A-Za-z0-9_./-]*/[A-Za-z0-9_./-]*`' "$file" | tr -d '`' | sort -u); do
         case $path in
+            *...*) continue ;;
             */|*/*.*) ;;
             *) continue ;;
         esac
         case $path in
-            c/*|chez/*|lib/*|native/*|tests/*|examples/*|benchmarks/*|docs/*|specs/*|tools/*|vim/*)
+            c/*|chez/*|lib/*|native/*|tests/*|examples/*|benchmarks/*|docs/*|specs/*|tools/*|vim/*|manse/*|otos/*)
                 if [ ! -e "$path" ]; then
                     echo "$file: names missing path $path" >&2
                     status=1

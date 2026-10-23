@@ -397,7 +397,7 @@ enum { LEAVES_NONE = -2, LEAVES_MIXED = -1 };
 /* A union's overlapping members contribute to its calling classification.
  * Preserve byte classes as well as size: a 4-aligned union can straddle two
  * SysV eightbytes when nested in a struct. Bytes past the register bytes go
- * unrecorded. See docs/native.md. */
+ * unrecorded. */
 static bool classify_union_member(ots* s, otv d, size_t offset,
                                   sysv_class classes[SYSV_REGISTER_BYTES], int* leaves,
                                   unsigned depth) {

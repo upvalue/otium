@@ -107,4 +107,4 @@ reproduce a bug. Don't abort, quit or send input without a reason.
 
 Exit status: 0 ok, 1 Otium error, 2 no server, 3 timed out, 4 paused.
 
-For protocol, launcher, and UI details, read [docs/dev-server.md](../../../docs/dev-server.md) from this skill directory. Commands above run from the repository root.
+For protocol details, read [specs/dev-server.md](../../../specs/dev-server.md) from this skill directory. Commands above run from the repository root.

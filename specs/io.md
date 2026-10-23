@@ -14,8 +14,7 @@ and `get` on strings return characters instead of one-character strings.
 Previously, Otium could print to the host's output and read a whole file into
 a string (`read-file`). Ports add standard input, streaming file access, binary
 I/O, and output to other destinations. They also give both runtimes common
-UTF-8 validation and filesystem error behavior. See
-[Portability](../docs/portability.md) for runtime details.
+UTF-8 validation and filesystem error behavior.
 
 A streaming JSON reader and writer is the motivating example. It isn't part of
 this spec, but the port design should make it straightforward and reasonably

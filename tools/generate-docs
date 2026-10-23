@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""Regenerate docs from their .md.spec files with Claude Code.
+
+docs/foo.md.spec holds YAML front matter (title, prompt) and an optional body
+with more detail. The generated doc is written beside it as docs/foo.md. Docs
+without a .spec are hand written and never touched.
+"""
+import argparse
+import json
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+DOCS = ROOT / 'docs'
+MODEL = 'claude-opus-5-5'
+MARK = '✨'
+
+RULES = f"""\
+You write one Markdown documentation file for the Otium repository. Your final
+reply is written verbatim to {{target}}, so reply with the document and nothing
+else: no preamble, no code fence around the whole thing.
+
+Rules:
+- The first line is `# {MARK} {{title}}`. The {MARK} marks the doc as LLM generated;
+  hand-written docs have no {MARK}. Use plain headings below it.
+- Read the source before writing. Describe what the code does today, not what
+  specs or tickets propose. When something is planned but not built, say so
+  briefly or leave it out. Do not invent APIs, flags or files.
+- Read AGENT-LANG.md before writing any Otium code examples. Keep examples short
+  and check them against the source.
+- Write plainly. Prefer short sentences and ordinary words over jargon.
+- Name repository files in backticks with paths from the repository root, and
+  only name files that exist.
+- Link to other docs with relative links from {{target}}. The docs that exist:
+{{index}}
+- Do not edit any files. Your only output is the reply.
+"""
+
+
+def parse_spec(path):
+    """Return (front matter dict, body) for a spec file.
+
+    Handles the small YAML subset specs use: `key: value` scalars, quoted
+    strings and `|` or `>` block scalars."""
+    lines = path.read_text().splitlines()
+    if not lines or lines[0].strip() != '---':
+        sys.exit(f'{path}: missing front matter')
+    try:
+        end = lines.index('---', 1)
+    except ValueError:
+        sys.exit(f'{path}: unterminated front matter')
+    meta, i, head = {}, 0, lines[1:end]
+    while i < len(head):
+        line = head[i]
+        i += 1
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        key, sep, value = line.partition(':')
+        if not sep:
+            sys.exit(f'{path}: bad front matter line: {line}')
+        key, value = key.strip(), value.strip()
+        if value in ('|', '>'):
+            block = []
+            while i < len(head) and (not head[i].strip() or head[i].startswith((' ', '\t'))):
+                block.append(head[i].strip())
+                i += 1
+            value = ('\n' if value == '|' else ' ').join(block).strip()
+        elif value.startswith('"'):
+            value = json.loads(value)
+        elif value.startswith("'"):
+            value = value[1:-1].replace("''", "'")
+        meta[key] = value
+    for key in ('title', 'prompt'):
+        if not meta.get(key):
+            sys.exit(f'{path}: front matter needs {key}')
+    return meta, '\n'.join(lines[end + 1:]).strip()
+
+
+def target_of(spec):
+    return spec.with_suffix('')
+
+
+def doc_index():
+    """List every doc, generated or hand written, with its title."""
+    entries = []
+    for doc in sorted(DOCS.rglob('*.md')):
+        spec = doc.with_name(doc.name + '.spec')
+        title = parse_spec(spec)[0]['title'] if spec.exists() else doc.stem
+        entries.append((doc, title))
+    for spec in sorted(DOCS.rglob('*.md.spec')):
+        if not target_of(spec).exists():
+            entries.append((target_of(spec), parse_spec(spec)[0]['title']))
+    return '\n'.join(f'  - {d.relative_to(ROOT)}: {t}' for d, t in sorted(entries))
+
+
+def generate(spec, index, dry_run):
+    meta, body = parse_spec(spec)
+    target = target_of(spec)
+    rel = target.relative_to(ROOT)
+    system = RULES.format(target=rel, title=meta['title'], index=index)
+    prompt = meta['prompt'] + ('\n\n' + body if body else '')
+    if dry_run:
+        print(f'== {rel}\n-- system\n{system}\n-- prompt\n{prompt}\n')
+        return True
+    print(f'generating {rel}', file=sys.stderr)
+    result = subprocess.run(
+        ['claude', '-p', '--model', MODEL, '--output-format', 'json',
+         '--allowed-tools', 'Read', 'Grep', 'Glob', 'Bash(git ls-files:*)',
+         '--append-system-prompt', system],
+        input=prompt, capture_output=True, text=True, cwd=ROOT)
+    if result.returncode != 0:
+        print(f'{rel}: claude failed\n{result.stderr}{result.stdout}', file=sys.stderr)
+        return False
+    reply = json.loads(result.stdout)
+    text = reply.get('result', '').strip()
+    if reply.get('is_error') or not text.startswith(f'# {MARK}'):
+        print(f'{rel}: unexpected reply, not written:\n{text[:500]}', file=sys.stderr)
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text + '\n')
+    print(f'wrote {rel}', file=sys.stderr)
+    return True
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('docs', nargs='*',
+                        help='docs or specs to regenerate (default: every spec)')
+    parser.add_argument('-j', '--jobs', type=int, default=4)
+    parser.add_argument('-n', '--dry-run', action='store_true',
+                        help='print the prompts instead of running Claude')
+    args = parser.parse_args()
+    if args.docs:
+        specs = []
+        for name in args.docs:
+            path = Path(name).resolve()
+            spec = path if path.name.endswith('.md.spec') else path.with_name(path.name + '.spec')
+            if not spec.exists():
+                sys.exit(f'{name}: no spec at {spec.relative_to(ROOT)}')
+            specs.append(spec)
+    else:
+        specs = sorted(DOCS.rglob('*.md.spec'))
+    index = doc_index()
+    with ThreadPoolExecutor(max(1, args.jobs)) as pool:
+        ok = all(pool.map(lambda s: generate(s, index, args.dry_run), specs))
+    sys.exit(0 if ok else 1)
+
+
+if __name__ == '__main__':
+    main()

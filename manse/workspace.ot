@@ -10,20 +10,7 @@
 (require manse.theme :as theme)
 (require manse.widgets :as w)
 
-(defonce workspace {:apps (apps/registry)})
-
-;; Adopt sessions from workspaces started before the app registry existed.
-(unless (workspace :apps)
-  (put! workspace :apps (apps/registry))
-  (for-each (fn (session)
-              (apps/add! (workspace :apps)
-                         (str "Terminal " (session :id))
-                         (make terminal/TerminalApp :session session)))
-            (get workspace :sessions []))
-  (put! workspace :sessions nil))
-
-;; Adopt apps from workspaces started before the strip existed.
-(unless (workspace :strip) (put! workspace :strip (strip/strip)))
+(defonce workspace {:apps (apps/registry) :strip (strip/strip)})
 
 (def (query-apps . predicates)
   "Inspect app metadata, optionally filtering with a predicate."

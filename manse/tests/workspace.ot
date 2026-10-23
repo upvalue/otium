@@ -63,18 +63,15 @@
 (def (focused-id)
   (strip/focused (workspace/workspace :strip)))
 
-;; Exercise adoption of sessions from a workspace running the previous code.
-(put! workspace/workspace :apps nil)
-(put! workspace/workspace :strip nil)
-(put! workspace/workspace :sessions [first second])
-(require manse.workspace :reload)
-(check "migration adopts live sessions" first ((workspace/find-app 1) :session))
-(check "migration removes old session collection" nil (workspace/workspace :sessions))
+(workspace/add-app! "Terminal 1" (make terminal/TerminalApp :session first))
+(workspace/add-app! "Terminal 2" (make terminal/TerminalApp :session second))
+(strip/focus! (workspace/workspace :strip) 1)
 (reconcile!)
-(check "migration opens a column per app" '(1 2) (array-to-list (strip/ids (workspace/workspace :strip))))
 (require manse.apps :reload)
 (require manse.terminal :reload)
 (require manse.workspace :reload)
+(check "reload preserves live sessions" first ((workspace/find-app 1) :session))
+(check "reload preserves columns" '(1 2) (array-to-list (strip/ids (workspace/workspace :strip))))
 
 (unwind-protect
   (begin

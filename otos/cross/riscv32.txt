@@ -1,0 +1,15 @@
+[binaries]
+c = '/opt/homebrew/opt/llvm/bin/clang'
+ar = '/opt/homebrew/opt/llvm/bin/llvm-ar'
+strip = '/opt/homebrew/opt/llvm/bin/llvm-strip'
+objcopy = '/opt/homebrew/opt/llvm/bin/llvm-objcopy'
+
+[built-in options]
+c_args = ['--target=riscv32-unknown-elf', '-march=rv32gc', '-mabi=ilp32d', '-mcmodel=medany', '-fno-stack-protector']
+c_link_args = ['--target=riscv32-unknown-elf', '-march=rv32gc', '-mabi=ilp32d', '-fuse-ld=lld', '-nostdlib', '-static']
+
+[host_machine]
+system = 'none'
+cpu_family = 'riscv32'
+cpu = 'rv32gc'
+endian = 'little'

@@ -1,0 +1,3 @@
+Generic builtins from compiler-rt at llvmorg-22.1.8 (compiler-rt/lib/builtins),
+the GENERIC_SOURCES list minus Apple and trampoline files. Homebrew LLVM
+does not ship a riscv32 libclang_rt.builtins.a.

@@ -3,11 +3,8 @@
 #include "kernel.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-
-static const char program[] =
-    "(def (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))\n"
-    "(fib 25)\n";
 
 static void write_console(void* userdata, const char* bytes, size_t length) {
   (void)userdata;
@@ -33,6 +30,106 @@ static void write_console(void* userdata, const char* bytes, size_t length) {
   sbi_shutdown(true);
 }
 
+/* Reads one line from the console into line, echoing as it goes. Returns the
+ * line's length, LINE_INTERRUPTED for ^C, or LINE_EOF for ^D on an empty line. */
+#define LINE_EOF -1
+#define LINE_INTERRUPTED -2
+
+static int read_line(char* line, int capacity) {
+  int length = 0;
+  for (;;) {
+    int c = console_read_byte();
+    if (c == '\r' || c == '\n') {
+      console_write("\n", 1);
+      return length;
+    } else if (c == 0x03) {
+      console_write("^C\n", 3);
+      return LINE_INTERRUPTED;
+    } else if (c == 0x04) {
+      if (length == 0) return LINE_EOF;
+    } else if (c == 0x7f || c == 0x08) {
+      /* Drop a whole UTF-8 sequence: continuation bytes, then the lead byte. */
+      while (length > 0 && ((unsigned char)line[length - 1] & 0xc0) == 0x80) length--;
+      if (length > 0) {
+        length--;
+        console_write("\b \b", 3);
+      }
+    } else if ((c >= 0x20 || c == '\t') && length < capacity) {
+      line[length++] = (char)c;
+      char byte = (char)c;
+      console_write(&byte, 1);
+    }
+  }
+}
+
+static void report_condition(ots* state) {
+  otv condition = ot_condition(state);
+  OT_FRAME_SCOPED(state, &condition);
+  ot_clear_condition(state);
+  fputs("error: ", stdout);
+  if (ot_has_type(condition, OBJ_TABLE)) {
+    otv key = ot_intern(state, "message", 7, true);
+    otv message = ot_table_get(state, condition, key, ot_nil);
+    const char* text;
+    size_t length;
+    if (ot_string_bytes(message, &text, &length)) {
+      console_write(text, length);
+      console_write("\n", 1);
+      return;
+    }
+  }
+  ot_repr_to(state, condition, false, write_console, NULL);
+  console_write("\n", 1);
+}
+
+static void repl(ots* state) {
+  static char line[1024];
+  char* pending = NULL;
+  size_t pending_length = 0;
+  for (;;) {
+    fputs(pending_length == 0 ? "ot> " : "..> ", stdout);
+    int length = read_line(line, sizeof line);
+    if (length == LINE_EOF) break;
+    if (length == LINE_INTERRUPTED) {
+      pending_length = 0;
+      continue;
+    }
+    char* grown = realloc(pending, pending_length + (size_t)length + 1);
+    if (grown == NULL) {
+      puts("otos: out of memory");
+      pending_length = 0;
+      continue;
+    }
+    pending = grown;
+    memcpy(pending + pending_length, line, (size_t)length);
+    pending_length += (size_t)length;
+    pending[pending_length++] = '\n';
+
+    size_t consumed;
+    bool incomplete;
+    otv result;
+    if (ot_eval_partial(state, pending, pending_length, "<repl>", &consumed, &incomplete,
+                        &result)) {
+      OT_FRAME_SCOPED(state, &result);
+      ot_repr_to(state, result, false, write_console, NULL);
+      console_write("\n", 1);
+      pending_length = 0;
+      continue;
+    }
+    if (consumed != 0) {
+      memmove(pending, pending + consumed, pending_length - consumed);
+      pending_length -= consumed;
+    }
+    if (incomplete) {
+      ot_clear_condition(state);
+      continue;
+    }
+    report_condition(state);
+    pending_length = 0;
+  }
+  free(pending);
+}
+
 [[noreturn]] void kmain(uintptr_t hart, uintptr_t device_tree) {
   printf("otos: hart %lu, device tree at %#lx\n", (unsigned long)hart,
          (unsigned long)device_tree);
@@ -46,18 +143,7 @@ static void write_console(void* userdata, const char* bytes, size_t length) {
   uint64_t created = ot_platform_monotonic_ns();
   printf("otos: runtime ready in %lu ms\n", (unsigned long)((created - start) / 1000000));
 
-  otv result;
-  bool ok = ot_eval_src(state, program, sizeof program - 1, "<boot>", &result);
-  uint64_t finished = ot_platform_monotonic_ns();
-  OT_FRAME_SCOPED(state, &result);
-  if (!ok) {
-    result = ot_condition(state);
-    ot_clear_condition(state);
-    fputs("otos: error: ", stdout);
-  } else {
-    fputs("otos: (fib 25) => ", stdout);
-  }
-  ot_repr_to(state, result, false, write_console, NULL);
-  printf("\notos: evaluated in %lu ms\n", (unsigned long)((finished - created) / 1000000));
-  sbi_shutdown(!ok);
+  puts("otium repl (otos) - ^C clears the line, ^D shuts down");
+  repl(state);
+  sbi_shutdown(false);
 }

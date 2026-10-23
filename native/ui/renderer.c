@@ -574,6 +574,28 @@ int otui_gpu_cache_draw(Renderer* r, int id, float x, float y, float cx, float c
 
 int otui_gpu_cache_count(Renderer* r) { return r->cache_count; }
 
+// Bytes this renderer holds, by kind, for memory reports. The atlas is kept
+// three times: CPU pixels, GPU texture and upload buffer. The instance list is
+// too. Swapchain images belong to SDL; kind 5 is the size of one.
+long long otui_gpu_memory(Renderer* r, int kind) {
+  long long atlas = ATLAS_BYTES;
+  long long image = (long long)r->width * r->height * 4;
+  switch (kind) {
+    case 0: return atlas * 3;
+    case 1: return (long long)r->capacity * sizeof(Rect) * 3;
+    case 2: {
+      long long bytes = (long long)r->cache_capacity * sizeof(Cache);
+      for (int i = 0; i < r->cache_count; ++i)
+        bytes += (long long)r->caches[i].count * sizeof(Rect);
+      return bytes;
+    }
+    case 3: return r->offscreen ? image : 0;
+    case 4: return (long long)sizeof(Renderer);
+    case 5: return image;
+    default: return -1;
+  }
+}
+
 // Append one clipped rectangle instance. Grow CPU/GPU storage together;
 // no drawing is submitted until otui_gpu_frame. Text uses this path too.
 bool otui_gpu_rect(Renderer* r, float x, float y, float w, float h, float radius, Uint32 color,

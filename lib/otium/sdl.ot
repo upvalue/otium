@@ -32,6 +32,8 @@
                  (create-window "SDL_CreateWindow" (utf8 int int u64) pointer #t)
                  (set-window-size "SDL_SetWindowSize" (pointer int int) bool #t)
                  (get-window-flags "SDL_GetWindowFlags" (pointer) u64 #t)
+                 (get-window-properties "SDL_GetWindowProperties" (pointer) u32 #t)
+                 (get-pointer-property "SDL_GetPointerProperty" (u32 utf8 pointer) pointer #t)
                  (wait-event-timeout "SDL_WaitEventTimeout" (pointer int) bool #t)
                  (get-window-size "SDL_GetWindowSize" (pointer pointer pointer) bool #t)
                  (get-window-size-in-pixels "SDL_GetWindowSizeInPixels" (pointer pointer pointer) bool #t)

@@ -522,6 +522,41 @@ static otv dev_evaluate(ots* s, otv* args, int argc) {
   return response;
 }
 
+// otium.memory primitives. The heap breakdown and --memory-report are Chez-only
+// for now; %heap returns nil here.
+static otv memory_allocated(ots* s, otv* args, int argc) {
+  (void)args;
+  (void)argc;
+  return ot_make_int((int64_t)ot_get_gc_stats(s).allocated_bytes);
+}
+
+static otv memory_collections(ots* s, otv* args, int argc) {
+  (void)args;
+  (void)argc;
+  return ot_make_int((int64_t)ot_get_gc_stats(s).collections);
+}
+
+static otv memory_report_p(ots* s, otv* args, int argc) {
+  (void)s;
+  (void)args;
+  (void)argc;
+  return ot_false;
+}
+
+static otv memory_heap(ots* s, otv* args, int argc) {
+  (void)s;
+  (void)args;
+  (void)argc;
+  return ot_nil;
+}
+
+static void memory_module(ots* s) {
+  ot_def_nat(s, "%allocated", memory_allocated);
+  ot_def_nat(s, "%collections", memory_collections);
+  ot_def_nat(s, "%report?", memory_report_p);
+  ot_def_nat(s, "%heap", memory_heap);
+}
+
 static void dev_module(ots* s) {
   ot_def_nat(s, "%enabled?", dev_enabled_p);
   ot_def_nat(s, "%clock", dev_clock);
@@ -1150,6 +1185,7 @@ int main(int argc, char** argv) {
   ot_set_loader(state, module_loader, state);
   ot_register_demo_extension(state);
   ot_register_module(state, "otium.dev", dev_module);
+  ot_register_module(state, "otium.memory", memory_module);
   ot_set_arguments(state, script, argc - application_start, argv + application_start);
   struct sigaction action = {0};
   action.sa_handler = handle_interrupt;

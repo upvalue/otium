@@ -92,6 +92,7 @@
                  (gpu-cache-store "otui_gpu_cache_store" (pointer int int float float) bool #t)
                  (gpu-cache-draw "otui_gpu_cache_draw" (pointer int float float float float float float) int #t)
                  (gpu-cache-count "otui_gpu_cache_count" (pointer) int #t)
+                 (gpu-memory "otui_gpu_memory" (pointer int) i64 #t)
                  (gpu-driver "otui_gpu_driver" (pointer) utf8 #t)
                  (gpu-count "otui_gpu_count" (pointer) int #t)
                  (live-renderers "otui_live_renderers" () int #t))

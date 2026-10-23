@@ -36,8 +36,8 @@
                     [else (loop (+ i 1) out)])))))
       '()))
 
-(guard (c [(ot:control-condition? c) (ports:flush-all!) (dev-stop!) (exit (ot:control-status c))]
-          [else (dev-stop!) (report-condition c (current-error-port)) (exit 1)])
+(guard (c [(ot:control-condition? c) (ports:flush-all!) (dev-stop!) (memory-report!) (exit (ot:control-status c))]
+          [else (dev-stop!) (report-condition c (current-error-port)) (memory-report!) (exit 1)])
   (let ([script #f] [files '()] [paths '()] [project #f]
         [no-project #f] [repl? #f] [dev-path #f] [watchdog 2000] [serve? #f])
     (let loop ([args (cdr (command-line))])
@@ -97,6 +97,7 @@
                          [(equal? name "project") (set! project value)]
                          [(equal? name "no-project") (set! no-project #t)]
                          [(equal? name "load") (set! files (append files (list value)))]))
+                 (when (equal? name "memory-report") (memory-report-enable!))
                  (loop rest)))]))))
     (when (and project no-project) (fail "--project and --no-project cannot be used together"))
     (let* ([environment-paths (filter (lambda (s) (not (equal? s ""))) (split (or (getenv "OTIUM_PATH") "") #\:))]
@@ -110,4 +111,5 @@
     (when serve? (dev-run))
     (when (or repl? (and (not script) (null? files))) (repl))
     (ports:flush-all!)
-    (dev-stop!)))
+    (dev-stop!)
+    (memory-report!)))

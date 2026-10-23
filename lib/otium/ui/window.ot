@@ -8,6 +8,7 @@
 (require (otium.ffi :as ffi))
 (require (otium.objc :as objc))
 (require (otium.dev :as dev))
+(require (otium.memory :as memory))
 
 (defonce running? #f)
 
@@ -61,6 +62,40 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
           (sdl/destroy-surface surface)))))
   (when (get options :foreground #t) (sdl/check (sdl/raise-window window)))
   #t)
+
+(def- (metal-drawables view)
+  (let ((layer (objc/send view "layer")))
+    (if (and (not (ffi/null? layer)) (objc/send-as 'bool layer "isKindOfClass:" (objc/class "CAMetalLayer")))
+        (objc/send-as 'ulong layer "maximumDrawableCount")
+        (let ((subviews (objc/send view "subviews")))
+          (let loop ((i 0))
+            (when (< i (objc/send-as 'ulong subviews "count"))
+              (or (metal-drawables (objc/send subviews "objectAtIndex:" i)) (loop (+ i 1)))))))))
+
+(def (drawable-count window)
+  "How many swapchain images the window's Metal layer keeps, or nil off macOS."
+  (when (objc/available?)
+    (let ((ns-window (sdl/get-pointer-property (sdl/get-window-properties (window :window))
+                                               "SDL.window.cocoa.window"
+                                               ffi/null)))
+      (unless (ffi/null? ns-window) (metal-drawables (objc/send ns-window "contentView"))))))
+
+(def (graphics-buffers window)
+  "Bytes in the window's swapchain and renderer buffers, by label."
+  (let ((r (window :renderer))
+        (image (native/gpu-memory (window :renderer) 5))
+        (count (drawable-count window))
+        (out {}))
+    (if count
+        (put! out (str "window images (" count ")") (* count image))
+        (put! out "window image (each)" image))
+    (put! out "glyph atlas" (native/gpu-memory r 0))
+    (put! out "draw instances" (native/gpu-memory r 1))
+    (put! out "paint caches" (native/gpu-memory r 2))
+    (when (native/gpu-offscreen? r) (put! out "offscreen target" (native/gpu-memory r 3)))
+    out))
+
+(defonce window-count 0)
 
 (def (open options)
   (let ((first? (null? (ui/windows)))
@@ -118,6 +153,10 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
                        :closed? #f
                        :cleanups []
                        :last-error #f}))
+          (set! window-count (+ window-count 1))
+          (put! handle :memory-source (str "window " window-count " graphics"))
+          ;; Forward through the namespace so a reload changes live windows' reports.
+          (memory/add-source! (handle :memory-source) (fn () (graphics-buffers handle)))
           (set! ui/open-windows (append ui/open-windows (list handle)))
           (set! success? #t)
           handle))
@@ -131,6 +170,12 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
     (unless (get window :closed?)
       (set! (window :closed?) #t)
       (set! ui/open-windows (filter (fn (other) (not (eq? other window))) (ui/windows)))
+      ;; Reports print at exit, so keep the last figures of closed windows.
+      (when (get window :memory-source)
+        (let ((last (try
+                      (graphics-buffers window)
+                      (catch _ nil))))
+          (memory/add-source! (window :memory-source) (fn () last))))
       (unwind-protect
         (when (get (get window :options) :before-close!) ((get (get window :options) :before-close!) window))
         (unwind-protect
@@ -212,6 +257,7 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
           ;; Animation frames skip the view. Size animations need Yoga; scroll
           ;; animations only move bounds.
           (when (or full? (and visible (or (gpu/resizing? tree) (gpu/animating? tree))))
+            (memory/frame-begin!)
             (let ((now (time/seconds))
                   (relayout? (or full? (gpu/resizing? tree))))
               (when full?
@@ -227,6 +273,7 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
                         (get window :height)
                         (get options :background-color 0x101827ff))
             (sdl/check (native/gpu-frame renderer (get window :capture)))
+            (memory/frame-end!)
             (put! window :dirty? #f)
             (put! window :revision dev/revision)
             (set! (window :capture) "")

@@ -1,7 +1,7 @@
 (library (otium runtime)
   (export evaluate load-source require-namespace current-namespace namespace-name
           load-path namespace-ref namespace-set! repl dev-start! dev-stop! dev-service! dev-run
-          report-condition)
+          report-condition memory-report-enable! memory-report!)
   (import (otium strings) (chezscheme) (prefix (otium generic-core) gm:)
           (prefix (otium conditions) ot:) (prefix (otium ports) ports:) (otium expander) (otium line-edit)
           (otium runtime-documentation) (otium reader)
@@ -174,6 +174,32 @@
           (cons '%evaluate dev-evaluate)
           (cons '%deadline (lambda (value)
             (if (= value -1) dev-deadline (set! dev-deadline value))))))
+
+  ;; otium.memory reads these. Allocation is cumulative: bytes still held plus
+  ;; bytes collections have reclaimed. Reading it does not allocate.
+  (define memory-report? #f)
+  (define (memory-report-enable!) (set! memory-report? #t))
+  (define (memory-bindings)
+    (list (cons '%allocated (lambda () (+ (bytes-allocated) (bytes-deallocated))))
+          (cons '%collections (lambda () (collections)))
+          (cons '%report? (lambda () memory-report?))
+          (cons '%heap (lambda ()
+            (val:table (keyword "live") (bytes-allocated)
+                       (keyword "held") (current-memory-bytes)
+                       (keyword "peak") (maximum-memory-bytes)
+                       (keyword "generations")
+                       (map (lambda (g) (bytes-allocated g)) (iota (+ 1 (collect-maximum-generation))))
+                       (keyword "collections") (collections)
+                       (keyword "gc-ms") (let ([t (sstats-gc-real (statistics))])
+                                           (+ (* 1000 (time-second t)) (quotient (time-nanosecond t) 1000000))))))))
+
+  ;; Print the report if --memory-report asked for one. Errors here must not
+  ;; change how the program exits.
+  (define (memory-report!)
+    (when memory-report?
+      (guard (c [#t (display "otium: memory report failed\n" (current-error-port))])
+        (let ([space (require-namespace 'otium.memory #f)])
+          ((namespace-ref (namespace-name space) 'print-report))))))
 
   (define-record-type otium-macro
     (fields transformer namespace name))
@@ -382,6 +408,13 @@
                 (hashtable-set! (namespace-definitions space) (car entry)
                   "Typed maps and generic dispatch.")) gm:public-bindings)
             (namespace-loaded?-set! space #t))
+          (when (eq? name 'otium.memory)
+            (for-each
+              (lambda (entry)
+                (define-top-level-value (car entry) (cdr entry) env)
+                (hashtable-set! (namespace-definitions space) (car entry) "Memory statistics primitive.")
+                (hashtable-set! (namespace-privates space) (car entry) #t))
+              (memory-bindings)))
           (when (eq? name 'otium.dev)
             (for-each
               (lambda (entry)

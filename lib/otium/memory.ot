@@ -1,0 +1,159 @@
+(ns otium.memory)
+(require (otium.ffi :as ffi))
+(require (otium.process :as process))
+
+;; Memory statistics: the Otium heap, the process footprint, buffers that other
+;; modules know the size of, and allocation per UI frame. The runtime supplies
+;; %allocated, %collections, %heap and %report?; the C runtime has no heap
+;; breakdown yet, so heap returns nil there.
+
+(def (allocated)
+  "Bytes allocated on the Otium heap since the program started, including those since collected."
+  (%allocated))
+
+(def (heap)
+  "The Otium heap as a table of :live and :held bytes, :peak held bytes, live bytes per generation, :collections and :gc-ms, or nil when the runtime does not report it."
+  (%heap))
+
+;; Process footprint
+
+(ffi/defbindings libc
+                 %load-libc!
+                 ((private %getpid) "getpid" () int #f)
+                 ((private %rusage) "proc_pid_rusage" (int int pointer) int #f))
+
+(defonce libc-tried? #f)
+
+(def- (libc!)
+  (unless libc-tried?
+    (set! libc-tried? #t)
+    (try
+      (%load-libc! "/usr/lib/libSystem.B.dylib")
+      (catch (ffi/error? _) nil)))
+  libc)
+
+;; struct rusage_info_v4 is 37 u64s; ri_phys_footprint and
+;; ri_lifetime_max_phys_footprint are the 10th and 31st.
+(def- RUSAGE_INFO_V4 4)
+
+(def (footprint)
+  "The process's physical footprint in bytes, :current and :peak, or nil outside macOS."
+  (when (libc!)
+    (let ((info (ffi/alloc 'u64 37)))
+      (defer
+        (when (= 0 (%rusage (%getpid) RUSAGE_INFO_V4 info))
+          {:current (ffi/ref info 'u64 9) :peak (ffi/ref info 'u64 30)})
+        (ffi/free! info)))))
+
+;; Known buffers
+
+(defonce sources {})
+
+(def (add-source! name describe)
+  "Include buffers in reports under name. (describe) returns a table of labels to byte counts."
+  (put! sources name describe))
+
+(def (remove-source! name)
+  (put! sources name nil))
+
+(def (buffers)
+  "Each source's buffers, by source name."
+  (let ((out {}))
+    (for-each (fn (name) (put! out name ((sources name)))) (keys sources))
+    out))
+
+;; Frames. Tracking reads two counters, so it stays on.
+
+(def frame-window
+  "How many recent frames percentiles are taken over."
+  1024)
+
+(defonce frames {:count 0 :bytes 0 :max 0 :collections 0 :start 0 :start-collections 0 :recent nil})
+
+(def (frame-begin!)
+  "Start measuring a frame's allocation."
+  (put! frames :start (%allocated))
+  (put! frames :start-collections (%collections)))
+
+(def (frame-end!)
+  "Finish the frame frame-begin! started."
+  (let ((bytes (- (%allocated) (frames :start)))
+        (count (frames :count)))
+    (unless (frames :recent) (put! frames :recent (apply array (map (fn (_) 0) (range frame-window)))))
+    (put! (frames :recent) (modulo count frame-window) bytes)
+    (put! frames :count (+ count 1))
+    (put! frames :bytes (+ (frames :bytes) bytes))
+    (put! frames :max (max (frames :max) bytes))
+    (put! frames :collections (+ (frames :collections) (- (%collections) (frames :start-collections))))))
+
+(def (frame-stats)
+  "Frames measured, with :average, :p95 and :max bytes allocated per frame and :collections during them."
+  (let ((count (frames :count)))
+    (if (= count 0)
+        {:count 0}
+        (let ((recent (sort (take (min count frame-window) (array-to-list (frames :recent))))))
+          {:count count
+           :average (quotient (frames :bytes) count)
+           :p95 (list-ref recent (min (- (length recent) 1) (floor (* 0.95 (length recent)))))
+           :max (frames :max)
+           :collections (frames :collections)}))))
+
+(def (snapshot)
+  "Everything a report shows, as data."
+  {:footprint (footprint) :heap (heap) :buffers (buffers) :frames (frame-stats) :allocated (allocated)})
+
+;; Reports
+
+(def- (size bytes)
+  (cond
+    ((>= bytes 1073741824) (str (/ (round (/ bytes 107374182.4)) 10.0) " GB"))
+    ((>= bytes 1048576) (str (/ (round (/ bytes 104857.6)) 10.0) " MB"))
+    ((>= bytes 1024) (str (round (/ bytes 1024)) " KB"))
+    (else (str bytes " B"))))
+
+(def- (line label text)
+  (str "  " label (string-repeat " " (max 1 (- 22 (string-length label)))) text "\n"))
+
+(def (report)
+  "A readable memory report."
+  (let ((s (snapshot))
+        (out (buffer "otium memory report\n")))
+    (let ((fp (s :footprint)))
+      (when fp
+        (buffer-push! out (line "process footprint" (str (size (fp :current)) " (peak " (size (fp :peak)) ")")))))
+    (let ((h (s :heap)))
+      (when h
+        (buffer-push! out
+                      (line "otium heap"
+                            (str (size (h :held)) " held, " (size (h :live)) " live (peak held " (size (h :peak)) ")")))
+        (buffer-push! out (line "" (str (h :collections) " collections, " (h :gc-ms) " ms collecting")))))
+    (buffer-push! out (line "allocated in total" (size (s :allocated))))
+    (for-each (fn (name)
+                (let ((items ((s :buffers) name)))
+                  (when items
+                    (buffer-push! out (line name ""))
+                    (for-each (fn (label) (buffer-push! out (line (str "  " label) (size (items label)))))
+                              (keys items)))))
+              (keys (s :buffers)))
+    (let ((f (s :frames)))
+      (when (> (f :count) 0)
+        (buffer-push! out
+                      (line "frames"
+                            (str (f :count)
+                                 " frames; per frame "
+                                 (size (f :average))
+                                 " average, "
+                                 (size (f :p95))
+                                 " 95th percentile, "
+                                 (size (f :max))
+                                 " max")))
+        (buffer-push! out (line "" (str (f :collections) " collections during frames")))))
+    (buffer->string out)))
+
+(def (print-report)
+  "Write the report to standard error."
+  (process/write-error (report)))
+
+(def (report-requested?)
+  "True when the program was started with --memory-report."
+  (%report?))

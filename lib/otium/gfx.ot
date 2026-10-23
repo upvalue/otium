@@ -17,22 +17,35 @@
     (set! (context :clip) clip)
     context))
 
-(def (rect g bounds color . radius)
-  "Record a rounded rectangle, clipped to the current widget's bounds."
+(def- (%rect g x y width height radius color)
   (let ((clip (g :clip)))
     (sdl/check (native/gpu-rect (g :renderer)
-                                (bounds :x)
-                                (bounds :y)
-                                (bounds :width)
-                                (bounds :height)
-                                (if (null? radius)
-                                    0
-                                    (car radius))
+                                x
+                                y
+                                width
+                                height
+                                radius
                                 color
                                 (clip :x)
                                 (clip :y)
                                 (clip :width)
                                 (clip :height)))))
+
+(def (rect g bounds color . radius)
+  "Record a rounded rectangle, clipped to the current widget's bounds."
+  (%rect g
+         (bounds :x)
+         (bounds :y)
+         (bounds :width)
+         (bounds :height)
+         (if (null? radius)
+             0
+             (car radius))
+         color))
+
+(def (fill g x y width height color)
+  "Record a square-cornered rectangle at logical coordinates, like rect without a bounds value to allocate."
+  (%rect g x y width height 0 color))
 
 (def (font-index font)
   "Resolve :ui, :mono, or a font file path. File registrations last until UI teardown."
@@ -46,23 +59,37 @@
        face))
     (else (error "Unknown UI font" font))))
 
-(def (text g bounds string font size color wrap)
-  "Record shaped text in logical pixels, wrapping at the bounds when enabled."
+(def- (%text g x y wrap-width string font size color)
   (let ((clip (g :clip)))
     (sdl/check (native/gpu-text (g :renderer)
                                 string
                                 (font-index font)
                                 size
-                                (if wrap
-                                    (bounds :width)
-                                    -1)
-                                (bounds :x)
-                                (bounds :y)
+                                wrap-width
+                                x
+                                y
                                 color
                                 (clip :x)
                                 (clip :y)
                                 (clip :width)
                                 (clip :height)))))
+
+(def (text g bounds string font size color wrap)
+  "Record shaped text in logical pixels, wrapping at the bounds when enabled."
+  (%text g
+         (bounds :x)
+         (bounds :y)
+         (if wrap
+             (bounds :width)
+             -1)
+         string
+         font
+         size
+         color))
+
+(def (text-line g x y string font size color)
+  "Record unwrapped text at a logical position, like text without a bounds value to allocate."
+  (%text g x y -1 string font size color))
 
 ;; Paint caches: record a widget's drawing once and replay it, moved, on later
 ;; frames. Each cache has a renderer-wide id; the renderer frees recordings

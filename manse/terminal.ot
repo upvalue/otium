@@ -69,10 +69,9 @@
     (list (/ (get positions 10) 10) (/ (native/text-size run native/TEXT_HEIGHT) scale))))
 
 (def (rgba rgb alpha)
-  (bitwise-ior (bitwise-arithmetic-shift (car rgb) 24)
-               (bitwise-arithmetic-shift (cadr rgb) 16)
-               (bitwise-arithmetic-shift (caddr rgb) 8)
-               alpha))
+  ;; Chez allocates for bitwise-ior with more than two arguments.
+  (bitwise-ior (bitwise-ior (bitwise-arithmetic-shift (car rgb) 24) (bitwise-arithmetic-shift (cadr rgb) 16))
+               (bitwise-ior (bitwise-arithmetic-shift (caddr rgb) 8) alpha)))
 
 (def (key! session event)
   (let ((bytes (keyboard/encode (session :term) event)))
@@ -150,8 +149,8 @@
       (g/update! (session :term))
       (put! session :cols cols :rows rows))))
 
-(def (text-run! session g x y text color)
-  (gfx/text g (ui/bounds x y 100000 (session :cell-h)) text (font) (font-size) color #f))
+(def (text-run! g x y text color)
+  (gfx/text-line g x y text (font) (font-size) color))
 
 (def (paint-terminal session g bounds fit?)
   (let ((start (time/seconds))
@@ -213,23 +212,26 @@
         (run-col 0)
         (run-color nil))
     (def (flush!)
-      (when run-color (text-run! session g (+ x0 (* run-col cw)) py (buffer->string run) run-color))
+      (when run-color (text-run! g (+ x0 (* run-col cw)) py (buffer->string run) run-color))
       (set! run (buffer)))
+    ;; Runs once per cell, so it binds rather than assigns its colours:
+    ;; Chez boxes assigned locals.
     (g/each-row-cell (session :term)
-                     (fn (x text fg bg inverse?)
-                       (set! fg (or fg default-fg))
-                       (when inverse?
-                         (let ((t fg))
-                           (set! fg (or bg default-bg))
-                           (set! bg t)))
-                       (when bg
-                         (let ((left (round (+ x0 (* x cw)))))
-                           (gfx/rect g (ui/bounds left py (- (round (+ x0 (* (+ x 1) cw))) left) ch) bg)))
-                       (unless (eq? fg run-color)
-                         (flush!)
-                         (set! run-col x)
-                         (set! run-color fg))
-                       (buffer-push! run text)))
+                     (fn (x text cell-fg cell-bg inverse?)
+                       (let ((fg (if inverse?
+                                     (or cell-bg default-bg)
+                                     (or cell-fg default-fg)))
+                             (bg (if inverse?
+                                     (or cell-fg default-fg)
+                                     cell-bg)))
+                         (when bg
+                           (let ((left (round (+ x0 (* x cw)))))
+                             (gfx/fill g left py (- (round (+ x0 (* (+ x 1) cw))) left) ch bg)))
+                         (unless (eq? fg run-color)
+                           (flush!)
+                           (set! run-col x)
+                           (set! run-color fg))
+                         (buffer-push! run text))))
     (flush!)))
 
 (def (record-time! session elapsed)

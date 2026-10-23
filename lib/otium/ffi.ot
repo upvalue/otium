@@ -11,10 +11,13 @@
 ;; The largest integer on the C runtime bounds every size.
 (def- SIZE_LIMIT 4611686018427387903)
 
+;; SIZE_LIMIT is a bignum on Chez, so dividing it allocates. Offsets are
+;; usually small enough for their product to be checked without it.
 (def- (%mul op a b)
-  (if (and (> b 0) (> a (quotient SIZE_LIMIT b)))
-      (%fail op "range" "size overflow")
-      (* a b)))
+  (cond
+    ((and (< a 1073741824) (< b 1073741824)) (* a b))
+    ((and (> b 0) (> a (quotient SIZE_LIMIT b))) (%fail op "range" "size overflow"))
+    (else (* a b))))
 
 (def- (%add op a b)
   (if (> a (- SIZE_LIMIT b))

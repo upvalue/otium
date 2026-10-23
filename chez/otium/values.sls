@@ -115,18 +115,48 @@
     (let ([port (open-output-string)])
       (for-each (lambda (x) (otium-display x port)) xs)
       (get-output-string port)))
-  (define (buffer-push! b . xs)
-    (unless (buffer? b) (error 'buffer-push! "expected buffer"))
-    (for-each (lambda (x)
-                (let ([s (str x)])
-                  (display s (buffer-value-port b))
-                  (buffer-value-size-set! b (+ (buffer-value-size b) (string-length s))))) xs)
-    b)
+  ;; Strings go straight to the port; other values are rendered with str.
+  (define (buffer-push-one! b x)
+    (let ([s (if (string? x) x (str x))])
+      (put-string (buffer-value-port b) s)
+      (buffer-value-size-set! b (+ (buffer-value-size b) (string-length s)))))
+  (define buffer-push!
+    (case-lambda
+      [(b x)
+       (unless (buffer? b) (error 'buffer-push! "expected buffer"))
+       (buffer-push-one! b x)
+       b]
+      [(b . xs)
+       (unless (buffer? b) (error 'buffer-push! "expected buffer"))
+       (for-each (lambda (x) (buffer-push-one! b x)) xs)
+       b]))
   (define (buffer->string b)
     (unless (buffer? b) (error 'buffer->string "expected buffer"))
     (let ([s (string-append (buffer-value-snapshot b) (get-output-string (buffer-value-port b)))])
       (buffer-value-snapshot-set! b s) s))
-  (define (collection-call f . args)
+  (define collection-call
+    (case-lambda
+      [(f key)
+       (cond [(record? f) (record-ref f key)]
+             [(instance? f) (instance-read f key)]
+             [(procedure? f) (f key)]
+             [(table? f) (get-or f key (void))]
+             [(array? f)
+              (unless (and (integer? key) (exact? key)) (error 'call "expected integer index"))
+              (get-or f key (void))]
+             [(keyword? f) (if (table? key) (get-or key f (void)) (void))]
+             [else (error 'call "expected callable value" f)])]
+      [(f key fallback)
+       (cond [(or (record? f) (instance? f)) (collection-call-general f (list key fallback))]
+             [(procedure? f) (f key fallback)]
+             [(table? f) (get-or f key fallback)]
+             [(array? f)
+              (unless (and (integer? key) (exact? key)) (error 'call "expected integer index"))
+              (get-or f key fallback)]
+             [(keyword? f) (if (table? key) (get-or key f fallback) fallback)]
+             [else (error 'call "expected callable value" f)])]
+      [(f . args) (collection-call-general f args)]))
+  (define (collection-call-general f args)
     (cond [(record? f)
            (unless (= (length args) 1) (error 'record-ref "expected one keyword"))
            (record-ref f (car args))]
@@ -175,46 +205,59 @@
     (unless (even? (length xs)) (error 'table "expected key/value pairs"))
     (let ([t (make-table (make-hashtable key-hash key=?) '())])
       (unless (null? xs) (apply put! t xs)) t))
-  (define (get x key . default)
-    (unless (<= (length default) 1) (error 'get "expected 2 or 3 arguments"))
-    (let ([fallback (if (null? default) (void) (car default))])
-      (cond [(nil? x) fallback]
-            [(table? x) (hashtable-ref (table-value-data x) key fallback)]
-            [(or (array? x) (string? x) (bytevector? x))
-             (if (and (integer? key) (exact? key) (<= 0 key) (< key (collection-length x)))
-                 (cond [(array? x) (vector-ref (array-value-storage x) key)]
-                       [(string? x) (string-ref x key)]
-                       [else (bytevector-u8-ref x key)])
-                 fallback)]
-            [else (error 'get "expected nil, table, array, string, or bytevector" x)])))
-  (define (put! x . xs)
-    (unless (and (pair? xs) (even? (length xs))) (error 'put! "expected key/value pairs"))
+  ;; Fixed arities keep lookups, which run per call in tight loops, from
+  ;; packing their arguments into a list.
+  (define get
+    (case-lambda
+      [(x key) (get-or x key (void))]
+      [(x key fallback) (get-or x key fallback)]
+      [args (error 'get "expected 2 or 3 arguments")]))
+  (define (get-or x key fallback)
+    (cond [(nil? x) fallback]
+          [(table? x) (hashtable-ref (table-value-data x) key fallback)]
+          [(or (array? x) (string? x) (bytevector? x))
+           (if (and (integer? key) (exact? key) (<= 0 key) (< key (collection-length x)))
+               (cond [(array? x) (vector-ref (array-value-storage x) key)]
+                     [(string? x) (string-ref x key)]
+                     [else (bytevector-u8-ref x key)])
+               fallback)]
+          [else (error 'get "expected nil, table, array, string, or bytevector" x)]))
+  (define put!
+    (case-lambda
+      [(x key value) (put-check! x) (put-one! x key value) x]
+      [(x . xs)
+       (unless (and (pair? xs) (even? (length xs))) (error 'put! "expected key/value pairs"))
+       (put-check! x)
+       (let loop ([xs xs])
+         (unless (null? xs)
+           (put-one! x (car xs) (cadr xs))
+           (loop (cddr xs))))
+       x]))
+  (define (put-check! x)
     (unless (or (array? x) (table? x) (bytevector? x))
-      (error 'put! "expected table, array, or bytevector" x))
-    (let loop ([xs xs])
-      (unless (null? xs)
-        (let ([key (car xs)] [value (cadr xs)])
-          (cond
-            [(bytevector? x)
-             (unless (and (fixnum? key) (fx<= 0 key) (fx< key (bytevector-length x)))
-               (error 'put! "index out of range" key))
-             (unless (and (fixnum? value) (fx<= 0 value 255))
-               (error 'put! "expected a byte from 0 to 255" value))
-             (bytevector-u8-set! x key value)]
-            [(array? x)
-                (unless (and (integer? key) (exact? key) (<= 0 key) (< key (array-value-size x)))
-                  (error 'put! "index out of range" key))
-                (vector-set! (array-value-storage x) key value)]
-            [else
-              (let ([data (table-value-data x)])
-                (cond [(nil? value)
-                       (hashtable-delete! data key)
-                       (table-value-order-set! x (remp (lambda (k) (key=? k key)) (table-value-order x)))]
-                      [else
-                       (unless (hashtable-contains? data key)
-                         (table-value-order-set! x (cons key (table-value-order x))))
-                       (hashtable-set! data key value)]))])
-          (loop (cddr xs))))) x)
+      (error 'put! "expected table, array, or bytevector" x)))
+  (define (put-one! x key value)
+    (cond
+      [(bytevector? x)
+       (unless (and (fixnum? key) (fx<= 0 key) (fx< key (bytevector-length x)))
+         (error 'put! "index out of range" key))
+       (unless (and (fixnum? value) (fx<= 0 value 255))
+         (error 'put! "expected a byte from 0 to 255" value))
+       (bytevector-u8-set! x key value)]
+      [(array? x)
+       (unless (and (integer? key) (exact? key) (<= 0 key) (< key (array-value-size x)))
+         (error 'put! "index out of range" key))
+       (vector-set! (array-value-storage x) key value)]
+      [else
+       (let ([data (table-value-data x)])
+         (cond [(nil? value)
+                (when (hashtable-contains? data key)
+                  (hashtable-delete! data key)
+                  (table-value-order-set! x (remp (lambda (k) (key=? k key)) (table-value-order x))))]
+               [else
+                (unless (hashtable-contains? data key)
+                  (table-value-order-set! x (cons key (table-value-order x))))
+                (hashtable-set! data key value)]))]))
   (define (set-applied! object key value)
     (cond [(record? object) (record-set! object key value)]
           [(instance? object) (instance-write object key value)]

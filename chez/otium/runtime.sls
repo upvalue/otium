@@ -450,16 +450,46 @@
         'name local))
     (import-qualified! space local (namespace-name target) member))
 
+  ;; A procedure compiled in the target's environment reads the variable
+  ;; directly, so imported references see redefinitions without looking the
+  ;; name up, and allocating, on every use. Namespaces keep their environment.
+  (define accessors (make-eq-hashtable))
+  (define core-environment (environment '(otium core)))
+  (define (namespace-accessor target-name member)
+    (let* ([target (find-namespace target-name)]
+           [import (hashtable-ref (namespace-imports target) member #f)])
+      (if import
+          (namespace-accessor (car import) (cdr import))
+          (let* ([env (namespace-environment target)]
+                 [table (or (hashtable-ref accessors env #f)
+                            (let ([t (make-eq-hashtable)]) (hashtable-set! accessors env t) t))])
+            (or (hashtable-ref table member #f)
+                (and (top-level-bound? member env)
+                     ;; Otium environments bind fn, not lambda. One that rebinds
+                     ;; fn keeps the lookup.
+                     (let ([accessor (and (top-level-syntax? 'fn env)
+                                          (eq? (top-level-syntax 'fn env) (top-level-syntax 'fn core-environment))
+                                          (guard (c [#t #f]) (eval `(fn () ,member) env)))])
+                       (when accessor (hashtable-set! table member accessor))
+                       accessor)))))))
+
   (define (import-qualified! space local target-name member)
     (define-top-level-syntax local
       (make-variable-transformer
         (lambda (form)
-          (with-syntax ([target (datum->syntax #'anchor target-name)]
-                        [member (datum->syntax #'anchor member)])
-            (syntax-case form (set!)
-              [(set! _ value) #'(namespace-set! 'target 'member value)]
-              [(_ . args) #'((namespace-ref 'target 'member) . args)]
-              [id (identifier? #'id) #'(namespace-ref 'target 'member)]))))
+          (let ([found (namespace-accessor target-name member)])
+            (with-syntax ([target (datum->syntax #'anchor target-name)]
+                          [member (datum->syntax #'anchor member)]
+                          [accessor (datum->syntax #'anchor found)])
+              (syntax-case form (set!)
+                [(set! _ value) #'(namespace-set! 'target 'member value)]
+                [(_ . args) (if found
+                                #'(('accessor) . args)
+                                #'((namespace-ref 'target 'member) . args))]
+                [id (identifier? #'id)
+                    (if found
+                        #'('accessor)
+                        #'(namespace-ref 'target 'member))])))))
       (namespace-environment space))
     (hashtable-set! (namespace-imports space) local (cons target-name member)))
 

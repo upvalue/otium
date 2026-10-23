@@ -37,8 +37,9 @@
       (and (val:table? c) (val:get c (val:keyword name) #f)))
     (define (checked-string x op)
       (unless (string? x) (%fail op "type" "expected string"))
-      (when (exists (lambda (c) (char=? c #\nul)) (string->list x))
-        (%fail op "encoding" "embedded NUL in string"))
+      (let ((n (string-length x)))
+        (do ((i 0 (fx+ i 1))) ((fx= i n))
+          (when (char=? (string-ref x i) #\nul) (%fail op "encoding" "embedded NUL in string"))))
       x)
     (define native-ready
       (delay
@@ -61,13 +62,24 @@
     ;; Call strings are copied out of the managed heap: a callback may collect
     ;; and move a bytevector during the call.
     (define memcpy (delay (foreign-procedure "memcpy" (void* u8* size_t) void*)))
+    ;; ASCII text, the usual case, is copied without an intermediate bytevector.
     (define (utf8-temporary text)
-      (let* ((b (string->utf8 text))
-             (n (bytevector-length b))
-             (address (foreign-alloc (+ n 1))))
-        ((force memcpy) address b n)
-        (foreign-set! 'unsigned-8 address n 0)
-        address))
+      (let* ((n (string-length text))
+             (address (foreign-alloc (fx+ n 1))))
+        (let loop ((i 0))
+          (cond
+            ((fx= i n) (foreign-set! 'unsigned-8 address n 0) address)
+            ((fx< (char->integer (string-ref text i)) 128)
+             (foreign-set! 'unsigned-8 address i (char->integer (string-ref text i)))
+             (loop (fx+ i 1)))
+            (else
+             (foreign-free address)
+             (let* ((b (string->utf8 text))
+                    (n (bytevector-length b))
+                    (address (foreign-alloc (+ n 1))))
+               ((force memcpy) address b n)
+               (foreign-set! 'unsigned-8 address n 0)
+               address))))))
     (define (%open name)
       (let ((address (native-open (checked-string name "open-library"))))
         (and (not (zero? address))
@@ -359,13 +371,17 @@
     ;; Signatures of scalars and pointers take a fixed-arity call that checks
     ;; arguments inline and builds error context only when a check fails.
     (define (direct? arguments result)
-      (and (for-all (lambda (t) (and (integer? t) (< t KIND_UTF8))) arguments)
+      (and (for-all (lambda (t) (and (integer? t) (<= t KIND_UTF8))) arguments)
            (and (integer? result) (< result KIND_UTF8))))
     (define (make-direct-factory arguments result collect-safe?)
-      (let ((xs (map (lambda (t) (gensym "x")) arguments))
-            (es (map (lambda (t) (gensym "encode")) arguments)))
+      ;; Strings are checked with the other arguments, then copied to native
+      ;; memory freed when the call returns. Native calls always return: see
+      ;; callbacks below.
+      (let* ((xs (map (lambda (t) (gensym "x")) arguments))
+             (es (map (lambda (t) (gensym "encode")) arguments))
+             (texts (filter (lambda (x) x) (map (lambda (t x) (and (= t KIND_UTF8) x)) arguments xs))))
         (eval
-          `(lambda (address encoders enter finish arity-fail)
+          `(lambda (address encoders enter finish arity-fail utf8-temporary)
              ;; See make-factory on __collect_safe.
              (let ((native (foreign-procedure ,@(if collect-safe? '(__collect_safe) '()) address
                              ,(map (lambda (t) (vector-ref foreign-types t)) arguments)
@@ -373,8 +389,11 @@
                    ,@(map (lambda (e i) `(,e (list-ref encoders ,i))) es (iota (length es))))
                (case-lambda
                  (,xs (let* ,(map (lambda (x e) `(,x (,e ,x))) xs es)
-                        (enter)
-                        (finish (native ,@xs))))
+                        (let ,(map (lambda (x) `(,x (if (string? ,x) (utf8-temporary ,x) 0))) texts)
+                          (enter)
+                          (let ((raw (native ,@xs)))
+                            ,@(map (lambda (x) `(unless (eqv? ,x 0) (foreign-free ,x))) texts)
+                            (finish raw)))))
                  (rest (arity-fail)))))
           (environment '(chezscheme)))))
     (define (argument-encoder k slow)
@@ -384,13 +403,23 @@
          (let ((low (max (kind-low k) (most-negative-fixnum)))
                (high (min (- (kind-high k) 1) (most-positive-fixnum))))
            (lambda (v) (if (and (fixnum? v) (fx<= low v high)) v (slow v)))))
-        ((= k KIND_DOUBLE) (lambda (v) (if (flonum? v) v (slow v))))
+        ;; Drawing code passes integer coordinates as often as flonums.
+        ((= k KIND_DOUBLE) (lambda (v) (cond ((flonum? v) v) ((fixnum? v) (fixnum->flonum v)) (else (slow v)))))
         ((= k KIND_FLOAT)
          (lambda (v)
-           (if (and (flonum? v) (or (not (flfinite? v)) (fl<= (flabs v) 3.4028234663852886e38)))
+           (cond
+             ((and (flonum? v) (or (not (flfinite? v)) (fl<= (flabs v) 3.4028234663852886e38))) v)
+             ((fixnum? v) (fixnum->flonum v))
+             (else (slow v)))))
+        ((= k KIND_POINTER) (lambda (v) (if (live? v) (pointer-address v) (slow v))))
+        ((= k KIND_UTF8)
+         (lambda (v)
+           (if (and (string? v)
+                    (let ((n (string-length v)))
+                      (let loop ((i 0))
+                        (or (fx= i n) (and (not (char=? (string-ref v i) #\nul)) (loop (fx+ i 1)))))))
                v
                (slow v))))
-        ((= k KIND_POINTER) (lambda (v) (if (live? v) (pointer-address v) (slow v))))
         (else slow)))
     (define (result-decoder k)
       (cond ((= k KIND_VOID) (lambda (raw) #f))
@@ -430,7 +459,8 @@
                         (set! pending #f)
                         (parameterize ((error-context context)) (replay))))
                     (decode-result raw))
-                  (lambda () (%fail "call" "arity" "wrong number of native arguments"))))
+                  (lambda () (%fail "call" "arity" "wrong number of native arguments"))
+                  utf8-temporary))
               (bind-general lib name arguments result (factory address))))))
     (define (bind-general lib name arguments result native)
       (lambda values

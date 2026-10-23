@@ -21,7 +21,7 @@ vertex Output vertex_main(Input in [[stage_in]], uint vertex_index [[vertex_id]]
 fragment float4 fragment_main(Output in [[stage_in]], texture2d<float> atlas [[texture(0)]], sampler atlas_sampler [[sampler(0)]]) {
   if (any(in.pixel < in.clip.xy) || any(in.pixel >= in.clip.zw)) discard_fragment();
   if (in.shape.w > 0) {
-    float a = in.color.a * atlas.sample(atlas_sampler, in.texcoord).a;
+    float a = in.color.a * atlas.sample(atlas_sampler, in.texcoord).r;
     return float4(in.color.rgb * a, a);
   }
   float2 halfsize = in.shape.xy * 0.5;

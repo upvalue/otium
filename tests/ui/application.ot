@@ -27,13 +27,24 @@
         (push! calls (list 'icon window (eq? image surface)))
         icon-ok?))
 (set! sdl/destroy-surface (fn (image) (push! calls (list 'destroy (eq? image surface)))))
+(set! sdl/scale-surface
+      (fn (image width height mode)
+        (push! calls (list 'scale (eq? image surface) width height))
+        scaled))
 (set! sdl/raise-window
       (fn (window)
         (push! calls (list 'raise window))
         #t))
 (set! sdl/get-error (fn () "icon failed"))
 
-(def surface (ffi/alloc 'u8 1))
+;; SDL_Surface begins with flags, format, w and h.
+(def surface (ffi/alloc 'i32 4))
+
+(def scaled (ffi/alloc 'i32 4))
+
+(ffi/set! surface 'i32 2 16)
+
+(ffi/set! surface 'i32 3 16)
 
 (unwind-protect
   (begin
@@ -54,6 +65,14 @@
       (window/present-window! 'window {:icon "icon.png"})
       (catch c (set! failed? #t)))
     (check #t failed?)
-    (check '((load "icon.png") (icon window #t) (destroy #t)) (array-to-list calls)))
-  (ffi/free! surface))
+    (check '((load "icon.png") (icon window #t) (destroy #t)) (array-to-list calls))
+    ;; Large icons are scaled down before the window system copies them.
+    (set! calls [])
+    (set! icon-ok? #t)
+    (ffi/set! surface 'i32 2 1024)
+    (ffi/set! surface 'i32 3 512)
+    (window/present-window! 'window {:icon "icon.png" :foreground #f})
+    (check '((load "icon.png") (scale #t 512 256) (icon window #f) (destroy #f) (destroy #t)) (array-to-list calls)))
+  (ffi/free! surface)
+  (ffi/free! scaled))
 (report "ui application")

@@ -10,7 +10,7 @@ layout(set=2,binding=0) uniform sampler2D atlas;
 void main() {
   if (any(lessThan(pixel, clip.xy)) || any(greaterThanEqual(pixel, clip.zw))) discard;
   if (shape.w > 0.0) {
-    float a = color.a * texture(atlas, texcoord).a;
+    float a = color.a * texture(atlas, texcoord).r;
     result = vec4(color.rgb * a, a); return;
   }
   vec2 halfsize = shape.xy * 0.5;

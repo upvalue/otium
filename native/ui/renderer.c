@@ -17,6 +17,8 @@ static const unsigned char rect_frag[] = {
 #include "text.h"
 #include <plutosvg.h>
 #define ATLAS_SIZE 2048
+// Glyphs and SVGs are tinted masks, so the atlas holds coverage alone.
+#define ATLAS_BYTES (ATLAS_SIZE * ATLAS_SIZE)
 
 typedef struct {
   TTF_Font* font;
@@ -409,7 +411,7 @@ void* otui_gpu_new(SDL_Window* window, int width, int height, float scale, const
   if (!r->pipeline) goto failed;
   SDL_GPUTextureCreateInfo texture = {
       .type = SDL_GPU_TEXTURETYPE_2D,
-      .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+      .format = SDL_GPU_TEXTUREFORMAT_R8_UNORM,
       .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER,
       .width = ATLAS_SIZE,
       .height = ATLAS_SIZE,
@@ -423,9 +425,9 @@ void* otui_gpu_new(SDL_Window* window, int width, int height, float scale, const
                                       .address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE};
   r->sampler = SDL_CreateGPUSampler(r->device, &sampler);
   SDL_GPUTransferBufferCreateInfo atlas_upload = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-                                                  .size = ATLAS_SIZE * ATLAS_SIZE * 4};
+                                                  .size = ATLAS_BYTES};
   r->atlas_upload = SDL_CreateGPUTransferBuffer(r->device, &atlas_upload);
-  r->atlas_pixels = calloc(ATLAS_SIZE * ATLAS_SIZE, 4);
+  r->atlas_pixels = calloc(ATLAS_BYTES, 1);
   if (!r->atlas || !r->sampler || !r->atlas_upload || !r->atlas_pixels) goto failed;
   r->atlas_dirty = true;
   r->next = renderers;
@@ -656,11 +658,8 @@ static Image* svg_image(Renderer* r, const char* path, float width, float height
   int stride = plutovg_surface_get_stride(surface);
   for (int y = 0; y < image->h; ++y) {
     const Uint32* src = (const Uint32*)(data + y * stride);
-    Uint8* dst = r->atlas_pixels + ((image->y + y) * ATLAS_SIZE + image->x) * 4;
-    for (int x = 0; x < image->w; ++x) {
-      dst[x * 4] = dst[x * 4 + 1] = dst[x * 4 + 2] = 255;
-      dst[x * 4 + 3] = src[x] >> 24;
-    }
+    Uint8* dst = r->atlas_pixels + (image->y + y) * ATLAS_SIZE + image->x;
+    for (int x = 0; x < image->w; ++x) dst[x] = src[x] >> 24;
   }
   plutovg_surface_destroy(surface);
   image->next = r->images;
@@ -717,9 +716,12 @@ static Glyph* glyph(Renderer* r, TTF_CopyOperation* op) {
   }
   Glyph* g = &r->glyphs[r->glyph_count++];
   *g = (Glyph){op->glyph_font, op->glyph_index, x, y};
-  for (int y = 0; y < pixels->h; ++y)
-    memcpy(r->atlas_pixels + ((g->y + y) * ATLAS_SIZE + g->x) * 4,
-           (Uint8*)pixels->pixels + y * pixels->pitch, pixels->w * 4);
+  // RGBA32 is byte-ordered, so alpha is every fourth byte.
+  for (int y = 0; y < pixels->h; ++y) {
+    const Uint8* src = (const Uint8*)pixels->pixels + y * pixels->pitch;
+    Uint8* dst = r->atlas_pixels + (g->y + y) * ATLAS_SIZE + g->x;
+    for (int x = 0; x < pixels->w; ++x) dst[x] = src[x * 4 + 3];
+  }
   SDL_DestroySurface(pixels);
   return g;
 }
@@ -782,7 +784,7 @@ static bool upload_frame(Renderer* r, SDL_GPUCommandBuffer* cmd) {
   if (r->atlas_dirty) {
     void* data = SDL_MapGPUTransferBuffer(r->device, r->atlas_upload, true);
     if (!data) return false;
-    memcpy(data, r->atlas_pixels, ATLAS_SIZE * ATLAS_SIZE * 4);
+    memcpy(data, r->atlas_pixels, ATLAS_BYTES);
     SDL_UnmapGPUTransferBuffer(r->device, r->atlas_upload);
     SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
     SDL_GPUTextureTransferInfo src = {.transfer_buffer = r->atlas_upload};

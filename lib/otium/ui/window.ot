@@ -28,13 +28,36 @@
                   "setProcessName:"
                   (objc/nsstring (get options :name "Otium")))))
 
+(def icon-limit
+  "Largest icon edge, in pixels, given to the window system. macOS keeps a
+full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
+  512)
+
+(def- SCALEMODE_LINEAR 1)
+
+(def- (fit-icon surface)
+  "The surface, or a copy scaled down to icon-limit."
+  ;; SDL_Surface begins with flags, format, w and h.
+  (let ((w (ffi/ref surface 'i32 2))
+        (h (ffi/ref surface 'i32 3))
+        (edge (max w h)))
+    (if (<= edge icon-limit)
+        surface
+        (sdl/pointer (sdl/scale-surface surface
+                                        (max 1 (round (/ (* w icon-limit) edge)))
+                                        (max 1 (round (/ (* h icon-limit) edge)))
+                                        SCALEMODE_LINEAR)))))
+
 (def (present-window! window options)
   "Install a PNG/BMP icon and optionally request foreground focus."
   (let ((icon (get options :icon "")))
     (unless (equal? icon "")
       (let ((surface (sdl/pointer (sdl/load-surface icon))))
         (unwind-protect
-          (sdl/check (sdl/set-window-icon window surface))
+          (let ((fitted (fit-icon surface)))
+            (unwind-protect
+              (sdl/check (sdl/set-window-icon window fitted))
+              (unless (eq? fitted surface) (sdl/destroy-surface fitted))))
           (sdl/destroy-surface surface)))))
   (when (get options :foreground #t) (sdl/check (sdl/raise-window window)))
   #t)

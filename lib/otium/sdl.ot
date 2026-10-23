@@ -23,6 +23,7 @@
                  (load-surface "SDL_LoadSurface" (utf8) pointer #t)
                  (set-window-icon "SDL_SetWindowIcon" (pointer pointer) bool #t)
                  (destroy-surface "SDL_DestroySurface" (pointer) void #t)
+                 (scale-surface "SDL_ScaleSurface" (pointer int int int) pointer #t)
                  (raise-window "SDL_RaiseWindow" (pointer) bool #t)
                  (init "SDL_Init" (u32) bool #t)
                  (quit "SDL_Quit" () void #t)

@@ -1,7 +1,8 @@
 # Otium
 
 Otium is an experimental little vibe-coded Lisp (but this README was written by
-a human). It has a focus on pragmatism and live reloadin.
+a human). It has a focus on pragmatism, supporting live development, and
+reasonable performance.
 
 This repository contains two other programs written in Otium (& a
 little bit of C)
@@ -35,10 +36,16 @@ whether GC code is written correctly.
 
 # The older operating system
 
-<link here>
+Otium (the name and domain) previously referred to a C++ + TCL operating system
+I wrote at Recurse Center in late 2025. That code is now archived but remains
+on commit `d8ab8cddd50575f3b061e3e30381a8942d1cde9f` for reference.
 
 ## Credits
+
+Manse utilizes libghostty for performant terminal goodness.
 
 Otium's `gen` collector is an adaptation of
 [toit](https://github.com/toitlang/toit)'s garbage collector, originally from
 Dartino.
+
+OtOS uses picolibc.

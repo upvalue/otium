@@ -2,7 +2,7 @@
   (export evaluate load-source require-namespace current-namespace namespace-name
           load-path namespace-ref namespace-set! repl dev-start! dev-stop! dev-service! dev-run
           report-condition)
-  (import (chezscheme) (prefix (otium generic-core) gm:)
+  (import (otium strings) (chezscheme) (prefix (otium generic-core) gm:)
           (prefix (otium conditions) ot:) (prefix (otium ports) ports:) (otium expander) (otium line-edit)
           (otium runtime-documentation) (otium reader)
           (only (otium values) keyword otium-write) (prefix (otium values) val:))
@@ -785,7 +785,7 @@
     (define name (and (pair? (cdr form)) (cadr form)))
     (define abstract? (eq? (car form) 'defabstract))
     (define reset? (eq? (car form) 'reset-class!))
-    (unless (and (symbol? name) (not (memv #\/ (string->list (symbol->string name)))))
+    (unless (and (symbol? name) (not (string-contains-ascii? (symbol->string name) #\/)))
       (invalid "expected local class name"))
     (let* ([rest (cddr form)]
            [parent (if (and (pair? rest) (declaration-option? (car rest) "is"))
@@ -810,7 +810,7 @@
                                    (set! init (compile-form (expander-top (namespace-expander space) `(fn () ,value)) env))]
                                   [(declaration-option? key "accessor")
                                    (unless (and (symbol? value)
-                                                (not (memv #\/ (string->list (symbol->string value)))))
+                                                (not (string-contains-ascii? (symbol->string value) #\/)))
                                      (invalid "expected local accessor name" value))
                                    (set! accessor value)]
                                   [(declaration-option? key "state")
@@ -863,7 +863,7 @@
     (define (invalid message)
       (gm:fail (car form) 'invalid-declaration message form))
     (define (identifier? x)
-      (and (symbol? x) (not (memv #\/ (string->list (symbol->string x))))))
+      (and (symbol? x) (not (string-contains-ascii? (symbol->string x) #\/))))
     (define (parameters! parameters specialized?)
       (unless (list? parameters) (invalid "expected fixed parameter list"))
       (let ([names (map (lambda (p)

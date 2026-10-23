@@ -1,6 +1,6 @@
 (library (otium ports)
   (export public-bindings flush-all!)
-  (import (chezscheme) (prefix (otium values) v:)
+  (import (otium strings) (chezscheme) (prefix (otium values) v:)
           (prefix (otium conditions) c:) (prefix (otium bytevectors) b:))
 
   (define initial-host-output (current-output-port))
@@ -283,7 +283,7 @@
       (let ([bytes (b:string->utf8 (get-output-string out))])
         (write-bytes bytes p 0 (bytevector-length bytes)))))
   (define (path! path op)
-    (unless (and (string? path) (not (memv #\nul (string->list path))))
+    (unless (and (string? path) (not (string-contains-ascii? path #\nul)))
       (c:error (format "~a: expected path without NUL" op))))
   (define (file-info path)
     (path! path 'file-info)

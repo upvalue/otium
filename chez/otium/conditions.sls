@@ -6,7 +6,7 @@
           call-with-otium-control call-with-native-conditions call-contained
           control-condition? control-kind control-status condition-continuation-of
           fail otium-condition? otium-value)
-  (import (except (chezscheme) error error? condition-message exit)
+  (import (otium strings) (except (chezscheme) error error? condition-message exit)
           (prefix (only (otium truth) if) ot:)
           (prefix (otium values) val:) (otium diagnostic-catalog)
           (only (otium reader) reader-location? reader-location-code)
@@ -154,7 +154,7 @@
     (let ([prefix "~s is not "] [n (string-length message)])
       (and (> n 12) (string=? (substring message 0 10) prefix)
            (let ([rest (substring message 10 n)])
-             (and (not (memv #\~ (string->list rest)))
+             (and (not (string-contains-ascii? rest #\~))
                   (or (string=? (substring rest 0 2) "a ") (string=? (substring rest 0 3) "an "))
                   rest)))))
   (define (native-condition exception)
@@ -187,7 +187,7 @@
          (diagnostic "E0302" (list (cons 'value (repr (car irritants)))))]
         [(and who (= (length irritants) 1) (> (string-length message) 9)
               (string=? (substring message 0 9) "expected ")
-              (not (memv #\~ (string->list message))))
+              (not (string-contains-ascii? message #\~)))
          ;; Otium's own Chez libraries say (error 'who "expected ..." value).
          (diagnostic "E0401"
            (list (cons 'detail (string-append "`" who "` " message ", got " (repr (car irritants))))

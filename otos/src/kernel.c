@@ -1,6 +1,7 @@
 #define OT_INTERNAL
 #include "otium.h"
 #include "kernel.h"
+#include "line.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,56 +31,74 @@ static void write_console(void* userdata, const char* bytes, size_t length) {
   sbi_shutdown(true);
 }
 
-/* Reads one line from the console into line, echoing as it goes. Returns the
- * line's length, LINE_INTERRUPTED for ^C, or LINE_EOF for ^D on an empty line. */
-#define LINE_EOF -1
-#define LINE_INTERRUPTED -2
-
-static int read_line(char* line, int capacity) {
-  int length = 0;
-  for (;;) {
-    int c = console_read_byte();
-    if (c == '\r' || c == '\n') {
-      console_write("\n", 1);
-      return length;
-    } else if (c == 0x03) {
-      console_write("^C\n", 3);
-      return LINE_INTERRUPTED;
-    } else if (c == 0x04) {
-      if (length == 0) return LINE_EOF;
-    } else if (c == 0x7f || c == 0x08) {
-      /* Drop a whole UTF-8 sequence: continuation bytes, then the lead byte. */
-      while (length > 0 && ((unsigned char)line[length - 1] & 0xc0) == 0x80) length--;
-      if (length > 0) {
-        length--;
-        console_write("\b \b", 3);
-      }
-    } else if ((c >= 0x20 || c == '\t') && length < capacity) {
-      line[length++] = (char)c;
-      char byte = (char)c;
-      console_write(&byte, 1);
-    }
+/* Namespaces load from the embedded lib/ tree: otium.json is /lib/otium/json.ot. */
+static bool load_namespace(void* userdata, const char* name, char** source, size_t* length) {
+  char path[256] = "/lib/";
+  size_t used = strlen(path);
+  for (const char* cursor = name; *cursor != '\0'; cursor++) {
+    if (used + 4 >= sizeof path) return false;
+    path[used++] = *cursor == '.' ? '/' : *cursor;
   }
+  memcpy(path + used, ".ot", 4);
+  if (!ot_platform_read_file(path, source, length)) return false;
+  ot_set_source_name(userdata, path);
+  return true;
 }
 
-static void report_condition(ots* state) {
-  otv condition = ot_condition(state);
-  OT_FRAME_SCOPED(state, &condition);
-  ot_clear_condition(state);
-  fputs("error: ", stdout);
+static bool poll_console(void* userdata) {
+  (void)userdata;
+  return console_poll_interrupt();
+}
+
+/* The condition being reported, rooted while otium.diagnostics renders it. */
+static otv reported_condition;
+
+static otv nat_reported_condition(ots* state, otv* args, int argc) {
+  (void)state;
+  (void)args;
+  (void)argc;
+  return reported_condition;
+}
+
+static void print_message(ots* state, otv condition) {
   if (ot_has_type(condition, OBJ_TABLE)) {
     otv key = ot_intern(state, "message", 7, true);
     otv message = ot_table_get(state, condition, key, ot_nil);
     const char* text;
     size_t length;
     if (ot_string_bytes(message, &text, &length)) {
+      fputs("error: ", stdout);
       console_write(text, length);
       console_write("\n", 1);
       return;
     }
   }
+  fputs("error: ", stdout);
   ot_repr_to(state, condition, false, write_console, NULL);
   console_write("\n", 1);
+}
+
+/* Renders the condition with otium.diagnostics, as the host REPL does, or
+ * prints its message if that fails. */
+static void report_condition(ots* state) {
+  reported_condition = ot_condition(state);
+  ot_clear_condition(state);
+  if (ot_value_type(reported_condition) == OT_TYPE_TABLE) {
+    const char* code =
+        "(begin (require otium.diagnostics) (otium.diagnostics/render (%reported-condition)))";
+    otv rendered;
+    const char* text;
+    size_t length;
+    if (ot_eval_src(state, code, strlen(code), "<report>", &rendered) &&
+        ot_string_bytes(rendered, &text, &length)) {
+      console_write(text, length);
+      reported_condition = ot_nil;
+      return;
+    }
+    ot_clear_condition(state);
+  }
+  print_message(state, reported_condition);
+  reported_condition = ot_nil;
 }
 
 static void repl(ots* state) {
@@ -87,13 +106,13 @@ static void repl(ots* state) {
   char* pending = NULL;
   size_t pending_length = 0;
   for (;;) {
-    fputs(pending_length == 0 ? "ot> " : "..> ", stdout);
-    int length = read_line(line, sizeof line);
+    int length = line_read(pending_length == 0 ? "ot> " : "..> ", line, sizeof line);
     if (length == LINE_EOF) break;
     if (length == LINE_INTERRUPTED) {
       pending_length = 0;
       continue;
     }
+    line_history_add(line, length);
     char* grown = realloc(pending, pending_length + (size_t)length + 1);
     if (grown == NULL) {
       puts("otos: out of memory");
@@ -124,8 +143,14 @@ static void repl(ots* state) {
       ot_clear_condition(state);
       continue;
     }
-    report_condition(state);
     pending_length = 0;
+    if (state->vm.unwind_kind == UNWIND_QUIT) {
+      ot_clear_condition(state);
+      if (state->quit_requested) break;
+      puts("interrupted");
+      continue;
+    }
+    report_condition(state);
   }
   free(pending);
 }
@@ -143,7 +168,12 @@ static void repl(ots* state) {
   uint64_t created = ot_platform_monotonic_ns();
   printf("otos: runtime ready in %lu ms\n", (unsigned long)((created - start) / 1000000));
 
-  puts("otium repl (otos) - ^C clears the line, ^D shuts down");
+  ot_set_loader(state, load_namespace, state);
+  state->poll_hook = poll_console;
+  ot_global_add(state, &reported_condition);
+  ot_def_nat(state, "%reported-condition", nat_reported_condition);
+
+  puts("otium repl (otos) - ^C interrupts, ^D shuts down");
   repl(state);
-  sbi_shutdown(false);
+  sbi_shutdown(state->quit_requested && state->quit_status != 0);
 }

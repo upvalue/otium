@@ -42,11 +42,18 @@ runtime = static_library('otium',
   c_args: runtime_args,
   dependencies: picolibc)
 
+# lib/ from the language tree, readable at /lib inside the kernel.
+embedded_files = custom_target('files.c',
+  output: 'files.c',
+  depfile: 'files.c.d',
+  command: [find_program('python3'), files('tools/embed-files.py'),
+            '@OUTPUT@', '@DEPFILE@', meson.current_source_dir() / '..', 'lib'])
+
 linker_script = meson.current_source_dir() / 'src/kernel.ld'
 executable('otos.elf',
-  'src/boot.S', 'src/kernel.c', 'src/ot-kernel.c',
+  'src/boot.S', 'src/kernel.c', 'src/line.c', 'src/ot-kernel.c', embedded_files,
   c_args: runtime_args,
-  include_directories: include_directories(runtime_dir),
+  include_directories: include_directories(runtime_dir, 'src'),
   dependencies: picolibc,
   link_with: [runtime, builtins],
   link_args: ['-T', linker_script, '-Wl,--gc-sections'],

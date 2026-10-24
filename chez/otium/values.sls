@@ -349,10 +349,19 @@
         (let ([n (array-value-size x)])
           (do ([i 0 (+ i 1)]) ((= i n)) (collection-call f (get x i))))
         (apply for-each (lambda args (apply collection-call f args)) (map sequence-list (cons x xs)))))
-  (define (collection-apply f . args)
+  (define (collection-apply-general f args)
     (when (null? args) (error 'apply "expected argument sequence"))
     (let ([rev (reverse args)])
       (apply apply collection-call f (reverse (cons (sequence-list (car rev)) (cdr rev))))))
+  ;; Applying a procedure to one sequence, with up to two leading arguments,
+  ;; builds no argument lists of its own.
+  (define collection-apply
+    (case-lambda
+      [(f seq) (if (procedure? f) (apply f (sequence-list seq)) (collection-apply-general f (list seq)))]
+      [(f a seq) (if (procedure? f) (apply f a (sequence-list seq)) (collection-apply-general f (list a seq)))]
+      [(f a b seq)
+       (if (procedure? f) (apply f a b (sequence-list seq)) (collection-apply-general f (list a b seq)))]
+      [(f . args) (collection-apply-general f args)]))
   (define (update! x key f . args) (put! x key (apply f (get x key) args)))
   (define (reaches? target value)
     (let ([seen (make-eq-hashtable)])

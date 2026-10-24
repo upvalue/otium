@@ -124,35 +124,27 @@
           (initialize-slot! object (car xs) (cadr xs) properties-only?)
           (loop (cddr xs))))
       (finish-instance object properties-only?)))
-  (define make
-    (case-lambda
-      [(type)
-       (let ([object (allocate-instance type)])
-         (finish-instance object #f))]
-      [(type k0 v0)
-       (let ([object (allocate-instance type)])
-         (initialize-slot! object k0 v0 #f)
-         (finish-instance object #f))]
-      [(type k0 v0 k1 v1)
-       (let ([object (allocate-instance type)])
-         (initialize-slot! object k0 v0 #f)
-         (initialize-slot! object k1 v1 #f)
-         (finish-instance object #f))]
-      [(type k0 v0 k1 v1 k2 v2)
-       (let ([object (allocate-instance type)])
-         (initialize-slot! object k0 v0 #f)
-         (initialize-slot! object k1 v1 #f)
-         (initialize-slot! object k2 v2 #f)
-         (finish-instance object #f))]
-      [(type k0 v0 k1 v1 k2 v2 k3 v3)
-       (let ([object (allocate-instance type)])
-         (initialize-slot! object k0 v0 #f)
-         (initialize-slot! object k1 v1 #f)
-         (initialize-slot! object k2 v2 #f)
-         (initialize-slot! object k3 v3 #f)
-         (finish-instance object #f))]
-      [(type . arguments) (construct #f type arguments)]))
-  (define (class-properties type . arguments) (construct #t type arguments))
+  ;; Clauses for up to eight keyword/value pairs, so calls with few slots
+  ;; build no argument list.
+  (define-syntax define-constructor
+    (lambda (x)
+      (syntax-case x ()
+        [(_ name properties-only?)
+         (with-syntax ([(clause ...)
+                        (map (lambda (pairs)
+                               (let ([ks (generate-temporaries (iota pairs))] [vs (generate-temporaries (iota pairs))])
+                                 (with-syntax ([(formal ...) (apply append (map list ks vs))] [(k ...) ks] [(v ...) vs])
+                                   #'[(type formal ...)
+                                      (let ([object (allocate-instance type)])
+                                        (initialize-slot! object k v properties-only?) ...
+                                        (finish-instance object properties-only?))])))
+                             (iota 9))])
+           #'(define name
+               (case-lambda
+                 clause ...
+                 [(type . arguments) (construct properties-only? type arguments)])))])))
+  (define-constructor make #f)
+  (define-constructor class-properties #t)
   (define (ensure-current-properties! object properties)
     (unless (instance? object) (fail 'slot-ref 'invalid-slot-operation "expected instance"))
     (unless (or (val:instance-migrating? object)

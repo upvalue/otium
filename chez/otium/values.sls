@@ -349,19 +349,41 @@
         (let ([n (array-value-size x)])
           (do ([i 0 (+ i 1)]) ((= i n)) (collection-call f (get x i))))
         (apply for-each (lambda args (apply collection-call f args)) (map sequence-list (cons x xs)))))
-  (define (collection-apply-general f args)
-    (when (null? args) (error 'apply "expected argument sequence"))
-    (let ([rev (reverse args)])
-      (apply apply collection-call f (reverse (cons (sequence-list (car rev)) (cdr rev))))))
-  ;; Applying a procedure to one sequence, with up to two leading arguments,
-  ;; builds no argument lists of its own.
+  ;; Splice the final sequence onto the leading arguments. The rest list is
+  ;; freshly allocated for this call, so it can be reused.
+  (define (spread-arguments! args)
+    (if (null? (cdr args))
+        (sequence-list (car args))
+        (let loop ([p args])
+          (if (null? (cddr p))
+              (begin (set-cdr! p (sequence-list (cadr p))) args)
+              (loop (cdr p))))))
+  ;; Short arrays are spread without converting them to a list.
+  (define (apply-array f seq)
+    (case (array-value-size seq)
+      [(0) (f)]
+      [(1) (f (get seq 0))]
+      [(2) (f (get seq 0) (get seq 1))]
+      [(3) (f (get seq 0) (get seq 1) (get seq 2))]
+      [(4) (f (get seq 0) (get seq 1) (get seq 2) (get seq 3))]
+      [else (apply f (array-list seq))]))
+  ;; Common arities avoid the rest list too.
   (define collection-apply
     (case-lambda
-      [(f seq) (if (procedure? f) (apply f (sequence-list seq)) (collection-apply-general f (list seq)))]
-      [(f a seq) (if (procedure? f) (apply f a (sequence-list seq)) (collection-apply-general f (list a seq)))]
+      [(f seq)
+       (cond [(not (procedure? f)) (collection-call-general f (sequence-list seq))]
+             [(array? seq) (apply-array f seq)]
+             [else (apply f (sequence-list seq))])]
+      [(f a seq)
+       (if (procedure? f) (apply f a (sequence-list seq)) (collection-call-general f (cons a (sequence-list seq))))]
       [(f a b seq)
-       (if (procedure? f) (apply f a b (sequence-list seq)) (collection-apply-general f (list a b seq)))]
-      [(f . args) (collection-apply-general f args)]))
+       (if (procedure? f)
+           (apply f a b (sequence-list seq))
+           (collection-call-general f (cons* a b (sequence-list seq))))]
+      [(f . args)
+       (when (null? args) (error 'apply "expected argument sequence"))
+       (let ([args (spread-arguments! args)])
+         (if (procedure? f) (apply f args) (collection-call-general f args)))]))
   (define (update! x key f . args) (put! x key (apply f (get x key) args)))
   (define (reaches? target value)
     (let ([seen (make-eq-hashtable)])

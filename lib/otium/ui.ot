@@ -18,7 +18,7 @@
   (bounds :init nil)
   (release-layout :init nil)
   (parent :init nil)
-  (options :init {})
+  (options :init nil)
   (focused? :init #f)
   (pressed? :init #f)
   (hovered? :init #f)
@@ -167,21 +167,49 @@
 (def (height bounds)
   (bounds :height))
 
+(defrecord LayoutStyle
+  (width height grow padding padding-x padding-y align-items gap row center scroll)
+  :immutable #t)
+
+(defrecord MeasureLimits
+  (width height width-mode height-mode scale)
+  :immutable #t)
+
+(def (limit-ref limits key . fallback)
+  "Read a measurement limit; unconstrained dimensions use the supplied default."
+  (let ((value (if (record? limits)
+                   (limits key)
+                   (get limits key))))
+    (if (nil? value)
+        (if (null? fallback)
+            nil
+            (car fallback))
+        value)))
+
+(def (style-ref style key fallback)
+  "Read a LayoutStyle or a custom widget's style table."
+  (if (record? style)
+      (style key)
+      (get style key fallback)))
+
 (defgeneric (layout-style widget))
 
 (defmethod (layout-style (w Widget))
-  {})
+  (record-new LayoutStyle -1 -1 0 0 nil nil :stretch 0 #f #f #f))
 
 (def- (box-style w row?)
-  {:width (w :width)
-   :height (w :height)
-   :grow (w :grow)
-   :padding (w :padding)
-   :padding-x (w :padding-x)
-   :padding-y (w :padding-y)
-   :align-items (w :align-items)
-   :gap (w :gap)
-   :row row?})
+  (record-new LayoutStyle
+              (w :width)
+              (w :height)
+              (w :grow)
+              (w :padding)
+              (w :padding-x)
+              (w :padding-y)
+              (w :align-items)
+              (w :gap)
+              row?
+              #f
+              #f))
 
 (defmethod (layout-style (w Box))
   (unless (memq (w :direction) '(:row :column)) (error "Box: direction must be :row or :column"))
@@ -264,45 +292,49 @@
     ((or (eq? (get event :kind) :pointer-down) (eq? (get event :kind) :pointer-up)) :handled)
     (else nil)))
 
-(def (new class opts . children)
-  "Construct a widget description without initializing mounted state.
-:tab-navigation defaults to #t; #f routes Tab and Shift+Tab to the widget's key handling."
+(def- (describe-widget class opts children extra)
   (unless (class-subtype? class Widget) (error "ui/new: expected widget class"))
-  (unless (table? opts) (error "ui/new: expected options table"))
-  (let ((args '())
-        (options {}))
-    (for-each (fn (k)
-                (cond
-                  ((eq? k :key) nil)
-                  ((memq k
-                         '(:disabled :focusable
-                                     :autofocus
-                                     :focus
-                                     :tab-navigation
-                                     :keymap
-                                     :on-action
-                                     :cache
-                                     :animate-size))
-                   (put! options k (get opts k)))
-                  (else (set! args (cons k (cons (get opts k) args))))))
-              (keys opts))
+  (unless (or (nil? opts) (table? opts)) (error "ui/new: expected options table or nil"))
+  (let ((args extra)
+        (options nil))
+    (unless (nil? opts)
+      (for-each (fn (k)
+                  (cond
+                    ((or (eq? k :key) (and (pair? extra) (eq? k (car extra)))) nil)
+                    ((memq k
+                           '(:disabled :focusable
+                                       :autofocus
+                                       :focus
+                                       :tab-navigation
+                                       :keymap
+                                       :on-action
+                                       :cache
+                                       :animate-size))
+                     (set! options opts))
+                    (else (set! args (cons k (cons (get opts k) args))))))
+                (keys opts)))
     (make Description
           :properties (apply class-properties class args)
           :key (get opts :key)
           :children children
           :options options)))
 
+(def (new class opts . children)
+  "Construct a description. Treat it and its options as fixed after construction.
+Empty options may be nil. :tab-navigation defaults to #t."
+  (describe-widget class opts children '()))
+
 (def (icon opts)
   (new Icon opts))
 
 (def (label opts text)
-  (new Label (put opts :text text)))
+  (describe-widget Label opts '() (list :text text)))
 
 (def (row opts . children)
-  (apply new Box (put opts :direction :row) children))
+  (describe-widget Box opts children '(:direction :row)))
 
 (def (column opts . children)
-  (apply new Box (put opts :direction :column) children))
+  (describe-widget Box opts children '(:direction :column)))
 
 (def (button opts . children)
   (apply new Button opts children))
@@ -362,9 +394,9 @@
 
 (def- (reconcile-children old input parent)
   (let ((descriptions (flatten input))
-        (keyed {})
-        (seen {})
-        (kept {})
+        (keyed nil)
+        (seen nil)
+        (kept nil)
         (out []))
     ;; Validate keys before changing any sibling instances.
     (for-each (fn (d)
@@ -373,9 +405,14 @@
                     (unless (or (keyword? key) (symbol? key) (string? key) (int? key))
                       (error "ui: key must be a keyword, symbol, string or integer"))
                     (when (get seen key #f) (error "ui: duplicate sibling key" key))
+                    (unless seen (set! seen {}))
                     (put! seen key #t))))
               descriptions)
-    (for-each (fn (n) (unless (nil? (n :key)) (put! keyed (n :key) n))) old)
+    (for-each (fn (n)
+                (unless (nil? (n :key))
+                  (unless keyed (set! keyed {}))
+                  (put! keyed (n :key) n)))
+              old)
     (dotimes (i (length descriptions))
       (let ((d (get descriptions i))
             (candidate (if (nil? (d :key))
@@ -394,8 +431,11 @@
         (unless (enabled? node) (set! (node :pressed?) #f))
         (when matched? (class-update-properties! (node :instance) (d :properties)))
         (let ((built (with-params ((building-children (d :children))) (build (node :instance)))))
-          (set! (node :children) (reconcile-children (node :children) built node)))
-        (put! kept node #t)
+          (unless (and (empty? (node :children)) (or (nil? built) (null? built) (and (array? built) (empty? built))))
+            (set! (node :children) (reconcile-children (node :children) built node))))
+        (when matched?
+          (unless kept (set! kept {}))
+          (put! kept node #t))
         ;; :autofocus takes focus on mount when nothing has it; :focus takes
         ;; it on mount or when the option turns on.
         (when (or focus? (and (not matched?) (get (node :options) :autofocus #f)))
@@ -480,7 +520,7 @@
   ((tree :focus) :node))
 
 (defmethod (layout-style (w Button))
-  {:width (w :width) :height (w :height) :grow (w :grow) :padding (w :padding) :center #t})
+  (record-new LayoutStyle (w :width) (w :height) (w :grow) (w :padding) nil nil :stretch 0 #f #t #f))
 
 (defmethod (build (w Button))
   (def (convert value)
@@ -499,7 +539,7 @@
   (convert (building-children)))
 
 (defmethod (layout-style (w TextField))
-  {:width (w :width) :height (w :height) :grow (w :grow)})
+  (record-new LayoutStyle (w :width) (w :height) (w :grow) 0 nil nil :stretch 0 #f #f #f))
 
 (defmethod (build (w TextField))
   (unless (equal? (w :seen) (w :value))
@@ -587,13 +627,17 @@
       (else nil))))
 
 (defmethod (layout-style (w Scroll))
-  {:width (w :width)
-   :height (w :height)
-   :grow (w :grow)
-   :padding (w :padding)
-   :gap (w :gap)
-   :row (eq? (w :axis) :x)
-   :scroll #t})
+  (record-new LayoutStyle
+              (w :width)
+              (w :height)
+              (w :grow)
+              (w :padding)
+              nil
+              nil
+              :stretch (w :gap)
+              (eq? (w :axis) :x)
+              #f
+              #t))
 
 (def (scroll-to! w position)
   "Move a mounted Scroll immediately, ending any animation."
@@ -672,7 +716,7 @@ smoothing. Within a quarter pixel, return target."
 
 (def (invalidate! window)
   "Request a frame for a window using :render-on-demand?."
-  (put! window :dirty? #t)
+  (put! window :dirty? #t :view-dirty? #t)
   window)
 
 (def (set-view! window view)

@@ -640,6 +640,9 @@
                                        (car p)
                                        p))
                                  (proper (cdr signature)))))
+                 (when (and (pair? body) (eq? (car body) :next))
+                   (set! names (cons (second body) names))
+                   (set! body (cdr (cdr body))))
                  (walk-body walk (bind-all walk scope names :method) body)))
               ((member head
                        '(ns require

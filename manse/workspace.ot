@@ -201,9 +201,13 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
 (def (column s entry viewport)
   (let ((id (entry :id))
         (focused? (equal? id (strip/focused s)))
-        (body (apps/view (entry :app))))
-    (set! (body :key) :body)
-    (put! (body :options) :focus focused?)
+        (source (apps/view (entry :app)))
+        (body (make ui/Description
+                    :properties (source :properties)
+                    :key
+                    :body
+                    :children (source :children)
+                    :options (put (or (source :options) {}) :focus focused?))))
     (ui/column {:key id
                 :cache #t
                 :animate-size #t

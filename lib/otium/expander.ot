@@ -745,14 +745,21 @@
                         (car rest)
                         #f)))
           (if (and (pair? head) (list? head))
-              (cons 'defmethod
-                    (cons head
-                          (exp-body (cdr rest)
-                                    (exp-map (fn (p)
-                                               (if (pair? p)
-                                                   (car p)
-                                                   p))
-                                             (cdr head)))))
+              (let ((body (cdr rest))
+                    (names (exp-map (fn (p)
+                                      (if (pair? p)
+                                          (car p)
+                                          p))
+                                    (cdr head))))
+                (if (and (pair? body) (eq? (car body) (keyword "next")))
+                    (if (or (null? (cdr body)) (null? (cdr (cdr body))))
+                        form
+                        (cons 'defmethod
+                              (cons head
+                                    (cons (keyword "next")
+                                          (cons (car (cdr body))
+                                                (exp-body (cdr (cdr body)) (cons (car (cdr body)) names)))))))
+                    (cons 'defmethod (cons head (exp-body body names)))))
               form)))))
 
 ;; The runtimes call (*expander* form) for each top-level form, after

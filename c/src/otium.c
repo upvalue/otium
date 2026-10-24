@@ -2297,7 +2297,6 @@ static bool compile_generic_declaration(ots* state, bytecode_compiler* compiler,
 static otv generic_select(ots* state, otv generic, otv* args, size_t argc);
 static bool class_subtype(otv child, otv parent);
 static otv invoke_method_chain(ots* state, otv context, otv* args, int argc);
-static otv prepare_method_frame(ots* state, otv context, otv* args, size_t argc);
 static otv cached_read_call(ots* state, otv cache, otv* args, int argc);
 static otv cached_write_call(ots* state, otv cache, otv* args, int argc);
 static otv nat_set_applied(ots* state, otv* args, int argc);
@@ -3376,7 +3375,6 @@ static void vm_push_frame(ots* state, otv function, otv env, size_t base) {
   state->vm.vm_frames[state->vm.vm_frame_count++] = (ot_vm_frame){
       .function = function,
       .env = env,
-      .next_method = state->next_method,
       .ip = 0,
       .base = base,
   };
@@ -3684,18 +3682,6 @@ static bool vm_enter_call(ots* state, size_t argc, bool tail) {
     callable = generic_select(state, callable, state->vm.vm_stack + call_base + 1, argc);
     if (callable == OT_UNWIND) return false;
   }
-  otv next_context = state->next_method;
-  OT_FRAME_SCOPED(state, &next_context);
-  if (is_type(callable, OBJ_NAT) &&
-      ((ot_nat_obj*)ot_as_obj(callable))->context_function == invoke_method_chain) {
-    otv context = ((ot_nat_obj*)ot_as_obj(callable))->context;
-    OT_FRAME_SCOPED(state, &context);
-    otv implementation = descriptor_value(context, 1);
-    if (is_type(implementation, OBJ_FUNCTION)) {
-      next_context = prepare_method_frame(state, context, state->vm.vm_stack + call_base + 1, argc);
-      callable = descriptor_value(context, 1);
-    }
-  }
   if (is_type(callable, OBJ_FUNCTION)) {
     ot_function_obj* candidate = (ot_function_obj*)ot_as_obj(callable);
     if (is_type(candidate->code, OBJ_CODE) && as_code(candidate->code)->fixed_arity == argc) {
@@ -3707,13 +3693,11 @@ static bool vm_enter_call(ots* state, size_t argc, bool tail) {
       for (size_t i = argc; i < local_count; i++) state->vm.vm_stack[base + i] = ot_nil;
       state->vm.vm_stack_count = base + local_count;
       if (!tail) {
-        state->next_method = next_context;
         vm_push_frame(state, callable, parent, base);
       }
       ot_vm_frame* target = &state->vm.vm_frames[state->vm.vm_frame_count - 1];
       target->function = callable;
       target->env = parent;
-      target->next_method = next_context;
       target->ip = 0;
       target->local_count = local_count;
       target->stack_locals = true;
@@ -3737,11 +3721,9 @@ static bool vm_enter_call(ots* state, size_t argc, bool tail) {
       frame->function = callable;
       frame->env = env;
       frame->stack_locals = false;
-      frame->next_method = next_context;
       frame->ip = 0;
     } else {
       state->vm.vm_stack_count = call_base;
-      state->next_method = next_context;
       vm_push_frame(state, callable, env, base);
     }
     return true;
@@ -3857,7 +3839,6 @@ static otv vm_execute_loop(ots* state, size_t floor) {
       return ot_raise(state, "maximum VM frame depth exceeded");
     }
     ot_vm_frame* frame = &state->vm.vm_frames[state->vm.vm_frame_count - 1];
-    state->next_method = frame->next_method;
     ot_function_obj* function = (ot_function_obj*)ot_as_obj(frame->function);
     if (!is_type(function->code, OBJ_CODE)) {
       (void)ot_raise(state, "vm: function has no bytecode");
@@ -4002,7 +3983,6 @@ static otv vm_execute_loop(ots* state, size_t floor) {
           ot_vm_frame* target = &state->vm.vm_frames[state->vm.vm_frame_count - 1];
           target->function = callable;
           target->env = parent;
-          target->next_method = state->next_method;
           target->ip = 0;
           target->local_count = local_count;
           target->stack_locals = true;
@@ -4515,10 +4495,7 @@ static otv vm_execute_loop(ots* state, size_t floor) {
 #endif
 
 static otv vm_execute(ots* state, size_t floor) {
-  otv saved_next = state->next_method;
-  OT_FRAME_SCOPED(state, &saved_next);
   otv result = vm_execute_loop(state, floor);
-  state->next_method = saved_next;
   return result;
 }
 
@@ -7481,7 +7458,11 @@ static bool signature_dominates(otv a, otv b) {
 /* Effective method chains and per-generic dispatch caches. */
 static otv method_qualifier(otv method) { return as_pair(as_pair(method)->cdr)->car; }
 
-static otv method_function(otv method) { return as_pair(as_pair(method)->cdr)->cdr; }
+static otv method_function(otv method) { return as_pair(as_pair(as_pair(method)->cdr)->cdr)->car; }
+
+static bool method_has_next(otv method) {
+  return as_pair(as_pair(as_pair(method)->cdr)->cdr)->cdr == ot_true;
+}
 
 static otv method_field(otv context, size_t index) {
   return as_slots(as_array(context)->slots)->values[index];
@@ -7496,20 +7477,10 @@ static void invalidate_generic(ots* state, otv value) {
 
 static otv effective_method(ots* state, otv generic, otv methods, otv* args, size_t argc);
 
-static otv prepare_method_frame(ots* state, otv context, otv* args, size_t argc) {
-  if (method_field(context, 3) == ot_nil) return ot_nil;
-  OT_FRAME_SCOPED(state, &context);
-  otv arguments = make_descriptor(state, args, argc);
-  otv fields[] = {method_field(context, 3), arguments, method_field(context, 2),
-                  method_field(context, 0)};
-  return make_descriptor(state, fields, 4);
-}
-
 static otv invoke_method_chain(ots* state, otv context, otv* args, int argc) {
   otv generic = method_field(context, 0), function = method_field(context, 1);
-  otv remaining = method_field(context, 2), next = method_field(context, 3);
-  otv saved = state->next_method, frame = ot_nil;
-  OT_FRAME_SCOPED(state, &context, &generic, &function, &remaining, &next, &saved, &frame);
+  otv remaining = method_field(context, 2);
+  OT_FRAME_SCOPED(state, &context, &generic, &function, &remaining);
   if (function == ot_false) {
     buf message = {0};
     buf_cstr(&message,
@@ -7525,11 +7496,31 @@ static otv invoke_method_chain(ots* state, otv context, otv* args, int argc) {
     buf_free(&message);
     return result;
   }
-  frame = prepare_method_frame(state, context, args, (size_t)argc);
-  state->next_method = frame;
-  otv result = apply_value(state, function, args, (size_t)argc, false);
-  state->next_method = saved;
-  return result;
+  return apply_value(state, function, args, (size_t)argc, false);
+}
+
+static otv invoke_next_method(ots* state, otv context, otv* args, int argc) {
+  otv generic = method_field(context, 0);
+  if ((size_t)argc != as_generic(generic)->arity)
+    return generic_error(state, "wrong-arity", "incorrect next method arity");
+  OT_FRAME_SCOPED(state, &context, &generic);
+  otv values[argc == 0 ? 1 : argc];
+  for (int i = 0; i < argc; i++) values[i] = args[i];
+  otv* roots[argc == 0 ? 1 : argc];
+  for (int i = 0; i < argc; i++) roots[i] = &values[i];
+  ot_frame arguments_frame [[gnu::cleanup(ot_frame_cleanup)]];
+  ot_frame_push(state, &arguments_frame, roots, (size_t)argc);
+  bool same = true;
+  for (int i = 0; i < argc; i++)
+    if (dispatch_type(state, values[i]) != method_field(method_field(context, 3), (size_t)i)) {
+      same = false;
+      break;
+    }
+  otv next = same
+                 ? method_field(context, 1)
+                 : effective_method(state, generic, method_field(context, 2), values, (size_t)argc);
+  if (next == OT_UNWIND) return next;
+  return apply_value(state, next, values, (size_t)argc, false);
 }
 
 static otv effective_method(ots* state, otv generic, otv methods, otv* args, size_t argc) {
@@ -7572,7 +7563,19 @@ static otv effective_method(ots* state, otv generic, otv methods, otv* args, siz
       if (method != best) remaining = ot_cons(state, method, remaining);
       cursor = as_pair(cursor)->cdr;
     }
-    if (remaining != ot_null) next = effective_method(state, generic, remaining, args, argc);
+    if (!method_has_next(best)) return function;
+    next = ot_false;
+    if (remaining != ot_null) {
+      otv types = ot_array_new(state, argc);
+      OT_FRAME_SCOPED(state, &types);
+      for (size_t i = 0; i < argc; i++) array_push(state, &types, dispatch_type(state, args[i]));
+      next = effective_method(state, generic, remaining, args, argc);
+      if (next == OT_UNWIND) return next;
+      otv fields[] = {generic, next, remaining, types};
+      otv context = make_descriptor(state, fields, 4);
+      next = ot_make_native(state, "next method", invoke_next_method, context);
+    }
+    return apply_value(state, function, &next, 1, false);
   } else remaining = applicable;
   otv fields[] = {generic, function, remaining, next};
   otv context = make_descriptor(state, fields, 4);
@@ -7627,31 +7630,6 @@ static otv generic_select(ots* state, otv generic, otv* args, size_t argc) {
   return OT_UNWIND;
 }
 
-static otv nat_next_method_p(ots* state, otv* args, int argc) {
-  (void)args;
-  if (need_arity(state, "next-method?", argc, 0, 0) == OT_UNWIND) return OT_UNWIND;
-  return state->next_method != ot_nil && method_field(state->next_method, 0) != ot_nil ? ot_true
-                                                                                       : ot_false;
-}
-
-static otv nat_call_next_method(ots* state, otv* args, int argc) {
-  if (state->next_method == ot_nil || method_field(state->next_method, 0) == ot_nil)
-    return generic_error(state, "no-next-method", "no next method");
-  otv frame = state->next_method, next = method_field(frame, 0);
-  otv generic = method_field(frame, 3);
-  OT_FRAME_SCOPED(state, &frame, &next, &generic);
-  if (argc != 0) {
-    if ((size_t)argc != as_generic(generic)->arity)
-      return generic_error(state, "wrong-arity", "incorrect next method arity");
-    next = effective_method(state, generic, method_field(frame, 2), args, (size_t)argc);
-    return apply_value(state, next, args, (size_t)argc, false);
-  }
-  size_t count = as_array(method_field(frame, 1))->length;
-  otv values[count == 0 ? 1 : count];
-  for (size_t i = 0; i < count; i++) values[i] = method_field(method_field(frame, 1), i);
-  return apply_value(state, next, values, count, false);
-}
-
 static otv default_update_instance(ots* state, otv context, otv* args, int argc) {
   (void)state;
   (void)context;
@@ -7680,21 +7658,23 @@ static otv signature_from_list(ots* state, otv generic, otv list) {
   return signature;
 }
 
-static otv register_method(ots* state, otv generic, otv signature, otv function, otv qualifier) {
-  OT_FRAME_SCOPED(state, &generic, &signature, &function, &qualifier);
+static otv register_method(ots* state, otv generic, otv signature, otv function, otv qualifier,
+                           otv has_next) {
+  otv methods = ot_null, cursor = as_generic(generic)->methods;
+  OT_FRAME_SCOPED(state, &generic, &signature, &function, &qualifier, &has_next, &methods, &cursor);
   invalidate_generic(state, generic);
-  for (otv p = as_generic(generic)->methods; p != ot_null; p = as_pair(p)->cdr) {
-    otv method = as_pair(p)->car;
-    if (same_signature(as_pair(method)->car, signature) && method_qualifier(method) == qualifier) {
-      ot_pair_obj* pair = as_pair(as_pair(method)->cdr);
-      ot_store(state, pair, &pair->cdr, function);
-      return ot_nil;
-    }
+  /* Keep old method lists intact for escaped next-method closures. */
+  while (cursor != ot_null) {
+    otv method = as_pair(cursor)->car;
+    if (!(same_signature(as_pair(method)->car, signature) && method_qualifier(method) == qualifier))
+      methods = ot_cons(state, method, methods);
+    cursor = as_pair(cursor)->cdr;
   }
-  otv method = ot_cons(state, qualifier, function);
+  otv method = ot_cons(state, function, has_next);
   OT_FRAME_SCOPED(state, &method);
+  method = ot_cons(state, qualifier, method);
   method = ot_cons(state, signature, method);
-  otv methods = ot_cons(state, method, as_generic(generic)->methods);
+  methods = ot_cons(state, method, methods);
   ot_generic_obj* object = as_generic(generic);
   ot_store(state, object, &object->methods, methods);
   return ot_nil;
@@ -8147,7 +8127,7 @@ static otv execute_class_declaration(ots* state, otv declaration) {
         ot_make_native(state, "slot accessor", slot_accessor, array_item(array_item(specs, i), 0));
     signature = ot_array_new(state, 1);
     array_push(state, &signature, type);
-    register_method(state, generic, signature, function, ot_false);
+    register_method(state, generic, signature, function, ot_false, ot_false);
     define_var(state, space, accessor, generic, ot_nil, false);
   }
   return ot_nil;
@@ -8269,13 +8249,44 @@ static bool compile_generic_declaration(ots* state, bytecode_compiler* compiler,
     params = nat_reverse(state, &params, 1);
     signature = nat_reverse(state, &signature, 1);
   }
+  otv has_next = ot_false;
   if (method) {
-    code = compile_function_code(state, params, list_tail(form, 2), ot_nil,
-                                 state->vm.current_namespace, name);
+    otv body = list_tail(form, 2), next_name = ot_nil;
+    OT_FRAME_SCOPED(state, &body, &next_name);
+    if (class_option(as_pair(body)->car, "next")) {
+      if (list_length(body) < 3) {
+        generic_error(state, "invalid-declaration", "expected :next name followed by method body");
+        return false;
+      }
+      next_name = as_pair(as_pair(body)->cdr)->car;
+      if (!is_type(next_name, OBJ_SYMBOL) || symbol_is(next_name, "&") ||
+          memchr(as_name(next_name)->bytes, '/', as_name(next_name)->length)) {
+        generic_error(state, "invalid-declaration", "expected local next-method name");
+        return false;
+      }
+      for (otv p = params; p != ot_null; p = as_pair(p)->cdr)
+        if (as_pair(p)->car == next_name) {
+          generic_error(state, "invalid-declaration", "next-method name duplicates parameter");
+          return false;
+        }
+      otv binding = ot_cons(state, next_name, ot_null);
+      OT_FRAME_SCOPED(state, &binding);
+      binding = ot_cons(state, next_name, binding);
+      binding = ot_cons(state, binding, ot_null);
+      body = ot_cons(state, binding, list_tail(body, 2));
+      body = ot_cons(state, ot_intern(state, "let", 3, false), body);
+      body = ot_cons(state, body, ot_null);
+      body = ot_cons(state, params, body);
+      body = ot_cons(state, ot_intern(state, "fn", 2, false), body);
+      body = ot_cons(state, body, ot_null);
+      params = ot_cons(state, next_name, ot_null);
+      has_next = ot_true;
+    }
+    code = compile_function_code(state, params, body, ot_nil, state->vm.current_namespace, name);
     if (code == OT_UNWIND) return false;
   }
-  otv fields[] = {kind, name, signature, code, qualifier};
-  otv descriptor = make_descriptor(state, fields, 5);
+  otv fields[] = {kind, name, signature, code, qualifier, has_next};
+  otv descriptor = make_descriptor(state, fields, 6);
   bytecode_emit_constant(state, compiler, BC_GENERIC_DECL, descriptor);
   return !compiler->bytes.failed;
 }
@@ -8317,7 +8328,8 @@ static otv execute_generic_declaration(ots* state, otv descriptor) {
       signature = as_pair(signature)->cdr;
     }
     otv function = make_bytecode_function(state, code, ot_nil, space, name);
-    return register_method(state, generic, resolved, function, array_item(descriptor, 4));
+    return register_method(state, generic, resolved, function, array_item(descriptor, 4),
+                           array_item(descriptor, 5));
   }
   bool type = symbol_is(kind, "defclass") || symbol_is(kind, "reset-class!");
   bool reset = symbol_is(kind, "reset-class!") || symbol_is(kind, "reset-generic!");
@@ -8493,8 +8505,6 @@ static void generic_module_init(ots* state) {
   ot_def_nat(state, "generic?", nat_generic_p);
   ot_def_nat(state, "generic-methods", nat_generic_methods);
   ot_def_nat(state, "remove-method!", nat_remove_method);
-  ot_def_nat(state, "call-next-method", nat_call_next_method);
-  ot_def_nat(state, "next-method?", nat_next_method_p);
   name = ot_intern(state, "update-instance", 15, false);
   state->update_instance = new_generic(state, owner, name, 2);
   otv signature = ot_nil, function = ot_nil;
@@ -8503,7 +8513,7 @@ static void generic_module_init(ots* state) {
   array_push(state, &signature, ot_false);
   array_push(state, &signature, ot_false);
   function = ot_make_native(state, "update-instance", default_update_instance, ot_nil);
-  register_method(state, state->update_instance, signature, function, ot_false);
+  register_method(state, state->update_instance, signature, function, ot_false, ot_false);
   define_var(state, state->vm.current_namespace, name, state->update_instance, ot_nil, false);
 }
 
@@ -9825,7 +9835,6 @@ ots* ot_create(const ot_config* configuration) {
   state->update_instance = ot_nil;
   state->input_port_param = state->output_port_param = state->error_port_param = state->open_ports =
       ot_nil;
-  state->next_method = ot_nil;
   state->vm.condition = ot_nil;
   state->vm.unwind_args = ot_nil;
   state->exts = ot_nil;

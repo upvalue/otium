@@ -952,7 +952,14 @@
                        (>= (length form) 3))
             (invalid "expected (defmethod (generic parameters ...) body ...)"))
           (let* ([names (parameters! (cdr head) #t)]
-                 [generic (eval (car head) env)])
+                 [generic (eval (car head) env)]
+                 [body (cddr form)]
+                 [next? (declaration-option? (car body) "next")]
+                 [next-name (and next? (pair? (cdr body)) (cadr body))])
+            (when next?
+              (unless (and (identifier? next-name) (not (memq next-name names))
+                           (not (eq? next-name '&)) (pair? (cddr body)))
+                (invalid "expected :next name followed by method body")))
             (unless (gm:generic? generic)
               (gm:fail kind 'not-generic "expected generic procedure" (car head)))
             (unless (= (length names) (gm:generic-arity generic))
@@ -968,9 +975,12 @@
                    [implementation
                     (compile-form
                       (expander-top (namespace-expander space)
-                        (copy-source! form `(fn ,names ,@(cddr form))))
+                        (copy-source! form
+                          (if next?
+                              `(fn (,next-name) (fn ,names (let ((,next-name ,next-name)) ,@(cddr body))))
+                              `(fn ,names ,@body))))
                       env)])
-              (gm:add-method! generic signature implementation qualifier))))
+              (gm:add-method! generic signature implementation qualifier next?))))
         (if (memq kind '(defclass defabstract reset-class!))
             (class-declaration! space form)
         (let* ([reset? (eq? kind 'reset-generic!)]

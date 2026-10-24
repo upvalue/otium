@@ -218,7 +218,6 @@ static void OT_GC_TRACE_VM(ots* state, ot_vm* vm) {
   for (size_t i = 0; i < vm->vm_frame_count; i++) {
     OT_GC_TRACE_SLOT(state, &vm->vm_frames[i].function);
     OT_GC_TRACE_SLOT(state, &vm->vm_frames[i].env);
-    OT_GC_TRACE_SLOT(state, &vm->vm_frames[i].next_method);
   }
 
   for (ot_handler_frame* handler = vm->handlers; handler != NULL; handler = handler->prev) {
@@ -256,7 +255,6 @@ static void OT_GC_TRACE_ROOTS(ots* state) {
   OT_GC_TRACE_SLOT(state, &state->error_port_param);
   OT_GC_TRACE_SLOT(state, &state->open_ports);
   OT_GC_TRACE_SLOT(state, &state->update_instance);
-  OT_GC_TRACE_SLOT(state, &state->next_method);
   OT_GC_TRACE_VM(state, &state->vm);
 }
 

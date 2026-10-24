@@ -15,7 +15,8 @@
   (with-slots object (x speed) (set! x (+ x speed))))
 
 (defmethod :around (advance (object Particle))
-  (call-next-method))
+  :next super
+  (super object))
 
 (let ((particle (make Particle))
       (i 0))

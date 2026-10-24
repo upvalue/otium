@@ -2,7 +2,7 @@
 
 Implemented on the C and Chez runtimes. Classes replace typed maps with fixed
 slots and a single chain of slotless abstract types. Generic functions support
-ancestor dispatch, `call-next-method`, and `:around` methods.
+ancestor dispatch, lexical next methods, and `:around` methods.
 
 ## Why
 
@@ -36,7 +36,7 @@ linearization algorithm.
   types are final, abstract types form a single-parent tree, and ambiguous
   methods are errors.
 - [CLOS](https://www.lispworks.com/documentation/HyperSpec/Body/07_.htm), for
-  `call-next-method`, `:around` methods, and updating instances when a class is
+  lexical next methods, `:around` methods, and updating instances when a class is
   redefined.
 - [Dylan](https://opendylan.org/books/drm/), for sealing as a later performance
   step.
@@ -81,8 +81,8 @@ hold fields its subclasses inherit; here it can't.
   (draw-text g bounds (w :label)))
 
 ;; Debug outlines around one kind of widget, without touching its paint method.
-(defmethod :around (paint (w Button) g bounds)
-  (call-next-method)
+(defmethod :around (paint (w Button) g bounds) :next super
+  (super w g bounds)
   (when debug? (draw-outline g bounds)))
 ```
 
@@ -245,41 +245,29 @@ today. With single chains, ambiguity can only come from conflicts across
 arguments, such as `(Button, Event)` against `(Widget, PointerDown)`. One
 argument position always has a clear order.
 
-## `call-next-method` and `:around`
+## Lexical next methods and `:around`
 
-Two kinds of method:
+A primary method runs when its signature is the most specific applicable one.
+`:around` methods wrap primaries, most specific outermost. The outermost
+method supplies the result.
 
-- **Primary** methods (no qualifier). The most specific runs. It can call
-  `(call-next-method)` to run the next most specific, with the same arguments,
-  or with new ones as `(call-next-method a b)`. `(next-method?)` checks whether
-  there is one.
-- **`:around`** methods wrap the primary methods, most specific outermost.
-  Each decides whether and when to `(call-next-method)`. The innermost one's
-  next method is the most specific primary.
+Add `:next name` immediately after the signature to bind a lexical next-method
+procedure. For example, `(defmethod (paint (w Button) g bounds) :next super ...)`
+can call `(super w g bounds)`. Pass every argument explicitly, including when
+calling a zero-argument generic. The binding is `#f` when no methods remain.
+Methods without `:next` do not set up next-method context.
 
-The result is the outermost method's result.
+Arguments reselect from the remaining methods applicable to the original
+call. They must have the generic's fixed arity. They do not restart dispatch
+or introduce methods excluded by the original arguments. An ambiguous next
+step is a procedure that raises an ambiguity error when called.
 
-Replacement arguments reselect from the remaining methods that were applicable
-to the original call. They must have the generic's fixed arity. They do not
-restart dispatch or introduce methods excluded by the original arguments.
-`next-method?` reports whether a remaining step exists, including an ambiguous
-step that will fail if called. Outside a method it returns false; calling
-`call-next-method` there raises an error.
+The binding can escape in a closure. It retains the methods selected for that
+call; later generic calls see method additions, replacements and removals.
+Class descriptors remain live across reloads.
 
-"Next most specific" is well defined only when the remaining methods have a
-single most specific one. With two arguments that can fail below the top: a
-`(Button, PointerDown)` method's next candidates might be both
-`(Widget, PointerDown)` and `(Button, Event)`, neither more specific than the
-other. `call-next-method` into such a tie is an ambiguity error naming the
-candidates.
-
-A method's identity is its qualifier plus its signature. Redefining the same
-qualifier and signature replaces it.
-
-CLOS also has `:before` and `:after` methods. They are left out here, since
-the wrapping a UI needs (clipping, skipping disabled widgets) belongs to the
-framework's own code that calls `paint` and `handle-event`. `:around` covers
-the remaining cases.
+A method's identity is its qualifier plus its signature. Redefining that pair
+replaces the method. There are no `:before` or `:after` methods.
 
 ## Property descriptions and state
 
@@ -414,7 +402,7 @@ This replaces:
   instances and slots.
 - Exact-match selection, with selection along each argument's chain.
 
-It adds abstract types, `call-next-method`, `:around` methods, and instance
+It adds abstract types, lexical next methods, `:around` methods, and instance
 migration.
 
 The typed-map constructors and `field-*` operations have been removed from
@@ -435,7 +423,7 @@ dispatch, and an around method using the same source on both runtimes.
 - No slot inheritance and no multiple parents. Abstract types form single
   chains, as in Julia.
 - Ambiguity across arguments stays an error.
-- `call-next-method` and `:around` methods; no `:before` or `:after`.
+- lexical next methods and `:around` methods; no `:before` or `:after`.
 - `def`-prefixed declaration names, including renaming the generic forms.
 - Slots without `:init` are required.
 - `set!` on a one-argument call target, through `set-applied!`.

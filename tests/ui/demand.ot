@@ -79,6 +79,89 @@
 (check "default windows paint continuously" 8 paints)
 (put! (w :options) :render-on-demand? #t)
 
+(def builds 0)
+
+(def layouts 0)
+
+(set! gpu/layout! (fn _ (set! layouts (+ layouts 1))))
+(set! native/text-input (fn _ #t))
+(ui/set-view! w
+              (fn ()
+                (set! builds (+ builds 1))
+                (ui/new ui/Box nil)))
+(window/frame! w)
+
+(def before-builds builds)
+
+(def before-layouts layouts)
+
+(def before-paints paints)
+
+(set! ((get (ui/children (w :tree)) 0) :bounds) (ui/bounds 0 0 100 100))
+(set! event {:kind :pointer-move :x 10 :y 10})
+(window/frame! w)
+(check "hover paints" (+ before-paints 1) paints)
+(check "hover skips view" before-builds builds)
+(check "hover skips layout" before-layouts layouts)
+(set! event {:kind :pointer-move :x 11 :y 11})
+(window/frame! w)
+(check "unchanged hover skips painting" (+ before-paints 1) paints)
+(set! event {:kind :pointer-leave})
+(window/frame! w)
+(check "leaving hover only repaints" before-builds builds)
+(set! event {:kind :key-down :key "Unused"})
+(window/frame! w)
+(check "unhandled key skips view" before-builds builds)
+
+(defclass Switcher
+  :is ui/Widget)
+
+(def switched? #f)
+
+(def typed "")
+
+(def text-enabled? #f)
+
+(defmethod (ui/default-focusable? (widget Switcher))
+  #t)
+
+(defmethod (ui/handle-event (widget Switcher) event)
+  (when (equal? (get event :key) "Switch")
+    (set! switched? #t)
+    :handled))
+
+(set! native/text-input
+      (fn (_ enabled?)
+        (set! text-enabled? enabled?)
+        #t))
+(ui/set-view! w
+              (fn ()
+                (set! builds (+ builds 1))
+                (if switched?
+                    (ui/text-field {:focus #t :value typed :on-change (fn (value) (set! typed value))})
+                    (ui/new Switcher {:autofocus #t}))))
+(window/frame! w)
+
+(def queued (list {:kind :key-down :key "Switch"} {:kind :text-input :text "x"}))
+
+(def original-poll native/poll-event)
+
+(set! native/poll-event
+      (fn (_)
+        (unless (null? queued)
+          (let ((e (car queued)))
+            (when (eq? (get e :kind) :text-input)
+              ;; Dispatch, rather than polling, must see the rebuilt focus.
+              (check "switch event changed state" #t switched?))
+            (set! queued (cdr queued))
+            e))))
+(set! before-builds builds)
+(window/frame! w)
+(check "queued text reaches newly focused field" "x" typed)
+(check "text input follows rebuilt focus" #t text-enabled?)
+(check "handled events rebuild once each" (+ before-builds 2) builds)
+(set! native/poll-event original-poll)
+
 ;; :on-close-request can refuse a close; without it, a close request closes.
 (def closes 0)
 

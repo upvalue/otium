@@ -2,7 +2,7 @@
   (export set-pointer-predicate! public-bindings fail descriptor? descriptor-owner fresh-type redefine-class!
           descriptor-abstract? descriptor-parent Object generic? generic-owner generic-arity
           fresh-generic add-method! dispatch-type make slot-ref slot-set! instance?
-          generic-methods remove-method! call-next-method next-method? update-instance
+          generic-methods remove-method! update-instance
           make-slot-cache cached-slot-ref cached-slot-set! cached-call cached-set-call)
   (import (chezscheme) (prefix (otium values) val:))
 
@@ -93,21 +93,21 @@
         (when (eq? (vector-ref slots i) absent)
           (fail 'make 'uninitialized-slot "required slot has no value"
             (type-name (val:instance-type object)) (vector-ref keys i))))))
-  (define (construct properties-only? type arguments)
+  (define (allocate-instance type)
     (unless (and (descriptor? type) (not (descriptor-builtin? type))
                  (not (descriptor-abstract? type)))
       (fail 'make 'invalid-class "expected concrete user class" type))
-    (unless (even? (length arguments)) (fail 'make 'invalid-slot-operation "expected keyword/value pairs"))
     (let* ([layout (descriptor-layout type)]
-           [slots (make-vector (vector-length (layout-keys layout)) absent)]
-           [object (val:make-instance type (cdr (descriptor-owner type)) layout slots #f)])
-      (let loop ([xs arguments])
-        (unless (null? xs)
-          (let ([index (slot-index layout (car xs) 'make type)])
-            (when (and properties-only? (vector-ref (layout-states layout) index))
-              (fail 'class-properties 'invalid-slot-operation "state slot cannot be supplied as a property"))
-            (vector-set! slots index (cadr xs)))
-          (loop (cddr xs))))
+           [slots (make-vector (vector-length (layout-keys layout)) absent)])
+      (val:make-instance type (cdr (descriptor-owner type)) layout slots #f)))
+  (define (initialize-slot! object key value properties-only?)
+    (let* ([layout (val:instance-layout object)]
+           [index (slot-index layout key 'make (val:instance-type object))])
+      (when (and properties-only? (vector-ref (layout-states layout) index))
+        (fail 'class-properties 'invalid-slot-operation "state slot cannot be supplied as a property"))
+      (vector-set! (val:instance-slots object) index value)))
+  (define (finish-instance object properties-only?)
+    (let ([layout (val:instance-layout object)] [slots (val:instance-slots object)])
       (do ([i 0 (+ i 1)]) ((= i (vector-length slots)))
         (if (and properties-only? (vector-ref (layout-states layout) i))
             (vector-set! slots i (void))
@@ -116,7 +116,42 @@
                 (when init (vector-set! slots i (init)))))))
       (check-initialized object)
       object))
-  (define (make type . arguments) (construct #f type arguments))
+  (define (construct properties-only? type arguments)
+    (let ([object (allocate-instance type)])
+      (unless (even? (length arguments)) (fail 'make 'invalid-slot-operation "expected keyword/value pairs"))
+      (let loop ([xs arguments])
+        (unless (null? xs)
+          (initialize-slot! object (car xs) (cadr xs) properties-only?)
+          (loop (cddr xs))))
+      (finish-instance object properties-only?)))
+  (define make
+    (case-lambda
+      [(type)
+       (let ([object (allocate-instance type)])
+         (finish-instance object #f))]
+      [(type k0 v0)
+       (let ([object (allocate-instance type)])
+         (initialize-slot! object k0 v0 #f)
+         (finish-instance object #f))]
+      [(type k0 v0 k1 v1)
+       (let ([object (allocate-instance type)])
+         (initialize-slot! object k0 v0 #f)
+         (initialize-slot! object k1 v1 #f)
+         (finish-instance object #f))]
+      [(type k0 v0 k1 v1 k2 v2)
+       (let ([object (allocate-instance type)])
+         (initialize-slot! object k0 v0 #f)
+         (initialize-slot! object k1 v1 #f)
+         (initialize-slot! object k2 v2 #f)
+         (finish-instance object #f))]
+      [(type k0 v0 k1 v1 k2 v2 k3 v3)
+       (let ([object (allocate-instance type)])
+         (initialize-slot! object k0 v0 #f)
+         (initialize-slot! object k1 v1 #f)
+         (initialize-slot! object k2 v2 #f)
+         (initialize-slot! object k3 v3 #f)
+         (finish-instance object #f))]
+      [(type . arguments) (construct #f type arguments)]))
   (define (class-properties type . arguments) (construct #t type arguments))
   (define (ensure-current-properties! object properties)
     (unless (instance? object) (fail 'slot-ref 'invalid-slot-operation "expected instance"))
@@ -220,7 +255,7 @@
     (val:make-instance (val:instance-type object) (val:instance-name object)
       (val:instance-layout object) (vector-copy (val:instance-slots object)) #f))
 
-  (define-record-type method (fields signature qualifier implementation))
+  (define-record-type method (fields signature qualifier implementation next?))
   (define-record-type generic-state
     (fields owner arity (mutable methods) (mutable cache) (mutable epoch) (mutable positions)))
   (define generics (make-ephemeron-eq-hashtable))
@@ -239,12 +274,6 @@
   (define (more-specific? a b)
     (and (for-all subtype? a b) (exists (lambda (x y) (not (eq? x y))) a b)))
   (define (signature-names signature) (map descriptor-name signature))
-  (define current-next (make-parameter #f))
-  (define (call-next-method . args)
-    (let ([next (current-next)])
-      (unless next (fail 'call-next-method 'no-next-method "outside a method"))
-      ((car next) args)))
-  (define (next-method?) (and (current-next) (cdr (current-next))))
   (define (qualifier! qualifier)
     (unless (or (eq? qualifier 'primary) (eq? qualifier (val:keyword "around")))
       (fail 'defmethod 'invalid-qualifier "expected :around or primary" qualifier)))
@@ -267,54 +296,76 @@
                              (more-specific? (method-signature other) (method-signature m))) candidates)))
                    candidates)])
       (cond [(null? best)
-             (lambda (args) (fail 'generic-call 'missing-method "no applicable method"
+             (lambda args (fail 'generic-call 'missing-method "no applicable method"
                               (generic-state-owner s) (signature-names types)))]
             [(pair? (cdr best))
-             (lambda (args) (fail 'generic-call 'ambiguous-method "ambiguous methods"
+             (lambda args (fail 'generic-call 'ambiguous-method "ambiguous methods"
                               (generic-state-owner s) (map (lambda (m) (signature-names (method-signature m))) best)))]
             [else
-             (let* ([method (car best)] [remaining (remq method applicable)]
-                    [next (and (pair? remaining) (effective-method s remaining types))])
-               (lambda (args)
-                 (parameterize ([current-next
-                   (cons (lambda (replacements)
-                           (let ([args (if (null? replacements) args replacements)])
+             (let* ([method (car best)] [remaining (remq method applicable)])
+               (if (method-next? method)
+                   ((method-implementation method)
+                    (and (pair? remaining)
+                         (let ([next (effective-method s remaining types)])
+                           (lambda args
                              (unless (= (length args) (generic-state-arity s))
-                               (fail 'call-next-method 'wrong-arity "incorrect next method arity"))
-                             (unless next (fail 'call-next-method 'no-next-method "no next method"))
-                             (if (null? replacements) (next args)
-                                 ((effective-method s remaining (map dispatch-type args)) args))))
-                         (and next #t))])
-                   (apply (method-implementation method) args))))])))
-  (define (cached-method s args)
+                               (fail 'next-method 'wrong-arity "incorrect next method arity"))
+                             (apply (if (for-all (lambda (arg type) (eq? (dispatch-type arg) type)) args types)
+                                        next
+                                        (effective-method s remaining (map dispatch-type args))) args)))))
+                   (method-implementation method)))])))
+  (define (cached-method s a b c d rest)
     (unless (= (generic-state-epoch s) epoch) (invalidate! s))
     (let loop ([cache (generic-state-cache s)] [positions (generic-state-positions s)])
-      (let* ([key (if (null? positions) Object (dispatch-type (list-ref args (car positions))))]
+      (let* ([key (if (null? positions) Object (dispatch-type (case (car positions)
+                      [(0) a] [(1) b] [(2) c] [(3) d]
+                      [else (list-ref rest (- (car positions) 4))])))]
              [last? (or (null? positions) (null? (cdr positions)))]
              [found (hashtable-ref cache key #f)])
         (if last?
-            (or found (let ([method (effective-method s (generic-state-methods s) (map dispatch-type args))])
+            (or found (let ([method (effective-method s (generic-state-methods s) (map dispatch-type
+                          (case (generic-state-arity s)
+                            [(0) '()] [(1) (list a)] [(2) (list a b)]
+                            [(3) (list a b c)] [else (cons a (cons b (cons c (cons d rest))))])))])
                         (hashtable-set! cache key method) method))
             (let ([child (or found (make-eq-hashtable))])
               (unless found (hashtable-set! cache key child))
               (loop child (cdr positions)))))))
   (define (fresh-generic owner name arity)
     (let* ([s (make-generic-state (cons owner name) arity '() (make-eq-hashtable) epoch '())]
-           [g (lambda args
-                (unless (= (length args) arity)
-                  (fail 'generic-call 'wrong-arity "incorrect generic arity" (generic-state-owner s)))
-                ((cached-method s args) args))])
+           [g (case-lambda
+                [()
+                 (unless (= arity 0) (fail 'generic-call 'wrong-arity "incorrect generic arity"))
+                 ((cached-method s #f #f #f #f '()))]
+                [(a)
+                 (unless (= arity 1) (fail 'generic-call 'wrong-arity "incorrect generic arity"))
+                 ((cached-method s a #f #f #f '()) a)]
+                [(a b)
+                 (unless (= arity 2) (fail 'generic-call 'wrong-arity "incorrect generic arity"))
+                 ((cached-method s a b #f #f '()) a b)]
+                [(a b c)
+                 (unless (= arity 3) (fail 'generic-call 'wrong-arity "incorrect generic arity"))
+                 ((cached-method s a b c #f '()) a b c)]
+                [(a b c d)
+                 (unless (= arity 4) (fail 'generic-call 'wrong-arity "incorrect generic arity"))
+                 ((cached-method s a b c d '()) a b c d)]
+                [args
+                 (unless (= (length args) arity)
+                   (fail 'generic-call 'wrong-arity "incorrect generic arity"))
+                 (apply (cached-method s (car args) (cadr args) (caddr args) (cadddr args) (cddddr args)) args)])])
       (hashtable-set! generics g s) g))
   (define add-method!
     (case-lambda
       [(generic signature implementation) (add-method! generic signature implementation 'primary)]
       [(generic signature implementation qualifier)
+       (add-method! generic signature implementation qualifier #f)]
+      [(generic signature implementation qualifier next?)
        (let ([s (state 'defmethod generic)])
          (signature! 'defmethod s signature) (qualifier! qualifier)
          (unless (procedure? implementation) (fail 'defmethod 'invalid-declaration "expected procedure"))
          (let ([signature (normalize signature)])
            (generic-state-methods-set! s
-             (cons (make-method signature qualifier implementation)
+             (cons (make-method signature qualifier implementation next?)
                (filter (lambda (m) (not (and (eq? qualifier (method-qualifier m))
                                             (same-signature? (method-signature m) signature))))
                  (generic-state-methods s)))))
@@ -343,8 +394,7 @@
       (cons 'type-descriptor? descriptor?) (cons 'type-name type-name)
       (cons 'dispatch-type dispatch-type) (cons 'slot-set! slot-set!)
       (cons 'generic? generic?) (cons 'generic-methods generic-methods)
-      (cons 'remove-method! remove-method!) (cons 'call-next-method call-next-method)
-      (cons 'next-method? next-method?) (cons 'update-instance update-instance)
+      (cons 'remove-method! remove-method!) (cons 'update-instance update-instance)
       (cons 'Port Port) (cons 'CPointer CPointer) (cons 'Object Object) (cons 'Number Number) (cons 'Boolean Boolean) (cons 'Character Character)
       (cons 'String String) (cons 'Symbol Symbol) (cons 'Null Null)
       (cons 'Pair Pair) (cons 'Vector Vector) (cons 'Bytevector Bytevector)

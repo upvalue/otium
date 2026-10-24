@@ -118,7 +118,7 @@ The library calls five generics:
 
 ```scheme
 (defgeneric (ui/build widget))                ; return child descriptions
-(defgeneric (ui/layout-style widget))         ; layout properties table
+(defgeneric (ui/layout-style widget))         ; LayoutStyle record or custom style table
 (defgeneric (ui/measure widget limits))       ; preferred size within limits
 (defgeneric (ui/paint widget g bounds))       ; draw into bounds
 (defgeneric (ui/handle-event widget event))   ; return :handled to stop it
@@ -741,3 +741,21 @@ service. The remaining drawing primitives below are still proposed. See
         :handled)
       nil))
 ```
+
+### Temporary layout values and descriptions
+
+Built-in layout methods return `ui/LayoutStyle` records. Custom methods may
+still return tables. Measurement receives an immutable `ui/MeasureLimits`
+record with width, height, width-mode, height-mode and scale fields. Use
+`(ui/limit-ref limits :width fallback)` for unconstrained dimensions, whose
+record fields are nil. Only leaves with a specialized measurement method are
+measured; layout refreshes the method list each pass to follow live reloads.
+
+Treat descriptions and their options as fixed once constructed. `ui/new`
+accepts nil for empty options, shares nonempty framework options with the
+caller, and stores nil when there are no framework options. Helpers such as
+`row` and `label` do not mutate the caller's options.
+
+Handled input requests a view update before the next event or frame. Hover
+changes and expose events only repaint; unhandled input with unchanged hover
+and focus does not request a frame.

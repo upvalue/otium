@@ -1,0 +1,57 @@
+;; Allocation per phase for a warmed headless view with two idle terminals.
+;; ./otium --runtime=chez -L . manse/bench-alloc.ot
+(require otium.memory :as memory)
+(require otium.ui :as ui)
+(require otium.ui.gpu :as gpu)
+(require otium.ui.native :as native)
+(require manse.workspace :as workspace)
+(require manse.apps :as apps)
+(require manse.strip :as strip)
+(require manse.theme :as theme)
+
+(def window nil)
+
+(def (average thunk)
+  (thunk)
+  (let ((start (memory/allocated)))
+    (dotimes (i 20)
+      (thunk))
+    (/ (- (memory/allocated) start) 20.0)))
+
+(def (frame!)
+  (ui/reconcile! (window :tree) ((window :view)))
+  (gpu/invalidate-paint! (window :tree))
+  (gpu/layout! (window :tree) (window :width) (window :height) (window :scale))
+  (gpu/paint! (window :tree) (window :renderer) (window :width) (window :height) theme/background)
+  (native/gpu-frame (window :renderer) ""))
+
+(unwind-protect
+  (begin
+    (put! workspace/workspace :apps (apps/registry) :strip (strip/strip) :shell "/bin/sh")
+    (workspace/new-terminal!)
+    (workspace/new-terminal!)
+    (strip/focus-move! (workspace/workspace :strip) -2)
+    (set! window
+          (ui/open {:title "Allocation benchmark"
+                    :width 900
+                    :height 800
+                    :headless #t
+                    :scale 2
+                    :config "build/ui-config.ot"
+                    :background-color theme/background}))
+    (put! workspace/workspace :window window)
+    (ui/set-view! window (fn () (workspace/view (window :tree))))
+    (dotimes (i 5)
+      (frame!))
+    (let ((view-bytes (average (window :view)))
+          (reconcile-bytes (average (fn () (ui/reconcile! (window :tree) ((window :view)))))))
+      (println :view view-bytes :reconcile-only (- reconcile-bytes view-bytes)))
+    (println :layout (average (fn () (gpu/layout! (window :tree) 900 800 2))))
+    (println :paint (average (fn ()
+                               (gpu/invalidate-paint! (window :tree))
+                               (gpu/paint! (window :tree) (window :renderer) 900 800 theme/background)
+                               (native/gpu-frame (window :renderer) ""))))
+    (println :full-frame (average frame!)))
+  (when window (ui/close! window))
+  (for-each (fn (entry) (apps/remove! (workspace/workspace :apps) (entry :id)))
+            (copy ((workspace/workspace :apps) :entries))))

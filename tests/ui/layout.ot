@@ -27,7 +27,7 @@
   (h :init 20))
 
 (defmethod (ui/measure (w Box) limits)
-  (check "constrained width mode" #t (not (nil? (get limits :width-mode))))
+  (check "constrained width mode" #t (not (nil? (ui/limit-ref limits :width-mode))))
   (ui/size (w :w) (w :h)))
 
 (defmethod (ui/layout-style (w Box))
@@ -40,16 +40,16 @@
 
 (defmethod (ui/measure (w Wrapping) limits)
   (for-each (fn (axis)
-              (let ((mode (get limits
-                               (if (eq? axis :width)
-                                   :width-mode
-                                   :height-mode))))
+              (let ((mode (ui/limit-ref limits
+                                        (if (eq? axis :width)
+                                            :width-mode
+                                            :height-mode))))
                 (check "constraint value present iff defined"
                        (not (eq? mode :undefined))
-                       (not (nil? (get limits axis))))))
+                       (not (nil? (ui/limit-ref limits axis))))))
             [:width :height])
-  (put! modes (get limits :width-mode) #t)
-  (let ((width (get limits :width 200)))
+  (put! modes (ui/limit-ref limits :width-mode) #t)
+  (let ((width (ui/limit-ref limits :width 200)))
     (ui/size (min width 200)
              (if (< width 150)
                  60
@@ -118,6 +118,13 @@
              (ui/size 60 30)))
     (gpu/layout! tree 300 200)
     (near "redefined measure used" 30 ((c :bounds) :height))
+    (remove-method! ui/measure (list Box Object))
+    (gpu/layout! tree 300 200)
+    (near "removed measure no longer supplies intrinsic height" 0 ((c :bounds) :height))
+    (eval '(defmethod (ui/measure (w Box) limits)
+             (ui/size 60 30)))
+    (gpu/layout! tree 300 200)
+    (near "added measure is detected on an existing node" 30 ((c :bounds) :height))
     (check "negative root rejected" #t (fails? (fn () (gpu/layout! tree -1 200))))
     (ui/reconcile! tree (ui/column {:padding -1}))
     (check "invalid style rejected" #t (fails? (fn () (gpu/layout! tree 300 200))))

@@ -261,7 +261,7 @@ Otium has classes with fixed slots and generic functions that dispatch on the cl
   (set! (widget :presses) (+ 1 (widget :presses))))
 ```
 
-You create instances with `make`. Their slots are read by calling the instance, like a table. Methods can be `:around` methods and can use `call-next-method`. A reload keeps class identity and existing methods. See `examples/multimethods/events.ot` and `specs/classes.md`.
+You create instances with `make`. Their slots are read by calling the instance, like a table. Methods can be `:around` methods and can bind the next method with `:next super`, then call `(super arguments ...)`. A reload keeps class identity and existing methods. See `examples/multimethods/events.ot` and `specs/classes.md`.
 
 ## Namespaces and modules
 

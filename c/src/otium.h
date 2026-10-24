@@ -670,7 +670,6 @@ typedef struct ot_ext_type_info {
 typedef struct ot_vm_frame {
   otv function;
   otv env;
-  otv next_method;
   size_t ip;
   size_t base;
   size_t local_count;
@@ -729,7 +728,6 @@ struct ot_state {
   otv object_class;
   otv update_instance;
   otv input_port_param, output_port_param, error_port_param, open_ports;
-  otv next_method;
   uint64_t class_epoch;
   void* ffi_state;
   otv exts;

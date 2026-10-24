@@ -1238,13 +1238,6 @@
       "chez"
     ]
   },
-  "call-next-method": {
-    "text": "(call-next-method [argument ...])\nCall the next applicable method, using the current arguments unless replacements are supplied. Raises an error if no next method exists or the next candidates are ambiguous.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
-  },
   "with-slots": {
     "text": "(with-slots object (slot ...) body ...)\nEvaluate object once and bind local symbol macros that read and write its slots. Each read sees the current value; set! on a slot name writes through to the object.",
     "runtimes": [
@@ -1274,14 +1267,7 @@
     ]
   },
   "defmethod": {
-    "text": "(defmethod [:around] (generic parameter ...) body ...)\nAdd or replace a method by qualifier and signature. Parameters are names or (name Class). Dispatch follows abstract parents; incomparable applicable methods are ambiguous. Around methods wrap primary methods.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
-  },
-  "next-method?": {
-    "text": "(next-method?)\nReturn whether the current method has remaining applicable methods. False outside a method; an ambiguous next step still counts as remaining.",
+    "text": "(defmethod [:around] (generic parameter ...) [:next name] body ...)\nAdd or replace a method by qualifier and signature. :next binds a lexical procedure for the remaining methods, or #f when none remain. Pass every argument explicitly. Around methods wrap primary methods; incomparable applicable methods are ambiguous.",
     "runtimes": [
       "c",
       "chez"

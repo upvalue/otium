@@ -201,10 +201,41 @@
           [(number? x) (if (and (real? x) (nan? x)) 17 (equal-hash (if (= x 0) 0 x)))]
           [else (equal-hash x)]))
   (define-record-type (table-value make-table table?) (fields data (mutable order)))
-  (define (table . xs)
-    (unless (even? (length xs)) (error 'table "expected key/value pairs"))
-    (let ([t (make-table (make-hashtable key-hash key=?) '())])
-      (unless (null? xs) (apply put! t xs)) t))
+  (define table
+    (case-lambda
+      [()
+       (let ([t (make-table (make-hashtable key-hash key=?) '())])
+         t)]
+      [(k0 v0)
+       (let ([t (make-table (make-hashtable key-hash key=?) '())])
+         (put-one! t k0 v0)
+         t)]
+      [(k0 v0 k1 v1)
+       (let ([t (make-table (make-hashtable key-hash key=?) '())])
+         (put-one! t k0 v0)
+         (put-one! t k1 v1)
+         t)]
+      [(k0 v0 k1 v1 k2 v2)
+       (let ([t (make-table (make-hashtable key-hash key=?) '())])
+         (put-one! t k0 v0)
+         (put-one! t k1 v1)
+         (put-one! t k2 v2)
+         t)]
+      [(k0 v0 k1 v1 k2 v2 k3 v3)
+       (let ([t (make-table (make-hashtable key-hash key=?) '())])
+         (put-one! t k0 v0)
+         (put-one! t k1 v1)
+         (put-one! t k2 v2)
+         (put-one! t k3 v3)
+         t)]
+      [xs
+       (unless (even? (length xs)) (error 'table "expected key/value pairs"))
+       (let ([t (make-table (make-hashtable key-hash key=?) '())])
+         (let loop ([xs xs])
+           (unless (null? xs)
+             (put-one! t (car xs) (cadr xs))
+             (loop (cddr xs))))
+         t)]))
   ;; Fixed arities keep lookups, which run per call in tight loops, from
   ;; packing their arguments into a list.
   (define get

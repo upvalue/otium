@@ -165,6 +165,8 @@ Returns true when the hovered nodes changed."
                                (node-path node)
                                (array-to-list (ui/children tree)))))
                  (if (eq? (action! path event) :handled)
-                     (set! (focus :drop-text?) #t)
+                     (begin
+                       (set! (focus :drop-text?) #t)
+                       :handled)
                      (bubble! path event))))))
       (else nil))))

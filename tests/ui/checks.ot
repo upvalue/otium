@@ -497,4 +497,13 @@
   (check "interactive Box press" :handled (ui/handle-event row {:kind :press}))
   (check "interactive Box invokes callback" 1 presses))
 
+(let ((opts {:focusable #t :width 20})
+      (d (ui/new ui/Box opts)))
+  (check "description shares options" #t (eq? opts (d :options)))
+  (check "empty description options are nil" nil ((ui/new ui/Box nil) :options))
+  (check "property-only description options are nil" nil ((ui/new ui/Box {:width 20}) :options))
+  (ui/label opts "unchanged")
+  (ui/row opts)
+  (check "helpers preserve caller options" '(:focusable :width) (array-to-list (keys opts))))
+
 (report "ui")

@@ -102,21 +102,26 @@
   '(object))
 
 (defmethod (paint (w Widget))
-  (cons 'widget (call-next-method)))
+  :next super
+  (cons 'widget (super w)))
 
 (defmethod (paint (w Control))
-  (cons 'control (call-next-method)))
+  :next super
+  (cons 'control (super w)))
 
 (defmethod (paint (w Button))
-  (cons 'button (call-next-method)))
+  :next super
+  (cons 'button (super w)))
 
 (check "ancestor method order" '(button control widget object) (paint b))
 
 (defmethod :around (paint (w Widget))
-  (cons 'outer-widget (call-next-method)))
+  :next super
+  (cons 'outer-widget (super w)))
 
 (defmethod :around (paint (w Button))
-  (cons 'outer-button (call-next-method)))
+  :next super
+  (cons 'outer-button (super w)))
 
 (check "around outside primaries" '(outer-button outer-widget button control widget object) (paint b))
 
@@ -129,7 +134,8 @@
 (check "cache invalidated on remove" '(outer-widget button control widget object) (paint b))
 
 (defmethod (paint (w Button))
-  (cons 'replacement (call-next-method)))
+  :next super
+  (cons 'replacement (super w)))
 
 (check "cache invalidated on replacement" '(outer-widget replacement control widget object) (paint b))
 
@@ -141,21 +147,21 @@
   '(root))
 
 (check "Object replaces unspecialized method" '(root) (paint 3))
-(check "next outside method" #f (next-method?))
 (check "call-next outside method" #t (fails? '(call-next-method)))
 
 (defgeneric (last-method x))
 
 (defmethod (last-method x)
-  (next-method?))
+  :next super
+  (and super #t))
 
 (check "no next in last method" #f (last-method b))
 
 (defmethod (last-method x)
-  (call-next-method))
+  :next super
+  (super x))
 
 (check "call-next without next fails" #t (fails? '(last-method b)))
-(check "next context restored after error" #f (next-method?))
 
 (defgeneric (replacement-args x))
 
@@ -163,7 +169,8 @@
   (+ x 1))
 
 (defmethod (replacement-args (x Number))
-  (call-next-method 10))
+  :next super
+  (super 10))
 
 (check "call-next replacement args" 11 (replacement-args 1))
 
@@ -197,7 +204,8 @@
 (check "most specific resolves ambiguity" 'exact (handle b p))
 
 (defmethod (handle (w Button) (e Pointer))
-  (call-next-method))
+  :next super
+  (super w e))
 
 (check "ambiguity below best" #t (fails? '(handle b p)))
 
@@ -260,7 +268,8 @@
 (defgeneric (nested-leaf x))
 
 (defmethod (nested-leaf x)
-  (next-method?))
+  :next super
+  (and super #t))
 
 (defgeneric (nested-chain x))
 
@@ -268,17 +277,17 @@
   'base)
 
 (defmethod (nested-chain (x Number))
-  (list (next-method?) (nested-leaf x) (next-method?) (call-next-method)))
+  :next super
+  (list (and super #t) (nested-leaf x) (and super #t) (super x)))
 
 (check "nested method restores outer next" '(#t #f #t base) (nested-chain 1))
-(check "nested method leaves no next" #f (next-method?))
 (check "replacement arity checked"
        #t
        (fails? '(begin
                   (defmethod (replacement-args (x Number))
-                    (call-next-method 1 2))
+                    :next super
+                    (super 1 2))
                   (replacement-args 1))))
-(check "next restored after replacement error" #f (next-method?))
 
 (def default-count 0)
 
@@ -340,7 +349,8 @@
   'primary)
 
 (defmethod :around (inspect-method (x Number))
-  (call-next-method))
+  :next super
+  (super x))
 
 (check "method introspection count" 2 (length (generic-methods inspect-method)))
 (check "method introspection includes qualifiers"
@@ -399,5 +409,97 @@
 
 (check "is-a? follows changed ancestry" #t (is-a? membership-value MembershipOther))
 (check "is-a? forgets former ancestry" #f (is-a? membership-value MembershipRoot))
+
+(defgeneric (escape-next x))
+
+(defmethod (escape-next x)
+  :old)
+
+(defmethod (escape-next (x Number))
+  :next super
+  (fn (value) (super value)))
+
+(def escaped (escape-next 1))
+
+(defmethod (escape-next x)
+  :new)
+
+(check "escaped next retains original methods" :old (escaped 2))
+(check "new calls see replacement next" :new ((escape-next 1) 2))
+(check "next binder cannot duplicate argument"
+       #t
+       (fails? '(defmethod (escape-next x)
+                  :next x
+                  x)))
+(check "next binder must be local"
+       #t
+       (fails? '(defmethod (escape-next x)
+                  :next other/super
+                  x)))
+(check "next binder requires a body"
+       #t
+       (fails? '(defmethod (escape-next x)
+                  :next super)))
+(check "next binder must be a name"
+       #t
+       (fails? '(defmethod (escape-next x)
+                  :next 3
+                  x)))
+
+(defgeneric (zero-arguments))
+
+(defmethod (zero-arguments)
+  :next super
+  super)
+
+(check "zero-arity next is false" #f (zero-arguments))
+(check "generic rejects excess arguments" #t (fails? '(zero-arguments 1)))
+
+(defgeneric (many-arguments a b c d e))
+
+(defmethod (many-arguments a b c d e)
+  e)
+
+(defmethod (many-arguments a b c d (e Number))
+  :next super
+  (+ 1 (super a b c d e)))
+
+(check "dispatch beyond fixed fast arities" 6 (many-arguments 1 2 3 4 5))
+(check "generic rejects missing arguments" #t (fails? '(many-arguments 1)))
+
+(defclass ConstructorPairs
+  a
+  b
+  c
+  d
+  (e :init 5))
+
+(check "constructor duplicate key last wins" 9 ((make ConstructorPairs :a 1 :b 2 :c 3 :d 4 :a 9) :a))
+(check "constructor fast arity defaults" 5 ((make ConstructorPairs :a 1 :b 2 :c 3 :d 4) :e))
+(check "table duplicate key last wins" 2 (get (table :a 1 :a 2) :a))
+(check "table nil removes a preceding key" nil (get (table :a 1 :a nil) :a))
+(check "table fallback preserves insertion order"
+       '(:b :c :d :a)
+       (array-to-list (keys (table :a 1 :b 2 :c 3 :a nil :d 4 :a 5))))
+(check "table rejects unmatched key" #t (fails? '(table :a 1 :b)))
+
+(defgeneric (local-next x))
+
+(defmethod (local-next x)
+  x)
+
+(defmethod (local-next (x Number))
+  :next super
+  (let ((result (super x)))
+    (set! super #f)
+    result))
+
+(check "next binding is local to first invocation" 1 (local-next 1))
+(check "next binding is fresh on next invocation" 2 (local-next 2))
+
+(check "next option requires a binder"
+       #t
+       (fails? '(defmethod (escape-next x)
+                  :next)))
 
 (report "classes")

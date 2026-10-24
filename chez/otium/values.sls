@@ -36,15 +36,42 @@
         (unless (null? rest)
           (when (memq (car rest) (cdr rest)) (error 'defrecord "duplicate field"))
           (loop (cdr rest))))
-      (make-record-descriptor name keys rtd (record-constructor rcd)
+      (make-record-descriptor name keys rtd (fixed-constructor rtd rcd (+ 1 (length fields)))
         (list->vector (map (lambda (i) (record-accessor rtd i)) (iota (length fields))))
         (and (not immutable?)
              (list->vector (map (lambda (i) (record-mutator rtd i)) (iota (length fields))))))))
-  (define (record-new descriptor . values)
+  ;; Chez's generic constructor for a record this wide takes its arguments as
+  ;; a list. A fixed-arity one built from $record allocates only the record.
+  (define (fixed-constructor rtd rcd count)
+    (if (> count record-new-arity)
+        (record-constructor rcd)
+        (let ([vars (map (lambda (i) (string->symbol (format "v~a" i))) (iota count))])
+          (eval `(lambda ,vars (($primitive $record) ',rtd ,@vars)) (environment '(chezscheme))))))
+  (define (check-record-new descriptor count)
     (unless (record-type? descriptor) (error 'record-new "expected record type"))
-    (unless (= (length values) (length (record-descriptor-keys descriptor)))
-      (error 'record-new "wrong field count"))
-    (apply (record-descriptor-constructor descriptor) descriptor values))
+    (unless (= count (vector-length (record-descriptor-readers descriptor)))
+      (error 'record-new "wrong field count")))
+  ;; Clauses for up to record-new-arity fields avoid a rest list.
+  (define-syntax define-record-new
+    (lambda (x)
+      (syntax-case x ()
+        [(_ name limit)
+         (with-syntax ([(clause ...)
+                        (map (lambda (count)
+                               (with-syntax ([(v ...) (generate-temporaries (iota count))] [count count])
+                                 #'[(descriptor v ...)
+                                    (check-record-new descriptor count)
+                                    ((record-descriptor-constructor descriptor) descriptor v ...)]))
+                             (iota (+ 1 (syntax->datum #'limit))))])
+           #'(define name
+               (case-lambda
+                 clause ...
+                 [(descriptor . values)
+                  (check-record-new descriptor (length values))
+                  (apply (record-descriptor-constructor descriptor) descriptor values)])))])))
+  ;; Arity counts the descriptor, which is the record's first field.
+  (define record-new-arity 17)
+  (define-record-new record-new 16)
   (define (record-index descriptor key)
     (let loop ([keys (record-descriptor-keys descriptor)] [i 0])
       (cond [(null? keys) (error 'record-ref "unknown record field" key)]

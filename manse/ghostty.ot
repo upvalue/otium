@@ -7,6 +7,7 @@
 (require otium.ffi :as ffi)
 (require otium.process :as process)
 (require otium.json :as json)
+(require manse.pty :as pty)
 
 ;; GhosttyResult
 (def SUCCESS 0)
@@ -141,6 +142,15 @@
                  ((private %cells-next) "ghostty_render_state_row_cells_next" (pointer) bool #f)
                  ((private %cell-get) "ghostty_render_state_row_cells_get" (pointer int pointer) int #f))
 
+;; manse/native/cells.c walks a row of cells in one call.
+(ffi/defbindings cells-library
+                 %load-cells!
+                 ((private %row-runs)
+                  "manse_row_runs"
+                  (pointer pointer u32 u32 pointer int pointer int pointer int pointer)
+                  int
+                  #f))
+
 (def (library-candidates)
   "MANSE_GHOSTTY_LIBRARY when set, with no fallback; otherwise loader names and Nix profiles."
   (let ((override (process/getenv "MANSE_GHOSTTY_LIBRARY")))
@@ -164,6 +174,7 @@
   (unless library
     (%load! (library-candidates))
     (set! scratch (ffi/alloc 'u64 1)))
+  (unless cells-library (%load-cells! (pty/native-candidates)))
   (when (eq? (get (build-info) :optimize) :debug)
     (process/write-error "manse: libghostty-vt is a debug build and will be slow\n"))
   library)
@@ -246,7 +257,8 @@
   (when (term :state) (%state-free (term :state)))
   (when (term :handle) (%terminal-free (term :handle)))
   (when (term :write-pty) (ffi/free-callback! (term :write-pty)))
-  (for-each (fn (k) (when (term k) (ffi/free! (term k)))) '(:rgb :codepoints :style :utf8 :utf8-buffer)))
+  (for-each (fn (k) (when (term k) (ffi/free! (term k))))
+            '(:rgb :codepoints :style :utf8 :utf8-buffer :run-text :runs :spans :run-counts)))
 
 (def- (free-keyboard! term)
   (when (term :key-encoder) (%key-encoder-free (term :key-encoder)))
@@ -481,6 +493,58 @@
              (and (or styled? (= n 0)) (cell-rgba term CELL-BG-COLOR))
              (and styled? (ffi/ref (term :style) 'bool inverse-offset))))
         (loop (+ x 1))))))
+
+;; Buffers for manse_row_runs: a row's UTF-8, and up to capacity runs and
+;; spans.
+(def- (runs-buffers! term capacity text-capacity)
+  (for-each (fn (k) (when (term k) (ffi/free! (term k)))) '(:run-text :runs :spans :run-counts))
+  (put! term
+        :run-capacity capacity
+        :run-text-capacity text-capacity
+        :run-text (ffi/alloc 'u8 text-capacity)
+        :runs (ffi/alloc 'u32 (* 4 capacity))
+        :spans (ffi/alloc 'u32 (* 3 capacity))
+        :run-counts (ffi/alloc 'i32 3)))
+
+(def (each-row-run term default-fg default-bg span! run!)
+  "For the current row, call (span! start end bg) for each stretch of cells
+sharing a background, then (run! x text fg) for each stretch of text sharing a
+foreground. Colours follow each-row-cell, with defaults applied; spans cover
+cells from start up to end. Returns #f, calling neither, when manse-native was
+built without libghostty-vt."
+  ;; Lazy allocation also serves terminals that survived a reload.
+  (unless (term :run-text) (runs-buffers! term 256 4096))
+  (let ((result (%row-runs (term :row-iter)
+                           (term :cells)
+                           default-fg
+                           default-bg
+                           (term :run-text)
+                           (term :run-text-capacity)
+                           (term :runs)
+                           (term :run-capacity)
+                           (term :spans)
+                           (term :run-capacity)
+                           (term :run-counts))))
+    (cond
+      ((= result -1) #f)
+      ((= result -2)
+       (runs-buffers! term (* 2 (term :run-capacity)) (* 2 (term :run-text-capacity)))
+       (each-row-run term default-fg default-bg span! run!))
+      ((< result 0) (error "ghostty: row runs failed" result))
+      (else (let ((counts (term :run-counts))
+                  (runs (term :runs))
+                  (spans (term :spans))
+                  (text (ffi/read-utf8-bytes (term :run-text) (ffi/ref (term :run-counts) 'i32 2))))
+              (dotimes (i (ffi/ref counts 'i32 1))
+                (span! (ffi/ref spans 'u32 (* 3 i))
+                       (ffi/ref spans 'u32 (+ 1 (* 3 i)))
+                       (ffi/ref spans 'u32 (+ 2 (* 3 i)))))
+              (dotimes (i (ffi/ref counts 'i32 0))
+                (let ((start (ffi/ref runs 'u32 (+ 1 (* 4 i)))))
+                  (run! (ffi/ref runs 'u32 (* 4 i))
+                        (substring text start (+ start (ffi/ref runs 'u32 (+ 2 (* 4 i)))))
+                        (ffi/ref runs 'u32 (+ 3 (* 4 i))))))
+              #t)))))
 
 (def (grid term)
   "The viewport as an array of rows of cell tables. For tests; allocates per cell."

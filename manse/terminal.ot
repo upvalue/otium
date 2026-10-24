@@ -209,6 +209,22 @@
     (record-time! session (- (time/seconds) start))))
 
 (def (paint-row session g area colors)
+  ;; Backgrounds first, then text, from one native walk of the row.
+  (let ((cw (session :cell-w))
+        (ch (session :cell-h))
+        (x0 (area :x))
+        (py (area :y)))
+    (unless (g/each-row-run (session :term)
+                            (rgba (colors :foreground) 255)
+                            (rgba (colors :background) 255)
+                            (fn (start end bg)
+                              (let ((left (round (+ x0 (* start cw)))))
+                                (gfx/fill g left py (- (round (+ x0 (* end cw))) left) ch bg)))
+                            (fn (x text fg) (text-run! g (+ x0 (* x cw)) py text fg)))
+      (paint-row-cells session g area colors))))
+
+;; Without manse-native's row walker, walk the cells from Otium.
+(def (paint-row-cells session g area colors)
   (let ((cw (session :cell-w))
         (ch (session :cell-h))
         (x0 (area :x))

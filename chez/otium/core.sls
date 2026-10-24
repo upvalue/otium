@@ -182,6 +182,11 @@
   (define (ot-equal? a b)
     (cond [(eq? a b) #t]
           [(pair? a) (and (pair? b) (ot-equal? (car a) (car b)) (ot-equal? (cdr a) (cdr b)))]
+          [(array? a)
+           (and (array? b) (= (length a) (length b))
+                (let loop ([i 0])
+                  (or (= i (length a))
+                      (and (ot-equal? (get a i) (get b i)) (loop (+ i 1))))))]
           [(or (bytevector? a) (bytevector? b)) #f]
           [else (equal? a b)]))
   (define (int? x) (and (integer? x) (exact? x)))

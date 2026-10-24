@@ -49,8 +49,8 @@
     (iterate n (bench-hide n (fn () (equal? x y))))))
 
 (def (equality-benchmark4 n)
-  (let ((x (array->list (bench-make-array n (make-test-tree2 3))))
-        (y (array->list (bench-make-array n (make-test-tree2 3)))))
+  (let ((x (array-to-list (bench-make-array n (make-test-tree2 3))))
+        (y (array-to-list (bench-make-array n (make-test-tree2 3)))))
     (iterate n (bench-hide n (fn () (equal? x y))))))
 
 (def (equality-benchmark5 n iterations)

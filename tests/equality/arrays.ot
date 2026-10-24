@@ -1,0 +1,34 @@
+(require otium.test :refer (check report))
+
+(check #t (equal? [] []))
+(check #t (equal? [1 [2] '(3 . 4)] [1 [2] '(3 . 4)]))
+(check #t (equal? (list [1]) (list [1])))
+(check #f (equal? [1] [1 2]))
+(check #f (equal? [1 2] [1]))
+(check #f (equal? [[1]] [[2]]))
+(check #f (equal? [1] [1.0]))
+(check #f (equal? [1] '(1)))
+(check #f (equal? '(1) [1]))
+(check #f (eq? [1] [1]))
+(check #t (contains? [[1]] [1]))
+
+;; Compare live elements, ignoring spare capacity and removed elements.
+(let ((a [1]))
+  (push! a 2 3 4)
+  (pop! a)
+  (pop! a)
+  (pop! a)
+  (check #t (equal? a [1]))
+  (put! a 0 2)
+  (check #f (equal? a [1])))
+
+;; Mutable table keys retain identity, including inside pair keys.
+(let ((a [1]) (b [1]) (t (table)))
+  (put! t a :array)
+  (put! t (list a) :pair)
+  (check :array (get t a))
+  (check nil (get t b))
+  (check :pair (get t (list a)))
+  (check nil (get t (list b))))
+
+(report "array equality")

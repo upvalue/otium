@@ -486,7 +486,13 @@ bool ot_equal(ots* state, otv left, otv right, bool structural) {
       return structural && ot_equal(state, as_pair(left)->car, as_pair(right)->car, true) &&
              ot_equal(state, as_pair(left)->cdr, as_pair(right)->cdr, true);
     case OBJ_ARRAY: {
-      return false;
+      ot_array_obj* a = as_array(left);
+      ot_array_obj* b = as_array(right);
+      if (!structural || a->length != b->length) return false;
+      for (size_t i = 0; i < a->length; i++)
+        if (!ot_equal(state, as_slots(a->slots)->values[i], as_slots(b->slots)->values[i], true))
+          return false;
+      return true;
     }
     default: return false;
   }
@@ -494,6 +500,9 @@ bool ot_equal(ots* state, otv left, otv right, bool structural) {
 
 static bool key_equal(ots* state, otv left, otv right) {
   if (left == right) return true;
+  if (is_type(left, OBJ_PAIR))
+    return is_type(right, OBJ_PAIR) && key_equal(state, as_pair(left)->car, as_pair(right)->car) &&
+           key_equal(state, as_pair(left)->cdr, as_pair(right)->cdr);
   if (is_type(left, OBJ_ARRAY) || is_type(left, OBJ_TABLE) || is_type(left, OBJ_BUFFER) ||
       is_type(left, OBJ_FUNCTION) || is_type(left, OBJ_NAT) || is_type(left, OBJ_EXT) ||
       is_type(left, OBJ_BYTEVECTOR))

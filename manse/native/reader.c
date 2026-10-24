@@ -20,7 +20,7 @@
 #include <unistd.h>
 
 enum {
-  BATCHES = 4,
+  BATCHES = 16,
   BATCH_CAPACITY = 64 * 1024,
   // Less than this is handed over at once, so typing and prompts stay prompt.
   BRIDGE_THRESHOLD = 1024,

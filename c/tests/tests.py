@@ -172,6 +172,9 @@ def server(t):
                    frame('(restart-case (error "server") (use-value (v) v))') + frame('(+ 3 4)'))
     t.expect(result, contains=['3\n\x1eot> ', 'error:', '7\n\x1eot> '], absent=['restart #?'])
     t.check(result.stdout.count('\x1eot> ') == 3 and result.stderr == '', result)
+    source = '(length "' + 'x' * 8192 + '")'
+    result = t.run([OTIUM, '--c.server'], stdin=frame(source) + '(+ 20\n 22)\n\x1f')
+    t.expect(result, stdout='8192\n\x1eot> 42\n\x1eot> ', stderr='')
 
 
 @test('c server interrupt')
@@ -180,6 +183,16 @@ def server_interrupt(t):
     # A deadline, not a latency bound: the server shares the machine with the
     # other tests, and collecting at every allocation is much slower.
     limit = 30 if t.stress else 10
+    running = t.scratch / 'running'
+    marker = json.dumps(str(running))
+
+    def wait_running():
+        deadline = time.monotonic() + limit
+        while not running.exists():
+            t.check(process.poll() is None, 'server exited before entering the loop')
+            t.check(time.monotonic() < deadline, 'server did not enter the loop')
+            time.sleep(0.001)
+        running.unlink()
 
     def send(source):
         process.stdin.write(frame(source).encode())
@@ -205,15 +218,19 @@ def server_interrupt(t):
 
     send('(+ 1 1)')
     expect_response('2\n\x1eot> ')
-    send('(begin (def counter 0) (def cleaned #f) '
-         '(unwind-protect (while #t (set! counter (+ counter 1))) (set! cleaned #t)))')
-    time.sleep(0.05)
+    send('(begin (def counter 0) (def cleaned #f) (def announce #t) '
+         '(unwind-protect (while #t (set! counter (+ counter 1)) '
+         f'(when announce (set! announce #f) (write-file {marker} "ready"))) '
+         '(set! cleaned #t)))')
+    wait_running()
     process.send_signal(signal.SIGINT)
     expect_response('paused\n\x1eot> ')
     send("(not (nil? (find-restart 'continue)))")
     expect_response('#t\n\x1eot> ')
+    send('(begin (set! announce #t) #t)')
+    expect_response('#t\n\x1eot> ')
     send("(invoke-restart 'continue)")
-    time.sleep(0.05)
+    wait_running()
     t.check(process.poll() is None, 'server exited after continue')
     process.send_signal(signal.SIGINT)
     expect_response('paused\n\x1eot> ')
@@ -224,12 +241,15 @@ def server_interrupt(t):
     send('counter')
     counter = response()
     t.check(int(counter.splitlines()[0]) > 0, counter)
-    send('(while #t nil)')
-    time.sleep(0.05)
-    process.send_signal(signal.SIGINT)
-    expect_response('paused\n\x1eot> ')
-    process.send_signal(signal.SIGINT)
-    expect_response('interrupted\n\x1eot> ')
+    # Send the second interrupt as soon as the paused prompt is visible. The
+    # server may not yet have entered its input wait when this signal arrives.
+    for _ in range(20):
+        send(f'(begin (write-file {marker} "ready") (while #t nil))')
+        wait_running()
+        process.send_signal(signal.SIGINT)
+        expect_response('paused\n\x1eot> ')
+        process.send_signal(signal.SIGINT)
+        expect_response('interrupted\n\x1eot> ')
     send('(+ 20 22)')
     expect_response('42\n\x1eot> ')
     send('(quit)')

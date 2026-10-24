@@ -17,6 +17,7 @@ static const unsigned ot_dev_src_len = sizeof ot_dev_src;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -684,19 +685,48 @@ static void finish_server_response(void) {
   fflush(stdout);
 }
 
-static bool read_server_request(bytes* request) {
-  char line[4096];
-  while (fgets(line, sizeof line, stdin) != NULL) {
-    size_t length = strlen(line);
-    bool end =
-        (length == 2 && line[0] == '\x1f' && line[1] == '\n') || (length == 1 && line[0] == '\x1f');
-    if (!end) {
-      bytes_append(request, line, length);
-      continue;
+static bool read_server_request(bytes* request, bool paused) {
+  static char input[4096];
+  static size_t at, end;
+  size_t line_start = request->length;
+  bool complete = false;
+  sigset_t blocked, previous;
+  sigemptyset(&blocked);
+  sigaddset(&blocked, SIGINT);
+  sigprocmask(SIG_BLOCK, &blocked, &previous);
+  while (!paused || !saw_interrupt) {
+    if (at == end) {
+      fd_set readers;
+      FD_ZERO(&readers);
+      FD_SET(STDIN_FILENO, &readers);
+      // Unblock SIGINT atomically with the wait, including signals received
+      // after the paused prompt but before this function was entered.
+      if (pselect(STDIN_FILENO + 1, &readers, NULL, NULL, NULL, &previous) <= 0) break;
+      ssize_t count = read(STDIN_FILENO, input, sizeof input);
+      if (count <= 0) {
+        if (count == 0 && request->length == line_start + 1 &&
+            request->data[line_start] == '\x1f') {
+          request->length = line_start;
+          complete = true;
+        }
+        break;
+      }
+      at = 0;
+      end = (size_t)count;
     }
-    return true;
+    char ch = input[at++];
+    bytes_append(request, &ch, 1);
+    if (ch == '\n') {
+      if (request->length == line_start + 2 && request->data[line_start] == '\x1f') {
+        request->length = line_start;
+        complete = true;
+        break;
+      }
+      line_start = request->length;
+    }
   }
-  return false;
+  sigprocmask(SIG_SETMASK, &previous, NULL);
+  return complete;
 }
 
 static ot_interrupt_action run_server_break(ots* state, void* userdata) {
@@ -706,7 +736,7 @@ static ot_interrupt_action run_server_break(ots* state, void* userdata) {
   finish_server_response();
 
   bytes request = {0};
-  while (read_server_request(&request)) {
+  while (read_server_request(&request, true)) {
     if (request.length != 0) {
       otv result;
       if (ot_eval_src(state, request.data, request.length, "<server>", &result)) {
@@ -723,7 +753,6 @@ static ot_interrupt_action run_server_break(ots* state, void* userdata) {
     request.length = 0;
     finish_server_response();
   }
-  clearerr(stdin);
   ot_host_free(request.data);
   return OT_INTERRUPT_ABORT;
 }
@@ -735,7 +764,7 @@ static void run_server(ots* state) {
   if (!ot_eval_src(state, initialize, strlen(initialize), "<server>", &initialized)) return;
   bytes request = {0};
   ot_set_interrupt_hook(state, run_server_break, NULL);
-  while (read_server_request(&request)) {
+  while (read_server_request(&request, false)) {
     bool stop = false;
     if (request.length != 0) {
       otv result;

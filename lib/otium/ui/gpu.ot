@@ -63,50 +63,105 @@
              (or (and (not (eq? (car signature) ui/Widget)) (class-subtype? type (car signature)))
                  (loop (cdr methods))))))))
 
-(def- (sync-node! node pass)
+(def- style-fields '(:width :height :grow :padding :padding-x :padding-y :align-items :gap :row :center :scroll))
+
+(def- (same-style? a b)
+  ;; LayoutStyle records compare by identity under equal?, so compare fields.
+  (cond
+    ((or (nil? a) (nil? b)) #f)
+    ((eq? a b) #t)
+    ((and (record? a) (record? b))
+     (let loop ((fields style-fields))
+       (or (null? fields) (and (equal? (a (car fields)) (b (car fields))) (loop (cdr fields))))))
+    (else (equal? a b))))
+
+(def- (same-nodes? a b)
+  (or (eq? a b)
+      (and a
+           b
+           (= (length a) (length b))
+           (let loop ((i 0)) (or (= i (length a)) (and (eq? (get a i) (get b i)) (loop (+ i 1))))))))
+
+(def- (push-style! p s width height shrink?)
+  (unless (native/node-style p
+                             width
+                             height
+                             (ui/style-ref s :grow 0)
+                             (ui/style-ref s :padding 0)
+                             (ui/style-ref s :gap 0)
+                             (if (ui/style-ref s :row #f)
+                                 1
+                                 0))
+    (error "Invalid widget layout style"))
+  (unless (native/node-padding p
+                               (or (ui/style-ref s :padding-x nil) (ui/style-ref s :padding 0))
+                               (or (ui/style-ref s :padding-y nil) (ui/style-ref s :padding 0)))
+    (error "Invalid widget padding"))
+  (native/node-align p
+                     (let ((align (ui/style-ref s :align-items :stretch)))
+                       (cond
+                         ((eq? align :stretch) 0)
+                         ((eq? align :start) 1)
+                         ((eq? align :center) 2)
+                         ((eq? align :end) 3)
+                         (else (error "Unknown :align-items" align)))))
+  (native/node-center p (ui/style-ref s :center #f))
+  (native/node-scroll p (ui/style-ref s :scroll #f))
+  (native/node-shrink p shrink?))
+
+;; Send only what changed since the last layout. Yoga keeps measurements and
+;; layout for nodes that stay clean, so an unchanged tree lays out in one pass
+;; with no measure queries.
+(def- (sync-node! node pass shrink?)
   (unless (node :layout)
     (let ((p (allocate-node)))
       (set! (node :layout) p)
       (set! (node :release-layout) (fn () (native/node-free p)))))
   (let ((p (node :layout))
-        (w (ui/instance node)))
-    (native/node-clear p)
-    ;; Remove the old leaf callback before adding children.
-    (native/node-intrinsic p 0 0 #f)
-    (let ((s (ui/layout-style w)))
-      (unless (native/node-style p
-                                 (eased-size! node :width (ui/style-ref s :width -1) pass)
-                                 (eased-size! node :height (ui/style-ref s :height -1) pass)
-                                 (ui/style-ref s :grow 0)
-                                 (ui/style-ref s :padding 0)
-                                 (ui/style-ref s :gap 0)
-                                 (if (ui/style-ref s :row #f)
-                                     1
-                                     0))
-        (error "Invalid widget layout style"))
-      (unless (native/node-padding p
-                                   (or (ui/style-ref s :padding-x nil) (ui/style-ref s :padding 0))
-                                   (or (ui/style-ref s :padding-y nil) (ui/style-ref s :padding 0)))
-        (error "Invalid widget padding"))
-      (native/node-align p
-                         (let ((align (ui/style-ref s :align-items :stretch)))
-                           (cond
-                             ((eq? align :stretch) 0)
-                             ((eq? align :start) 1)
-                             ((eq? align :center) 2)
-                             ((eq? align :end) 3)
-                             (else (error "Unknown :align-items" align)))))
-      (native/node-center p (ui/style-ref s :center #f))
-      (native/node-scroll p (ui/style-ref s :scroll #f)))
-    (if (empty? (ui/children node))
-        (native/node-intrinsic p 0 0 (measured? w (pass :measurers)))
+        (w (ui/instance node))
+        (s (ui/layout-style w))
+        (width (eased-size! node :width (ui/style-ref s :width -1) pass))
+        (height (eased-size! node :height (ui/style-ref s :height -1) pass))
+        (children (ui/children node))
+        (leaf? (empty? children))
+        (measured (and leaf? (measured? w (pass :measurers)))))
+    (unless (and (same-style? s (node :synced-style))
+                 (equal? width (node :synced-width))
+                 (equal? height (node :synced-height))
+                 (eq? shrink? (node :synced-shrink)))
+      (push-style! p s width height shrink?)
+      (set! (node :synced-style) s)
+      (set! (node :synced-width) width)
+      (set! (node :synced-height) height)
+      (set! (node :synced-shrink) shrink?))
+    ;; Yoga refuses a measure callback on a node with children, and children
+    ;; on a node with a callback.
+    (when (and leaf? (not (same-nodes? children (node :synced-children)))) (native/node-clear p))
+    (if measured
+        (let ((key (ui/measure-key w)))
+          (unless (and (node :measured?)
+                       key
+                       (equal? key (node :synced-key))
+                       (eq? (node :synced-generation) (pass :generation)))
+            ;; Drops recorded answers and marks the node dirty.
+            (native/node-intrinsic p 0 0 #t))
+          (set! (node :synced-key) key)
+          (set! (node :synced-generation) (pass :generation)))
+        (when (node :measured?)
+          ;; Removing the callback does not dirty the node; Yoga only lets a
+          ;; node with a callback be marked.
+          (native/node-retry p)
+          (native/node-intrinsic p 0 0 #f)))
+    (set! (node :measured?) measured)
+    (unless leaf?
+      (let ((shrinks? (not (eq? (dispatch-type w) ui/Scroll))))
         (for-each (fn (child)
-                    (sync-node! child pass)
-                    (native/node-shrink (child :layout)
-                                        (and (not (eq? (dispatch-type w) ui/Scroll))
-                                             (not (eq? (dispatch-type (ui/instance child)) ui/Icon))))
-                    (native/node-append p (child :layout)))
-                  (ui/children node)))))
+                    (sync-node! child pass (and shrinks? (not (eq? (dispatch-type (ui/instance child)) ui/Icon)))))
+                  children))
+      (unless (same-nodes? children (node :synced-children))
+        (native/node-clear p)
+        (for-each (fn (child) (native/node-append p (child :layout))) children)))
+    (set! (node :synced-children) children)))
 
 (def- (measure-mode value)
   (cond
@@ -115,31 +170,31 @@
     ((= value native/MEASURE_AT_MOST) :at-most)
     (else (error "Unknown native measurement mode" value))))
 
+;; Answer this pass's queries, then mark the answered leaves dirty so Yoga asks
+;; again and reads the answers. Returns true when any query was answered.
 (def- (answer-queries! node scale)
   (let ((p (node :layout))
         (changed #f))
-    (let loop ((i (native/node-pending p)))
-      (when (= i native/MEASURE_OVERFLOW) (error "Too many Yoga measurement queries"))
-      (unless (or (= i native/MEASURE_DONE) (>= i 0)) (error "Invalid native measurement query index" i))
-      (when (>= i 0)
-        (let ((wm (native/node-query p i native/QUERY_WIDTH_MODE))
-              (hm (native/node-query p i native/QUERY_HEIGHT_MODE))
-              (limits (record-new ui/MeasureLimits
-                                  (unless (= wm native/MEASURE_UNDEFINED) (native/node-query p i native/QUERY_WIDTH))
-                                  (unless (= hm native/MEASURE_UNDEFINED) (native/node-query p i native/QUERY_HEIGHT))
-                                  (measure-mode wm)
-                                  (measure-mode hm)
-                                  scale)))
-          (let ((size (or (ui/measure (ui/instance node) limits) (ui/size 0 0))))
-            (unless (native/node-answer p i (size :width) (size :height)) (error "Invalid widget measurement"))))
-        (set! changed #t)
-        (loop (native/node-pending p))))
+    (when (node :measured?)
+      (let loop ((i (native/node-pending p)))
+        (when (= i native/MEASURE_OVERFLOW) (error "Too many Yoga measurement queries"))
+        (unless (or (= i native/MEASURE_DONE) (>= i 0)) (error "Invalid native measurement query index" i))
+        (when (>= i 0)
+          (let ((wm (native/node-query p i native/QUERY_WIDTH_MODE))
+                (hm (native/node-query p i native/QUERY_HEIGHT_MODE))
+                (limits (record-new ui/MeasureLimits
+                                    (unless (= wm native/MEASURE_UNDEFINED) (native/node-query p i native/QUERY_WIDTH))
+                                    (unless (= hm native/MEASURE_UNDEFINED) (native/node-query p i native/QUERY_HEIGHT))
+                                    (measure-mode wm)
+                                    (measure-mode hm)
+                                    scale)))
+            (let ((size (or (ui/measure (ui/instance node) limits) (ui/size 0 0))))
+              (unless (native/node-answer p i (size :width) (size :height)) (error "Invalid widget measurement"))))
+          (set! changed #t)
+          (loop (native/node-pending p))))
+      (when changed (native/node-retry p)))
     (for-each (fn (child) (when (answer-queries! child scale) (set! changed #t))) (ui/children node))
     changed))
-
-(def- (retry! node)
-  (native/node-retry (node :layout))
-  (for-each retry! (ui/children node)))
 
 (def- (snap value scale)
   (/ (round (* value scale)) scale))
@@ -243,34 +298,46 @@ without relayout. Returns true while any animation continues."
     (set! (tree :animations) active)
     (not (empty? active))))
 
+(def (invalidate-layout! tree)
+  "Measure every widget again on the next layout, e.g. after code changes that
+measure-key cannot see."
+  (set! (tree :layout-generation) (+ 1 (tree :layout-generation))))
+
 (def (layout! tree width height &optional (scale 1))
   "Measure leaves using Yoga constraints, replaying until every query is answered."
   (unless (and (> width 0) (> height 0)) (error "Layout dimensions must be positive"))
   (let ((root (allocate-node))
-        (pass {:measurers (generic-methods ui/measure)
-               :resizing []
-               :instant (not (equal? (tree :size) (list width height)))}))
-    (set! (tree :size) (list width height))
-    (unwind-protect
-      (begin
-        (unless (native/node-style root width height 0 0 0 0) (error "Invalid root size"))
-        (for-each (fn (node)
-                    (sync-node! node pass)
-                    (native/node-append root (node :layout)))
-                  (ui/children tree))
-        (set! (tree :resizing) (pass :resizing))
-        (let loop ((pass 0))
-          (when (> pass 256) (error "Yoga measurement did not converge"))
-          (native/node-layout root width height)
-          (let ((changed #f))
-            (for-each (fn (node) (when (answer-queries! node scale) (set! changed #t))) (ui/children tree))
-            (when changed
-              (for-each retry! (ui/children tree))
-              (loop (+ pass 1)))))
-        (let ((animations []))
-          (for-each (fn (node) (save-bounds! node 0 0 scale animations)) (ui/children tree))
-          (set! (tree :animations) animations)))
-      (native/node-free root)))
+        (measurers (generic-methods ui/measure))
+        (done? #f))
+    (unless (and (equal? measurers (tree :measurers)) (equal? scale (tree :layout-scale))) (invalidate-layout! tree))
+    (set! (tree :measurers) measurers)
+    (set! (tree :layout-scale) scale)
+    (let ((pass {:measurers measurers
+                 :generation (tree :layout-generation)
+                 :resizing []
+                 :instant (not (equal? (tree :size) (list width height)))}))
+      (set! (tree :size) (list width height))
+      (unwind-protect
+        (begin
+          (unless (native/node-style root width height 0 0 0 0) (error "Invalid root size"))
+          (for-each (fn (node)
+                      (sync-node! node pass #t)
+                      (native/node-append root (node :layout)))
+                    (ui/children tree))
+          (set! (tree :resizing) (pass :resizing))
+          (let loop ((pass 0))
+            (when (> pass 256) (error "Yoga measurement did not converge"))
+            (native/node-layout root width height)
+            (let ((changed #f))
+              (for-each (fn (node) (when (answer-queries! node scale) (set! changed #t))) (ui/children tree))
+              (when changed (loop (+ pass 1)))))
+          (let ((animations []))
+            (for-each (fn (node) (save-bounds! node 0 0 scale animations)) (ui/children tree))
+            (set! (tree :animations) animations))
+          (set! done? #t))
+        ;; A failed measurement leaves placeholder answers behind.
+        (unless done? (invalidate-layout! tree))
+        (native/node-free root))))
   tree)
 
 (def- (inset bounds x y)
@@ -355,6 +422,9 @@ recording until invalidate-paint! starts a new generation or their size changes.
 
 (defmethod (ui/layout-style (w ui/Label))
   (record-new ui/LayoutStyle (w :width) (w :height) (w :grow) 0 nil nil :stretch 0 #f #f #f))
+
+(defmethod (ui/measure-key (w ui/Label))
+  (list (w :text) (w :font) (w :size) (w :wrap)))
 
 (defmethod (ui/measure (w ui/Label) limits)
   (let ((text (native/text-get (w :text)
@@ -441,6 +511,9 @@ recording until invalidate-paint! starts a new generation or their size changes.
           (push! positions (/ (ffi/ref buffer 'float i) scale)))
         positions)
       (ffi/free! buffer))))
+
+(defmethod (ui/measure-key (w ui/TextField))
+  (w :size))
 
 (defmethod (ui/measure (w ui/TextField) limits)
   (ui/size 160 (+ (w :size) 26)))
@@ -539,6 +612,9 @@ recording until invalidate-paint! starts a new generation or their size changes.
   (unless (and (number? (w :size)) (>= (w :size) 1) (<= (w :size) 256))
     (error "Icon size must be between 1 and 256" (w :size)))
   (record-new ui/LayoutStyle (w :size) (w :size) 0 0 nil nil :stretch 0 #f #f #f))
+
+(defmethod (ui/measure-key (w ui/Icon))
+  (w :size))
 
 (defmethod (ui/measure (w ui/Icon) limits)
   (ui/size (w :size) (w :size)))

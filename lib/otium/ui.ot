@@ -23,7 +23,16 @@
   (pressed? :init #f)
   (hovered? :init #f)
   (paint-cache :init nil)
-  (sizes :init nil))
+  (sizes :init nil)
+  ;; What was last sent to the Yoga node, so unchanged nodes stay clean.
+  (synced-style :init nil)
+  (synced-width :init nil)
+  (synced-height :init nil)
+  (synced-shrink :init nil)
+  (synced-children :init nil)
+  (synced-key :init nil)
+  (synced-generation :init nil)
+  (measured? :init #f))
 
 (defclass Focus
   (node :init nil)
@@ -38,7 +47,10 @@
   (animations :init [])
   (resizing :init [])
   (size :init nil)
-  (generation :init 0))
+  (generation :init 0)
+  (layout-generation :init 0)
+  (layout-scale :init nil)
+  (measurers :init nil))
 
 (def palette
   {:muted 0x71849fff
@@ -217,6 +229,11 @@
 
 (defgeneric (measure widget limits))
 
+;; A value that changes whenever measure's answers could change, other than
+;; through its limits. Measurements are reused while it stays equal?; nil, the
+;; default, measures again on every layout.
+(defgeneric (measure-key widget))
+
 (defgeneric (paint widget g bounds))
 
 (defgeneric (handle-event widget event))
@@ -267,6 +284,9 @@
   (building-children))
 
 (defmethod (measure (w Widget) limits)
+  nil)
+
+(defmethod (measure-key (w Widget))
   nil)
 
 (defmethod (paint (w Widget) g bounds)

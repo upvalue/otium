@@ -194,6 +194,8 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
                                       #f)))))
 
 (def- (sync! window)
+  ;; Reloaded measure methods may answer differently for the same key.
+  (unless (equal? (get window :synced-revision) dev/revision) (gpu/invalidate-layout! (get window :tree)))
   (when (get window :view)
     (ui/reconcile! (get window :tree) ((get window :view)))
     (sync-text! window))

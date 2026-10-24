@@ -55,6 +55,19 @@
                  60
                  20))))
 
+(defclass Keyed
+  :is ui/Widget
+  (text :init ""))
+
+(def keyed-measures 0)
+
+(defmethod (ui/measure (w Keyed) limits)
+  (set! keyed-measures (+ keyed-measures 1))
+  (ui/size (* 10 (string-length (w :text))) 20))
+
+(defmethod (ui/measure-key (w Keyed))
+  (w :text))
+
 (def tree (ui/root))
 
 (def (view)
@@ -125,6 +138,25 @@
              (ui/size 60 30)))
     (gpu/layout! tree 300 200)
     (near "added measure is detected on an existing node" 30 ((c :bounds) :height))
+    (let ((keyed (fn (text) (ui/row {} (ui/new Keyed {:text text}) (ui/new Box {:key :d})))))
+      (ui/reconcile! tree (keyed "ab"))
+      (gpu/layout! tree 300 200)
+      (set! keyed-measures 0)
+      (ui/reconcile! tree (keyed "ab"))
+      (gpu/layout! tree 300 200)
+      (check "unchanged measure key reuses the measurement" 0 keyed-measures)
+      (near "reused measurement keeps its size" 20 (((child (child tree 0) 0) :bounds) :width))
+      (ui/reconcile! tree (keyed "abcd"))
+      (gpu/layout! tree 300 200)
+      (check "changed measure key measures again" #t (> keyed-measures 0))
+      (near "new measurement moves siblings" 40 (((child (child tree 0) 1) :bounds) :x))
+      (set! keyed-measures 0)
+      (gpu/invalidate-layout! tree)
+      (gpu/layout! tree 300 200)
+      (check "invalidate-layout! measures again" #t (> keyed-measures 0))
+      (set! keyed-measures 0)
+      (gpu/layout! tree 300 200 2)
+      (check "scale change measures again" #t (> keyed-measures 0)))
     (check "negative root rejected" #t (fails? (fn () (gpu/layout! tree -1 200))))
     (ui/reconcile! tree (ui/column {:padding -1}))
     (check "invalid style rejected" #t (fails? (fn () (gpu/layout! tree 300 200))))

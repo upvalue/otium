@@ -521,7 +521,9 @@ Empty options may be nil. :tab-navigation defaults to #t."
   (if (enabled? node)
       (handle-event (node :instance)
                     (if (and (node :bounds) (get event :x))
-                        (put event :local-x (- (get event :x) ((node :bounds) :x)))
+                        (let ((local (put event :local-x (- (get event :x) ((node :bounds) :x)))))
+                          (when (get event :y) (put! local :local-y (- (get event :y) ((node :bounds) :y))))
+                          local)
                         event))
       nil))
 

@@ -73,11 +73,63 @@
   (bitwise-ior (bitwise-ior (bitwise-arithmetic-shift (car rgb) 24) (bitwise-arithmetic-shift (cadr rgb) 16))
                (bitwise-ior (bitwise-arithmetic-shift (caddr rgb) 8) alpha)))
 
+(def (changed! session)
+  ;; Paint caches key on this.
+  (put! session :version (+ 1 (get session :version 0))))
+
+(def (follow! session)
+  "Return a viewport scrolled into history to the live output."
+  (let ((term (session :term)))
+    (when (g/scrolled? term)
+      (g/scroll-to-bottom! term)
+      (g/update! term)
+      (changed! session))))
+
 (def (key! session event)
   (let ((bytes (keyboard/encode (session :term) event)))
     (when bytes
-      (unless (= (bytevector-length bytes) 0) (pty/write-bytes! (session :pty) bytes))
+      (unless (= (bytevector-length bytes) 0)
+        (follow! session)
+        (pty/write-bytes! (session :pty) bytes))
       :handled)))
+
+;; Logical pixels per unit of wheel motion, as ui/Scroll uses.
+(def wheel-step 36)
+
+(def (wheel! session event)
+  "Scroll by vertical wheel motion. Mostly horizontal motion is left to the strip."
+  (let ((dx (get event :dx 0))
+        (dy (get event :dy 0))
+        (term (session :term)))
+    (when (and (> (abs dy) (abs dx)) (session :cell-h))
+      ;; Trackpads send fractions of a row, so the remainder carries over.
+      (let ((rows (+ (get session :wheel-rows 0) (/ (* (- wheel-step) dy) (session :cell-h))))
+            (steps (exact (truncate rows)))
+            (live? (not (session :exit))))
+        (put! session :wheel-rows (- rows steps))
+        (cond
+          ((= steps 0))
+          ((and live? (g/mouse-tracking? term))
+           (dotimes (_ (abs steps))
+             (wheel-report! session event (< steps 0))))
+          ;; Programs on the alternate screen have no scrollback; like Ghostty,
+          ;; send them arrow keys.
+          ((and live? (g/alternate-screen? term))
+           (dotimes (_ (abs steps))
+             (key! session
+                   {:key (if (< steps 0)
+                             "Up"
+                             "Down")})))
+          (else (g/scroll! term steps) (g/update! term) (changed! session))))
+      :handled)))
+
+(def (wheel-report! session event up?)
+  (let ((cw (session :cell-w))
+        (ch (session :cell-h))
+        (col (clamp (floor (/ (- (get event :local-x 0) (padding)) cw)) 0 (- (session :cols) 1)))
+        (row (clamp (floor (/ (- (get event :local-y 0) (padding)) ch)) 0 (- (session :rows) 1)))
+        (bytes (g/encode-wheel (session :term) (exact col) (exact row) up? (round cw) (round ch))))
+    (unless (= (bytevector-length bytes) 0) (pty/write-bytes! (session :pty) bytes))))
 
 ;; The widget
 
@@ -104,8 +156,11 @@
         (session (w :session)))
     (cond
       ((eq? kind :pointer-down) :handled)
-      ((or (session :closed?) (session :exit)) :handled)
-      ((eq? kind :text-input) (pty/write! (session :pty) (get event :text)) :handled)
+      ((session :closed?) :handled)
+      ;; An exited terminal's history can still be read.
+      ((eq? kind :wheel) (wheel! session event))
+      ((session :exit) :handled)
+      ((eq? kind :text-input) (follow! session) (pty/write! (session :pty) (get event :text)) :handled)
       ((eq? kind :key-down) (key! session event))
       (else nil))))
 

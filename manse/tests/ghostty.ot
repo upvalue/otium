@@ -3,7 +3,7 @@
 (require otium.test :refer (check report))
 
 (g/load!)
-(check 6 (g/check-layouts!))
+(check 9 (g/check-layouts!))
 (check #t (string? (get (g/build-info) :version)))
 
 (def t (g/new 10 3))
@@ -21,6 +21,39 @@
 ;; Cursor position report: ESC [ 1 ; 9 R
 (g/write! t "\x1b;[6n")
 (check '(27 91 49 59 57 82) (apply list (t :replies)))
+(g/free! t)
+
+;; Scrollback and the viewport.
+(def t (g/new 4 2))
+
+(dotimes (i 5)
+  (g/write! t (str "\r\n" i)))
+(g/update! t)
+(check '("3   " "4   ") (apply list (g/text t)))
+(check #f (g/scrolled? t))
+(g/scroll! t -2)
+(g/update! t)
+(check #t (g/scrolled? t))
+(check '("1   " "2   ") (apply list (g/text t)))
+(check "output keeps the viewport in history"
+       '("1   " "2   ")
+       (begin
+         (g/write! t "\r\n5")
+         (g/update! t)
+         (apply list (g/text t))))
+(g/scroll-to-bottom! t)
+(g/update! t)
+(check #f (g/scrolled? t))
+(check '("4   " "5   ") (apply list (g/text t)))
+
+;; Wheel reports and the alternate screen.
+(check #f (g/mouse-tracking? t))
+(check #f (g/alternate-screen? t))
+(g/write! t "\x1b;[?1049h\x1b;[?1000h\x1b;[?1006h")
+(check #t (g/mouse-tracking? t))
+(check #t (g/alternate-screen? t))
+(check "SGR wheel up at column 3, row 2" "\x1b;[<64;3;2M" (utf8->string (g/encode-wheel t 2 1 #t 8 16)))
+(check "SGR wheel down" "\x1b;[<65;1;1M" (utf8->string (g/encode-wheel t 0 0 #f 8 16)))
 (g/free! t)
 (check "combining sequence" "é" (g/codepoints->string '(101 769)))
 (check "non-BMP text" "🙂" (g/codepoints->string '(128578)))

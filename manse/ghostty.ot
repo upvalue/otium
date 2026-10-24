@@ -15,6 +15,27 @@
 ;; GhosttyTerminalOption
 (def- OPT-WRITE-PTY 1)
 
+;; GhosttyTerminalData
+(def- DATA-ACTIVE-SCREEN 6)
+
+(def- DATA-MOUSE-TRACKING 11)
+
+(def- DATA-VIEWPORT-ACTIVE 32)
+
+;; GhosttyTerminalScrollViewportTag
+(def- SCROLL-BOTTOM 1)
+
+(def- SCROLL-DELTA 2)
+
+;; GhosttyMouseEncoderOption, GhosttyMouseAction and GhosttyMouseButton
+(def- MOUSE-OPT-SIZE 2)
+
+(def- MOUSE-PRESS 0)
+
+(def- MOUSE-WHEEL-UP 4)
+
+(def- MOUSE-WHEEL-DOWN 5)
+
 ;; GhosttyBuildInfo and GhosttyOptimizeMode
 (def- BUILD-INFO-OPTIMIZE 4)
 
@@ -97,6 +118,23 @@
                 '(cursor-has-value bool)
                 (list 'palette (list 'array Rgb 256)))))
 
+;; value is a union of an intptr_t delta, a size_t row and padding.
+(def ScrollViewport (layout "GhosttyTerminalScrollViewport" '((tag i32) (value (array u64 2)))))
+
+(def MousePosition (layout "GhosttyMousePosition" '((x float) (y float))))
+
+(def MouseSize
+  (layout "GhosttyMouseEncoderSize"
+          '((size size-t)
+            (screen-width u32)
+            (screen-height u32)
+            (cell-width u32)
+            (cell-height u32)
+            (padding-top u32)
+            (padding-bottom u32)
+            (padding-right u32)
+            (padding-left u32))))
+
 (def GString (layout "GhosttyString" '((ptr pointer) (len size-t))))
 
 (def GBuffer (layout "GhosttyBuffer" '((ptr pointer) (cap size-t) (len size-t))))
@@ -114,6 +152,7 @@
                  ((private %terminal-set) "ghostty_terminal_set" (pointer int pointer) int #t)
                  ((private %terminal-resize) "ghostty_terminal_resize" (pointer u16 u16 u32 u32) int #t)
                  ((private %vt-write) "ghostty_terminal_vt_write" (pointer pointer size-t) void #t)
+                 ((private %terminal-get) "ghostty_terminal_get" (pointer int pointer) int #f)
                  ((private %key-encoder-new) "ghostty_key_encoder_new" (pointer pointer) int #t)
                  ((private %key-encoder-free) "ghostty_key_encoder_free" (pointer) void #t)
                  ((private %key-options) "ghostty_key_encoder_setopt_from_terminal" (pointer pointer) void #t)
@@ -126,6 +165,19 @@
                  ((private %key-mods) "ghostty_key_event_set_mods" (pointer u16) void #t)
                  ((private %key-text) "ghostty_key_event_set_utf8" (pointer pointer size-t) void #t)
                  ((private %key-unshifted) "ghostty_key_event_set_unshifted_codepoint" (pointer u32) void #t)
+                 ((private %mouse-encoder-new) "ghostty_mouse_encoder_new" (pointer pointer) int #t)
+                 ((private %mouse-encoder-free) "ghostty_mouse_encoder_free" (pointer) void #t)
+                 ((private %mouse-options) "ghostty_mouse_encoder_setopt_from_terminal" (pointer pointer) void #t)
+                 ((private %mouse-option) "ghostty_mouse_encoder_setopt" (pointer int pointer) void #t)
+                 ((private %mouse-encode)
+                  "ghostty_mouse_encoder_encode"
+                  (pointer pointer pointer size-t pointer)
+                  int
+                  #t)
+                 ((private %mouse-event-new) "ghostty_mouse_event_new" (pointer pointer) int #t)
+                 ((private %mouse-event-free) "ghostty_mouse_event_free" (pointer) void #t)
+                 ((private %mouse-action) "ghostty_mouse_event_set_action" (pointer int) void #t)
+                 ((private %mouse-button) "ghostty_mouse_event_set_button" (pointer int) void #t)
                  ((private %state-new) "ghostty_render_state_new" (pointer pointer) int #t)
                  ((private %state-free) "ghostty_render_state_free" (pointer) void #t)
                  ((private %state-update) "ghostty_render_state_update" (pointer pointer) int #t)
@@ -151,6 +203,17 @@
                   int
                   #f))
 
+;; defbindings quotes its types, so calls that take structs by value bind here.
+(def- (by-value-bindings!)
+  (set! %scroll-viewport (ffi/bind library "ghostty_terminal_scroll_viewport" (list 'pointer ScrollViewport) 'void #t))
+  (set! %mouse-position (ffi/bind library "ghostty_mouse_event_set_position" (list 'pointer MousePosition) 'void #t)))
+
+(def- %scroll-viewport nil)
+
+(def- %mouse-position nil)
+
+(when library (by-value-bindings!))
+
 (def (library-candidates)
   "MANSE_GHOSTTY_LIBRARY when set, with no fallback; otherwise loader names and Nix profiles."
   (let ((override (process/getenv "MANSE_GHOSTTY_LIBRARY")))
@@ -173,6 +236,7 @@
 (def (load!)
   (unless library
     (%load! (library-candidates))
+    (by-value-bindings!)
     (set! scratch (ffi/alloc 'u64 1)))
   (unless cells-library (%load-cells! (pty/native-candidates)))
   (when (eq? (get (build-info) :optimize) :debug)
@@ -252,13 +316,14 @@
 
 (def (free! term)
   (free-keyboard! term)
+  (free-mouse! term)
   (when (term :cells) (%cells-free (term :cells)))
   (when (term :row-iter) (%rows-free (term :row-iter)))
   (when (term :state) (%state-free (term :state)))
   (when (term :handle) (%terminal-free (term :handle)))
   (when (term :write-pty) (ffi/free-callback! (term :write-pty)))
   (for-each (fn (k) (when (term k) (ffi/free! (term k))))
-            '(:rgb :codepoints :style :utf8 :utf8-buffer :run-text :runs :spans :run-counts)))
+            '(:rgb :codepoints :style :utf8 :utf8-buffer :scroll :run-text :runs :spans :run-counts)))
 
 (def- (free-keyboard! term)
   (when (term :key-encoder) (%key-encoder-free (term :key-encoder)))
@@ -311,6 +376,57 @@
       (check! "key_encoder_encode" result)
       (ffi/read-bytes (term :key-buffer) (ffi/ref scratch 'size-t 0)))))
 
+;; Mouse reporting. Only the wheel is reported so far.
+
+(def- (free-mouse! term)
+  (when (term :mouse-encoder) (%mouse-encoder-free (term :mouse-encoder)))
+  (when (term :mouse-event) (%mouse-event-free (term :mouse-event)))
+  (for-each (fn (key) (when (term key) (ffi/free! (term key)))) '(:mouse-size :mouse-position :mouse-buffer))
+  (for-each (fn (key) (put! term key nil)) '(:mouse-encoder :mouse-event :mouse-size :mouse-position :mouse-buffer)))
+
+(def- (mouse! term)
+  ;; Allocate lazily so terminals opened before a reload acquire an encoder too.
+  (unless (term :mouse-encoder)
+    (let ((success? #f))
+      (unwind-protect
+        (begin
+          (put! term :mouse-encoder (new-handle "mouse_encoder_new" %mouse-encoder-new ffi/null))
+          (put! term :mouse-event (new-handle "mouse_event_new" %mouse-event-new ffi/null))
+          (put! term :mouse-size (ffi/alloc MouseSize 1))
+          (put! term :mouse-position (ffi/alloc MousePosition 1))
+          (put! term :mouse-buffer (ffi/alloc 'u8 64))
+          (set! success? #t))
+        (unless success? (free-mouse! term))))))
+
+(def (encode-wheel term col row up? cell-width cell-height)
+  "Encode one wheel step over a cell for the program's mouse tracking mode."
+  (mouse! term)
+  (let ((encoder (term :mouse-encoder))
+        (event (term :mouse-event))
+        (size (term :mouse-size))
+        (position (term :mouse-position)))
+    (%mouse-options encoder (term :handle))
+    ;; The caller picks the cell, so the encoder sees an unpadded grid of
+    ;; whole-pixel cells and a position at the cell's centre.
+    (ffi/field-set! size MouseSize '(size) (ffi/sizeof MouseSize))
+    (ffi/field-set! size MouseSize '(screen-width) (* (term :cols) cell-width))
+    (ffi/field-set! size MouseSize '(screen-height) (* (term :rows) cell-height))
+    (ffi/field-set! size MouseSize '(cell-width) cell-width)
+    (ffi/field-set! size MouseSize '(cell-height) cell-height)
+    (for-each (fn (side) (ffi/field-set! size MouseSize (list side) 0))
+              '(padding-top padding-bottom padding-right padding-left))
+    (%mouse-option encoder MOUSE-OPT-SIZE size)
+    (%mouse-action event MOUSE-PRESS)
+    (%mouse-button event
+                   (if up?
+                       MOUSE-WHEEL-UP
+                       MOUSE-WHEEL-DOWN))
+    (ffi/field-set! position MousePosition '(x) (* (+ col 0.5) cell-width))
+    (ffi/field-set! position MousePosition '(y) (* (+ row 0.5) cell-height))
+    (%mouse-position event position)
+    (check! "mouse_encoder_encode" (%mouse-encode encoder event (term :mouse-buffer) 64 scratch))
+    (ffi/read-bytes (term :mouse-buffer) (ffi/ref scratch 'size-t 0))))
+
 (def (on-write-pty term data len)
   "Collect the terminal's replies as byte values, or pass them to :on-reply."
   (let ((handler (get term :on-reply)))
@@ -337,6 +453,36 @@
   (check! "terminal_resize" (%terminal-resize (term :handle) cols rows cell-width cell-height))
   (put! term :cols cols)
   (put! term :rows rows))
+
+(def- (terminal-ref term key type)
+  (check! "terminal_get" (%terminal-get (term :handle) key scratch))
+  (ffi/ref scratch type 0))
+
+(def (alternate-screen? term)
+  (= 1 (terminal-ref term DATA-ACTIVE-SCREEN 'i32)))
+
+(def (mouse-tracking? term)
+  "Whether the program has asked for mouse reports."
+  (terminal-ref term DATA-MOUSE-TRACKING 'bool))
+
+(def (scrolled? term)
+  "Whether the viewport shows history rather than following output."
+  (not (terminal-ref term DATA-VIEWPORT-ACTIVE 'bool)))
+
+(def- (scroll-viewport! term tag delta)
+  (unless (term :scroll) (put! term :scroll (ffi/alloc ScrollViewport 1)))
+  (let ((p (term :scroll)))
+    (ffi/field-set! p ScrollViewport '(tag) tag)
+    ;; The delta is the union's first member, at value's offset.
+    (ffi/set! p 'i64 1 delta)
+    (%scroll-viewport (term :handle) p)))
+
+(def (scroll! term rows)
+  "Move the viewport by rows; negative moves toward history."
+  (scroll-viewport! term SCROLL-DELTA rows))
+
+(def (scroll-to-bottom! term)
+  (scroll-viewport! term SCROLL-BOTTOM 0))
 
 (def (update! term)
   (check! "render_state_update" (%state-update (term :state) (term :handle))))

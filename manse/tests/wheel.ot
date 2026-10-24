@@ -1,0 +1,57 @@
+;; Wheel motion over a terminal: scrollback, mouse reports and the alternate screen.
+(require manse.terminal :as terminal)
+(require manse.ghostty :as g)
+(require manse.pty :as pty)
+(require otium.test :refer (check report))
+
+(def written [])
+
+(set! pty/write-bytes! (fn (_pty bytes) (push! written (utf8->string bytes))))
+
+(def (fresh)
+  (let ((t (g/new 4 2)))
+    (dotimes (i 5)
+      (g/write! t (str "\r\n" i)))
+    (g/update! t)
+    {:term t :pty {} :cell-w 10 :cell-h 18 :cols 4 :rows 2}))
+
+(def (wheel! session dy &optional (dx 0))
+  (terminal/wheel! session {:kind :wheel :dx dx :dy dy :local-x 15 :local-y 25}))
+
+(def session (fresh))
+
+(def term (session :term))
+
+(check "one wheel unit scrolls two rows of 18" :handled (wheel! session 1))
+(check '("1   " "2   ") (apply list (g/text term)))
+(check "scrolling repaints" 1 (session :version))
+(check "mostly horizontal motion goes to the strip" nil (wheel! session 0.1 1))
+(wheel! session -0.25)
+(check "half a row waits" '("1   " "2   ") (apply list (g/text term)))
+(wheel! session -0.25)
+(check "the remainder carries over" '("2   " "3   ") (apply list (g/text term)))
+(terminal/key! session {:key "Return"})
+(check "typing returns to live output" '("3   " "4   ") (apply list (g/text term)))
+(check '("\r") (apply list written))
+(g/free! term)
+
+(def session (fresh))
+
+(def term (session :term))
+
+(set! written [])
+(g/write! term "\x1b;[?1049h")
+(wheel! session 1)
+(check "the alternate screen gets arrow keys" '("\x1b;[A" "\x1b;[A") (apply list written))
+(set! written [])
+(g/write! term "\x1b;[?1000h\x1b;[?1006h")
+(wheel! session -0.5)
+(check "programs tracking the mouse get reports at the pointer's cell"
+       (list (str "\x1b;[<65;"
+                  (+ 1 (floor (/ (- 15 (terminal/padding)) 10)))
+                  ";"
+                  (+ 1 (floor (/ (- 25 (terminal/padding)) 18)))
+                  "M"))
+       (apply list written))
+(g/free! term)
+(report "wheel")

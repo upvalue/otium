@@ -110,20 +110,38 @@
   (define (nil? x) (eq? x (void)))
   (define-record-type (array-value make-array array?)
     (fields (mutable storage) (mutable size)))
-  (define (array . xs) (make-array (list->vector xs) (length xs)))
-  (define (push! a . xs)
+  (define array
+    (case-lambda
+      [() (make-array (vector) 0)]
+      [(a) (make-array (vector a) 1)]
+      [(a b) (make-array (vector a b) 2)]
+      [(a b c) (make-array (vector a b c) 3)]
+      [(a b c d) (make-array (vector a b c d) 4)]
+      [xs (make-array (list->vector xs) (length xs))]))
+  (define (array-reserve! a count)
     (unless (array? a) (error 'push! "expected array" a))
     (let* ([old (array-value-storage a)] [size (array-value-size a)]
-           [needed (+ size (length xs))])
+           [needed (+ size count)])
       (when (> needed (vector-length old))
         (let ([new (make-vector (max needed 4 (* 2 (vector-length old))) (void))])
           (do ([i 0 (+ i 1)]) ((= i size)) (vector-set! new i (vector-ref old i)))
           (array-value-storage-set! a new)))
-      (let loop ([xs xs] [i size])
-        (unless (null? xs)
-          (vector-set! (array-value-storage a) i (car xs))
-          (loop (cdr xs) (+ i 1))))
-      (array-value-size-set! a needed)) a)
+      size))
+  (define push!
+    (case-lambda
+      [(a x)
+       (let ([size (array-reserve! a 1)])
+         (vector-set! (array-value-storage a) size x)
+         (array-value-size-set! a (+ size 1)))
+       a]
+      [(a . xs)
+       (let* ([count (length xs)] [size (array-reserve! a count)])
+         (let loop ([xs xs] [i size])
+           (unless (null? xs)
+             (vector-set! (array-value-storage a) i (car xs))
+             (loop (cdr xs) (+ i 1))))
+         (array-value-size-set! a (+ size count)))
+       a]))
   (define (pop! a)
     (unless (array? a) (error 'pop! "expected array" a))
     (let ([n (array-value-size a)])
@@ -134,14 +152,43 @@
 
   (define-record-type (buffer-value make-buffer buffer?)
     (fields port (mutable size) (mutable snapshot)))
-  (define (buffer . seed)
-    (unless (<= (length seed) 1) (error 'buffer "expected optional seed"))
-    (let ([b (make-buffer (open-output-string) 0 "")])
-      (apply buffer-push! b seed) b))
-  (define (str . xs)
-    (let ([port (open-output-string)])
-      (for-each (lambda (x) (otium-display x port)) xs)
-      (get-output-string port)))
+  (define buffer
+    (case-lambda
+      [() (make-buffer (open-output-string) 0 "")]
+      [(seed)
+       (let ([b (buffer)])
+         (buffer-push-one! b seed)
+         b)]
+      [seed (error 'buffer "expected optional seed")]))
+  (define str
+    (case-lambda
+      [() (get-output-string (open-output-string))]
+      [(a)
+       (let ([port (open-output-string)])
+         (otium-display a port)
+         (get-output-string port))]
+      [(a b)
+       (let ([port (open-output-string)])
+         (otium-display a port)
+         (otium-display b port)
+         (get-output-string port))]
+      [(a b c)
+       (let ([port (open-output-string)])
+         (otium-display a port)
+         (otium-display b port)
+         (otium-display c port)
+         (get-output-string port))]
+      [(a b c d)
+       (let ([port (open-output-string)])
+         (otium-display a port)
+         (otium-display b port)
+         (otium-display c port)
+         (otium-display d port)
+         (get-output-string port))]
+      [xs
+       (let ([port (open-output-string)])
+         (for-each (lambda (x) (otium-display x port)) xs)
+         (get-output-string port))]))
   ;; Strings go straight to the port; other values are rendered with str.
   (define (buffer-push-one! b x)
     (let ([s (if (string? x) x (str x))])
@@ -344,11 +391,15 @@
   (define (collection-reverse x)
     (cond [(array? x) (apply array (reverse (array-list x)))] [(nil? x) '()] [else (reverse x)]))
   (define (sequence-list x) (cond [(array? x) (array-list x)] [(nil? x) '()] [else x]))
-  (define (collection-for-each f x . xs)
-    (if (and (array? x) (null? xs))
-        (let ([n (array-value-size x)])
-          (do ([i 0 (+ i 1)]) ((= i n)) (collection-call f (get x i))))
-        (apply for-each (lambda args (apply collection-call f args)) (map sequence-list (cons x xs)))))
+  (define collection-for-each
+    (case-lambda
+      [(f x)
+       (if (array? x)
+           (let ([n (array-value-size x)])
+             (do ([i 0 (+ i 1)]) ((= i n)) (collection-call f (get x i))))
+           (for-each (lambda (value) (collection-call f value)) (sequence-list x)))]
+      [(f x . xs)
+       (apply for-each (lambda args (apply collection-call f args)) (map sequence-list (cons x xs)))]))
   ;; Splice the final sequence onto the leading arguments. The rest list is
   ;; freshly allocated for this call, so it can be reused.
   (define (spread-arguments! args)
@@ -470,5 +521,13 @@
                    [(and (pair? (cdr x)) (< n 100)) (display " " port) (loop (cdr x) (+ n 1))]
                    [else (display " . " port) (render (cdr x) port #f (+ n 1)) (display ")" port)]))]
           [else ((if display? display write) x port)]))
-  (define (otium-write x . port) (render x (if (null? port) (current-output-port) (car port)) #f 0))
-  (define (otium-display x . port) (render x (if (null? port) (current-output-port) (car port)) #t 0)))
+  (define otium-write
+    (case-lambda
+      [(x) (render x (current-output-port) #f 0)]
+      [(x port) (render x port #f 0)]
+      [(x port . ignored) (render x port #f 0)]))
+  (define otium-display
+    (case-lambda
+      [(x) (render x (current-output-port) #t 0)]
+      [(x port) (render x port #t 0)]
+      [(x port . ignored) (render x port #t 0)])))

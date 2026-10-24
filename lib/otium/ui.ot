@@ -32,7 +32,9 @@
   (synced-children :init nil)
   (synced-key :init nil)
   (synced-generation :init nil)
-  (measured? :init #f))
+  (measured? :init #f)
+  ;; The reconcile pass that last matched this node.
+  (stamp :init nil))
 
 (defclass Focus
   (node :init nil)
@@ -337,6 +339,11 @@
           :children children
           :options options)))
 
+(def- (plain-description properties)
+  ;; A description without options, key or children, built without the
+  ;; options table and argument list ui/new goes through.
+  (make Description :properties properties :key nil :children '() :options nil))
+
 ;; lint: allow(rest-arguments) accepts any number of child widgets
 (def (new class opts . children)
   "Construct a description. Treat it and its options as fixed after construction.
@@ -397,7 +404,7 @@ Empty options may be nil. :tab-navigation defaults to #t."
       (cond
         ((or (nil? value) (null? value)) nil)
         ((description? value) (push! out value))
-        ((string? value) (push! out (label {} value)))
+        ((string? value) (push! out (plain-description (class-properties Label :text value))))
         ((or (array? value) (list? value)) (for-each visit value))
         (else (error "ui: child must be a description, string, sequence or nil"))))
     (visit input)
@@ -415,11 +422,15 @@ Empty options may be nil. :tab-navigation defaults to #t."
   (set! (node :children) [])
   (set! (node :active?) #f))
 
+(defonce reconcile-stamp 0)
+
 (def- (reconcile-children old input parent)
   (let ((descriptions (flatten input))
         (keyed nil)
         (seen nil)
-        (kept nil)
+        (stamp (begin
+                 (set! reconcile-stamp (+ reconcile-stamp 1))
+                 reconcile-stamp))
         (out []))
     ;; Validate keys before changing any sibling instances.
     (for-each (fn (d)
@@ -453,12 +464,13 @@ Empty options may be nil. :tab-navigation defaults to #t."
         (set! (node :options) (d :options))
         (unless (enabled? node) (set! (node :pressed?) #f))
         (when matched? (class-update-properties! (node :instance) (d :properties)))
-        (let ((built (with-params ((building-children (d :children))) (build (node :instance)))))
+        ;; Builds don't nest, so a leaf sees building-children's default.
+        (let ((built (if (null? (d :children))
+                         (build (node :instance))
+                         (with-params ((building-children (d :children))) (build (node :instance))))))
           (unless (and (empty? (node :children)) (or (nil? built) (null? built) (and (array? built) (empty? built))))
             (set! (node :children) (reconcile-children (node :children) built node))))
-        (when matched?
-          (unless kept (set! kept {}))
-          (put! kept node #t))
+        (when matched? (set! (node :stamp) stamp))
         ;; :autofocus takes focus on mount when nothing has it; :focus takes
         ;; it on mount or when the option turns on.
         (when (or focus? (and (not matched?) (get (node :options) :autofocus #f)))
@@ -467,7 +479,7 @@ Empty options may be nil. :tab-navigation defaults to #t."
                 (find-root (parent :parent))
                 (when (and (or focus? (not (focused parent))) (focusable? node)) (focus! parent node)))))
         (push! out node)))
-    (for-each (fn (n) (unless (get kept n #f) (retire! n))) old)
+    (for-each (fn (n) (unless (eq? (n :stamp) stamp) (retire! n))) old)
     out))
 
 (def (reconcile! tree descriptions)
@@ -549,14 +561,16 @@ Empty options may be nil. :tab-navigation defaults to #t."
   (def (convert value)
     (cond
       ((string? value)
-       (label {:size (w :size)
-               :font (w :font)
-               :align :center
-               :wrap #f
-               :color (if (eq? (w :style) :accent)
-                          :on-accent
-                          :text)}
-              value))
+       (plain-description (class-properties Label
+                                            :text value
+                                            :size (w :size)
+                                            :font (w :font)
+                                            :align
+                                            :center
+                                            :wrap #f
+                                            :color (if (eq? (w :style) :accent)
+                                                       :on-accent
+                                                       :text))))
       ((or (list? value) (array? value)) (map convert value))
       (else value)))
   (convert (building-children)))

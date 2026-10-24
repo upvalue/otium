@@ -354,33 +354,45 @@ measure-key cannot see."
                (max 0 (- (min (+ (a :x) (a :width)) (+ (b :x) (b :width))) x))
                (max 0 (- (min (+ (a :y) (a :height)) (+ (b :y) (b :height))) y)))))
 
-(def- (paint-node! node renderer clip generation resizing?)
+(def- (inside? a b)
+  (and (>= (a :x) (b :x))
+       (>= (a :y) (b :y))
+       (<= (+ (a :x) (a :width)) (+ (b :x) (b :width)))
+       (<= (+ (a :y) (a :height)) (+ (b :y) (b :height)))))
+
+;; g is one context shared by the whole walk, reset for each widget before its
+;; paint runs.
+(def- (paint-node! node g clip generation resizing?)
   (unless (node :bounds) (error "Run layout before painting"))
-  (let ((visible (intersect clip (node :bounds)))
+  (let ((bounds (node :bounds))
+        (visible (if (inside? bounds clip)
+                     bounds
+                     (intersect clip bounds)))
         (resizing? (or resizing? (resizing-node? node))))
     (when (and (> (visible :width) 0) (> (visible :height) 0))
       (if (get (node :options) :cache #f)
           (begin
             (unless (node :paint-cache) (set! (node :paint-cache) (gfx/cache)))
-            (gfx/cached (make gfx/Context :renderer renderer :clip clip)
+            ;; gfx/cached reads its context's clip after painting, so it gets
+            ;; its own.
+            (gfx/cached (make gfx/Context :renderer (g :renderer) :clip clip)
                         (node :paint-cache)
-                        (node :bounds)
+                        bounds
                         generation
-                        (fn (g) (paint-subtree! node renderer (g :clip) generation resizing?))))
-          (paint-subtree! node renderer visible generation resizing?)))))
+                        (fn (c) (paint-subtree! node g (c :clip) generation resizing?))))
+          (paint-subtree! node g visible generation resizing?)))))
 
-(def- (paint-subtree! node renderer clip generation resizing?)
-  (ui/paint (ui/instance node)
-            (make gfx/Context
-                  :renderer renderer
-                  :clip clip
-                  :focused? (node :focused?)
-                  :pressed? (node :pressed?)
-                  :hovered? (node :hovered?)
-                  :disabled? (not (ui/enabled? node))
-                  :resizing? (and resizing? #t))
-            (node :bounds))
-  (for-each (fn (child) (paint-node! child renderer clip generation resizing?)) (ui/children node)))
+(def- (paint-subtree! node g clip generation resizing?)
+  (set! (g :clip) clip)
+  (set! (g :focused?) (node :focused?))
+  (set! (g :pressed?) (node :pressed?))
+  (set! (g :hovered?) (node :hovered?))
+  (set! (g :disabled?) (not (ui/enabled? node)))
+  (set! (g :resizing?) (and resizing? #t))
+  (ui/paint (ui/instance node) g (node :bounds))
+  (let ((children (ui/children node)))
+    (dotimes (i (length children))
+      (paint-node! (get children i) g clip generation resizing?))))
 
 (def (invalidate-paint! tree)
   "Make widgets with the :cache option paint again on the next frame. Call it
@@ -393,8 +405,9 @@ and a subtree whose size changed records again anyway."
 recording until invalidate-paint! starts a new generation or their size changes."
   (native/gpu-clear renderer background)
   (let ((clip (ui/bounds 0 0 width height))
+        (g (make gfx/Context :renderer renderer :clip clip))
         (generation (tree :generation)))
-    (for-each (fn (node) (paint-node! node renderer clip generation #f)) (ui/children tree))))
+    (for-each (fn (node) (paint-node! node g clip generation #f)) (ui/children tree))))
 
 (def- (paint-box w g bounds)
   (let ((border (w :border))
@@ -438,19 +451,26 @@ recording until invalidate-paint! starts a new generation or their size changes.
     (ui/size (/ (native/text-size text native/TEXT_WIDTH) (ui/limit-ref limits :scale 1))
              (/ (native/text-size text native/TEXT_HEIGHT) (ui/limit-ref limits :scale 1)))))
 
+(def- (label-offset w g bounds)
+  ;; Only centred and right-aligned labels need their text's width.
+  (if (eq? (w :align) :left)
+      0
+      (let ((preferred (ui/measure w
+                                   (record-new ui/MeasureLimits
+                                               (bounds :width)
+                                               nil
+                                               :at-most
+                                               :undefined (native/gpu-scale (g :renderer))))))
+        (if (eq? (w :align) :center)
+            (/ (- (bounds :width) (preferred :width)) 2)
+            (- (bounds :width) (preferred :width))))))
+
 (defmethod (ui/paint (w ui/Label) g bounds)
-  (let ((preferred (ui/measure w
-                               (record-new ui/MeasureLimits
-                                           (bounds :width)
-                                           nil
-                                           :at-most
-                                           :undefined (native/gpu-scale (g :renderer)))))
-        (offset (cond
-                  ((eq? (w :align) :center) (/ (- (bounds :width) (preferred :width)) 2))
-                  ((eq? (w :align) :right) (- (bounds :width) (preferred :width)))
-                  (else 0))))
+  (let ((offset (label-offset w g bounds)))
     (gfx/text g
-              (ui/bounds (+ (bounds :x) offset) (bounds :y) (bounds :width) (bounds :height))
+              (if (= offset 0)
+                  bounds
+                  (ui/bounds (+ (bounds :x) offset) (bounds :y) (bounds :width) (bounds :height)))
               (w :text)
               (w :font)
               (w :size)

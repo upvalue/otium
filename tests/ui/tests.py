@@ -12,6 +12,18 @@ case('ui demand', 'tests/ui/demand.ot')
 case('ui application', 'tests/ui/application.ot', needs=['ffi'])
 case('ui layout', 'tests/ui/layout.ot', paths=['examples'], timeout=90)
 
+# stderr from a machine without a display or GPU backend.
+UNAVAILABLE = ('The video driver did not add any displays', 'No available video device',
+               'No supported SDL_GPU backend found', 'No available GPU device')
+
+
+@test('ui reuse', runtimes=BOTH)
+def reuse(t):
+    result = t.otium('tests/ui/reuse.ot')
+    if result.status and any(message in result.stderr for message in UNAVAILABLE):
+        raise Skip('no display or GPU backend: ' + result.stderr.strip())
+    t.expect(result, contains=['ui reuse: 9 checks passed'])
+
 
 def pixel(rows, x, y):
     return tuple(rows[y][x*3:x*3+3])
@@ -39,9 +51,7 @@ def gpu(t, required):
     for runtime in BOTH:
         capture, state = artifacts/(runtime+'.bmp'), artifacts/(runtime+'.json')
         result = launch(runtime, '--frames', 3, '--capture', capture, '--dump-state', state)
-        unavailable = any(message in result.stderr for message in (
-            'The video driver did not add any displays', 'No available video device',
-            'No supported SDL_GPU backend found', 'No available GPU device'))
+        unavailable = any(message in result.stderr for message in UNAVAILABLE)
         if result.returncode and unavailable and not required:
             raise Skip('no display or GPU backend: ' + result.stderr.strip())
         passed(result)

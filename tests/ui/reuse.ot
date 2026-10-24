@@ -1,0 +1,110 @@
+(require (otium.ui :as ui))
+(require (otium.gfx :as gfx))
+(require (otium.ui.gpu :as gpu))
+(require (otium.ui.native :as native))
+(require otium.test :refer (check report))
+
+;; Paint reuse: unchanged subtrees replay their recordings; anything that
+;; changes paints again, including a subtree that changed while scrolled out
+;; of view.
+(defclass Counter
+  :is ui/Widget
+  (label :init "")
+  (h :init 40))
+
+(def paints {})
+
+(def (painted label)
+  (get paints label 0))
+
+(defmethod (ui/measure (w Counter) limits)
+  (ui/size 100 (w :h)))
+
+(defmethod (ui/measure-key (w Counter))
+  (w :h))
+
+(defmethod (ui/paint-key (w Counter))
+  (w :label))
+
+(defmethod (ui/paint (w Counter) g bounds)
+  (put! paints (w :label) (+ 1 (painted (w :label))))
+  (gfx/rect g bounds 0xff0000ff))
+
+(defclass Plain
+  :is ui/Widget)
+
+(def plain-paints 0)
+
+(defmethod (ui/measure (w Plain) limits)
+  (ui/size 10 10))
+
+(defmethod (ui/paint (w Plain) g bounds)
+  (set! plain-paints (+ plain-paints 1))
+  (gfx/rect g bounds 0x00ff00ff))
+
+(def second "b")
+
+(def hidden "s0")
+
+(def (view)
+  (ui/column {}
+             (ui/row {:key :top} (ui/new Counter {:label "a"}))
+             (ui/new Counter {:key :b :label second})
+             (ui/scroll {:key :s :height 50 :width 100}
+                        ;; Scrolling moves the column, not the counter within
+                        ;; it, so only the change itself can mark the counter.
+                        (ui/column {:key 0} (ui/new Counter {:key :inner :label hidden}))
+                        (map (fn (i) (ui/new Counter {:key i :label (str "s" i)})) (range 1 4)))
+             (ui/row {:key :plain} (ui/new Plain {}))))
+
+(def w (ui/open {:title "reuse" :width 300 :height 300 :headless #t :config "build/ui-config.ot"}))
+
+(def tree (w :tree))
+
+(def (frame!)
+  (ui/reconcile! tree (view))
+  (gpu/layout! tree 300 300 1)
+  (gpu/paint! tree (w :renderer) 300 300 0)
+  (native/gpu-count (w :renderer)))
+
+(unwind-protect
+  (begin
+    ;; The first frame paints, the second records, later ones replay.
+    (let ((drawn (frame!))
+          (recorded (begin
+                      (frame!)
+                      (painted "a")))
+          (plain plain-paints))
+      (dotimes (i 3)
+        (frame!))
+      (check "unchanged subtree replays" recorded (painted "a"))
+      (check "replay draws what painting drew" drawn (frame!))
+      (check "widgets without a paint key paint every frame" (+ plain 4) plain-paints))
+    (let ((before (painted "a")))
+      (set! second "b2")
+      (frame!)
+      (check "changed widget paints" 1 (painted "b2"))
+      (check "unrelated subtree still replays" before (painted "a")))
+    (let ((before (painted "a"))
+          (a (ui/find-key tree :top)))
+      (set! ((get (ui/children a) 0) :hovered?) #t)
+      (frame!)
+      (check "hover change paints" #t (> (painted "a") before)))
+    (let ((before (painted "s1")))
+      (gpu/invalidate-paint! tree)
+      (frame!)
+      (check "invalidate-paint! paints everything" #t (> (painted "s1") before)))
+    (let ((scroll (ui/instance (ui/find-key tree :s))))
+      (ui/scroll-to! scroll 110)
+      (frame!)
+      (frame!)
+      (set! hidden "s0-changed")
+      (frame!)
+      (frame!)
+      (check "an off-screen change does not paint" 0 (painted "s0-changed"))
+      (ui/scroll-to! scroll 0)
+      (frame!)
+      (check "an off-screen change paints once visible" #t (> (painted "s0-changed") 0))))
+  (ui/close! w))
+
+(report "ui reuse")

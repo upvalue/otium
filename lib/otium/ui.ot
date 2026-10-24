@@ -34,7 +34,20 @@
   (synced-generation :init nil)
   (measured? :init #f)
   ;; The reconcile pass that last matched this node.
-  (stamp :init nil))
+  (stamp :init nil)
+  ;; What the node looked like when last painted, the paint frame in which it
+  ;; or anything under it last changed, and when its subtree was recorded.
+  (painted-key :init nil)
+  (painted-flags :init nil)
+  (painted-width :init nil)
+  (painted-height :init nil)
+  (painted-x :init nil)
+  (painted-y :init nil)
+  (painted-generation :init nil)
+  (painted-children :init nil)
+  (changed-at :init 0)
+  (recorded-at :init nil)
+  (paint-cacheable? :init #f))
 
 (defclass Focus
   (node :init nil)
@@ -51,6 +64,7 @@
   (size :init nil)
   (generation :init 0)
   (layout-generation :init 0)
+  (paint-frame :init 0)
   (layout-scale :init nil)
   (measurers :init nil))
 
@@ -238,6 +252,13 @@
 
 (defgeneric (paint widget g bounds))
 
+;; A value that changes whenever paint would draw differently, other than
+;; through the widget's size or its focused, pressed, hovered and disabled
+;; flags. Unchanged subtrees replay their last recording while it stays
+;; equal?; nil, the default, paints on every frame and keeps enclosing
+;; subtrees from being recorded.
+(defgeneric (paint-key widget))
+
 (defgeneric (handle-event widget event))
 
 (defgeneric (default-focusable? widget))
@@ -292,6 +313,9 @@
   nil)
 
 (defmethod (paint (w Widget) g bounds)
+  nil)
+
+(defmethod (paint-key (w Widget))
   nil)
 
 (defmethod (handle-event (w Widget) event)

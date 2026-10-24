@@ -194,16 +194,17 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
                                       #f)))))
 
 (def- (sync! window)
-  ;; Reloaded measure methods may answer differently for the same key.
-  (unless (equal? (get window :synced-revision) dev/revision) (gpu/invalidate-layout! (get window :tree)))
+  ;; Reloaded measure and paint methods may differ for the same key.
+  (unless (equal? (get window :synced-revision) dev/revision)
+    (gpu/invalidate-layout! (get window :tree))
+    (gpu/invalidate-paint! (get window :tree)))
   (when (get window :view)
     (ui/reconcile! (get window :tree) ((get window :view)))
     (sync-text! window))
   (put! window :view-dirty? #f :synced-revision dev/revision :synced-frame (get window :frame)))
 
 (def- (repaint! window)
-  (put! window :paint-dirty? #t)
-  (gpu/invalidate-paint! (window :tree)))
+  (put! window :paint-dirty? #t))
 
 (def- (event! window event)
   (let ((kind (get event :kind))
@@ -291,12 +292,13 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
                           (and (not (get options :render-on-demand?))
                                (or (get options :step!) (not (equal? (get window :synced-frame) (get window :frame)))))
                           (not (equal? (get window :synced-revision) dev/revision)))
-                  (sync! window))
-                (gpu/invalidate-paint! tree))
+                  (sync! window)))
               (when (gpu/resizing? tree) (gpu/step-sizes! tree now))
               (when relayout? (gpu/layout! tree (get window :width) (get window :height) (get window :scale)))
               (when (gpu/animating? tree) (gpu/animate! tree now (get window :scale))))
-            (when (and (input/refresh-hover! (get window :pointer) tree) (not full?)) (gpu/invalidate-paint! tree))
+            ;; Paint compares hover state itself, so a change needs no
+            ;; invalidation.
+            (input/refresh-hover! (get window :pointer) tree)
             (gpu/paint! tree
                         renderer
                         (get window :width)

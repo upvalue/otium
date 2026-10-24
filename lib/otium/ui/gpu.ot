@@ -360,54 +360,167 @@ measure-key cannot see."
        (<= (+ (a :x) (a :width)) (+ (b :x) (b :width)))
        (<= (+ (a :y) (a :height)) (+ (b :y) (b :height)))))
 
+;; Interaction flags as bits, so comparing them allocates nothing.
+(def- FOCUSED 1)
+
+(def- PRESSED 2)
+
+(def- HOVERED 4)
+
+(def- DISABLED 8)
+
+(def- RESIZING 16)
+
+(def- (flag-set? flags bit)
+  (odd? (quotient flags bit)))
+
+;; Compare each node with how it was last painted, then record in changed-at
+;; the paint frame in which it or anything under it last changed. Returns
+;; that frame.
+(def- (prepare-paint! node parent disabled? resizing? frame generation)
+  (unless (node :bounds) (error "Run layout before painting"))
+  (let ((w (ui/instance node))
+        (b (node :bounds))
+        (disabled? (or disabled? (get (node :options) :disabled #f)))
+        (resizing? (or resizing? (resizing-node? node)))
+        (flags (+ (if (node :focused?)
+                      FOCUSED
+                      0)
+                  (if (node :pressed?)
+                      PRESSED
+                      0)
+                  (if (node :hovered?)
+                      HOVERED
+                      0)
+                  (if disabled?
+                      DISABLED
+                      0)
+                  (if resizing?
+                      RESIZING
+                      0)))
+        (key (ui/paint-key w))
+        ;; Offsets from the parent; where the subtree itself sits doesn't
+        ;; matter, since recordings replay at any position.
+        (x (if parent
+               (- (b :x) ((parent :bounds) :x))
+               0))
+        (y (if parent
+               (- (b :y) ((parent :bounds) :y))
+               0))
+        (children (ui/children node)))
+    (unless (and key
+                 (eq? (node :painted-generation) generation)
+                 (equal? flags (node :painted-flags))
+                 (equal? key (node :painted-key))
+                 (equal? (b :width) (node :painted-width))
+                 (equal? (b :height) (node :painted-height))
+                 (equal? x (node :painted-x))
+                 (equal? y (node :painted-y))
+                 (same-nodes? children (node :painted-children)))
+      (set! (node :changed-at) frame))
+    (set! (node :painted-key) key)
+    (set! (node :painted-flags) flags)
+    (set! (node :painted-width) (b :width))
+    (set! (node :painted-height) (b :height))
+    (set! (node :painted-x) x)
+    (set! (node :painted-y) y)
+    (set! (node :painted-generation) generation)
+    (set! (node :painted-children) children)
+    (let loop ((i 0)
+               (changed (node :changed-at))
+               (cacheable? (not (nil? key))))
+      (if (= i (length children))
+          (begin
+            (set! (node :changed-at) changed)
+            (set! (node :paint-cacheable?) cacheable?)
+            changed)
+          (let ((child (get children i)))
+            (loop (+ i 1)
+                  (max changed (prepare-paint! child node disabled? resizing? frame generation))
+                  (and cacheable? (child :paint-cacheable?))))))))
+
+;; Subtrees recorded for replay: top-level widgets, keyed widgets, children of
+;; Scroll, and widgets with :cache.
+(def- (recorded? node)
+  (let ((parent (node :parent)))
+    (or (not (ui/mounted? parent))
+        (not (nil? (node :key)))
+        (eq? (dispatch-type (ui/instance parent)) ui/Scroll)
+        (get (node :options) :cache #f))))
+
+(def- (draw-recording renderer id bounds clip)
+  (let ((drawn (native/gpu-cache-draw renderer
+                                      id
+                                      (bounds :x)
+                                      (bounds :y)
+                                      (clip :x)
+                                      (clip :y)
+                                      (clip :width)
+                                      (clip :height))))
+    (when (< drawn 0) (error (sdl/get-error)))
+    (= drawn 1)))
+
 ;; g is one context shared by the whole walk, reset for each widget before its
 ;; paint runs.
-(def- (paint-node! node g clip generation resizing?)
-  (unless (node :bounds) (error "Run layout before painting"))
+(def- (paint-node! node g clip frame)
   (let ((bounds (node :bounds))
         (visible (if (inside? bounds clip)
                      bounds
-                     (intersect clip bounds)))
-        (resizing? (or resizing? (resizing-node? node))))
+                     (intersect clip bounds))))
     (when (and (> (visible :width) 0) (> (visible :height) 0))
-      (if (get (node :options) :cache #f)
-          (begin
-            (unless (node :paint-cache) (set! (node :paint-cache) (gfx/cache)))
-            ;; gfx/cached reads its context's clip after painting, so it gets
-            ;; its own.
-            (gfx/cached (make gfx/Context :renderer (g :renderer) :clip clip)
-                        (node :paint-cache)
-                        bounds
-                        generation
-                        (fn (c) (paint-subtree! node g (c :clip) generation resizing?))))
-          (paint-subtree! node g visible generation resizing?)))))
+      (if (and (node :paint-cacheable?) (recorded? node))
+          (paint-recorded! node g clip frame)
+          (paint-subtree! node g visible frame)))))
 
-(def- (paint-subtree! node g clip generation resizing?)
-  (set! (g :clip) clip)
-  (set! (g :focused?) (node :focused?))
-  (set! (g :pressed?) (node :pressed?))
-  (set! (g :hovered?) (node :hovered?))
-  (set! (g :disabled?) (not (ui/enabled? node)))
-  (set! (g :resizing?) (and resizing? #t))
+(def- (paint-recorded! node g clip frame)
+  ;; Replay the last recording unless the subtree changed since, or the
+  ;; renderer dropped it. A recording covers the whole subtree, so paint it
+  ;; clipped to its own bounds and let replay apply the current clip.
+  (let ((renderer (g :renderer))
+        (bounds (node :bounds)))
+    (unless (node :paint-cache) (set! (node :paint-cache) (gfx/cache)))
+    (let ((id ((node :paint-cache) :id)))
+      (cond
+        ((and (node :recorded-at) (>= (node :recorded-at) (node :changed-at)) (draw-recording renderer id bounds clip))
+         nil)
+        ;; Record only once a subtree has stayed unchanged for a frame, so
+        ;; one that changes every frame never pays for recording.
+        ((= (node :changed-at) frame) (paint-subtree! node g (intersect clip bounds) frame))
+        (else (let ((start (native/gpu-mark renderer)))
+                (paint-subtree! node g bounds frame)
+                (sdl/check (native/gpu-cache-store renderer id start (bounds :x) (bounds :y)))
+                (set! (node :recorded-at) frame)
+                (unless (draw-recording renderer id bounds clip) (error "Paint recording was not stored"))))))))
+
+(def- (paint-subtree! node g clip frame)
+  (let ((flags (node :painted-flags)))
+    (set! (g :clip) clip)
+    (set! (g :focused?) (flag-set? flags FOCUSED))
+    (set! (g :pressed?) (flag-set? flags PRESSED))
+    (set! (g :hovered?) (flag-set? flags HOVERED))
+    (set! (g :disabled?) (flag-set? flags DISABLED))
+    (set! (g :resizing?) (flag-set? flags RESIZING)))
   (ui/paint (ui/instance node) g (node :bounds))
   (let ((children (ui/children node)))
     (dotimes (i (length children))
-      (paint-node! (get children i) g clip generation resizing?))))
+      (paint-node! (get children i) g clip frame))))
 
 (def (invalidate-paint! tree)
-  "Make widgets with the :cache option paint again on the next frame. Call it
-after reconciling: a layout alone does not change what cached subtrees draw,
-and a subtree whose size changed records again anyway."
+  "Paint every widget again on the next frame, e.g. after code changes that
+paint-key cannot see."
   (set! (tree :generation) (+ 1 (tree :generation))))
 
 (def (paint! tree renderer width height background)
-  "Record the tree's drawing. Subtrees with the :cache option replay their last
-recording until invalidate-paint! starts a new generation or their size changes."
+  "Record the tree's drawing. Recorded subtrees replay while nothing in them
+changes; see ui/paint-key."
   (native/gpu-clear renderer background)
-  (let ((clip (ui/bounds 0 0 width height))
-        (g (make gfx/Context :renderer renderer :clip clip))
-        (generation (tree :generation)))
-    (for-each (fn (node) (paint-node! node g clip generation #f)) (ui/children tree))))
+  (set! (tree :paint-frame) (+ 1 (tree :paint-frame)))
+  (let ((frame (tree :paint-frame))
+        (generation (tree :generation))
+        (clip (ui/bounds 0 0 width height))
+        (g (make gfx/Context :renderer renderer :clip clip)))
+    (for-each (fn (node) (prepare-paint! node nil #f #f frame generation)) (ui/children tree))
+    (for-each (fn (node) (paint-node! node g clip frame)) (ui/children tree))))
 
 (def- (paint-box w g bounds)
   (let ((border (w :border))
@@ -429,6 +542,9 @@ recording until invalidate-paint! starts a new generation or their size changes.
           (gfx/rect g (ui/bounds (- (+ x width) 1) y 1 height) border)))
       (fill (gfx/rect g bounds fill radius))
       (else nil))))
+
+(defmethod (ui/paint-key (w ui/Box))
+  (list (w :background) (w :border) (w :radius) (w :hover)))
 
 (defmethod (ui/paint (w ui/Box) g bounds)
   (paint-box w g bounds))
@@ -465,6 +581,9 @@ recording until invalidate-paint! starts a new generation or their size changes.
             (/ (- (bounds :width) (preferred :width)) 2)
             (- (bounds :width) (preferred :width))))))
 
+(defmethod (ui/paint-key (w ui/Label))
+  (list (w :text) (w :font) (w :size) (w :color) (w :wrap) (w :align)))
+
 (defmethod (ui/paint (w ui/Label) g bounds)
   (let ((offset (label-offset w g bounds)))
     (gfx/text g
@@ -478,6 +597,9 @@ recording until invalidate-paint! starts a new generation or their size changes.
                   (ui/color :muted)
                   (ui/color (w :color)))
               (w :wrap))))
+
+(defmethod (ui/paint-key (w ui/Button))
+  (list (w :style) (w :radius)))
 
 (defmethod (ui/paint (w ui/Button) g bounds)
   (unless (eq? (w :style) :bare)
@@ -496,6 +618,9 @@ recording until invalidate-paint! starts a new generation or their size changes.
                     color)
                 (w :radius))
       (when (g :focused?) (gfx/rect g (inset bounds 2 2) color (max 0 (- (w :radius) 2)))))))
+
+(defmethod (ui/paint-key (w ui/Scroll))
+  (list (w :background) (w :axis) (w :offset) (w :limit)))
 
 (defmethod (ui/paint (w ui/Scroll) g bounds)
   (when (w :background) (gfx/rect g bounds (w :background) 0))
@@ -537,6 +662,11 @@ recording until invalidate-paint! starts a new generation or their size changes.
 
 (defmethod (ui/measure (w ui/TextField) limits)
   (ui/size 160 (+ (w :size) 26)))
+
+;; Paint also stores caret positions and the text's scroll offset, which
+;; depend only on these and the field's size.
+(defmethod (ui/paint-key (w ui/TextField))
+  (list (w :value) (w :placeholder) (w :cursor) (w :anchor) (w :font) (w :size) (w :caret-style)))
 
 (defmethod (ui/paint (w ui/TextField) g bounds)
   (let ((positions (caret-positions (w :value) (w :font) (w :size) (native/gpu-scale (g :renderer))))
@@ -638,6 +768,9 @@ recording until invalidate-paint! starts a new generation or their size changes.
 
 (defmethod (ui/measure (w ui/Icon) limits)
   (ui/size (w :size) (w :size)))
+
+(defmethod (ui/paint-key (w ui/Icon))
+  (list (w :name) (w :fill) (w :color)))
 
 (defmethod (ui/paint (w ui/Icon) g bounds)
   (gfx/image g bounds (icon-path w) (ui/color (w :color))))

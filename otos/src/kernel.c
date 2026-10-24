@@ -172,6 +172,7 @@ static void repl(ots* state) {
   state->poll_hook = poll_console;
   ot_global_add(state, &reported_condition);
   ot_def_nat(state, "%reported-condition", nat_reported_condition);
+  gfx_register(state);
 
   puts("otium repl (otos) - ^C interrupts, ^D shuts down");
   repl(state);

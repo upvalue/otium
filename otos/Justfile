@@ -6,3 +6,7 @@ build:
 # Build and boot in QEMU; output goes to this terminal
 run: build
     qemu-system-riscv32 -machine virt -m 256M -bios default -nographic -no-reboot -kernel build/otos.elf
+
+# Boot with a virtio-gpu display window; the REPL stays in this terminal
+run-display: build
+    qemu-system-riscv32 -machine virt -m 256M -bios default -no-reboot -kernel build/otos.elf -serial mon:stdio -device virtio-gpu-device -global virtio-mmio.force-legacy=false

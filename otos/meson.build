@@ -51,7 +51,8 @@ embedded_files = custom_target('files.c',
 
 linker_script = meson.current_source_dir() / 'src/kernel.ld'
 executable('otos.elf',
-  'src/boot.S', 'src/kernel.c', 'src/line.c', 'src/ot-kernel.c', embedded_files,
+  'src/boot.S', 'src/kernel.c', 'src/line.c', 'src/ot-kernel.c', 'src/virtio.c',
+  'src/display.c', 'src/gfx.c', embedded_files,
   c_args: runtime_args,
   include_directories: include_directories(runtime_dir, 'src'),
   dependencies: picolibc,

@@ -16,6 +16,9 @@
 (defmethod (ui/layout-style (w Dot))
   {:width (w :size) :height (w :size)})
 
+(defmethod (ui/paint-key (w Dot))
+  (list (w :color) (w :size)))
+
 (defmethod (ui/paint (w Dot) g bounds)
   (gfx/rect g bounds (w :color) (/ (w :size) 2)))
 

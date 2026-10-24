@@ -109,6 +109,13 @@
       ((eq? kind :key-down) (key! session event))
       (else nil))))
 
+;; Output bumps the session version. Focus, size and resizing are compared by
+;; the UI itself; paint's own side effects, fitting the PTY and noting the
+;; settled size, depend only on those.
+(defmethod (ui/paint-key (w Terminal))
+  (let ((session (w :session)))
+    (list (get session :version 0) (session :exit) (session :closed?) (font) (font-size) (padding))))
+
 ;; The outer cache replays idle terminals; row caches reuse unchanged text
 ;; after output or focus changes. While an enclosing column
 ;; eases to a new width, the last grid is replayed at its old size; the grid

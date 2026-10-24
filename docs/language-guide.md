@@ -150,9 +150,29 @@ Other everyday functions include `str` (concatenate display forms), `println`, `
 
 - `def` defines both values and functions. `define`, `defn`, `lambda`, `let*` and `letrec` do not exist, and the linter flags them (L0101).
 - A docstring goes after the parameter list, or before the value in a value definition.
-- A rest parameter can be written `(x . rest)`, `(x & rest)` or as a single symbol. The rest arrives as a list. There are no optional or keyword parameters.
+- Optional positional parameters follow `&optional`, each as `(name default)`. Defaults run only when omitted, from left to right, and can refer to preceding parameters. An explicit `nil` or `#f` is a supplied value.
+- A rest parameter can be written `(x . rest)`, `(x & rest)` or as a single symbol. The rest arrives as a list, allocating when extra arguments are supplied. `rest-arguments` (L0401) warns on runtime rest parameters; suppress it with a reason for genuinely variadic APIs. Macro parameter lists are exempt.
+- Optional parameters are supported in `fn`, `def` and `def-`. Required parameters come first; optional and rest parameters cannot be combined. Keyword parameters are not supported.
 - `def-` makes a definition private to its namespace.
 - `def` is allowed at top level and at the start of a body. `def-`, `defmacro`, `ns` and `require` are only allowed at top level.
+
+```scheme
+(def (draw-text text x y &optional (color :white) (scale 1))
+  ...)
+
+(draw-text "hello" 10 20)          ; :white, 1
+(draw-text "hello" 10 20 :red)     ; :red, 1
+(draw-text "hello" 10 20 :red 2)   ; :red, 2
+
+(fn (items start &optional (end (length items)))
+  ...)
+```
+
+Calls remain positional: supply earlier arguments to reach later ones. Too
+many or too few arguments raise an arity error. Chez compiles optional
+arguments to fixed-arity `case-lambda` entries with one shared body and no
+rest-list allocation. The experimental C runtime implements the same
+semantics using a rest-list fallback.
 
 ### `let` is sequential
 
@@ -329,6 +349,7 @@ Many of these errors exist to catch Scheme or Clojure habits. For example, E0201
 Rules have a level of `allow`, `warn` or `deny`. A deny-level finding makes the command fail, and `--deny-warnings` makes warnings fail it too. `--allow RULE`, `--warn RULE` and `--deny RULE` on the command line override the project's settings. The current rules are:
 
 - **Style:** `if-chain` (an `if` in the else branch of an `if`; use `cond`), `liftable-function`.
+- **Performance:** `rest-arguments` (L0401, warn by default).
 - **Foreign forms:** `foreign-definition` (`define`, `defn`, `lambda` and so on), `bracket-bindings` (deny by default).
 - **Correctness:** `unbound-name` (deny), `unused-binding`.
 - **Macros:** `missed-unquote`, `captured-binding`, `template-namespace-ref`, `self-qualified-template`, `expansion-side-effect`, `expansion-failed`.

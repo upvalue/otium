@@ -33,6 +33,7 @@
         #t
         #f)))
 
+;; lint: allow(rest-arguments) accepts any number of font search roots
 (def (discover . roots)
   "List font files recursively in standard directories, or an explicit list of directories."
   (let ((found '())
@@ -63,6 +64,7 @@
                   (car roots)))
     (sort found)))
 
+;; lint: allow(rest-arguments) accepts any number of font search roots
 (def (find name . roots)
   "Find a filename or filename stem, case-insensitively. Returns every matching path."
   (let ((wanted (string-downcase name)))
@@ -71,6 +73,7 @@
                 (or (equal? wanted base) (equal? wanted (substring base 0 (- (string-length base) 4))))))
             (apply discover roots))))
 
+;; lint: allow(rest-arguments) accepts any number of font search roots
 (def (resolve value . roots)
   "Resolve #f, an existing path, or an unambiguous installed font filename/stem."
   (cond

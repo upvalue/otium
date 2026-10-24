@@ -4,7 +4,9 @@
 (def (early x) (let ((y (+ x 1)) (z (+ y 1))) z))
 (defmacro identity-form (x) x)
 (def (macro-use x) (identity-form x))
+;; lint: allow(rest-arguments) exercises rest parameter scope
 (def (rest-use x & more) (cons x more))
+;; lint: allow(rest-arguments) exercises dotted parameter scope
 (def (dotted x . more) (cons x more))
 (def (ignored _x) 1)
 (def (loop-use n) (let loop ((x n)) (if (= x 0) x (loop (- x 1)))))

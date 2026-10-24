@@ -1,3 +1,4 @@
+;; lint: allow-file(rest-arguments) instrumentation accepts the intercepted function arities
 ;; Headless row-cache regression checks. Run from the repository root with --runtime=chez -L .
 (require manse.terminal)
 (ns manse.terminal)

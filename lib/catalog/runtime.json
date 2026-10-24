@@ -1929,5 +1929,11 @@
       "c",
       "chez"
     ]
+  },
+  "expander-optional-function": {
+    "text": "(expander-optional-function form fallback)\nInternal shared-expander adapter: preserve the canonical optional fn for tooling, otherwise select the runtime implementation.",
+    "runtimes": [
+      "c"
+    ]
   }
 }

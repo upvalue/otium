@@ -42,6 +42,7 @@
       ((equal? ((car entries) :id) id) ((car entries) :app))
       (else (loop (cdr entries))))))
 
+;; lint: allow(rest-arguments) combines any number of predicates
 (def (query registry . predicates)
   "Return metadata tables in registration order, optionally filtered by a predicate."
   (let ((items (map (fn (entry) (put (info (entry :app)) :id (entry :id) :name (entry :name))) (registry :entries))))

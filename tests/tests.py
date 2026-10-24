@@ -1,6 +1,7 @@
 """Otium check programs that run unchanged on both runtimes."""
 from harness import case
 
+case('optional parameters', 'tests/optional/checks.ot')
 case('expander', 'tests/expander/checks.ot')
 case('classes', 'tests/classes/checks.ot')
 case('records', 'tests/records/checks.ot', paths=['tests/records/fixtures'])

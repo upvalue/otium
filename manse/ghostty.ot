@@ -208,6 +208,7 @@
 
 ;; Terminals
 
+;; lint: allow(rest-arguments) forwards arguments to constructors with different arities
 (def- (new-handle op constructor . args)
   (check! op (apply constructor (append args (list scratch))))
   (ffi/ref scratch 'pointer 0))

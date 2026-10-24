@@ -1,3 +1,4 @@
+;; lint: allow-file(rest-arguments) instrumentation accepts the intercepted function arities
 (require manse.ghostty)
 (ns manse.ghostty)
 (require otium.test :refer (check report))

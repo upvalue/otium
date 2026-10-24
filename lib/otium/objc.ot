@@ -48,6 +48,7 @@
     ((ffi/pointer? value) 'pointer)
     (else (error "Cannot pass this to Objective-C" value))))
 
+;; lint: allow(rest-arguments) Objective-C selectors have varying arities
 (def (send-as result receiver name . arguments)
   "Send the message name to receiver and return a result of the FFI type
 result. Strings pass as C strings, integers as long, floats as double and
@@ -57,6 +58,7 @@ booleans as BOOL and pointers, such as objects, as pointers."
          (selector name)
          arguments))
 
+;; lint: allow(rest-arguments) forwards selector arguments
 (def (send receiver name . arguments)
   "Send the message name to receiver and return the object it returns."
   (apply send-as 'pointer receiver name arguments))

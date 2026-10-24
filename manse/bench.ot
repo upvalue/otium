@@ -1,3 +1,4 @@
+;; lint: allow-file(rest-arguments) instrumentation accepts the intercepted function arities
 (require otium.time :as time)
 
 ;; Frame cost of the Manse strip with four busy terminals.

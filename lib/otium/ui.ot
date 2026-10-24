@@ -175,15 +175,13 @@
   (width height width-mode height-mode scale)
   :immutable #t)
 
-(def (limit-ref limits key . fallback)
+(def (limit-ref limits key &optional (fallback nil))
   "Read a measurement limit; unconstrained dimensions use the supplied default."
   (let ((value (if (record? limits)
                    (limits key)
                    (get limits key))))
     (if (nil? value)
-        (if (null? fallback)
-            nil
-            (car fallback))
+        fallback
         value)))
 
 (def (style-ref style key fallback)
@@ -319,6 +317,7 @@
           :children children
           :options options)))
 
+;; lint: allow(rest-arguments) accepts any number of child widgets
 (def (new class opts . children)
   "Construct a description. Treat it and its options as fixed after construction.
 Empty options may be nil. :tab-navigation defaults to #t."
@@ -330,18 +329,22 @@ Empty options may be nil. :tab-navigation defaults to #t."
 (def (label opts text)
   (describe-widget Label opts '() (list :text text)))
 
+;; lint: allow(rest-arguments) accepts any number of child widgets
 (def (row opts . children)
   (describe-widget Box opts children '(:direction :row)))
 
+;; lint: allow(rest-arguments) accepts any number of child widgets
 (def (column opts . children)
   (describe-widget Box opts children '(:direction :column)))
 
+;; lint: allow(rest-arguments) accepts any number of child widgets
 (def (button opts . children)
   (apply new Button opts children))
 
 (def (text-field opts)
   (new TextField opts))
 
+;; lint: allow(rest-arguments) accepts any number of child widgets
 (def (scroll opts . children)
   (apply new Scroll opts children))
 

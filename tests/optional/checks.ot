@@ -1,0 +1,158 @@
+(require otium.test :refer (check fails? report))
+
+(def (defaults x &optional (y 10) (z (+ y x)))
+  "An optional function keeps its documentation."
+  (list x y z))
+
+(check '(2 10 12) (defaults 2))
+(check '(2 3 5) (defaults 2 3))
+(check '(2 3 4) (defaults 2 3 4))
+(check '(2 3 4) (apply defaults '(2 3 4)))
+(check 7 ((fn (&optional (x 7)) x)))
+(check nil ((fn (&optional (x 7)) x) nil))
+(check #f ((fn (&optional (x 7)) x) #f))
+(check 0 ((fn (&optional (x 7)) x) 0))
+(check '() ((fn (&optional (x 7)) x) '()))
+(check 9 (let ((x 9)) ((fn (&optional (x x)) x))))
+(check 12 (let ((outer 7)) ((fn (x &optional (y (+ x outer))) y) 5)))
+(check 17
+       ((fn (x &optional
+               (y (begin
+                    (set! x 10)
+                    7)))
+          (+ x y))
+        1))
+
+(check "default closure shares a mutated parameter"
+       9
+       ((fn (x &optional (read-x (fn () x)))
+          (set! x 9)
+          (read-x))
+        1))
+(check "default closure shares a mutated optional"
+       9
+       ((fn (&optional (x 1) (read-x (fn () x)))
+          (set! x 9)
+          (read-x))))
+(check "default closure can mutate a parameter"
+       9
+       ((fn (x &optional (write-x (fn () (set! x 9))))
+          (write-x)
+          x)
+        1))
+
+(def events [])
+
+(def (ordered &optional
+              (a (begin
+                   (push! events :a)
+                   1))
+              (b (begin
+                   (push! events :b)
+                   (+ a 1))))
+  (list a b))
+
+(check '(1 2) (ordered))
+(check '(:a :b) (array-to-list events))
+(set! events [])
+(check '(5 6) (ordered 5))
+(check '(:b) (array-to-list events))
+(set! events [])
+(check '(5 7) (ordered 5 7))
+(check '() (array-to-list events))
+(check #t (fails? (fn () (ordered 1 2 3))))
+(check '() (array-to-list events))
+(check #t (fails? (fn () (defaults))))
+(check #t (fails? (fn () (defaults 1 2 3 4))))
+
+(def (fresh &optional (value []))
+  value)
+
+(def first-fresh (fresh))
+
+(push! first-fresh 1)
+(check '() (array-to-list (fresh)))
+
+(defmacro twice (x)
+  #`(+ ,x ,x))
+
+(check 8 ((fn (x &optional (y (twice x))) y) 4))
+(check 5 ((fn (twice &optional (y (twice 4))) y) (fn (x) (+ x 1))))
+
+(defmacro optional-function ()
+  #`(fn (x# &optional (y# (+ x# 2))) y#))
+
+(check 7 ((optional-function) 5))
+
+(check 8
+       (let ()
+         (def (local x &optional (y (+ x 2)))
+           (def (body)
+             (+ y 1))
+           (body))
+         (local 5)))
+(check 4
+       (let ((car 1)
+             (cdr 2)
+             (null? 3)
+             (length 4)
+             (error 5))
+         ((fn (&optional (x length)) x))))
+(check 1000
+       (let ()
+         (def (loop n &optional (total 0))
+           (if (= n 0)
+               total
+               (loop (- n 1) (+ total 1))))
+         (loop 1000)))
+
+(def (live-default &optional (x 1))
+  x)
+
+(def (caller)
+  (live-default))
+
+(def saved live-default)
+
+(check 1 (caller))
+
+(def (live-default &optional (x 2))
+  x)
+
+(check 2 (caller))
+(check 1 (saved))
+
+(for-each (fn (source) (check source #t (fails? (fn () (eval (read-string source))))))
+          '("(fn (&optional) 1)"
+            "(fn (&optional x) x)"
+            "(fn (&optional (x)) x)"
+            "(fn (&optional (x 1 2)) x)"
+            "(fn (x &optional (x 2)) x)"
+            "(fn (&optional (x 1) (x 2)) x)"
+            "(fn (&optional (x 1) y) x)"
+            "(fn (&optional (x 1) . rest) x)"
+            "(fn (&optional (x 1) & rest) x)"
+            "(fn (&optional (if 1)) 1)"
+            "(fn (&optional (a/b 1)) 1)"
+            "(fn (x . &optional) x)"))
+
+(def expansion-count 0)
+
+(defmacro counted-default ()
+  (set! expansion-count (+ expansion-count 1))
+  10)
+
+(def (expanded-once &optional (x (counted-default)))
+  (+ x (counted-default)))
+
+(check "default and body expand once" 2 expansion-count)
+(check 20 (expanded-once))
+(check 12 (expanded-once 2))
+
+(check "array parameter compatibility" 3 ((fn [x &optional (y 2)] (+ x y)) 1))
+(check "arity code"
+       "E0301"
+       (try
+         (defaults 1 2 3 4)
+         (catch problem (get problem :code))))
+(report "optional parameters")

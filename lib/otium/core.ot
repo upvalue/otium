@@ -309,24 +309,16 @@
     (for-each (fn (x) (set! acc (f acc x))) seq)
     acc))
 
-(def (range . args)
+(def- %missing-argument (gensym "missing-argument"))
+
+(def (range start &optional (end %missing-argument) (step 1))
   "(range end) / (range start end [step])\nReturn an array of integers toward the exclusive end. Defaults: start 0, step 1. Step must be nonzero and may be negative."
-  (let ((n (length args))
-        (a 0)
-        (b 0)
-        (step 1))
-    (cond
-      ((= n 1) (set! b (nth args 0)))
-      ((= n 2)
-       (begin
-         (set! a (nth args 0))
-         (set! b (nth args 1))))
-      ((= n 3)
-       (begin
-         (set! a (nth args 0))
-         (set! b (nth args 1))
-         (set! step (nth args 2))))
-      (else (error "range: expected 1 to 3 arguments")))
+  (let ((a (if (eq? end %missing-argument)
+               0
+               start))
+        (b (if (eq? end %missing-argument)
+               start
+               end)))
     (require-int "range" a)
     (require-int "range" b)
     (require-int "range" step)
@@ -342,6 +334,7 @@
             (set! i (+ i step))))
       out)))
 
+;; lint: allow(rest-arguments) concatenates any number of sequences
 (def (concat . seqs)
   "Concatenation; kind follows the first argument (nil -> list)."
   (let ((out (builder-like (if (pair? seqs)
@@ -416,6 +409,7 @@
 
 ;; --- tables (10.5) ----------------------------------------------------------
 
+;; lint: allow(rest-arguments) accepts any number of key/value pairs
 (def (put coll . kvs)
   "(put collection key value ...)\nput! on a shallow copy; (put nil ...) builds a fresh table."
   (let ((c (if (nil? coll)
@@ -428,6 +422,7 @@
         (set! s (cdr (cdr s)))))
     c))
 
+;; lint: allow(rest-arguments) accepts any number of keys
 (def (dissoc coll . ks)
   "(dissoc collection key ...)\nReturn a shallow copy without the specified keys."
   (let ((c (if (nil? coll)
@@ -436,23 +431,21 @@
     (for-each (fn (k) (put! c k nil)) ks)
     c))
 
+;; lint: allow(rest-arguments) forwards any number of arguments to the updater
 (def (update coll k f . args)
   "(update collection key procedure argument ...)\nCopy the collection and replace the entry with (procedure (get collection key) argument ...)."
   (put coll k (apply f (get coll k) args)))
 
+;; lint: allow(rest-arguments) merges any number of tables
 (def (merge . ts)
   "New table, left to right; nil arguments skipped."
   (let ((out (table)))
     (for-each (fn (t) (unless (nil? t) (for-each (fn (k) (put! out k (get t k))) (keys t)))) ts)
     out))
 
-(def (get-in coll path . more)
+(def (get-in coll path &optional (default nil))
   "get folded over a sequence of keys."
-  (when (> (length more) 1) (error "get-in: expected 2 or 3 arguments"))
-  (let ((default (if (pair? more)
-                     (car more)
-                     nil))
-        (c coll))
+  (let ((c coll))
     (for-each (fn (k) (set! c (get c k))) path)
     (if (nil? c)
         default
@@ -843,6 +836,7 @@
 (def- (any-empty? lists)
   (and (pair? lists) (or (not (pair? (car lists))) (any-empty? (cdr lists)))))
 
+;; lint: allow(rest-arguments) folds over any number of parallel lists
 (def (fold-left f init lst & more)
   "(fold-left procedure initial list ...)\nCombine from the left: (procedure accumulator element ...) for each position."
   (let loop ((acc init)
@@ -851,6 +845,7 @@
         acc
         (loop (apply f acc (heads lists)) (tails lists)))))
 
+;; lint: allow(rest-arguments) folds over any number of parallel lists
 (def (fold-right f init lst & more)
   "(fold-right procedure initial list ...)\nCombine from the right: (procedure element ... accumulator) for each position."
   (let loop ((lists (cons lst more)))
@@ -879,6 +874,7 @@
              (cdr seq)))
        sequences))
 
+;; lint: allow(rest-arguments) tests any number of parallel lists
 (def (exists f seq & more)
   "Return the first truthy predicate result across lists or arrays, or nil. Stop at the shortest input."
   (let loop ((sequences (cons seq more))
@@ -887,6 +883,7 @@
         nil
         (or (apply f (sequence-heads sequences i)) (loop (sequence-tails sequences) (+ i 1))))))
 
+;; lint: allow(rest-arguments) tests any number of parallel lists
 (def (for-all f seq & more)
   "Return the last predicate result if all positions pass, else the first falsy result. Empty inputs pass."
   (let loop ((sequences (cons seq more))
@@ -907,6 +904,7 @@
   "Alias for neg?."
   neg?)
 
+;; lint: allow(rest-arguments) accepts any number of integers
 (def (gcd & xs)
   "(gcd integer ...)\nGreatest common divisor; no arguments gives 0."
   (let loop ((acc 0)
@@ -920,6 +918,7 @@
               (cdr rest))
         acc)))
 
+;; lint: allow(rest-arguments) accepts any number of integers
 (def (lcm & xs)
   "(lcm integer ...)\nLeast common multiple; no arguments gives 1."
   (let loop ((acc 1)
@@ -941,18 +940,22 @@
   (if (not (and (string? a) (string? b))) (error (str who ": expected strings")))
   (and (ok? a b) (or (null? more) (string-chain who ok? b (car more) (cdr more)))))
 
+;; lint: allow(rest-arguments) compares any number of values
 (def (string=? a b & more)
   "(string=? string string ...)\nTest whether all strings are equal."
   (string-chain "string=?" equal? a b more))
 
+;; lint: allow(rest-arguments) compares any number of values
 (def (string>? a b & more)
   "(string>? string string ...)\nTest whether strings are in strictly decreasing order."
   (string-chain "string>?" (fn (x y) (string<? y x)) a b more))
 
+;; lint: allow(rest-arguments) compares any number of values
 (def (string<=? a b & more)
   "(string<=? string string ...)\nTest whether strings are in nondecreasing order."
   (string-chain "string<=?" (fn (x y) (not (string<? y x))) a b more))
 
+;; lint: allow(rest-arguments) compares any number of values
 (def (string>=? a b & more)
   "(string>=? string string ...)\nTest whether strings are in nonincreasing order."
   (string-chain "string>=?" (fn (x y) (not (string<? x y))) a b more))
@@ -961,22 +964,27 @@
   (if (not (and (char? a) (char? b))) (error (str who ": expected chars")))
   (and (ok? (char->integer a) (char->integer b)) (or (null? more) (char-chain who ok? b (car more) (cdr more)))))
 
+;; lint: allow(rest-arguments) compares any number of values
 (def (char=? a b & more)
   "(char=? char char ...)\nTest whether all chars are the same."
   (char-chain "char=?" = a b more))
 
+;; lint: allow(rest-arguments) compares any number of values
 (def (char<? a b & more)
   "(char<? char char ...)\nTest whether chars are in strictly increasing code point order."
   (char-chain "char<?" < a b more))
 
+;; lint: allow(rest-arguments) compares any number of values
 (def (char>? a b & more)
   "(char>? char char ...)\nTest whether chars are in strictly decreasing code point order."
   (char-chain "char>?" > a b more))
 
+;; lint: allow(rest-arguments) compares any number of values
 (def (char<=? a b & more)
   "(char<=? char char ...)\nTest whether chars are in nondecreasing code point order."
   (char-chain "char<=?" <= a b more))
 
+;; lint: allow(rest-arguments) compares any number of values
 (def (char>=? a b & more)
   "(char>=? char char ...)\nTest whether chars are in nonincreasing code point order."
   (char-chain "char>=?" >= a b more))
@@ -1030,13 +1038,16 @@
 
 (def- %read-datum-string %read-datum-string)
 
-(def (read-string source . port)
+(def (read-string source &optional (port %missing-argument))
   "(read-string source) or (read-string count [port])\nParse a datum from a string, or read up to count characters from a port."
   (if (string? source)
       (begin
-        (unless (null? port) (error "read-string: string form takes one argument"))
+        (unless (eq? port %missing-argument) (error "read-string: string form takes one argument"))
         (%read-datum-string source))
-      (apply %read-characters source port)))
+      (%read-characters source
+                        (if (eq? port %missing-argument)
+                            (current-input-port)
+                            port))))
 
 (defmethod (close (port Port) outcome)
   (close-port port))
@@ -1099,12 +1110,9 @@
                 (buffer-push! out tail)
                 (when (and (eq? c #\#) (equal? tail "u8") (eq? (peek-char port) #\()) (%port-form-text port out))))))))
 
-(def (read . ports)
+(def (read &optional (port (current-input-port)))
   "(read [port])\nRead one Otium datum, or the EOF object."
-  (when (> (length ports) 1) (error "read: expected at most one port"))
-  (let ((port (if (null? ports)
-                  (current-input-port)
-                  (car ports))))
+  (begin
     (%port-space port)
     (if (eof-object? (peek-char port))
         (eof-object)
@@ -1123,13 +1131,9 @@
 (def- (%string-prefix? chars rest)
   (or (null? rest) (and (pair? chars) (eq? (car chars) (car rest)) (%string-prefix? (cdr chars) (cdr rest)))))
 
-(def (string-index text part . starts)
+(def (string-index text part &optional (start 0))
   "Find part at or after the optional character offset, or nil. Empty part matches at start."
-  (when (> (length starts) 1) (error "string-index: expected at most one start"))
-  (let ((start (if (null? starts)
-                   0
-                   (car starts)))
-        (n (string-length text))
+  (let ((n (string-length text))
         (needle (string->list part)))
     (require-int "string-index" start)
     (when (< start 0) (error "string-index: negative start" start))

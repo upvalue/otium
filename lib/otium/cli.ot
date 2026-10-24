@@ -116,12 +116,11 @@
   (%check-spec spec '())
   spec)
 
-(def (ref values name . fallback)
+(def (ref values name &optional (fallback #f))
   (let ((entry (assoc name values)))
-    (cond
-      (entry (cadr entry))
-      ((null? fallback) #f)
-      (else (car fallback)))))
+    (if entry
+        (cadr entry)
+        fallback)))
 
 (def (present? values name)
   (if (assoc name values)
@@ -379,11 +378,8 @@
                      "")
                  "\n"))
 
-(def (format-help command . context)
-  (let ((values (if (null? context)
-                    '()
-                    (car context)))
-        (path (ref values 'command-path (list (symbol->string (cadr command)))))
+(def (format-help command &optional (values '()))
+  (let ((path (ref values 'command-path (list (symbol->string (cadr command)))))
         (fields (append (ref values 'globals '()) (%fields command))))
     (string-append (%property command 'summary "")
                    "\n\nUsage: "
@@ -443,11 +439,8 @@
                    (string-join " " (ref (outcome-values outcome) 'command-path))
                    " --help' for more information.\n")))
 
-(def (run command main . supplied)
-  (let ((outcome (parse command
-                        (if (null? supplied)
-                            (otium.process/arguments)
-                            (car supplied)))))
+(def (run command main &optional (arguments (otium.process/arguments)))
+  (let ((outcome (parse command arguments)))
     (cond
       ((eq? (outcome-kind outcome) 'ok) (exit (main (outcome-values outcome))))
       ((eq? (outcome-kind outcome) 'help)

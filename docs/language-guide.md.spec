@@ -14,7 +14,10 @@ Cover, in roughly this order:
   (run, repl, fmt, lint, test, explain, serve). Check `lib/catalog/` and
   `tools/generate-cli.py` for the real list.
 - Syntax and data: literals, keywords, tables, vectors, strings.
-- Definitions, functions, control flow, `match`, macros.
+- Definitions, functions, control flow, `match`, macros. Include `&optional`
+  positional defaults in `fn`, `def` and `def-`, their sequential scope, and
+  the `rest-arguments` allocation lint rule. Chez avoids rest lists for
+  optionals; the C runtime currently uses a compatible fallback.
 - Namespaces, `require`, `project.ot` and module paths.
 - Errors and diagnostics: error codes, `otium explain`, lint rules and how to
   suppress one. Read `lib/catalog/diagnostics.json`.

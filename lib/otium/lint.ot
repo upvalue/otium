@@ -112,6 +112,19 @@
         (when (and (> (length parts) index) (eq? ((nth parts index) :kind) :array))
           (report! context "bracket-bindings" (nth parts index) {:form name :expected (get bracket-forms name)}))))))
 
+(def- (rest-arguments context node _quoted)
+  (let ((head (syntax/head-name node))
+        (parts (if (member head '("fn" "def" "def-"))
+                   (syntax/forms node)
+                   '())))
+    (when (> (length parts) 1)
+      (let ((params (second parts)))
+        (cond
+          ((and (equal? head "fn") (eq? (params :kind) :atom)) (report! context "rest-arguments" params {}))
+          ((get params :children)
+           (let ((marker (find (fn (part) (member (get part :text) '("." "&"))) (syntax/forms params))))
+             (when marker (report! context "rest-arguments" marker {})))))))))
+
 ;; Templates: a ` or #` prefix node. Unquoted code inside a template is
 ;; checked as code by the main traversal, not as template.
 
@@ -148,10 +161,16 @@
        (let ((params (nth parts 1)))
          (list (if (atom? params)
                    (list params)
-                   (filter atom?
-                           (if (get params :children)
-                               (syntax/forms params)
-                               '())))
+                   (filter identity
+                           (map (fn (param)
+                                  (cond
+                                    ((atom? param) param)
+                                    ((and (eq? (param :kind) :list) (= (length (syntax/forms param)) 2))
+                                     (first (syntax/forms param)))
+                                    (else nil)))
+                                (if (get params :children)
+                                    (syntax/forms params)
+                                    '()))))
                (drop 2 parts))))
       ((and (equal? name "let") (> (length parts) 2) (atom? (nth parts 1))) (list (list (nth parts 1)) (drop 3 parts)))
       ((and (equal? name "let") (> (length parts) 2) (get (nth parts 1) :children))
@@ -176,7 +195,7 @@
                       (let ((found (template-binding-names n)))
                         (when (and found (exists inserts-code? (second found)))
                           (for-each (fn (name)
-                                      (unless (or (member (name :text) '("&" "_"))
+                                      (unless (or (member (name :text) '("&" "&optional" "." "_"))
                                                   (string-starts-with? (name :text) "_"))
                                         (report! context "captured-binding" name {:name (name :text)})))
                                     (first found))))))))
@@ -195,7 +214,8 @@
                                      n
                                      {:name (n :text) :member (substring (n :text) (string-length prefix))}))))))))
 
-(def- syntax-checks (list if-chain foreign-definition bracket-bindings captured-binding self-qualified-template))
+(def- syntax-checks
+  (list if-chain foreign-definition bracket-bindings captured-binding self-qualified-template rest-arguments))
 
 (def- (check-syntax context node quoted)
   ;; Quoted data is not code, but a quasiquote template usually is.
@@ -464,8 +484,29 @@
                     (walk-form walk scope form)))
               (proper forms))))
 
+(def- (walk-parameters walk scope params)
+  (cond
+    ((null? params) scope)
+    ((symbol? params) (bind walk scope params :parameter))
+    ((eq? (car params) '&optional)
+     (let ((inner scope))
+       (for-each (fn (binding)
+                   (walk-form walk inner (second binding))
+                   (set! inner (bind walk inner (first binding) :parameter)))
+                 (cdr params))
+       inner))
+    (else (walk-parameters walk (bind walk scope (car params) :parameter) (cdr params)))))
+
 (def- (walk-definition walk scope form)
-  (let ((target (second form)))
+  ;; Optional function definitions expand to a named value holding a fn.
+  (let ((target (second form))
+        (body (cdr (cdr form)))
+        (values (if (and (pair? body) (string? (car body)) (pair? (cdr body)))
+                    (cdr body)
+                    body)))
+    (when (and (symbol? target) (= (length values) 1) (pair? (car values)) (eq? (car (car values)) 'fn))
+      (set! body (cdr (cdr (car values))))
+      (set! target (cons target (second (car values)))))
     (if (pair? target)
         (let ((name (symbol->string (car target)))
               (binding (find (fn (b) (equal? (b :name) name)) scope))
@@ -475,7 +516,7 @@
           (when binding
             (push! (walk :functions) candidate)
             (put! walk :active (cons candidate active)))
-          (walk-body walk (bind-all walk scope (parameter-names (cdr target)) :parameter) (cdr (cdr form)))
+          (walk-body walk (walk-parameters walk scope (cdr target)) body)
           (put! walk :active active))
         (walk-all walk scope (cdr (cdr form))))))
 
@@ -532,6 +573,7 @@
           else
           catch
           &
+          &optional
           _
           array
           table))
@@ -563,8 +605,7 @@
             (cond
               ((eq? head 'quote) nil)
               ((eq? head 'quasiquote) (walk-quasi walk scope (second x) 1 #f))
-              ((eq? head 'fn)
-               (walk-body walk (bind-all walk scope (parameter-names (second x)) :parameter) (cdr (cdr x))))
+              ((eq? head 'fn) (walk-body walk (walk-parameters walk scope (second x)) (cdr (cdr x))))
               ((eq? head 'let)
                (if (symbol? (second x))
                    (let ((bindings (proper (nth x 2))))
@@ -804,17 +845,11 @@
 
 ;; --- entry -----------------------------------------------------------------------
 
-(def (lint-text text & arguments)
+(def (lint-text text &optional (path "<text>") (options {}))
   "Findings for a whole source file, in source order. Optional arguments are
 the path to report and an options table of :levels, rule names mapped to
 :deny, :warn or :allow, and :expand, false to skip the name rules."
-  (let ((path (if (pair? arguments)
-                  (first arguments)
-                  "<text>"))
-        (options (if (and (pair? arguments) (pair? (cdr arguments)))
-                     (second arguments)
-                     {}))
-        (context (make-context text path options))
+  (let ((context (make-context text path options))
         (top (syntax/parse text))
         (tops (filter (fn (node) (not (syntax/comment? node))) (array-to-list top))))
     (collect-definitions! context tops)

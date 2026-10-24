@@ -369,14 +369,29 @@ Applying anything else is an error.
 A parameter list is one of:
 
 - `(a b c)` -- fixed parameters;
+- `(a &optional (b 10) (c (+ a b)))` -- required parameters followed by
+  optional positional parameters, each with a default expression;
 - `(a b . rest)` or `(a b & rest)` -- trailing rest parameter, bound to a
   *list* of the remaining arguments (possibly `()`);
 - a bare symbol `args` -- all arguments as a list;
 - the array-literal spelling `[a b]` of any of the above (1.7).
 
-Calling with fewer arguments than the fixed parameters, or more when
-there is no rest parameter, is an error. There are no optional or keyword
-parameters.
+Calling with fewer arguments than the required parameters, or more than
+all required and optional parameters when there is no rest parameter, is
+an arity error. Keyword parameters are not supported.
+
+Optional parameters are supported in `fn`, `def` and `def-`. Defaults run
+only for omitted arguments, from left to right, in the scope of preceding
+parameters and the enclosing lexical environment. Body definitions are not
+in scope in defaults. Explicit `nil` and `#f` are supplied values. Required
+parameters must precede `&optional`, which needs at least one `(name default)`
+pair; optional and rest parameters cannot be combined.
+
+Chez uses fixed-arity entries with a shared body, avoiding argument lists.
+The C implementation currently uses a compatible rest-list fallback.
+Runtime rest parameters trigger the `rest-arguments` lint warning (L0401);
+genuinely variadic APIs can suppress it with a reason. Macro parameter lists
+are exempt.
 
 ### 3.5 Tail calls
 

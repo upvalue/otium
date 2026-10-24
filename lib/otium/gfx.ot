@@ -31,17 +31,9 @@
                                 (clip :width)
                                 (clip :height)))))
 
-(def (rect g bounds color . radius)
+(def (rect g bounds color &optional (radius 0))
   "Record a rounded rectangle, clipped to the current widget's bounds."
-  (%rect g
-         (bounds :x)
-         (bounds :y)
-         (bounds :width)
-         (bounds :height)
-         (if (null? radius)
-             0
-             (car radius))
-         color))
+  (%rect g (bounds :x) (bounds :y) (bounds :width) (bounds :height) radius color))
 
 (def (fill g x y width height color)
   "Record a square-cornered rectangle at logical coordinates, like rect without a bounds value to allocate."

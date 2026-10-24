@@ -18,8 +18,14 @@ behind. Prefer expressing features in Otium over adding runtime escape hatches.
   `(let ((x 10) (y (+ x 2))) y)` returns `12`. Use parenthesized binding pairs.
   Named `let` is the usual tail-recursive loop; on Chez its initializers see the
   outer scope, so compute dependent initial values in a surrounding plain `let`.
+- Optional positional parameters follow `&optional` as `(name default)` pairs
+  in `fn`, `def` and `def-`. Defaults run only when omitted, left to right,
+  and see preceding parameters. Explicit `nil` is supplied, not omitted.
+  Chez avoids rest-list allocation; C currently uses a compatible fallback.
+  Optional and rest parameters cannot be combined.
 - Rest parameters accept Scheme dotted syntax `(fn (x . rest) ...)`,
-  `(fn (x & rest) ...)`, or a single symbol `(fn args ...)`. Rest values are lists.
+  `(fn (x & rest) ...)`, or a single symbol `(fn args ...)`. Rest values are lists. The `rest-arguments` linter warns on runtime rest
+  parameters; suppress with a reason for genuinely variadic APIs.
 - Use `if`, `cond`, `and`, `or`, `when`, and `unless`; `begin` groups expressions.
   `and` and `or` short-circuit and return values. Use `set!` to change a binding,
   `while` for a stateful loop, and `(dotimes (i count) ...)` for indexed repetition.

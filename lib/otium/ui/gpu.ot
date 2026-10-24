@@ -243,13 +243,10 @@ without relayout. Returns true while any animation continues."
     (set! (tree :animations) active)
     (not (empty? active))))
 
-(def (layout! tree width height . pixel-scale)
+(def (layout! tree width height &optional (scale 1))
   "Measure leaves using Yoga constraints, replaying until every query is answered."
   (unless (and (> width 0) (> height 0)) (error "Layout dimensions must be positive"))
   (let ((root (allocate-node))
-        (scale (if (null? pixel-scale)
-                   1
-                   (car pixel-scale)))
         (pass {:measurers (generic-methods ui/measure)
                :resizing []
                :instant (not (equal? (tree :size) (list width height)))}))

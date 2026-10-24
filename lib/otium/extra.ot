@@ -43,10 +43,12 @@
     (for-each (fn (x) (put! t x (+ 1 (get t x 0)))) seq)
     t))
 
+;; lint: allow(rest-arguments) captures and forwards arbitrary arguments
 (def (partial f . pre)
   "(partial procedure argument ...)\nReturn a procedure that prepends the supplied arguments to its later arguments."
   (fn args (apply f (append pre args))))
 
+;; lint: allow(rest-arguments) the innermost function accepts arbitrary arguments
 (def (comp . fs)
   "Right-to-left composition; (comp) is identity."
   (cond

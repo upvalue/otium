@@ -97,16 +97,9 @@
                  (gpu-count "otui_gpu_count" (pointer) int #t)
                  (live-renderers "otui_live_renderers" () int #t))
 
-(def (gpu-new window width height scale driver . offscreen)
+(def (gpu-new window width height scale driver &optional (offscreen #f))
   "Create a direct renderer, or pass #t as the last argument for offscreen rendering and capture."
-  (gpu-create window
-              width
-              height
-              scale
-              driver
-              (if (null? offscreen)
-                  #f
-                  (car offscreen))))
+  (gpu-create window width height scale driver offscreen))
 
 (def (config-ref settings key)
   (let loop ((entries settings))

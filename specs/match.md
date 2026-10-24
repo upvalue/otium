@@ -150,12 +150,9 @@ without reworking the compiler.
 ## Not included
 
 - Destructuring in `let` and `fn` parameters. That changes special forms on
-  both runtimes and can come later as sugar over `match`. It's also a way to
-  get optional and keyword arguments, which the language doesn't have (3.4),
-  from patterns over the rest list instead of a separate feature. That needs
-  `opt` to work at the end of a list pattern, `(fn (a & (list (opt b 0))) …)`,
-  and a `keys` pattern over alternating keyword/value lists that `make` could
-  share.
+  both runtimes and can come later as sugar over `match`. Optional positional
+  arguments are already supported (3.4). Patterns over rest arguments and
+  keyword/value lists would be separate extensions.
 - `if-match` and `when-match`. `(match e (p then) (_ else))` is one pair of
   parens longer. They're easy to add once code shows the need.
 - User-defined patterns. A `defpattern` that rewrites patterns into other

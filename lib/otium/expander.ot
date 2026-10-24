@@ -7,8 +7,11 @@
 ;;
 ;; Scope is tracked in Otium data: a list whose entries are symbols (lexical
 ;; variables) or (name expansion writer) lists (local symbol macros). Each runtime
-;; supplies eight natives:
+;; supplies runtime adapters:
 ;;   (expander-application form)     lower an expanded application for the runtime
+;;   (expander-optional-function form fallback)
+;;                                   choose native optional parameters or the
+;;                                   portable rest-list implementation
 ;;   (expander-macro-var sym)        the macro sym names as a var in the
 ;;                                   current namespace, else a false value
 ;;   (expander-invoke-macro m args)  run macro m on unevaluated argument forms
@@ -167,6 +170,7 @@
                   form))
 
 (def- (exp-param! p seen form)
+  (if (or (eq? p '&) (eq? p '&optional)) (exp-fail "E0103" "macroexpand: misplaced parameter marker" form))
   (exp-name! p form)
   (if (exp-memq p seen)
       (exp-fail "E0103" "macroexpand: duplicate parameter" p)
@@ -367,10 +371,78 @@
                           form))
       scope))
 
+(def- (exp-has-optionals? params)
+  (and (pair? params) (or (eq? (car params) '&optional) (exp-has-optionals? (cdr params)))))
+
+;; Defaults see preceding parameters, but not themselves or the body bindings.
+(def- (exp-optional-params ps seen scope form)
+  (if (null? ps)
+      '()
+      (begin
+        (if (not (and (pair? ps) (exp-length-between? (car ps) 2 2)))
+            (exp-fail "E0103" "macroexpand: expected (name default) after &optional" form))
+        (let ((binding (car ps))
+              (name (exp-param! (car binding) seen form))
+              (default (exp-expr (car (cdr binding)) (exp-append seen scope))))
+          (cons (list name default) (exp-optional-params (cdr ps) (cons name seen) scope form))))))
+
+(def- (exp-optional-call name args)
+  (expander-application (cons name args)))
+
+;; C uses this fallback until its calling convention supports optional slots.
+;; The host adapter keeps the canonical fn form for tooling on both runtimes.
+(def- (exp-optional-fallback required optionals body)
+  (let ((args (gensym "optional-arguments"))
+        (value (gensym "optional-value")))
+    (list 'fn
+          (exp-append required args)
+          (list 'if
+                (exp-optional-call 'otium.core/>
+                                   (list (exp-optional-call 'otium.core/length (list args)) (length optionals)))
+                (exp-optional-call 'otium.core/error
+                                   (list (list 'quote
+                                               (table (keyword "type")
+                                                      'arity-error
+                                                      (keyword "code")
+                                                      "E0301"
+                                                      (keyword "message")
+                                                      "too many arguments to optional function"))))
+                (cons 'let
+                      (cons (exp-map (fn (binding)
+                                       (list (car binding)
+                                             (list 'if
+                                                   (exp-optional-call 'otium.core/null? (list args))
+                                                   (car (cdr binding))
+                                                   (list 'let
+                                                         (list (list value
+                                                                     (exp-optional-call 'otium.core/car (list args))))
+                                                         (list 'set!
+                                                               args
+                                                               (exp-optional-call 'otium.core/cdr (list args)))
+                                                         value))))
+                                     optionals)
+                            body))))))
+
 (def- (exp-fn form scope)
   (exp-shape! form 2 #f)
-  (let ((r (exp-params (car (cdr form)) form)))
-    (cons 'fn (cons (car r) (exp-body (cdr (cdr form)) (exp-append (cdr r) scope))))))
+  (let ((params (if (exp-head-is? (car (cdr form)) 'array)
+                    (cdr (car (cdr form)))
+                    (car (cdr form))))
+        (forms (cdr (cdr form))))
+    (if (exp-has-optionals? params)
+        (let scan ((ps params)
+                   (required '()))
+          (if (eq? (car ps) '&optional)
+              (begin
+                (if (null? (cdr ps)) (exp-fail "E0103" "macroexpand: &optional needs at least one (name default)" form))
+                (let ((optionals (exp-optional-params (cdr ps) required scope form))
+                      (body (exp-body forms (exp-append (exp-map car optionals) (exp-append required scope))))
+                      (canonical (cons 'fn (cons (exp-append required (cons '&optional optionals)) body))))
+                  (expander-optional-function canonical (exp-optional-fallback required optionals body))))
+              (begin
+                (exp-param! (car ps) required form)
+                (scan (cdr ps) (exp-append required (list (car ps)))))))
+        (let ((r (exp-params params form))) (cons 'fn (cons (car r) (exp-body forms (exp-append (cdr r) scope))))))))
 
 ;; (let ((name expr) ...) body...) binds sequentially. Named let initializers
 ;; see only the enclosing scope.
@@ -513,6 +585,7 @@
      else
      catch
      &
+     &optional
      _
      array
      table))
@@ -625,12 +698,23 @@
         (target (car (cdr form)))
         (rest (cdr (cdr form))))
     (if (pair? target)
-        (let ((r (exp-params (cdr target) form)))
-          (cons (car form)
-                (cons (cons name (car r))
-                      (if (exp-doc? rest)
-                          (cons (car rest) (exp-body (cdr rest) (exp-append (cdr r) (exp-scope-with name scope))))
-                          (exp-body rest (exp-append (cdr r) (exp-scope-with name scope)))))))
+        (if (exp-has-optionals? (cdr target))
+            (let ((doc (exp-doc? rest))
+                  (value (exp-fn (cons 'fn
+                                       (cons (cdr target)
+                                             (if doc
+                                                 (cdr rest)
+                                                 rest)))
+                                 (exp-scope-with name scope))))
+              (if doc
+                  (list (car form) name (car rest) value)
+                  (list (car form) name value)))
+            (let ((r (exp-params (cdr target) form)))
+              (cons (car form)
+                    (cons (cons name (car r))
+                          (if (exp-doc? rest)
+                              (cons (car rest) (exp-body (cdr rest) (exp-append (cdr r) (exp-scope-with name scope))))
+                              (exp-body rest (exp-append (cdr r) (exp-scope-with name scope))))))))
         (exp-value-definition form name rest (exp-scope-with name scope)))))
 
 (def- (exp-value-definition form name rest scope)

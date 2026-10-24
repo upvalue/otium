@@ -18,6 +18,7 @@
       (bytevector-copy value)
       value))
 
+;; lint: allow(rest-arguments) accepts any number of SQL parameters
 (def (raw text . parameters)
   "A SQL fragment with positional parameters. Text is trusted SQL."
   (unless (string? text) (error "sql/raw: expected SQL string"))

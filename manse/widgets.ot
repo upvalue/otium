@@ -10,12 +10,8 @@
   (color :init 0xffffffff)
   (size :init 8))
 
-(def (dot color . size)
-  (ui/new Dot
-          {:color color
-           :size (if (null? size)
-                     8
-                     (car size))}))
+(def (dot color &optional (size 8))
+  (ui/new Dot {:color color :size size}))
 
 (defmethod (ui/layout-style (w Dot))
   {:width (w :size) :height (w :size)})

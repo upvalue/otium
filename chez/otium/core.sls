@@ -49,12 +49,65 @@
           (rename (otium values) (collection-length length) (collection-reverse reverse)
                   (collection-for-each for-each) (collection-apply apply)
                   (frozen-set-car! set-car!) (frozen-set-cdr! set-cdr!))
-          (prefix (only (chezscheme) display newline write for-each apply) host:))
+          (prefix (only (chezscheme) display newline write for-each apply map) host:))
 
   ;; Otium core forms over Chez. The shared expander has already normalized
   ;; parameter lists and moved body definitions ahead of plain expressions.
   (define-syntax ot-fn
-    (syntax-rules () [(_ params body ...) (lambda params body ...)]))
+    (lambda (stx)
+      ;; Forwarding parameters creates fresh bindings. If a parameter is
+      ;; assigned, defaults and the body must instead share its location.
+      (define (assigned? datum names)
+        (and (pair? datum)
+             (not (eq? (car datum) 'quote))
+             (or (and (memq (car datum) '(set! chez/set!)) (pair? (cdr datum))
+                      (memq (cadr datum) names))
+                 (assigned? (car datum) names)
+                 (assigned? (cdr datum) names))))
+      (syntax-case stx ()
+        [(_ params body ...)
+         (let scan ([ps #'params] [required '()])
+           (syntax-case ps ()
+             [(marker (name default) ...)
+              (eq? (syntax->datum #'marker) '&optional)
+              (with-syntax ([entry (car (generate-temporaries '(entry)))])
+                (if (assigned? (syntax->datum #'((default ...) body ...))
+                               (host:map syntax->datum (append required #'(name ...))))
+                    (with-syntax ([(required ...) required]
+                                  [(raw ...) (generate-temporaries #'(name ...))]
+                                  [missing (car (generate-temporaries '(missing)))])
+                      (with-syntax ([(clause ...)
+                                     (let clauses ([params #'(required ...)] [left #'(name ...)])
+                                       (if (null? left) '()
+                                           (cons
+                                             (with-syntax ([(param ...) params]
+                                                           [(absent ...) (host:map (lambda (_) #'missing) left)])
+                                               #'[(param ...) (entry param ... absent ...)])
+                                             (clauses (append params (list (car left))) (cdr left)))))])
+                        #'(let ([missing (gensym "missing")])
+                            (letrec ([entry
+                                      (case-lambda
+                                        clause ...
+                                        [(required ... raw ...)
+                                         (let* ([name (if (eq? raw missing) default raw)] ...)
+                                           body ...)])])
+                              entry))))
+                    (let clauses ([params required]
+                                  [names #'(name ...)] [defaults #'(default ...)])
+                      (if (null? names)
+                          (with-syntax ([(param ...) params])
+                            #'(letrec ([entry (case-lambda [(param ...) body ...])]) entry))
+                          (let ([next (clauses (append params (list (car names)))
+                                               (cdr names) (cdr defaults))])
+                            (syntax-case next ()
+                              [(letrec ([entry (case-lambda clause ...)]) result)
+                               (with-syntax ([(param ...) params] [default (car defaults)])
+                                 #'(letrec ([entry (case-lambda
+                                                   [(param ...) (let ([next default]) (entry param ... next))]
+                                                   clause ...)])
+                                     result))]))))))]
+             [(param . more) (scan #'more (append required (list #'param)))]
+             [_ #'(lambda params body ...)]))])))
 
   (define-syntax ot-def
     (lambda (x)

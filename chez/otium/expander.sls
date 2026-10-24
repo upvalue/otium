@@ -8,7 +8,7 @@
 
   ;; The expander itself is lib/otium/expander.ot, read with the Otium
   ;; reader and evaluated with the Otium core forms. It uses no macros, so it
-  ;; needs no expansion. The runtime supplies the eight natives it calls.
+  ;; needs no expansion. The runtime supplies the runtime adapters it calls.
   ;; A plain expander leaves applications as Otium wrote them, for tools that
   ;; read expanded code; others lower them to the runtime's call macros.
   (define-record-type (expander make-expander expander?)
@@ -54,6 +54,8 @@
                 [(and (eq? (car form) 'set-applied!) (= (length form) 4))
                  (cons (list 'quote cached-set-call) (cons (list 'quote (make-slot-cache)) form))]
                 [else (list application-name (car form) (cons call-function-name (cdr form)))])) env)
+      (define-top-level-value 'expander-optional-function
+        (lambda (form fallback) form) env)
       (define-top-level-value 'expander-macro-var
         (lambda (name) ((expander-lookup (current-expander)) name)) env)
       (define-top-level-value 'expander-invoke-macro

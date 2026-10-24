@@ -85,7 +85,7 @@
    "E0103" {:title "invalid parameter list"
             :type :syntax-error
             :message "{detail}"
-            :explanation "Parameters are symbols, each named once. A rest parameter is written `(a . rest)`, `(a & rest)` or as a single symbol. Square brackets build arrays in Otium, so Clojure's `(fn [x] ...)` is not a parameter list."
+            :explanation "Parameters are named once. Required parameters precede &optional (name default) pairs. Defaults see preceding parameters. Rest parameters use (a . rest), (a & rest), or a single symbol; optional and rest parameters cannot be combined."
             :example "(fn [x y] (+ x y))"
             :fixed "(fn (x y) (+ x y))"}
    "E0104" {:title "cannot rebind a core form name"
@@ -199,7 +199,7 @@
    "E0301" {:title "wrong number of arguments"
             :type :arity-error
             :message "wrong number of arguments to `{name}`"
-            :explanation "A function was called with more or fewer arguments than its parameter list accepts. There are no optional or keyword parameters; a rest parameter accepts any number of extra arguments. Check the signature with `(describe 'name)`."
+            :explanation "A function was called with more or fewer arguments than its parameter list accepts. Optional parameters accept a bounded number of extra positional arguments; rest parameters accept any number. Check the signature with (describe 'name)."
             :example "(def (f x) (+ x 1))\n(f 1 2)"
             :fixed "(f 1)"}
    "E0302" {:title "value is not callable"
@@ -333,4 +333,12 @@
             :message "no lint rule named `{rule}`"
             :explanation "A `lint:` directive, or the `lint` entry of `project.ot`, names a rule that does not exist. Run `otium lint --rules` for the list."
             :example ";; lint: allow(if-chains) typo"
-            :fixed ";; lint: allow(if-chain) mirrors the spec table"}})
+            :fixed ";; lint: allow(if-chain) mirrors the spec table"}
+   "L0401" {:title "rest parameters allocate argument lists"
+            :name "rest-arguments"
+            :group :performance
+            :level :warn
+            :message "rest parameters build a list of extra arguments; use &optional for defaults"
+            :explanation "Runtime rest parameters collect extra arguments into a list. In frequently called functions this creates avoidable allocation. Use &optional (name default) for a bounded set of positional arguments. Keep genuinely variadic APIs with a documented lint suppression. This rule checks fn, def and def- in dotted, & and single-symbol forms; macro parameter lists are exempt."
+            :example "(def (paint node . colors) (draw node (if (null? colors) :white (car colors))))"
+            :fixed "(def (paint node &optional (color :white)) (draw node color))"}})

@@ -12,6 +12,7 @@
 
 (defonce workspace {:apps (apps/registry) :strip (strip/strip)})
 
+;; lint: allow(rest-arguments) forwards any number of predicates
 (def (query-apps . predicates)
   "Inspect app metadata, optionally filtering with a predicate."
   (apply apps/query (workspace :apps) predicates))

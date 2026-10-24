@@ -14,7 +14,7 @@ def script(name, scratch):
 # These take a scratch directory as their argument.
 for name in ('tests', 'macro-tests', 'unary-call-tests', 'generic-tests'):
     script(name, scratch=True)
-for name in ('append-tests', 'condition-tests', 'environment-tests', 'reader-tests', 'string-tests'):
+for name in ('optional-tests', 'append-tests', 'condition-tests', 'environment-tests', 'reader-tests', 'string-tests'):
     script(name, scratch=False)
 
 

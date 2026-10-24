@@ -285,6 +285,7 @@ const char* ot_runtime_documentation(const char* name) {
     {"record?", "(record? value)\nTest whether value is a record instance."},
     {"record-type?", "(record-type? value)\nTest whether value is a record type descriptor."},
     {"record-type", "(record-type record)\nReturn the record type descriptor. Records compare by identity, including immutable records."},
+    {"expander-optional-function", "(expander-optional-function form fallback)\nInternal shared-expander adapter: preserve the canonical optional fn for tooling, otherwise select the runtime implementation."},
   };
   for (size_t i = 0; i < sizeof(entries) / sizeof(*entries); ++i)
     if (!strcmp(name, entries[i].name)) return entries[i].text;

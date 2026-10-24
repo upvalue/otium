@@ -6918,6 +6918,11 @@ static otv nat_expander_application(ots* state, otv* args, int argc) {
   return ot_cons(state, callable, form);
 }
 
+static otv nat_expander_optional_function(ots* state, otv* args, int argc) {
+  if (need_arity(state, "expander-optional-function", argc, 2, 2) == OT_UNWIND) return OT_UNWIND;
+  return args[state->plain_expansion ? 0 : 1];
+}
+
 // C has no host syntax that the expander must leave unwalked.
 static otv nat_expander_native_syntax(ots* state, otv* args, int argc) {
   (void)args;
@@ -9623,6 +9628,7 @@ static const nat_def core_nats[] = {
     {"expander-local-name", nat_expander_local_name},
     {"expander-native-syntax?", nat_expander_native_syntax},
     {"expander-application", nat_expander_application},
+    {"expander-optional-function", nat_expander_optional_function},
     {"expander-locate", nat_expander_locate},
     {"expander-fail", nat_expander_fail},
     {"string<?", nat_string_less},

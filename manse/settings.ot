@@ -37,6 +37,7 @@
 (def (path)
   (let ((home (process/getenv "HOME"))) (when home (str home "/.manse/config.ot"))))
 
+;; lint: allow(rest-arguments) loads any number of settings files
 (def (load! . paths)
   "Evaluate an optional config file. Use configure! to change settings. Missing files are ignored."
   (let ((file (if (null? paths)

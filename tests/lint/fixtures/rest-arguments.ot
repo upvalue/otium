@@ -1,0 +1,12 @@
+(def (dotted x . rest)
+  (cons x rest)) ;~ L0401
+(def- (marked x & rest)
+  (cons x rest)) ;~ L0401
+(def all (fn args args)) ;~ L0401
+(def (optional x &optional (y (+ x 1)))
+  y)
+
+(defmacro forms args
+  (cons 'list args))
+
+'(fn args args)

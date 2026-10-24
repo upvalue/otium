@@ -16,18 +16,18 @@
   (newline)
   (exit 1))
 
-(def (check & arguments)
+(def- missing-actual (gensym "missing-actual"))
+
+(def (check expected actual &optional (labeled-actual missing-actual))
   "(check expected actual) or (check label expected actual): exit 1 unless the values are equal?."
-  (let ((label (if (= (length arguments) 3)
-                   (car arguments)
-                   nil))
-        (pair (if (= (length arguments) 3)
-                  (cdr arguments)
-                  arguments)))
-    (unless (= (length pair) 2) (error "check: expected 2 or 3 arguments" arguments))
-    (if (equal? (car pair) (cadr pair))
+  (let ((label nil))
+    (unless (eq? labeled-actual missing-actual)
+      (set! label expected)
+      (set! expected actual)
+      (set! actual labeled-actual))
+    (if (equal? expected actual)
         (set! checks (+ checks 1))
-        (fail! label (car pair) (cadr pair)))))
+        (fail! label expected actual))))
 
 (def- (%fails? thunk)
   (try

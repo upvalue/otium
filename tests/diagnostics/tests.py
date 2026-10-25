@@ -6,6 +6,24 @@ from harness import BOTH, ROOT, case, test
 
 LIB = ['tests/diagnostics/lib']
 
+
+@test('class slot option diagnostic', runtimes=['chez'])
+def class_slot_option(t):
+    path = t.scratch / 'slot-option.ot'
+    for option in ['init', ':typo']:
+        path.write_text('(defabstract Widget)\n'
+                        '(defclass Rectangle\n'
+                        '  :is Widget\n'
+                        f'  (color {option} 0))\n')
+        message = (f'unknown slot option {option} for slot color; '
+                   'expected :init, :accessor, or :state')
+        t.expect(t.otium(path), status=1, stderr=[message])
+        result = t.expect(t.run([ROOT / 'otium', 'lint', '--format=json', path]))
+        diagnostics = [json.loads(line) for line in result.stdout.splitlines()]
+        t.check(len(diagnostics) == 1, result)
+        t.check(message in diagnostics[0]['message'], result)
+
+
 case('diagnostic codes', 'tests/diagnostics/codes.ot', paths=LIB)
 case('diagnostic codes chez', 'tests/diagnostics/codes-chez.ot', runtimes=['chez'])
 

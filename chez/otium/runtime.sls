@@ -879,7 +879,13 @@
                                   [(declaration-option? key "state")
                                    (unless (boolean? value) (invalid "expected boolean state flag" value))
                                    (set! state? value)]
-                                  [else (invalid "unknown slot option" key)]))
+                                  [else
+                                   (invalid
+                                     (format "unknown slot option ~a for slot ~s; expected :init, :accessor, or :state"
+                                       (call-with-string-output-port
+                                         (lambda (port) (val:otium-write key port)))
+                                       slot-name)
+                                     key)]))
                           (loop (cddr options))))
                       (when (and state? (not init)) (invalid "state slot requires initializer" slot-name))
                       (let ([key (keyword (symbol->string slot-name))])

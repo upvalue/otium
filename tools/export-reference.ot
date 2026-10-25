@@ -26,17 +26,16 @@
     ((symbol? datum) {"name" (symbol->string datum)})
     ((string? datum) {"name" datum})
     ((keyword? datum) {"name" (str datum)})
-    ((array? datum) (put (signature-group datum) "optional" #t))
-    ((and (pair? datum) (eq? (car datum) 'array)) (put (signature-group (cdr datum)) "optional" #t))
-    ((pair? datum) (signature-group datum))
+    ((array? datum) (optional-group datum))
+    ((and (pair? datum) (eq? (car datum) 'array)) (optional-group (cdr datum)))
+    ((pair? datum) (let ((args (signature-args datum))) (and args {"group" args})))
     (else nil)))
 
-(def- (signature-group items)
+;; [x] is the optional argument x; [x y] is an optional group.
+(def- (optional-group items)
   (let ((args (signature-args items)))
     (and args
-         (if (and (= (length args) 1) (not (nil? (get (args 0) "name"))))
-             (args 0)
-             {"group" args}))))
+         (put (if (= (length args) 1) (args 0) {"group" args}) "optional" #t))))
 
 ;; Returns an array of arguments, or nil when an element can't be shown as one.
 (def- (signature-args items)

@@ -10,7 +10,17 @@ tools/check-docs $docs
 edited=$(staged ACM)
 otium_files=$(printf '%s\n' $edited | grep -E '^(lib|examples|benchmarks)/.*\.ot$' || true)
 if [ -n "$otium_files" ]; then
-    ./otium fmt --check $otium_files
+    if ! ./otium fmt --check $otium_files; then
+        {
+            echo 'pre-commit: Otium formatting check failed; commit stopped.'
+            echo 'Run:'
+            printf '    ./otium fmt'
+            printf ' %s' $otium_files
+            printf '\n'
+            echo 'Then stage the formatted files with git add and retry git commit.'
+        } >&2
+        exit 1
+    fi
     ./otium lint --format=short --deny-warnings $otium_files
 fi
 if printf '%s\n' $edited | grep -qE '^(c|native|tests)/.*\.[ch]$'; then

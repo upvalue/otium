@@ -1,0 +1,29 @@
+;; https://leetcode.com/problems/count-days-spent-together/
+
+(def dpm [31 28 31 30 31 30 31 31 30 31 30 31])
+
+(def (convert-date s)
+  "Convert a date string like MM-DD to day-of-year 0-365"
+  (let ((mnd (string-split s "-"))
+        (mi (string->number (mnd 0)))
+        (di (string->number (mnd 1)))
+        (month-days (for ((i :range (- mi 1)) (total :sum (dpm i))) => total)))
+    (+ month-days di)))
+
+;; should => 60
+(println (convert-date "03-01"))
+
+(def (count-days-together arrive-alice leave-alice arrive-bob leave-bob)
+  (max (+ (- (min (convert-date leave-alice) (convert-date leave-bob))
+             (max (convert-date arrive-alice) (convert-date arrive-bob)))
+          1)
+       0))
+
+;; 3
+(println (count-days-together "08-15" "08-18" "08-16" "08-19"))
+
+;; 0
+(println (count-days-together "10-01" "10-31" "11-01" "12-31"))
+
+;; 1
+(println (count-days-together "12-31" "12-31" "12-31" "12-31"))

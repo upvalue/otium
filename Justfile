@@ -48,11 +48,12 @@ gc-lint *args:
 docs *args:
     tools/generate-docs "$@"
 
-# Regenerate checked-in launcher catalogs and runtime reference tables
+# Regenerate checked-in launcher catalogs, runtime reference tables and docs/reference.json
 generate:
     python3 tools/generate-cli.py
     python3 tools/generate-reference.py
     python3 tools/generate-diagnostics.py
+    ./otium --runtime=chez tools/export-reference.ot
 
 # Regenerate the local SDL ABI manifest from the installed headers
 sdl-manifest *args:

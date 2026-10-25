@@ -1054,7 +1054,7 @@
 (def- %read-datum-string %read-datum-string)
 
 (def (read-string source &optional (port %missing-argument))
-  "(read-string source) or (read-string count [port])\nParse a datum from a string, or read up to count characters from a port."
+  "(read-string source) / (read-string count [port])\nParse a datum from a string, or read up to count characters from a port."
   (if (string? source)
       (begin
         (unless (eq? port %missing-argument) (error "read-string: string form takes one argument"))

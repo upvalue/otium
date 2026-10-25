@@ -1,0 +1,233 @@
+;; Export the otium.core reference to docs/reference.json for the otium.sh site.
+;; Run from the repository root: ./otium --runtime=chez tools/export-reference.ot
+;;
+;; Entries come from two places: definitions in lib/otium/core.ot, and the
+;; runtime builtins in lib/catalog/runtime.json. A docstring whose first line
+;; starts with ( gives the signatures, with alternatives separated by " / ";
+;; otherwise the signature comes from the definition's parameter list.
+
+(ns tools.export-reference)
+(require otium.dev :as dev)
+(require otium.json :as json)
+(require otium.syntax :as syntax)
+
+(def- core-file "lib/otium/core.ot")
+(def- catalog-file "lib/catalog/runtime.json")
+(def- expander-file "lib/otium/expander.ot")
+(def- output-file "docs/reference.json")
+
+;; --- signatures --------------------------------------------------------------
+
+;; A signature argument is a table with "name" or "group" (an array of
+;; arguments, for patterns such as dotimes's (index count)), plus "optional"
+;; and "repeat" when they apply.
+(def- (signature-arg datum)
+  (cond
+    ((symbol? datum) {"name" (symbol->string datum)})
+    ((string? datum) {"name" datum})
+    ((keyword? datum) {"name" (str datum)})
+    ((array? datum) (put (signature-group datum) "optional" #t))
+    ((and (pair? datum) (eq? (car datum) 'array)) (put (signature-group (cdr datum)) "optional" #t))
+    ((pair? datum) (signature-group datum))
+    (else nil)))
+
+(def- (signature-group items)
+  (let ((args (signature-args items)))
+    (and args
+         (if (and (= (length args) 1) (not (nil? (get (args 0) "name"))))
+             (args 0)
+             {"group" args}))))
+
+;; Returns an array of arguments, or nil when an element can't be shown as one.
+(def- (signature-args items)
+  (let ((out [])
+        (ok #t))
+    (for-each (fn (item)
+                (if (eq? item '%repeat)
+                    (if (> (length out) 0)
+                        (put! out (- (length out) 1) (put (out (- (length out) 1)) "repeat" #t))
+                        (set! ok #f))
+                    (let ((arg (signature-arg item)))
+                      (if arg (push! out arg) (set! ok #f)))))
+              (if (array? items) (array-to-list items) items))
+    (and ok out)))
+
+;; Parse one signature such as "(get collection key [default])". The reader
+;; doesn't accept ... as a symbol, so it's read as %repeat. Forms that aren't
+;; a call, like "`template", keep only their text.
+(def- (parse-signature text)
+  (let ((datum (try (read-string (string-replace text "..." " %repeat "))
+                    (catch (error? _) nil))))
+    (if (and (pair? datum) (symbol? (car datum)) (list? datum))
+        (let ((args (signature-args (cdr datum))))
+          (if args {"text" text "args" args} {"text" text}))
+        {"text" text})))
+
+;; Build a signature from a definition's parameters: (a b &optional (c 1) & rest).
+(def- (params-signature name params)
+  (let ((args [])
+        (optional? #f))
+    (let loop ((ps params))
+      (cond
+        ((null? ps) nil)
+        ((symbol? ps) (push! args {"name" (symbol->string ps) "repeat" #t}))
+        ((eq? (car ps) '&optional) (set! optional? #t) (loop (cdr ps)))
+        ((eq? (car ps) '&)
+         (push! args {"name" (symbol->string (cadr ps)) "repeat" #t}))
+        ((pair? (car ps))
+         (let ((default (cadr (car ps)))
+               (arg {"name" (symbol->string (car (car ps))) "optional" #t}))
+           (unless (equal? default "%missing-argument")
+             (put! arg "default" default))
+           (push! args arg)
+           (loop (cdr ps))))
+        (else
+         (push! args (if optional?
+                         {"name" (symbol->string (car ps)) "optional" #t}
+                         {"name" (symbol->string (car ps))}))
+         (loop (cdr ps)))))
+    {"text" (signature-text name args) "args" args}))
+
+(def- (arg-text arg)
+  (let ((base (if (get arg "group")
+                  (str "(" (string-join " " (map arg-text (arg "group"))) ")")
+                  (arg "name")))
+        (shown (if (get arg "repeat") (str base " ...") base)))
+    (if (get arg "optional") (str "[" shown "]") shown)))
+
+(def- (signature-text name args)
+  (if (empty? args)
+      (str "(" name ")")
+      (str "(" name " " (string-join " " (map arg-text args)) ")")))
+
+;; Split a docstring into signatures and prose.
+(def- (split-doc doc)
+  (let ((newline (string-index doc "\n"))
+        (head (if newline (substring doc 0 newline) doc)))
+    (if (string-starts-with? head "(")
+        {:signatures (map parse-signature (string-split head " / "))
+         :doc (if newline (string-trim (substring doc (+ newline 1) (string-length doc))) "")}
+        {:signatures nil :doc doc})))
+
+;; --- source ------------------------------------------------------------------
+
+;; A parameter node as data: a symbol, or (name default-text) for an
+;; &optional pair. The dot in (a . rest) reads as &.
+(def- (param-datum node)
+  (cond
+    ((and (eq? (node :kind) :atom) (equal? (node :text) ".")) '&)
+    ((eq? (node :kind) :atom) (string->symbol (node :text)))
+    ((eq? (node :kind) :list)
+     (let ((parts (syntax/forms node)))
+       (list (string->symbol ((car parts) :text)) ((cadr parts) :text))))
+    (else (string->symbol (node :text)))))
+
+;; Each top-level function or macro definition's first line, counted from 1,
+;; and its parameters, by name.
+(def- (definitions path)
+  (let ((found {}))
+    (for-each (fn (node)
+                (let ((head (syntax/head-name node))
+                      (parts (and head (syntax/forms node))))
+                  (when (and head (member head '("def" "def-" "defonce" "defmacro" "defparam"))
+                             (pair? (cdr parts)))
+                    (let ((target (cadr parts))
+                          (macro? (equal? head "defmacro"))
+                          (name ((if (eq? (target :kind) :list) (car (syntax/forms target)) target) :text))
+                          (params (cond
+                                    ((eq? (target :kind) :list) (cdr (syntax/forms target)))
+                                    ((and macro? (pair? (cddr parts))) (syntax/forms (caddr parts)))
+                                    (else nil))))
+                      (unless (get found name)
+                        (put! found name {:line (+ (node :line) 1)
+                                          :params (and params (map param-datum params))}))))))
+              (syntax/parse (read-file path)))
+    found))
+
+;; --- entries -----------------------------------------------------------------
+
+;; The expander's core forms, read from its source since the list is private.
+(def- (core-forms)
+  (let ((found {}))
+    (for-each (fn (node)
+                (let ((parts (and (syntax/head-name node) (syntax/forms node))))
+                  (when (and parts (pair? (cdr parts)) (equal? ((cadr parts) :text) "expander-core-forms"))
+                    (syntax/walk (caddr parts)
+                                 (fn (child)
+                                   (when (eq? (child :kind) :atom) (put! found (child :text) #t)))))))
+              (syntax/parse (read-file expander-file)))
+    found))
+
+;; What a builtin is on Chez: "special" for the expander's core forms,
+;; "function", "macro" or "value" for bindings, or nil when Chez doesn't
+;; define it. Evaluating a macro's name is invalid syntax.
+(def- (chez-kind name special)
+  (if (get special name)
+      "special"
+      (try (if (procedure? (eval (string->symbol name))) "function" "value")
+           (catch (error? problem)
+             (if (eq? (get problem :type) 'name-error) nil "macro")))))
+
+(def- (runtime-order runtimes)
+  (filter (fn (r) (contains? runtimes r)) ["chez" "c"]))
+
+(def- (entry name kind doc params source runtimes)
+  (let ((parts (split-doc doc))
+        (signatures (or (parts :signatures)
+                        (and params [(params-signature name params)])
+                        (and (member kind '("function" "macro"))
+                             [{"text" (str "(" name " ...)")}])))
+        (out {"name" name "kind" kind "doc" (parts :doc) "runtimes" runtimes}))
+    (when signatures (put! out "signatures" (if (array? signatures) signatures (list-to-array signatures))))
+    (when source (put! out "source" source))
+    out))
+
+(def- (core-entries)
+  (let ((defs (definitions core-file)))
+    (map (fn (b)
+           (let ((name (symbol->string (b :name)))
+                 (found (get defs name)))
+             (entry name (keyword->string (b :kind)) (b :doc) (and found (found :params))
+                    (and found {"file" core-file "line" (found :line)})
+                    ["chez" "c"])))
+         (filter (fn (b) (and (b :public) (not (string-starts-with? (symbol->string (b :name)) "%"))))
+                 (dev/bindings 'otium.core)))))
+
+(def- (builtin-entries defined)
+  (let ((catalog (json/parse (read-file catalog-file)))
+        (special (core-forms))
+        (out []))
+    (for-each (fn (name)
+                ;; expander-* are the C runtime's hooks for the shared expander.
+                (unless (or (get defined name) (string-starts-with? name "expander-"))
+                  (let ((item (catalog name))
+                        (runtimes (item "runtimes"))
+                        (kind (chez-kind name special))
+                        (where (runtime-order (if kind
+                                                  (concat runtimes ["chez"])
+                                                  (filter (fn (r) (not (equal? r "chez"))) runtimes)))))
+                    (push! out (entry name (or kind "function")
+                                      (get item "chez" (item "text")) nil nil where)))))
+              (keys catalog))
+    out))
+
+(def- (json-ready value)
+  (cond
+    ((or (pair? value) (null? value)) (list-to-array (map json-ready value)))
+    ((array? value) (map json-ready value))
+    ((table? value)
+     (let ((out {}))
+       (for-each (fn (key) (put! out key (json-ready (value key)))) (keys value))
+       out))
+    (else value)))
+
+(def- (export)
+  (let ((core (core-entries))
+        (defined {}))
+    (for-each (fn (e) (put! defined (e "name") #t)) core)
+    (let ((entries (sort-by (fn (e) (e "name")) (concat core (builtin-entries defined)))))
+      (write-file output-file
+                  (str (json/encode (json-ready {"namespaces" [{"name" "otium.core" "entries" entries}]})) "\n"))
+      (println (str "wrote " (length entries) " entries to " output-file)))))
+
+(export)

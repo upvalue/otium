@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Count source lines in the working tree with cloc."""
+
+import argparse
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCOPES = {
+    "repo": ("All repository source and build scripts", ("",)),
+    "core": ("Core library file", ("lib/otium/core.ot",)),
+    "lib": ("Otium standard library", ("lib/otium",)),
+    "chez": ("Primary runtime, without tests", ("chez/otium", "chez/main.ss", "chez/run")),
+    "c": ("Experimental runtime, without tests", ("c/src",)),
+    "native": ("Native helpers and bindings", ("native",)),
+    "manse": ("Manse application", ("manse",)),
+    "otos": ("Operating system", ("otos",)),
+    "tests": ("Tests across implementations and tools",
+              ("tests", "chez/tests", "c/tests", "tools/tests", "c/tools/gc-lint/tests")),
+    "benchmarks": ("Benchmarks and Otium benchmark ports", ("benchmarks", "c/bench")),
+    "examples": ("Example programs", ("examples",)),
+    "tools": ("Development tools", ("tools", "c/tools")),
+}
+
+# Outputs of generate-cli.py, generate-reference.py and generate-diagnostics.py.
+GENERATED = {
+    "c/src/options.inc",
+    "c/src/runtime-reference.inc",
+    "c/src/diagnostic-catalog.inc",
+    "chez/otium/launcher-options.sls",
+    "chez/otium/runtime-documentation.sls",
+    "chez/otium/diagnostic-catalog.sls",
+    "lib/otium/diagnostics/catalog.ot",
+}
+NON_SOURCE = {".md", ".txt", ".json", ".csv", ".svg", ".spec", ".wrap", ".lang"}
+ASSET_DIRS = {"assets", "fonts", "icons"}
+
+
+def selected(name, scope, include_generated):
+    path = Path(name)
+    if any(part.startswith(".") for part in path.parts):
+        return False
+    if "vendor" in path.parts or ASSET_DIRS.intersection(path.parts):
+        return False
+    if path.parts[0] in {"docs", "specs"} or path.suffix in NON_SOURCE:
+        return False
+    if not include_generated and name in GENERATED:
+        return False
+    return any(not prefix or name == prefix or name.startswith(prefix + "/")
+               for prefix in SCOPES[scope][1])
+
+
+def main():
+    scopes = "\n".join(f"  {name:12} {description}" for name, (description, _) in SCOPES.items())
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Scopes (they can overlap):\n" + scopes + "\n\n"
+        "Counts tracked files at their current working-tree contents, including local edits.\n"
+        "Excludes vendor directories, submodules, docs, data, assets and generated catalogs.\n"
+        "Untracked files and build output are not counted. Duplicate files count separately.\n"
+        "Otium uses Lisp-style semicolon comments; docstrings count as code.\n"
+        "Requires cloc (macOS: brew install cloc; Debian/Ubuntu: apt install cloc).")
+    parser.add_argument("scope", nargs="?", default="repo", choices=SCOPES)
+    parser.add_argument("--by-file", action="store_true", help="show files as well as language totals")
+    parser.add_argument("--include-generated", action="store_true", help="include generated source catalogs")
+    args = parser.parse_args()
+    if not shutil.which("cloc"):
+        parser.exit(1, "cloc is required: brew install cloc (macOS), apt install cloc (Debian/Ubuntu)\n")
+    tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).decode().split("\0")
+    files = sorted({name for name in tracked if name
+                    and selected(name, args.scope, args.include_generated)
+                    and (ROOT / name).is_file() and not (ROOT / name).is_symlink()})
+    if not files:
+        parser.exit(1, f"No source files in scope {args.scope}.\n")
+    if any("\n" in name or "\r" in name for name in files):
+        parser.exit(1, "cloc file lists cannot represent filenames containing newlines.\n")
+    with tempfile.TemporaryDirectory(prefix="otium-loc-") as directory:
+        file_list = Path(directory) / "files"
+        file_list.write_text("\n".join(files) + "\n")
+        command = ["cloc", "--quiet", "--config=/dev/null", "--skip-uniqueness",
+                   f"--list-file={file_list}", f"--read-lang-def={ROOT / 'tools/cloc-otium.lang'}",
+                   "--force-lang=Scheme,sls", "--force-lang=C,inc"]
+        if args.by_file:
+            command.append("--by-file-by-lang")
+        print(f"{args.scope}: {SCOPES[args.scope][0]} (tracked working-tree files)", flush=True)
+        return subprocess.call(command, cwd=ROOT)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

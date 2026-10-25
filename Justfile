@@ -40,6 +40,10 @@ format-c *args:
 check-docs:
     tools/check-docs
 
+# Count source lines with cloc; use --help for scopes and exclusions
+loc *args:
+    @python3 tools/loc "$@"
+
 # Managed-pointer analysis of the C runtime; needs LLVM development tools
 gc-lint *args:
     c/tools/gc-lint/run {{args}}

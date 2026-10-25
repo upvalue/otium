@@ -1651,6 +1651,13 @@
       "chez"
     ]
   },
+  "read": {
+    "text": "(read [port])\nRead one Otium datum, or the EOF object.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
   "read-line": {
     "text": "(read-line [port])\nRead a line without its newline and preceding carriage return. Preserve a final unterminated line. Return EOF when no text remains.",
     "runtimes": [

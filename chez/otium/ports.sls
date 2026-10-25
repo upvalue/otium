@@ -1,7 +1,8 @@
 (library (otium ports)
   (export public-bindings flush-all!)
   (import (otium strings) (chezscheme) (prefix (otium values) v:)
-          (prefix (otium conditions) c:) (prefix (otium bytevectors) b:))
+          (prefix (otium conditions) c:) (prefix (otium bytevectors) b:)
+          (only (otium reader) read-from))
 
   (define initial-host-output (current-output-port))
   (define registry '())
@@ -342,6 +343,11 @@
       (cons 'read-char (lambda rest (read-character (optional-port rest current-input 'read-char))))
       (cons 'peek-char (lambda rest (peek-character (optional-port rest current-input 'peek-char))))
       (cons '%read-characters (lambda (n . rest) (read-count n (optional-port rest current-input 'read-string))))
+      (cons 'read (lambda rest
+        (let ([p (optional-port rest current-input 'read)])
+          (check p #t 'read)
+          (read-from (lambda () (peek-character p)) (lambda () (read-character p))
+                     (lambda () (v:port-value-position p)) (v:port-value-name p)))))
       (cons 'read-line (lambda rest (line (optional-port rest current-input 'read-line))))
       (cons 'read-all (lambda rest (scan "" (optional-port rest current-input 'read-all) #t #f)))
       (cons 'read-until (lambda (chars . rest) (scan chars (optional-port rest current-input 'read-until) #t #f)))

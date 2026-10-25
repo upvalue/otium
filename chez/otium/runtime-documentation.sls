@@ -172,6 +172,7 @@
     (read-bytevector! . "(read-bytevector! bytes [port [start [end]]])\nFill a half-open byte range without allocating a result buffer. Return the byte count, or EOF when no bytes are available.")
     (%read-characters . "(%read-characters count [port])\nRuntime implementation of the count-based read-string form.")
     (read-all . "(read-all [port])\nRead the remaining input as UTF-8 text. Return an empty string at EOF.")
+    (read . "(read [port])\nRead one Otium datum, or the EOF object.")
     (read-line . "(read-line [port])\nRead a line without its newline and preceding carriage return. Preserve a final unterminated line. Return EOF when no text remains.")
     (read-until . "(read-until stops [port])\nRead characters before the next member of stops, leaving that character unread. Return a string even at EOF.")
     (read-while . "(read-while characters [port])\nRead the longest prefix drawn from characters. Return a string even at EOF.")

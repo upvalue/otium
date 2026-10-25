@@ -1,5 +1,5 @@
 (library (otium reader)
-  (export read-otium read-string read-tokens reader-incomplete? public-bindings
+  (export read-otium read-from read-string read-tokens reader-incomplete? public-bindings
           make-source-positions current-source-positions source-of copy-source!
           reader-location? reader-location-code reader-location-line reader-location-column
           reader-location-start reader-location-end)
@@ -42,8 +42,14 @@
       to))
 
   (define (read-otium port . source)
+    (read-from (lambda () (peek-char port)) (lambda () (read-char port))
+               (and (port-has-port-position? port) (lambda () (port-position port)))
+               (if (null? source) (port-name port) (car source))))
+
+  ;; Read one datum from a character source. source-peek and source-take are
+  ;; thunks; position, when given, returns the source's offset.
+  (define (read-from source-peek source-take position name)
     (define consumed 0)
-    (define name (if (null? source) (port-name port) (car source)))
     (define log (current-token-log))
     (define positions (current-source-positions))
     (define (here)
@@ -58,12 +64,11 @@
                        (source-positions-offset positions))
                      (make-reader-location code #f #f #f #f)))
                (make-message-condition message)
-               (make-irritants-condition (list name (if (port-has-port-position? port)
-                                                       (port-position port) consumed)))
+               (make-irritants-condition (list name (if position (position) consumed)))
                (if incomplete? (make-reader-incomplete) (make-error)))))
-    (define (peek) (peek-char port))
+    (define (peek) (source-peek))
     (define (take)
-      (let ([c (read-char port)])
+      (let ([c (source-take)])
         (unless (eof-object? c)
           (set! consumed (+ consumed 1))
           (when positions
@@ -84,13 +89,13 @@
     (define (start-token)
       (when log
         (token-log-mark-set! log
-          (list (port-position port) (token-log-line log) (token-log-column log)
+          (list (position) (token-log-line log) (token-log-column log)
                 (token-log-newlines log)))))
     (define (end-token kind)
       (when log
         (let ([mark (token-log-mark log)])
           (token-log-tokens-set! log
-            (cons (list kind (car mark) (port-position port) (cadr mark) (caddr mark)
+            (cons (list kind (car mark) (position) (cadr mark) (caddr mark)
                         (cadddr mark))
                   (token-log-tokens log)))
           (token-log-newlines-set! log 0))))

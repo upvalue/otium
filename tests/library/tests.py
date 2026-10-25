@@ -37,7 +37,7 @@ def port_files(t):
 @test('library port datum reader', runtimes=BOTH)
 def port_reader(t):
     t.expect(t.otium('-L', 'tests/reader/data', 'tests/library/port-reader.ot'),
-             stdout='port datum reader: 165 checks passed\n')
+             stdout='port datum reader: 174 checks passed\n')
 
 
 @test('library port exit flush', runtimes=BOTH)

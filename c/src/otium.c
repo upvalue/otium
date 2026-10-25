@@ -1219,7 +1219,21 @@ typedef struct reader {
   const char* name;
   bool incomplete;
   buf* tokens;
+  /* Reading a port: source is text, the bytes copied from it so far. The
+   * port has consumed the first consumed of them; the rest are lookahead it
+   * still holds. failed means a port error is pending. */
+  otv* port;
+  buf* text;
+  size_t consumed;
+  bool failed;
 } reader;
+
+static bool reader_fill(reader* input, size_t count);
+
+/* Whether count bytes are available at the read offset. */
+static bool reader_has(reader* input, size_t count) {
+  return input->offset + count <= input->length || (input->port && reader_fill(input, count));
+}
 
 /* Tool mode keeps only byte spans here. Build managed token lists after the
  * normal reader has validated every form. Ordinary reads allocate no log. */
@@ -1240,7 +1254,7 @@ static bool delimiter(unsigned char byte) {
 }
 
 static void reader_space(reader* input) {
-  while (input->offset < input->length) {
+  while (reader_has(input, 1)) {
     unsigned char byte = (unsigned char)input->source[input->offset];
     if (isspace(byte)) {
       input->offset++;
@@ -1248,7 +1262,7 @@ static void reader_space(reader* input) {
     }
     if (byte == ';') {
       size_t start = input->offset;
-      while (input->offset < input->length && input->source[input->offset] != '\n' &&
+      while (reader_has(input, 1) && input->source[input->offset] != '\n' &&
              input->source[input->offset] != '\r')
         input->offset++;
       reader_token_end(input, start, "comment");
@@ -1262,6 +1276,7 @@ static void reader_space(reader* input) {
  * the start alone for an unclosed form or string. A message that differs from
  * the code's title, such as the C runtime's integer range, becomes a note. */
 static otv reader_error_at(reader* input, const char* code, const char* message, size_t start) {
+  if (input->failed) return OT_UNWIND;
   ots* state = input->state;
   otv condition = diagnostic_new(state, code);
   OT_FRAME_SCOPED(state, &condition);
@@ -1296,7 +1311,7 @@ static otv read_string(reader* input) {
   size_t start = input->offset;
   input->offset++;
   buf bytes = {0};
-  while (input->offset < input->length) {
+  while (reader_has(input, 1)) {
     unsigned char byte = (unsigned char)input->source[input->offset++];
     if (byte == '"') {
       reader_token_end(input, start, "string");
@@ -1306,19 +1321,19 @@ static otv read_string(reader* input) {
     }
     if (byte != '\\') {
       if (byte == '\r') {
-        if (input->offset < input->length && input->source[input->offset] == '\n') input->offset++;
+        if (reader_has(input, 1) && input->source[input->offset] == '\n') input->offset++;
         byte = '\n';
       }
       buf_byte(&bytes, (char)byte);
       continue;
     }
-    if (input->offset == input->length) break;
+    if (!reader_has(input, 1)) break;
     byte = (unsigned char)input->source[input->offset++];
     switch (byte) {
       case 'x': {
         uint32_t scalar = 0;
         size_t digits = 0;
-        while (input->offset < input->length && input->source[input->offset] != ';') {
+        while (reader_has(input, 1) && input->source[input->offset] != ';') {
           unsigned char c = (unsigned char)input->source[input->offset++];
           unsigned digit = hex_digit(c);
           if (digit == 16 || scalar > 0x10ffffu) {
@@ -1328,7 +1343,7 @@ static otv read_string(reader* input) {
           scalar = scalar * 16u + digit;
           digits++;
         }
-        if (input->offset == input->length) {
+        if (!reader_has(input, 1)) {
           input->incomplete = true;
           buf_free(&bytes);
           return reader_error_at(input, "E0002", "unterminated hex escape", start);
@@ -1394,14 +1409,16 @@ static size_t utf8_advance(const unsigned char* bytes, size_t length, size_t off
  * is a delimiter, so #\( and #\  read as those characters. */
 static otv read_char(reader* input) {
   input->offset += 2;
-  if (input->offset == input->length) {
+  if (!reader_has(input, 1)) {
     input->incomplete = true;
     return reader_error(input, "E0011", "character literal without a character");
   }
-  const unsigned char* source = (const unsigned char*)input->source;
+  reader_has(input, 4);
   size_t start = input->offset;
-  input->offset = utf8_advance(source, input->length, start);
-  while (input->offset < input->length && !delimiter(source[input->offset])) input->offset++;
+  input->offset = utf8_advance((const unsigned char*)input->source, input->length, start);
+  while (reader_has(input, 1) && !delimiter((unsigned char)input->source[input->offset]))
+    input->offset++;
+  const unsigned char* source = (const unsigned char*)input->source;
   size_t length = input->offset - start;
   if (utf8_advance(source, input->length, start) == input->offset)
     return ot_make_char(utf8_decode(source, input->length, start));
@@ -1426,13 +1443,13 @@ static otv read_char(reader* input) {
 
 static otv read_atom(reader* input) {
   size_t start = input->offset;
-  if (input->offset + 1 < input->length && input->source[input->offset] == '#' &&
+  if (reader_has(input, 2) && input->source[input->offset] == '#' &&
       input->source[input->offset + 1] == '\\') {
     otv value = read_char(input);
     reader_token_end(input, start, "atom");
     return value;
   }
-  while (input->offset < input->length && !delimiter((unsigned char)input->source[input->offset]))
+  while (reader_has(input, 1) && !delimiter((unsigned char)input->source[input->offset]))
     input->offset++;
   reader_token_end(input, start, "atom");
   const char* token = input->source + start;
@@ -1509,7 +1526,7 @@ static otv read_sequence(reader* input, char closing, otv prefix, size_t opening
   }
   for (;;) {
     reader_space(input);
-    if (input->offset == input->length) {
+    if (!reader_has(input, 1)) {
       input->incomplete = true;
       return reader_error_at(input, "E0001", "unclosed form", start);
     }
@@ -1518,12 +1535,11 @@ static otv read_sequence(reader* input, char closing, otv prefix, size_t opening
       return head;
     }
     if (input->source[input->offset] == '.' &&
-        (input->offset + 1 == input->length ||
-         delimiter((unsigned char)input->source[input->offset + 1]))) {
+        (!reader_has(input, 2) || delimiter((unsigned char)input->source[input->offset + 1]))) {
       if (tail == ot_nil) return reader_error(input, "E0007", "dot without a preceding value");
       reader_delimiter(input, "atom");
       reader_space(input);
-      if (input->offset == input->length) {
+      if (!reader_has(input, 1)) {
         input->incomplete = true;
         return reader_error_at(input, "E0001", "unclosed dotted pair", start);
       }
@@ -1532,7 +1548,7 @@ static otv read_sequence(reader* input, char closing, otv prefix, size_t opening
       ot_pair_obj* pair = as_pair(tail);
       ot_store(input->state, pair, &pair->cdr, item);
       reader_space(input);
-      if (input->offset == input->length) {
+      if (!reader_has(input, 1)) {
         input->incomplete = true;
         return reader_error_at(input, "E0001", "unclosed dotted pair", start);
       }
@@ -1560,7 +1576,7 @@ static otv read_quote(reader* input, const char* name, size_t name_length, size_
   input->offset += prefix_length;
   reader_token_end(input, start, "prefix");
   reader_space(input);
-  if (input->offset == input->length) {
+  if (!reader_has(input, 1)) {
     input->incomplete = true;
     return reader_error(input, "E0009", "quote without a value");
   }
@@ -1575,7 +1591,7 @@ static otv read_quote(reader* input, const char* name, size_t name_length, size_
 
 static otv read_form(reader* input) {
   reader_space(input);
-  if (input->offset == input->length) return OT_UNDEFINED;
+  if (!reader_has(input, 1)) return OT_UNDEFINED;
   char byte = input->source[input->offset];
   switch (byte) {
     case '(': return read_sequence(input, ')', ot_nil, 1);
@@ -1584,22 +1600,24 @@ static otv read_form(reader* input) {
     case '"': return read_string(input);
     case '#':
       /* #u8(...) reads as (bytevector ...), like [...] and {...}. */
-      if (input->length - input->offset >= 4 &&
-          memcmp(input->source + input->offset, "#u8(", 4) == 0) {
+      if (reader_has(input, 4) && memcmp(input->source + input->offset, "#u8(", 4) == 0) {
         return read_sequence(input, ')', ot_intern(input->state, "bytevector", 10, false), 4);
       }
-      if (input->offset + 1 < input->length && input->source[input->offset + 1] == '`')
+      if (reader_has(input, 2) && input->source[input->offset + 1] == '`')
         return read_quote(input, "syntax-quote", 12, 2);
       return read_atom(input);
     case '\'': return read_quote(input, "quote", 5, 1);
     case '`': return read_quote(input, "quasiquote", 10, 1);
     case ',':
-      if (input->offset + 1 < input->length && input->source[input->offset + 1] == '@')
+      if (reader_has(input, 2) && input->source[input->offset + 1] == '@')
         return read_quote(input, "unquote-splicing", 16, 2);
       return read_quote(input, "unquote", 7, 1);
     case ')':
     case ']':
-    case '}': return reader_error(input, "E0003", "unexpected closing delimiter");
+    case '}':
+      /* Consume the delimiter, as Chez does, so a port reader moves past it. */
+      input->offset++;
+      return reader_error_at(input, "E0003", "unexpected closing delimiter", input->offset - 1);
     default: return read_atom(input);
   }
 }
@@ -8774,6 +8792,68 @@ static otv port_optional(ots* s, otv* args, int argc, int index, bool input) {
   return argc > index ? args[index] : port_current(s, input);
 }
 
+/* Hand the port the bytes before the read offset, then copy count bytes of
+ * lookahead from its buffer without consuming them. Lookahead is at most four
+ * bytes, and port buffers hold at least four. */
+static bool reader_fill(reader* input, size_t count) {
+  if (input->failed) return false;
+  ot_port_obj* p = as_port(*input->port);
+  p->at += input->offset - input->consumed;
+  p->position += input->offset - input->consumed;
+  input->consumed = input->offset;
+  if (port_ensure(input->state, *input->port, count) == OT_UNWIND) {
+    input->failed = true;
+    return false;
+  }
+  p = as_port(*input->port);
+  size_t held = input->length - input->consumed;
+  size_t available = p->end - p->at < count ? p->end - p->at : count;
+  if (available > held)
+    buf_write(input->text, (char*)as_bytevector(p->buffer)->data + p->at + held, available - held);
+  if (input->text->failed) {
+    ot_raise(input->state, "read: out of memory");
+    input->failed = true;
+    return false;
+  }
+  input->source = input->text->data;
+  input->length = input->text->length;
+  return input->offset + count <= input->length;
+}
+
+static otv n_read(ots* s, otv* a, int n) {
+  if (need_arity(s, "read", n, 0, 1) == OT_UNWIND) return OT_UNWIND;
+  otv p = port_optional(s, a, n, 0, true);
+  OT_FRAME_SCOPED(s, &p);
+  if (p == OT_UNWIND || port_check(s, p, true, "read") == OT_UNWIND) return OT_UNWIND;
+  buf name = {0}, text = {0};
+  if (is_type(as_port(p)->name, OBJ_STRING))
+    buf_write(&name, (char*)as_bytes(as_string(as_port(p)->name)->bytes)->data,
+              as_string(as_port(p)->name)->length);
+  else buf_cstr(&name, "<port>");
+  buf_byte(&name, '\0');
+  size_t position = as_port(p)->position;
+  reader input = {.state = s, .source = "", .name = name.data, .port = &p, .text = &text};
+  otv value = read_form(&input);
+  if (input.failed) value = OT_UNWIND;
+  else if (value == OT_UNDEFINED) value = ot_eof;
+  /* The reader works on bytes; ports promise characters. */
+  for (size_t i = 0; value != OT_UNWIND && i < input.offset;) {
+    size_t width = utf8_valid_sequence((const unsigned char*)text.data + i, input.offset - i);
+    if (!width)
+      value = io_error(s, "decode-error", "read-char", "read-char: invalid UTF-8", "position",
+                       ot_make_int((intptr_t)(position + i)));
+    i += width ? width : input.offset;
+  }
+  if (!input.failed) {
+    ot_port_obj* port = as_port(p);
+    port->at += input.offset - input.consumed;
+    port->position += input.offset - input.consumed;
+  }
+  buf_free(&name);
+  buf_free(&text);
+  return value;
+}
+
 static otv port_write_bytes(ots* s, otv value, otv bytes, size_t start, size_t end) {
   if (port_check(s, value, false, "write-bytevector") == OT_UNWIND) return OT_UNWIND;
   OT_FRAME_SCOPED(s, &value, &bytes);
@@ -9429,6 +9509,7 @@ static const nat_def port_natives[] = {{"flush-ports!", n_flush_all},
                                        {"read-bytevector!", n_read_into},
                                        {"%read-characters", n_read_characters},
                                        {"read-all", n_read_all},
+                                       {"read", n_read},
                                        {"read-line", n_read_line},
                                        {"read-until", n_read_until},
                                        {"read-while", n_read_while},

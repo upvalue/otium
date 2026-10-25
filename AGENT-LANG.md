@@ -29,6 +29,15 @@ behind. Prefer expressing features in Otium over adding runtime escape hatches.
 - Use `if`, `cond`, `and`, `or`, `when`, and `unless`; `begin` groups expressions.
   `and` and `or` short-circuit and return values. Use `set!` to change a binding,
   `while` for a stateful loop, and `(dotimes (i count) ...)` for indexed repetition.
+- **Prefer `for` for loops that walk or build things.** Clauses step in
+  lockstep: drivers `(x :in seq)`, `(k v :in table)`, `(i :range [start] end
+  [step])`, `(x := init next)`; accumulators `(name :collect expr)`,
+  `(name :collect-array expr)` and `(name :sum expr)`, each with optional
+  `:when test`. `(for ((x :in xs) (out :collect (* x x))) => out)`.
+  A named loop `(for next (...) => final body ...)` goes round only when the
+  body calls `(next)` in tail position; not calling it returns the body's
+  value, and `(next :done)` steps once more and returns `final`. On Chez it
+  allocates nothing beyond what accumulators build.
 - **Only `nil` and `#f` are falsy.** `nil` is distinct from the empty list `'()`;
   empty lists, zero, and empty strings are truthy. Use `nil?` for missing values
   and `null?` for an empty list. An `if` without an alternative returns `nil`.

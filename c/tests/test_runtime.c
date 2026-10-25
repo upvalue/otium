@@ -491,7 +491,7 @@ static bool condition_message_is(ots* state, const char* expected) {
 static void test_named_let(void) {
   ot_config config = ot_config_default();
   config.gc_stress = true;
-  config.max_depth = 64;
+  config.max_depth = 256;
   ots* state = ot_create(&config);
   check(state != NULL, "create named-let runtime state");
   if (state == NULL) return;
@@ -529,7 +529,7 @@ static void test_named_let(void) {
   ot_clear_condition(state);
   check(evaluate(state,
                  "(def (deep n) (if (= n 0) 0 (+ 1 (deep (- n 1))))) "
-                 "(deep 100)",
+                 "(deep 1000)",
                  &value) == false &&
             condition_message_is(state, "maximum VM frame depth exceeded"),
         "non-tail recursion observes the VM frame limit");

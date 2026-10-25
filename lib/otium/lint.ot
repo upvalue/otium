@@ -214,8 +214,113 @@
                                      n
                                      {:name (n :text) :member (substring (n :text) (string-length prefix))}))))))))
 
+(def- (loop-sequence context name nodes tail?)
+  ;; Only the last of a sequence of forms can be in tail position.
+  (when (pair? nodes)
+    (for-each (fn (n) (loop-calls context name n #f)) (take (- (length nodes) 1) nodes))
+    (loop-calls context name (last nodes) tail?)))
+
+;; A named for goes round when its body calls the loop's name, and that call
+;; must end the pass. tail? says whether node is in tail position of the pass.
+;; Forms that are not known here, including other macros, are treated as
+;; ordinary calls, so a (next) inside one is reported.
+(def- (loop-calls context name node tail?)
+  (let ((head (syntax/head-name node))
+        (parts (if (get node :children)
+                   (syntax/forms node)
+                   '()))
+        (each (fn (nodes) (for-each (fn (n) (loop-calls context name n #f)) nodes)))
+        (body (fn (nodes) (loop-sequence context name nodes tail?)))
+        (binds? (fn (n) (and (eq? (n :kind) :atom) (equal? (n :text) name)))))
+    (cond
+      ((binds? node) (report! context "non-tail-loop-call" node {:name name}))
+      ((eq? (node :kind) :prefix) (when (member (node :text) '("," ",@")) (loop-calls context name (node :child) #f)))
+      ((not (eq? (node :kind) :list)) (each parts))
+      ((equal? head name) (unless tail? (report! context "non-tail-loop-call" node {:name name})) (each (cdr parts)))
+      ((member head '("quote" "quasiquote")) nil)
+      ((equal? head "if")
+       (each (take 1 (cdr parts)))
+       (for-each (fn (n) (loop-calls context name n tail?)) (drop 2 parts)))
+      ((member head '("when" "unless")) (each (take 1 (cdr parts))) (body (drop 2 parts)))
+      ((member head '("begin" "and" "or")) (body (cdr parts)))
+      ((equal? head "cond")
+       (for-each (fn (clause)
+                   (when (eq? (clause :kind) :list)
+                     (body (filter (fn (n) (not (equal? (get n :text) "else"))) (syntax/forms clause)))))
+                 (cdr parts)))
+      ((member head '("case" "match"))
+       (each (take 1 (cdr parts)))
+       (for-each (fn (clause) (when (eq? (clause :kind) :list) (body (cdr (syntax/forms clause))))) (drop 2 parts)))
+      ((equal? head "let")
+       (let ((named (and (> (length parts) 1) (eq? ((second parts) :kind) :atom)))
+             (bindings (nth parts
+                            (if named
+                                2
+                                1)))
+             (shadowed (and named (binds? (second parts)))))
+         (when (and bindings (get bindings :children))
+           (for-each (fn (binding)
+                       (let ((pair (if (get binding :children)
+                                       (syntax/forms binding)
+                                       '())))
+                         (unless shadowed
+                           (each (cdr pair))
+                           (when (and (pair? pair) (binds? (car pair))) (set! shadowed #t)))))
+                     (syntax/forms bindings)))
+         (unless shadowed
+           (body (drop (if named
+                           3
+                           2)
+                       parts)))))
+      ((member head '("fn" "def" "def-"))
+       (let ((params (and (> (length parts) 1) (second parts))))
+         (unless (and params (or (binds? params) (and (get params :children) (exists binds? (syntax/forms params)))))
+           (each (drop 2 parts)))))
+      ((equal? head "for")
+       (let ((inner (and (> (length parts) 2) (eq? ((second parts) :kind) :atom) ((second parts) :text)))
+             (rest (drop (if inner
+                             2
+                             1)
+                         parts))
+             (clauses (if (pair? rest)
+                          (car rest)
+                          nil))
+             (after (if (pair? rest)
+                        (cdr rest)
+                        '()))
+             (final? (and (pair? after) (equal? (get (car after) :text) "=>"))))
+         (when clauses (each (list clauses)))
+         (unless (equal? inner name)
+           (when (and final? (pair? (cdr after))) (loop-calls context name (cadr after) tail?))
+           (let ((forms (if final?
+                            (drop 2 after)
+                            after)))
+             (if inner
+                 (body forms)
+                 (each forms))))))
+      (else (each parts)))))
+
+(def- (non-tail-loop-call context node _quoted)
+  (when (equal? (syntax/head-name node) "for")
+    (let ((parts (syntax/forms node)))
+      (when (and (> (length parts) 2) (eq? ((second parts) :kind) :atom))
+        (let ((name ((second parts) :text))
+              (after (drop 3 parts)))
+          (loop-sequence context
+                         name
+                         (if (and (pair? after) (equal? (get (car after) :text) "=>"))
+                             (drop 2 after)
+                             after)
+                         #t))))))
+
 (def- syntax-checks
-  (list if-chain foreign-definition bracket-bindings captured-binding self-qualified-template rest-arguments))
+  (list if-chain
+        foreign-definition
+        bracket-bindings
+        captured-binding
+        self-qualified-template
+        rest-arguments
+        non-tail-loop-call))
 
 (def- (check-syntax context node quoted)
   ;; Quoted data is not code, but a quasiquote template usually is.
@@ -427,11 +532,20 @@
     (put! (walk :seen) name (+ count 1))
     count))
 
+;; A gensym from a macro expansion can share its name with a user's local,
+;; as for's step temporaries do. Gensyms are uninterned on Chez, where lint
+;; runs, so they are matched by identity, never reported and not counted as
+;; occurrences of the name.
+(def- (generated? symbol)
+  (not (eq? (string->symbol (symbol->string symbol)) symbol)))
+
 (def- (bind walk scope symbol kind)
-  (let ((name (symbol->string symbol))
-        (binding {:name name :used #f :kind kind :index (note! walk (symbol->string symbol))}))
-    (push! (walk :bindings) binding)
-    (cons binding scope)))
+  (if (generated? symbol)
+      (cons {:name "" :symbol symbol :used #t :kind :generated :index 0} scope)
+      (let ((name (symbol->string symbol))
+            (binding {:name name :used #f :kind kind :index (note! walk (symbol->string symbol))}))
+        (push! (walk :bindings) binding)
+        (cons binding scope))))
 
 (def- (bind-all walk scope symbols kind)
   (reduce (fn (scope symbol) (bind walk scope symbol kind)) scope symbols))
@@ -445,16 +559,26 @@
 ;; Every active candidate sees references in its nested functions too. A
 ;; binding in its saved outer scope is a capture, except for its own name.
 (def- (reference! walk scope symbol)
+  (if (generated? symbol)
+      (generated-reference! walk scope symbol)
+      (named-reference! walk scope symbol)))
+
+(def- (generated-reference! walk scope symbol)
+  (let ((binding (find (fn (b) (eq? (get b :symbol) symbol)) scope))) (when binding (block-captures! walk binding))))
+
+(def- (block-captures! walk binding)
+  (for-each (fn (candidate)
+              (when (and (not (eq? binding (candidate :binding)))
+                         (find (fn (outer) (eq? outer binding)) (candidate :outer)))
+                (put! candidate :blocked #t)))
+            (walk :active)))
+
+(def- (named-reference! walk scope symbol)
   (let ((name (symbol->string symbol))
         (index (note! walk name))
         (binding (find (fn (b) (equal? (b :name) name)) scope)))
     (cond
-      (binding (put! binding :used #t)
-               (for-each (fn (candidate)
-                           (when (and (not (eq? binding (candidate :binding)))
-                                      (find (fn (outer) (eq? outer binding)) (candidate :outer)))
-                             (put! candidate :blocked #t)))
-                         (walk :active)))
+      (binding (put! binding :used #t) (block-captures! walk binding))
       ((= (walk :host) 0) (push! (walk :free) {:name name :index index}))
       (else nil))))
 

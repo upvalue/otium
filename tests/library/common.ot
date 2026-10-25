@@ -157,10 +157,10 @@
                           ((2) 2))))))
 (check "case rejects malformed alternatives" #t (fails? (fn () (eval '(case 1 (1 2))))))
 
-;; Captured indices share the binding, including its final increment.
+;; Each pass binds the index afresh, so captured indices keep their value.
 (let ((callbacks []))
   (dotimes (i 3) (push! callbacks (fn () i)))
-  (check [3 3 3] (map (fn (f) (f)) callbacks)))
+  (check [0 1 2] (map (fn (f) (f)) callbacks)))
 (let ((seen []))
   (check nil (dotimes (i 5) (push! seen i) (set! i (+ i 1))))
   (check [0 2 4] seen))

@@ -1,0 +1,247 @@
+;; for and dotimes. otium.core re-exports both, with the docstrings people
+;; read through describe, so this file cannot use anything core defines after
+;; that point and core cannot use for or dotimes itself.
+(ns otium.loop)
+
+;; for is foof-loop's model with keyword clauses. Each clause compiles to a
+;; plan: bindings made once before the loop, loop variables as (name init
+;; step), tests that must all hold to run a pass, bindings made at the start
+;; of each pass, and bindings for the => expression. The expansion is one
+;; named let with no assignments to locals.
+(def- (plan outer vars more binds final)
+  {:outer outer :vars vars :more more :binds binds :final final})
+
+(def- (clause-error clause message)
+  (error (str "for: " message) clause))
+
+;; Lists step by pair and arrays and strings by index, so the cursor's type
+;; says which. nil is empty. The tests use pair? and null?, which Chez
+;; inlines; int? is a call and made list loops seven times slower.
+(def- (in-clause name seq)
+  (let ((s (gensym "seq"))
+        (n (gensym "count"))
+        (c (gensym "cursor")))
+    (plan (list (list s seq)
+                (list n
+                      #`(if (or (array? ,s) (string? ,s))
+                            (length ,s)
+                            0)))
+          (list (list c
+                      #`(cond
+                          ((or (array? ,s) (string? ,s)) 0)
+                          ((nil? ,s) '())
+                          (else ,s))
+                      #`(if (pair? ,c)
+                            (cdr ,c)
+                            (+ ,c 1))))
+          (list #`(cond
+                    ((pair? ,c) #t)
+                    ((null? ,c) #f)
+                    (else (< ,c ,n))))
+          (list (list name
+                      #`(if (pair? ,c)
+                            (car ,c)
+                            (get ,s ,c))))
+          '())))
+
+;; The value is read with a key of its own, so an unused k is reported by lint.
+(def- (table-clause k v table)
+  (let ((t (gensym "table"))
+        (ks (gensym "keys"))
+        (n (gensym "count"))
+        (i (gensym "index"))
+        (key (gensym "key")))
+    (plan (list (list t table) (list ks #`(keys ,t)) (list n #`(length ,ks)))
+          (list (list i 0 #`(+ ,i 1)))
+          (list #`(< ,i ,n))
+          (list (list key #`(get ,ks ,i)) (list k key) (list v #`(get ,t ,key)))
+          '())))
+
+;; Same arguments as the range function. A literal step picks the test at
+;; expansion time.
+(def- (range-clause name args clause)
+  (unless (<= 1 (length args) 3) (clause-error clause "expected (name :range [start] end [step])"))
+  (let ((one? (= (length args) 1))
+        (step (if (= (length args) 3)
+                  (caddr args)
+                  1))
+        (a (gensym "start"))
+        (e (gensym "end"))
+        (d (gensym "step")))
+    (when (and (number? step) (= step 0)) (clause-error clause "step must be nonzero"))
+    (plan (list (list a
+                      (if one?
+                          0
+                          (car args)))
+                (list e
+                      (if one?
+                          (car args)
+                          (cadr args)))
+                (list d step))
+          (list (list name a #`(+ ,name ,d)))
+          (list (if (number? step)
+                    (if (> step 0)
+                        #`(< ,name ,e)
+                        #`(> ,name ,e))
+                    #`(if (> ,d 0)
+                          (< ,name ,e)
+                          (> ,name ,e))))
+          '()
+          '())))
+
+;; An accumulator's step, skipping the test when there is no :when.
+(def- (guarded test then otherwise)
+  (if (eq? test #t)
+      then
+      #`(if ,test
+            ,then
+            ,otherwise)))
+
+(def- (var-clause name init step)
+  (plan '() (list (list name init step)) '() '() '()))
+
+;; Results are consed in reverse and reversed at the end. Adding to the tail
+;; with set-cdr! would allocate once, but Otium's set-cdr! checks for cycles
+;; and costs far more than the reverse. The name is bound only in =>.
+(def- (collect-clause name expr test)
+  (let ((acc (gensym "acc")))
+    (plan '()
+          (list (list acc ''() (guarded test #`(cons ,expr ,acc) acc)))
+          '()
+          '()
+          (list (list name #`(reverse ,acc))))))
+
+(def- (accumulator-test clause rest)
+  (cond
+    ((= (length rest) 1) #t)
+    ((and (= (length rest) 3) (eq? (cadr rest) :when)) (caddr rest))
+    (else (clause-error clause "expected (name :kind expr [:when test])"))))
+
+(def- (parse-clause clause)
+  (unless (and (list? clause) (>= (length clause) 3) (symbol? (car clause)))
+    (clause-error clause "expected (name :kind ...)"))
+  (let ((name (car clause))
+        (kind (cadr clause))
+        (rest (cddr clause)))
+    (cond
+      ((and (= (length clause) 4) (eq? (caddr clause) :in))
+       (unless (symbol? kind) (clause-error clause "expected (key value :in table)"))
+       (table-clause name kind (cadddr clause)))
+      ((eq? kind :in)
+       (unless (= (length rest) 1) (clause-error clause "expected (name :in sequence)"))
+       (in-clause name (car rest)))
+      ((eq? kind :range) (range-clause name rest clause))
+      ((eq? kind :=)
+       (unless (= (length rest) 2) (clause-error clause "expected (name := init next)"))
+       (var-clause name (car rest) (cadr rest)))
+      ((eq? kind :collect) (collect-clause name (car rest) (accumulator-test clause rest)))
+      ((eq? kind :collect-array)
+       (var-clause name
+                   #`(array)
+                   (guarded (accumulator-test clause rest)
+                            #`(begin
+                                (push! ,name ,(car rest))
+                                ,name)
+                            name)))
+      ((eq? kind :sum) (var-clause name 0 (guarded (accumulator-test clause rest) #`(+ ,name ,(car rest)) name)))
+      (else (clause-error clause "unknown clause")))))
+
+(def- (parts plans key)
+  (apply append (map (fn (p) (get p key)) plans)))
+
+(def- (mentions? form name)
+  (cond
+    ((eq? form name) #t)
+    ((pair? form) (or (mentions? (car form) name) (mentions? (cdr form) name)))
+    (else #f)))
+
+(def- (zip as bs)
+  (if (null? as)
+      '()
+      (cons (list (car as) (car bs)) (zip (cdr as) (cdr bs)))))
+
+;; Steps are computed left to right into temporaries before the recursive
+;; call, so accumulator side effects happen in clause order. The outer
+;; bindings are passed through the loop unchanged: on Chez a loop that keeps
+;; them as free variables and calls an unknown procedure, such as get, builds
+;; a closure on every entry.
+;;
+;; In a named loop the steps are pasted in where the body calls the name, so
+;; the names the clauses bind and the steps use are saved at the start of the
+;; pass and restored there. A body that rebinds x before calling (next) still collects the
+;; pass's x. Other names in clause expressions are not protected.
+;;
+;; The name takes a rest list rather than &optional. Chez lowers &optional to
+;; a case-lambda that calls itself, which it won't inline, and (next) became a
+;; call: 210 ns against 119 ns for 128 elements. A rest list folds away for
+;; (next). (next :done) allocates one pair, once per loop.
+(def- (named-pass name clauses vars binds loop temps finish body)
+  ;; The pass of a named loop: body with name standing for the call that steps
+  ;; the clauses and goes round, or with :done runs finish.
+  (let ((heads (apply append (map (fn (c) (list (car c) (cadr c))) clauses)))
+        (steps (map caddr vars))
+        (saved (filter (fn (v) (and (member v heads) (mentions? steps v))) (append (map car binds) (map car vars))))
+        (aliases (map (fn (_) (gensym "pass")) saved))
+        (how (gensym "how"))
+        (done #`(if (and (eq? (car ,how) :done) (null? (cdr ,how)))
+                    (let ,(zip (map car vars) temps) ,finish)
+                    (error "for: expected (name) or (name :done)" (car ,how))))
+        (step #`(let ,(zip temps steps)
+                  (if (pair? ,how)
+                      ,done
+                      (,loop ,@temps))))
+        (call #`(fn ,how (let ,(zip saved aliases) ,step))))
+    #`(let ,(zip aliases saved) (symbol-macrolet ((,name ,call)) ,@body))))
+
+;; The templates are kept shallow: the C runtime's expander recurses once per
+;; level of nesting, and the prelude loads this file within the VM's depth
+;; limit.
+(def- (expand-for name clauses plans final body)
+  (let ((outer (parts plans :outer))
+        (vars (append (map (fn (b) (list (car b) (car b) (car b))) outer) (parts plans :vars)))
+        (binds (parts plans :binds))
+        (loop (gensym "loop"))
+        (temps (map (fn (_) (gensym "next")) vars))
+        (finish #`(let ,(parts plans :final) ,final))
+        (pass (if name
+                  (named-pass name clauses vars binds loop temps finish body)
+                  #`(begin
+                      ,@body
+                      (let ,(zip temps (map caddr vars)) (,loop ,@temps)))))
+        (inits (map (fn (v) (list (car v) (cadr v))) vars)))
+    #`(let ,outer
+        (let ,loop
+          ,inits
+          (if (and ,@(parts plans :more))
+              (let ,binds ,pass)
+              ,finish)))))
+
+(defmacro for (head . more)
+  "(for [name] (clause ...) [=> final] body ...)\nSee for in otium.core."
+  (let ((name (if (symbol? head)
+                  head
+                  nil))
+        (args (if (symbol? head)
+                  more
+                  (cons head more))))
+    (unless (and (pair? args) (list? (car args))) (error "for: expected a clause list"))
+    (let ((tail (cdr args))
+          (final? (and (pair? tail) (eq? (car tail) '=>))))
+      (when (and final? (null? (cdr tail))) (error "for: expected an expression after =>"))
+      (expand-for name
+                  (car args)
+                  (map parse-clause (car args))
+                  (if final?
+                      (cadr tail)
+                      nil)
+                  (if final?
+                      (cddr tail)
+                      tail)))))
+
+(defmacro dotimes (spec . body)
+  "(dotimes (index count) body ...)\nSee dotimes in otium.core."
+  (let ((sp (if (eq? (car spec) 'array)
+                (cdr spec)
+                spec)))
+    #`(for ((,(car sp) :range ,(cadr sp)))
+        ,@body)))

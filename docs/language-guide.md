@@ -202,6 +202,53 @@ Named `let` is the usual way to write a tail-recursive loop. On Chez its initial
 (dotimes (i 3) (println i))         ; 0 1 2
 ```
 
+### Loops with `for`
+
+`for` is foof-loop's model with keyword clauses. Every clause steps once per pass, the loop ends when any driver runs out, and `=> final` gives the result (nil without one).
+
+```scheme
+(for ((x :in '(1 2 3 4))
+      (evens :collect x :when (even? x))
+      (total :sum x))
+  => [evens total])                 ; [(2 4) 10]
+```
+
+Drivers walk something:
+
+- `(x :in sequence)` walks a list, array or string. nil is empty.
+- `(k v :in table)` walks a table in insertion order.
+- `(i :range [start] end [step])` counts the way `range` does.
+- `(x := init next)` starts at `init` and becomes `next` after each pass. A fold is one of these: `(product := 1 (* product i))`.
+
+Accumulators build the result. Each takes an optional `:when test`.
+
+- `(name :collect expr)` gathers a list. The name is bound only in `final`.
+- `(name :collect-array expr)` pushes into a fresh array. The body can read the array so far.
+- `(name :sum expr)` adds up. The body can read the sum so far.
+
+Clauses step side by side, so `(for ((x :in items) (i :range 100) ...))` pairs each item with its index and stops at the shorter of the two. Nesting is one `for` inside another.
+
+Give the loop a name and it only goes round when the body calls it. Not calling it stops the loop with the body's value, and `=>` doesn't run. `(name :done)` steps the clauses for this pass, then runs `=>` instead of going round.
+
+```scheme
+(for next ((x :in [:a :b :c]))
+  (if (eq? x :b)
+      x                             ; found it, stop here
+      (next)))
+
+(for next ((x :in '(1 2 3 4 5)) (out :collect x))
+  => out
+  (if (= x 3)
+      (next :done)                  ; (1 2 3)
+      (next)))
+```
+
+The call has to be in tail position. Anywhere else the rest of the loop runs as a nested call and its result comes back to the pass that made it, which then carries on. The linter warns about this (L0203).
+
+On Chez, a `for` compiles to a single named let and doesn't allocate unless its accumulators do. `:collect` conses in reverse and reverses at the end, so it costs two pairs per element. `(name :done)` allocates one pair per loop. `benchmarks/loops.ot` compares `for` with `map`, `filter`, `reduce` and hand-written named lets. `dotimes` is built on `for`, and so each pass binds a fresh index.
+
+`for` and `dotimes` are defined in `otium.loop` and re-exported by `otium.core`, so they need no require. Core can't use them itself.
+
 `set!` can also assign through a callable place, such as `(set! (button :presses) 0)`.
 
 ### Errors and cleanup
@@ -439,7 +486,8 @@ Everything under `lib/otium/` is ordinary Otium:
 
 | Namespace | File | What it has |
 | --- | --- | --- |
-| `otium.core` | `lib/otium/core.ot` | The shared prelude, loaded automatically: `when`, `case`, `dotimes`, sequence functions, sorting, `put`, condition helpers and `match`. |
+| `otium.core` | `lib/otium/core.ot` | The shared prelude, loaded automatically: `when`, `case`, `for`, `dotimes`, sequence functions, sorting, `put`, condition helpers and `match`. |
+| `otium.loop` | `lib/otium/loop.ot` | `for` and `dotimes`. `otium.core` re-exports both, so you don't need to require it. |
 | `otium.extra` | `lib/otium/extra.ot` | Optional helpers: `->`, `->>`, `partial`, `comp`, `group-by`, `frequencies`. You have to require it. |
 | `otium.test` | `lib/otium/test.ot` | `check`, `fails?`, `report`. |
 | `otium.cli` | `lib/otium/cli.ot` | Command-line parsing from a declared spec. See `examples/greet.ot`. |

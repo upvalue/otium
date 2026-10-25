@@ -22,6 +22,10 @@ static const char ot_extra_src[] = {
 #embed "../../lib/otium/extra.ot"
 };
 static const unsigned ot_extra_src_len = sizeof ot_extra_src;
+static const char ot_loop_src[] = {
+#embed "../../lib/otium/loop.ot"
+};
+static const unsigned ot_loop_src_len = sizeof ot_loop_src;
 
 #ifndef OT_HEAP_INIT
 #define OT_HEAP_INIT (1024u * 1024u)
@@ -9904,6 +9908,11 @@ static void extra_module_init(ots* state) {
   (void)eval_source(state, ot_extra_src, ot_extra_src_len, "<otium.extra>", true, &ignored);
 }
 
+static void loop_module_init(ots* state) {
+  otv ignored;
+  (void)eval_source(state, ot_loop_src, ot_loop_src_len, "<otium.loop>", true, &ignored);
+}
+
 ots* ot_create(const ot_config* configuration) {
   ot_config config = configuration == NULL ? ot_config_default() : *configuration;
   if (config.heap_init < 1024 || config.heap_max < config.heap_init ||
@@ -9974,6 +9983,7 @@ ots* ot_create(const ot_config* configuration) {
   state->expand_head = ((ot_var_obj*)ot_as_obj(head_var))->value;
   ot_register_module(state, "otium.reader", reader_module_init);
   ot_register_module(state, "otium.extra", extra_module_init);
+  ot_register_module(state, "otium.loop", loop_module_init);
   ot_register_module(state, "otium.generic", generic_module_init);
   otv generic_name = ot_intern(state, "otium.generic", 13, false);
   state->vm.current_namespace = namespace_find(state, generic_name, true);

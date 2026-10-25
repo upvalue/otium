@@ -107,20 +107,6 @@
   "(case expression ((literal ...) body ...) ... (else body ...))\nEvaluate expression once and run the first equal? literal clause. Return nil if none matches."
   (let ((value (gensym "case"))) #`(let ((,value ,expression)) (cond ,@(case-clauses value clauses)))))
 
-(defmacro dotimes (spec . body)
-  "(dotimes (index count) body ...)\nEvaluate count once, then run body with index from 0 below count. Return nil."
-  (let ((sp (if (eq? (car spec) 'array)
-                (cdr spec)
-                spec)))
-    (let ((i (car sp))
-          (n (car (cdr sp))))
-      #`(let ((lim# ,n)
-              (,i 0))
-          (while (< ,i lim#)
-            ,@body
-            (set! ,i (+ ,i 1)))
-          nil))))
-
 ;; --- sequences (10.4) -------------------------------------------------------
 
 (def (caar p)
@@ -1105,8 +1091,10 @@
   (when (< count 0) (error "string-repeat: negative count" count))
   (unless (string? text) (error "string-repeat: expected a string" text))
   (let ((out (buffer)))
-    (dotimes (_ count)
-      (buffer-push! out text))
+    (let loop ((i 0))
+      (when (< i count)
+        (buffer-push! out text)
+        (loop (+ i 1))))
     (buffer->string out)))
 
 (def (file-directory? path)
@@ -1170,3 +1158,34 @@
                        ,(if (null? options)
                             #f
                             (car (cdr options))))))
+
+;; --- loops ------------------------------------------------------------------
+
+;; for and dotimes live in otium.loop. Defining them here makes them part of
+;; the prelude; this must stay last, since otium.loop sees only what core has
+;; defined when it loads.
+(require otium.loop :as loop)
+
+(def for
+  "(for [name] (clause ...) [=> final] body ...)
+Loop over the clauses in lockstep. Each pass binds the drivers, runs body and
+steps every clause. The loop ends when any driver runs out, and returns
+final, or nil without one.
+
+Drivers: (x :in sequence) walks a list, array or string. (k v :in table)
+walks a table in insertion order. (i :range [start] end [step]) counts like
+range. (x := init next) starts at init and becomes next after each pass.
+
+Accumulators: (name :collect expr [:when test]) gathers a list, bound only
+in final. (name :collect-array expr [:when test]) pushes into a fresh
+array, readable in body as the array so far. (name :sum expr [:when test])
+adds up, readable in body as the sum so far.
+
+With a name the loop goes round only when body calls (name), in tail
+position. Not calling it returns body's value. (name :done) steps the
+clauses and returns final instead of going round."
+  loop/for)
+
+(def dotimes
+  "(dotimes (index count) body ...)\nEvaluate count once, then run body with index from 0 below count. Return nil."
+  loop/dotimes)

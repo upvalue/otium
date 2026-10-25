@@ -1,0 +1,42 @@
+;; Names in for clauses and the loop name.
+(def (clean xs)
+  (for next ((x :in xs) (total :sum x) (out :collect x))
+    => [total out]
+    (if (odd? x)
+        (next)
+        (next :done))))
+
+(def (body-only xs)
+  (for next ((x :in xs) (n := 0 (+ n 1)))
+    => n
+    (println x)
+    (next)))
+
+(def (shadowed xs)
+  (for next ((x :in xs) (total :sum x))
+    => total
+    (let ((next (fn () 0)))
+      (next))
+    (cond
+      ((nil? x) (next))
+      (else (for inner ((y :in xs))
+              (if y
+                  (next)
+                  (inner)))))))
+
+(def (unused-element xs)
+  (for ((x :in xs) ;~ L0202
+        (n := 0 (+ n 1)))
+    => n))
+
+(def (unused-key t)
+  (for ((k v :in t) (total :sum v)) => total)) ;~ L0202
+
+(def (non-tail xs)
+  (for next ((x :in xs) (total :sum x))
+    => total
+    (+ 1 (next)))) ;~ L0203
+
+(def (inside-fn xs)
+  (for next ((x :in xs))
+    (for-each (fn (_) (next)) x))) ;~ L0203

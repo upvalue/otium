@@ -14,6 +14,11 @@ Cover, in roughly this order:
   (run, repl, fmt, lint, test, explain, serve). Check `lib/catalog/` and
   `tools/generate-cli.py` for the real list.
 - Syntax and data: literals, keywords, tables, vectors, strings.
+- Loops: `while`, `dotimes` and named `let`, then a section on `for` from
+  `lib/otium/loop.ot`: its drivers and accumulators, named loops and
+  `(name :done)`, the tail-call lint rule, and what it costs on Chez (see
+  `benchmarks/loops.ot`). Mention that `otium.core` re-exports `for` and
+  `dotimes`.
 - Definitions, functions, control flow, `match`, macros. Include `&optional`
   positional defaults in `fn`, `def` and `def-`, their sequential scope, and
   the `rest-arguments` allocation lint rule. Chez avoids rest lists for

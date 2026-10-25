@@ -22,6 +22,7 @@ parameter list, :always to always break any body, or :never."
     (for-each (fn (name) (put! rules name (rule 1 :signature))) '("def" "def-" "defmethod" "defgeneric"))
     (put! rules "defmacro" (rule 2 :always))
     (put! rules "dotimes" (rule 1 :always))
+    (put! rules "for" (rule 1 :always))
     (put! rules "unwind-protect" (rule 0 :always))
     (put! rules "otium.cli/compile" (rule 0 :always))
     (for-each (fn (name) (put! rules name (rule 1 :never)))
@@ -76,13 +77,17 @@ parameter list, :always to always break any body, or :never."
 (def- (keyword-node? node)
   (and (eq? (node :kind) :atom) (> (string-length (node :text)) 1) (string-starts-with? (node :text) ":")))
 
+(def- (final-node? node)
+  (and (eq? (node :kind) :atom) (equal? (node :text) "=>")))
+
 (def- (units nodes pair-all?)
-  "Group nodes into lists laid out together: table entries, and keyword arguments with their values."
+  "Group nodes into lists laid out together: table entries, keyword arguments with their values, and => with
+its expression."
   (cond
     ((null? nodes) '())
     ((or (syntax/comment? (car nodes)) (null? (cdr nodes)) (syntax/comment? (cadr nodes)))
      (cons (list (car nodes)) (units (cdr nodes) pair-all?)))
-    ((or pair-all? (and (keyword-node? (car nodes)) (not (keyword-node? (cadr nodes)))))
+    ((or pair-all? (final-node? (car nodes)) (and (keyword-node? (car nodes)) (not (keyword-node? (cadr nodes)))))
      (cons (list (car nodes) (cadr nodes)) (units (cddr nodes) pair-all?)))
     (else (cons (list (car nodes)) (units (cdr nodes) pair-all?)))))
 
@@ -90,18 +95,22 @@ parameter list, :always to always break any body, or :never."
   (let ((name (syntax/head-name node))) (and name (or (get rules name) (get rules (get node :resolved-head name))))))
 
 (def- (header-count node rule)
-  ;; A named let keeps its name and bindings beside the head.
+  ;; A named let or for keeps its name and bindings beside the head.
   (let ((args (cdr (syntax/forms node))))
-    (if (and (equal? (syntax/head-name node) "let") (pair? args) (eq? ((car args) :kind) :atom))
+    (if (and (member (syntax/head-name node) '("let" "for")) (pair? args) (eq? ((car args) :kind) :atom))
         2
         (rule :header))))
 
 (def- (forced? node rules)
-  "Whether a list's rule requires its body on separate lines. A body of two or more forms always breaks."
+  "Whether a list's rule requires its body on separate lines. A body of two or more forms always breaks. A
+for's => and its expression don't count, so a for without a body can stay on one line."
   (let ((rule (rule-for node rules)))
     (and rule
          (let ((args (cdr (syntax/forms node)))
-               (body (- (length (cdr (syntax/forms node))) (header-count node rule))))
+               (after (drop (header-count node rule) args))
+               (body (if (and (pair? after) (final-node? (car after)))
+                         (- (length after) 2)
+                         (length after))))
            (or (>= body 2)
                (and (= body 1)
                     (or (eq? (rule :break) :always)

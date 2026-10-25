@@ -262,6 +262,14 @@
             :explanation "A `let` binding, parameter or `match` variable is never referenced. Remove it, or start its name with `_` to show it is intentionally unused."
             :example "(def (f x y) x)"
             :fixed "(def (f x _y) x)"}
+   "L0203" {:title "a named for loop's name is called outside tail position"
+            :name "non-tail-loop-call"
+            :group :suspicious
+            :level :warn
+            :message "`({name})` is not in tail position, so the rest of the loop runs as a nested call"
+            :explanation "A named `for` goes round when its body calls the loop's name. That call must be the last thing the pass does. Anywhere else, such as inside an argument, in the middle of a `begin` or inside a nested `fn`, the rest of the loop runs as a nested call and its result comes back to this pass, which then carries on."
+            :example "(for next ((x :in xs) (total :sum x))\n  => total\n  (+ 1 (next)))"
+            :fixed "(for next ((x :in xs) (total :sum (+ x 1)))\n  => total\n  (next))"}
    "L0301" {:title "local name inside a #` template"
             :name "missed-unquote"
             :group :correctness

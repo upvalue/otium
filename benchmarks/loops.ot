@@ -55,6 +55,10 @@
              (when (< i n)
                (identity i)
                (loop (+ i 1))))))
+(measure "for-range"
+         (fn ()
+           (for ((i :range n))
+             (identity i))))
 (measure "reduce-list" (fn () (reduce + 0 linked)))
 (measure "reduce-array" (fn () (reduce + 0 items)))
 (measure "named-reduce-list"
@@ -71,6 +75,8 @@
              (if (= i n)
                  acc
                  (loop (+ i 1) (+ acc (get items i)))))))
+(measure "for-sum-list" (fn () (for ((x :in linked) (total :sum x)) => total)))
+(measure "for-sum-array" (fn () (for ((x :in items) (total :sum x)) => total)))
 (measure "range" (fn () (range n)))
 (measure "named-range"
          (fn ()
@@ -94,6 +100,21 @@
              (when (< i n)
                (identity (get items i))
                (loop (+ i 1))))))
+(measure "for-in-list"
+         (fn ()
+           (for ((x :in linked))
+             (identity x))))
+(measure "for-in-array"
+         (fn ()
+           (for ((x :in items))
+             (identity x))))
+(measure "for-named-list"
+         (fn ()
+           (for next ((x :in linked))
+             (identity x)
+             (if (keep? x)
+                 (next)
+                 (next)))))
 (measure "map-list" (fn () (map identity linked)))
 (measure "map-array" (fn () (map identity items)))
 (measure "named-map-list"
@@ -111,6 +132,9 @@
                  (push! out (identity (get items i)))
                  (loop (+ i 1))))
              out)))
+(measure "for-collect-list" (fn () (for ((x :in linked) (out :collect (identity x))) => out)))
+(measure "for-collect-array" (fn () (for ((x :in items) (out :collect (identity x))) => out)))
+(measure "for-collect-array-array" (fn () (for ((x :in items) (out :collect-array (identity x))) => out)))
 (measure "filter-list" (fn () (filter keep? linked)))
 (measure "filter-array" (fn () (filter keep? items)))
 (measure "named-filter-list"
@@ -131,3 +155,5 @@
                  (let ((x (get items i))) (when (keep? x) (push! out x)))
                  (loop (+ i 1))))
              out)))
+(measure "for-filter-list" (fn () (for ((x :in linked) (out :collect x :when (keep? x))) => out)))
+(measure "for-filter-array" (fn () (for ((x :in items) (out :collect x :when (keep? x))) => out)))

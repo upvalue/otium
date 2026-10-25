@@ -305,9 +305,24 @@
 
 (def (reduce f init seq)
   "(reduce procedure initial sequence)\nFold left, calling (procedure accumulator element) for each element. Empty sequences return initial."
-  (let ((acc init))
-    (for-each (fn (x) (set! acc (f acc x))) seq)
-    acc))
+  (cond
+    ((array? seq)
+     (let ((n (length seq)))
+       (let loop ((i 0)
+                  (acc init))
+         (if (= i n)
+             acc
+             (loop (+ i 1) (f acc (get seq i)))))))
+    ((nil? seq) init)
+    ((list? seq)
+     (let loop ((xs seq)
+                (acc init))
+       (if (null? xs)
+           acc
+           (let ((next (f acc (car xs)))) (loop (cdr xs) next)))))
+    (else (let ((acc init))
+            (for-each (fn (x) (set! acc (f acc x))) seq)
+            acc))))
 
 (def- %missing-argument (gensym "missing-argument"))
 

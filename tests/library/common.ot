@@ -157,4 +157,36 @@
                           ((2) 2))))))
 (check "case rejects malformed alternatives" #t (fails? (fn () (eval '(case 1 (1 2))))))
 
+;; Captured indices share the binding, including its final increment.
+(let ((callbacks []))
+  (dotimes (i 3) (push! callbacks (fn () i)))
+  (check [3 3 3] (map (fn (f) (f)) callbacks)))
+(let ((seen []))
+  (check nil (dotimes (i 5) (push! seen i) (set! i (+ i 1))))
+  (check [0 2 4] seen))
+
+;; Iteration keeps the initial array length but reads current elements.
+(for-each
+  (fn (operation)
+    (let ((source [1 2 3]) (seen []))
+      (operation (fn (x) (push! seen x) (pop! source) x) source)
+      (check [1 2 nil] seen))
+    (let ((source [1 2]) (seen []))
+      (operation (fn (x) (push! seen x) (push! source 9) x) source)
+      (check [1 2] seen)))
+  (list for-each map filter (fn (f xs) (reduce (fn (acc x) (f x) acc) nil xs))))
+(for-each
+  (fn (source)
+    (check 17 (reduce #f 17 source))
+    (check nil (for-each #f source)))
+  (list nil '() []))
+(check 4 (reduce {:a 4} :a '(9)))
+(check '(1 2) (map :a (list {:a 1} {:a 2})))
+(check '(0 2) (filter [#t nil #t] '(0 1 2)))
+(check [0 2] (filter [#t nil #t] [0 1 2]))
+(check '(1 2) (filter (fn (x) '()) '(1 2)))
+(let ((calls 0))
+  (check #t (fails? (fn () (reduce (fn (acc x) (set! calls (+ calls 1)) (+ acc x)) 0 '(1 . 2)))))
+  (check 0 calls))
+
 (report "library")

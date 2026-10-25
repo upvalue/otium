@@ -211,9 +211,9 @@
   (define collection-call
     (case-lambda
       [(f key)
-       (cond [(record? f) (record-ref f key)]
+       (cond [(procedure? f) (f key)]
+             [(record? f) (record-ref f key)]
              [(instance? f) (instance-read f key)]
-             [(procedure? f) (f key)]
              [(table? f) (get-or f key (void))]
              [(array? f)
               (unless (and (integer? key) (exact? key)) (error 'call "expected integer index"))
@@ -394,10 +394,11 @@
   (define collection-for-each
     (case-lambda
       [(f x)
-       (if (array? x)
-           (let ([n (array-value-size x)])
-             (do ([i 0 (+ i 1)]) ((= i n)) (collection-call f (get x i))))
-           (for-each (lambda (value) (collection-call f value)) (sequence-list x)))]
+       (let ([call (if (procedure? f) f (lambda (value) (collection-call f value)))])
+         (if (array? x)
+             (let ([n (array-value-size x)])
+               (do ([i 0 (+ i 1)]) ((= i n)) (call (get x i))))
+             (for-each call (sequence-list x))))]
       [(f x . xs)
        (apply for-each (lambda args (apply collection-call f args)) (map sequence-list (cons x xs)))]))
   ;; Splice the final sequence onto the leading arguments. The rest list is

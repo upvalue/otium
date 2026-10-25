@@ -1,0 +1,133 @@
+;; Run with ./otium --runtime=chez benchmarks/loops.ot.
+;; Each row reports nanoseconds and allocated bytes per 128-element call.
+(require otium.memory :as memory)
+
+(def n 128)
+
+(def repetitions 100000)
+
+(def items (range n))
+
+(def linked
+  (let loop ((i (- n 1))
+             (out '()))
+    (if (< i 0)
+        out
+        (loop (- i 1) (cons i out)))))
+
+(def (identity x)
+  x)
+
+(def (keep? x)
+  (< x 64))
+
+(def (measure name work)
+  (let warm ((i 0))
+    (when (< i 1000)
+      (work)
+      (warm (+ i 1))))
+  (let samples ((sample 0))
+    (when (< sample 5)
+      (let ((start (current-jiffy))
+            (bytes (memory/allocated)))
+        (let repeat ((i 0))
+          (when (< i repetitions)
+            (work)
+            (repeat (+ i 1))))
+        (let ((used (- (memory/allocated) bytes))
+              (elapsed (- (current-jiffy) start)))
+          (println name
+                   " "
+                   (/ (* elapsed 1000000000.0) (* repetitions (jiffies-per-second)))
+                   " "
+                   (/ used (inexact repetitions)))))
+      (samples (+ sample 1)))))
+
+(measure "while" (fn () (let ((i 0)) (while (< i n) (set! i (+ i 1))))))
+(measure "named-while" (fn () (let loop ((i 0)) (when (< i n) (loop (+ i 1))))))
+(measure "dotimes"
+         (fn ()
+           (dotimes (i n)
+             (identity i))))
+(measure "named-loop"
+         (fn ()
+           (let loop ((i 0))
+             (when (< i n)
+               (identity i)
+               (loop (+ i 1))))))
+(measure "reduce-list" (fn () (reduce + 0 linked)))
+(measure "reduce-array" (fn () (reduce + 0 items)))
+(measure "named-reduce-list"
+         (fn ()
+           (let loop ((xs linked)
+                      (acc 0))
+             (if (null? xs)
+                 acc
+                 (loop (cdr xs) (+ acc (car xs)))))))
+(measure "named-reduce-array"
+         (fn ()
+           (let loop ((i 0)
+                      (acc 0))
+             (if (= i n)
+                 acc
+                 (loop (+ i 1) (+ acc (get items i)))))))
+(measure "range" (fn () (range n)))
+(measure "named-range"
+         (fn ()
+           (let ((out (array)))
+             (let loop ((i 0))
+               (when (< i n)
+                 (push! out i)
+                 (loop (+ i 1))))
+             out)))
+(measure "for-each-list" (fn () (for-each identity linked)))
+(measure "for-each-array" (fn () (for-each identity items)))
+(measure "named-each-list"
+         (fn ()
+           (let loop ((xs linked))
+             (unless (null? xs)
+               (identity (car xs))
+               (loop (cdr xs))))))
+(measure "named-each-array"
+         (fn ()
+           (let loop ((i 0))
+             (when (< i n)
+               (identity (get items i))
+               (loop (+ i 1))))))
+(measure "map-list" (fn () (map identity linked)))
+(measure "map-array" (fn () (map identity items)))
+(measure "named-map-list"
+         (fn ()
+           (let loop ((xs linked)
+                      (out '()))
+             (if (null? xs)
+                 (reverse out)
+                 (loop (cdr xs) (cons (identity (car xs)) out))))))
+(measure "named-map-array"
+         (fn ()
+           (let ((out (array)))
+             (let loop ((i 0))
+               (when (< i n)
+                 (push! out (identity (get items i)))
+                 (loop (+ i 1))))
+             out)))
+(measure "filter-list" (fn () (filter keep? linked)))
+(measure "filter-array" (fn () (filter keep? items)))
+(measure "named-filter-list"
+         (fn ()
+           (let loop ((xs linked)
+                      (out '()))
+             (if (null? xs)
+                 (reverse out)
+                 (loop (cdr xs)
+                       (if (keep? (car xs))
+                           (cons (car xs) out)
+                           out))))))
+(measure "named-filter-array"
+         (fn ()
+           (let ((out (array)))
+             (let loop ((i 0))
+               (when (< i n)
+                 (let ((x (get items i))) (when (keep? x) (push! out x)))
+                 (loop (+ i 1))))
+             out)))

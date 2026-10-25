@@ -54,10 +54,11 @@
 
 ;; Parse one signature such as "(get collection key [default])". The reader
 ;; doesn't accept ... as a symbol, so it's read as %repeat. Forms that aren't
-;; a call, like "`template", keep only their text.
+;; written as a call, like "`template", keep only their text.
 (def- (parse-signature text)
-  (let ((datum (try (read-string (string-replace text "..." " %repeat "))
-                    (catch (error? _) nil))))
+  (let ((datum (and (string-starts-with? text "(")
+                    (try (read-string (string-replace text "..." " %repeat "))
+                         (catch (error? _) nil)))))
     (if (and (pair? datum) (symbol? (car datum)) (list? datum))
         (let ((args (signature-args (cdr datum))))
           (if args {"text" text "args" args} {"text" text}))
@@ -198,8 +199,11 @@
         (special (core-forms))
         (out []))
     (for-each (fn (name)
-                ;; expander-* are the C runtime's hooks for the shared expander.
-                (unless (or (get defined name) (string-starts-with? name "expander-"))
+                ;; expander-* are the C runtime's hooks for the shared expander,
+                ;; and % names are internal.
+                (unless (or (get defined name)
+                            (string-starts-with? name "expander-")
+                            (string-starts-with? name "%"))
                   (let ((item (catalog name))
                         (runtimes (item "runtimes"))
                         (kind (chez-kind name special))

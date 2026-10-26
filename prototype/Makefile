@@ -24,7 +24,7 @@ differential-foreign: otium-proto ffi_fixture.so
 	python3 differential_foreign.py
 
 .PHONY: test test-heap test-reader test-runtime sanitize sanitize-heap sanitize-reader sanitize-runtime clean
-test: test-heap-growth test-tokens test-properties test-records test-methods test-instances test-filesystem test-file-ports test-process test-port-shutdown test-port-reader test-ports test-time test-interrupt test-cleanup test-restarts test-cli test-bytevectors test-handlers test-params test-reflection test-strings test-numeric test-eval test-generics test-conditions test-shared-expander test-macros test-quasiquote test-modules test-namespaces test-defonce test-value test-heap test-reader test-runtime test-scope-roots test-slot-reuse test-foreign test-reload test-foreign-reload
+test: test-io-host test-heap-growth test-tokens test-properties test-records test-methods test-instances test-filesystem test-file-ports test-process test-port-shutdown test-port-reader test-ports test-time test-interrupt test-cleanup test-restarts test-cli test-bytevectors test-handlers test-params test-reflection test-strings test-numeric test-eval test-generics test-conditions test-shared-expander test-macros test-quasiquote test-modules test-namespaces test-defonce test-value test-heap test-reader test-runtime test-scope-roots test-slot-reuse test-foreign test-reload test-foreign-reload
 
 test-heap: test_heap
 	./test_heap
@@ -92,6 +92,7 @@ sanitize-runtime:
 	./test_runtime_sanitize
 
 clean:
+	rm -f test_io_host test_io_host_sanitize
 	rm -f otium-proto-sanitize test_bytevectors test_bytevectors_sanitize
 	rm -f test_port_shutdown test_port_shutdown_sanitize
 	rm -f test_port_reader test_port_reader_sanitize
@@ -627,3 +628,12 @@ test-heap-growth: test_heap_growth
 sanitize-heap-growth:
 	$(CC) -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined heap.c test_heap_growth.c -o test_heap_growth_sanitize
 	./test_heap_growth_sanitize
+
+.PHONY: test-io-host sanitize-io-host
+test_io_host: $(RUNTIME) test_io_host.c $(RUNTIME_HEADERS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_io_host.c $(LDLIBS) -o $@
+test-io-host: test_io_host
+	./test_io_host
+sanitize-io-host:
+	$(CC) $(CPPFLAGS) $(LDFLAGS) -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined $(RUNTIME) test_io_host.c $(LDLIBS) -o test_io_host_sanitize
+	./test_io_host_sanitize

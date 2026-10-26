@@ -400,6 +400,7 @@ bool rt_drive(Runtime* rt, size_t stop_frames) {
 
 /* Call back into the VM without discarding the suspended caller's roots. */
 Value rt_call_list(Runtime* rt, Value function, Value args) {
+  if (!rt_host_entry(rt)) return 0;
   size_t base = rt->sp, frames = rt->frame_count, tries = rt->try_count, params = rt->param_count;
   size_t handlers = rt->handler_count, handler_top = rt->handler_top,
          restarts = rt->restart_scope_count, cleanups = rt->cleanup_count;

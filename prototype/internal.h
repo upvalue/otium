@@ -221,6 +221,9 @@ struct Runtime {
   bool stress_gc, shared_expander, expanding;
   size_t expansion_calls, eval_depth;
   uint64_t gensym_counter;
+  RuntimeIOHost io_host;
+  void* io_userdata;
+  bool io_host_set, host_io_active, host_io_reentry;
   ForeignState* foreign;
 };
 
@@ -228,6 +231,7 @@ void rt_free_function(Function* fn);
 bool rt_reclaim(Runtime* rt);
 bool rt_coded_error(Runtime* rt, const char* code, const char* message);
 bool rt_error(Runtime* rt, const char* message);
+bool rt_host_entry(Runtime* rt);
 bool rt_grow(Runtime* rt, void** data, size_t* capacity, size_t needed, size_t width);
 bool rt_stack(Runtime* rt, size_t needed);
 Value rt_alloc(Runtime* rt, uint32_t kind, uint32_t fields, size_t bytes);

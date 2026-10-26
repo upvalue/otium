@@ -43,6 +43,7 @@ static char* copy_text(Runtime* rt, const char* s, size_t n) {
 }
 
 bool runtime_load_path(Runtime* rt, const char* path) {
+  if (!rt_host_entry(rt)) return false;
   ModuleState* m = state(rt);
   if (!m || !rt_grow(rt, (void**)&m->paths, &m->path_capacity, m->path_count + 1, sizeof(char*)))
     return false;

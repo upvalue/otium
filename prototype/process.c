@@ -3,6 +3,7 @@
 
 bool runtime_set_arguments(Runtime* rt, const char* script, size_t count,
                            const char* const* arguments) {
+  if (!rt_host_entry(rt)) return false;
   if (count && !arguments) return rt_error(rt, "missing argument array");
   Value v[] = {V_EMPTY, V_NIL, V_NIL};
   Roots roots;

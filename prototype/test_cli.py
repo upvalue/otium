@@ -76,3 +76,6 @@ run(['--heap=2097152', '--heap-max=1048576', '-e', '1'], status=2)
 r = run(['--stats', '-e', '42'], output='42\n')
 assert 'heap-capacity=1048576' in r.stderr, r
 print('CLI bounded growth and explicit fixed heaps passed')
+
+run(['--repl'], '(read-line)\nhello\n(+ 1 2)\n', output='hello\n3\n')
+run(['--repl'], '(println :a) (println :b)\n', output=':a\nnil\n:b\nnil\n')

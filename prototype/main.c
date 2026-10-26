@@ -1,5 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
-#include "runtime.h"
+#include "internal.h"
 #include "reader.h"
 #include <errno.h>
 #include <stdlib.h>
@@ -37,6 +37,7 @@ static bool evaluate(Runtime* rt, const char* source, size_t length, const char*
   if (echo) {
     runtime_print(rt, stdout, result);
     fputc('\n', stdout);
+    fflush(stdout);
   }
   return true;
 }
@@ -83,6 +84,36 @@ static bool load(Runtime* rt, const char* path) {
   return ok;
 }
 
+/* The REPL and program reads must share the standard port's managed buffer. */
+static ssize_t input_line(Runtime* rt, char** line, size_t* capacity) {
+  Value port, value;
+  if (!runtime_call(rt, "otium.core/%standard-input", NULL, 0, &port) ||
+      !runtime_call(rt, "otium.core/read-line", &port, 1, &value))
+    return -2;
+  if (value == V_EOF) return -1;
+  if (!rt_kind(value, K_STRING)) {
+    rt_error(rt, "read-line must return a string or EOF");
+    return -2;
+  }
+  size_t length = rt_bytes_length(value);
+  if (length >= SOURCE_LIMIT) {
+    rt_error(rt, "source exceeds size limit");
+    return -2;
+  }
+  if (*capacity < length + 1) {
+    char* grown = realloc(*line, length + 1);
+    if (!grown) {
+      rt_error(rt, "out of host memory");
+      return -2;
+    }
+    *line = grown;
+    *capacity = length + 1;
+  }
+  memcpy(*line, rt_bytes_data(value), length);
+  (*line)[length] = '\n';
+  return (ssize_t)(length + 1);
+}
+
 static bool repl(Runtime* rt) {
   bool terminal = isatty(STDIN_FILENO), ok = true;
   char *line = NULL, *pending = NULL;
@@ -92,10 +123,10 @@ static bool repl(Runtime* rt) {
       fputs(length ? "... " : "> ", stdout);
       fflush(stdout);
     }
-    ssize_t bytes = getline(&line, &line_capacity, stdin);
+    ssize_t bytes = input_line(rt, &line, &line_capacity);
     if (bytes < 0) {
-      if (ferror(stdin)) {
-        if (runtime_poll_interrupt(rt)) perror("stdin");
+      if (bytes == -2) {
+        if (!runtime_interrupted(rt)) fprintf(stderr, "stdin: %s\n", runtime_error(rt));
         ok = false;
       }
       if (length) {

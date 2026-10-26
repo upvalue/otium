@@ -6,6 +6,32 @@
 #include <signal.h>
 
 typedef struct Runtime Runtime;
+
+/* Host functions return errno values (zero on success); read/write return a
+ * byte count, zero for read EOF, or a negative errno. Writes must make progress.
+ * Callbacks borrow managed buffers: they must not reenter or collect the runtime.
+ * The table is copied. Userdata must outlive every port opened with this host. */
+enum {
+  RUNTIME_IO_READ = 1,
+  RUNTIME_IO_WRITE = 2,
+  RUNTIME_IO_CREATE = 4,
+  RUNTIME_IO_TRUNCATE = 8,
+  RUNTIME_IO_APPEND = 16,
+  RUNTIME_IO_EXCLUSIVE = 32
+};
+
+typedef struct {
+  int (*open)(void* userdata, const char* path, unsigned flags, intptr_t* handle);
+  long (*read)(void* userdata, intptr_t handle, uint8_t* bytes, size_t length);
+  long (*write)(void* userdata, intptr_t handle, const uint8_t* bytes, size_t length);
+  int (*close)(void* userdata, intptr_t handle);
+  int (*flush)(void* userdata, intptr_t handle); /* Optional. */
+} RuntimeIOHost;
+
+/* Affects subsequently opened ports. NULL restores POSIX defaults. Standard
+ * ports use handles 0/1/2 and are borrowed; install before loading the core to
+ * replace them. Existing ports retain their host, userdata and handle. */
+bool runtime_set_io_host(Runtime* rt, const RuntimeIOHost* host, void* userdata);
 Runtime* runtime_create(size_t semispace_bytes, size_t stack_limit);
 void runtime_destroy(Runtime* rt);
 /* Heaps are fixed until a larger per-semispace limit is explicitly supplied.

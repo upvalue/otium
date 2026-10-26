@@ -6,6 +6,12 @@
 #define OTIUM_BOOTSTRAP_FILE "prototype/primitives.ot"
 #endif
 
+bool rt_host_entry(Runtime* rt) {
+  if (!rt->host_io_active) return true;
+  rt->host_io_reentry = true;
+  return rt_error(rt, "host I/O callback cannot reenter Otium");
+}
+
 bool rt_error(Runtime* rt, const char* message) {
   if (!rt->error[0]) {
     snprintf(rt->error, sizeof(rt->error), "%s", message);
@@ -61,6 +67,7 @@ bool runtime_poll_interrupt(Runtime* rt) {
 }
 
 Value rt_alloc(Runtime* rt, uint32_t kind, uint32_t fields, size_t bytes) {
+  if (!rt_host_entry(rt)) return 0;
   if (rt->interrupt_flag && *rt->interrupt_flag && !runtime_poll_interrupt(rt)) return 0;
   size_t collections = rt->heap.collections;
   if (rt->stress_gc) heap_collect(&rt->heap);
@@ -283,6 +290,7 @@ Runtime* runtime_create(size_t bytes, size_t stack_limit) {
 }
 
 bool runtime_heap_limit(Runtime* rt, size_t bytes) {
+  if (!rt_host_entry(rt)) return false;
   return heap_set_limit(&rt->heap, bytes) ||
          rt_error(rt, "heap limit is below capacity or exceeds addressable size");
 }
@@ -290,7 +298,7 @@ bool runtime_heap_limit(Runtime* rt, size_t bytes) {
 size_t runtime_heap_capacity(const Runtime* rt) { return rt->heap.capacity; }
 
 void runtime_destroy(Runtime* rt) {
-  if (!rt) return;
+  if (!rt || !rt_host_entry(rt)) return;
   rt_ports_destroy(rt);
   rt_foreign_destroy(rt);
   rt_modules_destroy(rt);
@@ -525,6 +533,7 @@ Value rt_eval_value(Runtime* rt, Value value) {
 }
 
 bool runtime_load_expander(Runtime* rt, const char* directory) {
+  if (!rt_host_entry(rt)) return false;
   if (rt->shared_expander) return true;
   if (!rt_classes_init(rt)) return false;
   size_t n = strlen(directory);
@@ -599,6 +608,7 @@ static bool load_bootstrap(Runtime* rt) {
 }
 
 bool runtime_load_core(Runtime* rt, const char* directory) {
+  if (!rt_host_entry(rt)) return false;
   if (rt->core_loaded) return true;
   if (!runtime_load_expander(rt, directory) || !runtime_load_path(rt, directory)) return false;
   size_t n = strlen(directory);
@@ -638,6 +648,7 @@ bool runtime_load_core(Runtime* rt, const char* directory) {
 }
 
 bool runtime_eval(Runtime* rt, const char* source, size_t length, Value* result) {
+  if (!rt_host_entry(rt)) return false;
   bool nested = rt->frame_count || rt->compiling || rt->evaluating || rt->eval_depth;
   size_t base = nested ? rt->sp : 0, frames = rt->frame_count, tries = rt->try_count;
   size_t restarts = nested ? rt->restart_scope_count : 0, cleanups = nested ? rt->cleanup_count : 0;
@@ -694,6 +705,7 @@ bool runtime_exit_status(const Runtime* rt, int* status) {
 const char* runtime_error(const Runtime* rt) { return rt->error; }
 
 bool runtime_call(Runtime* rt, const char* name, const Value* args, size_t count, Value* result) {
+  if (!rt_host_entry(rt)) return false;
   rt->interrupted = false;
   rt->exit_pending = false;
   rt->error[0] = 0;

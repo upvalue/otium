@@ -78,8 +78,35 @@ forced-GC/sanitizer foreign regression. Five shared validation cases extend the
 Chez comparison to 17 programs and six errors. The unchanged 222-check common
 suite also passes on Chez after the shared helper changes.
 
-Embedding I/O, integration and performance remain
-in [prototype-completion.md](../prototype-completion.md). Passing this inventory
+The port embedding API is `RuntimeIOHost` with `runtime_set_io_host`. Hosts supply
+open/read/write/close callbacks and an optional flush hook. Read/write return
+counts or negative errno values; other callbacks return zero or errno. The
+runtime copies the table and snapshots it with userdata into each new port.
+Install it before loading the core to replace standard handles 0/1/2, which are
+borrowed. Existing ports keep their original host after replacement.
+
+File and standard ports buffer in managed bytevectors. Native host callbacks
+borrow those bytes and cannot reenter Otium or cause collection; the public
+entry points reject such attempts before touching VM state. Custom Otium ports
+continue to receive rooted bytevectors and may allocate. Partial writes retain
+progress across errors. EINTR polls the interrupt flag before retrying, preserving
+partial UTF-8 input. Destruction drains native buffers and closes owned handles
+without running Otium callbacks; use `runtime_flush_ports` first to observe errors.
+The default host uses POSIX descriptors. The REPL and program reads share the
+standard input buffer, and each echoed result is flushed before the next form.
+
+`test-io-host` and `sanitize-io-host` exercise these contracts with a host that
+returns one-byte reads and two-byte writes, injects errors and interrupts, checks
+that borrowed buffers belong to the moving heap, and attempts rejected reentry.
+All 40 non-collector targets from the standard test inventory pass, as do the
+affected port/host/file/shutdown/CLI ASan/UBSan targets. Port differential checks
+agree with Chez on 19 programs and 11 errors; compiler-free checks pass. Filesystem
+metadata and source/module loading still use POSIX directly; port host support
+does not yet establish filesystem-free embedding.
+
+The remaining embedding scope, integration and performance are tracked in
+[prototype-completion.md](../prototype-completion.md) and the
+[completion audit](prototype-completion-audit.md). Passing this inventory
 does not establish their completion. The default `sanitize` target covers only
 heap, reader and runtime checks; the Makefile has separate subsystem targets.
 

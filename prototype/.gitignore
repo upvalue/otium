@@ -136,3 +136,6 @@ test_quasiquote_sanitize
 
 /test_heap_growth
 /test_heap_growth_sanitize
+
+/test_io_host
+/test_io_host_sanitize

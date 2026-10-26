@@ -2,18 +2,19 @@
 #include "internal.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 
 typedef struct {
-  size_t position, length, capacity, lookahead, offset;
-  unsigned char peek[4];
+  size_t position, length, capacity, offset;
   unsigned kind;
   bool input, closed, eof, busy;
-  FILE* stream;
-  char* host_buffer;
+  RuntimeIOHost host;
+  void* userdata;
+  intptr_t handle;
 } Port;
 
 static Port* info(Value p) { return object_bytes(p); }
@@ -25,12 +26,78 @@ void rt_port_repr(FILE* out, Value p) {
     fprintf(out, " %s>", info(p)->input ? "input" : "output");
     return;
   }
-  const char* name = info(p)->kind == 0          ? "\"string\""
-                     : info(p)->kind == 1        ? "\"bytevector\""
-                     : info(p)->stream == stdin  ? "stdin"
-                     : info(p)->stream == stdout ? "stdout"
-                                                 : "stderr";
+  const char* name = info(p)->kind == 0     ? "\"string\""
+                     : info(p)->kind == 1   ? "\"bytevector\""
+                     : info(p)->handle == 0 ? "stdin"
+                     : info(p)->handle == 1 ? "stdout"
+                                            : "stderr";
   fprintf(out, "#<port %s %s>", name, info(p)->input ? "input" : "output");
+}
+
+static int posix_open(void* userdata, const char* path, unsigned flags, intptr_t* handle) {
+  (void)userdata;
+  int mode = flags & RUNTIME_IO_WRITE ? O_WRONLY : O_RDONLY;
+  if (flags & RUNTIME_IO_CREATE) mode |= O_CREAT;
+  if (flags & RUNTIME_IO_TRUNCATE) mode |= O_TRUNC;
+  if (flags & RUNTIME_IO_APPEND) mode |= O_APPEND;
+  if (flags & RUNTIME_IO_EXCLUSIVE) mode |= O_EXCL;
+  int fd = open(path, mode, 0666);
+  if (fd < 0) return errno;
+  struct stat st;
+  int error = fstat(fd, &st) ? errno : S_ISDIR(st.st_mode) ? EISDIR : 0;
+  if (error) {
+    close(fd);
+    return error;
+  }
+  *handle = fd;
+  return 0;
+}
+
+static long posix_read(void* userdata, intptr_t handle, uint8_t* bytes, size_t length) {
+  (void)userdata;
+  ssize_t n = read((int)handle, bytes, length);
+  return n < 0 ? -errno : (long)n;
+}
+
+static long posix_write(void* userdata, intptr_t handle, const uint8_t* bytes, size_t length) {
+  (void)userdata;
+  ssize_t n = write((int)handle, bytes, length);
+  return n < 0 ? -errno : (long)n;
+}
+
+static int posix_close(void* userdata, intptr_t handle) {
+  (void)userdata;
+  return close((int)handle) ? errno : 0;
+}
+
+static const RuntimeIOHost posix_host = {posix_open, posix_read, posix_write, posix_close, NULL};
+
+bool runtime_set_io_host(Runtime* rt, const RuntimeIOHost* host, void* userdata) {
+  if (!rt_host_entry(rt)) return false;
+  if (host && (!host->open || !host->read || !host->write || !host->close))
+    return rt_error(rt, "I/O host requires open, read, write and close callbacks");
+  rt->io_host = host ? *host : posix_host;
+  rt->io_host_set = host != NULL;
+  rt->io_userdata = host ? userdata : NULL;
+  return true;
+}
+
+static void port_host(Runtime* rt, Value port) {
+  info(port)->host = rt->io_host_set ? rt->io_host : posix_host;
+  info(port)->userdata = rt->io_host_set ? rt->io_userdata : NULL;
+}
+
+static void host_begin(Runtime* rt, Value port) {
+  rt->host_io_active = true;
+  info(port)->busy = true;
+}
+
+static bool host_end(Runtime* rt, Value port) {
+  rt->host_io_active = false;
+  info(port)->busy = false;
+  if (!rt->host_io_reentry) return true;
+  rt->host_io_reentry = false;
+  return rt_error(rt, "host I/O callback cannot reenter Otium");
 }
 
 static Value fail(Runtime* rt, const char* message) {
@@ -103,31 +170,67 @@ static Value callback(Runtime* rt, Value* port, size_t field, bool bytes, size_t
   return result;
 }
 
-static void stream_error(Runtime* rt, Value* port, const char* op, int error) {
+static void host_error(Runtime* rt, Value* port, const char* op, int error) {
   if (!runtime_poll_interrupt(rt)) return;
   if (info(*port)->kind == 4) rt_file_error(rt, op, object_fields(*port)[4], error ? error : EIO);
   else rt_io_error(rt, ":other");
 }
 
-static bool flush(Runtime* rt, Value* port) {
-  if (info(*port)->kind != 3) {
-    if (info(*port)->stream && fflush(info(*port)->stream)) {
-      stream_error(rt, port, "flush-output-port", errno);
-      return false;
+static long transfer(Runtime* rt, Value* port, bool writing, size_t start, size_t length) {
+  for (;;) {
+    if (!runtime_poll_interrupt(rt)) return -1;
+    Port* p = info(*port);
+    unsigned char* bytes = rt_bytes_data(object_fields(*port)[0]) + start;
+    host_begin(rt, *port);
+    long n = writing ? p->host.write(p->userdata, p->handle, bytes, length)
+                     : p->host.read(p->userdata, p->handle, bytes, length);
+    if (!host_end(rt, *port)) return -1;
+    if (n == -EINTR) {
+      if (!runtime_poll_interrupt(rt)) return -1;
+      continue;
     }
-    return true;
+    if (n < 0) {
+      host_error(rt, port, writing ? "write" : "read", n < -INT_MAX ? EIO : (int)-n);
+      return -1;
+    }
+    if ((size_t)n > length || (writing && !n)) {
+      rt_error(rt, writing ? "invalid host write count" : "invalid host read count");
+      return -1;
+    }
+    return n;
   }
+}
+
+static bool flush(Runtime* rt, Value* port) {
+  if (info(*port)->kind < 2) return true;
   while (info(*port)->offset < info(*port)->length) {
     size_t left = info(*port)->length - info(*port)->offset;
-    Value n = callback(rt, port, 1, true, info(*port)->offset, info(*port)->length);
-    if (!n) return false;
     size_t written;
-    if (!natural(n, &written) || !written || written > left)
-      return rt_error(rt, "invalid custom port write count");
+    if (info(*port)->kind == 3) {
+      Value n = callback(rt, port, 1, true, info(*port)->offset, info(*port)->length);
+      if (!n) return false;
+      if (!natural(n, &written) || !written || written > left)
+        return rt_error(rt, "invalid custom port write count");
+    } else {
+      long n = transfer(rt, port, true, info(*port)->offset, left);
+      if (n < 0) return false;
+      written = (size_t)n;
+    }
     info(*port)->offset += written;
   }
   info(*port)->offset = info(*port)->length = 0;
-  return callback(rt, port, 2, false, 0, 0) != 0;
+  if (info(*port)->kind == 3) return callback(rt, port, 2, false, 0, 0) != 0;
+  Port* p = info(*port);
+  if (p->host.flush) {
+    host_begin(rt, *port);
+    int error = p->host.flush(p->userdata, p->handle);
+    if (!host_end(rt, *port)) return false;
+    if (error) {
+      host_error(rt, port, "flush-output-port", error);
+      return false;
+    }
+  }
+  return true;
 }
 
 static Value make_custom(Runtime* rt, Value* port, size_t first, size_t count, bool input) {
@@ -181,8 +284,8 @@ static Value open_file(Runtime* rt, Value* port, size_t first, size_t count, boo
       (count == 2 && !rt_kind(rt->stack[first + 1], K_TABLE)))
     return fail(rt, "file port needs a path and optional options table");
   size_t size = 4096;
-  int flags = input ? O_RDONLY : O_WRONLY | O_CREAT | O_TRUNC;
-  const char* mode = input ? "rb" : "wb";
+  unsigned flags =
+      input ? RUNTIME_IO_READ : RUNTIME_IO_WRITE | RUNTIME_IO_CREATE | RUNTIME_IO_TRUNCATE;
   if (count == 2) {
     Value key = rt_intern(rt, K_KEYWORD, ":buffer-size", 12);
     if (!key) return 0;
@@ -199,9 +302,9 @@ static Value open_file(Runtime* rt, Value* port, size_t first, size_t count, boo
         if (!rt_kind(option, K_KEYWORD)) return fail(rt, "invalid if-exists option");
         const char* name = (char*)rt_bytes_data(option);
         if (!strcmp(name, ":append")) {
-          flags = O_WRONLY | O_CREAT | O_APPEND;
-          mode = "ab";
-        } else if (!strcmp(name, ":error")) flags = O_WRONLY | O_CREAT | O_EXCL;
+          flags = RUNTIME_IO_WRITE | RUNTIME_IO_CREATE | RUNTIME_IO_APPEND;
+        } else if (!strcmp(name, ":error"))
+          flags = RUNTIME_IO_WRITE | RUNTIME_IO_CREATE | RUNTIME_IO_EXCLUSIVE;
         else if (strcmp(name, ":truncate")) return fail(rt, "invalid if-exists option");
       }
     }
@@ -212,55 +315,54 @@ static Value open_file(Runtime* rt, Value* port, size_t first, size_t count, boo
   *port = rt_alloc(rt, K_PORT, 5, sizeof(Port));
   if (!*port) return 0;
   object_fields(*port)[4] = rt->stack[first];
-  char* buffer = malloc(size);
-  if (!buffer) return fail(rt, "out of host memory");
-  int fd = open((char*)rt_bytes_data(rt->stack[first]), flags, 0666);
-  int error = errno;
-  struct stat st;
-  if (fd >= 0) {
-    if (fstat(fd, &st)) error = errno;
-    else if (S_ISDIR(st.st_mode)) error = EISDIR;
-    else error = 0;
-  }
-  FILE* stream = NULL;
-  if (fd >= 0 && !error) {
-    stream = fdopen(fd, mode);
-    if (!stream) error = errno;
-  }
-  if (!stream) {
-    if (fd >= 0) close(fd);
-    free(buffer);
+  Value buffer = rt_bytes_new(rt, size);
+  if (!buffer) return 0;
+  object_fields(*port)[0] = buffer;
+  info(*port)->kind = 4;
+  info(*port)->input = input;
+  info(*port)->capacity = size;
+  port_host(rt, *port);
+  Port* p = info(*port);
+  host_begin(rt, *port);
+  int error =
+      p->host.open(p->userdata, (char*)rt_bytes_data(object_fields(*port)[4]), flags, &p->handle);
+  bool entered = host_end(rt, *port);
+  if (error) {
+    if (!entered) return 0;
     return rt_file_error(rt, input ? "open-input-file" : "open-output-file",
                          object_fields(*port)[4], error);
   }
-  if (setvbuf(stream, buffer, _IOFBF, size)) {
-    fclose(stream);
-    free(buffer);
-    return fail(rt, "cannot configure file buffer");
-  }
-  info(*port)->kind = 4;
-  info(*port)->input = input;
-  info(*port)->stream = stream;
-  info(*port)->host_buffer = buffer;
-  if (!register_port(rt, *port)) {
-    fclose(stream);
-    free(buffer);
-    info(*port)->stream = NULL;
-    info(*port)->host_buffer = NULL;
+  if (!entered || !register_port(rt, *port)) {
+    host_begin(rt, *port);
+    p->host.close(p->userdata, p->handle);
+    host_end(rt, *port);
+    info(*port)->closed = true;
     return 0;
   }
   return *port;
 }
 
+/* Destruction invokes no Otium code. Native hosts may drain buffered output;
+ * failures are ignored here, so embedders should call runtime_flush_ports first. */
 void rt_ports_destroy(Runtime* rt) {
   for (size_t i = 0; i < rt->open_port_count; i++) {
-    Port* p = info(rt->open_ports[i]);
-    if (p->kind == 4 && p->stream) {
-      fclose(p->stream);
-      free(p->host_buffer);
-      p->stream = NULL;
-      p->host_buffer = NULL;
+    Value port = rt->open_ports[i];
+    Port* p = info(port);
+    if ((p->kind != 2 && p->kind != 4) || p->closed) continue;
+    host_begin(rt, port);
+    if (!p->input) {
+      while (p->offset < p->length) {
+        size_t left = p->length - p->offset;
+        long n = p->host.write(p->userdata, p->handle,
+                               rt_bytes_data(object_fields(port)[0]) + p->offset, left);
+        if (n <= 0 || (size_t)n > left) break;
+        p->offset += (size_t)n;
+      }
+      if (p->host.flush) p->host.flush(p->userdata, p->handle);
     }
+    if (p->kind == 4) p->host.close(p->userdata, p->handle);
+    host_end(rt, port);
+    p->closed = true;
   }
 }
 
@@ -268,11 +370,22 @@ static Value standard(Runtime* rt, unsigned which) {
   if (rt->standard_ports[which] == V_NIL) {
     Value p = rt_alloc(rt, K_PORT, 5, sizeof(Port));
     if (!p) return 0;
+    Roots roots;
+    roots_push(&rt->heap, &roots, &p, 1);
     info(p)->kind = 2;
     info(p)->input = which == 0;
-    info(p)->stream = which == 0 ? stdin : which == 1 ? stdout : stderr;
-    rt->standard_ports[which] = p;
-    if (!register_port(rt, p)) return 0;
+    info(p)->handle = (intptr_t)which;
+    info(p)->capacity = 4096;
+    port_host(rt, p);
+    Value buffer = rt_bytes_new(rt, 4096);
+    bool ok = buffer != 0;
+    if (ok) {
+      object_fields(p)[0] = buffer;
+      ok = register_port(rt, p);
+    }
+    if (ok) rt->standard_ports[which] = p;
+    roots_pop(&rt->heap, &roots);
+    if (!ok) return 0;
   }
   return rt->standard_ports[which];
 }
@@ -298,62 +411,49 @@ static bool check(Runtime* rt, Value p, bool input) {
 }
 
 static int peek(Runtime* rt, Value* port, size_t ahead) {
-  Port* s = info((*port));
-  if (s->kind == 3) {
-    while (info(*port)->length - info(*port)->offset <= ahead) {
-      s = info(*port);
-      if (s->eof) return -1;
-      size_t remaining = s->length - s->offset;
-      unsigned char* data = rt_bytes_data(object_fields(*port)[0]);
-      memmove(data, data + s->offset, remaining);
-      s->offset = 0;
-      s->length = remaining;
-      size_t available = s->capacity - remaining;
+  Port* s = info(*port);
+  if (s->kind < 2)
+    return ahead < s->length - s->position
+               ? rt_bytes_data(object_fields(*port)[0])[s->position + ahead]
+               : -1;
+  while (info(*port)->length - info(*port)->offset <= ahead) {
+    s = info(*port);
+    if (s->eof) return -1;
+    size_t remaining = s->length - s->offset;
+    unsigned char* data = rt_bytes_data(object_fields(*port)[0]);
+    memmove(data, data + s->offset, remaining);
+    s->offset = 0;
+    s->length = remaining;
+    size_t available = s->capacity - remaining, n;
+    if (s->kind == 3) {
       Value result = callback(rt, port, 1, true, remaining, s->capacity);
       if (!result) return -2;
       if (result == V_EOF) {
         info(*port)->eof = true;
         return -1;
       }
-      size_t n;
       if (!natural(result, &n) || !n || n > available) {
         fail(rt, "invalid custom port read count");
         return -2;
       }
-      info(*port)->length += n;
-    }
-    return rt_bytes_data(object_fields(*port)[0])[info(*port)->offset + ahead];
-  }
-  if (!s->stream)
-    return ahead < s->length - s->position
-               ? rt_bytes_data(object_fields((*port))[0])[s->position + ahead]
-               : -1;
-  while (s->lookahead <= ahead) {
-    if (!runtime_poll_interrupt(rt)) return -2;
-    errno = 0;
-    int c = fgetc(s->stream);
-    if (c == EOF) {
-      if (ferror(s->stream)) {
-        int error = errno;
-        clearerr(s->stream);
-        stream_error(rt, port, "read", error);
-        return -2;
+    } else {
+      long result = transfer(rt, port, false, remaining, available);
+      if (result < 0) return -2;
+      if (!result) {
+        info(*port)->eof = true;
+        return -1;
       }
-      return -1;
+      n = (size_t)result;
     }
-    s->peek[s->lookahead++] = (unsigned char)c;
+    info(*port)->length += n;
   }
-  return s->peek[ahead];
+  return rt_bytes_data(object_fields(*port)[0])[info(*port)->offset + ahead];
 }
 
 static void consume(Value p, size_t n) {
   Port* s = info(p);
   s->position += n;
-  if (s->kind == 3) s->offset += n;
-  if (s->stream) {
-    s->lookahead -= n;
-    memmove(s->peek, s->peek + n, s->lookahead);
-  }
+  if (s->kind >= 2) s->offset += n;
 }
 
 static int character(Runtime* rt, Value* port, uint32_t* cp, size_t* width) {
@@ -484,7 +584,7 @@ static Value read_datum(Runtime* rt, Value* port) {
 
 static bool append(Runtime* rt, Value* port, const char* bytes, size_t n) {
   if (!check(rt, (*port), false)) return false;
-  if (info(*port)->kind == 3) {
+  if (info(*port)->kind >= 2) {
     while (n) {
       if (info(*port)->length == info(*port)->capacity && !flush(rt, port)) return false;
       size_t room = info(*port)->capacity - info(*port)->length;
@@ -495,13 +595,7 @@ static bool append(Runtime* rt, Value* port, const char* bytes, size_t n) {
       n -= take;
       if (info(*port)->length == info(*port)->capacity && !flush(rt, port)) return false;
     }
-    return true;
-  }
-  if (info((*port))->stream) {
-    bool ok = fwrite(bytes, 1, n, info((*port))->stream) == n &&
-              (info(*port)->kind != 2 || !fflush(info((*port))->stream));
-    if (!ok) stream_error(rt, port, "write", errno);
-    return ok;
+    return info(*port)->kind != 2 || flush(rt, port);
   }
   size_t length = info((*port))->length;
   if (n > SIZE_MAX - length) return rt_error(rt, "port output too large");
@@ -635,10 +729,14 @@ static Value port_builtin(Runtime* rt, unsigned id, size_t first, size_t count, 
     if (info(live[0])->kind == 3 && !callback(rt, &live[0], 3, false, 0, 0)) return 0;
     int error = 0;
     if (info(live[0])->kind == 4) {
-      if (fclose(info(live[0])->stream)) error = errno;
-      free(info(live[0])->host_buffer);
-      info(live[0])->host_buffer = NULL;
-      info(live[0])->stream = NULL;
+      Port* p = info(live[0]);
+      host_begin(rt, live[0]);
+      error = p->host.close(p->userdata, p->handle);
+      bool entered = host_end(rt, live[0]);
+      info(live[0])->closed = true;
+      unregister_port(rt, live[0]);
+      if (!entered) return 0;
+      return error ? rt_file_error(rt, "close-port", object_fields(live[0])[4], error) : V_NIL;
     }
     info(live[0])->closed = true;
     unregister_port(rt, live[0]);
@@ -836,6 +934,7 @@ Value rt_port_builtin(Runtime* rt, unsigned id, size_t first, size_t count) {
 }
 
 bool runtime_flush_ports(Runtime* rt) {
+  if (!rt_host_entry(rt)) return false;
   if (rt->frame_count || rt->evaluating || rt->compiling || rt->eval_depth)
     return rt_error(rt, "port flushing requires an idle runtime");
   Value saved[] = {rt->condition_values[0], rt->restart_transfer[0], rt->restart_transfer[1]};

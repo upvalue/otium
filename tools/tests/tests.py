@@ -103,8 +103,53 @@ def namespace_reference(t):
     t.check('window-call' not in ui, 'private helper exported')
     t.check(ui['measure']['signatures'][0]['text'] == '(measure widget limits)')
     t.check(ui['run']['signatures'][0]['text'] == '(run)')
-    t.check(ui['Widget']['kind'] == 'value')
+    t.check(ui['Widget']['kind'] == 'abstract')
+    t.check(ui['Widget']['fields'] == [])
+    t.check(ui['Label']['kind'] == 'class' and ui['Label']['parent'] == 'Widget')
+    label = {field['name']: field for field in ui['Label']['fields']}
+    t.check(label['text']['required'] and 'default' not in label['text'])
+    t.check(label['wrap']['default'] == '#t')
+    text = {field['name']: field for field in ui['TextField']['fields']}
+    t.check(text['value']['default'] == '""')
+    t.check(text['positions']['state'] and text['positions']['default'] == '[]')
+    root = {field['name']: field for field in ui['Root']['fields']}
+    t.check(root['focus']['default'] == '(make Focus)')
+    t.check(ui['LayoutStyle']['kind'] == 'record' and ui['LayoutStyle']['immutable'])
+    t.check([field['name'] for field in ui['MeasureLimits']['fields']] ==
+            ['width', 'height', 'width-mode', 'height-mode', 'scale'])
+    for entry in ui.values():
+        if entry['kind'] in ('class', 'abstract', 'record'):
+            t.check(bool(entry['doc']) and entry['doc'] != 'Class or abstract dispatch type.',
+                    'missing type documentation:', entry['name'])
     t.check('Resolve a palette keyword' in ui['color']['doc'])
     t.check('`reconcile!`' in namespaces['otium.ui']['doc'])
     core = {entry['name']: entry for entry in namespaces['otium.core']['entries']}
     t.check('+' in core and 'map' in core, 'core must include builtins and prelude')
+
+
+@test('class reference source', needs=['chez'])
+def class_reference_source(t):
+    """Keep defaults as source, including multiline expressions, without executing them."""
+    (t.scratch / 'fixture.ot').write_text('''; A class with source-preserved defaults.
+;; Unicode λ and `code` survive extraction.
+(defclass Sample :is Parent
+  required
+  (optional :init nil :accessor sample-optional)
+  (state :state #t :init (error
+                         "do not evaluate")))
+''')
+    exporter = (ROOT / 'tools/export-reference.ot').read_text()
+    driver = exporter.rsplit('(export)', 1)[0] + '''
+(write-file "type.json"
+  (json/encode (json-ready ((get (definitions "fixture.ot") "Sample") :type))))
+'''
+    script = t.scratch / 'check.ot'
+    script.write_text(driver)
+    t.expect(t.run([ROOT / 'otium', '--runtime=chez', script], cwd=t.scratch))
+    entry = json.loads((t.scratch / 'type.json').read_text())
+    t.check(entry['doc'] == 'A class with source-preserved defaults.\nUnicode λ and `code` survive extraction.')
+    t.check(entry['parent'] == 'Parent')
+    fields = entry['fields']
+    t.check(fields[0] == {'name': 'required', 'required': True})
+    t.check(fields[1]['default'] == 'nil' and fields[1]['accessor'] == 'sample-optional')
+    t.check(fields[2]['state'] and fields[2]['default'] == '(error\n                         "do not evaluate")')

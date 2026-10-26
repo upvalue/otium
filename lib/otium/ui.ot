@@ -8,15 +8,21 @@ widget instances. Widgets provide methods for measurement, painting, and events.
 Layout and drawing are supplied by otium.ui.gpu. Native window and GPU support
 are loaded when needed; requiring this module alone does not open a window."
 
-;; Shared widget lifecycle. Optional layout and drawing live in otium.ui.gpu.
+;; Base type for UI widgets. Specialize `build`, `measure`, `paint`, and
+;; `handle-event` to define a widget. Abstract types cannot be instantiated.
 (defabstract Widget)
 
+;; A view description passed to `reconcile!`: widget properties, an identity key,
+;; child descriptions, and mounting options. Matching keys preserve mounted state.
 (defclass Description
   properties
   key
   children
   options)
 
+;; A retained widget instance and its children, interaction state, and layout
+;; and paint caches. Created and maintained by `reconcile!`; use `dispose!`
+;; to release a tree.
 (defclass Mounted
   instance
   key
@@ -57,6 +63,8 @@ are loaded when needed; requiring this module alone does not open a window."
   (recorded-at :init nil)
   (paint-cacheable? :init #f))
 
+;; Keyboard focus and activation state for a retained tree. Use `focus!`,
+;; `focused`, and `cancel-key!` to manage it.
 (defclass Focus
   (node :init nil)
   (armed :init nil)
@@ -64,6 +72,8 @@ are loaded when needed; requiring this module alone does not open a window."
   (event :init nil)
   (drop-text? :init #f))
 
+;; Owns a retained widget tree, focus, animations, and layout generations.
+;; Pass it to `reconcile!` to update children and `dispose!` to release them.
 (defclass Root
   (children :init [])
   (focus :init (make Focus))
@@ -94,6 +104,8 @@ are loaded when needed; requiring this module alone does not open a window."
       (get palette value)
       value))
 
+;; Text widget with font, color, wrapping, and alignment. Supply `text`;
+;; width and height of -1 use the measured text size.
 (defclass Label
   :is Widget
   text
@@ -106,6 +118,9 @@ are loaded when needed; requiring this module alone does not open a window."
   (grow :init 0)
   (align :init :left))
 
+;; Named icon widget. Supply `name`; `size` controls its dimensions,
+;; `fill` selects the filled variant, and `color` accepts a palette keyword
+;; or a packed RGBA value.
 (defclass Icon
   :is Widget
   name
@@ -113,6 +128,8 @@ are loaded when needed; requiring this module alone does not open a window."
   (fill :init #f)
   (color :init :text))
 
+;; Lays out children in a row or column. Controls spacing, padding,
+;; alignment, and background decoration. `on-press` makes the box interactive.
 (defclass Box
   :is Widget
   (direction :init :column)
@@ -130,6 +147,9 @@ are loaded when needed; requiring this module alone does not open a window."
   (border :init nil)
   (radius :init 0))
 
+;; Focusable button that invokes `on-press` when activated by pointer or
+;; keyboard. Its children provide the content; padding, font, and style
+;; control its appearance.
 (defclass Button
   :is Widget
   (on-press :init nil)
@@ -142,6 +162,9 @@ are loaded when needed; requiring this module alone does not open a window."
   (size :init 18)
   (font :init :ui))
 
+;; Single-line text input with selection and keyboard editing. `value` is
+;; the displayed text; `on-change` receives edits and `on-submit` handles
+;; submission. Cursor, selection, and scroll state survive reconciliation.
 (defclass TextField
   :is Widget
   (value :init "")
@@ -160,6 +183,9 @@ are loaded when needed; requiring this module alone does not open a window."
   (offset :init 0 :state #t)
   (positions :init [] :state #t))
 
+;; Scrollable container along `axis` (:x or :y). Supports smooth scrolling,
+;; revealing a target, and following content with `stick-to-bottom`.
+;; Scroll position and animation state survive reconciliation.
 (defclass Scroll
   :is Widget
   (width :init -1)
@@ -180,10 +206,12 @@ are loaded when needed; requiring this module alone does not open a window."
   (following? :init #t :state #t)
   (revealed :init nil :state #t))
 
+;; Measured width and height in logical pixels. Construct with `size`.
 (defclass Size
   width
   height)
 
+;; Position and dimensions in logical pixels. Construct with `bounds`.
 (defclass Bounds
   x
   y
@@ -203,10 +231,14 @@ are loaded when needed; requiring this module alone does not open a window."
 (def (height bounds)
   (bounds :height))
 
+;; Immutable layout properties returned by `layout-style`. Fields are
+;; positional in `record-new` and readable by keyword.
 (defrecord LayoutStyle
   (width height grow padding padding-x padding-y align-items gap row center scroll)
   :immutable #t)
 
+;; Immutable constraints passed to `measure`. Includes available dimensions,
+;; constraint modes, and scale. Read a constraint with `limit-ref`.
 (defrecord MeasureLimits
   (width height width-mode height-mode scale)
   :immutable #t)

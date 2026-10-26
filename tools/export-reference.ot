@@ -17,8 +17,11 @@
 (def- modules
   [{:name 'otium.core :file "lib/otium/core.ot" :runtimes ["chez" "c"]}
    {:name 'otium.ui :file "lib/otium/ui.ot" :runtimes ["chez" "c"]}])
+
 (def- catalog-file "lib/catalog/runtime.json")
+
 (def- expander-file "lib/otium/expander.ot")
+
 (def- output-file "docs/reference.json")
 
 ;; --- signatures --------------------------------------------------------------
@@ -40,7 +43,11 @@
 (def- (optional-group items)
   (let ((args (signature-args items)))
     (and args
-         (put (if (= (length args) 1) (args 0) {"group" args}) "optional" #t))))
+         (put (if (= (length args) 1)
+                  (args 0)
+                  {"group" args})
+              "optional"
+              #t))))
 
 ;; Returns an array of arguments, or nil when an element can't be shown as one.
 (def- (signature-args items)
@@ -52,8 +59,12 @@
                         (put! out (- (length out) 1) (put (out (- (length out) 1)) "repeat" #t))
                         (set! ok #f))
                     (let ((arg (signature-arg item)))
-                      (if arg (push! out arg) (set! ok #f)))))
-              (if (array? items) (array-to-list items) items))
+                      (if arg
+                          (push! out arg)
+                          (set! ok #f)))))
+              (if (array? items)
+                  (array-to-list items)
+                  items))
     (and ok out)))
 
 ;; Parse one signature such as "(get collection key [default])". The reader
@@ -61,11 +72,14 @@
 ;; written as a call, like "`template", keep only their text.
 (def- (parse-signature text)
   (let ((datum (and (string-starts-with? text "(")
-                    (try (read-string (string-replace text "..." " %repeat "))
-                         (catch (error? _) nil)))))
+                    (try
+                      (read-string (string-replace text "..." " %repeat "))
+                      (catch (error? _) nil)))))
     (if (and (pair? datum) (symbol? (car datum)) (list? datum))
         (let ((args (signature-args (cdr datum))))
-          (if args {"text" text "args" args} {"text" text}))
+          (if args
+              {"text" text "args" args}
+              {"text" text}))
         {"text" text})))
 
 ;; Build a signature from a definition's parameters: (a b &optional (c 1) & rest).
@@ -77,28 +91,30 @@
         ((null? ps) nil)
         ((symbol? ps) (push! args {"name" (symbol->string ps) "repeat" #t}))
         ((eq? (car ps) '&optional) (set! optional? #t) (loop (cdr ps)))
-        ((eq? (car ps) '&)
-         (push! args {"name" (symbol->string (cadr ps)) "repeat" #t}))
+        ((eq? (car ps) '&) (push! args {"name" (symbol->string (cadr ps)) "repeat" #t}))
         ((pair? (car ps))
          (let ((default (cadr (car ps)))
                (arg {"name" (symbol->string (car (car ps))) "optional" #t}))
-           (unless (equal? default "%missing-argument")
-             (put! arg "default" default))
+           (unless (equal? default "%missing-argument") (put! arg "default" default))
            (push! args arg)
            (loop (cdr ps))))
-        (else
-         (push! args (if optional?
+        (else (push! args
+                     (if optional?
                          {"name" (symbol->string (car ps)) "optional" #t}
                          {"name" (symbol->string (car ps))}))
-         (loop (cdr ps)))))
+              (loop (cdr ps)))))
     {"text" (signature-text name args) "args" args}))
 
 (def- (arg-text arg)
   (let ((base (if (get arg "group")
                   (str "(" (string-join " " (map arg-text (arg "group"))) ")")
                   (arg "name")))
-        (shown (if (get arg "repeat") (str base " ...") base)))
-    (if (get arg "optional") (str "[" shown "]") shown)))
+        (shown (if (get arg "repeat")
+                   (str base " ...")
+                   base)))
+    (if (get arg "optional")
+        (str "[" shown "]")
+        shown)))
 
 (def- (signature-text name args)
   (if (empty? args)
@@ -108,10 +124,14 @@
 ;; Split a docstring into signatures and prose.
 (def- (split-doc doc)
   (let ((newline (string-index doc "\n"))
-        (head (if newline (substring doc 0 newline) doc)))
+        (head (if newline
+                  (substring doc 0 newline)
+                  doc)))
     (if (string-starts-with? head "(")
         {:signatures (map parse-signature (string-split head " / "))
-         :doc (if newline (string-trim (substring doc (+ newline 1) (string-length doc))) "")}
+         :doc (if newline
+                  (string-trim (substring doc (+ newline 1) (string-length doc)))
+                  "")}
         {:signatures nil :doc doc})))
 
 ;; --- source ------------------------------------------------------------------
@@ -123,38 +143,124 @@
     ((and (eq? (node :kind) :atom) (equal? (node :text) ".")) '&)
     ((eq? (node :kind) :atom) (string->symbol (node :text)))
     ((eq? (node :kind) :list)
-     (let ((parts (syntax/forms node)))
-       (list (string->symbol ((car parts) :text)) ((cadr parts) :text))))
+     (let ((parts (syntax/forms node))) (list (string->symbol ((car parts) :text)) ((cadr parts) :text))))
     (else (string->symbol (node :text)))))
 
 (def- (module-doc path)
-  (let ((forms (filter (fn (node) (not (eq? (node :kind) :comment)))
-                       (syntax/parse (read-file path))))
+  (let ((forms (filter (fn (node) (not (eq? (node :kind) :comment))) (syntax/parse (read-file path))))
         (first (get forms 0))
         (doc (if (and first (equal? (syntax/head-name first) "ns"))
                  (get forms 1)
                  first)))
-    (if (and doc (eq? (doc :kind) :string)) (read-string (doc :text)) "")))
+    (if (and doc (eq? (doc :kind) :string))
+        (read-string (doc :text))
+        "")))
 
-;; Each top-level function or macro definition's first line, counted from 1,
-;; and its parameters, by name.
+;; Keep initializer expressions as source text; exporting must not evaluate them.
+(def- (node-source node lines)
+  (let ((end (syntax/end node))
+        (start-line (node :line))
+        (end-line (car end)))
+    (if (= start-line end-line)
+        (substring (get lines start-line) (node :column) (cadr end))
+        (string-join "\n"
+                     (concat [(substring (get lines start-line) (node :column) (string-length (get lines start-line)))]
+                             (take (- end-line start-line 1) (drop (+ start-line 1) lines))
+                             [(substring (get lines end-line) 0 (cadr end))])))))
+
+(def- (option-node options key)
+  (let loop ((rest options))
+    (cond
+      ((null? rest) nil)
+      ((equal? ((car rest) :text) key) (cadr rest))
+      (else (loop (cddr rest))))))
+
+(def- (type-details head parts lines prose)
+  (let ((record? (equal? head "defrecord"))
+        (abstract? (equal? head "defabstract"))
+        (rest (cddr parts))
+        (parent? (and (pair? rest) (equal? ((car rest) :text) ":is")))
+        (parent (if parent?
+                    ((cadr rest) :text)
+                    "Object"))
+        (slots (cond
+                 (record? (syntax/forms (car rest)))
+                 (parent? (cddr rest))
+                 (else rest)))
+        (fields (map (fn (slot)
+                       (let ((simple? (eq? (slot :kind) :atom))
+                             (items (if simple?
+                                        (list slot)
+                                        (syntax/forms slot)))
+                             (options (cdr items))
+                             (init (option-node options ":init"))
+                             (state (option-node options ":state"))
+                             (accessor (option-node options ":accessor"))
+                             (field {"name" ((car items) :text) "required" (not init)}))
+                         (when init (put! field "default" (node-source init lines)))
+                         (when state (put! field "state" (equal? (state :text) "#t")))
+                         (when accessor (put! field "accessor" (accessor :text)))
+                         field))
+                     slots))
+        (out {"kind" (cond
+                       (record? "record")
+                       (abstract? "abstract")
+                       (else "class"))
+              "doc" prose
+              "fields" fields}))
+    (if record?
+        (let ((immutable (option-node (cdr rest) ":immutable")))
+          (put! out "immutable" (and immutable (equal? (immutable :text) "#t"))))
+        (put! out "parent" parent))
+    out))
+
+;; Source locations and signatures, plus type declarations. Comments directly
+;; above a type declaration supply its prose documentation.
+(def- (definition node lines comments)
+  (let ((head (syntax/head-name node))
+        (parts (and head (syntax/forms node))))
+    (when (and head
+               (member head
+                       '("def"
+                         "def-"
+                         "defonce"
+                         "defmacro"
+                         "defparam"
+                         "defgeneric"
+                         "defclass"
+                         "defabstract"
+                         "defrecord"))
+               (pair? (cdr parts)))
+      (let ((target (cadr parts))
+            (name ((if (eq? (target :kind) :list)
+                       (car (syntax/forms target))
+                       target)
+                   :text))
+            (params (cond
+                      ((eq? (target :kind) :list) (cdr (syntax/forms target)))
+                      ((and (equal? head "defmacro") (pair? (cddr parts))) (syntax/forms (caddr parts)))
+                      (else nil))))
+        {:name name
+         :line (+ (node :line) 1)
+         :params (and params (map param-datum params))
+         :type (and (member head '("defclass" "defabstract" "defrecord"))
+                    (type-details head parts lines (string-join "\n" comments)))}))))
+
 (def- (definitions path)
-  (let ((found {}))
+  (let ((found {})
+        (lines (string-split (read-file path) "\n"))
+        (comments []))
     (for-each (fn (node)
-                (let ((head (syntax/head-name node))
-                      (parts (and head (syntax/forms node))))
-                  (when (and head (member head '("def" "def-" "defonce" "defmacro" "defparam" "defgeneric" "defclass" "defabstract" "defrecord"))
-                             (pair? (cdr parts)))
-                    (let ((target (cadr parts))
-                          (macro? (equal? head "defmacro"))
-                          (name ((if (eq? (target :kind) :list) (car (syntax/forms target)) target) :text))
-                          (params (cond
-                                    ((eq? (target :kind) :list) (cdr (syntax/forms target)))
-                                    ((and macro? (pair? (cddr parts))) (syntax/forms (caddr parts)))
-                                    (else nil))))
-                      (unless (get found name)
-                        (put! found name {:line (+ (node :line) 1)
-                                          :params (and params (map param-datum params))}))))))
+                (when (> (node :newlines) 1) (set! comments []))
+                (if (eq? (node :kind) :comment)
+                    (let ((text (node :text)))
+                      (let loop ((start 0))
+                        (if (and (< start (string-length text)) (equal? (substring text start (+ start 1)) ";"))
+                            (loop (+ start 1))
+                            (push! comments (string-trim (substring text start (string-length text)))))))
+                    (let ((item (definition node lines comments)))
+                      (when (and item (not (get found (item :name)))) (put! found (item :name) item))
+                      (set! comments []))))
               (syntax/parse (read-file path)))
     found))
 
@@ -167,8 +273,7 @@
                 (let ((parts (and (syntax/head-name node) (syntax/forms node))))
                   (when (and parts (pair? (cdr parts)) (equal? ((cadr parts) :text) "expander-core-forms"))
                     (syntax/walk (caddr parts)
-                                 (fn (child)
-                                   (when (eq? (child :kind) :atom) (put! found (child :text) #t)))))))
+                                 (fn (child) (when (eq? (child :kind) :atom) (put! found (child :text) #t)))))))
               (syntax/parse (read-file expander-file)))
     found))
 
@@ -178,9 +283,14 @@
 (def- (chez-kind name special)
   (if (get special name)
       "special"
-      (try (if (procedure? (eval (string->symbol name))) "function" "value")
-           (catch (error? problem)
-             (if (eq? (get problem :type) 'name-error) nil "macro")))))
+      (try
+        (if (procedure? (eval (string->symbol name)))
+            "function"
+            "value")
+        (catch (error? problem)
+          (if (eq? (get problem :type) 'name-error)
+              nil
+              "macro")))))
 
 (def- (runtime-order runtimes)
   (filter (fn (r) (contains? runtimes r)) ["chez" "c"]))
@@ -189,10 +299,14 @@
   (let ((parts (split-doc doc))
         (signatures (or (parts :signatures)
                         (and params [(params-signature name params)])
-                        (and (member kind '("function" "macro"))
-                             [{"text" (str "(" name " ...)")}])))
+                        (and (member kind '("function" "macro")) [{"text" (str "(" name " ...)")}])))
         (out {"name" name "kind" kind "doc" (parts :doc) "runtimes" runtimes}))
-    (when signatures (put! out "signatures" (if (array? signatures) signatures (list-to-array signatures))))
+    (when signatures
+      (put! out
+            "signatures"
+            (if (array? signatures)
+                signatures
+                (list-to-array signatures))))
     (when source (put! out "source" source))
     out))
 
@@ -202,9 +316,15 @@
     (map (fn (b)
            (let ((name (symbol->string (b :name)))
                  (found (get defs name)))
-             (entry name (keyword->string (b :kind)) (b :doc) (and found (found :params))
-                    (and found {"file" path "line" (found :line)})
-                    (module :runtimes))))
+             (let ((out (entry name
+                               (keyword->string (b :kind))
+                               (b :doc)
+                               (and found (found :params))
+                               (and found {"file" path "line" (found :line)})
+                               (module :runtimes)))
+                   (details (and found (found :type))))
+               (when details (for-each (fn (key) (put! out key (details key))) (keys details)))
+               out)))
          (filter (fn (b) (and (b :public) (not (string-starts-with? (symbol->string (b :name)) "%"))))
                  (dev/bindings (module :name))))))
 
@@ -215,17 +335,14 @@
     (for-each (fn (name)
                 ;; expander-* are the C runtime's hooks for the shared expander,
                 ;; and % names are internal.
-                (unless (or (get defined name)
-                            (string-starts-with? name "expander-")
-                            (string-starts-with? name "%"))
+                (unless (or (get defined name) (string-starts-with? name "expander-") (string-starts-with? name "%"))
                   (let ((item (catalog name))
                         (runtimes (item "runtimes"))
                         (kind (chez-kind name special))
                         (where (runtime-order (if kind
                                                   (concat runtimes ["chez"])
                                                   (filter (fn (r) (not (equal? r "chez"))) runtimes)))))
-                    (push! out (entry name (or kind "function")
-                                      (get item "chez" (item "text")) nil nil where)))))
+                    (push! out (entry name (or kind "function") (get item "chez" (item "text")) nil nil where)))))
               (keys catalog))
     out))
 
@@ -240,8 +357,7 @@
     (else value)))
 
 (def- (export-module module)
-  (unless (eq? (module :name) 'otium.core)
-    (eval (list 'require (module :name))))
+  (unless (eq? (module :name) 'otium.core) (eval (list 'require (module :name))))
   (let ((entries (module-entries module)))
     (when (eq? (module :name) 'otium.core)
       (let ((defined {}))
@@ -253,8 +369,7 @@
 
 (def- (export)
   (let ((namespaces (map export-module modules)))
-    (write-file output-file
-                (str (json/encode (json-ready {"namespaces" namespaces})) "\n"))
+    (write-file output-file (str (json/encode (json-ready {"namespaces" namespaces})) "\n"))
     (println (str "wrote " (length namespaces) " namespaces to " output-file))))
 
 (export)

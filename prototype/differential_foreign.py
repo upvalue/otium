@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-FIXTURE = ROOT / 'prototype/ffi_fixture.so'
+FIXTURE = ROOT / 'prototype/build/release/ffi_fixture.so'
 CASES = [
     '(println (apply (ffi/bind lib "echo_int" \'(int) \'int #t) \'(42)))',
     '(println (apply (ffi/bind lib "echo_utf8" \'(utf8) \'utf8 #t) ["héllo"]))',

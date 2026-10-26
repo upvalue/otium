@@ -6,16 +6,16 @@ import signal
 import subprocess
 
 DIRECTORY = Path(__file__).resolve().parent
-HOST = Path(os.environ.get('OTIUM_TEST_FOREIGN', DIRECTORY / 'test_foreign')).resolve()
-OPTIONS = ['--sanitize'] if HOST.name.endswith('_sanitize') else []
+HOST = Path(os.environ.get('OTIUM_TEST_FOREIGN',
+                           DIRECTORY / 'build/release/bin/foreign-control')).resolve()
 for mode, message in [('outside', 'outside an Otium foreign call'),
                       ('thread', 'thread other than the Otium thread')]:
-    result = subprocess.run([str(HOST), *OPTIONS, '--callback-' + mode],
+    result = subprocess.run([str(HOST), mode],
                             cwd=DIRECTORY, text=True, capture_output=True, timeout=30)
     assert result.returncode == -signal.SIGABRT, result
     assert message in result.stderr, result
     assert 'AddressSanitizer' not in result.stderr and 'runtime error:' not in result.stderr, result
-result = subprocess.run([str(HOST), *OPTIONS, '--callback-exit'], cwd=DIRECTORY,
+result = subprocess.run([str(HOST), 'exit'], cwd=DIRECTORY,
                         text=True, capture_output=True, timeout=30)
 assert result.returncode == 0, result
 assert result.stdout == 'callback exit and outer cleanup passed\n', result

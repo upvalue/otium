@@ -7,7 +7,7 @@ import subprocess
 LUA_CASES = {
     'ffi1000000': '''local ffi = require("ffi")
     ffi.cdef("int echo_int(int value);")
-    local library = ffi.load("prototype/ffi_fixture.so")
+    local library = ffi.load("prototype/build/release/ffi_fixture.so")
     local echo = library.echo_int
     local function kernel(n)
       local total = 0

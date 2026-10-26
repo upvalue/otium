@@ -12,7 +12,7 @@ import tempfile
 from benchmark_lua import available_library, run_lua
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-FIXTURE = ROOT / 'prototype/ffi_fixture.so'
+FIXTURE = ROOT / 'prototype/build/release/ffi_fixture.so'
 
 
 def run(command):

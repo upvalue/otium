@@ -32,10 +32,10 @@ def main():
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     subprocess.run(['make', '-C', str(ROOT / 'prototype'), 'otium-proto',
-                    'ffi_fixture.so', 'ffi_other.so'], check=True)
+                    'build/release/ffi_fixture.so', 'build/release/ffi_other.so'], check=True)
     original_library = harness.library
-    fixtures = {'ffi-fixture-17': ROOT / 'prototype/ffi_fixture.so',
-                'ffi-fixture-29': ROOT / 'prototype/ffi_other.so'}
+    fixtures = {'ffi-fixture-17': ROOT / 'prototype/build/release/ffi_fixture.so',
+                'ffi-fixture-29': ROOT / 'prototype/build/release/ffi_other.so'}
     harness.library = lambda name: fixtures[name] if name in fixtures else original_library(name)
     for index, name in enumerate(DEFINITIONS):
         path = ROOT / name

@@ -8,45 +8,45 @@ static bool space(unsigned char c) {
 
 static bool delimiter(unsigned char c) { return space(c) || strchr("()[]{}\";'`,", c) != NULL; }
 
-static Value pair(Runtime* rt, Value car, Value cdr) {
-  Value live[] = {car, cdr};
-  Roots roots;
-  roots_push(&rt->heap, &roots, live, 2);
-  Value result = rt_alloc(rt, K_PAIR, 2, 0);
+static ot_value pair(ot_runtime* rt, ot_value car, ot_value cdr) {
+  ot_value live[] = {car, cdr};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, live, 2);
+  ot_value result = oti_alloc(rt, K_PAIR, 2, 0);
   if (result) {
     object_fields(result)[0] = live[0];
     object_fields(result)[1] = live[1];
   }
-  roots_pop(&rt->heap, &roots);
+  oti_roots_pop(&rt->heap, &roots);
   return result;
 }
 
-static bool validate(Runtime* rt, const char* text, size_t length) {
+static bool validate(ot_runtime* rt, const char* text, size_t length) {
   size_t position = 0;
   for (;;) {
-    if (!runtime_poll_interrupt(rt)) return false;
-    Reader r;
-    reader_init(&r, text, length, 16 * 1024 * 1024);
+    if (!ot_poll_interrupt(rt)) return false;
+    oti_reader r;
+    oti_reader_init(&r, text, length, 16 * 1024 * 1024);
     r.position = position;
-    Ast* form = reader_next(&r);
+    oti_ast* form = oti_reader_next(&r);
     bool done = form == NULL, ok = r.error == NULL;
     position = r.position;
     if (!ok) {
-      rt_coded_error(rt, r.error_code, r.error);
+      oti_coded_error(rt, r.error_code, r.error);
       rt->error_offset = r.error_offset;
     }
-    reader_destroy(&r);
+    oti_reader_destroy(&r);
     if (!ok || done) return ok;
   }
 }
 
-static bool advance(Runtime* rt, const char* text, size_t end, size_t* position, size_t* line,
+static bool advance(ot_runtime* rt, const char* text, size_t end, size_t* position, size_t* line,
                     size_t* column, bool* cr) {
   while (*position < end) {
     unsigned char c = (unsigned char)text[*position];
-    size_t next = rt_utf8_scalar((const unsigned char*)text, *position, end);
+    size_t next = oti_utf8_scalar((const unsigned char*)text, *position, end);
     if (!next || !c) {
-      rt_error(rt, "invalid source character");
+      oti_error(rt, "invalid source character");
       rt->error_offset = *position;
       return false;
     }
@@ -63,30 +63,30 @@ static bool advance(Runtime* rt, const char* text, size_t end, size_t* position,
   return true;
 }
 
-Value rt_tokens(Runtime* rt, size_t first, size_t count) {
-  if (count != 1 || !rt_kind(rt->stack[first], K_STRING)) {
-    rt_error(rt, "tokens needs one source string");
+ot_value oti_tokens(ot_runtime* rt, size_t first, size_t count) {
+  if (count != 1 || !oti_kind(rt->stack[first], K_STRING)) {
+    oti_error(rt, "tokens needs one source string");
     return 0;
   }
-  size_t length = rt_bytes_length(rt->stack[first]);
+  size_t length = oti_bytes_length(rt->stack[first]);
   char* text = malloc(length + 1);
   if (!text) {
-    rt_error(rt, "out of host memory");
+    oti_error(rt, "out of host memory");
     return 0;
   }
-  memcpy(text, rt_bytes_data(rt->stack[first]), length);
+  memcpy(text, oti_bytes_data(rt->stack[first]), length);
   text[length] = 0;
   if (!validate(rt, text, length)) {
     free(text);
     return 0;
   }
-  Value live[] = {V_EMPTY, V_NIL, V_NIL, V_NIL, V_NIL};
-  Roots roots;
-  roots_push(&rt->heap, &roots, live, 5);
+  ot_value live[] = {OT_EMPTY, OT_NIL, OT_NIL, OT_NIL, OT_NIL};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, live, 5);
   size_t position = 0, line = 0, column = 0, last_line = 0;
   bool cr = false, ok = true;
   while (ok && position < length) {
-    if (!runtime_poll_interrupt(rt)) {
+    if (!ot_poll_interrupt(rt)) {
       ok = false;
       break;
     }
@@ -123,9 +123,9 @@ Value rt_tokens(Runtime* rt, size_t first, size_t count) {
       end = start + 4;
     } else {
       if (length - start >= 2 && c == '#' && text[start + 1] == '\\') {
-        end = rt_utf8_scalar((unsigned char*)text, start + 2, length);
+        end = oti_utf8_scalar((unsigned char*)text, start + 2, length);
         if (!end) {
-          rt_error(rt, "invalid character token");
+          oti_error(rt, "invalid character token");
           ok = false;
           break;
         }
@@ -139,22 +139,22 @@ Value rt_tokens(Runtime* rt, size_t first, size_t count) {
       break;
     }
     last_line = line;
-    live[2] = rt_intern(rt, K_KEYWORD, kind, strlen(kind));
+    live[2] = oti_intern(rt, K_KEYWORD, kind, strlen(kind));
     ok = live[2] != 0;
     if (ok) {
-      live[3] = rt_text(rt, K_STRING, text + start, end - start);
+      live[3] = oti_text(rt, K_STRING, text + start, end - start);
       ok = live[3] != 0;
     }
     if (ok) {
-      live[4] = pair(rt, value_int((intptr_t)gap), V_EMPTY);
+      live[4] = pair(rt, ot_int((intptr_t)gap), OT_EMPTY);
       ok = live[4] != 0;
     }
     if (ok) {
-      live[4] = pair(rt, value_int((intptr_t)start_column), live[4]);
+      live[4] = pair(rt, ot_int((intptr_t)start_column), live[4]);
       ok = live[4] != 0;
     }
     if (ok) {
-      live[4] = pair(rt, value_int((intptr_t)start_line), live[4]);
+      live[4] = pair(rt, ot_int((intptr_t)start_line), live[4]);
       ok = live[4] != 0;
     }
     if (ok) {
@@ -166,17 +166,17 @@ Value rt_tokens(Runtime* rt, size_t first, size_t count) {
       ok = live[4] != 0;
     }
     if (ok) {
-      Value node = pair(rt, live[4], V_EMPTY);
+      ot_value node = pair(rt, live[4], OT_EMPTY);
       ok = node != 0;
       if (ok) {
-        if (live[0] == V_EMPTY) live[0] = node;
+        if (live[0] == OT_EMPTY) live[0] = node;
         else object_fields(live[1])[1] = node;
         live[1] = node;
       }
     }
   }
-  Value result = ok ? live[0] : 0;
-  roots_pop(&rt->heap, &roots);
+  ot_value result = ok ? live[0] : 0;
+  oti_roots_pop(&rt->heap, &roots);
   free(text);
   return result;
 }

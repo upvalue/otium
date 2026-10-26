@@ -3,10 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-static Value eval(Runtime* rt, const char* source) {
-  Value value;
-  if (!runtime_eval(rt, source, strlen(source), &value)) {
-    fprintf(stderr, "%s\n%s\n", source, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* source) {
+  ot_value value;
+  if (!ot_eval(rt, source, strlen(source), &value)) {
+    fprintf(stderr, "%s\n%s\n", source, ot_error(rt));
     abort();
   }
   return value;
@@ -18,10 +18,10 @@ int main(int argc, char** argv) {
     if (!strcmp(argv[i], "--sanitize")) sanitize = true;
     else abort();
   }
-  Runtime* rt = runtime_create(16384, 4096);
+  ot_runtime* rt = ot_create(16384, 4096);
   assert(rt);
 
-  runtime_gc_stress(rt, true);
+  ot_gc_stress(rt, true);
   char source[1024];
   const char* suffix = sanitize ? "_sanitize" : "";
   snprintf(source, sizeof(source),
@@ -36,8 +36,8 @@ int main(int argc, char** argv) {
              "(def current (ffi/bind lib \"echo_int\" '(int) 'int #t)) "
              "(+ (saved 20) (current 22))",
              suffix);
-    assert(eval(rt, source) == value_int(42));
-    RuntimeForeignStats stats = runtime_foreign_stats(rt);
+    assert(eval(rt, source) == ot_int(42));
+    ot_foreign_stats stats = ot_get_foreign_stats(rt);
     assert(stats.libraries == 1 && stats.bindings <= 3 && stats.signatures == 1);
     if (stats.bindings > peak_bindings) peak_bindings = stats.bindings;
   }
@@ -50,41 +50,41 @@ int main(int argc, char** argv) {
     eval(rt, source);
   }
   eval(rt, "nil");
-  RuntimeForeignStats stats = runtime_foreign_stats(rt);
+  ot_foreign_stats stats = ot_get_foreign_stats(rt);
   assert(stats.libraries == 1 && stats.bindings == 1 && stats.signatures <= 5);
-  assert(eval(rt, "(saved 42)") == value_int(42));
+  assert(eval(rt, "(saved 42)") == ot_int(42));
   assert(eval(rt, "(let ((i 0)) (while (< i 2000) (let ((p (ffi/alloc 'i32 1))) (ffi/set! p 'i32 0 "
-                  "i) (ffi/free! p)) (set! i (+ i 1))) i)") == value_int(2000));
-  stats = runtime_foreign_stats(rt);
+                  "i) (ffi/free! p)) (set! i (+ i 1))) i)") == ot_int(2000));
+  stats = ot_get_foreign_stats(rt);
   assert(stats.allocations == 0 && stats.bytes == 0 && stats.memory_records <= 2);
   eval(rt, "(def owner (ffi/alloc 'i32 2)) (def view (ffi/view owner 4 4)) (ffi/free! owner) (set! "
            "owner nil)");
   eval(rt, "nil");
-  assert(runtime_foreign_stats(rt).memory_records == 1);
-  Value result;
+  assert(ot_get_foreign_stats(rt).memory_records == 1);
+  ot_value result;
   const char* released = "(ffi/ref view 'i32 0)";
-  assert(!runtime_eval(rt, released, strlen(released), &result));
-  assert(strstr(runtime_error(rt), "released"));
+  assert(!ot_eval(rt, released, strlen(released), &result));
+  assert(strstr(ot_error(rt), "released"));
   eval(rt, "(set! view nil)");
   eval(rt, "nil");
-  assert(runtime_foreign_stats(rt).memory_records == 0);
+  assert(ot_get_foreign_stats(rt).memory_records == 0);
   eval(rt, "(def retained (ffi/alloc-utf8 \"persistent\")) "
            "((ffi/bind lib \"retain\" '(pointer) 'void #t) retained) (set! retained nil)");
   eval(rt, "nil");
-  stats = runtime_foreign_stats(rt);
+  stats = ot_get_foreign_stats(rt);
   assert(stats.allocations == 1 && stats.bytes == 11 && stats.memory_records == 1);
   assert(eval(rt, "(equal? ((ffi/bind lib \"retained_text\" '() 'utf8 #t)) \"persistent\")") ==
-         V_TRUE);
+         OT_TRUE);
   eval(rt, "(set! lib nil)");
-  assert(eval(rt, "(saved 42)") == value_int(42));
+  assert(eval(rt, "(saved 42)") == ot_int(42));
   eval(rt, "(def holder [saved]) (set! saved nil)");
-  assert(eval(rt, "((get holder 0) 42)") == value_int(42));
-  assert(runtime_foreign_stats(rt).bindings == 1);
+  assert(eval(rt, "((get holder 0) 42)") == ot_int(42));
+  assert(ot_get_foreign_stats(rt).bindings == 1);
   eval(rt, "(set! holder nil)");
   eval(rt, "nil");
-  stats = runtime_foreign_stats(rt);
+  stats = ot_get_foreign_stats(rt);
   assert(stats.bindings == 0 && stats.signatures <= 4 && stats.libraries == 1);
   printf("foreign reload tests passed: peak bindings=%zu cached signatures=%zu libraries=%zu\n",
          peak_bindings, stats.signatures, stats.libraries);
-  runtime_destroy(rt);
+  ot_destroy(rt);
 }

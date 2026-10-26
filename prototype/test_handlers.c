@@ -3,10 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-static Value eval(Runtime* rt, const char* source) {
-  Value result;
-  if (!runtime_eval(rt, source, strlen(source), &result)) {
-    fprintf(stderr, "%s: %s\n", source, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* source) {
+  ot_value result;
+  if (!ot_eval(rt, source, strlen(source), &result)) {
+    fprintf(stderr, "%s: %s\n", source, ot_error(rt));
     abort();
   }
   assert(rt->handler_count == 0 && rt->handler_top == 0 && rt->handler_roots.count == 0);
@@ -14,10 +14,10 @@ static Value eval(Runtime* rt, const char* source) {
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
-  runtime_gc_stress(rt, true);
+  assert(ot_load_core(rt, "../lib"));
+  ot_gc_stress(rt, true);
   eval(rt,
        "(def events []) (def (record x) (push! events x)) (def (yes _) #t) (defparam p :default)");
   const char* checks[] = {
@@ -52,7 +52,7 @@ int main(void) {
       "(condition-message c) (get c :data)))))) (signal \"message\" 1 2)) (equal? events [(list "
       "'error \"message\" [1 2])]))"};
   for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); i++)
-    assert(eval(rt, checks[i]) == V_TRUE);
+    assert(eval(rt, checks[i]) == OT_TRUE);
   const char* bad[] = {"(handler-bind)",
                        "(handler-bind ((yes)))",
                        "(handler-bind ((yes yes yes)))",
@@ -60,14 +60,14 @@ int main(void) {
                        "(signal :x 1)",
                        "(handler-bind ((yes (fn (c) nil))) (error :unhandled))"};
   for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++) {
-    Value ignored;
-    assert(!runtime_eval(rt, bad[i], strlen(bad[i]), &ignored));
+    ot_value ignored;
+    assert(!ot_eval(rt, bad[i], strlen(bad[i]), &ignored));
     assert(rt->handler_count == 0 && rt->handler_roots.count == 0);
-    assert(eval(rt, "(+ 20 22)") == value_int(42));
+    assert(eval(rt, "(+ 20 22)") == ot_int(42));
   }
   eval(rt, "(def hits 0) (def (deep n) (if (= n 0) (signal :bottom) (handler-bind ((yes (fn (c) "
            "(set! hits (+ hits 1))))) (deep (- n 1)))))");
-  assert(eval(rt, "(deep 4000) hits") == value_int(4000));
-  runtime_destroy(rt);
+  assert(eval(rt, "(deep 4000) hits") == ot_int(4000));
+  ot_destroy(rt);
   puts("signal-site handler tests passed");
 }

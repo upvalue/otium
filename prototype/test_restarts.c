@@ -3,10 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-static Value eval(Runtime* rt, const char* s) {
-  Value v;
-  if (!runtime_eval(rt, s, strlen(s), &v)) {
-    fprintf(stderr, "%s\n%s\n", s, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* s) {
+  ot_value v;
+  if (!ot_eval(rt, s, strlen(s), &v)) {
+    fprintf(stderr, "%s\n%s\n", s, ot_error(rt));
     abort();
   }
   assert(!rt->restart_scope_count && !rt->restart_roots.count && !rt->restart_pending);
@@ -14,10 +14,10 @@ static Value eval(Runtime* rt, const char* s) {
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
-  runtime_gc_stress(rt, true);
+  assert(ot_load_core(rt, "../lib"));
+  ot_gc_stress(rt, true);
   const char* checks[] = {
       "(= (restart-case (+ 1 2) (give (v) v)) 3)",
       "(= (handler-bind ((error? (fn (e) (invoke-restart 'give 42)))) (restart-case (+ 1000 (error "
@@ -56,7 +56,7 @@ int main(void) {
       "(begin (try (restart-case (error :bad) (give () 1)) (catch e nil)) (nil? (find-restart "
       "'give)))"};
   for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); i++) {
-    if (eval(rt, checks[i]) != V_TRUE) {
+    if (eval(rt, checks[i]) != OT_TRUE) {
       fprintf(stderr, "failed: %s\n", checks[i]);
       abort();
     }
@@ -66,11 +66,11 @@ int main(void) {
       "(restart-name 1)", "(restart-description 1)",    "(compute-restarts 1)",
       "(invoke-restart)", "(invoke-restart 'missing)",  "(restart-case (error :bad) (give () 1))"};
   for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++) {
-    Value v;
-    assert(!runtime_eval(rt, bad[i], strlen(bad[i]), &v));
+    ot_value v;
+    assert(!ot_eval(rt, bad[i], strlen(bad[i]), &v));
     assert(!rt->restart_scope_count && !rt->restart_roots.count);
-    assert(eval(rt, "(nil? (find-restart 'give))") == V_TRUE);
+    assert(eval(rt, "(nil? (find-restart 'give))") == OT_TRUE);
   }
-  runtime_destroy(rt);
+  ot_destroy(rt);
   puts("restart transfer and introspection tests passed");
 }

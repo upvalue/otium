@@ -5,13 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-struct ArenaBlock {
-  ArenaBlock* next;
+struct oti_arena_block {
+  oti_arena_block* next;
   size_t used, size;
   max_align_t data[];
 };
 
-static void fail(Reader* r, size_t offset, const char* code, const char* message) {
+static void fail(oti_reader* r, size_t offset, const char* code, const char* message) {
   if (!r->error) {
     r->error = message;
     r->error_code = code;
@@ -19,11 +19,11 @@ static void fail(Reader* r, size_t offset, const char* code, const char* message
   }
 }
 
-void* reader_allocate(Reader* r, size_t size) {
+void* oti_reader_allocate(oti_reader* r, size_t size) {
   const size_t alignment = _Alignof(max_align_t);
   if (size > SIZE_MAX - alignment) goto exhausted;
   size = (size + alignment - 1) / alignment * alignment;
-  ArenaBlock* b = r->blocks;
+  oti_arena_block* b = r->blocks;
   if (!b || size > b->size - b->used) {
     size_t capacity = size > 4096 ? size : 4096;
     if (capacity > SIZE_MAX - sizeof(*b)) goto exhausted;
@@ -31,7 +31,7 @@ void* reader_allocate(Reader* r, size_t size) {
     if (bytes > r->budget - r->allocated) goto exhausted;
     b = malloc(bytes);
     if (!b) goto exhausted;
-    *b = (ArenaBlock){r->blocks, 0, capacity};
+    *b = (oti_arena_block){r->blocks, 0, capacity};
     r->blocks = b;
     r->allocated += bytes;
   }
@@ -44,22 +44,22 @@ exhausted:
   return NULL;
 }
 
-void reader_init(Reader* r, const char* source, size_t length, size_t budget) {
-  *r = (Reader){.source = source, .length = length, .budget = budget};
+void oti_reader_init(oti_reader* r, const char* source, size_t length, size_t budget) {
+  *r = (oti_reader){.source = source, .length = length, .budget = budget};
 }
 
-void reader_destroy(Reader* r) {
-  ArenaBlock* b = r->blocks;
+void oti_reader_destroy(oti_reader* r) {
+  oti_arena_block* b = r->blocks;
   while (b) {
-    ArenaBlock* next = b->next;
+    oti_arena_block* next = b->next;
     free(b);
     b = next;
   }
-  *r = (Reader){0};
+  *r = (oti_reader){0};
 }
 
-static Ast* node(Reader* r, AstKind kind, size_t offset) {
-  Ast* a = reader_allocate(r, sizeof(*a));
+static oti_ast* node(oti_reader* r, oti_ast_kind kind, size_t offset) {
+  oti_ast* a = oti_reader_allocate(r, sizeof(*a));
   if (a) {
     a->kind = kind;
     a->offset = offset;
@@ -67,8 +67,8 @@ static Ast* node(Reader* r, AstKind kind, size_t offset) {
   return a;
 }
 
-static Ast* text_node(Reader* r, AstKind kind, size_t offset, const char* s, size_t n) {
-  Ast* a = node(r, kind, offset);
+static oti_ast* text_node(oti_reader* r, oti_ast_kind kind, size_t offset, const char* s, size_t n) {
+  oti_ast* a = node(r, kind, offset);
   if (a) {
     a->as.text.data = s;
     a->as.text.size = n;
@@ -76,7 +76,7 @@ static Ast* text_node(Reader* r, AstKind kind, size_t offset, const char* s, siz
   return a;
 }
 
-bool ast_symbol(const Ast* a, const char* s) {
+bool oti_ast_symbol(const oti_ast* a, const char* s) {
   return a && a->kind == AST_SYMBOL && a->as.text.size == strlen(s) &&
          !memcmp(a->as.text.data, s, a->as.text.size);
 }
@@ -87,7 +87,7 @@ static bool space(unsigned char c) {
 
 static bool delimiter(unsigned char c) { return space(c) || strchr("()[]{}\";'`,", c) != NULL; }
 
-static void skip(Reader* r) {
+static void skip(oti_reader* r) {
   while (r->position < r->length) {
     unsigned char c = r->source[r->position];
     if (space(c)) {
@@ -178,7 +178,7 @@ static size_t utf8_encode(char* out, uint32_t c) {
   return 4;
 }
 
-static Ast* string(Reader* r, size_t start) {
+static oti_ast* string(oti_reader* r, size_t start) {
   /* Find the closing quote first so many short strings do not reserve the
      * remaining source length each time. Decoding never expands that span. */
   size_t end = r->position;
@@ -191,7 +191,7 @@ static Ast* string(Reader* r, size_t start) {
     fail(r, start, "E0002", "unterminated string");
     return NULL;
   }
-  char* out = reader_allocate(r, end - r->position + 1);
+  char* out = oti_reader_allocate(r, end - r->position + 1);
   if (!out) return NULL;
   size_t used = 0;
   while (r->position < end) {
@@ -241,7 +241,7 @@ static Ast* string(Reader* r, size_t start) {
   return text_node(r, AST_STRING, start, out, used);
 }
 
-static Ast* character(Reader* r, size_t start) {
+static oti_ast* character(oti_reader* r, size_t start) {
   size_t begin = r->position;
   if (begin == r->length) {
     r->incomplete = true;
@@ -279,12 +279,12 @@ static Ast* character(Reader* r, size_t start) {
       return NULL;
     }
   }
-  Ast* a = node(r, AST_CHAR, start);
+  oti_ast* a = node(r, AST_CHAR, start);
   if (a) a->as.integer = value;
   return a;
 }
 
-static Ast* atom(Reader* r, size_t start) {
+static oti_ast* atom(oti_reader* r, size_t start) {
   while (r->position < r->length && !delimiter((unsigned char)r->source[r->position]))
     r->position++;
   size_t n = r->position - start;
@@ -304,7 +304,7 @@ static Ast* atom(Reader* r, size_t start) {
   }
   if (n == 3 && !memcmp(s, "nil", 3)) return node(r, AST_NIL, start);
   if ((n == 2 && !memcmp(s, "#t", 2)) || (n == 5 && !memcmp(s, "#true", 5))) {
-    Ast* a = node(r, AST_BOOL, start);
+    oti_ast* a = node(r, AST_BOOL, start);
     if (a) a->as.integer = 1;
     return a;
   }
@@ -349,10 +349,10 @@ static Ast* atom(Reader* r, size_t start) {
       }
     }
     if (pos != n) goto bad_number;
-    char* token = reader_allocate(r, n + 1);
+    char* token = oti_reader_allocate(r, n + 1);
     if (!token) return NULL;
     memcpy(token, s, n);
-    Ast* a = node(r, real ? AST_FLOAT : AST_INT, start);
+    oti_ast* a = node(r, real ? AST_FLOAT : AST_INT, start);
     if (!a) return NULL;
     errno = 0;
     if (real) {
@@ -374,12 +374,12 @@ bad_number:
   return NULL;
 }
 
-static Ast* parse(Reader* r);
+static oti_ast* parse(oti_reader* r);
 
-static Ast* sequence(Reader* r, size_t start, char close, const char* constructor) {
-  Ast* a = node(r, AST_LIST, start);
+static oti_ast* sequence(oti_reader* r, size_t start, char close, const char* constructor) {
+  oti_ast* a = node(r, AST_LIST, start);
   if (!a) return NULL;
-  Ast** next = &a->as.list.first;
+  oti_ast** next = &a->as.list.first;
   if (constructor) {
     *next = text_node(r, AST_SYMBOL, start, constructor, strlen(constructor));
     if (!*next) return NULL;
@@ -421,16 +421,16 @@ static Ast* sequence(Reader* r, size_t start, char close, const char* constructo
   }
 }
 
-static Ast* prefix(Reader* r, size_t start, const char* name) {
-  Ast* a = node(r, AST_LIST, start);
-  Ast* symbol = text_node(r, AST_SYMBOL, start, name, strlen(name));
+static oti_ast* prefix(oti_reader* r, size_t start, const char* name) {
+  oti_ast* a = node(r, AST_LIST, start);
+  oti_ast* symbol = text_node(r, AST_SYMBOL, start, name, strlen(name));
   if (!a || !symbol) return NULL;
   a->as.list.first = symbol;
   symbol->next = parse(r);
   return symbol->next ? a : NULL;
 }
 
-static Ast* parse_inner(Reader* r) {
+static oti_ast* parse_inner(oti_reader* r) {
   skip(r);
   size_t start = r->position;
   if (start == r->length) {
@@ -474,26 +474,26 @@ static Ast* parse_inner(Reader* r) {
   return atom(r, start);
 }
 
-static Ast* parse(Reader* r) {
+static oti_ast* parse(oti_reader* r) {
   if (r->error) return NULL;
   if (r->depth == 512) {
     fail(r, r->position, NULL, "reader nesting limit exceeded");
     return NULL;
   }
   r->depth++;
-  Ast* a = parse_inner(r);
+  oti_ast* a = parse_inner(r);
   r->depth--;
   return a;
 }
 
-Ast* reader_next(Reader* r) {
+oti_ast* oti_reader_next(oti_reader* r) {
   if (r->error) return NULL;
   skip(r);
   return r->position == r->length ? NULL : parse(r);
 }
 
-Ast* reader_one(Reader* r) {
-  Ast* a = reader_next(r);
+oti_ast* oti_reader_one(oti_reader* r) {
+  oti_ast* a = oti_reader_next(r);
   if (!a) {
     fail(r, r->position, "E0010", "expected datum");
     return NULL;

@@ -3,20 +3,20 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void eval(Runtime* rt, const char* source, bool check) {
-  Value result;
-  if (!runtime_eval(rt, source, strlen(source), &result)) {
-    fprintf(stderr, "%s\n%s\n", source, runtime_error(rt));
+static void eval(ot_runtime* rt, const char* source, bool check) {
+  ot_value result;
+  if (!ot_eval(rt, source, strlen(source), &result)) {
+    fprintf(stderr, "%s\n%s\n", source, ot_error(rt));
     abort();
   }
-  if (check) assert(result == V_TRUE);
+  if (check) assert(result == OT_TRUE);
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
-  runtime_gc_stress(rt, true);
+  assert(ot_load_core(rt, "../lib"));
+  ot_gc_stress(rt, true);
   FILE* file = fopen("../tests/classes/checks.ot", "rb");
   assert(file);
   assert(!fseek(file, 0, SEEK_END));
@@ -48,6 +48,6 @@ int main(void) {
       "(try (saved-next 1 2) (catch e #t))",
       "(eq? (saved-next 2) :old)"};
   for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); i++) eval(rt, checks[i], true);
-  runtime_destroy(rt);
+  ot_destroy(rt);
   puts("method snapshots, replacement arguments and tail calls passed");
 }

@@ -3,10 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-static Value eval(Runtime* rt, const char* source) {
-  Value value;
-  if (!runtime_eval(rt, source, strlen(source), &value)) {
-    fprintf(stderr, "%s: %s\n", source, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* source) {
+  ot_value value;
+  if (!ot_eval(rt, source, strlen(source), &value)) {
+    fprintf(stderr, "%s: %s\n", source, ot_error(rt));
     abort();
   }
   assert(rt->param_count == 0 && rt->param_roots.count == 0);
@@ -14,10 +14,10 @@ static Value eval(Runtime* rt, const char* source) {
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
-  runtime_gc_stress(rt, true);
+  assert(ot_load_core(rt, "../lib"));
+  ot_gc_stress(rt, true);
   eval(rt, "(defparam p \"Parameter.\" '(default)) (defparam q 0) (def (read-p) (p))");
   const char* checks[] = {
       "(equal? (with-params ((p '(first)) (p (cons 'second (p)))) (p)) '(second first))",
@@ -45,7 +45,7 @@ int main(void) {
       "(begin (def old-p p) (defparam p '(new)) (and (not (eq? old-p p)) (equal? (old-p) "
       "'(default)) (equal? (p) '(new))))"};
   for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); i++)
-    assert(eval(rt, checks[i]) == V_TRUE);
+    assert(eval(rt, checks[i]) == OT_TRUE);
   const char* bad[] = {"(p 1)",
                        "(with-params)",
                        "(with-params ((p)))",
@@ -58,17 +58,17 @@ int main(void) {
                        "(let () (defparam p 1))",
                        "(with-params ((p '(leaked))) (error :unhandled))"};
   for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++) {
-    Value ignored;
-    assert(!runtime_eval(rt, bad[i], strlen(bad[i]), &ignored));
+    ot_value ignored;
+    assert(!ot_eval(rt, bad[i], strlen(bad[i]), &ignored));
     assert(rt->param_count == 0 && rt->param_roots.count == 0);
-    assert(eval(rt, "(equal? (p) '(new))") == V_TRUE);
+    assert(eval(rt, "(equal? (p) '(new))") == OT_TRUE);
   }
   eval(rt,
        "(def (deep n) (with-params ((p (list n))) (if (= n 0) (error :bottom) (deep (- n 1)))))");
-  assert(eval(rt, "(try (deep 4000) (catch c (equal? (p) '(new))))") == V_TRUE);
-  Value result;
-  assert(!runtime_call(rt, "deep", (Value[]){value_int(20)}, 1, &result));
+  assert(eval(rt, "(try (deep 4000) (catch c (equal? (p) '(new))))") == OT_TRUE);
+  ot_value result;
+  assert(!ot_call(rt, "deep", (ot_value[]){ot_int(20)}, 1, &result));
   assert(rt->param_count == 0 && rt->param_roots.count == 0);
-  runtime_destroy(rt);
+  ot_destroy(rt);
   puts("dynamic parameter tests passed");
 }

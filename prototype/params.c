@@ -1,27 +1,27 @@
 #include "internal.h"
 
-void rt_restore_params(Runtime* rt, size_t count) {
+void oti_restore_params(ot_runtime* rt, size_t count) {
   rt->param_count = count;
   rt->param_roots.count = count * 2;
 }
 
-bool rt_bind_param(Runtime* rt, Value param, Value value) {
-  if (!rt_kind(param, K_PARAM)) return rt_error(rt, "with-params requires a param");
+bool oti_bind_param(ot_runtime* rt, ot_value param, ot_value value) {
+  if (!oti_kind(param, K_PARAM)) return oti_error(rt, "with-params requires a param");
   if (rt->param_count >= rt->stack_limit || rt->param_count >= SIZE_MAX / 2 - 1)
-    return rt_error(rt, "parameter binding limit exceeded");
-  if (!rt_grow(rt, (void**)&rt->params, &rt->param_capacity, 2 * (rt->param_count + 1),
-               sizeof(Value)))
+    return oti_error(rt, "parameter binding limit exceeded");
+  if (!oti_grow(rt, (void**)&rt->params, &rt->param_capacity, 2 * (rt->param_count + 1),
+               sizeof(ot_value)))
     return false;
   rt->param_roots.slots = rt->params;
   rt->params[2 * rt->param_count] = param;
   rt->params[2 * rt->param_count + 1] = value;
-  rt_restore_params(rt, rt->param_count + 1);
+  oti_restore_params(rt, rt->param_count + 1);
   return true;
 }
 
-Value rt_param_call(Runtime* rt, Value param, size_t count) {
+ot_value oti_param_call(ot_runtime* rt, ot_value param, size_t count) {
   if (count) {
-    rt_coded_error(rt, "E0301", "params take no arguments");
+    oti_coded_error(rt, "E0301", "params take no arguments");
     return 0;
   }
   for (size_t i = rt->param_count; i; i--)

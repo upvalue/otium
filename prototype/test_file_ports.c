@@ -5,13 +5,13 @@
 #include <string.h>
 #include <unistd.h>
 
-static void check(Runtime* rt, const char* source) {
-  Value result;
-  if (!runtime_eval(rt, source, strlen(source), &result)) {
-    fprintf(stderr, "%s\n%s\n", source, runtime_error(rt));
+static void check(ot_runtime* rt, const char* source) {
+  ot_value result;
+  if (!ot_eval(rt, source, strlen(source), &result)) {
+    fprintf(stderr, "%s\n%s\n", source, ot_error(rt));
     abort();
   }
-  assert(result == V_TRUE);
+  assert(result == OT_TRUE);
 }
 
 int main(void) {
@@ -19,12 +19,12 @@ int main(void) {
   assert(mkdtemp(directory));
   char path[128];
   snprintf(path, sizeof(path), "%s/data", directory);
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
-  runtime_gc_stress(rt, true);
+  assert(ot_load_core(rt, "../lib"));
+  ot_gc_stress(rt, true);
   const char* args[] = {path, directory};
-  assert(runtime_set_arguments(rt, NULL, 2, args));
+  assert(ot_set_arguments(rt, NULL, 2, args));
   check(rt, "(def path (car (otium.process/arguments))) (def directory (car (cdr "
             "(otium.process/arguments)))) #t");
   check(rt, "(try (open-input-file path) (catch e (and (condition-of-type? e 'file-error) (eq? "
@@ -47,14 +47,14 @@ int main(void) {
   check(rt, "(let ((p (open-input-file path))) (close-port p) (close-port p) (and (not (contains? "
             "(open-ports) p)) (try (read-u8 p) (catch e (eq? (get e :reason) :closed)))))");
   check(rt, "(def final-port (open-output-file path)) (write-string \"shutdown\" final-port) #t");
-  assert(runtime_flush_ports(rt));
+  assert(ot_flush_ports(rt));
   check(rt, "(equal? (read-file path) \"shutdown\")");
   if (!access("/dev/full", W_OK)) {
     check(rt, "(def full-port (open-output-file \"/dev/full\")) (try (begin (write-string "
               "\"failure\" full-port) (flush-output-port full-port) #f) (catch e (and "
               "(condition-of-type? e 'file-error) (eq? (get e :reason) :no-space))))");
   }
-  runtime_destroy(rt);
+  ot_destroy(rt);
   assert(!unlink(path));
   assert(!rmdir(directory));
   puts("file port ownership, buffering, modes and errors passed");

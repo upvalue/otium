@@ -27,16 +27,16 @@ static bool size_option(const char* text, size_t* out) {
   return true;
 }
 
-static bool evaluate(Runtime* rt, const char* source, size_t length, const char* path, bool echo) {
-  Value result;
-  if (!runtime_eval(rt, source, length, &result)) {
+static bool evaluate(ot_runtime* rt, const char* source, size_t length, const char* path, bool echo) {
+  ot_value result;
+  if (!ot_eval(rt, source, length, &result)) {
     int status;
-    if (!runtime_interrupted(rt) && !runtime_exit_status(rt, &status))
-      fprintf(stderr, "%s:%zu: %s\n", path, runtime_error_offset(rt), runtime_error(rt));
+    if (!ot_interrupted(rt) && !ot_exit_status(rt, &status))
+      fprintf(stderr, "%s:%zu: %s\n", path, ot_error_offset(rt), ot_error(rt));
     return false;
   }
   if (echo) {
-    runtime_print(rt, stdout, result);
+    ot_print(rt, stdout, result);
     fputc('\n', stdout);
     fflush(stdout);
   }
@@ -88,7 +88,7 @@ static char* read_source(const char* path, size_t* size) {
   return buffer;
 }
 
-static bool load(Runtime* rt, const char* path) {
+static bool load(ot_runtime* rt, const char* path) {
   size_t length;
   char* buffer = read_source(path, &length);
   if (!buffer) return false;
@@ -97,23 +97,23 @@ static bool load(Runtime* rt, const char* path) {
   return ok;
 }
 
-static bool project_paths(Runtime* rt, const char* path) {
+static bool project_paths(ot_runtime* rt, const char* path) {
   size_t length;
   char* source = read_source(path, &length);
   if (!source) return false;
-  Reader reader;
-  reader_init(&reader, source, length, SOURCE_LIMIT);
+  oti_reader reader;
+  oti_reader_init(&reader, source, length, SOURCE_LIMIT);
   bool ok = true;
-  Ast* form;
-  while (ok && (form = reader_next(&reader))) {
-    if (form->kind != AST_LIST || !ast_symbol(form->as.list.first, "paths")) continue;
+  oti_ast* form;
+  while (ok && (form = oti_reader_next(&reader))) {
+    if (form->kind != AST_LIST || !oti_ast_symbol(form->as.list.first, "paths")) continue;
     if (form->as.list.tail) {
-      ok = rt_error(rt, "project paths must be a proper list");
+      ok = oti_error(rt, "project paths must be a proper list");
       break;
     }
-    for (Ast* entry = form->as.list.first->next; ok && entry; entry = entry->next) {
+    for (oti_ast* entry = form->as.list.first->next; ok && entry; entry = entry->next) {
       if (entry->kind != AST_STRING || memchr(entry->as.text.data, 0, entry->as.text.size)) {
-        ok = rt_error(rt, "project paths must be strings without NUL");
+        ok = oti_error(rt, "project paths must be strings without NUL");
         break;
       }
       const char* slash = strrchr(path, '/');
@@ -122,28 +122,28 @@ static bool project_paths(Runtime* rt, const char* path) {
                               : 0;
       char* directory = malloc(prefix + entry->as.text.size + 1);
       if (!directory) {
-        ok = rt_error(rt, "out of host memory");
+        ok = oti_error(rt, "out of host memory");
         break;
       }
       memcpy(directory, path, prefix);
       memcpy(directory + prefix, entry->as.text.data, entry->as.text.size);
       directory[prefix + entry->as.text.size] = 0;
-      ok = runtime_load_path(rt, directory);
+      ok = ot_add_load_path(rt, directory);
       free(directory);
     }
   }
-  if (reader.error) ok = rt_coded_error(rt, reader.error_code, reader.error);
-  reader_destroy(&reader);
+  if (reader.error) ok = oti_coded_error(rt, reader.error_code, reader.error);
+  oti_reader_destroy(&reader);
   free(source);
   return ok;
 }
 
-static bool discover_project(Runtime* rt) {
+static bool discover_project(ot_runtime* rt) {
   char* directory = getcwd(NULL, 0);
-  if (!directory) return rt_error(rt, "cannot find current directory");
+  if (!directory) return oti_error(rt, "cannot find current directory");
   char* path = malloc(strlen(directory) + sizeof("/project.ot"));
   bool ok = path != NULL;
-  if (!ok) rt_error(rt, "out of host memory");
+  if (!ok) oti_error(rt, "out of host memory");
   while (ok) {
     sprintf(path, "%s/project.ot", directory);
     if (access(path, F_OK) == 0) {
@@ -151,7 +151,7 @@ static bool discover_project(Runtime* rt) {
       break;
     }
     if (errno != ENOENT && errno != ENOTDIR) {
-      ok = rt_error(rt, "cannot inspect project file");
+      ok = oti_error(rt, "cannot inspect project file");
       break;
     }
     char* slash = strrchr(directory, '/');
@@ -164,17 +164,17 @@ static bool discover_project(Runtime* rt) {
   return ok;
 }
 
-static bool environment_paths(Runtime* rt) {
+static bool environment_paths(ot_runtime* rt) {
   const char* value = getenv("OTIUM_PATH");
   if (!value) return true;
   char* paths = strdup(value);
-  if (!paths) return rt_error(rt, "out of host memory");
+  if (!paths) return oti_error(rt, "out of host memory");
   bool ok = true;
   char* cursor = paths;
   while (ok && cursor) {
     char* next = strchr(cursor, ':');
     if (next) *next++ = 0;
-    if (*cursor) ok = runtime_load_path(rt, cursor);
+    if (*cursor) ok = ot_add_load_path(rt, cursor);
     cursor = next;
   }
   free(paths);
@@ -182,36 +182,36 @@ static bool environment_paths(Runtime* rt) {
 }
 
 /* The REPL and program reads must share the standard port's managed buffer. */
-static ssize_t input_line(Runtime* rt, char** line, size_t* capacity) {
-  Value port, value;
-  if (!runtime_call(rt, "otium.core/%standard-input", NULL, 0, &port) ||
-      !runtime_call(rt, "otium.core/read-line", &port, 1, &value))
+static ssize_t input_line(ot_runtime* rt, char** line, size_t* capacity) {
+  ot_value port, value;
+  if (!ot_call(rt, "otium.core/%standard-input", NULL, 0, &port) ||
+      !ot_call(rt, "otium.core/read-line", &port, 1, &value))
     return -2;
-  if (value == V_EOF) return -1;
-  if (!rt_kind(value, K_STRING)) {
-    rt_error(rt, "read-line must return a string or EOF");
+  if (value == OT_EOF) return -1;
+  if (!oti_kind(value, K_STRING)) {
+    oti_error(rt, "read-line must return a string or EOF");
     return -2;
   }
-  size_t length = rt_bytes_length(value);
+  size_t length = oti_bytes_length(value);
   if (length >= SOURCE_LIMIT) {
-    rt_error(rt, "source exceeds size limit");
+    oti_error(rt, "source exceeds size limit");
     return -2;
   }
   if (*capacity < length + 1) {
     char* grown = realloc(*line, length + 1);
     if (!grown) {
-      rt_error(rt, "out of host memory");
+      oti_error(rt, "out of host memory");
       return -2;
     }
     *line = grown;
     *capacity = length + 1;
   }
-  memcpy(*line, rt_bytes_data(value), length);
+  memcpy(*line, oti_bytes_data(value), length);
   (*line)[length] = '\n';
   return (ssize_t)(length + 1);
 }
 
-static bool repl(Runtime* rt) {
+static bool repl(ot_runtime* rt) {
   bool terminal = isatty(STDIN_FILENO), ok = true;
   char *line = NULL, *pending = NULL;
   size_t line_capacity = 0, length = 0;
@@ -223,16 +223,16 @@ static bool repl(Runtime* rt) {
     ssize_t bytes = input_line(rt, &line, &line_capacity);
     if (bytes < 0) {
       if (bytes == -2) {
-        if (!runtime_interrupted(rt)) fprintf(stderr, "stdin: %s\n", runtime_error(rt));
+        if (!ot_interrupted(rt)) fprintf(stderr, "stdin: %s\n", ot_error(rt));
         ok = false;
       }
       if (length) {
-        Reader reader;
-        reader_init(&reader, pending, length, SOURCE_LIMIT);
-        reader_next(&reader);
+        oti_reader reader;
+        oti_reader_init(&reader, pending, length, SOURCE_LIMIT);
+        oti_reader_next(&reader);
         fprintf(stderr, "<stdin>:%zu: %s\n", reader.error_offset,
                 reader.error ? reader.error : "incomplete input");
-        reader_destroy(&reader);
+        oti_reader_destroy(&reader);
         ok = false;
       }
       break;
@@ -251,17 +251,17 @@ static bool repl(Runtime* rt) {
     pending = grown;
     memcpy(pending + length, line, (size_t)bytes);
     length += (size_t)bytes;
-    Reader reader;
-    reader_init(&reader, pending, length, SOURCE_LIMIT);
+    oti_reader reader;
+    oti_reader_init(&reader, pending, length, SOURCE_LIMIT);
     size_t consumed = 0;
     for (;;) {
       size_t start = reader.position;
-      Ast* form = reader_next(&reader);
+      oti_ast* form = oti_reader_next(&reader);
       if (form) {
         evaluate(rt, pending + start, reader.position - start, "<stdin>", true);
         int status;
-        if (runtime_interrupted(rt) || runtime_exit_status(rt, &status)) {
-          reader_destroy(&reader);
+        if (ot_interrupted(rt) || ot_exit_status(rt, &status)) {
+          oti_reader_destroy(&reader);
           free(line);
           free(pending);
           return false;
@@ -276,7 +276,7 @@ static bool repl(Runtime* rt) {
       }
       break;
     }
-    reader_destroy(&reader);
+    oti_reader_destroy(&reader);
     memmove(pending, pending + consumed, length - consumed);
     length -= consumed;
     fflush(stdout);
@@ -351,14 +351,14 @@ int main(int argc, char** argv) {
   if (!source && !path && !preloaded) interactive = true;
   if (heap_explicit && !max_explicit) heap_max = heap;
   if (heap_max < heap || heap_max > SIZE_MAX / 2) goto usage;
-  Runtime* rt = runtime_create(heap, stack);
+  ot_runtime* rt = ot_create(heap, stack);
   if (!rt) {
     fputs("cannot initialize runtime\n", stderr);
     return 1;
   }
-  if (!runtime_heap_limit(rt, heap_max)) {
-    fprintf(stderr, "%s\n", runtime_error(rt));
-    runtime_destroy(rt);
+  if (!ot_set_heap_limit(rt, heap_max)) {
+    fprintf(stderr, "%s\n", ot_error(rt));
+    ot_destroy(rt);
     return 1;
   }
   struct sigaction action = {0}, previous;
@@ -366,31 +366,31 @@ int main(int argc, char** argv) {
   sigemptyset(&action.sa_mask);
   if (sigaction(SIGINT, &action, &previous)) {
     perror("sigaction");
-    runtime_destroy(rt);
+    ot_destroy(rt);
     return 1;
   }
-  runtime_interrupt_flag(rt, &interrupt_requested);
-  bool ok = runtime_set_arguments(rt, path, (size_t)(argc - arguments_start),
+  ot_set_interrupt_flag(rt, &interrupt_requested);
+  bool ok = ot_set_arguments(rt, path, (size_t)(argc - arguments_start),
                                   (const char* const*)(argv + arguments_start));
-  if (ok) ok = runtime_load_expander(rt, OTIUM_LIBRARY_DIR);
-  if (!ok) fprintf(stderr, "cannot load expander: %s\n", runtime_error(rt));
+  if (ok) ok = ot_load_expander(rt, OTIUM_LIBRARY_DIR);
+  if (!ok) fprintf(stderr, "cannot load expander: %s\n", ot_error(rt));
   for (int i = 1; ok && i < option_end; i++) {
     if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "--load") || !strcmp(argv[i], "--project")) {
       i++;
       continue;
     }
     if (!strcmp(argv[i], "-L") || !strcmp(argv[i], "--path")) {
-      ok = runtime_load_path(rt, argv[++i]);
-      if (!ok) fprintf(stderr, "%s\n", runtime_error(rt));
+      ok = ot_add_load_path(rt, argv[++i]);
+      if (!ok) fprintf(stderr, "%s\n", ot_error(rt));
     }
-    if (!strncmp(argv[i], "--path=", 7)) ok = runtime_load_path(rt, argv[i] + 7);
+    if (!strncmp(argv[i], "--path=", 7)) ok = ot_add_load_path(rt, argv[i] + 7);
   }
   if (ok) ok = environment_paths(rt);
   if (ok && !no_project) ok = project ? project_paths(rt, project) : discover_project(rt);
-  if (!ok && runtime_error(rt)[0]) fprintf(stderr, "%s\n", runtime_error(rt));
+  if (!ok && ot_error(rt)[0]) fprintf(stderr, "%s\n", ot_error(rt));
   if (ok) {
-    ok = runtime_load_core(rt, OTIUM_LIBRARY_DIR);
-    if (!ok) fprintf(stderr, "cannot load core: %s\n", runtime_error(rt));
+    ok = ot_load_core(rt, OTIUM_LIBRARY_DIR);
+    if (!ok) fprintf(stderr, "cannot load core: %s\n", ot_error(rt));
   }
   for (int i = 1; ok && i < option_end; i++) {
     if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "-L") || !strcmp(argv[i], "--path") ||
@@ -405,20 +405,20 @@ int main(int argc, char** argv) {
   if (ok && source) ok = evaluate(rt, source, strlen(source), "<expression>", true);
   if (ok && interactive) ok = repl(rt);
   if (stats)
-    fprintf(stderr, "collections=%zu max-frames=%zu heap-capacity=%zu\n", runtime_collections(rt),
-            runtime_max_frames(rt), runtime_heap_capacity(rt));
-  if (stats && runtime_foreign_signatures(rt))
-    fprintf(stderr, "ffi-signatures=%zu\n", runtime_foreign_signatures(rt));
-  runtime_poll_interrupt(rt);
-  int status = runtime_interrupted(rt) ? 130 : ok ? 0 : 1;
-  bool exiting = runtime_exit_status(rt, &status);
-  if ((ok || exiting) && !runtime_flush_ports(rt)) {
-    status = runtime_interrupted(rt) ? 130 : 1;
-    if (!runtime_interrupted(rt) && !runtime_exit_status(rt, &status))
-      fprintf(stderr, "cannot flush output ports: %s\n", runtime_error(rt));
+    fprintf(stderr, "collections=%zu max-frames=%zu heap-capacity=%zu\n", ot_collections(rt),
+            ot_max_frames(rt), ot_heap_capacity(rt));
+  if (stats && ot_foreign_signatures(rt))
+    fprintf(stderr, "ffi-signatures=%zu\n", ot_foreign_signatures(rt));
+  ot_poll_interrupt(rt);
+  int status = ot_interrupted(rt) ? 130 : ok ? 0 : 1;
+  bool exiting = ot_exit_status(rt, &status);
+  if ((ok || exiting) && !ot_flush_ports(rt)) {
+    status = ot_interrupted(rt) ? 130 : 1;
+    if (!ot_interrupted(rt) && !ot_exit_status(rt, &status))
+      fprintf(stderr, "cannot flush output ports: %s\n", ot_error(rt));
   }
   sigaction(SIGINT, &previous, NULL);
-  runtime_destroy(rt);
+  ot_destroy(rt);
   return status;
 usage:
   fputs("usage: otium-proto [--heap=BYTES] [--heap-max=BYTES] [--stack=SLOTS] [--stats] [-L DIR] "

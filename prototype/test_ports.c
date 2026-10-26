@@ -3,20 +3,20 @@
 #include <stdlib.h>
 #include <string.h>
 
-static Value eval(Runtime* rt, const char* source) {
-  Value value;
-  if (!runtime_eval(rt, source, strlen(source), &value)) {
-    fprintf(stderr, "%s\n%s\n", source, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* source) {
+  ot_value value;
+  if (!ot_eval(rt, source, strlen(source), &value)) {
+    fprintf(stderr, "%s\n%s\n", source, ot_error(rt));
     abort();
   }
   return value;
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
-  runtime_gc_stress(rt, true);
+  assert(ot_load_core(rt, "../lib"));
+  ot_gc_stress(rt, true);
   FILE* file = fopen("../tests/library/ports.ot", "rb");
   assert(file);
   assert(!fseek(file, 0, SEEK_END));
@@ -82,19 +82,19 @@ int main(void) {
       "(eq? (dispatch-type (open-output-string)) Port)",
       "(equal? (str (open-input-string \"\")) \"#<port \\\"string\\\" input>\")"};
   for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); i++)
-    if (eval(rt, checks[i]) != V_TRUE) {
+    if (eval(rt, checks[i]) != OT_TRUE) {
       fprintf(stderr, "failed: %s\n", checks[i]);
       abort();
     }
   eval(rt,
        "(def raw-source (open-input-bytevector #u8(1 2 3))) (def raw-target (make-bytevector 3))");
-  uint32_t source_index = rt_lookup_global(rt, "raw-source", 10),
-           target_index = rt_lookup_global(rt, "raw-target", 10);
+  uint32_t source_index = oti_lookup_global(rt, "raw-source", 10),
+           target_index = oti_lookup_global(rt, "raw-target", 10);
   assert(source_index != UINT32_MAX && target_index != UINT32_MAX);
-  Value args[] = {rt->globals[target_index], rt->globals[source_index]}, result;
-  size_t collections = runtime_collections(rt);
-  assert(runtime_call(rt, "read-bytevector!", args, 2, &result) && result == value_int(3));
-  assert(runtime_collections(rt) == collections);
-  runtime_destroy(rt);
+  ot_value args[] = {rt->globals[target_index], rt->globals[source_index]}, result;
+  size_t collections = ot_collections(rt);
+  assert(ot_call(rt, "read-bytevector!", args, 2, &result) && result == ot_int(3));
+  assert(ot_collections(rt) == collections);
+  ot_destroy(rt);
   puts("memory port snapshots, UTF-8 and capture checks passed");
 }

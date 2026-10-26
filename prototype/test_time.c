@@ -17,34 +17,34 @@ static double second(void) {
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
-  runtime_gc_stress(rt, true);
-  Value value;
-  assert(runtime_call(rt, "jiffies-per-second", NULL, 0, &value));
-  assert(value == value_int(1000000000));
+  assert(ot_load_core(rt, "../lib"));
+  ot_gc_stress(rt, true);
+  ot_value value;
+  assert(ot_call(rt, "jiffies-per-second", NULL, 0, &value));
+  assert(value == ot_int(1000000000));
   for (size_t i = 0; i < 100; i++) {
     intptr_t before = jiffy();
-    assert(runtime_call(rt, "current-jiffy", NULL, 0, &value));
+    assert(ot_call(rt, "current-jiffy", NULL, 0, &value));
     intptr_t after = jiffy();
-    assert(value_is_int(value));
-    assert(before <= value_to_int(value) && value_to_int(value) <= after);
+    assert(ot_is_int(value));
+    assert(before <= ot_to_int(value) && ot_to_int(value) <= after);
     double start = second();
-    assert(runtime_call(rt, "current-second", NULL, 0, &value));
+    assert(ot_call(rt, "current-second", NULL, 0, &value));
     double end = second(), actual;
-    assert(rt_kind(value, K_FLOAT));
+    assert(oti_kind(value, K_FLOAT));
     memcpy(&actual, object_bytes(value), sizeof(actual));
     /* A civil clock adjustment during this check invalidates its bracket. */
     if (start <= end) assert(start <= actual && actual <= end);
   }
   const char* source = "(require otium.time :as clock) (let ((before (clock/seconds)) (after "
                        "(clock/seconds))) (<= before after))";
-  assert(runtime_eval(rt, source, strlen(source), &value) && value == V_TRUE);
+  assert(ot_eval(rt, source, strlen(source), &value) && value == OT_TRUE);
   const char* names[] = {"current-jiffy", "current-second", "jiffies-per-second"};
-  Value arg = value_int(0);
-  for (size_t i = 0; i < 3; i++) assert(!runtime_call(rt, names[i], &arg, 1, &value));
-  assert(runtime_call(rt, "current-jiffy", NULL, 0, &value));
-  runtime_destroy(rt);
+  ot_value arg = ot_int(0);
+  for (size_t i = 0; i < 3; i++) assert(!ot_call(rt, names[i], &arg, 1, &value));
+  assert(ot_call(rt, "current-jiffy", NULL, 0, &value));
+  ot_destroy(rt);
   puts("monotonic and civil clock checks passed");
 }

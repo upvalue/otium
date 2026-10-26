@@ -3,20 +3,20 @@
 #include <stdlib.h>
 #include <string.h>
 
-static Value eval(Runtime* rt, const char* source) {
-  Value result;
-  if (!runtime_eval(rt, source, strlen(source), &result)) {
-    fprintf(stderr, "%s: %s\n", source, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* source) {
+  ot_value result;
+  if (!ot_eval(rt, source, strlen(source), &result)) {
+    fprintf(stderr, "%s: %s\n", source, ot_error(rt));
     abort();
   }
   return result;
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 256 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 256 * 1024);
   assert(rt);
-  assert(runtime_load_expander(rt, "../lib"));
-  runtime_gc_stress(rt, true);
+  assert(ot_load_expander(rt, "../lib"));
+  ot_gc_stress(rt, true);
   const char* checks[] = {
       "(= (try 42 (catch c 0)) 42)",
       "(equal? (try (error \"boom\") (catch (error? e) (condition-message e))) \"boom\")",
@@ -54,15 +54,15 @@ int main(void) {
       "(= ((try (error [42]) (catch c (fn () (get c 0))))) 42)",
       "(try (error 1 2) (catch (error? e) #t))"};
   for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); i++)
-    assert(eval(rt, checks[i]) == V_TRUE);
+    assert(eval(rt, checks[i]) == OT_TRUE);
   eval(rt, "(def (deep n) (try (if (= n 0) (error 42) (deep (- n 1))) (catch c (error c))))");
-  assert(eval(rt, "(try (deep 10000) (catch c c))") == value_int(42));
+  assert(eval(rt, "(try (deep 10000) (catch c c))") == ot_int(42));
   for (size_t i = 0; i < 100; i++)
-    assert(eval(rt, "(try (error \"again\") (catch e 42))") == value_int(42));
-  Value result;
+    assert(eval(rt, "(try (error \"again\") (catch e 42))") == ot_int(42));
+  ot_value result;
   const char* source = "(error 7)";
-  assert(!runtime_eval(rt, source, strlen(source), &result));
-  assert(eval(rt, "(try (error 8) (catch e e))") == value_int(8));
-  runtime_destroy(rt);
+  assert(!ot_eval(rt, source, strlen(source), &result));
+  assert(eval(rt, "(try (error 8) (catch e e))") == ot_int(8));
+  ot_destroy(rt);
   puts("condition registry and try tests passed");
 }

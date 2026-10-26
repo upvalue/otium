@@ -6,13 +6,13 @@
 #define OTIUM_BOOTSTRAP_FILE "prototype/primitives.ot"
 #endif
 
-bool rt_host_entry(Runtime* rt) {
+bool oti_host_entry(ot_runtime* rt) {
   if (!rt->host_io_active) return true;
   rt->host_io_reentry = true;
-  return rt_error(rt, "host I/O callback cannot reenter Otium");
+  return oti_error(rt, "host I/O callback cannot reenter Otium");
 }
 
-bool rt_error(Runtime* rt, const char* message) {
+bool oti_error(ot_runtime* rt, const char* message) {
   if (!rt->error[0]) {
     snprintf(rt->error, sizeof(rt->error), "%s", message);
     rt->error_code = NULL;
@@ -21,72 +21,72 @@ bool rt_error(Runtime* rt, const char* message) {
   return false;
 }
 
-bool rt_coded_error(Runtime* rt, const char* code, const char* message) {
+bool oti_coded_error(ot_runtime* rt, const char* code, const char* message) {
   bool fresh = !rt->error[0];
-  rt_error(rt, message);
+  oti_error(rt, message);
   if (fresh) rt->error_code = code;
   return false;
 }
 
-bool rt_grow(Runtime* rt, void** data, size_t* capacity, size_t needed, size_t width) {
+bool oti_grow(ot_runtime* rt, void** data, size_t* capacity, size_t needed, size_t width) {
   if (needed <= *capacity) return true;
   size_t next = *capacity ? *capacity : 16;
   while (next < needed) {
-    if (next > SIZE_MAX / 2) return rt_error(rt, "allocation size overflow");
+    if (next > SIZE_MAX / 2) return oti_error(rt, "allocation size overflow");
     next *= 2;
   }
-  if (next > SIZE_MAX / width) return rt_error(rt, "allocation size overflow");
+  if (next > SIZE_MAX / width) return oti_error(rt, "allocation size overflow");
   void* new_data = realloc(*data, next * width);
-  if (!new_data) return rt_error(rt, "out of host memory");
+  if (!new_data) return oti_error(rt, "out of host memory");
   *data = new_data;
   *capacity = next;
   return true;
 }
 
-bool rt_stack(Runtime* rt, size_t needed) {
-  if (needed > rt->stack_limit) return rt_error(rt, "VM stack limit exceeded");
-  if (!rt_grow(rt, (void**)&rt->stack, &rt->stack_capacity, needed, sizeof(Value))) return false;
+bool oti_stack(ot_runtime* rt, size_t needed) {
+  if (needed > rt->stack_limit) return oti_error(rt, "VM stack limit exceeded");
+  if (!oti_grow(rt, (void**)&rt->stack, &rt->stack_capacity, needed, sizeof(ot_value))) return false;
   rt->stack_roots.slots = rt->stack;
   return true;
 }
 
-void runtime_interrupt_flag(Runtime* rt, volatile sig_atomic_t* flag) { rt->interrupt_flag = flag; }
+void ot_set_interrupt_flag(ot_runtime* rt, volatile sig_atomic_t* flag) { rt->interrupt_flag = flag; }
 
-bool runtime_interrupted(const Runtime* rt) { return rt->interrupted; }
+bool ot_interrupted(const ot_runtime* rt) { return rt->interrupted; }
 
-bool runtime_poll_interrupt(Runtime* rt) {
+bool ot_poll_interrupt(ot_runtime* rt) {
   if (!rt->interrupt_flag || !*rt->interrupt_flag) return true;
   *rt->interrupt_flag = 0;
   rt->interrupted = true;
   rt->exit_pending = rt->restart_pending = rt->raised = false;
-  rt->condition_values[0] = V_NIL;
-  rt->restart_transfer[0] = rt->restart_transfer[1] = V_NIL;
+  rt->condition_values[0] = OT_NIL;
+  rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
   rt->error[0] = 0;
-  rt_error(rt, "interrupted");
+  oti_error(rt, "interrupted");
   return false;
 }
 
-Value rt_alloc(Runtime* rt, uint32_t kind, uint32_t fields, size_t bytes) {
-  if (!rt_host_entry(rt)) return 0;
-  if (rt->interrupt_flag && *rt->interrupt_flag && !runtime_poll_interrupt(rt)) return 0;
+ot_value oti_alloc(ot_runtime* rt, uint32_t kind, uint32_t fields, size_t bytes) {
+  if (!oti_host_entry(rt)) return 0;
+  if (rt->interrupt_flag && *rt->interrupt_flag && !ot_poll_interrupt(rt)) return 0;
   size_t collections = rt->heap.collections;
-  if (rt->stress_gc) heap_collect(&rt->heap);
-  Value v = heap_alloc(&rt->heap, kind, fields, bytes);
-  if (rt->heap.collections != collections) rt_foreign_collect(rt);
-  if (!v) rt_error(rt, "managed heap exhausted");
+  if (rt->stress_gc) oti_heap_collect(&rt->heap);
+  ot_value v = oti_heap_alloc(&rt->heap, kind, fields, bytes);
+  if (rt->heap.collections != collections) oti_foreign_collect(rt);
+  if (!v) oti_error(rt, "managed heap exhausted");
   return v;
 }
 
-uint32_t rt_constant(Runtime* rt, Value value) {
+uint32_t oti_constant(ot_runtime* rt, ot_value value) {
   for (size_t i = 0; i < rt->constant_count; i++)
     if (rt->constant_state[i] && rt->constants[i] == value) return (uint32_t)i;
   size_t index = rt->constant_free;
   while (index < rt->constant_count && rt->constant_state[index]) index++;
   if (index >= UINT32_MAX ||
-      !rt_grow(rt, (void**)&rt->constants, &rt->constant_capacity, index + 1, sizeof(Value)))
+      !oti_grow(rt, (void**)&rt->constants, &rt->constant_capacity, index + 1, sizeof(ot_value)))
     return UINT32_MAX;
   rt->constant_roots.slots = rt->constants;
-  if (!rt_grow(rt, (void**)&rt->constant_state, &rt->constant_state_capacity, index + 1, 1))
+  if (!oti_grow(rt, (void**)&rt->constant_state, &rt->constant_state_capacity, index + 1, 1))
     return UINT32_MAX;
   if (index == rt->constant_count) rt->constant_count++;
   rt->constant_state[index] = 1;
@@ -96,7 +96,7 @@ uint32_t rt_constant(Runtime* rt, Value value) {
   return (uint32_t)index;
 }
 
-uint32_t rt_namespace(Runtime* rt, const char* name, size_t length) {
+uint32_t oti_namespace(ot_runtime* rt, const char* name, size_t length) {
   if (length == 3 && !memcmp(name, "ffi", 3)) {
     name = "otium.ffi";
     length = 9;
@@ -105,12 +105,12 @@ uint32_t rt_namespace(Runtime* rt, const char* name, size_t length) {
     if (strlen(rt->namespaces[i]) == length && !memcmp(rt->namespaces[i], name, length))
       return (uint32_t)i;
   if (rt->namespace_count >= UINT32_MAX ||
-      !rt_grow(rt, (void**)&rt->namespaces, &rt->namespace_capacity, rt->namespace_count + 1,
+      !oti_grow(rt, (void**)&rt->namespaces, &rt->namespace_capacity, rt->namespace_count + 1,
                sizeof(char*)))
     return UINT32_MAX;
   char* copy = malloc(length + 1);
   if (!copy) {
-    rt_error(rt, "out of host memory");
+    oti_error(rt, "out of host memory");
     return UINT32_MAX;
   }
   memcpy(copy, name, length);
@@ -120,7 +120,7 @@ uint32_t rt_namespace(Runtime* rt, const char* name, size_t length) {
   return id;
 }
 
-static uint32_t find_global(Runtime* rt, uint32_t space, const char* name, size_t length) {
+static uint32_t find_global(ot_runtime* rt, uint32_t space, const char* name, size_t length) {
   for (size_t i = 0; i < rt->global_count; i++)
     if (rt->global_namespaces[i] == space && strlen(rt->names[i]) == length &&
         !memcmp(rt->names[i], name, length))
@@ -128,40 +128,40 @@ static uint32_t find_global(Runtime* rt, uint32_t space, const char* name, size_
   return UINT32_MAX;
 }
 
-static uint32_t namespace_global(Runtime* rt, uint32_t space, const char* name, size_t length) {
+static uint32_t namespace_global(ot_runtime* rt, uint32_t space, const char* name, size_t length) {
   uint32_t existing = find_global(rt, space, name, length);
   if (existing != UINT32_MAX) return existing;
-  if (rt->global_count >= UINT32_MAX || !rt_grow(rt, (void**)&rt->globals, &rt->global_capacity,
-                                                 rt->global_count + 1, sizeof(Value))) {
-    rt_error(rt, "too many globals");
+  if (rt->global_count >= UINT32_MAX || !oti_grow(rt, (void**)&rt->globals, &rt->global_capacity,
+                                                 rt->global_count + 1, sizeof(ot_value))) {
+    oti_error(rt, "too many globals");
     return UINT32_MAX;
   }
   rt->global_roots.slots = rt->globals;
-  if (!rt_grow(rt, (void**)&rt->names, &rt->name_capacity, rt->global_count + 1, sizeof(char*)))
+  if (!oti_grow(rt, (void**)&rt->names, &rt->name_capacity, rt->global_count + 1, sizeof(char*)))
     return UINT32_MAX;
-  if (!rt_grow(rt, (void**)&rt->global_defined, &rt->global_defined_capacity, rt->global_count + 1,
+  if (!oti_grow(rt, (void**)&rt->global_defined, &rt->global_defined_capacity, rt->global_count + 1,
                1))
     return UINT32_MAX;
-  if (!rt_grow(rt, (void**)&rt->global_namespaces, &rt->global_namespace_capacity,
+  if (!oti_grow(rt, (void**)&rt->global_namespaces, &rt->global_namespace_capacity,
                rt->global_count + 1, sizeof(uint32_t)))
     return UINT32_MAX;
-  if (!rt_grow(rt, (void**)&rt->global_private, &rt->global_private_capacity, rt->global_count + 1,
+  if (!oti_grow(rt, (void**)&rt->global_private, &rt->global_private_capacity, rt->global_count + 1,
                1))
     return UINT32_MAX;
-  if (!rt_grow(rt, (void**)&rt->global_macro, &rt->global_macro_capacity, rt->global_count + 1, 1))
+  if (!oti_grow(rt, (void**)&rt->global_macro, &rt->global_macro_capacity, rt->global_count + 1, 1))
     return UINT32_MAX;
-  if (!rt_grow(rt, (void**)&rt->docs, &rt->docs_capacity, rt->global_count + 1,
-               sizeof(Documentation)))
+  if (!oti_grow(rt, (void**)&rt->docs, &rt->docs_capacity, rt->global_count + 1,
+               sizeof(oti_documentation)))
     return UINT32_MAX;
   char* copy = malloc(length + 1);
   if (!copy) {
-    rt_error(rt, "out of host memory");
+    oti_error(rt, "out of host memory");
     return UINT32_MAX;
   }
   memcpy(copy, name, length);
   copy[length] = 0;
   uint32_t index = (uint32_t)rt->global_count++;
-  rt->docs[index] = (Documentation){0};
+  rt->docs[index] = (oti_documentation){0};
   rt->names[index] = copy;
   rt->globals[index] = V_UNBOUND;
   rt->global_defined[index] = 0;
@@ -172,37 +172,37 @@ static uint32_t namespace_global(Runtime* rt, uint32_t space, const char* name, 
   return index;
 }
 
-uint32_t rt_global(Runtime* rt, const char* name, size_t length) {
-  if (rt_import_global(rt, name, length) != UINT32_MAX) {
-    rt_error(rt, "definition conflicts with a referred import");
+uint32_t oti_global(ot_runtime* rt, const char* name, size_t length) {
+  if (oti_import_global(rt, name, length) != UINT32_MAX) {
+    oti_error(rt, "definition conflicts with a referred import");
     return UINT32_MAX;
   }
   return namespace_global(rt, rt->current_namespace, name, length);
 }
 
-uint32_t rt_binding_global(Runtime* rt, uint32_t space, const char* name, size_t length,
+uint32_t oti_binding_global(ot_runtime* rt, uint32_t space, const char* name, size_t length,
                            bool create) {
   uint32_t index = find_global(rt, space, name, length);
   if (index != UINT32_MAX) return index;
-  index = rt_import_global_in(rt, space, name, length);
+  index = oti_import_global_in(rt, space, name, length);
   if (index != UINT32_MAX) return index;
   index = find_global(rt, 0, name, length);
   if (index != UINT32_MAX && rt->globals[index] != V_UNBOUND) return index;
   return create ? namespace_global(rt, space, name, length) : UINT32_MAX;
 }
 
-static uint32_t resolve_global(Runtime* rt, const char* name, size_t length, bool create) {
+static uint32_t resolve_global(ot_runtime* rt, const char* name, size_t length, bool create) {
   uint32_t local = find_global(rt, rt->current_namespace, name, length);
   if (local != UINT32_MAX) return local;
-  uint32_t imported = rt_import_global(rt, name, length);
+  uint32_t imported = oti_import_global(rt, name, length);
   if (imported != UINT32_MAX) return imported;
   /* A local name containing a slash takes precedence over qualification. */
   const char* slash = memchr(name, '/', length);
   if (slash && slash != name && slash + 1 < name + length) {
     size_t prefix = (size_t)(slash - name);
-    uint32_t alias = rt_alias_namespace(rt, name, prefix);
+    uint32_t alias = oti_alias_namespace(rt, name, prefix);
     if (alias != UINT32_MAX)
-      return rt_binding_global(rt, alias, slash + 1, length - prefix - 1, create);
+      return oti_binding_global(rt, alias, slash + 1, length - prefix - 1, create);
     const char* space_name = name;
     if (prefix == 3 && !memcmp(name, "ffi", 3)) {
       space_name = "otium.ffi";
@@ -210,28 +210,28 @@ static uint32_t resolve_global(Runtime* rt, const char* name, size_t length, boo
     }
     for (size_t i = 0; i < rt->namespace_count; i++)
       if (strlen(rt->namespaces[i]) == prefix && !memcmp(rt->namespaces[i], space_name, prefix))
-        return rt_binding_global(rt, (uint32_t)i, slash + 1, length - (size_t)(slash - name) - 1,
+        return oti_binding_global(rt, (uint32_t)i, slash + 1, length - (size_t)(slash - name) - 1,
                                  create);
   }
   uint32_t core = find_global(rt, 0, name, length);
   if (core != UINT32_MAX && rt->globals[core] != V_UNBOUND) return core;
-  return create ? rt_global(rt, name, length) : UINT32_MAX;
+  return create ? oti_global(rt, name, length) : UINT32_MAX;
 }
 
-uint32_t rt_lookup_global(Runtime* rt, const char* name, size_t length) {
+uint32_t oti_lookup_global(ot_runtime* rt, const char* name, size_t length) {
   return resolve_global(rt, name, length, false);
 }
 
-uint32_t rt_resolve_global(Runtime* rt, const char* name, size_t length) {
+uint32_t oti_resolve_global(ot_runtime* rt, const char* name, size_t length) {
   return resolve_global(rt, name, length, true);
 }
 
-Value rt_text(Runtime* rt, uint32_t kind, const char* text, size_t length) {
+ot_value oti_text(ot_runtime* rt, uint32_t kind, const char* text, size_t length) {
   if (length > SIZE_MAX - sizeof(size_t) - 1 - sizeof(uint64_t)) {
-    rt_error(rt, "text too large");
+    oti_error(rt, "text too large");
     return 0;
   }
-  Value v = rt_alloc(rt, kind, 0,
+  ot_value v = oti_alloc(rt, kind, 0,
                      sizeof(size_t) + length + 1 + (kind == K_SYMBOL ? sizeof(uint64_t) : 0));
   if (v) {
     unsigned char* bytes = object_bytes(v);
@@ -241,70 +241,70 @@ Value rt_text(Runtime* rt, uint32_t kind, const char* text, size_t length) {
   return v;
 }
 
-Value rt_float(Runtime* rt, double number) {
-  Value v = rt_alloc(rt, K_FLOAT, 0, sizeof(double));
+ot_value oti_float(ot_runtime* rt, double number) {
+  ot_value v = oti_alloc(rt, K_FLOAT, 0, sizeof(double));
   if (v) memcpy(object_bytes(v), &number, sizeof(number));
   return v;
 }
 
-Runtime* runtime_create(size_t bytes, size_t stack_limit) {
-  Runtime* rt = calloc(1, sizeof(*rt));
+ot_runtime* ot_create(size_t bytes, size_t stack_limit) {
+  ot_runtime* rt = calloc(1, sizeof(*rt));
   if (!rt) return NULL;
-  if (!heap_init(&rt->heap, bytes)) {
+  if (!oti_heap_init(&rt->heap, bytes)) {
     free(rt);
     return NULL;
   }
-  roots_push(&rt->heap, &rt->open_port_roots, NULL, 0);
-  for (size_t i = 0; i < 3; i++) rt->standard_ports[i] = V_NIL;
-  roots_push(&rt->heap, &rt->standard_port_roots, rt->standard_ports, 3);
-  rt->process_values[0] = V_EMPTY;
-  rt->process_values[1] = V_NIL;
-  roots_push(&rt->heap, &rt->process_roots, rt->process_values, 2);
+  oti_roots_push(&rt->heap, &rt->open_port_roots, NULL, 0);
+  for (size_t i = 0; i < 3; i++) rt->standard_ports[i] = OT_NIL;
+  oti_roots_push(&rt->heap, &rt->standard_port_roots, rt->standard_ports, 3);
+  rt->process_values[0] = OT_EMPTY;
+  rt->process_values[1] = OT_NIL;
+  oti_roots_push(&rt->heap, &rt->process_roots, rt->process_values, 2);
   rt->stack_limit = stack_limit;
   rt->required_namespace = UINT32_MAX;
-  roots_push(&rt->heap, &rt->constant_roots, NULL, 0);
-  roots_push(&rt->heap, &rt->global_roots, NULL, 0);
-  roots_push(&rt->heap, &rt->stack_roots, NULL, 0);
-  roots_push(&rt->heap, &rt->param_roots, NULL, 0);
-  roots_push(&rt->heap, &rt->handler_roots, NULL, 0);
-  roots_push(&rt->heap, &rt->cleanup_roots, NULL, 0);
-  roots_push(&rt->heap, &rt->restart_roots, NULL, 0);
-  rt->restart_transfer[0] = rt->restart_transfer[1] = V_NIL;
-  roots_push(&rt->heap, &rt->restart_transfer_roots, rt->restart_transfer, 2);
-  rt->condition_values[0] = rt->condition_values[1] = V_NIL;
-  roots_push(&rt->heap, &rt->condition_roots, rt->condition_values, 2);
-  for (size_t i = 0; i < C_COUNT; i++) rt->classes[i] = V_NIL;
-  roots_push(&rt->heap, &rt->class_roots, rt->classes, C_COUNT);
-  if (rt_namespace(rt, "otium.core", 10) == UINT32_MAX || !rt_builtins(rt) ||
-      !rt_foreign_init(rt)) {
-    runtime_destroy(rt);
+  oti_roots_push(&rt->heap, &rt->constant_roots, NULL, 0);
+  oti_roots_push(&rt->heap, &rt->global_roots, NULL, 0);
+  oti_roots_push(&rt->heap, &rt->stack_roots, NULL, 0);
+  oti_roots_push(&rt->heap, &rt->param_roots, NULL, 0);
+  oti_roots_push(&rt->heap, &rt->handler_roots, NULL, 0);
+  oti_roots_push(&rt->heap, &rt->cleanup_roots, NULL, 0);
+  oti_roots_push(&rt->heap, &rt->restart_roots, NULL, 0);
+  rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
+  oti_roots_push(&rt->heap, &rt->restart_transfer_roots, rt->restart_transfer, 2);
+  rt->condition_values[0] = rt->condition_values[1] = OT_NIL;
+  oti_roots_push(&rt->heap, &rt->condition_roots, rt->condition_values, 2);
+  for (size_t i = 0; i < C_COUNT; i++) rt->classes[i] = OT_NIL;
+  oti_roots_push(&rt->heap, &rt->class_roots, rt->classes, C_COUNT);
+  if (oti_namespace(rt, "otium.core", 10) == UINT32_MAX || !oti_builtins(rt) ||
+      !oti_foreign_init(rt)) {
+    ot_destroy(rt);
     return NULL;
   }
-  rt->current_namespace = rt_namespace(rt, "user", 4);
+  rt->current_namespace = oti_namespace(rt, "user", 4);
   if (rt->current_namespace == UINT32_MAX) {
-    runtime_destroy(rt);
+    ot_destroy(rt);
     return NULL;
   }
   rt->permanent_constants = rt->constant_count;
   return rt;
 }
 
-bool runtime_heap_limit(Runtime* rt, size_t bytes) {
-  if (!rt_host_entry(rt)) return false;
-  return heap_set_limit(&rt->heap, bytes) ||
-         rt_error(rt, "heap limit is below capacity or exceeds addressable size");
+bool ot_set_heap_limit(ot_runtime* rt, size_t bytes) {
+  if (!oti_host_entry(rt)) return false;
+  return oti_heap_set_limit(&rt->heap, bytes) ||
+         oti_error(rt, "heap limit is below capacity or exceeds addressable size");
 }
 
-size_t runtime_heap_capacity(const Runtime* rt) { return rt->heap.capacity; }
+size_t ot_heap_capacity(const ot_runtime* rt) { return rt->heap.capacity; }
 
-void runtime_destroy(Runtime* rt) {
-  if (!rt || !rt_host_entry(rt)) return;
-  rt_ports_destroy(rt);
-  rt_foreign_destroy(rt);
-  rt_modules_destroy(rt);
+void ot_destroy(ot_runtime* rt) {
+  if (!rt || !oti_host_entry(rt)) return;
+  oti_ports_destroy(rt);
+  oti_foreign_destroy(rt);
+  oti_modules_destroy(rt);
   for (size_t i = 0; i < rt->function_count; i++) {
-    Function* f = rt->functions[i];
-    rt_free_function(f);
+    oti_function* f = rt->functions[i];
+    oti_free_function(f);
   }
   for (size_t i = 0; i < rt->global_count; i++) {
     free(rt->names[i]);
@@ -333,45 +333,45 @@ void runtime_destroy(Runtime* rt) {
   free(rt->global_defined);
   free(rt->global_private);
   free(rt->global_macro);
-  heap_destroy(&rt->heap);
+  oti_heap_destroy(&rt->heap);
   free(rt);
 }
 
-static bool evaluate_top(Runtime* rt, const Ast* form, Value* result);
+static bool evaluate_top(ot_runtime* rt, const oti_ast* form, ot_value* result);
 
-static bool document(Runtime* rt, uint32_t index, const Ast* doc) {
+static bool document(ot_runtime* rt, uint32_t index, const oti_ast* doc) {
   char* text = NULL;
   size_t length = doc ? doc->as.text.size : 0;
   if (doc) {
     text = malloc(length + 1);
-    if (!text) return rt_error(rt, "out of host memory");
+    if (!text) return oti_error(rt, "out of host memory");
     memcpy(text, doc->as.text.data, length);
     text[length] = 0;
   }
   free(rt->docs[index].text);
-  rt->docs[index] = (Documentation){text, length};
+  rt->docs[index] = (oti_documentation){text, length};
   return true;
 }
 
 /* Top-level begin forms are evaluated in order, so declarations from earlier
  * forms are visible before later forms are compiled. */
-static bool evaluate_raw(Runtime* rt, const Ast* form, Value* result) {
-  if (form->kind == AST_LIST && !form->as.list.tail && ast_symbol(form->as.list.first, "begin") &&
+static bool evaluate_raw(ot_runtime* rt, const oti_ast* form, ot_value* result) {
+  if (form->kind == AST_LIST && !form->as.list.tail && oti_ast_symbol(form->as.list.first, "begin") &&
       form->as.list.first->next) {
     size_t base = rt->sp;
-    for (const Ast* child = form->as.list.first->next; child; child = child->next) {
+    for (const oti_ast* child = form->as.list.first->next; child; child = child->next) {
       rt->sp = rt->stack_roots.count = base;
       if (!evaluate_top(rt, child, result)) return false;
     }
     return true;
   }
-  if (form->kind == AST_LIST && ast_symbol(form->as.list.first, "defmacro")) {
-    const Ast* name = form->as.list.first->next;
+  if (form->kind == AST_LIST && oti_ast_symbol(form->as.list.first, "defmacro")) {
+    const oti_ast* name = form->as.list.first->next;
     if (form->as.list.tail || !name || name->kind != AST_SYMBOL || !name->next)
-      return rt_error(rt, "defmacro needs a name and parameters");
-    Ast definition = *form, head = *form->as.list.first, binding = *name;
-    Ast lambda = {.kind = AST_LIST, .offset = form->offset};
-    Ast fn = {.kind = AST_SYMBOL, .as.text = {"fn", 2}, .next = name->next};
+      return oti_error(rt, "defmacro needs a name and parameters");
+    oti_ast definition = *form, head = *form->as.list.first, binding = *name;
+    oti_ast lambda = {.kind = AST_LIST, .offset = form->offset};
+    oti_ast fn = {.kind = AST_SYMBOL, .as.text = {"fn", 2}, .next = name->next};
     head.as.text.data = "def";
     head.as.text.size = 3;
     head.next = &binding;
@@ -379,64 +379,64 @@ static bool evaluate_raw(Runtime* rt, const Ast* form, Value* result) {
     lambda.as.list.first = &fn;
     definition.as.list.first = &head;
     if (!evaluate_raw(rt, &definition, result)) return false;
-    uint32_t global = rt_global(rt, name->as.text.data, name->as.text.size);
+    uint32_t global = oti_global(rt, name->as.text.data, name->as.text.size);
     if (global == UINT32_MAX) return false;
-    Value macro = rt_alloc(rt, K_MACRO, 1, 0);
+    ot_value macro = oti_alloc(rt, K_MACRO, 1, 0);
     if (!macro) return false;
     object_fields(macro)[0] = rt->globals[global];
     rt->globals[global] = macro;
     rt->global_macro[global] = 1;
-    const Ast* doc = name->next->next;
+    const oti_ast* doc = name->next->next;
     if (!document(rt, global, doc && doc->kind == AST_STRING && doc->next ? doc : NULL))
       return false;
-    *result = V_NIL;
+    *result = OT_NIL;
     return true;
   }
   bool ok;
   uint32_t function;
-  if (form->kind == AST_LIST && ast_symbol(form->as.list.first, "require")) {
-    if (form->as.list.tail) return rt_error(rt, "require needs a proper specification list");
-    if (!rt_require(rt, form->as.list.first->next)) return false;
-    *result = V_NIL;
+  if (form->kind == AST_LIST && oti_ast_symbol(form->as.list.first, "require")) {
+    if (form->as.list.tail) return oti_error(rt, "require needs a proper specification list");
+    if (!oti_require(rt, form->as.list.first->next)) return false;
+    *result = OT_NIL;
     return true;
   }
-  if (form->kind == AST_LIST && ast_symbol(form->as.list.first, "ns")) {
-    const Ast* name = form->as.list.first->next;
+  if (form->kind == AST_LIST && oti_ast_symbol(form->as.list.first, "ns")) {
+    const oti_ast* name = form->as.list.first->next;
     if (form->as.list.tail || !name || name->kind != AST_SYMBOL) {
       rt->error_offset = form->offset;
-      return rt_coded_error(rt, "E0110", "ns needs a namespace symbol");
+      return oti_coded_error(rt, "E0110", "ns needs a namespace symbol");
     }
     if (rt->required_namespace != UINT32_MAX &&
         (strlen(rt->namespaces[rt->required_namespace]) != name->as.text.size ||
          memcmp(rt->namespaces[rt->required_namespace], name->as.text.data, name->as.text.size)))
-      return rt_coded_error(rt, "E0206", "module namespace does not match required name");
-    uint32_t space = rt_namespace(rt, name->as.text.data, name->as.text.size);
+      return oti_coded_error(rt, "E0206", "module namespace does not match required name");
+    uint32_t space = oti_namespace(rt, name->as.text.data, name->as.text.size);
     if (space == UINT32_MAX) return false;
     rt->current_namespace = space;
-    for (const Ast* clause = name->next; clause; clause = clause->next) {
-      const Ast* head = clause->kind == AST_LIST ? clause->as.list.first : NULL;
+    for (const oti_ast* clause = name->next; clause; clause = clause->next) {
+      const oti_ast* head = clause->kind == AST_LIST ? clause->as.list.first : NULL;
       if (!head || clause->as.list.tail || head->kind != AST_KEYWORD || head->as.text.size != 8 ||
           memcmp(head->as.text.data, ":require", 8))
-        return rt_coded_error(rt, "E0110", "ns only accepts require clauses");
-      if (!rt_require(rt, head->next)) return false;
+        return oti_coded_error(rt, "E0110", "ns only accepts require clauses");
+      if (!oti_require(rt, head->next)) return false;
     }
-    *result = V_NIL;
+    *result = OT_NIL;
     return true;
   }
-  Ast replacement, head;
-  bool once = form->kind == AST_LIST && ast_symbol(form->as.list.first, "defonce");
+  oti_ast replacement, head;
+  bool once = form->kind == AST_LIST && oti_ast_symbol(form->as.list.first, "defonce");
   if (once) {
-    const Ast* name = form->as.list.first->next;
-    const Ast* value = name ? name->next : NULL;
+    const oti_ast* name = form->as.list.first->next;
+    const oti_ast* value = name ? name->next : NULL;
     if (form->as.list.tail || !name || name->kind != AST_SYMBOL || !value ||
         (value->next && value->next->next)) {
       rt->error_offset = form->offset;
-      return rt_error(rt, "defonce needs a name, optional docstring and value");
+      return oti_error(rt, "defonce needs a name, optional docstring and value");
     }
-    uint32_t global = rt_global(rt, name->as.text.data, name->as.text.size);
+    uint32_t global = oti_global(rt, name->as.text.data, name->as.text.size);
     if (global == UINT32_MAX) return false;
     if (rt->global_defined[global]) {
-      *result = V_NIL;
+      *result = OT_NIL;
       return true;
     }
     replacement = *form;
@@ -448,130 +448,130 @@ static bool evaluate_raw(Runtime* rt, const Ast* form, Value* result) {
   }
   bool compiling = rt->compiling;
   rt->compiling = true;
-  ok = rt_compile(rt, form, &function);
+  ok = oti_compile(rt, form, &function);
   rt->compiling = compiling;
   /* Reclaim unreachable code at the next idle boundary. Macro execution can
      * retain constants and nested eval closures even if this compile fails. */
   if (!ok || rt->error[0]) return false;
-  if (!rt_execute(rt, function, result)) return false;
+  if (!oti_execute(rt, function, result)) return false;
   if (form->kind == AST_LIST) {
-    const Ast* definition = form->as.list.first;
-    if (ast_symbol(definition, "def") || ast_symbol(definition, "def-") ||
-        ast_symbol(definition, "defparam")) {
-      const Ast* name = definition->next;
+    const oti_ast* definition = form->as.list.first;
+    if (oti_ast_symbol(definition, "def") || oti_ast_symbol(definition, "def-") ||
+        oti_ast_symbol(definition, "defparam")) {
+      const oti_ast* name = definition->next;
       if (name->kind == AST_LIST) name = name->as.list.first;
       uint32_t index =
           find_global(rt, rt->current_namespace, name->as.text.data, name->as.text.size);
       if (index != UINT32_MAX) {
-        rt->global_private[index] = ast_symbol(definition, "def-");
-        const Ast* doc = definition->next->next;
+        rt->global_private[index] = oti_ast_symbol(definition, "def-");
+        const oti_ast* doc = definition->next->next;
         if (!document(rt, index, doc && doc->kind == AST_STRING && doc->next ? doc : NULL))
           return false;
       }
     }
   }
-  if (once) *result = V_NIL;
+  if (once) *result = OT_NIL;
   return true;
 }
 
-static bool evaluate_expanded(Runtime* rt, const Ast* form, Value* result) {
+static bool evaluate_expanded(ot_runtime* rt, const oti_ast* form, ot_value* result) {
   if (!rt->shared_expander) return evaluate_raw(rt, form, result);
-  const Ast* head = form->kind == AST_LIST ? form->as.list.first : NULL;
-  if (ast_symbol(head, "begin") || ast_symbol(head, "require") || ast_symbol(head, "ns"))
+  const oti_ast* head = form->kind == AST_LIST ? form->as.list.first : NULL;
+  if (oti_ast_symbol(head, "begin") || oti_ast_symbol(head, "require") || oti_ast_symbol(head, "ns"))
     return evaluate_raw(rt, form, result);
-  if (ast_symbol(head, "defonce") && head->next && head->next->kind == AST_SYMBOL) {
-    const Ast* name = head->next;
+  if (oti_ast_symbol(head, "defonce") && head->next && head->next->kind == AST_SYMBOL) {
+    const oti_ast* name = head->next;
     uint32_t global =
         find_global(rt, rt->current_namespace, name->as.text.data, name->as.text.size);
     if (global != UINT32_MAX && rt->global_defined[global]) return evaluate_raw(rt, form, result);
   }
-  Reader arena;
-  reader_init(&arena, "", 0, 16 * 1024 * 1024);
-  Ast* expanded = rt_expand_form(rt, form, &arena);
+  oti_reader arena;
+  oti_reader_init(&arena, "", 0, 16 * 1024 * 1024);
+  oti_ast* expanded = oti_expand_form(rt, form, &arena);
   bool ok = expanded && evaluate_raw(rt, expanded, result);
-  reader_destroy(&arena);
+  oti_reader_destroy(&arena);
   return ok;
 }
 
-static bool evaluate_top(Runtime* rt, const Ast* form, Value* result) {
+static bool evaluate_top(ot_runtime* rt, const oti_ast* form, ot_value* result) {
   size_t base = rt->frame_count || rt->compiling || rt->evaluating || rt->eval_depth ? rt->sp : 0;
   rt->sp = rt->stack_roots.count = base;
-  if (!rt->frame_count && !rt->compiling && !rt->evaluating && !rt->eval_depth && !rt_reclaim(rt))
+  if (!rt->frame_count && !rt->compiling && !rt->evaluating && !rt->eval_depth && !oti_reclaim(rt))
     return false;
   bool evaluating = rt->evaluating;
   rt->evaluating = true;
   bool ok = evaluate_expanded(rt, form, result);
   rt->evaluating = evaluating;
   rt->sp = rt->stack_roots.count = base;
-  if (!ok || !rt_stack(rt, base + 1)) return false;
+  if (!ok || !oti_stack(rt, base + 1)) return false;
   rt->stack[base] = *result;
   rt->sp = rt->stack_roots.count = base + 1;
   return true;
 }
 
-Value rt_eval_value(Runtime* rt, Value value) {
+ot_value oti_eval_value(ot_runtime* rt, ot_value value) {
   if (rt->eval_depth >= 128) {
-    rt_error(rt, "eval nesting limit exceeded");
+    oti_error(rt, "eval nesting limit exceeded");
     return 0;
   }
   rt->eval_depth++;
-  Reader arena;
-  reader_init(&arena, "", 0, 16 * 1024 * 1024);
-  Ast* form = rt_syntax_value(rt, value, &arena);
+  oti_reader arena;
+  oti_reader_init(&arena, "", 0, 16 * 1024 * 1024);
+  oti_ast* form = oti_syntax_value(rt, value, &arena);
   size_t base = rt->sp, frames = rt->frame_count, tries = rt->try_count;
   size_t restarts = rt->restart_scope_count, cleanups = rt->cleanup_count;
-  Value result = 0;
+  ot_value result = 0;
   if (form && !evaluate_top(rt, form, &result)) result = 0;
   rt->sp = rt->stack_roots.count = base;
   rt->frame_count = frames;
   rt->try_count = tries;
-  rt_restore_restarts(rt, restarts);
-  rt_restore_cleanups(rt, cleanups);
-  reader_destroy(&arena);
+  oti_restore_restarts(rt, restarts);
+  oti_restore_cleanups(rt, cleanups);
+  oti_reader_destroy(&arena);
   rt->eval_depth--;
   return result;
 }
 
-bool runtime_load_expander(Runtime* rt, const char* directory) {
-  if (!rt_host_entry(rt)) return false;
+bool ot_load_expander(ot_runtime* rt, const char* directory) {
+  if (!oti_host_entry(rt)) return false;
   if (rt->shared_expander) return true;
-  if (!rt_classes_init(rt)) return false;
+  if (!oti_classes_init(rt)) return false;
   size_t n = strlen(directory);
   char* path = malloc(n + 32);
-  if (!path) return rt_error(rt, "out of host memory");
+  if (!path) return oti_error(rt, "out of host memory");
   snprintf(path, n + 32, "%s/otium/expander.ot", directory);
   FILE* file = fopen(path, "rb");
   free(path);
-  if (!file) return rt_error(rt, "cannot open shared expander");
+  if (!file) return oti_error(rt, "cannot open shared expander");
   if (fseek(file, 0, SEEK_END)) {
     fclose(file);
-    return rt_error(rt, "cannot read shared expander");
+    return oti_error(rt, "cannot read shared expander");
   }
   long length = ftell(file);
   if (length < 0 || length > 16 * 1024 * 1024) {
     fclose(file);
-    return rt_error(rt, "shared expander source limit");
+    return oti_error(rt, "shared expander source limit");
   }
   rewind(file);
   char* source = malloc((size_t)length + 1);
   if (!source) {
     fclose(file);
-    return rt_error(rt, "out of host memory");
+    return oti_error(rt, "out of host memory");
   }
   bool ok = fread(source, 1, (size_t)length, file) == (size_t)length && !ferror(file);
   fclose(file);
   source[length] = 0;
   uint32_t saved = rt->current_namespace;
   rt->current_namespace = 0;
-  Value result;
-  if (ok) ok = runtime_eval(rt, source, (size_t)length, &result);
-  else rt_error(rt, "cannot read shared expander");
+  ot_value result;
+  if (ok) ok = ot_eval(rt, source, (size_t)length, &result);
+  else oti_error(rt, "cannot read shared expander");
   if (ok) {
     const char* adapters =
         "(def (macroexpand-1 form) (expander-expand-head form #t)) "
         "(def (macroexpand form) (expander-expand-head form #f)) "
         "(def (type-pred type) (fn (condition) (condition-of-type? condition type)))";
-    ok = runtime_eval(rt, adapters, strlen(adapters), &result);
+    ok = ot_eval(rt, adapters, strlen(adapters), &result);
   }
   rt->current_namespace = saved;
   free(source);
@@ -579,76 +579,76 @@ bool runtime_load_expander(Runtime* rt, const char* directory) {
   return ok;
 }
 
-static bool load_bootstrap(Runtime* rt) {
+static bool load_bootstrap(ot_runtime* rt) {
   FILE* file = fopen(OTIUM_BOOTSTRAP_FILE, "rb");
-  if (!file) return rt_error(rt, "cannot open bootstrap library");
+  if (!file) return oti_error(rt, "cannot open bootstrap library");
   if (fseek(file, 0, SEEK_END)) {
     fclose(file);
-    return rt_error(rt, "cannot read bootstrap library");
+    return oti_error(rt, "cannot read bootstrap library");
   }
   long length = ftell(file);
   if (length < 0 || length > 16 * 1024 * 1024) {
     fclose(file);
-    return rt_error(rt, "bootstrap source limit");
+    return oti_error(rt, "bootstrap source limit");
   }
   rewind(file);
   char* source = malloc((size_t)length + 1);
   if (!source) {
     fclose(file);
-    return rt_error(rt, "out of host memory");
+    return oti_error(rt, "out of host memory");
   }
   bool ok = fread(source, 1, (size_t)length, file) == (size_t)length && !ferror(file);
   fclose(file);
   source[length] = 0;
-  Value result;
-  if (ok) ok = runtime_eval(rt, source, (size_t)length, &result);
-  else rt_error(rt, "cannot read bootstrap library");
+  ot_value result;
+  if (ok) ok = ot_eval(rt, source, (size_t)length, &result);
+  else oti_error(rt, "cannot read bootstrap library");
   free(source);
   return ok;
 }
 
-bool runtime_load_core(Runtime* rt, const char* directory) {
-  if (!rt_host_entry(rt)) return false;
+bool ot_load_core(ot_runtime* rt, const char* directory) {
+  if (!oti_host_entry(rt)) return false;
   if (rt->core_loaded) return true;
-  if (!runtime_load_expander(rt, directory) || !runtime_load_path(rt, directory)) return false;
+  if (!ot_load_expander(rt, directory) || !ot_add_load_path(rt, directory)) return false;
   size_t n = strlen(directory);
   char* path = malloc(n + 32);
-  if (!path) return rt_error(rt, "out of host memory");
+  if (!path) return oti_error(rt, "out of host memory");
   snprintf(path, n + 32, "%s/otium/core.ot", directory);
   FILE* file = fopen(path, "rb");
   free(path);
-  if (!file) return rt_error(rt, "cannot open core library");
+  if (!file) return oti_error(rt, "cannot open core library");
   if (fseek(file, 0, SEEK_END)) {
     fclose(file);
-    return rt_error(rt, "cannot read core library");
+    return oti_error(rt, "cannot read core library");
   }
   long length = ftell(file);
   if (length < 0 || length > 16 * 1024 * 1024) {
     fclose(file);
-    return rt_error(rt, "core source limit");
+    return oti_error(rt, "core source limit");
   }
   rewind(file);
   char* source = malloc((size_t)length + 1);
   if (!source) {
     fclose(file);
-    return rt_error(rt, "out of host memory");
+    return oti_error(rt, "out of host memory");
   }
   bool ok = fread(source, 1, (size_t)length, file) == (size_t)length && !ferror(file);
   fclose(file);
   source[length] = 0;
   uint32_t saved = rt->current_namespace;
   rt->current_namespace = 0;
-  Value result;
-  if (ok) ok = load_bootstrap(rt) && runtime_eval(rt, source, (size_t)length, &result);
-  else rt_error(rt, "cannot read core library");
+  ot_value result;
+  if (ok) ok = load_bootstrap(rt) && ot_eval(rt, source, (size_t)length, &result);
+  else oti_error(rt, "cannot read core library");
   rt->current_namespace = saved;
   free(source);
   if (ok) rt->core_loaded = true;
   return ok;
 }
 
-bool runtime_eval(Runtime* rt, const char* source, size_t length, Value* result) {
-  if (!rt_host_entry(rt)) return false;
+bool ot_eval(ot_runtime* rt, const char* source, size_t length, ot_value* result) {
+  if (!oti_host_entry(rt)) return false;
   bool nested = rt->frame_count || rt->compiling || rt->evaluating || rt->eval_depth;
   size_t base = nested ? rt->sp : 0, frames = rt->frame_count, tries = rt->try_count;
   size_t restarts = nested ? rt->restart_scope_count : 0, cleanups = nested ? rt->cleanup_count : 0;
@@ -658,84 +658,84 @@ bool runtime_eval(Runtime* rt, const char* source, size_t length, Value* result)
     rt->error[0] = 0;
     rt->error_offset = 0;
     rt->raised = false;
-    rt->condition_values[0] = V_NIL;
+    rt->condition_values[0] = OT_NIL;
     rt->try_count = 0;
-    rt_restore_cleanups(rt, 0);
-    rt_restore_restarts(rt, 0);
+    oti_restore_cleanups(rt, 0);
+    oti_restore_restarts(rt, 0);
     rt->restart_pending = false;
-    rt->restart_transfer[0] = rt->restart_transfer[1] = V_NIL;
-    rt_restore_params(rt, 0);
-    rt_restore_handlers(rt, 0, 0);
+    rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
+    oti_restore_params(rt, 0);
+    oti_restore_handlers(rt, 0, 0);
     rt->signaled = false;
   }
   rt->sp = rt->stack_roots.count = base;
-  if (!runtime_poll_interrupt(rt)) return false;
-  Reader reader;
-  reader_init(&reader, source, length, 16 * 1024 * 1024);
+  if (!ot_poll_interrupt(rt)) return false;
+  oti_reader reader;
+  oti_reader_init(&reader, source, length, 16 * 1024 * 1024);
   bool ok = true;
-  *result = V_NIL;
-  Ast* form;
-  while ((form = reader_next(&reader))) {
+  *result = OT_NIL;
+  oti_ast* form;
+  while ((form = oti_reader_next(&reader))) {
     rt->sp = rt->stack_roots.count = base;
     if (!(ok = evaluate_top(rt, form, result))) break;
   }
   if (reader.error) {
-    rt_coded_error(rt, reader.error_code, reader.error);
+    oti_coded_error(rt, reader.error_code, reader.error);
     rt->error_offset = reader.error_offset;
   }
-  reader_destroy(&reader);
+  oti_reader_destroy(&reader);
   rt->frame_count = frames;
   rt->try_count = tries;
-  rt_restore_restarts(rt, restarts);
-  rt_restore_cleanups(rt, cleanups);
+  oti_restore_restarts(rt, restarts);
+  oti_restore_cleanups(rt, cleanups);
   rt->sp = rt->stack_roots.count = base;
   if (!ok || rt->error[0]) return false;
-  if (!rt_stack(rt, base + 1)) return false;
+  if (!oti_stack(rt, base + 1)) return false;
   rt->stack[base] = *result;
   rt->sp = rt->stack_roots.count = base + 1;
   return true;
 }
 
-bool runtime_exit_status(const Runtime* rt, int* status) {
+bool ot_exit_status(const ot_runtime* rt, int* status) {
   if (!rt->exit_pending) return false;
   *status = rt->exit_status;
   return true;
 }
 
-const char* runtime_error(const Runtime* rt) { return rt->error; }
+const char* ot_error(const ot_runtime* rt) { return rt->error; }
 
-bool runtime_call(Runtime* rt, const char* name, const Value* args, size_t count, Value* result) {
-  if (!rt_host_entry(rt)) return false;
+bool ot_call(ot_runtime* rt, const char* name, const ot_value* args, size_t count, ot_value* result) {
+  if (!oti_host_entry(rt)) return false;
   rt->interrupted = false;
   rt->exit_pending = false;
   rt->error[0] = 0;
   rt->error_offset = 0;
   rt->raised = false;
-  rt->condition_values[0] = V_NIL;
+  rt->condition_values[0] = OT_NIL;
   rt->try_count = 0;
-  rt_restore_cleanups(rt, 0);
-  rt_restore_restarts(rt, 0);
+  oti_restore_cleanups(rt, 0);
+  oti_restore_restarts(rt, 0);
   rt->restart_pending = false;
-  rt->restart_transfer[0] = rt->restart_transfer[1] = V_NIL;
-  rt_restore_params(rt, 0);
-  rt_restore_handlers(rt, 0, 0);
+  rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
+  oti_restore_params(rt, 0);
+  oti_restore_handlers(rt, 0, 0);
   rt->signaled = false;
   rt->sp = rt->stack_roots.count = rt->frame_count = 0;
-  if (!runtime_poll_interrupt(rt)) return false;
+  if (!ot_poll_interrupt(rt)) return false;
   uint32_t index = resolve_global(rt, name, strlen(name), false);
-  if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND) return rt_error(rt, "unbound global");
-  if (count >= rt->stack_limit || !rt_stack(rt, count + 1))
-    return rt_error(rt, "VM stack limit exceeded");
+  if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND) return oti_error(rt, "unbound global");
+  if (count >= rt->stack_limit || !oti_stack(rt, count + 1))
+    return oti_error(rt, "VM stack limit exceeded");
   rt->stack[0] = rt->globals[index];
-  if (count) memcpy(rt->stack + 1, args, count * sizeof(Value));
+  if (count) memcpy(rt->stack + 1, args, count * sizeof(ot_value));
   rt->sp = rt->stack_roots.count = count + 1;
-  if (!rt_invoke(rt, count, result)) {
-    rt_restore_cleanups(rt, 0);
-    rt_restore_restarts(rt, 0);
+  if (!oti_invoke(rt, count, result)) {
+    oti_restore_cleanups(rt, 0);
+    oti_restore_restarts(rt, 0);
     rt->restart_pending = false;
-    rt->restart_transfer[0] = rt->restart_transfer[1] = V_NIL;
-    rt_restore_params(rt, 0);
-    rt_restore_handlers(rt, 0, 0);
+    rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
+    oti_restore_params(rt, 0);
+    oti_restore_handlers(rt, 0, 0);
     rt->signaled = false;
     rt->sp = rt->stack_roots.count = rt->frame_count = 0;
     return false;
@@ -743,29 +743,29 @@ bool runtime_call(Runtime* rt, const char* name, const Value* args, size_t count
   return true;
 }
 
-size_t runtime_error_offset(const Runtime* rt) { return rt->error_offset; }
+size_t ot_error_offset(const ot_runtime* rt) { return rt->error_offset; }
 
-size_t runtime_collections(const Runtime* rt) { return rt->heap.collections; }
+size_t ot_collections(const ot_runtime* rt) { return rt->heap.collections; }
 
-size_t runtime_max_frames(const Runtime* rt) { return rt->max_frames; }
+size_t ot_max_frames(const ot_runtime* rt) { return rt->max_frames; }
 
-void runtime_gc_stress(Runtime* rt, bool enabled) { rt->stress_gc = enabled; }
+void ot_gc_stress(ot_runtime* rt, bool enabled) { rt->stress_gc = enabled; }
 
-static void print_value(FILE* out, Value v, unsigned depth) {
+static void print_value(FILE* out, ot_value v, unsigned depth) {
   if (depth > 100) {
     fputs("...", out);
     return;
   }
-  if (value_is_int(v)) {
-    fprintf(out, "%" PRIdPTR, value_to_int(v));
+  if (ot_is_int(v)) {
+    fprintf(out, "%" PRIdPTR, ot_to_int(v));
     return;
   }
-  if (v == V_NIL) fputs("nil", out);
-  else if (v == V_FALSE) fputs("#f", out);
-  else if (v == V_TRUE) fputs("#t", out);
-  else if (v == V_EMPTY) fputs("()", out);
-  else if (v == V_EOF) fputs("#<eof>", out);
-  else if (rt_kind(v, K_PARAM)) {
+  if (v == OT_NIL) fputs("nil", out);
+  else if (v == OT_FALSE) fputs("#f", out);
+  else if (v == OT_TRUE) fputs("#t", out);
+  else if (v == OT_EMPTY) fputs("()", out);
+  else if (v == OT_EOF) fputs("#<eof>", out);
+  else if (oti_kind(v, K_PARAM)) {
     fputs("#<param ", out);
     print_value(out, object_fields(v)[0], depth + 1);
     fputc('>', out);
@@ -773,7 +773,7 @@ static void print_value(FILE* out, Value v, unsigned depth) {
     uint32_t cp = (uint32_t)(v >> 8);
     char bytes[4];
     if (!depth) {
-      size_t n = rt_utf8_encode(cp, bytes);
+      size_t n = oti_utf8_encode(cp, bytes);
       fwrite(bytes, 1, n, out);
     } else if (cp == 0) fputs("#\\nul", out);
     else if (cp == 32) fputs("#\\space", out);
@@ -783,22 +783,22 @@ static void print_value(FILE* out, Value v, unsigned depth) {
     else if (cp < 32 || cp == 127) fprintf(out, "#\\x%x", cp);
     else {
       fputs("#\\", out);
-      size_t n = rt_utf8_encode(cp, bytes);
+      size_t n = oti_utf8_encode(cp, bytes);
       fwrite(bytes, 1, n, out);
     }
   } else if ((v & 255) == TAG_BUILTIN) fputs("#<builtin>", out);
-  else if (rt_kind(v, K_FLOAT)) {
+  else if (oti_kind(v, K_FLOAT)) {
     double d;
     char buffer[64];
     memcpy(&d, object_bytes(v), sizeof(d));
-    rt_format_float(d, buffer, sizeof(buffer));
+    oti_format_float(d, buffer, sizeof(buffer));
     fputs(buffer, out);
-  } else if (rt_kind(v, K_STRING) || rt_kind(v, K_SYMBOL) || rt_kind(v, K_KEYWORD)) {
+  } else if (oti_kind(v, K_STRING) || oti_kind(v, K_SYMBOL) || oti_kind(v, K_KEYWORD)) {
     size_t n;
     unsigned char* s = object_bytes(v);
     memcpy(&n, s, sizeof(n));
     s += sizeof(n);
-    if (rt_kind(v, K_STRING) && depth) {
+    if (oti_kind(v, K_STRING) && depth) {
       fputc('"', out);
       for (size_t i = 0; i < n; i++) {
         switch (s[i]) {
@@ -816,75 +816,75 @@ static void print_value(FILE* out, Value v, unsigned depth) {
       }
       fputc('"', out);
     } else fwrite(s, 1, n, out);
-  } else if (rt_kind(v, K_RECORD) || rt_kind(v, K_RECORD_TYPE)) {
-    bool descriptor = rt_kind(v, K_RECORD_TYPE);
+  } else if (oti_kind(v, K_RECORD) || oti_kind(v, K_RECORD_TYPE)) {
+    bool descriptor = oti_kind(v, K_RECORD_TYPE);
     fputs(descriptor ? "#<record-type " : "#<record ", out);
     print_value(out, object_fields(descriptor ? v : object_fields(v)[0])[0], depth + 1);
     fputc('>', out);
-  } else if (rt_kind(v, K_INSTANCE)) {
+  } else if (oti_kind(v, K_INSTANCE)) {
     fputs("#<", out);
     print_value(out, object_fields(object_fields(v)[0])[0], depth + 1);
     fputc('>', out);
-  } else if (rt_kind(v, K_PORT)) {
-    rt_port_repr(out, v);
-  } else if (rt_kind(v, K_RESTART)) {
+  } else if (oti_kind(v, K_PORT)) {
+    oti_port_repr(out, v);
+  } else if (oti_kind(v, K_RESTART)) {
     fputs("#<restart ", out);
     print_value(out, object_fields(v)[0], depth + 1);
     fputc('>', out);
-  } else if (rt_kind(v, K_BYTEVECTOR)) {
+  } else if (oti_kind(v, K_BYTEVECTOR)) {
     fputs("#u8(", out);
-    for (size_t i = 0; i < rt_bytes_length(v); i++) {
+    for (size_t i = 0; i < oti_bytes_length(v); i++) {
       if (i) fputc(' ', out);
-      fprintf(out, "%u", rt_bytes_data(v)[i]);
+      fprintf(out, "%u", oti_bytes_data(v)[i]);
     }
     fputc(')', out);
-  } else if (rt_kind(v, K_ARRAY)) {
-    ArrayInfo* info = object_bytes(v);
-    Value* items = info->length ? object_fields(object_fields(v)[0]) : NULL;
+  } else if (oti_kind(v, K_ARRAY)) {
+    oti_array_info* info = object_bytes(v);
+    ot_value* items = info->length ? object_fields(object_fields(v)[0]) : NULL;
     fputc('[', out);
     for (size_t i = 0; i < info->length; i++) {
       if (i) fputc(' ', out);
       print_value(out, items[i], depth + 1);
     }
     fputc(']', out);
-  } else if (rt_kind(v, K_TABLE)) {
-    TableInfo* info = object_bytes(v);
-    Value* entries = info->used ? object_fields(object_fields(v)[0]) : NULL;
+  } else if (oti_kind(v, K_TABLE)) {
+    oti_table_info* info = object_bytes(v);
+    ot_value* entries = info->used ? object_fields(object_fields(v)[0]) : NULL;
     fputc('{', out);
     size_t printed = 0;
     for (size_t i = 0; i < info->used; i++)
-      if (entries[2 * i + 1] != V_NIL) {
+      if (entries[2 * i + 1] != OT_NIL) {
         if (printed++) fputc(' ', out);
         print_value(out, entries[2 * i], depth + 1);
         fputc(' ', out);
         print_value(out, entries[2 * i + 1], depth + 1);
       }
     fputc('}', out);
-  } else if (rt_kind(v, K_PAIR)) {
+  } else if (oti_kind(v, K_PAIR)) {
     fputc('(', out);
     unsigned count = 0;
-    while (rt_kind(v, K_PAIR) && count++ < 1000) {
+    while (oti_kind(v, K_PAIR) && count++ < 1000) {
       if (count > 1) fputc(' ', out);
       print_value(out, object_fields(v)[0], depth + 1);
       v = object_fields(v)[1];
     }
-    if (v != V_EMPTY) {
+    if (v != OT_EMPTY) {
       fputs(" . ", out);
       print_value(out, v, depth + 1);
     }
     fputc(')', out);
-  } else if (rt_kind(v, K_POINTER)) fputs("#<foreign-pointer>", out);
-  else if (rt_kind(v, K_FOREIGN_LAYOUT)) fputs("#<foreign-layout>", out);
-  else if (rt_kind(v, K_FOREIGN_LIBRARY)) fputs("#<foreign-library>", out);
+  } else if (oti_kind(v, K_POINTER)) fputs("#<foreign-pointer>", out);
+  else if (oti_kind(v, K_FOREIGN_LAYOUT)) fputs("#<foreign-layout>", out);
+  else if (oti_kind(v, K_FOREIGN_LIBRARY)) fputs("#<foreign-library>", out);
   else fputs("#<function>", out);
 }
 
-void runtime_print(Runtime* rt, FILE* out, Value value) {
+void ot_print(ot_runtime* rt, FILE* out, ot_value value) {
   (void)rt;
   print_value(out, value, 0);
 }
 
-void runtime_write(Runtime* rt, FILE* out, Value value) {
+void ot_write(ot_runtime* rt, FILE* out, ot_value value) {
   (void)rt;
   print_value(out, value, 1);
 }

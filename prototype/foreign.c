@@ -8,27 +8,27 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct Library Library;
+typedef struct oti_library oti_library;
 
-struct Library {
-  Library* next;
+struct oti_library {
+  oti_library* next;
   void* handle;
 };
 
-typedef struct Binding Binding;
+typedef struct oti_foreign_binding oti_foreign_binding;
 
-struct Binding {
-  Binding* next;
-  Signature* signature;
+struct oti_foreign_binding {
+  oti_foreign_binding* next;
+  oti_signature* signature;
   void* target;
   bool collect_safe, marked;
 };
-typedef struct Callback Callback;
+typedef struct oti_callback oti_callback;
 
-struct Callback {
-  Callback* next;
-  Runtime* runtime;
-  Signature* signature;
+struct oti_callback {
+  oti_callback* next;
+  ot_runtime* runtime;
+  oti_signature* signature;
   ffi_closure* closure;
   void* code;
   pthread_t thread;
@@ -36,80 +36,80 @@ struct Callback {
   bool released, marked;
 };
 
-static _Thread_local Runtime* foreign_runtime;
+static _Thread_local ot_runtime* foreign_runtime;
 
-typedef struct Memory Memory;
+typedef struct oti_memory oti_memory;
 
-struct Memory {
-  Memory* next;
+struct oti_memory {
+  oti_memory* next;
   void* allocation;
   uintptr_t address;
   size_t size;
   bool released, marked, external;
-  Memory* parent;
+  oti_memory* parent;
   size_t root;
 };
 
 typedef struct {
   uintptr_t address;
-  Memory* owner;
+  oti_memory* owner;
   size_t length;
   bool bounded, view, callback_pointer;
-  Callback* callback;
-} Pointer;
+  oti_callback* callback;
+} oti_pointer;
 
 typedef struct {
   size_t argument;
   const char* expected;
-} ForeignError;
+} oti_foreign_error;
 
-struct ForeignState {
-  Library* libraries;
-  Signature* signatures;
-  Binding* bindings;
-  Memory* memory;
+struct oti_foreign_state {
+  oti_library* libraries;
+  oti_signature* signatures;
+  oti_foreign_binding* bindings;
+  oti_memory* memory;
   size_t allocations, bytes;
   uint32_t null_constant;
   char loader_error[512];
-  Callback* callbacks;
-  Value* values;
-  Roots roots;
+  oti_callback* callbacks;
+  ot_value* values;
+  oti_roots roots;
   size_t value_capacity, callback_count, call_depth;
   bool pending_exit, pending_interrupt;
   int pending_status;
-  ForeignError* error_context;
+  oti_foreign_error* error_context;
 };
 
-size_t runtime_foreign_signatures(const Runtime* rt) {
+size_t ot_foreign_signatures(const ot_runtime* rt) {
   size_t count = 0;
-  for (Signature* s = rt->foreign->signatures; s; s = s->next) count++;
+  for (oti_signature* s = rt->foreign->signatures; s; s = s->next) count++;
   return count;
 }
 
-static void argument_context(Runtime* rt, size_t index, const char* expected) {
-  if (rt->foreign->error_context) *rt->foreign->error_context = (ForeignError){index, expected};
+static void argument_context(ot_runtime* rt, size_t index, const char* expected) {
+  if (rt->foreign->error_context) *rt->foreign->error_context = (oti_foreign_error){index, expected};
 }
 
-static Value failure(Runtime* rt, const char* message) {
-  rt_error(rt, message);
+static ot_value failure(ot_runtime* rt, const char* message) {
+  oti_error(rt, message);
   return 0;
 }
 
-static const char* text(Value value, size_t* length) {
+static const char* text(ot_value value, size_t* length) {
   unsigned char* bytes = object_bytes(value);
   memcpy(length, bytes, sizeof(*length));
   return (const char*)bytes + sizeof(*length);
 }
 
-static const char* c_string(Runtime* rt, Value value) {
-  if (!rt_kind(value, K_STRING)) {
-    rt_error(rt, "FFI type: expected string");
+static const char* c_string(ot_runtime* rt, ot_value value) {
+  if (!oti_kind(value, K_STRING)) {
+    oti_error(rt, "FFI type: expected string");
     return NULL;
   }
   size_t length;
   const char* s = text(value, &length);
   if (memchr(s, 0, length)) {
-    rt_error(rt, "FFI encoding: embedded NUL");
+    oti_error(rt, "FFI encoding: embedded NUL");
     return NULL;
   }
   return s;
@@ -145,26 +145,26 @@ static bool utf8(const unsigned char* s, size_t n) {
   return true;
 }
 
-static bool pointer(Runtime* rt, Value value, Pointer* out) {
-  *out = (Pointer){0};
-  if (!rt_kind(value, K_POINTER)) return rt_error(rt, "FFI type: expected pointer");
+static bool pointer(ot_runtime* rt, ot_value value, oti_pointer* out) {
+  *out = (oti_pointer){0};
+  if (!oti_kind(value, K_POINTER)) return oti_error(rt, "FFI type: expected pointer");
   memcpy(out, object_bytes(value), sizeof(*out));
-  if (out->callback && out->callback->released) return rt_error(rt, "FFI released callback");
-  for (Memory* m = out->owner; m; m = m->parent)
-    if (m->released) return rt_error(rt, "FFI released pointer");
+  if (out->callback && out->callback->released) return oti_error(rt, "FFI released callback");
+  for (oti_memory* m = out->owner; m; m = m->parent)
+    if (m->released) return oti_error(rt, "FFI released pointer");
   return true;
 }
 
-static Value pointer_object(Runtime* rt, Pointer p) {
+static ot_value pointer_object(ot_runtime* rt, oti_pointer p) {
   if (!p.address && !p.owner) return rt->constants[rt->foreign->null_constant];
-  Value value = rt_alloc(rt, K_POINTER, 0, sizeof(p));
+  ot_value value = oti_alloc(rt, K_POINTER, 0, sizeof(p));
   if (value) memcpy(object_bytes(value), &p, sizeof(p));
   return value;
 }
 
-static Value wrap_pointer(Runtime* rt, void* address, bool callback_pointer) {
-  Pointer p = {.address = (uintptr_t)address, .callback_pointer = callback_pointer};
-  for (Callback* cb = rt->foreign->callbacks; address && cb; cb = cb->next)
+static ot_value wrap_pointer(ot_runtime* rt, void* address, bool callback_pointer) {
+  oti_pointer p = {.address = (uintptr_t)address, .callback_pointer = callback_pointer};
+  for (oti_callback* cb = rt->foreign->callbacks; address && cb; cb = cb->next)
     if (!cb->released && cb->code == address) {
       p.callback = cb;
       p.callback_pointer = true;
@@ -173,75 +173,75 @@ static Value wrap_pointer(Runtime* rt, void* address, bool callback_pointer) {
   return pointer_object(rt, p);
 }
 
-static Value library_object(Runtime* rt, Library* library, Value name) {
-  Roots roots;
-  roots_push(&rt->heap, &roots, &name, 1);
-  Value value = rt_alloc(rt, K_FOREIGN_LIBRARY, 1, sizeof(library));
+static ot_value library_object(ot_runtime* rt, oti_library* library, ot_value name) {
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, &name, 1);
+  ot_value value = oti_alloc(rt, K_FOREIGN_LIBRARY, 1, sizeof(library));
   if (value) {
     memcpy(object_bytes(value), &library, sizeof(library));
     object_fields(value)[0] = name;
   }
-  roots_pop(&rt->heap, &roots);
+  oti_roots_pop(&rt->heap, &roots);
   return value;
 }
 
-static void* object_data(Value value) {
+static void* object_data(ot_value value) {
   void* data;
   memcpy(&data, object_bytes(value), sizeof(data));
   return data;
 }
 
-RuntimeForeignStats runtime_foreign_stats(const Runtime* rt) {
-  RuntimeForeignStats stats = {0};
-  const ForeignState* state = rt->foreign;
+ot_foreign_stats ot_get_foreign_stats(const ot_runtime* rt) {
+  ot_foreign_stats stats = {0};
+  const oti_foreign_state* state = rt->foreign;
   if (!state) return stats;
-  for (Library* p = state->libraries; p; p = p->next) stats.libraries++;
-  for (Binding* p = state->bindings; p; p = p->next) stats.bindings++;
-  for (Signature* p = state->signatures; p; p = p->next) stats.signatures++;
-  for (Memory* p = state->memory; p; p = p->next) stats.memory_records++;
-  for (Callback* p = state->callbacks; p; p = p->next) stats.callback_records++;
+  for (oti_library* p = state->libraries; p; p = p->next) stats.libraries++;
+  for (oti_foreign_binding* p = state->bindings; p; p = p->next) stats.bindings++;
+  for (oti_signature* p = state->signatures; p; p = p->next) stats.signatures++;
+  for (oti_memory* p = state->memory; p; p = p->next) stats.memory_records++;
+  for (oti_callback* p = state->callbacks; p; p = p->next) stats.callback_records++;
   stats.callbacks = state->callback_count;
   stats.allocations = state->allocations;
   stats.bytes = state->bytes;
   return stats;
 }
 
-void rt_foreign_collect(Runtime* rt) {
-  ForeignState* state = rt->foreign;
+void oti_foreign_collect(ot_runtime* rt) {
+  oti_foreign_state* state = rt->foreign;
   if (!state || (!state->bindings && !state->signatures && !state->memory)) return;
-  for (Binding* p = state->bindings; p; p = p->next) p->marked = false;
-  for (Signature* p = state->signatures; p; p = p->next) p->marked = false;
-  for (Memory* p = state->memory; p; p = p->next) p->marked = false;
-  for (Callback* p = state->callbacks; p; p = p->next) p->marked = false;
+  for (oti_foreign_binding* p = state->bindings; p; p = p->next) p->marked = false;
+  for (oti_signature* p = state->signatures; p; p = p->next) p->marked = false;
+  for (oti_memory* p = state->memory; p; p = p->next) p->marked = false;
+  for (oti_callback* p = state->callbacks; p; p = p->next) p->marked = false;
   unsigned char* space = rt->heap.space[rt->heap.active];
   for (size_t offset = 0; offset < rt->heap.used;) {
-    Value value = (Value)(space + offset);
-    if (rt_kind(value, K_FOREIGN_FUNCTION)) {
-      Binding* binding = object_data(value);
+    ot_value value = (ot_value)(space + offset);
+    if (oti_kind(value, K_FOREIGN_FUNCTION)) {
+      oti_foreign_binding* binding = object_data(value);
       if (binding) {
         binding->marked = true;
         binding->signature->marked = true;
       }
-    } else if (rt_kind(value, K_POINTER)) {
-      Pointer pointer;
+    } else if (oti_kind(value, K_POINTER)) {
+      oti_pointer pointer;
       memcpy(&pointer, object_bytes(value), sizeof(pointer));
       if (pointer.owner) pointer.owner->marked = true;
       if (pointer.callback) pointer.callback->marked = true;
     }
-    offset += ((HeapObject*)value)->size;
+    offset += ((oti_object_header*)value)->size;
   }
-  Callback** callback = &state->callbacks;
+  oti_callback** callback = &state->callbacks;
   while (*callback) {
-    Callback* cb = *callback;
+    oti_callback* cb = *callback;
     if (!cb->released || cb->closure) cb->signature->marked = true;
     if (!cb->marked && cb->released && !cb->closure) {
       *callback = cb->next;
       free(cb);
     } else callback = &cb->next;
   }
-  Binding** binding = &state->bindings;
+  oti_foreign_binding** binding = &state->bindings;
   while (*binding) {
-    Binding* p = *binding;
+    oti_foreign_binding* p = *binding;
     if (p->marked) binding = &p->next;
     else {
       *binding = p->next;
@@ -251,19 +251,19 @@ void rt_foreign_collect(Runtime* rt) {
   /* Keep four recently bound, unused call interfaces to avoid preparing common
      * signatures during reload. Live bindings and in-progress wrappers pin theirs. */
   size_t spare = 0;
-  Signature** signature = &state->signatures;
+  oti_signature** signature = &state->signatures;
   while (*signature) {
-    Signature* p = *signature;
+    oti_signature* p = *signature;
     if (p->marked || p->pending || spare++ < 4) signature = &p->next;
     else {
       *signature = p->next;
-      foreign_free_abi_nodes(p->nodes);
+      oti_foreign_free_abi_nodes(p->nodes);
       free(p);
     }
   }
-  Memory** memory = &state->memory;
+  oti_memory** memory = &state->memory;
   while (*memory) {
-    Memory* p = *memory;
+    oti_memory* p = *memory;
     /* C may retain an allocation after all Otium wrappers disappear. */
     if (p->marked || !p->released) memory = &p->next;
     else {
@@ -273,55 +273,55 @@ void rt_foreign_collect(Runtime* rt) {
   }
 }
 
-bool rt_foreign_init(Runtime* rt) {
+bool oti_foreign_init(ot_runtime* rt) {
   rt->foreign = calloc(1, sizeof(*rt->foreign));
-  if (!rt->foreign) return rt_error(rt, "FFI allocation: out of host memory");
-  roots_push(&rt->heap, &rt->foreign->roots, NULL, 0);
-  if (!rt_grow(rt, (void**)&rt->foreign->values, &rt->foreign->value_capacity, 1, sizeof(Value)))
+  if (!rt->foreign) return oti_error(rt, "FFI allocation: out of host memory");
+  oti_roots_push(&rt->heap, &rt->foreign->roots, NULL, 0);
+  if (!oti_grow(rt, (void**)&rt->foreign->values, &rt->foreign->value_capacity, 1, sizeof(ot_value)))
     return false;
-  rt->foreign->values[0] = V_NIL;
+  rt->foreign->values[0] = OT_NIL;
   rt->foreign->roots.slots = rt->foreign->values;
   rt->foreign->roots.count = 1;
-  Value null = rt_alloc(rt, K_POINTER, 0, sizeof(Pointer));
+  ot_value null = oti_alloc(rt, K_POINTER, 0, sizeof(oti_pointer));
   if (!null) return false;
-  uint32_t index = rt_constant(rt, null);
+  uint32_t index = oti_constant(rt, null);
   if (index == UINT32_MAX) return false;
   rt->foreign->null_constant = index;
-  uint32_t global = rt_resolve_global(rt, "ffi/null", 8);
+  uint32_t global = oti_resolve_global(rt, "ffi/null", 8);
   if (global == UINT32_MAX) return false;
   rt->globals[global] = rt->constants[index];
   return true;
 }
 
-void rt_foreign_destroy(Runtime* rt) {
-  ForeignState* state = rt->foreign;
+void oti_foreign_destroy(ot_runtime* rt) {
+  oti_foreign_state* state = rt->foreign;
   if (!state) return;
   while (state->callbacks) {
-    Callback* next = state->callbacks->next;
+    oti_callback* next = state->callbacks->next;
     if (state->callbacks->closure) ffi_closure_free(state->callbacks->closure);
     free(state->callbacks);
     state->callbacks = next;
   }
   free(state->values);
   while (state->bindings) {
-    Binding* next = state->bindings->next;
+    oti_foreign_binding* next = state->bindings->next;
     free(state->bindings);
     state->bindings = next;
   }
   while (state->signatures) {
-    Signature* next = state->signatures->next;
-    foreign_free_abi_nodes(state->signatures->nodes);
+    oti_signature* next = state->signatures->next;
+    oti_foreign_free_abi_nodes(state->signatures->nodes);
     free(state->signatures);
     state->signatures = next;
   }
   while (state->libraries) {
-    Library* next = state->libraries->next;
+    oti_library* next = state->libraries->next;
     dlclose(state->libraries->handle);
     free(state->libraries);
     state->libraries = next;
   }
   while (state->memory) {
-    Memory* next = state->memory->next;
+    oti_memory* next = state->memory->next;
     free(state->memory->allocation);
     free(state->memory);
     state->memory = next;
@@ -330,27 +330,27 @@ void rt_foreign_destroy(Runtime* rt) {
   rt->foreign = NULL;
 }
 
-static Value open_library(Runtime* rt, Value names) {
+static ot_value open_library(ot_runtime* rt, ot_value names) {
   size_t count;
-  if (!foreign_list_length(rt, names, 1024, &count)) return 0;
+  if (!oti_foreign_list_length(rt, names, 1024, &count)) return 0;
   if (!count) return failure(rt, "FFI load: expected nonempty library list");
-  for (Value p = names; p != V_EMPTY; p = object_fields(p)[1]) {
+  for (ot_value p = names; p != OT_EMPTY; p = object_fields(p)[1]) {
     const char* name = c_string(rt, object_fields(p)[0]);
     if (!name) return 0;
     void* handle = dlopen(name, RTLD_NOW | RTLD_LOCAL);
     if (!handle) continue;
-    for (Library* existing = rt->foreign->libraries; existing; existing = existing->next) {
+    for (oti_library* existing = rt->foreign->libraries; existing; existing = existing->next) {
       if (existing->handle != handle) continue;
       dlclose(handle);
       return library_object(rt, existing, object_fields(p)[0]);
     }
-    Library* library = calloc(1, sizeof(*library));
+    oti_library* library = calloc(1, sizeof(*library));
     if (!library) {
       dlclose(handle);
       return failure(rt, "FFI allocation: out of host memory");
     }
     library->handle = handle;
-    Value v = library_object(rt, library, object_fields(p)[0]);
+    ot_value v = library_object(rt, library, object_fields(p)[0]);
     if (!v) {
       dlclose(handle);
       free(library);
@@ -363,36 +363,36 @@ static Value open_library(Runtime* rt, Value names) {
   return failure(rt, "FFI load: could not open a candidate library");
 }
 
-static void memory_scalar(unsigned type, void* address, ForeignSlot* value, bool write);
+static void memory_scalar(unsigned type, void* address, oti_foreign_slot* value, bool write);
 
-static Value layout_copy(Runtime* rt, Value value, unsigned depth, size_t* budget);
+static ot_value layout_copy(ot_runtime* rt, ot_value value, unsigned depth, size_t* budget);
 
-static Value bind_function(Runtime* rt, size_t first, bool codes) {
-  Value* args = rt->stack + first;
-  if (!rt_kind(args[0], K_FOREIGN_LIBRARY)) return failure(rt, "FFI type: expected library");
+static ot_value bind_function(ot_runtime* rt, size_t first, bool codes) {
+  ot_value* args = rt->stack + first;
+  if (!oti_kind(args[0], K_FOREIGN_LIBRARY)) return failure(rt, "FFI type: expected library");
   const char* name = c_string(rt, args[1]);
   if (!name) return 0;
-  if (args[4] != V_TRUE && args[4] != V_FALSE)
+  if (args[4] != OT_TRUE && args[4] != OT_FALSE)
     return failure(rt, "FFI type: expected collection safety boolean");
-  Library* library = object_data(args[0]);
+  oti_library* library = object_data(args[0]);
   dlerror();
   void* target = dlsym(library->handle, name);
   if (dlerror() || !target) return failure(rt, "FFI symbol: symbol not found");
-  Signature* s = foreign_signature(rt, &rt->foreign->signatures, args[2], args[3], codes);
+  oti_signature* s = oti_foreign_signature(rt, &rt->foreign->signatures, args[2], args[3], codes);
   if (!s) return 0;
-  Binding* b = malloc(sizeof(*b));
+  oti_foreign_binding* b = malloc(sizeof(*b));
   if (!b) return failure(rt, "FFI allocation: out of host memory");
-  *b = (Binding){rt->foreign->bindings, s, target, args[4] == V_TRUE, false};
+  *b = (oti_foreign_binding){rt->foreign->bindings, s, target, args[4] == OT_TRUE, false};
   /* Wrapper construction allocates; keep its host signature alive until publication. */
   s->pending = true;
-  Value live[] = {V_NIL, V_NIL};
-  Roots roots;
-  roots_push(&rt->heap, &roots, live, 2);
+  ot_value live[] = {OT_NIL, OT_NIL};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, live, 2);
   size_t budget = 65536;
   live[0] = layout_copy(rt, rt->stack[first + 2], 0, &budget);
   budget = 65536;
   if (live[0]) live[1] = layout_copy(rt, rt->stack[first + 3], 0, &budget);
-  Value value = live[0] && live[1] ? rt_alloc(rt, K_FOREIGN_FUNCTION, 4, sizeof(b)) : 0;
+  ot_value value = live[0] && live[1] ? oti_alloc(rt, K_FOREIGN_FUNCTION, 4, sizeof(b)) : 0;
   if (value) {
     memcpy(object_bytes(value), &b, sizeof(b));
     object_fields(value)[0] = rt->stack[first];
@@ -400,7 +400,7 @@ static Value bind_function(Runtime* rt, size_t first, bool codes) {
     object_fields(value)[2] = live[0];
     object_fields(value)[3] = live[1];
   }
-  roots_pop(&rt->heap, &roots);
+  oti_roots_pop(&rt->heap, &roots);
   s->pending = false;
   if (!value) {
     free(b);
@@ -412,18 +412,18 @@ static Value bind_function(Runtime* rt, size_t first, bool codes) {
   return value;
 }
 
-static bool to_foreign(Runtime* rt, const Scalar* type, Value value, ForeignSlot* slot) {
+static bool to_foreign(ot_runtime* rt, const oti_scalar* type, ot_value value, oti_foreign_slot* slot) {
   switch (type->kind) {
     case T_BOOL:
-      if (value != V_TRUE && value != V_FALSE) return rt_error(rt, "FFI type: expected boolean");
-      slot->boolean = value == V_TRUE;
+      if (value != OT_TRUE && value != OT_FALSE) return oti_error(rt, "FFI type: expected boolean");
+      slot->boolean = value == OT_TRUE;
       return true;
     case T_SIGNED:
     case T_UNSIGNED: {
-      if (!value_is_int(value)) return rt_error(rt, "FFI type: expected exact integer");
-      int64_t n = value_to_int(value);
+      if (!ot_is_int(value)) return oti_error(rt, "FFI type: expected exact integer");
+      int64_t n = ot_to_int(value);
       if (n < type->minimum || (n >= 0 && (uint64_t)n > type->maximum))
-        return rt_error(rt, "FFI range: integer argument out of range");
+        return oti_error(rt, "FFI range: integer argument out of range");
       if (type->kind == T_SIGNED) slot->signed_integer = n;
       else slot->unsigned_integer = (uint64_t)n;
       return true;
@@ -431,45 +431,45 @@ static bool to_foreign(Runtime* rt, const Scalar* type, Value value, ForeignSlot
     case T_FLOAT:
     case T_DOUBLE: {
       double d;
-      if (value_is_int(value)) d = (double)value_to_int(value);
-      else if (rt_kind(value, K_FLOAT)) memcpy(&d, object_bytes(value), sizeof(d));
-      else return rt_error(rt, "FFI type: expected number");
+      if (ot_is_int(value)) d = (double)ot_to_int(value);
+      else if (oti_kind(value, K_FLOAT)) memcpy(&d, object_bytes(value), sizeof(d));
+      else return oti_error(rt, "FFI type: expected number");
       if (type->kind == T_FLOAT) {
         if (isfinite(d) && fabs(d) > FLT_MAX)
-          return rt_error(rt, "FFI range: float argument out of range");
+          return oti_error(rt, "FFI range: float argument out of range");
         slot->single = (float)d;
       } else slot->real = d;
       return true;
     }
     case T_POINTER:
     case T_CALLBACK: {
-      Pointer p;
+      oti_pointer p;
       if (!pointer(rt, value, &p)) return false;
       if (type->kind == T_CALLBACK) {
         if (p.address && !p.callback_pointer)
-          return rt_error(rt, "FFI type: expected callback pointer");
+          return oti_error(rt, "FFI type: expected callback pointer");
         memcpy(&slot->callback, &p.address, sizeof(slot->callback));
       } else slot->pointer = (void*)p.address;
       return true;
     }
-    default: return rt_error(rt, "FFI type: unsupported conversion");
+    default: return oti_error(rt, "FFI type: unsupported conversion");
   }
 }
 
-static Value from_foreign(Runtime* rt, const Scalar* type, ForeignSlot value) {
+static ot_value from_foreign(ot_runtime* rt, const oti_scalar* type, oti_foreign_slot value) {
   switch (type->kind) {
-    case T_VOID: return V_FALSE;
-    case T_BOOL: return value.boolean ? V_TRUE : V_FALSE;
+    case T_VOID: return OT_FALSE;
+    case T_BOOL: return value.boolean ? OT_TRUE : OT_FALSE;
     case T_SIGNED:
       if (value.signed_integer < INTPTR_MIN / 2 || value.signed_integer > INTPTR_MAX / 2)
         return failure(rt, "FFI range: result exceeds integer range");
-      return value_int((intptr_t)value.signed_integer);
+      return ot_int((intptr_t)value.signed_integer);
     case T_UNSIGNED:
       if (value.unsigned_integer > (uint64_t)(INTPTR_MAX / 2))
         return failure(rt, "FFI range: result exceeds integer range");
-      return value_int((intptr_t)value.unsigned_integer);
-    case T_FLOAT: return rt_float(rt, value.single);
-    case T_DOUBLE: return rt_float(rt, value.real);
+      return ot_int((intptr_t)value.unsigned_integer);
+    case T_FLOAT: return oti_float(rt, value.single);
+    case T_DOUBLE: return oti_float(rt, value.real);
     case T_CALLBACK: {
       void* address;
       memcpy(&address, &value.callback, sizeof(address));
@@ -480,49 +480,49 @@ static Value from_foreign(Runtime* rt, const Scalar* type, ForeignSlot value) {
       if (!value.pointer) return rt->constants[rt->foreign->null_constant];
       size_t n = strlen(value.pointer);
       if (!utf8(value.pointer, n)) return failure(rt, "FFI encoding: invalid UTF-8 result");
-      return rt_text(rt, K_STRING, value.pointer, n);
+      return oti_text(rt, K_STRING, value.pointer, n);
     }
   }
   return 0;
 }
 
-static Value foreign_result(Runtime* rt, Value result, const char* op);
+static ot_value foreign_result(ot_runtime* rt, ot_value result, const char* op);
 
-static void clear_callback_error(Runtime* rt) {
+static void clear_callback_error(ot_runtime* rt) {
   rt->error[0] = 0;
   rt->error_code = NULL;
   rt->raised = rt->signaled = rt->exit_pending = rt->interrupted = rt->restart_pending = false;
-  rt->condition_values[0] = V_NIL;
-  rt->restart_transfer[0] = rt->restart_transfer[1] = V_NIL;
+  rt->condition_values[0] = OT_NIL;
+  rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
 }
 
 static void callback_entry(ffi_cif* cif, void* result, void** arguments, void* context) {
-  Callback* cb = context;
+  oti_callback* cb = context;
   if (!pthread_equal(cb->thread, pthread_self())) {
     fputs("FFI callback on a thread other than the Otium thread\n", stderr);
     abort();
   }
-  Runtime* rt = cb->runtime;
+  ot_runtime* rt = cb->runtime;
   if (foreign_runtime != rt || !rt->foreign->call_depth) {
     fputs("FFI callback outside an Otium foreign call\n", stderr);
     abort();
   }
-  Signature* sig = cb->signature;
+  oti_signature* sig = cb->signature;
   if (sig->result)
     memset(result, 0, cif->rtype->size < sizeof(ffi_arg) ? sizeof(ffi_arg) : cif->rtype->size);
-  Value live[] = {V_EMPTY, V_NIL, V_NIL};
-  Roots roots;
-  roots_push(&rt->heap, &roots, live, 3);
+  ot_value live[] = {OT_EMPTY, OT_NIL, OT_NIL};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, live, 3);
   bool ok = true;
   for (size_t i = sig->count; ok && i; i--) {
-    ForeignSlot value = {0};
+    oti_foreign_slot value = {0};
     memory_scalar(sig->arguments[i - 1], arguments[i - 1], &value, false);
-    live[1] = from_foreign(rt, &foreign_scalars[sig->arguments[i - 1]], value);
+    live[1] = from_foreign(rt, &oti_foreign_scalars[sig->arguments[i - 1]], value);
     if (!live[1]) {
       ok = false;
       break;
     }
-    Value pair = rt_alloc(rt, K_PAIR, 2, 0);
+    ot_value pair = oti_alloc(rt, K_PAIR, 2, 0);
     if (!pair) {
       ok = false;
       break;
@@ -532,12 +532,12 @@ static void callback_entry(ffi_cif* cif, void* result, void** arguments, void* c
     live[0] = pair;
   }
   if (ok) {
-    live[2] = rt_call_list(rt, rt->foreign->values[cb->root], live[0]);
+    live[2] = oti_call_list(rt, rt->foreign->values[cb->root], live[0]);
     ok = live[2] != 0;
   }
   if (ok && sig->result) {
-    ForeignSlot converted = {0};
-    const Scalar* type = &foreign_scalars[sig->result];
+    oti_foreign_slot converted = {0};
+    const oti_scalar* type = &oti_foreign_scalars[sig->result];
     ok = to_foreign(rt, type, live[2], &converted);
     if (ok) {
       if (type->kind == T_SIGNED && type->size < sizeof(ffi_arg))
@@ -551,36 +551,36 @@ static void callback_entry(ffi_cif* cif, void* result, void** arguments, void* c
   if (!ok) {
     if (rt->restart_pending) {
       clear_callback_error(rt);
-      rt_ffi_error(rt, "callback", "escape", "restart escapes a foreign callback");
+      oti_ffi_error(rt, "callback", "escape", "restart escapes a foreign callback");
     } else foreign_result(rt, 0, "callback");
-    if (!rt->exit_pending && !rt->interrupted && !rt->signaled) rt_signal_error(rt);
+    if (!rt->exit_pending && !rt->interrupted && !rt->signaled) oti_signal_error(rt);
     if (rt->restart_pending) {
       clear_callback_error(rt);
-      rt_ffi_error(rt, "callback", "escape", "handler restart escapes a foreign callback");
+      oti_ffi_error(rt, "callback", "escape", "handler restart escapes a foreign callback");
       rt->signaled = true;
     }
-    ForeignState* state = rt->foreign;
-    if (state->values[0] == V_NIL && !state->pending_exit && !state->pending_interrupt) {
+    oti_foreign_state* state = rt->foreign;
+    if (state->values[0] == OT_NIL && !state->pending_exit && !state->pending_interrupt) {
       if (rt->exit_pending) {
         state->pending_exit = true;
         state->pending_status = rt->exit_status;
       } else if (rt->interrupted) state->pending_interrupt = true;
-      else state->values[0] = rt_error_condition(rt);
+      else state->values[0] = oti_error_condition(rt);
     }
     clear_callback_error(rt);
   }
-  roots_pop(&rt->heap, &roots);
+  oti_roots_pop(&rt->heap, &roots);
 }
 
-static Value callback_builtin(Runtime* rt, unsigned id, size_t first, size_t count) {
-  ForeignState* state = rt->foreign;
+static ot_value callback_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+  oti_foreign_state* state = rt->foreign;
   size_t wanted = id == B_FFI_CALLBACK ? 3 : id == B_FFI_CALLBACK_COUNT ? 0 : 1;
   if (count != wanted) return failure(rt, "FFI arity: wrong number of callback arguments");
-  if (id == B_FFI_CALLBACK_COUNT) return value_int((intptr_t)state->callback_count);
+  if (id == B_FFI_CALLBACK_COUNT) return ot_int((intptr_t)state->callback_count);
   if (id == B_FFI_FREE_CALLBACK) {
     argument_context(rt, 0, "callback-pointer");
-    if (!rt_kind(rt->stack[first], K_POINTER)) return failure(rt, "FFI type: expected callback");
-    Pointer p;
+    if (!oti_kind(rt->stack[first], K_POINTER)) return failure(rt, "FFI type: expected callback");
+    oti_pointer p;
     memcpy(&p, object_bytes(rt->stack[first]), sizeof(p));
     if (!p.callback || p.view) return failure(rt, "FFI type: expected callback");
     if (!p.callback->released) {
@@ -589,28 +589,28 @@ static Value callback_builtin(Runtime* rt, unsigned id, size_t first, size_t cou
         ffi_closure_free(p.callback->closure);
         p.callback->closure = NULL;
       }
-      state->values[p.callback->root] = V_NIL;
+      state->values[p.callback->root] = OT_NIL;
       state->callback_count--;
     }
-    return V_FALSE;
+    return OT_FALSE;
   }
   argument_context(rt, 2, NULL);
-  if (rt_support_builtin(rt, B_PROCEDURE_P, first + 2, 1) != V_TRUE)
+  if (oti_support_builtin(rt, B_PROCEDURE_P, first + 2, 1) != OT_TRUE)
     return failure(rt, "FFI type: expected callback procedure");
-  Signature* sig =
-      foreign_signature(rt, &state->signatures, rt->stack[first], rt->stack[first + 1], true);
+  oti_signature* sig =
+      oti_foreign_signature(rt, &state->signatures, rt->stack[first], rt->stack[first + 1], true);
   if (!sig) return 0;
   if (sig->result >= 22) return failure(rt, "FFI signature: invalid callback result");
   for (size_t i = 0; i < sig->count; i++)
     if (!sig->arguments[i] || sig->arguments[i] >= 22)
       return failure(rt, "FFI signature: invalid callback argument");
   size_t slot = 1;
-  while (slot < state->roots.count && state->values[slot] != V_NIL) slot++;
-  if (!rt_grow(rt, (void**)&state->values, &state->value_capacity, slot + 1, sizeof(Value)))
+  while (slot < state->roots.count && state->values[slot] != OT_NIL) slot++;
+  if (!oti_grow(rt, (void**)&state->values, &state->value_capacity, slot + 1, sizeof(ot_value)))
     return 0;
   state->roots.slots = state->values;
-  if (slot == state->roots.count) state->values[state->roots.count++] = V_NIL;
-  Callback* cb = calloc(1, sizeof(*cb));
+  if (slot == state->roots.count) state->values[state->roots.count++] = OT_NIL;
+  oti_callback* cb = calloc(1, sizeof(*cb));
   if (!cb) return failure(rt, "FFI allocation: out of host memory");
   cb->runtime = rt;
   cb->signature = sig;
@@ -624,8 +624,8 @@ static Value callback_builtin(Runtime* rt, unsigned id, size_t first, size_t cou
     return failure(rt, "FFI abi: cannot prepare callback closure");
   }
   sig->pending = true;
-  Value value = pointer_object(
-      rt, (Pointer){.address = (uintptr_t)cb->code, .callback_pointer = true, .callback = cb});
+  ot_value value = pointer_object(
+      rt, (oti_pointer){.address = (uintptr_t)cb->code, .callback_pointer = true, .callback = cb});
   sig->pending = false;
   if (!value) {
     ffi_closure_free(cb->closure);
@@ -639,15 +639,15 @@ static Value callback_builtin(Runtime* rt, unsigned id, size_t first, size_t cou
   return value;
 }
 
-static Value allocate_memory(Runtime* rt, size_t size, const void* initial);
-static bool access_memory(Runtime* rt, Pointer p, size_t offset, size_t bytes, size_t alignment);
+static ot_value allocate_memory(ot_runtime* rt, size_t size, const void* initial);
+static bool access_memory(ot_runtime* rt, oti_pointer p, size_t offset, size_t bytes, size_t alignment);
 
-static Value foreign_call(Runtime* rt, size_t callable, size_t first, size_t count,
+static ot_value foreign_call(ot_runtime* rt, size_t callable, size_t first, size_t count,
                           size_t* failed_argument, unsigned* expected_type) {
-  Binding* binding = object_data(rt->stack[callable]);
-  Signature* s = binding->signature;
+  oti_foreign_binding* binding = object_data(rt->stack[callable]);
+  oti_signature* s = binding->signature;
   if (count != s->count) return failure(rt, "FFI arity: wrong number of arguments");
-  ForeignSlot args[MAX_ARGUMENTS], result = {0};
+  oti_foreign_slot args[MAX_ARGUMENTS], result = {0};
   char* copies[MAX_ARGUMENTS];
   size_t lengths[MAX_ARGUMENTS];
   for (size_t i = 0; i < count; i++) copies[i] = NULL;
@@ -655,9 +655,9 @@ static Value foreign_call(Runtime* rt, size_t callable, size_t first, size_t cou
   for (size_t i = 0; i < count; i++) {
     *failed_argument = i;
     *expected_type = s->arguments[i];
-    Value value = rt->stack[first + i];
+    ot_value value = rt->stack[first + i];
     if (s->arguments[i] == AGGREGATE) {
-      Pointer p;
+      oti_pointer p;
       ffi_type* type = s->argument_types[i];
       if (!pointer(rt, value, &p) || !access_memory(rt, p, 0, type->size, type->alignment)) {
         ok = false;
@@ -666,22 +666,22 @@ static Value foreign_call(Runtime* rt, size_t callable, size_t first, size_t cou
       copies[i] = malloc(type->size);
       lengths[i] = type->size;
       if (!copies[i]) {
-        ok = rt_error(rt, "FFI allocation: out of host memory");
+        ok = oti_error(rt, "FFI allocation: out of host memory");
         break;
       }
       memcpy(copies[i], (void*)p.address, type->size);
       continue;
     }
-    const Scalar* type = &foreign_scalars[s->arguments[i]];
+    const oti_scalar* type = &oti_foreign_scalars[s->arguments[i]];
     if (type->kind == T_UTF8) {
-      if (rt_kind(value, K_POINTER)) {
-        Pointer p;
+      if (oti_kind(value, K_POINTER)) {
+        oti_pointer p;
         if (!pointer(rt, value, &p)) {
           ok = false;
           break;
         }
         if (p.address) {
-          ok = rt_error(rt, "FFI type: utf8 needs string or null pointer");
+          ok = oti_error(rt, "FFI type: utf8 needs string or null pointer");
           break;
         }
         args[i].pointer = NULL;
@@ -696,7 +696,7 @@ static Value foreign_call(Runtime* rt, size_t callable, size_t first, size_t cou
         copies[i] = malloc(n + 1);
         lengths[i] = n + 1;
         if (!copies[i]) {
-          ok = rt_error(rt, "FFI allocation: out of host memory");
+          ok = oti_error(rt, "FFI allocation: out of host memory");
           break;
         }
         memcpy(copies[i], str, n + 1);
@@ -711,14 +711,14 @@ static Value foreign_call(Runtime* rt, size_t callable, size_t first, size_t cou
     *failed_argument = SIZE_MAX;
     *expected_type = UINT_MAX;
   }
-  Value value = 0, aggregate_result = V_NIL;
-  Roots result_roots;
-  roots_push(&rt->heap, &result_roots, &aggregate_result, 1);
+  ot_value value = 0, aggregate_result = OT_NIL;
+  oti_roots result_roots;
+  oti_roots_push(&rt->heap, &result_roots, &aggregate_result, 1);
   void* aggregate_bytes = NULL;
   if (ok && s->result == AGGREGATE) {
     size_t bytes = s->result_type->size;
     aggregate_bytes = calloc(1, bytes < sizeof(ffi_arg) ? sizeof(ffi_arg) : bytes);
-    if (!aggregate_bytes) ok = rt_error(rt, "FFI allocation: out of host memory");
+    if (!aggregate_bytes) ok = oti_error(rt, "FFI allocation: out of host memory");
     else {
       aggregate_result = allocate_memory(rt, bytes, NULL);
       ok = aggregate_result != 0;
@@ -727,7 +727,7 @@ static Value foreign_call(Runtime* rt, size_t callable, size_t first, size_t cou
   if (ok) {
     /* Native temporaries remain stable while callbacks allocate in the VM. */
     union {
-      ForeignSlot slot;
+      oti_foreign_slot slot;
       ffi_arg word;
       ffi_sarg signed_word;
     } storage[MAX_ARGUMENTS], returned = {0};
@@ -740,7 +740,7 @@ static Value foreign_call(Runtime* rt, size_t callable, size_t first, size_t cou
         addresses[i] = &storage[i];
       }
     }
-    Runtime* previous_runtime = foreign_runtime;
+    ot_runtime* previous_runtime = foreign_runtime;
     foreign_runtime = rt;
     rt->foreign->call_depth++;
     ffi_call(&s->cif, FFI_FN(binding->target), aggregate_bytes ? aggregate_bytes : &returned,
@@ -748,43 +748,43 @@ static Value foreign_call(Runtime* rt, size_t callable, size_t first, size_t cou
     rt->foreign->call_depth--;
     foreign_runtime = previous_runtime;
     if (!rt->foreign->call_depth)
-      for (Callback* cb = rt->foreign->callbacks; cb; cb = cb->next)
+      for (oti_callback* cb = rt->foreign->callbacks; cb; cb = cb->next)
         if (cb->released && cb->closure) {
           ffi_closure_free(cb->closure);
           cb->closure = NULL;
         }
     if (s->result == AGGREGATE) {
-      Pointer p;
+      oti_pointer p;
       memcpy(&p, object_bytes(aggregate_result), sizeof(p));
       memcpy((void*)p.address, aggregate_bytes, s->result_type->size);
       value = aggregate_result;
     } else {
-      const Scalar* type = &foreign_scalars[s->result];
+      const oti_scalar* type = &oti_foreign_scalars[s->result];
       if (type->kind == T_SIGNED && type->size < sizeof(ffi_arg))
         result.signed_integer = returned.signed_word;
       else if (type->kind == T_UNSIGNED && type->size < sizeof(ffi_arg))
         result.unsigned_integer = returned.word;
       else if (type->kind == T_BOOL) result.boolean = returned.word != 0;
       else memory_scalar(s->result, &returned, &result, false);
-      if (foreign_scalars[s->result].kind == T_POINTER && result.pointer)
+      if (oti_foreign_scalars[s->result].kind == T_POINTER && result.pointer)
         for (size_t i = 0; i < count; i++) {
           uintptr_t address = (uintptr_t)result.pointer, begin = (uintptr_t)copies[i];
           if (copies[i] && address >= begin && address - begin <= lengths[i]) {
-            ok = rt_error(rt, "FFI type: pointer escapes temporary UTF-8 argument");
+            ok = oti_error(rt, "FFI type: pointer escapes temporary UTF-8 argument");
             break;
           }
         }
       if (ok) {
         *expected_type = s->result;
-        value = from_foreign(rt, &foreign_scalars[s->result], result);
+        value = from_foreign(rt, &oti_foreign_scalars[s->result], result);
       }
     }
   }
-  ForeignState* state = rt->foreign;
+  oti_foreign_state* state = rt->foreign;
   if (!state->call_depth &&
-      (state->values[0] != V_NIL || state->pending_exit || state->pending_interrupt)) {
-    if (aggregate_result != V_NIL && aggregate_result) {
-      Pointer p;
+      (state->values[0] != OT_NIL || state->pending_exit || state->pending_interrupt)) {
+    if (aggregate_result != OT_NIL && aggregate_result) {
+      oti_pointer p;
       memcpy(&p, object_bytes(aggregate_result), sizeof(p));
       free(p.owner->allocation);
       p.owner->allocation = NULL;
@@ -794,41 +794,41 @@ static Value foreign_call(Runtime* rt, size_t callable, size_t first, size_t cou
     }
     clear_callback_error(rt);
     if (state->pending_exit) {
-      rt_error(rt, "exit requested");
+      oti_error(rt, "exit requested");
       rt->exit_pending = true;
       rt->exit_status = state->pending_status;
     } else if (state->pending_interrupt) {
-      rt_error(rt, "interrupted");
+      oti_error(rt, "interrupted");
       rt->interrupted = true;
     } else {
-      rt_error(rt, "uncaught callback condition");
+      oti_error(rt, "uncaught callback condition");
       rt->condition_values[0] = state->values[0];
       rt->raised = rt->signaled = true;
     }
-    state->values[0] = V_NIL;
+    state->values[0] = OT_NIL;
     state->pending_exit = state->pending_interrupt = false;
     value = 0;
   }
-  roots_pop(&rt->heap, &result_roots);
+  oti_roots_pop(&rt->heap, &result_roots);
   free(aggregate_bytes);
   for (size_t i = 0; i < count; i++) free(copies[i]);
   return value;
 }
 
-static bool nonnegative(Runtime* rt, Value value, size_t* out) {
+static bool nonnegative(ot_runtime* rt, ot_value value, size_t* out) {
   *out = 0;
-  if (!value_is_int(value)) return rt_error(rt, "FFI type: expected exact integer");
-  intptr_t n = value_to_int(value);
-  if (n < 0) return rt_error(rt, "FFI range: expected nonnegative integer");
+  if (!ot_is_int(value)) return oti_error(rt, "FFI type: expected exact integer");
+  intptr_t n = ot_to_int(value);
+  if (n < 0) return oti_error(rt, "FFI range: expected nonnegative integer");
   *out = (size_t)n;
   return true;
 }
 
-static Value allocate_memory(Runtime* rt, size_t size, const void* initial) {
-  ForeignState* state = rt->foreign;
+static ot_value allocate_memory(ot_runtime* rt, size_t size, const void* initial) {
+  oti_foreign_state* state = rt->foreign;
   if (size > (size_t)(INTPTR_MAX / 2) - state->bytes)
     return failure(rt, "FFI range: allocation size overflow");
-  Memory* m = calloc(1, sizeof(*m));
+  oti_memory* m = calloc(1, sizeof(*m));
   if (!m) return failure(rt, "FFI allocation: out of host memory");
   m->allocation = calloc(1, size ? size : 1);
   if (!m->allocation) {
@@ -838,8 +838,8 @@ static Value allocate_memory(Runtime* rt, size_t size, const void* initial) {
   if (initial && size) memcpy(m->allocation, initial, size);
   m->address = (uintptr_t)m->allocation;
   m->size = size;
-  Value p = pointer_object(
-      rt, (Pointer){.address = m->address, .owner = m, .length = size, .bounded = true});
+  ot_value p = pointer_object(
+      rt, (oti_pointer){.address = m->address, .owner = m, .length = size, .bounded = true});
   if (!p) {
     free(m->allocation);
     free(m);
@@ -852,12 +852,12 @@ static Value allocate_memory(Runtime* rt, size_t size, const void* initial) {
   return p;
 }
 
-static bool access_memory(Runtime* rt, Pointer p, size_t offset, size_t bytes, size_t alignment) {
-  if (!p.address) return rt_error(rt, "FFI null pointer");
+static bool access_memory(ot_runtime* rt, oti_pointer p, size_t offset, size_t bytes, size_t alignment) {
+  if (!p.address) return oti_error(rt, "FFI null pointer");
   if ((p.bounded && (offset > p.length || bytes > p.length - offset)) ||
       offset > UINTPTR_MAX - p.address || bytes > UINTPTR_MAX - (p.address + offset))
-    return rt_error(rt, "FFI bounds: memory access out of bounds");
-  if ((p.address + offset) % alignment) return rt_error(rt, "FFI alignment: unaligned access");
+    return oti_error(rt, "FFI bounds: memory access out of bounds");
+  if ((p.address + offset) % alignment) return oti_error(rt, "FFI alignment: unaligned access");
   return true;
 }
 
@@ -876,7 +876,7 @@ static bool access_memory(Runtime* rt, Pointer p, size_t offset, size_t bytes, s
     break;                                                                                         \
   }
 
-static void memory_scalar(unsigned type, void* address, ForeignSlot* value, bool write) {
+static void memory_scalar(unsigned type, void* address, oti_foreign_slot* value, bool write) {
   switch (type) {
     case 1:
       if (write) memcpy(address, &value->boolean, sizeof(bool));
@@ -901,52 +901,52 @@ static void memory_scalar(unsigned type, void* address, ForeignSlot* value, bool
       MEMORY_CASE(18, float, single)
       MEMORY_CASE(19, double, real)
       MEMORY_CASE(20, void*, pointer)
-      MEMORY_CASE(21, ForeignCallback, callback) MEMORY_CASE(22, void*, pointer)
+      MEMORY_CASE(21, oti_foreign_callback, callback) MEMORY_CASE(22, void*, pointer)
   }
 }
 
 #undef MEMORY_CASE
 
 /* Descriptions are private snapshots; callers only receive detached trees. */
-static Value layout_copy(Runtime* rt, Value value, unsigned depth, size_t* budget) {
+static ot_value layout_copy(ot_runtime* rt, ot_value value, unsigned depth, size_t* budget) {
   if (!*budget || depth > 256)
     return failure(rt, "FFI type: layout description too deep or cyclic");
   --*budget;
-  if (value == V_EMPTY || value_is_int(value) || rt_kind(value, K_SYMBOL)) return value;
-  if (!rt_kind(value, K_PAIR)) return failure(rt, "FFI type: invalid layout description");
-  Value live[] = {value, V_NIL, V_NIL};
-  Roots roots;
-  roots_push(&rt->heap, &roots, live, 3);
+  if (value == OT_EMPTY || ot_is_int(value) || oti_kind(value, K_SYMBOL)) return value;
+  if (!oti_kind(value, K_PAIR)) return failure(rt, "FFI type: invalid layout description");
+  ot_value live[] = {value, OT_NIL, OT_NIL};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, live, 3);
   live[1] = layout_copy(rt, object_fields(live[0])[0], depth + 1, budget);
   if (live[1]) live[2] = layout_copy(rt, object_fields(live[0])[1], depth + 1, budget);
-  Value result = 0;
+  ot_value result = 0;
   if (live[1] && live[2]) {
-    result = rt_alloc(rt, K_PAIR, 2, 0);
+    result = oti_alloc(rt, K_PAIR, 2, 0);
     if (result) {
       object_fields(result)[0] = live[1];
       object_fields(result)[1] = live[2];
     }
   }
-  roots_pop(&rt->heap, &roots);
+  oti_roots_pop(&rt->heap, &roots);
   return result;
 }
 
-static Value shared_builtin(Runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value shared_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   if (id == B_FFI_LAYOUT || id == B_FFI_LAYOUT_DATA) {
     if (count != 1) return failure(rt, "FFI arity: layout operation needs one argument");
-    Value input = rt->stack[first];
+    ot_value input = rt->stack[first];
     if (id == B_FFI_LAYOUT_DATA) {
-      if (!rt_kind(input, K_FOREIGN_LAYOUT)) return V_FALSE;
+      if (!oti_kind(input, K_FOREIGN_LAYOUT)) return OT_FALSE;
       input = object_fields(input)[0];
     }
     size_t budget = 65536;
-    Value description = layout_copy(rt, input, 0, &budget);
+    ot_value description = layout_copy(rt, input, 0, &budget);
     if (!description || id == B_FFI_LAYOUT_DATA) return description;
-    Roots roots;
-    roots_push(&rt->heap, &roots, &description, 1);
-    Value result = rt_alloc(rt, K_FOREIGN_LAYOUT, 1, 0);
+    oti_roots roots;
+    oti_roots_push(&rt->heap, &roots, &description, 1);
+    ot_value result = oti_alloc(rt, K_FOREIGN_LAYOUT, 1, 0);
     if (result) object_fields(result)[0] = description;
-    roots_pop(&rt->heap, &roots);
+    oti_roots_pop(&rt->heap, &roots);
     return result;
   }
 
@@ -954,21 +954,21 @@ static Value shared_builtin(Runtime* rt, unsigned id, size_t first, size_t count
     if (count != 3) return failure(rt, "FFI arity: fail requires operation, reason and message");
     const char *op = c_string(rt, rt->stack[first]), *reason = c_string(rt, rt->stack[first + 1]),
                *message = c_string(rt, rt->stack[first + 2]);
-    return op && reason && message ? rt_ffi_error(rt, op, reason, message) : 0;
+    return op && reason && message ? oti_ffi_error(rt, op, reason, message) : 0;
   }
   if (id == B_FFI_ERROR_FIELD) {
     if (count != 2) return failure(rt, "FFI arity: error-field needs two arguments");
     const char* field = c_string(rt, rt->stack[first + 1]);
     if (!field) return 0;
-    if (!rt_kind(rt->stack[first], K_TABLE)) return V_FALSE;
+    if (!oti_kind(rt->stack[first], K_TABLE)) return OT_FALSE;
     size_t n = strlen(field);
     char* name = malloc(n + 2);
     if (!name) return failure(rt, "FFI allocation: out of host memory");
     name[0] = ':';
     memcpy(name + 1, field, n + 1);
-    Value key = rt_intern(rt, K_KEYWORD, name, n + 1);
+    ot_value key = oti_intern(rt, K_KEYWORD, name, n + 1);
     free(name);
-    return key ? rt_table_get(rt, rt->stack[first], key, V_FALSE) : 0;
+    return key ? oti_table_get(rt, rt->stack[first], key, OT_FALSE) : 0;
   }
   size_t wanted = id == B_FFI_RAW_NULL || id == B_FFI_LOADER_ERROR ? 0
                   : id == B_FFI_RAW_BIND                           ? 5
@@ -979,7 +979,7 @@ static Value shared_builtin(Runtime* rt, unsigned id, size_t first, size_t count
   if (count != wanted) return failure(rt, "FFI arity: wrong number of arguments");
   if (id == B_FFI_RAW_NULL) return rt->constants[rt->foreign->null_constant];
   if (id == B_FFI_LOADER_ERROR)
-    return rt_text(rt, K_STRING, rt->foreign->loader_error, strlen(rt->foreign->loader_error));
+    return oti_text(rt, K_STRING, rt->foreign->loader_error, strlen(rt->foreign->loader_error));
   if (id == B_FFI_RAW_BIND) return bind_function(rt, first, true);
   if (id == B_FFI_RAW_OPEN) {
     const char* name = c_string(rt, rt->stack[first]);
@@ -989,20 +989,20 @@ static Value shared_builtin(Runtime* rt, unsigned id, size_t first, size_t count
       const char* error = dlerror();
       snprintf(rt->foreign->loader_error, sizeof(rt->foreign->loader_error), "%s",
                error ? error : "load failed");
-      return V_FALSE;
+      return OT_FALSE;
     }
-    for (Library* p = rt->foreign->libraries; p; p = p->next)
+    for (oti_library* p = rt->foreign->libraries; p; p = p->next)
       if (p->handle == handle) {
         dlclose(handle);
         return library_object(rt, p, rt->stack[first]);
       }
-    Library* library = calloc(1, sizeof(*library));
+    oti_library* library = calloc(1, sizeof(*library));
     if (!library) {
       dlclose(handle);
       return failure(rt, "FFI allocation: out of host memory");
     }
     library->handle = handle;
-    Value result = library_object(rt, library, rt->stack[first]);
+    ot_value result = library_object(rt, library, rt->stack[first]);
     if (!result) {
       dlclose(handle);
       free(library);
@@ -1022,41 +1022,41 @@ static Value shared_builtin(Runtime* rt, unsigned id, size_t first, size_t count
     return allocate_memory(rt, size, NULL);
   }
   if (id == B_FFI_RAW_SIZE || id == B_FFI_RAW_ALIGN) {
-    int type = foreign_scalar_code(rt, rt->stack[first], false);
+    int type = oti_foreign_scalar_code(rt, rt->stack[first], false);
     if (type < 0) return 0;
-    return value_int((intptr_t)(id == B_FFI_RAW_SIZE ? foreign_scalars[type].size
-                                                     : foreign_scalars[type].alignment));
+    return ot_int((intptr_t)(id == B_FFI_RAW_SIZE ? oti_foreign_scalars[type].size
+                                                     : oti_foreign_scalars[type].alignment));
   }
-  Pointer p;
+  oti_pointer p;
   size_t offset;
   argument_context(rt, 1, NULL);
-  int type = foreign_scalar_code(rt, rt->stack[first + 1], true);
+  int type = oti_foreign_scalar_code(rt, rt->stack[first + 1], true);
   if (type < 0) return 0;
   argument_context(rt, 0, "pointer");
   if (!pointer(rt, rt->stack[first], &p)) return 0;
   argument_context(rt, 2, "size-t");
   if (!nonnegative(rt, rt->stack[first + 2], &offset)) return 0;
-  const Scalar* s = &foreign_scalars[type];
+  const oti_scalar* s = &oti_foreign_scalars[type];
   argument_context(rt, 0, "pointer");
   if (!access_memory(rt, p, offset, s->size, s->alignment)) return 0;
-  ForeignSlot slot = {0};
+  oti_foreign_slot slot = {0};
   argument_context(rt, 3, s->name);
   if (id == B_FFI_RAW_SET && !to_foreign(rt, s, rt->stack[first + 3], &slot)) return 0;
   memory_scalar((unsigned)type, (void*)(p.address + offset), &slot, id == B_FFI_RAW_SET);
   argument_context(rt, SIZE_MAX, s->name);
-  return id == B_FFI_RAW_SET ? V_FALSE : from_foreign(rt, s, slot);
+  return id == B_FFI_RAW_SET ? OT_FALSE : from_foreign(rt, s, slot);
 }
 
-static Value bulk_memory(Runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value bulk_memory(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   size_t min = id == B_FFI_COPY ? 3 : 2;
   size_t max = id == B_FFI_WRITE_BYTES ? 4 : min;
   if (count < min || count > max) return failure(rt, "FFI arity: wrong number of arguments");
-  Value* args = rt->stack + first;
-  Pointer dest;
+  ot_value* args = rt->stack + first;
+  oti_pointer dest;
   argument_context(rt, 0, "pointer");
   if (!pointer(rt, args[0], &dest)) return 0;
   if (id == B_FFI_COPY) {
-    Pointer src;
+    oti_pointer src;
     size_t bytes;
     argument_context(rt, 1, "pointer");
     if (!pointer(rt, args[1], &src)) return 0;
@@ -1067,12 +1067,12 @@ static Value bulk_memory(Runtime* rt, unsigned id, size_t first, size_t count) {
     argument_context(rt, 1, "pointer");
     if (!access_memory(rt, src, 0, bytes, 1)) return 0;
     memmove((void*)dest.address, (const void*)src.address, bytes);
-    return V_FALSE;
+    return OT_FALSE;
   }
   if (id == B_FFI_WRITE_BYTES) {
     argument_context(rt, 1, NULL);
-    if (!rt_kind(args[1], K_BYTEVECTOR)) return failure(rt, "FFI type: expected bytevector");
-    size_t length = rt_bytes_length(args[1]), start = 0, end = length;
+    if (!oti_kind(args[1], K_BYTEVECTOR)) return failure(rt, "FFI type: expected bytevector");
+    size_t length = oti_bytes_length(args[1]), start = 0, end = length;
     argument_context(rt, 2, "size-t");
     if (count > 2 && !nonnegative(rt, args[2], &start)) return 0;
     if (start > length) return failure(rt, "FFI range: invalid bytevector start");
@@ -1081,8 +1081,8 @@ static Value bulk_memory(Runtime* rt, unsigned id, size_t first, size_t count) {
     if (start > end || end > length) return failure(rt, "FFI range: invalid bytevector end");
     argument_context(rt, 0, "pointer");
     if (!access_memory(rt, dest, 0, end - start, 1)) return 0;
-    memcpy((void*)dest.address, rt_bytes_data(args[1]) + start, end - start);
-    return V_FALSE;
+    memcpy((void*)dest.address, oti_bytes_data(args[1]) + start, end - start);
+    return OT_FALSE;
   }
   size_t bytes;
   argument_context(rt, 1, "size-t");
@@ -1092,38 +1092,38 @@ static Value bulk_memory(Runtime* rt, unsigned id, size_t first, size_t count) {
   if (id == B_FFI_READ_UTF8_BYTES) {
     if (!utf8((const unsigned char*)dest.address, bytes))
       return failure(rt, "FFI encoding: invalid UTF-8");
-    return rt_text(rt, K_STRING, (const char*)dest.address, bytes);
+    return oti_text(rt, K_STRING, (const char*)dest.address, bytes);
   }
-  Value result = rt_bytes_new(rt, bytes);
-  if (result) memcpy(rt_bytes_data(result), (const void*)dest.address, bytes);
+  ot_value result = oti_bytes_new(rt, bytes);
+  if (result) memcpy(oti_bytes_data(result), (const void*)dest.address, bytes);
   return result;
 }
 
-bool rt_foreign_owned(Value value) {
-  if (!rt_kind(value, K_POINTER)) return false;
-  Pointer p;
+bool oti_foreign_owned(ot_value value) {
+  if (!oti_kind(value, K_POINTER)) return false;
+  oti_pointer p;
   memcpy(&p, object_bytes(value), sizeof(p));
   return p.owner && !p.view;
 }
 
-static Value own_pointer(Runtime* rt, size_t first, size_t count) {
+static ot_value own_pointer(ot_runtime* rt, size_t first, size_t count) {
   if (count != 2) return failure(rt, "FFI arity: own requires pointer and release procedure");
-  Pointer p;
+  oti_pointer p;
   argument_context(rt, 0, "pointer");
   if (!pointer(rt, rt->stack[first], &p)) return 0;
   argument_context(rt, 1, NULL);
-  if (rt_support_builtin(rt, B_PROCEDURE_P, first + 1, 1) != V_TRUE)
+  if (oti_support_builtin(rt, B_PROCEDURE_P, first + 1, 1) != OT_TRUE)
     return failure(rt, "FFI type: expected release procedure");
-  ForeignState* state = rt->foreign;
+  oti_foreign_state* state = rt->foreign;
   size_t slot = 1;
   while (slot + 1 < state->roots.count &&
-         (state->values[slot] != V_NIL || state->values[slot + 1] != V_NIL))
+         (state->values[slot] != OT_NIL || state->values[slot + 1] != OT_NIL))
     slot++;
   size_t needed = slot + 2;
-  if (!rt_grow(rt, (void**)&state->values, &state->value_capacity, needed, sizeof(Value))) return 0;
+  if (!oti_grow(rt, (void**)&state->values, &state->value_capacity, needed, sizeof(ot_value))) return 0;
   state->roots.slots = state->values;
-  while (state->roots.count < needed) state->values[state->roots.count++] = V_NIL;
-  Memory* m = calloc(1, sizeof(*m));
+  while (state->roots.count < needed) state->values[state->roots.count++] = OT_NIL;
+  oti_memory* m = calloc(1, sizeof(*m));
   if (!m) return failure(rt, "FFI allocation: out of host memory");
   m->address = p.address;
   m->size = p.length;
@@ -1132,7 +1132,7 @@ static Value own_pointer(Runtime* rt, size_t first, size_t count) {
   m->root = slot;
   p.owner = m;
   p.view = false;
-  Value result = pointer_object(rt, p);
+  ot_value result = pointer_object(rt, p);
   if (!result) {
     free(m);
     return 0;
@@ -1144,39 +1144,39 @@ static Value own_pointer(Runtime* rt, size_t first, size_t count) {
   return result;
 }
 
-static Value release_pointer(Runtime* rt, Value value) {
-  if (!rt_kind(value, K_POINTER)) return failure(rt, "FFI type: expected pointer");
-  Pointer p;
+static ot_value release_pointer(ot_runtime* rt, ot_value value) {
+  if (!oti_kind(value, K_POINTER)) return failure(rt, "FFI type: expected pointer");
+  oti_pointer p;
   memcpy(&p, object_bytes(value), sizeof(p));
-  if (!p.address && !p.owner) return V_FALSE;
+  if (!p.address && !p.owner) return OT_FALSE;
   if (!p.owner || p.view) return failure(rt, "FFI type: free needs owning pointer");
-  Memory* m = p.owner;
-  if (m->released) return V_FALSE;
+  oti_memory* m = p.owner;
+  if (m->released) return OT_FALSE;
   if (!m->external) {
     m->released = true;
     free(m->allocation);
     m->allocation = NULL;
     rt->foreign->allocations--;
     rt->foreign->bytes -= m->size;
-    return V_FALSE;
+    return OT_FALSE;
   }
-  Value live[] = {rt->foreign->values[m->root], rt->foreign->values[m->root + 1]};
-  Roots roots;
-  roots_push(&rt->heap, &roots, live, 2);
-  Value args = rt_alloc(rt, K_PAIR, 2, 0);
-  Value result = 0;
+  ot_value live[] = {rt->foreign->values[m->root], rt->foreign->values[m->root + 1]};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, live, 2);
+  ot_value args = oti_alloc(rt, K_PAIR, 2, 0);
+  ot_value result = 0;
   if (args) {
     m->released = true;
-    rt->foreign->values[m->root] = rt->foreign->values[m->root + 1] = V_NIL;
+    rt->foreign->values[m->root] = rt->foreign->values[m->root + 1] = OT_NIL;
     object_fields(args)[0] = live[0];
-    object_fields(args)[1] = V_EMPTY;
-    result = rt_call_list(rt, live[1], args);
+    object_fields(args)[1] = OT_EMPTY;
+    result = oti_call_list(rt, live[1], args);
   }
-  roots_pop(&rt->heap, &roots);
-  return result ? V_FALSE : 0;
+  oti_roots_pop(&rt->heap, &roots);
+  return result ? OT_FALSE : 0;
 }
 
-static Value foreign_builtin(Runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value foreign_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   if (id == B_FFI_OWN) return own_pointer(rt, first, count);
   if (id >= B_FFI_CALLBACK && id <= B_FFI_CALLBACK_COUNT)
     return callback_builtin(rt, id, first, count);
@@ -1191,28 +1191,28 @@ static Value foreign_builtin(Runtime* rt, unsigned id, size_t first, size_t coun
                  : id == B_FFI_COUNT || id == B_FFI_BYTES ? 0
                                                           : 1;
   if (count != arity) return failure(rt, "FFI arity: wrong number of arguments");
-  Value* args = rt->stack + first;
+  ot_value* args = rt->stack + first;
   if (id == B_FFI_OPEN) return open_library(rt, args[0]);
   if (id == B_FFI_BIND) return bind_function(rt, first, false);
-  if (id == B_FFI_COUNT) return value_int((intptr_t)rt->foreign->allocations);
-  if (id == B_FFI_BYTES) return value_int((intptr_t)rt->foreign->bytes);
-  if (id == B_FFI_POINTER) return rt_kind(args[0], K_POINTER) ? V_TRUE : V_FALSE;
+  if (id == B_FFI_COUNT) return ot_int((intptr_t)rt->foreign->allocations);
+  if (id == B_FFI_BYTES) return ot_int((intptr_t)rt->foreign->bytes);
+  if (id == B_FFI_POINTER) return oti_kind(args[0], K_POINTER) ? OT_TRUE : OT_FALSE;
   if (id == B_FFI_NULL) {
-    if (!rt_kind(args[0], K_POINTER)) return V_FALSE;
-    Pointer p;
+    if (!oti_kind(args[0], K_POINTER)) return OT_FALSE;
+    oti_pointer p;
     memcpy(&p, object_bytes(args[0]), sizeof(p));
-    return !p.address ? V_TRUE : V_FALSE;
+    return !p.address ? OT_TRUE : OT_FALSE;
   }
   if (id == B_FFI_HAS_SYMBOL) {
     argument_context(rt, 0, NULL);
-    if (!rt_kind(args[0], K_FOREIGN_LIBRARY)) return failure(rt, "FFI type: expected library");
+    if (!oti_kind(args[0], K_FOREIGN_LIBRARY)) return failure(rt, "FFI type: expected library");
     argument_context(rt, 1, "utf8");
     const char* name = c_string(rt, args[1]);
     if (!name) return 0;
-    Library* lib = object_data(args[0]);
+    oti_library* lib = object_data(args[0]);
     dlerror();
     void* target = dlsym(lib->handle, name);
-    return !dlerror() && target ? V_TRUE : V_FALSE;
+    return !dlerror() && target ? OT_TRUE : OT_FALSE;
   }
   if (id == B_FFI_ALLOC_UTF8) {
     argument_context(rt, 0, "utf8");
@@ -1224,32 +1224,32 @@ static Value foreign_builtin(Runtime* rt, unsigned id, size_t first, size_t coun
   }
   if (id == B_FFI_SIZEOF || id == B_FFI_ALIGNOF || id == B_FFI_ALLOC) {
     argument_context(rt, 0, NULL);
-    int type = foreign_scalar(rt, args[0], true);
+    int type = oti_foreign_scalar(rt, args[0], true);
     if (type < 0) return 0;
     if (id != B_FFI_ALLOC)
-      return value_int((intptr_t)(id == B_FFI_SIZEOF ? foreign_scalars[type].size
-                                                     : foreign_scalars[type].alignment));
+      return ot_int((intptr_t)(id == B_FFI_SIZEOF ? oti_foreign_scalars[type].size
+                                                     : oti_foreign_scalars[type].alignment));
     size_t n;
     argument_context(rt, 1, "size-t");
     if (!nonnegative(rt, args[1], &n)) return 0;
-    if (n > SIZE_MAX / foreign_scalars[type].size)
+    if (n > SIZE_MAX / oti_foreign_scalars[type].size)
       return failure(rt, "FFI range: allocation size overflow");
-    return allocate_memory(rt, n * foreign_scalars[type].size, NULL);
+    return allocate_memory(rt, n * oti_foreign_scalars[type].size, NULL);
   }
   if (id == B_FFI_FREE) {
     argument_context(rt, 0, "pointer");
     return release_pointer(rt, args[0]);
   }
-  Pointer p;
+  oti_pointer p;
   if (id == B_FFI_POINTER_EQ) {
     argument_context(rt, 0, "pointer");
-    if (!rt_kind(args[0], K_POINTER)) return failure(rt, "FFI type: expected pointer");
+    if (!oti_kind(args[0], K_POINTER)) return failure(rt, "FFI type: expected pointer");
     argument_context(rt, 1, "pointer");
-    if (!rt_kind(args[1], K_POINTER)) return failure(rt, "FFI type: expected pointer");
-    Pointer other;
+    if (!oti_kind(args[1], K_POINTER)) return failure(rt, "FFI type: expected pointer");
+    oti_pointer other;
     memcpy(&p, object_bytes(args[0]), sizeof(p));
     memcpy(&other, object_bytes(args[1]), sizeof(other));
-    return p.address == other.address ? V_TRUE : V_FALSE;
+    return p.address == other.address ? OT_TRUE : OT_FALSE;
   }
   argument_context(rt, 0, "pointer");
   if (!pointer(rt, args[0], &p)) return 0;
@@ -1278,31 +1278,31 @@ static Value foreign_builtin(Runtime* rt, unsigned id, size_t first, size_t coun
     if (!end) return failure(rt, "FFI bounds: missing string terminator");
     if (!utf8((const unsigned char*)s, (size_t)(end - s)))
       return failure(rt, "FFI encoding: invalid UTF-8");
-    return rt_text(rt, K_STRING, s, (size_t)(end - s));
+    return oti_text(rt, K_STRING, s, (size_t)(end - s));
   }
   if (id == B_FFI_REF || id == B_FFI_SET) {
     argument_context(rt, 1, NULL);
-    int type = foreign_scalar(rt, args[1], true);
+    int type = oti_foreign_scalar(rt, args[1], true);
     if (type < 0) return 0;
     size_t index;
     argument_context(rt, 2, "size-t");
     if (!nonnegative(rt, args[2], &index)) return 0;
-    const Scalar* s = &foreign_scalars[type];
+    const oti_scalar* s = &oti_foreign_scalars[type];
     if (index > SIZE_MAX / s->size) return failure(rt, "FFI range: offset overflow");
     size_t offset = index * s->size;
     argument_context(rt, 0, "pointer");
     if (!access_memory(rt, p, offset, s->size, s->alignment)) return 0;
-    ForeignSlot slot = {0};
+    oti_foreign_slot slot = {0};
     argument_context(rt, 3, s->name);
     if (id == B_FFI_SET && !to_foreign(rt, s, args[3], &slot)) return 0;
     memory_scalar((unsigned)type, (void*)(p.address + offset), &slot, id == B_FFI_SET);
     argument_context(rt, SIZE_MAX, s->name);
-    return id == B_FFI_SET ? V_FALSE : from_foreign(rt, s, slot);
+    return id == B_FFI_SET ? OT_FALSE : from_foreign(rt, s, slot);
   }
   return failure(rt, "unknown FFI operation");
 }
 
-static Value foreign_result(Runtime* rt, Value result, const char* op) {
+static ot_value foreign_result(ot_runtime* rt, ot_value result, const char* op) {
   if (result || rt->raised || rt->exit_pending || rt->interrupted || rt->restart_pending ||
       strncmp(rt->error, "FFI ", 4))
     return result;
@@ -1311,52 +1311,52 @@ static Value foreign_result(Runtime* rt, Value result, const char* op) {
   if (n >= sizeof(reason)) n = sizeof(reason) - 1;
   memcpy(reason, rt->error + 4, n);
   reason[n] = 0;
-  return rt_ffi_error(rt, op, reason, rt->error);
+  return oti_ffi_error(rt, op, reason, rt->error);
 }
 
-static bool new_ffi_error(Runtime* rt) {
+static bool new_ffi_error(ot_runtime* rt) {
   return !rt->raised && !rt->exit_pending && !rt->interrupted && !rt->restart_pending &&
          !strncmp(rt->error, "FFI ", 4);
 }
 
-static bool condition_field(Runtime* rt, const char* name, Value value) {
-  Roots roots;
-  roots_push(&rt->heap, &roots, &value, 1);
-  Value key = rt_intern(rt, K_KEYWORD, name, strlen(name));
-  bool ok = key && rt_table_set(rt, rt->condition_values[0], key, value);
-  roots_pop(&rt->heap, &roots);
+static bool condition_field(ot_runtime* rt, const char* name, ot_value value) {
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, &value, 1);
+  ot_value key = oti_intern(rt, K_KEYWORD, name, strlen(name));
+  bool ok = key && oti_table_set(rt, rt->condition_values[0], key, value);
+  oti_roots_pop(&rt->heap, &roots);
   return ok;
 }
 
-static bool library_context(Runtime* rt, Value library, Value symbol) {
-  Value live[] = {library, symbol};
-  Roots roots;
-  roots_push(&rt->heap, &roots, live, 2);
+static bool library_context(ot_runtime* rt, ot_value library, ot_value symbol) {
+  ot_value live[] = {library, symbol};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, live, 2);
   bool ok = true;
-  if (rt_kind(live[0], K_FOREIGN_LIBRARY))
+  if (oti_kind(live[0], K_FOREIGN_LIBRARY))
     ok = condition_field(rt, ":library", object_fields(live[0])[0]);
-  if (ok && rt_kind(live[1], K_STRING)) ok = condition_field(rt, ":symbol", live[1]);
-  roots_pop(&rt->heap, &roots);
+  if (ok && oti_kind(live[1], K_STRING)) ok = condition_field(rt, ":symbol", live[1]);
+  oti_roots_pop(&rt->heap, &roots);
   return ok;
 }
 
-Value rt_foreign_call(Runtime* rt, size_t callable, size_t first, size_t count) {
+ot_value oti_foreign_call(ot_runtime* rt, size_t callable, size_t first, size_t count) {
   size_t argument = SIZE_MAX;
   unsigned expected = UINT_MAX;
-  Value result = foreign_call(rt, callable, first, count, &argument, &expected);
+  ot_value result = foreign_call(rt, callable, first, count, &argument, &expected);
   bool context = !result && new_ffi_error(rt);
   result = foreign_result(rt, result, "call");
   if (!context || !rt->raised) return result;
-  Value function = rt->stack[callable];
+  ot_value function = rt->stack[callable];
   if (!library_context(rt, object_fields(function)[0], object_fields(function)[1])) return 0;
-  if (argument != SIZE_MAX && !condition_field(rt, ":argument", value_int((intptr_t)argument)))
+  if (argument != SIZE_MAX && !condition_field(rt, ":argument", ot_int((intptr_t)argument)))
     return 0;
-  Value type = V_FALSE;
+  ot_value type = OT_FALSE;
   if (expected < AGGREGATE)
-    type = rt_intern(rt, K_SYMBOL, foreign_scalars[expected].name,
-                     strlen(foreign_scalars[expected].name));
+    type = oti_intern(rt, K_SYMBOL, oti_foreign_scalars[expected].name,
+                     strlen(oti_foreign_scalars[expected].name));
   else if (expected == AGGREGATE) {
-    type = rt_alloc(rt, K_FOREIGN_LAYOUT, 1, 0);
+    type = oti_alloc(rt, K_FOREIGN_LAYOUT, 1, 0);
     if (type) {
       function = rt->stack[callable];
       object_fields(type)[0] = argument == SIZE_MAX
@@ -1411,11 +1411,11 @@ static const char* operation(unsigned id) {
   }
 }
 
-Value rt_foreign_builtin(Runtime* rt, unsigned id, size_t first, size_t count) {
-  ForeignError context = {SIZE_MAX, NULL};
-  ForeignError* previous = rt->foreign->error_context;
+ot_value oti_foreign_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+  oti_foreign_error context = {SIZE_MAX, NULL};
+  oti_foreign_error* previous = rt->foreign->error_context;
   rt->foreign->error_context = &context;
-  Value result = foreign_builtin(rt, id, first, count);
+  ot_value result = foreign_builtin(rt, id, first, count);
   rt->foreign->error_context = previous;
   bool annotate = !result && new_ffi_error(rt);
   result = foreign_result(rt, result, operation(id));
@@ -1423,9 +1423,9 @@ Value rt_foreign_builtin(Runtime* rt, unsigned id, size_t first, size_t count) {
     if ((id == B_FFI_BIND || id == B_FFI_RAW_BIND) && count >= 2)
       library_context(rt, rt->stack[first], rt->stack[first + 1]);
     if (context.argument != SIZE_MAX)
-      condition_field(rt, ":argument", value_int((intptr_t)context.argument));
+      condition_field(rt, ":argument", ot_int((intptr_t)context.argument));
     if (context.expected) {
-      Value type = rt_intern(rt, K_SYMBOL, context.expected, strlen(context.expected));
+      ot_value type = oti_intern(rt, K_SYMBOL, context.expected, strlen(context.expected));
       if (type) condition_field(rt, ":expected-type", type);
     }
   }

@@ -3,21 +3,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-static Value eval(Runtime* rt, const char* source) {
-  Value v;
-  if (!runtime_eval(rt, source, strlen(source), &v)) {
-    fprintf(stderr, "%s\n%s\n", source, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* source) {
+  ot_value v;
+  if (!ot_eval(rt, source, strlen(source), &v)) {
+    fprintf(stderr, "%s\n%s\n", source, ot_error(rt));
     abort();
   }
   return v;
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
-  assert(runtime_load_path(rt, "../tests/reader/data"));
-  runtime_gc_stress(rt, true);
+  assert(ot_load_core(rt, "../lib"));
+  assert(ot_add_load_path(rt, "../tests/reader/data"));
+  ot_gc_stress(rt, true);
   FILE* f = fopen("../tests/library/port-reader.ot", "rb");
   assert(f);
   assert(!fseek(f, 0, SEEK_END));
@@ -32,7 +32,7 @@ int main(void) {
   eval(rt, s);
   free(s);
   assert(eval(rt, "(for-all (fn (text) (try (read (open-input-string text)) #f (catch e #t))) "
-                  "(drop 3 datums/negative))") == V_TRUE);
+                  "(drop 3 datums/negative))") == OT_TRUE);
   const char* checks[] = {
       "(let ((p (open-input-string \"(a)tail\"))) (and (equal? (read p) '(a)) (eq? (peek-char p) "
       "#\\t) (eq? (read p) 'tail)))",
@@ -58,10 +58,10 @@ int main(void) {
       "(let ((text (string-append \"(\" (string-repeat \"a \" 5000) \") :tail\")) (p "
       "(open-input-string text))) (and (= (length (read p)) 5000) (eq? (read p) :tail)))"};
   for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); i++)
-    if (eval(rt, checks[i]) != V_TRUE) {
+    if (eval(rt, checks[i]) != OT_TRUE) {
       fprintf(stderr, "failed: %s\n", checks[i]);
       abort();
     }
-  runtime_destroy(rt);
+  ot_destroy(rt);
   puts("streaming datum boundary and GC checks passed");
 }

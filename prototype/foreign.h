@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef void (*ForeignCallback)(void);
+typedef void (*oti_foreign_callback)(void);
 
 typedef union {
   int64_t signed_integer;
@@ -13,7 +13,7 @@ typedef union {
   double real;
   bool boolean;
   void* pointer;
-  ForeignCallback callback;
-} ForeignSlot;
+  oti_foreign_callback callback;
+} oti_foreign_slot;
 
 #endif

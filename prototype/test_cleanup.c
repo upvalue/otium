@@ -3,10 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-static Value eval(Runtime* rt, const char* s) {
-  Value v;
-  if (!runtime_eval(rt, s, strlen(s), &v)) {
-    fprintf(stderr, "%s\n%s\n", s, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* s) {
+  ot_value v;
+  if (!ot_eval(rt, s, strlen(s), &v)) {
+    fprintf(stderr, "%s\n%s\n", s, ot_error(rt));
     abort();
   }
   assert(!rt->cleanup_count && !rt->cleanup_roots.count);
@@ -14,10 +14,10 @@ static Value eval(Runtime* rt, const char* s) {
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
-  runtime_gc_stress(rt, true);
+  assert(ot_load_core(rt, "../lib"));
+  ot_gc_stress(rt, true);
   eval(rt, "(def events []) (def (record x) (push! events x)) (defparam p :default)");
   const char* checks[] = {
       "(begin (set! events []) (= (unwind-protect 42 (record :normal)) 42))",
@@ -59,28 +59,28 @@ int main(void) {
       "(eq? (try (unwind-protect (exit 7) (error :cleanup)) (catch e e)) :cleanup)",
       "(= (defer 42) 42)"};
   for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); i++) {
-    if (eval(rt, checks[i]) != V_TRUE) {
+    if (eval(rt, checks[i]) != OT_TRUE) {
       fprintf(stderr, "failed: %s\n", checks[i]);
       abort();
     }
   }
   const char* quit = "(set! events []) (try (call-with-cleanup (fn () (quit 7)) (fn (o) (record o) "
                      "(error :release))) (catch e (record e)))";
-  Value result;
-  assert(runtime_eval(rt, quit, strlen(quit), &result));
+  ot_value result;
+  assert(ot_eval(rt, quit, strlen(quit), &result));
   int status;
-  assert(!runtime_exit_status(rt, &status));
+  assert(!ot_exit_status(rt, &status));
   assert(!rt->cleanup_count && !rt->cleanup_roots.count);
-  assert(eval(rt, "(equal? events [:quit :release])") == V_TRUE);
-  assert(!runtime_exit_status(rt, &status));
+  assert(eval(rt, "(equal? events [:quit :release])") == OT_TRUE);
+  assert(!ot_exit_status(rt, &status));
   eval(rt, "(def (quit-host) (unwind-protect (exit 9) (record :host)))");
-  assert(!runtime_call(rt, "quit-host", NULL, 0, &result));
-  assert(runtime_exit_status(rt, &status) && status == 9);
-  assert(eval(rt, "(equal? events [:quit :release :host])") == V_TRUE);
-  runtime_gc_stress(rt, false);
+  assert(!ot_call(rt, "quit-host", NULL, 0, &result));
+  assert(ot_exit_status(rt, &status) && status == 9);
+  assert(eval(rt, "(equal? events [:quit :release :host])") == OT_TRUE);
+  ot_gc_stress(rt, false);
   eval(rt, "(def (deep n) (unwind-protect (if (= n 0) (error :bottom) (deep (- n 1))) (record n))) "
            "(set! events [])");
-  assert(eval(rt, "(try (deep 4000) (catch e nil)) (= (length events) 4001)") == V_TRUE);
-  runtime_destroy(rt);
+  assert(eval(rt, "(try (deep 4000) (catch e nil)) (= (length events) 4001)") == OT_TRUE);
+  ot_destroy(rt);
   puts("cleanup and exit transfer tests passed");
 }

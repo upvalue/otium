@@ -3,20 +3,20 @@
 #include <stdlib.h>
 #include <string.h>
 
-static Value eval(Runtime* rt, const char* source) {
-  Value result;
-  if (!runtime_eval(rt, source, strlen(source), &result)) {
-    fprintf(stderr, "%s: %s\n", source, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* source) {
+  ot_value result;
+  if (!ot_eval(rt, source, strlen(source), &result)) {
+    fprintf(stderr, "%s: %s\n", source, ot_error(rt));
     abort();
   }
   return result;
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
-  runtime_gc_stress(rt, true);
+  assert(ot_load_core(rt, "../lib"));
+  ot_gc_stress(rt, true);
   const char* checks[] = {
       "(begin (defonce map #`(answer 42)) (equal? map '(user/answer 42)))",
       "(begin (ns left) (def (f) x) (def x 42) (ns user) (= (left/f) 42))",
@@ -44,16 +44,16 @@ int main(void) {
       "(equal? (read-string \"(1 :two)\") '(1 :two))",
       "(begin (defmacro alias-source (x) `(+ ,x 1)) (def alias alias-source) (= (alias 41) 42))"};
   for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); i++)
-    assert(eval(rt, checks[i]) == V_TRUE);
+    assert(eval(rt, checks[i]) == OT_TRUE);
   for (size_t i = 0; i < 200; i++)
-    assert(eval(rt, "(defmethod (sample (x Number)) (+ x 2)) (sample 40)") == value_int(42));
+    assert(eval(rt, "(defmethod (sample (x Number)) (+ x 2)) (sample 40)") == ot_int(42));
   const char* bad[] = {"(defgeneric (sample x y))", "(defgeneric (bad x x))",
                        "(defmethod (sample (x 1)) x)", "(defmethod (sample x y) x)"};
   for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++) {
-    Value result;
-    assert(!runtime_eval(rt, bad[i], strlen(bad[i]), &result));
-    assert(eval(rt, "(sample 40)") == value_int(42));
+    ot_value result;
+    assert(!ot_eval(rt, bad[i], strlen(bad[i]), &result));
+    assert(eval(rt, "(sample 40)") == ot_int(42));
   }
-  runtime_destroy(rt);
+  ot_destroy(rt);
   puts("core bootstrap and primary generic tests passed");
 }

@@ -3,21 +3,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void eval(Runtime* rt, const char* source, bool check) {
-  Value result;
-  if (!runtime_eval(rt, source, strlen(source), &result)) {
-    fprintf(stderr, "%s\n%s\n", source, runtime_error(rt));
+static void eval(ot_runtime* rt, const char* source, bool check) {
+  ot_value result;
+  if (!ot_eval(rt, source, strlen(source), &result)) {
+    fprintf(stderr, "%s\n%s\n", source, ot_error(rt));
     abort();
   }
-  if (check) assert(result == V_TRUE);
+  if (check) assert(result == OT_TRUE);
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_path(rt, "../tests/records/fixtures"));
-  assert(runtime_load_core(rt, "../lib"));
-  runtime_gc_stress(rt, true);
+  assert(ot_add_load_path(rt, "../tests/records/fixtures"));
+  assert(ot_load_core(rt, "../lib"));
+  ot_gc_stress(rt, true);
   FILE* file = fopen("../tests/records/checks.ot", "rb");
   assert(file);
   assert(!fseek(file, 0, SEEK_END));
@@ -51,6 +51,6 @@ int main(void) {
       "(try (record-ref copied 'a) (catch e #t))",
       "(and (= (copied :a) 1) (eq? (get record-index first-record) :found))"};
   for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); i++) eval(rt, checks[i], true);
-  runtime_destroy(rt);
+  ot_destroy(rt);
   puts("record layouts, retention, immutability and identity checks passed");
 }

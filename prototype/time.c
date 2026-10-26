@@ -3,23 +3,23 @@
 #include <stdint.h>
 #include <time.h>
 
-Value rt_time_builtin(Runtime* rt, unsigned id, size_t count) {
+ot_value oti_time_builtin(ot_runtime* rt, unsigned id, size_t count) {
   if (count) {
-    rt_error(rt, "time procedures take no arguments");
+    oti_error(rt, "time procedures take no arguments");
     return 0;
   }
-  if (id == B_JIFFIES_SECOND) return value_int(1000000000);
+  if (id == B_JIFFIES_SECOND) return ot_int(1000000000);
   struct timespec now;
   if (clock_gettime(id == B_CURRENT_JIFFY ? CLOCK_MONOTONIC : CLOCK_REALTIME, &now)) {
-    rt_error(rt, "cannot read clock");
+    oti_error(rt, "cannot read clock");
     return 0;
   }
-  if (id == B_CURRENT_SECOND) return rt_float(rt, (double)now.tv_sec + (double)now.tv_nsec / 1e9);
+  if (id == B_CURRENT_SECOND) return oti_float(rt, (double)now.tv_sec + (double)now.tv_nsec / 1e9);
   uintmax_t limit = (uintmax_t)INTPTR_MAX / 2;
   if (now.tv_sec < 0 || now.tv_nsec < 0 ||
       (uintmax_t)now.tv_sec > (limit - (uintmax_t)now.tv_nsec) / 1000000000) {
-    rt_error(rt, "monotonic clock exceeds integer range");
+    oti_error(rt, "monotonic clock exceeds integer range");
     return 0;
   }
-  return value_int((intptr_t)((uintmax_t)now.tv_sec * 1000000000 + (uintmax_t)now.tv_nsec));
+  return ot_int((intptr_t)((uintmax_t)now.tv_sec * 1000000000 + (uintmax_t)now.tv_nsec));
 }

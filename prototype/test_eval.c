@@ -3,17 +3,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-static Value eval(Runtime* rt, const char* source) {
-  Value result;
-  if (!runtime_eval(rt, source, strlen(source), &result)) {
-    fprintf(stderr, "%s: %s\n", source, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* source) {
+  ot_value result;
+  if (!ot_eval(rt, source, strlen(source), &result)) {
+    fprintf(stderr, "%s: %s\n", source, ot_error(rt));
     abort();
   }
   return result;
 }
 
-static void checks(Runtime* rt) {
-  runtime_gc_stress(rt, true);
+static void checks(ot_runtime* rt) {
+  ot_gc_stress(rt, true);
   const char* cases[] = {
       "(let ((a [1 '(+ 1 2)])) (eq? (eval a) a))",
       "(let ((a {:x 42})) (eq? (eval a) a))",
@@ -36,35 +36,35 @@ static void checks(Runtime* rt) {
       "(begin (defmacro nested-closure () (eval '(def survivor (fn () 42))) 0) (nested-closure) (= "
       "(survivor) 42))",
       "(begin (defmacro nested-caught () (try (eval '(if)) (catch c 42))) (= (nested-caught) 42))"};
-  for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); i++) assert(eval(rt, cases[i]) == V_TRUE);
+  for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); i++) assert(eval(rt, cases[i]) == OT_TRUE);
   const char* failed = "(defmacro retain-then-fail () (eval '(def retained (fn () 'held-symbol))) "
                        "'(if)) (retain-then-fail)";
-  Value result;
-  assert(!runtime_eval(rt, failed, strlen(failed), &result));
-  assert(eval(rt, "(eq? (retained) 'held-symbol)") == V_TRUE);
+  ot_value result;
+  assert(!ot_eval(rt, failed, strlen(failed), &result));
+  assert(eval(rt, "(eq? (retained) 'held-symbol)") == OT_TRUE);
   assert(eval(rt,
               "(begin (ns eval-left) (def x 1) (def (f) (eval 'x)) (def e eval) (ns eval-right) "
               "(def x 42) (equal? (list (eval-left/f) (eval-left/e 'x) (eval 'x)) '(1 1 42)))") ==
-         V_TRUE);
+         OT_TRUE);
   eval(rt, "(ns user)");
-  assert(runtime_call(rt, "eval", (Value[]){value_int(42)}, 1, &result));
-  assert(result == value_int(42));
+  assert(ot_call(rt, "eval", (ot_value[]){ot_int(42)}, 1, &result));
+  assert(result == ot_int(42));
   for (size_t i = 0; i < 100; i++)
-    assert(eval(rt, "(eval '(let ((x 40)) (+ x 2)))") == value_int(42));
+    assert(eval(rt, "(eval '(let ((x 40)) (+ x 2)))") == ot_int(42));
   assert(eval(rt, "(begin (def (recursive-eval) (eval '(recursive-eval))) (try (recursive-eval) "
-                  "(catch c #t)))") == V_TRUE);
-  assert(eval(rt, "(saved 2)") == value_int(42));
+                  "(catch c #t)))") == OT_TRUE);
+  assert(eval(rt, "(saved 2)") == ot_int(42));
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
   checks(rt);
-  runtime_destroy(rt);
-  rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_destroy(rt);
+  rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
+  assert(ot_load_core(rt, "../lib"));
   checks(rt);
-  runtime_destroy(rt);
+  ot_destroy(rt);
   puts("nested evaluation tests passed");
 }

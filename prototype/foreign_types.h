@@ -14,38 +14,38 @@ typedef struct {
   size_t size, alignment;
   int64_t minimum;
   uint64_t maximum;
-} Scalar;
+} oti_scalar;
 
 #define MAX_ARGUMENTS 64
 
 enum { AGGREGATE = 23, UNION_TYPE = 24, ARRAY_TYPE = 25 };
-typedef struct AbiNode AbiNode;
+typedef struct oti_abi_node oti_abi_node;
 
-struct AbiNode {
-  AbiNode* next;
+struct oti_abi_node {
+  oti_abi_node* next;
   ffi_type type;
 };
-typedef struct Signature Signature;
+typedef struct oti_signature oti_signature;
 
-struct Signature {
-  Signature* next;
+struct oti_signature {
+  oti_signature* next;
   size_t count;
   unsigned arguments[MAX_ARGUMENTS], result;
   ffi_cif cif;
   ffi_type *argument_types[MAX_ARGUMENTS], *result_type;
-  AbiNode* nodes;
+  oti_abi_node* nodes;
   bool marked, pending;
 };
 
-extern const Scalar foreign_scalars[AGGREGATE];
-int foreign_scalar(Runtime* rt, Value name, bool memory);
-int foreign_scalar_code(Runtime* rt, Value value, bool memory);
-bool foreign_list_length(Runtime* rt, Value list, size_t limit, size_t* count);
-void foreign_free_abi_nodes(AbiNode* node);
-Signature* foreign_signature(Runtime* rt, Signature** cache, Value arguments, Value result,
+extern const oti_scalar oti_foreign_scalars[AGGREGATE];
+int oti_foreign_scalar(ot_runtime* rt, ot_value name, bool memory);
+int oti_foreign_scalar_code(ot_runtime* rt, ot_value value, bool memory);
+bool oti_foreign_list_length(ot_runtime* rt, ot_value list, size_t limit, size_t* count);
+void oti_foreign_free_abi_nodes(oti_abi_node* node);
+oti_signature* oti_foreign_signature(ot_runtime* rt, oti_signature** cache, ot_value arguments, ot_value result,
                              bool codes);
 
-static inline Value list_item(Value list, size_t index) {
+static inline ot_value list_item(ot_value list, size_t index) {
   while (index--) list = object_fields(list)[1];
   return object_fields(list)[0];
 }

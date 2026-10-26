@@ -12,17 +12,17 @@ typedef struct {
   size_t position, length, capacity, offset;
   unsigned kind;
   bool input, closed, eof, busy;
-  RuntimeIOHost host;
+  ot_io_host host;
   void* userdata;
   intptr_t handle;
-} Port;
+} oti_port;
 
-static Port* info(Value p) { return object_bytes(p); }
+static oti_port* info(ot_value p) { return object_bytes(p); }
 
-void rt_port_repr(FILE* out, Value p) {
+void oti_port_repr(FILE* out, ot_value p) {
   if (info(p)->kind == 3 || info(p)->kind == 4) {
     fputs("#<port ", out);
-    runtime_write(NULL, out, object_fields(p)[4]);
+    ot_write(NULL, out, object_fields(p)[4]);
     fprintf(out, " %s>", info(p)->input ? "input" : "output");
     return;
   }
@@ -36,11 +36,11 @@ void rt_port_repr(FILE* out, Value p) {
 
 static int posix_open(void* userdata, const char* path, unsigned flags, intptr_t* handle) {
   (void)userdata;
-  int mode = flags & RUNTIME_IO_WRITE ? O_WRONLY : O_RDONLY;
-  if (flags & RUNTIME_IO_CREATE) mode |= O_CREAT;
-  if (flags & RUNTIME_IO_TRUNCATE) mode |= O_TRUNC;
-  if (flags & RUNTIME_IO_APPEND) mode |= O_APPEND;
-  if (flags & RUNTIME_IO_EXCLUSIVE) mode |= O_EXCL;
+  int mode = flags & OT_IO_WRITE ? O_WRONLY : O_RDONLY;
+  if (flags & OT_IO_CREATE) mode |= O_CREAT;
+  if (flags & OT_IO_TRUNCATE) mode |= O_TRUNC;
+  if (flags & OT_IO_APPEND) mode |= O_APPEND;
+  if (flags & OT_IO_EXCLUSIVE) mode |= O_EXCL;
   int fd = open(path, mode, 0666);
   if (fd < 0) return errno;
   struct stat st;
@@ -70,50 +70,50 @@ static int posix_close(void* userdata, intptr_t handle) {
   return close((int)handle) ? errno : 0;
 }
 
-static const RuntimeIOHost posix_host = {posix_open, posix_read, posix_write, posix_close, NULL};
+static const ot_io_host posix_host = {posix_open, posix_read, posix_write, posix_close, NULL};
 
-bool runtime_set_io_host(Runtime* rt, const RuntimeIOHost* host, void* userdata) {
-  if (!rt_host_entry(rt)) return false;
+bool ot_set_io_host(ot_runtime* rt, const ot_io_host* host, void* userdata) {
+  if (!oti_host_entry(rt)) return false;
   if (host && (!host->open || !host->read || !host->write || !host->close))
-    return rt_error(rt, "I/O host requires open, read, write and close callbacks");
+    return oti_error(rt, "I/O host requires open, read, write and close callbacks");
   rt->io_host = host ? *host : posix_host;
   rt->io_host_set = host != NULL;
   rt->io_userdata = host ? userdata : NULL;
   return true;
 }
 
-static void port_host(Runtime* rt, Value port) {
+static void port_host(ot_runtime* rt, ot_value port) {
   info(port)->host = rt->io_host_set ? rt->io_host : posix_host;
   info(port)->userdata = rt->io_host_set ? rt->io_userdata : NULL;
 }
 
-static void host_begin(Runtime* rt, Value port) {
+static void host_begin(ot_runtime* rt, ot_value port) {
   rt->host_io_active = true;
   info(port)->busy = true;
 }
 
-static bool host_end(Runtime* rt, Value port) {
+static bool host_end(ot_runtime* rt, ot_value port) {
   rt->host_io_active = false;
   info(port)->busy = false;
   if (!rt->host_io_reentry) return true;
   rt->host_io_reentry = false;
-  return rt_error(rt, "host I/O callback cannot reenter Otium");
+  return oti_error(rt, "host I/O callback cannot reenter Otium");
 }
 
-static Value fail(Runtime* rt, const char* message) {
-  rt_error(rt, message);
+static ot_value fail(ot_runtime* rt, const char* message) {
+  oti_error(rt, message);
   return 0;
 }
 
-static bool natural(Value v, size_t* n) {
-  if (!value_is_int(v) || value_to_int(v) < 0) return false;
-  *n = (size_t)value_to_int(v);
+static bool natural(ot_value v, size_t* n) {
+  if (!ot_is_int(v) || ot_to_int(v) < 0) return false;
+  *n = (size_t)ot_to_int(v);
   return true;
 }
 
-static bool register_port(Runtime* rt, Value p) {
-  if (!rt_grow(rt, (void**)&rt->open_ports, &rt->open_port_capacity, rt->open_port_count + 1,
-               sizeof(Value)))
+static bool register_port(ot_runtime* rt, ot_value p) {
+  if (!oti_grow(rt, (void**)&rt->open_ports, &rt->open_port_capacity, rt->open_port_count + 1,
+               sizeof(ot_value)))
     return false;
   rt->open_port_roots.slots = rt->open_ports;
   rt->open_ports[rt->open_port_count++] = p;
@@ -121,37 +121,37 @@ static bool register_port(Runtime* rt, Value p) {
   return true;
 }
 
-static void unregister_port(Runtime* rt, Value p) {
+static void unregister_port(ot_runtime* rt, ot_value p) {
   for (size_t i = 0; i < rt->open_port_count; i++)
     if (rt->open_ports[i] == p) {
       memmove(rt->open_ports + i, rt->open_ports + i + 1,
-              (rt->open_port_count - i - 1) * sizeof(Value));
+              (rt->open_port_count - i - 1) * sizeof(ot_value));
       rt->open_port_roots.count = --rt->open_port_count;
       return;
     }
 }
 
-static bool callable(Value v) {
-  return (v & 255) == TAG_BUILTIN || rt_kind(v, K_CLOSURE) || rt_kind(v, K_GENERIC) ||
-         rt_kind(v, K_NEXT) || rt_kind(v, K_INSTANCE) || rt_kind(v, K_RECORD) ||
-         rt_kind(v, K_MACRO) || rt_kind(v, K_PARAM) || rt_kind(v, K_FOREIGN_FUNCTION) ||
-         rt_collection(v);
+static bool callable(ot_value v) {
+  return (v & 255) == TAG_BUILTIN || oti_kind(v, K_CLOSURE) || oti_kind(v, K_GENERIC) ||
+         oti_kind(v, K_NEXT) || oti_kind(v, K_INSTANCE) || oti_kind(v, K_RECORD) ||
+         oti_kind(v, K_MACRO) || oti_kind(v, K_PARAM) || oti_kind(v, K_FOREIGN_FUNCTION) ||
+         oti_collection(v);
 }
 
 /* The caller roots *port. Never retain its opaque bytes across a callback. */
-static Value callback(Runtime* rt, Value* port, size_t field, bool bytes, size_t start,
+static ot_value callback(ot_runtime* rt, ot_value* port, size_t field, bool bytes, size_t start,
                       size_t end) {
-  Value function = object_fields(*port)[field];
-  if (function == V_NIL) return V_NIL;
+  ot_value function = object_fields(*port)[field];
+  if (function == OT_NIL) return OT_NIL;
   if (info(*port)->busy) return fail(rt, "port callback reentry");
-  Value v[] = {function, V_EMPTY, object_fields(*port)[0], value_int((intptr_t)start),
-               value_int((intptr_t)end)};
-  Roots roots;
-  roots_push(&rt->heap, &roots, v, 5);
+  ot_value v[] = {function, OT_EMPTY, object_fields(*port)[0], ot_int((intptr_t)start),
+               ot_int((intptr_t)end)};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, v, 5);
   bool ok = true;
   if (bytes)
     for (size_t i = 3; i; i--) {
-      Value pair = rt_alloc(rt, K_PAIR, 2, 0);
+      ot_value pair = oti_alloc(rt, K_PAIR, 2, 0);
       if (!pair) {
         ok = false;
         break;
@@ -160,33 +160,33 @@ static Value callback(Runtime* rt, Value* port, size_t field, bool bytes, size_t
       object_fields(pair)[1] = v[1];
       v[1] = pair;
     }
-  Value result = 0;
+  ot_value result = 0;
   if (ok) {
     info(*port)->busy = true;
-    result = rt_call_list(rt, v[0], v[1]);
+    result = oti_call_list(rt, v[0], v[1]);
     info(*port)->busy = false;
   }
-  roots_pop(&rt->heap, &roots);
+  oti_roots_pop(&rt->heap, &roots);
   return result;
 }
 
-static void host_error(Runtime* rt, Value* port, const char* op, int error) {
-  if (!runtime_poll_interrupt(rt)) return;
-  if (info(*port)->kind == 4) rt_file_error(rt, op, object_fields(*port)[4], error ? error : EIO);
-  else rt_io_error(rt, ":other");
+static void host_error(ot_runtime* rt, ot_value* port, const char* op, int error) {
+  if (!ot_poll_interrupt(rt)) return;
+  if (info(*port)->kind == 4) oti_file_error(rt, op, object_fields(*port)[4], error ? error : EIO);
+  else oti_io_error(rt, ":other");
 }
 
-static long transfer(Runtime* rt, Value* port, bool writing, size_t start, size_t length) {
+static long transfer(ot_runtime* rt, ot_value* port, bool writing, size_t start, size_t length) {
   for (;;) {
-    if (!runtime_poll_interrupt(rt)) return -1;
-    Port* p = info(*port);
-    unsigned char* bytes = rt_bytes_data(object_fields(*port)[0]) + start;
+    if (!ot_poll_interrupt(rt)) return -1;
+    oti_port* p = info(*port);
+    unsigned char* bytes = oti_bytes_data(object_fields(*port)[0]) + start;
     host_begin(rt, *port);
     long n = writing ? p->host.write(p->userdata, p->handle, bytes, length)
                      : p->host.read(p->userdata, p->handle, bytes, length);
     if (!host_end(rt, *port)) return -1;
     if (n == -EINTR) {
-      if (!runtime_poll_interrupt(rt)) return -1;
+      if (!ot_poll_interrupt(rt)) return -1;
       continue;
     }
     if (n < 0) {
@@ -194,23 +194,23 @@ static long transfer(Runtime* rt, Value* port, bool writing, size_t start, size_
       return -1;
     }
     if ((size_t)n > length || (writing && !n)) {
-      rt_error(rt, writing ? "invalid host write count" : "invalid host read count");
+      oti_error(rt, writing ? "invalid host write count" : "invalid host read count");
       return -1;
     }
     return n;
   }
 }
 
-static bool flush(Runtime* rt, Value* port) {
+static bool flush(ot_runtime* rt, ot_value* port) {
   if (info(*port)->kind < 2) return true;
   while (info(*port)->offset < info(*port)->length) {
     size_t left = info(*port)->length - info(*port)->offset;
     size_t written;
     if (info(*port)->kind == 3) {
-      Value n = callback(rt, port, 1, true, info(*port)->offset, info(*port)->length);
+      ot_value n = callback(rt, port, 1, true, info(*port)->offset, info(*port)->length);
       if (!n) return false;
       if (!natural(n, &written) || !written || written > left)
-        return rt_error(rt, "invalid custom port write count");
+        return oti_error(rt, "invalid custom port write count");
     } else {
       long n = transfer(rt, port, true, info(*port)->offset, left);
       if (n < 0) return false;
@@ -220,7 +220,7 @@ static bool flush(Runtime* rt, Value* port) {
   }
   info(*port)->offset = info(*port)->length = 0;
   if (info(*port)->kind == 3) return callback(rt, port, 2, false, 0, 0) != 0;
-  Port* p = info(*port);
+  oti_port* p = info(*port);
   if (p->host.flush) {
     host_begin(rt, *port);
     int error = p->host.flush(p->userdata, p->handle);
@@ -233,33 +233,33 @@ static bool flush(Runtime* rt, Value* port) {
   return true;
 }
 
-static Value make_custom(Runtime* rt, Value* port, size_t first, size_t count, bool input) {
-  if (count != 2 || !rt_kind(rt->stack[first], K_STRING) || !rt_kind(rt->stack[first + 1], K_TABLE))
+static ot_value make_custom(ot_runtime* rt, ot_value* port, size_t first, size_t count, bool input) {
+  if (count != 2 || !oti_kind(rt->stack[first], K_STRING) || !oti_kind(rt->stack[first + 1], K_TABLE))
     return fail(rt, "custom port needs a name and callback table");
-  Value callbacks[] = {V_NIL, V_NIL, V_NIL};
-  Roots roots;
-  roots_push(&rt->heap, &roots, callbacks, 3);
+  ot_value callbacks[] = {OT_NIL, OT_NIL, OT_NIL};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, callbacks, 3);
   const char* names[] = {input ? ":read" : ":write", ":flush", ":close"};
   bool ok = true;
   for (size_t i = 0; i < 3; i++) {
-    Value key = rt_intern(rt, K_KEYWORD, names[i], strlen(names[i]));
+    ot_value key = oti_intern(rt, K_KEYWORD, names[i], strlen(names[i]));
     if (!key) {
       ok = false;
       break;
     }
-    callbacks[i] = rt_table_get(rt, rt->stack[first + 1], key, V_NIL);
+    callbacks[i] = oti_table_get(rt, rt->stack[first + 1], key, OT_NIL);
     if (!callbacks[i]) {
       ok = false;
       break;
     }
-    if ((!i || callbacks[i] != V_NIL) && !callable(callbacks[i])) {
+    if ((!i || callbacks[i] != OT_NIL) && !callable(callbacks[i])) {
       fail(rt, "invalid custom port callback");
       ok = false;
       break;
     }
   }
   if (ok) {
-    *port = rt_alloc(rt, K_PORT, 5, sizeof(Port));
+    *port = oti_alloc(rt, K_PORT, 5, sizeof(oti_port));
     ok = *port != 0;
     if (ok) {
       info(*port)->input = input;
@@ -267,7 +267,7 @@ static Value make_custom(Runtime* rt, Value* port, size_t first, size_t count, b
       info(*port)->capacity = 4096;
       for (size_t i = 0; i < 3; i++) object_fields(*port)[i + 1] = callbacks[i];
       object_fields(*port)[4] = rt->stack[first];
-      Value buffer = rt_bytes_new(rt, 4096);
+      ot_value buffer = oti_bytes_new(rt, 4096);
       ok = buffer != 0;
       if (ok) {
         object_fields(*port)[0] = buffer;
@@ -275,61 +275,61 @@ static Value make_custom(Runtime* rt, Value* port, size_t first, size_t count, b
       }
     }
   }
-  roots_pop(&rt->heap, &roots);
+  oti_roots_pop(&rt->heap, &roots);
   return ok ? *port : 0;
 }
 
-static Value open_file(Runtime* rt, Value* port, size_t first, size_t count, bool input) {
-  if (count < 1 || count > 2 || !rt_kind(rt->stack[first], K_STRING) ||
-      (count == 2 && !rt_kind(rt->stack[first + 1], K_TABLE)))
+static ot_value open_file(ot_runtime* rt, ot_value* port, size_t first, size_t count, bool input) {
+  if (count < 1 || count > 2 || !oti_kind(rt->stack[first], K_STRING) ||
+      (count == 2 && !oti_kind(rt->stack[first + 1], K_TABLE)))
     return fail(rt, "file port needs a path and optional options table");
   size_t size = 4096;
   unsigned flags =
-      input ? RUNTIME_IO_READ : RUNTIME_IO_WRITE | RUNTIME_IO_CREATE | RUNTIME_IO_TRUNCATE;
+      input ? OT_IO_READ : OT_IO_WRITE | OT_IO_CREATE | OT_IO_TRUNCATE;
   if (count == 2) {
-    Value key = rt_intern(rt, K_KEYWORD, ":buffer-size", 12);
+    ot_value key = oti_intern(rt, K_KEYWORD, ":buffer-size", 12);
     if (!key) return 0;
-    Value option = rt_table_get(rt, rt->stack[first + 1], key, V_NIL);
+    ot_value option = oti_table_get(rt, rt->stack[first + 1], key, OT_NIL);
     if (!option) return 0;
-    if (option != V_NIL && (!natural(option, &size) || !size))
+    if (option != OT_NIL && (!natural(option, &size) || !size))
       return fail(rt, "invalid port buffer size");
     if (!input) {
-      key = rt_intern(rt, K_KEYWORD, ":if-exists", 10);
+      key = oti_intern(rt, K_KEYWORD, ":if-exists", 10);
       if (!key) return 0;
-      option = rt_table_get(rt, rt->stack[first + 1], key, V_NIL);
+      option = oti_table_get(rt, rt->stack[first + 1], key, OT_NIL);
       if (!option) return 0;
-      if (option != V_NIL) {
-        if (!rt_kind(option, K_KEYWORD)) return fail(rt, "invalid if-exists option");
-        const char* name = (char*)rt_bytes_data(option);
+      if (option != OT_NIL) {
+        if (!oti_kind(option, K_KEYWORD)) return fail(rt, "invalid if-exists option");
+        const char* name = (char*)oti_bytes_data(option);
         if (!strcmp(name, ":append")) {
-          flags = RUNTIME_IO_WRITE | RUNTIME_IO_CREATE | RUNTIME_IO_APPEND;
+          flags = OT_IO_WRITE | OT_IO_CREATE | OT_IO_APPEND;
         } else if (!strcmp(name, ":error"))
-          flags = RUNTIME_IO_WRITE | RUNTIME_IO_CREATE | RUNTIME_IO_EXCLUSIVE;
+          flags = OT_IO_WRITE | OT_IO_CREATE | OT_IO_EXCLUSIVE;
         else if (strcmp(name, ":truncate")) return fail(rt, "invalid if-exists option");
       }
     }
   }
   if (size < 4) size = 4;
-  size_t length = rt_bytes_length(rt->stack[first]);
-  if (memchr(rt_bytes_data(rt->stack[first]), 0, length)) return fail(rt, "file path contains NUL");
-  *port = rt_alloc(rt, K_PORT, 5, sizeof(Port));
+  size_t length = oti_bytes_length(rt->stack[first]);
+  if (memchr(oti_bytes_data(rt->stack[first]), 0, length)) return fail(rt, "file path contains NUL");
+  *port = oti_alloc(rt, K_PORT, 5, sizeof(oti_port));
   if (!*port) return 0;
   object_fields(*port)[4] = rt->stack[first];
-  Value buffer = rt_bytes_new(rt, size);
+  ot_value buffer = oti_bytes_new(rt, size);
   if (!buffer) return 0;
   object_fields(*port)[0] = buffer;
   info(*port)->kind = 4;
   info(*port)->input = input;
   info(*port)->capacity = size;
   port_host(rt, *port);
-  Port* p = info(*port);
+  oti_port* p = info(*port);
   host_begin(rt, *port);
   int error =
-      p->host.open(p->userdata, (char*)rt_bytes_data(object_fields(*port)[4]), flags, &p->handle);
+      p->host.open(p->userdata, (char*)oti_bytes_data(object_fields(*port)[4]), flags, &p->handle);
   bool entered = host_end(rt, *port);
   if (error) {
     if (!entered) return 0;
-    return rt_file_error(rt, input ? "open-input-file" : "open-output-file",
+    return oti_file_error(rt, input ? "open-input-file" : "open-output-file",
                          object_fields(*port)[4], error);
   }
   if (!entered || !register_port(rt, *port)) {
@@ -343,18 +343,18 @@ static Value open_file(Runtime* rt, Value* port, size_t first, size_t count, boo
 }
 
 /* Destruction invokes no Otium code. Native hosts may drain buffered output;
- * failures are ignored here, so embedders should call runtime_flush_ports first. */
-void rt_ports_destroy(Runtime* rt) {
+ * failures are ignored here, so embedders should call ot_flush_ports first. */
+void oti_ports_destroy(ot_runtime* rt) {
   for (size_t i = 0; i < rt->open_port_count; i++) {
-    Value port = rt->open_ports[i];
-    Port* p = info(port);
+    ot_value port = rt->open_ports[i];
+    oti_port* p = info(port);
     if ((p->kind != 2 && p->kind != 4) || p->closed) continue;
     host_begin(rt, port);
     if (!p->input) {
       while (p->offset < p->length) {
         size_t left = p->length - p->offset;
         long n = p->host.write(p->userdata, p->handle,
-                               rt_bytes_data(object_fields(port)[0]) + p->offset, left);
+                               oti_bytes_data(object_fields(port)[0]) + p->offset, left);
         if (n <= 0 || (size_t)n > left) break;
         p->offset += (size_t)n;
       }
@@ -366,73 +366,73 @@ void rt_ports_destroy(Runtime* rt) {
   }
 }
 
-static Value standard(Runtime* rt, unsigned which) {
-  if (rt->standard_ports[which] == V_NIL) {
-    Value p = rt_alloc(rt, K_PORT, 5, sizeof(Port));
+static ot_value standard(ot_runtime* rt, unsigned which) {
+  if (rt->standard_ports[which] == OT_NIL) {
+    ot_value p = oti_alloc(rt, K_PORT, 5, sizeof(oti_port));
     if (!p) return 0;
-    Roots roots;
-    roots_push(&rt->heap, &roots, &p, 1);
+    oti_roots roots;
+    oti_roots_push(&rt->heap, &roots, &p, 1);
     info(p)->kind = 2;
     info(p)->input = which == 0;
     info(p)->handle = (intptr_t)which;
     info(p)->capacity = 4096;
     port_host(rt, p);
-    Value buffer = rt_bytes_new(rt, 4096);
+    ot_value buffer = oti_bytes_new(rt, 4096);
     bool ok = buffer != 0;
     if (ok) {
       object_fields(p)[0] = buffer;
       ok = register_port(rt, p);
     }
     if (ok) rt->standard_ports[which] = p;
-    roots_pop(&rt->heap, &roots);
+    oti_roots_pop(&rt->heap, &roots);
     if (!ok) return 0;
   }
   return rt->standard_ports[which];
 }
 
-static Value current_port(Runtime* rt, unsigned which) {
+static ot_value current_port(ot_runtime* rt, unsigned which) {
   const char* name = which == 0   ? "current-input-port"
                      : which == 1 ? "current-output-port"
                                   : "current-error-port";
-  uint32_t index = rt_binding_global(rt, 0, name, strlen(name), false);
+  uint32_t index = oti_binding_global(rt, 0, name, strlen(name), false);
   if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND) return standard(rt, which);
-  Value p = rt->globals[index];
-  if (!rt_kind(p, K_PARAM)) return fail(rt, "current port binding must be a param");
-  return rt_param_call(rt, p, 0);
+  ot_value p = rt->globals[index];
+  if (!oti_kind(p, K_PARAM)) return fail(rt, "current port binding must be a param");
+  return oti_param_call(rt, p, 0);
 }
 
-static Value current(Runtime* rt, bool input) { return current_port(rt, input ? 0 : 1); }
+static ot_value current(ot_runtime* rt, bool input) { return current_port(rt, input ? 0 : 1); }
 
-static bool check(Runtime* rt, Value p, bool input) {
-  if (!rt_kind(p, K_PORT) || info(p)->input != input)
-    return rt_error(rt, input ? "expected input port" : "expected output port");
-  if (info(p)->busy) return rt_error(rt, "port callback reentry");
+static bool check(ot_runtime* rt, ot_value p, bool input) {
+  if (!oti_kind(p, K_PORT) || info(p)->input != input)
+    return oti_error(rt, input ? "expected input port" : "expected output port");
+  if (info(p)->busy) return oti_error(rt, "port callback reentry");
   if (info(p)->closed) {
-    rt_io_error(rt, ":closed");
+    oti_io_error(rt, ":closed");
     return false;
   }
   return true;
 }
 
-static int peek(Runtime* rt, Value* port, size_t ahead) {
-  Port* s = info(*port);
+static int peek(ot_runtime* rt, ot_value* port, size_t ahead) {
+  oti_port* s = info(*port);
   if (s->kind < 2)
     return ahead < s->length - s->position
-               ? rt_bytes_data(object_fields(*port)[0])[s->position + ahead]
+               ? oti_bytes_data(object_fields(*port)[0])[s->position + ahead]
                : -1;
   while (info(*port)->length - info(*port)->offset <= ahead) {
     s = info(*port);
     if (s->eof) return -1;
     size_t remaining = s->length - s->offset;
-    unsigned char* data = rt_bytes_data(object_fields(*port)[0]);
+    unsigned char* data = oti_bytes_data(object_fields(*port)[0]);
     memmove(data, data + s->offset, remaining);
     s->offset = 0;
     s->length = remaining;
     size_t available = s->capacity - remaining, n;
     if (s->kind == 3) {
-      Value result = callback(rt, port, 1, true, remaining, s->capacity);
+      ot_value result = callback(rt, port, 1, true, remaining, s->capacity);
       if (!result) return -2;
-      if (result == V_EOF) {
+      if (result == OT_EOF) {
         info(*port)->eof = true;
         return -1;
       }
@@ -451,16 +451,16 @@ static int peek(Runtime* rt, Value* port, size_t ahead) {
     }
     info(*port)->length += n;
   }
-  return rt_bytes_data(object_fields(*port)[0])[info(*port)->offset + ahead];
+  return oti_bytes_data(object_fields(*port)[0])[info(*port)->offset + ahead];
 }
 
-static void consume(Value p, size_t n) {
-  Port* s = info(p);
+static void consume(ot_value p, size_t n) {
+  oti_port* s = info(p);
   s->position += n;
   if (s->kind >= 2) s->offset += n;
 }
 
-static int character(Runtime* rt, Value* port, uint32_t* cp, size_t* width) {
+static int character(ot_runtime* rt, ot_value* port, uint32_t* cp, size_t* width) {
   int first = peek(rt, port, 0);
   if (first < 0) return first;
   unsigned char bytes[4];
@@ -477,11 +477,11 @@ static int character(Runtime* rt, Value* port, uint32_t* cp, size_t* width) {
     if (b < 0) valid = false;
     else bytes[i] = (unsigned char)b;
   }
-  if (!valid || !rt_utf8_scalar(bytes, 0, *width)) {
-    rt_decode_error(rt, info((*port))->position);
+  if (!valid || !oti_utf8_scalar(bytes, 0, *width)) {
+    oti_decode_error(rt, info((*port))->position);
     return -2;
   }
-  rt_utf8_next((char*)bytes, *width, 0, cp);
+  oti_utf8_next((char*)bytes, *width, 0, cp);
   return 0;
 }
 
@@ -494,7 +494,7 @@ static bool datum_delimiter(uint32_t c) {
 }
 
 /* Only establish the boundary here; the shared reader validates the syntax. */
-static Value read_datum(Runtime* rt, Value* port) {
+static ot_value read_datum(ot_runtime* rt, ot_value* port) {
   enum { NORMAL, ATOM, STRING, ESCAPE, COMMENT, CHAR_FIRST, CHAR_TOKEN } mode = NORMAL;
 
   size_t depth = 0, length = 0, capacity = 0, token = 0;
@@ -502,7 +502,7 @@ static Value read_datum(Runtime* rt, Value* port) {
   bool started = false, comma = false, done = false;
   char* source = NULL;
   while (!done) {
-    if (!runtime_poll_interrupt(rt)) {
+    if (!ot_poll_interrupt(rt)) {
       free(source);
       return 0;
     }
@@ -571,29 +571,29 @@ static Value read_datum(Runtime* rt, Value* port) {
       free(source);
       return fail(rt, "port datum exceeds reader limit");
     }
-    if (!rt_grow(rt, (void**)&source, &capacity, length + width, 1)) {
+    if (!oti_grow(rt, (void**)&source, &capacity, length + width, 1)) {
       free(source);
       return 0;
     }
     char encoded[4];
-    size_t used = rt_utf8_encode(cp, encoded);
+    size_t used = oti_utf8_encode(cp, encoded);
     memcpy(source + length, encoded, used);
     length += used;
     consume((*port), width);
   }
-  Value result = started ? rt_read_source(rt, source, length) : V_EOF;
+  ot_value result = started ? oti_read_source(rt, source, length) : OT_EOF;
   free(source);
   return result;
 }
 
-static bool append(Runtime* rt, Value* port, const char* bytes, size_t n) {
+static bool append(ot_runtime* rt, ot_value* port, const char* bytes, size_t n) {
   if (!check(rt, (*port), false)) return false;
   if (info(*port)->kind >= 2) {
     while (n) {
       if (info(*port)->length == info(*port)->capacity && !flush(rt, port)) return false;
       size_t room = info(*port)->capacity - info(*port)->length;
       size_t take = n < room ? n : room;
-      memcpy(rt_bytes_data(object_fields(*port)[0]) + info(*port)->length, bytes, take);
+      memcpy(oti_bytes_data(object_fields(*port)[0]) + info(*port)->length, bytes, take);
       info(*port)->length += take;
       bytes += take;
       n -= take;
@@ -602,14 +602,14 @@ static bool append(Runtime* rt, Value* port, const char* bytes, size_t n) {
     return info(*port)->kind != 2 || flush(rt, port);
   }
   size_t length = info((*port))->length;
-  if (n > SIZE_MAX - length) return rt_error(rt, "port output too large");
+  if (n > SIZE_MAX - length) return oti_error(rt, "port output too large");
   if (length + n > info((*port))->capacity) {
     size_t capacity = info((*port))->capacity;
     if (capacity > SIZE_MAX / 2) capacity = length + n;
     else capacity *= 2;
     if (capacity < 64) capacity = 64;
     if (capacity < length + n) capacity = length + n;
-    Value data = rt_alloc(rt, K_BUFFER_DATA, 0, capacity);
+    ot_value data = oti_alloc(rt, K_BUFFER_DATA, 0, capacity);
     if (data) {
       if (length) memcpy(object_bytes(data), object_bytes(object_fields((*port))[0]), length);
       object_fields((*port))[0] = data;
@@ -622,8 +622,8 @@ static bool append(Runtime* rt, Value* port, const char* bytes, size_t n) {
   return true;
 }
 
-Value rt_port_print(Runtime* rt, unsigned id, size_t first, size_t count) {
-  Value p;
+ot_value oti_port_print(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+  ot_value p;
   if (id == B_PROCESS_WRITE_ERROR) {
     if (count != 1) return fail(rt, "write-error needs one argument");
     p = current_port(rt, 2);
@@ -643,31 +643,31 @@ Value rt_port_print(Runtime* rt, unsigned id, size_t first, size_t count) {
   if (!stream) return fail(rt, "out of host memory");
   for (size_t i = 0; i < count; i++) {
     if (i) fputc(' ', stream);
-    if (id == B_WRITE || id == B_WRITE_TO) runtime_write(rt, stream, rt->stack[first + i]);
-    else runtime_print(rt, stream, rt->stack[first + i]);
+    if (id == B_WRITE || id == B_WRITE_TO) ot_write(rt, stream, rt->stack[first + i]);
+    else ot_print(rt, stream, rt->stack[first + i]);
   }
   if (id == B_PRINTLN || id == B_NEWLINE) fputc('\n', stream);
   bool ok = !ferror(stream);
   if (fclose(stream)) ok = false;
-  Roots root;
-  roots_push(&rt->heap, &root, &p, 1);
+  oti_roots root;
+  oti_roots_push(&rt->heap, &root, &p, 1);
   if (ok) ok = append(rt, &p, bytes, length);
-  else rt_error(rt, "cannot format port output");
-  roots_pop(&rt->heap, &root);
+  else oti_error(rt, "cannot format port output");
+  oti_roots_pop(&rt->heap, &root);
   free(bytes);
-  return ok ? V_NIL : 0;
+  return ok ? OT_NIL : 0;
 }
 
-static bool range(Runtime* rt, size_t first, size_t count, size_t n, size_t* start, size_t* end) {
+static bool range(ot_runtime* rt, size_t first, size_t count, size_t n, size_t* start, size_t* end) {
   *start = 0;
   *end = n;
   if ((count && !natural(rt->stack[first], start)) ||
       (count > 1 && !natural(rt->stack[first + 1], end)) || *start > *end || *end > n)
-    return rt_error(rt, "invalid port slice");
+    return oti_error(rt, "invalid port slice");
   return true;
 }
 
-static Value port_builtin(Runtime* rt, unsigned id, size_t first, size_t count, Value live[2]) {
+static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count, ot_value live[2]) {
   if (id >= B_OPEN_INPUT_FILE)
     return open_file(rt, &live[0], first, count,
                      id == B_OPEN_INPUT_FILE || id == B_OPEN_BINARY_INPUT);
@@ -676,15 +676,15 @@ static Value port_builtin(Runtime* rt, unsigned id, size_t first, size_t count, 
   if (id == B_OPEN_PORTS) {
     if (count) return fail(rt, "open-ports takes no arguments");
     size_t base = rt->sp, n = rt->open_port_count;
-    if (n > rt->stack_limit - base || !rt_stack(rt, base + n))
+    if (n > rt->stack_limit - base || !oti_stack(rt, base + n))
       return fail(rt, "VM stack limit exceeded");
-    if (n) memcpy(rt->stack + base, rt->open_ports, n * sizeof(Value));
+    if (n) memcpy(rt->stack + base, rt->open_ports, n * sizeof(ot_value));
     rt->sp = rt->stack_roots.count = base + n;
-    Value result = rt_collection_builtin(rt, B_ARRAY, base, n);
+    ot_value result = oti_collection_builtin(rt, B_ARRAY, base, n);
     rt->sp = rt->stack_roots.count = base;
     return result;
   }
-  if (id == B_DISPLAY_TO || id == B_WRITE_TO) return rt_port_print(rt, id, first, count);
+  if (id == B_DISPLAY_TO || id == B_WRITE_TO) return oti_port_print(rt, id, first, count);
   if (id >= B_STDIN) {
     if (count) return fail(rt, "standard port takes no arguments");
     return standard(rt, id - B_STDIN);
@@ -692,11 +692,11 @@ static Value port_builtin(Runtime* rt, unsigned id, size_t first, size_t count, 
   if (id <= B_OUTPUT_OPEN) {
     if (count != 1) return fail(rt, "port predicate takes one argument");
     live[0] = rt->stack[first];
-    bool yes = rt_kind(live[0], K_PORT);
+    bool yes = oti_kind(live[0], K_PORT);
     if (yes && id != B_PORT_P)
       yes = info(live[0])->input == (id == B_INPUT_P || id == B_INPUT_OPEN);
     if (yes && (id == B_INPUT_OPEN || id == B_OUTPUT_OPEN)) yes = !info(live[0])->closed;
-    return yes ? V_TRUE : V_FALSE;
+    return yes ? OT_TRUE : OT_FALSE;
   }
   if (id == B_OPEN_INPUT_STRING || id == B_OPEN_INPUT_BYTES || id == B_OPEN_OUTPUT_STRING ||
       id == B_OPEN_OUTPUT_BYTES) {
@@ -705,19 +705,19 @@ static Value port_builtin(Runtime* rt, unsigned id, size_t first, size_t count, 
     if (count != (input ? 1u : 0u)) return fail(rt, "wrong number of port constructor arguments");
     size_t n = 0;
     if (input) {
-      if (!rt_kind(rt->stack[first], string ? K_STRING : K_BYTEVECTOR))
+      if (!oti_kind(rt->stack[first], string ? K_STRING : K_BYTEVECTOR))
         return fail(rt, "invalid input source");
-      n = rt_bytes_length(rt->stack[first]);
+      n = oti_bytes_length(rt->stack[first]);
     }
-    live[0] = rt_alloc(rt, K_PORT, 5, sizeof(Port));
+    live[0] = oti_alloc(rt, K_PORT, 5, sizeof(oti_port));
     if (!live[0]) return 0;
     info(live[0])->input = input;
     info(live[0])->kind = string ? 0 : 1;
     info(live[0])->length = n;
     if (input) {
-      Value bytes = rt_bytes_new(rt, n);
+      ot_value bytes = oti_bytes_new(rt, n);
       if (bytes) {
-        if (n) memcpy(rt_bytes_data(bytes), rt_bytes_data(rt->stack[first]), n);
+        if (n) memcpy(oti_bytes_data(bytes), oti_bytes_data(rt->stack[first]), n);
         object_fields(live[0])[0] = bytes;
       }
       if (!bytes) return 0;
@@ -725,29 +725,29 @@ static Value port_builtin(Runtime* rt, unsigned id, size_t first, size_t count, 
     return live[0];
   }
   if (id == B_CLOSE_PORT || id == B_CLOSE_INPUT || id == B_CLOSE_OUTPUT) {
-    if (count != 1 || !rt_kind(rt->stack[first], K_PORT)) return fail(rt, "close needs a port");
+    if (count != 1 || !oti_kind(rt->stack[first], K_PORT)) return fail(rt, "close needs a port");
     live[0] = rt->stack[first];
     if ((id == B_CLOSE_INPUT && !info(live[0])->input) ||
         (id == B_CLOSE_OUTPUT && info(live[0])->input))
       return fail(rt, "wrong port direction");
-    if (info(live[0])->closed) return V_NIL;
+    if (info(live[0])->closed) return OT_NIL;
     if (info(live[0])->busy) return fail(rt, "port callback reentry");
     if (!info(live[0])->input && !flush(rt, &live[0])) return 0;
     if (info(live[0])->kind == 3 && !callback(rt, &live[0], 3, false, 0, 0)) return 0;
     int error = 0;
     if (info(live[0])->kind == 4) {
-      Port* p = info(live[0]);
+      oti_port* p = info(live[0]);
       host_begin(rt, live[0]);
       error = p->host.close(p->userdata, p->handle);
       bool entered = host_end(rt, live[0]);
       info(live[0])->closed = true;
       unregister_port(rt, live[0]);
       if (!entered) return 0;
-      return error ? rt_file_error(rt, "close-port", object_fields(live[0])[4], error) : V_NIL;
+      return error ? oti_file_error(rt, "close-port", object_fields(live[0])[4], error) : OT_NIL;
     }
     info(live[0])->closed = true;
     unregister_port(rt, live[0]);
-    return error ? rt_file_error(rt, "close-port", object_fields(live[0])[4], error) : V_NIL;
+    return error ? oti_file_error(rt, "close-port", object_fields(live[0])[4], error) : OT_NIL;
   }
   if (id == B_GET_OUTPUT_STRING || id == B_GET_OUTPUT_BYTES) {
     if (count != 1) return fail(rt, "output extraction needs a port");
@@ -759,20 +759,20 @@ static Value port_builtin(Runtime* rt, unsigned id, size_t first, size_t count, 
     char* copy = malloc(n + 1);
     if (!copy) return fail(rt, "out of host memory");
     if (n) memcpy(copy, object_bytes(object_fields(live[0])[0]), n);
-    Value result;
+    ot_value result;
     if (id == B_GET_OUTPUT_STRING) {
       for (size_t i = 0; i < n;) {
-        size_t next = rt_utf8_scalar((unsigned char*)copy, i, n);
+        size_t next = oti_utf8_scalar((unsigned char*)copy, i, n);
         if (!next) {
           free(copy);
-          return rt_decode_error(rt, i);
+          return oti_decode_error(rt, i);
         }
         i = next;
       }
-      result = rt_text(rt, K_STRING, copy, n);
+      result = oti_text(rt, K_STRING, copy, n);
     } else {
-      result = rt_bytes_new(rt, n);
-      if (result && n) memcpy(rt_bytes_data(result), copy, n);
+      result = oti_bytes_new(rt, n);
+      if (result && n) memcpy(oti_bytes_data(result), copy, n);
     }
     free(copy);
     return result;
@@ -791,10 +791,10 @@ static Value port_builtin(Runtime* rt, unsigned id, size_t first, size_t count, 
   if (count < min || count > max) return fail(rt, "wrong number of port arguments");
   live[0] = count > min ? rt->stack[first + min] : current(rt, !output);
   if (!live[0] || !check(rt, live[0], !output)) return 0;
-  live[1] = payload ? rt->stack[first] : V_NIL;
+  live[1] = payload ? rt->stack[first] : OT_NIL;
   if (output) {
     if (id == B_FLUSH_PORT) {
-      return flush(rt, &live[0]) ? V_NIL : 0;
+      return flush(rt, &live[0]) ? OT_NIL : 0;
     }
     char one[4];
     const char* source = one;
@@ -805,18 +805,18 @@ static Value port_builtin(Runtime* rt, unsigned id, size_t first, size_t count, 
       one[0] = (char)byte;
     } else if (id == B_WRITE_CHAR) {
       if ((live[1] & 255) != TAG_CHAR) return fail(rt, "expected character");
-      n = rt_utf8_encode((uint32_t)(live[1] >> 8), one);
+      n = oti_utf8_encode((uint32_t)(live[1] >> 8), one);
     } else {
       bool string = id == B_WRITE_STRING;
-      if (!rt_kind(live[1], string ? K_STRING : K_BYTEVECTOR))
+      if (!oti_kind(live[1], string ? K_STRING : K_BYTEVECTOR))
         return fail(rt, "invalid output data");
-      size_t length = rt_bytes_length(live[1]), items = length;
-      source = (char*)rt_bytes_data(live[1]);
+      size_t length = oti_bytes_length(live[1]), items = length;
+      source = (char*)oti_bytes_data(live[1]);
       if (string) {
         items = 0;
         for (size_t i = 0; i < length; items++) {
           uint32_t cp;
-          i = rt_utf8_next(source, length, i, &cp);
+          i = oti_utf8_next(source, length, i, &cp);
         }
       }
       size_t start, end;
@@ -824,9 +824,9 @@ static Value port_builtin(Runtime* rt, unsigned id, size_t first, size_t count, 
       if (string) {
         size_t lo = 0, hi;
         uint32_t cp;
-        for (size_t i = 0; i < start; i++) lo = rt_utf8_next(source, length, lo, &cp);
+        for (size_t i = 0; i < start; i++) lo = oti_utf8_next(source, length, lo, &cp);
         hi = lo;
-        for (size_t i = start; i < end; i++) hi = rt_utf8_next(source, length, hi, &cp);
+        for (size_t i = start; i < end; i++) hi = oti_utf8_next(source, length, hi, &cp);
         start = lo;
         end = hi;
       }
@@ -838,40 +838,40 @@ static Value port_builtin(Runtime* rt, unsigned id, size_t first, size_t count, 
     memcpy(copy, source, n);
     bool ok = append(rt, &live[0], copy, n);
     free(copy);
-    return ok ? V_NIL : 0;
+    return ok ? OT_NIL : 0;
   }
   if (id == B_READ_U8 || id == B_PEEK_U8) {
     int c = peek(rt, &live[0], 0);
     if (c == -2) return 0;
-    if (c == -1) return V_EOF;
+    if (c == -1) return OT_EOF;
     if (id == B_READ_U8) consume(live[0], 1);
-    return value_int(c);
+    return ot_int(c);
   }
   if (id == B_READ_CHAR || id == B_PEEK_CHAR) {
     uint32_t cp;
     size_t width;
     int result = character(rt, &live[0], &cp, &width);
-    if (result < 0) return result == -1 ? V_EOF : 0;
+    if (result < 0) return result == -1 ? OT_EOF : 0;
     if (id == B_READ_CHAR) consume(live[0], width);
-    return ((Value)cp << 8) | TAG_CHAR;
+    return ((ot_value)cp << 8) | TAG_CHAR;
   }
   size_t limit = SIZE_MAX, start = 0, end = 0;
   if (id == B_READ_CHARACTERS || id == B_READ_BYTES) {
     if (!natural(live[1], &limit)) return fail(rt, "expected nonnegative count");
   }
   if (id == B_READ_BYTES_MUT) {
-    if (!rt_kind(live[1], K_BYTEVECTOR)) return fail(rt, "expected bytevector");
-    if (!range(rt, first + 2, count > 2 ? count - 2 : 0, rt_bytes_length(live[1]), &start, &end))
+    if (!oti_kind(live[1], K_BYTEVECTOR)) return fail(rt, "expected bytevector");
+    if (!range(rt, first + 2, count > 2 ? count - 2 : 0, oti_bytes_length(live[1]), &start, &end))
       return 0;
     limit = end - start;
   }
   bool scan = id >= B_READ_UNTIL;
-  if (scan && !rt_kind(live[1], K_STRING)) return fail(rt, "expected character set");
+  if (scan && !oti_kind(live[1], K_STRING)) return fail(rt, "expected character set");
   char* bytes = NULL;
   size_t n = 0, capacity = 0, items = 0;
   bool binary = id == B_READ_BYTES || id == B_READ_BYTES_MUT;
   while (items < limit) {
-    if (!runtime_poll_interrupt(rt)) {
+    if (!ot_poll_interrupt(rt)) {
       free(bytes);
       return 0;
     }
@@ -886,11 +886,11 @@ static Value port_builtin(Runtime* rt, unsigned id, size_t first, size_t count, 
     if (binary) cp = (uint32_t)result;
     if (scan) {
       bool found = false;
-      size_t len = rt_bytes_length(live[1]);
-      const char* set = (char*)rt_bytes_data(live[1]);
+      size_t len = oti_bytes_length(live[1]);
+      const char* set = (char*)oti_bytes_data(live[1]);
       for (size_t i = 0; i < len;) {
         uint32_t c;
-        i = rt_utf8_next(set, len, i, &c);
+        i = oti_utf8_next(set, len, i, &c);
         if (c == cp) found = true;
       }
       if (found == (id == B_READ_UNTIL)) break;
@@ -902,51 +902,51 @@ static Value port_builtin(Runtime* rt, unsigned id, size_t first, size_t count, 
       break;
     }
     if (id == B_READ_BYTES_MUT) {
-      rt_bytes_data(live[1])[start + items - 1] = (unsigned char)cp;
+      oti_bytes_data(live[1])[start + items - 1] = (unsigned char)cp;
       continue;
     }
     if (id == B_SKIP_WHILE) continue;
     char encoded[4];
-    size_t used = binary ? 1 : rt_utf8_encode(cp, encoded);
+    size_t used = binary ? 1 : oti_utf8_encode(cp, encoded);
     if (binary) encoded[0] = (char)cp;
-    if (!rt_grow(rt, (void**)&bytes, &capacity, n + used, 1)) {
+    if (!oti_grow(rt, (void**)&bytes, &capacity, n + used, 1)) {
       free(bytes);
       return 0;
     }
     memcpy(bytes + n, encoded, used);
     n += used;
   }
-  if (id == B_READ_BYTES_MUT) return items || !limit ? value_int((intptr_t)items) : V_EOF;
-  if (id == B_SKIP_WHILE) return value_int((intptr_t)items);
+  if (id == B_READ_BYTES_MUT) return items || !limit ? ot_int((intptr_t)items) : OT_EOF;
+  if (id == B_SKIP_WHILE) return ot_int((intptr_t)items);
   if (!items && limit && (id == B_READ_LINE || id == B_READ_CHARACTERS || id == B_READ_BYTES)) {
     free(bytes);
-    return V_EOF;
+    return OT_EOF;
   }
-  Value result;
+  ot_value result;
   if (id == B_READ_BYTES) {
-    result = rt_bytes_new(rt, n);
-    if (result && n) memcpy(rt_bytes_data(result), bytes, n);
-  } else result = rt_text(rt, K_STRING, bytes ? bytes : "", n);
+    result = oti_bytes_new(rt, n);
+    if (result && n) memcpy(oti_bytes_data(result), bytes, n);
+  } else result = oti_text(rt, K_STRING, bytes ? bytes : "", n);
   free(bytes);
   return result;
 }
 
-Value rt_port_builtin(Runtime* rt, unsigned id, size_t first, size_t count) {
-  Value live[2] = {V_NIL, V_NIL};
-  Roots roots;
-  roots_push(&rt->heap, &roots, live, 2);
-  Value result = port_builtin(rt, id, first, count, live);
-  roots_pop(&rt->heap, &roots);
+ot_value oti_port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+  ot_value live[2] = {OT_NIL, OT_NIL};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, live, 2);
+  ot_value result = port_builtin(rt, id, first, count, live);
+  oti_roots_pop(&rt->heap, &roots);
   return result;
 }
 
-bool runtime_flush_ports(Runtime* rt) {
-  if (!rt_host_entry(rt)) return false;
+bool ot_flush_ports(ot_runtime* rt) {
+  if (!oti_host_entry(rt)) return false;
   if (rt->frame_count || rt->evaluating || rt->compiling || rt->eval_depth)
-    return rt_error(rt, "port flushing requires an idle runtime");
-  Value saved[] = {rt->condition_values[0], rt->restart_transfer[0], rt->restart_transfer[1]};
-  Roots state_root;
-  roots_push(&rt->heap, &state_root, saved, 3);
+    return oti_error(rt, "port flushing requires an idle runtime");
+  ot_value saved[] = {rt->condition_values[0], rt->restart_transfer[0], rt->restart_transfer[1]};
+  oti_roots state_root;
+  oti_roots_push(&rt->heap, &state_root, saved, 3);
   char error[sizeof(rt->error)];
   memcpy(error, rt->error, sizeof(error));
   const char* code = rt->error_code;
@@ -957,23 +957,23 @@ bool runtime_flush_ports(Runtime* rt) {
   rt->error[0] = 0;
   rt->error_code = NULL;
   rt->raised = rt->signaled = rt->restart_pending = rt->exit_pending = rt->interrupted = false;
-  rt->condition_values[0] = rt->restart_transfer[0] = rt->restart_transfer[1] = V_NIL;
+  rt->condition_values[0] = rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
   size_t count = rt->open_port_count;
-  Value* ports = count ? malloc(count * sizeof(Value)) : NULL;
+  ot_value* ports = count ? malloc(count * sizeof(ot_value)) : NULL;
   bool ok = !count || ports;
-  if (!ok) rt_error(rt, "out of host memory");
+  if (!ok) oti_error(rt, "out of host memory");
   else {
-    if (count) memcpy(ports, rt->open_ports, count * sizeof(Value));
-    Roots roots;
-    roots_push(&rt->heap, &roots, ports, count);
+    if (count) memcpy(ports, rt->open_ports, count * sizeof(ot_value));
+    oti_roots roots;
+    oti_roots_push(&rt->heap, &roots, ports, count);
     for (size_t i = 0; ok && i < count; i++) {
-      if (!runtime_poll_interrupt(rt)) {
+      if (!ot_poll_interrupt(rt)) {
         ok = false;
         break;
       }
       if (!info(ports[i])->input && !info(ports[i])->closed) ok = flush(rt, &ports[i]);
     }
-    roots_pop(&rt->heap, &roots);
+    oti_roots_pop(&rt->heap, &roots);
   }
   free(ports);
   if (ok) {
@@ -990,6 +990,6 @@ bool runtime_flush_ports(Runtime* rt) {
     rt->restart_transfer[0] = saved[1];
     rt->restart_transfer[1] = saved[2];
   }
-  roots_pop(&rt->heap, &state_root);
+  oti_roots_pop(&rt->heap, &state_root);
   return ok;
 }

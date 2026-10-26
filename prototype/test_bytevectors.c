@@ -3,20 +3,20 @@
 #include <stdlib.h>
 #include <string.h>
 
-static Value eval(Runtime* rt, const char* source) {
-  Value result;
-  if (!runtime_eval(rt, source, strlen(source), &result)) {
-    fprintf(stderr, "%s\n%s\n", source, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* source) {
+  ot_value result;
+  if (!ot_eval(rt, source, strlen(source), &result)) {
+    fprintf(stderr, "%s\n%s\n", source, ot_error(rt));
     abort();
   }
   return result;
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
-  runtime_gc_stress(rt, true);
+  assert(ot_load_core(rt, "../lib"));
+  ot_gc_stress(rt, true);
   FILE* file = fopen("../tests/library/bytevectors.ot", "rb");
   assert(file);
   assert(!fseek(file, 0, SEEK_END));
@@ -51,7 +51,7 @@ int main(void) {
       "(and (eq? (get saved-table saved-bytes) :found) (= (bytevector-u8-ref saved-bytes 4095) "
       "255))"};
   for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); i++)
-    assert(eval(rt, checks[i]) == V_TRUE);
-  runtime_destroy(rt);
+    assert(eval(rt, checks[i]) == OT_TRUE);
+  ot_destroy(rt);
   puts("bytevector collection and UTF-8 tests passed");
 }

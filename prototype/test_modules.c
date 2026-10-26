@@ -5,19 +5,19 @@
 #include <string.h>
 #include <unistd.h>
 
-static Value eval(Runtime* rt, const char* source) {
-  Value result;
-  if (!runtime_eval(rt, source, strlen(source), &result)) {
-    fprintf(stderr, "%s\n%s\n", source, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* source) {
+  ot_value result;
+  if (!ot_eval(rt, source, strlen(source), &result)) {
+    fprintf(stderr, "%s\n%s\n", source, ot_error(rt));
     abort();
   }
   return result;
 }
 
-static void rejects(Runtime* rt, const char* source, const char* message) {
-  Value result;
-  if (runtime_eval(rt, source, strlen(source), &result) || !strstr(runtime_error(rt), message)) {
-    fprintf(stderr, "expected %s: %s\n%s\n", message, source, runtime_error(rt));
+static void rejects(ot_runtime* rt, const char* source, const char* message) {
+  ot_value result;
+  if (ot_eval(rt, source, strlen(source), &result) || !strstr(ot_error(rt), message)) {
+    fprintf(stderr, "expected %s: %s\n%s\n", message, source, ot_error(rt));
     abort();
   }
 }
@@ -52,36 +52,36 @@ int main(void) {
   assert(fputc(' ', large_file) != EOF);
   assert(!fclose(large_file));
   {
-    Runtime* rt = runtime_create(32768, 8192);
+    ot_runtime* rt = ot_create(32768, 8192);
     assert(rt);
-    runtime_gc_stress(rt, true);
-    assert(runtime_load_path(rt, "../tests/modules/first"));
-    assert(runtime_load_path(rt, "../tests/modules/second"));
-    assert(runtime_load_path(rt, directory));
-    assert(eval(rt, "(require choice suffix)") == V_NIL);
-    assert(eval(rt, "(equal? choice/value \"first-directory\")") == V_TRUE);
-    assert(eval(rt, "(equal? suffix/value \"ot\")") == V_TRUE);
+    ot_gc_stress(rt, true);
+    assert(ot_add_load_path(rt, "../tests/modules/first"));
+    assert(ot_add_load_path(rt, "../tests/modules/second"));
+    assert(ot_add_load_path(rt, directory));
+    assert(eval(rt, "(require choice suffix)") == OT_NIL);
+    assert(eval(rt, "(equal? choice/value \"first-directory\")") == OT_TRUE);
+    assert(eval(rt, "(equal? suffix/value \"ot\")") == OT_TRUE);
     rejects(rt, "(require retry)", "first load fails");
     assert(!strcmp(rt->namespaces[rt->current_namespace], "user"));
     eval(rt, "(require retry :as r :refer (value))");
-    assert(eval(rt, "(value)") == value_int(2));
-    assert(eval(rt, "r/state") == V_FALSE);
+    assert(eval(rt, "(value)") == ot_int(2));
+    assert(eval(rt, "r/state") == OT_FALSE);
     eval(rt, "(def (caller) (r/value)) (def saved r/value) (set! r/value (fn () 42))");
-    assert(eval(rt, "(caller)") == value_int(42));
-    assert(eval(rt, "(value)") == value_int(42));
-    assert(eval(rt, "(saved)") == value_int(2));
+    assert(eval(rt, "(caller)") == ot_int(42));
+    assert(eval(rt, "(value)") == ot_int(42));
+    assert(eval(rt, "(saved)") == ot_int(2));
     eval(rt, "(require (retry :as r :reload))");
-    assert(eval(rt, "(caller)") == value_int(3));
-    assert(eval(rt, "(value)") == value_int(3));
+    assert(eval(rt, "(caller)") == ot_int(3));
+    assert(eval(rt, "(value)") == ot_int(3));
     eval(rt, "(require '(retry :as quoted :refer (value)))");
-    assert(eval(rt, "(quoted/value)") == value_int(3));
+    assert(eval(rt, "(quoted/value)") == ot_int(3));
     size_t namespaces = rt->namespace_count, globals = rt->global_count;
     for (size_t i = 0; i < 1000; i++) eval(rt, "(require (retry :as r :refer (value)))");
     assert(rt->namespace_count == namespaces && rt->global_count == globals);
     for (size_t i = 0; i < 2; i++) {
       rejects(rt, "(require mismatch)", "namespace");
       rejects(rt, "(require cycle-a)", "circular");
-      assert(eval(rt, "(require missingns) missingns/partial") == value_int(1));
+      assert(eval(rt, "(require missingns) missingns/partial") == ot_int(1));
       assert(!strcmp(rt->namespaces[rt->current_namespace], "user"));
     }
     rejects(rt, "(def value 99)", "conflicts");
@@ -90,54 +90,54 @@ int main(void) {
     rejects(rt, "(require api :refer (missing))", "missing");
     rejects(rt, "(require api :as user)", "namespace name");
     eval(rt, "(ns consumer (:require (facade :as f) (api :refer (read))))");
-    assert(eval(rt, "(read)") == value_int(41));
-    assert(eval(rt, "(f/value)") == value_int(41));
+    assert(eval(rt, "(read)") == ot_int(41));
+    assert(eval(rt, "(f/value)") == ot_int(41));
     eval(rt, "(set! api/value 42)");
-    assert(eval(rt, "(read)") == value_int(42));
-    assert(eval(rt, "(facade/read)") == value_int(42));
+    assert(eval(rt, "(read)") == ot_int(42));
+    assert(eval(rt, "(facade/read)") == ot_int(42));
     eval(rt, "(require ffi :as foreign)");
-    assert(eval(rt, "(foreign/null? foreign/null)") == V_TRUE);
+    assert(eval(rt, "(foreign/null? foreign/null)") == OT_TRUE);
     eval(rt, "(ns retarget) (require suffix :as s :refer (value)) "
              "(def (old) value) (require choice :as s :refer (value))");
-    assert(eval(rt, "(equal? s/value \"first-directory\")") == V_TRUE);
-    assert(eval(rt, "(equal? value \"first-directory\")") == V_TRUE);
-    assert(eval(rt, "(equal? (old) \"ot\")") == V_TRUE);
+    assert(eval(rt, "(equal? s/value \"first-directory\")") == OT_TRUE);
+    assert(eval(rt, "(equal? value \"first-directory\")") == OT_TRUE);
+    assert(eval(rt, "(equal? (old) \"ot\")") == OT_TRUE);
     const char* bad[] = {"(require api :as)",      "(require api :refer x)",
                          "(require api :unknown)", "(require (api extra))",
                          "(require api . x)",      "(fn () (require api))",
                          "(let () (require api))"};
     for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++) {
-      Value result;
-      assert(!runtime_eval(rt, bad[i], strlen(bad[i]), &result));
+      ot_value result;
+      assert(!ot_eval(rt, bad[i], strlen(bad[i]), &result));
     }
     eval(rt, "(def saved-api api/read) (def (live-api) (api/read))");
     write_module(directory, "api", "(ns api) (def value 50) (error \"reload failed\")");
     rejects(rt, "(require api :reload)", "reload failed");
-    assert(eval(rt, "(live-api)") == value_int(50));
+    assert(eval(rt, "(live-api)") == ot_int(50));
     write_module(directory, "api", "(ns api) (def value 51) (def (read) (+ value 1))");
     eval(rt, "(require api)");
-    assert(eval(rt, "(live-api)") == value_int(52));
-    assert(eval(rt, "(saved-api)") == value_int(51));
-    assert(eval(rt, "api/secret") == value_int(7));
+    assert(eval(rt, "(live-api)") == ot_int(52));
+    assert(eval(rt, "(saved-api)") == ot_int(51));
+    assert(eval(rt, "api/secret") == ot_int(7));
     char api_path[512];
     snprintf(api_path, sizeof(api_path), "%s/api.ot", directory);
     assert(!unlink(api_path));
     rejects(rt, "(require api :reload)", "not found");
     write_module(directory, "api", "(ns api) (def value 53) (def (read) (+ value 1))");
-    assert(eval(rt, "(require api) (live-api)") == value_int(54));
-    assert(eval(rt, "(require)") == V_NIL);
-    assert(eval(rt, "(when #t 42)") == value_int(42));
-    assert(eval(rt, "(unless #t (error \"skipped\"))") == V_NIL);
+    assert(eval(rt, "(require api) (live-api)") == ot_int(54));
+    assert(eval(rt, "(require)") == OT_NIL);
+    assert(eval(rt, "(when #t 42)") == ot_int(42));
+    assert(eval(rt, "(unless #t (error \"skipped\"))") == OT_NIL);
     eval(rt, "(def (tail n) (when (> n 0) (tail (- n 1))))");
-    assert(eval(rt, "(tail 10000)") == V_NIL);
-    assert(runtime_max_frames(rt) < 8);
+    assert(eval(rt, "(tail 10000)") == OT_NIL);
+    assert(ot_max_frames(rt) < 8);
     rejects(rt, "(require chain0)", "nesting limit");
     write_module(directory, "chain0", "(ns chain0) (def recovered 42)");
-    assert(eval(rt, "(require chain0) chain0/recovered") == value_int(42));
+    assert(eval(rt, "(require chain0) chain0/recovered") == ot_int(42));
     write_module(directory, "chain0", "(ns chain0) (require chain1)");
     rejects(rt, "(require oversized)", "source budget");
     printf("module tests passed\n");
-    runtime_destroy(rt);
+    ot_destroy(rt);
     write_module(directory, "api", "(ns api) (def value 41) (def- secret 7) (def (read) value)");
   }
   const char* files[] = {"api", "facade", "missingns"};

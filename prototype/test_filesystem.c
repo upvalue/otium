@@ -5,24 +5,24 @@
 #include <string.h>
 #include <unistd.h>
 
-static void eval(Runtime* rt, const char* source, bool check) {
-  Value value;
-  if (!runtime_eval(rt, source, strlen(source), &value)) {
-    fprintf(stderr, "%s\n%s\n", source, runtime_error(rt));
+static void eval(ot_runtime* rt, const char* source, bool check) {
+  ot_value value;
+  if (!ot_eval(rt, source, strlen(source), &value)) {
+    fprintf(stderr, "%s\n%s\n", source, ot_error(rt));
     abort();
   }
-  if (check) assert(value == V_TRUE);
+  if (check) assert(value == OT_TRUE);
 }
 
 int main(void) {
   char root[] = "/tmp/otium-fs-XXXXXX";
   assert(mkdtemp(root));
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
-  runtime_gc_stress(rt, true);
+  assert(ot_load_core(rt, "../lib"));
+  ot_gc_stress(rt, true);
   const char* args[] = {root};
-  assert(runtime_set_arguments(rt, NULL, 1, args));
+  assert(ot_set_arguments(rt, NULL, 1, args));
   FILE* file = fopen("../tests/library/port-files.ot", "rb");
   assert(file);
   assert(!fseek(file, 0, SEEK_END));
@@ -68,7 +68,7 @@ int main(void) {
   assert(!unlink(target));
   snprintf(target, sizeof(target), "%s/directory", root);
   assert(!rmdir(target));
-  runtime_destroy(rt);
+  ot_destroy(rt);
   assert(!rmdir(root));
   puts("filesystem metadata, symlinks and public file checks passed");
 }

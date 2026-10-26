@@ -3,20 +3,20 @@
 #include <stdlib.h>
 #include <string.h>
 
-static Value eval(Runtime* rt, const char* source) {
-  Value value;
-  if (!runtime_eval(rt, source, strlen(source), &value)) {
-    fprintf(stderr, "%s: %s\n", source, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* source) {
+  ot_value value;
+  if (!ot_eval(rt, source, strlen(source), &value)) {
+    fprintf(stderr, "%s: %s\n", source, ot_error(rt));
     abort();
   }
   return value;
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
-  runtime_gc_stress(rt, true);
+  assert(ot_load_core(rt, "../lib"));
+  ot_gc_stress(rt, true);
   const char* checks[] = {
       "(equal? (substring \"aé🙂z\" 1 3) \"é🙂\")",
       "(equal? (substring \"ab\" -5 99) \"ab\")",
@@ -44,17 +44,17 @@ int main(void) {
       "(and (string<? \"a\\0b\" \"a\\0c\") (equal? (substring \"a\\0b\" 1 2) \"\\0\"))",
       "(equal? (name :hello) \"hello\")"};
   for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); i++)
-    assert(eval(rt, checks[i]) == V_TRUE);
+    assert(eval(rt, checks[i]) == OT_TRUE);
   const char* bad[] = {
       "(string-ref \"a\" -1)",      "(string-ref \"a\" 1)",     "(substring \"a\" 0.5)",
       "(string-split \"a\" \"\")",  "(string-split \"a\" nil)", "(list->string '(1))",
       "(list->string '(#\\a . 2))", "(integer->char 55296)",    "(integer->char 1114112)",
       "(buffer-push! \"a\" 1)",     "(string<? \"z\" \"a\" 1)"};
   for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++) {
-    Value value;
-    assert(!runtime_eval(rt, bad[i], strlen(bad[i]), &value));
-    assert(eval(rt, "(= (length b) 503)") == V_TRUE);
+    ot_value value;
+    assert(!ot_eval(rt, bad[i], strlen(bad[i]), &value));
+    assert(eval(rt, "(= (length b) 503)") == OT_TRUE);
   }
-  runtime_destroy(rt);
+  ot_destroy(rt);
   puts("string and buffer tests passed");
 }

@@ -74,22 +74,22 @@ int main(int argc, char** argv) {
   for (index = 0; index < sizeof(workloads) / sizeof(workloads[0]); index++)
     if (!strcmp(workloads[index].name, argv[1])) break;
   if (index == sizeof(workloads) / sizeof(workloads[0])) return 2;
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   if (!rt) return 1;
-  Value answer, argument = value_int(workloads[index].argument);
-  if (!runtime_eval(rt, workloads[index].source, strlen(workloads[index].source), &answer))
+  ot_value answer, argument = ot_int(workloads[index].argument);
+  if (!ot_eval(rt, workloads[index].source, strlen(workloads[index].source), &answer))
     goto error;
   double samples[5];
   for (size_t i = 0; i < 7; i++) {
     double start = now();
-    if (!runtime_call(rt, workloads[index].function, &argument, 1, &answer)) goto error;
+    if (!ot_call(rt, workloads[index].function, &argument, 1, &answer)) goto error;
     double elapsed = now() - start;
     if (workloads[index].real_result) {
-      if (!rt_kind(answer, K_FLOAT)) goto error;
+      if (!oti_kind(answer, K_FLOAT)) goto error;
       double real;
       memcpy(&real, object_bytes(answer), sizeof(real));
       if (real != (double)workloads[index].expected) goto error;
-    } else if (answer != value_int(workloads[index].expected)) goto error;
+    } else if (answer != ot_int(workloads[index].expected)) goto error;
     if (i >= 2) samples[i - 2] = elapsed;
   }
   struct rusage usage;
@@ -98,12 +98,12 @@ int main(int argc, char** argv) {
          "vm");
   for (size_t i = 0; i < 5; i++) printf("%s%.9f", i ? "," : "", samples[i]);
   printf("],\"ffi_signatures\":%zu,\"collections\":%zu,\"max_frames\":%zu,\"peak_rss_kib\":%ld}\n",
-         runtime_foreign_signatures(rt), runtime_collections(rt), runtime_max_frames(rt),
+         ot_foreign_signatures(rt), ot_collections(rt), ot_max_frames(rt),
          usage.ru_maxrss);
-  runtime_destroy(rt);
+  ot_destroy(rt);
   return 0;
 error:
-  fprintf(stderr, "%s: %s\n", workloads[index].name, runtime_error(rt));
-  runtime_destroy(rt);
+  fprintf(stderr, "%s: %s\n", workloads[index].name, ot_error(rt));
+  ot_destroy(rt);
   return 1;
 }

@@ -4,10 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-static Value eval(Runtime* rt, const char* source) {
-  Value value;
-  if (!runtime_eval(rt, source, strlen(source), &value)) {
-    fprintf(stderr, "%s: %s\n", source, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* source) {
+  ot_value value;
+  if (!ot_eval(rt, source, strlen(source), &value)) {
+    fprintf(stderr, "%s: %s\n", source, ot_error(rt));
     abort();
   }
   return value;
@@ -23,15 +23,15 @@ int main(void) {
     memcpy(&value, &bits, sizeof(value));
     if (!isfinite(value)) continue;
     char buffer[64];
-    size_t n = rt_format_float(value, buffer, sizeof(buffer));
+    size_t n = oti_format_float(value, buffer, sizeof(buffer));
     assert(n < sizeof(buffer));
     char* end;
     double parsed = strtod(buffer, &end);
     assert(!*end && !memcmp(&value, &parsed, sizeof(value)));
   }
-  Runtime* rt = runtime_create(32768, 8192);
+  ot_runtime* rt = ot_create(32768, 8192);
   assert(rt);
-  runtime_gc_stress(rt, true);
+  ot_gc_stress(rt, true);
   const char* checks[] = {
       "(= (+ 4611686018427387903 1) -4611686018427387904)",
       "(= (- -4611686018427387904 1) 4611686018427387903)",
@@ -60,7 +60,7 @@ int main(void) {
       "(and (float? (/ 1)) (= (/ 1) 1.0))",
       "(= (atan 0 -1) (acos -1))"};
   for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); i++)
-    assert(eval(rt, checks[i]) == V_TRUE);
+    assert(eval(rt, checks[i]) == OT_TRUE);
   const char* bad[] = {"(exact 2.5)",
                        "(exact (exp 1000))",
                        "(exact (sqrt -1))",
@@ -79,10 +79,10 @@ int main(void) {
                        "(bitwise-arithmetic-shift -1 63)",
                        "(bitwise-arithmetic-shift 1 4611686018427387903)"};
   for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++) {
-    Value value;
-    assert(!runtime_eval(rt, bad[i], strlen(bad[i]), &value));
-    assert(eval(rt, "(+ 20 22)") == value_int(42));
+    ot_value value;
+    assert(!ot_eval(rt, bad[i], strlen(bad[i]), &value));
+    assert(eval(rt, "(+ 20 22)") == ot_int(42));
   }
-  runtime_destroy(rt);
+  ot_destroy(rt);
   puts("numeric boundary tests passed");
 }

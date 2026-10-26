@@ -2,12 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char* type_name(Value value) {
-  if (value == V_NIL) return ":nil";
-  if (value == V_EMPTY) return ":null";
-  if (value == V_TRUE || value == V_FALSE) return ":boolean";
-  if (value == V_EOF) return ":eof";
-  if (value_is_int(value)) return ":int";
+static const char* type_name(ot_value value) {
+  if (value == OT_NIL) return ":nil";
+  if (value == OT_EMPTY) return ":null";
+  if (value == OT_TRUE || value == OT_FALSE) return ":boolean";
+  if (value == OT_EOF) return ":eof";
+  if (ot_is_int(value)) return ":int";
   if ((value & 255) == TAG_CHAR) return ":char";
   if ((value & 255) == TAG_BUILTIN) return ":function";
   if (value_is_ptr(value)) switch (object_kind(value)) {
@@ -38,64 +38,64 @@ static const char* type_name(Value value) {
   return ":native";
 }
 
-Value rt_reflection_builtin(Runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_reflection_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   size_t arity = id == B_EOF || id == B_CURRENT_NS ? 0 : 1;
   if (count != arity) {
-    rt_error(rt, "wrong number of arguments");
+    oti_error(rt, "wrong number of arguments");
     return 0;
   }
-  Value value = count ? rt->stack[first] : V_NIL;
+  ot_value value = count ? rt->stack[first] : OT_NIL;
   switch (id) {
-    case B_EOF: return V_EOF;
-    case B_EOF_P: return value == V_EOF ? V_TRUE : V_FALSE;
-    case B_BUFFER_P: return rt_kind(value, K_BUFFER) ? V_TRUE : V_FALSE;
+    case B_EOF: return OT_EOF;
+    case B_EOF_P: return value == OT_EOF ? OT_TRUE : OT_FALSE;
+    case B_BUFFER_P: return oti_kind(value, K_BUFFER) ? OT_TRUE : OT_FALSE;
     case B_TYPE: {
       const char* name = type_name(value);
-      return rt_intern(rt, K_KEYWORD, name, strlen(name));
+      return oti_intern(rt, K_KEYWORD, name, strlen(name));
     }
     case B_CURRENT_NS: {
       const char* name = rt->namespaces[rt->current_namespace];
-      return rt_intern(rt, K_SYMBOL, name, strlen(name));
+      return oti_intern(rt, K_SYMBOL, name, strlen(name));
     }
     case B_DESCRIBE: {
-      if (!rt_kind(value, K_SYMBOL)) {
-        rt_error(rt, "describe expects a symbol");
+      if (!oti_kind(value, K_SYMBOL)) {
+        oti_error(rt, "describe expects a symbol");
         return 0;
       }
       size_t n;
       memcpy(&n, object_bytes(value), sizeof(n));
       const char* name = (char*)object_bytes(value) + sizeof(n);
-      uint32_t index = rt_lookup_global(rt, name, n);
+      uint32_t index = oti_lookup_global(rt, name, n);
       if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND) {
         if (n == 2 && !memcmp(name, "ns", 2)) {
           const char* doc = "(ns name (:require ...)) Set the current namespace.";
-          return rt_text(rt, K_STRING, doc, strlen(doc));
+          return oti_text(rt, K_STRING, doc, strlen(doc));
         }
-        return V_NIL;
+        return OT_NIL;
       }
       const char* space = rt->namespaces[rt->global_namespaces[index]];
       const char* local = rt->names[index];
-      Documentation doc = rt->docs[index];
+      oti_documentation doc = rt->docs[index];
       if (!doc.text) {
         doc.text = "no documentation";
         doc.length = strlen(doc.text);
       }
       size_t prefix = strlen(space) + strlen(local) + 3;
       if (doc.length > SIZE_MAX - prefix - 1) {
-        rt_error(rt, "documentation too large");
+        oti_error(rt, "documentation too large");
         return 0;
       }
       char* text = malloc(prefix + doc.length + 1);
       if (!text) {
-        rt_error(rt, "out of host memory");
+        oti_error(rt, "out of host memory");
         return 0;
       }
       snprintf(text, prefix + 1, "%s/%s: ", space, local);
       memcpy(text + prefix, doc.text, doc.length);
-      Value result = rt_text(rt, K_STRING, text, prefix + doc.length);
+      ot_value result = oti_text(rt, K_STRING, text, prefix + doc.length);
       free(text);
       return result;
     }
-    default: rt_error(rt, "unknown reflection builtin"); return 0;
+    default: oti_error(rt, "unknown reflection builtin"); return 0;
   }
 }

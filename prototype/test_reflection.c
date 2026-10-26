@@ -3,20 +3,20 @@
 #include <stdlib.h>
 #include <string.h>
 
-static Value eval(Runtime* rt, const char* source) {
-  Value value;
-  if (!runtime_eval(rt, source, strlen(source), &value)) {
-    fprintf(stderr, "%s: %s\n", source, runtime_error(rt));
+static ot_value eval(ot_runtime* rt, const char* source) {
+  ot_value value;
+  if (!ot_eval(rt, source, strlen(source), &value)) {
+    fprintf(stderr, "%s: %s\n", source, ot_error(rt));
     abort();
   }
   return value;
 }
 
 int main(void) {
-  Runtime* rt = runtime_create(1024 * 1024, 128 * 1024);
+  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   assert(rt);
-  assert(runtime_load_core(rt, "../lib"));
-  runtime_gc_stress(rt, true);
+  assert(ot_load_core(rt, "../lib"));
+  ot_gc_stress(rt, true);
   const char* checks[] = {
       "(equal? (map type (list nil '() #f 1 1.0 'a :a #\\a \"a\" '(a) [] {} (buffer) +)) '(:nil "
       ":null :boolean :int :float :symbol :keyword :char :string :pair :array :table :buffer "
@@ -45,14 +45,14 @@ int main(void) {
       "(let ((t {})) (put! t 1 :int 1.0 :float :a 1 :a 2 :b nil) (and (= (length t) 3) (eq? (get t "
       "1) :int) (eq? (get t 1.0) :float) (= (get t :a) 2)))"};
   for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); i++)
-    assert(eval(rt, checks[i]) == V_TRUE);
+    assert(eval(rt, checks[i]) == OT_TRUE);
   for (size_t i = 0; i < 100; i++)
     assert(eval(rt, "(def (square x) \"Updated.\" x) (equal? (describe 'square) \"user/square: "
-                    "Updated.\")") == V_TRUE);
-  Value ignored;
+                    "Updated.\")") == OT_TRUE);
+  ot_value ignored;
   const char* bad = "(def square \"Failed.\" (/ 1 0))";
-  assert(!runtime_eval(rt, bad, strlen(bad), &ignored));
-  assert(eval(rt, "(equal? (describe 'square) \"user/square: Updated.\")") == V_TRUE);
-  runtime_destroy(rt);
+  assert(!ot_eval(rt, bad, strlen(bad), &ignored));
+  assert(eval(rt, "(equal? (describe 'square) \"user/square: Updated.\")") == OT_TRUE);
+  ot_destroy(rt);
   puts("type, documentation and EOF tests passed");
 }

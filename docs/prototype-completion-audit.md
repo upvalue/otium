@@ -6,7 +6,7 @@ Do not consult the original C implementation or repository history.
 
 | Requirement | Current evidence | Remaining work |
 | --- | --- | --- |
-| Core language and applicable public tests | `prototype/compliance.py`: 56 passing core/FFI groups, no skips | Classify every other public test definition below before calling the inventory complete. |
+| Core language and applicable public tests | `prototype/compliance.py`: 63 passing groups, five failures, no skips after adding resource, SQLite, diagnostics and CLI | Fix the diagnostic and launcher failures; classify the other public definitions below before calling the inventory complete. |
 | No generated-C execution or runtime compiler dependency | Bytecode compiler and libffi; `test-no-compiler` and `test-foreign-no-compiler` targets | Repeat after final integration changes and inspect launch paths. |
 | Union ABI classification | All 222 unchanged common FFI checks pass normally, under forced collection and ASan/UBSan | Supported union-call target is x86-64 Linux SysV; other targets reject at bind time. |
 | Callbacks and explicit ownership | Public callback 51, ownership 10, callback exit/thread groups pass; forced-GC, self-release, retained procedure, metadata replacement and idle-host checks | Keep these in the final sanitizer run; review aggregate calls that invoke callbacks. |
@@ -20,9 +20,23 @@ Do not consult the original C implementation or repository history.
 ## Public test inventory still to classify
 
 The compliance runner imports `tests/tests.py`, library, modules, reader,
-conditions, syntax-quote and FFI definitions. Other public definitions currently
-exist under cli, dev, diagnostics, format, lint, manse, objc, resource, sdl, sqlite
-and ui. Inspect their declared runtimes, dependencies and assertions. Record each
+conditions, syntax-quote, FFI, resource, SQLite, diagnostics and CLI definitions.
+The added suites exposed cleanup errors discarded during unwinding, missing
+process environment/output helpers, diagnostic codes/rendering, and launcher
+options/project behavior. Cleanup and process helpers are fixed. The five
+remaining failures stay in the runner.
+
+The diagnostic catalog test is runtime-independent and reads the original C
+sources, so it must not execute in this clean-room inventory. Chez-only tests
+remain outside the prototype run, including all Manse definitions and the
+inactive-backend CLI options test. Objective-C definitions only register on
+macOS; this host is Linux. The runtime-independent CLI help parity test still
+needs explicit launcher integration coverage.
+
+Other public definitions remain under dev, format, lint, sdl and ui. UI icon and
+layout tests require `build/ui-config.ot`; application/demand tests import SDL
+and UI modules even where they mock calls. Do not treat those dependencies as
+proof that the tests cannot run. Inspect their dependencies and assertions. Record each
 applicable group and run it, or document a concrete reason it belongs to a
 separate host/tooling/platform contract. Do not exclude a failing runtime test
 merely because its launcher or fixture setup differs.

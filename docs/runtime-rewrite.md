@@ -2283,3 +2283,28 @@ reload tests also pass. Leak checking is disabled in the tracing environment.
 Optional LLVM tools remain unavailable for gc-lint. The full public FFI suite
 still stops at union ABI classification; callbacks and ownership remain to be
 completed. Memory-operation error metadata needs a further audit.
+
+
+## Public resource, SQLite and CLI inventory
+
+The compliance runner now imports resource, SQLite, diagnostics and CLI test
+definitions as well as the original core and FFI groups. Its current result is
+63 passes, five failures and no skips. Diagnostic codes/rendering and launcher
+options, arguments and project paths remain failing gates. Runtime-independent
+checks that inspect the original C sources are outside this clean-room run.
+
+Resource cleanup errors replace the pending result, error, restart, quit or
+interrupt. Earlier prototype tests and the I/O spec had preserved the original
+transfer instead; both now agree with Chez and the public tests. Raised symbol
+and keyword values retain their names in the native error summary. Both SQLite
+suites pass, including 67 high-level transaction/resource checks.
+
+The process namespace now provides validated getenv/setenv! and write-error.
+Error output uses the dynamic current-error-port and the existing managed port
+path. Public CLI library and greeting examples pass, with forced-collection
+checks for copied environment values and redirected error output.
+
+Cleanup, conditions, process, ports, interrupt, foreign callbacks and foreign
+reload regressions pass. Cleanup, process, ports and interrupt sanitizer targets
+pass with ASan/UBSan and leak checking disabled. The expanded compliance runner
+continues to return failure until its diagnostic and launcher gaps are fixed.

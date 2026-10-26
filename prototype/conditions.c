@@ -83,7 +83,8 @@ Value rt_raise(Runtime* rt, size_t first, size_t count) {
   if (!condition) return 0;
   rt->condition_values[0] = condition;
   rt->raised = true;
-  if (rt_kind(rt->stack[first], K_STRING)) {
+  if (rt_kind(rt->stack[first], K_STRING) || rt_kind(condition, K_SYMBOL) ||
+      rt_kind(condition, K_KEYWORD)) {
     const char* message = (const char*)object_bytes(rt->stack[first]) + sizeof(size_t);
     return fail(rt, message);
   }

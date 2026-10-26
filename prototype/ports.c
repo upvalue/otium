@@ -390,14 +390,18 @@ static Value standard(Runtime* rt, unsigned which) {
   return rt->standard_ports[which];
 }
 
-static Value current(Runtime* rt, bool input) {
-  const char* name = input ? "current-input-port" : "current-output-port";
+static Value current_port(Runtime* rt, unsigned which) {
+  const char* name = which == 0   ? "current-input-port"
+                     : which == 1 ? "current-output-port"
+                                  : "current-error-port";
   uint32_t index = rt_binding_global(rt, 0, name, strlen(name), false);
-  if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND) return standard(rt, input ? 0 : 1);
+  if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND) return standard(rt, which);
   Value p = rt->globals[index];
   if (!rt_kind(p, K_PARAM)) return fail(rt, "current port binding must be a param");
   return rt_param_call(rt, p, 0);
 }
+
+static Value current(Runtime* rt, bool input) { return current_port(rt, input ? 0 : 1); }
 
 static bool check(Runtime* rt, Value p, bool input) {
   if (!rt_kind(p, K_PORT) || info(p)->input != input)
@@ -620,7 +624,10 @@ static bool append(Runtime* rt, Value* port, const char* bytes, size_t n) {
 
 Value rt_port_print(Runtime* rt, unsigned id, size_t first, size_t count) {
   Value p;
-  if (id == B_DISPLAY_TO || id == B_WRITE_TO) {
+  if (id == B_PROCESS_WRITE_ERROR) {
+    if (count != 1) return fail(rt, "write-error needs one argument");
+    p = current_port(rt, 2);
+  } else if (id == B_DISPLAY_TO || id == B_WRITE_TO) {
     if (!count) return fail(rt, "output needs a port");
     p = rt->stack[first++];
     count--;

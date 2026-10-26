@@ -44,11 +44,12 @@ int main(void) {
       "42))",
       "(equal? events [nil])",
       "(begin (set! events []) (try (call-with-cleanup (fn () (error :body)) (fn (outcome) (record "
-      "outcome) (error :release))) (catch e (record e))) (equal? events [:body :body]))",
+      "outcome) (error :release))) (catch e (record e))) (equal? events [:body :release]))",
       "(eq? (try (call-with-cleanup (fn () 42) (fn (outcome) (error :release))) (catch e e)) "
       ":release)",
-      "(begin (set! events []) (= (restart-case (call-with-cleanup (fn () (invoke-restart 'done "
-      "42)) (fn (outcome) (record outcome) (error :release))) (done (v) v)) 42))",
+      "(begin (set! events []) (eq? (try (restart-case (call-with-cleanup (fn () (invoke-restart "
+      "'done 42)) (fn (outcome) (record outcome) (error :release))) (done (v) v)) "
+      "(catch e e)) :release))",
       "(equal? events [nil])",
       "(begin (set! events []) (= (with ((a 1 record) (b (+ a 1) record)) 42) 42))",
       "(equal? events [2 1])",
@@ -64,18 +65,18 @@ int main(void) {
     }
   }
   const char* quit = "(set! events []) (try (call-with-cleanup (fn () (quit 7)) (fn (o) (record o) "
-                     "(error :release))) (catch e (record :wrong)))";
+                     "(error :release))) (catch e (record e)))";
   Value result;
-  assert(!runtime_eval(rt, quit, strlen(quit), &result));
+  assert(runtime_eval(rt, quit, strlen(quit), &result));
   int status;
-  assert(runtime_exit_status(rt, &status) && status == 7);
+  assert(!runtime_exit_status(rt, &status));
   assert(!rt->cleanup_count && !rt->cleanup_roots.count);
-  assert(eval(rt, "(equal? events [:quit])") == V_TRUE);
+  assert(eval(rt, "(equal? events [:quit :release])") == V_TRUE);
   assert(!runtime_exit_status(rt, &status));
   eval(rt, "(def (quit-host) (unwind-protect (exit 9) (record :host)))");
   assert(!runtime_call(rt, "quit-host", NULL, 0, &result));
   assert(runtime_exit_status(rt, &status) && status == 9);
-  assert(eval(rt, "(equal? events [:quit :host])") == V_TRUE);
+  assert(eval(rt, "(equal? events [:quit :release :host])") == V_TRUE);
   runtime_gc_stress(rt, false);
   eval(rt, "(def (deep n) (unwind-protect (if (= n 0) (error :bottom) (deep (- n 1))) (record n))) "
            "(set! events [])");

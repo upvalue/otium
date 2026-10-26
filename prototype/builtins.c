@@ -227,7 +227,8 @@ Value rt_builtin(Runtime* rt, unsigned id, size_t first, size_t count) {
   }
   if (id == B_QQ_APPEND) return quasi_append(rt, first, count);
   if (id == B_READER_TOKENS) return rt_tokens(rt, first, count);
-  if (id >= B_PROCESS_ARGUMENTS) return rt_process_builtin(rt, id, count);
+  if (id == B_PROCESS_WRITE_ERROR) return rt_port_print(rt, id, first, count);
+  if (id >= B_PROCESS_ARGUMENTS) return rt_process_builtin(rt, id, first, count);
   if (id >= B_FILE_EXISTS) return rt_filesystem_builtin(rt, id, first, count);
   if (id >= B_PORT_P) return rt_port_builtin(rt, id, first, count);
   if (id == B_PRINT || id == B_PRINTLN || id == B_DISPLAY || id == B_WRITE || id == B_NEWLINE)

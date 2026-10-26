@@ -1,4 +1,6 @@
+#define _POSIX_C_SOURCE 200809L
 #include "internal.h"
+#include <stdlib.h>
 #include <string.h>
 
 bool runtime_set_arguments(Runtime* rt, const char* script, size_t count,
@@ -40,7 +42,37 @@ bool runtime_set_arguments(Runtime* rt, const char* script, size_t count,
   return ok;
 }
 
-Value rt_process_builtin(Runtime* rt, unsigned id, size_t count) {
+static bool environment_string(Value value, bool name) {
+  if (!rt_kind(value, K_STRING)) return false;
+  size_t length = rt_bytes_length(value);
+  const uint8_t* bytes = rt_bytes_data(value);
+  return !memchr(bytes, 0, length) && (!name || (length && !memchr(bytes, '=', length)));
+}
+
+Value rt_process_builtin(Runtime* rt, unsigned id, size_t first, size_t count) {
+  if (id == B_PROCESS_GETENV || id == B_PROCESS_SETENV) {
+    if (count != (id == B_PROCESS_GETENV ? 1u : 2u) ||
+        !environment_string(rt->stack[first], true)) {
+      rt_error(rt, "expected an environment variable name");
+      return 0;
+    }
+    const char* name = (const char*)rt_bytes_data(rt->stack[first]);
+    if (id == B_PROCESS_GETENV) {
+      const char* value = getenv(name);
+      return value ? rt_text(rt, K_STRING, value, strlen(value)) : V_NIL;
+    }
+    Value value = rt->stack[first + 1];
+    if (value != V_NIL && !environment_string(value, false)) {
+      rt_error(rt, "expected a string without NUL or nil");
+      return 0;
+    }
+    int result = value == V_NIL ? unsetenv(name) : setenv(name, (char*)rt_bytes_data(value), 1);
+    if (result) {
+      rt_error(rt, "could not change the environment");
+      return 0;
+    }
+    return V_NIL;
+  }
   if (count) {
     rt_error(rt, "process metadata takes no arguments");
     return 0;

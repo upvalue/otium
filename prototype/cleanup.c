@@ -76,9 +76,7 @@ bool rt_run_cleanup(Runtime* rt, bool unwinding) {
     }
     if (ok) ok = rt_call_list(rt, values[0], values[4]) != 0;
   }
-  /* Resource cleanup preserves an in-flight failure; unwind-protect replaces it. */
-  if (ok || (cleanup.outcome && unwinding && !rt->restart_pending && !rt->exit_pending &&
-             !rt->interrupted)) {
+  if (ok) {
     memcpy(rt->error, message, sizeof(message));
     rt->error_code = code;
     rt->error_offset = offset;

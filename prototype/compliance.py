@@ -14,7 +14,9 @@ import harness
 
 DEFINITIONS = ['tests/tests.py', 'tests/library/tests.py', 'tests/modules/tests.py',
                'tests/reader/tests.py', 'tests/conditions/tests.py',
-               'tests/syntax-quote/tests.py', 'tests/ffi/tests.py']
+               'tests/syntax-quote/tests.py', 'tests/ffi/tests.py',
+               'tests/resource/tests.py', 'tests/sqlite/tests.py',
+               'tests/diagnostics/tests.py', 'tests/cli/tests.py']
 
 
 class Context(harness.Context):

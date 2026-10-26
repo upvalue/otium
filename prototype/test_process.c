@@ -17,6 +17,12 @@ int main(void) {
   assert(runtime_load_core(rt, "../lib"));
   runtime_gc_stress(rt, true);
   check(rt, "(require otium.process :as p) (and (null? (p/arguments)) (nil? (p/script-name)))");
+  check(rt, "(let ((out (open-output-string))) (with-params ((current-error-port out)) "
+            "(p/write-error \"problem λ\")) (equal? (get-output-string out) \"problem λ\"))");
+  check(rt, "(begin (p/setenv! \"OTIUM_PROTO_PROCESS_TEST\" \"a=b λ\") "
+            "(def env-copy (p/getenv \"OTIUM_PROTO_PROCESS_TEST\")) "
+            "(p/setenv! \"OTIUM_PROTO_PROCESS_TEST\" nil) "
+            "(and (equal? env-copy \"a=b λ\") (nil? (p/getenv \"OTIUM_PROTO_PROCESS_TEST\"))))");
   char script[] = "script.ot", argument[] = "copied";
   const char* args[] = {argument, "", "λ", "--heap=1"};
   assert(runtime_set_arguments(rt, script, 4, args));

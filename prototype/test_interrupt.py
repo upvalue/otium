@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory() as directory:
         ('(unwind-protect (unwind-protect (begin (ready) (spin)) (println :inner)) (println :outer))', b':inner\n:outer\n', 130),
         ('(call-with-cleanup (fn () (ready) (spin)) (fn (outcome) (println outcome)))', b':quit\n', 130),
         ('(try (unwind-protect (begin (ready) (spin)) (error :replacement)) (catch e (println e)))', b':replacement\n', 0),
-        ('(call-with-cleanup (fn () (ready) (spin)) (fn (o) (println o) (error :ignored)))', b':quit\n', 130),
+        ('(try (call-with-cleanup (fn () (ready) (spin)) (fn (o) (println o) (error :replacement))) (catch e (println e)))', b':quit\n:replacement\n', 0),
         ("(restart-case (unwind-protect (begin (ready) (spin)) (invoke-restart 'done)) (done () (println :recovered)))", b':recovered\n', 0),
         ("(unwind-protect (eval '(begin (ready) (spin))) (println :eval-cleanup))", b':eval-cleanup\n', 130),
     ]

@@ -362,7 +362,7 @@ Value rt_bytes_new(Runtime* rt, size_t n);
 size_t rt_utf8_scalar(const unsigned char* s, size_t p, size_t end);
 void rt_port_repr(FILE* out, Value port);
 Value rt_read_source(Runtime* rt, const char* source, size_t length);
-Value rt_process_builtin(Runtime* rt, unsigned id, size_t count);
+Value rt_process_builtin(Runtime* rt, unsigned id, size_t first, size_t count);
 Value rt_tokens(Runtime* rt, size_t first, size_t count);
 Value rt_filesystem_builtin(Runtime* rt, unsigned id, size_t first, size_t count);
 void rt_ports_destroy(Runtime* rt);

@@ -129,7 +129,7 @@ TEST(malformed_inputs_stay_in_bounds) {
       before = r.position;
     }
     CHECK(r.position <= length && r.error_offset <= length);
-    CHECK(r.allocated <= r.budget);
+    CHECK(r.arena.allocated <= r.arena.limit);
     oti_reader_destroy(&r);
   }
 }

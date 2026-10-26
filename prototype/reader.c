@@ -19,47 +19,58 @@ static void syntax_error(oti_reader* r, size_t offset, const char* code, const c
   }
 }
 
-void* oti_reader_allocate(oti_reader* r, size_t size) {
-  const size_t alignment = _Alignof(max_align_t);
-  if (size > SIZE_MAX - alignment) goto exhausted;
-  size = (size + alignment - 1) / alignment * alignment;
-  oti_arena_block* b = r->blocks;
-  if (!b || size > b->size - b->used) {
-    size_t capacity = size > 4096 ? size : 4096;
-    if (capacity > SIZE_MAX - sizeof(*b)) goto exhausted;
-    size_t bytes = sizeof(*b) + capacity;
-    if (bytes > r->budget - r->allocated) goto exhausted;
-    b = malloc(bytes);
-    if (!b) goto exhausted;
-    *b = (oti_arena_block){r->blocks, 0, capacity};
-    r->blocks = b;
-    r->allocated += bytes;
-  }
-  void* result = (unsigned char*)b->data + b->used;
-  b->used += size;
-  memset(result, 0, size);
-  return result;
-exhausted:
-  syntax_error(r, r->position, NULL, "reader memory limit exceeded");
-  return NULL;
-}
+void oti_arena_init(oti_arena* arena, size_t limit) { *arena = (oti_arena){.limit = limit}; }
 
-void oti_reader_init(oti_reader* r, const char* source, size_t length, size_t budget) {
-  *r = (oti_reader){.source = source, .length = length, .budget = budget};
-}
-
-void oti_reader_destroy(oti_reader* r) {
-  oti_arena_block* b = r->blocks;
+void oti_arena_destroy(oti_arena* arena) {
+  oti_arena_block* b = arena->blocks;
   while (b) {
     oti_arena_block* next = b->next;
     free(b);
     b = next;
   }
+  *arena = (oti_arena){0};
+}
+
+void* oti_arena_alloc(oti_arena* arena, size_t size) {
+  const size_t alignment = _Alignof(max_align_t);
+  if (size > SIZE_MAX - alignment) return NULL;
+  size = (size + alignment - 1) / alignment * alignment;
+  oti_arena_block* b = arena->blocks;
+  if (!b || size > b->size - b->used) {
+    size_t capacity = size > 4096 ? size : 4096;
+    if (capacity > SIZE_MAX - sizeof(*b)) return NULL;
+    size_t bytes = sizeof(*b) + capacity;
+    if (bytes > arena->limit - arena->allocated) return NULL;
+    b = malloc(bytes);
+    if (!b) return NULL;
+    *b = (oti_arena_block){arena->blocks, 0, capacity};
+    arena->blocks = b;
+    arena->allocated += bytes;
+  }
+  void* result = (unsigned char*)b->data + b->used;
+  b->used += size;
+  memset(result, 0, size);
+  return result;
+}
+
+static void* reader_allocate(oti_reader* r, size_t size) {
+  void* result = oti_arena_alloc(&r->arena, size);
+  if (!result) syntax_error(r, r->position, NULL, "reader memory limit exceeded");
+  return result;
+}
+
+void oti_reader_init(oti_reader* r, const char* source, size_t length, size_t limit) {
+  *r = (oti_reader){.source = source, .length = length};
+  oti_arena_init(&r->arena, limit);
+}
+
+void oti_reader_destroy(oti_reader* r) {
+  oti_arena_destroy(&r->arena);
   *r = (oti_reader){0};
 }
 
 static oti_ast* node(oti_reader* r, oti_ast_kind kind, size_t offset) {
-  oti_ast* a = oti_reader_allocate(r, sizeof(*a));
+  oti_ast* a = reader_allocate(r, sizeof(*a));
   if (a) {
     a->kind = kind;
     a->offset = offset;
@@ -191,7 +202,7 @@ static oti_ast* string(oti_reader* r, size_t start) {
     syntax_error(r, start, "E0002", "unterminated string");
     return NULL;
   }
-  char* out = oti_reader_allocate(r, end - r->position + 1);
+  char* out = reader_allocate(r, end - r->position + 1);
   if (!out) return NULL;
   size_t used = 0;
   while (r->position < end) {
@@ -349,7 +360,7 @@ static oti_ast* atom(oti_reader* r, size_t start) {
       }
     }
     if (pos != n) goto bad_number;
-    char* token = oti_reader_allocate(r, n + 1);
+    char* token = reader_allocate(r, n + 1);
     if (!token) return NULL;
     memcpy(token, s, n);
     oti_ast* a = node(r, real ? AST_FLOAT : AST_INT, start);

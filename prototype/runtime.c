@@ -501,11 +501,11 @@ static bool evaluate_expanded(ot_runtime* rt, const oti_ast* form, ot_value* res
         find_global(rt, rt->current_namespace, name->as.text.data, name->as.text.size);
     if (global != UINT32_MAX && rt->global_defined[global]) return evaluate_raw(rt, form, result);
   }
-  oti_reader arena;
-  oti_reader_init(&arena, "", 0, 16 * 1024 * 1024);
+  oti_arena arena;
+  oti_arena_init(&arena, OTI_SOURCE_LIMIT);
   oti_ast* expanded = oti_expand_form(rt, form, &arena);
   bool ok = expanded && evaluate_raw(rt, expanded, result);
-  oti_reader_destroy(&arena);
+  oti_arena_destroy(&arena);
   return ok;
 }
 
@@ -531,8 +531,8 @@ ot_value oti_eval_value(ot_runtime* rt, ot_value value) {
     return 0;
   }
   rt->eval_depth++;
-  oti_reader arena;
-  oti_reader_init(&arena, "", 0, 16 * 1024 * 1024);
+  oti_arena arena;
+  oti_arena_init(&arena, OTI_SOURCE_LIMIT);
   oti_ast* form = oti_syntax_value(rt, value, &arena);
   size_t base = rt->sp, frames = rt->frame_count, tries = rt->try_count;
   size_t restarts = rt->restart_scope_count, cleanups = rt->cleanup_count;
@@ -543,7 +543,7 @@ ot_value oti_eval_value(ot_runtime* rt, ot_value value) {
   rt->try_count = tries;
   oti_restore_restarts(rt, restarts);
   oti_restore_cleanups(rt, cleanups);
-  oti_reader_destroy(&arena);
+  oti_arena_destroy(&arena);
   rt->eval_depth--;
   return result;
 }
@@ -679,7 +679,7 @@ bool ot_eval(ot_runtime* rt, const char* source, size_t length, ot_value* result
   rt->sp = rt->stack_roots.count = base;
   if (!ot_poll_interrupt(rt)) return false;
   oti_reader reader;
-  oti_reader_init(&reader, source, length, 16 * 1024 * 1024);
+  oti_reader_init(&reader, source, length, OTI_SOURCE_LIMIT);
   bool ok = true;
   *result = OT_NIL;
   oti_ast* form;
@@ -770,7 +770,7 @@ const char* ot_string_data(ot_value v, size_t* length) {
 ot_form_status ot_scan_form(const char* source, size_t length, size_t start, size_t* end,
                             const char** error, size_t* error_offset) {
   oti_reader reader;
-  oti_reader_init(&reader, source, length, 16 * 1024 * 1024);
+  oti_reader_init(&reader, source, length, OTI_SOURCE_LIMIT);
   reader.position = start;
   oti_ast* form = oti_reader_next(&reader);
   ot_form_status status = form            ? OT_FORM_COMPLETE

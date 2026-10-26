@@ -542,9 +542,9 @@ ot_value oti_text(ot_runtime* rt, uint32_t kind, const char* text, size_t length
 ot_value oti_float(ot_runtime* rt, double number);
 ot_value oti_evaluator(ot_runtime* rt, uint32_t space);
 ot_value oti_eval_value(ot_runtime* rt, ot_value value);
-oti_ast* oti_syntax_value(ot_runtime* rt, ot_value value, oti_reader* arena);
+oti_ast* oti_syntax_value(ot_runtime* rt, ot_value value, oti_arena* arena);
 ot_value oti_read_string(ot_runtime* rt, ot_value string);
-oti_ast* oti_expand_form(ot_runtime* rt, const oti_ast* form, oti_reader* arena);
+oti_ast* oti_expand_form(ot_runtime* rt, const oti_ast* form, oti_arena* arena);
 bool oti_compile(ot_runtime* rt, const oti_ast* form, uint32_t* function);
 bool oti_execute(ot_runtime* rt, uint32_t function, ot_value* result);
 bool oti_drive(ot_runtime* rt, size_t stop_frames);

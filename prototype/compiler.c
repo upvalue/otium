@@ -24,7 +24,7 @@ struct oti_compiler {
   size_t lifetime_capacity;
   unsigned scope;
   bool definitions;
-  oti_reader* expansion_arena;
+  oti_arena* expansion_arena;
   size_t* expansions;
 };
 
@@ -327,7 +327,7 @@ static oti_ast* syntax_value(oti_compiler* c, ot_value v, size_t offset, unsigne
     error(c, NULL, "macro syntax nesting limit exceeded");
     return NULL;
   }
-  oti_ast* a = oti_reader_allocate(c->expansion_arena, sizeof(*a));
+  oti_ast* a = oti_arena_alloc(c->expansion_arena, sizeof(*a));
   if (!a) {
     error(c, NULL, "macro syntax memory limit exceeded");
     return NULL;
@@ -350,7 +350,7 @@ static oti_ast* syntax_value(oti_compiler* c, ot_value v, size_t offset, unsigne
     a->kind = oti_kind(v, K_STRING) ? AST_STRING : oti_kind(v, K_SYMBOL) ? AST_SYMBOL : AST_KEYWORD;
     size_t n;
     memcpy(&n, object_bytes(v), sizeof(n));
-    char* copy = oti_reader_allocate(c->expansion_arena, n + 1);
+    char* copy = oti_arena_alloc(c->expansion_arena, n + 1);
     if (!copy) {
       error(c, NULL, "macro syntax memory limit exceeded");
       return NULL;
@@ -389,7 +389,7 @@ static oti_ast* syntax_value(oti_compiler* c, ot_value v, size_t offset, unsigne
   return a;
 }
 
-oti_ast* oti_syntax_value(ot_runtime* rt, ot_value value, oti_reader* arena) {
+oti_ast* oti_syntax_value(ot_runtime* rt, ot_value value, oti_arena* arena) {
   oti_compiler c = {.rt = rt, .expansion_arena = arena};
   return syntax_value(&c, value, 0, 0);
 }
@@ -779,7 +779,7 @@ static bool try_form(oti_compiler* c, const oti_ast* forms, bool tail) {
   const oti_ast* clause = forms;
   oti_ast* protected = NULL, ** next = &protected;
   while (clause && !(clause->kind == AST_LIST && oti_ast_symbol(clause->as.list.first, "catch"))) {
-    oti_ast* copy = oti_reader_allocate(c->expansion_arena, sizeof(*copy));
+    oti_ast* copy = oti_arena_alloc(c->expansion_arena, sizeof(*copy));
     if (!copy) return error(c, clause, "compiler syntax memory limit");
     *copy = *clause;
     copy->next = NULL;
@@ -1021,7 +1021,7 @@ static bool expression(oti_compiler* c, const oti_ast* a, bool tail) {
         return error(c, p, "generics need fixed parameters");
       for (const oti_ast* prior = params.as.list.first; prior; prior = prior->next)
         if (same_name(prior, binding)) return error(c, p, "duplicate generic parameter");
-      oti_ast* copy = oti_reader_allocate(c->expansion_arena, sizeof(*copy));
+      oti_ast* copy = oti_arena_alloc(c->expansion_arena, sizeof(*copy));
       if (!copy) return error(c, p, "compiler syntax memory limit");
       *copy = *binding;
       copy->next = NULL;
@@ -1044,7 +1044,7 @@ static bool expression(oti_compiler* c, const oti_ast* a, bool tail) {
         for (const oti_ast* p = params.as.list.first; p; p = p->next)
           if (same_name(p, binding))
             return error(c, binding, "next binding conflicts with parameter");
-        oti_ast* copy = oti_reader_allocate(c->expansion_arena, sizeof(*copy));
+        oti_ast* copy = oti_arena_alloc(c->expansion_arena, sizeof(*copy));
         if (!copy) return error(c, binding, "compiler syntax memory limit");
         *copy = *binding;
         copy->next = params.as.list.first;
@@ -1328,8 +1328,8 @@ static bool expression(oti_compiler* c, const oti_ast* a, bool tail) {
 bool oti_compile(ot_runtime* rt, const oti_ast* form, uint32_t* function) {
   uint32_t id = new_function(rt);
   if (id == UINT32_MAX) return false;
-  oti_reader arena;
-  oti_reader_init(&arena, "", 0, 16 * 1024 * 1024);
+  oti_arena arena;
+  oti_arena_init(&arena, OTI_SOURCE_LIMIT);
   size_t expansions = 0;
   oti_compiler c = {.rt = rt,
                 .fn = rt->functions[id],
@@ -1342,11 +1342,11 @@ bool oti_compile(ot_runtime* rt, const oti_ast* form, uint32_t* function) {
   free(c.upnames);
   free(c.lifetimes);
   *function = id;
-  oti_reader_destroy(&arena);
+  oti_arena_destroy(&arena);
   return ok;
 }
 
-oti_ast* oti_expand_form(ot_runtime* rt, const oti_ast* form, oti_reader* arena) {
+oti_ast* oti_expand_form(ot_runtime* rt, const oti_ast* form, oti_arena* arena) {
   oti_compiler c = {.rt = rt, .expansion_arena = arena};
   ot_value values[2] = {OT_NIL, OT_EMPTY};
   oti_roots roots;
@@ -1395,7 +1395,7 @@ ot_value oti_read_string(ot_runtime* rt, ot_value string) {
 
 ot_value oti_read_source(ot_runtime* rt, const char* source, size_t length) {
   oti_reader reader;
-  oti_reader_init(&reader, source, length, 16 * 1024 * 1024);
+  oti_reader_init(&reader, source, length, OTI_SOURCE_LIMIT);
   oti_ast* form = oti_reader_one(&reader);
   oti_compiler c = {.rt = rt};
   ot_value result = form ? datum(&c, form) : 0;

@@ -7,7 +7,7 @@ static bool validate(ot_runtime* rt, const char* text, size_t length) {
   for (;;) {
     if (!ot_poll_interrupt(rt)) return false;
     oti_reader r;
-    oti_reader_init(&r, text, length, 16 * 1024 * 1024);
+    oti_reader_init(&r, text, length, OTI_SOURCE_LIMIT);
     r.position = position;
     oti_ast* form = oti_reader_next(&r);
     bool done = form == NULL, ok = r.error == NULL;

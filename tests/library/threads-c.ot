@@ -1,0 +1,96 @@
+(require otium.test :refer (check fails? report))
+(require otium.thread :as thread)
+
+;; Threads interleave at yield! and join! returns results.
+(def trace [])
+
+(def (worker name n)
+  (fn ()
+    (dotimes (i n)
+      (push! trace (list name i))
+      (thread/yield!))
+    name))
+
+(def a (thread/spawn (worker :a 3) :a))
+
+(def b (thread/spawn (worker :b 2) :b))
+
+(check :a (thread/join! a))
+(check :b (thread/join! b))
+(check ['(:a 0) '(:b 0) '(:a 1) '(:b 1) '(:a 2)] trace)
+(check #t (thread/thread-done? a))
+(check :a (thread/thread-name a))
+(check :main (thread/thread-name (thread/current-thread)))
+
+;; A thread can yield inside map, try, with-params and unwind-protect, and
+;; switching does not run its cleanups.
+(defparam level 0)
+
+(def log [])
+
+(def t
+  (thread/spawn (fn ()
+                  (with-params ((level 1))
+                    (try
+                      (unwind-protect
+                        (map (fn (x)
+                               (thread/yield!)
+                               (push! log (list x (level)))
+                               x)
+                             '(1 2))
+                        (push! log :cleanup))
+                      (catch (error? e) :caught))))))
+
+(push! log (list :main (level)))
+(check '(1 2) (thread/join! t))
+(check ['(:main 0) '(1 1) '(2 1) :cleanup] log)
+
+;; Errors end the thread and are raised again by join!.
+(def broken
+  (thread/spawn (fn ()
+                  (thread/yield!)
+                  (error "thread failed"))))
+
+(check "thread failed"
+       (try
+         (thread/join! broken)
+         (catch (error? e) (condition-message e))))
+
+;; Mailboxes
+(def echo
+  (thread/spawn (fn ()
+                  (let loop ((total 0))
+                    (let ((message (thread/receive!)))
+                      (if (eq? message :stop)
+                          total
+                          (loop (+ total message))))))))
+
+(dotimes (i 5)
+  (thread/send! echo i))
+(thread/send! echo :stop)
+(check 10 (thread/join! echo))
+
+;; A thread waiting for itself is a deadlock.
+(check #t (fails? (fn () (thread/join! (thread/current-thread)))))
+
+;; Switching inside a native callback, here a handler called by signal, is
+;; refused and leaves the scheduler working.
+(def other (thread/spawn (fn () :other)))
+
+(check "otium.thread: cannot switch threads here, as inside a native callback"
+       (try
+         (handler-bind (((fn (c) #t) (fn (c) (thread/yield!)))) (signal 'test))
+         (catch (error? e) (condition-message e))))
+(check :other (thread/join! other))
+
+;; Many threads
+(def many
+  (map (fn (i)
+         (thread/spawn (fn ()
+                         (thread/yield!)
+                         i)))
+       (range 1000)))
+
+(check 499500 (reduce + 0 (map thread/join! many)))
+
+(report "threads")

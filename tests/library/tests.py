@@ -6,6 +6,8 @@ for name in ('bootstrap', 'sequences', 'reflection', 'printing'):
 case('library', 'tests/library/common.ot')
 case('library arithmetic', 'tests/library/arithmetic.ot')
 case('library bounded bitwise', 'tests/library/bitwise-c.ot', runtimes=['c'])
+case('library continuations', 'tests/library/continuations-c.ot', runtimes=['c'])
+case('library threads', 'tests/library/threads-c.ot', runtimes=['c'])
 case('library json', 'tests/library/json.ot')
 case('library chars', 'tests/library/chars.ot')
 case('library loops', 'tests/library/loops.ot')

@@ -287,6 +287,16 @@ const char* ot_runtime_documentation(const char* name) {
     {"record-type?", "(record-type? value)\nTest whether value is a record type descriptor."},
     {"record-type", "(record-type record)\nReturn the record type descriptor. Records compare by identity, including immutable records."},
     {"expander-optional-function", "(expander-optional-function form fallback)\nInternal shared-expander adapter: preserve the canonical optional fn for tooling, otherwise select the runtime implementation."},
+    {"%resume", "(%resume continuation [value])\nContinue a raw continuation with value without running cleanups. An escape out of a native call unwinds the native frames in between."},
+    {"%switch", "(%switch continuation [value])\nContinue a raw continuation like %resume, but raise instead of unwinding native frames. Used to switch green threads."},
+    {"%new-stack", "(%new-stack function)\nMake a stack whose first resume calls function with the value. It starts with the caller's params and no handlers, restarts or cleanups. Returns the raw continuation that starts it."},
+    {"%winders", "(%winders)\nThe active cleanup entries, innermost first."},
+    {"%continuation-winders", "(%continuation-winders continuation)\nThe cleanup entries active where a raw continuation was captured."},
+    {"%unwind-one!", "(%unwind-one!)\nLeave the innermost cleanup's extent and return (function argument ...) to run it, or nil if it already ran."},
+    {"%continuation?", "(%continuation? value)\nTest whether value is a raw continuation."},
+    {"call-1cc", "(call-1cc function)\nCall function with a one-shot continuation of this call. Calling the continuation with an optional value returns it from call-1cc, running the cleanups of extents it leaves. It can be used once; returning from function also uses it. A continuation can't be resumed across a native call that has returned."},
+    {"%swap", "(%swap continuation)\nPark this stack and resume continuation with the continuation of this call, without running cleanups. Used to switch green threads."},
+    {"%can-swap?", "(%can-swap? continuation)\nTest whether %swap to continuation would succeed: it is unused, can run in this native call, and the running stack has no native frames under it."},
   };
   for (size_t i = 0; i < sizeof(entries) / sizeof(*entries); ++i)
     if (!strcmp(name, entries[i].name)) return entries[i].text;

@@ -1,0 +1,39 @@
+;; control.ot -- control operators for the C runtime, evaluated in otium.core
+;; after the prelude. Chez provides its own.
+;;
+;; These are written in Otium so that callbacks run on the VM stack: a
+;; continuation cannot capture C frames, so a thread could not switch inside
+;; a native for-each.
+
+(def (for-each f seq)
+  (cond
+    ((or (nil? seq) (null? seq)) nil)
+    ;; The length is read once, as Chez does: removed elements read as nil.
+    ((array? seq)
+     (let ((count (length seq)))
+       (let loop ((i 0))
+         (when (< i count)
+           (f (get seq i))
+           (loop (+ i 1))))))
+    ((list? seq)
+     (let loop ((xs seq))
+       (when (pair? xs)
+         (f (car xs))
+         (loop (cdr xs)))))
+    (else (error "for-each: improper list"))))
+
+(def- (winders-within? current target)
+  (cond
+    ((eq? current target) #t)
+    ((pair? target) (winders-within? current (cdr target)))
+    (else #f)))
+
+;; The VM calls this when calling continuation would leave extents with
+;; cleanups. Each cleanup runs in the dynamic context of its own extent.
+(def- (%wind-and-resume continuation value)
+  (let ((target (%continuation-winders continuation)))
+    (let loop ()
+      (unless (winders-within? (%winders) target)
+        (let ((cleanup (%unwind-one!))) (when cleanup (apply (car cleanup) (cdr cleanup))))
+        (loop))))
+  (%resume continuation value))

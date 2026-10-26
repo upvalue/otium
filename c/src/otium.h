@@ -338,6 +338,8 @@ typedef enum ot_obj_type {
   OBJ_CELL,
   OBJ_BYTEVECTOR,
   OBJ_PORT,
+  OBJ_STACK,
+  OBJ_CONTINUATION,
   OBJ_FREE,
 } ot_obj_type;
 
@@ -631,30 +633,6 @@ typedef struct ot_global_root {
   otv* slot;
 } ot_global_root;
 
-typedef struct ot_handler_frame {
-  struct ot_handler_frame* prev;
-  otv pred;
-  otv handler;
-} ot_handler_frame;
-
-typedef struct ot_restart_clause {
-  otv restart;
-  otv params;
-  otv body;
-} ot_restart_clause;
-
-typedef struct ot_restart_frame {
-  struct ot_restart_frame* prev;
-  ot_restart_clause* clauses;
-  size_t count;
-} ot_restart_frame;
-
-typedef struct ot_param_frame {
-  struct ot_param_frame* prev;
-  otv param;
-  otv value;
-} ot_param_frame;
-
 typedef struct ot_module {
   struct ot_module* next;
   char* name;
@@ -667,13 +645,29 @@ typedef struct ot_ext_type_info {
   ot_ext_finalizer finalizer;
 } ot_ext_type_info;
 
+/* Marker frames run no bytecode. They sit under the body of a dynamic form
+ * and act when the body returns or an unwind reaches them. A marker keeps
+ * the function of the frame that entered the form, which is the frame below
+ * it, and its own data in env. */
+typedef enum ot_frame_kind {
+  FRAME_CODE,
+  FRAME_HANDLERS,
+  FRAME_PARAMS,
+  FRAME_TRY,
+  FRAME_RESTARTS,
+  FRAME_CLEANUP,
+  FRAME_CLEANUP_RETURN,
+  FRAME_CLEANUP_UNWIND,
+} ot_frame_kind;
+
 typedef struct ot_vm_frame {
   otv function;
   otv env;
-  size_t ip;
-  size_t base;
-  size_t local_count;
+  uint32_t ip;
+  uint32_t base;
+  uint32_t local_count;
   bool stack_locals;
+  unsigned char kind;
 } ot_vm_frame;
 
 typedef enum ot_unwind_kind {
@@ -681,12 +675,74 @@ typedef enum ot_unwind_kind {
   UNWIND_CONDITION,
   UNWIND_RESTART,
   UNWIND_QUIT,
+  UNWIND_CONTINUATION,
 } ot_unwind_kind;
 
+/* Host arrays of one VM stack. While the stack runs they live in ot_vm and
+ * these pointers are NULL. */
+typedef struct ot_stack_mem {
+  otv* values;
+  size_t count;
+  size_t capacity;
+  struct ot_vm_frame* frames;
+  size_t frame_count;
+  size_t frame_capacity;
+} ot_stack_mem;
+
+/* A VM stack. Continuations park one; resuming makes it the running stack.
+ * Each belongs to the C entry into the VM that created it. */
+typedef struct ot_stack_obj {
+  uintptr_t header;
+  ot_stack_mem* mem;
+  /* Frees mem when the stack dies. */
+  otv ext;
+  /* Resumed with the result when the bottom frame returns. */
+  otv parent;
+  /* Saved dynamic state while parked. */
+  otv handlers;
+  otv restarts;
+  otv params;
+  otv winders;
+  /* The continuation holding this stack, or nil. */
+  otv parked;
+  uint64_t entry;
+  size_t floor;
+  bool active;
+  /* Made by %new-stack: the first resume calls the thunk on the stack. */
+  bool fresh;
+} ot_stack_obj;
+
+/* A one-shot continuation; stack is nil once used. */
+typedef struct ot_continuation_obj {
+  uintptr_t header;
+  otv stack;
+} ot_continuation_obj;
+
+/* One C call into the VM. Frames below floor on its home stack belong to
+ * C code further out. */
+typedef struct ot_vm_entry {
+  struct ot_vm_entry* prev;
+  uint64_t id;
+  otv home;
+  uint64_t saved_entry;
+  size_t saved_floor;
+} ot_vm_entry;
+
 typedef struct ot_vm {
-  ot_handler_frame* handlers;
-  ot_restart_frame* restarts;
-  ot_param_frame* params;
+  /* Lists of (pred . handler), restart objects, (param . value) and cleanup
+   * entries, innermost first. */
+  otv handlers;
+  otv restarts;
+  otv params;
+  otv winders;
+  otv stack;
+  otv spare_stacks;
+  size_t spare_count;
+  size_t floor;
+  uint64_t entry;
+  uint64_t next_entry;
+  ot_vm_entry* entries;
+  otv unwind_target;
   otv* vm_stack;
   size_t vm_stack_count;
   size_t vm_stack_capacity;
@@ -717,6 +773,7 @@ struct ot_state {
   ot_ext_type_info* ext_types;
   size_t ext_type_count;
   size_t ext_type_capacity;
+  unsigned stack_ext_type;
   ot_vm vm;
   otv symbols;
   otv namespaces;
@@ -727,6 +784,9 @@ struct ot_state {
   otv dispatch_types;
   otv object_class;
   otv update_instance;
+  /* (%wind-and-resume continuation value), for continuation calls that
+   * leave cleanups. */
+  otv wind_function;
   otv input_port_param, output_port_param, error_port_param, open_ports;
   uint64_t class_epoch;
   void* ffi_state;

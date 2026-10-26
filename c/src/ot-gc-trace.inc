@@ -206,6 +206,30 @@ static void OT_GC_TRACE_OBJECT(ots* state, ot_obj* object) {
       OT_GC_TRACE_SLOT(state, &restart->description);
       break;
     }
+    case OBJ_STACK: {
+      ot_stack_obj* stack = (ot_stack_obj*)object;
+      OT_GC_TRACE_SLOT(state, &stack->ext);
+      OT_GC_TRACE_SLOT(state, &stack->parent);
+      OT_GC_TRACE_SLOT(state, &stack->handlers);
+      OT_GC_TRACE_SLOT(state, &stack->restarts);
+      OT_GC_TRACE_SLOT(state, &stack->params);
+      OT_GC_TRACE_SLOT(state, &stack->winders);
+      OT_GC_TRACE_SLOT(state, &stack->parked);
+      /* A running stack's arrays are traced as part of the VM. */
+      if (stack->active || stack->mem == NULL) break;
+      ot_stack_mem* mem = stack->mem;
+      for (size_t i = 0; i < mem->count; i++) OT_GC_TRACE_SLOT(state, &mem->values[i]);
+      for (size_t i = 0; i < mem->frame_count; i++) {
+        OT_GC_TRACE_SLOT(state, &mem->frames[i].function);
+        OT_GC_TRACE_SLOT(state, &mem->frames[i].env);
+      }
+      break;
+    }
+    case OBJ_CONTINUATION: {
+      ot_continuation_obj* continuation = (ot_continuation_obj*)object;
+      OT_GC_TRACE_SLOT(state, &continuation->stack);
+      break;
+    }
   }
 }
 
@@ -213,26 +237,20 @@ static void OT_GC_TRACE_VM(ots* state, ot_vm* vm) {
   OT_GC_TRACE_SLOT(state, &vm->current_namespace);
   OT_GC_TRACE_SLOT(state, &vm->condition);
   OT_GC_TRACE_SLOT(state, &vm->unwind_args);
+  OT_GC_TRACE_SLOT(state, &vm->unwind_target);
+  OT_GC_TRACE_SLOT(state, &vm->handlers);
+  OT_GC_TRACE_SLOT(state, &vm->restarts);
+  OT_GC_TRACE_SLOT(state, &vm->params);
+  OT_GC_TRACE_SLOT(state, &vm->winders);
+  OT_GC_TRACE_SLOT(state, &vm->stack);
+  OT_GC_TRACE_SLOT(state, &vm->spare_stacks);
+  for (ot_vm_entry* entry = vm->entries; entry != NULL; entry = entry->prev)
+    OT_GC_TRACE_SLOT(state, &entry->home);
 
   for (size_t i = 0; i < vm->vm_stack_count; i++) OT_GC_TRACE_SLOT(state, &vm->vm_stack[i]);
   for (size_t i = 0; i < vm->vm_frame_count; i++) {
     OT_GC_TRACE_SLOT(state, &vm->vm_frames[i].function);
     OT_GC_TRACE_SLOT(state, &vm->vm_frames[i].env);
-  }
-
-  for (ot_handler_frame* handler = vm->handlers; handler != NULL; handler = handler->prev) {
-    OT_GC_TRACE_SLOT(state, &handler->pred);
-    OT_GC_TRACE_SLOT(state, &handler->handler);
-  }
-  for (ot_restart_frame* frame = vm->restarts; frame != NULL; frame = frame->prev)
-    for (size_t i = 0; i < frame->count; i++) {
-      OT_GC_TRACE_SLOT(state, &frame->clauses[i].restart);
-      OT_GC_TRACE_SLOT(state, &frame->clauses[i].params);
-      OT_GC_TRACE_SLOT(state, &frame->clauses[i].body);
-    }
-  for (ot_param_frame* param = vm->params; param != NULL; param = param->prev) {
-    OT_GC_TRACE_SLOT(state, &param->param);
-    OT_GC_TRACE_SLOT(state, &param->value);
   }
 }
 
@@ -255,6 +273,7 @@ static void OT_GC_TRACE_ROOTS(ots* state) {
   OT_GC_TRACE_SLOT(state, &state->error_port_param);
   OT_GC_TRACE_SLOT(state, &state->open_ports);
   OT_GC_TRACE_SLOT(state, &state->update_instance);
+  OT_GC_TRACE_SLOT(state, &state->wind_function);
   OT_GC_TRACE_VM(state, &state->vm);
 }
 

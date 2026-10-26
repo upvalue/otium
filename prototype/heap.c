@@ -1,4 +1,4 @@
-#include "heap.h"
+#include "internal.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>

@@ -8,7 +8,7 @@ RUNTIME = heap.c reader.c tokens.c runtime.c compiler.c vm.c builtins.c numeric.
   filesystem.c process.c ports.c strings.c bytevectors.c reflection.c support.c conditions.c \
   restarts.c cleanup.c params.c classes.c instances.c records.c foreign.c foreign_types.c \
   collections.c tables.c reclaim.c modules.c
-HEADERS = include/otium.h heap.h reader.h internal.h foreign.h foreign_types.h builtins.def \
+HEADERS = include/otium.h heap.h reader.h internal.h foreign.h foreign_types.h \
   tests/support/test.h tests/support/helpers.h
 
 # Each tests/NAME.c is one test program, built as build/MODE/bin/NAME.

@@ -1,3 +1,4 @@
+#include "internal.h"
 #include "foreign_types.h"
 #include <limits.h>
 #include <stdlib.h>

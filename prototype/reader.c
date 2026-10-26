@@ -1,4 +1,4 @@
-#include "reader.h"
+#include "internal.h"
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>

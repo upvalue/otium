@@ -1,6 +1,6 @@
+#include "internal.h"
 #include <errno.h>
 #include <stdlib.h>
-#include "internal.h"
 #include <string.h>
 
 static ot_value fail(ot_runtime* rt, const char* message) {

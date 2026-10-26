@@ -79,3 +79,33 @@ print('CLI bounded growth and explicit fixed heaps passed')
 
 run(['--repl'], '(read-line)\nhello\n(+ 1 2)\n', output='hello\n3\n')
 run(['--repl'], '(println :a) (println :b)\n', output=':a\nnil\n:b\nnil\n')
+
+# Projects are data. Only top-level paths forms contribute search directories.
+with tempfile.TemporaryDirectory() as temp:
+    root = Path(temp)
+    lib = root / 'module space'
+    lib.mkdir()
+    (lib / 'sample.ot').write_text('(ns sample) (def value 42)')
+    project = root / 'project.ot'
+    project.write_text('; "ignored"\n(paths "module space")\n(lint :allow (if-chain))\n')
+    expression = '(require sample :as s) s/value'
+    run(['--project', project, '-e', expression], output='42\n')
+    run(['--project=' + str(project), '-e', expression], output='42\n')
+    run(['--no-project', '--path=' + str(lib), '-e', expression], output='42\n')
+    pre = root / 'pre.ot'
+    pre.write_text('(def x 41)')
+    run(['--load=' + str(pre), '-e', '(+ x 1)'], output='42\n')
+    run(['--load', pre], '(println :unwanted-repl)\n', output='')
+    project.write_text('(paths "module space" . bad)')
+    run(['--project', project, '-e', '1'], status=1)
+    project.write_text('(paths "module space" 3)')
+    run(['--project', project, '-e', '1'], status=1)
+    project.write_text('(paths "module space"')
+    run(['--project', project, '-e', '1'], status=1)
+    run(['--project', root / 'missing.ot', '-e', '1'], status=1)
+    run(['--project', project, '--no-project', '-e', '1'], status=2)
+run(['--heap= 1024', '-e', '1'], status=2)
+run(['--c.heap-init=1023', '-e', '1'], status=2)
+run(['--c.heap-init=1048576', '--c.heap-max=4194304', '-e', large], output='2097152\n')
+assert 'Usage:' in run(['--help']).stdout
+print('CLI project data, attached paths and public heap options passed')

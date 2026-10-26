@@ -2308,3 +2308,24 @@ Cleanup, conditions, process, ports, interrupt, foreign callbacks and foreign
 reload regressions pass. Cleanup, process, ports and interrupt sanitizer targets
 pass with ASan/UBSan and leak checking disabled. The expanded compliance runner
 continues to return failure until its diagnostic and launcher gaps are fixed.
+
+
+## Prototype launcher paths and public options
+
+The standalone prototype launcher supports upward project.ot discovery,
+--project/--no-project, and colon-separated OTIUM_PATH. Explicit -L/--path
+entries precede environment and project paths. Project files are parsed as data:
+only top-level (paths ...) strings contribute directories, resolved relative to
+the project file. Comments and unrelated settings do not become search paths.
+Malformed paths forms fail; project contents are never evaluated.
+
+The public --c.heap-init and --c.heap-max options select prototype semispace
+sizes. Existing --heap retains its fixed-size behavior unless a maximum is
+specified. Numeric flags reject signs and whitespace. Attached --path, --load
+and --project values work. Preload-only invocation stops after loading unless
+--repl was requested. --help/-h list the supported prototype options.
+
+All five runtime-specific public CLI groups pass. The expanded compliance run
+now has 66 passes and two diagnostic failures. The standalone CLI deliberately
+has its own help while additional launcher services remain unimplemented;
+./otium still defaults to Chez, and runtime selection has not changed.

@@ -386,3 +386,7 @@ Added RuntimeIOHost/runtime_set_io_host with open/read/write/close and optional 
 **2026-10-26T21:56:31Z**
 
 Expanded public inventory to resource, SQLite, diagnostics and CLI: 63 pass, five fail, no skips. Fixed cleanup errors replacing pending error/restart/quit/interrupt (aligned stale spec with Chez/public tests), symbol error summaries, process getenv/setenv! and dynamic write-error. Normal cleanup/conditions/process/ports/interrupt/foreign/reload and affected ASan/UBSan checks pass (leak checking disabled). Remaining failures are diagnostic codes/rendering and launcher options/arguments/project paths; overall completion remains open.
+
+**2026-10-26T21:59:21Z**
+
+Prototype launcher now supports upward project discovery, explicit project/no-project, OTIUM_PATH, public heap flags, attached path/load values, help and preload-only execution. Projects parse only top-level paths data. All public CLI runtime groups pass: expanded inventory 66 pass, two diagnostic failures, zero skips. CLI ASan/UBSan (leak checks disabled), module and compiler-free regressions pass. Root launcher remains unchanged and defaults to Chez; further launcher services/routing still need audit.

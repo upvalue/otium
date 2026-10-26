@@ -2,6 +2,7 @@
 #include "internal.h"
 #include "reader.h"
 #include <errno.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -21,7 +22,7 @@ static bool size_option(const char* text, size_t* out) {
   char* end;
   errno = 0;
   unsigned long long value = strtoull(text, &end, 10);
-  if (errno || !*text || *text == '-' || *end || value > SIZE_MAX || !value) return false;
+  if (errno || !isdigit((unsigned char)*text) || *end || value > SIZE_MAX || !value) return false;
   *out = (size_t)value;
   return true;
 }
@@ -42,11 +43,11 @@ static bool evaluate(Runtime* rt, const char* source, size_t length, const char*
   return true;
 }
 
-static bool load(Runtime* rt, const char* path) {
+static char* read_source(const char* path, size_t* size) {
   FILE* file = fopen(path, "rb");
   if (!file) {
     perror(path);
-    return false;
+    return NULL;
   }
   size_t capacity = 4096, length = 0;
   char* buffer = malloc(capacity);
@@ -79,8 +80,104 @@ static bool load(Runtime* rt, const char* path) {
     buffer = grown;
   }
   fclose(file);
-  if (ok) ok = evaluate(rt, buffer, length, path, false);
+  if (!ok) {
+    free(buffer);
+    return NULL;
+  }
+  *size = length;
+  return buffer;
+}
+
+static bool load(Runtime* rt, const char* path) {
+  size_t length;
+  char* buffer = read_source(path, &length);
+  if (!buffer) return false;
+  bool ok = evaluate(rt, buffer, length, path, false);
   free(buffer);
+  return ok;
+}
+
+static bool project_paths(Runtime* rt, const char* path) {
+  size_t length;
+  char* source = read_source(path, &length);
+  if (!source) return false;
+  Reader reader;
+  reader_init(&reader, source, length, SOURCE_LIMIT);
+  bool ok = true;
+  Ast* form;
+  while (ok && (form = reader_next(&reader))) {
+    if (form->kind != AST_LIST || !ast_symbol(form->as.list.first, "paths")) continue;
+    if (form->as.list.tail) {
+      ok = rt_error(rt, "project paths must be a proper list");
+      break;
+    }
+    for (Ast* entry = form->as.list.first->next; ok && entry; entry = entry->next) {
+      if (entry->kind != AST_STRING || memchr(entry->as.text.data, 0, entry->as.text.size)) {
+        ok = rt_error(rt, "project paths must be strings without NUL");
+        break;
+      }
+      const char* slash = strrchr(path, '/');
+      size_t prefix = entry->as.text.size && entry->as.text.data[0] == '/' ? 0
+                      : slash ? (size_t)(slash - path + 1)
+                              : 0;
+      char* directory = malloc(prefix + entry->as.text.size + 1);
+      if (!directory) {
+        ok = rt_error(rt, "out of host memory");
+        break;
+      }
+      memcpy(directory, path, prefix);
+      memcpy(directory + prefix, entry->as.text.data, entry->as.text.size);
+      directory[prefix + entry->as.text.size] = 0;
+      ok = runtime_load_path(rt, directory);
+      free(directory);
+    }
+  }
+  if (reader.error) ok = rt_error(rt, reader.error);
+  reader_destroy(&reader);
+  free(source);
+  return ok;
+}
+
+static bool discover_project(Runtime* rt) {
+  char* directory = getcwd(NULL, 0);
+  if (!directory) return rt_error(rt, "cannot find current directory");
+  char* path = malloc(strlen(directory) + sizeof("/project.ot"));
+  bool ok = path != NULL;
+  if (!ok) rt_error(rt, "out of host memory");
+  while (ok) {
+    sprintf(path, "%s/project.ot", directory);
+    if (access(path, F_OK) == 0) {
+      ok = project_paths(rt, path);
+      break;
+    }
+    if (errno != ENOENT && errno != ENOTDIR) {
+      ok = rt_error(rt, "cannot inspect project file");
+      break;
+    }
+    char* slash = strrchr(directory, '/');
+    if (!slash || !strcmp(directory, "/")) break;
+    if (slash == directory) directory[1] = 0;
+    else *slash = 0;
+  }
+  free(path);
+  free(directory);
+  return ok;
+}
+
+static bool environment_paths(Runtime* rt) {
+  const char* value = getenv("OTIUM_PATH");
+  if (!value) return true;
+  char* paths = strdup(value);
+  if (!paths) return rt_error(rt, "out of host memory");
+  bool ok = true;
+  char* cursor = paths;
+  while (ok && cursor) {
+    char* next = strchr(cursor, ':');
+    if (next) *next++ = 0;
+    if (*cursor) ok = runtime_load_path(rt, cursor);
+    cursor = next;
+  }
+  free(paths);
   return ok;
 }
 
@@ -192,7 +289,8 @@ static bool repl(Runtime* rt) {
 int main(int argc, char** argv) {
   size_t heap = 1024 * 1024, heap_max = 64 * 1024 * 1024, stack = 128 * 1024;
   bool heap_explicit = false, max_explicit = false;
-  bool stats = false, interactive = false;
+  bool stats = false, interactive = false, preloaded = false, no_project = false;
+  const char* project = NULL;
   const char *source = NULL, *path = NULL;
   int option_end = argc, arguments_start = argc;
   for (int i = 1; i < argc; i++) {
@@ -204,7 +302,33 @@ int main(int argc, char** argv) {
       }
       arguments_start = i + 1;
       break;
-    } else if (!strncmp(argv[i], "--heap=", 7)) {
+    } else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
+      puts("Usage: otium-proto [OPTIONS] [SCRIPT] [-- ARGUMENTS...]\n"
+           "  --path DIR, -L DIR     Add a module search directory\n"
+           "  --project FILE         Read (paths ...) relative to FILE\n"
+           "  --no-project           Skip upward project.ot discovery\n"
+           "  --load FILE            Load before the script; repeatable\n"
+           "  --repl                 Enter the REPL after loading\n"
+           "  --c.heap-init=BYTES     Initial semispace size (minimum 1024)\n"
+           "  --c.heap-max=BYTES      Maximum semispace size\n"
+           "  --heap=BYTES            Fixed semispace unless --heap-max is given\n"
+           "  --heap-max=BYTES        Maximum semispace size\n"
+           "  --stack=SLOTS           VM stack limit\n"
+           "  --stats                Print VM statistics\n"
+           "  -e SOURCE              Evaluate and print SOURCE\n"
+           "  --help, -h             Show this help");
+      return 0;
+    } else if (!strncmp(argv[i], "--c.heap-init=", 14)) {
+      if (!size_option(argv[i] + 14, &heap) || heap < 1024) goto usage;
+    } else if (!strncmp(argv[i], "--c.heap-max=", 13)) {
+      if (!size_option(argv[i] + 13, &heap_max)) goto usage;
+      max_explicit = true;
+    } else if (!strcmp(argv[i], "--no-project")) no_project = true;
+    else if (!strcmp(argv[i], "--project") && i + 1 < argc) project = argv[++i];
+    else if (!strncmp(argv[i], "--project=", 10)) project = argv[i] + 10;
+    else if (!strncmp(argv[i], "--path=", 7)) continue;
+    else if (!strncmp(argv[i], "--load=", 7)) preloaded = true;
+    else if (!strncmp(argv[i], "--heap=", 7)) {
       if (!size_option(argv[i] + 7, &heap)) goto usage;
       heap_explicit = true;
     } else if (!strncmp(argv[i], "--heap-max=", 11)) {
@@ -214,15 +338,17 @@ int main(int argc, char** argv) {
       if (!size_option(argv[i] + 8, &stack)) goto usage;
     } else if ((!strcmp(argv[i], "-L") || !strcmp(argv[i], "--path") ||
                 !strcmp(argv[i], "--load")) &&
-               i + 1 < argc)
+               i + 1 < argc) {
+      if (!strcmp(argv[i], "--load")) preloaded = true;
       i++;
-    else if (!strcmp(argv[i], "--stats")) stats = true;
+    } else if (!strcmp(argv[i], "--stats")) stats = true;
     else if (!strcmp(argv[i], "--repl")) interactive = true;
     else if (!strcmp(argv[i], "-e") && i + 1 < argc && !source && !path) source = argv[++i];
     else if (argv[i][0] != '-' && !source && !path) path = argv[i];
     else goto usage;
   }
-  if (!source && !path) interactive = true;
+  if (project && no_project) goto usage;
+  if (!source && !path && !preloaded) interactive = true;
   if (heap_explicit && !max_explicit) heap_max = heap;
   if (heap_max < heap || heap_max > SIZE_MAX / 2) goto usage;
   Runtime* rt = runtime_create(heap, stack);
@@ -249,7 +375,7 @@ int main(int argc, char** argv) {
   if (ok) ok = runtime_load_expander(rt, OTIUM_LIBRARY_DIR);
   if (!ok) fprintf(stderr, "cannot load expander: %s\n", runtime_error(rt));
   for (int i = 1; ok && i < option_end; i++) {
-    if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "--load")) {
+    if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "--load") || !strcmp(argv[i], "--project")) {
       i++;
       continue;
     }
@@ -257,17 +383,23 @@ int main(int argc, char** argv) {
       ok = runtime_load_path(rt, argv[++i]);
       if (!ok) fprintf(stderr, "%s\n", runtime_error(rt));
     }
+    if (!strncmp(argv[i], "--path=", 7)) ok = runtime_load_path(rt, argv[i] + 7);
   }
+  if (ok) ok = environment_paths(rt);
+  if (ok && !no_project) ok = project ? project_paths(rt, project) : discover_project(rt);
+  if (!ok && runtime_error(rt)[0]) fprintf(stderr, "%s\n", runtime_error(rt));
   if (ok) {
     ok = runtime_load_core(rt, OTIUM_LIBRARY_DIR);
     if (!ok) fprintf(stderr, "cannot load core: %s\n", runtime_error(rt));
   }
   for (int i = 1; ok && i < option_end; i++) {
-    if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "-L") || !strcmp(argv[i], "--path")) {
+    if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "-L") || !strcmp(argv[i], "--path") ||
+        !strcmp(argv[i], "--project")) {
       i++;
       continue;
     }
     if (!strcmp(argv[i], "--load")) ok = load(rt, argv[++i]);
+    else if (!strncmp(argv[i], "--load=", 7)) ok = load(rt, argv[i] + 7);
   }
   if (ok && path) ok = load(rt, path);
   if (ok && source) ok = evaluate(rt, source, strlen(source), "<expression>", true);

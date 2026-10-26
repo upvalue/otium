@@ -23,7 +23,8 @@ class Context(harness.Context):
     def command(self, *arguments, runtime=None, project=False):
         if runtime not in (None, 'c'):
             raise harness.Skip('cross-runtime launcher test needs separate integration')
-        return [str(ROOT / 'prototype/otium-proto'), *map(str, arguments)]
+        return [str(ROOT / 'prototype/otium-proto'),
+                *([] if project else ['--no-project']), *map(str, arguments)]
 
 
 def main():

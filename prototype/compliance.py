@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Run public core tests against the prototype, retaining their assertions."""
+"""Run public core and FFI tests against the prototype, retaining their assertions."""
 import argparse
 import importlib.util
 import json
 from pathlib import Path
 import sys
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'tests'), str(ROOT / 'tools')]
@@ -13,7 +14,7 @@ import harness
 
 DEFINITIONS = ['tests/tests.py', 'tests/library/tests.py', 'tests/modules/tests.py',
                'tests/reader/tests.py', 'tests/conditions/tests.py',
-               'tests/syntax-quote/tests.py']
+               'tests/syntax-quote/tests.py', 'tests/ffi/tests.py']
 
 
 class Context(harness.Context):
@@ -27,6 +28,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
+    subprocess.run(['make', '-C', str(ROOT / 'prototype'), 'otium-proto',
+                    'ffi_fixture.so', 'ffi_other.so'], check=True)
+    original_library = harness.library
+    fixtures = {'ffi-fixture-17': ROOT / 'prototype/ffi_fixture.so',
+                'ffi-fixture-29': ROOT / 'prototype/ffi_other.so'}
+    harness.library = lambda name: fixtures[name] if name in fixtures else original_library(name)
     for index, name in enumerate(DEFINITIONS):
         path = ROOT / name
         harness._defaults.clear()

@@ -35,19 +35,25 @@ allocation. Binding and memory list links are published after allocation, when
 the current head is known. The collector retains four unused signatures for
 reload reuse, plus signatures pinned by live bindings or pending wrappers.
 
-The core compliance inventory has 49 passing groups. FFI supports scalar calls,
-bulk memory, layout snapshots and by-value structs with nested arrays. The full
-common FFI suite still stops at union ABI classification. Callbacks, the broader
-ownership contract and memory-operation error metadata need further work.
-Embedding I/O and class performance also remain part of the completion audit.
-See [prototype-completion.md](../prototype-completion.md) for that work; cleanup
-does not establish runtime completion.
+The compliance inventory includes all public FFI groups: 52 groups pass and four
+fail. The complete common FFI suite passes 222 checks, including unions on x86-64
+Linux SysV. Union lowering merges every member's integer/floating leaves while
+preserving offsets and padding; unsupported targets raise `abi`. The lowering
+follows the [AMD64 ABI classification rules](https://gitlab.com/x86-psABIs/x86-64-ABI/-/raw/master/x86-64-ABI/low-level-sys-info.tex)
+and [libffi's x86-64 classifier](https://github.com/libffi/libffi/blob/master/src/x86/ffi64.c).
+The exposed types exclude vectors and long double.
 
-Run `make -C prototype -j2 test` and `python3 prototype/compliance.py` for the
-normal suite and core inventory. The default `sanitize` target covers only heap,
-reader and runtime tests. Foreign changes also need `sanitize-foreign` and
-`sanitize-foreign-reload`; the Makefile has further subsystem sanitizer targets.
-All runtime builds use the same source list, including `foreign_types.c`.
+Callbacks, callback exit/thread handling and ownership still fail on missing APIs.
+Embedding I/O, memory-operation error metadata and performance remain part of
+[prototype-completion.md](../prototype-completion.md).
+
+Run `python3 prototype/compliance.py` for the public inventory; it builds its
+prototype executable and FFI fixtures. `make -C prototype test-foreign` includes
+the unchanged common FFI suite under forced collection. `sanitize-foreign` passes
+those checks under ASan/UBSan with leak detection disabled. Foreign reload tests
+also pass. The default `sanitize` target covers only heap, reader and runtime
+checks; the Makefile has separate subsystem sanitizer targets. All runtime builds
+use the same source list, including `foreign_types.c`.
 
 ## Cleanup validation
 

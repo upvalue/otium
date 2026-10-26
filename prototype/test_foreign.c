@@ -13,6 +13,22 @@ static Value eval(Runtime* rt, const char* source) {
   return v;
 }
 
+static void eval_file(Runtime* rt, const char* path) {
+  FILE* file = fopen(path, "rb");
+  assert(file);
+  assert(!fseek(file, 0, SEEK_END));
+  long length = ftell(file);
+  assert(length >= 0);
+  rewind(file);
+  char* contents = malloc((size_t)length + 1);
+  assert(contents);
+  assert(fread(contents, 1, (size_t)length, file) == (size_t)length);
+  fclose(file);
+  contents[length] = 0;
+  eval(rt, contents);
+  free(contents);
+}
+
 static void integer(Runtime* rt, const char* source, intptr_t expected) {
   Value actual = eval(rt, source);
   if (actual != value_int(expected)) {
@@ -318,6 +334,20 @@ int main(int argc, char** argv) {
            "   (ffi/bind aggregate-lib \"translate\" (list layout) layout #t)))");
   eval(rt, "(+ 20 22)");
   assert(runtime_foreign_signatures(rt) <= prepared + 6);
+  runtime_destroy(rt);
+  rt = runtime_create(4 * 1024 * 1024, 256 * 1024);
+  assert(rt);
+  assert(runtime_load_core(rt, "../lib"));
+  char fixture[128], other[128];
+  snprintf(fixture, sizeof(fixture), "./ffi_fixture%s.so", suffix);
+  snprintf(other, sizeof(other), "./ffi_other%s.so", suffix);
+  const char* arguments[] = {fixture, other};
+  assert(runtime_set_arguments(rt, "../tests/ffi/common.ot", 2, arguments));
+  runtime_gc_stress(rt, true);
+  eval_file(rt, "../tests/ffi/support.ot");
+  eval_file(rt, "../tests/ffi/runtime-c.ot");
+  eval_file(rt, "../tests/ffi/common.ot");
+  integer(rt, "(ffi/allocation-count)", 0);
   runtime_destroy(rt);
   puts("foreign call tests passed");
 }

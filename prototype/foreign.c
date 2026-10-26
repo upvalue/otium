@@ -80,12 +80,6 @@ struct oti_foreign_state {
   oti_foreign_error* error_context;
 };
 
-size_t ot_foreign_signatures(const ot_runtime* rt) {
-  size_t count = 0;
-  for (oti_signature* s = rt->foreign->signatures; s; s = s->next) count++;
-  return count;
-}
-
 static void argument_context(ot_runtime* rt, size_t index, const char* expected) {
   if (rt->foreign->error_context) *rt->foreign->error_context = (oti_foreign_error){index, expected};
 }
@@ -191,19 +185,17 @@ static void* object_data(ot_value value) {
   return data;
 }
 
-ot_foreign_stats ot_get_foreign_stats(const ot_runtime* rt) {
-  ot_foreign_stats stats = {0};
+void oti_foreign_stats(const ot_runtime* rt, ot_stats* stats) {
   const oti_foreign_state* state = rt->foreign;
-  if (!state) return stats;
-  for (oti_library* p = state->libraries; p; p = p->next) stats.libraries++;
-  for (oti_foreign_binding* p = state->bindings; p; p = p->next) stats.bindings++;
-  for (oti_signature* p = state->signatures; p; p = p->next) stats.signatures++;
-  for (oti_memory* p = state->memory; p; p = p->next) stats.memory_records++;
-  for (oti_callback* p = state->callbacks; p; p = p->next) stats.callback_records++;
-  stats.callbacks = state->callback_count;
-  stats.allocations = state->allocations;
-  stats.bytes = state->bytes;
-  return stats;
+  if (!state) return;
+  for (oti_library* p = state->libraries; p; p = p->next) stats->libraries++;
+  for (oti_foreign_binding* p = state->bindings; p; p = p->next) stats->bindings++;
+  for (oti_signature* p = state->signatures; p; p = p->next) stats->signatures++;
+  for (oti_memory* p = state->memory; p; p = p->next) stats->memory_records++;
+  for (oti_callback* p = state->callbacks; p; p = p->next) stats->callback_records++;
+  stats->callbacks = state->callback_count;
+  stats->allocations = state->allocations;
+  stats->bytes = state->bytes;
 }
 
 void oti_foreign_collect(ot_runtime* rt) {

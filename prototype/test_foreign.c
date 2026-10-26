@@ -1,5 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
-#include "runtime.h"
+#include "otium.h"
 #include <assert.h>
 #include <dlfcn.h>
 #include <stdio.h>
@@ -123,9 +123,9 @@ int main(int argc, char** argv) {
     abort();
   }
   integer(rt, "((ffi/bind lib \"fixture_id\" '() 'int #t))", 17);
-  assert(ot_foreign_signatures(rt) == 1);
+  assert(ot_get_stats(rt).signatures == 1);
   integer(rt, "((ffi/bind other \"fixture_id\" '() 'int #f))", 29);
-  assert(ot_foreign_signatures(rt) == 1);
+  assert(ot_get_stats(rt).signatures == 1);
   integer(rt, "(apply (ffi/bind lib \"fixture_id\" '() 'int #t) nil)", 17);
 
   assert(eval(rt, "(ffi/has-symbol? lib \"echo_bool\")") == OT_TRUE);
@@ -262,7 +262,7 @@ int main(int argc, char** argv) {
   ot_value argument = ot_int(43), result;
   assert(ot_call(rt, "byte", &argument, 1, &result) && result == argument);
   integer(rt, "(ffi/allocation-count)", 0);
-  assert(ot_collections(rt) > 10);
+  assert(ot_get_stats(rt).collections > 10);
   ot_destroy(rt);
   rt = ot_create(8192, 256);
   assert(rt);
@@ -276,7 +276,7 @@ int main(int argc, char** argv) {
          "(let loop ((n 10000) (value (text \"retained\"))) "
          "(if (= n 0) value (loop (- n 1) (text value))))",
          "retained");
-  assert(ot_collections(rt) > 10);
+  assert(ot_get_stats(rt).collections > 10);
   ot_destroy(rt);
   rt = ot_create(128, 64);
   assert(rt);
@@ -360,22 +360,22 @@ int main(int argc, char** argv) {
   contents[length] = 0;
   eval(rt, contents);
   free(contents);
-  size_t prepared = ot_foreign_signatures(rt);
+  size_t prepared = ot_get_stats(rt).signatures;
   eval(rt, "(def SamePoint (ffi/define-struct! 'OtherName '((a double) (b double))))"
            "(def same-translate (ffi/bind aggregate-lib \"translate\" (list SamePoint 'double "
            "'double) SamePoint #t))");
-  assert(ot_foreign_signatures(rt) == prepared);
+  assert(ot_get_stats(rt).signatures == prepared);
   /* Only prepare these signatures: the fixture has a different C type. */
   eval(rt, "(def DifferentPoint (ffi/define-struct! 'Point '((a u64) (b double))))"
            "(def unused-binding (ffi/bind aggregate-lib \"translate\" (list DifferentPoint 'double "
            "'double) DifferentPoint #t))");
-  assert(ot_foreign_signatures(rt) == prepared + 1);
+  assert(ot_get_stats(rt).signatures == prepared + 1);
   eval(rt, "(dotimes (i 40)"
            " (let ((layout (ffi/define-struct! 'Temporary (list (list 'data (list 'array 'u8 (+ i "
            "1)))))))"
            "   (ffi/bind aggregate-lib \"translate\" (list layout) layout #t)))");
   eval(rt, "(+ 20 22)");
-  assert(ot_foreign_signatures(rt) <= prepared + 6);
+  assert(ot_get_stats(rt).signatures <= prepared + 6);
   ot_destroy(rt);
   rt = ot_create(4 * 1024 * 1024, 256 * 1024);
   assert(rt);
@@ -407,15 +407,15 @@ int main(int argc, char** argv) {
            "(def callback-extra (ffi/open-library '(\"./ffi_extra%s.so\")))", suffix);
   eval(rt, source);
   eval_file(rt, "test_callback_lifetime.ot");
-  size_t callback_records = ot_get_foreign_stats(rt).callback_records;
+  size_t callback_records = ot_get_stats(rt).callback_records;
   for (size_t i = 0; i < 100; i++) {
     eval(rt, "(def temporary-callback (ffi/callback '(int) 'int (fn (x) (+ x 1))))"
              "(ffi/free-callback! temporary-callback) (set! temporary-callback nil)");
-    assert(ot_get_foreign_stats(rt).callback_records <= callback_records + 2);
+    assert(ot_get_stats(rt).callback_records <= callback_records + 2);
   }
   eval(rt, "(+ 20 22)");
-  assert(ot_get_foreign_stats(rt).callback_records <= callback_records);
-  assert(ot_get_foreign_stats(rt).callbacks == 1);
+  assert(ot_get_stats(rt).callback_records <= callback_records);
+  assert(ot_get_stats(rt).callbacks == 1);
   snprintf(source, sizeof(source), "%s/ffi-callback-handler.ot", directory);
   assert(!unlink(source));
   assert(!rmdir(directory));

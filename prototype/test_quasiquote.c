@@ -54,7 +54,7 @@ int main(void) {
     assert(eval(rt, "(equal? (build 100) '(1 2 3 1))") == OT_TRUE);
     eval(rt, "(def (loop n) (if (= n 0) 42 `(,@(loop (- n 1)))))");
     assert(eval(rt, "(loop 10000)") == ot_int(42));
-    assert(ot_max_frames(rt) < 8);
+    assert(ot_get_stats(rt).max_frames < 8);
     rejects(rt, "`(,@nil 1)", "proper list");
     eval(rt, "(def hits 0)");
     rejects(rt, "`(,@nil ,(begin (set! hits 1) 2))", "proper list");

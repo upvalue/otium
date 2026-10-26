@@ -130,12 +130,12 @@ int main(void) {
     assert(eval(rt, "(unless #t (error \"skipped\"))") == OT_NIL);
     eval(rt, "(def (tail n) (when (> n 0) (tail (- n 1))))");
     assert(eval(rt, "(tail 10000)") == OT_NIL);
-    assert(ot_max_frames(rt) < 8);
+    assert(ot_get_stats(rt).max_frames < 8);
     rejects(rt, "(require chain0)", "nesting limit");
     write_module(directory, "chain0", "(ns chain0) (def recovered 42)");
     assert(eval(rt, "(require chain0) chain0/recovered") == ot_int(42));
     write_module(directory, "chain0", "(ns chain0) (require chain1)");
-    rejects(rt, "(require oversized)", "source budget");
+    rejects(rt, "(require oversized)", "source size limit");
     printf("module tests passed\n");
     ot_destroy(rt);
     write_module(directory, "api", "(ns api) (def value 41) (def- secret 7) (def (read) value)");

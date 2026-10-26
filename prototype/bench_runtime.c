@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
          "vm");
   for (size_t i = 0; i < 5; i++) printf("%s%.9f", i ? "," : "", samples[i]);
   printf("],\"ffi_signatures\":%zu,\"collections\":%zu,\"max_frames\":%zu,\"peak_rss_kib\":%ld}\n",
-         ot_foreign_signatures(rt), ot_collections(rt), ot_max_frames(rt),
+         ot_get_stats(rt).signatures, ot_get_stats(rt).collections, ot_get_stats(rt).max_frames,
          usage.ru_maxrss);
   ot_destroy(rt);
   return 0;

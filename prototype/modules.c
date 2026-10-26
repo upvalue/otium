@@ -53,6 +53,51 @@ bool ot_add_load_path(ot_runtime* rt, const char* path) {
   return true;
 }
 
+bool ot_add_project_paths(ot_runtime* rt, const char* project_file) {
+  if (!oti_host_entry(rt)) return false;
+  FILE* file = fopen(project_file, "rb");
+  if (!file) return oti_error(rt, "cannot open project file");
+  size_t length;
+  char* source = oti_read_file(rt, file, OTI_SOURCE_LIMIT, "project file", &length);
+  if (!source) return false;
+  const char* slash = strrchr(project_file, '/');
+  size_t prefix = slash ? (size_t)(slash - project_file + 1) : 0;
+  oti_reader reader;
+  oti_reader_init(&reader, source, length, OTI_SOURCE_LIMIT);
+  bool ok = true;
+  oti_ast* form;
+  while (ok && (form = oti_reader_next(&reader))) {
+    if (form->kind != AST_LIST || !oti_ast_symbol(form->as.list.first, "paths")) continue;
+    if (form->as.list.tail) {
+      ok = oti_error(rt, "project paths must be a proper list");
+      break;
+    }
+    for (oti_ast* entry = form->as.list.first->next; ok && entry; entry = entry->next) {
+      if (entry->kind != AST_STRING || memchr(entry->as.text.data, 0, entry->as.text.size)) {
+        ok = oti_error(rt, "project paths must be strings without NUL");
+        break;
+      }
+      const char* text = entry->as.text.data;
+      size_t size = entry->as.text.size;
+      size_t base = size && text[0] == '/' ? 0 : prefix;
+      char* directory = malloc(base + size + 1);
+      if (!directory) {
+        ok = oti_error(rt, "out of host memory");
+        break;
+      }
+      memcpy(directory, project_file, base);
+      memcpy(directory + base, text, size);
+      directory[base + size] = 0;
+      ok = ot_add_load_path(rt, directory);
+      free(directory);
+    }
+  }
+  if (reader.error) ok = oti_coded_error(rt, reader.error_code, reader.error);
+  oti_reader_destroy(&reader);
+  free(source);
+  return ok;
+}
+
 void oti_modules_destroy(ot_runtime* rt) {
   oti_module_state* m = rt->modules;
   if (!m) return;
@@ -150,34 +195,18 @@ static bool load_module(ot_runtime* rt, uint32_t space, bool reload, bool legacy
     free(path);
   }
   if (!file) return oti_coded_error(rt, "E0202", "module file not found");
-  bool ok = !fseek(file, 0, SEEK_END);
-  long bytes = ok ? ftell(file) : -1;
-  if (bytes < 0 || (unsigned long)bytes > 16 * 1024 * 1024 - m->source_bytes) {
-    fclose(file);
-    return oti_error(rt, "module file exceeds source budget or cannot be read");
-  }
-  rewind(file);
-  char* source = malloc((size_t)bytes + 1);
-  if (!source) {
-    fclose(file);
-    return oti_error(rt, "out of host memory");
-  }
-  ok = fread(source, 1, (size_t)bytes, file) == (size_t)bytes && !ferror(file);
-  fclose(file);
-  source[bytes] = 0;
-  if (!ok) {
-    free(source);
-    return oti_error(rt, "cannot read module file");
-  }
+  size_t bytes;
+  char* source = oti_read_file(rt, file, OTI_SOURCE_LIMIT - m->source_bytes, "module file", &bytes);
+  if (!source) return false;
   uint32_t caller = rt->current_namespace, expected = rt->required_namespace;
   rt->current_namespace = rt->required_namespace = space;
   m->items[index].state = 1;
   ot_value ignored;
   m->depth++;
-  m->source_bytes += (size_t)bytes;
-  ok = ot_eval(rt, source, (size_t)bytes, &ignored);
+  m->source_bytes += bytes;
+  bool ok = ot_eval(rt, source, bytes, &ignored);
   m->depth--;
-  m->source_bytes -= (size_t)bytes;
+  m->source_bytes -= bytes;
   /* Recursive requires may grow the module array. Keep only its index. */
   m->items[index].state = ok ? 2 : 0;
   rt->current_namespace = caller;

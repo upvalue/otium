@@ -1,0 +1,157 @@
+#ifndef OTIUM_H
+#define OTIUM_H
+
+/* Public embedding API for the Otium runtime. This is the only header an
+ * embedding host needs; everything else in the source tree is internal. */
+
+#include <signal.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+typedef struct ot_runtime ot_runtime;
+
+/* Values are tagged words. Managed values move during collection, so a value
+ * returned to the host is only valid until the next call into the runtime. */
+typedef uintptr_t ot_value;
+
+enum { OT_NIL = 2, OT_FALSE = 6, OT_TRUE = 10, OT_EMPTY = 14, OT_EOF = 30 };
+
+static inline ot_value ot_int(intptr_t n) { return ((uintptr_t)n << 1) | 1; }
+
+static inline bool ot_is_int(ot_value v) { return (v & 1) != 0; }
+
+static inline ot_value ot_bool(bool b) { return b ? OT_TRUE : OT_FALSE; }
+
+#if !defined(OTIUM_PORTABLE_INTS) && INTPTR_MIN == (-INTPTR_MAX - 1) && (-1 >> 1) == -1
+#define OTIUM_FAST_INT_REPR 1
+
+/* The tagged word reinterpreted as a signed integer. */
+static inline intptr_t ot_int_bits(ot_value v) {
+  intptr_t bits;
+  _Static_assert(sizeof(bits) == sizeof(v), "matching integer widths");
+  memcpy(&bits, &v, sizeof(bits));
+  return bits;
+}
+#else
+#define OTIUM_FAST_INT_REPR 0
+#endif
+
+static inline intptr_t ot_to_int(ot_value v) {
+#if OTIUM_FAST_INT_REPR
+  return ot_int_bits(v) >> 1;
+#else
+  return v & ((uintptr_t)1 << (sizeof(v) * 8 - 1)) ? -(intptr_t)((~v >> 1) + 1)
+                                                   : (intptr_t)(v >> 1);
+#endif
+}
+
+/* The UTF-8 bytes of a string value, or NULL when the value is not a string.
+ * The pointer is invalidated by the next call into the runtime. */
+const char* ot_string_data(ot_value v, size_t* length);
+
+/* Creation and configuration. Heaps are fixed until a larger per-semispace
+ * limit is explicitly supplied; growth only happens after collection cannot
+ * satisfy an allocation. */
+ot_runtime* ot_create(size_t semispace_bytes, size_t stack_limit);
+void ot_destroy(ot_runtime* rt);
+bool ot_set_heap_limit(ot_runtime* rt, size_t semispace_bytes);
+/* Copy host script metadata. NULL script means no script; strings are UTF-8. */
+bool ot_set_arguments(ot_runtime* rt, const char* script, size_t count,
+                      const char* const* arguments);
+
+/* Loading. The expander must be loaded before the core library. */
+bool ot_load_expander(ot_runtime* rt, const char* directory);
+bool ot_load_core(ot_runtime* rt, const char* directory);
+/* Append a module search directory before the default . and lib directories. */
+bool ot_add_load_path(ot_runtime* rt, const char* path);
+/* Add the module directories listed by (paths ...) forms in a project file.
+ * Relative entries resolve against the project file's directory. */
+bool ot_add_project_paths(ot_runtime* rt, const char* project_file);
+
+/* Evaluation. The result is retained until the next evaluation. Definitions
+ * survive calls. Errors return false and leave the runtime ready for another
+ * evaluation. */
+bool ot_eval(ot_runtime* rt, const char* source, size_t length, ot_value* result);
+/* Invoke an existing global in the current namespace, or a qualified name,
+ * without parsing or compiling a wrapper. Arguments must be in caller-owned
+ * storage; the runtime roots them before allocation. */
+bool ot_call(ot_runtime* rt, const char* name, const ot_value* args, size_t count,
+             ot_value* result);
+const char* ot_error(const ot_runtime* rt);
+size_t ot_error_offset(const ot_runtime* rt);
+/* An exit request returns false from eval/call; the host decides when to exit.
+ * A subsequent top-level evaluation clears the request. */
+bool ot_exit_status(const ot_runtime* rt, int* status);
+
+/* Find the next complete form in source starting at start, without
+ * evaluating it. On OT_FORM_COMPLETE, *end is the offset just past the form.
+ * On OT_FORM_ERROR, *error and *error_offset describe the problem. */
+typedef enum {
+  OT_FORM_COMPLETE,
+  OT_FORM_END,
+  OT_FORM_INCOMPLETE,
+  OT_FORM_ERROR
+} ot_form_status;
+
+ot_form_status ot_scan_form(const char* source, size_t length, size_t start, size_t* end,
+                            const char** error, size_t* error_offset);
+
+/* Interrupts. The host owns the flag and keeps it alive until detached (NULL)
+ * or destruction. A signal handler may set it to 1; evaluation consumes it at
+ * safe points. */
+void ot_set_interrupt_flag(ot_runtime* rt, volatile sig_atomic_t* flag);
+bool ot_poll_interrupt(ot_runtime* rt);
+bool ot_interrupted(const ot_runtime* rt);
+
+/* Host IO. Host functions return errno values (zero on success); read/write
+ * return a byte count, zero for read EOF, or a negative errno. Writes must make
+ * progress. Callbacks borrow managed buffers: they must not reenter or collect
+ * the runtime. The table is copied. Userdata must outlive every port opened
+ * with this host. */
+enum {
+  OT_IO_READ = 1,
+  OT_IO_WRITE = 2,
+  OT_IO_CREATE = 4,
+  OT_IO_TRUNCATE = 8,
+  OT_IO_APPEND = 16,
+  OT_IO_EXCLUSIVE = 32
+};
+
+typedef struct {
+  int (*open)(void* userdata, const char* path, unsigned flags, intptr_t* handle);
+  long (*read)(void* userdata, intptr_t handle, uint8_t* bytes, size_t length);
+  long (*write)(void* userdata, intptr_t handle, const uint8_t* bytes, size_t length);
+  int (*close)(void* userdata, intptr_t handle);
+  int (*flush)(void* userdata, intptr_t handle); /* Optional. */
+} ot_io_host;
+
+/* Affects subsequently opened ports. NULL restores POSIX defaults. Standard
+ * ports use handles 0/1/2 and are borrowed; install before loading the core to
+ * replace them. Existing ports retain their host, userdata and handle. */
+bool ot_set_io_host(ot_runtime* rt, const ot_io_host* host, void* userdata);
+/* Flush a snapshot of registered output ports at an idle host boundary.
+ * Success preserves the preceding evaluation/exit result. A flush failure
+ * replaces it and can be inspected or retried. Destruction never calls Otium. */
+bool ot_flush_ports(ot_runtime* rt);
+
+/* Printing. ot_write uses read syntax; ot_print shows strings without quotes. */
+void ot_write(ot_runtime* rt, FILE* out, ot_value value);
+void ot_print(ot_runtime* rt, FILE* out, ot_value value);
+
+/* Diagnostics. Foreign record counts include cached signatures and retained
+ * library handles. allocations/bytes describe explicitly owned native buffers,
+ * not process RSS. */
+typedef struct {
+  size_t collections, max_frames, heap_capacity;
+  size_t libraries, bindings, signatures, memory_records, allocations, bytes;
+  size_t callbacks, callback_records;
+} ot_stats;
+
+ot_stats ot_get_stats(const ot_runtime* rt);
+/* Collect before every allocation. Slow; for testing rooting. */
+void ot_gc_stress(ot_runtime* rt, bool enabled);
+
+#endif

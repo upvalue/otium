@@ -1,6 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
-#include "internal.h"
-#include "reader.h"
+#include "otium.h"
 #include <errno.h>
 #include <ctype.h>
 #include <stdlib.h>
@@ -97,61 +96,24 @@ static bool load(ot_runtime* rt, const char* path) {
   return ok;
 }
 
-static bool project_paths(ot_runtime* rt, const char* path) {
-  size_t length;
-  char* source = read_source(path, &length);
-  if (!source) return false;
-  oti_reader reader;
-  oti_reader_init(&reader, source, length, SOURCE_LIMIT);
-  bool ok = true;
-  oti_ast* form;
-  while (ok && (form = oti_reader_next(&reader))) {
-    if (form->kind != AST_LIST || !oti_ast_symbol(form->as.list.first, "paths")) continue;
-    if (form->as.list.tail) {
-      ok = oti_error(rt, "project paths must be a proper list");
-      break;
-    }
-    for (oti_ast* entry = form->as.list.first->next; ok && entry; entry = entry->next) {
-      if (entry->kind != AST_STRING || memchr(entry->as.text.data, 0, entry->as.text.size)) {
-        ok = oti_error(rt, "project paths must be strings without NUL");
-        break;
-      }
-      const char* slash = strrchr(path, '/');
-      size_t prefix = entry->as.text.size && entry->as.text.data[0] == '/' ? 0
-                      : slash ? (size_t)(slash - path + 1)
-                              : 0;
-      char* directory = malloc(prefix + entry->as.text.size + 1);
-      if (!directory) {
-        ok = oti_error(rt, "out of host memory");
-        break;
-      }
-      memcpy(directory, path, prefix);
-      memcpy(directory + prefix, entry->as.text.data, entry->as.text.size);
-      directory[prefix + entry->as.text.size] = 0;
-      ok = ot_add_load_path(rt, directory);
-      free(directory);
-    }
-  }
-  if (reader.error) ok = oti_coded_error(rt, reader.error_code, reader.error);
-  oti_reader_destroy(&reader);
-  free(source);
-  return ok;
-}
-
 static bool discover_project(ot_runtime* rt) {
   char* directory = getcwd(NULL, 0);
-  if (!directory) return oti_error(rt, "cannot find current directory");
+  if (!directory) {
+    perror("cannot find current directory");
+    return false;
+  }
   char* path = malloc(strlen(directory) + sizeof("/project.ot"));
   bool ok = path != NULL;
-  if (!ok) oti_error(rt, "out of host memory");
+  if (!ok) fputs("out of host memory\n", stderr);
   while (ok) {
     sprintf(path, "%s/project.ot", directory);
     if (access(path, F_OK) == 0) {
-      ok = project_paths(rt, path);
+      ok = ot_add_project_paths(rt, path);
       break;
     }
     if (errno != ENOENT && errno != ENOTDIR) {
-      ok = oti_error(rt, "cannot inspect project file");
+      perror(path);
+      ok = false;
       break;
     }
     char* slash = strrchr(directory, '/');
@@ -168,7 +130,10 @@ static bool environment_paths(ot_runtime* rt) {
   const char* value = getenv("OTIUM_PATH");
   if (!value) return true;
   char* paths = strdup(value);
-  if (!paths) return oti_error(rt, "out of host memory");
+  if (!paths) {
+    fputs("out of host memory\n", stderr);
+    return false;
+  }
   bool ok = true;
   char* cursor = paths;
   while (ok && cursor) {
@@ -181,32 +146,37 @@ static bool environment_paths(ot_runtime* rt) {
   return ok;
 }
 
-/* The REPL and program reads must share the standard port's managed buffer. */
+/* The REPL and program reads must share the standard port's managed buffer.
+ * Returns the line length including a newline, -1 at EOF or -2 after
+ * reporting an error. */
 static ssize_t input_line(ot_runtime* rt, char** line, size_t* capacity) {
   ot_value port, value;
   if (!ot_call(rt, "otium.core/%standard-input", NULL, 0, &port) ||
-      !ot_call(rt, "otium.core/read-line", &port, 1, &value))
-    return -2;
-  if (value == OT_EOF) return -1;
-  if (!oti_kind(value, K_STRING)) {
-    oti_error(rt, "read-line must return a string or EOF");
+      !ot_call(rt, "otium.core/read-line", &port, 1, &value)) {
+    if (!ot_interrupted(rt)) fprintf(stderr, "stdin: %s\n", ot_error(rt));
     return -2;
   }
-  size_t length = oti_bytes_length(value);
+  if (value == OT_EOF) return -1;
+  size_t length;
+  const char* text = ot_string_data(value, &length);
+  if (!text) {
+    fputs("stdin: read-line must return a string or EOF\n", stderr);
+    return -2;
+  }
   if (length >= SOURCE_LIMIT) {
-    oti_error(rt, "source exceeds size limit");
+    fputs("stdin: source exceeds size limit\n", stderr);
     return -2;
   }
   if (*capacity < length + 1) {
     char* grown = realloc(*line, length + 1);
     if (!grown) {
-      oti_error(rt, "out of host memory");
+      fputs("out of host memory\n", stderr);
       return -2;
     }
     *line = grown;
     *capacity = length + 1;
   }
-  memcpy(*line, oti_bytes_data(value), length);
+  memcpy(*line, text, length);
   (*line)[length] = '\n';
   return (ssize_t)(length + 1);
 }
@@ -222,17 +192,12 @@ static bool repl(ot_runtime* rt) {
     }
     ssize_t bytes = input_line(rt, &line, &line_capacity);
     if (bytes < 0) {
-      if (bytes == -2) {
-        if (!ot_interrupted(rt)) fprintf(stderr, "stdin: %s\n", ot_error(rt));
-        ok = false;
-      }
+      if (bytes == -2) ok = false;
       if (length) {
-        oti_reader reader;
-        oti_reader_init(&reader, pending, length, SOURCE_LIMIT);
-        oti_reader_next(&reader);
-        fprintf(stderr, "<stdin>:%zu: %s\n", reader.error_offset,
-                reader.error ? reader.error : "incomplete input");
-        oti_reader_destroy(&reader);
+        size_t end, error_offset;
+        const char* error;
+        ot_scan_form(pending, length, 0, &end, &error, &error_offset);
+        fprintf(stderr, "<stdin>:%zu: %s\n", error_offset, error ? error : "incomplete input");
         ok = false;
       }
       break;
@@ -251,32 +216,29 @@ static bool repl(ot_runtime* rt) {
     pending = grown;
     memcpy(pending + length, line, (size_t)bytes);
     length += (size_t)bytes;
-    oti_reader reader;
-    oti_reader_init(&reader, pending, length, SOURCE_LIMIT);
     size_t consumed = 0;
     for (;;) {
-      size_t start = reader.position;
-      oti_ast* form = oti_reader_next(&reader);
-      if (form) {
-        evaluate(rt, pending + start, reader.position - start, "<stdin>", true);
-        int status;
-        if (ot_interrupted(rt) || ot_exit_status(rt, &status)) {
-          oti_reader_destroy(&reader);
+      size_t end, error_offset;
+      const char* error;
+      ot_form_status status = ot_scan_form(pending, length, consumed, &end, &error, &error_offset);
+      if (status == OT_FORM_COMPLETE) {
+        evaluate(rt, pending + consumed, end - consumed, "<stdin>", true);
+        int exit_status;
+        if (ot_interrupted(rt) || ot_exit_status(rt, &exit_status)) {
           free(line);
           free(pending);
           return false;
         }
-        consumed = reader.position;
+        consumed = end;
         continue;
       }
-      if (!reader.error) consumed = length;
-      else if (!reader.incomplete) {
-        fprintf(stderr, "<stdin>:%zu: %s\n", reader.error_offset, reader.error);
+      if (status == OT_FORM_END) consumed = length;
+      else if (status == OT_FORM_ERROR) {
+        fprintf(stderr, "<stdin>:%zu: %s\n", error_offset, error);
         consumed = length;
       }
       break;
     }
-    oti_reader_destroy(&reader);
     memmove(pending, pending + consumed, length - consumed);
     length -= consumed;
     fflush(stdout);
@@ -386,7 +348,7 @@ int main(int argc, char** argv) {
     if (!strncmp(argv[i], "--path=", 7)) ok = ot_add_load_path(rt, argv[i] + 7);
   }
   if (ok) ok = environment_paths(rt);
-  if (ok && !no_project) ok = project ? project_paths(rt, project) : discover_project(rt);
+  if (ok && !no_project) ok = project ? ot_add_project_paths(rt, project) : discover_project(rt);
   if (!ok && ot_error(rt)[0]) fprintf(stderr, "%s\n", ot_error(rt));
   if (ok) {
     ok = ot_load_core(rt, OTIUM_LIBRARY_DIR);
@@ -404,11 +366,12 @@ int main(int argc, char** argv) {
   if (ok && path) ok = load(rt, path);
   if (ok && source) ok = evaluate(rt, source, strlen(source), "<expression>", true);
   if (ok && interactive) ok = repl(rt);
-  if (stats)
-    fprintf(stderr, "collections=%zu max-frames=%zu heap-capacity=%zu\n", ot_collections(rt),
-            ot_max_frames(rt), ot_heap_capacity(rt));
-  if (stats && ot_foreign_signatures(rt))
-    fprintf(stderr, "ffi-signatures=%zu\n", ot_foreign_signatures(rt));
+  if (stats) {
+    ot_stats counts = ot_get_stats(rt);
+    fprintf(stderr, "collections=%zu max-frames=%zu heap-capacity=%zu\n", counts.collections,
+            counts.max_frames, counts.heap_capacity);
+    if (counts.signatures) fprintf(stderr, "ffi-signatures=%zu\n", counts.signatures);
+  }
   ot_poll_interrupt(rt);
   int status = ot_interrupted(rt) ? 130 : ok ? 0 : 1;
   bool exiting = ot_exit_status(rt, &status);

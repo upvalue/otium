@@ -31,6 +31,7 @@ PUBLIC = {
     'value_int': 'ot_int',
     'value_is_int': 'ot_is_int',
     'value_to_int': 'ot_to_int',
+    'value_int_signed': 'ot_int_bits',
     'runtime_create': 'ot_create',
     'runtime_destroy': 'ot_destroy',
     'runtime_set_io_host': 'ot_set_io_host',

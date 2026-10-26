@@ -1,4 +1,4 @@
-#include "runtime.h"
+#include "otium.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,7 +37,7 @@ int main(int argc, char** argv) {
              "(+ (saved 20) (current 22))",
              suffix);
     assert(eval(rt, source) == ot_int(42));
-    ot_foreign_stats stats = ot_get_foreign_stats(rt);
+    ot_stats stats = ot_get_stats(rt);
     assert(stats.libraries == 1 && stats.bindings <= 3 && stats.signatures == 1);
     if (stats.bindings > peak_bindings) peak_bindings = stats.bindings;
   }
@@ -50,28 +50,28 @@ int main(int argc, char** argv) {
     eval(rt, source);
   }
   eval(rt, "nil");
-  ot_foreign_stats stats = ot_get_foreign_stats(rt);
+  ot_stats stats = ot_get_stats(rt);
   assert(stats.libraries == 1 && stats.bindings == 1 && stats.signatures <= 5);
   assert(eval(rt, "(saved 42)") == ot_int(42));
   assert(eval(rt, "(let ((i 0)) (while (< i 2000) (let ((p (ffi/alloc 'i32 1))) (ffi/set! p 'i32 0 "
                   "i) (ffi/free! p)) (set! i (+ i 1))) i)") == ot_int(2000));
-  stats = ot_get_foreign_stats(rt);
+  stats = ot_get_stats(rt);
   assert(stats.allocations == 0 && stats.bytes == 0 && stats.memory_records <= 2);
   eval(rt, "(def owner (ffi/alloc 'i32 2)) (def view (ffi/view owner 4 4)) (ffi/free! owner) (set! "
            "owner nil)");
   eval(rt, "nil");
-  assert(ot_get_foreign_stats(rt).memory_records == 1);
+  assert(ot_get_stats(rt).memory_records == 1);
   ot_value result;
   const char* released = "(ffi/ref view 'i32 0)";
   assert(!ot_eval(rt, released, strlen(released), &result));
   assert(strstr(ot_error(rt), "released"));
   eval(rt, "(set! view nil)");
   eval(rt, "nil");
-  assert(ot_get_foreign_stats(rt).memory_records == 0);
+  assert(ot_get_stats(rt).memory_records == 0);
   eval(rt, "(def retained (ffi/alloc-utf8 \"persistent\")) "
            "((ffi/bind lib \"retain\" '(pointer) 'void #t) retained) (set! retained nil)");
   eval(rt, "nil");
-  stats = ot_get_foreign_stats(rt);
+  stats = ot_get_stats(rt);
   assert(stats.allocations == 1 && stats.bytes == 11 && stats.memory_records == 1);
   assert(eval(rt, "(equal? ((ffi/bind lib \"retained_text\" '() 'utf8 #t)) \"persistent\")") ==
          OT_TRUE);
@@ -79,10 +79,10 @@ int main(int argc, char** argv) {
   assert(eval(rt, "(saved 42)") == ot_int(42));
   eval(rt, "(def holder [saved]) (set! saved nil)");
   assert(eval(rt, "((get holder 0) 42)") == ot_int(42));
-  assert(ot_get_foreign_stats(rt).bindings == 1);
+  assert(ot_get_stats(rt).bindings == 1);
   eval(rt, "(set! holder nil)");
   eval(rt, "nil");
-  stats = ot_get_foreign_stats(rt);
+  stats = ot_get_stats(rt);
   assert(stats.bindings == 0 && stats.signatures <= 4 && stats.libraries == 1);
   printf("foreign reload tests passed: peak bindings=%zu cached signatures=%zu libraries=%zu\n",
          peak_bindings, stats.signatures, stats.libraries);

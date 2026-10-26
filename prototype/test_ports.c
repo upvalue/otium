@@ -92,9 +92,9 @@ int main(void) {
            target_index = oti_lookup_global(rt, "raw-target", 10);
   assert(source_index != UINT32_MAX && target_index != UINT32_MAX);
   ot_value args[] = {rt->globals[target_index], rt->globals[source_index]}, result;
-  size_t collections = ot_collections(rt);
+  size_t collections = ot_get_stats(rt).collections;
   assert(ot_call(rt, "read-bytevector!", args, 2, &result) && result == ot_int(3));
-  assert(ot_collections(rt) == collections);
+  assert(ot_get_stats(rt).collections == collections);
   ot_destroy(rt);
   puts("memory port snapshots, UTF-8 and capture checks passed");
 }

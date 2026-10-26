@@ -1,45 +1,13 @@
 #ifndef OTIUM_PROTOTYPE_HEAP_H
 #define OTIUM_PROTOTYPE_HEAP_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
-
-typedef uintptr_t ot_value;
-
-enum { OT_NIL = 2, OT_FALSE = 6, OT_TRUE = 10, OT_EMPTY = 14 };
-
-static inline ot_value ot_int(intptr_t n) { return ((uintptr_t)n << 1) | 1; }
-
-static inline bool ot_is_int(ot_value v) { return (v & 1) != 0; }
-#if !defined(OTIUM_PORTABLE_INTS) && INTPTR_MIN == (-INTPTR_MAX - 1) && (-1 >> 1) == -1
-#define OTIUM_FAST_INT_REPR 1
-
-static inline intptr_t value_int_signed(ot_value v) {
-  intptr_t bits;
-  _Static_assert(sizeof(bits) == sizeof(v), "matching integer widths");
-  memcpy(&bits, &v, sizeof(bits));
-  return bits;
-}
-#else
-#define OTIUM_FAST_INT_REPR 0
-#endif
-
-static inline intptr_t ot_to_int(ot_value v) {
-#if OTIUM_FAST_INT_REPR
-  return value_int_signed(v) >> 1;
-#else
-  return v & ((uintptr_t)1 << (sizeof(v) * 8 - 1)) ? -(intptr_t)((~v >> 1) + 1)
-                                                   : (intptr_t)(v >> 1);
-#endif
-}
+#include "otium.h"
 
 /* These operations require integer operands. False reports fixnum overflow. */
 static inline bool value_int_add(ot_value a, ot_value b, ot_value* out) {
   intptr_t n;
 #if OTIUM_FAST_INT_REPR
-  if (__builtin_add_overflow(value_int_signed(a), value_int_signed(b) - 1, &n)) return false;
+  if (__builtin_add_overflow(ot_int_bits(a), ot_int_bits(b) - 1, &n)) return false;
   *out = (ot_value)n;
 #else
   if (__builtin_add_overflow(ot_to_int(a), ot_to_int(b), &n) || n < INTPTR_MIN / 2 ||
@@ -53,7 +21,7 @@ static inline bool value_int_add(ot_value a, ot_value b, ot_value* out) {
 static inline bool value_int_sub(ot_value a, ot_value b, ot_value* out) {
   intptr_t n;
 #if OTIUM_FAST_INT_REPR
-  if (__builtin_sub_overflow(value_int_signed(a), value_int_signed(b) - 1, &n)) return false;
+  if (__builtin_sub_overflow(ot_int_bits(a), ot_int_bits(b) - 1, &n)) return false;
   *out = (ot_value)n;
 #else
   if (__builtin_sub_overflow(ot_to_int(a), ot_to_int(b), &n) || n < INTPTR_MIN / 2 ||
@@ -67,7 +35,7 @@ static inline bool value_int_sub(ot_value a, ot_value b, ot_value* out) {
 static inline bool value_int_mul(ot_value a, ot_value b, ot_value* out) {
   intptr_t n;
 #if OTIUM_FAST_INT_REPR
-  if (__builtin_mul_overflow(value_int_signed(a) - 1, ot_to_int(b), &n)) return false;
+  if (__builtin_mul_overflow(ot_int_bits(a) - 1, ot_to_int(b), &n)) return false;
   *out = (ot_value)n | 1;
 #else
   if (__builtin_mul_overflow(ot_to_int(a), ot_to_int(b), &n) || n < INTPTR_MIN / 2 ||

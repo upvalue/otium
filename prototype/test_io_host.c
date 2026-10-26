@@ -19,7 +19,7 @@ static void managed(Host* h, const void* bytes, size_t length) {
   uintptr_t start = (uintptr_t)h->rt->heap.space[h->rt->heap.active];
   assert((uintptr_t)bytes >= start && (uintptr_t)bytes + length <= start + h->rt->heap.used);
   if (h->reenter) {
-    size_t collections = ot_collections(h->rt);
+    size_t collections = ot_get_stats(h->rt).collections;
     ot_value result;
     assert(!ot_eval(h->rt, "(+ 1 2)", 7, &result));
     assert(!ot_call(h->rt, "+", NULL, 0, &result));
@@ -27,7 +27,7 @@ static void managed(Host* h, const void* bytes, size_t length) {
     assert(!ot_flush_ports(h->rt));
     assert(!ot_set_io_host(h->rt, NULL, NULL));
     ot_destroy(h->rt);
-    assert(ot_collections(h->rt) == collections);
+    assert(ot_get_stats(h->rt).collections == collections);
   }
 }
 
@@ -201,7 +201,7 @@ int main(void) {
   assert(replacement.output_length == 3 && !memcmp(replacement.output, "new", 3));
   eval(rt, "(write-string \"end\" new)");
   size_t opens = h.opens;
-  assert(ot_collections(rt) > 100);
+  assert(ot_get_stats(rt).collections > 100);
   ot_destroy(rt);
   assert(h.closes == opens);
   assert(replacement.closes == replacement.opens);

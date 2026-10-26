@@ -1,7 +1,7 @@
 #ifndef OTIUM_PROTOTYPE_INTERNAL_H
 #define OTIUM_PROTOTYPE_INTERNAL_H
 
-#include "runtime.h"
+#include "heap.h"
 #include "reader.h"
 
 enum {
@@ -37,7 +37,7 @@ enum {
   K_FOREIGN_LAYOUT
 };
 
-enum { OT_EOF = 30, V_UNBOUND = 18, TAG_CHAR = 22, TAG_BUILTIN = 26 };
+enum { V_UNBOUND = 18, TAG_CHAR = 22, TAG_BUILTIN = 26 };
 
 enum {
 
@@ -227,7 +227,13 @@ struct ot_runtime {
   oti_foreign_state* foreign;
 };
 
+/* Upper bound on a single source file or a nest of module loads. */
+#define OTI_SOURCE_LIMIT ((size_t)16 * 1024 * 1024)
+
 void oti_free_function(oti_function* fn);
+/* Read an open file to the end and close it. The result is NUL-terminated and
+ * owned by the caller. what names the file in error messages. */
+char* oti_read_file(ot_runtime* rt, FILE* file, size_t limit, const char* what, size_t* length);
 bool oti_reclaim(ot_runtime* rt);
 bool oti_coded_error(ot_runtime* rt, const char* code, const char* message);
 bool oti_error(ot_runtime* rt, const char* message);
@@ -330,6 +336,7 @@ static inline bool oti_collection(ot_value v) {
 ot_value oti_collection_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
 ot_value oti_collection_call(ot_runtime* rt, size_t callable, size_t first, size_t count);
 void oti_foreign_collect(ot_runtime* rt);
+void oti_foreign_stats(const ot_runtime* rt, ot_stats* stats);
 bool oti_foreign_init(ot_runtime* rt);
 void oti_foreign_destroy(ot_runtime* rt);
 ot_value oti_foreign_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);

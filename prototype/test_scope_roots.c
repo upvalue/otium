@@ -1,4 +1,4 @@
-#include "runtime.h"
+#include "otium.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,7 +36,7 @@ int main(void) {
            ot_int(42));
     assert(evaluate(rt, "(let ((f (let loop ((n 40)) (if (= n 0) (fn () 42) (loop (- n 1)))))) "
                         "(churn) (f))") == ot_int(42));
-    printf("scope root tests passed: collections=%zu\n", ot_collections(rt));
+    printf("scope root tests passed: collections=%zu\n", ot_get_stats(rt).collections);
     ot_destroy(rt);
   }
 }

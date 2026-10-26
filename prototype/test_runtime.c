@@ -1,4 +1,4 @@
-#include "runtime.h"
+#include "heap.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -150,17 +150,17 @@ static void tail_calls(void) {
   assert(rt);
   integer(rt, "(let loop ((i 1000000) (acc 0)) (if (= i 0) acc (loop (- i 1) (+ acc 1))))",
           1000000);
-  assert(ot_max_frames(rt) <= 2);
+  assert(ot_get_stats(rt).max_frames <= 2);
   integer(rt,
           "(def (even n) (if (= n 0) 1 (odd (- n 1))))"
           "(def (odd n) (if (= n 0) 0 (even (- n 1)))) (even 1000000)",
           1);
-  assert(ot_max_frames(rt) <= 2);
+  assert(ot_get_stats(rt).max_frames <= 2);
   integer(rt,
           "(def (a n) (if (= n 0) 7 (b (- n 1) 10 20)))"
           "(def (b n x y) (if (= n 0) (+ x y) (a (- n 1)))) (a 100001)",
           30);
-  assert(ot_max_frames(rt) <= 2);
+  assert(ot_get_stats(rt).max_frames <= 2);
   rejects(rt, "(def (recurse n) (+ 1 (recurse (+ n 1)))) (recurse 0)", "stack limit");
   ot_destroy(rt);
 }
@@ -175,7 +175,7 @@ static void collecting(void) {
           "  (if (= i 0) (+ (keep) (car p))"
           "      (loop (- i 1) (cons 1 nil)))))",
           43);
-  assert(ot_collections(rt) > 100);
+  assert(ot_get_stats(rt).collections > 100);
   ot_gc_stress(rt, true);
   integer(rt,
           "(def (rooted-rec n p) (if (= n 0) (car p) (let ((keep (cons n p))) (+ (rooted-rec (- n "
@@ -386,7 +386,7 @@ static void rest_arguments(void) {
           "(def (rest-loop n previous & args) (if (= n 0) (previous) (rest-loop (- n 1) (fn () "
           "args) n))) (car (rest-loop 500 (fn () nil) 99))",
           2);
-  assert(ot_max_frames(rt) < 5);
+  assert(ot_get_stats(rt).max_frames < 5);
   integer(rt,
           "(def (rest-rec n & args) (if (= n 0) (car (car args)) (+ (rest-rec (- n 1) (cons n "
           "nil)) (car (car args))))) (rest-rec 30 (cons 0 nil))",
@@ -394,10 +394,10 @@ static void rest_arguments(void) {
   ot_value arguments[] = {ot_int(1), ot_int(2), ot_int(3)}, result;
   assert(ot_call(rt, "gather", arguments, 3, &result));
   assert(value_is_ptr(result));
-  size_t collections = ot_collections(rt);
+  size_t collections = ot_get_stats(rt).collections;
   for (unsigned i = 0; i < 10000; i++)
     assert(ot_call(rt, "gather", NULL, 0, &result) && result == OT_EMPTY);
-  assert(ot_collections(rt) == collections);
+  assert(ot_get_stats(rt).collections == collections);
   ot_value many[512];
   for (size_t i = 0; i < 512; i++) many[i] = ot_int((intptr_t)i);
   assert(!ot_call(rt, "gather", many, 512, &result));
@@ -439,7 +439,7 @@ static void apply_calls(void) {
           "(def (apply-loop n total) (if (= n 0) total (apply apply-loop (- n 1) (list (+ total "
           "1))))) (apply-loop 10000 0)",
           10000);
-  assert(ot_max_frames(rt) < 5);
+  assert(ot_get_stats(rt).max_frames < 5);
   integer(rt,
           "(def (apply-rec n p) (if (= n 0) (car p) (+ (apply apply-rec (list (- n 1) (cons n "
           "nil))) (car p)))) (apply-rec 30 (cons 0 nil))",
@@ -484,7 +484,7 @@ static void optional_arguments(void) {
           "(def (optional-loop n &optional (x (cons n nil))) (if (= n 0) (car x) (optional-loop (- "
           "n 1)))) (optional-loop 10000)",
           0);
-  assert(ot_max_frames(rt) < 5);
+  assert(ot_get_stats(rt).max_frames < 5);
   integer(rt,
           "(def (optional-rec n &optional (p (cons n nil))) (if (= n 0) (car p) (+ (optional-rec "
           "(- n 1)) (car p)))) (optional-rec 30)",
@@ -496,11 +496,11 @@ static void optional_arguments(void) {
   ot_value values[] = {ot_int(20), ot_int(22)}, result;
   assert(ot_call(rt, "defaulted", values, 2, &result) && result == ot_int(42));
   integer(rt, "(def (optional-fast x &optional (y 1)) (+ x y)) (optional-fast 41)", 42);
-  size_t collections = ot_collections(rt);
+  size_t collections = ot_get_stats(rt).collections;
   ot_value argument = ot_int(41);
   for (unsigned i = 0; i < 10000; i++)
     assert(ot_call(rt, "optional-fast", &argument, 1, &result) && result == ot_int(42));
-  assert(ot_collections(rt) == collections);
+  assert(ot_get_stats(rt).collections == collections);
   rejects(rt, "(defaulted 1 2 3)", "arguments");
   integer(rt, "hits", 2);
   rejects(rt, "((fn (required &optional (x 1)) x))", "arguments");

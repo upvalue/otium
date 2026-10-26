@@ -295,8 +295,6 @@ bool ot_set_heap_limit(ot_runtime* rt, size_t bytes) {
          oti_error(rt, "heap limit is below capacity or exceeds addressable size");
 }
 
-size_t ot_heap_capacity(const ot_runtime* rt) { return rt->heap.capacity; }
-
 void ot_destroy(ot_runtime* rt) {
   if (!rt || !oti_host_entry(rt)) return;
   oti_ports_destroy(rt);
@@ -532,78 +530,97 @@ ot_value oti_eval_value(ot_runtime* rt, ot_value value) {
   return result;
 }
 
+char* oti_read_file(ot_runtime* rt, FILE* file, size_t limit, const char* what, size_t* length) {
+  char message[128];
+  char* buffer = NULL;
+  size_t used = 0, capacity = 0;
+  for (;;) {
+    if (used == capacity) {
+      size_t next = capacity ? capacity * 2 : 4096;
+      if (next > limit + 1) next = limit + 1;
+      char* grown = realloc(buffer, next + 1);
+      if (!grown) {
+        oti_error(rt, "out of host memory");
+        break;
+      }
+      buffer = grown;
+      capacity = next;
+    }
+    used += fread(buffer + used, 1, capacity - used, file);
+    if (ferror(file)) {
+      snprintf(message, sizeof(message), "cannot read %s", what);
+      oti_error(rt, message);
+      break;
+    }
+    if (used > limit) {
+      snprintf(message, sizeof(message), "%s exceeds the source size limit", what);
+      oti_error(rt, message);
+      break;
+    }
+    if (feof(file)) {
+      fclose(file);
+      buffer[used] = 0;
+      *length = used;
+      return buffer;
+    }
+  }
+  fclose(file);
+  free(buffer);
+  return NULL;
+}
+
+/* Evaluate a runtime library file in the root namespace. */
+static bool eval_library_file(ot_runtime* rt, const char* path, const char* what) {
+  FILE* file = fopen(path, "rb");
+  if (!file) {
+    char message[128];
+    snprintf(message, sizeof(message), "cannot open %s", what);
+    return oti_error(rt, message);
+  }
+  size_t length;
+  char* source = oti_read_file(rt, file, OTI_SOURCE_LIMIT, what, &length);
+  if (!source) return false;
+  uint32_t saved = rt->current_namespace;
+  rt->current_namespace = 0;
+  ot_value result;
+  bool ok = ot_eval(rt, source, length, &result);
+  rt->current_namespace = saved;
+  free(source);
+  return ok;
+}
+
+/* Join a library directory and a relative path. NULL when out of memory. */
+static char* library_path(ot_runtime* rt, const char* directory, const char* file) {
+  size_t n = strlen(directory) + strlen(file) + 2;
+  char* path = malloc(n);
+  if (!path) {
+    oti_error(rt, "out of host memory");
+    return NULL;
+  }
+  snprintf(path, n, "%s/%s", directory, file);
+  return path;
+}
+
 bool ot_load_expander(ot_runtime* rt, const char* directory) {
   if (!oti_host_entry(rt)) return false;
   if (rt->shared_expander) return true;
   if (!oti_classes_init(rt)) return false;
-  size_t n = strlen(directory);
-  char* path = malloc(n + 32);
-  if (!path) return oti_error(rt, "out of host memory");
-  snprintf(path, n + 32, "%s/otium/expander.ot", directory);
-  FILE* file = fopen(path, "rb");
+  char* path = library_path(rt, directory, "otium/expander.ot");
+  if (!path) return false;
+  bool ok = eval_library_file(rt, path, "shared expander");
   free(path);
-  if (!file) return oti_error(rt, "cannot open shared expander");
-  if (fseek(file, 0, SEEK_END)) {
-    fclose(file);
-    return oti_error(rt, "cannot read shared expander");
-  }
-  long length = ftell(file);
-  if (length < 0 || length > 16 * 1024 * 1024) {
-    fclose(file);
-    return oti_error(rt, "shared expander source limit");
-  }
-  rewind(file);
-  char* source = malloc((size_t)length + 1);
-  if (!source) {
-    fclose(file);
-    return oti_error(rt, "out of host memory");
-  }
-  bool ok = fread(source, 1, (size_t)length, file) == (size_t)length && !ferror(file);
-  fclose(file);
-  source[length] = 0;
-  uint32_t saved = rt->current_namespace;
-  rt->current_namespace = 0;
-  ot_value result;
-  if (ok) ok = ot_eval(rt, source, (size_t)length, &result);
-  else oti_error(rt, "cannot read shared expander");
   if (ok) {
     const char* adapters =
         "(def (macroexpand-1 form) (expander-expand-head form #t)) "
         "(def (macroexpand form) (expander-expand-head form #f)) "
         "(def (type-pred type) (fn (condition) (condition-of-type? condition type)))";
+    uint32_t saved = rt->current_namespace;
+    rt->current_namespace = 0;
+    ot_value result;
     ok = ot_eval(rt, adapters, strlen(adapters), &result);
+    rt->current_namespace = saved;
   }
-  rt->current_namespace = saved;
-  free(source);
   if (ok) rt->shared_expander = true;
-  return ok;
-}
-
-static bool load_bootstrap(ot_runtime* rt) {
-  FILE* file = fopen(OTIUM_BOOTSTRAP_FILE, "rb");
-  if (!file) return oti_error(rt, "cannot open bootstrap library");
-  if (fseek(file, 0, SEEK_END)) {
-    fclose(file);
-    return oti_error(rt, "cannot read bootstrap library");
-  }
-  long length = ftell(file);
-  if (length < 0 || length > 16 * 1024 * 1024) {
-    fclose(file);
-    return oti_error(rt, "bootstrap source limit");
-  }
-  rewind(file);
-  char* source = malloc((size_t)length + 1);
-  if (!source) {
-    fclose(file);
-    return oti_error(rt, "out of host memory");
-  }
-  bool ok = fread(source, 1, (size_t)length, file) == (size_t)length && !ferror(file);
-  fclose(file);
-  source[length] = 0;
-  ot_value result;
-  if (ok) ok = ot_eval(rt, source, (size_t)length, &result);
-  else oti_error(rt, "cannot read bootstrap library");
-  free(source);
   return ok;
 }
 
@@ -611,38 +628,11 @@ bool ot_load_core(ot_runtime* rt, const char* directory) {
   if (!oti_host_entry(rt)) return false;
   if (rt->core_loaded) return true;
   if (!ot_load_expander(rt, directory) || !ot_add_load_path(rt, directory)) return false;
-  size_t n = strlen(directory);
-  char* path = malloc(n + 32);
-  if (!path) return oti_error(rt, "out of host memory");
-  snprintf(path, n + 32, "%s/otium/core.ot", directory);
-  FILE* file = fopen(path, "rb");
+  char* path = library_path(rt, directory, "otium/core.ot");
+  if (!path) return false;
+  bool ok = eval_library_file(rt, OTIUM_BOOTSTRAP_FILE, "bootstrap library") &&
+            eval_library_file(rt, path, "core library");
   free(path);
-  if (!file) return oti_error(rt, "cannot open core library");
-  if (fseek(file, 0, SEEK_END)) {
-    fclose(file);
-    return oti_error(rt, "cannot read core library");
-  }
-  long length = ftell(file);
-  if (length < 0 || length > 16 * 1024 * 1024) {
-    fclose(file);
-    return oti_error(rt, "core source limit");
-  }
-  rewind(file);
-  char* source = malloc((size_t)length + 1);
-  if (!source) {
-    fclose(file);
-    return oti_error(rt, "out of host memory");
-  }
-  bool ok = fread(source, 1, (size_t)length, file) == (size_t)length && !ferror(file);
-  fclose(file);
-  source[length] = 0;
-  uint32_t saved = rt->current_namespace;
-  rt->current_namespace = 0;
-  ot_value result;
-  if (ok) ok = load_bootstrap(rt) && ot_eval(rt, source, (size_t)length, &result);
-  else oti_error(rt, "cannot read core library");
-  rt->current_namespace = saved;
-  free(source);
   if (ok) rt->core_loaded = true;
   return ok;
 }
@@ -745,9 +735,36 @@ bool ot_call(ot_runtime* rt, const char* name, const ot_value* args, size_t coun
 
 size_t ot_error_offset(const ot_runtime* rt) { return rt->error_offset; }
 
-size_t ot_collections(const ot_runtime* rt) { return rt->heap.collections; }
+ot_stats ot_get_stats(const ot_runtime* rt) {
+  ot_stats stats = {.collections = rt->heap.collections,
+                    .max_frames = rt->max_frames,
+                    .heap_capacity = rt->heap.capacity};
+  oti_foreign_stats(rt, &stats);
+  return stats;
+}
 
-size_t ot_max_frames(const ot_runtime* rt) { return rt->max_frames; }
+const char* ot_string_data(ot_value v, size_t* length) {
+  if (!oti_kind(v, K_STRING)) return NULL;
+  *length = oti_bytes_length(v);
+  return (const char*)oti_bytes_data(v);
+}
+
+ot_form_status ot_scan_form(const char* source, size_t length, size_t start, size_t* end,
+                            const char** error, size_t* error_offset) {
+  oti_reader reader;
+  oti_reader_init(&reader, source, length, 16 * 1024 * 1024);
+  reader.position = start;
+  oti_ast* form = oti_reader_next(&reader);
+  ot_form_status status = form            ? OT_FORM_COMPLETE
+                          : !reader.error ? OT_FORM_END
+                          : reader.incomplete ? OT_FORM_INCOMPLETE
+                                              : OT_FORM_ERROR;
+  *end = reader.position;
+  *error = reader.error;
+  *error_offset = reader.error_offset;
+  oti_reader_destroy(&reader);
+  return status;
+}
 
 void ot_gc_stress(ot_runtime* rt, bool enabled) { rt->stress_gc = enabled; }
 

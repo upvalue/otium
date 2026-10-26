@@ -1,7 +1,8 @@
 CC ?= cc
 CFLAGS ?= -O2 -g -std=c11 -Wall -Wextra -Werror
 RUNTIME = heap.c reader.c tokens.c runtime.c compiler.c vm.c builtins.c numeric.c time.c filesystem.c process.c ports.c strings.c bytevectors.c reflection.c support.c conditions.c restarts.c cleanup.c params.c classes.c instances.c records.c foreign.c foreign_types.c collections.c tables.c reclaim.c modules.c
-RUNTIME_HEADERS = heap.h reader.h runtime.h internal.h foreign.h foreign_types.h builtins.def
+RUNTIME_HEADERS = include/otium.h heap.h reader.h internal.h foreign.h foreign_types.h builtins.def
+CPPFLAGS += -Iinclude
 CPPFLAGS += -DOTIUM_LIBRARY_DIR='"$(abspath ../lib)"'
 CPPFLAGS += -DOTIUM_BOOTSTRAP_FILE='"$(CURDIR)/primitives.ot"'
 CPPFLAGS += $(shell pkg-config --cflags libffi)
@@ -72,7 +73,7 @@ test_runtime: $(RUNTIME) test_runtime.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_runtime.c $(LDLIBS) -o $@
 
 test_heap: heap.c heap.h test_heap.c
-	$(CC) $(CFLAGS) heap.c test_heap.c -o $@
+	$(CC) $(CFLAGS) -Iinclude heap.c test_heap.c -o $@
 
 test_reader: reader.c reader.h test_reader.c
 	$(CC) $(CFLAGS) reader.c test_reader.c -o $@
@@ -80,7 +81,7 @@ test_reader: reader.c reader.h test_reader.c
 sanitize: sanitize-heap sanitize-reader sanitize-runtime
 
 sanitize-heap:
-	$(CC) -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined heap.c test_heap.c -o test_heap_sanitize
+	$(CC) -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Iinclude heap.c test_heap.c -o test_heap_sanitize
 	./test_heap_sanitize
 
 sanitize-reader:
@@ -178,19 +179,19 @@ sanitize-slot-reuse:
 
 .PHONY: test-value sanitize-value
 test_value: test_value.c heap.h
-	$(CC) $(CFLAGS) test_value.c -o $@
+	$(CC) $(CFLAGS) -Iinclude test_value.c -o $@
 
 test_value_portable: test_value.c heap.h
-	$(CC) $(CFLAGS) -DOTIUM_PORTABLE_INTS test_value.c -o $@
+	$(CC) $(CFLAGS) -Iinclude -DOTIUM_PORTABLE_INTS test_value.c -o $@
 
 test-value: test_value test_value_portable
 	./test_value
 	./test_value_portable
 
 sanitize-value:
-	$(CC) -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined test_value.c -o test_value_sanitize
+	$(CC) -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Iinclude test_value.c -o test_value_sanitize
 	./test_value_sanitize
-	$(CC) -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -DOTIUM_PORTABLE_INTS test_value.c -o test_value_portable_sanitize
+	$(CC) -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Iinclude -DOTIUM_PORTABLE_INTS test_value.c -o test_value_portable_sanitize
 	./test_value_portable_sanitize
 
 bench_lua: bench_lua.c
@@ -622,11 +623,11 @@ differential-tokens: otium-proto
 
 .PHONY: test-heap-growth sanitize-heap-growth
 test_heap_growth: heap.c test_heap_growth.c heap.h
-	$(CC) $(CFLAGS) heap.c test_heap_growth.c -o $@
+	$(CC) $(CFLAGS) -Iinclude heap.c test_heap_growth.c -o $@
 test-heap-growth: test_heap_growth
 	./test_heap_growth
 sanitize-heap-growth:
-	$(CC) -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined heap.c test_heap_growth.c -o test_heap_growth_sanitize
+	$(CC) -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Iinclude heap.c test_heap_growth.c -o test_heap_growth_sanitize
 	./test_heap_growth_sanitize
 
 .PHONY: test-io-host sanitize-io-host

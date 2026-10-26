@@ -16,7 +16,7 @@ bool oti_install_cleanup(ot_runtime* rt, bool outcome) {
   rt->cleanups[count] = rt->stack[rt->sp - 1];
   rt->cleanup_states[count] =
       (oti_cleanup){{rt->frame_count, rt->sp - 1, 0, rt->param_count, rt->handler_count,
-                     rt->handler_top, rt->restart_scope_count, count},
+                     rt->handler_top, rt->restart_scope_count, count, 0},
                     rt->try_count,
                     outcome};
   oti_restore_cleanups(rt, count + 1);

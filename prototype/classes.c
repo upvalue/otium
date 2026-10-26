@@ -166,15 +166,15 @@ bool oti_generic_prepare(ot_runtime* rt, size_t call, size_t* count) {
     }
   }
   if (ok) {
-    if (rt->sp >= rt->stack_limit || !oti_stack(rt, rt->sp + 1))
-      ok = oti_error(rt, "VM stack limit exceeded");
+    /* Arguments need not end at the stack top; registers above them are dead. */
+    size_t end = call + 2 + *count;
+    if (end > rt->stack_limit || !oti_stack(rt, end)) ok = oti_error(rt, "VM stack limit exceeded");
     else {
       memmove(rt->stack + call + 2, rt->stack + call + 1, *count * sizeof(ot_value));
       rt->stack[call] = object_fields(live[1])[1];
       rt->stack[call + 1] = live[3];
       (*count)++;
-      rt->sp++;
-      rt->stack_roots.count = rt->sp;
+      if (rt->sp < end) rt->sp = rt->stack_roots.count = end;
     }
   }
   oti_roots_pop(&rt->heap, &roots);

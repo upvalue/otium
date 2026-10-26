@@ -41,12 +41,12 @@ TEST(namespaces_isolate_and_share_definitions) {
             "(ns forward) (def lexical (let ((value 44)) (fn () value))) "
             "(ns future) (forward/lexical)",
             44);
-  check_int(rt,
-            "(ns otium.core) (def original-add +) "
-            "(def + (fn (a b) (original-add a b 10))) (ns future) (left/imported 1)",
-            12);
+  /* Inlined builtins are immutable; namespaces can still shadow them. */
+  check_error(rt, "(ns otium.core) (def + (fn (a b) 10))", "cannot redefine builtin");
+  check_error(rt, "(ns otium.core) (set! + (fn (a b) 10))", "cannot redefine builtin");
+  check_int(rt, "(ns future) (left/imported 1)", 2);
   check_int(rt, "(left/local 1)", 17);
-  eval(rt, "(ns otium.core) (def + original-add) (ns future)");
+  eval(rt, "(ns future)");
   check_true(rt, "(ns ffi) (null? null)");
   check_true(rt, "(ns future) (ffi/null? ffi/null)");
   ot_value result;

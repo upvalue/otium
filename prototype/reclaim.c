@@ -5,7 +5,6 @@
 void oti_free_function(oti_function* fn) {
   if (!fn) return;
   free(fn->code);
-  free(fn->boxed);
   free(fn->captures);
   free(fn);
 }
@@ -79,8 +78,8 @@ bool oti_reclaim(ot_runtime* rt) {
       oti_function* fn = rt->functions[task.value];
       for (size_t i = 0; ok && i < fn->count; i++) {
         oti_instruction in = fn->code[i];
-        if (in.op == OP_CONST) ok = mark_constant(&m, in.arg);
-        else if (in.op == OP_CLOSURE) ok = mark_function(&m, in.arg);
+        if (in.op == OP_CONST) ok = mark_constant(&m, oti_instruction_bc(in));
+        else if (in.op == OP_CLOSURE) ok = mark_function(&m, oti_instruction_bc(in));
       }
     } else {
       if (oti_kind(task.value, K_CLOSURE)) {

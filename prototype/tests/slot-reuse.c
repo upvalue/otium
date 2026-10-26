@@ -20,8 +20,8 @@ TEST(sequential_scopes_share_slots) {
   ot_runtime* rt = new_runtime(16384, 32);
   ot_gc_stress(rt, true);
   check_int(rt, source, 42);
-  CHECK_EQ_INT(function(rt, "many")->locals, 1);
-  CHECK(!function(rt, "many")->boxed[0]);
+  /* Sequential scopes reuse registers: result, discarded value and binding. */
+  CHECK_EQ_INT(function(rt, "many")->locals, 3);
   ot_destroy(rt);
 }
 
@@ -36,10 +36,7 @@ TEST(captured_and_nested_scopes) {
             "(+ (a) (a) (b) c))) (mixed)",
             74);
   oti_function* f = function(rt, "mixed");
-  CHECK_EQ_INT(f->locals, 5);
-  size_t boxed = 0;
-  for (size_t i = 0; i < f->locals; i++) boxed += f->boxed[i];
-  CHECK_EQ_INT(boxed, 1);
+  CHECK_EQ_INT(f->locals, 9);
   check_int(rt,
             "(def (nested) (let ((left (let ((x 40)) (fn () (fn () x)))) "
             "(right (let ((x 2)) (fn () x)))) (+ ((left)) (right)))) (nested)",

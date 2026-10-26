@@ -37,10 +37,19 @@ build/sanitize/%.o: %.c $(HEADERS)
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -DOTIUM_TEST_FIXTURE_DIR='"$(CURDIR)/build/sanitize"' $(WARNINGS) $(SANITIZE) -c $< -o $@
 
+# The VM's portable switch dispatch, which GCC and Clang builds otherwise skip.
+build/switch/%.o: %.c $(HEADERS)
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) -DOTIUM_VM_SWITCH -DOTIUM_TEST_FIXTURE_DIR='"$(CURDIR)/build/release"' $(WARNINGS) $(CFLAGS) -c $< -o $@
+
 build/%/libotium.a: $(addprefix build/%/, $(RUNTIME:.c=.o))
 	$(AR) rcs $@ $^
 
 build/release/bin/%: build/release/tests/%.o $(addprefix build/release/, $(TEST_SUPPORT)) build/release/libotium.a
+	@mkdir -p $(@D)
+	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+build/switch/bin/%: build/switch/tests/%.o $(addprefix build/switch/, $(TEST_SUPPORT)) build/switch/libotium.a
 	@mkdir -p $(@D)
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
@@ -124,6 +133,16 @@ sanitize: $(SANITIZE_TESTS) $(addprefix build/sanitize/, $(FIXTURES)) build/sani
 	for s in $(SCRIPT_TESTS); do \
 	  ASAN_OPTIONS=detect_leaks=0 OTIUM_TEST_CLI=./otium-proto-sanitize \
 	    OTIUM_TEST_FOREIGN=build/sanitize/bin/foreign-control python3 $$s || failed=1; \
+	done; \
+	exit $$failed
+
+SWITCH_TESTS = $(addprefix build/switch/bin/, $(TESTS))
+
+.PHONY: test-switch
+test-switch: $(SWITCH_TESTS) $(addprefix build/release/, $(FIXTURES))
+	@failed=0; \
+	for t in $(SWITCH_TESTS); do \
+	  if $$t > $$t.log 2>&1; then tail -n 1 $$t.log; else cat $$t.log; failed=1; fi; \
 	done; \
 	exit $$failed
 

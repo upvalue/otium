@@ -330,67 +330,112 @@ enum {
   B_COUNT
 };
 
+/* Register VM opcodes. Register r of a frame is stack[base + r]; register 0
+ * holds the running closure. See vm-design.md for operand conventions. */
 typedef enum {
+  OP_MOVE,
+  OP_IMM,
   OP_CONST,
   OP_GLOBAL,
   OP_SET_GLOBAL,
   OP_DEFINE_GLOBAL,
-  OP_LOCAL,
-  OP_BIND,
-  OP_SET_LOCAL,
   OP_UPVALUE,
+  OP_UPVALUE_BOX,
   OP_SET_UPVALUE,
+  OP_BOX,
+  OP_UNBOX,
+  OP_SET_BOX,
+  OP_CHECK,
+  OP_CLEAR,
   OP_CLOSURE,
+  OP_JUMP,
+  OP_JFALSE,
+  OP_JTRUE,
+  OP_JBOUND,
   OP_CALL,
   OP_TAIL_CALL,
-  OP_CLEANUP,
-  OP_RUN_CLEANUP,
-  OP_RESTARTS,
-  OP_END_RESTARTS,
+  OP_RETURN,
   OP_TRY,
   OP_END_TRY,
   OP_RAISE,
+  OP_CLEANUP,
+  OP_RUN_CLEANUP,
+  OP_RESTARTS,
+  OP_RESULT,
+  OP_END_RESTARTS,
+  OP_BIND_HANDLERS,
+  OP_UNBIND_HANDLERS,
   OP_MAKE_PARAM,
   OP_BIND_PARAM,
   OP_UNBIND_PARAMS,
-  OP_BIND_HANDLERS,
-  OP_UNBIND_HANDLERS,
-  OP_RETURN,
-  OP_POP,
-  OP_DUP,
-  OP_JUMP,
-  OP_JFALSE,
-  OP_PRESENT,
-  OP_CLEAR_LOCAL
+  OP_ADD,
+  OP_SUB,
+  OP_MUL,
+  OP_ADDI,
+  OP_LT,
+  OP_LE,
+  OP_GT,
+  OP_GE,
+  OP_NUMEQ,
+  OP_EQ,
+  OP_CONS,
+  OP_CAR,
+  OP_CDR,
+  OP_NOT,
+  OP_NULLP,
+  OP_PAIRP,
+  /* Branches jump to the target word that follows when the test equals x. */
+  OP_BR_LT,
+  OP_BR_LE,
+  OP_BR_GT,
+  OP_BR_GE,
+  OP_BR_NUMEQ,
+  OP_BR_EQ,
+  OP_BR_LTI,
+  OP_BR_LEI,
+  OP_BR_GTI,
+  OP_BR_GEI,
+  OP_BR_NUMEQI,
+  OP_BR_NULL,
+  OP_BR_PAIR,
+  OP_COUNT
 } oti_opcode;
 
+/* b and c together form a 32-bit operand (oti_instruction_bc). */
 typedef struct {
-  uint32_t op, arg;
+  uint8_t op, x;
+  uint16_t a, b, c;
 } oti_instruction;
+
+static inline uint32_t oti_instruction_bc(oti_instruction ins) {
+  return (uint32_t)ins.b | (uint32_t)ins.c << 16;
+}
 
 typedef struct {
   uint32_t index;
-  bool local;
+  bool local, boxed;
 } oti_capture;
 
 typedef struct {
   oti_instruction* code;
   size_t count, capacity;
-  bool* boxed;
-  size_t locals, locals_capacity, arity, optional;
+  /* Registers above register 0; a frame occupies 1 + locals stack slots. */
+  size_t locals, arity, optional;
   oti_capture* captures;
   size_t capture_count, capture_capacity;
   bool rest, evaluator;
   uint32_t namespace;
 } oti_function;
 
+/* floor is the stack height when the frame was entered. */
 typedef struct {
   uint32_t function;
-  size_t ip, base;
+  size_t ip, base, floor;
 } oti_frame;
 
+/* slot receives a caught condition; sp is the frame top to restore. */
 typedef struct {
-  size_t frames, sp, target, params, handlers, handler_top, restarts, cleanups;
+  size_t frames, sp, target, params, handlers, handler_top, restarts, cleanups, slot;
 } oti_try_frame;
 
 typedef struct {
@@ -490,6 +535,8 @@ struct ot_runtime {
   size_t param_count, param_capacity;
   oti_roots param_roots;
   ot_value classes[C_COUNT];
+  /* Global cell of each builtin; inlined builtins cannot be redefined. */
+  uint32_t builtin_cells[B_COUNT];
   oti_roots class_roots;
   bool classes_ready, core_loaded;
   oti_roots constant_roots, global_roots, stack_roots, condition_roots;

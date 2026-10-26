@@ -28,7 +28,7 @@ bool oti_install_restarts(ot_runtime* rt, size_t first, size_t count, size_t tar
     rt->restart_roots.count = old + i + 1;
   }
   oti_restart_scope scope = {{rt->frame_count, first, target, rt->param_count, rt->handler_count,
-                              rt->handler_top, rt->restart_scope_count, rt->cleanup_count},
+                              rt->handler_top, rt->restart_scope_count, rt->cleanup_count, 0},
                              old,
                              count,
                              rt->try_count};

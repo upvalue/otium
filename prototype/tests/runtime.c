@@ -25,12 +25,13 @@ TEST(core_evaluation) {
   check_true(rt, "(= (+ 4611686018427387903 1 0.0) 4611686018427387904.0)");
   check_error(rt, "(< 2 1 #f)", "number");
   check_int(rt,
-            "(let ((saved +) (change (fn () (set! + (fn args 99)) 2))) (let ((answer (+ 1 (change) "
-            "3))) (set! + saved) answer))",
+            "(def add +) (let ((saved add) (change (fn () (set! add (fn args 99)) 2))) "
+            "(let ((answer (add 1 (change) 3))) (set! add saved) answer))",
             6);
   check_int(
       rt,
-      "(let ((saved +)) (set! + (fn args 42)) (let ((answer (+ 1 2 3))) (set! + saved) answer))",
+      "(let ((saved add)) (set! add (fn args 42)) (let ((answer (add 1 2 3))) (set! add saved) "
+      "answer))",
       42);
   check_int(rt, "(let ((x 10) (y (+ x 2)) (x (* x 2))) (+ x y))", 32);
   check_int(rt, "(if nil 10 20)", 20);
@@ -58,8 +59,8 @@ TEST(core_evaluation) {
       "(def (live) 1) (def saved live) (def (caller) (live)) (def (live) 2) (+ (* 10 (saved)) "
       "(caller))",
       12);
-  check_int(rt, "(def old-add +) (def + (fn (a b) (old-add a b 1))) (+ 20 21)", 42);
-  eval(rt, "(def + old-add)");
+  check_int(rt, "(def old-add add) (def add (fn (a b) (old-add a b 1))) (add 20 21)", 42);
+  eval(rt, "(def add old-add)");
   check_int(
       rt, "(let ((outside 9)) (let loop ((x (let ((inside 2)) inside)) (y outside)) (+ x y)))", 11);
   check_int(rt, "(let ((x 9)) (let loop ((x 1) (y x)) (+ x y)))", 10);
@@ -96,12 +97,16 @@ TEST(core_evaluation) {
   check_int(rt, "before-compile-error", 91);
   check_error(rt, "(def before-reader-error 92) (", "unterminated");
   check_int(rt, "before-reader-error", 92);
+  /* Inlined builtins are immutable. A callee is still loaded before its
+   * arguments are evaluated. */
+  check_error(rt, "(set! + (fn (a b) 100))", "cannot redefine builtin");
+  check_int(rt, "(+ 20 22)", 42);
   check_int(rt,
-            "(def previous-add +) (def (change-add) (set! + (fn (a b) 100)) 2)"
-            "(def (snapshot-call) (+ 1 (change-add))) (snapshot-call)",
+            "(def (snapshot-target a b) (+ a b)) "
+            "(def (change-target) (set! snapshot-target (fn (a b) 100)) 2)"
+            "(def (snapshot-call) (snapshot-target 1 (change-target))) (snapshot-call)",
             3);
   check_int(rt, "(snapshot-call)", 100);
-  eval(rt, "(def + previous-add)");
   ot_value args[] = {ot_int(20), ot_int(22)}, result;
   CHECK(ot_call(rt, "+", args, 2, &result) && result == ot_int(42));
   CHECK(ot_call(rt, "caller", NULL, 0, &result) && result == ot_int(2));

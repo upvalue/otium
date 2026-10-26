@@ -13,3 +13,14 @@ const char* offset_text(const char* p) { return p + 1; }
 void* offset_pointer(void* p) { return (unsigned char*)p + 1; }
 
 int64_t lowest_integer(void) { return INT64_MIN; }
+
+static int increment(int value) { return value + 1; }
+
+typedef int (*IntCallback)(int);
+
+IntCallback native_callback(void) { return increment; }
+
+IntCallback* native_callback_slot(void) {
+  static IntCallback function = increment;
+  return &function;
+}

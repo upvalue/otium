@@ -1,8 +1,11 @@
+#define _POSIX_C_SOURCE 200809L
 #include "runtime.h"
 #include <assert.h>
+#include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static Value eval(Runtime* rt, const char* source) {
   Value v;
@@ -67,8 +70,10 @@ static void rejects(Runtime* rt, const char* source, const char* message) {
 
 int main(int argc, char** argv) {
   bool sanitize = false;
+  const char* control = NULL;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--sanitize")) sanitize = true;
+    else if (!strncmp(argv[i], "--callback-", 11)) control = argv[i] + 11;
     else abort();
   }
   Runtime* rt = runtime_create(128 * 1024, 4096);
@@ -82,6 +87,41 @@ int main(int argc, char** argv) {
            "(def extra (ffi/open-library '(\"./ffi_extra%s.so\")))",
            suffix, suffix, suffix);
   eval(rt, source);
+  if (control) {
+    runtime_gc_stress(rt, true);
+    if (!strcmp(control, "exit")) {
+      assert(runtime_load_core(rt, "../lib"));
+      eval(rt, "(def cleaned 0)");
+      const char* program =
+          "(defer ((ffi/bind lib \"call_n\" '(callback-pointer int) 'int #t)"
+          " (ffi/%callback '(12) 12 (fn (x) (exit 3))) 2) (set! cleaned (+ cleaned 1)))";
+      Value result;
+      assert(!runtime_eval(rt, program, strlen(program), &result));
+      int status;
+      assert(runtime_exit_status(rt, &status) && status == 3);
+      integer(rt, "cleaned", 1);
+      runtime_destroy(rt);
+      puts("callback exit and outer cleanup passed");
+      return 0;
+    }
+    if (!strcmp(control, "thread")) {
+      eval(rt, "((ffi/bind lib \"call_on_thread\" '(callback-pointer) 'void #t)"
+               " (ffi/%callback '() 0 (fn () nil)))");
+      abort();
+    }
+    assert(!strcmp(control, "outside"));
+    eval(rt, "((ffi/bind lib \"store_callback\" '(callback-pointer) 'void #t)"
+             " (ffi/%callback '(12) 12 (fn (x) x)))");
+    snprintf(source, sizeof(source), "./ffi_fixture%s.so", suffix);
+    void* library = dlopen(source, RTLD_NOW | RTLD_LOCAL);
+    assert(library);
+    void* symbol = dlsym(library, "call_stored");
+    int (*invoke)(int);
+    memcpy(&invoke, &symbol, sizeof(invoke));
+    assert(invoke);
+    invoke(1);
+    abort();
+  }
   integer(rt, "((ffi/bind lib \"fixture_id\" '() 'int #t))", 17);
   assert(runtime_foreign_signatures(rt) == 1);
   integer(rt, "((ffi/bind other \"fixture_id\" '() 'int #f))", 29);
@@ -186,7 +226,9 @@ int main(int argc, char** argv) {
   eval(rt, "(ffi/free! p)");
   assert(eval(rt, "(ffi/free! p)") == V_FALSE);
   rejects(rt, "(ffi/ref view 'u64 0)", "released");
-  rejects(rt, "(pointer alias)", "released");
+  rejects(rt, "(pointer p)", "released");
+  assert(eval(rt, "(ffi/pointer=? p alias)") == V_TRUE);
+  rejects(rt, "(ffi/free! alias)", "owning");
   integer(rt, "(ffi/allocation-count)", 0);
   integer(rt, "(ffi/allocation-bytes)", 0);
   eval(rt, "(def zero (ffi/alloc 'u8 0))");
@@ -203,7 +245,7 @@ int main(int argc, char** argv) {
   eval(rt, "(def interior ((ffi/bind extra \"offset_pointer\" '(pointer) 'pointer #t) storage))");
   string(rt, "(ffi/read-utf8 interior 11)", "etained λ");
   eval(rt, "(ffi/free! storage)");
-  rejects(rt, "(ffi/read-utf8 interior 11)", "released");
+  rejects(rt, "(ffi/free! interior)", "owning");
   eval(rt, "(def slots (ffi/alloc 'pointer 1))"
            "((ffi/bind lib \"pointer_out\" '(pointer pointer) 'void #t) slots slots)");
   assert(eval(rt, "(ffi/pointer=? slots (ffi/ref slots 'pointer 0))") == V_TRUE);
@@ -348,6 +390,42 @@ int main(int argc, char** argv) {
   eval_file(rt, "../tests/ffi/runtime-c.ot");
   eval_file(rt, "../tests/ffi/common.ot");
   integer(rt, "(ffi/allocation-count)", 0);
+  runtime_destroy(rt);
+  rt = runtime_create(4 * 1024 * 1024, 256 * 1024);
+  assert(rt);
+  assert(runtime_load_core(rt, "../lib"));
+  char directory[] = "/tmp/otium-callback-test-XXXXXX";
+  assert(mkdtemp(directory));
+  const char* callback_arguments[] = {fixture, other, directory};
+  assert(runtime_set_arguments(rt, "../tests/ffi/callbacks.ot", 3, callback_arguments));
+  assert(runtime_load_path(rt, directory));
+  runtime_gc_stress(rt, true);
+  eval_file(rt, "../tests/ffi/support.ot");
+  eval_file(rt, "../tests/ffi/runtime-c.ot");
+  eval_file(rt, "../tests/ffi/callbacks.ot");
+  snprintf(source, sizeof(source),
+           "(def callback-extra (ffi/open-library '(\"./ffi_extra%s.so\")))", suffix);
+  eval(rt, source);
+  eval_file(rt, "test_callback_lifetime.ot");
+  size_t callback_records = runtime_foreign_stats(rt).callback_records;
+  for (size_t i = 0; i < 100; i++) {
+    eval(rt, "(def temporary-callback (ffi/callback '(int) 'int (fn (x) (+ x 1))))"
+             "(ffi/free-callback! temporary-callback) (set! temporary-callback nil)");
+    assert(runtime_foreign_stats(rt).callback_records <= callback_records + 2);
+  }
+  eval(rt, "(+ 20 22)");
+  assert(runtime_foreign_stats(rt).callback_records <= callback_records);
+  assert(runtime_foreign_stats(rt).callbacks == 1);
+  snprintf(source, sizeof(source), "%s/ffi-callback-handler.ot", directory);
+  assert(!unlink(source));
+  assert(!rmdir(directory));
+  runtime_destroy(rt);
+  rt = runtime_create(4 * 1024 * 1024, 256 * 1024);
+  assert(rt);
+  assert(runtime_load_core(rt, "../lib"));
+  runtime_gc_stress(rt, true);
+  eval_file(rt, "../tests/ffi/ownership.ot");
+  eval_file(rt, "test_ownership.ot");
   runtime_destroy(rt);
   puts("foreign call tests passed");
 }

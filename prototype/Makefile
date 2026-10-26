@@ -5,7 +5,7 @@ RUNTIME_HEADERS = heap.h reader.h runtime.h internal.h foreign.h foreign_types.h
 CPPFLAGS += -DOTIUM_LIBRARY_DIR='"$(abspath ../lib)"'
 CPPFLAGS += -DOTIUM_BOOTSTRAP_FILE='"$(CURDIR)/primitives.ot"'
 CPPFLAGS += $(shell pkg-config --cflags libffi)
-LDLIBS += -ldl -lm $(shell pkg-config --libs libffi)
+LDLIBS += -pthread -ldl -lm $(shell pkg-config --libs libffi)
 
 .PHONY: all
 all: otium-proto
@@ -38,6 +38,7 @@ test-runtime: test_runtime
 .PHONY: test-foreign sanitize-foreign
 test-foreign: test_foreign
 	./test_foreign
+	python3 test_foreign_control.py
 
 ffi_fixture.so: ../tests/ffi/fixture.c
 	$(CC) -O2 -g -fPIC -shared -pthread $< -o $@
@@ -65,6 +66,7 @@ test_foreign_sanitize: $(RUNTIME) test_foreign.c $(RUNTIME_HEADERS) ffi_fixture_
 
 sanitize-foreign: test_foreign_sanitize
 	./test_foreign_sanitize --sanitize
+	OTIUM_TEST_FOREIGN=./test_foreign_sanitize python3 test_foreign_control.py
 
 test_runtime: $(RUNTIME) test_runtime.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_runtime.c $(LDLIBS) -o $@

@@ -33,7 +33,7 @@ bool rt_classes_init(Runtime* rt) {
   static const char* names[C_COUNT] = {
       "Object",         "Number", "Boolean", "Character",  "String",    "Symbol",
       "Null",           "Pair",   "Vector",  "Bytevector", "Hashtable", "Procedure",
-      "TypeDescriptor", "Nil",    "Keyword", "Pointer",    "Port"};
+      "TypeDescriptor", "Nil",    "Keyword", "Pointer",    "Port",      "CPointer"};
   uint32_t saved = rt->current_namespace;
   rt->current_namespace = 0;
   bool ok = true;
@@ -63,11 +63,6 @@ bool rt_classes_init(Runtime* rt) {
     }
     rt->globals[global] = rt->classes[i];
   }
-  if (ok) {
-    uint32_t alias = rt_global(rt, "CPointer", 8);
-    if (alias == UINT32_MAX) ok = false;
-    else rt->globals[alias] = rt->classes[C_POINTER];
-  }
   rt->current_namespace = saved;
   rt->classes_ready = ok;
   return ok;
@@ -93,7 +88,7 @@ Value rt_dispatch_type(Runtime* rt, Value v) {
   else if (rt_kind(v, K_ARRAY)) kind = C_VECTOR;
   else if (rt_kind(v, K_TABLE)) kind = C_TABLE;
   else if (rt_kind(v, K_PAIR)) kind = C_PAIR;
-  else if (rt_kind(v, K_POINTER)) kind = C_POINTER;
+  else if (rt_kind(v, K_POINTER)) kind = rt_foreign_owned(v) ? C_CPOINTER : C_POINTER;
   else if (rt_kind(v, K_CLASS) || rt_kind(v, K_RECORD_TYPE) || rt_kind(v, K_FOREIGN_LAYOUT))
     kind = C_TYPE;
   return rt->classes[kind];

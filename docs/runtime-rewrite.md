@@ -35,25 +35,44 @@ allocation. Binding and memory list links are published after allocation, when
 the current head is known. The collector retains four unused signatures for
 reload reuse, plus signatures pinned by live bindings or pending wrappers.
 
-The compliance inventory includes all public FFI groups: 52 groups pass and four
-fail. The complete common FFI suite passes 222 checks, including unions on x86-64
-Linux SysV. Union lowering merges every member's integer/floating leaves while
-preserving offsets and padding; unsupported targets raise `abi`. The lowering
-follows the [AMD64 ABI classification rules](https://gitlab.com/x86-psABIs/x86-64-ABI/-/raw/master/x86-64-ABI/low-level-sys-info.tex)
+The compliance inventory includes all public FFI groups: 56 groups pass with no
+failures or skips. Common FFI passes 222 checks, callbacks 51, ownership 10 and
+bulk 23. Union calls are supported on x86-64 Linux SysV; other targets raise
+`abi`. Union lowering merges every member's integer/floating leaves, preserving
+offsets and padding. It follows the [AMD64 ABI classification rules](https://gitlab.com/x86-psABIs/x86-64-ABI/-/raw/master/x86-64-ABI/low-level-sys-info.tex)
 and [libffi's x86-64 classifier](https://github.com/libffi/libffi/blob/master/src/x86/ffi64.c).
 The exposed types exclude vectors and long double.
 
-Callbacks, callback exit/thread handling and ownership still fail on missing APIs.
-Embedding I/O, memory-operation error metadata and performance remain part of
-[prototype-completion.md](../prototype-completion.md).
+Callbacks use libffi closures with rooted procedures and deferred conditions.
+VM reentry preserves the suspended caller and its dynamic handlers. Errors and
+exits stop at the callback boundary and resume after the outermost native call;
+escaping restarts become `escape` conditions. Foreign-thread and idle-host calls
+abort before entering the VM. A callback released during a native call keeps its
+trampoline until that call returns. Released metadata is reclaimed after its
+wrappers disappear. Both collection-safety flags allow same-thread callback GC.
 
-Run `python3 prototype/compliance.py` for the public inventory; it builds its
-prototype executable and FFI fixtures. `make -C prototype test-foreign` includes
-the unchanged common FFI suite under forced collection. `sanitize-foreign` passes
-those checks under ASan/UBSan with leak detection disabled. Foreign reload tests
-also pass. The default `sanitize` target covers only heap, reader and runtime
-checks; the Makefile has separate subsystem sanitizer targets. All runtime builds
-use the same source list, including `foreign_types.c`.
+`ffi/own` retains a pointer and custom destructor until explicit release. The
+owner is marked released before calling the destructor, including error and
+recursive-close paths. Views share owner invalidation. Only owning pointers
+dispatch as `CPointer`; callbacks and borrowed pointers need explicit release.
+C pointer results have unknown extent and no inferred allocation owner. Address
+comparison remains valid after release. Runtime teardown frees native allocations
+and callback closures but does not call Otium custom destructors.
+
+`python3 prototype/compliance.py` builds its executable and fixtures and runs the
+public inventory. `make -C prototype test-foreign` runs the unchanged common,
+callback, ownership and bulk suites under forced collection. It also checks
+callback cleanup, native function pointers, self-release, retained procedures,
+100 callback replacement cycles and external ownership. Subprocess checks cover
+wrong-thread/idle-host rejection and deferred exit with outer cleanup.
+`sanitize-foreign` passes the same checks under ASan/UBSan with leak detection
+disabled. Foreign reload, compiler-free execution and affected condition/class
+regressions pass. Optional LLVM development tools remain unavailable for GC lint.
+
+Embedding I/O, the full error-metadata audit, integration and performance remain
+in [prototype-completion.md](../prototype-completion.md). Passing this inventory
+does not establish their completion. The default `sanitize` target covers only
+heap, reader and runtime checks; the Makefile has separate subsystem targets.
 
 ## Cleanup validation
 

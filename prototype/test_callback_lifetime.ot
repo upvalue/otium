@@ -1,0 +1,61 @@
+;; Loaded after the public callbacks suite, with collection at every allocation.
+(def cleanup-count 0)
+(def cleanup-callback
+  (ffi/callback '(int) 'int
+    (fn (x) (defer (error "callback failure") (set! cleanup-count (+ cleanup-count 1))))))
+(check "callback failure"
+       (try (call-n cleanup-callback 3) (catch (error? c) (condition-message c))))
+(check 3 cleanup-count)
+(ffi/free-callback! cleanup-callback)
+
+;; A native reference retains the procedure even after its Otium wrapper is lost.
+(store-callback (ffi/callback '(int) 'int (let ((factor 9)) (fn (x) (* factor x)))))
+(test-collect)
+(check 27 (call-stored 3))
+
+;; Releasing from within the callback must not free the executing trampoline.
+(def self nil)
+(set! self (ffi/callback '(int) 'int (fn (x) (ffi/free-callback! self) (test-collect) (+ x 7))))
+(check 7 (call-n self 1))
+(check 'released (reason (fn () (call-n self 1))))
+(check #f (resource-closable? self))
+(check #f (resource-closable? ffi/null))
+
+;; Pending conditions remain rooted while later callbacks allocate and signal.
+(def retained-error
+  (ffi/callback '(int) 'int
+    (fn (x) (test-collect) (error (string-append "failure " (number->string x))))))
+(check "failure 0"
+       (try (call-n retained-error 4) (catch (error? c) (condition-message c))))
+(ffi/free-callback! retained-error)
+(dotimes (i 100)
+  (let ((cb (ffi/callback '(int) 'int (fn (x) (+ x 1)))))
+    (check 3 (call-n cb 2))
+    (ffi/free-callback! cb)))
+(check 1 (ffi/callback-count))
+(check 0 (ffi/allocation-count))
+
+(def handler-escape (ffi/callback '(int) 'int (fn (x) (error "handler escape"))))
+(check 'escape
+       (reason (fn ()
+         (restart-case
+           (handler-bind ((error? (fn (c) (invoke-restart 'outside))))
+             (call-n handler-escape 1))
+           (outside () 'wrong)))))
+(ffi/free-callback! handler-escape)
+
+(def native ((ffi/bind callback-extra "native_callback" '() 'callback-pointer #t)))
+(check 6 (call-n native 3))
+(check #f (resource-closable? native))
+(check 'type (reason (fn () (ffi/free-callback! native))))
+(def native-slot ((ffi/bind callback-extra "native_callback_slot" '() 'pointer #t)))
+(check 6 (call-n (ffi/ref native-slot 'callback-pointer 0) 3))
+
+;; Pointer results have unknown extent and do not acquire allocation ownership.
+(def original (ffi/alloc 'u8 4))
+(def returned ((ffi/bind lib "echo_pointer" '(pointer) 'pointer #t) original))
+(check #f (resource-closable? returned))
+(check #f (resource-closable? (ffi/view returned 0 16)))
+(check 'type (reason (fn () (ffi/free! returned))))
+(ffi/free! original)
+(check #t (ffi/pointer=? original returned))

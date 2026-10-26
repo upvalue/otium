@@ -141,6 +141,7 @@ enum {
   C_KEYWORD,
   C_POINTER,
   C_PORT,
+  C_CPOINTER,
   C_COUNT
 };
 typedef struct ForeignState ForeignState;
@@ -328,6 +329,7 @@ void rt_foreign_collect(Runtime* rt);
 bool rt_foreign_init(Runtime* rt);
 void rt_foreign_destroy(Runtime* rt);
 Value rt_foreign_builtin(Runtime* rt, unsigned id, size_t first, size_t count);
+bool rt_foreign_owned(Value value);
 Value rt_foreign_call(Runtime* rt, size_t callable, size_t first, size_t count);
 
 static inline bool rt_kind(Value v, unsigned kind) {

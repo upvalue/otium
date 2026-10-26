@@ -49,6 +49,7 @@ void runtime_gc_stress(Runtime* rt, bool enabled);
  * allocations/bytes describe explicitly owned native buffers, not process RSS. */
 typedef struct {
   size_t libraries, bindings, signatures, memory_records, allocations, bytes;
+  size_t callbacks, callback_records;
 } RuntimeForeignStats;
 
 RuntimeForeignStats runtime_foreign_stats(const Runtime* rt);

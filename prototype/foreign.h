@@ -5,14 +5,15 @@
 #include <stdint.h>
 
 typedef void (*ForeignCallback)(void);
+
 typedef union {
-    int64_t signed_integer;
-    uint64_t unsigned_integer;
-    float single;
-    double real;
-    bool boolean;
-    void *pointer;
-    ForeignCallback callback;
+  int64_t signed_integer;
+  uint64_t unsigned_integer;
+  float single;
+  double real;
+  bool boolean;
+  void* pointer;
+  ForeignCallback callback;
 } ForeignSlot;
 
 #endif

@@ -18,10 +18,68 @@ cached FFI signature counts. There is no generated-C tier or runtime compiler
 subprocess. A C compiler is needed to build the executable and test fixtures,
 but not to run the built runtime.
 
-The sections below record implementation milestones, including the former
-native tier and its benchmarks. That tier was removed during the VM-first
-compliance work; its source is preserved in checkpoint commit 26bd86b. Historical
-native commands and measurements do not describe the current executable.
+## Current architecture and limits
+
+`compiler.c` compiles bytecode and `vm.c` executes it. `modules.c` owns module
+loading; macro expansion and higher-level library behavior use shared Otium.
+`runtime.h` is the embedding API. `internal.h` holds runtime implementation
+interfaces. `builtins.def` supplies public builtin IDs and names in one ordered
+list; dispatch ranges depend on that order.
+
+`foreign.c` owns loading, managed wrappers, native memory, call conversion and
+condition context. `foreign_types.c` owns scalar descriptions, recursive libffi
+ABI trees and signature preparation/cache lookup. Its private `foreign_types.h`
+is separate from the embedding API. Type preparation uses host allocation only.
+Signatures own their ABI trees; pending wrappers pin signatures across managed
+allocation. Binding and memory list links are published after allocation, when
+the current head is known. The collector retains four unused signatures for
+reload reuse, plus signatures pinned by live bindings or pending wrappers.
+
+The core compliance inventory has 49 passing groups. FFI supports scalar calls,
+bulk memory, layout snapshots and by-value structs with nested arrays. The full
+common FFI suite still stops at union ABI classification. Callbacks, the broader
+ownership contract and memory-operation error metadata need further work.
+Embedding I/O and class performance also remain part of the completion audit.
+See [prototype-completion.md](../prototype-completion.md) for that work; cleanup
+does not establish runtime completion.
+
+Run `make -C prototype -j2 test` and `python3 prototype/compliance.py` for the
+normal suite and core inventory. The default `sanitize` target covers only heap,
+reader and runtime tests. Foreign changes also need `sanitize-foreign` and
+`sanitize-foreign-reload`; the Makefile has further subsystem sanitizer targets.
+All runtime builds use the same source list, including `foreign_types.c`.
+
+## Cleanup validation
+
+The cleanup baseline passed the full prototype test target and all 49 core
+inventory groups. C sources and headers were formatted with clang-format 23.1.3
+and the repository configuration. Repeated formatting converged to identical
+output; the consecutive MEMORY_CASE invocations needed multiple passes.
+Formatting was saved separately from structural changes for review.
+
+After refactoring, the full prototype suite and all 49 core inventory groups
+pass again. Chez differential checks pass for 74 programs and 50 errors; FFI
+differential checks pass for 12 programs and 6 errors. Compiler-free runtime and
+foreign checks pass. Foreign, foreign-reload and runtime ASan/UBSan targets pass,
+including 23 bulk and 39 aggregate/error checks. Leak detection was disabled;
+these runs do not validate leaks. Optional LLVM development tools were unavailable
+for GC lint. All 268 public builtin ID/name pairs retain their original order.
+
+Further factoring remains possible in `foreign.c`: `shared_builtin` and
+`foreign_builtin` still combine native-memory validation with operation dispatch,
+and `layout_copy` and condition-context helpers remain in that module. Their
+rooting and error-order contracts warrant separate changes. `rt_builtin` in
+`builtins.c` still uses ordered subsystem ranges; additions to `builtins.def`
+must preserve those boundaries or update dispatch with them.
+
+## Reading the milestones
+
+The memory and execution contracts describe runtime invariants. The implementation
+sequence and dated development sections below are historical snapshots. Earlier
+claims about missing language features, generated-C commands and native timing
+measurements describe those milestones, not the current executable. The native
+tier was removed during VM-first compliance work. Later entries supersede earlier
+ones, including the FFI limitations recorded during each stage.
 
 ## Memory contract
 
@@ -54,7 +112,7 @@ Opaque payloads are zeroed; traced fields start as nil. The compiler should
 eventually expose object initialization to optimization so unnecessary writes
 can be eliminated without weakening the safepoint contract.
 
-## Implementation sequence
+## Historical implementation sequence
 
 1. Precise compacting heap: implemented, with relocation, cycles, sharing,
    repeated collection, payload integrity and exhaustion tests.
@@ -126,7 +184,7 @@ low-memory runtime. Heap limits do not include compiler arenas,
 code, global names or the VM stack. Runtime errors currently have messages but
 no instruction-to-source mapping; compile/read errors include source offsets.
 
-## Native tier
+## Historical native tier
 
 The native tier currently targets POSIX hosts with a C compiler and `dlopen`.
 It creates a private temporary directory, emits C from verified instructions,

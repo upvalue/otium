@@ -352,3 +352,17 @@ By-value structs and nested arrays now use libffi type trees, with layout verifi
 **2026-10-26T18:55:33Z**
 
 FFI bindings now retain selected library paths, symbols and copied type descriptions. Call failures report library/symbol, argument index and expected type; result/arity failures distinguish absent fields. Binding publication also fixes a possible stale list link across GC. 166 public common checks pass before union calls. Forced-GC, ASan/UBSan aggregate/error and bulk regressions plus foreign reload pass. Unions, callbacks, ownership and remaining error metadata audit are unfinished.
+
+**2026-10-26T19:43:35Z**
+
+Applied codebase-cleanup.md without resuming the runtime completion work. Baseline: full prototype suite passed; core inventory 49/49. Formatted 77 existing prototype C/header files with clang-format 23.1.3 and repository settings; final formatting is idempotent. Formatting-only patch: /tmp/otium-cleanup-format.patch.
+
+Extracted host-only scalar/aggregate ABI preparation and signature-cache lookup into foreign_types.c with a private header. Preserved pending-signature pins, wrapper roots, post-allocation list publication and partial-failure cleanup. Public embedding declarations remain in runtime.h. Added builtins.def as the ordered source for public IDs and names; verified all 268 mappings against the baseline. Centralized runtime header dependencies, included the new source in normal/sanitizer builds, and removed retired native-test cleanup commands. Updated docs/runtime-rewrite.md with current architecture, limitations and historical context.
+
+Validation after refactoring: full prototype tests and core inventory 49/49 pass; foreign and reload regressions pass; Chez differential 74 programs/50 errors and FFI differential 12 programs/6 errors pass; compiler-free tests pass. ASan/UBSan foreign, foreign-reload and runtime targets pass, including 23 bulk and 39 aggregate/error checks. Leak detection disabled, not leak validation. Optional LLVM development tools unavailable for GC lint. Formatting and git diff --check pass. Final inventory: /tmp/otium-cleanup-compliance.json. Structural patch: /tmp/otium-cleanup-refactor.patch.
+
+Remaining structure: foreign.c still combines native-memory dispatch, layout snapshots and condition context; builtins.c dispatch ranges still depend on definition order. The full common FFI suite remains blocked at union ABI classification. Callbacks, broader ownership/error metadata, embedding and performance completion remain outside this cleanup. Epic stays open.
+
+**2026-10-26T21:16:52Z**
+
+Reverified the existing codebase-cleanup.md implementation in the current worktree. No additional runtime refactor was needed. Full prototype test target and core compliance inventory pass (49/49); foreign and foreign-reload regressions pass. Chez differential checks pass (74 programs/50 errors), as do FFI differential checks (12 programs/6 errors). ASan/UBSan foreign and foreign-reload pass with leak detection disabled. clang-format 23.1.3 produces identical output for all 79 prototype C/header files; git diff --check passes. Existing separate formatting and refactor patches remain in /tmp/otium-cleanup-format.patch and /tmp/otium-cleanup-refactor.patch. LLVM development tools remain unavailable. Runtime completion and the documented FFI limitations remain open.

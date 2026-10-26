@@ -256,8 +256,15 @@
     },
     "algorithms2": {
       "browse": {
-        "status": "blocked",
-        "reason": "Database initialization creates a cyclic pair list with (set-cdr! p ipats). Chez rejects set-pair!: cycle and C rejects set-cdr!: cycle. Changing this representation would change the benchmark; no port retained."
+        "status": "ported",
+        "parity": "B",
+        "reason": "Untimed database initialization wraps the pattern cursor explicitly instead of creating a cyclic pair list; the timed matching algorithm is retained.",
+        "checks": {
+          "chez": "passed",
+          "c": "passed",
+          "upstream_guile": "1200 pattern-match truth values agree with both runtimes",
+          "lint": "passed"
+        }
       },
       "ray": {
         "status": "ported",

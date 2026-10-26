@@ -1,6 +1,7 @@
 CC ?= cc
 CFLAGS ?= -O2 -g -std=c11 -Wall -Wextra -Werror
-RUNTIME = heap.c reader.c tokens.c runtime.c compiler.c vm.c builtins.c numeric.c time.c filesystem.c process.c ports.c strings.c bytevectors.c reflection.c support.c conditions.c restarts.c cleanup.c params.c classes.c instances.c records.c foreign.c collections.c tables.c reclaim.c modules.c
+RUNTIME = heap.c reader.c tokens.c runtime.c compiler.c vm.c builtins.c numeric.c time.c filesystem.c process.c ports.c strings.c bytevectors.c reflection.c support.c conditions.c restarts.c cleanup.c params.c classes.c instances.c records.c foreign.c foreign_types.c collections.c tables.c reclaim.c modules.c
+RUNTIME_HEADERS = heap.h reader.h runtime.h internal.h foreign.h foreign_types.h builtins.def
 CPPFLAGS += -DOTIUM_LIBRARY_DIR='"$(abspath ../lib)"'
 CPPFLAGS += -DOTIUM_BOOTSTRAP_FILE='"$(CURDIR)/primitives.ot"'
 CPPFLAGS += $(shell pkg-config --cflags libffi)
@@ -9,10 +10,10 @@ LDLIBS += -ldl -lm $(shell pkg-config --libs libffi)
 .PHONY: all
 all: otium-proto
 
-otium-proto: $(RUNTIME) main.c heap.h reader.h runtime.h internal.h foreign.h
+otium-proto: $(RUNTIME) main.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) main.c $(LDLIBS) -o $@
 
-bench_runtime: $(RUNTIME) bench_runtime.c heap.h reader.h runtime.h internal.h foreign.h ffi_fixture.so
+bench_runtime: $(RUNTIME) bench_runtime.c $(RUNTIME_HEADERS) ffi_fixture.so
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) bench_runtime.c $(LDLIBS) -o $@
 
 .PHONY: differential differential-foreign
@@ -47,7 +48,7 @@ ffi_other.so: ../tests/ffi/fixture.c
 ffi_extra.so: ffi_extra.c
 	$(CC) $(CFLAGS) -fPIC -shared $< -o $@
 
-test_foreign: $(RUNTIME) test_foreign.c heap.h reader.h runtime.h internal.h foreign.h ffi_fixture.so ffi_other.so ffi_extra.so
+test_foreign: $(RUNTIME) test_foreign.c $(RUNTIME_HEADERS) ffi_fixture.so ffi_other.so ffi_extra.so
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_foreign.c $(LDLIBS) -o $@
 
 ffi_fixture_sanitize.so: ../tests/ffi/fixture.c
@@ -59,13 +60,13 @@ ffi_other_sanitize.so: ../tests/ffi/fixture.c
 ffi_extra_sanitize.so: ffi_extra.c
 	$(CC) -O1 -g -fPIC -shared -fsanitize=address,undefined $< -o $@
 
-test_foreign_sanitize: $(RUNTIME) test_foreign.c heap.h reader.h runtime.h internal.h foreign.h ffi_fixture_sanitize.so ffi_other_sanitize.so ffi_extra_sanitize.so
+test_foreign_sanitize: $(RUNTIME) test_foreign.c $(RUNTIME_HEADERS) ffi_fixture_sanitize.so ffi_other_sanitize.so ffi_extra_sanitize.so
 	$(CC) $(CPPFLAGS) $(LDFLAGS) -O1 -g -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined $(RUNTIME) test_foreign.c $(LDLIBS) -o $@
 
 sanitize-foreign: test_foreign_sanitize
 	./test_foreign_sanitize --sanitize
 
-test_runtime: $(RUNTIME) test_runtime.c heap.h reader.h runtime.h internal.h foreign.h
+test_runtime: $(RUNTIME) test_runtime.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_runtime.c $(LDLIBS) -o $@
 
 test_heap: heap.c heap.h test_heap.c
@@ -120,19 +121,16 @@ clean:
 	rm -f test_modules test_modules_sanitize
 	rm -f test_namespaces test_namespaces_sanitize
 	rm -f test_defonce test_defonce_sanitize
-	rm -f test_native_numeric test_native_numeric_sanitize
 	rm -f bench_lua
-	rm -f test_native_scalar test_native_scalar_sanitize
 	rm -f test_value test_value_portable test_value_sanitize test_value_portable_sanitize
 	rm -f test_slot_reuse test_slot_reuse_sanitize
 	rm -f test_scope_roots test_scope_roots_sanitize
-	rm -f test_native_calls test_native_calls_sanitize
 	rm -f test_reload test_reload_sanitize test_foreign_reload test_foreign_reload_sanitize
 	rm -f otium-proto bench_runtime test_heap test_heap_sanitize test_reader test_reader_sanitize test_reader_clang test_runtime test_runtime_sanitize test_runtime_clang
 	rm -f test_foreign test_foreign_sanitize ffi_fixture.so ffi_other.so ffi_extra.so ffi_fixture_sanitize.so ffi_other_sanitize.so ffi_extra_sanitize.so
 
 .PHONY: test-reload sanitize-reload
-test_reload: $(RUNTIME) test_reload.c heap.h reader.h runtime.h internal.h foreign.h
+test_reload: $(RUNTIME) test_reload.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_reload.c $(LDLIBS) -o $@
 
 test-reload: test_reload
@@ -143,7 +141,7 @@ sanitize-reload:
 	./test_reload_sanitize
 
 .PHONY: test-foreign-reload sanitize-foreign-reload
-test_foreign_reload: $(RUNTIME) test_foreign_reload.c heap.h reader.h runtime.h internal.h foreign.h ffi_fixture.so
+test_foreign_reload: $(RUNTIME) test_foreign_reload.c $(RUNTIME_HEADERS) ffi_fixture.so
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_foreign_reload.c $(LDLIBS) -o $@
 
 test-foreign-reload: test_foreign_reload
@@ -154,7 +152,7 @@ sanitize-foreign-reload: ffi_fixture_sanitize.so
 	./test_foreign_reload_sanitize --sanitize
 
 .PHONY: test-scope-roots sanitize-scope-roots
-test_scope_roots: $(RUNTIME) test_scope_roots.c heap.h reader.h runtime.h internal.h foreign.h
+test_scope_roots: $(RUNTIME) test_scope_roots.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_scope_roots.c $(LDLIBS) -o $@
 
 test-scope-roots: test_scope_roots
@@ -165,7 +163,7 @@ sanitize-scope-roots:
 	./test_scope_roots_sanitize
 
 .PHONY: test-slot-reuse sanitize-slot-reuse
-test_slot_reuse: $(RUNTIME) test_slot_reuse.c heap.h reader.h runtime.h internal.h foreign.h
+test_slot_reuse: $(RUNTIME) test_slot_reuse.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_slot_reuse.c $(LDLIBS) -o $@
 
 test-slot-reuse: test_slot_reuse
@@ -200,7 +198,7 @@ test-benchmark-lua: bench_lua
 	python3 test_benchmark_lua.py
 
 .PHONY: test-defonce sanitize-defonce
-test_defonce: $(RUNTIME) test_defonce.c heap.h reader.h runtime.h internal.h foreign.h
+test_defonce: $(RUNTIME) test_defonce.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_defonce.c $(LDLIBS) -o $@
 
 test-defonce: test_defonce
@@ -211,7 +209,7 @@ sanitize-defonce:
 	./test_defonce_sanitize
 
 .PHONY: test-namespaces sanitize-namespaces
-test_namespaces: $(RUNTIME) test_namespaces.c heap.h reader.h runtime.h internal.h foreign.h
+test_namespaces: $(RUNTIME) test_namespaces.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_namespaces.c $(LDLIBS) -o $@
 
 test-namespaces: test_namespaces
@@ -222,7 +220,7 @@ sanitize-namespaces:
 	./test_namespaces_sanitize
 
 .PHONY: test-modules sanitize-modules
-test_modules: $(RUNTIME) test_modules.c heap.h reader.h runtime.h internal.h foreign.h
+test_modules: $(RUNTIME) test_modules.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_modules.c $(LDLIBS) -o $@
 
 test-modules: test_modules
@@ -237,7 +235,7 @@ differential-modules: otium-proto
 	python3 differential_modules.py
 
 .PHONY: test-quasiquote sanitize-quasiquote
-test_quasiquote: $(RUNTIME) test_quasiquote.c heap.h reader.h runtime.h internal.h foreign.h
+test_quasiquote: $(RUNTIME) test_quasiquote.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_quasiquote.c $(LDLIBS) -o $@
 
 test-quasiquote: test_quasiquote
@@ -264,7 +262,7 @@ test-no-compiler: test_runtime test_foreign otium-proto
 	env PATH=/nonexistent OTIUM_NATIVE_CC=/nonexistent ./test_foreign
 
 .PHONY: test-macros sanitize-macros
-test_macros: $(RUNTIME) test_macros.c heap.h reader.h runtime.h internal.h foreign.h
+test_macros: $(RUNTIME) test_macros.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_macros.c $(LDLIBS) -o $@
 
 test-macros: test_macros
@@ -279,7 +277,7 @@ differential-macros: otium-proto
 	python3 differential_macros.py
 
 .PHONY: test-shared-expander sanitize-shared-expander
-test_shared_expander: $(RUNTIME) test_shared_expander.c heap.h reader.h runtime.h internal.h foreign.h
+test_shared_expander: $(RUNTIME) test_shared_expander.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_shared_expander.c $(LDLIBS) -o $@
 
 test-shared-expander: test_shared_expander
@@ -290,7 +288,7 @@ sanitize-shared-expander:
 	./test_shared_expander_sanitize
 
 .PHONY: test-conditions sanitize-conditions
-test_conditions: $(RUNTIME) test_conditions.c heap.h reader.h runtime.h internal.h foreign.h
+test_conditions: $(RUNTIME) test_conditions.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_conditions.c $(LDLIBS) -o $@
 
 test-conditions: test_conditions
@@ -305,7 +303,7 @@ differential-conditions: otium-proto
 	python3 differential_conditions.py
 
 .PHONY: test-generics sanitize-generics
-test_generics: $(RUNTIME) test_generics.c heap.h reader.h runtime.h internal.h foreign.h
+test_generics: $(RUNTIME) test_generics.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_generics.c $(LDLIBS) -o $@
 
 test-generics: test_generics
@@ -320,7 +318,7 @@ differential-generics: otium-proto
 	python3 differential_generics.py
 
 .PHONY: test-eval sanitize-eval
-test_eval: $(RUNTIME) test_eval.c heap.h reader.h runtime.h internal.h foreign.h
+test_eval: $(RUNTIME) test_eval.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_eval.c $(LDLIBS) -o $@
 
 test-eval: test_eval
@@ -335,7 +333,7 @@ differential-eval: otium-proto
 	python3 differential_eval.py
 
 .PHONY: test-numeric sanitize-numeric
-test_numeric: $(RUNTIME) test_numeric.c heap.h reader.h runtime.h internal.h foreign.h
+test_numeric: $(RUNTIME) test_numeric.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_numeric.c $(LDLIBS) -o $@
 
 test-numeric: test_numeric
@@ -350,7 +348,7 @@ differential-numeric: otium-proto
 	python3 differential_numeric.py
 
 .PHONY: test-strings sanitize-strings
-test_strings: $(RUNTIME) test_strings.c heap.h reader.h runtime.h internal.h foreign.h
+test_strings: $(RUNTIME) test_strings.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_strings.c $(LDLIBS) -o $@
 
 test-strings: test_strings
@@ -365,7 +363,7 @@ differential-strings: otium-proto
 	python3 differential_strings.py
 
 .PHONY: test-reflection sanitize-reflection
-test_reflection: $(RUNTIME) test_reflection.c heap.h reader.h runtime.h internal.h foreign.h
+test_reflection: $(RUNTIME) test_reflection.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_reflection.c $(LDLIBS) -o $@
 
 test-reflection: test_reflection
@@ -380,7 +378,7 @@ differential-reflection: otium-proto
 	python3 differential_reflection.py
 
 .PHONY: test-params sanitize-params
-test_params: $(RUNTIME) test_params.c heap.h reader.h runtime.h internal.h foreign.h
+test_params: $(RUNTIME) test_params.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_params.c $(LDLIBS) -o $@
 
 test-params: test_params
@@ -395,7 +393,7 @@ differential-params: otium-proto
 	python3 differential_params.py
 
 .PHONY: test-handlers sanitize-handlers
-test_handlers: $(RUNTIME) test_handlers.c heap.h reader.h runtime.h internal.h foreign.h
+test_handlers: $(RUNTIME) test_handlers.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_handlers.c $(LDLIBS) -o $@
 
 test-handlers: test_handlers
@@ -410,7 +408,7 @@ differential-handlers: otium-proto
 	python3 differential_handlers.py
 
 .PHONY: test-bytevectors sanitize-bytevectors differential-bytevectors
-test_bytevectors: $(RUNTIME) test_bytevectors.c heap.h reader.h runtime.h internal.h foreign.h
+test_bytevectors: $(RUNTIME) test_bytevectors.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_bytevectors.c $(LDLIBS) -o $@
 
 test-bytevectors: test_bytevectors
@@ -433,7 +431,7 @@ sanitize-cli:
 	OTIUM_TEST_CLI=./otium-proto-sanitize python3 test_cli.py
 
 .PHONY: test-restarts sanitize-restarts
-test_restarts: $(RUNTIME) test_restarts.c heap.h reader.h runtime.h internal.h foreign.h
+test_restarts: $(RUNTIME) test_restarts.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_restarts.c $(LDLIBS) -o $@
 
 test-restarts: test_restarts
@@ -448,7 +446,7 @@ differential-restarts: otium-proto
 	python3 differential_restarts.py
 
 .PHONY: test-cleanup sanitize-cleanup
-test_cleanup: $(RUNTIME) test_cleanup.c heap.h reader.h runtime.h internal.h foreign.h
+test_cleanup: $(RUNTIME) test_cleanup.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_cleanup.c $(LDLIBS) -o $@
 
 test-cleanup: test_cleanup
@@ -463,7 +461,7 @@ differential-cleanup: otium-proto
 	python3 differential_cleanup.py
 
 .PHONY: test-interrupt sanitize-interrupt
-test_interrupt: $(RUNTIME) test_interrupt.c heap.h reader.h runtime.h internal.h foreign.h
+test_interrupt: $(RUNTIME) test_interrupt.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_interrupt.c $(LDLIBS) -o $@
 
 test-interrupt: otium-proto test_interrupt
@@ -476,7 +474,7 @@ sanitize-interrupt: sanitize-cli
 	OTIUM_TEST_CLI=./otium-proto-sanitize python3 test_interrupt.py
 
 .PHONY: test-time sanitize-time differential-time
-test_time: $(RUNTIME) test_time.c heap.h reader.h runtime.h internal.h foreign.h
+test_time: $(RUNTIME) test_time.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_time.c $(LDLIBS) -o $@
 
 test-time: test_time
@@ -490,7 +488,7 @@ differential-time: otium-proto
 	python3 differential_time.py
 
 .PHONY: test-ports sanitize-ports
-test_ports: $(RUNTIME) test_ports.c heap.h reader.h runtime.h internal.h foreign.h
+test_ports: $(RUNTIME) test_ports.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_ports.c $(LDLIBS) -o $@
 
 test-ports: test_ports otium-proto
@@ -506,7 +504,7 @@ differential-ports: otium-proto
 	python3 differential_ports.py
 
 .PHONY: test-port-reader sanitize-port-reader
-test_port_reader: $(RUNTIME) test_port_reader.c heap.h reader.h runtime.h internal.h foreign.h
+test_port_reader: $(RUNTIME) test_port_reader.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_port_reader.c $(LDLIBS) -o $@
 
 test-port-reader: test_port_reader
@@ -517,7 +515,7 @@ sanitize-port-reader:
 	./test_port_reader_sanitize
 
 .PHONY: test-port-shutdown sanitize-port-shutdown
-test_port_shutdown: $(RUNTIME) test_port_shutdown.c heap.h reader.h runtime.h internal.h foreign.h
+test_port_shutdown: $(RUNTIME) test_port_shutdown.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_port_shutdown.c $(LDLIBS) -o $@
 
 test-port-shutdown: test_port_shutdown otium-proto
@@ -530,7 +528,7 @@ sanitize-port-shutdown: sanitize-cli
 	OTIUM_TEST_CLI=./otium-proto-sanitize python3 test_port_shutdown.py
 
 .PHONY: test-process sanitize-process
-test_process: $(RUNTIME) test_process.c heap.h reader.h runtime.h internal.h foreign.h
+test_process: $(RUNTIME) test_process.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_process.c $(LDLIBS) -o $@
 
 test-process: test_process
@@ -541,7 +539,7 @@ sanitize-process:
 	./test_process_sanitize
 
 .PHONY: test-file-ports sanitize-file-ports
-test_file_ports: $(RUNTIME) test_file_ports.c heap.h reader.h runtime.h internal.h foreign.h
+test_file_ports: $(RUNTIME) test_file_ports.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_file_ports.c $(LDLIBS) -o $@
 test-file-ports: test_file_ports
 	./test_file_ports
@@ -550,7 +548,7 @@ sanitize-file-ports:
 	./test_file_ports_sanitize
 
 .PHONY: test-filesystem sanitize-filesystem
-test_filesystem: $(RUNTIME) test_filesystem.c heap.h reader.h runtime.h internal.h foreign.h
+test_filesystem: $(RUNTIME) test_filesystem.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_filesystem.c $(LDLIBS) -o $@
 test-filesystem: test_filesystem
 	./test_filesystem
@@ -559,7 +557,7 @@ sanitize-filesystem:
 	./test_filesystem_sanitize
 
 .PHONY: test-instances sanitize-instances
-test_instances: $(RUNTIME) test_instances.c heap.h reader.h runtime.h internal.h foreign.h
+test_instances: $(RUNTIME) test_instances.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_instances.c $(LDLIBS) -o $@
 test-instances: test_instances
 	./test_instances
@@ -572,7 +570,7 @@ differential-instances: otium-proto
 	python3 differential_instances.py
 
 .PHONY: test-methods sanitize-methods
-test_methods: $(RUNTIME) test_methods.c heap.h reader.h runtime.h internal.h foreign.h
+test_methods: $(RUNTIME) test_methods.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_methods.c $(LDLIBS) -o $@
 test-methods: test_methods
 	./test_methods
@@ -585,7 +583,7 @@ differential-methods: otium-proto
 	python3 differential_methods.py
 
 .PHONY: test-records sanitize-records differential-records
-test_records: $(RUNTIME) test_records.c heap.h reader.h runtime.h internal.h foreign.h
+test_records: $(RUNTIME) test_records.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_records.c $(LDLIBS) -o $@
 test-records: test_records
 	./test_records
@@ -596,7 +594,7 @@ differential-records: otium-proto
 	python3 differential_records.py
 
 .PHONY: test-properties sanitize-properties differential-properties
-test_properties: $(RUNTIME) test_properties.c heap.h reader.h runtime.h internal.h foreign.h
+test_properties: $(RUNTIME) test_properties.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_properties.c $(LDLIBS) -o $@
 test-properties: test_properties
 	./test_properties
@@ -607,7 +605,7 @@ differential-properties: otium-proto
 	python3 differential_properties.py
 
 .PHONY: test-tokens sanitize-tokens
-test_tokens: $(RUNTIME) test_tokens.c heap.h reader.h runtime.h internal.h foreign.h
+test_tokens: $(RUNTIME) test_tokens.c $(RUNTIME_HEADERS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $(RUNTIME) test_tokens.c $(LDLIBS) -o $@
 test-tokens: test_tokens
 	./test_tokens

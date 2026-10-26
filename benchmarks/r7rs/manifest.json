@@ -1,6 +1,7 @@
 {
   "upstream_commit": "85f6acdc4cc4e2b857f307ba56bd0ba931dcccd1",
   "benchmarks": {
+    "browse": {"parity": "B", "deviation": "Cyclic pattern list replaced by explicit wrapping during untimed database setup; property helpers renamed; do loops use named let; timed matching algorithm retained"},
     "fib": {"parity": "A", "deviation": "syntax and benchmark API only"},
     "ack": {"parity": "A", "deviation": "syntax and benchmark API only"},
     "tak": {"parity": "A", "deviation": "syntax and benchmark API only"},

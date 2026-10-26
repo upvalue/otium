@@ -15,6 +15,7 @@ RUNNER = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(RUNNER)
 
 INPUTS = {
+    'browse': None,
     'nucleic': None,
     'matrix': '2\n3\n3\n(((1 1 1) (1 1 -1) (1 -1 1) (1 -1 -1)))\n',
     'graphs': '2\n3\n5\n',
@@ -62,7 +63,7 @@ INPUTS = {
 }
 
 
-CANONICAL_COUNTS = {'deriv': 1, 'conform': 2, 'peval': 2, 'nucleic': 2}
+CANONICAL_COUNTS = {'browse': 2, 'deriv': 1, 'conform': 2, 'peval': 2, 'nucleic': 2}
 
 FIXTURES = json.loads((HERE / "test-fixtures.json").read_text())
 

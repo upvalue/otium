@@ -48,5 +48,9 @@ if [ "$interactive" = yes ] && { { [ -t 0 ] && [ -t 1 ]; } || [ "${OTIUM_DEV_LIB
   native line
   export OTIUM_LINE_LIBRARY
 fi
-exec "${CHEZ:-chez}" \
+chez=${CHEZ:-chez}
+if [ -z "${CHEZ:-}" ] && ! command -v chez >/dev/null 2>&1; then
+  chez=scheme
+fi
+exec "$chez" \
   --compile-imported-libraries --libdirs "$root" --script "$root/main.ss" "$@"

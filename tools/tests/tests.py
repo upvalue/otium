@@ -77,3 +77,34 @@ def reference(t):
 @test('docs')
 def docs(t):
     t.expect(t.run([ROOT / 'tools/check-docs']))
+
+
+@test('namespace reference', needs=['chez'])
+def namespace_reference(t):
+    """Export public bindings and module prose without loading the UI backend."""
+    (t.scratch / 'lib').symlink_to(ROOT / 'lib', target_is_directory=True)
+    (t.scratch / 'docs').mkdir()
+    t.expect(t.run([ROOT / 'otium', '--runtime=chez', ROOT / 'tools/export-reference.ot'],
+                   cwd=t.scratch))
+    generated = (t.scratch / 'docs/reference.json').read_text()
+    t.check(generated == (ROOT / 'docs/reference.json').read_text(), 'reference needs regeneration')
+    namespaces = {ns['name']: ns for ns in json.loads(generated)['namespaces']}
+    t.check(set(namespaces) == {'otium.core', 'otium.ui'})
+    for ns in namespaces.values():
+        t.check(bool(ns['doc']), 'missing module docstring:', ns['name'])
+        names = [entry['name'] for entry in ns['entries']]
+        t.check(names == sorted(set(names)), 'entries must be unique and sorted')
+        for entry in ns['entries']:
+            if 'source' in entry:
+                source = entry['source']
+                line = (ROOT / source['file']).read_text().splitlines()[source['line'] - 1]
+                t.check(entry['name'] in line, 'incorrect source link:', entry['name'])
+    ui = {entry['name']: entry for entry in namespaces['otium.ui']['entries']}
+    t.check('window-call' not in ui, 'private helper exported')
+    t.check(ui['measure']['signatures'][0]['text'] == '(measure widget limits)')
+    t.check(ui['run']['signatures'][0]['text'] == '(run)')
+    t.check(ui['Widget']['kind'] == 'value')
+    t.check('Resolve a palette keyword' in ui['color']['doc'])
+    t.check('`reconcile!`' in namespaces['otium.ui']['doc'])
+    core = {entry['name']: entry for entry in namespaces['otium.core']['entries']}
+    t.check('+' in core and 'map' in core, 'core must include builtins and prelude')

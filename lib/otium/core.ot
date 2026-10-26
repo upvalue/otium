@@ -1,3 +1,8 @@
+"The core language and collection library, available without require.
+
+Includes runtime builtins, special forms, and the shared Otium prelude.
+Runtime labels identify bindings available only on Chez or C."
+
 ;; prelude.ot -- the derived core (spec 10.x), loaded through the real
 ;; expander, so defmacro and everything native is available.
 ;;

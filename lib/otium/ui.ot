@@ -1,4 +1,12 @@
 (ns otium.ui)
+"Widgets, retained trees, and window lifecycle for Otium applications.
+
+Build views from widget descriptions, then use `open`, `set-view!`, and `run`
+to display them. `reconcile!` updates a retained tree while preserving matching
+widget instances. Widgets provide methods for measurement, painting, and events.
+
+Layout and drawing are supplied by otium.ui.gpu. Native window and GPU support
+are loaded when needed; requiring this module alone does not open a window."
 
 ;; Shared widget lifecycle. Optional layout and drawing live in otium.ui.gpu.
 (defabstract Widget)

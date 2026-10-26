@@ -404,12 +404,12 @@ static bool evaluate_raw(Runtime* rt, const Ast* form, Value* result) {
     const Ast* name = form->as.list.first->next;
     if (form->as.list.tail || !name || name->kind != AST_SYMBOL) {
       rt->error_offset = form->offset;
-      return rt_error(rt, "ns needs a namespace symbol");
+      return rt_coded_error(rt, "E0110", "ns needs a namespace symbol");
     }
     if (rt->required_namespace != UINT32_MAX &&
         (strlen(rt->namespaces[rt->required_namespace]) != name->as.text.size ||
          memcmp(rt->namespaces[rt->required_namespace], name->as.text.data, name->as.text.size)))
-      return rt_error(rt, "module namespace does not match required name");
+      return rt_coded_error(rt, "E0206", "module namespace does not match required name");
     uint32_t space = rt_namespace(rt, name->as.text.data, name->as.text.size);
     if (space == UINT32_MAX) return false;
     rt->current_namespace = space;
@@ -417,7 +417,7 @@ static bool evaluate_raw(Runtime* rt, const Ast* form, Value* result) {
       const Ast* head = clause->kind == AST_LIST ? clause->as.list.first : NULL;
       if (!head || clause->as.list.tail || head->kind != AST_KEYWORD || head->as.text.size != 8 ||
           memcmp(head->as.text.data, ":require", 8))
-        return rt_error(rt, "ns only accepts require clauses");
+        return rt_coded_error(rt, "E0110", "ns only accepts require clauses");
       if (!rt_require(rt, head->next)) return false;
     }
     *result = V_NIL;
@@ -680,7 +680,7 @@ bool runtime_eval(Runtime* rt, const char* source, size_t length, Value* result)
     if (!(ok = evaluate_top(rt, form, result))) break;
   }
   if (reader.error) {
-    rt_error(rt, reader.error);
+    rt_coded_error(rt, reader.error_code, reader.error);
     rt->error_offset = reader.error_offset;
   }
   reader_destroy(&reader);

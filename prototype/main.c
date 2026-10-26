@@ -132,7 +132,7 @@ static bool project_paths(Runtime* rt, const char* path) {
       free(directory);
     }
   }
-  if (reader.error) ok = rt_error(rt, reader.error);
+  if (reader.error) ok = rt_coded_error(rt, reader.error_code, reader.error);
   reader_destroy(&reader);
   free(source);
   return ok;

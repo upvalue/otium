@@ -24,6 +24,18 @@ int main(void) {
       "(nil? (try (error nil) (catch c c)))",
       "(= (try (error 42) (catch c c)) 42)",
       "(= (try (error \"data\" 1 42) (catch c (get (get c :data) 1))) 42)",
+      "(try (read-string \"(\") (catch c (and (equal? (get c :code) \"E0001\") "
+      "(eq? (condition-type c) 'read-error) (condition-of-type? c 'error))))",
+      "(try (read-string \"'\") (catch c (equal? (get c :code) \"E0009\")))",
+      "(try (read-string \"\") (catch c (equal? (get c :code) \"E0010\")))",
+      "(try (eval '(if)) (catch c (and (equal? (get c :code) \"E0101\") "
+      "(eq? (condition-type c) 'syntax-error) (condition-of-type? c 'error))))",
+      "(try (car 5) (catch c (and (equal? (get c :code) \"E0401\") "
+      "(eq? (condition-type c) 'type-error) (condition-of-type? c 'error))))",
+      "(try (missing-name) (catch c (and (equal? (get c :code) \"E0201\") "
+      "(eq? (condition-type c) 'name-error) (condition-of-type? c 'error))))",
+      "(try ((fn (x) x) 1 2) (catch c (and (equal? (get c :code) \"E0301\") "
+      "(eq? (condition-type c) 'arity-error) (condition-of-type? c 'error))))",
       "(= (try (error 0) (catch ((fn (c) #f) c) 0) (catch c 42)) 42)",
       "(= (try (try (error 42) (catch ((fn (c) #f) c) 0)) (catch c c)) 42)",
       "(= (try (try (error 1) (catch c (error 42))) (catch c c)) 42)",

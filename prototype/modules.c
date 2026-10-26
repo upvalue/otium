@@ -122,7 +122,7 @@ static bool load_module(Runtime* rt, uint32_t space, bool reload, bool legacy_ff
     if (!rt_grow(rt, (void**)&m->items, &m->capacity, index + 1, sizeof(Module))) return false;
     m->items[m->count++] = (Module){space, 0};
   }
-  if (m->items[index].state == 1) return rt_error(rt, "circular module require");
+  if (m->items[index].state == 1) return rt_coded_error(rt, "E0205", "circular module require");
   if (m->items[index].state == 2 && !reload) return true;
   m->items[index].state = 0;
   if (m->depth >= 128) return rt_error(rt, "module nesting limit exceeded");
@@ -149,7 +149,7 @@ static bool load_module(Runtime* rt, uint32_t space, bool reload, bool legacy_ff
     }
     free(path);
   }
-  if (!file) return rt_error(rt, "module file not found");
+  if (!file) return rt_coded_error(rt, "E0202", "module file not found");
   bool ok = !fseek(file, 0, SEEK_END);
   long bytes = ok ? ftell(file) : -1;
   if (bytes < 0 || (unsigned long)bytes > 16 * 1024 * 1024 - m->source_bytes) {
@@ -219,7 +219,7 @@ static bool one_require(Runtime* rt, const Ast** cursor) {
     for (size_t i = 0; i < rt->namespace_count; i++)
       if (i != space && strlen(rt->namespaces[i]) == alias->as.text.size &&
           !memcmp(rt->namespaces[i], alias->as.text.data, alias->as.text.size))
-        return rt_error(rt, "require alias conflicts with a namespace name");
+        return rt_coded_error(rt, "E0208", "require alias conflicts with a namespace name");
   if (!load_module(rt, space, reload, ast_symbol(module, "ffi"))) {
     if (!strncmp(rt->error, "module [", 8)) return false;
     char cause[192];
@@ -242,14 +242,16 @@ static bool one_require(Runtime* rt, const Ast** cursor) {
             !memcmp(rt->names[i], name->as.text.data, name->as.text.size))
           return rt_error(rt, "referred import conflicts with a local binding");
       if (target == UINT32_MAX || rt->globals[target] == V_UNBOUND || rt->global_private[target])
-        return rt_error(rt, "cannot refer missing or private module binding");
+        return rt_coded_error(
+            rt, target != UINT32_MAX && rt->global_private[target] ? "E0204" : "E0203",
+            "cannot refer missing or private module binding");
       if (!install_import(rt, name, target, false)) return false;
     }
   if (alias)
     for (size_t i = 0; i < rt->namespace_count; i++)
       if (i != space && strlen(rt->namespaces[i]) == alias->as.text.size &&
           !memcmp(rt->namespaces[i], alias->as.text.data, alias->as.text.size))
-        return rt_error(rt, "require alias conflicts with a namespace name");
+        return rt_coded_error(rt, "E0208", "require alias conflicts with a namespace name");
   return !alias || install_import(rt, alias, space, true);
 }
 

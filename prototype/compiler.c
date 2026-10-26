@@ -1400,7 +1400,8 @@ Value rt_read_source(Runtime* rt, const char* source, size_t length) {
   Compiler c = {.rt = rt};
   Value result = form ? datum(&c, form) : 0;
   if (reader.error) {
-    rt_error(rt, reader.error);
+    rt_coded_error(rt, reader.error_code, reader.error);
+    rt->error_offset = reader.error_offset;
     result = 0;
   }
   reader_destroy(&reader);

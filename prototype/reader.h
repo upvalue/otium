@@ -47,6 +47,7 @@ typedef struct {
   const char* source;
   size_t length, position, error_offset;
   const char* error;
+  const char* error_code;
   bool incomplete;
   ArenaBlock* blocks;
   size_t allocated, budget;

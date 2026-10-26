@@ -32,7 +32,7 @@ static bool validate(Runtime* rt, const char* text, size_t length) {
     bool done = form == NULL, ok = r.error == NULL;
     position = r.position;
     if (!ok) {
-      rt_error(rt, r.error);
+      rt_coded_error(rt, r.error_code, r.error);
       rt->error_offset = r.error_offset;
     }
     reader_destroy(&r);

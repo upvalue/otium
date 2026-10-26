@@ -11,9 +11,10 @@ struct ArenaBlock {
   max_align_t data[];
 };
 
-static void fail(Reader* r, size_t offset, const char* message) {
+static void fail(Reader* r, size_t offset, const char* code, const char* message) {
   if (!r->error) {
     r->error = message;
+    r->error_code = code;
     r->error_offset = offset;
   }
 }
@@ -39,7 +40,7 @@ void* reader_allocate(Reader* r, size_t size) {
   memset(result, 0, size);
   return result;
 exhausted:
-  fail(r, r->position, "reader memory limit exceeded");
+  fail(r, r->position, NULL, "reader memory limit exceeded");
   return NULL;
 }
 
@@ -187,7 +188,7 @@ static Ast* string(Reader* r, size_t start) {
   }
   if (end == r->length) {
     r->incomplete = true;
-    fail(r, start, "unterminated string");
+    fail(r, start, "E0002", "unterminated string");
     return NULL;
   }
   char* out = reader_allocate(r, end - r->position + 1);
@@ -212,14 +213,14 @@ static Ast* string(Reader* r, size_t start) {
           uint32_t value;
           if (r->position == end ||
               !unicode_hex(r->source + digits, r->position - digits, &value)) {
-            fail(r, at, "invalid Unicode string escape");
+            fail(r, at, "E0006", "invalid Unicode string escape");
             return NULL;
           }
           r->position++;
           used += utf8_encode(out + used, value);
           break;
         }
-        default: fail(r, at, "invalid string escape"); return NULL;
+        default: fail(r, at, "E0006", "invalid string escape"); return NULL;
       }
     } else if (c == '\r') {
       if (r->position < end && r->source[r->position] == '\n') r->position++;
@@ -228,7 +229,7 @@ static Ast* string(Reader* r, size_t start) {
       uint32_t value;
       size_t count = utf8_decode(r->source + at, end - at, &value);
       if (!count || !value) {
-        fail(r, at, "invalid source character");
+        fail(r, at, NULL, "invalid source character");
         return NULL;
       }
       memcpy(out + used, r->source + at, count);
@@ -244,13 +245,13 @@ static Ast* character(Reader* r, size_t start) {
   size_t begin = r->position;
   if (begin == r->length) {
     r->incomplete = true;
-    fail(r, start, "missing character");
+    fail(r, start, "E0011", "missing character");
     return NULL;
   }
   uint32_t value;
   size_t count = utf8_decode(r->source + begin, r->length - begin, &value);
   if (!count || !value) {
-    fail(r, start, "invalid character");
+    fail(r, start, "E0011", "invalid character");
     return NULL;
   }
   r->position += count;
@@ -274,7 +275,7 @@ static Ast* character(Reader* r, size_t start) {
     if (!found && r->source[begin] == 'x')
       found = unicode_hex(r->source + begin + 1, size - 1, &value);
     if (!found) {
-      fail(r, start, "unknown character name");
+      fail(r, start, "E0011", "unknown character name");
       return NULL;
     }
   }
@@ -289,14 +290,14 @@ static Ast* atom(Reader* r, size_t start) {
   size_t n = r->position - start;
   const char* s = r->source + start;
   if (!n) {
-    fail(r, start, "invalid source character");
+    fail(r, start, NULL, "invalid source character");
     return NULL;
   }
   for (size_t i = 0; i < n;) {
     uint32_t value;
     size_t count = utf8_decode(s + i, n - i, &value);
     if (!count || !value) {
-      fail(r, start + i, "invalid source character");
+      fail(r, start + i, NULL, "invalid source character");
       return NULL;
     }
     i += count;
@@ -310,11 +311,11 @@ static Ast* atom(Reader* r, size_t start) {
   if ((n == 2 && !memcmp(s, "#f", 2)) || (n == 6 && !memcmp(s, "#false", 6)))
     return node(r, AST_BOOL, start);
   if (*s == '#') {
-    fail(r, start, "reserved # syntax");
+    fail(r, start, "E0005", "reserved # syntax");
     return NULL;
   }
   if (*s == ':' && n == 1) {
-    fail(r, start, "empty keyword");
+    fail(r, start, "E0008", "empty keyword");
     return NULL;
   }
   size_t sign = (*s == '+' || *s == '-');
@@ -364,12 +365,12 @@ static Ast* atom(Reader* r, size_t start) {
     return a;
   }
   if (*s == '.') {
-    fail(r, start, "invalid dot syntax");
+    fail(r, start, "E0007", "invalid dot syntax");
     return NULL;
   }
   return text_node(r, *s == ':' ? AST_KEYWORD : AST_SYMBOL, start, s, n);
 bad_number:
-  fail(r, start, "invalid or out-of-range number");
+  fail(r, start, "E0004", "invalid or out-of-range number");
   return NULL;
 }
 
@@ -388,7 +389,7 @@ static Ast* sequence(Reader* r, size_t start, char close, const char* constructo
     skip(r);
     if (r->position == r->length) {
       r->incomplete = true;
-      fail(r, start, "unterminated sequence");
+      fail(r, start, "E0001", "unterminated sequence");
       return NULL;
     }
     char c = r->source[r->position];
@@ -399,7 +400,7 @@ static Ast* sequence(Reader* r, size_t start, char close, const char* constructo
     if (c == '.' &&
         (r->position + 1 == r->length || delimiter((unsigned char)r->source[r->position + 1]))) {
       if (!a->as.list.first) {
-        fail(r, r->position, "dot needs a preceding element");
+        fail(r, r->position, "E0007", "dot needs a preceding element");
         return NULL;
       }
       r->position++;
@@ -408,7 +409,7 @@ static Ast* sequence(Reader* r, size_t start, char close, const char* constructo
       skip(r);
       if (r->position == r->length || r->source[r->position] != close) {
         r->incomplete = r->position == r->length;
-        fail(r, r->position, "expected closing delimiter after dotted tail");
+        fail(r, r->position, "E0007", "expected closing delimiter after dotted tail");
         return NULL;
       }
       r->position++;
@@ -434,7 +435,7 @@ static Ast* parse_inner(Reader* r) {
   size_t start = r->position;
   if (start == r->length) {
     r->incomplete = true;
-    fail(r, start, "expected datum");
+    fail(r, start, "E0009", "expected datum");
     return NULL;
   }
   char c = r->source[r->position++];
@@ -444,7 +445,7 @@ static Ast* parse_inner(Reader* r) {
     case '{': return sequence(r, start, '}', "table");
     case ')':
     case ']':
-    case '}': fail(r, start, "unexpected closing delimiter"); return NULL;
+    case '}': fail(r, start, "E0003", "unexpected closing delimiter"); return NULL;
     case '"': return string(r, start);
     case '\'': return prefix(r, start, "quote");
     case '`': return prefix(r, start, "quasiquote");
@@ -476,7 +477,7 @@ static Ast* parse_inner(Reader* r) {
 static Ast* parse(Reader* r) {
   if (r->error) return NULL;
   if (r->depth == 512) {
-    fail(r, r->position, "reader nesting limit exceeded");
+    fail(r, r->position, NULL, "reader nesting limit exceeded");
     return NULL;
   }
   r->depth++;
@@ -494,12 +495,12 @@ Ast* reader_next(Reader* r) {
 Ast* reader_one(Reader* r) {
   Ast* a = reader_next(r);
   if (!a) {
-    fail(r, r->position, "expected datum");
+    fail(r, r->position, "E0010", "expected datum");
     return NULL;
   }
   skip(r);
   if (r->position != r->length) {
-    fail(r, r->position, "expected one datum");
+    fail(r, r->position, NULL, "expected one datum");
     return NULL;
   }
   return a;

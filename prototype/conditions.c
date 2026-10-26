@@ -36,15 +36,40 @@ static Value field(Runtime* rt, Value table, const char* name) {
   return result;
 }
 
+static const char* diagnostic_type(const char* code) {
+  if (!code) return "error";
+  if (!strncmp(code, "E00", 3)) return "read-error";
+  if (!strncmp(code, "E01", 3)) return "syntax-error";
+  if (!strcmp(code, "E0201")) return "name-error";
+  if (!strncmp(code, "E02", 3)) return "namespace-error";
+  if (!strcmp(code, "E0301")) return "arity-error";
+  if (!strcmp(code, "E0302") || !strcmp(code, "E0401")) return "type-error";
+  return "error";
+}
+
 static Value message_condition(Runtime* rt, Value message, size_t first, size_t count,
                                const char* code) {
   Value values[] = {message, V_NIL, V_NIL, V_NIL, V_NIL};
   Roots roots;
   roots_push(&rt->heap, &roots, values, 5);
   values[1] = rt_table_builtin(rt, B_TABLE, 0, 0);
-  values[2] = rt_intern(rt, K_SYMBOL, "error", 5);
+  const char* type = diagnostic_type(code);
+  values[2] = rt_intern(rt, K_SYMBOL, type, strlen(type));
+  bool registered = values[2] != 0;
+  if (registered && strcmp(type, "error")) {
+    if (rt->condition_values[1] == V_NIL) {
+      Value registry = rt_table_builtin(rt, B_TABLE, 0, 0);
+      registered = registry != 0;
+      if (registered) rt->condition_values[1] = registry;
+    }
+    if (registered &&
+        rt_table_get(rt, rt->condition_values[1], values[2], V_UNBOUND) == V_UNBOUND) {
+      values[4] = rt_intern(rt, K_SYMBOL, "error", 5);
+      registered = values[4] && rt_table_set(rt, rt->condition_values[1], values[2], values[4]);
+    }
+  }
   Value k = key(rt, ":type");
-  bool ok = values[1] && values[2] && k && rt_table_set(rt, values[1], k, values[2]);
+  bool ok = registered && values[1] && values[2] && k && rt_table_set(rt, values[1], k, values[2]);
   if (ok) {
     k = key(rt, ":message");
     ok = k && rt_table_set(rt, values[1], k, values[0]);

@@ -36,7 +36,7 @@ bool rt_enter(Runtime* rt, size_t call, size_t argc, bool tail) {
     if (!rt_generic_prepare(rt, call, &argc)) return false;
     closure = rt->stack[call];
   }
-  if (!rt_kind(closure, K_CLOSURE)) return rt_error(rt, "value is not callable");
+  if (!rt_kind(closure, K_CLOSURE)) return rt_coded_error(rt, "E0302", "value is not callable");
   uint32_t id;
   memcpy(&id, object_bytes(closure), sizeof(id));
   Function* fn = rt->functions[id];
@@ -256,12 +256,13 @@ static bool dispatch(Runtime* rt, size_t stop_frames) {
         if (v == V_UNBOUND) {
           char message[192];
           snprintf(message, sizeof(message), "unbound global: %s", rt->names[ins.arg]);
-          return rt_error(rt, message);
+          return rt_coded_error(rt, "E0201", message);
         }
         if (!push(rt, v)) return false;
         break;
       case OP_SET_GLOBAL:
-        if (rt->globals[ins.arg] == V_UNBOUND) return rt_error(rt, "cannot set an unbound global");
+        if (rt->globals[ins.arg] == V_UNBOUND)
+          return rt_coded_error(rt, "E0201", "cannot set an unbound global");
         /* fall through */
       case OP_DEFINE_GLOBAL:
         if (ins.op == OP_DEFINE_GLOBAL) {

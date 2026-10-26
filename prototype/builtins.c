@@ -328,7 +328,7 @@ Value rt_builtin(Runtime* rt, unsigned id, size_t first, size_t count) {
     case B_SET_CAR:
     case B_SET_CDR:
       if (!rt_kind(a, K_PAIR)) {
-        rt_error(rt, "expected a pair");
+        rt_coded_error(rt, "E0401", "expected a pair");
         return 0;
       }
       if (id == B_CAR || id == B_CDR) return object_fields(a)[id == B_CDR];

@@ -1,0 +1,92 @@
+{
+  "workload": "(def (churn) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) (let ((p nil) (n 300)) (while (> n 0) (set! p (cons n p)) (set! n (- n 1))) (car p)) 42) (churn)",
+  "mode": "vm",
+  "results": {
+    "before": [
+      {
+        "semispace_bytes": 16384,
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "<expression>:0: managed heap exhausted"
+      },
+      {
+        "semispace_bytes": 32768,
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "<expression>:0: managed heap exhausted"
+      },
+      {
+        "semispace_bytes": 65536,
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "<expression>:0: managed heap exhausted"
+      },
+      {
+        "semispace_bytes": 131072,
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "<expression>:0: managed heap exhausted"
+      },
+      {
+        "semispace_bytes": 262144,
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "<expression>:0: managed heap exhausted"
+      },
+      {
+        "semispace_bytes": 524288,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      }
+    ],
+    "after": [
+      {
+        "semispace_bytes": 16384,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "semispace_bytes": 32768,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "semispace_bytes": 65536,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "semispace_bytes": 131072,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "semispace_bytes": 262144,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "semispace_bytes": 524288,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      }
+    ]
+  },
+  "executables": {
+    "before": {
+      "path": "/tmp/otium-before-scope-roots/otium-proto",
+      "sha256": "42ef472ee051ef40986d0355bc33e0f9b1d642c2e3bf16c9d4112d577556a668"
+    },
+    "after": {
+      "path": "prototype/otium-proto",
+      "sha256": "173e7fcbb7ebd3da6fded2a25df414a4e3b2d7ba3b1bf60855624313939937d8"
+    }
+  }
+}

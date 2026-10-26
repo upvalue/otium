@@ -1,0 +1,123 @@
+{
+  "luajit_library": "libluajit-5.1.so.2",
+  "metric": "warm million-call loop wall seconds",
+  "warmups": 2,
+  "samples_per_kernel": 5,
+  "luajit_warmup_policy": "At least two calls; discard samples when a new trace starts; limit 100 calls",
+  "machine": "Linux-6.18.46-x86_64-with-glibc2.43",
+  "python": "3.14.4",
+  "cpu_affinity": [
+    0
+  ],
+  "results": [
+    {
+      "workload": "ffi1000000",
+      "runtime": "prototype-vm",
+      "samples": [
+        0.066314122,
+        0.06628639,
+        0.066678357,
+        0.066410325,
+        0.066423187
+      ],
+      "compile_seconds": 0.0,
+      "ffi_compile_seconds": 0.014593424,
+      "ffi_signatures": 1,
+      "compiled_functions": 0,
+      "native_entries": 0,
+      "collections": 3,
+      "max_frames": 1,
+      "max_native_depth": 0,
+      "scalar_entries": 0,
+      "scalar_fallbacks": 0,
+      "peak_rss_kib": 18216,
+      "median": 0.066410325
+    },
+    {
+      "workload": "ffi1000000",
+      "runtime": "prototype-native",
+      "samples": [
+        0.012725022,
+        0.012735923,
+        0.012939575,
+        0.01276143,
+        0.012725754
+      ],
+      "compile_seconds": 0.069046989,
+      "ffi_compile_seconds": 0.015395943,
+      "ffi_signatures": 1,
+      "compiled_functions": 1,
+      "native_entries": 7,
+      "collections": 3,
+      "max_frames": 1,
+      "max_native_depth": 0,
+      "scalar_entries": 0,
+      "scalar_fallbacks": 0,
+      "peak_rss_kib": 18216,
+      "median": 0.012735923
+    },
+    {
+      "runtime": "python-ctypes",
+      "samples": [
+        0.1444470528513193,
+        0.13860912900418043,
+        0.1445176349952817,
+        0.1391078159213066,
+        0.1445054616779089
+      ],
+      "peak_rss_kib": 18216,
+      "median": 0.1444470528513193
+    },
+    {
+      "workload": "ffi1000000",
+      "runtime": "luajit-interpreter",
+      "samples": [
+        0.035220601,
+        0.035297986,
+        0.035244214,
+        0.035352378,
+        0.03526854
+      ],
+      "warmups": 2,
+      "discarded_samples": 0,
+      "trace_starts": 0,
+      "trace_stops": 0,
+      "jit_version": "LuaJIT 2.1.1761786044",
+      "jit_arch": "x64",
+      "jit_os": "Linux",
+      "jit_enabled": false,
+      "median": 0.03526854
+    },
+    {
+      "workload": "ffi1000000",
+      "runtime": "luajit-jit",
+      "samples": [
+        0.002379905,
+        0.002373663,
+        0.002391526,
+        0.002373262,
+        0.002366839
+      ],
+      "warmups": 2,
+      "discarded_samples": 0,
+      "trace_starts": 1,
+      "trace_stops": 1,
+      "jit_version": "LuaJIT 2.1.1761786044",
+      "jit_arch": "x64",
+      "jit_os": "Linux",
+      "jit_enabled": true,
+      "median": 0.002373663
+    },
+    {
+      "runtime": "chez-scheme",
+      "samples": [
+        0.002391375000000001,
+        0.0024102410000000005,
+        0.0024299480000000012,
+        0.002429417000000003,
+        0.002414820000000005
+      ],
+      "median": 0.002414820000000005
+    }
+  ]
+}

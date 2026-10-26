@@ -1,0 +1,159 @@
+{
+  "workload": "(def (many) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) (let ((x 42)) x) 42) (many)",
+  "executables": {
+    "before": {
+      "path": "/tmp/otium-before-slot-reuse/otium-proto",
+      "sha256": "173e7fcbb7ebd3da6fded2a25df414a4e3b2d7ba3b1bf60855624313939937d8"
+    },
+    "after": {
+      "path": "prototype/otium-proto",
+      "sha256": "fb953309c63e3b226972df6e8639e1ad81b7bb150ca45fb54fae52d980a99549"
+    }
+  },
+  "results": {
+    "before": [
+      {
+        "mode": "vm",
+        "stack_limit_slots": 32,
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "<expression>:0: VM stack limit exceeded"
+      },
+      {
+        "mode": "vm",
+        "stack_limit_slots": 64,
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "<expression>:0: VM stack limit exceeded"
+      },
+      {
+        "mode": "vm",
+        "stack_limit_slots": 128,
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "<expression>:0: VM stack limit exceeded"
+      },
+      {
+        "mode": "vm",
+        "stack_limit_slots": 256,
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "<expression>:0: VM stack limit exceeded"
+      },
+      {
+        "mode": "vm",
+        "stack_limit_slots": 512,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "mode": "native",
+        "stack_limit_slots": 32,
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "<expression>:0: VM stack limit exceeded"
+      },
+      {
+        "mode": "native",
+        "stack_limit_slots": 64,
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "<expression>:0: VM stack limit exceeded"
+      },
+      {
+        "mode": "native",
+        "stack_limit_slots": 128,
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "<expression>:0: VM stack limit exceeded"
+      },
+      {
+        "mode": "native",
+        "stack_limit_slots": 256,
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "<expression>:0: VM stack limit exceeded"
+      },
+      {
+        "mode": "native",
+        "stack_limit_slots": 512,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      }
+    ],
+    "after": [
+      {
+        "mode": "vm",
+        "stack_limit_slots": 32,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "mode": "vm",
+        "stack_limit_slots": 64,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "mode": "vm",
+        "stack_limit_slots": 128,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "mode": "vm",
+        "stack_limit_slots": 256,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "mode": "vm",
+        "stack_limit_slots": 512,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "mode": "native",
+        "stack_limit_slots": 32,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "mode": "native",
+        "stack_limit_slots": 64,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "mode": "native",
+        "stack_limit_slots": 128,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "mode": "native",
+        "stack_limit_slots": 256,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      },
+      {
+        "mode": "native",
+        "stack_limit_slots": 512,
+        "exit_code": 0,
+        "stdout": "42",
+        "stderr": ""
+      }
+    ]
+  }
+}

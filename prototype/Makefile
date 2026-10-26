@@ -100,15 +100,18 @@ otium-proto-sanitize: build/sanitize/main.o build/sanitize/libotium.a
 RELEASE_TESTS = $(addprefix build/release/bin/, $(TESTS) value-portable)
 SANITIZE_TESTS = $(addprefix build/sanitize/bin/, $(TESTS) value-portable)
 
-# Run every test program, then the scripts. Output is kept in build/MODE/bin/NAME.log
-# and shown only for failures.
+# Run every test program, then the scripts, then the CLI tests against the
+# amalgamation. Output is kept in build/MODE/bin/NAME.log and shown only for
+# failures.
 .PHONY: test sanitize
-test: $(RELEASE_TESTS) $(addprefix build/release/, $(FIXTURES)) build/release/bin/foreign-control otium-proto
+test: $(RELEASE_TESTS) $(addprefix build/release/, $(FIXTURES)) build/release/bin/foreign-control otium-proto \
+  build/amalgamation/otium-proto
 	@failed=0; \
 	for t in $(RELEASE_TESTS); do \
 	  if $$t > $$t.log 2>&1; then tail -n 1 $$t.log; else cat $$t.log; failed=1; fi; \
 	done; \
 	for s in $(SCRIPT_TESTS); do python3 $$s || failed=1; done; \
+	OTIUM_TEST_CLI=build/amalgamation/otium-proto python3 test_cli.py || failed=1; \
 	exit $$failed
 
 # Leak detection is off: the tracing environment used for development breaks it.
@@ -142,6 +145,22 @@ check-public:
 test-no-compiler: build/release/bin/runtime build/release/bin/foreign $(addprefix build/release/, $(FIXTURES))
 	env PATH=/nonexistent build/release/bin/runtime
 	env PATH=/nonexistent build/release/bin/foreign
+
+# The single-file distribution: otium.h, otium.c and main.c. The CLI tests run
+# against a launcher built from just those files.
+build/amalgamation/otium.c: tools/amalgamate.py Makefile $(RUNTIME) $(HEADERS) main.c
+	python3 tools/amalgamate.py build/amalgamation
+
+build/amalgamation/otium-proto: build/amalgamation/otium.c
+	$(CC) -DOTIUM_LIBRARY_DIR='"$(abspath ../lib)"' -DOTIUM_BOOTSTRAP_FILE='"$(CURDIR)/primitives.ot"' \
+	  $(shell pkg-config --cflags libffi) $(WARNINGS) $(CFLAGS) $(LDFLAGS) \
+	  build/amalgamation/otium.c build/amalgamation/main.c $(LDLIBS) -o $@
+
+.PHONY: amalgamation test-amalgamation
+amalgamation: build/amalgamation/otium-proto
+
+test-amalgamation: build/amalgamation/otium-proto
+	OTIUM_TEST_CLI=build/amalgamation/otium-proto python3 test_cli.py
 
 .PHONY: compliance differential
 compliance: otium-proto

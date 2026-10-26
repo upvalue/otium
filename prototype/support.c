@@ -4,19 +4,9 @@
 #include <inttypes.h>
 #include <math.h>
 
-static ot_value fail(ot_runtime* rt, const char* message) {
-  oti_error(rt, message);
-  return 0;
-}
-
-static const char* text(ot_value v, size_t* n) {
-  memcpy(n, object_bytes(v), sizeof(*n));
-  return (const char*)object_bytes(v) + sizeof(*n);
-}
-
 uint64_t oti_symbol_id(ot_value v) {
   size_t n;
-  text(v, &n);
+  oti_text_bytes(v, &n);
   uint64_t id;
   memcpy(&id, object_bytes(v) + sizeof(size_t) + n + 1, sizeof(id));
   return id;
@@ -27,12 +17,12 @@ ot_value oti_intern(ot_runtime* rt, unsigned kind, const char* bytes, size_t n) 
     ot_value v = rt->constants[i];
     if (!oti_kind(v, kind) || (kind == K_SYMBOL && oti_symbol_id(v))) continue;
     size_t length;
-    const char* s = text(v, &length);
+    const char* s = oti_text_bytes(v, &length);
     if (length == n && !memcmp(s, bytes, n)) return v;
   }
   /* The source may be in the moving heap. */
   char* copy = malloc(n ? n : 1);
-  if (!copy) return fail(rt, "out of host memory");
+  if (!copy) return oti_fail(rt, "out of host memory");
   memcpy(copy, bytes, n);
   ot_value v = oti_text(rt, kind, copy, n);
   free(copy);
@@ -67,29 +57,29 @@ ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
       : id == B_STRING_REF || id == B_EXP_OPTIONAL || id == B_EXP_INVOKE || id == B_EXP_LOCATE ? 2
                                                                                                : 1;
   if (id == B_GENSYM) {
-    if (count > 1) return fail(rt, "gensym expects at most one argument");
+    if (count > 1) return oti_fail(rt, "gensym expects at most one argument");
   } else if (id == B_SUBSTRING) {
-    if (count < 2 || count > 3) return fail(rt, "substring expects two or three arguments");
+    if (count < 2 || count > 3) return oti_fail(rt, "substring expects two or three arguments");
   } else if (id != B_STRING_APPEND && id != B_DISPLAY && id != B_WRITE && count != arity)
-    return fail(rt, "wrong number of arguments");
+    return oti_fail(rt, "wrong number of arguments");
   ot_value v = count ? rt->stack[first] : OT_NIL;
   bool predicate;
   switch (id) {
     case B_STRING_APPEND: {
       size_t total = 0;
       for (size_t i = 0; i < count; i++) {
-        if (!oti_kind(rt->stack[first + i], K_STRING)) return fail(rt, "expected string");
+        if (!oti_kind(rt->stack[first + i], K_STRING)) return oti_fail(rt, "expected string");
         size_t n;
-        text(rt->stack[first + i], &n);
-        if (n > SIZE_MAX - total - 1) return fail(rt, "string too large");
+        oti_text_bytes(rt->stack[first + i], &n);
+        if (n > SIZE_MAX - total - 1) return oti_fail(rt, "string too large");
         total += n;
       }
       char* joined = malloc(total + 1);
-      if (!joined) return fail(rt, "out of host memory");
+      if (!joined) return oti_fail(rt, "out of host memory");
       size_t offset = 0;
       for (size_t i = 0; i < count; i++) {
         size_t n;
-        const char* s = text(rt->stack[first + i], &n);
+        const char* s = oti_text_bytes(rt->stack[first + i], &n);
         memcpy(joined + offset, s, n);
         offset += n;
       }
@@ -105,7 +95,7 @@ ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
         double real;
         memcpy(&real, object_bytes(v), sizeof(real));
         n = (int)oti_format_float(real, buffer, sizeof(buffer));
-      } else return fail(rt, "expected number");
+      } else return oti_fail(rt, "expected number");
       return oti_text(rt, K_STRING, buffer, (size_t)n);
     }
     case B_POS:
@@ -113,7 +103,7 @@ ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
       double number;
       if (ot_is_int(v)) number = (double)ot_to_int(v);
       else if (oti_kind(v, K_FLOAT)) memcpy(&number, object_bytes(v), sizeof(number));
-      else return fail(rt, "expected number");
+      else return oti_fail(rt, "expected number");
       predicate = id == B_POS ? number > 0 : number < 0;
       break;
     }
@@ -139,19 +129,19 @@ ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
     case B_EXP_LOCATE: return rt->stack[first + 1];
     case B_EXP_INVOKE:
       if (rt->expanding && ++rt->expansion_calls > 1024)
-        return fail(rt, "macro expansion limit exceeded");
+        return oti_fail(rt, "macro expansion limit exceeded");
       return oti_call_list(rt, v, rt->stack[first + 1]);
     case B_EXP_FAIL: {
       ot_value message = rt->stack[first + 1];
-      if (!oti_kind(message, K_STRING)) return fail(rt, "expansion error");
+      if (!oti_kind(message, K_STRING)) return oti_fail(rt, "expansion error");
       size_t n;
-      const char* s = text(message, &n);
+      const char* s = oti_text_bytes(message, &n);
       (void)n;
       ot_value code = rt->stack[first];
       oti_error(rt, s);
       if (oti_kind(code, K_STRING)) {
         size_t length;
-        const char* bytes = text(code, &length);
+        const char* bytes = oti_text_bytes(code, &length);
         if (length < sizeof(rt->expansion_error_code)) {
           memcpy(rt->expansion_error_code, bytes, length);
           rt->expansion_error_code[length] = 0;
@@ -163,9 +153,9 @@ ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
     case B_EXP_MACRO:
     case B_EXP_QUALIFY:
     case B_EXP_LOCAL: {
-      if (!oti_kind(v, K_SYMBOL)) return fail(rt, "expected symbol");
+      if (!oti_kind(v, K_SYMBOL)) return oti_fail(rt, "expected symbol");
       size_t n;
-      const char* s = text(v, &n);
+      const char* s = oti_text_bytes(v, &n);
       uint32_t index = oti_lookup_global(rt, s, n);
       if (id == B_EXP_MACRO)
         return index != UINT32_MAX && rt->global_macro[index] ? rt->globals[index] : OT_FALSE;
@@ -187,7 +177,7 @@ ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
       const char* space = rt->namespaces[ns];
       size_t prefix = strlen(space);
       char* joined = malloc(prefix + n + 2);
-      if (!joined) return fail(rt, "out of host memory");
+      if (!joined) return oti_fail(rt, "out of host memory");
       memcpy(joined, space, prefix);
       joined[prefix] = '/';
       memcpy(joined + prefix + 1, s, n);
@@ -196,13 +186,13 @@ ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
       return result;
     }
     case B_GENSYM: {
-      if (count && !oti_kind(v, K_STRING)) return fail(rt, "gensym expects a string prefix");
+      if (count && !oti_kind(v, K_STRING)) return oti_fail(rt, "gensym expects a string prefix");
       size_t n = 1;
-      const char* prefix = count ? text(v, &n) : "g";
+      const char* prefix = count ? oti_text_bytes(v, &n) : "g";
       uint64_t serial = ++rt->gensym_counter;
-      if (!serial) return fail(rt, "gensym counter exhausted");
+      if (!serial) return oti_fail(rt, "gensym counter exhausted");
       char* name = malloc(n + 32);
-      if (!name) return fail(rt, "out of host memory");
+      if (!name) return oti_fail(rt, "out of host memory");
       memcpy(name, prefix, n);
       int written = snprintf(name + n, 32, "#%" PRIu64, serial);
       ot_value result = oti_text(rt, K_SYMBOL, name, n + (size_t)written);
@@ -216,12 +206,12 @@ ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
     case B_KEYWORD: {
       if (id == B_KEYWORD && oti_kind(v, K_KEYWORD)) return v;
       if (!oti_kind(v, K_STRING) && !(id == B_KEYWORD && oti_kind(v, K_SYMBOL)))
-        return fail(rt, "expected string or symbol");
+        return oti_fail(rt, "expected string or symbol");
       size_t n;
-      const char* s = text(v, &n);
+      const char* s = oti_text_bytes(v, &n);
       if (id == B_STRING_SYMBOL) return oti_intern(rt, K_SYMBOL, s, n);
       char* name = malloc(n + 1);
-      if (!name) return fail(rt, "out of host memory");
+      if (!name) return oti_fail(rt, "out of host memory");
       name[0] = ':';
       memcpy(name + 1, s, n);
       ot_value result = oti_intern(rt, K_KEYWORD, name, n + 1);
@@ -229,11 +219,11 @@ ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
       return result;
     }
     case B_SYMBOL_STRING: {
-      if (!oti_kind(v, K_SYMBOL)) return fail(rt, "expected symbol");
+      if (!oti_kind(v, K_SYMBOL)) return oti_fail(rt, "expected symbol");
       size_t n;
-      const char* s = text(v, &n);
+      const char* s = oti_text_bytes(v, &n);
       char* copy = malloc(n ? n : 1);
-      if (!copy) return fail(rt, "out of host memory");
+      if (!copy) return oti_fail(rt, "out of host memory");
       memcpy(copy, s, n);
       ot_value result = oti_text(rt, K_STRING, copy, n);
       free(copy);
@@ -242,22 +232,22 @@ ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
     case B_STRING_LENGTH:
     case B_STRING_REF:
     case B_SUBSTRING: {
-      if (!oti_kind(v, K_STRING)) return fail(rt, "expected string");
+      if (!oti_kind(v, K_STRING)) return oti_fail(rt, "expected string");
       size_t n;
-      const char* s = text(v, &n);
+      const char* s = oti_text_bytes(v, &n);
       intptr_t start = 0, end = 0;
       if (id != B_STRING_LENGTH) {
-        if (!ot_is_int(rt->stack[first + 1])) return fail(rt, "expected string index");
+        if (!ot_is_int(rt->stack[first + 1])) return oti_fail(rt, "expected string index");
         start = ot_to_int(rt->stack[first + 1]);
         end = start;
         if (id == B_SUBSTRING) {
           if (count == 3 && !ot_is_int(rt->stack[first + 2]))
-            return fail(rt, "expected string index");
+            return oti_fail(rt, "expected string index");
           end = count == 3 ? ot_to_int(rt->stack[first + 2]) : INTPTR_MAX;
           if (start < 0) start = 0;
           if (end < start) end = start;
         }
-        if (start < 0 || end < start) return fail(rt, "string index out of bounds");
+        if (start < 0 || end < start) return oti_fail(rt, "string index out of bounds");
       }
       size_t length = 0, a = n, b = n;
       uint32_t cp;
@@ -271,17 +261,17 @@ ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
         if (length == (size_t)end) b = before;
       }
       if (id == B_STRING_LENGTH) return ot_int((intptr_t)length);
-      if (id == B_STRING_REF) return fail(rt, "string index out of bounds");
+      if (id == B_STRING_REF) return oti_fail(rt, "string index out of bounds");
       if ((size_t)start == length) a = n;
       if ((size_t)end == length) b = n;
       char* copy = malloc(b - a + 1);
-      if (!copy) return fail(rt, "out of host memory");
+      if (!copy) return oti_fail(rt, "out of host memory");
       memcpy(copy, s + a, b - a);
       ot_value result = oti_text(rt, K_STRING, copy, b - a);
       free(copy);
       return result;
     }
-    default: return fail(rt, "unknown support builtin");
+    default: return oti_fail(rt, "unknown support builtin");
   }
   return predicate ? OT_TRUE : OT_FALSE;
 }

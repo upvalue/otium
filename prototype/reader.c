@@ -11,7 +11,7 @@ struct oti_arena_block {
   max_align_t data[];
 };
 
-static void fail(oti_reader* r, size_t offset, const char* code, const char* message) {
+static void syntax_error(oti_reader* r, size_t offset, const char* code, const char* message) {
   if (!r->error) {
     r->error = message;
     r->error_code = code;
@@ -40,7 +40,7 @@ void* oti_reader_allocate(oti_reader* r, size_t size) {
   memset(result, 0, size);
   return result;
 exhausted:
-  fail(r, r->position, NULL, "reader memory limit exceeded");
+  syntax_error(r, r->position, NULL, "reader memory limit exceeded");
   return NULL;
 }
 
@@ -81,16 +81,16 @@ bool oti_ast_symbol(const oti_ast* a, const char* s) {
          !memcmp(a->as.text.data, s, a->as.text.size);
 }
 
-static bool space(unsigned char c) {
+bool oti_reader_space(unsigned char c) {
   return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\v';
 }
 
-static bool delimiter(unsigned char c) { return space(c) || strchr("()[]{}\";'`,", c) != NULL; }
+bool oti_reader_delimiter(unsigned char c) { return oti_reader_space(c) || strchr("()[]{}\";'`,", c) != NULL; }
 
 static void skip(oti_reader* r) {
   while (r->position < r->length) {
     unsigned char c = r->source[r->position];
-    if (space(c)) {
+    if (oti_reader_space(c)) {
       r->position++;
       continue;
     }
@@ -188,7 +188,7 @@ static oti_ast* string(oti_reader* r, size_t start) {
   }
   if (end == r->length) {
     r->incomplete = true;
-    fail(r, start, "E0002", "unterminated string");
+    syntax_error(r, start, "E0002", "unterminated string");
     return NULL;
   }
   char* out = oti_reader_allocate(r, end - r->position + 1);
@@ -213,14 +213,14 @@ static oti_ast* string(oti_reader* r, size_t start) {
           uint32_t value;
           if (r->position == end ||
               !unicode_hex(r->source + digits, r->position - digits, &value)) {
-            fail(r, at, "E0006", "invalid Unicode string escape");
+            syntax_error(r, at, "E0006", "invalid Unicode string escape");
             return NULL;
           }
           r->position++;
           used += utf8_encode(out + used, value);
           break;
         }
-        default: fail(r, at, "E0006", "invalid string escape"); return NULL;
+        default: syntax_error(r, at, "E0006", "invalid string escape"); return NULL;
       }
     } else if (c == '\r') {
       if (r->position < end && r->source[r->position] == '\n') r->position++;
@@ -229,7 +229,7 @@ static oti_ast* string(oti_reader* r, size_t start) {
       uint32_t value;
       size_t count = utf8_decode(r->source + at, end - at, &value);
       if (!count || !value) {
-        fail(r, at, NULL, "invalid source character");
+        syntax_error(r, at, NULL, "invalid source character");
         return NULL;
       }
       memcpy(out + used, r->source + at, count);
@@ -241,22 +241,22 @@ static oti_ast* string(oti_reader* r, size_t start) {
   return text_node(r, AST_STRING, start, out, used);
 }
 
-static oti_ast* character(oti_reader* r, size_t start) {
+static oti_ast* character_literal(oti_reader* r, size_t start) {
   size_t begin = r->position;
   if (begin == r->length) {
     r->incomplete = true;
-    fail(r, start, "E0011", "missing character");
+    syntax_error(r, start, "E0011", "missing character");
     return NULL;
   }
   uint32_t value;
   size_t count = utf8_decode(r->source + begin, r->length - begin, &value);
   if (!count || !value) {
-    fail(r, start, "E0011", "invalid character");
+    syntax_error(r, start, "E0011", "invalid character");
     return NULL;
   }
   r->position += count;
-  if (!delimiter((unsigned char)r->source[begin]))
-    while (r->position < r->length && !delimiter((unsigned char)r->source[r->position]))
+  if (!oti_reader_delimiter((unsigned char)r->source[begin]))
+    while (r->position < r->length && !oti_reader_delimiter((unsigned char)r->source[r->position]))
       r->position++;
   size_t size = r->position - begin;
   if (size != count) {
@@ -275,7 +275,7 @@ static oti_ast* character(oti_reader* r, size_t start) {
     if (!found && r->source[begin] == 'x')
       found = unicode_hex(r->source + begin + 1, size - 1, &value);
     if (!found) {
-      fail(r, start, "E0011", "unknown character name");
+      syntax_error(r, start, "E0011", "unknown character name");
       return NULL;
     }
   }
@@ -285,19 +285,19 @@ static oti_ast* character(oti_reader* r, size_t start) {
 }
 
 static oti_ast* atom(oti_reader* r, size_t start) {
-  while (r->position < r->length && !delimiter((unsigned char)r->source[r->position]))
+  while (r->position < r->length && !oti_reader_delimiter((unsigned char)r->source[r->position]))
     r->position++;
   size_t n = r->position - start;
   const char* s = r->source + start;
   if (!n) {
-    fail(r, start, NULL, "invalid source character");
+    syntax_error(r, start, NULL, "invalid source character");
     return NULL;
   }
   for (size_t i = 0; i < n;) {
     uint32_t value;
     size_t count = utf8_decode(s + i, n - i, &value);
     if (!count || !value) {
-      fail(r, start + i, NULL, "invalid source character");
+      syntax_error(r, start + i, NULL, "invalid source character");
       return NULL;
     }
     i += count;
@@ -311,11 +311,11 @@ static oti_ast* atom(oti_reader* r, size_t start) {
   if ((n == 2 && !memcmp(s, "#f", 2)) || (n == 6 && !memcmp(s, "#false", 6)))
     return node(r, AST_BOOL, start);
   if (*s == '#') {
-    fail(r, start, "E0005", "reserved # syntax");
+    syntax_error(r, start, "E0005", "reserved # syntax");
     return NULL;
   }
   if (*s == ':' && n == 1) {
-    fail(r, start, "E0008", "empty keyword");
+    syntax_error(r, start, "E0008", "empty keyword");
     return NULL;
   }
   size_t sign = (*s == '+' || *s == '-');
@@ -365,12 +365,12 @@ static oti_ast* atom(oti_reader* r, size_t start) {
     return a;
   }
   if (*s == '.') {
-    fail(r, start, "E0007", "invalid dot syntax");
+    syntax_error(r, start, "E0007", "invalid dot syntax");
     return NULL;
   }
   return text_node(r, *s == ':' ? AST_KEYWORD : AST_SYMBOL, start, s, n);
 bad_number:
-  fail(r, start, "E0004", "invalid or out-of-range number");
+  syntax_error(r, start, "E0004", "invalid or out-of-range number");
   return NULL;
 }
 
@@ -389,7 +389,7 @@ static oti_ast* sequence(oti_reader* r, size_t start, char close, const char* co
     skip(r);
     if (r->position == r->length) {
       r->incomplete = true;
-      fail(r, start, "E0001", "unterminated sequence");
+      syntax_error(r, start, "E0001", "unterminated sequence");
       return NULL;
     }
     char c = r->source[r->position];
@@ -398,9 +398,9 @@ static oti_ast* sequence(oti_reader* r, size_t start, char close, const char* co
       return a;
     }
     if (c == '.' &&
-        (r->position + 1 == r->length || delimiter((unsigned char)r->source[r->position + 1]))) {
+        (r->position + 1 == r->length || oti_reader_delimiter((unsigned char)r->source[r->position + 1]))) {
       if (!a->as.list.first) {
-        fail(r, r->position, "E0007", "dot needs a preceding element");
+        syntax_error(r, r->position, "E0007", "dot needs a preceding element");
         return NULL;
       }
       r->position++;
@@ -409,7 +409,7 @@ static oti_ast* sequence(oti_reader* r, size_t start, char close, const char* co
       skip(r);
       if (r->position == r->length || r->source[r->position] != close) {
         r->incomplete = r->position == r->length;
-        fail(r, r->position, "E0007", "expected closing delimiter after dotted tail");
+        syntax_error(r, r->position, "E0007", "expected closing delimiter after dotted tail");
         return NULL;
       }
       r->position++;
@@ -435,7 +435,7 @@ static oti_ast* parse_inner(oti_reader* r) {
   size_t start = r->position;
   if (start == r->length) {
     r->incomplete = true;
-    fail(r, start, "E0009", "expected datum");
+    syntax_error(r, start, "E0009", "expected datum");
     return NULL;
   }
   char c = r->source[r->position++];
@@ -445,7 +445,7 @@ static oti_ast* parse_inner(oti_reader* r) {
     case '{': return sequence(r, start, '}', "table");
     case ')':
     case ']':
-    case '}': fail(r, start, "E0003", "unexpected closing delimiter"); return NULL;
+    case '}': syntax_error(r, start, "E0003", "unexpected closing delimiter"); return NULL;
     case '"': return string(r, start);
     case '\'': return prefix(r, start, "quote");
     case '`': return prefix(r, start, "quasiquote");
@@ -458,7 +458,7 @@ static oti_ast* parse_inner(oti_reader* r) {
     case '#':
       if (r->position < r->length && r->source[r->position] == '\\') {
         r->position++;
-        return character(r, start);
+        return character_literal(r, start);
       }
       if (r->position < r->length && r->source[r->position] == '`') {
         r->position++;
@@ -477,7 +477,7 @@ static oti_ast* parse_inner(oti_reader* r) {
 static oti_ast* parse(oti_reader* r) {
   if (r->error) return NULL;
   if (r->depth == 512) {
-    fail(r, r->position, NULL, "reader nesting limit exceeded");
+    syntax_error(r, r->position, NULL, "reader nesting limit exceeded");
     return NULL;
   }
   r->depth++;
@@ -495,12 +495,12 @@ oti_ast* oti_reader_next(oti_reader* r) {
 oti_ast* oti_reader_one(oti_reader* r) {
   oti_ast* a = oti_reader_next(r);
   if (!a) {
-    fail(r, r->position, "E0010", "expected datum");
+    syntax_error(r, r->position, "E0010", "expected datum");
     return NULL;
   }
   skip(r);
   if (r->position != r->length) {
-    fail(r, r->position, NULL, "expected one datum");
+    syntax_error(r, r->position, NULL, "expected one datum");
     return NULL;
   }
   return a;

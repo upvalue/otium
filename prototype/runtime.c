@@ -21,6 +21,24 @@ bool oti_error(ot_runtime* rt, const char* message) {
   return false;
 }
 
+ot_value oti_fail(ot_runtime* rt, const char* message) {
+  oti_error(rt, message);
+  return 0;
+}
+
+ot_value oti_cons(ot_runtime* rt, ot_value car, ot_value cdr) {
+  ot_value live[] = {car, cdr};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, live, 2);
+  ot_value result = oti_alloc(rt, K_PAIR, 2, 0);
+  if (result) {
+    object_fields(result)[0] = live[0];
+    object_fields(result)[1] = live[1];
+  }
+  oti_roots_pop(&rt->heap, &roots);
+  return result;
+}
+
 bool oti_coded_error(ot_runtime* rt, const char* code, const char* message) {
   bool fresh = !rt->error[0];
   oti_error(rt, message);

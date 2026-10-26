@@ -1,30 +1,12 @@
 #include "internal.h"
 #include <string.h>
 
-static ot_value fail(ot_runtime* rt, const char* message) {
-  oti_error(rt, message);
-  return 0;
-}
-
 static size_t slots(ot_value layout) { return ((oti_object_header*)layout)->fields / 3; }
 
 static size_t slot_index(ot_value layout, ot_value key) {
   for (size_t i = 0; i < slots(layout); i++)
     if (object_fields(layout)[3 * i] == key) return i;
   return SIZE_MAX;
-}
-
-static ot_value pair(ot_runtime* rt, ot_value car, ot_value cdr) {
-  ot_value live[] = {car, cdr};
-  oti_roots roots;
-  oti_roots_push(&rt->heap, &roots, live, 2);
-  ot_value result = oti_alloc(rt, K_PAIR, 2, 0);
-  if (result) {
-    object_fields(result)[0] = live[0];
-    object_fields(result)[1] = live[1];
-  }
-  oti_roots_pop(&rt->heap, &roots);
-  return result;
 }
 
 static bool migrate(ot_runtime* rt, ot_value* instance, ot_value properties) {
@@ -76,10 +58,10 @@ static bool migrate(ot_runtime* rt, ot_value* instance, ot_value properties) {
       }
     }
   if (ok) {
-    live[6] = pair(rt, live[5], OT_EMPTY);
+    live[6] = oti_cons(rt, live[5], OT_EMPTY);
     ok = live[6] != 0;
     if (ok) {
-      live[6] = pair(rt, live[0], live[6]);
+      live[6] = oti_cons(rt, live[0], live[6]);
       ok = live[6] != 0;
     }
     uint32_t hook = oti_binding_global(rt, 0, "update-instance", 15, false);
@@ -88,7 +70,7 @@ static bool migrate(ot_runtime* rt, ot_value* instance, ot_value properties) {
   }
   for (size_t i = 0; ok && i < n; i++)
     if (object_fields(live[4])[i] == V_UNBOUND) {
-      fail(rt, "missing required slot after migration");
+      oti_fail(rt, "missing required slot after migration");
       ok = false;
     }
   if (!ok && installed) {
@@ -100,20 +82,20 @@ static bool migrate(ot_runtime* rt, ot_value* instance, ot_value properties) {
   return ok;
 }
 
-static bool current(ot_runtime* rt, ot_value* instance) { return migrate(rt, instance, OT_NIL); }
+static bool migrate_to_current(ot_runtime* rt, ot_value* instance) { return migrate(rt, instance, OT_NIL); }
 
 ot_value oti_instance_call(ot_runtime* rt, ot_value instance, size_t first, size_t count) {
   if (count != 1 || !oti_kind(rt->stack[first], K_KEYWORD))
-    return fail(rt, "instance call needs one slot keyword");
+    return oti_fail(rt, "instance call needs one slot keyword");
   oti_roots root;
   oti_roots_push(&rt->heap, &root, &instance, 1);
   ot_value result = 0;
-  if (current(rt, &instance)) {
+  if (migrate_to_current(rt, &instance)) {
     size_t index = slot_index(object_fields(instance)[1], rt->stack[first]);
-    if (index == SIZE_MAX) fail(rt, "unknown instance slot");
+    if (index == SIZE_MAX) oti_fail(rt, "unknown instance slot");
     else {
       result = object_fields(object_fields(instance)[2])[index];
-      if (result == V_UNBOUND) result = fail(rt, "uninitialized instance slot");
+      if (result == V_UNBOUND) result = oti_fail(rt, "uninitialized instance slot");
     }
   }
   oti_roots_pop(&rt->heap, &root);
@@ -124,7 +106,7 @@ ot_value oti_instance_copy(ot_runtime* rt, ot_value instance) {
   ot_value live[] = {instance, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, live, 2);
-  if (!current(rt, &live[0])) {
+  if (!migrate_to_current(rt, &live[0])) {
     oti_roots_pop(&rt->heap, &roots);
     return 0;
   }
@@ -148,25 +130,25 @@ ot_value oti_instance_copy(ot_runtime* rt, ot_value instance) {
 }
 
 static ot_value define_class(ot_runtime* rt, size_t first, size_t count) {
-  if (count != 5) return fail(rt, "invalid class declaration");
+  if (count != 5) return oti_fail(rt, "invalid class declaration");
   ot_value name = rt->stack[first], parent = rt->stack[first + 1], abstract = rt->stack[first + 2],
         spec = rt->stack[first + 3];
   if (!oti_kind(name, K_SYMBOL) || !oti_kind(parent, K_CLASS) || !oti_kind(spec, K_ARRAY) ||
       (abstract != OT_TRUE && abstract != OT_FALSE))
-    return fail(rt, "invalid class declaration");
+    return oti_fail(rt, "invalid class declaration");
   if (!((oti_class_info*)object_bytes(parent))->abstract)
-    return fail(rt, "class parent must be abstract");
+    return oti_fail(rt, "class parent must be abstract");
   size_t n = ((oti_array_info*)object_bytes(spec))->length;
-  if (n % 3 || (abstract == OT_TRUE && n)) return fail(rt, "invalid class slots");
+  if (n % 3 || (abstract == OT_TRUE && n)) return oti_fail(rt, "invalid class slots");
   ot_value* fields = n ? object_fields(object_fields(spec)[0]) : NULL;
   for (size_t i = 0; i < n; i += 3) {
     if (!oti_kind(fields[i], K_KEYWORD) ||
         (fields[i + 1] != OT_FALSE && !oti_kind(fields[i + 1], K_CLOSURE)) ||
         (fields[i + 2] != OT_FALSE && fields[i + 2] != OT_TRUE) ||
         (fields[i + 2] == OT_TRUE && fields[i + 1] == OT_FALSE))
-      return fail(rt, "invalid slot definition");
+      return oti_fail(rt, "invalid slot definition");
     for (size_t j = 0; j < i; j += 3)
-      if (fields[j] == fields[i]) return fail(rt, "duplicate class slot");
+      if (fields[j] == fields[i]) return oti_fail(rt, "duplicate class slot");
   }
   uint32_t global = oti_global(rt, (char*)oti_bytes_data(name), oti_bytes_length(name));
   if (global == UINT32_MAX) return 0;
@@ -175,8 +157,8 @@ static ot_value define_class(ot_runtime* rt, size_t first, size_t count) {
   if (old != V_UNBOUND && !reset) {
     if (!oti_kind(old, K_CLASS) || ((oti_class_info*)object_bytes(old))->builtin ||
         ((oti_class_info*)object_bytes(old))->abstract != (abstract == OT_TRUE))
-      return fail(rt, "incompatible class redefinition");
-    if (oti_subtype(parent, old)) return fail(rt, "cyclic class ancestry");
+      return oti_fail(rt, "incompatible class redefinition");
+    if (oti_subtype(parent, old)) return oti_fail(rt, "cyclic class ancestry");
   }
   bool same = false;
   if (old != V_UNBOUND && !reset) {
@@ -212,21 +194,21 @@ static ot_value define_class(ot_runtime* rt, size_t first, size_t count) {
 
 static ot_value property_operation(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   size_t wanted = id == B_CLASS_MOUNT ? 1 : 2;
-  if (count != wanted) return fail(rt, "wrong number of property operation arguments");
+  if (count != wanted) return oti_fail(rt, "wrong number of property operation arguments");
   ot_value live[] = {rt->stack[first], rt->stack[first + count - 1], OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, live, 3);
   bool ok = true;
   if (!oti_kind(live[0], K_INSTANCE) || !oti_kind(live[1], K_INSTANCE)) {
-    fail(rt, "property operations require instances");
+    oti_fail(rt, "property operations require instances");
     ok = false;
   }
   if (ok && object_fields(live[1])[1] != object_fields(object_fields(live[1])[0])[2]) {
-    fail(rt, "outdated property description");
+    oti_fail(rt, "outdated property description");
     ok = false;
   }
   if (ok && id == B_CLASS_UPDATE && object_fields(live[0])[0] != object_fields(live[1])[0]) {
-    fail(rt, "property update requires the same class");
+    oti_fail(rt, "property update requires the same class");
     ok = false;
   }
   if (ok && id == B_CLASS_MOUNT) {
@@ -262,30 +244,30 @@ ot_value oti_instance_builtin(ot_runtime* rt, unsigned id, size_t first, size_t 
   if (id == B_CLASS_DEFINE) return define_class(rt, first, count);
   if (id == B_CLASS_MOUNT || id == B_CLASS_UPDATE) return property_operation(rt, id, first, count);
   if (id == B_INSTANCE_P) {
-    if (count != 1) return fail(rt, "instance? takes one argument");
+    if (count != 1) return oti_fail(rt, "instance? takes one argument");
     return oti_kind(rt->stack[first], K_INSTANCE) ? OT_TRUE : OT_FALSE;
   }
   if (id == B_SLOT_SET) {
     if (count != 3 || !oti_kind(rt->stack[first], K_INSTANCE) ||
         !oti_kind(rt->stack[first + 1], K_KEYWORD))
-      return fail(rt, "slot-set! needs an instance, keyword and value");
+      return oti_fail(rt, "slot-set! needs an instance, keyword and value");
     ot_value instance = rt->stack[first];
     oti_roots root;
     oti_roots_push(&rt->heap, &root, &instance, 1);
     ot_value result = 0;
-    if (current(rt, &instance)) {
+    if (migrate_to_current(rt, &instance)) {
       size_t index = slot_index(object_fields(instance)[1], rt->stack[first + 1]);
-      if (index == SIZE_MAX) fail(rt, "unknown instance slot");
+      if (index == SIZE_MAX) oti_fail(rt, "unknown instance slot");
       else result = object_fields(object_fields(instance)[2])[index] = rt->stack[first + 2];
     }
     oti_roots_pop(&rt->heap, &root);
     return result;
   }
   if (!count || !oti_kind(rt->stack[first], K_CLASS) || !(count % 2))
-    return fail(rt, "make needs a class and keyword/value pairs");
+    return oti_fail(rt, "make needs a class and keyword/value pairs");
   ot_value class = rt->stack[first];
   oti_class_info* info = object_bytes(class);
-  if (info->abstract || info->builtin) return fail(rt, "class cannot be instantiated");
+  if (info->abstract || info->builtin) return oti_fail(rt, "class cannot be instantiated");
   ot_value live[] = {class, object_fields(class)[2], OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, live, 3);
@@ -296,10 +278,10 @@ ot_value oti_instance_builtin(ot_runtime* rt, unsigned id, size_t first, size_t 
     ot_value key = rt->stack[first + i];
     size_t index = slot_index(live[1], key);
     if (!oti_kind(key, K_KEYWORD) || index == SIZE_MAX) {
-      fail(rt, "unknown constructor slot");
+      oti_fail(rt, "unknown constructor slot");
       ok = false;
     } else if (properties && object_fields(live[1])[3 * index + 2] == OT_TRUE) {
-      fail(rt, "state slot cannot be a property argument");
+      oti_fail(rt, "state slot cannot be a property argument");
       ok = false;
     }
   }
@@ -325,7 +307,7 @@ ot_value oti_instance_builtin(ot_runtime* rt, unsigned id, size_t first, size_t 
     if (value == V_UNBOUND) {
       ot_value initializer = object_fields(live[1])[i * 3 + 1];
       if (initializer == OT_FALSE) {
-        fail(rt, "missing required slot");
+        oti_fail(rt, "missing required slot");
         ok = false;
         break;
       }

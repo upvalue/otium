@@ -2,16 +2,11 @@
 #include <string.h>
 #include <stdlib.h>
 
-static oti_table_info* info(ot_value t) { return object_bytes(t); }
+static oti_table_info* table_info(ot_value t) { return object_bytes(t); }
 
 static ot_value* entries(ot_value t) { return object_fields(object_fields(t)[0]); }
 
 static uint32_t* buckets(ot_value t) { return object_bytes(object_fields(t)[0]); }
-
-static ot_value fail(ot_runtime* rt, const char* message) {
-  oti_error(rt, message);
-  return 0;
-}
 
 static size_t mix(size_t x) {
   x ^= x >> 16;
@@ -74,7 +69,7 @@ static bool freeze_key(ot_runtime* rt, ot_value key) {
 }
 
 static bool lookup(ot_runtime* rt, ot_value table, ot_value key, size_t* slot, size_t* entry) {
-  size_t mask = info(table)->capacity * 2 - 1, tomb = SIZE_MAX;
+  size_t mask = table_info(table)->capacity * 2 - 1, tomb = SIZE_MAX;
   uint32_t* index = buckets(table);
   ot_value* data = entries(table);
   *slot = hash(key, 8) & mask;
@@ -100,7 +95,7 @@ static bool lookup(ot_runtime* rt, ot_value table, ot_value key, size_t* slot, s
 
 ot_value oti_table_get(ot_runtime* rt, ot_value table, ot_value key, ot_value fallback) {
   if (!freeze_key(rt, key)) return 0;
-  if (!info(table)->count) return fallback;
+  if (!table_info(table)->count) return fallback;
   size_t slot, entry;
   if (!lookup(rt, table, key, &slot, &entry)) return 0;
   return entry == SIZE_MAX ? fallback : entries(table)[2 * entry + 1];
@@ -108,14 +103,14 @@ ot_value oti_table_get(ot_runtime* rt, ot_value table, ot_value key, ot_value fa
 
 static ot_value new_table(ot_runtime* rt) {
   ot_value table = oti_alloc(rt, K_TABLE, 1, sizeof(oti_table_info));
-  if (table) *info(table) = (oti_table_info){0};
+  if (table) *table_info(table) = (oti_table_info){0};
   return table;
 }
 
 static bool resize(ot_runtime* rt, ot_value* table) {
-  size_t capacity = info(*table)->capacity;
+  size_t capacity = table_info(*table)->capacity;
   if (!capacity) capacity = 8;
-  else if (info(*table)->count > capacity / 2) {
+  else if (table_info(*table)->count > capacity / 2) {
     if (capacity >= (UINT32_MAX / 4 + 1)) return oti_error(rt, "table too large");
     capacity *= 2;
   }
@@ -126,7 +121,7 @@ static bool resize(ot_runtime* rt, ot_value* table) {
   ot_value* data = object_fields(storage);
   uint32_t* index = object_bytes(storage);
   size_t count = 0;
-  for (size_t i = 0; i < info(*table)->used; i++) {
+  for (size_t i = 0; i < table_info(*table)->used; i++) {
     ot_value key = entries(*table)[2 * i], value = entries(*table)[2 * i + 1];
     if (value == OT_NIL) continue;
     size_t slot = hash(key, 8) & (2 * capacity - 1);
@@ -137,25 +132,25 @@ static bool resize(ot_runtime* rt, ot_value* table) {
     count++;
   }
   object_fields(*table)[0] = storage;
-  *info(*table) = (oti_table_info){count, count, capacity};
+  *table_info(*table) = (oti_table_info){count, count, capacity};
   return true;
 }
 
 ot_value oti_table_set(ot_runtime* rt, ot_value table, ot_value key, ot_value value) {
   if (!freeze_key(rt, key)) return 0;
   size_t slot = 0, entry = SIZE_MAX;
-  if (info(table)->capacity && !lookup(rt, table, key, &slot, &entry)) return 0;
+  if (table_info(table)->capacity && !lookup(rt, table, key, &slot, &entry)) return 0;
   if (entry != SIZE_MAX) {
     entries(table)[2 * entry + 1] = value;
     if (value == OT_NIL) {
       entries(table)[2 * entry] = OT_NIL;
       buckets(table)[slot] = UINT32_MAX;
-      info(table)->count--;
+      table_info(table)->count--;
     }
     return table;
   }
   if (value == OT_NIL) return table;
-  if (info(table)->used == info(table)->capacity) {
+  if (table_info(table)->used == table_info(table)->capacity) {
     ot_value live[] = {table, key, value};
     oti_roots root;
     oti_roots_push(&rt->heap, &root, live, 3);
@@ -165,11 +160,11 @@ ot_value oti_table_set(ot_runtime* rt, ot_value table, ot_value key, ot_value va
     table = live[0];
     key = live[1];
     value = live[2];
-    slot = hash(key, 8) & (2 * info(table)->capacity - 1);
-    while (buckets(table)[slot]) slot = (slot + 1) & (2 * info(table)->capacity - 1);
+    slot = hash(key, 8) & (2 * table_info(table)->capacity - 1);
+    while (buckets(table)[slot]) slot = (slot + 1) & (2 * table_info(table)->capacity - 1);
   }
-  entry = info(table)->used++;
-  info(table)->count++;
+  entry = table_info(table)->used++;
+  table_info(table)->count++;
   entries(table)[2 * entry] = key;
   entries(table)[2 * entry + 1] = value;
   buckets(table)[slot] = (uint32_t)entry + 1;
@@ -178,7 +173,7 @@ ot_value oti_table_set(ot_runtime* rt, ot_value table, ot_value key, ot_value va
 
 ot_value oti_table_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   if (id == B_TABLE) {
-    if (count % 2) return fail(rt, "table needs key/value pairs");
+    if (count % 2) return oti_fail(rt, "table needs key/value pairs");
     ot_value table = new_table(rt);
     if (!table) return 0;
     oti_roots root;
@@ -198,12 +193,12 @@ ot_value oti_table_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
                : id == B_PUT_MUT ? SIZE_MAX
                                  : min) ||
       (id == B_PUT_MUT && !(count % 2)))
-    return fail(rt, "wrong number of collection arguments");
+    return oti_fail(rt, "wrong number of collection arguments");
   ot_value table = rt->stack[first];
   if (id == B_TABLE_P) return oti_kind(table, K_TABLE) ? OT_TRUE : OT_FALSE;
-  if (!oti_kind(table, K_TABLE)) return fail(rt, "expected a table");
+  if (!oti_kind(table, K_TABLE)) return oti_fail(rt, "expected a table");
   switch (id) {
-    case B_LENGTH: return ot_int((intptr_t)info(table)->count);
+    case B_LENGTH: return ot_int((intptr_t)table_info(table)->count);
     case B_GET:
       return oti_table_get(rt, table, rt->stack[first + 1],
                           count == 3 ? rt->stack[first + 2] : OT_NIL);
@@ -220,7 +215,7 @@ ot_value oti_table_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
       ot_value copy = new_table(rt);
       if (!copy) return 0;
       table = rt->stack[first];
-      size_t capacity = info(table)->capacity;
+      size_t capacity = table_info(table)->capacity;
       if (!capacity) return copy;
       oti_roots root;
       oti_roots_push(&rt->heap, &root, &copy, 1);
@@ -232,7 +227,7 @@ ot_value oti_table_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
       memcpy(object_fields(storage), entries(table), 2 * capacity * sizeof(ot_value));
       memcpy(object_bytes(storage), buckets(table), 2 * capacity * sizeof(uint32_t));
       object_fields(copy)[0] = storage;
-      *info(copy) = *info(table);
+      *table_info(copy) = *table_info(table);
       return copy;
     }
     case B_KEYS:
@@ -240,7 +235,7 @@ ot_value oti_table_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
       ot_value array = oti_alloc(rt, K_ARRAY, 1, sizeof(oti_array_info));
       if (!array) return 0;
       table = rt->stack[first];
-      size_t length = info(table)->count;
+      size_t length = table_info(table)->count;
       *(oti_array_info*)object_bytes(array) = (oti_array_info){length, length};
       if (!length) return array;
       oti_roots root;
@@ -250,12 +245,12 @@ ot_value oti_table_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
       if (!storage) return 0;
       table = rt->stack[first];
       size_t out = 0;
-      for (size_t i = 0; i < info(table)->used; i++)
+      for (size_t i = 0; i < table_info(table)->used; i++)
         if (entries(table)[2 * i + 1] != OT_NIL)
           object_fields(storage)[out++] = entries(table)[2 * i + (id == B_VALUES)];
       object_fields(array)[0] = storage;
       return array;
     }
   }
-  return fail(rt, "unsupported table operation");
+  return oti_fail(rt, "unsupported table operation");
 }

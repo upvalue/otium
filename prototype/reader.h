@@ -63,5 +63,8 @@ void* oti_reader_allocate(oti_reader* r, size_t size);
 oti_ast* oti_reader_next(oti_reader* r);
 oti_ast* oti_reader_one(oti_reader* r);
 bool oti_ast_symbol(const oti_ast* a, const char* name);
+bool oti_reader_space(unsigned char c);
+/* Whitespace or a character that ends a token. */
+bool oti_reader_delimiter(unsigned char c);
 
 #endif

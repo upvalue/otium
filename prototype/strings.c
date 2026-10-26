@@ -3,16 +3,6 @@
 #include <ctype.h>
 #include <string.h>
 
-static ot_value fail(ot_runtime* rt, const char* message) {
-  oti_error(rt, message);
-  return 0;
-}
-
-static const char* text(ot_value value, size_t* n) {
-  memcpy(n, object_bytes(value), sizeof(*n));
-  return (char*)object_bytes(value) + sizeof(*n);
-}
-
 size_t oti_utf8_encode(uint32_t cp, char bytes[4]) {
   if (cp < 128) {
     bytes[0] = (char)cp;
@@ -30,7 +20,7 @@ size_t oti_utf8_encode(uint32_t cp, char bytes[4]) {
 ot_value oti_string_get(ot_value string, ot_value key, ot_value fallback) {
   if (!ot_is_int(key) || ot_to_int(key) < 0) return fallback;
   size_t n, at = 0, index = (size_t)ot_to_int(key);
-  const char* s = text(string, &n);
+  const char* s = oti_text_bytes(string, &n);
   for (size_t i = 0; at < n; i++) {
     uint32_t cp;
     at = oti_utf8_next(s, n, at, &cp);
@@ -43,7 +33,7 @@ static char* display(ot_runtime* rt, size_t first, size_t count, size_t* length)
   char* bytes = NULL;
   FILE* stream = open_memstream(&bytes, length);
   if (!stream) {
-    fail(rt, "cannot allocate display buffer");
+    oti_fail(rt, "cannot allocate display buffer");
     return NULL;
   }
   for (size_t i = 0; i < count; i++) ot_print(rt, stream, rt->stack[first + i]);
@@ -51,7 +41,7 @@ static char* display(ot_runtime* rt, size_t first, size_t count, size_t* length)
   if (fclose(stream)) ok = false;
   if (!ok) {
     free(bytes);
-    fail(rt, "cannot format value");
+    oti_fail(rt, "cannot format value");
     return NULL;
   }
   return bytes;
@@ -59,7 +49,7 @@ static char* display(ot_runtime* rt, size_t first, size_t count, size_t* length)
 
 static ot_value copied(ot_runtime* rt, const char* bytes, size_t n) {
   char* copy = malloc(n ? n : 1);
-  if (!copy) return fail(rt, "out of host memory");
+  if (!copy) return oti_fail(rt, "out of host memory");
   memcpy(copy, bytes, n);
   ot_value result = oti_text(rt, K_STRING, copy, n);
   free(copy);
@@ -102,9 +92,9 @@ static bool append_buffer(ot_runtime* rt, ot_value* buffer, const char* bytes, s
 
 ot_value oti_string_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   if (id == B_STR || id == B_BUFFER || id == B_BUFFER_PUSH) {
-    if (id == B_BUFFER && count > 1) return fail(rt, "buffer expects at most one argument");
+    if (id == B_BUFFER && count > 1) return oti_fail(rt, "buffer expects at most one argument");
     if (id == B_BUFFER_PUSH && (!count || !oti_kind(rt->stack[first], K_BUFFER)))
-      return fail(rt, "expected buffer");
+      return oti_fail(rt, "expected buffer");
     size_t n;
     char* bytes = display(rt, first + (id == B_BUFFER_PUSH), count - (id == B_BUFFER_PUSH), &n);
     if (!bytes) return 0;
@@ -118,31 +108,31 @@ ot_value oti_string_builtin(ot_runtime* rt, unsigned id, size_t first, size_t co
     return result;
   }
   if (id == B_STRING_LT) {
-    if (count < 2) return fail(rt, "string<? needs at least two strings");
+    if (count < 2) return oti_fail(rt, "string<? needs at least two strings");
     bool result = true;
     for (size_t i = 0; i < count; i++) {
-      if (!oti_kind(rt->stack[first + i], K_STRING)) return fail(rt, "expected string");
+      if (!oti_kind(rt->stack[first + i], K_STRING)) return oti_fail(rt, "expected string");
       if (i) {
         size_t a, b;
-        const char *x = text(rt->stack[first + i - 1], &a), *y = text(rt->stack[first + i], &b);
+        const char *x = oti_text_bytes(rt->stack[first + i - 1], &a), *y = oti_text_bytes(rt->stack[first + i], &b);
         int order = memcmp(x, y, a < b ? a : b);
         result &= order < 0 || (!order && a < b);
       }
     }
     return result ? OT_TRUE : OT_FALSE;
   }
-  if (count != 1) return fail(rt, "wrong number of arguments");
+  if (count != 1) return oti_fail(rt, "wrong number of arguments");
   ot_value value = rt->stack[first];
   if (id == B_BUFFER_STRING) {
-    if (!oti_kind(value, K_BUFFER)) return fail(rt, "expected buffer");
+    if (!oti_kind(value, K_BUFFER)) return oti_fail(rt, "expected buffer");
     size_t n = ((oti_buffer_info*)object_bytes(value))->length;
     return copied(rt, n ? object_bytes(object_fields(value)[0]) : "", n);
   }
   if (id == B_NAME || id == B_SYMBOL) {
     if (!oti_kind(value, K_STRING) && !oti_kind(value, K_SYMBOL) && !oti_kind(value, K_KEYWORD))
-      return fail(rt, "expected string, symbol or keyword");
+      return oti_fail(rt, "expected string, symbol or keyword");
     size_t n;
-    const char* bytes = text(value, &n);
+    const char* bytes = oti_text_bytes(value, &n);
     if (oti_kind(value, K_KEYWORD)) {
       bytes++;
       n--;
@@ -152,16 +142,16 @@ ot_value oti_string_builtin(ot_runtime* rt, unsigned id, size_t first, size_t co
                                       : oti_intern(rt, K_SYMBOL, bytes, n);
   }
   if (id == B_STRING_LIST) {
-    if (!oti_kind(value, K_STRING)) return fail(rt, "expected string");
+    if (!oti_kind(value, K_STRING)) return oti_fail(rt, "expected string");
     ot_value roots[3] = {value, OT_EMPTY, OT_EMPTY};
     oti_roots root;
     oti_roots_push(&rt->heap, &root, roots, 3);
     size_t n;
-    text(value, &n);
+    oti_text_bytes(value, &n);
     for (size_t at = 0; at < n;) {
       size_t ignored;
       uint32_t cp;
-      at = oti_utf8_next(text(roots[0], &ignored), n, at, &cp);
+      at = oti_utf8_next(oti_text_bytes(roots[0], &ignored), n, at, &cp);
       ot_value pair = oti_alloc(rt, K_PAIR, 2, 0);
       if (!pair) {
         roots[1] = 0;
@@ -178,9 +168,9 @@ ot_value oti_string_builtin(ot_runtime* rt, unsigned id, size_t first, size_t co
     return result;
   }
   if (id == B_STRING_NUMBER) {
-    if (!oti_kind(value, K_STRING)) return fail(rt, "expected string");
+    if (!oti_kind(value, K_STRING)) return oti_fail(rt, "expected string");
     size_t n;
-    const char* bytes = text(value, &n);
+    const char* bytes = oti_text_bytes(value, &n);
     while (n && isspace((unsigned char)*bytes)) {
       bytes++;
       n--;
@@ -204,13 +194,13 @@ ot_value oti_string_builtin(ot_runtime* rt, unsigned id, size_t first, size_t co
     return result;
   }
   if (id == B_INTEGER_CHAR) {
-    if (!ot_is_int(value)) return fail(rt, "expected integer code point");
+    if (!ot_is_int(value)) return oti_fail(rt, "expected integer code point");
     intptr_t cp = ot_to_int(value);
     if (cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff))
-      return fail(rt, "invalid character code point");
+      return oti_fail(rt, "invalid character code point");
     return ((ot_value)cp << 8) | TAG_CHAR;
   }
-  if ((value & 255) != TAG_CHAR) return fail(rt, "expected character");
+  if ((value & 255) != TAG_CHAR) return oti_fail(rt, "expected character");
   uint32_t cp = (uint32_t)(value >> 8);
   switch (id) {
     case B_CHAR_INTEGER: return ot_int(cp);
@@ -225,6 +215,6 @@ ot_value oti_string_builtin(ot_runtime* rt, unsigned id, size_t first, size_t co
       return (cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z') ? OT_TRUE : OT_FALSE;
     case B_CHAR_NUMERIC: return cp >= '0' && cp <= '9' ? OT_TRUE : OT_FALSE;
     case B_DIGIT_VALUE: return cp >= '0' && cp <= '9' ? ot_int(cp - '0') : OT_NIL;
-    default: return fail(rt, "unknown string builtin");
+    default: return oti_fail(rt, "unknown string builtin");
   }
 }

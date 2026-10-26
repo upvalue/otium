@@ -517,6 +517,10 @@ void oti_free_function(oti_function* fn);
 char* oti_read_file(ot_runtime* rt, FILE* file, size_t limit, const char* what, size_t* length);
 bool oti_reclaim(ot_runtime* rt);
 bool oti_coded_error(ot_runtime* rt, const char* code, const char* message);
+/* Record an error and return 0, the failure result of a builtin. */
+ot_value oti_fail(ot_runtime* rt, const char* message);
+/* A new pair. car and cdr are rooted across the allocation. */
+ot_value oti_cons(ot_runtime* rt, ot_value car, ot_value cdr);
 bool oti_error(ot_runtime* rt, const char* message);
 bool oti_host_entry(ot_runtime* rt);
 bool oti_grow(ot_runtime* rt, void** data, size_t* capacity, size_t needed, size_t width);
@@ -629,6 +633,19 @@ static inline bool oti_kind(ot_value v, unsigned kind) {
 }
 
 static inline bool oti_truth(ot_value v) { return v != OT_NIL && v != OT_FALSE; }
+
+/* The bytes of a string, symbol or keyword. */
+static inline const char* oti_text_bytes(ot_value v, size_t* length) {
+  memcpy(length, object_bytes(v), sizeof(*length));
+  return (const char*)object_bytes(v) + sizeof(*length);
+}
+
+/* A non-negative integer argument as a size. */
+static inline bool oti_natural(ot_value v, size_t* n) {
+  if (!ot_is_int(v) || ot_to_int(v) < 0) return false;
+  *n = (size_t)ot_to_int(v);
+  return true;
+}
 
 size_t oti_bytes_length(ot_value v);
 unsigned char* oti_bytes_data(ot_value v);

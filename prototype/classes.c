@@ -9,11 +9,6 @@ static oti_method_info* method_info(ot_value method) { return object_bytes(metho
 
 static ot_value cons(ot_runtime* rt, ot_value a, ot_value b);
 
-static ot_value fail(ot_runtime* rt, const char* message) {
-  oti_error(rt, message);
-  return 0;
-}
-
 static size_t arity(ot_value generic) {
   size_t n;
   memcpy(&n, object_bytes(generic), sizeof(n));
@@ -229,7 +224,7 @@ ot_value oti_class_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
                   : id == B_CLASS_SUBTYPE || id == B_REMOVE_METHOD ? 2
                                                                    : 1;
   if (count != needed && !(id == B_REMOVE_METHOD && count == 3))
-    return fail(rt, "wrong number of class arguments");
+    return oti_fail(rt, "wrong number of class arguments");
   if (!oti_classes_init(rt)) return 0;
   ot_value v = rt->stack[first];
   if (id == B_CLASS_P) return oti_kind(v, K_CLASS) ? OT_TRUE : OT_FALSE;
@@ -237,13 +232,13 @@ ot_value oti_class_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
   if (id == B_DISPATCH_TYPE) return oti_dispatch_type(rt, v);
   if (id == B_CLASS_SUBTYPE) {
     if (!oti_kind(v, K_CLASS) || !oti_kind(rt->stack[first + 1], K_CLASS))
-      return fail(rt, "expected class descriptors");
+      return oti_fail(rt, "expected class descriptors");
     return oti_subtype(v, rt->stack[first + 1]) ? OT_TRUE : OT_FALSE;
   }
   if (id == B_GENERIC_DEFINE) {
     ot_value n = rt->stack[first + 1];
     if (!oti_kind(v, K_SYMBOL) || !ot_is_int(n) || ot_to_int(n) < 0)
-      return fail(rt, "invalid generic declaration");
+      return oti_fail(rt, "invalid generic declaration");
     size_t length;
     memcpy(&length, object_bytes(v), sizeof(length));
     uint32_t global = oti_global(rt, (const char*)object_bytes(v) + sizeof(length), length);
@@ -252,7 +247,7 @@ ot_value oti_class_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
     size_t wanted = (size_t)ot_to_int(n);
     if (existing != V_UNBOUND && rt->stack[first + 2] != OT_TRUE) {
       if (!oti_kind(existing, K_GENERIC) || arity(existing) != wanted)
-        return fail(rt, "incompatible generic redeclaration");
+        return oti_fail(rt, "incompatible generic redeclaration");
       return existing;
     }
     ot_value generic = oti_alloc(rt, K_GENERIC, 2, sizeof(size_t));
@@ -264,7 +259,7 @@ ot_value oti_class_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
     rt->global_defined[global] = 1;
     return generic;
   }
-  if (!oti_kind(v, K_GENERIC)) return fail(rt, "expected generic function");
+  if (!oti_kind(v, K_GENERIC)) return oti_fail(rt, "expected generic function");
   ot_value slots[] = {v, OT_NIL, OT_NIL, OT_NIL, OT_EMPTY};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, slots, 5);
@@ -274,12 +269,12 @@ ot_value oti_class_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
     size_t n = 0;
     for (ot_value p = sig; oti_kind(p, K_PAIR); p = object_fields(p)[1]) {
       if (++n > arity(slots[0])) {
-        fail(rt, "method signature arity");
+        oti_fail(rt, "method signature arity");
         goto done;
       }
       ot_value type = object_fields(p)[0];
       if (type != OT_FALSE && !oti_kind(type, K_CLASS)) {
-        fail(rt, "method specializer must be a class");
+        oti_fail(rt, "method specializer must be a class");
         goto done;
       }
     }
@@ -287,7 +282,7 @@ ot_value oti_class_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
     for (size_t i = 0; i < n; i++) end = object_fields(end)[1];
     if (end != OT_EMPTY || n != arity(slots[0]) ||
         (id == B_GENERIC_METHOD && !oti_kind(rt->stack[first + 2], K_CLOSURE))) {
-      fail(rt, "invalid method signature or body");
+      oti_fail(rt, "invalid method signature or body");
       goto done;
     }
     slots[1] = copy_signature(rt, sig);
@@ -299,7 +294,7 @@ ot_value oti_class_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
         around = true;
       else if (!oti_kind(qualifier, K_SYMBOL) ||
                strcmp((char*)oti_bytes_data(qualifier), "primary")) {
-        fail(rt, "invalid method qualifier");
+        oti_fail(rt, "invalid method qualifier");
         goto done;
       }
     } else if (id == B_GENERIC_METHOD) around = rt->stack[first + 3] == OT_TRUE;
@@ -360,7 +355,7 @@ ot_value oti_class_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
       slots[1] = object_fields(slots[1])[1];
     }
     result = slots[4];
-  } else fail(rt, "unknown class operation");
+  } else oti_fail(rt, "unknown class operation");
 done:
   oti_roots_pop(&rt->heap, &roots);
   return result;

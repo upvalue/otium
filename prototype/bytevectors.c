@@ -10,23 +10,12 @@ size_t oti_bytes_length(ot_value v) {
 
 unsigned char* oti_bytes_data(ot_value v) { return (unsigned char*)object_bytes(v) + sizeof(size_t); }
 
-static ot_value fail(ot_runtime* rt, const char* s) {
-  oti_error(rt, s);
-  return 0;
-}
-
-static bool natural(ot_value v, size_t* n) {
-  if (!ot_is_int(v) || ot_to_int(v) < 0) return false;
-  *n = (size_t)ot_to_int(v);
-  return true;
-}
-
 static bool byte(ot_value v) {
   return ot_is_int(v) && ot_to_int(v) >= 0 && ot_to_int(v) <= 255;
 }
 
 ot_value oti_bytes_new(ot_runtime* rt, size_t n) {
-  if (n > UINT32_MAX - sizeof(size_t) - 32) return fail(rt, "bytevector too large");
+  if (n > UINT32_MAX - sizeof(size_t) - 32) return oti_fail(rt, "bytevector too large");
   ot_value v = oti_alloc(rt, K_BYTEVECTOR, 0, sizeof(size_t) + n);
   if (v) memcpy(object_bytes(v), &n, sizeof(n));
   return v;
@@ -35,8 +24,8 @@ ot_value oti_bytes_new(ot_runtime* rt, size_t n) {
 static bool slice(ot_runtime* rt, size_t first, size_t count, size_t n, size_t* start, size_t* end) {
   *start = 0;
   *end = n;
-  if ((count && !natural(rt->stack[first], start)) ||
-      (count > 1 && !natural(rt->stack[first + 1], end)) || *start > *end || *end > n)
+  if ((count && !oti_natural(rt->stack[first], start)) ||
+      (count > 1 && !oti_natural(rt->stack[first + 1], end)) || *start > *end || *end > n)
     return oti_error(rt, "invalid bytevector or string range");
   return true;
 }
@@ -78,27 +67,27 @@ ot_value oti_bytes_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
       max = 5;
       break;
   }
-  if (count < min || count > max) return fail(rt, "wrong number of bytevector arguments");
+  if (count < min || count > max) return oti_fail(rt, "wrong number of bytevector arguments");
   ot_value a = count ? rt->stack[first] : OT_NIL;
   if (id == B_BYTES_P) return oti_kind(a, K_BYTEVECTOR) ? OT_TRUE : OT_FALSE;
   if (id == B_BYTES || id == B_MAKE_BYTES || id == B_BYTES_APPEND) {
     size_t n = 0;
     unsigned fill = 0;
     if (id == B_MAKE_BYTES) {
-      if (!natural(a, &n) || (count == 2 && !byte(rt->stack[first + 1])))
-        return fail(rt, "invalid bytevector length or fill");
+      if (!oti_natural(a, &n) || (count == 2 && !byte(rt->stack[first + 1])))
+        return oti_fail(rt, "invalid bytevector length or fill");
       if (count == 2) fill = (unsigned)ot_to_int(rt->stack[first + 1]);
     } else
       for (size_t i = 0; i < count; i++) {
         ot_value v = rt->stack[first + i];
         size_t add = 1;
         if (id == B_BYTES) {
-          if (!byte(v)) return fail(rt, "expected byte");
+          if (!byte(v)) return oti_fail(rt, "expected byte");
         } else {
-          if (!oti_kind(v, K_BYTEVECTOR)) return fail(rt, "expected bytevector");
+          if (!oti_kind(v, K_BYTEVECTOR)) return oti_fail(rt, "expected bytevector");
           add = oti_bytes_length(v);
         }
-        if (add > SIZE_MAX - n) return fail(rt, "bytevector too large");
+        if (add > SIZE_MAX - n) return oti_fail(rt, "bytevector too large");
         n += add;
       }
     ot_value result = oti_bytes_new(rt, n);
@@ -118,7 +107,7 @@ ot_value oti_bytes_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
     return result;
   }
   if (id == B_STRING_UTF8) {
-    if (!oti_kind(a, K_STRING)) return fail(rt, "expected string");
+    if (!oti_kind(a, K_STRING)) return oti_fail(rt, "expected string");
     size_t n = oti_bytes_length(a), chars = 0;
     const unsigned char* s = oti_bytes_data(a);
     for (size_t p = 0; p < n; chars++) {
@@ -136,26 +125,26 @@ ot_value oti_bytes_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
     if (result) memcpy(oti_bytes_data(result), oti_bytes_data(rt->stack[first]) + lo, hi - lo);
     return result;
   }
-  if (!oti_kind(a, K_BYTEVECTOR)) return fail(rt, "expected bytevector");
+  if (!oti_kind(a, K_BYTEVECTOR)) return oti_fail(rt, "expected bytevector");
   size_t n = oti_bytes_length(a);
   if (id == B_BYTES_LENGTH) return ot_int((intptr_t)n);
   if (id == B_BYTES_REF || id == B_BYTES_SET) {
     size_t index;
-    if (!natural(rt->stack[first + 1], &index) || index >= n)
-      return fail(rt, "bytevector index out of bounds");
+    if (!oti_natural(rt->stack[first + 1], &index) || index >= n)
+      return oti_fail(rt, "bytevector index out of bounds");
     if (id == B_BYTES_REF) return ot_int(oti_bytes_data(a)[index]);
-    if (!byte(rt->stack[first + 2])) return fail(rt, "expected byte");
+    if (!byte(rt->stack[first + 2])) return oti_fail(rt, "expected byte");
     oti_bytes_data(a)[index] = (unsigned char)ot_to_int(rt->stack[first + 2]);
     return OT_NIL;
   }
   if (id == B_BYTES_COPY_MUT) {
     ot_value from = rt->stack[first + 2];
     size_t at, start, end;
-    if (!oti_kind(from, K_BYTEVECTOR)) return fail(rt, "expected source bytevector");
-    if (!natural(rt->stack[first + 1], &at) || at > n)
-      return fail(rt, "bytevector destination out of bounds");
+    if (!oti_kind(from, K_BYTEVECTOR)) return oti_fail(rt, "expected source bytevector");
+    if (!oti_natural(rt->stack[first + 1], &at) || at > n)
+      return oti_fail(rt, "bytevector destination out of bounds");
     if (!slice(rt, first + 3, count - 3, oti_bytes_length(from), &start, &end)) return 0;
-    if (end - start > n - at) return fail(rt, "bytevector destination too short");
+    if (end - start > n - at) return oti_fail(rt, "bytevector destination too short");
     memmove(oti_bytes_data(a) + at, oti_bytes_data(from) + start, end - start);
     return OT_NIL;
   }
@@ -168,7 +157,7 @@ ot_value oti_bytes_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
       p = next;
     }
     char* copy = malloc(end - start + 1);
-    if (!copy) return fail(rt, "out of host memory");
+    if (!copy) return oti_fail(rt, "out of host memory");
     memcpy(copy, oti_bytes_data(a) + start, end - start);
     ot_value result = oti_text(rt, K_STRING, copy, end - start);
     free(copy);

@@ -16,21 +16,21 @@ typedef struct {
   intptr_t handle;
 } oti_port;
 
-static oti_port* info(ot_value p) { return object_bytes(p); }
+static oti_port* port_info(ot_value p) { return object_bytes(p); }
 
 void oti_port_repr(FILE* out, ot_value p) {
-  if (info(p)->kind == 3 || info(p)->kind == 4) {
+  if (port_info(p)->kind == 3 || port_info(p)->kind == 4) {
     fputs("#<port ", out);
     ot_write(NULL, out, object_fields(p)[4]);
-    fprintf(out, " %s>", info(p)->input ? "input" : "output");
+    fprintf(out, " %s>", port_info(p)->input ? "input" : "output");
     return;
   }
-  const char* name = info(p)->kind == 0     ? "\"string\""
-                     : info(p)->kind == 1   ? "\"bytevector\""
-                     : info(p)->handle == 0 ? "stdin"
-                     : info(p)->handle == 1 ? "stdout"
+  const char* name = port_info(p)->kind == 0     ? "\"string\""
+                     : port_info(p)->kind == 1   ? "\"bytevector\""
+                     : port_info(p)->handle == 0 ? "stdin"
+                     : port_info(p)->handle == 1 ? "stdout"
                                             : "stderr";
-  fprintf(out, "#<port %s %s>", name, info(p)->input ? "input" : "output");
+  fprintf(out, "#<port %s %s>", name, port_info(p)->input ? "input" : "output");
 }
 
 static int posix_open(void* userdata, const char* path, unsigned flags, intptr_t* handle) {
@@ -82,32 +82,21 @@ bool ot_set_io_host(ot_runtime* rt, const ot_io_host* host, void* userdata) {
 }
 
 static void port_host(ot_runtime* rt, ot_value port) {
-  info(port)->host = rt->io_host_set ? rt->io_host : posix_host;
-  info(port)->userdata = rt->io_host_set ? rt->io_userdata : NULL;
+  port_info(port)->host = rt->io_host_set ? rt->io_host : posix_host;
+  port_info(port)->userdata = rt->io_host_set ? rt->io_userdata : NULL;
 }
 
 static void host_begin(ot_runtime* rt, ot_value port) {
   rt->host_io_active = true;
-  info(port)->busy = true;
+  port_info(port)->busy = true;
 }
 
 static bool host_end(ot_runtime* rt, ot_value port) {
   rt->host_io_active = false;
-  info(port)->busy = false;
+  port_info(port)->busy = false;
   if (!rt->host_io_reentry) return true;
   rt->host_io_reentry = false;
   return oti_error(rt, "host I/O callback cannot reenter Otium");
-}
-
-static ot_value fail(ot_runtime* rt, const char* message) {
-  oti_error(rt, message);
-  return 0;
-}
-
-static bool natural(ot_value v, size_t* n) {
-  if (!ot_is_int(v) || ot_to_int(v) < 0) return false;
-  *n = (size_t)ot_to_int(v);
-  return true;
 }
 
 static bool register_port(ot_runtime* rt, ot_value p) {
@@ -142,7 +131,7 @@ static ot_value callback(ot_runtime* rt, ot_value* port, size_t field, bool byte
                       size_t end) {
   ot_value function = object_fields(*port)[field];
   if (function == OT_NIL) return OT_NIL;
-  if (info(*port)->busy) return fail(rt, "port callback reentry");
+  if (port_info(*port)->busy) return oti_fail(rt, "port callback reentry");
   ot_value v[] = {function, OT_EMPTY, object_fields(*port)[0], ot_int((intptr_t)start),
                ot_int((intptr_t)end)};
   oti_roots roots;
@@ -161,9 +150,9 @@ static ot_value callback(ot_runtime* rt, ot_value* port, size_t field, bool byte
     }
   ot_value result = 0;
   if (ok) {
-    info(*port)->busy = true;
+    port_info(*port)->busy = true;
     result = oti_call_list(rt, v[0], v[1]);
-    info(*port)->busy = false;
+    port_info(*port)->busy = false;
   }
   oti_roots_pop(&rt->heap, &roots);
   return result;
@@ -171,14 +160,14 @@ static ot_value callback(ot_runtime* rt, ot_value* port, size_t field, bool byte
 
 static void host_error(ot_runtime* rt, ot_value* port, const char* op, int error) {
   if (!ot_poll_interrupt(rt)) return;
-  if (info(*port)->kind == 4) oti_file_error(rt, op, object_fields(*port)[4], error ? error : EIO);
+  if (port_info(*port)->kind == 4) oti_file_error(rt, op, object_fields(*port)[4], error ? error : EIO);
   else oti_io_error(rt, ":other");
 }
 
 static long transfer(ot_runtime* rt, ot_value* port, bool writing, size_t start, size_t length) {
   for (;;) {
     if (!ot_poll_interrupt(rt)) return -1;
-    oti_port* p = info(*port);
+    oti_port* p = port_info(*port);
     unsigned char* bytes = oti_bytes_data(object_fields(*port)[0]) + start;
     host_begin(rt, *port);
     long n = writing ? p->host.write(p->userdata, p->handle, bytes, length)
@@ -201,25 +190,25 @@ static long transfer(ot_runtime* rt, ot_value* port, bool writing, size_t start,
 }
 
 static bool flush(ot_runtime* rt, ot_value* port) {
-  if (info(*port)->kind < 2) return true;
-  while (info(*port)->offset < info(*port)->length) {
-    size_t left = info(*port)->length - info(*port)->offset;
+  if (port_info(*port)->kind < 2) return true;
+  while (port_info(*port)->offset < port_info(*port)->length) {
+    size_t left = port_info(*port)->length - port_info(*port)->offset;
     size_t written;
-    if (info(*port)->kind == 3) {
-      ot_value n = callback(rt, port, 1, true, info(*port)->offset, info(*port)->length);
+    if (port_info(*port)->kind == 3) {
+      ot_value n = callback(rt, port, 1, true, port_info(*port)->offset, port_info(*port)->length);
       if (!n) return false;
-      if (!natural(n, &written) || !written || written > left)
+      if (!oti_natural(n, &written) || !written || written > left)
         return oti_error(rt, "invalid custom port write count");
     } else {
-      long n = transfer(rt, port, true, info(*port)->offset, left);
+      long n = transfer(rt, port, true, port_info(*port)->offset, left);
       if (n < 0) return false;
       written = (size_t)n;
     }
-    info(*port)->offset += written;
+    port_info(*port)->offset += written;
   }
-  info(*port)->offset = info(*port)->length = 0;
-  if (info(*port)->kind == 3) return callback(rt, port, 2, false, 0, 0) != 0;
-  oti_port* p = info(*port);
+  port_info(*port)->offset = port_info(*port)->length = 0;
+  if (port_info(*port)->kind == 3) return callback(rt, port, 2, false, 0, 0) != 0;
+  oti_port* p = port_info(*port);
   if (p->host.flush) {
     host_begin(rt, *port);
     int error = p->host.flush(p->userdata, p->handle);
@@ -234,7 +223,7 @@ static bool flush(ot_runtime* rt, ot_value* port) {
 
 static ot_value make_custom(ot_runtime* rt, ot_value* port, size_t first, size_t count, bool input) {
   if (count != 2 || !oti_kind(rt->stack[first], K_STRING) || !oti_kind(rt->stack[first + 1], K_TABLE))
-    return fail(rt, "custom port needs a name and callback table");
+    return oti_fail(rt, "custom port needs a name and callback table");
   ot_value callbacks[] = {OT_NIL, OT_NIL, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, callbacks, 3);
@@ -252,7 +241,7 @@ static ot_value make_custom(ot_runtime* rt, ot_value* port, size_t first, size_t
       break;
     }
     if ((!i || callbacks[i] != OT_NIL) && !callable(callbacks[i])) {
-      fail(rt, "invalid custom port callback");
+      oti_fail(rt, "invalid custom port callback");
       ok = false;
       break;
     }
@@ -261,9 +250,9 @@ static ot_value make_custom(ot_runtime* rt, ot_value* port, size_t first, size_t
     *port = oti_alloc(rt, K_PORT, 5, sizeof(oti_port));
     ok = *port != 0;
     if (ok) {
-      info(*port)->input = input;
-      info(*port)->kind = 3;
-      info(*port)->capacity = 4096;
+      port_info(*port)->input = input;
+      port_info(*port)->kind = 3;
+      port_info(*port)->capacity = 4096;
       for (size_t i = 0; i < 3; i++) object_fields(*port)[i + 1] = callbacks[i];
       object_fields(*port)[4] = rt->stack[first];
       ot_value buffer = oti_bytes_new(rt, 4096);
@@ -281,7 +270,7 @@ static ot_value make_custom(ot_runtime* rt, ot_value* port, size_t first, size_t
 static ot_value open_file(ot_runtime* rt, ot_value* port, size_t first, size_t count, bool input) {
   if (count < 1 || count > 2 || !oti_kind(rt->stack[first], K_STRING) ||
       (count == 2 && !oti_kind(rt->stack[first + 1], K_TABLE)))
-    return fail(rt, "file port needs a path and optional options table");
+    return oti_fail(rt, "file port needs a path and optional options table");
   size_t size = 4096;
   unsigned flags =
       input ? OT_IO_READ : OT_IO_WRITE | OT_IO_CREATE | OT_IO_TRUNCATE;
@@ -290,38 +279,38 @@ static ot_value open_file(ot_runtime* rt, ot_value* port, size_t first, size_t c
     if (!key) return 0;
     ot_value option = oti_table_get(rt, rt->stack[first + 1], key, OT_NIL);
     if (!option) return 0;
-    if (option != OT_NIL && (!natural(option, &size) || !size))
-      return fail(rt, "invalid port buffer size");
+    if (option != OT_NIL && (!oti_natural(option, &size) || !size))
+      return oti_fail(rt, "invalid port buffer size");
     if (!input) {
       key = oti_intern(rt, K_KEYWORD, ":if-exists", 10);
       if (!key) return 0;
       option = oti_table_get(rt, rt->stack[first + 1], key, OT_NIL);
       if (!option) return 0;
       if (option != OT_NIL) {
-        if (!oti_kind(option, K_KEYWORD)) return fail(rt, "invalid if-exists option");
+        if (!oti_kind(option, K_KEYWORD)) return oti_fail(rt, "invalid if-exists option");
         const char* name = (char*)oti_bytes_data(option);
         if (!strcmp(name, ":append")) {
           flags = OT_IO_WRITE | OT_IO_CREATE | OT_IO_APPEND;
         } else if (!strcmp(name, ":error"))
           flags = OT_IO_WRITE | OT_IO_CREATE | OT_IO_EXCLUSIVE;
-        else if (strcmp(name, ":truncate")) return fail(rt, "invalid if-exists option");
+        else if (strcmp(name, ":truncate")) return oti_fail(rt, "invalid if-exists option");
       }
     }
   }
   if (size < 4) size = 4;
   size_t length = oti_bytes_length(rt->stack[first]);
-  if (memchr(oti_bytes_data(rt->stack[first]), 0, length)) return fail(rt, "file path contains NUL");
+  if (memchr(oti_bytes_data(rt->stack[first]), 0, length)) return oti_fail(rt, "file path contains NUL");
   *port = oti_alloc(rt, K_PORT, 5, sizeof(oti_port));
   if (!*port) return 0;
   object_fields(*port)[4] = rt->stack[first];
   ot_value buffer = oti_bytes_new(rt, size);
   if (!buffer) return 0;
   object_fields(*port)[0] = buffer;
-  info(*port)->kind = 4;
-  info(*port)->input = input;
-  info(*port)->capacity = size;
+  port_info(*port)->kind = 4;
+  port_info(*port)->input = input;
+  port_info(*port)->capacity = size;
   port_host(rt, *port);
-  oti_port* p = info(*port);
+  oti_port* p = port_info(*port);
   host_begin(rt, *port);
   int error =
       p->host.open(p->userdata, (char*)oti_bytes_data(object_fields(*port)[4]), flags, &p->handle);
@@ -335,7 +324,7 @@ static ot_value open_file(ot_runtime* rt, ot_value* port, size_t first, size_t c
     host_begin(rt, *port);
     p->host.close(p->userdata, p->handle);
     host_end(rt, *port);
-    info(*port)->closed = true;
+    port_info(*port)->closed = true;
     return 0;
   }
   return *port;
@@ -346,7 +335,7 @@ static ot_value open_file(ot_runtime* rt, ot_value* port, size_t first, size_t c
 void oti_ports_destroy(ot_runtime* rt) {
   for (size_t i = 0; i < rt->open_port_count; i++) {
     ot_value port = rt->open_ports[i];
-    oti_port* p = info(port);
+    oti_port* p = port_info(port);
     if ((p->kind != 2 && p->kind != 4) || p->closed) continue;
     host_begin(rt, port);
     if (!p->input) {
@@ -371,10 +360,10 @@ static ot_value standard(ot_runtime* rt, unsigned which) {
     if (!p) return 0;
     oti_roots roots;
     oti_roots_push(&rt->heap, &roots, &p, 1);
-    info(p)->kind = 2;
-    info(p)->input = which == 0;
-    info(p)->handle = (intptr_t)which;
-    info(p)->capacity = 4096;
+    port_info(p)->kind = 2;
+    port_info(p)->input = which == 0;
+    port_info(p)->handle = (intptr_t)which;
+    port_info(p)->capacity = 4096;
     port_host(rt, p);
     ot_value buffer = oti_bytes_new(rt, 4096);
     bool ok = buffer != 0;
@@ -396,17 +385,17 @@ static ot_value current_port(ot_runtime* rt, unsigned which) {
   uint32_t index = oti_binding_global(rt, 0, name, strlen(name), false);
   if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND) return standard(rt, which);
   ot_value p = rt->globals[index];
-  if (!oti_kind(p, K_PARAM)) return fail(rt, "current port binding must be a param");
+  if (!oti_kind(p, K_PARAM)) return oti_fail(rt, "current port binding must be a param");
   return oti_param_call(rt, p, 0);
 }
 
-static ot_value current(ot_runtime* rt, bool input) { return current_port(rt, input ? 0 : 1); }
+static ot_value current_standard_port(ot_runtime* rt, bool input) { return current_port(rt, input ? 0 : 1); }
 
 static bool check(ot_runtime* rt, ot_value p, bool input) {
-  if (!oti_kind(p, K_PORT) || info(p)->input != input)
+  if (!oti_kind(p, K_PORT) || port_info(p)->input != input)
     return oti_error(rt, input ? "expected input port" : "expected output port");
-  if (info(p)->busy) return oti_error(rt, "port callback reentry");
-  if (info(p)->closed) {
+  if (port_info(p)->busy) return oti_error(rt, "port callback reentry");
+  if (port_info(p)->closed) {
     oti_io_error(rt, ":closed");
     return false;
   }
@@ -414,13 +403,13 @@ static bool check(ot_runtime* rt, ot_value p, bool input) {
 }
 
 static int peek(ot_runtime* rt, ot_value* port, size_t ahead) {
-  oti_port* s = info(*port);
+  oti_port* s = port_info(*port);
   if (s->kind < 2)
     return ahead < s->length - s->position
                ? oti_bytes_data(object_fields(*port)[0])[s->position + ahead]
                : -1;
-  while (info(*port)->length - info(*port)->offset <= ahead) {
-    s = info(*port);
+  while (port_info(*port)->length - port_info(*port)->offset <= ahead) {
+    s = port_info(*port);
     if (s->eof) return -1;
     size_t remaining = s->length - s->offset;
     unsigned char* data = oti_bytes_data(object_fields(*port)[0]);
@@ -432,34 +421,34 @@ static int peek(ot_runtime* rt, ot_value* port, size_t ahead) {
       ot_value result = callback(rt, port, 1, true, remaining, s->capacity);
       if (!result) return -2;
       if (result == OT_EOF) {
-        info(*port)->eof = true;
+        port_info(*port)->eof = true;
         return -1;
       }
-      if (!natural(result, &n) || !n || n > available) {
-        fail(rt, "invalid custom port read count");
+      if (!oti_natural(result, &n) || !n || n > available) {
+        oti_fail(rt, "invalid custom port read count");
         return -2;
       }
     } else {
       long result = transfer(rt, port, false, remaining, available);
       if (result < 0) return -2;
       if (!result) {
-        info(*port)->eof = true;
+        port_info(*port)->eof = true;
         return -1;
       }
       n = (size_t)result;
     }
-    info(*port)->length += n;
+    port_info(*port)->length += n;
   }
-  return oti_bytes_data(object_fields(*port)[0])[info(*port)->offset + ahead];
+  return oti_bytes_data(object_fields(*port)[0])[port_info(*port)->offset + ahead];
 }
 
 static void consume(ot_value p, size_t n) {
-  oti_port* s = info(p);
+  oti_port* s = port_info(p);
   s->position += n;
   if (s->kind >= 2) s->offset += n;
 }
 
-static int character(ot_runtime* rt, ot_value* port, uint32_t* cp, size_t* width) {
+static int port_character(ot_runtime* rt, ot_value* port, uint32_t* cp, size_t* width) {
   int first = peek(rt, port, 0);
   if (first < 0) return first;
   unsigned char bytes[4];
@@ -477,7 +466,7 @@ static int character(ot_runtime* rt, ot_value* port, uint32_t* cp, size_t* width
     else bytes[i] = (unsigned char)b;
   }
   if (!valid || !oti_utf8_scalar(bytes, 0, *width)) {
-    oti_decode_error(rt, info((*port))->position);
+    oti_decode_error(rt, port_info((*port))->position);
     return -2;
   }
   oti_utf8_next((char*)bytes, *width, 0, cp);
@@ -507,7 +496,7 @@ static ot_value read_datum(ot_runtime* rt, ot_value* port) {
     }
     uint32_t cp;
     size_t width;
-    int state = character(rt, port, &cp, &width);
+    int state = port_character(rt, port, &cp, &width);
     if (state == -2) {
       free(source);
       return 0;
@@ -568,7 +557,7 @@ static ot_value read_datum(ot_runtime* rt, ot_value* port) {
     }
     if (depth > 512 || length > 16 * 1024 * 1024 - width) {
       free(source);
-      return fail(rt, "port datum exceeds reader limit");
+      return oti_fail(rt, "port datum exceeds reader limit");
     }
     if (!oti_grow(rt, (void**)&source, &capacity, length + width, 1)) {
       free(source);
@@ -587,23 +576,23 @@ static ot_value read_datum(ot_runtime* rt, ot_value* port) {
 
 static bool append(ot_runtime* rt, ot_value* port, const char* bytes, size_t n) {
   if (!check(rt, (*port), false)) return false;
-  if (info(*port)->kind >= 2) {
+  if (port_info(*port)->kind >= 2) {
     while (n) {
-      if (info(*port)->length == info(*port)->capacity && !flush(rt, port)) return false;
-      size_t room = info(*port)->capacity - info(*port)->length;
+      if (port_info(*port)->length == port_info(*port)->capacity && !flush(rt, port)) return false;
+      size_t room = port_info(*port)->capacity - port_info(*port)->length;
       size_t take = n < room ? n : room;
-      memcpy(oti_bytes_data(object_fields(*port)[0]) + info(*port)->length, bytes, take);
-      info(*port)->length += take;
+      memcpy(oti_bytes_data(object_fields(*port)[0]) + port_info(*port)->length, bytes, take);
+      port_info(*port)->length += take;
       bytes += take;
       n -= take;
-      if (info(*port)->length == info(*port)->capacity && !flush(rt, port)) return false;
+      if (port_info(*port)->length == port_info(*port)->capacity && !flush(rt, port)) return false;
     }
-    return info(*port)->kind != 2 || flush(rt, port);
+    return port_info(*port)->kind != 2 || flush(rt, port);
   }
-  size_t length = info((*port))->length;
+  size_t length = port_info((*port))->length;
   if (n > SIZE_MAX - length) return oti_error(rt, "port output too large");
-  if (length + n > info((*port))->capacity) {
-    size_t capacity = info((*port))->capacity;
+  if (length + n > port_info((*port))->capacity) {
+    size_t capacity = port_info((*port))->capacity;
     if (capacity > SIZE_MAX / 2) capacity = length + n;
     else capacity *= 2;
     if (capacity < 64) capacity = 64;
@@ -612,34 +601,34 @@ static bool append(ot_runtime* rt, ot_value* port, const char* bytes, size_t n) 
     if (data) {
       if (length) memcpy(object_bytes(data), object_bytes(object_fields((*port))[0]), length);
       object_fields((*port))[0] = data;
-      info((*port))->capacity = capacity;
+      port_info((*port))->capacity = capacity;
     }
     if (!data) return false;
   }
   if (n) memcpy((char*)object_bytes(object_fields((*port))[0]) + length, bytes, n);
-  info((*port))->length += n;
+  port_info((*port))->length += n;
   return true;
 }
 
 ot_value oti_port_print(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   ot_value p;
   if (id == B_PROCESS_WRITE_ERROR) {
-    if (count != 1) return fail(rt, "write-error needs one argument");
+    if (count != 1) return oti_fail(rt, "write-error needs one argument");
     p = current_port(rt, 2);
   } else if (id == B_DISPLAY_TO || id == B_WRITE_TO) {
-    if (!count) return fail(rt, "output needs a port");
+    if (!count) return oti_fail(rt, "output needs a port");
     p = rt->stack[first++];
     count--;
   } else if (id == B_NEWLINE) {
-    if (count > 1) return fail(rt, "newline takes an optional port");
-    p = count ? rt->stack[first] : current(rt, false);
+    if (count > 1) return oti_fail(rt, "newline takes an optional port");
+    p = count ? rt->stack[first] : current_standard_port(rt, false);
     count = 0;
-  } else p = current(rt, false);
+  } else p = current_standard_port(rt, false);
   if (!p || !check(rt, p, false)) return 0;
   char* bytes = NULL;
   size_t length = 0;
   FILE* stream = open_memstream(&bytes, &length);
-  if (!stream) return fail(rt, "out of host memory");
+  if (!stream) return oti_fail(rt, "out of host memory");
   for (size_t i = 0; i < count; i++) {
     if (i) fputc(' ', stream);
     if (id == B_WRITE || id == B_WRITE_TO) ot_write(rt, stream, rt->stack[first + i]);
@@ -660,8 +649,8 @@ ot_value oti_port_print(ot_runtime* rt, unsigned id, size_t first, size_t count)
 static bool range(ot_runtime* rt, size_t first, size_t count, size_t n, size_t* start, size_t* end) {
   *start = 0;
   *end = n;
-  if ((count && !natural(rt->stack[first], start)) ||
-      (count > 1 && !natural(rt->stack[first + 1], end)) || *start > *end || *end > n)
+  if ((count && !oti_natural(rt->stack[first], start)) ||
+      (count > 1 && !oti_natural(rt->stack[first + 1], end)) || *start > *end || *end > n)
     return oti_error(rt, "invalid port slice");
   return true;
 }
@@ -673,10 +662,10 @@ static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
   if (id == B_MAKE_INPUT_PORT || id == B_MAKE_OUTPUT_PORT)
     return make_custom(rt, &live[0], first, count, id == B_MAKE_INPUT_PORT);
   if (id == B_OPEN_PORTS) {
-    if (count) return fail(rt, "open-ports takes no arguments");
+    if (count) return oti_fail(rt, "open-ports takes no arguments");
     size_t base = rt->sp, n = rt->open_port_count;
     if (n > rt->stack_limit - base || !oti_stack(rt, base + n))
-      return fail(rt, "VM stack limit exceeded");
+      return oti_fail(rt, "VM stack limit exceeded");
     if (n) memcpy(rt->stack + base, rt->open_ports, n * sizeof(ot_value));
     rt->sp = rt->stack_roots.count = base + n;
     ot_value result = oti_collection_builtin(rt, B_ARRAY, base, n);
@@ -685,34 +674,34 @@ static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
   }
   if (id == B_DISPLAY_TO || id == B_WRITE_TO) return oti_port_print(rt, id, first, count);
   if (id >= B_STDIN) {
-    if (count) return fail(rt, "standard port takes no arguments");
+    if (count) return oti_fail(rt, "standard port takes no arguments");
     return standard(rt, id - B_STDIN);
   }
   if (id <= B_OUTPUT_OPEN) {
-    if (count != 1) return fail(rt, "port predicate takes one argument");
+    if (count != 1) return oti_fail(rt, "port predicate takes one argument");
     live[0] = rt->stack[first];
     bool yes = oti_kind(live[0], K_PORT);
     if (yes && id != B_PORT_P)
-      yes = info(live[0])->input == (id == B_INPUT_P || id == B_INPUT_OPEN);
-    if (yes && (id == B_INPUT_OPEN || id == B_OUTPUT_OPEN)) yes = !info(live[0])->closed;
+      yes = port_info(live[0])->input == (id == B_INPUT_P || id == B_INPUT_OPEN);
+    if (yes && (id == B_INPUT_OPEN || id == B_OUTPUT_OPEN)) yes = !port_info(live[0])->closed;
     return yes ? OT_TRUE : OT_FALSE;
   }
   if (id == B_OPEN_INPUT_STRING || id == B_OPEN_INPUT_BYTES || id == B_OPEN_OUTPUT_STRING ||
       id == B_OPEN_OUTPUT_BYTES) {
     bool input = id == B_OPEN_INPUT_STRING || id == B_OPEN_INPUT_BYTES;
     bool string = id == B_OPEN_INPUT_STRING || id == B_OPEN_OUTPUT_STRING;
-    if (count != (input ? 1u : 0u)) return fail(rt, "wrong number of port constructor arguments");
+    if (count != (input ? 1u : 0u)) return oti_fail(rt, "wrong number of port constructor arguments");
     size_t n = 0;
     if (input) {
       if (!oti_kind(rt->stack[first], string ? K_STRING : K_BYTEVECTOR))
-        return fail(rt, "invalid input source");
+        return oti_fail(rt, "invalid input source");
       n = oti_bytes_length(rt->stack[first]);
     }
     live[0] = oti_alloc(rt, K_PORT, 5, sizeof(oti_port));
     if (!live[0]) return 0;
-    info(live[0])->input = input;
-    info(live[0])->kind = string ? 0 : 1;
-    info(live[0])->length = n;
+    port_info(live[0])->input = input;
+    port_info(live[0])->kind = string ? 0 : 1;
+    port_info(live[0])->length = n;
     if (input) {
       ot_value bytes = oti_bytes_new(rt, n);
       if (bytes) {
@@ -724,39 +713,39 @@ static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
     return live[0];
   }
   if (id == B_CLOSE_PORT || id == B_CLOSE_INPUT || id == B_CLOSE_OUTPUT) {
-    if (count != 1 || !oti_kind(rt->stack[first], K_PORT)) return fail(rt, "close needs a port");
+    if (count != 1 || !oti_kind(rt->stack[first], K_PORT)) return oti_fail(rt, "close needs a port");
     live[0] = rt->stack[first];
-    if ((id == B_CLOSE_INPUT && !info(live[0])->input) ||
-        (id == B_CLOSE_OUTPUT && info(live[0])->input))
-      return fail(rt, "wrong port direction");
-    if (info(live[0])->closed) return OT_NIL;
-    if (info(live[0])->busy) return fail(rt, "port callback reentry");
-    if (!info(live[0])->input && !flush(rt, &live[0])) return 0;
-    if (info(live[0])->kind == 3 && !callback(rt, &live[0], 3, false, 0, 0)) return 0;
+    if ((id == B_CLOSE_INPUT && !port_info(live[0])->input) ||
+        (id == B_CLOSE_OUTPUT && port_info(live[0])->input))
+      return oti_fail(rt, "wrong port direction");
+    if (port_info(live[0])->closed) return OT_NIL;
+    if (port_info(live[0])->busy) return oti_fail(rt, "port callback reentry");
+    if (!port_info(live[0])->input && !flush(rt, &live[0])) return 0;
+    if (port_info(live[0])->kind == 3 && !callback(rt, &live[0], 3, false, 0, 0)) return 0;
     int error = 0;
-    if (info(live[0])->kind == 4) {
-      oti_port* p = info(live[0]);
+    if (port_info(live[0])->kind == 4) {
+      oti_port* p = port_info(live[0]);
       host_begin(rt, live[0]);
       error = p->host.close(p->userdata, p->handle);
       bool entered = host_end(rt, live[0]);
-      info(live[0])->closed = true;
+      port_info(live[0])->closed = true;
       unregister_port(rt, live[0]);
       if (!entered) return 0;
       return error ? oti_file_error(rt, "close-port", object_fields(live[0])[4], error) : OT_NIL;
     }
-    info(live[0])->closed = true;
+    port_info(live[0])->closed = true;
     unregister_port(rt, live[0]);
     return error ? oti_file_error(rt, "close-port", object_fields(live[0])[4], error) : OT_NIL;
   }
   if (id == B_GET_OUTPUT_STRING || id == B_GET_OUTPUT_BYTES) {
-    if (count != 1) return fail(rt, "output extraction needs a port");
+    if (count != 1) return oti_fail(rt, "output extraction needs a port");
     live[0] = rt->stack[first];
     if (!check(rt, live[0], false)) return 0;
-    if (info(live[0])->kind != (id == B_GET_OUTPUT_STRING ? 0u : 1u))
-      return fail(rt, "wrong output port kind");
-    size_t n = info(live[0])->length;
+    if (port_info(live[0])->kind != (id == B_GET_OUTPUT_STRING ? 0u : 1u))
+      return oti_fail(rt, "wrong output port kind");
+    size_t n = port_info(live[0])->length;
     char* copy = malloc(n + 1);
-    if (!copy) return fail(rt, "out of host memory");
+    if (!copy) return oti_fail(rt, "out of host memory");
     if (n) memcpy(copy, object_bytes(object_fields(live[0])[0]), n);
     ot_value result;
     if (id == B_GET_OUTPUT_STRING) {
@@ -777,8 +766,8 @@ static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
     return result;
   }
   if (id == B_READ_DATUM) {
-    if (count > 1) return fail(rt, "read takes an optional port");
-    live[0] = count ? rt->stack[first] : current(rt, true);
+    if (count > 1) return oti_fail(rt, "read takes an optional port");
+    live[0] = count ? rt->stack[first] : current_standard_port(rt, true);
     if (!live[0] || !check(rt, live[0], true)) return 0;
     return read_datum(rt, &live[0]);
   }
@@ -787,8 +776,8 @@ static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
                  (id >= B_WRITE_U8 && id <= B_WRITE_BYTES) || id >= B_READ_UNTIL;
   size_t min = payload ? 1 : 0, max = min + 1;
   if (id == B_READ_BYTES_MUT || id == B_WRITE_STRING || id == B_WRITE_BYTES) max = 4;
-  if (count < min || count > max) return fail(rt, "wrong number of port arguments");
-  live[0] = count > min ? rt->stack[first + min] : current(rt, !output);
+  if (count < min || count > max) return oti_fail(rt, "wrong number of port arguments");
+  live[0] = count > min ? rt->stack[first + min] : current_standard_port(rt, !output);
   if (!live[0] || !check(rt, live[0], !output)) return 0;
   live[1] = payload ? rt->stack[first] : OT_NIL;
   if (output) {
@@ -800,15 +789,15 @@ static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
     size_t n = 1;
     if (id == B_WRITE_U8) {
       size_t byte;
-      if (!natural(live[1], &byte) || byte > 255) return fail(rt, "expected byte");
+      if (!oti_natural(live[1], &byte) || byte > 255) return oti_fail(rt, "expected byte");
       one[0] = (char)byte;
     } else if (id == B_WRITE_CHAR) {
-      if ((live[1] & 255) != TAG_CHAR) return fail(rt, "expected character");
+      if ((live[1] & 255) != TAG_CHAR) return oti_fail(rt, "expected character");
       n = oti_utf8_encode((uint32_t)(live[1] >> 8), one);
     } else {
       bool string = id == B_WRITE_STRING;
       if (!oti_kind(live[1], string ? K_STRING : K_BYTEVECTOR))
-        return fail(rt, "invalid output data");
+        return oti_fail(rt, "invalid output data");
       size_t length = oti_bytes_length(live[1]), items = length;
       source = (char*)oti_bytes_data(live[1]);
       if (string) {
@@ -833,7 +822,7 @@ static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
       n = end - start;
     }
     char* copy = malloc(n + 1);
-    if (!copy) return fail(rt, "out of host memory");
+    if (!copy) return oti_fail(rt, "out of host memory");
     memcpy(copy, source, n);
     bool ok = append(rt, &live[0], copy, n);
     free(copy);
@@ -849,23 +838,23 @@ static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
   if (id == B_READ_CHAR || id == B_PEEK_CHAR) {
     uint32_t cp;
     size_t width;
-    int result = character(rt, &live[0], &cp, &width);
+    int result = port_character(rt, &live[0], &cp, &width);
     if (result < 0) return result == -1 ? OT_EOF : 0;
     if (id == B_READ_CHAR) consume(live[0], width);
     return ((ot_value)cp << 8) | TAG_CHAR;
   }
   size_t limit = SIZE_MAX, start = 0, end = 0;
   if (id == B_READ_CHARACTERS || id == B_READ_BYTES) {
-    if (!natural(live[1], &limit)) return fail(rt, "expected nonnegative count");
+    if (!oti_natural(live[1], &limit)) return oti_fail(rt, "expected nonnegative count");
   }
   if (id == B_READ_BYTES_MUT) {
-    if (!oti_kind(live[1], K_BYTEVECTOR)) return fail(rt, "expected bytevector");
+    if (!oti_kind(live[1], K_BYTEVECTOR)) return oti_fail(rt, "expected bytevector");
     if (!range(rt, first + 2, count > 2 ? count - 2 : 0, oti_bytes_length(live[1]), &start, &end))
       return 0;
     limit = end - start;
   }
   bool scan = id >= B_READ_UNTIL;
-  if (scan && !oti_kind(live[1], K_STRING)) return fail(rt, "expected character set");
+  if (scan && !oti_kind(live[1], K_STRING)) return oti_fail(rt, "expected character set");
   char* bytes = NULL;
   size_t n = 0, capacity = 0, items = 0;
   bool binary = id == B_READ_BYTES || id == B_READ_BYTES_MUT;
@@ -876,7 +865,7 @@ static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
     }
     uint32_t cp = 0;
     size_t width = 1;
-    int result = binary ? peek(rt, &live[0], 0) : character(rt, &live[0], &cp, &width);
+    int result = binary ? peek(rt, &live[0], 0) : port_character(rt, &live[0], &cp, &width);
     if (result == -2) {
       free(bytes);
       return 0;
@@ -970,7 +959,7 @@ bool ot_flush_ports(ot_runtime* rt) {
         ok = false;
         break;
       }
-      if (!info(ports[i])->input && !info(ports[i])->closed) ok = flush(rt, &ports[i]);
+      if (!port_info(ports[i])->input && !port_info(ports[i])->closed) ok = flush(rt, &ports[i]);
     }
     oti_roots_pop(&rt->heap, &roots);
   }

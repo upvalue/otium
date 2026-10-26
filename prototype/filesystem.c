@@ -6,11 +6,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static ot_value fail(ot_runtime* rt, const char* message) {
-  oti_error(rt, message);
-  return 0;
-}
-
 static bool path_valid(ot_value path) {
   return oti_kind(path, K_STRING) && !memchr(oti_bytes_data(path), 0, oti_bytes_length(path));
 }
@@ -39,7 +34,7 @@ static ot_value directory(ot_runtime* rt, ot_value path) {
     }
     if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
     if (count == UINT32_MAX) {
-      fail(rt, "directory too large");
+      oti_fail(rt, "directory too large");
       ok = false;
       break;
     }
@@ -49,7 +44,7 @@ static ot_value directory(ot_runtime* rt, ot_value path) {
     }
     names[count] = strdup(entry->d_name);
     if (!names[count]) {
-      fail(rt, "out of host memory");
+      oti_fail(rt, "out of host memory");
       ok = false;
       break;
     }
@@ -93,7 +88,7 @@ static ot_value directory(ot_runtime* rt, ot_value path) {
 
 static ot_value metadata(ot_runtime* rt, const struct stat* st) {
   if (st->st_size < 0 || (uintmax_t)st->st_size > (uintmax_t)(INTPTR_MAX / 2))
-    return fail(rt, "file size exceeds integer range");
+    return oti_fail(rt, "file size exceeds integer range");
   ot_value live[] = {OT_NIL, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, live, 2);
@@ -118,17 +113,17 @@ static ot_value metadata(ot_runtime* rt, const struct stat* st) {
 
 ot_value oti_filesystem_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   if (id == B_CURRENT_DIRECTORY) {
-    if (count) return fail(rt, "current-directory takes no arguments");
+    if (count) return oti_fail(rt, "current-directory takes no arguments");
     size_t size = 256;
     char* buffer = NULL;
     for (;;) {
       buffer = malloc(size);
-      if (!buffer) return fail(rt, "out of host memory");
+      if (!buffer) return oti_fail(rt, "out of host memory");
       if (getcwd(buffer, size)) break;
       int error = errno;
       free(buffer);
       if (error != ERANGE) return oti_file_error(rt, "current-directory", OT_NIL, error);
-      if (size > SIZE_MAX / 2) return fail(rt, "directory path too long");
+      if (size > SIZE_MAX / 2) return oti_fail(rt, "directory path too long");
       size *= 2;
     }
     ot_value result = oti_text(rt, K_STRING, buffer, strlen(buffer));
@@ -136,9 +131,9 @@ ot_value oti_filesystem_builtin(ot_runtime* rt, unsigned id, size_t first, size_
     return result;
   }
   if (count != (id == B_RENAME_FILE ? 2u : 1u))
-    return fail(rt, "wrong number of filesystem arguments");
+    return oti_fail(rt, "wrong number of filesystem arguments");
   for (size_t i = 0; i < count; i++)
-    if (!path_valid(rt->stack[first + i])) return fail(rt, "expected path without NUL");
+    if (!path_valid(rt->stack[first + i])) return oti_fail(rt, "expected path without NUL");
   ot_value path = rt->stack[first];
   const char* name = (char*)oti_bytes_data(path);
   if (id == B_LIST_DIRECTORY) return directory(rt, path);

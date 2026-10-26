@@ -89,19 +89,13 @@ static ot_value failure(ot_runtime* rt, const char* message) {
   return 0;
 }
 
-static const char* text(ot_value value, size_t* length) {
-  unsigned char* bytes = object_bytes(value);
-  memcpy(length, bytes, sizeof(*length));
-  return (const char*)bytes + sizeof(*length);
-}
-
 static const char* c_string(ot_runtime* rt, ot_value value) {
   if (!oti_kind(value, K_STRING)) {
     oti_error(rt, "FFI type: expected string");
     return NULL;
   }
   size_t length;
-  const char* s = text(value, &length);
+  const char* s = oti_text_bytes(value, &length);
   if (memchr(s, 0, length)) {
     oti_error(rt, "FFI encoding: embedded NUL");
     return NULL;
@@ -684,7 +678,7 @@ static ot_value foreign_call(ot_runtime* rt, size_t callable, size_t first, size
           break;
         }
         size_t n;
-        text(value, &n);
+        oti_text_bytes(value, &n);
         copies[i] = malloc(n + 1);
         lengths[i] = n + 1;
         if (!copies[i]) {
@@ -1211,7 +1205,7 @@ static ot_value foreign_builtin(ot_runtime* rt, unsigned id, size_t first, size_
     const char* s = c_string(rt, args[0]);
     if (!s) return 0;
     size_t n;
-    text(args[0], &n);
+    oti_text_bytes(args[0], &n);
     return allocate_memory(rt, n + 1, s);
   }
   if (id == B_FFI_SIZEOF || id == B_FFI_ALIGNOF || id == B_FFI_ALLOC) {

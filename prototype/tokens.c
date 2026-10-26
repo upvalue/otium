@@ -2,25 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static bool space(unsigned char c) {
-  return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\v';
-}
-
-static bool delimiter(unsigned char c) { return space(c) || strchr("()[]{}\";'`,", c) != NULL; }
-
-static ot_value pair(ot_runtime* rt, ot_value car, ot_value cdr) {
-  ot_value live[] = {car, cdr};
-  oti_roots roots;
-  oti_roots_push(&rt->heap, &roots, live, 2);
-  ot_value result = oti_alloc(rt, K_PAIR, 2, 0);
-  if (result) {
-    object_fields(result)[0] = live[0];
-    object_fields(result)[1] = live[1];
-  }
-  oti_roots_pop(&rt->heap, &roots);
-  return result;
-}
-
 static bool validate(ot_runtime* rt, const char* text, size_t length) {
   size_t position = 0;
   for (;;) {
@@ -91,7 +72,7 @@ ot_value oti_tokens(ot_runtime* rt, size_t first, size_t count) {
       break;
     }
     size_t end = position;
-    while (end < length && space((unsigned char)text[end])) end++;
+    while (end < length && oti_reader_space((unsigned char)text[end])) end++;
     if (!advance(rt, text, end, &position, &line, &column, &cr)) {
       ok = false;
       break;
@@ -129,9 +110,9 @@ ot_value oti_tokens(ot_runtime* rt, size_t first, size_t count) {
           ok = false;
           break;
         }
-        if (delimiter((unsigned char)text[start + 2])) goto span;
+        if (oti_reader_delimiter((unsigned char)text[start + 2])) goto span;
       }
-      while (end < length && !delimiter((unsigned char)text[end])) end++;
+      while (end < length && !oti_reader_delimiter((unsigned char)text[end])) end++;
     }
   span:
     if (!advance(rt, text, end, &position, &line, &column, &cr)) {
@@ -146,27 +127,27 @@ ot_value oti_tokens(ot_runtime* rt, size_t first, size_t count) {
       ok = live[3] != 0;
     }
     if (ok) {
-      live[4] = pair(rt, ot_int((intptr_t)gap), OT_EMPTY);
+      live[4] = oti_cons(rt, ot_int((intptr_t)gap), OT_EMPTY);
       ok = live[4] != 0;
     }
     if (ok) {
-      live[4] = pair(rt, ot_int((intptr_t)start_column), live[4]);
+      live[4] = oti_cons(rt, ot_int((intptr_t)start_column), live[4]);
       ok = live[4] != 0;
     }
     if (ok) {
-      live[4] = pair(rt, ot_int((intptr_t)start_line), live[4]);
+      live[4] = oti_cons(rt, ot_int((intptr_t)start_line), live[4]);
       ok = live[4] != 0;
     }
     if (ok) {
-      live[4] = pair(rt, live[3], live[4]);
+      live[4] = oti_cons(rt, live[3], live[4]);
       ok = live[4] != 0;
     }
     if (ok) {
-      live[4] = pair(rt, live[2], live[4]);
+      live[4] = oti_cons(rt, live[2], live[4]);
       ok = live[4] != 0;
     }
     if (ok) {
-      ot_value node = pair(rt, live[4], OT_EMPTY);
+      ot_value node = oti_cons(rt, live[4], OT_EMPTY);
       ok = node != 0;
       if (ok) {
         if (live[0] == OT_EMPTY) live[0] = node;

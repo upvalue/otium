@@ -3,11 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static ot_value fail(ot_runtime* rt, const char* message) {
-  oti_error(rt, message);
-  return 0;
-}
-
 static ot_value key(ot_runtime* rt, const char* name) {
   return oti_intern(rt, K_KEYWORD, name, strlen(name));
 }
@@ -15,7 +10,7 @@ static ot_value key(ot_runtime* rt, const char* name) {
 static ot_value symbol(ot_runtime* rt, ot_value v) {
   if (oti_kind(v, K_SYMBOL)) return v;
   if (!oti_kind(v, K_KEYWORD) && !oti_kind(v, K_STRING))
-    return fail(rt, "condition type must be a name");
+    return oti_fail(rt, "condition type must be a name");
   size_t n;
   memcpy(&n, object_bytes(v), sizeof(n));
   const char* s = (const char*)object_bytes(v) + sizeof(n);
@@ -100,25 +95,25 @@ ot_value oti_error_condition(ot_runtime* rt) {
 }
 
 ot_value oti_raise(ot_runtime* rt, size_t first, size_t count) {
-  if (!count) return fail(rt, "error needs an argument");
+  if (!count) return oti_fail(rt, "error needs an argument");
   ot_value condition = rt->stack[first];
   if (oti_kind(condition, K_STRING))
     condition = message_condition(rt, condition, first + 1, count - 1, NULL);
-  else if (count != 1) return fail(rt, "extra arguments after non-string condition");
+  else if (count != 1) return oti_fail(rt, "extra arguments after non-string condition");
   if (!condition) return 0;
   rt->condition_values[0] = condition;
   rt->raised = true;
   if (oti_kind(rt->stack[first], K_STRING) || oti_kind(condition, K_SYMBOL) ||
       oti_kind(condition, K_KEYWORD)) {
     const char* message = (const char*)object_bytes(rt->stack[first]) + sizeof(size_t);
-    return fail(rt, message);
+    return oti_fail(rt, message);
   }
-  return fail(rt, "uncaught condition");
+  return oti_fail(rt, "uncaught condition");
 }
 
 ot_value oti_condition_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   if (count != (id == B_DEFINE_CONDITION || id == B_CONDITION_IS ? 2u : 1u))
-    return fail(rt, "wrong number of condition arguments");
+    return oti_fail(rt, "wrong number of condition arguments");
   if (id == B_CONDITION_TYPE || id == B_CONDITION_MESSAGE)
     return field(rt, rt->stack[first], id == B_CONDITION_TYPE ? ":type" : ":message");
   if (id == B_ERROR_P) {
@@ -143,7 +138,7 @@ ot_value oti_condition_builtin(ot_runtime* rt, unsigned id, size_t first, size_t
     ot_value cursor = values[1];
     while (cursor != OT_NIL) {
       if (cursor == values[0]) {
-        fail(rt, "condition hierarchy cycle");
+        oti_fail(rt, "condition hierarchy cycle");
         goto done;
       }
       cursor = oti_table_get(rt, rt->condition_values[1], cursor, OT_NIL);
@@ -234,11 +229,11 @@ static bool signal_handlers(ot_runtime* rt, ot_value condition) {
 }
 
 ot_value oti_signal(ot_runtime* rt, size_t first, size_t count) {
-  if (!count) return fail(rt, "signal needs an argument");
+  if (!count) return oti_fail(rt, "signal needs an argument");
   ot_value condition = rt->stack[first];
   if (oti_kind(condition, K_STRING))
     condition = message_condition(rt, condition, first + 1, count - 1, NULL);
-  else if (count != 1) return fail(rt, "extra arguments after non-string condition");
+  else if (count != 1) return oti_fail(rt, "extra arguments after non-string condition");
   return condition && signal_handlers(rt, condition) ? OT_NIL : 0;
 }
 
@@ -359,7 +354,7 @@ ot_value oti_ffi_error(ot_runtime* rt, const char* operation, const char* reason
   char op[64], why[64];
   size_t length = strlen(message);
   char* detail = malloc(length + 1);
-  if (!detail) return fail(rt, "out of host memory");
+  if (!detail) return oti_fail(rt, "out of host memory");
   memcpy(detail, message, length + 1);
   snprintf(op, sizeof(op), "%s", operation);
   snprintf(why, sizeof(why), "%s", reason);

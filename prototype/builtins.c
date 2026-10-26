@@ -50,8 +50,6 @@ bool oti_number(ot_runtime* rt, ot_value v, double* out) {
   return oti_error(rt, "expected a number");
 }
 
-static ot_value boolean(bool b) { return b ? OT_TRUE : OT_FALSE; }
-
 static ot_value arithmetic(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   if (!count && (id == B_SUB || id == B_DIV)) {
     oti_error(rt, "arithmetic needs an argument");
@@ -171,7 +169,7 @@ static ot_value compare(ot_runtime* rt, unsigned id, size_t first, size_t count)
     }
     previous = v;
   }
-  return boolean(result);
+  return ot_bool(result);
 }
 
 /* Quasiquote copies only the splice prefix; its final tail can be any value. */
@@ -314,19 +312,19 @@ static ot_value core_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
       if (id == B_MODULO && r && ((r < 0) != (divisor < 0))) r += divisor;
       return ot_int(r);
     }
-    case B_EQ: return boolean(a == b);
-    case B_NOT: return boolean(!oti_truth(a));
-    case B_NULL: return boolean(a == OT_EMPTY);
-    case B_NIL: return boolean(a == OT_NIL);
-    case B_PAIR: return boolean(oti_kind(a, K_PAIR));
+    case B_EQ: return ot_bool(a == b);
+    case B_NOT: return ot_bool(!oti_truth(a));
+    case B_NULL: return ot_bool(a == OT_EMPTY);
+    case B_NIL: return ot_bool(a == OT_NIL);
+    case B_PAIR: return ot_bool(oti_kind(a, K_PAIR));
     case B_INTEGER: {
       double real;
       if (ot_is_int(a)) return OT_TRUE;
       if (!oti_kind(a, K_FLOAT)) return OT_FALSE;
       memcpy(&real, object_bytes(a), sizeof(real));
-      return boolean(isfinite(real) && trunc(real) == real);
+      return ot_bool(isfinite(real) && trunc(real) == real);
     }
-    case B_NUMBER: return boolean(ot_is_int(a) || oti_kind(a, K_FLOAT));
+    case B_NUMBER: return ot_bool(ot_is_int(a) || oti_kind(a, K_FLOAT));
     case B_CONS: {
       ot_value pair = oti_alloc(rt, K_PAIR, 2, 0);
       if (pair) {

@@ -4,27 +4,20 @@
 #include <string.h>
 #include <stdlib.h>
 
-static ot_value fail(ot_runtime* rt, const char* message) {
-  oti_error(rt, message);
-  return 0;
-}
-
-static ot_value boolean(bool value) { return value ? OT_TRUE : OT_FALSE; }
-
 static ot_value wrapped(uintptr_t bits) { return (bits << 1) | 1; }
 
 static ot_value integral(ot_runtime* rt, double n) {
   if (!isfinite(n) || n < (double)(INTPTR_MIN / 2) || n >= -(double)(INTPTR_MIN / 2))
-    return fail(rt, "integer conversion out of range");
+    return oti_fail(rt, "integer conversion out of range");
   return ot_int((intptr_t)n);
 }
 
 static ot_value bitwise(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   if ((id == B_BIT_NOT && count != 1) || (id == B_BIT_SHIFT && count != 2))
-    return fail(rt, "wrong number of arguments");
+    return oti_fail(rt, "wrong number of arguments");
   uintptr_t bits = id == B_BIT_AND ? UINTPTR_MAX : 0;
   for (size_t i = 0; i < count; i++)
-    if (!ot_is_int(rt->stack[first + i])) return fail(rt, "expected integers");
+    if (!ot_is_int(rt->stack[first + i])) return oti_fail(rt, "expected integers");
   if (id == B_BIT_NOT) return wrapped(~(uintptr_t)ot_to_int(rt->stack[first]));
   if (id == B_BIT_SHIFT) {
     intptr_t n = ot_to_int(rt->stack[first]), shift = ot_to_int(rt->stack[first + 1]);
@@ -37,10 +30,10 @@ static ot_value bitwise(ot_runtime* rt, unsigned id, size_t first, size_t count)
       magnitude >>= right;
       return wrapped(n < 0 ? ~magnitude : magnitude);
     }
-    if (shift >= width) return fail(rt, "integer shift overflow");
+    if (shift >= width) return oti_fail(rt, "integer shift overflow");
     uintptr_t magnitude = n < 0 ? 0 - (uintptr_t)n : (uintptr_t)n;
     uintptr_t limit = n < 0 ? (uintptr_t)INTPTR_MAX / 2 + 1 : (uintptr_t)INTPTR_MAX / 2;
-    if (magnitude > (limit >> shift)) return fail(rt, "integer shift overflow");
+    if (magnitude > (limit >> shift)) return oti_fail(rt, "integer shift overflow");
     return wrapped((uintptr_t)n << shift);
   }
   for (size_t i = 0; i < count; i++) {
@@ -55,7 +48,7 @@ static ot_value bitwise(ot_runtime* rt, unsigned id, size_t first, size_t count)
 ot_value oti_numeric_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   if (id >= B_BIT_AND) return bitwise(rt, id, first, count);
   if (id == B_MIN || id == B_MAX) {
-    if (!count) return fail(rt, "extremum needs an argument");
+    if (!count) return oti_fail(rt, "extremum needs an argument");
     ot_value selected = rt->stack[first];
     double best;
     if (!oti_number(rt, selected, &best)) return 0;
@@ -83,7 +76,7 @@ ot_value oti_numeric_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
   }
   size_t arity = id == B_QUOTIENT || id == B_EXPT ? 2 : 1;
   if (id == B_ATAN ? count < 1 || count > 2 : count != arity)
-    return fail(rt, "wrong number of arguments");
+    return oti_fail(rt, "wrong number of arguments");
   ot_value value = rt->stack[first];
   double a, b = 0;
   if (!oti_number(rt, value, &a)) return 0;
@@ -91,8 +84,8 @@ ot_value oti_numeric_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
   switch (id) {
     case B_QUOTIENT:
       if (!ot_is_int(value) || !ot_is_int(rt->stack[first + 1]))
-        return fail(rt, "expected integers");
-      if (!ot_to_int(rt->stack[first + 1])) return fail(rt, "division by zero");
+        return oti_fail(rt, "expected integers");
+      if (!ot_to_int(rt->stack[first + 1])) return oti_fail(rt, "division by zero");
       return wrapped((uintptr_t)(ot_to_int(value) / ot_to_int(rt->stack[first + 1])));
     case B_ABS:
       if (ot_is_int(value)) {
@@ -100,14 +93,14 @@ ot_value oti_numeric_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
         return wrapped(n < 0 ? 0 - (uintptr_t)n : (uintptr_t)n);
       }
       return oti_float(rt, fabs(a));
-    case B_EXACT_P: return boolean(ot_is_int(value));
-    case B_INEXACT_P: return boolean(!ot_is_int(value));
-    case B_FINITE_P: return boolean(isfinite(a));
-    case B_INFINITE_P: return boolean(isinf(a));
-    case B_NAN_P: return boolean(isnan(a));
+    case B_EXACT_P: return ot_bool(ot_is_int(value));
+    case B_INEXACT_P: return ot_bool(!ot_is_int(value));
+    case B_FINITE_P: return ot_bool(isfinite(a));
+    case B_INFINITE_P: return ot_bool(isinf(a));
+    case B_NAN_P: return ot_bool(isnan(a));
     case B_EXACT:
       if (ot_is_int(value)) return value;
-      if (trunc(a) != a) return fail(rt, "exact expects an integer-valued number");
+      if (trunc(a) != a) return oti_fail(rt, "exact expects an integer-valued number");
       return integral(rt, a);
     case B_INEXACT: return ot_is_int(value) ? oti_float(rt, a) : value;
     case B_FLOOR:
@@ -141,7 +134,7 @@ ot_value oti_numeric_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
         return wrapped(result);
       }
       return oti_float(rt, pow(a, b));
-    default: return fail(rt, "unknown numeric builtin");
+    default: return oti_fail(rt, "unknown numeric builtin");
   }
 }
 

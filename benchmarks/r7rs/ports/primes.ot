@@ -1,0 +1,28 @@
+;; PRIMES -- Eric Mohr's recursive list sieve.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+
+(def (interval-list m n)
+  (if (> m n)
+      '()
+      (cons m (interval-list (+ 1 m) n))))
+
+(def (sieve items)
+  ;; lint: allow(liftable-function) Keep the helper local as in the upstream sieve.
+  (def (remove-multiples n items)
+    (cond
+      ((null? items) '())
+      ((= (remainder (car items) n) 0) (remove-multiples n (cdr items)))
+      (else (cons (car items) (remove-multiples n (cdr items))))))
+  (if (null? items)
+      '()
+      (cons (car items) (sieve (remove-multiples (car items) (cdr items))))))
+
+(def (primes<= n)
+  (sieve (interval-list 2 n)))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input (bench-read))
+        (output (bench-read))
+        (name (str "primes:" input ":" count)))
+    (run-ported-benchmark name count (fn () (primes<= (bench-hide count input))) (fn (result) (equal? result output)))))

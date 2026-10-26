@@ -1,0 +1,22 @@
+;; CAT -- Copy a file one character at a time.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+
+(def (catport in out)
+  (let ((x (read-char in)))
+    (unless (eof-object? x)
+      (write-char x out)
+      (catport in out))))
+
+(def (go input-file output-file)
+  (when (file-exists? output-file) (delete-file output-file))
+  (with ((in (open-input-file input-file))) (with ((out (open-output-file output-file))) (catport in out))))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input (bench-read))
+        (output-file (bench-read)))
+    (bench-read)
+    (run-ported-benchmark (str "cat:" count)
+                          count
+                          (fn () (go (bench-hide count input) (bench-hide count output-file)))
+                          (fn (_) #t))))

@@ -1,0 +1,23 @@
+;; SUM1 -- Read and sum numbers from a file.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+
+(def (sumport port sum-so-far)
+  (let ((x (read port)))
+    (if (eof-object? x)
+        sum-so-far
+        (sumport port (+ x sum-so-far)))))
+
+(def (sum port)
+  (sumport port 0.0))
+
+(def (go input)
+  (with ((port (open-input-file input))) (sum port)))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input (bench-read))
+        (output (bench-read)))
+    (run-ported-benchmark (str "sum1:" count)
+                          count
+                          (fn () (go (bench-hide count input)))
+                          (fn (result) (<= (abs (- result output)) 1e-9)))))

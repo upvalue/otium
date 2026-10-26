@@ -1,0 +1,160 @@
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+;;; LATTICE -- Obtained from Andrew Wright.
+
+;; Given a comparison routine that returns one of
+;;       less
+;;       more
+;;       equal
+;;       uncomparable
+;; return a new comparison routine that applies to sequences.
+(def (lexico base)
+  (def (lex-fixed fixed lhs rhs)
+    (def (check lhs rhs)
+      (if (null? lhs)
+          fixed
+          (let ((probe (base (car lhs) (car rhs))))
+            (if (or (eq? probe 'equal) (eq? probe fixed))
+                (check (cdr lhs) (cdr rhs))
+                'uncomparable))))
+    (check lhs rhs))
+  (def (lex-first lhs rhs)
+    (if (null? lhs)
+        'equal
+        (let ((probe (base (car lhs) (car rhs))))
+          (case probe
+            ((less more) (lex-fixed probe (cdr lhs) (cdr rhs)))
+            ((equal) (lex-first (cdr lhs) (cdr rhs)))
+            ((uncomparable) 'uncomparable)))))
+  lex-first)
+
+(def (make-lattice elem-list cmp-func)
+  (cons elem-list cmp-func))
+
+(def lattice->elements car)
+
+(def lattice->cmp cdr)
+
+;; Select elements of a list which pass some test.
+(def (zulu-select test lst)
+  (def (select-a ac lst)
+    (if (null? lst)
+        (xreverse! ac)
+        (select-a (let ((head (car lst)))
+                    (if (test head)
+                        (cons head ac)
+                        ac))
+                  (cdr lst))))
+  (select-a '() lst))
+
+(def xreverse!
+  (let ()
+    ;; lint: allow(liftable-function) Keep the recursive closure at the upstream allocation site.
+    (def (rotate fo fum)
+      (let ((next (cdr fo)))
+        (set-cdr! fo fum)
+        (if (null? next)
+            fo
+            (rotate next fo))))
+    (fn (lst)
+      (if (null? lst)
+          '()
+          (rotate lst '())))))
+
+;; Select elements of a list which pass some test and map a function
+;; over the result.  Note, only efficiency prevents this from being the
+;; composition of select and map.
+(def (select-map test func lst)
+  (def (select-a ac lst)
+    (if (null? lst)
+        (xreverse! ac)
+        (select-a (let ((head (car lst)))
+                    (if (test head)
+                        (cons (func head) ac)
+                        ac))
+                  (cdr lst))))
+  (select-a '() lst))
+
+;; This version of map-and tail-recurses on the last test.
+(def (map-and proc lst)
+  (if (null? lst)
+      #t
+      (let ()
+        (def (drudge lst)
+          (let ((rest (cdr lst)))
+            (if (null? rest)
+                (proc (car lst))
+                (and (proc (car lst)) (drudge rest)))))
+        (drudge lst))))
+
+(def (maps-1 source target pas new)
+  (let ((scmp (lattice->cmp source))
+        (tcmp (lattice->cmp target)))
+    (let ((less (select-map (fn (p) (eq? 'less (scmp (car p) new))) cdr pas))
+          (more (select-map (fn (p) (eq? 'more (scmp (car p) new))) cdr pas)))
+      (zulu-select (fn (t)
+                     (and (map-and (fn (t2) (memq (tcmp t2 t) '(less equal))) less)
+                          (map-and (fn (t2) (memq (tcmp t2 t) '(more equal))) more)))
+                   (lattice->elements target)))))
+
+(def (maps-rest source target pas rest to-1 to-collect)
+  (if (null? rest)
+      (to-1 pas)
+      (let ((next (car rest))
+            (rest (cdr rest)))
+        (to-collect (map (fn (x) (maps-rest source target (cons (cons next x) pas) rest to-1 to-collect))
+                         (maps-1 source target pas next))))))
+
+(def (maps source target)
+  (make-lattice (maps-rest source
+                           target
+                           '()
+                           (lattice->elements source)
+                           (fn (x) (list (map cdr x)))
+                           (fn (x) (apply append x)))
+                (lexico (lattice->cmp target))))
+
+(def (count-maps source target)
+  (maps-rest source target '() (lattice->elements source) (fn (_x) 1) sum))
+
+(def (sum lst)
+  (if (null? lst)
+      0
+      (+ (car lst) (sum (cdr lst)))))
+
+(def (run k)
+  (let ((l2 (make-lattice '(low high)
+                          (fn (lhs rhs)
+                            (case lhs
+                              ((low)
+                               (case rhs
+                                 ((low) 'equal)
+                                 ((high) 'less)
+                                 (else (error 'make-lattice "base" rhs))))
+                              ((high)
+                               (case rhs
+                                 ((low) 'more)
+                                 ((high) 'equal)
+                                 (else (error 'make-lattice "base" rhs))))
+                              (else (error 'make-lattice "base" lhs))))))
+        (l3 (maps l2 l2))
+        (l4 (maps l3 l3)))
+    (count-maps l2 l2)
+    (count-maps l3 l3)
+    (count-maps l2 l3)
+    (count-maps l3 l2)
+    (case k
+      ((33) (count-maps l3 l3))
+      ((44) (count-maps l4 l4))
+      ((45) (let ((l5 (maps l4 l4))) (count-maps l4 l5)))
+      ((54) (let ((l5 (maps l4 l4))) (count-maps l5 l4)))
+      ((55) (let ((l5 (maps l4 l4))) (count-maps l5 l5)))
+      (else (error "run: unanticipated problem size" k)))))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input (bench-read))
+        (output (bench-read)))
+    (run-ported-benchmark (str "lattice:" input ":" count)
+                          count
+                          (fn () (run (bench-hide count input)))
+                          (fn (result) (= result output)))))

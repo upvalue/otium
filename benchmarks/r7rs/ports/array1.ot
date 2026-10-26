@@ -1,0 +1,35 @@
+;; ARRAY1 -- Array construction and copying from Kernighan and Van Wyk.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+
+(def (create-x n)
+  (let ((result (bench-make-array n nil)))
+    (for ((i :range n))
+      (put! result i i))
+    result))
+
+(def (create-y x)
+  (let ((n (length x))
+        (result (bench-make-array n nil)))
+    (for ((i :range (- n 1) -1 -1))
+      (put! result i (get x i)))
+    result))
+
+(def (my-try n)
+  (length (create-y (create-x n))))
+
+(def (go m n)
+  (let loop ((repeat m)
+             (result '()))
+    (if (> repeat 0)
+        (loop (- repeat 1) (my-try n))
+        result)))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input (bench-read))
+        (output (bench-read))
+        (name (str "array1:" input ":" count)))
+    (run-ported-benchmark name
+                          1
+                          (fn () (go (bench-hide count count) (bench-hide count input)))
+                          (fn (result) (equal? result output)))))

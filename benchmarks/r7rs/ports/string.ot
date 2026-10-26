@@ -1,0 +1,32 @@
+;; STRING -- Repeated string growth from Kernighan and Van Wyk.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+
+(def s "abcdef")
+
+(def (grow)
+  (set! s (string-append "123" s "456" s "789"))
+  (set! s
+        (string-append (substring s (quotient (string-length s) 2) (string-length s))
+                       (substring s 0 (+ 1 (quotient (string-length s) 2)))))
+  s)
+
+(def (trial n)
+  (let loop ((i 0))
+    (if (> (string-length s) n)
+        (string-length s)
+        (begin
+          (grow)
+          (loop (+ i 1))))))
+
+(def (my-try n)
+  (dotimes (i 10)
+    (set! s "abcdef")
+    (trial n))
+  (string-length s))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input (bench-read))
+        (output (bench-read))
+        (name (str "string:" input ":" count)))
+    (run-ported-benchmark name count (fn () (my-try (bench-hide count input))) (fn (result) (equal? result output)))))

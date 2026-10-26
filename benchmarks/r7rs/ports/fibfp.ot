@@ -1,0 +1,14 @@
+;; FIBFP -- Compute Fibonacci numbers recursively using floating point.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+
+(def (fibfp n)
+  (if (< n 2.0)
+      n
+      (+ (fibfp (- n 1.0)) (fibfp (- n 2.0)))))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input (bench-read))
+        (output (bench-read))
+        (name (str "fibfp:" input ":" count)))
+    (run-ported-benchmark name count (fn () (fibfp (bench-hide count input))) (fn (result) (= result output)))))

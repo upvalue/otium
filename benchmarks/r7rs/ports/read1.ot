@@ -1,0 +1,20 @@
+;; READ1 -- Read every datum from a file and return the last one.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+
+(def (read-from-file-benchmark input)
+  (with ((in (open-input-file input)))
+        (let loop ((x (read in))
+                   (y #f)
+                   (i 0))
+          (if (eof-object? x)
+              y
+              (loop (read in) x (+ i 1))))))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input (bench-read))
+        (output (bench-read)))
+    (run-ported-benchmark (str "read1:" count)
+                          count
+                          (fn () (read-from-file-benchmark (bench-hide count input)))
+                          (fn (result) (equal? result output)))))

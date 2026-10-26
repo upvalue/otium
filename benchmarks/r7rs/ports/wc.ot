@@ -1,0 +1,29 @@
+;; WC -- Count lines, words, and characters, splitting words on spaces and newlines.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+
+(def (wcport port)
+  (def (loop nl nw nc inword?)
+    (let ((x (read-char port)))
+      (cond
+        ((eof-object? x) (list nl nw nc))
+        ((char=? x #\space) (loop nl nw (+ nc 1) #f))
+        ((char=? x #\newline) (loop (+ nl 1) nw (+ nc 1) #f))
+        (else (loop nl
+                    (if inword?
+                        nw
+                        (+ nw 1))
+                    (+ nc 1)
+                    #t)))))
+  (loop 0 0 0 #f))
+
+(def (go input)
+  (with ((port (open-input-file input))) (wcport port)))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input (bench-read))
+        (output (bench-read)))
+    (run-ported-benchmark (str "wc:" input ":" count)
+                          count
+                          (fn () (go (bench-hide count input)))
+                          (fn (result) (equal? result output)))))

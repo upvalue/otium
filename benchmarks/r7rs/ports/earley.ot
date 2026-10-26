@@ -1,0 +1,647 @@
+;; lint: allow-file(liftable-function) Keep local parser helpers at their upstream allocation sites.
+;; lint: allow-file(unused-binding) Retain the upstream helper arities and local computations.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+;;; EARLEY -- Earley's parser, written by Marc Feeley.
+
+;; (make-parser grammar lexer) is used to create a parser from the grammar
+;; description `grammar' and the lexer function `lexer'.
+;;
+;; A grammar is a list of definitions.  Each definition defines a non-terminal
+;; by a set of rules.  Thus a definition has the form: (nt rule1 rule2...).
+;; A given non-terminal can only be defined once.  The first non-terminal
+;; defined is the grammar's goal.  Each rule is a possibly empty list of
+;; non-terminals.  Thus a rule has the form: (nt1 nt2...).  A non-terminal
+;; can be any scheme value.  Note that all grammar symbols are treated as
+;; non-terminals.  This is fine though because the lexer will be outputing
+;; non-terminals.
+;;
+;; The lexer defines what a token is and the mapping between tokens and
+;; the grammar's non-terminals.  It is a function of one argument, the input,
+;; that returns the list of tokens corresponding to the input.  Each token is
+;; represented by a list.  The first element is some `user-defined' information
+;; associated with the token and the rest represents the token's class(es) (as a
+;; list of non-terminals that this token corresponds to).
+;;
+;; The result of `make-parser' is a function that parses the single input it
+;; is given into the grammar's goal.  The result is a `parse' which can be
+;; manipulated with the procedures: `parse->parsed?', `parse->trees'
+;; and `parse->nb-trees' (see below).
+;;
+;; Let's assume that we want a parser for the grammar
+;;
+;;  S -> x = E
+;;  E -> E + E | V
+;;  V -> V y |
+;;
+;; and that the input to the parser is a string of characters.  Also, assume we
+;; would like to map the characters `x', `y', `+' and `=' into the corresponding
+;; non-terminals in the grammar.  Such a parser could be created with
+;;
+;; (make-parser
+;;   '(
+;;      (s (x = e))
+;;      (e (e + e) (v))
+;;      (v (v y) ())
+;;    )
+;;   (lambda (str)
+;;     (map (lambda (char)
+;;            (list char;; user-info = the character itself
+;;                  (case char
+;;                    ((#\x) 'x)
+;;                    ((#\y) 'y)
+;;                    ((#\+) '+)
+;;                    ((#\=) '=)
+;;                    (else (fatal-error "lexer error")))))
+;;          (string->list str)))
+;; )
+;;
+;; An alternative definition (that does not check for lexical errors) is
+;;
+;; (make-parser
+;;   '(
+;;      (s (#\x #\= e))
+;;      (e (e #\+ e) (v))
+;;      (v (v #\y) ())
+;;    )
+;;   (lambda (str) (map (lambda (char) (list char char)) (string->list str)))
+;; )
+;;
+;; To help with the rest of the discussion, here are a few definitions:
+;;
+;; An input pointer (for an input of `n' tokens) is a value between 0 and `n'.
+;; It indicates a point between two input tokens (0 = beginning, `n' = end).
+;; For example, if `n' = 4, there are 5 input pointers:
+;;
+;;   input                   token1     token2     token3     token4
+;;   input pointers       0          1          2          3          4
+;;
+;; A configuration indicates the extent to which a given rule is parsed (this
+;; is the common `dot notation').  For simplicity, a configuration is
+;; represented as an integer, with successive configurations in the same
+;; rule associated with successive integers.  It is assumed that the grammar
+;; has been extended with rules to aid scanning.  These rules are of the
+;; form `nt ->', and there is one such rule for every non-terminal.  Note
+;; that these rules are special because they only apply when the corresponding
+;; non-terminal is returned by the lexer.
+;;
+;; A configuration set is a configuration grouped with the set of input pointers
+;; representing where the head non-terminal of the configuration was predicted.
+;;
+;; Here are the rules and configurations for the grammar given above:
+;;
+;;  S -> .         \
+;;       0          |
+;;  x -> .          |
+;;       1          |
+;;  = -> .          |
+;;       2          |
+;;  E -> .          |
+;;       3           > special rules (for scanning)
+;;  + -> .          |
+;;       4          |
+;;  V -> .          |
+;;       5          |
+;;  y -> .          |
+;;       6         /
+;;  S -> .  x  .  =  .  E  .
+;;       7     8     9     10
+;;  E -> .  E  .  +  .  E  .
+;;       11    12    13    14
+;;  E -> .  V  .
+;;       15    16
+;;  V -> .  V  .  y  .
+;;       17    18    19
+;;  V -> .
+;;       20
+;;
+;; Starters of the non-terminal `nt' are configurations that are leftmost
+;; in a non-special rule for `nt'.  Enders of the non-terminal `nt' are
+;; configurations that are rightmost in any rule for `nt'.  Predictors of the
+;; non-terminal `nt' are configurations that are directly to the left of `nt'
+;; in any rule.
+;;
+;; For the grammar given above,
+;;
+;;   Starters of V   = (17 20)
+;;   Enders of V     = (5 19 20)
+;;   Predictors of V = (15 17)
+
+(def (make-parser grammar lexer)
+
+  (def (non-terminals grammar) ;; return vector of non-terminals in grammar
+
+    (def (add-nt nt nts)
+      (if (member nt nts)
+          nts
+          (cons nt nts))) ;; use equal? for equality tests
+
+    (let def-loop ((defs grammar)
+                   (nts '()))
+      (if (pair? defs)
+          (let ((definition (car defs))
+                (head (car definition)))
+            (let rule-loop ((rules (cdr definition))
+                            (nts (add-nt head nts)))
+              (if (pair? rules)
+                  (let ((rule (car rules)))
+                    (let loop ((l rule)
+                               (nts nts))
+                      (if (pair? l)
+                          (let ((nt (car l))) (loop (cdr l) (add-nt nt nts)))
+                          (rule-loop (cdr rules) nts))))
+                  (def-loop (cdr defs) nts))))
+          (list-to-array (reverse nts))))) ;; goal non-terminal must be at index 0
+
+  (def (ind nt nts) ;; return index of non-terminal `nt' in `nts'
+    (let loop ((i (- (length nts) 1)))
+      (if (>= i 0)
+          (if (equal? (get nts i) nt)
+              i
+              (loop (- i 1)))
+          #f)))
+
+  (def (nb-configurations grammar) ;; return nb of configurations in grammar
+    (let def-loop ((defs grammar)
+                   (nb-confs 0))
+      (if (pair? defs)
+          (let ((definition (car defs)))
+            (let rule-loop ((rules (cdr definition))
+                            (nb-confs nb-confs))
+              (if (pair? rules)
+                  (let ((rule (car rules)))
+                    (let loop ((l rule)
+                               (nb-confs nb-confs))
+                      (if (pair? l)
+                          (loop (cdr l) (+ nb-confs 1))
+                          (rule-loop (cdr rules) (+ nb-confs 1)))))
+                  (def-loop (cdr defs) nb-confs))))
+          nb-confs)))
+
+  ;; First, associate a numeric identifier to every non-terminal in the
+  ;; grammar (with the goal non-terminal associated with 0).
+  ;;
+  ;; So, for the grammar given above we get:
+  ;;
+  ;; s -> 0   x -> 1   = -> 4   e ->3    + -> 4   v -> 5   y -> 6
+
+  (let ((nts (non-terminals grammar)) ;; id map = list of non-terms
+        (nb-nts (length nts)) ;; the number of non-terms
+        (nb-confs (+ (nb-configurations grammar) nb-nts)) ;; the nb of confs
+        (starters (bench-make-array nb-nts '())) ;; starters for every non-term
+        (enders (bench-make-array nb-nts '())) ;; enders for every non-term
+        (predictors (bench-make-array nb-nts '())) ;; predictors for every non-term
+        (steps (bench-make-array nb-confs #f)) ;; what to do in a given conf
+        (names (bench-make-array nb-confs #f))) ;; name of rules
+
+    (def (setup-tables grammar nts starters enders predictors steps names)
+
+      (def (add-conf conf nt nts class)
+        (let ((i (ind nt nts))) (put! class i (cons conf (get class i)))))
+
+      (let ((nb-nts (length nts)))
+
+        (let nt-loop ((i (- nb-nts 1)))
+          (when (>= i 0)
+            (put! steps i (- i nb-nts))
+            (put! names i (list (get nts i) 0))
+            (put! enders i (list i))
+            (nt-loop (- i 1))))
+
+        (let def-loop ((defs grammar)
+                       (conf (length nts)))
+          (when (pair? defs)
+            (let ((definition (car defs))
+                  (head (car definition)))
+              (let rule-loop ((rules (cdr definition))
+                              (conf conf)
+                              (rule-num 1))
+                (if (pair? rules)
+                    (let ((rule (car rules)))
+                      (put! names conf (list head rule-num))
+                      (add-conf conf head nts starters)
+                      (let loop ((l rule)
+                                 (conf conf))
+                        (if (pair? l)
+                            (let ((nt (car l)))
+                              (put! steps conf (ind nt nts))
+                              (add-conf conf nt nts predictors)
+                              (loop (cdr l) (+ conf 1)))
+                            (begin
+                              (put! steps conf (- (ind head nts) nb-nts))
+                              (add-conf conf head nts enders)
+                              (rule-loop (cdr rules) (+ conf 1) (+ rule-num 1))))))
+                    (def-loop (cdr defs) conf))))))))
+
+    ;; Now, for each non-terminal, compute the starters, enders and predictors and
+    ;; the names and steps tables.
+
+    (setup-tables grammar nts starters enders predictors steps names)
+
+    ;; Build the parser description
+
+    (let ((parser-descr (array lexer nts starters enders predictors steps names)))
+      (fn (input)
+
+        (def (ind nt nts) ;; return index of non-terminal `nt' in `nts'
+          (let loop ((i (- (length nts) 1)))
+            (if (>= i 0)
+                (if (equal? (get nts i) nt)
+                    i
+                    (loop (- i 1)))
+                #f)))
+
+        (def (comp-tok tok nts) ;; transform token to parsing format
+          (let loop ((l1 (cdr tok))
+                     (l2 '()))
+            (if (pair? l1)
+                (let ((i (ind (car l1) nts)))
+                  (if i
+                      (loop (cdr l1) (cons i l2))
+                      (loop (cdr l1) l2)))
+                (cons (car tok) (reverse l2)))))
+
+        (def (input->tokens input lexer nts)
+          (list-to-array (map (fn (tok) (comp-tok tok nts)) (lexer input))))
+
+        (def (make-states nb-toks nb-confs)
+          (let ((states (bench-make-array (+ nb-toks 1) #f)))
+            (let loop ((i nb-toks))
+              (if (>= i 0)
+                  (let ((v (bench-make-array (+ nb-confs 1) #f)))
+                    (put! v 0 -1)
+                    (put! states i v)
+                    (loop (- i 1)))
+                  states))))
+
+        (def (conf-set-get state conf)
+          (get state (+ conf 1)))
+
+        (def (conf-set-get* state state-num conf)
+          (let ((conf-set (conf-set-get state conf)))
+            (if conf-set
+                conf-set
+                (let ((conf-set (bench-make-array (+ state-num 6) #f)))
+                  (put! conf-set 1 -3) ;; old elems tail (points to head)
+                  (put! conf-set 2 -1) ;; old elems head
+                  (put! conf-set 3 -1) ;; new elems tail (points to head)
+                  (put! conf-set 4 -1) ;; new elems head
+                  (put! state (+ conf 1) conf-set)
+                  conf-set))))
+
+        (def (conf-set-merge-new! conf-set)
+          (put! conf-set (+ (get conf-set 1) 5) (get conf-set 4))
+          (put! conf-set 1 (get conf-set 3))
+          (put! conf-set 3 -1)
+          (put! conf-set 4 -1))
+
+        (def (conf-set-head conf-set)
+          (get conf-set 2))
+
+        (def (conf-set-next conf-set i)
+          (get conf-set (+ i 5)))
+
+        (def (conf-set-member? state conf i)
+          (let ((conf-set (get state (+ conf 1))))
+            (if conf-set
+                (conf-set-next conf-set i)
+                #f)))
+
+        (def (conf-set-adjoin state conf-set conf i)
+          (let ((tail (get conf-set 3))) ;; put new element at tail
+            (put! conf-set (+ i 5) -1)
+            (put! conf-set (+ tail 5) i)
+            (put! conf-set 3 i)
+            (when (< tail 0)
+              (put! conf-set 0 (get state 0))
+              (put! state 0 conf))))
+
+        (def (conf-set-adjoin* states state-num l i)
+          (let ((state (get states state-num)))
+            (let loop ((l1 l))
+              (when (pair? l1)
+                (let ((conf (car l1))
+                      (conf-set (conf-set-get* state state-num conf)))
+                  (if (not (conf-set-next conf-set i))
+                      (begin
+                        (conf-set-adjoin state conf-set conf i)
+                        (loop (cdr l1)))
+                      (loop (cdr l1))))))))
+
+        (def (conf-set-adjoin** states states* state-num conf i)
+          (let ((state (get states state-num)))
+            (if (conf-set-member? state conf i)
+                (let ((state* (get states* state-num))
+                      (conf-set* (conf-set-get* state* state-num conf)))
+                  (unless (conf-set-next conf-set* i) (conf-set-adjoin state* conf-set* conf i))
+                  #t)
+                #f)))
+
+        (def (conf-set-union state conf-set conf other-set)
+          (let loop ((i (conf-set-head other-set)))
+            (when (>= i 0)
+              (if (not (conf-set-next conf-set i))
+                  (begin
+                    (conf-set-adjoin state conf-set conf i)
+                    (loop (conf-set-next other-set i)))
+                  (loop (conf-set-next other-set i))))))
+
+        (def (forw states state-num starters enders predictors steps nts)
+
+          (def (predict state state-num conf-set conf nt starters enders)
+
+            ;; add configurations which start the non-terminal `nt' to the
+            ;; right of the dot
+
+            (let loop1 ((l (get starters nt)))
+              (when (pair? l)
+                (let ((starter (car l))
+                      (starter-set (conf-set-get* state state-num starter)))
+                  (if (not (conf-set-next starter-set state-num))
+                      (begin
+                        (conf-set-adjoin state starter-set starter state-num)
+                        (loop1 (cdr l)))
+                      (loop1 (cdr l))))))
+
+            ;; check for possible completion of the non-terminal `nt' to the
+            ;; right of the dot
+
+            (let loop2 ((l (get enders nt)))
+              (when (pair? l)
+                (let ((ender (car l)))
+                  (if (conf-set-member? state ender state-num)
+                      (let ((next (+ conf 1))
+                            (next-set (conf-set-get* state state-num next)))
+                        (conf-set-union state next-set next conf-set)
+                        (loop2 (cdr l)))
+                      (loop2 (cdr l)))))))
+
+          (def (reduce states state state-num conf-set head preds)
+
+            ;; a non-terminal is now completed so check for reductions that
+            ;; are now possible at the configurations `preds'
+
+            (let loop1 ((l preds))
+              (when (pair? l)
+                (let ((pred (car l)))
+                  (let loop2 ((i head))
+                    (if (>= i 0)
+                        (let ((pred-set (conf-set-get (get states i) pred)))
+                          (when pred-set
+                            (let ((next (+ pred 1))
+                                  (next-set (conf-set-get* state state-num next)))
+                              (conf-set-union state next-set next pred-set)))
+                          (loop2 (conf-set-next conf-set i)))
+                        (loop1 (cdr l))))))))
+
+          (let ((state (get states state-num))
+                (nb-nts (length nts)))
+            (let loop ()
+              (let ((conf (get state 0)))
+                (when (>= conf 0)
+                  (let ((step (get steps conf))
+                        (conf-set (get state (+ conf 1)))
+                        (head (get conf-set 4)))
+                    (put! state 0 (get conf-set 0))
+                    (conf-set-merge-new! conf-set)
+                    (if (>= step 0)
+                        (predict state state-num conf-set conf step starters enders)
+                        (let ((preds (get predictors (+ step nb-nts))))
+                          (reduce states state state-num conf-set head preds)))
+                    (loop)))))))
+
+        (def (forward starters enders predictors steps nts toks)
+          (let ((nb-toks (length toks))
+                (nb-confs (length steps))
+                (states (make-states nb-toks nb-confs))
+                (goal-starters (get starters 0)))
+            (conf-set-adjoin* states 0 goal-starters 0) ;; predict goal
+            (forw states 0 starters enders predictors steps nts)
+            (let loop ((i 0))
+              (when (< i nb-toks)
+                (let ((tok-nts (cdr (get toks i))))
+                  (conf-set-adjoin* states (+ i 1) tok-nts i) ;; scan token
+                  (forw states (+ i 1) starters enders predictors steps nts)
+                  (loop (+ i 1)))))
+            states))
+
+        (def (produce conf i j enders steps toks states states* nb-nts)
+          (let ((prev (- conf 1)))
+            (when (and (>= conf nb-nts) (>= (get steps prev) 0))
+              (let loop1 ((l (get enders (get steps prev))))
+                (when (pair? l)
+                  (let ((ender (car l))
+                        (ender-set (conf-set-get (get states j) ender)))
+                    (if ender-set
+                        (let loop2 ((k (conf-set-head ender-set)))
+                          (if (>= k 0)
+                              (begin
+                                (and (>= k i)
+                                     (conf-set-adjoin** states states* k prev i)
+                                     (conf-set-adjoin** states states* j ender k))
+                                (loop2 (conf-set-next ender-set k)))
+                              (loop1 (cdr l))))
+                        (loop1 (cdr l)))))))))
+
+        (def (back states states* state-num enders steps nb-nts toks)
+          (let ((state* (get states* state-num)))
+            (let loop1 ()
+              (let ((conf (get state* 0)))
+                (when (>= conf 0)
+                  (let ((conf-set (get state* (+ conf 1)))
+                        (head (get conf-set 4)))
+                    (put! state* 0 (get conf-set 0))
+                    (conf-set-merge-new! conf-set)
+                    (let loop2 ((i head))
+                      (if (>= i 0)
+                          (begin
+                            (produce conf i state-num enders steps toks states states* nb-nts)
+                            (loop2 (conf-set-next conf-set i)))
+                          (loop1)))))))))
+
+        (def (backward states enders steps nts toks)
+          (let ((nb-toks (length toks))
+                (nb-confs (length steps))
+                (nb-nts (length nts))
+                (states* (make-states nb-toks nb-confs))
+                (goal-enders (get enders 0)))
+            (let loop1 ((l goal-enders))
+              (when (pair? l)
+                (let ((conf (car l)))
+                  (conf-set-adjoin** states states* nb-toks conf 0)
+                  (loop1 (cdr l)))))
+            (let loop2 ((i nb-toks))
+              (when (>= i 0)
+                (back states states* i enders steps nb-nts toks)
+                (loop2 (- i 1))))
+            states*))
+
+        (def (parsed? nt i j nts enders states)
+          (let ((nt* (ind nt nts)))
+            (if nt*
+                (let ((nb-nts (length nts)))
+                  (let loop ((l (get enders nt*)))
+                    (if (pair? l)
+                        (let ((conf (car l)))
+                          (if (conf-set-member? (get states j) conf i)
+                              #t
+                              (loop (cdr l))))
+                        #f)))
+                #f)))
+
+        (def (deriv-trees conf i j enders steps names toks states nb-nts)
+          (let ((name (get names conf)))
+
+            (if name ;; `conf' is at the start of a rule (either special or not)
+                (if (< conf nb-nts)
+                    (list (list name (car (get toks i))))
+                    (list (list name)))
+
+                (let ((prev (- conf 1)))
+                  (let loop1 ((l1 (get enders (get steps prev)))
+                              (l2 '()))
+                    (if (pair? l1)
+                        (let ((ender (car l1))
+                              (ender-set (conf-set-get (get states j) ender)))
+                          (if ender-set
+                              (let loop2 ((k (conf-set-head ender-set))
+                                          (l2 l2))
+                                (if (>= k 0)
+                                    (if (and (>= k i) (conf-set-member? (get states k) prev i))
+                                        (let ((prev-trees (deriv-trees prev i k enders steps names toks states nb-nts))
+                                              (ender-trees (deriv-trees ender
+                                                                        k
+                                                                        j
+                                                                        enders
+                                                                        steps
+                                                                        names
+                                                                        toks
+                                                                        states
+                                                                        nb-nts)))
+                                          (let loop3 ((l3 ender-trees)
+                                                      (l2 l2))
+                                            (if (pair? l3)
+                                                (let ((ender-tree (list (car l3))))
+                                                  (let loop4 ((l4 prev-trees)
+                                                              (l2 l2))
+                                                    (if (pair? l4)
+                                                        (loop4 (cdr l4) (cons (append (car l4) ender-tree) l2))
+                                                        (loop3 (cdr l3) l2))))
+                                                (loop2 (conf-set-next ender-set k) l2))))
+                                        (loop2 (conf-set-next ender-set k) l2))
+                                    (loop1 (cdr l1) l2)))
+                              (loop1 (cdr l1) l2)))
+                        l2))))))
+
+        (def (deriv-trees* nt i j nts enders steps names toks states)
+          (let ((nt* (ind nt nts)))
+            (if nt*
+                (let ((nb-nts (length nts)))
+                  (let loop ((l (get enders nt*))
+                             (trees '()))
+                    (if (pair? l)
+                        (let ((conf (car l)))
+                          (if (conf-set-member? (get states j) conf i)
+                              (loop (cdr l) (append (deriv-trees conf i j enders steps names toks states nb-nts) trees))
+                              (loop (cdr l) trees)))
+                        trees)))
+                #f)))
+
+        (def (nb-deriv-trees conf i j enders steps toks states nb-nts)
+          (let ((prev (- conf 1)))
+            (if (or (< conf nb-nts) (< (get steps prev) 0))
+                1
+                (let loop1 ((l (get enders (get steps prev)))
+                            (n 0))
+                  (if (pair? l)
+                      (let ((ender (car l))
+                            (ender-set (conf-set-get (get states j) ender)))
+                        (if ender-set
+                            (let loop2 ((k (conf-set-head ender-set))
+                                        (n n))
+                              (if (>= k 0)
+                                  (if (and (>= k i) (conf-set-member? (get states k) prev i))
+                                      (let ((nb-prev-trees (nb-deriv-trees prev i k enders steps toks states nb-nts))
+                                            (nb-ender-trees (nb-deriv-trees ender k j enders steps toks states nb-nts)))
+                                        (loop2 (conf-set-next ender-set k) (+ n (* nb-prev-trees nb-ender-trees))))
+                                      (loop2 (conf-set-next ender-set k) n))
+                                  (loop1 (cdr l) n)))
+                            (loop1 (cdr l) n)))
+                      n)))))
+
+        (def (nb-deriv-trees* nt i j nts enders steps toks states)
+          (let ((nt* (ind nt nts)))
+            (if nt*
+                (let ((nb-nts (length nts)))
+                  (let loop ((l (get enders nt*))
+                             (nb-trees 0))
+                    (if (pair? l)
+                        (let ((conf (car l)))
+                          (if (conf-set-member? (get states j) conf i)
+                              (loop (cdr l) (+ (nb-deriv-trees conf i j enders steps toks states nb-nts) nb-trees))
+                              (loop (cdr l) nb-trees)))
+                        nb-trees)))
+                #f)))
+
+        (let ((lexer (get parser-descr 0))
+              (nts (get parser-descr 1))
+              (starters (get parser-descr 2))
+              (enders (get parser-descr 3))
+              (predictors (get parser-descr 4))
+              (steps (get parser-descr 5))
+              (names (get parser-descr 6))
+              (toks (input->tokens input lexer nts)))
+
+          (array nts
+                 starters
+                 enders
+                 predictors
+                 steps
+                 names
+                 toks
+                 (backward (forward starters enders predictors steps nts toks) enders steps nts toks)
+                 parsed?
+                 deriv-trees*
+                 nb-deriv-trees*))))))
+
+(def (parse->parsed? parse nt i j)
+  (let ((nts (get parse 0))
+        (enders (get parse 2))
+        (states (get parse 7))
+        (parsed? (get parse 8)))
+    (parsed? nt i j nts enders states)))
+
+(def (parse->trees parse nt i j)
+  (let ((nts (get parse 0))
+        (enders (get parse 2))
+        (steps (get parse 4))
+        (names (get parse 5))
+        (toks (get parse 6))
+        (states (get parse 7))
+        (deriv-trees* (get parse 9)))
+    (deriv-trees* nt i j nts enders steps names toks states)))
+
+(def (parse->nb-trees parse nt i j)
+  (let ((nts (get parse 0))
+        (enders (get parse 2))
+        (steps (get parse 4))
+        (toks (get parse 6))
+        (states (get parse 7))
+        (nb-deriv-trees* (get parse 10)))
+    (nb-deriv-trees* nt i j nts enders steps toks states)))
+
+(def (test input)
+  (let ((p (make-parser '((s (a) (s s))) (fn (l) (map (fn (x) (list x x)) l)))))
+    (let ((x (p input))
+          (n (length input)))
+      (length (parse->trees x 's 0 n)))))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input1 (bench-read))
+        (output (bench-read))
+        (s2 (number->string count))
+        (name "earley"))
+    (run-ported-benchmark (string-append name ":" s2)
+                          count
+                          (fn () (test (bench-hide count (array-to-list (bench-make-array input1 'a)))))
+                          (fn (result) (equal? result output)))))

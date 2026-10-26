@@ -1,0 +1,16 @@
+;; SUM -- Sum integers from n down to zero.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+
+(def (run n)
+  (let loop ((i n)
+             (sum 0))
+    (if (< i 0)
+        sum
+        (loop (- i 1) (+ i sum)))))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input (bench-read))
+        (output (bench-read))
+        (name (str "sum:" input ":" count)))
+    (run-ported-benchmark name count (fn () (run (bench-hide count input))) (fn (result) (equal? result output)))))

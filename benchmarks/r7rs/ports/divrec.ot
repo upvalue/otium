@@ -1,0 +1,22 @@
+;; DIVREC -- Divide by two using lists of empty lists.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+
+(def (create-n n)
+  (let loop ((n n)
+             (a '()))
+    (if (= n 0)
+        a
+        (loop (- n 1) (cons '() a)))))
+
+(def (recursive-div2 xs)
+  (if (null? xs)
+      '()
+      (cons (car xs) (recursive-div2 (cddr xs)))))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input (bench-read))
+        (output (bench-read))
+        (xs (create-n (bench-hide count input)))
+        (name (str "divrec:" input ":" count)))
+    (run-ported-benchmark name count (fn () (recursive-div2 xs)) (fn (result) (equal? (length result) output)))))

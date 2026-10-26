@@ -1,0 +1,47 @@
+;;; TRIANGL -- Board game benchmark.
+
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+
+(def *board* (list-to-array '(1 1 1 1 1 0 1 1 1 1 1 1 1 1 1 1)))
+
+(def *sequence* (list-to-array '(0 0 0 0 0 0 0 0 0 0 0 0 0 0)))
+
+(def *a* (list-to-array '(1 2 4 3 5 6 1 3 6 2 5 4 11 12 13 7 8 4 4 7 11 8 12 13 6 10 15 9 14 13 13 14 15 9 10 6 6)))
+
+(def *b* (list-to-array '(2 4 7 5 8 9 3 6 10 5 9 8 12 13 14 8 9 5 2 4 7 5 8 9 3 6 10 5 9 8 12 13 14 8 9 5 5)))
+
+(def *c* (list-to-array '(4 7 11 8 12 13 6 10 15 9 14 13 13 14 15 9 10 6 1 2 4 3 5 6 1 3 6 2 5 4 11 12 13 7 8 4 4)))
+
+(def *answer* '())
+
+(def (attempt i depth)
+  (cond
+    ((= depth 14) (set! *answer* (cons (cdr (array-to-list *sequence*)) *answer*)) #t)
+    ((and (= 1 (get *board* (get *a* i))) (= 1 (get *board* (get *b* i))) (= 0 (get *board* (get *c* i))))
+     (put! *board* (get *a* i) 0)
+     (put! *board* (get *b* i) 0)
+     (put! *board* (get *c* i) 1)
+     (put! *sequence* depth i)
+     (let ((j 0)
+           (next-depth (+ depth 1)))
+       (while (and (< j 36) (not (attempt j next-depth))) (set! j (+ j 1))))
+     (put! *board* (get *a* i) 1)
+     (put! *board* (get *b* i) 1)
+     (put! *board* (get *c* i) 0)
+     #f)
+    (else #f)))
+
+(def (test i depth)
+  (set! *answer* '())
+  (attempt i depth)
+  (car *answer*))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input1 (bench-read))
+        (input2 (bench-read))
+        (output (bench-read)))
+    (run-ported-benchmark (str "triangl:" input1 ":" input2 ":" count)
+                          count
+                          (fn () (test (bench-hide count input1) (bench-hide count input2)))
+                          (fn (result) (equal? result output)))))

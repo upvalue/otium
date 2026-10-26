@@ -1,0 +1,51 @@
+{
+  "cat": {
+    "fixtures": {
+      "inputs/cat.txt": "one two\nthree\tfour five\nlast"
+    },
+    "expected_outputs": {
+      "outputs/cat.output": "one two\nthree\tfour five\nlast"
+    },
+    "fixture_directories": [
+      "outputs"
+    ]
+  },
+  "tail": {
+    "fixtures": {
+      "inputs/tail.txt": "one two\nthree\tfour five\nlast"
+    },
+    "expected_outputs": {
+      "outputs/tail.output": "last\nthree\tfour five\none two\n"
+    },
+    "fixture_directories": [
+      "outputs"
+    ]
+  },
+  "wc": {
+    "fixtures": {
+      "inputs/wc.txt": "one two\nthree\tfour five\nlast"
+    },
+    "expected_outputs": {},
+    "fixture_directories": [
+      "outputs"
+    ]
+  },
+  "sum1": {
+    "fixtures": {
+      "inputs/sum1.txt": "1.25\n-2\n3.5\n4\n"
+    }
+  },
+  "read1": {
+    "fixtures": {
+      "inputs/read1.txt": "; comment\n(define (f x) (+ x 1))\n42\n\"hello\"\n(should return this list)\n"
+    }
+  },
+  "ray": {
+    "fixture_directories": [
+      "outputs"
+    ],
+    "expected_output_hashes": {
+      "outputs/ray.output": "38babccc4583f44c18d17488314bffe9723a0fd2bdeff7227ec0d7ed1ea1463d"
+    }
+  }
+}

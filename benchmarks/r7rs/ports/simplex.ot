@@ -1,0 +1,185 @@
+;; SIMPLEX -- Port of the upstream R7RS benchmark.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+
+(def (matrix-rows a)
+  (length a))
+
+(def (matrix-columns a)
+  (length (get a 0)))
+
+(def (matrix-ref a i j)
+  (get (get a i) j))
+
+(def (matrix-set! a i j x)
+  (put! (get a i) j x))
+
+(def (complain)
+  (error "This shouldn't happen"))
+
+(def (simplex a m1 m2 m3)
+  (def *epsilon* 0.000001)
+  (unless (and (>= m1 0) (>= m2 0) (>= m3 0) (= (matrix-rows a) (+ m1 m2 m3 2))) (complain))
+  (let ((m12 (+ m1 m2 1))
+        (m (- (matrix-rows a) 2))
+        (n (- (matrix-columns a) 1))
+        (l1 (bench-make-array n nil))
+        (l2 (bench-make-array m nil))
+        (l3 (bench-make-array m2 nil))
+        (nl1 n)
+        (iposv (bench-make-array m nil))
+        (izrov (bench-make-array n nil))
+        (ip 0)
+        (kp 0)
+        (bmax 0.0)
+        (one? #f)
+        (pass2? #t))
+    (def (simp1 mm abs?)
+      (set! kp (get l1 0))
+      (set! bmax (matrix-ref a mm kp))
+      (for ((k :range 1 nl1))
+        (when (positive? (if abs?
+                             (- (abs (matrix-ref a mm (get l1 k))) (abs bmax))
+                             (- (matrix-ref a mm (get l1 k)) bmax)))
+          (begin
+            (set! kp (get l1 k))
+            (set! bmax (matrix-ref a mm (get l1 k)))))))
+    (def (simp2)
+      (set! ip 0)
+      (let ((q1 0.0)
+            (flag? #f))
+        (for ((i :range 0 m))
+          (if flag?
+              (when (< (matrix-ref a (get l2 i) kp) (- *epsilon*))
+                (let ((q (/ (- (matrix-ref a (get l2 i) 0)) (matrix-ref a (get l2 i) kp))))
+                  (cond
+                    ((< q q1) (set! ip (get l2 i)) (set! q1 q))
+                    ((= q q1)
+                     (let ((qp 0.0)
+                           (q0 0.0))
+                       (let loop ((k 1))
+                         (if (<= k n)
+                             (begin
+                               (set! qp (/ (- (matrix-ref a ip k)) (matrix-ref a ip kp)))
+                               (set! q0 (/ (- (matrix-ref a (get l2 i) k)) (matrix-ref a (get l2 i) kp)))
+                               (if (= q0 qp) (loop (+ k 1))))))
+                       (if (< q0 qp) (set! ip (get l2 i))))))))
+              (when (< (matrix-ref a (get l2 i) kp) (- *epsilon*))
+                (set! q1 (/ (- (matrix-ref a (get l2 i) 0)) (matrix-ref a (get l2 i) kp)))
+                (set! ip (get l2 i))
+                (set! flag? #t))))))
+    (def (simp3 one?)
+      (let ((piv (/ (matrix-ref a ip kp))))
+        (for ((ii :range 0
+                  (+ m
+                     (if one?
+                         2
+                         1))))
+          (unless (= ii ip)
+            (matrix-set! a ii kp (* piv (matrix-ref a ii kp)))
+            (for ((kk :range 0 (+ n 1)))
+              (unless (= kk kp)
+                (matrix-set! a ii kk (- (matrix-ref a ii kk) (* (matrix-ref a ip kk) (matrix-ref a ii kp))))))))
+        (for ((kk :range 0 (+ n 1)))
+          (unless (= kk kp) (matrix-set! a ip kk (* (- piv) (matrix-ref a ip kk)))))
+        (matrix-set! a ip kp piv)))
+    (for ((k :range 0 n))
+      (put! l1 k (+ k 1))
+      (put! izrov k k))
+    (for ((i :range 0 m))
+      (when (negative? (matrix-ref a (+ i 1) 0)) (complain))
+      (put! l2 i (+ i 1))
+      (put! iposv i (+ n i)))
+    (for ((i :range 0 m2))
+      (put! l3 i #t))
+    (when (positive? (+ m2 m3))
+      (for ((k :range 0 (+ n 1)))
+        (let sum-column ((i (+ m1 1))
+                         (sum 0.0))
+          (if (> i m)
+              (matrix-set! a (+ m 1) k (- sum))
+              (sum-column (+ i 1) (+ sum (matrix-ref a i k))))))
+      (let loop ()
+        (simp1 (+ m 1) #f)
+        (cond
+          ((<= bmax *epsilon*)
+           (cond
+             ((< (matrix-ref a (+ m 1) 0) (- *epsilon*)) (set! pass2? #f))
+             ((<= (matrix-ref a (+ m 1) 0) *epsilon*)
+              (let loop ((ip1 m12))
+                (if (<= ip1 m)
+                    (cond
+                      ((= (get iposv (- ip1 1)) (+ ip n -1))
+                       (simp1 ip1 #t)
+                       (cond
+                         ((positive? bmax) (set! ip ip1) (set! one? #t))
+                         (else (loop (+ ip1 1)))))
+                      (else (loop (+ ip1 1))))
+                    (for ((i :range (+ m1 1) m12))
+                      (when (get l3 (- i (+ m1 1)))
+                        (for ((k :range 0 (+ n 1)))
+                          (matrix-set! a i k (- (matrix-ref a i k)))))))))
+             (else (simp2)
+                   (if (zero? ip)
+                       (set! pass2? #f)
+                       (set! one? #t)))))
+          (else (simp2)
+                (if (zero? ip)
+                    (set! pass2? #f)
+                    (set! one? #t))))
+        (when one?
+          (set! one? #f)
+          (simp3 #t)
+          (cond
+            ((>= (get iposv (- ip 1)) (+ n m12 -1))
+             (let loop ((k 0))
+               (cond
+                 ((and (< k nl1) (not (= kp (get l1 k)))) (loop (+ k 1)))
+                 (else (set! nl1 (- nl1 1))
+                       (for ((is :range k nl1))
+                         (put! l1 is (get l1 (+ is 1))))
+                       (matrix-set! a (+ m 1) kp (+ (matrix-ref a (+ m 1) kp) 1.0))
+                       (for ((i :range 0 (+ m 2)))
+                         (matrix-set! a i kp (- (matrix-ref a i kp))))))))
+            ((and (>= (get iposv (- ip 1)) (+ n m1)) (get l3 (- (get iposv (- ip 1)) (+ m1 n))))
+             (put! l3 (- (get iposv (- ip 1)) (+ m1 n)) #f)
+             (matrix-set! a (+ m 1) kp (+ (matrix-ref a (+ m 1) kp) 1.0))
+             (for ((i :range 0 (+ m 2)))
+               (matrix-set! a i kp (- (matrix-ref a i kp))))))
+          (let ((t (get izrov (- kp 1))))
+            (put! izrov (- kp 1) (get iposv (- ip 1)))
+            (put! iposv (- ip 1) t))
+          (loop))))
+    (and pass2?
+         (let loop ()
+           (simp1 0 #f)
+           (cond
+             ((positive? bmax)
+              (simp2)
+              (cond
+                ((zero? ip) #t)
+                (else (simp3 #f)
+                      (let ((t (get izrov (- kp 1))))
+                        (put! izrov (- kp 1) (get iposv (- ip 1)))
+                        (put! iposv (- ip 1) t))
+                      (loop))))
+             (else (list iposv izrov)))))))
+
+(def (test _input)
+  (simplex [[0.0 1.0 1.0 3.0 -0.5]
+            [740.0 -1.0 0.0 -2.0 0.0]
+            [0.0 0.0 -2.0 0.0 7.0]
+            [0.5 0.0 -1.0 1.0 -2.0]
+            [9.0 -1.0 -1.0 -1.0 -1.0]
+            [0.0 0.0 0.0 0.0 0.0]]
+           2
+           1
+           1))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input (bench-read))
+        (output (bench-read)))
+    (run-ported-benchmark (str "simplex:" count)
+                          count
+                          (fn () (test (bench-hide count input)))
+                          (fn (result) (equal? result output)))))

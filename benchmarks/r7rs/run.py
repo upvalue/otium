@@ -80,7 +80,14 @@ def parse_result(stdout, returncode):
         return "crashed", implementation, name, None, f"bad reported time: {value}"
 
 
-def execute(command, timeout, stdin=None, env=None):
+def prepare_workdir(root, destination):
+    destination.mkdir()
+    (destination / "inputs").symlink_to((root / "vendor/inputs").resolve(), target_is_directory=True)
+    (destination / "outputs").mkdir()
+    return destination
+
+
+def execute(command, timeout, stdin=None, env=None, cwd=None):
     started = time.perf_counter()
     try:
         result = subprocess.run(
@@ -91,6 +98,7 @@ def execute(command, timeout, stdin=None, env=None):
             check=False,
             timeout=timeout,
             env=env,
+            cwd=cwd,
         )
     except subprocess.TimeoutExpired as error:
         return "timeout", timeout, "", (error.stderr or "")
@@ -99,11 +107,23 @@ def execute(command, timeout, stdin=None, env=None):
 
 
 def otium_program(root, name, implementation, input_text):
+    inputs = f"'(\n{input_text}\n)"
+    if name == "pnpoly":
+        # Its two inputs are flat numeric Scheme vectors. Translate their syntax
+        # and construct arrays before timing. Quoted Otium arrays are syntax lists.
+        input_text = re.sub(r"#\(([+\-0-9.eE\s]*)\)", r"[\1]", input_text)
+        inputs = f"(list\n{input_text}\n)"
+    elif name == "simplex":
+        # The expected answer is a list of numeric vectors. Build its arrays
+        # outside timing while keeping the benchmark's structural result check.
+        input_text = re.sub(r"#\(([+\-0-9.eE\s]*)\)", r"(\1)", input_text)
+        inputs = (f"(let ((data '(\n{input_text}\n))) "
+                  "(list (car data) (cadr data) (map list-to-array (caddr data))))")
     library = (root / "lib" / "benchmark.ot").read_text()
     port = (root / "ports" / f"{name}.ot").read_text()
     return (
         f'(def *benchmark-implementation* "{implementation}")\n'
-        f"(def *benchmark-inputs* '(\n{input_text}\n))\n"
+        f"(def *benchmark-inputs* {inputs})\n"
         f"{library}\n{port}\n(benchmark-main)\n"
     )
 
@@ -163,7 +183,7 @@ def main():
     guile = shutil.which("guile") if args.reference == "guile" else None
     with tempfile.TemporaryDirectory(prefix="otium-r7rs-") as temp_dir:
         temp = Path(temp_dir)
-        for name in selected:
+        for selection_index, name in enumerate(selected):
             entry = manifest["benchmarks"][name]
             input_path = root / "vendor" / "inputs" / f"{name}.input"
             input_text = input_path.read_text()
@@ -175,10 +195,11 @@ def main():
             program_path = temp / f"{name}-otium.ot"
             program_path.write_text(otium_program(root, name, implementation, input_text))
 
+            port_cwd = prepare_workdir(root, temp / f"{selection_index}-{name}-port-work")
             commands.append([*binary, *flags, str(program_path)])
             for sample in range(1, args.runs + 1):
                 code, wall, stdout, stderr = execute(
-                    [*binary, *flags, str(program_path)], args.timeout
+                    [*binary, *flags, str(program_path)], args.timeout, cwd=port_cwd
                 )
                 if code == "timeout":
                     status, impl, bench_name, reported, reason = (
@@ -224,11 +245,12 @@ def main():
                     continue
                 source_path = temp / f"{name}-guile.scm"
                 source_path.write_text(upstream_program(root, name))
+                upstream_cwd = prepare_workdir(root, temp / f"{selection_index}-{name}-upstream-work")
                 env = os.environ.copy()
                 env["GC_INITIAL_HEAP_SIZE"] = "100000000"
                 for sample in range(1, args.runs + 1):
                     code, wall, stdout, stderr = execute(
-                        [guile, str(source_path)], args.timeout, stdin=input_text, env=env
+                        [guile, str(source_path)], args.timeout, stdin=input_text, env=env, cwd=upstream_cwd
                     )
                     if code == "timeout":
                         status, impl, bench_name, reported, reason = (
@@ -290,7 +312,11 @@ def main():
             f"{row['wall_seconds']} |"
         )
     (output_dir / "STATUS.md").write_text("\n".join(status_lines) + "\n")
-    (output_dir / "metadata.json").write_text(json.dumps(metadata(commands, build_label=args.build_label), indent=2) + "\n")
+    provenance = metadata(commands, build_label=args.build_label)
+    provenance["working_directory"] = (
+        "Separate temporary directories for each benchmark and variant; "
+        "inputs link to vendor/inputs, outputs stay temporary.")
+    (output_dir / "metadata.json").write_text(json.dumps(provenance, indent=2) + "\n")
     print(f"Results: {output_dir}")
     return 1 if had_failure else 0
 

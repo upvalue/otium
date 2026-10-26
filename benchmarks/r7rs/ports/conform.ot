@@ -1,0 +1,513 @@
+;; lint: allow-file(liftable-function) Keep helper closures at their upstream allocation sites.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+;;; CONFORM -- Type checker, written by Jim Miller.
+
+;;; Functional and unstable
+
+(def (sort-list obj pred)
+
+  (def (loop l)
+    (if (and (pair? l) (pair? (cdr l)))
+        (split-list l '() '())
+        l))
+
+  (def (split-list l one two)
+    (if (pair? l)
+        (split-list (cdr l) two (cons (car l) one))
+        (merge (loop one) (loop two))))
+
+  (def (merge one two)
+    (cond
+      ((null? one) two)
+      ((pred (car two) (car one)) (cons (car two) (merge (cdr two) one)))
+      (else (cons (car one) (merge (cdr one) two)))))
+
+  (loop obj))
+
+;; SET OPERATIONS
+;; (representation as lists with distinct elements)
+
+(def (adjoin element set)
+  (if (memq element set)
+      set
+      (cons element set)))
+
+(def (eliminate element set)
+  (cond
+    ((null? set) set)
+    ((eq? element (car set)) (cdr set))
+    (else (cons (car set) (eliminate element (cdr set))))))
+
+(def (intersect list1 list2)
+  (let loop ((l list1))
+    (cond
+      ((null? l) '())
+      ((memq (car l) list2) (cons (car l) (loop (cdr l))))
+      (else (loop (cdr l))))))
+
+(def (union list1 list2)
+  (if (null? list1)
+      list2
+      (union (cdr list1) (adjoin (car list1) list2))))
+
+;; GRAPH NODES
+
+(def make-internal-node array)
+
+(def (internal-node-name node)
+  (get node 0))
+
+(def (internal-node-green-edges node)
+  (get node 1))
+
+(def (internal-node-red-edges node)
+  (get node 2))
+
+(def (internal-node-blue-edges node)
+  (get node 3))
+
+(def (set-internal-node-name! node name)
+  (put! node 0 name))
+
+(def (set-internal-node-green-edges! node edges)
+  (put! node 1 edges))
+
+(def (set-internal-node-red-edges! node edges)
+  (put! node 2 edges))
+
+(def (set-internal-node-blue-edges! node edges)
+  (put! node 3 edges))
+
+;; lint: allow(rest-arguments) Preserve the upstream variadic node constructor.
+(def (make-node name . blue-edges) ;; User's constructor
+  (let ((name (if (symbol? name)
+                  (symbol->string name)
+                  name))
+        (blue-edges (if (null? blue-edges)
+                        'NOT-A-NODE-YET
+                        (car blue-edges))))
+    (make-internal-node name '() '() blue-edges)))
+
+(def (copy-node node)
+  (make-internal-node (internal-node-name node) '() '() (blue-edges node)))
+
+;; Selectors
+
+;;(define name internal-node-name)
+(def (make-edge-getter selector)
+  (fn (node)
+    (if (or (none-node? node) (any-node? node))
+        (error #f "Can't get edges from the ANY or NONE nodes")
+        (selector node))))
+
+(def red-edges (make-edge-getter internal-node-red-edges))
+
+(def green-edges (make-edge-getter internal-node-green-edges))
+
+(def blue-edges (make-edge-getter internal-node-blue-edges))
+
+;; Mutators
+
+(def (make-edge-setter mutator!)
+  (fn (node value)
+    (cond
+      ((any-node? node) (error #f "Can't set edges from the ANY node"))
+      ((none-node? node) 'OK)
+      (else (mutator! node value)))))
+
+(def set-red-edges! (make-edge-setter set-internal-node-red-edges!))
+
+(def set-green-edges! (make-edge-setter set-internal-node-green-edges!))
+
+(def set-blue-edges! (make-edge-setter set-internal-node-blue-edges!))
+
+;; BLUE EDGES
+
+(def make-blue-edge array)
+
+(def (blue-edge-operation edge)
+  (get edge 0))
+
+(def (blue-edge-arg-node edge)
+  (get edge 1))
+
+(def (blue-edge-res-node edge)
+  (get edge 2))
+
+(def (set-blue-edge-operation! edge value)
+  (put! edge 0 value))
+
+(def (set-blue-edge-arg-node! edge value)
+  (put! edge 1 value))
+
+(def (set-blue-edge-res-node! edge value)
+  (put! edge 2 value))
+
+;; Selectors
+(def operation blue-edge-operation)
+
+(def arg-node blue-edge-arg-node)
+
+(def res-node blue-edge-res-node)
+
+;; Mutators
+(def set-arg-node! set-blue-edge-arg-node!)
+
+(def set-res-node! set-blue-edge-res-node!)
+
+;; Higher level operations on blue edges
+
+(def (lookup-op op node)
+  (let loop ((edges (blue-edges node)))
+    (cond
+      ((null? edges) '())
+      ((eq? op (operation (car edges))) (car edges))
+      (else (loop (cdr edges))))))
+
+(def (has-op? op node)
+  (not (null? (lookup-op op node))))
+
+;; GRAPHS
+
+(def make-internal-graph array)
+
+(def (internal-graph-nodes graph)
+  (get graph 0))
+
+(def (internal-graph-already-met graph)
+  (get graph 1))
+
+(def (internal-graph-already-joined graph)
+  (get graph 2))
+
+(def (set-internal-graph-nodes! graph nodes)
+  (put! graph 0 nodes))
+
+;; Constructor
+
+;; lint: allow(rest-arguments) The graph constructor accepts an arbitrary node list.
+(def (make-graph . nodes)
+  (make-internal-graph nodes (make-empty-table) (make-empty-table)))
+
+;; Selectors
+
+(def graph-nodes internal-graph-nodes)
+
+(def already-met internal-graph-already-met)
+
+(def already-joined internal-graph-already-joined)
+
+;; Higher level functions on graphs
+
+(def (add-graph-nodes! graph nodes)
+  (set-internal-graph-nodes! graph (cons nodes (graph-nodes graph))))
+
+(def (copy-graph g)
+  (def (copy-list l)
+    (array-to-list (list-to-array l)))
+  (make-internal-graph (copy-list (graph-nodes g)) (already-met g) (already-joined g)))
+
+(def (clean-graph g)
+  (def (clean-node node)
+    (unless (or (any-node? node) (none-node? node))
+      (set-green-edges! node '())
+      (set-red-edges! node '())))
+  (for-each clean-node (graph-nodes g))
+  g)
+
+(def (canonicalize-graph graph classes)
+  (def (fix node)
+    (def (fix-set object selector mutator)
+      (mutator object (map (fn (node) (find-canonical-representative node classes)) (selector object))))
+    (unless (or (none-node? node) (any-node? node))
+      (fix-set node green-edges set-green-edges!)
+      (fix-set node red-edges set-red-edges!)
+      (for-each (fn (blue-edge)
+                  (set-arg-node! blue-edge (find-canonical-representative (arg-node blue-edge) classes))
+                  (set-res-node! blue-edge (find-canonical-representative (res-node blue-edge) classes)))
+                (blue-edges node)))
+    node)
+  (def (fix-table table)
+    (def (canonical? node)
+      (eq? node (find-canonical-representative node classes)))
+    (def (filter-and-fix predicate-fn update-fn list)
+      (let loop ((list list))
+        (cond
+          ((null? list) '())
+          ((predicate-fn (car list)) (cons (update-fn (car list)) (loop (cdr list))))
+          (else (loop (cdr list))))))
+    (def (fix-line line)
+      (filter-and-fix (fn (entry) (canonical? (car entry)))
+                      (fn (entry) (cons (car entry) (find-canonical-representative (cdr entry) classes)))
+                      line))
+    (if (null? table)
+        '()
+        (cons (car table)
+              (filter-and-fix (fn (entry) (canonical? (car entry)))
+                              (fn (entry) (cons (car entry) (fix-line (cdr entry))))
+                              (cdr table)))))
+  (make-internal-graph (map (fn (class) (fix (car class))) classes)
+                       (fix-table (already-met graph))
+                       (fix-table (already-joined graph))))
+
+;; USEFUL NODES
+
+(def none-node (make-node 'none #t))
+
+(def (none-node? node)
+  (eq? node none-node))
+
+(def any-node (make-node 'any '()))
+
+(def (any-node? node)
+  (eq? node any-node))
+
+;; COLORED EDGE TESTS
+
+(def (green-edge? from-node to-node)
+  (cond
+    ((any-node? from-node) #f)
+    ((none-node? from-node) #t)
+    ((memq to-node (green-edges from-node)) #t)
+    (else #f)))
+
+(def (red-edge? from-node to-node)
+  (cond
+    ((any-node? from-node) #f)
+    ((none-node? from-node) #t)
+    ((memq to-node (red-edges from-node)) #t)
+    (else #f)))
+
+;; SIGNATURE
+
+;; Return signature (i.e. <arg, res>) given an operation and a node
+
+(def sig
+  (let ((none-comma-any (cons none-node any-node)))
+    (fn (op node) ;; Returns (arg, res)
+      (let ((the-edge (lookup-op op node)))
+        (if (not (null? the-edge))
+            (cons (arg-node the-edge) (res-node the-edge))
+            none-comma-any)))))
+
+;; Selectors from signature
+
+(def (arg pair)
+  (car pair))
+
+(def (res pair)
+  (cdr pair))
+
+;; CONFORMITY
+
+(def (conforms? t1 t2)
+  (def nodes-with-red-edges-out '())
+  (def (add-red-edge! from-node to-node)
+    (set-red-edges! from-node (adjoin to-node (red-edges from-node)))
+    (set! nodes-with-red-edges-out (adjoin from-node nodes-with-red-edges-out)))
+  (def (greenify-red-edges! from-node)
+    (set-green-edges! from-node (append (red-edges from-node) (green-edges from-node)))
+    (set-red-edges! from-node '()))
+  (def (delete-red-edges! from-node)
+    (set-red-edges! from-node '()))
+  (def (does-conform t1 t2)
+    (cond
+      ((or (none-node? t1) (any-node? t2)) #t)
+      ((or (any-node? t1) (none-node? t2)) #f)
+      ((green-edge? t1 t2) #t)
+      ((red-edge? t1 t2) #t)
+      (else (add-red-edge! t1 t2)
+            (let loop ((blues (blue-edges t2)))
+              (if (null? blues)
+                  #t
+                  (let ((current-edge (car blues))
+                        (phi (operation current-edge)))
+                    (and (has-op? phi t1)
+                         (does-conform (res (sig phi t1)) (res (sig phi t2)))
+                         (does-conform (arg (sig phi t2)) (arg (sig phi t1)))
+                         (loop (cdr blues)))))))))
+  (let ((result (does-conform t1 t2)))
+    (for-each (if result
+                  greenify-red-edges!
+                  delete-red-edges!)
+              nodes-with-red-edges-out)
+    result))
+
+(def (equivalent? a b)
+  (and (conforms? a b) (conforms? b a)))
+
+;; EQUIVALENCE CLASSIFICATION
+;; Given a list of nodes, return a list of equivalence classes
+
+(def (classify nodes)
+  (let node-loop ((classes '())
+                  (nodes nodes))
+    (if (null? nodes)
+        (map (fn (class)
+               (sort-list class
+                          (fn (node1 node2)
+                            (< (string-length (internal-node-name node1)) (string-length (internal-node-name node2))))))
+             classes)
+        (let ((this-node (car nodes)))
+          (def (add-node classes)
+            (cond
+              ((null? classes) (list (list this-node)))
+              ((equivalent? this-node (caar classes)) (cons (cons this-node (car classes)) (cdr classes)))
+              (else (cons (car classes) (add-node (cdr classes))))))
+          (node-loop (add-node classes) (cdr nodes))))))
+
+;; Given a node N and a classified set of nodes,
+;; find the canonical member corresponding to N
+
+(def (find-canonical-representative element classification)
+  (let loop ((classes classification))
+    (cond
+      ((null? classes) (error #f "Can't classify" element))
+      ((memq element (car classes)) (car (car classes)))
+      (else (loop (cdr classes))))))
+
+;; Reduce a graph by taking only one member of each equivalence
+;; class and canonicalizing all outbound pointers
+
+(def (xreduce graph)
+  (let ((classes (classify (graph-nodes graph)))) (canonicalize-graph graph classes)))
+
+;; TWO DIMENSIONAL TABLES
+
+(def (make-empty-table)
+  (list 'TABLE))
+
+(def (lookup table x y)
+  (let ((one (assq x (cdr table))))
+    (if one
+        (let ((two (assq y (cdr one))))
+          (if two
+              (cdr two)
+              #f))
+        #f)))
+
+(def (insert! table x y value)
+  (def (make-singleton-table x y)
+    (list (cons x y)))
+  (let ((one (assq x (cdr table))))
+    (if one
+        (set-cdr! one (cons (cons y value) (cdr one)))
+        (set-cdr! table (cons (cons x (make-singleton-table y value)) (cdr table))))))
+
+;; MEET/JOIN
+;; These update the graph when computing the node for node1*node2
+
+(def (blue-edge-operate arg-fn res-fn graph op sig1 sig2)
+  (make-blue-edge op (arg-fn graph (arg sig1) (arg sig2)) (res-fn graph (res sig1) (res sig2))))
+
+(def (meet graph node1 node2)
+  (cond
+    ((eq? node1 node2) node1)
+    ((or (any-node? node1) (any-node? node2)) any-node) ;; canonicalize
+    ((none-node? node1) node2)
+    ((none-node? node2) node1)
+    ((lookup (already-met graph) node1 node2)) ;; return it if found
+    ((conforms? node1 node2) node2)
+    ((conforms? node2 node1) node1)
+    (else (let ((result (make-node (string-append "("
+                                                  (internal-node-name node1)
+                                                  " ^ "
+                                                  (internal-node-name node2)
+                                                  ")"))))
+            (add-graph-nodes! graph result)
+            (insert! (already-met graph) node1 node2 result)
+            (set-blue-edges! result
+                             (map (fn (op) (blue-edge-operate join meet graph op (sig op node1) (sig op node2)))
+                                  (intersect (map operation (blue-edges node1)) (map operation (blue-edges node2)))))
+            result))))
+
+(def (join graph node1 node2)
+  (cond
+    ((eq? node1 node2) node1)
+    ((any-node? node1) node2)
+    ((any-node? node2) node1)
+    ((or (none-node? node1) (none-node? node2)) none-node) ;; canonicalize
+    ((lookup (already-joined graph) node1 node2)) ;; return it if found
+    ((conforms? node1 node2) node1)
+    ((conforms? node2 node1) node2)
+    (else (let ((result (make-node (string-append "("
+                                                  (internal-node-name node1)
+                                                  " v "
+                                                  (internal-node-name node2)
+                                                  ")"))))
+            (add-graph-nodes! graph result)
+            (insert! (already-joined graph) node1 node2 result)
+            (set-blue-edges! result
+                             (map (fn (op) (blue-edge-operate meet join graph op (sig op node1) (sig op node2)))
+                                  (union (map operation (blue-edges node1)) (map operation (blue-edges node2)))))
+            result))))
+
+;; MAKE A LATTICE FROM A GRAPH
+
+(def (make-lattice g print?)
+  (def (step g)
+    (let ((copy (copy-graph g))
+          (nodes (graph-nodes copy)))
+      (for-each (fn (first)
+                  (for-each (fn (second)
+                              (meet copy first second)
+                              (join copy first second))
+                            nodes))
+                nodes)
+      copy))
+  (def (loop g count)
+    (when print? (display count))
+    (let ((lattice (step g)))
+      (when print?
+        (display " -> ")
+        (display (length (graph-nodes lattice))))
+      (let ((new-g (xreduce lattice))
+            (new-count (length (graph-nodes new-g))))
+        (if (= new-count count)
+            (begin
+              (when print? (newline))
+              new-g)
+            (begin
+              (when print?
+                (display " -> ")
+                (display new-count)
+                (newline))
+              (loop new-g new-count))))))
+  (let ((graph (apply make-graph (adjoin any-node (adjoin none-node (graph-nodes (clean-graph g)))))))
+    (loop graph (length (graph-nodes graph)))))
+
+;; DEBUG and TEST
+
+(def a '())
+
+(def b '())
+
+(def c '())
+
+(def d '())
+
+(def (setup a0 b0 c0 d0)
+  (set! a (make-node a0))
+  (set! b (make-node b0))
+  (set-blue-edges! a (list (make-blue-edge 'phi any-node b)))
+  (set-blue-edges! b (list (make-blue-edge 'phi any-node a) (make-blue-edge 'theta any-node b)))
+  (set! c (make-node c0))
+  (set! d (make-node d0))
+  (set-blue-edges! c (list (make-blue-edge 'theta any-node b)))
+  (set-blue-edges! d (list (make-blue-edge 'phi any-node c) (make-blue-edge 'theta any-node d)))
+  '(made a b c d))
+
+(def (test a0 b0 c0 d0)
+  (setup a0 b0 c0 d0)
+  (map internal-node-name (graph-nodes (make-lattice (make-graph a b c d any-node none-node) #f))))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input1 (bench-read))
+        (output (bench-read))
+        (s (number->string count))
+        (name "conform"))
+    (run-ported-benchmark (string-append name ":" s)
+                          count
+                          (fn () (apply test input1))
+                          (fn (result) (equal? result output)))))

@@ -1,0 +1,29 @@
+;; TAIL -- Read all lines, then write them in reverse order.
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+
+(def (tail-r-aux port file-so-far)
+  (let ((x (read-line port)))
+    (if (eof-object? x)
+        file-so-far
+        (tail-r-aux port (cons x file-so-far)))))
+
+(def (echo-lines-in-reverse-order in out)
+  (for-each (fn (line)
+              (write-string line out)
+              (newline out))
+            (tail-r-aux in '())))
+
+(def (go input output)
+  (with ((in (open-input-file input)))
+        (when (file-exists? output) (delete-file output))
+        (with ((out (open-output-file output))) (echo-lines-in-reverse-order in out))))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input (bench-read))
+        (output-file (bench-read)))
+    (bench-read)
+    (run-ported-benchmark (str "tail:" count)
+                          count
+                          (fn () (go (bench-hide count input) (bench-hide count output-file)))
+                          (fn (_) #t))))

@@ -25,18 +25,11 @@ void ot_gc_heap_destroy(ots* state);
 
 #if defined(OT_GC_GEN)
 void ot_gc_write_barrier(ots* state, const ot_obj* owner, otv value);
-/* Rescan owner at the next minor collection: its contents were written
- * without barriers, as a running VM stack's are. */
-void ot_gc_remember(ots* state, const ot_obj* owner);
 #else
 static inline void ot_gc_write_barrier(ots* state, const ot_obj* owner, otv value) {
   (void)state;
   (void)owner;
   (void)value;
-}
-static inline void ot_gc_remember(ots* state, const ot_obj* owner) {
-  (void)state;
-  (void)owner;
 }
 #endif
 

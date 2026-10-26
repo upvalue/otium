@@ -1102,8 +1102,6 @@ void ot_gc_write_barrier(ots* state, const ot_obj* owner, otv value) {
   if (in_current_nursery(heap, target)) remember_object(heap, owner);
 }
 
-void ot_gc_remember(ots* state, const ot_obj* owner) { remember_object(state->gc, owner); }
-
 void* ot_alloc(ots* state, size_t size, ot_obj_type type) {
   struct ot_gc_heap* heap = state->gc;
   if (size > SIZE_MAX - (OT_GC_ALIGNMENT - 1u)) return NULL;

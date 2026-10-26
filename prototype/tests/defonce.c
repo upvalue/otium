@@ -41,6 +41,7 @@ TEST(defonce_keeps_state_across_reload) {
   check_int(rt, "partial", 44);
   const char* shape = "defonce needs a name, optional docstring and value";
   const char* top = "defonce requires top-level context";
+
   const struct {
     const char* source;
     const char* message;
@@ -55,6 +56,7 @@ TEST(defonce_keeps_state_across_reload) {
              {"(fn () (defonce local 2))", top},
              {"(let () (defonce local 2))", top},
              {"(if #t (defonce local 2) 3)", top}};
+
   for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++)
     check_error(rt, bad[i].source, bad[i].message);
   check_int(rt, "(begin (begin) (begin 40 42))", 42);

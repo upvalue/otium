@@ -63,6 +63,7 @@ TEST(namespaces_isolate_and_share_definitions) {
   }
   const char* symbol = "ns needs a namespace symbol";
   const char* nested = "form not implemented in the prototype compiler";
+
   const struct {
     const char* source;
     const char* message;
@@ -74,6 +75,7 @@ TEST(namespaces_isolate_and_share_definitions) {
              {"(let () (ns x))", nested},
              {"(if #t (ns x) nil)", nested},
              {"(ns x (:require y))", "module file not found"}};
+
   for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++)
     check_error(rt, bad[i].source, bad[i].message);
   check_int(rt, "(ns right) value", 2);

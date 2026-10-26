@@ -63,12 +63,15 @@ bool oti_grow(ot_runtime* rt, void** data, size_t* capacity, size_t needed, size
 
 bool oti_stack(ot_runtime* rt, size_t needed) {
   if (needed > rt->stack_limit) return oti_error(rt, "VM stack limit exceeded");
-  if (!oti_grow(rt, (void**)&rt->stack, &rt->stack_capacity, needed, sizeof(ot_value))) return false;
+  if (!oti_grow(rt, (void**)&rt->stack, &rt->stack_capacity, needed, sizeof(ot_value)))
+    return false;
   rt->stack_roots.slots = rt->stack;
   return true;
 }
 
-void ot_set_interrupt_flag(ot_runtime* rt, volatile sig_atomic_t* flag) { rt->interrupt_flag = flag; }
+void ot_set_interrupt_flag(ot_runtime* rt, volatile sig_atomic_t* flag) {
+  rt->interrupt_flag = flag;
+}
 
 bool ot_interrupted(const ot_runtime* rt) { return rt->interrupted; }
 
@@ -124,7 +127,7 @@ uint32_t oti_namespace(ot_runtime* rt, const char* name, size_t length) {
       return (uint32_t)i;
   if (rt->namespace_count >= UINT32_MAX ||
       !oti_grow(rt, (void**)&rt->namespaces, &rt->namespace_capacity, rt->namespace_count + 1,
-               sizeof(char*)))
+                sizeof(char*)))
     return UINT32_MAX;
   char* copy = malloc(length + 1);
   if (!copy) {
@@ -150,7 +153,7 @@ static uint32_t namespace_global(ot_runtime* rt, uint32_t space, const char* nam
   uint32_t existing = find_global(rt, space, name, length);
   if (existing != UINT32_MAX) return existing;
   if (rt->global_count >= UINT32_MAX || !oti_grow(rt, (void**)&rt->globals, &rt->global_capacity,
-                                                 rt->global_count + 1, sizeof(ot_value))) {
+                                                  rt->global_count + 1, sizeof(ot_value))) {
     oti_error(rt, "too many globals");
     return UINT32_MAX;
   }
@@ -181,7 +184,7 @@ uint32_t oti_global(ot_runtime* rt, const char* name, size_t length) {
 }
 
 uint32_t oti_binding_global(ot_runtime* rt, uint32_t space, const char* name, size_t length,
-                           bool create) {
+                            bool create) {
   uint32_t index = find_global(rt, space, name, length);
   if (index != UINT32_MAX) return index;
   index = oti_import_global_in(rt, space, name, length);
@@ -211,7 +214,7 @@ static uint32_t resolve_global(ot_runtime* rt, const char* name, size_t length, 
     for (size_t i = 0; i < rt->namespace_count; i++)
       if (strlen(rt->namespaces[i]) == prefix && !memcmp(rt->namespaces[i], space_name, prefix))
         return oti_binding_global(rt, (uint32_t)i, slash + 1, length - (size_t)(slash - name) - 1,
-                                 create);
+                                  create);
   }
   uint32_t core = find_global(rt, 0, name, length);
   if (core != UINT32_MAX && rt->globals[core] != V_UNBOUND) return core;
@@ -232,7 +235,7 @@ ot_value oti_text(ot_runtime* rt, uint32_t kind, const char* text, size_t length
     return 0;
   }
   ot_value v = oti_alloc(rt, kind, 0,
-                     sizeof(size_t) + length + 1 + (kind == K_SYMBOL ? sizeof(uint64_t) : 0));
+                         sizeof(size_t) + length + 1 + (kind == K_SYMBOL ? sizeof(uint64_t) : 0));
   if (v) {
     unsigned char* bytes = object_bytes(v);
     memcpy(bytes, &length, sizeof(length));
@@ -349,8 +352,8 @@ static bool document(ot_runtime* rt, uint32_t index, const oti_ast* doc) {
 /* Top-level begin forms are evaluated in order, so declarations from earlier
  * forms are visible before later forms are compiled. */
 static bool evaluate_raw(ot_runtime* rt, const oti_ast* form, ot_value* result) {
-  if (form->kind == AST_LIST && !form->as.list.tail && oti_ast_symbol(form->as.list.first, "begin") &&
-      form->as.list.first->next) {
+  if (form->kind == AST_LIST && !form->as.list.tail &&
+      oti_ast_symbol(form->as.list.first, "begin") && form->as.list.first->next) {
     size_t base = rt->sp;
     for (const oti_ast* child = form->as.list.first->next; child; child = child->next) {
       rt->sp = rt->stack_roots.count = base;
@@ -470,13 +473,15 @@ static bool evaluate_raw(ot_runtime* rt, const oti_ast* form, ot_value* result) 
 static bool evaluate_expanded(ot_runtime* rt, const oti_ast* form, ot_value* result) {
   if (!rt->shared_expander) return evaluate_raw(rt, form, result);
   const oti_ast* head = form->kind == AST_LIST ? form->as.list.first : NULL;
-  if (oti_ast_symbol(head, "begin") || oti_ast_symbol(head, "require") || oti_ast_symbol(head, "ns"))
+  if (oti_ast_symbol(head, "begin") || oti_ast_symbol(head, "require") ||
+      oti_ast_symbol(head, "ns"))
     return evaluate_raw(rt, form, result);
   if (oti_ast_symbol(head, "defonce") && head->next && head->next->kind == AST_SYMBOL) {
     const oti_ast* name = head->next;
     uint32_t global =
         find_global(rt, rt->current_namespace, name->as.text.data, name->as.text.size);
-    if (global != UINT32_MAX && rt->global_info[global].defined) return evaluate_raw(rt, form, result);
+    if (global != UINT32_MAX && rt->global_info[global].defined)
+      return evaluate_raw(rt, form, result);
   }
   oti_arena arena;
   oti_arena_init(&arena, OTI_SOURCE_LIMIT);
@@ -689,7 +694,8 @@ bool ot_exit_status(const ot_runtime* rt, int* status) {
 
 const char* ot_error(const ot_runtime* rt) { return rt->error; }
 
-bool ot_call(ot_runtime* rt, const char* name, const ot_value* args, size_t count, ot_value* result) {
+bool ot_call(ot_runtime* rt, const char* name, const ot_value* args, size_t count,
+             ot_value* result) {
   if (!oti_host_entry(rt)) return false;
   rt->interrupted = false;
   rt->exit_pending = false;
@@ -708,7 +714,8 @@ bool ot_call(ot_runtime* rt, const char* name, const ot_value* args, size_t coun
   rt->sp = rt->stack_roots.count = rt->frame_count = 0;
   if (!ot_poll_interrupt(rt)) return false;
   uint32_t index = resolve_global(rt, name, strlen(name), false);
-  if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND) return oti_error(rt, "unbound global");
+  if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND)
+    return oti_error(rt, "unbound global");
   if (count >= rt->stack_limit || !oti_stack(rt, count + 1))
     return oti_error(rt, "VM stack limit exceeded");
   rt->stack[0] = rt->globals[index];
@@ -750,8 +757,8 @@ ot_form_status ot_scan_form(const char* source, size_t length, size_t start, siz
   oti_reader_init(&reader, source, length, OTI_SOURCE_LIMIT);
   reader.position = start;
   oti_ast* form = oti_reader_next(&reader);
-  ot_form_status status = form            ? OT_FORM_COMPLETE
-                          : !reader.error ? OT_FORM_END
+  ot_form_status status = form                ? OT_FORM_COMPLETE
+                          : !reader.error     ? OT_FORM_END
                           : reader.incomplete ? OT_FORM_INCOMPLETE
                                               : OT_FORM_ERROR;
   *end = reader.position;

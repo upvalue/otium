@@ -48,7 +48,8 @@ bool oti_enter(ot_runtime* rt, size_t call, size_t argc, bool tail) {
   if (base + 1 + fn->locals > rt->stack_capacity && !oti_stack(rt, base + 1 + fn->locals))
     return false;
   if (!tail && rt->frame_count == rt->frame_capacity &&
-      !oti_grow(rt, (void**)&rt->frames, &rt->frame_capacity, rt->frame_count + 1, sizeof(oti_frame)))
+      !oti_grow(rt, (void**)&rt->frames, &rt->frame_capacity, rt->frame_count + 1,
+                sizeof(oti_frame)))
     return false;
   size_t parameters = fn->arity + fn->optional + (fn->rest ? 1 : 0);
   ot_value rest = OT_EMPTY;
@@ -69,7 +70,8 @@ bool oti_enter(ot_runtime* rt, size_t call, size_t argc, bool tail) {
     closure = rt->stack[call];
   }
   size_t supplied = fn->rest ? fn->arity : argc;
-  if (base != call) memmove(rt->stack + base + 1, rt->stack + call + 1, supplied * sizeof(ot_value));
+  if (base != call)
+    memmove(rt->stack + base + 1, rt->stack + call + 1, supplied * sizeof(ot_value));
   rt->stack[base] = closure;
   for (size_t i = supplied; i < fn->locals; i++) rt->stack[base + 1 + i] = V_UNBOUND;
   if (fn->rest) rt->stack[base + 1 + fn->arity] = rest;
@@ -199,16 +201,16 @@ static bool dispatch(ot_runtime* rt, size_t stop_frames) {
         break;
       case OP_TRY:
         if (!oti_grow(rt, (void**)&rt->tries, &rt->try_capacity, rt->try_count + 1,
-                     sizeof(oti_try_frame)))
+                      sizeof(oti_try_frame)))
           return false;
         rt->tries[rt->try_count++] = (oti_try_frame){rt->frame_count,
-                                                rt->sp,
-                                                ins.arg,
-                                                rt->param_count,
-                                                rt->handler_count,
-                                                rt->handler_top,
-                                                rt->restart_scope_count,
-                                                rt->cleanup_count};
+                                                     rt->sp,
+                                                     ins.arg,
+                                                     rt->param_count,
+                                                     rt->handler_count,
+                                                     rt->handler_top,
+                                                     rt->restart_scope_count,
+                                                     rt->cleanup_count};
         break;
       case OP_END_TRY:
         if (!rt->try_count) return oti_error(rt, "invalid try stack");

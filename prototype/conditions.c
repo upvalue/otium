@@ -43,7 +43,7 @@ static const char* diagnostic_type(const char* code) {
 }
 
 static ot_value message_condition(ot_runtime* rt, ot_value message, size_t first, size_t count,
-                               const char* code) {
+                                  const char* code) {
   ot_value values[] = {message, OT_NIL, OT_NIL, OT_NIL, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, values, 5);
@@ -178,7 +178,7 @@ bool oti_install_handlers(ot_runtime* rt, size_t first, size_t count) {
     return false;
   rt->handler_roots.slots = rt->handlers;
   if (!oti_grow(rt, (void**)&rt->handler_previous, &rt->handler_previous_capacity, needed,
-               sizeof(size_t)))
+                sizeof(size_t)))
     return false;
   for (size_t i = 0; i < count; i++) {
     size_t index = rt->handler_count++;
@@ -350,7 +350,8 @@ ot_value oti_file_error(ot_runtime* rt, const char* op, ot_value path, int error
   return 0;
 }
 
-ot_value oti_ffi_error(ot_runtime* rt, const char* operation, const char* reason, const char* message) {
+ot_value oti_ffi_error(ot_runtime* rt, const char* operation, const char* reason,
+                       const char* message) {
   char op[64], why[64];
   size_t length = strlen(message);
   char* detail = malloc(length + 1);

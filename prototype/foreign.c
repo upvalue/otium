@@ -81,7 +81,8 @@ struct oti_foreign_state {
 };
 
 static void argument_context(ot_runtime* rt, size_t index, const char* expected) {
-  if (rt->foreign->error_context) *rt->foreign->error_context = (oti_foreign_error){index, expected};
+  if (rt->foreign->error_context)
+    *rt->foreign->error_context = (oti_foreign_error){index, expected};
 }
 
 static ot_value failure(ot_runtime* rt, const char* message) {
@@ -263,7 +264,8 @@ bool oti_foreign_init(ot_runtime* rt) {
   rt->foreign = calloc(1, sizeof(*rt->foreign));
   if (!rt->foreign) return oti_error(rt, "FFI allocation: out of host memory");
   oti_roots_push(&rt->heap, &rt->foreign->roots, NULL, 0);
-  if (!oti_grow(rt, (void**)&rt->foreign->values, &rt->foreign->value_capacity, 1, sizeof(ot_value)))
+  if (!oti_grow(rt, (void**)&rt->foreign->values, &rt->foreign->value_capacity, 1,
+                sizeof(ot_value)))
     return false;
   rt->foreign->values[0] = OT_NIL;
   rt->foreign->roots.slots = rt->foreign->values;
@@ -398,7 +400,8 @@ static ot_value bind_function(ot_runtime* rt, size_t first, bool codes) {
   return value;
 }
 
-static bool to_foreign(ot_runtime* rt, const oti_scalar* type, ot_value value, oti_foreign_slot* slot) {
+static bool to_foreign(ot_runtime* rt, const oti_scalar* type, ot_value value,
+                       oti_foreign_slot* slot) {
   switch (type->kind) {
     case T_BOOL:
       if (value != OT_TRUE && value != OT_FALSE) return oti_error(rt, "FFI type: expected boolean");
@@ -626,10 +629,11 @@ static ot_value callback_builtin(ot_runtime* rt, unsigned id, size_t first, size
 }
 
 static ot_value allocate_memory(ot_runtime* rt, size_t size, const void* initial);
-static bool access_memory(ot_runtime* rt, oti_pointer p, size_t offset, size_t bytes, size_t alignment);
+static bool access_memory(ot_runtime* rt, oti_pointer p, size_t offset, size_t bytes,
+                          size_t alignment);
 
 static ot_value foreign_call(ot_runtime* rt, size_t callable, size_t first, size_t count,
-                          size_t* failed_argument, unsigned* expected_type) {
+                             size_t* failed_argument, unsigned* expected_type) {
   oti_foreign_binding* binding = object_data(rt->stack[callable]);
   oti_signature* s = binding->signature;
   if (count != s->count) return failure(rt, "FFI arity: wrong number of arguments");
@@ -838,7 +842,8 @@ static ot_value allocate_memory(ot_runtime* rt, size_t size, const void* initial
   return p;
 }
 
-static bool access_memory(ot_runtime* rt, oti_pointer p, size_t offset, size_t bytes, size_t alignment) {
+static bool access_memory(ot_runtime* rt, oti_pointer p, size_t offset, size_t bytes,
+                          size_t alignment) {
   if (!p.address) return oti_error(rt, "FFI null pointer");
   if ((p.bounded && (offset > p.length || bytes > p.length - offset)) ||
       offset > UINTPTR_MAX - p.address || bytes > UINTPTR_MAX - (p.address + offset))
@@ -1011,7 +1016,7 @@ static ot_value shared_builtin(ot_runtime* rt, unsigned id, size_t first, size_t
     int type = oti_foreign_scalar_code(rt, rt->stack[first], false);
     if (type < 0) return 0;
     return ot_int((intptr_t)(id == B_FFI_RAW_SIZE ? oti_foreign_scalars[type].size
-                                                     : oti_foreign_scalars[type].alignment));
+                                                  : oti_foreign_scalars[type].alignment));
   }
   oti_pointer p;
   size_t offset;
@@ -1106,7 +1111,8 @@ static ot_value own_pointer(ot_runtime* rt, size_t first, size_t count) {
          (state->values[slot] != OT_NIL || state->values[slot + 1] != OT_NIL))
     slot++;
   size_t needed = slot + 2;
-  if (!oti_grow(rt, (void**)&state->values, &state->value_capacity, needed, sizeof(ot_value))) return 0;
+  if (!oti_grow(rt, (void**)&state->values, &state->value_capacity, needed, sizeof(ot_value)))
+    return 0;
   state->roots.slots = state->values;
   while (state->roots.count < needed) state->values[state->roots.count++] = OT_NIL;
   oti_memory* m = calloc(1, sizeof(*m));
@@ -1214,7 +1220,7 @@ static ot_value foreign_builtin(ot_runtime* rt, unsigned id, size_t first, size_
     if (type < 0) return 0;
     if (id != B_FFI_ALLOC)
       return ot_int((intptr_t)(id == B_FFI_SIZEOF ? oti_foreign_scalars[type].size
-                                                     : oti_foreign_scalars[type].alignment));
+                                                  : oti_foreign_scalars[type].alignment));
     size_t n;
     argument_context(rt, 1, "size-t");
     if (!nonnegative(rt, args[1], &n)) return 0;
@@ -1340,7 +1346,7 @@ ot_value oti_foreign_call(ot_runtime* rt, size_t callable, size_t first, size_t 
   ot_value type = OT_FALSE;
   if (expected < AGGREGATE)
     type = oti_intern(rt, K_SYMBOL, oti_foreign_scalars[expected].name,
-                     strlen(oti_foreign_scalars[expected].name));
+                      strlen(oti_foreign_scalars[expected].name));
   else if (expected == AGGREGATE) {
     type = oti_alloc(rt, K_FOREIGN_LAYOUT, 1, 0);
     if (type) {

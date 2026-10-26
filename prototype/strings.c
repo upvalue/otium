@@ -101,7 +101,8 @@ ot_value oti_string_builtin(ot_runtime* rt, unsigned id, size_t first, size_t co
     ot_value result;
     if (id == B_STR) result = oti_text(rt, K_STRING, bytes, n);
     else {
-      result = id == B_BUFFER ? oti_alloc(rt, K_BUFFER, 1, sizeof(oti_buffer_info)) : rt->stack[first];
+      result =
+          id == B_BUFFER ? oti_alloc(rt, K_BUFFER, 1, sizeof(oti_buffer_info)) : rt->stack[first];
       if (result && !append_buffer(rt, &result, bytes, n)) result = 0;
     }
     free(bytes);
@@ -114,7 +115,8 @@ ot_value oti_string_builtin(ot_runtime* rt, unsigned id, size_t first, size_t co
       if (!oti_kind(rt->stack[first + i], K_STRING)) return oti_fail(rt, "expected string");
       if (i) {
         size_t a, b;
-        const char *x = oti_text_bytes(rt->stack[first + i - 1], &a), *y = oti_text_bytes(rt->stack[first + i], &b);
+        const char *x = oti_text_bytes(rt->stack[first + i - 1], &a),
+                   *y = oti_text_bytes(rt->stack[first + i], &b);
         int order = memcmp(x, y, a < b ? a : b);
         result &= order < 0 || (!order && a < b);
       }
@@ -137,9 +139,9 @@ ot_value oti_string_builtin(ot_runtime* rt, unsigned id, size_t first, size_t co
       bytes++;
       n--;
     }
-    return id == B_NAME               ? copied(rt, bytes, n)
+    return id == B_NAME                ? copied(rt, bytes, n)
            : oti_kind(value, K_SYMBOL) ? value
-                                      : oti_intern(rt, K_SYMBOL, bytes, n);
+                                       : oti_intern(rt, K_SYMBOL, bytes, n);
   }
   if (id == B_STRING_LIST) {
     if (!oti_kind(value, K_STRING)) return oti_fail(rt, "expected string");

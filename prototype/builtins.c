@@ -229,9 +229,8 @@ static ot_value eval_in_namespace(ot_runtime* rt, unsigned id, size_t first, siz
 
 static ot_value exit_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   (void)id;
-  if (count > 1 ||
-      (count && (!ot_is_int(rt->stack[first]) || ot_to_int(rt->stack[first]) < 0 ||
-                 ot_to_int(rt->stack[first]) > 255))) {
+  if (count > 1 || (count && (!ot_is_int(rt->stack[first]) || ot_to_int(rt->stack[first]) < 0 ||
+                              ot_to_int(rt->stack[first]) > 255))) {
     oti_error(rt, "exit status must be an integer from 0 to 255");
     return 0;
   }

@@ -23,7 +23,8 @@ typedef struct {
 } oti_reclaim_mark;
 
 static bool enqueue(oti_reclaim_mark* m, ot_value value, bool function) {
-  if (!oti_grow(m->rt, (void**)&m->work, &m->capacity, m->count + 1, sizeof(oti_reclaim_task))) return false;
+  if (!oti_grow(m->rt, (void**)&m->work, &m->capacity, m->count + 1, sizeof(oti_reclaim_task)))
+    return false;
   m->work[m->count++] = (oti_reclaim_task){value, function};
   return true;
 }

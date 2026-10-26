@@ -89,12 +89,7 @@ bool ot_exit_status(const ot_runtime* rt, int* status);
 /* Find the next complete form in source starting at start, without
  * evaluating it. On OT_FORM_COMPLETE, *end is the offset just past the form.
  * On OT_FORM_ERROR, *error and *error_offset describe the problem. */
-typedef enum {
-  OT_FORM_COMPLETE,
-  OT_FORM_END,
-  OT_FORM_INCOMPLETE,
-  OT_FORM_ERROR
-} ot_form_status;
+typedef enum { OT_FORM_COMPLETE, OT_FORM_END, OT_FORM_INCOMPLETE, OT_FORM_ERROR } ot_form_status;
 
 ot_form_status ot_scan_form(const char* source, size_t length, size_t start, size_t* end,
                             const char** error, size_t* error_offset);

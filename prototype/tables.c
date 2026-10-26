@@ -201,7 +201,7 @@ ot_value oti_table_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
     case B_LENGTH: return ot_int((intptr_t)table_info(table)->count);
     case B_GET:
       return oti_table_get(rt, table, rt->stack[first + 1],
-                          count == 3 ? rt->stack[first + 2] : OT_NIL);
+                           count == 3 ? rt->stack[first + 2] : OT_NIL);
     case B_CONTAINS: {
       ot_value value = oti_table_get(rt, table, rt->stack[first + 1], OT_NIL);
       return !value ? 0 : value == OT_NIL ? OT_FALSE : OT_TRUE;

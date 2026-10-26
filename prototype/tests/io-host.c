@@ -106,8 +106,7 @@ static void fails(ot_runtime* rt, const char* source, const char* message) {
   if (ot_eval(rt, source, strlen(source), &result))
     test_fail(__FILE__, __LINE__, "%s: expected an error", source);
   if (!strstr(ot_error(rt), message))
-    test_fail(__FILE__, __LINE__, "%s: expected \"%s\", got \"%s\"", source, message,
-              ot_error(rt));
+    test_fail(__FILE__, __LINE__, "%s: expected \"%s\", got \"%s\"", source, message, ot_error(rt));
 }
 
 static ot_runtime* host_runtime(Host* h) {
@@ -234,10 +233,8 @@ TEST(host_replacement_and_destroy) {
 }
 
 static const test_case tests[] = {
-    TEST_ENTRY(host_input_and_eintr),
-    TEST_ENTRY(host_partial_writes_and_errors),
-    TEST_ENTRY(host_interrupted_reads),
-    TEST_ENTRY(host_invalid_counts_and_reentry),
+    TEST_ENTRY(host_input_and_eintr),         TEST_ENTRY(host_partial_writes_and_errors),
+    TEST_ENTRY(host_interrupted_reads),       TEST_ENTRY(host_invalid_counts_and_reentry),
     TEST_ENTRY(host_replacement_and_destroy),
 };
 

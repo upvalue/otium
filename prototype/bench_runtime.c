@@ -77,8 +77,7 @@ int main(int argc, char** argv) {
   ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
   if (!rt) return 1;
   ot_value answer, argument = ot_int(workloads[index].argument);
-  if (!ot_eval(rt, workloads[index].source, strlen(workloads[index].source), &answer))
-    goto error;
+  if (!ot_eval(rt, workloads[index].source, strlen(workloads[index].source), &answer)) goto error;
   double samples[5];
   for (size_t i = 0; i < 7; i++) {
     double start = now();

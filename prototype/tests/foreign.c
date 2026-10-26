@@ -58,14 +58,14 @@ TEST(library_loading_and_binding) {
   check_error(rt, "(ffi/bind lib \"fixture_id\" '(void) 'int #t)", "void argument");
   check_error(rt, "(ffi/bind lib \"fixture_id\" '(unknown) 'int #t)", "unsupported scalar");
   check_error(rt, "(ffi/bind lib \"fixture_id\" '(int . int) 'int #t)", "improper");
-  check_error(rt,
-              "(let ((p (list 'int))) (set-cdr! p p) (ffi/bind lib \"fixture_id\" p 'int #t))",
+  check_error(rt, "(let ((p (list 'int))) (set-cdr! p p) (ffi/bind lib \"fixture_id\" p 'int #t))",
               "cyclic");
   ot_destroy(rt);
 }
 
 TEST(integer_types_round_trip) {
   ot_runtime* rt = fixture_runtime();
+
   static const struct {
     const char *type, *symbol;
     intptr_t value;
@@ -85,6 +85,7 @@ TEST(integer_types_round_trip) {
                   {"ulong", "ulong", 1234567},
                   {"size-t", "size_t", 1234567},
                   {"ptrdiff-t", "ptrdiff_t", -1234567}};
+
   char source[2048];
   for (size_t i = 0; i < sizeof(integers) / sizeof(integers[0]); i++) {
     snprintf(source, sizeof(source), "((ffi/bind lib \"echo_%s\" '(%s) '%s #t) %ld)",

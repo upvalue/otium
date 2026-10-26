@@ -4,7 +4,8 @@
 static ot_runtime* process_runtime(void) {
   ot_runtime* rt = new_core_runtime();
   ot_gc_stress(rt, true);
-  check_true(rt, "(require otium.process :as p) (and (null? (p/arguments)) (nil? (p/script-name)))");
+  check_true(rt,
+             "(require otium.process :as p) (and (null? (p/arguments)) (nil? (p/script-name)))");
   return rt;
 }
 
@@ -12,10 +13,11 @@ TEST(error_output_and_environment) {
   ot_runtime* rt = process_runtime();
   check_true(rt, "(let ((out (open-output-string))) (with-params ((current-error-port out)) "
                  "(p/write-error \"problem λ\")) (equal? (get-output-string out) \"problem λ\"))");
-  check_true(rt, "(begin (p/setenv! \"OTIUM_PROTO_PROCESS_TEST\" \"a=b λ\") "
-                 "(def env-copy (p/getenv \"OTIUM_PROTO_PROCESS_TEST\")) "
-                 "(p/setenv! \"OTIUM_PROTO_PROCESS_TEST\" nil) "
-                 "(and (equal? env-copy \"a=b λ\") (nil? (p/getenv \"OTIUM_PROTO_PROCESS_TEST\"))))");
+  check_true(rt,
+             "(begin (p/setenv! \"OTIUM_PROTO_PROCESS_TEST\" \"a=b λ\") "
+             "(def env-copy (p/getenv \"OTIUM_PROTO_PROCESS_TEST\")) "
+             "(p/setenv! \"OTIUM_PROTO_PROCESS_TEST\" nil) "
+             "(and (equal? env-copy \"a=b λ\") (nil? (p/getenv \"OTIUM_PROTO_PROCESS_TEST\"))))");
   ot_destroy(rt);
 }
 

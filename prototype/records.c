@@ -77,7 +77,8 @@ static ot_value make_type(ot_runtime* rt, size_t first, size_t count) {
 ot_value oti_record_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
   if (id == B_MAKE_RECORD_TYPE) return make_type(rt, first, count);
   size_t wanted = id == B_RECORD_REF ? 2 : id == B_RECORD_SET ? 3 : 1;
-  if (id != B_RECORD_NEW && count != wanted) return oti_fail(rt, "wrong number of record arguments");
+  if (id != B_RECORD_NEW && count != wanted)
+    return oti_fail(rt, "wrong number of record arguments");
   if (!count) return oti_fail(rt, "record-new needs a record type");
   ot_value v = rt->stack[first];
   if (id == B_RECORD_P) return oti_kind(v, K_RECORD) ? OT_TRUE : OT_FALSE;

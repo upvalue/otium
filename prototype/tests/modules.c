@@ -111,6 +111,7 @@ TEST(modules_load_refer_and_reload) {
   check_true(rt, "(equal? value \"first-directory\")");
   check_true(rt, "(equal? (old) \"ot\")");
   const char* nested = "form not implemented in the prototype compiler";
+
   const struct {
     const char* source;
     const char* message;
@@ -121,6 +122,7 @@ TEST(modules_load_refer_and_reload) {
              {"(require api . x)", "require needs a proper specification list"},
              {"(fn () (require api))", nested},
              {"(let () (require api))", nested}};
+
   for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++)
     check_error(rt, bad[i].source, bad[i].message);
   eval(rt, "(def saved-api api/read) (def (live-api) (api/read))");

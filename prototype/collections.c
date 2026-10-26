@@ -46,8 +46,7 @@ static ot_value get(ot_runtime* rt, ot_value a, ot_value key, ot_value fallback)
   if (a == OT_NIL) return fallback;
   if (oti_kind(a, K_BYTEVECTOR)) {
     size_t index;
-    return index_of(key, oti_bytes_length(a), &index) ? ot_int(oti_bytes_data(a)[index])
-                                                     : fallback;
+    return index_of(key, oti_bytes_length(a), &index) ? ot_int(oti_bytes_data(a)[index]) : fallback;
   }
   if (oti_kind(a, K_STRING)) return oti_string_get(a, key, fallback);
   if (oti_kind(a, K_TABLE)) return oti_table_get(rt, a, key, fallback);
@@ -225,7 +224,8 @@ ot_value oti_collection_builtin(ot_runtime* rt, unsigned id, size_t first, size_
       a = object_fields(a)[1];
       if (oti_kind(slow, K_PAIR)) slow = object_fields(slow)[1];
       for (unsigned i = 0; i < 2 && oti_kind(fast, K_PAIR); i++) fast = object_fields(fast)[1];
-      if (oti_kind(fast, K_PAIR) && fast == slow) return oti_fail(rt, "length needs an acyclic list");
+      if (oti_kind(fast, K_PAIR) && fast == slow)
+        return oti_fail(rt, "length needs an acyclic list");
     }
     if (a != OT_EMPTY) return oti_fail(rt, "length needs a proper list");
     return ot_int((intptr_t)length);
@@ -262,7 +262,8 @@ ot_value oti_collection_builtin(ot_runtime* rt, unsigned id, size_t first, size_
       size_t length = array_info(a)->length;
       if (count - 1 > UINT32_MAX - length) return oti_fail(rt, "array too large");
       if (!reserve(rt, &a, length + count - 1)) return 0;
-      if (count > 1) memcpy(items(a) + length, rt->stack + first + 1, (count - 1) * sizeof(ot_value));
+      if (count > 1)
+        memcpy(items(a) + length, rt->stack + first + 1, (count - 1) * sizeof(ot_value));
       array_info(a)->length = length + count - 1;
       return a;
     }

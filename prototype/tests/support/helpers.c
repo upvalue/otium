@@ -55,8 +55,8 @@ void check_printed(ot_runtime* rt, const char* source, const char* expected) {
 void check_error(ot_runtime* rt, const char* source, const char* message) {
   ot_value result;
   if (ot_eval(rt, source, strlen(source), &result))
-    test_fail(__FILE__, __LINE__, "%s\n  expected error containing \"%s\", got %s", source,
-              message, printed(rt, result));
+    test_fail(__FILE__, __LINE__, "%s\n  expected error containing \"%s\", got %s", source, message,
+              printed(rt, result));
   if (!strstr(ot_error(rt), message))
     test_fail(__FILE__, __LINE__, "%s\n  expected error containing \"%s\", got \"%s\"", source,
               message, ot_error(rt));

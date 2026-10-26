@@ -63,6 +63,7 @@ TEST(restarts_transfer_and_introspect) {
 TEST(failures_leave_no_restarts) {
   ot_runtime* rt = new_restart_runtime();
   const char* arguments = "wrong number of restart arguments";
+
   const struct {
     const char* source;
     const char* message;
@@ -75,6 +76,7 @@ TEST(failures_leave_no_restarts) {
              {"(invoke-restart)", arguments},
              {"(invoke-restart 'missing)", "no active restart"},
              {"(restart-case (error :bad) (give () 1))", ":bad"}};
+
   for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++) {
     ot_value ignored;
     if (ot_eval(rt, bad[i].source, strlen(bad[i].source), &ignored))

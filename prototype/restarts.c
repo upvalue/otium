@@ -12,7 +12,7 @@ bool oti_install_restarts(ot_runtime* rt, size_t first, size_t count, size_t tar
   size_t old = rt->restart_count;
   if (count > rt->stack_limit - old) return oti_error(rt, "restart limit exceeded");
   if (!oti_grow(rt, (void**)&rt->restart_scopes, &rt->restart_scope_capacity,
-               rt->restart_scope_count + 1, sizeof(oti_restart_scope)))
+                rt->restart_scope_count + 1, sizeof(oti_restart_scope)))
     return false;
   if (!oti_grow(rt, (void**)&rt->restarts, &rt->restart_capacity, old + count, sizeof(ot_value)))
     return false;
@@ -28,10 +28,10 @@ bool oti_install_restarts(ot_runtime* rt, size_t first, size_t count, size_t tar
     rt->restart_roots.count = old + i + 1;
   }
   oti_restart_scope scope = {{rt->frame_count, first, target, rt->param_count, rt->handler_count,
-                         rt->handler_top, rt->restart_scope_count, rt->cleanup_count},
-                        old,
-                        count,
-                        rt->try_count};
+                              rt->handler_top, rt->restart_scope_count, rt->cleanup_count},
+                             old,
+                             count,
+                             rt->try_count};
   rt->restart_scopes[rt->restart_scope_count++] = scope;
   rt->restart_count = old + count;
   return true;
@@ -39,7 +39,8 @@ bool oti_install_restarts(ot_runtime* rt, size_t first, size_t count, size_t tar
 
 static ot_value find(ot_runtime* rt, ot_value name) {
   bool exact = oti_kind(name, K_RESTART);
-  if (!exact && !oti_kind(name, K_SYMBOL) && !oti_kind(name, K_STRING) && !oti_kind(name, K_KEYWORD)) {
+  if (!exact && !oti_kind(name, K_SYMBOL) && !oti_kind(name, K_STRING) &&
+      !oti_kind(name, K_KEYWORD)) {
     oti_error(rt, "restart name must be a symbol, keyword, string or restart");
     return 0;
   }

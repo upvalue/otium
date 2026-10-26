@@ -535,7 +535,7 @@ uint32_t oti_namespace(ot_runtime* rt, const char* name, size_t length);
 bool oti_require(ot_runtime* rt, const oti_ast* specs);
 void oti_modules_destroy(ot_runtime* rt);
 uint32_t oti_binding_global(ot_runtime* rt, uint32_t space, const char* name, size_t length,
-                           bool create);
+                            bool create);
 uint32_t oti_import_global_in(ot_runtime* rt, uint32_t space, const char* name, size_t length);
 uint32_t oti_import_global(ot_runtime* rt, const char* name, size_t length);
 uint32_t oti_alias_namespace(ot_runtime* rt, const char* name, size_t length);
@@ -674,5 +674,6 @@ ot_value oti_tokens(ot_runtime* rt, size_t first, size_t count);
 ot_value oti_filesystem_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
 void oti_ports_destroy(ot_runtime* rt);
 ot_value oti_file_error(ot_runtime* rt, const char* op, ot_value path, int error);
-ot_value oti_ffi_error(ot_runtime* rt, const char* operation, const char* reason, const char* message);
+ot_value oti_ffi_error(ot_runtime* rt, const char* operation, const char* reason,
+                       const char* message);
 #endif

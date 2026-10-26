@@ -59,6 +59,7 @@ TEST(handlers_run_at_signal_site) {
 TEST(failures_leave_no_handlers) {
   ot_runtime* rt = new_handler_runtime();
   const char* shape = "expected ((expression expression) ...)";
+
   const struct {
     const char* source;
     const char* message;
@@ -68,6 +69,7 @@ TEST(failures_leave_no_handlers) {
              {"(signal)", "signal needs an argument"},
              {"(signal :x 1)", "extra arguments after non-string condition"},
              {"(handler-bind ((yes (fn (c) nil))) (error :unhandled))", ":unhandled"}};
+
   for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++) {
     ot_value ignored;
     if (ot_eval(rt, bad[i].source, strlen(bad[i].source), &ignored))

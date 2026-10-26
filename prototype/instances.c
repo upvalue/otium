@@ -12,13 +12,13 @@ static size_t slot_index(ot_value layout, ot_value key) {
 static bool migrate(ot_runtime* rt, ot_value* instance, ot_value properties) {
   if (object_fields(*instance)[1] == object_fields(object_fields(*instance)[0])[2]) return true;
   ot_value live[] = {*instance,
-                  object_fields(*instance)[1],
-                  object_fields(*instance)[2],
-                  object_fields(object_fields(*instance)[0])[2],
-                  OT_NIL,
-                  OT_NIL,
-                  OT_NIL,
-                  properties};
+                     object_fields(*instance)[1],
+                     object_fields(*instance)[2],
+                     object_fields(object_fields(*instance)[0])[2],
+                     OT_NIL,
+                     OT_NIL,
+                     OT_NIL,
+                     properties};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, live, 8);
   size_t n = slots(live[3]);
@@ -82,7 +82,9 @@ static bool migrate(ot_runtime* rt, ot_value* instance, ot_value properties) {
   return ok;
 }
 
-static bool migrate_to_current(ot_runtime* rt, ot_value* instance) { return migrate(rt, instance, OT_NIL); }
+static bool migrate_to_current(ot_runtime* rt, ot_value* instance) {
+  return migrate(rt, instance, OT_NIL);
+}
 
 ot_value oti_instance_call(ot_runtime* rt, ot_value instance, size_t first, size_t count) {
   if (count != 1 || !oti_kind(rt->stack[first], K_KEYWORD))
@@ -132,7 +134,7 @@ ot_value oti_instance_copy(ot_runtime* rt, ot_value instance) {
 static ot_value define_class(ot_runtime* rt, size_t first, size_t count) {
   if (count != 5) return oti_fail(rt, "invalid class declaration");
   ot_value name = rt->stack[first], parent = rt->stack[first + 1], abstract = rt->stack[first + 2],
-        spec = rt->stack[first + 3];
+           spec = rt->stack[first + 3];
   if (!oti_kind(name, K_SYMBOL) || !oti_kind(parent, K_CLASS) || !oti_kind(spec, K_ARRAY) ||
       (abstract != OT_TRUE && abstract != OT_FALSE))
     return oti_fail(rt, "invalid class declaration");

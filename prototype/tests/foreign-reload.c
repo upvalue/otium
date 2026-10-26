@@ -73,8 +73,8 @@ TEST(reload_releases_bindings_and_memory) {
   eval(rt, "nil");
   stats = ot_get_stats(rt);
   CHECK(stats.bindings == 0 && stats.signatures <= 4 && stats.libraries == 1);
-  printf("peak bindings=%zu cached signatures=%zu libraries=%zu\n", peak_bindings,
-         stats.signatures, stats.libraries);
+  printf("peak bindings=%zu cached signatures=%zu libraries=%zu\n", peak_bindings, stats.signatures,
+         stats.libraries);
   ot_destroy(rt);
 }
 

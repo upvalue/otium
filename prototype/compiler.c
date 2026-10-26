@@ -74,8 +74,8 @@ static bool patch(oti_compiler* c, size_t instruction) {
 static uint32_t new_function(ot_runtime* rt) {
   size_t id = rt->function_free;
   while (id < rt->function_count && rt->functions[id]) id++;
-  if (id >= UINT32_MAX ||
-      !oti_grow(rt, (void**)&rt->functions, &rt->function_capacity, id + 1, sizeof(oti_function*))) {
+  if (id >= UINT32_MAX || !oti_grow(rt, (void**)&rt->functions, &rt->function_capacity, id + 1,
+                                    sizeof(oti_function*))) {
     oti_error(rt, "too many functions");
     return UINT32_MAX;
   }
@@ -96,7 +96,7 @@ static uint32_t local(oti_compiler* c, const oti_ast* name) {
   if (f->locals >= UINT32_MAX ||
       !oti_grow(c->rt, (void**)&f->boxed, &f->locals_capacity, f->locals + 1, sizeof(bool)) ||
       !oti_grow(c->rt, (void**)&c->lifetimes, &c->lifetime_capacity, f->locals + 1,
-               sizeof(oti_lifetime))) {
+                sizeof(oti_lifetime))) {
     oti_error(c->rt, "too many locals");
     return UINT32_MAX;
   }
@@ -109,7 +109,7 @@ static uint32_t local(oti_compiler* c, const oti_ast* name) {
       return UINT32_MAX;
     }
     if (!oti_grow(c->rt, (void**)&c->bindings, &c->binding_capacity, c->binding_count + 1,
-                 sizeof(oti_local)))
+                  sizeof(oti_local)))
       return UINT32_MAX;
     c->bindings[c->binding_count++] = (oti_local){name, slot};
   }
@@ -159,7 +159,7 @@ static bool assign_slots(oti_compiler* c) {
   for (size_t i = parameters; i < f->locals; i++) counts[f->boxed[i]]++;
   uint32_t* map = malloc(f->locals * sizeof(*map));
   oti_slot_pool pools[2] = {{malloc(counts[0] * sizeof(oti_slot)), 0},
-                       {malloc(counts[1] * sizeof(oti_slot)), 0}};
+                            {malloc(counts[1] * sizeof(oti_slot)), 0}};
   if (!map || (counts[0] && !pools[0].items) || (counts[1] && !pools[1].items)) {
     free(map);
     free(pools[0].items);
@@ -233,8 +233,9 @@ static bool capture(oti_compiler* c, const oti_ast* name, uint32_t* index) {
   oti_function* f = c->fn;
   if (f->capture_count >= UINT32_MAX ||
       !oti_grow(c->rt, (void**)&f->captures, &f->capture_capacity, f->capture_count + 1,
-               sizeof(oti_capture)) ||
-      !oti_grow(c->rt, (void**)&c->upnames, &c->upname_capacity, f->capture_count + 1, sizeof(oti_ast*)))
+                sizeof(oti_capture)) ||
+      !oti_grow(c->rt, (void**)&c->upnames, &c->upname_capacity, f->capture_count + 1,
+                sizeof(oti_ast*)))
     return false;
   *index = (uint32_t)f->capture_count++;
   f->captures[*index] = (oti_capture){outer, is_local};
@@ -425,8 +426,8 @@ typedef struct {
   oti_roots roots;
 } oti_qq_plan;
 
-static size_t qq_add(oti_qq_plan* plan, oti_qq_kind kind, size_t left, size_t right, const oti_ast* a,
-                     ot_value value) {
+static size_t qq_add(oti_qq_plan* plan, oti_qq_kind kind, size_t left, size_t right,
+                     const oti_ast* a, ot_value value) {
   ot_runtime* rt = plan->compiler->rt;
   if (plan->count >= 16 * 1024 * 1024 / (sizeof(oti_qq_node) + sizeof(ot_value))) {
     oti_error(rt, "quasiquote expansion exceeds budget");
@@ -434,7 +435,8 @@ static size_t qq_add(oti_qq_plan* plan, oti_qq_kind kind, size_t left, size_t ri
   }
   if (!oti_grow(rt, (void**)&plan->nodes, &plan->capacity, plan->count + 1, sizeof(oti_qq_node)))
     return SIZE_MAX;
-  if (!oti_grow(rt, (void**)&plan->values, &plan->value_capacity, plan->count + 1, sizeof(ot_value)))
+  if (!oti_grow(rt, (void**)&plan->values, &plan->value_capacity, plan->count + 1,
+                sizeof(ot_value)))
     return SIZE_MAX;
   plan->roots.slots = plan->values;
   size_t index = plan->count++;
@@ -466,7 +468,7 @@ static int qq_marker(const oti_ast* a) {
   return oti_ast_symbol(a, "quasiquote")         ? 1
          : oti_ast_symbol(a, "unquote")          ? 2
          : oti_ast_symbol(a, "unquote-splicing") ? 3
-                                             : 0;
+                                                 : 0;
 }
 
 static size_t qq_node(oti_qq_plan* plan, const oti_ast* a, unsigned depth);
@@ -522,8 +524,8 @@ static size_t qq_node(oti_qq_plan* plan, const oti_ast* a, unsigned depth) {
       }
       node = qq_add(plan, QQ_EXPRESSION, 0, 0, arg, OT_NIL);
     } else node = qq_node(plan, p, depth);
-    if (node == SIZE_MAX ||
-        !oti_grow(plan->compiler->rt, (void**)&pieces, &capacity, count + 1, sizeof(oti_qq_piece))) {
+    if (node == SIZE_MAX || !oti_grow(plan->compiler->rt, (void**)&pieces, &capacity, count + 1,
+                                      sizeof(oti_qq_piece))) {
       ok = false;
       break;
     }
@@ -550,7 +552,8 @@ static bool quasiquote(oti_compiler* c, const oti_ast* a, bool tail) {
 
   oti_qq_pending* pending = NULL;
   size_t count = 0, capacity = 0;
-  bool ok = root != SIZE_MAX && oti_grow(c->rt, (void**)&pending, &capacity, 1, sizeof(oti_qq_pending));
+  bool ok =
+      root != SIZE_MAX && oti_grow(c->rt, (void**)&pending, &capacity, 1, sizeof(oti_qq_pending));
   if (ok) pending[count++] = (oti_qq_pending){root, 0};
   while (ok && count) {
     size_t index = pending[count - 1].node;
@@ -567,7 +570,8 @@ static bool quasiquote(oti_compiler* c, const oti_ast* a, bool tail) {
         unsigned builtin = node.kind == QQ_CONS ? B_CONS : B_QQ_APPEND;
         ok = constant(c, ((ot_value)builtin << 8) | TAG_BUILTIN);
       } else if (stage < 3) {
-        if (!(ok = oti_grow(c->rt, (void**)&pending, &capacity, count + 1, sizeof(oti_qq_pending)))) break;
+        if (!(ok = oti_grow(c->rt, (void**)&pending, &capacity, count + 1, sizeof(oti_qq_pending))))
+          break;
         pending[count++] = (oti_qq_pending){stage == 1 ? node.left : node.right, 0};
       } else {
         ok = emit(c, tail && count == 1 ? OP_TAIL_CALL : OP_CALL, 2) != SIZE_MAX;
@@ -588,11 +592,11 @@ static bool lambda(oti_compiler* c, const oti_ast* params, const oti_ast* forms,
   uint32_t id = new_function(c->rt);
   if (id == UINT32_MAX) return false;
   oti_compiler child = {.rt = c->rt,
-                    .fn = c->rt->functions[id],
-                    .parent = c,
-                    .scope = 1,
-                    .expansion_arena = c->expansion_arena,
-                    .expansions = c->expansions};
+                        .fn = c->rt->functions[id],
+                        .parent = c,
+                        .scope = 1,
+                        .expansion_arena = c->expansion_arena,
+                        .expansions = c->expansions};
   bool ok = true;
   const oti_ast* rest = params->kind == AST_SYMBOL ? params : params->as.list.tail;
   const oti_ast* first = params->kind == AST_LIST ? params->as.list.first : NULL;
@@ -672,8 +676,8 @@ static bool lambda(oti_compiler* c, const oti_ast* params, const oti_ast* forms,
     ok = done != SIZE_MAX && patch(&child, missing) && expression(&child, name->next, false) &&
          emit(&child, OP_SET_LOCAL, optional_slot) != SIZE_MAX && patch(&child, done);
     if (ok)
-      ok = oti_grow(c->rt, (void**)&child.bindings, &child.binding_capacity, child.binding_count + 1,
-                   sizeof(oti_local));
+      ok = oti_grow(c->rt, (void**)&child.bindings, &child.binding_capacity,
+                    child.binding_count + 1, sizeof(oti_local));
     if (ok) child.bindings[child.binding_count++] = (oti_local){name, optional_slot};
   }
   if (forms && forms->kind == AST_STRING && forms->next) forms = forms->next;
@@ -871,7 +875,8 @@ static ot_value slot_key(oti_compiler* c, const oti_ast* name) {
   return key;
 }
 
-static bool accessor(oti_compiler* c, const oti_ast* class, const oti_ast* slot, const oti_ast* name) {
+static bool accessor(oti_compiler* c, const oti_ast* class, const oti_ast* slot,
+                     const oti_ast* name) {
   oti_ast param = {.kind = AST_SYMBOL, .as.text = {"%instance", 9}}, generic = *name;
   generic.next = &param;
   oti_ast sig = {.kind = AST_LIST, .as.list = {.first = &generic}};
@@ -899,8 +904,8 @@ static bool accessor(oti_compiler* c, const oti_ast* class, const oti_ast* slot,
   return expression(c, &form, false) && emit(c, OP_POP, 0) != SIZE_MAX;
 }
 
-static bool class_declaration(oti_compiler* c, const oti_ast* a, const oti_ast* head, const oti_ast* name,
-                              bool definitions) {
+static bool class_declaration(oti_compiler* c, const oti_ast* a, const oti_ast* head,
+                              const oti_ast* name, bool definitions) {
   if (c->scope || !definitions || !name || name->kind != AST_SYMBOL)
     return error(c, a, "class declaration requires a top-level name");
   if (!oti_classes_init(c->rt)) return false;
@@ -1037,8 +1042,8 @@ static bool expression(oti_compiler* c, const oti_ast* a, bool tail) {
       if (has_next) {
         const oti_ast* binding = forms->next;
         if (!binding || binding->kind != AST_SYMBOL ||
-            memchr(binding->as.text.data, '/', binding->as.text.size) || oti_ast_symbol(binding, "&") ||
-            oti_ast_symbol(binding, "&optional"))
+            memchr(binding->as.text.data, '/', binding->as.text.size) ||
+            oti_ast_symbol(binding, "&") || oti_ast_symbol(binding, "&optional"))
           return error(c, forms, "next method needs a local binding name");
         if (!binding->next) return error(c, forms, "next method needs a body");
         for (const oti_ast* p = params.as.list.first; p; p = p->next)
@@ -1052,8 +1057,8 @@ static bool expression(oti_compiler* c, const oti_ast* a, bool tail) {
         forms = binding->next;
       }
       return emit(c, OP_CALL, (uint32_t)count) != SIZE_MAX && lambda(c, &params, forms, false) &&
-             constant(c, around ? OT_TRUE : OT_FALSE) && constant(c, has_next ? OT_TRUE : OT_FALSE) &&
-             emit(c, OP_CALL, 5) != SIZE_MAX;
+             constant(c, around ? OT_TRUE : OT_FALSE) &&
+             constant(c, has_next ? OT_TRUE : OT_FALSE) && emit(c, OP_CALL, 5) != SIZE_MAX;
     }
     if (signature->next && (signature->next->kind != AST_STRING || signature->next->next))
       return error(c, a, "defgeneric accepts only an optional docstring");
@@ -1312,8 +1317,8 @@ static bool expression(oti_compiler* c, const oti_ast* a, bool tail) {
     free(jumps);
     return ok;
   }
-  if (oti_ast_symbol(head, "syntax-quote") || oti_ast_symbol(head, "defmacro") || oti_ast_symbol(head, "ns") ||
-      oti_ast_symbol(head, "require"))
+  if (oti_ast_symbol(head, "syntax-quote") || oti_ast_symbol(head, "defmacro") ||
+      oti_ast_symbol(head, "ns") || oti_ast_symbol(head, "require"))
     return error(c, a, "form not implemented in the prototype compiler");
   if (!expression(c, head, false)) return false;
   size_t count = 0;
@@ -1332,10 +1337,10 @@ bool oti_compile(ot_runtime* rt, const oti_ast* form, uint32_t* function) {
   oti_arena_init(&arena, OTI_SOURCE_LIMIT);
   size_t expansions = 0;
   oti_compiler c = {.rt = rt,
-                .fn = rt->functions[id],
-                .definitions = true,
-                .expansion_arena = &arena,
-                .expansions = &expansions};
+                    .fn = rt->functions[id],
+                    .definitions = true,
+                    .expansion_arena = &arena,
+                    .expansions = &expansions};
   bool ok = expression(&c, form, false);
   if (ok) ok = emit(&c, OP_RETURN, 0) != SIZE_MAX && assign_slots(&c);
   free(c.bindings);

@@ -10,7 +10,7 @@ bool oti_bind_param(ot_runtime* rt, ot_value param, ot_value value) {
   if (rt->param_count >= rt->stack_limit || rt->param_count >= SIZE_MAX / 2 - 1)
     return oti_error(rt, "parameter binding limit exceeded");
   if (!oti_grow(rt, (void**)&rt->params, &rt->param_capacity, 2 * (rt->param_count + 1),
-               sizeof(ot_value)))
+                sizeof(ot_value)))
     return false;
   rt->param_roots.slots = rt->params;
   rt->params[2 * rt->param_count] = param;

@@ -78,7 +78,8 @@ static oti_ast* node(oti_reader* r, oti_ast_kind kind, size_t offset) {
   return a;
 }
 
-static oti_ast* text_node(oti_reader* r, oti_ast_kind kind, size_t offset, const char* s, size_t n) {
+static oti_ast* text_node(oti_reader* r, oti_ast_kind kind, size_t offset, const char* s,
+                          size_t n) {
   oti_ast* a = node(r, kind, offset);
   if (a) {
     a->as.text.data = s;
@@ -96,7 +97,9 @@ bool oti_reader_space(unsigned char c) {
   return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\v';
 }
 
-bool oti_reader_delimiter(unsigned char c) { return oti_reader_space(c) || strchr("()[]{}\";'`,", c) != NULL; }
+bool oti_reader_delimiter(unsigned char c) {
+  return oti_reader_space(c) || strchr("()[]{}\";'`,", c) != NULL;
+}
 
 static void skip(oti_reader* r) {
   while (r->position < r->length) {
@@ -408,8 +411,8 @@ static oti_ast* sequence(oti_reader* r, size_t start, char close, const char* co
       r->position++;
       return a;
     }
-    if (c == '.' &&
-        (r->position + 1 == r->length || oti_reader_delimiter((unsigned char)r->source[r->position + 1]))) {
+    if (c == '.' && (r->position + 1 == r->length ||
+                     oti_reader_delimiter((unsigned char)r->source[r->position + 1]))) {
       if (!a->as.list.first) {
         syntax_error(r, r->position, "E0007", "dot needs a preceding element");
         return NULL;

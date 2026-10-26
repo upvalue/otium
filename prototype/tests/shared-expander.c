@@ -16,8 +16,7 @@ TEST(expander_forms_and_macros) {
   CHECK(eval(rt, "(let ((x (gensym \"x\"))) (eq? x (string->symbol (symbol->string x))))") ==
         OT_FALSE);
   check_int(rt, "(cond (#f 1) ((+ 20 22)))", 42);
-  check_true(rt,
-             "(equal? (list (string-length \"é🙂\") (substring \"aé🙂z\" 1 3)) '(2 \"é🙂\"))");
+  check_true(rt, "(equal? (list (string-length \"é🙂\") (substring \"aé🙂z\" 1 3)) '(2 \"é🙂\"))");
   check_true(rt, "(defmacro outer (x) `(inner ,x)) (defmacro inner (x) `(+ ,x 1)) "
                  "(equal? (macroexpand-1 '(outer 2)) '(inner 2))");
   check_true(rt, "(equal? (macroexpand '(outer 2)) '(+ 2 1))");

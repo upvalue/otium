@@ -9,16 +9,16 @@ bool oti_install_cleanup(ot_runtime* rt, bool outcome) {
   size_t count = rt->cleanup_count;
   if (count >= rt->stack_limit) return oti_error(rt, "cleanup limit exceeded");
   if (!oti_grow(rt, (void**)&rt->cleanup_states, &rt->cleanup_state_capacity, count + 1,
-               sizeof(oti_cleanup)) ||
+                sizeof(oti_cleanup)) ||
       !oti_grow(rt, (void**)&rt->cleanups, &rt->cleanup_capacity, count + 1, sizeof(ot_value)))
     return false;
   rt->cleanup_roots.slots = rt->cleanups;
   rt->cleanups[count] = rt->stack[rt->sp - 1];
   rt->cleanup_states[count] =
       (oti_cleanup){{rt->frame_count, rt->sp - 1, 0, rt->param_count, rt->handler_count,
-                 rt->handler_top, rt->restart_scope_count, count},
-                rt->try_count,
-                outcome};
+                     rt->handler_top, rt->restart_scope_count, count},
+                    rt->try_count,
+                    outcome};
   oti_restore_cleanups(rt, count + 1);
   return true;
 }
@@ -28,11 +28,11 @@ bool oti_run_cleanup(ot_runtime* rt, bool unwinding) {
   size_t index = rt->cleanup_count - 1;
   oti_cleanup cleanup = rt->cleanup_states[index];
   ot_value values[] = {rt->cleanups[index],
-                    rt->condition_values[0],
-                    rt->restart_transfer[0],
-                    rt->restart_transfer[1],
-                    OT_EMPTY,
-                    OT_NIL};
+                       rt->condition_values[0],
+                       rt->restart_transfer[0],
+                       rt->restart_transfer[1],
+                       OT_EMPTY,
+                       OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, values, 6);
   oti_restore_cleanups(rt, index);

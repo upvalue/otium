@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 _Static_assert(sizeof(oti_object_header) % 8 == 0, "object alignment");
 
 bool oti_heap_init(oti_heap* h, size_t capacity) {

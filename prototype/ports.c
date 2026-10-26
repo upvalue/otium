@@ -29,7 +29,7 @@ void oti_port_repr(FILE* out, ot_value p) {
                      : port_info(p)->kind == 1   ? "\"bytevector\""
                      : port_info(p)->handle == 0 ? "stdin"
                      : port_info(p)->handle == 1 ? "stdout"
-                                            : "stderr";
+                                                 : "stderr";
   fprintf(out, "#<port %s %s>", name, port_info(p)->input ? "input" : "output");
 }
 
@@ -101,7 +101,7 @@ static bool host_end(ot_runtime* rt, ot_value port) {
 
 static bool register_port(ot_runtime* rt, ot_value p) {
   if (!oti_grow(rt, (void**)&rt->open_ports, &rt->open_port_capacity, rt->open_port_count + 1,
-               sizeof(ot_value)))
+                sizeof(ot_value)))
     return false;
   rt->open_port_roots.slots = rt->open_ports;
   rt->open_ports[rt->open_port_count++] = p;
@@ -128,12 +128,12 @@ static bool callable(ot_value v) {
 
 /* The caller roots *port. Never retain its opaque bytes across a callback. */
 static ot_value callback(ot_runtime* rt, ot_value* port, size_t field, bool bytes, size_t start,
-                      size_t end) {
+                         size_t end) {
   ot_value function = object_fields(*port)[field];
   if (function == OT_NIL) return OT_NIL;
   if (port_info(*port)->busy) return oti_fail(rt, "port callback reentry");
   ot_value v[] = {function, OT_EMPTY, object_fields(*port)[0], ot_int((intptr_t)start),
-               ot_int((intptr_t)end)};
+                  ot_int((intptr_t)end)};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, v, 5);
   bool ok = true;
@@ -160,7 +160,8 @@ static ot_value callback(ot_runtime* rt, ot_value* port, size_t field, bool byte
 
 static void host_error(ot_runtime* rt, ot_value* port, const char* op, int error) {
   if (!ot_poll_interrupt(rt)) return;
-  if (port_info(*port)->kind == 4) oti_file_error(rt, op, object_fields(*port)[4], error ? error : EIO);
+  if (port_info(*port)->kind == 4)
+    oti_file_error(rt, op, object_fields(*port)[4], error ? error : EIO);
   else oti_io_error(rt, ":other");
 }
 
@@ -221,8 +222,10 @@ static bool flush(ot_runtime* rt, ot_value* port) {
   return true;
 }
 
-static ot_value make_custom(ot_runtime* rt, ot_value* port, size_t first, size_t count, bool input) {
-  if (count != 2 || !oti_kind(rt->stack[first], K_STRING) || !oti_kind(rt->stack[first + 1], K_TABLE))
+static ot_value make_custom(ot_runtime* rt, ot_value* port, size_t first, size_t count,
+                            bool input) {
+  if (count != 2 || !oti_kind(rt->stack[first], K_STRING) ||
+      !oti_kind(rt->stack[first + 1], K_TABLE))
     return oti_fail(rt, "custom port needs a name and callback table");
   ot_value callbacks[] = {OT_NIL, OT_NIL, OT_NIL};
   oti_roots roots;
@@ -272,8 +275,7 @@ static ot_value open_file(ot_runtime* rt, ot_value* port, size_t first, size_t c
       (count == 2 && !oti_kind(rt->stack[first + 1], K_TABLE)))
     return oti_fail(rt, "file port needs a path and optional options table");
   size_t size = 4096;
-  unsigned flags =
-      input ? OT_IO_READ : OT_IO_WRITE | OT_IO_CREATE | OT_IO_TRUNCATE;
+  unsigned flags = input ? OT_IO_READ : OT_IO_WRITE | OT_IO_CREATE | OT_IO_TRUNCATE;
   if (count == 2) {
     ot_value key = oti_intern(rt, K_KEYWORD, ":buffer-size", 12);
     if (!key) return 0;
@@ -291,15 +293,15 @@ static ot_value open_file(ot_runtime* rt, ot_value* port, size_t first, size_t c
         const char* name = (char*)oti_bytes_data(option);
         if (!strcmp(name, ":append")) {
           flags = OT_IO_WRITE | OT_IO_CREATE | OT_IO_APPEND;
-        } else if (!strcmp(name, ":error"))
-          flags = OT_IO_WRITE | OT_IO_CREATE | OT_IO_EXCLUSIVE;
+        } else if (!strcmp(name, ":error")) flags = OT_IO_WRITE | OT_IO_CREATE | OT_IO_EXCLUSIVE;
         else if (strcmp(name, ":truncate")) return oti_fail(rt, "invalid if-exists option");
       }
     }
   }
   if (size < 4) size = 4;
   size_t length = oti_bytes_length(rt->stack[first]);
-  if (memchr(oti_bytes_data(rt->stack[first]), 0, length)) return oti_fail(rt, "file path contains NUL");
+  if (memchr(oti_bytes_data(rt->stack[first]), 0, length))
+    return oti_fail(rt, "file path contains NUL");
   *port = oti_alloc(rt, K_PORT, 5, sizeof(oti_port));
   if (!*port) return 0;
   object_fields(*port)[4] = rt->stack[first];
@@ -318,7 +320,7 @@ static ot_value open_file(ot_runtime* rt, ot_value* port, size_t first, size_t c
   if (error) {
     if (!entered) return 0;
     return oti_file_error(rt, input ? "open-input-file" : "open-output-file",
-                         object_fields(*port)[4], error);
+                          object_fields(*port)[4], error);
   }
   if (!entered || !register_port(rt, *port)) {
     host_begin(rt, *port);
@@ -389,7 +391,9 @@ static ot_value current_port(ot_runtime* rt, unsigned which) {
   return oti_param_call(rt, p, 0);
 }
 
-static ot_value current_standard_port(ot_runtime* rt, bool input) { return current_port(rt, input ? 0 : 1); }
+static ot_value current_standard_port(ot_runtime* rt, bool input) {
+  return current_port(rt, input ? 0 : 1);
+}
 
 static bool check(ot_runtime* rt, ot_value p, bool input) {
   if (!oti_kind(p, K_PORT) || port_info(p)->input != input)
@@ -646,7 +650,8 @@ ot_value oti_port_print(ot_runtime* rt, unsigned id, size_t first, size_t count)
   return ok ? OT_NIL : 0;
 }
 
-static bool range(ot_runtime* rt, size_t first, size_t count, size_t n, size_t* start, size_t* end) {
+static bool range(ot_runtime* rt, size_t first, size_t count, size_t n, size_t* start,
+                  size_t* end) {
   *start = 0;
   *end = n;
   if ((count && !oti_natural(rt->stack[first], start)) ||
@@ -655,7 +660,8 @@ static bool range(ot_runtime* rt, size_t first, size_t count, size_t n, size_t* 
   return true;
 }
 
-static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count, ot_value live[2]) {
+static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count,
+                             ot_value live[2]) {
   if (id >= B_OPEN_INPUT_FILE)
     return open_file(rt, &live[0], first, count,
                      id == B_OPEN_INPUT_FILE || id == B_OPEN_BINARY_INPUT);
@@ -690,7 +696,8 @@ static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
       id == B_OPEN_OUTPUT_BYTES) {
     bool input = id == B_OPEN_INPUT_STRING || id == B_OPEN_INPUT_BYTES;
     bool string = id == B_OPEN_INPUT_STRING || id == B_OPEN_OUTPUT_STRING;
-    if (count != (input ? 1u : 0u)) return oti_fail(rt, "wrong number of port constructor arguments");
+    if (count != (input ? 1u : 0u))
+      return oti_fail(rt, "wrong number of port constructor arguments");
     size_t n = 0;
     if (input) {
       if (!oti_kind(rt->stack[first], string ? K_STRING : K_BYTEVECTOR))
@@ -713,7 +720,8 @@ static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
     return live[0];
   }
   if (id == B_CLOSE_PORT || id == B_CLOSE_INPUT || id == B_CLOSE_OUTPUT) {
-    if (count != 1 || !oti_kind(rt->stack[first], K_PORT)) return oti_fail(rt, "close needs a port");
+    if (count != 1 || !oti_kind(rt->stack[first], K_PORT))
+      return oti_fail(rt, "close needs a port");
     live[0] = rt->stack[first];
     if ((id == B_CLOSE_INPUT && !port_info(live[0])->input) ||
         (id == B_CLOSE_OUTPUT && port_info(live[0])->input))

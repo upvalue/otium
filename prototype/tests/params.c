@@ -45,6 +45,7 @@ TEST(parameters_bind_dynamically_and_unwind) {
   const char* shape = "expected ((expression expression) ...)";
   const char* malformed = "malformed form";
   const char* top = "form requires top-level context";
+
   const struct {
     const char* source;
     const char* message;
@@ -59,6 +60,7 @@ TEST(parameters_bind_dynamically_and_unwind) {
              {"(fn () (defparam p 1))", top},
              {"(let () (defparam p 1))", top},
              {"(with-params ((p '(leaked))) (error :unhandled))", ":unhandled"}};
+
   for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); i++) {
     ot_value ignored;
     if (ot_eval(rt, bad[i].source, strlen(bad[i].source), &ignored))

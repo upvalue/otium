@@ -26,7 +26,8 @@ static bool size_option(const char* text, size_t* out) {
   return true;
 }
 
-static bool evaluate(ot_runtime* rt, const char* source, size_t length, const char* path, bool echo) {
+static bool evaluate(ot_runtime* rt, const char* source, size_t length, const char* path,
+                     bool echo) {
   ot_value result;
   if (!ot_eval(rt, source, length, &result)) {
     int status;
@@ -333,7 +334,7 @@ int main(int argc, char** argv) {
   }
   ot_set_interrupt_flag(rt, &interrupt_requested);
   bool ok = ot_set_arguments(rt, path, (size_t)(argc - arguments_start),
-                                  (const char* const*)(argv + arguments_start));
+                             (const char* const*)(argv + arguments_start));
   if (ok) ok = ot_load_expander(rt, OTIUM_LIBRARY_DIR);
   if (!ok) fprintf(stderr, "cannot load expander: %s\n", ot_error(rt));
   for (int i = 1; ok && i < option_end; i++) {

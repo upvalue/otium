@@ -47,9 +47,7 @@ TEST(core_evaluation) {
   check_int(rt, "(def (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))) (fib 20)", 6765);
   check_int(rt, "(let ((x 0) (inc (fn () (set! x (+ x 1))))) (inc) (inc) x)", 2);
   check_int(
-      rt,
-      "(def (counter x) (fn () (set! x (+ x 1)) x)) (def tick (counter 40)) (tick) (tick)",
-      42);
+      rt, "(def (counter x) (fn () (set! x (+ x 1)) x)) (def tick (counter 40)) (tick) (tick)", 42);
   CHECK(eval(rt, "(let ((x 0)) (set! x 42))") == OT_NIL);
   check_int(rt, "(car (set-car! (cons 1 2) 3))", 3);
   check_int(rt, "(let ((x 17) (outer (fn () (fn () x)))) ((outer)))", 17);
@@ -63,9 +61,7 @@ TEST(core_evaluation) {
   check_int(rt, "(def old-add +) (def + (fn (a b) (old-add a b 1))) (+ 20 21)", 42);
   eval(rt, "(def + old-add)");
   check_int(
-      rt,
-      "(let ((outside 9)) (let loop ((x (let ((inside 2)) inside)) (y outside)) (+ x y)))",
-      11);
+      rt, "(let ((outside 9)) (let loop ((x (let ((inside 2)) inside)) (y outside)) (+ x y)))", 11);
   check_int(rt, "(let ((x 9)) (let loop ((x 1) (y x)) (+ x y)))", 10);
   check_int(rt, "(car (cdr '(10 20 . 30)))", 20);
   check_int(rt, "(cdr (cdr '(10 20 . 30)))", 30);
@@ -211,8 +207,7 @@ TEST(arrays) {
   check_true(rt, "(let ((a []) (b [])) (push! a a) (push! b b) (equal? a b))");
   CHECK(eval(rt, "(let ((a []) (b [])) (push! a a 1) (push! b b 2) (equal? a b))") == OT_FALSE);
   check_true(
-      rt,
-      "(let ((a (cons 1 nil)) (b (cons 1 nil))) (set-cdr! a a) (set-cdr! b b) (equal? a b))");
+      rt, "(let ((a (cons 1 nil)) (b (cons 1 nil))) (set-cdr! a a) (set-cdr! b b) (equal? a b))");
   CHECK(eval(rt, "(get [nil] 0 9)") == OT_NIL);
   check_int(rt, "([1 2] 9 42)", 42);
   check_int(rt, "(let ((a [[1]]) (b (copy a))) (put! (get b 0) 0 42) ((a 0) 0))", 42);
@@ -262,7 +257,7 @@ TEST(array_garbage_and_exhaustion) {
 TEST(long_list_equality) {
   ot_runtime* rt = new_runtime(4 * 1024 * 1024, 4096);
   check_true(rt, "(let ((a '()) (b '()) (i 0)) (while (< i 20000) (set! a (cons i a)) (set! b "
-             "(cons i b)) (set! i (+ i 1))) (equal? a b))");
+                 "(cons i b)) (set! i (+ i 1))) (equal? a b))");
   ot_destroy(rt);
 }
 
@@ -287,7 +282,7 @@ TEST(tables) {
   check_int(rt, "(get {0.0 42} -0.0)", 42);
   check_int(rt, "(get {\"same\" 42} \"same\")", 42);
   check_true(rt, "(let ((a [1]) (b [1]) (t {})) (put! t a :array) (put! t (list a) :pair) (equal? "
-             "(list (t a) (t b) (t (list a)) (t (list b))) (list :array nil :pair nil)))");
+                 "(list (t a) (t b) (t (list a)) (t (list b))) (list :array nil :pair nil)))");
   check_int(
       rt,
       "(let ((a [1]) (t {a 42}) (i 0)) (push! a 2 3 4 5 6) (while (< i 500) (put! t i (cons i "
@@ -312,10 +307,9 @@ TEST(tables) {
   check_error(rt, "(let ((k (list (cons 1 2))) (t {})) (put! t k 42) (set-car! (car k) 9))",
               "frozen table key");
   check_int(rt, "(let ((k (cons 1 nil)) (t {})) (set-cdr! k k) (put! t k 42) (t k))", 42);
-  check_true(
-      rt,
-      "(let ((t {}) (i 0)) (while (< i 8) (put! t i i) (set! i (+ i 1))) (set! i 0) (while "
-      "(< i 7) (put! t i nil) (set! i (+ i 1))) (put! t 8 8) (equal? (keys t) [7 8]))");
+  check_true(rt,
+             "(let ((t {}) (i 0)) (while (< i 8) (put! t i i) (set! i (+ i 1))) (set! i 0) (while "
+             "(< i 7) (put! t i nil) (set! i (+ i 1))) (put! t 8 8) (equal? (keys t) [7 8]))");
   check_error(rt, "(table 1)", "pairs");
   check_error(rt, "(keys [])", "table");
   check_error(rt, "(put! {} 1)", "arguments");
@@ -428,8 +422,7 @@ TEST(apply_calls) {
 TEST(apply_respects_stack_limit) {
   ot_runtime* rt = new_runtime(32768, 32);
   check_error(
-      rt,
-      "(let loop ((n 40) (xs '())) (if (= n 0) (apply list xs) (loop (- n 1) (cons n xs))))",
+      rt, "(let loop ((n 40) (xs '())) (if (= n 0) (apply list xs) (loop (- n 1) (cons n xs))))",
       "stack limit");
   ot_destroy(rt);
 }

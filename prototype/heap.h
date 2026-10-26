@@ -80,13 +80,17 @@ typedef struct {
   uint32_t fields, kind;
 } oti_object_header;
 
-static inline ot_value* object_fields(ot_value object) { return (ot_value*)((oti_object_header*)object + 1); }
+static inline ot_value* object_fields(ot_value object) {
+  return (ot_value*)((oti_object_header*)object + 1);
+}
 
 static inline void* object_bytes(ot_value object) {
   return object_fields(object) + ((oti_object_header*)object)->fields;
 }
 
-static inline uint32_t object_kind(ot_value object) { return ((oti_object_header*)object)->kind & 255; }
+static inline uint32_t object_kind(ot_value object) {
+  return ((oti_object_header*)object)->kind & 255;
+}
 
 static inline uint32_t object_identity(ot_value object) {
   return (((oti_object_header*)object)->kind >> 8) & 0x7fffff;
@@ -96,6 +100,8 @@ static inline bool object_frozen(ot_value object) {
   return (((oti_object_header*)object)->kind & 0x80000000u) != 0;
 }
 
-static inline void object_freeze(ot_value object) { ((oti_object_header*)object)->kind |= 0x80000000u; }
+static inline void object_freeze(ot_value object) {
+  ((oti_object_header*)object)->kind |= 0x80000000u;
+}
 
 #endif

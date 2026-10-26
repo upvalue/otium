@@ -3,7 +3,7 @@
 #include <string.h>
 
 bool ot_set_arguments(ot_runtime* rt, const char* script, size_t count,
-                           const char* const* arguments) {
+                      const char* const* arguments) {
   if (!oti_host_entry(rt)) return false;
   if (count && !arguments) return oti_error(rt, "missing argument array");
   ot_value v[] = {OT_EMPTY, OT_NIL, OT_NIL};

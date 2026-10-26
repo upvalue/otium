@@ -42,7 +42,8 @@ int oti_foreign_scalar(ot_runtime* rt, ot_value name, bool memory) {
     for (size_t i = 0; i < sizeof(oti_foreign_scalars) / sizeof(oti_foreign_scalars[0]); i++)
       if (strlen(oti_foreign_scalars[i].name) == length &&
           !memcmp(oti_foreign_scalars[i].name, s, length)) {
-        if (memory && (oti_foreign_scalars[i].kind == T_VOID || oti_foreign_scalars[i].kind == T_UTF8))
+        if (memory &&
+            (oti_foreign_scalars[i].kind == T_VOID || oti_foreign_scalars[i].kind == T_UTF8))
           break;
         return (int)i;
       }
@@ -102,7 +103,8 @@ int oti_foreign_scalar_code(ot_runtime* rt, ot_value value, bool memory) {
   if (ot_is_int(value) && ot_to_int(value) >= 0 &&
       (size_t)ot_to_int(value) < sizeof(oti_foreign_scalars) / sizeof(*oti_foreign_scalars)) {
     int code = (int)ot_to_int(value);
-    if (!memory || (oti_foreign_scalars[code].kind != T_VOID && oti_foreign_scalars[code].kind != T_UTF8))
+    if (!memory ||
+        (oti_foreign_scalars[code].kind != T_VOID && oti_foreign_scalars[code].kind != T_UTF8))
       return code;
   }
   oti_error(rt, "FFI type: invalid scalar code");
@@ -185,8 +187,8 @@ static bool lower_union(ot_runtime* rt, oti_signature* s, oti_abi_node* node, si
 #endif
 
 /* This builds host-owned ABI trees without allocating in the moving heap. */
-static ffi_type* aggregate_type(ot_runtime* rt, oti_signature* s, ot_value description, unsigned depth,
-                                size_t* budget) {
+static ffi_type* aggregate_type(ot_runtime* rt, oti_signature* s, ot_value description,
+                                unsigned depth, size_t* budget) {
   size_t n, kind, size, alignment;
   if (depth > 64 || !*budget) {
     oti_error(rt, "FFI signature: aggregate too complex");
@@ -330,8 +332,8 @@ static bool call_type(ot_runtime* rt, oti_signature* s, ot_value v, bool codes, 
   return true;
 }
 
-oti_signature* oti_foreign_signature(ot_runtime* rt, oti_signature** cache, ot_value arguments, ot_value result,
-                             bool codes) {
+oti_signature* oti_foreign_signature(ot_runtime* rt, oti_signature** cache, ot_value arguments,
+                                     ot_value result, bool codes) {
   oti_signature wanted = {0};
   if (!oti_foreign_list_length(rt, arguments, MAX_ARGUMENTS, &wanted.count)) return 0;
   bool valid = call_type(rt, &wanted, result, codes, &wanted.result, &wanted.result_type);

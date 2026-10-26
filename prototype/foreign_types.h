@@ -42,8 +42,8 @@ int oti_foreign_scalar(ot_runtime* rt, ot_value name, bool memory);
 int oti_foreign_scalar_code(ot_runtime* rt, ot_value value, bool memory);
 bool oti_foreign_list_length(ot_runtime* rt, ot_value list, size_t limit, size_t* count);
 void oti_foreign_free_abi_nodes(oti_abi_node* node);
-oti_signature* oti_foreign_signature(ot_runtime* rt, oti_signature** cache, ot_value arguments, ot_value result,
-                             bool codes);
+oti_signature* oti_foreign_signature(ot_runtime* rt, oti_signature** cache, ot_value arguments,
+                                     ot_value result, bool codes);
 
 static inline ot_value list_item(ot_value list, size_t index) {
   while (index--) list = object_fields(list)[1];

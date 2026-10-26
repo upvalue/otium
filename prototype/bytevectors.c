@@ -8,11 +8,11 @@ size_t oti_bytes_length(ot_value v) {
   return n;
 }
 
-unsigned char* oti_bytes_data(ot_value v) { return (unsigned char*)object_bytes(v) + sizeof(size_t); }
-
-static bool byte(ot_value v) {
-  return ot_is_int(v) && ot_to_int(v) >= 0 && ot_to_int(v) <= 255;
+unsigned char* oti_bytes_data(ot_value v) {
+  return (unsigned char*)object_bytes(v) + sizeof(size_t);
 }
+
+static bool byte(ot_value v) { return ot_is_int(v) && ot_to_int(v) >= 0 && ot_to_int(v) <= 255; }
 
 ot_value oti_bytes_new(ot_runtime* rt, size_t n) {
   if (n > UINT32_MAX - sizeof(size_t) - 32) return oti_fail(rt, "bytevector too large");
@@ -21,7 +21,8 @@ ot_value oti_bytes_new(ot_runtime* rt, size_t n) {
   return v;
 }
 
-static bool slice(ot_runtime* rt, size_t first, size_t count, size_t n, size_t* start, size_t* end) {
+static bool slice(ot_runtime* rt, size_t first, size_t count, size_t n, size_t* start,
+                  size_t* end) {
   *start = 0;
   *end = n;
   if ((count && !oti_natural(rt->stack[first], start)) ||

@@ -1,0 +1,24 @@
+(require (otium.ui :as ui) (otium.gfx :as gfx))
+
+;; Create a running window
+(def window (ui/open {:width 640 :height 480 :title "My cool application"}))
+
+;; Make a Rectangle widget which renders a colored box
+(defclass Rectangle
+  :is ui/Widget
+  (color :init 0xff0000ff :state #t))
+
+;; Define necessary UI methods
+(defmethod (ui/measure (r Rectangle) limits)
+  (ui/size 640 480))
+
+(defmethod (ui/paint (r Rectangle) g bounds)
+  (gfx/rect g bounds (r :color)))
+
+;; Put the rectangle onto the screen
+(ui/set-view! window (fn () (ui/new Rectangle {})))
+
+;; Run the graphical application and close when user exits
+(unwind-protect
+  (ui/run)
+  (ui/close! window))

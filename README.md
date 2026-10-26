@@ -5,7 +5,7 @@ a human). It has a focus on pragmatism, supporting live development, and
 reasonable performance.
 
 This repository contains two other programs written in Otium (& a
-little bit of C)
+little bit of C).
 
 # Manse
 
@@ -16,6 +16,10 @@ the wayland compositor Niri) as its terminal management paradigm.
 
 OtOS is a unikernel operating system for embedded devices in the multi-MB
 memory range. Its userspace is written in the Otium language.
+
+# Learn more
+
+Best place to learn more is in docs/index.md.
 
 # The language
 

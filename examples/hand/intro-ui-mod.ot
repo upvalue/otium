@@ -1,0 +1,11 @@
+;; intro-ui-mod.ot -> load intro a running intro-ui.ot mod to make the rectangle clickable
+
+;; Table mapping current color to next color
+(def next-color {0xff0000ff 0x00ff00ff 0x00ff00ff 0x0000ffff 0x0000ffff 0xff0000ff})
+
+;; When user clicks, cycle through colors
+(defmethod (ui/handle-event (r Rectangle) event)
+  (case (get event :kind)
+    ((:pointer-down :pointer-up) :handled)
+    ((:press) (set! (r :color) (get next-color (r :color) 0xff0000ff)) :handled)
+    (else nil)))

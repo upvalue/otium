@@ -261,5 +261,5 @@ def gpu(t, required):
 
 
 for required, suffix, suite in ((False, '', 'native'), (True, ' required', 'gpu')):
-    test('ui gpu' + suffix, suite=suite, needs=['ui', 'chez'], timeout=300, parallel=False)(
+    test('ui gpu' + suffix, suite=suite, needs=['ui', 'chez', 'c-ffi'], timeout=300, parallel=False)(
         lambda t, required=required: gpu(t, required))

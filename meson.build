@@ -35,19 +35,18 @@ line = both_libraries('otium-line', 'native/line/line-edit.c',
 dev = both_libraries('otium-dev', 'native/dev/transport.c',
   link_whole: utf8, override_options: native_options)
 
+ffi_native = both_libraries('otium-ffi', 'native/ffi/native.c',
+  link_whole: utf8, dependencies: dl, override_options: native_options)
+# Two copies of the FFI test fixture, told apart by fixture_id().
+ffi_fixtures = []
+foreach identity : ['17', '29']
+  ffi_fixtures += shared_module('ffi-fixture-' + identity, 'tests/ffi/fixture.c',
+    c_args: '-DFIXTURE_ID=' + identity, dependencies: dependency('threads'),
+    name_prefix: '', name_suffix: extension,
+    build_by_default: false, override_options: native_options + ['c_std=c11'])
+endforeach
+
 libffi = dependency('libffi', required: get_option('ffi'))
-if libffi.found()
-  ffi_native = both_libraries('otium-ffi', 'native/ffi/native.c',
-    link_whole: utf8, dependencies: dl, override_options: native_options)
-  # Two copies of the FFI test fixture, told apart by fixture_id().
-  ffi_fixtures = []
-  foreach identity : ['17', '29']
-    ffi_fixtures += shared_module('ffi-fixture-' + identity, 'tests/ffi/fixture.c',
-      c_args: '-DFIXTURE_ID=' + identity, dependencies: dependency('threads'),
-      name_prefix: '', name_suffix: extension,
-      build_by_default: false, override_options: native_options + ['c_std=c11'])
-  endforeach
-endif
 
 utf8_checks = executable('otium-utf8-checks', 'tests/native/utf8.c',
   include_directories: include_directories('native/utf8'),
@@ -180,20 +179,19 @@ test_kwargs = {'workdir': source_root, 'env': test_env}
 # Compiled checks.
 test('runtime', test_runtime, suite: 'c', kwargs: test_kwargs)
 test('utf8', utf8_checks, suite: 'native', kwargs: test_kwargs)
-if libffi.found() and ui
+if ui
   test('ui caret', ui_caret_checks, suite: 'native', kwargs: test_kwargs)
 endif
 
-features = []
-needed = {'': [otium]}
+features = ['ffi']
+needed = {'': [otium], 'ffi': [ffi_native] + ffi_fixtures}
 if chez.found()
   features += 'chez'
 endif
 if libffi.found()
-  features += 'ffi'
-  needed += {'ffi': [ffi_native] + ffi_fixtures}
+  features += 'c-ffi'
 endif
-if libffi.found() and ui
+if ui
   # Display tests share the window server and build/ui-test-artifacts/, so
   # they're registered as not parallel.
   features += 'ui'

@@ -1,6 +1,6 @@
 option('gc', type: 'combo', choices: ['semi', 'gen'], value: 'semi',
   description: 'semi is the whole-heap copying collector; gen is copying nursery plus mark-sweep')
-option('ffi', type: 'feature', value: 'auto', description: 'libffi foreign calls in the C runtime and the Chez helper')
+option('ffi', type: 'feature', value: 'auto', description: 'libffi foreign calls in the C runtime')
 option('ui', type: 'feature', value: 'auto', description: 'SDL3, SDL3_ttf and Yoga UI bridge')
 
 option('heap_init', type: 'integer', value: 1048576)

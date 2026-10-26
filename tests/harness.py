@@ -59,6 +59,8 @@ def test(name, *, runtimes=None, suite=None, timeout=None, needs=None, parallel=
             if full in TESTS:
                 raise ValueError(f'duplicate test name: {full}')
             required = set(_defaults.get('needs', ()) if needs is None else needs)
+            if runtime == 'c' and required & {'ffi', 'ui'}:
+                required.add('c-ffi')
             if runtime == 'chez':
                 required.add('chez')
             TESTS[full] = Test(full, function, runtime,

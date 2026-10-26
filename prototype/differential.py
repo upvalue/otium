@@ -126,7 +126,7 @@ def run(command, path):
 
 
 def main():
-    commands = [[ROOT / 'prototype/otium-proto'], [ROOT / 'prototype/otium-proto', '--native=1'],
+    commands = [[ROOT / 'prototype/otium-proto'],
                 [ROOT / 'otium', '--runtime=chez', '--no-project']]
     with tempfile.TemporaryDirectory(prefix='otium-differential-') as directory:
         path = pathlib.Path(directory) / 'case.ot'

@@ -77,11 +77,11 @@ static bool install_import(Runtime *rt, const Ast *name, uint32_t target, bool a
     m->imports[m->import_count++] = (Import){rt->current_namespace, target, copy, alias};
     return true;
 }
-static bool load_module(Runtime *rt, uint32_t space, bool reload) {
+static bool load_module(Runtime *rt, uint32_t space, bool reload, bool legacy_ffi) {
     ModuleState *m = state(rt);
     if (!m) return false;
     const char *name = rt->namespaces[space];
-    if (!strcmp(name, "otium.core") || !strcmp(name, "ffi")) return true;
+    if (!strcmp(name, "otium.core") || (!strcmp(name, "otium.ffi") && legacy_ffi) || !strcmp(name, "otium.process") || !strcmp(name,"otium.reader")) return true;
     size_t index = 0;
     while (index < m->count && m->items[index].space != space) index++;
     if (index == m->count) {
@@ -165,7 +165,7 @@ static bool one_require(Runtime *rt, const Ast **cursor) {
         if (i != space && strlen(rt->namespaces[i]) == alias->as.text.size &&
             !memcmp(rt->namespaces[i], alias->as.text.data, alias->as.text.size))
             return rt_error(rt, "require alias conflicts with a namespace name");
-    if (!load_module(rt, space, reload)) {
+    if (!load_module(rt, space, reload, ast_symbol(module,"ffi"))) {
         if (!strncmp(rt->error, "module [", 8)) return false;
         char cause[192];
         memcpy(cause, rt->error, sizeof(cause)); cause[sizeof(cause)-1] = 0;

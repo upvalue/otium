@@ -169,7 +169,7 @@ Value rt_table_builtin(Runtime *rt, unsigned id, size_t first, size_t count) {
         return table;
     }
     size_t min = id == B_PUT_MUT ? 3 : id == B_GET || id == B_CONTAINS ? 2 : 1;
-    if (count < min || count > (id == B_GET ? 3 : min)) return fail(rt, "wrong number of collection arguments");
+    if (count < min || count > (id == B_GET ? 3 : id == B_PUT_MUT ? SIZE_MAX : min) || (id == B_PUT_MUT && !(count % 2))) return fail(rt, "wrong number of collection arguments");
     Value table = rt->stack[first];
     if (id == B_TABLE_P) return rt_kind(table, K_TABLE) ? V_TRUE : V_FALSE;
     if (!rt_kind(table, K_TABLE)) return fail(rt, "expected a table");
@@ -180,7 +180,10 @@ Value rt_table_builtin(Runtime *rt, unsigned id, size_t first, size_t count) {
         Value value = rt_table_get(rt, table, rt->stack[first+1], V_NIL);
         return !value ? 0 : value == V_NIL ? V_FALSE : V_TRUE;
     }
-    case B_PUT_MUT: return rt_table_set(rt, table, rt->stack[first+1], rt->stack[first+2]);
+    case B_PUT_MUT:
+        for (size_t i = 1; i < count; i += 2)
+            if (!rt_table_set(rt, rt->stack[first], rt->stack[first+i], rt->stack[first+i+1])) return 0;
+        return rt->stack[first];
     case B_COPY: {
         Value copy = new_table(rt);
         if (!copy) return 0;

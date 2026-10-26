@@ -12,13 +12,32 @@ static bool push(Runtime *rt, Value v) {
     return true;
 }
 
+static bool primitive(Value value) {
+    return (value & 255) == TAG_BUILTIN || rt_kind(value, K_FOREIGN_FUNCTION) ||
+        rt_kind(value, K_PARAM) || rt_kind(value,K_INSTANCE) || rt_kind(value,K_RECORD) || rt_collection(value);
+}
+static Value call_primitive(Runtime *rt, size_t call, size_t argc) {
+    Value value = rt->stack[call];
+    if (rt_kind(value,K_RECORD)) return rt_record_call(rt,value,call+1,argc);
+    if (rt_kind(value,K_INSTANCE)) return rt_instance_call(rt,value,call+1,argc);
+    if (rt_kind(value, K_PARAM)) return rt_param_call(rt, value, argc);
+    if (rt_collection(value)) return rt_collection_call(rt, call, call + 1, argc);
+    if (rt_kind(value, K_FOREIGN_FUNCTION)) return rt_foreign_call(rt, call, call + 1, argc);
+    return rt_builtin(rt, (unsigned)(value >> 8), call + 1, argc);
+}
+
 bool rt_enter(Runtime *rt, size_t call, size_t argc, bool tail) {
     Value closure = rt->stack[call];
+    if (rt_kind(closure, K_MACRO)) { closure = object_fields(closure)[0]; rt->stack[call] = closure; }
+    if (rt_kind(closure,K_GENERIC) || rt_kind(closure,K_NEXT)) {
+        if(!rt_generic_prepare(rt,call,&argc)) return false;
+        closure=rt->stack[call];
+    }
     if (!rt_kind(closure, K_CLOSURE)) return rt_error(rt, "value is not callable");
     uint32_t id;
     memcpy(&id, object_bytes(closure), sizeof(id));
     Function *fn = rt->functions[id];
-    if (argc < fn->arity || (!fn->rest && argc > fn->arity + fn->optional)) return rt_error(rt, "wrong number of arguments");
+    if (argc < fn->arity || (!fn->rest && argc > fn->arity + fn->optional)) return rt_coded_error(rt, "E0301", "wrong number of arguments");
     size_t base = tail ? rt->frames[rt->frame_count - 1].base : call;
     if (fn->locals >= rt->stack_limit || base >= rt->stack_limit - fn->locals)
         return rt_error(rt, "VM stack limit exceeded");
@@ -98,10 +117,8 @@ bool rt_apply(Runtime *rt, size_t call, size_t argc, bool tail) {
         height(rt, call + 1 + argc);
     }
     Value target = rt->stack[call];
-    if ((target & 255) == TAG_BUILTIN || rt_collection(target) || rt_kind(target, K_FOREIGN_FUNCTION)) {
-        Value answer = rt_collection(target) ? rt_collection_call(rt, call, call + 1, argc)
-            : rt_kind(target, K_FOREIGN_FUNCTION) ? rt_foreign_call(rt, call, call + 1, argc)
-            : rt_builtin(rt, (unsigned)(target >> 8), call + 1, argc);
+    if (primitive(target)) {
+        Value answer = call_primitive(rt, call, argc);
         if (!answer || rt->error[0]) return false;
         if (tail) return rt_leave(rt, answer);
         rt->stack[call] = answer;
@@ -115,8 +132,8 @@ bool rt_execute(Runtime *rt, uint32_t function, Value *result) {
     Value closure = rt_alloc(rt, K_CLOSURE, 0, sizeof(function));
     if (!closure) return false;
     memcpy(object_bytes(closure), &function, sizeof(function));
-    if (!push(rt, closure)) return false;
-    return rt_invoke(rt, 0, result);
+    *result = rt_call_list(rt, closure, V_EMPTY);
+    return *result != 0;
 }
 
 bool rt_invoke(Runtime *rt, size_t argc, Value *result) {
@@ -125,10 +142,8 @@ bool rt_invoke(Runtime *rt, size_t argc, Value *result) {
         if (!rt_apply(rt, 0, argc, false)) return false;
         goto dispatch;
     }
-    if ((callable & 255) == TAG_BUILTIN || rt_kind(callable, K_FOREIGN_FUNCTION) || rt_collection(callable)) {
-        Value answer = rt_collection(callable) ? rt_collection_call(rt, 0, 1, argc)
-            : rt_kind(callable, K_FOREIGN_FUNCTION) ? rt_foreign_call(rt, 0, 1, argc)
-            : rt_builtin(rt, (unsigned)(callable >> 8), 1, argc);
+    if (primitive(callable)) {
+        Value answer = call_primitive(rt, 0, argc);
         if (!answer) return false;
         height(rt, 0);
         if (!push(rt, answer)) return false;
@@ -142,34 +157,89 @@ dispatch:;
     return true;
 }
 
-bool rt_drive(Runtime *rt, size_t stop_frames) {
+static bool dispatch(Runtime *rt, size_t stop_frames) {
     while (rt->frame_count > stop_frames && !rt->error[0]) {
+        if (rt->interrupt_flag && *rt->interrupt_flag && !runtime_poll_interrupt(rt)) return false;
         Frame *frame = &rt->frames[rt->frame_count - 1];
         Function *fn = rt->functions[frame->function];
-        if (rt->native_threshold && fn->heat < rt->native_threshold) fn->heat++;
-        if (rt->native_threshold && (fn->native || fn->heat >= rt->native_threshold)) {
-            if (!fn->native && !rt_native_compile(rt, frame->function)) return false;
-            rt->native_entries++;
-            if (!fn->native(rt)) return false;
-            continue;
-        }
         Instruction ins = fn->code[frame->ip++];
         size_t base = frame->base;
         Value v;
         switch (ins.op) {
+        case OP_CLEANUP:
+            if (!rt_install_cleanup(rt, ins.arg != 0)) return false;
+            height(rt, rt->sp - 1); break;
+        case OP_RUN_CLEANUP:
+            if (!rt_run_cleanup(rt, false)) return false;
+            break;
+        case OP_RESTARTS: {
+            size_t target = fn->code[frame->ip++].arg;
+            size_t first = rt->sp - 3 * ins.arg;
+            if (!rt_install_restarts(rt, first, ins.arg, target)) return false;
+            height(rt, first); break;
+        }
+        case OP_END_RESTARTS:
+            if (!rt->restart_scope_count) return rt_error(rt, "invalid restart scope");
+            rt_restore_restarts(rt, rt->restart_scope_count - 1); break;
+        case OP_TRY:
+            if (!rt_grow(rt, (void **)&rt->tries, &rt->try_capacity, rt->try_count + 1, sizeof(TryFrame))) return false;
+            rt->tries[rt->try_count++] = (TryFrame){rt->frame_count, rt->sp, ins.arg, rt->param_count, rt->handler_count, rt->handler_top, rt->restart_scope_count, rt->cleanup_count};
+            break;
+        case OP_END_TRY:
+            if (!rt->try_count) return rt_error(rt, "invalid try stack");
+            rt->try_count--; break;
+        case OP_RAISE:
+            rt->condition_values[0] = rt->stack[rt->sp - 1]; rt->raised = true;
+            rt_error(rt, "uncaught condition"); rt->signaled = true;
+            return false;
+        case OP_BIND_HANDLERS:
+            if (!rt_install_handlers(rt, rt->sp - 2 * ins.arg, ins.arg)) return false;
+            height(rt, rt->sp - 2 * ins.arg);
+            break;
+        case OP_UNBIND_HANDLERS:
+            if (ins.arg > rt->handler_count) return rt_error(rt, "invalid handler stack");
+            rt_remove_handlers(rt, ins.arg);
+            break;
+        case OP_MAKE_PARAM:
+            v = rt_alloc(rt, K_PARAM, 2, 0);
+            if (!v) return false;
+            object_fields(v)[0] = rt->stack[rt->sp - 2];
+            object_fields(v)[1] = rt->stack[rt->sp - 1];
+            height(rt, rt->sp - 2);
+            if (!push(rt, v)) return false;
+            break;
+        case OP_BIND_PARAM:
+            if (!rt_bind_param(rt, rt->stack[rt->sp - 2], rt->stack[rt->sp - 1])) return false;
+            height(rt, rt->sp - 2);
+            break;
+        case OP_UNBIND_PARAMS:
+            if (ins.arg > rt->param_count) return rt_error(rt, "invalid parameter stack");
+            rt_restore_params(rt, rt->param_count - ins.arg);
+            break;
         case OP_CONST:
             if (!push(rt, rt->constants[ins.arg])) return false;
             break;
         case OP_GLOBAL:
             v = rt->globals[ins.arg];
-            if (v == V_UNBOUND) return rt_error(rt, "unbound global");
+            if (v == (((Value)B_EVAL << 8) | TAG_BUILTIN)) {
+                v = rt_evaluator(rt, fn->namespace);
+                if (!v) return false;
+            }
+            if (v == V_UNBOUND) {
+                char message[192];
+                snprintf(message, sizeof(message), "unbound global: %s", rt->names[ins.arg]);
+                return rt_error(rt, message);
+            }
             if (!push(rt, v)) return false;
             break;
         case OP_SET_GLOBAL:
             if (rt->globals[ins.arg] == V_UNBOUND) return rt_error(rt, "cannot set an unbound global");
             /* fall through */
         case OP_DEFINE_GLOBAL:
-            if (ins.op == OP_DEFINE_GLOBAL) rt->global_defined[ins.arg] = 1;
+            if (ins.op == OP_DEFINE_GLOBAL) {
+                rt->global_defined[ins.arg] = 1;
+            }
+            rt->global_macro[ins.arg] = rt_kind(rt->stack[rt->sp - 1], K_MACRO);
             rt->globals[ins.arg] = rt->stack[rt->sp - 1];
             height(rt, rt->sp - 1);
             break;
@@ -232,10 +302,8 @@ bool rt_drive(Runtime *rt, size_t stop_frames) {
                 if (!rt_apply(rt, call, ins.arg, ins.op == OP_TAIL_CALL)) return false;
                 break;
             }
-            if ((v & 255) == TAG_BUILTIN || rt_kind(v, K_FOREIGN_FUNCTION) || rt_collection(v)) {
-                Value answer = rt_collection(v) ? rt_collection_call(rt, call, call + 1, ins.arg)
-                    : rt_kind(v, K_FOREIGN_FUNCTION) ? rt_foreign_call(rt, call, call + 1, ins.arg)
-                    : rt_builtin(rt, (unsigned)(v >> 8), call + 1, ins.arg);
+            if (primitive(v)) {
+                Value answer = call_primitive(rt, call, ins.arg);
                 if (!answer || rt->error[0]) return false;
                 if (ins.op == OP_TAIL_CALL) {
                     if (!rt_leave(rt, answer)) return false;
@@ -263,4 +331,58 @@ bool rt_drive(Runtime *rt, size_t stop_frames) {
         }
     }
     return !rt->error[0];
+}
+
+bool rt_drive(Runtime *rt, size_t stop_frames) {
+    while (!dispatch(rt, stop_frames)) {
+        if (!rt->interrupted && !rt->exit_pending && !rt->restart_pending && !rt->signaled) rt_signal_error(rt);
+        if (rt->restart_pending) {
+            if (!rt_resume_restart(rt, stop_frames)) return false;
+            continue;
+        }
+        size_t target_cleanups = !rt->interrupted && !rt->exit_pending && rt->try_count ? rt->tries[rt->try_count - 1].cleanups : 0;
+        if (rt->cleanup_count > target_cleanups) {
+            if (rt->cleanup_states[rt->cleanup_count-1].state.frames <= stop_frames) return false;
+            rt_run_cleanup(rt, true); continue;
+        }
+        if (rt->interrupted || rt->exit_pending || !rt->try_count || rt->tries[rt->try_count - 1].frames <= stop_frames) return false;
+        TryFrame handler = rt->tries[--rt->try_count];
+        rt->frame_count = handler.frames;
+        rt_restore_restarts(rt, handler.restarts);
+        rt_restore_params(rt, handler.params);
+        rt_restore_handlers(rt, handler.handlers, handler.handler_top);
+        height(rt, handler.sp);
+        Value condition = rt_error_condition(rt);
+        if (!condition) continue;
+        rt->error[0] = 0; rt->raised = false; rt->signaled = false;
+        if (!push(rt, condition)) continue;
+        rt->condition_values[0] = V_NIL;
+        rt->frames[rt->frame_count - 1].ip = handler.target;
+    }
+    return true;
+}
+
+/* Call back into the VM without discarding the suspended caller's roots. */
+Value rt_call_list(Runtime *rt, Value function, Value args) {
+    size_t base = rt->sp, frames = rt->frame_count, tries = rt->try_count, params = rt->param_count;
+    size_t handlers = rt->handler_count, handler_top = rt->handler_top, restarts = rt->restart_scope_count, cleanups = rt->cleanup_count;
+    if (rt->callback_depth >= 128) { rt_error(rt, "VM callback nesting limit exceeded"); rt->signaled = true; return 0; }
+    if (rt->stack_limit < 3 || base > rt->stack_limit - 3) { rt_error(rt, "VM stack limit exceeded"); rt->signaled = true; return 0; }
+    if (!rt_stack(rt, base + 3)) { rt->signaled = true; return 0; }
+    rt->callback_depth++;
+    rt->stack[base] = ((Value)B_APPLY << 8) | TAG_BUILTIN;
+    rt->stack[base + 1] = function; rt->stack[base + 2] = args;
+    height(rt, base + 3);
+    bool applied = rt_apply(rt, base, 2, false);
+    if (!applied && !rt->error[0]) rt_error(rt, "VM call failed");
+    bool ok = rt_drive(rt, frames);
+    Value result = ok ? rt->stack[base] : 0;
+    rt->frame_count = frames; rt->try_count = tries;
+    rt_restore_restarts(rt, restarts);
+    rt_restore_cleanups(rt, cleanups);
+    rt_restore_params(rt, params);
+    rt_restore_handlers(rt, handlers, handler_top);
+    rt->callback_depth--;
+    height(rt, base);
+    return result;
 }

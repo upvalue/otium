@@ -12,18 +12,16 @@ static Value eval(Runtime *rt, const char *source) {
     return value;
 }
 
-int main(int argc, char **argv) {
-    bool native = argc == 2 && !strcmp(argv[1], "--native");
-    assert(argc == 1 || native);
+int main(void) {
     Runtime *rt = runtime_create(8192, 4096);
     assert(rt);
-    runtime_native(rt, native ? 1 : 0);
+
     runtime_gc_stress(rt, true);
     eval(rt, "(def stable 'stable) (def tag :tag) (def held {}) (put! held :self held) "
              "(def current (let ((x 42)) (fn () (fn () (list x 'stable \"kept\"))))) "
              "(put! held :old current)");
     size_t peak_functions = 0, peak_constants = 0, peak_heap = 0;
-    for (unsigned i = 0; i < (native ? 40u : 2000u); i++) {
+    for (unsigned i = 0; i < 2000u; i++) {
         char source[512];
         snprintf(source, sizeof(source),
             "(def current (let ((x %u)) (fn () (fn () (list x 'stable \"new-%u\"))))) "

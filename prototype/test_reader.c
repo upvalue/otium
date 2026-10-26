@@ -39,7 +39,7 @@ static bool same(const Ast *actual, const Ast *expected, bool evaluate) {
     if (actual->kind != expected->kind) return false;
     switch (actual->kind) {
     case AST_NIL: return true;
-    case AST_BOOL: case AST_CHAR: case AST_INT:
+    case AST_BOOL: case AST_CHAR: case AST_INT: case AST_VALUE:
         return actual->as.integer == expected->as.integer;
     case AST_FLOAT: return actual->as.real == expected->as.real;
     case AST_STRING: case AST_SYMBOL: case AST_KEYWORD:

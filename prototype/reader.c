@@ -15,7 +15,7 @@ static void fail(Reader *r, size_t offset, const char *message) {
     if (!r->error) { r->error = message; r->error_offset = offset; }
 }
 
-static void *allocate(Reader *r, size_t size) {
+void *reader_allocate(Reader *r, size_t size) {
     const size_t alignment = _Alignof(max_align_t);
     if (size > SIZE_MAX - alignment) goto exhausted;
     size = (size + alignment - 1) / alignment * alignment;
@@ -51,7 +51,7 @@ void reader_destroy(Reader *r) {
 }
 
 static Ast *node(Reader *r, AstKind kind, size_t offset) {
-    Ast *a = allocate(r, sizeof(*a));
+    Ast *a = reader_allocate(r, sizeof(*a));
     if (a) { a->kind = kind; a->offset = offset; }
     return a;
 }
@@ -152,8 +152,8 @@ static Ast *string(Reader *r, size_t start) {
         if (r->source[end] == '"') break;
         if (r->source[end] == '\\' && end + 1 < r->length) end++;
     }
-    if (end == r->length) { fail(r, start, "unterminated string"); return NULL; }
-    char *out = allocate(r, end - r->position + 1);
+    if (end == r->length) { r->incomplete = true; fail(r, start, "unterminated string"); return NULL; }
+    char *out = reader_allocate(r, end - r->position + 1);
     if (!out) return NULL;
     size_t used = 0;
     while (r->position < end) {
@@ -200,7 +200,7 @@ static Ast *string(Reader *r, size_t start) {
 
 static Ast *character(Reader *r, size_t start) {
     size_t begin = r->position;
-    if (begin == r->length) { fail(r, start, "missing character"); return NULL; }
+    if (begin == r->length) { r->incomplete = true; fail(r, start, "missing character"); return NULL; }
     uint32_t value;
     size_t count = utf8_decode(r->source + begin, r->length - begin, &value);
     if (!count || !value) { fail(r, start, "invalid character"); return NULL; }
@@ -274,7 +274,7 @@ static Ast *atom(Reader *r, size_t start) {
             }
         }
         if (pos != n) goto bad_number;
-        char *token = allocate(r, n + 1);
+        char *token = reader_allocate(r, n + 1);
         if (!token) return NULL;
         memcpy(token, s, n);
         Ast *a = node(r, real ? AST_FLOAT : AST_INT, start);
@@ -308,7 +308,7 @@ static Ast *sequence(Reader *r, size_t start, char close, const char *constructo
     }
     for (;;) {
         skip(r);
-        if (r->position == r->length) { fail(r, start, "unterminated sequence"); return NULL; }
+        if (r->position == r->length) { r->incomplete = true; fail(r, start, "unterminated sequence"); return NULL; }
         char c = r->source[r->position];
         if (c == close) { r->position++; return a; }
         if (c == '.' && (r->position + 1 == r->length ||
@@ -319,6 +319,7 @@ static Ast *sequence(Reader *r, size_t start, char close, const char *constructo
             if (!a->as.list.tail) return NULL;
             skip(r);
             if (r->position == r->length || r->source[r->position] != close) {
+                r->incomplete = r->position == r->length;
                 fail(r, r->position, "expected closing delimiter after dotted tail"); return NULL;
             }
             r->position++;
@@ -342,7 +343,7 @@ static Ast *prefix(Reader *r, size_t start, const char *name) {
 static Ast *parse_inner(Reader *r) {
     skip(r);
     size_t start = r->position;
-    if (start == r->length) { fail(r, start, "expected datum"); return NULL; }
+    if (start == r->length) { r->incomplete = true; fail(r, start, "expected datum"); return NULL; }
     char c = r->source[r->position++];
     switch (c) {
     case '(': return sequence(r, start, ')', NULL);

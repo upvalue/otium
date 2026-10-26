@@ -57,21 +57,17 @@ static double now(void) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2 || argc > 3) return 2;
-    bool native = argc == 3 && !strcmp(argv[2], "--native");
+    if (argc != 2) return 2;
     size_t index;
     for (index = 0; index < sizeof(workloads) / sizeof(workloads[0]); index++)
         if (!strcmp(workloads[index].name, argv[1])) break;
     if (index == sizeof(workloads) / sizeof(workloads[0])) return 2;
     Runtime *rt = runtime_create(1024 * 1024, 128 * 1024);
     if (!rt) return 1;
-    runtime_native(rt, native ? 1024 : 0);
     Value answer, argument = value_int(workloads[index].argument);
     if (!runtime_eval(rt, workloads[index].source, strlen(workloads[index].source), &answer)) goto error;
     double samples[5];
     for (size_t i = 0; i < 7; i++) {
-        double compilation_before = runtime_native_compile_seconds(rt);
-        double foreign_before = runtime_foreign_compile_seconds(rt);
         double start = now();
         if (!runtime_call(rt, workloads[index].function, &argument, 1, &answer)) goto error;
         double elapsed = now() - start;
@@ -81,25 +77,15 @@ int main(int argc, char **argv) {
             memcpy(&real, object_bytes(answer), sizeof(real));
             if (real != (double)workloads[index].expected) goto error;
         } else if (answer != value_int(workloads[index].expected)) goto error;
-        if (i >= 2 && (runtime_native_compile_seconds(rt) != compilation_before ||
-                      runtime_foreign_compile_seconds(rt) != foreign_before)) {
-            fputs("unexpected compilation during measurement\n", stderr);
-            goto error;
-        }
         if (i >= 2) samples[i - 2] = elapsed;
     }
-    if (native && !runtime_native_functions(rt)) goto error;
     struct rusage usage;
     if (getrusage(RUSAGE_SELF, &usage)) goto error;
     printf("{\"workload\":\"%s\",\"runtime\":\"prototype-%s\",\"samples\":[",
-        workloads[index].name, native ? "native" : "vm");
+        workloads[index].name, "vm");
     for (size_t i = 0; i < 5; i++) printf("%s%.9f", i ? "," : "", samples[i]);
-    printf("],\"compile_seconds\":%.9f,\"ffi_compile_seconds\":%.9f,\"ffi_signatures\":%zu,"
-        "\"compiled_functions\":%zu,\"native_entries\":%zu,"
-        "\"collections\":%zu,\"max_frames\":%zu,\"max_native_depth\":%zu,\"scalar_entries\":%zu,\"scalar_fallbacks\":%zu,\"numeric_entries\":%zu,\"numeric_fallbacks\":%zu,\"peak_rss_kib\":%ld}\n",
-        runtime_native_compile_seconds(rt), runtime_foreign_compile_seconds(rt), runtime_foreign_signatures(rt),
-        runtime_native_functions(rt), runtime_native_entries(rt),
-        runtime_collections(rt), runtime_max_frames(rt), runtime_max_native_depth(rt), runtime_native_scalar_entries(rt), runtime_native_scalar_fallbacks(rt), rt->native_numeric_entries, rt->native_numeric_fallbacks, usage.ru_maxrss);
+    printf("],\"ffi_signatures\":%zu,\"collections\":%zu,\"max_frames\":%zu,\"peak_rss_kib\":%ld}\n",
+        runtime_foreign_signatures(rt), runtime_collections(rt), runtime_max_frames(rt), usage.ru_maxrss);
     runtime_destroy(rt);
     return 0;
 error:

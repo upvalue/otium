@@ -8,12 +8,20 @@ tests to resolve semantics. The existing launchers still use the existing runtim
 Build with `make -C prototype`. Run a source file with
 `prototype/otium-proto file.ot`, or print an expression's result with
 `prototype/otium-proto -e '(+ 20 22)'`. `--heap=8192` sets each semispace's size;
-the two spaces together consume twice that amount. `--stack=1024` caps VM value
-slots. `--stats` reports collection count and maximum simultaneous VM frames.
-`--native` enables the native tier after 1,024 bytecode instructions in a
-function; `--native=1` compiles before its first instruction. Native statistics
-include compiled function count, native entries and compiler wall time.
-Foreign adapters report their signature count and compiler time separately.
+the two spaces together consume twice that amount. An explicit `--heap` is fixed
+unless paired with `--heap-max`. Without either option, the CLI starts with 1 MiB
+semispaces and can grow each to 64 MiB. `--stack=1024` caps VM value slots.
+`--stats` reports collection count, maximum simultaneous VM frames and current
+semispace capacity.
+Execution uses the bytecode VM. Foreign calls use libffi; `--stats` reports
+cached FFI signature counts. There is no generated-C tier or runtime compiler
+subprocess. A C compiler is needed to build the executable and test fixtures,
+but not to run the built runtime.
+
+The sections below record implementation milestones, including the former
+native tier and its benchmarks. That tier was removed during the VM-first
+compliance work; its source is preserved in checkpoint commit 26bd86b. Historical
+native commands and measurements do not describe the current executable.
 
 ## Memory contract
 
@@ -34,8 +42,14 @@ their root slots afterwards. Interior pointers cannot survive allocation. All
 managed fields must contain valid tagged values. Root frames must be popped in
 reverse order. Heap operations are single-threaded.
 
-The heap has a fixed budget of two semispaces. Allocation returns zero when a
-request cannot fit after collection. It does not silently grow the budget.
+Embedding heaps start with a fixed budget of two semispaces. A host can opt into
+bounded growth with runtime_heap_limit. Allocation collects first, then grows
+only if the surviving objects and request cannot fit. Growth doubles capacity
+up to the configured limit. Both replacement spaces are allocated before any
+root is changed; allocation failure leaves the existing heap usable. The old
+and new spaces coexist briefly during relocation, so transient host allocation
+can exceed twice the configured semispace capacity. Allocation returns zero if
+the request still cannot fit within the limit.
 Opaque payloads are zeroed; traced fields start as nil. The compiler should
 eventually expose object initialization to optimization so unnecessary writes
 can be eliminated without weakening the safepoint contract.
@@ -173,15 +187,11 @@ aggregate and variadic declarations are unsupported. Argument counts are limited
 to 64. Integers outside the runtime's immediate range are rejected on return.
 Void calls return `#f`, matching the public fixture tests.
 
-Libffi development headers were unavailable. Instead, binding compiles a typed
-C adapter with the host compiler and caches it by argument/result types. The
-target symbol is passed separately, so one adapter can serve different libraries
-and functions with the same signature. Adapters use the platform C ABI for mixed
-integer/floating-point arguments and register/stack argument placement. This
-requires a C compiler even when VM execution is selected. `module.c` provides the
-shared compiler/loader path for adapters and native Otium functions. Signature
-types are selected from a fixed table; library paths and symbol names are never
-inserted into generated C source.
+Foreign bindings use libffi call interfaces cached by argument/result types.
+The build obtains libffi flags through pkg-config. Arguments use their declared
+C representations, including narrow integers; integral returns narrower than
+ffi_arg are decoded from libffi's widened result storage. Binding and calling
+foreign functions no longer generates C or starts a host compiler. The generated-C Otium tier has also been removed.
 
 Calls are synchronous leaves. The collection-safety flag is validated and stored;
 callback/reentry and concurrent collection are not implemented. Managed pointers
@@ -200,8 +210,8 @@ Only the owning pointer can be freed through `ffi/free!`; repeated frees return
 copies and adapter metadata.
 
 Foreign bindings and released allocation records are reclaimed after moving
-collection. Unused adapters have a bounded cache; live bindings retain their
-adapters. Reopening the same loader handle reuses one library record. Libraries
+collection. Unused call interfaces have a bounded cache; live bindings retain their
+interfaces. Reopening the same loader handle reuses one library record. Libraries
 remain mapped until runtime destruction because raw pointers may outlive their
 managed wrappers. Explicit `ffi/free!` releases the buffer immediately;
 collecting a managed pointer wrapper does not free native storage. Remaining
@@ -1206,3 +1216,951 @@ Existing native, root-lifetime, reload, module and FFI checks also pass.
 This supplies data templates for future macros. It does not implement defmacro,
 syntax quotation or hygienic expansion, and the higher-level standard library
 still needs those features and condition handling.
+
+
+## VM-first compliance work
+
+The current objective is to run Otium's core language and public tests, use
+libffi, and temporarily remove generated C execution. Earlier native-tier
+measurements in this document are historical results, not the new acceptance
+criteria.
+
+`python3 prototype/compliance.py --output prototype/compliance-baseline.json`
+runs the existing public test functions for the language, library, modules,
+reader, conditions, and syntax quotation against the prototype executable.
+Assertions remain in the public harness. The initial run reports 3 passes and
+46 failures; most programs cannot yet load the test library, and some fail on
+missing launcher options. This inventory also includes higher-level consumers
+from tests/tests.py. It does not cover all FFI, CLI, diagnostics, application,
+or Chez-only tests and is not by itself a completion gate for the full goal.
+
+The libffi migration passes scalar/ABI, ownership, reload and failure-recovery
+tests, 12 differential programs and 6 expected errors, and ASan/UBSan with leak
+detection disabled for the existing tracing limitation. The VM foreign-call
+suite also passes with PATH and OTIUM_NATIVE_CC pointing to nonexistent paths.
+Callbacks and reentry remain unimplemented. Core expansion and library bootstrapping are the next steps.
+
+
+### Generated-C removal
+
+Removed the generator, numeric specialization header, compiler subprocess/DSO
+helper, function heat counters, native entry points, CLI flags and compile-time
+statistics. The build no longer exports executable symbols for generated DSOs.
+The bytecode compiler and VM remain. Differential drivers now compare the VM
+with Chez; current benchmark drivers measure VM execution. Historical JSON
+measurements remain as records of the earlier implementation.
+
+Semantic tests for closures, arithmetic, calls, roots, reloads, namespaces,
+modules and quotation remain. Tests specific to generated-code specialization
+were removed with that backend. VM regression tests and all four differential
+suites pass (74/50 language programs/errors, 15/18 module, 12/6 FFI, 38/11
+quasiquote). Runtime and FFI/reload ASan/UBSan checks pass with leak detection
+disabled as above. `make -C prototype test-no-compiler` exercises runtime and
+foreign-call suites with no executable search path. The resulting executable
+imports ffi_call and ffi_prep_cif and has no process-launch imports.
+
+This completes removal of runtime C generation, not core language compliance.
+The initial public-suite inventory still exposes expansion, core bootstrap,
+conditions, reflection, I/O and launcher work.
+
+### Initial macro expansion
+
+Top-level defmacro now creates a VM closure marked as an expansion binding.
+Calls pass unevaluated argument data through the VM and copy the result into a
+bounded host syntax arena. Managed argument values stay in precise VM roots;
+the resulting syntax holds copied text and scalar data, never managed pointers.
+List spines are traversed iteratively with cycle detection. Nested syntax and
+expansion counts are bounded, and failed expansions leave evaluation retryable.
+
+Expansion respects lexical shadowing, including enclosing closures and
+sequential let bindings. Namespace-qualified macros use existing binding lookup.
+Redefining a macro affects subsequent compilation; already compiled functions
+retain their expansion. An ordinary def clears the macro marker. Macro bodies
+may be empty, matching Chez. Quasiquote-based variadic macros, nested macro
+calls and top-level generated definitions work.
+
+The focused forced-collection suite covers expansion, shadowing, reloads,
+malformed forms, cyclic output, expansion limits and error recovery. ASan/UBSan
+passes with leak detection disabled. Twelve programs and three expected errors
+agree with Chez. This is an initial expansion layer: body predeclaration for
+macro-generated local definitions, expansion APIs, hygienic symbols and syntax
+quotation remain unfinished. Macro-produced top-level directives also still
+need integration with the top-level evaluator. Core/test-library bootstrapping
+and the broader public-suite goal remain incomplete.
+
+### Shared Otium expander
+
+The CLI now loads lib/otium/expander.ot into otium.core and applies its expansion
+rules before bytecode compilation. runtime_create remains a minimal VM API;
+embedders opt into the shared layer with runtime_load_expander. The build records
+the library directory for the CLI. Relocatable library discovery is still open.
+The original C implementation has not been used.
+
+The runtime supplies the documented expander adapters, a nested VM call path
+that keeps suspended stack frames rooted, cond, basic symbol/type/string
+operations, and proper-list length. macroexpand and macroexpand-1 are small
+Otium wrappers around the shared expander. Module directives retain their
+existing validation before normalization; defonce skips an already-defined
+initializer before expansion. Compile-time macro calls have a 1,024-call limit.
+
+Generated symbols carry an identity separate from their printed text. The
+syntax arena preserves that identity, and lexical binding comparisons include
+it. Converting a generated symbol's name back into an ordinary interned symbol
+does not reproduce the generated binding. Syntax quotation and local body
+handling now come from the shared language implementation, rather than a
+second implementation of those rules in C.
+
+Forced-collection tests cover generated local definitions, spliced begin forms,
+nil after a trailing definition, nested VM macro calls, reserved-name errors,
+generated-symbol capture avoidance, Unicode string operations, expansion APIs,
+and recovery after expansion limits. The shared-expander suite passes
+ASan/UBSan with leak detection disabled. Eighteen expansion programs and three
+expected errors agree with Chez; existing language, module, quasiquote and FFI
+differential checks also pass.
+
+The public array-equality suite now passes all 17 checks. compliance-current.json
+records 4 passes and 45 failures, compared with the initial 3/46 baseline.
+The full core library is not yet loaded: derived collection operations,
+conditions, classes/generics, ports and other library dependencies remain open.
+The raw compiler expansion layer remains for minimal VM users; the CLI uses
+the shared expander for full syntax processing.
+
+### Condition values and VM try frames
+
+The runtime now registers condition type parents, checks hierarchy membership,
+constructs error tables with optional data arrays, and exposes condition-type,
+condition-message, error? and type-pred. Registrations accept symbol, keyword or
+string names and reject hierarchy cycles. error? follows the documented broad
+convention: any table containing :type qualifies, regardless of ancestry.
+
+try uses VM handler records containing frame count, stack height and catch
+instruction offset. An error unwinds to that saved VM state; the catch path
+then evaluates predicates in order and binds the original condition value.
+Predicates see their enclosing lexical scope, and errors raised in a catch
+propagate to an outer handler. Unmatched conditions are rethrown unchanged.
+Ordinary runtime errors become condition tables when caught. Suspended nested
+VM calls preserve the surrounding handler stack as well as value roots.
+
+A runtime root keeps the pending condition alive, including nil and false,
+and another keeps the type registry alive. Explicit error strings now appear
+in host diagnostics. Strings nested in printed collections are quoted and
+escaped, fixing a mismatch exposed by the condition differential tests.
+
+The focused forced-collection suite and ASan/UBSan checks pass. Ten thousand
+nested protected calls unwind on a 256 KiB C stack. Seventeen condition programs
+and three expected errors agree with Chez, and the existing language differential
+suite still passes 74 programs and 50 expected errors. Runtime, shared-expander,
+macro, module, quasiquote and compiler-free FFI regression checks pass.
+
+This is not the complete condition system. Signal-site handler-bind, restarts,
+unwind-protect, interrupts and exit transfers remain to be implemented. Loading
+the core source now reaches defgeneric after completing its condition declarations;
+generic dispatch and built-in class descriptors are the next bootstrap dependency.
+The public-suite inventory remains 4 passing and 45 failing.
+
+### Core bootstrap and primary generic methods
+
+The CLI now evaluates the complete shared core library in otium.core, including
+its otium.loop dependency. runtime_load_core exposes this bootstrap to embedders;
+runtime_create remains minimal. A small prototype/primitives.ot supplies derived
+operations such as for-each, reverse, append, inc/dec and collection assignment
+in Otium. Library and bootstrap file paths are currently recorded at build time.
+
+Built-in class descriptors have stable managed identities and an Object parent.
+Primary generic methods use fixed-arity class signatures. Dispatch selects a
+unique undominated applicable signature and reports missing or ambiguous
+methods. Redeclaration preserves a compatible generic's identity; replacing a
+signature replaces its closure. Method introspection copies the returned lists.
+The current selector scans methods without a dispatch cache.
+
+Macro values now have managed wrappers, so ordinary definitions can re-export a
+macro without turning it into a runtime function. This is needed by the core's
+for/dotimes aliases. read-string now parses exactly one datum through the
+prototype reader. Basic display/write/newline operations and closure-arity
+condition code E0301 support the public test library.
+
+Bootstrap also exposed two namespace bugs: unbound placeholders in core must
+not count as imports into other namespaces, and defonce must test its own
+namespace before skipping expansion. Regression tests cover both cases.
+
+Primary generics and core bootstrap pass forced-collection and ASan/UBSan tests,
+including 200 method replacements. Ten generic/sequence programs and four
+expected errors agree with Chez. The existing language, macro, module,
+quasiquote and FFI differential suites pass. The CLI loads the full core and
+executes a derived operation with no compiler on PATH.
+
+The public optional-parameter suite reports 52 checks passed; the inventory is
+now 5 passing and 44 failing. This does not prove the full optional/evaluation
+surface: eval is still absent, so tests that only expect an error from eval are
+weak evidence until that primitive is implemented. User-defined classes,
+instances and migration, around/next methods, remaining conditions and ports,
+reflection, numeric/string operations and launcher features remain unfinished.
+
+### Runtime evaluation and namespace capture
+
+`eval` now expands and executes runtime data without discarding the suspended
+VM stack or its condition handlers. Calls from macros, nested eval, module
+loading through eval, and errors during compilation share this path. Each eval
+value retains the namespace where it was obtained, matching Chez when an
+evaluator is saved or passed to a function in another namespace. Lexical locals
+are not visible to evaluated code.
+
+Managed arrays, tables and procedures in generated syntax are retained through
+constant-table indices in the host AST. They evaluate to the original value.
+This also lets macros return opaque values. The shared expander's diagnostic
+codes now survive conversion to condition tables.
+
+Code and constants are reclaimed at an idle outer evaluation boundary. Failed
+compilation no longer deletes constants or closures that a macro's side effects
+retained. Expanded begin forms keep their opaque constants alive across child
+forms. Nested eval is limited to 128 active evaluations to bound host recursion.
+A long-running evaluation can still accumulate temporary code until it returns;
+reclaiming that code while frames and host syntax are live remains open.
+
+Forced-collection tests cover nested evaluation, retained caller locals,
+closures, namespace capture, syntax errors, handlers, macro reentry, failed
+compilation side effects and opaque macro results. ASan/UBSan pass with leak
+checking disabled for the tracing environment. Public modules now pass 16
+checks and syntax quotation passes 18. The public inventory is 7 passing and
+42 failing groups. The optional-parameter suite now exercises a working eval,
+removing the earlier missing-primitive caveat. Full core compliance remains open.
+
+### Numeric operations and float output
+
+The runtime now supplies quotient, abs, min/max, rounding, transcendental
+functions, exponentiation, exact/inexact conversion and predicates, floating
+classification, and the five specified bitwise operations. Integer-valued
+floats satisfy integer? while int? still tests their representation. Unary
+division returns a float, including (/ 1).
+
+Integer addition, subtraction, multiplication, negation and non-negative integer
+powers now wrap at the 63-bit payload width on this host. This replaces the
+prototype's earlier overflow errors and follows section 10.1 and Appendix A of
+the shared language specification. Operations use unsigned arithmetic to avoid
+signed overflow. Left shifts and float-to-integer conversion still reject
+out-of-range results. Rounding uses half-away-from-zero for round.
+
+Display, write and number->string now preserve the float representation with a
+trailing .0 for integral fixed-point results. Formatting finds the shortest
+significant-digit precision that round-trips through the host conversion, then
+uses the primary runtime's fixed/exponent thresholds and exponent spelling.
+Ten thousand generated finite bit patterns round-trip in the numeric test.
+
+The public arithmetic suite passes 198 checks and bounded bitwise passes seven.
+The numeric differential suite agrees with Chez on 15 programs and nine errors.
+Bounded wrapping and the spec's integer-only quotient/exact conversion have
+separate tests: Chez has bignums and rationals, and some of its transcendental
+functions preserve exact results where the shared spec calls for floats.
+Numeric boundary and float-format tests pass ASan/UBSan with leak checking
+disabled for this environment. Runtime, nested-eval and compiler-free FFI
+regressions pass. The public inventory is now nine passing and 40 failing
+groups; sequence tests reach the still-missing string comparison operations.
+
+### Strings, characters and buffers
+
+Substring now clamps both bounds, accepts an omitted end, and indexes UTF-8 by
+code point. String collection lookup returns characters. Added string ordering,
+display concatenation, numeric parsing, string-to-list conversion, symbol/name
+coercion, character/code-point conversion and ASCII character classification.
+Display emits the character itself; write and nested values use reader syntax.
+Strings escape nul and escape characters with the documented spellings.
+
+The managed buffer has a separate byte-storage object that grows geometrically.
+It tracks byte length and character length. Append formats arguments before any
+managed allocation, roots the buffer while growing storage, and reloads managed
+pointers after allocation. buffer->string copies a snapshot and leaves the
+buffer usable. Forced-collection tests retain a snapshot across 500 appends.
+
+Split, join, trim, replace, case conversion, list-to-string and string construction
+are implemented in prototype/primitives.ot. They reuse the shared core's search
+and sequence operations. Empty replacement patterns leave the source unchanged;
+empty split separators are errors. The helpers currently inherit the shared
+search implementation's allocation costs; bulk string performance remains to
+be measured. Collection membership now handles strings and lists, keyword calls
+return their default for non-table targets, and copy preserves nil.
+
+The public sequence, printing, JSON, loop, reader-datum and OTcl suites now pass.
+The inventory advances to 15 passing and 34 failing groups. Forced-collection
+and ASan/UBSan string/buffer checks pass (leak checking disabled in this tracing
+environment), along with runtime, shared-expander, eval and compiler-free FFI
+regressions. Language and quasiquote differential suites still pass. Character
+and reader coverage still needs type reflection and EOF support; full classes,
+parameters, conditions, ports and remaining core operations are unfinished.
+
+### Type, EOF and binding reflection
+
+Added type, eof-object/eof-object?, buffer?, current-ns and describe. EOF is a
+truthy immediate singleton and prints as #<eof>. Type distinguishes the
+implemented public representations, including integral floats and macros.
+The C specification calls the macro type :macro; Chez currently reports
+:native for the same value, so that assertion has a separate conformance test.
+
+Binding documentation is stored with the global, copied from value, function
+and macro declarations. A successful ordinary redefinition replaces or clears
+it. A skipped defonce keeps its original documentation, and an initializer
+failure leaves the old binding and documentation intact. Embedded nul bytes
+in docstrings are preserved. Namespace reflection uses the active namespace,
+including when called from a function defined in another namespace. Qualified
+and aliased names resolve to the owning binding for describe. A direct namespace
+name in describe resolves here; the Chez probe returned nil for that spelling
+without a require alias. The public alias-based module checks agree.
+
+Reader-value testing also exposed missing variadic mutation: put! now accepts
+multiple key/value pairs for tables and arrays. Argument count is checked
+before mutation; each pair then takes effect in order.
+
+Public reflection, bootstrap, library-module and character suites now pass;
+the character suite contains 65 checks. The public inventory is 19 passing and
+30 failing groups. Reader-values advances to handler-bind, which remains
+unimplemented. Forced-collection and ASan/UBSan tests cover EOF, type names,
+namespace lookup, repeated documentation replacement, failed initialization,
+and variadic table/array mutation. Leak checking remains disabled for the
+tracing environment. Runtime, module, reload and compiler-free FFI regressions
+pass. Full core compliance remains open.
+
+### Dynamic parameters
+
+Added top-level defparam and with-params. Each declaration creates a fresh
+managed parameter containing its name and default. Bindings are installed
+sequentially, including evaluation of the next parameter expression. Calling
+a parameter reads its innermost binding or its default. Declaration docs are
+available through describe, and type reports :param.
+
+The runtime keeps parameter/value pairs in a precisely rooted array. Normal
+scope exit truncates it; VM try frames record the depth to restore on unwind.
+Nested VM calls and eval preserve the caller's depth and restore it on failure.
+Scope bodies retain a VM continuation until their bindings are removed, so
+unwinding does not recurse through the C stack. Closures returned from a scope
+read the dynamic value when later called; they do not capture that scope's
+parameter value.
+
+The C specification requires zero-argument parameter calls, so calls with
+arguments raise E0301. Chez also permits setter calls and reports parameters
+as :function. These representation/setter differences have separate C tests;
+the shared binding semantics agree on 14 differential programs and nine errors.
+
+The public expander suite now passes all 74 checks. Parameter tests exercise
+nested and repeated bindings, initializer failure, nested try/eval, expansion
+reentry, fresh declaration identity and restoration after an unhandled host
+call. Forced-GC and ASan/UBSan pass with leak checking disabled in this tracing
+environment. Four thousand nested scopes unwind on a 256 KiB C stack. Runtime,
+condition, eval and compiler-free FFI regressions pass. Restart, quit and cleanup
+transfers are still unimplemented and will need to restore dynamic state too;
+this milestone does not claim those exit paths are complete.
+
+The refreshed public inventory is 20 passing and 29 failing groups. Existing
+condition and eval differential suites also pass (17/3 and 20/5 programs/errors).
+
+### Signal-site handlers
+
+Added handler-bind and signal. Predicate/handler expressions all run before
+installation; installed bindings are visited innermost-last. A separate
+visible-handler chain masks the current binding and all inner bindings while
+its predicate or handler runs. Newly installed handlers link to the visible
+outer chain, while masked bindings remain rooted for the original walk.
+Handler return values are ignored, and signal returns nil when all decline.
+
+Explicit errors and VM errors are offered before any stack or dynamic-parameter
+unwinding. A handler may raise a replacement condition. Once an error has been
+offered, an unmatched try rethrow does not offer it again. VM callback boundaries
+also process errors from primitive callables while the handler mask is active;
+this avoids reentering a failing handler when its callable is itself a builtin.
+Try frames and nested calls restore both the physical handler depth and visible
+chain. Reentrant VM callbacks are bounded at 128 to protect the C stack.
+
+Reader-values now passes 64 public checks. The first 16 checks of the public
+condition program also pass, through handler masking, initialization ordering,
+and signal-once behavior; the remaining restart/cleanup/exit checks are still
+unfinished. The refreshed public inventory is 21 passing and 28 failing groups.
+Fourteen handler programs and five error cases agree with Chez. Forced-GC and
+ASan/UBSan checks pass with leak checking disabled for the tracing environment.
+A walk through 4,000 handlers passes on a 256 KiB C stack, and deliberately
+recursive signals hit the callback limit with a catchable error. Parameter,
+condition, eval and compiler-free FFI regression tests pass.
+
+### Bytevectors and UTF-8
+
+Added fixed-length mutable bytevectors with inline bytes and identity equality.
+Constructors, indexed access, mutation, copying, overlapping copy!, append,
+printing, reflection and Bytevector method dispatch are implemented. Generic
+length/count/get/put! work on bytevectors; copy returns a fresh value. Arguments
+and slice bounds are checked before allocation or copying. Variadic put! checks
+arity first and applies valid key/value pairs in order.
+
+UTF-8 conversion uses character offsets for string slices and byte offsets for
+bytevector slices. Decoding rejects stray continuation bytes, overlong sequences,
+surrogates, values above U+10FFFF and truncated sequences. Errors carry the
+existing core decode-error type and an absolute byte position. Allocation paths
+reload source values from rooted VM arguments after collection.
+
+All 63 public bytevector checks pass. Forced-collection and ASan/UBSan tests also
+cover scalar boundaries, sliced decode errors, condition inheritance, mutation
+ordering and retained identity keys. Leak checking is disabled in the tracing
+environment. Ten programs and nine error cases agree with Chez. String, handler,
+runtime and compiler-free FFI regressions pass. The public inventory is now
+22 passing and 27 failing groups, with no previously passing groups lost.
+Ports, resources, filesystem operations and the remaining language and condition
+features are still unfinished. Optional LLVM tools were unavailable for gc-lint.
+
+### Preloads and incremental REPL input
+
+The CLI now accepts repeated --load files in order before the main script or
+expression, --repl after a script, and --path as an alias for -L. No script starts
+the REPL. Preload failure stops startup. File loading reads streams without
+requiring seek support and enforces a 16 MiB source limit.
+
+The reader distinguishes incomplete forms from invalid input. The REPL buffers
+an incomplete form, evaluates each completed form once, retains definitions and
+continues after syntax or evaluation errors. EOF in an incomplete form is an
+error. Prompts are emitted only for terminal input. The CLI tests cover repeated
+preloads, failure ordering, multiline strings and dotted lists, multiple forms
+per line, side effects across continuation lines, error recovery and empty files.
+These tests and the reader fixtures pass under ASan/UBSan with leak checking
+disabled in the tracing environment.
+
+The public reader REPL group now passes. Condition tests can get past option
+parsing; common.ot currently stops at missing restart-case. The cleanup-error
+fixture previously accepted any caught error, so a missing unwind-protect could
+produce a false pass. It now requires the actual cleanup symbol; Chez passes
+that stronger assertion and the prototype correctly fails it. The refreshed
+inventory is 23 passing and 26 failing groups. Cleanup, restart and exit semantics
+remain unfinished.
+
+### Restart scopes and transfers
+
+Added restart-case, invoke-restart, find-restart, compute-restarts, restart-name
+and restart-description. Managed restart objects retain their symbol name,
+optional description and clause closure. Active scopes have a rooted object
+array and VM snapshots. Lookup is innermost-last, including duplicate names in
+one scope; an exact object selects that restart and expires when its scope exits.
+
+Invocation carries a rooted target and argument list through nested VM callback
+boundaries. The VM restores the target scope's frames, handlers, parameters and
+try depth, then enters the clause while keeping that scope's restarts active.
+Sibling invocation and repeated invocation reuse the recovery point rather than
+accumulating C calls. Nested eval preserves the caller's restart scopes. Try
+unwinding and host evaluation boundaries discard exited scopes.
+
+The first 37 public condition checks pass, through restart introspection and
+clause reinvocation. This is partial evidence: unwind-protect and exit are still
+missing, and restart transfers do not yet run intervening cleanups. Seventeen
+programs and eight error cases agree with Chez. Forced-collection and ASan/UBSan
+checks cover dynamic lookup, expired objects, error-handler recovery, parameter
+restoration, nested eval, captured locals, arity errors and 10,000 reinvocations.
+Leak checking is disabled in the tracing environment. A transfer across 4,000
+nested restart scopes passes on a 256 KiB C stack. Handler, eval, runtime and
+compiler-free libffi regressions pass. The inventory remains 23 passing and 26
+failing groups. Optional LLVM tools were unavailable for gc-lint.
+
+### Cleanup and exit transfers
+
+Added unwind-protect and defer, plus call-with-cleanup for the shared resource
+forms. Cleanup closures are rooted separately from their VM scope snapshots.
+Normal scope exit runs cleanup once while retaining the result. Error and
+restart unwinding run intervening cleanup in reverse order before reaching a
+catch or restart clause. The snapshots restore the dynamic parameters, handlers,
+restarts and try depth visible at the cleanup site. Nested eval and handler
+callbacks run their cleanup before passing a transfer back to the suspended VM.
+
+Unwind-protect cleanup errors replace the pending result or transfer. Resource
+cleanup receives nil for normal return/restart, the condition for error, or
+:quit for exit. It preserves a pending transfer if cleanup raises, as specified
+in specs/io.md. Chez currently replaces that transfer. The differential test
+asserts both observed outcomes explicitly for the error and restart cases;
+this discrepancy is not counted as shared behavior.
+
+Exit and quit validate status 0 through 255 and use an uncatchable VM transfer.
+Handlers and catch clauses are skipped, while cleanup runs. The embedding API
+returns false and exposes the request through runtime_exit_status; it never
+terminates the host process. The CLI returns the requested status, including
+from preloads and REPL input. A cleanup error can cancel and replace an exit.
+Interrupt delivery is still unimplemented.
+
+All 64 common condition checks pass, along with public exit, quit and
+cleanup-error tests. The inventory is 27 passing and 22 failing groups.
+Forced-collection and ASan/UBSan checks cover ordering, replacement errors,
+resource outcomes, nested callbacks and host exit status. CLI exit tests also
+pass under ASan/UBSan; leak checking is disabled in the tracing environment.
+Four thousand nested protected calls unwind on a 256 KiB C stack. Fourteen
+programs and eight error cases agree with Chez, with the two resource-cleanup
+differences checked separately. Restart, handler, eval, runtime and compiler-free
+libffi regressions pass. Optional LLVM tools were unavailable for gc-lint.
+
+### Cooperative interruption
+
+The embedding API accepts a host-owned volatile sig_atomic_t flag. A signal
+handler only sets the flag; runtime safe points consume it without allocation.
+The CLI installs a SIGINT handler and restores the previous handler at exit.
+The VM checks between instructions, and allocation and host evaluation/call
+entry also poll. The no-request path avoids an out-of-line poll call in the
+VM loop. Native calls are not forcibly terminated; blocking-port integration
+remains unfinished with the port implementation.
+
+An interrupt uses a distinct uncatchable transfer rather than a condition or
+exit request. Cleanup runs, resource cleanup receives :quit, and the CLI returns
+130 unless cleanup replaces the transfer. Embedders can inspect
+runtime_interrupted, then reuse the runtime; the next top-level evaluation
+clears the previous result without dropping a newly requested interrupt.
+No interactive break loop is provided.
+
+The public interrupt test passes. Process tests deliver SIGINT only after a
+readiness marker and check nested cleanup order, resource outcomes, replacement
+errors, recovery through a restart and nested eval. Host tests cover flag
+consumption, detachment, subsequent evaluation and pending interrupts before
+builtin calls or empty input. Interrupt and CLI sanitizer tests pass with leak
+checking disabled in the tracing environment. Cleanup, restart and compiler-free
+runtime/libffi regressions pass. Blocking port interruption is still unverified
+because ports are not yet implemented.
+
+### Monotonic and civil clocks
+
+Added current-jiffy, jiffies-per-second and current-second. Jiffies use the
+monotonic clock in nanoseconds and reject values beyond the integer range;
+civil time uses the realtime clock and returns a float. All three reject
+arguments. The shared otium.time/seconds helper now runs unchanged.
+
+All 136 checks in tests/library/common.ot pass. The public inventory is now
+29 passing and 20 failing groups. Forced-collection and ASan/UBSan tests bracket
+runtime readings with host clock readings and check representation, frequency,
+argument validation and reuse after errors. Leak checking is disabled in the
+tracing environment. Three clock-contract programs and three error cases agree
+with Chez. Ports, user classes, records, reader token support and their dependent
+features remain unfinished.
+
+### Memory ports and current streams
+
+Added managed Port values, input/output predicates, close operations, memory
+string/bytevector constructors and output extraction. Input ports snapshot their
+source; output extraction returns a fresh value. Output storage grows in managed
+raw-byte objects. Closed operations raise io-error with :reason :closed, and
+ports dispatch through the existing Port class and close method.
+
+Byte and character reads share one position. UTF-8 peeking leaves the bytes
+unconsumed, and invalid decoding reports an absolute byte position without
+consuming the invalid sequence. Implemented read-line, read-all, counted string
+and bytevector reads, read-bytevector!, and character-set scanning. Successful
+read-bytevector! does not allocate managed storage. Output supports characters,
+bytes, string/bytevector slices, display-to, write-to and flushing.
+
+Current input/output/error are dynamic params initialized with borrowed standard
+streams. Printing now uses current-output-port, so the shared
+with-output-to-string implementation works, including nested capture and error
+unwinding. Standard output flushes after each operation. Standard input retains
+up to four lookahead bytes; interrupted blocking reads propagate the runtime's
+interrupt transfer and run cleanup. Standard stream handles remain host-owned;
+closing a wrapper marks it closed without closing the host handle.
+
+Sixty-eight applicable public port checks pass under forced collection and
+ASan/UBSan, alongside snapshot, growth, dynamic-capture, decode-position and
+allocation-free read-bytevector! checks. Leak checking is disabled in the tracing
+environment. Ten programs and seven error cases agree with Chez. Stateful reads
+in those comparisons are sequenced explicitly: Chez and the prototype evaluated
+some println operands in different orders. Standard-stream subprocess checks
+cover mixed byte/character reads, raw byte output and blocked-read interruption.
+Interrupt and compiler-free runtime/libffi regressions pass.
+
+The full port suite still stops at missing read. File ports, custom callbacks,
+open-port tracking and datum reading remain unimplemented. The public inventory
+remains 29 passing and 20 failing groups, with no previously passing group lost.
+Optional LLVM tools were unavailable for gc-lint.
+
+### Datum reading from ports
+
+Added read with an optional current-input-port default. A streaming scanner
+collects one datum boundary, tracking strings, escapes, comments, quote prefixes,
+character literals and collection delimiters. The existing reader still owns
+syntax validation and value construction. The scanner does not reparse growing
+prefixes and leaves the following delimiter or datum unread. Completed strings,
+characters and collections return without waiting for EOF. Mismatched closing
+delimiters are passed to the reader immediately.
+
+All 174 public port-datum checks pass. Forced-collection and ASan/UBSan tests
+also cover 52 applicable negative reader fixtures, adjacent datums, quoted
+comments, malformed UTF-8 positions, empty input and a 5,000-element list.
+Leak checking is disabled in the tracing environment. Stdin subprocess tests
+keep the input pipe open and verify that completed datums return and leave the
+next byte available. The expanded port differential suite agrees with Chez on
+14 programs and 11 error cases. Reader, memory-port, runtime and compiler-free
+libffi regressions pass.
+
+The public inventory is 30 passing and 19 failing groups. The broad port suite
+now reaches make-input-port. Custom callbacks, file ports and open-port tracking
+remain unfinished, along with classes, records and reader token support.
+
+### Custom ports and open-port tracking
+
+Added make-input-port and make-output-port with byte-level callbacks, optional
+flush/close callbacks and a 4 KiB managed bytevector buffer. Input retains unread
+bytes across partial fills, including UTF-8 lookahead. Output tracks the confirmed
+write offset, so retrying a failed flush does not replay bytes already accepted
+by the sink. Full buffers, explicit flush and close drain pending output.
+Callback return counts are checked, and same-port callback reentry is rejected.
+
+Port operations now keep both the active port and caller payload in rooted
+slots. Helpers receive the port slot and reload object storage after callbacks;
+callback functions, argument lists and buffers are rooted across nested VM calls.
+A restart transfer from a callback clears its busy flag before unwinding reaches
+surrounding cleanup. Callback tables are captured when the port is constructed.
+
+The open-port registry retains custom and standard ports until close and returns
+a detached array. Memory ports are excluded. Finalizers remain deferred. Closing
+an already closed port does not call its callback again. Runtime shutdown flushing
+of all registered output ports is still unfinished and will be added with the
+file-port lifecycle work.
+
+All 89 public port checks pass under forced collection and ASan/UBSan. Extra
+checks cover callback reentry, invalid counts, callback failure/retry, output
+larger than the buffer, detached registry snapshots, restart transfer and datum
+reading through single-byte callback fills. Leak checking is disabled in the
+tracing environment. Nineteen port programs and eleven error cases agree with
+Chez. Datum-reader, interrupt and compiler-free runtime/libffi regressions pass.
+The public inventory is 31 passing and 18 failing groups. Optional LLVM tools
+were unavailable for gc-lint. File ports and remaining language features are
+still unfinished.
+
+### Shutdown flushing
+
+Added runtime_flush_ports for idle host boundaries. It roots a snapshot of the
+open-port registry, flushes each still-open output port, and preserves the prior
+evaluation or exit result on success. A flush failure replaces that result and
+stops the pass; retrying uses each port's confirmed write offset. Callback changes
+to the registry do not invalidate the snapshot. Ports opened by a flush callback
+are left for a subsequent pass. Runtime destruction does not invoke Otium code.
+
+The CLI flushes on normal script/REPL completion and explicit exit/quit. Successful
+flushing preserves the requested status. A failed flush reports an error, while
+an exit or interrupt raised by a callback supplies the resulting status.
+
+Forced-collection and ASan/UBSan tests cover partial-write retry, preservation of
+exit status, and a callback closing another registered port. CLI tests verify
+buffered output at normal completion, exit and quit, plus failing and exiting
+flush callbacks. Leak checking is disabled in the tracing environment. The port
+differential suite still agrees with Chez on 19 programs and 11 errors. The
+public inventory remains 31 passing and 18 failing groups. The public file-based
+exit-flush case still needs file ports and CLI script arguments, so this milestone
+does not count it as complete.
+
+### Script arguments
+
+Added the builtin otium.process namespace with arguments and script-name. The
+host setter copies script metadata into rooted runtime values and publishes it
+only after all allocations succeed. Each arguments call returns a fresh list.
+The CLI installs metadata before preloads and preserves every token after --,
+including empty strings, Unicode and tokens that look like runtime options.
+Using -- before the script also ends option parsing. With no script, script-name
+returns nil; a supplied script name retains the caller's spelling.
+
+Forced-collection tests cover host buffer ownership, repeated reads, failed
+replacement, empty metadata, module aliases/refers/reload and recovery after an
+arity error. CLI tests cover the public argument fixture, expression arguments,
+separator placement and metadata visible to preloads. Both suites pass under
+ASan/UBSan with leak checking disabled in the tracing environment.
+
+The public inventory remains 31 passing and 18 failing groups. File-port tests
+now reach missing file-exists? and open-output-file instead of stopping at CLI
+argument parsing. The format corpus reaches the missing otium.reader module.
+File ports, filesystem operations, classes, records and reader tooling remain.
+
+### File ports
+
+Added input/output file ports and binary aliases, optional buffer sizes, truncate,
+append and exclusive-create modes. Buffer sizes below four round up to four.
+File ports enter the open-port registry, flush on close and runtime shutdown,
+and release their descriptors and host buffers on close or runtime destruction.
+Standard streams remain borrowed. NUL-containing paths are rejected before open.
+Directory opens fail with :is-directory. Host failures carry file-error conditions
+with operation, path, reason and host detail.
+
+The first file backend uses libc streams and stable host-allocated buffers.
+The specified embedding I/O callback interface and managed bytevector buffering
+remain unfinished; this backend does not yet satisfy that embedding contract.
+
+Forced-collection and ASan/UBSan tests cover file modes, shared read-file/write-file,
+small-buffer UTF-8 lookahead, registry removal, repeated close, failed opens,
+shutdown flushing and /dev/full reporting :no-space when available. Leak checking
+is disabled in the tracing environment. Existing memory/custom/standard port and
+shutdown tests pass. Optional LLVM tools were unavailable for gc-lint.
+
+The public inventory is 34 passing and 15 failing groups. Read-file, write-file
+and file-based exit flushing now pass. Filesystem helpers still block the broad
+file suite; classes, records, reader tooling and embedding I/O remain unfinished.
+
+### Filesystem operations
+
+Added file-exists?, delete-file, rename-file, file-info, list-directory and
+make-directory, plus file-symbolic-link? and current-directory for the shared
+filesystem helpers. Metadata follows symlinks; the link predicate uses lstat,
+so dangling symlinks remain distinguishable from missing entries. Listings are
+sorted arrays without dot entries. Paths containing NUL are rejected. Host
+failures use the existing structured file-error conditions. Directory scanning
+polls for interrupts and releases its host allocations on failure.
+
+All 32 public file-port checks now pass under forced collection and ASan/UBSan.
+Additional checks cover symlinks, dangling links, deleting a link without deleting
+its target, metadata errors, sorted listings, current-directory and NUL rejection.
+Leak checking is disabled in the tracing environment. Runtime and libffi tests
+also pass with PATH and OTIUM_NATIVE_CC set to nonexistent locations. Optional
+LLVM tools were unavailable for gc-lint.
+
+The public inventory is 36 passing and 13 failing groups. Both broad file-port
+and filesystem-helper groups now pass. Remaining public failures depend on user
+classes/records or reader tooling. The embedding I/O contract remains unfinished.
+
+### User classes and instance migration
+
+Added defabstract, defclass and reset-class! with stable descriptors, abstract
+parent validation, cycle rejection and separate slot layouts. Instances hold
+class, layout and slot-storage references. Construction validates keyword/value
+arguments, evaluates defaults per instance and supports required slots and explicit
+accessors. Instances are callable by slot keyword, support assignment and shallow
+copy, dispatch through their class ancestry, and compare by identity. Shared
+with-slots and is-a? now work with user instances.
+
+Slot reads, writes and copies migrate stale instances. Kept slots retain values;
+added slots and changed state flags use initializers. update-instance receives
+old slots and can supply newly required values. Failed initializers or hooks
+restore the old layout and slot storage, so the next access retries. Instance
+identity and table keys survive migration. Changing defaults without changing
+slot names/order/state updates future construction without migrating instances.
+
+Forced-collection and ASan/UBSan checks cover the initial construction/access
+section of the public class suite plus migration, rollback/retry, required slots,
+identity, resets, parent changes and state-flag changes. Leak checking is disabled
+in the tracing environment. Eight class programs and eight error cases agree
+with Chez. Existing primary generic tests pass. Optional LLVM tools were
+unavailable for gc-lint.
+
+The public inventory is 40 passing and 9 failing groups. Matching, resources,
+resource exit and blocking-input interruption now pass. The class suite reaches
+lexical next methods, which remain unfinished along with around methods, property
+lifecycle operations, records and reader tooling. Slot inline caches, generic
+dispatch caches and the embedding I/O contract also remain unfinished.
+
+### Lexical next methods and around methods
+
+Added :next bindings and :around qualifiers. A next-method procedure retains a
+detached list of method objects applicable to the original call. Replacement
+arguments select from that list; later additions, removals, replacements and
+generic resets do not change an escaped procedure's methods. Around methods
+run outside primaries. Ambiguous remaining methods fail when next is called.
+Methods without :next avoid allocating a snapshot.
+
+The VM installs each selected method directly, passing its next binding as a
+hidden lexical argument. Tail calls through next methods stay in the VM rather
+than growing the C callback stack. Added qualifier-aware replacement/removal,
+detached introspection and reset-generic!. Next binding names must be local,
+distinct from parameters, and followed by a body. The public suite also exposed
+constructor duplicate-key semantics; construction now uses the last value.
+
+All 151 public class checks pass normally, under forced collection, and under
+ASan/UBSan. Extra tests cover escaped snapshots after removal/replacement/reset,
+replacement arguments that exclude originally inapplicable methods, arity errors,
+procedure reflection and 2,000 tail calls. Leak checking is disabled in the
+tracing environment. Eight method programs and seven errors agree with Chez;
+the existing ten generic programs/four errors and instance migration tests pass.
+Optional LLVM tools were unavailable for gc-lint.
+
+The public inventory is 41 passing and 8 failing groups. Five currently stop at
+missing record support, and three at the missing reader module. Property/state
+lifecycle operations, records, reader tooling, slot/dispatch caches and embedding
+I/O remain unfinished.
+
+### Fixed-layout records
+
+Added the runtime primitives used by the shared defrecord/declare-record!
+implementation. Descriptors copy field names into keyword metadata; records hold
+the descriptor and positional values inline in managed storage. Reads work through
+record-ref, direct calls and apply. Writes return the value and reject immutable
+records. Applied assignment uses the shared dispatch helper. Record identity and
+hashing remain stable across mutation and collection. Runtime reflection reports
+record and record-type separately.
+
+The shared declaration registry supplies namespace identity and reload checks;
+no second declaration registry was added in C. It preserves compatible descriptors
+and rejects field or mutability changes before replacing a binding. The low-level
+descriptor constructor checks proper acyclic field lists, symbol names, duplicate
+fields and boolean immutability.
+
+All 45 public record checks pass normally, under forced collection and under
+ASan/UBSan. Extra checks cover retained record chains, field-list mutation after
+descriptor construction, cyclic/improper lists, shallow immutability and stable
+table keys. Leak checking is disabled in the tracing environment. Six record
+programs and eight error cases agree with Chez. All 151 class checks and method
+snapshot/tail-call regressions still pass. Optional LLVM tools were unavailable
+for gc-lint.
+
+The public inventory is 43 passing and 6 failing groups. Records and the UI
+calculator now pass. Three groups stop at class-properties and three at the
+missing reader module. Property lifecycle, reader tooling, class caches and
+embedding I/O remain unfinished.
+
+### Property descriptions and mounted state
+
+Added class-properties, class-mount and class-update-properties!. Property
+construction evaluates property defaults, rejects state arguments and leaves
+state slots nil. Mounting copies properties and evaluates state initializers in
+declaration order, so separate mounts get separate state. Updating an unchanged
+layout copies only properties and preserves state.
+
+Layout migration accepts supplied properties before running initializers and
+update-instance. New required properties can therefore come from the caller;
+kept state survives, and state-flag changes reset according to the new role.
+Initializer or hook failures restore the previous layout and all slot values.
+Mount/update reject a source description whose layout is outdated. Direct slot
+access still performs normal instance migration, matching Chez.
+
+All 136 public UI checks pass normally, under forced collection and under
+ASan/UBSan. Additional checks cover initializer counts, repeated mounts, fresh
+state, shared property values, hook visibility and migration rollback/retry.
+Leak checking is disabled in the tracing environment. Six lifecycle programs
+and five errors agree with Chez. Class/method and ordinary migration regressions
+pass. Optional LLVM tools were unavailable for gc-lint.
+
+The public inventory is 46 passing and 3 failing groups. Every inventoried UI
+group now passes. The remaining groups need otium.reader token tooling and the
+formatting library that uses it. Class caches and embedding I/O also remain
+unfinished; passing this inventory alone will not establish full completion.
+
+### Reader tokens and formatter integration
+
+Added the builtin otium.reader/tokens module. It validates source using the
+existing datum reader, then emits raw token text with kind, zero-based line and
+Unicode-scalar column, and newline gaps. Comments, prefixes, collection openers,
+character literals and multiline strings retain their source spelling. CRLF is
+one line break, including when a character token ends at its CR. The validator
+releases its AST arena between top-level forms. Token construction roots all
+partially built lists and preserves earlier results across later calls.
+
+All 120 public token checks pass normally, under forced collection and under
+ASan/UBSan. Extra checks cover a 2,000-token source and retained output lists.
+Every printed token field in the public fixtures agrees with Chez. Leak checking
+is disabled in the tracing environment. Optional LLVM tools were unavailable
+for gc-lint.
+
+The default public inventory is 48 passing and 1 failing group. Reader tokens
+and formatting checks now pass. The remaining corpus test exhausts the CLI's
+fixed 1 MiB semispace. Running the unchanged corpus with --heap=16777216 passes:
+116 files, zero failures, 382 collections and at most 118 VM frames. The default
+CLI memory policy still needs work; this configured run does not erase the
+remaining default-run failure. Class caches and embedding I/O are also unfinished.
+
+### Bounded CLI heap growth
+
+The CLI now starts with 1 MiB semispaces and permits growth to 64 MiB per space.
+An explicit --heap remains fixed unless --heap-max is also supplied. Embedding
+heaps remain fixed until the host calls runtime_heap_limit. Allocation collects
+before growth, doubles within the limit, and allocates both replacement spaces
+before relocating roots. Cycles, aliases and object identity survive relocation.
+Failed allocations leave the existing heap usable. Stats include current
+semispace capacity. The memory contract above describes transient allocation.
+
+New tests cover growth through multiple capacities, cyclic roots, opaque payloads,
+identity, cap rejection, exhaustion/recovery and collecting garbage without growth.
+CLI checks cover default growth, explicit fixed heaps, maximum limits and invalid
+option combinations. ASan/UBSan growth and CLI checks pass, with leak checking
+disabled in the tracing environment. The full prototype test target passes.
+Its namespace leak check now measures the four namespaces it creates relative
+to startup, accommodating the new builtin process and reader namespaces.
+Optional LLVM tools were unavailable for gc-lint.
+
+All 49 inventoried public groups pass with default CLI settings. The unchanged
+format corpus reports 116 files and zero failures, growing to a 16 MiB semispace
+with 768 collections and at most 118 VM frames. Runtime/libffi tests also pass
+with PATH and OTIUM_NATIVE_CC pointing to nonexistent locations.
+
+This establishes the current inventory, not the full completion audit. Broader
+FFI public tests, embedding I/O and class performance requirements still need
+review and implementation where missing.
+
+### Shared FFI module and bulk memory
+
+The canonical builtin namespace is now otium.ffi. The legacy ffi spelling still
+resolves to it, while requiring otium.ffi loads the shared library. Added the
+scalar low-level hooks used by that library for binding, allocation, typed byte
+offsets and loader diagnostics. Native FFI failures now become ffi-error
+conditions. Detailed call-site error metadata is still incomplete.
+
+Added copy!, read-bytes, write-bytes! and read-utf8-bytes. Copying supports
+overlapping regions; reads return fresh managed values. Exact UTF-8 reads preserve
+embedded NULs and reject malformed or incomplete encodings. All operations check
+pointer lifetime and view bounds, including zero-length operations.
+
+All 23 public bulk checks pass normally and with forced collection under
+ASan/UBSan. Additional regressions cover both overlap directions, detached reads,
+source/destination bounds and copying released storage. Existing foreign-call,
+namespace and module tests pass. Leak checking was disabled in the tracing
+environment; optional LLVM tools were unavailable for gc-lint. The core inventory
+remains 49 passing groups. The public common FFI suite now reaches the missing
+%layout primitive. Aggregate calls, callbacks and the rest of the broader FFI
+audit remain unfinished.
+
+### Aggregate memory layouts
+
+Added opaque foreign layout values and the %layout/%layout-data hooks used by
+the shared library. Layout calculations and field-path traversal remain in
+Otium. The runtime copies description trees on construction and extraction, so
+mutating declaration lists or a returned description cannot change a saved
+layout. These traced snapshots survive collection independently of bindings.
+Tree copying has bounded depth and work to reject cyclic or excessive input.
+
+The first 93 checks of the public common FFI suite pass, through aggregate
+memory access. This was measured by running its unchanged prefix before the
+first by-value binding and adding a report call. The complete suite still stops
+at that binding because aggregate ABI lowering is not implemented yet.
+Additional forced-collection and ASan/UBSan tests cover mutated declaration
+lists, nested arrays, saved layouts after rebinding, union offsets, field views,
+duplicate fields and released storage. The foreign regression target passes;
+leak checking remains disabled in the tracing environment. No optional LLVM
+tools are available for gc-lint.
+
+### By-value struct calls through libffi
+
+Prepared signatures now own recursive libffi type trees for structs and nested
+fixed arrays. Preparation checks size, alignment and field offsets against the
+shared layout description using ffi_get_struct_offsets. Cache matching compares
+the complete ABI tree as well as scalar conversion codes; equal-sized integer
+and floating layouts cannot share the wrong call interface. Host trees are
+released with their cached signatures. See the upstream [libffi size and
+alignment contract](https://www.chiark.greenend.org.uk/doc/libffi-dev/html/Size-and-Alignment.html).
+
+Aggregate arguments are validated and copied into separate aligned host storage.
+Aggregate result buffers and owning wrappers are allocated before native
+execution. Returned bytes go into a fresh explicitly releasable allocation;
+subsequent calls and source mutation cannot overwrite it. Null release is a
+no-op. External pointers permit caller-asserted spans, while derived views carry
+bounds and address arithmetic rejects overflow.
+
+The unchanged public common FFI prefix through struct calls passes 156 checks.
+The complete suite currently stops at missing library metadata in a conversion
+condition. Dedicated tests cover floating and mixed-register structs, a large
+nested-array result, short/misaligned/released arguments, independent results,
+layout rebinding, structural signature reuse and bounded cache reclamation.
+The core inventory remains 49 passing groups, and foreign reload tests pass.
+Union ABI classification and callbacks remain unimplemented. Union-containing
+signatures currently fail with abi rather than using an incorrect substitute.
+
+The expanded foreign tests pass under forced collection and ASan/UBSan,
+including the aggregate signature-cache checks. Leak checking is disabled in
+the tracing environment. Optional LLVM tools remain unavailable for gc-lint.
+
+### FFI call error context
+
+Library wrappers retain the selected path, including when multiple paths share
+a loader handle. Bound functions trace their library wrapper, symbol and copied
+type descriptions. Call errors now identify the selected library, native symbol,
+failing argument index and expected scalar or aggregate type. Result conversion
+errors have no argument index; arity errors have neither an index nor an expected
+type. Native binding errors also carry available library and symbol information.
+Saved conditions and aggregate type descriptions survive collection and rebinding.
+
+Binding publication now reads the current host binding-list head after all
+managed allocations. Reading it before allocation could retain a stale link if
+collection reclaimed an older binding while constructing the new wrapper.
+
+All 166 public common FFI checks before union calls pass. The expanded foreign
+regression includes 39 aggregate/error checks and 23 bulk checks, with additional
+signature-cache checks. It passes under forced collection and ASan/UBSan; foreign
+reload tests also pass. Leak checking is disabled in the tracing environment.
+Optional LLVM tools remain unavailable for gc-lint. The full public FFI suite
+still stops at union ABI classification; callbacks and ownership remain to be
+completed. Memory-operation error metadata needs a further audit.

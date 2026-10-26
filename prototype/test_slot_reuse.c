@@ -26,11 +26,10 @@ int main(void) {
     char source[8192] = "(def (many) ";
     for (size_t i = 0; i < 256; i++) strcat(source, "(let ((x 42)) x) ");
     strcat(source, "42) (many)");
-    const size_t thresholds[] = {0, 1, 31};
-    for (size_t mode = 0; mode < 3; mode++) {
+    {
         Runtime *rt = runtime_create(16384, 32);
         assert(rt);
-        runtime_native(rt, thresholds[mode]);
+
         runtime_gc_stress(rt, true);
         assert(eval(rt, source) == value_int(42));
         assert(function(rt, "many")->locals == 1);
@@ -59,7 +58,7 @@ int main(void) {
             "(def x (+ i 1)) (if (< i 10) (let ((x 1)) (set! result (+ result x))) "
             "(let ((x 2)) (set! result (+ result x)))) (set! i x)) "
             "(let ((x 12)) (+ result x)))") == value_int(42));
-        printf("slot reuse tests passed: threshold=%zu sequential-locals=1 mixed-locals=5 boxed=1\n", thresholds[mode]);
+        printf("slot reuse tests passed: sequential-locals=1 mixed-locals=5 boxed=1\n");
         runtime_destroy(rt);
     }
 }

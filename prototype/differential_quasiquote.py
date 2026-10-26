@@ -42,7 +42,7 @@ INVALID = [',1', ',@1', '(quasiquote)', '(quasiquote 1 2)', '`(unquote)',
            '`,@(unquote 1)', '`(,(def x 1))']
 
 def main():
-    commands = [[str(ROOT / 'prototype/otium-proto')], [str(ROOT / 'prototype/otium-proto'), '--native=1'],
+    commands = [[str(ROOT / 'prototype/otium-proto')],
                 [str(ROOT / 'otium'), '--runtime=chez', '--no-project']]
     with tempfile.TemporaryDirectory(prefix='otium-qq-differential-') as directory:
         entry = pathlib.Path(directory) / 'entry.ot'

@@ -14,6 +14,5 @@ typedef union {
     void *pointer;
     ForeignCallback callback;
 } ForeignSlot;
-typedef void (*ForeignAdapter)(void *target, const ForeignSlot *arguments, ForeignSlot *result);
 
 #endif

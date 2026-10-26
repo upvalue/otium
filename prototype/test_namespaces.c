@@ -16,11 +16,11 @@ static void rejects(Runtime *rt, const char *source) {
     assert(!runtime_eval(rt, source, strlen(source), &value));
 }
 int main(void) {
-    const size_t thresholds[] = {0, 1, 31};
-    for (size_t mode = 0; mode < 3; mode++) {
+    {
         Runtime *rt = runtime_create(32768, 4096);
         assert(rt);
-        runtime_native(rt, thresholds[mode]); runtime_gc_stress(rt, true);
+        size_t initial_spaces=rt->namespace_count;
+        runtime_gc_stress(rt, true);
         assert(eval(rt, "(def user-value 40) (ns left) (def value 1) "
             "(def (read) value) (def saved read) (ns right) (def value 2) "
             "(+ (left/read) value)") == value_int(3));
@@ -60,7 +60,7 @@ int main(void) {
         assert(rt->global_count == globals);
         for (size_t i = 0; i < 1000; i++) {
             eval(rt, "(ns left) (defonce state (fn (x x) x)) (ns right) (defonce state (error \"skipped\"))");
-            assert(rt->namespace_count == 7);
+            assert(rt->namespace_count == initial_spaces + 4);
             assert(rt->global_count == globals);
         }
         const char *bad[] = {"(ns)", "(ns 1)", "(ns x y)", "(ns x . y)",
@@ -68,8 +68,8 @@ int main(void) {
             "(ns x (:require y))"};
         for (size_t i = 0; i < sizeof(bad)/sizeof(*bad); i++) rejects(rt, bad[i]);
         assert(eval(rt, "(ns right) value") == value_int(2));
-        printf("namespace tests passed: threshold=%zu spaces=%zu globals=%zu\n",
-            thresholds[mode], rt->namespace_count, rt->global_count);
+        printf("namespace tests passed: spaces=%zu globals=%zu\n",
+            rt->namespace_count, rt->global_count);
         runtime_destroy(rt);
     }
 }

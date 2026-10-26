@@ -17,6 +17,8 @@ struct Compiler {
     size_t lifetime_capacity;
     unsigned scope;
     bool definitions;
+    Reader *expansion_arena;
+    size_t *expansions;
 };
 typedef struct { Opcode load, store; uint32_t index; } Reference;
 
@@ -29,7 +31,7 @@ static bool error(Compiler *c, const Ast *a, const char *message) {
 }
 
 static bool same_name(const Ast *a, const Ast *b) {
-    return a && b && a->kind == AST_SYMBOL && b->kind == AST_SYMBOL &&
+    return a && b && a->symbol_id == b->symbol_id && a->kind == AST_SYMBOL && b->kind == AST_SYMBOL &&
         a->as.text.size == b->as.text.size &&
         !memcmp(a->as.text.data, b->as.text.data, a->as.text.size);
 }
@@ -66,7 +68,7 @@ static uint32_t new_function(Runtime *rt) {
     }
     Function *f = calloc(1, sizeof(*f));
     if (!f) { rt_error(rt, "out of host memory"); return UINT32_MAX; }
-    f->compiling = rt->compiling;
+    f->namespace = rt->current_namespace;
     if (id == rt->function_count) rt->function_count++;
     rt->function_free = id + 1;
     rt->functions[id] = f;
@@ -210,6 +212,7 @@ static bool resolve(Compiler *c, const Ast *name, Reference *ref) {
 static Value datum(Compiler *c, const Ast *a) {
     Runtime *rt = c->rt;
     switch (a->kind) {
+    case AST_VALUE: return rt->constants[a->as.integer];
     case AST_NIL: return V_NIL;
     case AST_BOOL: return a->as.integer ? V_TRUE : V_FALSE;
     case AST_CHAR: return ((Value)a->as.integer << 8) | TAG_CHAR;
@@ -227,9 +230,10 @@ static Value datum(Compiler *c, const Ast *a) {
             if (!rt_kind(v, kind)) continue;
             size_t length; unsigned char *bytes = object_bytes(v);
             memcpy(&length, bytes, sizeof(length));
-            if (length == a->as.text.size && !memcmp(bytes + sizeof(length), a->as.text.data, length)) return v;
+            if ((kind != K_SYMBOL || rt_symbol_id(v) == a->symbol_id) && length == a->as.text.size && !memcmp(bytes + sizeof(length), a->as.text.data, length)) return v;
         }
         Value v = rt_text(rt, kind, a->as.text.data, a->as.text.size);
+        if (v && kind == K_SYMBOL) memcpy(object_bytes(v) + sizeof(size_t) + a->as.text.size + 1, &a->symbol_id, sizeof(a->symbol_id));
         if (v && rt_constant(rt, v) == UINT32_MAX) return 0;
         return v;
     }
@@ -257,6 +261,66 @@ static Value datum(Compiler *c, const Ast *a) {
     }
     }
     return 0;
+}
+
+/* Expanded syntax is copied into a host arena; it never holds heap pointers. */
+static Ast *syntax_value(Compiler *c, Value v, size_t offset, unsigned depth) {
+    if (depth > 256) { error(c, NULL, "macro syntax nesting limit exceeded"); return NULL; }
+    Ast *a = reader_allocate(c->expansion_arena, sizeof(*a));
+    if (!a) { error(c, NULL, "macro syntax memory limit exceeded"); return NULL; }
+    a->offset = offset;
+    if (v == V_NIL) a->kind = AST_NIL;
+    else if (v == V_TRUE || v == V_FALSE) { a->kind = AST_BOOL; a->as.integer = v == V_TRUE; }
+    else if (value_is_int(v)) { a->kind = AST_INT; a->as.integer = value_to_int(v); }
+    else if ((v & 255) == TAG_CHAR) { a->kind = AST_CHAR; a->as.integer = v >> 8; }
+    else if (rt_kind(v, K_FLOAT)) { a->kind = AST_FLOAT; memcpy(&a->as.real, object_bytes(v), sizeof(double)); }
+    else if (rt_kind(v, K_STRING) || rt_kind(v, K_SYMBOL) || rt_kind(v, K_KEYWORD)) {
+        a->kind = rt_kind(v, K_STRING) ? AST_STRING : rt_kind(v, K_SYMBOL) ? AST_SYMBOL : AST_KEYWORD;
+        size_t n; memcpy(&n, object_bytes(v), sizeof(n));
+        char *copy = reader_allocate(c->expansion_arena, n + 1);
+        if (!copy) { error(c, NULL, "macro syntax memory limit exceeded"); return NULL; }
+        memcpy(copy, object_bytes(v) + sizeof(n), n); copy[n] = 0;
+        a->as.text.data = copy; a->as.text.size = n;
+        if (a->kind == AST_SYMBOL) a->symbol_id = rt_symbol_id(v);
+    } else if (v == V_EMPTY || rt_kind(v, K_PAIR)) {
+        a->kind = AST_LIST;
+        Ast **next = &a->as.list.first;
+        Value slow = v, fast = v;
+        while (rt_kind(v, K_PAIR)) {
+            *next = syntax_value(c, object_fields(v)[0], offset, depth + 1);
+            if (!*next) return NULL;
+            next = &(*next)->next; v = object_fields(v)[1];
+            if (rt_kind(slow, K_PAIR)) slow = object_fields(slow)[1];
+            for (unsigned i = 0; i < 2 && rt_kind(fast, K_PAIR); i++) fast = object_fields(fast)[1];
+            if (rt_kind(fast, K_PAIR) && fast == slow) {
+                error(c, NULL, "cyclic macro syntax"); return NULL;
+            }
+        }
+        if (v != V_EMPTY) {
+            a->as.list.tail = syntax_value(c, v, offset, depth + 1);
+            if (!a->as.list.tail) return NULL;
+        }
+    } else {
+        uint32_t index = rt_constant(c->rt, v);
+        if (index == UINT32_MAX) return NULL;
+        a->kind = AST_VALUE; a->as.integer = index;
+    }
+    return a;
+}
+
+Ast *rt_syntax_value(Runtime *rt, Value value, Reader *arena) {
+    Compiler c = {.rt = rt, .expansion_arena = arena};
+    return syntax_value(&c, value, 0, 0);
+}
+
+static Ast *expand_call(Compiler *c, const Ast *form, uint32_t global) {
+    Runtime *rt = c->rt;
+    if (++*c->expansions > 256) { error(c, form, "macro expansion limit exceeded"); return NULL; }
+    Ast arguments = {.kind = AST_LIST, .as.list.first = form->as.list.first->next};
+    Value args = datum(c, &arguments);
+    if (!args) return NULL;
+    Value result = rt_call_list(rt, rt->globals[global], args);
+    return result ? syntax_value(c, result, form->offset, 0) : NULL;
 }
 
 /* Plans use indices and reader-owned ASTs. Managed constants live in a separate
@@ -389,7 +453,7 @@ static bool lambda(Compiler *c, const Ast *params, const Ast *forms, bool bindin
         return error(c, params, "expected a parameter list or rest symbol");
     uint32_t id = new_function(c->rt);
     if (id == UINT32_MAX) return false;
-    Compiler child = {.rt = c->rt, .fn = c->rt->functions[id], .parent = c, .scope = 1};
+    Compiler child = {.rt = c->rt, .fn = c->rt->functions[id], .parent = c, .scope = 1, .expansion_arena = c->expansion_arena, .expansions = c->expansions};
     bool ok = true;
     const Ast *rest = params->kind == AST_SYMBOL ? params : params->as.list.tail;
     const Ast *first = params->kind == AST_LIST ? params->as.list.first : NULL;
@@ -530,6 +594,130 @@ static bool let_form(Compiler *c, const Ast *args, bool tail) {
     return ok;
 }
 
+static bool try_form(Compiler *c, const Ast *forms, bool tail) {
+    const Ast *clause = forms;
+    Ast *protected = NULL, **next = &protected;
+    while (clause && !(clause->kind == AST_LIST && ast_symbol(clause->as.list.first, "catch"))) {
+        Ast *copy = reader_allocate(c->expansion_arena, sizeof(*copy));
+        if (!copy) return error(c, clause, "compiler syntax memory limit");
+        *copy = *clause; copy->next = NULL; *next = copy; next = &copy->next;
+        clause = clause->next;
+    }
+    if (!clause) return body(c, forms, tail, false);
+    size_t handler = emit(c, OP_TRY, 0);
+    if (handler == SIZE_MAX || !body(c, protected, false, false) || emit(c, OP_END_TRY, 0) == SIZE_MAX) return false;
+    size_t normal = emit(c, OP_JUMP, 0);
+    if (!patch(c, handler)) return false;
+    uint32_t condition = local(c, NULL);
+    if (condition == UINT32_MAX || emit(c, OP_BIND, condition) == SIZE_MAX) return false;
+    size_t *jumps = NULL, count = 0, capacity = 0;
+    bool ok = true;
+    for (; clause && ok; clause = clause->next) {
+        const Ast *head = clause->kind == AST_LIST ? clause->as.list.first : NULL;
+        const Ast *guard = head ? head->next : NULL;
+        if (!ast_symbol(head, "catch") || !guard || clause->as.list.tail) { ok = error(c, clause, "invalid catch clause"); break; }
+        const Ast *name = guard, *predicate = NULL;
+        if (guard->kind == AST_LIST) {
+            predicate = guard->as.list.first; name = predicate ? predicate->next : NULL;
+            if (guard->as.list.tail || !name || name->next) { ok = error(c, guard, "invalid catch guard"); break; }
+        }
+        if (name->kind != AST_SYMBOL) { ok = error(c, guard, "catch needs a variable"); break; }
+        size_t saved = c->binding_count;
+        c->scope++;
+        size_t skip = SIZE_MAX;
+        if (predicate) {
+            ok = expression(c, predicate, false) && emit(c, OP_LOCAL, condition) != SIZE_MAX && emit(c, OP_CALL, 1) != SIZE_MAX;
+            if (ok) skip = emit(c, OP_JFALSE, 0);
+        }
+        uint32_t slot = local(c, name);
+        if (slot == UINT32_MAX || emit(c, OP_LOCAL, condition) == SIZE_MAX || emit(c, OP_BIND, slot) == SIZE_MAX) { ok = false; break; }
+        if (ok) ok = body(c, guard->next, tail, true) && clear_bindings(c, saved);
+        if (ok) ok = rt_grow(c->rt, (void **)&jumps, &capacity, count + 1, sizeof(size_t));
+        if (ok) jumps[count++] = emit(c, OP_JUMP, 0);
+        if (ok && skip != SIZE_MAX) ok = patch(c, skip) && clear_bindings(c, saved);
+        for (size_t i = saved; i < c->binding_count; i++) c->lifetimes[c->bindings[i].slot].end = c->fn->count;
+        c->binding_count = saved; c->scope--;
+    }
+    if (ok) ok = emit(c, OP_LOCAL, condition) != SIZE_MAX && emit(c, OP_RAISE, 0) != SIZE_MAX && patch(c, normal);
+    for (size_t i = 0; ok && i < count; i++) ok = patch(c, jumps[i]);
+    if (ok) ok = emit(c, OP_CLEAR_LOCAL, condition) != SIZE_MAX;
+    c->lifetimes[condition].end = c->fn->count;
+    free(jumps); return ok;
+}
+
+static bool class_key(const Ast *a,const char *key) {
+    return a && a->kind==AST_KEYWORD && a->as.text.size==strlen(key) && !memcmp(a->as.text.data,key,strlen(key));
+}
+static Value slot_key(Compiler *c,const Ast *name) {
+    size_t n=name->as.text.size; char *text=malloc(n+2);
+    if(!text) { error(c,name,"out of host memory"); return 0; }
+    text[0]=':'; memcpy(text+1,name->as.text.data,n); text[n+1]=0;
+    Value key=rt_intern(c->rt,K_KEYWORD,text,n+1); free(text); return key;
+}
+static bool accessor(Compiler *c,const Ast *class,const Ast *slot,const Ast *name) {
+    Ast param={.kind=AST_SYMBOL,.as.text={"%instance",9}}, generic=*name;
+    generic.next=&param;
+    Ast sig={.kind=AST_LIST,.as.list={.first=&generic}};
+    Ast head={.kind=AST_SYMBOL,.as.text={"defgeneric",10},.next=&sig};
+    Ast form={.kind=AST_LIST,.as.list={.first=&head}};
+    c->definitions=true;
+    if(!expression(c,&form,false) || emit(c,OP_POP,0)==SIZE_MAX) return false;
+    Ast type=*class; type.next=NULL; param.next=&type;
+    Ast specialized={.kind=AST_LIST,.as.list={.first=&param}};
+    generic.next=&specialized;
+    Value key=slot_key(c,slot); if(!key) return false;
+    uint32_t constant_index=rt_constant(c->rt,key); if(constant_index==UINT32_MAX) return false;
+    Ast key_ast={.kind=AST_VALUE,.as.integer=constant_index};
+    Ast receiver=param; receiver.next=&key_ast;
+    Ast read={.kind=AST_LIST,.as.list={.first=&receiver}};
+    sig.next=&read; head.as.text.data="defmethod"; head.as.text.size=9;
+    c->definitions=true;
+    return expression(c,&form,false) && emit(c,OP_POP,0)!=SIZE_MAX;
+}
+static bool class_declaration(Compiler *c,const Ast *a,const Ast *head,const Ast *name,bool definitions) {
+    if(c->scope || !definitions || !name || name->kind!=AST_SYMBOL) return error(c,a,"class declaration requires a top-level name");
+    if(!rt_classes_init(c->rt)) return false;
+    bool abstract=ast_symbol(head,"defabstract"),reset=ast_symbol(head,"reset-class!");
+    const Ast *fields=name->next,*parent=NULL;
+    if(class_key(fields,":is")) {
+        parent=fields->next; if(!parent) return error(c,a,"missing class parent");
+        fields=parent->next;
+    }
+    if(abstract && fields) return error(c,a,"abstract classes cannot have slots");
+    if(!constant(c,((Value)B_CLASS_DEFINE<<8)|TAG_BUILTIN) || !constant(c,datum(c,name)) ||
+       !(parent ? expression(c,parent,false) : constant(c,c->rt->classes[C_OBJECT])) ||
+       !constant(c,abstract ? V_TRUE : V_FALSE) || !constant(c,((Value)B_ARRAY<<8)|TAG_BUILTIN)) return false;
+    size_t count=0;
+    for(const Ast *p=fields;p;p=p->next) {
+        const Ast *slot=p->kind==AST_LIST ? p->as.list.first : p;
+        if(!slot || slot->kind!=AST_SYMBOL || (p->kind==AST_LIST && p->as.list.tail)) return error(c,p,"invalid slot declaration");
+        const Ast *init=NULL,*state=NULL,*getter=NULL;
+        for(const Ast *option=p->kind==AST_LIST ? slot->next : NULL;option;) {
+            const Ast *value=option->next;
+            if(!value) return error(c,option,"missing slot option value");
+            if(class_key(option,":init") && !init) init=value;
+            else if(class_key(option,":state") && !state) state=value;
+            else if(class_key(option,":accessor") && !getter && value->kind==AST_SYMBOL) getter=value;
+            else return error(c,option,"invalid or duplicate slot option");
+            option=value->next;
+        }
+        if(!constant(c,slot_key(c,slot))) return false;
+        if(init) {
+            Ast params={.kind=AST_LIST},value=*init; value.next=NULL;
+            if(!lambda(c,&params,&value,false)) return false;
+        } else if(!constant(c,V_FALSE)) return false;
+        if(!(state ? expression(c,state,false) : constant(c,V_FALSE))) return false;
+        count+=3;
+    }
+    if(count>UINT32_MAX || emit(c,OP_CALL,(uint32_t)count)==SIZE_MAX || !constant(c,reset ? V_TRUE : V_FALSE) || emit(c,OP_CALL,5)==SIZE_MAX || emit(c,OP_POP,0)==SIZE_MAX) return false;
+    for(const Ast *p=fields;p;p=p->next) if(p->kind==AST_LIST) {
+        const Ast *slot=p->as.list.first;
+        for(const Ast *o=slot->next;o;o=o->next->next)
+            if(class_key(o,":accessor") && !accessor(c,name,slot,o->next)) return false;
+    }
+    return expression(c,name,false);
+}
+
 static bool expression(Compiler *c, const Ast *a, bool tail) {
     if (c->rt->error[0]) return false;
     bool definitions = c->definitions;
@@ -543,6 +731,140 @@ static bool expression(Compiler *c, const Ast *a, bool tail) {
     const Ast *head = a->as.list.first;
     if (!head) return constant(c, V_EMPTY);
     const Ast *args = head->next;
+    if (head->kind == AST_SYMBOL) {
+        uint32_t ignored;
+        bool shadowed = false;
+        for (Compiler *scope = c; scope; scope = scope->parent)
+            if (find_local(scope, head, &ignored)) { shadowed = true; break; }
+        if (!shadowed) {
+            uint32_t global = rt_lookup_global(c->rt, head->as.text.data, head->as.text.size);
+            if (global != UINT32_MAX && c->rt->global_macro[global]) {
+                Ast *expanded = expand_call(c, a, global);
+                c->definitions = definitions;
+                return expanded && expression(c, expanded, tail);
+            }
+        }
+    }
+    if (ast_symbol(head,"defclass") || ast_symbol(head,"defabstract") || ast_symbol(head,"reset-class!"))
+        return class_declaration(c,a,head,args,definitions);
+    if (ast_symbol(head, "defgeneric") || ast_symbol(head,"reset-generic!") || ast_symbol(head, "defmethod")) {
+        bool method = ast_symbol(head, "defmethod");
+        if (c->scope || !definitions) return error(c, a, "generic declarations require top level");
+        if (!rt_classes_init(c->rt)) return false;
+        const Ast *signature = args;
+        bool around=method && class_key(signature,":around");
+        if(around) signature=signature->next;
+        if (!signature || signature->kind != AST_LIST || signature->as.list.tail || !signature->as.list.first)
+            return error(c, a, "expected a generic signature");
+        const Ast *name = signature->as.list.first;
+        if (name->kind != AST_SYMBOL) return error(c, name, "generic name must be a symbol");
+        size_t count = 0;
+        Ast params = {.kind = AST_LIST}, **next = &params.as.list.first;
+        if (!constant(c, ((Value)(method ? B_GENERIC_METHOD : B_GENERIC_DEFINE) << 8) | TAG_BUILTIN)) return false;
+        if (method) {
+            if (!expression(c, name, false) || !constant(c, ((Value)B_LIST << 8) | TAG_BUILTIN)) return false;
+        } else if (!constant(c, datum(c, name))) return false;
+        for (const Ast *p = name->next; p; p = p->next) {
+            const Ast *binding = p, *type = NULL;
+            if (method && p->kind == AST_LIST) {
+                binding = p->as.list.first; type = binding ? binding->next : NULL;
+                if (p->as.list.tail || !type || type->next) return error(c, p, "invalid method parameter");
+            }
+            if (!binding || binding->kind != AST_SYMBOL || ast_symbol(binding, "&") || ast_symbol(binding, "&optional"))
+                return error(c, p, "generics need fixed parameters");
+            for (const Ast *prior = params.as.list.first; prior; prior = prior->next)
+                if (same_name(prior, binding)) return error(c, p, "duplicate generic parameter");
+            Ast *copy = reader_allocate(c->expansion_arena, sizeof(*copy));
+            if (!copy) return error(c, p, "compiler syntax memory limit");
+            *copy = *binding; copy->next = NULL; *next = copy; next = &copy->next;
+            if (method && !(type ? expression(c, type, false) : constant(c, c->rt->classes[C_OBJECT]))) return false;
+            count++;
+        }
+        if (method) {
+            const Ast *forms = signature->next;
+            bool has_next=class_key(forms,":next");
+            if(has_next) {
+                const Ast *binding=forms->next;
+                if(!binding || binding->kind!=AST_SYMBOL || memchr(binding->as.text.data,'/',binding->as.text.size) || ast_symbol(binding,"&") || ast_symbol(binding,"&optional")) return error(c,forms,"next method needs a local binding name");
+                if(!binding->next) return error(c,forms,"next method needs a body");
+                for(const Ast *p=params.as.list.first;p;p=p->next)
+                    if(same_name(p,binding)) return error(c,binding,"next binding conflicts with parameter");
+                Ast *copy=reader_allocate(c->expansion_arena,sizeof(*copy));
+                if(!copy) return error(c,binding,"compiler syntax memory limit");
+                *copy=*binding; copy->next=params.as.list.first; params.as.list.first=copy;
+                forms=binding->next;
+            }
+            return emit(c, OP_CALL, (uint32_t)count) != SIZE_MAX && lambda(c, &params, forms, false) &&
+                constant(c,around ? V_TRUE : V_FALSE) && constant(c,has_next ? V_TRUE : V_FALSE) && emit(c, OP_CALL, 5) != SIZE_MAX;
+        }
+        if (signature->next && (signature->next->kind != AST_STRING || signature->next->next))
+            return error(c, a, "defgeneric accepts only an optional docstring");
+        return constant(c, value_int((intptr_t)count)) && constant(c,ast_symbol(head,"reset-generic!") ? V_TRUE : V_FALSE) && emit(c, OP_CALL, 3) != SIZE_MAX;
+    }
+    if (ast_symbol(head, "defparam")) {
+        if (c->scope || !definitions) return error(c, a, "defparam requires top level");
+        if (!args || args->kind != AST_SYMBOL || !args->next) return error(c, a, "defparam needs a name and default");
+        const Ast *value = args->next;
+        if (value->kind == AST_STRING && value->next) value = value->next;
+        if (value->next) return error(c, a, "defparam needs one default");
+        uint32_t global = rt_global(c->rt, args->as.text.data, args->as.text.size);
+        return global != UINT32_MAX && constant(c, datum(c, args)) && expression(c, value, false) &&
+            emit(c, OP_MAKE_PARAM, 0) != SIZE_MAX && emit(c, OP_DEFINE_GLOBAL, global) != SIZE_MAX && constant(c, V_NIL);
+    }
+    if (ast_symbol(head, "unwind-protect") || ast_symbol(head, "defer")) {
+        if (!args) return error(c, a, "unwind-protect needs an expression");
+        Ast params = {.kind = AST_LIST};
+        return lambda(c, &params, args->next, false) && emit(c, OP_CLEANUP, 0) != SIZE_MAX &&
+            expression(c, args, false) && emit(c, OP_RUN_CLEANUP, 0) != SIZE_MAX;
+    }
+    if (ast_symbol(head, "%call-with-cleanup")) {
+        if (!args || !args->next || args->next->next) return error(c, a, "cleanup needs two callables");
+        return expression(c, args, false) && expression(c, args->next, false) &&
+            emit(c, OP_CLEANUP, 1) != SIZE_MAX && emit(c, OP_CALL, 0) != SIZE_MAX && emit(c, OP_RUN_CLEANUP, 0) != SIZE_MAX;
+    }
+    if (ast_symbol(head, "restart-case")) {
+        if (!args) return error(c, a, "restart-case needs an expression");
+        size_t count = 0;
+        for (const Ast *clause = args->next; clause; clause = clause->next) {
+            const Ast *name = clause->kind == AST_LIST ? clause->as.list.first : NULL;
+            if (!name || name->kind != AST_SYMBOL || clause->as.list.tail || !name->next)
+                return error(c, clause, "invalid restart clause");
+            const Ast *params = name->next, *description = NULL;
+            if (params->kind == AST_STRING && params->next) { description = params; params = params->next; }
+            if (!constant(c, datum(c, name)) || !constant(c, description ? datum(c, description) : V_NIL) ||
+                !lambda(c, params, params->next, false)) return false;
+            if (++count > UINT32_MAX) return error(c, clause, "too many restarts");
+        }
+        if (emit(c, OP_RESTARTS, (uint32_t)count) == SIZE_MAX) return false;
+        size_t target = emit(c, OP_JUMP, 0);
+        return target != SIZE_MAX && expression(c, args, false) && patch(c, target) && emit(c, OP_END_RESTARTS, 0) != SIZE_MAX;
+    }
+    if (ast_symbol(head, "handler-bind")) {
+        if (!args || args->kind != AST_LIST || args->as.list.tail) return error(c, a, "handler-bind needs a binding list");
+        size_t count = 0;
+        for (const Ast *binding = args->as.list.first; binding; binding = binding->next) {
+            const Ast *predicate = binding->kind == AST_LIST ? binding->as.list.first : NULL;
+            if (!predicate || binding->as.list.tail || !predicate->next || predicate->next->next)
+                return error(c, binding, "handler binding needs a predicate and handler");
+            if (!expression(c, predicate, false) || !expression(c, predicate->next, false)) return false;
+            if (++count > UINT32_MAX) return error(c, binding, "too many handler bindings");
+        }
+        return emit(c, OP_BIND_HANDLERS, (uint32_t)count) != SIZE_MAX && body(c, args->next, false, false) &&
+            emit(c, OP_UNBIND_HANDLERS, (uint32_t)count) != SIZE_MAX;
+    }
+    if (ast_symbol(head, "with-params")) {
+        if (!args || args->kind != AST_LIST || args->as.list.tail) return error(c, a, "with-params needs a binding list");
+        size_t count = 0;
+        for (const Ast *binding = args->as.list.first; binding; binding = binding->next) {
+            const Ast *param = binding->kind == AST_LIST ? binding->as.list.first : NULL;
+            if (!param || binding->as.list.tail || !param->next || param->next->next)
+                return error(c, binding, "parameter binding needs a param and value");
+            if (!expression(c, param, false) || !expression(c, param->next, false) || emit(c, OP_BIND_PARAM, 0) == SIZE_MAX) return false;
+            if (++count > UINT32_MAX) return error(c, binding, "too many parameter bindings");
+        }
+        return body(c, args->next, false, false) && emit(c, OP_UNBIND_PARAMS, (uint32_t)count) != SIZE_MAX;
+    }
+    if (ast_symbol(head, "try")) return try_form(c, args, tail);
     if (ast_symbol(head, "defonce"))
         return error(c, a, "defonce requires top-level context");
     if (ast_symbol(head, "quote")) {
@@ -565,6 +887,29 @@ static bool expression(Compiler *c, const Ast *a, bool tail) {
         if (!patch(c, branch)) return false;
         if (!(args->next->next ? expression(c, args->next->next, tail) : constant(c, V_NIL))) return false;
         return patch(c, done);
+    }
+    if (ast_symbol(head, "cond")) {
+        size_t *jumps = NULL, count = 0, capacity = 0;
+        bool ok = true, otherwise = false;
+        for (const Ast *clause = args; clause && ok; clause = clause->next) {
+            const Ast *test = clause->kind == AST_LIST ? clause->as.list.first : NULL;
+            if (!test || clause->as.list.tail) { ok = error(c, clause, "cond needs proper nonempty clauses"); break; }
+            if (ast_symbol(test, "else")) {
+                if (clause->next) { ok = error(c, clause, "cond else must be last"); break; }
+                otherwise = true;
+                ok = body(c, test->next, tail, false); break;
+            }
+            if (!expression(c, test, false)) { ok = false; break; }
+            if (!test->next && emit(c, OP_DUP, 0) == SIZE_MAX) { ok = false; break; }
+            size_t skip = emit(c, OP_JFALSE, 0);
+            if (test->next && !body(c, test->next, tail, false)) { ok = false; break; }
+            if (!rt_grow(c->rt, (void **)&jumps, &capacity, count + 1, sizeof(size_t))) { ok = false; break; }
+            jumps[count++] = emit(c, OP_JUMP, 0);
+            if (!patch(c, skip) || (!test->next && emit(c, OP_POP, 0) == SIZE_MAX)) { ok = false; break; }
+        }
+        if (ok && !otherwise) ok = constant(c, V_NIL);
+        for (size_t i = 0; ok && i < count; i++) ok = patch(c, jumps[i]);
+        free(jumps); return ok;
     }
     if (ast_symbol(head, "when") || ast_symbol(head, "unless")) {
         if (!args) return error(c, a, "conditional body needs a condition");
@@ -667,10 +1012,84 @@ static bool expression(Compiler *c, const Ast *a, bool tail) {
 bool rt_compile(Runtime *rt, const Ast *form, uint32_t *function) {
     uint32_t id = new_function(rt);
     if (id == UINT32_MAX) return false;
-    Compiler c = {.rt = rt, .fn = rt->functions[id], .definitions = true};
+    Reader arena;
+    reader_init(&arena, "", 0, 16 * 1024 * 1024);
+    size_t expansions = 0;
+    Compiler c = {.rt = rt, .fn = rt->functions[id], .definitions = true,
+                  .expansion_arena = &arena, .expansions = &expansions};
     bool ok = expression(&c, form, false);
     if (ok) ok = emit(&c, OP_RETURN, 0) != SIZE_MAX && assign_slots(&c);
     free(c.bindings); free(c.upnames); free(c.lifetimes);
     *function = id;
+    reader_destroy(&arena);
     return ok;
+}
+
+Ast *rt_expand_form(Runtime *rt, const Ast *form, Reader *arena) {
+    Compiler c = {.rt = rt, .expansion_arena = arena};
+    Value values[2] = {V_NIL, V_EMPTY}; Roots roots;
+    roots_push(&rt->heap, &roots, values, 2);
+    values[0] = datum(&c, form);
+    if (values[0]) {
+        Value pair = rt_alloc(rt, K_PAIR, 2, 0);
+        if (pair) { object_fields(pair)[0] = values[0]; object_fields(pair)[1] = V_EMPTY; values[1] = pair; }
+        else values[0] = 0;
+    }
+    Ast *result = NULL;
+    uint32_t global = rt_binding_global(rt, 0, "*expander*", 10, false);
+    if (values[0] && global != UINT32_MAX) {
+        bool expanding = rt->expanding;
+        rt->expanding = true;
+        if (!expanding) rt->expansion_calls = 0;
+        Value expanded = rt_call_list(rt, rt->globals[global], values[1]);
+        rt->expanding = expanding;
+        if (expanded) result = syntax_value(&c, expanded, form->offset, 0);
+    }
+    roots_pop(&rt->heap, &roots);
+    return result;
+}
+
+Value rt_read_string(Runtime *rt, Value string) {
+    if (!rt_kind(string, K_STRING)) { rt_error(rt, "read-string expects a string"); return 0; }
+    size_t n; memcpy(&n, object_bytes(string), sizeof(n));
+    char *copy = malloc(n + 1);
+    if (!copy) { rt_error(rt, "out of host memory"); return 0; }
+    memcpy(copy, object_bytes(string) + sizeof(n), n); copy[n] = 0;
+    Value result = rt_read_source(rt, copy, n);
+    free(copy); return result;
+}
+
+Value rt_read_source(Runtime *rt, const char *source, size_t length) {
+    Reader reader; reader_init(&reader, source, length, 16 * 1024 * 1024);
+    Ast *form = reader_one(&reader);
+    Compiler c = {.rt = rt};
+    Value result = form ? datum(&c, form) : 0;
+    if (reader.error) { rt_error(rt, reader.error); result = 0; }
+    reader_destroy(&reader); return result;
+}
+
+/* Eval values retain the namespace where they were obtained. */
+Value rt_evaluator(Runtime *rt, uint32_t space) {
+    for (size_t i = 0; i < rt->constant_count; i++) {
+        Value v = rt->constants[i];
+        if (!rt_kind(v, K_CLOSURE)) continue;
+        uint32_t id; memcpy(&id, object_bytes(v), sizeof(id));
+        Function *fn = rt->functions[id];
+        if (fn->evaluator && fn->namespace == space) return v;
+    }
+    uint32_t id = new_function(rt);
+    if (id == UINT32_MAX) return 0;
+    Function *fn = rt->functions[id];
+    fn->namespace = space; fn->evaluator = true;
+    fn->arity = fn->locals = fn->locals_capacity = 1;
+    fn->boxed = calloc(1, sizeof(bool));
+    if (!fn->boxed) { rt_error(rt, "out of host memory"); return 0; }
+    Compiler c = {.rt = rt, .fn = fn};
+    if (!constant(&c, ((Value)B_EVAL_IN_NAMESPACE << 8) | TAG_BUILTIN) ||
+        !constant(&c, value_int(space)) || emit(&c, OP_LOCAL, 0) == SIZE_MAX ||
+        emit(&c, OP_TAIL_CALL, 2) == SIZE_MAX) return 0;
+    Value value = rt_alloc(rt, K_CLOSURE, 0, sizeof(id));
+    if (!value) return 0;
+    memcpy(object_bytes(value), &id, sizeof(id));
+    return rt_constant(rt, value) == UINT32_MAX ? 0 : value;
 }

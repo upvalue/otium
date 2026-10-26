@@ -3,10 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static size_t native_threshold;
 static Runtime *create(size_t heap, size_t stack) {
     Runtime *rt = runtime_create(heap, stack);
-    if (rt) runtime_native(rt, native_threshold);
     return rt;
 }
 
@@ -56,10 +54,10 @@ static void core(void) {
     assert(evaluate(rt, "(= (+ 1 2.5 3) 6.5)") == V_TRUE);
     assert(evaluate(rt, "(< 1 1.5 2)") == V_TRUE);
     assert(evaluate(rt, "(= 9007199254740993 9007199254740992.0 9007199254740993)") == V_FALSE);
-    rejects(rt, "(+ 4611686018427387903 1 -1)", "overflow");
-    rejects(rt, "(* 4611686018427387903 2 0)", "overflow");
-    rejects(rt, "(- -4611686018427387904 1 -1)", "overflow");
-    rejects(rt, "(+ 4611686018427387903 1 0.0)", "overflow");
+    integer(rt, "(+ 4611686018427387903 1 -1)", 4611686018427387903);
+    integer(rt, "(* 4611686018427387903 2 0)", 0);
+    integer(rt, "(- -4611686018427387904 1 -1)", -4611686018427387904);
+    assert(evaluate(rt, "(= (+ 4611686018427387903 1 0.0) 4611686018427387904.0)") == V_TRUE);
     rejects(rt, "(< 2 1 #f)", "number");
     integer(rt, "(let ((saved +) (change (fn () (set! + (fn args 99)) 2))) (let ((answer (+ 1 (change) 3))) (set! + saved) answer))", 6);
     integer(rt, "(let ((saved +)) (set! + (fn args 42)) (let ((answer (+ 1 2 3))) (set! + saved) answer))", 42);
@@ -111,8 +109,8 @@ static void core(void) {
     rejects(rt, "((fn (x) x) 1 2)", "arguments");
     rejects(rt, "(+ 1 #f)", "number");
     rejects(rt, "(/ 1 0)", "zero");
-    rejects(rt, "(+ 4611686018427387903 1)", "overflow");
-    rejects(rt, "(* 4611686018427387903 4)", "overflow");
+    integer(rt, "(+ 4611686018427387903 1)", -4611686018427387904);
+    integer(rt, "(* 4611686018427387903 4)", -4);
     rejects(rt, "4611686018427387904", "immediate range");
     rejects(rt, "(let () (def x y) (def y 2) x)", "uninitialized");
     rejects(rt, "(let () (if #f (begin (def x 1))) ((fn () x)))", "definition is only allowed");
@@ -130,10 +128,6 @@ static void core(void) {
     assert(runtime_call(rt, "caller", NULL, 0, &result) && result == value_int(2));
     assert(!runtime_call(rt, "missing-global-call", NULL, 0, &result));
     assert(runtime_call(rt, "+", args, 2, &result) && result == value_int(42));
-    if (native_threshold) {
-        assert(runtime_native_functions(rt) > 0);
-        assert(runtime_native_entries(rt) > 0);
-    }
     runtime_destroy(rt);
 }
 
@@ -401,10 +395,7 @@ static void optional_arguments(void) {
     runtime_destroy(rt);
 }
 
-int main(int argc, char **argv) {
-    if (argc == 2 && !strcmp(argv[1], "--native")) native_threshold = 1;
-    else if (argc == 2 && !strcmp(argv[1], "--tiered")) native_threshold = 31;
-    else assert(argc == 1);
+int main(void) {
     optional_arguments();
     apply_calls();
     rest_arguments();

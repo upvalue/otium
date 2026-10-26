@@ -39,14 +39,13 @@ static void rejects(Runtime *rt, const char *source, const char *message) {
 }
 
 int main(int argc, char **argv) {
-    bool native = false, sanitize = false;
+    bool sanitize = false;
     for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "--native")) native = true;
-        else if (!strcmp(argv[i], "--sanitize")) sanitize = true;
+        if (!strcmp(argv[i], "--sanitize")) sanitize = true;
         else abort();
     }
     Runtime *rt = runtime_create(128 * 1024, 4096); assert(rt);
-    runtime_native(rt, native ? 1 : 0);
+
     char source[2048];
     const char *suffix = sanitize ? "_sanitize" : "";
     snprintf(source, sizeof(source),
@@ -173,10 +172,9 @@ int main(int argc, char **argv) {
     assert(runtime_call(rt, "byte", &argument, 1, &result) && result == argument);
     integer(rt, "(ffi/allocation-count)", 0);
     assert(runtime_collections(rt) > 10);
-    if (native) assert(runtime_native_entries(rt) > 0);
     runtime_destroy(rt);
     rt = runtime_create(8192, 256); assert(rt);
-    runtime_native(rt, native ? 1 : 0);
+
     snprintf(source, sizeof(source), "(def lib (ffi/open-library '(\"./ffi_fixture%s.so\"))) "
         "(def text (ffi/bind lib \"echo_utf8\" '(utf8) 'utf8 #t))", suffix);
     eval(rt, source);
@@ -185,12 +183,79 @@ int main(int argc, char **argv) {
     assert(runtime_collections(rt) > 10);
     runtime_destroy(rt);
     rt = runtime_create(128, 64); assert(rt);
-    runtime_native(rt, native ? 1 : 0);
+
     const char *exhaustion = "(ffi/alloc 'u8 5)";
     assert(!runtime_eval(rt, exhaustion, strlen(exhaustion), &result));
     assert(strstr(runtime_error(rt), "heap exhausted"));
     assert(runtime_call(rt, "ffi/allocation-count", NULL, 0, &result) && result == value_int(0));
     assert(runtime_call(rt, "ffi/allocation-bytes", NULL, 0, &result) && result == value_int(0));
+    runtime_destroy(rt);
+    rt = runtime_create(4 * 1024 * 1024, 256 * 1024); assert(rt);
+    assert(runtime_load_core(rt, "../lib"));
+    runtime_gc_stress(rt, true);
+    FILE *bulk = fopen("../tests/ffi/bulk.ot", "rb"); assert(bulk);
+    assert(!fseek(bulk, 0, SEEK_END)); long length = ftell(bulk); assert(length >= 0);
+    rewind(bulk); char *contents = malloc((size_t)length + 1); assert(contents);
+    assert(fread(contents, 1, (size_t)length, bulk) == (size_t)length);
+    fclose(bulk); contents[length] = 0; eval(rt, contents); free(contents);
+    eval(rt, "(def overlap (ffi/alloc 'u8 6)) (ffi/write-bytes! overlap #u8(1 2 3 4 5 6))"
+        "(ffi/copy! (ffi/view overlap 1 5) overlap 5)");
+    string(rt, "(str (ffi/read-bytes overlap 6))", "#u8(1 1 2 3 4 5)");
+    eval(rt, "(ffi/copy! overlap (ffi/view overlap 1 5) 5)");
+    string(rt, "(str (ffi/read-bytes overlap 6))", "#u8(1 2 3 4 5 5)");
+    eval(rt, "(def detached (ffi/read-bytes overlap 6)) (ffi/write-bytes! overlap #u8(9))");
+    integer(rt, "(bytevector-u8-ref detached 0)", 1);
+    rejects(rt, "(ffi/copy! overlap (ffi/view overlap 0 2) 3)", "bounds");
+    rejects(rt, "(ffi/copy! (ffi/view overlap 0 2) overlap 3)", "bounds");
+    eval(rt, "(ffi/free! overlap)");
+    rejects(rt, "(ffi/copy! overlap overlap 0)", "released");
+    eval(rt, "(def spec (list 'array 'double 2))"
+        "(def fields (list (list 'tag 'u8) (list 'values spec)))"
+        "(def Layout (ffi/define-struct! 'Layout fields))"
+        "(set-car! (cdr spec) 'u8) (set-car! (car fields) 'changed)");
+    integer(rt, "(ffi/sizeof Layout)", 24);
+    integer(rt, "(ffi/alignof Layout)", 8);
+    integer(rt, "(ffi/offset-of Layout '(values 1))", 16);
+    eval(rt, "(def saved-layout Layout)"
+        "(def Container (ffi/define-struct! 'Container (list (list 'items (list 'array Layout 2)))))"
+        "(set! Layout (ffi/define-struct! 'Layout '((tag u8))))"
+        "(def aggregate (ffi/alloc Container 1))"
+        "(ffi/field-set! aggregate Container '(items 1 values 1) 3.5)");
+    integer(rt, "(ffi/sizeof Container)", 48);
+    assert(eval(rt, "(= (ffi/field-ref aggregate Container '(items 1 values 1)) 3.5)") == V_TRUE);
+    eval(rt, "(def aggregate-view (ffi/field-view aggregate Container '(items 1)))");
+    assert(eval(rt, "(= (ffi/field-ref aggregate-view saved-layout '(values 1)) 3.5)") == V_TRUE);
+    eval(rt, "(def Union (ffi/define-union! 'Union '((tag u8) (value double))))");
+    integer(rt, "(ffi/sizeof Union)", 8);
+    integer(rt, "(ffi/offset-of Union '(value))", 0);
+    eval(rt, "(ffi/free! aggregate)");
+    rejects(rt, "(ffi/field-ref aggregate-view saved-layout '(tag))", "released");
+    rejects(rt, "(ffi/define-struct! 'Duplicate '((a u8) (a double)))", "duplicate");
+    rejects(rt, "(ffi/offset-of Container '(items 2))", "bounds");
+    integer(rt, "(ffi/allocation-count)", 0);
+    runtime_destroy(rt);
+    rt = runtime_create(4 * 1024 * 1024, 256 * 1024); assert(rt);
+    assert(runtime_load_core(rt, "../lib")); runtime_gc_stress(rt, true);
+    snprintf(source, sizeof(source), "(def aggregate-fixture \"./ffi_fixture%s.so\")", suffix);
+    eval(rt, source);
+    FILE *aggregates = fopen("test_aggregate.ot", "rb"); assert(aggregates);
+    assert(!fseek(aggregates, 0, SEEK_END)); length = ftell(aggregates); assert(length >= 0);
+    rewind(aggregates); contents = malloc((size_t)length + 1); assert(contents);
+    assert(fread(contents, 1, (size_t)length, aggregates) == (size_t)length);
+    fclose(aggregates); contents[length] = 0; eval(rt, contents); free(contents);
+    size_t prepared = runtime_foreign_signatures(rt);
+    eval(rt, "(def SamePoint (ffi/define-struct! 'OtherName '((a double) (b double))))"
+        "(def same-translate (ffi/bind aggregate-lib \"translate\" (list SamePoint 'double 'double) SamePoint #t))");
+    assert(runtime_foreign_signatures(rt) == prepared);
+    /* Only prepare these signatures: the fixture has a different C type. */
+    eval(rt, "(def DifferentPoint (ffi/define-struct! 'Point '((a u64) (b double))))"
+        "(def unused-binding (ffi/bind aggregate-lib \"translate\" (list DifferentPoint 'double 'double) DifferentPoint #t))");
+    assert(runtime_foreign_signatures(rt) == prepared + 1);
+    eval(rt, "(dotimes (i 40)"
+        " (let ((layout (ffi/define-struct! 'Temporary (list (list 'data (list 'array 'u8 (+ i 1)))))))"
+        "   (ffi/bind aggregate-lib \"translate\" (list layout) layout #t)))");
+    eval(rt, "(+ 20 22)");
+    assert(runtime_foreign_signatures(rt) <= prepared + 6);
     runtime_destroy(rt);
     puts("foreign call tests passed");
 }

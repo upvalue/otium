@@ -212,3 +212,143 @@ Compiler planning holds all managed constants in a separate precise root array, 
 Focused GC-stress tests pass in VM/eager/tiered modes and with GCC/Clang-generated code; host/generated ASan+UBSan pass with detect_leaks=0 due the known environment limitation. Tests cover static sharing, nested templates, mutation/evaluation order, protected constructors, cycle/type errors, tail recursion, compile-time exhaustion and exhaustion while copying a splice, with successful recovery. An 8,000-element dynamic template passes with a 256 KiB C stack. New Chez differential suite: 38 programs/11 errors, plus a direct core-constructor-shadowing check. Existing core 74/50, module 15/18 and FFI 12/6 differential suites pass, along with native scalar/numeric, bounded calls, reload, modules, FFI, scope-root and slot-reuse checks. LLVM development tools absent.
 
 DESIGN.md records representation, semantics, resource limits and verification. This provides data templates needed for macros; defmacro, syntax quotation/hygienic expansion, conditions/reflection, broader library support and remaining recursive-call performance gaps stay open. Goal remains active.
+
+**2026-10-26T15:03:37Z**
+
+New goal prioritizes core language/public test compliance, libffi, and temporary removal of generated C execution. Replaced FFI C adapters with cached libffi interfaces, typed argument storage and widened integer result handling. FFI/reload tests, 12 differential programs/6 errors and ASan/UBSan pass; VM FFI also passes with nonexistent PATH/compiler. Added public-harness compliance runner: initial 3 pass/46 fail, with library bootstrap and launcher gaps; this is an inventory, not a complete goal gate. Native tier still present and is next for removal. Original C implementation/history remain uninspected.
+
+**2026-10-26T15:07:15Z**
+
+Removed generated-C backend and compiler subprocess helper, native runtime/function metadata, CLI modes, metrics, and native-specific test targets. Bytecode compiler/VM retained; differential and benchmark drivers are VM-only. VM semantic/root/reload/module tests, all four differential suites (74/50, 15/18, 12/6, 38/11 programs/errors), and runtime/FFI/reload ASan+UBSan pass. Runtime/FFI tests pass without PATH/compiler; executable imports libffi and no process-launch APIs. Broad core compliance remains incomplete; expansion/bootstrap are next. Original C/history remain uninspected.
+
+**2026-10-26T15:12:08Z**
+
+Implemented initial defmacro closures and compiler expansion with lexical shadowing, namespace lookup, variadic arguments, reload semantics, rooted argument data, copied syntax arena, cycle detection and bounded expansion. Forced-GC macro tests and ASan/UBSan pass; 12 Chez programs/3 errors agree, including empty macro bodies. Runtime/module/quasiquote regression tests pass. Macro-generated local definition predeclaration, expansion APIs, gensym/hygiene/syntax quotation and full core bootstrap remain next; goal remains active. No original C/history inspected.
+
+**2026-10-26T15:24:32Z**
+
+Integrated the shared Otium expander into the CLI instead of duplicating body/hygiene logic in C. Added documented adapters, nested rooted VM invocation, cond, symbol identity preservation, gensym, basic type/string primitives, list length, and Otium macroexpand wrappers. Shared tests cover macro-produced locals, begin splicing, syntax quotation, reserved names, capture avoidance and recovery; forced-GC and sanitizer checks pass. Macro differential now 18 programs/3 errors; other differential suites pass. Public array equality passes 17 checks; inventory advances to 4 pass/45 fail. Full core library loading and its missing runtime dependencies remain next. No original C/history inspected.
+
+**2026-10-26T15:37:49Z**
+
+Added condition hierarchy registry, condition helpers, explicit error values/tables/data, type-pred wrapper, and VM try/catch/unmatched rethrow. C stack does not represent protected frames: 10,000 nested protected calls pass at 256 KiB stack. Forced-GC and ASan/UBSan checks pass; 17 condition programs/3 errors agree with Chez, existing 74/50 language differential and runtime/macro/module/quasiquote/FFI regressions pass. Corrected error? to any typed table and nested string printing. Core loading now reaches defgeneric; full generics/classes, signal handlers/restarts/cleanup and other core work remain. Public inventory still 4/45. No original C/history inspected.
+
+**2026-10-26T15:57:31Z**
+
+Full shared otium.core now bootstraps in its namespace, including otium.loop. Added built-in class descriptors and fixed-arity primary generic methods with specificity/ambiguity checks, replacement, preserved identity and detached introspection. Macro wrappers preserve expansion through aliases. Added datum read-string, Otium-derived primitive helpers and basic printing, plus E0301 for closure arity. Fixed unbound core placeholders leaking across namespaces and defonce local shadowing. Forced-GC/ASan+UBSan and 10/4 generic differential pass; existing differential suites pass. Optional public suite reports 52 checks; inventory 5 pass/44 fail. eval-only expected-error assertions remain weak until eval exists. Full classes/around/next, condition recovery, ports/reflection and remaining core coverage stay open. No original C/history inspected.
+
+**2026-10-26T16:13:42Z**
+
+Implemented nested eval with preserved VM roots and handlers, shared expansion, namespace-retaining evaluator values, and opaque array/table/procedure syntax. Deferred code reclamation to idle outer boundaries so failed compilation preserves macro side effects and expanded begin forms retain their constants. Shared expander diagnostic codes reach conditions. Forced-GC and ASan/UBSan eval tests pass; public modules 16 checks and syntax quote 18 checks now pass. Public inventory 7 pass/42 fail. Long-running eval code reclamation, full classes, dynamic parameters, conditions, ports, reflection and remaining core primitives remain open. No original C implementation/history inspected.
+
+**2026-10-26T16:21:09Z**
+
+Implemented documented numeric primitives, bounded bitwise operations and conversions. Changed integer arithmetic to specified payload-width wrapping with unsigned operations; conversion and left-shift overflow remain errors. Fixed integer? for integral floats, unary division representation and float printing/number->string. Public arithmetic passes 198 checks, bounded bitwise 7; inventory 9 pass/40 fail. Numeric differential 15 programs/9 errors, sanitizer boundary checks and 10,000 float round trips pass, as do runtime/eval/no-compiler FFI regressions. Full core compliance remains open; strings now block sequence progress. No original C/history inspected.
+
+**2026-10-26T16:30:12Z**
+
+Added UTF-8 substring clamping and lookup, string ordering/formatting/parsing, character conversions/classification, symbol/name coercion, and managed buffers with geometric storage growth and snapshot copies. Derived split/join/trim/replace/case/string construction in Otium, reusing shared search. Fixed string/list membership, keyword-call defaults, copy nil and variadic display/write. Public sequence, printing, JSON, loops, reader datums and OTcl now pass: inventory 15 pass/34 fail. Forced-GC and sanitizer buffer tests pass, including 500 appends with a retained snapshot; existing runtime/expander/eval/no-compiler FFI and language/quasiquote differential checks pass. Full runtime compliance remains open.
+
+**2026-10-26T16:36:48Z**
+
+Added type, EOF singleton/predicate, buffer?, active-namespace reflection and binding documentation. Ordinary redefinition replaces docs; defonce skips preserve them; failed initializers leave old docs intact. Added variadic put! for arrays/tables exposed by reader-values. Public reflection/bootstrap/library modules and 65-check character suite now pass: inventory 19 pass/30 fail. Reader-values advances to missing handler-bind. Forced-GC and sanitizer reflection tests plus runtime/module/reload/no-compiler FFI regressions pass. C macro type remains :macro per spec, distinct from Chez current :native. Full core/class/parameter/condition/port work remains active.
+
+**2026-10-26T16:44:28Z**
+
+Implemented fresh named dynamic params, top-level defparam docs/type/printing and sequential with-params. Added precise roots for active bindings and restoration on normal exit, try unwind, nested VM/eval failure and host-call failure. Expander public suite passes 74 checks. Forced-GC/ASan+UBSan tests pass, as do 4,000 nested scopes on 256 KiB C stack and runtime/condition/eval/no-compiler FFI regressions. Shared param semantics agree with Chez on 14 programs/9 errors. Zero-argument-only calls and :param follow the C spec rather than Chez setters/:function. Restart/quit/cleanup integration remains pending with those features.
+
+**2026-10-26T16:55:55Z**
+
+Implemented handler-bind and signal with all initializers before install, innermost-last traversal, visible-chain masking, declining handlers, and replacement errors. Explicit and VM errors are signaled before unwinding and not signaled again by unmatched try rethrows. Nested primitive callbacks preserve masks. Reader-values passes 64 checks; first 16 public condition checks pass, then remaining restarts/cleanup/exit work is still open. Inventory 21 pass/28 fail. Forced-GC/sanitizer and 14-program/5-error Chez differential pass; 4,000 handlers and catchable recursive-signal limit verified on 256 KiB C stack. Param/condition/eval/no-compiler FFI regressions pass.
+
+**2026-10-26T17:04:33Z**
+
+Implemented inline bytevectors, collection integration, Bytevector dispatch and strict UTF-8 conversion. Public bytevectors: 63 checks pass; inventory 22 pass / 27 fail. Forced-collection ASan/UBSan checks pass (leak checking disabled); Chez differential 10 programs / 9 errors pass. Handler, string, runtime and compiler-free libffi regression checks pass. Ports and remaining core compliance still open. LLVM tools unavailable for optional gc-lint.
+
+**2026-10-26T17:07:44Z**
+
+Added ordered --load preloads, --path alias, and incremental REPL input with syntax/error recovery and no replay of completed forms. CLI and reader ASan/UBSan checks pass (leak checks disabled). Public inventory 23 pass / 26 fail; reader REPL now passes. Strengthened cleanup-error fixture to reject unbound-operation errors masquerading as cleanup; Chez passes, prototype correctly fails. Common conditions now reach missing restart-case instead of CLI usage rejection.
+
+**2026-10-26T17:13:29Z**
+
+Added VM restart scopes, managed restart introspection and nonlocal invocation through handlers/nested eval. First 37 public condition checks pass; full conditions remain incomplete because cleanup/exit are missing. Forced-GC and ASan/UBSan pass (leak checking disabled); Chez differential 17 programs / 8 errors; 4,000 nested scopes transfer on 256 KiB C stack. Handler/eval/runtime/compiler-free libffi regressions pass. Inventory remains 23 pass / 26 fail. Next required work: unwind-protect/cleanup on all transfers.
+
+**2026-10-26T17:20:27Z**
+
+Added VM cleanup scopes for unwind-protect/defer and call-with-cleanup, plus uncatchable exit/quit and embedding exit-status API. Public common conditions: 64 checks; exit/quit/cleanup-error pass. Inventory 27 pass / 22 fail. Forced-GC and ASan/UBSan cleanup checks pass; 4,000 nested scopes unwind on 256 KiB stack. Chez agreement 14 programs / 8 errors; explicitly verified 2 differences where specs/io.md preserves pending resource transfers but Chez replaces them. Interrupts and ports remain open. Compiler-free libffi and restart/handler/eval/runtime regressions pass.
+
+**2026-10-26T17:24:30Z**
+
+Added host-owned interrupt flag API and CLI SIGINT delivery at VM/allocation/evaluation safe points. Interrupts bypass handlers/catches, run cleanup with resource outcome :quit, and return CLI status 130 unless replaced by cleanup. Public interrupt test and six additional process scenarios pass; host API recovery/detachment/pending-call checks pass. ASan/UBSan interrupt/CLI checks pass (leak checks disabled). Cleanup/restart/compiler-free libffi regressions pass. Blocking-port interrupt integration remains open.
+
+**2026-10-26T17:26:39Z**
+
+Implemented current-jiffy, jiffies-per-second and current-second using monotonic/realtime clocks. Shared otium.time helper works. All 136 common library checks pass; inventory 29 pass / 20 fail. Forced-GC and ASan/UBSan clock bracketing checks pass (leak checking disabled); Chez differential 3 programs / 3 errors pass. Ports, classes/records and reader token support remain open.
+
+**2026-10-26T17:35:13Z**
+
+Implemented managed memory ports, byte/UTF-8 reads and scans, output snapshots, current-port params and routed printing. 68 applicable public port checks pass with forced GC and ASan/UBSan (leak checking disabled), plus snapshot/growth/closed/decode/allocation-free read checks. Chez differential 10 programs / 7 errors passes with stateful reads explicitly sequenced. Standard stream raw output/lookahead/blocking SIGINT checks pass; interrupt and compiler-free libffi regressions pass. Full ports still missing read, file/custom ports and open-port tracking. Inventory remains 29 pass / 20 fail.
+
+**2026-10-26T17:41:19Z**
+
+Added streaming read for memory/standard ports using a boundary scanner and existing syntax reader. All 174 public port-datum checks pass; inventory 30 pass / 19 fail. Forced-GC/ASan/UBSan cover 52 negative fixtures, adjacent datums, UTF-8 errors and a 5,000-element list (leak checks disabled). Open-pipe tests verify no wait for EOF or consumption of the next byte. Port differential: 14 programs / 11 errors agree with Chez. Broad ports now reach missing make-input-port; file/custom ports remain open.
+
+**2026-10-26T17:51:28Z**
+
+Added buffered custom input/output ports, partial callback handling and open-port registry. Rooted port/payload slots survive callback GC and nested VM entry; failed flush retries preserve confirmed write offset. All 89 public port checks pass under forced GC/ASan/UBSan (leak checking disabled), including extra restart/reentry/count/registry/growth checks. Chez port differential 19 programs / 11 errors passes. Inventory 31 pass / 18 fail. File ports and shutdown flushing of registered outputs remain open.
+
+**2026-10-26T17:55:32Z**
+
+Added explicit idle-host runtime_flush_ports and CLI flushing at normal completion/exit/quit. Successful flushing preserves exit status; failures are surfaced and partial writes remain retryable. Rooted registry snapshots tolerate callback closes; newly opened ports require a later pass. Forced-GC and ASan/UBSan host/CLI tests pass (leak checks disabled). Port differential remains 19 programs / 11 errors. Public inventory 31 pass / 18 fail; file-based exit flush still awaits file ports and script arguments.
+
+**2026-10-26T18:02:43Z**
+
+Verified script metadata and CLI -- arguments. Added forced-GC ownership/failed-replacement tests and CLI argument/preload coverage; normal and ASan/UBSan runs pass (leak checking disabled). Public inventory remains 31 pass / 18 fail; file cases now reach missing filesystem/file-port operations, and format corpus reaches missing otium.reader. Goal remains incomplete.
+
+**2026-10-26T18:05:34Z**
+
+Added file ports with buffering, append/exclusive/truncate modes, binary aliases, owned-resource cleanup and structured file errors. Forced-GC and ASan/UBSan file tests pass, including /dev/full; existing port/shutdown regressions pass. Public inventory improves to 34 pass / 15 fail. libc backend is provisional: specified embedding I/O callbacks and managed buffering remain unfinished, as do filesystem helpers and language gaps.
+
+**2026-10-26T18:08:06Z**
+
+Added filesystem operations, sorted listings, metadata, symlink predicate and current-directory. Public file-port fixture (32 checks) plus symlink/error/NUL checks pass under forced GC and ASan/UBSan (leak checking disabled). Runtime/libffi pass without a compiler on PATH. Public inventory now 36 pass / 13 fail. Remaining failures are class/record and reader dependencies; embedding I/O still unfinished.
+
+**2026-10-26T18:15:48Z**
+
+Added user class declarations, construction, slot access/assignment, accessors, copying, stable identity and lazy layout migration with rollback/retry. Initial public class checks plus migration cases pass under forced GC and ASan/UBSan; 8 programs/8 errors agree with Chez. Public inventory now 40 pass / 9 fail; matching/resources/resource exit/blocking-input interrupt newly pass. Next/around methods, property lifecycle, records, reader tooling, class caches and embedding I/O remain unfinished.
+
+**2026-10-26T18:19:59Z**
+
+Implemented lexical next methods, around methods, immutable escaped method snapshots, qualifier-aware removal/replacement/introspection and generic reset. All 151 public class checks pass under forced GC and ASan/UBSan; extra snapshot and 2000-tail-call tests pass. Chez comparisons: 8 method programs/7 errors plus existing 10 generic programs/4 errors. Inventory now 41 pass / 8 fail: five stop at record support, three at reader module. Goal remains incomplete.
+
+**2026-10-26T18:23:14Z**
+
+Added inline managed records and descriptor primitives; shared Otium declaration registry handles namespaces/reloads. All 45 public record checks and retention/identity/immutability tests pass under forced GC and ASan/UBSan; 6 programs/8 errors agree with Chez. Class/method regressions pass. Inventory now 43 pass / 6 fail; remaining failures reach class-properties or reader module. Goal remains incomplete.
+
+**2026-10-26T18:27:03Z**
+
+Implemented property construction, state mounting and updates with migration hooks seeing supplied properties before execution; rollback preserves old properties/state on failure. Public UI 136 checks and extra lifecycle tests pass under forced GC and ASan/UBSan. Six programs/five errors agree with Chez, including stale description access behavior. Inventory 46 pass / 3 fail; reader tooling/formatting remain, plus class caches and embedding I/O requirements.
+
+**2026-10-26T18:31:14Z**
+
+Added otium.reader/tokens using datum-reader validation and raw spans with Unicode positions/CRLF gaps. All 120 public checks plus GC retention/2000-token tests pass normally and under ASan/UBSan; exact fixture output agrees with Chez. Default inventory 48 pass / 1 fail: formatter corpus exhausts fixed 1 MiB semispace. Unchanged corpus passes with --heap=16777216 (116 files, 0 failures, 382 collections, max 118 frames). Next: CLI memory policy; broader caches/embedding I/O remain unfinished.
+
+**2026-10-26T18:36:08Z**
+
+Added bounded heap growth: CLI starts 1 MiB/space, max 64 MiB; explicit --heap and embedding heaps remain fixed unless opted in. Growth preserves roots/identity and recovers after exhaustion. New growth+CLI tests and ASan/UBSan pass. Full prototype test target passes after fixing namespace leak test startup-count assumption. All 49 inventoried public groups pass by default; corpus 116 files/0 failures, final semispace 16 MiB. Compiler-free runtime/libffi tests pass. Overall goal still active pending broader FFI/embedding/performance coverage audit.
+
+**2026-10-26T18:45:41Z**
+
+Shared otium.ffi now loads over the scalar libffi backend. Added copy!, read-bytes, write-bytes! and exact UTF-8 reads. Public bulk suite: 23 checks pass, including forced collection and ASan/UBSan via test-foreign; extra overlap, detached-read and lifetime checks pass. Core inventory remains 49/49. Public common FFI now reaches missing %layout; aggregates, callbacks and detailed error metadata remain unfinished. gc-lint unavailable (no llvm-config).
+
+**2026-10-26T18:47:25Z**
+
+Added opaque traced aggregate layout snapshots, with detached descriptions. Layout calculations stay in shared Otium. First 93 public common FFI checks pass through aggregate memory; complete suite stops at first by-value struct binding. Forced-GC and ASan/UBSan layout/foreign regressions pass. Aggregate ABI lowering and callbacks remain.
+
+**2026-10-26T18:52:15Z**
+
+By-value structs and nested arrays now use libffi type trees, with layout verification and structural cache keys. Arguments are copied; owned result storage is prepared before native execution. Public common FFI prefix: 156 passing checks. Dedicated aggregate, cache/reclamation, forced-GC and ASan/UBSan regressions pass; core remains 49/49 and foreign reload passes. Full common suite now fails on missing call-error library metadata. Union ABI classification and callbacks remain unfinished.
+
+**2026-10-26T18:55:33Z**
+
+FFI bindings now retain selected library paths, symbols and copied type descriptions. Call failures report library/symbol, argument index and expected type; result/arity failures distinguish absent fields. Binding publication also fixes a possible stale list link across GC. 166 public common checks pass before union calls. Forced-GC, ASan/UBSan aggregate/error and bulk regressions plus foreign reload pass. Unions, callbacks, ownership and remaining error metadata audit are unfinished.

@@ -38,7 +38,7 @@ def main():
         (folder / 'nested').mkdir()
         (folder / 'nested/worker.ot').write_text('(ns nested.worker) (def value 42)')
         paths = ['-L', str(ROOT / 'tests/modules/first'), '-L', str(ROOT / 'tests/modules/second'), '-L', directory]
-        commands = [[str(ROOT / 'prototype/otium-proto')], [str(ROOT / 'prototype/otium-proto'), '--native=1'],
+        commands = [[str(ROOT / 'prototype/otium-proto')],
                     [str(ROOT / 'otium'), '--runtime=chez', '--no-project']]
         entry = folder / 'entry.ot'
         for source in CASES + INVALID:

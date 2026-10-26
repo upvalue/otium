@@ -16,12 +16,11 @@ static void rejects(Runtime *rt, const char *source) {
     assert(!runtime_eval(rt, source, strlen(source), &result));
 }
 int main(void) {
-    const size_t modes[] = {0, 1, 31};
-    for (size_t mode = 0; mode < 3; mode++) {
+    {
         Runtime *rt = runtime_create(16384, 4096);
         assert(rt);
         runtime_gc_stress(rt, true);
-        runtime_native(rt, modes[mode]);
+
         assert(eval(rt, "(def hits 0) (defonce state \"saved state\" "
             "(begin (set! hits (+ hits 1)) [41]))") == V_NIL);
         assert(eval(rt, "(defonce state (error \"must not run\"))") == V_NIL);
@@ -35,18 +34,16 @@ int main(void) {
 
         rt = runtime_create(16384, 4096);
         assert(rt);
-        runtime_gc_stress(rt, true); runtime_native(rt, modes[mode]);
+        runtime_gc_stress(rt, true);
         eval(rt, "(defonce state [0]) (def alias state) (def (tick) (put! state 0 (+ (state 0) 1)) (state 0)) (def old tick)");
         assert(eval(rt, "(tick)") == value_int(1));
         eval(rt, "(defonce state [100]) (def (tick) (put! state 0 (+ (state 0) 10)) (state 0))");
         assert(eval(rt, "(tick)") == value_int(11));
         assert(eval(rt, "(old)") == value_int(12));
         assert(eval(rt, "(eq? alias state)") == V_TRUE);
-        size_t compiled = runtime_native_functions(rt);
         for (size_t i = 0; i < 1000; i++) {
             assert(eval(rt, "(begin (defonce state (fn (duplicate duplicate) duplicate)) "
                 "(begin (defonce state (missing-function)) (defonce state 2 3)))") == V_NIL);
-            assert(runtime_native_functions(rt) == compiled);
             assert(rt->function_count < 16 && rt->constant_count < 32);
         }
         assert(eval(rt, "(state 0)") == value_int(12));
@@ -64,7 +61,7 @@ int main(void) {
         for (size_t i = 0; i < sizeof(bad)/sizeof(*bad); i++) rejects(rt, bad[i]);
         assert(eval(rt, "(begin (begin) (begin 40 42))") == value_int(42));
         assert(eval(rt, "(begin)") == V_NIL);
-        printf("defonce/reload tests passed: threshold=%zu\n", modes[mode]);
+        printf("defonce/reload tests passed\n");
         runtime_destroy(rt);
     }
 }

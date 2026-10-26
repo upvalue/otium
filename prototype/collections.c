@@ -42,6 +42,11 @@ static bool index_of(Value key, size_t length, size_t *index) {
 
 static Value get(Runtime *rt, Value a, Value key, Value fallback) {
     if (a == V_NIL) return fallback;
+    if (rt_kind(a, K_BYTEVECTOR)) {
+        size_t index;
+        return index_of(key, rt_bytes_length(a), &index) ? value_int(rt_bytes_data(a)[index]) : fallback;
+    }
+    if (rt_kind(a, K_STRING)) return rt_string_get(a, key, fallback);
     if (rt_kind(a, K_TABLE)) return rt_table_get(rt, a, key, fallback);
     if (!rt_kind(a, K_ARRAY)) return fail(rt, "expected a collection or nil");
     size_t index;
@@ -51,8 +56,10 @@ static Value get(Runtime *rt, Value a, Value key, Value fallback) {
 Value rt_collection_call(Runtime *rt, size_t callable, size_t first, size_t count) {
     if (count < 1 || count > 2) return fail(rt, "array call needs an index and optional default");
     Value a = rt->stack[callable], b = rt->stack[first];
-    return rt_kind(a, K_KEYWORD) ? get(rt, b, a, count == 2 ? rt->stack[first + 1] : V_NIL)
-        : get(rt, a, b, count == 2 ? rt->stack[first + 1] : V_NIL);
+    Value fallback = count == 2 ? rt->stack[first + 1] : V_NIL;
+    if (rt_kind(a, K_KEYWORD)) return rt_kind(b, K_TABLE) ? rt_table_get(rt, b, a, fallback) : fallback;
+    if (rt_kind(a, K_ARRAY) && !value_is_int(b)) return fail(rt, "array index must be an integer");
+    return get(rt, a, b, fallback);
 }
 
 typedef struct { Value a, b; } Comparison;
@@ -134,20 +141,71 @@ Value rt_collection_builtin(Runtime *rt, unsigned id, size_t first, size_t count
         return a;
     }
     size_t min = id == B_GET || id == B_EQUAL || id == B_CONTAINS ? 2 : id == B_PUT_MUT ? 3 : 1;
-    size_t max = id == B_GET ? 3 : id == B_PUSH ? SIZE_MAX : min;
-    if (count < min || count > max) return fail(rt, "wrong number of collection arguments");
+    size_t max = id == B_GET ? 3 : id == B_PUSH || id == B_PUT_MUT ? SIZE_MAX : min;
+    if (count < min || count > max || (id == B_PUT_MUT && !(count % 2))) return fail(rt, "wrong number of collection arguments");
     Value a = rt->stack[first], b = count > 1 ? rt->stack[first + 1] : V_NIL;
+    if (id == B_COPY && rt_kind(a,K_INSTANCE)) return rt_instance_copy(rt,a);
+    if (id == B_COPY && a == V_NIL) return V_NIL;
+    if (id == B_CONTAINS && a == V_NIL) return V_FALSE;
+    if (id == B_CONTAINS && rt_kind(a, K_STRING)) {
+        if (!rt_kind(b, K_STRING)) return fail(rt, "expected substring");
+        size_t n, m; memcpy(&n, object_bytes(a), sizeof(n)); memcpy(&m, object_bytes(b), sizeof(m));
+        const char *s = (char *)object_bytes(a) + sizeof(n), *part = (char *)object_bytes(b) + sizeof(m);
+        if (m > n) return V_FALSE;
+        for (size_t i = 0; i <= n - m; i++) if (!memcmp(s + i, part, m)) return V_TRUE;
+        return V_FALSE;
+    }
+    if (id == B_CONTAINS && (a == V_EMPTY || rt_kind(a, K_PAIR))) {
+        Value slow = a, fast = a;
+        while (rt_kind(a, K_PAIR)) {
+            Value equal = rt_equal(rt, object_fields(a)[0], b, false);
+            if (equal != V_FALSE) return equal;
+            a = object_fields(a)[1];
+            if (rt_kind(slow, K_PAIR)) slow = object_fields(slow)[1];
+            for (unsigned i = 0; i < 2 && rt_kind(fast, K_PAIR); i++) fast = object_fields(fast)[1];
+            if (rt_kind(fast, K_PAIR) && fast == slow) return fail(rt, "cyclic list");
+        }
+        return a == V_EMPTY ? V_FALSE : fail(rt, "expected proper list");
+    }
     if (id == B_ARRAY_P) return rt_kind(a, K_ARRAY) ? V_TRUE : V_FALSE;
     if (id == B_EQUAL) return rt_equal(rt, a, b, false);
     if (id == B_GET) return get(rt, a, b, count == 3 ? rt->stack[first + 2] : V_NIL);
     if (id == B_LENGTH && (a == V_NIL || a == V_EMPTY)) return value_int(0);
+    if (id == B_LENGTH && rt_kind(a, K_BUFFER)) return value_int((intptr_t)((BufferInfo *)object_bytes(a))->characters);
+    if (id == B_LENGTH && rt_kind(a, K_STRING)) return rt_support_builtin(rt, B_STRING_LENGTH, first, count);
+    if (id == B_LENGTH && rt_kind(a, K_PAIR)) {
+        size_t length = 0; Value slow = a, fast = a;
+        while (rt_kind(a, K_PAIR)) {
+            length++; a = object_fields(a)[1];
+            if (rt_kind(slow, K_PAIR)) slow = object_fields(slow)[1];
+            for (unsigned i = 0; i < 2 && rt_kind(fast, K_PAIR); i++) fast = object_fields(fast)[1];
+            if (rt_kind(fast, K_PAIR) && fast == slow) return fail(rt, "length needs an acyclic list");
+        }
+        if (a != V_EMPTY) return fail(rt, "length needs a proper list");
+        return value_int((intptr_t)length);
+    }
+    if (rt_kind(a, K_BYTEVECTOR)) {
+        if (id == B_LENGTH) return value_int((intptr_t)rt_bytes_length(a));
+        if (id == B_COPY) return rt_bytes_builtin(rt, B_BYTES_COPY, first, count);
+        if (id == B_PUT_MUT) {
+            for (size_t i = 1; i < count; i += 2) {
+                size_t index; Value byte = rt->stack[first + i + 1];
+                if (!index_of(rt->stack[first + i], rt_bytes_length(a), &index)) return fail(rt, "bytevector index out of bounds");
+                if (!value_is_int(byte) || value_to_int(byte) < 0 || value_to_int(byte) > 255) return fail(rt, "expected byte");
+                rt_bytes_data(a)[index] = (unsigned char)value_to_int(byte);
+            }
+            return a;
+        }
+    }
     if (!rt_kind(a, K_ARRAY)) return fail(rt, "expected an array");
     switch (id) {
     case B_LENGTH: return value_int((intptr_t)info(a)->length);
     case B_PUT_MUT: {
-        size_t index;
-        if (!index_of(b, info(a)->length, &index)) return fail(rt, "array index out of range");
-        items(a)[index] = rt->stack[first + 2];
+        for (size_t i = 1; i < count; i += 2) {
+            size_t index;
+            if (!index_of(rt->stack[first + i], info(a)->length, &index)) return fail(rt, "array index out of bounds");
+            items(a)[index] = rt->stack[first + i + 1];
+        }
         return a;
     }
     case B_PUSH: {

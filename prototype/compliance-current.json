@@ -1,0 +1,311 @@
+{
+  "definitions": [
+    "tests/tests.py",
+    "tests/library/tests.py",
+    "tests/modules/tests.py",
+    "tests/reader/tests.py",
+    "tests/conditions/tests.py",
+    "tests/syntax-quote/tests.py"
+  ],
+  "results": [
+    {
+      "name": "optional parameters c",
+      "source": "tests/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "array equality c",
+      "source": "tests/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "expander c",
+      "source": "tests/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "classes c",
+      "source": "tests/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "records c",
+      "source": "tests/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "match c",
+      "source": "tests/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "ui c",
+      "source": "tests/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "ui calculator c",
+      "source": "tests/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "ui editing c",
+      "source": "tests/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "ui policy c",
+      "source": "tests/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "otcl c",
+      "source": "tests/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "format c",
+      "source": "tests/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "format corpus c",
+      "source": "tests/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library bootstrap c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library sequences c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library reflection c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library printing c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library arithmetic c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library bounded bitwise c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library json c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library chars c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library loops c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library bytevectors c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library resources c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library ports c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library modules c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library read-file c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "example reload c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library port files c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library port datum reader c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library port exit flush c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library write-file c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "library filesystem helpers c",
+      "source": "tests/library/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "modules c",
+      "source": "tests/modules/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "reader values c",
+      "source": "tests/reader/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "reader datums c",
+      "source": "tests/reader/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "reader module c",
+      "source": "tests/reader/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "reader errors c",
+      "source": "tests/reader/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "reader repl c",
+      "source": "tests/reader/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "reader tokens c",
+      "source": "tests/reader/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "conditions resource exit c",
+      "source": "tests/conditions/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "conditions c",
+      "source": "tests/conditions/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "conditions exit c",
+      "source": "tests/conditions/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "conditions quit c",
+      "source": "tests/conditions/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "conditions cleanup error c",
+      "source": "tests/conditions/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "conditions interrupt c",
+      "source": "tests/conditions/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "conditions blocking port interrupt c",
+      "source": "tests/conditions/tests.py",
+      "status": "pass",
+      "detail": ""
+    },
+    {
+      "name": "syntax quote c",
+      "source": "tests/syntax-quote/tests.py",
+      "status": "pass",
+      "detail": ""
+    }
+  ],
+  "counts": {
+    "pass": 49,
+    "fail": 0,
+    "skip": 0
+  }
+}

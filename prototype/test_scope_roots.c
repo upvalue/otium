@@ -18,11 +18,10 @@ int main(void) {
     char source[8192] = "(def (churn) ";
     for (size_t i = 0; i < 32; i++) strcat(source, scope);
     strcat(source, "42) (churn)");
-    const size_t thresholds[] = {0, 1, 31};
-    for (size_t mode = 0; mode < 3; mode++) {
+    {
         Runtime *rt = runtime_create(16384, 8192);
         assert(rt);
-        runtime_native(rt, thresholds[mode]);
+
         assert(evaluate(rt, source) == value_int(42));
         runtime_gc_stress(rt, true);
         assert(evaluate(rt, "(churn)") == value_int(42));
@@ -39,8 +38,8 @@ int main(void) {
         assert(evaluate(rt,
             "(let ((f (let loop ((n 40)) (if (= n 0) (fn () 42) (loop (- n 1)))))) "
             "(churn) (f))") == value_int(42));
-        printf("scope root tests passed: threshold=%zu collections=%zu\n",
-            thresholds[mode], runtime_collections(rt));
+        printf("scope root tests passed: collections=%zu\n",
+            runtime_collections(rt));
         runtime_destroy(rt);
     }
 }

@@ -78,7 +78,7 @@ typedef struct Roots Roots;
 struct Roots { Roots *previous; Value *slots; size_t count; };
 typedef struct {
     unsigned char *space[2];
-    size_t capacity, used, collections, copied_bytes;
+    size_t capacity, limit, used, collections, copied_bytes;
     unsigned active;
     uint32_t next_identity;
     Roots *roots;
@@ -86,14 +86,14 @@ typedef struct {
 
 bool heap_init(Heap *h, size_t semispace_bytes);
 void heap_destroy(Heap *h);
+bool heap_set_limit(Heap *h, size_t semispace_bytes);
 void roots_push(Heap *h, Roots *r, Value *slots, size_t count);
 void roots_pop(Heap *h, Roots *r);
 void heap_collect(Heap *h);
 /* Zero means exhaustion. Every live managed value must be rooted across this call.
  * Fields are traced; trailing bytes are opaque. Returned fields start as nil. */
 Value heap_alloc(Heap *h, uint32_t kind, uint32_t fields, size_t bytes);
-/* Shared with generated native code so field access does not cross a shared
- * library boundary. The header is internal to this prototype's value ABI. */
+/* Inline field access for runtime object operations. */
 typedef struct {
     size_t size;
     uint32_t fields, kind;

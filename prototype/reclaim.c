@@ -4,7 +4,6 @@
 
 void rt_free_function(Function *fn) {
     if (!fn) return;
-    rt_native_close(fn);
     free(fn->code); free(fn->boxed); free(fn->captures); free(fn);
 }
 
@@ -50,7 +49,7 @@ static bool mark_constant(Mark *m, uint32_t id) {
 }
 
 bool rt_reclaim(Runtime *rt) {
-    if (rt->frame_count || rt->compiling) return rt_error(rt, "code reclamation requires an evaluation boundary");
+    if (rt->frame_count || rt->compiling || rt->evaluating || rt->eval_depth) return rt_error(rt, "code reclamation requires an evaluation boundary");
     Mark m = {.rt = rt};
     m.objects = calloc(rt->heap.used / 64 + 1, 1);
     m.functions = calloc(rt->function_count + 1, 1);
@@ -87,7 +86,7 @@ bool rt_reclaim(Runtime *rt) {
             Value value = rt->constants[i];
             /* The intern table is weak: retain entries for symbols reachable
              * through user data as well as those referenced by live code. */
-            if (rt_kind(value, K_SYMBOL) || rt_kind(value, K_KEYWORD)) {
+            if (rt_kind(value, K_SYMBOL) || rt_kind(value, K_KEYWORD) || rt_kind(value, K_CLOSURE)) {
                 size_t bit = object_index(&m, value);
                 if (m.objects[bit / 8] & (1u << (bit % 8))) m.constants[i] = 1;
             }

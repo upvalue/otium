@@ -42,14 +42,14 @@ INVALID = [
 
 
 def main():
-    commands = [[ROOT / 'prototype/otium-proto'], [ROOT / 'prototype/otium-proto', '--native=1'],
+    commands = [[ROOT / 'prototype/otium-proto'],
                 [ROOT / 'otium', '--runtime=chez', '--no-project']]
     with tempfile.TemporaryDirectory(prefix='otium-ffi-differential-') as directory:
         path = pathlib.Path(directory) / 'case.ot'
         for source in CASES + INVALID:
             results = []
-            for index, command in enumerate(commands):
-                prefix = '(require otium.ffi :as ffi)\n' if index == 2 else ''
+            for command in commands:
+                prefix = '(require otium.ffi :as ffi)\n' if '--runtime=chez' in command else ''
                 path.write_text(prefix + f'(def lib (ffi/open-library \'("{FIXTURE}")))\n' + source + '\n')
                 results.append(subprocess.run([*map(str, command), str(path)], cwd=ROOT,
                                               capture_output=True, text=True, timeout=60))

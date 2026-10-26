@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure warm kernels separately from startup and native compilation."""
+"""Measure warm kernels separately from startup."""
 import argparse
 import json
 import os
@@ -106,11 +106,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='otium-steady-') as directory:
         for workload in args.workloads:
             argument, expected, python, scheme = CASES[workload]
-            for native in (False, True):
-                command = [ROOT / 'prototype/bench_runtime', workload]
-                if native:
-                    command.append('--native')
-                report['results'].append(run(command))
+            report['results'].append(run([ROOT / 'prototype/bench_runtime', workload]))
             python_path = pathlib.Path(directory) / 'kernel.py'
             python_path.write_text('import json, resource, time\n' + python + f'''
 samples = []

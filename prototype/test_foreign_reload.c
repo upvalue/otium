@@ -13,15 +13,14 @@ static Value eval(Runtime *rt, const char *source) {
 }
 
 int main(int argc, char **argv) {
-    bool native = false, sanitize = false;
+    bool sanitize = false;
     for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "--native")) native = true;
-        else if (!strcmp(argv[i], "--sanitize")) sanitize = true;
+        if (!strcmp(argv[i], "--sanitize")) sanitize = true;
         else abort();
     }
     Runtime *rt = runtime_create(16384, 4096);
     assert(rt);
-    runtime_native(rt, native ? 1 : 0);
+
     runtime_gc_stress(rt, true);
     char source[1024];
     const char *suffix = sanitize ? "_sanitize" : "";
@@ -29,9 +28,8 @@ int main(int argc, char **argv) {
         "(def lib (ffi/open-library '(\"./ffi_fixture%s.so\"))) "
         "(def saved (ffi/bind lib \"echo_int\" '(int) 'int #t))", suffix);
     eval(rt, source);
-    double compilation = runtime_foreign_compile_seconds(rt);
     size_t peak_bindings = 0;
-    for (unsigned i = 0; i < (native ? 30u : 300u); i++) {
+    for (unsigned i = 0; i < 300u; i++) {
         snprintf(source, sizeof(source),
             "(def lib (ffi/open-library '(\"./ffi_fixture%s.so\"))) "
             "(def current (ffi/bind lib \"echo_int\" '(int) 'int #t)) "
@@ -40,7 +38,6 @@ int main(int argc, char **argv) {
         RuntimeForeignStats stats = runtime_foreign_stats(rt);
         assert(stats.libraries == 1 && stats.bindings <= 3 && stats.signatures == 1);
         if (stats.bindings > peak_bindings) peak_bindings = stats.bindings;
-        assert(runtime_foreign_compile_seconds(rt) == compilation);
     }
     eval(rt, "(set! current nil)");
     static const char *types[] = {"i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "float", "double", "bool", "pointer"};

@@ -33,8 +33,7 @@ def main():
               'machine': platform.platform(), 'python': sys.version.split()[0],
               'cpu_affinity': sorted(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else None,
               'results': []}
-    for extra in ([], ['--native']):
-        report['results'].append(run([ROOT / 'prototype/bench_runtime', 'ffi1000000', *extra]))
+    report['results'].append(run([ROOT / 'prototype/bench_runtime', 'ffi1000000']))
     with tempfile.TemporaryDirectory(prefix='otium-foreign-benchmark-') as directory:
         path = pathlib.Path(directory) / 'kernel.py'
         path.write_text(f'''

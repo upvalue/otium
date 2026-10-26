@@ -16,10 +16,9 @@ static void rejects(Runtime *rt, const char *source, const char *message) {
     assert(strstr(runtime_error(rt), message));
 }
 int main(void) {
-    const size_t modes[] = {0, 1, 31};
-    for (size_t mode = 0; mode < 3; mode++) {
+    {
         Runtime *rt = runtime_create(32768, 4096); assert(rt);
-        runtime_native(rt, modes[mode]); runtime_gc_stress(rt, true);
+        runtime_gc_stress(rt, true);
         const char *checks[] = {
             "(equal? `(a ,(+ 1 2) ,@'(4 5) . tail) '(a 3 4 5 . tail))",
             "(let ((x 42)) (equal? `(a `(b ,x ,,x)) '(a (quasiquote (b (unquote x) (unquote 42))))))",
@@ -65,7 +64,7 @@ int main(void) {
         rejects(rt, "(quasiquote 1 2)", "one datum");
         eval(rt, "(def cons (fn (a b) 99)) (def append (fn (a b) 99))");
         assert(eval(rt, "(equal? `(a ,@'(b c) ,42) '(a b c 42))") == V_TRUE);
-        printf("quasiquote tests passed: threshold=%zu\n", modes[mode]);
+        printf("quasiquote tests passed\n");
         runtime_destroy(rt);
     }
     Runtime *rt = runtime_create(1024 * 1024, 32768); assert(rt);

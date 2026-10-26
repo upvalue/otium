@@ -40,17 +40,16 @@ int main(void) {
     FILE *large_file = fopen(large, "wb"); assert(large_file);
     assert(!fseek(large_file, 16 * 1024 * 1024, SEEK_SET));
     assert(fputc(' ', large_file) != EOF); assert(!fclose(large_file));
-    const size_t modes[] = {0, 1, 31};
-    for (size_t mode = 0; mode < 3; mode++) {
+    {
         Runtime *rt = runtime_create(32768, 8192); assert(rt);
-        runtime_native(rt, modes[mode]); runtime_gc_stress(rt, true);
+        runtime_gc_stress(rt, true);
         assert(runtime_load_path(rt, "../tests/modules/first"));
         assert(runtime_load_path(rt, "../tests/modules/second"));
         assert(runtime_load_path(rt, directory));
         assert(eval(rt, "(require choice suffix)") == V_NIL);
         assert(eval(rt, "(equal? choice/value \"first-directory\")") == V_TRUE);
         assert(eval(rt, "(equal? suffix/value \"ot\")") == V_TRUE);
-        rejects(rt, "(require retry)", "explicit error");
+        rejects(rt, "(require retry)", "first load fails");
         assert(!strcmp(rt->namespaces[rt->current_namespace], "user"));
         eval(rt, "(require retry :as r :refer (value))");
         assert(eval(rt, "(value)") == value_int(2));
@@ -65,10 +64,8 @@ int main(void) {
         eval(rt, "(require '(retry :as quoted :refer (value)))");
         assert(eval(rt, "(quoted/value)") == value_int(3));
         size_t namespaces = rt->namespace_count, globals = rt->global_count;
-        size_t compiled = runtime_native_functions(rt);
         for (size_t i = 0; i < 1000; i++) eval(rt, "(require (retry :as r :refer (value)))");
         assert(rt->namespace_count == namespaces && rt->global_count == globals);
-        assert(runtime_native_functions(rt) == compiled);
         for (size_t i = 0; i < 2; i++) {
             rejects(rt, "(require mismatch)", "namespace");
             rejects(rt, "(require cycle-a)", "circular");
@@ -101,7 +98,7 @@ int main(void) {
         }
         eval(rt, "(def saved-api api/read) (def (live-api) (api/read))");
         write_module(directory, "api", "(ns api) (def value 50) (error \"reload failed\")");
-        rejects(rt, "(require api :reload)", "explicit error");
+        rejects(rt, "(require api :reload)", "reload failed");
         assert(eval(rt, "(live-api)") == value_int(50));
         write_module(directory, "api", "(ns api) (def value 51) (def (read) (+ value 1))");
         eval(rt, "(require api)");
@@ -124,7 +121,7 @@ int main(void) {
         assert(eval(rt, "(require chain0) chain0/recovered") == value_int(42));
         write_module(directory, "chain0", "(ns chain0) (require chain1)");
         rejects(rt, "(require oversized)", "source budget");
-        printf("module tests passed: threshold=%zu\n", modes[mode]);
+        printf("module tests passed\n");
         runtime_destroy(rt);
         write_module(directory, "api", "(ns api) (def value 41) (def- secret 7) (def (read) value)");
     }

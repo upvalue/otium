@@ -185,7 +185,7 @@ static ot_value define_class(ot_runtime* rt, size_t first, size_t count) {
     object_fields(live[0])[1] = rt->stack[first + 1];
     object_fields(live[0])[2] = live[1];
     rt->globals[global] = live[0];
-    rt->global_defined[global] = 1;
+    rt->global_info[global].defined = 1;
   }
   ot_value result = ok ? live[0] : 0;
   oti_roots_pop(&rt->heap, &roots);

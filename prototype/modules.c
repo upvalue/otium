@@ -262,17 +262,17 @@ static bool one_require(ot_runtime* rt, const oti_ast** cursor) {
       if (name->kind != AST_SYMBOL) return oti_error(rt, "require :refer needs symbol names");
       uint32_t target = UINT32_MAX;
       for (size_t i = 0; i < rt->global_count; i++)
-        if (rt->global_namespaces[i] == space && strlen(rt->names[i]) == name->as.text.size &&
-            !memcmp(rt->names[i], name->as.text.data, name->as.text.size))
+        if (rt->global_info[i].space == space && strlen(rt->global_info[i].name) == name->as.text.size &&
+            !memcmp(rt->global_info[i].name, name->as.text.data, name->as.text.size))
           target = (uint32_t)i;
       for (size_t i = 0; i < rt->global_count; i++)
-        if (rt->global_namespaces[i] == rt->current_namespace &&
-            strlen(rt->names[i]) == name->as.text.size &&
-            !memcmp(rt->names[i], name->as.text.data, name->as.text.size))
+        if (rt->global_info[i].space == rt->current_namespace &&
+            strlen(rt->global_info[i].name) == name->as.text.size &&
+            !memcmp(rt->global_info[i].name, name->as.text.data, name->as.text.size))
           return oti_error(rt, "referred import conflicts with a local binding");
-      if (target == UINT32_MAX || rt->globals[target] == V_UNBOUND || rt->global_private[target])
+      if (target == UINT32_MAX || rt->globals[target] == V_UNBOUND || rt->global_info[target].is_private)
         return oti_coded_error(
-            rt, target != UINT32_MAX && rt->global_private[target] ? "E0204" : "E0203",
+            rt, target != UINT32_MAX && rt->global_info[target].is_private ? "E0204" : "E0203",
             "cannot refer missing or private module binding");
       if (!install_import(rt, name, target, false)) return false;
     }

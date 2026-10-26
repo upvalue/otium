@@ -4,7 +4,7 @@
 
 static oti_function* function(ot_runtime* rt, const char* name) {
   for (size_t i = 0; i < rt->global_count; i++)
-    if (!strcmp(rt->names[i], name)) {
+    if (!strcmp(rt->global_info[i].name, name)) {
       CHECK(oti_kind(rt->globals[i], K_CLOSURE));
       uint32_t id;
       memcpy(&id, object_bytes(rt->globals[i]), sizeof(id));

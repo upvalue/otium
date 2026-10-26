@@ -140,8 +140,8 @@ uint32_t oti_namespace(ot_runtime* rt, const char* name, size_t length) {
 
 static uint32_t find_global(ot_runtime* rt, uint32_t space, const char* name, size_t length) {
   for (size_t i = 0; i < rt->global_count; i++)
-    if (rt->global_namespaces[i] == space && strlen(rt->names[i]) == length &&
-        !memcmp(rt->names[i], name, length))
+    if (rt->global_info[i].space == space && strlen(rt->global_info[i].name) == length &&
+        !memcmp(rt->global_info[i].name, name, length))
       return (uint32_t)i;
   return UINT32_MAX;
 }
@@ -155,21 +155,8 @@ static uint32_t namespace_global(ot_runtime* rt, uint32_t space, const char* nam
     return UINT32_MAX;
   }
   rt->global_roots.slots = rt->globals;
-  if (!oti_grow(rt, (void**)&rt->names, &rt->name_capacity, rt->global_count + 1, sizeof(char*)))
-    return UINT32_MAX;
-  if (!oti_grow(rt, (void**)&rt->global_defined, &rt->global_defined_capacity, rt->global_count + 1,
-               1))
-    return UINT32_MAX;
-  if (!oti_grow(rt, (void**)&rt->global_namespaces, &rt->global_namespace_capacity,
-               rt->global_count + 1, sizeof(uint32_t)))
-    return UINT32_MAX;
-  if (!oti_grow(rt, (void**)&rt->global_private, &rt->global_private_capacity, rt->global_count + 1,
-               1))
-    return UINT32_MAX;
-  if (!oti_grow(rt, (void**)&rt->global_macro, &rt->global_macro_capacity, rt->global_count + 1, 1))
-    return UINT32_MAX;
-  if (!oti_grow(rt, (void**)&rt->docs, &rt->docs_capacity, rt->global_count + 1,
-               sizeof(oti_documentation)))
+  if (!oti_grow(rt, (void**)&rt->global_info, &rt->global_info_capacity, rt->global_count + 1,
+                sizeof(oti_global_info)))
     return UINT32_MAX;
   char* copy = malloc(length + 1);
   if (!copy) {
@@ -179,13 +166,8 @@ static uint32_t namespace_global(ot_runtime* rt, uint32_t space, const char* nam
   memcpy(copy, name, length);
   copy[length] = 0;
   uint32_t index = (uint32_t)rt->global_count++;
-  rt->docs[index] = (oti_documentation){0};
-  rt->names[index] = copy;
+  rt->global_info[index] = (oti_global_info){.name = copy, .space = space};
   rt->globals[index] = V_UNBOUND;
-  rt->global_defined[index] = 0;
-  rt->global_private[index] = 0;
-  rt->global_macro[index] = 0;
-  rt->global_namespaces[index] = space;
   rt->global_roots.count = rt->global_count;
   return index;
 }
@@ -323,15 +305,13 @@ void ot_destroy(ot_runtime* rt) {
     oti_free_function(f);
   }
   for (size_t i = 0; i < rt->global_count; i++) {
-    free(rt->names[i]);
-    free(rt->docs[i].text);
+    free(rt->global_info[i].name);
+    free(rt->global_info[i].doc.text);
   }
-  free(rt->docs);
+  free(rt->global_info);
   for (size_t i = 0; i < rt->namespace_count; i++) free(rt->namespaces[i]);
   free(rt->namespaces);
-  free(rt->global_namespaces);
   free(rt->functions);
-  free(rt->names);
   free(rt->constants);
   free(rt->globals);
   free(rt->open_ports);
@@ -346,9 +326,6 @@ void ot_destroy(ot_runtime* rt) {
   free(rt->frames);
   free(rt->stack);
   free(rt->constant_state);
-  free(rt->global_defined);
-  free(rt->global_private);
-  free(rt->global_macro);
   oti_heap_destroy(&rt->heap);
   free(rt);
 }
@@ -364,8 +341,8 @@ static bool document(ot_runtime* rt, uint32_t index, const oti_ast* doc) {
     memcpy(text, doc->as.text.data, length);
     text[length] = 0;
   }
-  free(rt->docs[index].text);
-  rt->docs[index] = (oti_documentation){text, length};
+  free(rt->global_info[index].doc.text);
+  rt->global_info[index].doc = (oti_documentation){text, length};
   return true;
 }
 
@@ -401,7 +378,7 @@ static bool evaluate_raw(ot_runtime* rt, const oti_ast* form, ot_value* result) 
     if (!macro) return false;
     object_fields(macro)[0] = rt->globals[global];
     rt->globals[global] = macro;
-    rt->global_macro[global] = 1;
+    rt->global_info[global].macro = 1;
     const oti_ast* doc = name->next->next;
     if (!document(rt, global, doc && doc->kind == AST_STRING && doc->next ? doc : NULL))
       return false;
@@ -451,7 +428,7 @@ static bool evaluate_raw(ot_runtime* rt, const oti_ast* form, ot_value* result) 
     }
     uint32_t global = oti_global(rt, name->as.text.data, name->as.text.size);
     if (global == UINT32_MAX) return false;
-    if (rt->global_defined[global]) {
+    if (rt->global_info[global].defined) {
       *result = OT_NIL;
       return true;
     }
@@ -479,7 +456,7 @@ static bool evaluate_raw(ot_runtime* rt, const oti_ast* form, ot_value* result) 
       uint32_t index =
           find_global(rt, rt->current_namespace, name->as.text.data, name->as.text.size);
       if (index != UINT32_MAX) {
-        rt->global_private[index] = oti_ast_symbol(definition, "def-");
+        rt->global_info[index].is_private = oti_ast_symbol(definition, "def-");
         const oti_ast* doc = definition->next->next;
         if (!document(rt, index, doc && doc->kind == AST_STRING && doc->next ? doc : NULL))
           return false;
@@ -499,7 +476,7 @@ static bool evaluate_expanded(ot_runtime* rt, const oti_ast* form, ot_value* res
     const oti_ast* name = head->next;
     uint32_t global =
         find_global(rt, rt->current_namespace, name->as.text.data, name->as.text.size);
-    if (global != UINT32_MAX && rt->global_defined[global]) return evaluate_raw(rt, form, result);
+    if (global != UINT32_MAX && rt->global_info[global].defined) return evaluate_raw(rt, form, result);
   }
   oti_arena arena;
   oti_arena_init(&arena, OTI_SOURCE_LIMIT);

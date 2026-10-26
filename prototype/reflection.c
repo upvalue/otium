@@ -73,9 +73,9 @@ ot_value oti_reflection_builtin(ot_runtime* rt, unsigned id, size_t first, size_
         }
         return OT_NIL;
       }
-      const char* space = rt->namespaces[rt->global_namespaces[index]];
-      const char* local = rt->names[index];
-      oti_documentation doc = rt->docs[index];
+      const char* space = rt->namespaces[rt->global_info[index].space];
+      const char* local = rt->global_info[index].name;
+      oti_documentation doc = rt->global_info[index].doc;
       if (!doc.text) {
         doc.text = "no documentation";
         doc.length = strlen(doc.text);

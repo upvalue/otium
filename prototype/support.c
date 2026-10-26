@@ -158,7 +158,7 @@ ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
       const char* s = oti_text_bytes(v, &n);
       uint32_t index = oti_lookup_global(rt, s, n);
       if (id == B_EXP_MACRO)
-        return index != UINT32_MAX && rt->global_macro[index] ? rt->globals[index] : OT_FALSE;
+        return index != UINT32_MAX && rt->global_info[index].macro ? rt->globals[index] : OT_FALSE;
       if (oti_symbol_id(v)) return OT_FALSE;
       if (id == B_EXP_LOCAL) {
         const char* slash = memchr(s, '/', n);
@@ -169,9 +169,9 @@ ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
         return index != UINT32_MAX && index == local ? oti_intern(rt, K_SYMBOL, bare, length)
                                                      : OT_FALSE;
       }
-      uint32_t ns = index == UINT32_MAX ? rt->current_namespace : rt->global_namespaces[index];
+      uint32_t ns = index == UINT32_MAX ? rt->current_namespace : rt->global_info[index].space;
       if (index != UINT32_MAX) {
-        s = rt->names[index];
+        s = rt->global_info[index].name;
         n = strlen(s);
       } else if (memchr(s, '/', n)) return v;
       const char* space = rt->namespaces[ns];

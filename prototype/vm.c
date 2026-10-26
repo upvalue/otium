@@ -255,7 +255,7 @@ static bool dispatch(ot_runtime* rt, size_t stop_frames) {
         }
         if (v == V_UNBOUND) {
           char message[192];
-          snprintf(message, sizeof(message), "unbound global: %s", rt->names[ins.arg]);
+          snprintf(message, sizeof(message), "unbound global: %s", rt->global_info[ins.arg].name);
           return oti_coded_error(rt, "E0201", message);
         }
         if (!push(rt, v)) return false;
@@ -266,9 +266,9 @@ static bool dispatch(ot_runtime* rt, size_t stop_frames) {
         /* fall through */
       case OP_DEFINE_GLOBAL:
         if (ins.op == OP_DEFINE_GLOBAL) {
-          rt->global_defined[ins.arg] = 1;
+          rt->global_info[ins.arg].defined = 1;
         }
-        rt->global_macro[ins.arg] = oti_kind(rt->stack[rt->sp - 1], K_MACRO);
+        rt->global_info[ins.arg].macro = oti_kind(rt->stack[rt->sp - 1], K_MACRO);
         rt->globals[ins.arg] = rt->stack[rt->sp - 1];
         height(rt, rt->sp - 1);
         break;

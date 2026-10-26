@@ -433,6 +433,15 @@ typedef struct {
   size_t length;
 } oti_documentation;
 
+/* Host-side metadata for a global. The values themselves are in
+ * ot_runtime.globals, which is a collector root array. */
+typedef struct {
+  char* name;
+  oti_documentation doc;
+  uint32_t space;
+  bool defined, is_private, macro;
+} oti_global_info;
+
 struct ot_runtime {
   oti_heap heap;
   ot_value process_values[2];
@@ -448,19 +457,12 @@ struct ot_runtime {
   unsigned char* constant_state;
   size_t constant_state_capacity, constant_free, function_free, permanent_constants;
   bool compiling, evaluating;
-  oti_documentation* docs;
-  size_t docs_capacity;
-  char** names;
-  unsigned char *global_defined, *global_private, *global_macro;
-  size_t global_macro_capacity;
-  size_t global_private_capacity;
-  uint32_t* global_namespaces;
-  size_t global_namespace_capacity;
+  oti_global_info* global_info;
+  size_t global_info_capacity;
   char** namespaces;
   size_t namespace_count, namespace_capacity;
   uint32_t current_namespace, required_namespace;
   oti_module_state* modules;
-  size_t name_capacity, global_defined_capacity;
   size_t sp, stack_capacity, stack_limit;
   oti_function** functions;
   size_t function_count, function_capacity;

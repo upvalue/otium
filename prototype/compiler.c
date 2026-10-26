@@ -978,7 +978,7 @@ static bool expression(oti_compiler* c, const oti_ast* a, bool tail) {
       }
     if (!shadowed) {
       uint32_t global = oti_lookup_global(c->rt, head->as.text.data, head->as.text.size);
-      if (global != UINT32_MAX && c->rt->global_macro[global]) {
+      if (global != UINT32_MAX && c->rt->global_info[global].macro) {
         oti_ast* expanded = expand_call(c, a, global);
         c->definitions = definitions;
         return expanded && expression(c, expanded, tail);

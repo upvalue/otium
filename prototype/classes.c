@@ -256,7 +256,7 @@ ot_value oti_class_builtin(ot_runtime* rt, unsigned id, size_t first, size_t cou
     object_fields(generic)[1] = OT_EMPTY;
     memcpy(object_bytes(generic), &wanted, sizeof(wanted));
     rt->globals[global] = generic;
-    rt->global_defined[global] = 1;
+    rt->global_info[global].defined = 1;
     return generic;
   }
   if (!oti_kind(v, K_GENERIC)) return oti_fail(rt, "expected generic function");

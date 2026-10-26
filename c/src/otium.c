@@ -1311,8 +1311,8 @@ static otv read_form(reader* input);
 
 static unsigned hex_digit(unsigned char c) {
   return c >= '0' && c <= '9'   ? c - '0'
-         : c >= 'a' && c <= 'f' ? c - 'a' + 10u
-         : c >= 'A' && c <= 'F' ? c - 'A' + 10u
+         : c >= 'a' && c <= 'f' ? c - 'a' + 10
+         : c >= 'A' && c <= 'F' ? c - 'A' + 10
                                 : 16;
 }
 

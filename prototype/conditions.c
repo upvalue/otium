@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <stdlib.h>
 #include "internal.h"
 #include <string.h>
 
@@ -329,10 +330,13 @@ Value rt_file_error(Runtime* rt, const char* op, Value path, int error) {
 }
 
 Value rt_ffi_error(Runtime* rt, const char* operation, const char* reason, const char* message) {
-  char op[64], why[64], detail[256];
+  char op[64], why[64];
+  size_t length = strlen(message);
+  char* detail = malloc(length + 1);
+  if (!detail) return fail(rt, "out of host memory");
+  memcpy(detail, message, length + 1);
   snprintf(op, sizeof(op), "%s", operation);
   snprintf(why, sizeof(why), "%s", reason);
-  snprintf(detail, sizeof(detail), "%s", message);
   Value live[] = {V_NIL, V_NIL};
   Roots roots;
   roots_push(&rt->heap, &roots, live, 2);
@@ -353,5 +357,6 @@ Value rt_ffi_error(Runtime* rt, const char* operation, const char* reason, const
     rt_error(rt, detail);
   }
   roots_pop(&rt->heap, &roots);
+  free(detail);
   return 0;
 }

@@ -58,6 +58,11 @@ typedef struct {
   Callback* callback;
 } Pointer;
 
+typedef struct {
+  size_t argument;
+  const char* expected;
+} ForeignError;
+
 struct ForeignState {
   Library* libraries;
   Signature* signatures;
@@ -72,12 +77,17 @@ struct ForeignState {
   size_t value_capacity, callback_count, call_depth;
   bool pending_exit, pending_interrupt;
   int pending_status;
+  ForeignError* error_context;
 };
 
 size_t runtime_foreign_signatures(const Runtime* rt) {
   size_t count = 0;
   for (Signature* s = rt->foreign->signatures; s; s = s->next) count++;
   return count;
+}
+
+static void argument_context(Runtime* rt, size_t index, const char* expected) {
+  if (rt->foreign->error_context) *rt->foreign->error_context = (ForeignError){index, expected};
 }
 
 static Value failure(Runtime* rt, const char* message) {
@@ -265,7 +275,7 @@ void rt_foreign_collect(Runtime* rt) {
 
 bool rt_foreign_init(Runtime* rt) {
   rt->foreign = calloc(1, sizeof(*rt->foreign));
-  if (!rt->foreign) return rt_error(rt, "out of host memory");
+  if (!rt->foreign) return rt_error(rt, "FFI allocation: out of host memory");
   roots_push(&rt->heap, &rt->foreign->roots, NULL, 0);
   if (!rt_grow(rt, (void**)&rt->foreign->values, &rt->foreign->value_capacity, 1, sizeof(Value)))
     return false;
@@ -337,7 +347,7 @@ static Value open_library(Runtime* rt, Value names) {
     Library* library = calloc(1, sizeof(*library));
     if (!library) {
       dlclose(handle);
-      return failure(rt, "out of host memory");
+      return failure(rt, "FFI allocation: out of host memory");
     }
     library->handle = handle;
     Value v = library_object(rt, library, object_fields(p)[0]);
@@ -371,7 +381,7 @@ static Value bind_function(Runtime* rt, size_t first, bool codes) {
   Signature* s = foreign_signature(rt, &rt->foreign->signatures, args[2], args[3], codes);
   if (!s) return 0;
   Binding* b = malloc(sizeof(*b));
-  if (!b) return failure(rt, "out of host memory");
+  if (!b) return failure(rt, "FFI allocation: out of host memory");
   *b = (Binding){rt->foreign->bindings, s, target, args[4] == V_TRUE, false};
   /* Wrapper construction allocates; keep its host signature alive until publication. */
   s->pending = true;
@@ -568,6 +578,7 @@ static Value callback_builtin(Runtime* rt, unsigned id, size_t first, size_t cou
   if (count != wanted) return failure(rt, "FFI arity: wrong number of callback arguments");
   if (id == B_FFI_CALLBACK_COUNT) return value_int((intptr_t)state->callback_count);
   if (id == B_FFI_FREE_CALLBACK) {
+    argument_context(rt, 0, "callback-pointer");
     if (!rt_kind(rt->stack[first], K_POINTER)) return failure(rt, "FFI type: expected callback");
     Pointer p;
     memcpy(&p, object_bytes(rt->stack[first]), sizeof(p));
@@ -583,6 +594,7 @@ static Value callback_builtin(Runtime* rt, unsigned id, size_t first, size_t cou
     }
     return V_FALSE;
   }
+  argument_context(rt, 2, NULL);
   if (rt_support_builtin(rt, B_PROCEDURE_P, first + 2, 1) != V_TRUE)
     return failure(rt, "FFI type: expected callback procedure");
   Signature* sig =
@@ -599,7 +611,7 @@ static Value callback_builtin(Runtime* rt, unsigned id, size_t first, size_t cou
   state->roots.slots = state->values;
   if (slot == state->roots.count) state->values[state->roots.count++] = V_NIL;
   Callback* cb = calloc(1, sizeof(*cb));
-  if (!cb) return failure(rt, "out of host memory");
+  if (!cb) return failure(rt, "FFI allocation: out of host memory");
   cb->runtime = rt;
   cb->signature = sig;
   cb->root = slot;
@@ -654,7 +666,7 @@ static Value foreign_call(Runtime* rt, size_t callable, size_t first, size_t cou
       copies[i] = malloc(type->size);
       lengths[i] = type->size;
       if (!copies[i]) {
-        ok = rt_error(rt, "out of host memory");
+        ok = rt_error(rt, "FFI allocation: out of host memory");
         break;
       }
       memcpy(copies[i], (void*)p.address, type->size);
@@ -684,7 +696,7 @@ static Value foreign_call(Runtime* rt, size_t callable, size_t first, size_t cou
         copies[i] = malloc(n + 1);
         lengths[i] = n + 1;
         if (!copies[i]) {
-          ok = rt_error(rt, "out of host memory");
+          ok = rt_error(rt, "FFI allocation: out of host memory");
           break;
         }
         memcpy(copies[i], str, n + 1);
@@ -706,7 +718,7 @@ static Value foreign_call(Runtime* rt, size_t callable, size_t first, size_t cou
   if (ok && s->result == AGGREGATE) {
     size_t bytes = s->result_type->size;
     aggregate_bytes = calloc(1, bytes < sizeof(ffi_arg) ? sizeof(ffi_arg) : bytes);
-    if (!aggregate_bytes) ok = rt_error(rt, "out of host memory");
+    if (!aggregate_bytes) ok = rt_error(rt, "FFI allocation: out of host memory");
     else {
       aggregate_result = allocate_memory(rt, bytes, NULL);
       ok = aggregate_result != 0;
@@ -758,7 +770,7 @@ static Value foreign_call(Runtime* rt, size_t callable, size_t first, size_t cou
         for (size_t i = 0; i < count; i++) {
           uintptr_t address = (uintptr_t)result.pointer, begin = (uintptr_t)copies[i];
           if (copies[i] && address >= begin && address - begin <= lengths[i]) {
-            ok = rt_error(rt, "FFI lifetime: pointer escapes temporary UTF-8 argument");
+            ok = rt_error(rt, "FFI type: pointer escapes temporary UTF-8 argument");
             break;
           }
         }
@@ -817,7 +829,7 @@ static Value allocate_memory(Runtime* rt, size_t size, const void* initial) {
   if (size > (size_t)(INTPTR_MAX / 2) - state->bytes)
     return failure(rt, "FFI range: allocation size overflow");
   Memory* m = calloc(1, sizeof(*m));
-  if (!m) return failure(rt, "out of host memory");
+  if (!m) return failure(rt, "FFI allocation: out of host memory");
   m->allocation = calloc(1, size ? size : 1);
   if (!m->allocation) {
     free(m);
@@ -951,7 +963,7 @@ static Value shared_builtin(Runtime* rt, unsigned id, size_t first, size_t count
     if (!rt_kind(rt->stack[first], K_TABLE)) return V_FALSE;
     size_t n = strlen(field);
     char* name = malloc(n + 2);
-    if (!name) return failure(rt, "out of host memory");
+    if (!name) return failure(rt, "FFI allocation: out of host memory");
     name[0] = ':';
     memcpy(name + 1, field, n + 1);
     Value key = rt_intern(rt, K_KEYWORD, name, n + 1);
@@ -987,7 +999,7 @@ static Value shared_builtin(Runtime* rt, unsigned id, size_t first, size_t count
     Library* library = calloc(1, sizeof(*library));
     if (!library) {
       dlclose(handle);
-      return failure(rt, "out of host memory");
+      return failure(rt, "FFI allocation: out of host memory");
     }
     library->handle = handle;
     Value result = library_object(rt, library, rt->stack[first]);
@@ -1017,15 +1029,21 @@ static Value shared_builtin(Runtime* rt, unsigned id, size_t first, size_t count
   }
   Pointer p;
   size_t offset;
+  argument_context(rt, 1, NULL);
   int type = foreign_scalar_code(rt, rt->stack[first + 1], true);
-  if (type < 0 || !pointer(rt, rt->stack[first], &p) ||
-      !nonnegative(rt, rt->stack[first + 2], &offset))
-    return 0;
+  if (type < 0) return 0;
+  argument_context(rt, 0, "pointer");
+  if (!pointer(rt, rt->stack[first], &p)) return 0;
+  argument_context(rt, 2, "size-t");
+  if (!nonnegative(rt, rt->stack[first + 2], &offset)) return 0;
   const Scalar* s = &foreign_scalars[type];
+  argument_context(rt, 0, "pointer");
   if (!access_memory(rt, p, offset, s->size, s->alignment)) return 0;
   ForeignSlot slot = {0};
+  argument_context(rt, 3, s->name);
   if (id == B_FFI_RAW_SET && !to_foreign(rt, s, rt->stack[first + 3], &slot)) return 0;
   memory_scalar((unsigned)type, (void*)(p.address + offset), &slot, id == B_FFI_RAW_SET);
+  argument_context(rt, SIZE_MAX, s->name);
   return id == B_FFI_RAW_SET ? V_FALSE : from_foreign(rt, s, slot);
 }
 
@@ -1035,29 +1053,42 @@ static Value bulk_memory(Runtime* rt, unsigned id, size_t first, size_t count) {
   if (count < min || count > max) return failure(rt, "FFI arity: wrong number of arguments");
   Value* args = rt->stack + first;
   Pointer dest;
+  argument_context(rt, 0, "pointer");
   if (!pointer(rt, args[0], &dest)) return 0;
   if (id == B_FFI_COPY) {
     Pointer src;
     size_t bytes;
-    if (!pointer(rt, args[1], &src) || !nonnegative(rt, args[2], &bytes) ||
-        !access_memory(rt, dest, 0, bytes, 1) || !access_memory(rt, src, 0, bytes, 1))
-      return 0;
+    argument_context(rt, 1, "pointer");
+    if (!pointer(rt, args[1], &src)) return 0;
+    argument_context(rt, 2, "size-t");
+    if (!nonnegative(rt, args[2], &bytes)) return 0;
+    argument_context(rt, 0, "pointer");
+    if (!access_memory(rt, dest, 0, bytes, 1)) return 0;
+    argument_context(rt, 1, "pointer");
+    if (!access_memory(rt, src, 0, bytes, 1)) return 0;
     memmove((void*)dest.address, (const void*)src.address, bytes);
     return V_FALSE;
   }
   if (id == B_FFI_WRITE_BYTES) {
+    argument_context(rt, 1, NULL);
     if (!rt_kind(args[1], K_BYTEVECTOR)) return failure(rt, "FFI type: expected bytevector");
     size_t length = rt_bytes_length(args[1]), start = 0, end = length;
-    if ((count > 2 && !nonnegative(rt, args[2], &start)) ||
-        (count > 3 && !nonnegative(rt, args[3], &end)))
-      return 0;
-    if (start > end || end > length) return failure(rt, "FFI range: invalid bytevector slice");
+    argument_context(rt, 2, "size-t");
+    if (count > 2 && !nonnegative(rt, args[2], &start)) return 0;
+    if (start > length) return failure(rt, "FFI range: invalid bytevector start");
+    argument_context(rt, 3, "size-t");
+    if (count > 3 && !nonnegative(rt, args[3], &end)) return 0;
+    if (start > end || end > length) return failure(rt, "FFI range: invalid bytevector end");
+    argument_context(rt, 0, "pointer");
     if (!access_memory(rt, dest, 0, end - start, 1)) return 0;
     memcpy((void*)dest.address, rt_bytes_data(args[1]) + start, end - start);
     return V_FALSE;
   }
   size_t bytes;
-  if (!nonnegative(rt, args[1], &bytes) || !access_memory(rt, dest, 0, bytes, 1)) return 0;
+  argument_context(rt, 1, "size-t");
+  if (!nonnegative(rt, args[1], &bytes)) return 0;
+  argument_context(rt, 0, "pointer");
+  if (!access_memory(rt, dest, 0, bytes, 1)) return 0;
   if (id == B_FFI_READ_UTF8_BYTES) {
     if (!utf8((const unsigned char*)dest.address, bytes))
       return failure(rt, "FFI encoding: invalid UTF-8");
@@ -1078,7 +1109,9 @@ bool rt_foreign_owned(Value value) {
 static Value own_pointer(Runtime* rt, size_t first, size_t count) {
   if (count != 2) return failure(rt, "FFI arity: own requires pointer and release procedure");
   Pointer p;
+  argument_context(rt, 0, "pointer");
   if (!pointer(rt, rt->stack[first], &p)) return 0;
+  argument_context(rt, 1, NULL);
   if (rt_support_builtin(rt, B_PROCEDURE_P, first + 1, 1) != V_TRUE)
     return failure(rt, "FFI type: expected release procedure");
   ForeignState* state = rt->foreign;
@@ -1091,7 +1124,7 @@ static Value own_pointer(Runtime* rt, size_t first, size_t count) {
   state->roots.slots = state->values;
   while (state->roots.count < needed) state->values[state->roots.count++] = V_NIL;
   Memory* m = calloc(1, sizeof(*m));
-  if (!m) return failure(rt, "out of host memory");
+  if (!m) return failure(rt, "FFI allocation: out of host memory");
   m->address = p.address;
   m->size = p.length;
   m->external = true;
@@ -1171,7 +1204,9 @@ static Value foreign_builtin(Runtime* rt, unsigned id, size_t first, size_t coun
     return !p.address ? V_TRUE : V_FALSE;
   }
   if (id == B_FFI_HAS_SYMBOL) {
+    argument_context(rt, 0, NULL);
     if (!rt_kind(args[0], K_FOREIGN_LIBRARY)) return failure(rt, "FFI type: expected library");
+    argument_context(rt, 1, "utf8");
     const char* name = c_string(rt, args[1]);
     if (!name) return 0;
     Library* lib = object_data(args[0]);
@@ -1180,6 +1215,7 @@ static Value foreign_builtin(Runtime* rt, unsigned id, size_t first, size_t coun
     return !dlerror() && target ? V_TRUE : V_FALSE;
   }
   if (id == B_FFI_ALLOC_UTF8) {
+    argument_context(rt, 0, "utf8");
     const char* s = c_string(rt, args[0]);
     if (!s) return 0;
     size_t n;
@@ -1187,31 +1223,43 @@ static Value foreign_builtin(Runtime* rt, unsigned id, size_t first, size_t coun
     return allocate_memory(rt, n + 1, s);
   }
   if (id == B_FFI_SIZEOF || id == B_FFI_ALIGNOF || id == B_FFI_ALLOC) {
+    argument_context(rt, 0, NULL);
     int type = foreign_scalar(rt, args[0], true);
     if (type < 0) return 0;
     if (id != B_FFI_ALLOC)
       return value_int((intptr_t)(id == B_FFI_SIZEOF ? foreign_scalars[type].size
                                                      : foreign_scalars[type].alignment));
     size_t n;
+    argument_context(rt, 1, "size-t");
     if (!nonnegative(rt, args[1], &n)) return 0;
     if (n > SIZE_MAX / foreign_scalars[type].size)
       return failure(rt, "FFI range: allocation size overflow");
     return allocate_memory(rt, n * foreign_scalars[type].size, NULL);
   }
-  if (id == B_FFI_FREE) return release_pointer(rt, args[0]);
+  if (id == B_FFI_FREE) {
+    argument_context(rt, 0, "pointer");
+    return release_pointer(rt, args[0]);
+  }
   Pointer p;
   if (id == B_FFI_POINTER_EQ) {
-    if (!rt_kind(args[0], K_POINTER) || !rt_kind(args[1], K_POINTER))
-      return failure(rt, "FFI type: expected pointer");
+    argument_context(rt, 0, "pointer");
+    if (!rt_kind(args[0], K_POINTER)) return failure(rt, "FFI type: expected pointer");
+    argument_context(rt, 1, "pointer");
+    if (!rt_kind(args[1], K_POINTER)) return failure(rt, "FFI type: expected pointer");
     Pointer other;
     memcpy(&p, object_bytes(args[0]), sizeof(p));
     memcpy(&other, object_bytes(args[1]), sizeof(other));
     return p.address == other.address ? V_TRUE : V_FALSE;
   }
+  argument_context(rt, 0, "pointer");
   if (!pointer(rt, args[0], &p)) return 0;
   if (id == B_FFI_VIEW) {
     size_t offset, bytes;
-    if (!nonnegative(rt, args[1], &offset) || !nonnegative(rt, args[2], &bytes)) return 0;
+    argument_context(rt, 1, "size-t");
+    if (!nonnegative(rt, args[1], &offset)) return 0;
+    argument_context(rt, 2, "size-t");
+    if (!nonnegative(rt, args[2], &bytes)) return 0;
+    argument_context(rt, 0, "pointer");
     if (!access_memory(rt, p, offset, bytes, 1)) return 0;
     p.address += offset;
     p.length = bytes;
@@ -1221,7 +1269,10 @@ static Value foreign_builtin(Runtime* rt, unsigned id, size_t first, size_t coun
   }
   if (id == B_FFI_READ_UTF8) {
     size_t limit;
-    if (!nonnegative(rt, args[1], &limit) || !access_memory(rt, p, 0, limit, 1)) return 0;
+    argument_context(rt, 1, "size-t");
+    if (!nonnegative(rt, args[1], &limit)) return 0;
+    argument_context(rt, 0, "pointer");
+    if (!access_memory(rt, p, 0, limit, 1)) return 0;
     const char* s = (const char*)p.address;
     const char* end = memchr(s, 0, limit);
     if (!end) return failure(rt, "FFI bounds: missing string terminator");
@@ -1230,16 +1281,22 @@ static Value foreign_builtin(Runtime* rt, unsigned id, size_t first, size_t coun
     return rt_text(rt, K_STRING, s, (size_t)(end - s));
   }
   if (id == B_FFI_REF || id == B_FFI_SET) {
+    argument_context(rt, 1, NULL);
     int type = foreign_scalar(rt, args[1], true);
+    if (type < 0) return 0;
     size_t index;
-    if (type < 0 || !nonnegative(rt, args[2], &index)) return 0;
+    argument_context(rt, 2, "size-t");
+    if (!nonnegative(rt, args[2], &index)) return 0;
     const Scalar* s = &foreign_scalars[type];
     if (index > SIZE_MAX / s->size) return failure(rt, "FFI range: offset overflow");
     size_t offset = index * s->size;
+    argument_context(rt, 0, "pointer");
     if (!access_memory(rt, p, offset, s->size, s->alignment)) return 0;
     ForeignSlot slot = {0};
+    argument_context(rt, 3, s->name);
     if (id == B_FFI_SET && !to_foreign(rt, s, args[3], &slot)) return 0;
     memory_scalar((unsigned)type, (void*)(p.address + offset), &slot, id == B_FFI_SET);
+    argument_context(rt, SIZE_MAX, s->name);
     return id == B_FFI_SET ? V_FALSE : from_foreign(rt, s, slot);
   }
   return failure(rt, "unknown FFI operation");
@@ -1311,24 +1368,66 @@ Value rt_foreign_call(Runtime* rt, size_t callable, size_t first, size_t count) 
   return 0;
 }
 
+static const char* operation(unsigned id) {
+  switch (id) {
+    case B_FFI_OPEN:
+    case B_FFI_RAW_OPEN: return "open-library";
+    case B_FFI_BIND:
+    case B_FFI_RAW_BIND: return "bind";
+    case B_FFI_REF:
+    case B_FFI_RAW_REF: return "ref";
+    case B_FFI_SET:
+    case B_FFI_RAW_SET: return "set!";
+    case B_FFI_ALLOC:
+    case B_FFI_RAW_ALLOC: return "alloc";
+    case B_FFI_SIZEOF:
+    case B_FFI_RAW_SIZE: return "sizeof";
+    case B_FFI_ALIGNOF:
+    case B_FFI_RAW_ALIGN: return "alignof";
+    case B_FFI_HAS_SYMBOL: return "has-symbol?";
+    case B_FFI_POINTER: return "pointer?";
+    case B_FFI_NULL:
+    case B_FFI_RAW_NULL: return "null?";
+    case B_FFI_POINTER_EQ: return "pointer=?";
+    case B_FFI_FREE: return "free!";
+    case B_FFI_VIEW: return "view";
+    case B_FFI_ALLOC_UTF8: return "alloc-utf8";
+    case B_FFI_READ_UTF8: return "read-utf8";
+    case B_FFI_COUNT: return "allocation-count";
+    case B_FFI_BYTES: return "allocation-bytes";
+    case B_FFI_COPY: return "copy!";
+    case B_FFI_READ_BYTES: return "read-bytes";
+    case B_FFI_WRITE_BYTES: return "write-bytes!";
+    case B_FFI_READ_UTF8_BYTES: return "read-utf8-bytes";
+    case B_FFI_OWN: return "own";
+    case B_FFI_CALLBACK: return "callback";
+    case B_FFI_FREE_CALLBACK: return "free-callback!";
+    case B_FFI_CALLBACK_COUNT: return "callback-count";
+    case B_FFI_LAYOUT:
+    case B_FFI_LAYOUT_DATA: return "layout";
+    case B_FFI_ERROR_FIELD: return "error-field";
+    case B_FFI_LOADER_ERROR: return "loader-error";
+    default: return "foreign";
+  }
+}
+
 Value rt_foreign_builtin(Runtime* rt, unsigned id, size_t first, size_t count) {
-  const char* op = id == B_FFI_OWN                            ? "own"
-                   : id == B_FFI_CALLBACK                     ? "callback"
-                   : id == B_FFI_FREE_CALLBACK                ? "free-callback!"
-                   : id == B_FFI_CALLBACK_COUNT               ? "callback-count"
-                   : id == B_FFI_BIND || id == B_FFI_RAW_BIND ? "bind"
-                   : id == B_FFI_OPEN || id == B_FFI_RAW_OPEN ? "open-library"
-                   : id == B_FFI_REF || id == B_FFI_RAW_REF   ? "ref"
-                   : id == B_FFI_SET || id == B_FFI_RAW_SET   ? "set!"
-                   : id == B_FFI_COPY                         ? "copy!"
-                   : id == B_FFI_READ_BYTES                   ? "read-bytes"
-                   : id == B_FFI_WRITE_BYTES                  ? "write-bytes!"
-                   : id == B_FFI_READ_UTF8_BYTES              ? "read-utf8-bytes"
-                                                              : "foreign";
+  ForeignError context = {SIZE_MAX, NULL};
+  ForeignError* previous = rt->foreign->error_context;
+  rt->foreign->error_context = &context;
   Value result = foreign_builtin(rt, id, first, count);
-  bool context =
-      !result && new_ffi_error(rt) && (id == B_FFI_BIND || id == B_FFI_RAW_BIND) && count >= 2;
-  result = foreign_result(rt, result, op);
-  if (context && rt->raised) library_context(rt, rt->stack[first], rt->stack[first + 1]);
+  rt->foreign->error_context = previous;
+  bool annotate = !result && new_ffi_error(rt);
+  result = foreign_result(rt, result, operation(id));
+  if (annotate && rt->raised) {
+    if ((id == B_FFI_BIND || id == B_FFI_RAW_BIND) && count >= 2)
+      library_context(rt, rt->stack[first], rt->stack[first + 1]);
+    if (context.argument != SIZE_MAX)
+      condition_field(rt, ":argument", value_int((intptr_t)context.argument));
+    if (context.expected) {
+      Value type = rt_intern(rt, K_SYMBOL, context.expected, strlen(context.expected));
+      if (type) condition_field(rt, ":expected-type", type);
+    }
+  }
   return result;
 }

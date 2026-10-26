@@ -40,6 +40,19 @@ INVALID = [
     '(def p (ffi/alloc \'u8 1)) (def v (ffi/view p 0 1)) (ffi/free! p) (ffi/ref v \'u8 0)',
 ]
 
+for expression in [
+    "(ffi/ref ffi/null 'u8 -1)",
+    "(ffi/alloc 'u8 -1)",
+    "(ffi/sizeof 'void)",
+    "(ffi/field-ref ffi/null (ffi/define-struct! 'R '((x u8))) '(missing))",
+    "(ffi/offset-of (ffi/define-struct! 'R '((x u8))) '(missing))",
+]:
+    CASES.append("(require otium.ffi :as ffi) "
+                 "(try " + expression + " (catch (ffi/error? c) "
+                 "(println (list (ffi/error-operation c) (ffi/error-reason c) "
+                 "(ffi/error-argument c) (ffi/error-expected-type c)))))")
+
+
 
 def main():
     commands = [[ROOT / 'prototype/otium-proto'],

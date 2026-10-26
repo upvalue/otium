@@ -426,6 +426,7 @@ int main(int argc, char** argv) {
   runtime_gc_stress(rt, true);
   eval_file(rt, "../tests/ffi/ownership.ot");
   eval_file(rt, "test_ownership.ot");
+  eval_file(rt, "test_foreign_errors.ot");
   runtime_destroy(rt);
   puts("foreign call tests passed");
 }

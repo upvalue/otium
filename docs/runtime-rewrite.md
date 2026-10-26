@@ -69,7 +69,16 @@ wrong-thread/idle-host rejection and deferred exit with outer cleanup.
 disabled. Foreign reload, compiler-free execution and affected condition/class
 regressions pass. Optional LLVM development tools remain unavailable for GC lint.
 
-Embedding I/O, the full error-metadata audit, integration and performance remain
+FFI memory errors identify the operation and the validation argument, with scalar
+expected types where applicable. Shared field helpers annotate conditions at the
+signal site, preserving a single handler invocation. Loader condition messages
+retain all attempted candidates even when they exceed the short runtime display
+buffer. `test_foreign_errors.ot` adds 32 standalone checks, also included in the
+forced-GC/sanitizer foreign regression. Five shared validation cases extend the
+Chez comparison to 17 programs and six errors. The unchanged 222-check common
+suite also passes on Chez after the shared helper changes.
+
+Embedding I/O, integration and performance remain
 in [prototype-completion.md](../prototype-completion.md). Passing this inventory
 does not establish their completion. The default `sanitize` target covers only
 heap, reader and runtime checks; the Makefile has separate subsystem targets.

@@ -134,8 +134,8 @@ static void union_classes(const ffi_type* type, size_t offset, unsigned char* cl
   }
 }
 
-static bool lower_union(Runtime* rt, Signature* s, AbiNode* node, size_t n,
-                        size_t size, size_t alignment) {
+static bool lower_union(Runtime* rt, Signature* s, AbiNode* node, size_t n, size_t size,
+                        size_t alignment) {
   size_t largest = 0, aligned = 1;
   for (size_t i = 0; i < n; i++) {
     ffi_type* member = node->type.elements[i];
@@ -152,14 +152,14 @@ static bool lower_union(Runtime* rt, Signature* s, AbiNode* node, size_t n,
     free(classes);
     free(elements);
     free(padding);
-    return rt_error(rt, "out of host memory");
+    return rt_error(rt, "FFI allocation: out of host memory");
   }
   padding->type = (ffi_type){1, 1, FFI_TYPE_STRUCT, calloc(1, sizeof(ffi_type*))};
   if (!padding->type.elements) {
     free(classes);
     free(elements);
     free(padding);
-    return rt_error(rt, "out of host memory");
+    return rt_error(rt, "FFI allocation: out of host memory");
   }
   padding->next = s->nodes;
   s->nodes = padding;
@@ -235,7 +235,7 @@ static ffi_type* aggregate_type(Runtime* rt, Signature* s, Value description, un
   *budget -= n;
   AbiNode* node = calloc(1, sizeof(*node));
   if (!node) {
-    rt_error(rt, "out of host memory");
+    rt_error(rt, "FFI allocation: out of host memory");
     return NULL;
   }
   node->next = s->nodes;
@@ -245,7 +245,7 @@ static ffi_type* aggregate_type(Runtime* rt, Signature* s, Value description, un
   size_t* offsets = calloc(n, sizeof(size_t));
   if (!node->type.elements || !offsets) {
     free(offsets);
-    rt_error(rt, "out of host memory");
+    rt_error(rt, "FFI allocation: out of host memory");
     return NULL;
   }
   Value cursor = members;
@@ -366,7 +366,7 @@ Signature* foreign_signature(Runtime* rt, Signature** cache, Value arguments, Va
     s = malloc(sizeof(*s));
     if (!s) {
       foreign_free_abi_nodes(wanted.nodes);
-      rt_error(rt, "out of host memory");
+      rt_error(rt, "FFI allocation: out of host memory");
       return NULL;
     }
     *s = wanted;

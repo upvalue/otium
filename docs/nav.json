@@ -1,0 +1,6 @@
+[
+  { "items": [{ "file": "index.md", "label": "Introduction" }, "how-to-run.md"] },
+  { "title": "Language", "items": ["language-guide.md"] },
+  { "title": "Reference", "generated": "reference" },
+  { "title": "Applications", "items": ["manse/guide.md", "otos/guide.md"] }
+]

@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
-"""Regenerate docs from their .md.spec files with Claude Code.
+"""Regenerate docs from their .md.spec files with Pi.
 
 docs/foo.md.spec holds YAML front matter (title, prompt) and an optional body
 with more detail. The generated doc is written beside it as docs/foo.md. Docs
-without a .spec are hand written and never touched.
+without a .spec are hand written and never touched. README.md and AGENTS.md
+are always excluded.
+
+Requires Pi (`pi`) with a provider login. In Pi, use /login and select OpenAI
+Codex for the default provider. Defaults: openai-codex/gpt-6-astra, medium
+reasoning, normal service tier. Override --provider/--model/--thinking to use
+another model; DOCS_PROVIDER and DOCS_MODEL also set the defaults.
 """
 import argparse
 import json
+import os
+import shlex
+import tempfile
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +23,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / 'docs'
-MODEL = 'claude-opus-5-5'
+MODEL = 'gpt-6-astra'
+PROVIDER = 'openai-codex'
 MARK = '✨'
 
 RULES = f"""\
@@ -95,31 +105,70 @@ def doc_index():
     return '\n'.join(f'  - {d.relative_to(ROOT)}: {t}' for d, t in sorted(entries))
 
 
-def generate(spec, index, dry_run):
+def pi_command(system, args):
+    return [
+        'pi', '--print', '--mode', 'json', '--no-session',
+        '--provider', args.provider, '--model', args.model,
+        '--thinking', args.thinking,
+        '--tools', 'read,grep,find,ls',
+        '--no-extensions', '--no-skills', '--no-prompt-templates',
+        '--no-themes', '--no-approve',
+        '--extension', str(ROOT / 'tools/docs-pi.mjs'),
+        '--append-system-prompt', system,
+    ]
+
+
+def final_reply(output):
+    """Use the last completed agent turn, never intermediate tool commentary."""
+    final = None
+    for line in output.splitlines():
+        event = json.loads(line)
+        if event.get('type') == 'agent_end':
+            final = event
+    if final is None:
+        raise ValueError('Pi did not finish an agent turn')
+    messages = [m for m in final.get('messages', []) if m.get('role') == 'assistant']
+    if not messages:
+        raise ValueError('Pi did not return an assistant reply')
+    if messages[-1].get('stopReason') != 'stop':
+        detail = messages[-1].get('errorMessage') or messages[-1].get('stopReason', 'unknown')
+        raise ValueError(f'Pi did not finish a complete assistant reply: {detail}')
+    return ''.join(block['text'] for block in messages[-1].get('content', [])
+                   if block.get('type') == 'text').strip()
+
+
+def generate(spec, index, args):
     meta, body = parse_spec(spec)
     target = target_of(spec)
     rel = target.relative_to(ROOT)
     system = RULES.format(target=rel, title=meta['title'], index=index)
     prompt = meta['prompt'] + ('\n\n' + body if body else '')
-    if dry_run:
-        print(f'== {rel}\n-- system\n{system}\n-- prompt\n{prompt}\n')
+    command = pi_command(system, args)
+    if args.dry_run:
+        print(f'== {rel}\n-- command\n{shlex.join(command)}\n-- prompt\n{prompt}\n')
         return True
     print(f'generating {rel}', file=sys.stderr)
-    result = subprocess.run(
-        ['claude', '-p', '--model', MODEL, '--output-format', 'json',
-         '--allowed-tools', 'Read', 'Grep', 'Glob', 'Bash(git ls-files:*)',
-         '--append-system-prompt', system],
-        input=prompt, capture_output=True, text=True, cwd=ROOT)
-    if result.returncode != 0:
-        print(f'{rel}: claude failed\n{result.stderr}{result.stdout}', file=sys.stderr)
+    try:
+        result = subprocess.run(command, input=prompt, capture_output=True,
+                                text=True, cwd=ROOT, timeout=args.timeout)
+        if result.returncode != 0:
+            raise ValueError(f'Pi exited {result.returncode}: {result.stderr.strip()}')
+        text = final_reply(result.stdout)
+        if text.splitlines()[:1] != [f'# {MARK} {meta["title"]}']:
+            raise ValueError('reply does not start with the expected document title')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode='w', dir=target.parent,
+                                         prefix=f'.{target.name}.', delete=False) as output:
+            temporary = Path(output.name)
+            output.write(text + '\n')
+        try:
+            temporary.chmod(target.stat().st_mode & 0o777 if target.exists() else 0o644)
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        print(f'{rel}: not written: {error}', file=sys.stderr)
         return False
-    reply = json.loads(result.stdout)
-    text = reply.get('result', '').strip()
-    if reply.get('is_error') or not text.startswith(f'# {MARK}'):
-        print(f'{rel}: unexpected reply, not written:\n{text[:500]}', file=sys.stderr)
-        return False
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text + '\n')
     print(f'wrote {rel}', file=sys.stderr)
     return True
 
@@ -131,7 +180,13 @@ def main():
                         help='docs or specs to regenerate (default: every spec)')
     parser.add_argument('-j', '--jobs', type=int, default=4)
     parser.add_argument('-n', '--dry-run', action='store_true',
-                        help='print the prompts instead of running Claude')
+                        help='print the command and prompts instead of running Pi')
+    parser.add_argument('--provider', default=os.environ.get('DOCS_PROVIDER', PROVIDER))
+    parser.add_argument('--model', default=os.environ.get('DOCS_MODEL', MODEL))
+    parser.add_argument('--thinking', default='medium',
+                        choices=['off', 'minimal', 'low', 'medium', 'high', 'xhigh'])
+    parser.add_argument('--timeout', type=float, default=900,
+                        help='seconds allowed per document (default: 900)')
     args = parser.parse_args()
     if args.docs:
         specs = []
@@ -143,9 +198,15 @@ def main():
             specs.append(spec)
     else:
         specs = sorted(DOCS.rglob('*.md.spec'))
+    protected = [s for s in specs if target_of(s).name in ('README.md', 'AGENTS.md')]
+    if args.docs and protected:
+        parser.error('README.md and AGENTS.md cannot be regenerated')
+    specs = [s for s in specs if s not in protected]
+    if args.timeout <= 0:
+        parser.error('--timeout must be positive')
     index = doc_index()
     with ThreadPoolExecutor(max(1, args.jobs)) as pool:
-        ok = all(pool.map(lambda s: generate(s, index, args.dry_run), specs))
+        ok = all(pool.map(lambda s: generate(s, index, args), specs))
     sys.exit(0 if ok else 1)
 
 

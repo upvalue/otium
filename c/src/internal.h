@@ -614,7 +614,8 @@ struct ot_state {
 void oti_free_function(oti_function* fn);
 /* Read a whole source file. The result is NUL-terminated and owned by the
  * caller; what names the file in error messages. When the file can't be
- * opened, returns NULL with *open_error set and no error recorded. */
+ * opened, returns NULL with *open_error set and no error recorded. Builds
+ * without an operating system read through the I/O host. */
 char* oti_read_source_file(ot_state* rt, const char* path, size_t limit, const char* what,
                            size_t* length, int* open_error);
 bool oti_reclaim(ot_state* rt);

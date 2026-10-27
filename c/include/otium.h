@@ -123,7 +123,12 @@ typedef struct {
 
 /* Affects subsequently opened ports. NULL restores POSIX defaults. Standard
  * ports use handles 0/1/2 and are borrowed; install before loading the core to
- * replace them. Existing ports retain their host, userdata and handle. */
+ * replace them. Existing ports retain their host, userdata and handle.
+ *
+ * A runtime built with OTIUM_FREESTANDING, for targets without an operating
+ * system, has no POSIX defaults, foreign calls or filesystem procedures. Its
+ * host must install an I/O host before loading, and the runtime also reads
+ * library, module and project files through the host's open, read and close. */
 bool ot_set_io_host(ot_state* rt, const ot_io_host* host, void* userdata);
 /* Flush a snapshot of registered output ports at an idle host boundary.
  * Success preserves the preceding evaluation/exit result. A flush failure

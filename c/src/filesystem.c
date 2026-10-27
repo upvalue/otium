@@ -1,6 +1,7 @@
 #include "internal.h"
-#include <dirent.h>
 #include <errno.h>
+#ifndef OTIUM_FREESTANDING
+#include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -205,6 +206,27 @@ static ot_value filesystem_make_directory(ot_state* rt, size_t first, size_t cou
   ot_value path = rt->stack[first];
   return filesystem_done(rt, "make-directory", path, mkdir((char*)oti_bytes_data(path), 0777));
 }
+
+#else
+/* Without an operating system the only files are the I/O host's, which has no
+ * metadata or directory calls, so these fail as unsupported. */
+static ot_value unsupported(ot_state* rt, const char* op, size_t first, size_t count) {
+  return oti_file_error(rt, op, count ? rt->stack[first] : OT_NIL, ENOSYS);
+}
+
+#define UNSUPPORTED(name, op)                                                                      \
+  static ot_value name(ot_state* rt, size_t first, size_t count) {                                 \
+    return unsupported(rt, op, first, count);                                                      \
+  }
+UNSUPPORTED(filesystem_file_exists, "file-exists?")
+UNSUPPORTED(filesystem_delete_file, "delete-file")
+UNSUPPORTED(filesystem_rename_file, "rename-file")
+UNSUPPORTED(filesystem_file_info, "file-info")
+UNSUPPORTED(filesystem_list_directory, "list-directory")
+UNSUPPORTED(filesystem_make_directory, "make-directory")
+UNSUPPORTED(filesystem_file_link, "file-symbolic-link?")
+UNSUPPORTED(filesystem_current_directory, "current-directory")
+#endif
 
 const oti_builtin_def oti_filesystem_builtins[] = {
     {B_FILE_EXISTS, "file-exists?", filesystem_file_exists},

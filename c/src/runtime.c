@@ -663,6 +663,7 @@ ot_value oti_eval_value(ot_state* rt, ot_value value) {
   return result;
 }
 
+#ifndef OTIUM_FREESTANDING
 static int source_open(ot_state* rt, const char* path, intptr_t* handle) {
   (void)rt;
   FILE* file = fopen(path, "rb");
@@ -680,6 +681,29 @@ static void source_close(ot_state* rt, intptr_t handle) {
   (void)rt;
   fclose((FILE*)handle);
 }
+#else
+/* Without an operating system, source files come from the I/O host. */
+static int source_open(ot_state* rt, const char* path, intptr_t* handle) {
+  if (!rt->io_host_set) return ENOSYS;
+  rt->host_io_active = true;
+  int error = rt->io_host.open(rt->io_userdata, path, OT_IO_READ, handle);
+  rt->host_io_active = rt->host_io_reentry = false;
+  return error;
+}
+
+static long source_read(ot_state* rt, intptr_t handle, char* bytes, size_t length) {
+  rt->host_io_active = true;
+  long n = rt->io_host.read(rt->io_userdata, handle, (uint8_t*)bytes, length);
+  rt->host_io_active = rt->host_io_reentry = false;
+  return n > (long)length ? -EIO : n;
+}
+
+static void source_close(ot_state* rt, intptr_t handle) {
+  rt->host_io_active = true;
+  rt->io_host.close(rt->io_userdata, handle);
+  rt->host_io_active = rt->host_io_reentry = false;
+}
+#endif
 
 char* oti_read_source_file(ot_state* rt, const char* path, size_t limit, const char* what,
                            size_t* length, int* open_error) {

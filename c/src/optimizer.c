@@ -710,6 +710,11 @@ static ot_value optimizer_vm_install(ot_state* rt, size_t first, size_t count) {
   for (s.current = 0; ok && s.current < s.count; s.current++) ok = install_check(&s);
   ok = ok && install_link(&s, space);
   ot_value result = ok ? ot_int(s.entries[0].id) : 0;
+  if (ok && getenv("OTIUM_DUMP_CODE")) {
+    fputs("; installed by the optimizer\n", stderr);
+    oti_disassemble(rt, s.entries[0].id, stderr);
+    fputc('\n', stderr);
+  }
   if (s.entries) install_free(&s, ok);
   oti_roots_pop(&rt->heap, &roots);
   return result;

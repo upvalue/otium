@@ -27,6 +27,7 @@ foreign_types
 collections
 tables
 reclaim
+disassemble
 modules
 dev
 diagnostics

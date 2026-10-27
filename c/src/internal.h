@@ -703,6 +703,9 @@ struct ot_state {
 #define OTI_SOURCE_LIMIT ((size_t)16 * 1024 * 1024)
 
 void oti_free_function(oti_function* fn);
+/* Print function id and the functions it creates, as a listing. */
+void oti_disassemble(ot_state* rt, uint32_t id, FILE* out);
+const char* oti_opcode_name(unsigned op);
 /* Read a whole source file. The result is NUL-terminated and owned by the
  * caller; what names the file in error messages. When the file can't be
  * opened, returns NULL with *open_error set and no error recorded. Builds

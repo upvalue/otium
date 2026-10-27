@@ -2039,6 +2039,10 @@ bool oti_compile(ot_state* rt, const oti_ast* form, uint32_t* function) {
     }
     discard_functions(rt, &unit);
   }
+  if (ok && getenv("OTIUM_DUMP_CODE")) {
+    oti_disassemble(rt, *function, stderr);
+    fputc('\n', stderr);
+  }
   free(unit.facts);
   free(unit.expansions);
   free(unit.functions);

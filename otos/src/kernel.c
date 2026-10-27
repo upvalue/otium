@@ -25,7 +25,7 @@
 /* picolibc's exit and abort end here. */
 [[noreturn]] void _exit(int status) { sbi_shutdown(status != 0); }
 
-[[noreturn]] void kernel_trap(uintptr_t cause, uintptr_t pc, uintptr_t value) {
+[[noreturn]] void kernel_fault(uintptr_t cause, uintptr_t pc, uintptr_t value) {
   printf("otos: trap cause=%#lx pc=%#lx value=%#lx\n", (unsigned long)cause, (unsigned long)pc,
          (unsigned long)value);
   sbi_shutdown(true);
@@ -35,7 +35,10 @@
  * form asked to exit. */
 static bool evaluate(ot_state* rt, const char* source, size_t length, int* status) {
   ot_value result;
+  console_interrupt = 0;
+  console_evaluating = true;
   bool ok = ot_eval(rt, source, length, &result);
+  console_evaluating = false;
   if (ot_exit_status(rt, status)) return false;
   if (ok) {
     ot_write(rt, stdout, result);
@@ -105,6 +108,7 @@ static int repl(ot_state* rt) {
   printf("otos: hart %lu, device tree at %#lx\n", (unsigned long)hart,
          (unsigned long)device_tree);
 
+  console_init();
   uint64_t start = kernel_uptime_ns();
   ot_state* rt = ot_create(HEAP_INITIAL, STACK_LIMIT);
   if (rt == NULL) {
@@ -118,10 +122,11 @@ static int repl(ot_state* rt) {
     printf("otos: cannot start the runtime: %s\n", ot_error(rt));
     sbi_shutdown(true);
   }
+  ot_set_interrupt_flag(rt, &console_interrupt);
   printf("otos: runtime ready in %lu ms\n",
          (unsigned long)((kernel_uptime_ns() - start) / 1000000));
 
-  puts("otium repl (otos) - ^D shuts down");
+  puts("otium repl (otos) - ^C interrupts, ^D shuts down");
   int status = repl(rt);
   sbi_shutdown(status != 0);
 }

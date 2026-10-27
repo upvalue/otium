@@ -13,9 +13,23 @@
 
 #define UART_BASE ((volatile uint8_t*)0x10000000)
 #define UART_DATA 0
+#define UART_INTERRUPTS 1
+#define UART_MODEM_CONTROL 4
 #define UART_STATUS 5
 #define UART_STATUS_READY 0x01
 #define UART_STATUS_EMPTY 0x20
+#define UART_IRQ 10
+
+/* The PLIC's registers for hart 0 in supervisor mode, its context 1. */
+#define PLIC_BASE 0x0c000000u
+#define PLIC_PRIORITY(irq) ((volatile uint32_t*)(PLIC_BASE + 4 * (irq)))
+#define PLIC_ENABLE ((volatile uint32_t*)(PLIC_BASE + 0x2080))
+#define PLIC_THRESHOLD ((volatile uint32_t*)(PLIC_BASE + 0x201000))
+#define PLIC_CLAIM ((volatile uint32_t*)(PLIC_BASE + 0x201004))
+
+#define SIE_EXTERNAL (1u << 9)
+#define SSTATUS_SIE (1u << 1)
+#define CAUSE_EXTERNAL 9
 
 #define RTC_BASE ((volatile uint32_t*)0x101000)
 /* QEMU virt's timebase. The device tree has the real value. */
@@ -34,10 +48,62 @@ void console_write(const char* bytes, size_t length) {
   }
 }
 
-int console_read_byte(void) {
-  while (!(UART_BASE[UART_STATUS] & UART_STATUS_READY)) {
+/* Input bytes, filled by the UART interrupt and emptied by console_read_byte. */
+static unsigned char input[256];
+static volatile size_t input_head, input_tail;
+
+volatile sig_atomic_t console_interrupt;
+volatile bool console_evaluating;
+
+void console_init(void) {
+  *PLIC_PRIORITY(UART_IRQ) = 1;
+  *PLIC_ENABLE |= 1u << UART_IRQ;
+  *PLIC_THRESHOLD = 0;
+  UART_BASE[UART_MODEM_CONTROL] |= 0x08; /* OUT2 routes the UART's interrupt out. */
+  UART_BASE[UART_INTERRUPTS] = 0x01;     /* Received data available. */
+  __asm__ volatile("csrs sie, %0" : : "r"(SIE_EXTERNAL));
+  __asm__ volatile("csrs sstatus, %0" : : "r"(SSTATUS_SIE));
+}
+
+/* While Otium code runs, ^C sets the interrupt flag and drops typeahead.
+ * Otherwise it reaches the line editor like any other byte. */
+static void uart_receive(void) {
+  while (UART_BASE[UART_STATUS] & UART_STATUS_READY) {
+    unsigned char c = UART_BASE[UART_DATA];
+    if (c == 0x03 && console_evaluating) {
+      console_interrupt = 1;
+      input_tail = input_head;
+      continue;
+    }
+    size_t next = (input_head + 1) % sizeof input;
+    if (next == input_tail) continue;
+    input[input_head] = c;
+    input_head = next;
   }
-  return UART_BASE[UART_DATA];
+}
+
+void kernel_interrupt(uintptr_t cause) {
+  if ((cause & 0xff) != CAUSE_EXTERNAL) return;
+  uint32_t irq = *PLIC_CLAIM;
+  if (irq == UART_IRQ) uart_receive();
+  if (irq != 0) *PLIC_CLAIM = irq;
+}
+
+int console_read_byte(void) {
+  for (;;) {
+    /* With interrupts off, a byte can't arrive between the check and wfi;
+     * wfi still wakes for the pending interrupt. */
+    __asm__ volatile("csrc sstatus, %0" : : "r"(SSTATUS_SIE));
+    bool empty = input_tail == input_head;
+    bool interrupted = console_evaluating && console_interrupt;
+    if (empty && !interrupted) __asm__ volatile("wfi");
+    __asm__ volatile("csrs sstatus, %0" : : "r"(SSTATUS_SIE));
+    if (interrupted) return -1;
+    if (!empty) break;
+  }
+  unsigned char c = input[input_tail];
+  input_tail = (input_tail + 1) % sizeof input;
+  return c;
 }
 
 /* picolibc's stdin, stdout and stderr all go to the UART. */
@@ -189,6 +255,7 @@ static long io_read(void* data, intptr_t handle, uint8_t* bytes, size_t length) 
   /* One byte at a time, so the standard input port never reads ahead of the
    * line editor. ^D is end of input. */
   int c = console_read_byte();
+  if (c < 0) return -EINTR;
   if (c == 0x04) return 0;
   bytes[0] = (uint8_t)(c == '\r' ? '\n' : c);
   return 1;

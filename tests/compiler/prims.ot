@@ -1,0 +1,541 @@
+;; The primop table: its shape, that folding gives what the runtime gives,
+;; and that transfer functions cover every result the runtime produces.
+(require (otium.test :refer (check report)) (otium.compiler.types :as t) (otium.compiler.prims :as p))
+
+(def (datum f)
+  (t/fact->datum f))
+
+(def- (entry name)
+  (p/lookup name))
+
+(def- (transfer name . facts)
+  (datum (((entry name) :transfer) facts)))
+
+(def- (fold name . args)
+  (try
+    [:ok (((entry name) :fold) args)]
+    (catch _ :refused)))
+
+(def- big t/fixnum-max)
+
+(def- small t/fixnum-min)
+
+(def- inf (* 1e300 1e300))
+
+(def- nan (- inf inf))
+
+(def- (every? f xs)
+  (or (null? xs) (and (f (car xs)) (every? f (cdr xs)))))
+
+(def- (some? f xs)
+  (and (pair? xs) (or (f (car xs)) (some? f (cdr xs)))))
+
+(def- (array->list a)
+  (for ((x :in a) (out :collect x)) => out))
+
+;; --- shape ---------------------------------------------------------------------
+
+(def- all-names (for ((n :in (p/names)) (out :collect n)) => out))
+
+(def- known-effects '(:alloc :read :write :raise :call :switch))
+
+(def- opcodes (%vm-opcodes))
+
+(def- (builtin? name)
+  (eq? ((%cell-info (%resolve-global 'otium.core name)) :builtin) name))
+
+(def- shape-problems [])
+
+(def- (problem! name what)
+  (push! shape-problems (list name what)))
+
+(for-each (fn (name)
+            (let ((e (entry name)))
+              (unless (eq? (e :name) name) (problem! name "name"))
+              (unless (and (array? (e :arity)) (int? ((e :arity) 0)) (boolean? ((e :arity) 1))) (problem! name "arity"))
+              (unless (and (list? (e :effects)) (every? (fn (x) (memq x known-effects)) (e :effects)))
+                (problem! name "effects"))
+              (unless (procedure? (e :transfer)) (problem! name "transfer"))
+              (when (e :vm)
+                (unless (get opcodes (e :vm)) (problem! name "vm opcode"))
+                (unless (p/arity-fits? e (e :vm-arity)) (problem! name "vm arity")))
+              (when (e :branch) (unless (get opcodes (e :branch)) (problem! name "branch opcode")))
+              (when (e :refines)
+                (unless (and (array? (e :refines)) (= (length (e :refines)) 2)) (problem! name "refines")))
+              (if (e :base)
+                  (let ((b (entry (e :base))))
+                    (unless (and b (not (b :base))) (problem! name "base"))
+                    (unless (eq? (e :vm) (and b (b :vm))) (problem! name "variant vm"))
+                    (unless (eq? (string-ref (symbol->string name) 0) #\%) (problem! name "variant name")))
+                  (unless (builtin? name) (problem! name "not a builtin")))))
+          all-names)
+
+(check "entries are well formed" [] shape-problems)
+(check "lookup of a non-builtin" nil (p/lookup 'append))
+(check "+ is :add" :add ((entry '+) :vm))
+(check "< branches" :br-lt ((entry '<) :branch))
+(check "pair? branches" :br-pair ((entry 'pair?) :branch))
+(check "%car's base" 'car ((entry '%car) :base))
+(check "%car doesn't raise" #f (p/effect? (entry '%car) :raise))
+(check "%fx+ raises" #t (p/effect? (entry '%fx+) :raise))
+(check "%fx+/no-overflow is pure" '() ((entry '%fx+/no-overflow) :effects))
+(check "%fx< is pure" '() ((entry '%fx<) :effects))
+(check "get takes 2 or 3" '(#f #t #t #f) (map (fn (n) (p/arity-fits? (entry 'get) n)) '(1 2 3 4)))
+
+;; The VM opcodes for the entries match compiler.c's table.
+(check "vm opcodes"
+       '((+ :add 2)
+         (- :sub 2)
+         (* :mul 2)
+         (< :lt 2)
+         (<= :le 2)
+         (> :gt 2)
+         (>= :ge 2)
+         (= :numeq 2)
+         (eq? :eq 2)
+         (cons :cons 2)
+         (car :car 1)
+         (cdr :cdr 1)
+         (not :not 1)
+         (null? :nullp 1)
+         (pair? :pairp 1))
+       (map (fn (n) (list n ((entry n) :vm) ((entry n) :vm-arity)))
+            '(+ - * < <= > >= = eq? cons car cdr not null? pair?)))
+(check "branch opcodes"
+       '(:br-lt :br-le :br-gt :br-ge :br-numeq :br-eq :br-null :br-pair)
+       (map (fn (n) ((entry n) :branch)) '(< <= > >= = eq? null? pair?)))
+
+;; --- particular facts --------------------------------------------------------------
+
+(check "+ of ranges" '(fixnum 1 11) (transfer '+ (t/fixnum-fact 0 10) (t/const-fact 1)))
+(check "+ that may overflow" '(fixnum) (transfer '+ (t/fixnum-fact 0 big) (t/const-fact 1)))
+(check "+ with a float" '(float) (transfer '+ t/any (t/const-fact 1.5)))
+(check "+ of anything" '(fixnum float) (transfer '+ t/any t/any))
+(check "+ of a pair" 'none (transfer '+ (t/fact t/t-pair) (t/const-fact 1)))
+(check "+ of nothing" '(const 0) (transfer '+))
+(check "- negates" '(fixnum -10 0) (transfer '- (t/fixnum-fact 0 10)))
+(check "- of min" '(fixnum) (transfer '- (t/fixnum-fact small 0)))
+(check "* corners" '(fixnum -20 15) (transfer '* (t/fixnum-fact -3 4) (t/fixnum-fact -5 2)))
+(check "/ of one" '(float) (transfer '/ (t/fixnum-fact 1 3)))
+(check "/ of fixnums" '(fixnum float) (transfer '/ (t/fixnum-fact 1 3) (t/fixnum-fact 1 3)))
+(check "abs" '(fixnum 0 10) (transfer 'abs (t/fixnum-fact -10 3)))
+(check "abs of min" '(fixnum) (transfer 'abs (t/fixnum-fact small 3)))
+(check "remainder" '(fixnum 0 9) (transfer 'remainder (t/fixnum-fact 0 100) (t/const-fact 10)))
+(check "modulo" '(fixnum -9 0) (transfer 'modulo t/any (t/const-fact -10)))
+(check "quotient of a float" 'none (transfer 'quotient (t/const-fact 1.0) (t/const-fact 1)))
+(check "floor of a float" '(fixnum) (transfer 'floor (t/fact t/t-float)))
+(check "< decided" '(const #t) (transfer '< (t/fixnum-fact 0 10) (t/fixnum-fact 11 20)))
+(check "< decided false" '(const #f) (transfer '< (t/fixnum-fact 10 10) (t/fixnum-fact 0 10)))
+(check "< undecided" '(false true) (transfer '< (t/fixnum-fact 0 10) (t/fixnum-fact 5 20)))
+(check "< of a string" 'none (transfer '< (t/const-fact "a") (t/const-fact 1)))
+(check "= decided" '(const #t) (transfer '= (t/const-fact 3) (t/const-fact 3)))
+(check "pair? of a pair" '(const #t) (transfer 'pair? (t/fact t/t-pair)))
+(check "pair? of a fixnum" '(const #f) (transfer 'pair? (t/fact t/t-fixnum)))
+(check "pair? of anything" '(false true) (transfer 'pair? t/any))
+(check "pair? refines" (list t/t-pair (- t/t-any t/t-pair)) (array->list ((entry 'pair?) :refines)))
+(check "integer? of a float" '(false true) (transfer 'integer? (t/fact t/t-float)))
+(check "not of a pair" '(const #f) (transfer 'not (t/fact t/t-pair)))
+(check "not of nil" '(const #t) (transfer 'not (t/fact t/t-nil)))
+(check "eq? of disjoint types" '(const #f) (transfer 'eq? (t/fact t/t-pair) (t/fact t/t-string)))
+(check "eq? of strings" '(false true) (transfer 'eq? (t/const-fact "a") (t/const-fact "a")))
+(check "eq? of symbols" '(const #t) (transfer 'eq? (t/const-fact 'a) (t/const-fact 'a)))
+(check "car of a fixnum" 'none (transfer 'car (t/const-fact 1)))
+(check "list of nothing" '(const ()) (transfer 'list))
+(check "length of nil" '(const 0) (transfer 'length (t/fact t/t-nil)))
+(check "length" '(fixnum 0 4611686018427387903) (transfer 'length t/any))
+(check "get of a string" '(nil char) (transfer 'get (t/fact t/t-string) t/any))
+(check "copy forgets the constant" '(array) (transfer 'copy (t/const-fact [1])))
+(check "error doesn't return" 'none (transfer 'error (t/const-fact "x")))
+(check "wrong argument count" 'none (transfer 'car t/any t/any))
+(check "none argument" 'none (transfer 'pair? t/none))
+
+;; --- particular folds --------------------------------------------------------------
+
+(check "fold +" [:ok 3] (fold '+ 1 2))
+(check "fold wraps like the runtime" [:ok small] (fold '+ big 1))
+(check "fold of an error" :refused (fold '/ 1 0))
+(check "fold car" nil ((entry 'car) :fold))
+(check "fold cons" nil ((entry 'cons) :fold))
+(check "fold list of nothing" [:ok '()] (fold 'list))
+(check "fold list of something" :refused (fold 'list 1))
+(check "fold eq? of strings" :refused (fold 'eq? "a" "a"))
+(check "fold eq? of symbols" [:ok #t] (fold 'eq? 'a 'a))
+(check "fold length of a list" :refused (fold 'length '(1 2)))
+(check "fold length of a string" [:ok 3] (fold 'length "abc"))
+(check "fold pair? of a list" [:ok #t] (fold 'pair? '(1 2)))
+(check "fold string-append" [:ok "ab"] (fold 'string-append "a" "b"))
+
+;; --- random testing ----------------------------------------------------------------
+
+(def- seed 4242)
+
+(def- (rand31)
+  (set! seed (modulo (* seed 48271) 2147483647))
+  seed)
+
+(def- (rand n)
+  (modulo (rand31) n))
+
+(def- (chance n)
+  (= (rand n) 0))
+
+(def- (pick xs)
+  (xs (rand (length xs))))
+
+(def- (random-magnitude)
+  (case (rand 5)
+    ((0) (rand 10))
+    ((1) (rand 1000))
+    ((2) (rand31))
+    ((3) (+ (* (rand 2147483647) 2147483648) (rand31)))
+    (else (+ (* (rand31) (rand 4)) (rand 3)))))
+
+(def- fixnum-edges
+  [0
+   1
+   -1
+   2
+   -2
+   3
+   -3
+   7
+   10
+   -10
+   100
+   -100
+   65
+   255
+   1114111
+   32767
+   -32768
+   big
+   (- big 1)
+   small
+   (+ small 1)
+   (quotient big 2)
+   (quotient small 2)
+   3037000499
+   -3037000500])
+
+(def- (random-fixnum)
+  (if (chance 3)
+      (pick fixnum-edges)
+      (let ((m (random-magnitude)))
+        (if (chance 2)
+            m
+            (- -1 m)))))
+
+(def- (random-fixnum-in lo hi)
+  (let ((span (t/checked- hi lo)))
+    (cond
+      ((chance 4) lo)
+      ((chance 3) hi)
+      ((and span (< span big)) (+ lo (modulo (+ (* (rand 2147483647) 2147483648) (rand31)) (+ span 1))))
+      (else (let loop ((v (random-fixnum)))
+              (if (and (<= lo v) (<= v hi))
+                  v
+                  (loop (random-fixnum))))))))
+
+(def- float-edges
+  [0.0
+   -0.0
+   1.0
+   -1.0
+   0.5
+   -0.5
+   2.5
+   -2.5
+   3.0
+   1e300
+   -1e300
+   1e-300
+   inf
+   (- 0.0 inf)
+   nan
+   4611686018427387904.0
+   -4611686018427387904.0
+   1e18
+   0.1
+   6.283185307179586])
+
+(def- (random-float)
+  (if (chance 2)
+      (pick float-edges)
+      (/ (inexact (random-fixnum)) (inexact (+ 1 (rand 1000))))))
+
+(def- strings ["" "a" "abc" "héllo" "12" "-3.5" "nil" "a b"])
+
+(def- symbols ['a 'foo 'x.y/z (string->symbol "nil")])
+
+(def- keywords [:a :foo :size])
+
+(def- chars [#\a #\Z #\0 #\é #\space #\newline])
+
+(defrecord point (x y))
+
+(def- (random-of-type bit)
+  (cond
+    ((= bit t/t-float) (random-float))
+    ((= bit t/t-pair)
+     (case (rand 3)
+       ((0) (list (random-fixnum)))
+       ((1) (list 1 "a" 'b))
+       (else (cons 1 2))))
+    ((= bit t/t-empty) '())
+    ((= bit t/t-nil) nil)
+    ((= bit t/t-false) #f)
+    ((= bit t/t-true) #t)
+    ((= bit t/t-char) (pick chars))
+    ((= bit t/t-string) (pick strings))
+    ((= bit t/t-symbol) (pick symbols))
+    ((= bit t/t-keyword) (pick keywords))
+    ((= bit t/t-array)
+     (case (rand 3)
+       ((0) [])
+       ((1) [1 2 3])
+       (else ["a" (random-fixnum)])))
+    ((= bit t/t-table)
+     (if (chance 2)
+         {}
+         {:a 1 "b" 2}))
+    ((= bit t/t-procedure) (pick [car + (fn (x) x)]))
+    ((= bit t/t-record) (record-new point 1 2))
+    ((= bit t/t-other)
+     (case (rand 3)
+       ((0)
+        (if (chance 2)
+            (bytevector 1 2 3)
+            point))
+       ((1) (eof-object))
+       (else (buffer))))
+    (else (random-fixnum))))
+
+(def- type-bits
+  [t/t-fixnum
+   t/t-float
+   t/t-pair
+   t/t-empty
+   t/t-nil
+   t/t-false
+   t/t-true
+   t/t-char
+   t/t-string
+   t/t-symbol
+   t/t-keyword
+   t/t-array
+   t/t-table
+   t/t-procedure
+   t/t-record
+   t/t-other])
+
+(def- (random-value)
+  (random-of-type (if (chance 2)
+                      (pick [t/t-fixnum t/t-float])
+                      (pick type-bits))))
+
+(def- (random-atom)
+  (let ((v (random-value)))
+    (if (p/atom? v)
+        v
+        (random-atom))))
+
+;; A random fact, and a value inside it.
+(def- (random-range)
+  (let ((a (random-fixnum))
+        (b (if (chance 2)
+               (random-fixnum)
+               (pick fixnum-edges))))
+    (if (chance 3)
+        (let ((c (+ (rand 20) -10))) [c (+ c (rand 10))])
+        [(min a b) (max a b)])))
+
+(def- (random-fact)
+  (case (rand 8)
+    ((0) (t/const-fact (random-atom)))
+    ((1) t/any)
+    ((2) (t/fact t/t-number))
+    ((3) (let ((r (random-range))) (t/fixnum-fact (r 0) (r 1))))
+    ((4) (let ((r (random-range))) (t/fact (bitwise-ior t/t-fixnum (pick type-bits)) (r 0) (r 1))))
+    ((5) (t/fact (pick type-bits)))
+    (else (let ((r (random-range))) (t/fact (rand 65536) (r 0) (r 1))))))
+
+(def- (value-in f)
+  (cond
+    ((t/const? f) (t/fact-const f))
+    ((t/none? f) (error "no value in none"))
+    (else (let ((bits (filter (fn (b) (not (t/never? f b))) (array->list type-bits))))
+            (let ((bit (list-ref bits (rand (length bits)))))
+              (if (= bit t/t-fixnum)
+                  (random-fixnum-in (t/fact-lo f) (t/fact-hi f))
+                  (random-of-type bit)))))))
+
+;; Facts for a variant's arguments, so its precondition usually holds.
+(def- (variant-fact name)
+  (let ((s (symbol->string name)))
+    (cond
+      ((eq? (string-ref s 1) #\c)
+       (if (chance 2)
+           (t/fact t/t-pair)
+           (random-fact)))
+      ((equal? (substring s 1 3) "fl") (t/fact t/t-float))
+      (else (let ((r (random-range))) (t/fixnum-fact (r 0) (r 1)))))))
+
+(def- (argument-count e)
+  (let ((arity (e :arity)))
+    (cond
+      ((chance 12) (rand 5))
+      ((not (arity 1)) (arity 0))
+      (else (let ((n (+ (arity 0) (rand 3))))
+              (if (e :max)
+                  (min n (e :max))
+                  n))))))
+
+(def- (run f args)
+  (try
+    [:ok (apply f args)]
+    (catch _ :raised)))
+
+(def- (same-value? a b)
+  (cond
+    ((and (float? a) (float? b)) (t/float-same? a b))
+    ((and (string? a) (string? b)) (equal? a b))
+    (else (eq? a b))))
+
+(def- (same-outcome? a b)
+  (if (eq? a :raised)
+      (eq? b :raised)
+      (and (array? b) (same-value? (a 1) (b 1)))))
+
+(def- (show x)
+  (cond
+    ((array? x) (array->list x))
+    (else x)))
+
+(def- (builtin-of name)
+  (eval (let ((b ((entry name) :base))) (or b name))))
+
+;; Output and calls into arbitrary code aren't run at random.
+(def- (randomly-testable? name)
+  (not (memq name '(print println display write newline apply signal))))
+
+;; --- folding -----------------------------------------------------------------------
+;;
+;; For each foldable primop, fold edge-case and random arguments and compare
+;; with calling the builtin: directly, and through code compiled by the
+;; runtime's compiler, which uses the VM's instructions (and ADDI for small
+;; constants).
+
+(def- fold-failures [])
+
+(def- folded-count 0)
+
+(def- compiled {})
+
+(def- (compiled-call name n)
+  ;; (fn (a b) (name a b)) compiled by compiler.c.
+  (or (get compiled (str name "/" n))
+      (let ((params (list-head '(a b c d e) n)))
+        (let ((f (eval (list 'fn params (cons name params)))))
+          (put! compiled (str name "/" n) f)
+          f))))
+
+(def- (list-head xs n)
+  (if (= n 0)
+      '()
+      (cons (car xs) (list-head (cdr xs) (- n 1)))))
+
+(def- (immediate-call name k)
+  (eval (list 'fn '(a) (list name 'a k))))
+
+(def- (fold-trial! name args)
+  (let ((e (entry name)))
+    (when (p/variant-allows? name args)
+      (let ((folded (try
+                      [:ok ((e :fold) args)]
+                      (catch _ :refused)))
+            (direct (run (builtin-of name) args)))
+        (unless (eq? folded :refused)
+          (set! folded-count (+ folded-count 1))
+          (unless (same-outcome? direct folded)
+            (push! fold-failures (list name (show args) :fold (show folded) :runtime (show direct)))))
+        (when (and (e :vm) (= (length args) (e :vm-arity)) (not (e :base)))
+          (let ((vm (run (compiled-call name (length args)) args)))
+            (unless (same-outcome? direct vm)
+              (push! fold-failures (list name (show args) :vm (show vm) :builtin (show direct))))))
+        (when (and (memq name '(+ -)) (= (length args) 2) (int? (car (cdr args))) (<= -32768 (car (cdr args)) 32767))
+          (let ((vm (run (immediate-call name (car (cdr args))) (list (car args)))))
+            (unless (same-outcome? direct vm)
+              (push! fold-failures (list name (show args) :immediate (show vm) :builtin (show direct))))))))))
+
+(def- (fold-argument name)
+  (cond
+    ((chance 10) (random-value))
+    ((and (> (length (symbol->string name)) 3) (eq? (string-ref (symbol->string name) 0) #\%))
+     (if (equal? (substring (symbol->string name) 1 3) "fl")
+         (random-float)
+         (random-fixnum)))
+    (else (random-atom))))
+
+(for-each (fn (name)
+            (let ((e (entry name)))
+              (when (e :fold)
+                ;; Every pair of edge values for small arities, then random ones.
+                (let ((edges (append (array->list fixnum-edges)
+                                     (array->list float-edges)
+                                     (list #\a "abc" 'a :a nil #t '()))))
+                  (when (and (not (e :base)) (<= ((e :arity) 0) 2) (not (and (= ((e :arity) 0) 0) ((e :arity) 1))))
+                    (if (= ((e :arity) 0) 1)
+                        (for-each (fn (x) (fold-trial! name (list x))) edges)
+                        (for-each (fn (x) (for-each (fn (y) (fold-trial! name (list x y))) edges)) edges))))
+                (dotimes (i 300)
+                  (let ((n (argument-count e)))
+                    (fold-trial! name (for ((k :range n) (out :collect (fold-argument name))) => out)))))))
+          all-names)
+
+(check "folding agrees with the runtime" [] fold-failures)
+(check "folds were tried" #t (> folded-count 20000))
+
+;; --- transfer soundness ------------------------------------------------------------
+;;
+;; Random argument facts, random values inside them: whatever the builtin
+;; returns must lie in the transfer result, and a predicate's answer must
+;; agree with :refines.
+
+(def- transfer-failures [])
+
+(def- transfer-trials 0)
+
+(def- (transfer-trial! name)
+  (let ((e (entry name)))
+    (let ((facts (for ((k :range (argument-count e))
+                       (out :collect (if (e :base)
+                                         (variant-fact name)
+                                         (random-fact))))
+                   => out)))
+      (unless (some? t/none? facts)
+        (let ((args (map value-in facts)))
+          (when (p/variant-allows? name args)
+            (set! transfer-trials (+ transfer-trials 1))
+            (let ((result ((e :transfer) facts))
+                  (outcome (run (builtin-of name) args)))
+              (when (and (array? outcome) (not (t/admits? result (outcome 1))))
+                (push! transfer-failures
+                       (list name (map datum facts) (show args) :transfer (datum result) :runtime (outcome 1))))
+              (when (and (array? outcome) (e :refines) (pair? args))
+                (let ((bits ((e :refines)
+                             (if (outcome 1)
+                                 0
+                                 1))))
+                  (unless (t/only? (t/const-fact (car args)) bits)
+                    (push! transfer-failures (list name :refines (show args) :answer (outcome 1)))))))))))))
+
+(for-each (fn (name)
+            (when (randomly-testable? name)
+              (dotimes (i 400)
+                (transfer-trial! name))))
+          all-names)
+
+(check "transfer results cover the runtime's" [] transfer-failures)
+(check "transfer trials ran" #t (> transfer-trials 20000))
+
+(report "prims")

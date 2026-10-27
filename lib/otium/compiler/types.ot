@@ -1,0 +1,380 @@
+(ns otium.compiler.types)
+
+;; Type facts: what Propagate knows about a value.
+;;
+;; A fact is an array [bits lo hi const], never mutated once made:
+;;
+;; - bits: a mask of the t- type bits below. Every value the fact describes
+;;   has one of these types. t-none (0) is bottom, "no information yet".
+;; - lo, hi: inclusive fixnum bounds. They mean something only when t-fixnum
+;;   is set; otherwise they are fixnum-min and fixnum-max.
+;; - const: the value, when the fact describes exactly one constant, else
+;;   no-const.
+;;
+;; Facts are made only through make-fact (and fact, const-fact), which keeps them
+;; normal: an empty fixnum range drops the fixnum bit, and a fact that can
+;; only be one value (a one-number range, nil, (), #f or #t) gets that value
+;; as its constant. So two facts that mean the same thing compare
+;; same-fact?.
+;;
+;; Range arithmetic never overflows: checked+, checked- and checked* return
+;; nil where the exact result would leave the fixnum range, and callers then
+;; use the whole range.
+
+;; Fixnums on the C runtime are 63 bits: ot_int shifts an intptr_t left by
+;; one and tags the low bit.
+(def fixnum-max 4611686018427387903)
+
+(def fixnum-min -4611686018427387904)
+
+(def t-fixnum 1)
+
+(def t-float 2)
+
+(def t-pair 4)
+
+(def t-empty 8)
+
+(def t-nil 16)
+
+(def t-false 32)
+
+(def t-true 64)
+
+(def t-char 128)
+
+(def t-string 256)
+
+(def t-symbol 512)
+
+(def t-keyword 1024)
+
+(def t-array 2048)
+
+(def t-table 4096)
+
+(def t-procedure 8192)
+
+(def t-record 16384)
+
+;; Everything else: bytevectors, buffers, ports, instances, classes, record
+;; types, the eof object, foreign values.
+(def t-other 32768)
+
+(def t-any 65535)
+
+(def t-none 0)
+
+;; Common unions.
+(def t-number (bitwise-ior t-fixnum t-float))
+
+(def t-boolean (bitwise-ior t-false t-true))
+
+(def t-list (bitwise-ior t-pair t-empty))
+
+(def t-falsy (bitwise-ior t-nil t-false))
+
+(def t-truthy (bitwise-and t-any (bitwise-not t-falsy)))
+
+(def no-const (gensym "no-const"))
+
+;; --- range arithmetic ------------------------------------------------------------
+;;
+;; The C runtime wraps fixnum arithmetic, so these test before computing.
+
+(def (checked+ a b)
+  "a + b, or nil when it leaves the fixnum range."
+  (cond
+    ((and (> b 0) (> a (- fixnum-max b))) nil)
+    ((and (< b 0) (< a (- fixnum-min b))) nil)
+    (else (+ a b))))
+
+(def (checked- a b)
+  "a - b, or nil when it leaves the fixnum range."
+  (cond
+    ((and (< b 0) (> a (+ fixnum-max b))) nil)
+    ((and (> b 0) (< a (+ fixnum-min b))) nil)
+    (else (- a b))))
+
+(def (checked-negate a)
+  (if (= a fixnum-min)
+      nil
+      (- 0 a)))
+
+(def (checked* a b)
+  "a * b, or nil when it leaves the fixnum range."
+  (cond
+    ((or (= a 0) (= b 0)) 0)
+    ((= b -1) (checked-negate a))
+    ((= a -1) (checked-negate b))
+    (else (let ((p (* a b)))
+            ;; p is the product modulo 2^63. It is the true product exactly
+            ;; when dividing it back by b gives a with no remainder.
+            (if (and (= (remainder p b) 0) (= (quotient p b) a))
+                p
+                nil)))))
+
+;; --- making facts ----------------------------------------------------------------
+
+(def (fixnum-bit? bits)
+  (not (= (bitwise-and bits t-fixnum) 0)))
+
+(def- (implied-const bits lo hi)
+  (cond
+    ((and (= bits t-fixnum) (= lo hi)) lo)
+    ((= bits t-nil) nil)
+    ((= bits t-empty) '())
+    ((= bits t-false) #f)
+    ((= bits t-true) #t)
+    (else no-const)))
+
+(def (make-fact bits lo hi const)
+  "The normal fact for these parts. const may be no-const."
+  (let ((bits (if (and (fixnum-bit? bits) (> lo hi))
+                  (bitwise-and bits (bitwise-not t-fixnum))
+                  bits)))
+    (if (fixnum-bit? bits)
+        [bits
+         lo
+         hi
+         (if (eq? const no-const)
+             (implied-const bits lo hi)
+             const)]
+        [bits
+         fixnum-min
+         fixnum-max
+         (if (eq? const no-const)
+             (implied-const bits 0 0)
+             const)])))
+
+(def (fact bits &optional (lo fixnum-min) (hi fixnum-max))
+  "A fact for values with these type bits; lo and hi bound the fixnums."
+  (make-fact bits lo hi no-const))
+
+(def (fixnum-fact lo hi)
+  (make-fact t-fixnum lo hi no-const))
+
+(def (value-bits v)
+  "The type bit of value v."
+  (cond
+    ((int? v) t-fixnum)
+    ((float? v) t-float)
+    ((pair? v) t-pair)
+    ((null? v) t-empty)
+    ((nil? v) t-nil)
+    ((eq? v #f) t-false)
+    ((eq? v #t) t-true)
+    ((char? v) t-char)
+    ((string? v) t-string)
+    ((symbol? v) t-symbol)
+    ((keyword? v) t-keyword)
+    ((array? v) t-array)
+    ((table? v) t-table)
+    ((procedure? v) t-procedure)
+    ((record? v) t-record)
+    (else t-other)))
+
+(def (const-fact v)
+  "The fact for exactly the constant v."
+  (if (int? v)
+      [t-fixnum v v v]
+      [(value-bits v) fixnum-min fixnum-max v]))
+
+(def any (fact t-any))
+
+(def none (fact t-none))
+
+(def boolean (fact t-boolean))
+
+(def (fact-bits f)
+  (f 0))
+
+(def (fact-lo f)
+  (f 1))
+
+(def (fact-hi f)
+  (f 2))
+
+(def (fact-const f)
+  (f 3))
+
+(def (const? f)
+  (not (eq? (f 3) no-const)))
+
+(def (none? f)
+  (= (f 0) 0))
+
+(def (only? f bits)
+  "True when every value f describes has one of these types."
+  (= (bitwise-and (f 0) (bitwise-not bits)) 0))
+
+(def (never? f bits)
+  "True when no value f describes has any of these types."
+  (= (bitwise-and (f 0) bits) 0))
+
+(def (fixnum-only? f)
+  "True when every value f describes is a fixnum."
+  (= (f 0) t-fixnum))
+
+(def (truthiness f)
+  "#t when every value of f is truthy, #f when every one is falsy, else nil.
+Also nil for none."
+  (cond
+    ((none? f) nil)
+    ((only? f t-falsy) #f)
+    ((never? f t-falsy) #t)
+    (else nil)))
+
+;; --- comparing constants ---------------------------------------------------------
+
+(def (float-same? a b)
+  "Whether floats a and b are the same value: -0.0 differs from 0.0, and NaN
+is the same as NaN."
+  (if (and (= a b) (not (= a 0.0)))
+      #t
+      (equal? (number->string a) (number->string b))))
+
+(def (same-const? a b)
+  "Whether constants a and b are interchangeable: the same object, or floats
+with the same value."
+  (or (eq? a b) (and (float? a) (float? b) (float-same? a b))))
+
+(def (admits? f v)
+  "Whether value v is one of the values fact f describes."
+  (let ((b (value-bits v)))
+    (and (not (= (bitwise-and (f 0) b) 0))
+         (or (not (= b t-fixnum)) (and (<= (f 1) v) (<= v (f 2))))
+         (or (not (const? f)) (same-const? (f 3) v)))))
+
+;; --- the lattice -----------------------------------------------------------------
+
+(def (same-fact? a b)
+  (and (= (a 0) (b 0))
+       (= (a 1) (b 1))
+       (= (a 2) (b 2))
+       (or (and (not (const? a)) (not (const? b))) (and (const? a) (const? b) (same-const? (a 3) (b 3))))))
+
+(def (join a b)
+  "The least fact covering both a and b."
+  (cond
+    ((none? a) b)
+    ((none? b) a)
+    (else (let ((bits (bitwise-ior (a 0) (b 0)))
+                (fa (fixnum-bit? (a 0)))
+                (fb (fixnum-bit? (b 0)))
+                (lo (cond
+                      ((and fa fb) (min (a 1) (b 1)))
+                      (fa (a 1))
+                      (else (b 1))))
+                (hi (cond
+                      ((and fa fb) (max (a 2) (b 2)))
+                      (fa (a 2))
+                      (else (b 2)))))
+            (make-fact bits
+                       lo
+                       hi
+                       (if (and (const? a) (const? b) (same-const? (a 3) (b 3)))
+                           (a 3)
+                           no-const))))))
+
+(def (meet a b)
+  "A fact covering every value both a and b describe."
+  (cond
+    ((const? a)
+     (if (admits? b (a 3))
+         a
+         none))
+    ((const? b)
+     (if (admits? a (b 3))
+         b
+         none))
+    (else (make-fact (bitwise-and (a 0) (b 0)) (max (a 1) (b 1)) (min (a 2) (b 2)) no-const))))
+
+(def (subfact? a b)
+  "Whether every value a describes is one b describes."
+  (cond
+    ((none? a) #t)
+    ((not (only? a (b 0))) #f)
+    ((and (fixnum-bit? (a 0)) (or (< (a 1) (b 1)) (> (a 2) (b 2)))) #f)
+    ((const? b) (and (const? a) (same-const? (a 3) (b 3))))
+    (else #t)))
+
+(def (widen old new)
+  "join of old and new, with any fixnum bound that moved pushed to the end of
+the fixnum range, so a loop's facts stop changing."
+  (let ((j (join old new)))
+    (if (and (fixnum-bit? (old 0)) (fixnum-bit? (j 0)))
+        (make-fact (j 0)
+                   (if (< (j 1) (old 1))
+                       fixnum-min
+                       (j 1))
+                   (if (> (j 2) (old 2))
+                       fixnum-max
+                       (j 2))
+                   (j 3))
+        j)))
+
+;; --- printing --------------------------------------------------------------------
+
+(def- bit-names
+  (list (cons t-fixnum 'fixnum)
+        (cons t-float 'float)
+        (cons t-pair 'pair)
+        (cons t-empty 'empty)
+        (cons t-nil 'nil)
+        (cons t-false 'false)
+        (cons t-true 'true)
+        (cons t-char 'char)
+        (cons t-string 'string)
+        (cons t-symbol 'symbol)
+        (cons t-keyword 'keyword)
+        (cons t-array 'array)
+        (cons t-table 'table)
+        (cons t-procedure 'procedure)
+        (cons t-record 'record)
+        (cons t-other 'other)))
+
+(def (fact->datum f)
+  "A readable datum for f: any, none, (const v), or a list of type names in
+which fixnum may be followed by its bounds: (fixnum 0 10 float)."
+  (cond
+    ((none? f) 'none)
+    ((const? f) (list 'const (f 3)))
+    ((= (f 0) t-any)
+     (if (and (= (f 1) fixnum-min) (= (f 2) fixnum-max))
+         'any
+         (fact->list f)))
+    (else (fact->list f))))
+
+(def- (fact->list f)
+  (for ((entry :in bit-names)
+        (out :collect (if (and (= (car entry) t-fixnum) (or (> (f 1) fixnum-min) (< (f 2) fixnum-max)))
+                          (list 'fixnum (f 1) (f 2))
+                          (list (cdr entry)))
+             :when (not (= (bitwise-and (f 0) (car entry)) 0))))
+    => (apply append out)))
+
+(def (datum->fact d)
+  "The fact fact->datum printed as d."
+  (cond
+    ((eq? d 'none) none)
+    ((eq? d 'any) any)
+    ((and (pair? d) (eq? (car d) 'const)) (const-fact (car (cdr d))))
+    (else (let loop ((d d)
+                     (bits 0)
+                     (lo fixnum-min)
+                     (hi fixnum-max))
+            (cond
+              ((null? d) (fact bits lo hi))
+              ((and (eq? (car d) 'fixnum) (pair? (cdr d)) (int? (car (cdr d))))
+               (loop (cdr (cdr (cdr d))) (bitwise-ior bits t-fixnum) (car (cdr d)) (car (cdr (cdr d)))))
+              (else (let ((entry (find-name (car d))))
+                      (unless entry (error "unknown type name in fact" (car d)))
+                      (loop (cdr d) (bitwise-ior bits (car entry)) lo hi))))))))
+
+(def- (find-name name)
+  (let loop ((xs bit-names))
+    (cond
+      ((null? xs) nil)
+      ((eq? (cdr (car xs)) name) (car xs))
+      (else (loop (cdr xs))))))

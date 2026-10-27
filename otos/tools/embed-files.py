@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Write a C file that embeds every file under the given directories.
+"""Write a C file that embeds the given files and every file under the given
+directories.
 
-Usage: embed-files.py OUTPUT DEPFILE ROOT DIRECTORY...
+Usage: embed-files.py OUTPUT DEPFILE ROOT PATH...
 
 Each file is stored at its path relative to ROOT, with a leading slash. The
 depfile lists the directories as well as the files, so adding or removing a
@@ -17,8 +18,11 @@ def main():
     root = os.path.abspath(root)
     files = []
     directories = []
-    for directory in sys.argv[4:]:
-        for current, names, entries in os.walk(os.path.join(root, directory)):
+    for path in sys.argv[4:]:
+        if os.path.isfile(os.path.join(root, path)):
+            files.append(os.path.join(root, path))
+            continue
+        for current, names, entries in os.walk(os.path.join(root, path)):
             names.sort()
             directories.append(current)
             files.extend(os.path.join(current, entry) for entry in sorted(entries)

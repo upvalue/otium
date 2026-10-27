@@ -1,17 +1,19 @@
 #ifndef OTOS_KERNEL_H
 #define OTOS_KERNEL_H
 
+#include "otium.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
 void console_write(const char* bytes, size_t length);
 int console_read_byte(void);
-/* Reads what has arrived without waiting; true if it included ^C. */
-bool console_poll_interrupt(void);
 
-/* Registers the otos.gfx module with the state. */
-struct ot_state;
-void gfx_register(struct ot_state* state);
+/* Nanoseconds since boot. */
+uint64_t kernel_uptime_ns(void);
+
+/* The console on handles 0, 1 and 2 and the embedded files, read-only. */
+extern const ot_io_host kernel_io_host;
 
 [[noreturn]] void sbi_shutdown(bool failure);
 

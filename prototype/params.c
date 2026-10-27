@@ -26,5 +26,5 @@ ot_value oti_param_call(ot_state* rt, ot_value param, size_t count) {
   }
   for (size_t i = rt->param_count; i; i--)
     if (rt->params[2 * (i - 1)] == param) return rt->params[2 * (i - 1) + 1];
-  return object_fields(param)[1];
+  return oti_as_param(param)->value;
 }

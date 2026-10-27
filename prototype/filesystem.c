@@ -60,23 +60,23 @@ static ot_value directory(ot_state* rt, ot_value path) {
   }
   if (ok) {
     if (count > 1) qsort(names, count, sizeof(char*), compare_names);
-    live[1] = oti_alloc(rt, K_ARRAY, 1, sizeof(oti_array_info));
+    live[1] = oti_alloc(rt, K_ARRAY, 1, OTI_BYTES(oti_array_obj, 1));
     ok = live[1] != 0;
   }
   if (ok && count) {
     ot_value storage = oti_alloc(rt, K_ARRAY_DATA, (uint32_t)count, 0);
     ok = storage != 0;
     if (ok) {
-      object_fields(live[1])[0] = storage;
-      ((oti_array_info*)object_bytes(live[1]))->capacity = count;
+      oti_as_array(live[1])->data = storage;
+      oti_as_array(live[1])->capacity = count;
     }
   }
   for (size_t i = 0; ok && i < count; i++) {
     live[2] = oti_text(rt, K_STRING, names[i], strlen(names[i]));
     ok = live[2] != 0;
     if (ok) {
-      object_fields(object_fields(live[1])[0])[i] = live[2];
-      ((oti_array_info*)object_bytes(live[1]))->length = i + 1;
+      object_fields(oti_as_array(live[1])->data)[i] = live[2];
+      oti_as_array(live[1])->length = i + 1;
     }
   }
   for (size_t i = 0; i < count; i++) free(names[i]);
@@ -92,7 +92,7 @@ static ot_value metadata(ot_state* rt, const struct stat* st) {
   ot_value live[] = {OT_NIL, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, live, 2);
-  live[0] = oti_table_builtin(rt, B_TABLE, 0, 0);
+  live[0] = oti_table_new(rt);
   bool ok = live[0] != 0;
   const char* keys[] = {":type", ":size", ":modified"};
   for (size_t i = 0; ok && i < 3; i++) {
@@ -111,52 +111,109 @@ static ot_value metadata(ot_state* rt, const struct stat* st) {
   return result;
 }
 
-ot_value oti_filesystem_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
-  if (id == B_CURRENT_DIRECTORY) {
-    if (count) return oti_fail(rt, "current-directory takes no arguments");
-    size_t size = 256;
-    char* buffer = NULL;
-    for (;;) {
-      buffer = malloc(size);
-      if (!buffer) return oti_fail(rt, "out of host memory");
-      if (getcwd(buffer, size)) break;
-      int error = errno;
-      free(buffer);
-      if (error != ERANGE) return oti_file_error(rt, "current-directory", OT_NIL, error);
-      if (size > SIZE_MAX / 2) return oti_fail(rt, "directory path too long");
-      size *= 2;
-    }
-    ot_value result = oti_text(rt, K_STRING, buffer, strlen(buffer));
-    free(buffer);
-    return result;
-  }
-  if (count != (id == B_RENAME_FILE ? 2u : 1u))
-    return oti_fail(rt, "wrong number of filesystem arguments");
-  for (size_t i = 0; i < count; i++)
-    if (!path_valid(rt->stack[first + i])) return oti_fail(rt, "expected path without NUL");
-  ot_value path = rt->stack[first];
-  const char* name = (char*)oti_bytes_data(path);
-  if (id == B_LIST_DIRECTORY) return directory(rt, path);
-  const char* op = id == B_FILE_EXISTS   ? "file-exists?"
-                   : id == B_DELETE_FILE ? "delete-file"
-                   : id == B_RENAME_FILE ? "rename-file"
-                   : id == B_FILE_INFO   ? "file-info"
-                   : id == B_FILE_LINK   ? "file-symbolic-link?"
-                                         : "make-directory";
-  struct stat st;
-  int result;
-  if (id == B_DELETE_FILE) result = unlink(name);
-  else if (id == B_RENAME_FILE) result = rename(name, (char*)oti_bytes_data(rt->stack[first + 1]));
-  else if (id == B_MAKE_DIRECTORY) result = mkdir(name, 0777);
-  else result = id == B_FILE_LINK ? lstat(name, &st) : stat(name, &st);
-  if (result) {
+static ot_value filesystem_current_directory(ot_state* rt, size_t first, size_t count) {
+  (void)first;
+  if (count) return oti_fail(rt, "current-directory takes no arguments");
+  size_t size = 256;
+  char* buffer = NULL;
+  for (;;) {
+    buffer = malloc(size);
+    if (!buffer) return oti_fail(rt, "out of host memory");
+    if (getcwd(buffer, size)) break;
     int error = errno;
-    if ((id == B_FILE_EXISTS || id == B_FILE_LINK) && (error == ENOENT || error == ENOTDIR))
-      return OT_FALSE;
-    return oti_file_error(rt, op, path, error);
+    free(buffer);
+    if (error != ERANGE) return oti_file_error(rt, "current-directory", OT_NIL, error);
+    if (size > SIZE_MAX / 2) return oti_fail(rt, "directory path too long");
+    size *= 2;
   }
-  if (id == B_FILE_EXISTS) return OT_TRUE;
-  if (id == B_FILE_LINK) return S_ISLNK(st.st_mode) ? OT_TRUE : OT_FALSE;
-  if (id == B_FILE_INFO) return metadata(rt, &st);
-  return OT_NIL;
+  ot_value result = oti_text(rt, K_STRING, buffer, strlen(buffer));
+  free(buffer);
+  return result;
 }
+
+/* Check that there are `expected` arguments and that each is a path. */
+static bool filesystem_paths(ot_state* rt, size_t first, size_t count, size_t expected) {
+  if (count != expected) {
+    oti_fail(rt, "wrong number of filesystem arguments");
+    return false;
+  }
+  for (size_t i = 0; i < count; i++)
+    if (!path_valid(rt->stack[first + i])) {
+      oti_fail(rt, "expected path without NUL");
+      return false;
+    }
+  return true;
+}
+
+/* The result of a call that returns zero or sets errno. */
+static ot_value filesystem_done(ot_state* rt, const char* op, ot_value path, int result) {
+  return result ? oti_file_error(rt, op, path, errno) : OT_NIL;
+}
+
+static ot_value filesystem_file_exists(ot_state* rt, size_t first, size_t count) {
+  if (!filesystem_paths(rt, first, count, 1)) return 0;
+  ot_value path = rt->stack[first];
+  struct stat st;
+  if (stat((char*)oti_bytes_data(path), &st)) {
+    int error = errno;
+    if (error == ENOENT || error == ENOTDIR) return OT_FALSE;
+    return oti_file_error(rt, "file-exists?", path, error);
+  }
+  return OT_TRUE;
+}
+
+static ot_value filesystem_file_link(ot_state* rt, size_t first, size_t count) {
+  if (!filesystem_paths(rt, first, count, 1)) return 0;
+  ot_value path = rt->stack[first];
+  struct stat st;
+  if (lstat((char*)oti_bytes_data(path), &st)) {
+    int error = errno;
+    if (error == ENOENT || error == ENOTDIR) return OT_FALSE;
+    return oti_file_error(rt, "file-symbolic-link?", path, error);
+  }
+  return S_ISLNK(st.st_mode) ? OT_TRUE : OT_FALSE;
+}
+
+static ot_value filesystem_file_info(ot_state* rt, size_t first, size_t count) {
+  if (!filesystem_paths(rt, first, count, 1)) return 0;
+  ot_value path = rt->stack[first];
+  struct stat st;
+  if (stat((char*)oti_bytes_data(path), &st)) return oti_file_error(rt, "file-info", path, errno);
+  return metadata(rt, &st);
+}
+
+static ot_value filesystem_list_directory(ot_state* rt, size_t first, size_t count) {
+  if (!filesystem_paths(rt, first, count, 1)) return 0;
+  return directory(rt, rt->stack[first]);
+}
+
+static ot_value filesystem_delete_file(ot_state* rt, size_t first, size_t count) {
+  if (!filesystem_paths(rt, first, count, 1)) return 0;
+  ot_value path = rt->stack[first];
+  return filesystem_done(rt, "delete-file", path, unlink((char*)oti_bytes_data(path)));
+}
+
+static ot_value filesystem_rename_file(ot_state* rt, size_t first, size_t count) {
+  if (!filesystem_paths(rt, first, count, 2)) return 0;
+  ot_value from = rt->stack[first], to = rt->stack[first + 1];
+  int result = rename((char*)oti_bytes_data(from), (char*)oti_bytes_data(to));
+  return filesystem_done(rt, "rename-file", from, result);
+}
+
+static ot_value filesystem_make_directory(ot_state* rt, size_t first, size_t count) {
+  if (!filesystem_paths(rt, first, count, 1)) return 0;
+  ot_value path = rt->stack[first];
+  return filesystem_done(rt, "make-directory", path, mkdir((char*)oti_bytes_data(path), 0777));
+}
+
+const oti_builtin_def oti_filesystem_builtins[] = {
+    {B_FILE_EXISTS, "file-exists?", filesystem_file_exists},
+    {B_DELETE_FILE, "delete-file", filesystem_delete_file},
+    {B_RENAME_FILE, "rename-file", filesystem_rename_file},
+    {B_FILE_INFO, "file-info", filesystem_file_info},
+    {B_LIST_DIRECTORY, "list-directory", filesystem_list_directory},
+    {B_MAKE_DIRECTORY, "make-directory", filesystem_make_directory},
+    {B_FILE_LINK, "file-symbolic-link?", filesystem_file_link},
+    {B_CURRENT_DIRECTORY, "current-directory", filesystem_current_directory},
+    {0, NULL, NULL},
+};

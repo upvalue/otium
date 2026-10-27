@@ -46,8 +46,8 @@ oti_signature* oti_foreign_signature(ot_state* rt, oti_signature** cache, ot_val
                                      ot_value result, bool codes);
 
 static inline ot_value list_item(ot_value list, size_t index) {
-  while (index--) list = object_fields(list)[1];
-  return object_fields(list)[0];
+  while (index--) list = oti_cdr(list);
+  return oti_car(list);
 }
 
 #endif

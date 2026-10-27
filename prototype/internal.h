@@ -8,6 +8,7 @@
 #endif
 
 #include "heap.h"
+#include <assert.h>
 #include "reader.h"
 
 enum {
@@ -45,9 +46,9 @@ enum {
 
 enum { V_UNBOUND = 18, TAG_CHAR = 22, TAG_BUILTIN = 26 };
 
-/* Builtin procedures. Names and handlers are in the table in builtins.c.
- * Several modules pick a sub-handler by comparing ids against the first id of
- * a group, so keep each module's builtins together and in this order. */
+/* Builtin procedures. Each module lists its builtins' names and functions in
+ * an oti_builtin_def table; builtins.c combines them. The order here doesn't
+ * matter. */
 enum {
   B_ADD,
   B_SUB,
@@ -324,7 +325,7 @@ enum {
   B_PROCESS_SETENV,
   B_PROCESS_WRITE_ERROR,
   B_READER_TOKENS,
-  /* Compiler-only helpers, absent from the global environment. */
+  /* Compiler-only helpers have no name, so they aren't globals. */
   B_QQ_APPEND,
   B_EVAL_IN_NAMESPACE,
   B_COUNT
@@ -497,6 +498,17 @@ typedef struct {
   bool defined, is_private, macro;
 } oti_global_info;
 
+/* A builtin reads its arguments from rt->stack[first, first + count). It
+ * returns 0 after recording an error. */
+typedef ot_value (*oti_builtin_fn)(ot_state* rt, size_t first, size_t count);
+
+/* name is NULL for compiler-only helpers. A table ends with a NULL run. */
+typedef struct {
+  unsigned id;
+  const char* name;
+  oti_builtin_fn run;
+} oti_builtin_def;
+
 struct ot_state {
   oti_heap heap;
   ot_value process_values[2];
@@ -552,6 +564,7 @@ struct ot_state {
   ot_value classes[C_COUNT];
   /* Global cell of each builtin; inlined builtins cannot be redefined. */
   uint32_t builtin_cells[B_COUNT];
+  oti_builtin_fn builtin_run[B_COUNT];
   oti_roots class_roots;
   bool classes_ready, core_loaded;
   oti_roots constant_roots, global_roots, stack_roots, condition_roots;
@@ -618,7 +631,6 @@ void oti_restore_params(ot_state* rt, size_t count);
 bool oti_bind_param(ot_state* rt, ot_value param, ot_value value);
 ot_value oti_param_call(ot_state* rt, ot_value param, size_t count);
 bool oti_builtins(ot_state* rt);
-ot_value oti_reflection_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 bool oti_classes_init(ot_state* rt);
 bool oti_generic_prepare(ot_state* rt, size_t call, size_t* count);
 size_t oti_format_float(double value, char* buffer, size_t size);
@@ -627,15 +639,7 @@ int oti_integer_real(intptr_t integer, double real);
 size_t oti_utf8_next(const char* s, size_t n, size_t p, uint32_t* cp);
 size_t oti_utf8_encode(uint32_t cp, char bytes[4]);
 ot_value oti_string_get(ot_value string, ot_value key, ot_value fallback);
-ot_value oti_string_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 
-typedef struct {
-  size_t length, capacity, characters;
-} oti_buffer_info;
-
-ot_value oti_numeric_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
-ot_value oti_class_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
-ot_value oti_condition_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 ot_value oti_error_condition(ot_state* rt);
 ot_value oti_raise(ot_state* rt, size_t first, size_t count);
 ot_value oti_signal(ot_state* rt, size_t first, size_t count);
@@ -643,7 +647,6 @@ void oti_signal_error(ot_state* rt);
 void oti_restore_handlers(ot_state* rt, size_t count, size_t top);
 bool oti_install_handlers(ot_state* rt, size_t first, size_t count);
 void oti_remove_handlers(ot_state* rt, size_t count);
-ot_value oti_support_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 ot_value oti_intern(ot_state* rt, unsigned kind, const char* text, size_t length);
 ot_value oti_call_list(ot_state* rt, ot_value function, ot_value args);
 uint64_t oti_symbol_id(ot_value symbol);
@@ -652,43 +655,26 @@ int oti_builtin_index(const char* name);
 bool oti_enter(ot_state* rt, size_t call, size_t argc, bool tail);
 bool oti_leave(ot_state* rt, ot_value result);
 
-typedef struct {
-  bool abstract, builtin;
-} oti_class_info;
-
 bool oti_subtype(ot_value child, ot_value parent);
 ot_value oti_dispatch_type(ot_state* rt, ot_value value);
-ot_value oti_instance_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 ot_value oti_instance_call(ot_state* rt, ot_value instance, size_t first, size_t count);
 ot_value oti_instance_copy(ot_state* rt, ot_value instance);
-ot_value oti_record_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 ot_value oti_record_call(ot_state* rt, ot_value record, size_t first, size_t count);
-
-typedef struct {
-  size_t length, capacity;
-} oti_array_info;
-
-typedef struct {
-  size_t count, used, capacity;
-} oti_table_info;
 
 ot_value oti_equal(ot_state* rt, ot_value a, ot_value b, bool keys);
 ot_value oti_table_set(ot_state* rt, ot_value table, ot_value key, ot_value value);
 ot_value oti_table_get(ot_state* rt, ot_value table, ot_value key, ot_value fallback);
-ot_value oti_table_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 
 static inline bool oti_collection(ot_value v) {
   return value_is_ptr(v) &&
          (object_kind(v) == K_ARRAY || object_kind(v) == K_TABLE || object_kind(v) == K_KEYWORD);
 }
 
-ot_value oti_collection_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 ot_value oti_collection_call(ot_state* rt, size_t callable, size_t first, size_t count);
 void oti_foreign_collect(ot_state* rt);
 void oti_foreign_stats(const ot_state* rt, ot_stats* stats);
 bool oti_foreign_init(ot_state* rt);
 void oti_foreign_destroy(ot_state* rt);
-ot_value oti_foreign_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 bool oti_foreign_owned(ot_value value);
 ot_value oti_foreign_call(ot_state* rt, size_t callable, size_t first, size_t count);
 
@@ -713,29 +699,239 @@ static inline bool oti_natural(ot_value v, size_t* n) {
 
 size_t oti_bytes_length(ot_value v);
 unsigned char* oti_bytes_data(ot_value v);
-ot_value oti_bytes_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 ot_value oti_decode_error(ot_state* rt, size_t position);
 
-ot_value oti_restart_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 bool oti_install_restarts(ot_state* rt, size_t first, size_t count, size_t target);
 void oti_restore_restarts(ot_state* rt, size_t scopes);
 bool oti_resume_restart(ot_state* rt, size_t stop_frames);
 bool oti_install_cleanup(ot_state* rt, bool outcome);
 bool oti_run_cleanup(ot_state* rt, bool unwinding);
 void oti_restore_cleanups(ot_state* rt, size_t count);
-ot_value oti_time_builtin(ot_state* rt, unsigned id, size_t count);
-ot_value oti_port_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
-ot_value oti_port_print(ot_state* rt, unsigned id, size_t first, size_t count);
 ot_value oti_io_error(ot_state* rt, const char* reason);
 ot_value oti_bytes_new(ot_state* rt, size_t n);
 size_t oti_utf8_scalar(const unsigned char* s, size_t p, size_t end);
 void oti_port_repr(FILE* out, ot_value port);
 ot_value oti_read_source(ot_state* rt, const char* source, size_t length);
-ot_value oti_process_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 ot_value oti_tokens(ot_state* rt, size_t first, size_t count);
-ot_value oti_filesystem_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 void oti_ports_destroy(ot_state* rt);
 ot_value oti_file_error(ot_state* rt, const char* op, ot_value path, int error);
 ot_value oti_ffi_error(ot_state* rt, const char* operation, const char* reason,
                        const char* message);
+/* Object layouts. Each struct mirrors what oti_alloc lays out for its kind:
+ * the header, then the traced fields, then the opaque bytes. Kinds with a
+ * variable number of fields end in a flexible array. OTI_LAYOUT checks that
+ * the traced fields come first; allocation sites must pass the same field
+ * count. Text, floats, bytevectors, closures and record types are still
+ * accessed through object_fields and object_bytes. */
+#define OTI_FIELDS_SIZE(n) (sizeof(oti_object_header) + (n) * sizeof(ot_value))
+#define OTI_LAYOUT(type, fields, first_byte)                                                       \
+  _Static_assert(offsetof(type, first_byte) == OTI_FIELDS_SIZE(fields), #type " layout")
+#define OTI_FIELDS_ONLY(type, fields)                                                              \
+  _Static_assert(sizeof(type) == OTI_FIELDS_SIZE(fields), #type " layout")
+/* The opaque byte count to pass to oti_alloc for a struct with these fields. */
+#define OTI_BYTES(type, fields) (sizeof(type) - OTI_FIELDS_SIZE(fields))
+
+/* Sanitizer builds check the kind behind every cast. */
+#ifdef OTIUM_CHECK_KINDS
+#define OTI_CAST(type, kind, v) ((type*)(assert(oti_kind((v), (kind))), (v)))
+#else
+#define OTI_CAST(type, kind, v) ((type*)(v))
+#endif
+
+typedef struct {
+  oti_object_header header;
+  ot_value car, cdr;
+} oti_pair_obj;
+
+OTI_FIELDS_ONLY(oti_pair_obj, 2);
+
+typedef struct {
+  oti_object_header header;
+  ot_value value;
+} oti_box_obj;
+
+OTI_FIELDS_ONLY(oti_box_obj, 1);
+
+typedef struct {
+  oti_object_header header;
+  ot_value expander;
+} oti_macro_obj;
+
+OTI_FIELDS_ONLY(oti_macro_obj, 1);
+
+/* data is a K_ARRAY_DATA object of capacity fields. */
+typedef struct {
+  oti_object_header header;
+  ot_value data;
+  size_t length, capacity;
+} oti_array_obj;
+
+OTI_LAYOUT(oti_array_obj, 1, length);
+
+/* data is a K_TABLE_DATA object: key/value fields, then the bucket index in
+ * its opaque bytes. */
+typedef struct {
+  oti_object_header header;
+  ot_value data;
+  size_t count, used, capacity;
+} oti_table_obj;
+
+OTI_LAYOUT(oti_table_obj, 1, count);
+
+/* data is a K_BUFFER_DATA object; characters counts UTF-8 scalars. */
+typedef struct {
+  oti_object_header header;
+  ot_value data;
+  size_t length, capacity, characters;
+} oti_buffer_obj;
+
+OTI_LAYOUT(oti_buffer_obj, 1, length);
+
+/* layout is a K_LAYOUT object with LAYOUT_STRIDE fields per slot. */
+typedef struct {
+  oti_object_header header;
+  ot_value name, parent, layout;
+  bool abstract, builtin;
+} oti_class_obj;
+
+OTI_LAYOUT(oti_class_obj, 3, abstract);
+
+/* A slot's key, initializer and whether it is a property (true) or state. */
+enum { LAYOUT_KEY, LAYOUT_INIT, LAYOUT_PROPERTY, LAYOUT_STRIDE };
+
+/* layout is the class layout the instance was built with; data is a
+ * K_ARRAY_DATA object of its slot values. */
+typedef struct {
+  oti_object_header header;
+  ot_value type, layout, data;
+} oti_instance_obj;
+
+OTI_FIELDS_ONLY(oti_instance_obj, 3);
+
+typedef struct {
+  oti_object_header header;
+  ot_value name, methods;
+  size_t arity;
+} oti_generic_obj;
+
+OTI_LAYOUT(oti_generic_obj, 2, arity);
+
+typedef struct {
+  oti_object_header header;
+  ot_value signature, procedure;
+  bool around, next;
+} oti_method_obj;
+
+OTI_LAYOUT(oti_method_obj, 2, around);
+
+/* The remaining method chain for next-method, and the call's argument count. */
+typedef struct {
+  oti_object_header header;
+  ot_value methods;
+  size_t count;
+} oti_next_obj;
+
+OTI_LAYOUT(oti_next_obj, 1, count);
+
+typedef struct {
+  oti_object_header header;
+  ot_value name, value;
+} oti_param_obj;
+
+OTI_FIELDS_ONLY(oti_param_obj, 2);
+
+typedef struct {
+  oti_object_header header;
+  ot_value name, description, handler;
+} oti_restart_obj;
+
+OTI_FIELDS_ONLY(oti_restart_obj, 3);
+
+typedef struct {
+  oti_object_header header;
+  ot_value type;
+  ot_value values[];
+} oti_record_obj;
+
+OTI_FIELDS_ONLY(oti_record_obj, 1);
+
+static inline oti_pair_obj* oti_as_pair(ot_value v) { return OTI_CAST(oti_pair_obj, K_PAIR, v); }
+
+static inline oti_box_obj* oti_as_box(ot_value v) { return OTI_CAST(oti_box_obj, K_BOX, v); }
+
+static inline oti_macro_obj* oti_as_macro(ot_value v) {
+  return OTI_CAST(oti_macro_obj, K_MACRO, v);
+}
+
+static inline oti_array_obj* oti_as_array(ot_value v) {
+  return OTI_CAST(oti_array_obj, K_ARRAY, v);
+}
+
+static inline oti_table_obj* oti_as_table(ot_value v) {
+  return OTI_CAST(oti_table_obj, K_TABLE, v);
+}
+
+static inline oti_buffer_obj* oti_as_buffer(ot_value v) {
+  return OTI_CAST(oti_buffer_obj, K_BUFFER, v);
+}
+
+static inline oti_class_obj* oti_as_class(ot_value v) {
+  return OTI_CAST(oti_class_obj, K_CLASS, v);
+}
+
+static inline oti_instance_obj* oti_as_instance(ot_value v) {
+  return OTI_CAST(oti_instance_obj, K_INSTANCE, v);
+}
+
+static inline oti_generic_obj* oti_as_generic(ot_value v) {
+  return OTI_CAST(oti_generic_obj, K_GENERIC, v);
+}
+
+static inline oti_method_obj* oti_as_method(ot_value v) {
+  return OTI_CAST(oti_method_obj, K_METHOD, v);
+}
+
+static inline oti_next_obj* oti_as_next(ot_value v) { return OTI_CAST(oti_next_obj, K_NEXT, v); }
+
+static inline oti_param_obj* oti_as_param(ot_value v) {
+  return OTI_CAST(oti_param_obj, K_PARAM, v);
+}
+
+static inline oti_restart_obj* oti_as_restart(ot_value v) {
+  return OTI_CAST(oti_restart_obj, K_RESTART, v);
+}
+
+static inline oti_record_obj* oti_as_record(ot_value v) {
+  return OTI_CAST(oti_record_obj, K_RECORD, v);
+}
+
+static inline ot_value oti_car(ot_value pair) { return oti_as_pair(pair)->car; }
+
+static inline ot_value oti_cdr(ot_value pair) { return oti_as_pair(pair)->cdr; }
+
+/* Builtin tables, one per module. */
+extern const oti_builtin_def oti_bytes_builtins[], oti_class_builtins[], oti_collection_builtins[],
+    oti_condition_builtins[], oti_filesystem_builtins[], oti_foreign_builtins[],
+    oti_instance_builtins[], oti_numeric_builtins[], oti_port_builtins[], oti_process_builtins[],
+    oti_record_builtins[], oti_reflection_builtins[], oti_restart_builtins[], oti_string_builtins[],
+    oti_support_builtins[], oti_table_builtins[], oti_time_builtins[];
+
+/* Plain helpers other modules use in place of calling a builtin. */
+ot_value oti_table_new(ot_state* rt);
+ot_value oti_array_from(ot_state* rt, size_t first, size_t count);
+ot_value oti_list_from(ot_state* rt, size_t first, size_t count);
+bool oti_procedure(ot_value v);
+
+/* The table, string and bytevector cases of the generic collection builtins,
+ * which collections.c hands on with the same arguments. */
+ot_value oti_table_get_builtin(ot_state* rt, size_t first, size_t count);
+ot_value oti_table_length_builtin(ot_state* rt, size_t first, size_t count);
+ot_value oti_table_put_builtin(ot_state* rt, size_t first, size_t count);
+ot_value oti_table_push_builtin(ot_state* rt, size_t first, size_t count);
+ot_value oti_table_pop_builtin(ot_state* rt, size_t first, size_t count);
+ot_value oti_table_copy_builtin(ot_state* rt, size_t first, size_t count);
+ot_value oti_table_contains_builtin(ot_state* rt, size_t first, size_t count);
+ot_value oti_string_length_builtin(ot_state* rt, size_t first, size_t count);
+ot_value oti_bytes_copy_builtin(ot_state* rt, size_t first, size_t count);
+
 #endif

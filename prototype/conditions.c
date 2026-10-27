@@ -47,13 +47,13 @@ static ot_value message_condition(ot_state* rt, ot_value message, size_t first, 
   ot_value values[] = {message, OT_NIL, OT_NIL, OT_NIL, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, values, 5);
-  values[1] = oti_table_builtin(rt, B_TABLE, 0, 0);
+  values[1] = oti_table_new(rt);
   const char* type = diagnostic_type(code);
   values[2] = oti_intern(rt, K_SYMBOL, type, strlen(type));
   bool registered = values[2] != 0;
   if (registered && strcmp(type, "error")) {
     if (rt->condition_values[1] == OT_NIL) {
-      ot_value registry = oti_table_builtin(rt, B_TABLE, 0, 0);
+      ot_value registry = oti_table_new(rt);
       registered = registry != 0;
       if (registered) rt->condition_values[1] = registry;
     }
@@ -75,7 +75,7 @@ static ot_value message_condition(ot_state* rt, ot_value message, size_t first, 
     ok = values[4] && k && oti_table_set(rt, values[1], k, values[4]);
   }
   if (ok && count) {
-    values[3] = oti_collection_builtin(rt, B_ARRAY, first, count);
+    values[3] = oti_array_from(rt, first, count);
     k = key(rt, ":data");
     ok = values[3] && k && oti_table_set(rt, values[1], k, values[3]);
   }
@@ -111,58 +111,84 @@ ot_value oti_raise(ot_state* rt, size_t first, size_t count) {
   return oti_fail(rt, "uncaught condition");
 }
 
-ot_value oti_condition_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
-  if (count != (id == B_DEFINE_CONDITION || id == B_CONDITION_IS ? 2u : 1u))
-    return oti_fail(rt, "wrong number of condition arguments");
-  if (id == B_CONDITION_TYPE || id == B_CONDITION_MESSAGE)
-    return field(rt, rt->stack[first], id == B_CONDITION_TYPE ? ":type" : ":message");
-  if (id == B_ERROR_P) {
-    ot_value type = field(rt, rt->stack[first], ":type");
-    return !type ? 0 : type == OT_NIL ? OT_FALSE : OT_TRUE;
-  }
-  ot_value values[] = {OT_NIL, OT_NIL, OT_NIL};
+static ot_value condition_define(ot_state* rt, size_t first, size_t count) {
+  if (count != 2) return oti_fail(rt, "wrong number of condition arguments");
+  ot_value values[] = {OT_NIL, OT_NIL};
   oti_roots roots;
-  oti_roots_push(&rt->heap, &roots, values, 3);
+  oti_roots_push(&rt->heap, &roots, values, 2);
   ot_value result = 0;
-  if (id == B_DEFINE_CONDITION) {
-    values[0] = symbol(rt, rt->stack[first]);
-    values[1] = rt->stack[first + 1] == OT_NIL ? OT_NIL : symbol(rt, rt->stack[first + 1]);
-    if (!values[0] || !values[1]) goto done;
-    if (rt->condition_values[1] == OT_NIL) {
-      rt->condition_values[1] = oti_table_builtin(rt, B_TABLE, 0, 0);
-      if (!rt->condition_values[1]) {
-        rt->condition_values[1] = OT_NIL;
-        goto done;
-      }
+  values[0] = symbol(rt, rt->stack[first]);
+  values[1] = rt->stack[first + 1] == OT_NIL ? OT_NIL : symbol(rt, rt->stack[first + 1]);
+  if (!values[0] || !values[1]) goto done;
+  if (rt->condition_values[1] == OT_NIL) {
+    rt->condition_values[1] = oti_table_new(rt);
+    if (!rt->condition_values[1]) {
+      rt->condition_values[1] = OT_NIL;
+      goto done;
     }
-    ot_value cursor = values[1];
-    while (cursor != OT_NIL) {
-      if (cursor == values[0]) {
-        oti_fail(rt, "condition hierarchy cycle");
-        goto done;
-      }
-      cursor = oti_table_get(rt, rt->condition_values[1], cursor, OT_NIL);
+  }
+  ot_value cursor = values[1];
+  while (cursor != OT_NIL) {
+    if (cursor == values[0]) {
+      oti_fail(rt, "condition hierarchy cycle");
+      goto done;
     }
-    if (oti_table_set(rt, rt->condition_values[1], values[0], values[1])) result = values[0];
-  } else {
-    values[0] = field(rt, rt->stack[first], ":type");
-    if (!values[0]) goto done;
-    values[1] = symbol(rt, rt->stack[first + 1]);
-    if (!values[1]) goto done;
-    result = OT_FALSE;
-    while (values[0] != OT_NIL) {
-      if (values[0] == values[1]) {
-        result = OT_TRUE;
-        break;
-      }
-      if (rt->condition_values[1] == OT_NIL) break;
-      values[0] = oti_table_get(rt, rt->condition_values[1], values[0], OT_NIL);
+    cursor = oti_table_get(rt, rt->condition_values[1], cursor, OT_NIL);
+  }
+  if (oti_table_set(rt, rt->condition_values[1], values[0], values[1])) result = values[0];
+done:
+  oti_roots_pop(&rt->heap, &roots);
+  return result;
+}
+
+static ot_value condition_type(ot_state* rt, size_t first, size_t count) {
+  if (count != 1) return oti_fail(rt, "wrong number of condition arguments");
+  return field(rt, rt->stack[first], ":type");
+}
+
+static ot_value condition_message(ot_state* rt, size_t first, size_t count) {
+  if (count != 1) return oti_fail(rt, "wrong number of condition arguments");
+  return field(rt, rt->stack[first], ":message");
+}
+
+static ot_value condition_error_p(ot_state* rt, size_t first, size_t count) {
+  if (count != 1) return oti_fail(rt, "wrong number of condition arguments");
+  ot_value type = field(rt, rt->stack[first], ":type");
+  return !type ? 0 : type == OT_NIL ? OT_FALSE : OT_TRUE;
+}
+
+static ot_value condition_of_type_p(ot_state* rt, size_t first, size_t count) {
+  if (count != 2) return oti_fail(rt, "wrong number of condition arguments");
+  ot_value values[] = {OT_NIL, OT_NIL};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, values, 2);
+  ot_value result = 0;
+  values[0] = field(rt, rt->stack[first], ":type");
+  if (!values[0]) goto done;
+  values[1] = symbol(rt, rt->stack[first + 1]);
+  if (!values[1]) goto done;
+  result = OT_FALSE;
+  while (values[0] != OT_NIL) {
+    if (values[0] == values[1]) {
+      result = OT_TRUE;
+      break;
     }
+    if (rt->condition_values[1] == OT_NIL) break;
+    values[0] = oti_table_get(rt, rt->condition_values[1], values[0], OT_NIL);
   }
 done:
   oti_roots_pop(&rt->heap, &roots);
   return result;
 }
+
+const oti_builtin_def oti_condition_builtins[] = {
+    {B_DEFINE_CONDITION, "define-condition", condition_define},
+    {B_CONDITION_TYPE, "condition-type", condition_type},
+    {B_CONDITION_MESSAGE, "condition-message", condition_message},
+    {B_CONDITION_IS, "condition-of-type?", condition_of_type_p},
+    {B_ERROR_P, "error?", condition_error_p},
+    {0, NULL, NULL},
+};
 
 void oti_restore_handlers(ot_state* rt, size_t count, size_t top) {
   rt->handler_count = count;
@@ -204,8 +230,8 @@ static bool signal_handlers(ot_state* rt, ot_value condition) {
   oti_roots_push(&rt->heap, &roots, &condition, 1);
   args = oti_alloc(rt, K_PAIR, 2, 0);
   if (args) {
-    object_fields(args)[0] = condition;
-    object_fields(args)[1] = OT_EMPTY;
+    oti_as_pair(args)->car = condition;
+    oti_as_pair(args)->cdr = OT_EMPTY;
   }
   oti_roots_pop(&rt->heap, &roots);
   if (!args) {

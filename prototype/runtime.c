@@ -32,8 +32,8 @@ ot_value oti_cons(ot_state* rt, ot_value car, ot_value cdr) {
   oti_roots_push(&rt->heap, &roots, live, 2);
   ot_value result = oti_alloc(rt, K_PAIR, 2, 0);
   if (result) {
-    object_fields(result)[0] = live[0];
-    object_fields(result)[1] = live[1];
+    oti_as_pair(result)->car = live[0];
+    oti_as_pair(result)->cdr = live[1];
   }
   oti_roots_pop(&rt->heap, &roots);
   return result;
@@ -381,7 +381,7 @@ static bool evaluate_raw(ot_state* rt, const oti_ast* form, ot_value* result) {
     if (global == UINT32_MAX) return false;
     ot_value macro = oti_alloc(rt, K_MACRO, 1, 0);
     if (!macro) return false;
-    object_fields(macro)[0] = rt->globals[global];
+    oti_as_macro(macro)->expander = rt->globals[global];
     rt->globals[global] = macro;
     rt->global_info[global].macro = 1;
     const oti_ast* doc = name->next->next;
@@ -787,7 +787,7 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
   else if (v == OT_EOF) fputs("#<eof>", out);
   else if (oti_kind(v, K_PARAM)) {
     fputs("#<param ", out);
-    print_value(out, object_fields(v)[0], depth + 1);
+    print_value(out, oti_as_param(v)->name, depth + 1);
     fputc('>', out);
   } else if ((v & 255) == TAG_CHAR) {
     uint32_t cp = (uint32_t)(v >> 8);
@@ -839,17 +839,17 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
   } else if (oti_kind(v, K_RECORD) || oti_kind(v, K_RECORD_TYPE)) {
     bool descriptor = oti_kind(v, K_RECORD_TYPE);
     fputs(descriptor ? "#<record-type " : "#<record ", out);
-    print_value(out, object_fields(descriptor ? v : object_fields(v)[0])[0], depth + 1);
+    print_value(out, object_fields(descriptor ? v : oti_as_record(v)->type)[0], depth + 1);
     fputc('>', out);
   } else if (oti_kind(v, K_INSTANCE)) {
     fputs("#<", out);
-    print_value(out, object_fields(object_fields(v)[0])[0], depth + 1);
+    print_value(out, oti_as_class(oti_as_instance(v)->type)->name, depth + 1);
     fputc('>', out);
   } else if (oti_kind(v, K_PORT)) {
     oti_port_repr(out, v);
   } else if (oti_kind(v, K_RESTART)) {
     fputs("#<restart ", out);
-    print_value(out, object_fields(v)[0], depth + 1);
+    print_value(out, oti_as_restart(v)->name, depth + 1);
     fputc('>', out);
   } else if (oti_kind(v, K_BYTEVECTOR)) {
     fputs("#u8(", out);
@@ -859,8 +859,8 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
     }
     fputc(')', out);
   } else if (oti_kind(v, K_ARRAY)) {
-    oti_array_info* info = object_bytes(v);
-    ot_value* items = info->length ? object_fields(object_fields(v)[0]) : NULL;
+    oti_array_obj* info = oti_as_array(v);
+    ot_value* items = info->length ? object_fields(info->data) : NULL;
     fputc('[', out);
     for (size_t i = 0; i < info->length; i++) {
       if (i) fputc(' ', out);
@@ -868,8 +868,8 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
     }
     fputc(']', out);
   } else if (oti_kind(v, K_TABLE)) {
-    oti_table_info* info = object_bytes(v);
-    ot_value* entries = info->used ? object_fields(object_fields(v)[0]) : NULL;
+    oti_table_obj* info = oti_as_table(v);
+    ot_value* entries = info->used ? object_fields(info->data) : NULL;
     fputc('{', out);
     size_t printed = 0;
     for (size_t i = 0; i < info->used; i++)
@@ -885,8 +885,8 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
     unsigned count = 0;
     while (oti_kind(v, K_PAIR) && count++ < 1000) {
       if (count > 1) fputc(' ', out);
-      print_value(out, object_fields(v)[0], depth + 1);
-      v = object_fields(v)[1];
+      print_value(out, oti_car(v), depth + 1);
+      v = oti_cdr(v);
     }
     if (v != OT_EMPTY) {
       fputs(" . ", out);

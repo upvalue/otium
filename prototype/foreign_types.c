@@ -56,7 +56,7 @@ bool oti_foreign_list_length(ot_state* rt, ot_value list, size_t limit, size_t* 
   *count = 0;
   while (oti_kind(list, K_PAIR) && *count < limit) {
     (*count)++;
-    list = object_fields(list)[1];
+    list = oti_cdr(list);
   }
   return list == OT_EMPTY || oti_error(rt, "FFI signature: improper, cyclic or oversized list");
 }
@@ -256,7 +256,7 @@ static ffi_type* aggregate_type(ot_state* rt, oti_signature* s, ot_value descrip
   for (size_t i = 0; ok && i < n; i++) {
     if (element) node->type.elements[i] = element;
     else {
-      ot_value field = object_fields(cursor)[0];
+      ot_value field = oti_car(cursor);
       size_t count;
       if (!oti_foreign_list_length(rt, field, 3, &count) || count != 3 ||
           !oti_kind(list_item(field, 0), K_SYMBOL)) {
@@ -266,14 +266,14 @@ static ffi_type* aggregate_type(ot_state* rt, oti_signature* s, ot_value descrip
       }
       node->type.elements[i] = aggregate_type(rt, s, list_item(field, 1), depth + 1, budget);
       ok = node->type.elements[i] != NULL;
-      cursor = object_fields(cursor)[1];
+      cursor = oti_cdr(cursor);
     }
   }
   if (ok && kind == UNION_TYPE) {
     cursor = members;
-    for (size_t i = 0; ok && i < n; i++, cursor = object_fields(cursor)[1]) {
+    for (size_t i = 0; ok && i < n; i++, cursor = oti_cdr(cursor)) {
       size_t offset;
-      if (!natural_size(list_item(object_fields(cursor)[0], 2), &offset) || offset)
+      if (!natural_size(list_item(oti_car(cursor), 2), &offset) || offset)
         ok = oti_error(rt, "FFI abi: union field offset mismatch");
     }
 #if defined(__x86_64__) && defined(__linux__) && !defined(__ILP32__)
@@ -291,9 +291,9 @@ static ffi_type* aggregate_type(ot_state* rt, oti_signature* s, ot_value descrip
   }
   if (ok && !element) {
     cursor = members;
-    for (size_t i = 0; i < n; i++, cursor = object_fields(cursor)[1]) {
+    for (size_t i = 0; i < n; i++, cursor = oti_cdr(cursor)) {
       size_t offset;
-      if (!natural_size(list_item(object_fields(cursor)[0], 2), &offset) || offset != offsets[i]) {
+      if (!natural_size(list_item(oti_car(cursor), 2), &offset) || offset != offsets[i]) {
         oti_error(rt, "FFI abi: field offset mismatch");
         ok = false;
         break;
@@ -338,8 +338,8 @@ oti_signature* oti_foreign_signature(ot_state* rt, oti_signature** cache, ot_val
   if (!oti_foreign_list_length(rt, arguments, MAX_ARGUMENTS, &wanted.count)) return 0;
   bool valid = call_type(rt, &wanted, result, codes, &wanted.result, &wanted.result_type);
   ot_value list = arguments;
-  for (size_t i = 0; valid && i < wanted.count; i++, list = object_fields(list)[1]) {
-    valid = call_type(rt, &wanted, object_fields(list)[0], codes, &wanted.arguments[i],
+  for (size_t i = 0; valid && i < wanted.count; i++, list = oti_cdr(list)) {
+    valid = call_type(rt, &wanted, oti_car(list), codes, &wanted.arguments[i],
                       &wanted.argument_types[i]);
     if (valid && wanted.arguments[i] == 0) valid = oti_error(rt, "FFI signature: void argument");
   }

@@ -38,64 +38,88 @@ static const char* type_name(ot_value value) {
   return ":native";
 }
 
-ot_value oti_reflection_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
-  size_t arity = id == B_EOF || id == B_CURRENT_NS ? 0 : 1;
-  if (count != arity) {
-    oti_error(rt, "wrong number of arguments");
+static bool reflection_arity(ot_state* rt, size_t count, size_t arity) {
+  if (count == arity) return true;
+  return oti_error(rt, "wrong number of arguments");
+}
+
+static ot_value reflection_eof_object(ot_state* rt, size_t first, size_t count) {
+  (void)first;
+  if (!reflection_arity(rt, count, 0)) return 0;
+  return OT_EOF;
+}
+
+static ot_value reflection_eof_object_p(ot_state* rt, size_t first, size_t count) {
+  if (!reflection_arity(rt, count, 1)) return 0;
+  return rt->stack[first] == OT_EOF ? OT_TRUE : OT_FALSE;
+}
+
+static ot_value reflection_buffer_p(ot_state* rt, size_t first, size_t count) {
+  if (!reflection_arity(rt, count, 1)) return 0;
+  return oti_kind(rt->stack[first], K_BUFFER) ? OT_TRUE : OT_FALSE;
+}
+
+static ot_value reflection_type(ot_state* rt, size_t first, size_t count) {
+  if (!reflection_arity(rt, count, 1)) return 0;
+  const char* name = type_name(rt->stack[first]);
+  return oti_intern(rt, K_KEYWORD, name, strlen(name));
+}
+
+static ot_value reflection_current_ns(ot_state* rt, size_t first, size_t count) {
+  (void)first;
+  if (!reflection_arity(rt, count, 0)) return 0;
+  const char* name = rt->namespaces[rt->current_namespace];
+  return oti_intern(rt, K_SYMBOL, name, strlen(name));
+}
+
+static ot_value reflection_describe(ot_state* rt, size_t first, size_t count) {
+  if (!reflection_arity(rt, count, 1)) return 0;
+  ot_value value = rt->stack[first];
+  if (!oti_kind(value, K_SYMBOL)) {
+    oti_error(rt, "describe expects a symbol");
     return 0;
   }
-  ot_value value = count ? rt->stack[first] : OT_NIL;
-  switch (id) {
-    case B_EOF: return OT_EOF;
-    case B_EOF_P: return value == OT_EOF ? OT_TRUE : OT_FALSE;
-    case B_BUFFER_P: return oti_kind(value, K_BUFFER) ? OT_TRUE : OT_FALSE;
-    case B_TYPE: {
-      const char* name = type_name(value);
-      return oti_intern(rt, K_KEYWORD, name, strlen(name));
+  size_t n;
+  memcpy(&n, object_bytes(value), sizeof(n));
+  const char* name = (char*)object_bytes(value) + sizeof(n);
+  uint32_t index = oti_lookup_global(rt, name, n);
+  if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND) {
+    if (n == 2 && !memcmp(name, "ns", 2)) {
+      const char* doc = "(ns name (:require ...)) Set the current namespace.";
+      return oti_text(rt, K_STRING, doc, strlen(doc));
     }
-    case B_CURRENT_NS: {
-      const char* name = rt->namespaces[rt->current_namespace];
-      return oti_intern(rt, K_SYMBOL, name, strlen(name));
-    }
-    case B_DESCRIBE: {
-      if (!oti_kind(value, K_SYMBOL)) {
-        oti_error(rt, "describe expects a symbol");
-        return 0;
-      }
-      size_t n;
-      memcpy(&n, object_bytes(value), sizeof(n));
-      const char* name = (char*)object_bytes(value) + sizeof(n);
-      uint32_t index = oti_lookup_global(rt, name, n);
-      if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND) {
-        if (n == 2 && !memcmp(name, "ns", 2)) {
-          const char* doc = "(ns name (:require ...)) Set the current namespace.";
-          return oti_text(rt, K_STRING, doc, strlen(doc));
-        }
-        return OT_NIL;
-      }
-      const char* space = rt->namespaces[rt->global_info[index].space];
-      const char* local = rt->global_info[index].name;
-      oti_documentation doc = rt->global_info[index].doc;
-      if (!doc.text) {
-        doc.text = "no documentation";
-        doc.length = strlen(doc.text);
-      }
-      size_t prefix = strlen(space) + strlen(local) + 3;
-      if (doc.length > SIZE_MAX - prefix - 1) {
-        oti_error(rt, "documentation too large");
-        return 0;
-      }
-      char* text = malloc(prefix + doc.length + 1);
-      if (!text) {
-        oti_error(rt, "out of host memory");
-        return 0;
-      }
-      snprintf(text, prefix + 1, "%s/%s: ", space, local);
-      memcpy(text + prefix, doc.text, doc.length);
-      ot_value result = oti_text(rt, K_STRING, text, prefix + doc.length);
-      free(text);
-      return result;
-    }
-    default: oti_error(rt, "unknown reflection builtin"); return 0;
+    return OT_NIL;
   }
+  const char* space = rt->namespaces[rt->global_info[index].space];
+  const char* local = rt->global_info[index].name;
+  oti_documentation doc = rt->global_info[index].doc;
+  if (!doc.text) {
+    doc.text = "no documentation";
+    doc.length = strlen(doc.text);
+  }
+  size_t prefix = strlen(space) + strlen(local) + 3;
+  if (doc.length > SIZE_MAX - prefix - 1) {
+    oti_error(rt, "documentation too large");
+    return 0;
+  }
+  char* text = malloc(prefix + doc.length + 1);
+  if (!text) {
+    oti_error(rt, "out of host memory");
+    return 0;
+  }
+  snprintf(text, prefix + 1, "%s/%s: ", space, local);
+  memcpy(text + prefix, doc.text, doc.length);
+  ot_value result = oti_text(rt, K_STRING, text, prefix + doc.length);
+  free(text);
+  return result;
 }
+
+const oti_builtin_def oti_reflection_builtins[] = {
+    {B_TYPE, "type", reflection_type},
+    {B_EOF, "eof-object", reflection_eof_object},
+    {B_EOF_P, "eof-object?", reflection_eof_object_p},
+    {B_BUFFER_P, "buffer?", reflection_buffer_p},
+    {B_CURRENT_NS, "current-ns", reflection_current_ns},
+    {B_DESCRIBE, "describe", reflection_describe},
+    {0, NULL, NULL},
+};

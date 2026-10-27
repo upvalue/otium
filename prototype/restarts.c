@@ -23,7 +23,10 @@ bool oti_install_restarts(ot_state* rt, size_t first, size_t count, size_t targe
       oti_restore_restarts(rt, rt->restart_scope_count);
       return false;
     }
-    memcpy(object_fields(v), rt->stack + first + 3 * i, 3 * sizeof(ot_value));
+    oti_restart_obj* r = oti_as_restart(v);
+    r->name = rt->stack[first + 3 * i];
+    r->description = rt->stack[first + 3 * i + 1];
+    r->handler = rt->stack[first + 3 * i + 2];
     rt->restarts[old + i] = v;
     rt->restart_roots.count = old + i + 1;
   }
@@ -59,7 +62,7 @@ static ot_value find(ot_state* rt, ot_value name) {
     if (exact) {
       if (r == name) return r;
     } else {
-      ot_value symbol = object_fields(r)[0];
+      ot_value symbol = oti_as_restart(r)->name;
       size_t n;
       memcpy(&n, object_bytes(symbol), sizeof(n));
       if (n == length && !memcmp((char*)object_bytes(symbol) + sizeof(n), text, n)) return r;
@@ -68,40 +71,49 @@ static ot_value find(ot_state* rt, ot_value name) {
   return OT_NIL;
 }
 
-ot_value oti_restart_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
-  if ((id == B_COMPUTE_RESTARTS && count) ||
-      (id == B_INVOKE_RESTART ? count < 1 : id != B_COMPUTE_RESTARTS && count != 1)) {
-    oti_error(rt, "wrong number of restart arguments");
-    return 0;
-  }
-  if (id == B_COMPUTE_RESTARTS) {
-    size_t base = rt->sp, n = rt->restart_count;
-    if (n > rt->stack_limit - base || !oti_stack(rt, base + n)) {
-      oti_error(rt, "VM stack limit exceeded");
-      return 0;
-    }
-    for (size_t i = 0; i < n; i++) rt->stack[base + i] = rt->restarts[n - i - 1];
-    rt->sp = rt->stack_roots.count = base + n;
-    ot_value result = oti_collection_builtin(rt, B_ARRAY, base, n);
-    rt->sp = rt->stack_roots.count = base;
-    return result;
-  }
+static ot_value restart_arity_error(ot_state* rt) {
+  return oti_fail(rt, "wrong number of restart arguments");
+}
+
+static ot_value restart_compute(ot_state* rt, size_t first, size_t count) {
+  (void)first;
+  if (count) return restart_arity_error(rt);
+  size_t base = rt->sp, n = rt->restart_count;
+  if (n > rt->stack_limit - base || !oti_stack(rt, base + n))
+    return oti_fail(rt, "VM stack limit exceeded");
+  for (size_t i = 0; i < n; i++) rt->stack[base + i] = rt->restarts[n - i - 1];
+  rt->sp = rt->stack_roots.count = base + n;
+  ot_value result = oti_array_from(rt, base, n);
+  rt->sp = rt->stack_roots.count = base;
+  return result;
+}
+
+static ot_value restart_find(ot_state* rt, size_t first, size_t count) {
+  if (count != 1) return restart_arity_error(rt);
+  return find(rt, rt->stack[first]);
+}
+
+static ot_value restart_name(ot_state* rt, size_t first, size_t count) {
+  if (count != 1) return restart_arity_error(rt);
   ot_value value = rt->stack[first];
-  if (id == B_RESTART_NAME || id == B_RESTART_DESCRIPTION) {
-    if (!oti_kind(value, K_RESTART)) {
-      oti_error(rt, "expected restart");
-      return 0;
-    }
-    return object_fields(value)[id == B_RESTART_DESCRIPTION];
-  }
-  ot_value restart = find(rt, value);
-  if (!restart || id == B_FIND_RESTART) return restart;
-  if (restart == OT_NIL) {
-    oti_error(rt, "no active restart");
-    return 0;
-  }
+  if (!oti_kind(value, K_RESTART)) return oti_fail(rt, "expected restart");
+  return oti_as_restart(value)->name;
+}
+
+static ot_value restart_description(ot_state* rt, size_t first, size_t count) {
+  if (count != 1) return restart_arity_error(rt);
+  ot_value value = rt->stack[first];
+  if (!oti_kind(value, K_RESTART)) return oti_fail(rt, "expected restart");
+  return oti_as_restart(value)->description;
+}
+
+static ot_value restart_invoke(ot_state* rt, size_t first, size_t count) {
+  if (count < 1) return restart_arity_error(rt);
+  ot_value restart = find(rt, rt->stack[first]);
+  if (!restart) return 0;
+  if (restart == OT_NIL) return oti_fail(rt, "no active restart");
   rt->restart_transfer[0] = restart;
-  ot_value args = oti_builtin(rt, B_LIST, first + 1, count - 1);
+  ot_value args = oti_list_from(rt, first + 1, count - 1);
   if (!args) {
     rt->restart_transfer[0] = OT_NIL;
     return 0;
@@ -111,6 +123,15 @@ ot_value oti_restart_builtin(ot_state* rt, unsigned id, size_t first, size_t cou
   rt->restart_pending = true;
   return 0;
 }
+
+const oti_builtin_def oti_restart_builtins[] = {
+    {B_FIND_RESTART, "find-restart", restart_find},
+    {B_COMPUTE_RESTARTS, "compute-restarts", restart_compute},
+    {B_RESTART_NAME, "restart-name", restart_name},
+    {B_RESTART_DESCRIPTION, "restart-description", restart_description},
+    {B_INVOKE_RESTART, "invoke-restart", restart_invoke},
+    {0, NULL, NULL},
+};
 
 bool oti_resume_restart(ot_state* rt, size_t stop_frames) {
   size_t index = rt->restart_count;
@@ -144,7 +165,7 @@ bool oti_resume_restart(ot_state* rt, size_t stop_frames) {
   size_t base = rt->sp;
   if (!oti_stack(rt, base + 3)) return true;
   rt->stack[base] = ((ot_value)B_APPLY << 8) | TAG_BUILTIN;
-  rt->stack[base + 1] = object_fields(rt->restart_transfer[0])[2];
+  rt->stack[base + 1] = oti_as_restart(rt->restart_transfer[0])->handler;
   rt->stack[base + 2] = rt->restart_transfer[1];
   rt->sp = rt->stack_roots.count = base + 3;
   rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;

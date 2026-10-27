@@ -123,7 +123,7 @@ bool oti_apply(ot_state* rt, size_t call, size_t argc, bool tail) {
     ot_value list = rt->stack[call + argc];
     bool array = oti_kind(list, K_ARRAY);
     ot_value cursor = array || list == OT_NIL ? OT_EMPTY : list, slow = cursor;
-    size_t length = array ? ((oti_array_info*)object_bytes(list))->length : 0, prefix = argc - 2;
+    size_t length = array ? oti_as_array(list)->length : 0, prefix = argc - 2;
     while (oti_kind(cursor, K_PAIR)) {
       if (length >= rt->stack_limit) return oti_error(rt, "VM stack limit exceeded");
       length++;

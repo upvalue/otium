@@ -29,8 +29,8 @@ bool ot_set_arguments(ot_state* rt, const char* script, size_t count,
       ok = false;
       break;
     }
-    object_fields(pair)[0] = v[2];
-    object_fields(pair)[1] = v[0];
+    oti_as_pair(pair)->car = v[2];
+    oti_as_pair(pair)->cdr = v[0];
     v[0] = pair;
   }
   if (ok) {
@@ -48,35 +48,52 @@ static bool environment_string(ot_value value, bool name) {
   return !memchr(bytes, 0, length) && (!name || (length && !memchr(bytes, '=', length)));
 }
 
-ot_value oti_process_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
-  if (id == B_PROCESS_GETENV || id == B_PROCESS_SETENV) {
-    if (count != (id == B_PROCESS_GETENV ? 1u : 2u) ||
-        !environment_string(rt->stack[first], true)) {
-      oti_error(rt, "expected an environment variable name");
-      return 0;
-    }
-    const char* name = (const char*)oti_bytes_data(rt->stack[first]);
-    if (id == B_PROCESS_GETENV) {
-      const char* value = getenv(name);
-      return value ? oti_text(rt, K_STRING, value, strlen(value)) : OT_NIL;
-    }
-    ot_value value = rt->stack[first + 1];
-    if (value != OT_NIL && !environment_string(value, false)) {
-      oti_error(rt, "expected a string without NUL or nil");
-      return 0;
-    }
-    int result = value == OT_NIL ? unsetenv(name) : setenv(name, (char*)oti_bytes_data(value), 1);
-    if (result) {
-      oti_error(rt, "could not change the environment");
-      return 0;
-    }
-    return OT_NIL;
+/* The variable name for getenv and setenv!, or NULL after recording an error. */
+static const char* process_variable(ot_state* rt, size_t first, size_t count, size_t expected) {
+  if (count != expected || !environment_string(rt->stack[first], true)) {
+    oti_error(rt, "expected an environment variable name");
+    return NULL;
   }
-  if (count) {
-    oti_error(rt, "process metadata takes no arguments");
+  return (const char*)oti_bytes_data(rt->stack[first]);
+}
+
+static ot_value process_getenv(ot_state* rt, size_t first, size_t count) {
+  const char* name = process_variable(rt, first, count, 1);
+  if (!name) return 0;
+  const char* value = getenv(name);
+  return value ? oti_text(rt, K_STRING, value, strlen(value)) : OT_NIL;
+}
+
+static ot_value process_setenv(ot_state* rt, size_t first, size_t count) {
+  const char* name = process_variable(rt, first, count, 2);
+  if (!name) return 0;
+  ot_value value = rt->stack[first + 1];
+  if (value != OT_NIL && !environment_string(value, false)) {
+    oti_error(rt, "expected a string without NUL or nil");
     return 0;
   }
-  if (id == B_SCRIPT_NAME) return rt->process_values[1];
+  int result = value == OT_NIL ? unsetenv(name) : setenv(name, (char*)oti_bytes_data(value), 1);
+  if (result) {
+    oti_error(rt, "could not change the environment");
+    return 0;
+  }
+  return OT_NIL;
+}
+
+static bool process_metadata(ot_state* rt, size_t count) {
+  if (count) oti_error(rt, "process metadata takes no arguments");
+  return !count;
+}
+
+static ot_value process_script_name(ot_state* rt, size_t first, size_t count) {
+  (void)first;
+  if (!process_metadata(rt, count)) return 0;
+  return rt->process_values[1];
+}
+
+static ot_value process_arguments(ot_state* rt, size_t first, size_t count) {
+  (void)first;
+  if (!process_metadata(rt, count)) return 0;
   ot_value live[] = {rt->process_values[0], OT_EMPTY, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, live, 3);
@@ -87,14 +104,22 @@ ot_value oti_process_builtin(ot_state* rt, unsigned id, size_t first, size_t cou
       ok = false;
       break;
     }
-    object_fields(pair)[0] = object_fields(live[0])[0];
-    object_fields(pair)[1] = OT_EMPTY;
+    oti_as_pair(pair)->car = oti_car(live[0]);
+    oti_as_pair(pair)->cdr = OT_EMPTY;
     if (live[1] == OT_EMPTY) live[1] = pair;
-    else object_fields(live[2])[1] = pair;
+    else oti_as_pair(live[2])->cdr = pair;
     live[2] = pair;
-    live[0] = object_fields(live[0])[1];
+    live[0] = oti_cdr(live[0]);
   }
   ot_value result = ok ? live[1] : 0;
   oti_roots_pop(&rt->heap, &roots);
   return result;
 }
+
+const oti_builtin_def oti_process_builtins[] = {
+    {B_PROCESS_ARGUMENTS, "otium.process/arguments", process_arguments},
+    {B_SCRIPT_NAME, "otium.process/script-name", process_script_name},
+    {B_PROCESS_GETENV, "otium.process/getenv", process_getenv},
+    {B_PROCESS_SETENV, "otium.process/setenv!", process_setenv},
+    {0, NULL, NULL},
+};

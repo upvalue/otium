@@ -1,7 +1,7 @@
 CC ?= cc
 CFLAGS ?= -O2 -g
 WARNINGS = -std=c11 -Wall -Wextra -Werror
-SANITIZE = -O1 -g -fsanitize=address,undefined
+SANITIZE = -O1 -g -fsanitize=address,undefined -DOTIUM_CHECK_KINDS
 LDLIBS = -pthread -ldl -lm $(shell pkg-config --libs libffi)
 
 RUNTIME = heap.c reader.c tokens.c runtime.c compiler.c vm.c builtins.c numeric.c time.c \

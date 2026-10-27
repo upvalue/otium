@@ -70,8 +70,8 @@ bool oti_run_cleanup(ot_state* rt, bool unwinding) {
                                              : OT_NIL;
       values[4] = values[5] ? oti_alloc(rt, K_PAIR, 2, 0) : 0;
       if (values[4]) {
-        object_fields(values[4])[0] = values[5];
-        object_fields(values[4])[1] = OT_EMPTY;
+        oti_as_pair(values[4])->car = values[5];
+        oti_as_pair(values[4])->cdr = OT_EMPTY;
       } else ok = false;
     }
     if (ok) ok = oti_call_list(rt, values[0], values[4]) != 0;

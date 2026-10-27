@@ -1,6 +1,10 @@
+# The LLVM toolchain file in cross/: homebrew on macOS, llvm-21 elsewhere.
+# Pick another with `just toolchain=NAME build`.
+toolchain := if os() == "macos" { "homebrew" } else { "llvm-21" }
+
 # Configure and build the kernel
 build:
-    @test -d build || meson setup build --cross-file=cross/riscv32.txt
+    @test -d build || meson setup build --cross-file=cross/riscv32.txt --cross-file=cross/{{toolchain}}.txt
     meson compile -C build
 
 # Build and boot in QEMU; output goes to this terminal

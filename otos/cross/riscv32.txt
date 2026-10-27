@@ -1,8 +1,5 @@
-[binaries]
-c = '/opt/homebrew/opt/llvm/bin/clang'
-ar = '/opt/homebrew/opt/llvm/bin/llvm-ar'
-strip = '/opt/homebrew/opt/llvm/bin/llvm-strip'
-objcopy = '/opt/homebrew/opt/llvm/bin/llvm-objcopy'
+# Target settings for rv32gc. Use it together with a toolchain file that
+# sets [binaries]: cross/homebrew.txt or cross/llvm-21.txt.
 
 [built-in options]
 c_args = ['--target=riscv32-unknown-elf', '-march=rv32gc', '-mabi=ilp32d', '-mcmodel=medany', '-fno-stack-protector']

@@ -9,7 +9,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 TARGET = platform.machine() + '-' + platform.system().lower()
 LIBRARY_EXTENSION = 'dylib' if platform.system() == 'Darwin' else 'so'
-BUILD = Path(os.environ.get('OTIUM_BUILD', ROOT / 'build'))
+BUILD = Path(os.environ.get('OTIUM_BUILD', ROOT / 'build' / TARGET / 'default'))
 
 
 def command(runtime='c', *arguments, isolated=True, executable=None):

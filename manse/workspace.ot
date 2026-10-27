@@ -261,11 +261,10 @@ one the last view asked for, e.g. by a click. Record the focus this view asks fo
         fallback)))
 
 (def (config-path)
-  "ui-config.ot in OTIUM_BUILD when set, otherwise build/ in the repository that contains this file."
+  "ui-config.ot in OTIUM_BUILD, which ./otium sets."
   (let ((build (process/getenv "OTIUM_BUILD")))
-    (if build
-        (str build "/ui-config.ot")
-        (script-path "build/ui-config.ot" "../build/ui-config.ot"))))
+    (unless build (error "OTIUM_BUILD is not set; run Manse through ./otium"))
+    (str build "/ui-config.ot")))
 
 (def (icon-path)
   (script-path "manse/assets/manse-mark.png" "assets/manse-mark.png"))

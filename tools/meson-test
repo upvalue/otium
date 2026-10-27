@@ -14,4 +14,5 @@ while [ "$count" -gt 0 ]; do
     shift
     count=$((count - 1))
 done
-exec meson test -C "$(dirname "$0")/../build" --setup "$setup" --print-errorlogs "$@"
+build=${OTIUM_BUILD:-$(dirname "$0")/../build/$(uname -m)-$(uname -s | tr A-Z a-z)/default}
+exec meson test -C "$build" --setup "$setup" --print-errorlogs "$@"

@@ -49,9 +49,13 @@ case "${1-}" in
         shift
         set -- "$root/lib/otium/tools/$tool.ot" -- "$@" ;;
 esac
+# Builds are per machine type, so a checkout synced between machines keeps one
+# for each. Exported so programs find native libraries in the same build.
+OTIUM_BUILD=${OTIUM_BUILD:-$root/build/$(uname -m)-$(uname -s | tr A-Z a-z)/default}
+export OTIUM_BUILD
 case "$runtime" in
     c)
-        binary=${OTIUM_BUILD:-$root/build}/otium
+        binary=$OTIUM_BUILD/otium
         if [ ! -x "$binary" ]; then
             printf 'otium: %s is missing; run just build\n' "$binary" >&2
             exit 127

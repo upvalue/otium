@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-build=${OTIUM_BUILD:-$root/../build}
+build=${OTIUM_BUILD:-$root/../build/$(uname -m)-$(uname -s | tr A-Z a-z)/default}
 case $(uname -s) in Darwin) extension=dylib ;; *) extension=so ;; esac
 # Native helpers are built on first use, so a fresh checkout only needs Chez,
 # Meson and a C compiler for the REPL and development server.

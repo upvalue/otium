@@ -9,6 +9,8 @@ import re
 import shutil
 import subprocess
 
+from otium_tools import BUILD
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -39,7 +41,7 @@ def main():
         prefix = ['--compile-imported-libraries', '--libdirs', str(ROOT/'chez'),
                   '--script', str(ROOT/'chez/main.ss')]
     else:
-        runtime = Path(os.environ.get('OTIUM_BUILD', ROOT/'build'))/'otium'
+        runtime = BUILD/'otium'
         executable = 'otium'
         prefix = []
     runtime = Path(runtime).resolve()
@@ -81,7 +83,7 @@ def main():
                '-L', str(ROOT/'examples'), '-L', str(ROOT/'tests'), str(application), '--',
                '--app-name', args.app_name, '--app-id', args.app_id,
                '--app-version', args.app_version, '--icon', icon, *options]
-    os.environ.setdefault('OTIUM_FFI_LIBRARY', str(Path(os.environ.get('OTIUM_BUILD', ROOT/'build'))/'libotium-ffi.dylib'))
+    os.environ.setdefault('OTIUM_FFI_LIBRARY', str(BUILD/'libotium-ffi.dylib'))
     os.chdir(ROOT)
     os.execv(str(host), command)
 

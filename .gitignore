@@ -1,6 +1,5 @@
-# Build output. Use build-<name>/ for extra Meson configurations.
+# Build output, in build/<machine>-<os>/<configuration>/.
 /build/
-/build-*/
 /subprojects/*
 !/subprojects/*.wrap
 !/subprojects/packagefiles/

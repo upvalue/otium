@@ -5,6 +5,7 @@ import shutil
 import sys
 
 from harness import ROOT, test
+from otium_tools import TARGET
 
 
 def launcher(t):
@@ -12,9 +13,9 @@ def launcher(t):
     root = t.scratch / 'otium launcher'
     root.mkdir()
     shutil.copy2(ROOT / 'otium', root / 'otium')
-    for runtime, path in (('c', 'build/otium'), ('chez', 'chez/run')):
+    for runtime, path in (('c', f'build/{TARGET}/default/otium'), ('chez', 'chez/run')):
         stub = root / path
-        stub.parent.mkdir()
+        stub.parent.mkdir(parents=True)
         stub.write_text('#!/usr/bin/env python3\nimport json,sys\n'
                         f'print(json.dumps([{runtime!r}, sys.argv[1:]]))\n')
         stub.chmod(0o755)

@@ -1,13 +1,18 @@
-# Otium development commands. Builds live in build/; see docs/language-guide.md.
+# Otium development commands. Builds live in build/<machine>-<os>/, one Meson
+# configuration per subdirectory, so a checkout synced between machines keeps a
+# build for each. See docs/language-guide.md.
 
 set positional-arguments
 
 export PYTHONPATH := justfile_directory() / "tools" + ":" + justfile_directory()
 
+builds := justfile_directory() / "build" / `echo "$(uname -m)-$(uname -s | tr A-Z a-z)"`
+export OTIUM_BUILD := env("OTIUM_BUILD", builds / "default")
+
 # Configure and build the C runtime and native helpers
 build:
-    @test -d build/meson-info || meson setup build
-    meson compile -C build
+    @test -d "$OTIUM_BUILD/meson-info" || meson setup "$OTIUM_BUILD"
+    meson compile -C "$OTIUM_BUILD"
 
 # Run tests; pass suite names (c, chez, shared, native, gpu, bench) or test names
 test *args: build
@@ -17,21 +22,21 @@ test *args: build
 test-stress *args: build
     tools/meson-test stress "$@"
 
-# C runtime tests under ASan/UBSan with object kind checks, built in build-asan/
+# C runtime tests under ASan/UBSan with object kind checks, built in the asan configuration
 sanitize *args:
-    @test -d build-asan/meson-info || meson setup build-asan -Db_sanitize=address,undefined -Druntime_checks=kinds -Dui=disabled
-    meson compile -C build-asan
-    ASAN_OPTIONS=detect_leaks=0 meson test -C build-asan --suite c --print-errorlogs "$@"
+    @test -d "{{builds}}/asan/meson-info" || meson setup "{{builds}}/asan" -Db_sanitize=address,undefined -Druntime_checks=kinds -Dui=disabled
+    meson compile -C "{{builds}}/asan"
+    ASAN_OPTIONS=detect_leaks=0 meson test -C "{{builds}}/asan" --suite c --print-errorlogs "$@"
 
 # C runtime tests collecting at every allocation into fresh memory, so a missed root faults. Slow
 check-roots *args:
-    @test -d build-roots/meson-info || meson setup build-roots -Db_sanitize=address,undefined -Druntime_checks=roots -Dui=disabled
-    meson compile -C build-roots
-    ASAN_OPTIONS=detect_leaks=0 meson test -C build-roots --setup stress --suite c --print-errorlogs "$@"
+    @test -d "{{builds}}/roots/meson-info" || meson setup "{{builds}}/roots" -Db_sanitize=address,undefined -Druntime_checks=roots -Dui=disabled
+    meson compile -C "{{builds}}/roots"
+    ASAN_OPTIONS=detect_leaks=0 meson test -C "{{builds}}/roots" --setup stress --suite c --print-errorlogs "$@"
 
 # Run every test, including native, GPU and benchmark ports
 test-all: build
-    meson test -C build --setup all --print-errorlogs
+    meson test -C "$OTIUM_BUILD" --setup all --print-errorlogs
 
 # Install the commit hook (repository-wide setting)
 setup:
@@ -81,8 +86,9 @@ bench *args: build
 
 # C runtime microbenchmarks; pass a workload name to run one
 bench-c *args: build
-    meson compile -C build c/bench-runtime ffi-fixture-17.so
-    build/c/bench-runtime {{args}}
+    meson compile -C "$OTIUM_BUILD" c/bench-runtime ffi-fixture-17.so
+    "$OTIUM_BUILD/c/bench-runtime" {{args}}
 
+# Remove this machine's builds
 clean:
-    rm -rf build
+    rm -rf "{{builds}}"

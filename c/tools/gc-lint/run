@@ -4,13 +4,13 @@
 #   c/tools/gc-lint/run [tool options] [files...]
 #
 # The runtime's compile flags come from a meson build directory's
-# compile_commands.json: OT_GC_LINT_BUILD, or build/ at the top of the
-# repository. Without file arguments every c/src file in it is checked.
+# compile_commands.json: OT_GC_LINT_BUILD, then OTIUM_BUILD, then
+# build/<machine>-<os>/default/ at the top of the repository. Without file arguments every c/src file in it is checked.
 set -euo pipefail
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$script_dir/../../.." && pwd)
-build=${OT_GC_LINT_BUILD:-"$top/build"}
+build=${OT_GC_LINT_BUILD:-${OTIUM_BUILD:-"$top/build/$(uname -m)-$(uname -s | tr A-Z a-z)/default"}}
 tool_dir=${OT_GC_LINT_TOOL_DIR:-"$build/gc-lint"}
 
 find_llvm_config() {

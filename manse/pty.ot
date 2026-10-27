@@ -39,13 +39,13 @@
                  ((private %reader-wake) "manse_reader_wake" (pointer) void #f))
 
 (def (native-candidates)
-  "MANSE_NATIVE_LIBRARY when set; otherwise the Meson build in OTIUM_BUILD, or build/ from the repository root or manse/."
+  "MANSE_NATIVE_LIBRARY when set; otherwise the Meson build in OTIUM_BUILD, which ./otium sets."
   (let ((override (process/getenv "MANSE_NATIVE_LIBRARY"))
         (build (process/getenv "OTIUM_BUILD")))
     (cond
       (override (list override))
       (build (list (str build "/manse/native/libmanse-native.dylib")))
-      (else '("../build/manse/native/libmanse-native.dylib" "build/manse/native/libmanse-native.dylib")))))
+      (else (error "OTIUM_BUILD is not set; run Manse through ./otium")))))
 
 (def (load!)
   (unless libc (%load! '("/usr/lib/libSystem.B.dylib")))

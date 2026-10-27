@@ -35,14 +35,27 @@ else: no preamble, no code fence around the whole thing.
 Rules:
 - The first line is `# {MARK} {{title}}`. The {MARK} marks the doc as LLM generated;
   hand-written docs have no {MARK}. Use plain headings below it.
-- Read the source before writing. Describe what the code does today, not what
-  specs or tickets propose. When something is planned but not built, say so
-  briefly or leave it out. Do not invent APIs, flags or files.
+- Write for the reader the prompt describes and include only what they need
+  for the doc's purpose. Before keeping a sentence, ask whether the reader
+  would be worse off without it. Most of what you learn from the source fails
+  that test.
+- Read the source to get the facts right, not to report on it. Leave out how
+  things are implemented, behaviour that is accidental or "in the current
+  implementation", edge cases the reader is unlikely to hit, and which files
+  hold the tests, catalogs or fixtures. Describe what the code does today, not
+  what specs or tickets propose. Do not invent APIs, flags or files.
 - Read AGENT-LANG.md before writing any Otium code examples. Keep examples short
-  and check them against the source.
+  and check them against the source. Prefer examples that return a value over
+  ones that print.
+- Decide whether the doc teaches, shows how to do a task, describes, or
+  explains, and keep to it (the Diátaxis split). A guide that teaches or shows
+  a task keeps explanation to the minimum the reader needs to act, and leaves
+  out options and alternatives that don't serve the task.
 - Write plainly. Prefer short sentences and ordinary words over jargon.
-- Name repository files in backticks with paths from the repository root, and
-  only name files that exist.
+- Before replying, read the humanizer skill and apply it to your draft in
+  embedded mode. Keep the title line and code unchanged.
+- Name a repository file only when the reader would open it. Use backticks
+  and a path from the repository root, and only name files that exist.
 - Link to other docs with relative links from {{target}}. The docs that exist:
 {{index}}
 - Do not edit any files. Your only output is the reply.
@@ -113,6 +126,7 @@ def pi_command(system, args):
         '--tools', 'read,grep,find,ls',
         '--no-extensions', '--no-skills', '--no-prompt-templates',
         '--no-themes', '--no-approve',
+        '--skill', str(ROOT / '.agents/skills/humanizer'),
         '--extension', str(ROOT / 'tools/docs-pi.mjs'),
         '--append-system-prompt', system,
     ]
@@ -137,6 +151,19 @@ def final_reply(output):
                    if block.get('type') == 'text').strip()
 
 
+def files_read(output):
+    """Paths Pi opened with its read tool, in order, relative to the repo."""
+    paths = []
+    for line in output.splitlines():
+        event = json.loads(line)
+        if event.get('type') == 'tool_execution_start' and event.get('toolName') == 'read':
+            path = Path(ROOT, event.get('args', {}).get('path', ''))
+            name = str(path.resolve().relative_to(ROOT)) if path.resolve().is_relative_to(ROOT) else str(path)
+            if name not in paths:
+                paths.append(name)
+    return paths
+
+
 def generate(spec, index, args):
     meta, body = parse_spec(spec)
     target = target_of(spec)
@@ -154,6 +181,7 @@ def generate(spec, index, args):
         if result.returncode != 0:
             raise ValueError(f'Pi exited {result.returncode}: {result.stderr.strip()}')
         text = final_reply(result.stdout)
+        print(f'{rel}: read {", ".join(files_read(result.stdout)) or "nothing"}', file=sys.stderr)
         if text.splitlines()[:1] != [f'# {MARK} {meta["title"]}']:
             raise ValueError('reply does not start with the expected document title')
         target.parent.mkdir(parents=True, exist_ok=True)

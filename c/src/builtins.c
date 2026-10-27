@@ -5,11 +5,13 @@
 static const oti_builtin_def oti_core_builtins[];
 
 static const oti_builtin_def* const builtin_modules[] = {
-    oti_core_builtins,       oti_bytes_builtins,      oti_class_builtins,   oti_collection_builtins,
-    oti_condition_builtins,  oti_filesystem_builtins, oti_foreign_builtins, oti_instance_builtins,
-    oti_numeric_builtins,    oti_port_builtins,       oti_process_builtins, oti_record_builtins,
-    oti_reflection_builtins, oti_restart_builtins,    oti_string_builtins,  oti_support_builtins,
-    oti_table_builtins,      oti_time_builtins,
+    oti_core_builtins,       oti_bytes_builtins,      oti_class_builtins,
+    oti_collection_builtins, oti_condition_builtins,  oti_dev_builtins,
+    oti_filesystem_builtins, oti_foreign_builtins,    oti_instance_builtins,
+    oti_numeric_builtins,    oti_port_builtins,       oti_process_builtins,
+    oti_record_builtins,     oti_reflection_builtins, oti_restart_builtins,
+    oti_string_builtins,     oti_support_builtins,    oti_table_builtins,
+    oti_time_builtins,
 };
 
 #define BUILTIN_MODULES (sizeof(builtin_modules) / sizeof(*builtin_modules))
@@ -27,9 +29,11 @@ bool oti_builtins(ot_state* rt) {
   uint32_t ffi = oti_namespace(rt, "ffi", 3);
   uint32_t process = oti_namespace(rt, "otium.process", 13);
   uint32_t reader = oti_namespace(rt, "otium.reader", 12);
+  uint32_t dev = oti_namespace(rt, "otium.dev", 9);
   /* otium.generic has no bindings of its own: its names resolve to core's. */
   uint32_t generic = oti_namespace(rt, "otium.generic", 13);
-  if (ffi == UINT32_MAX || process == UINT32_MAX || reader == UINT32_MAX || generic == UINT32_MAX)
+  if (ffi == UINT32_MAX || process == UINT32_MAX || reader == UINT32_MAX || generic == UINT32_MAX ||
+      dev == UINT32_MAX)
     return false;
   memset(rt->builtin_run, 0, sizeof(rt->builtin_run));
   for (size_t m = 0; m < BUILTIN_MODULES; m++) {
@@ -41,10 +45,16 @@ bool oti_builtins(ot_state* rt) {
       bool foreign = !strncmp(full, "ffi/", 4);
       bool process_binding = !strncmp(full, "otium.process/", 14);
       bool reader_binding = !strncmp(full, "otium.reader/", 13);
-      const char* name = full + (foreign ? 4 : process_binding ? 14 : reader_binding ? 13 : 0);
+      bool dev_binding = !strncmp(full, "otium.dev/", 10);
+      const char* name = full + (foreign           ? 4
+                                 : process_binding ? 14
+                                 : reader_binding  ? 13
+                                 : dev_binding     ? 10
+                                                   : 0);
       rt->current_namespace = foreign           ? ffi
                               : process_binding ? process
                               : reader_binding  ? reader
+                              : dev_binding     ? dev
                                                 : 0;
       uint32_t global = oti_global(rt, name, strlen(name));
       if (global == UINT32_MAX) return false;
@@ -249,7 +259,7 @@ static ot_value eval_in_namespace(ot_state* rt, size_t first, size_t count) {
 static ot_value exit_builtin(ot_state* rt, size_t first, size_t count) {
   if (count > 1 || (count && (!ot_is_int(rt->stack[first]) || ot_to_int(rt->stack[first]) < 0 ||
                               ot_to_int(rt->stack[first]) > 255))) {
-    oti_error(rt, "exit status must be an integer from 0 to 255");
+    oti_error(rt, "exit: expected integer status from 0 to 255");
     return 0;
   }
   rt->exit_status = count ? (int)ot_to_int(rt->stack[first]) : 0;

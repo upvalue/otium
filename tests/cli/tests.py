@@ -66,7 +66,7 @@ def greet(t):
 @test('cli inactive backend options', runtimes=['chez'])
 def inactive(t):
     """C-only settings are accepted, validated and ignored by Chez."""
-    result = t.otium('--c.gc-stats', '--c.gc-force-compact', '--c.heap-max=1024',
+    result = t.otium('--c.gc-stats', '--c.gc-stats-json', '--c.heap-max=1024',
                      'examples/greet.ot', '--', 'Alice')
     t.expect(result, stdout='Hello, Alice!\n')
     t.check(result.stderr == '', 'unexpected stderr', result)

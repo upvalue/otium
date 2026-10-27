@@ -155,6 +155,29 @@ static bool install_import(ot_state* rt, const oti_ast* name, uint32_t target, b
   return true;
 }
 
+/* Tell the load hook, if any, that a module file is about to be loaded. */
+static bool notify_load(ot_state* rt, uint32_t space, const char* path) {
+  if (rt->load_hook == UINT32_MAX || rt->globals[rt->load_hook] == V_UNBOUND) return true;
+  ot_value v[] = {OT_NIL, OT_NIL, OT_EMPTY};
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, v, 3);
+  const char* name = rt->namespaces[space];
+  bool ok = (v[0] = oti_intern(rt, K_SYMBOL, name, strlen(name))) &&
+            (v[1] = oti_text(rt, K_STRING, path, strlen(path)));
+  for (int i = 1; ok && i >= 0; i--) {
+    ot_value pair = oti_alloc(rt, K_PAIR, 2, 0);
+    if (!pair) ok = false;
+    else {
+      oti_as_pair(pair)->car = v[i];
+      oti_as_pair(pair)->cdr = v[2];
+      v[2] = pair;
+    }
+  }
+  ok = ok && oti_call_list(rt, rt->globals[rt->load_hook], v[2]) != 0;
+  oti_roots_pop(&rt->heap, &roots);
+  return ok;
+}
+
 static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_ffi) {
   oti_module_state* m = state(rt);
   if (!m) return false;
@@ -176,6 +199,7 @@ static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_f
   const char* defaults[] = {".", "lib"};
   size_t paths = m->path_count + 2;
   FILE* file = NULL;
+  char* found = NULL;
   for (size_t i = 0; i < paths && !file; i++) {
     const char* directory = i < m->path_count ? m->paths[i] : defaults[i - m->path_count];
     size_t d = strlen(directory), n = strlen(name);
@@ -194,12 +218,18 @@ static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_f
         return oti_error(rt, "cannot open module file");
       }
     }
-    free(path);
+    if (file) found = path;
+    else free(path);
   }
   if (!file) return oti_coded_error(rt, "E0202", "module file not found");
   size_t bytes;
   char* source = oti_read_file(rt, file, OTI_SOURCE_LIMIT - m->source_bytes, "module file", &bytes);
-  if (!source) return false;
+  bool notified = source && notify_load(rt, space, found);
+  free(found);
+  if (!notified) {
+    free(source);
+    return false;
+  }
   uint32_t caller = rt->current_namespace, expected = rt->required_namespace;
   rt->current_namespace = rt->required_namespace = space;
   m->items[index].state = 1;

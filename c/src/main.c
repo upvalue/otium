@@ -1,13 +1,27 @@
 #define _POSIX_C_SOURCE 200809L
 #include "otium.h"
-#include <errno.h>
 #include <ctype.h>
+#include <errno.h>
+#include <signal.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <unistd.h>
+/* Angle brackets keep the shared native code out of the amalgamation. */
+#include <line/line-edit.h>
 #ifndef OTIUM_LIBRARY_DIR
 #define OTIUM_LIBRARY_DIR "lib"
 #endif
+#ifndef OTIUM_DEV_FILE
+#define OTIUM_DEV_FILE "c/src/dev.ot"
+#endif
+
+/* launcher_options and launcher_help, from lib/catalog/options.json. */
+#include "options.inc"
+
+/* 1 for SIGINT and 2 for the development server's timer tick, which the
+ * interrupt handler in c/src/dev.ot tells apart. */
 static volatile sig_atomic_t interrupt_requested;
 
 static void interrupt_handler(int signal_number) {
@@ -15,23 +29,43 @@ static void interrupt_handler(int signal_number) {
   interrupt_requested = 1;
 }
 
-#define SOURCE_LIMIT (16u * 1024u * 1024u)
+static void tick_handler(int signal_number) {
+  (void)signal_number;
+  if (!interrupt_requested) interrupt_requested = 2;
+}
 
-static bool size_option(const char* text, size_t* out) {
-  char* end;
-  errno = 0;
-  unsigned long long value = strtoull(text, &end, 10);
-  if (errno || !isdigit((unsigned char)*text) || *end || value > SIZE_MAX || !value) return false;
-  *out = (size_t)value;
-  return true;
+#define SOURCE_LIMIT (16u * 1024u * 1024u)
+#define TICK_MICROSECONDS 10000
+
+typedef struct {
+  const char *script, *source, *project, *dev_path;
+  size_t heap_init, heap_max, max_depth;
+  unsigned watchdog;
+  bool heap_max_given, repl, no_project, preloads, serve, server, gc_stats, gc_stats_json;
+  /* Launcher options end at option_end; program arguments start at arguments. */
+  int option_end, arguments;
+} options;
+
+static int usage_error(const char* format, ...) {
+  va_list args;
+  va_start(args, format);
+  fputs("otium: ", stderr);
+  vfprintf(stderr, format, args);
+  fputc('\n', stderr);
+  va_end(args);
+  return 2;
+}
+
+/* The one place the launcher prints a runtime error. */
+static void report_error(ot_state* rt, const char* where) {
+  fprintf(stderr, "%s:%zu: %s\n", where, ot_error_offset(rt), ot_error(rt));
 }
 
 static bool evaluate(ot_state* rt, const char* source, size_t length, const char* path, bool echo) {
   ot_value result;
   if (!ot_eval(rt, source, length, &result)) {
     int status;
-    if (!ot_interrupted(rt) && !ot_exit_status(rt, &status))
-      fprintf(stderr, "%s:%zu: %s\n", path, ot_error_offset(rt), ot_error(rt));
+    if (!ot_interrupted(rt) && !ot_exit_status(rt, &status)) report_error(rt, path);
     return false;
   }
   if (echo) {
@@ -146,10 +180,218 @@ static bool environment_paths(ot_state* rt) {
   return ok;
 }
 
-/* The REPL and program reads must share the standard port's managed buffer.
- * Returns the line length including a newline, -1 at EOF or -2 after
- * reporting an error. */
-static ssize_t input_line(ot_state* rt, char** line, size_t* capacity) {
+/* Parse a positive decimal integer of at most limit. */
+static bool integer_value(const char* text, unsigned long long limit, unsigned long long* out) {
+  if (!*text) return false;
+  for (const char* p = text; *p; p++)
+    if (!isdigit((unsigned char)*p)) return false;
+  errno = 0;
+  unsigned long long value = strtoull(text, NULL, 10);
+  if (errno || !value || value > limit) return false;
+  *out = value;
+  return true;
+}
+
+/* Fill o from argv. Returns 0 to continue, or an exit status. */
+static int parse_options(int argc, char** argv, options* o) {
+  *o = (options){.heap_init = 1024 * 1024,
+                 .heap_max = 64 * 1024 * 1024,
+                 .watchdog = 2000,
+                 .option_end = argc,
+                 .arguments = argc};
+  for (int i = 1; i < argc; i++) {
+    const char* token = argv[i];
+    if (!strcmp(token, "--")) {
+      o->option_end = i;
+      if (!o->script && !o->source) {
+        if (i + 1 == argc) return usage_error("-- requires a script");
+        o->script = argv[++i];
+      }
+      o->arguments = i + 1;
+      return 0;
+    }
+    if (!strcmp(token, "serve") && !o->script && !o->source && !o->serve) {
+      o->serve = true;
+      if (!o->dev_path) o->dev_path = "";
+      continue;
+    }
+    if (!strcmp(token, "-e")) {
+      if (i + 1 == argc) return usage_error("-e requires source");
+      if (o->script || o->source)
+        return usage_error("extra script; use --load or put application arguments after --");
+      o->source = argv[++i];
+      continue;
+    }
+    if (token[0] != '-' || !token[1]) {
+      if (o->script || o->source)
+        return usage_error("extra script; use --load or put application arguments after --");
+      o->script = token;
+      continue;
+    }
+    if (!strcmp(token, "-h")) token = "--help";
+    else if (!strcmp(token, "-L")) token = "--path";
+    const char* equals = strchr(token, '=');
+    size_t spelling = equals ? (size_t)(equals - token) : strlen(token);
+    const char *name = NULL, *owner = NULL, *kind = NULL;
+    for (size_t k = 0; k < sizeof(launcher_options) / sizeof(*launcher_options); k++)
+      if (spelling == strlen(launcher_options[k].name) + 2 && !strncmp(token, "--", 2) &&
+          !strncmp(token + 2, launcher_options[k].name, spelling - 2)) {
+        name = launcher_options[k].name;
+        owner = launcher_options[k].owner;
+        kind = launcher_options[k].kind;
+      }
+    if (!name) return usage_error("unknown option %s", argv[i]);
+    const char* value = equals ? equals + 1 : NULL;
+    unsigned long long number = 0;
+    if (!strcmp(kind, "optional-path")) {
+      if (!value) value = "";
+    } else if (!strcmp(kind, "milliseconds")) {
+      if (!value || (strcmp(value, "0") && !integer_value(value, 2147483647, &number)))
+        return usage_error("--%s requires =MS (nonnegative integer)", name);
+    } else if (!strcmp(kind, "flag")) {
+      if (value) return usage_error("--%s takes no value", name);
+    } else if (!strcmp(kind, "integer")) {
+      if (!value) return usage_error("--%s requires =INTEGER", name);
+      if (!integer_value(value, 18446744073709551615ull, &number))
+        return usage_error("--%s requires an integer", name);
+    } else if (!value) {
+      if (i + 1 == argc) return usage_error("--%s requires a %s", name, kind);
+      value = argv[++i];
+    }
+    if (!strcmp(owner, "chez")) continue;
+    if (!strcmp(name, "help")) {
+      fputs(launcher_help, stdout);
+      return -1;
+    } else if (!strcmp(name, "repl")) o->repl = true;
+    else if (!strcmp(name, "project")) o->project = value;
+    else if (!strcmp(name, "no-project")) o->no_project = true;
+    else if (!strcmp(name, "load")) o->preloads = true;
+    else if (!strcmp(name, "dev")) o->dev_path = value;
+    else if (!strcmp(name, "dev-watchdog")) o->watchdog = (unsigned)number;
+    else if (!strcmp(name, "c.server")) o->server = true;
+    else if (!strcmp(name, "c.gc-stats")) o->gc_stats = true;
+    else if (!strcmp(name, "c.gc-stats-json")) o->gc_stats_json = true;
+    else if (!strcmp(name, "c.heap-init") || !strcmp(name, "c.heap-max")) {
+      if (number > SIZE_MAX / 2 || (name[7] == 'i' && number < 1024))
+        return usage_error("--%s out of range", name);
+      if (name[7] == 'i') o->heap_init = (size_t)number;
+      else {
+        o->heap_max = (size_t)number;
+        o->heap_max_given = true;
+      }
+    } else if (!strcmp(name, "c.max-depth")) {
+      if (number > 4294967295ull) return usage_error("--c.max-depth out of range");
+      o->max_depth = (size_t)number;
+    }
+  }
+  return 0;
+}
+
+static int check_options(options* o) {
+  if (o->project && o->no_project)
+    return usage_error("--project and --no-project cannot be used together");
+  if (o->server && (o->repl || o->serve || o->dev_path))
+    return usage_error("--%s and --c.server cannot be used together", o->repl    ? "repl"
+                                                                      : o->serve ? "serve"
+                                                                                 : "dev");
+  if (!o->heap_max_given && o->heap_max < o->heap_init) o->heap_max = o->heap_init;
+  if (o->heap_max < o->heap_init) return usage_error("--c.heap-max must be at least --c.heap-init");
+  if (!o->script && !o->source && !o->preloads && !o->serve && !o->server) o->repl = true;
+  return 0;
+}
+
+/* Load paths: -L/--path first, then OTIUM_PATH, then the project's. */
+static bool add_paths(ot_state* rt, const options* o, char** argv) {
+  for (int i = 1; i < o->option_end; i++) {
+    const char* path = NULL;
+    if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "--load") || !strcmp(argv[i], "--project")) i++;
+    else if (!strcmp(argv[i], "-L") || !strcmp(argv[i], "--path")) path = argv[++i];
+    else if (!strncmp(argv[i], "--path=", 7)) path = argv[i] + 7;
+    if (path && !ot_add_load_path(rt, path)) return false;
+  }
+  if (!environment_paths(rt)) return false;
+  if (o->no_project) return true;
+  return o->project ? ot_add_project_paths(rt, o->project) : discover_project(rt);
+}
+
+static bool preload(ot_state* rt, const options* o, char** argv) {
+  for (int i = 1; i < o->option_end; i++) {
+    if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "-L") || !strcmp(argv[i], "--path") ||
+        !strcmp(argv[i], "--project"))
+      i++;
+    else if (!strcmp(argv[i], "--load") && !load(rt, argv[++i])) return false;
+    else if (!strncmp(argv[i], "--load=", 7) && !load(rt, argv[i] + 7)) return false;
+  }
+  return true;
+}
+
+/* Load the server's Otium side: lib/otium/dev.ot, then the C runtime's part. */
+static bool load_dev(ot_state* rt) {
+  static const char require[] = "(require (otium.dev :as dev))";
+  ot_value result;
+  if (!ot_eval(rt, require, sizeof(require) - 1, &result) || !load(rt, OTIUM_DEV_FILE))
+    return false;
+  return ot_eval(rt, "(ns user)", 9, &result);
+}
+
+static bool start_dev(ot_state* rt, const options* o) {
+  /* The path is passed as Otium source, so write it as a string literal. */
+  size_t length = strlen(o->dev_path);
+  char* source = malloc(length * 2 + 64);
+  if (!source) return false;
+  char* p = source + sprintf(source, "(otium.dev/%%start! \"");
+  for (const char* c = o->dev_path; *c; c++) {
+    if (*c == '"' || *c == '\\') *p++ = '\\';
+    *p++ = *c;
+  }
+  sprintf(p, "\" %u)", o->watchdog);
+  ot_value result;
+  bool ok = ot_eval(rt, source, strlen(source), &result);
+  free(source);
+  if (!ok) return false;
+  if (!ot_set_interrupt_handler(rt, "otium.dev/%interrupt") ||
+      !ot_set_load_hook(rt, "otium.dev/record-load!"))
+    return false;
+  /* The tick counts process CPU time, so it never interrupts a blocking call
+   * and costs nothing while the program waits. */
+  struct sigaction action = {0};
+  action.sa_handler = tick_handler;
+  action.sa_flags = SA_RESTART;
+  sigemptyset(&action.sa_mask);
+  sigaddset(&action.sa_mask, SIGINT);
+  struct itimerval timer = {{0, TICK_MICROSECONDS}, {0, TICK_MICROSECONDS}};
+  return sigaction(SIGVTALRM, &action, NULL) == 0 && setitimer(ITIMER_VIRTUAL, &timer, NULL) == 0;
+}
+
+static void stop_dev(ot_state* rt) {
+  struct itimerval off = {{0, 0}, {0, 0}};
+  setitimer(ITIMER_VIRTUAL, &off, NULL);
+  if (interrupt_requested == 2) interrupt_requested = 0;
+  ot_value result;
+  ot_call(rt, "otium.dev/%stop!", NULL, 0, &result);
+  ot_set_interrupt_handler(rt, NULL);
+  ot_set_load_hook(rt, NULL);
+}
+
+static void dev_service(void* data) {
+  ot_state* rt = data;
+  ot_value result;
+  if (ot_call(rt, "otium.dev/service!", NULL, 0, &result)) return;
+  int status;
+  if (!ot_exit_status(rt, &status)) {
+    if (!ot_interrupted(rt)) report_error(rt, "<dev>");
+    return;
+  }
+  /* A client asked the program to exit while the REPL waited for input. */
+  stop_dev(rt);
+  ot_flush_ports(rt);
+  exit(status);
+}
+
+/* Lines from the standard input port, which the REPL shares with programs.
+ * Returns the length including a newline, -1 at EOF or -2 after reporting an
+ * error. */
+static ssize_t port_line(ot_state* rt, char** line, size_t* capacity) {
   ot_value port, value;
   if (!ot_call(rt, "otium.core/%standard-input", NULL, 0, &port) ||
       !ot_call(rt, "otium.core/read-line", &port, 1, &value)) {
@@ -181,16 +423,46 @@ static ssize_t input_line(ot_state* rt, char** line, size_t* capacity) {
   return (ssize_t)(length + 1);
 }
 
-static bool repl(ot_state* rt) {
-  bool terminal = isatty(STDIN_FILENO), ok = true;
+/* Lines from the line editor, or -3 when ^C discarded the input. */
+static ssize_t edited_line(const char* prompt, char** line, size_t* capacity) {
+  const char* text = ot_line_read(prompt);
+  if (!text) return -1;
+  if (ot_line_interrupted()) return -3;
+  size_t length = strlen(text);
+  if (length >= SOURCE_LIMIT) {
+    fputs("stdin: source exceeds size limit\n", stderr);
+    return -2;
+  }
+  if (*capacity < length + 1) {
+    char* grown = realloc(*line, length + 1);
+    if (!grown) {
+      fputs("out of host memory\n", stderr);
+      return -2;
+    }
+    *line = grown;
+    *capacity = length + 1;
+  }
+  memcpy(*line, text, length);
+  (*line)[length] = '\n';
+  return (ssize_t)(length + 1);
+}
+
+/* The line editor is used on a terminal, and with the development server so
+ * requests are served while the REPL waits. Otherwise lines come from the
+ * standard input port and evaluation stops at an interrupt. */
+static bool repl(ot_state* rt, bool dev) {
+  bool terminal = ot_line_interactive(), editing = terminal || dev, ok = true;
+  if (dev) ot_line_set_service(dev_service, rt);
+  if (terminal) puts("otium repl (c) - ^C interrupts, ^D exits, ,help for help");
   char *line = NULL, *pending = NULL;
   size_t line_capacity = 0, length = 0;
   for (;;) {
-    if (terminal) {
-      fputs(length ? "... " : "> ", stdout);
-      fflush(stdout);
+    ssize_t bytes = editing ? edited_line(length ? "..> " : "> ", &line, &line_capacity)
+                            : port_line(rt, &line, &line_capacity);
+    if (bytes == -3) {
+      length = 0;
+      continue;
     }
-    ssize_t bytes = input_line(rt, &line, &line_capacity);
     if (bytes < 0) {
       if (bytes == -2) ok = false;
       if (length) {
@@ -224,11 +496,13 @@ static bool repl(ot_state* rt) {
       if (status == OT_FORM_COMPLETE) {
         evaluate(rt, pending + consumed, end - consumed, "<stdin>", true);
         int exit_status;
-        if (ot_interrupted(rt) || ot_exit_status(rt, &exit_status)) {
+        if (ot_exit_status(rt, &exit_status) || (ot_interrupted(rt) && !editing)) {
           free(line);
           free(pending);
+          if (dev) ot_line_set_service(NULL, NULL);
           return false;
         }
+        if (ot_interrupted(rt)) fputs("interrupted\n", stderr);
         consumed = end;
         continue;
       }
@@ -245,80 +519,74 @@ static bool repl(ot_state* rt) {
   }
   free(line);
   free(pending);
+  if (editing) ot_line_close();
+  if (dev) ot_line_set_service(NULL, NULL);
   return ok;
 }
 
-int main(int argc, char** argv) {
-  size_t heap = 1024 * 1024, heap_max = 64 * 1024 * 1024, stack = 128 * 1024;
-  bool heap_explicit = false, max_explicit = false;
-  bool stats = false, interactive = false, preloaded = false, no_project = false;
-  const char* project = NULL;
-  const char *source = NULL, *path = NULL;
-  int option_end = argc, arguments_start = argc;
-  for (int i = 1; i < argc; i++) {
-    if (!strcmp(argv[i], "--")) {
-      option_end = i;
-      if (!source && !path) {
-        if (i + 1 == argc) goto usage;
-        path = argv[++i];
-      }
-      arguments_start = i + 1;
-      break;
-    } else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
-      puts("Usage: otium [OPTIONS] [SCRIPT] [-- ARGUMENTS...]\n"
-           "  --path DIR, -L DIR     Add a module search directory\n"
-           "  --project FILE         Read (paths ...) relative to FILE\n"
-           "  --no-project           Skip upward project.ot discovery\n"
-           "  --load FILE            Load before the script; repeatable\n"
-           "  --repl                 Enter the REPL after loading\n"
-           "  --c.heap-init=BYTES     Initial semispace size (minimum 1024)\n"
-           "  --c.heap-max=BYTES      Maximum semispace size\n"
-           "  --heap=BYTES            Fixed semispace unless --heap-max is given\n"
-           "  --heap-max=BYTES        Maximum semispace size\n"
-           "  --stack=SLOTS           VM stack limit\n"
-           "  --stats                Print VM statistics\n"
-           "  -e SOURCE              Evaluate and print SOURCE\n"
-           "  --help, -h             Show this help");
-      return 0;
-    } else if (!strncmp(argv[i], "--c.heap-init=", 14)) {
-      if (!size_option(argv[i] + 14, &heap) || heap < 1024) goto usage;
-    } else if (!strncmp(argv[i], "--c.heap-max=", 13)) {
-      if (!size_option(argv[i] + 13, &heap_max)) goto usage;
-      max_explicit = true;
-    } else if (!strcmp(argv[i], "--no-project")) no_project = true;
-    else if (!strcmp(argv[i], "--project") && i + 1 < argc) project = argv[++i];
-    else if (!strncmp(argv[i], "--project=", 10)) project = argv[i] + 10;
-    else if (!strncmp(argv[i], "--path=", 7)) continue;
-    else if (!strncmp(argv[i], "--load=", 7)) preloaded = true;
-    else if (!strncmp(argv[i], "--heap=", 7)) {
-      if (!size_option(argv[i] + 7, &heap)) goto usage;
-      heap_explicit = true;
-    } else if (!strncmp(argv[i], "--heap-max=", 11)) {
-      if (!size_option(argv[i] + 11, &heap_max)) goto usage;
-      max_explicit = true;
-    } else if (!strncmp(argv[i], "--stack=", 8)) {
-      if (!size_option(argv[i] + 8, &stack)) goto usage;
-    } else if ((!strcmp(argv[i], "-L") || !strcmp(argv[i], "--path") ||
-                !strcmp(argv[i], "--load")) &&
-               i + 1 < argc) {
-      if (!strcmp(argv[i], "--load")) preloaded = true;
-      i++;
-    } else if (!strcmp(argv[i], "--stats")) stats = true;
-    else if (!strcmp(argv[i], "--repl")) interactive = true;
-    else if (!strcmp(argv[i], "-e") && i + 1 < argc && !source && !path) source = argv[++i];
-    else if (argv[i][0] != '-' && !source && !path) path = argv[i];
-    else goto usage;
+/* The framed stdio server. An interrupted frame is answered with
+ * "interrupted" and the server reads the next one. */
+static bool stdio_server(ot_state* rt) {
+  if (!ot_set_interrupt_handler(rt, "otium.dev/%stdio-interrupt")) return false;
+  ot_value result;
+  int status;
+  bool ok;
+  while (!(ok = ot_call(rt, "otium.dev/%stdio-run", NULL, 0, &result)) &&
+         !ot_exit_status(rt, &status)) {
+    if (!ot_interrupted(rt)) break;
+    fputs("interrupted\n\x1eot> ", stdout);
+    fflush(stdout);
   }
-  if (project && no_project) goto usage;
-  if (!source && !path && !preloaded) interactive = true;
-  if (heap_explicit && !max_explicit) heap_max = heap;
-  if (heap_max < heap || heap_max > SIZE_MAX / 2) goto usage;
-  ot_state* rt = ot_create(heap, stack);
+  ot_set_interrupt_handler(rt, NULL);
+  if (!ok && !ot_interrupted(rt) && !ot_exit_status(rt, &status)) report_error(rt, "<server>");
+  return ok;
+}
+
+static void print_size(const char* name, size_t bytes) {
+  static const char* const units[] = {"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"};
+  double value = (double)bytes;
+  unsigned unit = 0;
+  while (value >= 1024 && unit < 6) {
+    value /= 1024;
+    unit++;
+  }
+  if (unit) fprintf(stderr, "  %s: %zu (%.2f %s)\n", name, bytes, value, units[unit]);
+  else fprintf(stderr, "  %s: %zu (%zu B)\n", name, bytes, bytes);
+}
+
+static void print_gc_stats(ot_state* rt, const options* o) {
+  ot_stats s = ot_get_stats(rt);
+  if (o->gc_stats) {
+    fprintf(stderr, "GC stats:\n  allocations: %zu\n  collections: %zu\n", s.heap_allocations,
+            s.collections);
+    print_size("allocated bytes", s.heap_allocated_bytes);
+    print_size("copied bytes", s.heap_copied_bytes);
+    print_size("reclaimed bytes", s.heap_reclaimed_bytes);
+    print_size("heap used bytes", s.heap_used);
+    print_size("peak heap used bytes", s.heap_peak_used);
+    print_size("heap capacity bytes", s.heap_capacity);
+    print_size("heap limit bytes", s.heap_limit);
+  }
+  if (o->gc_stats_json)
+    fprintf(stderr,
+            "OTIUM_GC_STATS {\"allocations\":%zu,\"collections\":%zu,\"allocated_bytes\":%zu,"
+            "\"copied_bytes\":%zu,\"reclaimed_bytes\":%zu,\"used_bytes\":%zu,"
+            "\"peak_used_bytes\":%zu,\"capacity_bytes\":%zu,\"limit_bytes\":%zu}\n",
+            s.heap_allocations, s.collections, s.heap_allocated_bytes, s.heap_copied_bytes,
+            s.heap_reclaimed_bytes, s.heap_used, s.heap_peak_used, s.heap_capacity, s.heap_limit);
+}
+
+int main(int argc, char** argv) {
+  options o;
+  int status = parse_options(argc, argv, &o);
+  if (status) return status < 0 ? 0 : status;
+  if ((status = check_options(&o))) return status;
+  ot_state* rt = ot_create(o.heap_init, 128 * 1024);
   if (!rt) {
     fputs("cannot initialize runtime\n", stderr);
     return 1;
   }
-  if (!ot_set_heap_limit(rt, heap_max)) {
+  if (!ot_set_heap_limit(rt, o.heap_max) || (o.max_depth && !ot_set_frame_limit(rt, o.max_depth))) {
     fprintf(stderr, "%s\n", ot_error(rt));
     ot_destroy(rt);
     return 1;
@@ -326,55 +594,48 @@ int main(int argc, char** argv) {
   struct sigaction action = {0}, previous;
   action.sa_handler = interrupt_handler;
   sigemptyset(&action.sa_mask);
+  sigaddset(&action.sa_mask, SIGVTALRM);
   if (sigaction(SIGINT, &action, &previous)) {
     perror("sigaction");
     ot_destroy(rt);
     return 1;
   }
   ot_set_interrupt_flag(rt, &interrupt_requested);
-  bool ok = ot_set_arguments(rt, path, (size_t)(argc - arguments_start),
-                             (const char* const*)(argv + arguments_start));
+  bool dev = o.dev_path != NULL;
+  bool ok = ot_set_arguments(rt, o.script, (size_t)(argc - o.arguments),
+                             (const char* const*)(argv + o.arguments));
   if (ok) ok = ot_load_expander(rt, OTIUM_LIBRARY_DIR);
   if (!ok) fprintf(stderr, "cannot load expander: %s\n", ot_error(rt));
-  for (int i = 1; ok && i < option_end; i++) {
-    if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "--load") || !strcmp(argv[i], "--project")) {
-      i++;
-      continue;
-    }
-    if (!strcmp(argv[i], "-L") || !strcmp(argv[i], "--path")) {
-      ok = ot_add_load_path(rt, argv[++i]);
-      if (!ok) fprintf(stderr, "%s\n", ot_error(rt));
-    }
-    if (!strncmp(argv[i], "--path=", 7)) ok = ot_add_load_path(rt, argv[i] + 7);
-  }
-  if (ok) ok = environment_paths(rt);
-  if (ok && !no_project) ok = project ? ot_add_project_paths(rt, project) : discover_project(rt);
-  if (!ok && ot_error(rt)[0]) fprintf(stderr, "%s\n", ot_error(rt));
+  if (ok && !(ok = add_paths(rt, &o, argv)) && ot_error(rt)[0])
+    fprintf(stderr, "%s\n", ot_error(rt));
   if (ok) {
     ok = ot_load_core(rt, OTIUM_LIBRARY_DIR);
     if (!ok) fprintf(stderr, "cannot load core: %s\n", ot_error(rt));
   }
-  for (int i = 1; ok && i < option_end; i++) {
-    if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "-L") || !strcmp(argv[i], "--path") ||
-        !strcmp(argv[i], "--project")) {
-      i++;
-      continue;
-    }
-    if (!strcmp(argv[i], "--load")) ok = load(rt, argv[++i]);
-    else if (!strncmp(argv[i], "--load=", 7)) ok = load(rt, argv[i] + 7);
+  if (ok && (dev || o.server) && !(ok = load_dev(rt))) report_error(rt, "<dev>");
+  if (ok && dev && !(ok = start_dev(rt, &o))) {
+    int exit_status;
+    if (!ot_interrupted(rt) && !ot_exit_status(rt, &exit_status)) report_error(rt, "<dev>");
+    dev = false;
   }
-  if (ok && path) ok = load(rt, path);
-  if (ok && source) ok = evaluate(rt, source, strlen(source), "<expression>", true);
-  if (ok && interactive) ok = repl(rt);
-  if (stats) {
-    ot_stats counts = ot_get_stats(rt);
-    fprintf(stderr, "collections=%zu max-frames=%zu heap-capacity=%zu\n", counts.collections,
-            counts.max_frames, counts.heap_capacity);
-    if (counts.signatures) fprintf(stderr, "ffi-signatures=%zu\n", counts.signatures);
+  if (ok) ok = preload(rt, &o, argv);
+  if (ok && o.script) ok = load(rt, o.script);
+  if (ok && o.source) ok = evaluate(rt, o.source, strlen(o.source), "<expression>", true);
+  if (ok && o.serve) {
+    ot_value result;
+    ok = ot_call(rt, "otium.dev/run", NULL, 0, &result);
+    int exit_status;
+    if (!ok && !ot_interrupted(rt) && !ot_exit_status(rt, &exit_status)) report_error(rt, "<dev>");
   }
+  if (ok && o.server) ok = stdio_server(rt);
+  if (ok && o.repl) ok = repl(rt, dev);
+  if (dev) ot_set_interrupt_handler(rt, NULL);
   ot_poll_interrupt(rt);
-  int status = ot_interrupted(rt) ? 130 : ok ? 0 : 1;
+  status = ot_interrupted(rt) ? 130 : ok ? 0 : 1;
   bool exiting = ot_exit_status(rt, &status);
+  /* Stopping the server calls into Otium, which clears the exit request. */
+  if (dev) stop_dev(rt);
+  print_gc_stats(rt, &o);
   if ((ok || exiting) && !ot_flush_ports(rt)) {
     status = ot_interrupted(rt) ? 130 : 1;
     if (!ot_interrupted(rt) && !ot_exit_status(rt, &status))
@@ -383,9 +644,4 @@ int main(int argc, char** argv) {
   sigaction(SIGINT, &previous, NULL);
   ot_destroy(rt);
   return status;
-usage:
-  fputs("usage: otium [--heap=BYTES] [--heap-max=BYTES] [--stack=SLOTS] [--stats] [-L DIR] "
-        "[--load FILE] [--repl] [FILE | -e SOURCE] [-- ARG ...]\n",
-        stderr);
-  return 2;
 }

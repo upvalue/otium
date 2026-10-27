@@ -58,6 +58,9 @@ const char* ot_string_data(ot_value v, size_t* length);
 ot_state* ot_create(size_t semispace_bytes, size_t stack_limit);
 void ot_destroy(ot_state* rt);
 bool ot_set_heap_limit(ot_state* rt, size_t semispace_bytes);
+/* Limit how many VM frames can be live at once. There is no limit by default
+ * beyond the stack limit. Zero, or fewer frames than are live, is refused. */
+bool ot_set_frame_limit(ot_state* rt, size_t frames);
 /* Copy host script metadata. NULL script means no script; strings are UTF-8. */
 bool ot_set_arguments(ot_state* rt, const char* script, size_t count, const char* const* arguments);
 
@@ -97,6 +100,16 @@ ot_form_status ot_scan_form(const char* source, size_t length, size_t start, siz
  * safe points. */
 void ot_set_interrupt_flag(ot_state* rt, volatile sig_atomic_t* flag);
 bool ot_poll_interrupt(ot_state* rt);
+/* Call the named global, with the flag's value, when the VM finds the flag set
+ * between instructions or during a blocking read, instead of interrupting. It
+ * runs on top of the interrupted code, and returning #t interrupts that code;
+ * any other result resumes it. NULL removes the handler. The name resolves in
+ * the current namespace when this is called; redefining the global changes
+ * the handler. */
+bool ot_set_interrupt_handler(ot_state* rt, const char* name);
+/* Call the named global with a namespace symbol and a path before a module
+ * file is loaded. An error from it stops the load. NULL removes the hook. */
+bool ot_set_load_hook(ot_state* rt, const char* name);
 bool ot_interrupted(const ot_state* rt);
 
 /* Host IO. Host functions return errno values (zero on success); read/write
@@ -134,11 +147,15 @@ bool ot_flush_ports(ot_state* rt);
 void ot_write(ot_state* rt, FILE* out, ot_value value);
 void ot_print(ot_state* rt, FILE* out, ot_value value);
 
-/* Diagnostics. Foreign record counts include cached signatures and retained
- * library handles. allocations/bytes describe explicitly owned native buffers,
- * not process RSS. */
+/* Diagnostics. The heap fields describe the copying collector: capacity and
+ * limit are per semispace, copied bytes are what collections moved, and
+ * reclaimed bytes are what they freed. Foreign record counts include cached
+ * signatures and retained library handles. allocations/bytes describe
+ * explicitly owned native buffers, not process RSS. */
 typedef struct {
-  size_t collections, max_frames, heap_capacity;
+  size_t collections, max_frames, heap_capacity, heap_limit;
+  size_t heap_allocations, heap_allocated_bytes, heap_copied_bytes, heap_reclaimed_bytes;
+  size_t heap_used, heap_peak_used;
   size_t libraries, bindings, signatures, memory_records, allocations, bytes;
   size_t callbacks, callback_records;
 } ot_stats;

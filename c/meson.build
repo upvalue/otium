@@ -6,7 +6,7 @@ runtime_sources = files(
   'src/ports.c', 'src/strings.c', 'src/bytevectors.c', 'src/reflection.c', 'src/support.c',
   'src/conditions.c', 'src/restarts.c', 'src/cleanup.c', 'src/params.c', 'src/classes.c',
   'src/instances.c', 'src/records.c', 'src/foreign.c', 'src/foreign_types.c',
-  'src/collections.c', 'src/tables.c', 'src/reclaim.c', 'src/modules.c')
+  'src/collections.c', 'src/tables.c', 'src/reclaim.c', 'src/modules.c', 'src/dev.c')
 
 # The runtime is C11 with GNU builtins and computed goto, so it skips the
 # project's C23 and -Wpedantic.
@@ -18,6 +18,7 @@ runtime_deps = [dependency('libffi'), dependency('threads'), dl, libm]
 runtime_args = [
   '-DOTIUM_LIBRARY_DIR="@0@"'.format(source_root / 'lib'),
   '-DOTIUM_BOOTSTRAP_FILE="@0@"'.format(source_root / 'c/src/primitives.ot'),
+  '-DOTIUM_DEV_FILE="@0@"'.format(source_root / 'c/src/dev.ot'),
   '-DOTIUM_TEST_FIXTURE_DIR="@0@"'.format(build_root),
 ]
 checks = get_option('runtime_checks')
@@ -32,10 +33,12 @@ if get_option('vm_switch')
 endif
 
 # Position-independent code costs a few percent in the VM, and the runtime is
-# only linked statically.
+# only linked statically. The development server's socket transport is shared
+# with Chez.
 libotium = static_library('otium', runtime_sources,
-  c_args: runtime_args, include_directories: runtime_include, dependencies: runtime_deps,
-  override_options: runtime_options, pic: false)
+  c_args: runtime_args, include_directories: [runtime_include, native_include],
+  dependencies: runtime_deps, link_whole: dev.get_static_lib(), override_options: runtime_options,
+  pic: false)
 libotium_dep = declare_dependency(link_with: libotium,
   include_directories: include_directories('include'), dependencies: runtime_deps)
 
@@ -43,10 +46,11 @@ libotium_dep = declare_dependency(link_with: libotium,
 amalgamation = custom_target('amalgamation',
   input: runtime_sources, output: ['otium.c', 'otium.h', 'main.c'],
   command: [python, files('tools/amalgamate.py'), '@OUTDIR@', '@INPUT@'],
-  depend_files: files('include/otium.h', 'src/main.c') + runtime_headers)
+  depend_files: files('include/otium.h', 'src/main.c', 'src/options.inc') + runtime_headers)
 otium_amalgamation = executable('otium-amalgamation', amalgamation[0], amalgamation[2],
-  c_args: runtime_args, dependencies: runtime_deps, override_options: runtime_options,
-  build_by_default: false)
+  c_args: runtime_args, include_directories: native_include,
+  link_with: [dev.get_static_lib(), line.get_static_lib()], dependencies: runtime_deps,
+  override_options: runtime_options, build_by_default: false)
 
 # Each tests/unit/NAME.c is one suite, and all of them link into one runner.
 # value.c is built a second time with the portable integer representation.

@@ -157,8 +157,9 @@ That's handled by interrupts.
 
 ## Interrupts and the watchdog
 
-Both VMs stop regularly to check for interrupts. The C VM checks a flag every
-1024 instructions. On Chez, the server installs a timer interrupt handler with
+Both VMs stop regularly to check for interrupts. The C VM checks a flag at
+backward jumps and calls, and with the server running, a timer that counts
+process CPU time sets it every 10ms. On Chez, the server installs a timer interrupt handler with
 `set-timer`. Ticks are roughly procedure calls and loop iterations.
 
 At these checks, the runtime reads a monotonic clock at most every 50ms of
@@ -183,9 +184,8 @@ about 1% at 10k ticks. That handler read the clock with `current-time`, which
 allocates; the real one should read it with a foreign call. At about 400M
 ticks per second, 10k ticks is around 25µs. Use 10k.
 
-On C, reading the clock every check would cost more than it should. Count
-checks and read the clock every 16th one, about every 16k instructions.
-Measure both before settling the numbers.
+On C, the VM already checks the flag, so the server adds nothing to that path.
+The handler runs only when the timer has set the flag.
 
 Neither VM can stop inside a single long primitive (a large copy, a huge
 `make-vector`). The pause waits for it to return. That is bounded by the
@@ -195,9 +195,8 @@ block forever. GC pauses also delay the check, briefly.
 ## Break loop
 
 When the program pauses, the runtime runs the break loop in place, inside the
-interrupt hook. C already has this hook and its `continue` and `abort`
-restarts (`ot_set_interrupt_hook`, used by `--c.server`). Chez needs the same
-hook and restarts.
+interrupt hook, inside `continue` and `abort` restarts. On C the hook is
+`ot_set_interrupt_handler`, which both the socket server and `--c.server` use.
 
 The break loop:
 

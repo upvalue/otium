@@ -322,6 +322,23 @@ enum {
   B_PROCESS_SETENV,
   B_PROCESS_WRITE_ERROR,
   B_READER_TOKENS,
+  B_DEV_OPEN,
+  B_DEV_CLOSE,
+  B_DEV_POLL,
+  B_DEV_NEXT,
+  B_DEV_CLIENT,
+  B_DEV_SEND,
+  B_DEV_CLOCK,
+  B_DEV_NOW,
+  B_DEV_PID,
+  B_DEV_UID,
+  B_DEV_CWD,
+  B_DEV_PRIVATE_DIRECTORY,
+  B_DEV_REALPATH,
+  B_DEV_MTIME,
+  B_DEV_NAMESPACE_NAMES,
+  B_DEV_NAMESPACE_BINDINGS,
+  B_DEV_EVAL_IN,
   /* Compiler-only helpers have no name, so they aren't globals. */
   B_QQ_APPEND,
   B_EVAL_IN_NAMESPACE,
@@ -564,7 +581,9 @@ struct ot_state {
   oti_function** functions;
   size_t function_count, function_capacity;
   oti_frame* frames;
-  size_t frame_count, frame_capacity, max_frames;
+  /* frame_capacity never exceeds frame_limit, so the call fast path needs no
+   * separate depth check. */
+  size_t frame_count, frame_capacity, max_frames, frame_limit;
   ot_value* handlers;
   size_t* handler_previous;
   size_t handler_count, handler_capacity, handler_previous_capacity, handler_top, callback_depth;
@@ -579,6 +598,8 @@ struct ot_state {
   size_t cleanup_count, cleanup_capacity, cleanup_state_capacity;
   oti_roots cleanup_roots;
   volatile sig_atomic_t* interrupt_flag;
+  /* Globals named by ot_set_interrupt_handler and ot_set_load_hook, or UINT32_MAX. */
+  uint32_t interrupt_handler, load_hook;
   bool interrupted;
   bool exit_pending;
   int exit_status;
@@ -698,6 +719,9 @@ bool oti_install_handlers(ot_state* rt, size_t first, size_t count);
 void oti_remove_handlers(ot_state* rt, size_t count);
 ot_value oti_intern(ot_state* rt, unsigned kind, const char* text, size_t length);
 ot_value oti_call_list(ot_state* rt, ot_value function, ot_value args);
+/* A point where Otium code may run: the VM between instructions and blocking
+ * reads. Calls the interrupt handler, if any, when the flag is set. */
+bool oti_interrupt_point(ot_state* rt);
 uint64_t oti_symbol_id(ot_value symbol);
 ot_value oti_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 int oti_builtin_index(const char* name);
@@ -962,7 +986,7 @@ static inline ot_value oti_cdr(ot_value pair) { return oti_as_pair(pair)->cdr; }
 
 /* Builtin tables, one per module. */
 extern const oti_builtin_def oti_bytes_builtins[], oti_class_builtins[], oti_collection_builtins[],
-    oti_condition_builtins[], oti_filesystem_builtins[], oti_foreign_builtins[],
+    oti_condition_builtins[], oti_dev_builtins[], oti_filesystem_builtins[], oti_foreign_builtins[],
     oti_instance_builtins[], oti_numeric_builtins[], oti_port_builtins[], oti_process_builtins[],
     oti_record_builtins[], oti_reflection_builtins[], oti_restart_builtins[], oti_string_builtins[],
     oti_support_builtins[], oti_table_builtins[], oti_time_builtins[];

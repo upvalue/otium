@@ -75,10 +75,13 @@ bool oti_enter(ot_state* rt, size_t call, size_t argc, bool tail) {
     return oti_error(rt, "VM stack limit exceeded");
   size_t top = base + 1 + fn->locals;
   if (top > rt->stack_capacity && !oti_stack(rt, top)) return false;
-  if (!tail && rt->frame_count == rt->frame_capacity &&
-      !oti_grow(rt, (void**)&rt->frames, &rt->frame_capacity, rt->frame_count + 1,
-                sizeof(oti_frame)))
-    return false;
+  if (!tail && rt->frame_count == rt->frame_capacity) {
+    if (rt->frame_count >= rt->frame_limit) return oti_error(rt, "VM frame depth limit exceeded");
+    if (!oti_grow(rt, (void**)&rt->frames, &rt->frame_capacity, rt->frame_count + 1,
+                  sizeof(oti_frame)))
+      return false;
+    if (rt->frame_capacity > rt->frame_limit) rt->frame_capacity = rt->frame_limit;
+  }
   ot_value rest = OT_EMPTY;
   if (fn->rest && argc > fn->arity) {
     oti_roots root;
@@ -351,7 +354,8 @@ static bool dispatch(ot_state* rt, size_t stop_frames) {
   do {                                                                                             \
     if (VM_UNLIKELY(rt->interrupt_flag && *rt->interrupt_flag)) {                                  \
       SAVE_IP();                                                                                   \
-      if (!ot_poll_interrupt(rt)) return false;                                                    \
+      if (!oti_interrupt_point(rt)) return false;                                                  \
+      RELOAD();                                                                                    \
     }                                                                                              \
   } while (0)
 #define TARGET(word) (code + oti_instruction_bc(word))

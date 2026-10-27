@@ -9,10 +9,9 @@
  ["dev-watchdog", "common", "milliseconds", "Pause slow evaluations; 0 disables (default: 2000)"],
  ["memory-report", "chez", "flag", "Print a memory report at exit"],
  ["c.server", "c", "flag", "Run the framed stdio server"],
- ["c.heap-init", "c", "integer", "Initial usable heap target in bytes"],
- ["c.heap-max", "c", "integer", "Maximum usable heap size in bytes"],
+ ["c.heap-init", "c", "integer", "Initial size of each semispace in bytes"],
+ ["c.heap-max", "c", "integer", "Maximum size of each semispace in bytes"],
  ["c.max-depth", "c", "integer", "VM frame depth limit"],
  ["c.gc-stats", "c", "flag", "Print collector statistics at exit"],
- ["c.gc-stats-json", "c", "flag", "Print machine-readable GC statistics"],
- ["c.gc-force-compact", "c", "flag", "Force compaction at every major GC"]
+ ["c.gc-stats-json", "c", "flag", "Print machine-readable GC statistics"]
 ]

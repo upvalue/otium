@@ -390,7 +390,8 @@
       (for-each (fn (blk)
                   (set! current (blk :instrs))
                   (for-each (fn (o) (select-op! o)) (ir/block-ops ir (blk :ir)))
-                  (put! blk :term (select-term! (blk :ir))))
+                  (put! blk :term (select-term! (blk :ir)))
+                  (return-call! blk))
                 blocks))
 
     (put! lfn :blocks blocks)
@@ -411,6 +412,20 @@
     (put! lfn :vregs next-vreg)
     (put! lfn :calls calls)
     lfn))
+
+;; A call to a builtin whose result is returned at once becomes a tail call,
+;; as compiler.c makes it, so the caller's frame is gone when the builtin
+;; raises and errors report the same frames.
+(def- (return-call! blk)
+  (let ((t (blk :term))
+        (instrs (blk :instrs)))
+    (when (and (eq? (t :op) :return) (> (length instrs) 0))
+      (let ((last (instrs (- (length instrs) 1))))
+        (when (and (eq? (last :op) :call) (= (last :dst) (car (t :uses))))
+          (pop! instrs)
+          (put! last :op :tail-call)
+          (put! last :dst nil)
+          (put! blk :term last))))))
 
 ;; --- dead instructions -------------------------------------------------------------
 

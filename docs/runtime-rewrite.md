@@ -161,6 +161,29 @@ while an error is pending, such as cleanups and port flushing, moves the record
 out with `oti_take_error` and back with `oti_restore_error` or
 `oti_drop_error`.
 
+The record also says where the error happened, in host memory: a source id
+and offset once something locates it (`oti_error_at`), the frames of an
+uncaught error, and the top-level forms in other files that led to it.
+Source ids index `rt->sources`, the paths of required files; 0 is the text
+the host passed to `ot_eval`, and `OTI_NO_SOURCE` marks runtime libraries and
+evaluated data. Each function keeps a cold table from instruction indexes to
+the offsets of the forms they came from, filled as the compiler emits code,
+and its name. When dispatch fails with no try frame installed, `oti_drive`
+records the frames (`oti_trace_error`) before anything unwinds; a frame whose
+tail call failed is left out, since on Chez the call has replaced it. When a
+top-level form fails, `oti_locate_error` locates an unlocated error at the
+form, or notes the form when the error is located in another file. Lists read
+for the shared expander carry their offset in their first pair, and
+`expander-locate` copies it onto rewritten forms, so expanded code keeps its
+position.
+
+`ot_report_error` turns the record into a diagnostic table, adding `:span`,
+`:frames`, "reached from" notes and `:suggestions` from the source files as
+Chez's `locate!` does, and renders it with `otium.diagnostics/render`, falling
+back to plain text. Messages follow Chez's and the catalog's: E0201 has
+`:name`, E0301 has `:name` and `:label`, and read errors use the catalog
+message.
+
 ## Launcher paths and options
 
 The launcher supports upward project.ot discovery, --project/--no-project, and

@@ -138,6 +138,89 @@ host support does not yet give filesystem-free embedding.
 The embedding API has no way for a host to define native functions or make
 foreign values. Native code is reached through `otium.ffi`.
 
+## Errors
+
+A failing operation records an `oti_error_record` in `rt->error` and returns
+false or zero. Recording never allocates on the managed heap, because callers
+often hold unrooted values and return straight after. The condition is built
+where the error is caught, by `oti_error_condition` or `oti_condition_of`.
+
+The record holds the message, owned and not truncated, a diagnostic code, the
+source offset and typed fields. `who` and `tag` become the condition's `:who`
+and the symbol that starts `:data`, as in Chez; up to three further `:data`
+values live in rooted slots, so storing one is safe anywhere.
+`oti_tagged_error` records these, and generic dispatch, slot access and class
+and generic declarations use it, so `((get e :data) 0)` is a symbol such as
+`missing-method` on both runtimes. `ffi_reason` marks an FFI error, which
+`foreign_run` turns into an `ffi-error` condition; `in_module` marks a message
+that already names the module whose load failed.
+
+`oti_error`, `oti_errorf`, `oti_coded_errorf` and `oti_ffi_errorf` record an
+error; the first one wins. `oti_failed(rt)` tests for one. Code that runs Otium
+while an error is pending, such as cleanups and port flushing, moves the record
+out with `oti_take_error` and back with `oti_restore_error` or
+`oti_drop_error`.
+
+## Launcher paths and options
+
+The launcher supports upward project.ot discovery, --project/--no-project, and
+colon-separated OTIUM_PATH. Explicit -L/--path entries precede environment and
+project paths. Project files are parsed as data: only top-level (paths ...)
+strings contribute directories, resolved relative to the project file. Comments
+and unrelated settings do not become search paths. Malformed paths forms fail;
+project contents are never evaluated.
+
+Options come from `lib/catalog/options.json` through the table that
+`tools/generate-cli.py` writes to `c/src/options.inc`, so `--help` is the same on
+both runtimes and errors name the option the same way. Chez-only options are
+accepted and ignored. Numeric options reject signs and whitespace. Attached
+--path, --load and --project values work. Preload-only invocation stops after
+loading unless --repl was requested. `-e` is a C-only extra and isn't in
+`--help`.
+
+The prototype's own `--heap`, `--heap-max`, `--stack` and `--stats` are gone.
+`--c.heap-init`, `--c.heap-max`, `--c.max-depth` and `--c.gc-stats` replace them.
+Without `--c.heap-max`, the limit is 64 MiB or the initial size if that is
+larger. `--c.max-depth` is applied by never growing the frame array past it, so
+calls pay nothing for it. `--c.gc-force-compact` was dropped: the semispace
+collector compacts on every collection. `--c.gc-stats-json` reports allocations,
+collections, allocated, copied and reclaimed bytes, current and peak use, and
+the semispace capacity and limit. The counters change only during collection;
+the allocation count is the object identity counter.
+
+The REPL reads from the standard input port, which it shares with programs,
+and prompts only on a terminal. On a terminal, and with `--dev`, it reads
+through the line editor in `native/line` instead, as Chez does, and an
+interrupted evaluation returns to the prompt.
+
+## Development server
+
+`--dev[=PATH]`, `--dev-watchdog=MS` and `serve` work as on Chez; see
+`specs/dev-server.md`. The protocol is `lib/otium/dev.ot`. The C runtime links
+the socket transport from `native/dev` and provides the primitives that file
+uses: the transport, clocks and namespace listings in `c/src/dev.c`, and request
+evaluation, output copying and the pause logic in Otium in `c/src/dev.ot`, which
+the launcher loads after `lib/otium/dev.ot`.
+
+Pausing uses `ot_set_interrupt_handler`. When the interrupt flag is set and a
+handler is named, the VM calls it at its existing safe points (backward jumps
+and calls) and blocking port reads call it while they wait; other places that
+check the flag leave it set. The handler gets the flag's value: 1 for SIGINT and
+2 for a timer tick. The launcher sets up the tick with `ITIMER_VIRTUAL` every
+10 ms, so it runs only while the process uses CPU and never interrupts a
+blocking call. On a tick the handler polls the socket and checks the watchdog
+deadline, and pauses in `dev/break!` inside `continue` and `abort` restarts.
+Aborting raises an error in the paused code, as on Chez.
+
+`ot_set_load_hook` names a function the module loader calls before loading a
+file; the server passes `dev/record-load!`, which the introspection functions
+use to find source files.
+
+`--c.server` reads frames ending in a line holding only `\x1f` and answers each
+with output, the value and a `\x1eot> ` prompt, through `dev/stdio!`. SIGINT
+while a frame runs pauses it with the same restarts and serves frames until one
+invokes a restart; a second SIGINT, or `abort`, interrupts it.
+
 ## Checks
 
 `just test c` runs the C suite: the unit runner and the tests in
@@ -428,29 +511,6 @@ FFI loop against Python ctypes and Chez's direct foreign-procedure interface.
 `baseline-foreign.json` records the results. The shared C fixture, argument,
 expected sum and warmup/sample counts match. Measurements include the language
 loop and marshalling, while native/adapter compilation occurs before sampling.
-
-## Errors
-
-A failing operation records an `oti_error_record` in `rt->error` and returns
-false or zero. Recording never allocates on the managed heap, because callers
-often hold unrooted values and return straight after. The condition is built
-where the error is caught, by `oti_error_condition` or `oti_condition_of`.
-
-The record holds the message, owned and not truncated, a diagnostic code, the
-source offset and typed fields. `who` and `tag` become the condition's `:who`
-and the symbol that starts `:data`, as in Chez; up to three further `:data`
-values live in rooted slots, so storing one is safe anywhere.
-`oti_tagged_error` records these, and generic dispatch, slot access and class
-and generic declarations use it, so `((get e :data) 0)` is a symbol such as
-`missing-method` on both runtimes. `ffi_reason` marks an FFI error, which
-`foreign_run` turns into an `ffi-error` condition; `in_module` marks a message
-that already names the module whose load failed.
-
-`oti_error`, `oti_errorf`, `oti_coded_errorf` and `oti_ffi_errorf` record an
-error; the first one wins. `oti_failed(rt)` tests for one. Code that runs Otium
-while an error is pending, such as cleanups and port flushing, moves the record
-out with `oti_take_error` and back with `oti_restore_error` or
-`oti_drop_error`.
 
 ## Arrays and structural equality
 
@@ -2351,64 +2411,3 @@ Cleanup, conditions, process, ports, interrupt, foreign callbacks and foreign
 reload regressions pass. Cleanup, process, ports and interrupt sanitizer targets
 pass with ASan/UBSan and leak checking disabled. The expanded compliance runner
 continues to return failure until its diagnostic and launcher gaps are fixed.
-
-
-## Launcher paths and options
-
-The launcher supports upward project.ot discovery, --project/--no-project, and
-colon-separated OTIUM_PATH. Explicit -L/--path entries precede environment and
-project paths. Project files are parsed as data: only top-level (paths ...)
-strings contribute directories, resolved relative to the project file. Comments
-and unrelated settings do not become search paths. Malformed paths forms fail;
-project contents are never evaluated.
-
-Options come from `lib/catalog/options.json` through the table that
-`tools/generate-cli.py` writes to `c/src/options.inc`, so `--help` is the same on
-both runtimes and errors name the option the same way. Chez-only options are
-accepted and ignored. Numeric options reject signs and whitespace. Attached
---path, --load and --project values work. Preload-only invocation stops after
-loading unless --repl was requested. `-e` is a C-only extra and isn't in
-`--help`.
-
-The prototype's own `--heap`, `--heap-max`, `--stack` and `--stats` are gone.
-`--c.heap-init`, `--c.heap-max`, `--c.max-depth` and `--c.gc-stats` replace them.
-Without `--c.heap-max`, the limit is 64 MiB or the initial size if that is
-larger. `--c.max-depth` is applied by never growing the frame array past it, so
-calls pay nothing for it. `--c.gc-force-compact` was dropped: the semispace
-collector compacts on every collection. `--c.gc-stats-json` reports allocations,
-collections, allocated, copied and reclaimed bytes, current and peak use, and
-the semispace capacity and limit. The counters change only during collection;
-the allocation count is the object identity counter.
-
-The REPL reads from the standard input port, which it shares with programs,
-and prompts only on a terminal. On a terminal, and with `--dev`, it reads
-through the line editor in `native/line` instead, as Chez does, and an
-interrupted evaluation returns to the prompt.
-
-## Development server
-
-`--dev[=PATH]`, `--dev-watchdog=MS` and `serve` work as on Chez; see
-`specs/dev-server.md`. The protocol is `lib/otium/dev.ot`. The C runtime links
-the socket transport from `native/dev` and provides the primitives that file
-uses: the transport, clocks and namespace listings in `c/src/dev.c`, and request
-evaluation, output copying and the pause logic in Otium in `c/src/dev.ot`, which
-the launcher loads after `lib/otium/dev.ot`.
-
-Pausing uses `ot_set_interrupt_handler`. When the interrupt flag is set and a
-handler is named, the VM calls it at its existing safe points (backward jumps
-and calls) and blocking port reads call it while they wait; other places that
-check the flag leave it set. The handler gets the flag's value: 1 for SIGINT and
-2 for a timer tick. The launcher sets up the tick with `ITIMER_VIRTUAL` every
-10 ms, so it runs only while the process uses CPU and never interrupts a
-blocking call. On a tick the handler polls the socket and checks the watchdog
-deadline, and pauses in `dev/break!` inside `continue` and `abort` restarts.
-Aborting raises an error in the paused code, as on Chez.
-
-`ot_set_load_hook` names a function the module loader calls before loading a
-file; the server passes `dev/record-load!`, which the introspection functions
-use to find source files.
-
-`--c.server` reads frames ending in a line holding only `\x1f` and answers each
-with output, the value and a `\x1eot> ` prompt, through `dev/stdio!`. SIGINT
-while a frame runs pauses it with the same restarts and serves frames until one
-invokes a restart; a second SIGINT, or `abort`, interrupts it.

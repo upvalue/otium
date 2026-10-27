@@ -1,0 +1,374 @@
+(ns otium.compiler.closures)
+
+;; Closure conversion for the VM. The contract is in docs/optimizer.md,
+;; "Closures" and "Rules settled for the second wave". (run ir) reads the IR
+;; Propagate made and writes a new one that passes (verify/check ir :closed).
+;;
+;; What it does:
+;; - A function's free variables are the values defined outside it that it
+;;   uses, that the functions it creates need, or that its calls need (the
+;;   extra arguments of a lifted function, the closure value of a call that
+;;   stops being known). They are kept in order of old value id, so the
+;;   layout is deterministic. Computing them is a fixpoint over all
+;;   functions, because lifting a function adds its free variables to its
+;;   callers. Sets only grow, so it ends; a function that grows past four
+;;   free variables after its callers took them on keeps those callers'
+;;   extra free variables (harmless, and rare).
+;; - A function with free variables reads them with one `env-ref i` each, all
+;;   at the start of its entry block, in index order. That dominates every
+;;   use. They are pure and cheap, so the backend may move or rematerialize
+;;   them to save registers.
+;; - `closure g vs` becomes `make-closure g captures`, captures in g's free
+;;   variable order, each a value of the creating function (its own value or
+;;   its env-ref or lifted parameter). The operands Convert gave `closure` are
+;;   ignored: the captures are recomputed from what g actually uses. With no
+;;   captures it becomes `static-closure g`.
+;; - Well-known functions: no `closure` of g has a used value, no `self` in g
+;;   has a used value, and g has a parent. With 1 to 4 free variables, g takes
+;;   them as extra leading required parameters, every :known call to g passes
+;;   them first, and its remaining `closure` operations become
+;;   `static-closure`. A jump back to g's entry block passes them on too.
+;; - Known-call rule: a :known call to a function with captures becomes a
+;;   :value call on its closure: `self` when the call is inside g itself; a
+;;   `closure` of g visible at the call (in the calling function, or an
+;;   enclosing one, which then makes it a free variable); otherwise, when the
+;;   caller is g's parent, a fresh `make-closure` just before the call. Any
+;;   other case raises (core/unsupported ...).
+;; - Functions nothing live creates or calls are dropped, so that every
+;;   function with env-refs has a make-closure. Unreachable blocks are dropped.
+;; - Facts and names carry over; an env-ref or lifted parameter gets the fact
+;;   and name of the value it stands for.
+
+(require otium.compiler.column :as column)
+(require otium.compiler.core :as core)
+(require otium.compiler.ir :as ir)
+
+(def max-lifted
+  "Most free variables a well-known function takes as extra parameters."
+  4)
+
+(def- (unsupported what)
+  (core/unsupported (str "closure conversion: " what)))
+
+;; --- analysis --------------------------------------------------------------------
+
+(def- (analyse old)
+  "A table of everything the rewrite needs about old."
+  (let ((nfn (ir/function-count old))
+        (nval (ir/value-count old))
+        (order (column/filled (ir/function-count old) '())) ; reachable blocks in rpo
+        (op-index (column/filled (ir/op-count old) nil))
+        (used (column/bitset (ir/value-count old)))
+        (direct (column/filled (ir/function-count old) nil))
+        (creates (column/filled (ir/function-count old) '())) ; g made by closures in f
+        (makers (column/filled (ir/function-count old) '())) ; closure ops making g
+        (selfs (column/filled (ir/function-count old) '())) ; self ops in g
+        (calls (column/filled (ir/function-count old) '())) ; known calls in f: [blk g]
+        (doms-of {}))
+    (dotimes (f nfn)
+      (put! direct f (column/bitset nval))
+      (when (ir/fn-entry old f) (put! order f (ir/rpo old f))))
+    (def (use! f x)
+      (column/bitset-set! used x)
+      (unless (= (ir/value-fn old x) f) (column/bitset-set! (direct f) x)))
+    (dotimes (f nfn)
+      (for-each (fn (blk)
+                  (let loop ((os (ir/block-ops old blk))
+                             (i 0))
+                    (unless (null? os)
+                      (let ((o (car os)))
+                        (put! op-index o i)
+                        (let ((code (ir/op-code old o)))
+                          (cond
+                            ((eq? code 'closure)
+                             (let ((g (ir/op-aux old o)))
+                               (put! makers g (cons o (makers g)))
+                               (unless (memq g (creates f)) (put! creates f (cons g (creates f))))))
+                            (else (when (eq? code 'self) (put! selfs f (cons o (selfs f))))
+                                  (for-each (fn (x) (use! f x)) (ir/op-args old o))))))
+                      (loop (cdr os) (+ i 1))))
+                  (for-each (fn (x) (use! f x)) (ir/term-args old blk))
+                  (let ((kind (ir/term-kind old blk))
+                        (ck (ir/term-call-kind old blk)))
+                    (when (memq kind '(:call :tail-call))
+                      (cond
+                        ((eq? ck :value) (use! f (ir/term-callee old blk)))
+                        ((eq? ck :known) (put! calls f (cons [blk (ir/term-callee old blk)] (calls f))))))))
+                (order f)))
+    (dotimes (f nfn)
+      (put! creates f (reverse (creates f)))
+      (put! makers f (reverse (makers f)))
+      (put! calls f (reverse (calls f))))
+    (def (value-used? o)
+      (column/bitset-has? used (ir/op-value old o)))
+    (let ((well-known (column/filled nfn #f)))
+      (dotimes (g nfn)
+        (put! well-known
+              g
+              (and (ir/fn-parent old g)
+                   (null? (filter value-used? (makers g)))
+                   (null? (filter value-used? (selfs g))))))
+      {:old old
+       :order order
+       :op-index op-index
+       :direct direct
+       :creates creates
+       :makers makers
+       :calls calls
+       :well-known well-known
+       :doms-of doms-of})))
+
+(def- (doms a f)
+  (or (get (a :doms-of) f)
+      (let ((d (ir/dominators (a :old) f)))
+        (put! (a :doms-of) f d)
+        d)))
+
+(def- (ancestor? old h g)
+  (let loop ((p (ir/fn-parent old g)))
+    (cond
+      ((nil? p) #f)
+      ((= p h) #t)
+      (else (loop (ir/fn-parent old p))))))
+
+(def- (visible? a x c blk i seen)
+  "Whether value x can be used in function c at position i of blk (nil: the
+terminator), directly or as a free variable of c."
+  (let ((old (a :old))
+        (h (ir/value-fn (a :old) x)))
+    (cond
+      ((= h c)
+       (let ((d (doms a c))
+             (def-block (ir/value-block old x))
+             (site (ir/value-def old x)))
+         (and (contains? d def-block)
+              (if (and (= def-block blk) (eq? (site 0) :op))
+                  (or (nil? i) (< ((a :op-index) (site 1)) i))
+                  (ir/dominates? old d def-block blk)))))
+      ((and (ancestor? old h c) (not (memq c seen)))
+       (let ((ms ((a :makers) c)))
+         (and (not (null? ms))
+              (null? (filter (fn (o)
+                               (let ((ob (ir/op-block old o)))
+                                 (not (visible? a x (ir/block-fn old ob) ob ((a :op-index) o) (cons c seen)))))
+                             ms)))))
+      (else #f))))
+
+(def- (resolve a c blk g)
+  "How a :known call in c to g finds g's closure if it has to become a :value
+call: :self, an old value to use, :fresh (make one at the call) or :none."
+  (let ((old (a :old)))
+    (cond
+      ((= g c) :self)
+      (else (let ((ms ((a :makers) g)))
+              ;; the caller's own closures first, then enclosing functions'
+              (let ((found (let loop ((xs (append (filter (fn (o) (= (ir/block-fn old (ir/op-block old o)) c)) ms)
+                                                  (filter (fn (o) (not (= (ir/block-fn old (ir/op-block old o)) c)))
+                                                          ms))))
+                             (cond
+                               ((null? xs) nil)
+                               ((visible? a (ir/op-value old (car xs)) c blk nil '()) (ir/op-value old (car xs)))
+                               (else (loop (cdr xs)))))))
+                (cond
+                  (found found)
+                  ((eq? (ir/fn-parent old g) c) :fresh)
+                  (else :none))))))))
+
+(def- (add-outside! into from f old)
+  "Add the members of from that aren't values of f to into; true if it changed."
+  (let ((changed #f))
+    (column/bitset-for-each (fn (x)
+                              (unless (or (= (ir/value-fn old x) f) (column/bitset-has? into x))
+                                (column/bitset-set! into x)
+                                (set! changed #t)))
+                            from)
+    changed))
+
+(def- (free-variables! a)
+  "Compute :free (sorted list per function), :count and :lifted, and add to
+each known call [blk g] its resolution."
+  (let ((old (a :old))
+        (nfn (ir/function-count (a :old)))
+        (free (map column/bitset-copy (a :direct)))
+        (count (column/filled (ir/function-count (a :old)) 0)))
+    (dotimes (f nfn)
+      (for-each (fn (call) (push! call (resolve a f (call 0) (call 1)))) ((a :calls) f))
+      (put! count f (length (column/bitset->list (free f)))))
+    (def (lifted? g)
+      (and ((a :well-known) g) (>= (count g) 1) (<= (count g) max-lifted)))
+    (def (captures? g)
+      (and (> (count g) 0) (not (lifted? g))))
+    (let ((changed #t))
+      (while changed
+        (set! changed #f)
+        (let loop ((f (- nfn 1)))
+          (when (>= f 0)
+            (let ((mine (free f))
+                  (grew #f))
+              (for-each (fn (g) (when (and (captures? g) (add-outside! mine (free g) f old)) (set! grew #t)))
+                        ((a :creates) f))
+              (for-each (fn (call)
+                          (let ((g (call 1))
+                                (r (call 2)))
+                            (cond
+                              ((= (count g) 0) nil)
+                              ((or (lifted? g) (eq? r :fresh)) (when (add-outside! mine (free g) f old) (set! grew #t)))
+                              ((and (int? r) (not (= (ir/value-fn old r) f)) (not (column/bitset-has? mine r)))
+                               (column/bitset-set! mine r)
+                               (set! grew #t)))))
+                        ((a :calls) f))
+              (when grew
+                (put! count f (length (column/bitset->list mine)))
+                (set! changed #t)))
+            (loop (- f 1))))))
+    (put! a :free (map column/bitset->list free))
+    (put! a :count count)
+    (put! a :lifted (map lifted? (range nfn)))
+    a))
+
+(def- (lifted? a g)
+  ((a :lifted) g))
+
+(def- (captures? a g)
+  (and (> ((a :count) g) 0) (not (lifted? a g))))
+
+(def- (live-functions a)
+  "Bitset of functions reachable from the roots through closures and known calls."
+  (let ((old (a :old))
+        (live (column/bitset (ir/function-count (a :old))))
+        (work '()))
+    (def (mark! f)
+      (unless (column/bitset-has? live f)
+        (column/bitset-set! live f)
+        (set! work (cons f work))
+        (let ((p (ir/fn-parent old f))) (when p (mark! p)))))
+    (dotimes (f (ir/function-count old))
+      (when (nil? (ir/fn-parent old f)) (mark! f)))
+    (while (not (null? work))
+      (let ((f (car work)))
+        (set! work (cdr work))
+        (for-each mark! ((a :creates) f))
+        (for-each (fn (call) (mark! (call 1))) ((a :calls) f))))
+    live))
+
+;; --- rewrite ---------------------------------------------------------------------
+
+(def (run old)
+  "Closure-convert old, returning a new IR that passes (verify/check ir :closed)."
+  (let ((a (free-variables! (analyse old)))
+        (out (ir/new))
+        (vmap (column/filled (ir/value-count old) nil)))
+    (let ((live (live-functions a)))
+      (for ((f :in (ir/functions old)))
+        (when (column/bitset-has? live f) (ir/copy-function-shell! old out f)))
+      (for ((f :in (ir/functions old)))
+        (when (column/bitset-has? live f) (convert-function! a out vmap f))))
+    out))
+
+(def- (carry! old out x nx)
+  (ir/set-value-fact! out nx (ir/value-fact old x))
+  (ir/set-value-name! out nx (ir/value-name old x))
+  nx)
+
+(def- (convert-function! a out vmap f)
+  (let ((old (a :old))
+        (nf (ir/copied-function out f))
+        (bmap {})
+        (order ((a :order) f))
+        (frees ((a :free) f))
+        (fmap {}) ; free variable -> its value in nf
+        (entry (ir/fn-entry old f))
+        (lifted (lifted? a f)))
+    (def (val x)
+      (let ((nx (if (= (ir/value-fn old x) f)
+                    (vmap x)
+                    (get fmap x))))
+        (when (nil? nx) (unsupported (str "v" x " isn't available in f" f)))
+        nx))
+    (def (captures-of g)
+      (map val ((a :free) g)))
+    (def (fn-of g)
+      (ir/copied-function out g))
+    ;; Blocks and parameters; a lifted function's free variables come first.
+    (for ((b :in order))
+      (let ((nb (ir/add-block! out nf)))
+        (put! bmap b nb)
+        (when (and lifted (= b entry))
+          (for ((x :in frees))
+            (put! fmap x (carry! old out x (ir/add-param! out nb)))))
+        (for ((p :in (ir/block-params old b)))
+          (put! vmap p (carry! old out p (ir/add-param! out nb))))))
+    (ir/set-entry! out nf (bmap entry))
+    (let ((sig (ir/fn-signature old f))
+          (params (map vmap (ir/fn-params old f))))
+      (if lifted
+          (ir/set-signature! out
+                             nf
+                             (append (map (fn (x) (fmap x)) frees) params)
+                             (+ (sig 0) (length frees))
+                             (sig 1)
+                             (sig 2))
+          (ir/set-signature! out nf params (sig 0) (sig 1) (sig 2))))
+    (when (captures? a f)
+      (let loop ((xs frees)
+                 (i 0))
+        (unless (null? xs)
+          (put! fmap (car xs) (carry! old out (car xs) (ir/emit! out (bmap entry) 'env-ref '() i)))
+          (loop (cdr xs) (+ i 1)))))
+    ;; Operations.
+    (for ((b :in order))
+      (let ((nb (bmap b)))
+        (for ((o :in (ir/block-ops old b)))
+          (let ((code (ir/op-code old o))
+                (aux (ir/op-aux old o))
+                (pos (ir/op-pos old o))
+                (x (ir/op-value old o)))
+            (put! vmap
+                  x
+                  (carry! old
+                          out
+                          x
+                          (cond
+                            ((eq? code 'closure)
+                             (if (captures? a aux)
+                                 (ir/emit! out nb 'make-closure (captures-of aux) (fn-of aux) pos)
+                                 (ir/emit! out nb 'static-closure '() (fn-of aux) pos)))
+                            ((and (ir/ir-code? code) (eq? (ir/code-aux-kind code) :fn))
+                             (ir/emit! out nb code (map val (ir/op-args old o)) (fn-of aux) pos))
+                            (else (ir/emit! out nb code (map val (ir/op-args old o)) aux pos)))))))))
+    ;; Terminators.
+    (let ((calls ((a :calls) f)))
+      (def (resolution-of b)
+        (let loop ((cs calls))
+          (if (= ((car cs) 0) b)
+              ((car cs) 2)
+              (loop (cdr cs)))))
+      (for ((b :in order))
+        (let ((nb (bmap b))
+              (kind (ir/term-kind old b)))
+          (cond
+            ((and (eq? kind :jump) lifted (= (car (ir/succs old b)) entry))
+             (ir/jump! out nb (bmap entry) (append (map (fn (x) (fmap x)) frees) (map val (ir/term-args old b)))))
+            ((and (memq kind '(:call :tail-call)) (eq? (ir/term-call-kind old b) :known))
+             (let ((g (ir/term-callee old b))
+                   (args (map val (ir/term-args old b)))
+                   (pos (ir/term-pos old b)))
+               (def (finish! ck callee args)
+                 (if (eq? kind :call)
+                     (ir/call! out nb ck callee args (bmap (car (ir/succs old b))) pos)
+                     (ir/tail-call! out nb ck callee args pos)))
+               (cond
+                 ((= ((a :count) g) 0) (finish! :known (fn-of g) args))
+                 ((lifted? a g) (finish! :known (fn-of g) (append (captures-of g) args)))
+                 (else (let ((r (resolution-of b)))
+                         (finish! :value (cond
+                                           ((eq? r :self) (ir/emit! out nb 'self '()))
+                                           ((eq? r :fresh) (ir/emit! out nb 'make-closure (captures-of g) (fn-of g)))
+                                           ((eq? r :none)
+                                            (unsupported (str "no closure of f"
+                                                              g
+                                                              " is visible at its known call in f"
+                                                              f)))
+                                           (else (val r)))
+                                  args))))))
+            (else (ir/copy-term! old b out nb val (fn (s) (bmap s))))))))))

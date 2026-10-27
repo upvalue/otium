@@ -21,6 +21,11 @@ Read AGENT-LANG.md before writing Otium code.
   when something can be done in Otium over using escape hatches to the runtime,
   it should be.
 
+# Repository
+
+- docs/ is managed by humans; while some of the docs within may be LLM
+  generated, you should never directly put documents in there without instructions.
+
 # Manse
 
 Manse is a development environment written in Otium and powered by Ghostty.

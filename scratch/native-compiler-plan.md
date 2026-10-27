@@ -4,14 +4,14 @@ Goal: an optimizing compiler for Otium that produces machine code for the C
 runtime. It's written in Otium, with C supplying the parts that touch memory,
 the OS and the collector. It should be several times faster than interpreters
 and non-optimizing compilers on ordinary code, and within reach of Chez and
-SBCL. The same compiler also produces better bytecode for the register VM, for
-platforms without a native backend yet.
+SBCL. Platforms without a native backend run the register VM, which gets the
+front end's declarations and rewrites by way of the simple compiler.
 
 This supersedes `compiler-plan.md`. Most of that plan's decisions still hold
 and are repeated here briefly. What changes:
 
-- Native code is the main target. The VM is a second backend that shares
-  everything above instruction selection.
+- Native code is the main target. The VM shares the front end only (see
+  Revisions after the first build).
 - Chez is going away, so the compiler is developed and run on the C runtime.
   Nothing needs to keep working on Chez.
 - The middle of the pipeline is cut down to one main optimization pass
@@ -20,6 +20,48 @@ and are repeated here briefly. What changes:
 
 Data structures, the hand-offs between passes, installing code and testing
 are in `native-compiler-internals.md`.
+
+## Revisions after the first build
+
+The first version of this plan is built on `main` under `lib/otium/compiler/`,
+with the register VM as its only backend. Status is in `docs/optimizer.md`. It
+works: the C test suite and the R7RS ports pass with it on. It isn't faster
+than `compiler.c`, within 5% in VM instructions either way, for three reasons:
+
+- Most time on the ports is in calls between globals, and this plan never
+  inlined user globals. Inline only had local functions to work with, and real
+  code has few of them.
+- The VM can't express what Propagate learns. `%fx+` and `%car` go out as the
+  same generic `ADD` and `CAR`, and nothing uses the ranges.
+- `compiler.c` already does the cheap things (named `let` loops, fused
+  compare-and-branch, `ADDI`, tail calls), and the SSA allocator gave some of
+  it back as argument moves.
+
+Looking at SBCL's source settled the direction. SBCL never inlines a user
+function unless it's declared `inline` (`save-inline-expansion-p` in
+`src/code/macros.lisp`), and redefining one only warns. Recursive calls are
+direct only when `speed` or `space` beats `debug` (`recognize-self-calls`, off
+under the default policy), so `trace` sees them. Its speed comes from built-in
+functions the compiler knows about (about 1,100 `defknown`s and 700
+`deftransform`s) and from type declarations. All of that depends on things
+that can't change at run time, so a redefinition never invalidates anything.
+That suits live reloading better than Chez, whose cp0 treats a library's
+bindings as fixed.
+
+What changed:
+
+- User globals are inlined only when their definition declares it. See
+  Declarations.
+- Library functions get rewrites keyed on what's known about their arguments,
+  with a cheap run-time test where it isn't known, instead of plain inlining.
+  See Library rewrites.
+- The VM no longer goes through the block IR. Inline's output goes back to
+  `compiler.c`. See The VM.
+- Passes 3-8 are for native code. VM and native code don't share a calling
+  convention, and VM code only runs during bootstrap, for forms the optimizer
+  doesn't support, and on platforms without a backend.
+- The VM allocator is dropped. Native code gets the linear scan it was always
+  going to.
 
 ## Targets
 
@@ -47,13 +89,17 @@ Kept from `compiler-plan.md`:
 - **Compile everything ahead of time.** No interpreter tier, no profiling, no
   type feedback. Optimization levels trade compile time for code quality.
 - **Builtins are immutable.** Everything bound in `otium.core` is a known
-  operation the compiler can fold, inline or specialize. This includes the
-  library functions written in Otium (`map`, `for-each`, `get`), which Inline can
-  inline.
-- **User functions stay redefinable.** Calls go through global cells. Inlining
-  a global records a dependency and redefinition recompiles dependents. A
-  running frame finishes with the code it started with. `set!` on a global
-  only from its own module; `redef!` and `with-redefs` for the rest.
+  operation the compiler can fold, rewrite or specialize. This includes the
+  library functions written in Otium (`map`, `for-each`, `get`). See Library
+  rewrites.
+- **User functions stay redefinable.** Calls go through global cells. A user
+  function is inlined only when its definition declares `inline`. Inlining it
+  records a dependency, and redefining it recompiles the callers. A running
+  frame finishes with the code it started with.
+- **`set!` on another module's global stays allowed.** Tests use it to stub
+  functions (`manse/tests/wheel.ot`, `tests/ui/application.ot`). A cell that's
+  been `set!` is never inlined again, so stubs and tracing wrappers see every
+  call.
 - **One-shot continuations only.** Frames live on stacks.
 - **Single return values.**
 - **No unsafe level.** Checks disappear only when the compiler proves them
@@ -65,11 +111,12 @@ Kept from `compiler-plan.md`:
 
 New or settled here:
 
-- **Fixnum overflow raises an error**, as the C runtime does today. A
-  successful fixnum `+` then produces a fixnum, so type and range facts carry
-  forward. If bignums arrive later they go on the slow path and inference
-  weakens to "integer" for results that could overflow. That's a cost to weigh
-  then, not now.
+- **Fixnum overflow.** This plan assumed the C runtime raises on overflow. It
+  wraps. `types.ot` and `prims.ot` account for that, at the cost of weaker
+  ranges after `+`, `-` and `*`. Whether to make it raise is an open question.
+- **Declarations live in the definition.** `inline`, `notinline` and checked
+  parameter types go in a `(declare ...)` after the docstring, not in a
+  separate form. See Declarations.
 - **Otium code runs on its own stacks, using the hardware `call` and `ret`.**
   C runs on a separate C stack. See Stacks and frames.
 - **All allocatable registers are caller-saved.** Values live across a call are
@@ -86,6 +133,87 @@ New or settled here:
 - **x86-64 first, then AArch64.** x86-64 because that's the main development
   machine; AArch64 follows closely because of Apple Silicon. Both are designed
   for from the start.
+
+## Declarations
+
+Some things the compiler can't work out for itself, so the programmer says
+them. They go inside the definition, after the docstring:
+
+```scheme
+(def (second seq)
+  "Element at index 1, or nil."
+  (declare inline)
+  (nth seq 1))
+
+(def (dot ax ay bx by)
+  (declare (float ax ay bx by))
+  (+ (* ax bx) (* ay by)))
+```
+
+Common Lisp's `declaim` is a separate top-level form that changes global state
+for a name, and that goes wrong with reloading: delete the `declaim` and
+reload, and the old setting stays, because nothing undoes it. SBCL has a
+special case for exactly this (a function that used to be inline keeps saving
+its body). Inside the definition, every reload re-runs the `def`, which
+replaces its declarations, so they always match the source.
+
+To start with:
+
+- **`inline` and `notinline`.** The compiler keeps the body of an `inline`
+  function. Callers compiled after it copy the body and record a dependency on
+  its cell. Redefining it recompiles them (see Global cells). A caller compiled
+  before the definition calls through the cell, as in SBCL.
+- **Parameter types,** from a small fixed set: `int`, `float`, `pair`,
+  `list`, `array`, `string`, `table`. They're checked on entry, never trusted,
+  and the body can rely on them.
+
+Settings for a whole module go on `ns` rather than in a global form. Direct
+self-calls are the first: off by default, so `trace` sees recursive calls, and
+on for a module that asks.
+
+`declare` becomes reserved in that position, the way the docstring is
+recognised by position today. Chez's expander, the linter and `./otium fmt`
+have to accept it; Chez checks the types and ignores the rest.
+
+Only declared functions are inlined, so a long-running loop like Manse's event
+loop only misses a redefinition of a function someone declared `inline`. The
+size limit keeps large handlers out regardless.
+
+## Library rewrites
+
+The library is generic: `map` keeps the kind of its input, `get` works on
+tables, arrays and lists, collections are callable. Inlining its code as it is
+doesn't buy much. `map` builds its result through a builder and a closure over
+a boxed variable (`lib/otium/core.ot`), and `second` is `(nth seq 1)`.
+Measured on the C runtime, 2,000 runs over 1,000 elements:
+
+| code | seconds |
+| --- | --- |
+| `(map (fn (x) (+ x 1)) xs)` | 0.080 |
+| the same as a hand-written list loop | 0.036 |
+| `(second p)` summed over a list | 0.080 |
+| `(car (cdr p))` summed over a list | 0.014 |
+
+The gap is genericity, not the call. So, as SBCL does with `deftransform`,
+Inline rewrites calls to a short list of hot library functions using what it
+knows about the arguments:
+
+- `second` of a known pair becomes `car` of `cdr`.
+- `map` of a known list with a literal `fn` becomes a loop with the `fn`
+  inlined.
+- Where the kind isn't known, a guarded version: `(map f xs)` becomes "if `xs`
+  is a pair, the list loop, else call `map`". The test is one `BR_PAIR` on the
+  VM. It costs code size, so it's for the hot few only.
+
+The first list: `map`, `for-each`, `filter`, `reduce`, `nth`, `second`,
+`third`, `get`, `put!`, `length`, `append`. Rewrites are written in Otium
+beside the primop table.
+
+The facts come from what Inline already tracks along `if` branches
+(`pair?`, `null?` and other predicate tests), from what `cons`, `list` and
+literals produce, and from declarations. Chez's cptypes pass does type
+recovery on the tree after cp0 and is worth reading before extending Inline's
+facts.
 
 ## Pipeline
 
@@ -110,22 +238,26 @@ Propagate and Closures. The rest translate. Each pass is a named function that
 can be switched off where that's meaningful, and the verifier runs after each
 in test builds.
 
-Passes 1-5 and the shared half of 6 are target-independent. The VM and each
-native target differ in the tables 6 uses, in 7's register model and in 8.
+Passes 1-5 and the shared half of 6 are target-independent. Each native target
+differs in the tables 6 uses, in 7's register model and in 8.
+
+For the VM, only passes 1 and 2 run. Inline's Core goes back to an Otium form
+and `compiler.c` compiles it. See The VM.
 
 ## 1-2. Resolve and Inline
 
-These exist on `wip-vm-peephole` as `lib/otium/compiler/core.ot` and
-`cp0.ot` (about 1,100 lines), currently emitting source. They move over largely
-as they are, with `cp0.ot` renamed to `inline.ot`:
+These are `lib/otium/compiler/core.ot` and `inline.ot` on `main`. Inline still
+has its own small table of builtins and should move to `prims.ot` before the
+rewrites go in.
 
 - Resolve turns expander output into Core: lexical or global references,
   assigned and captured flags per variable, `fix` for mutually recursive
   functions (Fixing Letrec (Reloaded)), and source positions on every node.
 - Inline follows Waddell and Dybvig's algorithm, which is Chez's cp0 pass:
   inlining with size and effort budgets, constant folding, copy propagation,
-  dead binding removal and test simplification, in one walk. It's also where inlined globals get recorded as
-  dependencies.
+  dead binding removal and test simplification, in one walk. It's also where
+  declarations and library rewrites apply, and where inlined `inline`
+  globals get recorded as dependencies.
 
 The branch's loop-invariant and cleanup passes (`cleanup.ot`) aren't carried
 forward. Contification and Propagate cover the same ground on the block IR,
@@ -318,10 +450,12 @@ intervals. Block arguments become parallel moves at the end of each
 predecessor, sequenced with a scratch register for cycles. Values live across
 a call are spilled, because no allocatable register survives a call.
 
-**VM.** The same liveness, with unlimited registers: values whose lifetimes
-don't overlap share a slot. Arguments go straight into the slots the call
-needs, which removes most of the argument `MOVE`s that are the VM's top opcode
-today.
+**VM.** Not used; the VM gets its code from `compiler.c`. The first build had
+an SSA allocator for the VM (`allocate.ot`). It placed each call's registers
+after colouring, above whatever was live, where `compiler.c` reserves them
+before computing the arguments, so it often needed more moves. Its block
+liveness and parallel move sequencing are worth reusing for the native
+allocator.
 
 **Safepoint maps.** At every safepoint (calls, allocation slow paths, polls),
 liveness says which slots and registers hold live tagged values. That map is
@@ -339,8 +473,6 @@ and tables to C to install.
 The encoders are Otium functions writing into a bytevector, one file per
 target. x86-64 needs the integer, SSE2 and branch subset, a few hundred lines.
 AArch64 is simpler to encode and similar in size.
-
-VM: write instructions as `compiler.c` does now, with the same tables.
 
 Tables, per code object:
 
@@ -395,8 +527,20 @@ entry, with no checks at the call site. Storing into the cell sets the entry:
 - a table, array, keyword, instance or record: the callable-collection stub
 - unbound: a stub that raises the unbound error
 
-The cell also carries the version and watched bit that dependency tracking
-uses.
+The cell also carries a watched bit and the list of functions that inlined it.
+Only cells of `inline` functions are ever watched, so the list stays short. A
+store to a watched cell:
+
+- Skips everything if the new definition's Core is the same as the old one. A
+  module reload re-runs every `def`, and most are unchanged.
+- Otherwise points each dependent at a stub that recompiles it on its next
+  call, rather than recompiling them all at once.
+- Recompiles a dependent in place under the same function id, so closures of
+  it that were saved as callbacks get the new code too, which is what calling
+  by name gives them today. Frames already running keep the old code, which
+  has to stay alive until they return.
+- For a `set!` rather than a `def`, marks the cell as never to be inlined
+  again.
 
 ### Closures and code objects
 
@@ -507,25 +651,42 @@ the boundary returns to the nearest stub with a request to make the call,
 trampoline style, so mutual tail recursion between VM and native code still
 runs in bounded space.
 
-## The VM backend
+The native convention is chosen for native code, not to match the VM's
+register windows. That's only cheap if mixed code is rare, which means:
 
-The VM shares passes 1-5, Select's representation choices and Allocate's
-liveness. What it gets that `compiler.c` can't give it:
+- **The optimizer covers the whole language.** The first build hands class
+  and generic declarations, `handler-bind`, `restart-case`, `with-params` and
+  `defparam` back to `compiler.c`. On a native system each of those is VM code
+  paying a transition on every call into native code.
+- **Bootstrap runs on the VM** until the compiler has compiled itself. Images
+  with native code (phase 7 below) are what make startup native.
+- **Compile time stays low.** With no interpreter, every form typed or
+  reloaded goes through the full compiler. The target is about a millisecond
+  for a 20-line function; the first build takes about 2.4 ms per form, with
+  the compiler compiled by `compiler.c`.
 
-- Inlining across functions and of library code (`map`, `for`, small
-  helpers), with dependency tracking.
-- Loops from contification, including non-tail ones.
-- Typed opcodes where Propagate proved types: fixnum operations without the
-  tag test or float path, `car` and `cdr` without the check, direct calls to
-  known functions without the closure and arity checks.
-- Slot allocation by liveness, with arguments placed where calls need them.
-- Safepoint maps, which allow raw float slots and drop the slot clearing.
+## The VM
 
-New VM opcodes are only worth it if they remove instructions or checks the
-benchmarks show. Typed arithmetic, unchecked pair access and direct calls are
-the expected ones. Expect a 1.5-3x gain over the simple compiler on the ports;
-the VM's dispatch is already instruction-count bound, so fewer instructions is
-the lever.
+The VM runs Resolve and Inline, turns the resulting Core back into an Otium
+form, and gives that to `compiler.c`. That way it gets declarations, `inline`
+functions and library rewrites, and keeps everything `compiler.c` already does
+well: every form, call registers reserved before arguments are computed, and
+fast compilation. An inlined body can refer to another namespace's private
+globals, so the form needs a way to name a cell directly, such as a
+`%global-ref` by cell id that `compiler.c` understands.
+
+The first build's VM backend (`select.ot`, `allocate.ot`, `emit.ot`,
+`vm-ops.ot` and `%vm-install`) has no job after that. The SSA middle (Convert,
+Propagate, Closures) waits for native code. It should keep running in the test
+suite with the verifier on, so it doesn't rot while nothing uses its output.
+
+New VM opcodes are VM work, separate from this plan, and help `compiler.c`'s
+code as much. The ones that matter most are opcodes for builtins that are calls
+today (`get` alone is a third of builtin calls on the ports), then unchecked
+variants for Inline to use where it has proven the type. A typed fixnum `ADD`
+saves little: the existing one is two tag tests and an overflow check on
+predicted branches, against about 2.5 cycles of dispatch per instruction (see
+`asm-vm-plan.md`).
 
 ## Generic functions, classes and keyword calls
 
@@ -615,20 +776,23 @@ What changes now that the oracle isn't Chez:
 
 Each ends with something that runs and is tested.
 
+The first build covered the front end, the block IR, Propagate and a VM
+backend, which were phases 1-4 of the original list. What's left:
+
 0. **Runtime groundwork, measured on the VM.** Stable global cells, pair tag,
    8-byte headers, lazy identity. Each change shows its effect on the ports
    before the next.
-1. **Front end on the C runtime.** Move Resolve and Inline from
-   `wip-vm-peephole`. The C runtime has `macroexpand-all` now, so the old
-   blocker is gone. Exit: the compiler's source-to-source output passes the
-   test suites when run on the C runtime.
-2. **Block IR.** Convert with contification and assignment conversion, the IR
-   interpreter, the verifier. Exit: tests pass through the IR interpreter.
-3. **Propagate.** Exit: tests pass through the IR interpreter after
-   Propagate, and the generator finds no disagreements.
-4. **VM backend.** Closures, Select, slot allocation, bytecode, safepoint maps
-   in the VM. Exit: tests and ports run; the simple compiler and the optimizer
-   agree on everything; the compiler compiles itself to bytecode.
+1. **The VM through `compiler.c`.** Core back to an Otium form, a way to name
+   cells directly, Inline using `prims.ot`. Exit: tests and ports pass with it
+   on, and nothing falls back that `compiler.c` handles.
+2. **Library rewrites.** The first list above, with guarded versions. Exit:
+   the `map` and `second` measurements above are close to their hand-written
+   versions, and the ports are faster than `compiler.c` alone.
+3. **Declarations.** `(declare ...)` on both runtimes, checked parameter
+   types, `inline` with recompiling callers, direct self-calls as an `ns`
+   setting. Exit: redefinition tests (see the internals doc) pass.
+4. **The whole language.** Resolve and the SSA passes handle every form, so
+   nothing falls back.
 5. **x86-64.** Encoder, templates, linear scan, stubs, code space, walker, the
    transition stubs. Exit: tests and ports pass natively, the compiler compiles
    itself natively, and the first numbers against Chez.
@@ -636,18 +800,18 @@ Each ends with something that runs and is tested.
 7. **Images with native code.** Because code is position-independent, saving
    an image writes code bytes as they are and rebuilds link tables on load.
 
-Phase 4 comes before native code on purpose. It tests every shared pass
-against the existing VM with nothing new below it, and it's what platforms
-without a backend will run.
+Phases 1-3 pay off on the VM straight away and don't wait on a backend. Phase 4
+can run alongside them.
 
 ## Open questions
 
 - Which optimization level the REPL uses, once compile times are measured.
-- Loops and redefinition: whether to avoid inlining globals into a function
-  containing a loop back edge (the `compiler-plan.md` preference) so a
-  long-running loop like Manse's event loop picks up redefinitions.
-- Whether to add checked type declarations. With no type feedback, they're the
-  main way to tell the compiler something it can't prove.
+- Whether fixnum overflow should raise, as this plan first assumed, so ranges
+  carry through arithmetic.
+- The details of declarations: the type names, whether return types are
+  worth having, and what `./otium fmt` does with them.
+- Whether to delete the first build's VM backend or keep it as a reference
+  once the VM goes through `compiler.c`.
 - How far to take headerless pairs, after the 8-byte header is measured.
 - What a green thread may observe at a poll when preemption is on. Propagate
   assumes globals and mutable data can change at any poll, which is correct
@@ -665,6 +829,10 @@ without a backend will run.
 - Wimmer and Franz, "Linear Scan Register Allocation on SSA Form".
 - SBCL internals on VOPs and representation selection, and CMUCL's design
   notes on IR1 and IR2.
+- SBCL's source on inlining and redefinition: `save-inline-expansion-p`
+  (`src/code/macros.lisp`), `recognize-known-call` (`src/compiler/ir1opt.lisp`),
+  `recognize-self-calls` (`src/compiler/policies.lisp`).
+- Chez Scheme's cptypes pass, type recovery on the tree after cp0.
 - Leroy and others, OCaml's native backend (allocation combining, the
   allocation pointer register).
 - Feeley, Gambit's GVM and its stack-limit interrupt checks.

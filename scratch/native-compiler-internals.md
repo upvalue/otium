@@ -25,6 +25,9 @@ expanded form
   | install (C)        code object, entries, closures
 ```
 
+For the VM, only Resolve and Inline run, and the Core goes back to an Otium
+form for `compiler.c`.
+
 Two IR families, chosen to suit their passes:
 
 - **Core** is a tree. Inline is a recursive walk with an environment, and trees
@@ -169,9 +172,12 @@ Data structures, following Waddell's thesis:
   operands. "Test" lets `(if (if a b #f) ...)` collapse; "effect" drops pure
   work.
 
-For each inlined global, Inline adds `(cell-id version)` to `unit.deps`. It does
-not inline a global that the redefinition rules exclude (assigned globals,
-`defonce`, data).
+Inline only inlines a global whose definition declares `inline` (see
+Declarations in the plan), and adds `(cell-id version)` to `unit.deps` for each
+one. It never inlines a cell that has been `set!`, a `defonce`, or data.
+
+Library rewrites run here too, as rows beside the primop table: a pattern on
+the builtin's name and argument facts, and the Core it becomes.
 
 **Hand-off to Convert:** a Core tree whose `refs` and `sets` counts are exact,
 since Convert uses them to decide assignment conversion and contification.
@@ -466,10 +472,9 @@ move instructions, a block order, a frame layout and safepoint maps.
 
 ### Data (VM)
 
-The same liveness and intervals, assigned to slots without a register limit.
-The call window rule from the plan: each `call` puts its base above the highest
-slot live across it, and an argument whose interval ends at the call is
-assigned straight to its window slot.
+None. The VM now gets its code from `compiler.c` (see The VM in the plan). The
+first build's `allocate.ot` is where to borrow block liveness and parallel move
+sequencing from.
 
 ### Output
 

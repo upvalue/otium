@@ -528,4 +528,14 @@ ports measured, either way. Known gaps, roughly in order of payoff:
   compiled by compiler.c, and loading it adds about 0.1 s at startup.
 
 Tools: `OTIUM_DUMP_CODE=1` prints compiler.c's code and every installed
-unit; `OTIUM_OPTIMIZE_REPORT=1` prints each fallback.
+unit; `OTIUM_OPTIMIZE_REPORT=1` prints each fallback. The dump only shows each
+unit's entry function, not the functions nested in it.
+
+## Next
+
+The plan changed after this build; see "Revisions after the first build" in
+`docs/compiler-plan/native-compiler-plan.md`. In short: the VM will take
+Inline's output back to compiler.c, user functions are inlined only when
+declared `inline`, hot library functions get rewrites instead of plain
+inlining, and Convert onwards waits for the native backend. Select, Allocate
+and Emit as described above are on their way out.

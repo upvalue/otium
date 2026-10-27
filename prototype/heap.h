@@ -56,12 +56,24 @@ struct oti_roots {
   size_t count;
 };
 
+#ifdef OTIUM_CHECK_ROOTS
+#define OTI_RETIRED_SPACES 16
+typedef struct {
+  unsigned char* space;
+  size_t bytes;
+} oti_retired_space;
+#endif
+
 typedef struct {
   unsigned char* space[2];
   size_t capacity, limit, used, collections, copied_bytes;
   unsigned active;
   uint32_t next_identity;
   oti_roots* roots;
+#ifdef OTIUM_CHECK_ROOTS
+  oti_retired_space retired[OTI_RETIRED_SPACES];
+  size_t retired_next;
+#endif
 } oti_heap;
 
 bool oti_heap_init(oti_heap* h, size_t semispace_bytes);

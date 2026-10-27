@@ -63,8 +63,23 @@ bool oti_grow(ot_state* rt, void** data, size_t* capacity, size_t needed, size_t
 
 bool oti_stack(ot_state* rt, size_t needed) {
   if (needed > rt->stack_limit) return oti_error(rt, "VM stack limit exceeded");
+#ifdef OTIUM_CHECK_ROOTS
+  /* Root-checking builds move the stack on every request, sized exactly, so a
+   * pointer into it held across possible growth reads freed, poisoned memory. */
+  size_t capacity = needed > rt->stack_capacity ? needed : rt->stack_capacity;
+  ot_value* moved = malloc((capacity ? capacity : 1) * sizeof(ot_value));
+  if (!moved) return oti_error(rt, "out of host memory");
+  if (rt->stack_capacity) {
+    memcpy(moved, rt->stack, rt->stack_capacity * sizeof(ot_value));
+    memset(rt->stack, 0xdb, rt->stack_capacity * sizeof(ot_value));
+  }
+  free(rt->stack);
+  rt->stack = moved;
+  rt->stack_capacity = capacity;
+#else
   if (!oti_grow(rt, (void**)&rt->stack, &rt->stack_capacity, needed, sizeof(ot_value)))
     return false;
+#endif
   rt->stack_roots.slots = rt->stack;
   rt->stack_room = rt->stack_capacity < rt->stack_limit ? rt->stack_capacity : rt->stack_limit;
   return true;
@@ -266,6 +281,8 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
   rt->process_values[1] = OT_NIL;
   oti_roots_push(&rt->heap, &rt->process_roots, rt->process_values, 2);
   rt->stack_limit = stack_limit;
+  const char* stress = getenv("OTIUM_GC_STRESS");
+  rt->stress_gc = stress && *stress && strcmp(stress, "0");
   rt->required_namespace = UINT32_MAX;
   oti_roots_push(&rt->heap, &rt->constant_roots, NULL, 0);
   oti_roots_push(&rt->heap, &rt->global_roots, NULL, 0);

@@ -383,6 +383,15 @@ build. Reader checks include the shared core source, public datum fixtures,
 memory/depth limits, invalid UTF-8, numeric overflow and 50,000 deterministic
 malformed inputs. Optional LLVM development tools were unavailable for GC lint.
 
+`make -C prototype check-roots` looks for missing roots. It builds with the
+sanitizers and `OTIUM_CHECK_ROOTS`, which makes every collection copy into
+freshly mapped memory and protect the old space, and makes the VM stack move to
+new memory on every `oti_stack` call. It then runs the suites and scripts with
+`OTIUM_GC_STRESS=1`, which collects at every allocation in any build. A value or
+object pointer held across an allocation, or a pointer into the stack held
+across growth, then faults instead of reading a stale copy. `SUITE=name/` limits
+the runner to one suite. The first full run found no missing roots.
+
 `make -C prototype test-runtime` checks closures, lexical mutation, live global
 redefinition, numeric boundaries, tail calls and recovery after errors. It also
 exercises collection with an 8 KiB semispace, collection at every allocation,

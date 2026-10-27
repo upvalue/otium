@@ -1,7 +1,9 @@
 CC ?= cc
-CFLAGS ?= -O2 -g
+CFLAGS ?= -O2 -g -flto
 WARNINGS = -std=c11 -Wall -Wextra -Werror
 SANITIZE = -O1 -g -fsanitize=address,undefined -DOTIUM_CHECK_KINDS
+# Sanitizer flags plus fresh heap spaces and stack moves; see check-roots.
+CHECK_ROOTS = $(SANITIZE) -DOTIUM_CHECK_ROOTS
 LDLIBS = -pthread -ldl -lm $(shell pkg-config --libs libffi)
 
 RUNTIME = heap.c reader.c tokens.c runtime.c compiler.c vm.c builtins.c numeric.c time.c \
@@ -40,6 +42,10 @@ build/sanitize/%.o: %.c $(HEADERS)
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -DOTIUM_TEST_FIXTURE_DIR='"$(CURDIR)/build/sanitize"' $(WARNINGS) $(SANITIZE) -c $< -o $@
 
+build/roots/%.o: %.c $(HEADERS)
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) -DOTIUM_TEST_FIXTURE_DIR='"$(CURDIR)/build/sanitize"' $(WARNINGS) $(CHECK_ROOTS) -c $< -o $@
+
 # The VM's portable switch dispatch, which GCC and Clang builds otherwise skip.
 build/switch/%.o: %.c $(HEADERS)
 	@mkdir -p $(@D)
@@ -73,6 +79,10 @@ build/sanitize/bin/tests: build/suites.c $(addprefix build/sanitize/, $(SUITE_OB
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(WARNINGS) $(SANITIZE) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
+build/roots/bin/tests: build/suites.c $(addprefix build/roots/, $(SUITE_OBJECTS) $(TEST_SUPPORT)) build/roots/libotium.a
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(WARNINGS) $(CHECK_ROOTS) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
 build/release/tests/value-portable.o: tests/value.c $(HEADERS)
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -DOTIUM_PORTABLE_INTS $(WARNINGS) $(CFLAGS) -c $< -o $@
@@ -85,14 +95,22 @@ build/sanitize/tests/value-portable.o: tests/value.c $(HEADERS)
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -DOTIUM_PORTABLE_INTS $(WARNINGS) $(SANITIZE) -c $< -o $@
 
+build/roots/tests/value-portable.o: tests/value.c $(HEADERS)
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) -DOTIUM_PORTABLE_INTS $(WARNINGS) $(CHECK_ROOTS) -c $< -o $@
+
 # Host program for the callback abort checks in test_foreign_control.py.
 build/release/bin/foreign-control: build/release/tests/hosts/foreign-control.o $(addprefix build/release/, $(TEST_SUPPORT)) build/release/libotium.a
 	@mkdir -p $(@D)
-	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
 build/sanitize/bin/foreign-control: build/sanitize/tests/hosts/foreign-control.o $(addprefix build/sanitize/, $(TEST_SUPPORT)) build/sanitize/libotium.a
 	@mkdir -p $(@D)
 	$(CC) $(SANITIZE) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+build/roots/bin/foreign-control: build/roots/tests/hosts/foreign-control.o $(addprefix build/roots/, $(TEST_SUPPORT)) build/roots/libotium.a
+	@mkdir -p $(@D)
+	$(CC) $(CHECK_ROOTS) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
 build/release/ffi_fixture.so: ../tests/ffi/fixture.c
 	@mkdir -p $(@D)
@@ -120,10 +138,13 @@ build/sanitize/ffi_extra.so: tests/fixtures/ffi_extra.c
 
 # Scripts expect the CLI next to this Makefile.
 otium-proto: build/release/main.o build/release/libotium.a
-	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
 otium-proto-sanitize: build/sanitize/main.o build/sanitize/libotium.a
 	$(CC) $(SANITIZE) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+build/roots/otium-proto: build/roots/main.o build/roots/libotium.a
+	$(CC) $(CHECK_ROOTS) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
 # Run every suite, then the scripts, then the CLI tests against the
 # amalgamation. The runner prints a line per suite and details of failures.
@@ -144,6 +165,21 @@ sanitize: build/sanitize/bin/tests $(addprefix build/sanitize/, $(FIXTURES)) bui
 	for s in $(SCRIPT_TESTS); do \
 	  ASAN_OPTIONS=detect_leaks=0 OTIUM_TEST_CLI=./otium-proto-sanitize \
 	    OTIUM_TEST_FOREIGN=build/sanitize/bin/foreign-control python3 $$s || failed=1; \
+	done; \
+	exit $$failed
+
+# Every suite and script under the sanitizers, collecting at every allocation,
+# with each collection copying into fresh memory and protecting the old space,
+# and the VM stack moving whenever it may grow. A missed root faults instead of
+# reading a stale copy. Fixtures are the sanitizer builds.
+.PHONY: check-roots
+check-roots: build/roots/bin/tests $(addprefix build/sanitize/, $(FIXTURES)) build/roots/bin/foreign-control \
+  build/roots/otium-proto
+	@failed=0; \
+	ASAN_OPTIONS=detect_leaks=0 OTIUM_GC_STRESS=1 build/roots/bin/tests $(SUITE) || failed=1; \
+	for s in $(SCRIPT_TESTS); do \
+	  ASAN_OPTIONS=detect_leaks=0 OTIUM_GC_STRESS=1 OTIUM_TEST_CLI=build/roots/otium-proto \
+	    OTIUM_TEST_FOREIGN=build/roots/bin/foreign-control python3 $$s || failed=1; \
 	done; \
 	exit $$failed
 
@@ -197,7 +233,7 @@ differential-%: otium-proto build/release/ffi_fixture.so
 	python3 differential_$(subst -,_,$*).py
 
 bench_runtime: build/release/bench_runtime.o build/release/libotium.a build/release/ffi_fixture.so
-	$(CC) $(LDFLAGS) build/release/bench_runtime.o build/release/libotium.a $(LDLIBS) -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) build/release/bench_runtime.o build/release/libotium.a $(LDLIBS) -o $@
 
 bench_lua: bench_lua.c
 	$(CC) $(WARNINGS) $(CFLAGS) bench_lua.c -ldl -o $@

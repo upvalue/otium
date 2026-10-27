@@ -46,51 +46,15 @@ foreach identity : ['17', '29']
     build_by_default: false, override_options: native_options + ['c_std=c11'])
 endforeach
 
-libffi = dependency('libffi', required: get_option('ffi'))
-
 utf8_checks = executable('otium-utf8-checks', 'tests/native/utf8.c',
   include_directories: include_directories('native/utf8'),
   link_with: utf8, override_options: native_options)
 
-# The C runtime.
-runtime_args = [
-  '-Wshadow',
-  '-DOT_HEAP_INIT=@0@'.format(get_option('heap_init')),
-  '-DOT_HEAP_MAX=@0@'.format(get_option('heap_max')),
-  '-DOT_MAX_DEPTH=@0@'.format(get_option('max_depth')),
-  '-DOT_GC_NURSERY_BYTES=@0@'.format(get_option('gc_nursery_bytes')),
-  '-DOT_GC_OLD_CHUNK_BYTES=@0@'.format(get_option('gc_old_chunk_bytes')),
-  '-DOT_GC_LARGE_OBJECT_BYTES=@0@'.format(get_option('gc_large_object_bytes')),
-  '-DOT_GC_MARK_STACK_ENTRIES=@0@'.format(get_option('gc_mark_stack_entries')),
-  '-DOT_GC_TIMING=@0@'.format(get_option('gc_timing')),
-  get_option('gc') == 'gen' ? '-DOT_GC_GEN' : '-DOT_GC_SEMI',
-]
-runtime_sources = files(
-  'c/src/otium.c', 'c/src/ot-gc-common.c', 'c/src/ot-gc-@0@.c'.format(get_option('gc')),
-  'c/src/ot-posix.c', 'c/src/ot-ffi.c', 'c/src/ot-cli.c')
-runtime_deps = [libm]
-runtime_links = []
-if libffi.found()
-  runtime_args += '-DOT_WITH_FFI'
-  runtime_deps += [libffi, dl]
-  runtime_links += ffi_native.get_static_lib()
-endif
-
-libotium = static_library('otium', runtime_sources,
-  c_args: runtime_args, dependencies: runtime_deps, link_with: runtime_links)
-
-otium = executable('otium', 'c/src/main.c', 'c/src/ot-ext-demo.c',
-  c_args: runtime_args + ['-DOT_LIB_DIR="@0@"'.format(source_root / 'lib')],
-  include_directories: native_include,
-  link_with: [libotium, line.get_static_lib(), dev.get_static_lib()])
-
-test_runtime = executable('test-runtime', 'c/tests/test_runtime.c',
-  c_args: runtime_args, include_directories: include_directories('c/src'),
-  link_with: libotium)
-
-gc_bench = executable('gc-bench', 'c/bench/gc_bench.c',
-  c_args: runtime_args, include_directories: include_directories('c/src'),
-  link_with: libotium, build_by_default: false)
+python = find_program('python3')
+subdir('c')
+# Built here so the launcher finds it at build/otium.
+otium = executable('otium', 'c/src/main.c',
+  c_args: runtime_args, dependencies: libotium_dep, override_options: runtime_options)
 
 # The optional UI bridge: SDL_GPU rendering, SDL_ttf text and Yoga layout.
 sdl3 = dependency('sdl3', version: '>= 3.4.12', required: get_option('ui'))
@@ -151,7 +115,6 @@ subdir('manse/native')
 # Tests. tests/run lists the tests defined in tests.py files, and each runs as
 # tests/run NAME from the source root; the launchers find this build through
 # OTIUM_BUILD. GC stress is opt-in: meson test --setup stress.
-python = find_program('python3')
 chez = find_program('chez', 'scheme', required: false)
 harness = files('tests/run')
 test_env = environment({
@@ -177,19 +140,18 @@ add_test_setup('all', env: test_env)
 test_kwargs = {'workdir': source_root, 'env': test_env}
 
 # Compiled checks.
-test('runtime', test_runtime, suite: 'c', kwargs: test_kwargs)
+test('unit', unit_tests, suite: 'c', timeout: 300,
+  depends: ffi_fixtures + ffi_extra, kwargs: test_kwargs)
 test('utf8', utf8_checks, suite: 'native', kwargs: test_kwargs)
 if ui
   test('ui caret', ui_caret_checks, suite: 'native', kwargs: test_kwargs)
 endif
 
-features = ['ffi']
-needed = {'': [otium], 'ffi': [ffi_native] + ffi_fixtures}
+features = ['ffi', 'c-ffi', 'c-host']
+needed = {'': [otium], 'ffi': [ffi_native] + ffi_fixtures,
+  'c-host': [foreign_control, ffi_extra] + ffi_fixtures}
 if chez.found()
   features += 'chez'
-endif
-if libffi.found()
-  features += 'c-ffi'
 endif
 if ui
   # Display tests share the window server and build/ui-test-artifacts/, so

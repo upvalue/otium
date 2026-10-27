@@ -1,6 +1,0 @@
-/build/
-/otium-proto
-/otium-proto-sanitize
-/bench_runtime
-/bench_lua
-__pycache__/

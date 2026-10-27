@@ -1,15 +1,5 @@
-option('gc', type: 'combo', choices: ['semi', 'gen'], value: 'semi',
-  description: 'semi is the whole-heap copying collector; gen is copying nursery plus mark-sweep')
-option('ffi', type: 'feature', value: 'auto', description: 'libffi foreign calls in the C runtime')
+option('runtime_checks', type: 'combo', choices: ['none', 'kinds', 'roots'], value: 'none',
+  description: 'kinds checks the kind behind object casts; roots also moves the heap and stack so missed roots fault')
+option('vm_switch', type: 'boolean', value: false,
+  description: 'Build the VM with portable switch dispatch instead of computed goto')
 option('ui', type: 'feature', value: 'auto', description: 'SDL3, SDL3_ttf and Yoga UI bridge')
-
-option('heap_init', type: 'integer', value: 1048576)
-option('heap_max', type: 'integer', value: 67108864)
-option('max_depth', type: 'integer', value: 200000)
-# Host-oriented generational collector geometry. Constrained targets can supply
-# their own profile without platform checks in the collector.
-option('gc_nursery_bytes', type: 'integer', value: 2097152)
-option('gc_old_chunk_bytes', type: 'integer', value: 1048576)
-option('gc_large_object_bytes', type: 'integer', value: 262144)
-option('gc_mark_stack_entries', type: 'integer', value: 16384)
-option('gc_timing', type: 'integer', value: 1)

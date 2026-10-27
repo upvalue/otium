@@ -1,9 +1,0 @@
-;; Run with prototype/otium-proto prototype/example-ffi.ot.
-(def libc (ffi/open-library '("libc.so.6" "libSystem.B.dylib")))
-(def c-length (ffi/bind libc "strlen" '(utf8) 'size-t #t))
-(println (c-length "Otium"))
-
-(def buffer (ffi/alloc 'i32 4))
-(ffi/set! buffer 'i32 2 42)
-(println (ffi/ref buffer 'i32 2))
-(ffi/free! buffer)

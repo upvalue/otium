@@ -9,7 +9,6 @@ FEATURES is a comma-separated list such as chez,ffi,c-ffi,ui. A test passes with
 exit 0, fails with 1 and is skipped with 77, meson's skip status."""
 import argparse
 import importlib.util
-import json
 import os
 from pathlib import Path
 import shutil
@@ -45,13 +44,10 @@ def available():
         features.add('ffi')
         if harness.library('libotium-ui').exists():
             features.add('ui')
-    targets = harness.BUILD / 'meson-info/intro-targets.json'
-    if targets.exists():
-        for target in json.loads(targets.read_text()):
-            if target['name'] == 'otium' and any(
-                    '-DOT_WITH_FFI' in source.get('parameters', [])
-                    for source in target['target_sources']):
-                features.add('c-ffi')
+    if harness.built('otium').exists():
+        features.add('c-ffi')
+    if harness.built('c/otium-foreign-control').exists():
+        features.add('c-host')
     return features
 
 

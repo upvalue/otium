@@ -17,6 +17,18 @@ test *args: build
 test-stress *args: build
     tools/meson-test stress "$@"
 
+# C runtime tests under ASan/UBSan with object kind checks, built in build-asan/
+sanitize *args:
+    @test -d build-asan/meson-info || meson setup build-asan -Db_sanitize=address,undefined -Druntime_checks=kinds -Dui=disabled
+    meson compile -C build-asan
+    ASAN_OPTIONS=detect_leaks=0 meson test -C build-asan --suite c --print-errorlogs "$@"
+
+# C runtime tests collecting at every allocation into fresh memory, so a missed root faults. Slow
+check-roots *args:
+    @test -d build-roots/meson-info || meson setup build-roots -Db_sanitize=address,undefined -Druntime_checks=roots -Dui=disabled
+    meson compile -C build-roots
+    ASAN_OPTIONS=detect_leaks=0 meson test -C build-roots --setup stress --suite c --print-errorlogs "$@"
+
 # Run every test, including native, GPU and benchmark ports
 test-all: build
     meson test -C build --setup all --print-errorlogs
@@ -67,12 +79,10 @@ sdl-manifest *args:
 bench *args: build
     python3 benchmarks/run.py {{args}}
 
-# Native collector stress benchmarks
-bench-gc: build
-    meson compile -C build gc-bench
-    build/gc-bench churn
-    build/gc-bench mixed
-    build/gc-bench fragmentation
+# C runtime microbenchmarks; pass a workload name to run one
+bench-c *args: build
+    meson compile -C build c/bench-runtime ffi-fixture-17.so
+    build/c/bench-runtime {{args}}
 
 clean:
     rm -rf build

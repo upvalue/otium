@@ -69,6 +69,12 @@ struct oti_compiler {
   unsigned scope;
   bool definitions;
   oti_arena* expansion_arena;
+  /* The source offset of the form being compiled, recorded for the code it
+   * emits. Datums are located pairs while reading forms for a macro. The
+   * next function compiled takes naming as its name. */
+  size_t offset;
+  bool locate;
+  const oti_ast* naming;
   size_t* expansions;
 };
 
@@ -85,14 +91,18 @@ static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tai
 static bool body(oti_compiler* c, const oti_ast* forms, uint32_t dst, bool tail, bool definitions);
 
 static bool error(oti_compiler* c, const oti_ast* a, const char* message) {
-  if (!oti_failed(c->rt) && a) c->rt->error.offset = a->offset;
-  return oti_error(c->rt, message);
+  bool fresh = !oti_failed(c->rt);
+  oti_error(c->rt, message);
+  if (fresh && a) oti_error_at(c->rt, a->offset);
+  return false;
 }
 
 /* A misplaced or malformed class or generic declaration. */
 static bool declaration_error(oti_compiler* c, const oti_ast* a, const char* message) {
-  if (!oti_failed(c->rt) && a) c->rt->error.offset = a->offset;
-  return oti_tagged_error(c->rt, "declaration", "invalid-declaration", message, 0, NULL);
+  bool fresh = !oti_failed(c->rt);
+  oti_tagged_error(c->rt, "declaration", "invalid-declaration", message, 0, NULL);
+  if (fresh && a) oti_error_at(c->rt, a->offset);
+  return false;
 }
 
 static bool same_name(const oti_ast* a, const oti_ast* b) {
@@ -111,6 +121,12 @@ static size_t emit_word(oti_compiler* c, oti_instruction ins) {
   }
   size_t i = f->count++;
   f->code[i] = ins;
+  if (!f->point_count || f->points[f->point_count - 1].offset != c->offset) {
+    if (!oti_grow(c->rt, (void**)&f->points, &f->point_capacity, f->point_count + 1,
+                  sizeof(oti_source_point)))
+      return SIZE_MAX;
+    f->points[f->point_count++] = (oti_source_point){(uint32_t)i, (uint32_t)c->offset};
+  }
   return i;
 }
 
@@ -221,6 +237,7 @@ static uint32_t new_function(ot_state* rt) {
     return UINT32_MAX;
   }
   f->namespace = rt->current_namespace;
+  f->source = rt->source;
   if (id == rt->function_count) rt->function_count++;
   rt->function_free = id + 1;
   rt->functions[id] = f;
@@ -484,8 +501,13 @@ static ot_value datum(oti_compiler* c, const oti_ast* a) {
       for (const oti_ast* item = a->as.list.first; item; item = item->next) {
         slots[2] = datum(c, item);
         if (!slots[2]) break;
-        ot_value pair = oti_alloc(rt, K_PAIR, 2, 0);
+        bool located = c->locate && slots[0] == OT_EMPTY;
+        ot_value pair = oti_alloc(rt, K_PAIR, 2, located ? OTI_LOCATED_PAIR_BYTES : 0);
         if (!pair) break;
+        if (located) {
+          size_t offset = a->offset;
+          memcpy(object_bytes(pair), &offset, sizeof(offset));
+        }
         object_fields(pair)[0] = slots[2];
         object_fields(pair)[1] = OT_EMPTY;
         if (slots[0] == OT_EMPTY) slots[0] = pair;
@@ -515,6 +537,8 @@ static oti_ast* syntax_value(oti_compiler* c, ot_value v, size_t offset, unsigne
     error(c, NULL, "macro syntax memory limit exceeded");
     return NULL;
   }
+  size_t located;
+  if (oti_pair_offset(v, &located)) offset = located;
   a->offset = offset;
   if (v == OT_NIL) a->kind = AST_NIL;
   else if (v == OT_TRUE || v == OT_FALSE) {
@@ -584,7 +608,10 @@ static oti_ast* expand_call(oti_compiler* c, const oti_ast* form, uint32_t globa
     return NULL;
   }
   oti_ast arguments = {.kind = AST_LIST, .as.list.first = form->as.list.first->next};
+  bool locate = c->locate;
+  c->locate = true;
   ot_value args = datum(c, &arguments);
+  c->locate = locate;
   if (!args) return NULL;
   ot_value result = oti_call_list(rt, rt->globals[global], args);
   return result ? syntax_value(c, result, form->offset, 0) : NULL;
@@ -857,8 +884,17 @@ static bool lambda(oti_compiler* c, const oti_ast* params, const oti_ast* forms,
                         .top = 1,
                         .scope = 1,
                         .expansion_arena = c->expansion_arena,
-                        .expansions = c->expansions};
+                        .expansions = c->expansions,
+                        .offset = c->offset};
   bool ok = true;
+  const oti_ast* label = self ? self : c->naming;
+  c->naming = NULL;
+  if (label && label->kind == AST_SYMBOL) {
+    child.fn->name = malloc(label->as.text.size + 1);
+    if (!child.fn->name) return oti_error(c->rt, "out of host memory");
+    memcpy(child.fn->name, label->as.text.data, label->as.text.size);
+    child.fn->name[label->as.text.size] = 0;
+  }
   if (self && !fact(c, self_fact)->assigned) {
     ok = oti_grow(c->rt, (void**)&child.bindings, &child.binding_capacity, 1, sizeof(oti_binding));
     if (ok)
@@ -1480,7 +1516,17 @@ static bool branch_primitive(oti_compiler* c, const oti_primitive* p, const oti_
   return ok;
 }
 
+static bool branch_form(oti_compiler* c, const oti_ast* a, bool when, oti_jumps* out);
+
 static bool branch(oti_compiler* c, const oti_ast* a, bool when, oti_jumps* out) {
+  size_t outer = c->offset;
+  c->offset = a->offset;
+  bool ok = branch_form(c, a, when, out);
+  c->offset = outer;
+  return ok;
+}
+
+static bool branch_form(oti_compiler* c, const oti_ast* a, bool when, oti_jumps* out) {
   if (oti_failed(c->rt)) return false;
   c->definitions = false;
   a = expand_head(c, a);
@@ -1590,7 +1636,18 @@ static bool simple(oti_compiler* c, const oti_ast* a) {
   return true;
 }
 
+static bool expression_form(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tail);
+
+/* Code compiled for a form records the form's source offset. */
 static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tail) {
+  size_t outer = c->offset;
+  c->offset = a->offset;
+  bool ok = expression_form(c, a, dst, tail);
+  c->offset = outer;
+  return ok;
+}
+
+static bool expression_form(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tail) {
   if (oti_failed(c->rt)) return false;
   bool definitions = c->definitions;
   c->definitions = false;
@@ -1820,10 +1877,14 @@ static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tai
       uint32_t global = oti_global(c->rt, name->as.text.data, name->as.text.size);
       if (global == UINT32_MAX) return false;
       bool ok;
-      if (value) ok = expression(c, value, dst, false);
-      else {
+      if (value) {
+        if (value->kind == AST_LIST && oti_ast_symbol(value->as.list.first, "fn")) c->naming = name;
+        ok = expression(c, value, dst, false);
+        c->naming = NULL;
+      } else {
         oti_ast params = *args;
         params.as.list.first = name->next;
+        c->naming = name;
         ok = lambda(c, &params, args->next, false, dst, NULL, 0);
       }
       return ok && emit_bc(c, OP_DEFINE_GLOBAL, dst, global) != SIZE_MAX && finish(c, dst, tail);
@@ -1980,7 +2041,7 @@ bool oti_compile(ot_state* rt, const oti_ast* form, uint32_t* function) {
 }
 
 oti_ast* oti_expand_form(ot_state* rt, const oti_ast* form, oti_arena* arena) {
-  oti_compiler c = {.rt = rt, .expansion_arena = arena};
+  oti_compiler c = {.rt = rt, .expansion_arena = arena, .locate = true};
   ot_value values[2] = {OT_NIL, OT_EMPTY};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, values, 2);

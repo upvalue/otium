@@ -238,4 +238,4 @@ static const test_case tests[] = {
     TEST_ENTRY(host_replacement_and_destroy),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(io_host, tests);

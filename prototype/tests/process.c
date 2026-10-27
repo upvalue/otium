@@ -53,4 +53,4 @@ static const test_case tests[] = {
     TEST_ENTRY(arguments_are_copied_and_kept),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(process, tests);

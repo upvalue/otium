@@ -38,4 +38,4 @@ static const test_case tests[] = {
     TEST_ENTRY(expander_forms_and_macros),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(shared_expander, tests);

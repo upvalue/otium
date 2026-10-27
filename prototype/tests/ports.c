@@ -91,4 +91,4 @@ static const test_case tests[] = {
     TEST_ENTRY(read_bytevector_does_not_collect),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(ports, tests);

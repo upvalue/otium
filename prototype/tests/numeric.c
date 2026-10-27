@@ -80,4 +80,4 @@ static const test_case tests[] = {
     TEST_ENTRY(integer_and_float_boundaries),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(numeric, tests);

@@ -60,4 +60,4 @@ static const test_case tests[] = {
     TEST_ENTRY(captured_and_nested_scopes),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(slot_reuse, tests);

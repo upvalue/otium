@@ -69,4 +69,9 @@ static const test_case tests[] = {
     TEST_ENTRY(random_integers_and_arithmetic),
 };
 
-TEST_MAIN(tests)
+/* The build compiles this file twice, once with the portable representation. */
+#ifdef OTIUM_PORTABLE_INTS
+TEST_SUITE(value_portable, tests);
+#else
+TEST_SUITE(value, tests);
+#endif

@@ -386,4 +386,4 @@ static const test_case tests[] = {
     TEST_ENTRY(foreign_error_fields),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(foreign, tests);

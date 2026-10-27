@@ -126,4 +126,4 @@ static const test_case tests[] = {
     TEST_ENTRY(global_calls),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(control, tests);

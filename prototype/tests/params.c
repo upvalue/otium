@@ -87,4 +87,4 @@ static const test_case tests[] = {
     TEST_ENTRY(parameters_bind_dynamically_and_unwind),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(params, tests);

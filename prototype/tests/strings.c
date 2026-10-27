@@ -51,4 +51,4 @@ static const test_case tests[] = {
     TEST_ENTRY(strings_and_buffers),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(strings, tests);

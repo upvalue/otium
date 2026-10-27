@@ -82,4 +82,4 @@ static const test_case tests[] = {
     TEST_ENTRY(reload_releases_bindings_and_memory),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(foreign_reload, tests);

@@ -43,4 +43,4 @@ static const test_case tests[] = {
     TEST_ENTRY(filesystem_metadata_and_symlinks),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(filesystem, tests);

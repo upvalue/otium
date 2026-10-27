@@ -37,4 +37,4 @@ static const test_case tests[] = {
     TEST_ENTRY(method_snapshots_and_tail_calls),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(methods, tests);

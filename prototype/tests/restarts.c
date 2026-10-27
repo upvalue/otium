@@ -96,4 +96,4 @@ static const test_case tests[] = {
     TEST_ENTRY(failures_leave_no_restarts),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(restarts, tests);

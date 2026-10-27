@@ -53,4 +53,4 @@ static const test_case tests[] = {
     TEST_ENTRY(fresh_frames_after_collections),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(scope_roots, tests);

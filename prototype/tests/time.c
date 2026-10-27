@@ -66,4 +66,4 @@ static const test_case tests[] = {
     TEST_ENTRY(clock_procedures_reject_arguments),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(time, tests);

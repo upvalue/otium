@@ -48,4 +48,4 @@ static const test_case tests[] = {
     TEST_ENTRY(property_mounting_and_migration_rollback),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(properties, tests);

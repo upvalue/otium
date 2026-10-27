@@ -45,4 +45,4 @@ static const test_case tests[] = {
     TEST_ENTRY(record_layouts_retention_and_immutability),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(records, tests);

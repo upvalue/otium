@@ -86,4 +86,4 @@ static const test_case tests[] = {
     TEST_ENTRY(namespaces_isolate_and_share_definitions),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(namespaces, tests);

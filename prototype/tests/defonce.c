@@ -69,4 +69,4 @@ static const test_case tests[] = {
     TEST_ENTRY(defonce_keeps_state_across_reload),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(defonce, tests);

@@ -46,4 +46,4 @@ static const test_case tests[] = {
     TEST_ENTRY(interrupt_flag_and_recovery),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(interrupt, tests);

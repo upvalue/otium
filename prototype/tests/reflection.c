@@ -49,4 +49,4 @@ static const test_case tests[] = {
     TEST_ENTRY(types_documentation_and_eof),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(reflection, tests);

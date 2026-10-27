@@ -63,4 +63,4 @@ static const test_case tests[] = {
     TEST_ENTRY(full_device_reports_no_space),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(file_ports, tests);

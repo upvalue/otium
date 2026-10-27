@@ -72,4 +72,4 @@ static const test_case tests[] = {
     TEST_ENTRY(uncaught_error_leaves_try_working),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(conditions, tests);

@@ -51,4 +51,4 @@ static const test_case tests[] = {
     TEST_ENTRY(streaming_datum_boundaries),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(port_reader, tests);

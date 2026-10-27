@@ -94,4 +94,4 @@ static const test_case tests[] = {
     TEST_ENTRY(allocation_failure_recovers),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(quasiquote, tests);

@@ -102,4 +102,4 @@ static const test_case tests[] = {
     TEST_ENTRY(deep_unwind_runs_every_cleanup),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(cleanup, tests);

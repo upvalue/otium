@@ -155,4 +155,4 @@ static const test_case tests[] = {
     TEST_ENTRY(core_library_reads),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(reader, tests);

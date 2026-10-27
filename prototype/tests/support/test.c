@@ -21,10 +21,14 @@ void test_fail(const char* file, int line, const char* format, ...) {
   exit(1);
 }
 
-static bool selected(const char* name, int argc, char** argv, int first) {
+static bool selected(const char* suite, const char* name, int argc, char** argv, int first) {
   if (first >= argc) return true;
-  for (int i = first; i < argc; i++)
-    if (strstr(name, argv[i])) return true;
+  char full[256];
+  snprintf(full, sizeof(full), "%s/%s", suite, name);
+  for (int i = first; i < argc; i++) {
+    if (strchr(argv[i], '/') ? !strncmp(full, argv[i], strlen(argv[i])) : !!strstr(full, argv[i]))
+      return true;
+  }
   return false;
 }
 
@@ -52,7 +56,7 @@ static bool run_forked(const test_case* test) {
   return false;
 }
 
-int test_main(int argc, char** argv, const test_case* tests, size_t count) {
+int test_main(int argc, char** argv, const test_suite* const* suites, size_t count) {
   bool fork_tests = true;
   int first = 1;
   if (argc > 1 && !strcmp(argv[1], "--no-fork")) {
@@ -60,17 +64,25 @@ int test_main(int argc, char** argv, const test_case* tests, size_t count) {
     first = 2;
   }
   size_t passed = 0, failed = 0;
-  for (size_t i = 0; i < count; i++) {
-    if (!selected(tests[i].name, argc, argv, first)) continue;
-    current_test = tests[i].name;
-    bool ok = true;
-    if (fork_tests) ok = run_forked(&tests[i]);
-    else tests[i].run();
-    printf("%s %s\n", ok ? "ok" : "FAIL", tests[i].name);
-    fflush(stdout);
-    if (ok) passed++;
-    else failed++;
+  for (size_t s = 0; s < count; s++) {
+    size_t suite_passed = 0, suite_failed = 0;
+    for (size_t i = 0; i < suites[s]->count; i++) {
+      const test_case* test = &suites[s]->tests[i];
+      if (!selected(suites[s]->name, test->name, argc, argv, first)) continue;
+      current_test = test->name;
+      bool ok = true;
+      if (fork_tests) ok = run_forked(test);
+      else test->run();
+      if (!ok) printf("FAIL %s/%s\n", suites[s]->name, test->name);
+      fflush(stdout);
+      if (ok) suite_passed++;
+      else suite_failed++;
+    }
+    if (suite_passed || suite_failed)
+      printf("%s: %zu passed, %zu failed\n", suites[s]->name, suite_passed, suite_failed);
+    passed += suite_passed;
+    failed += suite_failed;
   }
-  printf("%s: %zu passed, %zu failed\n", argv[0], passed, failed);
+  printf("%zu passed, %zu failed\n", passed, failed);
   return failed || !passed ? 1 : 0;
 }

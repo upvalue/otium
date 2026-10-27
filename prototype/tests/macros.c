@@ -33,4 +33,4 @@ static const test_case tests[] = {
     TEST_ENTRY(macros_expand_and_redefine),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(macros, tests);

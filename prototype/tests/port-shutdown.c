@@ -50,4 +50,4 @@ static const test_case tests[] = {
     TEST_ENTRY(host_flush_survives_port_closed_by_flush),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(port_shutdown, tests);

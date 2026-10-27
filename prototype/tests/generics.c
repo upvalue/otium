@@ -51,4 +51,4 @@ static const test_case tests[] = {
     TEST_ENTRY(core_bootstrap_and_primary_generics),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(generics, tests);

@@ -53,4 +53,4 @@ static const test_case tests[] = {
     TEST_ENTRY(class_construction_and_migration),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(instances, tests);

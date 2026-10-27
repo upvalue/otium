@@ -51,4 +51,4 @@ static const test_case tests[] = {
     TEST_ENTRY(collection_keeps_roots_and_exhaustion_recovers),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(heap, tests);

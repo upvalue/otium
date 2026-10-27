@@ -64,4 +64,4 @@ static const test_case tests[] = {
     TEST_ENTRY(nested_evaluation_with_core),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(evaluation, tests);

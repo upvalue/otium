@@ -57,4 +57,4 @@ static const test_case tests[] = {
     TEST_ENTRY(garbage_does_not_grow_heap),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(heap_growth, tests);

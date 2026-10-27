@@ -11,8 +11,11 @@ RUNTIME = heap.c reader.c tokens.c runtime.c compiler.c vm.c builtins.c numeric.
 HEADERS = include/otium.h heap.h reader.h internal.h foreign.h foreign_types.h \
   tests/support/test.h tests/support/helpers.h
 
-# Each tests/NAME.c is one test program, built as build/MODE/bin/NAME.
+# Each tests/NAME.c is one suite, and every suite links into build/MODE/bin/tests.
+# tests/value.c is also built with the portable integer representation.
 TESTS = $(basename $(notdir $(wildcard tests/*.c)))
+SUITES = $(subst -,_,$(TESTS)) value_portable
+SUITE_OBJECTS = $(addprefix tests/, $(addsuffix .o, $(TESTS) value-portable))
 TEST_SUPPORT = tests/support/test.o tests/support/helpers.o
 FIXTURES = ffi_fixture.so ffi_other.so ffi_extra.so
 # Python checks that drive the CLI or a host program.
@@ -45,22 +48,38 @@ build/switch/%.o: %.c $(HEADERS)
 build/%/libotium.a: $(addprefix build/%/, $(RUNTIME:.c=.o))
 	$(AR) rcs $@ $^
 
-build/release/bin/%: build/release/tests/%.o $(addprefix build/release/, $(TEST_SUPPORT)) build/release/libotium.a
+# The runner's main, listing every suite. It is generated so that a new test
+# file needs no other edit.
+build/suites.c: $(wildcard tests/*.c) Makefile
 	@mkdir -p $(@D)
-	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	@{ echo '#include "test.h"'; \
+	  for s in $(SUITES); do echo "extern const test_suite $${s}_suite;"; done; \
+	  echo 'static const test_suite* const suites[] = {'; \
+	  for s in $(SUITES); do echo "    &$${s}_suite,"; done; \
+	  echo '};'; \
+	  echo 'int main(int argc, char** argv) {'; \
+	  echo '  return test_main(argc, argv, suites, sizeof(suites) / sizeof(*suites));'; \
+	  echo '}'; } > $@
 
-build/switch/bin/%: build/switch/tests/%.o $(addprefix build/switch/, $(TEST_SUPPORT)) build/switch/libotium.a
+build/release/bin/tests: build/suites.c $(addprefix build/release/, $(SUITE_OBJECTS) $(TEST_SUPPORT)) build/release/libotium.a
 	@mkdir -p $(@D)
-	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	$(CC) $(CPPFLAGS) $(WARNINGS) $(CFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
-build/sanitize/bin/%: build/sanitize/tests/%.o $(addprefix build/sanitize/, $(TEST_SUPPORT)) build/sanitize/libotium.a
+build/switch/bin/tests: build/suites.c $(addprefix build/switch/, $(SUITE_OBJECTS) $(TEST_SUPPORT)) build/switch/libotium.a
 	@mkdir -p $(@D)
-	$(CC) $(SANITIZE) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	$(CC) $(CPPFLAGS) $(WARNINGS) $(CFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
-# The value tests again with the portable integer representation.
+build/sanitize/bin/tests: build/suites.c $(addprefix build/sanitize/, $(SUITE_OBJECTS) $(TEST_SUPPORT)) build/sanitize/libotium.a
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(WARNINGS) $(SANITIZE) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
 build/release/tests/value-portable.o: tests/value.c $(HEADERS)
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -DOTIUM_PORTABLE_INTS $(WARNINGS) $(CFLAGS) -c $< -o $@
+
+build/switch/tests/value-portable.o: tests/value.c $(HEADERS)
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) -DOTIUM_VM_SWITCH -DOTIUM_PORTABLE_INTS $(WARNINGS) $(CFLAGS) -c $< -o $@
 
 build/sanitize/tests/value-portable.o: tests/value.c $(HEADERS)
 	@mkdir -p $(@D)
@@ -106,52 +125,38 @@ otium-proto: build/release/main.o build/release/libotium.a
 otium-proto-sanitize: build/sanitize/main.o build/sanitize/libotium.a
 	$(CC) $(SANITIZE) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
-RELEASE_TESTS = $(addprefix build/release/bin/, $(TESTS) value-portable)
-SANITIZE_TESTS = $(addprefix build/sanitize/bin/, $(TESTS) value-portable)
-
-# Run every test program, then the scripts, then the CLI tests against the
-# amalgamation. Output is kept in build/MODE/bin/NAME.log and shown only for
-# failures.
+# Run every suite, then the scripts, then the CLI tests against the
+# amalgamation. The runner prints a line per suite and details of failures.
 .PHONY: test sanitize
-test: $(RELEASE_TESTS) $(addprefix build/release/, $(FIXTURES)) build/release/bin/foreign-control otium-proto \
-  build/amalgamation/otium-proto
+test: build/release/bin/tests $(addprefix build/release/, $(FIXTURES)) build/release/bin/foreign-control \
+  otium-proto build/amalgamation/otium-proto
 	@failed=0; \
-	for t in $(RELEASE_TESTS); do \
-	  if $$t > $$t.log 2>&1; then tail -n 1 $$t.log; else cat $$t.log; failed=1; fi; \
-	done; \
+	build/release/bin/tests || failed=1; \
 	for s in $(SCRIPT_TESTS); do python3 $$s || failed=1; done; \
 	OTIUM_TEST_CLI=build/amalgamation/otium-proto python3 test_cli.py || failed=1; \
 	exit $$failed
 
 # Leak detection is off: the tracing environment used for development breaks it.
-sanitize: $(SANITIZE_TESTS) $(addprefix build/sanitize/, $(FIXTURES)) build/sanitize/bin/foreign-control otium-proto-sanitize
+sanitize: build/sanitize/bin/tests $(addprefix build/sanitize/, $(FIXTURES)) build/sanitize/bin/foreign-control \
+  otium-proto-sanitize
 	@failed=0; \
-	for t in $(SANITIZE_TESTS); do \
-	  if ASAN_OPTIONS=detect_leaks=0 $$t > $$t.log 2>&1; then tail -n 1 $$t.log; \
-	  else cat $$t.log; failed=1; fi; \
-	done; \
+	ASAN_OPTIONS=detect_leaks=0 build/sanitize/bin/tests || failed=1; \
 	for s in $(SCRIPT_TESTS); do \
 	  ASAN_OPTIONS=detect_leaks=0 OTIUM_TEST_CLI=./otium-proto-sanitize \
 	    OTIUM_TEST_FOREIGN=build/sanitize/bin/foreign-control python3 $$s || failed=1; \
 	done; \
 	exit $$failed
 
-SWITCH_TESTS = $(addprefix build/switch/bin/, $(TESTS))
-
 .PHONY: test-switch
-test-switch: $(SWITCH_TESTS) $(addprefix build/release/, $(FIXTURES))
-	@failed=0; \
-	for t in $(SWITCH_TESTS); do \
-	  if $$t > $$t.log 2>&1; then tail -n 1 $$t.log; else cat $$t.log; failed=1; fi; \
-	done; \
-	exit $$failed
+test-switch: build/switch/bin/tests $(addprefix build/release/, $(FIXTURES))
+	build/switch/bin/tests
 
-# make test-NAME and sanitize-NAME run tests/NAME.c alone.
-test-%: build/release/bin/% $(addprefix build/release/, $(FIXTURES))
-	$<
+# make test-NAME and sanitize-NAME run the suite in tests/NAME.c alone.
+test-%: build/release/bin/tests $(addprefix build/release/, $(FIXTURES))
+	$< $(subst -,_,$*)/
 
-sanitize-%: build/sanitize/bin/% $(addprefix build/sanitize/, $(FIXTURES))
-	ASAN_OPTIONS=detect_leaks=0 $<
+sanitize-%: build/sanitize/bin/tests $(addprefix build/sanitize/, $(FIXTURES))
+	ASAN_OPTIONS=detect_leaks=0 $< $(subst -,_,$*)/
 
 # The public header must stand alone and must not mention internal names.
 .PHONY: check-public
@@ -161,9 +166,8 @@ check-public:
 
 # Execution must not need a C compiler.
 .PHONY: test-no-compiler
-test-no-compiler: build/release/bin/runtime build/release/bin/foreign $(addprefix build/release/, $(FIXTURES))
-	env PATH=/nonexistent build/release/bin/runtime
-	env PATH=/nonexistent build/release/bin/foreign
+test-no-compiler: build/release/bin/tests $(addprefix build/release/, $(FIXTURES))
+	env PATH=/nonexistent build/release/bin/tests runtime/ foreign/
 
 # The single-file distribution: otium.h, otium.c and main.c. The CLI tests run
 # against a launcher built from just those files.

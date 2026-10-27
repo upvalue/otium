@@ -499,4 +499,4 @@ static const test_case tests[] = {
     TEST_ENTRY(large_frame),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(runtime, tests);

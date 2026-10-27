@@ -39,4 +39,4 @@ static const test_case tests[] = {
     TEST_ENTRY(bytevectors_and_utf8),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(bytevectors, tests);

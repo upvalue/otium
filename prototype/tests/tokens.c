@@ -29,4 +29,4 @@ static const test_case tests[] = {
     TEST_ENTRY(tokens_survive_collection),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(tokens, tests);

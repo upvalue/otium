@@ -100,4 +100,4 @@ static const test_case tests[] = {
     TEST_ENTRY(deeply_nested_handlers),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(handlers, tests);

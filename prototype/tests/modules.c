@@ -160,4 +160,4 @@ static const test_case tests[] = {
     TEST_ENTRY(modules_load_refer_and_reload),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(modules, tests);

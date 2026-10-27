@@ -32,4 +32,4 @@ static const test_case tests[] = {
     TEST_ENTRY(redefinition_reclaims_functions_and_constants),
 };
 
-TEST_MAIN(tests)
+TEST_SUITE(reload, tests);

@@ -24,16 +24,16 @@ cd "$project_dir"
 case "${1:-}" in
   "")
     git ls-files -z -- 'c/*.c' 'c/*.h' 'native/*.c' 'native/*.h' 'tests/*.c' 'tests/*.h' \
-      ':!c/tests/ctest.h' ':!c/tools/gc-lint/tests/*' ':!native/vendor/*' |
+      ':!c/tools/gc-lint/tests/*' ':!native/vendor/*' |
       xargs -0 "$formatter_bin" --style=file -i
     ;;
   --check)
     git ls-files -z -- 'c/*.c' 'c/*.h' 'native/*.c' 'native/*.h' 'tests/*.c' 'tests/*.h' \
-      ':!c/tests/ctest.h' ':!c/tools/gc-lint/tests/*' ':!native/vendor/*' |
+      ':!c/tools/gc-lint/tests/*' ':!native/vendor/*' |
       xargs -0 "$formatter_bin" --style=file --dry-run --Werror
     ;;
   *)
-    echo "usage: tools/format-c [--check]" >&2
+    echo "usage: c/tools/format-c [--check]" >&2
     exit 2
     ;;
 esac

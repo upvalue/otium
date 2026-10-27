@@ -14,7 +14,7 @@ SCOPES = {
     "core": ("Core library file", ("lib/otium/core.ot",)),
     "lib": ("Otium standard library", ("lib/otium",)),
     "chez": ("Primary runtime, without tests", ("chez/otium", "chez/main.ss", "chez/run")),
-    "c": ("Experimental runtime, without tests", ("c/src",)),
+    "c": ("Experimental runtime, without tests", ("c/src", "c/include")),
     "native": ("Native helpers and bindings", ("native",)),
     "manse": ("Manse application", ("manse",)),
     "otos": ("Operating system", ("otos",)),

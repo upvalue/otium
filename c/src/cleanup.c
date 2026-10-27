@@ -39,10 +39,9 @@ bool oti_run_cleanup(ot_state* rt, bool unwinding) {
   bool restart = rt->restart_pending, exiting = rt->exit_pending, signaled = rt->signaled;
   bool raised = rt->raised, interrupted = rt->interrupted;
   int status = rt->exit_status;
-  size_t offset = rt->error_offset;
-  const char* code = rt->error_code;
-  char message[sizeof(rt->error)];
-  memcpy(message, rt->error, sizeof(message));
+  oti_error_record saved;
+  oti_roots saved_roots;
+  oti_take_error(rt, &saved, &saved_roots);
   bool error = unwinding && !restart && !exiting && !interrupted;
   if (unwinding) {
     rt->frame_count = cleanup.state.frames;
@@ -54,13 +53,12 @@ bool oti_run_cleanup(ot_state* rt, bool unwinding) {
   }
   bool ok = true;
   if (error) {
-    values[1] = oti_error_condition(rt);
+    values[1] = raised ? rt->condition_values[0] : oti_condition_of(rt, &saved);
     ok = values[1] != 0;
     raised = true;
   }
   if (ok) {
-    rt->error[0] = 0;
-    rt->error_code = NULL;
+    oti_clear_error(rt);
     rt->raised = rt->signaled = rt->restart_pending = rt->exit_pending = rt->interrupted = false;
     rt->condition_values[0] = OT_NIL;
     rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
@@ -77,9 +75,7 @@ bool oti_run_cleanup(ot_state* rt, bool unwinding) {
     if (ok) ok = oti_call_list(rt, values[0], values[4]) != 0;
   }
   if (ok) {
-    memcpy(rt->error, message, sizeof(message));
-    rt->error_code = code;
-    rt->error_offset = offset;
+    oti_restore_error(rt, &saved, &saved_roots);
     rt->raised = raised;
     rt->signaled = signaled;
     rt->condition_values[0] = values[1];
@@ -90,7 +86,7 @@ bool oti_run_cleanup(ot_state* rt, bool unwinding) {
     rt->exit_pending = exiting;
     rt->exit_status = status;
     ok = true;
-  }
+  } else oti_drop_error(rt, &saved, &saved_roots);
   oti_roots_pop(&rt->heap, &roots);
   return ok;
 }

@@ -14,7 +14,7 @@ static bool validate(ot_state* rt, const char* text, size_t length) {
     position = r.position;
     if (!ok) {
       oti_coded_error(rt, r.error_code, r.error);
-      rt->error_offset = r.error_offset;
+      rt->error.offset = r.error_offset;
     }
     oti_reader_destroy(&r);
     if (!ok || done) return ok;
@@ -28,7 +28,7 @@ static bool advance(ot_state* rt, const char* text, size_t end, size_t* position
     size_t next = oti_utf8_scalar((const unsigned char*)text, *position, end);
     if (!next || !c) {
       oti_error(rt, "invalid source character");
-      rt->error_offset = *position;
+      rt->error.offset = *position;
       return false;
     }
     if (c == '\r') {

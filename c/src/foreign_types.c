@@ -48,7 +48,7 @@ int oti_foreign_scalar(ot_state* rt, ot_value name, bool memory) {
         return (int)i;
       }
   }
-  oti_error(rt, "FFI type: unsupported scalar type");
+  oti_ffi_errorf(rt, "type", "unsupported scalar type");
   return -1;
 }
 
@@ -58,7 +58,7 @@ bool oti_foreign_list_length(ot_state* rt, ot_value list, size_t limit, size_t* 
     (*count)++;
     list = oti_cdr(list);
   }
-  return list == OT_EMPTY || oti_error(rt, "FFI signature: improper, cyclic or oversized list");
+  return list == OT_EMPTY || oti_ffi_errorf(rt, "signature", "improper, cyclic or oversized list");
 }
 
 void oti_foreign_free_abi_nodes(oti_abi_node* node) {
@@ -107,7 +107,7 @@ int oti_foreign_scalar_code(ot_state* rt, ot_value value, bool memory) {
         (oti_foreign_scalars[code].kind != T_VOID && oti_foreign_scalars[code].kind != T_UTF8))
       return code;
   }
-  oti_error(rt, "FFI type: invalid scalar code");
+  oti_ffi_errorf(rt, "type", "invalid scalar code");
   return -1;
 }
 
@@ -147,7 +147,7 @@ static bool lower_union(ot_state* rt, oti_signature* s, oti_abi_node* node, size
   }
   if (aligned != alignment || largest > SIZE_MAX - alignment + 1 ||
       (largest + alignment - 1) / alignment * alignment != size)
-    return oti_error(rt, "FFI abi: union layout mismatch");
+    return oti_ffi_errorf(rt, "abi", "union layout mismatch");
   unsigned char* classes = calloc(size, 1);
   ffi_type** elements = calloc(size + 1, sizeof(*elements));
   oti_abi_node* padding = calloc(1, sizeof(*padding));
@@ -155,14 +155,14 @@ static bool lower_union(ot_state* rt, oti_signature* s, oti_abi_node* node, size
     free(classes);
     free(elements);
     free(padding);
-    return oti_error(rt, "FFI allocation: out of host memory");
+    return oti_ffi_errorf(rt, "allocation", "out of host memory");
   }
   padding->type = (ffi_type){1, 1, FFI_TYPE_STRUCT, calloc(1, sizeof(ffi_type*))};
   if (!padding->type.elements) {
     free(classes);
     free(elements);
     free(padding);
-    return oti_error(rt, "FFI allocation: out of host memory");
+    return oti_ffi_errorf(rt, "allocation", "out of host memory");
   }
   padding->next = s->nodes;
   s->nodes = padding;
@@ -191,7 +191,7 @@ static ffi_type* aggregate_type(ot_state* rt, oti_signature* s, ot_value descrip
                                 unsigned depth, size_t* budget) {
   size_t n, kind, size, alignment;
   if (depth > 64 || !*budget) {
-    oti_error(rt, "FFI signature: aggregate too complex");
+    oti_ffi_errorf(rt, "signature", "aggregate too complex");
     return NULL;
   }
   --*budget;
@@ -199,24 +199,24 @@ static ffi_type* aggregate_type(ot_state* rt, oti_signature* s, ot_value descrip
       !natural_size(list_item(description, 0), &kind) ||
       !natural_size(list_item(description, 1), &size) ||
       !natural_size(list_item(description, 2), &alignment)) {
-    oti_error(rt, "FFI signature: invalid type description");
+    oti_ffi_errorf(rt, "signature", "invalid type description");
     return NULL;
   }
   if (kind < AGGREGATE) {
     if (!kind || kind == 22 || size != oti_foreign_scalars[kind].size ||
         alignment != oti_foreign_scalars[kind].alignment) {
-      oti_error(rt, "FFI signature: invalid aggregate member");
+      oti_ffi_errorf(rt, "signature", "invalid aggregate member");
       return NULL;
     }
     return abi_type((unsigned)kind);
   }
   if ((kind != AGGREGATE && kind != ARRAY_TYPE && kind != UNION_TYPE) || !size || !alignment ||
       alignment > _Alignof(max_align_t)) {
-    oti_error(rt, "FFI signature: invalid aggregate layout");
+    oti_ffi_errorf(rt, "signature", "invalid aggregate layout");
     return NULL;
   }
   if (size > 65536) {
-    oti_error(rt, "FFI signature: aggregate too complex");
+    oti_ffi_errorf(rt, "signature", "aggregate too complex");
     return NULL;
   }
   ot_value members = list_item(description, 3);
@@ -225,20 +225,20 @@ static ffi_type* aggregate_type(ot_state* rt, oti_signature* s, ot_value descrip
     size_t entries;
     if (!oti_foreign_list_length(rt, members, 2, &entries) || entries != 2 ||
         !natural_size(list_item(members, 1), &n)) {
-      oti_error(rt, "FFI signature: invalid array layout");
+      oti_ffi_errorf(rt, "signature", "invalid array layout");
       return NULL;
     }
     element = aggregate_type(rt, s, list_item(members, 0), depth + 1, budget);
     if (!element) return NULL;
   } else if (!oti_foreign_list_length(rt, members, *budget, &n)) return NULL;
   if (!n || n > *budget) {
-    oti_error(rt, "FFI signature: empty or oversized aggregate");
+    oti_ffi_errorf(rt, "signature", "empty or oversized aggregate");
     return NULL;
   }
   *budget -= n;
   oti_abi_node* node = calloc(1, sizeof(*node));
   if (!node) {
-    oti_error(rt, "FFI allocation: out of host memory");
+    oti_ffi_errorf(rt, "allocation", "out of host memory");
     return NULL;
   }
   node->next = s->nodes;
@@ -248,7 +248,7 @@ static ffi_type* aggregate_type(ot_state* rt, oti_signature* s, ot_value descrip
   size_t* offsets = calloc(n, sizeof(size_t));
   if (!node->type.elements || !offsets) {
     free(offsets);
-    oti_error(rt, "FFI allocation: out of host memory");
+    oti_ffi_errorf(rt, "allocation", "out of host memory");
     return NULL;
   }
   ot_value cursor = members;
@@ -260,7 +260,7 @@ static ffi_type* aggregate_type(ot_state* rt, oti_signature* s, ot_value descrip
       size_t count;
       if (!oti_foreign_list_length(rt, field, 3, &count) || count != 3 ||
           !oti_kind(list_item(field, 0), K_SYMBOL)) {
-        oti_error(rt, "FFI signature: invalid aggregate field");
+        oti_ffi_errorf(rt, "signature", "invalid aggregate field");
         ok = false;
         break;
       }
@@ -274,19 +274,19 @@ static ffi_type* aggregate_type(ot_state* rt, oti_signature* s, ot_value descrip
     for (size_t i = 0; ok && i < n; i++, cursor = oti_cdr(cursor)) {
       size_t offset;
       if (!natural_size(list_item(oti_car(cursor), 2), &offset) || offset)
-        ok = oti_error(rt, "FFI abi: union field offset mismatch");
+        ok = oti_ffi_errorf(rt, "abi", "union field offset mismatch");
     }
 #if defined(__x86_64__) && defined(__linux__) && !defined(__ILP32__)
     if (ok) ok = lower_union(rt, s, node, n, size, alignment);
 #else
-    if (ok) ok = oti_error(rt, "FFI abi: union calls require x86-64 Linux SysV");
+    if (ok) ok = oti_ffi_errorf(rt, "abi", "union calls require x86-64 Linux SysV");
 #endif
     free(offsets);
     return ok ? &node->type : NULL;
   }
   if (ok && (ffi_get_struct_offsets(FFI_DEFAULT_ABI, &node->type, offsets) != FFI_OK ||
              node->type.size != size || node->type.alignment != alignment)) {
-    oti_error(rt, "FFI abi: aggregate layout mismatch");
+    oti_ffi_errorf(rt, "abi", "aggregate layout mismatch");
     ok = false;
   }
   if (ok && !element) {
@@ -294,7 +294,7 @@ static ffi_type* aggregate_type(ot_state* rt, oti_signature* s, ot_value descrip
     for (size_t i = 0; i < n; i++, cursor = oti_cdr(cursor)) {
       size_t offset;
       if (!natural_size(list_item(oti_car(cursor), 2), &offset) || offset != offsets[i]) {
-        oti_error(rt, "FFI abi: field offset mismatch");
+        oti_ffi_errorf(rt, "abi", "field offset mismatch");
         ok = false;
         break;
       }
@@ -341,7 +341,7 @@ oti_signature* oti_foreign_signature(ot_state* rt, oti_signature** cache, ot_val
   for (size_t i = 0; valid && i < wanted.count; i++, list = oti_cdr(list)) {
     valid = call_type(rt, &wanted, oti_car(list), codes, &wanted.arguments[i],
                       &wanted.argument_types[i]);
-    if (valid && wanted.arguments[i] == 0) valid = oti_error(rt, "FFI signature: void argument");
+    if (valid && wanted.arguments[i] == 0) valid = oti_ffi_errorf(rt, "signature", "void argument");
   }
   if (!valid) {
     oti_foreign_free_abi_nodes(wanted.nodes);
@@ -369,7 +369,7 @@ oti_signature* oti_foreign_signature(ot_state* rt, oti_signature** cache, ot_val
     s = malloc(sizeof(*s));
     if (!s) {
       oti_foreign_free_abi_nodes(wanted.nodes);
-      oti_error(rt, "FFI allocation: out of host memory");
+      oti_ffi_errorf(rt, "allocation", "out of host memory");
       return NULL;
     }
     *s = wanted;
@@ -377,7 +377,7 @@ oti_signature* oti_foreign_signature(ot_state* rt, oti_signature** cache, ot_val
                      s->argument_types) != FFI_OK) {
       oti_foreign_free_abi_nodes(s->nodes);
       free(s);
-      oti_error(rt, "FFI signature: unsupported ABI");
+      oti_ffi_errorf(rt, "signature", "unsupported ABI");
       return NULL;
     }
     s->next = *cache;

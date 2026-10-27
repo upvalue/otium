@@ -1,5 +1,7 @@
 #include "internal.h"
 #include <inttypes.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #ifndef OTIUM_BOOTSTRAP_FILE
@@ -12,12 +14,92 @@ bool oti_host_entry(ot_state* rt) {
   return oti_error(rt, "host I/O callback cannot reenter Otium");
 }
 
-bool oti_error(ot_state* rt, const char* message) {
-  if (!rt->error[0]) {
-    snprintf(rt->error, sizeof(rt->error), "%s", message);
-    rt->error_code = NULL;
-    rt->signaled = false;
+static char out_of_memory[] = "out of host memory";
+
+/* Start a record whose message has length bytes, or return NULL if one exists. */
+static char* start_error(ot_state* rt, size_t length) {
+  if (rt->error.set) return NULL;
+  oti_error_record* e = &rt->error;
+  *e = (oti_error_record){.set = true, .data = {OT_NIL, OT_NIL, OT_NIL}};
+  rt->signaled = false;
+  e->message = length < SIZE_MAX ? malloc(length + 1) : NULL;
+  if (!e->message) {
+    e->message = out_of_memory;
+    return NULL;
   }
+  e->owned = true;
+  return e->message;
+}
+
+static bool verror(ot_state* rt, const char* prefix, const char* format, va_list arguments) {
+  if (rt->error.set) return false;
+  va_list copy;
+  va_copy(copy, arguments);
+  int length = vsnprintf(NULL, 0, format, copy);
+  va_end(copy);
+  size_t skip = prefix ? strlen(prefix) : 0;
+  char* message = start_error(rt, length < 0 ? SIZE_MAX : skip + (size_t)length);
+  if (message) {
+    if (skip) memcpy(message, prefix, skip);
+    vsnprintf(message + skip, (size_t)length + 1, format, arguments);
+  }
+  return false;
+}
+
+bool oti_error(ot_state* rt, const char* message) { return oti_errorf(rt, "%s", message); }
+
+bool oti_errorf(ot_state* rt, const char* format, ...) {
+  va_list arguments;
+  va_start(arguments, format);
+  verror(rt, NULL, format, arguments);
+  va_end(arguments);
+  return false;
+}
+
+bool oti_ffi_errorf(ot_state* rt, const char* reason, const char* format, ...) {
+  if (rt->error.set) return false;
+  char prefix[48];
+  snprintf(prefix, sizeof(prefix), "FFI %s: ", reason);
+  va_list arguments;
+  va_start(arguments, format);
+  verror(rt, prefix, format, arguments);
+  va_end(arguments);
+  rt->error.ffi_reason = reason;
+  return false;
+}
+
+void oti_clear_error(ot_state* rt) {
+  if (rt->error.owned) free(rt->error.message);
+  rt->error = (oti_error_record){.data = {OT_NIL, OT_NIL, OT_NIL}};
+}
+
+void oti_take_error(ot_state* rt, oti_error_record* saved, oti_roots* roots) {
+  *saved = rt->error;
+  rt->error = (oti_error_record){.data = {OT_NIL, OT_NIL, OT_NIL}};
+  oti_roots_push(&rt->heap, roots, saved->data, 3);
+}
+
+void oti_restore_error(ot_state* rt, oti_error_record* saved, oti_roots* roots) {
+  oti_roots_pop(&rt->heap, roots);
+  oti_clear_error(rt);
+  rt->error = *saved;
+}
+
+void oti_drop_error(ot_state* rt, oti_error_record* saved, oti_roots* roots) {
+  oti_roots_pop(&rt->heap, roots);
+  if (saved->owned) free(saved->message);
+  *saved = (oti_error_record){.data = {OT_NIL, OT_NIL, OT_NIL}};
+}
+
+bool oti_tagged_error(ot_state* rt, const char* who, const char* tag, const char* message,
+                      size_t count, const ot_value* values) {
+  if (oti_failed(rt)) return false;
+  oti_error(rt, message);
+  oti_error_record* e = &rt->error;
+  e->who = who;
+  e->tag = tag;
+  e->data_count = count < 3 ? count : 3;
+  for (size_t i = 0; i < e->data_count; i++) e->data[i] = values[i];
   return false;
 }
 
@@ -40,9 +122,16 @@ ot_value oti_cons(ot_state* rt, ot_value car, ot_value cdr) {
 }
 
 bool oti_coded_error(ot_state* rt, const char* code, const char* message) {
-  bool fresh = !rt->error[0];
-  oti_error(rt, message);
-  if (fresh) rt->error_code = code;
+  return oti_coded_errorf(rt, code, "%s", message);
+}
+
+bool oti_coded_errorf(ot_state* rt, const char* code, const char* format, ...) {
+  bool fresh = !rt->error.set;
+  va_list arguments;
+  va_start(arguments, format);
+  verror(rt, NULL, format, arguments);
+  va_end(arguments);
+  if (fresh && code) snprintf(rt->error.code, sizeof(rt->error.code), "%s", code);
   return false;
 }
 
@@ -96,7 +185,7 @@ bool ot_poll_interrupt(ot_state* rt) {
   rt->exit_pending = rt->restart_pending = rt->raised = false;
   rt->condition_values[0] = OT_NIL;
   rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
-  rt->error[0] = 0;
+  oti_clear_error(rt);
   oti_error(rt, "interrupted");
   return false;
 }
@@ -295,6 +384,8 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
   oti_roots_push(&rt->heap, &rt->restart_transfer_roots, rt->restart_transfer, 2);
   rt->condition_values[0] = rt->condition_values[1] = OT_NIL;
   oti_roots_push(&rt->heap, &rt->condition_roots, rt->condition_values, 2);
+  oti_clear_error(rt);
+  oti_roots_push(&rt->heap, &rt->error_roots, rt->error.data, 3);
   for (size_t i = 0; i < C_COUNT; i++) rt->classes[i] = OT_NIL;
   oti_roots_push(&rt->heap, &rt->class_roots, rt->classes, C_COUNT);
   if (oti_namespace(rt, "otium.core", 10) == UINT32_MAX || !oti_builtins(rt) ||
@@ -320,6 +411,7 @@ bool ot_set_heap_limit(ot_state* rt, size_t bytes) {
 void ot_destroy(ot_state* rt) {
   if (!rt || !oti_host_entry(rt)) return;
   oti_ports_destroy(rt);
+  oti_clear_error(rt);
   oti_foreign_destroy(rt);
   oti_modules_destroy(rt);
   for (size_t i = 0; i < rt->function_count; i++) {
@@ -418,7 +510,7 @@ static bool evaluate_raw(ot_state* rt, const oti_ast* form, ot_value* result) {
   if (form->kind == AST_LIST && oti_ast_symbol(form->as.list.first, "ns")) {
     const oti_ast* name = form->as.list.first->next;
     if (form->as.list.tail || !name || name->kind != AST_SYMBOL) {
-      rt->error_offset = form->offset;
+      rt->error.offset = form->offset;
       return oti_coded_error(rt, "E0110", "ns needs a namespace symbol");
     }
     if (rt->required_namespace != UINT32_MAX &&
@@ -445,7 +537,7 @@ static bool evaluate_raw(ot_state* rt, const oti_ast* form, ot_value* result) {
     const oti_ast* value = name ? name->next : NULL;
     if (form->as.list.tail || !name || name->kind != AST_SYMBOL || !value ||
         (value->next && value->next->next)) {
-      rt->error_offset = form->offset;
+      rt->error.offset = form->offset;
       return oti_error(rt, "defonce needs a name, optional docstring and value");
     }
     uint32_t global = oti_global(rt, name->as.text.data, name->as.text.size);
@@ -467,7 +559,7 @@ static bool evaluate_raw(ot_state* rt, const oti_ast* form, ot_value* result) {
   rt->compiling = compiling;
   /* Reclaim unreachable code at the next idle boundary. Macro execution can
      * retain constants and nested eval closures even if this compile fails. */
-  if (!ok || rt->error[0]) return false;
+  if (!ok || oti_failed(rt)) return false;
   if (!oti_execute(rt, function, result)) return false;
   if (form->kind == AST_LIST) {
     const oti_ast* definition = form->as.list.first;
@@ -550,7 +642,6 @@ ot_value oti_eval_value(ot_state* rt, ot_value value) {
 }
 
 char* oti_read_file(ot_state* rt, FILE* file, size_t limit, const char* what, size_t* length) {
-  char message[128];
   char* buffer = NULL;
   size_t used = 0, capacity = 0;
   for (;;) {
@@ -567,13 +658,11 @@ char* oti_read_file(ot_state* rt, FILE* file, size_t limit, const char* what, si
     }
     used += fread(buffer + used, 1, capacity - used, file);
     if (ferror(file)) {
-      snprintf(message, sizeof(message), "cannot read %s", what);
-      oti_error(rt, message);
+      oti_errorf(rt, "cannot read %s", what);
       break;
     }
     if (used > limit) {
-      snprintf(message, sizeof(message), "%s exceeds the source size limit", what);
-      oti_error(rt, message);
+      oti_errorf(rt, "%s exceeds the source size limit", what);
       break;
     }
     if (feof(file)) {
@@ -591,11 +680,7 @@ char* oti_read_file(ot_state* rt, FILE* file, size_t limit, const char* what, si
 /* Evaluate a runtime library file in the root namespace. */
 static bool eval_library_file(ot_state* rt, const char* path, const char* what) {
   FILE* file = fopen(path, "rb");
-  if (!file) {
-    char message[128];
-    snprintf(message, sizeof(message), "cannot open %s", what);
-    return oti_error(rt, message);
-  }
+  if (!file) return oti_errorf(rt, "cannot open %s", what);
   size_t length;
   char* source = oti_read_file(rt, file, OTI_SOURCE_LIMIT, what, &length);
   if (!source) return false;
@@ -664,8 +749,7 @@ bool ot_eval(ot_state* rt, const char* source, size_t length, ot_value* result) 
   if (!nested) {
     rt->interrupted = false;
     rt->exit_pending = false;
-    rt->error[0] = 0;
-    rt->error_offset = 0;
+    oti_clear_error(rt);
     rt->raised = false;
     rt->condition_values[0] = OT_NIL;
     rt->try_count = 0;
@@ -690,7 +774,7 @@ bool ot_eval(ot_state* rt, const char* source, size_t length, ot_value* result) 
   }
   if (reader.error) {
     oti_coded_error(rt, reader.error_code, reader.error);
-    rt->error_offset = reader.error_offset;
+    rt->error.offset = reader.error_offset;
   }
   oti_reader_destroy(&reader);
   rt->frame_count = frames;
@@ -698,7 +782,7 @@ bool ot_eval(ot_state* rt, const char* source, size_t length, ot_value* result) 
   oti_restore_restarts(rt, restarts);
   oti_restore_cleanups(rt, cleanups);
   rt->sp = rt->stack_roots.count = base;
-  if (!ok || rt->error[0]) return false;
+  if (!ok || oti_failed(rt)) return false;
   if (!oti_stack(rt, base + 1)) return false;
   rt->stack[base] = *result;
   rt->sp = rt->stack_roots.count = base + 1;
@@ -711,14 +795,13 @@ bool ot_exit_status(const ot_state* rt, int* status) {
   return true;
 }
 
-const char* ot_error(const ot_state* rt) { return rt->error; }
+const char* ot_error(const ot_state* rt) { return rt->error.set ? rt->error.message : ""; }
 
 bool ot_call(ot_state* rt, const char* name, const ot_value* args, size_t count, ot_value* result) {
   if (!oti_host_entry(rt)) return false;
   rt->interrupted = false;
   rt->exit_pending = false;
-  rt->error[0] = 0;
-  rt->error_offset = 0;
+  oti_clear_error(rt);
   rt->raised = false;
   rt->condition_values[0] = OT_NIL;
   rt->try_count = 0;
@@ -753,7 +836,7 @@ bool ot_call(ot_state* rt, const char* name, const ot_value* args, size_t count,
   return true;
 }
 
-size_t ot_error_offset(const ot_state* rt) { return rt->error_offset; }
+size_t ot_error_offset(const ot_state* rt) { return rt->error.offset; }
 
 ot_stats ot_get_stats(const ot_state* rt) {
   ot_stats stats = {.collections = rt->heap.collections,

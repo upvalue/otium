@@ -158,8 +158,7 @@ bool oti_resume_restart(ot_state* rt, size_t stop_frames) {
   oti_frame* frame = &rt->frames[rt->frame_count - 1];
   frame->pc = frame->fn->code + scope.state.target;
   rt->restart_pending = false;
-  rt->error[0] = 0;
-  rt->error_code = NULL;
+  oti_clear_error(rt);
   rt->raised = rt->signaled = false;
   rt->condition_values[0] = OT_NIL;
   size_t base = rt->sp;

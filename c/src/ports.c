@@ -1218,15 +1218,12 @@ bool ot_flush_ports(ot_state* rt) {
   ot_value saved[] = {rt->condition_values[0], rt->restart_transfer[0], rt->restart_transfer[1]};
   oti_roots state_root;
   oti_roots_push(&rt->heap, &state_root, saved, 3);
-  char error[sizeof(rt->error)];
-  memcpy(error, rt->error, sizeof(error));
-  const char* code = rt->error_code;
-  size_t offset = rt->error_offset;
+  oti_error_record error;
+  oti_roots error_roots;
+  oti_take_error(rt, &error, &error_roots);
   bool raised = rt->raised, signaled = rt->signaled, restart = rt->restart_pending;
   bool exiting = rt->exit_pending, interrupted = rt->interrupted;
   int status = rt->exit_status;
-  rt->error[0] = 0;
-  rt->error_code = NULL;
   rt->raised = rt->signaled = rt->restart_pending = rt->exit_pending = rt->interrupted = false;
   rt->condition_values[0] = rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
   size_t count = rt->open_port_count;
@@ -1249,9 +1246,7 @@ bool ot_flush_ports(ot_state* rt) {
   }
   free(ports);
   if (ok) {
-    memcpy(rt->error, error, sizeof(error));
-    rt->error_code = code;
-    rt->error_offset = offset;
+    oti_restore_error(rt, &error, &error_roots);
     rt->raised = raised;
     rt->signaled = signaled;
     rt->restart_pending = restart;
@@ -1261,7 +1256,7 @@ bool ot_flush_ports(ot_state* rt) {
     rt->condition_values[0] = saved[0];
     rt->restart_transfer[0] = saved[1];
     rt->restart_transfer[1] = saved[2];
-  }
+  } else oti_drop_error(rt, &error, &error_roots);
   oti_roots_pop(&rt->heap, &state_root);
   return ok;
 }

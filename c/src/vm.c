@@ -155,7 +155,7 @@ bool oti_apply(ot_state* rt, size_t call, size_t argc, bool tail) {
   ot_value target = rt->stack[call];
   if (vm_primitive(target)) {
     ot_value answer = vm_call_primitive(rt, call, argc);
-    if (!answer || rt->error[0]) return false;
+    if (!answer || oti_failed(rt)) return false;
     if (tail) return oti_leave(rt, answer);
     rt->stack[call] = answer;
     return true;
@@ -198,7 +198,7 @@ static ot_value vm_builtin(ot_state* rt, unsigned id, ot_value a, ot_value b, si
   vm_height(rt, first + count);
   ot_value result = oti_builtin(rt, id, first, count);
   vm_height(rt, first);
-  return result && !rt->error[0] ? result : 0;
+  return result && !oti_failed(rt) ? result : 0;
 }
 
 static bool vm_float(ot_value v, double* out) {
@@ -224,9 +224,7 @@ static bool vm_install_try(ot_state* rt, size_t target, size_t slot) {
 }
 
 static bool vm_unbound_global(ot_state* rt, uint32_t index) {
-  char message[192];
-  snprintf(message, sizeof(message), "unbound global: %s", rt->global_info[index].name);
-  return oti_coded_error(rt, "E0201", message);
+  return oti_coded_errorf(rt, "E0201", "unbound global: %s", rt->global_info[index].name);
 }
 
 /* True, with an error, when index is the cell of a builtin the compiler turns
@@ -255,9 +253,7 @@ static bool vm_inlined_builtin(ot_state* rt, uint32_t index) {
     default: return false;
   }
   if (rt->builtin_cells[id] != index) return false;
-  char message[192];
-  snprintf(message, sizeof(message), "cannot redefine builtin: %s", rt->global_info[index].name);
-  oti_error(rt, message);
+  oti_errorf(rt, "cannot redefine builtin: %s", rt->global_info[index].name);
   return true;
 }
 
@@ -317,7 +313,7 @@ static unsigned vm_builtin_id(unsigned op) {
 static bool dispatch(ot_state* rt, size_t stop_frames) {
   /* A failed transfer (such as a restart applied to bad arguments) leaves its
    * error pending for the unwinding loop. */
-  if (rt->frame_count <= stop_frames || rt->error[0]) return !rt->error[0];
+  if (rt->frame_count <= stop_frames || oti_failed(rt)) return !oti_failed(rt);
   oti_frame* frame;
   oti_function* fn;
   const oti_instruction *code, *pc;
@@ -620,7 +616,7 @@ next:
     } else if ((v & 255) == TAG_BUILTIN && v != VM_APPLY) {
       SAVE_IP();
       v = oti_builtin(rt, (unsigned)(v >> 8), base + ins.a + 1, argc);
-      if (!v || rt->error[0]) return false;
+      if (!v || oti_failed(rt)) return false;
       RELOAD();
       R[ins.a] = v;
       SAFEPOINT();
@@ -661,7 +657,7 @@ next:
     } else if ((v & 255) == TAG_BUILTIN && v != VM_APPLY) {
       SAVE_IP();
       v = oti_builtin(rt, (unsigned)(v >> 8), base + ins.a + 1, argc);
-      if (!v || rt->error[0]) return false;
+      if (!v || oti_failed(rt)) return false;
       RELOAD();
       goto return_value;
     }
@@ -963,7 +959,7 @@ bool oti_drive(ot_state* rt, size_t stop_frames) {
     vm_height(rt, handler.sp);
     ot_value condition = oti_error_condition(rt);
     if (!condition) continue;
-    rt->error[0] = 0;
+    oti_clear_error(rt);
     rt->raised = false;
     rt->signaled = false;
     rt->stack[handler.slot] = condition;
@@ -1000,7 +996,7 @@ ot_value oti_call_list(ot_state* rt, ot_value function, ot_value args) {
   rt->stack[base + 2] = args;
   vm_height(rt, base + 3);
   bool applied = oti_apply(rt, base, 2, false);
-  if (!applied && !rt->error[0]) oti_error(rt, "VM call failed");
+  if (!applied && !oti_failed(rt)) oti_error(rt, "VM call failed");
   bool ok = oti_drive(rt, frames);
   ot_value result = ok ? rt->stack[base] : 0;
   rt->frame_count = frames;

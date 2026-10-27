@@ -85,7 +85,7 @@ static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tai
 static bool body(oti_compiler* c, const oti_ast* forms, uint32_t dst, bool tail, bool definitions);
 
 static bool error(oti_compiler* c, const oti_ast* a, const char* message) {
-  if (!c->rt->error[0] && a) c->rt->error_offset = a->offset;
+  if (!oti_failed(c->rt) && a) c->rt->error.offset = a->offset;
   return oti_error(c->rt, message);
 }
 
@@ -97,7 +97,7 @@ static bool same_name(const oti_ast* a, const oti_ast* b) {
 
 static size_t emit_word(oti_compiler* c, oti_instruction ins) {
   oti_function* f = c->fn;
-  if (c->rt->error[0]) return SIZE_MAX;
+  if (oti_failed(c->rt)) return SIZE_MAX;
   if (f->count >= UINT32_MAX ||
       !oti_grow(c->rt, (void**)&f->code, &f->capacity, f->count + 1, sizeof(oti_instruction))) {
     oti_error(c->rt, "function too large");
@@ -128,7 +128,7 @@ static size_t emit_bc(oti_compiler* c, oti_opcode op, uint32_t a, uint32_t bc) {
 }
 
 static bool patch_to(oti_compiler* c, size_t at, size_t target) {
-  if (at == SIZE_MAX || c->rt->error[0]) return false;
+  if (at == SIZE_MAX || oti_failed(c->rt)) return false;
   if (target > UINT32_MAX) return oti_error(c->rt, "function too large");
   c->fn->code[at].b = (uint16_t)(target & 0xffff);
   c->fn->code[at].c = (uint16_t)(target >> 16);
@@ -356,7 +356,7 @@ static bool resolve(oti_compiler* c, const oti_ast* name, oti_reference* ref) {
                            c->fn->captures[index].boxed};
     return true;
   }
-  if (c->rt->error[0]) return false;
+  if (oti_failed(c->rt)) return false;
   index = oti_resolve_global(c->rt, name->as.text.data, name->as.text.size);
   *ref = (oti_reference){REF_GLOBAL, index, UINT32_MAX, SIZE_MAX, false};
   return index != UINT32_MAX;
@@ -486,11 +486,11 @@ static ot_value datum(oti_compiler* c, const oti_ast* a) {
         else object_fields(slots[1])[1] = pair;
         slots[1] = pair;
       }
-      if (!rt->error[0] && a->as.list.tail) {
+      if (!oti_failed(rt) && a->as.list.tail) {
         slots[2] = datum(c, a->as.list.tail);
         if (slots[2]) object_fields(slots[1])[1] = slots[2];
       }
-      ot_value result = rt->error[0] ? 0 : slots[0];
+      ot_value result = oti_failed(rt) ? 0 : slots[0];
       oti_roots_pop(&rt->heap, &roots);
       return result;
     }
@@ -1473,7 +1473,7 @@ static bool branch_primitive(oti_compiler* c, const oti_primitive* p, const oti_
 }
 
 static bool branch(oti_compiler* c, const oti_ast* a, bool when, oti_jumps* out) {
-  if (c->rt->error[0]) return false;
+  if (oti_failed(c->rt)) return false;
   c->definitions = false;
   a = expand_head(c, a);
   if (!a) return false;
@@ -1583,7 +1583,7 @@ static bool simple(oti_compiler* c, const oti_ast* a) {
 }
 
 static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tail) {
-  if (c->rt->error[0]) return false;
+  if (oti_failed(c->rt)) return false;
   bool definitions = c->definitions;
   c->definitions = false;
   if (a->kind == AST_SYMBOL) {
@@ -2026,7 +2026,7 @@ ot_value oti_read_source(ot_state* rt, const char* source, size_t length) {
   ot_value result = form ? datum(&c, form) : 0;
   if (reader.error) {
     oti_coded_error(rt, reader.error_code, reader.error);
-    rt->error_offset = reader.error_offset;
+    rt->error.offset = reader.error_offset;
     result = 0;
   }
   oti_reader_destroy(&reader);

@@ -84,14 +84,49 @@ static ot_value message_condition(ot_state* rt, ot_value message, size_t first, 
   return result;
 }
 
+ot_value oti_condition_of(ot_state* rt, const oti_error_record* e) {
+  const char* message = e->set ? e->message : "";
+  ot_value live[] = {oti_text(rt, K_STRING, message, strlen(message)), OT_NIL, OT_NIL};
+  if (!live[0]) return 0;
+  oti_roots roots;
+  oti_roots_push(&rt->heap, &roots, live, 3);
+  live[0] = message_condition(rt, live[0], 0, 0, e->code[0] ? e->code : NULL);
+  bool ok = live[0] != 0;
+  if (ok && e->who) {
+    live[1] = oti_text(rt, K_STRING, e->who, strlen(e->who));
+    ot_value k = live[1] ? key(rt, ":who") : 0;
+    ok = k && oti_table_set(rt, live[0], k, live[1]);
+  }
+  if (ok && e->tag) {
+    /* :data is the tag symbol and the saved values, gathered on the stack. */
+    size_t base = rt->sp, n = 1 + e->data_count;
+    live[1] = n <= rt->stack_limit - base && oti_stack(rt, base + n)
+                  ? oti_intern(rt, K_SYMBOL, e->tag, strlen(e->tag))
+                  : 0;
+    ok = live[1] != 0;
+    if (ok) {
+      rt->stack[base] = live[1];
+      for (size_t i = 0; i < e->data_count; i++) rt->stack[base + 1 + i] = e->data[i];
+      rt->sp = rt->stack_roots.count = base + n;
+      live[1] = oti_array_from(rt, base, n);
+      rt->sp = rt->stack_roots.count = base;
+      ot_value k = live[1] ? key(rt, ":data") : 0;
+      ok = k && oti_table_set(rt, live[0], k, live[1]);
+    }
+  }
+  ot_value result = ok ? live[0] : 0;
+  oti_roots_pop(&rt->heap, &roots);
+  return result;
+}
+
 ot_value oti_error_condition(ot_state* rt) {
   if (rt->raised) return rt->condition_values[0];
-  char message[sizeof(rt->error)];
-  memcpy(message, rt->error, sizeof(message));
-  const char* code = rt->error_code;
-  rt->error[0] = 0;
-  ot_value text = oti_text(rt, K_STRING, message, strlen(message));
-  return text ? message_condition(rt, text, 0, 0, code) : 0;
+  oti_error_record e;
+  oti_roots roots;
+  oti_take_error(rt, &e, &roots);
+  ot_value condition = oti_condition_of(rt, &e);
+  oti_drop_error(rt, &e, &roots);
+  return condition;
 }
 
 ot_value oti_raise(ot_state* rt, size_t first, size_t count) {
@@ -266,29 +301,31 @@ ot_value oti_signal(ot_state* rt, size_t first, size_t count) {
 /* Offer an error before unwinding. A handler's error replaces the original;
  * a normally returning handler leaves the original condition pending. */
 void oti_signal_error(ot_state* rt) {
-  size_t offset = rt->error_offset;
-  char message[sizeof(rt->error)];
-  memcpy(message, rt->error, sizeof(message));
-  ot_value condition = oti_error_condition(rt);
+  bool raised = rt->raised;
+  oti_error_record saved;
+  oti_roots saved_roots;
+  oti_take_error(rt, &saved, &saved_roots);
+  ot_value condition = raised ? rt->condition_values[0] : oti_condition_of(rt, &saved);
   if (!condition) {
+    oti_drop_error(rt, &saved, &saved_roots);
     rt->signaled = true;
     return;
   }
   oti_roots root;
   oti_roots_push(&rt->heap, &root, &condition, 1);
-  rt->error[0] = 0;
   rt->raised = false;
   rt->condition_values[0] = OT_NIL;
   rt->signaled = false;
-  if (signal_handlers(rt, condition)) {
-    memcpy(rt->error, message, sizeof(message));
-    rt->error_offset = offset;
-    rt->error_code = NULL;
+  bool resume = signal_handlers(rt, condition);
+  oti_roots_pop(&rt->heap, &root);
+  if (resume) {
+    /* The condition already carries the code. */
+    oti_restore_error(rt, &saved, &saved_roots);
+    rt->error.code[0] = 0;
     rt->condition_values[0] = condition;
     rt->raised = true;
     rt->signaled = true;
-  }
-  oti_roots_pop(&rt->heap, &root);
+  } else oti_drop_error(rt, &saved, &saved_roots);
 }
 
 ot_value oti_decode_error(ot_state* rt, size_t position) {
@@ -378,13 +415,15 @@ ot_value oti_file_error(ot_state* rt, const char* op, ot_value path, int error) 
 
 ot_value oti_ffi_error(ot_state* rt, const char* operation, const char* reason,
                        const char* message) {
-  char op[64], why[64];
-  size_t length = strlen(message);
-  char* detail = malloc(length + 1);
-  if (!detail) return oti_fail(rt, "out of host memory");
-  memcpy(detail, message, length + 1);
-  snprintf(op, sizeof(op), "%s", operation);
-  snprintf(why, sizeof(why), "%s", reason);
+  /* The strings may point into managed strings, which collection moves. */
+  size_t op_length = strlen(operation) + 1, why_length = strlen(reason) + 1;
+  size_t length = strlen(message) + 1;
+  char* op = malloc(op_length + why_length + length);
+  if (!op) return oti_fail(rt, "out of host memory");
+  char *why = op + op_length, *detail = why + why_length;
+  memcpy(op, operation, op_length);
+  memcpy(why, reason, why_length);
+  memcpy(detail, message, length);
   ot_value live[] = {OT_NIL, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, live, 2);
@@ -405,6 +444,6 @@ ot_value oti_ffi_error(ot_state* rt, const char* operation, const char* reason,
     oti_error(rt, detail);
   }
   oti_roots_pop(&rt->heap, &roots);
-  free(detail);
+  free(op);
   return 0;
 }

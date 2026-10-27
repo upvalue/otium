@@ -512,6 +512,30 @@ typedef struct {
   oti_builtin_fn run;
 } oti_builtin_def;
 
+/* The error being reported. Error sites often hold unrooted values and return
+ * straight after recording, so recording never allocates on the managed heap;
+ * oti_error_condition builds the condition where the error is caught. The
+ * first error wins until it is cleared or taken. */
+typedef struct {
+  bool set;
+  /* Owned and NUL-terminated, or the static out-of-memory message. */
+  char* message;
+  bool owned;
+  /* A diagnostic code such as E0301, or empty. */
+  char code[32];
+  /* The source offset of the failing form. */
+  size_t offset;
+  /* Static strings, or NULL: the operation for :who, the symbol that starts
+   * :data, and the reason of an FFI error. */
+  const char *who, *tag, *ffi_reason;
+  /* Further :data values. They live in rooted slots, so storing one is safe at
+   * any error site. */
+  ot_value data[3];
+  size_t data_count;
+  /* The message already names the module whose load failed. */
+  bool in_module;
+} oti_error_record;
+
 struct ot_state {
   oti_heap heap;
   ot_value process_values[2];
@@ -575,10 +599,8 @@ struct ot_state {
   bool raised;
   oti_try_frame* tries;
   size_t try_count, try_capacity;
-  char error[192];
-  char expansion_error_code[32];
-  const char* error_code;
-  size_t error_offset;
+  oti_error_record error;
+  oti_roots error_roots;
   bool stress_gc, shared_expander, expanding;
   size_t expansion_calls, eval_depth;
   uint64_t gensym_counter;
@@ -597,11 +619,32 @@ void oti_free_function(oti_function* fn);
 char* oti_read_file(ot_state* rt, FILE* file, size_t limit, const char* what, size_t* length);
 bool oti_reclaim(ot_state* rt);
 bool oti_coded_error(ot_state* rt, const char* code, const char* message);
+bool oti_coded_errorf(ot_state* rt, const char* code, const char* format, ...)
+    __attribute__((format(printf, 3, 4)));
 /* Record an error and return 0, the failure result of a builtin. */
 ot_value oti_fail(ot_state* rt, const char* message);
 /* A new pair. car and cdr are rooted across the allocation. */
 ot_value oti_cons(ot_state* rt, ot_value car, ot_value cdr);
 bool oti_error(ot_state* rt, const char* message);
+bool oti_errorf(ot_state* rt, const char* format, ...) __attribute__((format(printf, 2, 3)));
+/* Record an FFI error with reason, such as "type", and message "FFI reason: ...". */
+bool oti_ffi_errorf(ot_state* rt, const char* reason, const char* format, ...)
+    __attribute__((format(printf, 3, 4)));
+
+/* Whether an error is recorded. */
+static inline bool oti_failed(const ot_state* rt) { return rt->error.set; }
+
+void oti_clear_error(ot_state* rt);
+/* Take the recorded error out of rt, leaving none, and put it back. The saved
+ * record's data slots are rooted between the two calls. */
+void oti_take_error(ot_state* rt, oti_error_record* saved, oti_roots* roots);
+void oti_restore_error(ot_state* rt, oti_error_record* saved, oti_roots* roots);
+/* Release a taken record instead of restoring it. */
+void oti_drop_error(ot_state* rt, oti_error_record* saved, oti_roots* roots);
+/* Record an error whose condition has :who and :data, which starts with the
+ * symbol tag and continues with up to three values. All strings are static. */
+bool oti_tagged_error(ot_state* rt, const char* who, const char* tag, const char* message,
+                      size_t count, const ot_value* values);
 bool oti_host_entry(ot_state* rt);
 bool oti_grow(ot_state* rt, void** data, size_t* capacity, size_t needed, size_t width);
 bool oti_stack(ot_state* rt, size_t needed);
@@ -643,7 +686,10 @@ size_t oti_utf8_next(const char* s, size_t n, size_t p, uint32_t* cp);
 size_t oti_utf8_encode(uint32_t cp, char bytes[4]);
 ot_value oti_string_get(ot_value string, ot_value key, ot_value fallback);
 
+/* The condition for a recorded error, or the raised condition. Clears the error. */
 ot_value oti_error_condition(ot_state* rt);
+/* The condition for a saved error record, which stays as it is. */
+ot_value oti_condition_of(ot_state* rt, const oti_error_record* e);
 ot_value oti_raise(ot_state* rt, size_t first, size_t count);
 ot_value oti_signal(ot_state* rt, size_t first, size_t count);
 void oti_signal_error(ot_state* rt);

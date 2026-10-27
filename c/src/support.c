@@ -223,14 +223,14 @@ static ot_value support_expander_fail(ot_state* rt, size_t first, size_t count) 
   const char* s = oti_text_bytes(message, &n);
   (void)n;
   ot_value code = rt->stack[first];
+  bool fresh = !oti_failed(rt);
   oti_error(rt, s);
-  if (oti_kind(code, K_STRING)) {
+  if (fresh && oti_kind(code, K_STRING)) {
     size_t length;
     const char* bytes = oti_text_bytes(code, &length);
-    if (length < sizeof(rt->expansion_error_code)) {
-      memcpy(rt->expansion_error_code, bytes, length);
-      rt->expansion_error_code[length] = 0;
-      rt->error_code = rt->expansion_error_code;
+    if (length < sizeof(rt->error.code)) {
+      memcpy(rt->error.code, bytes, length);
+      rt->error.code[length] = 0;
     }
   }
   return 0;

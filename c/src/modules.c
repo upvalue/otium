@@ -252,11 +252,17 @@ static bool one_require(ot_state* rt, const oti_ast** cursor) {
           !memcmp(rt->namespaces[i], alias->as.text.data, alias->as.text.size))
         return oti_coded_error(rt, "E0208", "require alias conflicts with a namespace name");
   if (!load_module(rt, space, reload, oti_ast_symbol(module, "ffi"))) {
-    if (!strncmp(rt->error, "module [", 8)) return false;
-    char cause[192];
-    memcpy(cause, rt->error, sizeof(cause));
-    cause[sizeof(cause) - 1] = 0;
-    snprintf(rt->error, sizeof(rt->error), "module [%.64s]: %.100s", rt->namespaces[space], cause);
+    oti_error(rt, "");
+    oti_error_record* e = &rt->error;
+    if (e->in_module) return false;
+    e->in_module = true;
+    size_t length = strlen(rt->namespaces[space]) + strlen(e->message) + sizeof("module []: ");
+    char* message = malloc(length);
+    if (!message) return false;
+    snprintf(message, length, "module [%s]: %s", rt->namespaces[space], e->message);
+    if (e->owned) free(e->message);
+    e->message = message;
+    e->owned = true;
     return false;
   }
   if (refer)

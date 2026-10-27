@@ -91,6 +91,9 @@ ot_value oti_heap_alloc(oti_heap* h, uint32_t kind, uint32_t fields, size_t byte
 typedef struct {
   size_t size;
   uint32_t fields, kind;
+#if SIZE_MAX == UINT32_MAX
+  uint32_t padding; /* Keeps 32-bit headers a multiple of 8 bytes. */
+#endif
 } oti_object_header;
 
 static inline ot_value* object_fields(ot_value object) {

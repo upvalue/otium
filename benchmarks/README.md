@@ -7,8 +7,7 @@ optional positional executable selects a custom build.
 just bench --runtime c
 just bench --runtime chez
 python3 benchmarks/compare.py --otium build/otium
-python3 benchmarks/gc/compare.py --runs 1 --warmups 0
-just bench-gc
+just bench-c
 ```
 
 `run.py` runs every file in `workloads/`, or the paths given with `--only`.
@@ -20,15 +19,14 @@ the same on both runtimes.
 workload. It runs Chez directly without imported-library compilation, which
 keeps its measurement boundary; the other runners use the normal launcher.
 
-`gc/compare.py` builds the C collectors into `build-gc-semi/` and `build-gc-gen/`
-with the same memory budget and runs `c/bench/gc_bench.c` plus the allocation
-workloads. `just bench-gc` runs the collector stress cases on the current build.
+`just bench-c` runs the C runtime's warm microbenchmarks in `c/bench/runtime.c`,
+calling each workload through the embedding API after warmup. Pass a workload
+name to run one.
 
 ## Results
 
 Runs write to ignored `benchmarks/runs/<family>/<timestamp>/` directories. Use
-`--output FILE` for the workload and paired runners, `--output DIR` for R7RS,
-and `--csv` for the GC comparison. Curated results live in `benchmarks/results/`;
+`--output FILE` for the workload and paired runners and `--output DIR` for R7RS. Curated results live in `benchmarks/results/`;
 copy new ones there deliberately.
 
 Reports record commands, commit, dirty state, platform and a `--build-label`.

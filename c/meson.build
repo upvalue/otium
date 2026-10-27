@@ -6,7 +6,7 @@ runtime_sources = files(
   'src/ports.c', 'src/strings.c', 'src/bytevectors.c', 'src/reflection.c', 'src/support.c',
   'src/conditions.c', 'src/restarts.c', 'src/cleanup.c', 'src/params.c', 'src/classes.c',
   'src/instances.c', 'src/records.c', 'src/foreign.c', 'src/foreign_types.c',
-  'src/collections.c', 'src/tables.c', 'src/reclaim.c', 'src/modules.c')
+  'src/collections.c', 'src/tables.c', 'src/reclaim.c', 'src/modules.c', 'src/natives.c')
 
 # The runtime is C11 with GNU builtins and computed goto, so it skips the
 # project's C23 and -Wpedantic.
@@ -84,6 +84,10 @@ unit_tests = executable('otium-unit-tests', unit_main, unit_sources,
 foreign_control = executable('otium-foreign-control', 'tests/unit/hosts/foreign-control.c',
   c_args: runtime_args, include_directories: unit_include, dependencies: libotium_dep,
   link_with: unit_support, override_options: runtime_options)
+
+# A host with native procedures, for the extension test in tests.py.
+extension_demo = executable('otium-extension-demo', 'tests/unit/hosts/extension-demo.c',
+  c_args: runtime_args, dependencies: libotium_dep, override_options: runtime_options)
 
 ffi_extra = shared_module('ffi-extra', 'tests/unit/fixtures/ffi_extra.c',
   name_prefix: '', name_suffix: extension, build_by_default: false,

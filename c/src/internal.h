@@ -41,7 +41,9 @@ enum {
   K_NEXT,
   K_RECORD_TYPE,
   K_RECORD,
-  K_FOREIGN_LAYOUT
+  K_FOREIGN_LAYOUT,
+  K_NATIVE,
+  K_HOST_OBJECT
 };
 
 enum { V_UNBOUND = 18, TAG_CHAR = 22, TAG_BUILTIN = 26 };
@@ -135,6 +137,7 @@ enum {
   B_BOOLEAN_P,
   B_LIST_P,
   B_PROCEDURE_P,
+  B_FOREIGN_P,
   B_SYMBOL_STRING,
   B_STRING_SYMBOL,
   B_KEYWORD,
@@ -481,6 +484,7 @@ enum {
 };
 typedef struct oti_foreign_state oti_foreign_state;
 typedef struct oti_module_state oti_module_state;
+typedef struct oti_native_state oti_native_state;
 
 typedef struct {
   char* text;
@@ -555,6 +559,7 @@ struct ot_state {
   size_t namespace_count, namespace_capacity;
   uint32_t current_namespace, required_namespace;
   oti_module_state* modules;
+  oti_native_state* natives;
   size_t sp, stack_capacity, stack_limit;
   /* Slots usable without growing the stack: the lesser of capacity and limit. */
   size_t stack_room;
@@ -658,6 +663,11 @@ uint32_t oti_resolve_global(ot_state* rt, const char* name, size_t length);
 uint32_t oti_namespace(ot_state* rt, const char* name, size_t length);
 bool oti_require(ot_state* rt, const oti_ast* specs);
 void oti_modules_destroy(ot_state* rt);
+/* Host procedures from ot_define_natives. */
+ot_value oti_native_call(ot_state* rt, ot_value native, size_t first, size_t count);
+bool oti_native_namespace(const ot_state* rt, uint32_t space);
+const char* oti_host_object_name(ot_value v);
+void oti_natives_destroy(ot_state* rt);
 uint32_t oti_binding_global(ot_state* rt, uint32_t space, const char* name, size_t length,
                             bool create);
 uint32_t oti_import_global_in(ot_state* rt, uint32_t space, const char* name, size_t length);

@@ -167,7 +167,7 @@ static bool callable(ot_value v) {
   return (v & 255) == TAG_BUILTIN || oti_kind(v, K_CLOSURE) || oti_kind(v, K_GENERIC) ||
          oti_kind(v, K_NEXT) || oti_kind(v, K_INSTANCE) || oti_kind(v, K_RECORD) ||
          oti_kind(v, K_MACRO) || oti_kind(v, K_PARAM) || oti_kind(v, K_FOREIGN_FUNCTION) ||
-         oti_collection(v);
+         oti_kind(v, K_NATIVE) || oti_collection(v);
 }
 
 /* The caller roots *port, and function is one of its callbacks. Never retain

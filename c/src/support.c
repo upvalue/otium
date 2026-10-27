@@ -106,7 +106,7 @@ static ot_value support_sign_p(ot_state* rt, bool positive, size_t first, size_t
 bool oti_procedure(ot_value v) {
   return oti_kind(v, K_PARAM) || oti_kind(v, K_MACRO) || oti_kind(v, K_NEXT) ||
          oti_kind(v, K_GENERIC) || oti_kind(v, K_CLOSURE) || oti_kind(v, K_FOREIGN_FUNCTION) ||
-         (v & 255) == TAG_BUILTIN;
+         oti_kind(v, K_NATIVE) || (v & 255) == TAG_BUILTIN;
 }
 
 /* One-argument type predicates. */
@@ -125,6 +125,7 @@ static ot_value support_type_p(ot_state* rt, unsigned id, size_t first, size_t c
     case B_BOOLEAN_P: result = v == OT_TRUE || v == OT_FALSE; break;
     case B_LIST_P: result = proper(v); break;
     case B_PROCEDURE_P: result = oti_procedure(v); break;
+    case B_FOREIGN_P: result = oti_kind(v, K_HOST_OBJECT); break;
   }
   return ot_bool(result);
 }
@@ -151,6 +152,10 @@ static ot_value support_list_p(ot_state* rt, size_t first, size_t count) {
 
 static ot_value support_procedure_p(ot_state* rt, size_t first, size_t count) {
   return support_type_p(rt, B_PROCEDURE_P, first, count);
+}
+
+static ot_value support_foreign_p(ot_state* rt, size_t first, size_t count) {
+  return support_type_p(rt, B_FOREIGN_P, first, count);
 }
 
 static ot_value support_int_p(ot_state* rt, size_t first, size_t count) {
@@ -413,6 +418,7 @@ const oti_builtin_def oti_support_builtins[] = {
     {B_BOOLEAN_P, "boolean?", support_boolean_p},
     {B_LIST_P, "list?", support_list_p},
     {B_PROCEDURE_P, "procedure?", support_procedure_p},
+    {B_FOREIGN_P, "foreign?", support_foreign_p},
     {B_INT_P, "int?", support_int_p},
     {B_FLOAT_P, "float?", support_float_p},
     {B_MACRO_P, "macro?", support_macro_p},

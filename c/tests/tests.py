@@ -20,7 +20,13 @@ for name in ('01-reader', '02-types', '03-equality', '04-tables', '05-control',
     case('conformance ' + name, f'c/tests/otium/{name}.ot', runtimes=['c'],
          stdout_file=f'c/tests/otium/expected/{name}.txt')
 
-case('extension', 'c/tests/ext-demo.ot', runtimes=['c'], paths=['c/tests/modules'])
+
+@test('extension')
+def extension(t):
+    """Native procedures and host objects from an embedding host's demo namespace."""
+    host = built('c/otium-extension-demo')
+    t.expect(t.run([host, '-L', 'c/tests/modules', 'c/tests/ext-demo.ot']))
+
 
 @test('multimethods', runtimes=BOTH, timeout=180)
 def multimethods(t):

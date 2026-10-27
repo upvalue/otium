@@ -49,6 +49,14 @@ static bool verror(ot_state* rt, const char* prefix, const char* format, va_list
 
 bool oti_error(ot_state* rt, const char* message) { return oti_errorf(rt, "%s", message); }
 
+ot_value ot_native_error(ot_state* rt, const char* format, ...) {
+  va_list arguments;
+  va_start(arguments, format);
+  verror(rt, NULL, format, arguments);
+  va_end(arguments);
+  return 0;
+}
+
 bool oti_errorf(ot_state* rt, const char* format, ...) {
   va_list arguments;
   va_start(arguments, format);
@@ -436,6 +444,7 @@ void ot_destroy(ot_state* rt) {
   oti_clear_error(rt);
   oti_foreign_destroy(rt);
   oti_modules_destroy(rt);
+  oti_natives_destroy(rt);
   for (size_t i = 0; i < rt->function_count; i++) {
     oti_function* f = rt->functions[i];
     oti_free_function(f);
@@ -1068,6 +1077,7 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
   else if (oti_kind(v, K_POINTER)) fputs("#<foreign-pointer>", out);
   else if (oti_kind(v, K_FOREIGN_LAYOUT)) fputs("#<foreign-layout>", out);
   else if (oti_kind(v, K_FOREIGN_LIBRARY)) fputs("#<foreign-library>", out);
+  else if (oti_kind(v, K_HOST_OBJECT)) fprintf(out, "#<%s>", oti_host_object_name(v));
   else fputs("#<function>", out);
 }
 

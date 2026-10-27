@@ -106,6 +106,45 @@ agree with Chez on 19 programs and 11 errors; compiler-free checks pass. Filesys
 metadata and source/module loading still use POSIX directly; port host support
 does not yet establish filesystem-free embedding.
 
+Building with `OTIUM_FREESTANDING` is the filesystem-free case, used by otos
+(see the [otos guide](otos/guide.md)). It drops libffi, dlopen, pthreads and the
+POSIX calls. FFI builtins raise an `ffi-error` with reason `unavailable`, and the
+filesystem procedures (`file-exists?`, `file-info`, `list-directory` and the
+rest) raise a `file-error` for `ENOSYS`. There is no default I/O host. The
+embedder installs one before loading the expander, and library, module and
+project files are read through its `open`, `read` and `close` as well as ports.
+32-bit targets pad object headers to 16 bytes and count jiffies in milliseconds,
+since nanoseconds pass the 30-bit fixnum range a second after the clock starts.
+
+## Host procedures and objects
+
+`ot_define_natives(rt, "otos.gfx", natives, count)` binds C functions as
+procedures in a namespace. Each `ot_native` has a name, a function, argument
+bounds (`OT_ANY_ARGS` for no upper bound) and userdata. The runtime checks the
+argument count, then calls `function(rt, userdata, args, count)`. `args` point
+at rooted stack slots, so a native rereads them after allocating. It returns a
+value, or 0 after `ot_native_error(rt, format, ...)`, which raises a catchable
+error. Natives can't reenter `ot_eval` or `ot_call`.
+
+A namespace with natives can be required without a source file. If there is one,
+it loads into the same namespace and sees the natives, as
+`c/tests/modules/demo.ot` does. Natives are a `K_NATIVE` object holding an
+index into the runtime's table; they're procedures to `procedure?`, `class-of`
+and printing. Calls to them take the VM's general primitive path, so closure
+and builtin calls are unaffected.
+
+`ot_make_host_object(rt, type, data, size)` copies host bytes into a managed
+`K_HOST_OBJECT` tagged with an `ot_host_type` the host owns. `foreign?` is true
+of these and they print as `#<name>`. `ot_host_object_data(value, type)` returns
+the bytes, or NULL for any other value, so a host checks types by pointer.
+There are no finalizers: a host that stores a pointer frees it on an explicit
+release, as the demo's owned counter does. `ot_make_string`, `ot_make_float`,
+`ot_make_list` and `ot_number_value` cover the rest of what otos.gfx and the
+demo need.
+
+The `extension` test runs `c/tests/ext-demo.ot` under
+`c/tests/unit/hosts/extension-demo.c`, a host that defines the demo namespace.
+
 The remaining embedding scope, integration and performance are tracked in
 [prototype-completion.md](../prototype-completion.md) and the
 [completion audit](prototype-completion-audit.md). Passing this inventory

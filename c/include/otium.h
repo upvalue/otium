@@ -139,6 +139,50 @@ bool ot_flush_ports(ot_state* rt);
 void ot_write(ot_state* rt, FILE* out, ot_value value);
 void ot_print(ot_state* rt, FILE* out, ot_value value);
 
+/* Host procedures. ot_define_natives binds C functions as procedures in a
+ * namespace, creating it if needed; names are copied. A later require of the
+ * namespace still loads its source file when one is found, and otherwise
+ * succeeds with just these bindings. The runtime checks the argument count
+ * against min_args and max_args (OT_ANY_ARGS for no limit) before calling.
+ *
+ * args point at rooted runtime slots: after an allocation, read them again
+ * rather than keeping copies. A native returns a value, or 0 after recording
+ * an error with ot_native_error, which Otium code can catch. Natives must not
+ * call ot_eval, ot_call or the loading functions. */
+#define OT_ANY_ARGS SIZE_MAX
+
+typedef ot_value (*ot_native_fn)(ot_state* rt, void* userdata, const ot_value* args, size_t count);
+
+typedef struct {
+  const char* name;
+  ot_native_fn function;
+  size_t min_args, max_args;
+  void* userdata;
+} ot_native;
+
+bool ot_define_natives(ot_state* rt, const char* space, const ot_native* natives, size_t count);
+/* Record an error for the running native. Always returns 0. */
+ot_value ot_native_error(ot_state* rt, const char* format, ...);
+
+/* Values for natives. Constructors return 0 after recording an error when
+ * memory runs out. ot_make_list roots its items while it allocates. */
+ot_value ot_make_string(ot_state* rt, const char* bytes, size_t length);
+ot_value ot_make_float(ot_state* rt, double number);
+ot_value ot_make_list(ot_state* rt, const ot_value* items, size_t count);
+/* An integer or float as a double; false for anything else. */
+bool ot_number_value(ot_value v, double* out);
+
+/* Host objects carry size bytes of host data, copied in and 8-byte aligned,
+ * tagged with a type the host owns. foreign? is true of them, and they print
+ * as #<name>. The data pointer is valid until the next allocation. */
+typedef struct {
+  const char* name;
+} ot_host_type;
+
+ot_value ot_make_host_object(ot_state* rt, const ot_host_type* type, const void* data, size_t size);
+/* The object's data, or NULL when v is not a host object of this type. */
+void* ot_host_object_data(ot_value v, const ot_host_type* type);
+
 /* Diagnostics. Foreign record counts include cached signatures and retained
  * library handles. allocations/bytes describe explicitly owned native buffers,
  * not process RSS. */

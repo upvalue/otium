@@ -37,8 +37,8 @@ static size_t vm_top(const oti_frame* frame) {
 
 static bool vm_primitive(ot_value value) {
   return (value & 255) == TAG_BUILTIN || oti_kind(value, K_FOREIGN_FUNCTION) ||
-         oti_kind(value, K_PARAM) || oti_kind(value, K_INSTANCE) || oti_kind(value, K_RECORD) ||
-         oti_collection(value);
+         oti_kind(value, K_NATIVE) || oti_kind(value, K_PARAM) || oti_kind(value, K_INSTANCE) ||
+         oti_kind(value, K_RECORD) || oti_collection(value);
 }
 
 static ot_value vm_call_primitive(ot_state* rt, size_t call, size_t argc) {
@@ -48,6 +48,7 @@ static ot_value vm_call_primitive(ot_state* rt, size_t call, size_t argc) {
   if (oti_kind(value, K_PARAM)) return oti_param_call(rt, value, argc);
   if (oti_collection(value)) return oti_collection_call(rt, call, call + 1, argc);
   if (oti_kind(value, K_FOREIGN_FUNCTION)) return oti_foreign_call(rt, call, call + 1, argc);
+  if (oti_kind(value, K_NATIVE)) return oti_native_call(rt, value, call + 1, argc);
   return oti_builtin(rt, (unsigned)(value >> 8), call + 1, argc);
 }
 

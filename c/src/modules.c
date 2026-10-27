@@ -200,6 +200,10 @@ static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_f
     }
     free(path);
   }
+  if (!source && oti_native_namespace(rt, space)) {
+    m->items[index].state = 2;
+    return true;
+  }
   if (!source) return oti_coded_error(rt, "E0202", "module file not found");
   uint32_t caller = rt->current_namespace, expected = rt->required_namespace;
   rt->current_namespace = rt->required_namespace = space;

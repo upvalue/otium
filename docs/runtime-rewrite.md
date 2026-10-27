@@ -22,9 +22,11 @@ but not to run the built runtime.
 
 `compiler.c` compiles bytecode and `vm.c` executes it. `modules.c` owns module
 loading; macro expansion and higher-level library behavior use shared Otium.
-`runtime.h` is the embedding API. `internal.h` holds runtime implementation
-interfaces. `builtins.def` supplies public builtin IDs and names in one ordered
-list; dispatch ranges depend on that order.
+`include/otium.h` is the embedding API, built around `ot_state`. `internal.h`
+holds runtime implementation interfaces, including a struct for each object
+kind that mirrors its heap layout (`oti_pair_obj`, `oti_class_obj`, ...). The
+builtin ID enum is in `internal.h` and the name table is in `builtins.c`. Each
+module's handler switches on explicit IDs, so the enum's order doesn't matter.
 
 `foreign.c` owns loading, managed wrappers, native memory, call conversion and
 condition context. `foreign_types.c` owns scalar descriptions, recursive libffi
@@ -129,9 +131,7 @@ for GC lint. All 268 public builtin ID/name pairs retain their original order.
 Further factoring remains possible in `foreign.c`: `shared_builtin` and
 `foreign_builtin` still combine native-memory validation with operation dispatch,
 and `layout_copy` and condition-context helpers remain in that module. Their
-rooting and error-order contracts warrant separate changes. `rt_builtin` in
-`builtins.c` still uses ordered subsystem ranges; additions to `builtins.def`
-must preserve those boundaries or update dispatch with them.
+rooting and error-order contracts warrant separate changes.
 
 ## Reading the milestones
 
@@ -371,7 +371,11 @@ loop and marshalling, while native/adapter compilation occurs before sampling.
 
 ## Checks
 
-Run `make -C prototype test` and `make -C prototype sanitize`. In sandboxes where
+Run `make -C prototype test` and `make -C prototype sanitize`. Each file in
+`prototype/tests` is a suite, and all of them link into one runner program.
+`make test-NAME` runs one suite, and the runner takes `suite/` or
+`suite/test` patterns. Sanitizer builds also check the kind behind every
+object struct cast. In sandboxes where
 LeakSanitizer cannot inspect `/proc`, use `ASAN_OPTIONS=detect_leaks=0` for the
 second command; this retains address and undefined-behavior checks but does not
 validate leaks. The first implementation also passes a Clang warnings-as-errors

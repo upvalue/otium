@@ -312,6 +312,10 @@ enum {
   B_SCRIPT_NAME,
   B_PROCESS_GETENV,
   B_PROCESS_SETENV,
+  B_MEMORY_ALLOCATED,
+  B_MEMORY_COLLECTIONS,
+  B_MEMORY_REPORT,
+  B_MEMORY_HEAP,
   B_READER_TOKENS,
   B_DEV_OPEN,
   B_DEV_CLOSE,
@@ -1058,8 +1062,6 @@ static inline bool oti_pair_offset(ot_value v, size_t* offset) {
   memcpy(offset, object_bytes(v), sizeof(*offset));
   return true;
 }
-
-static inline oti_box_obj* oti_as_box(ot_value v) { return OTI_CAST(oti_box_obj, K_BOX, v); }
 
 static inline oti_macro_obj* oti_as_macro(ot_value v) {
   return OTI_CAST(oti_macro_obj, K_MACRO, v);

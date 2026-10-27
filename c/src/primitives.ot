@@ -169,3 +169,13 @@
 
 (ns otium.process)
 (def (write-error text) (display-to (current-error-port) text))
+
+;; UI frames call otium.dev without --dev too, so the state they read is here
+;; rather than in c/src/dev.ot, which only the development server loads.
+(ns otium.dev)
+(defonce %active #f)
+;; When the running request or frame should pause, in %clock milliseconds; 0
+;; means never.
+(defonce %deadline-at 0)
+(def (%enabled?) %active)
+(def (%deadline value) (if (= value -1) %deadline-at (set! %deadline-at value)))

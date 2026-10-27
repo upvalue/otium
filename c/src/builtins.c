@@ -30,10 +30,11 @@ bool oti_builtins(ot_state* rt) {
   uint32_t process = oti_namespace(rt, "otium.process", 13);
   uint32_t reader = oti_namespace(rt, "otium.reader", 12);
   uint32_t dev = oti_namespace(rt, "otium.dev", 9);
+  uint32_t memory = oti_namespace(rt, "otium.memory", 12);
   /* otium.generic has no bindings of its own: its names resolve to core's. */
   uint32_t generic = oti_namespace(rt, "otium.generic", 13);
   if (ffi == UINT32_MAX || process == UINT32_MAX || reader == UINT32_MAX || generic == UINT32_MAX ||
-      dev == UINT32_MAX)
+      dev == UINT32_MAX || memory == UINT32_MAX)
     return false;
   memset(rt->builtin_run, 0, sizeof(rt->builtin_run));
   for (size_t m = 0; m < BUILTIN_MODULES; m++) {
@@ -46,15 +47,18 @@ bool oti_builtins(ot_state* rt) {
       bool process_binding = !strncmp(full, "otium.process/", 14);
       bool reader_binding = !strncmp(full, "otium.reader/", 13);
       bool dev_binding = !strncmp(full, "otium.dev/", 10);
+      bool memory_binding = !strncmp(full, "otium.memory/", 13);
       const char* name = full + (foreign           ? 4
                                  : process_binding ? 14
                                  : reader_binding  ? 13
                                  : dev_binding     ? 10
+                                 : memory_binding  ? 13
                                                    : 0);
       rt->current_namespace = foreign           ? ffi
                               : process_binding ? process
                               : reader_binding  ? reader
                               : dev_binding     ? dev
+                              : memory_binding  ? memory
                                                 : 0;
       uint32_t global = oti_global(rt, name, strlen(name));
       if (global == UINT32_MAX) return false;

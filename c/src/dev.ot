@@ -5,12 +5,6 @@
 ;; --c.server. The C primitives are in c/src/dev.c.
 (ns otium.dev)
 
-(defonce %active #f)
-
-;; When the running request or frame should pause, in %clock milliseconds; 0
-;; means never.
-(defonce %deadline-at 0)
-
 ;; True while the break loop runs, so the interrupt handler leaves it alone.
 (defonce %busy #f)
 
@@ -19,19 +13,11 @@
 
 (defonce %output-port nil)
 
-(def (%enabled?)
-  %active)
-
 (def (%runtime)
   :c)
 
 (def (%repr value)
   (with-output-to-string (fn () (write value))))
-
-(def (%deadline value)
-  (if (= value -1)
-      %deadline-at
-      (set! %deadline-at value)))
 
 (def (%namespaces)
   (map (fn (name) {:name name}) (%namespace-names)))

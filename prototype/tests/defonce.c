@@ -2,7 +2,7 @@
 #include "internal.h"
 
 TEST(defonce_evaluates_once) {
-  ot_runtime* rt = new_runtime(16384, 4096);
+  ot_state* rt = new_runtime(16384, 4096);
   ot_gc_stress(rt, true);
   CHECK(eval(rt, "(def hits 0) (defonce state \"saved state\" "
                  "(begin (set! hits (+ hits 1)) [41]))") == OT_NIL);
@@ -17,7 +17,7 @@ TEST(defonce_evaluates_once) {
 }
 
 TEST(defonce_keeps_state_across_reload) {
-  ot_runtime* rt = new_runtime(16384, 4096);
+  ot_state* rt = new_runtime(16384, 4096);
   ot_gc_stress(rt, true);
   eval(rt, "(defonce state [0]) (def alias state) (def (tick) (put! state 0 (+ (state 0) 1)) "
            "(state 0)) (def old tick)");

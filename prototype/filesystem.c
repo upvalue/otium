@@ -14,7 +14,7 @@ static int compare_names(const void* a, const void* b) {
   return strcmp(*(const char* const*)a, *(const char* const*)b);
 }
 
-static ot_value directory(ot_runtime* rt, ot_value path) {
+static ot_value directory(ot_state* rt, ot_value path) {
   DIR* dir = opendir((char*)oti_bytes_data(path));
   if (!dir) return oti_file_error(rt, "list-directory", path, errno);
   char** names = NULL;
@@ -86,7 +86,7 @@ static ot_value directory(ot_runtime* rt, ot_value path) {
   return result;
 }
 
-static ot_value metadata(ot_runtime* rt, const struct stat* st) {
+static ot_value metadata(ot_state* rt, const struct stat* st) {
   if (st->st_size < 0 || (uintmax_t)st->st_size > (uintmax_t)(INTPTR_MAX / 2))
     return oti_fail(rt, "file size exceeds integer range");
   ot_value live[] = {OT_NIL, OT_NIL};
@@ -111,7 +111,7 @@ static ot_value metadata(ot_runtime* rt, const struct stat* st) {
   return result;
 }
 
-ot_value oti_filesystem_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_filesystem_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   if (id == B_CURRENT_DIRECTORY) {
     if (count) return oti_fail(rt, "current-directory takes no arguments");
     size_t size = 256;

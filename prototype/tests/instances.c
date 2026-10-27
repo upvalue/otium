@@ -6,7 +6,7 @@
  * instances (such as Widget and b) that the migration checks below use. Each
  * check also builds on the ones before it. */
 TEST(class_construction_and_migration) {
-  ot_runtime* rt = new_core_runtime();
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   size_t length;
   char* source = read_file("../tests/classes/checks.ot", &length);

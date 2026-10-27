@@ -2,7 +2,7 @@
 #include <string.h>
 
 TEST(strings_and_buffers) {
-  ot_runtime* rt = new_core_runtime();
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   const char* checks[] = {
       "(equal? (substring \"aé🙂z\" 1 3) \"é🙂\")",

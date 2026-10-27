@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-bool ot_set_arguments(ot_runtime* rt, const char* script, size_t count,
+bool ot_set_arguments(ot_state* rt, const char* script, size_t count,
                       const char* const* arguments) {
   if (!oti_host_entry(rt)) return false;
   if (count && !arguments) return oti_error(rt, "missing argument array");
@@ -48,7 +48,7 @@ static bool environment_string(ot_value value, bool name) {
   return !memchr(bytes, 0, length) && (!name || (length && !memchr(bytes, '=', length)));
 }
 
-ot_value oti_process_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_process_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   if (id == B_PROCESS_GETENV || id == B_PROCESS_SETENV) {
     if (count != (id == B_PROCESS_GETENV ? 1u : 2u) ||
         !environment_string(rt->stack[first], true)) {

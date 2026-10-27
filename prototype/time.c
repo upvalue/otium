@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <time.h>
 
-ot_value oti_time_builtin(ot_runtime* rt, unsigned id, size_t count) {
+ot_value oti_time_builtin(ot_state* rt, unsigned id, size_t count) {
   if (count) {
     oti_error(rt, "time procedures take no arguments");
     return 0;

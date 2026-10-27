@@ -4,7 +4,7 @@
 #include <string.h>
 
 TEST(templates_build_and_share_structure) {
-  ot_runtime* rt = new_runtime(32768, 4096);
+  ot_state* rt = new_runtime(32768, 4096);
   ot_gc_stress(rt, true);
   const char* checks[] = {
       "(equal? `(a ,(+ 1 2) ,@'(4 5) . tail) '(a 3 4 5 . tail))",
@@ -53,7 +53,7 @@ TEST(templates_build_and_share_structure) {
 }
 
 TEST(long_flat_template) {
-  ot_runtime* rt = new_runtime(1024 * 1024, 32768);
+  ot_state* rt = new_runtime(1024 * 1024, 32768);
   const size_t length = 8000;
   char* source = malloc(length * 3 + 64);
   CHECK(source);
@@ -72,7 +72,7 @@ TEST(long_flat_template) {
 }
 
 TEST(allocation_failure_recovers) {
-  ot_runtime* rt = new_runtime(2048, 4096);
+  ot_state* rt = new_runtime(2048, 4096);
   char source[512];
   strcpy(source, "`(");
   for (size_t i = 0; i < 200; i++) strcat(source, "1 ");

@@ -1,8 +1,8 @@
 #include "helpers.h"
 #include <string.h>
 
-static ot_runtime* process_runtime(void) {
-  ot_runtime* rt = new_core_runtime();
+static ot_state* process_runtime(void) {
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   check_true(rt,
              "(require otium.process :as p) (and (null? (p/arguments)) (nil? (p/script-name)))");
@@ -10,7 +10,7 @@ static ot_runtime* process_runtime(void) {
 }
 
 TEST(error_output_and_environment) {
-  ot_runtime* rt = process_runtime();
+  ot_state* rt = process_runtime();
   check_true(rt, "(let ((out (open-output-string))) (with-params ((current-error-port out)) "
                  "(p/write-error \"problem λ\")) (equal? (get-output-string out) \"problem λ\"))");
   check_true(rt,
@@ -23,7 +23,7 @@ TEST(error_output_and_environment) {
 
 /* The runtime copies host arguments and keeps them through failed updates. */
 TEST(arguments_are_copied_and_kept) {
-  ot_runtime* rt = process_runtime();
+  ot_state* rt = process_runtime();
   char script[] = "script.ot", argument[] = "copied";
   const char* args[] = {argument, "", "λ", "--heap=1"};
   CHECK(ot_set_arguments(rt, script, 4, args));

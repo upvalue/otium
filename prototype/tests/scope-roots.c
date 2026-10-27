@@ -7,7 +7,7 @@ TEST(scopes_survive_collection_under_stress) {
   char source[8192] = "(def (churn) ";
   for (size_t i = 0; i < 32; i++) strcat(source, scope);
   strcat(source, "42) (churn)");
-  ot_runtime* rt = new_runtime(16384, 8192);
+  ot_state* rt = new_runtime(16384, 8192);
   check_int(rt, source, 42);
   ot_gc_stress(rt, true);
   check_int(rt, "(churn)", 42);
@@ -32,7 +32,7 @@ TEST(scopes_survive_collection_under_stress) {
 /* A call takes stack slots above the height without writing them. Slots left
  * by earlier frames must not hold pointers from before a collection. */
 TEST(fresh_frames_after_collections) {
-  ot_runtime* rt = new_runtime(1024 * 1024, 65536);
+  ot_state* rt = new_runtime(1024 * 1024, 65536);
   check_int(
       rt,
       "(def (deep n acc) (if (= n 0) acc (cons n (deep (- n 1) (cons acc '()))))) "

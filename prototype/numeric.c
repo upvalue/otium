@@ -6,13 +6,13 @@
 
 static ot_value wrapped(uintptr_t bits) { return (bits << 1) | 1; }
 
-static ot_value integral(ot_runtime* rt, double n) {
+static ot_value integral(ot_state* rt, double n) {
   if (!isfinite(n) || n < (double)(INTPTR_MIN / 2) || n >= -(double)(INTPTR_MIN / 2))
     return oti_fail(rt, "integer conversion out of range");
   return ot_int((intptr_t)n);
 }
 
-static ot_value bitwise(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value bitwise(ot_state* rt, unsigned id, size_t first, size_t count) {
   if ((id == B_BIT_NOT && count != 1) || (id == B_BIT_SHIFT && count != 2))
     return oti_fail(rt, "wrong number of arguments");
   uintptr_t bits = id == B_BIT_AND ? UINTPTR_MAX : 0;
@@ -45,7 +45,7 @@ static ot_value bitwise(ot_runtime* rt, unsigned id, size_t first, size_t count)
   return wrapped(bits);
 }
 
-ot_value oti_numeric_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_numeric_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   if (id >= B_BIT_AND) return bitwise(rt, id, first, count);
   if (id == B_MIN || id == B_MAX) {
     if (!count) return oti_fail(rt, "extremum needs an argument");

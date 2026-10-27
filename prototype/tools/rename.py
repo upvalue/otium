@@ -13,7 +13,7 @@ import re
 import sys
 
 PUBLIC = {
-    'Runtime': 'ot_runtime',
+    'Runtime': 'ot_state',
     'Value': 'ot_value',
     'RuntimeIOHost': 'ot_io_host',
     'RuntimeForeignStats': 'ot_foreign_stats',

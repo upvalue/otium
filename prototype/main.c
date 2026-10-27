@@ -26,8 +26,7 @@ static bool size_option(const char* text, size_t* out) {
   return true;
 }
 
-static bool evaluate(ot_runtime* rt, const char* source, size_t length, const char* path,
-                     bool echo) {
+static bool evaluate(ot_state* rt, const char* source, size_t length, const char* path, bool echo) {
   ot_value result;
   if (!ot_eval(rt, source, length, &result)) {
     int status;
@@ -88,7 +87,7 @@ static char* read_source(const char* path, size_t* size) {
   return buffer;
 }
 
-static bool load(ot_runtime* rt, const char* path) {
+static bool load(ot_state* rt, const char* path) {
   size_t length;
   char* buffer = read_source(path, &length);
   if (!buffer) return false;
@@ -97,7 +96,7 @@ static bool load(ot_runtime* rt, const char* path) {
   return ok;
 }
 
-static bool discover_project(ot_runtime* rt) {
+static bool discover_project(ot_state* rt) {
   char* directory = getcwd(NULL, 0);
   if (!directory) {
     perror("cannot find current directory");
@@ -127,7 +126,7 @@ static bool discover_project(ot_runtime* rt) {
   return ok;
 }
 
-static bool environment_paths(ot_runtime* rt) {
+static bool environment_paths(ot_state* rt) {
   const char* value = getenv("OTIUM_PATH");
   if (!value) return true;
   char* paths = strdup(value);
@@ -150,7 +149,7 @@ static bool environment_paths(ot_runtime* rt) {
 /* The REPL and program reads must share the standard port's managed buffer.
  * Returns the line length including a newline, -1 at EOF or -2 after
  * reporting an error. */
-static ssize_t input_line(ot_runtime* rt, char** line, size_t* capacity) {
+static ssize_t input_line(ot_state* rt, char** line, size_t* capacity) {
   ot_value port, value;
   if (!ot_call(rt, "otium.core/%standard-input", NULL, 0, &port) ||
       !ot_call(rt, "otium.core/read-line", &port, 1, &value)) {
@@ -182,7 +181,7 @@ static ssize_t input_line(ot_runtime* rt, char** line, size_t* capacity) {
   return (ssize_t)(length + 1);
 }
 
-static bool repl(ot_runtime* rt) {
+static bool repl(ot_state* rt) {
   bool terminal = isatty(STDIN_FILENO), ok = true;
   char *line = NULL, *pending = NULL;
   size_t line_capacity = 0, length = 0;
@@ -314,7 +313,7 @@ int main(int argc, char** argv) {
   if (!source && !path && !preloaded) interactive = true;
   if (heap_explicit && !max_explicit) heap_max = heap;
   if (heap_max < heap || heap_max > SIZE_MAX / 2) goto usage;
-  ot_runtime* rt = ot_create(heap, stack);
+  ot_state* rt = ot_create(heap, stack);
   if (!rt) {
     fputs("cannot initialize runtime\n", stderr);
     return 1;

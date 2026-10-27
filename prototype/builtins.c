@@ -3,7 +3,7 @@
 #include <string.h>
 
 /* Every builtin gets the id, the first argument's stack slot and the count. */
-typedef ot_value builtin_handler(ot_runtime* rt, unsigned id, size_t first, size_t count);
+typedef ot_value builtin_handler(ot_state* rt, unsigned id, size_t first, size_t count);
 
 typedef struct {
   const char* name;
@@ -18,7 +18,7 @@ int oti_builtin_index(const char* name) {
   return -1;
 }
 
-bool oti_builtins(ot_runtime* rt) {
+bool oti_builtins(ot_state* rt) {
   uint32_t ffi = oti_namespace(rt, "ffi", 3);
   uint32_t process = oti_namespace(rt, "otium.process", 13);
   uint32_t reader = oti_namespace(rt, "otium.reader", 12);
@@ -39,7 +39,7 @@ bool oti_builtins(ot_runtime* rt) {
   return true;
 }
 
-bool oti_number(ot_runtime* rt, ot_value v, double* out) {
+bool oti_number(ot_state* rt, ot_value v, double* out) {
   if (ot_is_int(v)) {
     *out = (double)ot_to_int(v);
     return true;
@@ -51,7 +51,7 @@ bool oti_number(ot_runtime* rt, ot_value v, double* out) {
   return oti_error(rt, "expected a number");
 }
 
-static ot_value arithmetic(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value arithmetic(ot_state* rt, unsigned id, size_t first, size_t count) {
   if (!count && (id == B_SUB || id == B_DIV)) {
     oti_error(rt, "arithmetic needs an argument");
     return 0;
@@ -134,7 +134,7 @@ int oti_integer_real(intptr_t integer, double real) {
   return (double)truncated < real ? -1 : (double)truncated > real ? 1 : 0;
 }
 
-static ot_value compare(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value compare(ot_state* rt, unsigned id, size_t first, size_t count) {
   if (count < 2) {
     oti_error(rt, "comparison needs at least two arguments");
     return 0;
@@ -174,7 +174,7 @@ static ot_value compare(ot_runtime* rt, unsigned id, size_t first, size_t count)
 }
 
 /* Quasiquote copies only the splice prefix; its final tail can be any value. */
-static ot_value quasi_append(ot_runtime* rt, size_t first, size_t count) {
+static ot_value quasi_append(ot_state* rt, size_t first, size_t count) {
   if (count != 2) {
     oti_error(rt, "invalid quasiquote splice arity");
     return 0;
@@ -215,7 +215,7 @@ static ot_value quasi_append(ot_runtime* rt, size_t first, size_t count) {
   return result;
 }
 
-static ot_value eval_in_namespace(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value eval_in_namespace(ot_state* rt, unsigned id, size_t first, size_t count) {
   (void)id;
   if (count != 2) {
     oti_error(rt, "invalid evaluator call");
@@ -228,7 +228,7 @@ static ot_value eval_in_namespace(ot_runtime* rt, unsigned id, size_t first, siz
   return result;
 }
 
-static ot_value exit_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value exit_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   (void)id;
   if (count > 1 || (count && (!ot_is_int(rt->stack[first]) || ot_to_int(rt->stack[first]) < 0 ||
                               ot_to_int(rt->stack[first]) > 255))) {
@@ -241,7 +241,7 @@ static ot_value exit_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
   return 0;
 }
 
-static ot_value list_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value list_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   (void)id;
   ot_value result = OT_EMPTY;
   oti_roots root;
@@ -260,33 +260,33 @@ static ot_value list_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
   return result;
 }
 
-static ot_value error_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value error_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   (void)id;
   return oti_raise(rt, first, count);
 }
 
-static ot_value signal_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value signal_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   (void)id;
   return oti_signal(rt, first, count);
 }
 
-static ot_value tokens(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value tokens(ot_state* rt, unsigned id, size_t first, size_t count) {
   (void)id;
   return oti_tokens(rt, first, count);
 }
 
-static ot_value time_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value time_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   (void)first;
   return oti_time_builtin(rt, id, count);
 }
 
-static ot_value qq_append_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value qq_append_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   (void)id;
   return quasi_append(rt, first, count);
 }
 
 /* Fixed-arity list, equality and predicate primitives. */
-static ot_value core_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value core_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   size_t arity = id == B_REMAINDER || id == B_MODULO || id == B_EQ || id == B_CONS ||
                          id == B_SET_CAR || id == B_SET_CDR
                      ? 2
@@ -633,7 +633,7 @@ static const oti_builtin_entry builtin_table[B_COUNT] = {
     [B_EVAL_IN_NAMESPACE] = {NULL, eval_in_namespace},
 };
 
-ot_value oti_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   if (id >= B_COUNT || !builtin_table[id].run) {
     oti_error(rt, "unknown builtin");
     return 0;

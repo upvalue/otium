@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static bool validate(ot_runtime* rt, const char* text, size_t length) {
+static bool validate(ot_state* rt, const char* text, size_t length) {
   size_t position = 0;
   for (;;) {
     if (!ot_poll_interrupt(rt)) return false;
@@ -21,7 +21,7 @@ static bool validate(ot_runtime* rt, const char* text, size_t length) {
   }
 }
 
-static bool advance(ot_runtime* rt, const char* text, size_t end, size_t* position, size_t* line,
+static bool advance(ot_state* rt, const char* text, size_t end, size_t* position, size_t* line,
                     size_t* column, bool* cr) {
   while (*position < end) {
     unsigned char c = (unsigned char)text[*position];
@@ -44,7 +44,7 @@ static bool advance(ot_runtime* rt, const char* text, size_t end, size_t* positi
   return true;
 }
 
-ot_value oti_tokens(ot_runtime* rt, size_t first, size_t count) {
+ot_value oti_tokens(ot_state* rt, size_t first, size_t count) {
   if (count != 1 || !oti_kind(rt->stack[first], K_STRING)) {
     oti_error(rt, "tokens needs one source string");
     return 0;

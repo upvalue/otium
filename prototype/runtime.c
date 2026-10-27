@@ -6,13 +6,13 @@
 #define OTIUM_BOOTSTRAP_FILE "prototype/primitives.ot"
 #endif
 
-bool oti_host_entry(ot_runtime* rt) {
+bool oti_host_entry(ot_state* rt) {
   if (!rt->host_io_active) return true;
   rt->host_io_reentry = true;
   return oti_error(rt, "host I/O callback cannot reenter Otium");
 }
 
-bool oti_error(ot_runtime* rt, const char* message) {
+bool oti_error(ot_state* rt, const char* message) {
   if (!rt->error[0]) {
     snprintf(rt->error, sizeof(rt->error), "%s", message);
     rt->error_code = NULL;
@@ -21,12 +21,12 @@ bool oti_error(ot_runtime* rt, const char* message) {
   return false;
 }
 
-ot_value oti_fail(ot_runtime* rt, const char* message) {
+ot_value oti_fail(ot_state* rt, const char* message) {
   oti_error(rt, message);
   return 0;
 }
 
-ot_value oti_cons(ot_runtime* rt, ot_value car, ot_value cdr) {
+ot_value oti_cons(ot_state* rt, ot_value car, ot_value cdr) {
   ot_value live[] = {car, cdr};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, live, 2);
@@ -39,14 +39,14 @@ ot_value oti_cons(ot_runtime* rt, ot_value car, ot_value cdr) {
   return result;
 }
 
-bool oti_coded_error(ot_runtime* rt, const char* code, const char* message) {
+bool oti_coded_error(ot_state* rt, const char* code, const char* message) {
   bool fresh = !rt->error[0];
   oti_error(rt, message);
   if (fresh) rt->error_code = code;
   return false;
 }
 
-bool oti_grow(ot_runtime* rt, void** data, size_t* capacity, size_t needed, size_t width) {
+bool oti_grow(ot_state* rt, void** data, size_t* capacity, size_t needed, size_t width) {
   if (needed <= *capacity) return true;
   size_t next = *capacity ? *capacity : 16;
   while (next < needed) {
@@ -61,7 +61,7 @@ bool oti_grow(ot_runtime* rt, void** data, size_t* capacity, size_t needed, size
   return true;
 }
 
-bool oti_stack(ot_runtime* rt, size_t needed) {
+bool oti_stack(ot_state* rt, size_t needed) {
   if (needed > rt->stack_limit) return oti_error(rt, "VM stack limit exceeded");
   if (!oti_grow(rt, (void**)&rt->stack, &rt->stack_capacity, needed, sizeof(ot_value)))
     return false;
@@ -70,13 +70,11 @@ bool oti_stack(ot_runtime* rt, size_t needed) {
   return true;
 }
 
-void ot_set_interrupt_flag(ot_runtime* rt, volatile sig_atomic_t* flag) {
-  rt->interrupt_flag = flag;
-}
+void ot_set_interrupt_flag(ot_state* rt, volatile sig_atomic_t* flag) { rt->interrupt_flag = flag; }
 
-bool ot_interrupted(const ot_runtime* rt) { return rt->interrupted; }
+bool ot_interrupted(const ot_state* rt) { return rt->interrupted; }
 
-bool ot_poll_interrupt(ot_runtime* rt) {
+bool ot_poll_interrupt(ot_state* rt) {
   if (!rt->interrupt_flag || !*rt->interrupt_flag) return true;
   *rt->interrupt_flag = 0;
   rt->interrupted = true;
@@ -88,7 +86,7 @@ bool ot_poll_interrupt(ot_runtime* rt) {
   return false;
 }
 
-ot_value oti_alloc(ot_runtime* rt, uint32_t kind, uint32_t fields, size_t bytes) {
+ot_value oti_alloc(ot_state* rt, uint32_t kind, uint32_t fields, size_t bytes) {
   if (!oti_host_entry(rt)) return 0;
   if (rt->interrupt_flag && *rt->interrupt_flag && !ot_poll_interrupt(rt)) return 0;
   size_t collections = rt->heap.collections;
@@ -102,7 +100,7 @@ ot_value oti_alloc(ot_runtime* rt, uint32_t kind, uint32_t fields, size_t bytes)
   return v;
 }
 
-uint32_t oti_constant(ot_runtime* rt, ot_value value) {
+uint32_t oti_constant(ot_state* rt, ot_value value) {
   for (size_t i = 0; i < rt->constant_count; i++)
     if (rt->constant_state[i] && rt->constants[i] == value) return (uint32_t)i;
   size_t index = rt->constant_free;
@@ -121,7 +119,7 @@ uint32_t oti_constant(ot_runtime* rt, ot_value value) {
   return (uint32_t)index;
 }
 
-uint32_t oti_namespace(ot_runtime* rt, const char* name, size_t length) {
+uint32_t oti_namespace(ot_state* rt, const char* name, size_t length) {
   if (length == 3 && !memcmp(name, "ffi", 3)) {
     name = "otium.ffi";
     length = 9;
@@ -145,7 +143,7 @@ uint32_t oti_namespace(ot_runtime* rt, const char* name, size_t length) {
   return id;
 }
 
-static uint32_t find_global(ot_runtime* rt, uint32_t space, const char* name, size_t length) {
+static uint32_t find_global(ot_state* rt, uint32_t space, const char* name, size_t length) {
   for (size_t i = 0; i < rt->global_count; i++)
     if (rt->global_info[i].space == space && strlen(rt->global_info[i].name) == length &&
         !memcmp(rt->global_info[i].name, name, length))
@@ -153,7 +151,7 @@ static uint32_t find_global(ot_runtime* rt, uint32_t space, const char* name, si
   return UINT32_MAX;
 }
 
-static uint32_t namespace_global(ot_runtime* rt, uint32_t space, const char* name, size_t length) {
+static uint32_t namespace_global(ot_state* rt, uint32_t space, const char* name, size_t length) {
   uint32_t existing = find_global(rt, space, name, length);
   if (existing != UINT32_MAX) return existing;
   if (rt->global_count >= UINT32_MAX || !oti_grow(rt, (void**)&rt->globals, &rt->global_capacity,
@@ -179,7 +177,7 @@ static uint32_t namespace_global(ot_runtime* rt, uint32_t space, const char* nam
   return index;
 }
 
-uint32_t oti_global(ot_runtime* rt, const char* name, size_t length) {
+uint32_t oti_global(ot_state* rt, const char* name, size_t length) {
   if (oti_import_global(rt, name, length) != UINT32_MAX) {
     oti_error(rt, "definition conflicts with a referred import");
     return UINT32_MAX;
@@ -187,7 +185,7 @@ uint32_t oti_global(ot_runtime* rt, const char* name, size_t length) {
   return namespace_global(rt, rt->current_namespace, name, length);
 }
 
-uint32_t oti_binding_global(ot_runtime* rt, uint32_t space, const char* name, size_t length,
+uint32_t oti_binding_global(ot_state* rt, uint32_t space, const char* name, size_t length,
                             bool create) {
   uint32_t index = find_global(rt, space, name, length);
   if (index != UINT32_MAX) return index;
@@ -198,7 +196,7 @@ uint32_t oti_binding_global(ot_runtime* rt, uint32_t space, const char* name, si
   return create ? namespace_global(rt, space, name, length) : UINT32_MAX;
 }
 
-static uint32_t resolve_global(ot_runtime* rt, const char* name, size_t length, bool create) {
+static uint32_t resolve_global(ot_state* rt, const char* name, size_t length, bool create) {
   uint32_t local = find_global(rt, rt->current_namespace, name, length);
   if (local != UINT32_MAX) return local;
   uint32_t imported = oti_import_global(rt, name, length);
@@ -225,15 +223,15 @@ static uint32_t resolve_global(ot_runtime* rt, const char* name, size_t length, 
   return create ? oti_global(rt, name, length) : UINT32_MAX;
 }
 
-uint32_t oti_lookup_global(ot_runtime* rt, const char* name, size_t length) {
+uint32_t oti_lookup_global(ot_state* rt, const char* name, size_t length) {
   return resolve_global(rt, name, length, false);
 }
 
-uint32_t oti_resolve_global(ot_runtime* rt, const char* name, size_t length) {
+uint32_t oti_resolve_global(ot_state* rt, const char* name, size_t length) {
   return resolve_global(rt, name, length, true);
 }
 
-ot_value oti_text(ot_runtime* rt, uint32_t kind, const char* text, size_t length) {
+ot_value oti_text(ot_state* rt, uint32_t kind, const char* text, size_t length) {
   if (length > SIZE_MAX - sizeof(size_t) - 1 - sizeof(uint64_t)) {
     oti_error(rt, "text too large");
     return 0;
@@ -248,14 +246,14 @@ ot_value oti_text(ot_runtime* rt, uint32_t kind, const char* text, size_t length
   return v;
 }
 
-ot_value oti_float(ot_runtime* rt, double number) {
+ot_value oti_float(ot_state* rt, double number) {
   ot_value v = oti_alloc(rt, K_FLOAT, 0, sizeof(double));
   if (v) memcpy(object_bytes(v), &number, sizeof(number));
   return v;
 }
 
-ot_runtime* ot_create(size_t bytes, size_t stack_limit) {
-  ot_runtime* rt = calloc(1, sizeof(*rt));
+ot_state* ot_create(size_t bytes, size_t stack_limit) {
+  ot_state* rt = calloc(1, sizeof(*rt));
   if (!rt) return NULL;
   if (!oti_heap_init(&rt->heap, bytes)) {
     free(rt);
@@ -296,13 +294,13 @@ ot_runtime* ot_create(size_t bytes, size_t stack_limit) {
   return rt;
 }
 
-bool ot_set_heap_limit(ot_runtime* rt, size_t bytes) {
+bool ot_set_heap_limit(ot_state* rt, size_t bytes) {
   if (!oti_host_entry(rt)) return false;
   return oti_heap_set_limit(&rt->heap, bytes) ||
          oti_error(rt, "heap limit is below capacity or exceeds addressable size");
 }
 
-void ot_destroy(ot_runtime* rt) {
+void ot_destroy(ot_state* rt) {
   if (!rt || !oti_host_entry(rt)) return;
   oti_ports_destroy(rt);
   oti_foreign_destroy(rt);
@@ -337,9 +335,9 @@ void ot_destroy(ot_runtime* rt) {
   free(rt);
 }
 
-static bool evaluate_top(ot_runtime* rt, const oti_ast* form, ot_value* result);
+static bool evaluate_top(ot_state* rt, const oti_ast* form, ot_value* result);
 
-static bool document(ot_runtime* rt, uint32_t index, const oti_ast* doc) {
+static bool document(ot_state* rt, uint32_t index, const oti_ast* doc) {
   char* text = NULL;
   size_t length = doc ? doc->as.text.size : 0;
   if (doc) {
@@ -355,7 +353,7 @@ static bool document(ot_runtime* rt, uint32_t index, const oti_ast* doc) {
 
 /* Top-level begin forms are evaluated in order, so declarations from earlier
  * forms are visible before later forms are compiled. */
-static bool evaluate_raw(ot_runtime* rt, const oti_ast* form, ot_value* result) {
+static bool evaluate_raw(ot_state* rt, const oti_ast* form, ot_value* result) {
   if (form->kind == AST_LIST && !form->as.list.tail &&
       oti_ast_symbol(form->as.list.first, "begin") && form->as.list.first->next) {
     size_t base = rt->sp;
@@ -474,7 +472,7 @@ static bool evaluate_raw(ot_runtime* rt, const oti_ast* form, ot_value* result) 
   return true;
 }
 
-static bool evaluate_expanded(ot_runtime* rt, const oti_ast* form, ot_value* result) {
+static bool evaluate_expanded(ot_state* rt, const oti_ast* form, ot_value* result) {
   if (!rt->shared_expander) return evaluate_raw(rt, form, result);
   const oti_ast* head = form->kind == AST_LIST ? form->as.list.first : NULL;
   if (oti_ast_symbol(head, "begin") || oti_ast_symbol(head, "require") ||
@@ -495,7 +493,7 @@ static bool evaluate_expanded(ot_runtime* rt, const oti_ast* form, ot_value* res
   return ok;
 }
 
-static bool evaluate_top(ot_runtime* rt, const oti_ast* form, ot_value* result) {
+static bool evaluate_top(ot_state* rt, const oti_ast* form, ot_value* result) {
   size_t base = rt->frame_count || rt->compiling || rt->evaluating || rt->eval_depth ? rt->sp : 0;
   rt->sp = rt->stack_roots.count = base;
   if (!rt->frame_count && !rt->compiling && !rt->evaluating && !rt->eval_depth && !oti_reclaim(rt))
@@ -511,7 +509,7 @@ static bool evaluate_top(ot_runtime* rt, const oti_ast* form, ot_value* result) 
   return true;
 }
 
-ot_value oti_eval_value(ot_runtime* rt, ot_value value) {
+ot_value oti_eval_value(ot_state* rt, ot_value value) {
   if (rt->eval_depth >= 128) {
     oti_error(rt, "eval nesting limit exceeded");
     return 0;
@@ -534,7 +532,7 @@ ot_value oti_eval_value(ot_runtime* rt, ot_value value) {
   return result;
 }
 
-char* oti_read_file(ot_runtime* rt, FILE* file, size_t limit, const char* what, size_t* length) {
+char* oti_read_file(ot_state* rt, FILE* file, size_t limit, const char* what, size_t* length) {
   char message[128];
   char* buffer = NULL;
   size_t used = 0, capacity = 0;
@@ -574,7 +572,7 @@ char* oti_read_file(ot_runtime* rt, FILE* file, size_t limit, const char* what, 
 }
 
 /* Evaluate a runtime library file in the root namespace. */
-static bool eval_library_file(ot_runtime* rt, const char* path, const char* what) {
+static bool eval_library_file(ot_state* rt, const char* path, const char* what) {
   FILE* file = fopen(path, "rb");
   if (!file) {
     char message[128];
@@ -594,7 +592,7 @@ static bool eval_library_file(ot_runtime* rt, const char* path, const char* what
 }
 
 /* Join a library directory and a relative path. NULL when out of memory. */
-static char* library_path(ot_runtime* rt, const char* directory, const char* file) {
+static char* library_path(ot_state* rt, const char* directory, const char* file) {
   size_t n = strlen(directory) + strlen(file) + 2;
   char* path = malloc(n);
   if (!path) {
@@ -605,7 +603,7 @@ static char* library_path(ot_runtime* rt, const char* directory, const char* fil
   return path;
 }
 
-bool ot_load_expander(ot_runtime* rt, const char* directory) {
+bool ot_load_expander(ot_state* rt, const char* directory) {
   if (!oti_host_entry(rt)) return false;
   if (rt->shared_expander) return true;
   if (!oti_classes_init(rt)) return false;
@@ -628,7 +626,7 @@ bool ot_load_expander(ot_runtime* rt, const char* directory) {
   return ok;
 }
 
-bool ot_load_core(ot_runtime* rt, const char* directory) {
+bool ot_load_core(ot_state* rt, const char* directory) {
   if (!oti_host_entry(rt)) return false;
   if (rt->core_loaded) return true;
   if (!ot_load_expander(rt, directory) || !ot_add_load_path(rt, directory)) return false;
@@ -641,7 +639,7 @@ bool ot_load_core(ot_runtime* rt, const char* directory) {
   return ok;
 }
 
-bool ot_eval(ot_runtime* rt, const char* source, size_t length, ot_value* result) {
+bool ot_eval(ot_state* rt, const char* source, size_t length, ot_value* result) {
   if (!oti_host_entry(rt)) return false;
   bool nested = rt->frame_count || rt->compiling || rt->evaluating || rt->eval_depth;
   size_t base = nested ? rt->sp : 0, frames = rt->frame_count, tries = rt->try_count;
@@ -690,16 +688,15 @@ bool ot_eval(ot_runtime* rt, const char* source, size_t length, ot_value* result
   return true;
 }
 
-bool ot_exit_status(const ot_runtime* rt, int* status) {
+bool ot_exit_status(const ot_state* rt, int* status) {
   if (!rt->exit_pending) return false;
   *status = rt->exit_status;
   return true;
 }
 
-const char* ot_error(const ot_runtime* rt) { return rt->error; }
+const char* ot_error(const ot_state* rt) { return rt->error; }
 
-bool ot_call(ot_runtime* rt, const char* name, const ot_value* args, size_t count,
-             ot_value* result) {
+bool ot_call(ot_state* rt, const char* name, const ot_value* args, size_t count, ot_value* result) {
   if (!oti_host_entry(rt)) return false;
   rt->interrupted = false;
   rt->exit_pending = false;
@@ -739,9 +736,9 @@ bool ot_call(ot_runtime* rt, const char* name, const ot_value* args, size_t coun
   return true;
 }
 
-size_t ot_error_offset(const ot_runtime* rt) { return rt->error_offset; }
+size_t ot_error_offset(const ot_state* rt) { return rt->error_offset; }
 
-ot_stats ot_get_stats(const ot_runtime* rt) {
+ot_stats ot_get_stats(const ot_state* rt) {
   ot_stats stats = {.collections = rt->heap.collections,
                     .max_frames = rt->max_frames,
                     .heap_capacity = rt->heap.capacity};
@@ -772,7 +769,7 @@ ot_form_status ot_scan_form(const char* source, size_t length, size_t start, siz
   return status;
 }
 
-void ot_gc_stress(ot_runtime* rt, bool enabled) { rt->stress_gc = enabled; }
+void ot_gc_stress(ot_state* rt, bool enabled) { rt->stress_gc = enabled; }
 
 static void print_value(FILE* out, ot_value v, unsigned depth) {
   if (depth > 100) {
@@ -902,12 +899,12 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
   else fputs("#<function>", out);
 }
 
-void ot_print(ot_runtime* rt, FILE* out, ot_value value) {
+void ot_print(ot_state* rt, FILE* out, ot_value value) {
   (void)rt;
   print_value(out, value, 0);
 }
 
-void ot_write(ot_runtime* rt, FILE* out, ot_value value) {
+void ot_write(ot_state* rt, FILE* out, ot_value value) {
   (void)rt;
   print_value(out, value, 1);
 }

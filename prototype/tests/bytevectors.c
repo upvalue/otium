@@ -1,14 +1,14 @@
 #include "helpers.h"
 
 TEST(bytevector_script) {
-  ot_runtime* rt = new_core_runtime();
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   eval_file(rt, "../tests/library/bytevectors.ot");
   ot_destroy(rt);
 }
 
 TEST(bytevectors_and_utf8) {
-  ot_runtime* rt = new_core_runtime();
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   const char* checks[] = {
       "(= (bytevector-length #u8(1 2)) 2)",

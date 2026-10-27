@@ -5,7 +5,7 @@
  * globals read the global in the call instruction. */
 
 TEST(named_let_loops) {
-  ot_runtime* rt = new_runtime(1024 * 1024, 4096);
+  ot_state* rt = new_runtime(1024 * 1024, 4096);
   ot_gc_stress(rt, true);
   check_int(
       rt, "(def (sum n) (let loop ((i 0) (s 0)) (if (= i n) s (loop (+ i 1) (+ s i))))) (sum 100)",
@@ -31,7 +31,7 @@ TEST(named_let_loops) {
 }
 
 TEST(named_let_names_used_as_values) {
-  ot_runtime* rt = new_runtime(1024 * 1024, 4096);
+  ot_state* rt = new_runtime(1024 * 1024, 4096);
   ot_gc_stress(rt, true);
   check_int(rt,
             "(def (len l) (let walk ((l l)) (if (null? l) 0 (+ 1 (walk (cdr l)))))) (len '(1 2 3))",
@@ -47,7 +47,7 @@ TEST(named_let_names_used_as_values) {
 }
 
 TEST(named_let_bindings_are_fresh_each_iteration) {
-  ot_runtime* rt = new_runtime(1024 * 1024, 4096);
+  ot_state* rt = new_runtime(1024 * 1024, 4096);
   ot_gc_stress(rt, true);
   check_int(rt,
             "(def (thunks) (let loop ((i 0) (acc '())) "
@@ -63,7 +63,7 @@ TEST(named_let_bindings_are_fresh_each_iteration) {
 }
 
 TEST(while_loops) {
-  ot_runtime* rt = new_runtime(1024 * 1024, 4096);
+  ot_state* rt = new_runtime(1024 * 1024, 4096);
   check_int(rt, "(let ((i 0) (s 0)) (while (< i 5) (set! s (+ s i)) (set! i (+ i 1))) s)", 10);
   check_int(rt, "(let ((n 0)) (while (> n 0) (set! n 1)) n)", 0);
   check_printed(rt, "(while #f 1)", "nil");
@@ -75,7 +75,7 @@ TEST(while_loops) {
 }
 
 TEST(and_or_values) {
-  ot_runtime* rt = new_runtime(1024 * 1024, 4096);
+  ot_state* rt = new_runtime(1024 * 1024, 4096);
   check_printed(rt, "(and (= 1 1) nil)", "nil");
   check_int(rt, "(and (= 1 1) 5)", 5);
   check_printed(rt, "(and (< 2 1) 5)", "#f");
@@ -91,7 +91,7 @@ TEST(and_or_values) {
 }
 
 TEST(comparisons_with_constants) {
-  ot_runtime* rt = new_runtime(1024 * 1024, 4096);
+  ot_state* rt = new_runtime(1024 * 1024, 4096);
   check_int(rt,
             "(def (kind x) (cond ((eq? x 'a) 1) ((eq? 'b x) 2) ((eq? x 3) 3) "
             "((eq? x #\\c) 4) ((eq? x :k) 5) (else 6))) "
@@ -102,7 +102,7 @@ TEST(comparisons_with_constants) {
 }
 
 TEST(global_calls) {
-  ot_runtime* rt = new_runtime(1024 * 1024, 4096);
+  ot_state* rt = new_runtime(1024 * 1024, 4096);
   check_int(rt, "(def (f x) (+ x 1)) (def (g y) (f y)) (g 1)", 2);
   check_int(rt, "(def (f x) (* x 10)) (g 1)", 10);
   check_int(rt, "(def (h y) (+ 0 (f (- y 1)))) (h 3)", 20);

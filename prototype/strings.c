@@ -29,7 +29,7 @@ ot_value oti_string_get(ot_value string, ot_value key, ot_value fallback) {
   return fallback;
 }
 
-static char* display(ot_runtime* rt, size_t first, size_t count, size_t* length) {
+static char* display(ot_state* rt, size_t first, size_t count, size_t* length) {
   char* bytes = NULL;
   FILE* stream = open_memstream(&bytes, length);
   if (!stream) {
@@ -47,7 +47,7 @@ static char* display(ot_runtime* rt, size_t first, size_t count, size_t* length)
   return bytes;
 }
 
-static ot_value copied(ot_runtime* rt, const char* bytes, size_t n) {
+static ot_value copied(ot_state* rt, const char* bytes, size_t n) {
   char* copy = malloc(n ? n : 1);
   if (!copy) return oti_fail(rt, "out of host memory");
   memcpy(copy, bytes, n);
@@ -56,7 +56,7 @@ static ot_value copied(ot_runtime* rt, const char* bytes, size_t n) {
   return result;
 }
 
-static bool append_buffer(ot_runtime* rt, ot_value* buffer, const char* bytes, size_t n) {
+static bool append_buffer(ot_state* rt, ot_value* buffer, const char* bytes, size_t n) {
   oti_buffer_info* info = object_bytes(*buffer);
   if (n > SIZE_MAX - info->length) return oti_error(rt, "buffer too large");
   size_t needed = info->length + n;
@@ -90,7 +90,7 @@ static bool append_buffer(ot_runtime* rt, ot_value* buffer, const char* bytes, s
   return true;
 }
 
-ot_value oti_string_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_string_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   if (id == B_STR || id == B_BUFFER || id == B_BUFFER_PUSH) {
     if (id == B_BUFFER && count > 1) return oti_fail(rt, "buffer expects at most one argument");
     if (id == B_BUFFER_PUSH && (!count || !oti_kind(rt->stack[first], K_BUFFER)))

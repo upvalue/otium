@@ -3,7 +3,7 @@
 #include <string.h>
 
 TEST(core_evaluation) {
-  ot_runtime* rt = new_runtime(128 * 1024, 32768);
+  ot_state* rt = new_runtime(128 * 1024, 32768);
   check_int(rt, "(+ 1 (* 2 3) (- 8 2))", 13);
   check_int(rt, "(def (nary a b c) (+ a b c)) (nary 10 20 12)", 42);
   check_int(rt, "(- 100 20 30 8)", 42);
@@ -116,7 +116,7 @@ TEST(core_evaluation) {
 }
 
 TEST(tail_calls) {
-  ot_runtime* rt = new_runtime(8192, 256);
+  ot_state* rt = new_runtime(8192, 256);
   check_int(rt, "(let loop ((i 1000000) (acc 0)) (if (= i 0) acc (loop (- i 1) (+ acc 1))))",
             1000000);
   CHECK(ot_get_stats(rt).max_frames <= 2);
@@ -135,7 +135,7 @@ TEST(tail_calls) {
 }
 
 TEST(collection_keeps_live_values) {
-  ot_runtime* rt = new_runtime(8192, 1024);
+  ot_state* rt = new_runtime(8192, 1024);
   check_int(rt,
             "(def (maker x) (fn () (car x)))"
             "(let ((keep (maker (cons 42 nil))))"
@@ -186,7 +186,7 @@ TEST(collection_keeps_live_values) {
 }
 
 TEST(large_frame) {
-  ot_runtime* rt = new_runtime(128 * 1024, 2048);
+  ot_state* rt = new_runtime(128 * 1024, 2048);
   char source[16384];
   size_t used = (size_t)snprintf(source, sizeof(source), "(let (");
   for (unsigned i = 0; i < 300; i++) {
@@ -202,7 +202,7 @@ TEST(large_frame) {
 }
 
 TEST(arrays) {
-  ot_runtime* rt = new_runtime(32 * 1024, 4096);
+  ot_state* rt = new_runtime(32 * 1024, 4096);
   ot_gc_stress(rt, true);
   check_true(rt, "(equal? [1 [2] '(3 . 4)] [1 [2] '(3 . 4)])");
   CHECK(eval(rt, "(equal? [1] [1.0])") == OT_FALSE);
@@ -242,7 +242,7 @@ TEST(arrays) {
 }
 
 TEST(array_garbage_and_exhaustion) {
-  ot_runtime* rt = new_runtime(8192, 4096);
+  ot_state* rt = new_runtime(8192, 4096);
   ot_gc_stress(rt, true);
   check_int(rt,
             "(let ((a []) (i 0)) (while (< i 10000) (push! a (cons i nil)) (pop! a) (set! i (+ i "
@@ -260,14 +260,14 @@ TEST(array_garbage_and_exhaustion) {
 }
 
 TEST(long_list_equality) {
-  ot_runtime* rt = new_runtime(4 * 1024 * 1024, 4096);
+  ot_state* rt = new_runtime(4 * 1024 * 1024, 4096);
   check_true(rt, "(let ((a '()) (b '()) (i 0)) (while (< i 20000) (set! a (cons i a)) (set! b "
                  "(cons i b)) (set! i (+ i 1))) (equal? a b))");
   ot_destroy(rt);
 }
 
 TEST(tables) {
-  ot_runtime* rt = new_runtime(256 * 1024, 8192);
+  ot_state* rt = new_runtime(256 * 1024, 8192);
   ot_gc_stress(rt, true);
   CHECK(eval(rt, "(equal? {:a 1} {:a 1})") == OT_FALSE);
   check_true(rt, "(equal? (keys {:a 1 :b 2 :a 3}) [:a :b])");
@@ -322,7 +322,7 @@ TEST(tables) {
 }
 
 TEST(table_garbage_and_exhaustion) {
-  ot_runtime* rt = new_runtime(8192, 4096);
+  ot_state* rt = new_runtime(8192, 4096);
   ot_gc_stress(rt, true);
   check_int(
       rt,
@@ -339,7 +339,7 @@ TEST(table_garbage_and_exhaustion) {
 }
 
 TEST(rest_arguments) {
-  ot_runtime* rt = new_runtime(8192, 4096);
+  ot_state* rt = new_runtime(8192, 4096);
   ot_gc_stress(rt, true);
   check_true(rt, "(equal? ((fn args args) 1 2 3) '(1 2 3))");
   check_true(rt, "(equal? ((fn (x . args) (cons x args)) 1 2 3) '(1 2 3))");
@@ -381,7 +381,7 @@ TEST(rest_arguments) {
 }
 
 TEST(apply_calls) {
-  ot_runtime* rt = new_runtime(32768, 4096);
+  ot_state* rt = new_runtime(32768, 4096);
   ot_gc_stress(rt, true);
   check_int(rt, "(apply + '(1 2 3))", 6);
   check_int(rt, "(apply + 1 2 [3 4])", 10);
@@ -425,7 +425,7 @@ TEST(apply_calls) {
 }
 
 TEST(apply_respects_stack_limit) {
-  ot_runtime* rt = new_runtime(32768, 32);
+  ot_state* rt = new_runtime(32768, 32);
   check_error(
       rt, "(let loop ((n 40) (xs '())) (if (= n 0) (apply list xs) (loop (- n 1) (cons n xs))))",
       "stack limit");
@@ -433,7 +433,7 @@ TEST(apply_respects_stack_limit) {
 }
 
 TEST(optional_arguments) {
-  ot_runtime* rt = new_runtime(16384, 4096);
+  ot_state* rt = new_runtime(16384, 4096);
   ot_gc_stress(rt, true);
   check_int(rt, "((fn (x &optional (y (+ x 1)) (z (+ y 1))) (+ x y z)) 1)", 6);
   check_int(rt, "((fn (x &optional (y (+ x 1)) (z (+ y 1))) (+ x y z)) 1 20)", 42);

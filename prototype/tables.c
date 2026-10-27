@@ -45,7 +45,7 @@ static size_t hash(ot_value key, unsigned depth) {
   return mix(object_identity(key) ^ kind);
 }
 
-static bool freeze_key(ot_runtime* rt, ot_value key) {
+static bool freeze_key(ot_state* rt, ot_value key) {
   if (!oti_kind(key, K_PAIR) || object_frozen(key)) return true;
   ot_value* work = NULL;
   size_t count = 0, capacity = 0;
@@ -68,7 +68,7 @@ static bool freeze_key(ot_runtime* rt, ot_value key) {
   return true;
 }
 
-static bool lookup(ot_runtime* rt, ot_value table, ot_value key, size_t* slot, size_t* entry) {
+static bool lookup(ot_state* rt, ot_value table, ot_value key, size_t* slot, size_t* entry) {
   size_t mask = table_info(table)->capacity * 2 - 1, tomb = SIZE_MAX;
   uint32_t* index = buckets(table);
   ot_value* data = entries(table);
@@ -93,7 +93,7 @@ static bool lookup(ot_runtime* rt, ot_value table, ot_value key, size_t* slot, s
   return true;
 }
 
-ot_value oti_table_get(ot_runtime* rt, ot_value table, ot_value key, ot_value fallback) {
+ot_value oti_table_get(ot_state* rt, ot_value table, ot_value key, ot_value fallback) {
   if (!freeze_key(rt, key)) return 0;
   if (!table_info(table)->count) return fallback;
   size_t slot, entry;
@@ -101,13 +101,13 @@ ot_value oti_table_get(ot_runtime* rt, ot_value table, ot_value key, ot_value fa
   return entry == SIZE_MAX ? fallback : entries(table)[2 * entry + 1];
 }
 
-static ot_value new_table(ot_runtime* rt) {
+static ot_value new_table(ot_state* rt) {
   ot_value table = oti_alloc(rt, K_TABLE, 1, sizeof(oti_table_info));
   if (table) *table_info(table) = (oti_table_info){0};
   return table;
 }
 
-static bool resize(ot_runtime* rt, ot_value* table) {
+static bool resize(ot_state* rt, ot_value* table) {
   size_t capacity = table_info(*table)->capacity;
   if (!capacity) capacity = 8;
   else if (table_info(*table)->count > capacity / 2) {
@@ -136,7 +136,7 @@ static bool resize(ot_runtime* rt, ot_value* table) {
   return true;
 }
 
-ot_value oti_table_set(ot_runtime* rt, ot_value table, ot_value key, ot_value value) {
+ot_value oti_table_set(ot_state* rt, ot_value table, ot_value key, ot_value value) {
   if (!freeze_key(rt, key)) return 0;
   size_t slot = 0, entry = SIZE_MAX;
   if (table_info(table)->capacity && !lookup(rt, table, key, &slot, &entry)) return 0;
@@ -171,7 +171,7 @@ ot_value oti_table_set(ot_runtime* rt, ot_value table, ot_value key, ot_value va
   return table;
 }
 
-ot_value oti_table_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_table_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   if (id == B_TABLE) {
     if (count % 2) return oti_fail(rt, "table needs key/value pairs");
     ot_value table = new_table(rt);

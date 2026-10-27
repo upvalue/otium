@@ -1,20 +1,20 @@
 #include "helpers.h"
 #include "internal.h"
 
-static ot_runtime* ports_runtime(void) {
-  ot_runtime* rt = new_core_runtime();
+static ot_state* ports_runtime(void) {
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   return rt;
 }
 
 TEST(port_library_script) {
-  ot_runtime* rt = ports_runtime();
+  ot_state* rt = ports_runtime();
   eval_file(rt, "../tests/library/ports.ot");
   ot_destroy(rt);
 }
 
 TEST(custom_and_memory_ports) {
-  ot_runtime* rt = ports_runtime();
+  ot_state* rt = ports_runtime();
   const char* checks[] = {
       "(let ((p (make-input-port \"restart\" {:read (fn (b s e) (invoke-restart 'done 42))}))) "
       "(let ((v (restart-case (read-u8 p) (done (v) v)))) (close-port p) (= v 42)))",
@@ -72,7 +72,7 @@ TEST(custom_and_memory_ports) {
 
 /* Reading into a bytevector from a bytevector port does not allocate. */
 TEST(read_bytevector_does_not_collect) {
-  ot_runtime* rt = ports_runtime();
+  ot_state* rt = ports_runtime();
   eval(rt,
        "(def raw-source (open-input-bytevector #u8(1 2 3))) (def raw-target (make-bytevector 3))");
   uint32_t source_index = oti_lookup_global(rt, "raw-source", 10),

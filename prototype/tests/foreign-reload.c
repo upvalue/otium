@@ -3,7 +3,7 @@
 
 /* Each step relies on the bindings and libraries left by the ones before it. */
 TEST(reload_releases_bindings_and_memory) {
-  ot_runtime* rt = new_runtime(16384, 4096);
+  ot_state* rt = new_runtime(16384, 4096);
   ot_gc_stress(rt, true);
   char source[1024];
   snprintf(source, sizeof(source),

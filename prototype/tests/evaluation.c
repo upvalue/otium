@@ -2,7 +2,7 @@
 #include <string.h>
 
 /* Each case must evaluate to #t, with collection before every allocation. */
-static void nested_evaluation(ot_runtime* rt) {
+static void nested_evaluation(ot_state* rt) {
   ot_gc_stress(rt, true);
   const char* cases[] = {
       "(let ((a [1 '(+ 1 2)])) (eq? (eval a) a))",
@@ -48,13 +48,13 @@ static void nested_evaluation(ot_runtime* rt) {
 }
 
 TEST(nested_evaluation_without_core) {
-  ot_runtime* rt = new_runtime(1024 * 1024, 128 * 1024);
+  ot_state* rt = new_runtime(1024 * 1024, 128 * 1024);
   nested_evaluation(rt);
   ot_destroy(rt);
 }
 
 TEST(nested_evaluation_with_core) {
-  ot_runtime* rt = new_core_runtime();
+  ot_state* rt = new_core_runtime();
   nested_evaluation(rt);
   ot_destroy(rt);
 }

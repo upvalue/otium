@@ -1,11 +1,11 @@
 #include "internal.h"
 
-void oti_restore_params(ot_runtime* rt, size_t count) {
+void oti_restore_params(ot_state* rt, size_t count) {
   rt->param_count = count;
   rt->param_roots.count = count * 2;
 }
 
-bool oti_bind_param(ot_runtime* rt, ot_value param, ot_value value) {
+bool oti_bind_param(ot_state* rt, ot_value param, ot_value value) {
   if (!oti_kind(param, K_PARAM)) return oti_error(rt, "with-params requires a param");
   if (rt->param_count >= rt->stack_limit || rt->param_count >= SIZE_MAX / 2 - 1)
     return oti_error(rt, "parameter binding limit exceeded");
@@ -19,7 +19,7 @@ bool oti_bind_param(ot_runtime* rt, ot_value param, ot_value value) {
   return true;
 }
 
-ot_value oti_param_call(ot_runtime* rt, ot_value param, size_t count) {
+ot_value oti_param_call(ot_state* rt, ot_value param, size_t count) {
   if (count) {
     oti_coded_error(rt, "E0301", "params take no arguments");
     return 0;

@@ -49,7 +49,7 @@ static void remove_fixtures(const char* directory, const char* large) {
   CHECK(!rmdir(directory));
 }
 
-static void check_in_user(ot_runtime* rt) {
+static void check_in_user(ot_state* rt) {
   CHECK_STR(rt->namespaces[rt->current_namespace], "user");
 }
 
@@ -61,7 +61,7 @@ TEST(modules_load_refer_and_reload) {
   char large[512];
   write_fixtures(directory, large, sizeof(large));
 
-  ot_runtime* rt = new_runtime(32768, 8192);
+  ot_state* rt = new_runtime(32768, 8192);
   ot_gc_stress(rt, true);
   CHECK(ot_add_load_path(rt, "../tests/modules/first"));
   CHECK(ot_add_load_path(rt, "../tests/modules/second"));

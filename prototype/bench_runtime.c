@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
   for (index = 0; index < sizeof(workloads) / sizeof(workloads[0]); index++)
     if (!strcmp(workloads[index].name, argv[1])) break;
   if (index == sizeof(workloads) / sizeof(workloads[0])) return 2;
-  ot_runtime* rt = ot_create(1024 * 1024, 128 * 1024);
+  ot_state* rt = ot_create(1024 * 1024, 128 * 1024);
   if (!rt) return 1;
   ot_value answer, argument = ot_int(workloads[index].argument);
   if (!ot_eval(rt, workloads[index].source, strlen(workloads[index].source), &answer)) goto error;

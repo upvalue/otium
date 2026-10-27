@@ -23,7 +23,7 @@ TEST(float_formatting_round_trips) {
 }
 
 TEST(integer_and_float_boundaries) {
-  ot_runtime* rt = new_runtime(32768, 8192);
+  ot_state* rt = new_runtime(32768, 8192);
   ot_gc_stress(rt, true);
   const char* checks[] = {
       "(= (+ 4611686018427387903 1) -4611686018427387904)",

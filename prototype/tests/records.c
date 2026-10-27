@@ -1,7 +1,7 @@
 #include "helpers.h"
 
-static ot_runtime* records_runtime(void) {
-  ot_runtime* rt = new_runtime(1024 * 1024, 128 * 1024);
+static ot_state* records_runtime(void) {
+  ot_state* rt = new_runtime(1024 * 1024, 128 * 1024);
   CHECK(ot_add_load_path(rt, "../tests/records/fixtures"));
   CHECK(ot_load_core(rt, TEST_LIBRARY_DIR));
   ot_gc_stress(rt, true);
@@ -9,14 +9,14 @@ static ot_runtime* records_runtime(void) {
 }
 
 TEST(record_checks_script) {
-  ot_runtime* rt = records_runtime();
+  ot_state* rt = records_runtime();
   eval_file(rt, "../tests/records/checks.ot");
   ot_destroy(rt);
 }
 
 /* Each check builds on the records defined by earlier ones. */
 TEST(record_layouts_retention_and_immutability) {
-  ot_runtime* rt = records_runtime();
+  ot_state* rt = records_runtime();
   const char* checks[] = {
       "(def names (list 'a 'b)) (def copied-fields (%make-record-type 'Copied names #f)) (set-car! "
       "names 'changed) (def copied (record-new copied-fields 1 2)) (and (= (copied :a) 1) (= "

@@ -9,7 +9,7 @@ static size_t slot_index(ot_value layout, ot_value key) {
   return SIZE_MAX;
 }
 
-static bool migrate(ot_runtime* rt, ot_value* instance, ot_value properties) {
+static bool migrate(ot_state* rt, ot_value* instance, ot_value properties) {
   if (object_fields(*instance)[1] == object_fields(object_fields(*instance)[0])[2]) return true;
   ot_value live[] = {*instance,
                      object_fields(*instance)[1],
@@ -82,11 +82,11 @@ static bool migrate(ot_runtime* rt, ot_value* instance, ot_value properties) {
   return ok;
 }
 
-static bool migrate_to_current(ot_runtime* rt, ot_value* instance) {
+static bool migrate_to_current(ot_state* rt, ot_value* instance) {
   return migrate(rt, instance, OT_NIL);
 }
 
-ot_value oti_instance_call(ot_runtime* rt, ot_value instance, size_t first, size_t count) {
+ot_value oti_instance_call(ot_state* rt, ot_value instance, size_t first, size_t count) {
   if (count != 1 || !oti_kind(rt->stack[first], K_KEYWORD))
     return oti_fail(rt, "instance call needs one slot keyword");
   oti_roots root;
@@ -104,7 +104,7 @@ ot_value oti_instance_call(ot_runtime* rt, ot_value instance, size_t first, size
   return result;
 }
 
-ot_value oti_instance_copy(ot_runtime* rt, ot_value instance) {
+ot_value oti_instance_copy(ot_state* rt, ot_value instance) {
   ot_value live[] = {instance, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, live, 2);
@@ -131,7 +131,7 @@ ot_value oti_instance_copy(ot_runtime* rt, ot_value instance) {
   return result;
 }
 
-static ot_value define_class(ot_runtime* rt, size_t first, size_t count) {
+static ot_value define_class(ot_state* rt, size_t first, size_t count) {
   if (count != 5) return oti_fail(rt, "invalid class declaration");
   ot_value name = rt->stack[first], parent = rt->stack[first + 1], abstract = rt->stack[first + 2],
            spec = rt->stack[first + 3];
@@ -194,7 +194,7 @@ static ot_value define_class(ot_runtime* rt, size_t first, size_t count) {
   return result;
 }
 
-static ot_value property_operation(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+static ot_value property_operation(ot_state* rt, unsigned id, size_t first, size_t count) {
   size_t wanted = id == B_CLASS_MOUNT ? 1 : 2;
   if (count != wanted) return oti_fail(rt, "wrong number of property operation arguments");
   ot_value live[] = {rt->stack[first], rt->stack[first + count - 1], OT_NIL};
@@ -241,7 +241,7 @@ static ot_value property_operation(ot_runtime* rt, unsigned id, size_t first, si
   return result;
 }
 
-ot_value oti_instance_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_instance_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   if (!oti_classes_init(rt)) return 0;
   if (id == B_CLASS_DEFINE) return define_class(rt, first, count);
   if (id == B_CLASS_MOUNT || id == B_CLASS_UPDATE) return property_operation(rt, id, first, count);

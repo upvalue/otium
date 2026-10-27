@@ -11,13 +11,13 @@ static size_t field_index(ot_value type, ot_value key) {
   return SIZE_MAX;
 }
 
-ot_value oti_record_call(ot_runtime* rt, ot_value record, size_t first, size_t count) {
+ot_value oti_record_call(ot_state* rt, ot_value record, size_t first, size_t count) {
   if (count != 1) return oti_fail(rt, "record call needs one field keyword");
   size_t index = field_index(object_fields(record)[0], rt->stack[first]);
   return index == SIZE_MAX ? oti_fail(rt, "unknown record field") : object_fields(record)[index];
 }
 
-static ot_value make_type(ot_runtime* rt, size_t first, size_t count) {
+static ot_value make_type(ot_state* rt, size_t first, size_t count) {
   if (count != 3 || !oti_kind(rt->stack[first], K_SYMBOL) ||
       (rt->stack[first + 2] != OT_TRUE && rt->stack[first + 2] != OT_FALSE))
     return oti_fail(rt, "invalid record type declaration");
@@ -74,7 +74,7 @@ static ot_value make_type(ot_runtime* rt, size_t first, size_t count) {
   return result;
 }
 
-ot_value oti_record_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_record_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   if (id == B_MAKE_RECORD_TYPE) return make_type(rt, first, count);
   size_t wanted = id == B_RECORD_REF ? 2 : id == B_RECORD_SET ? 3 : 1;
   if (id != B_RECORD_NEW && count != wanted)

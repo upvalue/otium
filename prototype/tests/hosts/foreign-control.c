@@ -15,7 +15,7 @@ int main(int argc, char** argv) {
     return 2;
   }
   const char* mode = argv[1];
-  ot_runtime* rt = new_runtime(128 * 1024, 4096);
+  ot_state* rt = new_runtime(128 * 1024, 4096);
   char source[2048];
   snprintf(source, sizeof(source),
            "(def lib (ffi/open-library '(\"/missing/ffi/library\" \"%s\"))) "

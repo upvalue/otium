@@ -1,7 +1,7 @@
 #include "helpers.h"
 
-static ot_runtime* reader_runtime(void) {
-  ot_runtime* rt = new_core_runtime();
+static ot_state* reader_runtime(void) {
+  ot_state* rt = new_core_runtime();
   CHECK(ot_add_load_path(rt, "../tests/reader/data"));
   ot_gc_stress(rt, true);
   return rt;
@@ -9,7 +9,7 @@ static ot_runtime* reader_runtime(void) {
 
 /* The script loads the reader data that the negative check uses. */
 TEST(port_reader_script) {
-  ot_runtime* rt = reader_runtime();
+  ot_state* rt = reader_runtime();
   eval_file(rt, "../tests/library/port-reader.ot");
   check_true(rt, "(for-all (fn (text) (try (read (open-input-string text)) #f (catch e #t))) "
                  "(drop 3 datums/negative))");
@@ -17,7 +17,7 @@ TEST(port_reader_script) {
 }
 
 TEST(streaming_datum_boundaries) {
-  ot_runtime* rt = reader_runtime();
+  ot_state* rt = reader_runtime();
   const char* checks[] = {
       "(let ((p (open-input-string \"(a)tail\"))) (and (equal? (read p) '(a)) (eq? (peek-char p) "
       "#\\t) (eq? (read p) 'tail)))",

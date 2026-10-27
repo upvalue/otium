@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
-typedef struct ot_runtime ot_runtime;
+typedef struct ot_state ot_state;
 
 /* Values are tagged words. Managed values move during collection, so a value
  * returned to the host is only valid until the next call into the runtime. */
@@ -55,36 +55,34 @@ const char* ot_string_data(ot_value v, size_t* length);
 /* Creation and configuration. Heaps are fixed until a larger per-semispace
  * limit is explicitly supplied; growth only happens after collection cannot
  * satisfy an allocation. */
-ot_runtime* ot_create(size_t semispace_bytes, size_t stack_limit);
-void ot_destroy(ot_runtime* rt);
-bool ot_set_heap_limit(ot_runtime* rt, size_t semispace_bytes);
+ot_state* ot_create(size_t semispace_bytes, size_t stack_limit);
+void ot_destroy(ot_state* rt);
+bool ot_set_heap_limit(ot_state* rt, size_t semispace_bytes);
 /* Copy host script metadata. NULL script means no script; strings are UTF-8. */
-bool ot_set_arguments(ot_runtime* rt, const char* script, size_t count,
-                      const char* const* arguments);
+bool ot_set_arguments(ot_state* rt, const char* script, size_t count, const char* const* arguments);
 
 /* Loading. The expander must be loaded before the core library. */
-bool ot_load_expander(ot_runtime* rt, const char* directory);
-bool ot_load_core(ot_runtime* rt, const char* directory);
+bool ot_load_expander(ot_state* rt, const char* directory);
+bool ot_load_core(ot_state* rt, const char* directory);
 /* Append a module search directory before the default . and lib directories. */
-bool ot_add_load_path(ot_runtime* rt, const char* path);
+bool ot_add_load_path(ot_state* rt, const char* path);
 /* Add the module directories listed by (paths ...) forms in a project file.
  * Relative entries resolve against the project file's directory. */
-bool ot_add_project_paths(ot_runtime* rt, const char* project_file);
+bool ot_add_project_paths(ot_state* rt, const char* project_file);
 
 /* Evaluation. The result is retained until the next evaluation. Definitions
  * survive calls. Errors return false and leave the runtime ready for another
  * evaluation. */
-bool ot_eval(ot_runtime* rt, const char* source, size_t length, ot_value* result);
+bool ot_eval(ot_state* rt, const char* source, size_t length, ot_value* result);
 /* Invoke an existing global in the current namespace, or a qualified name,
  * without parsing or compiling a wrapper. Arguments must be in caller-owned
  * storage; the runtime roots them before allocation. */
-bool ot_call(ot_runtime* rt, const char* name, const ot_value* args, size_t count,
-             ot_value* result);
-const char* ot_error(const ot_runtime* rt);
-size_t ot_error_offset(const ot_runtime* rt);
+bool ot_call(ot_state* rt, const char* name, const ot_value* args, size_t count, ot_value* result);
+const char* ot_error(const ot_state* rt);
+size_t ot_error_offset(const ot_state* rt);
 /* An exit request returns false from eval/call; the host decides when to exit.
  * A subsequent top-level evaluation clears the request. */
-bool ot_exit_status(const ot_runtime* rt, int* status);
+bool ot_exit_status(const ot_state* rt, int* status);
 
 /* Find the next complete form in source starting at start, without
  * evaluating it. On OT_FORM_COMPLETE, *end is the offset just past the form.
@@ -97,9 +95,9 @@ ot_form_status ot_scan_form(const char* source, size_t length, size_t start, siz
 /* Interrupts. The host owns the flag and keeps it alive until detached (NULL)
  * or destruction. A signal handler may set it to 1; evaluation consumes it at
  * safe points. */
-void ot_set_interrupt_flag(ot_runtime* rt, volatile sig_atomic_t* flag);
-bool ot_poll_interrupt(ot_runtime* rt);
-bool ot_interrupted(const ot_runtime* rt);
+void ot_set_interrupt_flag(ot_state* rt, volatile sig_atomic_t* flag);
+bool ot_poll_interrupt(ot_state* rt);
+bool ot_interrupted(const ot_state* rt);
 
 /* Host IO. Host functions return errno values (zero on success); read/write
  * return a byte count, zero for read EOF, or a negative errno. Writes must make
@@ -126,15 +124,15 @@ typedef struct {
 /* Affects subsequently opened ports. NULL restores POSIX defaults. Standard
  * ports use handles 0/1/2 and are borrowed; install before loading the core to
  * replace them. Existing ports retain their host, userdata and handle. */
-bool ot_set_io_host(ot_runtime* rt, const ot_io_host* host, void* userdata);
+bool ot_set_io_host(ot_state* rt, const ot_io_host* host, void* userdata);
 /* Flush a snapshot of registered output ports at an idle host boundary.
  * Success preserves the preceding evaluation/exit result. A flush failure
  * replaces it and can be inspected or retried. Destruction never calls Otium. */
-bool ot_flush_ports(ot_runtime* rt);
+bool ot_flush_ports(ot_state* rt);
 
 /* Printing. ot_write uses read syntax; ot_print shows strings without quotes. */
-void ot_write(ot_runtime* rt, FILE* out, ot_value value);
-void ot_print(ot_runtime* rt, FILE* out, ot_value value);
+void ot_write(ot_state* rt, FILE* out, ot_value value);
+void ot_print(ot_state* rt, FILE* out, ot_value value);
 
 /* Diagnostics. Foreign record counts include cached signatures and retained
  * library handles. allocations/bytes describe explicitly owned native buffers,
@@ -145,8 +143,8 @@ typedef struct {
   size_t callbacks, callback_records;
 } ot_stats;
 
-ot_stats ot_get_stats(const ot_runtime* rt);
+ot_stats ot_get_stats(const ot_state* rt);
 /* Collect before every allocation. Slow; for testing rooting. */
-void ot_gc_stress(ot_runtime* rt, bool enabled);
+void ot_gc_stress(ot_state* rt, bool enabled);
 
 #endif

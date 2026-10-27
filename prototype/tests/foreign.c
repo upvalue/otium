@@ -10,7 +10,7 @@
 
 /* Open the fixture libraries as lib, other and extra. The first candidate for
  * lib is missing, so loading falls through to the next one. */
-static void open_fixtures(ot_runtime* rt) {
+static void open_fixtures(ot_state* rt) {
   char source[2048];
   snprintf(source, sizeof(source),
            "(def lib (ffi/open-library '(\"/missing/ffi/library\" \"%s\"))) "
@@ -20,13 +20,13 @@ static void open_fixtures(ot_runtime* rt) {
   eval(rt, source);
 }
 
-static ot_runtime* fixture_runtime(void) {
-  ot_runtime* rt = new_runtime(128 * 1024, 4096);
+static ot_state* fixture_runtime(void) {
+  ot_state* rt = new_runtime(128 * 1024, 4096);
   open_fixtures(rt);
   return rt;
 }
 
-static void define_scalar_bindings(ot_runtime* rt) {
+static void define_scalar_bindings(ot_state* rt) {
   eval(rt, "(def byte (ffi/bind lib \"echo_u8\" '(u8) 'u8 #t))"
            "(def boolean (ffi/bind lib \"echo_bool\" '(bool) 'bool #t))"
            "(def single (ffi/bind lib \"echo_float\" '(float) 'float #t))"
@@ -35,14 +35,14 @@ static void define_scalar_bindings(ot_runtime* rt) {
            "(def pointer (ffi/bind lib \"echo_pointer\" '(pointer) 'pointer #t))");
 }
 
-static ot_runtime* core_runtime(void) {
-  ot_runtime* rt = new_runtime(4 * 1024 * 1024, 256 * 1024);
+static ot_state* core_runtime(void) {
+  ot_state* rt = new_runtime(4 * 1024 * 1024, 256 * 1024);
   CHECK(ot_load_core(rt, TEST_LIBRARY_DIR));
   return rt;
 }
 
 TEST(library_loading_and_binding) {
-  ot_runtime* rt = fixture_runtime();
+  ot_state* rt = fixture_runtime();
   check_int(rt, "((ffi/bind lib \"fixture_id\" '() 'int #t))", 17);
   CHECK(ot_get_stats(rt).signatures == 1);
   check_int(rt, "((ffi/bind other \"fixture_id\" '() 'int #f))", 29);
@@ -64,7 +64,7 @@ TEST(library_loading_and_binding) {
 }
 
 TEST(integer_types_round_trip) {
-  ot_runtime* rt = fixture_runtime();
+  ot_state* rt = fixture_runtime();
 
   static const struct {
     const char *type, *symbol;
@@ -101,7 +101,7 @@ TEST(integer_types_round_trip) {
 }
 
 TEST(scalar_text_and_pointer_conversions) {
-  ot_runtime* rt = fixture_runtime();
+  ot_state* rt = fixture_runtime();
   define_scalar_bindings(rt);
   check_true(rt, "(boolean #t)");
   CHECK(eval(rt, "(boolean #f)") == OT_FALSE);
@@ -145,7 +145,7 @@ TEST(scalar_text_and_pointer_conversions) {
 /* Allocation, views and release, then the same calls with collection before
  * every allocation. */
 TEST(foreign_memory_and_collection) {
-  ot_runtime* rt = fixture_runtime();
+  ot_state* rt = fixture_runtime();
   define_scalar_bindings(rt);
   eval(rt, "(def p (ffi/alloc 'u64 2)) (def view (ffi/view p 8 8))");
   check_int(rt, "(ffi/allocation-count)", 1);
@@ -202,7 +202,7 @@ TEST(foreign_memory_and_collection) {
 }
 
 TEST(text_survives_collection_in_small_heap) {
-  ot_runtime* rt = new_runtime(8192, 256);
+  ot_state* rt = new_runtime(8192, 256);
   char source[2048];
   snprintf(source, sizeof(source),
            "(def lib (ffi/open-library '(\"%s\"))) "
@@ -218,7 +218,7 @@ TEST(text_survives_collection_in_small_heap) {
 }
 
 TEST(allocation_reports_heap_exhaustion) {
-  ot_runtime* rt = new_runtime(128, 64);
+  ot_state* rt = new_runtime(128, 64);
   ot_value result;
   const char* exhaustion = "(ffi/alloc 'u8 5)";
   CHECK(!ot_eval(rt, exhaustion, strlen(exhaustion), &result));
@@ -229,7 +229,7 @@ TEST(allocation_reports_heap_exhaustion) {
 }
 
 TEST(bulk_memory_and_layouts) {
-  ot_runtime* rt = core_runtime();
+  ot_state* rt = core_runtime();
   ot_gc_stress(rt, true);
   eval_file(rt, "../tests/ffi/bulk.ot");
 
@@ -287,7 +287,7 @@ static void relative_fixture(char* buffer, size_t size) {
 }
 
 TEST(aggregate_calls_and_signature_cache) {
-  ot_runtime* rt = core_runtime();
+  ot_state* rt = core_runtime();
   ot_gc_stress(rt, true);
   char fixture[1024], source[2048];
   relative_fixture(fixture, sizeof(fixture));
@@ -314,7 +314,7 @@ TEST(aggregate_calls_and_signature_cache) {
 }
 
 TEST(common_ffi_script) {
-  ot_runtime* rt = core_runtime();
+  ot_state* rt = core_runtime();
   const char* arguments[] = {FIXTURE, OTHER};
   CHECK(ot_set_arguments(rt, "../tests/ffi/common.ot", 2, arguments));
   ot_gc_stress(rt, true);
@@ -326,7 +326,7 @@ TEST(common_ffi_script) {
 }
 
 TEST(callbacks_and_callback_lifetime) {
-  ot_runtime* rt = core_runtime();
+  ot_state* rt = core_runtime();
   char directory[] = "/tmp/otium-callback-test-XXXXXX";
   CHECK(mkdtemp(directory));
   const char* arguments[] = {FIXTURE, OTHER, directory};
@@ -357,7 +357,7 @@ TEST(callbacks_and_callback_lifetime) {
 }
 
 TEST(ownership_scripts) {
-  ot_runtime* rt = core_runtime();
+  ot_state* rt = core_runtime();
   ot_gc_stress(rt, true);
   eval_file(rt, "../tests/ffi/ownership.ot");
   eval_file(rt, "tests/data/ownership.ot");
@@ -365,7 +365,7 @@ TEST(ownership_scripts) {
 }
 
 TEST(foreign_error_fields) {
-  ot_runtime* rt = core_runtime();
+  ot_state* rt = core_runtime();
   ot_gc_stress(rt, true);
   eval_file(rt, "tests/data/foreign-errors.ot");
   ot_destroy(rt);

@@ -489,7 +489,7 @@ typedef struct {
 } oti_documentation;
 
 /* Host-side metadata for a global. The values themselves are in
- * ot_runtime.globals, which is a collector root array. */
+ * ot_state.globals, which is a collector root array. */
 typedef struct {
   char* name;
   oti_documentation doc;
@@ -497,7 +497,7 @@ typedef struct {
   bool defined, is_private, macro;
 } oti_global_info;
 
-struct ot_runtime {
+struct ot_state {
   oti_heap heap;
   ot_value process_values[2];
   oti_roots process_roots;
@@ -578,91 +578,91 @@ struct ot_runtime {
 void oti_free_function(oti_function* fn);
 /* Read an open file to the end and close it. The result is NUL-terminated and
  * owned by the caller. what names the file in error messages. */
-char* oti_read_file(ot_runtime* rt, FILE* file, size_t limit, const char* what, size_t* length);
-bool oti_reclaim(ot_runtime* rt);
-bool oti_coded_error(ot_runtime* rt, const char* code, const char* message);
+char* oti_read_file(ot_state* rt, FILE* file, size_t limit, const char* what, size_t* length);
+bool oti_reclaim(ot_state* rt);
+bool oti_coded_error(ot_state* rt, const char* code, const char* message);
 /* Record an error and return 0, the failure result of a builtin. */
-ot_value oti_fail(ot_runtime* rt, const char* message);
+ot_value oti_fail(ot_state* rt, const char* message);
 /* A new pair. car and cdr are rooted across the allocation. */
-ot_value oti_cons(ot_runtime* rt, ot_value car, ot_value cdr);
-bool oti_error(ot_runtime* rt, const char* message);
-bool oti_host_entry(ot_runtime* rt);
-bool oti_grow(ot_runtime* rt, void** data, size_t* capacity, size_t needed, size_t width);
-bool oti_stack(ot_runtime* rt, size_t needed);
-ot_value oti_alloc(ot_runtime* rt, uint32_t kind, uint32_t fields, size_t bytes);
-uint32_t oti_global(ot_runtime* rt, const char* name, size_t length);
-uint32_t oti_lookup_global(ot_runtime* rt, const char* name, size_t length);
-uint32_t oti_resolve_global(ot_runtime* rt, const char* name, size_t length);
-uint32_t oti_namespace(ot_runtime* rt, const char* name, size_t length);
-bool oti_require(ot_runtime* rt, const oti_ast* specs);
-void oti_modules_destroy(ot_runtime* rt);
-uint32_t oti_binding_global(ot_runtime* rt, uint32_t space, const char* name, size_t length,
+ot_value oti_cons(ot_state* rt, ot_value car, ot_value cdr);
+bool oti_error(ot_state* rt, const char* message);
+bool oti_host_entry(ot_state* rt);
+bool oti_grow(ot_state* rt, void** data, size_t* capacity, size_t needed, size_t width);
+bool oti_stack(ot_state* rt, size_t needed);
+ot_value oti_alloc(ot_state* rt, uint32_t kind, uint32_t fields, size_t bytes);
+uint32_t oti_global(ot_state* rt, const char* name, size_t length);
+uint32_t oti_lookup_global(ot_state* rt, const char* name, size_t length);
+uint32_t oti_resolve_global(ot_state* rt, const char* name, size_t length);
+uint32_t oti_namespace(ot_state* rt, const char* name, size_t length);
+bool oti_require(ot_state* rt, const oti_ast* specs);
+void oti_modules_destroy(ot_state* rt);
+uint32_t oti_binding_global(ot_state* rt, uint32_t space, const char* name, size_t length,
                             bool create);
-uint32_t oti_import_global_in(ot_runtime* rt, uint32_t space, const char* name, size_t length);
-uint32_t oti_import_global(ot_runtime* rt, const char* name, size_t length);
-uint32_t oti_alias_namespace(ot_runtime* rt, const char* name, size_t length);
-uint32_t oti_constant(ot_runtime* rt, ot_value value);
-ot_value oti_text(ot_runtime* rt, uint32_t kind, const char* text, size_t length);
-ot_value oti_float(ot_runtime* rt, double number);
-ot_value oti_evaluator(ot_runtime* rt, uint32_t space);
-ot_value oti_eval_value(ot_runtime* rt, ot_value value);
-oti_ast* oti_syntax_value(ot_runtime* rt, ot_value value, oti_arena* arena);
-ot_value oti_read_string(ot_runtime* rt, ot_value string);
-oti_ast* oti_expand_form(ot_runtime* rt, const oti_ast* form, oti_arena* arena);
-bool oti_compile(ot_runtime* rt, const oti_ast* form, uint32_t* function);
-bool oti_execute(ot_runtime* rt, uint32_t function, ot_value* result);
-bool oti_drive(ot_runtime* rt, size_t stop_frames);
-bool oti_invoke(ot_runtime* rt, size_t argc, ot_value* result);
-bool oti_apply(ot_runtime* rt, size_t call, size_t argc, bool tail);
-void oti_restore_params(ot_runtime* rt, size_t count);
-bool oti_bind_param(ot_runtime* rt, ot_value param, ot_value value);
-ot_value oti_param_call(ot_runtime* rt, ot_value param, size_t count);
-bool oti_builtins(ot_runtime* rt);
-ot_value oti_reflection_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
-bool oti_classes_init(ot_runtime* rt);
-bool oti_generic_prepare(ot_runtime* rt, size_t call, size_t* count);
+uint32_t oti_import_global_in(ot_state* rt, uint32_t space, const char* name, size_t length);
+uint32_t oti_import_global(ot_state* rt, const char* name, size_t length);
+uint32_t oti_alias_namespace(ot_state* rt, const char* name, size_t length);
+uint32_t oti_constant(ot_state* rt, ot_value value);
+ot_value oti_text(ot_state* rt, uint32_t kind, const char* text, size_t length);
+ot_value oti_float(ot_state* rt, double number);
+ot_value oti_evaluator(ot_state* rt, uint32_t space);
+ot_value oti_eval_value(ot_state* rt, ot_value value);
+oti_ast* oti_syntax_value(ot_state* rt, ot_value value, oti_arena* arena);
+ot_value oti_read_string(ot_state* rt, ot_value string);
+oti_ast* oti_expand_form(ot_state* rt, const oti_ast* form, oti_arena* arena);
+bool oti_compile(ot_state* rt, const oti_ast* form, uint32_t* function);
+bool oti_execute(ot_state* rt, uint32_t function, ot_value* result);
+bool oti_drive(ot_state* rt, size_t stop_frames);
+bool oti_invoke(ot_state* rt, size_t argc, ot_value* result);
+bool oti_apply(ot_state* rt, size_t call, size_t argc, bool tail);
+void oti_restore_params(ot_state* rt, size_t count);
+bool oti_bind_param(ot_state* rt, ot_value param, ot_value value);
+ot_value oti_param_call(ot_state* rt, ot_value param, size_t count);
+bool oti_builtins(ot_state* rt);
+ot_value oti_reflection_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
+bool oti_classes_init(ot_state* rt);
+bool oti_generic_prepare(ot_state* rt, size_t call, size_t* count);
 size_t oti_format_float(double value, char* buffer, size_t size);
-bool oti_number(ot_runtime* rt, ot_value value, double* result);
+bool oti_number(ot_state* rt, ot_value value, double* result);
 int oti_integer_real(intptr_t integer, double real);
 size_t oti_utf8_next(const char* s, size_t n, size_t p, uint32_t* cp);
 size_t oti_utf8_encode(uint32_t cp, char bytes[4]);
 ot_value oti_string_get(ot_value string, ot_value key, ot_value fallback);
-ot_value oti_string_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
+ot_value oti_string_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 
 typedef struct {
   size_t length, capacity, characters;
 } oti_buffer_info;
 
-ot_value oti_numeric_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
-ot_value oti_class_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
-ot_value oti_condition_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
-ot_value oti_error_condition(ot_runtime* rt);
-ot_value oti_raise(ot_runtime* rt, size_t first, size_t count);
-ot_value oti_signal(ot_runtime* rt, size_t first, size_t count);
-void oti_signal_error(ot_runtime* rt);
-void oti_restore_handlers(ot_runtime* rt, size_t count, size_t top);
-bool oti_install_handlers(ot_runtime* rt, size_t first, size_t count);
-void oti_remove_handlers(ot_runtime* rt, size_t count);
-ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
-ot_value oti_intern(ot_runtime* rt, unsigned kind, const char* text, size_t length);
-ot_value oti_call_list(ot_runtime* rt, ot_value function, ot_value args);
+ot_value oti_numeric_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
+ot_value oti_class_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
+ot_value oti_condition_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
+ot_value oti_error_condition(ot_state* rt);
+ot_value oti_raise(ot_state* rt, size_t first, size_t count);
+ot_value oti_signal(ot_state* rt, size_t first, size_t count);
+void oti_signal_error(ot_state* rt);
+void oti_restore_handlers(ot_state* rt, size_t count, size_t top);
+bool oti_install_handlers(ot_state* rt, size_t first, size_t count);
+void oti_remove_handlers(ot_state* rt, size_t count);
+ot_value oti_support_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
+ot_value oti_intern(ot_state* rt, unsigned kind, const char* text, size_t length);
+ot_value oti_call_list(ot_state* rt, ot_value function, ot_value args);
 uint64_t oti_symbol_id(ot_value symbol);
-ot_value oti_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
+ot_value oti_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 int oti_builtin_index(const char* name);
-bool oti_enter(ot_runtime* rt, size_t call, size_t argc, bool tail);
-bool oti_leave(ot_runtime* rt, ot_value result);
+bool oti_enter(ot_state* rt, size_t call, size_t argc, bool tail);
+bool oti_leave(ot_state* rt, ot_value result);
 
 typedef struct {
   bool abstract, builtin;
 } oti_class_info;
 
 bool oti_subtype(ot_value child, ot_value parent);
-ot_value oti_dispatch_type(ot_runtime* rt, ot_value value);
-ot_value oti_instance_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
-ot_value oti_instance_call(ot_runtime* rt, ot_value instance, size_t first, size_t count);
-ot_value oti_instance_copy(ot_runtime* rt, ot_value instance);
-ot_value oti_record_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
-ot_value oti_record_call(ot_runtime* rt, ot_value record, size_t first, size_t count);
+ot_value oti_dispatch_type(ot_state* rt, ot_value value);
+ot_value oti_instance_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
+ot_value oti_instance_call(ot_state* rt, ot_value instance, size_t first, size_t count);
+ot_value oti_instance_copy(ot_state* rt, ot_value instance);
+ot_value oti_record_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
+ot_value oti_record_call(ot_state* rt, ot_value record, size_t first, size_t count);
 
 typedef struct {
   size_t length, capacity;
@@ -672,25 +672,25 @@ typedef struct {
   size_t count, used, capacity;
 } oti_table_info;
 
-ot_value oti_equal(ot_runtime* rt, ot_value a, ot_value b, bool keys);
-ot_value oti_table_set(ot_runtime* rt, ot_value table, ot_value key, ot_value value);
-ot_value oti_table_get(ot_runtime* rt, ot_value table, ot_value key, ot_value fallback);
-ot_value oti_table_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
+ot_value oti_equal(ot_state* rt, ot_value a, ot_value b, bool keys);
+ot_value oti_table_set(ot_state* rt, ot_value table, ot_value key, ot_value value);
+ot_value oti_table_get(ot_state* rt, ot_value table, ot_value key, ot_value fallback);
+ot_value oti_table_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 
 static inline bool oti_collection(ot_value v) {
   return value_is_ptr(v) &&
          (object_kind(v) == K_ARRAY || object_kind(v) == K_TABLE || object_kind(v) == K_KEYWORD);
 }
 
-ot_value oti_collection_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
-ot_value oti_collection_call(ot_runtime* rt, size_t callable, size_t first, size_t count);
-void oti_foreign_collect(ot_runtime* rt);
-void oti_foreign_stats(const ot_runtime* rt, ot_stats* stats);
-bool oti_foreign_init(ot_runtime* rt);
-void oti_foreign_destroy(ot_runtime* rt);
-ot_value oti_foreign_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
+ot_value oti_collection_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
+ot_value oti_collection_call(ot_state* rt, size_t callable, size_t first, size_t count);
+void oti_foreign_collect(ot_state* rt);
+void oti_foreign_stats(const ot_state* rt, ot_stats* stats);
+bool oti_foreign_init(ot_state* rt);
+void oti_foreign_destroy(ot_state* rt);
+ot_value oti_foreign_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 bool oti_foreign_owned(ot_value value);
-ot_value oti_foreign_call(ot_runtime* rt, size_t callable, size_t first, size_t count);
+ot_value oti_foreign_call(ot_state* rt, size_t callable, size_t first, size_t count);
 
 static inline bool oti_kind(ot_value v, unsigned kind) {
   return value_is_ptr(v) && object_kind(v) == kind;
@@ -713,29 +713,29 @@ static inline bool oti_natural(ot_value v, size_t* n) {
 
 size_t oti_bytes_length(ot_value v);
 unsigned char* oti_bytes_data(ot_value v);
-ot_value oti_bytes_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
-ot_value oti_decode_error(ot_runtime* rt, size_t position);
+ot_value oti_bytes_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
+ot_value oti_decode_error(ot_state* rt, size_t position);
 
-ot_value oti_restart_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
-bool oti_install_restarts(ot_runtime* rt, size_t first, size_t count, size_t target);
-void oti_restore_restarts(ot_runtime* rt, size_t scopes);
-bool oti_resume_restart(ot_runtime* rt, size_t stop_frames);
-bool oti_install_cleanup(ot_runtime* rt, bool outcome);
-bool oti_run_cleanup(ot_runtime* rt, bool unwinding);
-void oti_restore_cleanups(ot_runtime* rt, size_t count);
-ot_value oti_time_builtin(ot_runtime* rt, unsigned id, size_t count);
-ot_value oti_port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
-ot_value oti_port_print(ot_runtime* rt, unsigned id, size_t first, size_t count);
-ot_value oti_io_error(ot_runtime* rt, const char* reason);
-ot_value oti_bytes_new(ot_runtime* rt, size_t n);
+ot_value oti_restart_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
+bool oti_install_restarts(ot_state* rt, size_t first, size_t count, size_t target);
+void oti_restore_restarts(ot_state* rt, size_t scopes);
+bool oti_resume_restart(ot_state* rt, size_t stop_frames);
+bool oti_install_cleanup(ot_state* rt, bool outcome);
+bool oti_run_cleanup(ot_state* rt, bool unwinding);
+void oti_restore_cleanups(ot_state* rt, size_t count);
+ot_value oti_time_builtin(ot_state* rt, unsigned id, size_t count);
+ot_value oti_port_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
+ot_value oti_port_print(ot_state* rt, unsigned id, size_t first, size_t count);
+ot_value oti_io_error(ot_state* rt, const char* reason);
+ot_value oti_bytes_new(ot_state* rt, size_t n);
 size_t oti_utf8_scalar(const unsigned char* s, size_t p, size_t end);
 void oti_port_repr(FILE* out, ot_value port);
-ot_value oti_read_source(ot_runtime* rt, const char* source, size_t length);
-ot_value oti_process_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
-ot_value oti_tokens(ot_runtime* rt, size_t first, size_t count);
-ot_value oti_filesystem_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count);
-void oti_ports_destroy(ot_runtime* rt);
-ot_value oti_file_error(ot_runtime* rt, const char* op, ot_value path, int error);
-ot_value oti_ffi_error(ot_runtime* rt, const char* operation, const char* reason,
+ot_value oti_read_source(ot_state* rt, const char* source, size_t length);
+ot_value oti_process_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
+ot_value oti_tokens(ot_state* rt, size_t first, size_t count);
+ot_value oti_filesystem_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
+void oti_ports_destroy(ot_state* rt);
+ot_value oti_file_error(ot_state* rt, const char* op, ot_value path, int error);
+ot_value oti_ffi_error(ot_state* rt, const char* operation, const char* reason,
                        const char* message);
 #endif

@@ -3,12 +3,12 @@
 #include <string.h>
 
 /* Every evaluation must leave no cleanup frames or cleanup roots behind. */
-static void check_no_cleanups(ot_runtime* rt) {
+static void check_no_cleanups(ot_state* rt) {
   CHECK(!rt->cleanup_count && !rt->cleanup_roots.count);
 }
 
-static ot_runtime* new_cleanup_runtime(void) {
-  ot_runtime* rt = new_core_runtime();
+static ot_state* new_cleanup_runtime(void) {
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   eval(rt, "(def events []) (def (record x) (push! events x)) (defparam p :default)");
   check_no_cleanups(rt);
@@ -17,7 +17,7 @@ static ot_runtime* new_cleanup_runtime(void) {
 
 /* Some cases check the events recorded by the case before them. */
 TEST(cleanups_run_on_every_exit) {
-  ot_runtime* rt = new_cleanup_runtime();
+  ot_state* rt = new_cleanup_runtime();
   const char* checks[] = {
       "(begin (set! events []) (= (unwind-protect 42 (record :normal)) 42))",
       "(equal? events [:normal])",
@@ -65,7 +65,7 @@ TEST(cleanups_run_on_every_exit) {
 }
 
 TEST(quit_and_exit_run_cleanups) {
-  ot_runtime* rt = new_cleanup_runtime();
+  ot_state* rt = new_cleanup_runtime();
   const char* quit = "(set! events []) (try (call-with-cleanup (fn () (quit 7)) (fn (o) (record o) "
                      "(error :release))) (catch e (record e)))";
   ot_value result;
@@ -86,7 +86,7 @@ TEST(quit_and_exit_run_cleanups) {
 }
 
 TEST(deep_unwind_runs_every_cleanup) {
-  ot_runtime* rt = new_cleanup_runtime();
+  ot_state* rt = new_cleanup_runtime();
   ot_gc_stress(rt, false);
   eval(rt, "(def (deep n) (unwind-protect (if (= n 0) (error :bottom) (deep (- n 1))) (record n))) "
            "(set! events [])");

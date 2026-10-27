@@ -3,7 +3,7 @@
 
 /* Later checks redefine names documented by earlier ones. */
 TEST(types_documentation_and_eof) {
-  ot_runtime* rt = new_core_runtime();
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   const char* checks[] = {
       "(equal? (map type (list nil '() #f 1 1.0 'a :a #\\a \"a\" '(a) [] {} (buffer) +)) '(:nil "

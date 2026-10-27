@@ -2,7 +2,7 @@
 
 /* Later steps redefine macros and functions from earlier ones. */
 TEST(macros_expand_and_redefine) {
-  ot_runtime* rt = new_runtime(32768, 8192);
+  ot_state* rt = new_runtime(32768, 8192);
   ot_gc_stress(rt, true);
   CHECK(eval(rt, "(defmacro twice (x) `(+ ,x ,x))") == OT_NIL);
   check_int(rt, "(twice 21)", 42);

@@ -7,7 +7,7 @@ typedef struct {
 
 static oti_method_info* method_info(ot_value method) { return object_bytes(method); }
 
-static ot_value cons(ot_runtime* rt, ot_value a, ot_value b);
+static ot_value cons(ot_state* rt, ot_value a, ot_value b);
 
 static size_t arity(ot_value generic) {
   size_t n;
@@ -23,7 +23,7 @@ bool oti_subtype(ot_value child, ot_value parent) {
   return false;
 }
 
-bool oti_classes_init(ot_runtime* rt) {
+bool oti_classes_init(ot_state* rt) {
   if (rt->classes_ready) return true;
   static const char* names[C_COUNT] = {
       "Object",         "Number", "Boolean", "Character",  "String",    "Symbol",
@@ -63,7 +63,7 @@ bool oti_classes_init(ot_runtime* rt) {
   return ok;
 }
 
-ot_value oti_dispatch_type(ot_runtime* rt, ot_value v) {
+ot_value oti_dispatch_type(ot_state* rt, ot_value v) {
   if (oti_kind(v, K_INSTANCE)) return object_fields(v)[0];
   unsigned kind = C_OBJECT;
   if (ot_is_int(v) || oti_kind(v, K_FLOAT)) kind = C_NUMBER;
@@ -89,7 +89,7 @@ ot_value oti_dispatch_type(ot_runtime* rt, ot_value v) {
   return rt->classes[kind];
 }
 
-static bool applicable(ot_runtime* rt, ot_value signature, size_t first) {
+static bool applicable(ot_state* rt, ot_value signature, size_t first) {
   for (size_t i = 0; signature != OT_EMPTY; i++, signature = object_fields(signature)[1])
     if (!oti_subtype(oti_dispatch_type(rt, rt->stack[first + i]), object_fields(signature)[0]))
       return false;
@@ -108,7 +108,7 @@ static bool more_specific(ot_value a, ot_value b) {
   return strict;
 }
 
-bool oti_generic_prepare(ot_runtime* rt, size_t call, size_t* count) {
+bool oti_generic_prepare(ot_state* rt, size_t call, size_t* count) {
   ot_value callable = rt->stack[call];
   if (*count != arity(callable)) return oti_error(rt, "wrong number of generic arguments");
   bool initial = oti_kind(callable, K_GENERIC);
@@ -181,7 +181,7 @@ bool oti_generic_prepare(ot_runtime* rt, size_t call, size_t* count) {
   return ok;
 }
 
-static ot_value cons(ot_runtime* rt, ot_value a, ot_value b) {
+static ot_value cons(ot_state* rt, ot_value a, ot_value b) {
   ot_value slots[] = {a, b};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, slots, 2);
@@ -194,7 +194,7 @@ static ot_value cons(ot_runtime* rt, ot_value a, ot_value b) {
   return pair;
 }
 
-static ot_value copy_signature(ot_runtime* rt, ot_value source) {
+static ot_value copy_signature(ot_state* rt, ot_value source) {
   ot_value slots[] = {source, OT_EMPTY, OT_EMPTY};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, slots, 3);
@@ -216,7 +216,7 @@ static ot_value copy_signature(ot_runtime* rt, ot_value source) {
   return result;
 }
 
-ot_value oti_class_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_class_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   if (id >= B_MAKE_RECORD_TYPE) return oti_record_builtin(rt, id, first, count);
   if (id >= B_CLASS_DEFINE) return oti_instance_builtin(rt, id, first, count);
   size_t needed = id == B_GENERIC_METHOD                           ? 5

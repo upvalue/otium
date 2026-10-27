@@ -1,11 +1,11 @@
 #include "internal.h"
 #include <string.h>
 
-void oti_restore_cleanups(ot_runtime* rt, size_t count) {
+void oti_restore_cleanups(ot_state* rt, size_t count) {
   rt->cleanup_count = rt->cleanup_roots.count = count;
 }
 
-bool oti_install_cleanup(ot_runtime* rt, bool outcome) {
+bool oti_install_cleanup(ot_state* rt, bool outcome) {
   size_t count = rt->cleanup_count;
   if (count >= rt->stack_limit) return oti_error(rt, "cleanup limit exceeded");
   if (!oti_grow(rt, (void**)&rt->cleanup_states, &rt->cleanup_state_capacity, count + 1,
@@ -23,7 +23,7 @@ bool oti_install_cleanup(ot_runtime* rt, bool outcome) {
   return true;
 }
 
-bool oti_run_cleanup(ot_runtime* rt, bool unwinding) {
+bool oti_run_cleanup(ot_state* rt, bool unwinding) {
   if (!rt->cleanup_count) return oti_error(rt, "invalid cleanup stack");
   size_t index = rt->cleanup_count - 1;
   oti_cleanup cleanup = rt->cleanup_states[index];

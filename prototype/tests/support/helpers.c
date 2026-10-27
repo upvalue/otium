@@ -3,27 +3,27 @@
 #include <stdlib.h>
 #include <string.h>
 
-ot_runtime* new_runtime(size_t semispace_bytes, size_t stack_limit) {
-  ot_runtime* rt = ot_create(semispace_bytes, stack_limit);
+ot_state* new_runtime(size_t semispace_bytes, size_t stack_limit) {
+  ot_state* rt = ot_create(semispace_bytes, stack_limit);
   CHECK(rt);
   return rt;
 }
 
-ot_runtime* new_core_runtime(void) {
-  ot_runtime* rt = new_runtime(1024 * 1024, 128 * 1024);
+ot_state* new_core_runtime(void) {
+  ot_state* rt = new_runtime(1024 * 1024, 128 * 1024);
   if (!ot_load_core(rt, TEST_LIBRARY_DIR))
     test_fail(__FILE__, __LINE__, "cannot load core: %s", ot_error(rt));
   return rt;
 }
 
-ot_value eval(ot_runtime* rt, const char* source) {
+ot_value eval(ot_state* rt, const char* source) {
   ot_value result;
   if (!ot_eval(rt, source, strlen(source), &result))
     test_fail(__FILE__, __LINE__, "%s\n  error: %s", source, ot_error(rt));
   return result;
 }
 
-void eval_file(ot_runtime* rt, const char* path) {
+void eval_file(ot_state* rt, const char* path) {
   size_t length;
   char* source = read_file(path, &length);
   ot_value result;
@@ -32,27 +32,27 @@ void eval_file(ot_runtime* rt, const char* path) {
   free(source);
 }
 
-void check_true(ot_runtime* rt, const char* source) {
+void check_true(ot_state* rt, const char* source) {
   ot_value result = eval(rt, source);
   if (result != OT_TRUE)
     test_fail(__FILE__, __LINE__, "%s\n  expected #t, got %s", source, printed(rt, result));
 }
 
-void check_int(ot_runtime* rt, const char* source, intptr_t expected) {
+void check_int(ot_state* rt, const char* source, intptr_t expected) {
   ot_value result = eval(rt, source);
   if (result != ot_int(expected))
     test_fail(__FILE__, __LINE__, "%s\n  expected %ld, got %s", source, (long)expected,
               printed(rt, result));
 }
 
-void check_printed(ot_runtime* rt, const char* source, const char* expected) {
+void check_printed(ot_state* rt, const char* source, const char* expected) {
   char* text = printed(rt, eval(rt, source));
   if (strcmp(text, expected))
     test_fail(__FILE__, __LINE__, "%s\n  expected %s, got %s", source, expected, text);
   free(text);
 }
 
-void check_error(ot_runtime* rt, const char* source, const char* message) {
+void check_error(ot_state* rt, const char* source, const char* message) {
   ot_value result;
   if (ot_eval(rt, source, strlen(source), &result))
     test_fail(__FILE__, __LINE__, "%s\n  expected error containing \"%s\", got %s", source, message,
@@ -63,7 +63,7 @@ void check_error(ot_runtime* rt, const char* source, const char* message) {
   check_int(rt, "(+ 20 22)", 42);
 }
 
-char* printed(ot_runtime* rt, ot_value value) {
+char* printed(ot_state* rt, ot_value value) {
   char* text = NULL;
   size_t size = 0;
   FILE* out = open_memstream(&text, &size);

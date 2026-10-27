@@ -2,7 +2,7 @@
 #include "internal.h"
 #include <string.h>
 
-static oti_function* function(ot_runtime* rt, const char* name) {
+static oti_function* function(ot_state* rt, const char* name) {
   for (size_t i = 0; i < rt->global_count; i++)
     if (!strcmp(rt->global_info[i].name, name)) {
       CHECK(oti_kind(rt->globals[i], K_CLOSURE));
@@ -17,7 +17,7 @@ TEST(sequential_scopes_share_slots) {
   char source[8192] = "(def (many) ";
   for (size_t i = 0; i < 256; i++) strcat(source, "(let ((x 42)) x) ");
   strcat(source, "42) (many)");
-  ot_runtime* rt = new_runtime(16384, 32);
+  ot_state* rt = new_runtime(16384, 32);
   ot_gc_stress(rt, true);
   check_int(rt, source, 42);
   /* Sequential scopes reuse registers: result, discarded value and binding. */
@@ -26,7 +26,7 @@ TEST(sequential_scopes_share_slots) {
 }
 
 TEST(captured_and_nested_scopes) {
-  ot_runtime* rt = new_runtime(16384, 32);
+  ot_state* rt = new_runtime(16384, 32);
   ot_gc_stress(rt, true);
   check_int(rt,
             "(def (mixed) (let ((a nil) (b nil) (c 0)) "

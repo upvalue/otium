@@ -8,7 +8,7 @@ static ot_value* items(ot_value a) {
   return array_info(a)->capacity ? object_fields(object_fields(a)[0]) : NULL;
 }
 
-static bool reserve(ot_runtime* rt, ot_value* array, size_t needed) {
+static bool reserve(ot_state* rt, ot_value* array, size_t needed) {
   size_t capacity = array_info(*array)->capacity;
   if (needed <= capacity) return true;
   if (needed > UINT32_MAX) return oti_error(rt, "array too large");
@@ -28,7 +28,7 @@ static bool reserve(ot_runtime* rt, ot_value* array, size_t needed) {
   return storage != 0;
 }
 
-static ot_value array_new(ot_runtime* rt, size_t length) {
+static ot_value array_new(ot_state* rt, size_t length) {
   ot_value a = oti_alloc(rt, K_ARRAY, 1, sizeof(oti_array_info));
   if (!a) return 0;
   *array_info(a) = (oti_array_info){0, 0};
@@ -42,7 +42,7 @@ static bool index_of(ot_value key, size_t length, size_t* index) {
   return *index < length;
 }
 
-static ot_value get(ot_runtime* rt, ot_value a, ot_value key, ot_value fallback) {
+static ot_value get(ot_state* rt, ot_value a, ot_value key, ot_value fallback) {
   if (a == OT_NIL) return fallback;
   if (oti_kind(a, K_BYTEVECTOR)) {
     size_t index;
@@ -55,7 +55,7 @@ static ot_value get(ot_runtime* rt, ot_value a, ot_value key, ot_value fallback)
   return index_of(key, array_info(a)->length, &index) ? items(a)[index] : fallback;
 }
 
-ot_value oti_collection_call(ot_runtime* rt, size_t callable, size_t first, size_t count) {
+ot_value oti_collection_call(ot_state* rt, size_t callable, size_t first, size_t count) {
   if (count < 1 || count > 2) return oti_fail(rt, "array call needs an index and optional default");
   ot_value a = rt->stack[callable], b = rt->stack[first];
   ot_value fallback = count == 2 ? rt->stack[first + 1] : OT_NIL;
@@ -79,7 +79,7 @@ static size_t pair_hash(oti_comparison p) {
 
 /* No managed allocation occurs during equality. The work list and seen set can
  * safely hold heap addresses, including cycles, until this call returns. */
-ot_value oti_equal(ot_runtime* rt, ot_value a, ot_value b, bool keys) {
+ot_value oti_equal(ot_state* rt, ot_value a, ot_value b, bool keys) {
   if (a == b) return OT_TRUE;
   if (!value_is_ptr(a) || !value_is_ptr(b) || object_kind(a) != object_kind(b)) return OT_FALSE;
   oti_comparison *work = NULL, *seen = NULL;
@@ -166,7 +166,7 @@ ot_value oti_equal(ot_runtime* rt, ot_value a, ot_value b, bool keys) {
   return result;
 }
 
-ot_value oti_collection_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_collection_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   if (id >= B_TABLE || (count && oti_kind(rt->stack[first], K_TABLE) && id != B_ARRAY &&
                         id != B_EQUAL && id != B_ARRAY_P))
     return oti_table_builtin(rt, id, first, count);

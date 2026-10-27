@@ -23,7 +23,7 @@ struct oti_module_state {
   size_t import_count, import_capacity;
 };
 
-static oti_module_state* state(ot_runtime* rt) {
+static oti_module_state* state(ot_state* rt) {
   if (!rt->modules) {
     rt->modules = calloc(1, sizeof(oti_module_state));
     if (!rt->modules) oti_error(rt, "out of host memory");
@@ -31,7 +31,7 @@ static oti_module_state* state(ot_runtime* rt) {
   return rt->modules;
 }
 
-static char* copy_text(ot_runtime* rt, const char* s, size_t n) {
+static char* copy_text(ot_state* rt, const char* s, size_t n) {
   char* copy = malloc(n + 1);
   if (!copy) {
     oti_error(rt, "out of host memory");
@@ -42,7 +42,7 @@ static char* copy_text(ot_runtime* rt, const char* s, size_t n) {
   return copy;
 }
 
-bool ot_add_load_path(ot_runtime* rt, const char* path) {
+bool ot_add_load_path(ot_state* rt, const char* path) {
   if (!oti_host_entry(rt)) return false;
   oti_module_state* m = state(rt);
   if (!m || !oti_grow(rt, (void**)&m->paths, &m->path_capacity, m->path_count + 1, sizeof(char*)))
@@ -53,7 +53,7 @@ bool ot_add_load_path(ot_runtime* rt, const char* path) {
   return true;
 }
 
-bool ot_add_project_paths(ot_runtime* rt, const char* project_file) {
+bool ot_add_project_paths(ot_state* rt, const char* project_file) {
   if (!oti_host_entry(rt)) return false;
   FILE* file = fopen(project_file, "rb");
   if (!file) return oti_error(rt, "cannot open project file");
@@ -98,7 +98,7 @@ bool ot_add_project_paths(ot_runtime* rt, const char* project_file) {
   return ok;
 }
 
-void oti_modules_destroy(ot_runtime* rt) {
+void oti_modules_destroy(ot_state* rt) {
   oti_module_state* m = rt->modules;
   if (!m) return;
   for (size_t i = 0; i < m->path_count; i++) free(m->paths[i]);
@@ -109,7 +109,7 @@ void oti_modules_destroy(ot_runtime* rt) {
   free(m);
 }
 
-static uint32_t lookup_import(ot_runtime* rt, uint32_t owner, const char* name, size_t length,
+static uint32_t lookup_import(ot_state* rt, uint32_t owner, const char* name, size_t length,
                               bool alias) {
   oti_module_state* m = rt->modules;
   if (m)
@@ -122,19 +122,19 @@ static uint32_t lookup_import(ot_runtime* rt, uint32_t owner, const char* name, 
   return UINT32_MAX;
 }
 
-uint32_t oti_import_global_in(ot_runtime* rt, uint32_t space, const char* name, size_t length) {
+uint32_t oti_import_global_in(ot_state* rt, uint32_t space, const char* name, size_t length) {
   return lookup_import(rt, space, name, length, false);
 }
 
-uint32_t oti_import_global(ot_runtime* rt, const char* name, size_t length) {
+uint32_t oti_import_global(ot_state* rt, const char* name, size_t length) {
   return lookup_import(rt, rt->current_namespace, name, length, false);
 }
 
-uint32_t oti_alias_namespace(ot_runtime* rt, const char* name, size_t length) {
+uint32_t oti_alias_namespace(ot_state* rt, const char* name, size_t length) {
   return lookup_import(rt, rt->current_namespace, name, length, true);
 }
 
-static bool install_import(ot_runtime* rt, const oti_ast* name, uint32_t target, bool alias) {
+static bool install_import(ot_state* rt, const oti_ast* name, uint32_t target, bool alias) {
   oti_module_state* m = state(rt);
   if (!m) return false;
   for (size_t i = 0; i < m->import_count; i++) {
@@ -155,7 +155,7 @@ static bool install_import(ot_runtime* rt, const oti_ast* name, uint32_t target,
   return true;
 }
 
-static bool load_module(ot_runtime* rt, uint32_t space, bool reload, bool legacy_ffi) {
+static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_ffi) {
   oti_module_state* m = state(rt);
   if (!m) return false;
   const char* name = rt->namespaces[space];
@@ -221,7 +221,7 @@ static bool keyword(const oti_ast* a, const char* name) {
          !memcmp(a->as.text.data, name, a->as.text.size);
 }
 
-static bool one_require(ot_runtime* rt, const oti_ast** cursor) {
+static bool one_require(ot_state* rt, const oti_ast** cursor) {
   const oti_ast* module = *cursor;
   if (!module || module->kind != AST_SYMBOL) return oti_error(rt, "require needs a module name");
   const oti_ast *p = module->next, *alias = NULL, *refer = NULL;
@@ -287,7 +287,7 @@ static bool one_require(ot_runtime* rt, const oti_ast** cursor) {
   return !alias || install_import(rt, alias, space, true);
 }
 
-bool oti_require(ot_runtime* rt, const oti_ast* specs) {
+bool oti_require(ot_state* rt, const oti_ast* specs) {
   if (!specs) return true;
   const oti_ast* p = specs;
   while (p) {

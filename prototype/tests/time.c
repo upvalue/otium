@@ -16,14 +16,14 @@ static double second(void) {
   return (double)t.tv_sec + (double)t.tv_nsec / 1e9;
 }
 
-static ot_runtime* clock_runtime(void) {
-  ot_runtime* rt = new_core_runtime();
+static ot_state* clock_runtime(void) {
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   return rt;
 }
 
 TEST(clocks_match_host_clocks) {
-  ot_runtime* rt = clock_runtime();
+  ot_state* rt = clock_runtime();
   ot_value value;
   CHECK(ot_call(rt, "jiffies-per-second", NULL, 0, &value));
   CHECK(value == ot_int(1000000000));
@@ -45,14 +45,14 @@ TEST(clocks_match_host_clocks) {
 }
 
 TEST(time_library_seconds) {
-  ot_runtime* rt = clock_runtime();
+  ot_state* rt = clock_runtime();
   check_true(rt, "(require otium.time :as clock) (let ((before (clock/seconds)) (after "
                  "(clock/seconds))) (<= before after))");
   ot_destroy(rt);
 }
 
 TEST(clock_procedures_reject_arguments) {
-  ot_runtime* rt = clock_runtime();
+  ot_state* rt = clock_runtime();
   const char* names[] = {"current-jiffy", "current-second", "jiffies-per-second"};
   ot_value arg = ot_int(0), value;
   for (size_t i = 0; i < 3; i++) CHECK(!ot_call(rt, names[i], &arg, 1, &value));

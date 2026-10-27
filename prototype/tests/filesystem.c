@@ -7,7 +7,7 @@
 TEST(filesystem_metadata_and_symlinks) {
   char root[] = "/tmp/otium-fs-XXXXXX";
   CHECK(mkdtemp(root));
-  ot_runtime* rt = new_core_runtime();
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   const char* args[] = {root};
   CHECK(ot_set_arguments(rt, NULL, 1, args));

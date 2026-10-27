@@ -71,7 +71,7 @@ static int posix_close(void* userdata, intptr_t handle) {
 
 static const ot_io_host posix_host = {posix_open, posix_read, posix_write, posix_close, NULL};
 
-bool ot_set_io_host(ot_runtime* rt, const ot_io_host* host, void* userdata) {
+bool ot_set_io_host(ot_state* rt, const ot_io_host* host, void* userdata) {
   if (!oti_host_entry(rt)) return false;
   if (host && (!host->open || !host->read || !host->write || !host->close))
     return oti_error(rt, "I/O host requires open, read, write and close callbacks");
@@ -81,17 +81,17 @@ bool ot_set_io_host(ot_runtime* rt, const ot_io_host* host, void* userdata) {
   return true;
 }
 
-static void port_host(ot_runtime* rt, ot_value port) {
+static void port_host(ot_state* rt, ot_value port) {
   port_info(port)->host = rt->io_host_set ? rt->io_host : posix_host;
   port_info(port)->userdata = rt->io_host_set ? rt->io_userdata : NULL;
 }
 
-static void host_begin(ot_runtime* rt, ot_value port) {
+static void host_begin(ot_state* rt, ot_value port) {
   rt->host_io_active = true;
   port_info(port)->busy = true;
 }
 
-static bool host_end(ot_runtime* rt, ot_value port) {
+static bool host_end(ot_state* rt, ot_value port) {
   rt->host_io_active = false;
   port_info(port)->busy = false;
   if (!rt->host_io_reentry) return true;
@@ -99,7 +99,7 @@ static bool host_end(ot_runtime* rt, ot_value port) {
   return oti_error(rt, "host I/O callback cannot reenter Otium");
 }
 
-static bool register_port(ot_runtime* rt, ot_value p) {
+static bool register_port(ot_state* rt, ot_value p) {
   if (!oti_grow(rt, (void**)&rt->open_ports, &rt->open_port_capacity, rt->open_port_count + 1,
                 sizeof(ot_value)))
     return false;
@@ -109,7 +109,7 @@ static bool register_port(ot_runtime* rt, ot_value p) {
   return true;
 }
 
-static void unregister_port(ot_runtime* rt, ot_value p) {
+static void unregister_port(ot_state* rt, ot_value p) {
   for (size_t i = 0; i < rt->open_port_count; i++)
     if (rt->open_ports[i] == p) {
       memmove(rt->open_ports + i, rt->open_ports + i + 1,
@@ -127,7 +127,7 @@ static bool callable(ot_value v) {
 }
 
 /* The caller roots *port. Never retain its opaque bytes across a callback. */
-static ot_value callback(ot_runtime* rt, ot_value* port, size_t field, bool bytes, size_t start,
+static ot_value callback(ot_state* rt, ot_value* port, size_t field, bool bytes, size_t start,
                          size_t end) {
   ot_value function = object_fields(*port)[field];
   if (function == OT_NIL) return OT_NIL;
@@ -158,14 +158,14 @@ static ot_value callback(ot_runtime* rt, ot_value* port, size_t field, bool byte
   return result;
 }
 
-static void host_error(ot_runtime* rt, ot_value* port, const char* op, int error) {
+static void host_error(ot_state* rt, ot_value* port, const char* op, int error) {
   if (!ot_poll_interrupt(rt)) return;
   if (port_info(*port)->kind == 4)
     oti_file_error(rt, op, object_fields(*port)[4], error ? error : EIO);
   else oti_io_error(rt, ":other");
 }
 
-static long transfer(ot_runtime* rt, ot_value* port, bool writing, size_t start, size_t length) {
+static long transfer(ot_state* rt, ot_value* port, bool writing, size_t start, size_t length) {
   for (;;) {
     if (!ot_poll_interrupt(rt)) return -1;
     oti_port* p = port_info(*port);
@@ -190,7 +190,7 @@ static long transfer(ot_runtime* rt, ot_value* port, bool writing, size_t start,
   }
 }
 
-static bool flush(ot_runtime* rt, ot_value* port) {
+static bool flush(ot_state* rt, ot_value* port) {
   if (port_info(*port)->kind < 2) return true;
   while (port_info(*port)->offset < port_info(*port)->length) {
     size_t left = port_info(*port)->length - port_info(*port)->offset;
@@ -222,8 +222,7 @@ static bool flush(ot_runtime* rt, ot_value* port) {
   return true;
 }
 
-static ot_value make_custom(ot_runtime* rt, ot_value* port, size_t first, size_t count,
-                            bool input) {
+static ot_value make_custom(ot_state* rt, ot_value* port, size_t first, size_t count, bool input) {
   if (count != 2 || !oti_kind(rt->stack[first], K_STRING) ||
       !oti_kind(rt->stack[first + 1], K_TABLE))
     return oti_fail(rt, "custom port needs a name and callback table");
@@ -270,7 +269,7 @@ static ot_value make_custom(ot_runtime* rt, ot_value* port, size_t first, size_t
   return ok ? *port : 0;
 }
 
-static ot_value open_file(ot_runtime* rt, ot_value* port, size_t first, size_t count, bool input) {
+static ot_value open_file(ot_state* rt, ot_value* port, size_t first, size_t count, bool input) {
   if (count < 1 || count > 2 || !oti_kind(rt->stack[first], K_STRING) ||
       (count == 2 && !oti_kind(rt->stack[first + 1], K_TABLE)))
     return oti_fail(rt, "file port needs a path and optional options table");
@@ -334,7 +333,7 @@ static ot_value open_file(ot_runtime* rt, ot_value* port, size_t first, size_t c
 
 /* Destruction invokes no Otium code. Native hosts may drain buffered output;
  * failures are ignored here, so embedders should call ot_flush_ports first. */
-void oti_ports_destroy(ot_runtime* rt) {
+void oti_ports_destroy(ot_state* rt) {
   for (size_t i = 0; i < rt->open_port_count; i++) {
     ot_value port = rt->open_ports[i];
     oti_port* p = port_info(port);
@@ -356,7 +355,7 @@ void oti_ports_destroy(ot_runtime* rt) {
   }
 }
 
-static ot_value standard(ot_runtime* rt, unsigned which) {
+static ot_value standard(ot_state* rt, unsigned which) {
   if (rt->standard_ports[which] == OT_NIL) {
     ot_value p = oti_alloc(rt, K_PORT, 5, sizeof(oti_port));
     if (!p) return 0;
@@ -380,7 +379,7 @@ static ot_value standard(ot_runtime* rt, unsigned which) {
   return rt->standard_ports[which];
 }
 
-static ot_value current_port(ot_runtime* rt, unsigned which) {
+static ot_value current_port(ot_state* rt, unsigned which) {
   const char* name = which == 0   ? "current-input-port"
                      : which == 1 ? "current-output-port"
                                   : "current-error-port";
@@ -391,11 +390,11 @@ static ot_value current_port(ot_runtime* rt, unsigned which) {
   return oti_param_call(rt, p, 0);
 }
 
-static ot_value current_standard_port(ot_runtime* rt, bool input) {
+static ot_value current_standard_port(ot_state* rt, bool input) {
   return current_port(rt, input ? 0 : 1);
 }
 
-static bool check(ot_runtime* rt, ot_value p, bool input) {
+static bool check(ot_state* rt, ot_value p, bool input) {
   if (!oti_kind(p, K_PORT) || port_info(p)->input != input)
     return oti_error(rt, input ? "expected input port" : "expected output port");
   if (port_info(p)->busy) return oti_error(rt, "port callback reentry");
@@ -406,7 +405,7 @@ static bool check(ot_runtime* rt, ot_value p, bool input) {
   return true;
 }
 
-static int peek(ot_runtime* rt, ot_value* port, size_t ahead) {
+static int peek(ot_state* rt, ot_value* port, size_t ahead) {
   oti_port* s = port_info(*port);
   if (s->kind < 2)
     return ahead < s->length - s->position
@@ -452,7 +451,7 @@ static void consume(ot_value p, size_t n) {
   if (s->kind >= 2) s->offset += n;
 }
 
-static int port_character(ot_runtime* rt, ot_value* port, uint32_t* cp, size_t* width) {
+static int port_character(ot_state* rt, ot_value* port, uint32_t* cp, size_t* width) {
   int first = peek(rt, port, 0);
   if (first < 0) return first;
   unsigned char bytes[4];
@@ -486,7 +485,7 @@ static bool datum_delimiter(uint32_t c) {
 }
 
 /* Only establish the boundary here; the shared reader validates the syntax. */
-static ot_value read_datum(ot_runtime* rt, ot_value* port) {
+static ot_value read_datum(ot_state* rt, ot_value* port) {
   enum { NORMAL, ATOM, STRING, ESCAPE, COMMENT, CHAR_FIRST, CHAR_TOKEN } mode = NORMAL;
 
   size_t depth = 0, length = 0, capacity = 0, token = 0;
@@ -578,7 +577,7 @@ static ot_value read_datum(ot_runtime* rt, ot_value* port) {
   return result;
 }
 
-static bool append(ot_runtime* rt, ot_value* port, const char* bytes, size_t n) {
+static bool append(ot_state* rt, ot_value* port, const char* bytes, size_t n) {
   if (!check(rt, (*port), false)) return false;
   if (port_info(*port)->kind >= 2) {
     while (n) {
@@ -614,7 +613,7 @@ static bool append(ot_runtime* rt, ot_value* port, const char* bytes, size_t n) 
   return true;
 }
 
-ot_value oti_port_print(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_port_print(ot_state* rt, unsigned id, size_t first, size_t count) {
   ot_value p;
   if (id == B_PROCESS_WRITE_ERROR) {
     if (count != 1) return oti_fail(rt, "write-error needs one argument");
@@ -650,8 +649,7 @@ ot_value oti_port_print(ot_runtime* rt, unsigned id, size_t first, size_t count)
   return ok ? OT_NIL : 0;
 }
 
-static bool range(ot_runtime* rt, size_t first, size_t count, size_t n, size_t* start,
-                  size_t* end) {
+static bool range(ot_state* rt, size_t first, size_t count, size_t n, size_t* start, size_t* end) {
   *start = 0;
   *end = n;
   if ((count && !oti_natural(rt->stack[first], start)) ||
@@ -660,7 +658,7 @@ static bool range(ot_runtime* rt, size_t first, size_t count, size_t n, size_t* 
   return true;
 }
 
-static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count,
+static ot_value port_builtin(ot_state* rt, unsigned id, size_t first, size_t count,
                              ot_value live[2]) {
   if (id >= B_OPEN_INPUT_FILE)
     return open_file(rt, &live[0], first, count,
@@ -927,7 +925,7 @@ static ot_value port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
   return result;
 }
 
-ot_value oti_port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_port_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   ot_value live[2] = {OT_NIL, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, live, 2);
@@ -936,7 +934,7 @@ ot_value oti_port_builtin(ot_runtime* rt, unsigned id, size_t first, size_t coun
   return result;
 }
 
-bool ot_flush_ports(ot_runtime* rt) {
+bool ot_flush_ports(ot_state* rt) {
   if (!oti_host_entry(rt)) return false;
   if (rt->frame_count || rt->evaluating || rt->compiling || rt->eval_depth)
     return oti_error(rt, "port flushing requires an idle runtime");

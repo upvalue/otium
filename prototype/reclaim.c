@@ -15,7 +15,7 @@ typedef struct {
 } oti_reclaim_task;
 
 typedef struct {
-  ot_runtime* rt;
+  ot_state* rt;
   unsigned char *objects, *functions, *constants;
   oti_reclaim_task* work;
   size_t count, capacity;
@@ -58,7 +58,7 @@ static bool mark_constant(oti_reclaim_mark* m, uint32_t id) {
   return mark_value(m, m->rt->constants[id]);
 }
 
-bool oti_reclaim(ot_runtime* rt) {
+bool oti_reclaim(ot_state* rt) {
   if (rt->frame_count || rt->compiling || rt->evaluating || rt->eval_depth)
     return oti_error(rt, "code reclamation requires an evaluation boundary");
   oti_reclaim_mark m = {.rt = rt};

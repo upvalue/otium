@@ -14,15 +14,14 @@ unsigned char* oti_bytes_data(ot_value v) {
 
 static bool byte(ot_value v) { return ot_is_int(v) && ot_to_int(v) >= 0 && ot_to_int(v) <= 255; }
 
-ot_value oti_bytes_new(ot_runtime* rt, size_t n) {
+ot_value oti_bytes_new(ot_state* rt, size_t n) {
   if (n > UINT32_MAX - sizeof(size_t) - 32) return oti_fail(rt, "bytevector too large");
   ot_value v = oti_alloc(rt, K_BYTEVECTOR, 0, sizeof(size_t) + n);
   if (v) memcpy(object_bytes(v), &n, sizeof(n));
   return v;
 }
 
-static bool slice(ot_runtime* rt, size_t first, size_t count, size_t n, size_t* start,
-                  size_t* end) {
+static bool slice(ot_state* rt, size_t first, size_t count, size_t n, size_t* start, size_t* end) {
   *start = 0;
   *end = n;
   if ((count && !oti_natural(rt->stack[first], start)) ||
@@ -49,7 +48,7 @@ size_t oti_utf8_scalar(const unsigned char* s, size_t p, size_t end) {
   return p + width;
 }
 
-ot_value oti_bytes_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_bytes_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   size_t min = 1, max = 1;
   switch (id) {
     case B_BYTES:

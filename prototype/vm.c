@@ -19,10 +19,10 @@
 
 #define VM_APPLY (((ot_value)B_APPLY << 8) | TAG_BUILTIN)
 
-static void vm_height(ot_runtime* rt, size_t sp) { rt->sp = rt->stack_roots.count = sp; }
+static void vm_height(ot_state* rt, size_t sp) { rt->sp = rt->stack_roots.count = sp; }
 
 /* Make stack[from, to) valid before a frame takes it without writing it. */
-static inline void vm_fresh(ot_runtime* rt, ot_value* stack, size_t from, size_t to) {
+static inline void vm_fresh(ot_state* rt, ot_value* stack, size_t from, size_t to) {
   size_t stale = rt->stack_stale;
   if (to <= stale) return;
   for (size_t i = from > stale ? from : stale; i < to; i++) stack[i] = V_UNBOUND;
@@ -41,7 +41,7 @@ static bool vm_primitive(ot_value value) {
          oti_collection(value);
 }
 
-static ot_value vm_call_primitive(ot_runtime* rt, size_t call, size_t argc) {
+static ot_value vm_call_primitive(ot_state* rt, size_t call, size_t argc) {
   ot_value value = rt->stack[call];
   if (oti_kind(value, K_RECORD)) return oti_record_call(rt, value, call + 1, argc);
   if (oti_kind(value, K_INSTANCE)) return oti_instance_call(rt, value, call + 1, argc);
@@ -53,7 +53,7 @@ static ot_value vm_call_primitive(ot_runtime* rt, size_t call, size_t argc) {
 
 /* Enter the closure in stack[call] with arguments above it. A tail call
  * replaces the current frame and keeps its floor. */
-bool oti_enter(ot_runtime* rt, size_t call, size_t argc, bool tail) {
+bool oti_enter(ot_state* rt, size_t call, size_t argc, bool tail) {
   ot_value closure = rt->stack[call];
   if (oti_kind(closure, K_MACRO)) {
     closure = object_fields(closure)[0];
@@ -109,7 +109,7 @@ bool oti_enter(ot_runtime* rt, size_t call, size_t argc, bool tail) {
   return true;
 }
 
-bool oti_leave(ot_runtime* rt, ot_value result) {
+bool oti_leave(ot_state* rt, ot_value result) {
   oti_frame frame = rt->frames[--rt->frame_count];
   /* The returning frame already owns this slot; no allocation is needed. */
   rt->stack[frame.base] = result;
@@ -117,7 +117,7 @@ bool oti_leave(ot_runtime* rt, ot_value result) {
   return true;
 }
 
-bool oti_apply(ot_runtime* rt, size_t call, size_t argc, bool tail) {
+bool oti_apply(ot_state* rt, size_t call, size_t argc, bool tail) {
   while (rt->stack[call] == VM_APPLY) {
     if (argc < 2) return oti_error(rt, "apply needs a callable and a final argument sequence");
     ot_value list = rt->stack[call + argc];
@@ -163,7 +163,7 @@ bool oti_apply(ot_runtime* rt, size_t call, size_t argc, bool tail) {
   return oti_enter(rt, call, argc, tail);
 }
 
-bool oti_execute(ot_runtime* rt, uint32_t function, ot_value* result) {
+bool oti_execute(ot_state* rt, uint32_t function, ot_value* result) {
   ot_value closure = oti_alloc(rt, K_CLOSURE, 0, sizeof(function));
   if (!closure) return false;
   memcpy(object_bytes(closure), &function, sizeof(function));
@@ -171,7 +171,7 @@ bool oti_execute(ot_runtime* rt, uint32_t function, ot_value* result) {
   return *result != 0;
 }
 
-bool oti_invoke(ot_runtime* rt, size_t argc, ot_value* result) {
+bool oti_invoke(ot_state* rt, size_t argc, ot_value* result) {
   ot_value callable = rt->stack[0];
   if (callable == VM_APPLY) {
     if (!oti_apply(rt, 0, argc, false)) return false;
@@ -190,7 +190,7 @@ bool oti_invoke(ot_runtime* rt, size_t argc, ot_value* result) {
 
 /* Call a builtin with operands copied above the frame, as the slow path of an
  * inline primitive. The caller reloads its register pointer afterwards. */
-static ot_value vm_builtin(ot_runtime* rt, unsigned id, ot_value a, ot_value b, size_t count) {
+static ot_value vm_builtin(ot_state* rt, unsigned id, ot_value a, ot_value b, size_t count) {
   size_t first = rt->sp;
   if (!oti_stack(rt, first + 2)) return 0;
   rt->stack[first] = a;
@@ -207,7 +207,7 @@ static bool vm_float(ot_value v, double* out) {
   return true;
 }
 
-static bool vm_install_try(ot_runtime* rt, size_t target, size_t slot) {
+static bool vm_install_try(ot_state* rt, size_t target, size_t slot) {
   if (!oti_grow(rt, (void**)&rt->tries, &rt->try_capacity, rt->try_count + 1,
                 sizeof(oti_try_frame)))
     return false;
@@ -223,7 +223,7 @@ static bool vm_install_try(ot_runtime* rt, size_t target, size_t slot) {
   return true;
 }
 
-static bool vm_unbound_global(ot_runtime* rt, uint32_t index) {
+static bool vm_unbound_global(ot_state* rt, uint32_t index) {
   char message[192];
   snprintf(message, sizeof(message), "unbound global: %s", rt->global_info[index].name);
   return oti_coded_error(rt, "E0201", message);
@@ -232,7 +232,7 @@ static bool vm_unbound_global(ot_runtime* rt, uint32_t index) {
 /* True, with an error, when index is the cell of a builtin the compiler turns
  * into instructions. Those cells are immutable, so compiled code never needs
  * to check them. */
-static bool vm_inlined_builtin(ot_runtime* rt, uint32_t index) {
+static bool vm_inlined_builtin(ot_state* rt, uint32_t index) {
   ot_value old = rt->globals[index];
   if ((old & 255) != TAG_BUILTIN) return false;
   unsigned id = (unsigned)(old >> 8);
@@ -261,7 +261,7 @@ static bool vm_inlined_builtin(ot_runtime* rt, uint32_t index) {
   return true;
 }
 
-static bool vm_closure(ot_runtime* rt, ot_value* registers, uint32_t id, ot_value* out) {
+static bool vm_closure(ot_state* rt, ot_value* registers, uint32_t id, ot_value* out) {
   oti_function* child = rt->functions[id];
   ot_value v = oti_alloc(rt, K_CLOSURE, (uint32_t)child->capture_count, sizeof(uint32_t));
   if (!v) return false;
@@ -314,7 +314,7 @@ static unsigned vm_builtin_id(unsigned op) {
   }
 }
 
-static bool dispatch(ot_runtime* rt, size_t stop_frames) {
+static bool dispatch(ot_state* rt, size_t stop_frames) {
   /* A failed transfer (such as a restart applied to bad arguments) leaves its
    * error pending for the unwinding loop. */
   if (rt->frame_count <= stop_frames || rt->error[0]) return !rt->error[0];
@@ -936,7 +936,7 @@ next:
 #undef ins
 }
 
-bool oti_drive(ot_runtime* rt, size_t stop_frames) {
+bool oti_drive(ot_state* rt, size_t stop_frames) {
   while (!dispatch(rt, stop_frames)) {
     if (!rt->interrupted && !rt->exit_pending && !rt->restart_pending && !rt->signaled)
       oti_signal_error(rt);
@@ -975,7 +975,7 @@ bool oti_drive(ot_runtime* rt, size_t stop_frames) {
 }
 
 /* Call back into the VM without discarding the suspended caller's roots. */
-ot_value oti_call_list(ot_runtime* rt, ot_value function, ot_value args) {
+ot_value oti_call_list(ot_state* rt, ot_value function, ot_value args) {
   if (!oti_host_entry(rt)) return 0;
   size_t base = rt->sp, frames = rt->frame_count, tries = rt->try_count, params = rt->param_count;
   size_t handlers = rt->handler_count, handler_top = rt->handler_top,

@@ -2,7 +2,7 @@
 #include "internal.h"
 
 TEST(redefinition_reclaims_functions_and_constants) {
-  ot_runtime* rt = new_runtime(8192, 4096);
+  ot_state* rt = new_runtime(8192, 4096);
   ot_gc_stress(rt, true);
   eval(rt, "(def stable 'stable) (def tag :tag) (def held {}) (put! held :self held) "
            "(def current (let ((x 42)) (fn () (fn () (list x 'stable \"kept\"))))) "

@@ -1,21 +1,21 @@
 #include "helpers.h"
 
-static ot_runtime* properties_runtime(void) {
-  ot_runtime* rt = new_runtime(2 * 1024 * 1024, 256 * 1024);
+static ot_state* properties_runtime(void) {
+  ot_state* rt = new_runtime(2 * 1024 * 1024, 256 * 1024);
   CHECK(ot_load_core(rt, TEST_LIBRARY_DIR));
   ot_gc_stress(rt, true);
   return rt;
 }
 
 TEST(ui_checks_script) {
-  ot_runtime* rt = properties_runtime();
+  ot_state* rt = properties_runtime();
   eval_file(rt, "../tests/ui/checks.ot");
   ot_destroy(rt);
 }
 
 /* Each check builds on the classes and instances made by earlier ones. */
 TEST(property_mounting_and_migration_rollback) {
-  ot_runtime* rt = properties_runtime();
+  ot_state* rt = properties_runtime();
   const char* checks[] = {
       "(def prop-count 0) (def state-count 0) (defclass Lifecycle (p :init (begin (set! prop-count "
       "(+ prop-count 1)) [])) (s :state #t :init (begin (set! state-count (+ state-count 1)) []))) "

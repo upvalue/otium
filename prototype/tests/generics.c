@@ -3,7 +3,7 @@
 
 /* Later checks build on the generics defined by earlier ones. */
 TEST(core_bootstrap_and_primary_generics) {
-  ot_runtime* rt = new_core_runtime();
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   const char* checks[] = {
       "(begin (defonce map #`(answer 42)) (equal? map '(user/answer 42)))",

@@ -53,7 +53,7 @@ typedef struct {
 typedef struct oti_compiler oti_compiler;
 
 struct oti_compiler {
-  ot_runtime* rt;
+  ot_state* rt;
   oti_function* fn;
   oti_compiler* parent;
   oti_unit* unit;
@@ -201,7 +201,7 @@ static bool load_builtin(oti_compiler* c, unsigned id, uint32_t dst) {
   return load_constant(c, ((ot_value)id << 8) | TAG_BUILTIN, dst);
 }
 
-static uint32_t new_function(ot_runtime* rt) {
+static uint32_t new_function(ot_state* rt) {
   size_t id = rt->function_free;
   while (id < rt->function_count && rt->functions[id]) id++;
   if (id >= UINT32_MAX || !oti_grow(rt, (void**)&rt->functions, &rt->function_capacity, id + 1,
@@ -437,7 +437,7 @@ static bool scope_end(oti_compiler* c, oti_scope s, bool clear) {
 }
 
 static ot_value datum(oti_compiler* c, const oti_ast* a) {
-  ot_runtime* rt = c->rt;
+  ot_state* rt = c->rt;
   switch (a->kind) {
     case AST_VALUE: return rt->constants[a->as.integer];
     case AST_NIL: return OT_NIL;
@@ -566,13 +566,13 @@ static oti_ast* syntax_value(oti_compiler* c, ot_value v, size_t offset, unsigne
   return a;
 }
 
-oti_ast* oti_syntax_value(ot_runtime* rt, ot_value value, oti_arena* arena) {
+oti_ast* oti_syntax_value(ot_state* rt, ot_value value, oti_arena* arena) {
   oti_compiler c = {.rt = rt, .expansion_arena = arena};
   return syntax_value(&c, value, 0, 0);
 }
 
 static oti_ast* expand_call(oti_compiler* c, const oti_ast* form, uint32_t global) {
-  ot_runtime* rt = c->rt;
+  ot_state* rt = c->rt;
   if (++*c->expansions > 256) {
     error(c, form, "macro expansion limit exceeded");
     return NULL;
@@ -604,7 +604,7 @@ typedef struct {
 
 static size_t qq_add(oti_qq_plan* plan, oti_qq_kind kind, size_t left, size_t right,
                      const oti_ast* a, ot_value value) {
-  ot_runtime* rt = plan->compiler->rt;
+  ot_state* rt = plan->compiler->rt;
   if (plan->count >= 16 * 1024 * 1024 / (sizeof(oti_qq_node) + sizeof(ot_value))) {
     oti_error(rt, "quasiquote expansion exceeds budget");
     return SIZE_MAX;
@@ -1924,7 +1924,7 @@ static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tai
   return tail || move(c, dst, base);
 }
 
-static void discard_functions(ot_runtime* rt, oti_unit* unit) {
+static void discard_functions(ot_state* rt, oti_unit* unit) {
   for (size_t i = 0; i < unit->function_count; i++) {
     uint32_t id = unit->functions[i];
     oti_free_function(rt->functions[id]);
@@ -1934,7 +1934,7 @@ static void discard_functions(ot_runtime* rt, oti_unit* unit) {
   unit->function_count = 0;
 }
 
-bool oti_compile(ot_runtime* rt, const oti_ast* form, uint32_t* function) {
+bool oti_compile(ot_state* rt, const oti_ast* form, uint32_t* function) {
   oti_arena arena;
   oti_arena_init(&arena, OTI_SOURCE_LIMIT);
   size_t expansions = 0;
@@ -1971,7 +1971,7 @@ bool oti_compile(ot_runtime* rt, const oti_ast* form, uint32_t* function) {
   return ok;
 }
 
-oti_ast* oti_expand_form(ot_runtime* rt, const oti_ast* form, oti_arena* arena) {
+oti_ast* oti_expand_form(ot_state* rt, const oti_ast* form, oti_arena* arena) {
   oti_compiler c = {.rt = rt, .expansion_arena = arena};
   ot_value values[2] = {OT_NIL, OT_EMPTY};
   oti_roots roots;
@@ -1999,7 +1999,7 @@ oti_ast* oti_expand_form(ot_runtime* rt, const oti_ast* form, oti_arena* arena) 
   return result;
 }
 
-ot_value oti_read_string(ot_runtime* rt, ot_value string) {
+ot_value oti_read_string(ot_state* rt, ot_value string) {
   if (!oti_kind(string, K_STRING)) {
     oti_error(rt, "read-string expects a string");
     return 0;
@@ -2018,7 +2018,7 @@ ot_value oti_read_string(ot_runtime* rt, ot_value string) {
   return result;
 }
 
-ot_value oti_read_source(ot_runtime* rt, const char* source, size_t length) {
+ot_value oti_read_source(ot_state* rt, const char* source, size_t length) {
   oti_reader reader;
   oti_reader_init(&reader, source, length, OTI_SOURCE_LIMIT);
   oti_ast* form = oti_reader_one(&reader);
@@ -2034,7 +2034,7 @@ ot_value oti_read_source(ot_runtime* rt, const char* source, size_t length) {
 }
 
 /* Eval values retain the namespace where they were obtained. */
-ot_value oti_evaluator(ot_runtime* rt, uint32_t space) {
+ot_value oti_evaluator(ot_state* rt, uint32_t space) {
   for (size_t i = 0; i < rt->constant_count; i++) {
     ot_value v = rt->constants[i];
     if (!oti_kind(v, K_CLOSURE)) continue;

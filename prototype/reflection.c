@@ -38,7 +38,7 @@ static const char* type_name(ot_value value) {
   return ":native";
 }
 
-ot_value oti_reflection_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_reflection_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   size_t arity = id == B_EOF || id == B_CURRENT_NS ? 0 : 1;
   if (count != arity) {
     oti_error(rt, "wrong number of arguments");

@@ -12,7 +12,7 @@ uint64_t oti_symbol_id(ot_value v) {
   return id;
 }
 
-ot_value oti_intern(ot_runtime* rt, unsigned kind, const char* bytes, size_t n) {
+ot_value oti_intern(ot_state* rt, unsigned kind, const char* bytes, size_t n) {
   for (size_t i = 0; i < rt->constant_count; i++) {
     ot_value v = rt->constants[i];
     if (!oti_kind(v, kind) || (kind == K_SYMBOL && oti_symbol_id(v))) continue;
@@ -50,7 +50,7 @@ size_t oti_utf8_next(const char* s, size_t n, size_t p, uint32_t* cp) {
   return p;
 }
 
-ot_value oti_support_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_support_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   size_t arity =
       id == B_NEWLINE                                                                          ? 0
       : id == B_SUBSTRING || id == B_EXP_FAIL                                                  ? 3

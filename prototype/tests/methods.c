@@ -1,7 +1,7 @@
 #include "helpers.h"
 
 TEST(class_checks_script) {
-  ot_runtime* rt = new_core_runtime();
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   eval_file(rt, "../tests/classes/checks.ot");
   ot_destroy(rt);
@@ -9,7 +9,7 @@ TEST(class_checks_script) {
 
 /* Each check builds on the generics defined by earlier ones. */
 TEST(method_snapshots_and_tail_calls) {
-  ot_runtime* rt = new_core_runtime();
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   const char* checks[] = {
       "(defgeneric (snapshot x)) (defmethod (snapshot x) :old) (defmethod (snapshot (x String)) "

@@ -6,7 +6,7 @@
 /* A fake I/O host that delivers one input byte and accepts two output bytes
  * per call, and can be told to fail, interrupt or reenter the runtime. */
 typedef struct {
-  ot_runtime* rt;
+  ot_state* rt;
   unsigned char input[128], output[1024];
   size_t input_length, positions[128], output_length, opens, reads, writes, closes, flushes;
   unsigned flags;
@@ -101,7 +101,7 @@ static const ot_io_host host = {host_open, host_read, host_write, host_close, ho
 
 /* Expect an error containing message, without the recovery check that
  * check_error adds, since some of these run with the host misbehaving. */
-static void fails(ot_runtime* rt, const char* source, const char* message) {
+static void fails(ot_state* rt, const char* source, const char* message) {
   ot_value result;
   if (ot_eval(rt, source, strlen(source), &result))
     test_fail(__FILE__, __LINE__, "%s: expected an error", source);
@@ -109,8 +109,8 @@ static void fails(ot_runtime* rt, const char* source, const char* message) {
     test_fail(__FILE__, __LINE__, "%s: expected \"%s\", got \"%s\"", source, message, ot_error(rt));
 }
 
-static ot_runtime* host_runtime(Host* h) {
-  ot_runtime* rt = new_runtime(2 * 1024 * 1024, 128 * 1024);
+static ot_state* host_runtime(Host* h) {
+  ot_state* rt = new_runtime(2 * 1024 * 1024, 128 * 1024);
   *h = (Host){.rt = rt, .input = "a\xc3\xa9\xf0\x9f\x99\x82", .input_length = 7};
   CHECK(ot_set_io_host(rt, &host, h));
   CHECK(ot_load_core(rt, TEST_LIBRARY_DIR));
@@ -121,7 +121,7 @@ static ot_runtime* host_runtime(Host* h) {
 
 TEST(host_input_and_eintr) {
   Host h;
-  ot_runtime* rt = host_runtime(&h);
+  ot_state* rt = host_runtime(&h);
   check_true(rt, "(try (open-input-file \"missing\") (catch e (and (eq? (get e :reason) "
                  ":not-found) (equal? (get e :path) \"missing\"))))");
   eval(rt, "(def p (open-input-file \"input\" {:buffer-size 4}))");
@@ -135,7 +135,7 @@ TEST(host_input_and_eintr) {
 
 TEST(host_partial_writes_and_errors) {
   Host h;
-  ot_runtime* rt = host_runtime(&h);
+  ot_state* rt = host_runtime(&h);
   h.output_length = 0;
   eval(rt, "(def out (open-output-file \"output\" {:buffer-size 8 :if-exists :append})) "
            "(write-string \"abcdef\" out)");
@@ -160,7 +160,7 @@ TEST(host_partial_writes_and_errors) {
 
 TEST(host_interrupted_reads) {
   Host h;
-  ot_runtime* rt = host_runtime(&h);
+  ot_state* rt = host_runtime(&h);
   eval(rt, "(def interrupted (open-input-file \"input\"))");
   h.read_error = EINTR;
   h.interrupt = true;
@@ -183,7 +183,7 @@ TEST(host_interrupted_reads) {
 
 TEST(host_invalid_counts_and_reentry) {
   Host h;
-  ot_runtime* rt = host_runtime(&h);
+  ot_state* rt = host_runtime(&h);
   eval(rt, "(def bad (open-input-file \"input\"))");
   h.invalid_read = true;
   fails(rt, "(read-u8 bad)", "invalid host read count");
@@ -215,7 +215,7 @@ TEST(host_invalid_counts_and_reentry) {
  * flushes and closes every port. */
 TEST(host_replacement_and_destroy) {
   Host h;
-  ot_runtime* rt = host_runtime(&h);
+  ot_state* rt = host_runtime(&h);
   eval(rt, "(def old (open-output-file \"old\")) (write-string \"old\" old)");
   Host replacement = {.rt = rt};
   CHECK(ot_set_io_host(rt, &host, &replacement));

@@ -1,14 +1,14 @@
 #include "internal.h"
 #include <string.h>
 
-void oti_restore_restarts(ot_runtime* rt, size_t scopes) {
+void oti_restore_restarts(ot_state* rt, size_t scopes) {
   rt->restart_scope_count = scopes;
   rt->restart_count =
       scopes ? rt->restart_scopes[scopes - 1].first + rt->restart_scopes[scopes - 1].count : 0;
   rt->restart_roots.count = rt->restart_count;
 }
 
-bool oti_install_restarts(ot_runtime* rt, size_t first, size_t count, size_t target) {
+bool oti_install_restarts(ot_state* rt, size_t first, size_t count, size_t target) {
   size_t old = rt->restart_count;
   if (count > rt->stack_limit - old) return oti_error(rt, "restart limit exceeded");
   if (!oti_grow(rt, (void**)&rt->restart_scopes, &rt->restart_scope_capacity,
@@ -37,7 +37,7 @@ bool oti_install_restarts(ot_runtime* rt, size_t first, size_t count, size_t tar
   return true;
 }
 
-static ot_value find(ot_runtime* rt, ot_value name) {
+static ot_value find(ot_state* rt, ot_value name) {
   bool exact = oti_kind(name, K_RESTART);
   if (!exact && !oti_kind(name, K_SYMBOL) && !oti_kind(name, K_STRING) &&
       !oti_kind(name, K_KEYWORD)) {
@@ -68,7 +68,7 @@ static ot_value find(ot_runtime* rt, ot_value name) {
   return OT_NIL;
 }
 
-ot_value oti_restart_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_restart_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   if ((id == B_COMPUTE_RESTARTS && count) ||
       (id == B_INVOKE_RESTART ? count < 1 : id != B_COMPUTE_RESTARTS && count != 1)) {
     oti_error(rt, "wrong number of restart arguments");
@@ -112,7 +112,7 @@ ot_value oti_restart_builtin(ot_runtime* rt, unsigned id, size_t first, size_t c
   return 0;
 }
 
-bool oti_resume_restart(ot_runtime* rt, size_t stop_frames) {
+bool oti_resume_restart(ot_state* rt, size_t stop_frames) {
   size_t index = rt->restart_count;
   while (index && rt->restarts[index - 1] != rt->restart_transfer[0]) index--;
   if (!index) {

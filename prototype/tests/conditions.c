@@ -1,7 +1,7 @@
 #include "helpers.h"
 
-static ot_runtime* new_expander_runtime(void) {
-  ot_runtime* rt = new_runtime(1024 * 1024, 256 * 1024);
+static ot_state* new_expander_runtime(void) {
+  ot_state* rt = new_runtime(1024 * 1024, 256 * 1024);
   if (!ot_load_expander(rt, TEST_LIBRARY_DIR))
     test_fail(__FILE__, __LINE__, "cannot load expander: %s", ot_error(rt));
   ot_gc_stress(rt, true);
@@ -10,7 +10,7 @@ static ot_runtime* new_expander_runtime(void) {
 
 /* The define-condition cases build on each other. */
 TEST(try_catches_conditions_by_type) {
-  ot_runtime* rt = new_expander_runtime();
+  ot_state* rt = new_expander_runtime();
   const char* checks[] = {
       "(= (try 42 (catch c 0)) 42)",
       "(equal? (try (error \"boom\") (catch (error? e) (condition-message e))) \"boom\")",
@@ -52,7 +52,7 @@ TEST(try_catches_conditions_by_type) {
 }
 
 TEST(deep_rethrow_and_repeated_catch) {
-  ot_runtime* rt = new_expander_runtime();
+  ot_state* rt = new_expander_runtime();
   eval(rt, "(def (deep n) (try (if (= n 0) (error 42) (deep (- n 1))) (catch c (error c))))");
   check_int(rt, "(try (deep 10000) (catch c c))", 42);
   for (size_t i = 0; i < 100; i++) check_int(rt, "(try (error \"again\") (catch e 42))", 42);
@@ -60,7 +60,7 @@ TEST(deep_rethrow_and_repeated_catch) {
 }
 
 TEST(uncaught_error_leaves_try_working) {
-  ot_runtime* rt = new_expander_runtime();
+  ot_state* rt = new_expander_runtime();
   check_error(rt, "(error 7)", "uncaught condition");
   check_int(rt, "(try (error 8) (catch e e))", 8);
   ot_destroy(rt);

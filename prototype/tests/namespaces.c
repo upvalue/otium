@@ -3,7 +3,7 @@
 
 /* Every step builds on the namespaces defined by the ones before it. */
 TEST(namespaces_isolate_and_share_definitions) {
-  ot_runtime* rt = new_runtime(32768, 4096);
+  ot_state* rt = new_runtime(32768, 4096);
   size_t initial_spaces = rt->namespace_count;
   ot_gc_stress(rt, true);
   check_int(rt,

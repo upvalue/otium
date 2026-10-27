@@ -3,12 +3,12 @@
 #include <string.h>
 
 /* Every evaluation must leave no handlers or handler roots behind. */
-static void check_no_handlers(ot_runtime* rt) {
+static void check_no_handlers(ot_state* rt) {
   CHECK(rt->handler_count == 0 && rt->handler_top == 0 && rt->handler_roots.count == 0);
 }
 
-static ot_runtime* new_handler_runtime(void) {
-  ot_runtime* rt = new_core_runtime();
+static ot_state* new_handler_runtime(void) {
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   eval(rt,
        "(def events []) (def (record x) (push! events x)) (def (yes _) #t) (defparam p :default)");
@@ -17,7 +17,7 @@ static ot_runtime* new_handler_runtime(void) {
 }
 
 TEST(handlers_run_at_signal_site) {
-  ot_runtime* rt = new_handler_runtime();
+  ot_state* rt = new_handler_runtime();
   const char* checks[] = {
       "(nil? (signal 'unhandled))",
       "(= (handler-bind () 42) 42)",
@@ -57,7 +57,7 @@ TEST(handlers_run_at_signal_site) {
 }
 
 TEST(failures_leave_no_handlers) {
-  ot_runtime* rt = new_handler_runtime();
+  ot_state* rt = new_handler_runtime();
   const char* shape = "expected ((expression expression) ...)";
 
   const struct {
@@ -85,7 +85,7 @@ TEST(failures_leave_no_handlers) {
 }
 
 TEST(deeply_nested_handlers) {
-  ot_runtime* rt = new_handler_runtime();
+  ot_state* rt = new_handler_runtime();
   eval(rt, "(def hits 0) (def (deep n) (if (= n 0) (signal :bottom) (handler-bind ((yes (fn (c) "
            "(set! hits (+ hits 1))))) (deep (- n 1)))))");
   check_no_handlers(rt);

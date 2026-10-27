@@ -3,7 +3,7 @@
 #include <string.h>
 
 TEST(interrupt_flag_and_recovery) {
-  ot_runtime* rt = new_core_runtime();
+  ot_state* rt = new_core_runtime();
   volatile sig_atomic_t flag = 0;
   ot_set_interrupt_flag(rt, &flag);
   ot_value value;

@@ -3,19 +3,19 @@
 #include <string.h>
 
 /* Every evaluation must leave no restart scopes, roots or pending transfer. */
-static void check_no_restarts(ot_runtime* rt) {
+static void check_no_restarts(ot_state* rt) {
   CHECK(!rt->restart_scope_count && !rt->restart_roots.count && !rt->restart_pending);
 }
 
-static ot_runtime* new_restart_runtime(void) {
-  ot_runtime* rt = new_core_runtime();
+static ot_state* new_restart_runtime(void) {
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   return rt;
 }
 
 /* Some cases use definitions made by earlier ones (saved, p). */
 TEST(restarts_transfer_and_introspect) {
-  ot_runtime* rt = new_restart_runtime();
+  ot_state* rt = new_restart_runtime();
   const char* checks[] = {
       "(= (restart-case (+ 1 2) (give (v) v)) 3)",
       "(= (handler-bind ((error? (fn (e) (invoke-restart 'give 42)))) (restart-case (+ 1000 (error "
@@ -61,7 +61,7 @@ TEST(restarts_transfer_and_introspect) {
 }
 
 TEST(failures_leave_no_restarts) {
-  ot_runtime* rt = new_restart_runtime();
+  ot_state* rt = new_restart_runtime();
   const char* arguments = "wrong number of restart arguments";
 
   const struct {

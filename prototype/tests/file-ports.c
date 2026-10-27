@@ -3,8 +3,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-static ot_runtime* file_runtime(void) {
-  ot_runtime* rt = new_core_runtime();
+static ot_state* file_runtime(void) {
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   return rt;
 }
@@ -15,7 +15,7 @@ TEST(file_port_modes_buffering_and_errors) {
   CHECK(mkdtemp(directory));
   char path[128];
   snprintf(path, sizeof(path), "%s/data", directory);
-  ot_runtime* rt = file_runtime();
+  ot_state* rt = file_runtime();
   const char* args[] = {path, directory};
   CHECK(ot_set_arguments(rt, NULL, 2, args));
   check_true(rt, "(def path (car (otium.process/arguments))) (def directory (car (cdr "
@@ -51,7 +51,7 @@ TEST(file_port_modes_buffering_and_errors) {
 
 TEST(full_device_reports_no_space) {
   if (access("/dev/full", W_OK)) return;
-  ot_runtime* rt = file_runtime();
+  ot_state* rt = file_runtime();
   check_true(rt, "(def full-port (open-output-file \"/dev/full\")) (try (begin (write-string "
                  "\"failure\" full-port) (flush-output-port full-port) #f) (catch e (and "
                  "(condition-of-type? e 'file-error) (eq? (get e :reason) :no-space))))");

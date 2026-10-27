@@ -3,11 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-static ot_value key(ot_runtime* rt, const char* name) {
+static ot_value key(ot_state* rt, const char* name) {
   return oti_intern(rt, K_KEYWORD, name, strlen(name));
 }
 
-static ot_value symbol(ot_runtime* rt, ot_value v) {
+static ot_value symbol(ot_state* rt, ot_value v) {
   if (oti_kind(v, K_SYMBOL)) return v;
   if (!oti_kind(v, K_KEYWORD) && !oti_kind(v, K_STRING))
     return oti_fail(rt, "condition type must be a name");
@@ -21,7 +21,7 @@ static ot_value symbol(ot_runtime* rt, ot_value v) {
   return oti_intern(rt, K_SYMBOL, s, n);
 }
 
-static ot_value field(ot_runtime* rt, ot_value table, const char* name) {
+static ot_value field(ot_state* rt, ot_value table, const char* name) {
   if (!oti_kind(table, K_TABLE)) return OT_NIL;
   oti_roots root;
   oti_roots_push(&rt->heap, &root, &table, 1);
@@ -42,7 +42,7 @@ static const char* diagnostic_type(const char* code) {
   return "error";
 }
 
-static ot_value message_condition(ot_runtime* rt, ot_value message, size_t first, size_t count,
+static ot_value message_condition(ot_state* rt, ot_value message, size_t first, size_t count,
                                   const char* code) {
   ot_value values[] = {message, OT_NIL, OT_NIL, OT_NIL, OT_NIL};
   oti_roots roots;
@@ -84,7 +84,7 @@ static ot_value message_condition(ot_runtime* rt, ot_value message, size_t first
   return result;
 }
 
-ot_value oti_error_condition(ot_runtime* rt) {
+ot_value oti_error_condition(ot_state* rt) {
   if (rt->raised) return rt->condition_values[0];
   char message[sizeof(rt->error)];
   memcpy(message, rt->error, sizeof(message));
@@ -94,7 +94,7 @@ ot_value oti_error_condition(ot_runtime* rt) {
   return text ? message_condition(rt, text, 0, 0, code) : 0;
 }
 
-ot_value oti_raise(ot_runtime* rt, size_t first, size_t count) {
+ot_value oti_raise(ot_state* rt, size_t first, size_t count) {
   if (!count) return oti_fail(rt, "error needs an argument");
   ot_value condition = rt->stack[first];
   if (oti_kind(condition, K_STRING))
@@ -111,7 +111,7 @@ ot_value oti_raise(ot_runtime* rt, size_t first, size_t count) {
   return oti_fail(rt, "uncaught condition");
 }
 
-ot_value oti_condition_builtin(ot_runtime* rt, unsigned id, size_t first, size_t count) {
+ot_value oti_condition_builtin(ot_state* rt, unsigned id, size_t first, size_t count) {
   if (count != (id == B_DEFINE_CONDITION || id == B_CONDITION_IS ? 2u : 1u))
     return oti_fail(rt, "wrong number of condition arguments");
   if (id == B_CONDITION_TYPE || id == B_CONDITION_MESSAGE)
@@ -164,13 +164,13 @@ done:
   return result;
 }
 
-void oti_restore_handlers(ot_runtime* rt, size_t count, size_t top) {
+void oti_restore_handlers(ot_state* rt, size_t count, size_t top) {
   rt->handler_count = count;
   rt->handler_top = top;
   rt->handler_roots.count = count * 2;
 }
 
-bool oti_install_handlers(ot_runtime* rt, size_t first, size_t count) {
+bool oti_install_handlers(ot_state* rt, size_t first, size_t count) {
   if (count > rt->stack_limit - rt->handler_count || count > SIZE_MAX / 2 - rt->handler_count)
     return oti_error(rt, "handler binding limit exceeded");
   size_t needed = rt->handler_count + count;
@@ -191,13 +191,13 @@ bool oti_install_handlers(ot_runtime* rt, size_t first, size_t count) {
   return true;
 }
 
-void oti_remove_handlers(ot_runtime* rt, size_t count) {
+void oti_remove_handlers(ot_state* rt, size_t count) {
   if (!count) return;
   size_t remaining = rt->handler_count - count;
   oti_restore_handlers(rt, remaining, rt->handler_previous[remaining]);
 }
 
-static bool signal_handlers(ot_runtime* rt, ot_value condition) {
+static bool signal_handlers(ot_state* rt, ot_value condition) {
   if (!rt->handler_top) return true;
   ot_value args = OT_NIL;
   oti_roots roots;
@@ -228,7 +228,7 @@ static bool signal_handlers(ot_runtime* rt, ot_value condition) {
   return ok;
 }
 
-ot_value oti_signal(ot_runtime* rt, size_t first, size_t count) {
+ot_value oti_signal(ot_state* rt, size_t first, size_t count) {
   if (!count) return oti_fail(rt, "signal needs an argument");
   ot_value condition = rt->stack[first];
   if (oti_kind(condition, K_STRING))
@@ -239,7 +239,7 @@ ot_value oti_signal(ot_runtime* rt, size_t first, size_t count) {
 
 /* Offer an error before unwinding. A handler's error replaces the original;
  * a normally returning handler leaves the original condition pending. */
-void oti_signal_error(ot_runtime* rt) {
+void oti_signal_error(ot_state* rt) {
   size_t offset = rt->error_offset;
   char message[sizeof(rt->error)];
   memcpy(message, rt->error, sizeof(message));
@@ -265,7 +265,7 @@ void oti_signal_error(ot_runtime* rt) {
   oti_roots_pop(&rt->heap, &root);
 }
 
-ot_value oti_decode_error(ot_runtime* rt, size_t position) {
+ot_value oti_decode_error(ot_state* rt, size_t position) {
   ot_value v[] = {OT_NIL, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, v, 2);
@@ -290,7 +290,7 @@ ot_value oti_decode_error(ot_runtime* rt, size_t position) {
   return 0;
 }
 
-ot_value oti_io_error(ot_runtime* rt, const char* reason) {
+ot_value oti_io_error(ot_state* rt, const char* reason) {
   ot_value v[] = {OT_NIL, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, v, 2);
@@ -316,7 +316,7 @@ ot_value oti_io_error(ot_runtime* rt, const char* reason) {
   return 0;
 }
 
-ot_value oti_file_error(ot_runtime* rt, const char* op, ot_value path, int error) {
+ot_value oti_file_error(ot_state* rt, const char* op, ot_value path, int error) {
   const char* reason = error == ENOENT                     ? ":not-found"
                        : error == EEXIST                   ? ":exists"
                        : error == EACCES || error == EPERM ? ":permission"
@@ -350,7 +350,7 @@ ot_value oti_file_error(ot_runtime* rt, const char* op, ot_value path, int error
   return 0;
 }
 
-ot_value oti_ffi_error(ot_runtime* rt, const char* operation, const char* reason,
+ot_value oti_ffi_error(ot_state* rt, const char* operation, const char* reason,
                        const char* message) {
   char op[64], why[64];
   size_t length = strlen(message);

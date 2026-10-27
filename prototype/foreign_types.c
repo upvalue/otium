@@ -34,7 +34,7 @@ const oti_scalar oti_foreign_scalars[AGGREGATE] = {
 #undef SIGNED
 #undef UNSIGNED
 
-int oti_foreign_scalar(ot_runtime* rt, ot_value name, bool memory) {
+int oti_foreign_scalar(ot_state* rt, ot_value name, bool memory) {
   if (oti_kind(name, K_SYMBOL)) {
     size_t length;
     memcpy(&length, object_bytes(name), sizeof(length));
@@ -52,7 +52,7 @@ int oti_foreign_scalar(ot_runtime* rt, ot_value name, bool memory) {
   return -1;
 }
 
-bool oti_foreign_list_length(ot_runtime* rt, ot_value list, size_t limit, size_t* count) {
+bool oti_foreign_list_length(ot_state* rt, ot_value list, size_t limit, size_t* count) {
   *count = 0;
   while (oti_kind(list, K_PAIR) && *count < limit) {
     (*count)++;
@@ -99,7 +99,7 @@ static ffi_type* abi_type(unsigned id) {
   return NULL;
 }
 
-int oti_foreign_scalar_code(ot_runtime* rt, ot_value value, bool memory) {
+int oti_foreign_scalar_code(ot_state* rt, ot_value value, bool memory) {
   if (ot_is_int(value) && ot_to_int(value) >= 0 &&
       (size_t)ot_to_int(value) < sizeof(oti_foreign_scalars) / sizeof(*oti_foreign_scalars)) {
     int code = (int)ot_to_int(value);
@@ -137,7 +137,7 @@ static void union_classes(const ffi_type* type, size_t offset, unsigned char* cl
   }
 }
 
-static bool lower_union(ot_runtime* rt, oti_signature* s, oti_abi_node* node, size_t n, size_t size,
+static bool lower_union(ot_state* rt, oti_signature* s, oti_abi_node* node, size_t n, size_t size,
                         size_t alignment) {
   size_t largest = 0, aligned = 1;
   for (size_t i = 0; i < n; i++) {
@@ -187,7 +187,7 @@ static bool lower_union(ot_runtime* rt, oti_signature* s, oti_abi_node* node, si
 #endif
 
 /* This builds host-owned ABI trees without allocating in the moving heap. */
-static ffi_type* aggregate_type(ot_runtime* rt, oti_signature* s, ot_value description,
+static ffi_type* aggregate_type(ot_state* rt, oti_signature* s, ot_value description,
                                 unsigned depth, size_t* budget) {
   size_t n, kind, size, alignment;
   if (depth > 64 || !*budget) {
@@ -317,7 +317,7 @@ static bool same_abi_type(const ffi_type* a, const ffi_type* b) {
   return !a->elements[i] && !b->elements[i];
 }
 
-static bool call_type(ot_runtime* rt, oti_signature* s, ot_value v, bool codes, unsigned* id,
+static bool call_type(ot_state* rt, oti_signature* s, ot_value v, bool codes, unsigned* id,
                       ffi_type** abi) {
   if (codes && oti_kind(v, K_PAIR)) {
     size_t budget = 65536;
@@ -332,7 +332,7 @@ static bool call_type(ot_runtime* rt, oti_signature* s, ot_value v, bool codes, 
   return true;
 }
 
-oti_signature* oti_foreign_signature(ot_runtime* rt, oti_signature** cache, ot_value arguments,
+oti_signature* oti_foreign_signature(ot_state* rt, oti_signature** cache, ot_value arguments,
                                      ot_value result, bool codes) {
   oti_signature wanted = {0};
   if (!oti_foreign_list_length(rt, arguments, MAX_ARGUMENTS, &wanted.count)) return 0;

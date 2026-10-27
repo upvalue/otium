@@ -76,8 +76,11 @@ void oti_trace_error(ot_state* rt) {
     if (i == rt->frame_count - 1 && (op == OP_TAIL_CALL || op == OP_TAIL_CALL_GLOBAL) &&
         strcmp(e->code, "E0201"))
       continue;
-    e->frames[e->frame_count++] =
-        (oti_error_place){fn->source, point_offset(fn, pc), copy_string(fn->name)};
+    /* Recursion through one call site shows once, as on Chez. */
+    uint32_t offset = point_offset(fn, pc);
+    const oti_error_place* last = e->frame_count ? &e->frames[e->frame_count - 1] : NULL;
+    if (last && last->source == fn->source && last->offset == offset) continue;
+    e->frames[e->frame_count++] = (oti_error_place){fn->source, offset, copy_string(fn->name)};
   }
 }
 
@@ -151,12 +154,23 @@ bool oti_callable_error(ot_state* rt, ot_value value) {
   return false;
 }
 
+/* A name from another namespace is shown qualified, as it was written. */
 bool oti_unbound_error(ot_state* rt, uint32_t global) {
   if (oti_failed(rt)) return false;
   const oti_global_info* info = &rt->global_info[global];
-  oti_coded_errorf(rt, "E0201", "unbound name `%s`", info->name);
-  rt->error.name = copy_string(info->name);
+  const char* prefix = "";
+  if (info->space && info->space != rt->current_namespace) {
+    prefix = oti_namespace_alias(rt, rt->current_namespace, info->space);
+    if (!prefix) prefix = rt->namespaces[info->space];
+  }
+  const char* slash = *prefix ? "/" : "";
+  oti_coded_errorf(rt, "E0201", "unbound name `%s%s%s`", prefix, slash, info->name);
+  size_t qualifier = strlen(prefix) + strlen(slash), n = qualifier + strlen(info->name) + 1;
+  char* name = malloc(n);
+  if (name) snprintf(name, n, "%s%s%s", prefix, slash, info->name);
+  rt->error.name = name;
   rt->error.space = info->space;
+  rt->error.qualifier = qualifier;
   return false;
 }
 
@@ -381,14 +395,16 @@ static int compare_names(const void* a, const void* b) {
   return strcmp(*(const char* const*)a, *(const char* const*)b);
 }
 
-/* Push an array of up to three close spellings of name among the globals
- * visible in space, or nil. */
-static bool push_suggestions(ot_state* rt, const char* name, uint32_t space) {
+/* Push an array of up to three close spellings of the name of e among the
+ * globals visible in its namespace, qualified as it is, or nil. */
+static bool push_suggestions(ot_state* rt, const oti_error_record* e) {
   const char* close[64];
+  const char *name = e->name + e->qualifier, *prefix = e->name;
+  uint32_t space = e->space;
   size_t count = 0, limit = strlen(name) < 5 ? 1 : 2;
   for (size_t i = 0; i < rt->global_count && count < 64; i++) {
     const oti_global_info* info = &rt->global_info[i];
-    if ((info->space != space && (info->space != 0 || info->is_private)) ||
+    if ((info->space != space && (info->space != 0 || info->is_private || e->qualifier)) ||
         rt->globals[i] == V_UNBOUND || !strcmp(info->name, name) ||
         edit_distance(name, info->name) > limit)
       continue;
@@ -399,8 +415,16 @@ static bool push_suggestions(ot_state* rt, const char* name, uint32_t space) {
   if (!count) return push(rt, OT_NIL);
   qsort(close, count, sizeof(close[0]), compare_names);
   size_t base = rt->sp;
-  for (size_t i = 0; i < count && i < 3; i++)
-    if (!push_text(rt, close[i])) return false;
+  for (size_t i = 0; i < count && i < 3; i++) {
+    size_t n = e->qualifier + strlen(close[i]);
+    char* text = malloc(n + 1);
+    if (!text) return false;
+    memcpy(text, prefix, e->qualifier);
+    memcpy(text + e->qualifier, close[i], n - e->qualifier + 1);
+    bool ok = push_text(rt, text);
+    free(text);
+    if (!ok) return false;
+  }
   return push_array(rt, base);
 }
 
@@ -429,7 +453,7 @@ static bool locate(oti_report* r, const oti_error_record* e, size_t d) {
   if (!inner && e->located) inner = &at;
   size_t token = SIZE_MAX;
   if (e->name && !strcmp(code, "E0201")) {
-    ok = push_suggestions(rt, e->name, e->space) && put(rt, d, ":suggestions");
+    ok = push_suggestions(rt, e) && put(rt, d, ":suggestions");
     if (inner) token = token_in_form(r, inner->source, inner->offset, e->name);
   }
 

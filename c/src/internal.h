@@ -563,9 +563,11 @@ typedef struct {
   bool located;
   /* Owned host copies, or NULL: :name and :label, such as the unbound name
    * of E0201 or the callee and its arity for E0301. space is the namespace
-   * an unbound name was looked up in. */
+   * an unbound name was looked up in, and qualifier the length of the
+   * namespace prefix the name was written with, such as "json/". */
   char *name, *label;
   uint32_t space;
+  size_t qualifier;
   /* Where an uncaught error happened, recorded before unwinding: the frames
    * with source, innermost first. reached are top-level forms in other files
    * that led to it, such as requires, innermost first. */
@@ -744,6 +746,8 @@ uint32_t oti_binding_global(ot_state* rt, uint32_t space, const char* name, size
 uint32_t oti_import_global_in(ot_state* rt, uint32_t space, const char* name, size_t length);
 uint32_t oti_import_global(ot_state* rt, const char* name, size_t length);
 uint32_t oti_alias_namespace(ot_state* rt, const char* name, size_t length);
+/* The alias owner gave namespace target, or NULL. */
+const char* oti_namespace_alias(ot_state* rt, uint32_t owner, uint32_t target);
 uint32_t oti_constant(ot_state* rt, ot_value value);
 ot_value oti_text(ot_state* rt, uint32_t kind, const char* text, size_t length);
 ot_value oti_float(ot_state* rt, double number);

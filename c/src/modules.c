@@ -134,6 +134,14 @@ uint32_t oti_alias_namespace(ot_state* rt, const char* name, size_t length) {
   return lookup_import(rt, rt->current_namespace, name, length, true);
 }
 
+const char* oti_namespace_alias(ot_state* rt, uint32_t owner, uint32_t target) {
+  oti_module_state* m = rt->modules;
+  for (size_t i = 0; m && i < m->import_count; i++)
+    if (m->imports[i].alias && m->imports[i].owner == owner && m->imports[i].target == target)
+      return m->imports[i].name;
+  return NULL;
+}
+
 static bool install_import(ot_state* rt, const oti_ast* name, uint32_t target, bool alias) {
   oti_module_state* m = state(rt);
   if (!m) return false;

@@ -1,0 +1,105 @@
+;; lint: allow-file(unbound-name) %vm-install and %set-optimizer! are C runtime builtins the Chez linter does not know
+(ns otium.compiler.driver)
+(require (otium.compiler.core :as core)
+         (otium.compiler.inline :as inline)
+         (otium.compiler.convert :as convert)
+         (otium.compiler.propagate :as propagate)
+         (otium.compiler.closures :as closures)
+         (otium.compiler.verify :as verify)
+         (otium.compiler.select :as select)
+         (otium.compiler.allocate :as allocate)
+         (otium.compiler.emit :as emit)
+         (otium.process :as process))
+
+;; The optimizing compiler's entry point. A unit is one top-level form; see
+;; docs/optimizer.md. Passes take the unit table and return it.
+
+(defparam options
+  "Unit options. :verify runs the IR verifier after each IR pass, :skip lists
+passes to leave out, :strict makes unsupported forms raise instead of falling
+back to the simple compiler, :trace prints each unit's IR to stderr."
+  {:verify (not (nil? (process/getenv "OTIUM_OPTIMIZE_VERIFY")))
+   :skip '()
+   :strict (not (nil? (process/getenv "OTIUM_OPTIMIZE_STRICT")))
+   :trace #f})
+
+(def counts
+  "How many forms the optimizer compiled and how many fell back."
+  {:compiled 0 :fallback 0})
+
+(def- report-fallbacks? (not (nil? (process/getenv "OTIUM_OPTIMIZE_REPORT"))))
+
+(def- (count! key)
+  (put! counts key (+ (counts key) 1)))
+
+(def- (verify! unit stage)
+  (when ((options) :verify) (verify/check (unit :ir) stage))
+  unit)
+
+(def passes
+  "Each pass as (name function); :verify-as names the verifier stage to run after it."
+  (list (list :resolve (fn (u)
+                         (put! u :core (core/resolve (u :form) (u :ns)))
+                         u))
+        (list :inline (fn (u)
+                        (put! u :core (inline/run (u :core)))
+                        u))
+        (list :convert (fn (u)
+                         (put! u :ir (convert/run (u :core)))
+                         (verify! u :converted)))
+        (list :propagate (fn (u)
+                           (put! u :ir (propagate/run (u :ir)))
+                           (verify! u :converted)))
+        (list :closures (fn (u)
+                          (put! u :ir (closures/run (u :ir)))
+                          (verify! u :closed)))
+        (list :select (fn (u)
+                        (put! u :lir (select/run (u :ir)))
+                        u))
+        (list :allocate (fn (u)
+                          (put! u :lir (allocate/run (u :lir)))
+                          u))
+        (list :emit (fn (u)
+                      (put! u :vm (emit/run (u :lir)))
+                      u))))
+
+(def- required-passes '(:resolve :convert :closures :select :allocate :emit))
+
+(def (run-passes unit)
+  "Run every pass that isn't skipped over unit and return it."
+  (let ((skip ((options) :skip)))
+    (reduce (fn (u pass)
+              (if (and (member (car pass) skip) (not (member (car pass) required-passes)))
+                  u
+                  ((second pass) u)))
+            unit
+            passes)))
+
+(def (compile-unit form space)
+  "The unit for form compiled in namespace space, with every pass run."
+  (run-passes {:form form :ns space}))
+
+(def (compile-form form space)
+  "Compile and install form, returning the entry's function id, or nil when
+the form uses something the optimizer doesn't support."
+  (try
+    (let ((id (%vm-install ((compile-unit form space) :vm) space)))
+      (count! :compiled)
+      id)
+    (catch (core/unsupported? problem)
+      (count! :fallback)
+      (when report-fallbacks? (process/write-error (str "optimizer: falling back: " (condition-message problem) "\n")))
+      (if ((options) :strict)
+          (error problem)
+          nil))))
+
+(def- (hook form space)
+  (compile-form form space))
+
+(def (enable!)
+  "Compile every later top-level form with the optimizer."
+  (%set-optimizer! hook))
+
+(def (disable!)
+  "Go back to the simple compiler."
+  (%set-optimizer! nil))

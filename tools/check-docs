@@ -38,6 +38,7 @@ for file do
     # Backticked paths under a source directory must exist. Only names ending
     # in / or with an extension count, since chez/values and native/poll-event
     # are Otium bindings. Globs and placeholders don't match the pattern.
+    # Ignored paths, such as build output, only exist after a build.
     for path in $(grep -o '`[a-z][A-Za-z0-9_./-]*/[A-Za-z0-9_./-]*`' "$file" | tr -d '`' | sort -u); do
         case $path in
             *...*) continue ;;
@@ -46,7 +47,7 @@ for file do
         esac
         case $path in
             c/*|chez/*|lib/*|native/*|tests/*|examples/*|benchmarks/*|docs/*|specs/*|tools/*|vim/*|manse/*|otos/*)
-                if [ ! -e "$path" ]; then
+                if [ ! -e "$path" ] && ! git check-ignore -q "$path"; then
                     echo "$file: names missing path $path" >&2
                     status=1
                 fi ;;

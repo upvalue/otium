@@ -392,6 +392,8 @@ static bool dispatch(ot_runtime* rt, size_t stop_frames) {
       [OP_JBOUND] = &&L_OP_JBOUND,
       [OP_CALL] = &&L_OP_CALL,
       [OP_TAIL_CALL] = &&L_OP_TAIL_CALL,
+      [OP_CALL_GLOBAL] = &&L_OP_CALL_GLOBAL,
+      [OP_TAIL_CALL_GLOBAL] = &&L_OP_TAIL_CALL_GLOBAL,
       [OP_RETURN] = &&L_OP_RETURN,
       [OP_RETURN_IMM] = &&L_OP_RETURN_IMM,
       [OP_TRY] = &&L_OP_TRY,
@@ -579,9 +581,16 @@ next:
     if (R[ins.a] != V_UNBOUND) pc = TARGET(ins);
     NEXT();
   }
+  CASE(OP_CALL_GLOBAL) {
+    LOAD_GLOBAL();
+    R[ins.a] = v;
+    argc = ins.x;
+    goto call;
+  }
   CASE(OP_CALL) {
     v = R[ins.a];
     argc = ins.b;
+  call:
     if (VM_LIKELY(oti_kind(v, K_CLOSURE))) {
       uint32_t id;
       memcpy(&id, object_bytes(v), sizeof(id));
@@ -623,9 +632,16 @@ next:
     SAFEPOINT();
     NEXT();
   }
+  CASE(OP_TAIL_CALL_GLOBAL) {
+    LOAD_GLOBAL();
+    R[ins.a] = v;
+    argc = ins.x;
+    goto tail_call;
+  }
   CASE(OP_TAIL_CALL) {
     v = R[ins.a];
     argc = ins.b;
+  tail_call:
     if (VM_LIKELY(oti_kind(v, K_CLOSURE))) {
       uint32_t id;
       memcpy(&id, object_bytes(v), sizeof(id));

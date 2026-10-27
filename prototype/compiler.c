@@ -1567,6 +1567,21 @@ static bool self_jump(oti_compiler* c, const oti_ast* args, uint32_t params, siz
   return emit_bc(c, OP_JUMP, 0, (uint32_t)target) != SIZE_MAX;
 }
 
+/* An expression that runs no user code and leaves globals alone: a bound
+ * local, a constant, or an inline primitive of those. */
+static bool simple(oti_compiler* c, const oti_ast* a) {
+  if (a->kind == AST_SYMBOL) {
+    size_t b = find_binding(c, a);
+    return b != SIZE_MAX && (c->bindings[b].kind == BIND_SELF ||
+                             (c->bindings[b].kind == BIND_LOCAL && c->bindings[b].initialized));
+  }
+  if (constant_syntax(a)) return true;
+  if (!primitive(c, a)) return false;
+  for (const oti_ast* q = a->as.list.first->next; q; q = q->next)
+    if (!simple(c, q)) return false;
+  return true;
+}
+
 static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tail) {
   if (c->rt->error[0]) return false;
   bool definitions = c->definitions;
@@ -1889,11 +1904,24 @@ static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tai
   size_t target;
   if (tail && head->kind == AST_SYMBOL && self_tail_call(c, head, count, &params, &target))
     return self_jump(c, args, params, target);
+  /* A global callee is read by the call instruction itself when reading it
+   * after the arguments cannot be told apart from reading it before. */
+  oti_reference ref = {REF_LOCAL, 0, 0, 0, false};
+  if (head->kind == AST_SYMBOL && !resolve(c, head, &ref)) return false;
+  bool global = head->kind == AST_SYMBOL && ref.kind == REF_GLOBAL && count <= UINT8_MAX;
+  for (const oti_ast* q = args; global && q; q = q->next) global = simple(c, q);
   uint32_t saved, base = call_begin(c, dst, tail, &saved);
-  if (!expression(c, head, base, false)) return false;
+  if (!global &&
+      !(head->kind == AST_SYMBOL ? load(c, &ref, base) : expression(c, head, base, false)))
+    return false;
   for (const oti_ast* q = args; q; q = q->next)
     if (!argument(c, q)) return false;
-  return call_end(c, base, count, saved, dst, tail);
+  if (!global) return call_end(c, base, count, saved, dst, tail);
+  if (emit_x(c, tail ? OP_TAIL_CALL_GLOBAL : OP_CALL_GLOBAL, (unsigned)count, base,
+             ref.index & 0xffff, ref.index >> 16) == SIZE_MAX)
+    return false;
+  release(c, saved);
+  return tail || move(c, dst, base);
 }
 
 static void discard_functions(ot_runtime* rt, oti_unit* unit) {

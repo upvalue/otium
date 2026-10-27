@@ -354,6 +354,9 @@ typedef enum {
   OP_JBOUND,
   OP_CALL,
   OP_TAIL_CALL,
+  /* Call or tail call G[bc], placed in rA, with x arguments above it. */
+  OP_CALL_GLOBAL,
+  OP_TAIL_CALL_GLOBAL,
   OP_RETURN,
   /* Return the 32-bit immediate in bc, sign extended, as IMM loads it. */
   OP_RETURN_IMM,

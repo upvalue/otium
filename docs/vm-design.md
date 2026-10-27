@@ -149,6 +149,7 @@ Control:
 | `JBOUND a bc` | jump if `rA` is not unbound (optional parameters) |
 | `CALL a b` | call `rA` with `rA+1 .. rA+b`, result in `rA` |
 | `TAIL_CALL a b` | tail call |
+| `CALL_GLOBAL x a bc`, `TAIL_CALL_GLOBAL x a bc` | `rA = G[bc]` as `GLOBAL` reads it, then call or tail call it with `x` arguments |
 | `RETURN a` | return `rA` |
 | `RETURN_IMM bc` | return the immediate in `bc`, as `IMM` loads it |
 
@@ -279,6 +280,14 @@ unless a jump lands after it.
 
 **Global definitions** keep going through global cells, so redefinition is
 visible to every caller, including self-recursive global functions.
+
+**Global calls.** A call to a global whose arguments are all bound locals,
+constants or inline primitives of those uses `CALL_GLOBAL`, which reads the
+global when the call is made, after the arguments. Those arguments run no user
+code and change no global, so the result is the same as reading the global
+first. The one difference is which error is reported when the global is
+unbound and an argument also fails, such as `(missing (car 5))`. Other calls
+read the callee first with `GLOBAL`, as before.
 
 ## Code metadata
 

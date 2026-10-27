@@ -542,8 +542,8 @@
 (prim! 'exact? [1 #f] '(:raise) {:fold (folder exact?) :transfer (number-test types/t-fixnum 0)})
 (prim! 'inexact? [1 #f] '(:raise) {:fold (folder inexact?) :transfer (number-test types/t-float 0)})
 (prim! 'finite? [1 #f] '(:raise) {:fold (folder finite?) :transfer (number-test types/t-fixnum types/t-float)})
-(prim! 'nan? [1 #f] '(:raise) {:fold (folder nan?) :transfer (number-test 0 types/t-float)})
-(prim! 'infinite? [1 #f] '(:raise) {:fold (folder infinite?) :transfer (number-test 0 types/t-float)})
+(prim! 'nan? [1 #f] '(:raise) {:fold (folder (fn (x) (nan? x))) :transfer (number-test 0 types/t-float)})
+(prim! 'infinite? [1 #f] '(:raise) {:fold (folder (fn (x) (infinite? x))) :transfer (number-test 0 types/t-float)})
 (prim! 'pos? [1 #f] '(:raise) {:fold (folder pos?) :transfer (sign-test #t)})
 (prim! 'neg? [1 #f] '(:raise) {:fold (folder neg?) :transfer (sign-test #f)})
 

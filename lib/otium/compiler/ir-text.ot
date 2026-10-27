@@ -1,0 +1,458 @@
+(ns otium.compiler.ir-text)
+
+;; Block IR as a datum, for dumps and hand-written test inputs. The format is
+;; in docs/optimizer.md, "Text format". Printing numbers functions, blocks and
+;; values in the order they are printed, so (print (read d)) is d for any d
+;; that print made.
+;;
+;; Beyond the spec:
+;; - A function with a position prints :pos n after :entry.
+;; - Value names print as :name sym. On an operation it follows :aux and
+;;   :pos; a parameter with a name or fact prints as (vN :name sym :fact f)
+;;   in its block's parameter list.
+;; - A block without a terminator prints without one.
+;; - Facts print with types/fact->datum and read with types/datum->fact,
+;;   through the parameters fact->datum and datum->fact.
+;; - The reader takes any symbols as labels for functions, blocks and values;
+;;   only their position says what they are. Annotations may come in any
+;;   order.
+
+(require otium.compiler.ir :as ir)
+(require otium.compiler.types :as types)
+
+(defparam fact->datum types/fact->datum)
+
+(defparam datum->fact types/datum->fact)
+
+(def- terminator-heads '(jump branch branch-prim call tail-call return try unreachable))
+
+(def- (fn-aux? code)
+  (and (ir/ir-code? code) (eq? (ir/code-aux-kind code) :fn)))
+
+;; --- printing --------------------------------------------------------------------
+
+;; Label symbols by number, kept across prints: interning is slow on the C
+;; runtime once its symbol table is large.
+(defonce label-cache {"v" [] "b" [] "f" []})
+
+(def- (label prefix n)
+  (let ((cache (label-cache prefix)))
+    (while (<= (length cache) n) (push! cache (string->symbol (str prefix (length cache)))))
+    (cache n)))
+
+(def- (const-datum v)
+  (if (or (symbol? v) (pair? v) (null? v))
+      (list 'quote v)
+      v))
+
+;; Print labels: functions keep their ids; blocks and values are numbered in
+;; print order. A function whose entry parameters are its signature's writes
+;; them in :params and its entry block with ().
+
+(def- (header-entry ir f)
+  (let ((e (ir/fn-entry ir f)))
+    (and e (not (null? (ir/fn-params ir f))) (equal? (ir/block-params ir e) (ir/fn-params ir f)) e)))
+
+(def (labels ir)
+  "The numbering print uses, for messages that name values and blocks as a dump would."
+  (let ((vnum (column-of (ir/value-count ir)))
+        (bnum (column-of (ir/block-count ir)))
+        (next-v 0)
+        (next-b 0))
+    (def (number! vs)
+      (for-each (fn (v)
+                  (put! vnum v next-v)
+                  (set! next-v (+ next-v 1)))
+                vs))
+    (for-each (fn (f)
+                (let ((in-header (header-entry ir f)))
+                  (when in-header (number! (ir/fn-params ir f)))
+                  (for-each (fn (b)
+                              (put! bnum b next-b)
+                              (set! next-b (+ next-b 1))
+                              (unless (eq? b in-header) (number! (ir/block-params ir b)))
+                              (number! (map (fn (o) (ir/op-value ir o)) (ir/block-ops ir b))))
+                            (ir/fn-blocks ir f))))
+              (ir/functions ir))
+    {:v vnum :b bnum}))
+
+(def (value-label names v)
+  (let ((n (and (int? v) (get (names :v) v))))
+    (if n
+        (label "v" n)
+        (string->symbol (str "?v" v)))))
+
+(def (block-label names b)
+  (let ((n (and (int? b) (get (names :b) b))))
+    (if n
+        (label "b" n)
+        (string->symbol (str "?b" b)))))
+
+(def (fn-label f)
+  (label "f" f))
+
+(def- (annotations ir v)
+  (append (if (ir/value-name ir v)
+              (list :name (ir/value-name ir v))
+              '())
+          (if (nil? (ir/value-fact ir v))
+              '()
+              (list :fact ((fact->datum) (ir/value-fact ir v))))))
+
+(def- (param-datum ir names v)
+  (let ((notes (annotations ir v)))
+    (if (null? notes)
+        (value-label names v)
+        (cons (value-label names v) notes))))
+
+(def (op-datum ir names o)
+  "Operation o as print writes it."
+  (let ((code (ir/op-code ir o))
+        (aux (ir/op-aux ir o))
+        (pos (ir/op-pos ir o))
+        (x (ir/op-value ir o)))
+    (append (list (value-label names x) code)
+            (if (eq? code 'const)
+                (list (const-datum aux))
+                (append (map (fn (v) (value-label names v)) (ir/op-args ir o))
+                        (cond
+                          ((nil? aux) '())
+                          ((fn-aux? code) (list :aux (fn-label aux)))
+                          (else (list :aux aux)))))
+            (if (nil? pos)
+                '()
+                (list :pos pos))
+            (annotations ir x))))
+
+(def (term-datum ir names b)
+  "Block b's terminator as print writes it, or nil if it has none."
+  (let ((kind (ir/term-kind ir b))
+        (args (map (fn (v) (value-label names v)) (ir/term-args ir b)))
+        (succ (map (fn (s) (block-label names s)) (ir/succs ir b)))
+        (pos (if (nil? (ir/term-pos ir b))
+                 '()
+                 (list :pos (ir/term-pos ir b))))
+        (ck (ir/term-call-kind ir b)))
+    (def (callee)
+      (let ((c (ir/term-callee ir b)))
+        (cond
+          ((eq? ck :value) (value-label names c))
+          ((eq? ck :known) (fn-label c))
+          (else c))))
+    (cond
+      ((nil? kind) nil)
+      ((eq? kind :jump) (cons 'jump (cons (car succ) args)))
+      ((eq? kind :branch) (list 'branch (car args) (car succ) (cadr succ)))
+      ((eq? kind :branch-prim) (list 'branch-prim (ir/term-prim ir b) args (car succ) (cadr succ)))
+      ((eq? kind :call) (append (list 'call (keyword->symbol ck) (callee) args (car succ)) pos))
+      ((eq? kind :tail-call) (append (list 'tail-call (keyword->symbol ck) (callee) args) pos))
+      ((eq? kind :return) (list 'return (car args)))
+      ((eq? kind :try) (list 'try (car succ) (cadr succ)))
+      (else (list 'unreachable)))))
+
+(def (print ir)
+  "The IR as a datum."
+  (let ((names (labels ir)))
+    (def (block b in-header)
+      (let ((term (term-datum ir names b)))
+        (append (list (block-label names b)
+                      (if (eq? b in-header)
+                          '()
+                          (map (fn (v) (param-datum ir names v)) (ir/block-params ir b))))
+                (map (fn (o) (op-datum ir names o)) (ir/block-ops ir b))
+                (if term
+                    (list term)
+                    '()))))
+    (def (function f)
+      (let ((parent (ir/fn-parent ir f))
+            (sig (ir/fn-signature ir f))
+            (entry (ir/fn-entry ir f))
+            (in-header (header-entry ir f)))
+        (append (list 'fn
+                      (fn-label f)
+                      (ir/fn-name ir f)
+                      :parent (and parent (fn-label parent))
+                      :params (map (fn (v)
+                                     (if in-header
+                                         (param-datum ir names v)
+                                         (value-label names v)))
+                                   (ir/fn-params ir f))
+                      :signature (and sig (array-to-list sig))
+                      :entry (and entry (block-label names entry)))
+                (if (nil? (ir/fn-pos ir f))
+                    '()
+                    (list :pos (ir/fn-pos ir f)))
+                (map (fn (b) (block b in-header)) (ir/fn-blocks ir f)))))
+    (cons 'ir (map function (ir/functions ir)))))
+
+(def- (column-of n)
+  (let ((a []))
+    (dotimes (i n)
+      (push! a nil))
+    a))
+
+(def- (keyword->symbol k)
+  (string->symbol (keyword->string k)))
+
+;; --- reading ---------------------------------------------------------------------
+
+(def- (show x)
+  (with-output-to-string (fn () (write x))))
+
+(def- (bad form what)
+  (error (str "ir-text/read: " what " in " (show form))))
+
+(def- (split-annotations form items allowed)
+  "Split items into [before notes rest]: the items before the first keyword, a
+table of the :key value pairs that follow, and what comes after the pairs."
+  (let loop ((xs items)
+             (before '()))
+    (if (or (null? xs) (keyword? (car xs)))
+        (let ((notes {}))
+          (let pairs ((ys xs))
+            (if (and (pair? ys) (keyword? (car ys)))
+                (begin
+                  (unless (pair? (cdr ys)) (bad form (str "missing value after " (car ys))))
+                  (unless (memq (car ys) allowed) (bad form (str "unknown annotation " (car ys))))
+                  (when (contains? notes (car ys)) (bad form (str "repeated " (car ys))))
+                  ;; boxed, since putting nil would delete the key
+                  (put! notes (car ys) [(cadr ys)])
+                  (pairs (cddr ys)))
+                [(reverse before) notes ys])))
+        (loop (cdr xs) (cons (car xs) before)))))
+
+(def- (trailing form split)
+  (unless (null? (split 2)) (bad form (str "unexpected " (show (car (split 2))) " after the annotations")))
+  split)
+
+(def- (note notes key)
+  (let ((box (get notes key))) (and box (box 0))))
+
+(def- (proper-list? x)
+  (list? x))
+
+(def (read datum)
+  "An IR from a datum in the text format."
+  (unless (and (pair? datum) (eq? (car datum) 'ir) (proper-list? datum)) (bad datum "expected (ir (fn ...) ...)"))
+  (let ((out (ir/new))
+        (fnames {})
+        (bnames {})
+        (vnames {})
+        (fns '())) ; [id form notes blocks] per function
+    (def (value form x)
+      (lookup vnames "value" form x))
+    (def (block form x)
+      (lookup bnames "block" form x))
+    (def (function form x)
+      (lookup fnames "function" form x))
+    (def (values-of form xs)
+      (unless (proper-list? xs) (bad form (str "expected a list of values, got " (show xs))))
+      (map (fn (x) (value form x)) xs))
+    (def (annotate! form x notes)
+      (when (contains? notes :name) (ir/set-value-name! out x (note notes :name)))
+      (when (contains? notes :fact)
+        (ir/set-value-fact! out x (guarded form (fn () ((datum->fact) (note notes :fact)))))))
+    ;; Functions, blocks and parameters, in order.
+    (for-each (fn (form)
+                (unless (and (proper-list? form) (>= (length form) 3) (eq? (car form) 'fn))
+                  (bad form "expected (fn label name :key value ... block ...)"))
+                (let ((split (split-annotations form (cddr form) '(:parent :params :signature :entry :pos))))
+                  (let ((head (split 0))
+                        (notes (split 1)))
+                    (unless (= (length head) 1)
+                      (bad form "expected a name and then :key value pairs before the blocks"))
+                    (let ((blocks (split 2))
+                          (parent (note notes :parent)))
+                      (let ((f (ir/add-function! out (car head) (and parent (function form parent)) (note notes :pos))))
+                        (define! fnames "function" form (cadr form) f)
+                        (set! fns (cons [f form notes blocks nil] fns)))))))
+              (cdr datum))
+    (set! fns (reverse fns))
+    (def (param! form b p)
+      (let ((x (ir/add-param! out b)))
+        (if (pair? p)
+            (let ((split (trailing p (split-annotations p (cdr p) '(:name :fact)))))
+              (unless (null? (split 0)) (bad p "expected (label :name sym :fact f)"))
+              (define! vnames "value" p (car p) x)
+              (annotate! p x (split 1)))
+            (define! vnames "value" form p x))
+        x))
+    ;; Blocks and their parameters. An entry block written with () takes
+    ;; the header's :params as its parameters.
+    (for-each (fn (entry)
+                (let ((f (entry 0))
+                      (form (entry 1))
+                      (params (or (note (entry 2) :params) '())))
+                  (unless (list? params) (bad form (str "expected :params (value ...), got " (show params))))
+                  (for-each (fn (bform)
+                              (unless (and (proper-list? bform) (>= (length bform) 2) (proper-list? (cadr bform)))
+                                (bad bform "expected (label (params ...) operation ... terminator)"))
+                              (let ((b (ir/add-block! out f)))
+                                (define! bnames "block" bform (car bform) b)
+                                (if (and (eq? (car bform) (note (entry 2) :entry))
+                                         (null? (cadr bform))
+                                         (not (null? params)))
+                                    (put! entry 4 (map (fn (p) (param! form b p)) params))
+                                    (for-each (fn (p) (param! bform b p)) (cadr bform)))))
+                            (entry 3))))
+              fns)
+    ;; Operation values get ids in text order, from the next free id.
+    (let ((next (ir/next-value-id out))
+          (ops '())) ; [form block-label] in order
+      (for-each (fn (entry)
+                  (for-each (fn (bform)
+                              (let loop ((body (cddr bform)))
+                                (unless (null? body)
+                                  (let ((form (car body)))
+                                    (unless (and (pair? form) (symbol? (car form)) (proper-list? form))
+                                      (bad form "expected an operation or terminator"))
+                                    (if (memq (car form) terminator-heads)
+                                        (unless (null? (cdr body)) (bad form "terminator must come last in its block"))
+                                        (begin
+                                          (define! vnames "value" form (car form) next)
+                                          (set! next (+ next 1))
+                                          (set! ops (cons [form (car bform)] ops)))))
+                                  (loop (cdr body)))))
+                            (entry 3)))
+                fns)
+      (for-each (fn (item)
+                  (let ((form (item 0))
+                        (b (get bnames (item 1))))
+                    (unless (>= (length form) 2) (bad form "expected (label code arg ...)"))
+                    (let ((code (cadr form)))
+                      (unless (symbol? code) (bad form "operation code must be a symbol"))
+                      (let ((split (if (eq? code 'const)
+                                       (begin
+                                         (unless (>= (length form) 3) (bad form "const needs a value"))
+                                         (trailing form (split-annotations form (cdddr form) '(:pos :name :fact))))
+                                       (trailing form (split-annotations form (cddr form) '(:aux :pos :name :fact))))))
+                        (let ((args (if (eq? code 'const)
+                                        '()
+                                        (values-of form (split 0))))
+                              (notes (split 1)))
+                          (when (and (eq? code 'const) (not (null? (split 0)))) (bad form "const takes one value"))
+                          (let ((aux (cond
+                                       ((eq? code 'const) (read-const form (caddr form)))
+                                       ((fn-aux? code) (and (contains? notes :aux) (function form (note notes :aux))))
+                                       (else (note notes :aux)))))
+                            (let ((x (guarded form (fn () (ir/%emit! out b code args aux (note notes :pos) #f)))))
+                              (unless (eq? x (get vnames (car form))) (bad form "internal: value numbering went wrong"))
+                              (annotate! form x notes))))))))
+                (reverse ops))
+      (unless (= next (ir/value-count out)) (bad datum "internal: value numbering went wrong")))
+    ;; Entries, signatures and terminators.
+    (for-each (fn (entry)
+                (let ((f (entry 0))
+                      (form (entry 1))
+                      (notes (entry 2)))
+                  (when (note notes :entry)
+                    (guarded form (fn () (ir/set-entry! out f (block form (note notes :entry))))))
+                  (let ((sig (note notes :signature)))
+                    (when sig
+                      (unless (and (proper-list? sig) (= (length sig) 3))
+                        (bad form "expected :signature (required optional rest?)"))
+                      (let ((params (or (entry 4) (values-of form (or (note notes :params) '())))))
+                        (guarded form (fn () (ir/set-signature! out f params (car sig) (cadr sig) (caddr sig)))))))
+                  (when (and (not (note notes :signature)) (not (null? (or (note notes :params) '()))))
+                    (bad form ":params needs a :signature"))
+                  (for-each (fn (bform)
+                              (let ((form (last (cdr bform))))
+                                (when (and (pair? form) (memq (car form) terminator-heads))
+                                  (read-term! out (get bnames (car bform)) form value block function guarded))))
+                            (entry 3))))
+              fns)
+    out))
+
+(def- (lookup table kind form x)
+  (unless (symbol? x) (bad form (str "expected a " kind " label, got " (show x))))
+  (let ((id (get table x)))
+    (when (nil? id) (bad form (str "unknown " kind " " x)))
+    id))
+
+(def- (define! table kind form x id)
+  (unless (symbol? x) (bad form (str "expected a " kind " label, got " (show x))))
+  (when (contains? table x) (bad form (str kind " " x " is defined twice")))
+  (put! table x id))
+
+(def- (guarded form thunk)
+  "Run thunk, making a builder error name the form being read."
+  (try
+    (thunk)
+    (catch (error? c)
+      (let ((m (condition-message c)))
+        (if (string-starts-with? m "ir-text/read:")
+            (error m)
+            (bad form m))))))
+
+(def- (read-const form x)
+  (cond
+    ((and (pair? x) (eq? (car x) 'quote) (pair? (cdr x)) (null? (cddr x))) (cadr x))
+    ((or (symbol? x) (pair? x) (null? x)) (bad form (str "a symbol or list constant must be quoted: " (show x))))
+    (else x)))
+
+(def- (call-kind form x)
+  (cond
+    ((eq? x 'value) :value)
+    ((eq? x 'global) :global)
+    ((eq? x 'known) :known)
+    (else (bad form (str "call kind must be value, global or known, got " (show x))))))
+
+(def- (read-term! out b form value block function guarded)
+  (let ((head (car form))
+        (n (length form)))
+    (def (need k shape)
+      (unless (= n k) (bad form (str "expected " shape))))
+    (def (vals xs)
+      (unless (list? xs) (bad form (str "expected a list of values, got " (show xs))))
+      (map (fn (x) (value form x)) xs))
+    (def (callee kind x)
+      (cond
+        ((eq? kind :value) (value form x))
+        ((eq? kind :known) (function form x))
+        (else x)))
+    (def (pos-of rest)
+      (cond
+        ((null? rest) nil)
+        ((and (eq? (car rest) :pos) (pair? (cdr rest)) (null? (cddr rest))) (cadr rest))
+        (else (bad form "expected an optional :pos n at the end"))))
+    (guarded form
+             (fn ()
+               (cond
+                 ((eq? head 'jump)
+                  (unless (>= n 2) (bad form "expected (jump block arg ...)"))
+                  (ir/jump! out b (block form (cadr form)) (vals (cddr form))))
+                 ((eq? head 'branch)
+                  (need 4 "(branch value then else)")
+                  (ir/branch! out b (value form (cadr form)) (block form (caddr form)) (block form (cadddr form))))
+                 ((eq? head 'branch-prim)
+                  (need 5 "(branch-prim prim (args) then else)")
+                  (ir/branch-prim! out
+                                   b
+                                   (cadr form)
+                                   (vals (caddr form))
+                                   (block form (cadddr form))
+                                   (block form (list-ref form 4))))
+                 ((eq? head 'call)
+                  (unless (>= n 5) (bad form "expected (call kind callee (args) block [:pos n])"))
+                  (let ((kind (call-kind form (cadr form))))
+                    (ir/call! out
+                              b
+                              kind
+                              (callee kind (caddr form))
+                              (vals (cadddr form))
+                              (block form (list-ref form 4))
+                              (pos-of (list-tail form 5)))))
+                 ((eq? head 'tail-call)
+                  (unless (>= n 4) (bad form "expected (tail-call kind callee (args) [:pos n])"))
+                  (let ((kind (call-kind form (cadr form))))
+                    (ir/tail-call! out
+                                   b
+                                   kind
+                                   (callee kind (caddr form))
+                                   (vals (cadddr form))
+                                   (pos-of (list-tail form 4)))))
+                 ((eq? head 'return) (need 2 "(return value)") (ir/return! out b (value form (cadr form))))
+                 ((eq? head 'try)
+                  (need 3 "(try body handler)")
+                  (ir/try! out b (block form (cadr form)) (block form (caddr form))))
+                 (else (need 1 "(unreachable)") (ir/unreachable! out b)))))))

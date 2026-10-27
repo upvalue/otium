@@ -1,0 +1,258 @@
+(ns otium.compiler.verify)
+
+;; The block IR verifier. Rules are in docs/optimizer.md, "Verifier rules".
+;; Messages name functions, blocks and values as ir-text/print would, so they
+;; can be read against a dump, and end with the offending form.
+;;
+;; Decisions beyond the spec:
+;; - Every function needs an entry and a signature (the unit's entry
+;;   function has the signature (0 0 #f)).
+;; - Uses in unreachable blocks aren't checked for dominance; a reachable use
+;;   of a value defined in an unreachable block is an error.
+;; - Before Closures, a use inside a nested function g of a value from an
+;;   enclosing function h counts as a use at each reachable `closure`
+;;   operation that creates g. If that operation is itself in a function
+;;   nested in h, the rule applies again from there, until it reaches h. A
+;;   function no reachable `closure` creates puts no constraint on them.
+;; - :converted rejects the after-Closures codes env-ref, make-closure and
+;;   static-closure.
+;; - :closed: a function's capture count is the operand count of the
+;;   make-closure operations that create it, which must agree; 0 when only
+;;   static-closure or nothing creates it. A function with captures can't
+;;   also have a static-closure.
+;; - A :known call passes an argument count its callee's signature accepts.
+;; - `raise` must be the last operation of a block ending in `unreachable`.
+
+(require otium.compiler.ir :as ir)
+(require otium.compiler.ir-text :as ir-text)
+(require otium.compiler.prims :as prims)
+
+(def- (arity-text entry)
+  (let ((arity (entry :arity)))
+    (cond
+      ((not (arity 1)) (str (arity 0)))
+      ((entry :max) (str (arity 0) " to " (entry :max)))
+      (else (str (arity 0) " or more")))))
+
+(def- (check-prim where sym n)
+  (let ((entry (prims/lookup sym)))
+    (unless entry (fail where (str "unknown primop " sym)))
+    (unless (prims/arity-fits? entry n) (fail where (str sym " takes " (arity-text entry) " arguments, got " n)))))
+
+(def- (show x)
+  (with-output-to-string (fn () (write x))))
+
+;; where is a string or a thunk making one, so it costs nothing until
+;; something fails
+(def- (fail where what)
+  (error (str "verify: "
+              what
+              " ("
+              (if (procedure? where)
+                  (where)
+                  where)
+              ")")))
+
+(def (check ir stage)
+  "Raise on the first violation of the verifier rules; stage is :converted or :closed."
+  (unless (or (eq? stage :converted) (eq? stage :closed))
+    (error (str "verify/check: stage must be :converted or :closed, got " (show stage))))
+  (let ((names nil)
+        (closed (eq? stage :closed))
+        (op-index (let ((a []))
+                    (dotimes (i (ir/op-count ir))
+                      (push! a 0))
+                    a))
+        (doms-of {})
+        (closures-of {}) ; function -> closure ops creating it
+        (captures-of {}) ; function -> make-closure operand count, :closed
+        (static-of {}))
+    (def (names!)
+      (when (nil? names) (set! names (ir-text/labels ir)))
+      names)
+    (def (v x)
+      (ir-text/value-label (names!) x))
+    (def (b x)
+      (ir-text/block-label (names!) x))
+    (def f ir-text/fn-label)
+    (def (at-fn x)
+      (str "in " (f x)))
+    (def (at-block x)
+      (str "in " (f (ir/block-fn ir x)) " " (b x)))
+    (def (at-op o)
+      (str "in "
+           (f (ir/block-fn ir (ir/op-block ir o)))
+           " "
+           (b (ir/op-block ir o))
+           ": "
+           (show (ir-text/op-datum ir (names!) o))))
+    (def (at-term x)
+      (str "in " (f (ir/block-fn ir x)) " " (b x) ": " (show (ir-text/term-datum ir (names!) x))))
+    (def (doms g)
+      (or (get doms-of g)
+          (let ((d (ir/dominators ir g)))
+            (put! doms-of g d)
+            d)))
+
+    ;; Functions, blocks and terminators.
+    (for-each (fn (g)
+                (let ((entry (ir/fn-entry ir g))
+                      (sig (ir/fn-signature ir g)))
+                  (unless entry (fail (at-fn g) "function has no entry block"))
+                  (unless sig (fail (at-fn g) "function has no signature"))
+                  (unless (equal? (ir/block-params ir entry) (ir/fn-params ir g))
+                    (fail (at-block entry)
+                          (str "entry parameters "
+                               (show (map v (ir/block-params ir entry)))
+                               " aren't the signature's "
+                               (show (map v (ir/fn-params ir g)))))))
+                (for-each (fn (blk)
+                            (let ((kind (ir/term-kind ir blk))
+                                  (succ (ir/succs ir blk))
+                                  (ops (ir/block-ops ir blk)))
+                              (unless kind (fail (at-block blk) "block has no terminator"))
+                              (for-each (fn (s)
+                                          (unless (= (ir/block-fn ir s) g)
+                                            (fail (at-term blk)
+                                                  (str "successor " (b s) " belongs to " (f (ir/block-fn ir s))))))
+                                        succ)
+                              (when (eq? kind :jump)
+                                (let ((want (ir/block-param-count ir (car succ)))
+                                      (got (length (ir/term-args ir blk))))
+                                  (unless (= want got)
+                                    (fail (at-term blk)
+                                          (str "jump passes "
+                                               got
+                                               " values but "
+                                               (b (car succ))
+                                               " has "
+                                               want
+                                               " parameters")))))
+                              (when (and (eq? kind :call) (= 0 (ir/block-param-count ir (car succ))))
+                                (fail (at-term blk) (str "call returns to " (b (car succ)) ", which has no parameter")))
+                              (when (and (eq? kind :try) (= 0 (ir/block-param-count ir (cadr succ))))
+                                (fail (at-term blk) (str "handler " (b (cadr succ)) " has no parameter")))
+                              (when (eq? kind :branch-prim)
+                                (check-prim (fn () (at-term blk)) (ir/term-prim ir blk) (length (ir/term-args ir blk))))
+                              (when (and (or (eq? kind :call) (eq? kind :tail-call))
+                                         (eq? (ir/term-call-kind ir blk) :known))
+                                (let ((callee-sig (ir/fn-signature ir (ir/term-callee ir blk)))
+                                      (n (length (ir/term-args ir blk))))
+                                  (when (and callee-sig
+                                             (or (< n (callee-sig 0))
+                                                 (and (not (callee-sig 2)) (> n (+ (callee-sig 0) (callee-sig 1))))))
+                                    (fail (at-term blk)
+                                          (str (f (ir/term-callee ir blk)) " doesn't take " n " arguments")))))
+                              (let loop ((os ops)
+                                         (i 0))
+                                (unless (null? os)
+                                  (let ((o (car os)))
+                                    (put! op-index o i)
+                                    (when (and (eq? (ir/op-code ir o) 'raise)
+                                               (not (and (null? (cdr os)) (eq? kind :unreachable))))
+                                      (fail (at-op o)
+                                            "raise must be the last operation of a block ending in unreachable")))
+                                  (loop (cdr os) (+ i 1))))))
+                          (ir/fn-blocks ir g)))
+              (ir/functions ir))
+
+    ;; Operations.
+    (dotimes (o (ir/op-count ir))
+      (let ((code (ir/op-code ir o))
+            (n (length (ir/op-args ir o)))
+            (aux (ir/op-aux ir o)))
+        (if (ir/ir-code? code)
+            (cond
+              ((and closed (eq? code 'closure))
+               (fail (at-op o) "closure appears after Closures; it should be make-closure or static-closure"))
+              ((and (not closed) (memq code '(env-ref make-closure static-closure)))
+               (fail (at-op o) (str code " appears before Closures")))
+              ((eq? code 'closure) (put! closures-of aux (cons o (get closures-of aux '()))))
+              ((eq? code 'make-closure)
+               (let ((old (get captures-of aux)))
+                 (when (and old (not (= old n)))
+                   (fail (at-op o) (str (f aux) " is made elsewhere with " old " captures")))
+                 (put! captures-of aux n)))
+              ((eq? code 'static-closure) (put! static-of aux #t)))
+            (check-prim (fn () (at-op o)) code n))))
+    (when closed
+      (dotimes (o (ir/op-count ir))
+        (let ((code (ir/op-code ir o)))
+          (cond
+            ((eq? code 'static-closure)
+             (when (> (get captures-of (ir/op-aux ir o) 0) 0)
+               (fail (at-op o) (str (f (ir/op-aux ir o)) " has captures, so it can't have a static closure"))))
+            ((eq? code 'env-ref)
+             (let ((count (get captures-of (ir/block-fn ir (ir/op-block ir o)) 0)))
+               (unless (< (ir/op-aux ir o) count)
+                 (fail (at-op o) (str "env-ref " (ir/op-aux ir o) " but the function has " count " captures")))))))))
+
+    ;; Each value's definition, then each use.
+    (dotimes (x (ir/value-count ir))
+      (let ((site (ir/value-def ir x)))
+        (if (eq? (site 0) :op)
+            (unless (= (ir/op-value ir (site 1)) x) (fail (at-op (site 1)) (str (v x) " claims this definition")))
+            (unless (eq? (list-ref (ir/block-params ir (site 1)) (site 2)) x)
+              (fail (at-block (site 1)) (str (v x) " claims to be parameter " (site 2)))))))
+
+    (def (ancestor? h g)
+      (let loop ((p (ir/fn-parent ir g)))
+        (cond
+          ((nil? p) #f)
+          ((= p h) #t)
+          (else (loop (ir/fn-parent ir p))))))
+
+    ;; Does x's definition reach position i of block blk (i is nil for the
+    ;; terminator)?
+    (def (available? x blk i)
+      (let ((d (doms (ir/block-fn ir blk)))
+            (def-block (ir/value-block ir x))
+            (site (ir/value-def ir x)))
+        (and (contains? d def-block)
+             (cond
+               ((eq? (site 0) :param) (ir/dominates? ir d def-block blk))
+               ((= def-block blk) (or (nil? i) (< (op-index (site 1)) i)))
+               (else (ir/dominates? ir d def-block blk))))))
+
+    (def (check-use x g blk i where seen)
+      (let ((h (ir/value-fn ir x)))
+        (cond
+          ((= h g)
+           (unless (available? x blk i) (fail where (str (v x) " is used where its definition doesn't dominate"))))
+          (closed (fail where (str (v x) " belongs to " (f h) "; after Closures functions use only their own values")))
+          ((not (ancestor? h g)) (fail where (str (v x) " belongs to " (f h) ", which doesn't enclose " (f g))))
+          ((not (memq g seen))
+           ;; Move the use out to every closure operation creating g.
+           (for-each (fn (c)
+                       (let ((cb (ir/op-block ir c))
+                             (cf (ir/block-fn ir (ir/op-block ir c))))
+                         (when (contains? (doms cf) cb)
+                           (check-use x
+                                      cf
+                                      cb
+                                      (op-index c)
+                                      (fn ()
+                                        (str (if (procedure? where)
+                                                 (where)
+                                                 where)
+                                             ", through the closure "
+                                             (at-op c)))
+                                      (cons g seen)))))
+                     (get closures-of g '()))))))
+
+    (for-each (fn (g)
+                (let ((d (doms g)))
+                  (for-each (fn (blk)
+                              (when (contains? d blk)
+                                (for-each (fn (o)
+                                            (for-each (fn (x) (check-use x g blk (op-index o) (fn () (at-op o)) '()))
+                                                      (ir/op-args ir o)))
+                                          (ir/block-ops ir blk))
+                                (for-each (fn (x) (check-use x g blk nil (fn () (at-term blk)) '()))
+                                          (append (ir/term-args ir blk)
+                                                  (if (eq? (ir/term-call-kind ir blk) :value)
+                                                      (list (ir/term-callee ir blk))
+                                                      '())))))
+                            (ir/fn-blocks ir g))))
+              (ir/functions ir))
+    #t))

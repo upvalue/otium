@@ -422,6 +422,29 @@ undefined-behavior checks and address instrumentation remain enabled.
 `make -C prototype differential-foreign` compares twelve programs and six error
 cases across VM, native and Chez execution.
 
+## Errors
+
+A failing operation records an `oti_error_record` in `rt->error` and returns
+false or zero. Recording never allocates on the managed heap, because callers
+often hold unrooted values and return straight after. The condition is built
+where the error is caught, by `oti_error_condition` or `oti_condition_of`.
+
+The record holds the message, owned and not truncated, a diagnostic code, the
+source offset and typed fields. `who` and `tag` become the condition's `:who`
+and the symbol that starts `:data`, as in Chez; up to three further `:data`
+values live in rooted slots, so storing one is safe anywhere.
+`oti_tagged_error` records these, and generic dispatch, slot access and class
+and generic declarations use it, so `((get e :data) 0)` is a symbol such as
+`missing-method` on both runtimes. `ffi_reason` marks an FFI error, which
+`foreign_run` turns into an `ffi-error` condition; `in_module` marks a message
+that already names the module whose load failed.
+
+`oti_error`, `oti_errorf`, `oti_coded_errorf` and `oti_ffi_errorf` record an
+error; the first one wins. `oti_failed(rt)` tests for one. Code that runs Otium
+while an error is pending, such as cleanups and port flushing, moves the record
+out with `oti_take_error` and back with `oti_restore_error` or
+`oti_drop_error`.
+
 ## Arrays and structural equality
 
 Arrays have a stable managed wrapper and a separate traced backing store. Growth

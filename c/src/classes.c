@@ -113,7 +113,11 @@ static bool more_specific(ot_value a, ot_value b) {
 
 bool oti_generic_prepare(ot_state* rt, size_t call, size_t* count) {
   ot_value callable = rt->stack[call];
-  if (*count != arity(callable)) return oti_error(rt, "wrong number of generic arguments");
+  if (*count != arity(callable))
+    return oti_kind(callable, K_GENERIC) ? oti_tagged_error(rt, "generic-call", "wrong-arity",
+                                                            "incorrect generic arity", 0, NULL)
+                                         : oti_tagged_error(rt, "next-method", "wrong-arity",
+                                                            "incorrect next method arity", 0, NULL);
   bool initial = oti_kind(callable, K_GENERIC);
   ot_value methods = initial ? oti_as_generic(callable)->methods : oti_as_next(callable)->methods;
   ot_value selected = OT_NIL;
@@ -139,10 +143,12 @@ bool oti_generic_prepare(ot_state* rt, size_t call, size_t* count) {
       }
     }
     if (dominated) continue;
-    if (selected != OT_NIL) return oti_error(rt, "ambiguous generic call");
+    if (selected != OT_NIL)
+      return oti_tagged_error(rt, "generic-call", "ambiguous-method", "ambiguous methods", 0, NULL);
     selected = m;
   }
-  if (selected == OT_NIL) return oti_error(rt, "no applicable method");
+  if (selected == OT_NIL)
+    return oti_tagged_error(rt, "generic-call", "missing-method", "no applicable method", 0, NULL);
   if (!oti_as_method(selected)->next) {
     rt->stack[call] = oti_as_method(selected)->procedure;
     return true;
@@ -255,13 +261,22 @@ static ot_value class_define_generic(ot_state* rt, size_t first, size_t count) {
     return oti_fail(rt, "invalid generic declaration");
   size_t length;
   memcpy(&length, object_bytes(v), sizeof(length));
-  uint32_t global = oti_global(rt, (const char*)object_bytes(v) + sizeof(length), length);
+  const char* text = (const char*)object_bytes(v) + sizeof(length);
+  if (oti_import_global(rt, text, length) != UINT32_MAX) {
+    oti_tagged_error(rt, "defgeneric", "binding-conflict",
+                     "declaration would replace another binding", 1, &v);
+    return 0;
+  }
+  uint32_t global = oti_global(rt, text, length);
   if (global == UINT32_MAX) return 0;
   ot_value existing = rt->globals[global];
   size_t wanted = (size_t)ot_to_int(n);
   if (existing != V_UNBOUND && rt->stack[first + 2] != OT_TRUE) {
-    if (!oti_kind(existing, K_GENERIC) || arity(existing) != wanted)
-      return oti_fail(rt, "incompatible generic redeclaration");
+    if (!oti_kind(existing, K_GENERIC) || arity(existing) != wanted) {
+      oti_tagged_error(rt, "defgeneric", "binding-conflict",
+                       "declaration would replace another binding", 0, NULL);
+      return 0;
+    }
     return existing;
   }
   ot_value generic = oti_alloc(rt, K_GENERIC, 2, OTI_BYTES(oti_generic_obj, 2));
@@ -276,21 +291,33 @@ static ot_value class_define_generic(ot_state* rt, size_t first, size_t count) {
 }
 
 /* Validate a method signature against the generic's arity and return a copy
- * with #f specializers replaced by Object. A body is checked only for
- * %define-method. */
-static ot_value class_method_signature(ot_state* rt, size_t wanted, ot_value sig, bool body_ok) {
+ * with #f specializers replaced by Object. A method definition passes its
+ * body's validity; other callers pass NULL. */
+static ot_value class_method_signature(ot_state* rt, const char* who, size_t wanted, ot_value sig,
+                                       const bool* body_ok) {
   size_t n = 0;
-  for (ot_value p = sig; oti_kind(p, K_PAIR); p = oti_cdr(p)) {
-    if (++n > wanted) return oti_fail(rt, "method signature arity");
-    ot_value type = oti_car(p);
-    if (type != OT_FALSE && !oti_kind(type, K_CLASS))
-      return oti_fail(rt, "method specializer must be a class");
-  }
   ot_value end = sig;
-  for (size_t i = 0; i < n; i++) end = oti_cdr(end);
-  if (end != OT_EMPTY || n != wanted || !body_ok)
-    return oti_fail(rt, "invalid method signature or body");
+  for (; oti_kind(end, K_PAIR) && n <= wanted; end = oti_cdr(end), n++) {
+    ot_value type = oti_car(end);
+    if (type != OT_FALSE && !oti_kind(type, K_CLASS)) {
+      oti_tagged_error(rt, who, "invalid-specializer", "expected class", 0, NULL);
+      return 0;
+    }
+  }
+  if (end == OT_EMPTY && n != wanted && body_ok) {
+    oti_tagged_error(rt, who, "wrong-arity", "method arity differs from generic", 0, NULL);
+    return 0;
+  }
+  if (end != OT_EMPTY || n != wanted || (body_ok && !*body_ok)) {
+    oti_tagged_error(rt, who, "invalid-signature", "expected class/wildcard signature", 0, NULL);
+    return 0;
+  }
   return copy_signature(rt, sig);
+}
+
+static ot_value not_generic(ot_state* rt, const char* who) {
+  oti_tagged_error(rt, who, "not-generic", "expected generic procedure", 0, NULL);
+  return 0;
 }
 
 static bool class_same_method(ot_value method, ot_value signature, bool around) {
@@ -304,13 +331,13 @@ static bool class_same_method(ot_value method, ot_value signature, bool around) 
 
 static ot_value class_define_method(ot_state* rt, size_t first, size_t count) {
   if (!class_args(rt, count, 5)) return 0;
-  if (!oti_kind(rt->stack[first], K_GENERIC)) return oti_fail(rt, "expected generic function");
+  if (!oti_kind(rt->stack[first], K_GENERIC)) return not_generic(rt, "defmethod");
   ot_value slots[] = {rt->stack[first], OT_NIL, OT_NIL, OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, slots, 4);
   ot_value result = 0;
-  slots[1] = class_method_signature(rt, arity(slots[0]), rt->stack[first + 1],
-                                    oti_kind(rt->stack[first + 2], K_CLOSURE));
+  slots[1] = class_method_signature(rt, "defmethod", arity(slots[0]), rt->stack[first + 1],
+                                    &(bool){oti_kind(rt->stack[first + 2], K_CLOSURE)});
   if (!slots[1]) goto done;
   bool around = rt->stack[first + 3] == OT_TRUE;
   slots[2] = oti_alloc(rt, K_METHOD, 2, OTI_BYTES(oti_method_obj, 2));
@@ -338,12 +365,13 @@ done:
 static ot_value class_remove_method(ot_state* rt, size_t first, size_t count) {
   if (count != 2 && count != 3) return oti_fail(rt, "wrong number of class arguments");
   if (!oti_classes_init(rt)) return 0;
-  if (!oti_kind(rt->stack[first], K_GENERIC)) return oti_fail(rt, "expected generic function");
+  if (!oti_kind(rt->stack[first], K_GENERIC)) return not_generic(rt, "remove-method!");
   ot_value slots[] = {rt->stack[first], OT_NIL};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, slots, 2);
   ot_value result = 0;
-  slots[1] = class_method_signature(rt, arity(slots[0]), rt->stack[first + 1], true);
+  slots[1] =
+      class_method_signature(rt, "remove-method!", arity(slots[0]), rt->stack[first + 1], NULL);
   if (!slots[1]) goto done;
   bool around = false;
   if (count == 3) {
@@ -374,7 +402,7 @@ done:
 
 static ot_value class_generic_methods(ot_state* rt, size_t first, size_t count) {
   if (!class_args(rt, count, 1)) return 0;
-  if (!oti_kind(rt->stack[first], K_GENERIC)) return oti_fail(rt, "expected generic function");
+  if (!oti_kind(rt->stack[first], K_GENERIC)) return not_generic(rt, "generic-methods");
   ot_value slots[] = {OT_NIL, OT_NIL, OT_NIL, OT_EMPTY};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, slots, 4);

@@ -283,7 +283,8 @@ static uint32_t namespace_global(ot_state* rt, uint32_t space, const char* name,
 
 uint32_t oti_global(ot_state* rt, const char* name, size_t length) {
   if (oti_import_global(rt, name, length) != UINT32_MAX) {
-    oti_error(rt, "definition conflicts with a referred import");
+    oti_coded_errorf(rt, "E0207", "definition of `%.*s` would replace an import", (int)length,
+                     name);
     return UINT32_MAX;
   }
   return namespace_global(rt, rt->current_namespace, name, length);

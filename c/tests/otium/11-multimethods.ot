@@ -11,7 +11,7 @@
     (begin
       (eval form)
       'no-error)
-    (catch (error? e) (get e :code))))
+    (catch (error? e) (get (get e :data) 0))))
 
 (defclass Button
   (label :init "7")

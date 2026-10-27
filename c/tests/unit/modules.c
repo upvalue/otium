@@ -92,8 +92,8 @@ TEST(modules_load_refer_and_reload) {
     check_int(rt, "(require missingns) missingns/partial", 1);
     check_in_user(rt);
   }
-  check_error(rt, "(def value 99)", "conflicts");
-  check_error(rt, "(defonce value 99)", "conflicts");
+  check_error(rt, "(def value 99)", "would replace an import");
+  check_error(rt, "(defonce value 99)", "would replace an import");
   check_error(rt, "(require api :refer (secret))", "private");
   check_error(rt, "(require api :refer (missing))", "missing");
   check_error(rt, "(require api :as user)", "namespace name");

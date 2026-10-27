@@ -8,7 +8,7 @@ import signal
 import subprocess
 import time
 
-from harness import ROOT, Failure, built, case, defaults, test
+from harness import BOTH, ROOT, Failure, built, case, defaults, test
 
 defaults(suite='c')
 OTIUM = built('otium')
@@ -22,7 +22,7 @@ for name in ('01-reader', '02-types', '03-equality', '04-tables', '05-control',
 
 case('extension', 'c/tests/ext-demo.ot', runtimes=['c'], paths=['c/tests/modules'])
 
-@test('multimethods', timeout=180)
+@test('multimethods', runtimes=BOTH, timeout=180)
 def multimethods(t):
     """Wildcard resolution against a bitset oracle, then namespace integration."""
     forms = ['(require (otium.generic :as g :refer (Number)))', '(defgeneric (f a b c))']
@@ -36,7 +36,7 @@ def multimethods(t):
             for mask in order:
                 parameters = ' '.join(f'({p} Number)' if mask & (1 << i) else p for i, p in enumerate('abc'))
                 forms.append(f'(defmethod (f {parameters}) {mask})')
-            forms.append('(println (try (f 1 2 3) (catch (error? e) (get e :code))))')
+            forms.append('(println (try (f 1 2 3) (catch (error? e) (get (get e :data) 0))))')
             expected.append(answer)
     forms.append((ROOT / 'c/tests/multimethods/namespaces.ot').read_text())
     expected += ['#f', 'ambiguous-method', 'exact', '#t', '#t', 'exact', 'binding-conflict',
@@ -44,7 +44,7 @@ def multimethods(t):
                  'wrong-arity', 'number']
     program = t.scratch / 'checks.ot'
     program.write_text('\n'.join(forms))
-    t.expect(t.run([OTIUM, '--no-project', '--path', 'c/tests/multimethods', program], timeout=180),
+    t.expect(t.otium('--path', 'c/tests/multimethods', program, timeout=180),
              stdout=''.join(line + '\n' for line in expected))
 
 

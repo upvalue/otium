@@ -87,6 +87,11 @@ static bool migrate_to_current(ot_state* rt, ot_value* instance) {
   return migrate(rt, instance, OT_NIL);
 }
 
+static void missing_slot(ot_state* rt, const char* who, ot_value instance, ot_value key) {
+  ot_value data[] = {oti_as_instance(instance)->type, key};
+  oti_tagged_error(rt, who, "missing-slot", "class has no such slot", 2, data);
+}
+
 ot_value oti_instance_call(ot_state* rt, ot_value instance, size_t first, size_t count) {
   if (count != 1 || !oti_kind(rt->stack[first], K_KEYWORD))
     return oti_fail(rt, "instance call needs one slot keyword");
@@ -95,7 +100,7 @@ ot_value oti_instance_call(ot_state* rt, ot_value instance, size_t first, size_t
   ot_value result = 0;
   if (migrate_to_current(rt, &instance)) {
     size_t index = slot_index(oti_as_instance(instance)->layout, rt->stack[first]);
-    if (index == SIZE_MAX) oti_fail(rt, "unknown instance slot");
+    if (index == SIZE_MAX) missing_slot(rt, "slot-ref", instance, rt->stack[first]);
     else {
       result = object_fields(oti_as_instance(instance)->data)[index];
       if (result == V_UNBOUND) result = oti_fail(rt, "uninitialized instance slot");
@@ -159,14 +164,27 @@ static ot_value instance_define_class(ot_state* rt, size_t first, size_t count) 
     for (size_t j = 0; j < i; j += LAYOUT_STRIDE)
       if (fields[j + LAYOUT_KEY] == key) return oti_fail(rt, "duplicate class slot");
   }
+  if (oti_import_global(rt, (char*)oti_bytes_data(name), oti_bytes_length(name)) != UINT32_MAX) {
+    oti_tagged_error(rt, "defclass", "binding-conflict", "class declaration conflicts with binding",
+                     1, &name);
+    return 0;
+  }
   uint32_t global = oti_global(rt, (char*)oti_bytes_data(name), oti_bytes_length(name));
   if (global == UINT32_MAX) return 0;
   ot_value old = rt->globals[global];
   bool reset = rt->stack[first + 4] == OT_TRUE;
+  if (old == V_UNBOUND && reset) {
+    oti_tagged_error(rt, "reset-class!", "binding-conflict",
+                     "class declaration conflicts with binding", 0, NULL);
+    return 0;
+  }
   if (old != V_UNBOUND && !reset) {
     if (!oti_kind(old, K_CLASS) || oti_as_class(old)->builtin ||
-        oti_as_class(old)->abstract != (abstract == OT_TRUE))
-      return oti_fail(rt, "incompatible class redefinition");
+        oti_as_class(old)->abstract != (abstract == OT_TRUE)) {
+      oti_tagged_error(rt, "defclass", "binding-conflict",
+                       "class declaration conflicts with binding", 0, NULL);
+      return 0;
+    }
     if (oti_subtype(parent, old)) return oti_fail(rt, "cyclic class ancestry");
   }
   bool same = false;
@@ -284,7 +302,7 @@ static ot_value instance_slot_set(ot_state* rt, size_t first, size_t count) {
   ot_value result = 0;
   if (migrate_to_current(rt, &instance)) {
     size_t index = slot_index(oti_as_instance(instance)->layout, rt->stack[first + 1]);
-    if (index == SIZE_MAX) oti_fail(rt, "unknown instance slot");
+    if (index == SIZE_MAX) missing_slot(rt, "slot-set!", instance, rt->stack[first + 1]);
     else result = object_fields(oti_as_instance(instance)->data)[index] = rt->stack[first + 2];
   }
   oti_roots_pop(&rt->heap, &root);

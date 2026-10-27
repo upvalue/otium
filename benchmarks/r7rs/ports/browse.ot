@@ -1,0 +1,199 @@
+;;; BROWSE -- Benchmark to create and browse through
+;;; an AI-like data base of units.
+
+;; lint: allow-file(unbound-name) benchmarks/r7rs/run.py prepends benchmarks/r7rs/lib/benchmark.ot
+
+(def (lookup key table)
+  (let loop ((x table))
+    (if (null? x)
+        #f
+        (let ((pair (car x)))
+          (if (eq? (car pair) key)
+              pair
+              (loop (cdr x)))))))
+
+(def *properties* '())
+
+(def (browse-get key1 key2)
+  (let ((x (lookup key1 *properties*)))
+    (if x
+        (let ((y (lookup key2 (cdr x))))
+          (if y
+              (cdr y)
+              #f))
+        #f)))
+
+(def (browse-put key1 key2 val)
+  (let ((x (lookup key1 *properties*)))
+    (if x
+        (let ((y (lookup key2 (cdr x))))
+          (if y
+              (set-cdr! y val)
+              (set-cdr! x (cons (cons key2 val) (cdr x)))))
+        (set! *properties* (cons (list key1 (cons key2 val)) *properties*)))))
+
+(def *current-gensym* 0)
+
+(def (generate-symbol)
+  (set! *current-gensym* (+ *current-gensym* 1))
+  (string->symbol (number->string *current-gensym*)))
+
+(def (append-to-tail! x y)
+  (if (null? x)
+      y
+      (let loop ((a x)
+                 (b (cdr x)))
+        (if (null? b)
+            (begin
+              (set-cdr! a y)
+              x)
+            (loop b (cdr b))))))
+
+(def (tree-copy x)
+  (if (not (pair? x))
+      x
+      (cons (tree-copy (car x)) (tree-copy (cdr x)))))
+
+;;; n is # of symbols
+;;; m is maximum amount of stuff on the plist
+;;; npats is the number of basic patterns on the unit
+;;; ipats is the instantiated copies of the patterns
+
+(def *rand* 21)
+
+(def (init n m npats ipats)
+  (let ((ipats (tree-copy ipats)))
+    ;; Wrap explicitly: Otium pairs cannot form the upstream circular list.
+    ;; Database construction is outside the timed region.
+    (let loop ((n n)
+               (i m)
+               (name (generate-symbol))
+               (a '()))
+      (if (= n 0)
+          a
+          (begin
+            (set! a (cons name a))
+            (let props ((i i))
+              (unless (zero? i)
+                (browse-put name (generate-symbol) #f)
+                (props (- i 1))))
+            (browse-put name
+                        'pattern
+                        (let patterns ((i npats)
+                                       (p ipats)
+                                       (a '()))
+                          (if (zero? i)
+                              a
+                              (patterns (- i 1)
+                                        (if (null? (cdr p))
+                                            ipats
+                                            (cdr p))
+                                        (cons (car p) a)))))
+            (let props ((j (- m i)))
+              (unless (zero? j)
+                (browse-put name (generate-symbol) #f)
+                (props (- j 1))))
+            (loop (- n 1)
+                  (if (zero? i)
+                      m
+                      (- i 1))
+                  (generate-symbol)
+                  a))))))
+
+(def (browse-random)
+  (set! *rand* (remainder (* *rand* 17) 251))
+  *rand*)
+
+(def (randomize l)
+  (let loop ((a '()))
+    (if (null? l)
+        a
+        (let ((n (remainder (browse-random) (length l))))
+          (if (zero? n)
+              (begin
+                (set! a (cons (car l) a))
+                (set! l (cdr l)))
+              (let find ((n n)
+                         (x l))
+                (if (= n 1)
+                    (begin
+                      (set! a (cons (cadr x) a))
+                      (set-cdr! x (cddr x)))
+                    (find (- n 1) (cdr x)))))
+          (loop a)))))
+
+(def (my-match pat dat alist)
+  (cond
+    ((null? pat) (null? dat))
+    ((null? dat) '())
+    ((or (eq? (car pat) '?) (eq? (car pat) (car dat))) (my-match (cdr pat) (cdr dat) alist))
+    ((eq? (car pat) '*)
+     (or (my-match (cdr pat) dat alist) (my-match (cdr pat) (cdr dat) alist) (my-match pat (cdr dat) alist)))
+    (else (cond
+            ((not (pair? (car pat)))
+             (cond
+               ((eq? (string-ref (symbol->string (car pat)) 0) #\?)
+                (let ((val (assq (car pat) alist)))
+                  (cond
+                    (val (my-match (cons (cdr val) (cdr pat)) dat alist))
+                    (else (my-match (cdr pat) (cdr dat) (cons (cons (car pat) (car dat)) alist))))))
+               ((eq? (string-ref (symbol->string (car pat)) 0) #\*)
+                (let ((val (assq (car pat) alist)))
+                  (cond
+                    (val (my-match (append (cdr val) (cdr pat)) dat alist))
+                    (else (let loop ((l '())
+                                     (e (cons '() dat))
+                                     (d dat))
+                            (if (or (null? e) (my-match (cdr pat) d (cons (cons (car pat) l) alist)))
+                                (if (null? e)
+                                    #f
+                                    #t)
+                                (loop (append-to-tail! l
+                                                       (cons (if (null? d)
+                                                                 '()
+                                                                 (car d))
+                                                             '()))
+                                      (cdr e)
+                                      (if (null? d)
+                                          '()
+                                          (cdr d)))))))))
+
+               ;; fix suggested by Manuel Serrano
+               ;; (cond did not have an else clause);
+               ;; this changes the run time quite a bit
+
+               (else #f)))
+            (else (and (pair? (car dat)) (my-match (car pat) (car dat) alist) (my-match (cdr pat) (cdr dat) alist)))))))
+
+(def database
+  (randomize (init 100
+                   10
+                   4
+                   '((a a a b b b b a a a a a b b a a a) (a a b b b b a a (a a) (b b)) (a a a b (b a) b a b a)))))
+
+(def (browse pats)
+  (investigate database pats)
+  (map string->number (map symbol->string database)))
+
+(def (investigate units pats)
+  (let units-loop ((units units))
+    (unless (null? units)
+      (let pats-loop ((pats pats))
+        (unless (null? pats)
+          (let patterns-loop ((p (browse-get (car units) 'pattern)))
+            (unless (null? p)
+              (my-match (car pats) (car p) '())
+              (patterns-loop (cdr p))))
+          (pats-loop (cdr pats))))
+      (units-loop (cdr units)))))
+
+(def (benchmark-main)
+  (let ((count (bench-read))
+        (input1 (bench-read))
+        (output (bench-read))
+        (s2 (number->string count))
+        (name "browse"))
+    (run-ported-benchmark (string-append name ":" s2)
+                          count
+                          (fn () (browse (bench-hide count input1)))
+                          (fn (result) (equal? result output)))))

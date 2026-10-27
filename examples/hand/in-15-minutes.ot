@@ -1,0 +1,72 @@
+;; A semicolon starts a comment
+
+;; ---
+;; 1. Primitive types, definitions and collections
+;; ---
+
+;; Numbers can be fixnums (integers)
+123
+
+;; Or flonums (floating point numbers)
+123.4
+
+;; Strings are about like you'd expect
+"hello world"
+
+;; Otium also supports Symbols.
+;; Unlike strings, symbols are immutable and global. They're cheap to pass
+;; around and good to use as keys for hash tables, arguments 
+:my-symbol
+
+;; We can call functions like this
+(+ 2 2)
+
+;; And we can define variables and functions using the `def` primitive
+(def four (+ 2 2))
+
+;; One thing to note is that Otium is a lot more permissive about what can go
+;; into an identifier name than most languages
+(def %f-o-u-r four)
+
+;; Otium has a few different collection types.
+;; There are lists
+(list 1 2 3)
+
+;; And arrays
+(array 1 2 3)
+
+;; And hash tables
+(table :key 5)
+
+;; Arrays and tables have literal syntaxes
+[1 2 3]
+{:key 5}
+
+;; Lists need to be quoted to make them on the fly, because otherwise that would conflict with function application:
+'(1 2 3)
+
+;; Quoting is also important, but we'll discuss it in detail in the macros section.
+
+;; ---
+;; 2. Functions & basic flow control
+;; ---
+
+;; ---
+;; 3. Loops
+;; ---
+
+;; ---
+;; 4. Pattern matching
+;; ---
+
+;; --- 
+;; 5. Macros
+;; ---
+
+;; ---
+;; 6. Classes
+;; ---
+
+;; ---
+;; 7. Namespaces
+;; ---

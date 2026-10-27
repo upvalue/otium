@@ -1,0 +1,18 @@
+;; https://leetcode.com/problems/create-grid-with-exactly-one-path/
+
+(def (exactly-one-path m n)
+  (def res [])
+  (for ((r :range 0 m))
+    (def sb (list))
+    (for ((c :range 0 n))
+      (set! sb
+            (cons (if (or (= c (- n 1)) (= r 0))
+                      #\.
+                      #\#)
+                  sb)))
+    (push! res (list->string (reverse sb))))
+  res)
+
+(println (exactly-one-path 2 3))
+(println (exactly-one-path 3 3))
+(println (exactly-one-path 1 4))

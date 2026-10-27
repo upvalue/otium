@@ -5,18 +5,16 @@ This implementation is independent of `c/`. Its initial semantic source is
 history when extending it. Use the public language docs, library, examples and
 tests to resolve semantics. The existing launchers still use the existing runtime.
 
-Build with `make -C prototype`. Run a source file with
-`prototype/otium-proto file.ot`, or print an expression's result with
-`prototype/otium-proto -e '(+ 20 22)'`. `--heap=8192` sets each semispace's size;
-the two spaces together consume twice that amount. An explicit `--heap` is fixed
-unless paired with `--heap-max`. Without either option, the CLI starts with 1 MiB
-semispaces and can grow each to 64 MiB. `--stack=1024` caps VM value slots.
-`--stats` reports collection count, maximum simultaneous VM frames and current
-semispace capacity.
-Execution uses the bytecode VM. Foreign calls use libffi; `--stats` reports
-cached FFI signature counts. There is no generated-C tier or runtime compiler
-subprocess. A C compiler is needed to build the executable and test fixtures,
-but not to run the built runtime.
+Meson builds it into `build/otium`, which `./otium --runtime=c` runs. The
+launcher takes the options in `lib/catalog/options.json`, the same as Chez, plus
+`-e SOURCE` to print an expression's result. `--c.heap-init` sets each
+semispace's starting size (1 MiB by default) and `--c.heap-max` how far each can
+grow (64 MiB); the two spaces together use twice that. `--c.max-depth` caps live
+VM frames, and the stack is capped at 128 Ki value slots. `--c.gc-stats` and
+`--c.gc-stats-json` print collector statistics at exit.
+Execution uses the bytecode VM. Foreign calls use libffi. There is no
+generated-C tier or runtime compiler subprocess. A C compiler is needed to build
+the executable and test fixtures, but not to run the built runtime.
 
 ## Current architecture and limits
 
@@ -2346,22 +2344,62 @@ pass with ASan/UBSan and leak checking disabled. The expanded compliance runner
 continues to return failure until its diagnostic and launcher gaps are fixed.
 
 
-## Prototype launcher paths and public options
+## Launcher paths and options
 
-The standalone prototype launcher supports upward project.ot discovery,
---project/--no-project, and colon-separated OTIUM_PATH. Explicit -L/--path
-entries precede environment and project paths. Project files are parsed as data:
-only top-level (paths ...) strings contribute directories, resolved relative to
-the project file. Comments and unrelated settings do not become search paths.
-Malformed paths forms fail; project contents are never evaluated.
+The launcher supports upward project.ot discovery, --project/--no-project, and
+colon-separated OTIUM_PATH. Explicit -L/--path entries precede environment and
+project paths. Project files are parsed as data: only top-level (paths ...)
+strings contribute directories, resolved relative to the project file. Comments
+and unrelated settings do not become search paths. Malformed paths forms fail;
+project contents are never evaluated.
 
-The public --c.heap-init and --c.heap-max options select prototype semispace
-sizes. Existing --heap retains its fixed-size behavior unless a maximum is
-specified. Numeric flags reject signs and whitespace. Attached --path, --load
-and --project values work. Preload-only invocation stops after loading unless
---repl was requested. --help/-h list the supported prototype options.
+Options come from `lib/catalog/options.json` through the table that
+`tools/generate-cli.py` writes to `c/src/options.inc`, so `--help` is the same on
+both runtimes and errors name the option the same way. Chez-only options are
+accepted and ignored. Numeric options reject signs and whitespace. Attached
+--path, --load and --project values work. Preload-only invocation stops after
+loading unless --repl was requested. `-e` is a C-only extra and isn't in
+`--help`.
 
-All five runtime-specific public CLI groups pass. The expanded compliance run
-now has 66 passes and two diagnostic failures. The standalone CLI deliberately
-has its own help while additional launcher services remain unimplemented;
-./otium still defaults to Chez, and runtime selection has not changed.
+The prototype's own `--heap`, `--heap-max`, `--stack` and `--stats` are gone.
+`--c.heap-init`, `--c.heap-max`, `--c.max-depth` and `--c.gc-stats` replace them.
+Without `--c.heap-max`, the limit is 64 MiB or the initial size if that is
+larger. `--c.max-depth` is applied by never growing the frame array past it, so
+calls pay nothing for it. `--c.gc-force-compact` was dropped: the semispace
+collector compacts on every collection. `--c.gc-stats-json` reports allocations,
+collections, allocated, copied and reclaimed bytes, current and peak use, and
+the semispace capacity and limit. The counters change only during collection;
+the allocation count is the object identity counter.
+
+The REPL reads from the standard input port, which it shares with programs,
+and prompts only on a terminal. On a terminal, and with `--dev`, it reads
+through the line editor in `native/line` instead, as Chez does, and an
+interrupted evaluation returns to the prompt.
+
+## Development server
+
+`--dev[=PATH]`, `--dev-watchdog=MS` and `serve` work as on Chez; see
+`specs/dev-server.md`. The protocol is `lib/otium/dev.ot`. The C runtime links
+the socket transport from `native/dev` and provides the primitives that file
+uses: the transport, clocks and namespace listings in `c/src/dev.c`, and request
+evaluation, output copying and the pause logic in Otium in `c/src/dev.ot`, which
+the launcher loads after `lib/otium/dev.ot`.
+
+Pausing uses `ot_set_interrupt_handler`. When the interrupt flag is set and a
+handler is named, the VM calls it at its existing safe points (backward jumps
+and calls) and blocking port reads call it while they wait; other places that
+check the flag leave it set. The handler gets the flag's value: 1 for SIGINT and
+2 for a timer tick. The launcher sets up the tick with `ITIMER_VIRTUAL` every
+10 ms, so it runs only while the process uses CPU and never interrupts a
+blocking call. On a tick the handler polls the socket and checks the watchdog
+deadline, and pauses in `dev/break!` inside `continue` and `abort` restarts.
+Aborting raises an error in the paused code, as on Chez.
+
+`ot_set_load_hook` names a function the module loader calls before loading a
+file; the server passes `dev/record-load!`, which the introspection functions
+use to find source files.
+
+`--c.server` reads frames ending in a line holding only `\x1f` and answers each
+with output, the value and a `\x1eot> ` prompt, through `dev/stdio!`. SIGINT
+while a frame runs pauses it with the same restarts and serves frames until one
+invokes a restart; a second SIGINT, or `abort`, interrupts it.

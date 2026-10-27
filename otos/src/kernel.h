@@ -19,6 +19,9 @@ extern volatile bool console_evaluating;
 /* Nanoseconds since boot. */
 uint64_t kernel_uptime_ns(void);
 
+/* Defines the otos.gfx namespace's native procedures. */
+bool gfx_register(ot_state* rt);
+
 /* The console on handles 0, 1 and 2 and the embedded files, read-only. */
 extern const ot_io_host kernel_io_host;
 

@@ -33,7 +33,8 @@ runtime_names = [
   'heap', 'reader', 'tokens', 'runtime', 'compiler', 'vm', 'builtins', 'numeric', 'time',
   'filesystem', 'process', 'ports', 'strings', 'bytevectors', 'reflection', 'support',
   'conditions', 'restarts', 'cleanup', 'params', 'classes', 'instances', 'records', 'foreign',
-  'foreign_types', 'collections', 'tables', 'reclaim', 'modules']
+  'foreign_types', 'collections', 'tables', 'reclaim', 'modules',
+  'natives']
 runtime_sources = []
 foreach name : runtime_names
   runtime_sources += files(runtime_dir / 'src' / name + '.c')
@@ -60,7 +61,7 @@ embedded_files = custom_target('files.c',
 linker_script = meson.current_source_dir() / 'src/kernel.ld'
 executable('otos.elf',
   'src/boot.S', 'src/kernel.c', 'src/line.c', 'src/ot-kernel.c', 'src/virtio.c',
-  'src/display.c', embedded_files,
+  'src/display.c', 'src/gfx.c', embedded_files,
   c_args: platform_args,
   include_directories: include_directories(runtime_dir / 'include', 'src'),
   dependencies: picolibc,

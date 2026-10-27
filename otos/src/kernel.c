@@ -118,7 +118,7 @@ static int repl(ot_state* rt) {
   /* The I/O host has to be in place before the core library loads, since the
    * runtime reads its library files and standard ports through it. */
   if (!ot_set_heap_limit(rt, HEAP_LIMIT) || !ot_set_io_host(rt, &kernel_io_host, NULL) ||
-      !ot_load_expander(rt, "/lib") || !ot_load_core(rt, "/lib")) {
+      !ot_load_expander(rt, "/lib") || !ot_load_core(rt, "/lib") || !gfx_register(rt)) {
     printf("otos: cannot start the runtime: %s\n", ot_error(rt));
     sbi_shutdown(true);
   }

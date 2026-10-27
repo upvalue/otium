@@ -31,9 +31,11 @@ if get_option('vm_switch')
   runtime_args += '-DOTIUM_VM_SWITCH'
 endif
 
+# Position-independent code costs a few percent in the VM, and the runtime is
+# only linked statically.
 libotium = static_library('otium', runtime_sources,
   c_args: runtime_args, include_directories: runtime_include, dependencies: runtime_deps,
-  override_options: runtime_options)
+  override_options: runtime_options, pic: false)
 libotium_dep = declare_dependency(link_with: libotium,
   include_directories: include_directories('include'), dependencies: runtime_deps)
 

@@ -56,7 +56,7 @@ static const struct {
      "(while (< i n) (set! total (+ total (get a i))) (set! i (+ i 1))) total))",
      "arrays", 50000, 1249975000, false},
     {"ffi1000000",
-     "(def lib (ffi/open-library \"" OTIUM_TEST_FIXTURE_DIR "/ffi-fixture-17.so\")) "
+     "(def lib (ffi/open-library '(\"" OTIUM_TEST_FIXTURE_DIR "/ffi-fixture-17.so\"))) "
      "(def echo (ffi/bind lib \"echo_int\" '(int) 'int #t)) "
      "(def (foreign-loop n) (let loop ((n n) (total 0)) "
      "(if (= n 0) total (loop (- n 1) (+ total (echo n))))))",

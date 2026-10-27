@@ -623,7 +623,7 @@ Chez's native integer coercion rules must not leak through the portable API. Any
 at bind time, not on every call.
 [Chez foreign interface](https://www.scheme.com/csug8/foreign.html)
 
-Proposed placement: `c/src/ot-ffi.c` for the C backend,
+Placement: `c/src/foreign.c` and `c/src/foreign_types.c` for the C backend,
 `chez/otium/ffi.sls` for Chez, `lib/otium/ffi.ot` for declarations, generic native
 helpers, probes and fixtures, and `native/sdl/` for binding data and wrappers.
 Each runtime's loader may adapt the shared source without duplicating function

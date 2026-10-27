@@ -445,7 +445,7 @@ void ot_set_io_host(ots* state, const ot_io_host* host, void* userdata);
 ```
 
 - Failures return a reason code that the runtime maps to a `:reason`.
-- `ot-posix.c` supplies the default, using file descriptors. Using descriptors
+- `c/src/ports.c` supplies the default, using file descriptors. Using descriptors
   rather than `FILE*` means they can be polled later.
 - An embedder with no filesystem can install a host whose `open` always fails
   with `:not-found`.

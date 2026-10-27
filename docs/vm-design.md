@@ -1,7 +1,7 @@
 # Register VM design
 
-This replaces the prototype's stack VM (`prototype/vm.c`) and retargets the
-simple compiler (`prototype/compiler.c`) to it. It follows the register VM
+This replaced the C runtime's stack VM and retargeted its simple compiler to
+it. The VM is `c/src/vm.c` and the compiler `c/src/compiler.c`. It follows the register VM
 sketch in `compiler-plan.md`, limited to what a non-optimizing, single-pass
 compiler can use. The goal is to beat interpreters that do little optimization,
 such as CPython and Lua, on calls, arithmetic and loops.
@@ -299,9 +299,10 @@ through `CONST` and `CLOSURE` instructions, as now.
 
 ## Checks
 
-`make test`, `make sanitize` and `make test-switch` pass, and so do
+These ran when the register VM landed, before the runtime moved from
+`prototype/` into `c/`, so they name the old Makefile targets. `make test`, `make sanitize` and `make test-switch` pass, and so do
 `compliance.py` (67 pass; `diagnostic output` fails as it did before) and the
 Chez differential suites, except `differential-cleanup`, which fails the same
-way on the old VM. `prototype/tests/slot-reuse.c` checks register counts instead of the
+way on the old VM. `c/tests/unit/slot-reuse.c` checks register counts instead of the
 old slot allocator's. The tests that redefined `+` now use an ordinary global
 or expect the error.

@@ -1,4 +1,5 @@
 #include "internal.h"
+#include <errno.h>
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -47,6 +48,14 @@ static bool verror(ot_state* rt, const char* prefix, const char* format, va_list
 }
 
 bool oti_error(ot_state* rt, const char* message) { return oti_errorf(rt, "%s", message); }
+
+ot_value ot_native_error(ot_state* rt, const char* format, ...) {
+  va_list arguments;
+  va_start(arguments, format);
+  verror(rt, NULL, format, arguments);
+  va_end(arguments);
+  return 0;
+}
 
 bool oti_errorf(ot_state* rt, const char* format, ...) {
   va_list arguments;
@@ -506,6 +515,7 @@ void ot_destroy(ot_state* rt) {
   oti_clear_error(rt);
   oti_foreign_destroy(rt);
   oti_modules_destroy(rt);
+  oti_natives_destroy(rt);
   for (size_t i = 0; i < rt->function_count; i++) {
     oti_function* f = rt->functions[i];
     oti_free_function(f);
@@ -739,48 +749,96 @@ ot_value oti_eval_value(ot_state* rt, ot_value value) {
   return result;
 }
 
-char* oti_read_file(ot_state* rt, FILE* file, size_t limit, const char* what, size_t* length) {
+#ifndef OTIUM_FREESTANDING
+static int source_open(ot_state* rt, const char* path, intptr_t* handle) {
+  (void)rt;
+  FILE* file = fopen(path, "rb");
+  *handle = (intptr_t)file;
+  return file ? 0 : errno ? errno : EIO;
+}
+
+static long source_read(ot_state* rt, intptr_t handle, char* bytes, size_t length) {
+  (void)rt;
+  size_t got = fread(bytes, 1, length, (FILE*)handle);
+  return ferror((FILE*)handle) ? -EIO : (long)got;
+}
+
+static void source_close(ot_state* rt, intptr_t handle) {
+  (void)rt;
+  fclose((FILE*)handle);
+}
+#else
+/* Without an operating system, source files come from the I/O host. */
+static int source_open(ot_state* rt, const char* path, intptr_t* handle) {
+  if (!rt->io_host_set) return ENOSYS;
+  rt->host_io_active = true;
+  int error = rt->io_host.open(rt->io_userdata, path, OT_IO_READ, handle);
+  rt->host_io_active = rt->host_io_reentry = false;
+  return error;
+}
+
+static long source_read(ot_state* rt, intptr_t handle, char* bytes, size_t length) {
+  rt->host_io_active = true;
+  long n = rt->io_host.read(rt->io_userdata, handle, (uint8_t*)bytes, length);
+  rt->host_io_active = rt->host_io_reentry = false;
+  return n > (long)length ? -EIO : n;
+}
+
+static void source_close(ot_state* rt, intptr_t handle) {
+  rt->host_io_active = true;
+  rt->io_host.close(rt->io_userdata, handle);
+  rt->host_io_active = rt->host_io_reentry = false;
+}
+#endif
+
+char* oti_read_source_file(ot_state* rt, const char* path, size_t limit, const char* what,
+                           size_t* length, int* open_error) {
+  intptr_t handle;
+  *open_error = source_open(rt, path, &handle);
+  if (*open_error) return NULL;
   char* buffer = NULL;
   size_t used = 0, capacity = 0;
+  bool ok = true;
   for (;;) {
     if (used == capacity) {
       size_t next = capacity ? capacity * 2 : 4096;
       if (next > limit + 1) next = limit + 1;
       char* grown = realloc(buffer, next + 1);
       if (!grown) {
-        oti_error(rt, "out of host memory");
+        ok = oti_error(rt, "out of host memory");
         break;
       }
       buffer = grown;
       capacity = next;
     }
-    used += fread(buffer + used, 1, capacity - used, file);
-    if (ferror(file)) {
-      oti_errorf(rt, "cannot read %s", what);
+    long n = source_read(rt, handle, buffer + used, capacity - used);
+    if (n < 0) {
+      ok = oti_errorf(rt, "cannot read %s", what);
       break;
     }
+    used += (size_t)n;
     if (used > limit) {
-      oti_errorf(rt, "%s exceeds the source size limit", what);
+      ok = oti_errorf(rt, "%s exceeds the source size limit", what);
       break;
     }
-    if (feof(file)) {
-      fclose(file);
-      buffer[used] = 0;
-      *length = used;
-      return buffer;
-    }
+    if (!n) break;
   }
-  fclose(file);
-  free(buffer);
-  return NULL;
+  source_close(rt, handle);
+  if (!ok) {
+    free(buffer);
+    return NULL;
+  }
+  buffer[used] = 0;
+  *length = used;
+  return buffer;
 }
 
 /* Evaluate a runtime library file in the root namespace. */
 static bool eval_library_file(ot_state* rt, const char* path, const char* what) {
-  FILE* file = fopen(path, "rb");
-  if (!file) return oti_errorf(rt, "cannot open %s", what);
   size_t length;
-  char* source = oti_read_file(rt, file, OTI_SOURCE_LIMIT, what, &length);
+  int error;
+  char* source = oti_read_source_file(rt, path, OTI_SOURCE_LIMIT, what, &length, &error);
+  if (error) return oti_errorf(rt, "cannot open %s", what);
   if (!source) return false;
   uint32_t saved = rt->current_namespace, source_id = rt->source;
   rt->current_namespace = 0;
@@ -1106,6 +1164,7 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
   else if (oti_kind(v, K_POINTER)) fputs("#<foreign-pointer>", out);
   else if (oti_kind(v, K_FOREIGN_LAYOUT)) fputs("#<foreign-layout>", out);
   else if (oti_kind(v, K_FOREIGN_LIBRARY)) fputs("#<foreign-library>", out);
+  else if (oti_kind(v, K_HOST_OBJECT)) fprintf(out, "#<%s>", oti_host_object_name(v));
   else fputs("#<function>", out);
 }
 

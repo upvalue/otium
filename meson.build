@@ -150,7 +150,7 @@ endif
 
 features = ['ffi', 'c-ffi', 'c-host']
 needed = {'': [otium], 'ffi': [ffi_native] + ffi_fixtures,
-  'c-host': [foreign_control, ffi_extra] + ffi_fixtures}
+  'c-host': [foreign_control, ffi_extra, extension_demo, otium_amalgamation] + ffi_fixtures}
 if chez.found()
   features += 'chez'
 endif

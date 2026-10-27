@@ -300,7 +300,7 @@ static bool put(ot_state* rt, size_t table, const char* key) {
   return ok;
 }
 
-static ot_value get(ot_state* rt, size_t table, const char* key) {
+static ot_value field_get(ot_state* rt, size_t table, const char* key) {
   ot_value k = oti_intern(rt, K_KEYWORD, key, strlen(key));
   return k ? oti_table_get(rt, rt->stack[table], k, OT_NIL) : 0;
 }
@@ -391,7 +391,7 @@ static size_t edit_distance(const char* a, const char* b) {
   return row[m];
 }
 
-static int compare_names(const void* a, const void* b) {
+static int compare_suggestions(const void* a, const void* b) {
   return strcmp(*(const char* const*)a, *(const char* const*)b);
 }
 
@@ -413,7 +413,7 @@ static bool push_suggestions(ot_state* rt, const oti_error_record* e) {
     if (!seen) close[count++] = info->name;
   }
   if (!count) return push(rt, OT_NIL);
-  qsort(close, count, sizeof(close[0]), compare_names);
+  qsort(close, count, sizeof(close[0]), compare_suggestions);
   size_t base = rt->sp;
   for (size_t i = 0; i < count && i < 3; i++) {
     size_t n = e->qualifier + strlen(close[i]);
@@ -432,12 +432,12 @@ static bool push_suggestions(ot_state* rt, const oti_error_record* e) {
  * from where e happened, as the Chez runtime's locate! does. */
 static bool locate(oti_report* r, const oti_error_record* e, size_t d) {
   ot_state* rt = r->rt;
-  ot_value existing = get(rt, d, ":span");
+  ot_value existing = field_get(rt, d, ":span");
   if (!existing) return false;
   if (existing != OT_NIL) return true;
   /* The condition keeps the code once handlers have seen the error. */
   char code[sizeof(e->code)] = "";
-  ot_value code_value = get(rt, d, ":code");
+  ot_value code_value = field_get(rt, d, ":code");
   if (!code_value) return false;
   if (oti_kind(code_value, K_STRING)) {
     size_t n;

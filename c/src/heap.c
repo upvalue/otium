@@ -177,7 +177,9 @@ ot_value oti_heap_alloc(oti_heap* h, uint32_t kind, uint32_t fields, size_t byte
     return 0;
   oti_object_header* o = (oti_object_header*)(h->space[h->active] + h->used);
   h->used += size;
-  *o = (oti_object_header){size, fields, (kind & 255) | ((++h->next_identity & 0x7fffff) << 8)};
+  *o = (oti_object_header){.size = size,
+                           .fields = fields,
+                           .kind = (kind & 255) | ((++h->next_identity & 0x7fffff) << 8)};
   ot_value* slots = object_fields((ot_value)o);
   for (uint32_t i = 0; i < fields; i++) slots[i] = OT_NIL;
   memset((unsigned char*)o + base, 0, size - base);

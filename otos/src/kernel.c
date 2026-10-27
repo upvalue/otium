@@ -1,4 +1,3 @@
-#define OT_INTERNAL
 #include "otium.h"
 #include "kernel.h"
 #include "line.h"
@@ -7,10 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void write_console(void* userdata, const char* bytes, size_t length) {
-  (void)userdata;
-  console_write(bytes, length);
-}
+/* Each semispace starts at 1 MB and can grow to 16 MB. */
+#define HEAP_INITIAL (1024u * 1024u)
+#define HEAP_LIMIT (16u * 1024u * 1024u)
+/* VM value slots. */
+#define STACK_LIMIT (128u * 1024u)
 
 [[noreturn]] void sbi_shutdown(bool failure) {
   /* SBI system reset extension: shutdown, with no reason or a system failure. */
@@ -25,156 +25,107 @@ static void write_console(void* userdata, const char* bytes, size_t length) {
 /* picolibc's exit and abort end here. */
 [[noreturn]] void _exit(int status) { sbi_shutdown(status != 0); }
 
-[[noreturn]] void kernel_trap(uintptr_t cause, uintptr_t pc, uintptr_t value) {
+[[noreturn]] void kernel_fault(uintptr_t cause, uintptr_t pc, uintptr_t value) {
   printf("otos: trap cause=%#lx pc=%#lx value=%#lx\n", (unsigned long)cause, (unsigned long)pc,
          (unsigned long)value);
   sbi_shutdown(true);
 }
 
-/* Namespaces load from the embedded lib/ tree: otium.json is /lib/otium/json.ot. */
-static bool load_namespace(void* userdata, const char* name, char** source, size_t* length) {
-  char path[256] = "/lib/";
-  size_t used = strlen(path);
-  for (const char* cursor = name; *cursor != '\0'; cursor++) {
-    if (used + 4 >= sizeof path) return false;
-    path[used++] = *cursor == '.' ? '/' : *cursor;
+/* Evaluates one form and prints its value or error. Returns false when the
+ * form asked to exit. */
+static bool evaluate(ot_state* rt, const char* source, size_t length, int* status) {
+  ot_value result;
+  console_interrupt = 0;
+  console_evaluating = true;
+  bool ok = ot_eval(rt, source, length, &result);
+  console_evaluating = false;
+  if (ot_exit_status(rt, status)) return false;
+  if (ok) {
+    ot_write(rt, stdout, result);
+    putchar('\n');
+  } else if (ot_interrupted(rt)) {
+    puts("interrupted");
+  } else {
+    printf("error: %s\n", ot_error(rt));
   }
-  memcpy(path + used, ".ot", 4);
-  if (!ot_platform_read_file(path, source, length)) return false;
-  ot_set_source_name(userdata, path);
   return true;
 }
 
-static bool poll_console(void* userdata) {
-  (void)userdata;
-  return console_poll_interrupt();
-}
-
-/* The condition being reported, rooted while otium.diagnostics renders it. */
-static otv reported_condition;
-
-static otv nat_reported_condition(ots* state, otv* args, int argc) {
-  (void)state;
-  (void)args;
-  (void)argc;
-  return reported_condition;
-}
-
-static void print_message(ots* state, otv condition) {
-  if (ot_has_type(condition, OBJ_TABLE)) {
-    otv key = ot_intern(state, "message", 7, true);
-    otv message = ot_table_get(state, condition, key, ot_nil);
-    const char* text;
-    size_t length;
-    if (ot_string_bytes(message, &text, &length)) {
-      fputs("error: ", stdout);
-      console_write(text, length);
-      console_write("\n", 1);
-      return;
-    }
-  }
-  fputs("error: ", stdout);
-  ot_repr_to(state, condition, false, write_console, NULL);
-  console_write("\n", 1);
-}
-
-/* Renders the condition with otium.diagnostics, as the host REPL does, or
- * prints its message if that fails. */
-static void report_condition(ots* state) {
-  reported_condition = ot_condition(state);
-  ot_clear_condition(state);
-  if (ot_value_type(reported_condition) == OT_TYPE_TABLE) {
-    const char* code =
-        "(begin (require otium.diagnostics) (otium.diagnostics/render (%reported-condition)))";
-    otv rendered;
-    const char* text;
-    size_t length;
-    if (ot_eval_src(state, code, strlen(code), "<report>", &rendered) &&
-        ot_string_bytes(rendered, &text, &length)) {
-      console_write(text, length);
-      reported_condition = ot_nil;
-      return;
-    }
-    ot_clear_condition(state);
-  }
-  print_message(state, reported_condition);
-  reported_condition = ot_nil;
-}
-
-static void repl(ots* state) {
+/* Returns the exit status: from (exit n), or 0 for ^D. */
+static int repl(ot_state* rt) {
   static char line[1024];
   char* pending = NULL;
-  size_t pending_length = 0;
+  size_t length = 0;
+  int status = 0;
   for (;;) {
-    int length = line_read(pending_length == 0 ? "ot> " : "..> ", line, sizeof line);
-    if (length == LINE_EOF) break;
-    if (length == LINE_INTERRUPTED) {
-      pending_length = 0;
+    int read = line_read(length == 0 ? "ot> " : "..> ", line, sizeof line);
+    if (read == LINE_EOF) break;
+    if (read == LINE_INTERRUPTED) {
+      length = 0;
       continue;
     }
-    line_history_add(line, length);
-    char* grown = realloc(pending, pending_length + (size_t)length + 1);
+    line_history_add(line, read);
+    char* grown = realloc(pending, length + (size_t)read + 1);
     if (grown == NULL) {
       puts("otos: out of memory");
-      pending_length = 0;
+      length = 0;
       continue;
     }
     pending = grown;
-    memcpy(pending + pending_length, line, (size_t)length);
-    pending_length += (size_t)length;
-    pending[pending_length++] = '\n';
+    memcpy(pending + length, line, (size_t)read);
+    length += (size_t)read;
+    pending[length++] = '\n';
 
-    size_t consumed;
-    bool incomplete;
-    otv result;
-    if (ot_eval_partial(state, pending, pending_length, "<repl>", &consumed, &incomplete,
-                        &result)) {
-      OT_FRAME_SCOPED(state, &result);
-      ot_repr_to(state, result, false, write_console, NULL);
-      console_write("\n", 1);
-      pending_length = 0;
-      continue;
+    /* Evaluate each complete form; keep an incomplete one for the next line. */
+    size_t consumed = 0;
+    for (;;) {
+      size_t end, error_offset;
+      const char* error;
+      ot_form_status form = ot_scan_form(pending, length, consumed, &end, &error, &error_offset);
+      if (form == OT_FORM_COMPLETE) {
+        if (!evaluate(rt, pending + consumed, end - consumed, &status)) {
+          free(pending);
+          return status;
+        }
+        consumed = end;
+        continue;
+      }
+      if (form == OT_FORM_END) consumed = length;
+      if (form == OT_FORM_ERROR) {
+        printf("error: %s\n", error);
+        consumed = length;
+      }
+      break;
     }
-    if (consumed != 0) {
-      memmove(pending, pending + consumed, pending_length - consumed);
-      pending_length -= consumed;
-    }
-    if (incomplete) {
-      ot_clear_condition(state);
-      continue;
-    }
-    pending_length = 0;
-    if (state->vm.unwind_kind == UNWIND_QUIT) {
-      ot_clear_condition(state);
-      if (state->quit_requested) break;
-      puts("interrupted");
-      continue;
-    }
-    report_condition(state);
+    memmove(pending, pending + consumed, length - consumed);
+    length -= consumed;
   }
   free(pending);
+  return status;
 }
 
 [[noreturn]] void kmain(uintptr_t hart, uintptr_t device_tree) {
-  printf("otos: hart %lu, device tree at %#lx\n", (unsigned long)hart,
-         (unsigned long)device_tree);
+  printf("otos: hart %lu, device tree at %#lx\n", (unsigned long)hart, (unsigned long)device_tree);
 
-  uint64_t start = ot_platform_monotonic_ns();
-  ots* state = ot_create(NULL);
-  if (state == NULL) {
+  console_init();
+  uint64_t start = kernel_uptime_ns();
+  ot_state* rt = ot_create(HEAP_INITIAL, STACK_LIMIT);
+  if (rt == NULL) {
     puts("otos: ot_create failed");
     sbi_shutdown(true);
   }
-  uint64_t created = ot_platform_monotonic_ns();
-  printf("otos: runtime ready in %lu ms\n", (unsigned long)((created - start) / 1000000));
-
-  ot_set_loader(state, load_namespace, state);
-  state->poll_hook = poll_console;
-  ot_global_add(state, &reported_condition);
-  ot_def_nat(state, "%reported-condition", nat_reported_condition);
-  gfx_register(state);
+  /* The I/O host has to be in place before the core library loads, since the
+   * runtime reads its library files and standard ports through it. */
+  if (!ot_set_heap_limit(rt, HEAP_LIMIT) || !ot_set_io_host(rt, &kernel_io_host, NULL) ||
+      !ot_load_expander(rt, "/lib") || !ot_load_core(rt, "/lib") || !gfx_register(rt)) {
+    printf("otos: cannot start the runtime: %s\n", ot_error(rt));
+    sbi_shutdown(true);
+  }
+  ot_set_interrupt_flag(rt, &console_interrupt);
+  printf("otos: runtime ready in %lu ms\n",
+         (unsigned long)((kernel_uptime_ns() - start) / 1000000));
 
   puts("otium repl (otos) - ^C interrupts, ^D shuts down");
-  repl(state);
-  sbi_shutdown(state->quit_requested && state->quit_status != 0);
+  int status = repl(rt);
+  sbi_shutdown(status != 0);
 }

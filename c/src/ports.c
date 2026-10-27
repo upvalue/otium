@@ -1,9 +1,11 @@
 #include "internal.h"
 #include <errno.h>
-#include <fcntl.h>
 #include <limits.h>
+#ifndef OTIUM_FREESTANDING
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -40,6 +42,7 @@ void oti_port_repr(FILE* out, ot_value p) {
   fprintf(out, "#<port %s %s>", name, port_object(p)->input ? "input" : "output");
 }
 
+#ifndef OTIUM_FREESTANDING
 static int posix_open(void* userdata, const char* path, unsigned flags, intptr_t* handle) {
   (void)userdata;
   int mode = flags & OT_IO_WRITE ? O_WRONLY : O_RDONLY;
@@ -75,6 +78,40 @@ static int posix_close(void* userdata, intptr_t handle) {
   (void)userdata;
   return close((int)handle) ? errno : 0;
 }
+
+#else
+/* Without an operating system the host must install an I/O host; until then
+ * every call fails. */
+static int posix_open(void* userdata, const char* path, unsigned flags, intptr_t* handle) {
+  (void)userdata;
+  (void)path;
+  (void)flags;
+  (void)handle;
+  return ENOSYS;
+}
+
+static long posix_read(void* userdata, intptr_t handle, uint8_t* bytes, size_t length) {
+  (void)userdata;
+  (void)handle;
+  (void)bytes;
+  (void)length;
+  return -ENOSYS;
+}
+
+static long posix_write(void* userdata, intptr_t handle, const uint8_t* bytes, size_t length) {
+  (void)userdata;
+  (void)handle;
+  (void)bytes;
+  (void)length;
+  return -ENOSYS;
+}
+
+static int posix_close(void* userdata, intptr_t handle) {
+  (void)userdata;
+  (void)handle;
+  return 0;
+}
+#endif
 
 static const ot_io_host posix_host = {posix_open, posix_read, posix_write, posix_close, NULL};
 
@@ -130,7 +167,7 @@ static bool callable(ot_value v) {
   return (v & 255) == TAG_BUILTIN || oti_kind(v, K_CLOSURE) || oti_kind(v, K_GENERIC) ||
          oti_kind(v, K_NEXT) || oti_kind(v, K_INSTANCE) || oti_kind(v, K_RECORD) ||
          oti_kind(v, K_MACRO) || oti_kind(v, K_PARAM) || oti_kind(v, K_FOREIGN_FUNCTION) ||
-         oti_collection(v);
+         oti_kind(v, K_NATIVE) || oti_collection(v);
 }
 
 /* The caller roots *port, and function is one of its callbacks. Never retain

@@ -2,6 +2,14 @@
 #include <stdint.h>
 #include <time.h>
 
+/* Nanosecond jiffies would pass the 30-bit integer range of a 32-bit target
+ * about a second after its clock starts, so those count milliseconds. */
+#if INTPTR_MAX > INT32_MAX
+#define JIFFIES_PER_SECOND 1000000000
+#else
+#define JIFFIES_PER_SECOND 1000
+#endif
+
 static bool time_arity(ot_state* rt, size_t count) {
   if (!count) return true;
   return oti_error(rt, "time procedures take no arguments");
@@ -16,18 +24,19 @@ static ot_value time_current_jiffy(ot_state* rt, size_t first, size_t count) {
     return 0;
   }
   uintmax_t limit = (uintmax_t)INTPTR_MAX / 2;
+  uintmax_t part = (uintmax_t)now.tv_nsec / (1000000000 / JIFFIES_PER_SECOND);
   if (now.tv_sec < 0 || now.tv_nsec < 0 ||
-      (uintmax_t)now.tv_sec > (limit - (uintmax_t)now.tv_nsec) / 1000000000) {
+      (uintmax_t)now.tv_sec > (limit - part) / JIFFIES_PER_SECOND) {
     oti_error(rt, "monotonic clock exceeds integer range");
     return 0;
   }
-  return ot_int((intptr_t)((uintmax_t)now.tv_sec * 1000000000 + (uintmax_t)now.tv_nsec));
+  return ot_int((intptr_t)((uintmax_t)now.tv_sec * JIFFIES_PER_SECOND + part));
 }
 
 static ot_value time_jiffies_second(ot_state* rt, size_t first, size_t count) {
   (void)first;
   if (!time_arity(rt, count)) return 0;
-  return ot_int(1000000000);
+  return ot_int(JIFFIES_PER_SECOND);
 }
 
 static ot_value time_current_second(ot_state* rt, size_t first, size_t count) {

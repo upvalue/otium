@@ -7,13 +7,16 @@ runtime_sources = files(
   'src/conditions.c', 'src/restarts.c', 'src/cleanup.c', 'src/params.c', 'src/classes.c',
   'src/instances.c', 'src/records.c', 'src/foreign.c', 'src/foreign_types.c',
   'src/collections.c', 'src/tables.c', 'src/reclaim.c', 'src/modules.c', 'src/dev.c',
-  'src/diagnostics.c')
+  'src/diagnostics.c', 'src/natives.c')
 
 # The runtime is C11 with GNU builtins and computed goto, so it skips the
 # project's C23 and -Wpedantic.
 runtime_headers = files('src/internal.h', 'src/heap.h', 'src/reader.h', 'src/foreign.h',
   'src/foreign_types.h', 'src/diagnostic-catalog.inc')
 runtime_options = ['c_std=c11', 'warning_level=2']
+# The amalgamation writes otium.h into this build directory, so targets that use
+# c/include must not search it.
+no_implicit = {'implicit_include_directories': false}
 runtime_include = include_directories('include', 'src')
 runtime_deps = [dependency('libffi'), dependency('threads'), dl, libm]
 runtime_args = [
@@ -39,7 +42,7 @@ endif
 libotium = static_library('otium', runtime_sources,
   c_args: runtime_args, include_directories: [runtime_include, native_include],
   dependencies: runtime_deps, link_whole: dev.get_static_lib(), override_options: runtime_options,
-  pic: false)
+  pic: false, kwargs: no_implicit)
 libotium_dep = declare_dependency(link_with: libotium,
   include_directories: include_directories('include'), dependencies: runtime_deps)
 
@@ -66,7 +69,8 @@ unit_include = include_directories('tests/unit/support', 'src')
 unit_support = static_library('otium-test-support',
   'tests/unit/support/test.c', 'tests/unit/support/helpers.c',
   c_args: runtime_args, include_directories: unit_include, dependencies: libotium_dep,
-  override_options: runtime_options)
+  override_options: runtime_options,
+  kwargs: no_implicit)
 declarations = []
 entries = []
 unit_sources = []
@@ -82,20 +86,30 @@ unit_main = configure_file(input: 'tests/unit/main.c.in', output: 'unit-main.c',
   configuration: {'DECLARATIONS': '\n'.join(declarations), 'ENTRIES': '\n'.join(entries)})
 value_portable = static_library('otium-test-value-portable', 'tests/unit/value.c',
   c_args: runtime_args + '-DOTIUM_PORTABLE_INTS', include_directories: unit_include,
-  dependencies: libotium_dep, override_options: runtime_options)
+  dependencies: libotium_dep, override_options: runtime_options,
+  kwargs: no_implicit)
 unit_tests = executable('otium-unit-tests', unit_main, unit_sources,
   c_args: runtime_args, include_directories: unit_include, dependencies: libotium_dep,
-  link_with: [unit_support, value_portable], override_options: runtime_options)
+  link_with: [unit_support, value_portable], override_options: runtime_options,
+  kwargs: no_implicit)
 
 # A host program for the callback abort checks in tests.py.
 foreign_control = executable('otium-foreign-control', 'tests/unit/hosts/foreign-control.c',
   c_args: runtime_args, include_directories: unit_include, dependencies: libotium_dep,
-  link_with: unit_support, override_options: runtime_options)
+  link_with: unit_support, override_options: runtime_options,
+  kwargs: no_implicit)
+
+# A host with native procedures, for the extension test in tests.py.
+extension_demo = executable('otium-extension-demo', 'tests/unit/hosts/extension-demo.c',
+  c_args: runtime_args, dependencies: libotium_dep, override_options: runtime_options,
+  kwargs: no_implicit)
 
 ffi_extra = shared_module('ffi-extra', 'tests/unit/fixtures/ffi_extra.c',
   name_prefix: '', name_suffix: extension, build_by_default: false,
-  override_options: runtime_options)
+  override_options: runtime_options,
+  kwargs: no_implicit)
 
 bench_runtime = executable('bench-runtime', 'bench/runtime.c', include_directories: 'src',
   c_args: runtime_args, dependencies: libotium_dep, override_options: runtime_options,
-  build_by_default: false)
+  build_by_default: false,
+  kwargs: no_implicit)

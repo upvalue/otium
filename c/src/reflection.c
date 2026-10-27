@@ -32,7 +32,8 @@ static const char* type_name(ot_value value) {
       case K_NEXT:
       case K_GENERIC:
       case K_CLOSURE:
-      case K_FOREIGN_FUNCTION: return ":function";
+      case K_FOREIGN_FUNCTION:
+      case K_NATIVE: return ":function";
       case K_FOREIGN_LAYOUT: return ":foreign-layout";
       case K_POINTER: return ":pointer";
       default: break;

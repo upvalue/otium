@@ -1,0 +1,6 @@
+# LLVM 21 as packaged by Debian, Ubuntu and apt.llvm.org.
+[binaries]
+c = '/usr/lib/llvm-21/bin/clang'
+ar = '/usr/lib/llvm-21/bin/llvm-ar'
+strip = '/usr/lib/llvm-21/bin/llvm-strip'
+objcopy = '/usr/lib/llvm-21/bin/llvm-objcopy'

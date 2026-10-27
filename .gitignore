@@ -22,7 +22,7 @@ __pycache__/
 *.swo
 *~
 
-# Local benchmark runs; curated results live in benchmarks/results.
+# Local benchmark runs.
 /benchmarks/runs/
 
 # Claude Code worktrees

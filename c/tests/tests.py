@@ -20,7 +20,13 @@ for name in ('01-reader', '02-types', '03-equality', '04-tables', '05-control',
     case('conformance ' + name, f'c/tests/otium/{name}.ot', runtimes=['c'],
          stdout_file=f'c/tests/otium/expected/{name}.txt')
 
-case('extension', 'c/tests/ext-demo.ot', runtimes=['c'], paths=['c/tests/modules'])
+
+@test('extension', needs=['c-host'])
+def extension(t):
+    """Native procedures and host objects from an embedding host's demo namespace."""
+    host = built('c/otium-extension-demo')
+    t.expect(t.run([host, '-L', 'c/tests/modules', 'c/tests/ext-demo.ot']))
+
 
 @test('multimethods', runtimes=BOTH, timeout=180)
 def multimethods(t):
@@ -435,3 +441,12 @@ def foreign_host(t):
         t.check('AddressSanitizer' not in result.stderr and 'runtime error:' not in result.stderr,
                 result)
     t.expect(t.run([host, 'exit']), stdout='callback exit and outer cleanup passed\n')
+
+
+@test('c amalgamation', needs=['c-host'])
+def amalgamation(t):
+    """The single-file distribution builds and runs scripts like the CLI."""
+    binary = built('c/otium-amalgamation')
+    t.expect(t.run([binary, '--no-project', '-e', '(+ 20 22)']), stdout='42\n')
+    t.expect(t.run([binary, '--no-project', ROOT / 'tests/cli/arguments.ot', '--', 'a']),
+             stdout='1:a\n' + str(ROOT / 'tests/cli/arguments.ot') + '\n')

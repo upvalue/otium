@@ -1,4 +1,5 @@
 #include "internal.h"
+#ifndef OTIUM_FREESTANDING
 #include "foreign_types.h"
 #include <dlfcn.h>
 #include <float.h>
@@ -1539,6 +1540,43 @@ static ot_value foreign_run(ot_state* rt, const char* op, oti_builtin_fn run, si
   }
   return result;
 }
+
+#else
+/* Without an operating system there is no libffi, dlopen or threads, so every
+ * FFI builtin raises an ffi-error with reason unavailable. */
+bool oti_foreign_init(ot_state* rt) {
+  (void)rt;
+  return true;
+}
+
+void oti_foreign_destroy(ot_state* rt) { (void)rt; }
+
+void oti_foreign_collect(ot_state* rt) { (void)rt; }
+
+void oti_foreign_stats(const ot_state* rt, ot_stats* stats) {
+  (void)rt;
+  (void)stats;
+}
+
+bool oti_foreign_owned(ot_value value) {
+  (void)value;
+  return false;
+}
+
+static ot_value foreign_unavailable(ot_state* rt, const char* op) {
+  return oti_ffi_error(rt, op, "unavailable", "foreign calls are not available in this build");
+}
+
+ot_value oti_foreign_call(ot_state* rt, size_t callable, size_t first, size_t count) {
+  (void)callable;
+  (void)first;
+  (void)count;
+  return foreign_unavailable(rt, "call");
+}
+
+#define foreign_run(rt, op, run, first, count)                                                     \
+  ((void)(first), (void)(count), foreign_unavailable(rt, op))
+#endif
 
 static ot_value ffi_open_builtin(ot_state* rt, size_t first, size_t count) {
   return foreign_run(rt, "open-library", foreign_open, first, count);

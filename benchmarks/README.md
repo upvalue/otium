@@ -26,8 +26,7 @@ name to run one.
 ## Results
 
 Runs write to ignored `benchmarks/runs/<family>/<timestamp>/` directories. Use
-`--output FILE` for the workload and paired runners and `--output DIR` for R7RS. Curated results live in `benchmarks/results/`;
-copy new ones there deliberately.
+`--output FILE` for the workload and paired runners and `--output DIR` for R7RS.
 
 Reports record commands, commit, dirty state, platform and a `--build-label`.
 Cache state isn't normalized, so note it when comparing startup. Don't combine

@@ -1,3 +1,4 @@
+#ifndef OTIUM_FREESTANDING
 #include "internal.h"
 #include "foreign_types.h"
 #include <limits.h>
@@ -385,3 +386,4 @@ oti_signature* oti_foreign_signature(ot_state* rt, oti_signature** cache, ot_val
   }
   return s;
 }
+#endif

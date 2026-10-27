@@ -1,0 +1,6 @@
+# LLVM from Homebrew on macOS.
+[binaries]
+c = '/opt/homebrew/opt/llvm/bin/clang'
+ar = '/opt/homebrew/opt/llvm/bin/llvm-ar'
+strip = '/opt/homebrew/opt/llvm/bin/llvm-strip'
+objcopy = '/opt/homebrew/opt/llvm/bin/llvm-objcopy'

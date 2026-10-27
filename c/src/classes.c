@@ -77,7 +77,7 @@ ot_value oti_dispatch_type(ot_state* rt, ot_value v) {
   else if ((v & 255) == TAG_CHAR) kind = C_CHARACTER;
   else if ((v & 255) == TAG_BUILTIN || oti_kind(v, K_PARAM) || oti_kind(v, K_CLOSURE) ||
            oti_kind(v, K_NEXT) || oti_kind(v, K_GENERIC) || oti_kind(v, K_MACRO) ||
-           oti_kind(v, K_FOREIGN_FUNCTION))
+           oti_kind(v, K_FOREIGN_FUNCTION) || oti_kind(v, K_NATIVE))
     kind = C_PROCEDURE;
   else if (oti_kind(v, K_STRING)) kind = C_STRING;
   else if (oti_kind(v, K_SYMBOL)) kind = C_SYMBOL;

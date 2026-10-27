@@ -36,8 +36,11 @@
 ;;   size. Parameters are registers 1..n (required, optional, rest).
 ;; - A call's window R is one above the highest register live across it
 ;;   (and above the pinned registers); its result is R. A tail call's window
-;;   is 1, or 0 when the callee is the running closure, so a self tail call
-;;   moves its arguments straight into the parameters.
+;;   is where its callee and arguments already sit in order, since TAIL_CALL
+;;   moves them down itself. Otherwise it's 0 for a global call, whose
+;;   instruction loads the callee itself, or when the callee is the running
+;;   closure, so the arguments go straight into the parameters; else 1, since
+;;   nothing but a tail call instruction may write register 0.
 ;; - Preferences. A free register is chosen from, in order: the register of
 ;;   a value it's copied to or from at a jump, if that is already assigned;
 ;;   hints from the previous round (the window slot of a call where it's an
@@ -161,12 +164,36 @@
 (def- (all-instrs blk)
   (append (array-to-list (blk :instrs)) (list (blk :term))))
 
+(def- (in-place-window instr reg)
+  "The base R when a tail call's callee (for a value call) and arguments are
+already in R, R+1, ..., else nil. R is 0 only for a global call. TAIL_CALL moves them
+down to the frame itself, so they don't need moving into 1, 2, ...."
+  (let ((args (instr :args))
+        (value? (eq? (instr :kind) :value)))
+    (let ((base (cond
+                  (value? (reg (instr :callee)))
+                  ((pair? args) (and (reg (car args)) (- (reg (car args)) 1)))
+                  (else nil))))
+      (and base
+           (>= base
+               (if (eq? (instr :kind) :global)
+                   0
+                   1))
+           (let loop ((as args)
+                      (r (+ base 1)))
+             (cond
+               ((null? as) base)
+               ((and (reg (car as)) (= (reg (car as)) r)) (loop (cdr as) (+ r 1)))
+               (else nil)))))))
+
 (def- (window-of instr reg pinned-max)
   "A call's window base, from the registers of the values live across it."
   (if (eq? (instr :op) :tail-call)
-      (if (and (eq? (instr :kind) :value) (= (instr :callee) 0))
-          0
-          1)
+      (cond
+        ((and (eq? (instr :kind) :value) (= (instr :callee) 0)) 0)
+        ((in-place-window instr reg))
+        ((eq? (instr :kind) :global) 0)
+        (else 1))
       (+ 1 (reduce (fn (m v) (max m (reg v))) pinned-max (instr :across)))))
 
 (def- (colour lfn ins handlers pinned partners hints)

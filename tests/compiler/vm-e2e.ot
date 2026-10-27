@@ -58,6 +58,10 @@
     ("(def (local-fns n) (def (ev? n) (if (= n 0) #t (od? (- n 1)))) (def (od? n) (if (= n 0) #f (ev? (- n 1)))) (ev? n))"
      "(list (local-fns 10) (local-fns 7))")
     ("(def (w n) (let ((s 0) (i 0)) (while (< i n) (set! s (+ s i)) (set! i (+ i 1))) s))" "(w 10)")
+    ("(def (self-loop xs) (def (ok? x d ys) (cond ((null? ys) #t) ((= (car ys) (+ x d)) #f) (else (ok? x (+ d 1) (cdr ys))))) (list (ok? 1 1 xs) (ok? 5 1 xs)))"
+     "(self-loop '(9 8 7 6))")
+    ("(def (self-box n) (def (go i acc) (if (= i 0) (map (fn (f) (f)) acc) (go (- i 1) (cons (fn () i) acc)))) (go n '()))"
+     "(self-box 3)")
     ("(def (andor a b) (list (and a b) (or a b) (and) (or)))" "(andor 1 #f)")
     ("(def (mapper xs) (map (fn (x) (* x x)) xs))" "(mapper '(1 2 3))")
     ("(def (fl x) (* x 1.5))" "(fl 2)")

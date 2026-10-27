@@ -80,6 +80,7 @@
 (def- checked {}) ; value id -> #t when known not to be the unbound marker
 
 (def- selfs {}) ; function id -> its self value
+(def- self-loops {}) ; function id -> [header block, required count] for self tail calls
 
 (def- contified {}) ; first member's variable id -> #t for contified groups
 
@@ -95,6 +96,7 @@
   (set! var-names {})
   (set! checked {})
   (set! selfs {})
+  (set! self-loops {})
   (set! contified {})
   (set! boxed {}))
 
@@ -575,6 +577,23 @@
          (and entry (not (prims/effect? entry :call)) (not (prims/effect? entry :switch)) (every? simple? (n :args)))))
       (else #f))))
 
+(def- (tail-calls? n x count)
+  ;; Whether Core n calls variable x with count arguments in tail position.
+  (let ((op (n :op)))
+    (cond
+      ((eq? op :call) (and (eq? ((n :fn) :op) :ref) (eq? ((n :fn) :var) x) (= (length (n :args)) count)))
+      ((eq? op :if) (or (tail-calls? (n :then) x count) (tail-calls? (n :else) x count)))
+      ((eq? op :seq) (tail-calls? (last (n :exprs)) x count))
+      ((memq op '(:let :fix)) (tail-calls? (n :body) x count))
+      (else #f))))
+
+(def- (self-loop-call? callee args)
+  ;; A call of the running function to itself that can jump to its header.
+  (and (eq? (callee :op) :ref)
+       (let ((b (get binds ((callee :var) :id)))
+             (loop (get self-loops cur-fn)))
+         (and b loop (eq? (b :kind) :member) (eq? (b :fn) cur-fn) (= (length args) (loop 1))))))
+
 (def- (conv-call n k)
   (let ((callee (n :fn))
         (args (n :args))
@@ -584,6 +603,10 @@
        (let ((b (binds ((callee :var) :id)))
              (vs (map value args)))
          (ir/jump! out (block!) (b :block) (append vs (map (fn (id) (vals id)) (b :carried))))
+         (set! cur nil)))
+      ((and (eq? k :return) (self-loop-call? callee args))
+       (let ((vs (map value args)))
+         (ir/jump! out (block!) ((self-loops cur-fn) 0) vs)
          (set! cur nil)))
       ((eq? (callee :op) :prim) (conv (core/primcall (callee :name) args pos) k))
       (else (let ((global? (and (eq? (callee :op) :global) (<= (length args) 255) (every? simple? args)))
@@ -638,11 +661,26 @@
     (when member
       (put! member :fn f)
       (when (member :self-ref) (put! selfs f (emit 'self '()))))
-    (each2 (fn (x v)
-             (put! checked v #t)
-             (bind! x v))
-           (n :params)
-           required)
+    ;; A function that calls itself, with only required parameters, gets a
+    ;; header block after its entry, so a tail call to itself is a jump.
+    ;; Parameters are bound in the header, so boxes are fresh each time round.
+    (let ((params (if (and member
+                           (member :self-ref)
+                           (null? optional)
+                           (not rest)
+                           (tail-calls? (n :body) (member :var) (length required)))
+                      (let ((header (ir/add-block! out f)))
+                        (let ((ps (map (fn (x) (name! (ir/add-param! out header) x)) (n :params))))
+                          (ir/jump! out (block!) header required)
+                          (set! cur header)
+                          (put! self-loops f [header (length ps)])
+                          ps))
+                      required)))
+      (each2 (fn (x v)
+               (put! checked v #t)
+               (bind! x v))
+             (n :params)
+             params))
     (when rest
       (put! checked rest #t)
       (bind! (n :rest) rest))
@@ -741,7 +779,7 @@
       (for-each (fn (b)
                   (let ((x (car b))
                         (id ((car b) :id))
-                        (record {:kind :member :fn nil :closure nil :box nil :self-ref (get (deps id) id)}))
+                        (record {:kind :member :var x :fn nil :closure nil :box nil :self-ref (get (deps id) id)}))
                     (when (get needs-box id)
                       (unless unbound (set! unbound (emit 'unbound '())))
                       (put! record :box (name! (emit 'box (list unbound)) x)))

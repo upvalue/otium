@@ -115,11 +115,40 @@
       (unless (null? fs)
         (put! index-of (car fs) i)
         (loop (cdr fs) (+ i 1))))
-    {:functions (list-to-array (map (fn (f) (select-function ir f index-of)) order))}))
+    (let ((ir-uses (ir/uses ir)))
+      {:functions (list-to-array (map (fn (f) (select-function ir f index-of ir-uses)) order))})))
+
+(def- (memv? x xs)
+  (and (pair? xs) (or (= x (car xs)) (memv? x (cdr xs)))))
 
 ;; --- per function ------------------------------------------------------------------
 
-(def- (select-function ir f index-of)
+(def- (fused-test ir b ir-uses)
+  "For a block ending in a branch on a value made by not or a predicate with a
+branch opcode at the end of the same block and used only there: [prim args
+negate? ops], where prim is nil to branch on the value args directly and ops
+are the operations the branch replaces. Else nil."
+  (when (eq? (ir/term-kind ir b) :branch)
+    (let ((trailing (reverse (ir/block-ops ir b))))
+      (let loop ((v (car (ir/term-args ir b)))
+                 (negate #f)
+                 (skip '())
+                 (rest trailing))
+        (let ((d (ir/value-def ir v))
+              (stop (fn () (and (pair? skip) [nil v negate skip]))))
+          (if (and (eq? (d 0) :op) (pair? rest) (= (car rest) (d 1)) (= 1 (length (ir-uses v))))
+              (let ((o (d 1)))
+                (let ((code (ir/op-code ir o))
+                      (args (ir/op-args ir o)))
+                  (let ((entry (prims/lookup code)))
+                    (cond
+                      ((and (eq? code 'not) (= 1 (length args)))
+                       (loop (car args) (not negate) (cons o skip) (cdr rest)))
+                      ((and entry (entry :branch) (= (length args) (entry :vm-arity))) [code args negate (cons o skip)])
+                      (else (stop))))))
+              (stop)))))))
+
+(def- (select-function ir f index-of ir-uses)
   (let ((sig (ir/fn-signature ir f))
         (name (ir/fn-name ir f))
         (lfn {})
@@ -133,7 +162,8 @@
         (static-of {}) ; unit function index -> constant index
         (blocks [])
         (bmap {}) ; IR block -> LIR block index
-        (current nil)) ; instruction array being filled
+        (current nil) ; instruction array being filled
+        (fused nil)) ; the block's fused-test, while its terminator is selected
     (def (fresh!)
       (let ((v next-vreg))
         (set! next-vreg (+ v 1))
@@ -288,6 +318,16 @@
             (pos (ir/term-pos ir b)))
         (let ((t (cond
                    ((eq? kind :jump) {:op :jump :target (block-of (car succ)) :args nil :uses nil})
+                   ((and (eq? kind :branch) fused)
+                    (let ((then (block-of (if (fused 2)
+                                              (cadr succ)
+                                              (car succ))))
+                          (else (block-of (if (fused 2)
+                                              (car succ)
+                                              (cadr succ)))))
+                      (if (fused 0)
+                          (select-branch (fused 0) (fused 1) then else)
+                          {:op :branch :uses (list (use (fused 1))) :then then :else else})))
                    ((eq? kind :branch)
                     (let ((tested (get bound-of (car targs))))
                       (if tested
@@ -389,7 +429,9 @@
       (for-each (fn (blk) (put! blk :idom (bmap (doms (blk :ir))))) blocks)
       (for-each (fn (blk)
                   (set! current (blk :instrs))
-                  (for-each (fn (o) (select-op! o)) (ir/block-ops ir (blk :ir)))
+                  (set! fused (fused-test ir (blk :ir) ir-uses))
+                  (for-each (fn (o) (unless (and fused (memv? o (fused 3))) (select-op! o)))
+                            (ir/block-ops ir (blk :ir)))
                   (put! blk :term (select-term! (blk :ir)))
                   (return-call! blk))
                 blocks))

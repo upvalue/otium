@@ -116,6 +116,7 @@ bool oti_reclaim(ot_runtime* rt) {
     rt->constant_roots.count = rt->constant_count;
     rt->constant_free = rt->function_free = 0;
     oti_heap_collect(&rt->heap);
+    if (rt->stack_stale > rt->sp) rt->stack_stale = rt->sp;
     oti_foreign_collect(rt);
   }
   free(m.objects);

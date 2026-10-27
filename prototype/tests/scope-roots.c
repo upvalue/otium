@@ -29,8 +29,28 @@ TEST(scopes_survive_collection_under_stress) {
   ot_destroy(rt);
 }
 
+/* A call takes stack slots above the height without writing them. Slots left
+ * by earlier frames must not hold pointers from before a collection. */
+TEST(fresh_frames_after_collections) {
+  ot_runtime* rt = new_runtime(1024 * 1024, 65536);
+  check_int(
+      rt,
+      "(def (deep n acc) (if (= n 0) acc (cons n (deep (- n 1) (cons acc '()))))) "
+      "(def (wide a b c d e f) (let ((x (cons a b)) (y (cons c d)) (z (cons e f))) "
+      "(cons x (cons y (cons z '()))))) "
+      "(def (mix n) (let loop ((i 0) (out '())) (if (= i n) (length out) "
+      "(loop (+ i 1) (cons (wide i (deep (modulo i 7) (cons i '())) i i (fn () i) i) out))))) "
+      "(def (tails n) (if (= n 0) 0 (begin (wide 1 2 3 4 5 6) (tails (- n 1))))) 0",
+      0);
+  ot_gc_stress(rt, true);
+  for (int i = 0; i < 3; i++)
+    check_int(rt, "(+ (mix 120) (tails 100) (length (deep 50 '())))", 171);
+  ot_destroy(rt);
+}
+
 static const test_case tests[] = {
     TEST_ENTRY(scopes_survive_collection_under_stress),
+    TEST_ENTRY(fresh_frames_after_collections),
 };
 
 TEST_MAIN(tests)

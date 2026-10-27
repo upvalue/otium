@@ -72,9 +72,13 @@ Invariant: while a frame runs, `sp >= max(floor, base + 1 + locals)`, the
 frame's top. `sp` is never lowered below the top of a frame that will resume.
 Every slot in `[0, sp)` holds a valid value.
 
-- Entering a frame raises `sp` to `max(floor, new top)`. Slots between the old
-  `sp` and the new top are set to unbound, because a slot above `sp` may hold a
-  pointer that a collection has since made stale.
+- Entering a frame raises `sp` to `max(floor, new top)`. A slot above `sp` may
+  hold a pointer that a collection has since made stale, so the runtime keeps
+  `stack_stale`: every slot below it holds a valid value, even above `sp`. A
+  collection lowers it to `sp`. A call sets the slots of its new frame from
+  `stack_stale` up to unbound and raises the mark, so in steady state calls
+  write nothing. Registers are always written before they are read; the
+  compiler initializes the ones that must start unbound.
 - Returning sets `sp` back to the popped frame's floor, which is the caller's
   height at the call.
 - A tail call keeps the floor and recomputes the top.

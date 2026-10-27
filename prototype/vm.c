@@ -21,6 +21,14 @@
 
 static void vm_height(ot_runtime* rt, size_t sp) { rt->sp = rt->stack_roots.count = sp; }
 
+/* Make stack[from, to) valid before a frame takes it without writing it. */
+static inline void vm_fresh(ot_runtime* rt, ot_value* stack, size_t from, size_t to) {
+  size_t stale = rt->stack_stale;
+  if (to <= stale) return;
+  for (size_t i = from > stale ? from : stale; i < to; i++) stack[i] = V_UNBOUND;
+  rt->stack_stale = to;
+}
+
 /* A frame's top covers its registers and everything live below its entry. */
 static size_t vm_top(const oti_frame* frame) {
   size_t top = frame->base + 1 + frame->fn->locals;
@@ -590,8 +598,7 @@ next:
         if (count > rt->max_frames) rt->max_frames = count;
         *frame = (oti_frame){callee, callee->code, callee_base, old};
         if (top > old) {
-          /* Slots above the old height may hold pointers made stale by a collection. */
-          for (size_t i = old; i < top; i++) stack[i] = V_UNBOUND;
+          vm_fresh(rt, stack, old, top);
           vm_height(rt, top);
         }
         fn = callee;
@@ -627,8 +634,7 @@ next:
       if (VM_LIKELY(argc == callee->arity && !callee->variadic && top <= rt->stack_room)) {
         ot_value* stack = rt->stack;
         memmove(R, R + ins.a, ((size_t)argc + 1) * sizeof(ot_value));
-        for (size_t i = old > base + 1 + argc ? old : base + 1 + argc; i < top; i++)
-          stack[i] = V_UNBOUND;
+        if (top > old) vm_fresh(rt, stack, old, top);
         vm_height(rt, top > floor ? top : floor);
         frame->fn = callee;
         fn = callee;

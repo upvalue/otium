@@ -94,7 +94,10 @@ ot_value oti_alloc(ot_runtime* rt, uint32_t kind, uint32_t fields, size_t bytes)
   size_t collections = rt->heap.collections;
   if (rt->stress_gc) oti_heap_collect(&rt->heap);
   ot_value v = oti_heap_alloc(&rt->heap, kind, fields, bytes);
-  if (rt->heap.collections != collections) oti_foreign_collect(rt);
+  if (rt->heap.collections != collections) {
+    oti_foreign_collect(rt);
+    if (rt->stack_stale > rt->sp) rt->stack_stale = rt->sp;
+  }
   if (!v) oti_error(rt, "managed heap exhausted");
   return v;
 }

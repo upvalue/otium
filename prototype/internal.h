@@ -518,6 +518,9 @@ struct ot_runtime {
   size_t sp, stack_capacity, stack_limit;
   /* Slots usable without growing the stack: the lesser of capacity and limit. */
   size_t stack_room;
+  /* Every stack slot below stack_stale holds a valid value, even above sp. Slots
+   * above sp at a collection, or never written, may not. */
+  size_t stack_stale;
   oti_function** functions;
   size_t function_count, function_capacity;
   oti_frame* frames;

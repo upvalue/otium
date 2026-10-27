@@ -178,6 +178,8 @@ enum {
   B_GENERIC_DEFINE,
   B_GENERIC_METHOD,
   B_REMOVE_METHOD,
+  B_TYPE_NAME,
+  B_TYPE_DESCRIPTOR_P,
   B_CLASS_DEFINE,
   B_MAKE,
   B_INSTANCE_P,
@@ -479,6 +481,7 @@ enum {
   C_POINTER,
   C_PORT,
   C_CPOINTER,
+  C_OTHER,
   C_COUNT
 };
 typedef struct oti_foreign_state oti_foreign_state;
@@ -791,10 +794,12 @@ OTI_LAYOUT(oti_buffer_obj, 1, length);
 typedef struct {
   oti_object_header header;
   ot_value name, parent, layout;
+  /* The symbol naming the namespace that defined the class. */
+  ot_value owner;
   bool abstract, builtin;
 } oti_class_obj;
 
-OTI_LAYOUT(oti_class_obj, 3, abstract);
+OTI_LAYOUT(oti_class_obj, 4, abstract);
 
 /* A slot's key, initializer and whether it is a property (true) or state. */
 enum { LAYOUT_KEY, LAYOUT_INIT, LAYOUT_PROPERTY, LAYOUT_STRIDE };

@@ -1,4 +1,5 @@
 #include "internal.h"
+#include <stdlib.h>
 #include <string.h>
 
 static ot_value cons(ot_state* rt, ot_value a, ot_value b);
@@ -20,15 +21,15 @@ bool oti_subtype(ot_value child, ot_value parent) {
 bool oti_classes_init(ot_state* rt) {
   if (rt->classes_ready) return true;
   static const char* names[C_COUNT] = {
-      "Object",         "Number", "Boolean", "Character",  "String",    "Symbol",
-      "Null",           "Pair",   "Vector",  "Bytevector", "Hashtable", "Procedure",
-      "TypeDescriptor", "Nil",    "Keyword", "Pointer",    "Port",      "CPointer"};
+      "Object",  "Number",  "Boolean",    "Character", "String",    "Symbol",         "Null",
+      "Pair",    "Vector",  "Bytevector", "Hashtable", "Procedure", "TypeDescriptor", "Nil",
+      "Keyword", "Pointer", "Port",       "CPointer",  "Other"};
   uint32_t saved = rt->current_namespace;
   rt->current_namespace = 0;
   bool ok = true;
   for (size_t i = 0; i < C_COUNT; i++) {
     if (rt->classes[i] == OT_NIL) {
-      rt->classes[i] = oti_alloc(rt, K_CLASS, 3, OTI_BYTES(oti_class_obj, 3));
+      rt->classes[i] = oti_alloc(rt, K_CLASS, 4, OTI_BYTES(oti_class_obj, 4));
       if (!rt->classes[i]) {
         rt->classes[i] = OT_NIL;
         ok = false;
@@ -38,6 +39,7 @@ bool oti_classes_init(ot_state* rt) {
       c->name = OT_NIL;
       c->parent = i ? rt->classes[C_OBJECT] : OT_NIL;
       c->layout = OT_NIL;
+      c->owner = OT_NIL;
       c->abstract = i == C_OBJECT;
       c->builtin = true;
     }
@@ -47,6 +49,12 @@ bool oti_classes_init(ot_state* rt) {
       break;
     }
     oti_as_class(rt->classes[i])->name = name;
+    ot_value owner = oti_intern(rt, K_SYMBOL, "otium.generic", 13);
+    if (!owner) {
+      ok = false;
+      break;
+    }
+    oti_as_class(rt->classes[i])->owner = owner;
     uint32_t global = oti_global(rt, names[i], strlen(names[i]));
     if (global == UINT32_MAX) {
       ok = false;
@@ -61,7 +69,7 @@ bool oti_classes_init(ot_state* rt) {
 
 ot_value oti_dispatch_type(ot_state* rt, ot_value v) {
   if (oti_kind(v, K_INSTANCE)) return oti_as_instance(v)->type;
-  unsigned kind = C_OBJECT;
+  unsigned kind = C_OTHER;
   if (ot_is_int(v) || oti_kind(v, K_FLOAT)) kind = C_NUMBER;
   else if (v == OT_TRUE || v == OT_FALSE) kind = C_BOOLEAN;
   else if (v == OT_NIL) kind = C_NIL;
@@ -392,6 +400,22 @@ done:
   return result;
 }
 
+/* The class's name qualified by its owner, as in user/Point. */
+static ot_value class_type_name(ot_state* rt, size_t first, size_t count) {
+  if (count != 1 || !oti_kind(rt->stack[first], K_CLASS))
+    return oti_fail(rt, "`type-name` expected a type descriptor");
+  oti_class_obj* c = oti_as_class(rt->stack[first]);
+  size_t owner = oti_bytes_length(c->owner), name = oti_bytes_length(c->name);
+  char* text = malloc(owner + 1 + name);
+  if (!text) return oti_fail(rt, "out of host memory");
+  memcpy(text, oti_bytes_data(c->owner), owner);
+  text[owner] = '/';
+  memcpy(text + owner + 1, oti_bytes_data(c->name), name);
+  ot_value result = oti_intern(rt, K_SYMBOL, text, owner + 1 + name);
+  free(text);
+  return result;
+}
+
 const oti_builtin_def oti_class_builtins[] = {
     {B_CLASS_P, "class?", class_class_p},
     {B_DISPATCH_TYPE, "dispatch-type", class_dispatch_type},
@@ -401,5 +425,7 @@ const oti_builtin_def oti_class_builtins[] = {
     {B_GENERIC_DEFINE, "%define-generic", class_define_generic},
     {B_GENERIC_METHOD, "%define-method", class_define_method},
     {B_REMOVE_METHOD, "remove-method!", class_remove_method},
+    {B_TYPE_NAME, "type-name", class_type_name},
+    {B_TYPE_DESCRIPTOR_P, "type-descriptor?", class_class_p},
     {0, NULL, NULL},
 };

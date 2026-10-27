@@ -27,7 +27,10 @@ bool oti_builtins(ot_state* rt) {
   uint32_t ffi = oti_namespace(rt, "ffi", 3);
   uint32_t process = oti_namespace(rt, "otium.process", 13);
   uint32_t reader = oti_namespace(rt, "otium.reader", 12);
-  if (ffi == UINT32_MAX || process == UINT32_MAX || reader == UINT32_MAX) return false;
+  /* otium.generic has no bindings of its own: its names resolve to core's. */
+  uint32_t generic = oti_namespace(rt, "otium.generic", 13);
+  if (ffi == UINT32_MAX || process == UINT32_MAX || reader == UINT32_MAX || generic == UINT32_MAX)
+    return false;
   memset(rt->builtin_run, 0, sizeof(rt->builtin_run));
   for (size_t m = 0; m < BUILTIN_MODULES; m++) {
     for (const oti_builtin_def* d = builtin_modules[m]; d->run; d++) {

@@ -160,7 +160,8 @@ static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_f
   if (!m) return false;
   const char* name = rt->namespaces[space];
   if (!strcmp(name, "otium.core") || (!strcmp(name, "otium.ffi") && legacy_ffi) ||
-      !strcmp(name, "otium.process") || !strcmp(name, "otium.reader"))
+      !strcmp(name, "otium.process") || !strcmp(name, "otium.reader") ||
+      !strcmp(name, "otium.generic"))
     return true;
   size_t index = 0;
   while (index < m->count && m->items[index].space != space) index++;
@@ -267,6 +268,9 @@ static bool one_require(ot_state* rt, const oti_ast** cursor) {
             strlen(rt->global_info[i].name) == name->as.text.size &&
             !memcmp(rt->global_info[i].name, name->as.text.data, name->as.text.size))
           target = (uint32_t)i;
+      /* otium.generic's names are core bindings. */
+      if (target == UINT32_MAX && !strcmp(rt->namespaces[space], "otium.generic"))
+        target = oti_binding_global(rt, 0, name->as.text.data, name->as.text.size, false);
       for (size_t i = 0; i < rt->global_count; i++)
         if (rt->global_info[i].space == rt->current_namespace &&
             strlen(rt->global_info[i].name) == name->as.text.size &&

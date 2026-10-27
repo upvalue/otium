@@ -136,6 +136,10 @@ ot_value oti_instance_copy(ot_state* rt, ot_value instance) {
 static ot_value instance_define_class(ot_state* rt, size_t first, size_t count) {
   if (!oti_classes_init(rt)) return 0;
   if (count != 5) return oti_fail(rt, "invalid class declaration");
+  /* Nothing else allocates on the managed heap until live is rooted. */
+  const char* space = rt->namespaces[rt->current_namespace];
+  ot_value owner = oti_intern(rt, K_SYMBOL, space, strlen(space));
+  if (!owner) return 0;
   ot_value name = rt->stack[first], parent = rt->stack[first + 1], abstract = rt->stack[first + 2],
            spec = rt->stack[first + 3];
   if (!oti_kind(name, K_SYMBOL) || !oti_kind(parent, K_CLASS) || !oti_kind(spec, K_ARRAY) ||
@@ -173,16 +177,16 @@ static ot_value instance_define_class(ot_state* rt, size_t first, size_t count) 
       same = layout[i + LAYOUT_KEY] == fields[i + LAYOUT_KEY] &&
              layout[i + LAYOUT_PROPERTY] == fields[i + LAYOUT_PROPERTY];
   }
-  ot_value live[] = {old, OT_NIL};
+  ot_value live[] = {old, OT_NIL, owner};
   oti_roots roots;
-  oti_roots_push(&rt->heap, &roots, live, 2);
+  oti_roots_push(&rt->heap, &roots, live, 3);
   live[1] = same ? oti_as_class(live[0])->layout : oti_alloc(rt, K_LAYOUT, (uint32_t)n, 0);
   bool ok = live[1] != 0;
   if (ok && n)
     memcpy(object_fields(live[1]), object_fields(oti_as_array(rt->stack[first + 3])->data),
            n * sizeof(ot_value));
   if (ok && (old == V_UNBOUND || reset)) {
-    live[0] = oti_alloc(rt, K_CLASS, 3, OTI_BYTES(oti_class_obj, 3));
+    live[0] = oti_alloc(rt, K_CLASS, 4, OTI_BYTES(oti_class_obj, 4));
     ok = live[0] != 0;
     if (ok) {
       oti_as_class(live[0])->abstract = abstract == OT_TRUE;
@@ -194,6 +198,7 @@ static ot_value instance_define_class(ot_state* rt, size_t first, size_t count) 
     c->name = rt->stack[first];
     c->parent = rt->stack[first + 1];
     c->layout = live[1];
+    c->owner = live[2];
     rt->globals[global] = live[0];
     rt->global_info[global].defined = 1;
   }

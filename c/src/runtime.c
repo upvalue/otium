@@ -910,7 +910,8 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
       print_value(out, v, depth + 1);
     }
     fputc(')', out);
-  } else if (oti_kind(v, K_POINTER)) fputs("#<foreign-pointer>", out);
+  } else if (oti_kind(v, K_CLASS)) fputs("#<descriptor>", out);
+  else if (oti_kind(v, K_POINTER)) fputs("#<foreign-pointer>", out);
   else if (oti_kind(v, K_FOREIGN_LAYOUT)) fputs("#<foreign-layout>", out);
   else if (oti_kind(v, K_FOREIGN_LIBRARY)) fputs("#<foreign-library>", out);
   else fputs("#<function>", out);

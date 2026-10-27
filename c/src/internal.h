@@ -612,9 +612,11 @@ struct ot_state {
 #define OTI_SOURCE_LIMIT ((size_t)16 * 1024 * 1024)
 
 void oti_free_function(oti_function* fn);
-/* Read an open file to the end and close it. The result is NUL-terminated and
- * owned by the caller. what names the file in error messages. */
-char* oti_read_file(ot_state* rt, FILE* file, size_t limit, const char* what, size_t* length);
+/* Read a whole source file. The result is NUL-terminated and owned by the
+ * caller; what names the file in error messages. When the file can't be
+ * opened, returns NULL with *open_error set and no error recorded. */
+char* oti_read_source_file(ot_state* rt, const char* path, size_t limit, const char* what,
+                           size_t* length, int* open_error);
 bool oti_reclaim(ot_state* rt);
 bool oti_coded_error(ot_state* rt, const char* code, const char* message);
 bool oti_coded_errorf(ot_state* rt, const char* code, const char* format, ...)

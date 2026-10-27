@@ -55,10 +55,11 @@ bool ot_add_load_path(ot_state* rt, const char* path) {
 
 bool ot_add_project_paths(ot_state* rt, const char* project_file) {
   if (!oti_host_entry(rt)) return false;
-  FILE* file = fopen(project_file, "rb");
-  if (!file) return oti_error(rt, "cannot open project file");
   size_t length;
-  char* source = oti_read_file(rt, file, OTI_SOURCE_LIMIT, "project file", &length);
+  int error;
+  char* source =
+      oti_read_source_file(rt, project_file, OTI_SOURCE_LIMIT, "project file", &length, &error);
+  if (error) return oti_error(rt, "cannot open project file");
   if (!source) return false;
   const char* slash = strrchr(project_file, '/');
   size_t prefix = slash ? (size_t)(slash - project_file + 1) : 0;
@@ -175,8 +176,9 @@ static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_f
   if (m->depth >= 128) return oti_error(rt, "module nesting limit exceeded");
   const char* defaults[] = {".", "lib"};
   size_t paths = m->path_count + 2;
-  FILE* file = NULL;
-  for (size_t i = 0; i < paths && !file; i++) {
+  char* source = NULL;
+  size_t bytes;
+  for (size_t i = 0; i < paths && !source; i++) {
     const char* directory = i < m->path_count ? m->paths[i] : defaults[i - m->path_count];
     size_t d = strlen(directory), n = strlen(name);
     if (d > SIZE_MAX - n - 6) return oti_error(rt, "module path too long");
@@ -186,20 +188,19 @@ static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_f
     path[d] = '/';
     for (size_t j = 0; j < n; j++) path[d + 1 + j] = name[j] == '.' ? '/' : name[j];
     const char* suffixes[] = {".ot", ".scm"};
-    for (size_t suffix = 0; suffix < 2 && !file; suffix++) {
+    for (size_t suffix = 0; suffix < 2 && !source; suffix++) {
       strcpy(path + d + n + 1, suffixes[suffix]);
-      file = fopen(path, "rb");
-      if (!file && errno != ENOENT && errno != ENOTDIR) {
+      int error;
+      source = oti_read_source_file(rt, path, OTI_SOURCE_LIMIT - m->source_bytes, "module file",
+                                    &bytes, &error);
+      if (!source && (!error || (error != ENOENT && error != ENOTDIR))) {
         free(path);
-        return oti_error(rt, "cannot open module file");
+        return error ? oti_error(rt, "cannot open module file") : false;
       }
     }
     free(path);
   }
-  if (!file) return oti_coded_error(rt, "E0202", "module file not found");
-  size_t bytes;
-  char* source = oti_read_file(rt, file, OTI_SOURCE_LIMIT - m->source_bytes, "module file", &bytes);
-  if (!source) return false;
+  if (!source) return oti_coded_error(rt, "E0202", "module file not found");
   uint32_t caller = rt->current_namespace, expected = rt->required_namespace;
   rt->current_namespace = rt->required_namespace = space;
   m->items[index].state = 1;

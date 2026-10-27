@@ -51,7 +51,7 @@ def output(t):
 def catalog(t):
     """Codes in the sources are catalogued, and each catalogued code is tested."""
     entries = json.loads((ROOT / 'lib/catalog/diagnostics.json').read_text())
-    sources = [*ROOT.glob('chez/otium/*.sls'), ROOT / 'c/src/otium.c', ROOT / 'c/src/main.c',
+    sources = [*ROOT.glob('chez/otium/*.sls'), *ROOT.glob('c/src/*.c'),
                ROOT / 'lib/otium/expander.ot']
     used = set()
     for path in sources:

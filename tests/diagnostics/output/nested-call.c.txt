@@ -1,7 +1,10 @@
-error[E0401]: `car` expected pair
-  --> tests/diagnostics/output/nested-call.ot:12:1
-   |
-12 | (h)
-   | ^^^
-   |
-   = note: run `otium explain E0401` for details
+error[E0401]: `car` expected a pair, got 5
+ --> tests/diagnostics/output/nested-call.ot:2:8
+  |
+2 |   (+ 1 (car x)))
+  |        ^^^^^^^
+  |
+  = note: in `f`
+  = note: called from `g` at tests/diagnostics/output/nested-call.ot:5:9
+  = note: called from `h` at tests/diagnostics/output/nested-call.ot:8:12
+  = note: run `otium explain E0401` for details

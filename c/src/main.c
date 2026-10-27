@@ -57,9 +57,7 @@ static int usage_error(const char* format, ...) {
 }
 
 /* The one place the launcher prints a runtime error. */
-static void report_error(ot_state* rt, const char* where) {
-  fprintf(stderr, "%s:%zu: %s\n", where, ot_error_offset(rt), ot_error(rt));
-}
+static void report_error(ot_state* rt, const char* where) { ot_report_error(rt, where, stderr); }
 
 static bool evaluate(ot_state* rt, const char* source, size_t length, const char* path, bool echo) {
   ot_value result;

@@ -63,12 +63,12 @@ bool oti_enter(ot_state* rt, size_t call, size_t argc, bool tail) {
     if (!oti_generic_prepare(rt, call, &argc)) return false;
     closure = rt->stack[call];
   }
-  if (!oti_kind(closure, K_CLOSURE)) return oti_coded_error(rt, "E0302", "value is not callable");
+  if (!oti_kind(closure, K_CLOSURE)) return oti_callable_error(rt, closure);
   uint32_t id;
   memcpy(&id, object_bytes(closure), sizeof(id));
   oti_function* fn = rt->functions[id];
   if (argc < fn->arity || (!fn->rest && argc > fn->arity + fn->optional))
-    return oti_coded_error(rt, "E0301", "wrong number of arguments");
+    return oti_arity_error(rt, fn, argc);
   size_t base = tail ? rt->frames[rt->frame_count - 1].base : call;
   size_t floor = tail ? rt->frames[rt->frame_count - 1].floor : rt->sp;
   if (fn->locals >= rt->stack_limit || base >= rt->stack_limit - fn->locals - 1)
@@ -226,9 +226,7 @@ static bool vm_install_try(ot_state* rt, size_t target, size_t slot) {
   return true;
 }
 
-static bool vm_unbound_global(ot_state* rt, uint32_t index) {
-  return oti_coded_errorf(rt, "E0201", "unbound global: %s", rt->global_info[index].name);
-}
+static bool vm_unbound_global(ot_state* rt, uint32_t index) { return oti_unbound_error(rt, index); }
 
 /* True, with an error, when index is the cell of a builtin the compiler turns
  * into instructions. Those cells are immutable, so compiled code never needs
@@ -938,6 +936,7 @@ next:
 
 bool oti_drive(ot_state* rt, size_t stop_frames) {
   while (!dispatch(rt, stop_frames)) {
+    if (!rt->try_count) oti_trace_error(rt);
     if (!rt->interrupted && !rt->exit_pending && !rt->restart_pending && !rt->signaled)
       oti_signal_error(rt);
     if (rt->restart_pending) {

@@ -109,9 +109,9 @@ TEST(global_calls) {
   check_int(rt, "(def (len l) (length l)) (len '(1 2))", 2);
   check_int(rt, "(def (len2 l) (+ 1 (length l))) (len2 '(1 2))", 3);
   check_error(rt, "(def (missing) (missing-function 1)) (missing)",
-              "unbound global: missing-function");
+              "unbound name `missing-function`");
   check_error(rt, "(def (missing-tail x) (+ 1 (missing-function x))) (missing-tail 1)",
-              "unbound global: missing-function");
+              "unbound name `missing-function`");
   check_printed(rt, "(def (truth x) (if x #t #f)) (list (truth 1) (truth #f))", "(#t #f)");
   ot_destroy(rt);
 }

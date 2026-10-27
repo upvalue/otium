@@ -297,6 +297,42 @@ is gone. Each capture records its source (parent register or parent capture)
 and whether it is a box. Code reclamation finds constants and child functions
 through `CONST` and `CLOSURE` instructions, as now.
 
+## Installed code
+
+The optimizing compiler (`docs/optimizer.md`) emits VM units, which
+`%vm-install` in `c/src/optimizer.c` turns into functions like the ones
+`compiler.c` makes: the same namespace and source fields, constants in the
+runtime table, and `CLOSURE` and `CONST` operands rewritten to runtime ids, so
+code reclamation finds installed code and static closures the same way.
+
+The installer checks a unit before installing any of it, and raises an error
+naming the function and word:
+
+- `:arity`, `:locals` and `:code` are required; a missing `:optional`, `:rest`,
+  `:name`, `:constants`, `:statics`, `:captures` or `:points` is empty.
+  `locals` covers the parameters, and optional and rest don't combine. The
+  entry, function 0, has no parameters or captures.
+- Each word is five fixnums. `x` is 0 to 255 and `a`, `b`, `c` are -32768 to
+  65535; negative values are stored as 16-bit two's complement, so the signed
+  immediates of `ADDI` and the `BR_*I` forms can be written either way.
+- Jump targets are word indexes. A fused branch or `RESTARTS` is followed by a
+  `JUMP` word holding its target, as `compiler.c` emits it; that word counts as
+  an index like any other.
+- Register operands are at most `locals`, including every register of a call
+  window (`CALL a b` uses `a .. a+b`, `CALL_GLOBAL` uses `a .. a+x`) and the
+  ranges of `CLEAR`, `RESTARTS` and `BIND_HANDLERS`. Only tail calls may name
+  register 0; other instructions can't write it.
+- `IMM` and `RETURN_IMM` load only fixnums, `nil`, booleans, the empty list,
+  end of file, the unbound marker (bits 18), characters and builtins.
+- Constant, capture, function and global cell indexes are in range. Each
+  `CLOSURE` checks that the child's captures name registers or captures of
+  the function making it, and a static closure's function has no captures.
+- The last word doesn't fall through: it is `JUMP`, `RETURN`, `RETURN_IMM`, a
+  tail call or `RAISE`.
+
+It doesn't check what registers hold, so `UNBOX` or `UPVALUE_BOX` of a value
+that isn't a box still crashes.
+
 ## Checks
 
 These ran when the register VM landed, before the runtime moved from

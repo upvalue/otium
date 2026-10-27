@@ -1,0 +1,176 @@
+;; Hand-built VM units for c/tests/unit/optimizer.c. The optimizer below
+;; installs units[name] for a top-level form (probe name) or (probe 'name);
+;; other forms compile as usual. A unit that is a procedure is called instead,
+;; and its result is the optimizer's. Forms the optimizer leaves to compiler.c
+;; must be quoted, so the probe function sees a symbol.
+
+(def ops (%vm-opcodes))
+
+(def (u32 n) (if (< n 0) (+ n 4294967296) n))
+(def (lo n) (remainder (u32 n) 65536))
+(def (hi n) (quotient (u32 n) 65536))
+
+;; A word with a 32-bit bc operand.
+(def (w op x a n) (list op x a (lo n) (hi n)))
+
+(def (bits v) (%immediate-bits v))
+
+;; Flatten words (op x a b c) into the unit's code array.
+(def (code words)
+  (let ((out []))
+    (for-each (fn (word)
+                (push! out (if (keyword? (car word)) (ops (car word)) (car word)))
+                (for-each (fn (n) (push! out n)) (cdr word)))
+              words)
+    out))
+
+(def out nil)
+(def out-cell (%global-cell 'user 'out))
+
+;; Store register r in out and return it.
+(def (finish r) (list (w :define-global 0 r out-cell) (list :return 0 r 0 0)))
+
+(def (twice x) (* 2 x))
+(def nested-value nil)
+(def last-offset nil)
+(def seen [])
+(def (probe name) :fallback)
+(def units {})
+
+(def (seen-form? form)
+  (let loop ((i 0))
+    (cond ((= i (length seen)) #f)
+          ((equal? (seen i) form) #t)
+          (else (loop (+ i 1))))))
+
+(put! units 'const
+      [{:name "const" :arity 0 :locals 1 :constants ["hello"]
+        :code (code (append (list '(:const 0 1 0 0)) (finish 1)))}])
+
+(put! units 'imm [{:arity 0 :locals 0 :code (code (list (w :return-imm 0 0 (bits 42))))}])
+
+(put! units 'capture
+      [{:arity 0 :locals 2
+        :code (code (append (list (w :imm 0 1 (bits 5)) '(:closure 0 2 1 0)) (finish 2)))}
+       {:name "adder" :arity 1 :locals 3 :captures [[1 #t]]
+        :code (code '((:upvalue 0 2 0 0) (:add 0 3 1 2) (:return 0 3 0 0)))}])
+
+(put! units 'capture-chain
+      [{:arity 0 :locals 2
+        :code (code (append (list (w :imm 0 1 (bits 5)) '(:closure 0 2 1 0)) (finish 2)))}
+       {:arity 0 :locals 1 :captures [[1 #t]]
+        :code (code '((:closure 0 1 2 0) (:return 0 1 0 0)))}
+       {:arity 0 :locals 1 :captures [[0 #f]]
+        :code (code '((:upvalue 0 1 0 0) (:return 0 1 0 0)))}])
+
+(put! units 'optional
+      [{:arity 0 :locals 1 :code (code (append (list '(:closure 0 1 1 0)) (finish 1)))}
+       {:name "with-default" :arity 1 :optional 1 :locals 3
+        :code (code (list (w :jbound 0 2 2) (w :imm 0 2 (bits 100)) '(:add 0 3 1 2)
+                          '(:return 0 3 0 0)))}])
+
+(put! units 'rest
+      [{:arity 0 :locals 1 :code (code (append (list '(:closure 0 1 1 0)) (finish 1)))}
+       {:arity 1 :rest #t :locals 2 :code (code '((:return 0 2 0 0)))}])
+
+(put! units 'call-global
+      [{:arity 0 :locals 2
+        :code (code (append (list (w :imm 0 2 (bits 21))
+                                  (w :call-global 1 1 (%resolve-global 'user 'twice)))
+                            (finish 1)))}])
+
+(put! units 'tail-global
+      [{:arity 0 :locals 3
+        :code (code (list (w :imm 0 2 (bits 1)) (w :imm 0 3 (bits 2))
+                          (w :tail-call-global 2 1 (%resolve-global 'user 'list))))}])
+
+(put! units 'static
+      [{:arity 0 :locals 1 :constants [nil] :statics [[0 1]]
+        :code (code (append (list '(:const 0 1 0 0)) (finish 1)))}
+       {:arity 0 :locals 0 :code (code (list (w :return-imm 0 0 (bits 7))))}])
+
+;; The static closure of function 2 is reachable only through function 1's code.
+(put! units 'static-nested
+      [{:arity 0 :locals 1 :code (code (append (list '(:closure 0 1 1 0)) (finish 1)))}
+       {:arity 0 :locals 1 :constants [nil] :statics [[0 2]]
+        :code (code '((:const 0 1 0 0) (:tail-call 0 1 0 0)))}
+       {:arity 0 :locals 0 :code (code (list (w :return-imm 0 0 (bits 9))))}])
+
+(put! units 'branch
+      [{:arity 0 :locals 1 :code (code (append (list '(:closure 0 1 1 0)) (finish 1)))}
+       {:arity 1 :locals 1
+        :code (code (list '(:br-lti 0 1 0 10) (w :jump 0 0 3) (w :return-imm 0 0 (bits 1))
+                          (w :return-imm 0 0 (bits 2))))}])
+
+(put! units 'branch-constant
+      [{:arity 0 :locals 1 :code (code (append (list '(:closure 0 1 1 0)) (finish 1)))}
+       {:arity 1 :locals 1 :constants [:yes]
+        :code (code (list (w :br-eqk 0 1 0) (w :jump 0 0 3) (w :return-imm 0 0 (bits 1))
+                          (w :return-imm 0 0 (bits 2))))}])
+
+;; (fn (n) (let loop ((n n) (sum 0)) (if (<= n 0) sum (loop (- n 1) (+ sum n))))),
+;; with a negative ADDI immediate written as -1.
+(put! units 'loop
+      [{:arity 0 :locals 1 :code (code (append (list '(:closure 0 1 1 0)) (finish 1)))}
+       {:arity 1 :locals 2 :points [[0 0] [3 5]]
+        :code (code (list (w :imm 0 2 (bits 0)) '(:br-lei 1 1 0 0) (w :jump 0 0 6)
+                          '(:add 0 2 2 1) '(:addi 0 1 1 -1) (w :jump 0 0 1) '(:return 0 2 0 0)))}])
+
+(put! units 'try
+      [{:arity 0 :locals 2 :constants ["boom"]
+        :code (code (list (w :try 0 1 4) '(:const 0 2 0 0) '(:raise 0 2 0 0)
+                          (w :return-imm 0 0 (bits 0)) '(:return 0 1 0 0)))}])
+
+;; Malformed units, each rejected with an error.
+(def (one-word word) [{:arity 0 :locals 1 :code (code (list word '(:return 0 1 0 0)))}])
+(put! units 'bad-opcode (one-word '(99 0 0 0 0)))
+(put! units 'bad-register (one-word '(:move 0 5 1 0)))
+(put! units 'bad-register-zero (one-word '(:move 0 0 1 0)))
+(put! units 'bad-jump (one-word (w :jump 0 0 50)))
+(put! units 'bad-constant (one-word '(:const 0 1 3 0)))
+(put! units 'bad-closure (one-word '(:closure 0 1 7 0)))
+(put! units 'bad-global (one-word (w :global 0 1 99999999)))
+(put! units 'bad-immediate (one-word (w :imm 0 1 8)))
+(put! units 'bad-upvalue (one-word '(:upvalue 0 1 0 0)))
+(put! units 'bad-call-window (one-word '(:call 0 1 3 0)))
+(put! units 'bad-branch [{:arity 0 :locals 1 :code (code '((:br-null 0 1 0 0)))}])
+(put! units 'bad-fall-through [{:arity 0 :locals 1 :code (code '((:move 0 1 1 0)))}])
+(put! units 'bad-entry [{:arity 1 :locals 1 :code (code '((:return 0 1 0 0)))}])
+(put! units 'bad-locals
+      [{:arity 0 :locals 0 :code (code (list (w :return-imm 0 0 (bits 0))))}
+       {:arity 2 :optional 1 :locals 2 :code (code '((:return 0 1 0 0)))}])
+(put! units 'bad-optional-rest
+      [{:arity 0 :locals 0 :code (code (list (w :return-imm 0 0 (bits 0))))}
+       {:arity 1 :optional 1 :rest #t :locals 3 :code (code '((:return 0 1 0 0)))}])
+(put! units 'bad-code-length [{:arity 0 :locals 1 :code [0 0 0 0]}])
+(put! units 'bad-operand [{:arity 0 :locals 1 :code [(ops :return) 0 70000 0 0]}])
+(put! units 'bad-descriptor ["not a table"])
+(put! units 'bad-unit [])
+(put! units 'bad-capture
+      [{:arity 0 :locals 1 :code (code (append (list '(:closure 0 1 1 0)) (finish 1)))}
+       {:arity 0 :locals 1 :captures [[9 #t]] :code (code '((:return 0 1 0 0)))}])
+(put! units 'bad-static
+      [{:arity 0 :locals 1 :constants [nil] :statics [[0 1]]
+        :code (code (append (list '(:const 0 1 0 0)) (finish 1)))}
+       {:arity 0 :locals 1 :captures [[1 #t]] :code (code '((:return 0 1 0 0)))}])
+(put! units 'bad-static-index
+      [{:arity 0 :locals 1 :constants [nil] :statics [[3 0]]
+        :code (code (list (w :return-imm 0 0 (bits 0))))}])
+(put! units 'bad-points
+      [{:arity 0 :locals 0 :points [[4 0]] :code (code (list (w :return-imm 0 0 (bits 0))))}])
+
+(put! units 'boom (fn () (error "optimizer boom")))
+(put! units 'bad-result (fn () "not an id"))
+(put! units 'nested (fn () (set! nested-value (eval '(+ 40 2))) nil))
+
+(%set-optimizer!
+ (fn (form space)
+   (push! seen form)
+   (if (and (pair? form) (eq? (car form) 'probe))
+       (let ((name (cadr form))
+             (unit (get units (if (pair? name) (cadr name) name))))
+         (set! last-offset (%form-offset form))
+         (cond ((procedure? unit) (unit))
+               (unit (%vm-install unit space))
+               (else nil)))
+       nil)))

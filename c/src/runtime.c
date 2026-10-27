@@ -489,6 +489,8 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
   oti_roots_push(&rt->heap, &rt->error_roots, rt->error.slots, 4);
   for (size_t i = 0; i < C_COUNT; i++) rt->classes[i] = OT_NIL;
   oti_roots_push(&rt->heap, &rt->class_roots, rt->classes, C_COUNT);
+  rt->optimizer = OT_NIL;
+  oti_roots_push(&rt->heap, &rt->optimizer_roots, &rt->optimizer, 1);
   if (oti_namespace(rt, "otium.core", 10) == UINT32_MAX || !oti_builtins(rt) ||
       !oti_foreign_init(rt)) {
     ot_destroy(rt);
@@ -657,13 +659,17 @@ static bool evaluate_raw(ot_state* rt, const oti_ast* form, ot_value* result) {
     replacement.as.list.first = &head;
     form = &replacement;
   }
-  bool compiling = rt->compiling;
-  rt->compiling = true;
-  ok = oti_compile(rt, form, &function);
-  rt->compiling = compiling;
-  /* Reclaim unreachable code at the next idle boundary. Macro execution can
+  bool installed;
+  if (!oti_optimize(rt, form, &function, &installed)) return false;
+  if (!installed) {
+    bool compiling = rt->compiling;
+    rt->compiling = true;
+    ok = oti_compile(rt, form, &function);
+    rt->compiling = compiling;
+    /* Reclaim unreachable code at the next idle boundary. Macro execution can
      * retain constants and nested eval closures even if this compile fails. */
-  if (!ok || oti_failed(rt)) return false;
+    if (!ok || oti_failed(rt)) return false;
+  }
   if (!oti_execute(rt, function, result)) return false;
   if (form->kind == AST_LIST) {
     const oti_ast* definition = form->as.list.first;

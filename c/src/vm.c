@@ -236,24 +236,7 @@ static bool vm_inlined_builtin(ot_state* rt, uint32_t index) {
   ot_value old = rt->globals[index];
   if ((old & 255) != TAG_BUILTIN) return false;
   unsigned id = (unsigned)(old >> 8);
-  switch (id) {
-    case B_ADD:
-    case B_SUB:
-    case B_MUL:
-    case B_LT:
-    case B_LE:
-    case B_GT:
-    case B_GE:
-    case B_NUMEQ:
-    case B_EQ:
-    case B_CONS:
-    case B_CAR:
-    case B_CDR:
-    case B_NOT:
-    case B_NULL:
-    case B_PAIR: break;
-    default: return false;
-  }
+  if (!oti_inlined_builtin(id)) return false;
   if (rt->builtin_cells[id] != index) return false;
   oti_errorf(rt, "cannot redefine builtin: %s", rt->global_info[index].name);
   return true;

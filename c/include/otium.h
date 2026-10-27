@@ -67,6 +67,10 @@ bool ot_set_arguments(ot_state* rt, const char* script, size_t count, const char
 /* Loading. The expander must be loaded before the core library. */
 bool ot_load_expander(ot_state* rt, const char* directory);
 bool ot_load_core(ot_state* rt, const char* directory);
+/* With OTIUM_OPTIMIZE set to anything but empty or 0, require
+ * otium.compiler.driver and call its enable!, so top-level forms go through
+ * the optimizing compiler. Call it after ot_load_core. True when unset. */
+bool ot_load_optimizer(ot_state* rt);
 /* Append a module search directory before the default . and lib directories. */
 bool ot_add_load_path(ot_state* rt, const char* path);
 /* Add the module directories listed by (paths ...) forms in a project file.

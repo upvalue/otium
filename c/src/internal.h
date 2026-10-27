@@ -330,6 +330,14 @@ enum {
   B_DEV_NAMESPACE_NAMES,
   B_DEV_NAMESPACE_BINDINGS,
   B_DEV_EVAL_IN,
+  B_RESOLVE_GLOBAL,
+  B_GLOBAL_CELL,
+  B_CELL_INFO,
+  B_FORM_OFFSET,
+  B_VM_OPCODES,
+  B_IMMEDIATE_BITS,
+  B_VM_INSTALL,
+  B_SET_OPTIMIZER,
   /* Compiler-only helpers have no name, so they aren't globals. */
   B_QQ_APPEND,
   B_EVAL_IN_NAMESPACE,
@@ -422,6 +430,28 @@ typedef struct {
 
 static inline uint32_t oti_instruction_bc(oti_instruction ins) {
   return (uint32_t)ins.b | (uint32_t)ins.c << 16;
+}
+
+/* Builtins the compiler turns into opcodes. Their own cells are immutable. */
+static inline bool oti_inlined_builtin(unsigned id) {
+  switch (id) {
+    case B_ADD:
+    case B_SUB:
+    case B_MUL:
+    case B_LT:
+    case B_LE:
+    case B_GT:
+    case B_GE:
+    case B_NUMEQ:
+    case B_EQ:
+    case B_CONS:
+    case B_CAR:
+    case B_CDR:
+    case B_NOT:
+    case B_NULL:
+    case B_PAIR: return true;
+    default: return false;
+  }
 }
 
 typedef struct {
@@ -656,6 +686,11 @@ struct ot_state {
   size_t source_count, source_capacity;
   uint32_t source;
   bool stress_gc, shared_expander, expanding;
+  /* The procedure set by %set-optimizer!, or nil, and whether it is running;
+   * while it runs, evaluation compiles with compiler.c. */
+  ot_value optimizer;
+  oti_roots optimizer_roots;
+  bool optimizing;
   size_t expansion_calls, eval_depth;
   uint64_t gensym_counter;
   ot_io_host io_host;
@@ -758,6 +793,14 @@ oti_ast* oti_syntax_value(ot_state* rt, ot_value value, oti_arena* arena);
 ot_value oti_read_string(ot_state* rt, ot_value string);
 oti_ast* oti_expand_form(ot_state* rt, const oti_ast* form, oti_arena* arena);
 bool oti_compile(ot_state* rt, const oti_ast* form, uint32_t* function);
+/* Give fn a free function id, which is returned, or record an error and
+ * return UINT32_MAX. fn's namespace and source are left as they are. */
+uint32_t oti_add_function(ot_state* rt, oti_function* fn);
+/* A form as a datum whose lists are located pairs, as macros receive it. */
+ot_value oti_form_datum(ot_state* rt, const oti_ast* form);
+/* Offer form to the optimizer set by %set-optimizer!. *installed says whether
+ * it returned a function to execute in place of compiling the form. */
+bool oti_optimize(ot_state* rt, const oti_ast* form, uint32_t* function, bool* installed);
 bool oti_execute(ot_state* rt, uint32_t function, ot_value* result);
 bool oti_drive(ot_state* rt, size_t stop_frames);
 bool oti_invoke(ot_state* rt, size_t argc, ot_value* result);
@@ -1070,7 +1113,7 @@ extern const oti_builtin_def oti_bytes_builtins[], oti_class_builtins[], oti_col
     oti_condition_builtins[], oti_dev_builtins[], oti_filesystem_builtins[], oti_foreign_builtins[],
     oti_instance_builtins[], oti_numeric_builtins[], oti_port_builtins[], oti_process_builtins[],
     oti_record_builtins[], oti_reflection_builtins[], oti_restart_builtins[], oti_string_builtins[],
-    oti_support_builtins[], oti_table_builtins[], oti_time_builtins[];
+    oti_support_builtins[], oti_table_builtins[], oti_time_builtins[], oti_optimizer_builtins[];
 
 /* Plain helpers other modules use in place of calling a builtin. */
 ot_value oti_table_new(ot_state* rt);

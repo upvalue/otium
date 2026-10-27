@@ -173,8 +173,11 @@ static void host_error(ot_state* rt, ot_value* port, const char* op, int error) 
 }
 
 static long transfer(ot_state* rt, ot_value* port, bool writing, size_t start, size_t length) {
+  /* A blocking read is a safe place to run an interrupt handler; a write may
+   * be partway through the buffer. */
+  bool (*poll)(ot_state*) = writing ? ot_poll_interrupt : oti_interrupt_point;
   for (;;) {
-    if (!ot_poll_interrupt(rt)) return -1;
+    if (!poll(rt)) return -1;
     oti_port_obj* p = port_object(*port);
     unsigned char* bytes = oti_bytes_data(port_object(*port)->buffer) + start;
     host_begin(rt, *port);
@@ -182,7 +185,7 @@ static long transfer(ot_state* rt, ot_value* port, bool writing, size_t start, s
                      : p->host.read(p->userdata, p->handle, bytes, length);
     if (!host_end(rt, *port)) return -1;
     if (n == -EINTR) {
-      if (!ot_poll_interrupt(rt)) return -1;
+      if (!poll(rt)) return -1;
       continue;
     }
     if (n < 0) {

@@ -100,6 +100,16 @@ ot_form_status ot_scan_form(const char* source, size_t length, size_t start, siz
  * safe points. */
 void ot_set_interrupt_flag(ot_state* rt, volatile sig_atomic_t* flag);
 bool ot_poll_interrupt(ot_state* rt);
+/* Call the named global, with the flag's value, when the VM finds the flag set
+ * between instructions or during a blocking read, instead of interrupting. It
+ * runs on top of the interrupted code, and returning #t interrupts that code;
+ * any other result resumes it. NULL removes the handler. The name resolves in
+ * the current namespace when this is called; redefining the global changes
+ * the handler. */
+bool ot_set_interrupt_handler(ot_state* rt, const char* name);
+/* Call the named global with a namespace symbol and a path before a module
+ * file is loaded. An error from it stops the load. NULL removes the hook. */
+bool ot_set_load_hook(ot_state* rt, const char* name);
 bool ot_interrupted(const ot_state* rt);
 
 /* Host IO. Host functions return errno values (zero on success); read/write

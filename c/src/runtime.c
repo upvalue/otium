@@ -185,8 +185,11 @@ bool ot_set_frame_limit(ot_state* rt, size_t frames) {
 
 bool ot_interrupted(const ot_state* rt) { return rt->interrupted; }
 
-bool ot_poll_interrupt(ot_state* rt) {
-  if (!rt->interrupt_flag || !*rt->interrupt_flag) return true;
+static ot_value hook_value(const ot_state* rt, uint32_t global) {
+  return global == UINT32_MAX ? V_UNBOUND : rt->globals[global];
+}
+
+static bool interrupt_now(ot_state* rt) {
   *rt->interrupt_flag = 0;
   rt->interrupted = true;
   rt->exit_pending = rt->restart_pending = rt->raised = false;
@@ -196,6 +199,47 @@ bool ot_poll_interrupt(ot_state* rt) {
   oti_error(rt, "interrupted");
   return false;
 }
+
+/* With a handler, only interrupt points act on the flag; elsewhere it stays
+ * set until the VM reaches one. */
+bool ot_poll_interrupt(ot_state* rt) {
+  if (!rt->interrupt_flag || !*rt->interrupt_flag) return true;
+  if (hook_value(rt, rt->interrupt_handler) != V_UNBOUND) return true;
+  return interrupt_now(rt);
+}
+
+bool oti_interrupt_point(ot_state* rt) {
+  if (!rt->interrupt_flag || !*rt->interrupt_flag) return true;
+  if (hook_value(rt, rt->interrupt_handler) == V_UNBOUND) return interrupt_now(rt);
+  ot_value reason = ot_int(*rt->interrupt_flag);
+  *rt->interrupt_flag = 0;
+  ot_value args = oti_alloc(rt, K_PAIR, 2, 0);
+  if (!args) return false;
+  oti_as_pair(args)->car = reason;
+  oti_as_pair(args)->cdr = OT_EMPTY;
+  ot_value result = oti_call_list(rt, hook_value(rt, rt->interrupt_handler), args);
+  if (!result) return false;
+  if (result != OT_TRUE) return true;
+  *rt->interrupt_flag = 1;
+  return interrupt_now(rt);
+}
+
+static bool set_hook(ot_state* rt, uint32_t* hook, const char* name) {
+  if (!name) {
+    *hook = UINT32_MAX;
+    return true;
+  }
+  uint32_t global = oti_lookup_global(rt, name, strlen(name));
+  if (global == UINT32_MAX) return oti_error(rt, "unbound global");
+  *hook = global;
+  return true;
+}
+
+bool ot_set_interrupt_handler(ot_state* rt, const char* name) {
+  return set_hook(rt, &rt->interrupt_handler, name);
+}
+
+bool ot_set_load_hook(ot_state* rt, const char* name) { return set_hook(rt, &rt->load_hook, name); }
 
 ot_value oti_alloc(ot_state* rt, uint32_t kind, uint32_t fields, size_t bytes) {
   if (!oti_host_entry(rt)) return 0;
@@ -382,6 +426,7 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
   const char* stress = getenv("OTIUM_GC_STRESS");
   rt->stress_gc = stress && *stress && strcmp(stress, "0");
   rt->required_namespace = UINT32_MAX;
+  rt->interrupt_handler = rt->load_hook = UINT32_MAX;
   oti_roots_push(&rt->heap, &rt->constant_roots, NULL, 0);
   oti_roots_push(&rt->heap, &rt->global_roots, NULL, 0);
   oti_roots_push(&rt->heap, &rt->stack_roots, NULL, 0);

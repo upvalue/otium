@@ -354,7 +354,8 @@ static bool dispatch(ot_state* rt, size_t stop_frames) {
   do {                                                                                             \
     if (VM_UNLIKELY(rt->interrupt_flag && *rt->interrupt_flag)) {                                  \
       SAVE_IP();                                                                                   \
-      if (!ot_poll_interrupt(rt)) return false;                                                    \
+      if (!oti_interrupt_point(rt)) return false;                                                  \
+      RELOAD();                                                                                    \
     }                                                                                              \
   } while (0)
 #define TARGET(word) (code + oti_instruction_bc(word))

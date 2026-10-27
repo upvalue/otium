@@ -583,6 +583,8 @@ struct ot_state {
   size_t cleanup_count, cleanup_capacity, cleanup_state_capacity;
   oti_roots cleanup_roots;
   volatile sig_atomic_t* interrupt_flag;
+  /* Globals named by ot_set_interrupt_handler and ot_set_load_hook, or UINT32_MAX. */
+  uint32_t interrupt_handler, load_hook;
   bool interrupted;
   bool exit_pending;
   int exit_status;
@@ -700,6 +702,9 @@ bool oti_install_handlers(ot_state* rt, size_t first, size_t count);
 void oti_remove_handlers(ot_state* rt, size_t count);
 ot_value oti_intern(ot_state* rt, unsigned kind, const char* text, size_t length);
 ot_value oti_call_list(ot_state* rt, ot_value function, ot_value args);
+/* A point where Otium code may run: the VM between instructions and blocking
+ * reads. Calls the interrupt handler, if any, when the flag is set. */
+bool oti_interrupt_point(ot_state* rt);
 uint64_t oti_symbol_id(ot_value symbol);
 ot_value oti_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 int oti_builtin_index(const char* name);

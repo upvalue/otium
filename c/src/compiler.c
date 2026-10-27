@@ -89,6 +89,12 @@ static bool error(oti_compiler* c, const oti_ast* a, const char* message) {
   return oti_error(c->rt, message);
 }
 
+/* A misplaced or malformed class or generic declaration. */
+static bool declaration_error(oti_compiler* c, const oti_ast* a, const char* message) {
+  if (!oti_failed(c->rt) && a) c->rt->error.offset = a->offset;
+  return oti_tagged_error(c->rt, "declaration", "invalid-declaration", message, 0, NULL);
+}
+
 static bool same_name(const oti_ast* a, const oti_ast* b) {
   return a && b && a->symbol_id == b->symbol_id && a->kind == AST_SYMBOL && b->kind == AST_SYMBOL &&
          a->as.text.size == b->as.text.size &&
@@ -1183,7 +1189,7 @@ static bool accessor(oti_compiler* c, const oti_ast* class, const oti_ast* slot,
 static bool class_declaration(oti_compiler* c, const oti_ast* a, const oti_ast* head,
                               const oti_ast* name, bool definitions, uint32_t dst, bool tail) {
   if (c->scope || !definitions || !name || name->kind != AST_SYMBOL)
-    return error(c, a, "class declaration requires a top-level name");
+    return declaration_error(c, a, "class declaration requires a top-level name");
   if (!oti_classes_init(c->rt)) return false;
   bool abstract = oti_ast_symbol(head, "defabstract"), reset = oti_ast_symbol(head, "reset-class!");
   const oti_ast *fields = name->next, *parent = NULL;
@@ -1244,16 +1250,17 @@ static bool class_declaration(oti_compiler* c, const oti_ast* a, const oti_ast* 
 static bool generic_form(oti_compiler* c, const oti_ast* a, const oti_ast* head,
                          const oti_ast* args, bool definitions, uint32_t dst, bool tail) {
   bool method = oti_ast_symbol(head, "defmethod");
-  if (c->scope || !definitions) return error(c, a, "generic declarations require top level");
+  if (c->scope || !definitions)
+    return declaration_error(c, a, "generic declarations require top level");
   if (!oti_classes_init(c->rt)) return false;
   const oti_ast* signature = args;
   bool around = method && class_key(signature, ":around");
   if (around) signature = signature->next;
   if (!signature || signature->kind != AST_LIST || signature->as.list.tail ||
       !signature->as.list.first)
-    return error(c, a, "expected a generic signature");
+    return declaration_error(c, a, "expected a generic signature");
   const oti_ast* name = signature->as.list.first;
-  if (name->kind != AST_SYMBOL) return error(c, name, "generic name must be a symbol");
+  if (name->kind != AST_SYMBOL) return declaration_error(c, name, "generic name must be a symbol");
   size_t count = 0;
   oti_ast params = {.kind = AST_LIST}, **next = &params.as.list.first;
   uint32_t saved, base = call_begin(c, dst, tail, &saved), types = 0;
@@ -1268,13 +1275,14 @@ static bool generic_form(oti_compiler* c, const oti_ast* a, const oti_ast* head,
     if (method && p->kind == AST_LIST) {
       binding = p->as.list.first;
       type = binding ? binding->next : NULL;
-      if (p->as.list.tail || !type || type->next) return error(c, p, "invalid method parameter");
+      if (p->as.list.tail || !type || type->next)
+        return declaration_error(c, p, "invalid method parameter");
     }
     if (!binding || binding->kind != AST_SYMBOL || oti_ast_symbol(binding, "&") ||
         oti_ast_symbol(binding, "&optional"))
-      return error(c, p, "generics need fixed parameters");
+      return declaration_error(c, p, "generics need fixed parameters");
     for (const oti_ast* prior = params.as.list.first; prior; prior = prior->next)
-      if (same_name(prior, binding)) return error(c, p, "duplicate generic parameter");
+      if (same_name(prior, binding)) return declaration_error(c, p, "duplicate generic parameter");
     oti_ast* copy = oti_arena_alloc(c->expansion_arena, sizeof(*copy));
     if (!copy) return error(c, p, "compiler syntax memory limit");
     *copy = *binding;

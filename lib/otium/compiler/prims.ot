@@ -690,7 +690,6 @@
 (prim! 'apply [1 #t] every-effect {})
 (prim! 'error [0 #t] every-effect {:transfer (returns types/none)})
 (prim! 'signal [1 #t] every-effect {})
-(for-each (fn (name) (prim! name [0 #t] every-effect {})) '(print println display write newline))
 
 ;; --- variants --------------------------------------------------------------------
 

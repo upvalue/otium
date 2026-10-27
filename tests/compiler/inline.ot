@@ -92,7 +92,7 @@
        '(def user/f
           (fn ()
             (begin
-              (println 1)
+              (call (global otium.core/println) 1)
               2)))
        (inlined "(def (f) (let ((a (println 1))) 2))"))
 (check "drop allocation for effect" '(def user/f (fn () 3)) (inlined "(def (f) (begin (cons 1 2) 3))"))

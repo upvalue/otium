@@ -1,30 +1,70 @@
-# Clean-room runtime
+# C runtime
 
-This implementation is independent of `c/`. Its initial semantic source is
-`AGENT-LANG.md`. Do not consult the original C implementation or repository
-history when extending it. Use the public language docs, library, examples and
-tests to resolve semantics. The existing launchers still use the existing runtime.
+The C runtime is Otium's second, experimental implementation; Chez is the
+primary one. It aims at small memory use and embedding: a moving collector, a
+bytecode compiler and VM, and libffi for foreign calls. A C compiler is needed
+to build it and its test fixtures, but not to run it.
 
-Meson builds it into `build/otium`, which `./otium --runtime=c` runs. The
+It was written clean-room, from the public language docs, library, examples and
+tests rather than the previous C runtime. Keep it that way: don't consult that
+runtime's sources in repository history (anything under `c/src` before commit
+62cd5ff). Resolve semantics from the public docs, library, tests and Chez.
+
+## Layout
+
+- `c/include/otium.h` is the embedding API, built around `ot_state`. It is the
+  only header a host needs.
+- `c/src/` is the runtime. `main.c` is the command-line program, built as
+  `build/otium`. `primitives.ot` is Otium source loaded before the core
+  library. `runtime-reference.inc` is generated from `lib/catalog/runtime.json`
+  by `tools/generate-reference.py`.
+- `c/tests/unit/` holds the unit tests. Each `NAME.c` is one suite, and all of
+  them link into one runner, `build/c/otium-unit-tests`. `support/` has the
+  test framework and helpers, `hosts/foreign-control.c` is a host program for
+  callback checks that end the process, `fixtures/` has an extra FFI library,
+  and `data/` has Otium scripts the suites load.
+- `c/tests/tests.py` defines the C runtime's repository tests: the conformance
+  files in `c/tests/otium/`, the CLI, REPL, server and embedding host.
+- `c/bench/runtime.c` is the warm microbenchmark program behind `just bench-c`.
+- `c/tools/amalgamate.py` writes the single-file distribution (`otium.c`,
+  `otium.h` and `main.c`). `c/tools/format-c` runs clang-format over the C
+  sources, and `c/tools/gc-lint/` is the managed-pointer analysis.
+- `c/meson.build` builds all of these; the root `meson.build` includes it.
+
+## Building and running
+
+`just build` sets up `build/` and compiles, the same as
+`meson setup build && meson compile -C build`. Put other configurations in
+`build-NAME/`. Two Meson options are specific to this runtime:
+
+- `-Druntime_checks=kinds` checks the kind behind every object struct cast;
+  `roots` also moves the heap and VM stack so a missed root faults.
+- `-Dvm_switch=true` builds the VM with switch dispatch instead of computed
+  goto.
+
+Run a file with `./otium --runtime=c file.ot` or `build/otium file.ot`. The
 launcher takes the options in `lib/catalog/options.json`, the same as Chez, plus
-`-e SOURCE` to print an expression's result. `--c.heap-init` sets each
-semispace's starting size (1 MiB by default) and `--c.heap-max` how far each can
-grow (64 MiB); the two spaces together use twice that. `--c.max-depth` caps live
-VM frames, and the stack is capped at 128 Ki value slots. `--c.gc-stats` and
-`--c.gc-stats-json` print collector statistics at exit.
-Execution uses the bytecode VM. Foreign calls use libffi. There is no
-generated-C tier or runtime compiler subprocess. A C compiler is needed to build
-the executable and test fixtures, but not to run the built runtime.
+`-e SOURCE` to print an expression's result. `./otium --help` lists them; those
+starting with `--c.` apply only to this runtime. The heap starts at 1 MiB per
+semispace and can grow each to 64 MiB; `--c.heap-init` and `--c.heap-max`
+change that, and the two spaces together use twice the size. `--c.max-depth`
+caps live VM frames, and the stack is capped at 128 Ki value slots.
+`--c.gc-stats` and `--c.gc-stats-json` print collector statistics at exit.
+`OTIUM_GC_STRESS=1` collects at every allocation in any build.
+
+`meson compile -C build c/otium-amalgamation` builds the single-file
+distribution and an executable from it.
 
 ## Current architecture and limits
 
 `compiler.c` compiles bytecode and `vm.c` executes it. `modules.c` owns module
 loading; macro expansion and higher-level library behavior use shared Otium.
-`include/otium.h` is the embedding API, built around `ot_state`. `internal.h`
-holds runtime implementation interfaces, including a struct for each object
-kind that mirrors its heap layout (`oti_pair_obj`, `oti_class_obj`, ...). The
-builtin ID enum is in `internal.h` and the name table is in `builtins.c`. Each
-module's handler switches on explicit IDs, so the enum's order doesn't matter.
+`internal.h` holds runtime implementation interfaces, including a struct for
+each object kind that mirrors its heap layout (`oti_pair_obj`, `oti_class_obj`,
+...). The builtin ID enum is in `internal.h`; each source file has an
+`oti_builtin_def` table naming its builtins, and `builtins.c` combines them.
+Each module's handler switches on explicit IDs, so the enum's order doesn't
+matter.
 
 `foreign.c` owns loading, managed wrappers, native memory, call conversion and
 condition context. `foreign_types.c` owns scalar descriptions, recursive libffi
@@ -35,9 +75,8 @@ allocation. Binding and memory list links are published after allocation, when
 the current head is known. The collector retains four unused signatures for
 reload reuse, plus signatures pinned by live bindings or pending wrappers.
 
-The compliance inventory includes all public FFI groups: 56 groups pass with no
-failures or skips. Common FFI passes 222 checks, callbacks 51, ownership 10 and
-bulk 23. Union calls are supported on x86-64 Linux SysV; other targets raise
+The public FFI tests in `tests/ffi/` pass: common 222 checks, callbacks 51,
+ownership 10 and bulk 23. Union calls are supported on x86-64 Linux SysV; other targets raise
 `abi`. Union lowering merges every member's integer/floating leaves, preserving
 offsets and padding. It follows the [AMD64 ABI classification rules](https://gitlab.com/x86-psABIs/x86-64-ABI/-/raw/master/x86-64-ABI/low-level-sys-info.tex)
 and [libffi's x86-64 classifier](https://github.com/libffi/libffi/blob/master/src/x86/ffi64.c).
@@ -59,26 +98,21 @@ C pointer results have unknown extent and no inferred allocation owner. Address
 comparison remains valid after release. Runtime teardown frees native allocations
 and callback closures but does not call Otium custom destructors.
 
-`python3 prototype/compliance.py` builds its executable and fixtures and runs the
-public inventory. `make -C prototype test-foreign` runs the unchanged common,
-callback, ownership and bulk suites under forced collection. It also checks
-callback cleanup, native function pointers, self-release, retained procedures,
-100 callback replacement cycles and external ownership. Subprocess checks cover
-wrong-thread/idle-host rejection and deferred exit with outer cleanup.
-`sanitize-foreign` passes the same checks under ASan/UBSan with leak detection
-disabled. Foreign reload, compiler-free execution and affected condition/class
-regressions pass. Optional LLVM development tools remain unavailable for GC lint.
+The `foreign` unit suite runs the unchanged common, callback, ownership and
+bulk scripts with collection at every allocation. It also checks callback
+cleanup, native function pointers, self-release, retained procedures, 100
+callback replacement cycles and external ownership. The `c foreign host` test
+runs `c/tests/unit/hosts/foreign-control.c` to check wrong-thread and idle-host
+rejection and deferred exit with outer cleanup.
 
 FFI memory errors identify the operation and the validation argument, with scalar
 expected types where applicable. Shared field helpers annotate conditions at the
 signal site, preserving a single handler invocation. Loader condition messages
 retain all attempted candidates even when they exceed the short runtime display
-buffer. `test_foreign_errors.ot` adds 32 standalone checks, also included in the
-forced-GC/sanitizer foreign regression. Five shared validation cases extend the
-Chez comparison to 17 programs and six errors. The unchanged 222-check common
-suite also passes on Chez after the shared helper changes.
+buffer. `c/tests/unit/data/foreign-errors.ot` adds 32 standalone checks. The
+common suite also passes on Chez.
 
-The port embedding API is `RuntimeIOHost` with `runtime_set_io_host`. Hosts supply
+The port embedding API is `ot_io_host` with `ot_set_io_host`. Hosts supply
 open/read/write/close callbacks and an optional flush hook. Read/write return
 counts or negative errno values; other callbacks return zero or errno. The
 runtime copies the table and snapshots it with userdata into each new port.
@@ -91,24 +125,61 @@ entry points reject such attempts before touching VM state. Custom Otium ports
 continue to receive rooted bytevectors and may allocate. Partial writes retain
 progress across errors. EINTR polls the interrupt flag before retrying, preserving
 partial UTF-8 input. Destruction drains native buffers and closes owned handles
-without running Otium callbacks; use `runtime_flush_ports` first to observe errors.
+without running Otium callbacks; use `ot_flush_ports` first to observe errors.
 The default host uses POSIX descriptors. The REPL and program reads share the
 standard input buffer, and each echoed result is flushed before the next form.
 
-`test-io-host` and `sanitize-io-host` exercise these contracts with a host that
-returns one-byte reads and two-byte writes, injects errors and interrupts, checks
-that borrowed buffers belong to the moving heap, and attempts rejected reentry.
-All 40 non-collector targets from the standard test inventory pass, as do the
-affected port/host/file/shutdown/CLI ASan/UBSan targets. Port differential checks
-agree with Chez on 19 programs and 11 errors; compiler-free checks pass. Filesystem
-metadata and source/module loading still use POSIX directly; port host support
-does not yet establish filesystem-free embedding.
+The `io-host` unit suite exercises these contracts with a host that returns
+one-byte reads and two-byte writes, injects errors and interrupts, checks that
+borrowed buffers belong to the moving heap, and attempts rejected reentry.
+Filesystem metadata and source/module loading still use POSIX directly, so port
+host support does not yet give filesystem-free embedding.
 
-The remaining embedding scope, integration and performance are tracked in
-[prototype-completion.md](../prototype-completion.md) and the
-[completion audit](prototype-completion-audit.md). Passing this inventory
-does not establish their completion. The default `sanitize` target covers only
-heap, reader and runtime checks; the Makefile has separate subsystem targets.
+The embedding API has no way for a host to define native functions or make
+foreign values. Native code is reached through `otium.ffi`.
+
+## Checks
+
+`just test c` runs the C suite: the unit runner and the tests in
+`c/tests/tests.py`. `just test` runs the default suites for both runtimes. To
+run one repository test without meson, use
+`OTIUM_BUILD=$PWD/build PYTHONPATH=$PWD/tools:$PWD python3 tests/run 'NAME'`.
+
+Run the unit runner from the repository root, since suites load files by
+relative path. `build/c/otium-unit-tests` runs every test. Arguments select
+tests: one containing `/` is a prefix of `suite/test`, as in `reader/` or
+`foreign/common_ffi_script`; anything else matches part of the name. Each test
+runs in a child process; `--no-fork` runs them in the runner itself, which is
+easier in a debugger.
+
+`just sanitize` builds `build-asan/` with ASan, UBSan and
+`runtime_checks=kinds`, then runs the C suite. `just check-roots` builds
+`build-roots/` with `runtime_checks=roots`, where every collection copies into
+freshly mapped memory and protects the old space, and the VM stack moves to new
+memory on every `oti_stack` call. It then runs the C suite collecting at every
+allocation, so a value or object pointer held across an allocation, or a
+pointer into the stack held across growth, faults instead of reading a stale
+copy. Both set `ASAN_OPTIONS=detect_leaks=0`, so neither checks for leaks.
+`just test-stress` runs the default tests collecting at every allocation, which
+is slow.
+
+When changing allocation, roots or managed pointers, also run `just gc-lint` if
+the LLVM development tools are installed. `c/tools/format-c --check` checks C
+formatting.
+
+## Reading the milestones
+
+The memory and execution contracts describe runtime invariants. The implementation
+sequence and dated development sections below are historical snapshots. Earlier
+claims about missing language features, generated-C commands and native timing
+measurements describe those milestones, not the current executable. The native
+tier was removed during VM-first compliance work. Later entries supersede earlier
+ones, including the FFI limitations recorded during each stage.
+
+Everything from here on was written while the runtime lived in `prototype/`, so
+its paths, the `prototype/otium-proto` program and the `make -C prototype`
+targets refer to that old layout. The files are now in `c/src/` and the tests in
+`c/tests/unit/`, and the scripts it names, such as `compliance.py`, are gone.
 
 ## Cleanup validation
 
@@ -131,15 +202,6 @@ Further factoring remains possible in `foreign.c`: `shared_builtin` and
 and `layout_copy` and condition-context helpers remain in that module. Their
 rooting and error-order contracts warrant separate changes.
 
-## Reading the milestones
-
-The memory and execution contracts describe runtime invariants. The implementation
-sequence and dated development sections below are historical snapshots. Earlier
-claims about missing language features, generated-C commands and native timing
-measurements describe those milestones, not the current executable. The native
-tier was removed during VM-first compliance work. Later entries supersede earlier
-ones, including the FFI limitations recorded during each stage.
-
 ## Memory contract
 
 Values occupy one machine word. Odd values are signed integers with one tag bit;
@@ -160,7 +222,7 @@ managed fields must contain valid tagged values. Root frames must be popped in
 reverse order. Heap operations are single-threaded.
 
 Embedding heaps start with a fixed budget of two semispaces. A host can opt into
-bounded growth with runtime_heap_limit. Allocation collects first, then grows
+bounded growth with ot_set_heap_limit. Allocation collects first, then grows
 only if the surviving objects and request cannot fit. Growth doubles capacity
 up to the configured limit. Both replacement spaces are allocated before any
 root is changed; allocation failure leaves the existing heap usable. The old
@@ -366,59 +428,6 @@ FFI loop against Python ctypes and Chez's direct foreign-procedure interface.
 `baseline-foreign.json` records the results. The shared C fixture, argument,
 expected sum and warmup/sample counts match. Measurements include the language
 loop and marshalling, while native/adapter compilation occurs before sampling.
-
-## Checks
-
-Run `make -C prototype test` and `make -C prototype sanitize`. Each file in
-`prototype/tests` is a suite, and all of them link into one runner program.
-`make test-NAME` runs one suite, and the runner takes `suite/` or
-`suite/test` patterns. Sanitizer builds also check the kind behind every
-object struct cast. In sandboxes where
-LeakSanitizer cannot inspect `/proc`, use `ASAN_OPTIONS=detect_leaks=0` for the
-second command; this retains address and undefined-behavior checks but does not
-validate leaks. The first implementation also passes a Clang warnings-as-errors
-build. Reader checks include the shared core source, public datum fixtures,
-memory/depth limits, invalid UTF-8, numeric overflow and 50,000 deterministic
-malformed inputs. Optional LLVM development tools were unavailable for GC lint.
-
-`make -C prototype check-roots` looks for missing roots. It builds with the
-sanitizers and `OTIUM_CHECK_ROOTS`, which makes every collection copy into
-freshly mapped memory and protect the old space, and makes the VM stack move to
-new memory on every `oti_stack` call. It then runs the suites and scripts with
-`OTIUM_GC_STRESS=1`, which collects at every allocation in any build. A value or
-object pointer held across an allocation, or a pointer into the stack held
-across growth, then faults instead of reading a stale copy. `SUITE=name/` limits
-the runner to one suite. The first full run found no missing roots.
-
-`make -C prototype test-runtime` checks closures, lexical mutation, live global
-redefinition, numeric boundaries, tail calls and recovery after errors. It also
-exercises collection with an 8 KiB semispace, collection at every allocation,
-and live-heap exhaustion. `sanitize-runtime` runs those checks under ASan/UBSan.
-`make -C prototype differential` compares 57 supported programs and thirty-two error
-cases with the primary Chez implementation. These checks exposed and corrected
-the return values of `set!` and pair mutation, and the restriction on definitions
-in expression positions.
-
-`make -C prototype test-native` runs the same runtime suite with eager native
-compilation and with a heat threshold of 31 to exercise transitions during
-execution. It includes large frames, fresh captured bindings across tail calls,
-redefinition during argument evaluation, and collection at every allocation.
-The differential suite compares both the VM and native tier with Chez.
-`ASAN_OPTIONS=detect_leaks=0 make -C prototype sanitize-native` instruments both
-the runtime and generated native modules with ASan/UBSan. Native compiler
-subprocesses use `OTIUM_NATIVE_SANITIZE=1` only for that test target.
-
-`make -C prototype test-foreign` uses the public C fixture plus a mixed-argument
-fixture. It covers all scalar widths, signature reuse across libraries, strict
-conversion errors, UTF-8 validation/copying, native retention, view bounds,
-release detection, and repeated calls in an 8 KiB semispace. The same tests pass
-with GCC and Clang and in VM/native modes. `sanitize-foreign` instruments the
-runtime, adapters and fixture libraries with ASan/UBSan. Clang's exact C function
-type check is disabled only at the foreign adapter boundary: FFI pointer types
-erase C pointee types, so that check rejects ABI-compatible declarations. Other
-undefined-behavior checks and address instrumentation remain enabled.
-`make -C prototype differential-foreign` compares twelve programs and six error
-cases across VM, native and Chez execution.
 
 ## Errors
 

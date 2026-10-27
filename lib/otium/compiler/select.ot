@@ -1,0 +1,446 @@
+;; lint: allow-file(unbound-name) %resolve-global and %immediate-bits are C runtime builtins the Chez linter does not know
+(ns otium.compiler.select)
+
+;; Select: closed block IR to LIR, the VM backend's instruction list on
+;; virtual registers (docs/optimizer.md, "VM backend"). Allocate then gives
+;; each vreg a VM register and Emit encodes the words.
+;;
+;; LIR. (run ir) returns {:functions [lfn ...]}, indexed by unit function
+;; index: the IR function with no parent is 0, the rest follow in IR order.
+;; An lfn is a table:
+;;
+;;   :index :name :arity :optional :rest   as in the VM unit
+;;   :parent      the parent's unit index, or nil
+;;   :params      vregs of the parameters, in order (registers 1..n)
+;;   :vregs       number of vregs; vreg 0 is the running closure (`self`,
+;;                register 0), never allocated
+;;   :blocks      array of blocks in layout order (the IR's reverse
+;;                postorder, so the entry is first and every block comes
+;;                after its dominators)
+;;   :constants   array of constant values; :statics array of
+;;                [constant-index function-index] (their constant is nil)
+;;   :calls       number of call instructions (each has a :call-id)
+;;
+;; A block is {:index i :idom j :params (vreg ...) :instrs [instr ...] :term
+;; instr}. A block parameter that is the target of a call gets the call's
+;; result; a try handler's parameter gets the condition.
+;;
+;; An instruction is a table with :op, :dst (the vreg it defines, or nil),
+;; :uses (the vregs it reads, in order) and :pos (source offset or nil),
+;; plus fields by op:
+;;
+;;   :imm :bits             :const :k              :global :cell
+;;   :set-global :cell      :define-global :cell   :upvalue :index
+;;   :box :unbox :set-box :check :end-try :run-cleanup :cleanup
+;;   :closure :fn :captures, a list of (:reg vreg) or (:env index) in the
+;;            child's capture order; the (:reg) vregs are also :uses
+;;   :prim :vm              a binary or unary VM opcode (:add, :car, ...)
+;;   :addi :imm             the 16-bit immediate added to the one use
+;;   :bound                 #t unless the use is the unbound marker
+;;   :call :kind :callee :args :call-id
+;;            kind :value (callee is a vreg, the first use), :global (a cell
+;;            id) or :const (a constant index, for known calls); :args the
+;;            argument vregs. The result, :dst, is the window base.
+;;
+;; Terminators (the block's :term):
+;;
+;;   :jump :target :args    the args are :uses; moved to the target's params
+;;   :branch :then :else    on the truth of the one use (a branch on a
+;;                          bound? value becomes JBOUND on its operand)
+;;   :br :vm :then :else    fused test: :vm a branch opcode (:br-lt, :br-lti
+;;                          with :imm, :br-eqk with :k, :br-null ...) or
+;;                          :jbound; jumps to :then when the test holds
+;;   :call                  as above, plus :ret; :dst goes to :ret's param
+;;   :tail-call             as :call without :dst and :ret
+;;   :return                the one use; :return-imm :bits
+;;   :try :body :handler    install a handler, continue at :body
+;;   :raise                 re-raise the one use
+;;   :unreachable
+;;
+;; Choices:
+;; - check-bound becomes CHECK and its result is the checked vreg; refine is
+;;   the refined vreg. No moves.
+;; - env-ref values aren't kept live from the entry block: every use gets a
+;;   fresh UPVALUE just before it, and a make-closure capture of one copies
+;;   the parent's capture directly.
+;; - Operations whose result is nil (global-set, box-set, ...) are followed
+;;   by IMM nil into their vreg; unused pure instructions (constants, IMM,
+;;   UPVALUE, ...) are removed at the end, so a constant only used as an
+;;   immediate operand costs nothing.
+;; - A primop with :vm and :vm-arity arguments is its instruction (variants
+;;   copy their base's :vm). (+ x k), (+ k x) and (- x k) with a 16-bit
+;;   fixnum k use ADDI. Others call their base's otium.core cell.
+;; - branch-prim: :branch opcodes fuse, with the BR_*I form when the second
+;;   operand is a 16-bit fixnum constant and BR_EQK when either eq? operand
+;;   is a constant; bound? is JBOUND; not swaps the targets; nil? is BR_EQK
+;;   against nil; anything else computes the predicate and branches on it.
+;; - A call's ret block must have exactly one parameter (unsupported
+;;   otherwise).
+
+(require otium.compiler.column :as column)
+(require otium.compiler.core :as core)
+(require otium.compiler.ir :as ir)
+(require otium.compiler.prims :as prims)
+(require otium.compiler.vm-ops :as vm-ops)
+
+(def- (unsupported what)
+  (core/unsupported (str "vm select: " what)))
+
+(defonce core-cells {})
+
+(def (core-cell name)
+  "The otium.core cell of a builtin name."
+  (or (get core-cells name)
+      (let ((cell (%resolve-global 'otium.core name)))
+        (put! core-cells name cell)
+        cell)))
+
+(def (immediate-bits v)
+  "IMM bits for v, or nil when it needs a constant."
+  (%immediate-bits v))
+
+(def- (unit-order ir)
+  "IR functions in unit order: the entry (no parent) first."
+  (let ((fs (filter (fn (f) (ir/fn-entry ir f)) (ir/functions ir))))
+    (let ((roots (filter (fn (f) (nil? (ir/fn-parent ir f))) fs)))
+      (unless (= (length roots) 1) (unsupported "a unit needs exactly one entry function"))
+      (cons (car roots) (filter (fn (f) (not (nil? (ir/fn-parent ir f)))) fs)))))
+
+(def (run ir)
+  "The LIR for closed IR ir."
+  (let ((order (unit-order ir))
+        (index-of {}))
+    (let loop ((fs order)
+               (i 0))
+      (unless (null? fs)
+        (put! index-of (car fs) i)
+        (loop (cdr fs) (+ i 1))))
+    {:functions (list-to-array (map (fn (f) (select-function ir f index-of)) order))}))
+
+;; --- per function ------------------------------------------------------------------
+
+(def- (select-function ir f index-of)
+  (let ((sig (ir/fn-signature ir f))
+        (name (ir/fn-name ir f))
+        (lfn {})
+        (vmap {}) ; IR value -> vreg
+        (consts {}) ; IR value -> [value] for const values
+        (envs {}) ; IR value -> capture index for env-ref values
+        (next-vreg 1)
+        (calls 0)
+        (constants [])
+        (statics [])
+        (static-of {}) ; unit function index -> constant index
+        (blocks [])
+        (bmap {}) ; IR block -> LIR block index
+        (current nil)) ; instruction array being filled
+    (def (fresh!)
+      (let ((v next-vreg))
+        (set! next-vreg (+ v 1))
+        v))
+    (def (fn-index g)
+      (or (get index-of g) (unsupported "a reference to a dropped function")))
+    (def (constant! v)
+      (let loop ((i 0))
+        (cond
+          ((= i (length constants)) (push! constants v) i)
+          ((and (eq? (constants i) v) (not (static-slot? i))) i)
+          (else (loop (+ i 1))))))
+    (def (static-slot? i)
+      (let loop ((i2 0)) (and (< i2 (length statics)) (or (= ((statics i2) 0) i) (loop (+ i2 1))))))
+    (def (static! g)
+      (let ((gi (fn-index g)))
+        (or (get static-of gi)
+            (let ((k (length constants)))
+              (push! constants nil)
+              (push! statics [k gi])
+              (put! static-of gi k)
+              k))))
+    (def (emit! instr)
+      (push! current instr)
+      instr)
+    (def (use x)
+      "The vreg for IR value x, emitting an UPVALUE first for an env-ref."
+      (let ((e (get envs x)))
+        (if (nil? e)
+            (let ((v (get vmap x)))
+              (when (nil? v) (unsupported (str "value v" x " used before it is selected")))
+              v)
+            (let ((d (fresh!)))
+              (emit! {:op :upvalue :dst d :uses '() :index e})
+              d))))
+    (def (uses xs)
+      (map use xs))
+    (def (const-of x)
+      (get consts x))
+    (def (fixnum-const x)
+      (let ((c (const-of x))) (and c (int? (c 0)) (c 0))))
+    (def (block-of b)
+      (bmap b))
+
+    (def (select-op! o)
+      (let ((code (ir/op-code ir o))
+            (args (ir/op-args ir o))
+            (aux (ir/op-aux ir o))
+            (pos (ir/op-pos ir o))
+            (x (ir/op-value ir o)))
+        (def (define! instr)
+          (let ((d (fresh!)))
+            (put! vmap x d)
+            (put! instr :dst d)
+            (put! instr :pos pos)
+            (emit! instr)
+            d))
+        (def (effect! instr)
+          (put! instr :pos pos)
+          (emit! instr)
+          (define! {:op :imm :uses '() :bits (immediate-bits nil)}))
+        (cond
+          ((eq? code 'const)
+           (put! consts x [aux])
+           (let ((bits (immediate-bits aux)))
+             (if bits
+                 (define! {:op :imm :uses '() :bits bits})
+                 (define! {:op :const :uses '() :k (constant! aux)}))))
+          ((eq? code 'global-ref) (define! {:op :global :uses '() :cell aux}))
+          ((eq? code 'global-set) (effect! {:op :set-global :uses (uses args) :cell aux}))
+          ((eq? code 'global-def) (effect! {:op :define-global :uses (uses args) :cell aux}))
+          ((eq? code 'prim-ref) (define! {:op :global :uses '() :cell (core-cell aux)}))
+          ((eq? code 'box) (define! {:op :box :uses (uses args)}))
+          ((eq? code 'box-ref) (define! {:op :unbox :uses (uses args)}))
+          ((eq? code 'box-set) (effect! {:op :set-box :uses (uses args)}))
+          ((eq? code 'unbound) (define! {:op :imm :uses '() :bits vm-ops/unbound-bits}))
+          ((eq? code 'check-bound)
+           (let ((v (use (car args))))
+             (emit! {:op :check :uses (list v) :pos pos})
+             (put! vmap x v)))
+          ((eq? code 'bound?) (put! bound-of x (car args)) (define! {:op :bound :uses (uses args)}))
+          ((eq? code 'refine) (put! vmap x (use (car args))))
+          ((eq? code 'self) (put! vmap x 0))
+          ((eq? code 'env-ref) (put! envs x aux))
+          ((eq? code 'make-closure)
+           (let ((g (fn-index aux)))
+             (unless (eq? (ir/fn-parent ir aux) f) (unsupported "a closure made outside its parent function"))
+             (let ((captures (map (fn (a)
+                                    (let ((e (get envs a)))
+                                      (if (nil? e)
+                                          (list :reg (use a))
+                                          (list :env e))))
+                                  args)))
+               (define! {:op :closure
+                         :fn g
+                         :captures captures
+                         :uses (map cadr (filter (fn (c) (eq? (car c) :reg)) captures))}))))
+          ((eq? code 'static-closure) (define! {:op :const :uses '() :k (static! aux)}))
+          ((eq? code 'pop-try) (effect! {:op :end-try :uses '()}))
+          ((eq? code 'push-cleanup) (effect! {:op :cleanup :uses (uses args)}))
+          ((eq? code 'run-cleanup) (effect! {:op :run-cleanup :uses '()}))
+          ((eq? code 'raise)
+           ;; The block's unreachable terminator becomes RAISE.
+           (put! raising (ir/op-block ir o) (use (car args)))
+           (put! vmap x 0))
+          ((eq? code 'closure) (unsupported "closure before closure conversion"))
+          ((ir/ir-code? code) (unsupported code))
+          (else (prim! code args define!)))))
+
+    (def raising {}) ; IR block -> vreg it raises
+    (def bound-of {}) ; IR value of a bound? op -> the value it tests
+
+    (def (prim! code args define!)
+      (let ((entry (prims/lookup code))
+            (n (length args)))
+        (let ((vm (and entry (entry :vm) (= n (entry :vm-arity)) (entry :vm)))
+              (base (or (and entry (entry :base)) code)))
+          (cond
+            ((and (eq? vm :add) (vm-ops/imm16? (fixnum-const (cadr args))))
+             (define! {:op :addi :uses (list (use (car args))) :imm (fixnum-const (cadr args))}))
+            ((and (eq? vm :add) (vm-ops/imm16? (fixnum-const (car args))))
+             (define! {:op :addi :uses (list (use (cadr args))) :imm (fixnum-const (car args))}))
+            ((and (eq? vm :sub) (fixnum-const (cadr args)) (vm-ops/imm16? (- 0 (fixnum-const (cadr args)))))
+             (define! {:op :addi :uses (list (use (car args))) :imm (- 0 (fixnum-const (cadr args)))}))
+            (vm (define! {:op :prim :vm vm :uses (uses args)}))
+            (else (define! (call-instr :global (core-cell base) (uses args))))))))
+
+    (def (call-instr kind callee args)
+      (let ((id calls))
+        (set! calls (+ calls 1))
+        {:op :call
+         :kind kind
+         :callee callee
+         :args args
+         :call-id id
+         :uses (if (eq? kind :value)
+                   (cons callee args)
+                   args)}))
+
+    (def (callee-of b)
+      (let ((kind (ir/term-call-kind ir b))
+            (callee (ir/term-callee ir b)))
+        (cond
+          ((eq? kind :value) [:value (use callee)])
+          ((eq? kind :global) [:global callee])
+          (else [:const (static! callee)]))))
+
+    (def (select-term! b)
+      (let ((kind (ir/term-kind ir b))
+            (targs (ir/term-args ir b))
+            (succ (ir/succs ir b))
+            (pos (ir/term-pos ir b)))
+        (let ((t (cond
+                   ((eq? kind :jump) {:op :jump :target (block-of (car succ)) :args nil :uses nil})
+                   ((eq? kind :branch)
+                    (let ((tested (get bound-of (car targs))))
+                      (if tested
+                          {:op :br
+                           :vm :jbound
+                           :uses (list (use tested))
+                           :then (block-of (car succ))
+                           :else (block-of (cadr succ))}
+                          {:op :branch :uses (uses targs) :then (block-of (car succ)) :else (block-of (cadr succ))})))
+                   ((eq? kind :branch-prim)
+                    (select-branch (ir/term-prim ir b) targs (block-of (car succ)) (block-of (cadr succ))))
+                   ((eq? kind :call)
+                    (let ((ret (car succ)))
+                      (unless (= 1 (ir/block-param-count ir ret))
+                        (unsupported "a call's ret block with other parameters"))
+                      (let ((c (callee-of b)))
+                        (let ((t (call-instr (c 0) (c 1) (uses targs))))
+                          (put! t :dst (fresh!))
+                          (put! t :ret (block-of ret))
+                          t))))
+                   ((eq? kind :tail-call)
+                    (let ((c (callee-of b)))
+                      (let ((t (call-instr (c 0) (c 1) (uses targs))))
+                        (put! t :op :tail-call)
+                        t)))
+                   ((eq? kind :return)
+                    (let ((c (const-of (car targs))))
+                      (if (and c (immediate-bits (c 0)))
+                          {:op :return-imm :uses '() :bits (immediate-bits (c 0))}
+                          {:op :return :uses (uses targs)})))
+                   ((eq? kind :try) {:op :try :uses '() :body (block-of (car succ)) :handler (block-of (cadr succ))})
+                   ((contains? raising b) {:op :raise :uses (list (raising b))})
+                   (else {:op :unreachable :uses '()}))))
+          (when (eq? kind :jump)
+            (let ((args (uses targs)))
+              (put! t :args args)
+              (put! t :uses args)))
+          (unless (contains? t :dst) (put! t :dst nil))
+          (put! t :pos pos)
+          t)))
+
+    (def (select-branch prim args then else)
+      (let ((entry (prims/lookup prim))
+            (n (length args)))
+        (let ((br (and entry (entry :branch) (= n (entry :vm-arity)) (entry :branch))))
+          (cond
+            ((and (eq? prim 'bound?) (= n 1)) {:op :br :vm :jbound :uses (uses args) :then then :else else})
+            ((and (eq? prim 'not) (= n 1)) {:op :branch :uses (uses args) :then else :else then})
+            ((and (eq? prim 'nil?) (= n 1))
+             {:op :br :vm :br-eqk :k (constant! nil) :uses (uses args) :then then :else else})
+            ((and (eq? br :br-eq) (const-of (cadr args)))
+             {:op :br
+              :vm :br-eqk
+              :k (constant! ((const-of (cadr args)) 0))
+              :uses (list (use (car args)))
+              :then then
+              :else else})
+            ((and (eq? br :br-eq) (const-of (car args)))
+             {:op :br
+              :vm :br-eqk
+              :k (constant! ((const-of (car args)) 0))
+              :uses (list (use (cadr args)))
+              :then then
+              :else else})
+            ((and br (get vm-ops/immediate-branch br) (vm-ops/imm16? (fixnum-const (cadr args))))
+             {:op :br
+              :vm (get vm-ops/immediate-branch br)
+              :imm (fixnum-const (cadr args))
+              :uses (list (use (car args)))
+              :then then
+              :else else})
+            (br {:op :br :vm br :uses (uses args) :then then :else else})
+            (else
+              ;; Compute the predicate, then branch on it.
+              (let ((d nil))
+                (prim! prim
+                       args
+                       (fn (instr)
+                         (set! d (fresh!))
+                         (put! instr :dst d)
+                         (put! instr :pos nil)
+                         (emit! instr)
+                         d))
+                {:op :branch :uses (list d) :then then :else else}))))))
+
+    ;; Blocks and parameters.
+    (let ((rpo (ir/rpo ir f))
+          (doms (ir/dominators ir f)))
+      (for-each (fn (b)
+                  (put! bmap b (length blocks))
+                  (push! blocks {:index (length blocks) :params '() :instrs [] :term nil :ir b})
+                  (let ((ps (map (fn (p)
+                                   (let ((v (fresh!)))
+                                     (put! vmap p v)
+                                     v))
+                                 (ir/block-params ir b))))
+                    (put! (blocks (- (length blocks) 1)) :params ps)))
+                rpo)
+      (for-each (fn (blk) (put! blk :idom (bmap (doms (blk :ir))))) blocks)
+      (for-each (fn (blk)
+                  (set! current (blk :instrs))
+                  (for-each (fn (o) (select-op! o)) (ir/block-ops ir (blk :ir)))
+                  (put! blk :term (select-term! (blk :ir))))
+                blocks))
+
+    (put! lfn :blocks blocks)
+    (put! lfn :constants constants)
+    (put! lfn :statics statics)
+    (remove-dead! blocks next-vreg)
+    (put! lfn :index (fn-index f))
+    (put! lfn :parent (and (ir/fn-parent ir f) (fn-index (ir/fn-parent ir f))))
+    (put! lfn
+          :name (cond
+                  ((string? name) name)
+                  ((nil? name) nil)
+                  (else (str name))))
+    (put! lfn :arity (sig 0))
+    (put! lfn :optional (sig 1))
+    (put! lfn :rest (sig 2))
+    (put! lfn :params (map (fn (p) (vmap p)) (ir/fn-params ir f)))
+    (put! lfn :vregs next-vreg)
+    (put! lfn :calls calls)
+    lfn))
+
+;; --- dead instructions -------------------------------------------------------------
+
+(def- pure-ops '(:imm :const :upvalue :bound :closure))
+
+(def- pure-prims '(:eq :not :nullp :pairp :cons))
+
+(def- (pure? instr)
+  (or (memq (instr :op) pure-ops) (and (eq? (instr :op) :prim) (memq (instr :vm) pure-prims))))
+
+(def- (remove-dead! blocks nvregs)
+  "Drop pure instructions whose result is never used."
+  (let ((counts (column/filled nvregs 0)))
+    (def (count! instr d)
+      (for-each (fn (v) (put! counts v (+ (counts v) d))) (instr :uses)))
+    (for-each (fn (blk)
+                (for-each (fn (i) (count! i 1)) (blk :instrs))
+                (count! (blk :term) 1))
+              blocks)
+    (let loop ()
+      (let ((changed #f))
+        (for-each (fn (blk)
+                    (let ((keep []))
+                      (for-each (fn (i)
+                                  (if (and (pure? i) (= 0 (counts (i :dst))))
+                                      (begin
+                                        (count! i -1)
+                                        (set! changed #t))
+                                      (push! keep i)))
+                                (blk :instrs))
+                      (put! blk :instrs keep)))
+                  blocks)
+        (when changed (loop))))))

@@ -1,0 +1,436 @@
+(ns otium.compiler.allocate)
+
+;; Allocate: VM registers for Select's LIR (see the top of select.ot for the
+;; LIR). (run lir) fills in, for each function:
+;;
+;;   :reg      array from vreg to register (nil for a value never used)
+;;   :locals   registers above register 0 the frame needs
+;;
+;; and on instructions:
+;;
+;;   :window       a call's base register R: the callee goes in R, the
+;;                 arguments in R+1.., the result comes back in R
+;;   :moves        moves before a call (into its window) or at a jump (into
+;;                 the target's parameters), as a list of (dst src) to run
+;;                 in order
+;;   :post-moves   moves after a call: its result into the ret block's
+;;                 parameter (a call terminator) or into a pinned result
+;;
+;; How:
+;; - Liveness: live-in sets per block by backward iteration to a fixed
+;;   point, then one backward scan per block recording, for each
+;;   instruction, the operands that die there, whether its result is dead,
+;;   and for calls the values live across them.
+;; - Pinned values. Every value live into a try handler keeps one register
+;;   for the whole function: nothing else ever uses it, and every call
+;;   window goes above it (the docs' rule for try). Pinned parameters keep
+;;   their parameter register; other pinned values get the registers above
+;;   the parameters.
+;; - Assignment walks blocks in reverse postorder, which puts each
+;;   definition before its uses. A block starts with the registers of its
+;;   live-in values taken. At each instruction, the registers of operands
+;;   that die there are released, then the result takes a free register.
+;;   This is the usual SSA greedy colouring: two values that are live at the
+;;   same time are live together at one of their definitions, so any free
+;;   choice is correct, and the choice only matters for moves and frame
+;;   size. Parameters are registers 1..n (required, optional, rest).
+;; - A call's window R is one above the highest register live across it
+;;   (and above the pinned registers); its result is R. A tail call's window
+;;   is 1, or 0 when the callee is the running closure, so a self tail call
+;;   moves its arguments straight into the parameters.
+;; - Preferences. A free register is chosen from, in order: the register of
+;;   a value it's copied to or from at a jump, if that is already assigned;
+;;   hints from the previous round (the window slot of a call where it's an
+;;   argument and dies, the register the call result is moved to); the
+;;   lowest free register. Assignment runs three rounds, each with the
+;;   previous round's hints, and keeps the one with the fewest moves, then
+;;   the smallest frame.
+;; - Block arguments, call windows and moved results are parallel moves,
+;;   sequenced here. A cycle goes through a scratch register one above the
+;;   frame, which then grows by one.
+;;
+;; Limits: no splitting, so a value has one register for its whole life and
+;; a value live across a call forces every later window above it even where
+;; a move would make a smaller frame. Pinned values are conservative. The
+;; scratch register could reuse a free one instead of growing the frame.
+
+(require otium.compiler.column :as column)
+
+(def rounds 3)
+
+;; --- helpers ---
+
+(def (for-each2 f xs ys)
+  "Call f on the elements of xs and ys in step."
+  (let loop ((xs xs)
+             (ys ys))
+    (when (and (pair? xs) (pair? ys))
+      (f (car xs) (car ys))
+      (loop (cdr xs) (cdr ys)))))
+
+;; --- edges -------------------------------------------------------------------------
+
+(def (edges term)
+  "Successors of a terminator: a list of [block-index args]."
+  (let ((op (term :op)))
+    (cond
+      ((eq? op :jump) (list [(term :target) (term :args)]))
+      ((memq op '(:branch :br)) (list [(term :then) '()] [(term :else) '()]))
+      ((eq? op :call) (list [(term :ret) (list (term :dst))]))
+      ((eq? op :try) (list [(term :body) '()] [(term :handler) '()]))
+      (else '()))))
+
+(def- (call? instr)
+  (memq (instr :op) '(:call :tail-call)))
+
+;; --- liveness ----------------------------------------------------------------------
+
+(def- (set-add! s v)
+  (unless (= v 0) (column/bitset-set! s v)))
+
+(def- (set-remove! s v)
+  (when v (column/bitset-clear! s v)))
+
+(def- (step! live instr)
+  "Live before instr from live after it."
+  (set-remove! live (instr :dst))
+  (for-each (fn (u) (set-add! live u)) (instr :uses)))
+
+(def- (live-in-of blk out)
+  (let ((live (column/bitset-copy out)))
+    (step! live (blk :term))
+    (let ((is (blk :instrs)))
+      (let loop ((i (- (length is) 1)))
+        (when (>= i 0)
+          (step! live (is i))
+          (loop (- i 1)))))
+    (for-each (fn (p) (set-remove! live p)) (blk :params))
+    live))
+
+(def (liveness lfn)
+  "Per block live-in bitsets (parameters excluded), as an array; and live-out."
+  (let ((blocks (lfn :blocks))
+        (n (lfn :vregs)))
+    (let ((ins (column/filled (length blocks) nil))
+          (outs (column/filled (length blocks) nil)))
+      (dotimes (i (length blocks))
+        (put! ins i (column/bitset n))
+        (put! outs i (column/bitset n)))
+      (let loop ()
+        (let ((changed #f))
+          (let walk ((i (- (length blocks) 1)))
+            (when (>= i 0)
+              (let ((blk (blocks i))
+                    (out (column/bitset n)))
+                (for-each (fn (e) (column/bitset-union! out (ins (e 0)))) (edges (blk :term)))
+                (put! outs i out)
+                (let ((in (live-in-of blk out)))
+                  (unless (column/bitset-equal? in (ins i))
+                    (put! ins i in)
+                    (set! changed #t))))
+              (walk (- i 1))))
+          (when changed (loop))))
+      [ins outs])))
+
+(def- (annotate! blk out)
+  "Record :dies, :dst-dead and (for calls) :across on blk's instructions."
+  (let ((live (column/bitset-copy out)))
+    (def (note! instr)
+      (let ((dies '()))
+        (for-each (fn (u) (unless (or (= u 0) (column/bitset-has? live u) (memv? u dies)) (set! dies (cons u dies))))
+                  (instr :uses))
+        (put! instr :dies dies)
+        (put! instr :dst-dead (and (instr :dst) (not (column/bitset-has? live (instr :dst)))))
+        (when (call? instr)
+          (let ((across (column/bitset-copy live)))
+            (set-remove! across (instr :dst))
+            (put! instr :across (column/bitset->list across))))
+        (step! live instr)))
+    (note! (blk :term))
+    (let ((is (blk :instrs)))
+      (let loop ((i (- (length is) 1)))
+        (when (>= i 0)
+          (note! (is i))
+          (loop (- i 1)))))))
+
+(def- (memv? x xs)
+  (and (pair? xs) (or (= x (car xs)) (memv? x (cdr xs)))))
+
+;; --- assignment --------------------------------------------------------------------
+
+(def- (all-instrs blk)
+  (append (array-to-list (blk :instrs)) (list (blk :term))))
+
+(def- (window-of instr reg pinned-max)
+  "A call's window base, from the registers of the values live across it."
+  (if (eq? (instr :op) :tail-call)
+      (if (and (eq? (instr :kind) :value) (= (instr :callee) 0))
+          0
+          1)
+      (+ 1 (reduce (fn (m v) (max m (reg v))) pinned-max (instr :across)))))
+
+(def- (colour lfn ins handlers pinned partners hints)
+  "One round of assignment: [reg windows]."
+  (let ((blocks (lfn :blocks))
+        (reg (column/filled (lfn :vregs) nil))
+        (windows (column/filled (lfn :calls) nil))
+        (reserved {})
+        (pinned-max 0)
+        (occ []))
+    (put! reg 0 0)
+    (let loop ((ps (lfn :params))
+               (r 1))
+      (unless (null? ps)
+        (put! reg (car ps) r)
+        (loop (cdr ps) (+ r 1))))
+    (let ((next (+ 1 (length (lfn :params)))))
+      (for-each (fn (v)
+                  (when (nil? (reg v))
+                    (put! reg v next)
+                    (set! next (+ next 1)))
+                  (put! reserved (reg v) #t)
+                  (set! pinned-max (max pinned-max (reg v))))
+                pinned))
+    (def (taken? r)
+      (and (< r (length occ)) (occ r)))
+    (def (take! r)
+      (while (<= (length occ) r) (push! occ #f))
+      (put! occ r #t))
+    (def (release! r)
+      (when (and (< r (length occ)) (not (get reserved r))) (put! occ r #f)))
+    (def (free? r)
+      (and (int? r) (>= r 1) (not (taken? r)) (not (get reserved r))))
+    (def (choose! v)
+      (when (nil? (reg v))
+        (let ((r (or (let loop ((ws (partners v)))
+                       (cond
+                         ((null? ws) nil)
+                         ((free? (reg (car ws))) (reg (car ws)))
+                         (else (loop (cdr ws)))))
+                     (let loop ((hs (get hints v '())))
+                       (cond
+                         ((null? hs) nil)
+                         ((free? (car hs)) (car hs))
+                         (else (loop (cdr hs)))))
+                     (let loop ((r 1))
+                       (if (free? r)
+                           r
+                           (loop (+ r 1)))))))
+          (put! reg v r)))
+      (take! (reg v)))
+    (dotimes (bi (length blocks))
+      (let ((blk (blocks bi)))
+        (set! occ [])
+        (column/bitset-for-each (fn (v) (take! (reg v))) (ins bi))
+        (for-each (fn (p) (when (or (get handlers bi) (> ((lfn :use-count) p) 0)) (choose! p))) (blk :params))
+        (for-each (fn (p) (when (and (reg p) (= 0 ((lfn :use-count) p))) (release! (reg p)))) (blk :params))
+        (for-each (fn (instr)
+                    (let ((w (and (call? instr) (window-of instr reg pinned-max))))
+                      (when w (put! windows (instr :call-id) w))
+                      (for-each (fn (u) (release! (reg u))) (instr :dies))
+                      (let ((d (instr :dst)))
+                        (when d
+                          (when (and w (nil? (reg d))) (put! reg d w))
+                          (choose! d)
+                          (when (instr :dst-dead) (release! (reg d)))))))
+                  (all-instrs blk))))
+    [reg windows]))
+
+;; --- moves -------------------------------------------------------------------------
+
+(def (sequence pairs scratch)
+  "Order the parallel move pairs ((dst src) ...) as sequential moves, going
+through scratch to break cycles. Returns [moves used-scratch?]."
+  (let ((pending (filter (fn (p) (not (= (car p) (cadr p)))) pairs))
+        (out '())
+        (used #f))
+    (let loop ()
+      (unless (null? pending)
+        (let ((ready (let find ((ps pending))
+                       (cond
+                         ((null? ps) nil)
+                         ((not (any-src? (car (car ps)) pending (car ps))) (car ps))
+                         (else (find (cdr ps)))))))
+          (if ready
+              (begin
+                (set! out (cons ready out))
+                (set! pending (remove-pair ready pending)))
+              (let ((d (car (car pending))))
+                (set! used #t)
+                (set! out (cons (list scratch d) out))
+                (set! pending
+                      (map (fn (p)
+                             (if (= (cadr p) d)
+                                 (list (car p) scratch)
+                                 p))
+                           pending))))
+          (loop))))
+    [(reverse out) used]))
+
+(def- (any-src? r pending except)
+  (let loop ((ps pending))
+    (and (pair? ps) (or (and (not (eq? (car ps) except)) (= (cadr (car ps)) r)) (loop (cdr ps))))))
+
+(def- (remove-pair p ps)
+  (filter (fn (q) (not (eq? q p))) ps))
+
+(def- (move-sets lfn reg windows)
+  "For each instruction with moves: [instr pre post] with unsequenced pairs."
+  (let ((out []))
+    (dotimes (bi (length (lfn :blocks)))
+      (let ((blk ((lfn :blocks) bi)))
+        (for-each (fn (instr)
+                    (cond
+                      ((call? instr)
+                       (let ((w (windows (instr :call-id)))
+                             (pre '())
+                             (post '()))
+                         (when (eq? (instr :kind) :value) (set! pre (cons (list w (reg (instr :callee))) pre)))
+                         (let loop ((as (instr :args))
+                                    (i 1))
+                           (unless (null? as)
+                             (set! pre (cons (list (+ w i) (reg (car as))) pre))
+                             (loop (cdr as) (+ i 1))))
+                         (cond
+                           ((eq? (instr :op) :tail-call))
+                           ((instr :ret)
+                            (let ((p (car (((lfn :blocks) (instr :ret)) :params))))
+                              (when (reg p) (set! post (list (list (reg p) w))))))
+                           (else (set! post (list (list (reg (instr :dst)) w)))))
+                         (push! out [instr (reverse pre) post])))
+                      ((eq? (instr :op) :jump)
+                       (let ((pairs '()))
+                         (for-each2 (fn (p a) (when (reg p) (set! pairs (cons (list (reg p) (reg a)) pairs))))
+                                    (((lfn :blocks) (instr :target)) :params)
+                                    (instr :args))
+                         (push! out [instr (reverse pairs) '()])))))
+                  (all-instrs blk))))
+    out))
+
+(def- (move-count sets)
+  (reduce (fn (n s)
+            (+ n
+               (length (filter (fn (p) (not (= (car p) (cadr p)))) (s 1)))
+               (length (filter (fn (p) (not (= (car p) (cadr p)))) (s 2)))))
+          0
+          sets))
+
+(def- (frame-size lfn reg windows)
+  (let ((m (+ (lfn :arity)
+              (lfn :optional)
+              (if (lfn :rest)
+                  1
+                  0))))
+    (dotimes (v (length reg))
+      (when (reg v) (set! m (max m (reg v)))))
+    (for-each (fn (blk)
+                (for-each (fn (instr)
+                            (when (call? instr) (set! m (max m (+ (windows (instr :call-id)) (length (instr :args)))))))
+                          (all-instrs blk)))
+              (array-to-list (lfn :blocks)))
+    m))
+
+;; --- driver ------------------------------------------------------------------------
+
+(def- (use-counts lfn)
+  (let ((counts (column/filled (lfn :vregs) 0)))
+    (for-each (fn (blk)
+                (for-each (fn (i) (for-each (fn (u) (put! counts u (+ 1 (counts u)))) (i :uses))) (all-instrs blk)))
+              (array-to-list (lfn :blocks)))
+    counts))
+
+(def (allocate-function! lfn)
+  (let ((blocks (lfn :blocks))
+        (live (liveness lfn)))
+    (let ((ins (live 0))
+          (outs (live 1))
+          (counts (use-counts lfn))
+          (handlers {})
+          (pinned '())
+          (partners (column/filled (lfn :vregs) '())))
+      (put! lfn :use-count counts)
+      (dotimes (bi (length blocks))
+        (annotate! (blocks bi) (outs bi)))
+      (for-each (fn (blk)
+                  (let ((t (blk :term)))
+                    (when (eq? (t :op) :try)
+                      (put! handlers (t :handler) #t)
+                      (column/bitset-for-each (fn (v) (unless (memv? v pinned) (set! pinned (cons v pinned))))
+                                              (ins (t :handler))))
+                    (when (eq? (t :op) :jump)
+                      (for-each2 (fn (p a)
+                                   (unless (= a 0)
+                                     (put! partners p (cons a (partners p)))
+                                     (put! partners a (cons p (partners a)))))
+                                 ((blocks (t :target)) :params)
+                                 (t :args)))))
+                (array-to-list blocks))
+      (set! pinned (reverse pinned))
+      (let ((best nil)
+            (hints {}))
+        (dotimes (round rounds)
+          (let ((result (colour lfn ins handlers pinned partners hints)))
+            (let ((reg (result 0))
+                  (windows (result 1)))
+              (let ((sets (move-sets lfn reg windows)))
+                (let ((cost [(move-count sets) (frame-size lfn reg windows)]))
+                  (when (or (nil? best)
+                            (< (cost 0) ((best 0) 0))
+                            (and (= (cost 0) ((best 0) 0)) (< (cost 1) ((best 0) 1))))
+                    (set! best [cost reg windows sets]))
+                  (set! hints (next-hints lfn reg windows)))))))
+        (let ((reg (best 1))
+              (windows (best 2))
+              (locals ((best 0) 1)))
+          (let ((scratch (+ locals 1))
+                (used #f))
+            (for-each (fn (s)
+                        (let ((instr (s 0))
+                              (pre (sequence (s 1) scratch))
+                              (post (sequence (s 2) scratch)))
+                          (put! instr :moves (pre 0))
+                          (put! instr :post-moves (post 0))
+                          (when (or (pre 1) (post 1)) (set! used #t))))
+                      (best 3))
+            (for-each (fn (blk)
+                        (for-each (fn (instr) (when (call? instr) (put! instr :window (windows (instr :call-id)))))
+                                  (all-instrs blk)))
+                      (array-to-list blocks))
+            (put! lfn :reg reg)
+            (put! lfn
+                  :locals (if used
+                              scratch
+                              locals))
+            lfn))))))
+
+(def- (next-hints lfn reg windows)
+  (let ((hints {}))
+    (def (hint! v r)
+      (unless (or (= v 0) (nil? r)) (put! hints v (append (get hints v '()) (list r)))))
+    (for-each (fn (blk)
+                (for-each (fn (instr)
+                            (cond
+                              ((call? instr)
+                               (let ((w (windows (instr :call-id))))
+                                 (when (and (eq? (instr :kind) :value) (memv? (instr :callee) (instr :dies)))
+                                   (hint! (instr :callee) w))
+                                 (let loop ((as (instr :args))
+                                            (i 1))
+                                   (unless (null? as)
+                                     (when (memv? (car as) (instr :dies)) (hint! (car as) (+ w i)))
+                                     (loop (cdr as) (+ i 1))))
+                                 (when (instr :ret) (hint! (car (((lfn :blocks) (instr :ret)) :params)) w))))
+                              ((eq? (instr :op) :jump)
+                               (for-each2 (fn (p a)
+                                            (hint! a (reg p))
+                                            (hint! p (reg a)))
+                                          (((lfn :blocks) (instr :target)) :params)
+                                          (instr :args)))))
+                          (all-instrs blk)))
+              (array-to-list (lfn :blocks)))
+    hints))
+
+(def (run lir)
+  "Assign registers in every function of lir, in place, and return it."
+  (for-each allocate-function! (array-to-list (lir :functions)))
+  lir)

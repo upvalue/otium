@@ -1,0 +1,314 @@
+;; Resolve: expanded forms to Core.
+(require (otium.test :refer (check report)) (otium.compiler.core :as core))
+
+(def- (resolved text)
+  (core/resolve (macroexpand-all (read-string text)) 'user))
+
+(def- (shown text)
+  (core/show (resolved text)))
+
+(def- (unsupported text)
+  (try
+    (begin
+      (resolved text)
+      :supported)
+    (catch (core/unsupported? _) :unsupported)))
+
+(def- (find-node n pred)
+  ;; The first node in n, depth first, that pred accepts.
+  (if (pred n)
+      n
+      (let ((found nil))
+        (core/for-each-child n (fn (c) (unless found (set! found (find-node c pred)))))
+        found)))
+
+(def- (all-nodes n)
+  (let ((out '()))
+    (let walk ((m n))
+      (set! out (cons m out))
+      (core/for-each-child m walk))
+    out))
+
+;; Constants and quote
+(check "number" 1 (shown "1"))
+(check "string" "s" (shown "\"s\""))
+(check "keyword" '(quote :k) (shown ":k"))
+(check "nil" '(quote nil) (shown "nil"))
+(check "quoted list" '(quote (1 2)) (shown "'(1 2)"))
+
+;; Globals and builtins
+(check "global" '(global user/some-global) (shown "some-global"))
+(check "builtin as a value" '(prim car) (shown "car"))
+(check "builtin call is a primcall" '(car (quote (1))) (shown "(car '(1))"))
+(check "qualified builtin" '(car (quote (1))) (shown "(otium.core/car '(1))"))
+(check "user call" '(call (global user/g) 1) (shown "(g 1)"))
+(check "Otium-defined core function is a global call"
+       '(call (global otium.core/first) (quote (1)))
+       (shown "(first '(1))"))
+(check "global cell ids" (%resolve-global 'user 'some-global) ((resolved "some-global") :cell))
+(check "builtin cell id" (%resolve-global 'user 'car) ((resolved "car") :cell))
+(check "set! of a global" '(gset! user/some-global 1) (shown "(set! some-global 1)"))
+
+;; Definitions
+(check "def" '(def user/x 1) (shown "(def x 1)"))
+(check "def-" '(def- user/x 1) (shown "(def- x 1)"))
+(check "def with a doc" "Doc." ((resolved "(def x \"Doc.\" 1)") :doc))
+(check "def cell" (%global-cell 'user 'x) ((resolved "(def x 1)") :cell))
+(check "function def" '(def user/f (fn (x.1) x.1)) (shown "(def (f x) x)"))
+(check "function def names the fn" 'f (((resolved "(def (f x) x)") :value) :name))
+(check "function doc" '(def user/f (fn (x.1) x.1)) (shown "(def (f x) \"Doc.\" x)"))
+(check "recursive def refers to the global"
+       '(def user/f (fn (x.1) (call (global user/f) x.1)))
+       (shown "(def (f x) (f x))"))
+(check "top-level begin"
+       '(begin
+          (def user/x 1)
+          (call (global user/g)))
+       (shown "(begin (def x 1) (g))"))
+
+;; Special forms
+(check "if"
+       '(fn (x.1)
+          (if x.1
+              1
+              2))
+       (shown "(fn (x) (if x 1 2))"))
+(check "if without else"
+       '(fn (x.1)
+          (if x.1
+              1
+              (quote nil)))
+       (shown "(fn (x) (if x 1))"))
+(check "begin"
+       '(fn ()
+          (begin
+            (call (global user/g))
+            2))
+       (shown "(fn () (begin (g) 2))"))
+(check "empty begin" '(quote nil) (shown "(begin)"))
+(check "let is sequential" '(fn () (let ((a.1 1)) (let ((b.2 a.1)) b.2))) (shown "(fn () (let ((a 1) (b a)) b))"))
+(check "let shadows" '(fn (x.1) (let ((x.2 x.1)) x.2)) (shown "(fn (x) (let ((x x)) x))"))
+(check "rest" '(fn (x.1 & r.2) r.2) (shown "(fn (x . r) r)"))
+(check "bare rest" '(fn (& r.1) r.1) (shown "(fn r r)"))
+(check "optionals see earlier parameters"
+       '(fn (x.1 &optional (y.2 x.1) (z.3 y.2)) z.3)
+       (shown "(fn (x &optional (y x) (z y)) z)"))
+(check "fn docstring" '(fn () 1) (shown "(fn () \"Doc.\" 1)"))
+(check "string body" '(fn () "s") (shown "(fn () \"s\")"))
+(check "set!" '(fn (x.1) (set! x.1 2)) (shown "(fn (x) (set! x 2))"))
+(check "while" '(fn () (while (call (global user/g)) (call (global user/h)))) (shown "(fn () (while (g) (h)))"))
+(check "and keeps the deciding value"
+       '(fn (a.1 b.2)
+          (let ((and.3 a.1))
+            (if and.3
+                b.2
+                and.3)))
+       (shown "(fn (a b) (and a b))"))
+(check "or keeps the deciding value"
+       '(fn (a.1 b.2)
+          (let ((or.3 a.1))
+            (if or.3
+                or.3
+                b.2)))
+       (shown "(fn (a b) (or a b))"))
+(check "empty and, or"
+       '(fn ()
+          (begin
+            #t
+            #f))
+       (shown "(fn () (and) (or))"))
+(check "cond"
+       '(fn (a.1)
+          (if a.1
+              1
+              (let ((test.2 (call (global user/g))))
+                (if test.2
+                    test.2
+                    (if #t
+                        3
+                        (quote nil))))))
+       (shown "(fn (a) (cond (a 1) ((g)) (#t 3)))"))
+(check "cond else"
+       '(fn (a.1)
+          (if a.1
+              1
+              2))
+       (shown "(fn (a) (cond (a 1) (else 2)))"))
+(check "when"
+       '(fn (a.1)
+          (if a.1
+              1
+              (quote nil)))
+       (shown "(fn (a) (when a 1))"))
+(check "try"
+       '(fn ()
+          (try
+            (call (global user/g))
+            (catch ((global otium.core/error?) e.1) e.1)
+            (catch ((fn (_.2) #t) f.3) 2)))
+       (shown "(fn () (try (g) (catch (error? e) e) (catch f 2)))"))
+(check "try without catches" '(fn () (call (global user/g))) (shown "(fn () (try (g)))"))
+(check "defer"
+       '(fn ()
+          (defer
+            (call (global user/g))
+            (begin
+              (call (global user/h))
+              1)))
+       (shown "(fn () (defer (g) (h) 1))"))
+(check "unwind-protect"
+       '(fn ()
+          (defer
+            1
+            2))
+       (shown "(fn () (unwind-protect 1 2))"))
+(check "call of an expression" '(fn (f.1) (call f.1 1)) (shown "(fn (f) (f 1))"))
+(check "local shadows a builtin" '(fn (car.1) (call car.1 1)) (shown "(fn (car) (car 1))"))
+(check "keyword call" '(fn (t.1) (call (quote :a) t.1)) (shown "(fn (t) (:a t))"))
+
+;; Quasiquote
+(check "constant quasiquote" '(quote (a b)) (shown "`(a b)"))
+(check "quasiquote" '(fn (x.1) (cons (quote a) (cons x.1 (quote ())))) (shown "(fn (x) `(a ,x))"))
+(check "splice"
+       '(fn (x.1) (cons (quote a) (call (global otium.core/append) x.1 (quote (b)))))
+       (shown "(fn (x) `(a ,@x b))"))
+(check "final splice" '(fn (x.1) (cons (quote a) x.1)) (shown "(fn (x) `(a ,@x))"))
+(check "nested quasiquote"
+       '(fn (x.1)
+          (cons (quote a)
+                (cons (cons (quote quasiquote)
+                            (cons (cons (quote b) (cons (cons (quote unquote) (cons x.1 (quote ()))) (quote ())))
+                                  (quote ())))
+                      (quote ()))))
+       (shown "(fn (x) `(a `(b ,,x)))"))
+(check "nested quasiquote evaluates like the runtime"
+       (let ((x 5)) `(a `(b ,,x ,(c))))
+       (eval (read-string "(let ((x 5)) `(a `(b ,,x ,(c))))")))
+
+;; Named let and body definitions
+(check "named let"
+       '(fn (n.1)
+          (fix ((loop.2 (fn (i.3)
+                          (if (< i.3 n.1)
+                              (call loop.2 (+ i.3 1))
+                              i.3))))
+               (call loop.2 0)))
+       (shown "(fn (n) (let loop ((i 0)) (if (< i n) (loop (+ i 1)) i)))"))
+(check "named let initializers see the outer scope"
+       '(fn (i.1) (fix ((loop.2 (fn (i.3) i.3))) (call loop.2 i.1)))
+       (shown "(fn (i) (let loop ((i i)) i))"))
+(check "body functions are one fix"
+       '(fn ()
+          (fix ((even.1 (fn (n.2)
+                          (if (= n.2 0)
+                              #t
+                              (call odd.3 (- n.2 1)))))
+                (odd.3 (fn (n.4)
+                         (if (= n.4 0)
+                             #f
+                             (call even.1 (- n.4 1))))))
+               (call even.1 10)))
+       (shown "(fn () (def (even n) (if (= n 0) #t (odd (- n 1)))) (def (odd n) (if (= n 0) #f (even (- n 1)))) (even 10))"))
+(check "values first become lets"
+       '(fn () (let ((x.1 (call (global user/g)))) (fix ((f.2 (fn () x.1))) (call f.2))))
+       (shown "(fn () (def x (g)) (def (f) x) (f))"))
+(check "a value may use functions that only reach earlier variables"
+       '(fn () (let ((a.1 1)) (fix ((f.2 (fn () a.1))) (let ((b.3 (call f.2))) b.3))))
+       (shown "(fn () (def a 1) (def (f) a) (def b (f)) b)"))
+(check "functions aren't moved before what they use"
+       '(fn () (let ((x.1 1)) (let ((y.2 2)) (fix ((f.3 (fn () y.2))) (call f.3)))))
+       (shown "(fn () (def (f) y) (def x 1) (def y 2) (f))"))
+(check "a value that reaches a later variable starts unbound"
+       '(fn ()
+          (let ((x.1 (unbound)))
+            (let ((y.2 (unbound)))
+              (fix ((f.3 (fn () y.2)))
+                   (begin
+                     (set! x.1 (call f.3))
+                     (set! y.2 1)
+                     x.1)))))
+       (shown "(fn () (def (f) y) (def x (f)) (def y 1) x)"))
+(check "unbound variables are marked"
+       #t
+       (((find-node (resolved "(fn () (def x (list x)) x)") (fn (n) (eq? (n :op) :let))) :var) :unbound))
+(check "unused complex values are only evaluated"
+       '(fn ()
+          (let ((y.1 (unbound)))
+            (begin
+              (call (global user/g) y.1)
+              (set! y.1 1)
+              y.1)))
+       (shown "(fn () (def x (g y)) (def y 1) y)"))
+(check "assigned functions aren't fixed"
+       '(fn ()
+          (let ((f.1 (fn () 1)))
+            (begin
+              (set! f.1 2)
+              f.1)))
+       (shown "(fn () (def (f) 1) (set! f 2) f)"))
+(check "body ending in a definition" '(fn () (let ((x.1 1)) (quote nil))) (shown "(fn () (def x 1))"))
+(check "definitions in let bodies"
+       '(fn () (let ((a.1 1)) (fix ((f.2 (fn () a.1))) (call f.2))))
+       (shown "(fn () (let ((a 1)) (def (f) a) (f)))"))
+(check "definitions after expressions"
+       '(let ((x.2 1)) x.2)
+       ;; The expander wraps (g) in a definition with a gensym name.
+       (third (third (shown "(fn () (g) (def x 1) x)"))))
+
+;; Variable facts
+(let ((n (resolved "(fn (x y) (fn () x) (set! y 1) y)"))
+      (x (car (n :params)))
+      (y (second (n :params))))
+  (check "captured" #t (x :captured))
+  (check "not captured" #f (y :captured))
+  (check "refs" 1 (x :refs))
+  (check "sets" 1 (y :sets))
+  (check "refs of an assigned variable" 1 (y :refs)))
+(let ((n (resolved "(fn (x) (fn () (set! x 1)))")))
+  (check "assignment from a nested fn captures" #t ((car (n :params)) :captured)))
+(let ((n (resolved "(fn (x) (let loop ((i x)) (when i (loop (cdr i)))))")))
+  (check "loop variable not captured" #f ((car (n :params)) :captured)))
+(let ((n (core/annotate! (resolved "(fn (x) x x)")))) (check "annotate! is idempotent" 2 ((car (n :params)) :refs)))
+
+;; Unsupported forms
+(check "defparam" :unsupported (unsupported "(defparam p 1)"))
+(check "handler-bind" :unsupported (unsupported "(fn () (handler-bind ((error? (fn (c) 1))) (g)))"))
+(check "with-params" :unsupported (unsupported "(fn () (with-params ((p 1)) (g)))"))
+(check "restart-case" :unsupported (unsupported "(fn () (restart-case (g) (use-value (v) v)))"))
+(check "call-with-cleanup" :unsupported (unsupported "(fn () (%call-with-cleanup f g))"))
+(check "repeated body definitions" :unsupported (unsupported "(fn () (def a 1) (def a 2) a)"))
+(check "supported" :supported (unsupported "(fn () 1)"))
+(check "unsupported? is false for other conditions"
+       #f
+       (try
+         (error "plain")
+         (catch e (core/unsupported? e))))
+(check "unsupported names what"
+       'thing
+       (try
+         (core/unsupported 'thing)
+         (catch e (e :what))))
+
+;; Positions: forms the runtime reads carry offsets. Collect some through
+;; the optimizer hook, declining to compile them.
+(def- collected [])
+
+(%set-optimizer! (fn (form space)
+                   (push! collected (list form space))
+                   nil))
+
+(def (position-sample x)
+  (if (pair? x)
+      (car x)
+      (g x)))
+
+(%set-optimizer! nil)
+
+(let ((entry (collected 0))
+      (n (core/resolve (first entry) (second entry))))
+  (check "def keeps the form's position" (%form-offset (first entry)) (n :pos))
+  (check "every node has a position" '() (filter (fn (m) (nil? (m :pos))) (all-nodes n)))
+  (check "inner forms have their own positions" #t (< (n :pos) ((find-node n (fn (m) (eq? (m :op) :call))) :pos)))
+  (check "the hook's form is in its namespace" 'user (second entry)))
+
+(report "compiler core")

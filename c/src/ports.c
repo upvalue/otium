@@ -666,8 +666,8 @@ static bool append(ot_state* rt, ot_value* port, const char* bytes, size_t n) {
   return true;
 }
 
-static ot_value port_print_values(ot_state* rt, ot_value p, size_t first, size_t count, bool write,
-                                  bool newline) {
+static ot_value port_print_values(ot_state* rt, ot_value p, size_t first, size_t count,
+                                  bool write) {
   if (!p || !check(rt, p, false)) return 0;
   char* bytes = NULL;
   size_t length = 0;
@@ -678,7 +678,6 @@ static ot_value port_print_values(ot_state* rt, ot_value p, size_t first, size_t
     if (write) ot_write(rt, stream, rt->stack[first + i]);
     else ot_print(rt, stream, rt->stack[first + i]);
   }
-  if (newline) fputc('\n', stream);
   bool ok = !ferror(stream);
   if (fclose(stream)) ok = false;
   oti_roots root;
@@ -693,18 +692,7 @@ static ot_value port_print_values(ot_state* rt, ot_value p, size_t first, size_t
 /* display-to and write-to */
 static ot_value port_print_to(ot_state* rt, size_t first, size_t count, bool write) {
   if (!count) return oti_fail(rt, "output needs a port");
-  return port_print_values(rt, rt->stack[first], first + 1, count - 1, write, false);
-}
-
-static ot_value port_newline(ot_state* rt, size_t first, size_t count) {
-  if (count > 1) return oti_fail(rt, "newline takes an optional port");
-  ot_value p = count ? rt->stack[first] : current_standard_port(rt, false);
-  return port_print_values(rt, p, first, 0, false, true);
-}
-
-static ot_value port_write_error(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "write-error needs one argument");
-  return port_print_values(rt, current_port(rt, 2), first, count, false, false);
+  return port_print_values(rt, rt->stack[first], first + 1, count - 1, write);
 }
 
 static bool range(ot_state* rt, size_t first, size_t count, size_t n, size_t* start, size_t* end) {
@@ -772,13 +760,9 @@ static ot_value port_open_memory(ot_state* rt, size_t first, size_t count, ot_va
   return live[0];
 }
 
-/* close-port, close-input-port and close-output-port */
-static ot_value port_close(ot_state* rt, size_t first, size_t count, ot_value live[2],
-                           bool only_input, bool only_output) {
+static ot_value port_close(ot_state* rt, size_t first, size_t count, ot_value live[2]) {
   if (count != 1 || !oti_kind(rt->stack[first], K_PORT)) return oti_fail(rt, "close needs a port");
   live[0] = rt->stack[first];
-  if ((only_input && !port_object(live[0])->input) || (only_output && port_object(live[0])->input))
-    return oti_fail(rt, "wrong port direction");
   if (port_object(live[0])->closed) return OT_NIL;
   if (port_object(live[0])->busy) return oti_fail(rt, "port callback reentry");
   if (!port_object(live[0])->input && !flush(rt, &live[0])) return 0;
@@ -1097,18 +1081,6 @@ static ot_value port_skip_while(ot_state* rt, size_t first, size_t count, ot_val
   return ot_int((intptr_t)items);
 }
 
-static ot_value port_print_builtin(ot_state* rt, size_t first, size_t count) {
-  return port_print_values(rt, current_standard_port(rt, false), first, count, false, false);
-}
-
-static ot_value port_println_builtin(ot_state* rt, size_t first, size_t count) {
-  return port_print_values(rt, current_standard_port(rt, false), first, count, false, true);
-}
-
-static ot_value port_write_builtin(ot_state* rt, size_t first, size_t count) {
-  return port_print_values(rt, current_standard_port(rt, false), first, count, true, false);
-}
-
 static ot_value port_display_to_builtin(ot_state* rt, size_t first, size_t count) {
   return port_print_to(rt, first, count, false);
 }
@@ -1169,9 +1141,7 @@ PORT_LIVE(port_open_input_bytes, port_open_memory(rt, first, count, live, true, 
 PORT_LIVE(port_open_output_bytes, port_open_memory(rt, first, count, live, false, false))
 PORT_LIVE(port_get_output_string, port_get_output(rt, first, count, live, true))
 PORT_LIVE(port_get_output_bytes, port_get_output(rt, first, count, live, false))
-PORT_LIVE(port_close_port, port_close(rt, first, count, live, false, false))
-PORT_LIVE(port_close_input, port_close(rt, first, count, live, true, false))
-PORT_LIVE(port_close_output, port_close(rt, first, count, live, false, true))
+PORT_LIVE(port_close_port, port_close(rt, first, count, live))
 PORT_LIVE(port_read_u8_builtin, port_read_u8(rt, first, count, live, true))
 PORT_LIVE(port_peek_u8_builtin, port_read_u8(rt, first, count, live, false))
 PORT_LIVE(port_read_char_builtin, port_read_char(rt, first, count, live, true))
@@ -1210,8 +1180,6 @@ const oti_builtin_def oti_port_builtins[] = {
     {B_OPEN_OUTPUT_BYTES, "open-output-bytevector", port_open_output_bytes},
     {B_GET_OUTPUT_BYTES, "get-output-bytevector", port_get_output_bytes},
     {B_CLOSE_PORT, "close-port", port_close_port},
-    {B_CLOSE_INPUT, "close-input-port", port_close_input},
-    {B_CLOSE_OUTPUT, "close-output-port", port_close_output},
     {B_READ_U8, "read-u8", port_read_u8_builtin},
     {B_PEEK_U8, "peek-u8", port_peek_u8_builtin},
     {B_READ_CHAR, "read-char", port_read_char_builtin},
@@ -1240,14 +1208,6 @@ const oti_builtin_def oti_port_builtins[] = {
     {B_STDERR, "%standard-error", port_stderr_builtin},
     {B_OPEN_INPUT_FILE, "open-input-file", port_open_input_file_builtin},
     {B_OPEN_OUTPUT_FILE, "open-output-file", port_open_output_file_builtin},
-    {B_OPEN_BINARY_INPUT, "open-binary-input-file", port_open_input_file_builtin},
-    {B_OPEN_BINARY_OUTPUT, "open-binary-output-file", port_open_output_file_builtin},
-    {B_PRINT, "print", port_print_builtin},
-    {B_PRINTLN, "println", port_println_builtin},
-    {B_DISPLAY, "display", port_print_builtin},
-    {B_WRITE, "write", port_write_builtin},
-    {B_NEWLINE, "newline", port_newline},
-    {B_PROCESS_WRITE_ERROR, "otium.process/write-error", port_write_error},
     {0, NULL, NULL},
 };
 

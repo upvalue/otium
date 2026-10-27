@@ -500,7 +500,6 @@ static const oti_builtin_def oti_core_builtins[] = {
     {B_ERROR, "error", oti_raise},
     {B_SIGNAL, "signal", oti_signal},
     {B_EXIT, "exit", exit_builtin},
-    {B_QUIT, "quit", exit_builtin},
     {B_READER_TOKENS, "otium.reader/tokens", oti_tokens},
     {B_QQ_APPEND, NULL, quasi_append},
     {B_EVAL_IN_NAMESPACE, NULL, eval_in_namespace},

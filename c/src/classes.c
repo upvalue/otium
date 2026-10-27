@@ -454,6 +454,5 @@ const oti_builtin_def oti_class_builtins[] = {
     {B_GENERIC_METHOD, "%define-method", class_define_method},
     {B_REMOVE_METHOD, "remove-method!", class_remove_method},
     {B_TYPE_NAME, "type-name", class_type_name},
-    {B_TYPE_DESCRIPTOR_P, "type-descriptor?", class_class_p},
     {0, NULL, NULL},
 };

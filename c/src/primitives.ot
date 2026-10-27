@@ -143,5 +143,29 @@
 (defparam current-output-port (%standard-output))
 (defparam current-error-port (%standard-error))
 
+(def (display . values) (apply display-to (current-output-port) values))
+(def print display)
+(def (write . values) (apply write-to (current-output-port) values))
+(def (newline &optional (port (current-output-port))) (write-char #\newline port))
+(def (println . values)
+  (let ((port (current-output-port)))
+    (apply display-to port values)
+    (write-char #\newline port)))
+
+(def (close-input-port port)
+  (when (output-port? port) (error "close-input-port: wrong port direction"))
+  (close-port port))
+(def (close-output-port port)
+  (when (input-port? port) (error "close-output-port: wrong port direction"))
+  (close-port port))
+(def open-binary-input-file open-input-file)
+(def open-binary-output-file open-output-file)
+
+(def quit exit)
+(def type-descriptor? class?)
+
 (defgeneric (update-instance instance old-slots))
 (defmethod (update-instance instance old-slots) nil)
+
+(ns otium.process)
+(def (write-error text) (display-to (current-error-port) text))

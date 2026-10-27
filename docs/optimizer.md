@@ -473,3 +473,33 @@ The VM installer (`c/src/optimizer.c`, documented under "Installed code" in
   non-box crash.
 - `%global-cell` creates a cell in that namespace; only call it for real
   `def`s, never to look a name up.
+
+## Rules settled for the second wave
+
+- **Global call order.** `(call :global cell args ret)` reads the cell when
+  the call is made, after the arguments are computed (the VM's
+  `CALL_GLOBAL`). Otium evaluates the callee first, so Convert uses `:global`
+  only when no argument can call unknown code or assign a global (constants,
+  variables, and primops without `:call` or `:write` effects on globals).
+  Otherwise it emits `global-ref` first and makes a `:value` call.
+- **Known calls after Closures** only target functions with no captures:
+  static functions, and well-known functions whose captures became extra
+  parameters. Any other call Propagate marked `:known` goes back to a
+  `:value` call on the closure value. The backend loads a known callee with
+  the function's static closure.
+- **Primops without a VM opcode** are calls to the builtin's cell
+  (`(%resolve-global 'otium.core name)`) in the middle of a block. The
+  backend treats them as calls: they need a call window and clobber it.
+- **Re-raising** is `(error condition)` on this runtime; there is no `raise`
+  builtin. In the IR it's the `raise` operation.
+- **Overflow** of fixnum `+ - *` wraps on this runtime (it doesn't raise).
+  `types.ot` and `prims.ot` already account for it.
+- **Commits** go through a hook that runs `./otium fmt --check` and the
+  linter (which runs on Chez) on staged Otium files. Run `./otium fmt FILE`
+  and `./otium lint FILE` on your files before finishing. Don't use C-only
+  builtins as values at load time; for names the Chez linter doesn't know,
+  add a `;; lint: allow-file(unbound-name) reason` line at the top, as
+  `core.ot` does.
+- **Symbols are slow to intern** on this runtime once there are many of them.
+  Don't make a symbol per value or block; use fixnums and strings.
+- `ns` and `range` can't be local variable names.

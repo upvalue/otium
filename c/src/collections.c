@@ -303,54 +303,12 @@ static ot_value collection_copy(ot_state* rt, size_t first, size_t count) {
   return copy;
 }
 
-static ot_value collection_contains(ot_state* rt, size_t first, size_t count) {
-  if (collection_on_table(rt, first, count)) return oti_table_contains_builtin(rt, first, count);
-  if (!collection_arity(rt, count, 2, 2)) return 0;
-  ot_value a = rt->stack[first], b = rt->stack[first + 1];
-  if (a == OT_NIL) return OT_FALSE;
-  if (oti_kind(a, K_STRING)) {
-    if (!oti_kind(b, K_STRING)) return oti_fail(rt, "expected substring");
-    size_t n, m;
-    memcpy(&n, object_bytes(a), sizeof(n));
-    memcpy(&m, object_bytes(b), sizeof(m));
-    const char *s = (char*)object_bytes(a) + sizeof(n), *part = (char*)object_bytes(b) + sizeof(m);
-    if (m > n) return OT_FALSE;
-    for (size_t i = 0; i <= n - m; i++)
-      if (!memcmp(s + i, part, m)) return OT_TRUE;
-    return OT_FALSE;
-  }
-  if (a == OT_EMPTY || oti_kind(a, K_PAIR)) {
-    ot_value slow = a, fast = a;
-    while (oti_kind(a, K_PAIR)) {
-      ot_value equal = oti_equal(rt, oti_car(a), b, false);
-      if (equal != OT_FALSE) return equal;
-      a = oti_cdr(a);
-      if (oti_kind(slow, K_PAIR)) slow = oti_cdr(slow);
-      for (unsigned i = 0; i < 2 && oti_kind(fast, K_PAIR); i++) fast = oti_cdr(fast);
-      if (oti_kind(fast, K_PAIR) && fast == slow) return oti_fail(rt, "cyclic list");
-    }
-    return a == OT_EMPTY ? OT_FALSE : oti_fail(rt, "expected proper list");
-  }
-  if (!oti_kind(a, K_ARRAY)) return oti_fail(rt, "expected an array");
-  for (size_t i = 0; i < oti_as_array(a)->length; i++) {
-    ot_value result = oti_equal(rt, items(a)[i], b, false);
-    if (result != OT_FALSE) return result;
-  }
-  return OT_FALSE;
-}
-
 const oti_builtin_def oti_collection_builtins[] = {
-    {B_ARRAY, "array", oti_array_from},
-    {B_ARRAY_P, "array?", collection_array_p},
-    {B_LENGTH, "length", collection_length},
-    {B_GET, "get", collection_get},
-    {B_PUT_MUT, "put!", collection_put_mut},
-    {B_PUSH, "push!", collection_push},
-    {B_POP, "pop!", collection_pop},
-    {B_COPY, "copy", collection_copy},
-    {B_EQUAL, "equal?", collection_equal},
-    {B_CONTAINS, "contains?", collection_contains},
-    {0, NULL, NULL},
+    {B_ARRAY, "array", oti_array_from},      {B_ARRAY_P, "array?", collection_array_p},
+    {B_LENGTH, "length", collection_length}, {B_GET, "get", collection_get},
+    {B_PUT_MUT, "put!", collection_put_mut}, {B_PUSH, "push!", collection_push},
+    {B_POP, "pop!", collection_pop},         {B_COPY, "copy", collection_copy},
+    {B_EQUAL, "equal?", collection_equal},   {0, NULL, NULL},
 };
 
 /* A set of object addresses, for walks that must visit each object once. It

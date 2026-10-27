@@ -180,22 +180,6 @@ done:
   return result;
 }
 
-static ot_value condition_type(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of condition arguments");
-  return field(rt, rt->stack[first], ":type");
-}
-
-static ot_value condition_message(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of condition arguments");
-  return field(rt, rt->stack[first], ":message");
-}
-
-static ot_value condition_error_p(ot_state* rt, size_t first, size_t count) {
-  if (count != 1) return oti_fail(rt, "wrong number of condition arguments");
-  ot_value type = field(rt, rt->stack[first], ":type");
-  return !type ? 0 : type == OT_NIL ? OT_FALSE : OT_TRUE;
-}
-
 static ot_value condition_of_type_p(ot_state* rt, size_t first, size_t count) {
   if (count != 2) return oti_fail(rt, "wrong number of condition arguments");
   ot_value values[] = {OT_NIL, OT_NIL};
@@ -222,10 +206,7 @@ done:
 
 const oti_builtin_def oti_condition_builtins[] = {
     {B_DEFINE_CONDITION, "define-condition", condition_define},
-    {B_CONDITION_TYPE, "condition-type", condition_type},
-    {B_CONDITION_MESSAGE, "condition-message", condition_message},
     {B_CONDITION_IS, "condition-of-type?", condition_of_type_p},
-    {B_ERROR_P, "error?", condition_error_p},
     {0, NULL, NULL},
 };
 

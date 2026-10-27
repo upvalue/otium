@@ -18,7 +18,7 @@ def quote(text):
     return json.dumps(text, ensure_ascii=False)
 
 c = ['/* Generated from lib/catalog/runtime.json. */',
-     'const char* ot_runtime_documentation(const char* name) {',
+     'static const char* oti_runtime_documentation(const char* name) {',
      '  static const struct { const char* name; const char* text; } entries[] = {']
 c += ['    {' + quote(name) + ', ' + quote(text) + '},' for name, text in pairs('c')]
 c += ['  };', '  for (size_t i = 0; i < sizeof(entries) / sizeof(*entries); ++i)',

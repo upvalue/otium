@@ -56,14 +56,14 @@ def generated(t):
 
 @test('runtime reference')
 def reference(t):
-    """Every C native and special form is documented, and prelude definitions have docstrings."""
-    source = (ROOT / 'c/src/otium.c').read_text()
-    natives = source.split('static const nat_def core_nats[] = {')[1].split('};')[0]
-    ports = source.split('static const nat_def port_natives[] = {')[1].split('};')[0]
-    natives += ports
-    specials = source.split('static bool special_name(')[1].split('};')[0]
-    required = set(re.findall(r'\{"([^"]+)"', natives))
-    required.update(re.findall(r'^\s*"([^"]+)"', specials, re.M))
+    """Every C builtin and core form is documented, and prelude definitions have docstrings.
+    Internal (%) and namespaced builtins, such as ffi/ and otium.process/, are exempt."""
+    builtins = ''.join(path.read_text() for path in (ROOT / 'c/src').glob('*.c'))
+    required = {name for name in re.findall(r'\{B_\w+, "([^"]+)",', builtins)
+                if not name.startswith('%') and '/' not in name}
+    expander = (ROOT / 'lib/otium/expander.ot').read_text()
+    forms = expander.split('(def- expander-core-forms')[1].split('))')[0]
+    required.update(re.findall(r'[^\s()\']+', forms))
     entries = json.loads((ROOT / 'lib/catalog/runtime.json').read_text())
     t.check(not required - entries.keys(), 'undocumented:', sorted(required - entries.keys()))
     prelude = (ROOT / 'lib/otium/core.ot').read_text()

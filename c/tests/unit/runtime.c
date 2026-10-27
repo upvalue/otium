@@ -207,7 +207,6 @@ TEST(arrays) {
   check_true(rt, "(equal? [1 [2] '(3 . 4)] [1 [2] '(3 . 4)])");
   CHECK(eval(rt, "(equal? [1] [1.0])") == OT_FALSE);
   CHECK(eval(rt, "(equal? [1] '(1))") == OT_FALSE);
-  check_true(rt, "(contains? [[1]] [1])");
   check_true(rt, "(let ((a [1])) (push! a 2 3 4) (pop! a) (pop! a) (pop! a) (equal? a [1]))");
   check_true(rt, "(let ((a []) (b [])) (push! a a) (push! b b) (equal? a b))");
   CHECK(eval(rt, "(let ((a []) (b [])) (push! a a 1) (push! b b 2) (equal? a b))") == OT_FALSE);
@@ -280,7 +279,6 @@ TEST(tables) {
       "(replace)) (set! put! saved) (t :a))",
       42);
   check_int(rt, "({nil 42} nil)", 42);
-  check_true(rt, "(contains? {:a #f} :a)");
   CHECK(eval(rt, "(get {1 42} 1.0)") == OT_NIL);
   check_int(rt, "(get {0.0 42} -0.0)", 42);
   check_int(rt, "(get {\"same\" 42} \"same\")", 42);

@@ -1942,5 +1942,39 @@
     "runtimes": [
       "c"
     ]
+  },
+  "class?": {
+    "text": "(class? value)\nTest whether value is a class descriptor.",
+    "runtimes": [
+      "c"
+    ]
+  },
+  "generic?": {
+    "text": "(generic? value)\nTest whether value is a generic function.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "type-descriptor?": {
+    "text": "(type-descriptor? value)\nTest whether value is a type descriptor, such as a class.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "type-name": {
+    "text": "(type-name descriptor)\nReturn the descriptor's name qualified by its namespace, such as user/Point.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
+  },
+  "syntax-quote": {
+    "text": "(syntax-quote template)\nA quasiquote whose template names resolve where it is written. #`template reads as this form.",
+    "runtimes": [
+      "c",
+      "chez"
+    ]
   }
 }

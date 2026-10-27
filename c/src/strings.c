@@ -299,12 +299,6 @@ static ot_value string_char_numeric(ot_state* rt, size_t first, size_t count) {
   return cp >= '0' && cp <= '9' ? OT_TRUE : OT_FALSE;
 }
 
-static ot_value string_digit_value(ot_state* rt, size_t first, size_t count) {
-  uint32_t cp;
-  if (!string_char_argument(rt, first, count, &cp)) return 0;
-  return cp >= '0' && cp <= '9' ? ot_int(cp - '0') : OT_NIL;
-}
-
 const oti_builtin_def oti_string_builtins[] = {
     {B_STR, "str", string_str},
     {B_STRING_LT, "string<?", string_lt},
@@ -319,7 +313,6 @@ const oti_builtin_def oti_string_builtins[] = {
     {B_CHAR_SPACE, "char-whitespace?", string_char_whitespace},
     {B_CHAR_ALPHA, "char-alphabetic?", string_char_alphabetic},
     {B_CHAR_NUMERIC, "char-numeric?", string_char_numeric},
-    {B_DIGIT_VALUE, "digit-value", string_digit_value},
     {B_NAME, "name", string_name},
     {B_SYMBOL, "symbol", string_symbol},
     {B_STRING_LIST, "string->list", string_to_list},

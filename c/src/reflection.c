@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "runtime-reference.inc"
+
 static const char* type_name(ot_value value) {
   if (value == OT_NIL) return ":nil";
   if (value == OT_EMPTY) return ":null";
@@ -83,33 +85,37 @@ static ot_value reflection_describe(ot_state* rt, size_t first, size_t count) {
   memcpy(&n, object_bytes(value), sizeof(n));
   const char* name = (char*)object_bytes(value) + sizeof(n);
   uint32_t index = oti_lookup_global(rt, name, n);
-  if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND) {
-    if (n == 2 && !memcmp(name, "ns", 2)) {
-      const char* doc = "(ns name (:require ...)) Set the current namespace.";
-      return oti_text(rt, K_STRING, doc, strlen(doc));
-    }
-    return OT_NIL;
+  /* Special forms and builtins are documented in lib/catalog/runtime.json. */
+  char key[64];
+  const char* reference = "";
+  if (n < sizeof(key)) {
+    memcpy(key, name, n);
+    key[n] = 0;
+    reference = oti_runtime_documentation(key);
   }
+  if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND)
+    return *reference ? oti_text(rt, K_STRING, reference, strlen(reference)) : OT_NIL;
   const char* space = rt->namespaces[rt->global_info[index].space];
   const char* local = rt->global_info[index].name;
-  oti_documentation doc = rt->global_info[index].doc;
-  if (!doc.text) {
-    doc.text = "no documentation";
-    doc.length = strlen(doc.text);
+  const char* doc = rt->global_info[index].doc.text;
+  size_t length = rt->global_info[index].doc.length;
+  if (!doc) {
+    doc = *reference ? reference : "no documentation";
+    length = strlen(doc);
   }
   size_t prefix = strlen(space) + strlen(local) + 3;
-  if (doc.length > SIZE_MAX - prefix - 1) {
+  if (length > SIZE_MAX - prefix - 1) {
     oti_error(rt, "documentation too large");
     return 0;
   }
-  char* text = malloc(prefix + doc.length + 1);
+  char* text = malloc(prefix + length + 1);
   if (!text) {
     oti_error(rt, "out of host memory");
     return 0;
   }
   snprintf(text, prefix + 1, "%s/%s: ", space, local);
-  memcpy(text + prefix, doc.text, doc.length);
-  ot_value result = oti_text(rt, K_STRING, text, prefix + doc.length);
+  memcpy(text + prefix, doc, length);
+  ot_value result = oti_text(rt, K_STRING, text, prefix + length);
   free(text);
   return result;
 }

@@ -213,4 +213,8 @@
     (record? . "(record? value)\nTest whether value is a record instance.")
     (record-type? . "(record-type? value)\nTest whether value is a record type descriptor.")
     (record-type . "(record-type record)\nReturn the record type descriptor. Records compare by identity, including immutable records.")
+    (generic? . "(generic? value)\nTest whether value is a generic function.")
+    (type-descriptor? . "(type-descriptor? value)\nTest whether value is a type descriptor, such as a class.")
+    (type-name . "(type-name descriptor)\nReturn the descriptor's name qualified by its namespace, such as user/Point.")
+    (syntax-quote . "(syntax-quote template)\nA quasiquote whose template names resolve where it is written. #`template reads as this form.")
   )))

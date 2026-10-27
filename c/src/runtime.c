@@ -738,6 +738,7 @@ bool ot_load_expander(ot_state* rt, const char* directory) {
     const char* adapters =
         "(def (macroexpand-1 form) (expander-expand-head form #t)) "
         "(def (macroexpand form) (expander-expand-head form #f)) "
+        "(def (macroexpand-all form) (*expander* form)) "
         "(def (type-pred type) (fn (condition) (condition-of-type? condition type)))";
     uint32_t saved = rt->current_namespace;
     rt->current_namespace = 0;

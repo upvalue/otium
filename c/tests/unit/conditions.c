@@ -1,9 +1,8 @@
 #include "helpers.h"
 
+/* The core library defines error?, condition-type and condition-message. */
 static ot_state* new_expander_runtime(void) {
-  ot_state* rt = new_runtime(1024 * 1024, 256 * 1024);
-  if (!ot_load_expander(rt, TEST_LIBRARY_DIR))
-    test_fail(__FILE__, __LINE__, "cannot load expander: %s", ot_error(rt));
+  ot_state* rt = new_core_runtime();
   ot_gc_stress(rt, true);
   return rt;
 }

@@ -29,12 +29,13 @@ subdir('vendor/compiler-rt')
 # or POSIX file calls. The kernel's I/O host supplies the console and files.
 # The bootstrap library is read from the embedded c/src/primitives.ot.
 runtime_dir = '../c'
-runtime_names = [
-  'heap', 'reader', 'tokens', 'runtime', 'compiler', 'vm', 'builtins', 'numeric', 'time',
-  'filesystem', 'process', 'ports', 'strings', 'bytevectors', 'reflection', 'support',
-  'conditions', 'restarts', 'cleanup', 'params', 'classes', 'instances', 'records', 'foreign',
-  'foreign_types', 'collections', 'tables', 'reclaim', 'modules',
-  'natives']
+fs = import('fs')
+runtime_names = []
+foreach entry : fs.read(runtime_dir / 'sources.list').strip().split('\n')
+  if not entry.startswith('#')
+    runtime_names += entry
+  endif
+endforeach
 runtime_sources = []
 foreach name : runtime_names
   runtime_sources += files(runtime_dir / 'src' / name + '.c')
@@ -45,7 +46,7 @@ platform_args = ['-D_POSIX_MONOTONIC_CLOCK=200809L']
 runtime = static_library('otium', runtime_sources,
   c_args: platform_args + ['-DOTIUM_FREESTANDING',
     '-DOTIUM_BOOTSTRAP_FILE="/c/src/primitives.ot"', '-Wno-unused-parameter'],
-  include_directories: include_directories(runtime_dir / 'include', runtime_dir / 'src'),
+  include_directories: include_directories(runtime_dir / 'include', runtime_dir / 'src', '../native'),
   dependencies: picolibc,
   override_options: ['c_std=c11'])
 

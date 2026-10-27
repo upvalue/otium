@@ -202,33 +202,13 @@ static const char* source_text(oti_report* r, uint32_t source, size_t* length) {
       *length = r->texts[i].length;
       return r->texts[i].text;
     }
+  /* An error is pending while reporting, so a failed read records nothing. */
   const char* path = source_path(r, source);
-  FILE* file = path ? fopen(path, "rb") : NULL;
-  char* text = NULL;
   size_t n = 0;
-  if (file) {
-    size_t capacity = 0;
-    for (;;) {
-      if (n == capacity) {
-        capacity = capacity ? capacity * 2 : 4096;
-        char* grown = capacity <= OTI_SOURCE_LIMIT ? realloc(text, capacity) : NULL;
-        if (!grown) {
-          free(text);
-          text = NULL;
-          break;
-        }
-        text = grown;
-      }
-      size_t got = fread(text + n, 1, capacity - n, file);
-      n += got;
-      if (!got) break;
-    }
-    if (text && ferror(file)) {
-      free(text);
-      text = NULL;
-    }
-    fclose(file);
-  }
+  int error;
+  char* text =
+      path ? oti_read_source_file(r->rt, path, OTI_SOURCE_LIMIT, "source file", &n, &error) : NULL;
+  if (!text) n = 0;
   if (r->text_count < sizeof(r->texts) / sizeof(r->texts[0]))
     r->texts[r->text_count++] = (oti_report_text){source, text, n};
   *length = n;
@@ -268,7 +248,11 @@ static char* display_path(const char* path) {
   }
   out[used] = 0;
   free(starts);
+#ifdef OTIUM_FREESTANDING
+  char* here = NULL;
+#else
   char* here = absolute ? getcwd(NULL, 0) : NULL;
+#endif
   if (here) {
     size_t h = strlen(here);
     if (h > 1 && used > h + 1 && !strncmp(out, here, h) && out[h] == '/')

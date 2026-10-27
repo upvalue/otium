@@ -1,13 +1,16 @@
 # The C runtime. See docs/runtime-rewrite.md.
 
-runtime_sources = files(
-  'src/heap.c', 'src/reader.c', 'src/tokens.c', 'src/runtime.c', 'src/compiler.c', 'src/vm.c',
-  'src/builtins.c', 'src/numeric.c', 'src/time.c', 'src/filesystem.c', 'src/process.c',
-  'src/ports.c', 'src/strings.c', 'src/bytevectors.c', 'src/reflection.c', 'src/support.c',
-  'src/conditions.c', 'src/restarts.c', 'src/cleanup.c', 'src/params.c', 'src/classes.c',
-  'src/instances.c', 'src/records.c', 'src/foreign.c', 'src/foreign_types.c',
-  'src/collections.c', 'src/tables.c', 'src/reclaim.c', 'src/modules.c', 'src/dev.c',
-  'src/diagnostics.c', 'src/natives.c')
+# The runtime's sources are listed in sources.list, which otos also reads.
+runtime_names = []
+foreach entry : fs.read('sources.list').strip().split('\n')
+  if not entry.startswith('#')
+    runtime_names += entry
+  endif
+endforeach
+runtime_sources = []
+foreach name : runtime_names
+  runtime_sources += files('src' / name + '.c')
+endforeach
 
 # The runtime is C11 with GNU builtins and computed goto, so it skips the
 # project's C23 and -Wpedantic.

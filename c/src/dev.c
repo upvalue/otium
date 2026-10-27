@@ -5,6 +5,9 @@
 /* Angle brackets keep the shared transport out of the amalgamation. */
 #include <dev/transport.h>
 #include <string.h>
+#ifdef OTIUM_FREESTANDING
+#include <time.h>
+#endif
 
 static bool dev_arity(ot_state* rt, size_t count, size_t expected) {
   if (count == expected) return true;
@@ -238,6 +241,64 @@ static ot_value dev_eval_in(ot_state* rt, size_t first, size_t count) {
   rt->current_namespace = saved;
   return result;
 }
+
+#ifdef OTIUM_FREESTANDING
+/* Without an operating system there is no socket or file system: the server
+ * can't listen, and the rest answer as for a process with nothing to report. */
+int ot_dev_open(const char* path) {
+  (void)path;
+  return -1;
+}
+
+void ot_dev_close(void) {}
+
+int ot_dev_poll(int timeout) {
+  (void)timeout;
+  return 0;
+}
+
+const char* ot_dev_next(void) { return NULL; }
+
+int ot_dev_client(void) { return -1; }
+
+void ot_dev_send(int client, const char* text) {
+  (void)client;
+  (void)text;
+}
+
+uint64_t ot_dev_clock(void) {
+  struct timespec t;
+  return clock_gettime(CLOCK_MONOTONIC, &t)
+             ? 0
+             : (uint64_t)t.tv_sec * 1000 + (uint64_t)t.tv_nsec / 1000000;
+}
+
+int ot_dev_uid(void) { return 0; }
+
+int ot_dev_private_directory(const char* path) {
+  (void)path;
+  return 0;
+}
+
+int ot_dev_pid(void) { return 0; }
+
+const char* ot_dev_cwd(void) { return "/"; }
+
+int64_t ot_dev_now(void) {
+  struct timespec t;
+  return clock_gettime(CLOCK_REALTIME, &t) ? 0 : (int64_t)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+}
+
+const char* ot_dev_realpath(const char* path) {
+  (void)path;
+  return NULL;
+}
+
+int64_t ot_dev_mtime(const char* path) {
+  (void)path;
+  return -1;
+}
+#endif
 
 const oti_builtin_def oti_dev_builtins[] = {
     {B_DEV_EVAL_IN, "otium.dev/%eval-in", dev_eval_in},

@@ -305,9 +305,37 @@ copy. Both set `ASAN_OPTIONS=detect_leaks=0`, so neither checks for leaks.
 `just test-stress` runs the default tests collecting at every allocation, which
 is slow.
 
-When changing allocation, roots or managed pointers, also run `just gc-lint` if
-the LLVM development tools are installed. `c/tools/format-c --check` checks C
-formatting.
+When changing allocation, roots or managed pointers, also run `just gc-lint`, a
+static check for missing roots. It needs LLVM and Clang development packages
+(it finds `LLVM_CONFIG`, `llvm-config`, `llvm-config-N`,
+`/usr/lib/llvm-*/bin/llvm-config` or Homebrew's `llvm`), builds the tool into
+`build/gc-lint`, runs its fixtures in `c/tools/gc-lint/tests`, then checks every
+`c/src` file listed in `build/compile_commands.json`. `OT_GC_LINT_BUILD` points
+it at another meson build directory, and file arguments narrow the check. It is
+never part of the build.
+
+It reports an `ot_value` variable that isn't rooted, used after a call that can
+collect; a pointer from `oti_as_*`, `object_fields` and the like used after such
+a call; a pointer into `rt->stack` or another `ot_state` array used after a call
+that can grow that array; any of these passed to a parameter the callee uses
+after the same kind of call; and an unrooted value passed next to an argument
+that allocates. Which calls collect or grow arrays comes from the call graph,
+seeded by `oti_heap_alloc`, `oti_heap_collect`, `oti_stack` and the VM entry
+points in `c/tools/gc-lint/gc-lint.conf`. Assigning `rt->F` or taking `&rt->F`
+counts as moving `F`, and calls through function pointers are assumed to do
+anything unless the config says otherwise. Values re-read from rooted places,
+such as `rt->stack[i]` or a pushed `live[]` array, are fresh. The same file
+lists accepted findings (`allow FUNCTION VARIABLE REASON`), so the runtime
+sources carry no annotations. `--why=FUNCTION` explains a function's effects
+and `--list-effects` lists them all.
+
+The analysis is per function and follows control flow but not values, so a
+variable that holds a managed value on some paths is assumed to hold one on
+all of them. It doesn't track `ot_value` fields of local structs, values reached
+through a pointer copied from `&v`, or pointers into host arrays other than
+`ot_state`'s.
+
+`c/tools/format-c --check` checks C formatting.
 
 ## Reading the milestones
 

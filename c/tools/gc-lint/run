@@ -1,93 +1,124 @@
 #!/usr/bin/env bash
+# Build otium-gc-lint, run its own tests, then check the C runtime.
+#
+#   c/tools/gc-lint/run [tool options] [files...]
+#
+# The runtime's compile flags come from a meson build directory's
+# compile_commands.json: OT_GC_LINT_BUILD, or build/ at the top of the
+# repository. Without file arguments every c/src file in it is checked.
 set -euo pipefail
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
-repo_dir=$(cd "$script_dir/../.." && pwd)
-build_dir=${OT_GC_LINT_BUILD_DIR:-"$repo_dir/../build/gc-lint"}
+top=$(cd "$script_dir/../../.." && pwd)
+build=${OT_GC_LINT_BUILD:-"$top/build"}
+tool_dir=${OT_GC_LINT_TOOL_DIR:-"$build/gc-lint"}
 
-if [[ -n ${LLVM_CONFIG:-} ]]; then
-  llvm_config=$LLVM_CONFIG
-elif command -v llvm-config >/dev/null 2>&1; then
-  llvm_config=$(command -v llvm-config)
-elif command -v brew >/dev/null 2>&1 && brew --prefix llvm >/dev/null 2>&1; then
-  llvm_config=$(brew --prefix llvm)/bin/llvm-config
-else
+find_llvm_config() {
+  if [[ -n ${LLVM_CONFIG:-} ]]; then
+    printf '%s\n' "$LLVM_CONFIG"
+    return
+  fi
+  local candidate
+  for candidate in llvm-config llvm-config-{30..15}; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      command -v "$candidate"
+      return
+    fi
+  done
+  for candidate in $(ls -d /usr/lib/llvm-*/bin/llvm-config 2>/dev/null | sort -V -r); do
+    printf '%s\n' "$candidate"
+    return
+  done
+  if command -v brew >/dev/null 2>&1 && brew --prefix llvm >/dev/null 2>&1; then
+    printf '%s\n' "$(brew --prefix llvm)/bin/llvm-config"
+    return
+  fi
+  return 1
+}
+
+if ! llvm_config=$(find_llvm_config); then
   printf '%s\n' \
     'otium-gc-lint needs LLVM and Clang development headers.' \
+    'On Debian or Ubuntu: apt install llvm-dev libclang-dev clang' \
     'On macOS: brew install llvm' \
     'Elsewhere: set LLVM_CONFIG to the matching llvm-config executable.' >&2
   exit 2
 fi
-
 if [[ ! -x $llvm_config ]]; then
-  printf 'LLVM_CONFIG is not executable: %s\n' "$llvm_config" >&2
+  printf 'llvm-config is not executable: %s\n' "$llvm_config" >&2
   exit 2
 fi
 
 llvm_prefix=$($llvm_config --prefix)
+llvm_libdir=$($llvm_config --libdir)
 clang_bin="$llvm_prefix/bin/clang"
 clangxx_bin="$llvm_prefix/bin/clang++"
-if [[ ! -x $clang_bin || ! -x $clangxx_bin ]] ||
-  ! compgen -G "$llvm_prefix/lib/libclang-cpp.*" >/dev/null; then
-  printf 'The LLVM installation at %s lacks clang, clang++, or libclang-cpp.\n' "$llvm_prefix" >&2
+# Some distributions ship only the versioned libclang-cpp.so.N.
+clang_cpp=
+for candidate in "$llvm_libdir"/libclang-cpp.{so,dylib} "$llvm_libdir"/libclang-cpp.so.*; do
+  if [[ -e $candidate ]]; then
+    clang_cpp=$candidate
+    break
+  fi
+done
+if [[ ! -x $clang_bin || ! -x $clangxx_bin || -z $clang_cpp ||
+  ! -d "$($llvm_config --includedir)/clang/Tooling" ]]; then
+  printf 'The LLVM installation at %s lacks clang, clang++, libclang-cpp or its headers.\n' \
+    "$llvm_prefix" >&2
   printf '%s\n' 'Install matching LLVM and Clang development packages.' >&2
   exit 2
 fi
 resource_dir=$($clang_bin --print-resource-dir)
-system_args=()
+extra_args=(--extra-arg=-resource-dir="$resource_dir")
 if [[ $(uname -s) == Darwin ]] && command -v xcrun >/dev/null 2>&1; then
-  system_args=(-isysroot "$(xcrun --show-sdk-path)")
+  extra_args+=(--extra-arg=-isysroot --extra-arg="$(xcrun --show-sdk-path)")
 fi
 
-mkdir -p "$build_dir"
-tool="$build_dir/otium-gc-lint"
+mkdir -p "$tool_dir"
+tool="$tool_dir/otium-gc-lint"
 source="$script_dir/otium-gc-lint.cpp"
-if [[ ! -x $tool || $source -nt $tool ]]; then
-  # llvm-config emits compiler arguments as shell words. Homebrew LLVM paths do
-  # not contain spaces; installations that do can provide a wrapper via LLVM_CONFIG.
-  # shellcheck disable=SC2206
+if [[ ! -x $tool || $source -nt $tool || $0 -nt $tool ]]; then
+  # llvm-config emits compiler arguments as shell words.
+  # shellcheck disable=SC2207
   cxxflags=($($llvm_config --cxxflags))
-  # shellcheck disable=SC2206
+  # shellcheck disable=SC2207
   ldflags=($($llvm_config --ldflags --system-libs --libs))
-  "$clangxx_bin" "${cxxflags[@]}" "$source" -o "$tool" \
-    -Wl,-rpath,"$llvm_prefix/lib" -lclang-cpp "${ldflags[@]}"
+  "$clangxx_bin" "${cxxflags[@]}" -O1 "$source" -o "$tool.tmp" \
+    -Wl,-rpath,"$llvm_libdir" "$clang_cpp" "${ldflags[@]}"
+  mv "$tool.tmp" "$tool"
 fi
 
-python3 "$script_dir/tests/test_lint.py" "$tool" \
-  "$script_dir/tests/stale-borrow.c" "$script_dir/tests/write-barrier.c"
+config="$script_dir/gc-lint.conf"
+python3 "$script_dir/tests/test_lint.py" "$tool" "$config" "$resource_dir"
 
-compile_args=(
-  -std=c23 \
-  -DOT_HEAP_INIT=1048576 \
-  -DOT_HEAP_MAX=67108864 \
-  -DOT_MAX_DEPTH=200000 \
-  -DOT_GC_NURSERY_BYTES=2097152 \
-  -DOT_GC_LARGE_OBJECT_BYTES=262144 \
-  -resource-dir "$resource_dir" \
-  "${system_args[@]}" \
-  -I"$repo_dir/src" \
-  -I"$repo_dir/../native"
-)
+# Options go to the tool; anything else is a file to check.
+options=()
+files=()
+for argument in "$@"; do
+  if [[ $argument == -* ]]; then options+=("$argument")
+  else files+=("$(cd "$(dirname "$argument")" && pwd)/$(basename "$argument")")
+  fi
+done
 
-"$tool" "$@" \
-  "$repo_dir/src/otium.c" \
-  "$repo_dir/src/ot-gc-common.c" \
-  "$repo_dir/src/ot-posix.c" \
-  "$repo_dir/src/ot-cli.c" \
-  "$repo_dir/src/main.c" \
-  "$repo_dir/src/ot-ext-demo.c" \
-  "$repo_dir/tests/test_runtime.c" \
-  "$repo_dir/bench/gc_bench.c" \
-  -- "${compile_args[@]}" -DOT_GC_GEN
-
-if pkg-config --exists libffi; then
-  # pkg-config emits compiler arguments as shell words.
-  # shellcheck disable=SC2206
-  ffi_args=($(pkg-config --cflags libffi))
-  "$tool" "$@" "$repo_dir/src/ot-ffi.c" -- \
-    "${compile_args[@]}" "${ffi_args[@]}" -DOT_GC_GEN -DOT_WITH_FFI
+if [[ ! -f $build/compile_commands.json ]]; then
+  printf 'No compile_commands.json in %s.\n' "$build" >&2
+  printf 'Run meson setup there, or set OT_GC_LINT_BUILD to a meson build directory.\n' >&2
+  exit 2
+fi
+if ((${#files[@]} == 0)); then
+  mapfile -t files < <(python3 - "$build/compile_commands.json" "$top/c/src" <<'EOF'
+import json, os, sys
+database, sources = sys.argv[1], os.path.realpath(sys.argv[2])
+seen = set()
+for entry in json.load(open(database)):
+    path = os.path.realpath(os.path.join(entry["directory"], entry["file"]))
+    if os.path.dirname(path) == sources and path not in seen:
+        seen.add(path)
+        print(path)
+EOF
+  )
 fi
 
-
-"$tool" "$@" "$repo_dir/src/ot-gc-semi.c" -- "${compile_args[@]}" -DOT_GC_SEMI
-"$tool" "$@" "$repo_dir/src/ot-gc-gen.c" -- "${compile_args[@]}" -DOT_GC_GEN
+# ClangTool reports progress for each file; drop those lines.
+"$tool" --config="$config" -p "$build" "${extra_args[@]}" "${options[@]}" "${files[@]}" \
+  2> >(grep -v '^\[[0-9]*/[0-9]*\] Processing file ' >&2)

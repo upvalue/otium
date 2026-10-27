@@ -105,8 +105,7 @@ static int repl(ot_state* rt) {
 }
 
 [[noreturn]] void kmain(uintptr_t hart, uintptr_t device_tree) {
-  printf("otos: hart %lu, device tree at %#lx\n", (unsigned long)hart,
-         (unsigned long)device_tree);
+  printf("otos: hart %lu, device tree at %#lx\n", (unsigned long)hart, (unsigned long)device_tree);
 
   console_init();
   uint64_t start = kernel_uptime_ns();

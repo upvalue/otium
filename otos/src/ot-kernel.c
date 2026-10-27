@@ -36,8 +36,7 @@
 #define TIMEBASE_HZ 10000000u
 
 static void uart_put(char c) {
-  while (!(UART_BASE[UART_STATUS] & UART_STATUS_EMPTY)) {
-  }
+  while (!(UART_BASE[UART_STATUS] & UART_STATUS_EMPTY)) {}
   UART_BASE[UART_DATA] = (uint8_t)c;
 }
 

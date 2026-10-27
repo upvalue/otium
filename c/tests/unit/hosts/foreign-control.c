@@ -21,8 +21,8 @@ int main(int argc, char** argv) {
            "(def lib (ffi/open-library '(\"/missing/ffi/library\" \"%s\"))) "
            "(def other (ffi/open-library '(\"%s\"))) "
            "(def extra (ffi/open-library '(\"%s\")))",
-           TEST_FIXTURE("ffi-fixture-17.so"), TEST_FIXTURE("ffi-fixture-29.so"),
-           TEST_FIXTURE("c/ffi-extra.so"));
+           TEST_SHARED_LIBRARY("ffi-fixture-17"), TEST_SHARED_LIBRARY("ffi-fixture-29"),
+           TEST_SHARED_LIBRARY("c/ffi-extra"));
   eval(rt, source);
   ot_gc_stress(rt, true);
   if (!strcmp(mode, "exit")) {
@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
   }
   eval(rt, "((ffi/bind lib \"store_callback\" '(callback-pointer) 'void #t)"
            " (ffi/%callback '(12) 12 (fn (x) x)))");
-  void* library = dlopen(TEST_FIXTURE("ffi-fixture-17.so"), RTLD_NOW | RTLD_LOCAL);
+  void* library = dlopen(TEST_SHARED_LIBRARY("ffi-fixture-17"), RTLD_NOW | RTLD_LOCAL);
   CHECK(library);
   void* symbol = dlsym(library, "call_stored");
   int (*invoke)(int);

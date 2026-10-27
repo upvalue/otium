@@ -4,9 +4,9 @@
 #include <string.h>
 #include <unistd.h>
 
-#define FIXTURE TEST_FIXTURE("ffi-fixture-17.so")
-#define OTHER TEST_FIXTURE("ffi-fixture-29.so")
-#define EXTRA TEST_FIXTURE("c/ffi-extra.so")
+#define FIXTURE TEST_SHARED_LIBRARY("ffi-fixture-17")
+#define OTHER TEST_SHARED_LIBRARY("ffi-fixture-29")
+#define EXTRA TEST_SHARED_LIBRARY("c/ffi-extra")
 
 /* Open the fixture libraries as lib, other and extra. The first candidate for
  * lib is missing, so loading falls through to the next one. */
@@ -283,7 +283,7 @@ static void relative_fixture(char* buffer, size_t size) {
   size_t length = strlen(directory);
   if (strncmp(FIXTURE, directory, length) || FIXTURE[length] != '/')
     test_fail(__FILE__, __LINE__, "%s is not under %s", FIXTURE, directory);
-  CHECK((size_t)snprintf(buffer, size, ".%s", FIXTURE + length) < size);
+  CHECK((size_t)snprintf(buffer, size, ".%s", &FIXTURE[length]) < size);
 }
 
 TEST(aggregate_calls_and_signature_cache) {

@@ -27,6 +27,7 @@ runtime_args = [
   '-DOTIUM_BOOTSTRAP_FILE="@0@"'.format(source_root / 'c/src/primitives.ot'),
   '-DOTIUM_DEV_FILE="@0@"'.format(source_root / 'c/src/dev.ot'),
   '-DOTIUM_TEST_FIXTURE_DIR="@0@"'.format(build_root),
+  '-DOTIUM_TEST_LIBRARY_EXTENSION="@0@"'.format(extension),
 ]
 checks = get_option('runtime_checks')
 if checks != 'none'
@@ -92,8 +93,13 @@ value_portable = static_library('otium-test-value-portable', 'tests/unit/value.c
   c_args: runtime_args + '-DOTIUM_PORTABLE_INTS', include_directories: unit_include,
   dependencies: libotium_dep, override_options: runtime_options,
   kwargs: no_implicit)
+# macOS hides mkdtemp under _POSIX_C_SOURCE unless _DARWIN_C_SOURCE is set.
+unit_args = runtime_args
+if host_machine.system() == 'darwin'
+  unit_args += '-D_DARWIN_C_SOURCE'
+endif
 unit_tests = executable('otium-unit-tests', unit_main, unit_sources,
-  c_args: runtime_args, include_directories: unit_include, dependencies: libotium_dep,
+  c_args: unit_args, include_directories: unit_include, dependencies: libotium_dep,
   link_with: [unit_support, value_portable], override_options: runtime_options,
   kwargs: no_implicit)
 

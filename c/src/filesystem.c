@@ -191,7 +191,13 @@ static ot_value filesystem_list_directory(ot_state* rt, size_t first, size_t cou
 static ot_value filesystem_delete_file(ot_state* rt, size_t first, size_t count) {
   if (!filesystem_paths(rt, first, count, 1)) return 0;
   ot_value path = rt->stack[first];
-  return filesystem_done(rt, "delete-file", path, unlink((char*)oti_bytes_data(path)));
+  const char* name = (char*)oti_bytes_data(path);
+  if (!unlink(name)) return OT_NIL;
+  /* macOS reports a directory as EPERM, which POSIX allows; Linux says EISDIR. */
+  int error = errno;
+  struct stat st;
+  if (error == EPERM && !lstat(name, &st) && S_ISDIR(st.st_mode)) error = EISDIR;
+  return oti_file_error(rt, "delete-file", path, error);
 }
 
 static ot_value filesystem_rename_file(ot_state* rt, size_t first, size_t count) {

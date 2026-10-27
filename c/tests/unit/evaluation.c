@@ -23,8 +23,8 @@ static void nested_evaluation(ot_state* rt) {
       "(= (eval '(+ 40 2)) 42)",
       "(begin (eval '(defmacro plus-one (x) `(+ ,x 1))) (= (eval '(plus-one 41)) 42))",
       "(begin (defmacro nested (x) (eval '(+ 20 22))) (= (nested ignored) 42))",
-      "(begin (defmacro nested-closure () (eval '(def survivor (fn () 42))) 0) (nested-closure) "
-      "(= (survivor) 42))",
+      ("(begin (defmacro nested-closure () (eval '(def survivor (fn () 42))) 0) (nested-closure) "
+       "(= (survivor) 42))"),
       "(begin (defmacro nested-caught () (try (eval '(if)) (catch c 42))) (= (nested-caught) 42))"};
   for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); i++) check_true(rt, cases[i]);
 

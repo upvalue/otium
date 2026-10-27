@@ -9,7 +9,7 @@ TEST(reload_releases_bindings_and_memory) {
   snprintf(source, sizeof(source),
            "(def lib (ffi/open-library '(\"%s\"))) "
            "(def saved (ffi/bind lib \"echo_int\" '(int) 'int #t))",
-           TEST_FIXTURE("ffi-fixture-17.so"));
+           TEST_SHARED_LIBRARY("ffi-fixture-17"));
   eval(rt, source);
   size_t peak_bindings = 0;
   for (unsigned i = 0; i < 300u; i++) {
@@ -17,7 +17,7 @@ TEST(reload_releases_bindings_and_memory) {
              "(def lib (ffi/open-library '(\"%s\"))) "
              "(def current (ffi/bind lib \"echo_int\" '(int) 'int #t)) "
              "(+ (saved 20) (current 22))",
-             TEST_FIXTURE("ffi-fixture-17.so"));
+             TEST_SHARED_LIBRARY("ffi-fixture-17"));
     check_int(rt, source, 42);
     ot_stats stats = ot_get_stats(rt);
     CHECK(stats.libraries == 1 && stats.bindings <= 3 && stats.signatures == 1);

@@ -483,7 +483,35 @@ TEST(optional_arguments) {
   ot_destroy(rt);
 }
 
+TEST(frame_limit) {
+  ot_state* rt = new_runtime(8192, 4096);
+  CHECK(!ot_set_frame_limit(rt, 0));
+  CHECK(ot_set_frame_limit(rt, 40));
+  check_int(rt, "(def (depth n) (if (= n 0) 0 (+ 1 (depth (- n 1))))) (depth 30)", 30);
+  check_error(rt, "(depth 100)", "frame depth limit");
+  /* Tail calls reuse their frame. */
+  check_int(rt, "(let loop ((i 1000)) (if (= i 0) 7 (loop (- i 1))))", 7);
+  CHECK(ot_get_stats(rt).max_frames <= 40);
+  ot_destroy(rt);
+}
+
+TEST(heap_statistics) {
+  ot_state* rt = new_runtime(8192, 1024);
+  ot_stats before = ot_get_stats(rt);
+  check_int(rt, "(let loop ((i 1000) (p nil)) (if (= i 0) 1 (loop (- i 1) (cons i nil))))", 1);
+  ot_stats after = ot_get_stats(rt);
+  CHECK(after.collections > before.collections);
+  CHECK(after.heap_allocations >= before.heap_allocations + 1000);
+  CHECK(after.heap_allocated_bytes >= before.heap_allocated_bytes + 1000 * 24);
+  CHECK(after.heap_reclaimed_bytes > before.heap_reclaimed_bytes);
+  CHECK(after.heap_used <= after.heap_peak_used && after.heap_peak_used <= after.heap_capacity);
+  CHECK(after.heap_allocated_bytes == after.heap_used + after.heap_reclaimed_bytes);
+  ot_destroy(rt);
+}
+
 static const test_case tests[] = {
+    TEST_ENTRY(frame_limit),
+    TEST_ENTRY(heap_statistics),
     TEST_ENTRY(optional_arguments),
     TEST_ENTRY(apply_calls),
     TEST_ENTRY(apply_respects_stack_limit),

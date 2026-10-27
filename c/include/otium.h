@@ -58,6 +58,9 @@ const char* ot_string_data(ot_value v, size_t* length);
 ot_state* ot_create(size_t semispace_bytes, size_t stack_limit);
 void ot_destroy(ot_state* rt);
 bool ot_set_heap_limit(ot_state* rt, size_t semispace_bytes);
+/* Limit how many VM frames can be live at once. There is no limit by default
+ * beyond the stack limit. Zero, or fewer frames than are live, is refused. */
+bool ot_set_frame_limit(ot_state* rt, size_t frames);
 /* Copy host script metadata. NULL script means no script; strings are UTF-8. */
 bool ot_set_arguments(ot_state* rt, const char* script, size_t count, const char* const* arguments);
 
@@ -134,11 +137,15 @@ bool ot_flush_ports(ot_state* rt);
 void ot_write(ot_state* rt, FILE* out, ot_value value);
 void ot_print(ot_state* rt, FILE* out, ot_value value);
 
-/* Diagnostics. Foreign record counts include cached signatures and retained
- * library handles. allocations/bytes describe explicitly owned native buffers,
- * not process RSS. */
+/* Diagnostics. The heap fields describe the copying collector: capacity and
+ * limit are per semispace, copied bytes are what collections moved, and
+ * reclaimed bytes are what they freed. Foreign record counts include cached
+ * signatures and retained library handles. allocations/bytes describe
+ * explicitly owned native buffers, not process RSS. */
 typedef struct {
-  size_t collections, max_frames, heap_capacity;
+  size_t collections, max_frames, heap_capacity, heap_limit;
+  size_t heap_allocations, heap_allocated_bytes, heap_copied_bytes, heap_reclaimed_bytes;
+  size_t heap_used, heap_peak_used;
   size_t libraries, bindings, signatures, memory_records, allocations, bytes;
   size_t callbacks, callback_records;
 } ot_stats;

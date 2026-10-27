@@ -112,6 +112,10 @@ static void copy_live(oti_heap* h, const unsigned char* from, unsigned char* to)
     for (uint32_t i = 0; i < o->fields; i++) fields[i] = evacuate(h, fields[i], from, to, &used);
     scan += o->size;
   }
+  h->allocated_bytes += h->used - h->live_bytes;
+  h->reclaimed_bytes += h->used - used;
+  if (h->used > h->peak_used) h->peak_used = h->used;
+  h->live_bytes = used;
   h->used = used;
   h->collections++;
   h->copied_bytes += used;

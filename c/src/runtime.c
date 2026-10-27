@@ -176,6 +176,13 @@ bool oti_stack(ot_state* rt, size_t needed) {
 
 void ot_set_interrupt_flag(ot_state* rt, volatile sig_atomic_t* flag) { rt->interrupt_flag = flag; }
 
+bool ot_set_frame_limit(ot_state* rt, size_t frames) {
+  if (!frames || frames < rt->frame_count) return false;
+  rt->frame_limit = frames;
+  if (rt->frame_capacity > frames) rt->frame_capacity = frames;
+  return true;
+}
+
 bool ot_interrupted(const ot_state* rt) { return rt->interrupted; }
 
 bool ot_poll_interrupt(ot_state* rt) {
@@ -371,6 +378,7 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
   rt->process_values[1] = OT_NIL;
   oti_roots_push(&rt->heap, &rt->process_roots, rt->process_values, 2);
   rt->stack_limit = stack_limit;
+  rt->frame_limit = SIZE_MAX;
   const char* stress = getenv("OTIUM_GC_STRESS");
   rt->stress_gc = stress && *stress && strcmp(stress, "0");
   rt->required_namespace = UINT32_MAX;
@@ -840,9 +848,17 @@ bool ot_call(ot_state* rt, const char* name, const ot_value* args, size_t count,
 size_t ot_error_offset(const ot_state* rt) { return rt->error.offset; }
 
 ot_stats ot_get_stats(const ot_state* rt) {
-  ot_stats stats = {.collections = rt->heap.collections,
+  const oti_heap* h = &rt->heap;
+  ot_stats stats = {.collections = h->collections,
                     .max_frames = rt->max_frames,
-                    .heap_capacity = rt->heap.capacity};
+                    .heap_capacity = h->capacity,
+                    .heap_limit = h->limit,
+                    .heap_allocations = (size_t)h->next_identity,
+                    .heap_allocated_bytes = h->allocated_bytes + (h->used - h->live_bytes),
+                    .heap_copied_bytes = h->copied_bytes,
+                    .heap_reclaimed_bytes = h->reclaimed_bytes,
+                    .heap_used = h->used,
+                    .heap_peak_used = h->used > h->peak_used ? h->used : h->peak_used};
   oti_foreign_stats(rt, &stats);
   return stats;
 }

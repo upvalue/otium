@@ -566,7 +566,9 @@ struct ot_state {
   oti_function** functions;
   size_t function_count, function_capacity;
   oti_frame* frames;
-  size_t frame_count, frame_capacity, max_frames;
+  /* frame_capacity never exceeds frame_limit, so the call fast path needs no
+   * separate depth check. */
+  size_t frame_count, frame_capacity, max_frames, frame_limit;
   ot_value* handlers;
   size_t* handler_previous;
   size_t handler_count, handler_capacity, handler_previous_capacity, handler_top, callback_depth;

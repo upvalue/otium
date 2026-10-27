@@ -68,8 +68,12 @@ typedef struct {
 typedef struct {
   unsigned char* space[2];
   size_t capacity, limit, used, collections, copied_bytes;
+  /* Statistics, updated only by collections. live_bytes is the size after the
+   * last collection, so used - live_bytes is what has been allocated since. */
+  size_t allocated_bytes, reclaimed_bytes, peak_used, live_bytes;
   unsigned active;
-  uint32_t next_identity;
+  /* Counts every allocation; its low bits become object identities. */
+  uint64_t next_identity;
   oti_roots* roots;
 #ifdef OTIUM_CHECK_ROOTS
   oti_retired_space retired[OTI_RETIRED_SPACES];

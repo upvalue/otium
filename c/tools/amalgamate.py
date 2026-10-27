@@ -6,11 +6,16 @@ Writes three files to OUTPUT_DIR:
   otium.c  every internal header and runtime source, each included once
   main.c   the command-line launcher
 
-Build with: cc otium.c main.c $(pkg-config --cflags --libs libffi) -lm -ldl -pthread
+The development server's transport and the line editor are shared with Chez
+and stay separate, under native/. Build with:
+
+  cc -Inative otium.c main.c native/dev/transport.c native/utf8/utf8.c \
+     native/line/line-edit.c native/vendor/bestline/bestline.c \
+     -Inative/vendor/bestline $(pkg-config --cflags --libs libffi) -lm -ldl -pthread
 
 Local includes are expanded in place the first time they appear and dropped
 after that. #line directives keep compiler messages pointing at the original
-files. Sources are combined in the order given; main.c is copied, not combined.
+files. Sources are combined in the order given; main.c is expanded on its own.
 
 Usage: c/tools/amalgamate.py OUTPUT_DIR SOURCE...
 """
@@ -61,7 +66,10 @@ def main():
         expand(Path(source).resolve(), seen, out)
     (output / 'otium.c').write_text(''.join(out))
     shutil.copyfile(PUBLIC_HEADER, output / 'otium.h')
-    shutil.copyfile(SOURCE / 'main.c', output / 'main.c')
+    # main.c keeps its own copy of the launcher's option table.
+    launcher = []
+    expand(SOURCE / 'main.c', set(), launcher)
+    (output / 'main.c').write_text(''.join(launcher))
 
 
 if __name__ == '__main__':

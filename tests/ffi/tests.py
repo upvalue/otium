@@ -8,8 +8,6 @@ def ffi(t, program, *arguments, paths=(), **expected):
     fixtures = [library('ffi-fixture-17'), library('ffi-fixture-29')]
     options = ['--load', 'tests/ffi/support.ot', '--load', f'tests/ffi/runtime-{t.runtime}.ot']
     options += [part for path in paths for part in ('-L', path)]
-    if t.runtime == 'c' and t.stress:
-        options.append('--c.gc-force-compact')
     return t.expect(t.otium(*options, program, '--', *fixtures, *arguments), **expected)
 
 

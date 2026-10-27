@@ -259,7 +259,7 @@ static ot_value eval_in_namespace(ot_state* rt, size_t first, size_t count) {
 static ot_value exit_builtin(ot_state* rt, size_t first, size_t count) {
   if (count > 1 || (count && (!ot_is_int(rt->stack[first]) || ot_to_int(rt->stack[first]) < 0 ||
                               ot_to_int(rt->stack[first]) > 255))) {
-    oti_error(rt, "exit status must be an integer from 0 to 255");
+    oti_error(rt, "exit: expected integer status from 0 to 255");
     return 0;
   }
   rt->exit_status = count ? (int)ot_to_int(rt->stack[first]) : 0;

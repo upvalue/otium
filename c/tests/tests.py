@@ -59,13 +59,15 @@ def cli(t):
         return t.run([OTIUM, *args], stdin=stdin)
     for text in ('--repl', '--c.server', '--c.heap-max', '--c.gc-stats'):
         expect(t, run('--help'), 0, text)
-    expect(t, run(), 0, 'otium repl')
+    # The REPL prints a banner and prompts only on a terminal, so these check
+    # that it evaluates input.
+    t.expect(run(stdin='(+ 40 2)\n'), stdout='42\n')
     t.expect(run(FIXTURE), stdout='loaded-from-file\n')
-    expect(t, run(FIXTURE, '--repl'), 0, 'loaded-from-file\notium repl')
-    expect(t, run('--repl', FIXTURE), 0, 'loaded-from-file\notium repl')
+    t.expect(run(FIXTURE, '--repl', stdin='(+ 40 2)\n'), stdout='loaded-from-file\n42\n')
+    t.expect(run('--repl', FIXTURE, stdin='(+ 40 2)\n'), stdout='loaded-from-file\n42\n')
     t.expect(run('--load', FIXTURE, SECOND), stdout='loaded-from-file\nloaded-from-second-file\n')
-    expect(t, run('--repl', '--load', FIXTURE, SECOND), 0,
-           'loaded-from-file\nloaded-from-second-file\notium repl')
+    t.expect(run('--repl', '--load', FIXTURE, SECOND, stdin='(+ 40 2)\n'),
+             stdout='loaded-from-file\nloaded-from-second-file\n42\n')
     t.expect(run('c/tests/misplaced-shebang.ot'), status=1, stderr=['reserved # token'])
     script = t.scratch / 'script'
     script.write_text(f'#!{OTIUM} --no-project\n(println "shebang-ok")\n')
@@ -94,18 +96,13 @@ def gc_stats(t):
                           stats, re.M), 'missing', field, stats)
     capacity = re.search(r'^  heap capacity bytes: (\d+) ', stats, re.M)
     t.check(capacity and int(capacity[1]) > 0, 'no heap capacity', stats)
-    result = t.expect(t.run([OTIUM, '--c.gc-stats-json', '--c.gc-force-compact', FIXTURE]),
+    result = t.expect(t.run([OTIUM, '--c.gc-stats-json', FIXTURE]),
                       stdout='loaded-from-file\n', stderr=['OTIUM_GC_STATS '])
     line = next(line for line in result.stderr.splitlines() if line.startswith('OTIUM_GC_STATS '))
     fields = json.loads(line.removeprefix('OTIUM_GC_STATS '))
-    expected = set('''allocations collections allocated_bytes copied_bytes promoted_bytes moved_bytes
-        reclaimed_bytes mark_stack_overflows used_bytes peak_used_bytes capacity_bytes reserved_bytes
-        metadata_bytes fragmentation_bytes largest_free_region_bytes full_copy_collections
-        full_copy_total_pause_ns full_copy_max_pause_ns minor_collections minor_total_pause_ns
-        minor_max_pause_ns major_sweep_collections major_sweep_total_pause_ns
-        major_sweep_max_pause_ns major_compact_collections major_compact_total_pause_ns
-        major_compact_max_pause_ns mutator_pause_collections mutator_pause_total_ns
-        mutator_pause_max_ns'''.split())
+    # The collector copies between two semispaces; capacity and limit are per semispace.
+    expected = set('''allocations collections allocated_bytes copied_bytes reclaimed_bytes used_bytes
+        peak_used_bytes capacity_bytes limit_bytes'''.split())
     t.check(set(fields) == expected, 'GC stats fields differ', sorted(set(fields) ^ expected))
     t.check(all(isinstance(value, int) and value >= 0 for value in fields.values()), fields)
 
@@ -121,11 +118,13 @@ def repl(t):
     t.check(result.stderr == '', result)
     expect(t, run('(unwind-protect (exit 7) (println "exit-cleanup"))\n'), 7, 'exit-cleanup\n')
     expect(t, run('(println (try (exit 256) (catch (error? e) (condition-message e))))\n(quit)\n'), 0,
-           '`exit` expected status from 0 to 255\n')
+           'exit: expected integer status from 0 to 255\n')
     expect(t, run('(def hits (array)) (push! hits 1) (+ 1\n 2) (println "hits:" (length hits))\n(quit)\n'),
            0, 'hits: 1\n')
     expect(t, run('(println "a\n   \nb")\n(quit)\n'), 0, 'a\n   \nb\n')
-    result = t.expect(run('(+ 1\n'))
+    # Input ending inside a form fails, as in c cli preloads and arguments, but
+    # names the problem rather than a generic read error.
+    result = t.expect(run('(+ 1\n'), status=1)
     t.check('read error' not in result.stderr, 'incomplete input reported a read error', result)
 
 

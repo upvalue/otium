@@ -54,7 +54,8 @@ python = find_program('python3')
 subdir('c')
 # Built here so the launcher finds it at build/otium.
 otium = executable('otium', 'c/src/main.c',
-  c_args: runtime_args, dependencies: libotium_dep, override_options: runtime_options)
+  c_args: runtime_args, include_directories: native_include, link_with: line.get_static_lib(),
+  dependencies: libotium_dep, override_options: runtime_options)
 
 # The optional UI bridge: SDL_GPU rendering, SDL_ttf text and Yoga layout.
 sdl3 = dependency('sdl3', version: '>= 3.4.12', required: get_option('ui'))

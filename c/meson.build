@@ -43,7 +43,7 @@ libotium_dep = declare_dependency(link_with: libotium,
 amalgamation = custom_target('amalgamation',
   input: runtime_sources, output: ['otium.c', 'otium.h', 'main.c'],
   command: [python, files('tools/amalgamate.py'), '@OUTDIR@', '@INPUT@'],
-  depend_files: files('include/otium.h', 'src/main.c') + runtime_headers)
+  depend_files: files('include/otium.h', 'src/main.c', 'src/options.inc') + runtime_headers)
 otium_amalgamation = executable('otium-amalgamation', amalgamation[0], amalgamation[2],
   c_args: runtime_args, include_directories: native_include,
   link_with: [dev.get_static_lib(), line.get_static_lib()], dependencies: runtime_deps,

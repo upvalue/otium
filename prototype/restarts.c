@@ -134,7 +134,8 @@ bool oti_resume_restart(ot_runtime* rt, size_t stop_frames) {
   oti_restore_params(rt, scope.state.params);
   oti_restore_handlers(rt, scope.state.handlers, scope.state.handler_top);
   rt->sp = rt->stack_roots.count = scope.state.sp;
-  rt->frames[rt->frame_count - 1].ip = scope.state.target;
+  oti_frame* frame = &rt->frames[rt->frame_count - 1];
+  frame->pc = frame->fn->code + scope.state.target;
   rt->restart_pending = false;
   rt->error[0] = 0;
   rt->error_code = NULL;

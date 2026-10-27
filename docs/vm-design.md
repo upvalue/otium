@@ -46,12 +46,15 @@ Frame records stay in a separate array:
 
 ```c
 typedef struct {
-  uint32_t function;
-  size_t ip, base, floor;
+  oti_function* fn;
+  const oti_instruction* pc;
+  size_t base, floor;
 } Frame;
 ```
 
-`floor` is the stack height when the frame was entered. A call places the callee
+`pc` is where the frame resumes. Frames point at code directly because code is
+reclaimed only when no frames are live. `floor` is the stack height when the
+frame was entered. A call places the callee
 in register `R` of the caller with its arguments in `R+1 .. R+n`. The callee's
 frame starts at `base + R`, so arguments are already in place.
 
@@ -90,9 +93,12 @@ a non-tail scope ends. Precise liveness waits for slot maps.
 ## Dispatch
 
 One function, `dispatch`, runs instructions until the frame count returns to
-the caller's stop depth. It keeps `pc`, the register pointer, the current
-function and the constants pointer in locals, and reloads them from the frame
-record only after calls, returns, errors and calls out to C.
+the caller's stop depth. It keeps `pc`, the register pointer and the current
+function in locals, and reloads them from the frame record only after calls,
+returns, errors and calls out to C. Dispatch reads only the opcode; handlers
+read operand fields from the instruction where they use them. Runtime fields
+are read into locals before stack stores in the call path, since a store to a
+stack slot could otherwise alias them.
 
 Each handler is written once with `CASE(op)` and `NEXT()` macros. With GCC or
 Clang they expand to computed goto (a label table indexed by opcode, one
@@ -100,9 +106,9 @@ indirect jump per handler). Defining `OTIUM_VM_SWITCH` builds a portable
 `switch` loop instead; `make test-switch` builds and runs the C tests that way. A
 tail-call (`musttail`) version can be added later from the same handlers.
 
-The interrupt flag is checked at function entry and on backward jumps, not on
-every instruction. Errors exit `dispatch` and are handled by the existing
-unwinding loop (`rt_drive`), which finds try frames, cleanups and restarts as
+The interrupt flag is checked at function entry and on backward jumps,
+conditional or not, but not on every instruction. Errors exit `dispatch` and are handled by the existing
+unwinding loop (`oti_drive`), which finds try frames, cleanups and restarts as
 before and then re-enters `dispatch`.
 
 ## Instruction set
@@ -140,6 +146,7 @@ Control:
 | `CALL a b` | call `rA` with `rA+1 .. rA+b`, result in `rA` |
 | `TAIL_CALL a b` | tail call |
 | `RETURN a` | return `rA` |
+| `RETURN_IMM bc` | return the immediate in `bc`, as `IMM` loads it |
 
 Primitive operations write `rA` from `rB` and `rC`:
 
@@ -154,7 +161,9 @@ forms) and jump to the target in the following word when the result equals the
 needs; `not` and `unless` set `x = 1` instead of adding opcodes:
 
 `BR_LT BR_LE BR_GT BR_GE BR_NUMEQ BR_EQ`, the immediate forms
-`BR_LTI BR_LEI BR_GTI BR_GEI BR_NUMEQI`, and `BR_NULL BR_PAIR`.
+`BR_LTI BR_LEI BR_GTI BR_GEI BR_NUMEQI`, `BR_NULL BR_PAIR`, and `BR_EQK`,
+which tests `rA` against the constant `K[bc]`. Code reclamation finds
+constants through `BR_EQK` as well as `CONST`.
 
 Dynamic state, ported from the stack VM:
 
@@ -179,11 +188,13 @@ capacity, pushes a frame record, sets unbound only the registers that lie above
 the old `sp`, and continues in the callee without leaving `dispatch`. No C call
 is made.
 
-Everything else goes through the existing slow path (`rt_apply`/`rt_enter`):
+Builtins other than `apply` are called directly from `CALL` and `TAIL_CALL`
+with their interface, `oti_builtin(rt, id, first, count)`, and arguments read
+from the caller's registers.
+
+Everything else goes through the existing slow path (`oti_apply`/`oti_enter`):
 `apply`, rest lists, optionals, generic functions, macros used as functions,
-builtins, foreign functions, parameters, records, instances and callable
-collections. Builtins keep their interface, `rt_builtin(rt, id, first, count)`,
-with arguments read from the caller's registers.
+foreign functions, parameters, records, instances and callable collections.
 
 `TAIL_CALL` moves the callee and arguments to the current frame's base and
 re-enters the same frame record. A builtin in tail position is called and its
@@ -223,7 +234,18 @@ once. Boxed parameters are boxed by `BOX` instructions at function entry.
 assigned elsewhere. This avoids a box for every self-recursive local function.
 A call to self in tail position with exactly the function's arity, and no
 optional or rest parameters, becomes moves into the parameter registers and a
-backward jump. Named-`let` and `for` loops become real loops.
+backward jump. Arguments are evaluated into temporaries first. An argument that
+is its own parameter, unchanged, needs no move, and the last argument is
+computed straight into its parameter when it is a leaf or an inline primitive,
+which read their operands before writing.
+
+**Loops.** A named `let` in tail position is compiled into the enclosing frame:
+its variables are registers there, and a tail call to its name from its body
+is moves and a jump to the loop's start, where boxed variables get fresh boxes.
+Any other use of the name (a call that is not in tail position, a reference as
+a value, a capture by a closure or an assignment) is a fact, as for boxes, and
+the form is compiled again with the loop as a function. A `while` loop puts its
+test after the body, so an iteration takes one branch.
 
 **Primitive operations.** A call whose head is not shadowed by a local and
 names the builtin's own `otium.core` cell, with the arity the opcode handles,
@@ -240,7 +262,16 @@ builtins stay redefinable for now.
 
 **Tests and branches.** `if`, `when`, `unless`, `cond`, `and`, `or` and `while`
 compile their tests in a jump-on-false context. A primitive comparison in that
-context becomes a fused compare and branch, and `not` swaps the branch.
+context becomes a fused compare and branch, and `not` swaps the branch. An
+`eq?` with a literal or quoted operand becomes `BR_EQK`. Where `and` or `or`
+is used for its value, an operand other than the last that is a comparison,
+type predicate or `not` yields `#t` or `#f`, so it branches straight to the
+result it decides; other operands leave their own value, which may be `nil`.
+
+**Results.** A bound local in tail position is returned from its own register,
+and an immediate constant with `RETURN_IMM`. An expression evaluated only for
+its effects drops a final store of a constant or copy into its unused result,
+unless a jump lands after it.
 
 **Global definitions** keep going through global cells, so redefinition is
 visible to every caller, including self-recursive global functions.

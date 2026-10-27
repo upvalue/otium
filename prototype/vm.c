@@ -17,11 +17,13 @@
 #define VM_UNLIKELY(x) (x)
 #endif
 
+#define VM_APPLY (((ot_value)B_APPLY << 8) | TAG_BUILTIN)
+
 static void vm_height(ot_runtime* rt, size_t sp) { rt->sp = rt->stack_roots.count = sp; }
 
 /* A frame's top covers its registers and everything live below its entry. */
-static size_t vm_top(ot_runtime* rt, const oti_frame* frame) {
-  size_t top = frame->base + 1 + rt->functions[frame->function]->locals;
+static size_t vm_top(const oti_frame* frame) {
+  size_t top = frame->base + 1 + frame->fn->locals;
   return top > frame->floor ? top : frame->floor;
 }
 
@@ -94,7 +96,7 @@ bool oti_enter(ot_runtime* rt, size_t call, size_t argc, bool tail) {
   if (fn->rest) rt->stack[base + 1 + fn->arity] = rest;
   vm_height(rt, top > floor ? top : floor);
   if (!tail) rt->frame_count++;
-  rt->frames[rt->frame_count - 1] = (oti_frame){id, 0, base, floor};
+  rt->frames[rt->frame_count - 1] = (oti_frame){fn, fn->code, base, floor};
   if (rt->frame_count > rt->max_frames) rt->max_frames = rt->frame_count;
   return true;
 }
@@ -108,8 +110,7 @@ bool oti_leave(ot_runtime* rt, ot_value result) {
 }
 
 bool oti_apply(ot_runtime* rt, size_t call, size_t argc, bool tail) {
-  const ot_value apply = ((ot_value)B_APPLY << 8) | TAG_BUILTIN;
-  while (rt->stack[call] == apply) {
+  while (rt->stack[call] == VM_APPLY) {
     if (argc < 2) return oti_error(rt, "apply needs a callable and a final argument sequence");
     ot_value list = rt->stack[call + argc];
     bool array = oti_kind(list, K_ARRAY);
@@ -164,7 +165,7 @@ bool oti_execute(ot_runtime* rt, uint32_t function, ot_value* result) {
 
 bool oti_invoke(ot_runtime* rt, size_t argc, ot_value* result) {
   ot_value callable = rt->stack[0];
-  if (callable == (((ot_value)B_APPLY << 8) | TAG_BUILTIN)) {
+  if (callable == VM_APPLY) {
     if (!oti_apply(rt, 0, argc, false)) return false;
   } else if (vm_primitive(callable)) {
     ot_value answer = vm_call_primitive(rt, 0, argc);
@@ -314,24 +315,28 @@ static bool dispatch(ot_runtime* rt, size_t stop_frames) {
   const oti_instruction *code, *pc;
   ot_value* R;
   size_t base;
-  oti_instruction ins;
+  /* The running instruction. Handlers read its fields where they need them,
+   * so dispatch decodes only the opcode. */
+  const oti_instruction* in;
+#define ins (*in)
   ot_value v;
+  size_t argc;
 
 #define LOAD_FRAME()                                                                               \
   do {                                                                                             \
     frame = &rt->frames[rt->frame_count - 1];                                                      \
-    fn = rt->functions[frame->function];                                                           \
+    fn = frame->fn;                                                                                \
     code = fn->code;                                                                               \
-    pc = code + frame->ip;                                                                         \
+    pc = frame->pc;                                                                                \
     base = frame->base;                                                                            \
     R = rt->stack + base;                                                                          \
   } while (0)
-#define SAVE_IP() (frame->ip = (size_t)(pc - code))
+#define SAVE_IP() (frame->pc = pc)
   /* Resume the top frame after a call out to C, which may have moved the stack. */
 #define RELOAD()                                                                                   \
   do {                                                                                             \
     LOAD_FRAME();                                                                                  \
-    vm_height(rt, vm_top(rt, frame));                                                              \
+    vm_height(rt, vm_top(frame));                                                                  \
   } while (0)
 #define FAIL()                                                                                     \
   do {                                                                                             \
@@ -346,6 +351,15 @@ static bool dispatch(ot_runtime* rt, size_t stop_frames) {
     }                                                                                              \
   } while (0)
 #define TARGET(word) (code + oti_instruction_bc(word))
+  /* Loops are made of backward jumps, so those check for interrupts. */
+#define JUMP_TO(target)                                                                            \
+  do {                                                                                             \
+    const oti_instruction* target_ = (target);                                                     \
+    if (target_ < pc) {                                                                            \
+      pc = target_;                                                                                \
+      SAFEPOINT();                                                                                 \
+    } else pc = target_;                                                                           \
+  } while (0)
 
 #if VM_THREADED
   static const void* const labels[OP_COUNT] = {
@@ -371,6 +385,7 @@ static bool dispatch(ot_runtime* rt, size_t stop_frames) {
       [OP_CALL] = &&L_OP_CALL,
       [OP_TAIL_CALL] = &&L_OP_TAIL_CALL,
       [OP_RETURN] = &&L_OP_RETURN,
+      [OP_RETURN_IMM] = &&L_OP_RETURN_IMM,
       [OP_TRY] = &&L_OP_TRY,
       [OP_END_TRY] = &&L_OP_END_TRY,
       [OP_RAISE] = &&L_OP_RAISE,
@@ -413,12 +428,13 @@ static bool dispatch(ot_runtime* rt, size_t stop_frames) {
       [OP_BR_NUMEQI] = &&L_OP_BR_NUMEQI,
       [OP_BR_NULL] = &&L_OP_BR_NULL,
       [OP_BR_PAIR] = &&L_OP_BR_PAIR,
+      [OP_BR_EQK] = &&L_OP_BR_EQK,
   };
 #define CASE(op) L_##op:
 #define NEXT()                                                                                     \
   do {                                                                                             \
-    ins = *pc++;                                                                                   \
-    goto* labels[ins.op];                                                                          \
+    in = pc++;                                                                                     \
+    goto* labels[in->op];                                                                          \
   } while (0)
 #else
 #define CASE(op) case op:
@@ -430,8 +446,8 @@ static bool dispatch(ot_runtime* rt, size_t stop_frames) {
   NEXT();
 #else
 next:
-  ins = *pc++;
-  switch (ins.op) {
+  in = pc++;
+  switch (in->op) {
 #endif
 
   CASE(OP_MOVE) {
@@ -446,19 +462,24 @@ next:
     R[ins.a] = rt->constants[oti_instruction_bc(ins)];
     NEXT();
   }
+  /* v = G[bc]. The eval builtin is read as an evaluator for this namespace. */
+#define LOAD_GLOBAL()                                                                              \
+  do {                                                                                             \
+    uint32_t index_ = oti_instruction_bc(ins);                                                     \
+    v = rt->globals[index_];                                                                       \
+    if (VM_UNLIKELY(v == (((ot_value)B_EVAL << 8) | TAG_BUILTIN))) {                               \
+      SAVE_IP();                                                                                   \
+      v = oti_evaluator(rt, fn->namespace);                                                        \
+      if (!v) return false;                                                                        \
+      RELOAD();                                                                                    \
+    }                                                                                              \
+    if (VM_UNLIKELY(v == V_UNBOUND)) {                                                             \
+      vm_unbound_global(rt, index_);                                                               \
+      FAIL();                                                                                      \
+    }                                                                                              \
+  } while (0)
   CASE(OP_GLOBAL) {
-    uint32_t index = oti_instruction_bc(ins);
-    v = rt->globals[index];
-    if (VM_UNLIKELY(v == (((ot_value)B_EVAL << 8) | TAG_BUILTIN))) {
-      SAVE_IP();
-      v = oti_evaluator(rt, fn->namespace);
-      if (!v) return false;
-      RELOAD();
-    }
-    if (VM_UNLIKELY(v == V_UNBOUND)) {
-      vm_unbound_global(rt, index);
-      FAIL();
-    }
+    LOAD_GLOBAL();
     R[ins.a] = v;
     NEXT();
   }
@@ -535,19 +556,15 @@ next:
     NEXT();
   }
   CASE(OP_JUMP) {
-    const oti_instruction* target = TARGET(ins);
-    if (target < pc) {
-      pc = target;
-      SAFEPOINT();
-    } else pc = target;
+    JUMP_TO(TARGET(ins));
     NEXT();
   }
   CASE(OP_JFALSE) {
-    if (!oti_truth(R[ins.a])) pc = TARGET(ins);
+    if (!oti_truth(R[ins.a])) JUMP_TO(TARGET(ins));
     NEXT();
   }
   CASE(OP_JTRUE) {
-    if (oti_truth(R[ins.a])) pc = TARGET(ins);
+    if (oti_truth(R[ins.a])) JUMP_TO(TARGET(ins));
     NEXT();
   }
   CASE(OP_JBOUND) {
@@ -556,69 +573,102 @@ next:
   }
   CASE(OP_CALL) {
     v = R[ins.a];
+    argc = ins.b;
     if (VM_LIKELY(oti_kind(v, K_CLOSURE))) {
       uint32_t id;
       memcpy(&id, object_bytes(v), sizeof(id));
       oti_function* callee = rt->functions[id];
+      /* Runtime fields are read before any store: a stack store could alias them. */
       size_t callee_base = base + ins.a, top = callee_base + 1 + callee->locals, old = rt->sp;
-      if (VM_LIKELY(ins.b == callee->arity && !callee->optional && !callee->rest &&
-                    top <= rt->stack_capacity && top <= rt->stack_limit &&
-                    rt->frame_count < rt->frame_capacity)) {
+      size_t count = rt->frame_count;
+      if (VM_LIKELY(argc == callee->arity && !callee->variadic && top <= rt->stack_room &&
+                    count < rt->frame_capacity)) {
+        ot_value* stack = rt->stack;
         SAVE_IP();
-        /* Slots above the old height may hold pointers made stale by a collection. */
-        for (size_t i = old; i < top; i++) rt->stack[i] = V_UNBOUND;
-        if (top > old) vm_height(rt, top);
-        frame = &rt->frames[rt->frame_count++];
-        *frame = (oti_frame){id, 0, callee_base, old};
-        if (rt->frame_count > rt->max_frames) rt->max_frames = rt->frame_count;
+        frame = rt->frames + count++;
+        rt->frame_count = count;
+        if (count > rt->max_frames) rt->max_frames = count;
+        *frame = (oti_frame){callee, callee->code, callee_base, old};
+        if (top > old) {
+          /* Slots above the old height may hold pointers made stale by a collection. */
+          for (size_t i = old; i < top; i++) stack[i] = V_UNBOUND;
+          vm_height(rt, top);
+        }
         fn = callee;
         code = pc = callee->code;
         base = callee_base;
-        R = rt->stack + base;
+        R = stack + base;
         SAFEPOINT();
         NEXT();
       }
+    } else if ((v & 255) == TAG_BUILTIN && v != VM_APPLY) {
+      SAVE_IP();
+      v = oti_builtin(rt, (unsigned)(v >> 8), base + ins.a + 1, argc);
+      if (!v || rt->error[0]) return false;
+      RELOAD();
+      R[ins.a] = v;
+      SAFEPOINT();
+      NEXT();
     }
     SAVE_IP();
-    if (!oti_apply(rt, base + ins.a, ins.b, false)) return false;
+    if (!oti_apply(rt, base + ins.a, argc, false)) return false;
     RELOAD();
     SAFEPOINT();
     NEXT();
   }
   CASE(OP_TAIL_CALL) {
     v = R[ins.a];
+    argc = ins.b;
     if (VM_LIKELY(oti_kind(v, K_CLOSURE))) {
       uint32_t id;
       memcpy(&id, object_bytes(v), sizeof(id));
       oti_function* callee = rt->functions[id];
-      size_t top = base + 1 + callee->locals, old = rt->sp;
-      if (VM_LIKELY(ins.b == callee->arity && !callee->optional && !callee->rest &&
-                    top <= rt->stack_capacity && top <= rt->stack_limit)) {
-        memmove(R, R + ins.a, ((size_t)ins.b + 1) * sizeof(ot_value));
-        for (size_t i = old > base + 1 + ins.b ? old : base + 1 + ins.b; i < top; i++)
-          rt->stack[i] = V_UNBOUND;
-        vm_height(rt, top > frame->floor ? top : frame->floor);
-        frame->function = id;
+      size_t top = base + 1 + callee->locals, old = rt->sp, floor = frame->floor;
+      if (VM_LIKELY(argc == callee->arity && !callee->variadic && top <= rt->stack_room)) {
+        ot_value* stack = rt->stack;
+        memmove(R, R + ins.a, ((size_t)argc + 1) * sizeof(ot_value));
+        for (size_t i = old > base + 1 + argc ? old : base + 1 + argc; i < top; i++)
+          stack[i] = V_UNBOUND;
+        vm_height(rt, top > floor ? top : floor);
+        frame->fn = callee;
         fn = callee;
         code = pc = callee->code;
         SAFEPOINT();
         NEXT();
       }
+    } else if ((v & 255) == TAG_BUILTIN && v != VM_APPLY) {
+      SAVE_IP();
+      v = oti_builtin(rt, (unsigned)(v >> 8), base + ins.a + 1, argc);
+      if (!v || rt->error[0]) return false;
+      RELOAD();
+      goto return_value;
     }
     SAVE_IP();
-    if (!oti_apply(rt, base + ins.a, ins.b, true)) return false;
+    if (!oti_apply(rt, base + ins.a, argc, true)) return false;
     if (rt->frame_count <= stop_frames) return true;
     RELOAD();
     SAFEPOINT();
     NEXT();
   }
+  CASE(OP_RETURN_IMM) {
+    v = (ot_value)(intptr_t)(int32_t)oti_instruction_bc(ins);
+    goto return_value;
+  }
   CASE(OP_RETURN) {
-    size_t floor = frame->floor;
-    R[0] = R[ins.a];
-    rt->frame_count--;
+    v = R[ins.a];
+  return_value:;
+    size_t floor = frame->floor, count = rt->frame_count - 1;
+    ot_value* stack = rt->stack;
+    R[0] = v;
+    rt->frame_count = count;
     vm_height(rt, floor > base ? floor : base + 1);
-    if (rt->frame_count <= stop_frames) return true;
-    LOAD_FRAME();
+    if (count <= stop_frames) return true;
+    frame--;
+    fn = frame->fn;
+    code = fn->code;
+    pc = frame->pc;
+    base = frame->base;
+    R = stack + base;
     NEXT();
   }
   CASE(OP_TRY) {
@@ -675,7 +725,7 @@ next:
     NEXT();
   }
   CASE(OP_RESULT) {
-    R[ins.a] = rt->stack[vm_top(rt, frame)];
+    R[ins.a] = rt->stack[vm_top(frame)];
     NEXT();
   }
   CASE(OP_END_RESTARTS) {
@@ -779,7 +829,7 @@ next:
 
 #define BRANCH_IF(test)                                                                            \
   do {                                                                                             \
-    if ((test) == (ins.x != 0)) pc = TARGET(*pc);                                                  \
+    if ((test) == (ins.x != 0)) JUMP_TO(TARGET(*pc));                                              \
     else pc++;                                                                                     \
     NEXT();                                                                                        \
   } while (0)
@@ -805,6 +855,7 @@ next:
   CASE(OP_BR_EQ) { BRANCH_IF(R[ins.a] == R[ins.b]); }
   CASE(OP_BR_NULL) { BRANCH_IF(R[ins.a] == OT_EMPTY); }
   CASE(OP_BR_PAIR) { BRANCH_IF(oti_kind(R[ins.a], K_PAIR)); }
+  CASE(OP_BR_EQK) { BRANCH_IF(R[ins.a] == rt->constants[oti_instruction_bc(ins)]); }
 
   CASE(OP_EQ) {
     R[ins.a] = R[ins.b] == R[ins.c] ? OT_TRUE : OT_FALSE;
@@ -850,6 +901,8 @@ next:
 #undef FAIL
 #undef SAFEPOINT
 #undef TARGET
+#undef LOAD_GLOBAL
+#undef JUMP_TO
 #undef CASE
 #undef NEXT
 #undef SLOW
@@ -858,6 +911,7 @@ next:
 #undef COMPARE
 #undef BRANCH_IF
 #undef BRANCH_COMPARE
+#undef ins
 }
 
 bool oti_drive(ot_runtime* rt, size_t stop_frames) {
@@ -892,7 +946,8 @@ bool oti_drive(ot_runtime* rt, size_t stop_frames) {
     rt->signaled = false;
     rt->stack[handler.slot] = condition;
     rt->condition_values[0] = OT_NIL;
-    rt->frames[rt->frame_count - 1].ip = handler.target;
+    oti_frame* frame = &rt->frames[rt->frame_count - 1];
+    frame->pc = frame->fn->code + handler.target;
   }
   return true;
 }
@@ -918,7 +973,7 @@ ot_value oti_call_list(ot_runtime* rt, ot_value function, ot_value args) {
     return 0;
   }
   rt->callback_depth++;
-  rt->stack[base] = ((ot_value)B_APPLY << 8) | TAG_BUILTIN;
+  rt->stack[base] = VM_APPLY;
   rt->stack[base + 1] = function;
   rt->stack[base + 2] = args;
   vm_height(rt, base + 3);

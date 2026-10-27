@@ -355,6 +355,8 @@ typedef enum {
   OP_CALL,
   OP_TAIL_CALL,
   OP_RETURN,
+  /* Return the 32-bit immediate in bc, sign extended, as IMM loads it. */
+  OP_RETURN_IMM,
   OP_TRY,
   OP_END_TRY,
   OP_RAISE,
@@ -398,6 +400,8 @@ typedef enum {
   OP_BR_NUMEQI,
   OP_BR_NULL,
   OP_BR_PAIR,
+  /* Branch on rA being the constant K[bc]. */
+  OP_BR_EQK,
   OP_COUNT
 } oti_opcode;
 
@@ -423,14 +427,17 @@ typedef struct {
   size_t locals, arity, optional;
   oti_capture* captures;
   size_t capture_count, capture_capacity;
-  bool rest, evaluator;
+  /* variadic is rest || optional, so a call can check its arity with one test. */
+  bool rest, variadic, evaluator;
   uint32_t namespace;
 } oti_function;
 
-/* floor is the stack height when the frame was entered. */
+/* floor is the stack height when the frame was entered. pc is where the frame
+ * resumes. Code is only reclaimed when no frames are live. */
 typedef struct {
-  uint32_t function;
-  size_t ip, base, floor;
+  oti_function* fn;
+  const oti_instruction* pc;
+  size_t base, floor;
 } oti_frame;
 
 /* slot receives a caught condition; sp is the frame top to restore. */
@@ -509,6 +516,8 @@ struct ot_runtime {
   uint32_t current_namespace, required_namespace;
   oti_module_state* modules;
   size_t sp, stack_capacity, stack_limit;
+  /* Slots usable without growing the stack: the lesser of capacity and limit. */
+  size_t stack_room;
   oti_function** functions;
   size_t function_count, function_capacity;
   oti_frame* frames;

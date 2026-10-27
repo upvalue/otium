@@ -10,17 +10,23 @@
  * compiled again when a later fact changes an earlier decision. Facts are
  * numbered in binding creation order, which is the same on every attempt. */
 
-enum { BIND_LOCAL, BIND_SELF };
+/* A loop binding names a named let compiled as a loop in the enclosing frame:
+ * reg is its first variable and target its first instruction. */
+enum { BIND_LOCAL, BIND_SELF, BIND_LOOP };
 
 typedef struct {
   const oti_ast* name;
   uint32_t reg, fact;
   unsigned char kind;
   bool boxed, initialized;
+  uint32_t count;
+  size_t target;
 } oti_binding;
 
+/* escaped is set for a named let whose name is used other than by tail calls
+ * from its own body, which needs a real function. */
 typedef struct {
-  bool captured, assigned, early;
+  bool captured, assigned, early, escaped;
 } oti_fact;
 
 typedef struct {
@@ -58,13 +64,15 @@ struct oti_compiler {
   size_t upname_capacity, upfact_capacity;
   /* Next free register, and the lowest top that keeps every binding. */
   uint32_t top, pinned;
+  /* The highest forward jump target patched so far. */
+  size_t label;
   unsigned scope;
   bool definitions;
   oti_arena* expansion_arena;
   size_t* expansions;
 };
 
-typedef enum { REF_LOCAL, REF_SELF, REF_UPVALUE, REF_GLOBAL } oti_ref_kind;
+typedef enum { REF_LOCAL, REF_SELF, REF_LOOP, REF_UPVALUE, REF_GLOBAL } oti_ref_kind;
 
 typedef struct {
   oti_ref_kind kind;
@@ -124,6 +132,7 @@ static bool patch_to(oti_compiler* c, size_t at, size_t target) {
   if (target > UINT32_MAX) return oti_error(c->rt, "function too large");
   c->fn->code[at].b = (uint16_t)(target & 0xffff);
   c->fn->code[at].c = (uint16_t)(target >> 16);
+  if (target > c->label) c->label = target;
   return true;
 }
 
@@ -137,12 +146,16 @@ static bool jumps_add(oti_compiler* c, oti_jumps* jumps, size_t at) {
   return true;
 }
 
-static bool jumps_patch(oti_compiler* c, oti_jumps* jumps) {
+static bool jumps_patch_to(oti_compiler* c, oti_jumps* jumps, size_t target) {
   bool ok = true;
-  for (size_t i = 0; ok && i < jumps->count; i++) ok = patch(c, jumps->items[i]);
+  for (size_t i = 0; ok && i < jumps->count; i++) ok = patch_to(c, jumps->items[i], target);
   free(jumps->items);
   *jumps = (oti_jumps){0};
   return ok;
+}
+
+static bool jumps_patch(oti_compiler* c, oti_jumps* jumps) {
+  return jumps_patch_to(c, jumps, c->fn->count);
 }
 
 static uint32_t next_register(oti_compiler* c) {
@@ -166,12 +179,22 @@ static bool move(oti_compiler* c, uint32_t dst, uint32_t src) {
   return dst == src || emit(c, OP_MOVE, dst, src, 0) != SIZE_MAX;
 }
 
+static bool immediate(ot_value value) {
+  return !value_is_ptr(value) && (ot_value)(intptr_t)(int32_t)value == value;
+}
+
 static bool load_constant(oti_compiler* c, ot_value value, uint32_t dst) {
   if (!value) return false;
-  if (!value_is_ptr(value) && (ot_value)(intptr_t)(int32_t)value == value)
-    return emit_bc(c, OP_IMM, dst, (uint32_t)value) != SIZE_MAX;
+  if (immediate(value)) return emit_bc(c, OP_IMM, dst, (uint32_t)value) != SIZE_MAX;
   uint32_t index = oti_constant(c->rt, value);
   return index != UINT32_MAX && emit_bc(c, OP_CONST, dst, index) != SIZE_MAX;
+}
+
+/* A constant in dst, returned when in tail position. */
+static bool constant_result(oti_compiler* c, ot_value value, uint32_t dst, bool tail) {
+  if (value && tail && immediate(value))
+    return emit_bc(c, OP_RETURN_IMM, 0, (uint32_t)value) != SIZE_MAX;
+  return load_constant(c, value, dst) && finish(c, dst, tail);
 }
 
 static bool load_builtin(oti_compiler* c, unsigned id, uint32_t dst) {
@@ -235,7 +258,8 @@ static size_t bind_fact(oti_compiler* c, const oti_ast* name, uint32_t reg, bool
                                        c->binding_count + 1, sizeof(oti_binding)))
     return SIZE_MAX;
   bool boxed = needs_box(fact(c, index));
-  c->bindings[c->binding_count] = (oti_binding){name, reg, index, BIND_LOCAL, boxed, initialized};
+  c->bindings[c->binding_count] =
+      (oti_binding){name, reg, index, BIND_LOCAL, boxed, initialized, 0, 0};
   if (reg + 1 > c->pinned) c->pinned = reg + 1;
   return c->binding_count++;
 }
@@ -276,7 +300,12 @@ static bool capture(oti_compiler* c, const oti_ast* name, uint32_t* index) {
   if (b != SIZE_MAX) {
     oti_binding* binding = &p->bindings[b];
     origin = binding->fact;
-    if (binding->kind == BIND_SELF) source = (oti_capture){0, true, false};
+    if (binding->kind == BIND_LOOP) {
+      /* The loop needs a function; this attempt is discarded. */
+      fact(c, origin)->escaped = true;
+      c->unit->retry = true;
+      source = (oti_capture){0, true, false};
+    } else if (binding->kind == BIND_SELF) source = (oti_capture){0, true, false};
     else {
       oti_fact* f = fact(c, origin);
       f->captured = true;
@@ -311,6 +340,12 @@ static bool resolve(oti_compiler* c, const oti_ast* name, oti_reference* ref) {
   size_t b = find_binding(c, name);
   if (b != SIZE_MAX) {
     oti_binding* binding = &c->bindings[b];
+    if (binding->kind == BIND_LOOP) {
+      fact(c, binding->fact)->escaped = true;
+      c->unit->retry = true;
+      *ref = (oti_reference){REF_LOOP, 0, binding->fact, b, false};
+      return true;
+    }
     *ref = (oti_reference){binding->kind == BIND_SELF ? REF_SELF : REF_LOCAL, binding->reg,
                            binding->fact, b, binding->boxed};
     return true;
@@ -335,6 +370,8 @@ static bool load(oti_compiler* c, const oti_reference* ref, uint32_t dst) {
         return false;
       return move(c, dst, ref->index);
     case REF_SELF: return move(c, dst, 0);
+    /* Escaped loops are compiled again as functions. */
+    case REF_LOOP: return load_constant(c, OT_NIL, dst);
     case REF_UPVALUE:
       return emit(c, ref->boxed ? OP_UPVALUE_BOX : OP_UPVALUE, dst, ref->index, 0) != SIZE_MAX;
     case REF_GLOBAL: return emit_bc(c, OP_GLOBAL, dst, ref->index) != SIZE_MAX;
@@ -348,13 +385,15 @@ static bool assign(oti_compiler* c, const oti_reference* ref, uint32_t src) {
   if (ref->fact != UINT32_MAX) {
     oti_fact* f = fact(c, ref->fact);
     f->assigned = true;
-    if (ref->kind == REF_SELF || (needs_box(f) && !ref->boxed)) c->unit->retry = true;
+    if (ref->kind == REF_SELF || ref->kind == REF_LOOP || (needs_box(f) && !ref->boxed))
+      c->unit->retry = true;
   }
   switch (ref->kind) {
     case REF_LOCAL:
       if (ref->boxed) return emit(c, OP_SET_BOX, ref->index, src, 0) != SIZE_MAX;
       return move(c, ref->index, src);
-    case REF_SELF: return true;
+    case REF_SELF:
+    case REF_LOOP: return true;
     case REF_UPVALUE: return emit(c, OP_SET_UPVALUE, src, ref->index, 0) != SIZE_MAX;
     case REF_GLOBAL: return emit_bc(c, OP_SET_GLOBAL, src, ref->index) != SIZE_MAX;
   }
@@ -706,10 +745,21 @@ static const oti_ast* expand_head(oti_compiler* c, const oti_ast* a) {
   return a;
 }
 
+/* Drop a final store of a constant or copy into the unused register t, made
+ * since start, unless a jump lands after it. */
+static void drop_unused(oti_compiler* c, size_t start, uint32_t t) {
+  oti_function* f = c->fn;
+  if (f->count <= start || c->label >= f->count) return;
+  oti_instruction last = f->code[f->count - 1];
+  if ((last.op == OP_IMM || last.op == OP_CONST || last.op == OP_MOVE) && last.a == t) f->count--;
+}
+
 /* Evaluate an expression for its effects only. */
 static bool effect(oti_compiler* c, const oti_ast* a) {
   uint32_t saved = c->top, t = next_register(c);
+  size_t start = c->fn->count;
   bool ok = expression(c, a, t, false);
+  if (ok) drop_unused(c, start, t);
   release(c, saved);
   return ok;
 }
@@ -807,7 +857,7 @@ static bool lambda(oti_compiler* c, const oti_ast* params, const oti_ast* forms,
     ok = oti_grow(c->rt, (void**)&child.bindings, &child.binding_capacity, 1, sizeof(oti_binding));
     if (ok)
       child.bindings[child.binding_count++] =
-          (oti_binding){self, 0, self_fact, BIND_SELF, false, true};
+          (oti_binding){self, 0, self_fact, BIND_SELF, false, true, 0, 0};
   }
   const oti_ast* rest = params->kind == AST_SYMBOL ? params : params->as.list.tail;
   const oti_ast* first = params->kind == AST_LIST ? params->as.list.first : NULL;
@@ -890,6 +940,7 @@ static bool lambda(oti_compiler* c, const oti_ast* params, const oti_ast* forms,
     ok = present != SIZE_MAX && expression(&child, name->next, optional_slot, false) &&
          patch(&child, present) && bind_value(&child, name, optional_slot);
   }
+  child.fn->variadic = child.fn->rest || child.fn->optional;
   if (forms && forms->kind == AST_STRING && forms->next) forms = forms->next;
   if (ok) ok = body(&child, forms, next_register(&child), true, true);
   free(child.bindings);
@@ -919,12 +970,40 @@ static bool body(oti_compiler* c, const oti_ast* forms, uint32_t dst, bool tail,
         return false;
     }
   }
-  if (!forms) return load_constant(c, OT_NIL, dst) && finish(c, dst, tail);
+  if (!forms) return constant_result(c, OT_NIL, dst, tail);
   for (const oti_ast* a = forms; a; a = a->next) {
     c->definitions = definitions;
     if (!(a->next ? effect(c, a) : expression(c, a, dst, tail))) return false;
   }
   return true;
+}
+
+/* A named let in tail position whose name is only called in tail position
+ * from its body is a loop in the enclosing frame. Its variables are bound
+ * after the initializers are evaluated, as a call would bind them. Facts are
+ * created in the same order as for the function it otherwise becomes. */
+static bool inline_loop(oti_compiler* c, const oti_ast* name, const oti_ast* bindings, uint32_t dst,
+                        uint32_t index, size_t count) {
+  oti_scope s = scope_begin(c);
+  uint32_t first = c->top;
+  for (const oti_ast* b = bindings->as.list.first; b; b = b->next)
+    if (!argument(c, b->as.list.first->next)) return false;
+  size_t target = c->fn->count;
+  uint32_t reg = first;
+  for (const oti_ast* b = bindings->as.list.first; b; b = b->next, reg++) {
+    const oti_ast* var = b->as.list.first;
+    for (const oti_ast* q = bindings->as.list.first; q != b; q = q->next)
+      if (same_name(q->as.list.first, var)) return error(c, var, "duplicate parameter");
+    if (!bind_value(c, var, reg)) return false;
+  }
+  if (!oti_grow(c->rt, (void**)&c->bindings, &c->binding_capacity, c->binding_count + 1,
+                sizeof(oti_binding)))
+    return false;
+  c->bindings[c->binding_count++] =
+      (oti_binding){name, first, index, BIND_LOOP, false, false, (uint32_t)count, target};
+  const oti_ast* forms = bindings->next;
+  if (forms && forms->kind == AST_STRING && forms->next) forms = forms->next;
+  return body(c, forms, dst, true, true) && scope_end(c, s, false);
 }
 
 static bool named_let(oti_compiler* c, const oti_ast* name, const oti_ast* bindings, uint32_t dst,
@@ -933,6 +1012,8 @@ static bool named_let(oti_compiler* c, const oti_ast* name, const oti_ast* bindi
   if (index == UINT32_MAX) return false;
   size_t count = 0;
   for (const oti_ast* b = bindings->as.list.first; b; b = b->next) count++;
+  if (tail && !fact(c, index)->assigned && !fact(c, index)->escaped && count <= UINT16_MAX)
+    return inline_loop(c, name, bindings, dst, index, count);
   if (!fact(c, index)->assigned) {
     /* The loop function refers to itself as register 0. */
     uint32_t saved, base = call_begin(c, dst, tail, &saved);
@@ -1345,13 +1426,33 @@ static bool branch_word(oti_compiler* c, oti_opcode op, bool when, uint32_t a, u
   return emit_x(c, op, when, a, b, k) != SIZE_MAX && jumps_add(c, out, emit_bc(c, OP_JUMP, 0, 0));
 }
 
+/* The syntax of a literal or quoted datum, or NULL. */
+static const oti_ast* constant_syntax(const oti_ast* a) {
+  if (a->kind != AST_LIST) return a->kind == AST_SYMBOL ? NULL : a;
+  const oti_ast* head = a->as.list.first;
+  return !a->as.list.tail && oti_ast_symbol(head, "quote") && head->next && !head->next->next
+             ? head->next
+             : NULL;
+}
+
 static bool branch_primitive(oti_compiler* c, const oti_primitive* p, const oti_ast* args,
                              bool when, oti_jumps* out) {
   uint32_t saved = c->top, regs[2];
   int32_t k;
   bool ok;
   oti_opcode op = p->branch;
-  if (op <= OP_BR_NUMEQ && small_integer(args->next, &k)) {
+  const oti_ast *constant = NULL, *other = NULL;
+  if (op == OP_BR_EQ) {
+    if ((constant = constant_syntax(args->next))) other = args;
+    else if ((constant = constant_syntax(args))) other = args->next;
+  }
+  if (constant) {
+    /* The constant has no effects, so the other operand is evaluated alone. */
+    ot_value value = datum(c, constant);
+    uint32_t index = value ? oti_constant(c->rt, value) : UINT32_MAX;
+    ok = index != UINT32_MAX && operands(c, other, 1, regs) &&
+         branch_word(c, OP_BR_EQK, when, regs[0], index & 0xffff, index >> 16, out);
+  } else if (op <= OP_BR_NUMEQ && small_integer(args->next, &k)) {
     ok = operands(c, args, 1, regs) && branch_word(c, (oti_opcode)(op + OP_BR_LTI - OP_BR_LT), when,
                                                    regs[0], 0, (uint16_t)k, out);
   } else if (op <= OP_BR_NUMEQ && small_integer(args, &k)) {
@@ -1414,24 +1515,56 @@ static bool branch(oti_compiler* c, const oti_ast* a, bool when, oti_jumps* out)
   return ok;
 }
 
-/* A call to the enclosing function in tail position, with its exact arity,
- * becomes moves into the parameters and a jump to the start. */
-static bool self_tail_call(oti_compiler* c, const oti_ast* head, size_t count) {
+/* A tail call to the enclosing function with its exact arity, or to a loop,
+ * becomes moves into the parameters and a jump to the start. Parameters start
+ * at *first and the start is *target. */
+static bool self_tail_call(oti_compiler* c, const oti_ast* head, size_t count, uint32_t* first,
+                           size_t* target) {
   size_t b = find_binding(c, head);
-  if (b == SIZE_MAX || c->bindings[b].kind != BIND_SELF || count != c->fn->arity ||
-      c->fn->optional || c->fn->rest)
+  if (b == SIZE_MAX) return false;
+  oti_binding* binding = &c->bindings[b];
+  if (binding->kind == BIND_LOOP && count == binding->count) {
+    *first = binding->reg;
+    *target = binding->target;
+    return true;
+  }
+  if (binding->kind != BIND_SELF || count != c->fn->arity || c->fn->optional || c->fn->rest)
     return false;
+  *first = 1;
+  *target = 0;
   return true;
 }
 
-static bool self_jump(oti_compiler* c, const oti_ast* args, size_t count) {
-  uint32_t saved = c->top, first = c->top;
-  for (const oti_ast* p = args; p; p = p->next)
-    if (!argument(c, p)) return false;
-  for (uint32_t i = 0; i < count; i++)
-    if (!move(c, 1 + i, first + i)) return false;
+/* True when argument a of a self call is the parameter in register reg itself. */
+static bool same_parameter(oti_compiler* c, const oti_ast* a, uint32_t reg) {
+  if (a->kind != AST_SYMBOL) return false;
+  size_t b = find_binding(c, a);
+  return b != SIZE_MAX && c->bindings[b].kind == BIND_LOCAL && c->bindings[b].reg == reg &&
+         !c->bindings[b].boxed;
+}
+
+/* Arguments go to temporaries and are then moved into the parameters. One that
+ * passes its parameter through needs neither. The last can be computed in place
+ * when it reads its operands before writing, as a primitive or a leaf does. */
+static bool self_jump(oti_compiler* c, const oti_ast* args, uint32_t params, size_t target) {
+  uint32_t saved = c->top, first = c->top, i = 0;
+  const oti_ast* last = args;
+  while (last && last->next) last = last->next;
+  bool in_place = last && (leaf(last) || primitive(c, last));
+  const oti_ast* p;
+  for (p = args; p; p = p->next, i++) {
+    if (same_parameter(c, p, params + i)) continue;
+    if (p == last && in_place) {
+      if (!expression(c, p, params + i, false)) return false;
+    } else if (!argument(c, p)) return false;
+  }
+  uint32_t temp = first;
+  for (p = args, i = 0; p; p = p->next, i++) {
+    if (same_parameter(c, p, params + i) || (p == last && in_place)) continue;
+    if (!move(c, params + i, temp++)) return false;
+  }
   release(c, saved);
-  return emit_bc(c, OP_JUMP, 0, 0) != SIZE_MAX;
+  return emit_bc(c, OP_JUMP, 0, (uint32_t)target) != SIZE_MAX;
 }
 
 static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tail) {
@@ -1440,12 +1573,16 @@ static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tai
   c->definitions = false;
   if (a->kind == AST_SYMBOL) {
     oti_reference ref;
-    return resolve(c, a, &ref) && load(c, &ref, dst) && finish(c, dst, tail);
+    if (!resolve(c, a, &ref)) return false;
+    /* A bound local in tail position is returned from its own register. */
+    if (tail && ref.kind == REF_LOCAL && !ref.boxed && c->bindings[ref.binding].initialized)
+      return finish(c, ref.index, tail);
+    return load(c, &ref, dst) && finish(c, dst, tail);
   }
-  if (a->kind != AST_LIST) return load_constant(c, datum(c, a), dst) && finish(c, dst, tail);
+  if (a->kind != AST_LIST) return constant_result(c, datum(c, a), dst, tail);
   if (a->as.list.tail) return error(c, a, "cannot call an improper list");
   const oti_ast* head = a->as.list.first;
-  if (!head) return load_constant(c, OT_EMPTY, dst) && finish(c, dst, tail);
+  if (!head) return constant_result(c, OT_EMPTY, dst, tail);
   const oti_ast* args = head->next;
   const oti_ast* expanded = expand_head(c, a);
   if (!expanded) return false;
@@ -1473,7 +1610,7 @@ static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tai
               emit(c, OP_MAKE_PARAM, name, name, initial) != SIZE_MAX &&
               emit_bc(c, OP_DEFINE_GLOBAL, name, global) != SIZE_MAX;
     release(c, saved);
-    return ok && load_constant(c, OT_NIL, dst) && finish(c, dst, tail);
+    return ok && constant_result(c, OT_NIL, dst, tail);
   }
   if (oti_ast_symbol(head, "unwind-protect") || oti_ast_symbol(head, "defer")) {
     if (!args) return error(c, a, "unwind-protect needs an expression");
@@ -1563,7 +1700,7 @@ static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tai
   if (oti_ast_symbol(head, "defonce")) return error(c, a, "defonce requires top-level context");
   if (oti_ast_symbol(head, "quote")) {
     if (!args || args->next) return error(c, a, "quote needs one datum");
-    return load_constant(c, datum(c, args), dst) && finish(c, dst, tail);
+    return constant_result(c, datum(c, args), dst, tail);
   }
   if (oti_ast_symbol(head, "quasiquote")) {
     if (!args || args->next) return error(c, a, "quasiquote needs one datum");
@@ -1582,7 +1719,7 @@ static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tai
     size_t done = tail ? SIZE_MAX : emit_bc(c, OP_JUMP, 0, 0);
     if (!jumps_patch(c, &otherwise)) return false;
     if (!(args->next->next ? expression(c, args->next->next, dst, tail)
-                           : load_constant(c, OT_NIL, dst) && finish(c, dst, tail)))
+                           : constant_result(c, OT_NIL, dst, tail)))
       return false;
     return tail || patch(c, done);
   }
@@ -1626,7 +1763,7 @@ static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tai
       return false;
     }
     size_t done = tail ? SIZE_MAX : emit_bc(c, OP_JUMP, 0, 0);
-    return jumps_patch(c, &skip) && load_constant(c, OT_NIL, dst) && finish(c, dst, tail) &&
+    return jumps_patch(c, &skip) && constant_result(c, OT_NIL, dst, tail) &&
            (tail || patch(c, done));
   }
   if (oti_ast_symbol(head, "begin")) return body(c, args, dst, tail, definitions);
@@ -1644,7 +1781,7 @@ static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tai
                          : next_register(c);
     bool ok = expression(c, args->next, value, false) && assign(c, &ref, value);
     release(c, saved);
-    return ok && load_constant(c, OT_NIL, dst) && finish(c, dst, tail);
+    return ok && constant_result(c, OT_NIL, dst, tail);
   }
   if (oti_ast_symbol(head, "def") || oti_ast_symbol(head, "def-")) {
     if (!definitions) return error(c, a, "definition is only allowed at top level or in a body");
@@ -1699,32 +1836,45 @@ static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tai
   }
   if (oti_ast_symbol(head, "while")) {
     if (!args) return error(c, a, "while needs a condition");
-    size_t start = c->fn->count;
-    oti_jumps done = {0};
+    /* The test follows the body, so an iteration takes one branch. */
     uint32_t saved = c->top, scratch = next_register(c);
-    if (!branch(c, args, false, &done)) {
-      free(done.items);
-      return false;
-    }
+    size_t entry = emit_bc(c, OP_JUMP, 0, 0), start = c->fn->count;
     oti_scope s = scope_begin(c);
-    bool ok = body(c, args->next, scratch, false, true);
+    bool ok = entry != SIZE_MAX && body(c, args->next, scratch, false, true);
+    if (ok) drop_unused(c, start, scratch);
     ok = scope_end(c, s, true) && ok;
+    oti_jumps again = {0};
+    ok = ok && patch(c, entry) && branch(c, args, true, &again);
+    ok = jumps_patch_to(c, &again, start) && ok;
     release(c, saved);
-    if (!ok || emit_bc(c, OP_JUMP, 0, (uint32_t)start) == SIZE_MAX || !jumps_patch(c, &done))
-      return false;
-    return load_constant(c, OT_NIL, dst) && finish(c, dst, tail);
+    return ok && constant_result(c, OT_NIL, dst, tail);
   }
   if (oti_ast_symbol(head, "and") || oti_ast_symbol(head, "or")) {
     bool conjunction = oti_ast_symbol(head, "and");
-    if (!args)
-      return load_constant(c, conjunction ? OT_TRUE : OT_FALSE, dst) && finish(c, dst, tail);
-    oti_jumps done = {0};
+    if (!args) return constant_result(c, conjunction ? OT_TRUE : OT_FALSE, dst, tail);
+    /* A test that yields #t or #f branches to the result it decides, so it is
+     * not stored and tested again. Other operands leave their own value. */
+    oti_jumps done = {0}, decided = {0};
     bool ok = true;
     for (const oti_ast* p = args; ok && p; p = p->next) {
+      const oti_primitive* test = p->next ? primitive(c, p) : NULL;
+      if (test && (test->branch != OP_MOVE || test->op == OP_NOT)) {
+        ok = branch(c, p, !conjunction, &decided);
+        continue;
+      }
       ok = expression(c, p, dst, tail && !p->next);
       if (ok && p->next)
         ok = jumps_add(c, &done, emit_bc(c, conjunction ? OP_JFALSE : OP_JTRUE, dst, 0));
     }
+    if (ok && decided.count) {
+      size_t over = tail ? SIZE_MAX : emit_bc(c, OP_JUMP, 0, 0);
+      ok = jumps_patch(c, &decided) &&
+           constant_result(c, conjunction ? OT_FALSE : OT_TRUE, dst, tail) &&
+           (tail || patch(c, over));
+    }
+    free(decided.items);
+    /* In tail position every path has returned unless an operand jumps here. */
+    if (tail && !done.count) return ok;
     ok = jumps_patch(c, &done) && ok;
     return ok && finish(c, dst, tail);
   }
@@ -1735,8 +1885,10 @@ static bool expression(oti_compiler* c, const oti_ast* a, uint32_t dst, bool tai
   if (p) return primitive_call(c, p, args, dst, tail);
   size_t count = 0;
   for (const oti_ast* q = args; q; q = q->next) count++;
-  if (tail && head->kind == AST_SYMBOL && self_tail_call(c, head, count))
-    return self_jump(c, args, count);
+  uint32_t params;
+  size_t target;
+  if (tail && head->kind == AST_SYMBOL && self_tail_call(c, head, count, &params, &target))
+    return self_jump(c, args, params, target);
   uint32_t saved, base = call_begin(c, dst, tail, &saved);
   if (!expression(c, head, base, false)) return false;
   for (const oti_ast* q = args; q; q = q->next)

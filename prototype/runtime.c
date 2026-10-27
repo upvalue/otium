@@ -66,6 +66,7 @@ bool oti_stack(ot_runtime* rt, size_t needed) {
   if (!oti_grow(rt, (void**)&rt->stack, &rt->stack_capacity, needed, sizeof(ot_value)))
     return false;
   rt->stack_roots.slots = rt->stack;
+  rt->stack_room = rt->stack_capacity < rt->stack_limit ? rt->stack_capacity : rt->stack_limit;
   return true;
 }
 

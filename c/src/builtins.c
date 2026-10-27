@@ -80,6 +80,24 @@ bool oti_number(ot_state* rt, ot_value v, double* out) {
   return oti_error(rt, "expected a number");
 }
 
+/* Record E0401 unless v is a number, naming the operator as Chez does. */
+static bool number_operand(ot_state* rt, unsigned id, ot_value v) {
+  if (ot_is_int(v) || oti_kind(v, K_FLOAT)) return true;
+  const char* who = id == B_ADD   ? "+"
+                    : id == B_SUB ? "-"
+                    : id == B_MUL ? "*"
+                    : id == B_DIV ? "/"
+                    : id == B_LT  ? "<"
+                    : id == B_LE  ? "<="
+                    : id == B_GT  ? ">"
+                    : id == B_GE  ? ">="
+                                  : "=";
+  const char* what = id == B_DIV                                            ? "int or float"
+                     : id == B_LT || id == B_LE || id == B_GT || id == B_GE ? "a real number"
+                                                                            : "a number";
+  return oti_type_error(rt, who, what, v);
+}
+
 static ot_value arithmetic(ot_state* rt, unsigned id, size_t first, size_t count) {
   if (!count && (id == B_SUB || id == B_DIV)) {
     oti_error(rt, "arithmetic needs an argument");
@@ -91,7 +109,9 @@ static ot_value arithmetic(ot_state* rt, unsigned id, size_t first, size_t count
   for (size_t j = 0; j < count; j++) {
     if (!ot_is_int(rt->stack[first + j])) {
       double ignored;
-      if (!oti_number(rt, rt->stack[first + j], &ignored)) return 0;
+      if (!number_operand(rt, id, rt->stack[first + j]) ||
+          !oti_number(rt, rt->stack[first + j], &ignored))
+        return 0;
       exact = false;
     }
   }
@@ -173,7 +193,7 @@ static ot_value compare(ot_state* rt, unsigned id, size_t first, size_t count) {
   for (size_t i = 0; i < count; i++) {
     ot_value v = rt->stack[first + i];
     double current = 0;
-    if (!ot_is_int(v) && !oti_number(rt, v, &current)) return 0;
+    if (!number_operand(rt, id, v) || (!ot_is_int(v) && !oti_number(rt, v, &current))) return 0;
     if (i) {
       int order;
       if (ot_is_int(previous) && ot_is_int(v)) {

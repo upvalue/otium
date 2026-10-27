@@ -6,7 +6,8 @@ runtime_sources = files(
   'src/ports.c', 'src/strings.c', 'src/bytevectors.c', 'src/reflection.c', 'src/support.c',
   'src/conditions.c', 'src/restarts.c', 'src/cleanup.c', 'src/params.c', 'src/classes.c',
   'src/instances.c', 'src/records.c', 'src/foreign.c', 'src/foreign_types.c',
-  'src/collections.c', 'src/tables.c', 'src/reclaim.c', 'src/modules.c', 'src/dev.c')
+  'src/collections.c', 'src/tables.c', 'src/reclaim.c', 'src/modules.c', 'src/dev.c',
+  'src/diagnostics.c')
 
 # The runtime is C11 with GNU builtins and computed goto, so it skips the
 # project's C23 and -Wpedantic.

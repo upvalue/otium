@@ -203,9 +203,22 @@ static ot_value support_expander_native_syntax_p(ot_state* rt, size_t first, siz
   return OT_FALSE;
 }
 
+/* An unlocated output form becomes a located copy of its first pair, at the
+ * input form's offset. The expander only passes the result on, so the copy
+ * need not be the same pair. */
 static ot_value support_expander_locate(ot_state* rt, size_t first, size_t count) {
   if (!support_arity(rt, count, 2)) return 0;
-  return rt->stack[first + 1];
+  size_t offset, ignored;
+  if (!oti_pair_offset(rt->stack[first], &offset) || !oti_kind(rt->stack[first + 1], K_PAIR) ||
+      oti_pair_offset(rt->stack[first + 1], &ignored))
+    return rt->stack[first + 1];
+  ot_value pair = oti_alloc(rt, K_PAIR, 2, OTI_LOCATED_PAIR_BYTES);
+  if (!pair) return 0;
+  ot_value to = rt->stack[first + 1];
+  object_fields(pair)[0] = object_fields(to)[0];
+  object_fields(pair)[1] = object_fields(to)[1];
+  memcpy(object_bytes(pair), &offset, sizeof(offset));
+  return pair;
 }
 
 static ot_value support_expander_invoke_macro(ot_state* rt, size_t first, size_t count) {
@@ -225,6 +238,8 @@ static ot_value support_expander_fail(ot_state* rt, size_t first, size_t count) 
   ot_value code = rt->stack[first];
   bool fresh = !oti_failed(rt);
   oti_error(rt, s);
+  size_t offset;
+  if (fresh && oti_pair_offset(rt->stack[first + 2], &offset)) oti_error_at(rt, offset);
   if (fresh && oti_kind(code, K_STRING)) {
     size_t length;
     const char* bytes = oti_text_bytes(code, &length);

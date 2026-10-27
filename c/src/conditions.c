@@ -102,6 +102,14 @@ ot_value oti_condition_of(ot_state* rt, const oti_error_record* e) {
     ot_value k = live[1] ? key(rt, ":who") : 0;
     ok = k && oti_table_set(rt, live[0], k, live[1]);
   }
+  const char* names[] = {":name", ":label"};
+  const char* texts[] = {e->name, e->label};
+  for (size_t i = 0; ok && i < 2; i++)
+    if (texts[i]) {
+      live[1] = oti_text(rt, K_STRING, texts[i], strlen(texts[i]));
+      ot_value k = live[1] ? key(rt, names[i]) : 0;
+      ok = k && oti_table_set(rt, live[0], k, live[1]);
+    }
   if (ok && e->has_value) {
     ot_value k = key(rt, ":value");
     ok = k && oti_table_set(rt, live[0], k, e->slots[OTI_ERROR_VALUE]);

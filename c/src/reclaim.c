@@ -6,6 +6,8 @@ void oti_free_function(oti_function* fn) {
   if (!fn) return;
   free(fn->code);
   free(fn->captures);
+  free(fn->points);
+  free(fn->name);
   free(fn);
 }
 

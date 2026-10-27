@@ -225,13 +225,16 @@ static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_f
   size_t bytes;
   char* source = oti_read_file(rt, file, OTI_SOURCE_LIMIT - m->source_bytes, "module file", &bytes);
   bool notified = source && notify_load(rt, space, found);
+  uint32_t source_id = notified ? oti_source_id(rt, found) : OTI_NO_SOURCE;
   free(found);
-  if (!notified) {
+  if (!notified || source_id == OTI_NO_SOURCE) {
     free(source);
     return false;
   }
   uint32_t caller = rt->current_namespace, expected = rt->required_namespace;
+  uint32_t caller_source = rt->source;
   rt->current_namespace = rt->required_namespace = space;
+  rt->source = source_id;
   m->items[index].state = 1;
   ot_value ignored;
   m->depth++;
@@ -243,6 +246,7 @@ static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_f
   m->items[index].state = ok ? 2 : 0;
   rt->current_namespace = caller;
   rt->required_namespace = expected;
+  rt->source = caller_source;
   free(source);
   return ok;
 }
@@ -284,7 +288,8 @@ static bool one_require(ot_state* rt, const oti_ast** cursor) {
   if (!load_module(rt, space, reload, oti_ast_symbol(module, "ffi"))) {
     oti_error(rt, "");
     oti_error_record* e = &rt->error;
-    if (e->in_module) return false;
+    /* A located error names its file, and the report notes this require. */
+    if (e->in_module || e->located || e->frame_count) return false;
     e->in_module = true;
     size_t length = strlen(rt->namespaces[space]) + strlen(e->message) + sizeof("module []: ");
     char* message = malloc(length);

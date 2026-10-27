@@ -68,10 +68,21 @@ bool oti_ffi_errorf(ot_state* rt, const char* reason, const char* format, ...) {
   return false;
 }
 
-void oti_clear_error(ot_state* rt) {
-  if (rt->error.owned) free(rt->error.message);
-  rt->error = (oti_error_record){.slots = {OT_NIL, OT_NIL, OT_NIL, OT_NIL}};
+static void free_places(oti_error_place* places, size_t count) {
+  for (size_t i = 0; i < count; i++) free(places[i].name);
+  free(places);
 }
+
+void oti_release_error(oti_error_record* e) {
+  if (e->owned) free(e->message);
+  free(e->name);
+  free(e->label);
+  free_places(e->frames, e->frame_count);
+  free_places(e->reached, e->reached_count);
+  *e = (oti_error_record){.slots = {OT_NIL, OT_NIL, OT_NIL, OT_NIL}};
+}
+
+void oti_clear_error(ot_state* rt) { oti_release_error(&rt->error); }
 
 void oti_take_error(ot_state* rt, oti_error_record* saved, oti_roots* roots) {
   *saved = rt->error;
@@ -87,8 +98,7 @@ void oti_restore_error(ot_state* rt, oti_error_record* saved, oti_roots* roots) 
 
 void oti_drop_error(ot_state* rt, oti_error_record* saved, oti_roots* roots) {
   oti_roots_pop(&rt->heap, roots);
-  if (saved->owned) free(saved->message);
-  *saved = (oti_error_record){.slots = {OT_NIL, OT_NIL, OT_NIL, OT_NIL}};
+  oti_release_error(saved);
 }
 
 bool oti_type_error(ot_state* rt, const char* who, const char* what, ot_value value) {
@@ -115,7 +125,7 @@ bool oti_reader_error(ot_state* rt, const oti_reader* reader) {
   if (oti_failed(rt)) return false;
   const char* message = oti_diagnostic_message(reader->error_code);
   oti_coded_error(rt, reader->error_code, message ? message : reader->error);
-  rt->error.offset = reader->error_offset;
+  oti_error_at(rt, reader->error_offset);
   return false;
 }
 
@@ -507,6 +517,8 @@ void ot_destroy(ot_state* rt) {
   free(rt->global_info);
   for (size_t i = 0; i < rt->namespace_count; i++) free(rt->namespaces[i]);
   free(rt->namespaces);
+  for (size_t i = 0; i < rt->source_count; i++) free(rt->sources[i]);
+  free(rt->sources);
   free(rt->functions);
   free(rt->constants);
   free(rt->globals);
@@ -692,6 +704,7 @@ static bool evaluate_top(ot_state* rt, const oti_ast* form, ot_value* result) {
   bool evaluating = rt->evaluating;
   rt->evaluating = true;
   bool ok = evaluate_expanded(rt, form, result);
+  if (!ok) oti_locate_error(rt, form->offset);
   rt->evaluating = evaluating;
   rt->sp = rt->stack_roots.count = base;
   if (!ok || !oti_stack(rt, base + 1)) return false;
@@ -709,6 +722,8 @@ ot_value oti_eval_value(ot_state* rt, ot_value value) {
   oti_arena arena;
   oti_arena_init(&arena, OTI_SOURCE_LIMIT);
   oti_ast* form = oti_syntax_value(rt, value, &arena);
+  uint32_t source_id = rt->source;
+  rt->source = OTI_NO_SOURCE;
   size_t base = rt->sp, frames = rt->frame_count, tries = rt->try_count;
   size_t restarts = rt->restart_scope_count, cleanups = rt->cleanup_count;
   ot_value result = 0;
@@ -719,6 +734,7 @@ ot_value oti_eval_value(ot_state* rt, ot_value value) {
   oti_restore_restarts(rt, restarts);
   oti_restore_cleanups(rt, cleanups);
   oti_arena_destroy(&arena);
+  rt->source = source_id;
   rt->eval_depth--;
   return result;
 }
@@ -766,11 +782,13 @@ static bool eval_library_file(ot_state* rt, const char* path, const char* what) 
   size_t length;
   char* source = oti_read_file(rt, file, OTI_SOURCE_LIMIT, what, &length);
   if (!source) return false;
-  uint32_t saved = rt->current_namespace;
+  uint32_t saved = rt->current_namespace, source_id = rt->source;
   rt->current_namespace = 0;
+  rt->source = OTI_NO_SOURCE;
   ot_value result;
   bool ok = ot_eval(rt, source, length, &result);
   rt->current_namespace = saved;
+  rt->source = source_id;
   free(source);
   return ok;
 }
@@ -804,7 +822,10 @@ bool ot_load_expander(ot_state* rt, const char* directory) {
     uint32_t saved = rt->current_namespace;
     rt->current_namespace = 0;
     ot_value result;
+    uint32_t source_id = rt->source;
+    rt->source = OTI_NO_SOURCE;
     ok = ot_eval(rt, adapters, strlen(adapters), &result);
+    rt->source = source_id;
     rt->current_namespace = saved;
   }
   if (ok) rt->shared_expander = true;
@@ -951,9 +972,7 @@ ot_form_status ot_scan_form(const char* source, size_t length, size_t start, siz
                           : reader.incomplete ? OT_FORM_INCOMPLETE
                                               : OT_FORM_ERROR;
   *end = reader.position;
-  *error = reader.error && oti_diagnostic_message(reader.error_code)
-               ? oti_diagnostic_message(reader.error_code)
-               : reader.error;
+  *error = reader.error;
   *error_offset = reader.error_offset;
   oti_reader_destroy(&reader);
   return status;

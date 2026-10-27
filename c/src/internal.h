@@ -438,6 +438,15 @@ typedef struct {
   bool local, boxed;
 } oti_capture;
 
+/* From instruction pc on, code comes from the form at source offset. */
+typedef struct {
+  uint32_t pc, offset;
+} oti_source_point;
+
+/* The source of code from no file, such as runtime libraries and evaluated
+ * data. Source 0 is the text the host passed to ot_eval. */
+#define OTI_NO_SOURCE UINT32_MAX
+
 typedef struct {
   oti_instruction* code;
   size_t count, capacity;
@@ -448,6 +457,12 @@ typedef struct {
   /* variadic is rest || optional, so a call can check its arity with one test. */
   bool rest, variadic, evaluator;
   uint32_t namespace;
+  /* Cold metadata for error reports: source points in pc order, the source
+   * the function was compiled from, and its name, owned, or NULL. */
+  uint32_t source;
+  char* name;
+  oti_source_point* points;
+  size_t point_count, point_capacity;
 } oti_function;
 
 /* floor is the stack height when the frame was entered. pc is where the frame
@@ -524,6 +539,13 @@ typedef struct {
   oti_builtin_fn run;
 } oti_builtin_def;
 
+/* A source position in an error report and the function running there, by
+ * its owned name or NULL. */
+typedef struct {
+  uint32_t source, offset;
+  char* name;
+} oti_error_place;
+
 /* The error being reported. Error sites often hold unrooted values and return
  * straight after recording, so recording never allocates on the managed heap;
  * oti_error_condition builds the condition where the error is caught. The
@@ -535,8 +557,21 @@ typedef struct {
   bool owned;
   /* A diagnostic code such as E0301, or empty. */
   char code[32];
-  /* The source offset of the failing form. */
+  /* The source offset of the failing form, in source, when located. */
   size_t offset;
+  uint32_t source;
+  bool located;
+  /* Owned host copies, or NULL: :name and :label, such as the unbound name
+   * of E0201 or the callee and its arity for E0301. space is the namespace
+   * an unbound name was looked up in. */
+  char *name, *label;
+  uint32_t space;
+  /* Where an uncaught error happened, recorded before unwinding: the frames
+   * with source, innermost first. reached are top-level forms in other files
+   * that led to it, such as requires, innermost first. */
+  oti_error_place *frames, *reached;
+  size_t frame_count, reached_count;
+  bool traced;
   /* Static strings, or NULL: the operation for :who, the symbol that starts
    * :data, and the reason of an FFI error. */
   const char *who, *tag, *ffi_reason;
@@ -620,6 +655,11 @@ struct ot_state {
   size_t try_count, try_capacity;
   oti_error_record error;
   oti_roots error_roots;
+  /* Paths of the files code was compiled from, by source id; entry 0 is
+   * unused. source is the one being evaluated now. */
+  char** sources;
+  size_t source_count, source_capacity;
+  uint32_t source;
   bool stress_gc, shared_expander, expanding;
   size_t expansion_calls, eval_depth;
   uint64_t gensym_counter;
@@ -664,6 +704,25 @@ void oti_drop_error(ot_state* rt, oti_error_record* saved, oti_roots* roots);
  * symbol tag and continues with up to three values. All strings are static. */
 bool oti_tagged_error(ot_state* rt, const char* who, const char* tag, const char* message,
                       size_t count, const ot_value* values);
+/* Locate the recorded error at offset in the current source, unless it is
+ * located already. */
+void oti_error_at(ot_state* rt, size_t offset);
+/* Record the frames of an uncaught error before they unwind. */
+void oti_trace_error(ot_state* rt);
+/* After the top-level form at offset in the current source failed: locate
+ * the error at the form if nothing located it, or note that the form led to
+ * an error located in another file. */
+void oti_locate_error(ot_state* rt, size_t offset);
+/* Record E0301 for a call of fn with argc arguments, with :name and :label. */
+bool oti_arity_error(ot_state* rt, const oti_function* fn, size_t argc);
+/* Record E0302, "value is not callable", with :value. */
+bool oti_callable_error(ot_state* rt, ot_value value);
+/* Record E0201 for the unbound global cell, with :name. */
+bool oti_unbound_error(ot_state* rt, uint32_t global);
+/* The source id of a file path, registered on first use, or OTI_NO_SOURCE. */
+uint32_t oti_source_id(ot_state* rt, const char* path);
+/* Free what an error record owns. */
+void oti_release_error(oti_error_record* e);
 /* Record a reader's error with its catalog message, at its offset. */
 bool oti_reader_error(ot_state* rt, const oti_reader* reader);
 /* The message template of a diagnostic code, or NULL for an unknown code. */
@@ -935,6 +994,19 @@ typedef struct {
 OTI_FIELDS_ONLY(oti_record_obj, 1);
 
 static inline oti_pair_obj* oti_as_pair(ot_value v) { return OTI_CAST(oti_pair_obj, K_PAIR, v); }
+
+/* Pairs that start lists read for the expander carry the list's source offset
+ * as trailing bytes, so expanded code keeps its position. */
+#define OTI_LOCATED_PAIR_BYTES sizeof(size_t)
+
+static inline bool oti_pair_offset(ot_value v, size_t* offset) {
+  if (!oti_kind(v, K_PAIR) || ((oti_object_header*)v)->size < sizeof(oti_object_header) +
+                                                                  2 * sizeof(ot_value) +
+                                                                  OTI_LOCATED_PAIR_BYTES)
+    return false;
+  memcpy(offset, object_bytes(v), sizeof(*offset));
+  return true;
+}
 
 static inline oti_box_obj* oti_as_box(ot_value v) { return OTI_CAST(oti_box_obj, K_BOX, v); }
 

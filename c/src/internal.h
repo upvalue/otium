@@ -664,6 +664,10 @@ void oti_drop_error(ot_state* rt, oti_error_record* saved, oti_roots* roots);
  * symbol tag and continues with up to three values. All strings are static. */
 bool oti_tagged_error(ot_state* rt, const char* who, const char* tag, const char* message,
                       size_t count, const ot_value* values);
+/* Record a reader's error with its catalog message, at its offset. */
+bool oti_reader_error(ot_state* rt, const oti_reader* reader);
+/* The message template of a diagnostic code, or NULL for an unknown code. */
+const char* oti_diagnostic_message(const char* code);
 /* Record E0401, "`who` expected what, got value", with :who and :value. */
 bool oti_type_error(ot_state* rt, const char* who, const char* what, ot_value value);
 bool oti_host_entry(ot_state* rt);

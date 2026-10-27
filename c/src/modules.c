@@ -92,7 +92,7 @@ bool ot_add_project_paths(ot_state* rt, const char* project_file) {
       free(directory);
     }
   }
-  if (reader.error) ok = oti_coded_error(rt, reader.error_code, reader.error);
+  if (reader.error) ok = oti_reader_error(rt, &reader);
   oti_reader_destroy(&reader);
   free(source);
   return ok;

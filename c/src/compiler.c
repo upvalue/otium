@@ -2033,8 +2033,7 @@ ot_value oti_read_source(ot_state* rt, const char* source, size_t length) {
   oti_compiler c = {.rt = rt};
   ot_value result = form ? datum(&c, form) : 0;
   if (reader.error) {
-    oti_coded_error(rt, reader.error_code, reader.error);
-    rt->error.offset = reader.error_offset;
+    oti_reader_error(rt, &reader);
     result = 0;
   }
   oti_reader_destroy(&reader);

@@ -11,7 +11,7 @@ runtime_sources = files(
 # The runtime is C11 with GNU builtins and computed goto, so it skips the
 # project's C23 and -Wpedantic.
 runtime_headers = files('src/internal.h', 'src/heap.h', 'src/reader.h', 'src/foreign.h',
-  'src/foreign_types.h')
+  'src/foreign_types.h', 'src/diagnostic-catalog.inc')
 runtime_options = ['c_std=c11', 'warning_level=2']
 runtime_include = include_directories('include', 'src')
 runtime_deps = [dependency('libffi'), dependency('threads'), dl, libm]

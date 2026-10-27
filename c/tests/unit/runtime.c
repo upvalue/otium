@@ -95,7 +95,7 @@ TEST(core_evaluation) {
   check_error(rt, "(+ 1 (def invalid 2))", "definition is only allowed");
   check_error(rt, "(def before-compile-error 91) (fn (x x) x)", "duplicate");
   check_int(rt, "before-compile-error", 91);
-  check_error(rt, "(def before-reader-error 92) (", "unterminated");
+  check_error(rt, "(def before-reader-error 92) (", "unclosed form");
   check_int(rt, "before-reader-error", 92);
   /* Inlined builtins are immutable. A callee is still loaded before its
    * arguments are evaluated. */

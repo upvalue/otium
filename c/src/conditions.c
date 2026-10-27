@@ -31,14 +31,19 @@ static ot_value field(ot_state* rt, ot_value table, const char* name) {
   return result;
 }
 
+#include "diagnostic-catalog.inc"
+
+const char* oti_diagnostic_message(const char* code) {
+  if (code)
+    for (size_t i = 0; i < sizeof(ot_diagnostic_entries) / sizeof(ot_diagnostic_entries[0]); i++)
+      if (!strcmp(ot_diagnostic_entries[i].code, code)) return ot_diagnostic_entries[i].message;
+  return NULL;
+}
+
 static const char* diagnostic_type(const char* code) {
-  if (!code) return "error";
-  if (!strncmp(code, "E00", 3)) return "read-error";
-  if (!strncmp(code, "E01", 3)) return "syntax-error";
-  if (!strcmp(code, "E0201")) return "name-error";
-  if (!strncmp(code, "E02", 3)) return "namespace-error";
-  if (!strcmp(code, "E0301")) return "arity-error";
-  if (!strcmp(code, "E0302") || !strcmp(code, "E0401")) return "type-error";
+  if (code)
+    for (size_t i = 0; i < sizeof(ot_diagnostic_entries) / sizeof(ot_diagnostic_entries[0]); i++)
+      if (!strcmp(ot_diagnostic_entries[i].code, code)) return ot_diagnostic_entries[i].type;
   return "error";
 }
 

@@ -111,6 +111,14 @@ bool oti_type_error(ot_state* rt, const char* who, const char* what, ot_value va
   return false;
 }
 
+bool oti_reader_error(ot_state* rt, const oti_reader* reader) {
+  if (oti_failed(rt)) return false;
+  const char* message = oti_diagnostic_message(reader->error_code);
+  oti_coded_error(rt, reader->error_code, message ? message : reader->error);
+  rt->error.offset = reader->error_offset;
+  return false;
+}
+
 bool oti_tagged_error(ot_state* rt, const char* who, const char* tag, const char* message,
                       size_t count, const ot_value* values) {
   if (oti_failed(rt)) return false;
@@ -847,10 +855,7 @@ bool ot_eval(ot_state* rt, const char* source, size_t length, ot_value* result) 
     rt->sp = rt->stack_roots.count = base;
     if (!(ok = evaluate_top(rt, form, result))) break;
   }
-  if (reader.error) {
-    oti_coded_error(rt, reader.error_code, reader.error);
-    rt->error.offset = reader.error_offset;
-  }
+  if (reader.error) oti_reader_error(rt, &reader);
   oti_reader_destroy(&reader);
   rt->frame_count = frames;
   rt->try_count = tries;
@@ -946,7 +951,9 @@ ot_form_status ot_scan_form(const char* source, size_t length, size_t start, siz
                           : reader.incomplete ? OT_FORM_INCOMPLETE
                                               : OT_FORM_ERROR;
   *end = reader.position;
-  *error = reader.error;
+  *error = reader.error && oti_diagnostic_message(reader.error_code)
+               ? oti_diagnostic_message(reader.error_code)
+               : reader.error;
   *error_offset = reader.error_offset;
   oti_reader_destroy(&reader);
   return status;

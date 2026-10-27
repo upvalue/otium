@@ -327,6 +327,23 @@ enum {
   B_PROCESS_SETENV,
   B_PROCESS_WRITE_ERROR,
   B_READER_TOKENS,
+  B_DEV_OPEN,
+  B_DEV_CLOSE,
+  B_DEV_POLL,
+  B_DEV_NEXT,
+  B_DEV_CLIENT,
+  B_DEV_SEND,
+  B_DEV_CLOCK,
+  B_DEV_NOW,
+  B_DEV_PID,
+  B_DEV_UID,
+  B_DEV_CWD,
+  B_DEV_PRIVATE_DIRECTORY,
+  B_DEV_REALPATH,
+  B_DEV_MTIME,
+  B_DEV_NAMESPACE_NAMES,
+  B_DEV_NAMESPACE_BINDINGS,
+  B_DEV_EVAL_IN,
   /* Compiler-only helpers have no name, so they aren't globals. */
   B_QQ_APPEND,
   B_EVAL_IN_NAMESPACE,
@@ -969,7 +986,7 @@ static inline ot_value oti_cdr(ot_value pair) { return oti_as_pair(pair)->cdr; }
 
 /* Builtin tables, one per module. */
 extern const oti_builtin_def oti_bytes_builtins[], oti_class_builtins[], oti_collection_builtins[],
-    oti_condition_builtins[], oti_filesystem_builtins[], oti_foreign_builtins[],
+    oti_condition_builtins[], oti_dev_builtins[], oti_filesystem_builtins[], oti_foreign_builtins[],
     oti_instance_builtins[], oti_numeric_builtins[], oti_port_builtins[], oti_process_builtins[],
     oti_record_builtins[], oti_reflection_builtins[], oti_restart_builtins[], oti_string_builtins[],
     oti_support_builtins[], oti_table_builtins[], oti_time_builtins[];

@@ -1,0 +1,209 @@
+;; The C runtime's part of otium.dev, loaded by the launcher after
+;; lib/otium/dev.ot. It defines the primitives that file uses that are simpler
+;; in Otium than in C, the interrupt handler that pauses running code for the
+;; watchdog and :interrupt requests, and the framed stdio server behind
+;; --c.server. The C primitives are in c/src/dev.c.
+(ns otium.dev)
+
+(defonce %active #f)
+
+;; When the running request or frame should pause, in %clock milliseconds; 0
+;; means never.
+(defonce %deadline-at 0)
+
+;; True while the break loop runs, so the interrupt handler leaves it alone.
+(defonce %busy #f)
+
+;; Text printed outside requests, not yet sent to clients.
+(defonce %output "")
+
+(defonce %output-port nil)
+
+(def (%enabled?)
+  %active)
+
+(def (%runtime)
+  :c)
+
+(def (%repr value)
+  (with-output-to-string (fn () (write value))))
+
+(def (%deadline value)
+  (if (= value -1)
+      %deadline-at
+      (set! %deadline-at value)))
+
+(def (%namespaces)
+  (map (fn (name) {:name name}) (%namespace-names)))
+
+(def (%bindings space)
+  (map (fn (binding)
+         (let ((entry {:name (car binding) :kind (cadr binding) :public (caddr binding) :doc (car (cdddr binding))})
+               (mask (cadr (cdddr binding))))
+           (if mask
+               (put entry :arity-mask mask)
+               entry)))
+       (%namespace-bindings space)))
+
+(def (%flush-output!)
+  (when %output-port (flush-output-port %output-port))
+  (unless (equal? %output "")
+    (let ((text %output))
+      (set! %output "")
+      (%send 0 (%repr {:event :output :text text})))))
+
+(def (%poll timeout)
+  (%flush-output!)
+  (%transport-poll timeout))
+
+(def- (each-form code f)
+  ;; Read one byte at a time so the line count stays at the form being read.
+  (let ((bytes (string->utf8 code))
+        (offset 0)
+        (line 1))
+    (with ((port (make-input-port "source"
+                                  {:read (fn (out start _end)
+                                           (if (= offset (bytevector-length bytes))
+                                               (eof-object)
+                                               (let ((byte (get bytes offset)))
+                                                 (put! out start byte)
+                                                 (set! offset (+ offset 1))
+                                                 (when (= byte 10) (set! line (+ line 1)))
+                                                 1)))})))
+          (let loop ()
+            (skip-while " \t\r\n\x0b;\x0c;" port)
+            (cond
+              ((eof-object? (peek-char port)) nil)
+              ((eq? (peek-char port) #\;) (read-line port) (loop))
+              (else (let ((start line)
+                          (form (read port)))
+                      (f form start))
+                    (loop)))))))
+
+(def (%evaluate code space path)
+  "Evaluate each form in code, in the namespace named space, capturing output and any condition."
+  (let ((output (open-output-string))
+        (results '())
+        (failure nil)
+        (failed #f)
+        (line 1)
+        (space (string->symbol space))
+        (busy %busy))
+    (set! %busy #f)
+    (unwind-protect
+      (with-params ((current-output-port output))
+        (try
+          (each-form code
+                     (fn (form start)
+                       (set! line start)
+                       (set! results (cons (%repr (%eval-in space form)) results))
+                       (when (and (pair? form) (eq? (car form) 'ns) (pair? (cdr form)) (symbol? (cadr form)))
+                         (set! space (cadr form)))))
+          (catch c
+            (set! failed #t)
+            (set! failure c))))
+      (set! %busy busy))
+    {:ok (not failed)
+     :value (if (null? results)
+                "nil"
+                (car results))
+     :values (reverse results)
+     :condition (if (table? failure)
+                    (put failure :source {:path path :line line})
+                    failure)
+     :output (get-output-string output)}))
+
+(def (%interrupt reason)
+  "The interrupt handler while serving: a signal interrupts, and a timer tick checks for requests and the watchdog."
+  (cond
+    ((= reason 1) #t)
+    ((or (not %active) %busy) #f)
+    (else (%flush-output!)
+          (when (or (> (%transport-poll 0) 0) (and (> %deadline-at 0) (>= (%clock) %deadline-at)))
+            (let ((abort? (begin
+                            (set! %busy #t)
+                            (unwind-protect
+                              (restart-case (break! #f (str (current-ns)))
+                                (continue () #f)
+                                (abort () #t))
+                              (set! %busy #f)))))
+              (when abort? (error "evaluation aborted"))))
+          #f)))
+
+(def (%start! path timeout)
+  "Open the development socket and copy output printed outside requests to clients."
+  (listen! path timeout)
+  (set! %active #t)
+  (let ((original (current-output-port)))
+    (set! %output-port
+          (make-output-port "dev-output"
+                            {:write (fn (bytes start end)
+                                      (write-bytevector bytes original start end)
+                                      (flush-output-port original)
+                                      (set! %output (string-append %output (utf8->string bytes start end)))
+                                      (- end start))}))
+    (%eval-in 'otium.core (list 'defparam 'current-output-port %output-port))))
+
+(def (%stop!)
+  (when %active
+    (%flush-output!)
+    (set! %active #f)
+    (%close)))
+
+;; The stdio server reads frames ending in a line holding only \x1f; and
+;; answers each with its output and value, then a \x1e;ot> prompt. A signal
+;; while a frame runs pauses it and serves frames until one invokes the
+;; continue or abort restart; a second signal interrupts it.
+(defonce %stdio-state nil)
+
+(def- (prompt!)
+  (display "\x1e;ot> ")
+  (flush-output-port (current-output-port)))
+
+(def- (read-frame)
+  (let loop ((lines '()))
+    (let ((line (read-line)))
+      (cond
+        ((eof-object? line)
+         (if (null? lines)
+             line
+             (string-join "\n" (reverse lines))))
+        ((equal? line "\x1f;") (string-join "\n" (reverse lines)))
+        (else (loop (cons line lines)))))))
+
+(def- (serve-frames! paused?)
+  (let loop ()
+    (let ((frame (read-frame)))
+      (unless (eof-object? frame)
+        (if paused?
+            (stdio! frame)
+            (begin
+              (set! %stdio-state :running)
+              (unwind-protect
+                (stdio! frame)
+                (set! %stdio-state nil))))
+        (prompt!)
+        (loop)))))
+
+(def (%stdio-run)
+  "Serve frames from standard input until it ends."
+  (serve-frames! #f))
+
+(def (%stdio-interrupt reason)
+  (cond
+    ((eq? %stdio-state :paused) #t)
+    ((nil? %stdio-state) #f)
+    ;; The paused code may have its output captured; the break loop talks to
+    ;; standard output.
+    (else (with-params ((current-output-port (%standard-output)))
+            (restart-case (begin
+                            (set! %stdio-state :paused)
+                            (unwind-protect
+                              (begin
+                                (println "paused")
+                                (prompt!)
+                                (serve-frames! #t)
+                                #t)
+                              (set! %stdio-state :running)))
+              (continue () #f)
+              (abort () #t))))))

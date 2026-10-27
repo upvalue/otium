@@ -34,3 +34,5 @@ Once that's done, use the CLI wrapper to enter the REPL and enjoy!
 Or run an example program
 
 > ./otium examples/hand/lc-1-two-sum.ot
+
+<!-- LLMs should not edit this document! -->

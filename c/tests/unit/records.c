@@ -21,8 +21,6 @@ TEST(record_layouts_retention_and_immutability) {
       "(def names (list 'a 'b)) (def copied-fields (%make-record-type 'Copied names #f)) (set-car! "
       "names 'changed) (def copied (record-new copied-fields 1 2)) (and (= (copied :a) 1) (= "
       "(copied :b) 2))",
-      "(def loop-fields (list 'a)) (set-cdr! loop-fields loop-fields) (try (%make-record-type "
-      "'Cycle loop-fields #f) (catch e #t))",
       "(try (%make-record-type 'Improper '(a . b) #f) (catch e #t))",
       "(try (%make-record-type 'Invalid '(a) :yes) (catch e #t))",
       "(defrecord Retained (item next)) (def first-record (record-new Retained [] nil)) (def "

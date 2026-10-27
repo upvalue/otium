@@ -528,13 +528,16 @@ typedef struct {
   /* Static strings, or NULL: the operation for :who, the symbol that starts
    * :data, and the reason of an FFI error. */
   const char *who, *tag, *ffi_reason;
-  /* Further :data values. They live in rooted slots, so storing one is safe at
-   * any error site. */
-  ot_value data[3];
+  /* Managed values, in rooted slots so storing one is safe at any error site:
+   * the :data values after the tag, then :value at OTI_ERROR_VALUE. */
+  ot_value slots[4];
   size_t data_count;
+  bool has_value;
   /* The message already names the module whose load failed. */
   bool in_module;
 } oti_error_record;
+
+#define OTI_ERROR_VALUE 3
 
 struct ot_state {
   oti_heap heap;
@@ -645,6 +648,8 @@ void oti_drop_error(ot_state* rt, oti_error_record* saved, oti_roots* roots);
  * symbol tag and continues with up to three values. All strings are static. */
 bool oti_tagged_error(ot_state* rt, const char* who, const char* tag, const char* message,
                       size_t count, const ot_value* values);
+/* Record E0401, "`who` expected what, got value", with :who and :value. */
+bool oti_type_error(ot_state* rt, const char* who, const char* what, ot_value value);
 bool oti_host_entry(ot_state* rt);
 bool oti_grow(ot_state* rt, void** data, size_t* capacity, size_t needed, size_t width);
 bool oti_stack(ot_state* rt, size_t needed);
@@ -970,6 +975,9 @@ extern const oti_builtin_def oti_bytes_builtins[], oti_class_builtins[], oti_col
 /* Plain helpers other modules use in place of calling a builtin. */
 ot_value oti_table_new(ot_state* rt);
 ot_value oti_array_from(ot_state* rt, size_t first, size_t count);
+/* Whether target is reachable from from through pairs, arrays and tables: 1 if
+ * so, 0 if not, -1 if host memory ran out. Never allocates on the managed heap. */
+int oti_reaches(ot_value from, ot_value target);
 ot_value oti_list_from(ot_state* rt, size_t first, size_t count);
 bool oti_procedure(ot_value v);
 

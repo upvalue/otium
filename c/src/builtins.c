@@ -350,37 +350,49 @@ static ot_value cons_builtin(ot_state* rt, size_t first, size_t count) {
   return pair;
 }
 
-static bool pair_argument(ot_state* rt, ot_value a) {
-  if (oti_kind(a, K_PAIR)) return true;
-  return oti_coded_error(rt, "E0401", "expected a pair");
+static bool pair_argument(ot_state* rt, const char* who, ot_value a) {
+  return oti_kind(a, K_PAIR) || oti_type_error(rt, who, "a pair", a);
 }
 
 static ot_value car_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 1) || !pair_argument(rt, rt->stack[first])) return 0;
+  if (!core_arity(rt, count, 1) || !pair_argument(rt, "car", rt->stack[first])) return 0;
   return oti_car(rt->stack[first]);
 }
 
 static ot_value cdr_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 1) || !pair_argument(rt, rt->stack[first])) return 0;
+  if (!core_arity(rt, count, 1) || !pair_argument(rt, "cdr", rt->stack[first])) return 0;
   return oti_cdr(rt->stack[first]);
 }
 
 /* Pairs inside table keys are frozen so the key's hash cannot change. */
+/* Chez names both mutators set-pair! in its errors. */
 static bool mutable_pair(ot_state* rt, ot_value a) {
-  if (!pair_argument(rt, a)) return false;
+  if (!oti_kind(a, K_PAIR)) return oti_type_error(rt, "set-pair!", "pair", a);
   if (!object_frozen(a)) return true;
   return oti_error(rt, "frozen table key");
 }
 
+/* False, with an error, if pair is reachable from value: storing value in
+ * pair would make a cycle. */
+static bool acyclic(ot_state* rt, ot_value pair, ot_value value) {
+  int found = oti_reaches(value, pair);
+  if (found < 0) return oti_error(rt, "out of host memory");
+  return !found || oti_tagged_error(rt, "set-pair!", NULL, "cycle", 0, NULL);
+}
+
 static ot_value set_car_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 2) || !mutable_pair(rt, rt->stack[first])) return 0;
+  if (!core_arity(rt, count, 2) || !mutable_pair(rt, rt->stack[first]) ||
+      !acyclic(rt, rt->stack[first], rt->stack[first + 1]))
+    return 0;
   ot_value a = rt->stack[first];
   oti_as_pair(a)->car = rt->stack[first + 1];
   return a;
 }
 
 static ot_value set_cdr_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!core_arity(rt, count, 2) || !mutable_pair(rt, rt->stack[first])) return 0;
+  if (!core_arity(rt, count, 2) || !mutable_pair(rt, rt->stack[first]) ||
+      !acyclic(rt, rt->stack[first], rt->stack[first + 1]))
+    return 0;
   ot_value a = rt->stack[first];
   oti_as_pair(a)->cdr = rt->stack[first + 1];
   return a;

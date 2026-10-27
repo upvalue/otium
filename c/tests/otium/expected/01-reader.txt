@@ -21,9 +21,9 @@ float-neg: -0.5
 float-plain: 3.5
 float-shortest: 0.1
 float-negative-zero: -0.0
-float-nan: nan
-float-positive-infinity: +inf
-float-negative-infinity: -inf
+float-nan: +nan.0
+float-positive-infinity: +inf.0
+float-negative-infinity: -inf.0
 float-type: :float
 int-type: :int
 esc-len: 7

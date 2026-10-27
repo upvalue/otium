@@ -97,6 +97,10 @@ ot_value oti_condition_of(ot_state* rt, const oti_error_record* e) {
     ot_value k = live[1] ? key(rt, ":who") : 0;
     ok = k && oti_table_set(rt, live[0], k, live[1]);
   }
+  if (ok && e->has_value) {
+    ot_value k = key(rt, ":value");
+    ok = k && oti_table_set(rt, live[0], k, e->slots[OTI_ERROR_VALUE]);
+  }
   if (ok && e->tag) {
     /* :data is the tag symbol and the saved values, gathered on the stack. */
     size_t base = rt->sp, n = 1 + e->data_count;
@@ -106,7 +110,7 @@ ot_value oti_condition_of(ot_state* rt, const oti_error_record* e) {
     ok = live[1] != 0;
     if (ok) {
       rt->stack[base] = live[1];
-      for (size_t i = 0; i < e->data_count; i++) rt->stack[base + 1 + i] = e->data[i];
+      for (size_t i = 0; i < e->data_count; i++) rt->stack[base + 1 + i] = e->slots[i];
       rt->sp = rt->stack_roots.count = base + n;
       live[1] = oti_array_from(rt, base, n);
       rt->sp = rt->stack_roots.count = base;

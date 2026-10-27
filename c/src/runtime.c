@@ -20,7 +20,7 @@ static char out_of_memory[] = "out of host memory";
 static char* start_error(ot_state* rt, size_t length) {
   if (rt->error.set) return NULL;
   oti_error_record* e = &rt->error;
-  *e = (oti_error_record){.set = true, .data = {OT_NIL, OT_NIL, OT_NIL}};
+  *e = (oti_error_record){.set = true, .slots = {OT_NIL, OT_NIL, OT_NIL, OT_NIL}};
   rt->signaled = false;
   e->message = length < SIZE_MAX ? malloc(length + 1) : NULL;
   if (!e->message) {
@@ -70,13 +70,13 @@ bool oti_ffi_errorf(ot_state* rt, const char* reason, const char* format, ...) {
 
 void oti_clear_error(ot_state* rt) {
   if (rt->error.owned) free(rt->error.message);
-  rt->error = (oti_error_record){.data = {OT_NIL, OT_NIL, OT_NIL}};
+  rt->error = (oti_error_record){.slots = {OT_NIL, OT_NIL, OT_NIL, OT_NIL}};
 }
 
 void oti_take_error(ot_state* rt, oti_error_record* saved, oti_roots* roots) {
   *saved = rt->error;
-  rt->error = (oti_error_record){.data = {OT_NIL, OT_NIL, OT_NIL}};
-  oti_roots_push(&rt->heap, roots, saved->data, 3);
+  rt->error = (oti_error_record){.slots = {OT_NIL, OT_NIL, OT_NIL, OT_NIL}};
+  oti_roots_push(&rt->heap, roots, saved->slots, 4);
 }
 
 void oti_restore_error(ot_state* rt, oti_error_record* saved, oti_roots* roots) {
@@ -88,7 +88,27 @@ void oti_restore_error(ot_state* rt, oti_error_record* saved, oti_roots* roots) 
 void oti_drop_error(ot_state* rt, oti_error_record* saved, oti_roots* roots) {
   oti_roots_pop(&rt->heap, roots);
   if (saved->owned) free(saved->message);
-  *saved = (oti_error_record){.data = {OT_NIL, OT_NIL, OT_NIL}};
+  *saved = (oti_error_record){.slots = {OT_NIL, OT_NIL, OT_NIL, OT_NIL}};
+}
+
+bool oti_type_error(ot_state* rt, const char* who, const char* what, ot_value value) {
+  if (oti_failed(rt)) return false;
+  char* text = NULL;
+  size_t length = 0;
+  FILE* stream = open_memstream(&text, &length);
+  if (stream) {
+    ot_write(rt, stream, value);
+    if (fclose(stream)) {
+      free(text);
+      text = NULL;
+    }
+  }
+  oti_coded_errorf(rt, "E0401", "`%s` expected %s, got %s", who, what, text ? text : "a value");
+  free(text);
+  rt->error.who = who;
+  rt->error.slots[OTI_ERROR_VALUE] = value;
+  rt->error.has_value = true;
+  return false;
 }
 
 bool oti_tagged_error(ot_state* rt, const char* who, const char* tag, const char* message,
@@ -99,7 +119,7 @@ bool oti_tagged_error(ot_state* rt, const char* who, const char* tag, const char
   e->who = who;
   e->tag = tag;
   e->data_count = count < 3 ? count : 3;
-  for (size_t i = 0; i < e->data_count; i++) e->data[i] = values[i];
+  for (size_t i = 0; i < e->data_count; i++) e->slots[i] = values[i];
   return false;
 }
 
@@ -386,7 +406,7 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
   rt->condition_values[0] = rt->condition_values[1] = OT_NIL;
   oti_roots_push(&rt->heap, &rt->condition_roots, rt->condition_values, 2);
   oti_clear_error(rt);
-  oti_roots_push(&rt->heap, &rt->error_roots, rt->error.data, 3);
+  oti_roots_push(&rt->heap, &rt->error_roots, rt->error.slots, 4);
   for (size_t i = 0; i < C_COUNT; i++) rt->classes[i] = OT_NIL;
   oti_roots_push(&rt->heap, &rt->class_roots, rt->classes, C_COUNT);
   if (oti_namespace(rt, "otium.core", 10) == UINT32_MAX || !oti_builtins(rt) ||

@@ -211,8 +211,6 @@ TEST(arrays) {
   check_true(rt, "(let ((a [1])) (push! a 2 3 4) (pop! a) (pop! a) (pop! a) (equal? a [1]))");
   check_true(rt, "(let ((a []) (b [])) (push! a a) (push! b b) (equal? a b))");
   CHECK(eval(rt, "(let ((a []) (b [])) (push! a a 1) (push! b b 2) (equal? a b))") == OT_FALSE);
-  check_true(
-      rt, "(let ((a (cons 1 nil)) (b (cons 1 nil))) (set-cdr! a a) (set-cdr! b b) (equal? a b))");
   CHECK(eval(rt, "(get [nil] 0 9)") == OT_NIL);
   check_int(rt, "([1 2] 9 42)", 42);
   check_int(rt, "(let ((a [[1]]) (b (copy a))) (put! (get b 0) 0 42) ((a 0) 0))", 42);
@@ -311,7 +309,6 @@ TEST(tables) {
   check_error(rt, "(let ((k (cons 1 2))) (put! {} k nil) (set-cdr! k 9))", "frozen table key");
   check_error(rt, "(let ((k (list (cons 1 2))) (t {})) (put! t k 42) (set-car! (car k) 9))",
               "frozen table key");
-  check_int(rt, "(let ((k (cons 1 nil)) (t {})) (set-cdr! k k) (put! t k 42) (t k))", 42);
   check_true(rt,
              "(let ((t {}) (i 0)) (while (< i 8) (put! t i i) (set! i (+ i 1))) (set! i 0) (while "
              "(< i 7) (put! t i nil) (set! i (+ i 1))) (put! t 8 8) (equal? (keys t) [7 8]))");
@@ -418,7 +415,7 @@ TEST(apply_calls) {
   check_error(rt, "(apply +)", "argument sequence");
   check_error(rt, "(apply list 1)", "proper list");
   check_error(rt, "(apply list '(1 . 2))", "proper list");
-  check_error(rt, "(let ((p (cons 1 nil))) (set-cdr! p p) (apply list p))", "acyclic");
+  check_error(rt, "(let ((p (cons 1 nil))) (set-cdr! p p) (apply list p))", "cycle");
   check_error(rt, "(apply 1 '())", "callable");
   check_error(rt, "(apply (fn (x) x) '())", "arguments");
   ot_destroy(rt);

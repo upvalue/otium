@@ -196,10 +196,11 @@ static bool table_arity(ot_state* rt, size_t count, size_t min, size_t max) {
 }
 
 /* Checks the argument count, then that the first argument is a table. */
-static bool table_arguments(ot_state* rt, size_t first, size_t count, size_t min, size_t max) {
+static bool table_arguments(ot_state* rt, const char* who, size_t first, size_t count, size_t min,
+                            size_t max) {
   if (!table_arity(rt, count, min, max)) return false;
   if (oti_kind(rt->stack[first], K_TABLE)) return true;
-  return oti_error(rt, "expected a table");
+  return oti_type_error(rt, who, "table", rt->stack[first]);
 }
 
 static ot_value table_table_p(ot_state* rt, size_t first, size_t count) {
@@ -208,18 +209,18 @@ static ot_value table_table_p(ot_state* rt, size_t first, size_t count) {
 }
 
 ot_value oti_table_length_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!table_arguments(rt, first, count, 1, 1)) return 0;
+  if (!table_arguments(rt, "length", first, count, 1, 1)) return 0;
   return ot_int((intptr_t)oti_as_table(rt->stack[first])->count);
 }
 
 ot_value oti_table_get_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!table_arguments(rt, first, count, 2, 3)) return 0;
+  if (!table_arguments(rt, "get", first, count, 2, 3)) return 0;
   return oti_table_get(rt, rt->stack[first], rt->stack[first + 1],
                        count == 3 ? rt->stack[first + 2] : OT_NIL);
 }
 
 ot_value oti_table_contains_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!table_arguments(rt, first, count, 2, 2)) return 0;
+  if (!table_arguments(rt, "contains?", first, count, 2, 2)) return 0;
   ot_value value = oti_table_get(rt, rt->stack[first], rt->stack[first + 1], OT_NIL);
   return !value ? 0 : value == OT_NIL ? OT_FALSE : OT_TRUE;
 }
@@ -227,7 +228,10 @@ ot_value oti_table_contains_builtin(ot_state* rt, size_t first, size_t count) {
 ot_value oti_table_put_builtin(ot_state* rt, size_t first, size_t count) {
   if (!table_arity(rt, count, 3, SIZE_MAX)) return 0;
   if (!(count % 2)) return oti_fail(rt, "wrong number of collection arguments");
-  if (!oti_kind(rt->stack[first], K_TABLE)) return oti_fail(rt, "expected a table");
+  if (!oti_kind(rt->stack[first], K_TABLE)) {
+    oti_type_error(rt, "put!", "table", rt->stack[first]);
+    return 0;
+  }
   for (size_t i = 1; i < count; i += 2)
     if (!oti_table_set(rt, rt->stack[first], rt->stack[first + i], rt->stack[first + i + 1]))
       return 0;
@@ -235,7 +239,7 @@ ot_value oti_table_put_builtin(ot_state* rt, size_t first, size_t count) {
 }
 
 ot_value oti_table_copy_builtin(ot_state* rt, size_t first, size_t count) {
-  if (!table_arguments(rt, first, count, 1, 1)) return 0;
+  if (!table_arguments(rt, "copy", first, count, 1, 1)) return 0;
   ot_value copy = oti_table_new(rt);
   if (!copy) return 0;
   ot_value table = rt->stack[first];
@@ -260,7 +264,8 @@ ot_value oti_table_copy_builtin(ot_state* rt, size_t first, size_t count) {
 
 /* Shared by keys and values, which differ only in which half of each entry they take. */
 static ot_value table_keys_or_values(ot_state* rt, size_t first, size_t count, bool values) {
-  if (!table_arguments(rt, first, count, 1, 1)) return 0;
+  if (count == 1 && rt->stack[first] == OT_NIL) return oti_array_from(rt, first, 0);
+  if (!table_arguments(rt, values ? "values" : "keys", first, count, 1, 1)) return 0;
   ot_value array = oti_alloc(rt, K_ARRAY, 1, OTI_BYTES(oti_array_obj, 1));
   if (!array) return 0;
   ot_value table = rt->stack[first];
@@ -291,7 +296,7 @@ static ot_value table_values(ot_state* rt, size_t first, size_t count) {
 
 /* Collection builtins with no table version, such as push! on a table. */
 static ot_value table_unsupported(ot_state* rt, size_t first, size_t count) {
-  if (!table_arguments(rt, first, count, 1, 1)) return 0;
+  if (!table_arguments(rt, "collection operation", first, count, 1, 1)) return 0;
   return oti_fail(rt, "unsupported table operation");
 }
 

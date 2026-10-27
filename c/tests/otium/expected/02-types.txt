@@ -12,7 +12,7 @@ get-default: 99
 get-on-nil: nil
 get-in-nil-chain: nil
 get-in-hit: 1
-get-unsupported: `get` expected nil, table, array, string, or bytevector
+get-unsupported: `get` expected nil, table, array, string, or bytevector, got 42
 put-nil-deletes: 1
 put-nil-gone: #f
 ctor-nil-deletes: 0
@@ -40,9 +40,9 @@ null?-empty: #t
 null?-nil: #f
 number?-both: #t #t #f
 list?-proper: #t #t
-set-cdr-cycle: set-cdr!: cycle
+set-cdr-cycle: cycle
 set-cdr-cycle-value: (1 . 2)
-set-car-nested-cycle: set-car!: cycle
-set-car-array-cycle: set-car!: cycle
-set-cdr-table-cycle: set-cdr!: cycle
+set-car-nested-cycle: cycle
+set-car-array-cycle: cycle
+set-cdr-table-cycle: cycle
 set-car-existing-array-cycle: :array

@@ -20,7 +20,6 @@ TEST(templates_build_and_share_structure) {
       "(begin (def (suffix x) `(,x a b)) (eq? (cdr (suffix 1)) (cdr (suffix 2))))",
       "(begin (def (prefix x) `(a b ,x)) (not (eq? (prefix 1) (prefix 2))))",
       "(let ((x '(1 2))) (let ((y `(,@x 3))) (set-car! y 9) (= (car x) 1)))",
-      "(let ((x (cons 1 nil))) (set-cdr! x x) (eq? `(,@x) x))",
       "(let ((x 42)) (equal? ``(,,x) '(quasiquote ((unquote 42)))))",
   };
   /* Definitions used to inspect sharing must be top-level. */
@@ -42,7 +41,7 @@ TEST(templates_build_and_share_structure) {
   check_int(rt, "hits", 1);
   check_error(rt, "`(,@[1 2] 3)", "proper list");
   check_error(rt, "`(,@'(1 . 2) 3)", "proper list");
-  check_error(rt, "(let ((x (cons 1 nil))) (set-cdr! x x) `(,@x 2))", "cyclic");
+  check_error(rt, "(let ((x (cons 1 nil))) (set-cdr! x x) `(,@x 2))", "cycle");
   check_error(rt, "`(unquote)", "operand");
   check_error(rt, "`,@(unquote 1)", "outside");
   check_error(rt, ",1", "outside");

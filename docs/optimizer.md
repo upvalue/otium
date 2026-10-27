@@ -434,3 +434,42 @@ Allocation is liveness-based: values share registers when their lifetimes
 don't overlap, call windows sit above everything live across the call, and
 arguments whose last use is the call are allocated in their window slots.
 Block arguments become parallel moves.
+
+## Notes from the first wave
+
+Core as built: the node list is at the top of `lib/otium/compiler/core.ot`.
+Differences from the Core section above:
+
+- `:fix :bindings ((x . fn) ...) :body`: every variable unassigned, every
+  value a `:fn`. Fixing Letrec puts other letrec values in `:let`s, or binds
+  them to `{:op :unbound}` and assigns them in order; a variable with
+  `:unbound #t` starts out unbound, so reads of it need `check-bound` (or
+  `box-ref` when boxed).
+- `and`/`or` arrive as `let` plus `if`. `quasiquote` arrives as `cons`
+  primcalls and calls to the global `otium.core/append` (an Otium function on
+  this runtime).
+- `:defer :body :cleanup` covers `unwind-protect` too.
+- `:try :body :catches ((pred x body) ...)`: `pred` is nil for a catch-all.
+- `core/annotate!` recomputes exact `:refs`, `:sets` and `:captured`.
+
+The VM installer (`c/src/optimizer.c`, documented under "Installed code" in
+`docs/vm-design.md`) enforces:
+
+- Opcode keywords come straight from the enum: `:nullp`, `:pairp`,
+  `:br-null`, `:call-global`.
+- Every fused branch (`BR_*`) is followed by a `JUMP` word holding its target,
+  and that word counts in instruction indexes. A branch jumps when its test
+  equals `x`. `BR_*I` forms test register `a` against the immediate in `c`.
+- The last word of a function is `JUMP`, `RETURN`, `RETURN_IMM`, `TAIL_CALL`,
+  `TAIL_CALL_GLOBAL` or `RAISE`.
+- Every register named, including whole call windows (`CALL a b` uses
+  `a..a+b`, `CALL_GLOBAL x a` uses `a..a+x`), is at most `:locals`. Only tail
+  calls may name register 0; nothing writes it.
+- `IMM` takes `%immediate-bits`, written as `b` = low 16 bits, `c` = high 16
+  bits. The unbound marker's bits are 18.
+- `a`, `b`, `c` accept -32768..65535; `x` is 0..255, so `CALL_GLOBAL` takes at
+  most 255 arguments.
+- Not checked: what registers hold at run time. `UNBOX` and friends on a
+  non-box crash.
+- `%global-cell` creates a cell in that namespace; only call it for real
+  `def`s, never to look a name up.

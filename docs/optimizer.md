@@ -503,3 +503,29 @@ The VM installer (`c/src/optimizer.c`, documented under "Installed code" in
 - **Symbols are slow to intern** on this runtime once there are many of them.
   Don't make a symbol per value or block; use fixnums and strings.
 - `ns` and `range` can't be local variable names.
+
+## Status
+
+Every pass exists and runs on the C runtime. With `OTIUM_OPTIMIZE=1` the C
+test suite (102 tests) passes, also with `OTIUM_OPTIMIZE_VERIFY=1`, and all
+43 R7RS ports in this tree give the same results as compiler.c. Forms fall
+back to compiler.c only for the unsupported forms listed under Core (class
+and generic declarations, handler-bind, restart-case, with-params, defparam).
+
+Generated code runs within 5% of compiler.c's in VM instructions on the
+ports measured, either way. Known gaps, roughly in order of payoff:
+
+- Call windows. compiler.c reserves a call's window before computing its
+  arguments, so nested calls stack above it and results land in place.
+  Allocate places each window above what's live across it, so results of
+  nested calls often need moving (deriv, triangl, the float ports).
+- No inlining of globals, including otium.core functions written in Otium
+  (map, append, second, ...), which needs the dependency tracking from the
+  plan. Most benchmark time is in calls between globals.
+- No typed VM opcodes, so Propagate's specializations (%fx+, %car) still
+  run the generic instruction's checks.
+- Compile time is about 2.4 ms per top-level form, with the compiler itself
+  compiled by compiler.c, and loading it adds about 0.1 s at startup.
+
+Tools: `OTIUM_DUMP_CODE=1` prints compiler.c's code and every installed
+unit; `OTIUM_OPTIMIZE_REPORT=1` prints each fallback.

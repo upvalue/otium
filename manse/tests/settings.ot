@@ -22,12 +22,8 @@
          (catch (error? _) #t)))
 (require manse.settings :reload)
 (check "settings survive reload" 18 (settings/options :font-size))
-(require chez)
-(chez/call-with-output-file "/tmp/manse-config-test.ot"
-                            (fn (port)
-                              (chez/display "(require manse.settings :as settings)\n(settings/configure! {:font-size 16 :width 800})\n"
-                                            port))
-                            'replace)
+(write-file "/tmp/manse-config-test.ot"
+            "(require manse.settings :as settings)\n(settings/configure! {:font-size 16 :width 800})\n")
 (settings/load! "/tmp/manse-config-test.ot")
 (check "config evaluated" 16 (settings/options :font-size))
 (check "config updates width" 800 (settings/options :width))

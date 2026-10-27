@@ -1,8 +1,12 @@
 ;; A child on a PTY: size, controlling terminal, output through libghostty, and Ctrl-C.
 (require manse.pty :as pty)
 (require manse.ghostty :as g)
+(require otium.ffi :as ffi)
 (require otium.test :refer (check report))
-(require chez)
+
+(ffi/defbindings libc %load-libc! (%usleep "usleep" (u32) int #f))
+
+(%load-libc! "/usr/lib/libSystem.B.dylib")
 
 (def term (g/new 80 24))
 
@@ -24,7 +28,7 @@
                     (begin
                       (g/write-bytes! term (pty/output-data p) n)
                       (pty/consume! p))
-                    (chez/sleep (chez/make-time 'time-duration 10000000 0))))
+                    (%usleep 10000)))
               (loop))))))
 
 (def (screen)

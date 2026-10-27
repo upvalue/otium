@@ -1,8 +1,12 @@
 (require manse.fonts :as fonts)
 (require manse.settings :as settings)
+(require otium.ffi :as ffi)
 (require otium.process :as process)
 (require otium.test :refer (check report))
-(require chez)
+
+(ffi/defbindings libc %load-libc! (%symlink "symlink" (utf8 utf8) int #t))
+
+(%load-libc! "/usr/lib/libSystem.B.dylib")
 
 (let ((home (process/getenv "HOME"))
       (data-home (process/getenv "XDG_DATA_HOME"))
@@ -24,21 +28,21 @@
     (process/setenv! "XDG_DATA_HOME" data-home)
     (process/setenv! "XDG_DATA_DIRS" data-dirs)))
 
-(def root (str "/tmp/manse-font-discovery-" (chez/get-process-id)))
+;; The harness passes a scratch directory and removes it afterwards.
+(def root (car (process/arguments)))
 
-(chez/mkdir root)
-(chez/mkdir (str root "/nested"))
-(chez/mkdir (str root "/duplicate"))
+(make-directory (str root "/nested"))
+(make-directory (str root "/duplicate"))
 
 (def (touch name)
-  (chez/call-with-output-file (str root "/" name) (fn (port) (chez/display "fixture" port))))
+  (write-file (str root "/" name) "fixture"))
 
 (touch "nested/ExampleMono-Regular.ttf")
 (touch "Example.ttc")
 (touch "duplicate/Example.ttc")
 (touch "ignore.txt")
-(check "create directory symlink cycle" 0 (chez/system (str "ln -s .. " root "/nested/loop")))
-(check "create font symlink" 0 (chez/system (str "ln -s Example.ttc " root "/Alias.otf")))
+(check "create directory symlink cycle" 0 (%symlink ".." (str root "/nested/loop")))
+(check "create font symlink" 0 (%symlink "Example.ttc" (str root "/Alias.otf")))
 
 (def roots (list root (str root "/missing") root))
 
@@ -89,14 +93,4 @@
              (catch (error? _) #t)))
     (check "failed discovery preserves size" 14 (settings/options :font-size)))
   (set! fonts/search-paths original-search-paths))
-(for-each (fn (name) (chez/delete-file (str root "/" name)))
-          '("Alias.otf"
-            "nested/loop"
-            "nested/ExampleMono-Regular.ttf"
-            "Example.ttc"
-            "duplicate/Example.ttc"
-            "ignore.txt"))
-(chez/delete-directory (str root "/nested"))
-(chez/delete-directory (str root "/duplicate"))
-(chez/delete-directory root)
 (report "manse fonts")

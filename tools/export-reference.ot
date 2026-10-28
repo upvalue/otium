@@ -338,7 +338,7 @@
                 ;; expander-* are the runtime's hooks for the expander, and % names
                 ;; are internal.
                 (unless (or (get defined name) (string-starts-with? name "expander-") (string-starts-with? name "%"))
-                  (push! out (entry name (builtin-kind name special) ((catalog name) "text") nil nil))))
+                  (push! out (entry name (builtin-kind name special) (catalog name) nil nil))))
               (keys catalog))
     out))
 

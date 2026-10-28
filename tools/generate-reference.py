@@ -16,7 +16,7 @@ def quote(text):
 c = ['/* Generated from lib/catalog/runtime.json. */',
      'static const char* oti_runtime_documentation(const char* name) {',
      '  static const struct { const char* name; const char* text; } entries[] = {']
-c += ['    {' + quote(name) + ', ' + quote(entry['text']) + '},' for name, entry in entries.items()]
+c += ['    {' + quote(name) + ', ' + quote(text) + '},' for name, text in entries.items()]
 c += ['  };', '  for (size_t i = 0; i < sizeof(entries) / sizeof(*entries); ++i)',
       '    if (!strcmp(name, entries[i].name)) return entries[i].text;', '  return "";', '}','']
 name = 'c/src/runtime-reference.inc'

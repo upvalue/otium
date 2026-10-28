@@ -15,7 +15,7 @@ for file do
         README.md|AGENTS.md|AGENT-LANG.md|docs/*.md|specs/*.md|scratch/*.md) ;;
         benchmarks/README.md|manse/README.md) ;;
         examples/*/README.md|vim/README.md|.agents/skills/*/SKILL.md) ;;
-        .tickets/*|*/vendor/*|otos/cross/*|*-OFL.txt|tests/*|c/tests/*) continue ;;
+        COPYING.md|.tickets/*|*/vendor/*|otos/cross/*|*-OFL.txt|tests/*|c/tests/*) continue ;;
         *) echo "$file: docs belong in docs/, specs/ or scratch/" >&2; status=1; continue ;;
     esac
     # Generated docs have a .spec beside them and ✨ in the title; hand-written

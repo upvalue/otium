@@ -6,6 +6,7 @@ Every line of a fixture that should be reported ends in a comment
 
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -28,6 +29,11 @@ def run(arguments):
 
 tool, config, resource_dir = sys.argv[1:]
 tests = Path(__file__).resolve().parent
+# Homebrew's clang doesn't know where the macOS SDK is, so system headers
+# need the same -isysroot the runner gives the runtime.
+sysroot = []
+if sys.platform == "darwin" and shutil.which("xcrun"):
+    sysroot = ["-isysroot", subprocess.check_output(["xcrun", "--show-sdk-path"], text=True).strip()]
 failed = False
 for fixture in sorted(tests.glob("*.c")):
     expected = set()
@@ -37,7 +43,7 @@ for fixture in sorted(tests.glob("*.c")):
     status, stdout, stderr = run([
         tool, "--warnings-as-errors", f"--config={config}",
         f"--config={tests / 'gc-lint.conf'}", str(fixture), "--",
-        f"-resource-dir={resource_dir}", "-std=c11",
+        f"-resource-dir={resource_dir}", "-std=c11", *sysroot,
     ])
     reported = set()
     for line in stdout.splitlines():

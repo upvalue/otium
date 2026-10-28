@@ -223,7 +223,7 @@ static bool load_builtin(oti_compiler* c, unsigned id, uint32_t dst) {
   return load_constant(c, ((ot_value)id << 8) | TAG_BUILTIN, dst);
 }
 
-uint32_t oti_add_function(ot_state* rt, oti_function* fn) {
+static uint32_t new_function(ot_state* rt) {
   size_t id = rt->function_free;
   while (id < rt->function_count && rt->functions[id]) id++;
   if (id >= UINT32_MAX || !oti_grow(rt, (void**)&rt->functions, &rt->function_capacity, id + 1,
@@ -231,13 +231,6 @@ uint32_t oti_add_function(ot_state* rt, oti_function* fn) {
     oti_error(rt, "too many functions");
     return UINT32_MAX;
   }
-  if (id == rt->function_count) rt->function_count++;
-  rt->function_free = id + 1;
-  rt->functions[id] = fn;
-  return (uint32_t)id;
-}
-
-static uint32_t new_function(ot_state* rt) {
   oti_function* f = calloc(1, sizeof(*f));
   if (!f) {
     oti_error(rt, "out of host memory");
@@ -245,9 +238,10 @@ static uint32_t new_function(ot_state* rt) {
   }
   f->namespace = rt->current_namespace;
   f->source = rt->source;
-  uint32_t id = oti_add_function(rt, f);
-  if (id == UINT32_MAX) free(f);
-  return id;
+  if (id == rt->function_count) rt->function_count++;
+  rt->function_free = id + 1;
+  rt->functions[id] = f;
+  return (uint32_t)id;
 }
 
 /* Functions created by an attempt are discarded if the form is compiled again. */
@@ -2078,11 +2072,6 @@ oti_ast* oti_expand_form(ot_state* rt, const oti_ast* form, oti_arena* arena) {
   }
   oti_roots_pop(&rt->heap, &roots);
   return result;
-}
-
-ot_value oti_form_datum(ot_state* rt, const oti_ast* form) {
-  oti_compiler c = {.rt = rt, .locate = true};
-  return datum(&c, form);
 }
 
 ot_value oti_read_string(ot_state* rt, ot_value string) {

@@ -66,7 +66,6 @@ unit_suites = [
   'bytevectors', 'cleanup', 'conditions', 'control', 'defonce', 'evaluation', 'file-ports',
   'filesystem', 'foreign', 'foreign-reload', 'generics', 'handlers', 'heap', 'heap-growth',
   'instances', 'interrupt', 'io-host', 'macros', 'methods', 'modules', 'namespaces', 'numeric',
-  'optimizer',
   'params', 'port-reader', 'port-shutdown', 'ports', 'process', 'properties', 'quasiquote',
   'reader', 'records', 'reflection', 'reload', 'restarts', 'runtime', 'scope-roots',
   'shared-expander', 'slot-reuse', 'strings', 'time', 'tokens', 'value']

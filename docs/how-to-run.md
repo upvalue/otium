@@ -7,7 +7,6 @@ You'll need the following dependencies to run Otium:
 
 - A POSIX system. Otium is developed primarily on OSX and occasionally tested
   on Linux.
-- [Chez Scheme](https://github.com/cisco/ChezScheme). Unfortunately Chez Scheme doesn't package itself upstream, but it's available in Homebrew and other Linux package managers.
 - A c compiler. Only clang has been tested so far.
 - Meson for building the C code.
 - SDL3, SDL3_ttf. 

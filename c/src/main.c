@@ -608,10 +608,6 @@ int main(int argc, char** argv) {
     ok = ot_load_core(rt, OTIUM_LIBRARY_DIR);
     if (!ok) fprintf(stderr, "cannot load core: %s\n", ot_error(rt));
   }
-  if (ok && !(ok = ot_load_optimizer(rt))) {
-    fprintf(stderr, "cannot enable the optimizer that OTIUM_OPTIMIZE asks for:\n");
-    report_error(rt, "<optimizer>");
-  }
   if (ok && (dev || o.server) && !(ok = load_dev(rt))) report_error(rt, "<dev>");
   if (ok && dev && !(ok = start_dev(rt, &o))) {
     int exit_status;

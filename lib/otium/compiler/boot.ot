@@ -102,8 +102,8 @@
       (close-port port))))
 
 ;; The standard boot file: the expander, core, and the compiler's modules.
-(def (build-standard out)
-  (build out "lib" "c/src/primitives.ot"
+(def (build-standard out library primitives)
+  (build out library primitives
          '(otium.loop otium.compiler.convert otium.compiler.lower otium.compiler.alloc
            otium.compiler.emit otium.compiler.fasl otium.compiler)))
 

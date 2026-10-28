@@ -1,0 +1,5 @@
+(def (h x) (println "pair?" (pair? x) (null? x) (not x) (eq? x x)))
+(h '(1 2))
+(h '())
+(def (k x) (if (pair? x) 'yes 'no))
+(println (k '(1)) (k 1))

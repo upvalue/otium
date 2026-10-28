@@ -57,6 +57,20 @@ otium = executable('otium', 'c/src/main.c',
   c_args: runtime_args, include_directories: native_include, link_with: line.get_static_lib(),
   dependencies: libotium_dep, override_options: runtime_options)
 
+# The boot file native processes start from: the VM compiles the expander,
+# core and the native compiler to native code.
+if native_enabled
+  boot_sources = files('lib/otium/expander.ot', 'lib/otium/core.ot', 'lib/otium/loop.ot',
+    'c/src/primitives.ot', 'lib/otium/compiler.ot', 'lib/otium/compiler/convert.ot',
+    'lib/otium/compiler/lower.ot', 'lib/otium/compiler/alloc.ot', 'lib/otium/compiler/emit.ot',
+    'lib/otium/compiler/fasl.ot', 'lib/otium/compiler/boot.ot')
+  custom_target('otium.boot', output: 'otium.boot', depend_files: boot_sources,
+    command: [otium, '--c.vm', '--no-project', '-L', source_root / 'lib', '-e',
+      '(require otium.compiler.boot :as boot) (boot/build-standard "@OUTPUT@" "@0@" "@1@") (exit 0)'.format(
+        source_root / 'lib', source_root / 'c/src/primitives.ot')],
+    build_by_default: true)
+endif
+
 # The optional UI bridge: SDL_GPU rendering, SDL_ttf text and Yoga layout.
 sdl3 = dependency('sdl3', version: '>= 3.4.12', required: get_option('ui'))
 sdl3_ttf = dependency('sdl3-ttf', version: '>= 3.2.2', required: get_option('ui'))
@@ -123,11 +137,13 @@ test_variables = {
 }
 test_env = environment(test_variables)
 stress_env = environment(test_variables + {'OTIUM_GC_STRESS': '1'})
+vm_env = environment(test_variables + {'OTIUM_VM': '1'})
 add_test_setup('default', is_default: true, env: test_env,
   exclude_suites: ['native', 'gpu', 'bench'])
 add_test_setup('stress', env: stress_env,
   exclude_suites: ['native', 'gpu', 'bench'], timeout_multiplier: 4)
 add_test_setup('all', env: test_env)
+add_test_setup('vm', env: vm_env, exclude_suites: ['native', 'gpu', 'bench'])
 test_kwargs = {'workdir': source_root, 'env': test_env}
 
 # Compiled checks.

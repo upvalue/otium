@@ -1,0 +1,11 @@
+;; Fixnum and float arithmetic, comparisons and arrays.
+(println (+ 1 2) (- 5 9) (* 6 7) (+ 1.5 2) (* 2.5 4.0) (- 0.5 1.25) (/ 7 2))
+(println (< 1 2) (<= 2 2) (> 1.5 2.5) (>= 3.0 3) (= 4 4.0) (< (sqrt -1.0) 0.0))
+(println (+ 4611686018427387903 1) (* 4611686018427387903 4))
+(def (sumfp n) (let loop ((i 0) (acc 0.0)) (if (= i n) acc (loop (+ i 1) (+ acc (* i 0.5))))))
+(println (sumfp 1000))
+(def a (make-bytevector 3 7))
+(def v [1 2 3])
+(put! v 0 'x)
+(println (get v 0) (get v 9) (length v) (get v 9 'default) (length "four") (get {:k 1} :k))
+(println (try (put! v 9 1) (catch e (condition-message e))))

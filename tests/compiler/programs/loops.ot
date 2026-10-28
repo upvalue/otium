@@ -1,0 +1,8 @@
+(def (array-to-list2 value)
+  (let ((acc '())
+        (i (- (length value) 1)))
+    (while (>= i 0)
+      (set! acc (cons (get value i) acc))
+      (set! i (- i 1)))
+    acc))
+(println (array-to-list2 [1 2 3]))

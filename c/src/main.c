@@ -606,8 +606,9 @@ int main(int argc, char** argv) {
   ot_set_interrupt_flag(rt, &interrupt_requested);
   interrupt_runtime = rt;
 #ifdef OTIUM_NATIVE
-  const char* native = getenv("OTIUM_NATIVE");
-  if (!o.vm && native && *native && strcmp(native, "0") && !ot_use_native(rt)) {
+  /* Native code by default; --c.vm or OTIUM_VM=1 keeps the VM. */
+  const char* vm = getenv("OTIUM_VM");
+  if (!o.vm && !(vm && *vm && strcmp(vm, "0")) && !ot_use_native(rt)) {
     fprintf(stderr, "cannot run native code: %s\n", ot_error(rt));
     ot_destroy(rt);
     return 1;

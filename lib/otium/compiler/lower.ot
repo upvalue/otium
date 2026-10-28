@@ -14,7 +14,7 @@
 ;;
 ;;   [:mov dst src]  [:load8 dst mem]  [:op2 op flags dst a b]  [:op2u op flags a b]
 ;;   [:cmpj cond a b label]  [:jcond cond label]  [:jump label]  [:label label]
-;;   [:call kind callee args dst tail handlers offset]
+;;   [:call kind callee args dst tail handlers offset tail-position?]
 ;;   [:ccall helper args dst handlers offset]  [:ret src]  [:entry]  [:poll label]
 ;;   [:landing dst]  [:addr dst label]  [:spbase dst]
 ;;
@@ -621,11 +621,13 @@
          (let ((args (arguments fc (get node 3))))
            (emit! fc [:call :value f args dst tail (fc :handlers) offset]))))
       ((:gcall)
+       (when (get node 5) (global-ref fc (get node 2) offset))
        (let ((args (arguments fc (get node 3))))
-         (emit! fc [:call :cell (cell! u (get node 2)) args dst tail (fc :handlers) offset])))
+         (emit! fc [:call :cell (cell! u (get node 2)) args dst tail (fc :handlers) offset
+                    (get node 6)])))
       (else
        (let ((args (arguments fc (get node 3))))
-         (emit! fc [:call :imm (get node 2) args dst tail (fc :handlers) offset]))))))
+         (emit! fc [:call :imm (get node 2) args dst tail (fc :handlers) offset (get node 6)]))))))
 
 ;; Builtins the compiler calls itself, and core builtins convert marked, keep
 ;; their caller's frame, so errors point at the call.

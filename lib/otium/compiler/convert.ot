@@ -8,7 +8,8 @@
 ;;   [:const off value]          [:lref off var check?]   [:lset off var expr]
 ;;   [:gref off cell]            [:gset off cell expr]    [:gdef off cell expr]
 ;;   [:if off test then else]    [:seq off nodes]         [:let off vars inits body]
-;;   [:fn off info]              [:call off f args tail?] [:gcall off cell args tail?]
+;;   [:fn off info]              [:call off f args tail?]
+;;   [:gcall off cell args tail? check? tail-position?]
 ;;   [:bcall off builtin args tail?]                      [:prim off name args]
 ;;   [:loop off loop inits body] [:recur off loop args]   [:while off test body]
 ;;   [:try off body var clauses] [:cleanup off fn outcome? body]
@@ -51,7 +52,7 @@
   (%compile-error message (offset-of form off)))
 
 (def (declaration-fail message form off)
-  (%compile-error message (offset-of form off)))
+  (%compile-error message (offset-of form off) 'invalid-declaration))
 
 ;; --- Facts that need a second attempt ---------------------------------------
 
@@ -580,8 +581,11 @@
                        ;; A builtin of core in tail position runs in its caller's frame, as in
                        ;; the VM, so errors point at the call. apply stays a tail call.
                        ((and builtin (site :tail) (not (eq? builtin 'apply)) (%native-core-cell? cell))
-                        [:gcall off cell nodes #f])
-                       (else [:gcall off cell nodes (site :tail)])))))
+                        [:gcall off cell nodes #f #f #t])
+                       ;; A callee unbound now is checked before the arguments
+                       ;; run, so a misspelt function is reported before
+                       ;; anything in its arguments is.
+                       (else [:gcall off cell nodes (site :tail) (not (%native-cell-bound? cell))])))))
             (else
              (let ((f (expression head (non-tail site) off)))
                [:call off f (list-to-array (map (fn (a) (expression a (non-tail site) off)) args))
@@ -594,7 +598,7 @@
 ;; the same name doesn't matter. The call keeps its frame, so errors in it
 ;; point at the form.
 (def (builtin-call name args off tail)
-  [:bcall off (%native-builtin name) args #f])
+  [:bcall off (%native-builtin name) args #f #f tail])
 
 ;; --- quasiquote ----------------------------------------------------------
 
@@ -842,7 +846,8 @@
                   (let ((forms (cdr signature)) (has-next #f))
                     (when (class-key? (car forms) "next")
                       (let ((binding (and (pair? (cdr forms)) (car (cdr forms)))))
-                        (unless (and (symbol? binding) (not (eq? binding '&)) (not (eq? binding '&optional)))
+                        (unless (and (symbol? binding) (not (eq? binding '&)) (not (eq? binding '&optional))
+                                     (not (string-contains? (symbol->string binding) "/")))
                           (fail "next method needs a local binding name" (car forms) off))
                         (unless (pair? (cdr (cdr forms))) (fail "next method needs a body" (car forms) off))
                         (when (find (fn (q) (eq? q binding)) params)

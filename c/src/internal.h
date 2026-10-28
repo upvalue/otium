@@ -356,6 +356,7 @@ enum {
   B_SET_NAMESPACE,
   B_SYMBOL_SERIAL,
   B_EVALUATE,
+  B_NATIVE_CELL_BOUND,
   /* Compiler-only helpers have no name, so they aren't globals. */
   B_QQ_APPEND,
   B_EVAL_IN_NAMESPACE,
@@ -756,8 +757,8 @@ struct ot_state {
   uintptr_t native_stubs[3];
   /* The boot file a native process started from (fasl.c). */
   oti_boot* boot;
-  /* Set by ot_request_interrupt; native.limit is raised with it. */
-  volatile sig_atomic_t interrupt_requested;
+  /* The interrupt flag when the host hasn't installed one. */
+  volatile sig_atomic_t interrupt_word;
 };
 
 #ifdef OTIUM_NATIVE

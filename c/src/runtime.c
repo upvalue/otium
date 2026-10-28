@@ -227,7 +227,17 @@ bool oti_stack(ot_state* rt, size_t needed) {
   return true;
 }
 
-void ot_set_interrupt_flag(ot_state* rt, volatile sig_atomic_t* flag) { rt->interrupt_flag = flag; }
+void ot_set_interrupt_flag(ot_state* rt, volatile sig_atomic_t* flag) {
+  rt->interrupt_flag = flag ? flag : &rt->interrupt_word;
+}
+
+void ot_request_interrupt(ot_state* rt, int reason) {
+  *rt->interrupt_flag = reason;
+#ifdef OTIUM_NATIVE
+  /* Every stack check at a function entry or loop head now fails. */
+  rt->native.limit = UINTPTR_MAX;
+#endif
+}
 
 bool ot_set_frame_limit(ot_state* rt, size_t frames) {
   if (!frames || frames < rt->frame_count) return false;
@@ -523,6 +533,7 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
   oti_roots_push(&rt->heap, &rt->process_roots, rt->process_values, 2);
   rt->stack_limit = stack_limit;
   rt->frame_limit = SIZE_MAX;
+  rt->interrupt_flag = &rt->interrupt_word;
   const char* stress = getenv("OTIUM_GC_STRESS");
   rt->stress_gc = stress && *stress && strcmp(stress, "0");
   rt->required_namespace = UINT32_MAX;
@@ -554,14 +565,18 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
     return NULL;
   }
   rt->permanent_constants = rt->constant_count;
-#ifdef OTIUM_NATIVE
-  const char* native = getenv("OTIUM_NATIVE");
-  if (native && *native && strcmp(native, "0") && !oti_native_init(rt)) {
-    ot_destroy(rt);
-    return NULL;
-  }
-#endif
   return rt;
+}
+
+bool ot_use_native(ot_state* rt) {
+  if (!oti_host_entry(rt)) return false;
+#ifdef OTIUM_NATIVE
+  if (rt->native_mode) return true;
+  if (rt->shared_expander || rt->frame_count) return oti_error(rt, "too late to switch to native code");
+  return oti_native_init(rt);
+#else
+  return oti_error(rt, "native code is not available in this build");
+#endif
 }
 
 bool ot_set_heap_limit(ot_state* rt, size_t bytes) {
@@ -630,7 +645,17 @@ static bool document(ot_state* rt, uint32_t index, const oti_ast* doc) {
 #ifdef OTIUM_NATIVE
 /* Compile a form with the native compiler, loading it on first use, and run
  * it. */
+static bool load_boot(ot_state* rt);
+
 static bool native_evaluate(ot_state* rt, const oti_ast* form, ot_value* result) {
+  /* The compiler lives in the boot file, which a host that never loaded the
+   * core library hasn't loaded either. */
+  if (!rt->boot) {
+    uint32_t saved = rt->current_namespace;
+    bool ok = load_boot(rt);
+    rt->current_namespace = saved;
+    if (!ok) return false;
+  }
   uint32_t space = oti_namespace(rt, "otium.compiler", 14);
   if (space == UINT32_MAX) return false;
   uint32_t cell = oti_binding_global(rt, space, "install-top", 11, false);
@@ -993,7 +1018,9 @@ bool ot_load_expander(ot_state* rt, const char* directory) {
   if (!oti_host_entry(rt)) return false;
   if (rt->shared_expander) return true;
 #ifdef OTIUM_NATIVE
-  if (rt->native_mode) return load_boot(rt);
+  /* ot_load_core adds the library directory, but it returns early once the
+   * boot file has loaded core. */
+  if (rt->native_mode) return load_boot(rt) && ot_add_load_path(rt, directory);
 #endif
   if (!oti_classes_init(rt)) return false;
   char* path = library_path(rt, directory, "otium/expander.ot");
@@ -1022,10 +1049,10 @@ bool ot_load_expander(ot_state* rt, const char* directory) {
 bool ot_load_core(ot_state* rt, const char* directory) {
   if (!oti_host_entry(rt)) return false;
   if (rt->core_loaded) return true;
-#ifdef OTIUM_NATIVE
-  if (rt->native_mode) return load_boot(rt) && ot_add_load_path(rt, directory);
-#endif
-  if (!ot_load_expander(rt, directory) || !ot_add_load_path(rt, directory)) return false;
+  if (!ot_load_expander(rt, directory)) return false;
+  /* A native process's boot file holds core as well. */
+  if (rt->core_loaded) return true;
+  if (!ot_add_load_path(rt, directory)) return false;
   char* path = library_path(rt, directory, "otium/core.ot");
   if (!path) return false;
   bool ok = eval_library_file(rt, OTIUM_BOOTSTRAP_FILE, "bootstrap library") &&

@@ -12,5 +12,6 @@
  ["c.heap-max", "integer", "Maximum size of each semispace in bytes"],
  ["c.max-depth", "integer", "VM frame depth limit"],
  ["c.gc-stats", "flag", "Print collector statistics at exit"],
- ["c.gc-stats-json", "flag", "Print machine-readable GC statistics"]
+ ["c.gc-stats-json", "flag", "Print machine-readable GC statistics"],
+ ["c.vm", "flag", "Run on the VM instead of native code"]
 ]

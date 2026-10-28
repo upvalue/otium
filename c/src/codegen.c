@@ -90,7 +90,8 @@ static ot_value codegen_source_offset(ot_state* rt, size_t first, size_t count) 
 }
 
 /* (%compile-error message offset [code]): fail with a compile error located
- * at offset, when it is an integer. */
+ * at offset, when it is an integer. code is a diagnostic code string, or the
+ * symbol invalid-declaration for a tagged declaration error. */
 static ot_value codegen_compile_error(ot_state* rt, size_t first, size_t count) {
   if (!codegen_arity(rt, count, 2, 3)) return 0;
   ot_value message = rt->stack[first], offset = rt->stack[first + 1];
@@ -98,6 +99,19 @@ static ot_value codegen_compile_error(ot_state* rt, size_t first, size_t count) 
   size_t length;
   const char* text = oti_text_bytes(message, &length);
   char code[32] = "";
+  /* A declaration error is tagged, as compiler.c's declaration_error. */
+  if (count == 3 && oti_kind(rt->stack[first + 2], K_SYMBOL)) {
+    bool fresh = !oti_failed(rt);
+    char* copy = malloc(length + 1);
+    if (!copy) return oti_fail(rt, "out of host memory");
+    memcpy(copy, text, length);
+    copy[length] = 0;
+    oti_tagged_error(rt, "declaration", "invalid-declaration", copy, 0, NULL);
+    free(copy);
+    if (fresh && ot_is_int(offset) && ot_to_int(offset) >= 0)
+      oti_error_at(rt, (size_t)ot_to_int(offset));
+    return 0;
+  }
   if (count == 3 && oti_kind(rt->stack[first + 2], K_STRING)) {
     size_t n;
     const char* c = oti_text_bytes(rt->stack[first + 2], &n);
@@ -207,7 +221,14 @@ static ot_value codegen_evaluate(ot_state* rt, size_t first, size_t count) {
   return oti_eval_value(rt, rt->stack[first]);
 }
 
+static ot_value codegen_cell_bound(ot_state* rt, size_t first, size_t count) {
+  uint32_t cell = 0;
+  if (!codegen_arity(rt, count, 1, 1) || !cell_arg(rt, rt->stack[first], &cell)) return 0;
+  return ot_bool(!oti_unbound(oti_global_value(rt, cell)));
+}
+
 const oti_builtin_def oti_codegen_builtins[] = {
+    {B_NATIVE_CELL_BOUND, "%native-cell-bound?", codegen_cell_bound},
     {B_EVALUATE, "%native-evaluate", codegen_evaluate},
     {B_READ_FORMS, "%read-forms", codegen_read_forms},
     {B_SET_NAMESPACE, "%set-namespace", codegen_set_namespace},

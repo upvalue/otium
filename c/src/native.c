@@ -96,7 +96,10 @@ typedef struct {
   uint32_t offset;   /* source offset of the call, or UINT32_MAX */
   uint32_t function; /* the oti_function id, or UINT32_MAX for runtime stubs */
   uint32_t slots;    /* first word of the live slot bitmap in the code object */
-  uint32_t words;    /* bitmap words */
+  uint16_t words;    /* bitmap words */
+  /* A call in tail position that keeps its frame, a builtin's: backtraces
+   * leave it out when it is innermost, as the VM's do. */
+  bool tail;
 } oti_descriptor;
 
 typedef struct oti_code {
@@ -750,6 +753,7 @@ static ot_value* array_items(ot_value array, size_t* count) {
     return NULL;
   }
   *count = oti_as_array(array)->length;
+  if (!*count) return NULL;
   return oti_as_array_data(oti_as_array(array)->data)->items;
 }
 
@@ -777,12 +781,17 @@ static void write_perf_map(ot_state* rt, oti_code* code) {
   fflush(n->perf_map);
 }
 
-/* Install a unit: [stream literals cells functions descriptors statics].
+/* Install a unit: [stream literals cells functions descriptors statics
+ * max-args].
  * functions are [name arity optional rest? offset]; descriptors are
  * [function live-slots offset]; statics are [function literal], closures
  * without captures that the unit reads as literals. Returns the static
  * closure of function 0, the unit's top level. */
 ot_value oti_native_install(ot_state* rt, size_t slot) {
+  if (getenv("OTIUM_DUMP_UNITS")) {
+    ot_write(rt, stderr, rt->stack[slot]);
+    fputc('\n', stderr);
+  }
   size_t parts_count;
   ot_value* parts = array_items(rt->stack[slot], &parts_count);
   if (parts_count < 6 || !oti_kind(parts[0], K_BYTEVECTOR)) {
@@ -799,6 +808,9 @@ ot_value oti_native_install(ot_state* rt, size_t slot) {
     oti_error(rt, "native unit: no functions");
     return 0;
   }
+  /* Calls store arguments past the fifth in native.args. */
+  uint32_t max_args = 0;
+  if (parts_count > 6 && unit_int(parts[6], &max_args) && !oti_native_args(rt, max_args)) return 0;
   oti_bridge b = {.rt = rt};
   oti_code* code = calloc(1, sizeof(*code));
   uint32_t* cells = calloc(cell_count + 1, sizeof(uint32_t));
@@ -893,7 +905,8 @@ ot_value oti_native_install(ot_state* rt, size_t slot) {
     }
     descriptors[i] = (oti_descriptor){0, 0, offset,
                                       function == UINT32_MAX ? UINT32_MAX : functions[function],
-                                      (uint32_t)bitmap_count, words};
+                                      (uint32_t)bitmap_count, (uint16_t)words,
+                                      n > 3 && oti_truth(info[3])};
     bitmap_count += words;
   }
   /* The stream. */
@@ -965,6 +978,7 @@ ot_value oti_native_install(ot_state* rt, size_t slot) {
     }
   }
   ot_value result = 0;
+  uint32_t top = UINT32_MAX;
   for (size_t i = 0; ok && i < static_count; i++) {
     ot_value closure = oti_alloc_closure(rt, 0);
     if (!closure) {
@@ -983,8 +997,10 @@ ot_value oti_native_install(ot_state* rt, size_t slot) {
     }
     oti_as_closure(closure)->code = rt->functions[code->functions[function]]->entry;
     rt->constants[code->constants[literal]] = closure;
-    if (function == 0) result = closure;
+    if (function == 0) top = code->constants[literal];
   }
+  /* Later allocations may have moved it; the constant slot is a root. */
+  if (ok && top != UINT32_MAX) result = rt->constants[top];
   if (ok && !result) ok = oti_error(rt, "native unit: no static top level");
   if (b.c) sljit_free_compiler(b.c);
   free(b.labels);
@@ -1111,6 +1127,7 @@ void oti_native_trace(ot_state* rt) {
   oti_error_place* places = calloc(TRACE_LIMIT, sizeof(oti_error_place));
   if (!places) return;
   size_t count = 0;
+  bool seen = false;
   uintptr_t sp = rt->native.sp;
   while (sp && count < TRACE_LIMIT) {
     uintptr_t ra = ((uintptr_t*)sp)[-1];
@@ -1124,6 +1141,9 @@ void oti_native_trace(ot_state* rt) {
     if (d->function == UINT32_MAX || d->offset == UINT32_MAX) continue;
     const oti_function* fn = rt->functions[d->function];
     if (!fn || fn->source == OTI_NO_SOURCE) continue;
+    bool innermost = !seen;
+    seen = true;
+    if (innermost && d->tail && strcmp(e->code, "E0201")) continue;
     /* Recursion through one call site shows once. */
     if (count && places[count - 1].source == fn->source && places[count - 1].offset == d->offset)
       continue;
@@ -1327,10 +1347,7 @@ static W h_poll(ot_state* rt) {
   oti_native_runtime* n = rt->native_runtime;
   if (rt->native.limit != n->limit) {
     rt->native.limit = n->limit;
-    if (rt->interrupt_requested) {
-      rt->interrupt_requested = 0;
-      if (!oti_interrupt_point(rt)) oti_native_raise(rt);
-    }
+    if (!oti_interrupt_point(rt)) oti_native_raise(rt);
     return OT_NIL;
   }
   if (rt->native.sp <= n->limit) {
@@ -1479,8 +1496,13 @@ static W h_restart_apply(ot_state* rt, W transfer) {
   return result;
 }
 
-static W h_evaluator(ot_state* rt, W space) {
-  ot_value v = oti_evaluator(rt, (uint32_t)space);
+/* The closure eval reads as, for the namespace named by a symbol. */
+static W h_evaluator(ot_state* rt, W name) {
+  size_t length;
+  const char* text = oti_text_bytes(name, &length);
+  uint32_t space = oti_namespace(rt, text, length);
+  if (space == UINT32_MAX) oti_native_raise(rt);
+  ot_value v = oti_evaluator(rt, space);
   if (!v) oti_native_raise(rt);
   return v;
 }
@@ -1712,7 +1734,7 @@ static bool build_stubs(ot_state* rt) {
   for (int i = 0; i < 2; i++)
     code->descriptors[i] =
         (oti_descriptor){(uint32_t)(sljit_get_label_addr(sites[i].label) - code->start),
-                         sites[i].frame, UINT32_MAX, UINT32_MAX, 0, 0};
+                         sites[i].frame, UINT32_MAX, UINT32_MAX, 0, 0, false};
   code->descriptor_count = 2;
   qsort(code->descriptors, 2, sizeof(oti_descriptor), compare_descriptors);
   for (int i = 0; i < STUB_COUNT; i++) {

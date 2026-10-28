@@ -56,6 +56,11 @@ const char* ot_string_data(ot_value v, size_t* length);
  * limit is explicitly supplied; growth only happens after collection cannot
  * satisfy an allocation. */
 ot_state* ot_create(size_t semispace_bytes, size_t stack_limit);
+/* Run native code instead of the VM: everything is compiled to machine code,
+ * starting from the boot file the build makes. Call it right after
+ * ot_create. False, with the runtime unchanged, where native code isn't
+ * available. */
+bool ot_use_native(ot_state* rt);
 void ot_destroy(ot_state* rt);
 bool ot_set_heap_limit(ot_state* rt, size_t semispace_bytes);
 /* Limit how many VM frames can be live at once. There is no limit by default
@@ -105,6 +110,11 @@ ot_form_status ot_scan_form(const char* source, size_t length, size_t start, siz
  * or destruction. A signal handler may set it to 1; evaluation consumes it at
  * safe points. */
 void ot_set_interrupt_flag(ot_state* rt, volatile sig_atomic_t* flag);
+/* Ask running code to stop at its next safe point, with a reason the
+ * interrupt handler is given (nonzero). Safe to call from a signal handler.
+ * It sets the flag, or the runtime's own when the host has none, and makes
+ * native code check it: native code doesn't read the flag otherwise. */
+void ot_request_interrupt(ot_state* rt, int reason);
 bool ot_poll_interrupt(ot_state* rt);
 /* Call the named global, with the flag's value, when the VM finds the flag set
  * between instructions or during a blocking read, instead of interrupting. It

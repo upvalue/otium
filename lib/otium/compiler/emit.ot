@@ -196,14 +196,14 @@
 
 ;; A descriptor for the call at instruction i: where every value live across it
 ;; is kept during the call.
-(def (descriptor! e i offset)
+(def (descriptor! e i offset . flags)
   (let ((fc (e :fc)) (slots []))
     (for ((v :in (or (get (fc :live) i) [])))
       (when (get (fc :raw) v) (error "native compiler: raw value live across a call" v))
       (let ((loc (location fc v)))
         (push! slots (if (eq? (get loc 0) :reg) (save-slot fc (get loc 1)) (get loc 1)))))
     (let ((descriptors ((e :unit) :descriptors)))
-      (push! descriptors [((fc :info) :index) slots offset])
+      (push! descriptors [((fc :info) :index) slots offset (and (pair? flags) (car flags))])
       (- (length descriptors) 1))))
 
 (def (save-live! e i)
@@ -296,7 +296,10 @@
         (mov! e [:reg scratch] [:slot (fc :swap)])
         (mov! e target [:mem scratch 16])
         (label-op! e other)))
-    ;; Arguments past the fifth go to native.args.
+    ;; Arguments past the fifth go to native.args, which install makes big
+    ;; enough for the unit's largest call.
+    (let ((u (e :unit)))
+      (when (> (length args) (or (u :max-args) 0)) (put! u :max-args (length args))))
     (when (> (length args) 5)
       (mov! e [:reg scratch] [:state sf-args])
       (for ((k :range 5 (length args)))
@@ -317,7 +320,7 @@
       (if tail
           (op! e ns-call 1 src 0)
           (begin
-            (op! e ns-call 0 src (descriptor! e i offset))
+            (op! e ns-call 0 src (descriptor! e i offset (get ins 8)))
             (when dst (mov! e (location fc dst) [:reg 0]))
             (restore-live! e i))))))
 
@@ -337,8 +340,14 @@
     (case (get ins 0)
       ((:mov) (let ((src (physical e (get ins 2)))) (mov! e (physical e (get ins 1)) src)))
       ((:load8)
+       ;; A byte load into memory would write only a byte, so a spilled
+       ;; destination is filled through the scratch register.
        (let ((src (physical e (get ins 2))) (dst (physical e (get ins 1))))
-         (op! e ns-mov 1 dst src)))
+         (if (eq? (get dst 0) :reg)
+             (op! e ns-mov 1 dst src)
+             (begin
+               (op! e ns-mov 1 [:reg scratch] src)
+               (mov! e dst [:reg scratch])))))
       ((:op2)
        (let ((a (physical e (get ins 4))) (b (physical e (get ins 5))))
          (op! e ns-op2 (get op-codes (get ins 1)) (flags (get ins 2)) (physical e (get ins 3)) a b)))
@@ -406,4 +415,5 @@
                   (if (info :rest) #t #f) (info :offset)])
                (array-to-list (u :functions))))
          (u :descriptors)
-         (u :statics)]))))
+         (u :statics)
+         (or (u :max-args) 0)]))))

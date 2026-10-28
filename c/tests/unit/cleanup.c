@@ -4,7 +4,7 @@
 
 /* Every evaluation must leave no cleanup frames or cleanup roots behind. */
 static void check_no_cleanups(ot_state* rt) {
-  CHECK(!rt->cleanup_count && !rt->cleanup_roots.count);
+  CHECK(!rt->cleanup_count);
 }
 
 static ot_state* new_cleanup_runtime(void) {

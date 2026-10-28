@@ -4,7 +4,7 @@
 
 /* Every evaluation must leave no parameter bindings or roots behind. */
 static void check_no_bindings(ot_state* rt) {
-  CHECK(rt->param_count == 0 && rt->param_roots.count == 0);
+  CHECK(rt->param_count == 0);
 }
 
 /* The failure checks expect p as redefined by the last binding case. */

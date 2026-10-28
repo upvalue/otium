@@ -222,7 +222,6 @@ bool oti_stack(ot_state* rt, size_t needed) {
   if (!oti_grow(rt, (void**)&rt->stack, &rt->stack_capacity, needed, sizeof(ot_value)))
     return false;
 #endif
-  rt->stack_roots.slots = rt->stack;
   rt->stack_room = rt->stack_capacity < rt->stack_limit ? rt->stack_capacity : rt->stack_limit;
   return true;
 }
@@ -311,13 +310,30 @@ void oti_set_global(ot_state* rt, uint32_t cell, ot_value value) {
 #endif
 }
 
-/* Global cells are roots, and in native processes so are native frames. */
+void oti_visit_exec(ot_state* rt, oti_exec* x, oti_root_visitor visit, void* context) {
+  for (size_t i = 0; i < x->sp; i++) visit(context, &x->stack[i]);
+  for (size_t i = 0; i < 2 * x->handler_count; i++) visit(context, &x->handlers[i]);
+  for (size_t i = 0; i < x->restart_count; i++) visit(context, &x->restarts[i]);
+  for (size_t i = 0; i < 2; i++) visit(context, &x->restart_transfer[i]);
+  for (size_t i = 0; i < x->cleanup_count; i++) visit(context, &x->cleanups[i]);
+  for (size_t i = 0; i < 2 * x->param_count; i++) visit(context, &x->params[i]);
+  visit(context, &x->condition_values[0]);
+  for (size_t i = 0; i < 4; i++) visit(context, &x->error.slots[i]);
+#ifdef OTIUM_NATIVE
+  if (rt->native_mode) oti_native_visit_exec(rt, x, visit, context);
+#else
+  (void)rt;
+#endif
+}
+
+/* Roots outside the LIFO list: global cells, the condition type table and
+ * the running thread's execution state, then every other thread's. */
 static void visit_roots(void* data, oti_root_visitor visit, void* context) {
   ot_state* rt = data;
   for (size_t i = 0; i < rt->global_count; i++) visit(context, &rt->globals[i].value);
-#ifdef OTIUM_NATIVE
-  if (rt->native_mode) oti_native_visit_roots(rt, visit, context);
-#endif
+  visit(context, &rt->condition_types);
+  oti_visit_exec(rt, &rt->exec, visit, context);
+  oti_visit_threads(rt, visit, context);
 }
 
 #ifndef OTIUM_NATIVE
@@ -541,17 +557,9 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
   rt->heap.hook = visit_roots;
   rt->heap.hook_data = rt;
   oti_roots_push(&rt->heap, &rt->constant_roots, NULL, 0);
-  oti_roots_push(&rt->heap, &rt->stack_roots, NULL, 0);
-  oti_roots_push(&rt->heap, &rt->param_roots, NULL, 0);
-  oti_roots_push(&rt->heap, &rt->handler_roots, NULL, 0);
-  oti_roots_push(&rt->heap, &rt->cleanup_roots, NULL, 0);
-  oti_roots_push(&rt->heap, &rt->restart_roots, NULL, 0);
   rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
-  oti_roots_push(&rt->heap, &rt->restart_transfer_roots, rt->restart_transfer, 2);
-  rt->condition_values[0] = rt->condition_values[1] = OT_NIL;
-  oti_roots_push(&rt->heap, &rt->condition_roots, rt->condition_values, 2);
+  rt->condition_values[0] = rt->condition_types = OT_NIL;
   oti_clear_error(rt);
-  oti_roots_push(&rt->heap, &rt->error_roots, rt->error.slots, 4);
   for (size_t i = 0; i < C_COUNT; i++) rt->classes[i] = OT_NIL;
   oti_roots_push(&rt->heap, &rt->class_roots, rt->classes, C_COUNT);
   if (oti_namespace(rt, "otium.core", 10) == UINT32_MAX || !oti_builtins(rt) ||
@@ -685,7 +693,7 @@ static bool evaluate_raw(ot_state* rt, const oti_ast* form, ot_value* result) {
       oti_ast_symbol(form->as.list.first, "begin") && form->as.list.first->next) {
     size_t base = rt->sp;
     for (const oti_ast* child = form->as.list.first->next; child; child = child->next) {
-      rt->sp = rt->stack_roots.count = base;
+      rt->sp = base;
       if (!evaluate_top(rt, child, result)) return false;
     }
     return true;
@@ -833,7 +841,7 @@ static bool evaluate_expanded(ot_state* rt, const oti_ast* form, ot_value* resul
 
 static bool evaluate_top(ot_state* rt, const oti_ast* form, ot_value* result) {
   size_t base = rt->frame_count || rt->compiling || rt->evaluating || rt->eval_depth ? rt->sp : 0;
-  rt->sp = rt->stack_roots.count = base;
+  rt->sp = base;
   if (!rt->frame_count && !rt->compiling && !rt->evaluating && !rt->eval_depth && !oti_reclaim(rt))
     return false;
   bool evaluating = rt->evaluating;
@@ -841,10 +849,10 @@ static bool evaluate_top(ot_state* rt, const oti_ast* form, ot_value* result) {
   bool ok = evaluate_expanded(rt, form, result);
   if (!ok) oti_locate_error(rt, form->offset);
   rt->evaluating = evaluating;
-  rt->sp = rt->stack_roots.count = base;
+  rt->sp = base;
   if (!ok || !oti_stack(rt, base + 1)) return false;
   rt->stack[base] = *result;
-  rt->sp = rt->stack_roots.count = base + 1;
+  rt->sp = base + 1;
   return true;
 }
 
@@ -863,7 +871,7 @@ ot_value oti_eval_value(ot_state* rt, ot_value value) {
   size_t restarts = rt->restart_scope_count, cleanups = rt->cleanup_count;
   ot_value result = 0;
   if (form && !evaluate_top(rt, form, &result)) result = 0;
-  rt->sp = rt->stack_roots.count = base;
+  rt->sp = base;
   rt->frame_count = frames;
   rt->try_count = tries;
   oti_restore_restarts(rt, restarts);
@@ -1082,7 +1090,7 @@ bool ot_eval(ot_state* rt, const char* source, size_t length, ot_value* result) 
     oti_restore_handlers(rt, 0, 0);
     rt->signaled = false;
   }
-  rt->sp = rt->stack_roots.count = base;
+  rt->sp = base;
   if (!ot_poll_interrupt(rt)) return false;
   oti_reader reader;
   oti_reader_init(&reader, source, length, OTI_SOURCE_LIMIT);
@@ -1090,7 +1098,7 @@ bool ot_eval(ot_state* rt, const char* source, size_t length, ot_value* result) 
   *result = OT_NIL;
   oti_ast* form;
   while ((form = oti_reader_next(&reader))) {
-    rt->sp = rt->stack_roots.count = base;
+    rt->sp = base;
     if (!(ok = evaluate_top(rt, form, result))) break;
   }
   if (reader.error) oti_reader_error(rt, &reader);
@@ -1099,11 +1107,11 @@ bool ot_eval(ot_state* rt, const char* source, size_t length, ot_value* result) 
   rt->try_count = tries;
   oti_restore_restarts(rt, restarts);
   oti_restore_cleanups(rt, cleanups);
-  rt->sp = rt->stack_roots.count = base;
+  rt->sp = base;
   if (!ok || oti_failed(rt)) return false;
   if (!oti_stack(rt, base + 1)) return false;
   rt->stack[base] = *result;
-  rt->sp = rt->stack_roots.count = base + 1;
+  rt->sp = base + 1;
   return true;
 }
 
@@ -1130,7 +1138,7 @@ bool ot_call(ot_state* rt, const char* name, const ot_value* args, size_t count,
   oti_restore_params(rt, 0);
   oti_restore_handlers(rt, 0, 0);
   rt->signaled = false;
-  rt->sp = rt->stack_roots.count = rt->frame_count = 0;
+  rt->sp = rt->frame_count = 0;
   if (!ot_poll_interrupt(rt)) return false;
   uint32_t index = resolve_global(rt, name, strlen(name), false);
   if (index == UINT32_MAX || oti_unbound(oti_global_value(rt, index)))
@@ -1139,7 +1147,7 @@ bool ot_call(ot_state* rt, const char* name, const ot_value* args, size_t count,
     return oti_error(rt, "VM stack limit exceeded");
   rt->stack[0] = oti_global_value(rt, index);
   if (count) memcpy(rt->stack + 1, args, count * sizeof(ot_value));
-  rt->sp = rt->stack_roots.count = count + 1;
+  rt->sp = count + 1;
   if (!oti_invoke(rt, count, result)) {
     oti_restore_cleanups(rt, 0);
     oti_restore_restarts(rt, 0);
@@ -1148,7 +1156,7 @@ bool ot_call(ot_state* rt, const char* name, const ot_value* args, size_t count,
     oti_restore_params(rt, 0);
     oti_restore_handlers(rt, 0, 0);
     rt->signaled = false;
-    rt->sp = rt->stack_roots.count = rt->frame_count = 0;
+    rt->sp = rt->frame_count = 0;
     return false;
   }
   return true;

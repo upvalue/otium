@@ -183,14 +183,14 @@ static ot_value codegen_read_forms(ot_state* rt, size_t first, size_t count) {
     if (!v || !oti_stack(rt, rt->sp + 1)) ok = false;
     else {
       rt->stack[rt->sp] = v;
-      rt->sp = rt->stack_roots.count = rt->sp + 1;
+      rt->sp = rt->sp + 1;
     }
   }
   if (ok && reader.error) ok = oti_reader_error(rt, &reader);
   oti_reader_destroy(&reader);
   free(copy);
   ot_value result = ok ? oti_array_from(rt, base, rt->sp - base) : 0;
-  rt->sp = rt->stack_roots.count = base;
+  rt->sp = base;
   return result;
 }
 

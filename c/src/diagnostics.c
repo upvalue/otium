@@ -266,11 +266,11 @@ static bool push(ot_state* rt, ot_value v) {
   size_t n = rt->sp;
   if (!v || !oti_stack(rt, n + 1)) return false;
   rt->stack[n] = v;
-  rt->sp = rt->stack_roots.count = n + 1;
+  rt->sp = n + 1;
   return true;
 }
 
-static void drop_to(ot_state* rt, size_t height) { rt->sp = rt->stack_roots.count = height; }
+static void drop_to(ot_state* rt, size_t height) { rt->sp = height; }
 
 static bool push_text(ot_state* rt, const char* text) {
   return push(rt, oti_text(rt, K_STRING, text, strlen(text)));

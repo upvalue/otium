@@ -2,7 +2,6 @@
 
 void oti_restore_params(ot_state* rt, size_t count) {
   rt->param_count = count;
-  rt->param_roots.count = count * 2;
 }
 
 bool oti_bind_param(ot_state* rt, ot_value param, ot_value value) {
@@ -12,7 +11,6 @@ bool oti_bind_param(ot_state* rt, ot_value param, ot_value value) {
   if (!oti_grow(rt, (void**)&rt->params, &rt->param_capacity, 2 * (rt->param_count + 1),
                 sizeof(ot_value)))
     return false;
-  rt->param_roots.slots = rt->params;
   rt->params[2 * rt->param_count] = param;
   rt->params[2 * rt->param_count + 1] = value;
   oti_restore_params(rt, rt->param_count + 1);

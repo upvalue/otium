@@ -19,7 +19,7 @@
 
 #define VM_APPLY (((ot_value)B_APPLY << 8) | TAG_BUILTIN)
 
-static void vm_height(ot_state* rt, size_t sp) { rt->sp = rt->stack_roots.count = sp; }
+static void vm_height(ot_state* rt, size_t sp) { rt->sp = sp; }
 
 /* Make stack[from, to) valid before a frame takes it without writing it. */
 static inline void vm_fresh(ot_state* rt, ot_value* stack, size_t from, size_t to) {

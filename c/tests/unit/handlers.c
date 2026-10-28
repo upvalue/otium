@@ -4,7 +4,7 @@
 
 /* Every evaluation must leave no handlers or handler roots behind. */
 static void check_no_handlers(ot_state* rt) {
-  CHECK(rt->handler_count == 0 && rt->handler_top == 0 && rt->handler_roots.count == 0);
+  CHECK(rt->handler_count == 0 && rt->handler_top == 0);
 }
 
 static ot_state* new_handler_runtime(void) {
@@ -77,7 +77,7 @@ TEST(failures_leave_no_handlers) {
     if (!strstr(ot_error(rt), bad[i].message))
       test_fail(__FILE__, __LINE__, "%s: expected error containing \"%s\", got \"%s\"",
                 bad[i].source, bad[i].message, ot_error(rt));
-    CHECK(rt->handler_count == 0 && rt->handler_roots.count == 0);
+    CHECK(rt->handler_count == 0);
     check_int(rt, "(+ 20 22)", 42);
     check_no_handlers(rt);
   }

@@ -666,8 +666,59 @@ typedef struct {
   size_t args_capacity;
 } oti_native_exec;
 
+/* What each thread of execution has of its own (see threads.c). The fields
+ * are declared once here and appear in ot_state through a union, so code
+ * names them as rt->stack, rt->sp and so on while a thread switch copies
+ * rt->exec as one block. The native block comes first: trampolines and
+ * generated code address it at fixed offsets. */
+#define OTI_EXEC_FIELDS                                                                            \
+  oti_native_exec native;                                                                          \
+  ot_value* stack;                                                                                 \
+  size_t sp, stack_capacity;                                                                       \
+  /* Slots usable without growing the stack: the lesser of capacity and limit. */                  \
+  size_t stack_room;                                                                               \
+  /* Every stack slot below stack_stale holds a valid value, even above sp. Slots                  \
+   * above sp at a collection, or never written, may not. */                                       \
+  size_t stack_stale;                                                                              \
+  oti_frame* frames;                                                                               \
+  /* frame_capacity never exceeds frame_limit, so the call fast path needs no                      \
+   * separate depth check. In native code frame_count counts entries. */                           \
+  size_t frame_count, frame_capacity;                                                              \
+  ot_value* handlers;                                                                              \
+  size_t* handler_previous;                                                                        \
+  size_t handler_count, handler_capacity, handler_previous_capacity, handler_top, callback_depth;  \
+  ot_value *restarts, restart_transfer[2];                                                         \
+  size_t restart_count, restart_capacity, restart_scope_count, restart_scope_capacity;             \
+  oti_restart_scope* restart_scopes;                                                               \
+  bool restart_pending;                                                                            \
+  ot_value* cleanups;                                                                              \
+  oti_cleanup* cleanup_states;                                                                     \
+  size_t cleanup_count, cleanup_capacity, cleanup_state_capacity;                                  \
+  bool interrupted, signaled, raised;                                                              \
+  ot_value* params;                                                                                \
+  size_t param_count, param_capacity;                                                              \
+  /* The condition being raised. */                                                                \
+  ot_value condition_values[1];                                                                    \
+  oti_try_frame* tries;                                                                            \
+  size_t try_count, try_capacity;                                                                  \
+  oti_error_record error;                                                                          \
+  uint32_t current_namespace, required_namespace;                                                  \
+  /* The source being evaluated now, an index into ot_state.sources. */                            \
+  uint32_t source;                                                                                 \
+  bool compiling, evaluating, expanding;                                                           \
+  size_t expansion_calls, eval_depth;
+
+typedef struct {
+  OTI_EXEC_FIELDS
+} oti_exec;
+
 struct ot_state {
-  oti_native_exec native;
+  union {
+    oti_exec exec;
+    struct {
+      OTI_EXEC_FIELDS
+    };
+  };
   oti_heap heap;
   ot_value process_values[2];
   oti_roots process_roots;
@@ -676,75 +727,41 @@ struct ot_state {
   oti_roots open_port_roots;
   ot_value standard_ports[3];
   oti_roots standard_port_roots;
-  ot_value *constants, *stack;
+  ot_value* constants;
   oti_cell* globals;
   size_t constant_count, constant_capacity, global_count, global_capacity;
   /* Constant states: 0 free, 1 retained until code reclamation. */
   unsigned char* constant_state;
   size_t constant_state_capacity, constant_free, function_free, permanent_constants;
-  bool compiling, evaluating;
   oti_global_info* global_info;
   size_t global_info_capacity;
   char** namespaces;
   size_t namespace_count, namespace_capacity;
-  uint32_t current_namespace, required_namespace;
   oti_module_state* modules;
   oti_native_state* natives;
-  size_t sp, stack_capacity, stack_limit;
-  /* Slots usable without growing the stack: the lesser of capacity and limit. */
-  size_t stack_room;
-  /* Every stack slot below stack_stale holds a valid value, even above sp. Slots
-   * above sp at a collection, or never written, may not. */
-  size_t stack_stale;
+  size_t stack_limit;
   oti_function** functions;
   size_t function_count, function_capacity;
-  oti_frame* frames;
-  /* frame_capacity never exceeds frame_limit, so the call fast path needs no
-   * separate depth check. */
-  size_t frame_count, frame_capacity, max_frames, frame_limit;
-  ot_value* handlers;
-  size_t* handler_previous;
-  size_t handler_count, handler_capacity, handler_previous_capacity, handler_top, callback_depth;
-  oti_roots handler_roots;
-  ot_value *restarts, restart_transfer[2];
-  size_t restart_count, restart_capacity, restart_scope_count, restart_scope_capacity;
-  oti_restart_scope* restart_scopes;
-  oti_roots restart_roots, restart_transfer_roots;
-  bool restart_pending;
-  ot_value* cleanups;
-  oti_cleanup* cleanup_states;
-  size_t cleanup_count, cleanup_capacity, cleanup_state_capacity;
-  oti_roots cleanup_roots;
+  size_t max_frames, frame_limit;
   volatile sig_atomic_t* interrupt_flag;
   /* Globals named by ot_set_interrupt_handler and ot_set_load_hook, or UINT32_MAX. */
   uint32_t interrupt_handler, load_hook;
-  bool interrupted;
   bool exit_pending;
   int exit_status;
-  bool signaled;
-  ot_value* params;
-  size_t param_count, param_capacity;
-  oti_roots param_roots;
   ot_value classes[C_COUNT];
   /* Global cell of each builtin; inlined builtins cannot be redefined. */
   uint32_t builtin_cells[B_COUNT];
   oti_builtin_fn builtin_run[B_COUNT];
   oti_roots class_roots;
   bool classes_ready, core_loaded;
-  oti_roots constant_roots, stack_roots, condition_roots;
-  ot_value condition_values[2];
-  bool raised;
-  oti_try_frame* tries;
-  size_t try_count, try_capacity;
-  oti_error_record error;
-  oti_roots error_roots;
+  oti_roots constant_roots;
+  /* Each condition type's parent, a table. */
+  ot_value condition_types;
   /* Paths of the files code was compiled from, by source id; entry 0 is
-   * unused. source is the one being evaluated now. */
+   * unused. */
   char** sources;
   size_t source_count, source_capacity;
-  uint32_t source;
-  bool stress_gc, shared_expander, expanding;
-  size_t expansion_calls, eval_depth;
+  bool stress_gc, shared_expander;
   uint64_t gensym_counter;
   ot_io_host io_host;
   void* io_userdata;
@@ -946,6 +963,10 @@ static inline bool oti_collection(ot_value v) {
 }
 
 ot_value oti_collection_call(ot_state* rt, size_t callable, size_t first, size_t count);
+/* Visit the roots of one thread's execution state, and of every thread but
+ * the running one (threads.c). */
+void oti_visit_exec(ot_state* rt, oti_exec* x, oti_root_visitor visit, void* context);
+void oti_visit_threads(ot_state* rt, oti_root_visitor visit, void* context);
 /* Callables the VM calls as C: builtins, records, instances, params,
  * collections, foreign functions and natives. */
 bool oti_primitive_value(ot_value value);
@@ -963,7 +984,7 @@ ot_value oti_native_invoke_list(ot_state* rt, ot_value function, ot_value args);
 /* Make room for count arguments in native.args. */
 bool oti_native_args(ot_state* rt, size_t count);
 uintptr_t oti_native_cell_entry(ot_state* rt, ot_value value);
-void oti_native_visit_roots(ot_state* rt, oti_root_visitor visit, void* context);
+void oti_native_visit_exec(ot_state* rt, oti_exec* x, oti_root_visitor visit, void* context);
 bool oti_native_mark_closure(ot_state* rt, ot_value closure, bool (*mark)(void*, uint32_t),
                              void* context);
 void oti_native_sweep(ot_state* rt);

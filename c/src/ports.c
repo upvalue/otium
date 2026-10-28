@@ -714,9 +714,9 @@ static ot_value port_open_ports(ot_state* rt, size_t first, size_t count) {
   if (n > rt->stack_limit - base || !oti_stack(rt, base + n))
     return oti_fail(rt, "VM stack limit exceeded");
   if (n) memcpy(rt->stack + base, rt->open_ports, n * sizeof(ot_value));
-  rt->sp = rt->stack_roots.count = base + n;
+  rt->sp = base + n;
   ot_value result = oti_array_from(rt, base, n);
-  rt->sp = rt->stack_roots.count = base;
+  rt->sp = base;
   return result;
 }
 

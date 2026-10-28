@@ -2,7 +2,7 @@
 #include <string.h>
 
 void oti_restore_cleanups(ot_state* rt, size_t count) {
-  rt->cleanup_count = rt->cleanup_roots.count = count;
+  rt->cleanup_count = count;
 }
 
 bool oti_install_cleanup(ot_state* rt, bool outcome) {
@@ -12,7 +12,6 @@ bool oti_install_cleanup(ot_state* rt, bool outcome) {
                 sizeof(oti_cleanup)) ||
       !oti_grow(rt, (void**)&rt->cleanups, &rt->cleanup_capacity, count + 1, sizeof(ot_value)))
     return false;
-  rt->cleanup_roots.slots = rt->cleanups;
   rt->cleanups[count] = rt->stack[rt->sp - 1];
   rt->cleanup_states[count] =
       (oti_cleanup){{rt->frame_count, rt->sp - 1, 0, rt->param_count, rt->handler_count,
@@ -46,7 +45,7 @@ bool oti_run_cleanup(ot_state* rt, bool unwinding) {
   if (unwinding) {
     rt->frame_count = cleanup.state.frames;
     rt->try_count = cleanup.tries;
-    rt->sp = rt->stack_roots.count = cleanup.state.sp;
+    rt->sp = cleanup.state.sp;
     oti_restore_params(rt, cleanup.state.params);
     oti_restore_handlers(rt, cleanup.state.handlers, cleanup.state.handler_top);
     oti_restore_restarts(rt, cleanup.state.restarts);

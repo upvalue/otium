@@ -56,15 +56,15 @@ static ot_value message_condition(ot_state* rt, ot_value message, size_t first, 
   values[2] = oti_intern(rt, K_SYMBOL, type, strlen(type));
   bool registered = values[2] != 0;
   if (registered && strcmp(type, "error")) {
-    if (rt->condition_values[1] == OT_NIL) {
+    if (rt->condition_types == OT_NIL) {
       ot_value registry = oti_table_new(rt);
       registered = registry != 0;
-      if (registered) rt->condition_values[1] = registry;
+      if (registered) rt->condition_types = registry;
     }
     if (registered &&
-        oti_table_get(rt, rt->condition_values[1], values[2], V_UNBOUND) == V_UNBOUND) {
+        oti_table_get(rt, rt->condition_types, values[2], V_UNBOUND) == V_UNBOUND) {
       values[4] = oti_intern(rt, K_SYMBOL, "error", 5);
-      registered = values[4] && oti_table_set(rt, rt->condition_values[1], values[2], values[4]);
+      registered = values[4] && oti_table_set(rt, rt->condition_types, values[2], values[4]);
     }
   }
   ot_value k = key(rt, ":type");
@@ -123,9 +123,9 @@ ot_value oti_condition_of(ot_state* rt, const oti_error_record* e) {
     if (ok) {
       rt->stack[base] = live[1];
       for (size_t i = 0; i < e->data_count; i++) rt->stack[base + 1 + i] = e->slots[i];
-      rt->sp = rt->stack_roots.count = base + n;
+      rt->sp = base + n;
       live[1] = oti_array_from(rt, base, n);
-      rt->sp = rt->stack_roots.count = base;
+      rt->sp = base;
       ot_value k = live[1] ? key(rt, ":data") : 0;
       ok = k && oti_table_set(rt, live[0], k, live[1]);
     }
@@ -171,10 +171,10 @@ static ot_value condition_define(ot_state* rt, size_t first, size_t count) {
   values[0] = symbol(rt, rt->stack[first]);
   values[1] = rt->stack[first + 1] == OT_NIL ? OT_NIL : symbol(rt, rt->stack[first + 1]);
   if (!values[0] || !values[1]) goto done;
-  if (rt->condition_values[1] == OT_NIL) {
-    rt->condition_values[1] = oti_table_new(rt);
-    if (!rt->condition_values[1]) {
-      rt->condition_values[1] = OT_NIL;
+  if (rt->condition_types == OT_NIL) {
+    rt->condition_types = oti_table_new(rt);
+    if (!rt->condition_types) {
+      rt->condition_types = OT_NIL;
       goto done;
     }
   }
@@ -184,9 +184,9 @@ static ot_value condition_define(ot_state* rt, size_t first, size_t count) {
       oti_fail(rt, "condition hierarchy cycle");
       goto done;
     }
-    cursor = oti_table_get(rt, rt->condition_values[1], cursor, OT_NIL);
+    cursor = oti_table_get(rt, rt->condition_types, cursor, OT_NIL);
   }
-  if (oti_table_set(rt, rt->condition_values[1], values[0], values[1])) result = values[0];
+  if (oti_table_set(rt, rt->condition_types, values[0], values[1])) result = values[0];
 done:
   oti_roots_pop(&rt->heap, &roots);
   return result;
@@ -208,8 +208,8 @@ static ot_value condition_of_type_p(ot_state* rt, size_t first, size_t count) {
       result = OT_TRUE;
       break;
     }
-    if (rt->condition_values[1] == OT_NIL) break;
-    values[0] = oti_table_get(rt, rt->condition_values[1], values[0], OT_NIL);
+    if (rt->condition_types == OT_NIL) break;
+    values[0] = oti_table_get(rt, rt->condition_types, values[0], OT_NIL);
   }
 done:
   oti_roots_pop(&rt->heap, &roots);
@@ -225,7 +225,6 @@ const oti_builtin_def oti_condition_builtins[] = {
 void oti_restore_handlers(ot_state* rt, size_t count, size_t top) {
   rt->handler_count = count;
   rt->handler_top = top;
-  rt->handler_roots.count = count * 2;
 }
 
 bool oti_install_handlers(ot_state* rt, size_t first, size_t count) {
@@ -234,7 +233,6 @@ bool oti_install_handlers(ot_state* rt, size_t first, size_t count) {
   size_t needed = rt->handler_count + count;
   if (!oti_grow(rt, (void**)&rt->handlers, &rt->handler_capacity, 2 * needed, sizeof(ot_value)))
     return false;
-  rt->handler_roots.slots = rt->handlers;
   if (!oti_grow(rt, (void**)&rt->handler_previous, &rt->handler_previous_capacity, needed,
                 sizeof(size_t)))
     return false;
@@ -245,7 +243,6 @@ bool oti_install_handlers(ot_state* rt, size_t first, size_t count) {
     rt->handler_previous[index] = rt->handler_top;
     rt->handler_top = index + 1;
   }
-  rt->handler_roots.count = rt->handler_count * 2;
   return true;
 }
 

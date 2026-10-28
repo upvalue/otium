@@ -184,7 +184,7 @@ bool oti_generic_prepare(ot_state* rt, size_t call, size_t* count) {
       rt->stack[call] = oti_as_method(live[1])->procedure;
       rt->stack[call + 1] = live[3];
       (*count)++;
-      if (rt->sp < end) rt->sp = rt->stack_roots.count = end;
+      if (rt->sp < end) rt->sp = end;
     }
   }
   oti_roots_pop(&rt->heap, &roots);

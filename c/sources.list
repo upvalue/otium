@@ -33,3 +33,4 @@ dev
 diagnostics
 natives
 codegen
+threads

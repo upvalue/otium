@@ -149,8 +149,8 @@ extern char oti_native_return[], oti_native_fail[];
 #define OFF_TOP 24
 #define OFF_ARGS 32
 #define OFF_DEPTH 40
-#define OFF_HEAP_START 88
-#define OFF_HEAP_USED 112
+#define OFF_HEAP_START 632
+#define OFF_HEAP_USED 656
 #define STR_(x) #x
 #define STR(x) STR_(x)
 
@@ -1089,7 +1089,7 @@ ot_value oti_native_invoke(ot_state* rt, ot_value callee, size_t argc) {
   oti_restore_cleanups(rt, cleanups);
   oti_restore_params(rt, params);
   oti_restore_handlers(rt, handlers, handler_top);
-  rt->sp = rt->stack_roots.count = base;
+  rt->sp = base;
   if (!result && !oti_failed(rt)) oti_error(rt, "native call failed");
   return result;
 }
@@ -1112,9 +1112,8 @@ ot_value oti_native_invoke_list(ot_state* rt, ot_value function, ot_value args) 
 
 /* Visit the live slots of every native frame, run by run, from the frame
  * that last called C out to the outermost entry record. */
-static void visit_frames(ot_state* rt, oti_root_visitor visit, void* context) {
+static void visit_frames(ot_state* rt, uintptr_t sp, oti_root_visitor visit, void* context) {
   oti_native_runtime* n = rt->native_runtime;
-  uintptr_t sp = rt->native.sp;
   while (sp) {
     uintptr_t ra = ((uintptr_t*)sp)[-1];
     if (ra == (uintptr_t)oti_native_return) {
@@ -1137,9 +1136,9 @@ static void visit_frames(ot_state* rt, oti_root_visitor visit, void* context) {
 
 /* native.args is not a root: values pass through it between a call and the
  * callee's entry, or into C that copies them before it can collect. */
-void oti_native_visit_roots(ot_state* rt, oti_root_visitor visit, void* context) {
-  visit(context, &rt->native.callee);
-  visit_frames(rt, visit, context);
+void oti_native_visit_exec(ot_state* rt, oti_exec* x, oti_root_visitor visit, void* context) {
+  visit(context, &x->native.callee);
+  visit_frames(rt, x->native.sp, visit, context);
 }
 
 /* The frames of an uncaught error, innermost first, as oti_trace_error does
@@ -1237,7 +1236,7 @@ static bool resume_restart(ot_state* rt, size_t stop) {
   rt->try_count = scope.tries;
   oti_restore_params(rt, scope.state.params);
   oti_restore_handlers(rt, scope.state.handlers, scope.state.handler_top);
-  rt->sp = rt->stack_roots.count = scope.state.sp;
+  rt->sp = scope.state.sp;
   rt->restart_pending = false;
   oti_clear_error(rt);
   rt->raised = rt->signaled = false;
@@ -1291,7 +1290,7 @@ _Noreturn void oti_native_raise(ot_state* rt) {
     oti_restore_restarts(rt, handler.restarts);
     oti_restore_params(rt, handler.params);
     oti_restore_handlers(rt, handler.handlers, handler.handler_top);
-    rt->sp = rt->stack_roots.count = handler.sp;
+    rt->sp = handler.sp;
     ot_value condition = oti_error_condition(rt);
     if (!condition) continue;
     oti_clear_error(rt);
@@ -1317,9 +1316,9 @@ static ot_value builtin_on_stack(ot_state* rt, unsigned id, ot_value a, ot_value
   if (!oti_stack(rt, first + 2)) oti_native_raise(rt);
   rt->stack[first] = a;
   rt->stack[first + 1] = b;
-  rt->sp = rt->stack_roots.count = first + n;
+  rt->sp = first + n;
   ot_value result = oti_builtin(rt, id, first, n);
-  rt->sp = rt->stack_roots.count = first;
+  rt->sp = first;
   if (!result || oti_failed(rt)) oti_native_raise(rt);
   return result;
 }
@@ -1442,9 +1441,9 @@ static W h_cleanup(ot_state* rt, W closure, W outcome) {
   size_t top = rt->sp;
   if (!oti_stack(rt, top + 1)) oti_native_raise(rt);
   rt->stack[top] = closure;
-  rt->sp = rt->stack_roots.count = top + 1;
+  rt->sp = top + 1;
   bool ok = oti_install_cleanup(rt, outcome != OT_FALSE);
-  rt->sp = rt->stack_roots.count = top;
+  rt->sp = top;
   if (!ok) oti_native_raise(rt);
   return OT_NIL;
 }
@@ -1459,14 +1458,14 @@ static size_t args_to_stack(ot_state* rt, size_t count) {
   size_t top = rt->sp;
   if (!oti_stack(rt, top + count)) oti_native_raise(rt);
   memcpy(rt->stack + top, rt->native.args, count * sizeof(ot_value));
-  rt->sp = rt->stack_roots.count = top + count;
+  rt->sp = top + count;
   return top;
 }
 
 static W h_handlers(ot_state* rt, W count) {
   size_t top = args_to_stack(rt, 2 * count);
   bool ok = oti_install_handlers(rt, top, count);
-  rt->sp = rt->stack_roots.count = top;
+  rt->sp = top;
   if (!ok) oti_native_raise(rt);
   return OT_NIL;
 }
@@ -1511,7 +1510,7 @@ static W h_make_param(ot_state* rt, W name, W value) {
 static W h_restarts(ot_state* rt, W count, W pc, W sp) {
   size_t top = args_to_stack(rt, 3 * count);
   bool ok = oti_install_restarts(rt, top, count, pc);
-  rt->sp = rt->stack_roots.count = top;
+  rt->sp = top;
   if (!ok) oti_native_raise(rt);
   rt->restart_scopes[rt->restart_scope_count - 1].state.slot = sp;
   return OT_NIL;
@@ -1635,7 +1634,7 @@ static bool spread(ot_state* rt, size_t call, size_t* argc) {
       list = oti_cdr(list);
     }
   *argc = count;
-  rt->sp = rt->stack_roots.count = call + 1 + count;
+  rt->sp = call + 1 + count;
   return true;
 }
 
@@ -1650,9 +1649,9 @@ static W dispatch(ot_state* rt) {
   if ((callee & 255) == TAG_BUILTIN && callee != APPLY_VALUE && (callee >> 8) < B_COUNT &&
       base + argc <= rt->stack_room) {
     memcpy(rt->stack + base, rt->native.args, argc * sizeof(ot_value));
-    rt->sp = rt->stack_roots.count = base + argc;
+    rt->sp = base + argc;
     ot_value result = rt->builtin_run[callee >> 8](rt, base, argc);
-    rt->sp = rt->stack_roots.count = base;
+    rt->sp = base;
     if (!result || oti_failed(rt)) oti_native_raise(rt);
     return result;
   }
@@ -1663,7 +1662,7 @@ static W dispatch(ot_state* rt) {
   }
   rt->stack[base] = rt->native.callee;
   memcpy(rt->stack + base + 1, rt->native.args, argc * sizeof(ot_value));
-  rt->sp = rt->stack_roots.count = base + 1 + argc;
+  rt->sp = base + 1 + argc;
   for (;;) {
     ot_value f = rt->stack[base];
     if (f == APPLY_VALUE) {
@@ -1683,12 +1682,12 @@ static W dispatch(ot_state* rt) {
       memcpy(rt->native.args, rt->stack + base + 1, argc * sizeof(ot_value));
       rt->native.callee = rt->stack[base];
       rt->native.argc = argc;
-      rt->sp = rt->stack_roots.count = base;
+      rt->sp = base;
       return 0;
     }
     if (oti_primitive_value(f)) {
       ot_value result = oti_call_primitive(rt, base, argc);
-      rt->sp = rt->stack_roots.count = base;
+      rt->sp = base;
       if (!result || oti_failed(rt)) oti_native_raise(rt);
       return result;
     }

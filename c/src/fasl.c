@@ -112,12 +112,12 @@ static const char* f_text(oti_fasl* f, size_t* length) {
 static bool push(ot_state* rt, ot_value v) {
   if (!v || !oti_stack(rt, rt->sp + 1)) return false;
   rt->stack[rt->sp] = v;
-  rt->sp = rt->stack_roots.count = rt->sp + 1;
+  rt->sp = rt->sp + 1;
   return true;
 }
 
 static ot_value pop(ot_state* rt) {
-  rt->sp = rt->stack_roots.count = rt->sp - 1;
+  rt->sp = rt->sp - 1;
   return rt->stack[rt->sp];
 }
 
@@ -201,7 +201,7 @@ static bool datum(oti_fasl* f, unsigned depth) {
       for (size_t i = 0; i < count; i++)
         if (!datum(f, depth + 1)) return false;
       ot_value array = oti_array_from(rt, base, count);
-      rt->sp = rt->stack_roots.count = base;
+      rt->sp = base;
       return push(rt, array);
     }
     case D_BYTES: {
@@ -337,7 +337,7 @@ static bool run(oti_fasl* f, bool in_module) {
       case F_UNIT: {
         if (!datum(f, 0)) return f->bad ? fasl_error(f) : false;
         ot_value thunk = oti_native_install(rt, rt->sp - 1);
-        rt->sp = rt->stack_roots.count = base;
+        rt->sp = base;
         ok = thunk && oti_native_invoke(rt, thunk, 0);
         break;
       }
@@ -381,7 +381,7 @@ static bool run(oti_fasl* f, bool in_module) {
         ok = cell != UINT32_MAX;
         /* The definition and its doc entry are skipped together. */
         if (ok && rt->global_info[cell].defined) {
-          rt->sp = rt->stack_roots.count = base;
+          rt->sp = base;
           if (!skip_entry(f)) return fasl_error(f);
           skip = *f->p == F_DOC;
         }
@@ -413,7 +413,7 @@ static bool run(oti_fasl* f, bool in_module) {
       }
       default: return fasl_error(f);
     }
-    rt->sp = rt->stack_roots.count = base;
+    rt->sp = base;
     if (!ok) return false;
   }
 }

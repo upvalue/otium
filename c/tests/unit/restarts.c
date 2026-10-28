@@ -4,7 +4,7 @@
 
 /* Every evaluation must leave no restart scopes, roots or pending transfer. */
 static void check_no_restarts(ot_state* rt) {
-  CHECK(!rt->restart_scope_count && !rt->restart_roots.count && !rt->restart_pending);
+  CHECK(!rt->restart_scope_count && !rt->restart_pending);
 }
 
 static ot_state* new_restart_runtime(void) {
@@ -84,7 +84,7 @@ TEST(failures_leave_no_restarts) {
     if (!strstr(ot_error(rt), bad[i].message))
       test_fail(__FILE__, __LINE__, "%s: expected error containing \"%s\", got \"%s\"",
                 bad[i].source, bad[i].message, ot_error(rt));
-    CHECK(!rt->restart_scope_count && !rt->restart_roots.count);
+    CHECK(!rt->restart_scope_count);
     check_true(rt, "(nil? (find-restart 'give))");
     check_no_restarts(rt);
   }

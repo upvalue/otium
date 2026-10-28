@@ -5,7 +5,6 @@ void oti_restore_restarts(ot_state* rt, size_t scopes) {
   rt->restart_scope_count = scopes;
   rt->restart_count =
       scopes ? rt->restart_scopes[scopes - 1].first + rt->restart_scopes[scopes - 1].count : 0;
-  rt->restart_roots.count = rt->restart_count;
 }
 
 bool oti_install_restarts(ot_state* rt, size_t first, size_t count, size_t target) {
@@ -16,7 +15,6 @@ bool oti_install_restarts(ot_state* rt, size_t first, size_t count, size_t targe
     return false;
   if (!oti_grow(rt, (void**)&rt->restarts, &rt->restart_capacity, old + count, sizeof(ot_value)))
     return false;
-  rt->restart_roots.slots = rt->restarts;
   for (size_t i = 0; i < count; i++) {
     ot_value v = oti_alloc(rt, K_RESTART, 3, 0);
     if (!v) {
@@ -28,7 +26,8 @@ bool oti_install_restarts(ot_state* rt, size_t first, size_t count, size_t targe
     r->description = rt->stack[first + 3 * i + 1];
     r->handler = rt->stack[first + 3 * i + 2];
     rt->restarts[old + i] = v;
-    rt->restart_roots.count = old + i + 1;
+    /* Restarts made so far are roots while the rest are allocated. */
+    rt->restart_count = old + i + 1;
   }
   oti_restart_scope scope = {{rt->frame_count, first, target, rt->param_count, rt->handler_count,
                               rt->handler_top, rt->restart_scope_count, rt->cleanup_count, 0},
@@ -81,9 +80,9 @@ static ot_value restart_compute(ot_state* rt, size_t first, size_t count) {
   if (n > rt->stack_limit - base || !oti_stack(rt, base + n))
     return oti_fail(rt, "VM stack limit exceeded");
   for (size_t i = 0; i < n; i++) rt->stack[base + i] = rt->restarts[n - i - 1];
-  rt->sp = rt->stack_roots.count = base + n;
+  rt->sp = base + n;
   ot_value result = oti_array_from(rt, base, n);
-  rt->sp = rt->stack_roots.count = base;
+  rt->sp = base;
   return result;
 }
 
@@ -153,7 +152,7 @@ bool oti_resume_restart(ot_state* rt, size_t stop_frames) {
   rt->try_count = scope.tries;
   oti_restore_params(rt, scope.state.params);
   oti_restore_handlers(rt, scope.state.handlers, scope.state.handler_top);
-  rt->sp = rt->stack_roots.count = scope.state.sp;
+  rt->sp = scope.state.sp;
   oti_frame* frame = &rt->frames[rt->frame_count - 1];
   frame->pc = frame->fn->code + scope.state.target;
   rt->restart_pending = false;
@@ -165,7 +164,7 @@ bool oti_resume_restart(ot_state* rt, size_t stop_frames) {
   rt->stack[base] = ((ot_value)B_APPLY << 8) | TAG_BUILTIN;
   rt->stack[base + 1] = oti_as_restart(rt->restart_transfer[0])->handler;
   rt->stack[base + 2] = rt->restart_transfer[1];
-  rt->sp = rt->stack_roots.count = base + 3;
+  rt->sp = base + 3;
   rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
   oti_apply(rt, base, 2, false);
   return true;

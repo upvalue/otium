@@ -522,7 +522,10 @@ static _Noreturn void enter(ot_state* rt, oti_thread* t) {
  * which is then waiting, wakes with :deadlock. */
 static _Noreturn void schedule(ot_state* rt) {
   oti_threads* ts = rt->threads;
-  if (ts->current) ts->current->exec = rt->exec;
+  if (ts->current) {
+    oti_native_stack_trim(rt, &rt->native);
+    ts->current->exec = rt->exec;
+  }
   for (;;) {
     expire(rt);
     oti_thread* next = pick(ts);

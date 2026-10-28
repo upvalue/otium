@@ -724,9 +724,9 @@ typedef struct {
   /* While a builtin call is parked, the arguments it will be dispatched
    * with again: they are roots until then. */
   size_t args_live;
-  /* The Otium stack is a chain of segments (native.c): the one in use, a
-   * spare kept for the next overflow, and the bytes in the chain. */
-  oti_segment *segment, *spare;
+  /* The Otium stack is a chain of segments (native.c): the one in use and
+   * the bytes up to and including it. */
+  oti_segment* segment;
   size_t stack_bytes;
 } oti_native_exec;
 
@@ -1057,9 +1057,11 @@ _Noreturn void oti_native_resume(ot_state* rt, uintptr_t sp, uintptr_t pc, ot_va
  * (with native.sp), and where a new thread starts (native.c). */
 extern char oti_c_resume[], oti_thread_begin[];
 uintptr_t oti_native_entry_of(ot_state* rt, ot_value callee);
-/* Give x an Otium stack of one segment, and free one. */
+/* Give x an Otium stack of one segment, and free one. Trimming releases
+ * the segments kept above the one in use. */
 bool oti_native_stack_new(ot_state* rt, oti_native_exec* x);
 void oti_native_stack_free(ot_state* rt, oti_native_exec* x);
+void oti_native_stack_trim(ot_state* rt, oti_native_exec* x);
 /* Where a builtin call that parked is dispatched again. */
 uintptr_t oti_native_redispatch(ot_state* rt);
 /* A builtin's result when it parked the running thread; dispatch hands the

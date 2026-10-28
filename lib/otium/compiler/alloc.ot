@@ -1,0 +1,270 @@
+;; alloc.ot -- register allocation for the native compiler.
+;;
+;; Linear scan over one function's virtual code (lower.ot). Liveness is
+;; computed per block, a block ending at every branch, label and call, and a
+;; call inside a try or restart-case also leading to its landing labels.
+;; Each register's interval spans every point where it is live, so a value
+;; stays in one place for its whole life: one of ten registers, or a spill
+;; slot when they run out. Calls don't split intervals: emit saves the
+;; registers live across a call into fixed save slots and reloads them after.
+;;
+;; Results go back into the function context: :location maps each register
+;; to [:reg r] or [:slot i], :spills counts spill slots, and :live maps the
+;; index of each call and landing to the registers live across or into it.
+
+(ns otium.compiler.alloc)
+
+;; sljit registers R0-R10, except R6, which emit keeps as a scratch register.
+;; R7 and up are pushed by the prologue of a function that uses them.
+(def- pool [0 1 2 3 4 5 7 8 9 10])
+
+;; Helpers that never return.
+(def- noreturn-helpers {3 #t 4 #t 5 #t 12 #t})
+
+;; --- Bit sets, 60 bits to a fixnum ---------------------------------------------
+
+(def- bits 60)
+
+(def (set-new words) (let ((a [])) (dotimes (i words) (push! a 0)) a))
+
+(def (set-add! s n)
+  (let ((w (quotient n bits)))
+    (put! s w (bitwise-ior (get s w) (bitwise-arithmetic-shift 1 (remainder n bits))))))
+
+(def (set-remove! s n)
+  (let ((w (quotient n bits)))
+    (put! s w (bitwise-and (get s w) (bitwise-not (bitwise-arithmetic-shift 1 (remainder n bits)))))))
+
+(def (set-has? s n)
+  (not (= 0 (bitwise-and (get s (quotient n bits)) (bitwise-arithmetic-shift 1 (remainder n bits))))))
+
+;; dst := dst | src; true when dst changed.
+(def (set-union! dst src)
+  (let ((changed #f))
+    (dotimes (i (length dst))
+      (let ((old (get dst i)) (new (bitwise-ior (get dst i) (get src i))))
+        (unless (= old new)
+          (put! dst i new)
+          (set! changed #t))))
+    changed))
+
+(def (set-copy s) (copy s))
+
+(def (set-members s)
+  (let ((out []))
+    (dotimes (w (length s))
+      (let ((word (get s w)))
+        (unless (= word 0)
+          (dotimes (b bits)
+            (unless (= 0 (bitwise-and word (bitwise-arithmetic-shift 1 b)))
+              (push! out (+ (* w bits) b)))))))
+    out))
+
+;; --- Uses and definitions ---------------------------------------------------------
+
+(def (vreg? x) (int? x))
+
+(def (operand-uses op out)
+  (cond ((vreg? op) (push! out op))
+        ((and (array? op) (eq? (get op 0) :mem) (vreg? (get op 1))) (push! out (get op 1)))))
+
+;; The registers an instruction reads.
+(def (uses ins fc)
+  (let ((out []))
+    (case (get ins 0)
+      ((:mov)
+       (operand-uses (get ins 2) out)
+       (unless (vreg? (get ins 1)) (operand-uses (get ins 1) out)))
+      ((:load8) (operand-uses (get ins 2) out))
+      ((:op2)
+       (operand-uses (get ins 4) out)
+       (operand-uses (get ins 5) out)
+       (unless (vreg? (get ins 3)) (operand-uses (get ins 3) out)))
+      ((:op2u) (operand-uses (get ins 3) out) (operand-uses (get ins 4) out))
+      ((:cmpj) (operand-uses (get ins 2) out) (operand-uses (get ins 3) out))
+      ((:call)
+       (when (eq? (get ins 1) :value) (operand-uses (get ins 2) out))
+       (for ((a :in (get ins 3))) (operand-uses a out)))
+      ((:ccall) (for ((a :in (get ins 2))) (operand-uses a out)))
+      ((:ret) (operand-uses (get ins 1) out)))
+    out))
+
+;; The registers an instruction writes.
+(def (defs ins fc)
+  (case (get ins 0)
+    ((:mov :load8 :addr :spbase :landing) (if (vreg? (get ins 1)) [(get ins 1)] []))
+    ((:op2) (if (vreg? (get ins 3)) [(get ins 3)] []))
+    ((:call) (if (and (get ins 4) (not (get ins 5))) [(get ins 4)] []))
+    ((:ccall) (if (vreg? (get ins 3)) [(get ins 3)] []))
+    ((:entry)
+     (let ((out [(fc :closure)]))
+       (for ((v :in (fc :params))) (push! out v))
+       (for ((v :in (fc :optional-regs))) (push! out v))
+       (when (fc :rest-reg) (push! out (fc :rest-reg)))
+       out))
+    (else [])))
+
+(def (safepoint? ins)
+  (or (and (eq? (get ins 0) :call) (not (get ins 5))) (eq? (get ins 0) :ccall)))
+
+;; --- Blocks -----------------------------------------------------------------
+
+;; Instructions after which a block ends.
+(def (ends-block? ins)
+  (memq (get ins 0) '(:jump :cmpj :jcond :ret :call :ccall :poll)))
+
+;; Successor instruction indices of the last instruction of a block.
+(def (successors ins i labels n)
+  (let ((next (if (< (+ i 1) n) [(+ i 1)] []))
+        (handlers (fn (h) (map (fn (l) (get labels l)) h))))
+    (case (get ins 0)
+      ((:jump) [(get labels (get ins 1))])
+      ((:cmpj) (list-to-array (cons (get labels (get ins 4)) (array-to-list next))))
+      ((:jcond) (list-to-array (cons (get labels (get ins 2)) (array-to-list next))))
+      ((:poll) (list-to-array (cons (get labels (get ins 1)) (array-to-list next))))
+      ((:ret) [])
+      ((:call)
+       (if (get ins 5)
+           []
+           (list-to-array (append (array-to-list next) (handlers (get ins 6))))))
+      ((:ccall)
+       (if (get noreturn-helpers (get ins 1))
+           (list-to-array (handlers (get ins 4)))
+           (list-to-array (append (array-to-list next) (handlers (get ins 4))))))
+      (else next))))
+
+;; --- Allocation -----------------------------------------------------------------
+
+(def (allocate fc)
+  (let ((code (fc :code)))
+    (for ((ins :in (fc :cold))) (push! code ins))
+    (put! fc :cold [])
+    (let ((n (length code)) (labels {}) (words (+ 1 (quotient (fc :next) bits))))
+      (dotimes (i n)
+        (when (eq? (get (get code i) 0) :label) (put! labels (get (get code i) 1) i)))
+      ;; Blocks: starts and ends.
+      (let ((starts []) (block-of []))
+        (dotimes (i n)
+          (when (or (= i 0) (eq? (get (get code i) 0) :label) (ends-block? (get code (- i 1))))
+            (push! starts i))
+          (push! block-of (- (length starts) 1)))
+        (let ((nb (length starts)))
+          (let ((ends (map (fn (b) (if (< (+ b 1) nb) (- (get starts (+ b 1)) 1) (- n 1)))
+                                          (range nb)))
+                (gen []) (kill []) (live-in []) (live-out []) (succ []))
+            ;; Per-block uses before definitions, and definitions.
+            (dotimes (b nb)
+              (let ((g (set-new words)) (k (set-new words)))
+                (let walk ((i (get starts b)))
+                  (when (<= i (get ends b))
+                    (let ((ins (get code i)))
+                      (for ((u :in (uses ins fc))) (unless (set-has? k u) (set-add! g u)))
+                      (for ((d :in (defs ins fc))) (set-add! k d)))
+                    (walk (+ i 1))))
+                (push! gen g)
+                (push! kill k)
+                (push! live-in (set-copy g))
+                (push! live-out (set-new words))
+                (push! succ (map (fn (i) (get block-of i))
+                                 (array-to-list (successors (get code (get ends b)) (get ends b)
+                                                            labels n))))))
+            ;; Backward dataflow to a fixed point.
+            (let iterate ()
+              (let ((changed #f))
+                (let back ((b (- nb 1)))
+                  (when (>= b 0)
+                    (let ((out (get live-out b)))
+                      (for ((s :in (get succ b)))
+                        (when (set-union! out (get live-in s)) (set! changed #t)))
+                      ;; in = gen | (out - kill)
+                      (let ((in (get live-in b)) (k (get kill b)) (g (get gen b)))
+                        (dotimes (w words)
+                          (let ((new (bitwise-ior (get g w) (bitwise-and (get out w) (bitwise-not (get k w))))))
+                            (unless (= new (get in w))
+                              (put! in w new)
+                              (set! changed #t))))))
+                    (back (- b 1))))
+                (when changed (iterate))))
+            ;; Live ranges, half open [from to), and the registers live across each
+            ;; safepoint and into each landing.
+            (let ((ranges {}) (live {}))
+              ;; Blocks go last to first, so a definition trims only ranges from
+              ;; its own block and later ones.
+              (for ((b :range (- nb 1) -1 -1))
+                (let ((from (get starts b)) (to (+ (get ends b) 1))
+                      (now (set-copy (get live-out b))))
+                  (for ((v :in (set-members now))) (add-range! ranges v from to))
+                  (let walk ((i (get ends b)))
+                    (when (>= i from)
+                      (let ((ins (get code i)))
+                        (for ((d :in (defs ins fc)))
+                          (set-remove! now d)
+                          (start-range! ranges d i))
+                        (when (or (safepoint? ins) (eq? (get ins 0) :landing))
+                          (put! live i (set-members now)))
+                        (for ((u :in (uses ins fc)))
+                          (set-add! now u)
+                          (add-range! ranges u from (+ i 1))))
+                      (walk (- i 1))))))
+              (put! fc :live live)
+              (put! fc :ranges ranges)
+              (assign fc ranges))))))))
+
+;; Ranges of a register, as a list of [from to] sorted by from. Blocks are
+;; walked in order and each backwards, so ranges arrive mostly in order.
+(def (add-range! ranges v from to)
+  (put! ranges v (insert-range (or (get ranges v) '()) from to)))
+
+(def (insert-range rs from to)
+  (cond ((null? rs) (list [from to]))
+        ((< to (get (car rs) 0)) (cons [from to] rs))
+        ((> from (get (car rs) 1)) (cons (car rs) (insert-range (cdr rs) from to)))
+        (else
+         ;; Overlapping or touching: merge, then with any later ones it reaches.
+         (let ((merged [(min from (get (car rs) 0)) (max to (get (car rs) 1))]))
+           (let absorb ((rest (cdr rs)))
+             (if (and (pair? rest) (<= (get (car rest) 0) (get merged 1)))
+                 (begin
+                   (put! merged 1 (max (get merged 1) (get (car rest) 1)))
+                   (absorb (cdr rest)))
+                 (cons merged rest)))))))
+
+;; A definition at i starts the range that covers i; one with no later use
+;; still occupies its own instruction.
+(def (start-range! ranges v i)
+  (let ((rs (get ranges v)))
+    (if (nil? rs)
+        (put! ranges v (list [i (+ i 1)]))
+        (let find-it ((r rs))
+          (cond ((null? r) (put! ranges v (insert-range rs i (+ i 1))))
+                ((and (<= (get (car r) 0) i) (< i (get (car r) 1))) (put! (car r) 0 i))
+                (else (find-it (cdr r))))))))
+
+(def (overlap? a b)
+  (cond ((or (null? a) (null? b)) #f)
+        ((<= (get (car a) 1) (get (car b) 0)) (overlap? (cdr a) b))
+        ((<= (get (car b) 1) (get (car a) 0)) (overlap? a (cdr b)))
+        (else #t)))
+
+;; Give each register, in order of where it starts, the first pool register
+;; or spill slot none of whose holders it overlaps.
+(def (assign fc ranges)
+  (let ((order (sort-by (fn (v) (get (car (get ranges v)) 0)) (keys ranges)))
+        (location {}) (holders {}) (slot-holders []))
+    (for ((v :in order))
+      (let ((rs (get ranges v)))
+        (let ((fits (fn (others) (not (find (fn (o) (overlap? rs (get ranges o))) others)))))
+          (let ((r (find (fn (r) (fits (or (get holders r) '()))) (array-to-list pool))))
+            (if r
+                (begin
+                  (put! location v [:reg r])
+                  (put! holders r (cons v (or (get holders r) '()))))
+                (let ((k (find-index (fn (others) (fits others)) slot-holders)))
+                  (when (nil? k)
+                    (push! slot-holders '())
+                    (set! k (- (length slot-holders) 1)))
+                  (put! location v [:slot k])
+                  (put! slot-holders k (cons v (get slot-holders k)))))))))
+    (put! fc :location location)
+    (put! fc :spills (length slot-holders))
+    fc))

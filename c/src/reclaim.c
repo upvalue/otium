@@ -65,6 +65,10 @@ typedef struct {
   bool ok;
 } oti_reclaim_visit;
 
+#ifdef OTIUM_NATIVE
+static bool mark_code_constant(void* mark, uint32_t id) { return mark_constant(mark, id); }
+#endif
+
 static void mark_root(void* context, ot_value* slot) {
   oti_reclaim_visit* v = context;
   if (v->ok) v->ok = mark_value(v->mark, *slot);
@@ -99,7 +103,13 @@ bool oti_reclaim(ot_state* rt) {
         else if (in.op == OP_CLOSURE) ok = mark_function(&m, oti_instruction_bc(in));
       }
     } else {
-      if (oti_kind(task.value, K_CLOSURE)) ok = mark_function(&m, oti_closure_function(task.value));
+      if (oti_kind(task.value, K_CLOSURE)) {
+#ifdef OTIUM_NATIVE
+        if (rt->native_mode) ok = oti_native_mark_closure(rt, task.value, mark_code_constant, &m);
+        else
+#endif
+          ok = mark_function(&m, oti_closure_function(task.value));
+      }
       oti_object_header* object = (oti_object_header*)task.value;
       ot_value* fields = object_fields(task.value);
       for (size_t i = 0; ok && i < object->fields; i++) ok = mark_value(&m, fields[i]);
@@ -119,6 +129,10 @@ bool oti_reclaim(ot_state* rt) {
         rt->constant_state[i] = 0;
       }
     }
+#ifdef OTIUM_NATIVE
+    if (rt->native_mode) oti_native_sweep(rt);
+    else
+#endif
     for (size_t i = 0; i < rt->function_count; i++)
       if (!m.functions[i]) {
         oti_free_function(rt->functions[i]);

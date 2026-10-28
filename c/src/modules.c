@@ -205,6 +205,24 @@ static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_f
   if (m->items[index].state == 2 && !reload) return true;
   m->items[index].state = 0;
   if (m->depth >= 128) return oti_error(rt, "module nesting limit exceeded");
+#ifdef OTIUM_NATIVE
+  if (rt->boot) {
+    /* A module compiled into the boot file loads from there. */
+    uint32_t caller = rt->current_namespace, expected = rt->required_namespace;
+    uint32_t caller_source = rt->source;
+    rt->current_namespace = rt->required_namespace = space;
+    m->items[index].state = 1;
+    m->depth++;
+    bool found;
+    bool ok = oti_boot_module(rt, name, &found);
+    m->depth--;
+    m->items[index].state = ok && found ? 2 : 0;
+    rt->current_namespace = caller;
+    rt->required_namespace = expected;
+    rt->source = caller_source;
+    if (found || !ok) return ok;
+  }
+#endif
   const char* defaults[] = {".", "lib"};
   size_t paths = m->path_count + 2;
   char *source = NULL, *found = NULL;
@@ -263,6 +281,8 @@ static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_f
   free(source);
   return ok;
 }
+
+bool oti_load_module(ot_state* rt, uint32_t space) { return load_module(rt, space, false, false); }
 
 static bool keyword(const oti_ast* a, const char* name) {
   return a && a->kind == AST_KEYWORD && a->as.text.size == strlen(name) &&

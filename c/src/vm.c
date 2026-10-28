@@ -35,13 +35,13 @@ static size_t vm_top(const oti_frame* frame) {
   return top > frame->floor ? top : frame->floor;
 }
 
-static bool vm_primitive(ot_value value) {
+bool oti_primitive_value(ot_value value) {
   return (value & 255) == TAG_BUILTIN || oti_kind(value, K_FOREIGN_FUNCTION) ||
          oti_kind(value, K_NATIVE) || oti_kind(value, K_PARAM) || oti_kind(value, K_INSTANCE) ||
          oti_kind(value, K_RECORD) || oti_collection(value);
 }
 
-static ot_value vm_call_primitive(ot_state* rt, size_t call, size_t argc) {
+ot_value oti_call_primitive(ot_state* rt, size_t call, size_t argc) {
   ot_value value = rt->stack[call];
   if (oti_kind(value, K_RECORD)) return oti_record_call(rt, value, call + 1, argc);
   if (oti_kind(value, K_INSTANCE)) return oti_instance_call(rt, value, call + 1, argc);
@@ -155,8 +155,8 @@ bool oti_apply(ot_state* rt, size_t call, size_t argc, bool tail) {
     if (call + 1 + argc > rt->sp) vm_height(rt, call + 1 + argc);
   }
   ot_value target = rt->stack[call];
-  if (vm_primitive(target)) {
-    ot_value answer = vm_call_primitive(rt, call, argc);
+  if (oti_primitive_value(target)) {
+    ot_value answer = oti_call_primitive(rt, call, argc);
     if (!answer || oti_failed(rt)) return false;
     if (tail) return oti_leave(rt, answer);
     rt->stack[call] = answer;
@@ -175,10 +175,22 @@ bool oti_execute(ot_state* rt, uint32_t function, ot_value* result) {
 
 bool oti_invoke(ot_state* rt, size_t argc, ot_value* result) {
   ot_value callable = rt->stack[0];
+#ifdef OTIUM_NATIVE
+  if (rt->native_mode) {
+    if (!oti_native_args(rt, argc)) return false;
+    memcpy(rt->native.args, rt->stack + 1, argc * sizeof(ot_value));
+    ot_value answer = oti_native_invoke(rt, rt->stack[0], argc);
+    if (!answer) return false;
+    rt->stack[0] = answer;
+    vm_height(rt, 1);
+    *result = answer;
+    return true;
+  }
+#endif
   if (callable == VM_APPLY) {
     if (!oti_apply(rt, 0, argc, false)) return false;
-  } else if (vm_primitive(callable)) {
-    ot_value answer = vm_call_primitive(rt, 0, argc);
+  } else if (oti_primitive_value(callable)) {
+    ot_value answer = oti_call_primitive(rt, 0, argc);
     if (!answer) return false;
     rt->stack[0] = answer;
     vm_height(rt, 1);
@@ -955,6 +967,9 @@ bool oti_drive(ot_state* rt, size_t stop_frames) {
 /* Call back into the VM without discarding the suspended caller's roots. */
 ot_value oti_call_list(ot_state* rt, ot_value function, ot_value args) {
   if (!oti_host_entry(rt)) return 0;
+#ifdef OTIUM_NATIVE
+  if (rt->native_mode) return oti_native_invoke_list(rt, function, args);
+#endif
   size_t base = rt->sp, frames = rt->frame_count, tries = rt->try_count, params = rt->param_count;
   size_t handlers = rt->handler_count, handler_top = rt->handler_top,
          restarts = rt->restart_scope_count, cleanups = rt->cleanup_count;

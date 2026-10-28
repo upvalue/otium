@@ -81,6 +81,9 @@ typedef struct {
    * ready, which is filled normally and used when every allocation must take
    * the slow path. */
   size_t filled, ready;
+  /* start + ready, for native code, which bumps an absolute pointer. Set
+   * with oti_heap_set_ready. */
+  unsigned char* end;
   /* Statistics, updated only by collections. live_bytes is the size after the
    * last collection, so used - live_bytes is what has been allocated since. */
   size_t allocated_bytes, reclaimed_bytes, peak_used, live_bytes;
@@ -106,6 +109,11 @@ static inline void oti_roots_push(oti_heap* h, oti_roots* r, ot_value* slots, si
 static inline void oti_roots_pop(oti_heap* h, oti_roots* r) {
   assert(h->roots == r);
   h->roots = r->previous;
+}
+
+static inline void oti_heap_set_ready(oti_heap* h, size_t ready) {
+  h->ready = ready;
+  h->end = h->start + ready;
 }
 
 void oti_heap_collect(oti_heap* h);

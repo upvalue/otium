@@ -1,0 +1,825 @@
+;; lower.ot -- tree IR to virtual code.
+;;
+;; Virtual code is a list of instructions per function, close to the bridge's
+;; stream (c/src/native.c) but on virtual registers. A virtual register is a
+;; non-negative integer; other operands are arrays:
+;;
+;;   [:imm word]     a machine word        [:fix n]        the fixnum n
+;;   [:mem base off] memory at a register, :rt (the state) or :alloc (S1)
+;;   [:cell j f]     field f of unit cell j [:cellidx j]   cell j's number
+;;   [:const k]      unit literal k         [:state f]     a state field
+;;   [:alloc]        the allocation pointer
+;;
+;; Instructions:
+;;
+;;   [:mov dst src]  [:load8 dst mem]  [:op2 op flags dst a b]  [:op2u op flags a b]
+;;   [:cmpj cond a b label]  [:jcond cond label]  [:jump label]  [:label label]
+;;   [:call kind callee args dst tail handlers offset]
+;;   [:ccall helper args dst handlers offset]  [:ret src]  [:entry]  [:poll label]
+;;   [:landing dst]  [:addr dst label]  [:spbase dst]
+;;
+;; Calls are safepoints. allocate keeps every value in one place for its
+;; whole life; emit saves the registers live across a safepoint into the
+;; frame around it. handlers lists the labels a raise inside a try or
+;; restart-case can land on, for liveness.
+;;
+;; Fast paths are inline. Slow paths go to a cold list after the function's
+;; code: allocation past the heap's end, primitives on anything but
+;; fixnums and pairs, the poll, errors.
+
+(ns otium.compiler.lower
+  (:require (otium.compiler.convert :as cv)))
+
+;; --- Representation ---------------------------------------------------------
+
+;; Machine words of immediates, and object layouts, as in c/src/internal.h.
+(def word-nil 2)
+(def word-false 6)
+(def word-true 10)
+(def word-empty 14)
+(def word-unbound 18)
+(def word-eof 30)
+(def kind-pair 1)
+(def kind-box 2)
+(def kind-closure 3)
+(def header-bytes 16)
+(def offset-kind 12)
+(def offset-car 16)
+(def offset-cdr 24)
+(def offset-box 16)
+(def offset-code 16)
+(def offset-captures 24)
+
+;; Helpers in native.c, by number.
+(def h-alloc 0)
+(def h-prim1 1)
+(def h-prim2 2)
+(def h-arity 3)
+(def h-unbound 4)
+(def h-uninitialized 5)
+(def h-define 6)
+(def h-set-global 7)
+(def h-poll 8)
+(def h-rest 9)
+(def h-try 10)
+(def h-end-try 11)
+(def h-raise 12)
+(def h-cleanup 13)
+(def h-run-cleanup 14)
+(def h-handlers 15)
+(def h-unhandlers 16)
+(def h-bind-param 17)
+(def h-unbind-params 18)
+(def h-make-param 19)
+(def h-restarts 20)
+(def h-end-restarts 21)
+(def h-restart-apply 22)
+(def h-evaluator 23)
+
+;; State fields.
+(def sf-heap-end 0)
+(def sf-heap-start 1)
+(def sf-limit 2)
+(def sf-args 3)
+(def sf-call-other 4)
+(def sf-native-sp 5)
+(def sf-callee 6)
+(def sf-argc 7)
+
+(def (builtin-id name) (quotient (%native-builtin name) 256))
+
+(def- builtin-ids
+  (let ((t {}))
+    (for ((name :in '("+" "-" "*" "<" "<=" ">" ">=" "=" "car" "cdr")))
+      (put! t (string->symbol name) (builtin-id name)))
+    t))
+
+;; The operand for a constant: an immediate when it is one, else nil.
+(def (immediate value)
+  (cond ((int? value) [:fix value])
+        ((nil? value) [:imm word-nil])
+        ((eq? value #t) [:imm word-true])
+        ((eq? value #f) [:imm word-false])
+        ((null? value) [:imm word-empty])
+        ((char? value) [:imm (+ (* (char->integer value) 256) 22)])
+        ((eof-object? value) [:imm word-eof])
+        (else nil)))
+
+;; --- Units ------------------------------------------------------------------
+
+;; A unit is a table: :labels counts labels, :literals and :cells are the
+;; unit's tables, :functions every function in index order, :statics the
+;; [function literal] pairs of closures without captures, :pending
+;; functions still to lower, :namespace the current namespace's name.
+(def (make-unit)
+  {:labels 0 :literals [] :cells [] :cell-map {} :functions [] :statics [] :pending []
+   :namespace (current-ns)})
+
+(def (unit-label! u)
+  (let ((n (u :labels)))
+    (put! u :labels (+ n 1))
+    n))
+
+(def (literal! u value)
+  (let ((literals (u :literals)))
+    (let find-it ((i 0))
+      (cond ((= i (length literals))
+             (push! literals value)
+             i)
+            ((eq? (get literals i) value) i)
+            (else (find-it (+ i 1)))))))
+
+;; A literal no other use shares, for a static closure.
+(def (fresh-literal! u)
+  (let ((literals (u :literals)))
+    (push! literals nil)
+    (- (length literals) 1)))
+
+(def (cell! u cell)
+  (let ((index (get (u :cell-map) cell)))
+    (or index
+        (let ((i (length (u :cells))))
+          (push! (u :cells) cell)
+          (put! (u :cell-map) cell i)
+          i))))
+
+;; Give a function its index and entry label, queueing it for lowering.
+(def (function! u info)
+  (or (info :index)
+      (let ((i (length (u :functions))))
+        (put! info :index i)
+        (put! info :xep (unit-label! u))
+        (push! (u :functions) info)
+        (push! (u :pending) info)
+        (when (= (length (info :captures)) 0)
+          (let ((k (fresh-literal! u)))
+            (put! info :static k)
+            (push! (u :statics) [i k])))
+        i)))
+
+;; --- Function contexts --------------------------------------------------------
+
+;; A function being lowered: :code and :cold instruction arrays, :next the
+;; next register, :raw the registers holding raw words, :locs where each
+;; variable lives by id, :handlers the landing labels in scope, :loops the
+;; heads and registers of inline loops.
+(def (make-context u info)
+  {:u u :info info :code [] :cold [] :next 0 :raw {} :locs {} :handlers '() :loops {}})
+
+(def (vreg! fc)
+  (let ((n (fc :next)))
+    (put! fc :next (+ n 1))
+    n))
+
+(def (raw! fc)
+  (let ((n (vreg! fc)))
+    (put! (fc :raw) n #t)
+    n))
+
+(def (emit! fc ins) (push! (fc :code) ins))
+
+(def (cold! fc ins) (push! (fc :cold) ins))
+
+(def (label! fc) (unit-label! (fc :u)))
+
+(def (vreg? x) (int? x))
+
+;; An operand in a register.
+(def (in-vreg fc op)
+  (if (vreg? op)
+      op
+      (let ((v (vreg! fc)))
+        (emit! fc [:mov v op])
+        v)))
+
+;; A fresh register holding op, for a binding that may be assigned.
+(def (fresh-copy fc op)
+  (let ((v (vreg! fc)))
+    (emit! fc [:mov v op])
+    v))
+
+(def (ccall! fc helper args dst offset)
+  (emit! fc [:ccall helper args dst (fc :handlers) offset]))
+
+(def (cold-ccall! fc helper args dst offset)
+  (cold! fc [:ccall helper args dst (fc :handlers) offset]))
+
+;; --- Variables ----------------------------------------------------------------
+
+(def (boxed? var) (and (var :captured) (or (var :assigned) (var :early))))
+
+(def (closure-reg fc) (fc :closure))
+
+;; Where var is: [:reg v], [:box v], or [:cap index boxed?].
+(def (var-loc fc var)
+  (or (get (fc :locs) (var :id))
+      (let ((captures ((fc :info) :captures)))
+        (let find-it ((i 0))
+          (cond ((= i (length captures))
+                 (error "native compiler: variable not in scope" (var :name)))
+                ((eq? (get captures i) var) [:cap i (boxed? var)])
+                (else (find-it (+ i 1))))))))
+
+(def (capture-mem fc i) [:mem (closure-reg fc) (+ offset-captures (* 8 i))])
+
+;; A register reading var, checked for initialization when check is true.
+(def (read-var fc var check offset)
+  (let ((loc (var-loc fc var)))
+    (case (get loc 0)
+      ((:reg)
+       (when check (check-bound fc (get loc 1) 0 offset))
+       (get loc 1))
+      ((:box)
+       (let ((v (vreg! fc)))
+         (emit! fc [:mov v [:mem (get loc 1) offset-box]])
+         (check-bound fc v 0 offset)
+         v))
+      (else
+       (let ((v (vreg! fc)))
+         (emit! fc [:mov v (capture-mem fc (get loc 1))])
+         (when (get loc 2)
+           (emit! fc [:mov v [:mem v offset-box]])
+           (check-bound fc v 1 offset))
+         v)))))
+
+(def (check-bound fc v captured offset)
+  (let ((slow (label! fc)))
+    (emit! fc [:cmpj :eq v [:imm word-unbound] slow])
+    (cold! fc [:label slow])
+    (cold-ccall! fc h-uninitialized [[:imm captured]] nil offset)))
+
+(def (write-var fc var value)
+  (let ((loc (var-loc fc var)))
+    (case (get loc 0)
+      ((:reg) (emit! fc [:mov (get loc 1) value]))
+      ((:box) (emit! fc [:mov [:mem (get loc 1) offset-box] (in-vreg fc value)]))
+      (else
+       (let ((b (vreg! fc)) (v (in-vreg fc value)))
+         (emit! fc [:mov b (capture-mem fc (get loc 1))])
+         (emit! fc [:mov [:mem b offset-box] v]))))))
+
+;; Bind var to a value just computed: in a box when it needs one.
+(def (bind-var fc var value offset)
+  (if (boxed? var)
+      (put! (fc :locs) (var :id) [:box (make-box fc value offset)])
+      (put! (fc :locs) (var :id) [:reg (fresh-copy fc value)])))
+
+;; --- Allocation -----------------------------------------------------------------
+
+;; Allocate an object of kind with fields traced words and bytes more, inline:
+;; bump the allocation pointer, check it against the heap's end, write the
+;; header. Past the end, C allocates (collecting if it must) and writes the
+;; header itself.
+(def (allocate fc kind fields bytes offset)
+  (let ((size (+ header-bytes (* 8 fields) bytes))
+        (p (vreg! fc)) (top (raw! fc))
+        (slow (label! fc)) (join (label! fc)))
+    (emit! fc [:op2 :add 0 top [:alloc] [:imm size]])
+    (emit! fc [:cmpj :gt top [:state sf-heap-end] slow])
+    (emit! fc [:mov p [:alloc]])
+    (emit! fc [:mov [:alloc] top])
+    (emit! fc [:mov [:mem p 0] [:imm size]])
+    (emit! fc [:mov [:mem p 8] [:imm (+ fields (* kind 4294967296))]])
+    (emit! fc [:label join])
+    (cold! fc [:label slow])
+    (cold-ccall! fc h-alloc [[:imm kind] [:imm fields] [:imm bytes]] p offset)
+    (cold! fc [:jump join])
+    p))
+
+(def (make-box fc value offset)
+  (let ((v (in-vreg-or-imm fc value)))
+    (let ((b (allocate fc kind-box 1 0 offset)))
+      (emit! fc [:mov [:mem b offset-box] v])
+      b)))
+
+;; Operands that are immediates can be stored directly; others go through a
+;; register so an instruction has at most one register-based memory operand.
+(def (in-vreg-or-imm fc op)
+  (if (and (array? op) (memq (get op 0) '(:imm :fix))) op (in-vreg fc op)))
+
+(def (make-pair fc a b offset)
+  (let ((a (in-vreg-or-imm fc a)) (b (in-vreg-or-imm fc b)))
+    (let ((p (allocate fc kind-pair 2 0 offset)))
+      (emit! fc [:mov [:mem p offset-car] a])
+      (emit! fc [:mov [:mem p offset-cdr] b])
+      p)))
+
+;; --- Expressions -------------------------------------------------------------
+
+(def (node-offset node) (get node 1))
+
+;; The value of node as an operand.
+(def (value fc node)
+  (let ((offset (node-offset node)))
+    (case (get node 0)
+      ((:const) (constant fc (get node 2)))
+      ((:unbound) [:imm word-unbound])
+      ((:lref) (read-var fc (get node 2) (get node 3) offset))
+      ((:lset)
+       (write-var fc (get node 2) (value fc (get node 3)))
+       [:imm word-nil])
+      ((:gref) (global-ref fc (get node 2) offset))
+      ((:gdef)
+       (let ((v (in-vreg fc (value fc (get node 3)))) (r (vreg! fc)))
+         (ccall! fc h-define [[:cellidx (cell! (fc :u) (get node 2))] v] r offset)
+         r))
+      ((:gset)
+       (let ((v (in-vreg fc (value fc (get node 3)))))
+         (ccall! fc h-set-global [[:cellidx (cell! (fc :u) (get node 2))] v] (vreg! fc) offset)
+         [:imm word-nil]))
+      ((:seq)
+       (let ((nodes (get node 2)))
+         (for ((i :range (- (length nodes) 1))) (effect fc (get nodes i)))
+         (value fc (get nodes (- (length nodes) 1)))))
+      ((:let)
+       (bind-let fc node)
+       (value fc (get node 4)))
+      ((:fn) (closure fc (get node 2) offset))
+      ((:prim) (primitive fc (get node 2) (get node 3) offset))
+      ((:make-param)
+       (let ((name (in-vreg-or-imm fc (value fc (get node 2))))
+             (init (in-vreg fc (value fc (get node 3))))
+             (r (vreg! fc)))
+         (ccall! fc h-make-param [name init] r offset)
+         r))
+      ((:evaluator)
+       (let ((r (vreg! fc)))
+         (ccall! fc h-evaluator [(constant fc ((fc :u) :namespace))] r offset)
+         r))
+      ((:class-object) (constant fc (%native-object-class)))
+      ((:call :gcall :bcall)
+       (let ((r (vreg! fc)))
+         (call fc node r #f)
+         r))
+      (else (via-target fc node)))))
+
+;; Nodes with control flow deliver their value to a target: a register and a
+;; label to jump to.
+(def (via-target fc node)
+  (let ((r (vreg! fc)) (done (label! fc)))
+    (tail fc node [r done])
+    (emit! fc [:label done])
+    r))
+
+(def (effect fc node) (value fc node))
+
+(def (constant fc value)
+  (or (immediate value)
+      [:const (literal! (fc :u) value)]))
+
+(def (global-ref fc cell offset)
+  (let ((v (vreg! fc)) (t (raw! fc)) (slow (label! fc)) (j (cell! (fc :u) cell)))
+    (emit! fc [:mov v [:cell j 0]])
+    (emit! fc [:op2 :and 0 t v [:imm 255]])
+    (emit! fc [:cmpj :eq t [:imm word-unbound] slow])
+    (cold! fc [:label slow])
+    (cold-ccall! fc h-unbound [v] nil offset)
+    v))
+
+(def (bind-let fc node)
+  (let ((vars (get node 2)) (inits (get node 3)))
+    (for ((i :range (length vars)))
+      (bind-var fc (get vars i) (value fc (get inits i)) (node-offset node)))))
+
+;; Deliver node's value to target: nil returns it from the function, [r label]
+;; puts it in r and jumps to label.
+(def (tail fc node target)
+  (let ((offset (node-offset node)))
+    (case (get node 0)
+      ((:if)
+       (let ((otherwise (label! fc)))
+         (test fc (get node 2) otherwise)
+         (tail fc (get node 3) target)
+         (emit! fc [:label otherwise])
+         (tail fc (get node 4) target)))
+      ((:seq)
+       (let ((nodes (get node 2)))
+         (for ((i :range (- (length nodes) 1))) (effect fc (get nodes i)))
+         (tail fc (get nodes (- (length nodes) 1)) target)))
+      ((:let)
+       (bind-let fc node)
+       (tail fc (get node 4) target))
+      ((:call :gcall :bcall)
+       (if (and (nil? target) (tail-call? node))
+           (call fc node nil #t)
+           (let ((r (vreg! fc)))
+             (call fc node r #f)
+             (deliver fc r target))))
+      ((:loop) (inline-loop fc node target))
+      ((:recur) (recur fc node))
+      ((:while) (while-loop fc node) (deliver fc [:imm word-nil] target))
+      ((:try) (deliver fc (try-form fc node) target))
+      ((:cleanup) (deliver fc (cleanup-form fc node) target))
+      ((:handlers) (deliver fc (handlers-form fc node) target))
+      ((:params) (deliver fc (params-form fc node) target))
+      ((:restarts) (deliver fc (restarts-form fc node) target))
+      (else (deliver fc (value fc node) target)))))
+
+(def (deliver fc op target)
+  (if (nil? target)
+      (emit! fc [:ret op])
+      (begin
+        (emit! fc [:mov (get target 0) op])
+        (emit! fc [:jump (get target 1)]))))
+
+;; --- Tests --------------------------------------------------------------------
+
+;; Jump to otherwise when node's value is false or nil; fall through when not.
+(def (test fc node otherwise)
+  (case (get node 0)
+    ((:prim) (test-primitive fc (get node 2) (get node 3) otherwise (node-offset node)))
+    ((:const)
+     (unless (and (not (nil? (get node 2))) (not (eq? (get node 2) #f)))
+       (emit! fc [:jump otherwise])))
+    ((:if)
+     (let ((alt (label! fc)) (done (label! fc)))
+       (test fc (get node 2) alt)
+       (test fc (get node 3) otherwise)
+       (emit! fc [:jump done])
+       (emit! fc [:label alt])
+       (test fc (get node 4) otherwise)
+       (emit! fc [:label done])))
+    ((:let)
+     (bind-let fc node)
+     (test fc (get node 4) otherwise))
+    ((:seq)
+     (let ((nodes (get node 2)))
+       (for ((i :range (- (length nodes) 1))) (effect fc (get nodes i)))
+       (test fc (get nodes (- (length nodes) 1)) otherwise)))
+    (else (falsy-jump fc (value fc node) otherwise))))
+
+;; nil (2) and #f (6) differ only in bit 2.
+(def (falsy-jump fc op otherwise)
+  (let ((t (raw! fc)))
+    (emit! fc [:op2 :or 0 t op [:imm 4]])
+    (emit! fc [:cmpj :eq t [:imm word-false] otherwise])))
+
+;; --- Primitives ----------------------------------------------------------------
+
+(def (pair-check fc x slow)
+  (let ((k (raw! fc)))
+    (emit! fc [:op2u :and :zero x [:imm 7]])
+    (emit! fc [:jcond :nonzero slow])
+    (emit! fc [:load8 k [:mem x offset-kind]])
+    (emit! fc [:cmpj :ne k [:imm kind-pair] slow])))
+
+(def (both-fixnums fc a b slow)
+  (cond ((fixnum-operand? b)
+         (emit! fc [:op2u :and :zero a [:imm 1]])
+         (emit! fc [:jcond :zero slow]))
+        ((fixnum-operand? a)
+         (emit! fc [:op2u :and :zero b [:imm 1]])
+         (emit! fc [:jcond :zero slow]))
+        (else
+         (let ((t (raw! fc)))
+           (emit! fc [:op2 :and 0 t a b])
+           (emit! fc [:op2u :and :zero t [:imm 1]])
+           (emit! fc [:jcond :zero slow])))))
+
+(def (fixnum-operand? op) (and (array? op) (eq? (get op 0) :fix)))
+
+;; Operands for a binary primitive: registers, or fixnum immediates.
+(def (operand fc node)
+  (let ((op (value fc node)))
+    (if (fixnum-operand? op) op (in-vreg fc op))))
+
+(def- comparisons
+  {'< [:slt :sge] '<= [:sle :sgt] '> [:sgt :sle] '>= [:sge :slt] '= [:eq :ne]})
+
+(def (slow-builtin fc name args r offset join)
+  (let ((slow (label! fc)))
+    (cold! fc [:label slow])
+    (cold-ccall! fc (if (= (length args) 1) h-prim1 h-prim2)
+                 (list-to-array (cons [:imm (get builtin-ids name)] (array-to-list args))) r offset)
+    (cold! fc [:jump join])
+    slow))
+
+(def (primitive fc name args offset)
+  (case name
+    ((car cdr)
+     (let ((x (in-vreg fc (value fc (get args 0)))) (r (vreg! fc)) (join (label! fc)))
+       (let ((slow (slow-builtin fc name [x] r offset join)))
+         (pair-check fc x slow)
+         (emit! fc [:mov r [:mem x (if (eq? name 'car) offset-car offset-cdr)]])
+         (emit! fc [:label join])
+         r)))
+    ((cons)
+     (let ((a (value fc (get args 0))))
+       (let ((a (in-vreg-or-imm fc a)) (b (value fc (get args 1))))
+         (make-pair fc a b offset))))
+    ((+ - *)
+     (let ((a (operand fc (get args 0))) (b (operand fc (get args 1))) (r (vreg! fc))
+           (join (label! fc)))
+       (let ((slow (slow-builtin fc name [a b] r offset join)))
+         (both-fixnums fc a b slow)
+         (case name
+           ((+)
+            (cond ((fixnum-operand? b) (emit! fc [:op2 :add 0 r a [:imm (* 2 (get b 1))]]))
+                  ((fixnum-operand? a) (emit! fc [:op2 :add 0 r b [:imm (* 2 (get a 1))]]))
+                  (else
+                   (emit! fc [:op2 :add 0 r a b])
+                   (emit! fc [:op2 :sub 0 r r [:imm 1]]))))
+           ((-)
+            (if (fixnum-operand? b)
+                (emit! fc [:op2 :sub 0 r a [:imm (* 2 (get b 1))]])
+                (begin
+                  (emit! fc [:op2 :sub 0 r a b])
+                  (emit! fc [:op2 :add 0 r r [:imm 1]]))))
+           (else
+            (let ((x (raw! fc)) (y (raw! fc)))
+              (emit! fc [:op2 :sub 0 x a [:imm 1]])
+              (emit! fc [:op2 :ashr 0 y b [:imm 1]])
+              (emit! fc [:op2 :mul 0 x x y])
+              (emit! fc [:op2 :add 0 r x [:imm 1]]))))
+         (emit! fc [:label join])
+         r)))
+    ((< <= > >= =)
+     (boolean fc (fn (otherwise) (test-primitive fc name args otherwise offset))))
+    ((eq? not null? pair?)
+     (boolean fc (fn (otherwise) (test-primitive fc name args otherwise offset))))
+    (else (error "native compiler: unknown primitive" name))))
+
+;; A boolean from a test.
+(def (boolean fc test-to)
+  (let ((r (vreg! fc)) (done (label! fc)) (otherwise (label! fc)))
+    (test-to otherwise)
+    (emit! fc [:mov r [:imm word-true]])
+    (emit! fc [:jump done])
+    (emit! fc [:label otherwise])
+    (emit! fc [:mov r [:imm word-false]])
+    (emit! fc [:label done])
+    r))
+
+(def (test-primitive fc name args otherwise offset)
+  (case name
+    ((< <= > >= =)
+     (let ((a (operand fc (get args 0))) (b (operand fc (get args 1)))
+           (r (vreg! fc)) (join (label! fc)) (cont (label! fc)))
+       (when (and (fixnum-operand? a) (fixnum-operand? b)) (set! a (in-vreg fc a)))
+       (let ((slow (slow-builtin fc name [a b] r offset join)))
+         (both-fixnums fc a b slow)
+         (emit! fc [:cmpj (get (get comparisons name) 1) (tagged a) (tagged b) otherwise])
+         (emit! fc [:jump cont])
+         (emit! fc [:label join])
+         (falsy-jump fc r otherwise)
+         (emit! fc [:label cont]))))
+    ((eq?)
+     (let ((a (in-vreg fc (value fc (get args 0)))) (b (value fc (get args 1))))
+       (emit! fc [:cmpj :ne a b otherwise])))
+    ((not)
+     (let ((x (value fc (get args 0))) (t (raw! fc)))
+       (emit! fc [:op2 :or 0 t x [:imm 4]])
+       (emit! fc [:cmpj :ne t [:imm word-false] otherwise])))
+    ((null?)
+     (let ((x (in-vreg fc (value fc (get args 0)))))
+       (emit! fc [:cmpj :ne x [:imm word-empty] otherwise])))
+    ((pair?)
+     (let ((x (in-vreg fc (value fc (get args 0)))))
+       (pair-check fc x otherwise)))
+    (else (falsy-jump fc (primitive fc name args offset) otherwise))))
+
+;; Fixnum immediates compare as their tagged words.
+(def (tagged op) op)
+
+;; --- Closures ------------------------------------------------------------------
+
+(def (closure fc info offset)
+  (let ((u (fc :u)))
+    (function! u info)
+    (let ((captures (info :captures)))
+      (if (= (length captures) 0)
+          [:const (info :static)]
+          (let ((values (map (fn (var) (capture-value fc var)) (array-to-list captures))))
+            (let ((p (allocate fc kind-closure (length captures) 8 offset))
+                  (code (raw! fc)))
+              (emit! fc [:addr code (info :xep)])
+              (emit! fc [:mov [:mem p offset-code] code])
+              (let loop ((vs values) (i 0))
+                (unless (null? vs)
+                  (emit! fc [:mov [:mem p (+ offset-captures (* 8 i))] (car vs)])
+                  (loop (cdr vs) (+ i 1))))
+              p))))))
+
+;; What a closure captures for var: the box of a boxed variable, else its value.
+(def (capture-value fc var)
+  (let ((loc (var-loc fc var)))
+    (case (get loc 0)
+      ((:reg :box) (get loc 1))
+      (else
+       (let ((v (vreg! fc)))
+         (emit! fc [:mov v (capture-mem fc (get loc 1))])
+         v)))))
+
+;; --- Calls ------------------------------------------------------------------------
+
+;; Arguments are evaluated left to right; a global callee is read after them.
+(def (call fc node dst tail)
+  (let ((offset (node-offset node)) (u (fc :u)))
+    (case (get node 0)
+      ((:call)
+       (let ((f (in-vreg fc (value fc (get node 2)))))
+         (let ((args (arguments fc (get node 3))))
+           (emit! fc [:call :value f args dst tail (fc :handlers) offset]))))
+      ((:gcall)
+       (let ((args (arguments fc (get node 3))))
+         (emit! fc [:call :cell (cell! u (get node 2)) args dst tail (fc :handlers) offset])))
+      (else
+       (let ((args (arguments fc (get node 3))))
+         (emit! fc [:call :imm (get node 2) args dst tail (fc :handlers) offset]))))))
+
+;; Builtins the compiler calls itself, and core builtins convert marked, keep
+;; their caller's frame, so errors point at the call.
+(def (tail-call? node)
+  (and (not (eq? (get node 0) :bcall)) (get node 4)))
+
+(def (arguments fc nodes)
+  (let ((ops []))
+    (for ((n :in nodes)) (push! ops (value fc n)))
+    ops))
+
+;; --- Loops -----------------------------------------------------------------------
+
+(def (inline-loop fc node target)
+  (let ((loop (get node 2)) (inits (get node 3)) (head (label! fc)))
+    (let ((vals (map (fn (init) (fresh-copy fc (value fc init))) (array-to-list inits))))
+      (put! (fc :loops) (loop :index) [head vals])
+      (emit! fc [:label head])
+      (poll fc)
+      (let bind ((vars (array-to-list (loop :vars))) (vs vals))
+        (unless (null? vars)
+          (let ((var (car vars)))
+            (if (boxed? var)
+                (put! (fc :locs) (var :id) [:box (make-box fc (car vs) (node-offset node))])
+                (put! (fc :locs) (var :id) [:reg (car vs)])))
+          (bind (cdr vars) (cdr vs))))
+      (tail fc (get node 4) target))))
+
+(def (recur fc node)
+  (let ((entry (get (fc :loops) ((get node 2) :index))))
+    (let ((temps (map (fn (a) (fresh-copy fc (value fc a))) (array-to-list (get node 3)))))
+      (let move ((ts temps) (vs (get entry 1)))
+        (unless (null? ts)
+          (emit! fc [:mov (car vs) (car ts)])
+          (move (cdr ts) (cdr vs))))
+      (emit! fc [:jump (get entry 0)]))))
+
+(def (while-loop fc node)
+  (let ((body (label! fc)) (check (label! fc)) (exit (label! fc)))
+    (emit! fc [:jump check])
+    (emit! fc [:label body])
+    (effect fc (get node 3))
+    (emit! fc [:label check])
+    (poll fc)
+    (test fc (get node 2) exit)
+    (emit! fc [:jump body])
+    (emit! fc [:label exit])))
+
+;; The poll at function entries and loop heads: one compare of the stack
+;; pointer with the limit, which an interrupt request also trips.
+(def (poll fc)
+  (let ((slow (label! fc)) (back (label! fc)))
+    (emit! fc [:poll slow])
+    (emit! fc [:label back])
+    (cold! fc [:label slow])
+    (cold-ccall! fc h-poll [] nil nil)
+    (cold! fc [:jump back])))
+
+;; --- Control forms ---------------------------------------------------------------
+
+(def (with-handler fc label thunk)
+  (let ((saved (fc :handlers)))
+    (put! fc :handlers (cons label saved))
+    (let ((result (thunk)))
+      (put! fc :handlers saved)
+      result)))
+
+(def (try-form fc node)
+  (let ((offset (node-offset node)) (handler (label! fc)) (done (label! fc))
+        (out (vreg! fc)) (pc (raw! fc)) (sp (raw! fc)))
+    (emit! fc [:addr pc handler])
+    (emit! fc [:spbase sp])
+    (ccall! fc h-try [pc sp] (vreg! fc) offset)
+    (let ((r (with-handler fc handler (fn () (value fc (get node 2))))))
+      (ccall! fc h-end-try [] (vreg! fc) offset)
+      (emit! fc [:mov out r])
+      (emit! fc [:jump done]))
+    (emit! fc [:label handler])
+    (let ((condition (vreg! fc)))
+      (emit! fc [:landing condition])
+      (put! (fc :locs) ((get node 3) :id) [:reg condition])
+      (for ((clause :in (get node 4)))
+        (let ((next (label! fc)))
+          (when (get clause 0)
+            (let ((f (in-vreg fc (value fc (get clause 0)))) (r (vreg! fc)))
+              (emit! fc [:call :value f [condition] r #f (fc :handlers) offset])
+              (falsy-jump fc r next)))
+          (bind-var fc (get clause 1) condition offset)
+          (emit! fc [:mov out (value fc (get clause 2))])
+          (emit! fc [:jump done])
+          (emit! fc [:label next])))
+      (ccall! fc h-raise [condition] nil offset))
+    (emit! fc [:label done])
+    out))
+
+(def (cleanup-form fc node)
+  (let ((offset (node-offset node)))
+    (let ((f (in-vreg fc (value fc (get node 2)))))
+      (ccall! fc h-cleanup [f [:imm (if (get node 3) word-true word-false)]] (vreg! fc) offset)
+      (let ((r (fresh-copy fc (value fc (get node 4)))))
+        (ccall! fc h-run-cleanup [] (vreg! fc) offset)
+        r))))
+
+;; Store values into native.args for a helper that takes them there.
+(def (store-args fc values)
+  (let ((a (raw! fc)))
+    (emit! fc [:mov a [:state sf-args]])
+    (for ((i :range (length values)))
+      (emit! fc [:mov [:mem a (* 8 i)] (get values i)]))))
+
+(def (handlers-form fc node)
+  (let ((offset (node-offset node)) (values []))
+    (for ((pair :in (get node 2)))
+      (push! values (in-vreg fc (value fc (get pair 0))))
+      (push! values (in-vreg fc (value fc (get pair 1)))))
+    (let ((n (length (get node 2))))
+      (store-args fc values)
+      (ccall! fc h-handlers [[:imm n]] (vreg! fc) offset)
+      (let ((r (fresh-copy fc (value fc (get node 3)))))
+        (ccall! fc h-unhandlers [[:imm n]] (vreg! fc) offset)
+        r))))
+
+(def (params-form fc node)
+  (let ((offset (node-offset node)))
+    (for ((pair :in (get node 2)))
+      (let ((p (in-vreg fc (value fc (get pair 0)))))
+        (let ((v (in-vreg fc (value fc (get pair 1)))))
+          (ccall! fc h-bind-param [p v] (vreg! fc) offset))))
+    (let ((r (fresh-copy fc (value fc (get node 3)))))
+      (ccall! fc h-unbind-params [[:imm (length (get node 2))]] (vreg! fc) offset)
+      r)))
+
+(def (restarts-form fc node)
+  (let ((offset (node-offset node)) (values []) (target (label! fc)) (done (label! fc))
+        (out (vreg! fc)) (pc (raw! fc)) (sp (raw! fc)))
+    (for ((clause :in (get node 2)))
+      (for ((part :in clause)) (push! values (in-vreg fc (value fc part)))))
+    (store-args fc values)
+    (emit! fc [:addr pc target])
+    (emit! fc [:spbase sp])
+    (ccall! fc h-restarts [[:imm (length (get node 2))] pc sp] (vreg! fc) offset)
+    (let ((r (with-handler fc target (fn () (value fc (get node 3))))))
+      (emit! fc [:mov out r])
+      (emit! fc [:jump done]))
+    (emit! fc [:label target])
+    (let ((transfer (vreg! fc)))
+      (emit! fc [:landing transfer])
+      (ccall! fc h-restart-apply [transfer] out offset))
+    (emit! fc [:label done])
+    (ccall! fc h-end-restarts [] (vreg! fc) offset)
+    out))
+
+;; --- Functions -----------------------------------------------------------------
+
+;; Lower a function. Its entry defines the closure and parameters; emit
+;; turns [:entry] into the arity check and the moves from where the caller
+;; left them.
+(def (lower-function u info)
+  (let ((fc (make-context u info)))
+    (put! fc :closure (vreg! fc))
+    (put! fc :params (list-to-array (map (fn (v) (vreg! fc)) (array-to-list (info :params)))))
+    (put! fc :optional-regs
+          (list-to-array (map (fn (o) (vreg! fc)) (array-to-list (info :optionals)))))
+    (put! fc :rest-reg (and (info :rest) (vreg! fc)))
+    (emit! fc [:entry])
+    (poll fc)
+    (when (info :self) (put! (fc :locs) ((info :self) :id) [:reg (fc :closure)]))
+    (let ((offset (info :offset)))
+      (for ((i :range (length (info :params))))
+        (bind-param fc (get (info :params) i) (get (fc :params) i) offset))
+      (for ((i :range (length (info :optionals))))
+        (let ((pair (get (info :optionals) i)) (v (get (fc :optional-regs) i)) (skip (label! fc)))
+          (emit! fc [:cmpj :ne v [:imm word-unbound] skip])
+          (emit! fc [:mov v (value fc (get pair 1))])
+          (emit! fc [:label skip])
+          (bind-param fc (get pair 0) v offset)))
+      (when (info :rest) (bind-param fc (info :rest) (fc :rest-reg) offset)))
+    (tail fc (info :body) nil)
+    fc))
+
+(def (bind-param fc var v offset)
+  (if (boxed? var)
+      (put! (fc :locs) (var :id) [:box (make-box fc v offset)])
+      (put! (fc :locs) (var :id) [:reg v])))
+
+;; Lower a converted top-level form and every function inside it. Returns
+;; the unit and the function contexts in index order.
+(def (lower-top info)
+  (let ((u (make-unit)) (contexts []))
+    (function! u info)
+    (let loop ()
+      (unless (= (length (u :pending)) 0)
+        (let ((next (get (u :pending) 0)))
+          (put! u :pending (list-to-array (cdr (array-to-list (u :pending)))))
+          (push! contexts (lower-function u next))
+          (loop))))
+    [u contexts]))

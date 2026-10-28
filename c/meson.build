@@ -26,6 +26,7 @@ runtime_args = [
   '-DOTIUM_LIBRARY_DIR="@0@"'.format(source_root / 'lib'),
   '-DOTIUM_BOOTSTRAP_FILE="@0@"'.format(source_root / 'c/src/primitives.ot'),
   '-DOTIUM_DEV_FILE="@0@"'.format(source_root / 'c/src/dev.ot'),
+  '-DOTIUM_BOOT_FILE="@0@"'.format(build_root / 'otium.boot'),
   '-DOTIUM_TEST_FIXTURE_DIR="@0@"'.format(build_root),
   '-DOTIUM_TEST_LIBRARY_EXTENSION="@0@"'.format(extension),
 ]
@@ -43,6 +44,8 @@ endif
 native_supported = host_machine.cpu_family() == 'x86_64' and host_machine.system() == 'linux'
 native_enabled = get_option('native').require(native_supported,
   error_message: 'native code needs x86-64 Linux').allowed()
+# The amalgamation is the VM alone.
+amalgamation_args = runtime_args
 if native_enabled
   runtime_args += '-DOTIUM_NATIVE'
 endif
@@ -50,9 +53,19 @@ endif
 # Position-independent code costs a few percent in the VM, and the runtime is
 # only linked statically. The development server's socket transport lives in
 # native/dev.
-libotium = static_library('otium', runtime_sources,
-  c_args: runtime_args, include_directories: [runtime_include, native_include],
-  dependencies: runtime_deps, link_whole: dev.get_static_lib(), override_options: runtime_options,
+# Native code: native.c, and sljit built with its own conventions.
+native_sources = []
+runtime_link = [dev.get_static_lib()]
+sljit_include = include_directories('../native/vendor/sljit')
+if native_enabled
+  native_sources = files('src/native.c', 'src/fasl.c')
+  runtime_link += static_library('otium-sljit', 'src/sljit.c',
+    include_directories: [sljit_include, include_directories('src')],
+    override_options: ['warning_level=0', 'werror=false'], pic: false, kwargs: no_implicit)
+endif
+libotium = static_library('otium', runtime_sources + native_sources,
+  c_args: runtime_args, include_directories: [runtime_include, native_include, sljit_include],
+  dependencies: runtime_deps, link_whole: runtime_link, override_options: runtime_options,
   pic: false, kwargs: no_implicit)
 libotium_dep = declare_dependency(link_with: libotium,
   include_directories: include_directories('include'), dependencies: runtime_deps)
@@ -63,7 +76,7 @@ amalgamation = custom_target('amalgamation',
   command: [python, files('tools/amalgamate.py'), '@OUTDIR@', '@INPUT@'],
   depend_files: files('include/otium.h', 'src/main.c', 'src/options.inc') + runtime_headers)
 otium_amalgamation = executable('otium-amalgamation', amalgamation[0], amalgamation[2],
-  c_args: runtime_args, include_directories: native_include,
+  c_args: amalgamation_args, include_directories: native_include,
   link_with: [dev.get_static_lib(), line.get_static_lib()], dependencies: runtime_deps,
   override_options: runtime_options, build_by_default: false)
 

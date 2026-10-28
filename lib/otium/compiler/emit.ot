@@ -1,0 +1,409 @@
+;; emit.ot -- allocated virtual code to the bridge's instruction stream.
+;;
+;; The stream format is described in c/src/native.c. This file places each
+;; virtual register where alloc put it, expands function entries and calls
+;; into the moves the calling convention needs, saves registers live across
+;; each call into the frame and reloads them after, and records a frame
+;; descriptor for every call: the slots holding live values.
+;;
+;; A frame's slots: spill slots, then one save slot per register in the
+;; pool, a slot for breaking move cycles, a slot holding an unknown callee's
+;; entry, and staging slots for the parameters of variadic functions.
+
+(ns otium.compiler.emit)
+
+;; Stream opcodes and operand kinds, as in native.c.
+(def- ns-end 0)
+(def- ns-func 1)
+(def- ns-enter 2)
+(def- ns-label 3)
+(def- ns-mov 4)
+(def- ns-op2 5)
+(def- ns-op2u 6)
+(def- ns-cmpj 7)
+(def- ns-jump 8)
+(def- ns-jcond 9)
+(def- ns-flags 10)
+(def- ns-call 11)
+(def- ns-ccall 12)
+(def- ns-ret 13)
+(def- ns-addr 14)
+(def- ns-spbase 15)
+(def- ns-poll 16)
+
+(def- op-codes {:add 0 :sub 1 :mul 2 :and 3 :or 4 :xor 5 :shl 6 :lshr 7 :ashr 8})
+(def- conditions {:eq 0 :ne 1 :lt 2 :ge 3 :gt 4 :le 5 :slt 6 :sge 7 :sgt 8 :sle 9
+                  :zero 0 :nonzero 1})
+
+(def- scratch 6)
+(def- pool [0 1 2 3 4 5 7 8 9 10])
+(def- kind-closure 3)
+(def- word-unbound 18)
+(def- h-arity 3)
+(def- h-rest 9)
+(def- sf-args 3)
+(def- sf-call-other 4)
+(def- sf-callee 6)
+(def- sf-argc 7)
+
+;; --- Bytes -------------------------------------------------------------------
+
+(def (make-buffer) {:bytes (make-bytevector 1024 0) :n 0})
+
+(def (byte! buf b)
+  (let ((bytes (buf :bytes)) (n (buf :n)))
+    (when (= n (bytevector-length bytes))
+      (let ((bigger (make-bytevector (* 2 n) 0)))
+        (bytevector-copy! bigger 0 bytes)
+        (put! buf :bytes bigger)
+        (set! bytes bigger)))
+    (bytevector-u8-set! bytes n b)
+    (put! buf :n (+ n 1))))
+
+(def (unsigned! buf n)
+  (if (< n 128)
+      (byte! buf n)
+      (begin
+        (byte! buf (+ 128 (remainder n 128)))
+        (unsigned! buf (quotient n 128)))))
+
+;; Signed LEB128, by arithmetic shifts so large values never overflow.
+(def (signed! buf n)
+  (let ((low (bitwise-and n 127)) (rest (bitwise-arithmetic-shift n -7)))
+    (if (or (and (= rest 0) (= 0 (bitwise-and low 64)))
+            (and (= rest -1) (not (= 0 (bitwise-and low 64)))))
+        (byte! buf low)
+        (begin
+          (byte! buf (+ 128 low))
+          (signed! buf rest)))))
+
+(def (buffer-bytes buf) (bytevector-copy (buf :bytes) 0 (buf :n)))
+
+;; --- Operands ----------------------------------------------------------------
+
+;; Physical operands: [:reg r], [:slot i], and the virtual code's own kinds
+;; with registers in place of virtual registers.
+(def (base-code base)
+  (cond ((eq? base :rt) 11)
+        ((eq? base :alloc) 12)
+        (else base)))
+
+(def (operand! buf op)
+  (case (get op 0)
+    ((:reg) (unsigned! buf 0) (unsigned! buf (get op 1)))
+    ((:imm) (unsigned! buf 1) (signed! buf (get op 1)))
+    ((:mem) (unsigned! buf 2) (unsigned! buf (base-code (get op 1))) (signed! buf (get op 2)))
+    ((:slot) (unsigned! buf 4) (unsigned! buf (get op 1)))
+    ((:cell) (unsigned! buf 5) (unsigned! buf (get op 1)) (unsigned! buf (get op 2)))
+    ((:const) (unsigned! buf 6) (unsigned! buf (get op 1)))
+    ((:state) (unsigned! buf 7) (unsigned! buf (get op 1)))
+    ((:rt) (unsigned! buf 8))
+    ((:alloc) (unsigned! buf 9))
+    ((:cellidx) (unsigned! buf 10) (unsigned! buf (get op 1)))
+    ((:fix) (unsigned! buf 11) (signed! buf (get op 1)))
+    (else (error "native compiler: bad operand" op))))
+
+;; --- Functions ---------------------------------------------------------------
+
+;; The emitter for one function: its context, the stream, and the unit's
+;; descriptors.
+(def (frame-layout fc)
+  (let ((spills (fc :spills)) (info (fc :info)))
+    (let ((save spills))
+      (put! fc :save-base save)
+      (put! fc :swap (+ save (length pool)))
+      (put! fc :target (+ save (length pool) 1))
+      (put! fc :stage (+ save (length pool) 2))
+      (put! fc :slots (+ save (length pool) 2
+                          (if (simple-entry? info) 0 (+ 2 (length (info :params))
+                                                          (length (info :optionals)))))))))
+
+(def (simple-entry? info)
+  (and (<= (length (info :params)) 5) (= 0 (length (info :optionals))) (nil? (info :rest))))
+
+(def (save-slot fc r)
+  (let find-it ((i 0))
+    (if (= (get pool i) r) (+ (fc :save-base) i) (find-it (+ i 1)))))
+
+(def (location fc v)
+  (or (get (fc :location) v)
+      ;; A register never live anywhere still gets somewhere to go.
+      [:reg scratch]))
+
+;; The physical form of a virtual operand. A memory operand based on a spilled
+;; register loads the base into the scratch register first.
+(def (physical e op)
+  (let ((fc (e :fc)))
+    (cond ((int? op) (location fc op))
+          ((and (array? op) (eq? (get op 0) :mem) (int? (get op 1)))
+           (let ((loc (location fc (get op 1))))
+             (if (eq? (get loc 0) :reg)
+                 [:mem (get loc 1) (get op 2)]
+                 (begin
+                   (mov! e [:reg scratch] loc)
+                   [:mem scratch (get op 2)]))))
+          (else op))))
+
+(def (same? a b)
+  (and (eq? (get a 0) (get b 0)) (equal? a b)))
+
+(def (mov! e dst src)
+  (unless (same? dst src)
+    (let ((buf (e :buf)))
+      (unsigned! buf ns-mov)
+      (unsigned! buf 0)
+      (operand! buf dst)
+      (operand! buf src))))
+
+(def (op! e code . operands)
+  (let ((buf (e :buf)))
+    (unsigned! buf code)
+    (for ((o :in operands))
+      (if (int? o) (unsigned! buf o) (operand! buf o)))))
+
+(def (label-op! e label) (op! e ns-label label))
+
+;; Registers a source operand reads.
+(def (reads op)
+  (case (get op 0)
+    ((:reg) [(get op 1)])
+    ((:mem) (if (int? (get op 1)) [(get op 1)] []))
+    (else [])))
+
+;; Moves that happen at once: each destination gets its source's old value.
+;; Destinations are registers or memory; a cycle goes through the swap slot.
+(def (parallel-move! e moves)
+  (let ((pending (filter (fn (m) (not (same? (get m 0) (get m 1)))) moves)))
+    (let loop ()
+      (unless (null? pending)
+        (let ((ready (find (fn (m)
+                             (or (not (eq? (get (get m 0) 0) :reg))
+                                 (not (find (fn (other)
+                                              (and (not (eq? other m))
+                                                   (memq (get (get m 0) 1) (array-to-list (reads (get other 1))))))
+                                            pending))))
+                           pending)))
+          (if ready
+              (begin
+                (mov! e (get ready 0) (get ready 1))
+                (set! pending (filter (fn (m) (not (eq? m ready))) pending)))
+              (let ((m (car pending)) (swap [:slot ((e :fc) :swap)]))
+                (mov! e swap (get m 1))
+                (set! pending (cons [(get m 0) swap] (cdr pending))))))
+        (loop)))))
+
+;; --- Descriptors ---------------------------------------------------------------
+
+;; A descriptor for the call at instruction i: where every value live across it
+;; is kept during the call.
+(def (descriptor! e i offset)
+  (let ((fc (e :fc)) (slots []))
+    (for ((v :in (or (get (fc :live) i) [])))
+      (when (get (fc :raw) v) (error "native compiler: raw value live across a call" v))
+      (let ((loc (location fc v)))
+        (push! slots (if (eq? (get loc 0) :reg) (save-slot fc (get loc 1)) (get loc 1)))))
+    (let ((descriptors ((e :unit) :descriptors)))
+      (push! descriptors [((fc :info) :index) slots offset])
+      (- (length descriptors) 1))))
+
+(def (save-live! e i)
+  (let ((fc (e :fc)))
+    (for ((v :in (or (get (fc :live) i) [])))
+      (let ((loc (location fc v)))
+        (when (eq? (get loc 0) :reg) (mov! e [:slot (save-slot fc (get loc 1))] loc))))))
+
+(def (restore-live! e i)
+  (let ((fc (e :fc)))
+    (for ((v :in (or (get (fc :live) i) [])))
+      (let ((loc (location fc v)))
+        (when (eq? (get loc 0) :reg) (mov! e loc [:slot (save-slot fc (get loc 1))]))))))
+
+;; --- Entries ------------------------------------------------------------------
+
+(def (scratch-count fc)
+  (let ((highest 6))
+    (for ((v :in (keys (fc :location))))
+      (let ((loc (get (fc :location) v)))
+        (when (and (eq? (get loc 0) :reg) (> (get loc 1) highest)) (set! highest (get loc 1)))))
+    (+ highest 1)))
+
+(def (entry! e)
+  (let ((fc (e :fc)) (info ((e :fc) :info)) (u (e :unit)))
+    (let ((required (length (info :params))) (optional (length (info :optionals)))
+          (arity (e :arity-label)))
+      (if (simple-entry? info)
+          (begin
+            (op! e ns-cmpj (get (e :conditions) :ne) [:reg 0] [:imm required] arity)
+            (parallel-move! e (cons [(location fc (fc :closure)) [:reg 1]]
+                                    (array-to-list
+                                     (map (fn (i) [(location fc (get (fc :params) i)) [:reg (+ 2 i)]])
+                                          (range required))))))
+          (let ((stage (fc :stage)))
+            (op! e ns-cmpj (get (e :conditions) :lt) [:reg 0] [:imm required] arity)
+            (unless (info :rest)
+              (op! e ns-cmpj (get (e :conditions) :gt) [:reg 0] [:imm (+ required optional)] arity))
+            (mov! e [:state sf-argc] [:reg 0])
+            (mov! e [:state sf-callee] [:reg 1])
+            (mov! e [:reg 0] [:state sf-args])
+            (dotimes (i 5) (mov! e [:mem 0 (* 8 i)] [:reg (+ 2 i)]))
+            (when (info :rest)
+              (mov! e [:reg 1] [:imm (+ required optional)])
+              (let ((d (let ((descriptors (u :descriptors)))
+                         (push! descriptors [(info :index) [] (info :offset)])
+                         (- (length descriptors) 1))))
+                (op! e ns-ccall h-rest 1 d))
+              (mov! e [:slot stage] [:reg 0]))
+            (mov! e [:reg 0] [:state sf-args])
+            (mov! e [:slot (+ stage 1)] [:state sf-callee])
+            (dotimes (i required) (mov! e [:slot (+ stage 2 i)] [:mem 0 (* 8 i)]))
+            (dotimes (i optional)
+              (let ((k (+ required i)) (slot [:slot (+ stage 2 required i)]))
+                (mov! e slot [:imm word-unbound])
+                (let ((l (fresh-label! e)))
+                  (op! e ns-cmpj (get (e :conditions) :le) [:state sf-argc] [:imm k] l)
+                  (mov! e slot [:mem 0 (* 8 k)])
+                  (label-op! e l))))
+            (mov! e (location fc (fc :closure)) [:slot (+ stage 1)])
+            (dotimes (i required)
+              (mov! e (location fc (get (fc :params) i)) [:slot (+ stage 2 i)]))
+            (dotimes (i optional)
+              (mov! e (location fc (get (fc :optional-regs) i)) [:slot (+ stage 2 required i)]))
+            (when (info :rest) (mov! e (location fc (fc :rest-reg)) [:slot stage])))))))
+
+(def (fresh-label! e)
+  (let ((u (e :unit)))
+    (let ((n (u :labels)))
+      (put! u :labels (+ n 1))
+      n)))
+
+;; --- Instructions -----------------------------------------------------------------
+
+(def (call! e i ins)
+  (let ((fc (e :fc)) (kind (get ins 1)) (callee (get ins 2)) (args (get ins 3))
+        (dst (get ins 4)) (tail (get ins 5)) (offset (get ins 7)))
+    (unless tail (save-live! e i))
+    ;; An unknown callee's entry: its code word if it is a closure, else the
+    ;; stub for everything else.
+    (when (eq? kind :value)
+      (let ((other (fresh-label! e)) (target [:slot (fc :target)]))
+        (mov! e [:reg scratch] (location fc callee))
+        (mov! e target [:state sf-call-other])
+        (op! e ns-op2u (get op-codes :and) 1 [:reg scratch] [:imm 7])
+        (op! e ns-jcond (get conditions :nonzero) other)
+        (mov! e [:slot (fc :swap)] [:reg scratch])
+        (op! e ns-mov 1 [:reg scratch] [:mem scratch 12])
+        (op! e ns-cmpj (get conditions :ne) [:reg scratch] [:imm kind-closure] other)
+        (mov! e [:reg scratch] [:slot (fc :swap)])
+        (mov! e target [:mem scratch 16])
+        (label-op! e other)))
+    ;; Arguments past the fifth go to native.args.
+    (when (> (length args) 5)
+      (mov! e [:reg scratch] [:state sf-args])
+      (for ((k :range 5 (length args)))
+        (mov! e [:mem scratch (* 8 k)] (physical e (get args k)))))
+    (let ((moves '()))
+      (set! moves (list [[:reg 0] [:imm (length args)]]
+                        [[:reg 1] (case kind
+                                    ((:value) (location fc callee))
+                                    ((:cell) [:cell callee 0])
+                                    (else [:imm callee]))]))
+      (dotimes (k (min 5 (length args)))
+        (set! moves (cons [[:reg (+ 2 k)] (physical e (get args k))] moves)))
+      (parallel-move! e moves))
+    (let ((src (case kind
+                 ((:value) [:slot (fc :target)])
+                 ((:cell) [:cell callee 1])
+                 (else [:state sf-call-other]))))
+      (if tail
+          (op! e ns-call 1 src 0)
+          (begin
+            (op! e ns-call 0 src (descriptor! e i offset))
+            (when dst (mov! e (location fc dst) [:reg 0]))
+            (restore-live! e i))))))
+
+(def (ccall! e i ins)
+  (let ((fc (e :fc)) (helper (get ins 1)) (args (get ins 2)) (dst (get ins 3)) (offset (get ins 5)))
+    (save-live! e i)
+    (let ((moves '()))
+      (dotimes (k (length args))
+        (set! moves (cons [[:reg (+ 1 k)] (physical e (get args k))] moves)))
+      (parallel-move! e moves))
+    (op! e ns-ccall helper (length args) (descriptor! e i offset))
+    (when (int? dst) (mov! e (location fc dst) [:reg 0]))
+    (restore-live! e i)))
+
+(def (instruction! e i ins)
+  (let ((fc (e :fc)))
+    (case (get ins 0)
+      ((:mov) (let ((src (physical e (get ins 2)))) (mov! e (physical e (get ins 1)) src)))
+      ((:load8)
+       (let ((src (physical e (get ins 2))) (dst (physical e (get ins 1))))
+         (op! e ns-mov 1 dst src)))
+      ((:op2)
+       (let ((a (physical e (get ins 4))) (b (physical e (get ins 5))))
+         (op! e ns-op2 (get op-codes (get ins 1)) (flags (get ins 2)) (physical e (get ins 3)) a b)))
+      ((:op2u)
+       (let ((a (physical e (get ins 3))) (b (physical e (get ins 4))))
+         (op! e ns-op2u (get op-codes (get ins 1)) (flags (get ins 2)) a b)))
+      ((:cmpj)
+       (let ((a (physical e (get ins 2))) (b (physical e (get ins 3))))
+         (op! e ns-cmpj (get conditions (get ins 1)) a b (get ins 4))))
+      ((:jcond) (op! e ns-jcond (get conditions (get ins 1)) (get ins 2)))
+      ((:jump) (op! e ns-jump (get ins 1)))
+      ((:label) (label-op! e (get ins 1)))
+      ((:poll) (op! e ns-poll (get ins 1)))
+      ((:addr) (op! e ns-addr (location fc (get ins 1)) (get ins 2)))
+      ((:spbase)
+       (op! e ns-spbase (location fc (get ins 1)))
+       (signed! (e :buf) 0))
+      ((:landing)
+       (mov! e (location fc (get ins 1)) [:reg 0])
+       (restore-live! e i))
+      ((:ret) (op! e ns-ret (physical e (get ins 1))))
+      ((:entry) (entry! e))
+      ((:call) (call! e i ins))
+      ((:ccall) (ccall! e i ins))
+      (else (error "native compiler: unknown instruction" ins)))))
+
+(def (flags f)
+  (cond ((eq? f :zero) 1)
+        ((or (nil? f) (eq? f 0)) 0)
+        (else f)))
+
+(def (function! e fc)
+  (let ((info (fc :info)) (buf (e :buf)))
+    (frame-layout fc)
+    (put! e :fc fc)
+    (put! e :arity-label (fresh-label! e))
+    (op! e ns-func (info :index))
+    (label-op! e (info :xep))
+    (op! e ns-enter (scratch-count fc) (fc :slots))
+    (let ((code (fc :code)))
+      (dotimes (i (length code)) (instruction! e i (get code i))))
+    ;; Wrong argument counts: (arity-error closure argc).
+    (label-op! e (e :arity-label))
+    (mov! e [:reg 2] [:reg 0])
+    (let ((descriptors ((e :unit) :descriptors)))
+      (push! descriptors [nil [] nil])
+      (op! e ns-ccall h-arity 2 (- (length descriptors) 1)))))
+
+;; The stream and tables of a unit, from its allocated function contexts.
+(def (emit-unit u contexts)
+  (put! u :descriptors [])
+  (let ((e {:unit u :buf (make-buffer) :conditions conditions}))
+    (for ((fc :in contexts)) (function! e fc))
+    (op! e ns-end)
+    (let ((body (buffer-bytes (e :buf))) (head (make-buffer)))
+      ;; The label count goes first.
+      (unsigned! head (u :labels))
+      (let ((stream (bytevector-append (buffer-bytes head) body)))
+        [stream
+         (u :literals)
+         (u :cells)
+         (list-to-array
+          (map (fn (info)
+                 [(info :name) (length (info :params)) (length (info :optionals))
+                  (if (info :rest) #t #f) (info :offset)])
+               (array-to-list (u :functions))))
+         (u :descriptors)
+         (u :statics)]))))

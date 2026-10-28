@@ -132,7 +132,7 @@ static void port_host(ot_state* rt, ot_value port) {
 
 static void host_begin(ot_state* rt, ot_value port) {
   rt->host_io_active = true;
-  rt->heap.ready = rt->heap.used;
+  oti_heap_set_ready(&rt->heap, rt->heap.used);
   port_object(port)->busy = true;
 }
 

@@ -8,6 +8,9 @@
 #ifdef OTIUM_NATIVE
 #include <sys/mman.h>
 #endif
+#ifndef OTIUM_BOOT_FILE
+#define OTIUM_BOOT_FILE "otium.boot"
+#endif
 #ifndef OTIUM_BOOTSTRAP_FILE
 #define OTIUM_BOOTSTRAP_FILE "c/src/primitives.ot"
 #endif
@@ -293,13 +296,25 @@ bool ot_set_load_hook(ot_state* rt, const char* name) { return set_hook(rt, &rt-
 
 void oti_set_global(ot_state* rt, uint32_t cell, ot_value value) {
   rt->globals[cell].value = value;
+#ifdef OTIUM_NATIVE
+  if (rt->native_mode) rt->globals[cell].entry = oti_native_cell_entry(rt, value);
+#endif
 }
 
-/* Global cells are roots. */
+/* Global cells are roots, and in native processes so are native frames. */
 static void visit_roots(void* data, oti_root_visitor visit, void* context) {
   ot_state* rt = data;
   for (size_t i = 0; i < rt->global_count; i++) visit(context, &rt->globals[i].value);
+#ifdef OTIUM_NATIVE
+  if (rt->native_mode) oti_native_visit_roots(rt, visit, context);
+#endif
 }
+
+#ifndef OTIUM_NATIVE
+oti_function* oti_closure_fn(ot_state* rt, ot_value closure) {
+  return rt->functions[oti_closure_function(closure)];
+}
+#endif
 
 ot_value oti_alloc_slow(ot_state* rt, uint32_t kind, uint32_t fields, size_t bytes) {
   if (!oti_host_entry(rt)) return 0;
@@ -307,7 +322,7 @@ ot_value oti_alloc_slow(ot_state* rt, uint32_t kind, uint32_t fields, size_t byt
   size_t collections = rt->heap.collections;
   if (rt->stress_gc) oti_heap_collect(&rt->heap);
   ot_value v = oti_heap_alloc(&rt->heap, kind, fields, bytes);
-  if (rt->stress_gc) rt->heap.ready = rt->heap.used;
+  if (rt->stress_gc) oti_heap_set_ready(&rt->heap, rt->heap.used);
   if (rt->heap.collections != collections) {
     oti_foreign_collect(rt);
     if (rt->stack_stale > rt->sp) rt->stack_stale = rt->sp;
@@ -539,6 +554,13 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
     return NULL;
   }
   rt->permanent_constants = rt->constant_count;
+#ifdef OTIUM_NATIVE
+  const char* native = getenv("OTIUM_NATIVE");
+  if (native && *native && strcmp(native, "0") && !oti_native_init(rt)) {
+    ot_destroy(rt);
+    return NULL;
+  }
+#endif
   return rt;
 }
 
@@ -555,6 +577,10 @@ void ot_destroy(ot_state* rt) {
   oti_foreign_destroy(rt);
   oti_modules_destroy(rt);
   oti_natives_destroy(rt);
+#ifdef OTIUM_NATIVE
+  oti_boot_destroy(rt);
+  oti_native_destroy(rt);
+#endif
   for (size_t i = 0; i < rt->function_count; i++) {
     oti_function* f = rt->functions[i];
     oti_free_function(f);
@@ -600,6 +626,32 @@ static bool document(ot_state* rt, uint32_t index, const oti_ast* doc) {
   rt->global_info[index].doc = (oti_documentation){text, length};
   return true;
 }
+
+#ifdef OTIUM_NATIVE
+/* Compile a form with the native compiler, loading it on first use, and run
+ * it. */
+static bool native_evaluate(ot_state* rt, const oti_ast* form, ot_value* result) {
+  uint32_t space = oti_namespace(rt, "otium.compiler", 14);
+  if (space == UINT32_MAX) return false;
+  uint32_t cell = oti_binding_global(rt, space, "install-top", 11, false);
+  if (cell == UINT32_MAX || oti_unbound(oti_global_value(rt, cell))) {
+    if (!oti_load_module(rt, space)) return false;
+    cell = oti_binding_global(rt, space, "install-top", 11, false);
+    if (cell == UINT32_MAX || oti_unbound(oti_global_value(rt, cell)))
+      return oti_error(rt, "native compiler is not available");
+  }
+  ot_value datum = oti_ast_datum(rt, form, true);
+  if (!datum || !oti_native_args(rt, 1)) return false;
+  rt->native.args[0] = datum;
+  bool compiling = rt->compiling;
+  rt->compiling = true;
+  ot_value thunk = oti_native_invoke(rt, oti_global_value(rt, cell), 1);
+  rt->compiling = compiling;
+  if (!thunk || oti_failed(rt)) return false;
+  *result = oti_native_invoke(rt, thunk, 0);
+  return *result != 0;
+}
+#endif
 
 /* Top-level begin forms are evaluated in order, so declarations from earlier
  * forms are visible before later forms are compiled. */
@@ -694,14 +746,21 @@ static bool evaluate_raw(ot_state* rt, const oti_ast* form, ot_value* result) {
     replacement.as.list.first = &head;
     form = &replacement;
   }
-  bool compiling = rt->compiling;
-  rt->compiling = true;
-  ok = oti_compile(rt, form, &function);
-  rt->compiling = compiling;
-  /* Reclaim unreachable code at the next idle boundary. Macro execution can
-   * retain constants and nested eval closures even if this compile fails. */
-  if (!ok || oti_failed(rt)) return false;
-  if (!oti_execute(rt, function, result)) return false;
+#ifdef OTIUM_NATIVE
+  if (rt->native_mode) {
+    if (!native_evaluate(rt, form, result)) return false;
+  } else
+#endif
+  {
+    bool compiling = rt->compiling;
+    rt->compiling = true;
+    ok = oti_compile(rt, form, &function);
+    rt->compiling = compiling;
+    /* Reclaim unreachable code at the next idle boundary. Macro execution can
+     * retain constants and nested eval closures even if this compile fails. */
+    if (!ok || oti_failed(rt)) return false;
+    if (!oti_execute(rt, function, result)) return false;
+  }
   if (form->kind == AST_LIST) {
     const oti_ast* definition = form->as.list.first;
     if (oti_ast_symbol(definition, "def") || oti_ast_symbol(definition, "def-") ||
@@ -720,6 +779,10 @@ static bool evaluate_raw(ot_state* rt, const oti_ast* form, ot_value* result) {
   }
   if (once) *result = OT_NIL;
   return true;
+}
+
+bool oti_evaluate_form(ot_state* rt, const oti_ast* form, ot_value* result) {
+  return evaluate_raw(rt, form, result);
 }
 
 static bool evaluate_expanded(ot_state* rt, const oti_ast* form, ot_value* result) {
@@ -809,7 +872,7 @@ static void source_close(ot_state* rt, intptr_t handle) {
 static int source_open(ot_state* rt, const char* path, intptr_t* handle) {
   if (!rt->io_host_set) return ENOSYS;
   rt->host_io_active = true;
-  rt->heap.ready = rt->heap.used;
+  oti_heap_set_ready(&rt->heap, rt->heap.used);
   int error = rt->io_host.open(rt->io_userdata, path, OT_IO_READ, handle);
   rt->host_io_active = rt->host_io_reentry = false;
   return error;
@@ -817,7 +880,7 @@ static int source_open(ot_state* rt, const char* path, intptr_t* handle) {
 
 static long source_read(ot_state* rt, intptr_t handle, char* bytes, size_t length) {
   rt->host_io_active = true;
-  rt->heap.ready = rt->heap.used;
+  oti_heap_set_ready(&rt->heap, rt->heap.used);
   long n = rt->io_host.read(rt->io_userdata, handle, (uint8_t*)bytes, length);
   rt->host_io_active = rt->host_io_reentry = false;
   return n > (long)length ? -EIO : n;
@@ -825,7 +888,7 @@ static long source_read(ot_state* rt, intptr_t handle, char* bytes, size_t lengt
 
 static void source_close(ot_state* rt, intptr_t handle) {
   rt->host_io_active = true;
-  rt->heap.ready = rt->heap.used;
+  oti_heap_set_ready(&rt->heap, rt->heap.used);
   rt->io_host.close(rt->io_userdata, handle);
   rt->host_io_active = rt->host_io_reentry = false;
 }
@@ -903,9 +966,35 @@ static char* library_path(ot_state* rt, const char* directory, const char* file)
   return path;
 }
 
+#ifdef OTIUM_NATIVE
+/* A native process loads the compiled expander and core together. */
+static bool load_boot(ot_state* rt) {
+  const char* path = getenv("OTIUM_BOOT");
+  if (!path || !*path) path = OTIUM_BOOT_FILE;
+  if (!oti_classes_init(rt) || !oti_load_boot(rt, path)) return false;
+  rt->shared_expander = rt->core_loaded = true;
+  /* Programs compiled ahead of time, for testing the compiler. */
+  const char* program = getenv("OTIUM_FASL");
+  if (program && *program && !oti_load_fasl(rt, program)) {
+    oti_error_record* e = &rt->error;
+    fprintf(stderr, "error: %s\n", e->message);
+    for (size_t i = 0; i < e->frame_count; i++) {
+      const char* file = e->frames[i].source < rt->source_count ? rt->sources[e->frames[i].source] : "?";
+      fprintf(stderr, "  at %s:%u %s\n", file ? file : "?", e->frames[i].offset,
+              e->frames[i].name ? e->frames[i].name : "");
+    }
+    exit(1);
+  }
+  return true;
+}
+#endif
+
 bool ot_load_expander(ot_state* rt, const char* directory) {
   if (!oti_host_entry(rt)) return false;
   if (rt->shared_expander) return true;
+#ifdef OTIUM_NATIVE
+  if (rt->native_mode) return load_boot(rt);
+#endif
   if (!oti_classes_init(rt)) return false;
   char* path = library_path(rt, directory, "otium/expander.ot");
   if (!path) return false;
@@ -933,6 +1022,9 @@ bool ot_load_expander(ot_state* rt, const char* directory) {
 bool ot_load_core(ot_state* rt, const char* directory) {
   if (!oti_host_entry(rt)) return false;
   if (rt->core_loaded) return true;
+#ifdef OTIUM_NATIVE
+  if (rt->native_mode) return load_boot(rt) && ot_add_load_path(rt, directory);
+#endif
   if (!ot_load_expander(rt, directory) || !ot_add_load_path(rt, directory)) return false;
   char* path = library_path(rt, directory, "otium/core.ot");
   if (!path) return false;
@@ -1077,7 +1169,7 @@ ot_form_status ot_scan_form(const char* source, size_t length, size_t start, siz
 
 void ot_gc_stress(ot_state* rt, bool enabled) {
   rt->stress_gc = enabled;
-  rt->heap.ready = rt->heap.used;
+  oti_heap_set_ready(&rt->heap, rt->heap.used);
 }
 
 static void print_value(FILE* out, ot_value v, unsigned depth) {

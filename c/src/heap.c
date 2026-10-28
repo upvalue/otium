@@ -47,6 +47,7 @@ bool oti_heap_init(oti_heap* h, size_t capacity) {
 #endif
   h->capacity = h->limit = capacity;
   h->start = h->space[0];
+  h->end = h->start;
   return true;
 }
 
@@ -130,8 +131,9 @@ static void copy_live(oti_heap* h, const unsigned char* from, unsigned char* to)
   h->reclaimed_bytes += h->used - used;
   if (h->used > h->peak_used) h->peak_used = h->used;
   h->live_bytes = used;
-  h->used = h->filled = h->ready = used;
+  h->used = h->filled = used;
   h->start = to;
+  oti_heap_set_ready(h, used);
   h->collections++;
   h->copied_bytes += used;
 }
@@ -206,5 +208,6 @@ void oti_heap_fill(oti_heap* h) {
   size_t end = h->capacity - h->filled > OTI_FILL_CHUNK ? h->filled + OTI_FILL_CHUNK : h->capacity;
   ot_value* slot = (ot_value*)(h->start + h->filled);
   for (size_t i = 0, n = (end - h->filled) / sizeof(ot_value); i < n; i++) slot[i] = OT_NIL;
-  h->filled = h->ready = end;
+  h->filled = end;
+  oti_heap_set_ready(h, end);
 }

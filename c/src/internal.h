@@ -340,6 +340,22 @@ enum {
   B_DEV_NAMESPACE_NAMES,
   B_DEV_NAMESPACE_BINDINGS,
   B_DEV_EVAL_IN,
+  B_NATIVE_INSTALL,
+  B_NATIVE_CELL,
+  B_NATIVE_CELL_BUILTIN,
+  B_NATIVE_CELL_NAME,
+  B_NATIVE_NAMESPACE,
+  B_NATIVE_P,
+  B_SOURCE_OFFSET,
+  B_COMPILE_ERROR,
+  B_NATIVE_CELL_DEFINE,
+  B_NATIVE_CORE_CELL,
+  B_NATIVE_BUILTIN,
+  B_NATIVE_OBJECT_CLASS,
+  B_READ_FORMS,
+  B_SET_NAMESPACE,
+  B_SYMBOL_SERIAL,
+  B_EVALUATE,
   /* Compiler-only helpers have no name, so they aren't globals. */
   B_QQ_APPEND,
   B_EVAL_IN_NAMESPACE,
@@ -486,6 +502,10 @@ typedef struct {
   char* name;
   oti_source_point* points;
   size_t point_count, point_capacity;
+  /* Native functions have no code here: entry is their external entry point
+   * and offset the source offset of the form that made them. */
+  uintptr_t entry;
+  uint32_t offset;
 } oti_function;
 
 /* floor is the stack height when the frame was entered. pc is where the frame
@@ -537,6 +557,8 @@ enum {
 typedef struct oti_foreign_state oti_foreign_state;
 typedef struct oti_module_state oti_module_state;
 typedef struct oti_native_state oti_native_state;
+typedef struct oti_native_runtime oti_native_runtime;
+typedef struct oti_boot oti_boot;
 
 typedef struct {
   char* text;
@@ -621,7 +643,30 @@ typedef struct {
 
 #define OTI_ERROR_VALUE 3
 
+/* Native execution state. Trampolines and generated code address these
+ * fields at fixed offsets, so the block comes first in ot_state; native.c
+ * checks the offsets. */
+typedef struct {
+  /* The stack pointer of the native frame that last called into C. */
+  uintptr_t sp;
+  /* The innermost entry record a trampoline left on the stack, or 0. */
+  uintptr_t entry;
+  /* Function entries and loop back edges compare the stack pointer against
+   * this. ot_request_interrupt raises it so every check fails. */
+  uintptr_t limit;
+  uintptr_t stack_top;
+  /* Arguments past the fifth, and every argument where C hands a call to
+   * native code or back. Not a root; see oti_native_visit_roots. */
+  ot_value* args;
+  size_t depth;
+  /* A callee and argument count that C asks a stub to enter. Rooted. */
+  ot_value callee;
+  size_t argc;
+  size_t args_capacity;
+} oti_native_exec;
+
 struct ot_state {
+  oti_native_exec native;
   oti_heap heap;
   ot_value process_values[2];
   oti_roots process_roots;
@@ -704,6 +749,15 @@ struct ot_state {
   void* io_userdata;
   bool io_host_set, host_io_active, host_io_reentry;
   oti_foreign_state* foreign;
+  /* Native code: whether this process runs it, its code objects and stack,
+   * and the stubs cells and calls jump to (see native.c). */
+  bool native_mode;
+  oti_native_runtime* native_runtime;
+  uintptr_t native_stubs[3];
+  /* The boot file a native process started from (fasl.c). */
+  oti_boot* boot;
+  /* Set by ot_request_interrupt; native.limit is raised with it. */
+  volatile sig_atomic_t interrupt_requested;
 };
 
 #ifdef OTIUM_NATIVE
@@ -831,6 +885,9 @@ ot_value oti_evaluator(ot_state* rt, uint32_t space);
 ot_value oti_eval_value(ot_state* rt, ot_value value);
 oti_ast* oti_syntax_value(ot_state* rt, ot_value value, oti_arena* arena);
 ot_value oti_read_string(ot_state* rt, ot_value string);
+/* A form as data. With locate, lists carry their source offsets, as the
+ * expander sees them. */
+ot_value oti_ast_datum(ot_state* rt, const oti_ast* form, bool locate);
 oti_ast* oti_expand_form(ot_state* rt, const oti_ast* form, oti_arena* arena);
 bool oti_compile(ot_state* rt, const oti_ast* form, uint32_t* function);
 bool oti_execute(ot_state* rt, uint32_t function, ot_value* result);
@@ -888,6 +945,40 @@ static inline bool oti_collection(ot_value v) {
 }
 
 ot_value oti_collection_call(ot_state* rt, size_t callable, size_t first, size_t count);
+/* Callables the VM calls as C: builtins, records, instances, params,
+ * collections, foreign functions and natives. */
+bool oti_primitive_value(ot_value value);
+ot_value oti_call_primitive(ot_state* rt, size_t call, size_t argc);
+/* The function a closure runs, in either mode. NULL for runtime stubs. */
+oti_function* oti_closure_fn(ot_state* rt, ot_value closure);
+
+#ifdef OTIUM_NATIVE
+/* Native code (native.c). */
+bool oti_native_init(ot_state* rt);
+void oti_native_destroy(ot_state* rt);
+ot_value oti_native_install(ot_state* rt, size_t slot);
+ot_value oti_native_invoke(ot_state* rt, ot_value callee, size_t argc);
+ot_value oti_native_invoke_list(ot_state* rt, ot_value function, ot_value args);
+/* Make room for count arguments in native.args. */
+bool oti_native_args(ot_state* rt, size_t count);
+uintptr_t oti_native_cell_entry(ot_state* rt, ot_value value);
+void oti_native_visit_roots(ot_state* rt, oti_root_visitor visit, void* context);
+bool oti_native_mark_closure(ot_state* rt, ot_value closure, bool (*mark)(void*, uint32_t),
+                             void* context);
+void oti_native_sweep(ot_state* rt);
+bool oti_native_evaluator(ot_state* rt, ot_value v, uint32_t space);
+ot_value oti_native_make_evaluator(ot_state* rt, uint32_t space);
+_Noreturn void oti_native_raise(ot_state* rt);
+/* Boot files and fasls (fasl.c). */
+bool oti_load_boot(ot_state* rt, const char* path);
+bool oti_load_fasl(ot_state* rt, const char* path);
+bool oti_boot_module(ot_state* rt, const char* name, bool* found);
+void oti_boot_destroy(ot_state* rt);
+#endif
+/* Evaluate a form read at top level, as from a file (runtime.c). */
+bool oti_evaluate_form(ot_state* rt, const oti_ast* form, ot_value* result);
+/* Load a module by namespace, as require does without options. */
+bool oti_load_module(ot_state* rt, uint32_t space);
 void oti_foreign_collect(ot_state* rt);
 void oti_foreign_stats(const ot_state* rt, ot_stats* stats);
 bool oti_foreign_init(ot_state* rt);
@@ -1299,6 +1390,7 @@ static inline ot_value oti_cdr(ot_value pair) { return oti_as_pair(pair)->cdr; }
 /* Builtin tables, one per module. */
 extern const oti_builtin_def oti_bytes_builtins[], oti_class_builtins[], oti_collection_builtins[],
     oti_condition_builtins[], oti_dev_builtins[], oti_filesystem_builtins[], oti_foreign_builtins[],
+    oti_codegen_builtins[],
     oti_instance_builtins[], oti_numeric_builtins[], oti_port_builtins[], oti_process_builtins[],
     oti_record_builtins[], oti_reflection_builtins[], oti_restart_builtins[], oti_string_builtins[],
     oti_support_builtins[], oti_table_builtins[], oti_time_builtins[];

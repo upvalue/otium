@@ -1,0 +1,110 @@
+;; fasl.ot -- writing compiled code to files.
+;;
+;; A fasl holds compiled units and the directives a native process replays
+;; around them, read by c/src/fasl.c. After the magic "OTFASL01" comes a
+;; series of entries, each a tag byte and its data:
+;;
+;;   0 end                    1 unit datum           2 form datum
+;;   3 macro name doc         4 doc name private doc 5 defonce name
+;;   6 module name            7 end of module        8 namespace name
+;;   9 source path-or-nil
+;;
+;; A unit runs when loaded. A form is a declaration the runtime evaluates as
+;; it would from source: ns or require. macro makes the global just defined a
+;; macro; doc documents a definition; defonce skips the next entry when its
+;; name is already defined. A module section is skipped where it appears and
+;; loaded when something requires the module.
+;;
+;; Data are tagged too: 0 nil, 1 #t, 2 #f, 3 (), 4 integer, 5 float (as
+;; text), 6 char, 7 string, 8 symbol, 9 gensym (name and serial), 10 keyword,
+;; 11 list (count, items, tail), 12 array, 13 bytevector, 14 global cell
+;; (namespace and name), 15 eof, 16 the Object class. Integers are signed
+;; LEB128, counts unsigned.
+
+(ns otium.compiler.fasl
+  (:require (otium.compiler.emit :as emit)))
+
+(def (make-writer) {:buf (emit/make-buffer)})
+
+(def (u8! w b) (emit/byte! (w :buf) b))
+
+(def (count! w n) (emit/unsigned! (w :buf) n))
+
+(def (bytes! w bv)
+  (count! w (bytevector-length bv))
+  (dotimes (i (bytevector-length bv)) (u8! w (bytevector-u8-ref bv i))))
+
+(def (text! w s) (bytes! w (string->utf8 s)))
+
+(def (datum! w x)
+  (cond ((nil? x) (u8! w 0))
+        ((eq? x #t) (u8! w 1))
+        ((eq? x #f) (u8! w 2))
+        ((null? x) (u8! w 3))
+        ((int? x) (u8! w 4) (emit/signed! (w :buf) x))
+        ((float? x) (u8! w 5) (text! w (number->string x)))
+        ((char? x) (u8! w 6) (count! w (char->integer x)))
+        ((string? x) (u8! w 7) (text! w x))
+        ((symbol? x)
+         (let ((serial (%symbol-serial x)))
+           (if (= serial 0)
+               (begin (u8! w 8) (text! w (symbol->string x)))
+               (begin (u8! w 9) (text! w (symbol->string x)) (count! w serial)))))
+        ((keyword? x) (u8! w 10) (text! w (keyword->string x)))
+        ((pair? x)
+         (let ((items []) (tail x))
+           (while (pair? tail)
+             (push! items (car tail))
+             (set! tail (cdr tail)))
+           (u8! w 11)
+           (count! w (length items))
+           (for ((item :in items)) (datum! w item))
+           (datum! w tail)))
+        ((array? x)
+         (u8! w 12)
+         (count! w (length x))
+         (for ((item :in x)) (datum! w item)))
+        ((bytevector? x) (u8! w 13) (bytes! w x))
+        ((eof-object? x) (u8! w 15))
+        ((eq? x (%native-object-class)) (u8! w 16))
+        (else (error "native compiler: cannot write a literal to a fasl" x))))
+
+(def (cell! w cell)
+  (let ((name (%native-cell-name cell)))
+    (u8! w 14)
+    (text! w (car name))
+    (text! w (cdr name))))
+
+;; A unit, with its cells written by name.
+(def (unit! w unit)
+  (u8! w 1)
+  (u8! w 12)
+  (count! w (length unit))
+  (dotimes (i (length unit))
+    (if (= i 2)
+        (begin
+          (u8! w 12)
+          (count! w (length (get unit 2)))
+          (for ((cell :in (get unit 2))) (cell! w cell)))
+        (datum! w (get unit i)))))
+
+(def (form! w form) (u8! w 2) (datum! w form))
+
+(def (macro! w name doc) (u8! w 3) (datum! w name) (datum! w doc))
+
+(def (doc! w name private doc) (u8! w 4) (datum! w name) (datum! w private) (datum! w doc))
+
+(def (defonce! w name) (u8! w 5) (datum! w name))
+
+(def (module! w name) (u8! w 6) (datum! w name))
+
+(def (end-module! w) (u8! w 7))
+
+(def (namespace! w name) (u8! w 8) (datum! w name))
+
+(def (source! w path) (u8! w 9) (datum! w path))
+
+;; The finished file's bytes.
+(def (finish w)
+  (u8! w 0)
+  (bytevector-append (string->utf8 "OTFASL01") (emit/buffer-bytes (w :buf))))

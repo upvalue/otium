@@ -32,3 +32,4 @@ modules
 dev
 diagnostics
 natives
+codegen

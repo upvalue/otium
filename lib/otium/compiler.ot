@@ -1,0 +1,45 @@
+;; compiler.ot -- the native compiler's driver.
+;;
+;; compile-top takes one expanded top-level form and returns a unit for the
+;; bridge (c/src/native.c): convert to tree IR, lower each function to
+;; virtual code, allocate registers, emit the stream. In a native process
+;; run-top installs the unit and calls it. See
+;; scratch/native-compiler-design.md, section 10.
+
+(ns otium.compiler
+  (:require (otium.compiler.convert :as convert)
+            (otium.compiler.lower :as lower)
+            (otium.compiler.alloc :as alloc)
+            (otium.compiler.emit :as emit)))
+
+(def (compile-top form)
+  (let ((info (convert/convert-top form)))
+    (let ((lowered (lower/lower-top info)))
+      (let ((u (get lowered 0)) (contexts (get lowered 1)))
+        (for ((fc :in contexts)) (alloc/allocate fc))
+        (emit/emit-unit u contexts)))))
+
+;; The closure that runs a compiled top-level form.
+(def (install-top form) (%native-install (compile-top form)))
+
+;; Virtual code of a form's functions, after allocation, for debugging.
+(def (dump-top form)
+  (let ((info (convert/convert-top form)))
+    (let ((lowered (lower/lower-top info)))
+      (for ((fc :in (get lowered 1)))
+        (alloc/allocate fc)
+        (println "function " ((fc :info) :index) " " ((fc :info) :name))
+        (let ((code (fc :code)))
+          (dotimes (i (length code))
+            (let ((ins (get code i)))
+              (print "  " i " ")
+              (write ins)
+              (let ((live (get (fc :live) i)))
+                (when live (print "  live ") (write live)))
+              (newline))))
+        (print "  locations ")
+        (write (fc :location))
+        (newline)
+        (print "  ranges ")
+        (write (fc :ranges))
+        (newline)))))

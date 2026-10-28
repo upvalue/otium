@@ -1,0 +1,880 @@
+;; convert.ot -- expanded forms to the native compiler's tree IR.
+;;
+;; Input is the shared expander's output: core forms only, parameter lists in
+;; dotted form, definitions ahead of expressions in bodies. Output is a tree
+;; of nodes, arrays tagged with a keyword and carrying the source offset of
+;; their form:
+;;
+;;   [:const off value]          [:lref off var check?]   [:lset off var expr]
+;;   [:gref off cell]            [:gset off cell expr]    [:gdef off cell expr]
+;;   [:if off test then else]    [:seq off nodes]         [:let off vars inits body]
+;;   [:fn off info]              [:call off f args tail?] [:gcall off cell args tail?]
+;;   [:bcall off builtin args tail?]                      [:prim off name args]
+;;   [:loop off loop inits body] [:recur off loop args]   [:while off test body]
+;;   [:try off body var clauses] [:cleanup off fn outcome? body]
+;;   [:handlers off pairs body]  [:params off pairs body] [:restarts off clauses body]
+;;   [:make-param off name init] [:evaluator off]
+;;
+;; Variables are records shared by every node that mentions them. Whether a
+;; variable needs a box is decided by lower, from what convert learned: a
+;; captured variable is boxed when it is assigned, or captured before it is
+;; initialized. Names are resolved here as compiler.c resolves them, and
+;; error messages match it.
+
+(ns otium.compiler.convert)
+
+;; --- Variables and functions ----------------------------------------------
+
+;; Records are tables. A variable has :name, :id, :owner (its function),
+;; :captured, :assigned, :early (captured before initialized), :initialized,
+;; :self (refers to its own function's closure), :loop (names a loop) and
+;; :forms (the body it was defined in). A function has :name, :params,
+;; :optionals ([var default] pairs), :rest, :body, :captures, :self, :offset
+;; and :parent.
+
+(def- *var-count* 0)
+
+(def (make-var name owner initialized)
+  (set! *var-count* (+ *var-count* 1))
+  {:name name :id *var-count* :owner owner :initialized initialized})
+
+(def (make-fn name parent offset)
+  {:name name :params [] :optionals [] :captures [] :offset offset :parent parent})
+
+;; --- Errors ------------------------------------------------------------------
+
+(def (offset-of form fallback)
+  (let ((o (%source-offset form)))
+    (if (nil? o) fallback o)))
+
+(def (fail message form off)
+  (%compile-error message (offset-of form off)))
+
+(def (declaration-fail message form off)
+  (%compile-error message (offset-of form off)))
+
+;; --- Facts that need a second attempt ---------------------------------------
+
+;; Named lets are compiled as loops until one turns out to escape: then the
+;; whole form is converted again with that loop marked, as compiler.c does.
+;; Loops are numbered in the order conversion meets them, which is the same
+;; on every attempt. The context table holds :escaped, :retry and :loops.
+
+(def (next-loop-index ctx)
+  (let ((n (ctx :loops)))
+    (put! ctx :loops (+ n 1))
+    n))
+
+;; --- Scope -----------------------------------------------------------------
+
+;; An environment is a list of (symbol . var), innermost first.
+(def (lookup env sym)
+  (cond ((null? env) nil)
+        ((eq? (car (car env)) sym) (cdr (car env)))
+        (else (lookup (cdr env) sym))))
+
+(def (bind env sym var) (cons (cons sym var) env))
+
+;; Capture var in fn and every function between fn and the variable's owner.
+(def (capture! func var)
+  (put! var :captured #t)
+  (unless (var :initialized) (put! var :early #t))
+  (let walk ((f func))
+    (when (and f (not (eq? f (var :owner))))
+      (let ((captures (f :captures)))
+        (unless (find (fn (v) (eq? v var)) captures)
+          (push! captures var)))
+      (walk (f :parent)))))
+
+;; --- Constants ------------------------------------------------------------
+
+(def (constant-form? form)
+  (or (not (pair? form)) (eq? (car form) 'quote)))
+
+(def (literal form off) [:const off form])
+
+;; --- The converter -------------------------------------------------------
+
+;; Where a form is converted, a table: :fn the function it is in, :env its
+;; scope, :tail whether it is in tail position of the function, :loops the
+;; loops whose body it is in tail position of, :definitions whether a
+;; definition may appear, :top whether this is the top level of the form,
+;; where definitions are global, and :ctx the conversion's context.
+(def (with-site site . changes)
+  (let ((copied (copy site)))
+    (let loop ((c changes))
+      (unless (null? c)
+        (put! copied (car c) (car (cdr c)))
+        (loop (cdr (cdr c)))))
+    copied))
+
+(def (make-site func env tail definitions top ctx)
+  {:fn func :env env :tail tail :loops '() :definitions definitions :top top :ctx ctx})
+
+(def (non-tail site) (with-site site :tail #f :loops '() :definitions #f))
+
+;; A nested scope, such as a let body: definitions there are local.
+(def (scope site) (with-site site :top #f))
+
+(def (expression form site off)
+  (let ((off (offset-of form off)))
+    (cond ((symbol? form) (variable form site off))
+          ((not (pair? form))
+           (if (null? form) (literal '() off) (literal form off)))
+          (else (compound form site off)))))
+
+(def (improper? lst)
+  (cond ((null? lst) #f)
+        ((pair? lst) (improper? (cdr lst)))
+        (else #t)))
+
+;; A reference to a variable or global.
+(def (variable sym site off)
+  (let ((var (lookup (site :env) sym)))
+    (if var
+        (local-ref var site off)
+        (global-ref sym site off))))
+
+(def (local-ref var site off)
+  (let ((func (site :fn)))
+    (cond ((var :loop)
+           ;; A loop's name used as a value means the loop needs a function.
+           (escape! (var :loop) site)
+           [:lref off var #f])
+          (else
+           (unless (eq? (var :owner) func) (capture! func var))
+           [:lref off var (not (var :initialized))]))))
+
+(def (escape! loop site)
+  (unless (loop :escaped)
+    (put! loop :escaped #t)
+    (put! (site :ctx) :retry #t)
+    (put! ((site :ctx) :escaped) (loop :index) #t)))
+
+(def (global-ref sym site off)
+  (let ((cell (%native-cell sym)))
+    (if (eq? (%native-cell-builtin cell) 'eval)
+        [:evaluator off]
+        [:gref off cell])))
+
+;; Builtins compiled inline, by the name of the builtin a cell holds. Each
+;; needs exactly this many arguments, as compiler.c's table.
+(def- primitive-arities
+  {'+ 2 '- 2 '* 2 '< 2 '<= 2 '> 2 '>= 2 '= 2 'eq? 2 'cons 2 'car 1 'cdr 1 'not 1 'null? 1
+   'pair? 1})
+
+;; The primitive a call's head names, or nil.
+(def (primitive-of form site)
+  (let ((head (car form)))
+    (when (and (symbol? head) (not (lookup (site :env) head)) (not (improper? form)))
+      (let ((cell (%native-cell head)))
+        (let ((builtin (%native-cell-builtin cell)))
+          (when builtin
+            (let ((arity (get primitive-arities builtin)))
+              (when (and arity (= arity (length (cdr form))))
+                builtin))))))))
+
+;; Special forms are recognized by name even where a local shadows it, as in
+;; compiler.c; primitives only where nothing does.
+(def- special-forms
+  (let ((t {}))
+    (for ((name :in '(quote quasiquote unquote unquote-splicing if cond when unless begin fn let set!
+                      def def- while and or try unwind-protect defer %call-with-cleanup
+                      restart-case handler-bind with-params defparam defclass defabstract
+                      reset-class! defgeneric reset-generic! defmethod defonce syntax-quote defmacro
+                      ns require)))
+      (put! t name #t))
+    t))
+
+(def (compound form site off)
+  (let ((head (car form)) (args (cdr form)))
+    (cond ((improper? form) (fail "cannot call an improper list" form off))
+          ((and (symbol? head) (get special-forms head)) (special form head args site off))
+          (else
+           (let ((prim (primitive-of form site)))
+             (if prim
+                 (primitive prim args site off)
+                 (call form site off)))))))
+
+(def (special form head args site off)
+  (case head
+    ((quote)
+     (if (and (pair? args) (null? (cdr args)))
+         (literal (car args) off)
+         (fail "quote needs one datum" form off)))
+    ((quasiquote)
+     (if (and (pair? args) (null? (cdr args)))
+         (quasi (car args) site off)
+         (fail "quasiquote needs one datum" form off)))
+    ((unquote unquote-splicing) (fail "unquote outside quasiquote" form off))
+    ((if) (if-form form args site off))
+    ((cond) (cond-form form args site off))
+    ((when unless)
+     (if (null? args)
+         (fail "conditional body needs a condition" form off)
+         (let ((test (expression (car args) (non-tail site) off))
+               (body (body-forms (cdr args) (with-site site :definitions #f) off)))
+           (if (eq? head 'when)
+               [:if off test body (literal nil off)]
+               [:if off test (literal nil off) body]))))
+    ((begin) (body-forms args (with-site site :definitions (site :definitions)) off))
+    ((fn)
+     (if (null? args)
+         (fail "expected a parameter list or rest symbol" form off)
+         [:fn off (lambda-form (car args) (cdr args) site off nil nil)]))
+    ((let) (let-form form args site off))
+    ((set!) (set-form form args site off))
+    ((def def-) (def-form form head args site off))
+    ((while) (while-form form args site off))
+    ((and or) (logic-form head args site off))
+    ((try) (try-form form args site off))
+    ((unwind-protect defer)
+     (if (null? args)
+         (fail "unwind-protect needs an expression" form off)
+         (let ((cleanup (lambda-form '() (cdr args) site off nil nil)))
+           [:cleanup off [:fn off cleanup] #f (expression (car args) (non-tail site) off)])))
+    ((%call-with-cleanup)
+     (if (not (and (pair? args) (pair? (cdr args)) (null? (cdr (cdr args)))))
+         (fail "cleanup needs two callables" form off)
+         (let ((thunk (expression (car args) (non-tail site) off))
+               (cleanup (expression (car (cdr args)) (non-tail site) off)))
+           [:cleanup off cleanup #t [:call off thunk [] #f]])))
+    ((restart-case) (restart-form form args site off))
+    ((handler-bind) (handler-form form args site off))
+    ((with-params) (params-form form args site off))
+    ((defparam) (defparam-form form args site off))
+    ((defclass defabstract reset-class!) (class-form form head args site off))
+    ((defgeneric reset-generic! defmethod) (generic-form form head args site off))
+    ((defonce) (fail "defonce requires top-level context" form off))
+    (else (fail "form not implemented by the compiler" form off))))
+
+;; --- Conditionals -----------------------------------------------------------
+
+(def (if-form form args site off)
+  (if (or (null? args) (null? (cdr args))
+          (and (pair? (cdr (cdr args))) (pair? (cdr (cdr (cdr args))))))
+      (fail "if needs two or three operands" form off)
+      (let ((test (expression (car args) (non-tail site) off))
+            (then (expression (car (cdr args)) (with-site site :definitions #f) off))
+            (alt (if (pair? (cdr (cdr args)))
+                      (expression (car (cdr (cdr args))) (with-site site :definitions #f) off)
+                      (literal nil off))))
+        [:if off test then alt])))
+
+;; Clauses become nested ifs. A clause of only a test yields the test's value
+;; when it is true, through a temporary.
+(def (cond-form form clauses site off)
+  (let walk ((cs clauses))
+    (cond ((null? cs) (literal nil off))
+          ((or (not (pair? (car cs))) (improper? (car cs)))
+           (fail "cond needs proper nonempty clauses" (car cs) off))
+          (else
+           (let ((clause (car cs)))
+             (cond ((eq? (car clause) 'else)
+                    (if (pair? (cdr cs))
+                        (fail "cond else must be last" clause off)
+                        (body-forms (cdr clause) (with-site site :definitions #f) off)))
+                   ((null? (cdr clause))
+                    (let ((var (make-var 'cond-value (site :fn) #t)))
+                      [:let off [var] [(expression (car clause) (non-tail site) off)]
+                       [:if off [:lref off var #f] [:lref off var #f] (walk (cdr cs))]]))
+                   (else
+                    [:if off (expression (car clause) (non-tail site) off)
+                     (body-forms (cdr clause) (with-site site :definitions #f) off)
+                     (walk (cdr cs))])))))))
+
+(def (logic-form head args site off)
+  (cond ((null? args) (literal (eq? head 'and) off))
+        ((null? (cdr args)) (expression (car args) (with-site site :definitions #f) off))
+        (else
+         (let ((first (expression (car args) (non-tail site) off))
+               (rest (logic-form head (cdr args) site off))
+               (var (make-var 'logic (site :fn) #t)))
+           [:let off [var] [first]
+            (if (eq? head 'and)
+                [:if off [:lref off var #f] rest [:lref off var #f]]
+                [:if off [:lref off var #f] [:lref off var #f] rest])]))))
+
+;; --- Bodies and definitions ---------------------------------------------------
+
+(def (definition-name form)
+  (when (and (pair? form) (memq (car form) '(def def-)) (pair? (cdr form)))
+    (let ((name (car (cdr form))))
+      (if (pair? name) (car name) name))))
+
+;; A body: definitions bind uninitialized variables first, as compiler.c does,
+;; when site allows definitions inside a function.
+(def (body-forms forms site off)
+  (if (and (site :definitions) (not (site :top)))
+      (body-with-definitions forms site off)
+      (sequence forms site off)))
+
+(def (sequence forms site off)
+  (cond ((null? forms) (literal nil off))
+        ((null? (cdr forms)) (expression (car forms) site off))
+        (else
+         (let ((nodes []))
+           (let loop ((fs forms))
+             (if (null? (cdr fs))
+                 (push! nodes (expression (car fs) site off))
+                 (begin
+                   (push! nodes (expression (car fs) (with-site (non-tail site)
+                                                                :definitions (site :definitions))
+                                            off))
+                   (loop (cdr fs)))))
+           [:seq off nodes]))))
+
+(def (body-with-definitions forms site off)
+  (let ((vars []) (env (site :env)))
+    (for ((f :in forms))
+      (let ((name (definition-name f)))
+        (when (symbol? name)
+          (let ((var (make-var name (site :fn) #f)))
+            (put! var :forms forms)
+            (push! vars var)
+            (set! env (bind env name var))))))
+    (if (= (length vars) 0)
+        (sequence forms site off)
+        [:let off vars (list-to-array (map (fn (v) [:unbound off]) (array-to-list vars)))
+         (sequence forms (with-site site :env env) off)])))
+
+(def (def-form form head args site off)
+  (cond ((not (site :definitions))
+         (fail "definition is only allowed at top level or in a body" form off))
+        (else
+         (let ((name (definition-name form)))
+           (if (or (not (symbol? name)) (null? (cdr args)))
+               (fail "invalid definition" form off)
+               (let ((value-form (definition-value form args off)))
+                 (if (site :top)
+                     (top-definition form name args value-form site off)
+                     (local-definition form name args value-form site off))))))))
+
+;; The value of (def name [doc] value), or nil for (def (name . params) ...).
+(def (definition-value form args off)
+  (if (pair? (car args))
+      nil
+      (let ((value (cdr args)))
+        (when (and (string? (car value)) (pair? (cdr value))) (set! value (cdr value)))
+        (if (pair? (cdr value))
+            (fail "definition needs one value" form off)
+            (car value)))))
+
+(def (top-definition form name args value-form site off)
+  (let ((cell (%native-cell-define name)))
+    [:gdef off cell
+     (if (nil? value-form)
+         [:fn off (lambda-form (cdr (car args)) (cdr args) site off name nil)]
+         (named-value value-form name site off))]))
+
+;; (def f (fn ...)) names the function f.
+(def (named-value value-form name site off)
+  (if (and (pair? value-form) (eq? (car value-form) 'fn) (not (lookup (site :env) 'fn))
+           (pair? (cdr value-form)))
+      [:fn (offset-of value-form off)
+       (lambda-form (car (cdr value-form)) (cdr (cdr value-form)) site off name nil)]
+      (expression value-form (non-tail site) off)))
+
+(def (local-definition form name args value-form site off)
+  (let ((var (lookup (site :env) name)))
+    (cond ((or (not var) (not (eq? (var :owner) (site :fn))) (var :loop))
+           ;; Not in this body's binding list: assign what it resolves to.
+           (let ((value (if (nil? value-form)
+                            [:fn off (lambda-form (cdr (car args)) (cdr args) site off name nil)]
+                            (expression value-form (non-tail site) off))))
+             (assignment name value site off)))
+          (else
+           (let ((value (if (nil? value-form)
+                            [:fn off (lambda-form (cdr (car args)) (cdr args) site off name
+                                                  (unless (assigned-in? name (var :forms))
+                                                    var))]
+                            (expression value-form (non-tail site) off))))
+             (when (var :initialized) (put! var :assigned #t))
+             (put! var :initialized #t)
+             [:lset off var value])))))
+
+;; Whether forms set! sym anywhere, ignoring shadowing.
+(def (assigned-in? sym forms)
+  (cond ((pair? forms)
+         (or (and (eq? (car forms) 'set!) (pair? (cdr forms)) (eq? (car (cdr forms)) sym))
+             (and (pair? (car forms)) (assigned-in? sym (car forms)))
+             (assigned-in? sym (cdr forms))))
+        (else #f)))
+
+;; --- set! --------------------------------------------------------------------
+
+(def (set-form form args site off)
+  (if (not (and (pair? args) (pair? (cdr args)) (null? (cdr (cdr args)))))
+      (fail "set! needs a name and value" form off)
+      (if (not (symbol? (car args)))
+          (fail "expected a symbol" (car args) off)
+          (let ((value (expression (car (cdr args)) (non-tail site) off)))
+            (assignment (car args) value site off)))))
+
+(def (assignment sym value site off)
+  (let ((var (lookup (site :env) sym)))
+    (cond ((nil? var) [:gset off (%native-cell sym) value])
+          ((var :loop)
+           (escape! (var :loop) site)
+           [:seq off [value (literal nil off)]])
+          (else
+           (put! var :assigned #t)
+           (unless (eq? (var :owner) (site :fn)) (capture! (site :fn) var))
+           [:seq off [[:lset off var value] (literal nil off)]]))))
+
+;; --- Functions -----------------------------------------------------------
+
+(def (symbol-named? x name) (and (symbol? x) (eq? x name)))
+
+;; Convert (fn params . body). self, when given, is the variable whose name
+;; refers to the function itself inside its body.
+(def (lambda-form params body site off name self)
+  (let ((info (make-fn name (site :fn) off))
+        (env (site :env)))
+    (when self
+      (let ((own (make-var (self :name) info #t)))
+        (put! own :self #t)
+        (put! info :self own)
+        (set! env (bind env (self :name) own))))
+    (cond ((symbol? params)
+           (let ((v (make-var params info #t)))
+             (put! info :rest v)
+             (set! env (bind env params v))))
+          ((not (or (pair? params) (null? params)))
+           (fail "expected a parameter list or rest symbol" params off))
+          (else
+           (let walk ((p params) (seen '()))
+             (cond ((null? p) nil)
+                   ((symbol? p)
+                    (if (memq p seen)
+                        (fail "duplicate parameter" p off)
+                        (let ((v (make-var p info #t)))
+                          (put! info :rest v)
+                          (set! env (bind env p v)))))
+                   ((eq? (car p) '&optional)
+                    (when (null? (cdr p))
+                      (fail "optional parameters need defaults and cannot combine with rest" p off))
+                    (let opt ((q (cdr p)) (seen seen))
+                      (unless (null? q)
+                        (let ((spec (car q)))
+                          (unless (and (pair? spec) (symbol? (car spec)) (pair? (cdr spec))
+                                       (null? (cdr (cdr spec))))
+                            (fail "expected (name default) after &optional" spec off))
+                          (when (memq (car spec) seen) (fail "duplicate parameter" (car spec) off))
+                          (let ((v (make-var (car spec) info #t)))
+                            (push! (info :optionals)
+                                   [v (expression (car (cdr spec))
+                                                  (make-site info env #f #f #f (site :ctx))
+                                                  off)])
+                            (set! env (bind env (car spec) v))
+                            (opt (cdr q) (cons (car spec) seen)))))))
+                   ((not (symbol? (car p))) (fail "expected a symbol parameter" (car p) off))
+                   ((memq (car p) seen) (fail "duplicate parameter" (car p) off))
+                   (else
+                    (let ((v (make-var (car p) info #t)))
+                      (push! (info :params) v)
+                      (set! env (bind env (car p) v))
+                      (walk (cdr p) (cons (car p) seen))))))))
+    (let ((forms (if (and (pair? body) (string? (car body)) (pair? (cdr body))) (cdr body) body)))
+      (put! info :body (body-forms forms (make-site info env #t #t #f (site :ctx)) off)))
+    info))
+
+;; --- let and loops -----------------------------------------------------------
+
+(def (let-form form args site off)
+  (let ((name (and (pair? args) (symbol? (car args)) (car args))))
+    (let ((bindings (if name (and (pair? (cdr args)) (car (cdr args))) (and (pair? args) (car args))))
+          (body (if name (and (pair? (cdr args)) (cdr (cdr args))) (and (pair? args) (cdr args)))))
+      (cond ((not (and (or (pair? bindings) (null? bindings)) (not (improper? bindings))))
+             (fail "let needs a binding list" form off))
+            ((find (fn (b) (not (and (pair? b) (symbol? (car b)) (pair? (cdr b))
+                                     (null? (cdr (cdr b))))))
+                   bindings)
+             (fail "let binding needs a name and initializer"
+                   (find (fn (b) (not (and (pair? b) (symbol? (car b)) (pair? (cdr b))
+                                           (null? (cdr (cdr b))))))
+                         bindings)
+                   off))
+            (name (named-let name bindings body site off))
+            (else (plain-let bindings body site off))))))
+
+(def (plain-let bindings body site off)
+  (let ((vars []) (inits []) (env (site :env)))
+    (for ((b :in bindings))
+      (push! inits (expression (car (cdr b)) (with-site (non-tail site) :env env) off))
+      (let ((v (make-var (car b) (site :fn) #t)))
+        (push! vars v)
+        (set! env (bind env (car b) v))))
+    [:let off vars inits (body-forms body (with-site (scope site) :env env :definitions #t) off)]))
+
+(def (named-let name bindings body site off)
+  (let ((ctx (site :ctx)))
+    (let ((index (next-loop-index ctx)))
+      (if (or (get (ctx :escaped) index) (assigned-in? name body))
+          (loop-function name bindings body site off index)
+          (inline-loop name bindings body site off index)))))
+
+;; A loop in the enclosing function. Initializers see the outer scope.
+(def (inline-loop name bindings body site off index)
+  (let ((inits (map (fn (b) (expression (car (cdr b)) (non-tail site) off)) bindings))
+        (loop {:fn (site :fn) :vars [] :tail (site :tail) :index index})
+        (env (site :env)))
+    (let ((seen '()))
+      (for ((b :in bindings))
+        (when (memq (car b) seen) (fail "duplicate parameter" (car b) off))
+        (set! seen (cons (car b) seen))
+        (let ((v (make-var (car b) (site :fn) #t)))
+          (push! (loop :vars) v)
+          (set! env (bind env (car b) v)))))
+    (let ((lv (make-var name (site :fn) #t)))
+      (put! lv :loop loop)
+      (put! loop :var lv)
+      (set! env (bind env name lv)))
+    (let ((forms (if (and (pair? body) (string? (car body)) (pair? (cdr body))) (cdr body) body)))
+      [:loop off loop (list-to-array inits)
+       (body-forms forms (with-site (scope site) :env env :definitions #t
+                                    :loops (cons loop (if (site :tail) (site :loops) '())))
+                   off)])))
+
+;; A named let whose name escapes is a function called at once. Its name
+;; refers to the function itself unless the name is assigned.
+(def (loop-function name bindings body site off index)
+  (let ((params (map car bindings))
+        (inits (map (fn (b) (expression (car (cdr b)) (non-tail site) off)) bindings)))
+    (if (assigned-in? name body)
+        ;; An assigned loop name is a real binding the function captures.
+        (let ((var (make-var name (site :fn) #f)))
+          (let ((inner (with-site site :env (bind (site :env) name var))))
+            (let ((info (lambda-form params body inner off name nil)))
+              (put! var :initialized #t)
+              (let ((temps (map (fn (p) (make-var p (site :fn) #t)) params)))
+                [:let off (list-to-array temps) (list-to-array inits)
+                 [:let off [var] [[:fn off info]]
+                  [:call off [:lref off var #f]
+                   (list-to-array (map (fn (t) [:lref off t #f]) temps)) (site :tail)]]]))))
+        (let ((self (make-var name (site :fn) #t)))
+          (let ((info (lambda-form params body site off name self)))
+            [:call off [:fn off info] (list-to-array inits) (site :tail)])))))
+
+(def (while-form form args site off)
+  (if (null? args)
+      (fail "while needs a condition" form off)
+      [:while off (expression (car args) (non-tail site) off)
+       (body-forms (cdr args) (with-site (scope (non-tail site)) :definitions #t) off)]))
+
+;; --- Calls ----------------------------------------------------------------
+
+(def (call form site off)
+  (let ((head (car form)) (args (cdr form)))
+    (let ((var (and (symbol? head) (lookup (site :env) head))))
+      (cond ((and var (var :loop) (memq (var :loop) (site :loops))
+                  (= (length args) (length ((var :loop) :vars))))
+             [:recur off (var :loop) (list-to-array (map (fn (a) (expression a (non-tail site) off))
+                                                         args))])
+            ((and (symbol? head) (not var))
+             (let ((cell (%native-cell head)))
+               (let ((builtin (%native-cell-builtin cell))
+                     (nodes (list-to-array (map (fn (a) (expression a (non-tail site) off)) args))))
+                 (cond ((eq? builtin 'eval)
+                        [:call off [:evaluator off] nodes (site :tail)])
+                       ;; A builtin of core in tail position runs in its caller's frame, as in
+                       ;; the VM, so errors point at the call. apply stays a tail call.
+                       ((and builtin (site :tail) (not (eq? builtin 'apply)) (%native-core-cell? cell))
+                        [:gcall off cell nodes #f])
+                       (else [:gcall off cell nodes (site :tail)])))))
+            (else
+             (let ((f (expression head (non-tail site) off)))
+               [:call off f (list-to-array (map (fn (a) (expression a (non-tail site) off)) args))
+                (site :tail)]))))))
+
+(def (primitive name args site off)
+  [:prim off name (list-to-array (map (fn (a) (expression a (non-tail site) off)) args))])
+
+;; Builtins the compiler calls itself, by their value: a redefined global of
+;; the same name doesn't matter. The call keeps its frame, so errors in it
+;; point at the form.
+(def (builtin-call name args off tail)
+  [:bcall off (%native-builtin name) args #f])
+
+;; --- quasiquote ----------------------------------------------------------
+
+;; Templates fold to constants where no unquote reaches; the rest builds the
+;; list with cons and the compiler's own append.
+(def (quasi template site off)
+  (let ((node (quasi-node template 1 site off)))
+    (if (eq? (get node 0) :const) node (quasi-build node off))))
+
+(def (qq-marker x)
+  (cond ((eq? x 'quasiquote) 1)
+        ((eq? x 'unquote) 2)
+        ((eq? x 'unquote-splicing) 3)
+        (else 0)))
+
+;; Intermediate forms: [:const off value], [:expr node], [:cons a b], [:append a b].
+(def (qq-join left right splice)
+  (cond ((and splice (eq? (get right 0) :const) (null? (get right 2))) left)
+        ((and (not splice) (eq? (get left 0) :const) (eq? (get right 0) :const))
+         [:const (get left 1) (cons (get left 2) (get right 2))])
+        (else [(if splice :append :cons) left right])))
+
+(def (quasi-special lst depth site off)
+  ;; lst starts with a quasiquote marker.
+  (let ((marker (qq-marker (car lst))))
+    (cond ((not (pair? (cdr lst))) (fail "quasiquote marker needs an operand" lst off))
+          ((and (not (= marker 1)) (= depth 0)) (fail "unquote outside quasiquote" lst off))
+          ((and (= marker 2) (= depth 1)) [:expr (expression (car (cdr lst)) (non-tail site) off)])
+          (else
+           (let ((value (quasi-node (car (cdr lst)) (if (= marker 1) (+ depth 1) (- depth 1)) site off)))
+             (qq-join [:const off (car lst)] (qq-join value [:const off '()] #f) #f))))))
+
+(def (quasi-node x depth site off)
+  (if (not (pair? x))
+      [:const off x]
+      (let ((pieces []) (rest nil))
+        (let walk ((p x))
+          (cond ((null? p) (set! rest [:const off '()]))
+                ((not (pair? p)) (set! rest (quasi-node p depth site off)))
+                ((> (qq-marker (car p)) 0) (set! rest (quasi-special p depth site off)))
+                (else
+                 (let ((item (car p)))
+                   (if (and (= depth 1) (pair? item) (eq? (car item) 'unquote-splicing))
+                       (if (pair? (cdr item))
+                           (push! pieces [[:expr (expression (car (cdr item)) (non-tail site) off)] #t])
+                           (fail "splice needs an operand" item off))
+                       (push! pieces [(quasi-node item depth site off) #f])))
+                 (walk (cdr p)))))
+        (let loop ((i (- (length pieces) 1)) (acc rest))
+          (if (< i 0)
+              acc
+              (loop (- i 1) (qq-join (get (get pieces i) 0) acc (get (get pieces i) 1))))))))
+
+(def (quasi-build node off)
+  (case (get node 0)
+    ((:const) node)
+    ((:expr) (get node 1))
+    ((:cons) [:prim off 'cons [(quasi-build (get node 1) off) (quasi-build (get node 2) off)]])
+    (else (builtin-call "qq-append" [(quasi-build (get node 1) off) (quasi-build (get node 2) off)]
+                        off #f))))
+
+;; --- try and control forms -------------------------------------------------
+
+(def (try-form form args site off)
+  (let ((protected '()) (clauses args))
+    (let split ()
+      (when (and (pair? clauses)
+                 (not (and (pair? (car clauses)) (eq? (car (car clauses)) 'catch))))
+        (set! protected (cons (car clauses) protected))
+        (set! clauses (cdr clauses))
+        (split)))
+    (set! protected (reverse protected))
+    (if (null? clauses)
+        (body-forms args (with-site site :definitions #f) off)
+        (let ((body (body-forms protected (with-site (non-tail site) :definitions #f) off))
+              (var (make-var 'condition (site :fn) #t))
+              (converted []))
+          (for ((clause :in clauses))
+            (let ((guard (and (pair? clause) (eq? (car clause) 'catch) (not (improper? clause))
+                              (pair? (cdr clause)) (car (cdr clause)))))
+              (unless guard (fail "invalid catch clause" clause off))
+              (let ((name guard) (predicate nil))
+                (when (pair? guard)
+                  (unless (and (pair? (cdr guard)) (null? (cdr (cdr guard))))
+                    (fail "invalid catch guard" guard off))
+                  (set! predicate (car guard))
+                  (set! name (car (cdr guard))))
+                (unless (symbol? name) (fail "catch needs a variable" guard off))
+                (let ((bound (make-var name (site :fn) #t)))
+                  (push! converted
+                         [(and predicate (expression predicate (non-tail site) off))
+                          bound
+                          (body-forms (cdr (cdr clause))
+                                      (with-site (scope site) :env (bind (site :env) name bound)
+                                                 :definitions #t)
+                                      off)])))))
+          [:try off body var converted]))))
+
+(def (restart-form form args site off)
+  (if (null? args)
+      (fail "restart-case needs an expression" form off)
+      (let ((clauses []))
+        (for ((clause :in (cdr args)))
+          (unless (and (pair? clause) (symbol? (car clause)) (not (improper? clause)) (pair? (cdr clause)))
+            (fail "invalid restart clause" clause off))
+          (let ((params (cdr clause)) (description nil))
+            (when (and (string? (car params)) (pair? (cdr params)))
+              (set! description (car params))
+              (set! params (cdr params)))
+            (push! clauses [(literal (car clause) off) (literal description off)
+                            [:fn off (lambda-form (car params) (cdr params) site off nil nil)]])))
+        [:restarts off clauses (expression (car args) (non-tail site) off)])))
+
+(def (handler-form form args site off)
+  (if (not (and (pair? args) (or (pair? (car args)) (null? (car args))) (not (improper? (car args)))))
+      (fail "handler-bind needs a binding list" form off)
+      (let ((pairs []))
+        (for ((binding :in (car args)))
+          (unless (and (pair? binding) (not (improper? binding)) (pair? (cdr binding))
+                       (null? (cdr (cdr binding))))
+            (fail "handler binding needs a predicate and handler" binding off))
+          (push! pairs [(expression (car binding) (non-tail site) off)
+                        (expression (car (cdr binding)) (non-tail site) off)]))
+        [:handlers off pairs (body-forms (cdr args) (with-site (non-tail site) :definitions #f) off)])))
+
+(def (params-form form args site off)
+  (if (not (and (pair? args) (or (pair? (car args)) (null? (car args))) (not (improper? (car args)))))
+      (fail "with-params needs a binding list" form off)
+      (let ((pairs []))
+        (for ((binding :in (car args)))
+          (unless (and (pair? binding) (not (improper? binding)) (pair? (cdr binding))
+                       (null? (cdr (cdr binding))))
+            (fail "parameter binding needs a param and value" binding off))
+          (push! pairs [(expression (car binding) (non-tail site) off)
+                        (expression (car (cdr binding)) (non-tail site) off)]))
+        [:params off pairs (body-forms (cdr args) (with-site (non-tail site) :definitions #f) off)])))
+
+(def (defparam-form form args site off)
+  (cond ((or (not (site :top)) (not (site :definitions))) (fail "defparam requires top level" form off))
+        ((not (and (pair? args) (symbol? (car args)) (pair? (cdr args))))
+         (fail "defparam needs a name and default" form off))
+        (else
+         (let ((value (cdr args)))
+           (when (and (string? (car value)) (pair? (cdr value))) (set! value (cdr value)))
+           (if (pair? (cdr value))
+               (fail "defparam needs one default" form off)
+               (let ((cell (%native-cell-define (car args))))
+                 [:seq off [[:gdef off cell [:make-param off (literal (car args) off)
+                                             (expression (car value) (non-tail site) off)]]
+                            (literal nil off)]]))))))
+
+;; --- Classes and generics, as compiler.c compiles them ---------------------
+
+(def (class-key? x key) (and (keyword? x) (equal? (keyword->string x) key)))
+
+(def (class-form form head args site off)
+  (let ((name (and (pair? args) (car args))))
+    (if (or (not (site :top)) (not (site :definitions)) (not (symbol? name)))
+        (declaration-fail "class declaration requires a top-level name" form off)
+        (let ((abstract (eq? head 'defabstract)) (reset (eq? head 'reset-class!))
+              (fields (cdr args)) (parent nil))
+          (when (and (pair? fields) (class-key? (car fields) "is"))
+            (if (not (pair? (cdr fields)))
+                (fail "missing class parent" form off)
+                (begin
+                  (set! parent (car (cdr fields)))
+                  (set! fields (cdr (cdr fields))))))
+          (when (and abstract (pair? fields)) (fail "abstract classes cannot have slots" form off))
+          (let ((items []) (accessors []))
+            (for ((p :in fields))
+              (let ((slot (if (pair? p) (car p) p)))
+                (unless (and (symbol? slot) (not (and (pair? p) (improper? p))))
+                  (fail "invalid slot declaration" p off))
+                (let ((init nil) (state nil) (getter nil))
+                  (when (pair? p)
+                    (let walk ((o (cdr p)))
+                      (unless (null? o)
+                        (unless (pair? (cdr o)) (fail "missing slot option value" (car o) off))
+                        (let ((value (car (cdr o))))
+                          (cond ((and (class-key? (car o) "init") (nil? init)) (set! init [value]))
+                                ((and (class-key? (car o) "state") (nil? state)) (set! state [value]))
+                                ((and (class-key? (car o) "accessor") (nil? getter) (symbol? value))
+                                 (set! getter value))
+                                (else (fail "invalid or duplicate slot option" (car o) off))))
+                        (walk (cdr (cdr o))))))
+                  (push! items (literal (string->keyword (symbol->string slot)) off))
+                  (push! items (if init
+                                   [:fn off (lambda-form '() (list (get init 0)) site off nil nil)]
+                                   (literal #f off)))
+                  (push! items (if state (expression (get state 0) (non-tail site) off) (literal #f off)))
+                  (when getter (push! accessors [slot getter])))))
+            (let ((define (builtin-call "%define-class"
+                                       [(literal name off)
+                                        (if parent
+                                            (expression parent (non-tail site) off)
+                                            [:class-object off])
+                                        (literal abstract off)
+                                        (builtin-call "array" items off #f)
+                                        (literal reset off)]
+                                       off #f))
+                  (nodes []))
+              (push! nodes define)
+              (for ((a :in accessors))
+                (let ((slot (get a 0)) (getter (get a 1)))
+                  (push! nodes (generic-form form 'defgeneric (list (list getter '%instance)) site off))
+                  (push! nodes (accessor-method getter name slot site off))))
+              (push! nodes (expression name (with-site site :definitions #f) off))
+              [:seq off nodes]))))))
+
+(def (accessor-method getter class slot site off)
+  (let ((key (string->keyword (symbol->string slot))))
+    (generic-form nil 'defmethod (list (list getter (list '%instance class))
+                                       (list '%instance (list 'quote key)))
+                  site off)))
+
+(def (string->keyword s) (keyword s))
+
+(def (generic-form form head args site off)
+  (if (or (not (site :top)) (not (site :definitions)))
+      (declaration-fail "generic declarations require top level" form off)
+      (let ((method (eq? head 'defmethod)) (signature args) (around #f))
+        (when (and method (pair? signature) (class-key? (car signature) "around"))
+          (set! around #t)
+          (set! signature (cdr signature)))
+        (let ((sig (and (pair? signature) (car signature))))
+          (unless (and (pair? sig) (not (improper? sig)))
+            (declaration-fail "expected a generic signature" form off))
+          (let ((name (car sig)))
+            (unless (symbol? name) (declaration-fail "generic name must be a symbol" name off))
+            (let ((params []) (types []))
+              (for ((p :in (cdr sig)))
+                (let ((binding p) (type nil))
+                  (when (and method (pair? p))
+                    (unless (and (pair? (cdr p)) (null? (cdr (cdr p))))
+                      (declaration-fail "invalid method parameter" p off))
+                    (set! binding (car p))
+                    (set! type (car (cdr p))))
+                  (when (or (not (symbol? binding)) (eq? binding '&) (eq? binding '&optional))
+                    (declaration-fail "generics need fixed parameters" p off))
+                  (when (find (fn (q) (eq? q binding)) params)
+                    (declaration-fail "duplicate generic parameter" p off))
+                  (push! params binding)
+                  (push! types (if type (expression type (non-tail site) off) [:class-object off]))))
+              (if method
+                  (let ((forms (cdr signature)) (has-next #f))
+                    (when (class-key? (car forms) "next")
+                      (let ((binding (and (pair? (cdr forms)) (car (cdr forms)))))
+                        (unless (and (symbol? binding) (not (eq? binding '&)) (not (eq? binding '&optional)))
+                          (fail "next method needs a local binding name" (car forms) off))
+                        (unless (pair? (cdr (cdr forms))) (fail "next method needs a body" (car forms) off))
+                        (when (find (fn (q) (eq? q binding)) params)
+                          (fail "next binding conflicts with parameter" binding off))
+                        (set! has-next #t)
+                        (set! params (list-to-array (cons binding (array-to-list params))))
+                        (set! forms (cdr (cdr forms)))))
+                    (builtin-call "%define-method"
+                                  [(expression name (non-tail site) off)
+                                   (builtin-call "list" types off #f)
+                                   [:fn off (lambda-form (array-to-list params) forms site off nil nil)]
+                                   (literal around off)
+                                   (literal has-next off)]
+                                  off (site :tail)))
+                  (if (and (pair? (cdr signature))
+                           (or (not (string? (car (cdr signature)))) (pair? (cdr (cdr signature)))))
+                      (fail "defgeneric accepts only an optional docstring" form off)
+                      (builtin-call "%define-generic"
+                                    [(literal name off) (literal (length params) off)
+                                     (literal (eq? head 'reset-generic!) off)]
+                                    off (site :tail))))))))))
+
+;; --- Top level ---------------------------------------------------------------
+
+;; Convert a top-level form to the function that evaluates it.
+(def (convert-top form)
+  (let ((ctx {:escaped {} :retry #f :loops 0}))
+    (let attempt ((n 0))
+      (put! ctx :retry #f)
+      (put! ctx :loops 0)
+      (let ((info (make-fn nil nil (offset-of form 0))))
+        (put! info :body (expression form (make-site info '() #t #t #t ctx) (offset-of form 0)))
+        (cond ((not (ctx :retry)) info)
+              ((>= n 8) (%compile-error "compiler binding analysis did not settle" (offset-of form 0)))
+              (else (attempt (+ n 1))))))))

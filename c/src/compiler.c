@@ -2068,6 +2068,11 @@ oti_ast* oti_expand_form(ot_state* rt, const oti_ast* form, oti_arena* arena) {
   return result;
 }
 
+ot_value oti_ast_datum(ot_state* rt, const oti_ast* form, bool locate) {
+  oti_compiler c = {.rt = rt, .locate = locate};
+  return datum(&c, form);
+}
+
 ot_value oti_read_string(ot_state* rt, ot_value string) {
   if (!oti_kind(string, K_STRING)) {
     oti_error(rt, "read-string expects a string");
@@ -2103,6 +2108,15 @@ ot_value oti_read_source(ot_state* rt, const char* source, size_t length) {
 
 /* Eval values retain the namespace where they were obtained. */
 ot_value oti_evaluator(ot_state* rt, uint32_t space) {
+#ifdef OTIUM_NATIVE
+  if (rt->native_mode) {
+    for (size_t i = 0; i < rt->constant_count; i++)
+      if (rt->constant_state[i] && oti_native_evaluator(rt, rt->constants[i], space))
+        return rt->constants[i];
+    ot_value v = oti_native_make_evaluator(rt, space);
+    return v && oti_constant(rt, v) != UINT32_MAX ? v : 0;
+  }
+#endif
   for (size_t i = 0; i < rt->constant_count; i++) {
     ot_value v = rt->constants[i];
     if (!oti_kind(v, K_CLOSURE)) continue;

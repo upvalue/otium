@@ -1,0 +1,122 @@
+;; boot.ot -- building boot files for native processes.
+;;
+;; A native process can't start from source: its expander, core library and
+;; compiler must already be compiled. The VM builds them: it loads them as
+;; usual, then reads their sources again and compiles each top-level form
+;; with the native compiler, writing a fasl (fasl.ot) that replays the same
+;; load. Top-level forms are handled as runtime.c's evaluate_raw handles
+;; them, so the native load matches the VM's.
+
+(ns otium.compiler.boot
+  (:require (otium.compiler :as nc)
+            (otium.compiler.fasl :as fasl)))
+
+;; The definitions the runtime adds after loading the expander (runtime.c).
+(def- adapters
+  "(def (macroexpand-1 form) (expander-expand-head form #t)) (def (macroexpand form) (expander-expand-head form #f)) (def (macroexpand-all form) (*expander* form)) (def (type-pred type) (fn (condition) (condition-of-type? condition type)))")
+
+(def (head form) (and (pair? form) (car form)))
+
+;; The docstring of (def name "doc" value) or (def (name ...) "doc" body), as
+;; evaluate_raw finds it.
+(def (definition-doc form)
+  (let ((rest (cdr (cdr form))))
+    (and (pair? rest) (string? (car rest)) (pair? (cdr rest)) (car rest))))
+
+(def (definition-name form)
+  (let ((name (car (cdr form))))
+    (if (pair? name) (car name) name)))
+
+(def (compile! w form)
+  (fasl/unit! w (nc/compile-top form)))
+
+;; One form as read from a file: evaluate_top, then evaluate_expanded.
+(def (top! w form)
+  (let ((h (head form)))
+    (cond ((and (eq? h 'begin) (pair? (cdr form))) (for ((child :in (cdr form))) (top! w child)))
+          ((memq h '(require ns)) (raw! w form))
+          (else (raw! w (*expander* form))))))
+
+;; evaluate_raw, on an expanded form.
+(def (raw! w form)
+  (let ((h (head form)))
+    (cond ((and (eq? h 'begin) (pair? (cdr form))) (for ((child :in (cdr form))) (top! w child)))
+          ((eq? h 'defmacro)
+           (let ((name (car (cdr form))) (rest (cdr (cdr form))))
+             (compile! w (list 'def name (cons 'fn rest)))
+             (fasl/macro! w name (and (pair? (cdr rest)) (string? (car (cdr rest))) (pair? (cdr (cdr rest)))
+                                      (car (cdr rest))))))
+          ((eq? h 'require) (fasl/form! w form))
+          ((eq? h 'ns)
+           (fasl/form! w form)
+           (%set-namespace (car (cdr form))))
+          ((eq? h 'defonce)
+           (fasl/defonce! w (car (cdr form)))
+           (let ((def-form (cons 'def (cdr form))))
+             (compile! w def-form)
+             (fasl/doc! w (definition-name def-form) #f (definition-doc def-form))))
+          ((memq h '(def def- defparam))
+           (compile! w form)
+           (fasl/doc! w (definition-name form) (eq? h 'def-) (definition-doc form)))
+          (else (compile! w form)))))
+
+(def (file! w path)
+  (for ((form :in (%read-forms (read-file path))))
+    (top! w form)
+    ;; A program compiled on its own is also evaluated, so later forms see its
+    ;; macros and requires.
+    (when (w :evaluate) (%native-evaluate form))))
+
+(def (library-file! w path)
+  (fasl/namespace! w 'otium.core)
+  (%set-namespace 'otium.core)
+  (file! w path))
+
+;; A module section: loaded when a native process requires the module.
+(def (module! w name directory)
+  (let ((path (str directory "/" (string-replace (symbol->string name) "." "/") ".ot"))
+        (saved (current-ns)))
+    (fasl/module! w name)
+    (fasl/source! w path)
+    (%set-namespace name)
+    (file! w path)
+    (%set-namespace saved)
+    (fasl/end-module! w)))
+
+;; Write the boot file: the expander and core library, loaded at startup,
+;; and modules native processes load from it instead of source.
+(def (build out library primitives modules)
+  (let ((w (fasl/make-writer)) (saved (current-ns)))
+    (fasl/source! w nil)
+    ;; Each library file starts in the core namespace, as the runtime loads it.
+    (library-file! w (str library "/otium/expander.ot"))
+    (fasl/namespace! w 'otium.core)
+    (%set-namespace 'otium.core)
+    (for ((form :in (%read-forms adapters))) (top! w form))
+    (library-file! w primitives)
+    (library-file! w (str library "/otium/core.ot"))
+    (%set-namespace saved)
+    (for ((name :in modules)) (module! w name library))
+    (let ((port (open-binary-output-file out)))
+      (write-bytevector (fasl/finish w) port)
+      (close-port port))))
+
+;; The standard boot file: the expander, core, and the compiler's modules.
+(def (build-standard out)
+  (build out "lib" "c/src/primitives.ot"
+         '(otium.loop otium.compiler.convert otium.compiler.lower otium.compiler.alloc
+           otium.compiler.emit otium.compiler.fasl otium.compiler)))
+
+;; Compile a program file to a fasl that a native process loads after its
+;; boot file, in the user namespace, for testing.
+(def (compile-file path out)
+  (let ((w (fasl/make-writer)) (saved (current-ns)))
+    (put! w :evaluate #t)
+    (fasl/source! w path)
+    (fasl/namespace! w 'user)
+    (%set-namespace 'user)
+    (file! w path)
+    (%set-namespace saved)
+    (let ((port (open-binary-output-file out)))
+      (write-bytevector (fasl/finish w) port)
+      (close-port port))))

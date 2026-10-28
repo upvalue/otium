@@ -14,6 +14,11 @@ build:
     @test -d "$OTIUM_BUILD/meson-info" || meson setup "$OTIUM_BUILD"
     meson compile -C "$OTIUM_BUILD"
 
+# Build the boot file native processes start from: the VM compiles the
+# expander, core and the native compiler to native code
+boot: build
+    ./otium -L lib -e '(require otium.compiler.boot :as boot) (boot/build-standard "{{env("OTIUM_BUILD", builds / "default")}}/otium.boot")' > /dev/null
+
 # Run tests; pass suite names (lang, c, native, gpu, bench) or test names
 test *args: build
     tools/meson-test default "$@"

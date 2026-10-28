@@ -149,7 +149,7 @@ bool ot_number_value(ot_value v, double* out) {
     return true;
   }
   if (!oti_kind(v, K_FLOAT)) return false;
-  memcpy(out, object_bytes(v), sizeof(*out));
+  *out = oti_as_float(v)->value;
   return true;
 }
 

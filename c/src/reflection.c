@@ -83,8 +83,7 @@ static ot_value reflection_describe(ot_state* rt, size_t first, size_t count) {
     return 0;
   }
   size_t n;
-  memcpy(&n, object_bytes(value), sizeof(n));
-  const char* name = (char*)object_bytes(value) + sizeof(n);
+  const char* name = oti_text_bytes(value, &n);
   uint32_t index = oti_lookup_global(rt, name, n);
   /* Special forms and builtins are documented in lib/catalog/runtime.json. */
   char key[64];

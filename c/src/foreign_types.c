@@ -38,8 +38,7 @@ const oti_scalar oti_foreign_scalars[AGGREGATE] = {
 int oti_foreign_scalar(ot_state* rt, ot_value name, bool memory) {
   if (oti_kind(name, K_SYMBOL)) {
     size_t length;
-    memcpy(&length, object_bytes(name), sizeof(length));
-    const char* s = (const char*)object_bytes(name) + sizeof(length);
+    const char* s = oti_text_bytes(name, &length);
     for (size_t i = 0; i < sizeof(oti_foreign_scalars) / sizeof(oti_foreign_scalars[0]); i++)
       if (strlen(oti_foreign_scalars[i].name) == length &&
           !memcmp(oti_foreign_scalars[i].name, s, length)) {

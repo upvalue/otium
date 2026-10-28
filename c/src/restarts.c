@@ -50,8 +50,7 @@ static ot_value find(ot_state* rt, ot_value name) {
   size_t length = 0;
   const char* text = NULL;
   if (!exact) {
-    memcpy(&length, object_bytes(name), sizeof(length));
-    text = (char*)object_bytes(name) + sizeof(length);
+    text = oti_text_bytes(name, &length);
     if (oti_kind(name, K_KEYWORD)) {
       text++;
       length--;
@@ -64,8 +63,8 @@ static ot_value find(ot_state* rt, ot_value name) {
     } else {
       ot_value symbol = oti_as_restart(r)->name;
       size_t n;
-      memcpy(&n, object_bytes(symbol), sizeof(n));
-      if (n == length && !memcmp((char*)object_bytes(symbol) + sizeof(n), text, n)) return r;
+      const char* s = oti_text_bytes(symbol, &n);
+      if (n == length && !memcmp(s, text, n)) return r;
     }
   }
   return OT_NIL;

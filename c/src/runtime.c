@@ -442,16 +442,15 @@ ot_value oti_text(ot_state* rt, uint32_t kind, const char* text, size_t length) 
   ot_value v = oti_alloc(rt, kind, 0,
                          sizeof(size_t) + length + 1 + (kind == K_SYMBOL ? sizeof(uint64_t) : 0));
   if (v) {
-    unsigned char* bytes = object_bytes(v);
-    memcpy(bytes, &length, sizeof(length));
-    memcpy(bytes + sizeof(length), text, length);
+    oti_as_bytes(v)->length = length;
+    memcpy(oti_as_bytes(v)->bytes, text, length);
   }
   return v;
 }
 
 ot_value oti_float(ot_state* rt, double number) {
   ot_value v = oti_alloc(rt, K_FLOAT, 0, sizeof(double));
-  if (v) memcpy(object_bytes(v), &number, sizeof(number));
+  if (v) oti_as_float(v)->value = number;
   return v;
 }
 
@@ -1075,16 +1074,12 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
     }
   } else if ((v & 255) == TAG_BUILTIN) fputs("#<builtin>", out);
   else if (oti_kind(v, K_FLOAT)) {
-    double d;
     char buffer[64];
-    memcpy(&d, object_bytes(v), sizeof(d));
-    oti_format_float(d, buffer, sizeof(buffer));
+    oti_format_float(oti_as_float(v)->value, buffer, sizeof(buffer));
     fputs(buffer, out);
   } else if (oti_kind(v, K_STRING) || oti_kind(v, K_SYMBOL) || oti_kind(v, K_KEYWORD)) {
-    size_t n;
-    unsigned char* s = object_bytes(v);
-    memcpy(&n, s, sizeof(n));
-    s += sizeof(n);
+    size_t n = oti_bytes_length(v);
+    const unsigned char* s = oti_bytes_data(v);
     if (oti_kind(v, K_STRING) && depth) {
       fputc('"', out);
       for (size_t i = 0; i < n; i++) {
@@ -1106,7 +1101,7 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
   } else if (oti_kind(v, K_RECORD) || oti_kind(v, K_RECORD_TYPE)) {
     bool descriptor = oti_kind(v, K_RECORD_TYPE);
     fputs(descriptor ? "#<record-type " : "#<record ", out);
-    print_value(out, object_fields(descriptor ? v : oti_as_record(v)->type)[0], depth + 1);
+    print_value(out, oti_as_record_type(descriptor ? v : oti_as_record(v)->type)->name, depth + 1);
     fputc('>', out);
   } else if (oti_kind(v, K_INSTANCE)) {
     fputs("#<", out);
@@ -1127,7 +1122,7 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
     fputc(')', out);
   } else if (oti_kind(v, K_ARRAY)) {
     oti_array_obj* info = oti_as_array(v);
-    ot_value* items = info->length ? object_fields(info->data) : NULL;
+    ot_value* items = info->length ? oti_as_array_data(info->data)->items : NULL;
     fputc('[', out);
     for (size_t i = 0; i < info->length; i++) {
       if (i) fputc(' ', out);
@@ -1136,7 +1131,7 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
     fputc(']', out);
   } else if (oti_kind(v, K_TABLE)) {
     oti_table_obj* info = oti_as_table(v);
-    ot_value* entries = info->used ? object_fields(info->data) : NULL;
+    ot_value* entries = info->used ? oti_as_table_data(info->data)->entries : NULL;
     fputc('{', out);
     size_t printed = 0;
     for (size_t i = 0; i < info->used; i++)

@@ -57,7 +57,7 @@ static ot_value vm_call_primitive(ot_state* rt, size_t call, size_t argc) {
 bool oti_enter(ot_state* rt, size_t call, size_t argc, bool tail) {
   ot_value closure = rt->stack[call];
   if (oti_kind(closure, K_MACRO)) {
-    closure = object_fields(closure)[0];
+    closure = oti_as_macro(closure)->expander;
     rt->stack[call] = closure;
   }
   if (oti_kind(closure, K_GENERIC) || oti_kind(closure, K_NEXT)) {
@@ -65,9 +65,7 @@ bool oti_enter(ot_state* rt, size_t call, size_t argc, bool tail) {
     closure = rt->stack[call];
   }
   if (!oti_kind(closure, K_CLOSURE)) return oti_callable_error(rt, closure);
-  uint32_t id;
-  memcpy(&id, object_bytes(closure), sizeof(id));
-  oti_function* fn = rt->functions[id];
+  oti_function* fn = rt->functions[oti_closure_function(closure)];
   if (argc < fn->arity || (!fn->rest && argc > fn->arity + fn->optional))
     return oti_arity_error(rt, fn, argc);
   size_t base = tail ? rt->frames[rt->frame_count - 1].base : call;
@@ -93,8 +91,8 @@ bool oti_enter(ot_state* rt, size_t call, size_t argc, bool tail) {
         oti_roots_pop(&rt->heap, &root);
         return false;
       }
-      object_fields(pair)[0] = rt->stack[call + i];
-      object_fields(pair)[1] = rest;
+      oti_as_pair(pair)->car = rt->stack[call + i];
+      oti_as_pair(pair)->cdr = rest;
       rest = pair;
     }
     oti_roots_pop(&rt->heap, &root);
@@ -131,8 +129,8 @@ bool oti_apply(ot_state* rt, size_t call, size_t argc, bool tail) {
     while (oti_kind(cursor, K_PAIR)) {
       if (length >= rt->stack_limit) return oti_error(rt, "VM stack limit exceeded");
       length++;
-      cursor = object_fields(cursor)[1];
-      if (!(length & 1)) slow = object_fields(slow)[1];
+      cursor = oti_cdr(cursor);
+      if (!(length & 1)) slow = oti_cdr(slow);
       if (cursor != OT_EMPTY && cursor == slow)
         return oti_error(rt, "apply needs an acyclic proper list");
     }
@@ -144,12 +142,12 @@ bool oti_apply(ot_state* rt, size_t call, size_t argc, bool tail) {
     if (call + 1 + count > rt->stack_capacity && !oti_stack(rt, call + 1 + count)) return false;
     memmove(rt->stack + call, rt->stack + call + 1, (prefix + 1) * sizeof(ot_value));
     if (array && length) {
-      memcpy(rt->stack + call + 1 + prefix, object_fields(object_fields(list)[0]),
+      memcpy(rt->stack + call + 1 + prefix, oti_as_array_data(oti_as_array(list)->data)->items,
              length * sizeof(ot_value));
     } else
       for (size_t i = 0; i < length; i++) {
-        rt->stack[call + 1 + prefix + i] = object_fields(list)[0];
-        list = object_fields(list)[1];
+        rt->stack[call + 1 + prefix + i] = oti_car(list);
+        list = oti_cdr(list);
       }
     argc = count;
     /* Spread arguments may pass the caller's top; the stack never shrinks
@@ -170,7 +168,7 @@ bool oti_apply(ot_state* rt, size_t call, size_t argc, bool tail) {
 bool oti_execute(ot_state* rt, uint32_t function, ot_value* result) {
   ot_value closure = oti_alloc(rt, K_CLOSURE, 0, sizeof(function));
   if (!closure) return false;
-  memcpy(object_bytes(closure), &function, sizeof(function));
+  oti_closure_set_function(closure, function);
   *result = oti_call_list(rt, closure, OT_EMPTY);
   return *result != 0;
 }
@@ -207,7 +205,7 @@ static ot_value vm_builtin(ot_state* rt, unsigned id, ot_value a, ot_value b, si
 
 static bool vm_float(ot_value v, double* out) {
   if (!oti_kind(v, K_FLOAT)) return false;
-  memcpy(out, object_bytes(v), sizeof(*out));
+  *out = oti_as_float(v)->value;
   return true;
 }
 
@@ -246,11 +244,12 @@ static bool vm_closure(ot_state* rt, ot_value* registers, uint32_t id, ot_value*
   oti_function* child = rt->functions[id];
   ot_value v = oti_alloc(rt, K_CLOSURE, (uint32_t)child->capture_count, sizeof(uint32_t));
   if (!v) return false;
-  memcpy(object_bytes(v), &id, sizeof(id));
+  oti_closure_set_function(v, id);
+  ot_value* captures = oti_as_closure(v)->captures;
   for (size_t i = 0; i < child->capture_count; i++) {
     oti_capture capture = child->captures[i];
-    object_fields(v)[i] =
-        capture.local ? registers[capture.index] : object_fields(registers[0])[capture.index];
+    captures[i] = capture.local ? registers[capture.index]
+                                : oti_as_closure(registers[0])->captures[capture.index];
   }
   *out = v;
   return true;
@@ -495,11 +494,11 @@ next:
     NEXT();
   }
   CASE(OP_UPVALUE) {
-    R[ins.a] = object_fields(R[0])[ins.b];
+    R[ins.a] = oti_as_closure(R[0])->captures[ins.b];
     NEXT();
   }
   CASE(OP_UPVALUE_BOX) {
-    v = object_fields(object_fields(R[0])[ins.b])[0];
+    v = oti_as_box(oti_as_closure(R[0])->captures[ins.b])->value;
     if (VM_UNLIKELY(v == V_UNBOUND)) {
       oti_error(rt, "uninitialized captured binding");
       FAIL();
@@ -508,18 +507,18 @@ next:
     NEXT();
   }
   CASE(OP_SET_UPVALUE) {
-    object_fields(object_fields(R[0])[ins.b])[0] = R[ins.a];
+    oti_as_box(oti_as_closure(R[0])->captures[ins.b])->value = R[ins.a];
     NEXT();
   }
   CASE(OP_BOX) {
     v = oti_alloc(rt, K_BOX, 1, 0);
     if (!v) FAIL();
-    object_fields(v)[0] = R[ins.a];
+    oti_as_box(v)->value = R[ins.a];
     R[ins.a] = v;
     NEXT();
   }
   CASE(OP_UNBOX) {
-    v = object_fields(R[ins.b])[0];
+    v = oti_as_box(R[ins.b])->value;
     if (VM_UNLIKELY(v == V_UNBOUND)) {
       oti_error(rt, "uninitialized local");
       FAIL();
@@ -528,7 +527,7 @@ next:
     NEXT();
   }
   CASE(OP_SET_BOX) {
-    object_fields(R[ins.a])[0] = R[ins.b];
+    oti_as_box(R[ins.a])->value = R[ins.b];
     NEXT();
   }
   CASE(OP_CHECK) {
@@ -574,9 +573,7 @@ next:
     argc = ins.b;
   call:
     if (VM_LIKELY(oti_kind(v, K_CLOSURE))) {
-      uint32_t id;
-      memcpy(&id, object_bytes(v), sizeof(id));
-      oti_function* callee = rt->functions[id];
+      oti_function* callee = rt->functions[oti_closure_function(v)];
       /* Runtime fields are read before any store: a stack store could alias them. */
       size_t callee_base = base + ins.a, top = callee_base + 1 + callee->locals, old = rt->sp;
       size_t count = rt->frame_count;
@@ -625,9 +622,7 @@ next:
     argc = ins.b;
   tail_call:
     if (VM_LIKELY(oti_kind(v, K_CLOSURE))) {
-      uint32_t id;
-      memcpy(&id, object_bytes(v), sizeof(id));
-      oti_function* callee = rt->functions[id];
+      oti_function* callee = rt->functions[oti_closure_function(v)];
       size_t top = base + 1 + callee->locals, old = rt->sp, floor = frame->floor;
       if (VM_LIKELY(argc == callee->arity && !callee->variadic && top <= rt->stack_room)) {
         ot_value* stack = rt->stack;
@@ -755,8 +750,8 @@ next:
   CASE(OP_MAKE_PARAM) {
     v = oti_alloc(rt, K_PARAM, 2, 0);
     if (!v) FAIL();
-    object_fields(v)[0] = R[ins.b];
-    object_fields(v)[1] = R[ins.c];
+    oti_as_param(v)->name = R[ins.b];
+    oti_as_param(v)->value = R[ins.c];
     R[ins.a] = v;
     NEXT();
   }
@@ -868,15 +863,15 @@ next:
   CASE(OP_CONS) {
     v = oti_alloc(rt, K_PAIR, 2, 0);
     if (!v) FAIL();
-    object_fields(v)[0] = R[ins.b];
-    object_fields(v)[1] = R[ins.c];
+    oti_as_pair(v)->car = R[ins.b];
+    oti_as_pair(v)->cdr = R[ins.c];
     R[ins.a] = v;
     NEXT();
   }
   CASE(OP_CAR)
   CASE(OP_CDR) {
     ot_value x = R[ins.b];
-    if (VM_LIKELY(oti_kind(x, K_PAIR))) v = object_fields(x)[ins.op == OP_CDR];
+    if (VM_LIKELY(oti_kind(x, K_PAIR))) v = ins.op == OP_CDR ? oti_cdr(x) : oti_car(x);
     else SLOW(vm_builtin_id(ins.op), x, OT_NIL, 1);
     R[ins.a] = v;
     NEXT();

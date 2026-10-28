@@ -4,12 +4,15 @@
 #include <inttypes.h>
 #include <math.h>
 
+/* A symbol's serial follows its text and NUL, unaligned. */
 uint64_t oti_symbol_id(ot_value v) {
-  size_t n;
-  oti_text_bytes(v, &n);
   uint64_t id;
-  memcpy(&id, object_bytes(v) + sizeof(size_t) + n + 1, sizeof(id));
+  memcpy(&id, oti_bytes_data(v) + oti_bytes_length(v) + 1, sizeof(id));
   return id;
+}
+
+void oti_symbol_set_id(ot_value v, uint64_t id) {
+  memcpy(oti_bytes_data(v) + oti_bytes_length(v) + 1, &id, sizeof(id));
 }
 
 ot_value oti_intern(ot_state* rt, unsigned kind, const char* bytes, size_t n) {
@@ -85,9 +88,7 @@ static ot_value support_number_string(ot_state* rt, size_t first, size_t count) 
   int n;
   if (ot_is_int(v)) n = snprintf(buffer, sizeof(buffer), "%" PRIdPTR, ot_to_int(v));
   else if (oti_kind(v, K_FLOAT)) {
-    double real;
-    memcpy(&real, object_bytes(v), sizeof(real));
-    n = (int)oti_format_float(real, buffer, sizeof(buffer));
+    n = (int)oti_format_float(oti_as_float(v)->value, buffer, sizeof(buffer));
   } else return oti_fail(rt, "expected number");
   return oti_text(rt, K_STRING, buffer, (size_t)n);
 }
@@ -98,7 +99,7 @@ static ot_value support_sign_p(ot_state* rt, bool positive, size_t first, size_t
   ot_value v = rt->stack[first];
   double number;
   if (ot_is_int(v)) number = (double)ot_to_int(v);
-  else if (oti_kind(v, K_FLOAT)) memcpy(&number, object_bytes(v), sizeof(number));
+  else if (oti_kind(v, K_FLOAT)) number = oti_as_float(v)->value;
   else return oti_fail(rt, "expected number");
   return ot_bool(positive ? number > 0 : number < 0);
 }
@@ -204,9 +205,9 @@ static ot_value support_expander_locate(ot_state* rt, size_t first, size_t count
   ot_value pair = oti_alloc(rt, K_PAIR, 2, OTI_LOCATED_PAIR_BYTES);
   if (!pair) return 0;
   ot_value to = rt->stack[first + 1];
-  object_fields(pair)[0] = object_fields(to)[0];
-  object_fields(pair)[1] = object_fields(to)[1];
-  memcpy(object_bytes(pair), &offset, sizeof(offset));
+  oti_as_pair(pair)->car = oti_car(to);
+  oti_as_pair(pair)->cdr = oti_cdr(to);
+  oti_pair_set_offset(pair, offset);
   return pair;
 }
 
@@ -307,9 +308,7 @@ static ot_value support_gensym(ot_state* rt, size_t first, size_t count) {
   int written = snprintf(name + n, 32, "#%" PRIu64, serial);
   ot_value result = oti_text(rt, K_SYMBOL, name, n + (size_t)written);
   free(name);
-  if (result)
-    memcpy(object_bytes(result) + sizeof(size_t) + n + (size_t)written + 1, &serial,
-           sizeof(serial));
+  if (result) oti_symbol_set_id(result, serial);
   return result;
 }
 

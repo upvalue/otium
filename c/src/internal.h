@@ -816,6 +816,7 @@ ot_value oti_call_list(ot_state* rt, ot_value function, ot_value args);
  * reads. Calls the interrupt handler, if any, when the flag is set. */
 bool oti_interrupt_point(ot_state* rt);
 uint64_t oti_symbol_id(ot_value symbol);
+void oti_symbol_set_id(ot_value symbol, uint64_t id);
 ot_value oti_builtin(ot_state* rt, unsigned id, size_t first, size_t count);
 int oti_builtin_index(const char* name);
 bool oti_enter(ot_state* rt, size_t call, size_t argc, bool tail);
@@ -850,12 +851,6 @@ static inline bool oti_kind(ot_value v, unsigned kind) {
 
 static inline bool oti_truth(ot_value v) { return v != OT_NIL && v != OT_FALSE; }
 
-/* The bytes of a string, symbol or keyword. */
-static inline const char* oti_text_bytes(ot_value v, size_t* length) {
-  memcpy(length, object_bytes(v), sizeof(*length));
-  return (const char*)object_bytes(v) + sizeof(*length);
-}
-
 /* A non-negative integer argument as a size. */
 static inline bool oti_natural(ot_value v, size_t* n) {
   if (!ot_is_int(v) || ot_to_int(v) < 0) return false;
@@ -863,8 +858,6 @@ static inline bool oti_natural(ot_value v, size_t* n) {
   return true;
 }
 
-size_t oti_bytes_length(ot_value v);
-unsigned char* oti_bytes_data(ot_value v);
 ot_value oti_decode_error(ot_state* rt, size_t position);
 
 bool oti_install_restarts(ot_state* rt, size_t first, size_t count, size_t target);
@@ -887,8 +880,8 @@ ot_value oti_ffi_error(ot_state* rt, const char* operation, const char* reason,
  * the header, then the traced fields, then the opaque bytes. Kinds with a
  * variable number of fields end in a flexible array. OTI_LAYOUT checks that
  * the traced fields come first; allocation sites must pass the same field
- * count. Text, floats, bytevectors, closures and record types are still
- * accessed through object_fields and object_bytes. */
+ * count. Kinds with both a variable number of fields and opaque bytes reach
+ * the bytes through an accessor next to their struct. */
 #define OTI_FIELDS_SIZE(n) (sizeof(oti_object_header) + (n) * sizeof(ot_value))
 #define OTI_LAYOUT(type, fields, first_byte)                                                       \
   _Static_assert(offsetof(type, first_byte) == OTI_FIELDS_SIZE(fields), #type " layout")
@@ -925,6 +918,58 @@ typedef struct {
 
 OTI_FIELDS_ONLY(oti_macro_obj, 1);
 
+typedef struct {
+  oti_object_header header;
+  double value;
+} oti_float_obj;
+
+OTI_LAYOUT(oti_float_obj, 0, value);
+
+/* Strings, symbols, keywords and bytevectors: a length, then that many bytes.
+ * Text follows its bytes with a NUL, and a symbol then holds its gensym
+ * serial (see oti_symbol_id). */
+typedef struct {
+  oti_object_header header;
+  size_t length;
+  unsigned char bytes[];
+} oti_bytes_obj;
+
+OTI_LAYOUT(oti_bytes_obj, 0, length);
+
+/* K_BUFFER_DATA: the bytes of a string buffer or string output port. */
+typedef struct {
+  oti_object_header header;
+  unsigned char bytes[];
+} oti_buffer_data_obj;
+
+OTI_FIELDS_ONLY(oti_buffer_data_obj, 0);
+
+/* One field per captured value, then the function id in the opaque bytes
+ * (see oti_closure_function). */
+typedef struct {
+  oti_object_header header;
+  ot_value captures[];
+} oti_closure_obj;
+
+OTI_FIELDS_ONLY(oti_closure_obj, 0);
+
+/* K_ARRAY_DATA: the items of an array or the slot values of an instance. */
+typedef struct {
+  oti_object_header header;
+  ot_value items[];
+} oti_array_data_obj;
+
+OTI_FIELDS_ONLY(oti_array_data_obj, 0);
+
+/* K_TABLE_DATA: key/value pairs as fields, then the bucket index in the
+ * opaque bytes (see oti_table_buckets). */
+typedef struct {
+  oti_object_header header;
+  ot_value entries[];
+} oti_table_data_obj;
+
+OTI_FIELDS_ONLY(oti_table_data_obj, 0);
+
 /* data is a K_ARRAY_DATA object of capacity fields. */
 typedef struct {
   oti_object_header header;
@@ -953,7 +998,7 @@ typedef struct {
 
 OTI_LAYOUT(oti_buffer_obj, 1, length);
 
-/* layout is a K_LAYOUT object with LAYOUT_STRIDE fields per slot. */
+/* layout is a K_LAYOUT object. */
 typedef struct {
   oti_object_header header;
   ot_value name, parent, layout;
@@ -965,7 +1010,22 @@ typedef struct {
 OTI_LAYOUT(oti_class_obj, 4, abstract);
 
 /* A slot's key, initializer and whether it is a property (true) or state. */
-enum { LAYOUT_KEY, LAYOUT_INIT, LAYOUT_PROPERTY, LAYOUT_STRIDE };
+typedef struct {
+  ot_value key, init, property;
+} oti_slot;
+
+/* The number of fields each slot takes in a layout. */
+#define OTI_SLOT_FIELDS (sizeof(oti_slot) / sizeof(ot_value))
+
+_Static_assert(sizeof(oti_slot) == 3 * sizeof(ot_value), "oti_slot layout");
+
+/* K_LAYOUT: a class's slots, in instance data order. */
+typedef struct {
+  oti_object_header header;
+  oti_slot slots[];
+} oti_layout_obj;
+
+OTI_FIELDS_ONLY(oti_layout_obj, 0);
 
 /* layout is the class layout the instance was built with; data is a
  * K_ARRAY_DATA object of its slot values. */
@@ -1023,6 +1083,16 @@ typedef struct {
 
 OTI_FIELDS_ONLY(oti_record_obj, 1);
 
+/* One keyword per record field, then whether records of the type are
+ * immutable in the opaque bytes (see oti_record_type_immutable). */
+typedef struct {
+  oti_object_header header;
+  ot_value name;
+  ot_value keys[];
+} oti_record_type_obj;
+
+OTI_FIELDS_ONLY(oti_record_type_obj, 1);
+
 static inline oti_pair_obj* oti_as_pair(ot_value v) { return OTI_CAST(oti_pair_obj, K_PAIR, v); }
 
 /* Pairs that start lists read for the expander carry the list's source offset
@@ -1030,12 +1100,17 @@ static inline oti_pair_obj* oti_as_pair(ot_value v) { return OTI_CAST(oti_pair_o
 #define OTI_LOCATED_PAIR_BYTES sizeof(size_t)
 
 static inline bool oti_pair_offset(ot_value v, size_t* offset) {
-  if (!oti_kind(v, K_PAIR) || ((oti_object_header*)v)->size < sizeof(oti_object_header) +
-                                                                  2 * sizeof(ot_value) +
-                                                                  OTI_LOCATED_PAIR_BYTES)
+  if (!oti_kind(v, K_PAIR) ||
+      oti_as_pair(v)->header.size < sizeof(oti_pair_obj) + OTI_LOCATED_PAIR_BYTES)
     return false;
   memcpy(offset, object_bytes(v), sizeof(*offset));
   return true;
+}
+
+/* Record offset in a pair allocated with OTI_LOCATED_PAIR_BYTES. */
+static inline void oti_pair_set_offset(ot_value v, size_t offset) {
+  (void)oti_as_pair(v);
+  memcpy(object_bytes(v), &offset, sizeof(offset));
 }
 
 static inline oti_macro_obj* oti_as_macro(ot_value v) {
@@ -1082,6 +1157,79 @@ static inline oti_restart_obj* oti_as_restart(ot_value v) {
 
 static inline oti_record_obj* oti_as_record(ot_value v) {
   return OTI_CAST(oti_record_obj, K_RECORD, v);
+}
+
+static inline oti_box_obj* oti_as_box(ot_value v) { return OTI_CAST(oti_box_obj, K_BOX, v); }
+
+static inline oti_float_obj* oti_as_float(ot_value v) {
+  return OTI_CAST(oti_float_obj, K_FLOAT, v);
+}
+
+/* Unchecked: several kinds share this layout. */
+static inline oti_bytes_obj* oti_as_bytes(ot_value v) { return (oti_bytes_obj*)v; }
+
+static inline size_t oti_bytes_length(ot_value v) { return oti_as_bytes(v)->length; }
+
+static inline unsigned char* oti_bytes_data(ot_value v) { return oti_as_bytes(v)->bytes; }
+
+/* The bytes of a string, symbol or keyword. */
+static inline const char* oti_text_bytes(ot_value v, size_t* length) {
+  *length = oti_as_bytes(v)->length;
+  return (const char*)oti_as_bytes(v)->bytes;
+}
+
+static inline oti_buffer_data_obj* oti_as_buffer_data(ot_value v) {
+  return OTI_CAST(oti_buffer_data_obj, K_BUFFER_DATA, v);
+}
+
+static inline oti_closure_obj* oti_as_closure(ot_value v) {
+  return OTI_CAST(oti_closure_obj, K_CLOSURE, v);
+}
+
+static inline uint32_t oti_closure_function(ot_value v) {
+  uint32_t id;
+  (void)oti_as_closure(v);
+  memcpy(&id, object_bytes(v), sizeof(id));
+  return id;
+}
+
+static inline void oti_closure_set_function(ot_value v, uint32_t id) {
+  (void)oti_as_closure(v);
+  memcpy(object_bytes(v), &id, sizeof(id));
+}
+
+static inline oti_array_data_obj* oti_as_array_data(ot_value v) {
+  return OTI_CAST(oti_array_data_obj, K_ARRAY_DATA, v);
+}
+
+static inline oti_table_data_obj* oti_as_table_data(ot_value v) {
+  return OTI_CAST(oti_table_data_obj, K_TABLE_DATA, v);
+}
+
+static inline uint32_t* oti_table_buckets(ot_value v) {
+  (void)oti_as_table_data(v);
+  return object_bytes(v);
+}
+
+static inline oti_layout_obj* oti_as_layout(ot_value v) {
+  return OTI_CAST(oti_layout_obj, K_LAYOUT, v);
+}
+
+static inline size_t oti_layout_slots(ot_value v) {
+  return oti_as_layout(v)->header.fields / OTI_SLOT_FIELDS;
+}
+
+static inline oti_record_type_obj* oti_as_record_type(ot_value v) {
+  return OTI_CAST(oti_record_type_obj, K_RECORD_TYPE, v);
+}
+
+static inline size_t oti_record_type_fields(ot_value v) {
+  return oti_as_record_type(v)->header.fields - 1;
+}
+
+static inline bool* oti_record_type_immutable(ot_value v) {
+  (void)oti_as_record_type(v);
+  return object_bytes(v);
 }
 
 static inline ot_value oti_car(ot_value pair) { return oti_as_pair(pair)->car; }

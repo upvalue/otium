@@ -78,7 +78,7 @@ bool oti_number(ot_state* rt, ot_value v, double* out) {
     return true;
   }
   if (oti_kind(v, K_FLOAT)) {
-    memcpy(out, object_bytes(v), sizeof(*out));
+    *out = oti_as_float(v)->value;
     return true;
   }
   return oti_error(rt, "expected a number");
@@ -364,7 +364,7 @@ static ot_value integer_builtin(ot_state* rt, size_t first, size_t count) {
   double real;
   if (ot_is_int(a)) return OT_TRUE;
   if (!oti_kind(a, K_FLOAT)) return OT_FALSE;
-  memcpy(&real, object_bytes(a), sizeof(real));
+  real = oti_as_float(a)->value;
   return ot_bool(isfinite(real) && trunc(real) == real);
 }
 

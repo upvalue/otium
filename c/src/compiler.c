@@ -481,16 +481,13 @@ static ot_value datum(oti_compiler* c, const oti_ast* a) {
         ot_value v = rt->constants[i];
         if (!oti_kind(v, kind)) continue;
         size_t length;
-        unsigned char* bytes = object_bytes(v);
-        memcpy(&length, bytes, sizeof(length));
+        const char* bytes = oti_text_bytes(v, &length);
         if ((kind != K_SYMBOL || oti_symbol_id(v) == a->symbol_id) && length == a->as.text.size &&
-            !memcmp(bytes + sizeof(length), a->as.text.data, length))
+            !memcmp(bytes, a->as.text.data, length))
           return v;
       }
       ot_value v = oti_text(rt, kind, a->as.text.data, a->as.text.size);
-      if (v && kind == K_SYMBOL)
-        memcpy(object_bytes(v) + sizeof(size_t) + a->as.text.size + 1, &a->symbol_id,
-               sizeof(a->symbol_id));
+      if (v && kind == K_SYMBOL) oti_symbol_set_id(v, a->symbol_id);
       if (v && oti_constant(rt, v) == UINT32_MAX) return 0;
       return v;
     }
@@ -504,19 +501,16 @@ static ot_value datum(oti_compiler* c, const oti_ast* a) {
         bool located = c->locate && slots[0] == OT_EMPTY;
         ot_value pair = oti_alloc(rt, K_PAIR, 2, located ? OTI_LOCATED_PAIR_BYTES : 0);
         if (!pair) break;
-        if (located) {
-          size_t offset = a->offset;
-          memcpy(object_bytes(pair), &offset, sizeof(offset));
-        }
-        object_fields(pair)[0] = slots[2];
-        object_fields(pair)[1] = OT_EMPTY;
+        if (located) oti_pair_set_offset(pair, a->offset);
+        oti_as_pair(pair)->car = slots[2];
+        oti_as_pair(pair)->cdr = OT_EMPTY;
         if (slots[0] == OT_EMPTY) slots[0] = pair;
-        else object_fields(slots[1])[1] = pair;
+        else oti_as_pair(slots[1])->cdr = pair;
         slots[1] = pair;
       }
       if (!oti_failed(rt) && a->as.list.tail) {
         slots[2] = datum(c, a->as.list.tail);
-        if (slots[2]) object_fields(slots[1])[1] = slots[2];
+        if (slots[2]) oti_as_pair(slots[1])->cdr = slots[2];
       }
       ot_value result = oti_failed(rt) ? 0 : slots[0];
       oti_roots_pop(&rt->heap, &roots);
@@ -552,17 +546,17 @@ static oti_ast* syntax_value(oti_compiler* c, ot_value v, size_t offset, unsigne
     a->as.integer = v >> 8;
   } else if (oti_kind(v, K_FLOAT)) {
     a->kind = AST_FLOAT;
-    memcpy(&a->as.real, object_bytes(v), sizeof(double));
+    a->as.real = oti_as_float(v)->value;
   } else if (oti_kind(v, K_STRING) || oti_kind(v, K_SYMBOL) || oti_kind(v, K_KEYWORD)) {
     a->kind = oti_kind(v, K_STRING) ? AST_STRING : oti_kind(v, K_SYMBOL) ? AST_SYMBOL : AST_KEYWORD;
     size_t n;
-    memcpy(&n, object_bytes(v), sizeof(n));
+    const char* text = oti_text_bytes(v, &n);
     char* copy = oti_arena_alloc(c->expansion_arena, n + 1);
     if (!copy) {
       error(c, NULL, "macro syntax memory limit exceeded");
       return NULL;
     }
-    memcpy(copy, object_bytes(v) + sizeof(n), n);
+    memcpy(copy, text, n);
     copy[n] = 0;
     a->as.text.data = copy;
     a->as.text.size = n;
@@ -572,12 +566,12 @@ static oti_ast* syntax_value(oti_compiler* c, ot_value v, size_t offset, unsigne
     oti_ast** next = &a->as.list.first;
     ot_value slow = v, fast = v;
     while (oti_kind(v, K_PAIR)) {
-      *next = syntax_value(c, object_fields(v)[0], offset, depth + 1);
+      *next = syntax_value(c, oti_car(v), offset, depth + 1);
       if (!*next) return NULL;
       next = &(*next)->next;
-      v = object_fields(v)[1];
-      if (oti_kind(slow, K_PAIR)) slow = object_fields(slow)[1];
-      for (unsigned i = 0; i < 2 && oti_kind(fast, K_PAIR); i++) fast = object_fields(fast)[1];
+      v = oti_cdr(v);
+      if (oti_kind(slow, K_PAIR)) slow = oti_cdr(slow);
+      for (unsigned i = 0; i < 2 && oti_kind(fast, K_PAIR); i++) fast = oti_cdr(fast);
       if (oti_kind(fast, K_PAIR) && fast == slow) {
         error(c, NULL, "cyclic macro syntax");
         return NULL;
@@ -668,8 +662,8 @@ static size_t qq_join(oti_qq_plan* plan, size_t left, size_t right, bool splice)
   if (!splice && plan->nodes[left].kind == QQ_CONSTANT && plan->nodes[right].kind == QQ_CONSTANT) {
     ot_value pair = oti_alloc(plan->compiler->rt, K_PAIR, 2, 0);
     if (!pair) return SIZE_MAX;
-    object_fields(pair)[0] = plan->values[left];
-    object_fields(pair)[1] = plan->values[right];
+    oti_as_pair(pair)->car = plan->values[left];
+    oti_as_pair(pair)->cdr = plan->values[right];
     return qq_constant(plan, pair);
   }
   return qq_add(plan, splice ? QQ_APPEND : QQ_CONS, left, right, NULL, OT_NIL);
@@ -2055,8 +2049,8 @@ oti_ast* oti_expand_form(ot_state* rt, const oti_ast* form, oti_arena* arena) {
   if (values[0]) {
     ot_value pair = oti_alloc(rt, K_PAIR, 2, 0);
     if (pair) {
-      object_fields(pair)[0] = values[0];
-      object_fields(pair)[1] = OT_EMPTY;
+      oti_as_pair(pair)->car = values[0];
+      oti_as_pair(pair)->cdr = OT_EMPTY;
       values[1] = pair;
     } else values[0] = 0;
   }
@@ -2080,13 +2074,13 @@ ot_value oti_read_string(ot_state* rt, ot_value string) {
     return 0;
   }
   size_t n;
-  memcpy(&n, object_bytes(string), sizeof(n));
+  const char* text = oti_text_bytes(string, &n);
   char* copy = malloc(n + 1);
   if (!copy) {
     oti_error(rt, "out of host memory");
     return 0;
   }
-  memcpy(copy, object_bytes(string) + sizeof(n), n);
+  memcpy(copy, text, n);
   copy[n] = 0;
   ot_value result = oti_read_source(rt, copy, n);
   free(copy);
@@ -2112,9 +2106,7 @@ ot_value oti_evaluator(ot_state* rt, uint32_t space) {
   for (size_t i = 0; i < rt->constant_count; i++) {
     ot_value v = rt->constants[i];
     if (!oti_kind(v, K_CLOSURE)) continue;
-    uint32_t id;
-    memcpy(&id, object_bytes(v), sizeof(id));
-    oti_function* fn = rt->functions[id];
+    oti_function* fn = rt->functions[oti_closure_function(v)];
     if (fn->evaluator && fn->namespace == space) return v;
   }
   uint32_t id = new_function(rt);
@@ -2130,6 +2122,6 @@ ot_value oti_evaluator(ot_state* rt, uint32_t space) {
     return 0;
   ot_value value = oti_alloc(rt, K_CLOSURE, 0, sizeof(id));
   if (!value) return 0;
-  memcpy(object_bytes(value), &id, sizeof(id));
+  oti_closure_set_function(value, id);
   return oti_constant(rt, value) == UINT32_MAX ? 0 : value;
 }

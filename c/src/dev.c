@@ -165,9 +165,7 @@ static ot_value dev_namespace_names(ot_state* rt, size_t first, size_t count) {
  * and the mask is negative when any number above the required count is. */
 static ot_value arity_mask(ot_state* rt, ot_value value) {
   if (!oti_kind(value, K_CLOSURE)) return OT_FALSE;
-  uint32_t id;
-  memcpy(&id, object_bytes(value), sizeof(id));
-  const oti_function* fn = rt->functions[id];
+  const oti_function* fn = rt->functions[oti_closure_function(value)];
   if (fn->arity + fn->optional > 60) return OT_FALSE;
   if (fn->rest) return ot_int(-((intptr_t)1 << fn->arity));
   return ot_int((((intptr_t)1 << (fn->optional + 1)) - 1) << fn->arity);

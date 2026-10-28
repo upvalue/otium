@@ -84,11 +84,7 @@ bool oti_reclaim(ot_state* rt) {
         else if (in.op == OP_CLOSURE) ok = mark_function(&m, oti_instruction_bc(in));
       }
     } else {
-      if (oti_kind(task.value, K_CLOSURE)) {
-        uint32_t id;
-        memcpy(&id, object_bytes(task.value), sizeof(id));
-        ok = mark_function(&m, id);
-      }
+      if (oti_kind(task.value, K_CLOSURE)) ok = mark_function(&m, oti_closure_function(task.value));
       oti_object_header* object = (oti_object_header*)task.value;
       ot_value* fields = object_fields(task.value);
       for (size_t i = 0; ok && i < object->fields; i++) ok = mark_value(&m, fields[i]);

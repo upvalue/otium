@@ -3,7 +3,7 @@
 #include <string.h>
 
 static ot_value* items(ot_value a) {
-  return oti_as_array(a)->capacity ? object_fields(oti_as_array(a)->data) : NULL;
+  return oti_as_array(a)->capacity ? oti_as_array_data(oti_as_array(a)->data)->items : NULL;
 }
 
 static bool reserve(ot_state* rt, ot_value* array, size_t needed) {
@@ -18,7 +18,7 @@ static bool reserve(ot_state* rt, ot_value* array, size_t needed) {
   ot_value storage = oti_alloc(rt, K_ARRAY_DATA, (uint32_t)grown, 0);
   if (storage) {
     if (oti_as_array(*array)->length)
-      memcpy(object_fields(storage), items(*array),
+      memcpy(oti_as_array_data(storage)->items, items(*array),
              oti_as_array(*array)->length * sizeof(ot_value));
     oti_as_array(*array)->data = storage;
     oti_as_array(*array)->capacity = grown;
@@ -99,21 +99,15 @@ ot_value oti_equal(ot_state* rt, ot_value a, ot_value b, bool keys) {
     }
     unsigned kind = object_kind(p.a);
     if (kind == K_FLOAT) {
-      double x, y;
-      memcpy(&x, object_bytes(p.a), sizeof(x));
-      memcpy(&y, object_bytes(p.b), sizeof(y));
-      if (x != y) {
+      if (oti_as_float(p.a)->value != oti_as_float(p.b)->value) {
         result = OT_FALSE;
         break;
       }
       continue;
     }
     if (kind == K_STRING || kind == K_SYMBOL || kind == K_KEYWORD) {
-      size_t x, y;
-      memcpy(&x, object_bytes(p.a), sizeof(x));
-      memcpy(&y, object_bytes(p.b), sizeof(y));
-      if (x != y ||
-          memcmp((char*)object_bytes(p.a) + sizeof(x), (char*)object_bytes(p.b) + sizeof(y), x)) {
+      size_t x = oti_bytes_length(p.a), y = oti_bytes_length(p.b);
+      if (x != y || memcmp(oti_bytes_data(p.a), oti_bytes_data(p.b), x)) {
         result = OT_FALSE;
         break;
       }
@@ -395,7 +389,7 @@ int oti_reaches(ot_value from, ot_value target) {
         result = reach(&w, items(v)[i]);
     } else {
       oti_table_obj* t = oti_as_table(v);
-      ot_value* entries = t->used ? object_fields(t->data) : NULL;
+      ot_value* entries = t->used ? oti_as_table_data(t->data)->entries : NULL;
       for (size_t i = 0; !result && i < t->used; i++)
         if (entries[2 * i + 1] != OT_NIL) {
           result = reach(&w, entries[2 * i]);

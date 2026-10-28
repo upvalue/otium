@@ -6,9 +6,7 @@ static oti_function* function(ot_state* rt, const char* name) {
   for (size_t i = 0; i < rt->global_count; i++)
     if (!strcmp(rt->global_info[i].name, name)) {
       CHECK(oti_kind(rt->globals[i], K_CLOSURE));
-      uint32_t id;
-      memcpy(&id, object_bytes(rt->globals[i]), sizeof(id));
-      return rt->functions[id];
+      return rt->functions[oti_closure_function(rt->globals[i])];
     }
   test_fail(__FILE__, __LINE__, "no global named %s", name);
 }

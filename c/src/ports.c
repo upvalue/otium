@@ -655,13 +655,15 @@ static bool append(ot_state* rt, ot_value* port, const char* bytes, size_t n) {
     if (capacity < length + n) capacity = length + n;
     ot_value data = oti_alloc(rt, K_BUFFER_DATA, 0, capacity);
     if (data) {
-      if (length) memcpy(object_bytes(data), object_bytes(port_object(*port)->buffer), length);
+      if (length)
+        memcpy(oti_as_buffer_data(data)->bytes,
+               oti_as_buffer_data(port_object(*port)->buffer)->bytes, length);
       port_object(*port)->buffer = data;
       port_object(*port)->capacity = capacity;
     }
     if (!data) return false;
   }
-  if (n) memcpy((char*)object_bytes(port_object(*port)->buffer) + length, bytes, n);
+  if (n) memcpy(oti_as_buffer_data(port_object(*port)->buffer)->bytes + length, bytes, n);
   port_object(*port)->length += n;
   return true;
 }
@@ -796,7 +798,7 @@ static ot_value port_get_output(ot_state* rt, size_t first, size_t count, ot_val
   size_t n = port_object(live[0])->length;
   char* copy = malloc(n + 1);
   if (!copy) return oti_fail(rt, "out of host memory");
-  if (n) memcpy(copy, object_bytes(port_object(live[0])->buffer), n);
+  if (n) memcpy(copy, oti_as_buffer_data(port_object(live[0])->buffer)->bytes, n);
   ot_value result;
   if (string) {
     for (size_t i = 0; i < n;) {

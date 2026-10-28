@@ -2,13 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-static size_t field_count(ot_value type) { return ((oti_object_header*)type)->fields - 1; }
-
-/* A record type's fields are its name, then one keyword per record value. */
 static size_t field_index(ot_value type, ot_value key) {
   if (!oti_kind(key, K_KEYWORD)) return SIZE_MAX;
-  for (size_t i = 0; i < field_count(type); i++)
-    if (object_fields(type)[i + 1] == key) return i;
+  for (size_t i = 0; i < oti_record_type_fields(type); i++)
+    if (oti_as_record_type(type)->keys[i] == key) return i;
   return SIZE_MAX;
 }
 
@@ -41,8 +38,8 @@ static ot_value record_make_type(ot_state* rt, size_t first, size_t count) {
   live[0] = oti_alloc(rt, K_RECORD_TYPE, (uint32_t)n + 1, sizeof(bool));
   bool ok = live[0] != 0;
   if (ok) {
-    object_fields(live[0])[0] = rt->stack[first];
-    *(bool*)object_bytes(live[0]) = rt->stack[first + 2] == OT_TRUE;
+    oti_as_record_type(live[0])->name = rt->stack[first];
+    *oti_record_type_immutable(live[0]) = rt->stack[first + 2] == OT_TRUE;
   }
   for (size_t i = 0; ok && i < n; i++) {
     ot_value name = oti_car(live[1]);
@@ -61,12 +58,12 @@ static ot_value record_make_type(ot_state* rt, size_t first, size_t count) {
     ok = key != 0;
     if (ok) {
       for (size_t j = 0; j < i; j++)
-        if (object_fields(live[0])[j + 1] == key) {
+        if (oti_as_record_type(live[0])->keys[j] == key) {
           oti_fail(rt, "duplicate record field");
           ok = false;
           break;
         }
-      object_fields(live[0])[i + 1] = key;
+      oti_as_record_type(live[0])->keys[i] = key;
     }
     live[1] = oti_cdr(live[1]);
   }
@@ -79,7 +76,8 @@ static ot_value record_new(ot_state* rt, size_t first, size_t count) {
   if (!count) return oti_fail(rt, "record-new needs a record type");
   ot_value type = rt->stack[first];
   if (!oti_kind(type, K_RECORD_TYPE)) return oti_fail(rt, "expected record type");
-  if (count - 1 != field_count(type)) return oti_fail(rt, "wrong number of record fields");
+  if (count - 1 != oti_record_type_fields(type))
+    return oti_fail(rt, "wrong number of record fields");
   ot_value record = oti_alloc(rt, K_RECORD, (uint32_t)count, 0);
   if (record) {
     oti_as_record(record)->type = rt->stack[first];
@@ -123,7 +121,7 @@ static ot_value record_set(ot_state* rt, size_t first, size_t count) {
   ot_value record = rt->stack[first], type = oti_as_record(record)->type;
   size_t index = field_index(type, rt->stack[first + 1]);
   if (index == SIZE_MAX) return oti_fail(rt, "unknown record field");
-  if (*(bool*)object_bytes(type)) return oti_fail(rt, "cannot mutate immutable record");
+  if (*oti_record_type_immutable(type)) return oti_fail(rt, "cannot mutate immutable record");
   return oti_as_record(record)->values[index] = rt->stack[first + 2];
 }
 

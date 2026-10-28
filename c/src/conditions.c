@@ -12,8 +12,7 @@ static ot_value symbol(ot_state* rt, ot_value v) {
   if (!oti_kind(v, K_KEYWORD) && !oti_kind(v, K_STRING))
     return oti_fail(rt, "condition type must be a name");
   size_t n;
-  memcpy(&n, object_bytes(v), sizeof(n));
-  const char* s = (const char*)object_bytes(v) + sizeof(n);
+  const char* s = oti_text_bytes(v, &n);
   if (oti_kind(v, K_KEYWORD)) {
     s++;
     n--;
@@ -157,7 +156,7 @@ ot_value oti_raise(ot_state* rt, size_t first, size_t count) {
   rt->raised = true;
   if (oti_kind(rt->stack[first], K_STRING) || oti_kind(condition, K_SYMBOL) ||
       oti_kind(condition, K_KEYWORD)) {
-    const char* message = (const char*)object_bytes(rt->stack[first]) + sizeof(size_t);
+    const char* message = (const char*)oti_bytes_data(rt->stack[first]);
     return oti_fail(rt, message);
   }
   return oti_fail(rt, "uncaught condition");

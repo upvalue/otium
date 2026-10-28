@@ -2,9 +2,9 @@
 #include <string.h>
 #include <stdlib.h>
 
-static ot_value* entries(ot_value t) { return object_fields(oti_as_table(t)->data); }
+static ot_value* entries(ot_value t) { return oti_as_table_data(oti_as_table(t)->data)->entries; }
 
-static uint32_t* buckets(ot_value t) { return object_bytes(oti_as_table(t)->data); }
+static uint32_t* buckets(ot_value t) { return oti_table_buckets(oti_as_table(t)->data); }
 
 static size_t mix(size_t x) {
   x ^= x >> 16;
@@ -25,16 +25,14 @@ static size_t hash(ot_value key, unsigned depth) {
     return mix(hash(oti_car(key), depth - 1) ^ (hash(oti_cdr(key), depth - 1) * 33) ^ K_PAIR);
   }
   if (kind == K_STRING || kind == K_SYMBOL || kind == K_KEYWORD) {
-    size_t length, result = kind;
-    unsigned char* text = object_bytes(key);
-    memcpy(&length, text, sizeof(length));
-    for (size_t i = 0; i < length; i++) result = result * 33 + text[sizeof(length) + i];
+    size_t length = oti_bytes_length(key), result = kind;
+    const unsigned char* text = oti_bytes_data(key);
+    for (size_t i = 0; i < length; i++) result = result * 33 + text[i];
     return mix(result);
   }
   if (kind == K_FLOAT) {
-    double d;
+    double d = oti_as_float(key)->value;
     uint64_t bits;
-    memcpy(&d, object_bytes(key), sizeof(d));
     if (d == 0) d = 0;
     memcpy(&bits, &d, sizeof(bits));
     return mix((size_t)bits ^ (size_t)(bits >> 32) ^ K_FLOAT);
@@ -119,8 +117,8 @@ static bool resize(ot_state* rt, ot_value* table) {
   ot_value storage =
       oti_alloc(rt, K_TABLE_DATA, (uint32_t)(2 * capacity), 2 * capacity * sizeof(uint32_t));
   if (!storage) return false;
-  ot_value* data = object_fields(storage);
-  uint32_t* index = object_bytes(storage);
+  ot_value* data = oti_as_table_data(storage)->entries;
+  uint32_t* index = oti_table_buckets(storage);
   size_t count = 0;
   for (size_t i = 0; i < oti_as_table(*table)->used; i++) {
     ot_value key = entries(*table)[2 * i], value = entries(*table)[2 * i + 1];
@@ -252,8 +250,8 @@ ot_value oti_table_copy_builtin(ot_state* rt, size_t first, size_t count) {
   oti_roots_pop(&rt->heap, &root);
   if (!storage) return 0;
   table = rt->stack[first];
-  memcpy(object_fields(storage), entries(table), 2 * capacity * sizeof(ot_value));
-  memcpy(object_bytes(storage), buckets(table), 2 * capacity * sizeof(uint32_t));
+  memcpy(oti_as_table_data(storage)->entries, entries(table), 2 * capacity * sizeof(ot_value));
+  memcpy(oti_table_buckets(storage), buckets(table), 2 * capacity * sizeof(uint32_t));
   oti_table_obj *to = oti_as_table(copy), *from = oti_as_table(table);
   to->data = storage;
   to->count = from->count;
@@ -281,7 +279,7 @@ static ot_value table_keys_or_values(ot_state* rt, size_t first, size_t count, b
   size_t out = 0;
   for (size_t i = 0; i < oti_as_table(table)->used; i++)
     if (entries(table)[2 * i + 1] != OT_NIL)
-      object_fields(storage)[out++] = entries(table)[2 * i + values];
+      oti_as_array_data(storage)->items[out++] = entries(table)[2 * i + values];
   oti_as_array(array)->data = storage;
   return array;
 }

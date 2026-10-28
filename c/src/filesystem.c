@@ -76,7 +76,7 @@ static ot_value directory(ot_state* rt, ot_value path) {
     live[2] = oti_text(rt, K_STRING, names[i], strlen(names[i]));
     ok = live[2] != 0;
     if (ok) {
-      object_fields(oti_as_array(live[1])->data)[i] = live[2];
+      oti_as_array_data(oti_as_array(live[1])->data)->items[i] = live[2];
       oti_as_array(live[1])->length = i + 1;
     }
   }

@@ -260,8 +260,7 @@ static ot_value class_define_generic(ot_state* rt, size_t first, size_t count) {
   if (!oti_kind(v, K_SYMBOL) || !ot_is_int(n) || ot_to_int(n) < 0)
     return oti_fail(rt, "invalid generic declaration");
   size_t length;
-  memcpy(&length, object_bytes(v), sizeof(length));
-  const char* text = (const char*)object_bytes(v) + sizeof(length);
+  const char* text = oti_text_bytes(v, &length);
   if (oti_import_global(rt, text, length) != UINT32_MAX) {
     oti_tagged_error(rt, "defgeneric", "binding-conflict",
                      "declaration would replace another binding", 1, &v);

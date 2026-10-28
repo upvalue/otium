@@ -2,22 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-size_t oti_bytes_length(ot_value v) {
-  size_t n;
-  memcpy(&n, object_bytes(v), sizeof(n));
-  return n;
-}
-
-unsigned char* oti_bytes_data(ot_value v) {
-  return (unsigned char*)object_bytes(v) + sizeof(size_t);
-}
-
 static bool byte(ot_value v) { return ot_is_int(v) && ot_to_int(v) >= 0 && ot_to_int(v) <= 255; }
 
 ot_value oti_bytes_new(ot_state* rt, size_t n) {
   if (n > UINT32_MAX - sizeof(size_t) - 32) return oti_fail(rt, "bytevector too large");
   ot_value v = oti_alloc(rt, K_BYTEVECTOR, 0, sizeof(size_t) + n);
-  if (v) memcpy(object_bytes(v), &n, sizeof(n));
+  if (v) oti_as_bytes(v)->length = n;
   return v;
 }
 

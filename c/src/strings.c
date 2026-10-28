@@ -75,11 +75,12 @@ static bool append_buffer(ot_state* rt, ot_value* buffer, const char* bytes, siz
     oti_roots_pop(&rt->heap, &roots);
     if (!data) return false;
     info = oti_as_buffer(*buffer);
-    if (info->length) memcpy(object_bytes(data), object_bytes(info->data), info->length);
+    if (info->length)
+      memcpy(oti_as_buffer_data(data)->bytes, oti_as_buffer_data(info->data)->bytes, info->length);
     info->data = data;
     info->capacity = capacity;
   }
-  if (n) memcpy((char*)object_bytes(info->data) + info->length, bytes, n);
+  if (n) memcpy(oti_as_buffer_data(info->data)->bytes + info->length, bytes, n);
   info->length = needed;
   for (size_t p = 0; p < n;) {
     uint32_t cp;
@@ -147,7 +148,7 @@ static ot_value string_buffer_string(ot_state* rt, size_t first, size_t count) {
   if (!value) return 0;
   if (!oti_kind(value, K_BUFFER)) return oti_fail(rt, "expected buffer");
   size_t n = oti_as_buffer(value)->length;
-  return copied(rt, n ? object_bytes(oti_as_buffer(value)->data) : "", n);
+  return copied(rt, n ? (char*)oti_as_buffer_data(oti_as_buffer(value)->data)->bytes : "", n);
 }
 
 /* The text of a string, symbol or keyword without a keyword's leading colon. */

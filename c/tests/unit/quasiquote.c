@@ -61,8 +61,8 @@ TEST(long_flat_template) {
   strcat(source, ")");
   ot_value list = eval(rt, source);
   size_t seen = 0;
-  for (; oti_kind(list, K_PAIR); list = object_fields(list)[1]) {
-    CHECK(object_fields(list)[0] == ot_int(1));
+  for (; oti_kind(list, K_PAIR); list = oti_cdr(list)) {
+    CHECK(oti_car(list) == ot_int(1));
     seen++;
   }
   CHECK(list == OT_EMPTY && seen == length);

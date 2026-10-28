@@ -37,7 +37,7 @@ TEST(clocks_match_host_clocks) {
     CHECK(ot_call(rt, "current-second", NULL, 0, &value));
     double end = second(), actual;
     CHECK(oti_kind(value, K_FLOAT));
-    memcpy(&actual, object_bytes(value), sizeof(actual));
+    actual = oti_as_float(value)->value;
     /* A civil clock adjustment during this check invalidates its bracket. */
     if (start <= end) CHECK(start <= actual && actual <= end);
   }

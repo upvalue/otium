@@ -466,7 +466,7 @@ static bool to_foreign(ot_state* rt, const oti_scalar* type, ot_value value,
     case T_DOUBLE: {
       double d;
       if (ot_is_int(value)) d = (double)ot_to_int(value);
-      else if (oti_kind(value, K_FLOAT)) memcpy(&d, object_bytes(value), sizeof(d));
+      else if (oti_kind(value, K_FLOAT)) d = oti_as_float(value)->value;
       else return oti_ffi_errorf(rt, "type", "expected number");
       if (type->kind == T_FLOAT) {
         if (isfinite(d) && fabs(d) > FLT_MAX)

@@ -46,6 +46,7 @@ bool oti_heap_init(oti_heap* h, size_t capacity) {
   }
 #endif
   h->capacity = h->limit = capacity;
+  h->start = h->space[0];
   return true;
 }
 
@@ -69,16 +70,6 @@ void oti_heap_destroy(oti_heap* h) {
   *h = (oti_heap){0};
 }
 
-void oti_roots_push(oti_heap* h, oti_roots* r, ot_value* slots, size_t count) {
-  *r = (oti_roots){h->roots, slots, count};
-  h->roots = r;
-}
-
-void oti_roots_pop(oti_heap* h, oti_roots* r) {
-  assert(h->roots == r);
-  h->roots = r->previous;
-}
-
 static ot_value evacuate(oti_heap* h, ot_value v, const unsigned char* from, unsigned char* to,
                          size_t* used) {
   if (!value_is_ptr(v)) return v;
@@ -94,7 +85,13 @@ static ot_value evacuate(oti_heap* h, ot_value v, const unsigned char* from, uns
   size_t size = old->size;
   assert(size <= h->capacity - *used);
   oti_object_header* copy = (oti_object_header*)(to + *used);
-  memcpy(copy, old, size);
+  /* Most objects are a few words, where calling memcpy costs more than the
+   * copy. Fixed 8-byte copies keep clang from turning this back into a call. */
+  if (size <= 64) {
+    for (size_t i = 0; i < size; i += 8) __builtin_memcpy((char*)copy + i, (char*)old + i, 8);
+  } else {
+    memcpy(copy, old, size);
+  }
   *used += size;
   ot_value forwarded = (ot_value)copy;
   old->size = 0;
@@ -116,7 +113,8 @@ static void copy_live(oti_heap* h, const unsigned char* from, unsigned char* to)
   h->reclaimed_bytes += h->used - used;
   if (h->used > h->peak_used) h->peak_used = h->used;
   h->live_bytes = used;
-  h->used = used;
+  h->used = h->filled = h->ready = used;
+  h->start = to;
   h->collections++;
   h->copied_bytes += used;
 }
@@ -175,13 +173,21 @@ ot_value oti_heap_alloc(oti_heap* h, uint32_t kind, uint32_t fields, size_t byte
   if (size > h->capacity - h->used) oti_heap_collect(h);
   if (size > h->capacity - h->used && (size > h->limit - h->used || !grow(h, h->used + size)))
     return 0;
-  oti_object_header* o = (oti_object_header*)(h->space[h->active] + h->used);
+  oti_object_header* o = (oti_object_header*)(h->start + h->used);
   h->used += size;
-  *o = (oti_object_header){.size = size,
-                           .fields = fields,
-                           .kind = (kind & 255) | ((++h->next_identity & 0x7fffff) << 8)};
+  *o = (oti_object_header){.size = size, .fields = fields, .kind = kind & 255};
   ot_value* slots = object_fields((ot_value)o);
   for (uint32_t i = 0; i < fields; i++) slots[i] = OT_NIL;
   memset((unsigned char*)o + base, 0, size - base);
+  oti_heap_fill(h);
   return (ot_value)o;
+}
+
+/* Fill the next chunk past used with nil so inline allocation can skip it. */
+void oti_heap_fill(oti_heap* h) {
+  if (h->filled < h->used) h->filled = h->used;
+  size_t end = h->capacity - h->filled > OTI_FILL_CHUNK ? h->filled + OTI_FILL_CHUNK : h->capacity;
+  ot_value* slot = (ot_value*)(h->start + h->filled);
+  for (size_t i = 0, n = (end - h->filled) / sizeof(ot_value); i < n; i++) slot[i] = OT_NIL;
+  h->filled = h->ready = end;
 }

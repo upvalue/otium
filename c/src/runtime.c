@@ -294,6 +294,7 @@ ot_value oti_alloc_slow(ot_state* rt, uint32_t kind, uint32_t fields, size_t byt
   size_t collections = rt->heap.collections;
   if (rt->stress_gc) oti_heap_collect(&rt->heap);
   ot_value v = oti_heap_alloc(&rt->heap, kind, fields, bytes);
+  if (rt->stress_gc) rt->heap.ready = rt->heap.used;
   if (rt->heap.collections != collections) {
     oti_foreign_collect(rt);
     if (rt->stack_stale > rt->sp) rt->stack_stale = rt->sp;
@@ -771,6 +772,7 @@ static void source_close(ot_state* rt, intptr_t handle) {
 static int source_open(ot_state* rt, const char* path, intptr_t* handle) {
   if (!rt->io_host_set) return ENOSYS;
   rt->host_io_active = true;
+  rt->heap.ready = rt->heap.used;
   int error = rt->io_host.open(rt->io_userdata, path, OT_IO_READ, handle);
   rt->host_io_active = rt->host_io_reentry = false;
   return error;
@@ -778,6 +780,7 @@ static int source_open(ot_state* rt, const char* path, intptr_t* handle) {
 
 static long source_read(ot_state* rt, intptr_t handle, char* bytes, size_t length) {
   rt->host_io_active = true;
+  rt->heap.ready = rt->heap.used;
   long n = rt->io_host.read(rt->io_userdata, handle, (uint8_t*)bytes, length);
   rt->host_io_active = rt->host_io_reentry = false;
   return n > (long)length ? -EIO : n;
@@ -785,6 +788,7 @@ static long source_read(ot_state* rt, intptr_t handle, char* bytes, size_t lengt
 
 static void source_close(ot_state* rt, intptr_t handle) {
   rt->host_io_active = true;
+  rt->heap.ready = rt->heap.used;
   rt->io_host.close(rt->io_userdata, handle);
   rt->host_io_active = rt->host_io_reentry = false;
 }
@@ -1002,7 +1006,6 @@ ot_stats ot_get_stats(const ot_state* rt) {
                     .max_frames = rt->max_frames,
                     .heap_capacity = h->capacity,
                     .heap_limit = h->limit,
-                    .heap_allocations = (size_t)h->next_identity,
                     .heap_allocated_bytes = h->allocated_bytes + (h->used - h->live_bytes),
                     .heap_copied_bytes = h->copied_bytes,
                     .heap_reclaimed_bytes = h->reclaimed_bytes,
@@ -1035,7 +1038,10 @@ ot_form_status ot_scan_form(const char* source, size_t length, size_t start, siz
   return status;
 }
 
-void ot_gc_stress(ot_state* rt, bool enabled) { rt->stress_gc = enabled; }
+void ot_gc_stress(ot_state* rt, bool enabled) {
+  rt->stress_gc = enabled;
+  rt->heap.ready = rt->heap.used;
+}
 
 static void print_value(FILE* out, ot_value v, unsigned depth) {
   if (depth > 100) {

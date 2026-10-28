@@ -94,8 +94,7 @@ def cli(t):
 def gc_stats(t):
     stats = t.expect(t.run([OTIUM, '--c.gc-stats', FIXTURE]), stdout='loaded-from-file\n',
                      stderr=['GC stats:\n']).stderr
-    for field in ('allocations', 'collections'):
-        t.check(re.search(rf'^  {field}: \d+$', stats, re.M), 'missing', field, stats)
+    t.check(re.search(r'^  collections: \d+$', stats, re.M), 'missing', 'collections', stats)
     for field in ('allocated bytes', 'copied bytes', 'reclaimed bytes', 'heap used bytes',
                   'peak heap used bytes', 'heap capacity bytes'):
         t.check(re.search(rf'^  {field}: \d+ \(\d+(?:\.\d{{2}})? (?:B|KiB|MiB|GiB|TiB|PiB|EiB)\)$',
@@ -107,7 +106,7 @@ def gc_stats(t):
     line = next(line for line in result.stderr.splitlines() if line.startswith('OTIUM_GC_STATS '))
     fields = json.loads(line.removeprefix('OTIUM_GC_STATS '))
     # The collector copies between two semispaces; capacity and limit are per semispace.
-    expected = set('''allocations collections allocated_bytes copied_bytes reclaimed_bytes used_bytes
+    expected = set('''collections allocated_bytes copied_bytes reclaimed_bytes used_bytes
         peak_used_bytes capacity_bytes limit_bytes'''.split())
     t.check(set(fields) == expected, 'GC stats fields differ', sorted(set(fields) ^ expected))
     t.check(all(isinstance(value, int) and value >= 0 for value in fields.values()), fields)

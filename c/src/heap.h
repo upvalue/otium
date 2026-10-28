@@ -2,6 +2,7 @@
 #define OTIUM_HEAP_H
 
 #include "otium.h"
+#include <assert.h>
 
 /* These operations require integer operands. False reports fixnum overflow. */
 static inline bool value_int_add(ot_value a, ot_value b, ot_value* out) {
@@ -67,13 +68,17 @@ typedef struct {
 
 typedef struct {
   unsigned char* space[2];
+  /* space[active], kept here so allocation needs one load to find it. */
+  unsigned char* start;
   size_t capacity, limit, used, collections, copied_bytes;
+  /* Space from used to filled already holds nil. Allocation bumps used up to
+   * ready, which is filled normally and used when every allocation must take
+   * the slow path. */
+  size_t filled, ready;
   /* Statistics, updated only by collections. live_bytes is the size after the
    * last collection, so used - live_bytes is what has been allocated since. */
   size_t allocated_bytes, reclaimed_bytes, peak_used, live_bytes;
   unsigned active;
-  /* Counts every allocation; its low bits become object identities. */
-  uint64_t next_identity;
   oti_roots* roots;
 #ifdef OTIUM_CHECK_ROOTS
   oti_retired_space retired[OTI_RETIRED_SPACES];
@@ -84,12 +89,23 @@ typedef struct {
 bool oti_heap_init(oti_heap* h, size_t semispace_bytes);
 void oti_heap_destroy(oti_heap* h);
 bool oti_heap_set_limit(oti_heap* h, size_t semispace_bytes);
-void oti_roots_push(oti_heap* h, oti_roots* r, ot_value* slots, size_t count);
-void oti_roots_pop(oti_heap* h, oti_roots* r);
+
+static inline void oti_roots_push(oti_heap* h, oti_roots* r, ot_value* slots, size_t count) {
+  *r = (oti_roots){h->roots, slots, count};
+  h->roots = r;
+}
+
+static inline void oti_roots_pop(oti_heap* h, oti_roots* r) {
+  assert(h->roots == r);
+  h->roots = r->previous;
+}
+
 void oti_heap_collect(oti_heap* h);
 /* Zero means exhaustion. Every live managed value must be rooted across this call.
  * Fields are traced; trailing bytes are opaque. Returned fields start as nil. */
 ot_value oti_heap_alloc(oti_heap* h, uint32_t kind, uint32_t fields, size_t bytes);
+#define OTI_FILL_CHUNK (32 * 1024)
+void oti_heap_fill(oti_heap* h);
 
 /* Inline field access for runtime object operations. */
 typedef struct {
@@ -112,8 +128,17 @@ static inline uint32_t object_kind(ot_value object) {
   return ((oti_object_header*)object)->kind & 255;
 }
 
+/* Objects get an identity the first time it's asked for, taken from their
+ * address then. It's kept in the header, so it survives being moved. */
 static inline uint32_t object_identity(ot_value object) {
-  return (((oti_object_header*)object)->kind >> 8) & 0x7fffff;
+  oti_object_header* o = (oti_object_header*)object;
+  uint32_t identity = (o->kind >> 8) & 0x7fffff;
+  if (!identity) {
+    identity = (uint32_t)(object >> 3) & 0x7fffff;
+    if (!identity) identity = 1;
+    o->kind |= identity << 8;
+  }
+  return identity;
 }
 
 static inline bool object_frozen(ot_value object) {

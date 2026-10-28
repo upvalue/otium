@@ -496,7 +496,6 @@ TEST(heap_statistics) {
   check_int(rt, "(let loop ((i 1000) (p nil)) (if (= i 0) 1 (loop (- i 1) (cons i nil))))", 1);
   ot_stats after = ot_get_stats(rt);
   CHECK(after.collections > before.collections);
-  CHECK(after.heap_allocations >= before.heap_allocations + 1000);
   CHECK(after.heap_allocated_bytes >= before.heap_allocated_bytes + 1000 * 24);
   CHECK(after.heap_reclaimed_bytes > before.heap_reclaimed_bytes);
   CHECK(after.heap_used <= after.heap_peak_used && after.heap_peak_used <= after.heap_capacity);

@@ -757,24 +757,18 @@ bool oti_grow(ot_state* rt, void** data, size_t* capacity, size_t needed, size_t
 bool oti_stack(ot_state* rt, size_t needed);
 ot_value oti_alloc_slow(ot_state* rt, uint32_t kind, uint32_t fields, size_t bytes);
 
-/* Allocate by bumping the heap pointer when the object fits and nothing needs
- * attention. Collection, interrupts and errors go through oti_alloc_slow. */
+/* Allocate by bumping the heap pointer into space the heap has already filled
+ * with nil. Running out of filled space, collection, interrupts, stress GC and
+ * host IO all go through oti_alloc_slow. */
 static inline ot_value oti_alloc(ot_state* rt, uint32_t kind, uint32_t fields, size_t bytes) {
   oti_heap* h = &rt->heap;
-  size_t room = h->capacity - h->used;
-  if (__builtin_expect(fields < 65536 && bytes <= room && !rt->host_io_active && !rt->stress_gc &&
-                           !(rt->interrupt_flag && *rt->interrupt_flag),
-                       1)) {
+  if (__builtin_expect(fields < 65536 && bytes < SIZE_MAX / 2, 1)) {
     size_t base = sizeof(oti_object_header) + (size_t)fields * sizeof(ot_value);
     size_t size = (base + bytes + 7) & ~(size_t)7;
-    if (__builtin_expect(size <= room, 1)) {
-      oti_object_header* o = (oti_object_header*)(h->space[h->active] + h->used);
+    if (__builtin_expect(size <= h->ready - h->used, 1)) {
+      oti_object_header* o = (oti_object_header*)(h->start + h->used);
       h->used += size;
-      *o = (oti_object_header){.size = size,
-                               .fields = fields,
-                               .kind = (kind & 255) | ((++h->next_identity & 0x7fffff) << 8)};
-      ot_value* slots = object_fields((ot_value)o);
-      for (uint32_t i = 0; i < fields; i++) slots[i] = OT_NIL;
+      *o = (oti_object_header){.size = size, .fields = fields, .kind = kind & 255};
       if (size > base) memset((unsigned char*)o + base, 0, size - base);
       return (ot_value)o;
     }

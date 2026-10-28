@@ -553,8 +553,7 @@ static void print_size(const char* name, size_t bytes) {
 static void print_gc_stats(ot_state* rt, const options* o) {
   ot_stats s = ot_get_stats(rt);
   if (o->gc_stats) {
-    fprintf(stderr, "GC stats:\n  allocations: %zu\n  collections: %zu\n", s.heap_allocations,
-            s.collections);
+    fprintf(stderr, "GC stats:\n  collections: %zu\n", s.collections);
     print_size("allocated bytes", s.heap_allocated_bytes);
     print_size("copied bytes", s.heap_copied_bytes);
     print_size("reclaimed bytes", s.heap_reclaimed_bytes);
@@ -565,11 +564,11 @@ static void print_gc_stats(ot_state* rt, const options* o) {
   }
   if (o->gc_stats_json)
     fprintf(stderr,
-            "OTIUM_GC_STATS {\"allocations\":%zu,\"collections\":%zu,\"allocated_bytes\":%zu,"
+            "OTIUM_GC_STATS {\"collections\":%zu,\"allocated_bytes\":%zu,"
             "\"copied_bytes\":%zu,\"reclaimed_bytes\":%zu,\"used_bytes\":%zu,"
             "\"peak_used_bytes\":%zu,\"capacity_bytes\":%zu,\"limit_bytes\":%zu}\n",
-            s.heap_allocations, s.collections, s.heap_allocated_bytes, s.heap_copied_bytes,
-            s.heap_reclaimed_bytes, s.heap_used, s.heap_peak_used, s.heap_capacity, s.heap_limit);
+            s.collections, s.heap_allocated_bytes, s.heap_copied_bytes, s.heap_reclaimed_bytes,
+            s.heap_used, s.heap_peak_used, s.heap_capacity, s.heap_limit);
 }
 
 int main(int argc, char** argv) {

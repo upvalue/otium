@@ -1,4 +1,3 @@
-;; lint: allow-file(unbound-name) %resolve-global is a C runtime builtin
 (ns otium.compiler.convert)
 (require (otium.compiler.core :as core)
          (otium.compiler.ir :as ir)

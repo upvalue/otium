@@ -1,5 +1,5 @@
 ;; Export the namespace reference to docs/reference.json for the otium.sh site.
-;; Run from the repository root: ./otium --runtime=chez tools/export-reference.ot
+;; Run from the repository root: ./otium tools/export-reference.ot
 ;;
 ;; Public bindings come from the modules below; core also includes the
 ;; runtime builtins in lib/catalog/runtime.json. Module docs are a leading
@@ -13,10 +13,8 @@
 (require otium.json :as json)
 (require otium.syntax :as syntax)
 
-;; Add a module here with its source path and supported runtimes.
-(def- modules
-  [{:name 'otium.core :file "lib/otium/core.ot" :runtimes ["chez" "c"]}
-   {:name 'otium.ui :file "lib/otium/ui.ot" :runtimes ["chez" "c"]}])
+;; Add a module here with its source path.
+(def- modules [{:name 'otium.core :file "lib/otium/core.ot"} {:name 'otium.ui :file "lib/otium/ui.ot"}])
 
 (def- catalog-file "lib/catalog/runtime.json")
 
@@ -243,6 +241,7 @@
         {:name name
          :line (+ (node :line) 1)
          :params (and params (map param-datum params))
+         :generic (equal? head "defgeneric")
          :type (and (member head '("defclass" "defabstract" "defrecord"))
                     (type-details head parts lines (string-join "\n" comments)))}))))
 
@@ -277,30 +276,25 @@
               (syntax/parse (read-file expander-file)))
     found))
 
-;; What a builtin is on Chez: "special" for the expander's core forms,
-;; "function", "macro" or "value" for bindings, or nil when Chez doesn't
-;; define it. Evaluating a macro's name is invalid syntax.
-(def- (chez-kind name special)
-  (if (get special name)
-      "special"
-      (try
-        (if (procedure? (eval (string->symbol name)))
-            "function"
-            "value")
-        (catch (error? problem)
-          (if (eq? (get problem :type) 'name-error)
-              nil
-              "macro")))))
+;; What a builtin is: "special" for the expander's core forms, otherwise
+;; "function", "macro" or "value". A name the runtime doesn't bind counts as a
+;; function.
+(def- (builtin-kind name special)
+  (let ((value (try
+                 (eval (string->symbol name))
+                 (catch (error? _) :unbound))))
+    (cond
+      ((get special name) "special")
+      ((macro? value) "macro")
+      ((or (eq? value :unbound) (procedure? value)) "function")
+      (else "value"))))
 
-(def- (runtime-order runtimes)
-  (filter (fn (r) (contains? runtimes r)) ["chez" "c"]))
-
-(def- (entry name kind doc params source runtimes)
+(def- (entry name kind doc params source)
   (let ((parts (split-doc doc))
         (signatures (or (parts :signatures)
                         (and params [(params-signature name params)])
                         (and (member kind '("function" "macro")) [{"text" (str "(" name " ...)")}])))
-        (out {"name" name "kind" kind "doc" (parts :doc) "runtimes" runtimes}))
+        (out {"name" name "kind" kind "doc" (parts :doc)}))
     (when signatures
       (put! out
             "signatures"
@@ -315,17 +309,25 @@
         (defs (definitions path)))
     (map (fn (b)
            (let ((name (symbol->string (b :name)))
-                 (found (get defs name)))
+                 (found (get defs name))
+                 (doc (or (b :doc) "")))
              (let ((out (entry name
                                (keyword->string (b :kind))
-                               (b :doc)
+                               (if (and (equal? doc "") found (found :generic))
+                                   "Generic procedure."
+                                   doc)
                                (and found (found :params))
-                               (and found {"file" path "line" (found :line)})
-                               (module :runtimes)))
+                               (and found {"file" path "line" (found :line)})))
                    (details (and found (found :type))))
                (when details (for-each (fn (key) (put! out key (details key))) (keys details)))
                out)))
-         (filter (fn (b) (and (b :public) (not (string-starts-with? (symbol->string (b :name)) "%"))))
+         ;; Core bindings not defined in core.ot are the runtime's builtins and
+         ;; the expander's entry points; builtin-entries covers the builtins.
+         (filter (fn (b)
+                   (let ((name (symbol->string (b :name))))
+                     (and (b :public)
+                          (not (string-starts-with? name "%"))
+                          (or (get defs name) (not (eq? (module :name) 'otium.core))))))
                  (dev/bindings (module :name))))))
 
 (def- (builtin-entries defined)
@@ -333,16 +335,10 @@
         (special (core-forms))
         (out []))
     (for-each (fn (name)
-                ;; expander-* are the C runtime's hooks for the shared expander,
-                ;; and % names are internal.
+                ;; expander-* are the runtime's hooks for the expander, and % names
+                ;; are internal.
                 (unless (or (get defined name) (string-starts-with? name "expander-") (string-starts-with? name "%"))
-                  (let ((item (catalog name))
-                        (runtimes (item "runtimes"))
-                        (kind (chez-kind name special))
-                        (where (runtime-order (if kind
-                                                  (concat runtimes ["chez"])
-                                                  (filter (fn (r) (not (equal? r "chez"))) runtimes)))))
-                    (push! out (entry name (or kind "function") (get item "chez" (item "text")) nil nil where)))))
+                  (push! out (entry name (builtin-kind name special) ((catalog name) "text") nil nil))))
               (keys catalog))
     out))
 

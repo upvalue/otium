@@ -12,19 +12,16 @@ LIBRARY_EXTENSION = 'dylib' if platform.system() == 'Darwin' else 'so'
 BUILD = Path(os.environ.get('OTIUM_BUILD', ROOT / 'build' / TARGET / 'default'))
 
 
-def command(runtime='c', *arguments, isolated=True, executable=None):
-    """Build a launcher command; explicit executables are already runtime-specific."""
-    if runtime not in ('c', 'chez'):
-        raise ValueError(f'Unknown runtime: {runtime}')
-    prefix = ([str(Path(executable).absolute())] if executable else
-              [str(ROOT / 'otium'), '--runtime=' + runtime])
+def command(*arguments, isolated=True, executable=None):
+    """Build a launcher command, or one for an explicit executable."""
+    prefix = [str(Path(executable).absolute() if executable else ROOT / 'otium')]
     return prefix + (['--no-project'] if isolated else []) + list(map(str, arguments))
 
 
-def environment(*, runtime='c', stress=False, overrides=None):
+def environment(*, stress=False, overrides=None):
     env = dict(os.environ)
     env.setdefault('OTIUM_FFI_LIBRARY', str(BUILD / ('libotium-ffi.' + LIBRARY_EXTENSION)))
-    if stress and runtime == 'c':
+    if stress:
         env['OTIUM_GC_STRESS'] = '1'
     if overrides:
         env.update(overrides)
@@ -41,7 +38,7 @@ def metadata(commands, *, build_label='unspecified', compilation='launcher defau
             'platform': platform.platform(), 'build_label': build_label,
             'compilation': compilation, 'commands': commands,
             'environment': {key: os.environ[key] for key in
-                ('CHEZ', 'OTIUM_BUILD', 'OTIUM_GC_STRESS') if key in os.environ}}
+                ('OTIUM_BUILD', 'OTIUM_GC_STRESS') if key in os.environ}}
 
 
 def run_directory(family):

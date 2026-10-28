@@ -107,7 +107,7 @@ full-size bitmap of the Dock icon: 40 MB for a 1024-pixel image, 10 MB at 512."
         (renderer ffi/null)
         (success? #f))
     (when first?
-      (let ((settings (native/load-config! (get options :config "build/ui-config.ot"))))
+      (let ((settings (native/load-config! (or (get options :config) (native/default-config-path)))))
         (sdl/load! (native/config-ref settings 'sdl)))
       (sdl/set-main-ready)
       (configure-app! {:name (get options :app-name "Otium")

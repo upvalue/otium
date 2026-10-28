@@ -48,3 +48,7 @@ Decision (Phil): every binding states collect-safety explicitly, true or false; 
 **2026-10-21T01:22:38Z**
 
 Implemented required fifth collect-safe? boolean in bind and defbindings, with strict validation on both runtimes. Chez selects the foreign-call convention at bind time and caches each mode separately; C accepts both modes with the same call path. Migrated bindings and documented blocking calls, same-thread callbacks, and the wrong-thread deadlock caveat. Fixed partial-edit callback cache and cddddr errors. All 10 FFI tests pass (217 fixture checks and 51 callback checks per runtime); 113 selected shared/Chez regression tests pass after rerunning 24 socket tests outside the sandbox. No GC suites run. Chez abs timing including loop overhead: #f 7.6-7.8 ns, #t 41.6-43.4 ns. Benchmark workload passes both runtimes. PTY test passes. Fresh Ghostty walk timing blocked by unrelated manse.json character/string mismatch after the I/O merge; json/parse of {} reproduces without FFI. Changes remain uncommitted.
+
+**2026-10-28T00:22:59Z**
+
+Chez runtime removed. The numbers and the 'raw Chez' target above are Chez-only; the C runtime's FFI call cost needs measuring before deciding what's left of this.

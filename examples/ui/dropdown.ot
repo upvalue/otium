@@ -1,6 +1,5 @@
 ;; A bounded headless run. No display or native UI dependencies are needed.
 ;; ./otium examples/ui/dropdown.ot
-;; ./otium --runtime=c examples/ui/dropdown.ot
 (require (otium.ui :as ui))
 
 (defclass Dropdown

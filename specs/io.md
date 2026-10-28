@@ -1,11 +1,11 @@
 # I/O
 
-Implemented on both runtimes: characters, bytevectors, resource scopes, file and
+Implemented: characters, bytevectors, resource scopes, file and
 memory ports, port-directed printing, custom ports, and filesystem operations
 (steps 1–6 below). The owning FFI pointer class is `CPointer`; the UI pointer
 capture state class is `PointerState`. Port finalizers remain deferred.
 
-Ports for files, standard streams, strings and bytes, on both runtimes. To
+Ports for files, standard streams, strings and bytes. To
 support them, Otium gains a character type and a bytevector type, and `first`
 and `get` on strings return characters instead of one-character strings.
 
@@ -13,8 +13,7 @@ and `get` on strings return characters instead of one-character strings.
 
 Previously, Otium could print to the host's output and read a whole file into
 a string (`read-file`). Ports add standard input, streaming file access, binary
-I/O, and output to other destinations. They also give both runtimes common
-UTF-8 validation and filesystem error behavior.
+I/O, and output to other destinations.
 
 A streaming JSON reader and writer is the motivating example. It isn't part of
 this spec, but the port design should make it straightforward and reasonably
@@ -24,8 +23,7 @@ fast. See [JSON](#json) below.
 
 - [R7RS](https://small.r7rs.org/attachment/r7rs.pdf) section 6.13, for names and
   argument order.
-- R6RS and Chez, for custom ports. Chez's ports are also what the Chez runtime
-  builds on.
+- R6RS and Chez Scheme, for custom ports.
 - [Janet](https://janet-lang.org/api/file.html), for reading into a
   caller-supplied buffer, and for `ev`, which shows how blocking-style port code
   can later run under an event loop.
@@ -58,7 +56,7 @@ Where Otium differs:
 
 End of file is an EOF object, as in R7RS. `(eof-object)` returns it and
 `eof-object?` tests for it. It is truthy, like every value other than `nil` and
-`#f`. `(type (eof-object))` is `:eof`, it prints as `#<eof>` on both runtimes,
+`#f`. `(type (eof-object))` is `:eof`, it prints as `#<eof>`,
 and it dispatches as `Other`.
 
 ## At a glance
@@ -105,7 +103,7 @@ Functions:
 - `(char-upcase c)`, `(char-downcase c)`, which may be ASCII-only, like the
   string versions (Appendix A)
 - `(char-alphabetic? c)`, `(char-numeric? c)`, `(char-whitespace? c)`, which
-  are ASCII-only on C
+  are ASCII-only
 - `(digit-value c)`, giving 0 to 9, or `nil`
 
 Changes to strings:
@@ -113,12 +111,12 @@ Changes to strings:
 - `first`, `last`, `nth` and `get` on a string return a char, or `nil` on a
   miss. Today they return a one-character string.
 - `(string-ref s k)` is like `get`, but out of range is an error. It is
-  there for code ported from Scheme; its docstring notes the cost on C.
+  there for code ported from Scheme; its docstring notes the cost.
 - `(string c…)` builds a string from chars.
 - `(string->list s)` and `(list->string l)` convert to and from a list of chars.
 - `str`, `buffer-push!` and `string-join` already use display forms, so chars
   work in them with no change: `(str #\a "bc")` is `"abc"`.
-- `(string-ref s k)` and `get` stay O(k) on C, which stores strings as UTF-8
+- `(string-ref s k)` and `get` stay O(k), because strings are stored as UTF-8
   (2.7). For a left-to-right scan, use `open-input-string` and read
   characters. That is O(n) overall.
 
@@ -127,15 +125,12 @@ compared one-character strings, and one leetcode example. Both now use chars.
 
 ### Representation
 
-On C, chars are immediates and never allocate. The low two bits `10` already
+Chars are immediates and never allocate. The low two bits `10` already
 mark immediates, and only values below 32 are in use (`nil` 2 through
 `OT_TOMBSTONE` 26). A char is `(codepoint << 5) | 30`, so `(v & 31) == 30`
 identifies one. That needs 26 bits, which fits on 32-bit targets. `ot_is_ptr`
 is false for chars, so the collector ignores them. The EOF object takes the
 next free constant, 34.
-
-On Chez, chars are Chez chars and the EOF object is Chez's. String access
-returns characters directly, and character dispatch is portable.
 
 ## Bytevectors
 
@@ -144,7 +139,7 @@ A new mutable type for fixed-length runs of bytes, `bytevector`.
 | | |
 | --- | --- |
 | Literal | `#u8(1 2 255)` |
-| repr | `#u8(1 2 255)` on both runtimes |
+| repr | `#u8(1 2 255)` |
 | `(type b)` | `:bytevector` |
 | Equality | identity, like arrays (2.4) |
 
@@ -167,8 +162,7 @@ Quoted literals produce constructor forms, not bytevector values.
 Input bytevector ports take a snapshot. Output extraction returns a fresh value
 without consuming the accumulated output.
 
-On C, the bytes live inline in a heap object. On Chez, these are Chez
-bytevectors, printed by Otium's printer as `#u8`, not `#vu8`.
+The bytes live inline in a heap object.
 
 ## Ports
 
@@ -228,7 +222,7 @@ params (section 9). Call them to read them, as R7RS does, and rebind them with
 ```
 
 The defaults wrap standard input, output and error. Standard output is flushed
-after each output operation to preserve host writer capture and prompt visibility. On C, the default output
+after each output operation to preserve host writer capture and prompt visibility. The default output
 port writes through the host writer (`ot_set_writer`), so embedders that
 capture output keep working. `display`, `write`, `print`, `println` and
 `newline` write to `(current-output-port)`. `newline` gains an optional port.
@@ -280,7 +274,7 @@ Each one takes an optional port, defaulting to `(current-output-port)`.
 | Form | |
 | --- | --- |
 | `(write-char c [p])` | |
-| `(write-string s [p [start [end]]])` | `start` and `end` are char positions, so on C they cost O(end). |
+| `(write-string s [p [start [end]]])` | `start` and `end` are char positions, so they cost O(end). |
 | `(write-u8 n [p])` | |
 | `(write-bytevector b [p [start [end]]])` | |
 | `(flush-output-port [p])` | |
@@ -341,12 +335,10 @@ A condition table looks like this:
 ```
 
 `:reason` is one of `:not-found`, `:exists`, `:permission`, `:is-directory`,
-`:not-directory`, `:no-space`, `:closed` or `:other`. Both runtimes produce the
-same `:reason`. `:detail` is the host's message, and it may differ.
+`:not-directory`, `:no-space`, `:closed` or `:other`. `:detail` is the host's message.
 
 `decode-error` adds `:position`, the byte offset in the port, and is raised
-for invalid UTF-8, including input that ends partway through a sequence. Both
-runtimes use Otium's decoder, so their decoding behaviour is the same.
+for invalid UTF-8, including input that ends partway through a sequence.
 
 ## `with`
 
@@ -406,9 +398,6 @@ after release is an error. A raw pointer released through `release` has no
 such check. `ffi/own` fixes that: `(ffi/own pointer destroy)` returns an
 owning pointer whose `close` calls `destroy` and marks it released.
 
-On Chez, a continuation captured inside the block can jump back into it after
-release. Re-entering a `with` block is unsupported.
-
 `Port` and `CPointer` are built-in classes (`specs/classes.md`). Owning FFI
 pointers dispatch as `CPointer`; borrowed pointers require an explicit release
 function or `ffi/own`. A custom destructor is called at most once, even if it
@@ -457,29 +446,20 @@ void ot_set_io_host(ots* state, const ot_io_host* host, void* userdata);
   checks the interrupt hook before retrying, so `^C` at a prompt waiting on
   input still works.
 
-### Chez
-
-Ports are an Otium record that wraps a Chez binary port and holds a bytevector
-buffer, filled with `get-bytevector-some!`. UTF-8 decoding, line splitting and
-the scanning functions are written in Scheme against that buffer, not taken
-from Chez's textual ports. That takes more code than using Chez's transcoders,
-but it is how decoding errors, peek behaviour and buffering end up the same on
-both runtimes. Chez's I/O conditions are mapped to `:reason`.
-
 ### Order of work
 
-1. Characters and the EOF object on both runtimes, plus the string changes
+1. Characters and the EOF object, plus the string changes
    and an audit of existing callers.
 2. Bytevectors.
 3. `with` and the `close` generic, with methods for owning FFI pointers and
    `ffi/own`. This doesn't depend on ports and can go first.
 4. File, string and bytevector ports with input, output and errors, tested in
-   `tests/library` on both runtimes.
+   `tests/library`.
 5. Moving `display` and friends onto `current-output-port`, with
    `ot_set_writer` as the default output port's sink.
 6. Custom ports, `open-ports`, and the filesystem functions.
 7. A JSON library as a separate piece of work to test the design. Benchmark
-   it against `read-file` plus a string-based parser on both runtimes.
+   it against `read-file` plus a string-based parser.
 
 ## JSON
 
@@ -523,7 +503,7 @@ next:
 
 Most of the input passes through `read-until`, `read-while` and `skip-while`,
 which run natively. The Otium code runs once per token, not once per
-character. `read-char` and `peek-char` allocate nothing on C, because chars
+character. `read-char` and `peek-char` allocate nothing, because chars
 are immediates.
 
 How much streaming this gives, by case:
@@ -549,7 +529,7 @@ How much streaming this gives, by case:
 
 `(json/write value p)` writes directly to the port, so there's no intermediate
 string, and buffering makes the many small writes cheap. Strings need
-escaping. Scanning a string by index is O(n²) on C, so the writer reads the
+escaping. Scanning a string by index is O(n²), so the writer reads the
 string through a string port instead:
 
 ```scheme

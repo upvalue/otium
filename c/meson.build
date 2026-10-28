@@ -41,8 +41,8 @@ if get_option('vm_switch')
 endif
 
 # Position-independent code costs a few percent in the VM, and the runtime is
-# only linked statically. The development server's socket transport is shared
-# with Chez.
+# only linked statically. The development server's socket transport lives in
+# native/dev.
 libotium = static_library('otium', runtime_sources,
   c_args: runtime_args, include_directories: [runtime_include, native_include],
   dependencies: runtime_deps, link_whole: dev.get_static_lib(), override_options: runtime_options,

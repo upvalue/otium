@@ -192,22 +192,6 @@ static ot_value support_read_string(ot_state* rt, size_t first, size_t count) {
   return oti_read_string(rt, rt->stack[first]);
 }
 
-static ot_value support_expander_application(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 1)) return 0;
-  return rt->stack[first];
-}
-
-static ot_value support_expander_optional_function(ot_state* rt, size_t first, size_t count) {
-  if (!support_arity(rt, count, 2)) return 0;
-  return rt->stack[first];
-}
-
-static ot_value support_expander_native_syntax_p(ot_state* rt, size_t first, size_t count) {
-  (void)first;
-  if (!support_arity(rt, count, 1)) return 0;
-  return OT_FALSE;
-}
-
 /* An unlocated output form becomes a located copy of its first pair, at the
  * input form's offset. The expander only passes the result on, so the copy
  * need not be the same pair. */
@@ -228,8 +212,10 @@ static ot_value support_expander_locate(ot_state* rt, size_t first, size_t count
 
 static ot_value support_expander_invoke_macro(ot_state* rt, size_t first, size_t count) {
   if (!support_arity(rt, count, 2)) return 0;
-  if (rt->expanding && ++rt->expansion_calls > 1024)
-    return oti_fail(rt, "macro expansion limit exceeded");
+  if (rt->expanding && ++rt->expansion_calls > 1024) {
+    oti_coded_error(rt, "E0111", "macro expansion limit exceeded");
+    return 0;
+  }
   return oti_call_list(rt, rt->stack[first], rt->stack[first + 1]);
 }
 
@@ -445,11 +431,8 @@ const oti_builtin_def oti_support_builtins[] = {
     {B_STRING_LENGTH, "string-length", oti_string_length_builtin},
     {B_STRING_REF, "string-ref", support_string_ref},
     {B_SUBSTRING, "substring", support_substring},
-    {B_EXP_APPLICATION, "expander-application", support_expander_application},
-    {B_EXP_OPTIONAL, "expander-optional-function", support_expander_optional_function},
     {B_EXP_MACRO, "expander-macro-var", support_expander_macro_var},
     {B_EXP_INVOKE, "expander-invoke-macro", support_expander_invoke_macro},
-    {B_EXP_NATIVE, "expander-native-syntax?", support_expander_native_syntax_p},
     {B_EXP_LOCATE, "expander-locate", support_expander_locate},
     {B_EXP_FAIL, "expander-fail", support_expander_fail},
     {B_EXP_QUALIFY, "expander-qualify", support_expander_qualify},

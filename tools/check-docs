@@ -12,10 +12,11 @@ for file do
     esac
     [ -f "$file" ] || continue
     case $file in
-        README.md|AGENTS.md|AGENT-LANG.md|docs/*.md|specs/*.md|benchmarks/README.md|manse/README.md) ;;
+        README.md|AGENTS.md|AGENT-LANG.md|docs/*.md|specs/*.md|scratch/*.md) ;;
+        benchmarks/README.md|manse/README.md) ;;
         examples/*/README.md|vim/README.md|.agents/skills/*/SKILL.md) ;;
         .tickets/*|*/vendor/*|otos/cross/*|*-OFL.txt|tests/*|c/tests/*) continue ;;
-        *) echo "$file: docs belong in docs/ or specs/" >&2; status=1; continue ;;
+        *) echo "$file: docs belong in docs/, specs/ or scratch/" >&2; status=1; continue ;;
     esac
     # Generated docs have a .spec beside them and ✨ in the title; hand-written
     # docs have neither. tools/generate-docs writes the generated ones.
@@ -34,10 +35,11 @@ for file do
         status=1
     fi
     # Agents can't edit these two, so a stale path there would block them.
-    case $file in README.md|AGENTS.md) continue ;; esac
+    # Scratch notes and plans may name files that are gone or not yet written.
+    case $file in README.md|AGENTS.md|scratch/*) continue ;; esac
     # Backticked paths under a source directory must exist. Only names ending
-    # in / or with an extension count, since chez/values and native/poll-event
-    # are Otium bindings. Globs and placeholders don't match the pattern.
+    # in / or with an extension count, since names like native/poll-event are
+    # Otium bindings. Globs and placeholders don't match the pattern.
     # Ignored paths, such as build output, only exist after a build.
     for path in $(grep -o '`[a-z][A-Za-z0-9_./-]*/[A-Za-z0-9_./-]*`' "$file" | tr -d '`' | sort -u); do
         case $path in
@@ -46,7 +48,7 @@ for file do
             *) continue ;;
         esac
         case $path in
-            c/*|chez/*|lib/*|native/*|tests/*|examples/*|benchmarks/*|docs/*|specs/*|tools/*|vim/*|manse/*|otos/*)
+            c/*|lib/*|native/*|tests/*|examples/*|benchmarks/*|docs/*|specs/*|tools/*|vim/*|manse/*|otos/*)
                 if [ ! -e "$path" ] && ! git check-ignore -q "$path"; then
                     echo "$file: names missing path $path" >&2
                     status=1

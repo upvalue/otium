@@ -4,8 +4,8 @@
 
 ;; Memory statistics: the Otium heap, the process footprint, buffers that other
 ;; modules know the size of, and allocation per UI frame. The runtime supplies
-;; %allocated, %collections, %heap and %report?; the C runtime has no heap
-;; breakdown yet, so heap returns nil there.
+;; %allocated, %collections and %heap; it has no heap breakdown yet, so heap
+;; returns nil.
 
 (def (allocated)
   "Bytes allocated on the Otium heap since the program started, including those since collected."
@@ -153,7 +153,3 @@
 (def (print-report)
   "Write the report to standard error."
   (process/write-error (report)))
-
-(def (report-requested?)
-  "True when the program was started with --memory-report."
-  (%report?))

@@ -1,4 +1,3 @@
-;; lint: allow-file(unbound-name) nan?, infinite? and %vm-opcodes are C runtime builtins the Chez linter does not know
 (ns otium.compiler.prims)
 
 (require (otium.compiler.types :as types))

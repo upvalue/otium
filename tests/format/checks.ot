@@ -1,4 +1,4 @@
-;; Formatter and linter checks. Run on either runtime.
+;; Formatter and linter checks.
 (require otium.reader (otium.format :as format) (otium.lint :as lint))
 
 (require otium.test :refer (check report))

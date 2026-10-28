@@ -1,4 +1,4 @@
-;; Expander behaviour shared by the C and Chez runtimes.
+;; Expander behaviour.
 (require otium.test :refer (check fails? report))
 
 (defmacro twice (x)

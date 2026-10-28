@@ -19,3 +19,9 @@ Where to look:
 
 Seen while moving for into otium.loop: test_named_let in c/tests/test_runtime.c ran with max_depth 64, and loading otium.loop from the end of core.ot needs about 85 frames. That test now uses 256.
 
+
+## Notes
+
+**2026-10-28T00:30:31Z**
+
+The launcher no longer takes --runtime; the repro is now ./otium --c.max-depth=50 any.ot.

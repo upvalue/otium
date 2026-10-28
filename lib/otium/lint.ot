@@ -506,7 +506,6 @@
   {:seen {}
    :bindings []
    :free []
-   :host 0
    :active '()
    :functions []
    :definitions {}
@@ -533,9 +532,8 @@
     count))
 
 ;; A gensym from a macro expansion can share its name with a user's local,
-;; as for's step temporaries do. Gensyms are uninterned on Chez, where lint
-;; runs, so they are matched by identity, never reported and not counted as
-;; occurrences of the name.
+;; as for's step temporaries do. Gensyms are uninterned, so they are matched
+;; by identity, never reported and not counted as occurrences of the name.
 (def- (generated? symbol)
   (not (eq? (string->symbol (symbol->string symbol)) symbol)))
 
@@ -579,8 +577,7 @@
         (binding (find (fn (b) (equal? (b :name) name)) scope)))
     (cond
       (binding (put! binding :used #t) (block-captures! walk binding))
-      ((= (walk :host) 0) (push! (walk :free) {:name name :index index}))
-      (else nil))))
+      (else (push! (walk :free) {:name name :index index})))))
 
 (def- (walk-all walk scope forms)
   (for-each (fn (form) (walk-form walk scope form)) (proper forms)))
@@ -635,7 +632,7 @@
         (let ((name (symbol->string (car target)))
               (binding (find (fn (b) (equal? (b :name) name)) scope))
               (active (walk :active))
-              (candidate {:name name :binding binding :outer scope :blocked (> (walk :host) 0)}))
+              (candidate {:name name :binding binding :outer scope :blocked #f}))
           (put! (walk :definitions) name (+ (get (walk :definitions) name 0) 1))
           (when binding
             (push! (walk :functions) candidate)
@@ -724,8 +721,7 @@
     ((symbol? x) (reference! walk scope x))
     ((not (pair? x)) nil)
     ((not (symbol? (car x))) (walk-all walk scope x))
-    (else (let ((head (car x))
-                (name (symbol->string (car x))))
+    (else (let ((head (car x)))
             (cond
               ((eq? head 'quote) nil)
               ((eq? head 'quasiquote) (walk-quasi walk scope (second x) 1 #f))
@@ -818,13 +814,6 @@
                           reset-class!
                           reset-generic!))
                nil)
-              ((string-starts-with? name "chez/")
-               ;; Chez syntax keeps its own binding forms, so names inside a chez/
-               ;; form count as uses of local bindings but are never reported.
-               (for-each (fn (candidate) (put! candidate :blocked #t)) (walk :active))
-               (put! walk :host (+ (walk :host) 1))
-               (walk-all walk scope (cdr x))
-               (put! walk :host (- (walk :host) 1)))
               (else (walk-all walk scope x)))))))
 
 (def- (bound-in? space names)

@@ -2,20 +2,19 @@
 
 Status: draft, October 17, 2026. Widget lifecycle, constraint-aware Yoga layout,
 wrapped text, rounded rectangles, pointer/keyboard button activation, focus
-traversal and keymap actions run on C and Chez, including a widget calculator.
+traversal and keymap actions work, including a widget calculator.
 Single-line text editing, vertical scrolling and a command-history terminal
-also run on both runtimes. Text editing currently uses codepoint boundaries
+also work. Text editing currently uses codepoint boundaries
 and shaped left-to-right caret placement, with interpolated positions inside
 ligatures; IME composition remains deferred. Custom widget methods control
 default focusability, committed text, key repeat and keyup activation.
-The window/reload service now runs on both runtimes, including development
+The window/reload service works, including development
 sockets and recovery from frame errors. See `examples/ui.ot` for a runnable
 demo. Decisions
 made so far are listed at the end.
 
 `otium.ui` is a hardware-accelerated UI library written in Otium on top of the
-portable FFI (`specs/ffi.md`) and classes (`specs/classes.md`). It is shared
-source: the same library runs on C and Chez. It has to handle three programs:
+portable FFI (`specs/ffi.md`) and classes (`specs/classes.md`). It has to handle three programs:
 
 - **Boids**, a flocking simulation. Exercises the canvas and drawing throughput.
 - **A calculator.** Layout, buttons, keyboard input, focus.
@@ -319,13 +318,13 @@ and the layout logic itself doesn't need to be live-reloadable: everything an
 application edits (widgets, options, `measure` and `paint` methods) is still
 Otium and reloads as usual.
 
-- Yoga is C++20. It's compiled only in `native/`, which keeps the runtimes
-  themselves C-only.
+- Yoga is C++20. It's compiled only in `native/`, which keeps the runtime
+  itself C-only.
 - Yoga asks leaf nodes for their size through a measure callback. FFI v1 has
   no interpreter callbacks. The native callback records constraint queries;
   Otium answers them through `ui/measure` between Yoga passes. Replay continues
   until all requests have answers. Node contexts contain only native data,
-  so no managed pointers cross the bridge on either runtime.
+  so no managed pointers cross the bridge.
 - The library keeps one Yoga node per matched widget, creating and freeing
   nodes as matching adds and removes widgets, and sets styles on the nodes it
   keeps.
@@ -347,21 +346,21 @@ the plan is to make that fast rather than design around it:
 
 - a dispatch cache per generic (`specs/classes.md`),
 - cached slot access, `(b :x)` as a layout check plus an index,
-- unboxed floats on C,
+- unboxed floats,
 - cheap allocation and collection of short-lived descriptions,
 - the per-subtree paint cache and reuse of unchanged subtrees,
 - native recording of primitives, one FFI call per primitive.
 
 Targets, to be measured once something runs: no work when idle; a keystroke in
 the terminal well under a millisecond of Otium work; boids with 600 birds at
-60 fps on both runtimes.
+60 fps.
 
 ## Testing
 
 - Headless tests for matching, keys, property replacement, state initialization
   and preservation, state-slot migration on reload, children flattening, action
-  lookup and focus movement, with fake measurement and paint. Run unchanged on
-  C and Chez, including handlers retained across property updates.
+  lookup and focus movement, with fake measurement and paint, including handlers retained across
+  property updates.
 - Display tests in the native suite: scripted input, frame capture, and
   pixel checks, as the current SDL tests do.
 - Every example supports bounded runs, scripted input, a fixed timestep and
@@ -370,7 +369,7 @@ the terminal well under a millisecond of Otium work; boids with 600 birds at
   slots so a program can be inspected without interactive use. Tests synchronize
   reloads through status acknowledgements rather than sleeps. Failed runs keep
   screenshots and diagnostics and return a nonzero exit status.
-- The four example programs below, run on both runtimes.
+- The four example programs below.
 
 ## Deferred
 

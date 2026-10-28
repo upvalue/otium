@@ -118,7 +118,7 @@ removes.
 
 ```scheme
 {:id 3 :ok #t :value {:pid 4121 :cwd "/Users/me/code/otium/lang"
-                      :runtime :chez :script "examples/ui.ot"
+                      :script "examples/ui.ot"
                       :arguments ("--scene" "ui.calculator")
                       :uptime-ms 2460210 :state :running :event 41}
  :output "" :event 41}
@@ -142,7 +142,7 @@ client can then report events that happened between its calls.
 `:max-chars`, default 10000. The server cuts `:value` at that length and adds
 `:truncated #t`. Truncation happens on the server so the full text never
 crosses the socket. Depth and length limits on printing would be better, but
-neither runtime has them yet.
+the runtime has none yet.
 
 ## Introspection
 
@@ -156,7 +156,7 @@ the protocol small. Starting a server runs `(require (otium.dev :as dev))` in
 - `(dev/bindings 'NS)`: for each binding defined in the namespace, the name,
   kind (`:function`, `:macro` or `:value`), whether it is public, and its
   docstring, plus `:arity` and `:variadic` for Otium functions. `defonce`
-  isn't distinguished from `def`; neither runtime remembers which was used.
+  isn't distinguished from `def`; the runtime doesn't remember which was used.
 - `(dev/source 'NS/NAME)`: the file and line of the definition, or `nil`.
 - `(dev/apropos "TEXT")`: qualified names, across loaded namespaces, whose
   name contains the text.
@@ -165,17 +165,17 @@ the protocol small. Starting a server runs `(require (otium.dev :as dev))` in
 
 `describe` already exists and stays as it is.
 
-Each runtime provides two primitives and `core.ot` builds the rest:
+The runtime provides two primitives and `core.ot` builds the rest:
 `%namespaces` returns each namespace's name, file and load time, and
-`%bindings` returns a namespace's bindings. The C loader records the file and
+`%bindings` returns a namespace's bindings. The loader records the file and
 load time of each namespace it reads in `main.c`, outside managed objects.
-Chez keeps them beside its namespace records. Files loaded with `:load` are
+Files loaded with `:load` are
 recorded by `core.ot`, keyed by the file's `(ns ...)` form.
 
 `dev/source` scans the namespace's file as it is now, line by line, for a
 top-level `def`, `def-`, `defonce`, `defmacro` or `defclass` of the name at
 the start of a line. Recording locations at evaluation time would be exact,
-but needs changes to both evaluators. Formatted code puts top-level forms at
+but needs changes to the evaluator. Formatted code puts top-level forms at
 column 0, and reading the current file gives the line the agent will edit
 even when the file has changed since it was loaded.
 
@@ -210,7 +210,7 @@ It covers:
 
 ## Tests
 
-- The client against both runtimes: `ls` with zero, one and several servers,
+- The client: `ls` with zero, one and several servers,
   stale socket removal, `eval` and `load` output and exit codes, `eval` from
   an argument, `--file` and stdin, an error in `eval --file` reporting that
   file's path and line, and a
@@ -218,8 +218,7 @@ It covers:
 - Events between calls: an event sent while no client is connected is
   returned by `events --since`.
 - Truncation at `:max-chars`.
-- `dev/bindings` and `dev/source` on a namespace defined in a test file, on
-  both runtimes.
+- `dev/bindings` and `dev/source` on a namespace defined in a test file.
 
 ## Open questions
 

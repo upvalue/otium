@@ -33,9 +33,8 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="benchmark standalone Otium programs"
     )
-    parser.add_argument("binary", type=Path, nargs="?", help="optional runtime-specific executable")
+    parser.add_argument("binary", type=Path, nargs="?", help="executable to run (default: the ./otium launcher)")
     parser.add_argument("--only", nargs="+", type=Path, help="select workloads without a positional executable")
-    parser.add_argument("--runtime", choices=("c", "chez"), default="c")
     parser.add_argument("--output", type=Path, help="JSON report path")
     parser.add_argument("--build-label", default="unspecified")
     parser.add_argument(
@@ -96,7 +95,7 @@ def format_duration(seconds):
 
 def main():
     args = parse_args()
-    binary = command(args.runtime, executable=args.binary)
+    binary = command(executable=args.binary)
     benchmark_dir = Path(__file__).resolve().parent / "workloads"
     requested = args.only or args.benchmarks or sorted(benchmark_dir.glob("*.ot"))
     benchmarks = [benchmark.resolve() for benchmark in requested]

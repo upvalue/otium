@@ -1,4 +1,4 @@
-;; Normal-reader throughput. Run with ./otium --runtime=c benchmarks/reader.ot.
+;; Normal-reader throughput. Run with ./otium benchmarks/reader.ot.
 ;; Seven batches of ten reads after three warmup reads; seconds exclude input construction.
 (def source (buffer))
 

@@ -5,8 +5,8 @@
 
 /* Error locations and reports. Errors record where they happened as source
  * ids and byte offsets, without touching the managed heap; ot_report_error
- * turns them into a diagnostic table and renders it with otium.diagnostics,
- * as the Chez runtime does. See the Errors section of runtime-rewrite.md. */
+ * turns them into a diagnostic table and renders it with otium.diagnostics.
+ * See the Errors section of scratch/runtime-rewrite.md. */
 
 static char* copy_string(const char* s) {
   if (!s) return NULL;
@@ -71,12 +71,12 @@ void oti_trace_error(ot_state* rt) {
     if (fn->source == OTI_NO_SOURCE) continue;
     size_t pc = frame->pc > fn->code ? (size_t)(frame->pc - fn->code) - 1 : 0;
     /* A tail call has replaced its caller's frame by the time the callee
-     * fails, as on Chez, though a builtin callee runs on the caller's. */
+     * fails, though a builtin callee runs on the caller's. */
     unsigned op = pc < fn->count ? fn->code[pc].op : OP_COUNT;
     if (i == rt->frame_count - 1 && (op == OP_TAIL_CALL || op == OP_TAIL_CALL_GLOBAL) &&
         strcmp(e->code, "E0201"))
       continue;
-    /* Recursion through one call site shows once, as on Chez. */
+    /* Recursion through one call site shows once. */
     uint32_t offset = point_offset(fn, pc);
     const oti_error_place* last = e->frame_count ? &e->frames[e->frame_count - 1] : NULL;
     if (last && last->source == fn->source && last->offset == offset) continue;
@@ -101,7 +101,7 @@ void oti_locate_error(ot_state* rt, size_t offset) {
   e->reached[e->reached_count++] = (oti_error_place){rt->source, (uint32_t)offset, NULL};
 }
 
-/* "1", "1 or 2", "1, 2, or 3" or "at least 1", as Chez describes arities. */
+/* "1", "1 or 2", "1, 2, or 3" or "at least 1". */
 static void arity_text(const oti_function* fn, char* out, size_t size) {
   if (fn->rest) {
     snprintf(out, size, "at least %zu", fn->arity);
@@ -216,7 +216,7 @@ static const char* source_text(oti_report* r, uint32_t source, size_t* length) {
 }
 
 /* Path without . and .. segments, relative to the current directory when it
- * lies beneath it, as Chez shows paths. Owned, or NULL. */
+ * lies beneath it. Owned, or NULL. */
 static char* display_path(const char* path) {
   size_t n = strlen(path);
   char* out = malloc(n + 2);
@@ -413,7 +413,7 @@ static bool push_suggestions(ot_state* rt, const oti_error_record* e) {
 }
 
 /* Add :span, :frames, :notes and :suggestions to the diagnostic in slot d,
- * from where e happened, as the Chez runtime's locate! does. */
+ * from where e happened. */
 static bool locate(oti_report* r, const oti_error_record* e, size_t d) {
   ot_state* rt = r->rt;
   ot_value existing = field_get(rt, d, ":span");

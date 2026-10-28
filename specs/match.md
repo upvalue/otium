@@ -1,11 +1,10 @@
 # Pattern matching
 
-Implemented on the C and Chez runtimes, in `lib/otium/core.ot`. Checks
+Implemented in `lib/otium/core.ot`. Checks
 are in `tests/match/checks.ot`.
 
 `match` takes a value apart by shape and binds the pieces. It's a macro in the
-shared prelude, written in Otium, so both runtimes get the same behaviour from
-the same code.
+shared prelude, written in Otium.
 
 ## Why
 
@@ -138,7 +137,7 @@ A literal one-parameter `fn` given to `?` or `app` is inlined as a `let`
 instead of being called.
 
 On a small dispatch benchmark (tagged lists, a table and an array), `match`
-runs at the same speed as the equivalent hand-written `cond` on both runtimes.
+runs at the same speed as the equivalent hand-written `cond`.
 
 Neighbouring clauses that test the same shape may share the test. Whether a
 `?` or `app` function runs again for a later clause is unspecified, so they
@@ -149,8 +148,8 @@ without reworking the compiler.
 
 ## Not included
 
-- Destructuring in `let` and `fn` parameters. That changes special forms on
-  both runtimes and can come later as sugar over `match`. Optional positional
+- Destructuring in `let` and `fn` parameters. That changes special forms and
+  can come later as sugar over `match`. Optional positional
   arguments are already supported (3.4). Patterns over rest arguments and
   keyword/value lists would be separate extensions.
 - `if-match` and `when-match`. `(match e (p then) (_ else))` is one pair of

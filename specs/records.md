@@ -1,7 +1,6 @@
 # Records
 
-Records hold a fixed set of fields. Chez uses native records with direct fields;
-C stores the fields inline in a managed object. Records have no inheritance or
+Records hold a fixed set of fields, stored inline in a managed object. Records have no inheritance or
 methods. The existing class system is separate.
 
 ```scheme

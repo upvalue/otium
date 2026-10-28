@@ -5,17 +5,16 @@ the [language guide](../docs/language-guide.md) covers the working subset.
 This document describes the full release
 contract.
 
-Otium should load a native shared library and call its C ABI from the same
-binding source on Chez and C. Binding an ordinary exported function must not
+Otium should load a native shared library and call its C ABI from Otium
+binding source. Binding an ordinary exported function must not
 require writing or compiling a C wrapper. The system math library is the first
 implementation target, exercising scalar calls and pointer output parameters
 without an installed dependency. Independent native fixtures cover ABI cases
 such as aggregate-by-value calls. SDL3 is the full release acceptance target:
 windows, accelerated 2D rendering, textures, input events, and queued PCM audio.
 
-The design starts with Otium's two runtimes and the operations needed to call
-SDL. Chez already has native foreign calls; C needs a calling engine, proposed
-here as libffi, plus the platform dynamic loader. Both expose a small common
+The design starts with the operations needed to call SDL. The runtime uses
+libffi as its calling engine, plus the platform dynamic loader, behind a small
 interface. The existing `ot_nat` extension API remains an embedding interface.
 
 ## Design basis
@@ -52,9 +51,7 @@ Version 1 supports fixed-arity C calls, scalar arguments and results, opaque
 pointers, foreign allocations, structs and unions passed and returned by value,
 pointers to aggregates, fixed arrays in memory and aggregate fields, UTF-8
 strings, and output parameters. Native 64-bit types are supported with
-checked conversion to each runtime's integer range. Declarations and memory
-operations share a common contract, with the numeric range difference described
-below; Chez's other native conversion extensions are not exposed.
+checked conversion to Otium's integer range, described below.
 
 Initial supported targets are macOS arm64 and Linux x86-64, using the native
 C calling convention, 64-bit pointers, and the normal platform ABI. A target
@@ -78,10 +75,8 @@ The initial audio example exercises playback.
 ## Common source and loading
 
 The portable API lives in `otium.ffi`. Examples below assume it is available as
-`ffi`; runtime-specific launchers may establish that alias. The shared binding
-body uses parentheses, quoted symbols, ordinary lists, and `#f`. It does not
-depend on C's keywords, arrays, tables, or nil. Unifying `require` syntax and
-file suffixes is separate work; a thin loader adapter is allowed per runtime.
+`ffi`. The binding body uses parentheses, quoted symbols, ordinary lists, and
+`#f`.
 
 The core operations are ordinary procedures. Scalar type specifications are
 symbols; aggregate specifications are first-class layout values. Type lists
@@ -118,9 +113,8 @@ Wrong arity or argument conversion fails before native code runs.
 `(ffi/has-symbol? library name)` is the explicit optional-symbol probe.
 
 Resolution is scoped to the selected library handle and its loader-defined
-dependencies. Chez must resolve that address explicitly and construct the
-foreign procedure from it; global name lookup alone is insufficient when two
-libraries export the same name. A small shared loader helper is allowed.
+dependencies; global name lookup alone is insufficient when two libraries
+export the same name. A small shared loader helper is allowed.
 
 Loaded libraries remain resident for the process lifetime. There is no unload
 operation in version 1. Reopening the same canonical library reuses its handle.
@@ -155,21 +149,19 @@ foreign API's contract. Runtime scalar definitions do not depend on SDL or
 any library manifest; a manifest can verify them but cannot redefine them.
 
 The backend must verify `_Bool` width and calling behavior with the native
-fixture rather than assuming Chez's `boolean` foreign type matches C `_Bool`.
+fixture rather than assuming it.
 `callback-pointer` is represented according to the target function-pointer ABI;
 the initial target profile requires that the backend can pass a null callback.
 
-Version 1 uses each runtime's existing ordinary integers. The `i64` and `u64`
+Version 1 uses Otium's ordinary integers. The `i64` and `u64`
 signatures describe native storage and calling conventions, not a promise that
 all their values fit an Otium integer. Native results and typed memory reads
-outside the receiving runtime's integer range raise `range`. Inputs and memory
+outside Otium's integer range raise `range`. Inputs and memory
 writes must fit the declared native type. A failed write leaves memory unchanged;
 a result-conversion error occurs after the native call and does not undo it.
 
 For the initial 64-bit C target, the ordinary integer range is `OT_INT_MIN`
-through `OT_INT_MAX`, currently `[-2^62, 2^62-1]`. Chez retains its wider exact
-integers. Shared code must account for this numeric range difference; conversion
-rules agree wherever both runtimes can represent the value. Integers are never
+through `OT_INT_MAX`, currently `[-2^62, 2^62-1]`. Integers are never
 silently rounded to doubles, truncated, or wrapped by the FFI.
 
 There is no separate foreign-integer type or FFI arithmetic API. The FFI copies
@@ -235,7 +227,7 @@ and all argument temporaries on failure. Backend-private result buffers and
 hidden result-pointer arguments are implementation details. No extra argument
 appears in the Otium signature. A successful aggregate return preserves native
 field bits without converting them to Otium integers. For example, an embedded
-high-bit `u64` can be returned and passed onward on C; reading that field raises
+high-bit `u64` can be returned and passed onward; reading that field raises
 `range` if it exceeds `OT_INT_MAX`. Padding bytes have no portable value and
 must not be used for semantic equality or deterministic serialization.
 
@@ -263,16 +255,13 @@ error before the call. The bytes are read-only to the callee; use explicit
 foreign memory for writable strings. The callee must not retain the address.
 
 This is a lifetime guarantee, not a requirement to use a particular allocator.
-Both backends copy the bytes into native storage outside the managed heap and
-release it when the call returns. A callback may collect during the call, so
-Chez does not use its native `utf-8` conversion, whose temporary bytevector
-could move. Pinning is not part of the public API.
-[Chez string conversion and collection rules](https://cisco.github.io/ChezScheme/csug10.0/foreign.html)
+The runtime copies the bytes into native storage outside the managed heap and
+releases it when the call returns, because a callback may collect during the
+call. Pinning is not part of the public API.
 
 A `utf8` result is copied and decoded into an independent Otium string before
 returning to application code. Native null becomes `ffi/null`, distinct from
-the empty string. Invalid UTF-8 raises a conversion error on both backends;
-native decoding defaults must not weaken that contract. The conversion never
+the empty string. Invalid UTF-8 raises a conversion error. The conversion never
 frees the source pointer. The binding author must ensure the source remains
 valid during conversion and contains a terminating NUL.
 Unlike `read-utf8`, this conversion has no byte bound: the declared native
@@ -289,12 +278,12 @@ length-delimited data use a pointer and length, including embedded zero bytes.
 
 ## Pointers and foreign memory
 
-`ffi/null` is the dedicated null pointer value on both runtimes. It is a pointer
-value, distinct from integer zero, `#f`, C nil, and any empty string. It is
+`ffi/null` is the dedicated null pointer value. It is a pointer
+value, distinct from integer zero, `#f`, `nil`, and any empty string. It is
 truthy; `(ffi/null? value)` is the test, returning false for every other value.
 `(ffi/pointer? value)` is true for every pointer value, including `ffi/null`,
 callbacks and pointers whose allocation has been released, and false otherwise.
-Integers, `#f`, and C nil are not accepted in its place. No change to language
+Integers, `#f`, and `nil` are not accepted in its place. No change to language
 truthiness is required.
 
 Null inputs become the native null pointer for the declared argument type.
@@ -305,11 +294,6 @@ All non-null data pointers are opaque pointer objects, not numeric addresses.
 `ffi/pointer=?` accepts pointer values, including `ffi/null`, and compares
 addresses; it does not imply equal ownership or valid lifetime. There is no
 public integer-to-pointer conversion in version 1.
-
-Chez's native conventions stay inside the adapter: raw `void*` uses integer
-addresses, typed foreign pointers wrap an address, and string conversion maps
-null to `#f`. The adapter normalizes these to and from Otium's dedicated null.
-[Chez pointer representations](https://cisco.github.io/ChezScheme/csug10.0/foreign.html)
 
 | Operation | Contract |
 | --- | --- |
@@ -464,32 +448,25 @@ in flight. An interrupt is delivered after the native call and conversion
 cleanup complete. The FFI does not promise that a blocking native call leaves
 the REPL responsive.
 
-Each backend keeps call inputs, callable metadata, and allocation owners live
-through conversion and the native call. The C backend roots managed values
+The runtime keeps call inputs, callable metadata, and allocation owners live
+through conversion and the native call. It roots managed values
 across every allocation and reacquires managed payload addresses after any
 operation that may collect. Its native argument storage, copied strings,
 aggregate copies, and result storage are outside the moving heap; it passes no managed object address
-to C in version 1. This is the C backend strategy, not a restriction on Chez's
-internal implementation of the same lifetime contract.
+to C in version 1.
 
 Every binding requires a final `collect-safe?` boolean, with no default:
 `(ffi/bind library name arguments result collect-safe?)`. `defbindings` uses
 `(name symbol arguments result collect-safe?)` for each declaration. Non-booleans
 raise a `type` FFI error.
 
-With `#t`, Chez uses `__collect_safe`: the Otium thread is deactivated during
-the native call, so a callback arriving on another thread can activate and abort
-instead of waiting for it. With `#f`, Chez leaves the thread active and avoids
-that transition cost. Use `#t` for blocking or long-running calls and calls whose
-threading behavior is uncertain. Use `#f` for short operations whose behavior is
-known. A call that waits on another thread invoking an Otium callback can deadlock
-with `#f` before the wrong-thread error is reported. The choice covers indirect
-calls and callbacks registered earlier, not just the declared arguments.
-Same-thread callbacks can collect with either setting; `#f` does not disable GC
-or promise that no callback occurs. The flag does not allow
-callbacks on foreign threads. The C backend validates the flag but uses the same
-call path for both values; it has no Chez thread activation state. No call
-argument points into Chez's managed heap.
+The runtime validates the flag but uses the same call path for both values.
+Use `#t` for blocking or long-running calls and calls whose threading behavior
+is uncertain. Use `#f` for short operations whose behavior is known. The choice
+covers indirect calls and callbacks registered earlier, not just the declared
+arguments. Same-thread callbacks can collect with either setting; `#f` does not
+disable GC or promise that no callback occurs. The flag does not allow
+callbacks on foreign threads.
 Native code reenters Otium only through [callbacks](#callbacks), on the Otium
 thread. Blocking calls still block the Otium execution thread.
 
@@ -516,8 +493,7 @@ tables, keywords, or native condition records:
 | `(ffi/error-expected-type condition)` | Expected FFI type specification, or `#f`. |
 
 Accessors other than `error?` require an FFI condition and raise a `type` error
-otherwise. `condition-message` supplies human-readable text. Field accessors
-return the same kinds of values on both runtimes; their internal condition
+otherwise. `condition-message` supplies human-readable text. The internal condition
 representation is not part of this API. A load error has reason `load`, library
 `#f` if no candidate was selected, and a message listing attempted candidates.
 
@@ -585,10 +561,9 @@ new session abstraction required of the FFI.
 
 ## Backend work and repository placement
 
-The C runtime gets an optional FFI build using libffi. A build without
+The runtime has an optional FFI build using libffi. A build without
 it has no libffi link dependency and reports FFI unavailable on import. Core
-startup does not load SDL. SDL remains an optional installed dependency on both
-runtimes.
+startup does not load SDL. SDL remains an optional installed dependency.
 
 The C callable representation needs per-binding context: native address,
 signature, library reference, and prepared libffi call interface. The existing
@@ -598,7 +573,7 @@ generate a fixed pool of global C trampolines. Cache immutable prepared
 signatures and keep all per-call storage separate.
 [libffi call interface](https://github.com/libffi/libffi/blob/master/doc/libffi.texi)
 
-The C backend constructs libffi aggregate type descriptions at bind time and
+The runtime constructs libffi aggregate type descriptions at bind time and
 checks computed sizes, alignments, and field offsets against the layout values.
 Embedded fixed arrays can be described as repeated elements. libffi does not
 provide a direct union type; union classification on both target ABIs is a
@@ -609,33 +584,19 @@ emulation described in libffi's union documentation is not sufficient evidence
 that a by-value signature is correct.
 [libffi aggregate types](https://github.com/libffi/libffi/blob/master/doc/libffi.texi)
 
-Chez constructs and caches native procedures for the same signatures, with
-the common validation/conversion layer around them. Aggregate bindings create
-private native ftype descriptions and use Chez's aggregate-by-value facility
-where supported by the selected Chez version and target. The adapter supplies
-any result destination required by Chez internally. Pin and verify the minimum
-Chez version supporting this path on both targets; an older runtime must report
-`abi` at bind time rather than silently pass an address. Native ftype layout and
-call behavior must pass the same fixture suite as C.
-[Chez aggregate calling implementation](https://github.com/cisco/ChezScheme/blob/main/IMPLEMENTATION.md)
+Any dynamic compilation happens at bind time, not on every call.
 
-Chez's native integer coercion rules must not leak through the portable API. Any dynamic compilation happens
-at bind time, not on every call.
-[Chez foreign interface](https://www.scheme.com/csug8/foreign.html)
-
-Placement: `c/src/foreign.c` and `c/src/foreign_types.c` for the C backend,
-`chez/otium/ffi.sls` for Chez, `lib/otium/ffi.ot` for declarations, generic native
-helpers, probes and fixtures, and `native/sdl/` for binding data and wrappers.
-Each runtime's loader may adapt the shared source without duplicating function
-signatures. Integration tests belong under `tests/`. Language/library
+Placement: `c/src/foreign.c` and `c/src/foreign_types.c` for the runtime,
+`lib/otium/ffi.ot` for declarations, generic native helpers, probes and
+fixtures, and `native/sdl/` for binding data and wrappers. Integration tests belong under `tests/`. Language/library
 gaps discovered while porting scene code belong in tickets.
 
 ## Verification and implementation order
 
 1. Build a tiny independent native fixture library and implement load/bind,
-   scalar conversion, null pointers, and fixed-arity calls on both backends.
+   scalar conversion, null pointers, and fixed-arity calls.
    Test native and runtime integer boundaries, including high-bit u64 results
-   that succeed on Chez and raise `range` on C. Check failed writes leave memory
+   that raise `range`. Check failed writes leave memory
    unchanged and out-of-range results do not hide native side effects. Test bool
    ABI, float rounding, missing symbols, and two libraries exporting the same
    symbol with different results.
@@ -653,13 +614,12 @@ gaps discovered while porting scene code belong in tickets.
    expected fields, never padding bytes. Verify argument-copy isolation, shallow
    pointer-member behavior, independent result allocations, invalid-buffer
    rejection before side effects, and allocation-failure cleanup. Return high-bit
-   integer fields and verify that only a subsequent scalar read raises `range`
-   on C. Rebind layouts and confirm saved callables keep their original ABI.
-3. Run the same fixture cases under C GC stress and forced compaction, with
+   integer fields and verify that only a subsequent scalar read raises `range`. Rebind layouts and confirm saved callables keep their original ABI.
+3. Run the same fixture cases under GC stress and forced compaction, with
    allocations during conversions, aggregate arguments/results, and live derived
    views. Test string arguments with collections between calls and inside a
    callback during the call. Use an explicitly retained native string across calls
-   and collections on both runtimes. Exercise failure cleanup and resource counts.
+   and collections. Exercise failure cleanup and resource counts.
    Run `just gc-lint` when LLVM tooling is installed
    for changes involving allocation, roots, or managed pointers.
    Check leak counts before teardown, including an intentionally abandoned
@@ -668,7 +628,7 @@ gaps discovered while porting scene code belong in tickets.
    mismatch errors. Define same-labelled layouts in separate namespaces, import
    them as values, and rebind one with changed fields. Verify saved and nested
    layouts keep their original size/offsets, without changing old allocations.
-4. Bind SDL and port the current canvas feature set. Both runtimes must create
+4. Bind SDL and port the current canvas feature set. It must create
    a window, report an accelerated renderer, render and capture known pixels,
    upload a texture, process injected R/Escape/close/mouse events, and close
    cleanly after an injected Otium error. Validate text copying with a fixture
@@ -676,21 +636,18 @@ gaps discovered while porting scene code belong in tickets.
 5. Add queued audio playback with a null callback, bounded queue refill, and
    deterministic teardown. Dummy audio can verify queue mechanics in CI; a
    real-device smoke test establishes actual playback. Keep those results distinct.
-6. Exercise reload between frames while resource identity persists. The existing
-   Chez SDL demos stay available until the shared path passes on both runtimes.
+6. Exercise reload between frames while resource identity persists.
 
-The fixture suite runs without SDL or a display and checks expected values,
-not merely agreement between runtimes. SDL graphics tests require a real
+The fixture suite runs without SDL or a display and checks expected values. SDL graphics tests require a real
 accelerated backend and compare captured output; absence is an explicit skip
 in ordinary CI and a failure in the dedicated integration job. Each supported
-target must run the ABI and native-call fixtures on both runtimes. Report
+target must run the ABI and native-call fixtures. Report
 foreign allocation leaks separately from managed heap use.
 
-The release requires the aggregate-by-value fixture suite on both runtimes and
-both supported targets, independently of SDL coverage. It is complete when
-one shared SDL binding body and one portable
-render/input/audio acceptance program run on both runtimes, with only loader
-and host setup adapters. No per-function C glue is needed for the listed surface.
+The release requires the aggregate-by-value fixture suite on both supported
+targets, independently of SDL coverage. It is complete when one SDL binding
+body and one portable render/input/audio acceptance program run, with only
+loader and host setup adapters. No per-function C glue is needed for the listed surface.
 
 ## Callbacks
 
@@ -708,9 +665,7 @@ code calls `procedure` with the converted arguments and converts its result.
 Callbacks are synchronous and same-thread. Native code may invoke one only on
 the Otium thread, while Otium is inside a foreign call it made; that includes a
 callback stored earlier and invoked during a later, unrelated call. Invocation
-on any other thread is unsupported and normally aborts the process with a message.
-On Chez, a foreign call bound with `#f` can prevent that diagnostic by blocking
-collection while waiting for the callback thread. Invocation on the Otium thread
+on any other thread is unsupported and normally aborts the process with a message. Invocation on the Otium thread
 outside any foreign call from Otium aborts the process with a message. A callback may itself make
 foreign calls, which may invoke callbacks.
 

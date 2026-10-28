@@ -1,6 +1,6 @@
 (require otium.json :as json)
 
-; Run with ./otium --runtime=chez benchmarks/json.ot.
+; Run with ./otium benchmarks/json.ot.
 (def text
   (str "["
        (string-join ","

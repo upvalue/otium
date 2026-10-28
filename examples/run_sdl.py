@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the portable SDL scene host or acceptance program on C or Chez."""
+"""Run the portable SDL scene host or acceptance program ."""
 import argparse
 import os
 from pathlib import Path
@@ -15,7 +15,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--runtime', choices=('c','chez'), default='c')
     parser.add_argument('--manifest', type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument('--scene', choices=('shapes','particles'), default='shapes')
     parser.add_argument('--scene-path', type=Path)
@@ -29,7 +28,7 @@ def main():
     args = parser.parse_args()
     if args.frames < 0: parser.error('--frames must be nonnegative')
     if args.capture and not args.frames and not args.acceptance: parser.error('--capture requires --frames')
-    source = bootstrap(args.runtime, args.manifest)
+    source = bootstrap(args.manifest)
     source += f'''\n(def renderer-name {literal(args.renderer)})
 (def frame-limit {args.frames})
 (def capture-path {literal(args.capture.resolve()) if args.capture else '#f'})
@@ -52,7 +51,7 @@ def main():
         parser.error('--audio real cannot use SDL_AUDIO_DRIVER=dummy')
     with tempfile.TemporaryDirectory(prefix='otium-sdl-') as directory:
         script = Path(directory)/'host.ot'; script.write_text(source)
-        return subprocess.run(command(args.runtime, script), cwd=ROOT, env=env).returncode
+        return subprocess.run(command(script), cwd=ROOT, env=env).returncode
 
 if __name__ == '__main__':
     raise SystemExit(main())

@@ -1,5 +1,6 @@
 (ns otium.ui.native)
 (require (otium.ffi :as ffi))
+(require (otium.process :as process))
 
 ;; Scalar selectors used by the native layout and text bridge.
 (defonce icons-directory nil)
@@ -108,8 +109,14 @@
       ((eq? (car (car entries)) key) (car (cdr (car entries))))
       (else (loop (cdr entries))))))
 
-(def (load-config! path)
-  "Load installation paths as data, then open the native UI library."
+(def (default-config-path)
+  "ui-config.ot in OTIUM_BUILD, which ./otium sets."
+  (let ((build (process/getenv "OTIUM_BUILD")))
+    (unless build (error "OTIUM_BUILD is not set; run the program through ./otium"))
+    (str build "/ui-config.ot")))
+
+(def (load-config! &optional (path (default-config-path)))
+  "Load installation paths as data, then open the native UI library. path defaults to default-config-path."
   (let ((settings (read-string (read-file path))))
     (load! (config-ref settings 'library))
     (set! icons-directory (config-ref settings 'icons))

@@ -9,14 +9,12 @@ import difflib
 import os
 from pathlib import Path
 import shlex
-import shutil
 import subprocess
 import tempfile
 import time
 
-from otium_tools import BUILD, LIBRARY_EXTENSION, ROOT, environment
+from otium_tools import BUILD, LIBRARY_EXTENSION, ROOT, command, environment
 
-BOTH = ('c', 'chez')
 STRESS = bool(os.environ.get('OTIUM_GC_STRESS'))
 TESTS = {}
 _defaults = {}
@@ -40,8 +38,8 @@ class Result:
 
 
 class Test:
-    def __init__(self, name, function, runtime, suite, timeout, needs, parallel, source):
-        self.name, self.function, self.runtime = name, function, runtime
+    def __init__(self, name, function, suite, timeout, needs, parallel, source):
+        self.name, self.function = name, function
         self.suite, self.timeout, self.needs = suite, timeout, set(needs)
         self.parallel, self.source = parallel, source
 
@@ -51,30 +49,23 @@ def defaults(**options):
     _defaults.update(options)
 
 
-def test(name, *, runtimes=None, suite=None, timeout=None, needs=None, parallel=None):
-    """Register function(t). With runtimes, register one test per runtime, named 'name runtime'."""
+def test(name, *, suite=None, timeout=None, needs=None, parallel=None):
+    """Register function(t) as the test called name."""
     def register(function):
-        for runtime in runtimes or (None,):
-            full = name if runtime is None else f'{name} {runtime}'
-            if full in TESTS:
-                raise ValueError(f'duplicate test name: {full}')
-            required = set(_defaults.get('needs', ()) if needs is None else needs)
-            if runtime == 'c' and required & {'ffi', 'ui'}:
-                required.add('c-ffi')
-            if runtime == 'chez':
-                required.add('chez')
-            TESTS[full] = Test(full, function, runtime,
-                               suite or _defaults.get('suite', 'shared'),
-                               timeout or _defaults.get('timeout', 60), required,
-                               _defaults.get('parallel', True) if parallel is None else parallel,
-                               _defaults.get('source'))
+        if name in TESTS:
+            raise ValueError(f'duplicate test name: {name}')
+        TESTS[name] = Test(name, function, suite or _defaults.get('suite', 'lang'),
+                           timeout or _defaults.get('timeout', 60),
+                           _defaults.get('needs', ()) if needs is None else needs,
+                           _defaults.get('parallel', True) if parallel is None else parallel,
+                           _defaults.get('source'))
         return function
     return register
 
 
-def case(name, program, *, runtimes=BOTH, options=(), paths=(), arguments=(), stdin='',
-         status=0, stdout=None, stdout_file=None, contains=(), stderr=(), env=None, **registration):
-    """Run program with each runtime and compare its exit status and output.
+def case(name, program, *, options=(), paths=(), arguments=(), stdin='', status=0,
+         stdout=None, stdout_file=None, contains=(), stderr=(), env=None, **registration):
+    """Run program and compare its exit status and output.
 
     paths become -L options and arguments follow --. stdout is exact; contains
     and stderr list substrings. status=None accepts any nonzero exit."""
@@ -84,14 +75,13 @@ def case(name, program, *, runtimes=BOTH, options=(), paths=(), arguments=(), st
         command = [*options, *flags, program, *(['--', *arguments] if arguments else [])]
         t.expect(t.otium(*command, stdin=stdin, env=env), status=status, stdout=expected,
                  contains=contains, stderr=stderr)
-    test(name, runtimes=runtimes, **registration)(run)
+    test(name, **registration)(run)
 
 
 class Context:
-    """What a test function receives: its runtime, a scratch directory and process helpers."""
+    """What a test function receives: a scratch directory and process helpers."""
 
-    def __init__(self, runtime):
-        self.runtime = runtime
+    def __init__(self):
         self.stress = STRESS
         self._scratch = None
         self._processes = []
@@ -122,13 +112,9 @@ class Context:
         env = environment(overrides=overrides)
         return {key: value for key, value in env.items() if value is not None}
 
-    def command(self, *arguments, runtime=None, project=False):
-        """A launcher command for this test's runtime, isolated from project.ot unless project."""
-        runtime = runtime or self.runtime
-        if runtime is None:
-            raise ValueError('this test has no runtime; pass runtime=')
-        return ([str(ROOT / 'otium'), '--runtime=' + runtime] +
-                ([] if project else ['--no-project']) + list(map(str, arguments)))
+    def command(self, *arguments, project=False):
+        """A launcher command, isolated from project.ot unless project."""
+        return command(*arguments, isolated=not project)
 
     def run(self, command, *, stdin='', env=None, cwd=ROOT, timeout=60):
         command = list(map(str, command))
@@ -140,8 +126,8 @@ class Context:
                           f'--- stdout\n{error.stdout or ""}\n--- stderr\n{error.stderr or ""}')
         return Result(command, result.returncode, result.stdout, result.stderr)
 
-    def otium(self, *arguments, runtime=None, project=False, **options):
-        return self.run(self.command(*arguments, runtime=runtime, project=project), **options)
+    def otium(self, *arguments, project=False, **options):
+        return self.run(self.command(*arguments, project=project), **options)
 
     def spawn(self, command, *, env=None, cwd=ROOT, **options):
         """Start a process that is killed when the test ends."""
@@ -194,14 +180,6 @@ class Context:
                               f'--- stdout\n{out}\n--- stderr\n{err}')
             time.sleep(interval)
         raise Failure(f'timed out waiting for {what}')
-
-
-def chez():
-    """The Chez Scheme executable."""
-    found = os.environ.get('CHEZ') or shutil.which('chez') or shutil.which('scheme')
-    if not found:
-        raise Skip('Chez Scheme not found')
-    return found
 
 
 def built(name):

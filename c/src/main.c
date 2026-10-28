@@ -230,12 +230,11 @@ static int parse_options(int argc, char** argv, options* o) {
     else if (!strcmp(token, "-L")) token = "--path";
     const char* equals = strchr(token, '=');
     size_t spelling = equals ? (size_t)(equals - token) : strlen(token);
-    const char *name = NULL, *owner = NULL, *kind = NULL;
+    const char *name = NULL, *kind = NULL;
     for (size_t k = 0; k < sizeof(launcher_options) / sizeof(*launcher_options); k++)
       if (spelling == strlen(launcher_options[k].name) + 2 && !strncmp(token, "--", 2) &&
           !strncmp(token + 2, launcher_options[k].name, spelling - 2)) {
         name = launcher_options[k].name;
-        owner = launcher_options[k].owner;
         kind = launcher_options[k].kind;
       }
     if (!name) return usage_error("unknown option %s", argv[i]);
@@ -256,7 +255,6 @@ static int parse_options(int argc, char** argv, options* o) {
       if (i + 1 == argc) return usage_error("--%s requires a %s", name, kind);
       value = argv[++i];
     }
-    if (!strcmp(owner, "chez")) continue;
     if (!strcmp(name, "help")) {
       fputs(launcher_help, stdout);
       return -1;

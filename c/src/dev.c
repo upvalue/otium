@@ -1,8 +1,8 @@
 /* Primitives for the development server in otium.dev. The socket transport
- * is native/dev/transport.c, shared with Chez; lib/otium/dev.ot handles the
- * protocol and c/src/dev.ot adapts these to the names it uses. */
+ * is native/dev/transport.c; lib/otium/dev.ot handles the protocol and
+ * c/src/dev.ot adapts these to the names it uses. */
 #include "internal.h"
-/* Angle brackets keep the shared transport out of the amalgamation. */
+/* Angle brackets keep the transport out of the amalgamation. */
 #include <dev/transport.h>
 #include <string.h>
 #ifdef OTIUM_FREESTANDING
@@ -161,7 +161,7 @@ static ot_value dev_namespace_names(ot_state* rt, size_t first, size_t count) {
   return ok ? v[0] : 0;
 }
 
-/* Chez's procedure-arity-mask: bit n is set when n arguments are accepted,
+/* An arity mask, as in procedure-arity-mask: bit n is set when n arguments are accepted,
  * and the mask is negative when any number above the required count is. */
 static ot_value arity_mask(ot_state* rt, ot_value value) {
   if (!oti_kind(value, K_CLOSURE)) return OT_FALSE;

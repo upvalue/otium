@@ -8,7 +8,7 @@ import signal
 import subprocess
 import time
 
-from harness import BOTH, ROOT, Failure, built, case, defaults, test
+from harness import ROOT, Failure, built, case, defaults, test
 
 defaults(suite='c')
 OTIUM = built('otium')
@@ -17,7 +17,7 @@ SECOND = 'c/tests/cli-load-second.ot'
 
 for name in ('01-reader', '02-types', '03-equality', '04-tables', '05-control',
              '06-closures', '07-macros', '08-conditions', '09-params', '11-multimethods'):
-    case('conformance ' + name, f'c/tests/otium/{name}.ot', runtimes=['c'],
+    case('conformance ' + name, f'c/tests/otium/{name}.ot',
          stdout_file=f'c/tests/otium/expected/{name}.txt')
 
 
@@ -28,7 +28,7 @@ def extension(t):
     t.expect(t.run([host, '-L', 'c/tests/modules', 'c/tests/ext-demo.ot']))
 
 
-@test('multimethods', runtimes=BOTH, timeout=180)
+@test('multimethods', timeout=180)
 def multimethods(t):
     """Wildcard resolution against a bitset oracle, then namespace integration."""
     forms = ['(require (otium.generic :as g :refer (Number)))', '(defgeneric (f a b c))']

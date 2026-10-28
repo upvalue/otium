@@ -72,16 +72,16 @@ def pick(args):
 
 
 def listing(found):
-    rows = [('PID', 'RUNTIME', 'STATE', 'CWD', 'PROGRAM')]
+    rows = [('PID', 'STATE', 'CWD', 'PROGRAM')]
     for path, info in found:
         if info is None:
-            rows.append((path.stem, '?', 'busy', '?', '?'))
+            rows.append((path.stem, 'busy', '?', '?'))
             continue
         program = ' '.join([info.get('script') or '-'] + list(info.get('arguments') or []))
-        rows.append((str(info['pid']), info['runtime'], info['state'], info['cwd'], program))
-    widths = [max(len(row[i]) for row in rows) for i in range(4)]
-    return '\n'.join('  '.join(cell.ljust(widths[i]) for i, cell in enumerate(row[:4])) +
-                     '  ' + row[4] for row in rows)
+        rows.append((str(info['pid']), info['state'], info['cwd'], program))
+    widths = [max(len(row[i]) for row in rows) for i in range(3)]
+    return '\n'.join('  '.join(cell.ljust(widths[i]) for i, cell in enumerate(row[:3])) +
+                     '  ' + row[3] for row in rows)
 
 
 def code_input(args):

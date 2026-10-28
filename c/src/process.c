@@ -117,8 +117,8 @@ static ot_value process_arguments(ot_state* rt, size_t first, size_t count) {
 }
 
 /* otium.memory reads these. Allocation is cumulative: bytes collections have
- * reclaimed plus bytes still held. --memory-report and the heap breakdown are
- * Chez-only, so %report? is #f and %heap is nil. */
+ * reclaimed plus bytes still held. There is no heap breakdown, so %heap is
+ * nil. */
 static ot_value memory_allocated(ot_state* rt, size_t first, size_t count) {
   (void)first;
   if (!process_metadata(rt, count)) return 0;
@@ -130,12 +130,6 @@ static ot_value memory_collections(ot_state* rt, size_t first, size_t count) {
   (void)first;
   if (!process_metadata(rt, count)) return 0;
   return ot_int((intptr_t)rt->heap.collections);
-}
-
-static ot_value memory_report_p(ot_state* rt, size_t first, size_t count) {
-  (void)first;
-  if (!process_metadata(rt, count)) return 0;
-  return OT_FALSE;
 }
 
 static ot_value memory_heap(ot_state* rt, size_t first, size_t count) {
@@ -151,7 +145,6 @@ const oti_builtin_def oti_process_builtins[] = {
     {B_PROCESS_SETENV, "otium.process/setenv!", process_setenv},
     {B_MEMORY_ALLOCATED, "otium.memory/%allocated", memory_allocated},
     {B_MEMORY_COLLECTIONS, "otium.memory/%collections", memory_collections},
-    {B_MEMORY_REPORT, "otium.memory/%report?", memory_report_p},
     {B_MEMORY_HEAP, "otium.memory/%heap", memory_heap},
     {0, NULL, NULL},
 };

@@ -38,7 +38,6 @@
 (check "owned nested binding" 1 (lift-count "(def (f) (def (a x) (fn () x)) (a 1))"))
 (check "reassigned helper" 0 (lift-count "(def (f) (def (a) 1) (set! a (fn () 2)) (a))"))
 (check "capture through assignment" 0 (lift-count "(def (f x) (def (a) (set! x 2)) (a) x)"))
-(check "host syntax" 0 (lift-count "(require chez) (def (f) (def (a) (chez/let ((x 1)) x)) (a))"))
 (check "anonymous callback" 0 (lift-count "(def (f) (map (fn (x) (+ x 1)) (list 1)))"))
 (check "macro capture" 0 (lift-count "(defmacro use-x () (quote x)) (def (f x) (def (a) (use-x)) (a))"))
 (check "macro binding" 1 (lift-count "(defmacro local () (quote (let ((x 1)) x))) (def (f) (def (a) (local)) (a))"))

@@ -1,7 +1,0 @@
-error[E0301]: wrong number of arguments to `f`
- --> tests/diagnostics/output/arity.ot:4:1
-  |
-4 | (f 1 2)
-  | ^^^^^^^ expects 1 argument, called with 2
-  |
-  = note: run `otium explain E0301` for details

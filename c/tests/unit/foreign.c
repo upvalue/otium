@@ -319,7 +319,6 @@ TEST(common_ffi_script) {
   CHECK(ot_set_arguments(rt, "tests/ffi/common.ot", 2, arguments));
   ot_gc_stress(rt, true);
   eval_file(rt, "tests/ffi/support.ot");
-  eval_file(rt, "tests/ffi/runtime-c.ot");
   eval_file(rt, "tests/ffi/common.ot");
   check_int(rt, "(ffi/allocation-count)", 0);
   ot_destroy(rt);
@@ -334,7 +333,6 @@ TEST(callbacks_and_callback_lifetime) {
   CHECK(ot_add_load_path(rt, directory));
   ot_gc_stress(rt, true);
   eval_file(rt, "tests/ffi/support.ot");
-  eval_file(rt, "tests/ffi/runtime-c.ot");
   eval_file(rt, "tests/ffi/callbacks.ot");
   eval(rt, "(def callback-extra (ffi/open-library '(\"" EXTRA "\")))");
   eval_file(rt, "c/tests/unit/data/callback-lifetime.ot");

@@ -1,4 +1,4 @@
-;; Pattern matching exercised unchanged on both runtimes.
+;; Pattern matching.
 (require otium.test :refer (check fails? report))
 
 ;; Literals and names

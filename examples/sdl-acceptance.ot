@@ -1,4 +1,4 @@
-;; This body runs unchanged on both runtimes. The launcher supplies options.
+;; The launcher supplies options.
 ;; lint: allow-file(unbound-name) examples/run_sdl.py prepends the SDL bindings and options
 (def acceptance-checks 0)
 

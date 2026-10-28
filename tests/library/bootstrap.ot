@@ -1,4 +1,4 @@
-; Both runtimes load the shared core before user code runs.
+; The shared core loads before user code runs.
 
 (println "empty-empty:" (empty? nil) (empty? '()) (empty? "") (empty? (buffer)) (empty? []) (empty? {}))
 (println "empty-nonempty:" (empty? '(1)) (empty? "x") (empty? (buffer "x")) (empty? [1]) (empty? {:a 1}))

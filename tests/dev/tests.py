@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import time
 
-from harness import BOTH, ROOT, Failure, Skip, test
+from harness import ROOT, Failure, Skip, test
 from otium_tools import dev
 
 
@@ -97,7 +97,7 @@ def pause_limit(t):
     return 2 if t.stress else .1
 
 
-@test('dev eval', runtimes=BOTH)
+@test('dev eval')
 def evaluation(t):
     server = serve(t)
     c = server.client
@@ -133,7 +133,7 @@ def evaluation(t):
     t.check_in(':ok #f', c.response(9))
 
 
-@test('dev interrupt', runtimes=BOTH)
+@test('dev interrupt')
 def interrupt(t):
     server = serve(t, watchdog=0)
     c = server.client
@@ -169,7 +169,7 @@ def interrupt(t):
     t.check_in(':value "#t"', replacement.response(10))
 
 
-@test('dev watchdog', runtimes=BOTH)
+@test('dev watchdog')
 def watchdog(t):
     c = serve(t, watchdog=150).client
     c.send(1, 'eval', code='(let loop () (loop))')
@@ -188,7 +188,7 @@ def watchdog(t):
     t.check_in(':ok #f', c.response(4))
 
 
-@test('dev gc stress', runtimes=BOTH)
+@test('dev gc stress')
 def gc_stress(t):
     if not t.stress:
         raise Skip('run with the stress test setup')
@@ -200,7 +200,7 @@ def gc_stress(t):
         t.check_in(':output "(1 2 3)\\n"', result)
 
 
-@test('dev repl idle', runtimes=BOTH)
+@test('dev repl idle')
 def repl_idle(t):
     server = Server(t)
     c = server.client
@@ -212,7 +212,7 @@ def repl_idle(t):
         pass
 
 
-@test('dev nested pause', runtimes=BOTH)
+@test('dev nested pause')
 def nested_pause(t):
     c = serve(t, watchdog=150).client
     c.send(1, 'eval', code='(let loop () (loop))')
@@ -229,7 +229,7 @@ def nested_pause(t):
     t.check_in(':ok #f', c.response(1))
 
 
-@test('dev frames', runtimes=BOTH)
+@test('dev frames')
 def frames(t):
     """Fragmented frames are reassembled; malformed or oversized ones drop only their client."""
     server = serve(t)
@@ -249,7 +249,7 @@ def frames(t):
     t.check_in(':ok #t', c.response(2))
 
 
-@test('dev attach and mcp', runtimes=BOTH)
+@test('dev attach and mcp')
 def attach_and_mcp(t):
     server = serve(t)
     result = t.expect(t.run([ROOT / 'otium', 'attach', server.path, '--eval', '(+ 20 22)'], timeout=10))
@@ -269,7 +269,7 @@ def attach_and_mcp(t):
     t.check_in(':value "7"', responses[2]['result']['content'][0]['text'])
 
 
-@test('dev events', runtimes=BOTH)
+@test('dev events')
 def events(t):
     server = serve(t, watchdog=150)
     c = server.client
@@ -296,10 +296,10 @@ def events(t):
     c.send(8, 'status')
     result = c.response(8)
     t.check_in(':pid ', result)
-    t.check_in(':runtime :' + t.runtime, result)
+    t.check(':runtime' not in result, 'status still reports a runtime')
 
 
-@test('dev introspection', runtimes=BOTH)
+@test('dev introspection')
 def introspection(t):
     server = serve(t)
     c = server.client
@@ -331,7 +331,7 @@ def introspection(t):
     t.check_in(str(path.resolve()), c.response(8))
 
 
-@test('dev introspection policy', runtimes=BOTH)
+@test('dev introspection policy')
 def introspection_policy(t):
     root = t.scratch / "otdev-'policy"
     (root / 'app').mkdir(parents=True)
@@ -369,10 +369,10 @@ def introspection_policy(t):
     t.check_in(':value "1"', c.response(9))
 
 
-@test('dev socket collision', runtimes=BOTH)
+@test('dev socket collision')
 def socket_collision(t):
     server = serve(t)
-    result = t.otium('--dev=' + str(server.path), 'serve', runtime='chez', project=True, timeout=10)
+    result = t.otium('--dev=' + str(server.path), 'serve', project=True, timeout=10)
     t.check(result.status != 0, 'a second server took a live socket', result)
     server.client.send(1, 'status')
     t.check_in(':ok #t', server.client.response(1))
@@ -380,7 +380,7 @@ def socket_collision(t):
 
 # Servers on the default socket directory can't tell their sockets apart, so
 # this runs alone.
-@test('dev client', runtimes=BOTH, parallel=False)
+@test('dev client', parallel=False)
 def client(t):
     """tools/otium-dev against a server on the default socket path."""
     directory = t.scratch
@@ -398,7 +398,7 @@ def client(t):
 
     t.check(path.parent.stat().st_mode & 0o777 == 0o700, 'socket directory is not private')
     t.check_in(str(directory.resolve()), run('ls').stdout)
-    t.check_in('runtime: ' + t.runtime, t.expect(run('status')).stdout)
+    t.check_in('pid: ', t.expect(run('status')).stdout)
     t.expect(run('eval', '(println "out") (+ 1 2)'), stdout='out\n3\n')
     t.expect(run('eval', '-', stdin='(* 6 7)'), stdout='42\n')
     (directory / 'scratch.ot').write_text('(+ 1\n  (error "broken"))\n')
@@ -428,7 +428,7 @@ UI_PROGRAM = '''(require (otium.ui :as ui))
 '''
 
 
-@test('dev ui', runtimes=BOTH, suite='gpu', needs=['ui'], timeout=300, parallel=False)
+@test('dev ui', suite='gpu', needs=['ui'], timeout=300, parallel=False)
 def live_ui(t):
     """Repair a failing, then looping, live UI through its development socket."""
     script = t.scratch / 'ui.ot'
@@ -467,7 +467,7 @@ def live_ui(t):
     t.check(server.process.returncode == 0, 'UI exited', server.process.returncode, out, err)
 
 
-@test('dev source forms', runtimes=BOTH)
+@test('dev source forms')
 def source_forms(t):
     server = serve(t)
     path = server.directory / 'forms.ot'

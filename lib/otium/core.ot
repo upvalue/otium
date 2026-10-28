@@ -1,7 +1,6 @@
 "The core language and collection library, available without require.
 
-Includes runtime builtins, special forms, and the shared Otium prelude.
-Runtime labels identify bindings available only on Chez or C."
+Includes runtime builtins, special forms, and the Otium prelude."
 
 ;; prelude.ot -- the derived core (spec 10.x), loaded through the real
 ;; expander, so defmacro and everything native is available.
@@ -739,7 +738,7 @@ Runtime labels identify bindings available only on Chez or C."
 
 ;; --- functional (10.8) ------------------------------------------------------
 
-;; Scheme list helpers, matching the Chez runtime's names.
+;; Scheme list helpers.
 (def (cdar p)
   "(cdar pair)\nEquivalent to (cdr (car pair))."
   (cdr (car p)))
@@ -1003,7 +1002,6 @@ Runtime labels identify bindings available only on Chez or C."
         n
         nil)))
 
-;; lint: allow(expansion-failed) The prelude loader owns this declaration in otium.core.
 (defgeneric (close resource outcome))
 
 (def (resource-closable? resource)

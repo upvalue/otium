@@ -1,4 +1,4 @@
-"""Otium check programs that run unchanged on both runtimes."""
+"""Otium check programs."""
 from harness import case
 
 case('optional parameters', 'tests/optional/checks.ot')

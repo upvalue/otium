@@ -2,7 +2,7 @@
 (require otium.time :as time)
 
 ;; Frame cost of the Manse strip with four busy terminals.
-;; ./otium --runtime=chez -L . manse/bench.ot
+;; ./otium -L . manse/bench.ot
 ;; MANSE_BENCH_UNCACHED=1 paints every terminal on every frame, as before
 ;; terminals were cached.
 (require (otium.ui :as ui))
@@ -37,7 +37,7 @@
         (set! resizes (+ resizes 1))
         (apply real-resize! args)))
 
-(def w (ui/open {:title "bench" :width 1280 :height 760 :headless #t :scale 2 :config "build/ui-config.ot"}))
+(def w (ui/open {:title "bench" :width 1280 :height 760 :headless #t :scale 2}))
 
 (put! workspace/workspace :window w)
 (put! workspace/workspace :shell "/bin/sh")

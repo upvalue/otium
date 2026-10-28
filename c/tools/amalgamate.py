@@ -6,8 +6,8 @@ Writes three files to OUTPUT_DIR:
   otium.c  every internal header and runtime source, each included once
   main.c   the command-line launcher
 
-The development server's transport and the line editor are shared with Chez
-and stay separate, under native/. Build with:
+The development server's transport and the line editor stay separate, under
+native/. Build with:
 
   cc -Inative otium.c main.c native/dev/transport.c native/utf8/utf8.c \
      native/line/line-edit.c native/vendor/bestline/bestline.c \

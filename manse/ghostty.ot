@@ -594,11 +594,11 @@
 
 (def- (cell-rgba term key)
   (when (= SUCCESS (%cell-get (term :cells) key (term :rgb)))
-    ;; Chez allocates for bitwise-ior with more than two arguments.
     (let ((p (term :rgb)))
-      (bitwise-ior (bitwise-ior (bitwise-arithmetic-shift (ffi/ref p 'u8 0) 24)
-                                (bitwise-arithmetic-shift (ffi/ref p 'u8 1) 16))
-                   (bitwise-ior (bitwise-arithmetic-shift (ffi/ref p 'u8 2) 8) 255)))))
+      (bitwise-ior (bitwise-arithmetic-shift (ffi/ref p 'u8 0) 24)
+                   (bitwise-arithmetic-shift (ffi/ref p 'u8 1) 16)
+                   (bitwise-arithmetic-shift (ffi/ref p 'u8 2) 8)
+                   255))))
 
 ;; One-character strings for ASCII cells, so painting a row doesn't allocate
 ;; a string per cell.
@@ -619,7 +619,6 @@
     (let loop ((x 0))
       (when (%cells-next (term :cells))
         (check! "row_cells_get" (%cell-get (term :cells) CELL-HAS-STYLING scratch))
-        ;; Assigned locals are boxed on Chez, so the retry binds a new name.
         (let ((styled? (ffi/ref scratch 'bool 0))
               (first (%cell-get (term :cells) CELL-UTF8 buf))
               (n (ffi/ref buf 'size-t buffer-len-index))

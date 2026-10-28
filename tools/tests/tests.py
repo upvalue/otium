@@ -9,44 +9,36 @@ from otium_tools import TARGET
 
 
 def launcher(t):
-    """A copy of ./otium whose runtimes are stubs that print their arguments as JSON."""
+    """A copy of ./otium whose runtime is a stub that prints its arguments as JSON."""
     root = t.scratch / 'otium launcher'
     root.mkdir()
     shutil.copy2(ROOT / 'otium', root / 'otium')
-    for runtime, path in (('c', f'build/{TARGET}/default/otium'), ('chez', 'chez/run')):
-        stub = root / path
-        stub.parent.mkdir(parents=True)
-        stub.write_text('#!/usr/bin/env python3\nimport json,sys\n'
-                        f'print(json.dumps([{runtime!r}, sys.argv[1:]]))\n')
-        stub.chmod(0o755)
+    stub = root / f'build/{TARGET}/default/otium'
+    stub.parent.mkdir(parents=True)
+    stub.write_text('#!/usr/bin/env python3\nimport json,sys\nprint(json.dumps(sys.argv[1:]))\n')
+    stub.chmod(0o755)
     env = {'OTIUM_BUILD': None}
 
     def run(*args, status=0):
         result = t.run([root / 'otium', *args], cwd='/', env=env)
         t.expect(result, status=status)
         return json.loads(result.stdout) if status == 0 else None
-    return root, run
+    return root, stub, run
 
 
 @test('launcher')
 def launcher_dispatch(t):
-    root, run = launcher(t)
-    t.check(run() == ['chez', []])
-    t.check(run('--runtime=c', 'x.ot') == ['c', ['x.ot']])
-    t.check(run('--runtime=chez', 'x.ot') == ['chez', ['x.ot']])
-    t.check(run('x.ot', '--runtime', 'chez') == ['chez', ['x.ot']])
-    args = ['--path', 'with spaces', 'program.ot', '--', '', 'λ', '--runtime=c', '--', '--help']
-    t.check(run('--runtime=chez', *args) == ['chez', args], 'arguments were not preserved')
+    root, stub, run = launcher(t)
+    t.check(run() == [])
+    args = ['--path', 'with spaces', 'program.ot', '--', '', 'λ', '--', '--help']
+    t.check(run(*args) == args, 'arguments were not preserved')
     tools = str(root / 'lib/otium/tools')
     t.check(run('fmt', 'a.ot', '--check') ==
-            ['chez', ['--no-project', f'{tools}/fmt.ot', '--', 'a.ot', '--check']], 'fmt')
+            ['--no-project', f'{tools}/fmt.ot', '--', 'a.ot', '--check'], 'fmt')
     for tool in ('lint', 'explain'):
-        t.check(run(tool, 'a.ot') == ['chez', [f'{tools}/{tool}.ot', '--', 'a.ot']], tool)
-    for option in ('--path', '-L', '--project', '--load'):
-        args = [option, '--runtime=chez', 'x.ot']
-        t.check(run(*args) == ['chez', args], f'{option} value was taken as a selector')
-    for args in (('--runtime',), ('--runtime=',), ('--runtime=bad',), ('--runtime', 'bad')):
-        run(*args, status=2)
+        t.check(run(tool, 'a.ot') == [f'{tools}/{tool}.ot', '--', 'a.ot'], tool)
+    stub.unlink()
+    run('x.ot', status=127)
 
 
 @test('generated')
@@ -72,7 +64,7 @@ def reference(t):
     for match in re.finditer(pattern, prelude, re.M):
         name = match[1] or match[2]
         t.check(prelude[match.end():].lstrip().startswith('"'), 'missing source docstring:', name)
-        t.check('c' not in entries.get(name, {}).get('runtimes', []), 'duplicate C documentation:', name)
+        t.check(name not in entries, 'documented in both the prelude and lib/catalog/runtime.json:', name)
 
 
 @test('docs')
@@ -80,13 +72,12 @@ def docs(t):
     t.expect(t.run([ROOT / 'tools/check-docs']))
 
 
-@test('namespace reference', needs=['chez'])
+@test('namespace reference')
 def namespace_reference(t):
     """Export public bindings and module prose without loading the UI backend."""
     (t.scratch / 'lib').symlink_to(ROOT / 'lib', target_is_directory=True)
     (t.scratch / 'docs').mkdir()
-    t.expect(t.run([ROOT / 'otium', '--runtime=chez', ROOT / 'tools/export-reference.ot'],
-                   cwd=t.scratch))
+    t.expect(t.run([ROOT / 'otium', ROOT / 'tools/export-reference.ot'], cwd=t.scratch))
     generated = (t.scratch / 'docs/reference.json').read_text()
     t.check(generated == (ROOT / 'docs/reference.json').read_text(), 'reference needs regeneration')
     namespaces = {ns['name']: ns for ns in json.loads(generated)['namespaces']}
@@ -128,7 +119,7 @@ def namespace_reference(t):
     t.check('+' in core and 'map' in core, 'core must include builtins and prelude')
 
 
-@test('class reference source', needs=['chez'])
+@test('class reference source')
 def class_reference_source(t):
     """Keep defaults as source, including multiline expressions, without executing them."""
     (t.scratch / 'fixture.ot').write_text('''; A class with source-preserved defaults.
@@ -146,7 +137,7 @@ def class_reference_source(t):
 '''
     script = t.scratch / 'check.ot'
     script.write_text(driver)
-    t.expect(t.run([ROOT / 'otium', '--runtime=chez', script], cwd=t.scratch))
+    t.expect(t.run([ROOT / 'otium', script], cwd=t.scratch))
     entry = json.loads((t.scratch / 'type.json').read_text())
     t.check(entry['doc'] == 'A class with source-preserved defaults.\nUnicode λ and `code` survive extraction.')
     t.check(entry['parent'] == 'Parent')

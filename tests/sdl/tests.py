@@ -3,7 +3,7 @@ import json
 import os
 import sys
 
-from harness import BOTH, ROOT, Skip, defaults, library, test
+from harness import ROOT, Skip, defaults, library, test
 from native.sdl.host import DEFAULT_MANIFEST, bootstrap, literal
 from ui_capture import pixel
 
@@ -16,14 +16,14 @@ UNAVAILABLE = ('The video driver did not add any displays', 'No available video 
 
 
 def program(t, source, env=AUDIO):
-    script = t.scratch / f'{t.runtime}.ot'
+    script = t.scratch / 'program.ot'
     script.write_text(source)
     return t.otium(script, env=env, timeout=45)
 
 
 def host(t, *options, required=False):
     """Run examples/run_sdl.py, skipping when there is no display unless required."""
-    result = t.run([sys.executable, ROOT / 'examples/run_sdl.py', '--runtime', t.runtime, *options],
+    result = t.run([sys.executable, ROOT / 'examples/run_sdl.py', *options],
                    env=AUDIO, timeout=45)
     if result.status and not required and any(text in result.stderr for text in UNAVAILABLE):
         raise Skip('no display or accelerated renderer: ' + result.stderr.strip())
@@ -35,31 +35,31 @@ def manifest(t):
     t.expect(t.run([sys.executable, ROOT / 'native/sdl/setup.py', '--check']))
 
 
-@test('sdl fixture', runtimes=BOTH)
+@test('sdl fixture')
 def fixture(t):
-    source = (bootstrap(t.runtime) + f'\n(def fixture-path {literal(library("sdl-fixture"))})\n' +
+    source = (bootstrap() + f'\n(def fixture-path {literal(library("sdl-fixture"))})\n' +
               (ROOT / 'tests/sdl/common.ot').read_text())
     t.expect(program(t, source), contains=['sdl fixture: 15 checks passed'])
 
 
-@test('sdl layout mismatch', runtimes=BOTH)
+@test('sdl layout mismatch')
 def layout_mismatch(t):
     """Startup rejects a manifest whose layout differs from the headers, before SDL_Init."""
     bad = json.loads(DEFAULT_MANIFEST.read_text())
     bad['layout']['SDL_Event']['size'] -= 8
     manifest = t.scratch / 'bad.json'
     manifest.write_text(json.dumps(bad))
-    t.expect(program(t, bootstrap(t.runtime, manifest)), status=None,
+    t.expect(program(t, bootstrap(manifest)), status=None,
              stderr=['SDL header layout mismatch'])
 
 
-@test('sdl library override', runtimes=BOTH)
+@test('sdl library override')
 def library_override(t):
     missing = '/no/such/SDL3-library'
     previous = os.environ.get('SDL3_LIBRARY')
     os.environ['SDL3_LIBRARY'] = missing
     try:
-        source = bootstrap(t.runtime)
+        source = bootstrap()
     finally:
         if previous is None:
             del os.environ['SDL3_LIBRARY']
@@ -84,7 +84,7 @@ def acceptance(t, required):
                   required=required)
     t.expect(result, contains=['SDL acceptance checks: 21', 'SDL initialized: 0', 'Foreign allocations: 0'])
     t.check(capture.stat().st_size > 100, 'capture is empty')
-    t.expect(program(t, bootstrap(t.runtime) + PARTIAL_STARTUP), contains=['Partial startup cleanup passed'])
+    t.expect(program(t, bootstrap() + PARTIAL_STARTUP), contains=['Partial startup cleanup passed'])
     for scene in ('shapes', 'particles'):
         t.expect(host(t, '--scene', scene, '--frames', '3', required=required),
                  contains=['render errors 0; ticks 3'])
@@ -101,7 +101,7 @@ def reload(t, required):
     host(t, '--scene', 'shapes', '--frames', '1', required=required)
     scene, status, capture = t.scratch / 'scene.ot', t.scratch / 'status', t.scratch / 'reload.bmp'
     replace(scene, '(def (render! t dt) (set! scene-ticks (+ scene-ticks 1)) (clear! 10 20 30))\n')
-    process = t.spawn([sys.executable, ROOT / 'examples/run_sdl.py', '--runtime', t.runtime,
+    process = t.spawn([sys.executable, ROOT / 'examples/run_sdl.py',
                        '--scene-path', scene, '--frames', '180', '--status', status, '--capture', capture],
                       env=AUDIO, text=True, stdin=None)
 
@@ -132,7 +132,7 @@ def reload(t, required):
 
 
 for required, suffix, suite in ((False, '', 'native'), (True, ' required', 'gpu')):
-    test('sdl acceptance' + suffix, runtimes=BOTH, suite=suite)(
+    test('sdl acceptance' + suffix, suite=suite)(
         lambda t, required=required: acceptance(t, required))
-    test('sdl reload' + suffix, runtimes=BOTH, suite=suite)(
+    test('sdl reload' + suffix, suite=suite)(
         lambda t, required=required: reload(t, required))

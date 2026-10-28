@@ -2,6 +2,10 @@
 (require (otium.ui.native :as native))
 (require (otium.sdl :as sdl))
 (require (ui.events :as events))
+(require (otium.process :as process))
+
+(def- (artifact name)
+  (str (process/getenv "OTIUM_BUILD") "/ui-test-artifacts/" name))
 
 (def (step! tree frame context)
   (let ((renderer (get context :renderer)))
@@ -12,14 +16,12 @@
     (if (native/gpu-offscreen? renderer)
         (begin
           (sdl/check (native/gpu-resize renderer 5000 32 1))
-          (when (native/gpu-resize renderer 2147483647 32 4)
-            (error "Unrepresentable texture dimensions accepted"))
-          (when (native/gpu-resize renderer 0 32 1)
-            (error "Zero dimensions accepted"))
-          (sdl/check (native/gpu-frame renderer "build/ui-test-artifacts/large-target.bmp"))
+          (when (native/gpu-resize renderer 2147483647 32 4) (error "Unrepresentable texture dimensions accepted"))
+          (when (native/gpu-resize renderer 0 32 1) (error "Zero dimensions accepted"))
+          (sdl/check (native/gpu-frame renderer (artifact "large-target.bmp")))
           (sdl/check (native/gpu-resize renderer 640 480 1)))
         (begin
-          (sdl/check (native/gpu-frame renderer "build/ui-test-artifacts/direct-capture.bmp"))
+          (sdl/check (native/gpu-frame renderer (artifact "direct-capture.bmp")))
           (events/visible! context #f)
           (sdl/check (native/gpu-frame renderer ""))
           (events/visible! context #t)

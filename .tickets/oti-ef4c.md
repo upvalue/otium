@@ -19,3 +19,9 @@ filter looks like it has the same shape and probably for-each too.
 
 map (and filter, if it shares the pattern) takes a direct path for proper lists and keeps its current behavior for arrays, nil and errors. deriv improves by about the measured amount on the prototype, and the Chez runtime isn't slower.
 
+
+## Notes
+
+**2026-10-28T00:22:59Z**
+
+Chez runtime removed; the 'Chez runtime isn't slower' criterion no longer applies.

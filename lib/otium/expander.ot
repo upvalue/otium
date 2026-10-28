@@ -1,22 +1,15 @@
-;; expander.ot -- the Otium macro expander, shared by the C and Chez runtimes.
+;; expander.ot -- the Otium macro expander.
 ;;
 ;; Loaded before any macro exists, so this file may use only core forms
 ;; (quote if begin fn def def- set! let while and or cond quasiquote) and
-;; natives. It must also avoid bare nil and keyword literals in expression
-;; position: Chez evaluates this file without expanding it first.
+;; natives.
 ;;
 ;; Scope is tracked in Otium data: a list whose entries are symbols (lexical
-;; variables) or (name expansion writer) lists (local symbol macros). Each runtime
-;; supplies runtime adapters:
-;;   (expander-application form)     lower an expanded application for the runtime
-;;   (expander-optional-function form fallback)
-;;                                   choose native optional parameters or the
-;;                                   portable rest-list implementation
+;; variables) or (name expansion writer) lists (local symbol macros). The
+;; runtime supplies these adapters:
 ;;   (expander-macro-var sym)        the macro sym names as a var in the
 ;;                                   current namespace, else a false value
 ;;   (expander-invoke-macro m args)  run macro m on unevaluated argument forms
-;;   (expander-native-syntax? sym)   true when sym is host syntax whose
-;;                                   operands must not be walked (never on C)
 ;;   (expander-locate from to)       give the output form to the source
 ;;                                   position of the input form; returns to
 ;;   (expander-fail code message form)  raise syntax error code from
@@ -32,10 +25,8 @@
 ;;
 ;; Output is the input with macros replaced, parameter lists normalized to
 ;; dotted form, keywords and other non-literal atoms quoted, and body
-;; definitions moved ahead of plain expressions. Each runtime then compiles
-;; it with its own core forms.
-
-;; lint: allow-file(unbound-name) each runtime supplies the expander-* natives
+;; definitions moved ahead of plain expressions. The runtime then compiles
+;; it with its core forms.
 
 (def- expander-core-forms
   '(quote quasiquote
@@ -230,8 +221,8 @@
 (def- (exp-compound form scope)
   (let ((head (car form)))
     (cond
-      ((not (symbol? head)) (expander-application (exp-exprs form scope form)))
-      ((exp-bound? head scope) (expander-application (cons (exp-symbol head scope) (exp-exprs (cdr form) scope form))))
+      ((not (symbol? head)) (exp-exprs form scope form))
+      ((exp-bound? head scope) (cons (exp-symbol head scope) (exp-exprs (cdr form) scope form)))
       ((or (eq? head 'when) (eq? head 'unless))
        (exp-shape! form 2 #f)
        (let ((test (exp-expr (car (cdr form)) scope))
@@ -240,8 +231,7 @@
              (list 'if test body exp-nil-form)
              (list 'if test exp-nil-form body))))
       ((exp-core? head) (exp-core form scope))
-      ((expander-native-syntax? head) form)
-      (else (expander-application (exp-exprs form scope form))))))
+      (else (exp-exprs form scope form)))))
 
 (def- (exp-core form scope)
   (let ((head (car form)))
@@ -294,7 +284,7 @@
                (list (list object (exp-expr (car name) scope))
                      (list key (exp-expr (car (cdr name)) scope))
                      (list value (exp-expr (car (cdr (cdr form))) scope)))
-               (expander-application (list 'set-applied! object key value)))))
+               (list 'set-applied! object key value))))
       (else (exp-fail "E0109" "set!: expected a variable name or one-argument call" form)))))
 
 (def- (exp-with-slots form scope)
@@ -386,43 +376,6 @@
               (default (exp-expr (car (cdr binding)) (exp-append seen scope))))
           (cons (list name default) (exp-optional-params (cdr ps) (cons name seen) scope form))))))
 
-(def- (exp-optional-call name args)
-  (expander-application (cons name args)))
-
-;; C uses this fallback until its calling convention supports optional slots.
-;; The host adapter keeps the canonical fn form for tooling on both runtimes.
-(def- (exp-optional-fallback required optionals body)
-  (let ((args (gensym "optional-arguments"))
-        (value (gensym "optional-value")))
-    (list 'fn
-          (exp-append required args)
-          (list 'if
-                (exp-optional-call 'otium.core/>
-                                   (list (exp-optional-call 'otium.core/length (list args)) (length optionals)))
-                (exp-optional-call 'otium.core/error
-                                   (list (list 'quote
-                                               (table (keyword "type")
-                                                      'arity-error
-                                                      (keyword "code")
-                                                      "E0301"
-                                                      (keyword "message")
-                                                      "too many arguments to optional function"))))
-                (cons 'let
-                      (cons (exp-map (fn (binding)
-                                       (list (car binding)
-                                             (list 'if
-                                                   (exp-optional-call 'otium.core/null? (list args))
-                                                   (car (cdr binding))
-                                                   (list 'let
-                                                         (list (list value
-                                                                     (exp-optional-call 'otium.core/car (list args))))
-                                                         (list 'set!
-                                                               args
-                                                               (exp-optional-call 'otium.core/cdr (list args)))
-                                                         value))))
-                                     optionals)
-                            body))))))
-
 (def- (exp-fn form scope)
   (exp-shape! form 2 #f)
   (let ((params (if (exp-head-is? (car (cdr form)) 'array)
@@ -436,9 +389,8 @@
               (begin
                 (if (null? (cdr ps)) (exp-fail "E0103" "macroexpand: &optional needs at least one (name default)" form))
                 (let ((optionals (exp-optional-params (cdr ps) required scope form))
-                      (body (exp-body forms (exp-append (exp-map car optionals) (exp-append required scope))))
-                      (canonical (cons 'fn (cons (exp-append required (cons '&optional optionals)) body))))
-                  (expander-optional-function canonical (exp-optional-fallback required optionals body))))
+                      (body (exp-body forms (exp-append (exp-map car optionals) (exp-append required scope)))))
+                  (cons 'fn (cons (exp-append required (cons '&optional optionals)) body))))
               (begin
                 (exp-param! (car ps) required form)
                 (scan (cdr ps) (exp-append required (list (car ps)))))))
@@ -666,7 +618,7 @@
     (else (exp-sq x depth data table))))
 
 (def- (exp-sq-symbol sym)
-  (if (or (exp-core? sym) (exp-memq sym exp-sq-bare) (expander-native-syntax? sym))
+  (if (or (exp-core? sym) (exp-memq sym exp-sq-bare))
       sym
       (or (expander-qualify sym) sym)))
 
@@ -822,9 +774,8 @@
 ;; (defmethod (generic param-or-(param Type) ...) body...)
 (def- (exp-method form)
   (let ((rest (cdr form)))
-    (if (and (pair? rest) (eq? (car rest) (keyword "around")))
-        (let ((expanded (exp-method (cons 'defmethod (cdr rest)))))
-          (cons 'defmethod (cons (keyword "around") (cdr expanded))))
+    (if (and (pair? rest) (eq? (car rest) :around))
+        (let ((expanded (exp-method (cons 'defmethod (cdr rest))))) (cons 'defmethod (cons :around (cdr expanded))))
         (let ((head (if (pair? rest)
                         (car rest)
                         #f)))
@@ -835,18 +786,17 @@
                                           (car p)
                                           p))
                                     (cdr head))))
-                (if (and (pair? body) (eq? (car body) (keyword "next")))
+                (if (and (pair? body) (eq? (car body) :next))
                     (if (or (null? (cdr body)) (null? (cdr (cdr body))))
                         form
                         (cons 'defmethod
                               (cons head
-                                    (cons (keyword "next")
-                                          (cons (car (cdr body))
-                                                (exp-body (cdr (cdr body)) (cons (car (cdr body)) names)))))))
+                                    (cons :next (cons (car (cdr body))
+                                                      (exp-body (cdr (cdr body)) (cons (car (cdr body)) names)))))))
                     (cons 'defmethod (cons head (exp-body body names)))))
               form)))))
 
-;; The runtimes call (*expander* form) for each top-level form, after
+;; The runtime calls (*expander* form) for each top-level form, after
 ;; splitting top-level begin with (expander-expand-head form #f).
 (def (*expander* form)
   (expander-locate form (exp-top form)))
@@ -865,9 +815,9 @@
 
 (def- (exp-option x)
   (cond
-    ((and (symbol? x) (equal? (symbol->string x) ":as")) (keyword "as"))
-    ((and (symbol? x) (equal? (symbol->string x) ":refer")) (keyword "refer"))
-    ((and (symbol? x) (equal? (symbol->string x) ":reload")) (keyword "reload"))
+    ((and (symbol? x) (equal? (symbol->string x) ":as")) :as)
+    ((and (symbol? x) (equal? (symbol->string x) ":refer")) :refer)
+    ((and (symbol? x) (equal? (symbol->string x) ":reload")) :reload)
     (else x)))
 
 (def- (exp-require-spec x)
@@ -893,8 +843,7 @@
                             (cond
                               ((not (and (pair? clause) (list? clause) (keyword? (car clause))))
                                (exp-fail "E0110" "ns: bad clause" clause))
-                              ((eq? (car clause) (keyword "require"))
-                               (cons (car clause) (exp-require-specs (cdr clause))))
+                              ((eq? (car clause) :require) (cons (car clause) (exp-require-specs (cdr clause))))
                               (else (exp-fail "E0110" "ns: unknown clause" clause))))
                           (cdr (cdr form))))))
     (else form)))

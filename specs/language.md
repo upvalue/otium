@@ -2,9 +2,7 @@
 
 **Specification -- draft 0.3**
 
-This draft describes the C dialect. Chez shares the namespace and macro
-design but uses Chez values and semantics; see the
-[language guide](../docs/language-guide.md).
+See also the [language guide](../docs/language-guide.md).
 
 Otium is a small Lisp: a Scheme kernel made pragmatic for embedding and
 data munging. The choices that make it itself:
@@ -88,7 +86,7 @@ reader produces an ordinary symbol.
 
 ### 1.4 Strings
 
-`"..."` with escapes `\n` `\t` `\r` `\0` `\e` (escape, U+001B) `\"` `\\`.
+`"..."` with escapes `\n` `\t` `\r` `\0` `\e` (escape, U+001B) `\"` `\\`, and `\xHEX;` for a code point in hex.
 Any other escape is a read error. Strings may span lines. Strings are
 immutable sequences of Unicode characters (code points).
 
@@ -387,8 +385,7 @@ in scope in defaults. Explicit `nil` and `#f` are supplied values. Required
 parameters must precede `&optional`, which needs at least one `(name default)`
 pair; optional and rest parameters cannot be combined.
 
-Chez uses fixed-arity entries with a shared body, avoiding argument lists.
-The C implementation currently uses a compatible rest-list fallback.
+Optional arguments go in fixed slots; calls build no argument list.
 Runtime rest parameters trigger the `rest-arguments` lint warning (L0401);
 genuinely variadic APIs can suppress it with a reason. Macro parameter lists
 are exempt.
@@ -543,7 +540,7 @@ A macro is a closure that runs at **expansion time**: it is called with a
 call's argument forms unevaluated, and the form it returns replaces the
 call.
 
-Both runtimes use the same expander, `lib/otium/expander.ot`, written
+The expander, `lib/otium/expander.ot`, is written
 in Otium itself. Expansion is eager and happens once. Immediately before
 a top-level form is evaluated, it is fully expanded:
 
@@ -651,8 +648,7 @@ the same template with each symbol rewritten:
   an error.
 - These stay as written: special-form names; `when`, `unless`, `else`,
   `catch`, `&`, `_`, `array` and `table`; symbols inside a `quote`d form
-  in the template; the specs of an `ns` or `require` form; and, on
-  runtimes with host syntax, host syntax names.
+  in the template; and the specs of an `ns` or `require` form.
 
 Unquoted expressions are code, expanded normally. A nested quasiquote or
 syntax quote raises the depth as in `quasiquote`, and its symbols are
@@ -979,8 +975,7 @@ to float.
 AND, inclusive OR, and XOR accept any number of arguments; their empty results
 are -1, 0, and 0. NOT takes one argument. Arithmetic shift takes an integer and
 a signed bit count: positive shifts left, negative shifts right with sign
-extension. Chez supports arbitrary precision; C raises an error when a left
-shift exceeds its integer range.
+extension. A left shift that exceeds the integer range raises an error.
 
 ### 10.2 Predicates
 

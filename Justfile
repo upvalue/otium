@@ -14,7 +14,7 @@ build:
     @test -d "$OTIUM_BUILD/meson-info" || meson setup "$OTIUM_BUILD"
     meson compile -C "$OTIUM_BUILD"
 
-# Run tests; pass suite names (c, chez, shared, native, gpu, bench) or test names
+# Run tests; pass suite names (lang, c, native, gpu, bench) or test names
 test *args: build
     tools/meson-test default "$@"
 
@@ -74,7 +74,7 @@ generate:
     python3 tools/generate-cli.py
     python3 tools/generate-reference.py
     python3 tools/generate-diagnostics.py
-    ./otium --runtime=chez tools/export-reference.ot
+    ./otium tools/export-reference.ot
 
 # Regenerate the local SDL ABI manifest from the installed headers
 sdl-manifest *args:

@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""Compare the C runtime with the Chez runtime using checked workloads."""
+"""Time checked workloads from inside the program as well as from outside it."""
 
 import argparse
 import datetime
 import json
-import os
 import platform
-import shutil
 import statistics
 import subprocess
 import tempfile
@@ -16,11 +14,9 @@ import sys
 
 # Repository modules, for running this file directly.
 sys.path[:0] = [str(Path(__file__).resolve().parents[1] / part) for part in ('', 'tools')]
-from otium_tools import metadata, run_directory
+from otium_tools import command, metadata, run_directory
 
 
-ROOT = Path(__file__).resolve().parents[1]
-CHEZ_ROOT = ROOT / "chez"
 WORKLOADS = {
     "startup": ("", "0", 0),
     "tail-loop": (
@@ -119,9 +115,8 @@ def run(command, cwd, expected, startup, timeout):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--otium", type=Path, required=True,
-                        help="C runtime executable; build before running")
-    parser.add_argument("--chez", default=os.environ.get("CHEZ", "chez"))
+    parser.add_argument("--otium", type=Path, default=None,
+                        help="executable to run (default: the ./otium launcher)")
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=120)
@@ -131,63 +126,43 @@ def main():
     args = parser.parse_args()
     if args.runs < 1 or args.warmups < 0 or args.timeout <= 0:
         parser.error("runs and timeout must be positive; warmups must be nonnegative")
-    chez = shutil.which(args.chez)
-    if not chez or not args.otium.absolute().is_file():
-        parser.error("both runtime executables must exist")
-    version = subprocess.run([chez, "--version"], capture_output=True, text=True, check=True)
+    otium = command(executable=args.otium and str(args.otium.absolute()))
+    if not Path(otium[0]).is_file():
+        parser.error(f"executable not found: {otium[0]}")
     report = {
         "date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "platform": platform.platform(), "machine": platform.machine(),
-        "chez_version": (version.stdout + version.stderr).strip(),
-        "c_runtime": str(args.otium.absolute()), "build_label": args.build_label,
+        "executable": otium, "build_label": args.build_label,
         "runs": args.runs, "warmups": args.warmups,
-        "method": "Fresh processes, alternating engine order; wall includes startup and compilation; work excludes setup, includes GC. No explicit collection. All results checked.",
+        "method": "Fresh processes; wall includes startup and compilation; work excludes setup, includes GC. No explicit collection. All results checked.",
         "benchmarks": {},
     }
-    print(f"C runtime ({args.build_label}) vs Otium on Chez {report['chez_version']}")
     print(f"{args.runs} measured runs, {args.warmups} warmups; medians in milliseconds")
-    print(f"{'workload':<19} {'C work':>10} {'Chez work':>10} {'speedup':>9} {'C wall':>10} {'Chez wall':>10}", flush=True)
+    print(f"{'workload':<19} {'work':>10} {'wall':>10}", flush=True)
     measured_commands = {}
-    with tempfile.TemporaryDirectory(prefix="otium-compare-") as temp:
+    with tempfile.TemporaryDirectory(prefix="otium-timed-") as temp:
         directory = Path(temp)
         (directory / "callee.ot").write_text("(ns callee)\n(def (inc x) (+ x 1))\n")
         for name in args.only or WORKLOADS:
-            samples = {engine: [] for engine in ("c-runtime", "chez")}
-            commands = {}
-            for engine in samples:
-                path = directory / f"{name}-{engine}.ot"
-                path.write_text(program(name))
-                commands[engine] = ([str(args.otium.absolute()), "--path", temp, str(path)]
-                    if engine == "c-runtime" else
-                    [chez, "--libdirs", str(CHEZ_ROOT), "--script",
-                     str(CHEZ_ROOT / "main.ss"), "-L", temp, str(path)])
-            measured_commands[name] = commands
+            path = directory / f"{name}.ot"
+            path.write_text(program(name))
+            measured_commands[name] = [*otium, "--path", temp, str(path)]
+            samples = []
             for iteration in range(args.warmups + args.runs):
-                order = list(samples)
-                if iteration % 2:
-                    order.reverse()
-                for engine in order:
-                    sample = run(commands[engine], temp, WORKLOADS[name][2],
-                                 name == "startup", args.timeout)
-                    if iteration >= args.warmups:
-                        samples[engine].append(sample)
-            summary = {}
-            for engine, values in samples.items():
-                summary[engine] = {"samples": values}
-                for metric in ("wall_ms", "work_ms"):
-                    numbers = [v[metric] for v in values if v[metric] is not None]
-                    summary[engine][metric] = ({"median": statistics.median(numbers),
-                        "min": min(numbers), "max": max(numbers)} if numbers else None)
+                sample = run(measured_commands[name], temp, WORKLOADS[name][2],
+                             name == "startup", args.timeout)
+                if iteration >= args.warmups:
+                    samples.append(sample)
+            summary = {"samples": samples}
+            for metric in ("wall_ms", "work_ms"):
+                numbers = [v[metric] for v in samples if v[metric] is not None]
+                summary[metric] = ({"median": statistics.median(numbers),
+                    "min": min(numbers), "max": max(numbers)} if numbers else None)
             report["benchmarks"][name] = summary
-            c, s = summary.values()
-            work = (f"{c['work_ms']['median']:10.3f} {s['work_ms']['median']:10.3f} "
-                    f"{c['work_ms']['median'] / s['work_ms']['median']:8.1f}x"
-                    if c["work_ms"] and s["work_ms"]["median"] else
-                    f"{'-':>10} {'-':>10} {'-':>9}")
-            print(f"{name:<19} {work} {c['wall_ms']['median']:10.3f} {s['wall_ms']['median']:10.3f}", flush=True)
-    report['provenance'] = metadata(measured_commands, build_label=args.build_label,
-        compilation='Direct Chez without --compile-imported-libraries; existing cache state uncontrolled')
-    output = args.output or run_directory('compare') / 'results.json'
+            work = f"{summary['work_ms']['median']:10.3f}" if summary["work_ms"] else f"{'-':>10}"
+            print(f"{name:<19} {work} {summary['wall_ms']['median']:10.3f}", flush=True)
+    report['provenance'] = metadata(measured_commands, build_label=args.build_label)
+    output = args.output or run_directory('timed') / 'results.json'
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2) + "\n")
     print(f'Results: {output}')

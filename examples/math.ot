@@ -1,4 +1,4 @@
-;; Run with ./otium --runtime=c|chez examples/math.ot. The C runtime needs libffi.
+;; Run with ./otium examples/math.ot. The runtime needs libffi.
 (require otium.ffi :as ffi)
 
 (def math-library-names '("/usr/lib/libSystem.B.dylib" "libm.so.6" "libm.so"))

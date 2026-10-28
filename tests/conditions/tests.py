@@ -3,7 +3,7 @@ import os
 import select
 import signal
 
-from harness import BOTH, case, test
+from harness import case, test
 
 SUPPORT = ['--load', 'tests/conditions/support.ot']
 
@@ -18,7 +18,7 @@ case('conditions cleanup error', 'tests/conditions/cleanup-error.ot', options=SU
      stdout='condition checks: 8\n')
 
 
-@test('conditions interrupt', runtimes=BOTH)
+@test('conditions interrupt')
 def interrupt(t):
     process = t.spawn(t.command(*SUPPORT, 'tests/conditions/interrupt.ot'), text=True)
     ready, _, _ = select.select([process.stdout], [], [], 10)
@@ -34,7 +34,7 @@ def interrupt(t):
     t.check(process.returncode != 0, 'interrupted process exited 0')
 
 
-@test('conditions blocking port interrupt', runtimes=BOTH)
+@test('conditions blocking port interrupt')
 def port_interrupt(t):
     process = t.spawn(t.command('tests/conditions/port-interrupt.ot'), text=True)
     ready, _, _ = select.select([process.stdout], [], [], 10)

@@ -1,4 +1,3 @@
-;; lint: allow-file(unbound-name) %vm-opcodes is a C runtime builtin the Chez linter does not know
 (ns otium.compiler.vm-ops)
 
 ;; The register VM's instruction forms, for the VM backend (docs/optimizer.md,

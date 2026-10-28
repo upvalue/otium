@@ -18,8 +18,8 @@ dl = dependency('dl', required: false)
 libm = cc.find_library('m', required: false)
 native_include = include_directories('native')
 
-# Native bridges shared by both runtimes. These are compiled with fewer
-# warnings than the runtime because they follow their libraries' conventions.
+# Native bridges, compiled with fewer warnings than the runtime because they
+# follow their libraries' conventions.
 native_options = ['warning_level=2']
 
 utf8 = static_library('otium-utf8', 'native/utf8/utf8.c',
@@ -52,7 +52,7 @@ utf8_checks = executable('otium-utf8-checks', 'tests/native/utf8.c',
 
 python = find_program('python3')
 subdir('c')
-# Built here so the launcher finds it at build/otium.
+# Built here so the launcher finds it in OTIUM_BUILD.
 otium = executable('otium', 'c/src/main.c',
   c_args: runtime_args, include_directories: native_include, link_with: line.get_static_lib(),
   dependencies: libotium_dep, override_options: runtime_options)
@@ -114,27 +114,17 @@ endif
 subdir('manse/native')
 
 # Tests. tests/run lists the tests defined in tests.py files, and each runs as
-# tests/run NAME from the source root; the launchers find this build through
+# tests/run NAME from the source root; the launcher finds this build through
 # OTIUM_BUILD. GC stress is opt-in: meson test --setup stress.
-chez = find_program('chez', 'scheme', required: false)
 harness = files('tests/run')
-test_env = environment({
+test_variables = {
   'OTIUM_BUILD': build_root,
   'PYTHONPATH': source_root / 'tools' + ':' + source_root,
-})
-if chez.found()
-  test_env.set('CHEZ', chez.full_path())
-endif
+}
+test_env = environment(test_variables)
+stress_env = environment(test_variables + {'OTIUM_GC_STRESS': '1'})
 add_test_setup('default', is_default: true, env: test_env,
   exclude_suites: ['native', 'gpu', 'bench'])
-stress_env = environment({
-  'OTIUM_BUILD': build_root,
-  'PYTHONPATH': source_root / 'tools' + ':' + source_root,
-  'OTIUM_GC_STRESS': '1',
-})
-if chez.found()
-  stress_env.set('CHEZ', chez.full_path())
-endif
 add_test_setup('stress', env: stress_env,
   exclude_suites: ['native', 'gpu', 'bench'], timeout_multiplier: 4)
 add_test_setup('all', env: test_env)
@@ -148,14 +138,11 @@ if ui
   test('ui caret', ui_caret_checks, suite: 'native', kwargs: test_kwargs)
 endif
 
-features = ['ffi', 'c-ffi', 'c-host']
+features = ['ffi', 'c-host']
 needed = {'': [otium], 'ffi': [ffi_native] + ffi_fixtures,
   'c-host': [foreign_control, ffi_extra, extension_demo, otium_amalgamation] + ffi_fixtures}
-if chez.found()
-  features += 'chez'
-endif
 if ui
-  # Display tests share the window server and build/ui-test-artifacts/, so
+  # Display tests share the window server and the build's ui-test-artifacts/, so
   # they're registered as not parallel.
   features += 'ui'
   needed += {'ui': [ffi_native, ui_library, ui_events, ui_text_reference, sdl_fixture]}

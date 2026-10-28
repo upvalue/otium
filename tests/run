@@ -5,13 +5,12 @@
   tests/run NAME...         run the named tests
   tests/run --list FEATURES print one line per test for meson.build
 
-FEATURES is a comma-separated list such as chez,ffi,c-ffi,ui. A test passes with
+FEATURES is a comma-separated list such as ffi,c-host,ui. A test passes with
 exit 0, fails with 1 and is skipped with 77, meson's skip status."""
 import argparse
 import importlib.util
 import os
 from pathlib import Path
-import shutil
 import sys
 import traceback
 
@@ -21,8 +20,8 @@ sys.dont_write_bytecode = True
 
 import harness
 
-DEFINITIONS = ['tests/**/tests.py', 'c/tests/tests.py', 'chez/tests/tests.py',
-               'benchmarks/r7rs/tests.py', 'tools/tests/tests.py']
+DEFINITIONS = ['tests/**/tests.py', 'c/tests/tests.py', 'benchmarks/r7rs/tests.py',
+               'tools/tests/tests.py']
 
 
 def load():
@@ -38,14 +37,10 @@ def load():
 def available():
     """Features this checkout can run, for runs that don't come from meson."""
     features = set()
-    if os.environ.get('CHEZ') or shutil.which('chez') or shutil.which('scheme'):
-        features.add('chez')
     if harness.library('libotium-ffi').exists():
         features.add('ffi')
         if harness.library('libotium-ui').exists():
             features.add('ui')
-    if harness.built('otium').exists():
-        features.add('c-ffi')
     if harness.built('c/otium-foreign-control').exists():
         features.add('c-host')
     return features
@@ -56,7 +51,7 @@ def run(test, features):
     if missing:
         print(f'SKIP {test.name}: needs ' + ', '.join(sorted(missing)))
         return 77
-    context = harness.Context(test.runtime)
+    context = harness.Context()
     try:
         test.function(context)
     except harness.Skip as skip:

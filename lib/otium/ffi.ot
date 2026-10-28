@@ -14,16 +14,13 @@
   (when (< n 0) (%fail-at op "range" "expected nonnegative integer" argument 'size-t))
   n)
 
-;; The largest integer on the C runtime bounds every size.
+;; The largest integer bounds every size.
 (def- SIZE_LIMIT 4611686018427387903)
 
-;; SIZE_LIMIT is a bignum on Chez, so dividing it allocates. Offsets are
-;; usually small enough for their product to be checked without it.
 (def- (%mul op a b &optional (argument #f))
-  (cond
-    ((and (< a 1073741824) (< b 1073741824)) (* a b))
-    ((and (> b 0) (> a (quotient SIZE_LIMIT b))) (%fail-at op "range" "size overflow" argument 'size-t))
-    (else (* a b))))
+  (if (and (> b 0) (> a (quotient SIZE_LIMIT b)))
+      (%fail-at op "range" "size overflow" argument 'size-t)
+      (* a b)))
 
 (def- (%add op a b)
   (if (> a (- SIZE_LIMIT b))
@@ -68,8 +65,8 @@
     ((eq? name (car names)) index)
     (else (%scalar-id name (cdr names) (+ index 1)))))
 
-;; Type codes shared with the runtimes: scalars by position in %scalars, then
-;; layout kinds. They match native/ffi/native.h and chez/otium/ffi.sls.
+;; Type codes shared with the runtime: scalars by position in %scalars, then
+;; layout kinds. They match native/ffi/native.h.
 (def- KIND_VOID (%scalar-id 'void %scalars 0))
 
 (def- KIND_UTF8 (%scalar-id 'utf8 %scalars 0))

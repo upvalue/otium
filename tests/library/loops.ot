@@ -1,4 +1,4 @@
-;; for and dotimes, on both runtimes. Allocation checks are in benchmarks/loops.ot.
+;; for and dotimes. Allocation checks are in benchmarks/loops.ot.
 (require otium.test :refer (check fails? report))
 
 ;; --- walking things ----------------------------------------------------------

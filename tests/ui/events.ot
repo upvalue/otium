@@ -2,9 +2,11 @@
 (require (otium.ffi :as ffi))
 (require (otium.sdl :as sdl))
 (require (otium.ui.native :as native))
+(require (otium.process :as process))
 
 (defonce library
-  (ffi/open-library (list (native/config-ref (read-string (read-file "build/ui-test-config.ot")) 'library))))
+  (let ((config (str (process/getenv "OTIUM_BUILD") "/ui-test-config.ot")))
+    (ffi/open-library (list (native/config-ref (read-string (read-file config)) 'library)))))
 
 (def- push-key (ffi/bind library "otui_test_key" '(pointer utf8 bool bool) 'bool #t))
 

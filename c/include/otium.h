@@ -87,11 +87,11 @@ bool ot_eval(ot_state* rt, const char* source, size_t length, ot_value* result);
 bool ot_call(ot_state* rt, const char* name, const ot_value* args, size_t count, ot_value* result);
 const char* ot_error(const ot_state* rt);
 size_t ot_error_offset(const ot_state* rt);
-/* Write the pending error, after eval or call returned false, as the Chez
- * runtime reports errors: rendered by otium.diagnostics with its source
- * span, frames and notes, else as plain text. path names the text given to
- * ot_eval, for spans in it. The error stays pending. False, writing nothing,
- * when no error is pending or the failure was an interrupt or exit. */
+/* Write the pending error, after eval or call returned false: rendered by
+ * otium.diagnostics with its source span, frames and notes, else as plain
+ * text. path names the text given to ot_eval, for spans in it. The error
+ * stays pending. False, writing nothing, when no error is pending or the
+ * failure was an interrupt or exit. */
 bool ot_report_error(ot_state* rt, const char* path, FILE* out);
 /* An exit request returns false from eval/call; the host decides when to exit.
  * A subsequent top-level evaluation clears the request. */

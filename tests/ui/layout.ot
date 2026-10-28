@@ -6,7 +6,7 @@
 (require (otium.ui.input :as input))
 (require (ui.layout :as demo))
 (require (ui.terminal :as terminal))
-(native/load-config! "build/ui-config.ot")
+(native/load-config!)
 
 (require otium.test :refer (check fails? report))
 

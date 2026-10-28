@@ -84,7 +84,7 @@ bool oti_number(ot_state* rt, ot_value v, double* out) {
   return oti_error(rt, "expected a number");
 }
 
-/* Record E0401 unless v is a number, naming the operator as Chez does. */
+/* Record E0401 unless v is a number, naming the operator. */
 static bool number_operand(ot_state* rt, unsigned id, ot_value v) {
   if (ot_is_int(v) || oti_kind(v, K_FLOAT)) return true;
   const char* who = id == B_ADD   ? "+"
@@ -399,7 +399,7 @@ static ot_value cdr_builtin(ot_state* rt, size_t first, size_t count) {
 }
 
 /* Pairs inside table keys are frozen so the key's hash cannot change. */
-/* Chez names both mutators set-pair! in its errors. */
+/* Both mutators are named set-pair! in their errors. */
 static bool mutable_pair(ot_state* rt, ot_value a) {
   if (!oti_kind(a, K_PAIR)) return oti_type_error(rt, "set-pair!", "pair", a);
   if (!object_frozen(a)) return true;

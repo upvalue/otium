@@ -272,17 +272,13 @@
 (def calls (ffi/bind lib "calls" '() 'int #t))
 
 (check 0 (calls))
-(if wide-integers?
-    (check (- (expt 2 64) 1) (high-call))
-    (check 'range (reason (fn () (high-call)))))
+(check 'range (reason (fn () (high-call))))
 (check 1 (calls))
 
 (def high-memory (ffi/alloc 'u64 1))
 
 ((ffi/bind lib "write_high" '(pointer) 'void #t) high-memory)
-(if wide-integers?
-    (check (- (expt 2 64) 1) (ffi/ref high-memory 'u64 0))
-    (check 'range (reason (fn () (ffi/ref high-memory 'u64 0)))))
+(check 'range (reason (fn () (ffi/ref high-memory 'u64 0))))
 (ffi/free! high-memory)
 (check #f (ffi/free! ffi/null))
 (check 'null (reason (fn () (ffi/ref ffi/null 'u8 0))))
@@ -400,9 +396,7 @@
 (def high-union ((ffi/bind lib "high_union" '() Number #t)))
 
 (check 255 ((ffi/bind lib "union_high_byte" (list Number) 'u8 #t) high-union))
-(if wide-integers?
-    (check (- (expt 2 64) 1) (ffi/field-ref high-union Number '(integer)))
-    (check 'range (reason (fn () (ffi/field-ref high-union Number '(integer))))))
+(check 'range (reason (fn () (ffi/field-ref high-union Number '(integer)))))
 (ffi/free! high-union)
 
 (def union-layout (ffi/bind lib "union_layout" '(int) 'size-t #t))

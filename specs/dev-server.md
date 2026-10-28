@@ -1,8 +1,8 @@
 # Development server
 
 Status: implemented, October 18, 2026. Usage is covered in the
-[language guide](../docs/language-guide.md). This is the stopgap version: single-threaded, built on the interrupt checks both VMs
-already have. Green threads are the likely next step and are sketched under
+[language guide](../docs/language-guide.md). This is the stopgap version: single-threaded, built on the interrupt checks the VM
+already has. Green threads are the likely next step and are sketched under
 [Later](#later).
 
 A running Otium program, usually a UI, listens on a local socket. Editors, an
@@ -16,7 +16,6 @@ stuck in a loop can be paused and examined from outside.
 Today there is `--c.server`, a stdio server in `c/src/main.c` used by the
 Conjure plugin. It has several problems for this use:
 
-- C only. Chez is the primary runtime and has no server.
 - Only the process that started Otium can talk to it, so nothing can attach to
   a UI that is already running.
 - Program output shares stdout with responses. Results and errors are printed
@@ -47,7 +46,7 @@ exits, which is the opposite of what you want while editing display code.
 
 In scope:
 
-- A local socket server on both runtimes, with any number of clients.
+- A local socket server, with any number of clients.
 - A small request protocol with ids and structured errors.
 - Requests served between frames by the UI loop, at the REPL prompt, or by a
   headless `otium serve`.
@@ -73,9 +72,8 @@ next to `project.ot`, or in the working directory without a project.
 `--dev` turns it on, and `--dev=PATH` picks another path. Starting fails if a
 live server already holds the path; a stale socket file is removed.
 
-The listener and connection handling are native code in `native/dev/`, built
-the same way as the line editor: C links it directly, and Chez loads it as a
-shared library. It does three things:
+The listener and connection handling are native code in `native/dev/`, linked
+into the runtime the same way as the line editor. It does three things:
 
 - Accepts connections and reads frames into per-client buffers, without
   blocking.
@@ -136,8 +134,7 @@ Requests are served one at a time, in arrival order, across all clients.
 
 Output printed while a request runs belongs to that request's `:output`.
 Output at other times goes to the process's normal stdout and also to clients
-as `:output` events. This needs a hook on the host output sink on both
-runtimes. When ports from `specs/io.md` land, it becomes a matter of binding
+as `:output` events. This needs a hook on the host output sink. When ports from `specs/io.md` land, it becomes a matter of binding
 the current output port around each request.
 
 ## Service points
@@ -157,10 +154,9 @@ That's handled by interrupts.
 
 ## Interrupts and the watchdog
 
-Both VMs stop regularly to check for interrupts. The C VM checks a flag at
+The VM stops regularly to check for interrupts. It checks a flag at
 backward jumps and calls, and with the server running, a timer that counts
-process CPU time sets it every 10ms. On Chez, the server installs a timer interrupt handler with
-`set-timer`. Ticks are roughly procedure calls and loop iterations.
+process CPU time sets it every 10ms.
 
 At these checks, the runtime reads a monotonic clock at most every 50ms of
 wall time and calls `(dev-pending)`. It pauses the program when either:
@@ -178,16 +174,10 @@ when a client sends `:continue`.
 
 ### Cost and granularity
 
-On Chez, a plain benchmark (`fib 37` and an allocation-heavy loop, not Otium
-code yet) showed no measurable cost at 1M ticks between handler calls and
-about 1% at 10k ticks. That handler read the clock with `current-time`, which
-allocates; the real one should read it with a foreign call. At about 400M
-ticks per second, 10k ticks is around 25µs. Use 10k.
-
-On C, the VM already checks the flag, so the server adds nothing to that path.
+The VM already checks the flag, so the server adds nothing to that path.
 The handler runs only when the timer has set the flag.
 
-Neither VM can stop inside a single long primitive (a large copy, a huge
+The VM can't stop inside a single long primitive (a large copy, a huge
 `make-vector`). The pause waits for it to return. That is bounded by the
 data, so it can't hang. Foreign calls are the same case, except they can
 block forever. GC pauses also delay the check, briefly.
@@ -195,7 +185,7 @@ block forever. GC pauses also delay the check, briefly.
 ## Break loop
 
 When the program pauses, the runtime runs the break loop in place, inside the
-interrupt hook, inside `continue` and `abort` restarts. On C the hook is
+interrupt hook, inside `continue` and `abort` restarts. The hook is
 `ot_set_interrupt_handler`, which both the socket server and `--c.server` use.
 
 The break loop:
@@ -252,7 +242,7 @@ Conjure keeps working. The Conjure plugin then moves to the socket, and
 
 ## Tests
 
-- Both runtimes: eval, load, structured errors, output capture, several
+- Eval, load, structured errors, output capture, several
   clients, requests interleaved across clients.
 - A tight loop and an allocation-heavy loop each pause within 100ms of
   `:interrupt`, and within 100ms of the watchdog deadline.
@@ -266,10 +256,10 @@ Conjure keeps working. The Conjure plugin then moves to the socket, and
 ## Open questions
 
 1. Otium data or JSON on the wire? Otium data suits Lisp clients and the
-   reader exists on both runtimes. JSON is simpler for the MCP adapter, but
+   reader already exists. JSON is simpler for the MCP adapter, but
    needs a JSON reader in Otium (see `specs/io.md`).
-2. Should `:paused` include a stack? Neither runtime exposes backtraces to
-   Otium yet. Chez has continuation inspection; C would need new code.
+2. Should `:paused` include a stack? The runtime doesn't expose backtraces to
+   Otium yet; that needs new code.
 3. Is 2 seconds the right watchdog default for interactive use? It could be
    shorter for frames than for requests.
 4. Should `--dev` be on by default for `ui/run` in development?
@@ -278,9 +268,8 @@ Conjure keeps working. The Conjure plugin then moves to the socket, and
 
 Squeak's approach is the natural next step: green threads in one OS thread,
 preempted at the same interrupt checks. A paused UI process could then be
-debugged from a fresh one, so the window keeps working. On Chez, engines
-provide this on top of the same timer. On C, it needs a separate VM stack per
-green thread. Neither needs a multithreaded collector.
+debugged from a fresh one, so the window keeps working. It needs a separate VM
+stack per green thread, but not a multithreaded collector.
 
 Real OS threads would only be needed to keep running during blocking foreign
 calls. That's a language design question about app concurrency, and should be

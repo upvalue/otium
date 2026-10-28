@@ -2,8 +2,7 @@
 
 Agent-generated guide to idiomatic Otium. Otium is a small, Scheme-derived
 Lisp with Clojure-inspired namespaces and Janet-inspired practical collections.
-Chez Scheme is the primary implementation; the experimental C runtime can lag
-behind. Prefer expressing features in Otium over adding runtime escape hatches.
+Prefer expressing features in Otium over adding runtime escape hatches.
 
 ## Everyday forms
 
@@ -16,12 +15,11 @@ behind. Prefer expressing features in Otium over adding runtime escape hatches.
   value: `(def limit "Maximum entries." 100)`.
 - **Plain `let` is sequential**, like Scheme's `let*`:
   `(let ((x 10) (y (+ x 2))) y)` returns `12`. Use parenthesized binding pairs.
-  Named `let` is the usual tail-recursive loop; on Chez its initializers see the
+  Named `let` is the usual tail-recursive loop; its initializers see the
   outer scope, so compute dependent initial values in a surrounding plain `let`.
 - Optional positional parameters follow `&optional` as `(name default)` pairs
   in `fn`, `def` and `def-`. Defaults run only when omitted, left to right,
   and see preceding parameters. Explicit `nil` is supplied, not omitted.
-  Chez avoids rest-list allocation; C currently uses a compatible fallback.
   Optional and rest parameters cannot be combined.
 - Rest parameters accept Scheme dotted syntax `(fn (x . rest) ...)`,
   `(fn (x & rest) ...)`, or a single symbol `(fn args ...)`. Rest values are lists. The `rest-arguments` linter warns on runtime rest
@@ -36,8 +34,7 @@ behind. Prefer expressing features in Otium over adding runtime escape hatches.
   `:when test`. `(for ((x :in xs) (out :collect (* x x))) => out)`.
   A named loop `(for next (...) => final body ...)` goes round only when the
   body calls `(next)` in tail position; not calling it returns the body's
-  value, and `(next :done)` steps once more and returns `final`. On Chez it
-  allocates nothing beyond what accumulators build.
+  value, and `(next :done)` steps once more and returns `final`.
 - **Only `nil` and `#f` are falsy.** `nil` is distinct from the empty list `'()`;
   empty lists, zero, and empty strings are truthy. Use `nil?` for missing values
   and `null?` for an empty list. An `if` without an alternative returns `nil`.
@@ -67,7 +64,7 @@ behind. Prefer expressing features in Otium over adding runtime escape hatches.
   `(match event ({:kind :move :x x} x) (_ nil))`.
 - `/` keeps exact integer results but returns floats for fractional results:
   `(/ 6 3)` is `2`, `(/ 3 2)` is `1.5`. Do not assume Scheme rational division.
-  Chez supports bignums; portable code must account for C's bounded integers.
+  Integers are bounded, `[-2^62, 2^62-1]`; there are no bignums.
 
 ## Namespaces and live code
 
@@ -106,11 +103,7 @@ behind. Prefer expressing features in Otium over adding runtime escape hatches.
   for dynamically scoped settings; `(setting)` reads the current value.
 - Load optional helpers explicitly: `(require otium.extra :as extra)` provides
   `extra/->`, `extra/->>`, `extra/partial`, `extra/comp`, and `extra/group-by`.
-- When native Chez facilities are needed, `(require chez)` exposes `chez/` names.
-  This is an explicit host boundary. Native syntax does not expand nested Otium
-  macros. Otium `values` enumerates table values; `chez/values` produces Scheme
-  multiple values. Prefer the shared Otium API for ordinary application code.
-- Run a file with `./otium --runtime=chez path/to/program.ot`; add `-L directory`
+- Run a file with `./otium path/to/program.ot`; add `-L directory`
   for module paths. Check `(describe 'name)`, the [shared prelude](lib/otium/core.ot),
   and the [language guide](docs/language-guide.md) before assuming a familiar Scheme
   or Clojure API exists or has the same contract.
@@ -118,7 +111,7 @@ behind. Prefer expressing features in Otium over adding runtime escape hatches.
 ## Diagnostics and lint
 
 - Run `just lint` to check `lib`, `examples`, and `benchmarks`, or
-  `./otium lint path/to/file.ot` for selected files. Lint runs on Chez.
+  `./otium lint path/to/file.ot` for selected files.
 - `./otium explain E0201` explains an error code; `./otium explain L0201`
   explains a lint rule. `./otium lint --rules` lists the rules and defaults.
 - Deny-level findings fail the command. Add `--deny-warnings` to fail on

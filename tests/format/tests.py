@@ -1,8 +1,8 @@
 """Formatter CLI selection, directory traversal, writes and project lookup."""
-from harness import BOTH, ROOT, test
+from harness import ROOT, test
 
 
-@test('format cli', runtimes=BOTH)
+@test('format cli')
 def cli(t):
     directory = t.scratch / 'sources'
     directory.mkdir()
@@ -17,7 +17,7 @@ def cli(t):
     (t.scratch / 'project.ot').write_text('(format (like when wide))\n')
     project_case = nested / 'project.ot-example.ot'
     project_case.write_text('(wide a (b) (c))\n')
-    command = [ROOT / 'otium', '--runtime=' + t.runtime, 'fmt']
+    command = [ROOT / 'otium', 'fmt']
     result = t.expect(t.run([*command, '--check', 'sources'], cwd=t.scratch), status=1)
     for path in paths:
         t.check_in(str(path.relative_to(t.scratch)), result.stdout)

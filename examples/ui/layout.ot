@@ -37,7 +37,7 @@
                      (swatch :logo 0x67d9c0ff 48 48)
                      (ui/column {:grow 1 :gap 4}
                                 (ui/label {:size 20 :wrap #f} "Otium UI")
-                                (ui/label {:size 12 :color 0x9cabc2ff} "Shared widgets on C and Chez")))
+                                (ui/label {:size 12 :color 0x9cabc2ff} "Shared widgets")))
              (ui/row {:grow 1 :gap 16}
                      (ui/column {:width 144 :padding 12 :gap 12 :background 0x202d43ff :radius 16}
                                 (ui/label {:color 0x67d9c0ff} "Overview")

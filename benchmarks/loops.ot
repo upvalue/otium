@@ -1,4 +1,4 @@
-;; Run with ./otium --runtime=chez benchmarks/loops.ot.
+;; Run with ./otium benchmarks/loops.ot.
 ;; Each row reports nanoseconds and allocated bytes per 128-element call.
 (require otium.memory :as memory)
 

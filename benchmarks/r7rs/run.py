@@ -38,12 +38,10 @@ def print_vendor_error():
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("binary", type=Path, nargs="?", help="optional runtime-specific executable")
+    parser.add_argument("binary", type=Path, nargs="?", help="executable to run (default: the ./otium launcher)")
     parser.add_argument("--output", type=Path, help="directory for CSV, status, and provenance")
     parser.add_argument("--build-label", default="unspecified")
     parser.add_argument("benchmarks", nargs="*", help="ports to run; default: all")
-    parser.add_argument("--runtime", choices=["c", "chez"], default="c",
-                        help="runtime for flags and result labels (default: c)")
     parser.add_argument("--only", nargs="+", help="select ports without a positional executable")
     parser.add_argument("--runs", type=int, default=1, help="samples per benchmark")
     parser.add_argument("--timeout", type=float, default=300.0, help="seconds per sample")
@@ -159,7 +157,7 @@ def main():
         print_vendor_error()
         return 2
     repo = root.parents[1]
-    binary = command(args.runtime, isolated=False, executable=args.binary)
+    binary = command(isolated=False, executable=args.binary)
     output_dir = args.output or run_directory("r7rs")
     output_dir.mkdir(parents=True, exist_ok=True)
     commands = []
@@ -175,7 +173,7 @@ def main():
 
     otium_commit = git_value(repo, "rev-parse", "--short", "HEAD")
     dirty = bool(git_value(repo, "status", "--porcelain"))
-    implementation = f"otium-{args.runtime}-{otium_commit}{'-dirty' if dirty else ''}"
+    implementation = f"otium-{otium_commit}{'-dirty' if dirty else ''}"
     host = f"{platform.system()} {platform.release()} {platform.machine()}"
     rows = []
     had_failure = False
@@ -189,9 +187,7 @@ def main():
             input_text = input_path.read_text()
             input_id = hashlib.sha256(input_path.read_bytes()).hexdigest()[:12]
             heap_max = entry.get("heap_max", 64 * 1024 * 1024)
-            flags = ["--no-project"]
-            if args.runtime == "c":
-                flags.append(f"--c.heap-max={heap_max}")
+            flags = ["--no-project", f"--c.heap-max={heap_max}"]
             program_path = temp / f"{name}-otium.ot"
             program_path.write_text(otium_program(root, name, implementation, input_text))
 

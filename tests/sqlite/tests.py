@@ -1,9 +1,9 @@
 import ctypes.util
 
-from harness import BOTH, Skip, test
+from harness import Skip, test
 
 
-@test('sqlite raw', runtimes=BOTH, suite='native', needs=['ffi'])
+@test('sqlite raw', suite='native', needs=['ffi'])
 def raw(t):
     if not ctypes.util.find_library('sqlite3'):
         raise Skip('system SQLite library not found')
@@ -11,7 +11,7 @@ def raw(t):
              stdout='sqlite:  96  checks passed\n')
 
 
-@test('sqlite high-level', runtimes=BOTH, suite='native', needs=['ffi'])
+@test('sqlite high-level', suite='native', needs=['ffi'])
 def high_level(t):
     if not ctypes.util.find_library('sqlite3'):
         raise Skip('system SQLite library not found')

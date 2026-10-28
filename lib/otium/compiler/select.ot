@@ -1,4 +1,3 @@
-;; lint: allow-file(unbound-name) %resolve-global and %immediate-bits are C runtime builtins the Chez linter does not know
 (ns otium.compiler.select)
 
 ;; Select: closed block IR to LIR, the VM backend's instruction list on

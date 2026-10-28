@@ -170,17 +170,9 @@
   "E0111": {
     "title": "macro expansion limit exceeded",
     "type": "syntax-error",
-    "message": "macro expansion limit exceeded in `{macro}`",
-    "explanation": "Expanding one top-level form ran more than 10000 macro calls. A macro probably expands into a call to itself without making progress. The notes list the most recent macros expanded.",
+    "message": "macro expansion limit exceeded",
+    "explanation": "Expanding one top-level form ran too many macro calls. A macro probably expands into a call to itself without making progress.",
     "example": "(defmacro forever (x) `(forever ,x))\n(forever 1)",
-    "fixed": ""
-  },
-  "E0112": {
-    "title": "macro transformer failed",
-    "type": "syntax-error",
-    "message": "macro `{macro}` failed while expanding",
-    "explanation": "A macro's own code raised an error while it was building its expansion. The note gives the underlying error. Macros receive unevaluated forms, so the usual cause is a macro that treats a form as a value, or a call that does not match the shape the macro expects.",
-    "example": "",
     "fixed": ""
   },
   "E0113": {
@@ -295,7 +287,7 @@
     "level": "warn",
     "title": "nested function has no captures",
     "message": "`{name}` does not capture enclosing bindings; consider a top-level `def-`",
-    "explanation": "A named helper that does not depend on enclosing local bindings can be a private top-level definition. This reduces nesting and makes its independence explicit. Keep it local with a suppression when that makes the code easier to read. This rule checks explicit named function definitions after macro expansion; it skips ambiguous source locations, reassigned helpers and Chez host forms. It does not suggest lifting groups of mutually dependent helpers.",
+    "explanation": "A named helper that does not depend on enclosing local bindings can be a private top-level definition. This reduces nesting and makes its independence explicit. Keep it local with a suppression when that makes the code easier to read. This rule checks explicit named function definitions after macro expansion; it skips ambiguous source locations and reassigned helpers. It does not suggest lifting groups of mutually dependent helpers.",
     "example": "(def (calculate)\n  (def (plus a b) (+ a b))\n  (plus 2 2))",
     "fixed": "(def- (plus a b) (+ a b))\n\n(def (calculate)\n  (plus 2 2))"
   },

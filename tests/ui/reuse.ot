@@ -57,7 +57,7 @@
                         (map (fn (i) (ui/new Counter {:key i :label (str "s" i)})) (range 1 4)))
              (ui/row {:key :plain} (ui/new Plain {}))))
 
-(def w (ui/open {:title "reuse" :width 300 :height 300 :headless #t :config "build/ui-config.ot"}))
+(def w (ui/open {:title "reuse" :width 300 :height 300 :headless #t}))
 
 (def tree (w :tree))
 

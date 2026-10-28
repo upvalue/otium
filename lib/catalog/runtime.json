@@ -1,1980 +1,866 @@
 {
   "*": {
-    "text": "(* number ...)\nMultiply the arguments; no arguments gives 1.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(* number ...)\nMultiply the arguments; no arguments gives 1."
   },
   "+": {
-    "text": "(+ number ...)\nadds numbers. No arguments gives 0.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(+ number ...)\nadds numbers. No arguments gives 0."
   },
   "-": {
-    "text": "(- number ...)\nSubtract subsequent arguments from the first; one argument negates.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(- number ...)\nSubtract subsequent arguments from the first; one argument negates."
   },
   "/": {
-    "text": "(/ number ...)\nDivide left to right; one argument takes the reciprocal. Exact integer divisions stay integers; others produce floats. Zero divisors raise an error.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(/ number ...)\nDivide left to right; one argument takes the reciprocal. Exact integer divisions stay integers; others produce floats. Zero divisors raise an error."
   },
   "<": {
-    "text": "(< number number ...)\nTest whether adjacent numbers are strictly increasing. Requires at least two arguments; integers and floats can be mixed.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(< number number ...)\nTest whether adjacent numbers are strictly increasing. Requires at least two arguments; integers and floats can be mixed."
   },
   "<=": {
-    "text": "(<= number number ...)\nTest whether adjacent numbers are nondecreasing. Requires at least two arguments; integers and floats can be mixed.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(<= number number ...)\nTest whether adjacent numbers are nondecreasing. Requires at least two arguments; integers and floats can be mixed."
   },
   "=": {
-    "text": "(= number ...)\nTest whether adjacent numbers are equal. Zero or one argument gives #t; integers and floats can be mixed.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(= number ...)\nTest whether adjacent numbers are equal. Zero or one argument gives #t; integers and floats can be mixed."
   },
   ">": {
-    "text": "(> number number ...)\nTest whether adjacent numbers are strictly decreasing. Requires at least two arguments; integers and floats can be mixed.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(> number number ...)\nTest whether adjacent numbers are strictly decreasing. Requires at least two arguments; integers and floats can be mixed."
   },
   ">=": {
-    "text": "(>= number number ...)\nTest whether adjacent numbers are nonincreasing. Requires at least two arguments; integers and floats can be mixed.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(>= number number ...)\nTest whether adjacent numbers are nonincreasing. Requires at least two arguments; integers and floats can be mixed."
   },
   "abs": {
-    "text": "(abs number)\nReturn the absolute value.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(abs number)\nReturn the absolute value."
   },
   "acos": {
-    "text": "(acos number)\nCompute inverse cosine in radians.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(acos number)\nCompute inverse cosine in radians."
   },
   "and": {
-    "text": "(and expression ...)\nEvaluate left to right until a falsy result; return the last result, or #t with no arguments.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(and expression ...)\nEvaluate left to right until a falsy result; return the last result, or #t with no arguments."
   },
   "append": {
-    "text": "(append list ...)\nConcatenate proper lists into a list. Dotted tails are rejected.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(append list ...)\nConcatenate proper lists into a list. Dotted tails are rejected."
   },
   "apply": {
-    "text": "(apply procedure argument ... sequence)\nCall procedure with the leading arguments followed by the elements of a proper list or array; nil contributes no arguments.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(apply procedure argument ... sequence)\nCall procedure with the leading arguments followed by the elements of a proper list or array; nil contributes no arguments."
   },
   "array": {
-    "text": "(array value ...)\nConstruct a mutable array. [a b c] is array literal syntax.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(array value ...)\nConstruct a mutable array. [a b c] is array literal syntax."
   },
   "array?": {
-    "text": "(array? value)\nReturn #t when value is an array, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(array? value)\nReturn #t when value is an array, otherwise #f."
   },
   "asin": {
-    "text": "(asin number)\nCompute inverse sine in radians.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(asin number)\nCompute inverse sine in radians."
   },
   "atan": {
-    "text": "(atan y [x])\nReturn arctangent in radians; two arguments use the quadrant-aware angle of y/x.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(atan y [x])\nReturn arctangent in radians; two arguments use the quadrant-aware angle of y/x."
   },
   "begin": {
-    "text": "(begin expression ...)\nEvaluate expressions in order and return the last result, or nil for no expressions.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(begin expression ...)\nEvaluate expressions in order and return the last result, or nil for no expressions."
   },
   "boolean?": {
-    "text": "(boolean? value)\nReturn #t when value is #t or #f, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(boolean? value)\nReturn #t when value is #t or #f, otherwise #f."
   },
   "buffer": {
-    "text": "(buffer [value])\nCreate a mutable string builder, optionally initialized from the value's display representation.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(buffer [value])\nCreate a mutable string builder, optionally initialized from the value's display representation."
   },
   "buffer->string": {
-    "text": "(buffer->string buffer)\nReturn a string snapshot; the buffer remains available for further appends.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(buffer->string buffer)\nReturn a string snapshot; the buffer remains available for further appends."
   },
   "buffer-push!": {
-    "text": "(buffer-push! buffer value ...)\nAppend display representations to the buffer and return it.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(buffer-push! buffer value ...)\nAppend display representations to the buffer and return it."
   },
   "buffer?": {
-    "text": "(buffer? value)\nReturn #t when value is a mutable string buffer, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(buffer? value)\nReturn #t when value is a mutable string buffer, otherwise #f."
   },
   "car": {
-    "text": "(car pair)\nReturn the head of a pair. Passing an empty list or another type raises an error.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(car pair)\nReturn the head of a pair. Passing an empty list or another type raises an error."
   },
   "cdr": {
-    "text": "(cdr pair)\nReturn the tail of a pair. Passing an empty list or another type raises an error.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(cdr pair)\nReturn the tail of a pair. Passing an empty list or another type raises an error."
   },
   "ceiling": {
-    "text": "(ceiling number)\nRound up to an integer.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(ceiling number)\nRound up to an integer."
   },
   "compute-restarts": {
-    "text": "(compute-restarts)\nReturn an array of active restarts, innermost first.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(compute-restarts)\nReturn an array of active restarts, innermost first."
   },
   "cond": {
-    "text": "(cond (test expression ...) ... (else expression ...))\nEvaluate the first matching clause. else is the final fallback clause.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(cond (test expression ...) ... (else expression ...))\nEvaluate the first matching clause. else is the final fallback clause."
   },
   "condition-of-type?": {
-    "text": "(condition-of-type? condition type)\nTest whether a condition has the named type or a registered subtype.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(condition-of-type? condition type)\nTest whether a condition has the named type or a registered subtype."
   },
   "cons": {
-    "text": "(cons head tail)\nConstruct a pair. A proper list ends in () or nil.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(cons head tail)\nConstruct a pair. A proper list ends in () or nil."
   },
   "copy": {
-    "text": "(copy collection)\nMake a shallow copy of an array, table, or instance; nil returns nil. Instances keep their class, migrate if needed, and share the objects held in their slots.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(copy collection)\nMake a shallow copy of an array, table, or instance; nil returns nil. Instances keep their class, migrate if needed, and share the objects held in their slots."
   },
   "cos": {
-    "text": "(cos number)\nCompute cosine in radians.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(cos number)\nCompute cosine in radians."
   },
   "current-jiffy": {
-    "text": "(current-jiffy)\nReturn a monotonic nanosecond counter with an unspecified epoch; subtract readings to measure elapsed time.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(current-jiffy)\nReturn a monotonic nanosecond counter with an unspecified epoch; subtract readings to measure elapsed time."
   },
   "current-ns": {
-    "text": "(current-ns)\nReturn the current namespace name as a symbol.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(current-ns)\nReturn the current namespace name as a symbol."
   },
   "current-second": {
-    "text": "(current-second)\nReturn wall-clock seconds since the Unix epoch as a float.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(current-second)\nReturn wall-clock seconds since the Unix epoch as a float."
   },
   "dec": {
-    "text": "(dec number)\nSubtract one.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(dec number)\nSubtract one."
   },
   "def": {
-    "text": "(def name [\"docstring\"] value) / (def (name parameter ...) [\"docstring\"] body ...)\nDefine or replace a binding. Namespace bindings are live across redefinition. Allowed at top level and in bodies.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(def name [\"docstring\"] value) / (def (name parameter ...) [\"docstring\"] body ...)\nDefine or replace a binding. Namespace bindings are live across redefinition. Allowed at top level and in bodies."
   },
   "def-": {
-    "text": "(def- name [\"docstring\"] value) / (def- (name parameter ...) [\"docstring\"] body ...)\nDefine or replace a top-level binding that is private to its namespace.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(def- name [\"docstring\"] value) / (def- (name parameter ...) [\"docstring\"] body ...)\nDefine or replace a top-level binding that is private to its namespace."
   },
   "defer": {
-    "text": "(defer expression cleanup ...)\nRun cleanup on normal return and on unwinding. Return expression's value unless cleanup raises a new condition.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(defer expression cleanup ...)\nRun cleanup on normal return and on unwinding. Return expression's value unless cleanup raises a new condition."
   },
   "define-condition": {
-    "text": "(define-condition name parent)\nRegister a condition type and parent for condition-of-type? checks; use nil for no parent.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(define-condition name parent)\nRegister a condition type and parent for condition-of-type? checks; use nil for no parent."
   },
   "defmacro": {
-    "text": "(defmacro name parameters [\"docstring\"] body ...)\nDefine an unhygienic Otium macro. It receives unevaluated argument datums and returns replacement code; use gensym for fresh names.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(defmacro name parameters [\"docstring\"] body ...)\nDefine an unhygienic Otium macro. It receives unevaluated argument datums and returns replacement code; use gensym for fresh names."
   },
   "defparam": {
-    "text": "(defparam name [\"docstring\"] default)\nDefine a named dynamically scoped parameter. Call (name) to read it; use with-params to override it temporarily.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(defparam name [\"docstring\"] default)\nDefine a named dynamically scoped parameter. Call (name) to read it; use with-params to override it temporarily."
   },
   "describe": {
-    "text": "(describe 'name)\nReturn namespace/name: docstring for a binding, a no-documentation placeholder for an undocumented binding, or nil for an unknown name. Runtime forms return their shared reference text.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(describe 'name)\nReturn namespace/name: docstring for a binding, a no-documentation placeholder for an undocumented binding, or nil for an unknown name. Runtime forms return their shared reference text."
   },
   "display": {
-    "text": "(display value ...)\nWrite display representations to the current output port sink, separated by spaces, without a newline. Return nil. Writes to current-output-port.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(display value ...)\nWrite display representations to the current output port sink, separated by spaces, without a newline. Return nil. Writes to current-output-port."
   },
   "eq?": {
-    "text": "(eq? a b)\nCompare immediate values by value and heap objects by identity. Use equal? for structural comparison.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(eq? a b)\nCompare immediate values by value and heap objects by identity. Use equal? for structural comparison."
   },
   "equal?": {
-    "text": "(equal? a b)\nCompare values structurally, including pairs, arrays, tables, and string contents.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(equal? a b)\nCompare values structurally, including pairs, arrays, tables, and string contents."
   },
   "error": {
-    "text": "(error condition-or-message argument ...)\nRaise an error condition containing the message and optional arguments; does not return normally.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(error condition-or-message argument ...)\nRaise an error condition containing the message and optional arguments; does not return normally."
   },
   "eval": {
-    "text": "(eval form)\nMacroexpand and evaluate a datum in the current namespace, without the caller's lexical bindings.",
-    "runtimes": [
-      "c",
-      "chez"
-    ],
-    "chez": "(eval form)\nOtium override: expand Otium macros and evaluate form in the namespace where this eval binding was installed. Loader directives and definitions participate in Otium namespace tracking. The caller's lexical bindings are not captured."
+    "text": "(eval form)\nMacroexpand and evaluate a datum in the current namespace, without the caller's lexical bindings."
   },
   "even?": {
-    "text": "(even? number)\nReturn #t when the argument is an even integer, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(even? number)\nReturn #t when the argument is an even integer, otherwise #f."
   },
   "exact": {
-    "text": "(exact number)\nConvert an integer-valued finite number to an integer; fractional or out-of-range values raise an error.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(exact number)\nConvert an integer-valued finite number to an integer; fractional or out-of-range values raise an error."
   },
   "exact?": {
-    "text": "(exact? number)\nReturn #t when the argument is an integer representation, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(exact? number)\nReturn #t when the argument is an integer representation, otherwise #f."
   },
   "exit": {
-    "text": "(exit [status])\nRequest program termination with an optional integer exit status from 0 through 255 (default 0).",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(exit [status])\nRequest program termination with an optional integer exit status from 0 through 255 (default 0)."
   },
   "exp": {
-    "text": "(exp number)\nCompute e raised to the argument as a float.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(exp number)\nCompute e raised to the argument as a float."
   },
   "expander-macro-var": {
-    "text": "(expander-macro-var symbol)\nInternal expander hook: resolve a symbol to its macro value, or nil if it does not name a macro.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(expander-macro-var symbol)\nInternal expander hook: resolve a symbol to its macro value, or nil if it does not name a macro."
   },
   "expander-invoke-macro": {
-    "text": "(expander-invoke-macro macro arguments)\nInternal expander hook: run a macro's transformer on unevaluated argument forms.",
-    "runtimes": [
-      "c"
-    ]
-  },
-  "expander-native-syntax?": {
-    "text": "(expander-native-syntax? symbol)\nInternal expander hook: true when symbol names host syntax the expander must not walk. Always false on C.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(expander-invoke-macro macro arguments)\nInternal expander hook: run a macro's transformer on unevaluated argument forms."
   },
   "expander-qualify": {
-    "text": "(expander-qualify symbol)\nInternal expander hook: symbol qualified with the namespace that owns it, or with the current namespace when unbound; false to leave it bare.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(expander-qualify symbol)\nInternal expander hook: symbol qualified with the namespace that owns it, or with the current namespace when unbound; false to leave it bare."
   },
   "expander-local-name": {
-    "text": "(expander-local-name symbol)\nInternal expander hook: for a qualified symbol, the bare name when it means the same binding in the current namespace, else false.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(expander-local-name symbol)\nInternal expander hook: for a qualified symbol, the bare name when it means the same binding in the current namespace, else false."
   },
   "expt": {
-    "text": "(expt base exponent)\nRaise base to exponent. Nonnegative integer powers of integers use integer arithmetic with wrapping overflow; other inputs use floating point.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(expt base exponent)\nRaise base to exponent. Nonnegative integer powers of integers use integer arithmetic with wrapping overflow; other inputs use floating point."
   },
   "false?": {
-    "text": "(false? value)\nReturn #t when value is exactly #f, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(false? value)\nReturn #t when value is exactly #f, otherwise #f."
   },
   "find-restart": {
-    "text": "(find-restart name)\nFind the innermost active restart by name, or return nil.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(find-restart name)\nFind the innermost active restart by name, or return nil."
   },
   "finite?": {
-    "text": "(finite? number)\nReturn #t when the argument is finite, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(finite? number)\nReturn #t when the argument is finite, otherwise #f."
   },
   "float?": {
-    "text": "(float? value)\nReturn #t when value is a floating-point representation, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(float? value)\nReturn #t when value is a floating-point representation, otherwise #f."
   },
   "floor": {
-    "text": "(floor number)\nRound down to an integer.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(floor number)\nRound down to an integer."
   },
   "fn": {
-    "text": "(fn parameters body ...)\nCreate a lexical procedure. Parameters may be a proper list, dotted rest list, (a & rest), or a rest symbol.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(fn parameters body ...)\nCreate a lexical procedure. Parameters may be a proper list, dotted rest list, (a & rest), or a rest symbol."
   },
   "for-each": {
-    "text": "(for-each procedure sequence)\nCall procedure on each element for side effects, then return nil. Traverses a snapshot; accepts a proper list, array, or nil.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(for-each procedure sequence)\nCall procedure on each element for side effects, then return nil. Traverses a snapshot; accepts a proper list, array, or nil."
   },
   "foreign?": {
-    "text": "(foreign? value)\nReturn #t when value is a foreign extension value, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(foreign? value)\nReturn #t when value is a foreign extension value, otherwise #f."
   },
   "gensym": {
-    "text": "(gensym [prefix])\nReturn a fresh symbol using the optional string prefix (default G). Useful for avoiding accidental capture in macros.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(gensym [prefix])\nReturn a fresh symbol using the optional string prefix (default G). Useful for avoiding accidental capture in macros."
   },
   "get": {
-    "text": "(get collection key [default])\nLook up a table key or an array/string index. Missing entries and nil collections return default (nil if omitted). String indexing returns a char.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(get collection key [default])\nLook up a table key or an array/string index. Missing entries and nil collections return default (nil if omitted). String indexing returns a char."
   },
   "handler-bind": {
-    "text": "(handler-bind ((predicate handler) ...) body ...)\nEvaluate all bindings left to right under the surrounding handlers, then install signal-site handlers for body. Returning from a handler declines the condition.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(handler-bind ((predicate handler) ...) body ...)\nEvaluate all bindings left to right under the surrounding handlers, then install signal-site handlers for body. Returning from a handler declines the condition."
   },
   "identity": {
-    "text": "(identity value)\nReturn value unchanged.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(identity value)\nReturn value unchanged."
   },
   "if": {
-    "text": "(if test consequent [alternative])\nEvaluate one branch. Only nil and #f are falsy; omitted alternative returns nil.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(if test consequent [alternative])\nEvaluate one branch. Only nil and #f are falsy; omitted alternative returns nil."
   },
   "inc": {
-    "text": "(inc number)\nAdd one.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(inc number)\nAdd one."
   },
   "inexact": {
-    "text": "(inexact number)\nConvert a number to a float.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(inexact number)\nConvert a number to a float."
   },
   "inexact?": {
-    "text": "(inexact? number)\nReturn #t when the argument is a floating-point representation, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(inexact? number)\nReturn #t when the argument is a floating-point representation, otherwise #f."
   },
   "infinite?": {
-    "text": "(infinite? number)\nReturn #t when the argument is positive or negative infinity, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(infinite? number)\nReturn #t when the argument is positive or negative infinity, otherwise #f."
   },
   "int?": {
-    "text": "(int? value)\nReturn #t when value is an integer representation, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(int? value)\nReturn #t when value is an integer representation, otherwise #f."
   },
   "integer?": {
-    "text": "(integer? number)\nReturn #t when the argument is an integer value, including integral floats, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(integer? number)\nReturn #t when the argument is an integer value, including integral floats, otherwise #f."
   },
   "invoke-restart": {
-    "text": "(invoke-restart name-or-restart argument ...)\nUnwind to the chosen active restart and run its clause with the arguments.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(invoke-restart name-or-restart argument ...)\nUnwind to the chosen active restart and run its clause with the arguments."
   },
   "jiffies-per-second": {
-    "text": "(jiffies-per-second)\nReturn 1000000000, the number of clock jiffies per second.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(jiffies-per-second)\nReturn 1000000000, the number of clock jiffies per second."
   },
   "keys": {
-    "text": "(keys table)\nReturn the table's keys in insertion order as an array. nil gives an empty array. This is a collection operation, not Scheme multiple values.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(keys table)\nReturn the table's keys in insertion order as an array. nil gives an empty array. This is a collection operation, not Scheme multiple values."
   },
   "keyword": {
-    "text": "(keyword name)\nIntern a keyword from a string, symbol, or keyword name.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(keyword name)\nIntern a keyword from a string, symbol, or keyword name."
   },
   "keyword?": {
-    "text": "(keyword? value)\nReturn #t when value is a keyword, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(keyword? value)\nReturn #t when value is a keyword, otherwise #f."
   },
   "length": {
-    "text": "(length collection)\nCount list/array elements, table entries, or string/buffer Unicode code points. Improper lists and unsupported types raise an error.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(length collection)\nCount list/array elements, table entries, or string/buffer Unicode code points. Improper lists and unsupported types raise an error."
   },
   "let": {
-    "text": "(let ((name expression) ...) body ...) / (let loop ((name expression) ...) body ...)\nBind names sequentially: later initializers see earlier bindings. Named let creates a recursive loop.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(let ((name expression) ...) body ...) / (let loop ((name expression) ...) body ...)\nBind names sequentially: later initializers see earlier bindings. Named let creates a recursive loop."
   },
   "list": {
-    "text": "(list value ...)\nConstruct a proper list of the arguments.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(list value ...)\nConstruct a proper list of the arguments."
   },
   "list?": {
-    "text": "(list? value)\nReturn #t when value is a proper list (including () and nil-terminated chains), otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(list? value)\nReturn #t when value is a proper list (including () and nil-terminated chains), otherwise #f."
   },
   "log": {
-    "text": "(log number)\nCompute the natural logarithm as a float.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(log number)\nCompute the natural logarithm as a float."
   },
   "macro?": {
-    "text": "(macro? value)\nReturn #t when value is an Otium macro, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ],
-    "chez": "(macro? value)\nReturn #t for an Otium macro value, otherwise #f. Macros receive unevaluated argument datums during expansion and are not ordinary procedures."
+    "text": "(macro? value)\nReturn #t when value is an Otium macro, otherwise #f."
   },
   "macroexpand": {
-    "text": "(macroexpand form)\nRepeatedly expand head macro calls until the head is no longer a macro. Does not descend into subforms.",
-    "runtimes": [
-      "c",
-      "chez"
-    ],
-    "chez": "(macroexpand form)\nRepeatedly expand Otium macros at the head of form until its head is no longer a macro. This may run transformer side effects, but does not evaluate the resulting code or traverse subforms."
+    "text": "(macroexpand form)\nRepeatedly expand head macro calls until the head is no longer a macro. Does not descend into subforms."
   },
   "macroexpand-all": {
-    "text": "(macroexpand-all form)\nExpand every macro call in form, including subforms, as the evaluator would before compiling it.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(macroexpand-all form)\nExpand every macro call in form, including subforms, as the evaluator would before compiling it."
   },
   "macroexpand-1": {
-    "text": "(macroexpand-1 form)\nExpand a macro at the head of form once; otherwise return form unchanged. Does not descend into subforms.",
-    "runtimes": [
-      "c",
-      "chez"
-    ],
-    "chez": "(macroexpand-1 form)\nExpand a head Otium macro once in the defining namespace of this binding, or return form unchanged. Do not recursively traverse subforms or evaluate the result."
+    "text": "(macroexpand-1 form)\nExpand a macro at the head of form once; otherwise return form unchanged. Does not descend into subforms."
   },
   "max": {
-    "text": "(max number ...)\nReturn the largest of one or more numbers.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(max number ...)\nReturn the largest of one or more numbers."
   },
   "min": {
-    "text": "(min number ...)\nReturn the smallest of one or more numbers.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(min number ...)\nReturn the smallest of one or more numbers."
   },
   "modulo": {
-    "text": "(modulo dividend divisor)\nInteger modulus with the divisor's sign. Both arguments must be integers; the divisor must be nonzero.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(modulo dividend divisor)\nInteger modulus with the divisor's sign. Both arguments must be integers; the divisor must be nonzero."
   },
   "name": {
-    "text": "(name value)\nReturn the name of a symbol or keyword as a string; a string is returned unchanged.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(name value)\nReturn the name of a symbol or keyword as a string; a string is returned unchanged."
   },
   "nan?": {
-    "text": "(nan? number)\nReturn #t when the argument is not-a-number, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(nan? number)\nReturn #t when the argument is not-a-number, otherwise #f."
   },
   "neg?": {
-    "text": "(neg? number)\nReturn #t when the argument is negative, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(neg? number)\nReturn #t when the argument is negative, otherwise #f."
   },
   "newline": {
-    "text": "(newline [port])\nWrite a newline to port, defaulting to current-output-port, and return nil.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(newline [port])\nWrite a newline to port, defaulting to current-output-port, and return nil."
   },
   "nil?": {
-    "text": "(nil? value)\nReturn #t when value is nil, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(nil? value)\nReturn #t when value is nil, otherwise #f."
   },
   "not": {
-    "text": "(not value)\nReturn #t for nil or #f; every other value, including (), is truthy.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(not value)\nReturn #t for nil or #f; every other value, including (), is truthy."
   },
   "ns": {
-    "text": "(ns name [:require clauses])\nSelect a namespace. Optional (:require ...) clauses import modules; a loaded module must declare its requested name.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(ns name [:require clauses])\nSelect a namespace. Optional (:require ...) clauses import modules; a loaded module must declare its requested name."
   },
   "null?": {
-    "text": "(null? value)\nReturn #t when value is the empty list (), otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(null? value)\nReturn #t when value is the empty list (), otherwise #f."
   },
   "number->string": {
-    "text": "(number->string number)\nReturn the number's display representation as a string.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(number->string number)\nReturn the number's display representation as a string."
   },
   "number?": {
-    "text": "(number? value)\nReturn #t when value is an integer or float, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(number? value)\nReturn #t when value is an integer or float, otherwise #f."
   },
   "odd?": {
-    "text": "(odd? number)\nReturn #t when the argument is an odd integer, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(odd? number)\nReturn #t when the argument is an odd integer, otherwise #f."
   },
   "or": {
-    "text": "(or expression ...)\nEvaluate left to right until a truthy result; return the last result, or #f with no arguments.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(or expression ...)\nEvaluate left to right until a truthy result; return the last result, or #f with no arguments."
   },
   "pair?": {
-    "text": "(pair? value)\nReturn #t when value is a pair, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(pair? value)\nReturn #t when value is a pair, otherwise #f."
   },
   "pop!": {
-    "text": "(pop! array)\nRemove and return the last array element, or nil when empty.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(pop! array)\nRemove and return the last array element, or nil when empty."
   },
   "pos?": {
-    "text": "(pos? number)\nReturn #t when the argument is positive, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(pos? number)\nReturn #t when the argument is positive, otherwise #f."
   },
   "print": {
-    "text": "(print value ...)\nWrite display representations to the current output port sink, separated by spaces, without a newline. Return nil. Writes to current-output-port.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(print value ...)\nWrite display representations to the current output port sink, separated by spaces, without a newline. Return nil. Writes to current-output-port."
   },
   "println": {
-    "text": "(println value ...)\nWrite display representations to the current output port sink, separated by spaces, followed by a newline. Return nil. Writes to current-output-port.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(println value ...)\nWrite display representations to the current output port sink, separated by spaces, followed by a newline. Return nil. Writes to current-output-port."
   },
   "procedure?": {
-    "text": "(procedure? value)\nReturn #t when value is a function or native procedure, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(procedure? value)\nReturn #t when value is a function or native procedure, otherwise #f."
   },
   "push!": {
-    "text": "(push! array value ...)\nAppend values to the array and return it.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(push! array value ...)\nAppend values to the array and return it."
   },
   "put!": {
-    "text": "(put! collection key value ...)\nMutate a table or array and return it. Table values of nil delete keys. Array indices must already exist; use push! to grow an array.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(put! collection key value ...)\nMutate a table or array and return it. Table values of nil delete keys. Array indices must already exist; use push! to grow an array."
   },
   "quasiquote": {
-    "text": "(quasiquote template) / `template\nConstruct data from a template, evaluating active unquote and unquote-splicing forms.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(quasiquote template) / `template\nConstruct data from a template, evaluating active unquote and unquote-splicing forms."
   },
   "quit": {
-    "text": "(quit [status])\nRequest program termination; status defaults to 0 and must be an integer from 0 through 255.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(quit [status])\nRequest program termination; status defaults to 0 and must be an integer from 0 through 255."
   },
   "quote": {
-    "text": "(quote datum) / 'datum\nReturn datum without evaluating it.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(quote datum) / 'datum\nReturn datum without evaluating it."
   },
   "quotient": {
-    "text": "(quotient dividend divisor)\nInteger division truncated toward zero. Both arguments must be integers; the divisor must be nonzero.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(quotient dividend divisor)\nInteger division truncated toward zero. Both arguments must be integers; the divisor must be nonzero."
   },
   "read-string": {
-    "text": "(read-string string)\nRead exactly one form without evaluating it. Empty input or trailing forms raise an error.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(read-string string)\nRead exactly one form without evaluating it. Empty input or trailing forms raise an error."
   },
   "remainder": {
-    "text": "(remainder dividend divisor)\nInteger remainder with the dividend's sign. Both arguments must be integers; the divisor must be nonzero.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(remainder dividend divisor)\nInteger remainder with the dividend's sign. Both arguments must be integers; the divisor must be nonzero."
   },
   "require": {
-    "text": "(require module [:as alias] [:refer (names)] [:reload])\nLoad a namespace. Grouped and quoted specs are also accepted. Search each path directory for .ot then .scm. Reload reevaluates the namespace, preserving defonce values and effects before an error.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(require module [:as alias] [:refer (names)] [:reload])\nLoad a namespace. Grouped and quoted specs are also accepted. Search each path directory for .ot then .scm. Reload reevaluates the namespace, preserving defonce values and effects before an error."
   },
   "restart-case": {
-    "text": "(restart-case expression (name [\"description\"] parameters body ...) ...)\nMake named recovery clauses available during expression and clause evaluation. invoke-restart unwinds to the selected clause; a clause may invoke itself or a sibling restart.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(restart-case expression (name [\"description\"] parameters body ...) ...)\nMake named recovery clauses available during expression and clause evaluation. invoke-restart unwinds to the selected clause; a clause may invoke itself or a sibling restart."
   },
   "restart-description": {
-    "text": "(restart-description restart)\nReturn a restart's description string, or nil if it has none.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(restart-description restart)\nReturn a restart's description string, or nil if it has none."
   },
   "restart-name": {
-    "text": "(restart-name restart)\nReturn a restart's name as a symbol.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(restart-name restart)\nReturn a restart's name as a symbol."
   },
   "reverse": {
-    "text": "(reverse sequence)\nReverse a list or array, preserving its kind. nil is treated as an empty list.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(reverse sequence)\nReverse a list or array, preserving its kind. nil is treated as an empty list."
   },
   "round": {
-    "text": "(round number)\nRound to the nearest integer; halfway cases round away from zero.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(round number)\nRound to the nearest integer; halfway cases round away from zero."
   },
   "set!": {
-    "text": "(set! name value)\nReplace the value of an existing lexical or namespace binding.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(set! name value)\nReplace the value of an existing lexical or namespace binding."
   },
   "set-car!": {
-    "text": "(set-car! pair value)\nReplace the pair's head and return the pair. Cycles and mutation of pairs frozen as table keys are rejected.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(set-car! pair value)\nReplace the pair's head and return the pair. Cycles and mutation of pairs frozen as table keys are rejected."
   },
   "set-cdr!": {
-    "text": "(set-cdr! pair value)\nReplace the pair's tail and return the pair. Cycles and mutation of pairs frozen as table keys are rejected.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(set-cdr! pair value)\nReplace the pair's tail and return the pair. Cycles and mutation of pairs frozen as table keys are rejected."
   },
   "signal": {
-    "text": "(signal condition-or-message argument ...)\nOffer a condition to active handlers before unwinding. Returning from a handler declines; if all decline, return nil (Chez: #f).",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(signal condition-or-message argument ...)\nOffer a condition to active handlers before unwinding. Returning from a handler declines; if all decline, return nil."
   },
   "sin": {
-    "text": "(sin number)\nCompute sine in radians.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(sin number)\nCompute sine in radians."
   },
   "sqrt": {
-    "text": "(sqrt number)\nCompute the square root as a float.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(sqrt number)\nCompute the square root as a float."
   },
   "str": {
-    "text": "(str value ...)\nConcatenate display representations into a string, with no separators. No arguments gives an empty string.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(str value ...)\nConcatenate display representations into a string, with no separators. No arguments gives an empty string."
   },
   "string->number": {
-    "text": "(string->number string)\nParse an integer or float, allowing surrounding whitespace. Invalid numeric text returns nil.",
-    "runtimes": [
-      "c",
-      "chez"
-    ],
-    "chez": "(string->number string)\nParse a number, returning nil on failure. Chez retains its native numeric tower."
+    "text": "(string->number string)\nParse an integer or float, allowing surrounding whitespace. Invalid numeric text returns nil."
   },
   "string->symbol": {
-    "text": "(string->symbol name)\nIntern a symbol from a string, symbol, or keyword name.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(string->symbol name)\nIntern a symbol from a string, symbol, or keyword name."
   },
   "string-append": {
-    "text": "(string-append string ...)\nConcatenate strings; non-string arguments raise an error.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(string-append string ...)\nConcatenate strings; non-string arguments raise an error."
   },
   "string-contains?": {
-    "text": "(string-contains? string text)\nReturn #t if string contains the literal text, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(string-contains? string text)\nReturn #t if string contains the literal text, otherwise #f."
   },
   "string-downcase": {
-    "text": "(string-downcase string)\nConvert ASCII uppercase letters to lowercase.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(string-downcase string)\nConvert ASCII uppercase letters to lowercase."
   },
   "string-ends-with?": {
-    "text": "(string-ends-with? string text)\nReturn #t if string ends with the literal text, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(string-ends-with? string text)\nReturn #t if string ends with the literal text, otherwise #f."
   },
   "string-join": {
-    "text": "(string-join separator sequence)\nJoin the display representations of sequence elements with separator.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(string-join separator sequence)\nJoin the display representations of sequence elements with separator."
   },
   "string-length": {
-    "text": "(string-length string)\nCount Unicode code points, not encoded bytes.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(string-length string)\nCount Unicode code points, not encoded bytes."
   },
   "string-replace": {
-    "text": "(string-replace string from to)\nReplace every literal occurrence of from with to.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(string-replace string from to)\nReplace every literal occurrence of from with to."
   },
   "string-split": {
-    "text": "(string-split string [separator])\nSplit into an array on a literal nonempty separator, or on runs of whitespace when omitted.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(string-split string [separator])\nSplit into an array on a literal nonempty separator, or on runs of whitespace when omitted."
   },
   "string-starts-with?": {
-    "text": "(string-starts-with? string text)\nReturn #t if string starts with the literal text, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(string-starts-with? string text)\nReturn #t if string starts with the literal text, otherwise #f."
   },
   "string-trim": {
-    "text": "(string-trim string)\nRemove surrounding ASCII whitespace.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(string-trim string)\nRemove surrounding ASCII whitespace."
   },
   "string-upcase": {
-    "text": "(string-upcase string)\nConvert ASCII lowercase letters to uppercase.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(string-upcase string)\nConvert ASCII lowercase letters to uppercase."
   },
   "string<?": {
-    "text": "(string<? left right)\nTest lexicographic string ordering.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(string<? left right)\nTest lexicographic string ordering."
   },
   "string?": {
-    "text": "(string? value)\nReturn #t when value is a string, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(string? value)\nReturn #t when value is a string, otherwise #f."
   },
   "substring": {
-    "text": "(substring string start [end])\nCopy code points from start (inclusive) to end (exclusive, default length). Indices clamp to the string bounds; end below start gives an empty string.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(substring string start [end])\nCopy code points from start (inclusive) to end (exclusive, default length). Indices clamp to the string bounds; end below start gives an empty string."
   },
   "symbol": {
-    "text": "(symbol name)\nIntern a symbol from a string, symbol, or keyword name.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(symbol name)\nIntern a symbol from a string, symbol, or keyword name."
   },
   "symbol->string": {
-    "text": "(symbol->string symbol)\nReturn the symbol's name as a string.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(symbol->string symbol)\nReturn the symbol's name as a string."
   },
   "symbol?": {
-    "text": "(symbol? value)\nReturn #t when value is a symbol, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(symbol? value)\nReturn #t when value is a symbol, otherwise #f."
   },
   "table": {
-    "text": "(table key value ...)\nConstruct an insertion-ordered table. Requires key/value pairs; a nil value removes its key. {key value ...} is table literal syntax.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(table key value ...)\nConstruct an insertion-ordered table. Requires key/value pairs; a nil value removes its key. {key value ...} is table literal syntax."
   },
   "table?": {
-    "text": "(table? value)\nReturn #t when value is a table, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(table? value)\nReturn #t when value is a table, otherwise #f."
   },
   "tan": {
-    "text": "(tan number)\nCompute tangent in radians.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(tan number)\nCompute tangent in radians."
   },
   "true?": {
-    "text": "(true? value)\nReturn #t when value is exactly #t, otherwise #f.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(true? value)\nReturn #t when value is exactly #t, otherwise #f."
   },
   "truncate": {
-    "text": "(truncate number)\nRound toward zero to an integer.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(truncate number)\nRound toward zero to an integer."
   },
   "try": {
-    "text": "(try body ... (catch (predicate name) handler-body ...) ...)\nCatch an unwinding condition using the first matching predicate. (catch name body ...) catches any condition. quit is not caught.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(try body ... (catch (predicate name) handler-body ...) ...)\nCatch an unwinding condition using the first matching predicate. (catch name body ...) catches any condition. quit is not caught."
   },
   "type": {
-    "text": "(type value)\nReturn the value's type as a keyword, such as :int, :string, :array, or :table.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(type value)\nReturn the value's type as a keyword, such as :int, :string, :array, or :table."
   },
   "unquote": {
-    "text": "(unquote expression) / ,expression\nInsert an evaluated value into an enclosing quasiquote.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(unquote expression) / ,expression\nInsert an evaluated value into an enclosing quasiquote."
   },
   "unquote-splicing": {
-    "text": "(unquote-splicing expression) / ,@expression\nSplice evaluated sequence elements into an enclosing quasiquote.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(unquote-splicing expression) / ,@expression\nSplice evaluated sequence elements into an enclosing quasiquote."
   },
   "unwind-protect": {
-    "text": "(unwind-protect expression cleanup ...)\nRun cleanup on normal return and on unwinding. Return expression's value unless cleanup raises a new condition.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(unwind-protect expression cleanup ...)\nRun cleanup on normal return and on unwinding. Return expression's value unless cleanup raises a new condition."
   },
   "update!": {
-    "text": "(update! collection key procedure argument ...)\nReplace the entry with (procedure (get collection key) argument ...). Mutates and returns the collection.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(update! collection key procedure argument ...)\nReplace the entry with (procedure (get collection key) argument ...). Mutates and returns the collection."
   },
   "values": {
-    "text": "(values table)\nReturn the table's values in insertion order as an array. nil gives an empty array. This is a collection operation, not Scheme multiple values.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(values table)\nReturn the table's values in insertion order as an array. nil gives an empty array. This is a collection operation, not Scheme multiple values."
   },
   "while": {
-    "text": "(while test body ...)\nRepeat body while test is truthy, then return nil.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(while test body ...)\nRepeat body while test is truthy, then return nil."
   },
   "with-params": {
-    "text": "(with-params ((parameter value) ...) body ...)\nInstall dynamic parameter values sequentially for body, restoring them on every exit path.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(with-params ((parameter value) ...) body ...)\nInstall dynamic parameter values sequentially for body, restoring them on every exit path."
   },
   "write": {
-    "text": "(write value ...)\nWrite readable representations to the current output port sink, separated by spaces, without a newline. Return nil. Writes to current-output-port.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(write value ...)\nWrite readable representations to the current output port sink, separated by spaces, without a newline. Return nil. Writes to current-output-port."
   },
   "zero?": {
-    "text": "(zero? number)\nReturn #t when the argument is zero, otherwise #f.",
-    "runtimes": [
-      "c"
-    ]
-  },
-  "live": {
-    "text": "(live 'name)\nReturn a procedure that looks up name on every call in its defining namespace. Saved callbacks then follow redefinition and module reload.",
-    "runtimes": [
-      "chez"
-    ]
+    "text": "(zero? number)\nReturn #t when the argument is zero, otherwise #f."
   },
   "defonce": {
-    "text": "(defonce name [\"docstring\"] expression)\nInitialize a binding once, preserving its value and documentation on reload.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(defonce name [\"docstring\"] expression)\nInitialize a binding once, preserving its value and documentation on reload."
   },
   "reset-generic!": {
-    "text": "(reset-generic! (name argument ...))\nReplace this declaration with a fresh generic of the given arity and no methods.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
-  },
-  "keyword->string": {
-    "text": "Return the interned keyword name without its leading colon.",
-    "runtimes": [
-      "chez"
-    ]
-  },
-  "expander-application": {
-    "text": "(expander-application form)\nInternal shared-expander adapter for calls and slot inline caches.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(reset-generic! (name argument ...))\nReplace this declaration with a fresh generic of the given arity and no methods."
   },
   "expander-locate": {
-    "text": "(expander-locate from to)\nInternal shared-expander adapter that carries source positions through expansion.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(expander-locate from to)\nInternal shared-expander adapter that carries source positions through expansion."
   },
   "expander-fail": {
-    "text": "(expander-fail code message form)\nInternal shared-expander adapter that raises a coded syntax error.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(expander-fail code message form)\nInternal shared-expander adapter that raises a coded syntax error."
   },
   "read-file": {
-    "text": "(read-file path)\nRead a whole UTF-8 text file into a string; raise an error if it cannot be read.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(read-file path)\nRead a whole UTF-8 text file into a string; raise an error if it cannot be read."
   },
   "symbol-macrolet": {
-    "text": "(symbol-macrolet ((name expansion [(parameter write-form)]) ...) body ...)\nReplace references to name with expansion in body. With a writer, (set! name value) becomes (let ((parameter value)) write-form).",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(symbol-macrolet ((name expansion [(parameter write-form)]) ...) body ...)\nReplace references to name with expansion in body. With a writer, (set! name value) becomes (let ((parameter value)) write-form)."
   },
   "remove-method!": {
-    "text": "(remove-method! generic signature [qualifier])\nRemove a method with the given class/#f signature and return whether one existed. Object and #f both mean unspecialized. The qualifier defaults to primary; :around removes a wrapper.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(remove-method! generic signature [qualifier])\nRemove a method with the given class/#f signature and return whether one existed. Object and #f both mean unspecialized. The qualifier defaults to primary; :around removes a wrapper."
   },
   "set-applied!": {
-    "text": "(set-applied! object key value)\nAssign an instance slot, table key, or existing array index and return value. (set! (object key) value) evaluates object, key, and value once, in that order. Table values of nil delete keys.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(set-applied! object key value)\nAssign an instance slot, table key, or existing array index and return value. (set! (object key) value) evaluates object, key, and value once, in that order. Table values of nil delete keys."
   },
   "reset-class!": {
-    "text": "(reset-class! Name [:is Abstract] slot ...)\nExplicitly replace an existing local binding with a fresh concrete class. Old instances and signatures retain the old class identity.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(reset-class! Name [:is Abstract] slot ...)\nExplicitly replace an existing local binding with a fresh concrete class. Old instances and signatures retain the old class identity."
   },
   "generic-methods": {
-    "text": "(generic-methods generic)\nReturn detached (qualifier signature) lists. Qualifiers are primary or :around. Signatures contain class descriptors; Object represents an unspecialized argument.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(generic-methods generic)\nReturn detached (qualifier signature) lists. Qualifiers are primary or :around. Signatures contain class descriptors; Object represents an unspecialized argument."
   },
   "update-instance": {
-    "text": "(update-instance object old-slots)\nGeneric called after lazy migration. old-slots is a table of the previous keyword slot values. The default does nothing. Methods may initialize newly required slots; a failed migration is retried on the next access.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(update-instance object old-slots)\nGeneric called after lazy migration. old-slots is a table of the previous keyword slot values. The default does nothing. Methods may initialize newly required slots; a failed migration is retried on the next access."
   },
   "slot-set!": {
-    "text": "(slot-set! instance keyword value)\nWrite a declared slot and return value. Migrates an outdated instance before writing. Read slots by calling the instance: (instance keyword).",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(slot-set! instance keyword value)\nWrite a declared slot and return value. Migrates an outdated instance before writing. Read slots by calling the instance: (instance keyword)."
   },
   "instance?": {
-    "text": "(instance? value)\nTest whether value is a class instance. Instances have identity equality and are not tables.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(instance? value)\nTest whether value is a class instance. Instances have identity equality and are not tables."
   },
   "make": {
-    "text": "(make Class keyword value ...)\nConstruct a concrete class instance. Supplied keywords must name declared slots; repeated keywords keep the last value. Missing slots evaluate their defaults in declaration order or raise an error when required.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(make Class keyword value ...)\nConstruct a concrete class instance. Supplied keywords must name declared slots; repeated keywords keep the last value. Missing slots evaluate their defaults in declaration order or raise an error when required."
   },
   "defabstract": {
-    "text": "(defabstract Name [:is Parent])\nDeclare a slotless abstract type for dispatch. Parents must be abstract and acyclic; the default parent is Object. Abstract types cannot be instantiated.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(defabstract Name [:is Parent])\nDeclare a slotless abstract type for dispatch. Parents must be abstract and acyclic; the default parent is Object. Abstract types cannot be instantiated."
   },
   "with-slots": {
-    "text": "(with-slots object (slot ...) body ...)\nEvaluate object once and bind local symbol macros that read and write its slots. Each read sees the current value; set! on a slot name writes through to the object.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(with-slots object (slot ...) body ...)\nEvaluate object once and bind local symbol macros that read and write its slots. Each read sees the current value; set! on a slot name writes through to the object."
   },
   "dispatch-type": {
-    "text": "(dispatch-type value)\nReturn the class used for generic dispatch, including the declared class of an instance.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(dispatch-type value)\nReturn the class used for generic dispatch, including the declared class of an instance."
   },
   "defclass": {
-    "text": "(defclass Name [:is Abstract] slot ...)\nDeclare a final class with fixed slots. Slot options are :init expression, :accessor generic, and :state boolean. State slots require :init; ordinary make treats them like other slots. Reload preserves class identity and lazily migrates instances; changing a slot between property and state resets it.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(defclass Name [:is Abstract] slot ...)\nDeclare a final class with fixed slots. Slot options are :init expression, :accessor generic, and :state boolean. State slots require :init; ordinary make treats them like other slots. Reload preserves class identity and lazily migrates instances; changing a slot between property and state resets it."
   },
   "defgeneric": {
-    "text": "(defgeneric (name argument ...))\nDeclare a fixed-arity generic. Reload preserves its identity and methods.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(defgeneric (name argument ...))\nDeclare a fixed-arity generic. Reload preserves its identity and methods."
   },
   "defmethod": {
-    "text": "(defmethod [:around] (generic parameter ...) [:next name] body ...)\nAdd or replace a method by qualifier and signature. :next binds a lexical procedure for the remaining methods, or #f when none remain. Pass every argument explicitly. Around methods wrap primary methods; incomparable applicable methods are ambiguous.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(defmethod [:around] (generic parameter ...) [:next name] body ...)\nAdd or replace a method by qualifier and signature. :next binds a lexical procedure for the remaining methods, or #f when none remain. Pass every argument explicitly. Around methods wrap primary methods; incomparable applicable methods are ambiguous."
   },
   "class-properties": {
-    "text": "(class-properties Class keyword value ...)\nConstruct properties for a fresh description. Reject state initargs, evaluate property defaults, and fill state slots with nil without evaluating their initializers. Used by otium.ui.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(class-properties Class keyword value ...)\nConstruct properties for a fresh description. Reject state initargs, evaluate property defaults, and fill state slots with nil without evaluating their initializers. Used by otium.ui."
   },
   "class-mount": {
-    "text": "(class-mount properties)\nCopy current-layout properties to a new instance and initialize its state slots. Does not repeat property initializers. Rejects stale descriptions after class redefinition.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(class-mount properties)\nCopy current-layout properties to a new instance and initialize its state slots. Does not repeat property initializers. Rejects stale descriptions after class redefinition."
   },
   "class-update-properties!": {
-    "text": "(class-update-properties! instance properties)\nUpdate an instance from current-layout properties of the same class, preserving state slots. During migration, supplies new required properties before update-instance runs. Returns the original instance; a failed migration restores its old layout and slots.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(class-update-properties! instance properties)\nUpdate an instance from current-layout properties of the same class, preserving state slots. During migration, supplies new required properties before update-instance runs. Returns the original instance; a failed migration restores its old layout and slots."
   },
   "class-subtype?": {
-    "text": "(class-subtype? child parent)\nTest whether child is parent or descends from it through abstract parents. Both arguments must be class descriptors.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(class-subtype? child parent)\nTest whether child is parent or descends from it through abstract parents. Both arguments must be class descriptors."
   },
   "char?": {
-    "text": "(char? value)\nTest whether value is a char.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(char? value)\nTest whether value is a char."
   },
   "char->integer": {
-    "text": "(char->integer char)\nThe Unicode code point of char.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(char->integer char)\nThe Unicode code point of char."
   },
   "integer->char": {
-    "text": "(integer->char n)\nThe char with code point n; raise an error for surrogates and values above #x10FFFF.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(integer->char n)\nThe char with code point n; raise an error for surrogates and values above #x10FFFF."
   },
   "char-upcase": {
-    "text": "(char-upcase char)\nUppercase an ASCII letter; other chars are returned unchanged on C.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(char-upcase char)\nUppercase an ASCII letter; other chars are returned unchanged on C."
   },
   "char-downcase": {
-    "text": "(char-downcase char)\nLowercase an ASCII letter; other chars are returned unchanged on C.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(char-downcase char)\nLowercase an ASCII letter; other chars are returned unchanged on C."
   },
   "char-alphabetic?": {
-    "text": "(char-alphabetic? char)\nTest for a letter. ASCII-only on C.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(char-alphabetic? char)\nTest for a letter. ASCII-only on C."
   },
   "char-numeric?": {
-    "text": "(char-numeric? char)\nTest for a decimal digit. ASCII-only on C.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(char-numeric? char)\nTest for a decimal digit. ASCII-only on C."
   },
   "char-whitespace?": {
-    "text": "(char-whitespace? char)\nTest for whitespace. ASCII-only on C.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(char-whitespace? char)\nTest for whitespace. ASCII-only on C."
   },
   "string": {
-    "text": "(string char ...)\nBuild a string from chars.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(string char ...)\nBuild a string from chars."
   },
   "string->list": {
-    "text": "(string->list string)\nA list of the chars in string.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(string->list string)\nA list of the chars in string."
   },
   "list->string": {
-    "text": "(list->string list)\nBuild a string from a list of chars.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(list->string list)\nBuild a string from a list of chars."
   },
   "string-ref": {
-    "text": "(string-ref string k)\nThe char at code point index k; raise an error when out of range. O(k) on C, which stores strings as UTF-8.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(string-ref string k)\nThe char at code point index k; raise an error when out of range. O(k) on C, which stores strings as UTF-8."
   },
   "eof-object": {
-    "text": "(eof-object)\nThe end-of-file object.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(eof-object)\nThe end-of-file object."
   },
   "eof-object?": {
-    "text": "(eof-object? value)\nTest whether value is the end-of-file object.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(eof-object? value)\nTest whether value is the end-of-file object."
   },
   "bytevector": {
-    "text": "(bytevector byte ...)\nCreate a fresh mutable bytevector. Each byte must be an exact integer from 0 to 255.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(bytevector byte ...)\nCreate a fresh mutable bytevector. Each byte must be an exact integer from 0 to 255."
   },
   "bytevector?": {
-    "text": "(bytevector? value)\nTest whether value is a bytevector.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(bytevector? value)\nTest whether value is a bytevector."
   },
   "make-bytevector": {
-    "text": "(make-bytevector length [fill])\nCreate a bytevector of non-negative length, filled with fill (default 0). Fill must be a byte from 0 to 255.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(make-bytevector length [fill])\nCreate a bytevector of non-negative length, filled with fill (default 0). Fill must be a byte from 0 to 255."
   },
   "bytevector-length": {
-    "text": "(bytevector-length bytes)\nReturn the number of bytes.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(bytevector-length bytes)\nReturn the number of bytes."
   },
   "bytevector-u8-ref": {
-    "text": "(bytevector-u8-ref bytes index)\nReturn the byte at index. Raise an error for an invalid index.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(bytevector-u8-ref bytes index)\nReturn the byte at index. Raise an error for an invalid index."
   },
   "bytevector-u8-set!": {
-    "text": "(bytevector-u8-set! bytes index byte)\nSet the byte at index and return nil. Reject invalid indexes and values outside 0 to 255.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(bytevector-u8-set! bytes index byte)\nSet the byte at index and return nil. Reject invalid indexes and values outside 0 to 255."
   },
   "bytevector-copy": {
-    "text": "(bytevector-copy bytes [start [end]])\nCopy the half-open byte range into a fresh bytevector. Defaults to the whole bytevector.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(bytevector-copy bytes [start [end]])\nCopy the half-open byte range into a fresh bytevector. Defaults to the whole bytevector."
   },
   "bytevector-copy!": {
-    "text": "(bytevector-copy! to at from [start [end]])\nCopy a half-open range from from into to at byte index at. Overlapping ranges are supported. Return nil.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(bytevector-copy! to at from [start [end]])\nCopy a half-open range from from into to at byte index at. Overlapping ranges are supported. Return nil."
   },
   "bytevector-append": {
-    "text": "(bytevector-append bytes ...)\nConcatenate bytevectors into a fresh bytevector.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(bytevector-append bytes ...)\nConcatenate bytevectors into a fresh bytevector."
   },
   "utf8->string": {
-    "text": "(utf8->string bytes [start [end]])\nDecode a half-open byte range as UTF-8. Invalid input raises decode-error with the absolute byte offset in :position.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(utf8->string bytes [start [end]])\nDecode a half-open byte range as UTF-8. Invalid input raises decode-error with the absolute byte offset in :position."
   },
   "string->utf8": {
-    "text": "(string->utf8 text [start [end]])\nEncode a half-open character range as UTF-8 in a fresh bytevector. Defaults to the whole string.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(string->utf8 text [start [end]])\nEncode a half-open character range as UTF-8 in a fresh bytevector. Defaults to the whole string."
   },
   "call-with-cleanup": {
-    "text": "(call-with-cleanup body cleanup)\nCall body with no arguments and cleanup with its exit outcome on every exit. The outcome is nil on return or restart transfer, the condition on error, or :quit on exit or interrupt. Cleanup errors replace the pending result. Reentry through a continuation is unsupported.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(call-with-cleanup body cleanup)\nCall body with no arguments and cleanup with its exit outcome on every exit. The outcome is nil on return or restart transfer, the condition on error, or :quit on exit or interrupt. Cleanup errors replace the pending result. Reentry through a continuation is unsupported."
   },
   "port?": {
-    "text": "(port? value)\nTest whether value is an Otium port.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(port? value)\nTest whether value is an Otium port."
   },
   "input-port?": {
-    "text": "(input-port? value)\nTest whether value is an input port.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(input-port? value)\nTest whether value is an input port."
   },
   "output-port?": {
-    "text": "(output-port? value)\nTest whether value is an output port.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(output-port? value)\nTest whether value is an output port."
   },
   "input-port-open?": {
-    "text": "(input-port-open? value)\nTest whether value is an open input port.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(input-port-open? value)\nTest whether value is an open input port."
   },
   "output-port-open?": {
-    "text": "(output-port-open? value)\nTest whether value is an open output port.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(output-port-open? value)\nTest whether value is an open output port."
   },
   "open-input-file": {
-    "text": "(open-input-file path [options])\nOpen a buffered byte input port. Options may specify a positive :buffer-size.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(open-input-file path [options])\nOpen a buffered byte input port. Options may specify a positive :buffer-size."
   },
   "open-output-file": {
-    "text": "(open-output-file path [options])\nOpen a buffered output port. :if-exists is :truncate (default), :append, or :error. :buffer-size is a positive byte count.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(open-output-file path [options])\nOpen a buffered output port. :if-exists is :truncate (default), :append, or :error. :buffer-size is a positive byte count."
   },
   "open-input-string": {
-    "text": "(open-input-string text)\nOpen a byte input port over the UTF-8 encoding of text.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(open-input-string text)\nOpen a byte input port over the UTF-8 encoding of text."
   },
   "open-input-bytevector": {
-    "text": "(open-input-bytevector bytes)\nOpen an input port over a snapshot of bytes.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(open-input-bytevector bytes)\nOpen an input port over a snapshot of bytes."
   },
   "open-output-string": {
-    "text": "(open-output-string)\nCreate a byte output port whose contents can be decoded with get-output-string.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(open-output-string)\nCreate a byte output port whose contents can be decoded with get-output-string."
   },
   "open-output-bytevector": {
-    "text": "(open-output-bytevector)\nCreate an output port collecting bytes.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(open-output-bytevector)\nCreate an output port collecting bytes."
   },
   "get-output-string": {
-    "text": "(get-output-string port)\nReturn the string port contents without consuming them. Invalid UTF-8 raises decode-error.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(get-output-string port)\nReturn the string port contents without consuming them. Invalid UTF-8 raises decode-error."
   },
   "get-output-bytevector": {
-    "text": "(get-output-bytevector port)\nReturn a fresh bytevector with the output contents, without consuming them.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(get-output-bytevector port)\nReturn a fresh bytevector with the output contents, without consuming them."
   },
   "close-port": {
-    "text": "(close-port port)\nFlush an output port and close the port. Closing twice does nothing.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(close-port port)\nFlush an output port and close the port. Closing twice does nothing."
   },
   "close-input-port": {
-    "text": "(close-input-port port)\nClose an input port. Closing twice does nothing.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(close-input-port port)\nClose an input port. Closing twice does nothing."
   },
   "close-output-port": {
-    "text": "(close-output-port port)\nFlush and close an output port. Closing twice does nothing.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(close-output-port port)\nFlush and close an output port. Closing twice does nothing."
   },
   "read-char": {
-    "text": "(read-char [port])\nRead one Unicode scalar, or the EOF object. Invalid UTF-8 raises decode-error at the byte :position.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(read-char [port])\nRead one Unicode scalar, or the EOF object. Invalid UTF-8 raises decode-error at the byte :position."
   },
   "peek-char": {
-    "text": "(peek-char [port])\nDecode the next character without consuming any bytes, or return EOF.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(peek-char [port])\nDecode the next character without consuming any bytes, or return EOF."
   },
   "read-u8": {
-    "text": "(read-u8 [port])\nRead a byte as an integer, or the EOF object.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(read-u8 [port])\nRead a byte as an integer, or the EOF object."
   },
   "peek-u8": {
-    "text": "(peek-u8 [port])\nReturn the next byte without consuming it, or EOF.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(peek-u8 [port])\nReturn the next byte without consuming it, or EOF."
   },
   "read-bytevector": {
-    "text": "(read-bytevector count [port])\nRead up to count bytes, stopping at EOF. Return EOF if none are available; count zero returns an empty bytevector.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(read-bytevector count [port])\nRead up to count bytes, stopping at EOF. Return EOF if none are available; count zero returns an empty bytevector."
   },
   "read-bytevector!": {
-    "text": "(read-bytevector! bytes [port [start [end]]])\nFill a half-open byte range without allocating a result buffer. Return the byte count, or EOF when no bytes are available.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(read-bytevector! bytes [port [start [end]]])\nFill a half-open byte range without allocating a result buffer. Return the byte count, or EOF when no bytes are available."
   },
   "%read-characters": {
-    "text": "(%read-characters count [port])\nRuntime implementation of the count-based read-string form.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(%read-characters count [port])\nRuntime implementation of the count-based read-string form."
   },
   "read-all": {
-    "text": "(read-all [port])\nRead the remaining input as UTF-8 text. Return an empty string at EOF.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(read-all [port])\nRead the remaining input as UTF-8 text. Return an empty string at EOF."
   },
   "read": {
-    "text": "(read [port])\nRead one Otium datum, or the EOF object.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(read [port])\nRead one Otium datum, or the EOF object."
   },
   "read-line": {
-    "text": "(read-line [port])\nRead a line without its newline and preceding carriage return. Preserve a final unterminated line. Return EOF when no text remains.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(read-line [port])\nRead a line without its newline and preceding carriage return. Preserve a final unterminated line. Return EOF when no text remains."
   },
   "read-until": {
-    "text": "(read-until stops [port])\nRead characters before the next member of stops, leaving that character unread. Return a string even at EOF.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(read-until stops [port])\nRead characters before the next member of stops, leaving that character unread. Return a string even at EOF."
   },
   "read-while": {
-    "text": "(read-while characters [port])\nRead the longest prefix drawn from characters. Return a string even at EOF.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(read-while characters [port])\nRead the longest prefix drawn from characters. Return a string even at EOF."
   },
   "skip-while": {
-    "text": "(skip-while characters [port])\nSkip the longest prefix drawn from characters and return its character count.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(skip-while characters [port])\nSkip the longest prefix drawn from characters and return its character count."
   },
   "write-string": {
-    "text": "(write-string text [port [start [end]]])\nWrite a half-open character range as UTF-8; indexes cost O(end) on C. Return nil.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(write-string text [port [start [end]]])\nWrite a half-open character range as UTF-8; indexes cost O(end) on C. Return nil."
   },
   "write-char": {
-    "text": "(write-char character [port])\nWrite one Unicode scalar as UTF-8 and return nil.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(write-char character [port])\nWrite one Unicode scalar as UTF-8 and return nil."
   },
   "write-u8": {
-    "text": "(write-u8 byte [port])\nWrite an exact integer byte from 0 to 255 and return nil.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(write-u8 byte [port])\nWrite an exact integer byte from 0 to 255 and return nil."
   },
   "write-bytevector": {
-    "text": "(write-bytevector bytes [port [start [end]]])\nWrite a half-open byte range and return nil.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(write-bytevector bytes [port [start [end]]])\nWrite a half-open byte range and return nil."
   },
   "flush-output-port": {
-    "text": "(flush-output-port [port])\nWrite buffered bytes to the sink and invoke its flush callback.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(flush-output-port [port])\nWrite buffered bytes to the sink and invoke its flush callback."
   },
   "make-input-port": {
-    "text": "(make-input-port name callbacks)\nCreate a buffered input port. :read receives (bytes start end) and returns a positive count or EOF. :close is optional.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(make-input-port name callbacks)\nCreate a buffered input port. :read receives (bytes start end) and returns a positive count or EOF. :close is optional."
   },
   "make-output-port": {
-    "text": "(make-output-port name callbacks)\nCreate a buffered output port. :write receives (bytes start end) and returns a positive count. :flush and :close are optional.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(make-output-port name callbacks)\nCreate a buffered output port. :write receives (bytes start end) and returns a positive count. :flush and :close are optional."
   },
   "open-ports": {
-    "text": "(open-ports)\nReturn an array of open file, custom, and standard ports; excludes memory ports.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(open-ports)\nReturn an array of open file, custom, and standard ports; excludes memory ports."
   },
   "display-to": {
-    "text": "(display-to port value ...)\nWrite display forms separated by spaces to port and return nil.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(display-to port value ...)\nWrite display forms separated by spaces to port and return nil."
   },
   "write-to": {
-    "text": "(write-to port value ...)\nWrite readable forms separated by spaces to port and return nil.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(write-to port value ...)\nWrite readable forms separated by spaces to port and return nil."
   },
   "flush-ports!": {
-    "text": "(flush-ports!)\nFlush all open file and custom output ports and the default output and error ports.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(flush-ports!)\nFlush all open file and custom output ports and the default output and error ports."
   },
   "file-exists?": {
-    "text": "(file-exists? path)\nTest whether the path exists. Other filesystem failures raise file-error.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(file-exists? path)\nTest whether the path exists. Other filesystem failures raise file-error."
   },
   "file-symbolic-link?": {
-    "text": "(file-symbolic-link? path)\nTest whether path itself is a symbolic link, including a dangling link.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(file-symbolic-link? path)\nTest whether path itself is a symbolic link, including a dangling link."
   },
   "current-directory": {
-    "text": "(current-directory)\nReturn the current working directory as an absolute path.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(current-directory)\nReturn the current working directory as an absolute path."
   },
   "file-info": {
-    "text": "(file-info path)\nReturn a table with :type (:file, :directory, or :other), :size in bytes, and :modified in Unix seconds.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(file-info path)\nReturn a table with :type (:file, :directory, or :other), :size in bytes, and :modified in Unix seconds."
   },
   "delete-file": {
-    "text": "(delete-file path)\nDelete a file and return nil. Filesystem failures raise file-error.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(delete-file path)\nDelete a file and return nil. Filesystem failures raise file-error."
   },
   "rename-file": {
-    "text": "(rename-file from to)\nRename a file and return nil. Filesystem failures raise file-error.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(rename-file from to)\nRename a file and return nil. Filesystem failures raise file-error."
   },
   "make-directory": {
-    "text": "(make-directory path)\nCreate a directory and return nil. Filesystem failures raise file-error.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(make-directory path)\nCreate a directory and return nil. Filesystem failures raise file-error."
   },
   "list-directory": {
-    "text": "(list-directory path)\nReturn a sorted array of entry names, excluding . and ... Filesystem failures raise file-error.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(list-directory path)\nReturn a sorted array of entry names, excluding . and ... Filesystem failures raise file-error."
   },
   "current-input-port": {
-    "text": "(current-input-port)\nThe dynamically scoped default input port. Rebind with with-params.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(current-input-port)\nThe dynamically scoped default input port. Rebind with with-params."
   },
   "current-output-port": {
-    "text": "(current-output-port)\nThe dynamically scoped default output port. Rebind with with-params.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(current-output-port)\nThe dynamically scoped default output port. Rebind with with-params."
   },
   "current-error-port": {
-    "text": "(current-error-port)\nThe dynamically scoped error output port. Rebind with with-params.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(current-error-port)\nThe dynamically scoped error output port. Rebind with with-params."
   },
   "open-binary-input-file": {
-    "text": "(open-binary-input-file path [options])\nAlias for open-input-file; all ports support byte and text reads.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(open-binary-input-file path [options])\nAlias for open-input-file; all ports support byte and text reads."
   },
   "open-binary-output-file": {
-    "text": "(open-binary-output-file path [options])\nAlias for open-output-file; all ports support byte and text writes.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(open-binary-output-file path [options])\nAlias for open-output-file; all ports support byte and text writes."
   },
   "bitwise-and": {
-    "text": "(bitwise-and integer ...)\nBitwise AND of exact integers; no arguments gives -1.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(bitwise-and integer ...)\nBitwise AND of exact integers; no arguments gives -1."
   },
   "bitwise-ior": {
-    "text": "(bitwise-ior integer ...)\nBitwise inclusive OR of exact integers; no arguments gives 0.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(bitwise-ior integer ...)\nBitwise inclusive OR of exact integers; no arguments gives 0."
   },
   "bitwise-xor": {
-    "text": "(bitwise-xor integer ...)\nBitwise exclusive OR of exact integers; no arguments gives 0.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(bitwise-xor integer ...)\nBitwise exclusive OR of exact integers; no arguments gives 0."
   },
   "bitwise-not": {
-    "text": "(bitwise-not integer)\nComplement the bits of one exact integer.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(bitwise-not integer)\nComplement the bits of one exact integer."
   },
   "bitwise-arithmetic-shift": {
-    "text": "(bitwise-arithmetic-shift integer count)\nShift an exact integer left by count bits, or right with sign extension for a negative count. C raises an error if the result exceeds its integer range.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
-  },
-  "defrecord": {
-    "text": "(defrecord Name (field ...) [:immutable boolean])\nDeclare a fixed-layout record type in the current namespace. Fields are mutable by default. An identical declaration reuses its type; changing fields or mutability is an error.",
-    "runtimes": [
-      "chez"
-    ]
+    "text": "(bitwise-arithmetic-shift integer count)\nShift an exact integer left by count bits, or right with sign extension for a negative count. C raises an error if the result exceeds its integer range."
   },
   "record-new": {
-    "text": "(record-new Type value ...)\nConstruct a record with positional values in declaration order. Every field is required.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(record-new Type value ...)\nConstruct a record with positional values in declaration order. Every field is required."
   },
   "record-ref": {
-    "text": "(record-ref record :field)\nRead a record field. Records also support (record :field). Unknown fields are errors.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(record-ref record :field)\nRead a record field. Records also support (record :field). Unknown fields are errors."
   },
   "record-set!": {
-    "text": "(record-set! record :field value)\nWrite a mutable record field and return value. Immutable records reject writes; immutability is shallow.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(record-set! record :field value)\nWrite a mutable record field and return value. Immutable records reject writes; immutability is shallow."
   },
   "record?": {
-    "text": "(record? value)\nTest whether value is a record instance.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(record? value)\nTest whether value is a record instance."
   },
   "record-type?": {
-    "text": "(record-type? value)\nTest whether value is a record type descriptor.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(record-type? value)\nTest whether value is a record type descriptor."
   },
   "record-type": {
-    "text": "(record-type record)\nReturn the record type descriptor. Records compare by identity, including immutable records.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
-  },
-  "expander-optional-function": {
-    "text": "(expander-optional-function form fallback)\nInternal shared-expander adapter: preserve the canonical optional fn for tooling, otherwise select the runtime implementation.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(record-type record)\nReturn the record type descriptor. Records compare by identity, including immutable records."
   },
   "class?": {
-    "text": "(class? value)\nTest whether value is a class descriptor.",
-    "runtimes": [
-      "c"
-    ]
+    "text": "(class? value)\nTest whether value is a class descriptor."
   },
   "generic?": {
-    "text": "(generic? value)\nTest whether value is a generic function.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(generic? value)\nTest whether value is a generic function."
   },
   "type-descriptor?": {
-    "text": "(type-descriptor? value)\nTest whether value is a type descriptor, such as a class.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(type-descriptor? value)\nTest whether value is a type descriptor, such as a class."
   },
   "type-name": {
-    "text": "(type-name descriptor)\nReturn the descriptor's name qualified by its namespace, such as user/Point.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(type-name descriptor)\nReturn the descriptor's name qualified by its namespace, such as user/Point."
   },
   "syntax-quote": {
-    "text": "(syntax-quote template)\nA quasiquote whose template names resolve where it is written. #`template reads as this form.",
-    "runtimes": [
-      "c",
-      "chez"
-    ]
+    "text": "(syntax-quote template)\nA quasiquote whose template names resolve where it is written. #`template reads as this form."
   }
 }

@@ -1,5 +1,5 @@
-;; Run from the repository root. The same entry point runs on C and Chez:
-;; ./otium --runtime=c -L tests examples/ui.ot -- --headless --capture /tmp/ui.png
+;; Run from the repository root:
+;; ./otium -L tests examples/ui.ot -- --headless --capture /tmp/ui.png
 (require (otium.cli :as cli))
 (require (otium.ui :as ui))
 (require (otium.ui.native :as native))
@@ -12,8 +12,8 @@
               (summary "Run a Yoga/SDL_GPU widget scene.")
               (option config
                       (names "--config")
-                      (default "build/ui-config.ot")
-                      (help "Native library installation data written by the UI build."))
+                      (default "")
+                      (help "Native library installation data written by the UI build; defaults to the one in OTIUM_BUILD."))
               (option scene (names "--scene") (default "ui.layout") (help "Module exporting a view function."))
               (option script
                       (names "--script")
@@ -112,7 +112,10 @@
                               :width width
                               :height height
                               :scale scale
-                              :config (cli/ref args 'config)
+                              :config (let ((config (cli/ref args 'config)))
+                                        (if (equal? config "")
+                                            nil
+                                            config))
                               :headless headless
                               :driver (cli/ref args 'driver)
                               :offscreen (or headless (cli/ref args 'offscreen) (not (equal? capture "")))

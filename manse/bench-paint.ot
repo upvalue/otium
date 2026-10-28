@@ -1,5 +1,5 @@
 ;; CPU paint and GPU submission timing, with deterministic terminal contents.
-;; Run from the repository root: W=760 H=900 ./otium --runtime=chez -L . manse/bench-paint.ot
+;; Run from the repository root: W=760 H=900 ./otium -L . manse/bench-paint.ot
 ;; W=1700 H=1125 gives 200x60. The outer cache is invalidated every frame.
 (require manse.terminal)
 (ns manse.terminal)
@@ -9,7 +9,7 @@
 
 (def height-px (string->number (process/getenv "H")))
 
-(def w (ui/open {:title "paint" :width width-px :height height-px :headless #t :scale 2 :config "build/ui-config.ot"}))
+(def w (ui/open {:title "paint" :width width-px :height height-px :headless #t :scale 2}))
 
 (def s (sessions/open! 1 "/bin/sh" (list "sh" "-c" "sleep 100")))
 

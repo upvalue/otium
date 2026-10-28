@@ -610,7 +610,9 @@ oti_ast* oti_syntax_value(ot_state* rt, ot_value value, oti_arena* arena) {
 static oti_ast* expand_call(oti_compiler* c, const oti_ast* form, uint32_t global) {
   ot_state* rt = c->rt;
   if (++*c->expansions > 256) {
-    error(c, form, "macro expansion limit exceeded");
+    bool fresh = !oti_failed(rt);
+    oti_coded_error(rt, "E0111", "macro expansion limit exceeded");
+    if (fresh) oti_error_at(rt, form->offset);
     return NULL;
   }
   oti_ast arguments = {.kind = AST_LIST, .as.list.first = form->as.list.first->next};

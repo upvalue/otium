@@ -1,6 +1,6 @@
 ;; Loaded before each FFI program with --load. Program arguments are the
 ;; fixture library, a second copy of it and, for callbacks.ot, a writable
-;; module directory. Load runtime-c.ot or runtime-chez.ot as well.
+;; module directory.
 (require otium.ffi :as ffi)
 (require otium.process)
 
@@ -9,3 +9,13 @@
 (def other-path (cadr (otium.process/arguments)))
 
 (def module-directory (if (pair? (cddr (otium.process/arguments))) (caddr (otium.process/arguments)) nil))
+
+;; Allocate enough to force a collection.
+(def (churn n)
+  (if (> n 0)
+      (begin
+        (list n n n)
+        (churn (- n 1)))
+      #f))
+
+(def (test-collect) (churn 2000))

@@ -18,10 +18,10 @@ If nothing is listed and you need one, start it in the background, for
 example (run `just build` first if the UI isn't built):
 
 ```sh
-./otium --runtime=chez --dev examples/ui.ot -- --scene ui.calculator
+./otium --dev examples/ui.ot -- --scene ui.calculator
 ```
 
-Use `./otium --runtime=chez serve FILE` for a headless development server.
+Use `./otium serve FILE` for a headless development server.
 Prefer an existing process when working on a live session. With one server,
 commands use it; with several, selection uses the working directory. Pin the
 intended process with `tools/otium-dev status --pid N`, then pass `--pid N`
@@ -90,9 +90,9 @@ While paused you can still `eval` to inspect state. Then run
 `tools/otium-dev continue` to keep going, or `tools/otium-dev abort` to unwind
 the paused code. `tools/otium-dev interrupt` pauses a running program on
 purpose. Ordinary eval/load requests do not themselves request a pause; if a
-busy loop prevents servicing them, send `interrupt` first. Chez uses timer
-interrupts and C uses VM hooks, but blocking native/FFI calls must return before
-the runtime can pause. Inspection accesses namespace state, not lexical locals
+busy loop prevents servicing them, send `interrupt` first. The VM checks for
+interrupts as it runs, but blocking native/FFI calls must return before the
+runtime can pause. Inspection accesses namespace state, not lexical locals
 in suspended frames. Continuing resumes the existing code in that frame.
 
 A client timeout does not cancel the server computation. Check status before

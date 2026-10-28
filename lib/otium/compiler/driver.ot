@@ -1,4 +1,3 @@
-;; lint: allow-file(unbound-name) %vm-install and %set-optimizer! are C runtime builtins the Chez linter does not know
 (ns otium.compiler.driver)
 (require (otium.compiler.core :as core)
          (otium.compiler.inline :as inline)

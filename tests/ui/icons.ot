@@ -3,7 +3,7 @@
 (require (otium.ui.native :as native))
 (require otium.test :refer (check fails? report))
 
-(native/load-config! "build/ui-config.ot")
+(native/load-config!)
 (def tree (ui/root))
 (defer
   (begin

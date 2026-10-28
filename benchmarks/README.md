@@ -1,23 +1,21 @@
 # Benchmarks
 
-Run from the repository root after `just build`. Every runner takes `--runtime c|chez`; an
-optional positional executable selects a custom build.
+Run from the repository root after `just build`. Every runner uses the `./otium`
+launcher; an optional positional executable (`--otium` for `timed.py`) selects
+a custom build.
 
 ```sh
-just bench --runtime c
-just bench --runtime chez
-python3 benchmarks/compare.py --otium build/otium
+just bench
+python3 benchmarks/timed.py
 just bench-c
 ```
 
 `run.py` runs every file in `workloads/`, or the paths given with `--only`.
 `--runs`, `--warmups` and `--timeout` control sampling. These are fresh-process
-wall times, including startup and compilation. Sources and result checks are
-the same on both runtimes.
+wall times, including startup and compilation.
 
-`compare.py` runs paired workloads and reports wall time and time inside the
-workload. It runs Chez directly without imported-library compilation, which
-keeps its measurement boundary; the other runners use the normal launcher.
+`timed.py` runs small checked workloads, including namespace calls, callbacks
+and reloads, and reports both wall time and time inside the workload.
 
 `just bench-c` runs the C runtime's warm microbenchmarks in `c/bench/runtime.c`,
 calling each workload through the embedding API after warmup. Pass a workload
@@ -26,7 +24,7 @@ name to run one.
 ## Results
 
 Runs write to ignored `benchmarks/runs/<family>/<timestamp>/` directories. Use
-`--output FILE` for the workload and paired runners and `--output DIR` for R7RS.
+`--output FILE` for `run.py` and `timed.py` and `--output DIR` for R7RS.
 
 Reports record commands, commit, dirty state, platform and a `--build-label`.
 Cache state isn't normalized, so note it when comparing startup. Don't combine
@@ -42,8 +40,8 @@ boundary and result check where possible.
 
 ```sh
 git submodule update --init benchmarks/r7rs/vendor
-python3 benchmarks/r7rs/run.py --runtime c --only fib ack
-python3 benchmarks/r7rs/run.py --runtime c --only fib --reference guile
+python3 benchmarks/r7rs/run.py --only fib ack
+python3 benchmarks/r7rs/run.py --only fib --reference guile
 just test bench
 ```
 
@@ -53,7 +51,7 @@ installed, `--reference guile` runs the unmodified upstream program on the same
 host, feeding it the vendored input on standard input.
 
 `just test bench` runs every port with reduced inputs and checks the answers.
-The reduced `equal` input reports `INCORRECT` on both runtimes; that's a known,
+The reduced `equal` input reports `INCORRECT`; that's a known,
 unexplained failure, so the bench suite isn't green yet.
 
 A timing counts only after the benchmark's own result check passes. Otherwise
@@ -64,7 +62,7 @@ currently too slow for useful turnaround, so use the reduced inputs while
 working on performance and don't present those times as benchmark results.
 
 `r7rs/manifest.json` grades each port and lists its deviations and any heap
-limit for C:
+limit:
 
 - A: mechanical syntax or name translation.
 - B: equivalent representation, such as an Otium array for a Scheme vector.

@@ -72,4 +72,13 @@
 (check #t (fails? (fn () (bitwise-not))))
 (check #t (fails? (fn () (bitwise-arithmetic-shift 1 1.0))))
 
+;; Fixnums are 63 bits; bitwise results outside that range fail.
+(check -4611686018427387904 (bitwise-not 4611686018427387903))
+(check 4611686018427387903 (bitwise-not -4611686018427387904))
+(check -4611686018427387904 (bitwise-arithmetic-shift -1 62))
+(check #t (fails? (fn () (bitwise-arithmetic-shift 1 62))))
+(check #t (fails? (fn () (bitwise-arithmetic-shift -1 63))))
+(check -1 (bitwise-arithmetic-shift -4611686018427387904 -4611686018427387904))
+(check 0 (bitwise-arithmetic-shift 4611686018427387903 -4611686018427387904))
+
 (report "arithmetic")

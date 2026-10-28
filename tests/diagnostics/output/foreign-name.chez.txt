@@ -1,8 +1,0 @@
-error[E0201]: unbound name `define`
- --> tests/diagnostics/output/foreign-name.ot:1:2
-  |
-1 | (define (twice x)
-  |  ^^^^^^
-  |
-  = help: Otium spells `define` as `def`
-  = note: run `otium explain E0201` for details

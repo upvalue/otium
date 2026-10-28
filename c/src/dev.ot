@@ -1,7 +1,7 @@
-;; The C runtime's part of otium.dev, loaded by the launcher after
-;; lib/otium/dev.ot. It defines the primitives that file uses that are simpler
-;; in Otium than in C, the interrupt handler that pauses running code for the
-;; watchdog and :interrupt requests, and the framed stdio server behind
+;; The server's part of otium.dev, loaded after lib/otium/dev.ot when --dev
+;; starts the server. It defines the server primitives that file uses that are
+;; simpler in Otium than in C, the interrupt handler that pauses running code
+;; for the watchdog and :interrupt requests, and the framed stdio server behind
 ;; --c.server. The C primitives are in c/src/dev.c.
 (ns otium.dev)
 
@@ -12,24 +12,6 @@
 (defonce %output "")
 
 (defonce %output-port nil)
-
-(def (%runtime)
-  :c)
-
-(def (%repr value)
-  (with-output-to-string (fn () (write value))))
-
-(def (%namespaces)
-  (map (fn (name) {:name name}) (%namespace-names)))
-
-(def (%bindings space)
-  (map (fn (binding)
-         (let ((entry {:name (car binding) :kind (cadr binding) :public (caddr binding) :doc (car (cdddr binding))})
-               (mask (cadr (cdddr binding))))
-           (if mask
-               (put entry :arity-mask mask)
-               entry)))
-       (%namespace-bindings space)))
 
 (def (%flush-output!)
   (when %output-port (flush-output-port %output-port))

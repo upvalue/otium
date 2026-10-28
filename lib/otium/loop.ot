@@ -15,8 +15,8 @@
   (error (str "for: " message) clause))
 
 ;; Lists step by pair and arrays and strings by index, so the cursor's type
-;; says which. nil is empty. The tests use pair? and null?, which Chez
-;; inlines; int? is a call and made list loops seven times slower.
+;; says which. nil is empty. The tests use pair? and null?, which compile to
+;; VM instructions; int? is a call.
 (def- (in-clause name seq)
   (let ((s (gensym "seq"))
         (n (gensym "count"))
@@ -162,19 +162,17 @@
 
 ;; Steps are computed left to right into temporaries before the recursive
 ;; call, so accumulator side effects happen in clause order. The outer
-;; bindings are passed through the loop unchanged: on Chez a loop that keeps
-;; them as free variables and calls an unknown procedure, such as get, builds
-;; a closure on every entry.
+;; bindings are passed through the loop unchanged: a loop that is not in tail
+;; position becomes a closure on every entry, and passing them keeps them out
+;; of it (24 bytes against 32 for one binding).
 ;;
 ;; In a named loop the steps are pasted in where the body calls the name, so
 ;; the names the clauses bind and the steps use are saved at the start of the
 ;; pass and restored there. A body that rebinds x before calling (next) still collects the
 ;; pass's x. Other names in clause expressions are not protected.
 ;;
-;; The name takes a rest list rather than &optional. Chez lowers &optional to
-;; a case-lambda that calls itself, which it won't inline, and (next) became a
-;; call: 210 ns against 119 ns for 128 elements. A rest list folds away for
-;; (next). (next :done) allocates one pair, once per loop.
+;; The name takes a rest list; &optional measured the same. (next :done)
+;; allocates one pair, once per loop.
 (def- (named-pass name clauses vars binds loop temps finish body)
   ;; The pass of a named loop: body with name standing for the call that steps
   ;; the clauses and goes round, or with :done runs finish.

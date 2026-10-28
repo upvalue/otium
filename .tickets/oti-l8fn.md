@@ -22,3 +22,9 @@ Haven't checked whether their live data really exceeds 64MB or whether the colle
 
 Each port either runs and reports its result, or the manifest gives it the limits it needs with a note on why.
 
+
+## Notes
+
+**2026-10-28T00:30:31Z**
+
+benchmarks/r7rs/run.py no longer takes --runtime; there is only the C runtime.

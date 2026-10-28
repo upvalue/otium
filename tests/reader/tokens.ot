@@ -1,4 +1,4 @@
-;; Run with -L tests/reader/data on either runtime.
+;; Run with -L tests/reader/data.
 (require otium.test :refer (check fails? report))
 (require reader-datums :as datums)
 (require otium.reader :as reader)
@@ -44,7 +44,7 @@
 (check 2 ((get (syntax/parse "\r\n\r(x)") 0) :line))
 (report "reader tokens")
 
-;; Printed by both runtimes for the differential test, including every field.
+;; Every field of each token, compared with tokens.txt.
 (for-each (fn (fixture) (println (reader/tokens (car fixture)))) datums/positive)
 (for-each (fn (text) (println (reader/tokens text)))
           '("' ; after prefix\n x" "\t[\n;inside\r\n\n] ;last" "\"a\nb\"\n\nλ" "#\\\n x" "(a . ; tail\n b)"))

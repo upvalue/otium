@@ -14,7 +14,7 @@ DEFAULT_MANIFEST = HERE / 'manifests' / (TARGET + '.json')
 def literal(value):
     return json.dumps(str(value), ensure_ascii=False)
 
-def bootstrap(runtime, manifest=DEFAULT_MANIFEST):
+def bootstrap(manifest=DEFAULT_MANIFEST):
     data = json.loads(Path(manifest).read_text())
     if data['schema'] != 1 or data['target'] != TARGET or TARGET not in ('arm64-darwin','x86_64-linux'):
         raise ValueError('Unsupported SDL ABI manifest target/schema; run native/sdl/setup.py')
@@ -42,5 +42,5 @@ def bootstrap(runtime, manifest=DEFAULT_MANIFEST):
     prefix += "(def sin (ffi/bind sdl-math \"sin\" '(double) 'double #f))\n(def cos (ffi/bind sdl-math \"cos\" '(double) 'double #f))\n"
     return prefix + (HERE/'bindings.ot').read_text() + (HERE/'canvas.ot').read_text()
 
-def command(runtime, script):
-    return runtime_command(runtime, script)
+def command(script):
+    return runtime_command(script)

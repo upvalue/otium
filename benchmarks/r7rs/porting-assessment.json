@@ -1,13 +1,12 @@
 {
   "scope": "Forty benchmark candidates assessed in three rounds. The five remaining untranslated candidates reference continuations and were excluded at the user's request.",
-  "validation": "Completed ports passed reduced-input correctness checks on Chez and the existing C build, upstream Guile checks with identical inputs, and targeted lint. No runtime changes. Canonical benchmark coverage is partial; see additional_validation.",
+  "validation": "Completed ports passed reduced-input correctness checks on the C build, upstream Guile checks with identical inputs, and targeted lint. No runtime changes. Canonical benchmark coverage is partial; see additional_validation.",
   "batches": {
     "numeric": {
       "sum": {
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -17,7 +16,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -27,7 +25,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -39,7 +36,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -49,7 +45,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -59,7 +54,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -71,7 +65,6 @@
         "status": "ported",
         "parity": "B",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -81,7 +74,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -91,7 +83,6 @@
         "status": "ported",
         "parity": "B",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -103,7 +94,6 @@
         "status": "ported",
         "parity": "B",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -113,7 +103,6 @@
         "status": "ported",
         "parity": "B",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -121,7 +110,7 @@
       },
       "maze": {
         "status": "blocked",
-        "reason": "The measured algorithm uses call-with-current-continuation, which is absent from the shared Otium API. No replacement algorithm or Chez escape hatch was used."
+        "reason": "The measured algorithm uses call-with-current-continuation, which is absent from the shared Otium API. No replacement algorithm was used."
       }
     },
     "control": {
@@ -129,7 +118,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -137,11 +125,11 @@
       },
       "ctak": {
         "status": "blocked",
-        "reason": "The measured algorithm uses call-with-current-continuation, which is absent from the shared Otium API. No replacement algorithm or Chez escape hatch was used."
+        "reason": "The measured algorithm uses call-with-current-continuation, which is absent from the shared Otium API. No replacement algorithm was used."
       },
       "fibc": {
         "status": "blocked",
-        "reason": "The measured algorithm uses call-with-current-continuation, which is absent from the shared Otium API. No replacement algorithm or Chez escape hatch was used."
+        "reason": "The measured algorithm uses call-with-current-continuation, which is absent from the shared Otium API. No replacement algorithm was used."
       }
     },
     "files2": {
@@ -149,7 +137,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -159,7 +146,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -169,7 +155,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -181,7 +166,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -191,7 +175,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -201,7 +184,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -211,15 +193,15 @@
     "math2": {
       "pi": {
         "status": "blocked",
-        "reason": "Requires exact-integer-sqrt inside the timed algorithm. The shared Otium API only exposes floating-point sqrt; both runtimes report E0201 for exact-integer-sqrt. Replacing it with floating-point arithmetic would lose integer precision, and implementing a new integer-root algorithm or using a Chez escape hatch was outside this translation pass."
+        "reason": "Requires exact-integer-sqrt inside the timed algorithm. The shared Otium API only exposes floating-point sqrt; Otium reports E0201 for exact-integer-sqrt. Replacing it with floating-point arithmetic would lose integer precision, and implementing a new integer-root algorithm was outside this translation pass."
       },
       "chudnovsky": {
         "status": "blocked",
-        "reason": "Requires exact-integer-sqrt inside the timed algorithm. The shared Otium API only exposes floating-point sqrt; both runtimes report E0201 for exact-integer-sqrt. Replacing it with floating-point arithmetic would lose integer precision, and implementing a new integer-root algorithm or using a Chez escape hatch was outside this translation pass."
+        "reason": "Requires exact-integer-sqrt inside the timed algorithm. The shared Otium API only exposes floating-point sqrt; Otium reports E0201 for exact-integer-sqrt. Replacing it with floating-point arithmetic would lose integer precision, and implementing a new integer-root algorithm was outside this translation pass."
       },
       "mbrotZ": {
         "status": "blocked",
-        "reason": "Requires native complex-number arithmetic, make-rectangular, real-part, and imag-part inside the timed algorithm. Both runtimes report E0201 for these complex-number procedures. Rewriting complex arithmetic as pairs of real values would change what mbrotZ measures, so no replacement was made."
+        "reason": "Requires native complex-number arithmetic, make-rectangular, real-part, and imag-part inside the timed algorithm. Otium reports E0201 for these complex-number procedures. Rewriting complex arithmetic as pairs of real values would change what mbrotZ measures, so no replacement was made."
       }
     },
     "structures2": {
@@ -227,7 +209,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -237,7 +218,6 @@
         "status": "ported",
         "parity": "B",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -247,7 +227,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -260,9 +239,8 @@
         "parity": "B",
         "reason": "Untimed database initialization wraps the pattern cursor explicitly instead of creating a cyclic pair list; the timed matching algorithm is retained.",
         "checks": {
-          "chez": "passed",
           "c": "passed",
-          "upstream_guile": "1200 pattern-match truth values agree with both runtimes",
+          "upstream_guile": "1200 pattern-match truth values agree with Otium",
           "lint": "passed"
         }
       },
@@ -270,7 +248,6 @@
         "status": "ported",
         "parity": "B",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -280,7 +257,6 @@
         "status": "ported",
         "parity": "B",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -292,7 +268,6 @@
         "status": "ported",
         "parity": "B",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -302,7 +277,6 @@
         "status": "ported",
         "parity": "B",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -312,7 +286,6 @@
         "status": "ported",
         "parity": "B",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -324,7 +297,6 @@
         "status": "ported",
         "parity": "B",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -334,7 +306,6 @@
         "status": "ported",
         "parity": "A",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -342,7 +313,7 @@
       },
       "parsing": {
         "status": "blocked",
-        "reason": "The lexer uses a fixed-size mutable string token accumulator inside the measured parser. Shared make-string and string-set! are absent; both names report E0201 on Chez and C. Replacing the buffer with arrays or string concatenation would change measured allocation and mutation, so no substitute implementation was added."
+        "reason": "The lexer uses a fixed-size mutable string token accumulator inside the measured parser. Shared make-string and string-set! are absent; both names report E0201. Replacing the buffer with arrays or string concatenation would change measured allocation and mutation, so no substitute implementation was added."
       }
     },
     "structures3": {
@@ -350,7 +321,6 @@
         "status": "ported",
         "parity": "B",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -360,7 +330,6 @@
         "status": "ported",
         "parity": "B",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -370,7 +339,6 @@
         "status": "ported",
         "parity": "B",
         "checks": {
-          "chez": "passed",
           "c": "passed",
           "upstream_guile": "passed",
           "lint": "passed"
@@ -385,17 +353,17 @@
     }
   },
   "additional_validation": {
-    "sum1": "Full canonical runner invocation passed on Chez and C, each with upstream Guile reference; isolated inputs and output directories exercised.",
-    "read1": "Unchanged canonical parsing.data passed on Chez, C and Guile with repetition count 2.",
-    "mazefun": "Canonical 11x11 problem passed on Chez, C and Guile with repetition count 2.",
-    "paraffins": "Additional odd n=9 case passed on Chez, C and Guile with repetition count 2.",
-    "lattice": "Larger k=44 case passed on Chez and C at count 2; upstream Guile exceeded 30 seconds. Reduced k=33 passes all three.",
-    "file_outputs": "cat and tail output text is checked exactly; ray output SHA256 matches upstream Guile on both Otium runtimes.",
-    "conform": "Canonical problem data passed on Chez, C and Guile with repetition count 2.",
-    "nboyer_sboyer": "Both n=0 (95024 rewrites) and n=1 (591777 rewrites) pass on Chez, C and Guile. Full quoted lemma data preserved.",
-    "peval": "Canonical problem passed at count 2. All ten output expressions also serialize identically on Chez, C and Guile; the upstream check compares only the tenth.",
-    "matrix": "Canonical 5x5 problem passed on Chez, C and Guile with repetition count 2, in addition to the smaller regression input.",
-    "nucleic": "Canonical problem passed on Chez, C and Guile with repetition count 2. All 6959 numeric literals preserved in upstream order."
+    "sum1": "Full canonical runner invocation passed on C, each with upstream Guile reference; isolated inputs and output directories exercised.",
+    "read1": "Unchanged canonical parsing.data passed on C and Guile with repetition count 2.",
+    "mazefun": "Canonical 11x11 problem passed on C and Guile with repetition count 2.",
+    "paraffins": "Additional odd n=9 case passed on C and Guile with repetition count 2.",
+    "lattice": "Larger k=44 case passed on C at count 2; upstream Guile exceeded 30 seconds. Reduced k=33 passes both.",
+    "file_outputs": "cat and tail output text is checked exactly; ray output SHA256 matches upstream Guile on Otium.",
+    "conform": "Canonical problem data passed on C and Guile with repetition count 2.",
+    "nboyer_sboyer": "Both n=0 (95024 rewrites) and n=1 (591777 rewrites) pass on C and Guile. Full quoted lemma data preserved.",
+    "peval": "Canonical problem passed at count 2. All ten output expressions also serialize identically on C and Guile; the upstream check compares only the tenth.",
+    "matrix": "Canonical 5x5 problem passed on C and Guile with repetition count 2, in addition to the smaller regression input.",
+    "nucleic": "Canonical problem passed on C and Guile with repetition count 2. All 6959 numeric literals preserved in upstream order."
   },
   "excluded": {
     "compiler": "Source references continuations; excluded from this pass.",

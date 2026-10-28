@@ -3,12 +3,12 @@ import os
 import select
 import signal
 
-from harness import BOTH, case, test
+from harness import case, test
 
 case('resource quit', 'tests/resource/quit.ot', status=1, stdout='released\n', stderr=['cleanup'])
 
 
-@test('resource interrupt', runtimes=BOTH)
+@test('resource interrupt')
 def interrupt(t):
     process = t.spawn(t.command('tests/resource/interrupt.ot'), text=True)
     ready, _, _ = select.select([process.stdout], [], [], 10)

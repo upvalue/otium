@@ -1,8 +1,0 @@
-error[E0401]: `/` expected int or float, got "four"
- --> tests/diagnostics/lib/broken-space.ot:6:12
-  |
-6 | (def value (half "four"))
-  |            ^^^^^^^^^^^^^
-  |
-  = note: reached from tests/diagnostics/output/required-file.ot:1:1
-  = note: run `otium explain E0401` for details

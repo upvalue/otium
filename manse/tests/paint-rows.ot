@@ -1,5 +1,5 @@
 ;; lint: allow-file(rest-arguments) instrumentation accepts the intercepted function arities
-;; Headless row-cache regression checks. Run from the repository root with --runtime=chez -L .
+;; Headless row-cache regression checks. Run from the repository root: ./otium -L . manse/tests/paint-rows.ot
 (require manse.terminal)
 (ns manse.terminal)
 (require otium.process :as process)
@@ -10,7 +10,7 @@
 
 (def height-px 900)
 
-(def w (ui/open {:title "paint" :width width-px :height height-px :headless #t :scale 2 :config "build/ui-config.ot"}))
+(def w (ui/open {:title "paint" :width width-px :height height-px :headless #t :scale 2}))
 
 (def s {:id 1 :term (g/new 80 24) :exit #t})
 

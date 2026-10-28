@@ -1,6 +1,6 @@
 # Classes and generic functions
 
-Implemented on the C and Chez runtimes. Classes replace typed maps with fixed
+Classes replace typed maps with fixed
 slots and a single chain of slotless abstract types. Generic functions support
 ancestor dispatch, lexical next methods, and `:around` methods.
 
@@ -115,7 +115,7 @@ one instance. Plain tables remain the type for open-ended data, and a class can
 have a slot holding one.
 
 Instances are not tables. `table?` is false, and `get` and `put!` don't apply.
-That is a change from typed maps, which are tables on C.
+That is a change from typed maps, which were tables.
 
 Equality is identity. `copy` makes a shallow copy with the same class. Instances
 print as `#<Button>` and are not readable.
@@ -163,8 +163,7 @@ This is not Common Lisp's `setf`. There is no registry of setters, so
 `(set! (car p) v)` or `(set! (my-accessor obj) v)` are errors. That can grow
 later if needed.
 
-The shared expander lowers applied assignment to `set-applied!` on both
-runtimes. In `with-slots`, assignment to a plain name goes through a local
+The shared expander lowers applied assignment to `set-applied!`. In `with-slots`, assignment to a plain name goes through a local
 symbol macro.
 
 ### `with-slots`
@@ -355,8 +354,8 @@ Signatures use `Object` for unspecialized arguments.
 ## Performance
 
 - **Instances are a slot vector** plus a layout pointer. A four-slot `Boid` is
-  one object of seven words on C: the header, layout pointer, stable identity
-  hash, and four values. Chez uses an opaque record with a slot vector.
+  one object of seven words: the header, layout pointer, stable identity
+  hash, and four values.
 - **Inline caches at slot reads.** `(b :x)` with a literal keyword remembers the
   last layout seen and its slot index. A hit is a pointer comparison and an
   index. A miss looks the slot up in the layout and updates the cache.
@@ -405,17 +404,16 @@ This replaces:
 It adds abstract types, lexical next methods, `:around` methods, and instance
 migration.
 
-The typed-map constructors and `field-*` operations have been removed from
-both runtimes. The multimethod examples and tests use classes.
+The typed-map constructors and `field-*` operations have been removed. The multimethod examples and tests use classes.
 
 ## Validation
 
-`tests/classes/checks.ot` runs unchanged on C and Chez (`just test classes`).
-Runtime-specific suites cover namespace ownership, imported method extensions,
+`tests/classes/checks.ot` holds the checks (`just test classes`).
+Other suites cover namespace ownership, imported method extensions,
 file reloads, explicit resets, and dispatch against an independent oracle.
 
 `benchmarks/workloads/classes.ot` exercises slot reads and writes, ancestor
-dispatch, and an around method using the same source on both runtimes.
+dispatch, and an around method.
 
 ## Decisions
 

@@ -1,3 +1,4 @@
+;; lint: allow-file(unbound-name) c/src/dev.ot defines %poll and %evaluate when --dev starts the server
 (require (otium.process :as process))
 
 (defonce pending '())
@@ -36,6 +37,21 @@
                   path)))
     (unless (%open path) (error "cannot listen on socket" path))
     (set! watchdog timeout)))
+
+(def (%repr value)
+  (with-output-to-string (fn () (write value))))
+
+(def (%namespaces)
+  (map (fn (name) {:name name}) (%namespace-names)))
+
+(def (%bindings space)
+  (map (fn (binding)
+         (let ((entry {:name (car binding) :kind (cadr binding) :public (caddr binding) :doc (car (cdddr binding))})
+               (mask (cadr (cdddr binding))))
+           (if mask
+               (put entry :arity-mask mask)
+               entry)))
+       (%namespace-bindings space)))
 
 (def (record-load! space path)
   "Record a loader notification; this table survives namespace reloads."
@@ -79,7 +95,6 @@
 (def- (status)
   {:pid (%pid)
    :cwd (%cwd)
-   :runtime (%runtime)
    :script (process/script-name)
    :arguments (process/arguments)
    :uptime-ms (- (%clock) launched)

@@ -2,11 +2,10 @@
 import hashlib
 import importlib.util
 import json
-import os
 from pathlib import Path
 import shutil
 
-from harness import BOTH, Skip, defaults, test
+from harness import Skip, defaults, test
 
 defaults(suite='bench', timeout=120)
 HERE = Path(__file__).resolve().parent
@@ -74,7 +73,7 @@ def vendor():
 
 
 def port(name):
-    @test('r7rs ' + name, runtimes=BOTH)
+    @test('r7rs ' + name)
     def run(t):
         vendor()
         text = INPUTS[name]
@@ -90,8 +89,7 @@ def port(name):
             target.write_text(contents)
         source = t.scratch / f'{name}.ot'
         source.write_text(RUNNER.otium_program(HERE, name, 'otium-test', text))
-        flags = ['--c.max-depth=2000'] if t.runtime == 'c' else []
-        t.expect(t.otium(*flags, source, cwd=t.scratch), contains=['+!CSVLINE!+otium-test,'], absent=['INCORRECT'])
+        t.expect(t.otium('--c.max-depth=2000', source, cwd=t.scratch), contains=['+!CSVLINE!+otium-test,'], absent=['INCORRECT'])
         for path, expected in fixture.get('expected_outputs', {}).items():
             t.check((t.scratch / path).read_text() == expected, 'unexpected contents:', path)
         for path, expected in fixture.get('expected_output_hashes', {}).items():

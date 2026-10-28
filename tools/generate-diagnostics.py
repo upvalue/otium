@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile lib/catalog/diagnostics.json into runtime tables, and an Otium module."""
+"""Compile lib/catalog/diagnostics.json into a runtime table and an Otium module."""
 import argparse
 import json
 from pathlib import Path
@@ -30,18 +30,6 @@ c += [f'  {{{c_string(code)}, {c_string(e["type"])}, {c_string(e["message"])}}},
       for code, e in errors.items()]
 c += ['};', '']
 
-scm = [f';; {SOURCE}',
-       '(library (otium diagnostic-catalog)',
-       '  (export diagnostic-entry)',
-       '  (import (chezscheme))',
-       '  ;; (type . message template) for a code string, or #f.',
-       '  (define (diagnostic-entry code)',
-       '    (let ([entry (assoc code entries)]) (and entry (cdr entry))))',
-       "  (define entries '("]
-scm += [f'    ({c_string(code)} {e["type"]} . {c_string(e["message"])})'
-        for code, e in errors.items()]
-scm += ['  )))', '']
-
 FIELDS = ['title', 'type', 'name', 'group', 'level', 'message', 'explanation', 'example', 'fixed']
 # Laid out as otium fmt lays it out, so the format check passes.
 ot = [f';; {SOURCE}', '(ns otium.diagnostics.catalog)', '',
@@ -66,7 +54,6 @@ ot.append('')
 
 
 outputs = [('c/src/diagnostic-catalog.inc', '\n'.join(c)),
-           ('chez/otium/diagnostic-catalog.sls', '\n'.join(scm)),
            ('lib/otium/diagnostics/catalog.ot', '\n'.join(ot))]
 for name, text in outputs:
     path = ROOT / name

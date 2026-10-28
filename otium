@@ -4,43 +4,6 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 case "${1-}" in
     attach|mcp)
         PYTHONPATH="$root/tools" exec "${PYTHON:-python3}" -m otium_tools.client "$@" ;;
-esac
-runtime=chez
-remaining=$#
-application=no
-# Rotate the original arguments once, removing only runtime selectors. Values
-# of launcher options and everything after -- pass through unchanged.
-while [ "$remaining" -gt 0 ]; do
-    argument=$1
-    shift
-    remaining=$((remaining - 1))
-    if [ "$application" = yes ]; then
-        set -- "$@" "$argument"
-        continue
-    fi
-    case "$argument" in
-        --) application=yes; set -- "$@" "$argument" ;;
-        --runtime=*) runtime=${argument#--runtime=} ;;
-        --runtime)
-            if [ "$remaining" -eq 0 ]; then
-                printf '%s\n' 'otium: --runtime requires c or chez' >&2
-                exit 2
-            fi
-            runtime=$1; shift; remaining=$((remaining - 1)) ;;
-        --path|-L|--project|--load)
-            set -- "$@" "$argument"
-            if [ "$remaining" -gt 0 ]; then
-                value=$1; shift; remaining=$((remaining - 1))
-                set -- "$@" "$value"
-            fi ;;
-        *) set -- "$@" "$argument" ;;
-    esac
-    case "$runtime" in
-        c|chez) ;;
-        *) printf 'otium: unknown runtime: %s (expected c or chez)\n' "$runtime" >&2; exit 2 ;;
-    esac
-done
-case "${1-}" in
     fmt)
         shift
         set -- --no-project "$root/lib/otium/tools/fmt.ot" -- "$@" ;;
@@ -53,13 +16,9 @@ esac
 # for each. Exported so programs find native libraries in the same build.
 OTIUM_BUILD=${OTIUM_BUILD:-$root/build/$(uname -m)-$(uname -s | tr A-Z a-z)/default}
 export OTIUM_BUILD
-case "$runtime" in
-    c)
-        binary=$OTIUM_BUILD/otium
-        if [ ! -x "$binary" ]; then
-            printf 'otium: %s is missing; run just build\n' "$binary" >&2
-            exit 127
-        fi
-        exec "$binary" "$@" ;;
-    chez) exec "$root/chez/run" "$@" ;;
-esac
+binary=$OTIUM_BUILD/otium
+if [ ! -x "$binary" ]; then
+    printf 'otium: %s is missing; run just build\n' "$binary" >&2
+    exit 127
+fi
+exec "$binary" "$@"

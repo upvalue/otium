@@ -142,4 +142,22 @@
 
 (handler-bind (((fn (c) nil) (fn (c) (set! handled 99)))) (signal 'test))
 (check 0 handled)
+
+(check nil (exists (fn (x) nil) '(1 2)))
+(check nil (for-all (fn (x) nil) '(1 2)))
+(check 7
+       (exists (fn (x)
+                 (if (= x 2)
+                     7
+                     nil))
+               '(1 2 3)))
+(check 8 (for-all (fn (x) 8) '(1 2)))
+(check 3
+       (let ((n 0))
+         (while (if (= n 3)
+                    nil
+                    #t)
+           (set! n (+ n 1)))
+         n))
+(check '(nil :a nil) `(nil :a ,nil))
 (report "reader values")

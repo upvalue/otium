@@ -7,7 +7,6 @@ import platform
 import plistlib
 import re
 import shutil
-import subprocess
 
 from otium_tools import BUILD
 
@@ -16,12 +15,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--runtime', choices=('c', 'chez'), default='chez')
     parser.add_argument('--app-name', default='Otium UI')
     parser.add_argument('--app-id', default='org.otium.ui-demo')
     parser.add_argument('--app-version', default='0.1')
     parser.add_argument('--icon', default='native/ui/assets/otium.png')
-    parser.add_argument('--chez-boot-dir', help='Directory containing chez.boot and petite.boot, if not beside the installed runtime')
     parser.add_argument('--application', default='examples/ui.ot')
     parser.add_argument('arguments', nargs=argparse.REMAINDER,
                         help='Application arguments after --, e.g. -- --headless --frames 3')
@@ -32,19 +29,7 @@ def main():
         parser.error('Application name must be a nonempty filename without / or :')
     if not re.fullmatch(r'[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+', args.app_id):
         parser.error('Application ID must be a reverse-domain identifier')
-    target = platform.machine() + '-darwin'
-    if args.runtime == 'chez':
-        runtime = shutil.which(os.environ.get('CHEZ', 'chez'))
-        if not runtime:
-            parser.error('Chez executable not found')
-        executable = 'chez'
-        prefix = ['--compile-imported-libraries', '--libdirs', str(ROOT/'chez'),
-                  '--script', str(ROOT/'chez/main.ss')]
-    else:
-        runtime = BUILD/'otium'
-        executable = 'otium'
-        prefix = []
-    runtime = Path(runtime).resolve()
+    runtime = (BUILD/'otium').resolve()
     if not runtime.is_file():
         parser.error('Runtime is missing; run just build first')
     application = (ROOT/args.application).resolve()
@@ -53,33 +38,21 @@ def main():
     icon = str((ROOT/args.icon).resolve()) if args.icon else ''
     if icon and not Path(icon).is_file():
         parser.error('Icon does not exist')
-    bundle = ROOT/'build/apps'/args.runtime/args.app_id/(args.app_name+'.app')
+    bundle = ROOT/'build/apps'/args.app_id/(args.app_name+'.app')
     contents = bundle/'Contents'
     (contents/'MacOS').mkdir(parents=True, exist_ok=True)
-    host = contents/'MacOS'/executable
+    host = contents/'MacOS'/'otium'
     # Use a fresh inode: another instance may still be executing the old host.
     temporary = host.with_suffix('.new')
     shutil.copy2(runtime, temporary)
     temporary.replace(host)
-    if args.runtime == 'chez':
-        if args.chez_boot_dir:
-            boot = Path(args.chez_boot_dir).resolve()
-        else:
-            version = subprocess.check_output([str(runtime), '--version'], text=True).strip()
-            machine = 'tarm64osx' if platform.machine() == 'arm64' else 'ta6osx'
-            candidates = [runtime.parent, runtime.parent.parent/'lib'/('csv'+version)/machine]
-            boot = next((p for p in candidates if (p/'chez.boot').is_file()), None)
-        if boot is None or not all((boot/name).is_file() for name in ('chez.boot', 'petite.boot')):
-            parser.error('Cannot locate Chez boot files; supply --chez-boot-dir')
-        for name in ('chez.boot', 'petite.boot'):
-            shutil.copy2(boot/name, contents/'MacOS'/name)
-    info = {'CFBundleExecutable': executable, 'CFBundleName': args.app_name,
+    info = {'CFBundleExecutable': 'otium', 'CFBundleName': args.app_name,
             'CFBundleDisplayName': args.app_name, 'CFBundleIdentifier': args.app_id,
             'CFBundlePackageType': 'APPL', 'CFBundleVersion': args.app_version,
             'CFBundleShortVersionString': args.app_version, 'NSHighResolutionCapable': True}
     (contents/'Info.plist').write_bytes(plistlib.dumps(info))
     options = args.arguments[1:] if args.arguments[:1] == ['--'] else args.arguments
-    command = [str(host), *prefix, '--no-project', '-L', str(ROOT/'lib'),
+    command = [str(host), '--no-project', '-L', str(ROOT/'lib'),
                '-L', str(ROOT/'examples'), '-L', str(ROOT/'tests'), str(application), '--',
                '--app-name', args.app_name, '--app-id', args.app_id,
                '--app-version', args.app_version, '--icon', icon, *options]

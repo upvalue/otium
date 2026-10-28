@@ -35,4 +35,8 @@ static const struct { const char* code; const char* type; const char* message; }
   {"E0301", "arity-error", "wrong number of arguments to `{name}`"},
   {"E0302", "type-error", "{value} is not callable"},
   {"E0401", "type-error", "{detail}"},
+  {"E0502", "thread-error", "cannot wait for another thread while loading a module"},
+  {"E0503", "thread-error", "deadlock: no thread can run and none is sleeping"},
+  {"E0504", "thread-failed", "the joined thread failed"},
+  {"E0505", "timeout", "timed out"},
 };

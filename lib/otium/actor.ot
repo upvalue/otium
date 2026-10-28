@@ -1,0 +1,101 @@
+;; actor.ot -- actors: threads that serve requests from their mailbox.
+;;
+;; An actor is a thread with a mailbox, as otium.thread provides. This adds
+;; request/reply with timeouts, monitors, delayed sends and a name table. See
+;; scratch/green-threads.md.
+;;
+;;   (require otium.actor :as actor)
+;;   (require otium.thread :refer (spawn send receive))
+;;
+;;   (def (serve count)
+;;     (serve (receive
+;;              ({:op :add :n n} (+ count n))
+;;              (:call {:op :get} count))))
+;;
+;;   (defonce counter (spawn serve 0))
+;;   (send counter {:op :add :n 2})
+;;   (actor/call counter {:op :get})   ; => 2
+
+(ns otium.actor (:require (otium.thread :as thread :refer (self send receive))))
+
+(defparam call-timeout
+  "Seconds actor/call waits for a reply when not given a timeout."
+  5)
+
+(defonce %state {:refs 0 :timer nil})
+
+(def- (next-ref)
+  (put! %state :refs (+ (%state :refs) 1))
+  (%state :refs))
+
+(def (call t message &optional (timeout (call-timeout)))
+  "(actor/call t message [timeout])\nSend message as a request to t, a thread or registered name, and wait for the reply from its receive's (:call pattern body ...) clause. An error in the body is raised here. With no reply within timeout seconds, raises a timeout condition with a use-value restart; nil waits for good."
+  (let ((target (thread/%resolve t))
+        (ref (next-ref)))
+    (unless target (error "actor/call: no live thread" t))
+    (send target {:call ref :from (self) :expiry (%thread-deadline timeout) :msg message})
+    (receive ({:reply (== ref) :from (== target) :error e} (error e))
+             ({:reply (== ref) :from (== target) :value (opt v nil)} v)
+             (:after timeout
+                     (restart-case (error {:type 'timeout :message "actor/call timed out" :code "E0505"})
+                       (use-value "Return a value instead" (v) v))))))
+
+(def (monitor t)
+  "(actor/monitor t)\nWhen t ends, send the calling thread {:exit t :ref ref :reason reason}, at once if it has ended. The reason is :normal, the kill reason or the condition t failed with. Returns ref."
+  (let ((ref {:monitor (next-ref) :thread t}))
+    (%monitor t ref)
+    ref))
+
+(def (demonitor ref)
+  "(actor/demonitor ref)\nStop the monitor that actor/monitor returned ref for. An exit message already sent stays in the mailbox."
+  (%demonitor (ref :thread) ref)
+  nil)
+
+;; --- Delayed sends ----------------------------------------------------------
+
+;; One daemon thread holds every pending delayed send, sorted by when it is
+;; due, and sleeps until the first one.
+(def- (insert entry pending)
+  (if (or (null? pending) (< (car entry) (car (car pending))))
+      (cons entry pending)
+      (cons (car pending) (insert entry (cdr pending)))))
+
+(def- (timer-loop pending)
+  (let ((now (%scheduler-clock)))
+    (if (and (pair? pending) (<= (car (car pending)) now))
+        (let ((entry (car pending)))
+          (send (cadr entry) (caddr entry))
+          (timer-loop (cdr pending)))
+        (timer-loop (receive ({:send-after at :to to :message m} (insert (list at to m) pending))
+                             (:after (if (pair? pending)
+                                         (- (car (car pending)) now)
+                                         nil)
+                                     pending))))))
+
+(def (send-after seconds t message)
+  "(actor/send-after seconds t message)\nSend message to t, a thread or registered name, after seconds. Returns at once; no thread is started per message."
+  (let ((timer (%state :timer)))
+    (when (or (nil? timer) (memq (thread/status timer) '(:done :failed :killed)))
+      (set! timer (thread/spawn-named 'actor-timer timer-loop '()))
+      (thread/daemon! timer)
+      (put! %state :timer timer))
+    (send timer {:send-after (+ (%scheduler-clock) seconds) :to t :message message})
+    nil))
+
+;; --- Names ------------------------------------------------------------------
+
+(def (register! name t)
+  "(actor/register! name t)\nName thread t, so send, actor/call and actor/whereis accept name. Names are process-wide; a name stays taken until its thread ends."
+  (let ((holder (thread/%resolve name)))
+    (when (and holder (not (eq? holder t))) (error "actor/register!: name is taken" name)))
+  (put! thread/%names name t)
+  t)
+
+(def (unregister! name)
+  "(actor/unregister! name)\nForget name."
+  (put! thread/%names name nil)
+  nil)
+
+(def (whereis name)
+  "(actor/whereis name)\nThe live thread registered under name, or nil."
+  (thread/%resolve name))

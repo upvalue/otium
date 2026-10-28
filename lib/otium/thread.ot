@@ -1,0 +1,324 @@
+;; thread.ot -- green threads.
+;;
+;; Many threads of Otium code on one native thread, preempted at function
+;; entries and loop heads. Waiting for a thread, a lock, a message or a timer
+;; parks only the waiting thread. I/O still blocks the whole process. See
+;; scratch/green-threads.md.
+;;
+;;   (require otium.thread :as thread :refer (spawn self sleep yield send receive))
+;;
+;; Threads need native code: on the VM (--c.vm) these raise an error.
+
+(ns otium.thread)
+
+;; --- Threads ----------------------------------------------------------------
+
+;; lint: allow(rest-arguments) spawn passes any number of arguments to f
+(def (spawn f . args)
+  "(spawn f arg ...)\nStart a thread running (f arg ...) and return it. It inherits the current parameter bindings and namespace."
+  (%spawn nil f args))
+
+;; lint: allow(rest-arguments) spawn passes any number of arguments to f
+(def (spawn-named name f . args)
+  "(spawn-named name f arg ...)\nspawn, with a name for printing and tools."
+  (%spawn name f args))
+
+(def (self)
+  "The running thread."
+  (%self))
+
+(def (yield)
+  "Let other runnable threads go first."
+  (%yield))
+
+(def (sleep seconds)
+  "Park the running thread for seconds, an integer or float."
+  (%sleep seconds))
+
+(def (thread? x)
+  "Whether x is a thread."
+  (eq? (type x) :thread))
+
+(def (status t)
+  "(thread/status t)\n:runnable, :waiting, :done, :failed or :killed."
+  (%thread-status t))
+
+(def (name t)
+  "A thread's name, or nil."
+  (%thread-name t))
+
+(def (failed? c)
+  "Whether c is the condition thread/join raises for a thread that failed."
+  (and (table? c) (eq? (get c :type) 'thread-failed)))
+
+(def (timeout? c)
+  "Whether c is a timeout condition."
+  (and (table? c) (eq? (get c :type) 'timeout)))
+
+(def- (timeout-condition what)
+  {:type 'timeout :message (str what " timed out") :code "E0505"})
+
+(def (join t &optional (timeout nil))
+  "(thread/join t [timeout])\nWait for t to finish and return its result. A thread that failed raises a thread-failed condition with the original under :reason; one killed returns its kill reason. With timeout, in seconds, raises a timeout condition when it passes."
+  (let ((woke (%thread-join t timeout)))
+    (cond
+      ((eq? woke :timeout)
+       (restart-case (error (timeout-condition "thread/join")) (use-value "Return a value instead" (v) v)))
+      ((eq? (%thread-status t) :failed)
+       (error {:type 'thread-failed
+               :message "the joined thread failed"
+               :code "E0504"
+               :thread t
+               :reason (%thread-result t)}))
+      (else (%thread-result t)))))
+
+(def (kill! t &optional (reason :killed))
+  "(thread/kill! t [reason])\nMake t unwind and end: its cleanups run and try can't catch it. Its status becomes :killed and joining it returns reason."
+  (%thread-kill t reason)
+  t)
+
+(def (interrupt! t thunk)
+  "(thread/interrupt! t thunk)\nRun thunk on top of t's stack at its next safe point, or as it wakes. An error from thunk unwinds t."
+  (%thread-interrupt t thunk))
+
+(def (all)
+  "Live threads."
+  (%threads #t))
+
+(def (daemon! t)
+  "(thread/daemon! t)\nMark t so join-all doesn't wait for it."
+  (%thread-daemon t))
+
+(def (join-all)
+  "Wait until every other thread has finished, except daemons, including threads started while waiting."
+  (let loop ()
+    (let ((waiting (%threads #f)))
+      (unless (= (length waiting) 0)
+        (%thread-join (get waiting 0) nil)
+        (loop)))))
+
+;; --- Mutexes and condition variables --------------------------------------
+
+;; Built on wait queues and atomic sections: a park inside an atomic section
+;; releases it for the wait, so check-then-park can't miss a wake.
+(defmacro atomically body
+  #`(begin
+      (%atomic #t)
+      (defer
+        (begin ,@body)
+        (%atomic #f))))
+
+(def (mutex)
+  "A mutex for thread/lock! and thread/with-lock."
+  {:owner nil :waiters (%make-waitq)})
+
+(def (lock! m &optional (timeout nil))
+  "(thread/lock! m [timeout])\nTake m, waiting for it if another thread holds it. #f if timeout passes first."
+  (let ((deadline (%thread-deadline timeout)))
+    (atomically (let loop ()
+                  (cond
+                    ((nil? (m :owner)) (put! m :owner (self)) #t)
+                    ((eq? (m :owner) (self)) (error "thread/lock!: already held by this thread"))
+                    ((eq? (%park (m :waiters) (remaining deadline)) :timeout) #f)
+                    (else (loop)))))))
+
+;; Seconds left until an absolute deadline, or nil for none.
+(def- (remaining deadline)
+  (and deadline
+       (let ((left (/ (- deadline (* 1000000000 (%scheduler-clock))) 1000000000.0)))
+         (if (< left 0)
+             0
+             left))))
+
+(def (unlock! m)
+  "(thread/unlock! m)\nRelease m and wake one thread waiting for it."
+  (atomically (unless (eq? (m :owner) (self)) (error "thread/unlock!: not held by this thread"))
+              (put! m :owner nil)
+              (%wake-one (m :waiters)))
+  nil)
+
+(defmacro with-lock (m . body)
+  "(thread/with-lock m body ...)\nRun body holding m, releasing it however body exits."
+  #`(let ((m# ,m))
+      (lock! m#)
+      (defer
+        (begin ,@body)
+        (unlock! m#))))
+
+(def (condvar)
+  "A condition variable."
+  {:waiters (%make-waitq)})
+
+(def (condvar-wait c m &optional (timeout nil))
+  "(thread/condvar-wait c m [timeout])\nRelease m, wait for a signal on c, and take m again. #f if timeout passes first. Spurious wakeups happen: test again in a loop."
+  (let ((woke (atomically (unlock! m) (%park (c :waiters) timeout))))
+    (lock! m)
+    (not (eq? woke :timeout))))
+
+(def (condvar-signal! c)
+  "Wake one thread waiting on c."
+  (%wake-one (c :waiters))
+  nil)
+
+(def (condvar-broadcast! c)
+  "Wake every thread waiting on c."
+  (%wake-all (c :waiters))
+  nil)
+
+;; --- Groups -----------------------------------------------------------
+
+;; A group's threads finish before the group closes. With the default
+;; policy the first failure kills the others and interrupts the owner, whose
+;; with body unwinds with a thread-group-failed condition; closing raises
+;; the first failure, with later ones under :others. (group :independent)
+;; only records failures.
+(defclass ThreadGroup
+  (threads :init [] :state #t)
+  (owner :init nil :state #t)
+  (independent :init #f :state #t)
+  (failures :init [] :state #t)
+  (killing :init #f :state #t))
+
+(def (group &optional (mode :linked))
+  "(thread/group [:independent])\nA group to spawn into with thread/spawn-in, used with with: leaving it waits for every thread in it."
+  (let ((g (make ThreadGroup)))
+    (slot-set! g :owner (self))
+    (slot-set! g :independent (eq? mode :independent))
+    g))
+
+(def- (group-failed g condition)
+  (push! (g :failures) condition)
+  (when (and (not (g :independent)) (not (g :killing)))
+    (slot-set! g :killing #t)
+    (for ((t :in (g :threads)))
+      (unless (or (eq? t (self)) (memq (status t) '(:done :failed :killed))) (kill! t :group-failed)))
+    (interrupt! (g :owner)
+                (fn ()
+                  (error {:type 'thread-group-failed :message "a thread in the group failed" :reason condition})))))
+
+;; lint: allow(rest-arguments) spawn passes any number of arguments to f
+(def (spawn-in g f . args)
+  "(thread/spawn-in g f arg ...)\nspawn into group g."
+  ;; The cleanup sees the condition only when an error leaves the thread, so
+  ;; errors f catches itself don't count, and the original keeps its place
+  ;; for the report. A kill's outcome is a keyword.
+  (let ((t (spawn (fn ()
+                    (call-with-cleanup (fn () (apply f args))
+                                       (fn (outcome) (when (table? outcome) (group-failed g outcome))))))))
+    (push! (g :threads) t)
+    t))
+
+(defmethod (close (g ThreadGroup) outcome)
+  (for ((t :in (g :threads)))
+    (unless (eq? t (self)) (%thread-join t nil)))
+  (let ((failures (g :failures)))
+    ;; The first failure is raised on a normal exit, or replaces the
+    ;; interrupt that unwound the body. Anything else leaving the body, such
+    ;; as an unrelated error or a kill, keeps going.
+    (when (and (> (length failures) 0)
+               (or (nil? outcome)
+                   (and (table? outcome) (eq? (get outcome :type) 'thread-group-failed))))
+      (error {:type 'thread-failed
+              :message "a thread in the group failed"
+              :code "E0504"
+              :reason (get failures 0)
+              :others (cdr (array-to-list failures))}))))
+
+;; --- Mailboxes --------------------------------------------------------------
+
+(defonce %names {})
+
+;; A thread, or the live thread registered under a name, or nil.
+(def (%resolve t)
+  (if (thread? t)
+      t
+      (let ((found (get %names t)))
+        (cond
+          ((nil? found) nil)
+          ((memq (status found) '(:done :failed :killed)) (put! %names t nil) nil)
+          (else found)))))
+
+(def (send t message)
+  "(send t message)\nAppend message to the mailbox of t, a thread or a name given to actor/register!. #f if t has finished or no live thread has that name."
+  (let ((target (%resolve t)))
+    (if target
+        (%send target message)
+        #f)))
+
+;; An actor/call request or reply whose expiry has passed, which receive
+;; drops: nobody waits for it any more.
+(def (%expired-call? m)
+  (and (table? m)
+       (or (get m :call) (get m :reply))
+       (get m :expiry)
+       (> (* 1000000000 (%scheduler-clock)) (get m :expiry))))
+
+(defonce %reply-failed (gensym "reply-failed"))
+
+;; Reply to an actor/call request with the value of thunk, or the condition
+;; it raised, and return the value, or %reply-failed after an error. The
+;; reply keeps the request's expiry, so a reply that comes too late is
+;; dropped too.
+(def (%reply request thunk)
+  (let ((reply {:reply (get request :call) :from (self) :expiry (get request :expiry)})
+        (failed #f))
+    (try
+      (put! reply :value (thunk))
+      (catch e
+        (put! reply :error e)
+        (set! failed #t)))
+    (send (get request :from) reply)
+    (if failed
+        %reply-failed
+        (get reply :value))))
+
+;; A receive clause whose body takes its message out of the mailbox first;
+;; a :when guard stays with the pattern.
+(def- (taking pattern body)
+  (if (and (pair? body) (eq? (car body) :when))
+      (cons pattern
+            (cons :when (cons (car (cdr body))
+                              (list #`(begin
+                                        (%mailbox-take)
+                                        ,@(cdr (cdr body)))))))
+      (list pattern
+            #`(begin
+                (%mailbox-take)
+                ,@body))))
+
+(defmacro receive clauses
+  "(receive clause ... [(:after seconds body ...)])\nTake the first message that matches a clause and run its body; clauses are match clauses. Messages no clause matches stay for a later receive. (:after seconds body ...) runs when that long passes without a match. (:call pattern body ...) answers an actor/call request matching pattern with body's value, which receive then returns. When body raises, the caller gets the error and receive waits for another message."
+  (let ((after nil)
+        (matches [])
+        (message (gensym "message"))
+        (next (gensym "next")))
+    (for ((c :in clauses))
+      (cond
+        ((and (pair? c) (eq? (car c) :after)) (set! after c))
+        ((and (pair? c) (eq? (car c) :call))
+         (push! matches
+                (list (list 'table :call (gensym "ref") :from (gensym "from") :msg (car (cdr c)))
+                      #`(let ((request# ,message))
+                          (%mailbox-take)
+                          (let ((value# (%reply request# (fn () ,@(cdr (cdr c))))))
+                            (if (eq? value# %reply-failed)
+                                (,next)
+                                value#))))))
+        (else (push! matches (taking (car c) (cdr c))))))
+    ;; next names the scan loop, so a failed :call can go round again.
+    #`(let ((deadline# (%thread-deadline ,(if after
+                                              (car (cdr after))
+                                              nil))))
+        (let ,next
+          ()
+          (let ((,message (%mailbox-next deadline#)))
+            (cond
+              ((eq? ,message :timeout)
+               (%mailbox-rewind)
+               ,@(if after
+                     (cdr (cdr after))
+                     '(nil)))
+              ((%expired-call? ,message) (%mailbox-take) (,next))
+              (else (match ,message
+                      ,@(array-to-list matches)
+                      (_ (,next))))))))))

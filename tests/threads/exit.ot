@@ -1,0 +1,9 @@
+;; exit from another thread ends the process; the main thread's cleanups run.
+(require otium.thread :as thread :refer (spawn sleep))
+
+(defer
+  (begin
+    (spawn (fn () (exit 3)))
+    (sleep 10)
+    (println "not reached"))
+  (println "main cleanup"))

@@ -2,6 +2,7 @@
 ;; -L tests/diagnostics/lib for the namespace fixtures.
 (require otium.test :refer (check report))
 (require otium.extra :refer (comp))
+(require otium.thread :as thread)
 
 (def (raised thunk)
   ;; The condition thunk raises, or nil.
@@ -50,6 +51,22 @@
             ("E0301" "((fn (x) x) 1 2)")
             ("E0302" "(3)")
             ("E0401" "(car 5)")))
+
+;; Thread errors, where threads work: native code only.
+(when (try
+        (begin
+          (thread/self)
+          #t)
+        (catch _ #f))
+  (check "E0502" "E0502" (code-of "(require thread-wait)"))
+  (check "E0504" "E0504" (get (raised (fn () (thread/join (thread/spawn (fn () (car 1)))))) :code))
+  (let ((sleeper (thread/spawn (fn () (thread/sleep 10)))))
+    (check "E0505" "E0505" (get (raised (fn () (thread/join sleeper 0.01))) :code))
+    (thread/kill! sleeper)
+    (thread/join sleeper))
+  ;; Last, since it leaves a thread waiting for good.
+  (let ((main (thread/self)))
+    (check "E0503" "E0503" (get (raised (fn () (thread/join (thread/spawn (fn () (thread/join main)))))) :code))))
 
 ;; Coded conditions carry their catalog type, an error subtype.
 (let ((c (raised (fn () (car 5)))))

@@ -11,6 +11,21 @@
 #include <assert.h>
 #include "reader.h"
 
+/* Clear AddressSanitizer's marks on memory that C frames once used but
+ * native code owns now, such as frames the native unwinder jumped over:
+ * ASan can't clear those itself on the runtime's own stacks. */
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define OTI_ASAN 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__) || defined(OTI_ASAN)
+#include <sanitizer/asan_interface.h>
+#define OTI_UNPOISON(p, n) __asan_unpoison_memory_region((void*)(p), (n))
+#else
+#define OTI_UNPOISON(p, n) ((void)0)
+#endif
+
 enum {
   K_PAIR = 1,
   K_BOX,
@@ -43,7 +58,9 @@ enum {
   K_RECORD,
   K_FOREIGN_LAYOUT,
   K_NATIVE,
-  K_HOST_OBJECT
+  K_HOST_OBJECT,
+  K_THREAD,
+  K_WAITQ
 };
 
 enum { V_UNBOUND = 18, TAG_CHAR = 22, TAG_BUILTIN = 26 };
@@ -357,6 +374,31 @@ enum {
   B_SYMBOL_SERIAL,
   B_EVALUATE,
   B_NATIVE_CELL_BOUND,
+  B_SPAWN,
+  B_SELF,
+  B_YIELD,
+  B_SLEEP,
+  B_THREAD_JOIN,
+  B_THREAD_STATUS,
+  B_THREAD_RESULT,
+  B_THREAD_NAME,
+  B_THREADS,
+  B_THREAD_DAEMON,
+  B_THREAD_KILL,
+  B_MAKE_WAITQ,
+  B_PARK,
+  B_WAKE_ONE,
+  B_WAKE_ALL,
+  B_ATOMIC,
+  B_SEND,
+  B_MAILBOX_NEXT,
+  B_MAILBOX_TAKE,
+  B_MAILBOX_REWIND,
+  B_THREAD_DEADLINE,
+  B_SCHEDULER_CLOCK,
+  B_THREAD_INTERRUPT,
+  B_MONITOR,
+  B_DEMONITOR,
   /* Compiler-only helpers have no name, so they aren't globals. */
   B_QQ_APPEND,
   B_EVAL_IN_NAMESPACE,
@@ -560,6 +602,7 @@ typedef struct oti_module_state oti_module_state;
 typedef struct oti_native_state oti_native_state;
 typedef struct oti_native_runtime oti_native_runtime;
 typedef struct oti_boot oti_boot;
+typedef struct oti_threads oti_threads;
 
 typedef struct {
   char* text;
@@ -664,6 +707,8 @@ typedef struct {
   ot_value callee;
   size_t argc;
   size_t args_capacity;
+  /* The limit when no interrupt or preemption is requested. */
+  uintptr_t base_limit;
 } oti_native_exec;
 
 /* What each thread of execution has of its own (see threads.c). The fields
@@ -706,7 +751,9 @@ typedef struct {
   /* The source being evaluated now, an index into ot_state.sources. */                            \
   uint32_t source;                                                                                 \
   bool compiling, evaluating, expanding;                                                           \
-  size_t expansion_calls, eval_depth;
+  size_t expansion_calls, eval_depth;                                                              \
+  /* Nesting of sections no other thread may preempt. */                                           \
+  size_t atomic;
 
 typedef struct {
   OTI_EXEC_FIELDS
@@ -774,6 +821,13 @@ struct ot_state {
   uintptr_t native_stubs[3];
   /* The boot file a native process started from (fasl.c). */
   oti_boot* boot;
+  /* Green threads, once one is spawned (threads.c). */
+  oti_threads* threads;
+  /* The root list as ot_create leaves it. Each thread pushes its own roots
+   * on top of this, and a switch swaps the list's head. */
+  oti_roots* base_roots;
+  /* What the host named the text it gives ot_eval (ot_set_source_path). */
+  char* host_path;
   /* The interrupt flag when the host hasn't installed one. */
   volatile sig_atomic_t interrupt_word;
 };
@@ -967,6 +1021,18 @@ ot_value oti_collection_call(ot_state* rt, size_t callable, size_t first, size_t
  * the running one (threads.c). */
 void oti_visit_exec(ot_state* rt, oti_exec* x, oti_root_visitor visit, void* context);
 void oti_visit_threads(ot_state* rt, oti_root_visitor visit, void* context);
+void oti_threads_destroy(ot_state* rt);
+/* A poll found the stack limit tripped while threads exist: yield when it's
+ * time to. False when the thread must unwind. */
+bool oti_thread_poll(ot_state* rt);
+/* Whether the running thread should take a pending interrupt now. */
+bool oti_thread_foreground(ot_state* rt);
+/* Grow every thread's native.args to the running thread's capacity. */
+bool oti_threads_grow_args(ot_state* rt);
+/* Live threads, counting the running one; 1 before any is spawned. */
+size_t oti_thread_count(ot_state* rt);
+/* How many module loads are in progress; threads don't switch inside one. */
+size_t oti_module_depth(ot_state* rt);
 /* Callables the VM calls as C: builtins, records, instances, params,
  * collections, foreign functions and natives. */
 bool oti_primitive_value(ot_value value);
@@ -1412,7 +1478,7 @@ static inline ot_value oti_cdr(ot_value pair) { return oti_as_pair(pair)->cdr; }
 /* Builtin tables, one per module. */
 extern const oti_builtin_def oti_bytes_builtins[], oti_class_builtins[], oti_collection_builtins[],
     oti_condition_builtins[], oti_dev_builtins[], oti_filesystem_builtins[], oti_foreign_builtins[],
-    oti_codegen_builtins[],
+    oti_codegen_builtins[], oti_thread_builtins[],
     oti_instance_builtins[], oti_numeric_builtins[], oti_port_builtins[], oti_process_builtins[],
     oti_record_builtins[], oti_reflection_builtins[], oti_restart_builtins[], oti_string_builtins[],
     oti_support_builtins[], oti_table_builtins[], oti_time_builtins[];

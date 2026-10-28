@@ -77,6 +77,9 @@ static void mark_root(void* context, ot_value* slot) {
 bool oti_reclaim(ot_state* rt) {
   if (rt->frame_count || rt->compiling || rt->evaluating || rt->eval_depth)
     return oti_error(rt, "code reclamation requires an evaluation boundary");
+  /* Other threads may be running code, or compiling it, that only their
+   * frames reach, so code is reclaimed only while one thread is left. */
+  if (oti_thread_count(rt) > 1) return true;
   oti_reclaim_mark m = {.rt = rt};
   m.objects = calloc(rt->heap.used / 64 + 1, 1);
   m.functions = calloc(rt->function_count + 1, 1);

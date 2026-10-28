@@ -68,6 +68,7 @@ static void report_error(ot_state* rt, const char* where) { ot_report_error(rt, 
 
 static bool evaluate(ot_state* rt, const char* source, size_t length, const char* path, bool echo) {
   ot_value result;
+  ot_set_source_path(rt, path);
   if (!ot_eval(rt, source, length, &result)) {
     int status;
     if (!ot_interrupted(rt) && !ot_exit_status(rt, &status)) report_error(rt, path);

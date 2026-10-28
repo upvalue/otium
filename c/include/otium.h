@@ -94,6 +94,10 @@ size_t ot_error_offset(const ot_state* rt);
  * stays pending. False, writing nothing, when no error is pending or the
  * failure was an interrupt or exit. */
 bool ot_report_error(ot_state* rt, const char* path, FILE* out);
+/* Name the text later ot_eval calls evaluate, for errors reported with a
+ * NULL path, such as those of threads that fail on their own. The runtime
+ * copies path; NULL forgets it. */
+bool ot_set_source_path(ot_state* rt, const char* path);
 /* An exit request returns false from eval/call; the host decides when to exit.
  * A subsequent top-level evaluation clears the request. */
 bool ot_exit_status(const ot_state* rt, int* status);

@@ -1,0 +1,342 @@
+;; Green threads. tests.py runs this under the test scheduler with several
+;; seeds (OTIUM_SCHED), so interleavings vary but each run is repeatable and
+;; sleeps take virtual time.
+(require otium.test :refer (check report))
+(require otium.thread :as thread :refer (spawn self sleep yield send receive))
+
+;; Let every other thread run until it blocks: virtual time only moves when
+;; nothing else can run.
+(def (settle)
+  (sleep 0.001))
+
+(def (failure-code thunk)
+  (try
+    (begin
+      (thunk)
+      nil)
+    (catch e (get e :code))))
+
+;; --- Spawn and join
+
+(check "join returns the result" 3 (thread/join (spawn (fn (a b) (+ a b)) 1 2)))
+(check "spawn with no arguments" 'done (thread/join (spawn (fn () 'done))))
+(check "thread?" #t (thread/thread? (self)))
+(check "self is stable" #t (eq? (self) (self)))
+(check "main thread name" :main (thread/name (self)))
+(check "named thread" 'worker (thread/name (thread/spawn-named 'worker (fn () nil))))
+(check "running thread is runnable" :runnable (thread/status (self)))
+
+(let ((t (spawn (fn () (self)))))
+  (check "self inside a thread" #t (eq? t (thread/join t)))
+  (check "finished thread is done" :done (thread/status t))
+  (check "joining again returns the result" #t (eq? t (thread/join t))))
+
+(let ((t (spawn (fn ()
+                  (sleep 1)
+                  'late))))
+  (check "status while sleeping"
+         :waiting (begin
+                    (settle)
+                    (thread/status t)))
+  (check "join timeout raises a timeout" "E0505" (failure-code (fn () (thread/join t 0.1))))
+  (check "timeout condition"
+         #t
+         (try
+           (thread/join t 0.1)
+           (catch e (thread/timeout? e))))
+  (check "use-value restart"
+         'instead
+         (handler-bind ((thread/timeout? (fn (_) (invoke-restart 'use-value 'instead)))) (thread/join t 0.1)))
+  (check "join after the timeout" 'late (thread/join t)))
+
+;; --- Failure
+
+(let ((t (spawn (fn () (car 1)))))
+  (check "failure raises thread-failed" "E0504" (failure-code (fn () (thread/join t))))
+  (check "failure carries the original"
+         "`car` expected a pair, got 1"
+         (try
+           (thread/join t)
+           (catch (thread/failed? e) (condition-message (get e :reason)))))
+  (check "failed status" :failed (thread/status t)))
+
+(let ((log []))
+  (thread/join (spawn (fn ()
+                        (try
+                          (error "inner")
+                          (catch e (push! log (condition-message e))))
+                        'ok)))
+  (check "a thread catches its own errors" ["inner"] log))
+
+;; --- Kill
+
+(let ((log [])
+      (t (spawn (fn ()
+                  (defer
+                    (try
+                      (sleep 10)
+                      (catch _ (push! log :caught)))
+                    (push! log :cleanup))))))
+  (settle)
+  (thread/kill! t)
+  (check "kill returns the reason to join" :killed (thread/join t))
+  (check "killed status" :killed (thread/status t))
+  (check "kill runs cleanups and try can't catch it" [:cleanup] log))
+
+(let ((t (spawn (fn () (sleep 10)))))
+  (thread/kill! t 'shutdown)
+  (check "kill reason" 'shutdown (thread/join t)))
+
+(check "killing the main thread is an error"
+       #t
+       (try
+         (begin
+           (thread/kill! (self))
+           #f)
+         (catch _ #t)))
+
+(let ((t (spawn (fn ()
+                  (thread/kill! (self) 'me)
+                  'not-reached))))
+  (check "a thread can kill itself" 'me (thread/join t)))
+
+;; --- Interrupt
+
+(let ((log [])
+      (t (spawn (fn ()
+                  (sleep 1)
+                  (push! log :after-sleep)
+                  'ok))))
+  (settle)
+  (thread/interrupt! t (fn () (push! log :interrupted)))
+  (check "interrupted thread carries on" 'ok (thread/join t))
+  (check "interrupt runs on the target" [:interrupted :after-sleep] log))
+
+(let ((t (spawn (fn ()
+                  (sleep 1)
+                  'ok))))
+  (settle)
+  (thread/interrupt! t (fn () (error "stop")))
+  (check "an error in the thunk unwinds the target" "E0504" (failure-code (fn () (thread/join t)))))
+
+(let ((t (spawn (fn () (sleep 1)))))
+  (check "interrupting yourself runs at once"
+         'here
+         (let ((seen nil))
+           (thread/interrupt! (self) (fn () (set! seen 'here)))
+           seen))
+  (thread/kill! t))
+
+;; --- Sleep and time
+
+(let ((order [])
+      (start (%scheduler-clock)))
+  (thread/join-all)
+  (for ((d :in '(0.3 0.1 0.2)))
+    (spawn (fn ()
+             (sleep d)
+             (push! order d))))
+  (thread/join-all)
+  (check "sleepers wake in deadline order" [0.1 0.2 0.3] order)
+  (check "virtual time passed" #t (>= (- (%scheduler-clock) start) 0.3)))
+
+(check "sleep returns nil" nil (sleep 0))
+
+;; --- Interleaving and yield
+
+(let ((log []))
+  (def (worker name n)
+    (dotimes (i n)
+      (push! log (list name i))
+      (yield))
+    name)
+  (let ((a (spawn worker 'a 3))
+        (b (spawn worker 'b 3)))
+    (check "both workers finish" '(a b) (list (thread/join a) (thread/join b)))
+    (check "each worker in order" '((a 0) (a 1) (a 2)) (filter (fn (e) (eq? (car e) 'a)) (array-to-list log)))
+    (check "six entries" 6 (length log))))
+
+;; A loop that never yields is preempted at its polls.
+(let ((flag #f))
+  (def (spin n)
+    (if flag
+        n
+        (spin (+ n 1))))
+  (let ((t (spawn spin 0)))
+    (spawn (fn () (set! flag #t)))
+    (check "preempted loop sees the flag" #t (int? (thread/join t)))))
+
+;; --- Mutexes and condition variables
+
+(let ((m (thread/mutex))
+      (counter 0))
+  (def (bump n)
+    (dotimes (_ n)
+      (thread/with-lock m
+                        (let ((c counter))
+                          (yield)
+                          (set! counter (+ c 1))))))
+  (for-each thread/join (map (fn (_) (spawn bump 100)) (range 5)))
+  (check "mutex counter" 500 counter))
+
+(let ((m (thread/mutex)))
+  (thread/lock! m)
+  (check "lock! times out" #f (thread/join (spawn (fn () (thread/lock! m 0.1)))))
+  (check "relocking is an error"
+         #t
+         (try
+           (begin
+             (thread/lock! m)
+             #f)
+           (catch _ #t)))
+  (thread/unlock! m)
+  (check "lock! after unlock" #t (thread/join (spawn (fn () (thread/with-lock m #t)))))
+  (check "unlocking a free mutex is an error"
+         #t
+         (try
+           (begin
+             (thread/unlock! m)
+             #f)
+           (catch _ #t))))
+
+(let ((m (thread/mutex))
+      (c (thread/condvar))
+      (queue [])
+      (got []))
+  (def (consumer)
+    (dotimes (i 10)
+      (thread/with-lock m
+                        (while (= (length queue) 0) (thread/condvar-wait c m))
+                        (push! got (car (array-to-list queue)))
+                        (set! queue (list-to-array (cdr (array-to-list queue)))))))
+  (def (producer)
+    (dotimes (i 10)
+      (thread/with-lock m (push! queue i) (thread/condvar-signal! c))
+      (yield)))
+  (let ((ct (spawn consumer))
+        (pt (spawn producer)))
+    (thread/join pt)
+    (thread/join ct)
+    (check "producer and consumer" (range 10) got)))
+
+(let ((m (thread/mutex))
+      (c (thread/condvar)))
+  (thread/lock! m)
+  (check "condvar-wait times out" #f (thread/condvar-wait c m 0.1))
+  (check "and holds the lock again" #t (eq? (m :owner) (self)))
+  (thread/unlock! m))
+
+(let ((m (thread/mutex))
+      (c (thread/condvar))
+      (woken 0))
+  (let ((ts (map (fn (_) (spawn (fn () (thread/with-lock m (thread/condvar-wait c m) (set! woken (+ woken 1))))))
+                 (range 3))))
+    (settle)
+    (thread/with-lock m (thread/condvar-broadcast! c))
+    (for-each thread/join ts)
+    (check "broadcast wakes everyone" 3 woken)))
+
+;; --- Mailboxes and receive
+
+(let ((echo (spawn (fn () (receive ({:from from :msg msg} (send from (list 'echo msg))))))))
+  (send echo {:from (self) :msg 'hello})
+  (check "echo" '(echo hello) (receive (m m))))
+
+(send (self) {:kind :a :n 1})
+(send (self) {:kind :b :n 2})
+(send (self) {:kind :a :n 3})
+(check "receive picks the first match" 2 (receive ({:kind :b :n n} n)))
+(check "unmatched messages stay, in order" 1 (receive ({:kind :a :n n} n)))
+(check "the rest" 3 (receive ({:kind :a :n n} n)))
+(check ":after when nothing matches" 'nothing (receive (m m) (:after 0.05 'nothing)))
+(send (self) 'other)
+(check ":after skips unmatched" 'timeout (receive ('wanted 'got) (:after 0.05 'timeout)))
+(check "the unmatched message is still there" 'other (receive (m m)))
+(check ":after 0 polls" 'empty (receive (m m) (:after 0 'empty)))
+
+(let ((main (self)))
+  (spawn (fn ()
+           (sleep 0.1)
+           (send main 'late)))
+  (check "receive waits for a message" 'late (receive ('late 'late))))
+
+(let ((t (spawn (fn () 'gone))))
+  (thread/join t)
+  (check "send to a finished thread" #f (send t 'x)))
+
+(def (counter-loop count)
+  (receive ({:op :add :n n} (counter-loop (+ count n)))
+           ({:op :get :from from} (send from count) (counter-loop count))
+           ({:op :stop} count)))
+
+(let ((t (spawn counter-loop 0)))
+  (dotimes (i 1000)
+    (send t {:op :add :n 1}))
+  (send t {:op :get :from (self)})
+  (check "actor loop in constant stack" 1000 (receive (n n)))
+  (send t {:op :stop})
+  (check "actor result" 1000 (thread/join t)))
+
+;; --- Groups
+
+(let ((results []))
+  (with ((g (thread/group)))
+        (for ((i :in (range 3)))
+          (thread/spawn-in g
+                           (fn ()
+                             (sleep (* i 0.01))
+                             (push! results i)))))
+  (check "closing a group waits for its threads" [0 1 2] results))
+
+(let ((log []))
+  (check "a failure kills the group and raises it"
+         '(thread-failed "boom")
+         (try
+           (with ((g (thread/group)))
+                 (thread/spawn-in g
+                                  (fn ()
+                                    (defer
+                                      (sleep 10)
+                                      (push! log :sibling-cleanup))))
+                 (thread/spawn-in g
+                                  (fn ()
+                                    (sleep 0.01)
+                                    (error "boom")))
+                 (sleep 5)
+                 (push! log :body-finished))
+           (catch e (list (get e :type) (condition-message (get e :reason))))))
+  (check "siblings unwound, body interrupted" [:sibling-cleanup] log))
+
+(check "closing raises the failure"
+       "boom"
+       (try
+         (with ((g (thread/group))) (thread/spawn-in g (fn () (error "boom"))) (thread/join-all))
+         (catch e (condition-message (get e :reason)))))
+
+(let ((finished []))
+  (check "independent groups record failures"
+         '(thread-failed 1)
+         (try
+           (with ((g (thread/group :independent)))
+                 (thread/spawn-in g (fn () (error "one")))
+                 (thread/spawn-in g
+                                  (fn ()
+                                    (sleep 0.05)
+                                    (push! finished :survivor))))
+           (catch e (list (get e :type) (length (list (get e :reason)))))))
+  (check "siblings of an independent failure finish" [:survivor] finished))
+
+;; --- Bookkeeping
+
+(let ((t (spawn (fn () (sleep 1)))))
+  (thread/daemon! t)
+  (settle)
+  (thread/join-all)
+  (check "join-all skips daemons" :waiting (thread/status t))
+  (check "all lists live threads" #t (pair? (memq t (array-to-list (thread/all)))))
+  (thread/kill! t)
+  (thread/join t))
+
+(check "only main is left" 1 (length (thread/all)))
+
+(report "threads")

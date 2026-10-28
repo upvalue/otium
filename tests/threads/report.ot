@@ -1,0 +1,13 @@
+;; A thread that fails on its own is reported on stderr, with its source.
+(require otium.thread :as thread :refer (spawn))
+
+(def (fail)
+  (error "worker broke"))
+
+(def t (spawn fail))
+
+(println (thread/status (begin
+                          (try
+                            (thread/join t)
+                            (catch _ nil))
+                          t)))

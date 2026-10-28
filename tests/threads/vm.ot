@@ -1,0 +1,2 @@
+(require otium.thread :as thread :refer (spawn))
+(spawn (fn () 1))

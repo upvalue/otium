@@ -1,0 +1,8 @@
+;; Every thread waits for another: the main thread's wait raises :deadlock.
+(require otium.thread :as thread :refer (spawn self))
+
+(def main (self))
+
+(def t (spawn (fn () (thread/join main))))
+
+(thread/join t)

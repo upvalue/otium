@@ -1,0 +1,167 @@
+;; Actors: request/reply, monitors, delayed sends and names. Run under the
+;; test scheduler like checks.ot.
+(require otium.test :refer (check report))
+(require otium.actor :as actor)
+(require otium.thread :as thread :refer (spawn self sleep send receive))
+
+(def (settle)
+  (sleep 0.001))
+
+(def (mailbox-empty?)
+  (eq? (receive (m m) (:after 0 'empty)) 'empty))
+
+;; --- call and reply
+
+(def (serve count)
+  (serve (receive ({:op :add :n n} (+ count n)) (:call {:op :get} count) (:call {:op :fail} (car count)))))
+
+(def counter (spawn serve 0))
+
+(send counter {:op :add :n 2})
+(check "call gets the reply" 2 (actor/call counter {:op :get}))
+(check "a nil reply" nil (actor/call (spawn (fn () (receive (:call _ nil)))) 'x))
+(check "the body's error is raised in the caller"
+       "`car` expected a pair, got 2"
+       (try
+         (actor/call counter {:op :fail})
+         (catch e (condition-message e))))
+(check "the actor carries on with its state" 2 (actor/call counter {:op :get}))
+(check "no stray replies" #t (mailbox-empty?))
+
+(let ((slow (spawn (fn () (receive (:call 'x (sleep 1) 'slow))))))
+  (check "call timeout"
+         "E0505"
+         (try
+           (actor/call slow 'x 0.05)
+           (catch e (get e :code))))
+  (check "use-value"
+         'instead
+         (handler-bind ((thread/timeout? (fn (_) (invoke-restart 'use-value 'instead)))) (actor/call slow 'x 0.05)))
+  (thread/join slow)
+  (check "a late reply is dropped" #t (mailbox-empty?)))
+
+(with-params ((actor/call-timeout 0.05))
+  (let ((silent (spawn (fn () (sleep 1)))))
+    (check "call-timeout param"
+           "E0505"
+           (try
+             (actor/call silent 'x)
+             (catch e (get e :code))))
+    (thread/kill! silent)))
+
+;; A request that waited past its expiry is dropped unanswered.
+(let ((log [])
+      (busy (spawn (fn ()
+                     (sleep 0.2)
+                     (receive (:call m (push! log m) m) (:after 0 nil))))))
+  (try
+    (actor/call busy 'stale 0.05)
+    (catch _ nil))
+  (thread/join busy)
+  (check "expired requests are not served" [] log))
+
+(check "call to a finished thread"
+       #t
+       (let ((t (spawn (fn () nil))))
+         (thread/join t)
+         (try
+           (begin
+             (actor/call t 'x)
+             #f)
+           (catch _ #t))))
+
+;; --- receive details
+
+(send (self) 1)
+(send (self) 5)
+(check ":when guards" 5 (receive (n :when (> n 3) n)))
+(check "the guarded-out message stays" 1 (receive (n n)))
+
+;; --- Live reload: an actor looping through its global picks up new code.
+
+(def (version-loop)
+  (receive (:call 'version 1))
+  (version-loop))
+
+(def versioned (spawn version-loop))
+
+(check "old code" 1 (actor/call versioned 'version))
+(eval '(def (version-loop)
+         (receive (:call 'version 2))
+         (version-loop)))
+(check "the receive already waiting runs old code" 1 (actor/call versioned 'version))
+(check "the next loop runs new code" 2 (actor/call versioned 'version))
+(thread/kill! versioned)
+
+;; --- Monitors
+
+(let ((t (spawn (fn () (receive ('go 'done)))))
+      (ref nil))
+  (set! ref (actor/monitor t))
+  (send t 'go)
+  (check "normal exit message" '(#t :normal) (receive ({:exit who :ref (== ref) :reason why} (list (eq? who t) why)))))
+
+(let ((t (spawn (fn ()
+                  (settle)
+                  (car 1))))
+      (ref nil))
+  (set! ref (actor/monitor t))
+  (check "failure reason is the condition" "E0401" (receive ({:exit _ :ref (== ref) :reason why} (get why :code)))))
+
+(let ((t (spawn (fn () (sleep 10))))
+      (ref nil))
+  (set! ref (actor/monitor t))
+  (thread/kill! t 'stop)
+  (check "kill reason" 'stop (receive ({:exit _ :ref (== ref) :reason why} why))))
+
+(let ((t (spawn (fn () nil))))
+  (thread/join t)
+  (let ((ref (actor/monitor t)))
+    (check "monitoring a finished thread" :normal (receive ({:ref (== ref) :reason why} why) (:after 0 'none)))))
+
+(let ((t (spawn (fn () (receive ('go nil))))))
+  (let ((ref (actor/monitor t)))
+    (actor/demonitor ref)
+    (send t 'go)
+    (thread/join t)
+    (check "demonitor" #t (mailbox-empty?))))
+
+;; --- Delayed sends
+
+(let ((start (%scheduler-clock)))
+  (actor/send-after 0.3 (self) 'third)
+  (actor/send-after 0.1 (self) 'first)
+  (actor/send-after 0.2 (self) 'second)
+  (check "send-after returns at once" #t (< (- (%scheduler-clock) start) 0.1))
+  (check "delivered in order" '(first second third) (list (receive (m m)) (receive (m m)) (receive (m m))))
+  (check "after their delays" #t (>= (- (%scheduler-clock) start) 0.3)))
+
+;; --- Names
+
+(let ((t (spawn (fn () (serve 10)))))
+  (actor/register! :tally t)
+  (check "whereis" #t (eq? t (actor/whereis :tally)))
+  (send :tally {:op :add :n 1})
+  (check "send and call by name" 11 (actor/call :tally {:op :get}))
+  (actor/send-after 0.01 :tally {:op :add :n 1})
+  (sleep 0.05)
+  (check "send-after by name" 12 (actor/call :tally {:op :get}))
+  (check "a taken name"
+         #t
+         (try
+           (begin
+             (actor/register! :tally (spawn (fn () nil)))
+             #f)
+           (catch _ #t)))
+  (thread/kill! t)
+  (thread/join t)
+  (check "a dead thread's name is free" nil (actor/whereis :tally))
+  (check "send to a free name" #f (send :tally 'x)))
+
+(let ((t (spawn (fn () (sleep 1)))))
+  (actor/register! 'named t)
+  (actor/unregister! 'named)
+  (check "unregister!" nil (actor/whereis 'named))
+  (thread/kill! t))
+
+(report "actors")

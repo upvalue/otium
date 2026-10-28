@@ -232,10 +232,8 @@ void ot_set_interrupt_flag(ot_state* rt, volatile sig_atomic_t* flag) {
 
 void ot_request_interrupt(ot_state* rt, int reason) {
   *rt->interrupt_flag = reason;
-#ifdef OTIUM_NATIVE
   /* Every stack check at a function entry or loop head now fails. */
   rt->native.limit = UINTPTR_MAX;
-#endif
 }
 
 bool ot_set_frame_limit(ot_state* rt, size_t frames) {
@@ -272,6 +270,7 @@ bool ot_poll_interrupt(ot_state* rt) {
 
 bool oti_interrupt_point(ot_state* rt) {
   if (!rt->interrupt_flag || !*rt->interrupt_flag) return true;
+  if (rt->threads && !oti_thread_foreground(rt)) return true;
   if (oti_unbound(hook_value(rt, rt->interrupt_handler))) return interrupt_now(rt);
   ot_value reason = ot_int(*rt->interrupt_flag);
   *rt->interrupt_flag = 0;
@@ -573,6 +572,7 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
     return NULL;
   }
   rt->permanent_constants = rt->constant_count;
+  rt->base_roots = rt->heap.roots;
   return rt;
 }
 
@@ -600,6 +600,7 @@ void ot_destroy(ot_state* rt) {
   oti_foreign_destroy(rt);
   oti_modules_destroy(rt);
   oti_natives_destroy(rt);
+  oti_threads_destroy(rt);
 #ifdef OTIUM_NATIVE
   oti_boot_destroy(rt);
   oti_native_destroy(rt);
@@ -617,6 +618,7 @@ void ot_destroy(ot_state* rt) {
   free(rt->namespaces);
   for (size_t i = 0; i < rt->source_count; i++) free(rt->sources[i]);
   free(rt->sources);
+  free(rt->host_path);
   free(rt->functions);
   free(rt->open_ports);
   free(rt->cleanups);
@@ -1330,6 +1332,8 @@ static void print_value(FILE* out, ot_value v, unsigned depth) {
   else if (oti_kind(v, K_FOREIGN_LAYOUT)) fputs("#<foreign-layout>", out);
   else if (oti_kind(v, K_FOREIGN_LIBRARY)) fputs("#<foreign-library>", out);
   else if (oti_kind(v, K_HOST_OBJECT)) fprintf(out, "#<%s>", oti_host_object_name(v));
+  else if (oti_kind(v, K_THREAD)) fputs("#<thread>", out);
+  else if (oti_kind(v, K_WAITQ)) fputs("#<wait-queue>", out);
   else fputs("#<function>", out);
 }
 

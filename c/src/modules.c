@@ -284,6 +284,8 @@ static bool load_module(ot_state* rt, uint32_t space, bool reload, bool legacy_f
 
 bool oti_load_module(ot_state* rt, uint32_t space) { return load_module(rt, space, false, false); }
 
+size_t oti_module_depth(ot_state* rt) { return rt->modules ? rt->modules->depth : 0; }
+
 static bool keyword(const oti_ast* a, const char* name) {
   return a && a->kind == AST_KEYWORD && a->as.text.size == strlen(name) &&
          !memcmp(a->as.text.data, name, a->as.text.size);

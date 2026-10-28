@@ -143,29 +143,31 @@ ot_value oti_native_enter(ot_state* rt, ot_value callee, uintptr_t entry, size_t
 _Noreturn void oti_native_resume(ot_state* rt, uintptr_t sp, uintptr_t pc, ot_value value);
 extern char oti_native_return[], oti_native_fail[];
 
-#define OFF_SP 0
-#define OFF_ENTRY 8
-#define OFF_LIMIT 16
-#define OFF_TOP 24
-#define OFF_ARGS 32
-#define OFF_DEPTH 40
-#define OFF_HEAP_START 632
-#define OFF_HEAP_USED 656
-#define STR_(x) #x
-#define STR(x) STR_(x)
+/* The assembly below reads these state fields; the C compiler gives the
+ * assembler their offsets. */
+void oti_native_offsets(void);
+void oti_native_offsets(void) {
+  __asm__(".set OFF_SP, %c0\n"
+          ".set OFF_ENTRY, %c1\n"
+          ".set OFF_TOP, %c2\n"
+          ".set OFF_ARGS, %c3\n"
+          ".set OFF_DEPTH, %c4\n"
+          ".set OFF_HEAP_START, %c5\n"
+          ".set OFF_HEAP_USED, %c6\n"
+          :
+          : "i"(offsetof(ot_state, native.sp)), "i"(offsetof(ot_state, native.entry)),
+            "i"(offsetof(ot_state, native.stack_top)), "i"(offsetof(ot_state, native.args)),
+            "i"(offsetof(ot_state, native.depth)), "i"(offsetof(ot_state, heap.start)),
+            "i"(offsetof(ot_state, heap.used)));
+}
 
-_Static_assert(offsetof(ot_state, native.sp) == OFF_SP, "trampoline offsets");
-_Static_assert(offsetof(ot_state, native.entry) == OFF_ENTRY, "trampoline offsets");
-_Static_assert(offsetof(ot_state, native.limit) == OFF_LIMIT, "trampoline offsets");
-_Static_assert(offsetof(ot_state, native.stack_top) == OFF_TOP, "trampoline offsets");
-_Static_assert(offsetof(ot_state, native.args) == OFF_ARGS, "trampoline offsets");
-_Static_assert(offsetof(ot_state, native.depth) == OFF_DEPTH, "trampoline offsets");
-_Static_assert(offsetof(ot_state, heap.used) == OFF_HEAP_USED, "trampoline offsets");
-_Static_assert(offsetof(ot_state, heap.start) == OFF_HEAP_START, "trampoline offsets");
+#define OFF_LIMIT 16
+_Static_assert(offsetof(ot_state, native.limit) == OFF_LIMIT, "the poll's displacement");
 
 /* oti_native_enter(rt, callee, entry, argc): call native code from C with the
  * arguments in native.args. The outermost entry switches to the Otium stack;
- * a nested one is already on it, since C helpers run there. Either way it
+ * a nested one is already on it, since C helpers run there, and so is a
+ * green thread's first, which has no stack_top. Either way it
  * leaves an entry record under the call (the previous native.sp, the
  * previous record and the stack pointer to return on) that frame walking
  * and unwinding use. The unwinder returns failure here through
@@ -183,25 +185,27 @@ __asm__(".text\n"
         "  push %r15\n"
         "  mov %rdi, %rbx\n"
         "  mov %rsp, %r12\n"
-        "  cmpq $0, " STR(OFF_DEPTH) "(%rbx)\n"
+        "  cmpq $0, OFF_DEPTH(%rbx)\n"
         "  jne 1f\n"
-        "  mov " STR(OFF_TOP) "(%rbx), %rsp\n"
+        "  cmpq $0, OFF_TOP(%rbx)\n"
+        "  je 1f\n"
+        "  mov OFF_TOP(%rbx), %rsp\n"
         "1:\n"
         "  and $-16, %rsp\n"
         "  sub $32, %rsp\n"
-        "  mov " STR(OFF_SP) "(%rbx), %rax\n"
+        "  mov OFF_SP(%rbx), %rax\n"
         "  mov %rax, 0(%rsp)\n"
-        "  mov " STR(OFF_ENTRY) "(%rbx), %rax\n"
+        "  mov OFF_ENTRY(%rbx), %rax\n"
         "  mov %rax, 8(%rsp)\n"
         "  mov %r12, 16(%rsp)\n"
-        "  mov %rsp, " STR(OFF_ENTRY) "(%rbx)\n"
-        "  movq $0, " STR(OFF_SP) "(%rbx)\n"
-        "  incq " STR(OFF_DEPTH) "(%rbx)\n"
-        "  mov " STR(OFF_HEAP_USED) "(%rbx), %r15\n"
-        "  add " STR(OFF_HEAP_START) "(%rbx), %r15\n"
+        "  mov %rsp, OFF_ENTRY(%rbx)\n"
+        "  movq $0, OFF_SP(%rbx)\n"
+        "  incq OFF_DEPTH(%rbx)\n"
+        "  mov OFF_HEAP_USED(%rbx), %r15\n"
+        "  add OFF_HEAP_START(%rbx), %r15\n"
         "  mov %rdx, %r9\n"
         "  mov %rcx, %rax\n"
-        "  mov " STR(OFF_ARGS) "(%rbx), %r10\n"
+        "  mov OFF_ARGS(%rbx), %r10\n"
         "  mov 0(%r10), %rdi\n"
         "  mov 8(%r10), %rcx\n"
         "  mov 16(%r10), %r8\n"
@@ -215,13 +219,13 @@ __asm__(".text\n"
         "oti_native_fail:\n"
         "  xor %eax, %eax\n"
         "2:\n"
-        "  sub " STR(OFF_HEAP_START) "(%rbx), %r15\n"
-        "  mov %r15, " STR(OFF_HEAP_USED) "(%rbx)\n"
-        "  decq " STR(OFF_DEPTH) "(%rbx)\n"
+        "  sub OFF_HEAP_START(%rbx), %r15\n"
+        "  mov %r15, OFF_HEAP_USED(%rbx)\n"
+        "  decq OFF_DEPTH(%rbx)\n"
         "  mov 0(%rsp), %rdx\n"
-        "  mov %rdx, " STR(OFF_SP) "(%rbx)\n"
+        "  mov %rdx, OFF_SP(%rbx)\n"
         "  mov 8(%rsp), %rdx\n"
-        "  mov %rdx, " STR(OFF_ENTRY) "(%rbx)\n"
+        "  mov %rdx, OFF_ENTRY(%rbx)\n"
         "  mov 16(%rsp), %rsp\n"
         "  pop %r15\n"
         "  pop %r14\n"
@@ -237,8 +241,8 @@ __asm__(".text\n"
         "oti_native_resume:\n"
         "  mov %rdi, %rbx\n"
         "  mov %rsi, %rsp\n"
-        "  mov " STR(OFF_HEAP_USED) "(%rbx), %r15\n"
-        "  add " STR(OFF_HEAP_START) "(%rbx), %r15\n"
+        "  mov OFF_HEAP_USED(%rbx), %r15\n"
+        "  add OFF_HEAP_START(%rbx), %r15\n"
         "  mov %rcx, %rax\n"
         "  jmp *%rdx\n"
         ".size oti_native_resume, .-oti_native_resume\n");
@@ -1066,7 +1070,9 @@ bool oti_native_args(ot_state* rt, size_t count) {
                 sizeof(ot_value)))
     return false;
   for (size_t i = old; i < rt->native.args_capacity; i++) rt->native.args[i] = OT_NIL;
-  return true;
+  /* Compiled code assumes room for any unit's arguments whichever thread
+   * installed it, so every thread grows together. */
+  return oti_threads_grow_args(rt);
 }
 
 static uintptr_t entry_of(ot_state* rt, ot_value callee) {
@@ -1127,6 +1133,7 @@ static void visit_frames(ot_state* rt, uintptr_t sp, oti_root_visitor visit, voi
       abort();
     }
     const uint64_t* bits = c->bitmaps + d->slots;
+    OTI_UNPOISON(sp, d->frame);
     for (uint32_t w = 0; w < d->words; w++)
       for (uint64_t word = bits[w]; word; word &= word - 1)
         visit(context, (ot_value*)sp + w * 64 + (uint32_t)__builtin_ctzll(word));
@@ -1379,13 +1386,13 @@ static W h_set_global(ot_state* rt, W cell, W value) {
 /* The stack check at function entries and loop back edges failed: the stack
  * really is too deep, or an interrupt was requested. */
 static W h_poll(ot_state* rt) {
-  oti_native_runtime* n = rt->native_runtime;
-  if (rt->native.limit != n->limit) {
-    rt->native.limit = n->limit;
+  if (rt->native.limit != rt->native.base_limit) {
+    rt->native.limit = rt->native.base_limit;
     if (!oti_interrupt_point(rt)) oti_native_raise(rt);
+    if (rt->threads && !oti_thread_poll(rt)) oti_native_raise(rt);
     return OT_NIL;
   }
-  if (rt->native.sp <= n->limit) {
+  if (rt->native.sp <= rt->native.base_limit) {
     oti_error(rt, "VM stack limit exceeded");
     oti_native_raise(rt);
   }
@@ -1648,7 +1655,8 @@ static W dispatch(ot_state* rt) {
   ot_value callee = rt->native.callee;
   if ((callee & 255) == TAG_BUILTIN && callee != APPLY_VALUE && (callee >> 8) < B_COUNT &&
       base + argc <= rt->stack_room) {
-    memcpy(rt->stack + base, rt->native.args, argc * sizeof(ot_value));
+    /* A new thread has no VM stack until something needs one. */
+    if (argc) memcpy(rt->stack + base, rt->native.args, argc * sizeof(ot_value));
     rt->sp = base + argc;
     ot_value result = rt->builtin_run[callee >> 8](rt, base, argc);
     rt->sp = base;
@@ -1869,7 +1877,7 @@ bool oti_native_init(ot_state* rt) {
   mprotect(stack, page_size(), PROT_NONE);
   rt->native.stack_top = ((uintptr_t)stack + n->stack_bytes) & ~(uintptr_t)15;
   n->limit = (uintptr_t)stack + page_size() + STACK_MARGIN;
-  rt->native.limit = n->limit;
+  rt->native.limit = rt->native.base_limit = n->limit;
   if (!oti_native_args(rt, 16)) return false;
   rt->native.callee = OT_NIL;
   if (!build_stubs(rt)) return oti_error(rt, "cannot build native stubs");

@@ -1,0 +1,15 @@
+;; ^C goes to the main thread, even while another thread runs. tests.py
+;; sends SIGINT once "ready" is printed.
+(require otium.thread :as thread :refer (spawn sleep))
+
+(def (spin n)
+  (spin (+ n 1)))
+
+(def worker (spawn spin 0))
+
+(defer
+  (begin
+    (println "ready")
+    (flush-output-port (current-output-port))
+    (thread/join worker))
+  (println "main cleanup"))

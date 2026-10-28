@@ -11,7 +11,7 @@ static const oti_builtin_def* const builtin_modules[] = {
     oti_numeric_builtins,    oti_port_builtins,       oti_process_builtins,
     oti_record_builtins,     oti_reflection_builtins, oti_restart_builtins,
     oti_string_builtins,     oti_support_builtins,    oti_table_builtins,
-    oti_time_builtins,       oti_codegen_builtins,
+    oti_time_builtins,       oti_codegen_builtins,    oti_thread_builtins,
 };
 
 #define BUILTIN_MODULES (sizeof(builtin_modules) / sizeof(*builtin_modules))

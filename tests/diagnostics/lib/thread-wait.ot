@@ -1,0 +1,4 @@
+;; Waits for another thread while loading, which E0502 forbids.
+(ns thread-wait (:require (otium.thread :as thread)))
+
+(thread/join (thread/spawn (fn () 1)))

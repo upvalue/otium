@@ -110,7 +110,7 @@
     (if (and frames (> (length frames) 0))
         (let ((frames (array-to-list frames))
               (inner (first frames))
-              (callers (take 8 (rest frames)))
+              (callers (take 8 (filter (fn (frame) (frame :span)) (rest frames))))
               (hidden (- (length frames) 1 (length callers))))
           (append (if (inner :name)
                       (list (str "in `" (inner :name) "`"))

@@ -36,6 +36,8 @@ static const char* type_name(ot_value value) {
       case K_NATIVE: return ":function";
       case K_FOREIGN_LAYOUT: return ":foreign-layout";
       case K_POINTER: return ":pointer";
+      case K_THREAD: return ":thread";
+      case K_WAITQ: return ":wait-queue";
       default: break;
     }
   return ":native";

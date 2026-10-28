@@ -191,7 +191,7 @@ typedef struct {
 } oti_report;
 
 static const char* source_path(oti_report* r, uint32_t source) {
-  if (source == 0) return r->host_path;
+  if (source == 0) return r->host_path ? r->host_path : r->rt->host_path;
   return source < r->rt->source_count ? r->rt->sources[source] : NULL;
 }
 
@@ -508,6 +508,18 @@ static bool render(ot_state* rt, ot_value* values) {
        oti_kind(result, K_STRING);
   if (ok) values[1] = result;
   return ok;
+}
+
+bool ot_set_source_path(ot_state* rt, const char* path) {
+  char* copy = NULL;
+  if (path) {
+    size_t n = strlen(path) + 1;
+    if (!(copy = malloc(n))) return oti_error(rt, "out of host memory");
+    memcpy(copy, path, n);
+  }
+  free(rt->host_path);
+  rt->host_path = copy;
+  return true;
 }
 
 bool ot_report_error(ot_state* rt, const char* path, FILE* out) {

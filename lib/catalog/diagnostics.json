@@ -271,6 +271,38 @@
     "example": "(car nil)",
     "fixed": "(if (pair? xs) (car xs) nil)"
   },
+  "E0502": {
+    "title": "waiting for a thread while loading a module",
+    "type": "thread-error",
+    "message": "cannot wait for another thread while loading a module",
+    "explanation": "A module's top-level forms run to completion before any other thread runs, so other threads never see a half-loaded module. Waiting there for something only another thread can do, such as a join, a lock or a message, could never finish. Start a thread from the module instead, or wait after the require returns. Sleeping is allowed: the whole process waits.",
+    "example": "(ns app.boot (:require (otium.thread :as thread)))\n(thread/join (thread/spawn (fn () 1)))",
+    "fixed": "(ns app.boot (:require (otium.thread :as thread)))\n(defonce worker (thread/spawn (fn () 1)))"
+  },
+  "E0503": {
+    "title": "deadlock",
+    "type": "thread-error",
+    "message": "deadlock: no thread can run and none is sleeping",
+    "explanation": "The main thread is waiting, every other thread is waiting too, and nothing is timed to wake any of them, so nothing ever will. Look for threads waiting on each other, a message nobody sends, or a lock nobody releases.",
+    "example": "(require otium.thread :as thread)\n(let ((main (thread/self)))\n  (thread/join (thread/spawn (fn () (thread/join main)))))",
+    "fixed": "(require otium.thread :as thread)\n(thread/join (thread/spawn (fn () 1)))"
+  },
+  "E0504": {
+    "title": "thread failed",
+    "type": "thread-failed",
+    "message": "the joined thread failed",
+    "explanation": "thread/join waits for a thread and returns its result. When the thread ended with an uncaught error, the join raises this condition instead, with the original under `:reason`. The thread's own report went to stderr when it failed.",
+    "example": "(require otium.thread :as thread)\n(thread/join (thread/spawn (fn () (car 1))))",
+    "fixed": "(require otium.thread :as thread)\n(try (thread/join (thread/spawn (fn () (car 1))))\n  (catch (thread/failed? e) (get e :reason)))"
+  },
+  "E0505": {
+    "title": "timed out",
+    "type": "timeout",
+    "message": "timed out",
+    "explanation": "An operation given a timeout, such as thread/join or actor/call, waited that long without finishing. A `use-value` restart returns a value in its place.",
+    "example": "(require otium.thread :as thread)\n(thread/join (thread/spawn (fn () (thread/sleep 10))) 0.1)",
+    "fixed": "(require otium.thread :as thread)\n(thread/join (thread/spawn (fn () (thread/sleep 10))) 20)"
+  },
   "L0001": {
     "name": "if-chain",
     "group": "style",

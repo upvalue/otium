@@ -15,9 +15,7 @@ Read AGENT-LANG.md before writing Otium code.
 
 - Live reloading is important
 - Performance is important
-- The Chez Scheme implementation is the primary implementation; the C
-  implementation is experimental and can lag behind.
-- However it is ideal to extend the higher-level language to meet challenges e.g. 
+- It is preferred to extend the higher-level language to meet challenges e.g.
   when something can be done in Otium over using escape hatches to the runtime,
   it should be.
 

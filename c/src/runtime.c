@@ -288,7 +288,7 @@ bool ot_set_interrupt_handler(ot_state* rt, const char* name) {
 
 bool ot_set_load_hook(ot_state* rt, const char* name) { return set_hook(rt, &rt->load_hook, name); }
 
-ot_value oti_alloc(ot_state* rt, uint32_t kind, uint32_t fields, size_t bytes) {
+ot_value oti_alloc_slow(ot_state* rt, uint32_t kind, uint32_t fields, size_t bytes) {
   if (!oti_host_entry(rt)) return 0;
   if (rt->interrupt_flag && *rt->interrupt_flag && !ot_poll_interrupt(rt)) return 0;
   size_t collections = rt->heap.collections;

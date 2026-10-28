@@ -25,6 +25,7 @@ Read AGENT-LANG.md before writing Otium code.
 
 - docs/ is managed by humans; while some of the docs within may be LLM
   generated, you should never directly put documents in there without instructions.
+  Put markdown files for plans &etc into the ./scratch directory.
 
 # Manse
 

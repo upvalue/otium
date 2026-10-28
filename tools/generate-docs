@@ -6,14 +6,20 @@ with more detail. The generated doc is written beside it as docs/foo.md. Docs
 without a .spec are hand written and never touched. README.md and AGENTS.md
 are always excluded.
 
+A doc is only regenerated when its spec has changed since the doc was last
+written. The last line of a generated doc records a hash of the spec it came
+from; --force regenerates regardless.
+
 Requires Pi (`pi`) with a provider login. In Pi, use /login and select OpenAI
 Codex for the default provider. Defaults: openai-codex/gpt-6-astra, medium
 reasoning, normal service tier. Override --provider/--model/--thinking to use
 another model; DOCS_PROVIDER and DOCS_MODEL also set the defaults.
 """
 import argparse
+import hashlib
 import json
 import os
+import re
 import shlex
 import tempfile
 import subprocess
@@ -105,6 +111,24 @@ def target_of(spec):
     return spec.with_suffix('')
 
 
+def spec_hash(spec):
+    return hashlib.sha256(spec.read_bytes()).hexdigest()
+
+
+def stamp(spec):
+    return f'<!-- generated from {spec.name} sha256:{spec_hash(spec)} -->'
+
+
+def up_to_date(spec):
+    """True when the doc was generated from the spec as it is now."""
+    target = target_of(spec)
+    if not target.exists():
+        return False
+    lines = target.read_text().rstrip().splitlines()
+    match = re.fullmatch(r'<!-- generated from \S+ sha256:([0-9a-f]{64}) -->', lines[-1] if lines else '')
+    return bool(match) and match.group(1) == spec_hash(spec)
+
+
 def doc_index():
     """List every doc, generated or hand written, with its title."""
     entries = []
@@ -168,6 +192,9 @@ def generate(spec, index, args):
     meta, body = parse_spec(spec)
     target = target_of(spec)
     rel = target.relative_to(ROOT)
+    if not args.force and up_to_date(spec):
+        print(f'{rel}: unchanged spec, skipped', file=sys.stderr)
+        return True
     system = RULES.format(target=rel, title=meta['title'], index=index)
     prompt = meta['prompt'] + ('\n\n' + body if body else '')
     command = pi_command(system, args)
@@ -188,7 +215,7 @@ def generate(spec, index, args):
         with tempfile.NamedTemporaryFile(mode='w', dir=target.parent,
                                          prefix=f'.{target.name}.', delete=False) as output:
             temporary = Path(output.name)
-            output.write(text + '\n')
+            output.write(f'{text}\n\n{stamp(spec)}\n')
         try:
             temporary.chmod(target.stat().st_mode & 0o777 if target.exists() else 0o644)
             temporary.replace(target)
@@ -207,6 +234,8 @@ def main():
     parser.add_argument('docs', nargs='*',
                         help='docs or specs to regenerate (default: every spec)')
     parser.add_argument('-j', '--jobs', type=int, default=4)
+    parser.add_argument('-f', '--force', action='store_true',
+                        help='regenerate even when the spec is unchanged')
     parser.add_argument('-n', '--dry-run', action='store_true',
                         help='print the command and prompts instead of running Pi')
     parser.add_argument('--provider', default=os.environ.get('DOCS_PROVIDER', PROVIDER))

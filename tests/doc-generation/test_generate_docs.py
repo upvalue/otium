@@ -44,7 +44,8 @@ class GenerationTests(unittest.TestCase):
             spec = target.with_suffix('.md.spec')
             spec.write_text('---\ntitle: Test\nprompt: Write it\n---\n')
             args = argparse.Namespace(provider='openai-codex', model='gpt-6-astra',
-                                      thinking='medium', dry_run=False, timeout=30)
+                                      thinking='medium', dry_run=False, timeout=30,
+                                      force=False)
             for reply in ['bad json', events('# ✨ Wrong'), events('# ✨ Test', 'length')]:
                 with patch.object(generator.subprocess, 'run', return_value=argparse.Namespace(
                         returncode=0, stdout=reply, stderr='')):
@@ -53,7 +54,29 @@ class GenerationTests(unittest.TestCase):
             with patch.object(generator.subprocess, 'run', return_value=argparse.Namespace(
                     returncode=0, stdout=events('# ✨ Test\n\nA document.'), stderr='')):
                 self.assertTrue(generator.generate(spec, '', args))
-                self.assertEqual(target.read_text(), '# ✨ Test\n\nA document.\n')
+                self.assertEqual(target.read_text(),
+                                 f'# ✨ Test\n\nA document.\n\n{generator.stamp(spec)}\n')
+
+    def test_unchanged_spec_is_skipped(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as folder:
+            target = Path(folder) / 'test.md'
+            spec = target.with_suffix('.md.spec')
+            spec.write_text('---\ntitle: Test\nprompt: Write it\n---\n')
+            args = argparse.Namespace(provider='openai-codex', model='gpt-6-astra',
+                                      thinking='medium', dry_run=False, timeout=30,
+                                      force=False)
+            reply = argparse.Namespace(returncode=0, stdout=events('# ✨ Test'), stderr='')
+            with patch.object(generator.subprocess, 'run', return_value=reply) as run:
+                self.assertTrue(generator.generate(spec, '', args))
+                self.assertTrue(generator.generate(spec, '', args))
+                self.assertEqual(run.call_count, 1)
+                args.force = True
+                self.assertTrue(generator.generate(spec, '', args))
+                self.assertEqual(run.call_count, 2)
+                args.force = False
+                spec.write_text('---\ntitle: Test\nprompt: Write it again\n---\n')
+                self.assertTrue(generator.generate(spec, '', args))
+                self.assertEqual(run.call_count, 3)
 
 
 if __name__ == '__main__':

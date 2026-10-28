@@ -82,6 +82,9 @@
        (unless (vreg? (get ins 3)) (operand-uses (get ins 3) out)))
       ((:op2u) (operand-uses (get ins 3) out) (operand-uses (get ins 4) out))
       ((:cmpj) (operand-uses (get ins 2) out) (operand-uses (get ins 3) out))
+      ((:fmov) (operand-uses (get ins 2) out) (operand-uses (get ins 1) out))
+      ((:fop2) (operand-uses (get ins 2) out) (operand-uses (get ins 3) out) (operand-uses (get ins 4) out))
+      ((:fcmpj) (operand-uses (get ins 2) out) (operand-uses (get ins 3) out))
       ((:call)
        (when (eq? (get ins 1) :value) (operand-uses (get ins 2) out))
        (for ((a :in (get ins 3))) (operand-uses a out)))
@@ -111,7 +114,7 @@
 
 ;; Instructions after which a block ends.
 (def (ends-block? ins)
-  (memq (get ins 0) '(:jump :cmpj :jcond :ret :call :ccall :poll)))
+  (memq (get ins 0) '(:jump :cmpj :jcond :ret :call :ccall :poll :fcmpj)))
 
 ;; Successor instruction indices of the last instruction of a block.
 (def (successors ins i labels n)
@@ -122,6 +125,7 @@
       ((:cmpj) (list-to-array (cons (get labels (get ins 4)) (array-to-list next))))
       ((:jcond) (list-to-array (cons (get labels (get ins 2)) (array-to-list next))))
       ((:poll) (list-to-array (cons (get labels (get ins 1)) (array-to-list next))))
+      ((:fcmpj) (list-to-array (cons (get labels (get ins 4)) (array-to-list next))))
       ((:ret) [])
       ((:call)
        (if (get ins 5)

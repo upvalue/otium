@@ -10,6 +10,7 @@
 ;;   [:if off test then else]    [:seq off nodes]         [:let off vars inits body]
 ;;   [:fn off info]              [:call off f args tail?]
 ;;   [:gcall off cell args tail? check? tail-position?]
+;;   [:gprim off name cell args]
 ;;   [:bcall off builtin args tail?]                      [:prim off name args]
 ;;   [:loop off loop inits body] [:recur off loop args]   [:while off test body]
 ;;   [:try off body var clauses] [:cleanup off fn outcome? body]
@@ -578,6 +579,10 @@
                      (nodes (list-to-array (map (fn (a) (expression a (non-tail site) off)) args))))
                  (cond ((eq? builtin 'eval)
                         [:call off [:evaluator off] nodes (site :tail)])
+                       ;; Collection access, inline on arrays while the global
+                       ;; still holds the builtin.
+                       ((and builtin (= (or (get guarded-arities builtin) -1) (length nodes)))
+                        [:gprim off builtin cell nodes])
                        ;; A builtin of core in tail position runs in its caller's frame, as in
                        ;; the VM, so errors point at the call. apply stays a tail call.
                        ((and builtin (site :tail) (not (eq? builtin 'apply)) (%native-core-cell? cell))
@@ -590,6 +595,10 @@
              (let ((f (expression head (non-tail site) off)))
                [:call off f (list-to-array (map (fn (a) (expression a (non-tail site) off)) args))
                 (site :tail)]))))))
+
+;; Builtins whose globals can be redefined, inlined behind a check that the
+;; global still holds them.
+(def- guarded-arities {'get 2 'put! 3 'length 1})
 
 (def (primitive name args site off)
   [:prim off name (list-to-array (map (fn (a) (expression a (non-tail site) off)) args))])

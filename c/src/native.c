@@ -49,6 +49,9 @@ enum {
   NS_ADDR,     /* dst label */
   NS_SPBASE,   /* dst offset */
   NS_POLL,     /* label: jump there when the stack pointer is below native.limit */
+  NS_FMOV,     /* dst src, doubles */
+  NS_FOP2,     /* op dst a b: add, sub, mul, div of doubles */
+  NS_FCMPJ,    /* cond a b label, comparing doubles */
   NS_COUNT
 };
 
@@ -65,6 +68,7 @@ enum {
   NO_ALLOC,
   NO_CELL_INDEX, /* immediate: the cell number of a unit cell */
   NO_FIXNUM,     /* immediate: the tagged word of a fixnum */
+  NO_FREG,       /* float register n */
 };
 
 /* State fields the stream can name. */
@@ -489,6 +493,12 @@ static void operand(oti_bridge* b, sljit_s32* op, sljit_sw* w) {
       *op = SLJIT_IMM;
       *w = b->cell_count ? (sljit_sw)b->cells[i] : 0;
       return;
+    case NO_FREG: {
+      uint64_t r = read_unsigned(b);
+      if (r > 1) b->bad = true;
+      *op = SLJIT_FR((sljit_s32)(r & 1));
+      return;
+    }
     case NO_FIXNUM:
       *op = SLJIT_IMM;
       *w = (sljit_sw)(((uint64_t)read_signed(b) << 1) | 1);
@@ -562,9 +572,11 @@ static struct sljit_jump* poll(struct sljit_compiler* c) {
   return sljit_emit_jump(c, SLJIT_LESS);
 }
 
+/* Two scratch float registers, for float fast paths; they never hold values
+ * across a call. */
 static void enter(struct sljit_compiler* c, sljit_s32 scratches, sljit_s32 slots, uint32_t* frame) {
-  sljit_emit_enter(c, SLJIT_ENTER_REG_ARG | SLJIT_ENTER_KEEP(2), SLJIT_ARGS0(W), scratches, 2,
-                   slots * 8);
+  sljit_emit_enter(c, SLJIT_ENTER_REG_ARG | SLJIT_ENTER_KEEP(2), SLJIT_ARGS0(W),
+                   scratches | SLJIT_ENTER_FLOAT(2), 2, slots * 8);
   sljit_s32 pushed = scratches > SCRATCH_REGISTERS ? scratches - SCRATCH_REGISTERS : 0;
   *frame = (uint32_t)(c->local_size + pushed * 8);
 }
@@ -680,6 +692,30 @@ static bool translate(oti_bridge* b) {
         sljit_get_local_base(c, d, dw, (sljit_sw)read_signed(b));
         break;
       case NS_POLL: pend(b, poll(c), read_label(b)); break;
+      case NS_FMOV:
+        operand(b, &d, &dw);
+        operand(b, &s1, &s1w);
+        sljit_emit_fop1(c, SLJIT_MOV_F64, d, dw, s1, s1w);
+        break;
+      case NS_FOP2: {
+        static const sljit_s32 fops[] = {SLJIT_ADD_F64, SLJIT_SUB_F64, SLJIT_MUL_F64, SLJIT_DIV_F64};
+        uint64_t code = read_unsigned(b);
+        if (code > 3) return false;
+        operand(b, &d, &dw);
+        operand(b, &s1, &s1w);
+        operand(b, &s2, &s2w);
+        sljit_emit_fop2(c, fops[code], d, dw, s1, s1w, s2, s2w);
+        break;
+      }
+      case NS_FCMPJ: {
+        uint64_t cond = read_unsigned(b);
+        if (cond < SLJIT_F_EQUAL || cond > SLJIT_ORDERED_LESS_EQUAL) return false;
+        operand(b, &s1, &s1w);
+        operand(b, &s2, &s2w);
+        uint32_t l = read_label(b);
+        pend(b, sljit_emit_fcmp(c, (sljit_s32)cond, s1, s1w, s2, s2w), l);
+        break;
+      }
       default: return false;
     }
     if (sljit_get_compiler_error(c)) return false;
@@ -1609,6 +1645,17 @@ static bool spread(ot_state* rt, size_t call, size_t* argc) {
  * stub to enter by tail call. */
 static W dispatch(ot_state* rt) {
   size_t argc = rt->native.argc, base = rt->sp;
+  /* Builtins, the common case, go straight to their function. */
+  ot_value callee = rt->native.callee;
+  if ((callee & 255) == TAG_BUILTIN && callee != APPLY_VALUE && (callee >> 8) < B_COUNT &&
+      base + argc <= rt->stack_room) {
+    memcpy(rt->stack + base, rt->native.args, argc * sizeof(ot_value));
+    rt->sp = rt->stack_roots.count = base + argc;
+    ot_value result = rt->builtin_run[callee >> 8](rt, base, argc);
+    rt->sp = rt->stack_roots.count = base;
+    if (!result || oti_failed(rt)) oti_native_raise(rt);
+    return result;
+  }
   if (argc + 1 > rt->stack_limit || base + 1 + argc > rt->stack_limit ||
       !oti_stack(rt, base + 1 + argc)) {
     if (!oti_failed(rt)) oti_error(rt, "VM stack limit exceeded");

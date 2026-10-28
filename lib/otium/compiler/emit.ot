@@ -30,6 +30,12 @@
 (def- ns-addr 14)
 (def- ns-spbase 15)
 (def- ns-poll 16)
+(def- ns-fmov 17)
+(def- ns-fop2 18)
+(def- ns-fcmpj 19)
+(def- fop-codes {:add 0 :sub 1 :mul 2 :div 3})
+;; Float comparisons that jump when false, NaN included.
+(def- float-conditions {:fune 25 :funge 27 :fule 29 :fult 32 :fungt 34})
 
 (def- op-codes {:add 0 :sub 1 :mul 2 :and 3 :or 4 :xor 5 :shl 6 :lshr 7 :ashr 8})
 (def- conditions {:eq 0 :ne 1 :lt 2 :ge 3 :gt 4 :le 5 :slt 6 :sge 7 :sgt 8 :sle 9
@@ -101,6 +107,7 @@
     ((:alloc) (unsigned! buf 9))
     ((:cellidx) (unsigned! buf 10) (unsigned! buf (get op 1)))
     ((:fix) (unsigned! buf 11) (signed! buf (get op 1)))
+    ((:freg) (unsigned! buf 12) (unsigned! buf (get op 1)))
     (else (error "native compiler: bad operand" op))))
 
 ;; --- Functions ---------------------------------------------------------------
@@ -369,6 +376,13 @@
        (mov! e (location fc (get ins 1)) [:reg 0])
        (restore-live! e i))
       ((:ret) (op! e ns-ret (physical e (get ins 1))))
+      ((:fmov) (let ((src (physical e (get ins 2)))) (op! e ns-fmov (physical e (get ins 1)) src)))
+      ((:fop2)
+       (let ((a (physical e (get ins 3))) (b (physical e (get ins 4))))
+         (op! e ns-fop2 (get fop-codes (get ins 1)) (physical e (get ins 2)) a b)))
+      ((:fcmpj)
+       (let ((a (physical e (get ins 2))) (b (physical e (get ins 3))))
+         (op! e ns-fcmpj (get float-conditions (get ins 1)) a b (get ins 4))))
       ((:entry) (entry! e))
       ((:call) (call! e i ins))
       ((:ccall) (ccall! e i ins))

@@ -697,6 +697,8 @@ typedef struct {
   bool raised, signaled, restart, exiting, interrupted;
 } oti_unwind_save;
 
+typedef struct oti_segment oti_segment;
+
 /* Native execution state. Trampolines and generated code address these
  * fields at fixed offsets, so the block comes first in ot_state; native.c
  * checks the offsets. */
@@ -722,6 +724,10 @@ typedef struct {
   /* While a builtin call is parked, the arguments it will be dispatched
    * with again: they are roots until then. */
   size_t args_live;
+  /* The Otium stack is a chain of segments (native.c): the one in use, a
+   * spare kept for the next overflow, and the bytes in the chain. */
+  oti_segment *segment, *spare;
+  size_t stack_bytes;
 } oti_native_exec;
 
 /* What each thread of execution has of its own (see threads.c). The fields
@@ -1051,6 +1057,9 @@ _Noreturn void oti_native_resume(ot_state* rt, uintptr_t sp, uintptr_t pc, ot_va
  * (with native.sp), and where a new thread starts (native.c). */
 extern char oti_c_resume[], oti_thread_begin[];
 uintptr_t oti_native_entry_of(ot_state* rt, ot_value callee);
+/* Give x an Otium stack of one segment, and free one. */
+bool oti_native_stack_new(ot_state* rt, oti_native_exec* x);
+void oti_native_stack_free(ot_state* rt, oti_native_exec* x);
 /* Where a builtin call that parked is dispatched again. */
 uintptr_t oti_native_redispatch(ot_state* rt);
 /* A builtin's result when it parked the running thread; dispatch hands the

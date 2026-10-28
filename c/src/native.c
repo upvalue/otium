@@ -133,16 +133,240 @@ struct oti_native_runtime {
   uintptr_t stubs[STUB_COUNT];
   /* In call_other, where a parked builtin call is dispatched again. */
   uintptr_t redispatch;
-  unsigned char* stack;
-  size_t stack_bytes;
-  uintptr_t limit;
+  /* Segments of the usual size no thread is using, and the chunks they are
+   * carved from. */
+  oti_segment* free_segments;
+  struct oti_segment_chunk* segment_chunks;
   FILE* perf_map;
   bool verbose;
 };
 
 /* The trampoline and resume routine, below. */
 ot_value oti_native_enter(ot_state* rt, ot_value callee, uintptr_t entry, size_t argc);
-extern char oti_native_return[], oti_native_fail[];
+extern char oti_native_return[], oti_native_fail[], oti_segment_return[], oti_segment_grow[];
+
+/* --- Segments ------------------------------------------------------------ *
+ *
+ * A thread's Otium stack is a chain of segments, blocks with this header
+ * at the top, so a thread that stays shallow touches only the top page.
+ * Frames grow down from under the header, and the limit sits
+ * SEGMENT_MARGIN above the bottom: room for a frame that has just been
+ * made (frames up to SMALL_FRAME are checked after their prologue), entry
+ * records and stub frames. A function that finds itself past the limit
+ * moves to a new segment: its frame is copied to the top of the new one,
+ * under a link record (the caller's stack pointer and the real return
+ * address), and its return address becomes oti_segment_return, which goes
+ * back to the old segment. Frame walking follows the link as it follows an
+ * entry record. Nothing can point into a frame yet at its entry check, so
+ * moving it is safe. Bigger frames check before their prologue and move
+ * before they are made (oti_segment_grow). */
+
+struct oti_segment {
+  oti_segment* prev;
+  size_t size;
+};
+
+/* Page-aligned, so a thread that stays shallow touches one page. */
+#define SEGMENT_BYTES ((size_t)8 << 10)
+#define SMALL_FRAME ((size_t)1 << 10)
+#define SEGMENT_MARGIN (SMALL_FRAME + 256)
+/* The most a thread's segments may add up to. */
+#define STACK_MAX ((size_t)256 << 20)
+/* Usual-size segments come SEGMENT_CHUNK at a time from one mapping, and
+ * go back to the free list, not the system. */
+#define SEGMENT_CHUNK 64
+
+typedef struct oti_segment_chunk {
+  struct oti_segment_chunk* next;
+  void* base;
+} oti_segment_chunk;
+
+static uintptr_t segment_top(const oti_segment* s) { return (uintptr_t)s; }
+
+static uintptr_t segment_base(const oti_segment* s) { return (uintptr_t)s + sizeof(*s) - s->size; }
+
+static uintptr_t segment_limit(const oti_segment* s) { return segment_base(s) + SEGMENT_MARGIN; }
+
+static oti_segment* segment_in(void* block, size_t size) {
+  return (oti_segment*)((unsigned char*)block + size - sizeof(oti_segment));
+}
+
+/* Fill the free list with a fresh chunk of segments. Untouched pages cost
+ * nothing until a thread uses them. */
+static bool segment_chunk(oti_native_runtime* n) {
+  size_t bytes = SEGMENT_CHUNK * SEGMENT_BYTES;
+  oti_segment_chunk* chunk = malloc(sizeof(*chunk));
+  void* base = chunk ? mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
+                     : MAP_FAILED;
+  if (base == MAP_FAILED) {
+    free(chunk);
+    return false;
+  }
+  *chunk = (oti_segment_chunk){n->segment_chunks, base};
+  n->segment_chunks = chunk;
+  for (size_t i = SEGMENT_CHUNK; i-- > 0;) {
+    oti_segment* s = segment_in((unsigned char*)base + i * SEGMENT_BYTES, SEGMENT_BYTES);
+    s->prev = n->free_segments;
+    n->free_segments = s;
+  }
+  return true;
+}
+
+static oti_segment* segment_alloc(ot_state* rt, size_t size) {
+  oti_native_runtime* n = rt->native_runtime;
+  oti_segment* s;
+  if (size == SEGMENT_BYTES) {
+    if (!n->free_segments && !segment_chunk(n)) return NULL;
+    s = n->free_segments;
+    n->free_segments = s->prev;
+  } else {
+    void* block = aligned_alloc(16, size);
+    if (!block) return NULL;
+    s = segment_in(block, size);
+  }
+  s->size = size;
+  s->prev = NULL;
+  return s;
+}
+
+static void segment_release(ot_state* rt, oti_segment* s) {
+  oti_native_runtime* n = rt->native_runtime;
+  if (s->size == SEGMENT_BYTES) {
+    s->prev = n->free_segments;
+    n->free_segments = s;
+  } else {
+    free((void*)segment_base(s));
+  }
+}
+
+/* Make s the segment in use, keeping the limit tripped if it is. */
+static void use_segment(ot_state* rt, oti_segment* s) {
+  bool tripped = rt->native.limit != rt->native.base_limit;
+  rt->native.segment = s;
+  rt->native.base_limit = segment_limit(s);
+  if (!tripped) rt->native.limit = rt->native.base_limit;
+}
+
+/* Leave the segment in use for the one under it, keeping it as the spare. */
+static void drop_segment(ot_state* rt) {
+  oti_segment* s = rt->native.segment;
+  rt->native.stack_bytes -= s->size;
+  if (rt->native.spare) segment_release(rt, rt->native.spare);
+  rt->native.spare = s;
+  use_segment(rt, s->prev);
+}
+
+bool oti_native_stack_new(ot_state* rt, oti_native_exec* x) {
+  oti_segment* s = segment_alloc(rt, SEGMENT_BYTES);
+  if (!s) return oti_error(rt, "out of host memory");
+  x->segment = s;
+  x->spare = NULL;
+  x->stack_bytes = s->size;
+  x->stack_top = segment_top(s);
+  x->base_limit = x->limit = segment_limit(s);
+  return true;
+}
+
+void oti_native_stack_free(ot_state* rt, oti_native_exec* x) {
+  for (oti_segment* s = x->segment; s;) {
+    oti_segment* prev = s->prev;
+    segment_release(rt, s);
+    s = prev;
+  }
+  if (x->spare) segment_release(rt, x->spare);
+  x->segment = x->spare = NULL;
+}
+
+/* A new segment for size bytes of frame and its link record, or NULL with
+ * the error recorded. */
+static oti_segment* grow_segment(ot_state* rt, size_t size) {
+  size_t bytes = SEGMENT_BYTES;
+  if (size + SEGMENT_MARGIN + sizeof(oti_segment) + 64 > bytes)
+    bytes = (size + SEGMENT_MARGIN + sizeof(oti_segment) + 64 + 4095) & ~(size_t)4095;
+  if (rt->native.stack_bytes + bytes > STACK_MAX) {
+    oti_error(rt, "VM stack limit exceeded");
+    return NULL;
+  }
+  oti_segment* s;
+  if (bytes == SEGMENT_BYTES && rt->native.spare) {
+    s = rt->native.spare;
+    rt->native.spare = NULL;
+  } else if (!(s = segment_alloc(rt, bytes))) {
+    oti_error(rt, "out of host memory");
+    return NULL;
+  }
+  s->prev = rt->native.segment;
+  rt->native.stack_bytes += s->size;
+  use_segment(rt, s);
+  return s;
+}
+
+/* Put a link record at the top of s, with oti_segment_return under it as
+ * the return address of a frame placed below. Returns that slot. */
+static uintptr_t link_segment(oti_segment* s, uintptr_t caller_sp, uintptr_t return_address) {
+  uintptr_t top = segment_top(s);
+  uintptr_t* link = (uintptr_t*)(top - 16);
+  link[0] = caller_sp;
+  link[1] = return_address;
+  link[-1] = (uintptr_t)oti_segment_return;
+  return top - 24;
+}
+
+static const oti_descriptor* descriptor_at(const oti_native_runtime* n, uintptr_t ra,
+                                           const oti_code** owner);
+
+/* The function whose entry check called h_poll made its frame past the
+ * limit: move the frame, with the return address of the call into C under
+ * it, to a new segment. */
+static bool grow_frame(ot_state* rt) {
+  uintptr_t sp = rt->native.sp, ra = ((uintptr_t*)sp)[-1];
+  const oti_descriptor* d = descriptor_at(rt->native_runtime, ra, NULL);
+  if (!d) abort();
+  size_t frame = d->frame;
+  oti_segment* s = grow_segment(rt, frame + 16);
+  if (!s) return false;
+  uintptr_t slot = link_segment(s, sp + frame + 8, ((uintptr_t*)(sp + frame))[0]);
+  uintptr_t moved = slot - frame;
+  memcpy((void*)moved, (void*)sp, frame);
+  ((uintptr_t*)moved)[-1] = ra;
+  rt->native.sp = moved;
+  return true;
+}
+
+/* oti_segment_grow: a big frame's check before its prologue failed. sp
+ * points at the argument registers it saved, the return into the function
+ * and the function's own return address; size is what the frame needs.
+ * Returns where the function's stack pointer goes, on a new segment. */
+uintptr_t oti_segment_grow_entry(ot_state* rt, size_t size, uintptr_t sp);
+uintptr_t oti_segment_grow_entry(ot_state* rt, size_t size, uintptr_t sp) {
+  oti_segment* s = grow_segment(rt, size);
+  if (!s) {
+    /* Raise from the caller's call. */
+    rt->native.sp = sp + 80;
+    oti_native_raise(rt);
+  }
+  return link_segment(s, sp + 80, ((uintptr_t*)sp)[9]);
+}
+
+/* oti_segment_return: a function at the top of a segment returned. Drop
+ * the segment and give back the caller's stack pointer and return address
+ * from its link record. */
+typedef struct {
+  uintptr_t sp, pc;
+} oti_return_to;
+
+oti_return_to oti_segment_pop(ot_state* rt, const uintptr_t* link);
+oti_return_to oti_segment_pop(ot_state* rt, const uintptr_t* link) {
+  oti_return_to to = {link[0], link[1]};
+  drop_segment(rt);
+  return to;
+}
+
+/* Unwinding to sp: drop the segments above the one that holds it. */
+static void unwind_segments(ot_state* rt, uintptr_t sp) {
+  while (!(sp > segment_base(rt->native.segment) && sp <= segment_top(rt->native.segment)))
+    drop_segment(rt);
+}
 
 /* The assembly below reads these state fields; the C compiler gives the
  * assembler their offsets. */
@@ -318,6 +542,62 @@ __asm__(".text\n"
         "  call oti_thread_finished\n"
         "  ud2\n"
         ".size oti_thread_end, .-oti_thread_end\n"
+        /* oti_segment_return: the return address of a function at the top
+         * of a segment. The link record is at the stack pointer; the
+         * result in rax goes back to the caller on the segment below. Only
+         * rax, rbx and r15 matter to native code here, and the callee-saved
+         * registers hold the caller's values, so it uses scratch ones and
+         * keeps rax on the C stack across the call. */
+        ".globl oti_segment_return\n"
+        ".type oti_segment_return,@function\n"
+        "oti_segment_return:\n"
+        "  mov %rsp, %rsi\n"
+        "  mov OFF_CSP(%rbx), %rsp\n"
+        "  push %rax\n"
+        "  sub $8, %rsp\n"
+        "  mov %rbx, %rdi\n"
+        "  call oti_segment_pop\n"
+        "  add $8, %rsp\n"
+        "  pop %rcx\n"
+        "  mov %rax, %rsp\n"
+        "  mov %rcx, %rax\n"
+        "  jmp *%rdx\n"
+        ".size oti_segment_return, .-oti_segment_return\n"
+        /* oti_segment_grow: called from a big frame's check before its
+         * prologue, with the frame's size in rdx and the arguments still in
+         * their registers. It saves them, gets a new segment from
+         * oti_segment_grow_entry on the C stack, and continues the function
+         * there, as if called with oti_segment_return as return address. */
+        ".globl oti_segment_grow\n"
+        ".type oti_segment_grow,@function\n"
+        "oti_segment_grow:\n"
+        "  push %r12\n"
+        "  push %rax\n"
+        "  push %rsi\n"
+        "  push %rdi\n"
+        "  push %rcx\n"
+        "  push %r8\n"
+        "  push %r11\n"
+        "  push %r10\n"
+        "  mov %rsp, %r12\n"
+        "  mov %rdx, %rsi\n"
+        "  mov %r12, %rdx\n"
+        "  mov %rbx, %rdi\n"
+        "  mov OFF_CSP(%rbx), %rsp\n"
+        "  call oti_segment_grow_entry\n"
+        "  mov %rax, %r9\n"
+        "  mov 0(%r12), %r10\n"
+        "  mov 8(%r12), %r11\n"
+        "  mov 16(%r12), %r8\n"
+        "  mov 24(%r12), %rcx\n"
+        "  mov 32(%r12), %rdi\n"
+        "  mov 40(%r12), %rsi\n"
+        "  mov 48(%r12), %rax\n"
+        "  mov 64(%r12), %rdx\n"
+        "  mov 56(%r12), %r12\n"
+        "  mov %r9, %rsp\n"
+        "  jmp *%rdx\n"
+        ".size oti_segment_grow, .-oti_segment_grow\n"
         /* Where a thread that stopped in a C call (see BRIDGE) resumes, with
          * the call's value in rax. */
         ".globl oti_c_resume\n"
@@ -670,6 +950,28 @@ static struct sljit_jump* poll(struct sljit_compiler* c) {
 /* Two scratch float registers, for float fast paths; they never hold values
  * across a call. */
 static void enter(struct sljit_compiler* c, sljit_s32 scratches, sljit_s32 slots, uint32_t* frame) {
+  /* A frame too big for the check after the prologue checks before it,
+   * with r9 and rdx, which carry no arguments, and moves to a new segment
+   * before it is made. */
+  size_t need = (size_t)slots * 8 + 256;
+  if (need > SMALL_FRAME) {
+    int32_t down = -(int32_t)need, limit = (int32_t)offsetof(ot_state, native.base_limit);
+    uint64_t grow = (uint64_t)(uintptr_t)oti_segment_grow;
+    unsigned char lea[8] = {0x4c, 0x8d, 0x8c, 0x24}, cmp[7] = {0x4c, 0x3b, 0x8b},
+                  jae[2] = {0x73, 18}, size[5] = {0xba}, target[10] = {0x49, 0xb9},
+                  call[3] = {0x41, 0xff, 0xd1};
+    memcpy(lea + 4, &down, 4);
+    memcpy(cmp + 3, &limit, 4);
+    uint32_t bytes = (uint32_t)need;
+    memcpy(size + 1, &bytes, 4);
+    memcpy(target + 2, &grow, 8);
+    sljit_emit_op_custom(c, lea, sizeof(lea));
+    sljit_emit_op_custom(c, cmp, sizeof(cmp));
+    sljit_emit_op_custom(c, jae, sizeof(jae));
+    sljit_emit_op_custom(c, size, sizeof(size));
+    sljit_emit_op_custom(c, target, sizeof(target));
+    sljit_emit_op_custom(c, call, sizeof(call));
+  }
   sljit_emit_enter(c, SLJIT_ENTER_REG_ARG | SLJIT_ENTER_KEEP(2), SLJIT_ARGS0(W),
                    scratches | SLJIT_ENTER_FLOAT(2), 2, slots * 8);
   sljit_s32 pushed = scratches > SCRATCH_REGISTERS ? scratches - SCRATCH_REGISTERS : 0;
@@ -1217,7 +1519,7 @@ static void visit_frames(ot_state* rt, uintptr_t sp, oti_root_visitor visit, voi
   oti_native_runtime* n = rt->native_runtime;
   while (sp) {
     uintptr_t ra = ((uintptr_t*)sp)[-1];
-    if (ra == (uintptr_t)oti_native_return) {
+    if (ra == (uintptr_t)oti_native_return || ra == (uintptr_t)oti_segment_return) {
       sp = ((uintptr_t*)sp)[0];
       continue;
     }
@@ -1270,7 +1572,7 @@ void oti_native_trace(ot_state* rt) {
   uintptr_t sp = rt->native.sp;
   while (sp && count < TRACE_LIMIT) {
     uintptr_t ra = ((uintptr_t*)sp)[-1];
-    if (ra == (uintptr_t)oti_native_return) {
+    if (ra == (uintptr_t)oti_native_return || ra == (uintptr_t)oti_segment_return) {
       sp = ((uintptr_t*)sp)[0];
       continue;
     }
@@ -1302,6 +1604,10 @@ static bool innermost_offset(ot_state* rt, uint32_t* source, uint32_t* offset) {
   while (sp) {
     uintptr_t ra = ((uintptr_t*)sp)[-1];
     if (ra == (uintptr_t)oti_native_return) return false;
+    if (ra == (uintptr_t)oti_segment_return) {
+      sp = ((uintptr_t*)sp)[0];
+      continue;
+    }
     const oti_descriptor* d = descriptor_at(rt->native_runtime, ra, NULL);
     if (!d) return false;
     if (d->function != UINT32_MAX && d->offset != UINT32_MAX && rt->functions[d->function]) {
@@ -1326,6 +1632,7 @@ static void drop_unwinds(ot_state* rt, uintptr_t sp) {
 }
 
 static _Noreturn void resume(ot_state* rt, uintptr_t sp, uintptr_t pc, ot_value value) {
+  unwind_segments(rt, sp);
   drop_unwinds(rt, sp);
   oti_native_resume(rt, sp, pc, value);
 }
@@ -1577,15 +1884,13 @@ static W h_set_global(ot_state* rt, W cell, W value) {
 /* The stack check at function entries and loop back edges failed: the stack
  * really is too deep, or an interrupt was requested. */
 static W h_poll(ot_state* rt) {
+  /* Past the limit only ever at a function's entry, where its frame can
+   * move to a new segment. */
+  if (rt->native.sp < rt->native.base_limit && !grow_frame(rt)) oti_native_raise(rt);
   if (rt->native.limit != rt->native.base_limit) {
     rt->native.limit = rt->native.base_limit;
     if (!oti_interrupt_point(rt)) oti_native_raise(rt);
     if (rt->threads && !oti_thread_poll(rt)) oti_native_raise(rt);
-    return OT_NIL;
-  }
-  if (rt->native.sp <= rt->native.base_limit) {
-    oti_error(rt, "VM stack limit exceeded");
-    oti_native_raise(rt);
   }
   return OT_NIL;
 }
@@ -2096,10 +2401,6 @@ void oti_native_sweep(ot_state* rt) {
 
 /* --- Setup -------------------------------------------------------------- */
 
-#define STACK_BYTES ((size_t)256 << 20)
-/* Room below the limit for C helpers and nested entries. */
-#define STACK_MARGIN ((size_t)2 << 20)
-
 bool oti_native_init(ot_state* rt) {
   oti_native_runtime* n = calloc(1, sizeof(*n));
   if (!n) return oti_error(rt, "out of host memory");
@@ -2111,17 +2412,7 @@ bool oti_native_init(ot_state* rt) {
     snprintf(path, sizeof(path), "/tmp/perf-%ld.map", (long)getpid());
     n->perf_map = fopen(path, "w");
   }
-  n->stack_bytes = STACK_BYTES;
-  void* stack = mmap(NULL, n->stack_bytes, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-  if (stack == MAP_FAILED) return oti_error(rt, "cannot reserve the native stack");
-  n->stack = stack;
-  /* A guard page at the bottom catches C helpers that run past the margin. */
-  mprotect(stack, page_size(), PROT_NONE);
-  rt->native.stack_top = ((uintptr_t)stack + n->stack_bytes) & ~(uintptr_t)15;
-  n->limit = (uintptr_t)stack + page_size() + STACK_MARGIN;
-  rt->native.limit = rt->native.base_limit = n->limit;
-  if (!oti_native_args(rt, 16)) return false;
+  if (!oti_native_stack_new(rt, &rt->native) || !oti_native_args(rt, 16)) return false;
   rt->native.callee = OT_NIL;
   if (!build_stubs(rt)) return oti_error(rt, "cannot build native stubs");
   rt->native_mode = true;
@@ -2142,7 +2433,13 @@ void oti_native_destroy(ot_state* rt) {
     free(c);
     c = next;
   }
-  if (n->stack) munmap(n->stack, n->stack_bytes);
+  oti_native_stack_free(rt, &rt->native);
+  while (n->segment_chunks) {
+    oti_segment_chunk* chunk = n->segment_chunks;
+    n->segment_chunks = chunk->next;
+    munmap(chunk->base, SEGMENT_CHUNK * SEGMENT_BYTES);
+    free(chunk);
+  }
   if (n->perf_map) fclose(n->perf_map);
   free(n);
   free(rt->native.args);

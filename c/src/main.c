@@ -1,4 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
+/* sigaltstack and SA_ONSTACK. */
+#define _XOPEN_SOURCE 700
 #include "otium.h"
 #include <ctype.h>
 #include <errno.h>
@@ -34,6 +36,18 @@ static void request(int reason) {
 static void interrupt_handler(int signal_number) {
   (void)signal_number;
   request(1);
+}
+
+/* Native code runs on small stacks with no room for a signal frame, so the
+ * handlers here run on a stack of their own. */
+static bool signal_stack(void) {
+  static _Alignas(16) char memory[64 * 1024];
+  static bool done;
+  if (done) return true;
+  stack_t stack = {.ss_sp = memory, .ss_size = sizeof(memory)};
+  if (sigaltstack(&stack, NULL)) return false;
+  done = true;
+  return true;
 }
 
 static void tick_handler(int signal_number) {
@@ -361,7 +375,8 @@ static bool start_dev(ot_state* rt, const options* o) {
    * and costs nothing while the program waits. */
   struct sigaction action = {0};
   action.sa_handler = tick_handler;
-  action.sa_flags = SA_RESTART;
+  action.sa_flags = SA_RESTART | SA_ONSTACK;
+  if (!signal_stack()) return false;
   sigemptyset(&action.sa_mask);
   sigaddset(&action.sa_mask, SIGINT);
   struct itimerval timer = {{0, TICK_MICROSECONDS}, {0, TICK_MICROSECONDS}};
@@ -599,7 +614,7 @@ int main(int argc, char** argv) {
   action.sa_handler = interrupt_handler;
   sigemptyset(&action.sa_mask);
   sigaddset(&action.sa_mask, SIGVTALRM);
-  if (sigaction(SIGINT, &action, &previous)) {
+  if (!signal_stack() || sigaction(SIGINT, &action, &previous)) {
     perror("sigaction");
     ot_destroy(rt);
     return 1;

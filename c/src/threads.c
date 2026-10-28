@@ -53,9 +53,6 @@ typedef struct {
 struct oti_thread {
   /* Saved while another thread runs. */
   oti_exec exec;
-  /* The Otium stack; NULL for the primordial thread, which has native.c's. */
-  unsigned char* stack;
-  size_t stack_bytes;
   oti_resume resume;
   ot_value object, entry, args, wake_value, kill_reason;
   /* A thunk thread/interrupt! asked this thread to run, or nil. */
@@ -112,12 +109,6 @@ typedef struct {
 } oti_waitq_obj;
 
 OTI_LAYOUT(oti_waitq_obj, 0, queue);
-
-/* A thread's Otium stack, reserved and committed as it is touched. Only
- * native frames and entry records go there. */
-#define THREAD_STACK ((size_t)64 << 20)
-/* Room below the limit for the frame being made and nested entries. */
-#define THREAD_MARGIN ((size_t)256 << 10)
 
 /* --- Time ----------------------------------------------------------------- */
 
@@ -267,7 +258,8 @@ void oti_visit_threads(ot_state* rt, oti_root_visitor visit, void* context) {
   for (size_t i = 0; i < ts->count; i++) visit_thread(rt, ts->all[i], visit, context);
 }
 
-static void free_exec(oti_exec* x) {
+static void free_exec(ot_state* rt, oti_exec* x) {
+  oti_native_stack_free(rt, &x->native);
   free(x->stack);
   free(x->frames);
   free(x->handlers);
@@ -285,13 +277,6 @@ static void free_exec(oti_exec* x) {
 }
 
 static void free_thread(oti_thread* t) {
-  if (t->stack) {
-    /* ASan marks C frames' redzones and clears them as the frames return.
-     * Marks left by frames that never returned would outlive the mapping
-     * and trip whatever is mapped there next. */
-    OTI_UNPOISON(t->stack, t->stack_bytes);
-    munmap(t->stack, t->stack_bytes);
-  }
   free(t->mailbox);
   free(t);
 }
@@ -394,7 +379,7 @@ void oti_threads_destroy(ot_state* rt) {
   /* The running thread's exec is rt->exec, which the runtime frees. */
   for (size_t i = 0; i < ts->count; i++) {
     oti_thread* t = ts->all[i];
-    if (t != ts->current) free_exec(&t->exec);
+    if (t != ts->current) free_exec(rt, &t->exec);
     free_thread(t);
   }
   for (size_t i = 0; i < ts->queue_count; i++) free(ts->queues[i]);
@@ -688,9 +673,9 @@ static _Noreturn void finish(ot_state* rt, ot_value result) {
     wake(rt, primordial, OT_NIL);
   }
   unregister(ts, me);
-  free_exec(&rt->exec);
-  memset(&rt->exec, 0, sizeof(rt->exec));
   /* Nothing runs on its stack any more: this is the C stack. */
+  free_exec(rt, &rt->exec);
+  memset(&rt->exec, 0, sizeof(rt->exec));
   free_thread(me);
   ts->current = NULL;
   schedule(rt);
@@ -738,23 +723,17 @@ static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
   }
   if (!ts->test && !ts->ticking && pthread_create(&ts->ticker, NULL, ticker, rt) == 0)
     ts->ticking = true;
-  size_t page = (size_t)sysconf(_SC_PAGESIZE);
   oti_thread* t = calloc(1, sizeof(*t));
   if (!t) return oti_fail(rt, "out of host memory");
   t->object = t->entry = t->args = t->wake_value = t->kill_reason = t->interrupt = OT_NIL;
   t->watchers = OT_EMPTY;
   t->resume = R_BEGIN;
-  t->stack_bytes = THREAD_STACK;
-  void* stack = mmap(NULL, t->stack_bytes, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-  if (stack == MAP_FAILED) {
+  if (!oti_native_stack_new(rt, &t->exec.native)) {
     free(t);
-    return oti_fail(rt, "cannot reserve a thread stack");
+    return 0;
   }
-  t->stack = stack;
-  /* A guard page catches anything that runs past the margin. */
-  mprotect(stack, page, PROT_NONE);
   if (!oti_grow(rt, (void**)&ts->all, &ts->capacity, ts->count + 1, sizeof(oti_thread*))) {
+    oti_native_stack_free(rt, &t->exec.native);
     free_thread(t);
     return 0;
   }
@@ -765,6 +744,7 @@ static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
   ot_value object = oti_alloc(rt, K_THREAD, 3, OTI_BYTES(oti_thread_obj, 3));
   if (!object) {
     unregister(ts, t);
+    oti_native_stack_free(rt, &t->exec.native);
     free_thread(t);
     return 0;
   }
@@ -776,8 +756,6 @@ static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
    * namespace, and nothing else. */
   oti_exec* x = &t->exec;
   x->native.callee = OT_NIL;
-  x->native.stack_top = ((uintptr_t)stack + t->stack_bytes) & ~(uintptr_t)15;
-  x->native.base_limit = x->native.limit = (uintptr_t)stack + page + THREAD_MARGIN;
   x->restart_transfer[0] = x->restart_transfer[1] = OT_NIL;
   x->condition_values[0] = OT_NIL;
   x->current_namespace = rt->current_namespace;
@@ -790,7 +768,7 @@ static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
   x->params = rt->param_count ? malloc(2 * rt->param_count * sizeof(ot_value)) : NULL;
   if (!x->native.args || (rt->param_count && !x->params)) {
     unregister(ts, t);
-    free_exec(x);
+    free_exec(rt, x);
     free_thread(t);
     return oti_fail(rt, "out of host memory");
   }

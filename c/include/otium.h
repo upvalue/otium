@@ -59,7 +59,9 @@ ot_state* ot_create(size_t semispace_bytes, size_t stack_limit);
 /* Run native code instead of the VM: everything is compiled to machine code,
  * starting from the boot file the build makes. Call it right after
  * ot_create. False, with the runtime unchanged, where native code isn't
- * available. */
+ * available. Native code runs on small stacks of its own, so a signal
+ * handler the host installs must run on an alternate stack (sigaltstack and
+ * SA_ONSTACK). */
 bool ot_use_native(ot_state* rt);
 void ot_destroy(ot_state* rt);
 bool ot_set_heap_limit(ot_state* rt, size_t semispace_bytes);

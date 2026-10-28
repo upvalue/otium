@@ -33,7 +33,7 @@
 
 (def (sleep seconds)
   "Park the running thread for seconds, an integer or float."
-  (%sleep seconds))
+  (%sleep (%thread-deadline seconds)))
 
 (def (thread? x)
   "Whether x is a thread."
@@ -60,7 +60,7 @@
 
 (def (join t &optional (timeout nil))
   "(thread/join t [timeout])\nWait for t to finish and return its result. A thread that failed raises a thread-failed condition with the original under :reason; one killed returns its kill reason. With timeout, in seconds, raises a timeout condition when it passes."
-  (let ((woke (%thread-join t timeout)))
+  (let ((woke (%thread-join t (%thread-deadline timeout))))
     (cond
       ((eq? woke :timeout)
        (restart-case (error (timeout-condition "thread/join")) (use-value "Return a value instead" (v) v)))
@@ -119,16 +119,8 @@
                   (cond
                     ((nil? (m :owner)) (put! m :owner (self)) #t)
                     ((eq? (m :owner) (self)) (error "thread/lock!: already held by this thread"))
-                    ((eq? (%park (m :waiters) (remaining deadline)) :timeout) #f)
+                    ((eq? (%park (m :waiters) deadline) :timeout) #f)
                     (else (loop)))))))
-
-;; Seconds left until an absolute deadline, or nil for none.
-(def- (remaining deadline)
-  (and deadline
-       (let ((left (/ (- deadline (* 1000000000 (%scheduler-clock))) 1000000000.0)))
-         (if (< left 0)
-             0
-             left))))
 
 (def (unlock! m)
   "(thread/unlock! m)\nRelease m and wake one thread waiting for it."
@@ -151,7 +143,7 @@
 
 (def (condvar-wait c m &optional (timeout nil))
   "(thread/condvar-wait c m [timeout])\nRelease m, wait for a signal on c, and take m again. #f if timeout passes first. Spurious wakeups happen: test again in a loop."
-  (let ((woke (atomically (unlock! m) (%park (c :waiters) timeout))))
+  (let ((woke (atomically (unlock! m) (%park (c :waiters) (%thread-deadline timeout)))))
     (lock! m)
     (not (eq? woke :timeout))))
 

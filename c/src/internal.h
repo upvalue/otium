@@ -687,6 +687,16 @@ typedef struct {
 
 #define OTI_ERROR_VALUE 3
 
+/* What native unwinding had in flight while a cleanup runs (native.c). */
+typedef struct {
+  /* The cleanup stub's stack pointer: unwinding past it drops the save. */
+  uintptr_t sp;
+  oti_error_record error;
+  ot_value condition, transfer[2];
+  int status;
+  bool raised, signaled, restart, exiting, interrupted;
+} oti_unwind_save;
+
 /* Native execution state. Trampolines and generated code address these
  * fields at fixed offsets, so the block comes first in ot_state; native.c
  * checks the offsets. */
@@ -709,6 +719,9 @@ typedef struct {
   size_t args_capacity;
   /* The limit when no interrupt or preemption is requested. */
   uintptr_t base_limit;
+  /* While a builtin call is parked, the arguments it will be dispatched
+   * with again: they are roots until then. */
+  size_t args_live;
 } oti_native_exec;
 
 /* What each thread of execution has of its own (see threads.c). The fields
@@ -753,7 +766,9 @@ typedef struct {
   bool compiling, evaluating, expanding;                                                           \
   size_t expansion_calls, eval_depth;                                                              \
   /* Nesting of sections no other thread may preempt. */                                           \
-  size_t atomic;
+  size_t atomic;                                                                                   \
+  oti_unwind_save* unwinds;                                                                        \
+  size_t unwind_count, unwind_capacity;
 
 typedef struct {
   OTI_EXEC_FIELDS
@@ -818,14 +833,17 @@ struct ot_state {
    * and the stubs cells and calls jump to (see native.c). */
   bool native_mode;
   oti_native_runtime* native_runtime;
-  uintptr_t native_stubs[3];
+  uintptr_t native_stubs[4];
   /* The boot file a native process started from (fasl.c). */
   oti_boot* boot;
+  /* Native code runs on Otium stacks and calls C through oti_c_bridge,
+   * which switches to native_c_sp on the C stack. Each oti_native_enter
+   * moves it below its own frame; native_c_base is its value under the
+   * outermost one. While they differ, C is waiting on Otium code it called
+   * (a callback), and threads don't switch. */
+  uintptr_t native_c_sp, native_c_base;
   /* Green threads, once one is spawned (threads.c). */
   oti_threads* threads;
-  /* The root list as ot_create leaves it. Each thread pushes its own roots
-   * on top of this, and a switch swaps the list's head. */
-  oti_roots* base_roots;
   /* What the host named the text it gives ot_eval (ot_set_source_path). */
   char* host_path;
   /* The interrupt flag when the host hasn't installed one. */
@@ -1027,6 +1045,19 @@ void oti_threads_destroy(ot_state* rt);
 bool oti_thread_poll(ot_state* rt);
 /* Whether the running thread should take a pending interrupt now. */
 bool oti_thread_foreground(ot_state* rt);
+/* Continue native code on stack sp at pc with value in R0. */
+_Noreturn void oti_native_resume(ot_state* rt, uintptr_t sp, uintptr_t pc, ot_value value);
+/* Where a thread that stopped in a C call called from native code resumes
+ * (with native.sp), and where a new thread starts (native.c). */
+extern char oti_c_resume[], oti_thread_begin[];
+uintptr_t oti_native_entry_of(ot_state* rt, ot_value callee);
+/* Where a builtin call that parked is dispatched again. */
+uintptr_t oti_native_redispatch(ot_state* rt);
+/* A builtin's result when it parked the running thread; dispatch hands the
+ * thread to the scheduler and calls it again once the thread is woken. */
+#define OTI_PARKED ((ot_value)34)
+_Noreturn void oti_thread_wait(ot_state* rt);
+_Noreturn void oti_thread_finished(ot_state* rt, ot_value result);
 /* Grow every thread's native.args to the running thread's capacity. */
 bool oti_threads_grow_args(ot_state* rt);
 /* Live threads, counting the running one; 1 before any is spawned. */

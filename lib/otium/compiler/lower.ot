@@ -80,6 +80,7 @@
 (def h-end-restarts 21)
 (def h-restart-apply 22)
 (def h-evaluator 23)
+(def h-pop-cleanup 24)
 
 ;; State fields.
 (def sf-heap-end 0)
@@ -823,11 +824,15 @@
     out))
 
 (def (cleanup-form fc node)
-  (let ((offset (node-offset node)))
+  (let ((offset (node-offset node)) (outcome (get node 3)))
     (let ((f (in-vreg fc (value fc (get node 2)))))
-      (ccall! fc h-cleanup [f [:imm (if (get node 3) word-true word-false)]] (vreg! fc) offset)
-      (let ((r (fresh-copy fc (value fc (get node 4)))))
-        (ccall! fc h-run-cleanup [] (vreg! fc) offset)
+      (ccall! fc h-cleanup [f [:imm (if outcome word-true word-false)]] (vreg! fc) offset)
+      (let ((r (fresh-copy fc (value fc (get node 4)))) (cleanup (vreg! fc)))
+        ;; Leaving normally: take the cleanup back and call it here, an
+        ;; ordinary call, with a nil outcome when it takes one.
+        (ccall! fc h-pop-cleanup [] cleanup offset)
+        (emit! fc [:call :value cleanup (if outcome [(in-vreg fc [:imm word-nil])] []) (vreg! fc) #f
+                   (fc :handlers) offset])
         r))))
 
 ;; Store values into native.args for a helper that takes them there.

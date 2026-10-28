@@ -318,6 +318,13 @@ void oti_visit_exec(ot_state* rt, oti_exec* x, oti_root_visitor visit, void* con
   for (size_t i = 0; i < 2 * x->param_count; i++) visit(context, &x->params[i]);
   visit(context, &x->condition_values[0]);
   for (size_t i = 0; i < 4; i++) visit(context, &x->error.slots[i]);
+  for (size_t i = 0; i < x->unwind_count; i++) {
+    oti_unwind_save* u = &x->unwinds[i];
+    for (size_t j = 0; j < 4; j++) visit(context, &u->error.slots[j]);
+    visit(context, &u->condition);
+    visit(context, &u->transfer[0]);
+    visit(context, &u->transfer[1]);
+  }
 #ifdef OTIUM_NATIVE
   if (rt->native_mode) oti_native_visit_exec(rt, x, visit, context);
 #else
@@ -572,7 +579,6 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
     return NULL;
   }
   rt->permanent_constants = rt->constant_count;
-  rt->base_roots = rt->heap.roots;
   return rt;
 }
 
@@ -626,6 +632,8 @@ void ot_destroy(ot_state* rt) {
   free(rt->restarts);
   free(rt->restart_scopes);
   free(rt->tries);
+  for (size_t i = 0; i < rt->unwind_count; i++) oti_release_error(&rt->unwinds[i].error);
+  free(rt->unwinds);
   free(rt->params);
   free(rt->handlers);
   free(rt->handler_previous);

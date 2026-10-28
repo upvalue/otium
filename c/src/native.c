@@ -124,13 +124,15 @@ typedef struct oti_code_chunk {
 } oti_code_chunk;
 
 /* Runtime stubs, in a code object of their own. */
-enum { STUB_CALL_OTHER, STUB_UNBOUND, STUB_EVALUATOR, STUB_COUNT };
+enum { STUB_CALL_OTHER, STUB_UNBOUND, STUB_EVALUATOR, STUB_UNWIND, STUB_COUNT };
 
 struct oti_native_runtime {
   oti_code_chunk* chunks;
   oti_code** codes;
   size_t code_count, code_capacity;
   uintptr_t stubs[STUB_COUNT];
+  /* In call_other, where a parked builtin call is dispatched again. */
+  uintptr_t redispatch;
   unsigned char* stack;
   size_t stack_bytes;
   uintptr_t limit;
@@ -140,7 +142,6 @@ struct oti_native_runtime {
 
 /* The trampoline and resume routine, below. */
 ot_value oti_native_enter(ot_state* rt, ot_value callee, uintptr_t entry, size_t argc);
-_Noreturn void oti_native_resume(ot_state* rt, uintptr_t sp, uintptr_t pc, ot_value value);
 extern char oti_native_return[], oti_native_fail[];
 
 /* The assembly below reads these state fields; the C compiler gives the
@@ -154,24 +155,32 @@ void oti_native_offsets(void) {
           ".set OFF_DEPTH, %c4\n"
           ".set OFF_HEAP_START, %c5\n"
           ".set OFF_HEAP_USED, %c6\n"
+          ".set OFF_CSP, %c7\n"
+          ".set OFF_CBASE, %c8\n"
+          ".set OFF_CALLEE, %c9\n"
+          ".set OFF_ARGC, %c10\n"
           :
           : "i"(offsetof(ot_state, native.sp)), "i"(offsetof(ot_state, native.entry)),
             "i"(offsetof(ot_state, native.stack_top)), "i"(offsetof(ot_state, native.args)),
             "i"(offsetof(ot_state, native.depth)), "i"(offsetof(ot_state, heap.start)),
-            "i"(offsetof(ot_state, heap.used)));
+            "i"(offsetof(ot_state, heap.used)), "i"(offsetof(ot_state, native_c_sp)),
+            "i"(offsetof(ot_state, native_c_base)), "i"(offsetof(ot_state, native.callee)),
+            "i"(offsetof(ot_state, native.argc)));
 }
 
 #define OFF_LIMIT 16
 _Static_assert(offsetof(ot_state, native.limit) == OFF_LIMIT, "the poll's displacement");
 
 /* oti_native_enter(rt, callee, entry, argc): call native code from C with the
- * arguments in native.args. The outermost entry switches to the Otium stack;
- * a nested one is already on it, since C helpers run there, and so is a
- * green thread's first, which has no stack_top. Either way it
- * leaves an entry record under the call (the previous native.sp, the
- * previous record and the stack pointer to return on) that frame walking
- * and unwinding use. The unwinder returns failure here through
- * oti_native_fail, with the stack pointer at the record. */
+ * arguments in native.args. Native code runs on the thread's Otium stack:
+ * the outermost entry starts at its top, a nested one just below the frame
+ * that called C, leaving that call's return address in place. The entry
+ * leaves a record under the call (the previous native.sp, the previous
+ * record, the C stack pointer to return on and the previous native_c_sp)
+ * that frame walking and unwinding use, and points native_c_sp below its
+ * own C frame, so C called from here doesn't overwrite it. The unwinder
+ * returns failure here through oti_native_fail, with the stack pointer at
+ * the record. */
 __asm__(".text\n"
         ".p2align 4\n"
         ".globl oti_native_enter\n"
@@ -187,10 +196,12 @@ __asm__(".text\n"
         "  mov %rsp, %r12\n"
         "  cmpq $0, OFF_DEPTH(%rbx)\n"
         "  jne 1f\n"
-        "  cmpq $0, OFF_TOP(%rbx)\n"
-        "  je 1f\n"
         "  mov OFF_TOP(%rbx), %rsp\n"
+        "  jmp 3f\n"
         "1:\n"
+        "  mov OFF_SP(%rbx), %rsp\n"
+        "  sub $16, %rsp\n"
+        "3:\n"
         "  and $-16, %rsp\n"
         "  sub $32, %rsp\n"
         "  mov OFF_SP(%rbx), %rax\n"
@@ -198,6 +209,15 @@ __asm__(".text\n"
         "  mov OFF_ENTRY(%rbx), %rax\n"
         "  mov %rax, 8(%rsp)\n"
         "  mov %r12, 16(%rsp)\n"
+        "  mov OFF_CSP(%rbx), %rax\n"
+        "  mov %rax, 24(%rsp)\n"
+        "  mov %r12, %rax\n"
+        "  and $-16, %rax\n"
+        "  mov %rax, OFF_CSP(%rbx)\n"
+        "  cmpq $0, OFF_CBASE(%rbx)\n"
+        "  jne 4f\n"
+        "  mov %rax, OFF_CBASE(%rbx)\n"
+        "4:\n"
         "  mov %rsp, OFF_ENTRY(%rbx)\n"
         "  movq $0, OFF_SP(%rbx)\n"
         "  incq OFF_DEPTH(%rbx)\n"
@@ -226,6 +246,12 @@ __asm__(".text\n"
         "  mov %rdx, OFF_SP(%rbx)\n"
         "  mov 8(%rsp), %rdx\n"
         "  mov %rdx, OFF_ENTRY(%rbx)\n"
+        "  mov 24(%rsp), %rdx\n"
+        "  mov %rdx, OFF_CSP(%rbx)\n"
+        "  test %rdx, %rdx\n"
+        "  jne 5f\n"
+        "  movq $0, OFF_CBASE(%rbx)\n"
+        "5:\n"
         "  mov 16(%rsp), %rsp\n"
         "  pop %r15\n"
         "  pop %r14\n"
@@ -236,6 +262,71 @@ __asm__(".text\n"
         "  ret\n"
         ".size oti_native_enter, .-oti_native_enter\n"
         ".p2align 4\n"
+        /* oti_thread_begin: a green thread's first instructions, on its own
+         * Otium stack, with the state in rbx, the entry address in rax and
+         * the callee, count and arguments in native.callee, native.argc and
+         * native.args. It leaves an entry record as oti_native_enter does,
+         * but whose return path pops a frame built here and lands in
+         * oti_thread_end, which hands the result (0 after failure) to
+         * oti_thread_finished on the C stack. The callee is entered with
+         * oti_native_return as its return address, which frame walking
+         * looks for. */
+        ".globl oti_thread_begin\n"
+        ".type oti_thread_begin,@function\n"
+        "oti_thread_begin:\n"
+        "  lea oti_thread_end(%rip), %rcx\n"
+        "  push %rcx\n"
+        "  push $0\n"
+        "  push %rbx\n"
+        "  push $0\n"
+        "  push $0\n"
+        "  push $0\n"
+        "  push $0\n"
+        "  mov %rsp, %r12\n"
+        "  mov %rax, %r9\n"
+        "  and $-16, %rsp\n"
+        "  sub $32, %rsp\n"
+        "  movq $0, 0(%rsp)\n"
+        "  movq $0, 8(%rsp)\n"
+        "  mov %r12, 16(%rsp)\n"
+        "  mov OFF_CSP(%rbx), %rax\n"
+        "  mov %rax, 24(%rsp)\n"
+        "  mov %rsp, OFF_ENTRY(%rbx)\n"
+        "  movq $0, OFF_SP(%rbx)\n"
+        "  incq OFF_DEPTH(%rbx)\n"
+        "  mov OFF_CALLEE(%rbx), %rsi\n"
+        "  mov OFF_ARGC(%rbx), %rax\n"
+        "  mov OFF_ARGS(%rbx), %r10\n"
+        "  mov 0(%r10), %rdi\n"
+        "  mov 8(%r10), %rcx\n"
+        "  mov 16(%r10), %r8\n"
+        "  mov 24(%r10), %r11\n"
+        "  mov 32(%r10), %r10\n"
+        "  lea oti_native_return(%rip), %rdx\n"
+        "  push %rdx\n"
+        "  jmp *%r9\n"
+        ".size oti_thread_begin, .-oti_thread_begin\n"
+        ".type oti_thread_end,@function\n"
+        /* The C stack position the record restored is from when the thread
+         * began; the main thread may have moved on since. A thread ends with
+         * no C frames of its own, at the current base. */
+        "oti_thread_end:\n"
+        "  mov OFF_CBASE(%rbx), %rsp\n"
+        "  mov %rsp, OFF_CSP(%rbx)\n"
+        "  mov %rbx, %rdi\n"
+        "  mov %rax, %rsi\n"
+        "  call oti_thread_finished\n"
+        "  ud2\n"
+        ".size oti_thread_end, .-oti_thread_end\n"
+        /* Where a thread that stopped in a C call (see BRIDGE) resumes, with
+         * the call's value in rax. */
+        ".globl oti_c_resume\n"
+        ".type oti_c_resume,@function\n"
+        "oti_c_resume:\n"
+        "  mov OFF_SP(%rbx), %rsp\n"
+        "  sub $8, %rsp\n"
+        "  ret\n"
+        ".size oti_c_resume, .-oti_c_resume\n"
         ".globl oti_native_resume\n"
         ".type oti_native_resume,@function\n"
         "oti_native_resume:\n"
@@ -545,17 +636,17 @@ static void site(oti_bridge* b, uint64_t descriptor) {
 
 static const void* helper_address(uint64_t id);
 
-/* A call into C: S1 goes back to heap.used and the stack pointer to
- * native.sp first, so the collector sees both, and S1 is reloaded after. The
- * state goes in R0, ahead of the arguments the stream put in R1 up. */
-static void c_call(struct sljit_compiler* c, const void* function, uint64_t args) {
+/* A call into C, through the function's bridge (BRIDGE), which runs it on
+ * the C stack: S1 goes back to heap.used first, so the collector sees it,
+ * and is reloaded after. The state goes in R0, ahead of the arguments the
+ * stream put in R1 up. */
+static void c_call(struct sljit_compiler* c, const void* bridge, uint64_t args) {
   static const sljit_s32 types[] = {
       SLJIT_ARGS1(W, P), SLJIT_ARGS2(W, P, W), SLJIT_ARGS3(W, P, W, W), SLJIT_ARGS4(W, P, W, W, W)};
   sljit_emit_op2(c, SLJIT_SUB, SLJIT_MEM1(SLJIT_S0), (sljit_sw)offsetof(ot_state, heap.used),
                  SLJIT_S1, 0, SLJIT_MEM1(SLJIT_S0), (sljit_sw)offsetof(ot_state, heap.start));
-  sljit_get_local_base(c, SLJIT_MEM1(SLJIT_S0), (sljit_sw)offsetof(ot_state, native.sp), 0);
   sljit_emit_op1(c, SLJIT_MOV, SLJIT_R0, 0, SLJIT_S0, 0);
-  sljit_emit_icall(c, SLJIT_CALL, types[args], SLJIT_IMM, SLJIT_FUNC_ADDR(function));
+  sljit_emit_icall(c, SLJIT_CALL, types[args], SLJIT_IMM, SLJIT_FUNC_ADDR(bridge));
 }
 
 static void after_c_call(struct sljit_compiler* c) {
@@ -1080,6 +1171,10 @@ static uintptr_t entry_of(ot_state* rt, ot_value callee) {
                                      : rt->native_stubs[STUB_CALL_OTHER];
 }
 
+uintptr_t oti_native_entry_of(ot_state* rt, ot_value callee) { return entry_of(rt, callee); }
+
+uintptr_t oti_native_redispatch(ot_state* rt) { return rt->native_runtime->redispatch; }
+
 /* Call callee with argc arguments already in native.args. 0 on failure, with
  * the error recorded, as oti_call_list. */
 ot_value oti_native_invoke(ot_state* rt, ot_value callee, size_t argc) {
@@ -1142,9 +1237,11 @@ static void visit_frames(ot_state* rt, uintptr_t sp, oti_root_visitor visit, voi
 }
 
 /* native.args is not a root: values pass through it between a call and the
- * callee's entry, or into C that copies them before it can collect. */
+ * callee's entry, or into C that copies them before it can collect. The
+ * exception is a parked builtin call's (args_live). */
 void oti_native_visit_exec(ot_state* rt, oti_exec* x, oti_root_visitor visit, void* context) {
   visit(context, &x->native.callee);
+  for (size_t i = 0; i < x->native.args_live; i++) visit(context, &x->native.args[i]);
   visit_frames(rt, x->native.sp, visit, context);
 }
 
@@ -1219,8 +1316,102 @@ static bool innermost_offset(ot_state* rt, uint32_t* source, uint32_t* offset) {
 
 /* --- Unwinding ---------------------------------------------------------- */
 
+typedef uintptr_t W;
+
+/* Drop cleanup saves whose stubs lie below sp, which unwinding is about to
+ * leave: a cleanup that raised never came back for its save. */
+static void drop_unwinds(ot_state* rt, uintptr_t sp) {
+  while (rt->unwind_count && rt->unwinds[rt->unwind_count - 1].sp < sp)
+    oti_release_error(&rt->unwinds[--rt->unwind_count].error);
+}
+
+static _Noreturn void resume(ot_state* rt, uintptr_t sp, uintptr_t pc, ot_value value) {
+  drop_unwinds(rt, sp);
+  oti_native_resume(rt, sp, pc, value);
+}
+
 static _Noreturn void fail_to_entry(ot_state* rt) {
-  oti_native_resume(rt, rt->native.entry, (uintptr_t)oti_native_fail, 0);
+  resume(rt, rt->native.entry, (uintptr_t)oti_native_fail, 0);
+}
+
+/* Run the innermost cleanup as native code, unwinding: save what is in
+ * flight, put the state back as it was when the cleanup was made, and jump
+ * to the unwind stub just under the frame that called C, as if that frame
+ * had called it. The stub calls the cleanup and then h_continue_unwind,
+ * which puts the save back and goes on unwinding. So a cleanup has no C
+ * frames under it, and its thread can wait for others. */
+static _Noreturn void unwind_cleanup(ot_state* rt) {
+  size_t index = rt->cleanup_count - 1;
+  oti_cleanup cleanup = rt->cleanup_states[index];
+  rt->native.callee = rt->cleanups[index];
+  oti_restore_cleanups(rt, index);
+  uintptr_t sp = rt->native.sp - 8;
+  if (!oti_grow(rt, (void**)&rt->unwinds, &rt->unwind_capacity, rt->unwind_count + 1,
+                sizeof(oti_unwind_save))) {
+    /* Out of memory: skip the cleanup and keep unwinding with that error. */
+    oti_native_raise(rt);
+  }
+  oti_unwind_save* u = &rt->unwinds[rt->unwind_count++];
+  *u = (oti_unwind_save){sp,
+                         rt->error,
+                         rt->condition_values[0],
+                         {rt->restart_transfer[0], rt->restart_transfer[1]},
+                         rt->exit_status,
+                         rt->raised,
+                         rt->signaled,
+                         rt->restart_pending,
+                         rt->exit_pending,
+                         rt->interrupted};
+  rt->error = (oti_error_record){.slots = {OT_NIL, OT_NIL, OT_NIL, OT_NIL}};
+  bool error = !u->restart && !u->exiting && !u->interrupted;
+  rt->frame_count = cleanup.state.frames;
+  rt->try_count = cleanup.tries;
+  rt->sp = cleanup.state.sp;
+  oti_restore_params(rt, cleanup.state.params);
+  oti_restore_handlers(rt, cleanup.state.handlers, cleanup.state.handler_top);
+  oti_restore_restarts(rt, cleanup.state.restarts);
+  rt->raised = rt->signaled = rt->restart_pending = rt->exit_pending = rt->interrupted = false;
+  rt->condition_values[0] = OT_NIL;
+  rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
+  ot_value outcome = OT_NIL;
+  if (error) {
+    /* The cleanup sees the condition, and unwinding goes on raising it. */
+    u = &rt->unwinds[rt->unwind_count - 1];
+    ot_value condition = u->raised ? u->condition : oti_condition_of(rt, &u->error);
+    if (!condition) {
+      rt->unwind_count--;
+      oti_native_raise(rt);
+    }
+    u = &rt->unwinds[rt->unwind_count - 1];
+    u->condition = outcome = condition;
+    u->raised = true;
+  } else if (u->exiting || u->interrupted) {
+    outcome = oti_intern(rt, K_KEYWORD, ":quit", 5);
+    if (!outcome) oti_native_raise(rt);
+  }
+  rt->native.argc = cleanup.outcome ? 1 : 0;
+  rt->native.args[0] = outcome;
+  resume(rt, sp, rt->native_runtime->stubs[STUB_UNWIND], 0);
+}
+
+/* The unwind stub's cleanup returned: put back what was in flight and go on
+ * unwinding. */
+static _Noreturn void unwind(ot_state* rt, size_t stop);
+
+static W h_continue_unwind(ot_state* rt) {
+  oti_unwind_save u = rt->unwinds[--rt->unwind_count];
+  oti_clear_error(rt);
+  rt->error = u.error;
+  rt->raised = u.raised;
+  rt->signaled = u.signaled;
+  rt->condition_values[0] = u.condition;
+  rt->restart_pending = u.restart;
+  rt->restart_transfer[0] = u.transfer[0];
+  rt->restart_transfer[1] = u.transfer[1];
+  rt->interrupted = u.interrupted;
+  rt->exit_pending = u.exiting;
+  rt->exit_status = u.status;
+  unwind(rt, rt->frame_count - 1);
 }
 
 static bool resume_restart(ot_state* rt, size_t stop) {
@@ -1235,8 +1426,7 @@ static bool resume_restart(ot_state* rt, size_t stop) {
   oti_restart_scope scope = rt->restart_scopes[scope_index - 1];
   if (rt->cleanup_count > scope.state.cleanups) {
     if (rt->cleanup_states[rt->cleanup_count - 1].state.frames <= stop) fail_to_entry(rt);
-    oti_run_cleanup(rt, true);
-    return true;
+    unwind_cleanup(rt);
   }
   if (scope.state.frames <= stop) fail_to_entry(rt);
   oti_restore_restarts(rt, scope_index);
@@ -1254,7 +1444,7 @@ static bool resume_restart(ot_state* rt, size_t stop) {
   oti_as_pair(transfer)->car = oti_as_restart(rt->restart_transfer[0])->handler;
   oti_as_pair(transfer)->cdr = rt->restart_transfer[1];
   rt->restart_transfer[0] = rt->restart_transfer[1] = OT_NIL;
-  oti_native_resume(rt, scope.state.slot, scope.state.target, transfer);
+  resume(rt, scope.state.slot, scope.state.target, transfer);
 }
 
 /* Unwind from the native frame that called this C function, after an error
@@ -1274,6 +1464,10 @@ _Noreturn void oti_native_raise(ot_state* rt) {
       e->located = true;
     }
   }
+  unwind(rt, stop);
+}
+
+static _Noreturn void unwind(ot_state* rt, size_t stop) {
   for (;;) {
     if (!rt->try_count) oti_native_trace(rt);
     if (!rt->interrupted && !rt->exit_pending && !rt->restart_pending && !rt->signaled)
@@ -1287,8 +1481,7 @@ _Noreturn void oti_native_raise(ot_state* rt) {
                                  : 0;
     if (rt->cleanup_count > target_cleanups) {
       if (rt->cleanup_states[rt->cleanup_count - 1].state.frames <= stop) fail_to_entry(rt);
-      oti_run_cleanup(rt, true);
-      continue;
+      unwind_cleanup(rt);
     }
     if (rt->interrupted || rt->exit_pending || !rt->try_count ||
         rt->tries[rt->try_count - 1].frames <= stop)
@@ -1304,13 +1497,11 @@ _Noreturn void oti_native_raise(ot_state* rt) {
     rt->raised = false;
     rt->signaled = false;
     rt->condition_values[0] = OT_NIL;
-    oti_native_resume(rt, handler.slot, handler.target, condition);
+    resume(rt, handler.slot, handler.target, condition);
   }
 }
 
 /* --- Helpers ------------------------------------------------------------ */
-
-typedef uintptr_t W;
 
 static W h_alloc(ot_state* rt, W kind, W fields, W bytes) {
   ot_value v = oti_alloc_slow(rt, (uint32_t)kind, (uint32_t)fields, (size_t)bytes);
@@ -1455,6 +1646,17 @@ static W h_cleanup(ot_state* rt, W closure, W outcome) {
   return OT_NIL;
 }
 
+/* Leaving a cleanup's body normally: drop its record and return the cleanup,
+ * which native code calls itself. */
+static W h_pop_cleanup(ot_state* rt) {
+  if (!rt->cleanup_count) {
+    oti_error(rt, "invalid cleanup stack");
+    oti_native_raise(rt);
+  }
+  oti_restore_cleanups(rt, rt->cleanup_count - 1);
+  return rt->cleanups[rt->cleanup_count];
+}
+
 static W h_run_cleanup(ot_state* rt) {
   if (!oti_run_cleanup(rt, false)) oti_native_raise(rt);
   return OT_NIL;
@@ -1549,61 +1751,80 @@ static W h_evaluator(ot_state* rt, W name) {
   return v;
 }
 
+/* The helpers the stream can call, by number. */
+#define HELPERS(X) \
+  X(H_ALLOC, h_alloc)  \
+  X(H_PRIM1, h_prim1)  \
+  X(H_PRIM2, h_prim2)  \
+  X(H_ARITY, h_arity)  \
+  X(H_UNBOUND, h_unbound)  \
+  X(H_UNINITIALIZED, h_uninitialized)  \
+  X(H_DEFINE, h_define)  \
+  X(H_SET_GLOBAL, h_set_global)  \
+  X(H_POLL, h_poll)  \
+  X(H_REST, h_rest)  \
+  X(H_TRY, h_try)  \
+  X(H_END_TRY, h_end_try)  \
+  X(H_RAISE, h_raise)  \
+  X(H_CLEANUP, h_cleanup)  \
+  X(H_RUN_CLEANUP, h_run_cleanup)  \
+  X(H_HANDLERS, h_handlers)  \
+  X(H_UNHANDLERS, h_unhandlers)  \
+  X(H_BIND_PARAM, h_bind_param)  \
+  X(H_UNBIND_PARAMS, h_unbind_params)  \
+  X(H_MAKE_PARAM, h_make_param)  \
+  X(H_RESTARTS, h_restarts)  \
+  X(H_END_RESTARTS, h_end_restarts)  \
+  X(H_RESTART_APPLY, h_restart_apply)  \
+  X(H_EVALUATOR, h_evaluator)  \
+  X(H_POP_CLEANUP, h_pop_cleanup)
+
 enum {
-  H_ALLOC,
-  H_PRIM1,
-  H_PRIM2,
-  H_ARITY,
-  H_UNBOUND,
-  H_UNINITIALIZED,
-  H_DEFINE,
-  H_SET_GLOBAL,
-  H_POLL,
-  H_REST,
-  H_TRY,
-  H_END_TRY,
-  H_RAISE,
-  H_CLEANUP,
-  H_RUN_CLEANUP,
-  H_HANDLERS,
-  H_UNHANDLERS,
-  H_BIND_PARAM,
-  H_UNBIND_PARAMS,
-  H_MAKE_PARAM,
-  H_RESTARTS,
-  H_END_RESTARTS,
-  H_RESTART_APPLY,
-  H_EVALUATOR,
+#define HELPER_ID(id, fn) id,
+  HELPERS(HELPER_ID)
+#undef HELPER_ID
   H_COUNT
 };
 
+static W dispatch(ot_state* rt);
+
+/* A bridge per C function native code calls: it records the calling frame
+ * (whose return address stays on the Otium stack, where frame walking reads
+ * it) and calls the function on the C stack. Each has its own direct call,
+ * which predicts far better than one shared indirect call. A thread that
+ * stopped in one resumes at oti_c_resume with the call's value in rax. */
+#define BRIDGE(fn)                                                                                  \
+  __asm__ volatile(".pushsection .text\n"                                                          \
+                   ".p2align 4\n"                                                                  \
+                   ".globl oti_bridge_" #fn "\n"                                                   \
+                   ".hidden oti_bridge_" #fn "\n"                                                  \
+                   "oti_bridge_" #fn ":\n"                                                         \
+                   "  lea 8(%%rsp), %%rax\n"                                                       \
+                   "  mov %%rax, OFF_SP(%%rbx)\n"                                                  \
+                   "  mov OFF_CSP(%%rbx), %%rsp\n"                                                 \
+                   "  call %P0\n"                                                                  \
+                   "  mov OFF_SP(%%rbx), %%rsp\n"                                                  \
+                   "  sub $8, %%rsp\n"                                                             \
+                   "  ret\n"                                                                       \
+                   ".popsection\n"                                                                 \
+                   :                                                                               \
+                   : "i"(fn))
+#define HELPER_BRIDGE(id, fn) BRIDGE(fn);
+#define HELPER_DECLARE(id, fn) extern char oti_bridge_##fn[];
+HELPERS(HELPER_DECLARE)
+extern char oti_bridge_dispatch[], oti_bridge_h_continue_unwind[];
+
+void oti_native_bridges(void);
+void oti_native_bridges(void) {
+  HELPERS(HELPER_BRIDGE)
+  BRIDGE(dispatch);
+  BRIDGE(h_continue_unwind);
+}
+
 static const void* helper_address(uint64_t id) {
-  static const void* const helpers[H_COUNT] = {
-      [H_ALLOC] = (const void*)h_alloc,
-      [H_PRIM1] = (const void*)h_prim1,
-      [H_PRIM2] = (const void*)h_prim2,
-      [H_ARITY] = (const void*)h_arity,
-      [H_UNBOUND] = (const void*)h_unbound,
-      [H_UNINITIALIZED] = (const void*)h_uninitialized,
-      [H_DEFINE] = (const void*)h_define,
-      [H_SET_GLOBAL] = (const void*)h_set_global,
-      [H_POLL] = (const void*)h_poll,
-      [H_REST] = (const void*)h_rest,
-      [H_TRY] = (const void*)h_try,
-      [H_END_TRY] = (const void*)h_end_try,
-      [H_RAISE] = (const void*)h_raise,
-      [H_CLEANUP] = (const void*)h_cleanup,
-      [H_RUN_CLEANUP] = (const void*)h_run_cleanup,
-      [H_HANDLERS] = (const void*)h_handlers,
-      [H_UNHANDLERS] = (const void*)h_unhandlers,
-      [H_BIND_PARAM] = (const void*)h_bind_param,
-      [H_UNBIND_PARAMS] = (const void*)h_unbind_params,
-      [H_MAKE_PARAM] = (const void*)h_make_param,
-      [H_RESTARTS] = (const void*)h_restarts,
-      [H_END_RESTARTS] = (const void*)h_end_restarts,
-      [H_RESTART_APPLY] = (const void*)h_restart_apply,
-      [H_EVALUATOR] = (const void*)h_evaluator,
-  };
+#define HELPER_ENTRY(id, fn) [id] = (const void*)oti_bridge_##fn,
+  static const void* const helpers[H_COUNT] = {HELPERS(HELPER_ENTRY)};
+#undef HELPER_ENTRY
   return id < H_COUNT ? helpers[id] : NULL;
 }
 
@@ -1660,6 +1881,7 @@ static W dispatch(ot_state* rt) {
     rt->sp = base + argc;
     ot_value result = rt->builtin_run[callee >> 8](rt, base, argc);
     rt->sp = base;
+    if (result == OTI_PARKED) oti_thread_wait(rt);
     if (!result || oti_failed(rt)) oti_native_raise(rt);
     return result;
   }
@@ -1696,6 +1918,7 @@ static W dispatch(ot_state* rt) {
     if (oti_primitive_value(f)) {
       ot_value result = oti_call_primitive(rt, base, argc);
       rt->sp = base;
+      if (result == OTI_PARKED) oti_thread_wait(rt);
       if (!result || oti_failed(rt)) oti_native_raise(rt);
       return result;
     }
@@ -1718,7 +1941,7 @@ static bool build_stubs(ot_state* rt) {
   oti_native_runtime* n = rt->native_runtime;
   struct sljit_compiler* c = sljit_create_compiler(NULL);
   if (!c) return false;
-  oti_stub_site sites[2];
+  oti_stub_site sites[4];
   struct sljit_label* entries[STUB_COUNT];
   uint32_t frame;
   sljit_sw args = (sljit_sw)offsetof(ot_state, native.args);
@@ -1732,7 +1955,10 @@ static bool build_stubs(ot_state* rt) {
     sljit_emit_op1(c, SLJIT_MOV, SLJIT_MEM1(SLJIT_R7), i * 8, SLJIT_R(2 + i), 0);
   sljit_emit_op1(c, SLJIT_MOV, SLJIT_MEM1(SLJIT_S0), callee, SLJIT_R1, 0);
   sljit_emit_op1(c, SLJIT_MOV, SLJIT_MEM1(SLJIT_S0), argc, SLJIT_R0, 0);
-  c_call(c, (const void*)dispatch, 0);
+  /* A thread whose builtin parked comes back here, to dispatch the same
+   * call again. */
+  struct sljit_label* redispatch = sljit_emit_label(c);
+  c_call(c, (const void*)oti_bridge_dispatch, 0);
   sites[0] = (oti_stub_site){sljit_emit_label(c), frame};
   after_c_call(c);
   struct sljit_jump* done = sljit_emit_cmp(c, SLJIT_NOT_EQUAL, SLJIT_R0, 0, SLJIT_IMM, 0);
@@ -1748,7 +1974,7 @@ static bool build_stubs(ot_state* rt) {
 
   entries[STUB_UNBOUND] = sljit_emit_aligned_label(c, SLJIT_LABEL_ALIGN_16, NULL);
   enter(c, 7, 0, &frame);
-  c_call(c, (const void*)h_unbound, 1);
+  c_call(c, (const void*)oti_bridge_h_unbound, 1);
   sites[1] = (oti_stub_site){sljit_emit_label(c), frame};
   sljit_emit_return(c, SLJIT_MOV, SLJIT_R0, 0);
 
@@ -1764,6 +1990,22 @@ static bool build_stubs(ot_state* rt) {
   sljit_emit_icall(c, SLJIT_CALL_REG_ARG | SLJIT_CALL_RETURN, SLJIT_ARGS0(W), SLJIT_MEM1(SLJIT_S0),
                    (sljit_sw)offsetof(ot_state, native_stubs[STUB_CALL_OTHER]));
 
+  /* Unwinding jumps here, as if the frame that called C had called it (see
+   * unwind_cleanup), with a cleanup and its arguments in native.callee,
+   * native.argc and native.args. */
+  entries[STUB_UNWIND] = sljit_emit_aligned_label(c, SLJIT_LABEL_ALIGN_16, NULL);
+  enter(c, 8, 0, &frame);
+  sljit_emit_op1(c, SLJIT_MOV, SLJIT_R7, 0, SLJIT_MEM1(SLJIT_S0), args);
+  sljit_emit_op1(c, SLJIT_MOV, SLJIT_R1, 0, SLJIT_MEM1(SLJIT_S0), callee);
+  sljit_emit_op1(c, SLJIT_MOV, SLJIT_R0, 0, SLJIT_MEM1(SLJIT_S0), argc);
+  sljit_emit_op1(c, SLJIT_MOV, SLJIT_R2, 0, SLJIT_MEM1(SLJIT_R7), 0);
+  sljit_emit_icall(c, SLJIT_CALL_REG_ARG, SLJIT_ARGS0(W), SLJIT_MEM1(SLJIT_S0),
+                   (sljit_sw)offsetof(ot_state, native_stubs[STUB_CALL_OTHER]));
+  sites[2] = (oti_stub_site){sljit_emit_label(c), frame};
+  c_call(c, (const void*)oti_bridge_h_continue_unwind, 0);
+  sites[3] = (oti_stub_site){sljit_emit_label(c), frame};
+  sljit_emit_return(c, SLJIT_MOV, SLJIT_R0, 0);
+
   void* machine = sljit_generate_code(c, 0, n);
   if (!machine) {
     sljit_free_compiler(c);
@@ -1778,19 +2020,20 @@ static bool build_stubs(ot_state* rt) {
   }
   code->start = (uintptr_t)machine;
   code->end = code->start + size;
-  code->descriptors = calloc(2, sizeof(oti_descriptor));
+  code->descriptors = calloc(4, sizeof(oti_descriptor));
   code->bitmaps = calloc(1, sizeof(uint64_t));
   if (!code->descriptors || !code->bitmaps) {
     sljit_free_compiler(c);
     free_code(code);
     return false;
   }
-  for (int i = 0; i < 2; i++)
+  for (int i = 0; i < 4; i++)
     code->descriptors[i] =
         (oti_descriptor){(uint32_t)(sljit_get_label_addr(sites[i].label) - code->start),
                          sites[i].frame, UINT32_MAX, UINT32_MAX, 0, 0, false};
-  code->descriptor_count = 2;
-  qsort(code->descriptors, 2, sizeof(oti_descriptor), compare_descriptors);
+  code->descriptor_count = 4;
+  qsort(code->descriptors, 4, sizeof(oti_descriptor), compare_descriptors);
+  n->redispatch = sljit_get_label_addr(redispatch);
   for (int i = 0; i < STUB_COUNT; i++) {
     n->stubs[i] = sljit_get_label_addr(entries[i]);
     rt->native_stubs[i] = n->stubs[i];

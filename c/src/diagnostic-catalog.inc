@@ -39,4 +39,5 @@ static const struct { const char* code; const char* type; const char* message; }
   {"E0503", "thread-error", "deadlock: no thread can run and none is sleeping"},
   {"E0504", "thread-failed", "the joined thread failed"},
   {"E0505", "timeout", "timed out"},
+  {"E0506", "thread-error", "cannot wait for another thread inside a call from C"},
 };

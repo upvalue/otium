@@ -232,6 +232,12 @@
             :explanation "An operation given a timeout, such as thread/join or actor/call, waited that long without finishing. A `use-value` restart returns a value in its place."
             :example "(require otium.thread :as thread)\n(thread/join (thread/spawn (fn () (thread/sleep 10))) 0.1)"
             :fixed "(require otium.thread :as thread)\n(thread/join (thread/spawn (fn () (thread/sleep 10))) 20)"}
+   "E0506" {:title "waiting inside a call from C"
+            :type :thread-error
+            :message "cannot wait for another thread inside a call from C"
+            :explanation "Some Otium code runs as a call from the runtime's C code: handler-bind handlers, interrupt thunks, macro expanders, slot initializers, callbacks from foreign code. C frames can't be set aside while another thread runs, so such code runs to the end without other threads running, and it can't wait for one: no join, lock, receive or condvar wait. Sleeping is allowed; the whole process waits. Do the waiting in ordinary code, for example after the handler has returned or in a restart."
+            :example "(require otium.thread :as thread)\n(let ((t (thread/spawn (fn () (thread/sleep 1)))))\n  (handler-bind ((error? (fn (c) (thread/join t))))\n    (error \"failed\")))"
+            :fixed "(require otium.thread :as thread)\n(let ((t (thread/spawn (fn () (thread/sleep 1)))))\n  (try (error \"failed\")\n    (catch e (thread/join t))))"}
    "L0001" {:title "if in the else branch of an if"
             :name "if-chain"
             :group :style

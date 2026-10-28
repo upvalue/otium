@@ -1,29 +1,36 @@
 #include "internal.h"
 
 /* Green threads: many threads of Otium code on one native thread. See
- * scratch/green-threads.md.
+ * scratch/green-threads.md and scratch/segmented-stacks.md.
  *
- * In native processes each thread has a machine stack of its own and a saved
- * copy of rt->exec, the per-thread part of the state. A switch copies the
- * running thread's exec out and the next one's in, then swaps stack
- * pointers. C frames stay on the stack they were made on, so a thread can
- * be switched out wherever C code calls the scheduler: when it parks, yields
- * or is preempted at a poll.
+ * Native code runs on Otium stacks, one per thread, and all C runs on the
+ * one C stack (native.c). A thread is switched only when it has no C frames
+ * of its own: when a builtin it called parks, at a poll, or when it
+ * finishes, and never while C is waiting on Otium code it called. So a
+ * thread that isn't running is its saved exec block, its Otium stack and
+ * where to continue: the start of the thread, the C call it was preempted
+ * in, or the builtin call that parked, which is dispatched again when the
+ * thread wakes. Waiting builtins are written for that: they mark the thread
+ * waiting and return OTI_PARKED, and when called again they see the wake
+ * value (retried) and return it or check again.
  *
- * The scheduler is a FIFO run queue, a list of timers sorted by deadline and
- * wait queues. A parked thread is on at most one wait queue and the timer
- * list; waking takes it off both before it is queued to run, so a timeout
- * and a wake can't both happen. Preemption is a ticker that trips the
- * native stack limit every millisecond while other threads are runnable or
- * sleeping; the poll it trips yields. With OTIUM_SCHED=seed[:slice] the scheduler is
- * deterministic instead, for tests: every poll counts towards a slice of
- * that many polls (random from the seed when not given), the next thread is
- * chosen at random, and time is virtual, jumping to the next deadline when
- * nothing can run. */
+ * The scheduler runs on the C stack: it saves the running thread's exec,
+ * loads the next one's, raises in it whatever is pending (^C on the main
+ * thread, a kill, an exit, a deadlock), runs an interrupt thunk, and jumps
+ * into it with oti_native_resume.
+ *
+ * The run queue is FIFO, timers are sorted by deadline, and a waiting
+ * thread is on at most one wait queue and the timer list; waking takes it
+ * off both, so a timeout and a wake can't both happen. Preemption is a
+ * ticker that trips the native stack limit every millisecond while another
+ * thread is runnable or sleeping; the poll it trips yields. With
+ * OTIUM_SCHED=seed[:slice] the scheduler is deterministic instead, for
+ * tests: every poll counts towards a slice of that many polls (random from
+ * the seed when not given), the next thread is chosen at random, and time
+ * is virtual, jumping to the next deadline when nothing can run. */
 
 #ifdef OTIUM_NATIVE
 
-#include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,6 +39,9 @@
 #include <unistd.h>
 
 typedef enum { T_RUNNABLE, T_RUNNING, T_WAITING, T_DONE, T_FAILED, T_KILLED } oti_thread_state;
+
+/* How a thread that isn't running continues. */
+typedef enum { R_BEGIN, R_REDISPATCH, R_RETURN } oti_resume;
 
 typedef struct oti_thread oti_thread;
 
@@ -43,13 +53,10 @@ typedef struct {
 struct oti_thread {
   /* Saved while another thread runs. */
   oti_exec exec;
-  uintptr_t machine_sp;
-  /* The head of its root list while it isn't running. */
-  oti_roots* roots;
-  /* The machine stack; NULL for the primordial thread, which runs on the
-   * process's. */
+  /* The Otium stack; NULL for the primordial thread, which has native.c's. */
   unsigned char* stack;
   size_t stack_bytes;
+  oti_resume resume;
   ot_value object, entry, args, wake_value, kill_reason;
   /* A thunk thread/interrupt! asked this thread to run, or nil. */
   ot_value interrupt;
@@ -60,7 +67,10 @@ struct oti_thread {
   oti_thread *next, *prev;
   oti_waitq* queue;
   uint64_t deadline;
-  bool timed, daemon, kill_pending, mail_waiting;
+  /* woken: the parked builtin call is being dispatched again. */
+  bool timed, daemon, kill_pending, mail_waiting, woken;
+  /* The atomic depth %park released for its wait. */
+  size_t saved_atomic;
   ot_value* mailbox;
   size_t mailbox_count, mailbox_capacity, cursor;
   oti_waitq joiners;
@@ -70,9 +80,8 @@ struct oti_threads {
   /* Live threads, including the running one. */
   oti_thread** all;
   size_t count, capacity;
+  /* NULL while a finished thread hands over to the next. */
   oti_thread *current, *primordial;
-  /* A finished thread whose stack is freed once another runs. */
-  oti_thread* dead;
   oti_waitq run;
   oti_thread** timers;
   size_t timer_count, timer_capacity;
@@ -104,48 +113,11 @@ typedef struct {
 
 OTI_LAYOUT(oti_waitq_obj, 0, queue);
 
-/* Reserved, and committed as it is touched. */
+/* A thread's Otium stack, reserved and committed as it is touched. Only
+ * native frames and entry records go there. */
 #define THREAD_STACK ((size_t)64 << 20)
-/* Room below the limit for C helpers. */
-#define THREAD_MARGIN ((size_t)1 << 20)
-
-/* oti_thread_switch(save, to): save the callee-saved registers and stack
- * pointer, load another stack and return on it. A new thread's stack starts
- * as if switched out just before oti_thread_start, with the state in rbx. */
-__asm__(".text\n"
-        ".p2align 4\n"
-        ".globl oti_thread_switch\n"
-        ".type oti_thread_switch,@function\n"
-        "oti_thread_switch:\n"
-        "  push %rbp\n"
-        "  push %rbx\n"
-        "  push %r12\n"
-        "  push %r13\n"
-        "  push %r14\n"
-        "  push %r15\n"
-        "  mov %rsp, (%rdi)\n"
-        "  mov %rsi, %rsp\n"
-        "  pop %r15\n"
-        "  pop %r14\n"
-        "  pop %r13\n"
-        "  pop %r12\n"
-        "  pop %rbx\n"
-        "  pop %rbp\n"
-        "  ret\n"
-        ".size oti_thread_switch, .-oti_thread_switch\n"
-        ".p2align 4\n"
-        ".globl oti_thread_start\n"
-        ".type oti_thread_start,@function\n"
-        "oti_thread_start:\n"
-        "  and $-16, %rsp\n"
-        "  mov %rbx, %rdi\n"
-        "  call oti_thread_main\n"
-        "  ud2\n"
-        ".size oti_thread_start, .-oti_thread_start\n");
-
-void oti_thread_switch(uintptr_t* save, uintptr_t to);
-extern char oti_thread_start[];
-_Noreturn void oti_thread_main(ot_state* rt);
+/* Room below the limit for the frame being made and nested entries. */
+#define THREAD_MARGIN ((size_t)256 << 10)
 
 /* --- Time ----------------------------------------------------------------- */
 
@@ -172,6 +144,18 @@ static bool deadline_after(ot_state* rt, ot_value seconds, uint64_t* deadline) {
   if (s < 0) s = 0;
   if (s > 1e9) s = 1e9;
   *deadline = now(rt->threads) + (uint64_t)(s * 1e9) + 1;
+  return true;
+}
+
+/* A deadline %thread-deadline made, or nil for none. Waiting builtins take
+ * absolute deadlines, since a parked call is dispatched again. */
+static bool deadline_arg(ot_state* rt, ot_value v, uint64_t* deadline) {
+  if (v == OT_NIL || v == OT_FALSE) {
+    *deadline = 0;
+    return true;
+  }
+  if (!ot_is_int(v) || ot_to_int(v) <= 0) return oti_error(rt, "expected a deadline from %thread-deadline");
+  *deadline = (uint64_t)ot_to_int(v);
   return true;
 }
 
@@ -231,7 +215,7 @@ static void remove_timer(oti_threads* ts, oti_thread* t) {
   t->timed = false;
 }
 
-/* Make a parked thread runnable, its park returning value. */
+/* Make a parked thread runnable, its wait ending with value. */
 static void wake(ot_state* rt, oti_thread* t, ot_value value) {
   oti_threads* ts = rt->threads;
   if (t->state != T_WAITING) return;
@@ -274,19 +258,13 @@ static void visit_thread(ot_state* rt, oti_thread* t, oti_root_visitor visit, vo
   visit(context, &t->interrupt);
   visit(context, &t->watchers);
   for (size_t i = 0; i < t->mailbox_count; i++) visit(context, &t->mailbox[i]);
-  if (t == rt->threads->current || t->state >= T_DONE) return;
-  oti_visit_exec(rt, &t->exec, visit, context);
-  /* Roots it pushed; the shared ones below are visited with the running
-   * thread's. */
-  for (oti_roots* r = t->roots; r && r != rt->base_roots; r = r->previous)
-    for (size_t i = 0; i < r->count; i++) visit(context, &r->slots[i]);
+  if (t != rt->threads->current && t->state < T_DONE) oti_visit_exec(rt, &t->exec, visit, context);
 }
 
 void oti_visit_threads(ot_state* rt, oti_root_visitor visit, void* context) {
   oti_threads* ts = rt->threads;
   if (!ts) return;
   for (size_t i = 0; i < ts->count; i++) visit_thread(rt, ts->all[i], visit, context);
-  if (ts->dead) visit_thread(rt, ts->dead, visit, context);
 }
 
 static void free_exec(oti_exec* x) {
@@ -301,15 +279,16 @@ static void free_exec(oti_exec* x) {
   free(x->params);
   free(x->tries);
   free(x->native.args);
+  for (size_t i = 0; i < x->unwind_count; i++) oti_release_error(&x->unwinds[i].error);
+  free(x->unwinds);
   oti_release_error(&x->error);
 }
 
 static void free_thread(oti_thread* t) {
   if (t->stack) {
     /* ASan marks C frames' redzones and clears them as the frames return.
-     * Frames still on a finished thread's stack never return, so their
-     * marks would outlive the mapping and trip whatever is mapped there
-     * next. */
+     * Marks left by frames that never returned would outlive the mapping
+     * and trip whatever is mapped there next. */
     OTI_UNPOISON(t->stack, t->stack_bytes);
     munmap(t->stack, t->stack_bytes);
   }
@@ -359,7 +338,8 @@ static void new_slice(oti_threads* ts) {
 }
 
 /* The scheduler and the primordial thread's record, made on first use, so a
- * program without threads has none of this. */
+ * program without threads has none of this. The ticker starts with the
+ * first spawn. */
 static bool setup(ot_state* rt) {
   if (rt->threads) return true;
   if (!rt->native_mode) return oti_error(rt, "threads need native code (run without --c.vm)");
@@ -385,6 +365,15 @@ static bool setup(ot_state* rt) {
   primordial->state = T_RUNNING;
   ts->primordial = ts->current = primordial;
   ts->all[ts->count++] = primordial;
+  const char* sched = getenv("OTIUM_SCHED");
+  if (sched && *sched) {
+    ts->test = true;
+    char* end;
+    ts->seed = strtoull(sched, &end, 10) * 2654435761u + 88172645463325252u;
+    ts->slice = *end == ':' ? strtoull(end + 1, NULL, 10) : 0;
+    ts->now = 1;
+    new_slice(ts);
+  }
   ot_value object = oti_alloc(rt, K_THREAD, 3, OTI_BYTES(oti_thread_obj, 3));
   if (!object) return false;
   as_thread(object)->name = OT_NIL;
@@ -394,16 +383,6 @@ static bool setup(ot_state* rt) {
   ot_value name = keyword(rt, ":main");
   if (!name) return false;
   as_thread(primordial->object)->name = name;
-  const char* sched = getenv("OTIUM_SCHED");
-  if (sched && *sched) {
-    ts->test = true;
-    char* end;
-    ts->seed = strtoull(sched, &end, 10) * 2654435761u + 88172645463325252u;
-    ts->slice = *end == ':' ? strtoull(end + 1, NULL, 10) : 0;
-    ts->now = 1;
-    new_slice(ts);
-  } else if (pthread_create(&ts->ticker, NULL, ticker, rt) == 0)
-    ts->ticking = true;
   return true;
 }
 
@@ -418,7 +397,6 @@ void oti_threads_destroy(ot_state* rt) {
     if (t != ts->current) free_exec(&t->exec);
     free_thread(t);
   }
-  if (ts->dead) free_thread(ts->dead);
   for (size_t i = 0; i < ts->queue_count; i++) free(ts->queues[i]);
   free(ts->queues);
   free(ts->all);
@@ -445,24 +423,13 @@ bool oti_threads_grow_args(ot_state* rt) {
 
 /* --- Switching ------------------------------------------------------------ */
 
-static void switch_to(ot_state* rt, oti_thread* next) {
-  oti_threads* ts = rt->threads;
-  oti_thread* me = ts->current;
-  next->state = T_RUNNING;
-  if (next == me) return;
-  if (me->state < T_DONE) me->exec = rt->exec;
-  me->roots = rt->heap.roots;
-  rt->exec = next->exec;
-  rt->heap.roots = next->roots;
-  ts->current = next;
-  oti_thread_switch(&me->machine_sp, next->machine_sp);
-  /* Running again: whoever switched here loaded this thread's exec. A thread
-   * that finished meanwhile can now lose its stack. */
-  if (ts->dead) {
-    free_thread(ts->dead);
-    ts->dead = NULL;
-  }
+/* Whether the running thread can be switched out: native code is running
+ * and C isn't waiting on Otium code it called. */
+static bool can_switch(ot_state* rt) {
+  return rt->native_c_base && rt->native_c_sp == rt->native_c_base;
 }
+
+static bool loading_module(ot_state* rt) { return oti_module_depth(rt) > 0; }
 
 /* Wake threads whose deadline has passed, with :timeout. */
 static void expire(ot_state* rt) {
@@ -482,20 +449,107 @@ static oti_thread* pick(oti_threads* ts) {
   return t;
 }
 
-/* Run something else: the current thread has been queued to run again,
- * parked, or finished. Sleeps when only timers can make progress. Returns
- * once this thread runs again. With nothing runnable and nothing timed, the
- * primordial thread, which is then waiting, wakes with :deadlock. */
-static void reschedule(ot_state* rt) {
+/* What a thread checks as it continues after a wait or a preemption. False
+ * when it must unwind instead: ^C on the main thread, an interrupt thunk
+ * that failed, a kill, another thread's exit, or a deadlock. */
+static bool checks(ot_state* rt, oti_thread* t) {
   oti_threads* ts = rt->threads;
+  if (t == ts->primordial && !oti_interrupt_point(rt)) return false;
+  /* A thunk from thread/interrupt! runs here, on top of whatever this thread
+   * was doing, unless it is in an atomic section. */
+  if (t->interrupt != OT_NIL && !rt->atomic && !t->kill_pending) {
+    ot_value thunk = t->interrupt;
+    t->interrupt = OT_NIL;
+    if (!oti_native_invoke(rt, thunk, 0)) return false;
+  }
+  if (t->kill_pending && !rt->interrupted) {
+    t->kill_pending = false;
+    rt->interrupted = true;
+    return oti_error(rt, "thread killed");
+  }
+  if (rt->exit_pending && t == ts->primordial) {
+    if (!oti_failed(rt)) oti_error(rt, "exit requested");
+    return false;
+  }
+  if (t->resume == R_REDISPATCH && t->wake_value == keyword(rt, ":deadlock"))
+    return oti_coded_error(rt, "E0503", "deadlock: no thread can run and none is sleeping");
+  return true;
+}
+
+static _Noreturn void finish(ot_state* rt, ot_value result);
+
+/* Continue t, whose exec is now rt->exec. */
+static _Noreturn void enter(ot_state* rt, oti_thread* t) {
+  if (t->resume == R_BEGIN) {
+    if (t->kill_pending) {
+      rt->interrupted = true;
+      finish(rt, 0);
+    }
+    size_t argc = 0;
+    for (ot_value p = t->args; oti_kind(p, K_PAIR); p = oti_cdr(p)) argc++;
+    if (!oti_native_args(rt, argc)) finish(rt, 0);
+    size_t i = 0;
+    for (ot_value p = t->args; oti_kind(p, K_PAIR); p = oti_cdr(p)) rt->native.args[i++] = oti_car(p);
+    rt->native.callee = t->entry;
+    rt->native.argc = argc;
+    t->entry = t->args = OT_NIL;
+    t->resume = R_RETURN;
+    /* As oti_native_invoke counts entries for try and cleanup records. */
+    rt->frame_count = 1;
+    oti_native_resume(rt, rt->native.stack_top, (uintptr_t)oti_thread_begin,
+                      oti_native_entry_of(rt, rt->native.callee));
+  }
+  /* The checks can run Otium code, whose calls go through native.callee and
+   * native.args, so a parked call waits on the value stack meanwhile. */
+  size_t base = rt->sp, argc = rt->native.args_live;
+  bool parked = t->resume == R_REDISPATCH && oti_stack(rt, base + argc + 1);
+  if (parked) {
+    rt->stack[base] = rt->native.callee;
+    memcpy(rt->stack + base + 1, rt->native.args, argc * sizeof(ot_value));
+    rt->sp = base + argc + 1;
+    rt->native.args_live = 0;
+  }
+  bool ok = checks(rt, t);
+  if (parked && ok) {
+    rt->native.callee = rt->stack[base];
+    memcpy(rt->native.args, rt->stack + base + 1, argc * sizeof(ot_value));
+    rt->native.argc = rt->native.args_live = argc;
+    rt->sp = base;
+  }
+  if (!ok) {
+    /* The parked call is abandoned. */
+    rt->sp = base;
+    rt->native.args_live = 0;
+    oti_native_raise(rt);
+  }
+  if (t->resume == R_REDISPATCH) {
+    t->woken = true;
+    /* Nothing collects between here and dispatch copying them. */
+    rt->native.args_live = 0;
+    oti_native_resume(rt, rt->native.sp, oti_native_redispatch(rt), 0);
+  }
+  oti_native_resume(rt, rt->native_c_sp, (uintptr_t)oti_c_resume, OT_NIL);
+}
+
+/* Run something else: the running thread has been queued to run again,
+ * parked, or (current NULL) finished. Sleeps when only timers can make
+ * progress. With nothing runnable and nothing timed, the primordial thread,
+ * which is then waiting, wakes with :deadlock. */
+static _Noreturn void schedule(ot_state* rt) {
+  oti_threads* ts = rt->threads;
+  if (ts->current) ts->current->exec = rt->exec;
   for (;;) {
     expire(rt);
     oti_thread* next = pick(ts);
     if (next) {
       ts->preempt = 0;
       new_slice(ts);
-      switch_to(rt, next);
-      return;
+      next->state = T_RUNNING;
+      ts->current = next;
+      rt->exec = next->exec;
+      /* Under the test scheduler every poll counts. */
+      if (ts->test) rt->native.limit = UINTPTR_MAX;
+      enter(rt, next);
     }
     if (ts->timer_count) {
       uint64_t deadline = ts->timers[0]->deadline, t = now(ts);
@@ -503,53 +557,28 @@ static void reschedule(ot_state* rt) {
       else if (deadline > t) pause_for(deadline - t);
       continue;
     }
-    oti_thread* waiting = ts->primordial->state == T_WAITING ? ts->primordial : ts->current;
-    if (waiting->state != T_WAITING) abort();
-    wake(rt, waiting, keyword(rt, ":deadlock"));
+    if (ts->primordial->state != T_WAITING) abort();
+    wake(rt, ts->primordial, keyword(rt, ":deadlock"));
   }
 }
 
-/* What a thread checks when it runs again after parking or yielding. False
- * when it must unwind: it was killed, or another thread asked the process
- * to exit and this is the primordial thread. */
-static bool resumed(ot_state* rt) {
-  oti_threads* ts = rt->threads;
-  oti_thread* me = ts->current;
-  /* ^C, which oti_thread_foreground sent here. */
-  if (me == ts->primordial && !oti_interrupt_point(rt)) return false;
-  /* A thunk from thread/interrupt! runs here, on top of whatever this thread
-   * was doing, unless it is in an atomic section. */
-  if (me->interrupt != OT_NIL && !rt->atomic && !me->kill_pending) {
-    ot_value thunk = me->interrupt;
-    me->interrupt = OT_NIL;
-    if (!oti_native_invoke(rt, thunk, 0)) return false;
-  }
-  if (me->kill_pending && !rt->interrupted) {
-    me->kill_pending = false;
-    rt->interrupted = true;
-    oti_error(rt, "thread killed");
-    return false;
-  }
-  if (rt->exit_pending && me == ts->primordial) {
-    if (!oti_failed(rt)) oti_error(rt, "exit requested");
-    return false;
-  }
-  return true;
+_Noreturn void oti_thread_wait(ot_state* rt) {
+  rt->threads->current->resume = R_REDISPATCH;
+  rt->native.args_live = rt->native.argc;
+  schedule(rt);
 }
 
-static bool loading_module(ot_state* rt) { return oti_module_depth(rt) > 0; }
-
-/* Park the current thread until woken, on q and until deadline when given.
- * Returns the value the waker gave, :timeout or :deadlock; 0 after an error,
- * when the thread must unwind. */
-static ot_value park(ot_state* rt, oti_waitq* q, uint64_t deadline) {
-  oti_threads* ts = rt->threads;
-  oti_thread* me = ts->current;
-  if (q && loading_module(rt)) {
-    oti_coded_error(rt, "E0502", "cannot wait for another thread while loading a module");
+/* Park the running thread on q, when given, and until deadline, when not
+ * 0. The waiting builtin returns what this returns: OTI_PARKED, or 0 when
+ * it can't wait here. */
+static ot_value wait_on(ot_state* rt, oti_waitq* q, uint64_t deadline) {
+  oti_thread* me = rt->threads->current;
+  if (!can_switch(rt)) {
+    if (loading_module(rt))
+      oti_coded_error(rt, "E0502", "cannot wait for another thread while loading a module");
+    else oti_coded_error(rt, "E0506", "cannot wait for another thread inside a call from C");
     return 0;
   }
-  if (me->kill_pending) return resumed(rt) ? OT_NIL : 0;
   me->state = T_WAITING;
   me->wake_value = OT_NIL;
   if (q) {
@@ -565,31 +594,24 @@ static ot_value park(ot_state* rt, oti_waitq* q, uint64_t deadline) {
       return 0;
     }
   }
-  reschedule(rt);
-  if (!resumed(rt)) return 0;
-  if (me->wake_value == keyword(rt, ":deadlock")) {
-    oti_coded_error(rt, "E0503", "deadlock: no thread can run and none is sleeping");
-    return 0;
-  }
-  return me->wake_value;
+  return OTI_PARKED;
 }
 
-/* Let the others run, the current thread going to the back of the queue. */
-static bool yield(ot_state* rt) {
-  oti_threads* ts = rt->threads;
-  oti_thread* me = ts->current;
-  if (ts->run.head || ts->timer_count) {
-    me->state = T_RUNNABLE;
-    enqueue(&ts->run, me);
-    reschedule(rt);
-  }
-  return resumed(rt);
+/* Whether this builtin call is a parked one dispatched again, and the value
+ * its wait ended with. Every waiting builtin calls this before anything
+ * else, so the flag can't outlive the call it belongs to. */
+static bool retried(ot_state* rt, ot_value* wake_value) {
+  oti_thread* me = rt->threads->current;
+  if (!me->woken) return false;
+  me->woken = false;
+  if (wake_value) *wake_value = me->wake_value;
+  return true;
 }
 
 /* An interrupt such as ^C is for the main thread. Another thread that finds
- * one pending wakes the main thread, if it is waiting, and yields to it, and
- * the main thread takes the interrupt as it resumes. True when the running
- * thread is the main one. */
+ * one pending wakes the main thread, if it is waiting, and yields to it,
+ * and the main thread takes the interrupt as it continues. True when the
+ * running thread is the main one. */
 bool oti_thread_foreground(ot_state* rt) {
   oti_threads* ts = rt->threads;
   if (ts->current == ts->primordial) return true;
@@ -599,39 +621,41 @@ bool oti_thread_foreground(ot_state* rt) {
 }
 
 /* The poll found its limit tripped: yield when the ticker or the test
- * scheduler's slice says so. False when the thread must unwind. */
+ * scheduler's slice says so and the thread can be switched. */
 bool oti_thread_poll(ot_state* rt) {
   oti_threads* ts = rt->threads;
   if (ts->test) {
     /* Every poll counts; keep the limit tripped so the next one does too. */
     rt->native.limit = UINTPTR_MAX;
-    if (ts->budget && --ts->budget) return resumed(rt);
+    if (ts->budget && --ts->budget) return true;
     ts->preempt = 1;
   }
-  if (!ts->preempt || rt->atomic || loading_module(rt)) return resumed(rt);
+  if (!ts->preempt || rt->atomic || !can_switch(rt)) return true;
   ts->preempt = 0;
-  return yield(rt);
+  if (!ts->run.head && !ts->timer_count) return true;
+  oti_thread* me = ts->current;
+  me->state = T_RUNNABLE;
+  enqueue(&ts->run, me);
+  me->resume = R_RETURN;
+  schedule(rt);
 }
 
 /* --- Starting and finishing threads -------------------------------------- */
 
 static void notify_watchers(ot_state* rt, ot_value object, ot_value watchers, bool normal);
 
-_Noreturn void oti_thread_main(ot_state* rt) {
+/* A thread's run ended with result, or 0 after it failed or was killed.
+ * Called on the C stack, by oti_thread_end, or by enter for a thread killed
+ * before it started. */
+_Noreturn void oti_thread_finished(ot_state* rt, ot_value result) { finish(rt, result); }
+
+static _Noreturn void finish(ot_state* rt, ot_value result) {
   oti_threads* ts = rt->threads;
   oti_thread* me = ts->current;
-  if (ts->test) rt->native.limit = UINTPTR_MAX;
-  size_t argc = 0;
-  for (ot_value p = me->args; oti_kind(p, K_PAIR); p = oti_cdr(p)) argc++;
-  ot_value result = 0;
-  if (oti_native_args(rt, argc)) {
-    size_t i = 0;
-    for (ot_value p = me->args; oti_kind(p, K_PAIR); p = oti_cdr(p)) rt->native.args[i++] = oti_car(p);
-    result = oti_native_invoke(rt, me->entry, argc);
-  }
+  rt->frame_count = 0;
   me->entry = me->args = OT_NIL;
   /* The thread stays running until it is done: reporting a failure runs
-   * Otium code, which can yield. */
+   * Otium code. */
   oti_thread_state end;
   if (result) {
     end = T_DONE;
@@ -666,9 +690,10 @@ _Noreturn void oti_thread_main(ot_state* rt) {
   unregister(ts, me);
   free_exec(&rt->exec);
   memset(&rt->exec, 0, sizeof(rt->exec));
-  ts->dead = me;
-  reschedule(rt);
-  abort();
+  /* Nothing runs on its stack any more: this is the C stack. */
+  free_thread(me);
+  ts->current = NULL;
+  schedule(rt);
 }
 
 /* Send each (watcher . ref) in watchers {:exit object :ref ref :reason
@@ -711,12 +736,14 @@ static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
     oti_type_error(rt, "spawn", "a function", rt->stack[first + 1]);
     return 0;
   }
+  if (!ts->test && !ts->ticking && pthread_create(&ts->ticker, NULL, ticker, rt) == 0)
+    ts->ticking = true;
   size_t page = (size_t)sysconf(_SC_PAGESIZE);
   oti_thread* t = calloc(1, sizeof(*t));
   if (!t) return oti_fail(rt, "out of host memory");
   t->object = t->entry = t->args = t->wake_value = t->kill_reason = t->interrupt = OT_NIL;
   t->watchers = OT_EMPTY;
-  t->roots = rt->base_roots;
+  t->resume = R_BEGIN;
   t->stack_bytes = THREAD_STACK;
   void* stack = mmap(NULL, t->stack_bytes, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
@@ -725,7 +752,7 @@ static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
     return oti_fail(rt, "cannot reserve a thread stack");
   }
   t->stack = stack;
-  /* A guard page catches C helpers that run past the margin. */
+  /* A guard page catches anything that runs past the margin. */
   mprotect(stack, page, PROT_NONE);
   if (!oti_grow(rt, (void**)&ts->all, &ts->capacity, ts->count + 1, sizeof(oti_thread*))) {
     free_thread(t);
@@ -749,6 +776,7 @@ static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
    * namespace, and nothing else. */
   oti_exec* x = &t->exec;
   x->native.callee = OT_NIL;
+  x->native.stack_top = ((uintptr_t)stack + t->stack_bytes) & ~(uintptr_t)15;
   x->native.base_limit = x->native.limit = (uintptr_t)stack + page + THREAD_MARGIN;
   x->restart_transfer[0] = x->restart_transfer[1] = OT_NIL;
   x->condition_values[0] = OT_NIL;
@@ -770,15 +798,6 @@ static ot_value spawn_builtin(ot_state* rt, size_t first, size_t count) {
   x->native.args_capacity = args_capacity;
   if (rt->param_count) memcpy(x->params, rt->params, 2 * rt->param_count * sizeof(ot_value));
   x->param_count = x->param_capacity = rt->param_count;
-  /* The stack as oti_thread_switch leaves a thread it switched out: six
-   * callee-saved registers, rbx holding the state, then oti_thread_start. */
-  uintptr_t* top = (uintptr_t*)(((uintptr_t)stack + t->stack_bytes) & ~(uintptr_t)15);
-  top[-1] = 0;
-  top[-2] = (uintptr_t)oti_thread_start;
-  top[-3] = 0;             /* rbp */
-  top[-4] = (uintptr_t)rt; /* rbx */
-  top[-5] = top[-6] = top[-7] = top[-8] = 0;
-  t->machine_sp = (uintptr_t)(top - 8);
   t->state = T_RUNNABLE;
   enqueue(&ts->run, t);
   return object;
@@ -800,18 +819,23 @@ static ot_value self_builtin(ot_state* rt, size_t first, size_t count) {
 static ot_value yield_builtin(ot_state* rt, size_t first, size_t count) {
   (void)first;
   if (count) return oti_fail(rt, "wrong number of arguments");
-  if (!rt->threads) return OT_NIL;
-  return yield(rt) ? OT_NIL : 0;
+  oti_threads* ts = rt->threads;
+  if (!ts || retried(rt, NULL)) return OT_NIL;
+  if (!can_switch(rt) || (!ts->run.head && !ts->timer_count)) return OT_NIL;
+  ts->current->state = T_RUNNABLE;
+  enqueue(&ts->run, ts->current);
+  return OTI_PARKED;
 }
 
-/* (%sleep seconds): park until then. While a module loads nothing else may
- * run, so the whole process waits. */
+/* (%sleep deadline): park until then. Where a thread can't be switched,
+ * such as while a module loads, the whole process waits. */
 static ot_value sleep_builtin(ot_state* rt, size_t first, size_t count) {
   if (count != 1) return oti_fail(rt, "wrong number of arguments");
-  uint64_t deadline;
-  if (!deadline_after(rt, rt->stack[first], &deadline)) return 0;
+  uint64_t deadline = 0;
+  if (!deadline_arg(rt, rt->stack[first], &deadline)) return 0;
+  if (rt->threads) retried(rt, NULL);
   if (!deadline) return OT_NIL;
-  if (!rt->threads || loading_module(rt)) {
+  if (!rt->threads || !can_switch(rt)) {
     for (uint64_t t = now(rt->threads); deadline > t; t = now(rt->threads)) {
       uint64_t step = deadline - t < 10000000u ? deadline - t : 10000000u;
       if (rt->threads && rt->threads->test) rt->threads->now += step;
@@ -820,32 +844,24 @@ static ot_value sleep_builtin(ot_state* rt, size_t first, size_t count) {
     }
     return OT_NIL;
   }
-  /* Woken early, to run an interrupt thunk, it sleeps on. */
-  for (;;) {
-    ot_value woke = park(rt, NULL, deadline);
-    if (!woke) return 0;
-    if (woke == keyword(rt, ":timeout") || now(rt->threads) >= deadline) return OT_NIL;
-  }
+  if (now(rt->threads) >= deadline) return OT_NIL;
+  return wait_on(rt, NULL, deadline);
 }
 
-/* (%thread-join t timeout): wait for t to finish: #t when it has, :timeout
- * when not. */
+/* (%thread-join t deadline): #t once t has finished, :timeout when the
+ * deadline passes first. */
 static ot_value join_builtin(ot_state* rt, size_t first, size_t count) {
   if (count != 2) return oti_fail(rt, "wrong number of arguments");
   ot_value v = thread_value(rt, rt->stack[first], "thread/join");
   if (!v) return 0;
+  uint64_t deadline = 0;
+  if (!deadline_arg(rt, rt->stack[first + 1], &deadline)) return 0;
+  if (rt->threads) retried(rt, NULL);
   oti_thread* t = as_thread(v)->thread;
   if (!t || !rt->threads) return OT_TRUE;
   if (t == rt->threads->current) return oti_fail(rt, "a thread cannot join itself");
-  uint64_t deadline;
-  if (!deadline_after(rt, rt->stack[first + 1], &deadline)) return 0;
-  /* Woken early, to run an interrupt thunk, it waits on. */
-  for (;;) {
-    ot_value woke = park(rt, &t->joiners, deadline);
-    if (!woke || woke == keyword(rt, ":timeout")) return woke;
-    t = as_thread(rt->stack[first])->thread;
-    if (!t) return OT_TRUE;
-  }
+  if (deadline && now(rt->threads) >= deadline) return keyword(rt, ":timeout");
+  return wait_on(rt, &t->joiners, deadline);
 }
 
 static ot_value status_builtin(ot_state* rt, size_t first, size_t count) {
@@ -904,22 +920,27 @@ static ot_value kill_builtin(ot_state* rt, size_t first, size_t count) {
   if (!t || !rt->threads || t->kill_pending) return v;
   if (t == rt->threads->primordial) return oti_fail(rt, "the main thread cannot be killed");
   t->kill_reason = rt->stack[first + 1];
+  if (t == rt->threads->current) {
+    rt->interrupted = true;
+    oti_error(rt, "thread killed");
+    return 0;
+  }
   t->kill_pending = true;
-  if (t == rt->threads->current) return resumed(rt) ? v : 0;
   wake(rt, t, OT_NIL);
   return v;
 }
 
 /* (%thread-interrupt t thunk): run thunk on t at its next safe point, or as
- * it wakes: a parked thread is woken for it. */
+ * it wakes: a parked thread is woken for it. On the running thread it runs
+ * now. */
 static ot_value interrupt_builtin(ot_state* rt, size_t first, size_t count) {
   if (count != 2) return oti_fail(rt, "wrong number of arguments");
   ot_value v = thread_value(rt, rt->stack[first], "thread/interrupt!");
   if (!v) return 0;
   oti_thread* t = as_thread(v)->thread;
   if (!t || !rt->threads) return OT_FALSE;
+  if (t == rt->threads->current) return oti_native_invoke(rt, rt->stack[first + 1], 0) ? OT_TRUE : 0;
   t->interrupt = rt->stack[first + 1];
-  if (t == rt->threads->current) return resumed(rt) ? OT_TRUE : 0;
   wake(rt, t, OT_NIL);
   return OT_TRUE;
 }
@@ -990,18 +1011,26 @@ static oti_waitq* waitq_arg(ot_state* rt, ot_value v) {
   return NULL;
 }
 
-/* (%park q timeout): wait on q. An atomic section is released while
+/* (%park q deadline): wait on q, returning what woke it: the waker's value,
+ * :timeout, or nil for an interrupt. An atomic section is released while
  * waiting and taken again after, which makes check-then-park safe. */
 static ot_value park_builtin(ot_state* rt, size_t first, size_t count) {
   if (count != 2) return oti_fail(rt, "wrong number of arguments");
   if (!setup(rt)) return 0;
   oti_waitq* q = waitq_arg(rt, rt->stack[first]);
-  uint64_t deadline;
-  if (!q || !deadline_after(rt, rt->stack[first + 1], &deadline)) return 0;
-  size_t atomic = rt->atomic;
-  rt->atomic = 0;
-  ot_value result = park(rt, q, deadline);
-  rt->atomic = atomic;
+  uint64_t deadline = 0;
+  if (!q || !deadline_arg(rt, rt->stack[first + 1], &deadline)) return 0;
+  oti_thread* me = rt->threads->current;
+  ot_value woke;
+  if (retried(rt, &woke)) {
+    rt->atomic = me->saved_atomic;
+    return woke;
+  }
+  ot_value result = wait_on(rt, q, deadline);
+  if (result == OTI_PARKED) {
+    me->saved_atomic = rt->atomic;
+    rt->atomic = 0;
+  }
   return result;
 }
 
@@ -1049,22 +1078,21 @@ static ot_value send_builtin(ot_state* rt, size_t first, size_t count) {
 }
 
 /* (%mailbox-next deadline): the next message after the cursor, waiting for
- * one until the deadline from %thread-deadline; :timeout when it passes. One
- * receive has one deadline however many messages it skips. */
+ * one until the deadline from %thread-deadline; :timeout when it passes.
+ * One receive has one deadline however many messages it skips. */
 static ot_value mailbox_next_builtin(ot_state* rt, size_t first, size_t count) {
   if (count != 1) return oti_fail(rt, "wrong number of arguments");
   if (!setup(rt)) return 0;
+  uint64_t deadline = 0;
+  if (!deadline_arg(rt, rt->stack[first], &deadline)) return 0;
   oti_threads* ts = rt->threads;
   oti_thread* me = ts->current;
-  uint64_t deadline = ot_is_int(rt->stack[first]) ? (uint64_t)ot_to_int(rt->stack[first]) : 0;
-  for (;;) {
-    if (me->cursor < me->mailbox_count) return me->mailbox[me->cursor++];
-    if (deadline && now(ts) >= deadline) return keyword(rt, ":timeout");
-    me->mail_waiting = true;
-    ot_value woke = park(rt, NULL, deadline);
-    me->mail_waiting = false;
-    if (!woke) return 0;
-  }
+  retried(rt, NULL);
+  if (me->cursor < me->mailbox_count) return me->mailbox[me->cursor++];
+  if (deadline && now(ts) >= deadline) return keyword(rt, ":timeout");
+  ot_value result = wait_on(rt, NULL, deadline);
+  if (result == OTI_PARKED) me->mail_waiting = true;
+  return result;
 }
 
 /* Remove the message the last %mailbox-next returned, so the next scan
@@ -1091,11 +1119,12 @@ static ot_value mailbox_rewind_builtin(ot_state* rt, size_t first, size_t count)
   return OT_NIL;
 }
 
-/* (%thread-deadline seconds): an absolute deadline for %mailbox-next, or nil. */
+/* (%thread-deadline seconds): an absolute deadline for the waiting
+ * builtins, or nil. Virtual under the test scheduler, so it sets that up. */
 static ot_value deadline_builtin(ot_state* rt, size_t first, size_t count) {
   if (count != 1) return oti_fail(rt, "wrong number of arguments");
   if (!setup(rt)) return 0;
-  uint64_t deadline;
+  uint64_t deadline = 0;
   if (!deadline_after(rt, rt->stack[first], &deadline)) return 0;
   return deadline ? ot_int((intptr_t)deadline) : OT_NIL;
 }

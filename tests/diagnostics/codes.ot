@@ -64,6 +64,13 @@
     (check "E0505" "E0505" (get (raised (fn () (thread/join sleeper 0.01))) :code))
     (thread/kill! sleeper)
     (thread/join sleeper))
+  (let ((sleeper (thread/spawn (fn () (thread/sleep 10)))))
+    (check "E0506"
+           "E0506"
+           (get (raised (fn () (handler-bind ((error? (fn (c) (thread/join sleeper)))) (error "x"))))
+                :code))
+    (thread/kill! sleeper)
+    (thread/join sleeper))
   ;; Last, since it leaves a thread waiting for good.
   (let ((main (thread/self)))
     (check "E0503" "E0503" (get (raised (fn () (thread/join (thread/spawn (fn () (thread/join main)))))) :code))))

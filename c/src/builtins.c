@@ -62,7 +62,7 @@ bool oti_builtins(ot_state* rt) {
                                                 : 0;
       uint32_t global = oti_global(rt, name, strlen(name));
       if (global == UINT32_MAX) return false;
-      rt->globals[global] = ((ot_value)d->id << 8) | TAG_BUILTIN;
+      oti_set_global(rt, global, ((ot_value)d->id << 8) | TAG_BUILTIN);
       rt->builtin_cells[d->id] = global;
     }
   }

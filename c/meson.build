@@ -39,6 +39,13 @@ endif
 if get_option('vm_switch')
   runtime_args += '-DOTIUM_VM_SWITCH'
 endif
+# Native code needs sljit's x86-64 backend and the trampolines in native.c.
+native_supported = host_machine.cpu_family() == 'x86_64' and host_machine.system() == 'linux'
+native_enabled = get_option('native').require(native_supported,
+  error_message: 'native code needs x86-64 Linux').allowed()
+if native_enabled
+  runtime_args += '-DOTIUM_NATIVE'
+endif
 
 # Position-independent code costs a few percent in the VM, and the runtime is
 # only linked statically. The development server's socket transport lives in

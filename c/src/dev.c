@@ -197,12 +197,12 @@ static ot_value dev_namespace_bindings(ot_state* rt, size_t first, size_t count)
   bool ok = true;
   for (size_t i = 0; ok && i < rt->global_count; i++) {
     const oti_global_info* info = &rt->global_info[i];
-    if (info->space != space || !info->defined || rt->globals[i] == V_UNBOUND) continue;
+    if (info->space != space || !info->defined || oti_unbound(oti_global_value(rt, (uint32_t)i))) continue;
     const char* kind = info->macro                     ? ":macro"
-                       : oti_procedure(rt->globals[i]) ? ":function"
+                       : oti_procedure(oti_global_value(rt, (uint32_t)i)) ? ":function"
                                                        : ":value";
     v[1] = OT_EMPTY;
-    v[2] = arity_mask(rt, rt->globals[i]);
+    v[2] = arity_mask(rt, oti_global_value(rt, (uint32_t)i));
     ok = dev_push(rt, &v[1], &v[2]);
     ok = ok &&
          (v[2] = oti_text(rt, K_STRING, info->doc.text ? info->doc.text : "",

@@ -60,6 +60,16 @@ static bool mark_constant(oti_reclaim_mark* m, uint32_t id) {
   return mark_value(m, m->rt->constants[id]);
 }
 
+typedef struct {
+  oti_reclaim_mark* mark;
+  bool ok;
+} oti_reclaim_visit;
+
+static void mark_root(void* context, ot_value* slot) {
+  oti_reclaim_visit* v = context;
+  if (v->ok) v->ok = mark_value(v->mark, *slot);
+}
+
 bool oti_reclaim(ot_state* rt) {
   if (rt->frame_count || rt->compiling || rt->evaluating || rt->eval_depth)
     return oti_error(rt, "code reclamation requires an evaluation boundary");
@@ -72,6 +82,11 @@ bool oti_reclaim(ot_state* rt) {
   for (oti_roots* root = rt->heap.roots; ok && root; root = root->previous) {
     if (root == &rt->constant_roots) continue;
     for (size_t i = 0; ok && i < root->count; i++) ok = mark_value(&m, root->slots[i]);
+  }
+  if (ok && rt->heap.hook) {
+    oti_reclaim_visit visit = {&m, true};
+    rt->heap.hook(rt->heap.hook_data, mark_root, &visit);
+    ok = visit.ok;
   }
   for (size_t i = 0; ok && i < rt->permanent_constants; i++) ok = mark_constant(&m, (uint32_t)i);
   while (ok && m.count) {

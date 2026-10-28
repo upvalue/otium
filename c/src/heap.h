@@ -57,6 +57,12 @@ struct oti_roots {
   size_t count;
 };
 
+/* Roots that don't fit the LIFO list, such as global cells and native stack
+ * frames, are visited by a hook the runtime installs: it calls visit on every
+ * slot holding a managed value. */
+typedef void (*oti_root_visitor)(void* context, ot_value* slot);
+typedef void (*oti_root_hook)(void* data, oti_root_visitor visit, void* context);
+
 #ifdef OTIUM_CHECK_ROOTS
 #define OTI_RETIRED_SPACES 16
 
@@ -80,6 +86,8 @@ typedef struct {
   size_t allocated_bytes, reclaimed_bytes, peak_used, live_bytes;
   unsigned active;
   oti_roots* roots;
+  oti_root_hook hook;
+  void* hook_data;
 #ifdef OTIUM_CHECK_ROOTS
   oti_retired_space retired[OTI_RETIRED_SPACES];
   size_t retired_next;
@@ -116,8 +124,13 @@ typedef struct {
 #endif
 } oti_object_header;
 
+/* Closures keep their code, a word the collector skips, ahead of their
+ * captured values. internal.h checks that K_CLOSURE has this number. */
+#define OTI_CODE_PREFIX_KIND 3
+
 static inline ot_value* object_fields(ot_value object) {
-  return (ot_value*)((oti_object_header*)object + 1);
+  oti_object_header* o = (oti_object_header*)object;
+  return (ot_value*)(o + 1) + ((o->kind & 255) == OTI_CODE_PREFIX_KIND);
 }
 
 static inline void* object_bytes(ot_value object) {

@@ -250,7 +250,7 @@ static ot_value support_expander_macro_var(ot_state* rt, size_t first, size_t co
   size_t n;
   const char* s = oti_text_bytes(v, &n);
   uint32_t index = oti_lookup_global(rt, s, n);
-  return index != UINT32_MAX && rt->global_info[index].macro ? rt->globals[index] : OT_FALSE;
+  return index != UINT32_MAX && rt->global_info[index].macro ? oti_global_value(rt, index) : OT_FALSE;
 }
 
 static ot_value support_expander_local_name(ot_state* rt, size_t first, size_t count) {

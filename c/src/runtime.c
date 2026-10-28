@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef OTIUM_NATIVE
+#include <sys/mman.h>
+#endif
 #ifndef OTIUM_BOOTSTRAP_FILE
 #define OTIUM_BOOTSTRAP_FILE "c/src/primitives.ot"
 #endif
@@ -233,7 +236,7 @@ bool ot_set_frame_limit(ot_state* rt, size_t frames) {
 bool ot_interrupted(const ot_state* rt) { return rt->interrupted; }
 
 static ot_value hook_value(const ot_state* rt, uint32_t global) {
-  return global == UINT32_MAX ? V_UNBOUND : rt->globals[global];
+  return global == UINT32_MAX ? V_UNBOUND : oti_global_value(rt, global);
 }
 
 static bool interrupt_now(ot_state* rt) {
@@ -251,13 +254,13 @@ static bool interrupt_now(ot_state* rt) {
  * set until the VM reaches one. */
 bool ot_poll_interrupt(ot_state* rt) {
   if (!rt->interrupt_flag || !*rt->interrupt_flag) return true;
-  if (hook_value(rt, rt->interrupt_handler) != V_UNBOUND) return true;
+  if (!oti_unbound(hook_value(rt, rt->interrupt_handler))) return true;
   return interrupt_now(rt);
 }
 
 bool oti_interrupt_point(ot_state* rt) {
   if (!rt->interrupt_flag || !*rt->interrupt_flag) return true;
-  if (hook_value(rt, rt->interrupt_handler) == V_UNBOUND) return interrupt_now(rt);
+  if (oti_unbound(hook_value(rt, rt->interrupt_handler))) return interrupt_now(rt);
   ot_value reason = ot_int(*rt->interrupt_flag);
   *rt->interrupt_flag = 0;
   ot_value args = oti_alloc(rt, K_PAIR, 2, 0);
@@ -287,6 +290,16 @@ bool ot_set_interrupt_handler(ot_state* rt, const char* name) {
 }
 
 bool ot_set_load_hook(ot_state* rt, const char* name) { return set_hook(rt, &rt->load_hook, name); }
+
+void oti_set_global(ot_state* rt, uint32_t cell, ot_value value) {
+  rt->globals[cell].value = value;
+}
+
+/* Global cells are roots. */
+static void visit_roots(void* data, oti_root_visitor visit, void* context) {
+  ot_state* rt = data;
+  for (size_t i = 0; i < rt->global_count; i++) visit(context, &rt->globals[i].value);
+}
 
 ot_value oti_alloc_slow(ot_state* rt, uint32_t kind, uint32_t fields, size_t bytes) {
   if (!oti_host_entry(rt)) return 0;
@@ -358,11 +371,10 @@ static uint32_t namespace_global(ot_state* rt, uint32_t space, const char* name,
   uint32_t existing = find_global(rt, space, name, length);
   if (existing != UINT32_MAX) return existing;
   if (rt->global_count >= UINT32_MAX || !oti_grow(rt, (void**)&rt->globals, &rt->global_capacity,
-                                                  rt->global_count + 1, sizeof(ot_value))) {
+                                                  rt->global_count + 1, sizeof(oti_cell))) {
     oti_error(rt, "too many globals");
     return UINT32_MAX;
   }
-  rt->global_roots.slots = rt->globals;
   if (!oti_grow(rt, (void**)&rt->global_info, &rt->global_info_capacity, rt->global_count + 1,
                 sizeof(oti_global_info)))
     return UINT32_MAX;
@@ -375,8 +387,7 @@ static uint32_t namespace_global(ot_state* rt, uint32_t space, const char* name,
   copy[length] = 0;
   uint32_t index = (uint32_t)rt->global_count++;
   rt->global_info[index] = (oti_global_info){.name = copy, .space = space};
-  rt->globals[index] = V_UNBOUND;
-  rt->global_roots.count = rt->global_count;
+  oti_set_global(rt, index, oti_unbound_marker(index));
   return index;
 }
 
@@ -396,7 +407,7 @@ uint32_t oti_binding_global(ot_state* rt, uint32_t space, const char* name, size
   index = oti_import_global_in(rt, space, name, length);
   if (index != UINT32_MAX) return index;
   index = find_global(rt, 0, name, length);
-  if (index != UINT32_MAX && rt->globals[index] != V_UNBOUND) return index;
+  if (index != UINT32_MAX && !oti_unbound(oti_global_value(rt, index))) return index;
   return create ? namespace_global(rt, space, name, length) : UINT32_MAX;
 }
 
@@ -423,7 +434,7 @@ static uint32_t resolve_global(ot_state* rt, const char* name, size_t length, bo
                                   create);
   }
   uint32_t core = find_global(rt, 0, name, length);
-  if (core != UINT32_MAX && rt->globals[core] != V_UNBOUND) return core;
+  if (core != UINT32_MAX && !oti_unbound(oti_global_value(rt, core))) return core;
   return create ? oti_global(rt, name, length) : UINT32_MAX;
 }
 
@@ -455,11 +466,38 @@ ot_value oti_float(ot_state* rt, double number) {
   return v;
 }
 
+#ifdef OTIUM_NATIVE
+/* Native code reads global cells and constants at fixed offsets from the
+ * state, so the state and both tables share one reservation, which the
+ * system commits as it is touched. */
+static ot_state* allocate_state(void) {
+  void* p = mmap(NULL, OTI_STATE_RESERVATION, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  if (p == MAP_FAILED) return NULL;
+  ot_state* rt = p;
+  rt->globals = (oti_cell*)((unsigned char*)p + OTI_CELLS_OFFSET);
+  rt->global_capacity = OTI_CELL_RESERVE;
+  rt->constants = (ot_value*)((unsigned char*)p + OTI_CONSTANTS_OFFSET);
+  rt->constant_capacity = OTI_CONSTANT_RESERVE;
+  return rt;
+}
+
+static void free_state(ot_state* rt) { munmap(rt, OTI_STATE_RESERVATION); }
+#else
+static ot_state* allocate_state(void) { return calloc(1, sizeof(ot_state)); }
+
+static void free_state(ot_state* rt) {
+  free(rt->constants);
+  free(rt->globals);
+  free(rt);
+}
+#endif
+
 ot_state* ot_create(size_t bytes, size_t stack_limit) {
-  ot_state* rt = calloc(1, sizeof(*rt));
+  ot_state* rt = allocate_state();
   if (!rt) return NULL;
   if (!oti_heap_init(&rt->heap, bytes)) {
-    free(rt);
+    free_state(rt);
     return NULL;
   }
   oti_roots_push(&rt->heap, &rt->open_port_roots, NULL, 0);
@@ -474,8 +512,9 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
   rt->stress_gc = stress && *stress && strcmp(stress, "0");
   rt->required_namespace = UINT32_MAX;
   rt->interrupt_handler = rt->load_hook = UINT32_MAX;
+  rt->heap.hook = visit_roots;
+  rt->heap.hook_data = rt;
   oti_roots_push(&rt->heap, &rt->constant_roots, NULL, 0);
-  oti_roots_push(&rt->heap, &rt->global_roots, NULL, 0);
   oti_roots_push(&rt->heap, &rt->stack_roots, NULL, 0);
   oti_roots_push(&rt->heap, &rt->param_roots, NULL, 0);
   oti_roots_push(&rt->heap, &rt->handler_roots, NULL, 0);
@@ -530,8 +569,6 @@ void ot_destroy(ot_state* rt) {
   for (size_t i = 0; i < rt->source_count; i++) free(rt->sources[i]);
   free(rt->sources);
   free(rt->functions);
-  free(rt->constants);
-  free(rt->globals);
   free(rt->open_ports);
   free(rt->cleanups);
   free(rt->cleanup_states);
@@ -545,7 +582,7 @@ void ot_destroy(ot_state* rt) {
   free(rt->stack);
   free(rt->constant_state);
   oti_heap_destroy(&rt->heap);
-  free(rt);
+  free_state(rt);
 }
 
 static bool evaluate_top(ot_state* rt, const oti_ast* form, ot_value* result);
@@ -594,8 +631,8 @@ static bool evaluate_raw(ot_state* rt, const oti_ast* form, ot_value* result) {
     if (global == UINT32_MAX) return false;
     ot_value macro = oti_alloc(rt, K_MACRO, 1, 0);
     if (!macro) return false;
-    oti_as_macro(macro)->expander = rt->globals[global];
-    rt->globals[global] = macro;
+    oti_as_macro(macro)->expander = oti_global_value(rt, global);
+    oti_set_global(rt, global, macro);
     rt->global_info[global].macro = 1;
     const oti_ast* doc = name->next->next;
     if (!document(rt, global, doc && doc->kind == AST_STRING && doc->next ? doc : NULL))
@@ -977,11 +1014,11 @@ bool ot_call(ot_state* rt, const char* name, const ot_value* args, size_t count,
   rt->sp = rt->stack_roots.count = rt->frame_count = 0;
   if (!ot_poll_interrupt(rt)) return false;
   uint32_t index = resolve_global(rt, name, strlen(name), false);
-  if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND)
+  if (index == UINT32_MAX || oti_unbound(oti_global_value(rt, index)))
     return oti_error(rt, "unbound global");
   if (count >= rt->stack_limit || !oti_stack(rt, count + 1))
     return oti_error(rt, "VM stack limit exceeded");
-  rt->stack[0] = rt->globals[index];
+  rt->stack[0] = oti_global_value(rt, index);
   if (count) memcpy(rt->stack + 1, args, count * sizeof(ot_value));
   rt->sp = rt->stack_roots.count = count + 1;
   if (!oti_invoke(rt, count, result)) {

@@ -93,7 +93,7 @@ static ot_value reflection_describe(ot_state* rt, size_t first, size_t count) {
     key[n] = 0;
     reference = oti_runtime_documentation(key);
   }
-  if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND)
+  if (index == UINT32_MAX || oti_unbound(oti_global_value(rt, index)))
     return *reference ? oti_text(rt, K_STRING, reference, strlen(reference)) : OT_NIL;
   const char* space = rt->namespaces[rt->global_info[index].space];
   const char* local = rt->global_info[index].name;

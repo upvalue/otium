@@ -436,8 +436,8 @@ static ot_value current_port(ot_state* rt, unsigned which) {
                      : which == 1 ? "current-output-port"
                                   : "current-error-port";
   uint32_t index = oti_binding_global(rt, 0, name, strlen(name), false);
-  if (index == UINT32_MAX || rt->globals[index] == V_UNBOUND) return standard(rt, which);
-  ot_value p = rt->globals[index];
+  if (index == UINT32_MAX || oti_unbound(oti_global_value(rt, index))) return standard(rt, which);
+  ot_value p = oti_global_value(rt, index);
   if (!oti_kind(p, K_PARAM)) return oti_fail(rt, "current port binding must be a param");
   return oti_param_call(rt, p, 0);
 }

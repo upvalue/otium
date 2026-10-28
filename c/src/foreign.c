@@ -319,7 +319,7 @@ bool oti_foreign_init(ot_state* rt) {
   rt->foreign->null_constant = index;
   uint32_t global = oti_resolve_global(rt, "ffi/null", 8);
   if (global == UINT32_MAX) return false;
-  rt->globals[global] = rt->constants[index];
+  oti_set_global(rt, global, rt->constants[index]);
   return true;
 }
 

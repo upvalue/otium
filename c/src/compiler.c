@@ -609,7 +609,7 @@ static oti_ast* expand_call(oti_compiler* c, const oti_ast* form, uint32_t globa
   ot_value args = datum(c, &arguments);
   c->locate = locate;
   if (!args) return NULL;
-  ot_value result = oti_call_list(rt, rt->globals[global], args);
+  ot_value result = oti_call_list(rt, oti_global_value(rt, global), args);
   return result ? syntax_value(c, result, form->offset, 0) : NULL;
 }
 
@@ -1385,7 +1385,7 @@ static const oti_primitive* primitive(oti_compiler* c, const oti_ast* a) {
   if (!head || head->kind != AST_SYMBOL || shadowed(c, head)) return NULL;
   uint32_t global = oti_lookup_global(c->rt, head->as.text.data, head->as.text.size);
   if (global == UINT32_MAX) return NULL;
-  ot_value value = c->rt->globals[global];
+  ot_value value = oti_global_value(c->rt, global);
   /* Only the builtin's own cell is immutable; other globals may hold it. */
   if ((value & 255) != TAG_BUILTIN || c->rt->builtin_cells[value >> 8] != global) return NULL;
   unsigned count = 0;
@@ -2060,7 +2060,7 @@ oti_ast* oti_expand_form(ot_state* rt, const oti_ast* form, oti_arena* arena) {
     bool expanding = rt->expanding;
     rt->expanding = true;
     if (!expanding) rt->expansion_calls = 0;
-    ot_value expanded = oti_call_list(rt, rt->globals[global], values[1]);
+    ot_value expanded = oti_call_list(rt, oti_global_value(rt, global), values[1]);
     rt->expanding = expanding;
     if (expanded) result = syntax_value(&c, expanded, form->offset, 0);
   }
@@ -2120,7 +2120,7 @@ ot_value oti_evaluator(ot_state* rt, uint32_t space) {
   if (!load_builtin(&c, B_EVAL_IN_NAMESPACE, 2) || !load_constant(&c, ot_int(space), 3) ||
       !move(&c, 4, 1) || emit(&c, OP_TAIL_CALL, 2, 2, 0) == SIZE_MAX)
     return 0;
-  ot_value value = oti_alloc(rt, K_CLOSURE, 0, sizeof(id));
+  ot_value value = oti_alloc_closure(rt, 0);
   if (!value) return 0;
   oti_closure_set_function(value, id);
   return oti_constant(rt, value) == UINT32_MAX ? 0 : value;

@@ -99,10 +99,27 @@ static ot_value evacuate(oti_heap* h, ot_value v, const unsigned char* from, uns
   return forwarded;
 }
 
+typedef struct {
+  oti_heap* heap;
+  const unsigned char* from;
+  unsigned char* to;
+  size_t used;
+} oti_copy;
+
+static void evacuate_root(void* context, ot_value* slot) {
+  oti_copy* c = context;
+  *slot = evacuate(c->heap, *slot, c->from, c->to, &c->used);
+}
+
 static void copy_live(oti_heap* h, const unsigned char* from, unsigned char* to) {
   size_t used = 0;
   for (oti_roots* r = h->roots; r; r = r->previous)
     for (size_t i = 0; i < r->count; i++) r->slots[i] = evacuate(h, r->slots[i], from, to, &used);
+  if (h->hook) {
+    oti_copy c = {h, from, to, used};
+    h->hook(h->hook_data, evacuate_root, &c);
+    used = c.used;
+  }
   for (size_t scan = 0; scan < used;) {
     oti_object_header* o = (oti_object_header*)(to + scan);
     ot_value* fields = object_fields((ot_value)o);

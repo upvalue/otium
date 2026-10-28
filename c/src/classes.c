@@ -60,7 +60,7 @@ bool oti_classes_init(ot_state* rt) {
       ok = false;
       break;
     }
-    rt->globals[global] = rt->classes[i];
+    oti_set_global(rt, global, rt->classes[i]);
   }
   rt->current_namespace = saved;
   rt->classes_ready = ok;
@@ -268,9 +268,9 @@ static ot_value class_define_generic(ot_state* rt, size_t first, size_t count) {
   }
   uint32_t global = oti_global(rt, text, length);
   if (global == UINT32_MAX) return 0;
-  ot_value existing = rt->globals[global];
+  ot_value existing = oti_global_value(rt, global);
   size_t wanted = (size_t)ot_to_int(n);
-  if (existing != V_UNBOUND && rt->stack[first + 2] != OT_TRUE) {
+  if (!oti_unbound(existing) && rt->stack[first + 2] != OT_TRUE) {
     if (!oti_kind(existing, K_GENERIC) || arity(existing) != wanted) {
       oti_tagged_error(rt, "defgeneric", "binding-conflict",
                        "declaration would replace another binding", 0, NULL);
@@ -284,7 +284,7 @@ static ot_value class_define_generic(ot_state* rt, size_t first, size_t count) {
   g->name = rt->stack[first];
   g->methods = OT_EMPTY;
   g->arity = wanted;
-  rt->globals[global] = generic;
+  oti_set_global(rt, global, generic);
   rt->global_info[global].defined = 1;
   return generic;
 }

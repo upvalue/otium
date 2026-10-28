@@ -48,6 +48,16 @@ enum {
 
 enum { V_UNBOUND = 18, TAG_CHAR = 22, TAG_BUILTIN = 26 };
 
+_Static_assert(K_CLOSURE == OTI_CODE_PREFIX_KIND, "closures skip their code word");
+
+/* An unbound global cell holds V_UNBOUND with its cell number above the tag,
+ * so code that finds it there can name the global. */
+static inline ot_value oti_unbound_marker(uint32_t cell) {
+  return ((ot_value)cell << 8) | V_UNBOUND;
+}
+
+static inline bool oti_unbound(ot_value v) { return (v & 255) == V_UNBOUND; }
+
 /* Builtin procedures. Each module lists its builtins' names and functions in
  * an oti_builtin_def table; builtins.c combines them. The order here doesn't
  * matter. */
@@ -533,8 +543,17 @@ typedef struct {
   size_t length;
 } oti_documentation;
 
+/* A global's value, and in native processes the address its callers jump to:
+ * the entry of a closure, or a stub that handles every other value. Native
+ * code addresses cells at fixed offsets from the state, so there the array
+ * is a reservation that never moves. */
+typedef struct {
+  ot_value value;
+  uintptr_t entry;
+} oti_cell;
+
 /* Host-side metadata for a global. The values themselves are in
- * ot_state.globals, which is a collector root array. */
+ * ot_state.globals, which the collector's root hook visits. */
 typedef struct {
   char* name;
   oti_documentation doc;
@@ -611,7 +630,8 @@ struct ot_state {
   oti_roots open_port_roots;
   ot_value standard_ports[3];
   oti_roots standard_port_roots;
-  ot_value *constants, *globals, *stack;
+  ot_value *constants, *stack;
+  oti_cell* globals;
   size_t constant_count, constant_capacity, global_count, global_capacity;
   /* Constant states: 0 free, 1 retained until code reclamation. */
   unsigned char* constant_state;
@@ -665,7 +685,7 @@ struct ot_state {
   oti_builtin_fn builtin_run[B_COUNT];
   oti_roots class_roots;
   bool classes_ready, core_loaded;
-  oti_roots constant_roots, global_roots, stack_roots, condition_roots;
+  oti_roots constant_roots, stack_roots, condition_roots;
   ot_value condition_values[2];
   bool raised;
   oti_try_frame* tries;
@@ -685,6 +705,16 @@ struct ot_state {
   bool io_host_set, host_io_active, host_io_reentry;
   oti_foreign_state* foreign;
 };
+
+#ifdef OTIUM_NATIVE
+/* Native processes keep the state, its global cells and its constants in one
+ * reservation, at these offsets. */
+#define OTI_CELL_RESERVE ((size_t)1 << 20)
+#define OTI_CONSTANT_RESERVE ((size_t)1 << 21)
+#define OTI_CELLS_OFFSET ((sizeof(ot_state) + 4095) & ~(size_t)4095)
+#define OTI_CONSTANTS_OFFSET (OTI_CELLS_OFFSET + OTI_CELL_RESERVE * sizeof(oti_cell))
+#define OTI_STATE_RESERVATION (OTI_CONSTANTS_OFFSET + OTI_CONSTANT_RESERVE * sizeof(ot_value))
+#endif
 
 /* Upper bound on a single source file or a nest of module loads. */
 #define OTI_SOURCE_LIMIT ((size_t)16 * 1024 * 1024)
@@ -964,14 +994,16 @@ typedef struct {
 
 OTI_FIELDS_ONLY(oti_buffer_data_obj, 0);
 
-/* One field per captured value, then the function id in the opaque bytes
- * (see oti_closure_function). */
+/* The code word, which the collector skips, then one field per captured
+ * value. The code is a function id in the VM and an entry address in native
+ * code (see oti_closure_function). */
 typedef struct {
   oti_object_header header;
+  uintptr_t code;
   ot_value captures[];
 } oti_closure_obj;
 
-OTI_FIELDS_ONLY(oti_closure_obj, 0);
+_Static_assert(offsetof(oti_closure_obj, captures) == OTI_FIELDS_SIZE(1), "oti_closure_obj layout");
 
 /* K_ARRAY_DATA: the items of an array or the slot values of an instance. */
 typedef struct {
@@ -1207,16 +1239,24 @@ static inline oti_closure_obj* oti_as_closure(ot_value v) {
 }
 
 static inline uint32_t oti_closure_function(ot_value v) {
-  uint32_t id;
-  (void)oti_as_closure(v);
-  memcpy(&id, object_bytes(v), sizeof(id));
-  return id;
+  return (uint32_t)oti_as_closure(v)->code;
 }
 
 static inline void oti_closure_set_function(ot_value v, uint32_t id) {
-  (void)oti_as_closure(v);
-  memcpy(object_bytes(v), &id, sizeof(id));
+  oti_as_closure(v)->code = id;
 }
+
+/* A closure with captures fields, its code word unset. */
+static inline ot_value oti_alloc_closure(ot_state* rt, uint32_t captures) {
+  return oti_alloc(rt, K_CLOSURE, captures, sizeof(uintptr_t));
+}
+
+static inline ot_value oti_global_value(const ot_state* rt, uint32_t cell) {
+  return rt->globals[cell].value;
+}
+
+/* Store a global's value, keeping its entry in step in native processes. */
+void oti_set_global(ot_state* rt, uint32_t cell, ot_value value);
 
 static inline oti_array_data_obj* oti_as_array_data(ot_value v) {
   return OTI_CAST(oti_array_data_obj, K_ARRAY_DATA, v);

@@ -166,7 +166,7 @@ bool oti_apply(ot_state* rt, size_t call, size_t argc, bool tail) {
 }
 
 bool oti_execute(ot_state* rt, uint32_t function, ot_value* result) {
-  ot_value closure = oti_alloc(rt, K_CLOSURE, 0, sizeof(function));
+  ot_value closure = oti_alloc_closure(rt, 0);
   if (!closure) return false;
   oti_closure_set_function(closure, function);
   *result = oti_call_list(rt, closure, OT_EMPTY);
@@ -231,7 +231,7 @@ static bool vm_unbound_global(ot_state* rt, uint32_t index) { return oti_unbound
  * into instructions. Those cells are immutable, so compiled code never needs
  * to check them. */
 static bool vm_inlined_builtin(ot_state* rt, uint32_t index) {
-  ot_value old = rt->globals[index];
+  ot_value old = oti_global_value(rt, index);
   if ((old & 255) != TAG_BUILTIN) return false;
   unsigned id = (unsigned)(old >> 8);
   if (!oti_inlined_builtin(id)) return false;
@@ -242,7 +242,7 @@ static bool vm_inlined_builtin(ot_state* rt, uint32_t index) {
 
 static bool vm_closure(ot_state* rt, ot_value* registers, uint32_t id, ot_value* out) {
   oti_function* child = rt->functions[id];
-  ot_value v = oti_alloc(rt, K_CLOSURE, (uint32_t)child->capture_count, sizeof(uint32_t));
+  ot_value v = oti_alloc_closure(rt, (uint32_t)child->capture_count);
   if (!v) return false;
   oti_closure_set_function(v, id);
   ot_value* captures = oti_as_closure(v)->captures;
@@ -457,14 +457,14 @@ next:
 #define LOAD_GLOBAL()                                                                              \
   do {                                                                                             \
     uint32_t index_ = oti_instruction_bc(ins);                                                     \
-    v = rt->globals[index_];                                                                       \
+    v = oti_global_value(rt, index_);                                                              \
     if (VM_UNLIKELY(v == (((ot_value)B_EVAL << 8) | TAG_BUILTIN))) {                               \
       SAVE_IP();                                                                                   \
       v = oti_evaluator(rt, fn->namespace);                                                        \
       if (!v) return false;                                                                        \
       RELOAD();                                                                                    \
     }                                                                                              \
-    if (VM_UNLIKELY(v == V_UNBOUND)) {                                                             \
+    if (VM_UNLIKELY(oti_unbound(v))) {                                                             \
       vm_unbound_global(rt, index_);                                                               \
       FAIL();                                                                                      \
     }                                                                                              \
@@ -476,13 +476,13 @@ next:
   }
   CASE(OP_SET_GLOBAL) {
     uint32_t index = oti_instruction_bc(ins);
-    if (rt->globals[index] == V_UNBOUND) {
+    if (oti_unbound(oti_global_value(rt, index))) {
       oti_coded_error(rt, "E0201", "cannot set an unbound global");
       FAIL();
     }
     if (VM_UNLIKELY(vm_inlined_builtin(rt, index))) FAIL();
     rt->global_info[index].macro = oti_kind(R[ins.a], K_MACRO);
-    rt->globals[index] = R[ins.a];
+    oti_set_global(rt, index, R[ins.a]);
     NEXT();
   }
   CASE(OP_DEFINE_GLOBAL) {
@@ -490,7 +490,7 @@ next:
     if (VM_UNLIKELY(vm_inlined_builtin(rt, index))) FAIL();
     rt->global_info[index].defined = 1;
     rt->global_info[index].macro = oti_kind(R[ins.a], K_MACRO);
-    rt->globals[index] = R[ins.a];
+    oti_set_global(rt, index, R[ins.a]);
     NEXT();
   }
   CASE(OP_UPVALUE) {

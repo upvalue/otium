@@ -166,7 +166,7 @@ static bool install_import(ot_state* rt, const oti_ast* name, uint32_t target, b
 
 /* Tell the load hook, if any, that a module file is about to be loaded. */
 static bool notify_load(ot_state* rt, uint32_t space, const char* path) {
-  if (rt->load_hook == UINT32_MAX || rt->globals[rt->load_hook] == V_UNBOUND) return true;
+  if (rt->load_hook == UINT32_MAX || oti_unbound(oti_global_value(rt, rt->load_hook))) return true;
   ot_value v[] = {OT_NIL, OT_NIL, OT_EMPTY};
   oti_roots roots;
   oti_roots_push(&rt->heap, &roots, v, 3);
@@ -182,7 +182,7 @@ static bool notify_load(ot_state* rt, uint32_t space, const char* path) {
       v[2] = pair;
     }
   }
-  ok = ok && oti_call_list(rt, rt->globals[rt->load_hook], v[2]) != 0;
+  ok = ok && oti_call_list(rt, oti_global_value(rt, rt->load_hook), v[2]) != 0;
   oti_roots_pop(&rt->heap, &roots);
   return ok;
 }
@@ -330,7 +330,7 @@ static bool one_require(ot_state* rt, const oti_ast** cursor) {
             strlen(rt->global_info[i].name) == name->as.text.size &&
             !memcmp(rt->global_info[i].name, name->as.text.data, name->as.text.size))
           return oti_error(rt, "referred import conflicts with a local binding");
-      if (target == UINT32_MAX || rt->globals[target] == V_UNBOUND ||
+      if (target == UINT32_MAX || oti_unbound(oti_global_value(rt, target)) ||
           rt->global_info[target].is_private)
         return oti_coded_error(
             rt, target != UINT32_MAX && rt->global_info[target].is_private ? "E0204" : "E0203",

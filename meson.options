@@ -3,3 +3,5 @@ option('runtime_checks', type: 'combo', choices: ['none', 'kinds', 'roots'], val
 option('vm_switch', type: 'boolean', value: false,
   description: 'Build the VM with portable switch dispatch instead of computed goto')
 option('ui', type: 'feature', value: 'auto', description: 'SDL3, SDL3_ttf and Yoga UI bridge')
+option('native', type: 'feature', value: 'auto',
+  description: 'Native code compiler, for x86-64 Linux')

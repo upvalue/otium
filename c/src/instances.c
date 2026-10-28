@@ -67,8 +67,8 @@ static bool migrate(ot_state* rt, ot_value* instance, ot_value properties) {
       ok = live[6] != 0;
     }
     uint32_t hook = oti_binding_global(rt, 0, "update-instance", 15, false);
-    if (ok && hook != UINT32_MAX && rt->globals[hook] != V_UNBOUND)
-      ok = oti_call_list(rt, rt->globals[hook], live[6]) != 0;
+    if (ok && hook != UINT32_MAX && !oti_unbound(oti_global_value(rt, hook)))
+      ok = oti_call_list(rt, oti_global_value(rt, hook), live[6]) != 0;
   }
   for (size_t i = 0; ok && i < n; i++)
     if (values(live[4])[i] == V_UNBOUND) {
@@ -172,7 +172,8 @@ static ot_value instance_define_class(ot_state* rt, size_t first, size_t count) 
   }
   uint32_t global = oti_global(rt, (char*)oti_bytes_data(name), oti_bytes_length(name));
   if (global == UINT32_MAX) return 0;
-  ot_value old = rt->globals[global];
+  ot_value old = oti_global_value(rt, global);
+  if (oti_unbound(old)) old = V_UNBOUND;
   bool reset = rt->stack[first + 4] == OT_TRUE;
   if (old == V_UNBOUND && reset) {
     oti_tagged_error(rt, "reset-class!", "binding-conflict",
@@ -217,7 +218,7 @@ static ot_value instance_define_class(ot_state* rt, size_t first, size_t count) 
     c->parent = rt->stack[first + 1];
     c->layout = live[1];
     c->owner = live[2];
-    rt->globals[global] = live[0];
+    oti_set_global(rt, global, live[0]);
     rt->global_info[global].defined = 1;
   }
   ot_value result = ok ? live[0] : 0;

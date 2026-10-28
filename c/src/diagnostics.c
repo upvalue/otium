@@ -389,7 +389,7 @@ static bool push_suggestions(ot_state* rt, const oti_error_record* e) {
   for (size_t i = 0; i < rt->global_count && count < 64; i++) {
     const oti_global_info* info = &rt->global_info[i];
     if ((info->space != space && (info->space != 0 || info->is_private || e->qualifier)) ||
-        rt->globals[i] == V_UNBOUND || !strcmp(info->name, name) ||
+        oti_unbound(oti_global_value(rt, (uint32_t)i)) || !strcmp(info->name, name) ||
         edit_distance(name, info->name) > limit)
       continue;
     bool seen = false;

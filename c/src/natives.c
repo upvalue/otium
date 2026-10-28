@@ -102,7 +102,7 @@ bool ot_define_natives(ot_state* rt, const char* space, const ot_native* natives
     }
     ((oti_native_obj*)object)->index = (uint32_t)n->count;
     n->items[n->count++] = (oti_native){d->function, d->userdata, d->min_args, d->max_args};
-    rt->globals[global] = object;
+    oti_set_global(rt, global, object);
   }
   rt->current_namespace = saved;
   return ok;

@@ -78,7 +78,7 @@ TEST(read_bytevector_does_not_collect) {
   uint32_t source_index = oti_lookup_global(rt, "raw-source", 10),
            target_index = oti_lookup_global(rt, "raw-target", 10);
   CHECK(source_index != UINT32_MAX && target_index != UINT32_MAX);
-  ot_value args[] = {rt->globals[target_index], rt->globals[source_index]}, result;
+  ot_value args[] = {oti_global_value(rt, target_index), oti_global_value(rt, source_index)}, result;
   size_t collections = ot_get_stats(rt).collections;
   CHECK(ot_call(rt, "read-bytevector!", args, 2, &result) && result == ot_int(3));
   CHECK(ot_get_stats(rt).collections == collections);

@@ -28,6 +28,10 @@ test-opt *args: build
         OTIUM_OPT=$opt OTIUM_BOOT=$boot tools/meson-test default "${@:-lang}"
     done
 
+# Run N generated programs on the VM and natively, from seed FIRST, and report the first that differs
+fuzz-compiler n="100" first="1": build
+    tools/fuzz-compiler {{n}} {{first}}
+
 # Tests on the VM instead of native code
 test-vm *args: build
     tools/meson-test vm "$@"

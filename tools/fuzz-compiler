@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""fuzz-compiler [N] [FIRST]: run N generated programs on the VM and natively.
+
+Seeds FIRST to FIRST+N-1 (default 100 from 1) go through
+tests/compiler/generate.ot. Each program must give the same exit status,
+stdout and stderr on the VM (the reference, which has no optimizer) and as
+native code with the optimizer. Stops at the first seed that differs and
+prints how to reproduce it. See scratch/optimizer-design.md, section 9.7.
+"""
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+OTIUM = ROOT / 'otium'
+
+
+def run(*args):
+    result = subprocess.run([OTIUM, '--no-project', *args], capture_output=True, text=True, timeout=60)
+    return result.returncode, result.stdout, result.stderr
+
+
+def main():
+    count = int(sys.argv[1]) if len(sys.argv) > 1 else 100
+    first = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+    with tempfile.TemporaryDirectory() as d:
+        program = Path(d) / 'program.ot'
+        for seed in range(first, first + count):
+            status, text, err = run(ROOT / 'tests/compiler/generate.ot', '--', str(seed))
+            if status:
+                print(f'seed {seed}: the generator failed\n{err}')
+                return 1
+            program.write_text(text)
+            vm = run('--c.vm', program)
+            native = run(program)
+            if vm != native:
+                kept = ROOT / 'scratch' / f'fuzz-{seed}.ot'
+                kept.parent.mkdir(exist_ok=True)
+                kept.write_text(text)
+                print(f'seed {seed} differs; program kept in {kept}')
+                for name, a, b in zip(('status', 'stdout', 'stderr'), vm, native):
+                    if a != b:
+                        print(f'--- vm {name}\n{a}\n--- native {name}\n{b}')
+                return 1
+    print(f'{count} programs from seed {first}: no differences')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

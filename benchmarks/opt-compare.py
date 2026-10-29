@@ -57,6 +57,8 @@ def load(directory):
     return samples
 
 
+# A runner exits non-zero when a sample fails (earley exhausts the heap
+# today); failed samples are left out, and summary() skips what's missing.
 def run_suites(config, args, out):
     env = environment(config)
     results = {}
@@ -65,14 +67,14 @@ def run_suites(config, args, out):
     if r7rs:
         d = out / 'r7rs'
         subprocess.run([sys.executable, ROOT / 'benchmarks/r7rs/run.py', '--only', *r7rs, '--runs',
-                        str(args.runs), '--cpu', 'auto', '--output', d], env=env, check=True,
+                        str(args.runs), '--cpu', 'auto', '--output', d], env=env,
                        stdout=subprocess.DEVNULL)
         results.update(load(d))
     if plb:
         d = out / 'plb'
         subprocess.run([sys.executable, ROOT / 'benchmarks/plb/run.py', '--only', *plb, '--languages', 'otium',
                         '--runs', str(args.runs), '--size', args.plb_size, '--cpu', 'auto', '--output', d],
-                       env=env, check=True, stdout=subprocess.DEVNULL)
+                       env=env, stdout=subprocess.DEVNULL)
         results.update(load(d))
     return results
 

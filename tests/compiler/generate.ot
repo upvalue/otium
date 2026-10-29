@@ -1,0 +1,217 @@
+;; generate.ot -- small random programs for testing the native compiler.
+;;
+;; otium tests/compiler/generate.ot -- SEED writes a program to stdout. The
+;; same seed always gives the same program. Programs use fixnum arithmetic
+;; (including wrapping), floats, comparisons, lists and arrays, closures that
+;; capture and assign, named lets and while, try around core functions given
+;; bad arguments, and core higher-order functions called with fns. Each
+;; prints its results, so running it on the VM and natively must print the
+;; same. tools/fuzz-compiler runs many seeds. See
+;; scratch/optimizer-design.md, section 9.7.
+
+;; --- Random numbers ------------------------------------------------------------
+
+;; A linear congruential generator; products stay below 2^62.
+(def seed 1)
+
+(def (next!)
+  (set! seed (remainder (+ (* seed 1103515245) 12345) 2147483648))
+  (quotient seed 65536))
+
+(def (below n)
+  (remainder (next!) n))
+
+(def (chance percent)
+  (< (below 100) percent))
+
+(def (pick items)
+  (get items (below (length items))))
+
+(def (upto n)
+  (array-to-list (range n)))
+
+;; --- Names -----------------------------------------------------------------------
+
+(def counter 0)
+
+(def (fresh prefix)
+  (set! counter (+ counter 1))
+  (string->symbol (str prefix counter)))
+
+;; An environment is a list of [name type assignable?]; types are :int, :list
+;; and :any.
+(def (vars-of env type)
+  (filter (fn (v) (or (eq? type :any) (eq? (get v 1) type))) env))
+
+(def (assignable env)
+  (filter (fn (v) (get v 2)) env))
+
+;; --- Expressions ---------------------------------------------------------------------
+
+(def boundaries [0 1 -1 2 7 100 -100 4611686018427387903 -4611686018427387904 4611686018427387902])
+
+(def (int-literal)
+  (if (chance 20)
+      (pick boundaries)
+      (- (below 41) 20)))
+
+(def (int-expr env depth)
+  (let ((vars (vars-of env :int)))
+    (cond
+      ((or (<= depth 0) (chance 25))
+       (if (and (pair? vars) (chance 60))
+           (get (pick (list-to-array vars)) 0)
+           (int-literal)))
+      (else (case (below 11)
+              ((0 1 2) (list (pick ['+ '- '*]) (int-expr env (- depth 1)) (int-expr env (- depth 1))))
+              ((3) (list 'if (bool-expr env (- depth 1)) (int-expr env (- depth 1)) (int-expr env (- depth 1))))
+              ((4) (list 'length (list-expr env (- depth 1))))
+              ((5)
+               (let ((v (fresh "t")))
+                 (list 'let (list (list v (int-expr env (- depth 1)))) (int-expr (cons [v :int #t] env) (- depth 1)))))
+              ((6) (list 'reduce (list 'fn '(acc x) (list '+ 'acc 'x)) 0 (list-expr env (- depth 1))))
+              ((7) (list 'try (list 'car (any-expr env (- depth 1))) '(catch e -1)))
+              ((8)
+               (let ((v (fresh "n"))
+                     (acc (fresh "acc")))
+                 (list 'let
+                       v
+                       (list (list acc 0) (list 'k (remainder (below 6) 6)))
+                       (list 'if
+                             '(<= k 0)
+                             acc
+                             (list v (list '+ acc (int-expr (cons [acc :int #f] env) (- depth 1))) '(- k 1))))))
+              ((9) (list 'quotient (int-expr env (- depth 1)) (pick [1 2 3 7 -5])))
+              (else (list 'count-calls (list-expr env (- depth 1)))))))))
+
+(def (bool-expr env depth)
+  (if (or (<= depth 0) (chance 30))
+      (pick ['#t '#f (list 'pair? (any-expr env 0)) (list 'null? (any-expr env 0))])
+      (case (below 6)
+        ((0 1) (list (pick ['< '<= '> '>= '=]) (int-expr env (- depth 1)) (int-expr env (- depth 1))))
+        ((2) (list (pick ['pair? 'null? 'symbol? 'number? 'array?]) (any-expr env (- depth 1))))
+        ((3) (list 'not (bool-expr env (- depth 1))))
+        ((4) (list (pick ['and 'or]) (bool-expr env (- depth 1)) (bool-expr env (- depth 1))))
+        (else (list 'eq? (any-expr env (- depth 1)) (pick [''a ''() 0 nil]))))))
+
+(def (list-expr env depth)
+  (let ((vars (vars-of env :list)))
+    (cond
+      ((or (<= depth 0) (chance 25))
+       (if (and (pair? vars) (chance 50))
+           (get (pick (list-to-array vars)) 0)
+           (list 'quote (map (fn (i) (- (below 10) 5)) (upto (below 4))))))
+      (else (case (below 8)
+              ((0) (cons 'list (map (fn (i) (int-expr env (- depth 1))) (upto (below 5)))))
+              ((1) (list 'cons (int-expr env (- depth 1)) (list-expr env (- depth 1))))
+              ((2) (list 'append (list-expr env (- depth 1)) (list-expr env (- depth 1))))
+              ((3) (list 'map (list 'fn '(x) (list '* 'x (int-expr env 0))) (list-expr env (- depth 1))))
+              ((4) (list 'filter '(fn (x) (> x 0)) (list-expr env (- depth 1))))
+              ((5) (list 'reverse (list-expr env (- depth 1))))
+              ((6) (list 'if (bool-expr env (- depth 1)) (list-expr env (- depth 1)) (list-expr env (- depth 1))))
+              (else (list 'try (list 'cdr (any-expr env (- depth 1))) '(catch e '(:caught)))))))))
+
+(def (any-expr env depth)
+  (case (below 5)
+    ((0 1) (int-expr env depth))
+    ((2 3) (list-expr env depth))
+    (else (pick ['nil ''sym '(array 1 2) 2.5 "s"]))))
+
+;; --- Statements ----------------------------------------------------------------------
+
+;; A body: a few statements, some assigning variables or closures that
+;; capture them, then an expression.
+(def (body env depth)
+  (let ((forms [])
+        (env env))
+    (dotimes (i (below 3))
+      (case (below 5)
+        ((0)
+         (let ((targets (vars-of (assignable env) :int)))
+           (when (pair? targets)
+             (let ((v (get (pick (list-to-array targets)) 0)))
+               (push! forms (list 'set! v (int-expr env (- depth 1))))))))
+        ((1)
+         (let ((targets (vars-of (assignable env) :int)))
+           (when (pair? targets)
+             (let ((v (get (pick (list-to-array targets)) 0)))
+               (push! forms
+                      (list 'for-each (list 'fn '(x) (list 'set! v (list '+ v 'x))) (list-expr env (- depth 1))))))))
+        ((2)
+         (let ((targets (vars-of (assignable env) :int)))
+           (when (pair? targets)
+             (let ((v (get (pick (list-to-array targets)) 0)))
+               ;; Bounded, since v may start far below the limit.
+               (let ((w (fresh "w")))
+                 (push! forms
+                        (list 'let
+                              (list (list w 0))
+                              (list 'while
+                                    (list 'and (list '< v (+ 3 (below 20))) (list '< w 20))
+                                    (list 'set! v (list '+ v 1))
+                                    (list 'set! w (list '+ w 1))))))))))
+        ((3) (push! forms (list 'show (list 'quote (fresh "line")) (any-expr env (- depth 1)))))
+        (else (push! forms (list 'show (list 'quote (fresh "line")) (int-expr env depth))))))
+    (append (array-to-list forms) (list (int-expr env depth)))))
+
+;; A function definition, and its parameters' types.
+(def (function name)
+  (let ((params (map (fn (i) (fresh "p")) (upto (+ 1 (below 3))))))
+    (let ((env (map (fn (p)
+                      [p
+                       (if (chance 70)
+                           :int
+                           :list)
+                       #t])
+                    params)))
+      [(cons 'def (cons (cons name params) (body env 3))) (map (fn (v) (get v 1)) env)])))
+
+(def (argument type)
+  (if (eq? type :int)
+      (int-literal)
+      (list 'quote (map (fn (i) (- (below 10) 5)) (upto (below 4))))))
+
+(def prelude
+  '((def (show label value)
+      (display label)
+      (display " ")
+      (write value)
+      (newline))
+    (def calls 0)
+    (def (count-calls xs)
+      (set! calls (+ calls 1))
+      (length xs))))
+
+(def (program n)
+  (set! seed n)
+  (set! counter 0)
+  (let ((forms []))
+    (for ((f :in prelude))
+      (push! forms f))
+    (dotimes (i (+ 1 (below 4)))
+      (let ((name (fresh "f")))
+        (let ((made (function name)))
+          (push! forms (get made 0))
+          (dotimes (j 2)
+            (push! forms
+                   (list 'show
+                         (list 'quote name)
+                         ;; Mostly arguments of the type the body expects.
+                         (list 'try
+                               (cons name
+                                     (map (fn (type)
+                                            (argument (if (chance 85)
+                                                          type
+                                                          (pick [:int :list]))))
+                                          (get made 1)))
+                               '(catch e (list :error (condition-message e))))))))))
+    (push! forms '(show 'calls calls))
+    forms))
+
+(def (main args)
+  (let ((n (string->number (car args))))
+    (for ((form :in (program n)))
+      (write form)
+      (newline))))
+
+(main (otium.process/arguments))

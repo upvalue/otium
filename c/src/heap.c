@@ -840,6 +840,39 @@ static void heap_grow(oti_heap* h, size_t capacity) {
   if (capacity > h->capacity) h->capacity = capacity;
 }
 
+/* Collect, and grow if that leaves the heap too full, until size bytes can be
+ * placed. A minor collection that frees enough is the whole of it; growth
+ * only follows full collections, which are the ones that see what's live. */
+static unsigned char* heap_place_after_collecting(oti_heap* h, size_t size) {
+  int collection = heap_next_collection(h);
+  heap_collect(h, collection);
+  unsigned char* p;
+  if (collection == COLLECT_MINOR) {
+    if ((p = heap_place(h, size))) return p;
+    heap_collect(h, COLLECT_MAJOR);
+  }
+  /* As more of the heap stays live, each collection frees less and they
+   * come closer together, so grow back to OTI_HEAP_LIVE_PERCENT. */
+  size_t needed = h->live_bytes + size;
+  if (needed > h->capacity / 100 * OTI_HEAP_LIVE_PERCENT && h->capacity < h->limit) {
+    heap_grow(h, needed > h->limit / 100 * OTI_HEAP_LIVE_PERCENT
+                ? h->limit
+                : needed / OTI_HEAP_LIVE_PERCENT * 100);
+    size_t room = h->capacity - h->live_bytes;
+    h->major_live = h->live_bytes + room / 2;
+  }
+  if ((p = heap_place(h, size))) return p;
+  /* Holes may be too small for the object, and the budget too small for a
+   * fresh block, while the limit still has room. */
+  if (h->capacity < h->limit) {
+    heap_grow(h, h->live_bytes + size);
+    if ((p = heap_place(h, size))) return p;
+  }
+  /* What is left may be scattered over too many blocks. */
+  heap_collect(h, COLLECT_DEFRAGMENT);
+  return heap_place(h, size);
+}
+
 ot_value oti_heap_alloc(oti_heap* h, uint32_t kind, uint32_t fields, size_t bytes) {
   if (fields && (SIZE_MAX - sizeof(oti_object_header)) / fields < sizeof(ot_value)) return 0;
   size_t base = sizeof(oti_object_header) + (size_t)fields * sizeof(ot_value);
@@ -847,39 +880,7 @@ ot_value oti_heap_alloc(oti_heap* h, uint32_t kind, uint32_t fields, size_t byte
   size_t size = (base + bytes + 7) & ~(size_t)7;
   if (size > h->limit || size > UINT32_MAX) return 0;
   unsigned char* p = heap_place(h, size);
-  if (!p) {
-    int kind = heap_next_collection(h);
-    heap_collect(h, kind);
-    if (kind == COLLECT_MINOR && !(p = heap_place(h, size))) {
-      kind = COLLECT_MAJOR;
-      heap_collect(h, kind);
-    }
-  }
-  if (!p) {
-    /* As more of the heap stays live, each collection frees less and they
-     * come closer together, so grow back to OTI_HEAP_LIVE_PERCENT. */
-    size_t needed = h->live_bytes + size;
-    if (needed > h->capacity / 100 * OTI_HEAP_LIVE_PERCENT && h->capacity < h->limit) {
-      heap_grow(h, needed > h->limit / 100 * OTI_HEAP_LIVE_PERCENT
-                  ? h->limit
-                  : needed / OTI_HEAP_LIVE_PERCENT * 100);
-      size_t room = h->capacity - h->live_bytes;
-      h->major_live = h->live_bytes + room / 2;
-    }
-    p = heap_place(h, size);
-    /* Holes may be too small for the object, and the budget too small for a
-     * fresh block, while the limit still has room. */
-    if (!p && h->capacity < h->limit) {
-      heap_grow(h, h->live_bytes + size);
-      p = heap_place(h, size);
-    }
-    /* What is left may be scattered over too many blocks. */
-    if (!p) {
-      heap_collect(h, COLLECT_DEFRAGMENT);
-      p = heap_place(h, size);
-    }
-    if (!p) return 0;
-  }
+  if (!p && !(p = heap_place_after_collecting(h, size))) return 0;
   oti_object_header* o = (oti_object_header*)p;
   *o = (oti_object_header){.size = (uint32_t)size, .fields = fields, .kind = kind & 255};
   ot_value* slots = object_fields((ot_value)o);

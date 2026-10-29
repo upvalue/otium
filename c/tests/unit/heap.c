@@ -158,7 +158,7 @@ TEST(evacuation_moves_survivors_out_of_sparse_blocks) {
       identities[k] = object_identity(v);
     }
   }
-  object_pin(kept[7]);
+  ((oti_object_header*)kept[7])->gc |= OTI_GC_PINNED;
   ot_value pinned = kept[7];
   oti_heap_collect(&h);
   CHECK(h.defragment);

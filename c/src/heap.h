@@ -205,7 +205,7 @@ typedef struct {
  * address over fields and kind. Reclaim marks what oti_reclaim reached; the
  * collection that follows clears it on every object it keeps. */
 #define OTI_GC_EPOCH 3u
-#define OTI_GC_PINNED 4u
+#define OTI_GC_PINNED 4u /* stays where it is; large objects never move anyway */
 #define OTI_GC_FORWARDED 8u
 #define OTI_GC_RECLAIM 16u
 
@@ -237,11 +237,6 @@ static inline uint32_t object_identity(ot_value object) {
     o->kind |= identity << 8;
   }
   return identity;
-}
-
-/* A pinned object stays where it is. Large objects never move anyway. */
-static inline void object_pin(ot_value object) {
-  ((oti_object_header*)object)->gc |= OTI_GC_PINNED;
 }
 
 static inline bool object_frozen(ot_value object) {

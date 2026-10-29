@@ -1,0 +1,49 @@
+;; Native stacks grow in segments: deep recursion, frames too big for the
+;; check after the prologue, crossing one boundary back and forth, unwinding
+;; and collecting across segments, overflow, and threads' own stacks.
+(require otium.test :refer (check fails? report))
+(require otium.thread :as thread :refer (spawn))
+
+;; (name n) recurses n deep with 150 values live across each call, so its
+;; frame is over 1KB and checked before its prologue. Each level n adds
+;; 150n + 11175.
+(defmacro wide-recursion (name bottom)
+  (let ((names (for ((i :range 150) (out :collect (symbol (str "a" i)))) => out)))
+    `(def (,name n)
+       (let ,(for ((s :in names) (i :range 150) (out :collect (list s (list '+ 'n i)))) => out)
+         (if (= n 0) ,bottom (+ (,name (- n 1)) ,@names))))))
+
+(def (wide-total n) (+ (* 150 (/ (* n (+ n 1)) 2)) (* 11175 n)))
+
+(def (deep n) (if (= n 0) 0 (+ 1 (deep (- n 1)))))
+(check "deep" 1000000 (deep 1000000))
+
+(def (build n) (if (= n 0) '() (cons (list n (* n 2)) (build (- n 1)))))
+(def (total xs) (if (null? xs) 0 (+ (car (car xs)) (total (cdr xs)))))
+(check "collecting across segments" 20000100000 (total (build 200000)))
+
+(def (bounces k acc) (if (= k 0) acc (bounces (- k 1) (+ acc (deep 120)))))
+(check "crossing one boundary" 1200000 (bounces 10000 0))
+
+(wide-recursion wide 0)
+(check "big frames" (wide-total 1000) (wide 1000))
+
+(def (fail-at n) (if (= n 0) (error "bottom") (+ 1 (fail-at (- n 1)))))
+(check "unwinding across segments" #t (fails? (fn () (fail-at 300000))))
+(check "deep after unwinding" 300000 (deep 300000))
+(wide-recursion wide-fail (error "bottom"))
+(check "unwinding big frames" #t (fails? (fn () (wide-fail 2000))))
+(check "big frames after unwinding" (wide-total 1000) (wide 1000))
+
+(def (forever n) (+ 1 (forever n)))
+(check "overflow" #t (fails? (fn () (forever 0))))
+(check "big frame overflow" #t (fails? (fn () (wide-fail 1000000))))
+(check "deep after overflow" 100000 (deep 100000))
+
+(def deep-threads (map (fn (i) (spawn (fn () (deep (* 100000 (+ i 1)))))) '(0 1 2 3)))
+(check "threads" '(100000 200000 300000 400000) (map thread/join deep-threads))
+(def wide-threads (map (fn (_) (spawn (fn () (wide 500)))) '(0 1 2)))
+(check "threads with big frames" (list (wide-total 500) (wide-total 500) (wide-total 500))
+       (map thread/join wide-threads))
+
+(report "segments")

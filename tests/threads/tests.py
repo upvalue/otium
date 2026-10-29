@@ -45,6 +45,7 @@ threads_test('threads')(seeded('tests/threads/checks.ot'))
 threads_test('threads real scheduler')(real('tests/threads/checks.ot'))
 threads_test('actors')(seeded('tests/threads/actors.ot'))
 threads_test('actors real scheduler')(real('tests/threads/actors.ot'))
+threads_test('stack segments')(real('tests/threads/segments.ot'))
 
 
 @threads_test('threads preemption')

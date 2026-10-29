@@ -10,7 +10,11 @@
 ;; pool, a slot for breaking move cycles, a slot holding an unknown callee's
 ;; entry, and staging slots for the parameters of variadic functions.
 
-(ns otium.compiler.emit)
+(ns otium.compiler.emit
+  (:require (otium.compiler.lower :refer (fc-closure fc-code fc-info fc-live fc-location fc-optional-regs
+                                          fc-params fc-raw fc-rest-reg fc-save-base fc-slots fc-spills
+                                          fc-stage fc-swap fc-target set-fc-save-base! set-fc-slots!
+                                          set-fc-stage! set-fc-swap! set-fc-target!))))
 
 ;; Stream opcodes and operand kinds, as in native.c.
 (def- ns-end 0)
@@ -115,16 +119,14 @@
 
 ;; --- Functions ---------------------------------------------------------------
 
-;; The emitter for one function: its context, the stream, and the unit's
-;; descriptors.
 (def (frame-layout fc)
-  (let ((spills (fc :spills)) (info (fc :info)))
+  (let ((spills (fc-spills fc)) (info (fc-info fc)))
     (let ((save spills))
-      (put! fc :save-base save)
-      (put! fc :swap (+ save (length pool)))
-      (put! fc :target (+ save (length pool) 1))
-      (put! fc :stage (+ save (length pool) 2))
-      (put! fc :slots (+ save (length pool) 2
+      (set-fc-save-base! fc save)
+      (set-fc-swap! fc (+ save (length pool)))
+      (set-fc-target! fc (+ save (length pool) 1))
+      (set-fc-stage! fc (+ save (length pool) 2))
+      (set-fc-slots! fc (+ save (length pool) 2
                           (if (simple-entry? info) 0 (+ 2 (length (info :params))
                                                           (length (info :optionals)))))))))
 
@@ -133,17 +135,17 @@
 
 (def (save-slot fc r)
   (let find-it ((i 0))
-    (if (= (get pool i) r) (+ (fc :save-base) i) (find-it (+ i 1)))))
+    (if (= (get pool i) r) (+ (fc-save-base fc) i) (find-it (+ i 1)))))
 
 (def (location fc v)
-  (or (get (fc :location) v)
+  (or (get (fc-location fc) v)
       ;; A register never live anywhere still gets somewhere to go.
       [:reg scratch]))
 
 ;; The physical form of a virtual operand. A memory operand based on a spilled
 ;; register loads the base into the scratch register first.
 (def (physical e op)
-  (let ((fc (e :fc)))
+  (let ((fc (emitter-fc e)))
     (cond ((int? op) (location fc op))
           ((and (array? op) (eq? (get op 0) :mem) (int? (get op 1)))
            (let ((loc (location fc (get op 1))))
@@ -159,14 +161,14 @@
 
 (def (mov! e dst src)
   (unless (same? dst src)
-    (let ((buf (e :buf)))
+    (let ((buf (emitter-buf e)))
       (unsigned! buf ns-mov)
       (unsigned! buf 0)
       (operand! buf dst)
       (operand! buf src))))
 
 (def (op! e code . operands)
-  (let ((buf (e :buf)))
+  (let ((buf (emitter-buf e)))
     (unsigned! buf code)
     (for ((o :in operands))
       (if (int? o) (unsigned! buf o) (operand! buf o)))))
@@ -197,7 +199,7 @@
               (begin
                 (mov! e (get ready 0) (get ready 1))
                 (set! pending (filter (fn (m) (not (eq? m ready))) pending)))
-              (let ((m (car pending)) (swap [:slot ((e :fc) :swap)]))
+              (let ((m (car pending)) (swap [:slot (fc-swap (emitter-fc e))]))
                 (mov! e swap (get m 1))
                 (set! pending (cons [(get m 0) swap] (cdr pending))))))
         (loop)))))
@@ -207,24 +209,24 @@
 ;; A descriptor for the call at instruction i: where every value live across it
 ;; is kept during the call.
 (def (descriptor! e i offset . flags)
-  (let ((fc (e :fc)) (slots []))
-    (for ((v :in (or (get (fc :live) i) [])))
-      (when (get (fc :raw) v) (error "native compiler: raw value live across a call" v))
+  (let ((fc (emitter-fc e)) (slots []))
+    (for ((v :in (or (get (fc-live fc) i) [])))
+      (when (get (fc-raw fc) v) (error "native compiler: raw value live across a call" v))
       (let ((loc (location fc v)))
         (push! slots (if (eq? (get loc 0) :reg) (save-slot fc (get loc 1)) (get loc 1)))))
-    (let ((descriptors ((e :unit) :descriptors)))
-      (push! descriptors [((fc :info) :index) slots offset (and (pair? flags) (car flags))])
+    (let ((descriptors ((emitter-unit e) :descriptors)))
+      (push! descriptors [((fc-info fc) :index) slots offset (and (pair? flags) (car flags))])
       (- (length descriptors) 1))))
 
 (def (save-live! e i)
-  (let ((fc (e :fc)))
-    (for ((v :in (or (get (fc :live) i) [])))
+  (let ((fc (emitter-fc e)))
+    (for ((v :in (or (get (fc-live fc) i) [])))
       (let ((loc (location fc v)))
         (when (eq? (get loc 0) :reg) (mov! e [:slot (save-slot fc (get loc 1))] loc))))))
 
 (def (restore-live! e i)
-  (let ((fc (e :fc)))
-    (for ((v :in (or (get (fc :live) i) [])))
+  (let ((fc (emitter-fc e)))
+    (for ((v :in (or (get (fc-live fc) i) [])))
       (let ((loc (location fc v)))
         (when (eq? (get loc 0) :reg) (mov! e loc [:slot (save-slot fc (get loc 1))]))))))
 
@@ -232,26 +234,25 @@
 
 (def (scratch-count fc)
   (let ((highest 6))
-    (for ((v :in (keys (fc :location))))
-      (let ((loc (get (fc :location) v)))
-        (when (and (eq? (get loc 0) :reg) (> (get loc 1) highest)) (set! highest (get loc 1)))))
+    (for ((loc :in (fc-location fc)))
+      (when (and loc (eq? (get loc 0) :reg) (> (get loc 1) highest)) (set! highest (get loc 1))))
     (+ highest 1)))
 
 (def (entry! e)
-  (let ((fc (e :fc)) (info ((e :fc) :info)) (u (e :unit)))
+  (let ((fc (emitter-fc e)) (info (fc-info (emitter-fc e))) (u (emitter-unit e)))
     (let ((required (length (info :params))) (optional (length (info :optionals)))
-          (arity (e :arity-label)))
+          (arity (emitter-arity-label e)))
       (if (simple-entry? info)
           (begin
-            (op! e ns-cmpj (get (e :conditions) :ne) [:reg 0] [:imm required] arity)
-            (parallel-move! e (cons [(location fc (fc :closure)) [:reg 1]]
+            (op! e ns-cmpj (get (emitter-conditions e) :ne) [:reg 0] [:imm required] arity)
+            (parallel-move! e (cons [(location fc (fc-closure fc)) [:reg 1]]
                                     (array-to-list
-                                     (map (fn (i) [(location fc (get (fc :params) i)) [:reg (+ 2 i)]])
+                                     (map (fn (i) [(location fc (get (fc-params fc) i)) [:reg (+ 2 i)]])
                                           (range required))))))
-          (let ((stage (fc :stage)))
-            (op! e ns-cmpj (get (e :conditions) :lt) [:reg 0] [:imm required] arity)
+          (let ((stage (fc-stage fc)))
+            (op! e ns-cmpj (get (emitter-conditions e) :lt) [:reg 0] [:imm required] arity)
             (unless (info :rest)
-              (op! e ns-cmpj (get (e :conditions) :gt) [:reg 0] [:imm (+ required optional)] arity))
+              (op! e ns-cmpj (get (emitter-conditions e) :gt) [:reg 0] [:imm (+ required optional)] arity))
             (mov! e [:state sf-argc] [:reg 0])
             (mov! e [:state sf-callee] [:reg 1])
             (mov! e [:reg 0] [:state sf-args])
@@ -270,18 +271,18 @@
               (let ((k (+ required i)) (slot [:slot (+ stage 2 required i)]))
                 (mov! e slot [:imm word-unbound])
                 (let ((l (fresh-label! e)))
-                  (op! e ns-cmpj (get (e :conditions) :le) [:state sf-argc] [:imm k] l)
+                  (op! e ns-cmpj (get (emitter-conditions e) :le) [:state sf-argc] [:imm k] l)
                   (mov! e slot [:mem 0 (* 8 k)])
                   (label-op! e l))))
-            (mov! e (location fc (fc :closure)) [:slot (+ stage 1)])
+            (mov! e (location fc (fc-closure fc)) [:slot (+ stage 1)])
             (dotimes (i required)
-              (mov! e (location fc (get (fc :params) i)) [:slot (+ stage 2 i)]))
+              (mov! e (location fc (get (fc-params fc) i)) [:slot (+ stage 2 i)]))
             (dotimes (i optional)
-              (mov! e (location fc (get (fc :optional-regs) i)) [:slot (+ stage 2 required i)]))
-            (when (info :rest) (mov! e (location fc (fc :rest-reg)) [:slot stage])))))))
+              (mov! e (location fc (get (fc-optional-regs fc) i)) [:slot (+ stage 2 required i)]))
+            (when (info :rest) (mov! e (location fc (fc-rest-reg fc)) [:slot stage])))))))
 
 (def (fresh-label! e)
-  (let ((u (e :unit)))
+  (let ((u (emitter-unit e)))
     (let ((n (u :labels)))
       (put! u :labels (+ n 1))
       n)))
@@ -289,26 +290,26 @@
 ;; --- Instructions -----------------------------------------------------------------
 
 (def (call! e i ins)
-  (let ((fc (e :fc)) (kind (get ins 1)) (callee (get ins 2)) (args (get ins 3))
+  (let ((fc (emitter-fc e)) (kind (get ins 1)) (callee (get ins 2)) (args (get ins 3))
         (dst (get ins 4)) (tail (get ins 5)) (offset (get ins 7)))
     (unless tail (save-live! e i))
     ;; An unknown callee's entry: its code word if it is a closure, else the
     ;; stub for everything else.
     (when (eq? kind :value)
-      (let ((other (fresh-label! e)) (target [:slot (fc :target)]))
+      (let ((other (fresh-label! e)) (target [:slot (fc-target fc)]))
         (mov! e [:reg scratch] (location fc callee))
         (mov! e target [:state sf-call-other])
         (op! e ns-op2u (get op-codes :and) 1 [:reg scratch] [:imm 7])
         (op! e ns-jcond (get conditions :nonzero) other)
-        (mov! e [:slot (fc :swap)] [:reg scratch])
+        (mov! e [:slot (fc-swap fc)] [:reg scratch])
         (op! e ns-mov 1 [:reg scratch] [:mem scratch 12])
         (op! e ns-cmpj (get conditions :ne) [:reg scratch] [:imm kind-closure] other)
-        (mov! e [:reg scratch] [:slot (fc :swap)])
+        (mov! e [:reg scratch] [:slot (fc-swap fc)])
         (mov! e target [:mem scratch 16])
         (label-op! e other)))
     ;; Arguments past the fifth go to native.args, which install makes big
     ;; enough for the unit's largest call.
-    (let ((u (e :unit)))
+    (let ((u (emitter-unit e)))
       (when (> (length args) (or (u :max-args) 0)) (put! u :max-args (length args))))
     (when (> (length args) 5)
       (mov! e [:reg scratch] [:state sf-args])
@@ -324,7 +325,7 @@
         (set! moves (cons [[:reg (+ 2 k)] (physical e (get args k))] moves)))
       (parallel-move! e moves))
     (let ((src (case kind
-                 ((:value) [:slot (fc :target)])
+                 ((:value) [:slot (fc-target fc)])
                  ((:cell) [:cell callee 1])
                  (else [:state sf-call-other]))))
       (if tail
@@ -335,7 +336,7 @@
             (restore-live! e i))))))
 
 (def (ccall! e i ins)
-  (let ((fc (e :fc)) (helper (get ins 1)) (args (get ins 2)) (dst (get ins 3)) (offset (get ins 5)))
+  (let ((fc (emitter-fc e)) (helper (get ins 1)) (args (get ins 2)) (dst (get ins 3)) (offset (get ins 5)))
     (save-live! e i)
     (let ((moves '()))
       (dotimes (k (length args))
@@ -346,7 +347,7 @@
     (restore-live! e i)))
 
 (def (instruction! e i ins)
-  (let ((fc (e :fc)))
+  (let ((fc (emitter-fc e)))
     (case (get ins 0)
       ((:mov) (let ((src (physical e (get ins 2)))) (mov! e (physical e (get ins 1)) src)))
       ((:store8) (op! e ns-mov 1 (physical e (get ins 1)) (physical e (get ins 2))))
@@ -375,7 +376,7 @@
       ((:addr) (op! e ns-addr (location fc (get ins 1)) (get ins 2)))
       ((:spbase)
        (op! e ns-spbase (location fc (get ins 1)))
-       (signed! (e :buf) 0))
+       (signed! (emitter-buf e) 0))
       ((:landing)
        (mov! e (location fc (get ins 1)) [:reg 0])
        (restore-live! e i))
@@ -398,29 +399,33 @@
         (else f)))
 
 (def (function! e fc)
-  (let ((info (fc :info)) (buf (e :buf)))
+  (let ((info (fc-info fc)) (buf (emitter-buf e)))
     (frame-layout fc)
-    (put! e :fc fc)
-    (put! e :arity-label (fresh-label! e))
+    (set-emitter-fc! e fc)
+    (set-emitter-arity-label! e (fresh-label! e))
     (op! e ns-func (info :index))
     (label-op! e (info :xep))
-    (op! e ns-enter (scratch-count fc) (fc :slots))
-    (let ((code (fc :code)))
+    (op! e ns-enter (scratch-count fc) (fc-slots fc))
+    (let ((code (fc-code fc)))
       (dotimes (i (length code)) (instruction! e i (get code i))))
     ;; Wrong argument counts: (arity-error closure argc).
-    (label-op! e (e :arity-label))
+    (label-op! e (emitter-arity-label e))
     (mov! e [:reg 2] [:reg 0])
-    (let ((descriptors ((e :unit) :descriptors)))
+    (let ((descriptors ((emitter-unit e) :descriptors)))
       (push! descriptors [nil [] nil])
       (op! e ns-ccall h-arity 2 (- (length descriptors) 1)))))
+
+;; Emitting a unit: the unit, the stream, the function being emitted and the
+;; label its wrong argument counts go to, and the condition codes.
+(defrecord Emitter (unit buf conditions fc arity-label))
 
 ;; The stream and tables of a unit, from its allocated function contexts.
 (def (emit-unit u contexts)
   (put! u :descriptors [])
-  (let ((e {:unit u :buf (make-buffer) :conditions conditions}))
+  (let ((e (make-emitter :unit u :buf (make-buffer) :conditions conditions)))
     (for ((fc :in contexts)) (function! e fc))
     (op! e ns-end)
-    (let ((body (buffer-bytes (e :buf))) (head (make-buffer)))
+    (let ((body (buffer-bytes (emitter-buf e))) (head (make-buffer)))
       ;; The label count goes first.
       (unsigned! head (u :labels))
       (let ((stream (bytevector-append (buffer-bytes head) body)))

@@ -8,11 +8,15 @@
 ;; slot when they run out. Calls don't split intervals: emit saves the
 ;; registers live across a call into fixed save slots and reloads them after.
 ;;
-;; Results go back into the function context: :location maps each register
-;; to [:reg r] or [:slot i], :spills counts spill slots, and :live maps the
+;; Results go back into the function context: :location holds each
+;; register's place by its number, [:reg r] or [:slot i] (nil for one never
+;; live), :spills counts spill slots, and :live maps the
 ;; index of each call and landing to the registers live across or into it.
 
-(ns otium.compiler.alloc)
+(ns otium.compiler.alloc
+  (:require (otium.compiler.lower :refer (fc-closure fc-code fc-cold fc-next fc-optional-regs fc-params
+                                          fc-rest-reg fc-u set-fc-cold! set-fc-live! set-fc-location!
+                                          set-fc-ranges! set-fc-spills!))))
 
 ;; sljit registers R0-R10, except R6, which emit keeps as a scratch register.
 ;; R7 and up are pushed by the prologue of a function that uses them.
@@ -49,6 +53,9 @@
     changed))
 
 (def (set-copy s) (copy s))
+
+;; An array of n copies of x, for maps keyed by register or label number.
+(def (filled n x) (let ((a [])) (dotimes (_ n) (push! a x)) a))
 
 (def (set-members s)
   (let ((out []))
@@ -101,10 +108,10 @@
     ((:call) (if (and (get ins 4) (not (get ins 5))) [(get ins 4)] []))
     ((:ccall) (if (vreg? (get ins 3)) [(get ins 3)] []))
     ((:entry)
-     (let ((out [(fc :closure)]))
-       (for ((v :in (fc :params))) (push! out v))
-       (for ((v :in (fc :optional-regs))) (push! out v))
-       (when (fc :rest-reg) (push! out (fc :rest-reg)))
+     (let ((out [(fc-closure fc)]))
+       (for ((v :in (fc-params fc))) (push! out v))
+       (for ((v :in (fc-optional-regs fc))) (push! out v))
+       (when (fc-rest-reg fc) (push! out (fc-rest-reg fc)))
        out))
     (else [])))
 
@@ -141,10 +148,10 @@
 ;; --- Allocation -----------------------------------------------------------------
 
 (def (allocate fc)
-  (let ((code (fc :code)))
-    (for ((ins :in (fc :cold))) (push! code ins))
-    (put! fc :cold [])
-    (let ((n (length code)) (labels {}) (words (+ 1 (quotient (fc :next) bits))))
+  (let ((code (fc-code fc)))
+    (for ((ins :in (fc-cold fc))) (push! code ins))
+    (set-fc-cold! fc [])
+    (let ((n (length code)) (labels (filled ((fc-u fc) :labels) nil)) (words (+ 1 (quotient (fc-next fc) bits))))
       (dotimes (i n)
         (when (eq? (get (get code i) 0) :label) (put! labels (get (get code i) 1) i)))
       ;; Blocks: starts and ends.
@@ -192,7 +199,7 @@
                 (when changed (iterate))))
             ;; Live ranges, half open [from to), and the registers live across each
             ;; safepoint and into each landing.
-            (let ((ranges {}) (live {}))
+            (let ((ranges (filled (fc-next fc) nil)) (live {}))
               ;; Blocks go last to first, so a definition trims only ranges from
               ;; its own block and later ones.
               (for ((b :range (- nb 1) -1 -1))
@@ -211,8 +218,8 @@
                           (set-add! now u)
                           (add-range! ranges u from (+ i 1))))
                       (walk (- i 1))))))
-              (put! fc :live live)
-              (put! fc :ranges ranges)
+              (set-fc-live! fc live)
+              (set-fc-ranges! fc ranges)
               (assign fc ranges))))))))
 
 ;; Ranges of a register, as a list of [from to] sorted by from. Blocks are
@@ -254,22 +261,23 @@
 ;; Give each register, in order of where it starts, the first pool register
 ;; or spill slot none of whose holders it overlaps.
 (def (assign fc ranges)
-  (let ((order (sort-by (fn (v) (get (car (get ranges v)) 0)) (keys ranges)))
-        (location {}) (holders {}) (slot-holders []))
+  (let ((order (sort-by (fn (v) (get (car (get ranges v)) 0)) (filter (fn (v) (get ranges v)) (range (length ranges)))))
+        (location (filled (length ranges) nil)) (holders (filled (+ 1 (apply max (array-to-list pool))) '()))
+        (slot-holders []))
     (for ((v :in order))
       (let ((rs (get ranges v)))
         (let ((fits (fn (others) (not (find (fn (o) (overlap? rs (get ranges o))) others)))))
-          (let ((r (find (fn (r) (fits (or (get holders r) '()))) (array-to-list pool))))
+          (let ((r (find (fn (r) (fits (get holders r))) (array-to-list pool))))
             (if r
                 (begin
                   (put! location v [:reg r])
-                  (put! holders r (cons v (or (get holders r) '()))))
+                  (put! holders r (cons v (get holders r))))
                 (let ((k (find-index (fn (others) (fits others)) slot-holders)))
                   (when (nil? k)
                     (push! slot-holders '())
                     (set! k (- (length slot-holders) 1)))
                   (put! location v [:slot k])
                   (put! slot-holders k (cons v (get slot-holders k)))))))))
-    (put! fc :location location)
-    (put! fc :spills (length slot-holders))
+    (set-fc-location! fc location)
+    (set-fc-spills! fc (length slot-holders))
     fc))

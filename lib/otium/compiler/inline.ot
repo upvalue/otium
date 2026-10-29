@@ -31,7 +31,8 @@
   (:require (otium.compiler.convert :as cv)
             (otium.compiler.ir :as ir)
             (otium.compiler.known :as known)
-            (otium.compiler.options :as options)))
+            (otium.compiler.options :as options)
+            (otium.compiler.types :as types)))
 
 ;; --- State -------------------------------------------------------------------
 
@@ -39,8 +40,8 @@
 ;; references to each variable the result keeps, fn is the function being
 ;; simplified, effort the steps left for inlining, attempt the innermost
 ;; inline attempt or nil, inlining the functions being inlined, innermost
-;; first.
-(defrecord State (env refs fn effort attempt inlining))
+;; first, and facts the simple facts known about variables.
+(defrecord State (env refs fn effort attempt inlining facts))
 
 ;; An inline attempt: the size of the copy so far, and the limit past which
 ;; it gives up.
@@ -61,7 +62,8 @@
                        :fn info
                        :effort (options/scaled (+ base-effort (* 4 (node-size (cv/fn-body info)))))
                        :attempt nil
-                       :inlining '())))
+                       :inlining '()
+                       :facts {})))
     (simplify-function s info)
     info))
 
@@ -211,6 +213,74 @@
             (when (and result (atom? (get result 0)) (not (and (string? (get result 0)) (flag? e :allocates))))
               [:const off (get result 0)])))))))
 
+;; --- Simple facts ----------------------------------------------------------------
+
+;; What's known about variables without loop analysis (design 5.6): what a
+;; variable is bound to, and in each branch of an if, what its test proves.
+;; Only variables that are never assigned have facts, so a fact holds
+;; wherever the variable is in scope, loops included. The types pass does
+;; the rest, with loops.
+
+(def (fact s var)
+  (if (cv/var-assigned var)
+      types/t-any
+      (get (state-facts s) (cv/var-id var) types/t-any)))
+
+;; Narrow var's fact to t.
+(def (learn! s var t)
+  (unless (or (cv/var-assigned var) (= t types/t-any))
+    (put! (state-facts s) (cv/var-id var) (types/meet (fact s var) t))))
+
+;; The type a value made in place has, as cons and array literals do.
+(def (made-type node)
+  (cond ((and (eq? (get node 0) :prim) (eq? (get node 2) 'cons)) types/t-pair)
+        ((and (eq? (get node 0) :known) (eq? (get node 2) 'array)) types/t-array)
+        (else types/t-any)))
+
+;; The variable a test is about and the types it proves when true and when
+;; false, or nil: a predicate that narrows, the variable itself, or not of
+;; either.
+(def (test-facts test)
+  (case (get test 0)
+    ((:lref)
+     (and (not (get test 3))
+          [(get test 2) (types/without types/t-any types/t-falsy) types/t-falsy]))
+    ((:prim :known)
+     (let ((name (get test 2)) (args (get test (if (eq? (get test 0) :prim) 3 4))))
+       (cond
+         ((and (eq? name 'not) (= (length args) 1))
+          (let ((inner (test-facts (get args 0))))
+            (and inner [(get inner 0) (get inner 2) (get inner 1)])))
+         ((and (= (length args) 1) (eq? (get (get args 0) 0) :lref) (not (get (get args 0) 3))
+               (types/narrows name))
+          (let ((n (types/narrows name)))
+            [(get (get args 0) 2) n (types/without types/t-any n)]))
+         (else nil))))
+    (else nil)))
+
+;; Run thunk with what test proves when it's true (or false) added to the
+;; facts, and take them back after.
+(def (with-test-facts s test true? thunk)
+  (let ((tf (test-facts test)))
+    (if (or (nil? tf) (cv/var-assigned (get tf 0)))
+        (thunk)
+        (let ((var (get tf 0)) (facts (state-facts s)))
+          (let ((id (cv/var-id var)) (old (get facts (cv/var-id var))))
+            (put! facts id (types/meet (fact s var) (get tf (if true? 1 2))))
+            (let ((out (thunk)))
+              (put! facts id old)
+              out))))))
+
+;; A predicate that narrows, on a variable whose facts settle it: #t or #f.
+(def (fold-by-fact s off name args)
+  (when (and (= (length args) 1) (eq? (get (get args 0) 0) :lref) (not (get (get args 0) 3)))
+    (let ((n (types/narrows name)))
+      (when n
+        (let ((r (types/predicate-result n (fact s (get (get args 0) 2)))))
+          (cond ((= r types/t-true) [:const off #t])
+                ((= r types/t-false) [:const off #f])
+                (else nil)))))))
+
 ;; --- The walk ----------------------------------------------------------------
 
 (def (step! s)
@@ -249,10 +319,12 @@
       ((:call) (simplify-call s node ctx))
       ((:prim)
        (let ((args (simplify-all s (get node 3))))
-         (or (fold off (get node 2) args) (result [:prim off (get node 2) args] ctx))))
+         (or (fold off (get node 2) args) (fold-by-fact s off (get node 2) args)
+             (result [:prim off (get node 2) args] ctx))))
       ((:known)
        (let ((args (simplify-all s (get node 4))))
-         (or (fold off (get node 2) args) (result [:known off (get node 2) (get node 3) args (get node 5)] ctx))))
+         (or (fold off (get node 2) args) (fold-by-fact s off (get node 2) args)
+             (result [:known off (get node 2) (get node 3) args (get node 5)] ctx))))
       ((:gprim) [:gprim off (get node 2) (get node 3) (simplify-all s (get node 4))])
       ((:gcall :bcall)
        (or (inline-core s node ctx)
@@ -344,8 +416,8 @@
                                        3
                                        4))
                               ctx))
-          (let ((then (simplify s (get node 3) ctx))
-                (else (simplify s (get node 4) ctx)))
+          (let ((then (with-test-facts s test #t (fn () (simplify s (get node 3) ctx))))
+                (else (with-test-facts s test #f (fn () (simplify s (get node 4) ctx)))))
             (cond
               ((and (eq? ctx :effect) (effect-free? then) (effect-free? else)) (or (drop-value test) (nothing off)))
               ((and (eq? ctx :test) (const? then) (truthy? (get then 2)) (const? else) (not (truthy? (get else 2))))
@@ -406,6 +478,7 @@
           ((copyable? init) (put! values i init) (bind! s var (make-binding :kind :copy :value init)))
           (else (let ((value (simplify s init :value)))
                   (put! values i value)
+                  (learn! s var (made-type value))
                   (bind! s var (make-binding :kind (kind-of value) :value value)))))))
     (let ((body (simplify s body ctx))
           (segments '()))

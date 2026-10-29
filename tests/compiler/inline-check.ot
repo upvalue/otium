@@ -231,6 +231,32 @@
        (fn nil
          ()
          (prim car a.1))))
+    ;; --- Simple facts ---
+    ;; A test that narrows proves its predicate in the branch it guards.
+    ((fn nil
+       (a.1)
+       (if (prim pair? a.1) (prim pair? a.1) (prim null? a.1)))
+     (fn nil (a.1) (if (prim pair? a.1) #t (prim null? a.1))))
+    ;; and its negation in the other.
+    ((fn nil
+       (a.1)
+       (if (prim not (prim pair? a.1)) (prim pair? a.1) (prim pair? a.1)))
+     (fn nil (a.1) (if (prim not (prim pair? a.1)) #f #t)))
+    ;; A variable bound to a cons is a pair.
+    ((fn nil
+       (a.1)
+       (let ((x.2 (prim cons a.1 a.1))) (prim cons (prim pair? x.2) x.2)))
+     (fn nil (a.1) (let ((x.2 (prim cons a.1 a.1))) (prim cons #t x.2))))
+    ;; first of what's known to be a pair inlines to car.
+    ((fn nil
+       (a.1)
+       (if (prim pair? a.1) (gcall otium.core/first a.1) a.1))
+     (fn nil (a.1) (if (prim pair? a.1) (prim car a.1) a.1)))
+    ;; An assigned variable has no facts.
+    ((fn nil
+       (a.1)
+       (if (prim pair? a.1) (begin (set! a.1 1) (prim pair? a.1)) #f))
+     (fn nil (a.1) (if (prim pair? a.1) (begin (set! a.1 1) (prim pair? a.1)) #f)))
     ;; --- Limits ---
     ;; A small fn called in two places is inlined into both.
     ((fn nil

@@ -117,11 +117,34 @@ static bool natural_size(ot_value v, size_t* out) {
   return true;
 }
 
+/* Whether a union's size and alignment are its members' own. */
+static bool union_layout(ot_state* rt, const oti_abi_node* node, size_t n, size_t size,
+                         size_t alignment) {
+  size_t largest = 0, aligned = 1;
+  for (size_t i = 0; i < n; i++) {
+    const ffi_type* member = node->type.elements[i];
+    if (member->size > largest) largest = member->size;
+    if (member->alignment > aligned) aligned = member->alignment;
+  }
+  if (aligned != alignment || largest > SIZE_MAX - alignment + 1 ||
+      (largest + alignment - 1) / alignment * alignment != size)
+    return oti_ffi_errorf(rt, "abi", "union layout mismatch");
+  return true;
+}
+
+/* libffi has no unions, so a union passes as a struct the platform's ABI
+ * classifies the same way: lower_union, for SysV AMD64 and AAPCS64. */
+#if defined(__x86_64__) && defined(__linux__) && !defined(__ILP32__)
+#define UNIONS_SYSV 1
+#else
+#define UNIONS_SYSV 0
+#endif
+
 /* SysV AMD64 merges overlapping INTEGER/SSE leaves. Keep byte positions until
  * libffi classifies the containing aggregate: a four-aligned union can start
  * halfway through an eightbyte. No vector or long-double types are exposed.
  * See x86-64 psABI 3.2.3 and libffi src/x86/ffi64.c. */
-#if defined(__x86_64__) && defined(__linux__) && !defined(__ILP32__)
+#if UNIONS_SYSV
 static void union_classes(const ffi_type* type, size_t offset, unsigned char* classes) {
   if (type->type == FFI_TYPE_STRUCT) {
     for (size_t i = 0; type->elements[i]; i++) {
@@ -139,15 +162,7 @@ static void union_classes(const ffi_type* type, size_t offset, unsigned char* cl
 
 static bool lower_union(ot_state* rt, oti_signature* s, oti_abi_node* node, size_t n, size_t size,
                         size_t alignment) {
-  size_t largest = 0, aligned = 1;
-  for (size_t i = 0; i < n; i++) {
-    ffi_type* member = node->type.elements[i];
-    if (member->size > largest) largest = member->size;
-    if (member->alignment > aligned) aligned = member->alignment;
-  }
-  if (aligned != alignment || largest > SIZE_MAX - alignment + 1 ||
-      (largest + alignment - 1) / alignment * alignment != size)
-    return oti_ffi_errorf(rt, "abi", "union layout mismatch");
+  if (!union_layout(rt, node, n, size, alignment)) return false;
   unsigned char* classes = calloc(size, 1);
   ffi_type** elements = calloc(size + 1, sizeof(*elements));
   oti_abi_node* padding = calloc(1, sizeof(*padding));
@@ -180,6 +195,45 @@ static bool lower_union(ot_state* rt, oti_signature* s, oti_abi_node* node, size
     }
   }
   free(classes);
+  free(node->type.elements);
+  node->type = (ffi_type){size, (unsigned short)alignment, FFI_TYPE_STRUCT, elements};
+  return true;
+}
+#elif defined(__aarch64__)
+/* AAPCS64 passes a union whose scalars are all floats, or all doubles, as
+ * that many of them in floating-point registers, up to four (a homogeneous
+ * aggregate), and any other union as its bytes: in integer registers up to
+ * 16 bytes, by reference beyond. libffi's aarch64 port classifies a struct
+ * by its scalars and size alone, so a struct of floats, doubles or bytes
+ * covers each case. See AAPCS64 5.9.5 and libffi src/aarch64/ffi.c. */
+
+/* The scalar type every scalar in type has: FFI_TYPE_FLOAT or
+ * FFI_TYPE_DOUBLE, FFI_TYPE_VOID for none, or -1 for anything else. */
+static int union_scalar(const ffi_type* type) {
+  if (type->type != FFI_TYPE_STRUCT)
+    return type->type == FFI_TYPE_FLOAT || type->type == FFI_TYPE_DOUBLE ? type->type : -1;
+  int common = FFI_TYPE_VOID;
+  for (size_t i = 0; type->elements[i]; i++) {
+    int scalar = union_scalar(type->elements[i]);
+    if (scalar == -1 || (common != FFI_TYPE_VOID && scalar != FFI_TYPE_VOID && scalar != common))
+      return -1;
+    if (scalar != FFI_TYPE_VOID) common = scalar;
+  }
+  return common;
+}
+
+static bool lower_union(ot_state* rt, oti_signature* s, oti_abi_node* node, size_t n, size_t size,
+                        size_t alignment) {
+  (void)s;
+  if (!union_layout(rt, node, n, size, alignment)) return false;
+  int common = union_scalar(&node->type);
+  ffi_type* leaf = common == FFI_TYPE_FLOAT    ? &ffi_type_float
+                   : common == FFI_TYPE_DOUBLE ? &ffi_type_double
+                                               : &ffi_type_uint8;
+  size_t count = size / leaf->size;
+  ffi_type** elements = calloc(count + 1, sizeof(*elements));
+  if (!elements) return oti_ffi_errorf(rt, "allocation", "out of host memory");
+  for (size_t i = 0; i < count; i++) elements[i] = leaf;
   free(node->type.elements);
   node->type = (ffi_type){size, (unsigned short)alignment, FFI_TYPE_STRUCT, elements};
   return true;
@@ -276,10 +330,10 @@ static ffi_type* aggregate_type(ot_state* rt, oti_signature* s, ot_value descrip
       if (!natural_size(list_item(oti_car(cursor), 2), &offset) || offset)
         ok = oti_ffi_errorf(rt, "abi", "union field offset mismatch");
     }
-#if defined(__x86_64__) && defined(__linux__) && !defined(__ILP32__)
+#if UNIONS_SYSV || defined(__aarch64__)
     if (ok) ok = lower_union(rt, s, node, n, size, alignment);
 #else
-    if (ok) ok = oti_ffi_errorf(rt, "abi", "union calls require x86-64 Linux SysV");
+    if (ok) ok = oti_ffi_errorf(rt, "abi", "union calls require x86-64 Linux or arm64");
 #endif
     free(offsets);
     return ok ? &node->type : NULL;

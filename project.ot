@@ -1,2 +1,3 @@
 ; Runnable examples for either runtime.
-(paths "examples" "examples/otcl")
+; benchmarks/plb/lib holds the helpers the benchmark ports share.
+(paths "examples" "examples/otcl" "benchmarks/plb/lib")

@@ -1,0 +1,37 @@
+;; Argument and number formatting helpers shared by the ports. Upstream
+;; programs use their language's printf; these cover the formats they print.
+(ns plb.support)
+
+(def (text-argument index default)
+  "The index-th command-line argument, or default when absent."
+  (let ((arguments (otium.process/arguments)))
+    (if (< index (length arguments))
+        (nth arguments index)
+        default)))
+
+(def (argument index default)
+  "The index-th command-line argument as a number, or default when absent."
+  (let ((text (text-argument index nil)))
+    (if (nil? text)
+        default
+        (string->number text))))
+
+(def (pad-left text width)
+  "Right-align text in width columns, like printf's %Nd."
+  (let ((missing (- width (string-length text))))
+    (if (> missing 0)
+        (string-append (string-repeat " " missing) text)
+        text)))
+
+(def (fixed x digits)
+  "Format float x with digits decimals, like printf's %.Nf."
+  (let ((scale (expt 10 digits))
+        (scaled (exact (round (* (abs x) scale))))
+        (whole (number->string (quotient scaled scale)))
+        (fraction (number->string (remainder scaled scale)))
+        (sign (if (and (< x 0) (> scaled 0))
+                  "-"
+                  "")))
+    (if (= digits 0)
+        (string-append sign whole)
+        (string-append sign whole "." (string-repeat "0" (- digits (string-length fraction))) fraction))))

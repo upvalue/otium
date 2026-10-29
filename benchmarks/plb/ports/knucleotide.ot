@@ -1,0 +1,60 @@
+;; knucleotide: count substrings of a DNA sequence in hash tables, after
+;; upstream 3.py. Like upstream, nucleotides become two-bit codes and each
+;; substring an integer key. Upstream counts every length in one pass, with a
+;; separate fast path for lengths 1 and 2; this counts each length in its own
+;; pass.
+(require plb.support :as support)
+
+(def codes {"G" 0 "T" 1 "C" 2 "A" 3 "g" 0 "t" 1 "c" 2 "a" 3})
+
+(def (read-sequence path)
+  (let ((port (open-input-file path))
+        (lines (array))
+        (total 0))
+    (let skip ((line (read-line port)))
+      (unless (or (eof-object? line) (string-starts-with? line ">THREE")) (skip (read-line port))))
+    (let collect ((line (read-line port)))
+      (unless (or (eof-object? line) (string-starts-with? line ">"))
+        (let ((trimmed (string-trim line)))
+          (push! lines trimmed)
+          (set! total (+ total (string-length trimmed))))
+        (collect (read-line port))))
+    (let ((sequence (make-bytevector total 0))
+          (at 0))
+      (for ((text :in lines))
+        (let ((bytes (string->utf8 text)))
+          (dotimes (i (bytevector-length bytes))
+            (bytevector-u8-set! sequence at (get codes (string (integer->char (bytevector-u8-ref bytes i)))))
+            (set! at (+ at 1)))))
+      sequence)))
+
+(def (count-frame sequence frame)
+  (let ((counts {})
+        (mask (- (bitwise-arithmetic-shift 1 (* 2 frame)) 1))
+        (bits 0))
+    (dotimes (k (- frame 1))
+      (set! bits (+ (* bits 4) (bytevector-u8-ref sequence k))))
+    (for ((k :range (- frame 1) (bytevector-length sequence)))
+      (set! bits (bitwise-and (+ (* bits 4) (bytevector-u8-ref sequence k)) mask))
+      (put! counts bits (+ (get counts bits 0) 1)))
+    counts))
+
+(def (key-bits text)
+  (reduce (fn (bits c) (+ (* bits 4) (get codes (string c)))) 0 (string->list text)))
+
+(def (show-relative sequence names frame)
+  (let ((counts (count-frame sequence frame))
+        (n (+ (- (bytevector-length sequence) frame) 1))
+        (rows (map (fn (name) [name (get counts (key-bits name) 0)]) names)))
+    (for ((row :in (sort-by (fn (row) (- (get row 1))) (sort-by (fn (row) (get row 0)) rows))))
+      (println (str (get row 0) " " (support/fixed (/ (* (get row 1) 100.0) n) 3))))
+    (println "")))
+
+(let ((sequence (read-sequence (support/text-argument 0 "25000_in")))
+      (mono ["G" "A" "T" "C"])
+      (di (for ((n :in mono) (out :collect-array (map (fn (m) (str n m)) mono))) => out)))
+  (show-relative sequence mono 1)
+  (show-relative sequence (reduce (fn (all row) (concat all row)) [] di) 2)
+  (for ((name :in ["GGT" "GGTA" "GGTATT" "GGTATTTTAATT" "GGTATTTTAATTTATAGT"]))
+    (let ((counts (count-frame sequence (string-length name))))
+      (println (str (get counts (key-bits name) 0) "\t" name)))))

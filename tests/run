@@ -21,6 +21,7 @@ sys.dont_write_bytecode = True
 import harness
 
 DEFINITIONS = ['tests/**/tests.py', 'c/tests/tests.py', 'benchmarks/r7rs/tests.py',
+               'benchmarks/plb/tests.py',
                'tools/tests/tests.py']
 
 

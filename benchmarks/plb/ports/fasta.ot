@@ -1,0 +1,81 @@
+;; fasta: generate DNA sequences from a repeat and a seeded generator, after
+;; upstream 1.py.
+(require plb.support :as support)
+
+(def alu
+  (string-append "GGCCGGGCGCGGTGGCTCACGCCTGTAATCCCAGCACTTTGG"
+                 "GAGGCCGAGGCGGGCGGATCACCTGAGGTCAGGAGTTCGAGA"
+                 "CCAGCCTGGCCAACATGGTGAAACCCCGTCTCTACTAAAAAT"
+                 "ACAAAAATTAGCCGGGCGTGGTGGCGCGCGCCTGTAATCCCA"
+                 "GCTACTCGGGAGGCTGAGGCAGGAGAATCGCTTGAACCCGGG"
+                 "AGGCGGAGGTTGCAGTGAGCCGAGATCGCGCCACTGCACTCC"
+                 "AGCCTGGGCGACAGAGCGAGACTCCGTCTCAAAAA"))
+
+(def iub
+  [["a" 0.27]
+   ["c" 0.12]
+   ["g" 0.12]
+   ["t" 0.27]
+   ["B" 0.02]
+   ["D" 0.02]
+   ["H" 0.02]
+   ["K" 0.02]
+   ["M" 0.02]
+   ["N" 0.02]
+   ["R" 0.02]
+   ["S" 0.02]
+   ["V" 0.02]
+   ["W" 0.02]
+   ["Y" 0.02]])
+
+(def homo-sapiens [["a" 0.3029549426680] ["c" 0.1979883004921] ["g" 0.1975473066391] ["t" 0.3015094502008]])
+
+(def width 60)
+
+(def seed 42)
+
+(def (random!)
+  (set! seed (modulo (+ (* seed 3877) 29573) 139968))
+  (/ seed 139968.0))
+
+(def (repeat-fasta source n)
+  (let ((r (string-length source))
+        (s (string-append source source (substring source 0 (modulo n r)))))
+    (dotimes (j (quotient n width))
+      (let ((i (modulo (* j width) r))) (println (substring s i (+ i width)))))
+    (when (> (modulo n width) 0) (println (substring s (- (string-length s) (modulo n width)))))))
+
+(def (random-fasta table n)
+  (let ((probabilities (array))
+        (codes (array))
+        (total 0.0)
+        (line (make-bytevector (+ width 1) 10)))
+    (for ((entry :in table))
+      (set! total (+ total (get entry 1)))
+      (push! probabilities total)
+      (push! codes (char->integer (string-ref (get entry 0) 0))))
+    (let ((count (length probabilities)))
+      ;; Like Python's bisect: the first entry above the random number.
+      (def (pick)
+        (let ((r (random!))
+              (i 0))
+          (while (and (< i count) (<= (get probabilities i) r)) (set! i (+ i 1)))
+          (get codes i)))
+      (dotimes (_ (quotient n width))
+        (dotimes (i width)
+          (bytevector-u8-set! line i (pick)))
+        (write-bytevector line))
+      (let ((rest (modulo n width)))
+        (when (> rest 0)
+          (dotimes (i rest)
+            (bytevector-u8-set! line i (pick)))
+          (bytevector-u8-set! line rest 10)
+          (write-bytevector line (current-output-port) 0 (+ rest 1)))))))
+
+(let ((n (support/argument 0 1000)))
+  (println ">ONE Homo sapiens alu")
+  (repeat-fasta alu (* n 2))
+  (println ">TWO IUB ambiguity codes")
+  (random-fasta iub (* n 3))
+  (println ">THREE Homo sapiens frequency")
+  (random-fasta homo-sapiens (* n 5)))

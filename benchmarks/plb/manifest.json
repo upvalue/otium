@@ -1,0 +1,82 @@
+{
+  "upstream": "https://github.com/hanabi1224/Programming-Language-Benchmarks",
+  "upstream_commit": "ad18b203dd1769724f4eea94fc3ac1e99f6593e0",
+  "shared": [
+    "References are upstream's official entries from bench/bench_<lang>.yaml; where a language lists several, the plain single-threaded one is used, and none is written to fill a gap",
+    "Every implementation runs on one CPU under taskset; sources marked threaded were written for several cores",
+    "Pinned Python runs set PYTHON_CPU_COUNT=1, so multiprocessing programs use one process",
+    "Ports format numbers with benchmarks/plb/lib/plb/support.ot in place of printf"
+  ],
+  "benchmarks": {
+    "helloworld": {
+      "tests": [["QwQ", "QwQ_out"], ["T_T", "T_T_out"]],
+      "sizes": {"small": "QwQ", "full": "QwQ"},
+      "references": {"python": "1.py", "sbcl": "1.cl", "lua": "1.lua", "luajit": "1.lua"},
+      "port": {"parity": "A", "deviation": "none"}
+    },
+    "nsieve": {
+      "tests": [["4", "4_out"], ["5", "5_out"]],
+      "sizes": {"small": "10", "full": "12"},
+      "references": {"python": "1.py", "sbcl": "1.cl"},
+      "port": {"parity": "B", "deviation": "flags are a bytevector rather than a list of booleans"}
+    },
+    "binarytrees": {
+      "tests": [["6", "6_out"], ["10", "10_out"]],
+      "sizes": {"small": "15", "full": "18"},
+      "references": {"python": "1.py", "sbcl": "3.cl", "lua": "1.lua", "luajit": "1.lua"},
+      "port": {"parity": "A", "deviation": "pairs stand in for two-element tuples"}
+    },
+    "merkletrees": {
+      "tests": [["9", "9_out"], ["10", "10_out"]],
+      "sizes": {"small": "15", "full": "17"},
+      "references": {"python": "1.py", "lua": "1.lua", "luajit": "1.lua"},
+      "port": {"parity": "A", "deviation": "a record stands in for the Node class"}
+    },
+    "nbody": {
+      "tests": [["1000", "1000_out"], ["10000", "10000_out"]],
+      "sizes": {"small": "500000", "full": "5000000"},
+      "references": {"python": "1.py", "sbcl": "1.cl", "lua": "4.lua", "luajit": "4.lua"},
+      "port": {"parity": "A", "deviation": "bodies are records; distance^-1.5 is dt/(d2*sqrt(d2)) as in 4.lua"}
+    },
+    "spectral-norm": {
+      "tests": [["100", "100_out"]],
+      "sizes": {"small": "2000", "full": "4000"},
+      "references": {"python": "8.py", "sbcl": "1.cl", "lua": "1.lua", "luajit": "1.lua"},
+      "threaded": ["python", "sbcl"],
+      "port": {"parity": "A", "deviation": "follows the single-threaded 1.lua"}
+    },
+    "fannkuch-redux": {
+      "tests": [["7", "7_out"], ["10", "10_out"]],
+      "sizes": {"small": "10", "full": "11"},
+      "references": {"sbcl": "1.cl"},
+      "threaded": ["sbcl"],
+      "port": {"parity": "B", "deviation": "the usual single-threaded algorithm; 1.cl generates specialised flip code and splits work over four threads"}
+    },
+    "fasta": {
+      "tests": [["1000", "1000_out"]],
+      "sizes": {"small": "250000", "full": "2500000"},
+      "references": {"python": "1.py", "sbcl": "1.cl"},
+      "port": {"parity": "B", "deviation": "random lines are built in a bytevector; bisect is a linear scan over at most 15 entries"}
+    },
+    "mandelbrot": {
+      "tests": [["1", "1_out"], ["200", "200_out"], ["500", "500_out"]],
+      "sizes": {"small": "1000", "full": "5000"},
+      "references": {},
+      "md5_body": true,
+      "port": {"parity": "B", "deviation": "follows 1.go, one pixel at a time; prints the bitmap and the runner computes the md5 upstream programs print"}
+    },
+    "lru": {
+      "tests": [["10 1000", "10_1000_out"], ["77 7777", "77_7777_out"], ["100 10000", "100_10000_out"]],
+      "sizes": {"small": "100 500000", "full": "1000 1000000"},
+      "references": {"python": "1.py"},
+      "port": {"parity": "A", "deviation": "an insertion-ordered table stands in for OrderedDict"}
+    },
+    "knucleotide": {
+      "tests": [["25000_in", "25000_out"], ["250000_in", "250000_out"]],
+      "sizes": {"small": "250000_in", "full": "2500000_in"},
+      "references": {"python": "3.py"},
+      "fasta_input": true,
+      "port": {"parity": "B", "deviation": "counts each length in its own pass; 3.py counts all lengths in one pass with a fast path for lengths 1 and 2"}
+    }
+  }
+}

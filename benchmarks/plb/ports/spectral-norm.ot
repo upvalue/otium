@@ -1,0 +1,37 @@
+;; spectral-norm: power method on an implicit matrix, after upstream 1.lua.
+(require plb.support :as support)
+
+(def (a i j)
+  (let ((ij (+ i j))) (/ 1.0 (+ (* ij (+ ij 1) 0.5) i 1))))
+
+(def (multiply-av! x y n)
+  (dotimes (i n)
+    (let ((sum 0.0))
+      (dotimes (j n)
+        (set! sum (+ sum (* (get x j) (a i j)))))
+      (put! y i sum))))
+
+(def (multiply-atv! x y n)
+  (dotimes (i n)
+    (let ((sum 0.0))
+      (dotimes (j n)
+        (set! sum (+ sum (* (get x j) (a j i)))))
+      (put! y i sum))))
+
+(def (multiply-atav! x y t n)
+  (multiply-av! x t n)
+  (multiply-atv! t y n))
+
+(let ((n (support/argument 0 100))
+      (u (for ((_ :range n) (out :collect-array 1.0)) => out))
+      (v (for ((_ :range n) (out :collect-array 0.0)) => out))
+      (t (for ((_ :range n) (out :collect-array 0.0)) => out))
+      (vbv 0.0)
+      (vv 0.0))
+  (dotimes (_ 10)
+    (multiply-atav! u v t n)
+    (multiply-atav! v u t n))
+  (dotimes (i n)
+    (set! vbv (+ vbv (* (get u i) (get v i))))
+    (set! vv (+ vv (* (get v i) (get v i)))))
+  (println (support/fixed (sqrt (/ vbv vv)) 9)))

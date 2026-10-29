@@ -1,0 +1,4 @@
+;; helloworld: startup and one line of output, after upstream 1.py.
+(require plb.support :as support)
+
+(println (string-append "Hello world " (support/text-argument 0 "") "!"))

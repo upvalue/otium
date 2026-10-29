@@ -1,0 +1,62 @@
+;; merkletrees: build trees, then fill in and check node hashes, after upstream 1.py.
+(require plb.support :as support)
+
+(defrecord Node (value left right hash))
+
+(def (make depth)
+  (if (> depth 0)
+      (record-new Node nil (make (- depth 1)) (make (- depth 1)) nil)
+      (record-new Node 1 nil nil nil)))
+
+(def (check? node)
+  (cond
+    ((nil? (node :hash)) #f)
+    ((node :value) #t)
+    ((and (node :left) (node :right)) (and (check? (node :left)) (check? (node :right))))
+    (else #f)))
+
+(def (hash-of node)
+  (or (node :hash) -1))
+
+(def (calculate-hash! node)
+  (when (nil? (node :hash))
+    (cond
+      ((node :value) (set! (node :hash) (node :value)))
+      ((and (node :left) (node :right))
+       (calculate-hash! (node :left))
+       (calculate-hash! (node :right))
+       (set! (node :hash) (+ (hash-of (node :left)) (hash-of (node :right))))))))
+
+(def (boolean-text value)
+  (if value
+      "true"
+      "false"))
+
+(let ((n (support/argument 0 6))
+      (min-depth 4)
+      (max-depth (max (+ min-depth 2) n))
+      (stretch-depth (+ max-depth 1))
+      (stretch (make stretch-depth)))
+  (calculate-hash! stretch)
+  (println (str "stretch tree of depth "
+                stretch-depth
+                "\t root hash: "
+                (hash-of stretch)
+                " check: "
+                (boolean-text (check? stretch))))
+  (let ((long-lived (make max-depth)))
+    (for ((depth :range min-depth stretch-depth 2))
+      (let ((iterations (expt 2 (- (+ max-depth min-depth) depth)))
+            (sum 0))
+        (dotimes (_ iterations)
+          (let ((tree (make depth)))
+            (calculate-hash! tree)
+            (set! sum (+ sum (hash-of tree)))))
+        (println (str iterations "\t trees of depth " depth "\t root hash sum: " sum))))
+    (calculate-hash! long-lived)
+    (println (str "long lived tree of depth "
+                  n
+                  "\t root hash: "
+                  (hash-of long-lived)
+                  " check: "
+                  (boolean-text (check? long-lived))))))

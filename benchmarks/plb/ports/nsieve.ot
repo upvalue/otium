@@ -1,0 +1,19 @@
+;; nsieve: count primes with a sieve of Eratosthenes, after upstream 1.py.
+(require plb.support :as support)
+
+(def (nsieve n)
+  (let ((flags (make-bytevector n 1))
+        (count 0))
+    (for ((i :range 2 n))
+      (when (= (bytevector-u8-ref flags i) 1)
+        (set! count (+ count 1))
+        (for ((j :range (* i 2) n i))
+          (bytevector-u8-set! flags j 0))))
+    (println (string-append "Primes up to "
+                            (support/pad-left (number->string n) 8)
+                            " "
+                            (support/pad-left (number->string count) 8)))))
+
+(let ((n (support/argument 0 4)))
+  (dotimes (i 3)
+    (nsieve (bitwise-arithmetic-shift 10000 (- n i)))))

@@ -1,0 +1,47 @@
+;; lru: a fixed-size least-recently-used cache, after upstream 1.py. Otium
+;; tables keep insertion order, so they stand in for OrderedDict: deleting and
+;; reinserting a key moves it to the end, and the first key is the oldest.
+(require plb.support :as support)
+
+(defrecord Lru (entries size))
+
+(def (oldest-key entries)
+  (for next ((key _ :in entries))
+    => nil
+    key))
+
+(def (lru-get cache key)
+  (let ((entries (cache :entries))
+        (value (get entries key)))
+    (unless (nil? value)
+      (put! entries key nil)
+      (put! entries key value))
+    value))
+
+(def (lru-put! cache key value)
+  (let ((entries (cache :entries)))
+    (cond
+      ((not (nil? (get entries key))) (put! entries key nil))
+      ((= (length entries) (cache :size)) (put! entries (oldest-key entries) nil)))
+    (put! entries key value)))
+
+(def (lcg seed)
+  (modulo (+ (* 1103515245 seed) 12345) 2147483648))
+
+(let ((size (support/argument 0 100))
+      (n (support/argument 1 1000))
+      (mod (* size 10))
+      (rng0 0)
+      (rng1 1)
+      (hit 0)
+      (missed 0)
+      (cache (record-new Lru {} size)))
+  (dotimes (_ n)
+    (set! rng0 (lcg rng0))
+    (let ((n0 (modulo rng0 mod))) (lru-put! cache n0 n0))
+    (set! rng1 (lcg rng1))
+    (if (nil? (lru-get cache (modulo rng1 mod)))
+        (set! missed (+ missed 1))
+        (set! hit (+ hit 1))))
+  (println hit)
+  (println missed))

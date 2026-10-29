@@ -1,0 +1,26 @@
+;; binarytrees: allocate and walk many short-lived trees, after upstream 1.py.
+;; Pairs stand in for Python's two-element tuples.
+(require plb.support :as support)
+
+(def (make-tree depth)
+  (if (> depth 0)
+      (cons (make-tree (- depth 1)) (make-tree (- depth 1)))
+      (cons nil nil)))
+
+(def (check-tree node)
+  (if (nil? (car node))
+      1
+      (+ 1 (check-tree (car node)) (check-tree (cdr node)))))
+
+(let ((min-depth 4)
+      (max-depth (max (+ min-depth 2) (support/argument 0 6)))
+      (stretch-depth (+ max-depth 1)))
+  (println (str "stretch tree of depth " stretch-depth "\t check: " (check-tree (make-tree stretch-depth))))
+  (let ((long-lived (make-tree max-depth)))
+    (for ((depth :range min-depth stretch-depth 2))
+      (let ((iterations (expt 2 (- (+ max-depth min-depth) depth)))
+            (check 0))
+        (dotimes (_ iterations)
+          (set! check (+ check (check-tree (make-tree depth)))))
+        (println (str iterations "\t trees of depth " depth "\t check: " check))))
+    (println (str "long lived tree of depth " max-depth "\t check: " (check-tree long-lived)))))

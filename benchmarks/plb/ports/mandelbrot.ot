@@ -1,0 +1,39 @@
+;; mandelbrot: render the set as a PBM bitmap. None of the reference languages
+;; has an upstream program, so this follows 1.go: 50 iterations, checking for
+;; escape after every 5. Upstream programs print the bitmap's md5; Otium has no
+;; md5, so this writes the bitmap and benchmarks/plb/run.py hashes it.
+(require plb.support :as support)
+
+(def (in-set? cr ci)
+  (let ((zr 0.0)
+        (zi 0.0)
+        (tr 0.0)
+        (ti 0.0)
+        (round 0)
+        (escaped #f))
+    (while (and (< round 10) (not escaped))
+      (dotimes (_ 5)
+        (set! zi (+ (* (+ zr zr) zi) ci))
+        (set! zr (+ (- tr ti) cr))
+        (set! tr (* zr zr))
+        (set! ti (* zi zi)))
+      ;; NaN compares false, so a diverged point counts as escaped.
+      (set! escaped (not (<= (+ tr ti) 4.0)))
+      (set! round (+ round 1)))
+    (not escaped)))
+
+(let ((size (* (quotient (+ (support/argument 0 200) 7) 8) 8))
+      (bytes-per-row (quotient size 8))
+      (inverse (/ 2.0 size))
+      (pixels (make-bytevector (* size bytes-per-row) 0)))
+  (dotimes (y size)
+    (let ((ci (- (* y inverse) 1.0))
+          (offset (* y bytes-per-row)))
+      (dotimes (chunk bytes-per-row)
+        (let ((bits 0))
+          (dotimes (i 8)
+            (when (in-set? (- (* (+ (* chunk 8) i) inverse) 1.5) ci)
+              (set! bits (bitwise-ior bits (bitwise-arithmetic-shift 128 (- i))))))
+          (bytevector-u8-set! pixels (+ offset chunk) bits)))))
+  (write-string (str "P4\n" size " " size "\n"))
+  (write-bytevector pixels))

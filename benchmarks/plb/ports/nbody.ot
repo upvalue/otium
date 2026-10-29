@@ -1,0 +1,102 @@
+;; nbody: simulate the Jovian planets, after upstream 1.py and 4.lua.
+(require plb.support :as support)
+
+(defrecord Body (x y z vx vy vz mass))
+
+(def pi 3.141592653589793)
+
+(def solar-mass (* 4 pi pi))
+
+(def days-per-year 365.24)
+
+(def (body x y z vx vy vz mass)
+  (record-new Body x y z (* vx days-per-year) (* vy days-per-year) (* vz days-per-year) (* mass solar-mass)))
+
+(def bodies
+  [(record-new Body 0.0 0.0 0.0 0.0 0.0 0.0 solar-mass)
+   (body 4.84143144246472090e+00
+         -1.16032004402742839e+00
+         -1.03622044471123109e-01
+         1.66007664274403694e-03
+         7.69901118419740425e-03
+         -6.90460016972063023e-05
+         9.54791938424326609e-04)
+   (body 8.34336671824457987e+00
+         4.12479856412430479e+00
+         -4.03523417114321381e-01
+         -2.76742510726862411e-03
+         4.99852801234917238e-03
+         2.30417297573763929e-05
+         2.85885980666130812e-04)
+   (body 1.28943695621391310e+01
+         -1.51111514016986312e+01
+         -2.23307578892655734e-01
+         2.96460137564761618e-03
+         2.37847173959480950e-03
+         -2.96589568540237556e-05
+         4.36624404335156298e-05)
+   (body 1.53796971148509165e+01
+         -2.59193146099879641e+01
+         1.79258772950371181e-01
+         2.68067772490389322e-03
+         1.62824170038242295e-03
+         -9.51592254519715870e-05
+         5.15138902046611451e-05)])
+
+(def (advance dt)
+  (let ((n (length bodies)))
+    (dotimes (i n)
+      (let ((bi (get bodies i)))
+        (for ((j :range (+ i 1) n))
+          (let ((bj (get bodies j))
+                (dx (- (bi :x) (bj :x)))
+                (dy (- (bi :y) (bj :y)))
+                (dz (- (bi :z) (bj :z)))
+                (distance2 (+ (* dx dx) (* dy dy) (* dz dz)))
+                (magnitude (/ dt (* distance2 (sqrt distance2))))
+                (bjm (* (bj :mass) magnitude))
+                (bim (* (bi :mass) magnitude)))
+            (set! (bi :vx) (- (bi :vx) (* dx bjm)))
+            (set! (bi :vy) (- (bi :vy) (* dy bjm)))
+            (set! (bi :vz) (- (bi :vz) (* dz bjm)))
+            (set! (bj :vx) (+ (bj :vx) (* dx bim)))
+            (set! (bj :vy) (+ (bj :vy) (* dy bim)))
+            (set! (bj :vz) (+ (bj :vz) (* dz bim)))))))
+    (for ((b :in bodies))
+      (set! (b :x) (+ (b :x) (* dt (b :vx))))
+      (set! (b :y) (+ (b :y) (* dt (b :vy))))
+      (set! (b :z) (+ (b :z) (* dt (b :vz)))))))
+
+(def (energy)
+  (let ((n (length bodies))
+        (e 0.0))
+    (dotimes (i n)
+      (let ((bi (get bodies i)))
+        (set! e (+ e (* 0.5 (bi :mass) (+ (* (bi :vx) (bi :vx)) (* (bi :vy) (bi :vy)) (* (bi :vz) (bi :vz))))))
+        (for ((j :range (+ i 1) n))
+          (let ((bj (get bodies j))
+                (dx (- (bi :x) (bj :x)))
+                (dy (- (bi :y) (bj :y)))
+                (dz (- (bi :z) (bj :z))))
+            (set! e (- e (/ (* (bi :mass) (bj :mass)) (sqrt (+ (* dx dx) (* dy dy) (* dz dz))))))))))
+    e))
+
+(def (offset-momentum)
+  (let ((px 0.0)
+        (py 0.0)
+        (pz 0.0)
+        (sun (get bodies 0)))
+    (for ((b :in bodies))
+      (set! px (- px (* (b :vx) (b :mass))))
+      (set! py (- py (* (b :vy) (b :mass))))
+      (set! pz (- pz (* (b :vz) (b :mass)))))
+    (set! (sun :vx) (/ px solar-mass))
+    (set! (sun :vy) (/ py solar-mass))
+    (set! (sun :vz) (/ pz solar-mass))))
+
+(let ((n (support/argument 0 1000)))
+  (offset-momentum)
+  (println (support/fixed (energy) 9))
+  (dotimes (_ n)
+    (advance 0.01))
+  (println (support/fixed (energy) 9)))

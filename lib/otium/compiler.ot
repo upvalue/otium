@@ -8,8 +8,10 @@
 
 (ns otium.compiler
   (:require (otium.compiler.convert :as convert)
+            (otium.compiler.inline :as inline)
             (otium.compiler.ir :as ir)
             (otium.compiler.known :as known)
+            (otium.compiler.options :as options)
             (otium.compiler.rescope :as rescope)
             (otium.compiler.lower :as lower)
             (otium.compiler.alloc :as alloc)
@@ -17,7 +19,7 @@
             (otium.process :as process)))
 
 ;; OTIUM_OPT_VERIFY=1 checks the tree IR after convert, and recomputes
-;; scopes and checks it again, for testing.
+;; scopes and checks it again, and checks it after each pass, for testing.
 (def- verify? (equal? (process/getenv "OTIUM_OPT_VERIFY") "1"))
 
 ;; OTIUM_OPT_TIMES=1 adds up the time each pass takes, for pass-times.
@@ -40,12 +42,19 @@
       (put! out pass (/ (get times pass) (inexact (jiffies-per-second)))))
     out))
 
+(def- inline? (options/enabled? "inline"))
+
+;; The tree IR of a form, after the passes switched on.
 (def (convert form)
   (let ((info (timed :convert (fn () (convert/convert-top form)))))
     (when verify?
       (ir/verify info)
       (rescope/rescope info)
       (ir/verify info))
+    (when inline?
+      (timed :inline (fn () (inline/inline info)))
+      (rescope/rescope info)
+      (when verify? (ir/verify info)))
     info))
 
 ;; The name of the inline candidate a converted top-level form defines, or
@@ -81,7 +90,7 @@
 
 ;; Virtual code of a form's functions, after allocation, for debugging.
 (def (dump-top form)
-  (let ((info (convert/convert-top form)))
+  (let ((info (convert form)))
     (let ((lowered (lower/lower-top info)))
       (for ((fc :in (get lowered 1)))
         (alloc/allocate fc)

@@ -1,0 +1,144 @@
+;; Local functions the inline pass inlines, and the cases it must leave alone.
+
+(def (trace x)
+  (print x " ")
+  x)
+
+;; Arguments with effects run once each, left to right, even when unused.
+(def (arguments a)
+  (let ((pick (fn (x y z) (+ x z)))) (pick (trace a) (trace (+ a 1)) (trace (+ a 2)))))
+
+(println (arguments 1))
+
+(def (unused a)
+  (let ((ignore (fn (x) 0))) (ignore (trace a))))
+
+(println (unused 5))
+
+;; A fn passed to a local higher-order function.
+(def (twice-each xs)
+  (let ((twice (fn (g x) (g (g x))))) (map (fn (x) (twice (fn (y) (* y 3)) x)) xs)))
+
+(println (twice-each '(1 2 3)))
+
+;; Inlined code that raises: the error and where it is are the same.
+(def (first-of x)
+  (let ((head (fn (p) (car p)))) (head x)))
+
+(println (try
+           (first-of 5)
+           (catch (error? e) (condition-message e))))
+
+(println (try
+           (let ((f (fn (a b) (quotient a b)))) (f 1 0))
+           (catch (error? e) (condition-message e))))
+
+;; A fold that would raise stays a call.
+(println (try
+           (+ 1 (quotient 4 0))
+           (catch (error? e) (condition-message e))))
+
+;; Assigned and captured variables aren't propagated.
+(def (assigned a)
+  (let ((x a))
+    (let ((get-x (fn () x))
+          (bump (fn () (set! x (+ x 1)))))
+      (bump)
+      (bump)
+      (list a x (get-x)))))
+
+(println (assigned 10))
+
+(def (assigned-source a)
+  (let ((x a))
+    (set! a 99)
+    (list x a)))
+
+(println (assigned-source 1))
+
+;; Shadowed names: a local called car is not the builtin.
+(def (shadowed p)
+  (let ((car (fn (x) (list :mine x)))) (car p)))
+
+(println (shadowed '(1 2)))
+
+(def (shadowed-param car)
+  (let ((f (fn (x) (car x)))) (f 4)))
+
+(println (shadowed-param (fn (x) (* x 10))))
+
+;; Body definitions: inlined after they run, and an error for one used
+;; before.
+(def (definitions n)
+  (def (sq x)
+    (* x x))
+  (def (sum-sq a b)
+    (+ (sq a) (sq b)))
+  (sum-sq n (+ n 1)))
+
+(println (definitions 3))
+
+(def (too-early)
+  (def a (b))
+  (def (b)
+    1)
+  a)
+
+(println (try
+           (too-early)
+           (catch (error? e) (condition-message e))))
+
+;; Recursive local functions and named lets stay calls and loops.
+(def (count-down n)
+  (def (go i acc)
+    (if (= i 0)
+        acc
+        (go (- i 1) (cons i acc))))
+  (go n '()))
+
+(println (count-down 5))
+
+(def (loop-with-helper n)
+  (let ((step (fn (i) (+ i 2))))
+    (let loop ((i 0)
+               (acc '()))
+      (if (>= i n)
+          (reverse acc)
+          (loop (step i) (cons i acc))))))
+
+(println (loop-with-helper 9))
+
+;; Tail calls from an inlined body stay tail calls.
+(def (deep n)
+  (let ((next (fn (k) (deep (- k 1)))))
+    (if (= n 0)
+        :done (next n))))
+
+(println (deep 1000000))
+
+;; Inlined into a closure, with a try and a cleanup around it.
+(def (wrapped a)
+  (let ((risky (fn (x)
+                 (if (> x 0)
+                     (* x 2)
+                     (error "not positive" x)))))
+    (fn (y)
+      (try
+        (defer
+          (risky (+ a y))
+          (print "cleanup "))
+        (catch (error? e) (list :caught (condition-message e)))))))
+
+(println ((wrapped 1) 2))
+
+(println ((wrapped 1) -5))
+
+;; Constants fold, and if keeps one branch.
+(def (folded)
+  (let ((k 10)
+        (on #t))
+    (if on
+        (+ k (* 2 3))
+        (trace :never))))
+
+(println (folded))

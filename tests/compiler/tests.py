@@ -96,3 +96,8 @@ def inline_bodies(t):
                      '      (unless (equal? (ir/tree->text (ir/text->tree text)) text) (println "differs " name))))) '
                      '(println "checked") (exit 0)'),
              stdout='checked\n')
+@test('compiler inline pass')
+def inline_pass(t):
+    """Hand-written trees through the inline pass, text in and text out."""
+    t.expect(t.otium('--no-project', '-L', LIB, ROOT / 'tests/compiler/inline-check.ot'),
+             contains=[' 0 failures'])

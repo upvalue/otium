@@ -1,0 +1,531 @@
+;; Pass tests for inline: each case is a tree in text form and the text the
+;; pass should turn it into, after rescope and the verifier.
+;;
+;;   inline-check.ot           check every case
+;;   inline-check.ot -- show   print what the pass gives for each case
+
+(require otium.compiler.inline :as inline)
+(require otium.compiler.ir :as ir)
+(require otium.compiler.rescope :as rescope)
+
+(def cases
+  '( ;; --- Constants and copies ---
+    ;; A local bound to a constant is replaced by it, and folds.
+    ((fn nil
+       ()
+       (let ((x.1 1)) (prim + x.1 2)))
+     (fn nil
+       ()
+       3))
+    ;; A local bound to another local is replaced by it.
+    ((fn nil
+       (a.1)
+       (let ((x.2 a.1)) (call :tail a.1 x.2)))
+     (fn nil
+       (a.1)
+       (call :tail a.1 a.1)))
+    ;; Constants and references are dropped where their value isn't used.
+    ((fn nil
+       (a.1)
+       (begin
+         1
+         a.1
+         (call a.1)
+         2))
+     (fn nil
+       (a.1)
+       (begin
+         (call a.1)
+         2)))
+    ;; A test that becomes a constant keeps one branch, after the test's effects.
+    ((fn nil
+       (a.1)
+       (if (begin
+             (call a.1)
+             #t)
+           1
+           2))
+     (fn nil
+       (a.1)
+       (begin
+         (call a.1)
+         1)))
+    ((fn nil
+       (a.1)
+       (if (prim null? (quote ()))
+           (call a.1)
+           2))
+     (fn nil
+       (a.1)
+       (call a.1)))
+    ;; (if x #t #f) where only truth matters is x.
+    ((fn nil
+       (a.1)
+       (if (if (call a.1)
+               #t
+               #f)
+           1
+           2))
+     (fn nil
+       (a.1)
+       (if (call a.1)
+           1
+           2)))
+    ;; --- Folding ---
+    ((fn nil
+       ()
+       (known quotient otium.core/quotient 7 2))
+     (fn nil
+       ()
+       3))
+    ((fn nil
+       ()
+       (prim eq? (quote a) (quote a)))
+     (fn nil
+       ()
+       #t))
+    ;; --- Dead code ---
+    ;; An unused binding with no effects goes; one with effects stays as an effect.
+    ((fn nil
+       (a.1)
+       (let ((x.2 (prim cons 1 2))
+             (y.3 (call a.1)))
+         3))
+     (fn nil
+       (a.1)
+       (begin
+         (call a.1)
+         3)))
+    ;; A flushable call whose value is thrown away keeps its arguments' effects.
+    ((fn nil
+       (a.1)
+       (begin
+         (prim cons (call a.1) 2)
+         3))
+     (fn nil
+       (a.1)
+       (begin
+         (call a.1)
+         3)))
+    ;; --- Inlining ---
+    ;; A let-bound fn, used only by calls, is inlined and dropped.
+    ((fn nil
+       (a.1)
+       (let ((f.2 (fn nil
+                    (x.3)
+                    (prim + x.3 1))))
+         (call f.2 a.1)))
+     (fn nil
+       (a.1)
+       (prim + a.1 1)))
+    ;; Used other than by calls, it stays too.
+    ((fn nil
+       (a.1)
+       (let ((f.2 (fn nil
+                    (x.3)
+                    (prim + x.3 1))))
+         (begin
+           (call a.1 f.2)
+           (call f.2 2))))
+     (fn nil
+       (a.1)
+       (let ((f.2 (fn nil
+                    (x.3)
+                    (prim + x.3 1))))
+         (begin
+           (call a.1 f.2)
+           3))))
+    ;; A fn written in place; arguments keep their order.
+    ((fn nil
+       (a.1)
+       (call (fn nil
+               (x.2 y.3)
+               (prim cons y.3 x.2))
+             (call a.1 1)
+             (call a.1 2)))
+     (fn nil
+       (a.1)
+       (let ((x.2 (call a.1 1))
+             (y.3 (call a.1 2)))
+         (prim cons y.3 x.2))))
+    ;; A fn passed as an argument is inlined where it's called.
+    ((fn nil
+       (a.1)
+       (let ((twice.2 (fn nil
+                        (g.3 x.4)
+                        (call g.3 (call g.3 x.4)))))
+         (call twice.2
+               (fn nil
+                 (y.5)
+                 (prim * y.5 2))
+               a.1)))
+     (fn nil
+       (a.1)
+       (let ((y.2 (prim * a.1 2))) (prim * y.2 2))))
+    ;; A body definition is inlined after its definition, and dropped.
+    ((fn nil
+       (a.1)
+       (let ((f.2 (unbound)))
+         (begin
+           (set! f.2
+                 (fn f
+                   (x.3)
+                   (prim car x.3)))
+           (call :tail f.2 a.1))))
+     (fn nil
+       (a.1)
+       (prim car a.1)))
+    ;; Inlined from tail position, a body's tail calls stay tail calls.
+    ((fn nil
+       (a.1)
+       (let ((f.2 (fn nil
+                    (x.3)
+                    (call :tail x.3))))
+         (call :tail f.2 a.1)))
+     (fn nil
+       (a.1)
+       (call :tail a.1)))
+    ;; Elsewhere they aren't.
+    ((fn nil
+       (a.1)
+       (let ((f.2 (fn nil
+                    (x.3)
+                    (call :tail x.3))))
+         (begin
+           (call f.2 a.1)
+           1)))
+     (fn nil
+       (a.1)
+       (begin
+         (call a.1)
+         1)))
+    ;; An inlined body's loop stays a loop, in the calling function.
+    ((fn nil
+       (a.1)
+       (let ((f.2 (fn nil
+                    (n.3)
+                    (loop l.4
+                          ((i.5 0))
+                          (if (prim < i.5 n.3)
+                              (recur l.4 (prim + i.5 1))
+                              i.5)))))
+         (call f.2 a.1)))
+     (fn nil
+       (a.1)
+       (loop l.2
+             ((i.3 0))
+             (if (prim < i.3 a.1)
+                 (recur l.2 (prim + i.3 1))
+                 i.3))))
+    ;; Called from inside another fn, the copy goes in that fn.
+    ((fn nil
+       (a.1)
+       (let ((f.2 (fn nil
+                    (x.3)
+                    (prim car x.3))))
+         (fn nil
+           ()
+           (call f.2 a.1))))
+     (fn nil
+       (a.1)
+       (fn nil
+         ()
+         (prim car a.1))))
+    ;; --- Limits ---
+    ;; A body over the size limit isn't inlined.
+    ((fn nil
+       (a.1)
+       (let ((f.2 (fn nil
+                    (x.3)
+                    (call x.3
+                          1
+                          2
+                          3
+                          4
+                          5
+                          6
+                          7
+                          8
+                          9
+                          10
+                          11
+                          12
+                          13
+                          14
+                          15
+                          16
+                          17
+                          18
+                          19
+                          20
+                          21
+                          22
+                          23
+                          24
+                          25
+                          26
+                          27
+                          28
+                          29
+                          30
+                          31
+                          32
+                          33
+                          34
+                          35
+                          36
+                          37
+                          38
+                          39
+                          40
+                          41
+                          42
+                          43
+                          44
+                          45
+                          46
+                          47
+                          48
+                          49
+                          50))))
+         (call f.2 a.1)))
+     (fn nil
+       (a.1)
+       (let ((f.2 (fn nil
+                    (x.3)
+                    (call x.3
+                          1
+                          2
+                          3
+                          4
+                          5
+                          6
+                          7
+                          8
+                          9
+                          10
+                          11
+                          12
+                          13
+                          14
+                          15
+                          16
+                          17
+                          18
+                          19
+                          20
+                          21
+                          22
+                          23
+                          24
+                          25
+                          26
+                          27
+                          28
+                          29
+                          30
+                          31
+                          32
+                          33
+                          34
+                          35
+                          36
+                          37
+                          38
+                          39
+                          40
+                          41
+                          42
+                          43
+                          44
+                          45
+                          46
+                          47
+                          48
+                          49
+                          50))))
+         (call f.2 a.1))))
+    ;; A function that refers to itself isn't inlined.
+    ((fn nil
+       (a.1)
+       (let ((f.2 (unbound)))
+         (begin
+           (set! f.2
+                 (fn f
+                   :self f.3
+                   (x.4)
+                   (call f.3 x.4)))
+           (call f.2 a.1))))
+     (fn nil
+       (a.1)
+       (let ((f.2 (unbound)))
+         (begin
+           (set! f.2
+                 (fn f
+                   :self f.3
+                   (x.4)
+                   (call f.3 x.4)))
+           (call f.2 a.1)))))
+    ;; Nor one with optional or rest parameters, or called with the wrong count.
+    ((fn nil
+       (a.1)
+       (call (fn nil
+               x.2
+               x.2)
+             a.1))
+     (fn nil
+       (a.1)
+       (call (fn nil
+               x.2
+               x.2)
+             a.1)))
+    ((fn nil
+       (a.1)
+       (call (fn nil
+               (x.2)
+               x.2)
+             a.1
+             a.1))
+     (fn nil
+       (a.1)
+       (call (fn nil
+               (x.2)
+               x.2)
+             a.1
+             a.1)))
+    ;; A fn applied to itself stops.
+    ((fn nil
+       ()
+       (call (fn nil
+               (h.1)
+               (call h.1 h.1))
+             (fn nil
+               (h.2)
+               (call h.2 h.2))))
+     (fn nil
+       ()
+       (let ((h.1 (fn nil
+                    (h.2)
+                    (call h.2 h.2))))
+         (call h.1 h.1))))
+    ;; --- Things that must not happen ---
+    ;; A call with effects dropped.
+    ((fn nil
+       (a.1)
+       (let ((f.2 (fn nil
+                    (x.3)
+                    1)))
+         (call f.2 (call a.1))))
+     (fn nil
+       (a.1)
+       (begin
+         (call a.1)
+         1)))
+    ;; A set! variable propagated.
+    ((fn nil
+       (a.1)
+       (let ((x.2 1))
+         (begin
+           (set! x.2 a.1)
+           x.2)))
+     (fn nil
+       (a.1)
+       (let ((x.2 1))
+         (begin
+           (set! x.2 a.1)
+           x.2))))
+    ((fn nil
+       (a.1)
+       (let ((x.2 a.1))
+         (begin
+           (set! a.1 2)
+           x.2)))
+     (fn nil
+       (a.1)
+       (let ((x.2 a.1))
+         (begin
+           (set! a.1 2)
+           x.2))))
+    ;; An error folded away, used or not.
+    ((fn nil
+       ()
+       (known quotient otium.core/quotient 1 0))
+     (fn nil
+       ()
+       (known quotient otium.core/quotient 1 0)))
+    ((fn nil
+       ()
+       (begin
+         (prim car 1)
+         2))
+     (fn nil
+       ()
+       (begin
+         (prim car 1)
+         2)))
+    ;; A mutable constant folded, which would share one object.
+    ((fn nil
+       ()
+       (known equal? otium.core/equal? (quote (1)) (quote (1))))
+     (fn nil
+       ()
+       (known equal? otium.core/equal? (quote (1)) (quote (1)))))
+    ;; An inline across a global.
+    ((fn nil
+       (a.1)
+       (let ((f.2 otium.core/car)) (call f.2 a.1)))
+     (fn nil
+       (a.1)
+       (let ((f.2 otium.core/car)) (call f.2 a.1))))
+    ;; A definition inlined before it has run, or a checked reference dropped.
+    ((fn nil
+       (a.1)
+       (let ((f.2 (unbound)))
+         (begin
+           (call (checked f.2) a.1)
+           (checked f.2)
+           (set! f.2
+                 (fn f
+                   (x.3)
+                   x.3))
+           1)))
+     (fn nil
+       (a.1)
+       (let ((f.2 (unbound)))
+         (begin
+           (call (checked f.2) a.1)
+           (checked f.2)
+           (set! f.2
+                 (fn f
+                   (x.3)
+                   x.3))
+           1))))))
+
+(def (simplified text)
+  (let ((info (ir/text->tree text)))
+    (inline/inline info)
+    (rescope/rescope info)
+    (ir/verify info)
+    (ir/tree->text info)))
+
+(def failures 0)
+
+(let ((show (equal? (otium.process/arguments) '("show"))))
+  (for ((c :in cases))
+    (let ((got (try
+                 (simplified (car c))
+                 (catch (error? problem) (list :error (condition-message problem))))))
+      (cond
+        (show (write got) (newline))
+        ((not (equal? got (car (cdr c))))
+         (set! failures (+ failures 1))
+         (print "FAIL ")
+         (write (car c))
+         (newline)
+         (print "  got ")
+         (write got)
+         (newline)))))
+  (println (str "checked " (length cases) " cases, " failures " failures"))
+  (exit (if (= failures 0)
+            0
+            1)))

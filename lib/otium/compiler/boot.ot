@@ -112,7 +112,7 @@
 
 (def standard-modules
   '(otium.loop otium.compiler.options otium.compiler.known otium.compiler.convert
-    otium.compiler.rescope otium.compiler.ir otium.compiler.lower otium.compiler.alloc otium.compiler.emit otium.compiler.fasl otium.compiler))
+    otium.compiler.rescope otium.compiler.ir otium.compiler.inline otium.compiler.lower otium.compiler.alloc otium.compiler.emit otium.compiler.fasl otium.compiler))
 
 ;; The standard boot file: the expander, core, and the compiler's modules.
 (def (build-standard out library primitives)

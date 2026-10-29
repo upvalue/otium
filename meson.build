@@ -64,7 +64,8 @@ if native_enabled
     'c/src/primitives.ot', 'lib/otium/compiler.ot', 'lib/otium/compiler/convert.ot',
     'lib/otium/compiler/lower.ot', 'lib/otium/compiler/alloc.ot', 'lib/otium/compiler/emit.ot',
     'lib/otium/compiler/fasl.ot', 'lib/otium/compiler/boot.ot', 'lib/otium/compiler/known.ot',
-    'lib/otium/compiler/options.ot', 'lib/otium/compiler/rescope.ot', 'lib/otium/compiler/ir.ot')
+    'lib/otium/compiler/options.ot', 'lib/otium/compiler/rescope.ot', 'lib/otium/compiler/ir.ot',
+    'lib/otium/compiler/inline.ot')
   boot_command = [otium, '--c.vm', '--no-project', '-L', source_root / 'lib', '-e',
     '(require otium.compiler.boot :as boot) (boot/build-standard "@OUTPUT@" "@0@" "@1@") (exit 0)'.format(
       source_root / 'lib', source_root / 'c/src/primitives.ot')]

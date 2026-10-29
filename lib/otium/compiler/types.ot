@@ -239,7 +239,8 @@
     ((:call) (put! node 2 (walk st (get node 2) env)) (walk-all st (get node 3) env) (typed st t-any node))
     ((:gcall)
      (let ((types (walk-all st (get node 3) env)))
-       (known-result st (core-builtin (get node 2)) (get node 3) types env node)))
+       (or (declared-check st node types env)
+           (known-result st (core-builtin (get node 2)) (get node 3) types env node))))
     ((:known) (let ((types (walk-all st (get node 4) env))) (known-result st (get node 2) (get node 4) types env node)))
     ((:bcall) (walk-all st (get node 3) env) (typed st t-any node))
     ((:gprim)
@@ -270,6 +271,23 @@
     (dotimes (i (length vars))
       (put! inits i (walk st (get inits i) env))
       (set-var! env (get vars i) (st :type)))))
+
+;; A call of otium.core/%declared, which declare and the expand to, or nil
+;; for any other call. Afterwards its value, and the local it checks, have the
+;; declared type. When the value's type is already proven, the call becomes
+;; its argument, which still runs.
+(def (declared-check st node types env)
+  (let ((args (get node 3)))
+    (when (and (= (length args) 3) (%native-core-cell? (get node 2)) (%core-locked?)
+               (= (get node 2) (%native-cell 'otium.core/%declared))
+               (eq? (get (get args 1) 0) :const) (get named (get (get args 1) 2)))
+      (let ((u (type-named (get (get args 1) 2))) (t (get types 0)) (arg (get args 0)))
+        (if (and (within? t u) (rewrite? st "types:declared" node))
+            (typed st t arg)
+            (let ((m (meet t u)))
+              (when (and (eq? (get arg 0) :lref) (tracked? (get arg 2)) (not (= m 0)))
+                (set-var! env (get arg 2) (meet (var-type env (get arg 2)) u)))
+              (typed st (if (= m 0) u m) node)))))))
 
 ;; The builtin a call of a global names, when it's a cell of locked core.
 (def (core-builtin cell)

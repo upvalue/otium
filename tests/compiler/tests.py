@@ -73,3 +73,10 @@ def verify_mode(t):
         verified = t.expect(t.otium(program, env=env), status=plain.status)
         t.check(verified.stdout == plain.stdout and verified.stderr == plain.stderr,
                 f'{program.name}: output differs with verifying')
+
+
+@test('compiler inline pass')
+def inline_pass(t):
+    """Hand-written trees through the inline pass, text in and text out."""
+    t.expect(t.otium('--no-project', '-L', LIB, ROOT / 'tests/compiler/inline-check.ot'),
+             contains=[' 0 failures'])

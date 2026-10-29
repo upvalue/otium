@@ -1,0 +1,566 @@
+;; inline.ot -- inlining, folding, copy propagation and dead code, on local code.
+;;
+;; One walk over a unit's tree, (simplify s node ctx), returns the node to use
+;; instead. ctx is how the value is used: :value, :test (only its truth), or
+;; :effect (thrown away). It follows Chez's cp0 at a smaller scale. See
+;; scratch/optimizer-design.md, section 5.6.
+;;
+;; What it does:
+;;
+;;   - a call of a local bound by let or a body definition to a fn, never
+;;     assigned, or of a fn written in place, becomes a let binding the
+;;     parameters to the arguments around a copy of the body;
+;;   - a let variable bound to a constant, or to another unassigned local, is
+;;     replaced by it;
+;;   - an unused binding is dropped when its initializer has no effects, and
+;;     kept for its effects when it has;
+;;   - a call of a :foldable builtin with constant arguments is run now, and
+;;     left alone when it raises;
+;;   - an if with a constant test keeps one branch; values thrown away are
+;;     dropped when they have no effects.
+;;
+;; Function records are simplified in place; other nodes are rebuilt. The
+;; pass leaves :captures and the variables' flags stale: run rescope after.
+;;
+;; Limits: an inline attempt that grows past its size limit raises an abort,
+;; and the call stays. A unit has an effort limit, after which nothing more
+;; is inlined. A function isn't inlined into itself, and functions that refer
+;; to themselves or take optional or rest parameters aren't inlined.
+
+(ns otium.compiler.inline
+  (:require (otium.compiler.convert :as cv) (otium.compiler.ir :as ir) (otium.compiler.known :as known)))
+
+;; --- State -------------------------------------------------------------------
+
+;; The walk's state: :env maps variable ids to bindings, :refs counts the
+;; references to each variable the result keeps, :fn is the function being
+;; simplified, :effort the steps left for inlining, :attempt the innermost
+;; inline attempt ({:size :limit}) or nil, :inlining the functions being
+;; inlined, innermost first.
+;;
+;; A binding is {:kind kind ...}: :const with :value a constant node, :copy
+;; with :value an lref to put in its place, :fn with :value a [:fn] node to
+;; inline from, :pending for a body definition not yet run, and :opaque.
+
+(def- base-effort 2000)
+
+(def (inline info)
+  (let ((s {:env {}
+            :refs {}
+            :fn info
+            :effort (+ base-effort (* 4 (node-size (info :body))))
+            :attempt nil
+            :inlining '()}))
+    (simplify-function s info)
+    info))
+
+(def (binding s var)
+  (get (s :env) (var :id)))
+
+(def (bind! s var b)
+  (put! (s :env) (var :id) b))
+
+(def (refs s var)
+  (get (s :refs) (var :id) 0))
+
+(def (count-ref! s var)
+  (put! (s :refs) (var :id) (+ (refs s var) 1)))
+
+;; The nodes directly inside node; for a fn, its defaults and body.
+(def (children node)
+  (let ((out []))
+    (def (add! x)
+      (when (array? x)
+        (if (keyword? (get x 0))
+            (push! out x)
+            (for ((y :in x))
+              (add! y)))))
+    (if (eq? (get node 0) :fn)
+        (let ((info (get node 2)))
+          (for ((pair :in (info :optionals)))
+            (push! out (get pair 1)))
+          (push! out (info :body)))
+        (for ((i :range 2 (length node)))
+          (add! (get node i))))
+    out))
+
+;; Nodes in a tree, counting functions' bodies.
+(def (node-size node)
+  (if (memq (get node 0) '(:const :lref :gref :unbound))
+      1
+      (let ((n 1))
+        (for ((c :in (children node)))
+          (set! n (+ n (node-size c))))
+        n)))
+
+;; --- Facts about nodes -----------------------------------------------------------
+
+(def (const? node)
+  (eq? (get node 0) :const))
+
+(def (truthy? value)
+  (not (or (nil? value) (eq? value #f))))
+
+(def (nothing off)
+  [:const off nil])
+
+;; An lref that can stand for its variable anywhere in the variable's scope:
+;; no initialization check, never assigned, not a loop's name.
+(def (copyable? node)
+  (and (eq? (get node 0) :lref) (not (get node 3)) (let ((var (get node 2))) (not (or (var :assigned) (var :loop))))))
+
+;; The table entry for a :prim or :known node.
+(def (entry-of node)
+  (known/entry (get node 2)))
+
+(def (flag? e flag)
+  (and e (memq flag (or (e :flags) '())) #t))
+
+;; Whether evaluating node can do nothing but produce its value: no effects,
+;; no raise.
+(def (effect-free? node)
+  (case (get node 0)
+    ((:const :fn :unbound) #t)
+    ((:lref) (not (get node 3)))
+    ((:prim) (and (flag? (entry-of node) :flushable) (all? effect-free? (get node 3))))
+    ((:known) (and (flag? (entry-of node) :flushable) (all? effect-free? (get node 4))))
+    ((:if) (and (effect-free? (get node 2)) (effect-free? (get node 3)) (effect-free? (get node 4))))
+    ((:seq) (all? effect-free? (get node 2)))
+    ((:let) (and (all? effect-free? (get node 3)) (effect-free? (get node 4))))
+    (else #f)))
+
+(def (all? pred nodes)
+  (let loop ((i 0)) (or (= i (length nodes)) (and (pred (get nodes i)) (loop (+ i 1))))))
+
+;; What of node to evaluate when its value isn't needed, or nil for nothing.
+(def (drop-value node)
+  (cond
+    ((effect-free? node) nil)
+    ((and (eq? (get node 0) :prim) (flag? (entry-of node) :flushable)) (sequence (get node 1) (get node 3) nil))
+    ((and (eq? (get node 0) :known) (flag? (entry-of node) :flushable)) (sequence (get node 1) (get node 4) nil))
+    (else node)))
+
+;; A node evaluating nodes for their effects, then last (nil for nothing).
+(def (sequence off nodes last)
+  (let ((out []))
+    (for ((n :in nodes))
+      (let ((d (drop-value n))) (when d (splice! out d))))
+    (when last (splice! out last))
+    (cond
+      ((= (length out) 0)
+       (if last
+           last
+           nil))
+      ((= (length out) 1) (get out 0))
+      (else [:seq off out]))))
+
+(def (splice! out node)
+  (if (eq? (get node 0) :seq)
+      (for ((n :in (get node 2)))
+        (push! out n))
+      (push! out node)))
+
+;; [effects constant] when node's value is a constant after some effects.
+(def (constant-after node)
+  (case (get node 0)
+    ((:const) [[] node])
+    ((:seq)
+     (let ((nodes (get node 2)))
+       (let ((last (get nodes (- (length nodes) 1))))
+         (when (const? last) [(list-to-array (take (- (length nodes) 1) (array-to-list nodes))) last]))))
+    (else nil)))
+
+;; --- Folding -----------------------------------------------------------------
+
+;; Constants a fold may take and give: no mutable objects, which a fold would
+;; turn into one object shared by every evaluation.
+(def (atom? x)
+  (or (number? x) (boolean? x) (nil? x) (char? x) (keyword? x) (symbol? x) (string? x) (null? x)))
+
+(def- procedures {})
+
+(def (procedure-of name)
+  (or (get procedures name)
+      (let ((p (eval (string->symbol (str "otium.core/" name)))))
+        (put! procedures name p)
+        p)))
+
+;; The constant node a call of the builtin name on args folds to, or nil.
+(def (fold off name args)
+  (let ((e (known/entry name)))
+    (when (and (flag? e :foldable) (all? const? args))
+      (let ((values (map (fn (a) (get a 2)) (array-to-list args))))
+        ;; Strings and floats can be equal without being one object; which
+        ;; ones are depends on how literals are stored.
+        (when (and (all? atom? (list-to-array values))
+                   (not (and (eq? name 'eq?) (find (fn (v) (or (string? v) (float? v))) values))))
+          (let ((result (try
+                          [(apply (procedure-of name) values)]
+                          (catch _ nil))))
+            (when (and result (atom? (get result 0)) (not (and (string? (get result 0)) (flag? e :allocates))))
+              [:const off (get result 0)])))))))
+
+;; --- The walk ----------------------------------------------------------------
+
+(def (step! s)
+  (put! s :effort (- (s :effort) 1))
+  (let ((a (s :attempt)))
+    (when a
+      (put! a :size (+ (a :size) 1))
+      (when (> (a :size) (a :limit)) (error abort-message a)))))
+
+(def- abort-message "inline: over the size limit")
+
+(def (abort? c)
+  (and (error? c) (equal? (condition-message c) abort-message)))
+
+(def (simplify s node ctx)
+  (step! s)
+  (let ((off (get node 1)))
+    (case (get node 0)
+      ((:const)
+       (if (eq? ctx :effect)
+           (nothing off)
+           node))
+      ((:lref) (simplify-ref s node ctx))
+      ((:lset) (simplify-set s node))
+      ((:gref :unbound :evaluator :class-object) node)
+      ((:gset :gdef) [(get node 0) off (get node 2) (simplify s (get node 3) :value)])
+      ((:if) (simplify-if s node ctx))
+      ((:seq) (simplify-seq s off (get node 2) ctx))
+      ((:let) (simplify-let s off (get node 2) (get node 3) (get node 4) ctx))
+      ((:fn)
+       (if (eq? ctx :effect)
+           (nothing off)
+           (begin
+             (simplify-function s (get node 2))
+             node)))
+      ((:call) (simplify-call s node ctx))
+      ((:prim)
+       (let ((args (simplify-all s (get node 3))))
+         (or (fold off (get node 2) args) (result [:prim off (get node 2) args] ctx))))
+      ((:known)
+       (let ((args (simplify-all s (get node 4))))
+         (or (fold off (get node 2) args) (result [:known off (get node 2) (get node 3) args (get node 5)] ctx))))
+      ((:gprim) [:gprim off (get node 2) (get node 3) (simplify-all s (get node 4))])
+      ((:gcall :bcall)
+       (let ((new (copy node)))
+         (put! new 3 (simplify-all s (get node 3)))
+         new))
+      ((:loop) [:loop off (get node 2) (simplify-all s (get node 3)) (simplify s (get node 4) :value)])
+      ((:recur) [:recur off (get node 2) (simplify-all s (get node 3))])
+      ((:while) [:while off (simplify s (get node 2) :test) (simplify s (get node 3) :effect)])
+      ((:try)
+       [:try off
+        (simplify s (get node 2) :value)
+        (get node 3)
+        (list-to-array (map (fn (clause)
+                              [(and (get clause 0) (simplify s (get clause 0) :value))
+                               (get clause 1)
+                               (simplify s (get clause 2) :value)])
+                            (array-to-list (get node 4))))])
+      ((:cleanup)
+       (let ((f (simplify s (get node 2) :value))) [:cleanup off f (get node 3) (simplify s (get node 4) :value)]))
+      ((:handlers :params :restarts)
+       (let ((clauses (list-to-array (map (fn (clause) (simplify-all s clause)) (array-to-list (get node 2))))))
+         [(get node 0) off clauses (simplify s (get node 3) :value)]))
+      ((:make-param) [:make-param off (simplify s (get node 2) :value) (simplify s (get node 3) :value)])
+      (else (error "inline: unknown node" (get node 0))))))
+
+(def (simplify-all s nodes)
+  (list-to-array (map (fn (n) (simplify s n :value)) (array-to-list nodes))))
+
+;; A call whose value is thrown away keeps only what has effects.
+(def (result node ctx)
+  (if (eq? ctx :effect)
+      (or (drop-value node) (nothing (get node 1)))
+      node))
+
+(def (simplify-function s info)
+  (let ((outer (s :fn)))
+    (put! s :fn info)
+    (for ((pair :in (info :optionals)))
+      (put! pair 1 (simplify s (get pair 1) :value)))
+    (put! info :body (simplify s (info :body) :value))
+    (put! s :fn outer)))
+
+(def (simplify-ref s node ctx)
+  (let ((var (get node 2)))
+    (let ((b (and (not (var :assigned)) (binding s var))))
+      (cond
+        ((and b (eq? (b :kind) :const))
+         (if (eq? ctx :effect)
+             (nothing (get node 1))
+             [:const (get node 1) (get (b :value) 2)]))
+        ((and b (eq? (b :kind) :copy))
+         (let ((target (b :value))) (simplify s [:lref (get node 1) (get target 2) #f] ctx)))
+        ((and (eq? ctx :effect) (not (get node 3))) (nothing (get node 1)))
+        (else (count-ref! s var) node)))))
+
+;; An assignment, or the one that runs a body definition.
+(def (simplify-set s node)
+  (let ((var (get node 2))
+        (value (simplify s (get node 3) :value)))
+    (let ((b (binding s var))
+          (new [:lset (get node 1) var value]))
+      (if (and b (eq? (b :kind) :pending) (not (var :assigned)))
+          (begin
+            (put! b :kind (kind-of value))
+            (put! b :value value)
+            (put! b :lset new))
+          (count-ref! s var))
+      new)))
+
+;; How a variable bound to the simplified node can be replaced.
+(def (kind-of node)
+  (cond
+    ((const? node) :const)
+    ((copyable? node) :copy)
+    ((eq? (get node 0) :fn) :fn)
+    (else :opaque)))
+
+(def (simplify-if s node ctx)
+  (let ((off (get node 1))
+        (test (simplify s (get node 2) :test)))
+    (let ((known (constant-after test)))
+      (if known
+          (sequence off
+                    (get known 0)
+                    (simplify s
+                              (get node
+                                   (if (truthy? (get (get known 1) 2))
+                                       3
+                                       4))
+                              ctx))
+          (let ((then (simplify s (get node 3) ctx))
+                (else (simplify s (get node 4) ctx)))
+            (cond
+              ((and (eq? ctx :effect) (effect-free? then) (effect-free? else)) (or (drop-value test) (nothing off)))
+              ((and (eq? ctx :test) (const? then) (truthy? (get then 2)) (const? else) (not (truthy? (get else 2))))
+               test)
+              (else [:if off test then else])))))))
+
+(def (simplify-seq s off nodes ctx)
+  (let ((out [])
+        (n (length nodes)))
+    (dotimes (i n)
+      (let ((last (= i (- n 1))))
+        (let ((x (simplify s
+                           (get nodes i)
+                           (if last
+                               ctx
+                               :effect))))
+          (if (eq? (get x 0) :seq)
+              (for ((y :in (get x 2)))
+                (push! out y))
+              (push! out x)))))
+    (let ((kept []))
+      (dotimes (i (length out))
+        (let ((x (get out i)))
+          (unless (and (effect-free? x) (or (< i (- (length out) 1)) (eq? ctx :effect))) (push! kept x))))
+      (cond
+        ((= (length kept) 0) (nothing off))
+        ((= (length kept) 1) (get kept 0))
+        (else [:seq off kept])))))
+
+;; --- let ---------------------------------------------------------------------
+
+;; Initializers are simplified in order, except fns, which wait until the
+;; body shows whether they are used other than by being inlined. Then from
+;; the last binding back, since an initializer may use earlier variables:
+;; a used binding is kept, an unused one is dropped or kept for its effects.
+;; ready, when given, says which inits are simplified already.
+(def (simplify-let s off vars inits body ctx &optional (ready nil))
+  (let ((n (length vars))
+        (values (list-to-array (map (fn (_) nil) (array-to-list vars))))
+        (defs #f))
+    (dotimes (i n)
+      (let ((var (get vars i))
+            (init (get inits i)))
+        (cond
+          ((and ready (get ready i))
+           (put! values i init)
+           (bind! s
+                  var
+                  {:kind (if (var :assigned)
+                             :opaque (kind-of init))
+                   :value init}))
+          ((eq? (get init 0) :unbound)
+           (set! defs #t)
+           (put! values i init)
+           (bind! s
+                  var
+                  {:kind (if (var :assigned)
+                             :opaque
+                             :pending)}))
+          ((var :assigned) (put! values i (simplify s init :value)) (bind! s var {:kind :opaque}))
+          ((eq? (get init 0) :fn) (bind! s var {:kind :fn :value init}))
+          ((copyable? init) (put! values i init) (bind! s var {:kind :copy :value init}))
+          (else (let ((value (simplify s init :value)))
+                  (put! values i value)
+                  (bind! s var {:kind (kind-of value) :value value}))))))
+    (let ((body (simplify s body ctx))
+          (segments '()))
+      (when defs (set! body (drop-definitions s vars body)))
+      (let loop ((i (- n 1)))
+        (when (>= i 0)
+          (let ((var (get vars i))
+                (value (get values i)))
+            (cond
+              ((> (refs s var) 0)
+               (when (or (nil? value) (eq? ((binding s var) :kind) :copy))
+                 (set! value (simplify s (get inits i) :value)))
+               (set! segments (cons [:bind var value] segments)))
+              ((nil? value) nil)
+              ((eq? (get value 0) :unbound)
+               (unless ((binding s var) :dropped) (set! segments (cons [:bind var value] segments))))
+              (else (let ((d (drop-value value))) (when d (set! segments (cons [:effect d] segments)))))))
+          (loop (- i 1))))
+      (build-let off segments body))))
+
+;; Body definitions no one refers to, whose definitions have no effects: the
+;; assignment that runs each is taken out of the body's sequence.
+(def (drop-definitions s vars body)
+  (let ((dropped []))
+    (for ((var :in vars))
+      (let ((b (binding s var)))
+        (when (and (= (refs s var) 0) (b :lset) (effect-free? (get (b :lset) 3)))
+          (cond
+            ((eq? body (b :lset)) (put! b :dropped #t) (set! body (nothing (get body 1))))
+            ((and (eq? (get body 0) :seq) (memq (b :lset) (array-to-list (get body 2))))
+             (put! b :dropped #t)
+             (push! dropped (b :lset)))))))
+    (if (and (> (length dropped) 0) (eq? (get body 0) :seq))
+        (let ((nodes (get body 2))
+              (kept []))
+          (dotimes (i (length nodes))
+            (let ((x (get nodes i)))
+              (cond
+                ((not (memq x (array-to-list dropped))) (push! kept x))
+                ((= i (- (length nodes) 1)) (push! kept (nothing (get x 1)))))))
+          (cond
+            ((= (length kept) 1) (get kept 0))
+            (else [:seq (get body 1) kept])))
+        body)))
+
+;; Segments in order, [:bind var init] or [:effect node], around body.
+;; Neighbouring bindings share a let.
+(def (build-let off segments body)
+  (let ((r body)
+        (vars '())
+        (inits '()))
+    (def (close!)
+      (unless (null? vars)
+        (set! r [:let off (list-to-array vars) (list-to-array inits) r])
+        (set! vars '())
+        (set! inits '())))
+    (for ((seg :in (reverse segments)))
+      (if (eq? (get seg 0) :bind)
+          (begin
+            (set! vars (cons (get seg 1) vars))
+            (set! inits (cons (get seg 2) inits)))
+          (begin
+            (close!)
+            (set! r (sequence off [(get seg 1)] r)))))
+    (close!)
+    r))
+
+;; --- Calls and inlining ----------------------------------------------------------
+
+;; The [:fn] node a callee stands for, or nil.
+(def (callee-fn s node)
+  (case (get node 0)
+    ((:fn) node)
+    ((:lref)
+     (let ((var (get node 2)))
+       (let ((b (and (not (var :assigned)) (not (get node 3)) (binding s var))))
+         (when b
+           (case (b :kind)
+             ((:fn) (b :value))
+             ((:copy) (callee-fn s (b :value)))
+             (else nil))))))
+    (else nil)))
+
+;; A call of a fn to inline. Its arguments are simplified first, outside the
+;; attempt, apart from fns and copies, which the let binding the parameters
+;; handles.
+(def (simplify-call s node ctx)
+  (let ((f (callee-fn s (get node 2)))
+        (args (get node 3)))
+    (if (and f (inlinable? s (get f 2) args))
+        (let ((ready (list-to-array (map (fn (a) (not (or (eq? (get a 0) :fn) (copyable? a)))) (array-to-list args)))))
+          (let ((prepared (map (fn (i)
+                                 (if (get ready i)
+                                     (simplify s (get args i) :value)
+                                     (get args i)))
+                               (range (length args)))))
+            (or (try-inline s node (get f 2) prepared ready ctx)
+                [:call (get node 1)
+                 (simplify s (get node 2) :value)
+                 (map (fn (i)
+                        (if (get ready i)
+                            (get prepared i)
+                            (simplify s (get args i) :value)))
+                      (range (length args)))
+                 (get node 4)])))
+        [:call (get node 1) (simplify s (get node 2) :value) (simplify-all s args) (get node 4)])))
+
+(def (inlinable? s info args)
+  (and (> (s :effort) 0)
+       (= (length (info :optionals)) 0)
+       (nil? (info :rest))
+       (= (length (info :params)) (length args))
+       (not (memq info (s :inlining)))
+       (not (and (info :self) (mentions? (info :body) (info :self))))))
+
+;; Whether node refers to var, inside functions too.
+(def (mentions? node var)
+  (if (and (memq (get node 0) '(:lref :lset)) (eq? (get node 2) var))
+      #t
+      (let ((cs (children node)))
+        (let loop ((i 0)) (and (< i (length cs)) (or (mentions? (get cs i) var) (loop (+ i 1))))))))
+
+;; (f a ...) as (let ((x a) ...) body), simplified, with a copy of f's body
+;; in the calling function. nil when it grows past the size limit.
+(def (try-inline s node info args ready ctx)
+  (let ((owner (s :fn))
+        (renames {})
+        (params []))
+    (for ((v :in (info :params)))
+      (let ((new (cv/make-var (v :name) owner #t)))
+        (for ((key :in '(:captured :assigned :early)))
+          (when (v key) (put! new key (v key))))
+        (put! renames (v :id) new)
+        (push! params new)))
+    (let ((body (ir/copy-node (info :body) owner renames))
+          (outer (s :attempt))
+          (attempt {:size 0 :limit (+ 40 (* 2 (node-size node)))}))
+      (unless (get node 4) (untail! body))
+      (put! s :attempt attempt)
+      (put! s :inlining (cons info (s :inlining)))
+      (let ((done (try
+                    (simplify-let s (get node 1) params args body ctx ready)
+                    (catch (abort? _) nil))))
+        (put! s :attempt outer)
+        (put! s :fn owner)
+        (put! s :inlining (cdr (s :inlining)))
+        (when (and done outer)
+          (put! outer :size (+ (outer :size) (attempt :size)))
+          (when (> (outer :size) (outer :limit)) (error abort-message outer)))
+        done))))
+
+;; Clear the tail flags of calls in tail position of node, which moves out of
+;; tail position.
+(def (untail! node)
+  (case (get node 0)
+    ((:if) (untail! (get node 3)) (untail! (get node 4)))
+    ((:seq) (untail! (get (get node 2) (- (length (get node 2)) 1))))
+    ((:let :loop) (untail! (get node 4)))
+    ((:try)
+     (for ((clause :in (get node 4)))
+       (untail! (get clause 2))))
+    ((:call) (put! node 4 #f))
+    ((:gcall) (put! node 4 #f) (when (= (length node) 7) (put! node 6 #f)))
+    ((:bcall) (put! node 4 #f) (put! node 6 #f))
+    ((:known) (put! node 5 #f))
+    (else nil)))

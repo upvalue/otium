@@ -642,6 +642,8 @@
 ;; functions.
 (def (inline-core s node ctx)
   (let ((info (core-function node)) (args (get node 3)))
+    (when (and info options/notes? (not (inlinable? s info args)))
+      (not-inlined s node info (why-not s info args)))
     (when (and info (inlinable? s info args))
       (let ((ready (list-to-array (map (fn (a) (not (or (eq? (get a 0) :fn) (copyable? a)))) (array-to-list args)))))
         (let ((prepared (map (fn (i)
@@ -651,12 +653,27 @@
                              (range (length args)))))
           (or (try-inline s node info prepared ready ctx)
               (let ((new (copy node)))
+                (not-inlined s node info "it would grow past the size limit")
                 (put! new 3 (map (fn (i)
                                    (if (get ready i)
                                        (get prepared i)
                                        (simplify s (get args i) :value)))
                                  (range (length args))))
                 new)))))))
+
+;; A note that a call of a core function wasn't inlined, unless this is
+;; inside an inline attempt, whose copy may be thrown away.
+(def (not-inlined s node info why)
+  (when (and options/notes? (nil? (state-attempt s)))
+    (options/note! (get node 1) (str "`" (cv/fn-name info) "` isn't inlined: " why))))
+
+;; Why inlinable? said no.
+(def (why-not s info args)
+  (cond ((<= (state-effort s) 0) "this unit's inlining effort ran out")
+        ((or (> (length (cv/fn-optionals info)) 0) (cv/fn-rest info)) "it takes optional or rest arguments")
+        ((not (= (length (cv/fn-params info)) (length args))) "it's called with the wrong number of arguments")
+        ((memq info (state-inlining s)) "it's being inlined here already")
+        (else "it calls itself")))
 
 ;; (f a ...) as (let ((x a) ...) body), simplified, with a copy of f's body
 ;; in the calling function. nil when it grows past the size limit, or the

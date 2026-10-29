@@ -57,3 +57,14 @@
       (if (and (int? n) (>= n 0)) n 100))))
 
 (def (scaled n) (quotient (* n inline-budget) 100))
+
+;; Efficiency notes (design 5.10): when on, the passes record where they left
+;; code slow and why, as [offset text] pairs. Off, they cost one test.
+(def notes? #f)
+
+(def notes [])
+
+(def (set-notes! on?) (set! notes? on?))
+
+(def (note! off text)
+  (when notes? (push! notes [off text])))

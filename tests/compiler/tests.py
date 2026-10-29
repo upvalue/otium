@@ -134,3 +134,19 @@ def inline_pass(t):
     t.expect(t.otium('--no-project', '-L', LIB, ROOT / 'tests/compiler/inline-check.ot',
                      env={'OTIUM_OPT_INLINE_BUDGET': '100'}),
              contains=[' 0 failures'])
+
+
+@test('compiler notes')
+def notes(t):
+    """otium compile --notes reports generic arithmetic, checks and closures
+    in loops, and calls left out of inlining, without running the program."""
+    if os.environ.get('OTIUM_VM'):
+        return
+    fixture = ROOT / 'tests/compiler/notes.ot'
+    out = t.expect(t.otium('--no-project', '-L', LIB, ROOT / 'lib/otium/tools/compile.ot', '--', '--notes', fixture),
+                   contains=[f'{fixture}:7:15: note: `cdr` checks for a pair each time round this loop',
+                             f'{fixture}:7:26: note: `+` stays generic: the first operand is a number',
+                             f'{fixture}:11:42: note: a closure is made each time round this loop',
+                             f'{fixture}:13:15: note: `inc` isn\'t inlined: it\'s called with the wrong number of arguments'])
+    t.check('not run' not in out.stdout, 'the program ran', out.stdout)
+

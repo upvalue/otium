@@ -1,0 +1,15 @@
+;; Input for the compiler notes test: each definition leaves one kind of note.
+
+(def (sum xs)
+  (let loop ((rest xs) (total 0))
+    (if (null? rest)
+        total
+        (loop (cdr rest) (+ total (car rest))))))
+
+(def (make-adders n)
+  (let loop ((i 0) (out '()))
+    (if (= i 10) out (loop (+ i 1) (cons (fn (y) (+ y n)) out)))))
+
+(def (bump x) (inc x 2))
+
+(println "not run")

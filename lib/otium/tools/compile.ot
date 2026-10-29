@@ -1,0 +1,59 @@
+;; otium compile --notes FILE...
+;; Compile each file with the native compiler and print where the optimizer
+;; left code slow, and why: arithmetic that stayed generic, checks and
+;; closures inside loops, and core functions that weren't inlined. Only
+;; definitions, ns and require are run, so later forms can use them; the
+;; program itself doesn't run.
+(require otium.process (otium.compiler :as nc) (otium.compiler.options :as options))
+
+;; Forms that are run as well as compiled, by the head written.
+(def- definitions
+  '(def def- defonce defparam defmacro defrecord defclass defabstract defgeneric defmethod ns require))
+
+(def (head form) (and (pair? form) (car form)))
+
+;; Line and column, from 1, of an offset into text.
+(def (position text offset)
+  (let loop ((i 0) (line 1) (start 0))
+    (cond ((or (>= i offset) (>= i (string-length text))) [line (+ 1 (- offset start))])
+          ((eq? (string-ref text i) #\newline) (loop (+ i 1) (+ line 1) (+ i 1)))
+          (else (loop (+ i 1) line start)))))
+
+(def (notes-for path)
+  (let ((text (read-file path)) (saved (current-ns)))
+    (%set-namespace 'user)
+    (for ((form :in (%read-forms text)))
+      (let ((h (head form)))
+        (unless (memq h '(ns require defmacro))
+          (options/set-notes! #t)
+          (try
+            (nc/compile-top (*expander* form))
+            (catch problem
+              (options/set-notes! #f)
+              (error problem)))
+          (options/set-notes! #f))
+        (when (memq h definitions)
+          (%native-evaluate form))))
+    (%set-namespace saved)
+    (let ((seen {}) (out []))
+      (for ((n :in (sort-by (fn (n) (get n 0)) options/notes)))
+        (let ((p (position text (get n 0))))
+          (let ((line (str path ":" (get p 0) ":" (get p 1) ": note: " (get n 1))))
+            (unless (get seen line)
+              (put! seen line #t)
+              (push! out line)))))
+      (while (> (length options/notes) 0) (pop! options/notes))
+      out)))
+
+(def (main arguments)
+  (if (or (null? arguments) (not (equal? (car arguments) "--notes")) (null? (cdr arguments)))
+      (begin
+        (otium.process/write-error "usage: otium compile --notes FILE...\n")
+        2)
+      (begin
+        (for ((path :in (cdr arguments)))
+          (for ((line :in (notes-for path)))
+            (println line)))
+        0)))
+
+(exit (main (otium.process/arguments)))

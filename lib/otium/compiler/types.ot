@@ -193,16 +193,33 @@
 ;; are still growing), type, the type of the node just walked, true and
 ;; false, the environments after a test, and backs, a loop variable's id to
 ;; the environments its recurs pass.
-(defrecord State (rewrite type true false backs))
+(defrecord State (rewrite type true false backs depth))
 
 (def (optimize info)
-  (let ((st (make-state :rewrite #t :type t-any :true nil :false nil :backs {})))
+  (let ((st (make-state :rewrite #t :type t-any :true nil :false nil :backs {} :depth 0)))
     (walk-function st info nil)
     info))
 
 (def (typed st t node)
   (set-state-type! st t)
   node)
+
+;; Walk a loop's body: notes say what happens each time round.
+(def (in-loop st thunk)
+  (set-state-depth! st (+ (state-depth st) 1))
+  (let ((out (thunk)))
+    (set-state-depth! st (- (state-depth st) 1))
+    out))
+
+;; A type, for a note.
+(def (type-text t)
+  (cond ((= t t-any) "not known")
+        ((= t t-fixnum) "a fixnum")
+        ((= t t-float) "a float")
+        ((= t t-number) "a number, fixnum or float")
+        ((within? t t-number) "a number")
+        ((= (meet t t-number) 0) "never a number")
+        (else "not known to be a fixnum")))
 
 (def (rewrite? st what node)
   (and (state-rewrite st) (options/rewrite? what (get node 1))))
@@ -214,7 +231,11 @@
         (set-var! env var (var-type outer var))))
     (for ((pair :in (cv/fn-optionals info)))
       (put! pair 1 (walk st (get pair 1) env)))
-    (cv/set-fn-body! info (walk st (cv/fn-body info) env))))
+    ;; A function's body runs once a call, whatever loop made the closure.
+    (let ((depth (state-depth st)))
+      (set-state-depth! st 0)
+      (cv/set-fn-body! info (walk st (cv/fn-body info) env))
+      (set-state-depth! st depth))))
 
 (def (walk-all st nodes env)
   (let ((types []))
@@ -235,6 +256,8 @@
     ((:seq) (let ((types (walk-all st (get node 2) env))) (typed st (get types (- (length types) 1)) node)))
     ((:let) (walk-let st node env) (put! node 4 (walk st (get node 4) env)) node)
     ((:fn)
+     (when (and (state-rewrite st) (> (state-depth st) 0) (> (length (cv/fn-captures (get node 2))) 0))
+       (options/note! (get node 1) "a closure is made each time round this loop"))
      ;; Closures can't change the variables walked here, so while a loop's
      ;; types are growing they can wait.
      (when (state-rewrite st) (walk-function st (get node 2) env))
@@ -358,12 +381,16 @@
     (let ((types (walk-all st args env)))
       (case name
         ((car cdr %car %cdr)
-         (when (and (memq name '(car cdr)) (within? (get types 0) t-pair) (rewrite? st (str "types:" name) node))
-           (put! node
-                 2
-                 (if (eq? name 'car)
-                     '%car
-                     '%cdr)))
+         (if (and (memq name '(car cdr)) (within? (get types 0) t-pair) (rewrite? st (str "types:" name) node))
+             (put! node
+                   2
+                   (if (eq? name 'car)
+                       '%car
+                       '%cdr))
+             (when (and options/notes? (memq name '(car cdr)) (state-rewrite st) (> (state-depth st) 0))
+               (options/note! (get node 1)
+                              (str "`" name "` checks for a pair each time round this loop: its argument "
+                                   (if (= (get types 0) t-any) "isn't known" "may not be a pair")))))
          (narrow-arguments! 'car args env)
          (typed st t-any node))
         ((cons) (typed st t-pair node))
@@ -371,6 +398,12 @@
          (let ((fixnums (and (within? (get types 0) t-fixnum) (within? (get types 1) t-fixnum))))
            (when (and fixnums (not (eq? name (get fixnum-ops name))) (rewrite? st (str "types:" name) node))
              (put! node 2 (get fixnum-ops name)))
+           (when (and (not fixnums) (state-rewrite st) options/notes?)
+             (options/note! (get node 1)
+                            (str "`" name "` stays generic: "
+                                 (if (within? (get types 0) t-fixnum)
+                                     (str "the second operand is " (type-text (get types 1)))
+                                     (str "the first operand is " (type-text (get types 0)))))))
            (typed st
                   (cond
                     ((memq name '(+ - * %fx+ %fx- %fx*))
@@ -584,7 +617,7 @@
         (set-state-rewrite! st rewrite)
         (put! (state-backs st) id [])
         (replace! env head)
-        (put! node 4 (walk st (get node 4) env))
+        (put! node 4 (in-loop st (fn () (walk st (get node 4) env))))
         (put! (state-backs st) id nil)
         node))))
 
@@ -608,7 +641,7 @@
       (put! node 2 (walk-test st (get node 2) env))
       (let ((t-env (state-true st))
             (f-env (state-false st)))
-        (when t-env (put! node 3 (walk st (get node 3) t-env)))
+        (when t-env (put! node 3 (in-loop st (fn () (walk st (get node 3) t-env)))))
         (replace! env f-env))
       (typed st t-nil node))))
 

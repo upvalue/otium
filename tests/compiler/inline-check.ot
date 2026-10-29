@@ -1,5 +1,6 @@
 ;; Pass tests for inline: each case is a tree in text form and the text the
-;; pass should turn it into, after rescope and the verifier.
+;; pass should turn it into, after rescope and the verifier, and :core when
+;; it needs core functions' stored bodies.
 ;;
 ;;   inline-check.ot           check every case
 ;;   inline-check.ot -- show   print what the pass gives for each case
@@ -251,7 +252,8 @@
     ((fn nil
        (a.1)
        (if (prim pair? a.1) (gcall otium.core/first a.1) a.1))
-     (fn nil (a.1) (if (prim pair? a.1) (prim car a.1) a.1)))
+     (fn nil (a.1) (if (prim pair? a.1) (prim car a.1) a.1))
+     :core)
     ;; An assigned variable has no facts.
     ((fn nil
        (a.1)
@@ -651,7 +653,9 @@
 (def failures 0)
 
 (let ((show (equal? (otium.process/arguments) '("show"))))
-  (for ((c :in cases))
+  ;; A case marked :core inlines a core function, whose stored body only a
+  ;; process started from a boot file has.
+  (for ((c :in (filter (fn (c) (or (%native?) (not (memq :core c)))) cases)))
     (let ((got (try
                  (simplified (car c))
                  (catch (error? problem) (list :error (condition-message problem))))))

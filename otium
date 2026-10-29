@@ -7,7 +7,7 @@ case "${1-}" in
     fmt)
         shift
         set -- --no-project "$root/lib/otium/tools/fmt.ot" -- "$@" ;;
-    lint|explain)
+    lint|explain|compile)
         tool=$1
         shift
         set -- "$root/lib/otium/tools/$tool.ot" -- "$@" ;;

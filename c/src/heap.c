@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #ifndef OTIUM_FREESTANDING
 #include <sys/mman.h>
 #endif
@@ -18,13 +19,25 @@ _Static_assert(OTI_LARGE_MIN <= OTI_BLOCK / 2, "medium objects fit a block");
 
 /* The most of the heap that may stay live after a collection before it grows,
  * as a percentage. Growth aims to bring it back to this. Lower means fewer
- * collections and more memory. */
-#define OTI_HEAP_LIVE_PERCENT 50
+ * collections and more memory. At 33 the heap still takes about two thirds of
+ * the memory the semispaces did at 50, which doubled as they grew. */
+#ifndef OTI_HEAP_LIVE_PERCENT
+#define OTI_HEAP_LIVE_PERCENT 33
+#endif
 
+/* Fresh blocks were taken from the free list since the last collection, so
+ * everything in them is young. */
 typedef struct {
   uint8_t state, mark;
+  bool fresh;
   uint16_t live_lines;
 } oti_block_info;
+
+/* Whether minor collections copy survivors out of fresh blocks, which leaves
+ * those blocks free and promoted objects packed together. */
+#ifndef OTI_EVACUATE_YOUNG
+#define OTI_EVACUATE_YOUNG 1
+#endif
 
 /* Evacuate marks a block whose objects are copied out as they are found;
  * quarantine holds freed blocks out of use for a while in root-checking
@@ -69,7 +82,9 @@ static inline oti_block_info* heap_block_info(const void* p) {
   return &heap_chunk_of(p)->blocks[heap_block_index(p)];
 }
 
-static inline uint8_t* heap_block_lines(const void* p) { return heap_chunk_of(p)->lines[heap_block_index(p)]; }
+static inline uint8_t* heap_block_lines(const void* p) {
+  return heap_chunk_of(p)->lines[heap_block_index(p)];
+}
 
 static inline unsigned char* heap_block_at(oti_chunk* c, size_t i) {
   return (unsigned char*)c + (i << OTI_BLOCK_BITS);
@@ -176,7 +191,8 @@ static unsigned char* heap_take_free_block(oti_heap* h) {
   if (h->blocks_used + reserve >= heap_block_cap(h)) return NULL;
   if (!h->free_blocks.count && !heap_add_chunk(h)) return NULL;
   unsigned char* block = h->free_blocks.items[--h->free_blocks.count];
-  *heap_block_info(block) = (oti_block_info){BLOCK_USED, 0, OTI_LINES_PER_BLOCK};
+  *heap_block_info(block) =
+      (oti_block_info){.state = BLOCK_USED, .fresh = true, .live_lines = OTI_LINES_PER_BLOCK};
   h->blocks_used++;
   return block;
 }
@@ -366,8 +382,8 @@ static bool heap_pop(oti_heap* h, ot_value* v) {
 static void heap_mark(oti_heap* h, ot_value v) {
   oti_object_header* o = heap_header(v);
   uint8_t epoch = (uint8_t)h->epoch;
-  o->gc = (o->gc & ~(OTI_GC_EPOCH | OTI_GC_RECLAIM)) | epoch |
-          (h->generational ? OTI_GC_UNLOGGED : 0);
+  o->gc =
+      (o->gc & ~(OTI_GC_EPOCH | OTI_GC_RECLAIM)) | epoch | (h->generational ? OTI_GC_UNLOGGED : 0);
   size_t size = o->size;
   h->marked_bytes += size;
   if (size < OTI_LARGE_MIN) {
@@ -444,12 +460,53 @@ static inline void heap_trace(oti_heap* h, ot_value* slot) {
 
 static void heap_trace_root(void* context, ot_value* slot) { heap_trace(context, slot); }
 
-static void heap_drain(oti_heap* h) {
+static void heap_drain_in_order(oti_heap* h) {
   ot_value v;
   while (heap_pop(h, &v)) {
     ot_value* fields = object_fields(v);
     for (uint32_t i = 0, n = heap_header(v)->fields; i < n; i++) heap_trace(h, &fields[i]);
   }
+}
+
+/* Tracing a field reads its referent's header, which in a heap bigger than
+ * the caches is usually a miss. Fields wait in a small ring after their
+ * referent is prefetched, so the misses overlap. Fields belong to objects
+ * already marked, which don't move. In a heap that fits the caches the ring
+ * only costs, so it waits for one of OTI_PREFETCH_HEAP bytes or more. */
+#define OTI_PREFETCH 8
+#define OTI_PREFETCH_HEAP (8u << 20)
+
+static void heap_drain_prefetching(oti_heap* h) {
+  ot_value* ring[OTI_PREFETCH];
+  size_t queued = 0, next = 0;
+  ot_value v;
+  for (;;) {
+    if (!heap_pop(h, &v)) {
+      if (!queued) return;
+      /* Tracing what's left may queue more objects. */
+      while (queued) {
+        heap_trace(h, ring[next]);
+        next = (next + 1) % OTI_PREFETCH;
+        queued--;
+      }
+      continue;
+    }
+    ot_value* fields = object_fields(v);
+    for (uint32_t i = 0, n = heap_header(v)->fields; i < n; i++) {
+      if (!value_is_ptr(fields[i])) continue;
+      __builtin_prefetch((void*)fields[i]);
+      if (queued == OTI_PREFETCH) {
+        heap_trace(h, ring[next]);
+        ring[next] = &fields[i];
+        next = (next + 1) % OTI_PREFETCH;
+      } else ring[(next + queued++) % OTI_PREFETCH] = &fields[i];
+    }
+  }
+}
+
+static void heap_drain(oti_heap* h) {
+  if (h->blocks_used * OTI_BLOCK + h->large_bytes >= OTI_PREFETCH_HEAP) heap_drain_prefetching(h);
+  else heap_drain_in_order(h);
 }
 
 /* Poison memory that is free after a sweep, so a pointer that missed a
@@ -551,7 +608,7 @@ static void heap_sweep(oti_heap* h) {
       bool current = heap_current(h, block);
       if (info->mark != epoch && !current) {
         memset(lines, 0, OTI_LINES_PER_BLOCK);
-        *info = (oti_block_info){BLOCK_FREE, 0, 0};
+        *info = (oti_block_info){.state = BLOCK_FREE};
         heap_poison(block, OTI_BLOCK);
 #ifdef OTIUM_CHECK_ROOTS
         heap_quarantine(h, block);
@@ -561,6 +618,7 @@ static void heap_sweep(oti_heap* h) {
         continue;
       }
       info->state = BLOCK_USED;
+      info->fresh = false;
       size_t live = 0, usable = 0;
       bool previous = false;
       for (size_t i = 0; i < OTI_LINES_PER_BLOCK; i++) {
@@ -592,8 +650,8 @@ static void heap_sweep(oti_heap* h) {
     free(l);
   }
   h->live_lines = live_lines;
-  h->defragment = h->blocks_used >= 8 && live_lines * OTI_LINE * 100 <
-                                             h->blocks_used * OTI_BLOCK * OTI_DEFRAG_PERCENT;
+  h->defragment = h->blocks_used >= 8 &&
+                  live_lines * OTI_LINE * 100 < h->blocks_used * OTI_BLOCK * OTI_DEFRAG_PERCENT;
 }
 
 size_t oti_heap_used(const oti_heap* h) {
@@ -629,11 +687,30 @@ static void heap_trace_remembered(oti_heap* h) {
   h->remembered_count = 0;
 }
 
+/* In a minor collection only young objects are traced, so evacuating fresh
+ * blocks moves young survivors and nothing else. Every pointer to one is in a
+ * root, a young object or a remembered old one, all of which get updated. */
+static void heap_select_young(oti_heap* h) {
+  size_t picked = 0;
+  for (oti_chunk* c = h->chunks; c; c = c->next)
+    for (size_t b = META_BLOCKS; b < OTI_BLOCKS_PER_CHUNK; b++) {
+      oti_block_info* info = &c->blocks[b];
+      if (info->state == BLOCK_USED && info->fresh && !heap_current(h, heap_block_at(c, b))) {
+        info->state = BLOCK_EVACUATE;
+        picked++;
+      }
+    }
+  h->evacuating = picked > 0;
+}
+
 /* --- Verification --------------------------------------------------------- */
 
-/* With OTIUM_GC_VERIFY set, every minor collection is checked against a
- * full trace: anything reachable that it left unmarked would be freed while
- * live, and points to a store that missed the write barrier. */
+/* With OTIUM_GC_VERIFY set, every collection is checked against a full
+ * trace of its own before sweeping. Everything reachable must be marked, with
+ * a sane header, and, unless it is large, on a marked line of a block in use.
+ * After a minor collection, something reachable but unmarked would be freed
+ * while live, which points to a store that missed the write barrier; after a
+ * major one, a forwarded object still reachable points to a missed root. */
 typedef struct {
   oti_heap* heap;
   uintptr_t* seen;
@@ -657,12 +734,38 @@ static bool heap_verify_visit(oti_verify* v, ot_value value) {
   }
   v->seen[i] = value;
   v->count++;
-  if ((heap_header(value)->gc & OTI_GC_EPOCH) != v->heap->epoch) {
+  oti_object_header* o = heap_header(value);
+  const char* problem = NULL;
+  if (o->gc & OTI_GC_FORWARDED) problem = "a forwarded object";
+  else if ((o->gc & OTI_GC_EPOCH) != v->heap->epoch) problem = "an unmarked object";
+  else if (o->size % 8 || !object_kind(value) ||
+           (size_t)((unsigned char*)object_bytes(value) - (unsigned char*)o) > o->size)
+    problem = "a bad header";
+  else if (o->size < OTI_LARGE_MIN) {
+    uint8_t state = heap_block_info(o)->state;
+    if (!oti_heap_contains(v->heap, value) || (state != BLOCK_USED && state != BLOCK_EVACUATE))
+      problem = "an object outside the blocks in use";
+    else if (heap_block_lines(o)[heap_line_index(o)] != v->heap->epoch)
+      problem = "an object on an unmarked line";
+  }
+  if (problem) {
     fprintf(stderr,
-            "otium: minor collection missed a live object of kind %u, field %zu of a kind %u "
+            "otium: collection left %s reachable, of kind %u, from field %zu of a kind %u "
             "object at %p\n",
-            object_kind(value), v->field, v->parent ? object_kind(v->parent) : 0,
+            problem, object_kind(value), v->field, v->parent ? object_kind(v->parent) : 0,
             (void*)v->parent);
+    fprintf(stderr, "  epoch %u; object %p gc %#x", v->heap->epoch, (void*)value, o->gc);
+    if (o->size < OTI_LARGE_MIN)
+      fprintf(stderr, " block state %u fresh %d", heap_block_info(o)->state,
+              heap_block_info(o)->fresh);
+    if (v->parent) {
+      oti_object_header* p = heap_header(v->parent);
+      fprintf(stderr, "; parent gc %#x", p->gc);
+      if (p->size < OTI_LARGE_MIN)
+        fprintf(stderr, " block state %u fresh %d", heap_block_info(p)->state,
+                heap_block_info(p)->fresh);
+    }
+    fputc('\n', stderr);
     abort();
   }
   if (v->work_count == v->work_capacity) {
@@ -709,11 +812,20 @@ enum { COLLECT_MINOR, COLLECT_MAJOR, COLLECT_DEFRAGMENT };
 
 /* The allocator's hole and overflow block survive a collection: nothing past
  * the cursor was allocated, so it is still free. A minor collection leaves
- * the epoch, so earlier survivors stay marked, and never moves anything. A
- * major one may evacuate the sparsest blocks if the last collection called
- * for it; a defragmenting one considers every block. Root-checking builds
+ * the epoch, so earlier survivors stay marked, and moves only young
+ * survivors out of fresh blocks. A major one may evacuate the sparsest blocks
+ * if the last collection called for it; a defragmenting one considers every
+ * block. Root-checking builds
  * make every collection major and move everything. */
+static uint64_t heap_nanoseconds(void) {
+  struct timespec t;
+  return clock_gettime(CLOCK_MONOTONIC, &t)
+             ? 0
+             : (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec;
+}
+
 static void heap_collect(oti_heap* h, int kind) {
+  uint64_t began = heap_nanoseconds();
   unsigned char *cursor = h->start ? h->start + h->used : NULL, *hole_end = h->hole_end;
   heap_end_hole(h);
 #ifdef OTIUM_CHECK_ROOTS
@@ -725,6 +837,7 @@ static void heap_collect(oti_heap* h, int kind) {
 #else
   if (kind == COLLECT_DEFRAGMENT || (kind == COLLECT_MAJOR && h->defragment))
     heap_select_evacuation(h, kind == COLLECT_DEFRAGMENT);
+  else if (kind == COLLECT_MINOR && OTI_EVACUATE_YOUNG) heap_select_young(h);
 #endif
   size_t used = oti_heap_used(h);
   if (used > h->peak_used) h->peak_used = used;
@@ -742,26 +855,42 @@ static void heap_collect(oti_heap* h, int kind) {
   if (minor) heap_trace_remembered(h);
   h->evacuating = false;
   h->evacuation = h->evacuation_end = NULL;
-  if (minor && h->verify) heap_verify(h);
+  if (h->verify) heap_verify(h);
   if (h->weak) h->weak(h->hook_data);
   heap_sweep(h);
   /* A minor collection only sees what it promotes; what was already old is
-   * counted as live until a major one says otherwise. */
+   * counted as live until a major one says otherwise. One that kept more
+   * than half of what was allocated since the last collection did a full
+   * one's work for little, so minor collections wait out a number of full
+   * ones that doubles each time that happens. */
+  size_t young = used > h->live_bytes ? used - h->live_bytes : 0;
   h->live_bytes = minor ? h->live_bytes + h->marked_bytes : h->marked_bytes;
   if (!minor) {
     size_t room = h->capacity > h->live_bytes ? h->capacity - h->live_bytes : 0;
     h->major_live = h->live_bytes + room / 2;
-  } else h->minor_collections++;
+    if (h->majors_before_minor) h->majors_before_minor--;
+  } else {
+    h->minor_collections++;
+    if (h->marked_bytes * 2 > young) {
+      h->minor_backoff = h->minor_backoff ? h->minor_backoff * 2 : 1;
+      if (h->minor_backoff > 64) h->minor_backoff = 64;
+      h->majors_before_minor = h->minor_backoff;
+    } else h->minor_backoff = 0;
+  }
   if (used > h->live_bytes) h->reclaimed_bytes += used - h->live_bytes;
   h->allocated_at_collection = h->allocated_bytes;
   h->collections++;
   if (cursor) heap_begin_hole(h, cursor, hole_end);
+  uint64_t pause = heap_nanoseconds() - began;
+  h->pause_nanoseconds += pause;
+  if (pause > h->longest_pause) h->longest_pause = pause;
 }
 
 /* Minor collections until promoted objects take up half the room the last
- * major one left. */
+ * major one left, unless they've stopped paying for themselves. */
 static int heap_next_collection(const oti_heap* h) {
-  return h->generational && !h->remembered_overflow && h->live_bytes < h->major_live
+  return h->generational && !h->remembered_overflow && h->live_bytes < h->major_live &&
+                 !h->majors_before_minor
              ? COLLECT_MINOR
              : COLLECT_MAJOR;
 }
@@ -856,8 +985,8 @@ static unsigned char* heap_place_after_collecting(oti_heap* h, size_t size) {
   size_t needed = h->live_bytes + size;
   if (needed > h->capacity / 100 * OTI_HEAP_LIVE_PERCENT && h->capacity < h->limit) {
     heap_grow(h, needed > h->limit / 100 * OTI_HEAP_LIVE_PERCENT
-                ? h->limit
-                : needed / OTI_HEAP_LIVE_PERCENT * 100);
+                     ? h->limit
+                     : needed / OTI_HEAP_LIVE_PERCENT * 100);
     size_t room = h->capacity - h->live_bytes;
     h->major_live = h->live_bytes + room / 2;
   }

@@ -149,6 +149,9 @@ typedef struct {
   bool generational, remembered_overflow, verify;
   ot_value* remembered;
   size_t remembered_count, remembered_capacity, major_live, minor_collections;
+  size_t minor_backoff, majors_before_minor;
+  /* Time spent collecting, and the longest collection, in nanoseconds. */
+  uint64_t pause_nanoseconds, longest_pause;
   /* Statistics. allocated_bytes counts finished holes, overflow and large
    * objects; the current hole's share is start + used - hole_start. */
   unsigned char* hole_start;

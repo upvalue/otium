@@ -1,0 +1,29 @@
+;; A large heap that stays live, like an editor's buffers and code, while the
+;; program keeps making short-lived garbage. Every full collection traces or
+;; copies the whole live heap; a minor one only what is new.
+
+(def (build n)
+  (let loop ((i 0) (acc '()))
+    (if (= i n) acc (loop (+ i 1) (cons (string-repeat "k" (remainder i 24)) acc)))))
+
+;; About 100 MB of pairs and strings that live to the end.
+(def kept (build 1500000))
+
+(def (churn n)
+  (let loop ((i 0) (acc '()))
+    (if (= i n) (length acc) (loop (+ i 1) (cons (* i 2) acc)))))
+
+;; Short-lived lists, with an occasional store of something new into the old
+;; structure, as an editor would.
+(def (run rounds)
+  (let loop ((r 0) (cell kept) (total 0))
+    (if (= r rounds)
+        total
+        (begin
+          (set-car! cell (string-repeat "n" (remainder r 24)))
+          (loop (+ r 1) (cdr cell) (+ total (churn 20000)))))))
+
+(def total (run 2000))
+(unless (= total 40000000) (error "wrong total" total))
+(unless (= (length kept) 1500000) (error "lost the live heap"))
+(print total)

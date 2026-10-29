@@ -562,8 +562,8 @@ ot_state* ot_create(size_t bytes, size_t stack_limit) {
   const char* stress = getenv("OTIUM_GC_STRESS");
   rt->stress_gc = stress && *stress && strcmp(stress, "0");
   const char* generational = getenv("OTIUM_GC_GENERATIONAL");
-  rt->heap.generational = generational && *generational ? strcmp(generational, "0") != 0
-                                                        : OTI_GENERATIONAL_DEFAULT;
+  rt->heap.generational =
+      generational && *generational ? strcmp(generational, "0") != 0 : OTI_GENERATIONAL_DEFAULT;
   const char* verify = getenv("OTIUM_GC_VERIFY");
   rt->heap.verify = verify && *verify && strcmp(verify, "0");
   rt->required_namespace = UINT32_MAX;
@@ -1187,6 +1187,8 @@ ot_stats ot_get_stats(const ot_state* rt) {
   const oti_heap* h = &rt->heap;
   ot_stats stats = {.collections = h->collections,
                     .minor_collections = h->minor_collections,
+                    .gc_microseconds = (size_t)(h->pause_nanoseconds / 1000),
+                    .gc_longest_microseconds = (size_t)(h->longest_pause / 1000),
                     .max_frames = rt->max_frames,
                     .heap_capacity = h->capacity,
                     .heap_limit = h->limit,
@@ -1194,8 +1196,8 @@ ot_stats ot_get_stats(const ot_state* rt) {
                     .heap_copied_bytes = h->copied_bytes,
                     .heap_reclaimed_bytes = h->reclaimed_bytes,
                     .heap_used = oti_heap_used(h),
-                    .heap_peak_used = oti_heap_used(h) > h->peak_used ? oti_heap_used(h)
-                                                                     : h->peak_used};
+                    .heap_peak_used =
+                        oti_heap_used(h) > h->peak_used ? oti_heap_used(h) : h->peak_used};
   oti_foreign_stats(rt, &stats);
   return stats;
 }

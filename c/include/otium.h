@@ -227,6 +227,8 @@ typedef struct {
   size_t collections, minor_collections, max_frames, heap_capacity, heap_limit;
   size_t heap_allocated_bytes, heap_copied_bytes, heap_reclaimed_bytes;
   size_t heap_used, heap_peak_used;
+  /* Time spent collecting and the longest collection, in microseconds. */
+  size_t gc_microseconds, gc_longest_microseconds;
   size_t libraries, bindings, signatures, memory_records, allocations, bytes;
   size_t callbacks, callback_records;
 } ot_stats;

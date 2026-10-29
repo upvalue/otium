@@ -220,15 +220,17 @@ TEST(minor_collections_trace_remembered_objects) {
   oti_heap_write(&h, live[0]);
   CHECK_EQ_INT(h.remembered_count, 1);
   live[1] = oti_heap_alloc(&h, 1, 1, 0);
-  ot_value garbage = oti_heap_alloc(&h, 1, 1, 0);
-  size_t minors = h.minor_collections;
+  CHECK(oti_heap_alloc(&h, 1, 1, 0));
+  size_t minors = h.minor_collections, used = oti_heap_used(&h);
   oti_heap_collect(&h);
   CHECK_EQ_INT(h.minor_collections, minors + 1);
   CHECK_EQ_INT(h.remembered_count, 0);
+  CHECK(oti_heap_used(&h) < used);
+  /* Young survivors may have moved; the old object and the root follow. */
+  young = object_fields(live[0])[0];
   CHECK((((oti_object_header*)young)->gc & OTI_GC_EPOCH) == h.epoch);
   CHECK((((oti_object_header*)live[1])->gc & OTI_GC_EPOCH) == h.epoch);
-  CHECK((((oti_object_header*)garbage)->gc & OTI_GC_EPOCH) != h.epoch);
-  CHECK(ot_to_int(object_fields(object_fields(live[0])[0])[0]) == 7);
+  CHECK(ot_to_int(object_fields(young)[0]) == 7);
   /* Promoted, so unlogged until the next store. */
   CHECK(((oti_object_header*)young)->gc & OTI_GC_UNLOGGED);
   oti_roots_pop(&h, &roots);

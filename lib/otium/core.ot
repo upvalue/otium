@@ -78,6 +78,55 @@ Includes runtime builtins, special forms, and the Otium prelude."
       value
       (error (str who ": expected integer"))))
 
+;; --- Declarations ------------------------------------------------------------
+
+;; The type names declare accepts, and their tests.
+(def- declared-types
+  {'fixnum int?
+   'float float?
+   'number number?
+   'pair pair?
+   'list (fn (x) (or (pair? x) (null? x)))
+   'boolean boolean?
+   'symbol symbol?
+   'keyword keyword?
+   'string string?
+   'char char?
+   'array array?
+   'table table?
+   'procedure procedure?
+   'record record?
+   'sequence (fn (x) (or (nil? x) (pair? x) (null? x) (array? x) (string? x)))})
+
+;; What (declare (type name)) runs: value, the value of name, unless it
+;; isn't of type.
+(def (%declared value type name)
+  (if ((get declared-types type) value)
+      value
+      (error {:type 'type-error
+              :message (let ((out (open-output-string)))
+                         (write-to out value)
+                         (str "`" name "` is declared " type ", got " (get-output-string out)))
+              :who name
+              :value value})))
+
+(defmacro declare (& specs)
+  "(declare (type name ...) ...)\nAt the start of a def, fn or let body, check that each name holds a value of type, once, there; the compiler may rely on it after. Types are fixnum, float, number, pair, list, boolean, symbol, keyword, string, char, array, table, procedure, record and sequence. (declare inline) is accepted and does nothing yet."
+  (let loop ((specs specs) (checks '()))
+    (cond ((null? specs) (cons 'begin (reverse (cons nil checks))))
+          ((eq? (car specs) 'inline) (loop (cdr specs) checks))
+          ((not (and (pair? (car specs)) (symbol? (car (car specs)))))
+           (error "declare: expected (type name ...)" (car specs)))
+          ((not (get declared-types (car (car specs))))
+           (error "declare: unknown type" (car (car specs))))
+          (else
+           (let names ((more (cdr (car specs))) (checks checks))
+             (cond ((null? more) (loop (cdr specs) checks))
+                   ((not (symbol? (car more))) (error "declare: expected a name" (car more)))
+                   (else
+                    (names (cdr more)
+                           (cons #`(%declared ,(car more) (quote ,(car (car specs))) (quote ,(car more))) checks)))))))))
+
 ;; --- macros (10.11) ---------------------------------------------------------
 
 (defmacro when (test . body)

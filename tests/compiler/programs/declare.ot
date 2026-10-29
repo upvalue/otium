@@ -1,0 +1,16 @@
+;; Local declarations: checked once where they appear, on the VM and natively.
+
+(def (dot a b)
+  (declare (array a b))
+  (let ((n (length a)))
+    (declare (fixnum n))
+    (let loop ((i 0) (acc 0))
+      (if (< i n) (loop (+ i 1) (+ acc (* (get a i) (get b i)))) acc))))
+(write (dot [1 2] [3 4]))
+(newline)
+(write (try (dot '(1) [2]) (catch e (list (condition-message e) (condition-of-type? e 'type-error)))))
+(newline)
+(write ((fn (x) (declare (number x) inline)) 5))
+(newline)
+(write (try (eval '(fn (x) (declare (vector x)) x)) (catch e (condition-message e))))
+(newline)

@@ -44,7 +44,10 @@ static bool reached(ot_value value) {
 
 static bool mark_value(oti_reclaim_mark* m, ot_value value) {
   if (!value_is_ptr(value)) return true;
+#ifdef OTIUM_CHECK_KINDS
+  /* A walk of every chunk and large object, so only in checking builds. */
   if (!oti_heap_contains(&m->rt->heap, value)) return oti_error(m->rt, "invalid live object");
+#endif
   if (reached(value)) return true;
   ((oti_object_header*)value)->gc |= OTI_GC_RECLAIM;
   return enqueue(m, value, false);

@@ -687,6 +687,7 @@ static void heap_trace_remembered(oti_heap* h) {
   h->remembered_count = 0;
 }
 
+#ifndef OTIUM_CHECK_ROOTS
 /* In a minor collection only young objects are traced, so evacuating fresh
  * blocks moves young survivors and nothing else. Every pointer to one is in a
  * root, a young object or a remembered old one, all of which get updated. */
@@ -702,6 +703,7 @@ static void heap_select_young(oti_heap* h) {
     }
   h->evacuating = picked > 0;
 }
+#endif
 
 /* --- Verification --------------------------------------------------------- */
 

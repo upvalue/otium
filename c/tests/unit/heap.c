@@ -135,6 +135,10 @@ TEST(medium_objects_survive) {
 /* A sparse heap gets its sparsest blocks evacuated: survivors move, keep
  * their contents, identity and links, and pinned objects stay put. */
 TEST(evacuation_moves_survivors_out_of_sparse_blocks) {
+#ifdef OTIUM_CHECK_ROOTS
+  /* Root-checking builds make every collection full and evacuate it all. */
+  return;
+#endif
   oti_heap h;
   CHECK(oti_heap_init(&h, 8 << 20));
   enum { KEPT = 4000 };
@@ -175,6 +179,10 @@ TEST(evacuation_moves_survivors_out_of_sparse_blocks) {
 /* Marking a wide object queues every field, far past one segment of mark
  * stack. Free blocks hold the rest and go back on the free list after. */
 TEST(mark_stack_borrows_free_blocks) {
+#ifdef OTIUM_CHECK_ROOTS
+  /* Root-checking builds make every collection full and evacuate it all. */
+  return;
+#endif
   oti_heap h;
   CHECK(oti_heap_init(&h, 16 << 20));
   enum { WIDTH = 100000 };
@@ -202,6 +210,10 @@ TEST(mark_stack_borrows_free_blocks) {
 /* A minor collection doesn't trace old objects, so a young value stored into
  * one survives only because the write barrier remembered the old object. */
 TEST(minor_collections_trace_remembered_objects) {
+#ifdef OTIUM_CHECK_ROOTS
+  /* Root-checking builds make every collection full and evacuate it all. */
+  return;
+#endif
   oti_heap h;
   CHECK(oti_heap_init(&h, 4 << 20));
   oti_heap_set_generational(&h, true);
@@ -240,6 +252,10 @@ TEST(minor_collections_trace_remembered_objects) {
 /* Promoted garbage stays until a full collection, which comes once promotions
  * pass the threshold the last full one set. */
 TEST(minor_collections_give_way_to_full_ones) {
+#ifdef OTIUM_CHECK_ROOTS
+  /* Root-checking builds make every collection full and evacuate it all. */
+  return;
+#endif
   oti_heap h;
   CHECK(oti_heap_init(&h, 1 << 20));
   oti_heap_set_generational(&h, true);

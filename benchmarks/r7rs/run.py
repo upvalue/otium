@@ -13,13 +13,18 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 # Repository modules, for running this file directly.
-sys.path[:0] = [str(Path(__file__).resolve().parents[2] / part) for part in ('', 'tools')]
+sys.path[:0] = [str(Path(__file__).resolve().parents[2] / part)
+                for part in ('', 'tools', 'benchmarks')]
 from otium_tools import command, metadata, run_directory
+import common
 
+
+# Maximum heap for ports without a manifest heap_max. The heap grows with
+# occupancy, so a high ceiling costs small benchmarks nothing.
+DEFAULT_HEAP_MAX = 1024 * 1024 * 1024
 
 CSV_LINE = re.compile(r"^\+!CSVLINE!\+([^,]+),([^,]+),(.+)$", re.MULTILINE)
 
@@ -45,6 +50,14 @@ def parse_args():
     parser.add_argument("--only", nargs="+", help="select ports without a positional executable")
     parser.add_argument("--runs", type=int, default=1, help="samples per benchmark")
     parser.add_argument("--timeout", type=float, default=300.0, help="seconds per sample")
+    parser.add_argument(
+        "--otium-modes", nargs="+", choices=["native", "vm"], default=["native"],
+        help="run Otium as native code, on the VM (--c.vm), or both (default: native)"
+    )
+    parser.add_argument(
+        "--cpu", default="none",
+        help="CPU to pin every process to with taskset, 'auto' for the last allowed CPU (default: none)"
+    )
     parser.add_argument(
         "--reference", choices=["guile"], help="also run unmodified upstream source"
     )
@@ -85,25 +98,6 @@ def prepare_workdir(root, destination):
     return destination
 
 
-def execute(command, timeout, stdin=None, env=None, cwd=None):
-    started = time.perf_counter()
-    try:
-        result = subprocess.run(
-            command,
-            input=stdin,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=timeout,
-            env=env,
-            cwd=cwd,
-        )
-    except subprocess.TimeoutExpired as error:
-        return "timeout", timeout, "", (error.stderr or "")
-    wall = time.perf_counter() - started
-    return result.returncode, wall, result.stdout, result.stderr
-
-
 def otium_program(root, name, implementation, input_text):
     inputs = f"'(\n{input_text}\n)"
     if name == "pnpoly":
@@ -137,7 +131,7 @@ def upstream_program(root, name):
     return "\n".join(path.read_text() for path in parts if path.exists())
 
 
-def result_row(meta, variant, parity, sample, status, wall, reported=None, reason=""):
+def result_row(meta, variant, parity, sample, status, wall, reported=None, reason="", rss=None):
     return {
         **meta,
         "variant": variant,
@@ -145,6 +139,7 @@ def result_row(meta, variant, parity, sample, status, wall, reported=None, reaso
         "sample": sample,
         "reported_seconds": "" if reported is None else f"{reported:.9f}",
         "wall_seconds": "" if wall is None else f"{wall:.9f}",
+        "max_rss_kb": "" if rss is None else rss,
         "status": status,
         "reason": reason.replace("\n", " ")[:240],
     }
@@ -173,12 +168,13 @@ def main():
 
     otium_commit = git_value(repo, "rev-parse", "--short", "HEAD")
     dirty = bool(git_value(repo, "status", "--porcelain"))
-    implementation = f"otium-{otium_commit}{'-dirty' if dirty else ''}"
+    suffix = f"{otium_commit}{'-dirty' if dirty else ''}"
     host = f"{platform.system()} {platform.release()} {platform.machine()}"
     rows = []
     had_failure = False
 
     guile = shutil.which("guile") if args.reference == "guile" else None
+    cpu = common.choose_cpu(args.cpu)
     with tempfile.TemporaryDirectory(prefix="otium-r7rs-") as temp_dir:
         temp = Path(temp_dir)
         for selection_index, name in enumerate(selected):
@@ -186,43 +182,45 @@ def main():
             input_path = root / "vendor" / "inputs" / f"{name}.input"
             input_text = input_path.read_text()
             input_id = hashlib.sha256(input_path.read_bytes()).hexdigest()[:12]
-            heap_max = entry.get("heap_max", 64 * 1024 * 1024)
-            flags = ["--no-project", f"--c.heap-max={heap_max}"]
-            program_path = temp / f"{name}-otium.ot"
-            program_path.write_text(otium_program(root, name, implementation, input_text))
+            heap_max = entry.get("heap_max", DEFAULT_HEAP_MAX)
+            for mode in args.otium_modes:
+                implementation = f"otium-{mode}-{suffix}"
+                flags = ["--no-project", f"--c.heap-max={heap_max}", *(["--c.vm"] if mode == "vm" else [])]
+                program_path = temp / f"{name}-otium-{mode}.ot"
+                program_path.write_text(otium_program(root, name, implementation, input_text))
 
-            port_cwd = prepare_workdir(root, temp / f"{selection_index}-{name}-port-work")
-            commands.append([*binary, *flags, str(program_path)])
-            for sample in range(1, args.runs + 1):
-                code, wall, stdout, stderr = execute(
-                    [*binary, *flags, str(program_path)], args.timeout, cwd=port_cwd
-                )
-                if code == "timeout":
-                    status, impl, bench_name, reported, reason = (
-                        "timeout",
-                        implementation,
-                        name,
-                        None,
-                        f"timed out after {args.timeout:g}s",
+                port_cwd = prepare_workdir(root, temp / f"{selection_index}-{name}-{mode}-port-work")
+                commands.append(common.pinned([*binary, *flags, str(program_path)], cpu))
+                for sample in range(1, args.runs + 1):
+                    code, wall, stdout, stderr, rss = common.execute(
+                        commands[-1], args.timeout, cwd=port_cwd
                     )
-                else:
-                    status, impl, bench_name, reported, reason = parse_result(stdout, code)
-                    if status == "crashed":
-                        reason = stderr or stdout or reason
-                meta = {
-                    "implementation": impl or implementation,
-                    "benchmark": bench_name or name,
-                    "input": input_id,
-                    "platform": host,
-                    "runtime_flags": " ".join(flags),
-                    "upstream_commit": manifest["upstream_commit"][:12],
-                    "otium_commit": otium_commit,
-                }
-                rows.append(
-                    result_row(meta, "port", entry["parity"], sample, status, wall, reported, reason)
-                )
-                print(f"{name} port sample {sample}: {status}")
-                had_failure |= status != "ok"
+                    if code == "timeout":
+                        status, impl, bench_name, reported, reason = (
+                            "timeout",
+                            implementation,
+                            name,
+                            None,
+                            f"timed out after {args.timeout:g}s",
+                        )
+                    else:
+                        status, impl, bench_name, reported, reason = parse_result(stdout, code)
+                        if status == "crashed":
+                            reason = stderr or stdout or reason
+                    meta = {
+                        "implementation": impl or implementation,
+                        "benchmark": bench_name or name,
+                        "input": input_id,
+                        "platform": host,
+                        "runtime_flags": " ".join(flags),
+                        "upstream_commit": manifest["upstream_commit"][:12],
+                        "otium_commit": otium_commit,
+                    }
+                    rows.append(
+                        result_row(meta, "port", entry["parity"], sample, status, wall, reported, reason, rss)
+                    )
+                    print(f"{name} {mode} sample {sample}: {status}")
+                    had_failure |= status != "ok"
 
             if args.reference:
                 if not guile:
@@ -245,8 +243,9 @@ def main():
                 env = os.environ.copy()
                 env["GC_INITIAL_HEAP_SIZE"] = "100000000"
                 for sample in range(1, args.runs + 1):
-                    code, wall, stdout, stderr = execute(
-                        [guile, str(source_path)], args.timeout, stdin=input_text, env=env, cwd=upstream_cwd
+                    code, wall, stdout, stderr, rss = common.execute(
+                        common.pinned([guile, str(source_path)], cpu), args.timeout,
+                        stdin=input_text, env=env, cwd=upstream_cwd
                     )
                     if code == "timeout":
                         status, impl, bench_name, reported, reason = (
@@ -270,7 +269,7 @@ def main():
                         "otium_commit": otium_commit,
                     }
                     rows.append(
-                        result_row(meta, "upstream", "A", sample, status, wall, reported, reason)
+                        result_row(meta, "upstream", "A", sample, status, wall, reported, reason, rss)
                     )
                     print(f"{name} upstream sample {sample}: {status}")
 
@@ -283,6 +282,7 @@ def main():
         "sample",
         "reported_seconds",
         "wall_seconds",
+        "max_rss_kb",
         "status",
         "reason",
         "platform",
@@ -309,6 +309,11 @@ def main():
         )
     (output_dir / "STATUS.md").write_text("\n".join(status_lines) + "\n")
     provenance = metadata(commands, build_label=args.build_label)
+    provenance.update({
+        "suite": "r7rs", "runs": args.runs, "cpu": cpu,
+        "versions": {"guile": common.version(["guile", "--version"])} if args.reference else {},
+        "upstream_commit": manifest["upstream_commit"],
+    })
     provenance["working_directory"] = (
         "Separate temporary directories for each benchmark and variant; "
         "inputs link to vendor/inputs, outputs stay temporary.")

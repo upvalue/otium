@@ -21,8 +21,7 @@
     },
     "gcbench": {
       "parity": "B",
-      "deviation": "records and vectors use fixed-layout Otium arrays",
-      "heap_max": 1073741824
+      "deviation": "records and vectors use fixed-layout Otium arrays"
     },
     "quicksort": {
       "parity": "B",

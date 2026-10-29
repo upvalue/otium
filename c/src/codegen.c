@@ -41,11 +41,13 @@ static ot_value codegen_cell(ot_state* rt, size_t first, size_t count) {
   return cell == UINT32_MAX ? 0 : ot_int((intptr_t)cell);
 }
 
-/* The name of the builtin a cell holds, when it is that builtin's own cell,
- * else #f. Inlined builtins' own cells can't be redefined. */
+/* The name of the builtin a cell holds, when it is that builtin's own cell
+ * in otium.core, else #f. Inlined builtins' own cells can't be redefined.
+ * Other namespaces' builtins can share a core name (otium.ffi's null?). */
 static ot_value codegen_cell_builtin(ot_state* rt, size_t first, size_t count) {
   uint32_t cell = 0;
   if (!codegen_arity(rt, count, 1, 1) || !cell_arg(rt, rt->stack[first], &cell)) return 0;
+  if (rt->global_info[cell].space != 0) return OT_FALSE;
   ot_value v = oti_global_value(rt, cell);
   if ((v & 255) != TAG_BUILTIN) return OT_FALSE;
   unsigned id = (unsigned)(v >> 8);

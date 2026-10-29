@@ -29,6 +29,8 @@ test-opt *args: build
     done
     echo "== OTIUM_OPT_CHECK=1"
     OTIUM_OPT_CHECK=1 tools/meson-test default "${@:-lang}"
+    echo "== OTIUM_OPT_INLINE_BUDGET=0"
+    OTIUM_OPT_INLINE_BUDGET=0 tools/meson-test default "${@:-lang}"
 
 # Run N generated programs on the VM and natively, from seed FIRST, and report the first that differs
 fuzz-compiler n="100" first="1": build

@@ -46,3 +46,14 @@
 ;; the types pass made, and trap when one fails: a wrong proof then stops
 ;; where it was made instead of corrupting memory. See section 9.5.
 (def check-mode (equal? (otium.process/getenv "OTIUM_OPT_CHECK") "1"))
+
+;; OTIUM_OPT_INLINE_BUDGET scales the inline pass's limits, as a percentage:
+;; how big an inlined copy may grow and how much work inlining may do in a
+;; unit. 100 is the default, 0 turns inlining off; smaller code against
+;; speed, for small targets.
+(def inline-budget
+  (let ((value (otium.process/getenv "OTIUM_OPT_INLINE_BUDGET")))
+    (let ((n (and value (string->number value))))
+      (if (and (int? n) (>= n 0)) n 100))))
+
+(def (scaled n) (quotient (* n inline-budget) 100))

@@ -21,10 +21,11 @@ def differential(t):
 
 def expected_boot():
     """The boot file a build in this configuration should match, or None when
-    none does: with a component switched off, or in check mode, the build
-    differs from both boot files by design."""
+    none does: with a component switched off, in check mode, or with another
+    inlining budget, the build differs from both boot files by design."""
     opt = os.environ.get('OTIUM_OPT', '')
-    if os.environ.get('OTIUM_OPT_CHECK') == '1' or opt not in ('', 'all', 'none'):
+    budget = os.environ.get('OTIUM_OPT_INLINE_BUDGET', '100')
+    if os.environ.get('OTIUM_OPT_CHECK') == '1' or opt not in ('', 'all', 'none') or budget != '100':
         return None
     name = 'otium-noopt.boot' if opt == 'none' else 'otium.boot'
     return Path(os.environ['OTIUM_BUILD']) / name
@@ -128,6 +129,8 @@ def inline_bodies(t):
              stdout='checked\n')
 @test('compiler inline pass')
 def inline_pass(t):
-    """Hand-written trees through the inline pass, text in and text out."""
-    t.expect(t.otium('--no-project', '-L', LIB, ROOT / 'tests/compiler/inline-check.ot'),
+    """Hand-written trees through the inline pass, text in and text out, at
+    the default inlining budget the expected trees assume."""
+    t.expect(t.otium('--no-project', '-L', LIB, ROOT / 'tests/compiler/inline-check.ot',
+                     env={'OTIUM_OPT_INLINE_BUDGET': '100'}),
              contains=[' 0 failures'])

@@ -59,7 +59,7 @@
   (let ((s (make-state :env {}
                        :refs {}
                        :fn info
-                       :effort (+ base-effort (* 4 (node-size (cv/fn-body info))))
+                       :effort (options/scaled (+ base-effort (* 4 (node-size (cv/fn-body info)))))
                        :attempt nil
                        :inlining '())))
     (simplify-function s info)
@@ -605,7 +605,7 @@
         (push! params new)))
     (let ((body (ir/copy-node (cv/fn-body info) owner renames))
           (outer (state-attempt s))
-          (attempt (make-attempt :size 0 :limit (+ 80 (* 2 (node-size node))))))
+          (attempt (make-attempt :size 0 :limit (options/scaled (+ 80 (* 2 (node-size node)))))))
       (unless (get node 4) (untail! body))
       (set-state-attempt! s attempt)
       (set-state-inlining! s (cons info (state-inlining s)))
